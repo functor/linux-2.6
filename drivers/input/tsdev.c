@@ -232,9 +232,11 @@ static ssize_t tsdev_read(struct file *file, char __user *buffer, size_t count,
 static unsigned int tsdev_poll(struct file *file, poll_table * wait)
 {
 	struct tsdev_list *list = file->private_data;
+
 	poll_wait(file, &list->tsdev->wait, wait);
-	return ((list->head == list->tail) ? 0 : (POLLIN | POLLRDNORM)) |
-		(list->tsdev->exist ? 0 : (POLLHUP | POLLERR));
+	if (list->head != list->tail)
+		return POLLIN | POLLRDNORM;
+	return 0;
 }
 
 static int tsdev_ioctl(struct inode *inode, struct file *file,
@@ -263,7 +265,7 @@ static int tsdev_ioctl(struct inode *inode, struct file *file,
 	return retval;
 }
 
-static struct file_operations tsdev_fops = {
+struct file_operations tsdev_fops = {
 	.owner =	THIS_MODULE,
 	.open =		tsdev_open,
 	.release =	tsdev_release,
@@ -424,7 +426,6 @@ static struct input_handle *tsdev_connect(struct input_handler *handler,
 static void tsdev_disconnect(struct input_handle *handle)
 {
 	struct tsdev *tsdev = handle->private;
-	struct tsdev_list *list;
 
 	class_simple_device_remove(MKDEV(INPUT_MAJOR, TSDEV_MINOR_BASE + tsdev->minor));
 	devfs_remove("input/ts%d", tsdev->minor);
@@ -434,8 +435,6 @@ static void tsdev_disconnect(struct input_handle *handle)
 	if (tsdev->open) {
 		input_close_device(handle);
 		wake_up_interruptible(&tsdev->wait);
-		list_for_each_entry(list, &tsdev->list, node)
-			kill_fasync(&list->fasync, SIGIO, POLL_HUP);
 	} else
 		tsdev_free(tsdev);
 }

@@ -550,7 +550,8 @@ failed_usb_register:
 failed_usb_serial_register:
 	for (i = 0; i < NUM_URBS; ++i) {
 		if (write_urb_pool[i]) {
-			kfree(write_urb_pool[i]->transfer_buffer);
+			if (write_urb_pool[i]->transfer_buffer)
+				kfree(write_urb_pool[i]->transfer_buffer);
 			usb_free_urb(write_urb_pool[i]);
 		}
 	}
@@ -574,7 +575,8 @@ static void __exit empeg_exit (void)
 			 * the host controllers get fixed to set urb->dev = NULL after
 			 * the urb is finished.  Otherwise this call oopses. */
 			/* usb_kill_urb(write_urb_pool[i]); */
-			kfree(write_urb_pool[i]->transfer_buffer);
+			if (write_urb_pool[i]->transfer_buffer)
+				kfree(write_urb_pool[i]->transfer_buffer);
 			usb_free_urb (write_urb_pool[i]);
 		}
 	}

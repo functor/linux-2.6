@@ -3,22 +3,22 @@
  *
  *  Virtual Server: File System Support
  *
- *  Copyright (C) 2004-2005  Herbert Pötzl
+ *  Copyright (C) 2004  Herbert Pötzl
  *
  *  V0.01  separated from vcontext V0.05
  *
  */
 
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/vs_context.h>
+#include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/devpts_fs.h>
 #include <linux/namei.h>
 #include <linux/mount.h>
 #include <linux/parser.h>
-#include <linux/compat.h>
 #include <linux/vserver/inode.h>
-#include <linux/vserver/inode_cmd.h>
 #include <linux/vserver/xid.h>
 
 #include <asm/errno.h>
@@ -50,7 +50,7 @@ static int __vc_get_iattr(struct inode *in, uint32_t *xid, uint32_t *flags, uint
 	case PROC_SUPER_MAGIC:
 		entry = PROC_I(in)->pde;
 
-		/* check for specific inodes? */
+		// check for specific inodes ?
 		if (entry)
 			*mask |= IATTR_FLAGS;
 		if (entry)
@@ -87,49 +87,16 @@ int vc_get_iattr(uint32_t id, void __user *data)
 			&vc_data.xid, &vc_data.flags, &vc_data.mask);
 		path_release(&nd);
 	}
-	if (ret)
-		return ret;
 
 	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
 		ret = -EFAULT;
 	return ret;
 }
-
-#ifdef	CONFIG_COMPAT
-
-int vc_get_iattr_x32(uint32_t id, void __user *data)
-{
-	struct nameidata nd;
-	struct vcmd_ctx_iattr_v1_x32 vc_data = { .xid = -1 };
-	int ret;
-
-	if (!vx_check(0, VX_ADMIN))
-		return -ENOSYS;
-	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
-		return -EFAULT;
-
-	ret = user_path_walk_link(compat_ptr(vc_data.name_ptr), &nd);
-	if (!ret) {
-		ret = __vc_get_iattr(nd.dentry->d_inode,
-			&vc_data.xid, &vc_data.flags, &vc_data.mask);
-		path_release(&nd);
-	}
-	if (ret)
-		return ret;
-
-	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
-		ret = -EFAULT;
-	return ret;
-}
-
-#endif	/* CONFIG_COMPAT */
-
 
 static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uint32_t *mask)
 {
 	struct inode *in = de->d_inode;
 	int error = 0, is_proc = 0, has_xid = 0;
-	struct iattr attr = { 0 };
 
 	if (!in || !in->i_sb)
 		return -ESRCH;
@@ -144,10 +111,8 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 		return -EINVAL;
 
 	down(&in->i_sem);
-	if (*mask & IATTR_XID) {
-		attr.ia_xid = *xid;
-		attr.ia_valid |= ATTR_XID;
-	}
+	if (*mask & IATTR_XID)
+		in->i_xid = *xid;
 
 	if (*mask & IATTR_FLAGS) {
 		struct proc_dir_entry *entry = PROC_I(in)->pde;
@@ -161,8 +126,9 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 	}
 
 	if (*mask & (IATTR_BARRIER | IATTR_IUNLINK | IATTR_IMMUTABLE)) {
+		struct iattr attr;
 
-		attr.ia_valid |= ATTR_ATTR_FLAG;
+		attr.ia_valid = ATTR_ATTR_FLAG;
 		attr.ia_attr_flags =
 			(IS_IMMUTABLE(in) ? ATTR_FLAG_IMMUTABLE : 0) |
 			(IS_IUNLINK(in) ? ATTR_FLAG_IUNLINK : 0) |
@@ -186,9 +152,6 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 			else
 				attr.ia_attr_flags &= ~ATTR_FLAG_BARRIER;
 		}
-	}
-
-	if (attr.ia_valid) {
 		if (in->i_op && in->i_op->setattr)
 			error = in->i_op->setattr(de, &attr);
 		else {
@@ -198,6 +161,7 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 		}
 	}
 
+	mark_inode_dirty(in);
 	up(&in->i_sem);
 	return 0;
 }
@@ -225,34 +189,6 @@ int vc_set_iattr(uint32_t id, void __user *data)
 	return ret;
 }
 
-#ifdef	CONFIG_COMPAT
-
-int vc_set_iattr_x32(uint32_t id, void __user *data)
-{
-	struct nameidata nd;
-	struct vcmd_ctx_iattr_v1_x32 vc_data;
-	int ret;
-
-	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_LINUX_IMMUTABLE))
-		return -EPERM;
-	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
-		return -EFAULT;
-
-	ret = user_path_walk_link(compat_ptr(vc_data.name_ptr), &nd);
-	if (!ret) {
-		ret = __vc_set_iattr(nd.dentry,
-			&vc_data.xid, &vc_data.flags, &vc_data.mask);
-		path_release(&nd);
-	}
-
-	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
-		ret = -EFAULT;
-	return ret;
-}
-
-#endif	/* CONFIG_COMPAT */
-
-/* required by PLK */
 int vc_iattr_ioctl(struct dentry *de, unsigned int cmd, unsigned long arg)
 {
 	void __user *data = (void __user *)arg;
@@ -283,6 +219,7 @@ int vc_iattr_ioctl(struct dentry *de, unsigned int cmd, unsigned long arg)
 		ret = -EFAULT;
 	return ret;
 }
+
 
 #ifdef	CONFIG_VSERVER_LEGACY
 

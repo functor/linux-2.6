@@ -21,7 +21,8 @@ struct powernow_k8_data {
 	u32 plllock; /* pll lock time, units 1 us */
 
 	/* keep track of the current fid / vid */
-	u32 currvid, currfid;
+	u32 currvid;
+	u32 currfid;
 
 	/* the powernow_table includes all frequency and vid/fid pairings:
 	 * fid are the lower 8 bits of the index, vid are the upper 8 bits.
@@ -151,14 +152,14 @@ struct psb_s {
 	u8 signature[10];
 	u8 tableversion;
 	u8 flags1;
-	u16 vstable;
+	u16 voltagestabilizationtime;
 	u8 flags2;
-	u8 num_tables;
+	u8 numpst;
 	u32 cpuid;
 	u8 plllocktime;
 	u8 maxfid;
 	u8 maxvid;
-	u8 numps;
+	u8 numpstates;
 };
 
 /* Pairs of fid/vid values are appended to the version 1.4 PSB table. */
@@ -174,18 +175,3 @@ static int core_voltage_post_transition(struct powernow_k8_data *data, u32 reqvi
 static int core_frequency_transition(struct powernow_k8_data *data, u32 reqfid);
 
 static void powernow_k8_acpi_pst_values(struct powernow_k8_data *data, unsigned int index);
-
-#ifndef for_each_cpu_mask
-#define for_each_cpu_mask(i,mask) for (i=0;i<1;i++)
-#endif
-                                                                                
-#ifdef CONFIG_SMP
-static inline void define_siblings(int cpu, cpumask_t cpu_sharedcore_mask[])
-{
-}
-#else
-static inline void define_siblings(int cpu, cpumask_t cpu_sharedcore_mask[])
-{
-	cpu_set(0, cpu_sharedcore_mask[0]);
-}
-#endif

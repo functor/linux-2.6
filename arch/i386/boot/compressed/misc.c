@@ -12,6 +12,7 @@
 #include <linux/linkage.h>
 #include <linux/vmalloc.h>
 #include <linux/tty.h>
+#include <video/edid.h>
 #include <asm/io.h>
 #include <asm/segment.h>
 

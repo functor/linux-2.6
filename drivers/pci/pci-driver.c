@@ -49,6 +49,13 @@ pci_device_probe_dynamic(struct pci_driver *drv, struct pci_dev *pci_dev)
 	return error;
 }
 
+static inline void
+dynid_init(struct dynid *dynid)
+{
+	memset(dynid, 0, sizeof(*dynid));
+	INIT_LIST_HEAD(&dynid->node);
+}
+
 /**
  * store_new_id
  *
@@ -75,9 +82,8 @@ store_new_id(struct device_driver *driver, const char *buf, size_t count)
 	dynid = kmalloc(sizeof(*dynid), GFP_KERNEL);
 	if (!dynid)
 		return -ENOMEM;
+	dynid_init(dynid);
 
-	memset(dynid, 0, sizeof(*dynid));
-	INIT_LIST_HEAD(&dynid->node);
 	dynid->id.vendor = vendor;
 	dynid->id.device = device;
 	dynid->id.subvendor = subvendor;
@@ -109,6 +115,7 @@ static DRIVER_ATTR(new_id, S_IWUSR, NULL, store_new_id);
 static inline void
 pci_init_dynids(struct pci_dynids *dynids)
 {
+	memset(dynids, 0, sizeof(*dynids));
 	spin_lock_init(&dynids->lock);
 	INIT_LIST_HEAD(&dynids->list);
 }
@@ -161,6 +168,7 @@ static inline int pci_device_probe_dynamic(struct pci_driver *drv, struct pci_de
 {
 	return -ENODEV;
 }
+static inline void dynid_init(struct dynid *dynid) {}
 static inline void pci_init_dynids(struct pci_dynids *dynids) {}
 static inline void pci_free_dynids(struct pci_driver *drv) {}
 static inline int pci_create_newid_file(struct pci_driver *drv)
@@ -276,14 +284,27 @@ static int pci_device_remove(struct device * dev)
 	return 0;
 }
 
-static int pci_device_suspend(struct device * dev, pm_message_t state)
+static int pci_device_suspend(struct device * dev, u32 state)
 {
 	struct pci_dev * pci_dev = to_pci_dev(dev);
 	struct pci_driver * drv = pci_dev->driver;
+	u32 dev_state;
 	int i = 0;
 
+	/* Translate PM_SUSPEND_xx states to PCI device states */
+	static u32 state_conversion[] = {
+		[PM_SUSPEND_ON] = 0,
+		[PM_SUSPEND_STANDBY] = 1,
+		[PM_SUSPEND_MEM] = 3,
+		[PM_SUSPEND_DISK] = 3,
+	};
+
+	if (state >= sizeof(state_conversion) / sizeof(state_conversion[1]))
+		return -EINVAL;
+
+	dev_state = state_conversion[state];
 	if (drv && drv->suspend)
-		i = drv->suspend(pci_dev, state);
+		i = drv->suspend(pci_dev, dev_state);
 	else
 		pci_save_state(pci_dev);
 	return i;
@@ -318,14 +339,6 @@ static int pci_device_resume(struct device * dev)
 	return 0;
 }
 
-static void pci_device_shutdown(struct device *dev)
-{
-	struct pci_dev *pci_dev = to_pci_dev(dev);
-	struct pci_driver *drv = pci_dev->driver;
-
-	if (drv && drv->shutdown)
-		drv->shutdown(pci_dev);
-}
 
 #define kobj_to_pci_driver(obj) container_of(obj, struct device_driver, kobj)
 #define attr_to_driver_attribute(obj) container_of(obj, struct driver_attribute, attr)
@@ -381,7 +394,7 @@ pci_populate_driver_dir(struct pci_driver *drv)
  * 
  * Adds the driver structure to the list of registered drivers.
  * Returns a negative value on error, otherwise 0. 
- * If no error occurred, the driver remains registered even if 
+ * If no error occured, the driver remains registered even if 
  * no device was claimed during registration.
  */
 int pci_register_driver(struct pci_driver *drv)
@@ -393,10 +406,6 @@ int pci_register_driver(struct pci_driver *drv)
 	drv->driver.bus = &pci_bus_type;
 	drv->driver.probe = pci_device_probe;
 	drv->driver.remove = pci_device_remove;
-	/* FIXME, once all of the existing PCI drivers have been fixed to set
-	 * the pci shutdown function, this test can go away. */
-	if (!drv->driver.shutdown)
-		drv->driver.shutdown = pci_device_shutdown;
 	drv->driver.owner = drv->owner;
 	drv->driver.kobj.ktype = &pci_driver_kobj_type;
 	pci_init_dynids(&drv->dynids);

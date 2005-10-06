@@ -14,6 +14,7 @@
 
 typedef struct {
 	unsigned int __softirq_pending;
+	struct task_struct * __ksoftirqd_task;
 } ____cacheline_aligned irq_cpustat_t;
 
 #include <linux/irq_cpustat.h>	/* Standard mappings for irq_cpustat_t above */

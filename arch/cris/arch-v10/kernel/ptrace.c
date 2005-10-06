@@ -10,7 +10,6 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
-#include <linux/signal.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -185,7 +184,7 @@ sys_ptrace(long request, long pid, long addr, long data)
 		case PTRACE_CONT:
 			ret = -EIO;
 			
-			if (!valid_signal(data))
+			if ((unsigned long) data > _NSIG)
 				break;
                         
 			if (request == PTRACE_SYSCALL) {
@@ -220,7 +219,7 @@ sys_ptrace(long request, long pid, long addr, long data)
 		case PTRACE_SINGLESTEP:
 			ret = -EIO;
 			
-			if (!valid_signal(data))
+			if ((unsigned long) data > _NSIG)
 				break;
 			
 			clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);

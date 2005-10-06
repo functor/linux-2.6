@@ -182,6 +182,8 @@ open_xa_dir (const struct inode *inode, int flags)
             dput (xadir);
             return ERR_PTR (-ENODATA);
         }
+        /* Newly created object.. Need to mark it private */
+        REISERFS_I(xadir->d_inode)->i_flags |= i_priv_object;
     }
 
     dput (xaroot);
@@ -229,6 +231,8 @@ get_xa_file_dentry (const struct inode *inode, const char *name, int flags)
             dput (xafile);
             goto out;
         }
+        /* Newly created object.. Need to mark it private */
+        REISERFS_I(xafile->d_inode)->i_flags |= i_priv_object;
     }
 
 out:
@@ -591,7 +595,7 @@ open_file:
      * gets marked dirty, but won't (ever) make it onto the dirty list until
      * it's synced explicitly to clear I_DIRTY. This is bad. */
     if (!hlist_unhashed(&inode->i_hash)) {
-        inode->i_ctime = CURRENT_TIME_SEC;
+        inode->i_ctime = CURRENT_TIME;
         mark_inode_dirty (inode);
     }
 
@@ -765,7 +769,7 @@ reiserfs_xattr_del (struct inode *inode, const char *name)
     dput (dir);
 
     if (!err) {
-        inode->i_ctime = CURRENT_TIME_SEC;
+        inode->i_ctime = CURRENT_TIME;
         mark_inode_dirty (inode);
     }
 
@@ -831,7 +835,7 @@ reiserfs_delete_xattrs (struct inode *inode)
     if (dir->d_inode->i_nlink <= 2) {
         root = get_xa_root (inode->i_sb);
         reiserfs_write_lock_xattrs (inode->i_sb);
-	err = vfs_rmdir (root->d_inode, dir, NULL);
+        err = vfs_rmdir (root->d_inode, dir);
         reiserfs_write_unlock_xattrs (inode->i_sb);
         dput (root);
     } else {
@@ -1037,7 +1041,7 @@ reiserfs_removexattr (struct dentry *dentry, const char *name)
 
     err = reiserfs_xattr_del (dentry->d_inode, name);
 
-    dentry->d_inode->i_ctime = CURRENT_TIME_SEC;
+    dentry->d_inode->i_ctime = CURRENT_TIME;
     mark_inode_dirty (dentry->d_inode);
 
 out:
@@ -1149,7 +1153,7 @@ out:
 
 /* This is the implementation for the xattr plugin infrastructure */
 static struct list_head xattr_handlers = LIST_HEAD_INIT (xattr_handlers);
-static DEFINE_RWLOCK(handler_lock);
+static rwlock_t handler_lock = RW_LOCK_UNLOCKED;
 
 static struct reiserfs_xattr_handler *
 find_xattr_handler_prefix (const char *prefix)
@@ -1313,7 +1317,7 @@ reiserfs_xattr_init (struct super_block *s, int mount_flags)
 
       if (!err && dentry) {
           s->s_root->d_op = &xattr_lookup_poison_ops;
-          reiserfs_mark_inode_private (dentry->d_inode);
+          REISERFS_I(dentry->d_inode)->i_flags |= i_priv_object;
           REISERFS_SB(s)->priv_root = dentry;
       } else if (!(mount_flags & MS_RDONLY)) { /* xattrs are unavailable */
           /* If we're read-only it just means that the dir hasn't been
@@ -1347,6 +1351,10 @@ __reiserfs_permission (struct inode *inode, int mask, struct nameidata *nd,
                        int need_lock)
 {
 	umode_t			mode = inode->i_mode;
+
+	/* Prevent vservers from escaping chroot() barriers */
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN))
+		return -EACCES;
 
 	if (mask & MAY_WRITE) {
 		/*

@@ -42,7 +42,7 @@ static inline int hugepgd_index(unsigned long addr)
 	return (addr & ~REGION_MASK) >> HUGEPGDIR_SHIFT;
 }
 
-static pud_t *hugepgd_offset(struct mm_struct *mm, unsigned long addr)
+static pgd_t *hugepgd_offset(struct mm_struct *mm, unsigned long addr)
 {
 	int index;
 
@@ -52,21 +52,21 @@ static pud_t *hugepgd_offset(struct mm_struct *mm, unsigned long addr)
 
 	index = hugepgd_index(addr);
 	BUG_ON(index >= PTRS_PER_HUGEPGD);
-	return (pud_t *)(mm->context.huge_pgdir + index);
+	return mm->context.huge_pgdir + index;
 }
 
-static inline pte_t *hugepte_offset(pud_t *dir, unsigned long addr)
+static inline pte_t *hugepte_offset(pgd_t *dir, unsigned long addr)
 {
 	int index;
 
-	if (pud_none(*dir))
+	if (pgd_none(*dir))
 		return NULL;
 
 	index = (addr >> HPAGE_SHIFT) % PTRS_PER_HUGEPTE;
-	return (pte_t *)pud_page(*dir) + index;
+	return (pte_t *)pgd_page(*dir) + index;
 }
 
-static pud_t *hugepgd_alloc(struct mm_struct *mm, unsigned long addr)
+static pgd_t *hugepgd_alloc(struct mm_struct *mm, unsigned long addr)
 {
 	BUG_ON(! in_hugepage_area(mm->context, addr));
 
@@ -90,9 +90,10 @@ static pud_t *hugepgd_alloc(struct mm_struct *mm, unsigned long addr)
 	return hugepgd_offset(mm, addr);
 }
 
-static pte_t *hugepte_alloc(struct mm_struct *mm, pud_t *dir, unsigned long addr)
+static pte_t *hugepte_alloc(struct mm_struct *mm, pgd_t *dir,
+			    unsigned long addr)
 {
-	if (! pud_present(*dir)) {
+	if (! pgd_present(*dir)) {
 		pte_t *new;
 
 		spin_unlock(&mm->page_table_lock);
@@ -103,7 +104,7 @@ static pte_t *hugepte_alloc(struct mm_struct *mm, pud_t *dir, unsigned long addr
 		 * Because we dropped the lock, we should re-check the
 		 * entry, as somebody else could have populated it..
 		 */
-		if (pud_present(*dir)) {
+		if (pgd_present(*dir)) {
 			if (new)
 				kmem_cache_free(zero_cache, new);
 		} else {
@@ -114,7 +115,7 @@ static pte_t *hugepte_alloc(struct mm_struct *mm, pud_t *dir, unsigned long addr
 			ptepage = virt_to_page(new);
 			ptepage->mapping = (void *) mm;
 			ptepage->index = addr & HUGEPGDIR_MASK;
-			pud_populate(mm, dir, new);
+			pgd_populate(mm, dir, new);
 		}
 	}
 
@@ -123,37 +124,37 @@ static pte_t *hugepte_alloc(struct mm_struct *mm, pud_t *dir, unsigned long addr
 
 static pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
-	pud_t *pud;
+	pgd_t *pgd;
 
 	BUG_ON(! in_hugepage_area(mm->context, addr));
 
-	pud = hugepgd_offset(mm, addr);
-	if (! pud)
+	pgd = hugepgd_offset(mm, addr);
+	if (! pgd)
 		return NULL;
 
-	return hugepte_offset(pud, addr);
+	return hugepte_offset(pgd, addr);
 }
 
 static pte_t *huge_pte_alloc(struct mm_struct *mm, unsigned long addr)
 {
-	pud_t *pud;
+	pgd_t *pgd;
 
 	BUG_ON(! in_hugepage_area(mm->context, addr));
 
-	pud = hugepgd_alloc(mm, addr);
-	if (! pud)
+	pgd = hugepgd_alloc(mm, addr);
+	if (! pgd)
 		return NULL;
 
-	return hugepte_alloc(mm, pud, addr);
+	return hugepte_alloc(mm, pgd, addr);
 }
 
 static void set_huge_pte(struct mm_struct *mm, struct vm_area_struct *vma,
-			 unsigned long addr, struct page *page,
-			 pte_t *ptep, int write_access)
+			 struct page *page, pte_t *ptep, int write_access)
 {
 	pte_t entry;
 
-	add_mm_counter(mm, rss, HPAGE_SIZE / PAGE_SIZE);
+	// mm->rss += (HPAGE_SIZE / PAGE_SIZE);
+	vx_rsspages_add(mm, HPAGE_SIZE / PAGE_SIZE);
 	if (write_access) {
 		entry =
 		    pte_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
@@ -163,7 +164,7 @@ static void set_huge_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 	entry = pte_mkyoung(entry);
 	entry = pte_mkhuge(entry);
 
-	set_pte_at(mm, addr, ptep, entry);
+	set_pte(ptep, entry);
 }
 
 /*
@@ -202,6 +203,8 @@ static int prepare_low_seg_for_htlb(struct mm_struct *mm, unsigned long seg)
 	unsigned long start = seg << SID_SHIFT;
 	unsigned long end = (seg+1) << SID_SHIFT;
 	struct vm_area_struct *vma;
+	unsigned long addr;
+	struct mmu_gather *tlb;
 
 	BUG_ON(seg >= 16);
 
@@ -209,6 +212,41 @@ static int prepare_low_seg_for_htlb(struct mm_struct *mm, unsigned long seg)
 	vma = find_vma(mm, start);
 	if (vma && (vma->vm_start < end))
 		return -EBUSY;
+
+	/* Clean up any leftover PTE pages in the region */
+	spin_lock(&mm->page_table_lock);
+	tlb = tlb_gather_mmu(mm, 0);
+	for (addr = start; addr < end; addr += PMD_SIZE) {
+		pgd_t *pgd = pgd_offset(mm, addr);
+		pmd_t *pmd;
+		struct page *page;
+		pte_t *pte;
+		int i;
+
+		if (pgd_none(*pgd))
+			continue;
+		pmd = pmd_offset(pgd, addr);
+		if (!pmd || pmd_none(*pmd))
+			continue;
+		if (pmd_bad(*pmd)) {
+			pmd_ERROR(*pmd);
+			pmd_clear(pmd);
+			continue;
+		}
+		pte = (pte_t *)pmd_page_kernel(*pmd);
+		/* No VMAs, so there should be no PTEs, check just in case. */
+		for (i = 0; i < PTRS_PER_PTE; i++) {
+			BUG_ON(!pte_none(*pte));
+			pte++;
+		}
+		page = pmd_page(*pmd);
+		pmd_clear(pmd);
+		mm->nr_ptes--;
+		dec_page_state(nr_page_table_pages);
+		pte_free_tlb(tlb, page);
+	}
+	tlb_finish_mmu(tlb, start, end);
+	spin_unlock(&mm->page_table_lock);
 
 	return 0;
 }
@@ -227,10 +265,6 @@ static int open_low_hpage_segs(struct mm_struct *mm, u16 newsegs)
 				return -EBUSY;
 
 	mm->context.htlb_segs |= newsegs;
-
-	/* update the paca copy of the context struct */
-	get_paca()->context = mm->context;
-
 	/* the context change must make it to memory before the flush,
 	 * so that further SLB misses do the right thing. */
 	mb();
@@ -278,9 +312,9 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 		
 		ptepage = pte_page(entry);
 		get_page(ptepage);
-		add_mm_counter(dst, rss, HPAGE_SIZE / PAGE_SIZE);
-		set_pte_at(dst, addr, dst_pte, entry);
-
+		// dst->rss += (HPAGE_SIZE / PAGE_SIZE);
+		vx_rsspages_add(dst, HPAGE_SIZE / PAGE_SIZE);
+		set_pte(dst_pte, entry);
 		addr += HPAGE_SIZE;
 	}
 
@@ -384,12 +418,23 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 
 		pte = *ptep;
 		page = pte_page(pte);
-		pte_clear(mm, addr, ptep);
+		pte_clear(ptep);
 
 		put_page(page);
 	}
-	add_mm_counter(mm, rss, -((end - start) >> PAGE_SHIFT));
+	// mm->rss -= (end - start) >> PAGE_SHIFT;
+	vx_rsspages_sub(mm, (end - start) >> PAGE_SHIFT);
 	flush_tlb_pending();
+}
+
+void hugetlb_free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *prev,
+			   unsigned long start, unsigned long end)
+{
+	/* Because the huge pgtables are only 2 level, they can take
+	 * at most around 4M, much less than one hugepage which the
+	 * process is presumably entitled to use.  So we don't bother
+	 * freeing up the pagetables on unmap, and wait until
+	 * destroy_context() to clean up the lot. */
 }
 
 int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
@@ -439,7 +484,7 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 				goto out;
 			}
 		}
-		set_huge_pte(mm, vma, addr, page, pte, vma->vm_flags & VM_WRITE);
+		set_huge_pte(mm, vma, page, pte, vma->vm_flags & VM_WRITE);
 	}
 out:
 	spin_unlock(&mm->page_table_lock);
@@ -465,7 +510,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		vma = find_vma(mm, addr);
 		if (((TASK_SIZE - len) >= addr)
 		    && (!vma || (addr+len) <= vma->vm_start)
-		    && !is_hugepage_only_range(mm, addr,len))
+		    && !is_hugepage_only_range(addr,len))
 			return addr;
 	}
 	start_addr = addr = mm->free_area_cache;
@@ -475,7 +520,7 @@ full_search:
 	while (TASK_SIZE - len >= addr) {
 		BUG_ON(vma && (addr >= vma->vm_end));
 
-		if (touches_hugepage_low_range(mm, addr, len)) {
+		if (touches_hugepage_low_range(addr, len)) {
 			addr = ALIGN(addr+1, 1<<SID_SHIFT);
 			vma = find_vma(mm, addr);
 			continue;
@@ -536,7 +581,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 		vma = find_vma(mm, addr);
 		if (TASK_SIZE - len >= addr &&
 				(!vma || addr + len <= vma->vm_start)
-				&& !is_hugepage_only_range(mm, addr,len))
+				&& !is_hugepage_only_range(addr,len))
 			return addr;
 	}
 
@@ -549,7 +594,7 @@ try_again:
 	addr = (mm->free_area_cache - len) & PAGE_MASK;
 	do {
 hugepage_recheck:
-		if (touches_hugepage_low_range(mm, addr, len)) {
+		if (touches_hugepage_low_range(addr, len)) {
 			addr = (addr & ((~0) << SID_SHIFT)) - len;
 			goto hugepage_recheck;
 		} else if (touches_hugepage_high_range(addr, len)) {
@@ -662,7 +707,7 @@ unsigned long hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 	if (len & ~HPAGE_MASK)
 		return -EINVAL;
 
-	if (!cpu_has_feature(CPU_FTR_16M_PAGE))
+	if (!(cur_cpu_spec->cpu_features & CPU_FTR_16M_PAGE))
 		return -EINVAL;
 
 	if (test_thread_flag(TIF_32BIT)) {
@@ -702,16 +747,16 @@ void hugetlb_mm_free_pgd(struct mm_struct *mm)
 
 	pgdir = mm->context.huge_pgdir;
 	if (! pgdir)
-		goto out;
+		return;
 
 	mm->context.huge_pgdir = NULL;
 
 	/* cleanup any hugepte pages leftover */
 	for (i = 0; i < PTRS_PER_HUGEPGD; i++) {
-		pud_t *pud = (pud_t *)(pgdir + i);
+		pgd_t *pgd = pgdir + i;
 
-		if (! pud_none(*pud)) {
-			pte_t *pte = (pte_t *)pud_page(*pud);
+		if (! pgd_none(*pgd)) {
+			pte_t *pte = (pte_t *)pgd_page(*pgd);
 			struct page *ptepage = virt_to_page(pte);
 
 			ptepage->mapping = NULL;
@@ -719,13 +764,12 @@ void hugetlb_mm_free_pgd(struct mm_struct *mm)
 			BUG_ON(memcmp(pte, empty_zero_page, PAGE_SIZE));
 			kmem_cache_free(zero_cache, pte);
 		}
-		pud_clear(pud);
+		pgd_clear(pgd);
 	}
 
 	BUG_ON(memcmp(pgdir, empty_zero_page, PAGE_SIZE));
 	kmem_cache_free(zero_cache, pgdir);
 
- out:
 	spin_unlock(&mm->page_table_lock);
 }
 
@@ -734,6 +778,7 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 {
 	pte_t *ptep;
 	unsigned long va, vpn;
+	int is_write;
 	pte_t old_pte, new_pte;
 	unsigned long hpteflags, prpn;
 	long slot;
@@ -760,7 +805,8 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 	 * Check the user's access rights to the page.  If access should be
 	 * prevented then send the problem up to do_page_fault.
 	 */
-	if (unlikely(access & ~pte_val(*ptep)))
+	is_write = access & _PAGE_RW;
+	if (unlikely(is_write && !(pte_val(*ptep) & _PAGE_RW)))
 		goto out;
 	/*
 	 * At this point, we have a pte (old_pte) which can be used to build
@@ -779,8 +825,6 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 	new_pte = old_pte;
 
 	hpteflags = 0x2 | (! (pte_val(new_pte) & _PAGE_RW));
- 	/* _PAGE_EXEC -> HW_NO_EXEC since it's inverted */
-	hpteflags |= ((pte_val(new_pte) & _PAGE_EXEC) ? 0 : HW_NO_EXEC);
 
 	/* Check if pte already has an hpte (case 2) */
 	if (unlikely(pte_val(old_pte) & _PAGE_HASHPTE)) {
@@ -790,7 +834,7 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 		hash = hpt_hash(vpn, 1);
 		if (pte_val(old_pte) & _PAGE_SECONDARY)
 			hash = ~hash;
-		slot = (hash & htab_hash_mask) * HPTES_PER_GROUP;
+		slot = (hash & htab_data.htab_hash_mask) * HPTES_PER_GROUP;
 		slot += (pte_val(old_pte) & _PAGE_GROUP_IX) >> 12;
 
 		if (ppc_md.hpte_updatepp(slot, hpteflags, va, 1, local) == -1)
@@ -804,7 +848,7 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 		prpn = pte_pfn(old_pte);
 
 repeat:
-		hpte_group = ((hash & htab_hash_mask) *
+		hpte_group = ((hash & htab_data.htab_hash_mask) *
 			      HPTES_PER_GROUP) & ~0x7UL;
 
 		/* Update the linux pte with the HPTE slot */
@@ -821,13 +865,13 @@ repeat:
 		/* Primary is full, try the secondary */
 		if (unlikely(slot == -1)) {
 			pte_val(new_pte) |= _PAGE_SECONDARY;
-			hpte_group = ((~hash & htab_hash_mask) *
+			hpte_group = ((~hash & htab_data.htab_hash_mask) *
 				      HPTES_PER_GROUP) & ~0x7UL; 
 			slot = ppc_md.hpte_insert(hpte_group, va, prpn,
 						  1, hpteflags, 0, 1);
 			if (slot == -1) {
 				if (mftb() & 0x1)
-					hpte_group = ((hash & htab_hash_mask) * HPTES_PER_GROUP) & ~0x7UL;
+					hpte_group = ((hash & htab_data.htab_hash_mask) * HPTES_PER_GROUP) & ~0x7UL;
 
 				ppc_md.hpte_remove(hpte_group);
 				goto repeat;

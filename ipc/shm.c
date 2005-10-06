@@ -26,10 +26,8 @@
 #include <linux/proc_fs.h>
 #include <linux/shmem_fs.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
 #include <linux/syscalls.h>
-#include <linux/audit.h>
-#include <linux/ptrace.h>
-#include <linux/vs_limit.h>
 
 #include <asm/uaccess.h>
 
@@ -115,12 +113,7 @@ static void shm_open (struct vm_area_struct *shmd)
  */
 static void shm_destroy (struct shmid_kernel *shp)
 {
-	struct vx_info *vxi = locate_vx_info(shp->shm_perm.xid);
-	int numpages = (shp->shm_segsz + PAGE_SIZE - 1) >> PAGE_SHIFT;
-
-	vx_ipcshm_sub(vxi, shp, numpages);
-	shm_tot -= numpages;
-
+	shm_tot -= (shp->shm_segsz + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	shm_rmid (shp->id);
 	shm_unlock(shp);
 	if (!is_file_hugepages(shp->shm_file))
@@ -130,7 +123,6 @@ static void shm_destroy (struct shmid_kernel *shp)
 						shp->mlock_user);
 	fput (shp->shm_file);
 	security_shm_free(shp);
-	put_vx_info(vxi);
 	ipc_rcu_putref(shp);
 }
 
@@ -197,8 +189,6 @@ static int newseg (key_t key, int shmflg, size_t size)
 
 	if (shm_tot + numpages >= shm_ctlall)
 		return -ENOSPC;
-	if (!vx_ipcshm_avail(current->vx_info, numpages))
-		return -ENOSPC;
 
 	shp = ipc_rcu_alloc(sizeof(*shp));
 	if (!shp)
@@ -247,7 +237,6 @@ static int newseg (key_t key, int shmflg, size_t size)
 	else
 		file->f_op = &shm_file_operations;
 	shm_tot += numpages;
-	vx_ipcshm_add(current->vx_info, key, numpages);
 	shm_unlock(shp);
 	return shp->id;
 
@@ -614,8 +603,6 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 			err = -EFAULT;
 			goto out;
 		}
-		if ((err = audit_ipc_perms(0, setbuf.uid, setbuf.gid, setbuf.mode)))
-			return err;
 		down(&shm_ids.sem);
 		shp = shm_lock(shmid);
 		err=-EINVAL;
@@ -782,18 +769,6 @@ invalid:
 		err = PTR_ERR(user_addr);
 out:
 	return err;
-}
-
-asmlinkage long sys_shmat(int shmid, char __user *shmaddr, int shmflg)
-{
-	unsigned long ret;
-	long err;
-
-	err = do_shmat(shmid, shmaddr, shmflg, &ret);
-	if (err)
-		return err;
-	force_successful_syscall_return();
-	return (long)ret;
 }
 
 /*

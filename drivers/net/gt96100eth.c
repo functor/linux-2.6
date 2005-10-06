@@ -187,8 +187,10 @@ static void gt96100_delay(int ms)
 {
 	if (in_interrupt())
 		return;
-	else
-		msleep_interruptible(ms);
+	else {
+		current->state = TASK_INTERRUPTIBLE;
+		schedule_timeout(ms*HZ/1000);
+	}
 }
 
 static int
@@ -525,7 +527,7 @@ abort(struct net_device *dev, u32 abort_bits)
 
 	// wait for abort to complete
 	while (GT96100ETH_READ(gp, GT96100_ETH_SDMA_COMM) & abort_bits) {
-		// snooze for 1 msec and check again
+		// snooze for 20 msec and check again
 		gt96100_delay(1);
 	
 		if (--timedout == 0) {

@@ -51,10 +51,7 @@ static int set_brk(unsigned long start, unsigned long end)
 	start = PAGE_ALIGN(start);
 	end = PAGE_ALIGN(end);
 	if (end > start) {
-		unsigned long addr;
-		down_write(&current->mm->mmap_sem);
-		addr = do_brk(start, end - start);
-		up_write(&current->mm->mmap_sem);
+		unsigned long addr = do_brk(start, end - start);
 		if (BAD_ADDR(addr))
 			return addr;
 	}
@@ -116,7 +113,7 @@ static int aout_core_dump(long signr, struct pt_regs * regs, struct file *file)
 	set_fs(KERNEL_DS);
 	has_dumped = 1;
 	current->flags |= PF_DUMPCORE;
-       	strncpy(dump.u_comm, current->comm, sizeof(dump.u_comm));
+       	strncpy(dump.u_comm, current->comm, sizeof(current->comm));
 #ifndef __sparc__
 	dump.u_ar0 = (void *)(((unsigned long)(&dump.regs)) - ((unsigned long)(&dump)));
 #endif
@@ -149,14 +146,14 @@ static int aout_core_dump(long signr, struct pt_regs * regs, struct file *file)
 /* make sure we actually have a data and stack area to dump */
 	set_fs(USER_DS);
 #ifdef __sparc__
-	if (!access_ok(VERIFY_READ, (void __user *)START_DATA(dump), dump.u_dsize))
+	if (verify_area(VERIFY_READ, (void __user *)START_DATA(dump), dump.u_dsize))
 		dump.u_dsize = 0;
-	if (!access_ok(VERIFY_READ, (void __user *)START_STACK(dump), dump.u_ssize))
+	if (verify_area(VERIFY_READ, (void __user *)START_STACK(dump), dump.u_ssize))
 		dump.u_ssize = 0;
 #else
-	if (!access_ok(VERIFY_READ, (void __user *)START_DATA(dump), dump.u_dsize << PAGE_SHIFT))
+	if (verify_area(VERIFY_READ, (void __user *)START_DATA(dump), dump.u_dsize << PAGE_SHIFT))
 		dump.u_dsize = 0;
-	if (!access_ok(VERIFY_READ, (void __user *)START_STACK(dump), dump.u_ssize << PAGE_SHIFT))
+	if (verify_area(VERIFY_READ, (void __user *)START_STACK(dump), dump.u_ssize << PAGE_SHIFT))
 		dump.u_ssize = 0;
 #endif
 
@@ -318,7 +315,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		(current->mm->start_brk = N_BSSADDR(ex));
 	current->mm->free_area_cache = current->mm->mmap_base;
 
-	set_mm_counter(current->mm, rss, 0);
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->mmap = NULL;
 	compute_creds(bprm);
  	current->flags &= ~PF_FORKNOEXEC;
@@ -327,14 +325,10 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		loff_t pos = fd_offset;
 		/* Fuck me plenty... */
 		/* <AOL></AOL> */
-		down_write(&current->mm->mmap_sem);	
 		error = do_brk(N_TXTADDR(ex), ex.a_text);
-		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char *) N_TXTADDR(ex),
 			  ex.a_text, &pos);
-		down_write(&current->mm->mmap_sem);
 		error = do_brk(N_DATADDR(ex), ex.a_data);
-		up_write(&current->mm->mmap_sem);
 		bprm->file->f_op->read(bprm->file, (char *) N_DATADDR(ex),
 			  ex.a_data, &pos);
 		goto beyond_if;
@@ -354,9 +348,8 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		pos = 32;
 		map_size = ex.a_text+ex.a_data;
 #endif
-		down_write(&current->mm->mmap_sem);
+
 		error = do_brk(text_addr & PAGE_MASK, map_size);
-		up_write(&current->mm->mmap_sem);
 		if (error != (text_addr & PAGE_MASK)) {
 			send_sig(SIGKILL, current, 0);
 			return error;
@@ -391,9 +384,7 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 		if (!bprm->file->f_op->mmap||((fd_offset & ~PAGE_MASK) != 0)) {
 			loff_t pos = fd_offset;
-			down_write(&current->mm->mmap_sem);
 			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
-			up_write(&current->mm->mmap_sem);
 			bprm->file->f_op->read(bprm->file,
 					(char __user *)N_TXTADDR(ex),
 					ex.a_text+ex.a_data, &pos);
@@ -435,7 +426,7 @@ beyond_if:
 		return retval;
 	}
 
-	retval = setup_arg_pages(bprm, STACK_TOP, EXSTACK_DEFAULT);
+	retval = setup_arg_pages(bprm, EXSTACK_DEFAULT);
 	if (retval < 0) { 
 		/* Someone check-me: is this error path enough? */ 
 		send_sig(SIGKILL, current, 0); 
@@ -498,9 +489,8 @@ static int load_aout_library(struct file *file)
 			       file->f_dentry->d_name.name);
 			error_time = jiffies;
 		}
-		down_write(&current->mm->mmap_sem);
+
 		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
-		up_write(&current->mm->mmap_sem);
 		
 		file->f_op->read(file, (char __user *)start_addr,
 			ex.a_text + ex.a_data, &pos);
@@ -524,9 +514,7 @@ static int load_aout_library(struct file *file)
 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
 	bss = ex.a_text + ex.a_data + ex.a_bss;
 	if (bss > len) {
-		down_write(&current->mm->mmap_sem);
 		error = do_brk(start_addr + len, bss - len);
-		up_write(&current->mm->mmap_sem);
 		retval = error;
 		if (error != start_addr + len)
 			goto out;

@@ -255,12 +255,13 @@ load_som_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	set_binfmt(&som_format);
 	compute_creds(bprm);
-	setup_arg_pages(bprm, STACK_TOP, EXSTACK_DEFAULT);
+	setup_arg_pages(bprm, EXSTACK_DEFAULT);
 
 	create_som_tables(bprm);
 
 	current->mm->start_stack = bprm->p;
-	set_mm_counter(current->mm, rss, 0);
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 
 #if 0
 	printk("(start_brk) %08lx\n" , (unsigned long) current->mm->start_brk);

@@ -49,9 +49,9 @@
 
 /* Definition for rcupdate control block. */
 struct rcu_ctrlblk rcu_ctrlblk = 
-	{ .cur = -300, .completed = -300 };
+	{ .cur = -300, .completed = -300 , .lock = SEQCNT_ZERO };
 struct rcu_ctrlblk rcu_bh_ctrlblk =
-	{ .cur = -300, .completed = -300 };
+	{ .cur = -300, .completed = -300 , .lock = SEQCNT_ZERO };
 
 /* Bookkeeping of the progress of the grace period */
 struct rcu_state {
@@ -60,9 +60,9 @@ struct rcu_state {
 	                              /* for current batch to proceed.        */
 };
 
-static struct rcu_state rcu_state ____cacheline_maxaligned_in_smp =
+struct rcu_state rcu_state ____cacheline_maxaligned_in_smp =
 	  {.lock = SPIN_LOCK_UNLOCKED, .cpumask = CPU_MASK_NONE };
-static struct rcu_state rcu_bh_state ____cacheline_maxaligned_in_smp =
+struct rcu_state rcu_bh_state ____cacheline_maxaligned_in_smp =
 	  {.lock = SPIN_LOCK_UNLOCKED, .cpumask = CPU_MASK_NONE };
 
 DEFINE_PER_CPU(struct rcu_data, rcu_data) = { 0L };
@@ -185,13 +185,10 @@ static void rcu_start_batch(struct rcu_ctrlblk *rcp, struct rcu_state *rsp,
 			rcp->completed == rcp->cur) {
 		/* Can't change, since spin lock held. */
 		cpus_andnot(rsp->cpumask, cpu_online_map, nohz_cpu_mask);
-
+		write_seqcount_begin(&rcp->lock);
 		rcp->next_pending = 0;
-		/* next_pending == 0 must be visible in __rcu_process_callbacks()
-		 * before it can see new value of cur.
-		 */
-		smp_wmb();
 		rcp->cur++;
+		write_seqcount_end(&rcp->lock);
 	}
 }
 
@@ -219,9 +216,9 @@ static void rcu_check_quiescent_state(struct rcu_ctrlblk *rcp,
 			struct rcu_state *rsp, struct rcu_data *rdp)
 {
 	if (rdp->quiescbatch != rcp->cur) {
-		/* start new grace period: */
+		/* new grace period: record qsctr value. */
 		rdp->qs_pending = 1;
-		rdp->passed_quiesc = 0;
+		rdp->last_qsctr = rdp->qsctr;
 		rdp->quiescbatch = rcp->cur;
 		return;
 	}
@@ -234,10 +231,11 @@ static void rcu_check_quiescent_state(struct rcu_ctrlblk *rcp,
 		return;
 
 	/* 
-	 * Was there a quiescent state since the beginning of the grace
-	 * period? If no, then exit and wait for the next call.
+	 * Races with local timer interrupt - in the worst case
+	 * we may miss one quiescent state of that CPU. That is
+	 * tolerable. So no need to disable interrupts.
 	 */
-	if (!rdp->passed_quiesc)
+	if (rdp->qsctr == rdp->last_qsctr)
 		return;
 	rdp->qs_pending = 0;
 
@@ -321,6 +319,8 @@ static void __rcu_process_callbacks(struct rcu_ctrlblk *rcp,
 
 	local_irq_disable();
 	if (rdp->nxtlist && !rdp->curlist) {
+		int next_pending, seq;
+
 		rdp->curlist = rdp->nxtlist;
 		rdp->curtail = rdp->nxttail;
 		rdp->nxtlist = NULL;
@@ -330,15 +330,14 @@ static void __rcu_process_callbacks(struct rcu_ctrlblk *rcp,
 		/*
 		 * start the next batch of callbacks
 		 */
+		do {
+			seq = read_seqcount_begin(&rcp->lock);
+			/* determine batch number */
+			rdp->batch = rcp->cur + 1;
+			next_pending = rcp->next_pending;
+		} while (read_seqcount_retry(&rcp->lock, seq));
 
-		/* determine batch number */
-		rdp->batch = rcp->cur + 1;
-		/* see the comment and corresponding wmb() in
-		 * the rcu_start_batch()
-		 */
-		smp_rmb();
-
-		if (!rcp->next_pending) {
+		if (!next_pending) {
 			/* and start it/schedule start if it's a new batch */
 			spin_lock(&rsp->lock);
 			rcu_start_batch(rcp, rsp, 1);
@@ -444,18 +443,15 @@ static void wakeme_after_rcu(struct rcu_head  *head)
 }
 
 /**
- * synchronize_rcu - wait until a grace period has elapsed.
+ * synchronize_kernel - wait until a grace period has elapsed.
  *
  * Control will return to the caller some time after a full grace
  * period has elapsed, in other words after all currently executing RCU
  * read-side critical sections have completed.  RCU read-side critical
  * sections are delimited by rcu_read_lock() and rcu_read_unlock(),
  * and may be nested.
- *
- * If your read-side code is not protected by rcu_read_lock(), do -not-
- * use synchronize_rcu().
  */
-void synchronize_rcu(void)
+void synchronize_kernel(void)
 {
 	struct rcu_synchronize rcu;
 
@@ -467,16 +463,7 @@ void synchronize_rcu(void)
 	wait_for_completion(&rcu.completion);
 }
 
-/*
- * Deprecated, use synchronize_rcu() or synchronize_sched() instead.
- */
-void synchronize_kernel(void)
-{
-	synchronize_rcu();
-}
-
 module_param(maxbatch, int, 0);
-EXPORT_SYMBOL(call_rcu);  /* WARNING: GPL-only in April 2006. */
-EXPORT_SYMBOL(call_rcu_bh);  /* WARNING: GPL-only in April 2006. */
-EXPORT_SYMBOL_GPL(synchronize_rcu);
-EXPORT_SYMBOL(synchronize_kernel);  /* WARNING: GPL-only in April 2006. */
+EXPORT_SYMBOL(call_rcu);
+EXPORT_SYMBOL(call_rcu_bh);
+EXPORT_SYMBOL(synchronize_kernel);

@@ -17,7 +17,6 @@
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/errno.h>
-#include <linux/mm.h>
 
 #include <asm/io.h>
 #include <asm/hardware/icst525.h>
@@ -35,7 +34,7 @@ module_param_named(lmid, module_id, int, 0444);
 MODULE_PARM_DESC(lmid, "logic module stack position");
 
 struct impd1_module {
-	void __iomem	*base;
+	void		*base;
 	struct clk	vcos[2];
 };
 
@@ -260,17 +259,6 @@ static int impd1fb_clcd_setup(struct clcd_fb *fb)
 	return ret;
 }
 
-static int impd1fb_clcd_mmap(struct clcd_fb *fb, struct vm_area_struct *vma)
-{
-	unsigned long start, size;
-
-	start = vma->vm_pgoff + (fb->fb.fix.smem_start >> PAGE_SHIFT);
-	size = vma->vm_end - vma->vm_start;
-
-	return remap_pfn_range(vma, vma->vm_start, start, size,
-			       vma->vm_page_prot);
-}
-
 static void impd1fb_clcd_remove(struct clcd_fb *fb)
 {
 	iounmap(fb->fb.screen_base);
@@ -284,7 +272,6 @@ static struct clcd_board impd1_clcd_data = {
 	.disable	= impd1fb_clcd_disable,
 	.enable		= impd1fb_clcd_enable,
 	.setup		= impd1fb_clcd_setup,
-	.mmap		= impd1fb_clcd_mmap,
 	.remove		= impd1fb_clcd_remove,
 };
 

@@ -19,7 +19,6 @@
 #include <linux/ptrace.h>
 #include <linux/user.h>
 #include <linux/config.h>
-#include <linux/signal.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -254,7 +253,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			long tmp;
 
 			ret = -EIO;
-			if (!valid_signal(data))
+			if ((unsigned long) data > _NSIG)
 				break;
 			if (request == PTRACE_SYSCALL) {
 					child->thread.work.syscall_trace = ~0;
@@ -295,7 +294,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			long tmp;
 
 			ret = -EIO;
-			if (!valid_signal(data))
+			if ((unsigned long) data > _NSIG)
 				break;
 			child->thread.work.syscall_trace = 0;
 			tmp = get_reg(child, PT_SR) | (TRACE_BITS << 16);

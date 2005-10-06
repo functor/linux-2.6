@@ -16,8 +16,7 @@ typedef signed short	nasid_t;	/* node id in numa-as-id space */
 typedef signed char	partid_t;	/* partition ID type */
 typedef unsigned int    moduleid_t;     /* user-visible module number type */
 typedef unsigned int    cmoduleid_t;    /* kernel compact module id type */
-typedef unsigned char	slotid_t;	/* slot (blade) within module */
-typedef unsigned char	slabid_t;	/* slab (asic) within slot */
+typedef signed char     slabid_t;
 typedef u64 nic_t;
 typedef unsigned long iopaddr_t;
 typedef unsigned long paddr_t;

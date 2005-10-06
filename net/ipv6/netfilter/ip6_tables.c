@@ -234,7 +234,7 @@ ip6_packet_match(const struct sk_buff *skb,
 			 * we will change the return 0 to 1*/
 			if ((currenthdr == IPPROTO_NONE) || 
 				(currenthdr == IPPROTO_ESP))
-				break;
+				return 0;
 
 			hp = skb_header_pointer(skb, ptr, sizeof(_hdr), &_hdr);
 			BUG_ON(hp == NULL);
@@ -365,6 +365,10 @@ ip6t_do_table(struct sk_buff **pskb,
 	const char *indev, *outdev;
 	void *table_base;
 	struct ip6t_entry *e, *back;
+
+	/* FIXME: Push down to extensions --RR */
+	if (skb_is_nonlinear(*pskb) && skb_linearize(*pskb, GFP_ATOMIC) != 0)
+		return NF_DROP;
 
 	/* Initialization */
 	indev = in ? in->name : nulldevname;
@@ -952,7 +956,7 @@ translate_table(const char *name,
 	}
 
 	/* And one copy for every other CPU */
-	for (i = 1; i < num_possible_cpus(); i++) {
+	for (i = 1; i < NR_CPUS; i++) {
 		memcpy(newinfo->entries + SMP_ALIGN(newinfo->size)*i,
 		       newinfo->entries,
 		       SMP_ALIGN(newinfo->size));
@@ -974,7 +978,7 @@ replace_table(struct ip6t_table *table,
 		struct ip6t_entry *table_base;
 		unsigned int i;
 
-		for (i = 0; i < num_possible_cpus(); i++) {
+		for (i = 0; i < NR_CPUS; i++) {
 			table_base =
 				(void *)newinfo->entries
 				+ TABLE_OFFSET(newinfo, i);
@@ -1021,7 +1025,7 @@ get_counters(const struct ip6t_table_info *t,
 	unsigned int cpu;
 	unsigned int i;
 
-	for (cpu = 0; cpu < num_possible_cpus(); cpu++) {
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
 		i = 0;
 		IP6T_ENTRY_ITERATE(t->entries + TABLE_OFFSET(t, cpu),
 				  t->size,
@@ -1155,13 +1159,18 @@ do_replace(void __user *user, unsigned int len)
 		return -ENOMEM;
 
 	newinfo = vmalloc(sizeof(struct ip6t_table_info)
-			  + SMP_ALIGN(tmp.size) * num_possible_cpus());
+			  + SMP_ALIGN(tmp.size) * NR_CPUS);
 	if (!newinfo)
 		return -ENOMEM;
 
 	if (copy_from_user(newinfo->entries, user + sizeof(tmp),
 			   tmp.size) != 0) {
 		ret = -EFAULT;
+		goto free_newinfo;
+	}
+	
+	if(tmp.num_counters >= (4 << 20)/sizeof(struct ip6t_counters)) {
+		ret = -ENOMEM;
 		goto free_newinfo;
 	}
 
@@ -1218,12 +1227,11 @@ do_replace(void __user *user, unsigned int len)
 	IP6T_ENTRY_ITERATE(oldinfo->entries, oldinfo->size, cleanup_entry,NULL);
 	vfree(oldinfo);
 	/* Silent error: too late now. */
-	if (copy_to_user(tmp.counters, counters,
-			 sizeof(struct ip6t_counters) * tmp.num_counters) != 0)
-		ret = -EFAULT;
+	copy_to_user(tmp.counters, counters,
+		     sizeof(struct ip6t_counters) * tmp.num_counters);
 	vfree(counters);
 	up(&ip6t_mutex);
-	return ret;
+	return 0;
 
  put_module:
 	module_put(t->me);
@@ -1460,8 +1468,7 @@ ip6t_unregister_match(struct ip6t_match *match)
 	up(&ip6t_mutex);
 }
 
-int ip6t_register_table(struct ip6t_table *table,
-			const struct ip6t_replace *repl)
+int ip6t_register_table(struct ip6t_table *table)
 {
 	int ret;
 	struct ip6t_table_info *newinfo;
@@ -1469,17 +1476,17 @@ int ip6t_register_table(struct ip6t_table *table,
 		= { 0, 0, 0, { 0 }, { 0 }, { } };
 
 	newinfo = vmalloc(sizeof(struct ip6t_table_info)
-			  + SMP_ALIGN(repl->size) * num_possible_cpus());
+			  + SMP_ALIGN(table->table->size) * NR_CPUS);
 	if (!newinfo)
 		return -ENOMEM;
 
-	memcpy(newinfo->entries, repl->entries, repl->size);
+	memcpy(newinfo->entries, table->table->entries, table->table->size);
 
 	ret = translate_table(table->name, table->valid_hooks,
-			      newinfo, repl->size,
-			      repl->num_entries,
-			      repl->hook_entry,
-			      repl->underflow);
+			      newinfo, table->table->size,
+			      table->table->num_entries,
+			      table->table->hook_entry,
+			      table->table->underflow);
 	if (ret != 0) {
 		vfree(newinfo);
 		return ret;

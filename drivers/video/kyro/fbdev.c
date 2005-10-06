@@ -1,5 +1,5 @@
 /*
- *  linux/drivers/video/kyro/fbdev.c
+ *  linux/drivers/video/kyro/kyrofb.c
  *
  *  Copyright (C) 2002 STMicroelectronics
  *  Copyright (C) 2003, 2004 Paul Mundt
@@ -43,14 +43,14 @@
 #define KHZ2PICOS(a) (1000000000UL/(a))
 
 /****************************************************************************/
-static struct fb_fix_screeninfo kyro_fix __devinitdata = {
+static struct fb_fix_screeninfo kyro_fix __initdata = {
 	.id		= "ST Kyro",
 	.type		= FB_TYPE_PACKED_PIXELS,
 	.visual		= FB_VISUAL_TRUECOLOR,
 	.accel		= FB_ACCEL_NONE,
 };
 
-static struct fb_var_screeninfo kyro_var __devinitdata = {
+static struct fb_var_screeninfo kyro_var __initdata = {
 	/* 640x480, 16bpp @ 60 Hz */
 	.xres		= 640,
 	.yres		= 480,
@@ -86,18 +86,18 @@ typedef struct {
 /* global graphics card info structure (one per card) */
 static device_info_t deviceInfo;
 
-static char *mode_option __devinitdata = NULL;
-static int nopan __devinitdata = 0;
-static int nowrap __devinitdata = 1;
+static char *mode_option __initdata = NULL;
+static int nopan __initdata = 0;
+static int nowrap __initdata = 1;
 #ifdef CONFIG_MTRR
-static int nomtrr __devinitdata = 0;
+static int nomtrr __initdata = 0;
 #endif
 
 /* PCI driver prototypes */
 static int kyrofb_probe(struct pci_dev *pdev, const struct pci_device_id *ent);
 static void kyrofb_remove(struct pci_dev *pdev);
 
-static struct fb_videomode kyro_modedb[] __devinitdata = {
+static struct fb_videomode kyro_modedb[] __initdata = {
 	{
 		/* 640x350 @ 85Hz */
 		NULL, 85, 640, 350, KHZ2PICOS(31500),
@@ -307,7 +307,7 @@ enum {
 };
 
 /* Accessors */
-static int kyro_dev_video_mode_set(struct fb_info *info)
+int kyro_dev_video_mode_set(struct fb_info *info)
 {
 	struct kyrofb_info *par = (struct kyrofb_info *)info->par;
 
@@ -339,8 +339,8 @@ static int kyro_dev_video_mode_set(struct fb_info *info)
 	return 0;
 }
 
-static int kyro_dev_overlay_create(u32 ulWidth,
-				   u32 ulHeight, int bLinear)
+int kyro_dev_overlay_create(u32 ulWidth,
+			    u32 ulHeight, int bLinear)
 {
 	u32 offset;
 	u32 stride, uvStride;
@@ -376,7 +376,7 @@ static int kyro_dev_overlay_create(u32 ulWidth,
 	return 0;
 }
 
-static int kyro_dev_overlay_viewport_set(u32 x, u32 y, u32 ulWidth, u32 ulHeight)
+int kyro_dev_overlay_viewport_set(u32 x, u32 y, u32 ulWidth, u32 ulHeight)
 {
 	if (deviceInfo.ulOverlayOffset == 0)
 		/* probably haven't called CreateOverlay yet */
@@ -558,8 +558,7 @@ static int kyrofb_setcolreg(u_int regno, u_int red, u_int green,
 	return 0;
 }
 
-#ifndef MODULE
-static int __init kyrofb_setup(char *options)
+int __init kyrofb_setup(char *options)
 {
 	char *this_opt;
 
@@ -584,7 +583,6 @@ static int __init kyrofb_setup(char *options)
 
 	return 0;
 }
-#endif
 
 static int kyrofb_ioctl(struct inode *inode, struct file *file,
 			unsigned int cmd, unsigned long arg,
@@ -596,8 +594,7 @@ static int kyrofb_ioctl(struct inode *inode, struct file *file,
 
 	switch (cmd) {
 	case KYRO_IOCTL_OVERLAY_CREATE:
-		if (copy_from_user(&ol_create, argp, sizeof(overlay_create)))
-			return -EFAULT;
+		copy_from_user(&ol_create, argp, sizeof(overlay_create));
 
 		if (kyro_dev_overlay_create(ol_create.ulWidth,
 					    ol_create.ulHeight, 0) < 0) {
@@ -607,9 +604,8 @@ static int kyrofb_ioctl(struct inode *inode, struct file *file,
 		}
 		break;
 	case KYRO_IOCTL_OVERLAY_VIEWPORT_SET:
-		if (copy_from_user(&ol_viewport_set, argp,
-			       sizeof(overlay_viewport_set)))
-			return -EFAULT;
+		copy_from_user(&ol_viewport_set, argp,
+			       sizeof(overlay_viewport_set));
 
 		if (kyro_dev_overlay_viewport_set(ol_viewport_set.xOrgin,
 						  ol_viewport_set.yOrgin,
@@ -629,16 +625,13 @@ static int kyrofb_ioctl(struct inode *inode, struct file *file,
 		}
 		break;
 	case KYRO_IOCTL_UVSTRIDE:
-		if (copy_to_user(argp, &deviceInfo.ulOverlayUVStride, sizeof(unsigned long)))
-			return -EFAULT;
+		copy_to_user(argp, &deviceInfo.ulOverlayUVStride, sizeof(unsigned long));
 		break;
 	case KYRO_IOCTL_STRIDE:
-		if (copy_to_user(argp, &deviceInfo.ulOverlayStride, sizeof(unsigned long)))
-			return -EFAULT;
+		copy_to_user(argp, &deviceInfo.ulOverlayStride, sizeof(unsigned long));
 		break;
 	case KYRO_IOCTL_OVERLAY_OFFSET:
-		if (copy_to_user(argp, &deviceInfo.ulOverlayOffset, sizeof(unsigned long)))
-			return -EFAULT;
+		copy_to_user(argp, &deviceInfo.ulOverlayOffset, sizeof(unsigned long));
 		break;
 	}
 
@@ -793,7 +786,7 @@ static void __devexit kyrofb_remove(struct pci_dev *pdev)
 	kfree(info);
 }
 
-static int __init kyrofb_init(void)
+int __init kyrofb_init(void)
 {
 #ifndef MODULE
 	char *option = NULL;
@@ -802,7 +795,7 @@ static int __init kyrofb_init(void)
 		return -ENODEV;
 	kyrofb_setup(option);
 #endif
-	return pci_register_driver(&kyrofb_pci_driver);
+	return pci_module_init(&kyrofb_pci_driver);
 }
 
 static void __exit kyrofb_exit(void)

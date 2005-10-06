@@ -19,9 +19,9 @@
 #define MNT_NOSUID	1
 #define MNT_NODEV	2
 #define MNT_NOEXEC	4
-#define MNT_RDONLY	8  /* MEF @ PlanetLab: bme patch */
-#define MNT_NOATIME	16 /* MEF @ PlanetLab: bme patch */
-#define MNT_NODIRATIME	32 /* MEF @ PlanetLab: bme patch */
+#define MNT_RDONLY	8
+#define MNT_NOATIME	16
+#define MNT_NODIRATIME	32
 #define MNT_XID		256
 
 struct vfsmount

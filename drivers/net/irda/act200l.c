@@ -152,8 +152,7 @@ static int act200l_change_speed(struct irda_task *task)
 		}
 		break;
 	case IRDA_TASK_CHILD_WAIT:
-		IRDA_WARNING("%s(), resetting dongle timed out!\n",
-			     __FUNCTION__);
+		WARNING("%s(), resetting dongle timed out!\n", __FUNCTION__);
 		ret = -1;
 		break;
 	case IRDA_TASK_CHILD_DONE:
@@ -198,8 +197,7 @@ static int act200l_change_speed(struct irda_task *task)
 		self->speed_task = NULL;
 		break;
 	default:
-		IRDA_ERROR("%s(), unknown state %d\n",
-			   __FUNCTION__, task->state);
+		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		self->speed_task = NULL;
 		ret = -1;
@@ -265,8 +263,7 @@ static int act200l_reset(struct irda_task *task)
 		self->reset_task = NULL;
 		break;
 	default:
-		IRDA_ERROR("%s(), unknown state %d\n",
-			   __FUNCTION__, task->state);
+		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		self->reset_task = NULL;
 		ret = -1;

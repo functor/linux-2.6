@@ -55,8 +55,7 @@ struct poll_table_page {
  * as all select/poll functions have to call it to add an entry to the
  * poll table.
  */
-static void __pollwait(struct file *filp, wait_queue_head_t *wait_address,
-		       poll_table *p);
+void __pollwait(struct file *filp, wait_queue_head_t *wait_address, poll_table *p);
 
 void poll_initwait(struct poll_wqueues *pwq)
 {
@@ -88,8 +87,7 @@ void poll_freewait(struct poll_wqueues *pwq)
 
 EXPORT_SYMBOL(poll_freewait);
 
-static void __pollwait(struct file *filp, wait_queue_head_t *wait_address,
-		       poll_table *_p)
+void __pollwait(struct file *filp, wait_queue_head_t *wait_address, poll_table *_p)
 {
 	struct poll_wqueues *p = container_of(_p, struct poll_wqueues, pt);
 	struct poll_table_page *table = p->table;
@@ -242,7 +240,6 @@ int do_select(int n, fd_set_bits *fds, long *timeout)
 						retval++;
 					}
 				}
-				cond_resched();
 			}
 			if (res_in)
 				*rinp = res_in;
@@ -304,12 +301,10 @@ sys_select(int n, fd_set __user *inp, fd_set __user *outp, fd_set __user *exp, s
 	if (tvp) {
 		time_t sec, usec;
 
-		if (!access_ok(VERIFY_READ, tvp, sizeof(*tvp))
-		    || __get_user(sec, &tvp->tv_sec)
-		    || __get_user(usec, &tvp->tv_usec)) {
-			ret = -EFAULT;
+		if ((ret = verify_area(VERIFY_READ, tvp, sizeof(*tvp)))
+		    || (ret = __get_user(sec, &tvp->tv_sec))
+		    || (ret = __get_user(usec, &tvp->tv_usec)))
 			goto out_nofds;
-		}
 
 		ret = -EINVAL;
 		if (sec < 0 || usec < 0)

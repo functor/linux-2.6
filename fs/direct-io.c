@@ -66,7 +66,6 @@ struct dio {
 	struct bio *bio;		/* bio under assembly */
 	struct inode *inode;
 	int rw;
-	loff_t i_size;			/* i_size when submitted */
 	int lock_type;			/* doesn't change */
 	unsigned blkbits;		/* doesn't change */
 	unsigned blkfactor;		/* When we're using an alignment which
@@ -216,7 +215,7 @@ static void dio_complete(struct dio *dio, loff_t offset, ssize_t bytes)
 {
 	if (dio->end_io && dio->result)
 		dio->end_io(dio->inode, offset, bytes, dio->map_bh.b_private);
-	if (dio->lock_type == DIO_LOCKING)
+	if (dio->lock_type != DIO_NO_LOCKING)
 		up_read(&dio->inode->i_alloc_sem);
 }
 
@@ -231,29 +230,17 @@ static void finished_one_bio(struct dio *dio)
 	spin_lock_irqsave(&dio->bio_lock, flags);
 	if (dio->bio_count == 1) {
 		if (dio->is_async) {
-			ssize_t transferred;
-			loff_t offset;
-
 			/*
 			 * Last reference to the dio is going away.
 			 * Drop spinlock and complete the DIO.
 			 */
 			spin_unlock_irqrestore(&dio->bio_lock, flags);
-
-			/* Check for short read case */
-			transferred = dio->result;
-			offset = dio->iocb->ki_pos;
-
-			if ((dio->rw == READ) &&
-			    ((offset + transferred) > dio->i_size))
-				transferred = dio->i_size - offset;
-
-			dio_complete(dio, offset, transferred);
-
+			dio_complete(dio, dio->block_in_file << dio->blkbits,
+					dio->result);
 			/* Complete AIO later if falling back to buffered i/o */
 			if (dio->result == dio->size ||
 				((dio->rw == READ) && dio->result)) {
-				aio_complete(dio->iocb, transferred, 0);
+				aio_complete(dio->iocb, dio->result, 0);
 				kfree(dio);
 				return;
 			} else {
@@ -964,7 +951,6 @@ direct_io_worker(int rw, struct kiocb *iocb, struct inode *inode,
 	dio->page_errors = 0;
 	dio->result = 0;
 	dio->iocb = iocb;
-	dio->i_size = i_size_read(inode);
 
 	/*
 	 * BIO completion state.
@@ -1215,13 +1201,12 @@ __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
 	 *	readers need to grab i_sem and i_alloc_sem
 	 *	writers need to grab i_alloc_sem only (i_sem is already held)
 	 * For regular files using DIO_OWN_LOCKING,
-	 *	neither readers nor writers take any locks here
-	 *	(i_sem is already held and release for writers here)
+	 *	readers need to grab i_alloc_sem only (i_sem is already held)
+	 *	writers need to grab i_alloc_sem only
 	 */
 	dio->lock_type = dio_lock_type;
 	if (dio_lock_type != DIO_NO_LOCKING) {
-		/* watch out for a 0 len io from a tricksy fs */
-		if (rw == READ && end > offset) {
+		if (rw == READ) {
 			struct address_space *mapping;
 
 			mapping = iocb->ki_filp->f_mapping;
@@ -1229,22 +1214,19 @@ __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
 				down(&inode->i_sem);
 				reader_with_isem = 1;
 			}
-
-			retval = filemap_write_and_wait_range(mapping, offset,
-							      end - 1);
+			retval = filemap_write_and_wait(mapping);
 			if (retval) {
 				kfree(dio);
 				goto out;
 			}
-
+			down_read(&inode->i_alloc_sem);
 			if (dio_lock_type == DIO_OWN_LOCKING) {
 				up(&inode->i_sem);
 				reader_with_isem = 0;
 			}
-		}
-
-		if (dio_lock_type == DIO_LOCKING)
+		} else {
 			down_read(&inode->i_alloc_sem);
+		}
 	}
 
 	/*

@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Context Namespace Support
  *
- *  Copyright (C) 2003-2005  Herbert Pötzl
+ *  Copyright (C) 2003-2004  Herbert Pötzl
  *
  *  V0.01  broken out from context.c 0.07
  *  V0.02  added task locking for namespace
@@ -15,7 +15,6 @@
 #include <linux/sched.h>
 #include <linux/vs_context.h>
 #include <linux/vserver/namespace.h>
-#include <linux/vserver/namespace_cmd.h>
 #include <linux/dcache.h>
 #include <linux/mount.h>
 #include <linux/fs.h>
@@ -23,6 +22,123 @@
 #include <asm/errno.h>
 #include <asm/uaccess.h>
 
+
+int vx_check_vfsmount(struct vx_info *vxi, struct vfsmount *mnt)
+{
+	struct vfsmount *root_mnt, *altroot_mnt;
+	struct dentry *root, *altroot, *point;
+	int r1, r2, s1, s2, ret = 0;
+
+	if (!vxi || !mnt)
+		return 1;
+
+	spin_lock(&dcache_lock);
+	altroot_mnt = current->fs->rootmnt;
+	altroot = current->fs->root;
+	point = altroot;
+
+	if (vxi->vx_fs) {
+		root_mnt = vxi->vx_fs->rootmnt;
+		root = vxi->vx_fs->root;
+	} else {
+		root_mnt = altroot_mnt;
+		root = altroot;
+	}
+	/* printk("··· %p:%p/%p:%p ",
+		root_mnt, root, altroot_mnt, altroot);	*/
+
+	while ((mnt != mnt->mnt_parent) &&
+		(mnt != root_mnt) && (mnt != altroot_mnt)) {
+		point = mnt->mnt_mountpoint;
+		mnt = mnt->mnt_parent;
+	}
+
+	r1 = (mnt == root_mnt);
+	s1 = is_subdir(point, root);
+	r2 = (mnt == altroot_mnt);
+	s2 = is_subdir(point, altroot);
+
+	ret = (((mnt == root_mnt) && is_subdir(point, root)) ||
+		((mnt == altroot_mnt) && is_subdir(point, altroot)));
+	/* printk("··· for %p:%p -> %d:%d/%d:%d = %d\n",
+		mnt, point, r1, s1, r2, s2, ret);	*/
+	spin_unlock(&dcache_lock);
+
+	return (r2 && s2);
+}
+
+
+/* virtual host info names */
+
+static char * vx_vhi_name(struct vx_info *vxi, int id)
+{
+	switch (id) {
+		case VHIN_CONTEXT:
+			return vxi->vx_name;
+		case VHIN_SYSNAME:
+			return vxi->cvirt.utsname.sysname;
+		case VHIN_NODENAME:
+			return vxi->cvirt.utsname.nodename;
+		case VHIN_RELEASE:
+			return vxi->cvirt.utsname.release;
+		case VHIN_VERSION:
+			return vxi->cvirt.utsname.version;
+		case VHIN_MACHINE:
+			return vxi->cvirt.utsname.machine;
+		case VHIN_DOMAINNAME:
+			return vxi->cvirt.utsname.domainname;
+		default:
+			return NULL;
+	}
+	return NULL;
+}
+
+int vc_set_vhi_name(uint32_t id, void __user *data)
+{
+	struct vx_info *vxi;
+	struct vcmd_vx_vhi_name_v0 vc_data;
+	char *name;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
+		return -EFAULT;
+
+	vxi = locate_vx_info(id);
+	if (!vxi)
+		return -ESRCH;
+
+	name = vx_vhi_name(vxi, vc_data.field);
+	if (name)
+		memcpy(name, vc_data.name, 65);
+	put_vx_info(vxi);
+	return (name ? 0 : -EFAULT);
+}
+
+int vc_get_vhi_name(uint32_t id, void __user *data)
+{
+	struct vx_info *vxi;
+	struct vcmd_vx_vhi_name_v0 vc_data;
+	char *name;
+
+	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
+		return -EFAULT;
+
+	vxi = locate_vx_info(id);
+	if (!vxi)
+		return -ESRCH;
+
+	name = vx_vhi_name(vxi, vc_data.field);
+	if (!name)
+		goto out_put;
+
+	memcpy(vc_data.name, name, 65);
+	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
+		return -EFAULT;
+out_put:
+	put_vx_info(vxi);
+	return (name ? 0 : -EFAULT);
+}
 
 /* namespace functions */
 

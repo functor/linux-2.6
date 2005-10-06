@@ -1180,9 +1180,9 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 				if (arg) {
 					ulong __user *p = argp;
 					int i;
-					if (!access_ok(VERIFY_WRITE, p,
-							sizeof(ulong) * ISDN_MAX_CHANNELS * 2))
-						return -EFAULT;
+					if ((ret = verify_area(VERIFY_WRITE, p,
+							       sizeof(ulong) * ISDN_MAX_CHANNELS * 2)))
+						return ret;
 					for (i = 0; i < ISDN_MAX_CHANNELS; i++) {
 						put_user(dev->ibytes[i], p++);
 						put_user(dev->obytes[i], p++);
@@ -1420,10 +1420,10 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 					char __user *p = argp;
 					int i;
 
-					if (!access_ok(VERIFY_WRITE, argp,
+					if ((ret = verify_area(VERIFY_WRITE, argp,
 					(ISDN_MODEM_NUMREG + ISDN_MSNLEN + ISDN_LMSNLEN)
-						   * ISDN_MAX_CHANNELS))
-						return -EFAULT;
+						   * ISDN_MAX_CHANNELS)))
+						return ret;
 
 					for (i = 0; i < ISDN_MAX_CHANNELS; i++) {
 						if (copy_to_user(p, dev->mdm.info[i].emu.profile,
@@ -1447,10 +1447,10 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 					char __user *p = argp;
 					int i;
 
-					if (!access_ok(VERIFY_READ, argp,
+					if ((ret = verify_area(VERIFY_READ, argp,
 					(ISDN_MODEM_NUMREG + ISDN_MSNLEN + ISDN_LMSNLEN)
-						   * ISDN_MAX_CHANNELS))
-						return -EFAULT;
+						   * ISDN_MAX_CHANNELS)))
+						return ret;
 
 					for (i = 0; i < ISDN_MAX_CHANNELS; i++) {
 						if (copy_from_user(dev->mdm.info[i].emu.profile, p,
@@ -1496,8 +1496,8 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 							int j = 0;
 
 							while (1) {
-								if (!access_ok(VERIFY_READ, p, 1))
-									return -EFAULT;
+								if ((ret = verify_area(VERIFY_READ, p, 1)))
+									return ret;
 								get_user(bname[j], p++);
 								switch (bname[j]) {
 									case '\0':
@@ -1563,9 +1563,9 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 						drvidx = 0;
 					if (drvidx == -1)
 						return -ENODEV;
-					if (!access_ok(VERIFY_WRITE, argp,
-					     sizeof(isdn_ioctl_struct)))
-						return -EFAULT;
+					if ((ret = verify_area(VERIFY_WRITE, argp,
+					     sizeof(isdn_ioctl_struct))))
+						return ret;
 					c.driver = drvidx;
 					c.command = ISDN_CMD_IOCTL;
 					c.arg = cmd;

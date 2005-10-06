@@ -308,7 +308,7 @@ int isdnhdlc_decode (struct isdnhdlc_vars *hdlc, const unsigned char *src,
 				hdlc->crc = crc_ccitt_byte(hdlc->crc, hdlc->shift_reg);
 
 				// good byte received
-				if (hdlc->dstpos < dsize) {
+				if (dsize--) {
 					dst[hdlc->dstpos++] = hdlc->shift_reg;
 				} else {
 					// frame too long

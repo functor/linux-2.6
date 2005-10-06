@@ -717,7 +717,7 @@ static int translate_table(const char *name,
 	}
 
 	/* And one copy for every other CPU */
-	for (i = 1; i < num_possible_cpus(); i++) {
+	for (i = 1; i < NR_CPUS; i++) {
 		memcpy(newinfo->entries + SMP_ALIGN(newinfo->size)*i,
 		       newinfo->entries,
 		       SMP_ALIGN(newinfo->size));
@@ -768,7 +768,7 @@ static void get_counters(const struct arpt_table_info *t,
 	unsigned int cpu;
 	unsigned int i;
 
-	for (cpu = 0; cpu < num_possible_cpus(); cpu++) {
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
 		i = 0;
 		ARPT_ENTRY_ITERATE(t->entries + TABLE_OFFSET(t, cpu),
 				   t->size,
@@ -886,7 +886,7 @@ static int do_replace(void __user *user, unsigned int len)
 		return -ENOMEM;
 
 	newinfo = vmalloc(sizeof(struct arpt_table_info)
-			  + SMP_ALIGN(tmp.size) * num_possible_cpus());
+			  + SMP_ALIGN(tmp.size) * NR_CPUS);
 	if (!newinfo)
 		return -ENOMEM;
 
@@ -948,12 +948,12 @@ static int do_replace(void __user *user, unsigned int len)
 	/* Decrease module usage counts and free resource */
 	ARPT_ENTRY_ITERATE(oldinfo->entries, oldinfo->size, cleanup_entry,NULL);
 	vfree(oldinfo);
-	if (copy_to_user(tmp.counters, counters,
-			 sizeof(struct arpt_counters) * tmp.num_counters) != 0)
-		ret = -EFAULT;
+	/* Silent error: too late now. */
+	copy_to_user(tmp.counters, counters,
+		     sizeof(struct arpt_counters) * tmp.num_counters);
 	vfree(counters);
 	up(&arpt_mutex);
-	return ret;
+	return 0;
 
  put_module:
 	module_put(t->me);
@@ -1150,8 +1150,7 @@ void arpt_unregister_target(struct arpt_target *target)
 	up(&arpt_mutex);
 }
 
-int arpt_register_table(struct arpt_table *table,
-			const struct arpt_replace *repl)
+int arpt_register_table(struct arpt_table *table)
 {
 	int ret;
 	struct arpt_table_info *newinfo;
@@ -1159,18 +1158,18 @@ int arpt_register_table(struct arpt_table *table,
 		= { 0, 0, 0, { 0 }, { 0 }, { } };
 
 	newinfo = vmalloc(sizeof(struct arpt_table_info)
-			  + SMP_ALIGN(repl->size) * num_possible_cpus());
+			  + SMP_ALIGN(table->table->size) * NR_CPUS);
 	if (!newinfo) {
 		ret = -ENOMEM;
 		return ret;
 	}
-	memcpy(newinfo->entries, repl->entries, repl->size);
+	memcpy(newinfo->entries, table->table->entries, table->table->size);
 
 	ret = translate_table(table->name, table->valid_hooks,
-			      newinfo, repl->size,
-			      repl->num_entries,
-			      repl->hook_entry,
-			      repl->underflow);
+			      newinfo, table->table->size,
+			      table->table->num_entries,
+			      table->table->hook_entry,
+			      table->table->underflow);
 	duprintf("arpt_register_table: translate table gives %d\n", ret);
 	if (ret != 0) {
 		vfree(newinfo);

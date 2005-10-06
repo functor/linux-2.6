@@ -1,5 +1,5 @@
 /*
- *  linux/arch/arm26/mm/init.c
+ *  linux/arch/arm/mm/init.c
  *
  *  Copyright (C) 1995-2002 Russell King
  *
@@ -26,6 +26,7 @@
 
 #include <asm/segment.h>
 #include <asm/mach-types.h>
+#include <asm/pgalloc.h>
 #include <asm/dma.h>
 #include <asm/hardware.h>
 #include <asm/setup.h>
@@ -83,7 +84,7 @@ void show_mem(void)
 		else if (!page_count(page))
 			free++;
 		else
-			shared += page_count(page) - 1;
+			shared += atomic_read(&page->count) - 1;
 		page++;
 	} while (page < end);
 
@@ -155,8 +156,7 @@ find_memend_and_nodes(struct meminfo *mi, struct node_info *np)
 {
 	unsigned int memend_pfn = 0;
 
-	nodes_clear(node_online_map);
-	node_set_online(0);
+	numnodes = 1;
 
 	np->bootmap_pages = 0;
 
@@ -308,6 +308,8 @@ void __init paging_init(struct meminfo *mi)
 	pgdat->node_mem_map = NULL;
 	free_area_init_node(0, pgdat, zone_size,
 			bdata->node_boot_start >> PAGE_SHIFT, zhole_size);
+
+	mem_map = NODE_DATA(0)->node_mem_map;
 
 	/*
 	 * finish off the bad pages once

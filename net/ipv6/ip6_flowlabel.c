@@ -54,11 +54,11 @@ static struct timer_list ip6_fl_gc_timer = TIMER_INITIALIZER(ip6_fl_gc, 0, 0);
 
 /* FL hash table lock: it protects only of GC */
 
-static DEFINE_RWLOCK(ip6_fl_lock);
+static rwlock_t ip6_fl_lock = RW_LOCK_UNLOCKED;
 
 /* Big socket sock */
 
-static DEFINE_RWLOCK(ip6_sk_fl_lock);
+static rwlock_t ip6_sk_fl_lock = RW_LOCK_UNLOCKED;
 
 
 static __inline__ struct ip6_flowlabel * __fl_lookup(u32 label)
@@ -87,7 +87,7 @@ static struct ip6_flowlabel * fl_lookup(u32 label)
 
 static void fl_free(struct ip6_flowlabel *fl)
 {
-	if (fl)
+	if (fl->opt)
 		kfree(fl->opt);
 	kfree(fl);
 }
@@ -351,7 +351,8 @@ fl_create(struct in6_flowlabel_req *freq, char __user *optval, int optlen, int *
 	return fl;
 
 done:
-	fl_free(fl);
+	if (fl)
+		fl_free(fl);
 	*err_p = err;
 	return NULL;
 }
@@ -535,12 +536,10 @@ release:
 		if (err)
 			goto done;
 
-		if (!freq.flr_label) {
-			if (copy_to_user(&((struct in6_flowlabel_req __user *) optval)->flr_label,
-					 &fl->label, sizeof(fl->label))) {
-				/* Intentionally ignore fault. */
-			}
-		}
+		/* Do not check for fault */
+		if (!freq.flr_label)
+			copy_to_user(&((struct in6_flowlabel_req __user *) optval)->flr_label,
+				     &fl->label, sizeof(fl->label));
 
 		sfl1->fl = fl;
 		sfl1->next = np->ipv6_fl_list;
@@ -552,8 +551,10 @@ release:
 	}
 
 done:
-	fl_free(fl);
-	kfree(sfl1);
+	if (fl)
+		fl_free(fl);
+	if (sfl1)
+		kfree(sfl1);
 	return err;
 }
 

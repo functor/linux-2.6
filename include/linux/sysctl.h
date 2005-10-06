@@ -84,9 +84,6 @@ enum
 
 	KERN_CAP_BSET=14,	/* int: capability bounding set */
 	KERN_PANIC=15,		/* int: panic timeout */
-	KERN_EXEC_SHIELD=1000,	/* int: exec-shield enabled (0/1/2) */
-	KERN_PRINT_FATAL=1001,	/* int: print fatal signals (0/1/2) */
-	KERN_VDSO=1002,		/* int: VDSO enabled (0/1) */
 	KERN_REALROOTDEV=16,	/* real root device to mount after initrd */
 
 	KERN_SPARC_REBOOT=21,	/* reboot command on Sparc */
@@ -137,9 +134,9 @@ enum
 	KERN_SPARC_SCONS_PWROFF=64, /* int: serial console power-off halt */
 	KERN_HZ_TIMER=65,	/* int: hz timer on or off */
 	KERN_UNKNOWN_NMI_PANIC=66, /* int: unknown nmi panic flag */
-	KERN_BOOTLOADER_TYPE=67, /* int: boot loader type */
-	KERN_RANDOMIZE=68, /* int: randomize virtual address space */
-	KERN_VSHELPER=69,	/* string: path to vshelper policy agent */
+	KERN_VSHELPER=67,	/* string: path to vshelper policy agent */
+	KERN_SETUID_DUMPABLE=68, /* int: behaviour of dumps for setuid core */
+	KERN_DUMP=69,		/* dir: dump parameters */
 };
 
 
@@ -165,7 +162,7 @@ enum
 	VM_PAGEBUF=17,		/* struct: Control pagebuf parameters */
 	VM_HUGETLB_PAGES=18,	/* int: Number of available Huge Pages */
 	VM_SWAPPINESS=19,	/* Tendency to steal mapped memory */
-	VM_LOWMEM_RESERVE_RATIO=20,/* reservation ratio for lower memory zones */
+	VM_LOWER_ZONE_PROTECTION=20,/* Amount of protection of lower zones */
 	VM_MIN_FREE_KBYTES=21,	/* Minimum free kilobytes to maintain */
 	VM_MAX_MAP_COUNT=22,	/* int: Maximum number of mmaps/address-space */
 	VM_LAPTOP_MODE=23,	/* vm laptop mode */
@@ -350,14 +347,12 @@ enum
 	NET_TCP_DEFAULT_WIN_SCALE=105,
 	NET_TCP_MODERATE_RCVBUF=106,
 	NET_TCP_TSO_WIN_DIVISOR=107,
-	NET_TCP_BIC_BETA=108,
-	NET_IPV4_ICMP_ERRORS_USE_INBOUND_IFADDR=109,
 #ifdef CONFIG_ICMP_IPOD
 	NET_IPV4_ICMP_IPOD_VERSION,
 	NET_IPV4_ICMP_IPOD_ENABLED,
 	NET_IPV4_ICMP_IPOD_HOST,
 	NET_IPV4_ICMP_IPOD_MASK,
-	NET_IPV4_ICMP_IPOD_KEY
+	NET_IPV4_ICMP_IPOD_KEY,
 #endif
 };
 
@@ -380,7 +375,6 @@ enum {
 	NET_IPV4_ROUTE_MIN_PMTU=16,
 	NET_IPV4_ROUTE_MIN_ADVMSS=17,
 	NET_IPV4_ROUTE_SECRET_INTERVAL=18,
-	NET_IPV4_ROUTE_GC_MIN_INTERVAL_MS=19,
 };
 
 enum
@@ -412,8 +406,6 @@ enum
 	NET_IPV4_CONF_FORCE_IGMP_VERSION=17,
 	NET_IPV4_CONF_ARP_ANNOUNCE=18,
 	NET_IPV4_CONF_ARP_IGNORE=19,
-	NET_IPV4_CONF_PROMOTE_SECONDARIES=20,
-	__NET_IPV4_CONF_MAX
 };
 
 /* /proc/sys/net/ipv4/netfilter */
@@ -471,8 +463,7 @@ enum {
 	NET_IPV6_ROUTE_GC_INTERVAL=6,
 	NET_IPV6_ROUTE_GC_ELASTICITY=7,
 	NET_IPV6_ROUTE_MTU_EXPIRES=8,
-	NET_IPV6_ROUTE_MIN_ADVMSS=9,
-	NET_IPV6_ROUTE_GC_MIN_INTERVAL_MS=10
+	NET_IPV6_ROUTE_MIN_ADVMSS=9
 };
 
 enum {
@@ -492,8 +483,7 @@ enum {
 	NET_IPV6_REGEN_MAX_RETRY=14,
 	NET_IPV6_MAX_DESYNC_FACTOR=15,
 	NET_IPV6_MAX_ADDRESSES=16,
-	NET_IPV6_FORCE_MLD_VERSION=17,
-	__NET_IPV6_MAX
+	NET_IPV6_FORCE_MLD_VERSION=17
 };
 
 /* /proc/sys/net/ipv6/icmp */
@@ -518,10 +508,7 @@ enum {
 	NET_NEIGH_GC_INTERVAL=13,
 	NET_NEIGH_GC_THRESH1=14,
 	NET_NEIGH_GC_THRESH2=15,
-	NET_NEIGH_GC_THRESH3=16,
-	NET_NEIGH_RETRANS_TIME_MS=17,
-	NET_NEIGH_REACHABLE_TIME_MS=18,
-	__NET_NEIGH_MAX
+	NET_NEIGH_GC_THRESH3=16
 };
 
 /* /proc/sys/net/ipx */
@@ -657,7 +644,6 @@ enum {
 	NET_SCTP_MAX_BURST               = 12,
 	NET_SCTP_ADDIP_ENABLE		 = 13,
 	NET_SCTP_PRSCTP_ENABLE		 = 14,
-	NET_SCTP_SNDBUF_POLICY		 = 15,
 };
 
 /* /proc/sys/net/bridge */
@@ -737,7 +723,7 @@ enum
 	FS_LEASES=13,	/* int: leases enabled */
 	FS_DIR_NOTIFY=14,	/* int: directory notification enabled */
 	FS_LEASE_TIME=15,	/* int: maximum time to wait for a lease break */
-	FS_DQSTATS=16,	/* disc quota usage statistics and control */
+	FS_DQSTATS=16,	/* disc quota usage statistics */
 	FS_XFS=17,	/* struct: control xfs parameters */
 	FS_AIO_NR=18,	/* current system-wide number of aio requests */
 	FS_AIO_MAX_NR=19,	/* system-wide maximum number of aio requests */
@@ -753,7 +739,6 @@ enum {
 	FS_DQ_ALLOCATED = 6,
 	FS_DQ_FREE = 7,
 	FS_DQ_SYNCS = 8,
-	FS_DQ_WARNINGS = 9,
 };
 
 /* CTL_DEBUG names: */
@@ -856,9 +841,6 @@ typedef int ctl_handler (ctl_table *table, int __user *name, int nlen,
 typedef int proc_handler (ctl_table *ctl, int write, struct file * filp,
 			  void __user *buffer, size_t *lenp, loff_t *ppos);
 
-typedef int virt_handler (struct ctl_table *ctl, int write, xid_t xid,
-			  void **datap, size_t *lenp);
-
 extern int proc_dostring(ctl_table *, int, struct file *,
 			 void __user *, size_t *, loff_t *);
 extern int proc_dointvec(ctl_table *, int, struct file *,
@@ -871,8 +853,6 @@ extern int proc_dointvec_jiffies(ctl_table *, int, struct file *,
 				 void __user *, size_t *, loff_t *);
 extern int proc_dointvec_userhz_jiffies(ctl_table *, int, struct file *,
 					void __user *, size_t *, loff_t *);
-extern int proc_dointvec_ms_jiffies(ctl_table *, int, struct file *,
-				    void __user *, size_t *, loff_t *);
 extern int proc_doulongvec_minmax(ctl_table *, int, struct file *,
 				  void __user *, size_t *, loff_t *);
 extern int proc_doulongvec_ms_jiffies_minmax(ctl_table *table, int,
@@ -890,7 +870,6 @@ extern int do_sysctl_strategy (ctl_table *table,
 extern ctl_handler sysctl_string;
 extern ctl_handler sysctl_intvec;
 extern ctl_handler sysctl_jiffies;
-extern ctl_handler sysctl_ms_jiffies;
 
 
 /*
@@ -940,7 +919,6 @@ struct ctl_table
 	mode_t mode;
 	ctl_table *child;
 	proc_handler *proc_handler;	/* Callback for text formatting */
-	virt_handler *virt_handler;	/* Context virtualization */
 	ctl_handler *strategy;		/* Callback function for all r/w */
 	struct proc_dir_entry *de;	/* /proc control block */
 	void *extra1;

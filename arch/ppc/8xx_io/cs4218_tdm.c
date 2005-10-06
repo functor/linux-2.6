@@ -55,8 +55,6 @@ static int irq_installed = 0;
 static char **sound_buffers = NULL;
 static char **sound_read_buffers = NULL;
 
-static DEFINE_SPINLOCK(cs4218_lock);
-
 /* Local copies of things we put in the control register.  Output
  * volume, like most codecs is really attenuation.
  */
@@ -1208,8 +1206,7 @@ static void CS_Play(void)
 	volatile cbd_t	*bdp;
 	volatile cpm8xx_t *cp;
 
-	/* Protect buffer */
-	spin_lock_irqsave(&cs4218_lock, flags);
+	save_flags(flags); cli();
 #if 0
 	if (awacs_beep_state) {
 		/* sound takes precedence over beeps */
@@ -1266,7 +1263,7 @@ static void CS_Play(void)
 
 		++sq.active;
 	}
-	spin_unlock_irqrestore(&cs4218_lock, flags);
+	restore_flags(flags);
 }
 
 
@@ -1278,8 +1275,7 @@ static void CS_Record(void)
 	if (read_sq.active)
 		return;
 
-	/* Protect buffer */
-	spin_lock_irqsave(&cs4218_lock, flags);
+	save_flags(flags); cli();
 
 	/* This is all we have to do......Just start it up.
 	*/
@@ -1288,7 +1284,7 @@ static void CS_Record(void)
 
 	read_sq.active = 1;
 
-        spin_unlock_irqrestore(&cs4218_lock, flags);
+        restore_flags(flags);
 }
 
 
@@ -1369,15 +1365,14 @@ static void cs_nosound(unsigned long xx)
 {
 	unsigned long flags;
 
-	/* not sure if this is needed, since hardware command is #if 0'd */
-	spin_lock_irqsave(&cs4218_lock, flags);
+	save_flags(flags); cli();
 	if (beep_playing) {
 #if 0
 		st_le16(&beep_dbdma_cmd->command, DBDMA_STOP);
 #endif
 		beep_playing = 0;
 	}
-	spin_unlock_irqrestore(&cs4218_lock, flags);
+	restore_flags(flags);
 }
 
 static struct timer_list beep_timer = TIMER_INITIALIZER(cs_nosound, 0, 0);
@@ -1406,22 +1401,21 @@ static void cs_mksound(unsigned int hz, unsigned int ticks)
 		return;
 #endif
 	}
-	/* lock while modifying beep_timer */
-	spin_lock_irqsave(&cs4218_lock, flags);
+	save_flags(flags); cli();
 	del_timer(&beep_timer);
 	if (ticks) {
 		beep_timer.expires = jiffies + ticks;
 		add_timer(&beep_timer);
 	}
 	if (beep_playing || sq.active || beep_buf == NULL) {
-		spin_unlock_irqrestore(&cs4218_lock, flags);
+		restore_flags(flags);
 		return;		/* too hard, sorry :-( */
 	}
 	beep_playing = 1;
 #if 0
 	st_le16(&beep_dbdma_cmd->command, OUTPUT_MORE + BR_ALWAYS);
 #endif
-	spin_unlock_irqrestore(&cs4218_lock, flags);
+	restore_flags(flags);
 
 	if (hz == beep_hz_cache && beep_volume == beep_volume_cache) {
 		nsamples = beep_nsamples_cache;
@@ -1448,7 +1442,7 @@ static void cs_mksound(unsigned int hz, unsigned int ticks)
 	st_le32(&beep_dbdma_cmd->phy_addr, virt_to_bus(beep_buf));
 	awacs_beep_state = 1;
 
-	spin_lock_irqsave(&cs4218_lock, flags);
+	save_flags(flags); cli();
 	if (beep_playing) {	/* i.e. haven't been terminated already */
 		out_le32(&awacs_txdma->control, (RUN|WAKE|FLUSH|PAUSE) << 16);
 		out_le32(&awacs->control,
@@ -1458,8 +1452,8 @@ static void cs_mksound(unsigned int hz, unsigned int ticks)
 		out_le32(&awacs_txdma->cmdptr, virt_to_bus(beep_dbdma_cmd));
 		out_le32(&awacs_txdma->control, RUN | (RUN << 16));
 	}
-	spin_unlock_irqrestore(&cs4218_lock, flags);
 #endif
+	restore_flags(flags);
 }
 
 static MACHINE mach_cs4218 = {

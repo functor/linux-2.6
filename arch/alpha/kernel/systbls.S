@@ -227,7 +227,7 @@ sys_call_table:
 	.quad sys_semop
 	.quad osf_utsname
 	.quad sys_lchown
-	.quad sys_shmat
+	.quad osf_shmat
 	.quad sys_shmctl			/* 210 */
 	.quad sys_shmdt
 	.quad sys_shmget
@@ -299,7 +299,7 @@ sys_call_table:
 	.quad alpha_ni_syscall			/* 270 */
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
-	.quad alpha_ni_syscall
+	.quad sys_vserver			/* 273 sys_vserver */
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 275 */
 	.quad alpha_ni_syscall
@@ -455,7 +455,7 @@ sys_call_table:
 	.quad sys_stat64			/* 425 */
 	.quad sys_lstat64
 	.quad sys_fstat64
-	.quad sys_vserver			/* sys_vserver */
+	.quad sys_ni_syscall			/* sys_vserver */
 	.quad sys_ni_syscall			/* sys_mbind */
 	.quad sys_ni_syscall			/* sys_get_mempolicy */
 	.quad sys_ni_syscall			/* sys_set_mempolicy */
@@ -466,9 +466,6 @@ sys_call_table:
 	.quad sys_mq_notify
 	.quad sys_mq_getsetattr
 	.quad sys_waitid
-	.quad sys_add_key
-	.quad sys_request_key			/* 440 */
-	.quad sys_keyctl
 
 	.size sys_call_table, . - sys_call_table
 	.type sys_call_table, @object

@@ -24,7 +24,7 @@
  *
  *   +------------------+
  *   | header           |
- *   | entry 1          | |
+ *   ¦ entry 1          | |
  *   | entry 2          | | growing downwards
  *   | entry 3          | v
  *   | four null bytes  |
@@ -101,7 +101,7 @@ static void ext2_xattr_rehash(struct ext2_xattr_header *,
 
 static struct mb_cache *ext2_xattr_cache;
 
-static struct xattr_handler *ext2_xattr_handler_map[] = {
+static struct xattr_handler *ext2_xattr_handler_map[EXT2_XATTR_INDEX_MAX] = {
 	[EXT2_XATTR_INDEX_USER]		     = &ext2_xattr_user_handler,
 #ifdef CONFIG_EXT2_FS_POSIX_ACL
 	[EXT2_XATTR_INDEX_POSIX_ACL_ACCESS]  = &ext2_xattr_acl_access_handler,
@@ -131,9 +131,20 @@ ext2_xattr_handler(int name_index)
 {
 	struct xattr_handler *handler = NULL;
 
-	if (name_index > 0 && name_index < ARRAY_SIZE(ext2_xattr_handler_map))
+	if (name_index > 0 && name_index <= EXT2_XATTR_INDEX_MAX)
 		handler = ext2_xattr_handler_map[name_index];
 	return handler;
+}
+
+/*
+ * Inode operation listxattr()
+ *
+ * dentry->d_inode->i_sem: don't care
+ */
+ssize_t
+ext2_listxattr(struct dentry *dentry, char *buffer, size_t size)
+{
+	return ext2_xattr_list(dentry->d_inode, buffer, size);
 }
 
 /*
@@ -249,7 +260,7 @@ cleanup:
  * Returns a negative error number on failure, or the number of bytes
  * used / required on success.
  */
-static int
+int
 ext2_xattr_list(struct inode *inode, char *buffer, size_t buffer_size)
 {
 	struct buffer_head *bh = NULL;
@@ -321,17 +332,6 @@ cleanup:
 	up_read(&EXT2_I(inode)->xattr_sem);
 
 	return error;
-}
-
-/*
- * Inode operation listxattr()
- *
- * dentry->d_inode->i_sem: don't care
- */
-ssize_t
-ext2_listxattr(struct dentry *dentry, char *buffer, size_t size)
-{
-	return ext2_xattr_list(dentry->d_inode, buffer, size);
 }
 
 /*
@@ -495,7 +495,6 @@ bad_block:		ext2_error(sb, "ext2_xattr_set",
 
 	if (header) {
 		struct mb_cache_entry *ce;
-
 		/* assert(header == HDR(bh)); */
 		ce = mb_cache_entry_get(ext2_xattr_cache, bh->b_bdev,
 					bh->b_blocknr);
@@ -708,24 +707,17 @@ ext2_xattr_set2(struct inode *inode, struct buffer_head *old_bh,
 
 	/* Update the inode. */
 	EXT2_I(inode)->i_file_acl = new_bh ? new_bh->b_blocknr : 0;
-	inode->i_ctime = CURRENT_TIME_SEC;
+	inode->i_ctime = CURRENT_TIME;
 	if (IS_SYNC(inode)) {
 		error = ext2_sync_inode (inode);
-		/* In case sync failed due to ENOSPC the inode was actually
-		 * written (only some dirty data were not) so we just proceed
-		 * as if nothing happened and cleanup the unused block */
-		if (error && error != -ENOSPC) {
-			if (new_bh && new_bh != old_bh)
-				DQUOT_FREE_BLOCK(inode, 1);
+		if (error)
 			goto cleanup;
-		}
 	} else
 		mark_inode_dirty(inode);
 
 	error = 0;
 	if (old_bh && old_bh != new_bh) {
 		struct mb_cache_entry *ce;
-
 		/*
 		 * If there was an old block and we are no longer using it,
 		 * release the old block.
@@ -745,10 +737,10 @@ ext2_xattr_set2(struct inode *inode, struct buffer_head *old_bh,
 			bforget(old_bh);
 		} else {
 			/* Decrement the refcount only. */
-			HDR(old_bh)->h_refcount = cpu_to_le32(
-				le32_to_cpu(HDR(old_bh)->h_refcount) - 1);
 			if (ce)
 				mb_cache_entry_release(ce);
+			HDR(old_bh)->h_refcount = cpu_to_le32(
+				le32_to_cpu(HDR(old_bh)->h_refcount) - 1);
 			DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
 			DQUOT_FREE_BLOCK(inode, 1);
 			mark_buffer_dirty(old_bh);
@@ -794,7 +786,8 @@ ext2_xattr_delete_inode(struct inode *inode)
 			EXT2_I(inode)->i_file_acl);
 		goto cleanup;
 	}
-	ce = mb_cache_entry_get(ext2_xattr_cache, bh->b_bdev, bh->b_blocknr);
+	ce = mb_cache_entry_get(ext2_xattr_cache, bh->b_bdev,
+				bh->b_blocknr);
 	lock_buffer(bh);
 	if (HDR(bh)->h_refcount == cpu_to_le32(1)) {
 		if (ce)
@@ -803,10 +796,10 @@ ext2_xattr_delete_inode(struct inode *inode)
 		get_bh(bh);
 		bforget(bh);
 	} else {
-		HDR(bh)->h_refcount = cpu_to_le32(
-			le32_to_cpu(HDR(bh)->h_refcount) - 1);
 		if (ce)
 			mb_cache_entry_release(ce);
+		HDR(bh)->h_refcount = cpu_to_le32(
+			le32_to_cpu(HDR(bh)->h_refcount) - 1);
 		mark_buffer_dirty(bh);
 		if (IS_SYNC(inode))
 			sync_dirty_buffer(bh);
@@ -888,7 +881,6 @@ ext2_xattr_cmp(struct ext2_xattr_header *header1,
 		if (IS_LAST_ENTRY(entry2))
 			return 1;
 		if (entry1->e_hash != entry2->e_hash ||
-		    entry1->e_name_index != entry2->e_name_index ||
 		    entry1->e_name_len != entry2->e_name_len ||
 		    entry1->e_value_size != entry2->e_value_size ||
 		    memcmp(entry1->e_name, entry2->e_name, entry1->e_name_len))
@@ -938,6 +930,7 @@ again:
 		}
 
 		bh = sb_bread(inode->i_sb, ce->e_block);
+
 		if (!bh) {
 			ext2_error(inode->i_sb, "ext2_xattr_cache_find",
 				"inode %ld: block %ld read error",
@@ -1037,7 +1030,7 @@ init_ext2_xattr(void)
 {
 	ext2_xattr_cache = mb_cache_create("ext2_xattr", NULL,
 		sizeof(struct mb_cache_entry) +
-		sizeof(((struct mb_cache_entry *) 0)->e_indexes[0]), 1, 6);
+		sizeof(struct mb_cache_entry_index), 1, 6);
 	if (!ext2_xattr_cache)
 		return -ENOMEM;
 	return 0;

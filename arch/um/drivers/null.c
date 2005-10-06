@@ -10,24 +10,23 @@
 
 static int null_chan;
 
-static void *null_init(char *str, int device, struct chan_opts *opts)
+void *null_init(char *str, int device, struct chan_opts *opts)
 {
 	return(&null_chan);
 }
 
-static int null_open(int input, int output, int primary, void *d,
-		     char **dev_out)
+int null_open(int input, int output, int primary, void *d, char **dev_out)
 {
 	*dev_out = NULL;
 	return(os_open_file(DEV_NULL, of_rdwr(OPENFLAGS()), 0));
 }
 
-static int null_read(int fd, char *c_out, void *unused)
+int null_read(int fd, char *c_out, void *unused)
 {
 	return(-ENODEV);
 }
 
-static void null_free(void *data)
+void null_free(void *data)
 {
 }
 

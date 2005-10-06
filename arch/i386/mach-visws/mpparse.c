@@ -36,7 +36,7 @@ unsigned int __initdata maxcpus = NR_CPUS;
  * No problem for Linux.
  */
 
-static void __init MP_processor_info (struct mpc_config_processor *m)
+void __init MP_processor_info (struct mpc_config_processor *m)
 {
  	int ver, logical_apicid;
 	physid_mask_t apic_cpus;

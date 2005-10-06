@@ -14,8 +14,8 @@
  * uncached physical addresses.
  * 	pio_phys_read_mmr  - read an MMR
  * 	pio_phys_write_mmr - write an MMR
- * 	pio_atomic_phys_write_mmrs - atomically write 1 or 2 MMRs with psr.ic=0
- *		Second MMR will be skipped if address is NULL
+ * 	pio_atomic_phys_write_mmrs - atomically write 2 MMRs with psr.ic=0
+ * 		(interrupt collection)
  *
  * Addresses passed to these routines should be uncached physical addresses
  * ie., 0x80000....
@@ -61,14 +61,13 @@ pio_atomic_phys_write_mmrs(volatile long *mmr1, long val1, volatile long *mmr2, 
         asm volatile
             ("mov r2=psr;;"
              "rsm psr.i | psr.dt | psr.ic;;"
-	     "cmp.ne p9,p0=%2,r0;"
              "srlz.i;;"
              "st8.rel [%0]=%1;"
-             "(p9) st8.rel [%2]=%3;;"
+             "st8.rel [%2]=%3;;"
              "mov psr.l=r2;;"
              "srlz.i;;"
 	     :: "r"(mmr1), "r"(val1), "r"(mmr2), "r"(val2)
-             : "p9", "r2", "memory");
+             : "r2", "memory");
 }            
 
 #endif /* _ASM_IA64_SN_RW_MMR_H */

@@ -1202,7 +1202,7 @@ static int me;
 
 static int io = -1;
 
-module_param(io, int, 0);
+MODULE_PARM(io, "i");
 
 static int __init init_opl3 (void)
 {

@@ -48,17 +48,17 @@ typedef struct
 {
 	__u8 callee_used_stack[__SIGNAL_FRAMESIZE32];
 	__u8 retcode[S390_SYSCALL_SIZE];
-	compat_siginfo_t info;
+	struct siginfo32 info;
 	struct ucontext32 uc;
 } rt_sigframe32;
 
 asmlinkage int FASTCALL(do_signal(struct pt_regs *regs, sigset_t *oldset));
 
-int copy_siginfo_to_user32(compat_siginfo_t __user *to, siginfo_t *from)
+int copy_siginfo_to_user32(siginfo_t32 __user *to, siginfo_t *from)
 {
 	int err;
 
-	if (!access_ok (VERIFY_WRITE, to, sizeof(compat_siginfo_t)))
+	if (!access_ok (VERIFY_WRITE, to, sizeof(siginfo_t32)))
 		return -EFAULT;
 
 	/* If you change siginfo_t structure, please be sure
@@ -95,13 +95,9 @@ int copy_siginfo_to_user32(compat_siginfo_t __user *to, siginfo_t *from)
 					  &to->si_addr);
 			break;
 		case __SI_POLL >> 16:
+		case __SI_TIMER >> 16:
 			err |= __put_user(from->si_band, &to->si_band);
 			err |= __put_user(from->si_fd, &to->si_fd);
-			break;
-		case __SI_TIMER >> 16:
-			err |= __put_user(from->si_tid, &to->si_tid);
-			err |= __put_user(from->si_overrun, &to->si_overrun);
-			err |= __put_user(from->si_int, &to->si_int);
 			break;
 		default:
 			break;
@@ -110,12 +106,12 @@ int copy_siginfo_to_user32(compat_siginfo_t __user *to, siginfo_t *from)
 	return err;
 }
 
-int copy_siginfo_from_user32(siginfo_t *to, compat_siginfo_t __user *from)
+int copy_siginfo_from_user32(siginfo_t *to, siginfo_t32 __user *from)
 {
 	int err;
 	u32 tmp;
 
-	if (!access_ok (VERIFY_READ, from, sizeof(compat_siginfo_t)))
+	if (!access_ok (VERIFY_READ, from, sizeof(siginfo_t32)))
 		return -EFAULT;
 
 	err = __get_user(to->si_signo, &from->si_signo);
@@ -146,13 +142,9 @@ int copy_siginfo_from_user32(siginfo_t *to, compat_siginfo_t __user *from)
 			to->si_addr = (void *)(u64) (tmp & PSW32_ADDR_INSN);
 			break;
 		case __SI_POLL >> 16:
+		case __SI_TIMER >> 16:
 			err |= __get_user(to->si_band, &from->si_band);
 			err |= __get_user(to->si_fd, &from->si_fd);
-			break;
-		case __SI_TIMER >> 16:
-			err |= __get_user(to->si_tid, &from->si_tid);
-			err |= __get_user(to->si_overrun, &from->si_overrun);
-			err |= __get_user(to->si_int, &from->si_int);
 			break;
 		default:
 			break;
@@ -231,7 +223,7 @@ sys32_sigaction(int sig, const struct old_sigaction32 __user *act,
 
         if (act) {
 		compat_old_sigset_t mask;
-		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
+		if (verify_area(VERIFY_READ, act, sizeof(*act)) ||
 		    __get_user(sa_handler, &act->sa_handler) ||
 		    __get_user(sa_restorer, &act->sa_restorer))
 			return -EFAULT;
@@ -247,7 +239,7 @@ sys32_sigaction(int sig, const struct old_sigaction32 __user *act,
 	if (!ret && oact) {
 		sa_handler = (unsigned long) old_ka.sa.sa_handler;
 		sa_restorer = (unsigned long) old_ka.sa.sa_restorer;
-		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		if (verify_area(VERIFY_WRITE, oact, sizeof(*oact)) ||
 		    __put_user(sa_handler, &oact->sa_handler) ||
 		    __put_user(sa_restorer, &oact->sa_restorer))
 			return -EFAULT;
@@ -416,7 +408,7 @@ asmlinkage long sys32_sigreturn(struct pt_regs *regs)
 	sigframe32 __user *frame = (sigframe32 __user *)regs->gprs[15];
 	sigset_t set;
 
-	if (!access_ok(VERIFY_READ, frame, sizeof(*frame)))
+	if (verify_area(VERIFY_READ, frame, sizeof(*frame)))
 		goto badframe;
 	if (__copy_from_user(&set.sig, &frame->sc.oldmask, _SIGMASK_COPY_SIZE32))
 		goto badframe;
@@ -446,7 +438,7 @@ asmlinkage long sys32_rt_sigreturn(struct pt_regs *regs)
 	int err;
 	mm_segment_t old_fs = get_fs();
 
-	if (!access_ok(VERIFY_READ, frame, sizeof(*frame)))
+	if (verify_area(VERIFY_READ, frame, sizeof(*frame)))
 		goto badframe;
 	if (__copy_from_user(&set, &frame->uc.uc_sigmask, sizeof(set)))
 		goto badframe;

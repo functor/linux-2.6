@@ -96,7 +96,7 @@ static int load_script(struct linux_binprm *bprm,struct pt_regs *regs)
 	return search_binary_handler(bprm,regs);
 }
 
-static struct linux_binfmt script_format = {
+struct linux_binfmt script_format = {
 	.module		= THIS_MODULE,
 	.load_binary	= load_script,
 };

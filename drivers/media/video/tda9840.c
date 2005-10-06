@@ -51,6 +51,9 @@ I2C_CLIENT_INSMOD;
 static struct i2c_driver driver;
 static struct i2c_client client_template;
 
+/* unique ID allocation */
+static int tda9840_id = 0;
+
 static int command(struct i2c_client *client, unsigned int cmd, void *arg)
 {
 	int result;
@@ -117,8 +120,7 @@ static int command(struct i2c_client *client, unsigned int cmd, void *arg)
 			dprintk("i2c_smbus_write_byte() failed, ret:%d\n", result);
 		break;
 
-	case TDA9840_DETECT: {
-		int *ret = (int *)arg;
+	case TDA9840_DETECT:
 
 		byte = i2c_smbus_read_byte_data(client, STEREO_ADJUST);
 		if (byte == -1) {
@@ -132,10 +134,8 @@ static int command(struct i2c_client *client, unsigned int cmd, void *arg)
 		}
 
 		dprintk("TDA9840_DETECT: byte: 0x%02x\n", byte);
-		*ret = ((byte & 0x60) >> 5);
-		result = 0;
-		break;
-	}
+		return ((byte & 0x60) >> 5);
+
 	case TDA9840_TEST:
 		dprintk("TDA9840_TEST: 0x%02x\n", byte);
 
@@ -179,6 +179,7 @@ static int detect(struct i2c_adapter *adapter, int address, int kind)
 
 	/* fill client structure */
 	memcpy(client, &client_template, sizeof(struct i2c_client));
+	client->id = tda9840_id++;
 	client->addr = address;
 	client->adapter = adapter;
 

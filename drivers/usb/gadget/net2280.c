@@ -1,9 +1,8 @@
 /*
- * Driver for the PLX NET2280 USB device controller.
- * Specs and errata are available from <http://www.plxtech.com>.
+ * Driver for the NetChip 2280 USB device controller.
+ * Specs and errata are available from <http://www.netchip.com>.
  *
- * PLX Technology Inc. (formerly NetChip Technology) supported the 
- * development of this driver.
+ * NetChip Technology Inc. supported the development of this driver.
  *
  *
  * CODE STATUS HIGHLIGHTS
@@ -24,7 +23,7 @@
 
 /*
  * Copyright (C) 2003 David Brownell
- * Copyright (C) 2003-2005 PLX Technology, Inc.
+ * Copyright (C) 2003 NetChip Technologies
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -70,8 +69,8 @@
 #include <asm/unaligned.h>
 
 
-#define	DRIVER_DESC		"PLX NET2280 USB Peripheral Controller"
-#define	DRIVER_VERSION		"2005 Feb 03"
+#define	DRIVER_DESC		"NetChip 2280 USB Peripheral Controller"
+#define	DRIVER_VERSION		"2004 Jan 14"
 
 #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
 #define	EP_DONTUSE		13	/* nonzero */
@@ -113,16 +112,6 @@ static ushort fifo_mode = 0;
 
 /* "modprobe net2280 fifo_mode=1" etc */
 module_param (fifo_mode, ushort, 0644);
-
-/* enable_suspend -- When enabled, the driver will respond to
- * USB suspend requests by powering down the NET2280.  Otherwise,
- * USB suspend requests will be ignored.  This is acceptible for
- * self-powered devices, and helps avoid some quirks.
- */
-static int enable_suspend = 0;
-
-/* "modprobe net2280 enable_suspend=1" etc */
-module_param (enable_suspend, bool, S_IRUGO);
 
 
 #define	DIR_STRING(bAddress) (((bAddress) & USB_DIR_IN) ? "in" : "out")
@@ -1270,7 +1259,7 @@ static int net2280_dequeue (struct usb_ep *_ep, struct usb_request *_req)
 	}
 
 	spin_unlock_irqrestore (&ep->dev->lock, flags);
-	return 0;
+	return req ? 0 : -EOPNOTSUPP;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -2572,8 +2561,6 @@ static void handle_stat1_irqs (struct net2280 *dev, u32 stat)
 		if (stat & (1 << SUSPEND_REQUEST_INTERRUPT)) {
 			if (dev->driver->suspend)
 				dev->driver->suspend (&dev->gadget);
-			if (!enable_suspend)
-				stat &= ~(1 << SUSPEND_REQUEST_INTERRUPT);
 		} else {
 			if (dev->driver->resume)
 				dev->driver->resume (&dev->gadget);

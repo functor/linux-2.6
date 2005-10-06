@@ -13,7 +13,7 @@
  *
  * This code is GPL
  *
- * $Id: cfi_cmdset_0002.c,v 1.114 2004/12/11 15:43:53 dedekind Exp $
+ * $Id: cfi_cmdset_0002.c,v 1.111 2004/11/16 18:29:00 dwmw2 Exp $
  *
  */
 
@@ -707,7 +707,7 @@ static int do_write_oneword(struct map_info *map, struct flchip *chip, unsigned 
 	 */
 	unsigned long uWriteTimeout = ( HZ / 1000 ) + 1;
 	int ret = 0;
-	map_word oldd;
+	map_word oldd, curd;
 	int retry_cnt = 0;
 
 	adr += chip->start;
@@ -764,19 +764,29 @@ static int do_write_oneword(struct map_info *map, struct flchip *chip, unsigned 
 			continue;
 		}
 
-		if (chip_ready(map, adr))
-			goto op_done;
+		/* Test to see if toggling has stopped. */
+		oldd = map_read(map, adr);
+		curd = map_read(map, adr);
+		if (map_word_equal(map, curd, oldd)) {
+			/* Do we have the correct value? */
+			if (map_word_equal(map, curd, datum)) {
+				goto op_done;
+			}
+			/* Nope something has gone wrong. */
+			break;
+		}
 
-		if (time_after(jiffies, timeo))
-                        break;
+		if (time_after(jiffies, timeo)) {
+			printk(KERN_WARNING "MTD %s(): software timeout\n",
+				__func__ );
+			break;
+		}
 
 		/* Latency issues. Drop the lock, wait a while and retry */
 		cfi_spin_unlock(chip->mutex);
 		cfi_udelay(1);
 		cfi_spin_lock(chip->mutex);
 	}
-
-	printk(KERN_WARNING "MTD %s(): software timeout\n", __func__);
 
 	/* reset on all failures. */
 	map_write( map, CMD(0xF0), chip->start );
@@ -1163,7 +1173,8 @@ static inline int do_erase_chip(struct map_info *map, struct flchip *chip)
 	chip->in_progress_block_addr = adr;
 
 	cfi_spin_unlock(chip->mutex);
-	msleep(chip->erase_time/2);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout((chip->erase_time*HZ)/(2*1000));
 	cfi_spin_lock(chip->mutex);
 
 	timeo = jiffies + (HZ*20);
@@ -1248,7 +1259,8 @@ static inline int do_erase_oneblock(struct map_info *map, struct flchip *chip, u
 	chip->in_progress_block_addr = adr;
 	
 	cfi_spin_unlock(chip->mutex);
-	msleep(chip->erase_time/2);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout((chip->erase_time*HZ)/(2*1000));
 	cfi_spin_lock(chip->mutex);
 
 	timeo = jiffies + (HZ*20);

@@ -208,7 +208,7 @@ int cond_index_bool(void *key, void *datum, void *datap)
 	return 0;
 }
 
-static int bool_isvalid(struct cond_bool_datum *b)
+int bool_isvalid(struct cond_bool_datum *b)
 {
 	if (!(b->state == 0 || b->state == 1))
 		return 0;
@@ -219,16 +219,15 @@ int cond_read_bool(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct cond_bool_datum *booldatum;
-	u32 buf[3], len;
-	int rc;
+	__u32 *buf, len;
 
 	booldatum = kmalloc(sizeof(struct cond_bool_datum), GFP_KERNEL);
 	if (!booldatum)
 		return -1;
 	memset(booldatum, 0, sizeof(struct cond_bool_datum));
 
-	rc = next_entry(buf, fp, sizeof buf);
-	if (rc < 0)
+	buf = next_entry(fp, sizeof(__u32) * 3);
+	if (!buf)
 		goto err;
 
 	booldatum->value = le32_to_cpu(buf[0]);
@@ -239,12 +238,13 @@ int cond_read_bool(struct policydb *p, struct hashtab *h, void *fp)
 
 	len = le32_to_cpu(buf[2]);
 
+	buf = next_entry(fp, len);
+	if (!buf)
+		goto err;
 	key = kmalloc(len + 1, GFP_KERNEL);
 	if (!key)
 		goto err;
-	rc = next_entry(key, fp, len);
-	if (rc < 0)
-		goto err;
+	memcpy(key, buf, len);
 	key[len] = 0;
 	if (hashtab_insert(h, key, booldatum))
 		goto err;
@@ -262,15 +262,15 @@ static int cond_read_av_list(struct policydb *p, void *fp, struct cond_av_list *
 	struct avtab_key key;
 	struct avtab_datum datum;
 	struct avtab_node *node_ptr;
-	int rc;
-	u32 buf[1], i, len;
-	u8 found;
+	int len, i;
+	__u32 *buf;
+	__u8 found;
 
 	*ret_list = NULL;
 
 	len = 0;
-	rc = next_entry(buf, fp, sizeof buf);
-	if (rc < 0)
+	buf = next_entry(fp, sizeof(__u32));
+	if (!buf)
 		return -1;
 
 	len = le32_to_cpu(buf[0]);
@@ -369,27 +369,27 @@ static int expr_isvalid(struct policydb *p, struct cond_expr *expr)
 
 static int cond_read_node(struct policydb *p, struct cond_node *node, void *fp)
 {
-	u32 buf[2], len, i;
-	int rc;
+	__u32 *buf;
+	int len, i;
 	struct cond_expr *expr = NULL, *last = NULL;
 
-	rc = next_entry(buf, fp, sizeof(u32));
-	if (rc < 0)
+	buf = next_entry(fp, sizeof(__u32));
+	if (!buf)
 		return -1;
 
 	node->cur_state = le32_to_cpu(buf[0]);
 
 	len = 0;
-	rc = next_entry(buf, fp, sizeof(u32));
-	if (rc < 0)
+	buf = next_entry(fp, sizeof(__u32));
+	if (!buf)
 		return -1;
 
 	/* expr */
 	len = le32_to_cpu(buf[0]);
 
 	for (i = 0; i < len; i++ ) {
-		rc = next_entry(buf, fp, sizeof(u32) * 2);
-		if (rc < 0)
+		buf = next_entry(fp, sizeof(__u32) * 2);
+		if (!buf)
 			goto err;
 
 		expr = kmalloc(sizeof(struct cond_expr), GFP_KERNEL);
@@ -401,10 +401,8 @@ static int cond_read_node(struct policydb *p, struct cond_node *node, void *fp)
 		expr->expr_type = le32_to_cpu(buf[0]);
 		expr->bool = le32_to_cpu(buf[1]);
 
-		if (!expr_isvalid(p, expr)) {
-			kfree(expr);
+		if (!expr_isvalid(p, expr))
 			goto err;
-		}
 
 		if (i == 0) {
 			node->expr = expr;
@@ -427,11 +425,11 @@ err:
 int cond_read_list(struct policydb *p, void *fp)
 {
 	struct cond_node *node, *last = NULL;
-	u32 buf[1], i, len;
-	int rc;
+	__u32 *buf;
+	int i, len;
 
-	rc = next_entry(buf, fp, sizeof buf);
-	if (rc < 0)
+	buf = next_entry(fp, sizeof(__u32));
+	if (!buf)
 		return -1;
 
 	len = le32_to_cpu(buf[0]);

@@ -35,7 +35,7 @@
 
 static void *videomemory;
 static u_long videomemorysize = VIDEOMEMSIZE;
-module_param(videomemorysize, ulong, 0);
+MODULE_PARM(videomemorysize, "l");
 
 static struct fb_var_screeninfo vfb_default __initdata = {
 	.xres =		640,
@@ -70,7 +70,13 @@ static struct fb_fix_screeninfo vfb_fix __initdata = {
 };
 
 static int vfb_enable __initdata = 0;	/* disabled by default */
-module_param(vfb_enable, bool, 0);
+MODULE_PARM(vfb_enable, "i");
+
+    /*
+     *  Interface used by the world
+     */
+int vfb_init(void);
+int vfb_setup(char *);
 
 static int vfb_check_var(struct fb_var_screeninfo *var,
 			 struct fb_info *info);
@@ -373,8 +379,7 @@ static int vfb_mmap(struct fb_info *info, struct file *file,
 	return -EINVAL;
 }
 
-#ifndef MODULE
-static int __init vfb_setup(char *options)
+int __init vfb_setup(char *options)
 {
 	char *this_opt;
 
@@ -391,7 +396,6 @@ static int __init vfb_setup(char *options)
 	}
 	return 1;
 }
-#endif  /*  MODULE  */
 
     /*
      *  Initialisation
@@ -488,7 +492,7 @@ static struct platform_device vfb_device = {
 	}
 };
 
-static int __init vfb_init(void)
+int __init vfb_init(void)
 {
 	int ret = 0;
 

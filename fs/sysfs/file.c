@@ -96,7 +96,7 @@ static int fill_read_buffer(struct dentry * dentry, struct sysfs_buffer * buffer
 /**
  *	flush_read_buffer - push buffer to userspace.
  *	@buffer:	data buffer for file.
- *	@buf:		user-passed buffer.
+ *	@userbuf:	user-passed buffer.
  *	@count:		number of bytes requested.
  *	@ppos:		file position.
  *
@@ -164,7 +164,7 @@ out:
 /**
  *	fill_write_buffer - copy buffer from userspace.
  *	@buffer:	data buffer for file.
- *	@buf:		data from user.
+ *	@userbuf:	data from user.
  *	@count:		number of bytes in @userbuf.
  *
  *	Allocate @buffer->page if it hasn't been already, then
@@ -231,16 +231,15 @@ static ssize_t
 sysfs_write_file(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	struct sysfs_buffer * buffer = file->private_data;
-	ssize_t len;
 
 	down(&buffer->sem);
-	len = fill_write_buffer(buffer, buf, count);
-	if (len > 0)
-		len = flush_write_buffer(file->f_dentry, buffer, len);
-	if (len > 0)
-		*ppos += len;
+	count = fill_write_buffer(buffer,buf,count);
+	if (count > 0)
+		count = flush_write_buffer(file->f_dentry,buffer,count);
+	if (count > 0)
+		*ppos += count;
 	up(&buffer->sem);
-	return len;
+	return count;
 }
 
 static int check_perm(struct inode * inode, struct file * file)
@@ -425,41 +424,6 @@ int sysfs_update_file(struct kobject * kobj, const struct attribute * attr)
 
 	return res;
 }
-
-
-/**
- * sysfs_chmod_file - update the modified mode value on an object attribute.
- * @kobj: object we're acting for.
- * @attr: attribute descriptor.
- * @mode: file permissions.
- *
- */
-int sysfs_chmod_file(struct kobject *kobj, struct attribute *attr, mode_t mode)
-{
-	struct dentry *dir = kobj->dentry;
-	struct dentry *victim;
-	struct sysfs_dirent *sd;
-	umode_t umode = (mode & S_IALLUGO) | S_IFREG;
-	int res = -ENOENT;
-
-	down(&dir->d_inode->i_sem);
-	victim = sysfs_get_dentry(dir, attr->name);
-	if (!IS_ERR(victim)) {
-		if (victim->d_inode &&
-		    (victim->d_parent->d_inode == dir->d_inode)) {
-			sd = victim->d_fsdata;
-			attr->mode = mode;
-			sd->s_mode = umode;
-			victim->d_inode->i_mode = umode;
-			dput(victim);
-			res = 0;
-		}
-	}
-	up(&dir->d_inode->i_sem);
-
-	return res;
-}
-EXPORT_SYMBOL_GPL(sysfs_chmod_file);
 
 
 /**

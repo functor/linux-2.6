@@ -44,7 +44,6 @@
 
 static int prism54_bring_down(islpci_private *);
 static int islpci_alloc_memory(islpci_private *);
-static struct net_device_stats *islpci_statistics(struct net_device *);
 
 /* Temporary dummy MAC address to use until firmware is loaded.
  * The idea there is that some tools (such as nameif) may query
@@ -53,7 +52,7 @@ static struct net_device_stats *islpci_statistics(struct net_device *);
  * Of course, this is not the final/real MAC address. It doesn't
  * matter, as you are suppose to be able to change it anytime via
  * ndev->set_mac_address. Jean II */
-static const unsigned char	dummy_mac[6] = { 0x00, 0x30, 0xB4, 0x00, 0x00, 0x00 };
+const unsigned char	dummy_mac[6] = { 0x00, 0x30, 0xB4, 0x00, 0x00, 0x00 };
 
 static int
 isl_upload_firmware(islpci_private *priv)
@@ -420,7 +419,7 @@ prism54_bring_down(islpci_private *priv)
 	 * currently in progress by emptying the TX and RX queues. */
 
 	/* wait until interrupts have finished executing on other CPUs */
-	synchronize_irq(priv->pdev->irq);
+	prism54_synchronize_irq(priv->pdev->irq);
 
 	reg = readl(device_base + ISL38XX_CTRL_STAT_REG);
 	reg &= ~(ISL38XX_CTRL_STAT_RESET | ISL38XX_CTRL_STAT_RAMBOOT);
@@ -608,7 +607,7 @@ islpci_reset(islpci_private *priv, int reload_firmware)
 	return rc;
 }
 
-static struct net_device_stats *
+struct net_device_stats *
 islpci_statistics(struct net_device *ndev)
 {
 	islpci_private *priv = netdev_priv(ndev);

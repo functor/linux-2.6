@@ -41,6 +41,7 @@
 #include <asm/types.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
+#include <asm/naca.h>
 #include <asm/machdep.h>
 #include <asm/lmb.h>
 #include <asm/abs_addr.h>
@@ -51,7 +52,6 @@
 #include <asm/cacheflush.h>
 #include <asm/cputable.h>
 #include <asm/abs_addr.h>
-#include <asm/sections.h>
 
 #ifdef DEBUG
 #define DBG(fmt...) udbg_printf(fmt)
@@ -75,8 +75,7 @@
 extern unsigned long dart_tablebase;
 #endif /* CONFIG_U3_DART */
 
-HPTE		*htab_address;
-unsigned long	htab_hash_mask;
+HTAB htab_data = {NULL, 0, 0, 0, 0};
 
 extern unsigned long _SDR1;
 
@@ -96,7 +95,6 @@ static inline void create_pte_mapping(unsigned long start, unsigned long end,
 {
 	unsigned long addr;
 	unsigned int step;
-	unsigned long tmp_mode;
 
 	if (large)
 		step = 16*MB;
@@ -114,27 +112,20 @@ static inline void create_pte_mapping(unsigned long start, unsigned long end,
 		else
 			vpn = va >> PAGE_SHIFT;
 
-
-		tmp_mode = mode;
-		
-		/* Make non-kernel text non-executable */
-		if (!in_kernel_text(addr))
-			tmp_mode = mode | HW_NO_EXEC;
-
 		hash = hpt_hash(vpn, large);
 
-		hpteg = ((hash & htab_hash_mask) * HPTES_PER_GROUP);
+		hpteg = ((hash & htab_data.htab_hash_mask)*HPTES_PER_GROUP);
 
 #ifdef CONFIG_PPC_PSERIES
 		if (systemcfg->platform & PLATFORM_LPAR)
 			ret = pSeries_lpar_hpte_insert(hpteg, va,
 				virt_to_abs(addr) >> PAGE_SHIFT,
-				0, tmp_mode, 1, large);
+				0, mode, 1, large);
 		else
 #endif /* CONFIG_PPC_PSERIES */
 			ret = native_hpte_insert(hpteg, va,
 				virt_to_abs(addr) >> PAGE_SHIFT,
-				0, tmp_mode, 1, large);
+				0, mode, 1, large);
 
 		if (ret == -1) {
 			ppc64_terminate_msg(0x20, "create_pte_mapping");
@@ -149,8 +140,6 @@ void __init htab_initialize(void)
 	unsigned long pteg_count;
 	unsigned long mode_rw;
 	int i, use_largepages = 0;
-	unsigned long base = 0, size = 0;
-	extern unsigned long tce_alloc_start, tce_alloc_end;
 
 	DBG(" -> htab_initialize()\n");
 
@@ -158,7 +147,7 @@ void __init htab_initialize(void)
 	 * Calculate the required size of the htab.  We want the number of
 	 * PTEGs to equal one half the number of real pages.
 	 */ 
-	htab_size_bytes = 1UL << ppc64_pft_size;
+	htab_size_bytes = 1UL << naca->pftSize;
 	pteg_count = htab_size_bytes >> 7;
 
 	/* For debug, make the HTAB 1/8 as big as it normally would be. */
@@ -167,11 +156,12 @@ void __init htab_initialize(void)
 		htab_size_bytes = pteg_count << 7;
 	}
 
-	htab_hash_mask = pteg_count - 1;
+	htab_data.htab_num_ptegs = pteg_count;
+	htab_data.htab_hash_mask = pteg_count - 1;
 
 	if (systemcfg->platform & PLATFORM_LPAR) {
 		/* Using a hypervisor which owns the htab */
-		htab_address = NULL;
+		htab_data.htab = NULL;
 		_SDR1 = 0; 
 	} else {
 		/* Find storage for the HPT.  Must be contiguous in
@@ -186,7 +176,7 @@ void __init htab_initialize(void)
 			ppc64_terminate_msg(0x20, "hpt space");
 			loop_forever();
 		}
-		htab_address = abs_to_virt(table);
+		htab_data.htab = abs_to_virt(table);
 
 		/* htab absolute addr + encoded htabsize */
 		_SDR1 = table + __ilog2(pteg_count) - 11;
@@ -201,11 +191,13 @@ void __init htab_initialize(void)
 	 * _NOT_ map it to avoid cache paradoxes as it's remapped non
 	 * cacheable later on
 	 */
-	if (cpu_has_feature(CPU_FTR_16M_PAGE))
+	if (cur_cpu_spec->cpu_features & CPU_FTR_16M_PAGE)
 		use_largepages = 1;
 
 	/* create bolted the linear mapping in the hash table */
 	for (i=0; i < lmb.memory.cnt; i++) {
+		unsigned long base, size;
+
 		base = lmb.memory.region[i].physbase + KERNELBASE;
 		size = lmb.memory.region[i].size;
 
@@ -234,25 +226,6 @@ void __init htab_initialize(void)
 #endif /* CONFIG_U3_DART */
 		create_pte_mapping(base, base + size, mode_rw, use_largepages);
 	}
-
-	/*
-	 * If we have a memory_limit and we've allocated TCEs then we need to
-	 * explicitly map the TCE area at the top of RAM. We also cope with the
-	 * case that the TCEs start below memory_limit.
-	 * tce_alloc_start/end are 16MB aligned so the mapping should work
-	 * for either 4K or 16MB pages.
-	 */
-	if (tce_alloc_start) {
-		tce_alloc_start += KERNELBASE;
-		tce_alloc_end += KERNELBASE;
-
-		if (base + size >= tce_alloc_start)
-			tce_alloc_start = base + size + 1;
-
-		create_pte_mapping(tce_alloc_start, tce_alloc_end,
-			mode_rw, use_largepages);
-	}
-
 	DBG(" <- htab_initialize()\n");
 }
 #undef KB
@@ -266,6 +239,8 @@ unsigned int hash_page_do_lazy_icache(unsigned int pp, pte_t pte, int trap)
 {
 	struct page *page;
 
+#define PPC64_HWNOEXEC (1 << 2)
+
 	if (!pfn_valid(pte_pfn(pte)))
 		return pp;
 
@@ -277,7 +252,7 @@ unsigned int hash_page_do_lazy_icache(unsigned int pp, pte_t pte, int trap)
 			__flush_dcache_icache(page_address(page));
 			set_bit(PG_arch_1, &page->flags);
 		} else
-			pp |= HW_NO_EXEC;
+			pp |= PPC64_HWNOEXEC;
 	}
 	return pp;
 }
@@ -298,27 +273,34 @@ int hash_page(unsigned long ea, unsigned long access, unsigned long trap)
 	int local = 0;
 	cpumask_t tmp;
 
-	if ((ea & ~REGION_MASK) > EADDR_MASK)
-		return 1;
-
  	switch (REGION_ID(ea)) {
 	case USER_REGION_ID:
 		user_region = 1;
 		mm = current->mm;
-		if (! mm)
+		if ((ea > USER_END) || (! mm))
 			return 1;
 
 		vsid = get_vsid(mm->context.id, ea);
 		break;
 	case IO_REGION_ID:
+		if (ea > IMALLOC_END)
+			return 1;
 		mm = &ioremap_mm;
 		vsid = get_kernel_vsid(ea);
 		break;
 	case VMALLOC_REGION_ID:
+		if (ea > VMALLOC_END)
+			return 1;
 		mm = &init_mm;
 		vsid = get_kernel_vsid(ea);
 		break;
 #if 0
+	case EEH_REGION_ID:
+		/*
+		 * Should only be hit if there is an access to MMIO space
+		 * which is protected by EEH.
+		 * Send the problem up to do_page_fault 
+		 */
 	case KERNEL_REGION_ID:
 		/*
 		 * Should never get here - entire 0xC0... region is bolted.
@@ -361,7 +343,7 @@ void flush_hash_page(unsigned long context, unsigned long ea, pte_t pte,
 	unsigned long vsid, vpn, va, hash, secondary, slot;
 	unsigned long huge = pte_huge(pte);
 
-	if (ea < KERNELBASE)
+	if ((ea >= USER_START) && (ea <= USER_END))
 		vsid = get_vsid(context, ea);
 	else
 		vsid = get_kernel_vsid(ea);
@@ -375,7 +357,7 @@ void flush_hash_page(unsigned long context, unsigned long ea, pte_t pte,
 	secondary = (pte_val(pte) & _PAGE_SECONDARY) >> 15;
 	if (secondary)
 		hash = ~hash;
-	slot = (hash & htab_hash_mask) * HPTES_PER_GROUP;
+	slot = (hash & htab_data.htab_hash_mask) * HPTES_PER_GROUP;
 	slot += (pte_val(pte) & _PAGE_GROUP_IX) >> 12;
 
 	ppc_md.hpte_invalidate(slot, va, huge, local);

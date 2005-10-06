@@ -14,10 +14,6 @@
 
 #include <asm/fpstate.h>
 
-#define THREAD_SIZE_ORDER	1
-#define THREAD_SIZE		8192
-#define THREAD_START_SP		(THREAD_SIZE - 8)
-
 #ifndef __ASSEMBLY__
 
 struct task_struct;
@@ -57,7 +53,6 @@ struct thread_info {
 	__u32			cpu_domain;	/* cpu domain */
 	struct cpu_context_save	cpu_context;	/* cpu context */
 	__u8			used_cp[16];	/* thread used copro */
-	unsigned long		tp_value;
 	union fp_state		fpstate;
 	union vfp_state		vfpstate;
 	struct restart_block	restart_block;
@@ -80,6 +75,8 @@ struct thread_info {
 
 #define init_thread_info	(init_thread_union.thread_info)
 #define init_stack		(init_thread_union.stack)
+
+#define THREAD_SIZE		8192
 
 /*
  * how to get the thread information struct from C
@@ -131,7 +128,6 @@ extern void iwmmxt_task_release(struct thread_info *);
 #define TIF_SYSCALL_TRACE	8
 #define TIF_POLLING_NRFLAG	16
 #define TIF_USING_IWMMXT	17
-#define TIF_MEMDIE		18
 
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
 #define _TIF_SIGPENDING		(1 << TIF_SIGPENDING)

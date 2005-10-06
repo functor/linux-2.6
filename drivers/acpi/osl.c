@@ -40,7 +40,6 @@
 #include <acpi/acpi.h>
 #include <asm/io.h>
 #include <acpi/acpi_bus.h>
-#include <acpi/processor.h>
 #include <asm/uaccess.h>
 
 #include <linux/efi.h>
@@ -357,7 +356,7 @@ acpi_os_get_timer (void)
 	if (!t)
 		printk(KERN_ERR PREFIX "acpi_os_get_timer() TBD\n");
 
-	return ++t;
+	return(++t);
 }
 
 acpi_status
@@ -563,7 +562,7 @@ acpi_os_write_pci_configuration (struct acpi_pci_id *pci_id, u32 reg, acpi_integ
 }
 
 /* TODO: Change code to take advantage of driver model more */
-static void
+void
 acpi_os_derive_pci_id_2 (
 	acpi_handle		rhandle,        /* upper bound  */
 	acpi_handle		chandle,        /* current node */
@@ -636,7 +635,7 @@ acpi_os_write_pci_configuration (
 	acpi_integer		value,
 	u32			width)
 {
-	return AE_SUPPORT;
+	return (AE_SUPPORT);
 }
 
 acpi_status
@@ -646,7 +645,7 @@ acpi_os_read_pci_configuration (
 	void			*value,
 	u32			width)
 {
-	return AE_SUPPORT;
+	return (AE_SUPPORT);
 }
 
 void
@@ -938,7 +937,7 @@ acpi_os_wait_semaphore(
 		// TODO: A better timeout algorithm?
 		{
 			int i = 0;
-			static const int quantum_ms = (HZ>1000)?1:(1000/HZ);
+			static const int quantum_ms = 1000/HZ;
 
 			ret = down_trylock(sem);
 			for (i = timeout; (i > 0 && ret < 0); i -= quantum_ms) {
@@ -1071,7 +1070,7 @@ acpi_os_signal (
 }
 EXPORT_SYMBOL(acpi_os_signal);
 
-static int __init
+int __init
 acpi_os_name_setup(char *str)
 {
 	char *p = acpi_os_name;
@@ -1101,7 +1100,7 @@ __setup("acpi_os_name=", acpi_os_name_setup);
  * empty string disables _OSI
  * TBD additional string adds to _OSI
  */
-static int __init
+int __init
 acpi_osi_setup(char *str)
 {
 	if (str == NULL || *str == '\0') {
@@ -1119,7 +1118,7 @@ acpi_osi_setup(char *str)
 __setup("acpi_osi=", acpi_osi_setup);
 
 /* enable serialization to combat AE_ALREADY_EXISTS errors */
-static int __init
+int __init
 acpi_serialize_setup(char *str)
 {
 	printk(KERN_INFO PREFIX "serialize enabled\n");
@@ -1140,7 +1139,7 @@ __setup("acpi_serialize", acpi_serialize_setup);
  * Run-time events on the same GPE this flag is available
  * to tell Linux to keep the wake-time GPEs enabled at run-time.
  */
-static int __init
+int __init
 acpi_wake_gpes_always_on_setup(char *str)
 {
 	printk(KERN_INFO PREFIX "wake GPEs not disabled\n");
@@ -1156,7 +1155,7 @@ __setup("acpi_wake_gpes_always_on", acpi_wake_gpes_always_on_setup);
  * max_cstate is defined in the base kernel so modules can
  * change it w/o depending on the state of the processor module.
  */
-unsigned int max_cstate = ACPI_PROCESSOR_MAX_POWER;
+unsigned int max_cstate = ACPI_C_STATES_MAX;
 
 
 EXPORT_SYMBOL(max_cstate);

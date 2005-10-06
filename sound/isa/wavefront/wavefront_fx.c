@@ -537,7 +537,8 @@ snd_wavefront_fx_ioctl (snd_hwdep_t *sdev, struct file *file,
 			     r.data[1], /* addr */
 			     r.data[2], /* cnt */
 			     pd);
-		kfree(page_data);
+		if (page_data)
+			kfree(page_data);
 		break;
 
 	default:

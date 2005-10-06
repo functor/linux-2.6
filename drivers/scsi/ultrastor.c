@@ -259,7 +259,7 @@ static struct ultrastor_config
 } config = {0};
 
 /* Set this to 1 to reset the SCSI bus on error.  */
-static int ultrastor_bus_reset;
+int ultrastor_bus_reset;
 
 
 /* Allowed BIOS base addresses (NULL indicates reserved) */
@@ -945,7 +945,7 @@ static int ultrastor_abort(Scsi_Cmnd *SCpnt)
 	       config.mscp[mscp_index].SCint, SCpnt);
 #endif
     if (config.mscp[mscp_index].SCint == 0)
-	return FAILED;
+	return SCSI_ABORT_NOT_RUNNING;
 
     if (config.mscp[mscp_index].SCint != SCpnt) panic("Bad abort");
     config.mscp[mscp_index].SCint = NULL;
@@ -1020,7 +1020,7 @@ static int ultrastor_host_reset(Scsi_Cmnd * SCpnt)
 #endif
 
     spin_unlock_irqrestore(host->host_lock, flags);
-    return SUCCESS;
+    return SCSI_RESET_SUCCESS;
 
 }
 

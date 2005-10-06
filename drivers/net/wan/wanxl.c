@@ -72,7 +72,7 @@ typedef struct card_t {
 	u8 irq;
 
 	u8 __iomem *plx;	/* PLX PCI9060 virtual base address */
-	struct pci_dev *pdev;	/* for pci_name(pdev) */
+	struct pci_dev *pdev;	/* for pdev->slot_name */
 	int rx_in;
 	struct sk_buff *rx_skbs[RX_QUEUE_LENGTH];
 	card_status_t *status;	/* shared between host and card */
@@ -85,6 +85,12 @@ typedef struct card_t {
 static inline port_t* dev_to_port(struct net_device *dev)
 {
         return (port_t *)dev_to_hdlc(dev)->priv;
+}
+
+
+static inline const char* card_name(struct pci_dev *pdev)
+{
+	return pdev->slot_name;
 }
 
 
@@ -101,7 +107,7 @@ static inline dma_addr_t pci_map_single_debug(struct pci_dev *pdev, void *ptr,
 	dma_addr_t addr = pci_map_single(pdev, ptr, size, direction);
 	if (addr + size > 0x100000000LL)
 		printk(KERN_CRIT "wanXL %s: pci_map_single() returned memory"
-		       " at 0x%LX!\n", pci_name(pdev),
+		       " at 0x%LX!\n", card_name(pdev),
 		       (unsigned long long)addr);
 	return addr;
 }
@@ -195,7 +201,7 @@ static inline void wanxl_rx_intr(card_t *card)
 	       desc->stat != PACKET_EMPTY) {
 		if ((desc->stat & PACKET_PORT_MASK) > card->n_ports)
 			printk(KERN_CRIT "wanXL %s: received packet for"
-			       " nonexistent port\n", pci_name(card->pdev));
+			       " nonexistent port\n", card_name(card->pdev));
 		else {
 			struct sk_buff *skb = card->rx_skbs[card->rx_in];
 			port_t *port = &card->ports[desc->stat &
@@ -598,7 +604,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 	card = kmalloc(alloc_size, GFP_KERNEL);
 	if (card == NULL) {
 		printk(KERN_ERR "wanXL %s: unable to allocate memory\n",
-		       pci_name(pdev));
+		       card_name(pdev));
 		pci_release_regions(pdev);
 		pci_disable_device(pdev);
 		return -ENOBUFS;
@@ -617,7 +623,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 
 #ifdef DEBUG_PCI
 	printk(KERN_DEBUG "wanXL %s: pci_alloc_consistent() returned memory"
-	       " at 0x%LX\n", pci_name(pdev),
+	       " at 0x%LX\n", card_name(pdev),
 	       (unsigned long long)card->status_address);
 #endif
 
@@ -643,7 +649,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 	while ((stat = readl(card->plx + PLX_MAILBOX_0)) != 0) {
 		if (time_before(timeout, jiffies)) {
 			printk(KERN_WARNING "wanXL %s: timeout waiting for"
-			       " PUTS to complete\n", pci_name(pdev));
+			       " PUTS to complete\n", card_name(pdev));
 			wanxl_pci_remove_one(pdev);
 			return -ENODEV;
 		}
@@ -655,7 +661,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 
 		default:
 			printk(KERN_WARNING "wanXL %s: PUTS test 0x%X"
-			       " failed\n", pci_name(pdev), stat & 0x30);
+			       " failed\n", card_name(pdev), stat & 0x30);
 			wanxl_pci_remove_one(pdev);
 			return -ENODEV;
 		}
@@ -675,7 +681,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 	    (TX_BUFFERS + RX_BUFFERS) * BUFFER_LENGTH * ports) {
 		printk(KERN_WARNING "wanXL %s: no enough on-board RAM"
 		       " (%u bytes detected, %u bytes required)\n",
-		       pci_name(pdev), ramsize, BUFFERS_ADDR +
+		       card_name(pdev), ramsize, BUFFERS_ADDR +
 		       (TX_BUFFERS + RX_BUFFERS) * BUFFER_LENGTH * ports);
 		wanxl_pci_remove_one(pdev);
 		return -ENODEV;
@@ -683,7 +689,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 
 	if (wanxl_puts_command(card, MBX1_CMD_BSWAP)) {
 		printk(KERN_WARNING "wanXL %s: unable to Set Byte Swap"
-		       " Mode\n", pci_name(pdev));
+		       " Mode\n", card_name(pdev));
 		wanxl_pci_remove_one(pdev);
 		return -ENODEV;
 	}
@@ -714,7 +720,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 
 	if (wanxl_puts_command(card, MBX1_CMD_ABORTJ)) {
 		printk(KERN_WARNING "wanXL %s: unable to Abort and Jump\n",
-		       pci_name(pdev));
+		       card_name(pdev));
 		wanxl_pci_remove_one(pdev);
 		return -ENODEV;
 	}
@@ -729,7 +735,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 
 	if (!stat) {
 		printk(KERN_WARNING "wanXL %s: timeout while initializing card"
-		       "firmware\n", pci_name(pdev));
+		       "firmware\n", card_name(pdev));
 		wanxl_pci_remove_one(pdev);
 		return -ENODEV;
 	}
@@ -739,12 +745,12 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 #endif
 
 	printk(KERN_INFO "wanXL %s: at 0x%X, %u KB of RAM at 0x%X, irq %u\n",
-	       pci_name(pdev), plx_phy, ramsize / 1024, mem_phy, pdev->irq);
+	       card_name(pdev), plx_phy, ramsize / 1024, mem_phy, pdev->irq);
 
 	/* Allocate IRQ */
 	if (request_irq(pdev->irq, wanxl_intr, SA_SHIRQ, "wanXL", card)) {
 		printk(KERN_WARNING "wanXL %s: could not allocate IRQ%i.\n",
-		       pci_name(pdev), pdev->irq);
+		       card_name(pdev), pdev->irq);
 		wanxl_pci_remove_one(pdev);
 		return -EBUSY;
 	}
@@ -756,7 +762,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 		struct net_device *dev = alloc_hdlcdev(port);
 		if (!dev) {
 			printk(KERN_ERR "wanXL %s: unable to allocate"
-			       " memory\n", pci_name(pdev));
+			       " memory\n", card_name(pdev));
 			wanxl_pci_remove_one(pdev);
 			return -ENOMEM;
 		}
@@ -777,7 +783,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 		get_status(port)->clocking = CLOCK_EXT;
 		if (register_hdlc_device(dev)) {
 			printk(KERN_ERR "wanXL %s: unable to register hdlc"
-			       " device\n", pci_name(pdev));
+			       " device\n", card_name(pdev));
 			free_netdev(dev);
 			wanxl_pci_remove_one(pdev);
 			return -ENOBUFS;
@@ -785,7 +791,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 		card->n_ports++;
 	}
 
-	printk(KERN_INFO "wanXL %s: port", pci_name(pdev));
+	printk(KERN_INFO "wanXL %s: port", card_name(pdev));
 	for (i = 0; i < ports; i++)
 		printk("%s #%i: %s", i ? "," : "", i,
 		       card->ports[i].dev->name);

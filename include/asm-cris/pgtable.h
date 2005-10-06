@@ -5,8 +5,6 @@
 #ifndef _CRIS_PGTABLE_H
 #define _CRIS_PGTABLE_H
 
-#include <asm-generic/4level-fixup.h>
-
 #ifndef __ASSEMBLY__
 #include <linux/config.h>
 #include <linux/sched.h>
@@ -34,8 +32,6 @@ extern void paging_init(void);
  * hook is made available.
  */
 #define set_pte(pteptr, pteval) ((*(pteptr)) = (pteval))
-#define set_pte_at(mm,addr,ptep,pteval) set_pte(ptep,pteval)
-
 /*
  * (pmds are folded into pgds so this doesn't get actually called,
  * but the define is needed for a generic inline function.)
@@ -76,7 +72,7 @@ extern void paging_init(void);
  */
 
 #define USER_PTRS_PER_PGD       (TASK_SIZE/PGDIR_SIZE)
-#define FIRST_USER_ADDRESS      0
+#define FIRST_USER_PGD_NR       0
 
 /* zero page used for uninitialized stuff */
 #ifndef __ASSEMBLY__
@@ -103,7 +99,7 @@ extern unsigned long empty_zero_page;
 
 #define pte_none(x)	(!pte_val(x))
 #define pte_present(x)	(pte_val(x) & _PAGE_PRESENT)
-#define pte_clear(mm,addr,xp)	do { pte_val(*(xp)) = 0; } while (0)
+#define pte_clear(xp)	do { pte_val(*(xp)) = 0; } while (0)
 
 #define pmd_none(x)	(!pmd_val(x))
 /* by removing the _PAGE_KERNEL bit from the comparision, the same pmd_bad

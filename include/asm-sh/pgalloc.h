@@ -1,6 +1,7 @@
 #ifndef __ASM_SH_PGALLOC_H
 #define __ASM_SH_PGALLOC_H
 
+#include <asm/processor.h>
 #include <linux/threads.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
@@ -43,7 +44,9 @@ static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm,
 {
 	pte_t *pte;
 
-	pte = (pte_t *) __get_free_page(GFP_KERNEL | __GFP_REPEAT | __GFP_ZERO);
+	pte = (pte_t *) __get_free_page(GFP_KERNEL | __GFP_REPEAT);
+	if (pte)
+		clear_page(pte);
 
 	return pte;
 }
@@ -53,7 +56,9 @@ static inline struct page *pte_alloc_one(struct mm_struct *mm,
 {
 	struct page *pte;
 
-   	pte = alloc_pages(GFP_KERNEL|__GFP_REPEAT|__GFP_ZERO, 0);
+   	pte = alloc_pages(GFP_KERNEL|__GFP_REPEAT, 0);
+	if (pte)
+		clear_page(page_address(pte));
 
 	return pte;
 }

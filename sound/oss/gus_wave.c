@@ -94,7 +94,7 @@ static int      recording_active;
 static int      only_read_access;
 static int      only_8_bits;
 
-static int      iw_mode = 0;
+int             iw_mode = 0;
 int             gus_wave_volume = 60;
 int             gus_pcm_volume = 80;
 int             have_gus_max = 0;
@@ -139,7 +139,7 @@ static int      pcm_current_block;
 static unsigned long pcm_current_buf;
 static int      pcm_current_count;
 static int      pcm_current_intrflag;
-DEFINE_SPINLOCK(gus_lock);
+spinlock_t gus_lock=SPIN_LOCK_UNLOCKED;
 
 extern int     *gus_osp;
 
@@ -3126,7 +3126,8 @@ void __exit gus_wave_unload(struct address_info *hw_config)
 	if (hw_config->slots[5] != -1)
 		sound_unload_mixerdev(hw_config->slots[5]);
 	
-	vfree(samples);
+	if(samples)
+		vfree(samples);
 	samples=NULL;
 }
 /* called in interrupt context */

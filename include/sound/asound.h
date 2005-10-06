@@ -110,12 +110,9 @@ enum sndrv_hwdep_iface {
 	SNDRV_HWDEP_IFACE_MIXART,	/* Digigram miXart cards */
 	SNDRV_HWDEP_IFACE_USX2Y,	/* Tascam US122, US224 & US428 usb */
 	SNDRV_HWDEP_IFACE_EMUX_WAVETABLE, /* EmuX wavetable */	
-	SNDRV_HWDEP_IFACE_BLUETOOTH,	/* Bluetooth audio */
-	SNDRV_HWDEP_IFACE_USX2Y_PCM,	/* Tascam US122, US224 & US428 rawusb pcm */
-	SNDRV_HWDEP_IFACE_PCXHR,	/* Digigram PCXHR */
 
 	/* Don't forget to change the following: */
-	SNDRV_HWDEP_IFACE_LAST = SNDRV_HWDEP_IFACE_PCXHR
+	SNDRV_HWDEP_IFACE_LAST = SNDRV_HWDEP_IFACE_EMUX_WAVETABLE,
 };
 
 struct sndrv_hwdep_info {
@@ -582,7 +579,6 @@ enum sndrv_timer_slave_class {
 /* global timers (device member) */
 #define SNDRV_TIMER_GLOBAL_SYSTEM	0
 #define SNDRV_TIMER_GLOBAL_RTC		1
-#define SNDRV_TIMER_GLOBAL_HPET		2
 
 /* info flags */
 #define SNDRV_TIMER_FLG_SLAVE		(1<<0)	/* cannot be controlled */

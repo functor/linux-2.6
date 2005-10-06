@@ -50,13 +50,6 @@
  */
 static int rx_copybreak = 200;
 
-/* Should we use MMIO or Port IO?
- * 0: Port IO
- * 1: MMIO
- * 2: Try MMIO, fallback to Port IO
- */
-static unsigned int use_mmio = 2;
-
 /* end user-configurable values */
 
 /* Maximum number of multicast addresses to filter (vs. rx-all-multicast).
@@ -100,8 +93,8 @@ static const int multicast_filter_limit = 32;
 #define PKT_BUF_SZ		1536
 
 #define DRV_MODULE_NAME		"typhoon"
-#define DRV_MODULE_VERSION 	"1.5.7"
-#define DRV_MODULE_RELDATE	"05/01/07"
+#define DRV_MODULE_VERSION 	"1.5.4"
+#define DRV_MODULE_RELDATE	"04/09/09"
 #define PFX			DRV_MODULE_NAME ": "
 #define ERR_PFX			KERN_ERR PFX
 
@@ -138,16 +131,9 @@ static char version[] __devinitdata =
     "typhoon.c: version " DRV_MODULE_VERSION " (" DRV_MODULE_RELDATE ")\n";
 
 MODULE_AUTHOR("David Dillow <dave@thedillows.org>");
-MODULE_VERSION(DRV_MODULE_VERSION);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("3Com Typhoon Family (3C990, 3CR990, and variants)");
-MODULE_PARM_DESC(rx_copybreak, "Packets smaller than this are copied and "
-			       "the buffer given back to the NIC. Default "
-			       "is 200.");
-MODULE_PARM_DESC(use_mmio, "Use MMIO (1) or PIO(0) to access the NIC. "
-			   "Default is to try MMIO and fallback to PIO.");
-module_param(rx_copybreak, int, 0);
-module_param(use_mmio, int, 0);
+MODULE_PARM(rx_copybreak, "i");
 
 #if defined(NETIF_F_TSO) && MAX_SKB_FRAGS > 32
 #warning Typhoon only supports 32 entries in its SG list for TSO, disabling TSO
@@ -324,7 +310,7 @@ enum state_values {
  * cannot pass a read, so this forces current writes to post.
  */
 #define typhoon_post_pci_writes(x) \
-	do { if(likely(use_mmio)) ioread32(x+TYPHOON_REG_HEARTBEAT); } while(0)
+	do { readl(x + TYPHOON_REG_HEARTBEAT); } while(0)
 
 /* We'll wait up to six seconds for a reset, and half a second normally.
  */
@@ -405,17 +391,17 @@ typhoon_reset(void __iomem *ioaddr, int wait_type)
 	else
 		timeout = TYPHOON_RESET_TIMEOUT_SLEEP;
 
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_STATUS);
+	writel(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
+	writel(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_STATUS);
 
-	iowrite32(TYPHOON_RESET_ALL, ioaddr + TYPHOON_REG_SOFT_RESET);
+	writel(TYPHOON_RESET_ALL, ioaddr + TYPHOON_REG_SOFT_RESET);
 	typhoon_post_pci_writes(ioaddr);
 	udelay(1);
-	iowrite32(TYPHOON_RESET_NONE, ioaddr + TYPHOON_REG_SOFT_RESET);
+	writel(TYPHOON_RESET_NONE, ioaddr + TYPHOON_REG_SOFT_RESET);
 
 	if(wait_type != NoWait) {
 		for(i = 0; i < timeout; i++) {
-			if(ioread32(ioaddr + TYPHOON_REG_STATUS) ==
+			if(readl(ioaddr + TYPHOON_REG_STATUS) ==
 			   TYPHOON_STATUS_WAITING_FOR_HOST)
 				goto out;
 
@@ -430,8 +416,8 @@ typhoon_reset(void __iomem *ioaddr, int wait_type)
 	}
 
 out:
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_STATUS);
+	writel(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
+	writel(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_STATUS);
 
 	/* The 3XP seems to need a little extra time to complete the load
 	 * of the sleep image before we can reliably boot it. Failure to
@@ -456,7 +442,7 @@ typhoon_wait_status(void __iomem *ioaddr, u32 wait_value)
 	int i, err = 0;
 
 	for(i = 0; i < TYPHOON_WAIT_TIMEOUT; i++) {
-		if(ioread32(ioaddr + TYPHOON_REG_STATUS) == wait_value)
+		if(readl(ioaddr + TYPHOON_REG_STATUS) == wait_value)
 			goto out;
 		udelay(TYPHOON_UDELAY);
 	}
@@ -492,7 +478,7 @@ typhoon_hello(struct typhoon *tp)
 
 		INIT_COMMAND_NO_RESPONSE(cmd, TYPHOON_CMD_HELLO_RESP);
 		smp_wmb();
-		iowrite32(ring->lastWrite, tp->ioaddr + TYPHOON_REG_CMD_READY);
+		writel(ring->lastWrite, tp->ioaddr + TYPHOON_REG_CMD_READY);
 		spin_unlock(&tp->command_lock);
 	}
 }
@@ -647,7 +633,7 @@ typhoon_issue_command(struct typhoon *tp, int num_cmd, struct cmd_desc *cmd,
 	/* "I feel a presence... another warrior is on the the mesa."
 	 */
 	wmb();
-	iowrite32(ring->lastWrite, tp->ioaddr + TYPHOON_REG_CMD_READY);
+	writel(ring->lastWrite, tp->ioaddr + TYPHOON_REG_CMD_READY);
 	typhoon_post_pci_writes(tp->ioaddr);
 
 	if((cmd->flags & TYPHOON_CMD_RESPOND) == 0)
@@ -701,7 +687,7 @@ out:
 		 * is the case.
 		 */
 		if(indexes->respCleared != indexes->respReady)
-			iowrite32(1, tp->ioaddr + TYPHOON_REG_SELF_INTERRUPT);
+			writel(1, tp->ioaddr + TYPHOON_REG_SELF_INTERRUPT);
 	}
 
 	spin_unlock(&tp->command_lock);
@@ -903,7 +889,7 @@ typhoon_start_tx(struct sk_buff *skb, struct net_device *dev)
 	/* Kick the 3XP
 	 */
 	wmb();
-	iowrite32(txRing->lastWrite, tp->tx_ioaddr + txRing->writeRegister);
+	writel(txRing->lastWrite, tp->tx_ioaddr + txRing->writeRegister);
 
 	dev->trans_start = jiffies;
 
@@ -1072,10 +1058,8 @@ typhoon_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 		if(typhoon_issue_command(tp, 1, &xp_cmd, 3, xp_resp) < 0) {
 			strcpy(info->fw_version, "Unknown runtime");
 		} else {
-			u32 sleep_ver = xp_resp[0].parm2;
-			snprintf(info->fw_version, 32, "%02x.%03x.%03x",
-				 sleep_ver >> 24, (sleep_ver >> 12) & 0xfff, 
-				 sleep_ver & 0xfff);
+			strncpy(info->fw_version, (char *) &xp_resp[1], 32);
+			info->fw_version[31] = 0;
 		}
 	}
 
@@ -1267,7 +1251,7 @@ typhoon_wait_interrupt(void __iomem *ioaddr)
 	int i, err = 0;
 
 	for(i = 0; i < TYPHOON_WAIT_TIMEOUT; i++) {
-		if(ioread32(ioaddr + TYPHOON_REG_INTR_STATUS) &
+		if(readl(ioaddr + TYPHOON_REG_INTR_STATUS) &
 		   TYPHOON_INTR_BOOTCMD)
 			goto out;
 		udelay(TYPHOON_UDELAY);
@@ -1276,7 +1260,7 @@ typhoon_wait_interrupt(void __iomem *ioaddr)
 	err = -ETIMEDOUT;
 
 out:
-	iowrite32(TYPHOON_INTR_BOOTCMD, ioaddr + TYPHOON_REG_INTR_STATUS);
+	writel(TYPHOON_INTR_BOOTCMD, ioaddr + TYPHOON_REG_INTR_STATUS);
 	return err;
 }
 
@@ -1410,11 +1394,11 @@ typhoon_download_firmware(struct typhoon *tp)
 		goto err_out;
 	}
 
-	irqEnabled = ioread32(ioaddr + TYPHOON_REG_INTR_ENABLE);
-	iowrite32(irqEnabled | TYPHOON_INTR_BOOTCMD,
+	irqEnabled = readl(ioaddr + TYPHOON_REG_INTR_ENABLE);
+	writel(irqEnabled | TYPHOON_INTR_BOOTCMD,
 	       ioaddr + TYPHOON_REG_INTR_ENABLE);
-	irqMasked = ioread32(ioaddr + TYPHOON_REG_INTR_MASK);
-	iowrite32(irqMasked | TYPHOON_INTR_BOOTCMD,
+	irqMasked = readl(ioaddr + TYPHOON_REG_INTR_MASK);
+	writel(irqMasked | TYPHOON_INTR_BOOTCMD,
 	       ioaddr + TYPHOON_REG_INTR_MASK);
 
 	err = -ETIMEDOUT;
@@ -1426,24 +1410,24 @@ typhoon_download_firmware(struct typhoon *tp)
 	numSections = le32_to_cpu(fHdr->numSections);
 	load_addr = le32_to_cpu(fHdr->startAddr);
 
-	iowrite32(TYPHOON_INTR_BOOTCMD, ioaddr + TYPHOON_REG_INTR_STATUS);
-	iowrite32(load_addr, ioaddr + TYPHOON_REG_DOWNLOAD_BOOT_ADDR);
+	writel(TYPHOON_INTR_BOOTCMD, ioaddr + TYPHOON_REG_INTR_STATUS);
+	writel(load_addr, ioaddr + TYPHOON_REG_DOWNLOAD_BOOT_ADDR);
 	hmac = le32_to_cpu(fHdr->hmacDigest[0]);
-	iowrite32(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_0);
+	writel(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_0);
 	hmac = le32_to_cpu(fHdr->hmacDigest[1]);
-	iowrite32(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_1);
+	writel(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_1);
 	hmac = le32_to_cpu(fHdr->hmacDigest[2]);
-	iowrite32(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_2);
+	writel(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_2);
 	hmac = le32_to_cpu(fHdr->hmacDigest[3]);
-	iowrite32(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_3);
+	writel(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_3);
 	hmac = le32_to_cpu(fHdr->hmacDigest[4]);
-	iowrite32(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_4);
+	writel(hmac, ioaddr + TYPHOON_REG_DOWNLOAD_HMAC_4);
 	typhoon_post_pci_writes(ioaddr);
-	iowrite32(TYPHOON_BOOTCMD_RUNTIME_IMAGE, ioaddr + TYPHOON_REG_COMMAND);
+	writel(TYPHOON_BOOTCMD_RUNTIME_IMAGE, ioaddr + TYPHOON_REG_COMMAND);
 
 	image_data += sizeof(struct typhoon_file_header);
 
-	/* The ioread32() in typhoon_wait_interrupt() will force the
+	/* The readl() in typhoon_wait_interrupt() will force the
 	 * last write to the command register to post, so
 	 * we don't need a typhoon_post_pci_writes() after it.
 	 */
@@ -1457,7 +1441,7 @@ typhoon_download_firmware(struct typhoon *tp)
 			len = min_t(u32, section_len, PAGE_SIZE);
 
 			if(typhoon_wait_interrupt(ioaddr) < 0 ||
-			   ioread32(ioaddr + TYPHOON_REG_STATUS) !=
+			   readl(ioaddr + TYPHOON_REG_STATUS) !=
 			   TYPHOON_STATUS_WAITING_FOR_SEGMENT) {
 				printk(KERN_ERR "%s: segment ready timeout\n",
 				       tp->name);
@@ -1474,14 +1458,13 @@ typhoon_download_firmware(struct typhoon *tp)
 			csum = csum_fold(csum);
 			csum = le16_to_cpu(csum);
 
-			iowrite32(len, ioaddr + TYPHOON_REG_BOOT_LENGTH);
-			iowrite32(csum, ioaddr + TYPHOON_REG_BOOT_CHECKSUM);
-			iowrite32(load_addr,
-					ioaddr + TYPHOON_REG_BOOT_DEST_ADDR);
-			iowrite32(0, ioaddr + TYPHOON_REG_BOOT_DATA_HI);
-			iowrite32(dpage_dma, ioaddr + TYPHOON_REG_BOOT_DATA_LO);
+			writel(len, ioaddr + TYPHOON_REG_BOOT_LENGTH);
+			writel(csum, ioaddr + TYPHOON_REG_BOOT_CHECKSUM);
+			writel(load_addr, ioaddr + TYPHOON_REG_BOOT_DEST_ADDR);
+			writel(0, ioaddr + TYPHOON_REG_BOOT_DATA_HI);
+			writel(dpage_dma, ioaddr + TYPHOON_REG_BOOT_DATA_LO);
 			typhoon_post_pci_writes(ioaddr);
-			iowrite32(TYPHOON_BOOTCMD_SEG_AVAILABLE,
+			writel(TYPHOON_BOOTCMD_SEG_AVAILABLE,
 			       ioaddr + TYPHOON_REG_COMMAND);
 
 			image_data += len;
@@ -1491,25 +1474,25 @@ typhoon_download_firmware(struct typhoon *tp)
 	}
 
 	if(typhoon_wait_interrupt(ioaddr) < 0 ||
-	   ioread32(ioaddr + TYPHOON_REG_STATUS) !=
+	   readl(ioaddr + TYPHOON_REG_STATUS) !=
 	   TYPHOON_STATUS_WAITING_FOR_SEGMENT) {
 		printk(KERN_ERR "%s: final segment ready timeout\n", tp->name);
 		goto err_out_irq;
 	}
 
-	iowrite32(TYPHOON_BOOTCMD_DNLD_COMPLETE, ioaddr + TYPHOON_REG_COMMAND);
+	writel(TYPHOON_BOOTCMD_DNLD_COMPLETE, ioaddr + TYPHOON_REG_COMMAND);
 
 	if(typhoon_wait_status(ioaddr, TYPHOON_STATUS_WAITING_FOR_BOOT) < 0) {
 		printk(KERN_ERR "%s: boot ready timeout, status 0x%0x\n",
-		       tp->name, ioread32(ioaddr + TYPHOON_REG_STATUS));
+		       tp->name, readl(ioaddr + TYPHOON_REG_STATUS));
 		goto err_out_irq;
 	}
 
 	err = 0;
 
 err_out_irq:
-	iowrite32(irqMasked, ioaddr + TYPHOON_REG_INTR_MASK);
-	iowrite32(irqEnabled, ioaddr + TYPHOON_REG_INTR_ENABLE);
+	writel(irqMasked, ioaddr + TYPHOON_REG_INTR_MASK);
+	writel(irqEnabled, ioaddr + TYPHOON_REG_INTR_ENABLE);
 
 	pci_free_consistent(pdev, PAGE_SIZE, dpage, dpage_dma);
 
@@ -1527,25 +1510,24 @@ typhoon_boot_3XP(struct typhoon *tp, u32 initial_status)
 		goto out_timeout;
 	}
 
-	iowrite32(0, ioaddr + TYPHOON_REG_BOOT_RECORD_ADDR_HI);
-	iowrite32(tp->shared_dma, ioaddr + TYPHOON_REG_BOOT_RECORD_ADDR_LO);
+	writel(0, ioaddr + TYPHOON_REG_BOOT_RECORD_ADDR_HI);
+	writel(tp->shared_dma, ioaddr + TYPHOON_REG_BOOT_RECORD_ADDR_LO);
 	typhoon_post_pci_writes(ioaddr);
-	iowrite32(TYPHOON_BOOTCMD_REG_BOOT_RECORD,
-				ioaddr + TYPHOON_REG_COMMAND);
+	writel(TYPHOON_BOOTCMD_REG_BOOT_RECORD, ioaddr + TYPHOON_REG_COMMAND);
 
 	if(typhoon_wait_status(ioaddr, TYPHOON_STATUS_RUNNING) < 0) {
 		printk(KERN_ERR "%s: boot finish timeout (status 0x%x)\n",
-		       tp->name, ioread32(ioaddr + TYPHOON_REG_STATUS));
+		       tp->name, readl(ioaddr + TYPHOON_REG_STATUS));
 		goto out_timeout;
 	}
 
 	/* Clear the Transmit and Command ready registers
 	 */
-	iowrite32(0, ioaddr + TYPHOON_REG_TX_HI_READY);
-	iowrite32(0, ioaddr + TYPHOON_REG_CMD_READY);
-	iowrite32(0, ioaddr + TYPHOON_REG_TX_LO_READY);
+	writel(0, ioaddr + TYPHOON_REG_TX_HI_READY);
+	writel(0, ioaddr + TYPHOON_REG_CMD_READY);
+	writel(0, ioaddr + TYPHOON_REG_TX_LO_READY);
 	typhoon_post_pci_writes(ioaddr);
-	iowrite32(TYPHOON_BOOTCMD_BOOT, ioaddr + TYPHOON_REG_COMMAND);
+	writel(TYPHOON_BOOTCMD_BOOT, ioaddr + TYPHOON_REG_COMMAND);
 
 	return 0;
 
@@ -1705,7 +1687,8 @@ typhoon_rx(struct typhoon *tp, struct basic_ring *rxRing, volatile u32 * ready,
 		skb = rxb->skb;
 		dma_addr = rxb->dma_addr;
 
-		typhoon_inc_rx_index(&rxaddr, 1);
+		rxaddr += sizeof(struct rx_desc);
+		rxaddr %= RX_ENTRIES * sizeof(struct rx_desc);
 
 		if(rx->flags & TYPHOON_RX_ERROR) {
 			typhoon_recycle_rx_skb(tp, idx);
@@ -1824,8 +1807,7 @@ typhoon_poll(struct net_device *dev, int *total_budget)
 
 	if(done) {
 		netif_rx_complete(dev);
-		iowrite32(TYPHOON_INTR_NONE,
-				tp->ioaddr + TYPHOON_REG_INTR_MASK);
+		writel(TYPHOON_INTR_NONE, tp->ioaddr + TYPHOON_REG_INTR_MASK);
 		typhoon_post_pci_writes(tp->ioaddr);
 	}
 
@@ -1840,14 +1822,14 @@ typhoon_interrupt(int irq, void *dev_instance, struct pt_regs *rgs)
 	void __iomem *ioaddr = tp->ioaddr;
 	u32 intr_status;
 
-	intr_status = ioread32(ioaddr + TYPHOON_REG_INTR_STATUS);
+	intr_status = readl(ioaddr + TYPHOON_REG_INTR_STATUS);
 	if(!(intr_status & TYPHOON_INTR_HOST_INT))
 		return IRQ_NONE;
 
-	iowrite32(intr_status, ioaddr + TYPHOON_REG_INTR_STATUS);
+	writel(intr_status, ioaddr + TYPHOON_REG_INTR_STATUS);
 
 	if(netif_rx_schedule_prep(dev)) {
-		iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
+		writel(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
 		typhoon_post_pci_writes(ioaddr);
 		__netif_rx_schedule(dev);
 	} else {
@@ -1874,7 +1856,7 @@ typhoon_free_rx_rings(struct typhoon *tp)
 }
 
 static int
-typhoon_sleep(struct typhoon *tp, pci_power_t state, u16 events)
+typhoon_sleep(struct typhoon *tp, int state, u16 events)
 {
 	struct pci_dev *pdev = tp->pdev;
 	void __iomem *ioaddr = tp->ioaddr;
@@ -1906,9 +1888,9 @@ typhoon_sleep(struct typhoon *tp, pci_power_t state, u16 events)
 	 */
 	netif_carrier_off(tp->dev);
 
-	pci_enable_wake(tp->pdev, pci_choose_state(pdev, state), 1);
+	pci_enable_wake(tp->pdev, state, 1);
 	pci_disable_device(pdev);
-	return pci_set_power_state(pdev, pci_choose_state(pdev, state));
+	return pci_set_power_state(pdev, state);
 }
 
 static int
@@ -1917,14 +1899,14 @@ typhoon_wakeup(struct typhoon *tp, int wait_type)
 	struct pci_dev *pdev = tp->pdev;
 	void __iomem *ioaddr = tp->ioaddr;
 
-	pci_set_power_state(pdev, PCI_D0);
+	pci_set_power_state(pdev, 0);
 	pci_restore_state(pdev);
 
 	/* Post 2.x.x versions of the Sleep Image require a reset before
 	 * we can download the Runtime Image. But let's not make users of
 	 * the old firmware pay for the reset.
 	 */
-	iowrite32(TYPHOON_BOOTCMD_WAKEUP, ioaddr + TYPHOON_REG_COMMAND);
+	writel(TYPHOON_BOOTCMD_WAKEUP, ioaddr + TYPHOON_REG_COMMAND);
 	if(typhoon_wait_status(ioaddr, TYPHOON_STATUS_WAITING_FOR_HOST) < 0 ||
 			(tp->capabilities & TYPHOON_WAKEUP_NEEDS_RESET))
 		return typhoon_reset(ioaddr, wait_type);
@@ -2013,8 +1995,8 @@ typhoon_start_runtime(struct typhoon *tp)
 	tp->card_state = Running;
 	smp_wmb();
 
-	iowrite32(TYPHOON_INTR_ENABLE_ALL, ioaddr + TYPHOON_REG_INTR_ENABLE);
-	iowrite32(TYPHOON_INTR_NONE, ioaddr + TYPHOON_REG_INTR_MASK);
+	writel(TYPHOON_INTR_ENABLE_ALL, ioaddr + TYPHOON_REG_INTR_ENABLE);
+	writel(TYPHOON_INTR_NONE, ioaddr + TYPHOON_REG_INTR_MASK);
 	typhoon_post_pci_writes(ioaddr);
 
 	return 0;
@@ -2039,7 +2021,7 @@ typhoon_stop_runtime(struct typhoon *tp, int wait_type)
 	 * when called with !netif_running(). This will be posted
 	 * when we force the posting of the command.
 	 */
-	iowrite32(TYPHOON_INTR_NONE, ioaddr + TYPHOON_REG_INTR_ENABLE);
+	writel(TYPHOON_INTR_NONE, ioaddr + TYPHOON_REG_INTR_ENABLE);
 
 	INIT_COMMAND_NO_RESPONSE(&xp_cmd, TYPHOON_CMD_RX_DISABLE);
 	typhoon_issue_command(tp, 1, &xp_cmd, 0, NULL);
@@ -2155,7 +2137,7 @@ out_sleep:
 		goto out;
 	}
 
-	if(typhoon_sleep(tp, PCI_D3hot, 0) < 0) 
+	if(typhoon_sleep(tp, 3, 0) < 0) 
 		printk(KERN_ERR "%s: unable to go back to sleep\n", dev->name);
 
 out:
@@ -2182,7 +2164,7 @@ typhoon_close(struct net_device *dev)
 	if(typhoon_boot_3XP(tp, TYPHOON_STATUS_WAITING_FOR_HOST) < 0)
 		printk(KERN_ERR "%s: unable to boot sleep image\n", dev->name);
 
-	if(typhoon_sleep(tp, PCI_D3hot, 0) < 0)
+	if(typhoon_sleep(tp, 3, 0) < 0)
 		printk(KERN_ERR "%s: unable to put card to sleep\n", dev->name);
 
 	return 0;
@@ -2222,7 +2204,7 @@ reset:
 }
 
 static int
-typhoon_suspend(struct pci_dev *pdev, pm_message_t state)
+typhoon_suspend(struct pci_dev *pdev, u32 state)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct typhoon *tp = netdev_priv(dev);
@@ -2287,57 +2269,11 @@ need_resume:
 }
 
 static int
-typhoon_enable_wake(struct pci_dev *pdev, pci_power_t state, int enable)
+typhoon_enable_wake(struct pci_dev *pdev, u32 state, int enable)
 {
 	return pci_enable_wake(pdev, state, enable);
 }
 #endif
-
-static int __devinit
-typhoon_test_mmio(struct pci_dev *pdev)
-{
-	void __iomem *ioaddr = pci_iomap(pdev, 1, 128);
-	int mode = 0;
-	u32 val;
-
-	if(!ioaddr)
-		goto out;
-
-	if(ioread32(ioaddr + TYPHOON_REG_STATUS) !=
-				TYPHOON_STATUS_WAITING_FOR_HOST)
-		goto out_unmap;
-
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_STATUS);
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_ENABLE);
-
-	/* Ok, see if we can change our interrupt status register by
-	 * sending ourselves an interrupt. If so, then MMIO works.
-	 * The 50usec delay is arbitrary -- it could probably be smaller.
-	 */
-	val = ioread32(ioaddr + TYPHOON_REG_INTR_STATUS);
-	if((val & TYPHOON_INTR_SELF) == 0) {
-		iowrite32(1, ioaddr + TYPHOON_REG_SELF_INTERRUPT);
-		ioread32(ioaddr + TYPHOON_REG_INTR_STATUS);
-		udelay(50);
-		val = ioread32(ioaddr + TYPHOON_REG_INTR_STATUS);
-		if(val & TYPHOON_INTR_SELF)
-			mode = 1;
-	}
-
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_MASK);
-	iowrite32(TYPHOON_INTR_ALL, ioaddr + TYPHOON_REG_INTR_STATUS);
-	iowrite32(TYPHOON_INTR_NONE, ioaddr + TYPHOON_REG_INTR_ENABLE);
-	ioread32(ioaddr + TYPHOON_REG_INTR_STATUS);
-
-out_unmap:
-	pci_iounmap(pdev, ioaddr);
-
-out:
-	if(!mode)
-		printk(KERN_INFO PFX "falling back to port IO\n");
-	return mode;
-}
 
 static int __devinit
 typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -2346,7 +2282,8 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct net_device *dev;
 	struct typhoon *tp;
 	int card_id = (int) ent->driver_data;
-	void __iomem *ioaddr;
+	unsigned long ioaddr;
+	void __iomem *ioaddr_mapped;
 	void *shared;
 	dma_addr_t shared_dma;
 	struct cmd_desc xp_cmd;
@@ -2387,21 +2324,8 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto error_out_mwi;
 	}
 
-	/* sanity checks on IO and MMIO BARs
+	/* sanity checks, resource #1 is our mmio area
 	 */
-	if(!(pci_resource_flags(pdev, 0) & IORESOURCE_IO)) {
-		printk(ERR_PFX
-		       "%s: region #1 not a PCI IO resource, aborting\n",
-		       pci_name(pdev));
-		err = -ENODEV;
-		goto error_out_mwi;
-	}
-	if(pci_resource_len(pdev, 0) < 128) {
-		printk(ERR_PFX "%s: Invalid PCI IO region size, aborting\n",
-		       pci_name(pdev));
-		err = -ENODEV;
-		goto error_out_mwi;
-	}
 	if(!(pci_resource_flags(pdev, 1) & IORESOURCE_MEM)) {
 		printk(ERR_PFX
 		       "%s: region #1 not a PCI MMIO resource, aborting\n",
@@ -2423,14 +2347,12 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto error_out_mwi;
 	}
 
-	/* map our registers
+	/* map our MMIO region
 	 */
-	if(use_mmio != 0 && use_mmio != 1)
-		use_mmio = typhoon_test_mmio(pdev);
-
-	ioaddr = pci_iomap(pdev, use_mmio, 128);
-	if (!ioaddr) {
-		printk(ERR_PFX "%s: cannot remap registers, aborting\n",
+	ioaddr = pci_resource_start(pdev, 1);
+	ioaddr_mapped = ioremap(ioaddr, 128);
+	if (!ioaddr_mapped) {
+		printk(ERR_PFX "%s: cannot remap MMIO, aborting\n",
 		       pci_name(pdev));
 		err = -EIO;
 		goto error_out_regions;
@@ -2453,9 +2375,12 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	tp->shared_dma = shared_dma;
 	tp->pdev = pdev;
 	tp->tx_pdev = pdev;
-	tp->ioaddr = ioaddr;
-	tp->tx_ioaddr = ioaddr;
+	tp->ioaddr = ioaddr_mapped;
+	tp->tx_ioaddr = ioaddr_mapped;
 	tp->dev = dev;
+
+	/* need to be able to restore PCI state after a suspend */
+	pci_save_state(pdev);
 
 	/* Init sequence:
 	 * 1) Reset the adapter to clear any bad juju
@@ -2464,18 +2389,16 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * 4) Get the hardware address.
 	 * 5) Put the card to sleep.
 	 */
-	if (typhoon_reset(ioaddr, WaitSleep) < 0) {
+	if (typhoon_reset(ioaddr_mapped, WaitSleep) < 0) {
 		printk(ERR_PFX "%s: could not reset 3XP\n", pci_name(pdev));
 		err = -EIO;
 		goto error_out_dma;
 	}
 
 	/* Now that we've reset the 3XP and are sure it's not going to
-	 * write all over memory, enable bus mastering, and save our
-	 * state for resuming after a suspend.
+	 * write all over memory, enable bus mastering.
 	 */
 	pci_set_master(pdev);
-	pci_save_state(pdev);
 
 	/* dev->name is not valid until we register, but we need to
 	 * use some common routines to initialize the card. So that those
@@ -2516,7 +2439,7 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	INIT_COMMAND_WITH_RESPONSE(&xp_cmd, TYPHOON_CMD_READ_VERSIONS);
 	if(typhoon_issue_command(tp, 1, &xp_cmd, 3, xp_resp) < 0) {
 		printk(ERR_PFX "%s: Could not get Sleep Image version\n",
-			pci_name(pdev));
+			pdev->slot_name);
 		goto error_out_reset;
 	}
 
@@ -2532,7 +2455,7 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if(xp_resp[0].numDesc != 0)
 		tp->capabilities |= TYPHOON_WAKEUP_NEEDS_RESET;
 
-	if(typhoon_sleep(tp, PCI_D3hot, 0) < 0) {
+	if(typhoon_sleep(tp, 3, 0) < 0) {
 		printk(ERR_PFX "%s: cannot put adapter to sleep\n",
 		       pci_name(pdev));
 		err = -EIO;
@@ -2569,9 +2492,8 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	pci_set_drvdata(pdev, dev);
 
-	printk(KERN_INFO "%s: %s at %s 0x%lx, ",
-	       dev->name, typhoon_card_info[card_id].name,
-	       use_mmio ? "MMIO" : "IO", pci_resource_start(pdev, use_mmio));
+	printk(KERN_INFO "%s: %s at 0x%lx, ",
+	       dev->name, typhoon_card_info[card_id].name, ioaddr);
 	for(i = 0; i < 5; i++)
 		printk("%2.2x:", dev->dev_addr[i]);
 	printk("%2.2x\n", dev->dev_addr[i]);
@@ -2594,8 +2516,7 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		u8 *ver_string = (u8 *) &xp_resp[1];
 		ver_string[25] = 0;
 		printk(KERN_INFO "%s: Typhoon 1.1+ Sleep Image version "
-			"%02x.%03x.%03x %s\n", dev->name, sleep_ver >> 24,
-			(sleep_ver >> 12) & 0xfff, sleep_ver & 0xfff,
+			"%u.%u.%u.%u %s\n", dev->name, HIPQUAD(sleep_ver),
 			ver_string);
 	} else {
 		printk(KERN_WARNING "%s: Unknown Sleep Image version "
@@ -2606,13 +2527,13 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return 0;
 
 error_out_reset:
-	typhoon_reset(ioaddr, NoWait);
+	typhoon_reset(ioaddr_mapped, NoWait);
 
 error_out_dma:
 	pci_free_consistent(pdev, sizeof(struct typhoon_shared),
 			    shared, shared_dma);
 error_out_remap:
-	pci_iounmap(pdev, ioaddr);
+	iounmap(ioaddr_mapped);
 error_out_regions:
 	pci_release_regions(pdev);
 error_out_mwi:
@@ -2632,10 +2553,10 @@ typhoon_remove_one(struct pci_dev *pdev)
 	struct typhoon *tp = netdev_priv(dev);
 
 	unregister_netdev(dev);
-	pci_set_power_state(pdev, PCI_D0);
+	pci_set_power_state(pdev, 0);
 	pci_restore_state(pdev);
 	typhoon_reset(tp->ioaddr, NoWait);
-	pci_iounmap(pdev, tp->ioaddr);
+	iounmap(tp->ioaddr);
 	pci_free_consistent(pdev, sizeof(struct typhoon_shared),
 			    tp->shared, tp->shared_dma);
 	pci_release_regions(pdev);

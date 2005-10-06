@@ -100,7 +100,7 @@ typedef struct {
 static ulog_buff_t ulog_buffers[ULOG_MAXNLGROUPS];	/* array of buffers */
 
 static struct sock *nflognl;	/* our socket */
-static DECLARE_LOCK(ulog_lock);	/* spinlock */
+DECLARE_LOCK(ulog_lock);	/* spinlock */
 
 /* send one ulog_buff_t to userspace */
 static void ulog_send(unsigned int nlgroupnum)
@@ -140,7 +140,7 @@ static void ulog_timer(unsigned long data)
 	UNLOCK_BH(&ulog_lock);
 }
 
-static struct sk_buff *ulog_alloc_skb(unsigned int size)
+struct sk_buff *ulog_alloc_skb(unsigned int size)
 {
 	struct sk_buff *skb;
 

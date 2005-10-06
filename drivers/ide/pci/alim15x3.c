@@ -775,7 +775,7 @@ static void __init init_hwif_common_ali15x3 (ide_hwif_t *hwif)
                  * M1543C or newer for DMAing
                  */
                 hwif->ide_dma_check = &ali15x3_config_drive_for_dma;
-		hwif->dma_setup = &ali15x3_dma_setup;
+		hwif->ide_dma_setup = &ali15x3_dma_setup;
 		if (!noautodma)
 			hwif->autodma = 1;
 		if (!(hwif->udma_four))
@@ -884,7 +884,8 @@ static int __devinit alim15x3_init_one(struct pci_dev *dev, const struct pci_dev
 #if defined(CONFIG_SPARC64)
 	d->init_hwif = init_hwif_common_ali15x3;
 #endif /* CONFIG_SPARC64 */
-	return ide_setup_pci_device(dev, d);
+	ide_setup_pci_device(dev, d);
+	return 0;
 }
 
 

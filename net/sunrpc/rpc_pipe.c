@@ -276,7 +276,12 @@ rpc_pipe_ioctl(struct inode *ino, struct file *filp,
 	}
 }
 
-static struct file_operations rpc_pipe_fops = {
+struct inode_operations rpc_pipe_iops = {
+	.lookup		= simple_lookup,
+};
+
+
+struct file_operations rpc_pipe_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.read		= rpc_pipe_read,
@@ -590,7 +595,7 @@ __rpc_rmdir(struct inode *dir, struct dentry *dentry)
 	return 0;
 }
 
-static struct dentry *
+struct dentry *
 rpc_lookup_negative(char *path, struct nameidata *nd)
 {
 	struct dentry *dentry;
@@ -764,7 +769,6 @@ rpc_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = RPCAUTH_GSSMAGIC;
 	sb->s_op = &s_ops;
-	sb->s_time_gran = 1;
 
 	inode = rpc_get_inode(sb, S_IFDIR | 0755);
 	if (!inode)

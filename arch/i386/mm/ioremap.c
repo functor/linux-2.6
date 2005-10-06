@@ -17,85 +17,84 @@
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
 
-#define ISA_START_ADDRESS	0xa0000
-#define ISA_END_ADDRESS		0x100000
-
-static int ioremap_pte_range(pmd_t *pmd, unsigned long addr,
-		unsigned long end, unsigned long phys_addr, unsigned long flags)
+static inline void remap_area_pte(pte_t * pte, unsigned long address, unsigned long size,
+	unsigned long phys_addr, unsigned long flags)
 {
-	pte_t *pte;
+	unsigned long end;
 	unsigned long pfn;
 
+	address &= ~PMD_MASK;
+	end = address + size;
+	if (end > PMD_SIZE)
+		end = PMD_SIZE;
+	if (address >= end)
+		BUG();
 	pfn = phys_addr >> PAGE_SHIFT;
-	pte = pte_alloc_kernel(&init_mm, pmd, addr);
-	if (!pte)
-		return -ENOMEM;
 	do {
-		BUG_ON(!pte_none(*pte));
+		if (!pte_none(*pte)) {
+			printk("remap_area_pte: page already exists\n");
+			BUG();
+		}
 		set_pte(pte, pfn_pte(pfn, __pgprot(_PAGE_PRESENT | _PAGE_RW | 
 					_PAGE_DIRTY | _PAGE_ACCESSED | flags)));
+		address += PAGE_SIZE;
 		pfn++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
-	return 0;
+		pte++;
+	} while (address && (address < end));
 }
 
-static inline int ioremap_pmd_range(pud_t *pud, unsigned long addr,
-		unsigned long end, unsigned long phys_addr, unsigned long flags)
+static inline int remap_area_pmd(pmd_t * pmd, unsigned long address, unsigned long size,
+	unsigned long phys_addr, unsigned long flags)
 {
-	pmd_t *pmd;
-	unsigned long next;
+	unsigned long end;
 
-	phys_addr -= addr;
-	pmd = pmd_alloc(&init_mm, pud, addr);
-	if (!pmd)
-		return -ENOMEM;
+	address &= ~PGDIR_MASK;
+	end = address + size;
+	if (end > PGDIR_SIZE)
+		end = PGDIR_SIZE;
+	phys_addr -= address;
+	if (address >= end)
+		BUG();
 	do {
-		next = pmd_addr_end(addr, end);
-		if (ioremap_pte_range(pmd, addr, next, phys_addr + addr, flags))
+		pte_t * pte = pte_alloc_kernel(&init_mm, pmd, address);
+		if (!pte)
 			return -ENOMEM;
-	} while (pmd++, addr = next, addr != end);
+		remap_area_pte(pte, address, end - address, address + phys_addr, flags);
+		address = (address + PMD_SIZE) & PMD_MASK;
+		pmd++;
+	} while (address && (address < end));
 	return 0;
 }
 
-static inline int ioremap_pud_range(pgd_t *pgd, unsigned long addr,
-		unsigned long end, unsigned long phys_addr, unsigned long flags)
+static int remap_area_pages(unsigned long address, unsigned long phys_addr,
+				 unsigned long size, unsigned long flags)
 {
-	pud_t *pud;
-	unsigned long next;
+	int error;
+	pgd_t * dir;
+	unsigned long end = address + size;
 
-	phys_addr -= addr;
-	pud = pud_alloc(&init_mm, pgd, addr);
-	if (!pud)
-		return -ENOMEM;
-	do {
-		next = pud_addr_end(addr, end);
-		if (ioremap_pmd_range(pud, addr, next, phys_addr + addr, flags))
-			return -ENOMEM;
-	} while (pud++, addr = next, addr != end);
-	return 0;
-}
-
-static int ioremap_page_range(unsigned long addr,
-		unsigned long end, unsigned long phys_addr, unsigned long flags)
-{
-	pgd_t *pgd;
-	unsigned long next;
-	int err;
-
-	BUG_ON(addr >= end);
+	phys_addr -= address;
+	dir = pgd_offset(&init_mm, address);
 	flush_cache_all();
-	phys_addr -= addr;
-	pgd = pgd_offset_k(addr);
+	if (address >= end)
+		BUG();
 	spin_lock(&init_mm.page_table_lock);
 	do {
-		next = pgd_addr_end(addr, end);
-		err = ioremap_pud_range(pgd, addr, next, phys_addr+addr, flags);
-		if (err)
+		pmd_t *pmd;
+		pmd = pmd_alloc(&init_mm, dir, address);
+		error = -ENOMEM;
+		if (!pmd)
 			break;
-	} while (pgd++, addr = next, addr != end);
+		if (remap_area_pmd(pmd, address, end - address,
+					 phys_addr + address, flags))
+			break;
+		error = 0;
+		address = (address + PGDIR_SIZE) & PGDIR_MASK;
+		dir++;
+	} while (address && (address < end));
 	spin_unlock(&init_mm.page_table_lock);
 	flush_tlb_all();
-	return err;
+	return error;
 }
 
 /*
@@ -125,13 +124,13 @@ void __iomem * __ioremap(unsigned long phys_addr, unsigned long size, unsigned l
 	/*
 	 * Don't remap the low PCI/ISA area, it's always mapped..
 	 */
-	if (phys_addr >= ISA_START_ADDRESS && last_addr < ISA_END_ADDRESS)
+	if (phys_addr >= 0xA0000 && last_addr < 0x100000)
 		return (void __iomem *) phys_to_virt(phys_addr);
 
 	/*
 	 * Don't allow anybody to remap normal RAM that we're using..
 	 */
-	if (phys_addr <= virt_to_phys(high_memory - 1)) {
+	if (phys_addr < virt_to_phys(high_memory)) {
 		char *t_addr, *t_end;
 		struct page *page;
 
@@ -153,13 +152,12 @@ void __iomem * __ioremap(unsigned long phys_addr, unsigned long size, unsigned l
 	/*
 	 * Ok, go for it..
 	 */
-	area = get_vm_area(size, VM_IOREMAP | (flags << 20));
+	area = get_vm_area(size, VM_IOREMAP);
 	if (!area)
 		return NULL;
 	area->phys_addr = phys_addr;
 	addr = (void __iomem *) area->addr;
-	if (ioremap_page_range((unsigned long) addr,
-			(unsigned long) addr + size, phys_addr, flags)) {
+	if (remap_area_pages((unsigned long) addr, phys_addr, size, flags)) {
 		vunmap((void __force *) addr);
 		return NULL;
 	}
@@ -199,7 +197,7 @@ void __iomem *ioremap_nocache (unsigned long phys_addr, unsigned long size)
 	/* Guaranteed to be > phys_addr, as per __ioremap() */
 	last_addr = phys_addr + size - 1;
 
-	if (last_addr < virt_to_phys(high_memory) - 1) {
+	if (last_addr < virt_to_phys(high_memory)) { 
 		struct page *ppage = virt_to_page(__va(phys_addr));		
 		unsigned long npages;
 
@@ -227,32 +225,19 @@ void iounmap(volatile void __iomem *addr)
 {
 	struct vm_struct *p;
 	if ((void __force *) addr <= high_memory) 
-		return;
-
-	/*
-	 * __ioremap special-cases the PCI/ISA range by not instantiating a
-	 * vm_area and by simply returning an address into the kernel mapping
-	 * of ISA space.   So handle that here.
-	 */
-	if (addr >= phys_to_virt(ISA_START_ADDRESS) &&
-			addr < phys_to_virt(ISA_END_ADDRESS))
-		return;
-
-	write_lock(&vmlist_lock);
-	p = __remove_vm_area((void *) (PAGE_MASK & (unsigned long __force) addr));
+		return; 
+	p = remove_vm_area((void *) (PAGE_MASK & (unsigned long __force) addr));
 	if (!p) { 
-		printk("iounmap: bad address %p\n", addr);
-		goto out_unlock;
-	}
+		printk("__iounmap: bad address %p\n", addr);
+		return;
+	} 
 
-	if ((p->flags >> 20) && p->phys_addr < virt_to_phys(high_memory) - 1) {
+	if (p->flags && p->phys_addr < virt_to_phys(high_memory)) { 
 		change_page_attr(virt_to_page(__va(p->phys_addr)),
 				 p->size >> PAGE_SHIFT,
-				 PAGE_KERNEL);
+				 PAGE_KERNEL); 				 
 		global_flush_tlb();
 	} 
-out_unlock:
-	write_unlock(&vmlist_lock);
 	kfree(p); 
 }
 
@@ -270,7 +255,7 @@ void __init *bt_ioremap(unsigned long phys_addr, unsigned long size)
 	/*
 	 * Don't remap the low PCI/ISA area, it's always mapped..
 	 */
-	if (phys_addr >= ISA_START_ADDRESS && last_addr < ISA_END_ADDRESS)
+	if (phys_addr >= 0xA0000 && last_addr < 0x100000)
 		return phys_to_virt(phys_addr);
 
 	/*

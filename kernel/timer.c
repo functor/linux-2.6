@@ -30,13 +30,12 @@
 #include <linux/thread_info.h>
 #include <linux/time.h>
 #include <linux/jiffies.h>
-#include <linux/posix-timers.h>
 #include <linux/cpu.h>
+#include <linux/vs_cvirt.h>
+#include <linux/vserver/sched.h>
 #include <linux/syscalls.h>
 #include <linux/delay.h>
 #include <linux/diskdump.h>
-#include <linux/vs_cvirt.h>
-#include <linux/vserver/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -53,9 +52,8 @@ static void time_interpolator_update(long delta_nsec);
 /*
  * per-CPU timer vector definitions:
  */
-
-#define TVN_BITS (CONFIG_BASE_SMALL ? 4 : 6)
-#define TVR_BITS (CONFIG_BASE_SMALL ? 6 : 8)
+#define TVN_BITS 6
+#define TVR_BITS 8
 #define TVN_SIZE (1 << TVN_BITS)
 #define TVR_SIZE (1 << TVR_BITS)
 #define TVN_MASK (TVN_SIZE - 1)
@@ -472,14 +470,7 @@ repeat:
 			smp_wmb();
 			timer->base = NULL;
 			spin_unlock_irqrestore(&base->lock, flags);
-			{
-				u32 preempt_count = preempt_count();
-				fn(data);
-				if (preempt_count != preempt_count()) {
-					printk("huh, entered %p with %08x, exited with %08x?\n", fn, preempt_count, preempt_count());
-					BUG();
-				}
-			}
+			fn(data);
 			spin_lock_irq(&base->lock);
 			goto repeat;
 		}
@@ -568,7 +559,7 @@ unsigned long tick_nsec = TICK_NSEC;		/* ACTHZ period (nsec) */
 /* 
  * The current time 
  * wall_to_monotonic is what we need to add to xtime (or xtime corrected 
- * for sub jiffie times) to get to monotonic time.  Monotonic is pegged
+ * for sub jiffie times) to get to monotonic time.  Monotonic is pegged at zero
  * at zero at system boot time, so wall_to_monotonic will be negative,
  * however, we will ALWAYS keep the tv_nsec part positive so we can use
  * the usual normalization.
@@ -594,10 +585,10 @@ long time_tolerance = MAXFREQ;		/* frequency tolerance (ppm)	*/
 long time_precision = 1;		/* clock precision (us)		*/
 long time_maxerror = NTP_PHASE_LIMIT;	/* maximum error (us)		*/
 long time_esterror = NTP_PHASE_LIMIT;	/* estimated error (us)		*/
-static long time_phase;			/* phase offset (scaled us)	*/
+long time_phase;			/* phase offset (scaled us)	*/
 long time_freq = (((NSEC_PER_SEC + HZ/2) % HZ - HZ/2) << SHIFT_USEC) / NSEC_PER_USEC;
 					/* frequency offset (scaled ppm)*/
-static long time_adj;			/* tick adjust (scaled 1 / HZ)	*/
+long time_adj;				/* tick adjust (scaled 1 / HZ)	*/
 long time_reftime;			/* time at last adjustment (s)	*/
 long time_adjust;
 long time_next_adjust;
@@ -691,11 +682,7 @@ static void second_overflow(void)
 	if (ltemp > (MAXPHASE / MINSEC) << SHIFT_UPDATE)
 	    ltemp = (MAXPHASE / MINSEC) << SHIFT_UPDATE;
 	time_offset += ltemp;
-	#if SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE > 0
 	time_adj = -ltemp << (SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE);
-	#else
-	time_adj = -ltemp >> (SHIFT_HZ + SHIFT_UPDATE - SHIFT_SCALE);
-	#endif
     } else {
 	ltemp = time_offset;
 	if (!(time_status & STA_FLL))
@@ -703,11 +690,7 @@ static void second_overflow(void)
 	if (ltemp > (MAXPHASE / MINSEC) << SHIFT_UPDATE)
 	    ltemp = (MAXPHASE / MINSEC) << SHIFT_UPDATE;
 	time_offset -= ltemp;
-	#if SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE > 0
 	time_adj = ltemp << (SHIFT_SCALE - SHIFT_HZ - SHIFT_UPDATE);
-	#else
-	time_adj = ltemp >> (SHIFT_HZ + SHIFT_UPDATE - SHIFT_SCALE);
-	#endif
     }
 
     /*
@@ -821,6 +804,59 @@ static void update_wall_time(unsigned long ticks)
 	} while (ticks);
 }
 
+static inline void do_process_times(struct task_struct *p,
+	unsigned long user, unsigned long system)
+{
+	unsigned long psecs;
+
+	psecs = (p->utime += user);
+	psecs += (p->stime += system);
+	if (p->signal && !unlikely(p->state & (EXIT_DEAD|EXIT_ZOMBIE)) &&
+	    psecs / HZ >= p->signal->rlim[RLIMIT_CPU].rlim_cur) {
+		/* Send SIGXCPU every second.. */
+		if (!(psecs % HZ))
+			send_sig(SIGXCPU, p, 1);
+		/* and SIGKILL when we go over max.. */
+		if (psecs / HZ >= p->signal->rlim[RLIMIT_CPU].rlim_max)
+			send_sig(SIGKILL, p, 1);
+	}
+}
+
+static inline void do_it_virt(struct task_struct * p, unsigned long ticks)
+{
+	unsigned long it_virt = p->it_virt_value;
+
+	if (it_virt) {
+		it_virt -= ticks;
+		if (!it_virt) {
+			it_virt = p->it_virt_incr;
+			send_sig(SIGVTALRM, p, 1);
+		}
+		p->it_virt_value = it_virt;
+	}
+}
+
+static inline void do_it_prof(struct task_struct *p)
+{
+	unsigned long it_prof = p->it_prof_value;
+
+	if (it_prof) {
+		if (--it_prof == 0) {
+			it_prof = p->it_prof_incr;
+			send_sig(SIGPROF, p, 1);
+		}
+		p->it_prof_value = it_prof;
+	}
+}
+
+static void update_one_process(struct task_struct *p, unsigned long user,
+			unsigned long system, int cpu)
+{
+	do_process_times(p, user, system);
+	do_it_virt(p, user);
+	do_it_prof(p);
+}	
+
 /*
  * Called from the timer interrupt handler to charge one tick to the current 
  * process.  user_tick is 1 if the tick is user time, 0 for system.
@@ -828,18 +864,11 @@ static void update_wall_time(unsigned long ticks)
 void update_process_times(int user_tick)
 {
 	struct task_struct *p = current;
-	int cpu = smp_processor_id();
+	int cpu = smp_processor_id(), system = user_tick ^ 1;
 
-	/* Note: this timer irq context must be accounted for as well. */
-	if (user_tick)
-		account_user_time(p, jiffies_to_cputime(1));
-	else
-		account_system_time(p, HARDIRQ_OFFSET, jiffies_to_cputime(1));
+	update_one_process(p, user_tick, system, cpu);
 	run_local_timers();
-	if (rcu_pending(cpu))
-		rcu_check_callbacks(cpu, user_tick);
-	scheduler_tick();
- 	run_posix_cpu_timers(p);
+	scheduler_tick(user_tick, system);
 }
 
 /*
@@ -859,8 +888,6 @@ static unsigned long count_active_tasks(void)
  * Requires xtime_lock to access.
  */
 unsigned long avenrun[3];
-
-EXPORT_SYMBOL(avenrun);
 
 /*
  * calc_load - given tick count, update the avenrun load estimates.
@@ -966,6 +993,12 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
 
 #endif
 
+#ifndef __alpha__
+
+/*
+ * The Alpha uses getxpid, getxuid, and getxgid instead.  Maybe this
+ * should be moved into arch/i386 instead?
+ */
 
 /**
  * sys_getpid - return the thread group id of the current process
@@ -1014,7 +1047,7 @@ asmlinkage long sys_getppid(void)
 		 * Make sure we read the pid before re-reading the
 		 * parent pointer:
 		 */
-		smp_rmb();
+		rmb();
 		parent = me->group_leader->real_parent;
 		if (old != parent)
 			continue;
@@ -1024,20 +1057,6 @@ asmlinkage long sys_getppid(void)
 	}
 	return vx_map_pid(pid);
 }
-
-#ifdef __alpha__
-
-/*
- * The Alpha uses getxpid, getxuid, and getxgid instead.
- */
-
-asmlinkage long do_getxpid(long *ppid)
-{
-	*ppid = sys_getppid();
-	return sys_getpid();
-}
-
-#else /* _alpha_ */
 
 asmlinkage long sys_getuid(void)
 {
@@ -1261,6 +1280,9 @@ asmlinkage long sys_sysinfo(struct sysinfo __user *info)
 		val.procs = nr_threads;
 	} while (read_seqretry(&xtime_lock, seq));
 
+/*	if (vx_flags(VXF_VIRT_CPU, 0))
+		vx_vsi_cpu(val);
+*/
 	si_meminfo(&val);
 	si_swapinfo(&val);
 
@@ -1453,7 +1475,7 @@ void __init init_timers(void)
 
 struct time_interpolator *time_interpolator;
 static struct time_interpolator *time_interpolator_list;
-static DEFINE_SPINLOCK(time_interpolator_lock);
+static spinlock_t time_interpolator_lock = SPIN_LOCK_UNLOCKED;
 
 static inline u64 time_interpolator_get_cycles(unsigned int src)
 {
@@ -1466,10 +1488,10 @@ static inline u64 time_interpolator_get_cycles(unsigned int src)
 			return x();
 
 		case TIME_SOURCE_MMIO64	:
-			return readq((void __iomem *) time_interpolator->addr);
+			return readq(time_interpolator->addr);
 
 		case TIME_SOURCE_MMIO32	:
-			return readl((void __iomem *) time_interpolator->addr);
+			return readl(time_interpolator->addr);
 
 		default: return get_cycles();
 	}

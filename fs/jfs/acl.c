@@ -214,8 +214,7 @@ int jfs_setattr(struct dentry *dentry, struct iattr *iattr)
 		return rc;
 
 	if ((iattr->ia_valid & ATTR_UID && iattr->ia_uid != inode->i_uid) ||
-	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid) ||
-	    (iattr->ia_valid & ATTR_XID && iattr->ia_xid != inode->i_xid)) {
+	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid)) {
 		if (DQUOT_TRANSFER(inode, iattr))
 			return -EDQUOT;
 	}

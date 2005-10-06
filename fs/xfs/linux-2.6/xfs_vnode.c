@@ -34,7 +34,7 @@
 
 
 uint64_t vn_generation;		/* vnode generation number */
-DEFINE_SPINLOCK(vnumber_lock);
+spinlock_t vnumber_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  * Dedicated vnode inactive/reclaim sync semaphores.
@@ -156,6 +156,7 @@ vn_initialize(
 
 #ifdef	XFS_VNODE_TRACE
 	vp->v_trace = ktrace_alloc(VNODE_TRACE_SIZE, KM_SLEEP);
+	printk("Allocated VNODE_TRACE at 0x%p\n", vp->v_trace);
 #endif	/* XFS_VNODE_TRACE */
 
 	vn_trace_exit(vp, "vn_initialize", (inst_t *)__return_address);
@@ -198,11 +199,11 @@ vn_revalidate_core(
 {
 	struct inode	*inode = LINVFS_GET_IP(vp);
 
+	inode = LINVFS_GET_IP(vp);
 	inode->i_mode	    = VTTOIF(vap->va_type) | vap->va_mode;
 	inode->i_nlink	    = vap->va_nlink;
 	inode->i_uid	    = vap->va_uid;
 	inode->i_gid	    = vap->va_gid;
-	inode->i_xid	    = vap->va_xid;
 	inode->i_blocks	    = vap->va_nblocks;
 	inode->i_mtime	    = vap->va_mtime;
 	inode->i_ctime	    = vap->va_ctime;
@@ -423,8 +424,8 @@ vn_remove(
 /*  3 */		(void *)(vn_count(vp)), \
 /*  4 */		(void *)(ra),				\
 /*  5 */		(void *)(__psunsigned_t)(vp)->v_flag,	\
-/*  6 */		(void *)(__psint_t)current_cpu(),	\
-/*  7 */		(void *)(__psint_t)current_pid(),	\
+/*  6 */		(void *)(__psint_t)smp_processor_id(),	\
+/*  7 */		(void *)(__psint_t)(current->pid),	\
 /*  8 */		(void *)__return_address,		\
 /*  9 */		0, 0, 0, 0, 0, 0, 0)
 
@@ -432,13 +433,13 @@ vn_remove(
  * Vnode tracing code.
  */
 void
-vn_trace_entry(vnode_t *vp, const char *func, inst_t *ra)
+vn_trace_entry(vnode_t *vp, char *func, inst_t *ra)
 {
 	KTRACE_ENTER(vp, VNODE_KTRACE_ENTRY, func, 0, ra);
 }
 
 void
-vn_trace_exit(vnode_t *vp, const char *func, inst_t *ra)
+vn_trace_exit(vnode_t *vp, char *func, inst_t *ra)
 {
 	KTRACE_ENTER(vp, VNODE_KTRACE_EXIT, func, 0, ra);
 }

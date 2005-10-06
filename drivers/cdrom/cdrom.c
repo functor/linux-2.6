@@ -303,7 +303,7 @@ module_param(lockdoor, bool, 0);
 module_param(check_media_type, bool, 0);
 module_param(mrw_format_restart, bool, 0);
 
-static DEFINE_SPINLOCK(cdrom_lock);
+static spinlock_t cdrom_lock = SPIN_LOCK_UNLOCKED;
 
 static const char *mrw_format_status[] = {
 	"not mrw",
@@ -505,7 +505,7 @@ int cdrom_get_media_event(struct cdrom_device_info *cdi,
  * the first prototypes used 0x2c as the page code for the mrw mode page,
  * subsequently this was changed to 0x03. probe the one used by this drive
  */
-static int cdrom_mrw_probe_pc(struct cdrom_device_info *cdi)
+int cdrom_mrw_probe_pc(struct cdrom_device_info *cdi)
 {
 	struct packet_command cgc;
 	char buffer[16];
@@ -526,7 +526,7 @@ static int cdrom_mrw_probe_pc(struct cdrom_device_info *cdi)
 	return 1;
 }
 
-static int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
+int cdrom_is_mrw(struct cdrom_device_info *cdi, int *write)
 {
 	struct packet_command cgc;
 	struct mrw_feature_desc *mfd;
@@ -645,7 +645,7 @@ static int cdrom_mrw_exit(struct cdrom_device_info *cdi)
 		ret = cdrom_mrw_bgformat_susp(cdi, 0);
 	}
 
-	if (!ret && cdi->media_written)
+	if (!ret)
 		ret = cdrom_flush_cache(cdi);
 
 	return ret;
@@ -680,7 +680,7 @@ static int cdrom_mrw_set_lba_space(struct cdrom_device_info *cdi, int space)
 	return 0;
 }
 
-static int cdrom_get_random_writable(struct cdrom_device_info *cdi,
+int cdrom_get_random_writable(struct cdrom_device_info *cdi,
 			      struct rwrt_feature_desc *rfd)
 {
 	struct packet_command cgc;
@@ -701,7 +701,7 @@ static int cdrom_get_random_writable(struct cdrom_device_info *cdi,
 	return 0;
 }
 
-static int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
+int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
 {
 	struct packet_command cgc;
 	char buffer[16];
@@ -726,7 +726,7 @@ static int cdrom_has_defect_mgt(struct cdrom_device_info *cdi)
 }
 
 
-static int cdrom_is_random_writable(struct cdrom_device_info *cdi, int *write)
+int cdrom_is_random_writable(struct cdrom_device_info *cdi, int *write)
 {
 	struct rwrt_feature_desc rfd;
 	int ret;
@@ -3077,12 +3077,14 @@ EXPORT_SYMBOL(cdrom_mode_select);
 EXPORT_SYMBOL(cdrom_mode_sense);
 EXPORT_SYMBOL(init_cdrom_command);
 EXPORT_SYMBOL(cdrom_get_media_event);
+EXPORT_SYMBOL(cdrom_is_mrw);
+EXPORT_SYMBOL(cdrom_is_random_writable);
 
 #ifdef CONFIG_SYSCTL
 
 #define CDROM_STR_SIZE 1000
 
-static struct cdrom_sysctl_settings {
+struct cdrom_sysctl_settings {
 	char	info[CDROM_STR_SIZE];	/* general info */
 	int	autoclose;		/* close tray upon mount, etc */
 	int	autoeject;		/* eject on umount */
@@ -3091,7 +3093,7 @@ static struct cdrom_sysctl_settings {
 	int	check;			/* check media type */
 } cdrom_sysctl_settings;
 
-static int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
+int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
                            void __user *buffer, size_t *lenp, loff_t *ppos)
 {
         int pos;
@@ -3194,7 +3196,7 @@ static int cdrom_sysctl_info(ctl_table *ctl, int write, struct file * filp,
    procfs/sysctl yet. When they are, this will naturally disappear. For now
    just update all drives. Later this will become the template on which
    new registered drives will be based. */
-static void cdrom_update_settings(void)
+void cdrom_update_settings(void)
 {
 	struct cdrom_device_info *cdi;
 
@@ -3272,7 +3274,7 @@ static int cdrom_sysctl_handler(ctl_table *ctl, int write, struct file * filp,
 }
 
 /* Place files in /proc/sys/dev/cdrom */
-static ctl_table cdrom_table[] = {
+ctl_table cdrom_table[] = {
 	{
 		.ctl_name	= DEV_CDROM_INFO,
 		.procname	= "info",
@@ -3324,7 +3326,7 @@ static ctl_table cdrom_table[] = {
 	{ .ctl_name = 0 }
 };
 
-static ctl_table cdrom_cdrom_table[] = {
+ctl_table cdrom_cdrom_table[] = {
 	{
 		.ctl_name	= DEV_CDROM,
 		.procname	= "cdrom",
@@ -3336,7 +3338,7 @@ static ctl_table cdrom_cdrom_table[] = {
 };
 
 /* Make sure that /proc/sys/dev is there */
-static ctl_table cdrom_root_table[] = {
+ctl_table cdrom_root_table[] = {
 	{
 		.ctl_name	= CTL_DEV,
 		.procname	= "dev",

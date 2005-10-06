@@ -48,13 +48,10 @@ static int snd_trident_pcm_mixer_build(trident_t *trident, snd_trident_voice_t *
 static int snd_trident_pcm_mixer_free(trident_t *trident, snd_trident_voice_t * voice, snd_pcm_substream_t *substream);
 static irqreturn_t snd_trident_interrupt(int irq, void *dev_id, struct pt_regs *regs);
 #ifdef CONFIG_PM
-static int snd_trident_suspend(snd_card_t *card, pm_message_t state);
-static int snd_trident_resume(snd_card_t *card);
+static int snd_trident_suspend(snd_card_t *card, unsigned int state);
+static int snd_trident_resume(snd_card_t *card, unsigned int state);
 #endif
 static int snd_trident_sis_reset(trident_t *trident);
-
-static void snd_trident_clear_voices(trident_t * trident, unsigned short v_min, unsigned short v_max);
-static int snd_trident_free(trident_t *trident);
 
 /*
  *  common I/O routines
@@ -635,7 +632,7 @@ static void snd_trident_write_cvol_reg(trident_t * trident, snd_trident_voice_t 
    Returns:     Delta value.
   
   ---------------------------------------------------------------------------*/
-static unsigned int snd_trident_convert_rate(unsigned int rate)
+unsigned int snd_trident_convert_rate(unsigned int rate)
 {
 	unsigned int delta;
 
@@ -695,7 +692,7 @@ static unsigned int snd_trident_convert_adc_rate(unsigned int rate)
    Returns:     Delta value.
   
   ---------------------------------------------------------------------------*/
-static unsigned int snd_trident_spurious_threshold(unsigned int rate, unsigned int period_size)
+unsigned int snd_trident_spurious_threshold(unsigned int rate, unsigned int period_size)
 {
 	unsigned int res = (rate * period_size) / 48000;
 	if (res < 64)
@@ -716,7 +713,7 @@ static unsigned int snd_trident_spurious_threshold(unsigned int rate, unsigned i
    Returns:     Control value.
   
   ---------------------------------------------------------------------------*/
-static unsigned int snd_trident_control_mode(snd_pcm_substream_t *substream)
+unsigned int snd_trident_control_mode(snd_pcm_substream_t *substream)
 {
 	unsigned int CTRL;
 	snd_pcm_runtime_t *runtime = substream->runtime;
@@ -773,8 +770,8 @@ static int snd_trident_ioctl(snd_pcm_substream_t * substream,
   
   ---------------------------------------------------------------------------*/
 
-static int snd_trident_allocate_pcm_mem(snd_pcm_substream_t * substream,
-					snd_pcm_hw_params_t * hw_params)
+int snd_trident_allocate_pcm_mem(snd_pcm_substream_t * substream,
+				 snd_pcm_hw_params_t * hw_params)
 {
 	trident_t *trident = snd_pcm_substream_chip(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
@@ -807,8 +804,8 @@ static int snd_trident_allocate_pcm_mem(snd_pcm_substream_t * substream,
   
   ---------------------------------------------------------------------------*/
 
-static int snd_trident_allocate_evoice(snd_pcm_substream_t * substream,
-				       snd_pcm_hw_params_t * hw_params)
+int snd_trident_allocate_evoice(snd_pcm_substream_t * substream,
+				snd_pcm_hw_params_t * hw_params)
 {
 	trident_t *trident = snd_pcm_substream_chip(substream);
 	snd_pcm_runtime_t *runtime = substream->runtime;
@@ -3110,28 +3107,37 @@ static int __devinit snd_trident_mixer(trident_t * trident, int pcm_spdif_device
 
 #if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
 
+typedef struct snd_trident_gameport {
+	struct gameport info;
+	trident_t *chip;
+} trident_gameport_t;
+
 static unsigned char snd_trident_gameport_read(struct gameport *gameport)
 {
-	trident_t *chip = gameport_get_port_data(gameport);
-
-	snd_assert(chip, return 0);
+	trident_gameport_t *gp = (trident_gameport_t *)gameport;
+	trident_t *chip;
+	snd_assert(gp, return 0);
+	chip = gp->chip;
 	return inb(TRID_REG(chip, GAMEPORT_LEGACY));
 }
 
 static void snd_trident_gameport_trigger(struct gameport *gameport)
 {
-	trident_t *chip = gameport_get_port_data(gameport);
-
-	snd_assert(chip, return);
+	trident_gameport_t *gp = (trident_gameport_t *)gameport;
+	trident_t *chip;
+	snd_assert(gp, return);
+	chip = gp->chip;
 	outb(0xff, TRID_REG(chip, GAMEPORT_LEGACY));
 }
 
 static int snd_trident_gameport_cooked_read(struct gameport *gameport, int *axes, int *buttons)
 {
-	trident_t *chip = gameport_get_port_data(gameport);
+	trident_gameport_t *gp = (trident_gameport_t *)gameport;
+	trident_t *chip;
 	int i;
 
-	snd_assert(chip, return 0);
+	snd_assert(gp, return 0);
+	chip = gp->chip;
 
 	*buttons = (~inb(TRID_REG(chip, GAMEPORT_LEGACY)) >> 4) & 0xf;
 
@@ -3145,9 +3151,10 @@ static int snd_trident_gameport_cooked_read(struct gameport *gameport, int *axes
 
 static int snd_trident_gameport_open(struct gameport *gameport, int mode)
 {
-	trident_t *chip = gameport_get_port_data(gameport);
-
-	snd_assert(chip, return 0);
+	trident_gameport_t *gp = (trident_gameport_t *)gameport;
+	trident_t *chip;
+	snd_assert(gp, return -1);
+	chip = gp->chip;
 
 	switch (mode) {
 		case GAMEPORT_MODE_COOKED:
@@ -3163,42 +3170,30 @@ static int snd_trident_gameport_open(struct gameport *gameport, int mode)
 	}
 }
 
-int __devinit snd_trident_create_gameport(trident_t *chip)
+void __devinit snd_trident_gameport(trident_t *chip)
 {
-	struct gameport *gp;
-
-	chip->gameport = gp = gameport_allocate_port();
-	if (!gp) {
-		printk(KERN_ERR "trident: cannot allocate memory for gameport\n");
-		return -ENOMEM;
+	trident_gameport_t *gp;
+	gp = kmalloc(sizeof(*gp), GFP_KERNEL);
+	if (! gp) {
+		snd_printk("cannot allocate gameport area\n");
+		return;
 	}
+	memset(gp, 0, sizeof(*gp));
+	gp->chip = chip;
+	gp->info.fuzz = 64;
+	gp->info.read = snd_trident_gameport_read;
+	gp->info.trigger = snd_trident_gameport_trigger;
+	gp->info.cooked_read = snd_trident_gameport_cooked_read;
+	gp->info.open = snd_trident_gameport_open;
+	chip->gameport = gp;
 
-	gameport_set_name(gp, "Trident 4DWave");
-	gameport_set_phys(gp, "pci%s/gameport0", pci_name(chip->pci));
-	gameport_set_dev_parent(gp, &chip->pci->dev);
-
-	gameport_set_port_data(gp, chip);
-	gp->fuzz = 64;
-	gp->read = snd_trident_gameport_read;
-	gp->trigger = snd_trident_gameport_trigger;
-	gp->cooked_read = snd_trident_gameport_cooked_read;
-	gp->open = snd_trident_gameport_open;
-
-	gameport_register_port(gp);
-
-	return 0;
+	gameport_register_port(&gp->info);
 }
 
-static inline void snd_trident_free_gameport(trident_t *chip)
-{
-	if (chip->gameport) {
-		gameport_unregister_port(chip->gameport);
-		chip->gameport = NULL;
-	}
-}
 #else
-int __devinit snd_trident_create_gameport(trident_t *chip) { return -ENOSYS; }
-static inline void snd_trident_free_gameport(trident_t *chip) { }
+void __devinit snd_trident_gameport(trident_t *chip)
+{
+}
 #endif /* CONFIG_GAMEPORT */
 
 /*
@@ -3661,9 +3656,14 @@ int __devinit snd_trident_create(snd_card_t * card,
   
   ---------------------------------------------------------------------------*/
 
-static int snd_trident_free(trident_t *trident)
+int snd_trident_free(trident_t *trident)
 {
-	snd_trident_free_gameport(trident);
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
+	if (trident->gameport) {
+		gameport_unregister_port(&trident->gameport->info);
+		kfree(trident->gameport);
+	}
+#endif
 	snd_trident_disable_eso(trident);
 	// Disable S/PDIF out
 	if (trident->device == TRIDENT_DEVICE_ID_NX)
@@ -3677,7 +3677,8 @@ static int snd_trident_free(trident_t *trident)
 			snd_util_memhdr_free(trident->tlb.memhdr);
 		if (trident->tlb.silent_page.area)
 			snd_dma_free_pages(&trident->tlb.silent_page);
-		vfree(trident->tlb.shadow_entries);
+		if (trident->tlb.shadow_entries)
+			vfree(trident->tlb.shadow_entries);
 		snd_dma_free_pages(&trident->tlb.buffer);
 	}
 	if (trident->irq >= 0)
@@ -3804,9 +3805,9 @@ static irqreturn_t snd_trident_interrupt(int irq, void *dev_id, struct pt_regs *
 }
 
 /*---------------------------------------------------------------------------
-   snd_trident_attach_synthesizer
+   snd_trident_attach_synthesizer, snd_trident_detach_synthesizer
   
-   Description: Attach synthesizer hooks
+   Description: Attach/detach synthesizer hooks
                 
    Paramters:   trident  - device specific private data for 4DWave card
 
@@ -3820,6 +3821,17 @@ int snd_trident_attach_synthesizer(trident_t *trident)
 			       sizeof(trident_t*), &trident->seq_dev) >= 0) {
 		strcpy(trident->seq_dev->name, "4DWave");
 		*(trident_t**)SNDRV_SEQ_DEVICE_ARGPTR(trident->seq_dev) = trident;
+	}
+#endif
+	return 0;
+}
+
+int snd_trident_detach_synthesizer(trident_t *trident)
+{
+#if defined(CONFIG_SND_SEQUENCER) || (defined(MODULE) && defined(CONFIG_SND_SEQUENCER_MODULE))
+	if (trident->seq_dev) {
+		snd_device_free(trident->card, trident->seq_dev);
+		trident->seq_dev = NULL;
 	}
 #endif
 	return 0;
@@ -3897,7 +3909,7 @@ void snd_trident_free_voice(trident_t * trident, snd_trident_voice_t *voice)
 		private_free(voice);
 }
 
-static void snd_trident_clear_voices(trident_t * trident, unsigned short v_min, unsigned short v_max)
+void snd_trident_clear_voices(trident_t * trident, unsigned short v_min, unsigned short v_max)
 {
 	unsigned int i, val, mask[2] = { 0, 0 };
 
@@ -3918,7 +3930,7 @@ static void snd_trident_clear_voices(trident_t * trident, unsigned short v_min, 
 }
 
 #ifdef CONFIG_PM
-static int snd_trident_suspend(snd_card_t *card, pm_message_t state)
+static int snd_trident_suspend(snd_card_t *card, unsigned int state)
 {
 	trident_t *trident = card->pm_private_data;
 
@@ -3941,10 +3953,11 @@ static int snd_trident_suspend(snd_card_t *card, pm_message_t state)
 		break;
 	}
 	pci_disable_device(trident->pci);
+	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
-static int snd_trident_resume(snd_card_t *card)
+static int snd_trident_resume(snd_card_t *card, unsigned int state)
 {
 	trident_t *trident = card->pm_private_data;
 
@@ -3975,6 +3988,7 @@ static int snd_trident_resume(snd_card_t *card)
 
 	snd_trident_enable_eso(trident);
 
+	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	trident->in_suspend = 0;
 	return 0;
 }
@@ -3985,7 +3999,9 @@ EXPORT_SYMBOL(snd_trident_free_voice);
 EXPORT_SYMBOL(snd_trident_start_voice);
 EXPORT_SYMBOL(snd_trident_stop_voice);
 EXPORT_SYMBOL(snd_trident_write_voice_regs);
+EXPORT_SYMBOL(snd_trident_clear_voices);
 /* trident_memory.c symbols */
 EXPORT_SYMBOL(snd_trident_synth_alloc);
 EXPORT_SYMBOL(snd_trident_synth_free);
+EXPORT_SYMBOL(snd_trident_synth_bzero);
 EXPORT_SYMBOL(snd_trident_synth_copy_from_user);

@@ -12,7 +12,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
-#include <linux/nodemask.h>
 #include <asm/system.h>
 #include <asm/io.h>
 #include <asm/sn/sn_sal.h>
@@ -234,13 +233,14 @@ int __init prominfo_init(void)
 	if (!ia64_platform_is("sn2"))
 		return 0;
 
-	proc_entries = kmalloc(num_online_nodes() * sizeof(struct proc_dir_entry *),
+	proc_entries = kmalloc(numnodes * sizeof(struct proc_dir_entry *),
 			       GFP_KERNEL);
 
 	sgi_prominfo_entry = proc_mkdir("sgi_prominfo", NULL);
 
-	entp = proc_entries;
-	for_each_online_node(cnodeid) {
+	for (cnodeid = 0, entp = proc_entries;
+	     cnodeid < numnodes;
+	     cnodeid++, entp++) {
 		sprintf(name, "node%d", cnodeid);
 		*entp = proc_mkdir(name, sgi_prominfo_entry);
 		nasid = cnodeid_to_nasid(cnodeid);
@@ -254,7 +254,6 @@ int __init prominfo_init(void)
 			(void *)nasid);
 		if (p)
 			p->owner = THIS_MODULE;
-		entp++;
 	}
 
 	return 0;
@@ -266,13 +265,12 @@ void __exit prominfo_exit(void)
 	unsigned cnodeid;
 	char name[NODE_NAME_LEN];
 
-	entp = proc_entries;
-	for_each_online_node(cnodeid) {
+	for (cnodeid = 0, entp = proc_entries;
+	     cnodeid < numnodes; cnodeid++, entp++) {
 		remove_proc_entry("fit", *entp);
 		remove_proc_entry("version", *entp);
 		sprintf(name, "node%d", cnodeid);
 		remove_proc_entry(name, sgi_prominfo_entry);
-		entp++;
 	}
 	remove_proc_entry("sgi_prominfo", NULL);
 	kfree(proc_entries);

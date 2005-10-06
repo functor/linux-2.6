@@ -51,8 +51,8 @@ MODULE_AUTHOR("Paul Diefenbaugh");
 MODULE_DESCRIPTION(ACPI_AC_DRIVER_NAME);
 MODULE_LICENSE("GPL");
 
-static int acpi_ac_add (struct acpi_device *device);
-static int acpi_ac_remove (struct acpi_device *device, int type);
+int acpi_ac_add (struct acpi_device *device);
+int acpi_ac_remove (struct acpi_device *device, int type);
 static int acpi_ac_open_fs(struct inode *inode, struct file *file);
 
 static struct acpi_driver acpi_ac_driver = {
@@ -108,9 +108,9 @@ acpi_ac_get_state (
                               FS Interface (/proc)
    -------------------------------------------------------------------------- */
 
-static struct proc_dir_entry	*acpi_ac_dir;
+struct proc_dir_entry		*acpi_ac_dir;
 
-static int acpi_ac_seq_show(struct seq_file *seq, void *offset)
+int acpi_ac_seq_show(struct seq_file *seq, void *offset)
 {
 	struct acpi_ac		*ac = (struct acpi_ac *) seq->private;
 
@@ -200,7 +200,7 @@ acpi_ac_remove_fs (
                                    Driver Model
    -------------------------------------------------------------------------- */
 
-static void
+void
 acpi_ac_notify (
 	acpi_handle		handle,
 	u32			event,
@@ -232,7 +232,7 @@ acpi_ac_notify (
 }
 
 
-static int
+int
 acpi_ac_add (
 	struct acpi_device	*device)
 {
@@ -286,7 +286,7 @@ end:
 }
 
 
-static int
+int
 acpi_ac_remove (
 	struct acpi_device	*device,
 	int			type)
@@ -315,7 +315,7 @@ acpi_ac_remove (
 }
 
 
-static int __init
+int __init
 acpi_ac_init (void)
 {
 	int			result = 0;
@@ -337,7 +337,7 @@ acpi_ac_init (void)
 }
 
 
-static void __exit
+void __exit
 acpi_ac_exit (void)
 {
 	ACPI_FUNCTION_TRACE("acpi_ac_exit");

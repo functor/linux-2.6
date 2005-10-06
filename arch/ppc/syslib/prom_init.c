@@ -53,13 +53,11 @@ extern const struct linux_logo logo_linux_clut224;
 
 #define ALIGNUL(x) (((x) + sizeof(unsigned long)-1) & -sizeof(unsigned long))
 
-typedef u32 prom_arg_t;
-
 struct prom_args {
 	const char *service;
 	int nargs;
 	int nret;
-	prom_arg_t args[10];
+	void *args[10];
 };
 
 struct pci_address {
@@ -95,9 +93,9 @@ struct pci_intr_map {
 };
 
 static void prom_exit(void);
-static int  call_prom(const char *service, int nargs, int nret, ...);
-static int  call_prom_ret(const char *service, int nargs, int nret,
-			  prom_arg_t *rets, ...);
+static void *call_prom(const char *service, int nargs, int nret, ...);
+static void *call_prom_ret(const char *service, int nargs, int nret,
+			   void **rets, ...);
 static void prom_print_hex(unsigned int v);
 static int  prom_set_color(ihandle ih, int i, int r, int g, int b);
 static int  prom_next_node(phandle *nodep);
@@ -148,7 +146,7 @@ prom_exit(void)
 		;
 }
 
-static int __init
+static void * __init
 call_prom(const char *service, int nargs, int nret, ...)
 {
 	va_list list;
@@ -160,16 +158,16 @@ call_prom(const char *service, int nargs, int nret, ...)
 	prom_args.nret = nret;
 	va_start(list, nret);
 	for (i = 0; i < nargs; ++i)
-		prom_args.args[i] = va_arg(list, prom_arg_t);
+		prom_args.args[i] = va_arg(list, void *);
 	va_end(list);
 	for (i = 0; i < nret; ++i)
-		prom_args.args[i + nargs] = 0;
+		prom_args.args[i + nargs] = NULL;
 	prom(&prom_args);
 	return prom_args.args[nargs];
 }
 
-static int __init
-call_prom_ret(const char *service, int nargs, int nret, prom_arg_t *rets, ...)
+static void * __init
+call_prom_ret(const char *service, int nargs, int nret, void **rets, ...)
 {
 	va_list list;
 	int i;
@@ -180,10 +178,10 @@ call_prom_ret(const char *service, int nargs, int nret, prom_arg_t *rets, ...)
 	prom_args.nret = nret;
 	va_start(list, rets);
 	for (i = 0; i < nargs; ++i)
-		prom_args.args[i] = va_arg(list, int);
+		prom_args.args[i] = va_arg(list, void *);
 	va_end(list);
 	for (i = 0; i < nret; ++i)
-		prom_args.args[i + nargs] = 0;
+		prom_args.args[i + nargs] = NULL;
 	prom(&prom_args);
 	for (i = 1; i < nret; ++i)
 		rets[i-1] = prom_args.args[nargs + i];
@@ -229,7 +227,19 @@ prom_print_hex(unsigned int v)
 static int __init
 prom_set_color(ihandle ih, int i, int r, int g, int b)
 {
-	return call_prom("call-method", 6, 1, "color!", ih, i, b, g, r);
+	struct prom_args prom_args;
+
+	prom_args.service = "call-method";
+	prom_args.nargs = 6;
+	prom_args.nret = 1;
+	prom_args.args[0] = "color!";
+	prom_args.args[1] = ih;
+	prom_args.args[2] = (void *) i;
+	prom_args.args[3] = (void *) b;
+	prom_args.args[4] = (void *) g;
+	prom_args.args[5] = (void *) r;
+	prom(&prom_args);
+	return (int) prom_args.args[6];
 }
 
 static int __init
@@ -353,9 +363,9 @@ check_display(unsigned long mem)
 	};
 	const unsigned char *clut;
 
-	prom_disp_node = 0;
+	prom_disp_node = NULL;
 
-	for (node = 0; prom_next_node(&node); ) {
+	for (node = NULL; prom_next_node(&node); ) {
 		type[0] = 0;
 		call_prom("getprop", 4, 1, node, "device_type",
 			  type, sizeof(type));
@@ -364,7 +374,8 @@ check_display(unsigned long mem)
 		/* It seems OF doesn't null-terminate the path :-( */
 		path = (char *) mem;
 		memset(path, 0, 256);
-		if (call_prom("package-to-path", 3, 1, node, path, 255) < 0)
+		if ((int) call_prom("package-to-path", 3, 1,
+				    node, path, 255) < 0)
 			continue;
 
 		/*
@@ -406,11 +417,11 @@ check_display(unsigned long mem)
 				prom_disp_node = prom_display_nodes[j];
 				j--;
 			} else
-				prom_disp_node = 0;
+				prom_disp_node = NULL;
 			continue;
 		} else {
 			prom_print("... ok\n");
-			call_prom("setprop", 4, 1, node, "linux,opened", 0, 0);
+			call_prom("setprop", 4, 1, node, "linux,opened", 0, NULL);
 
 			/*
 			 * Setup a usable color table when the appropriate
@@ -437,13 +448,13 @@ check_display(unsigned long mem)
 	if (prom_stdout) {
 		phandle p;
 		p = call_prom("instance-to-package", 1, 1, prom_stdout);
-		if (p && p != -1) {
+		if (p && (int)p != -1) {
 			type[0] = 0;
 			call_prom("getprop", 4, 1, p, "device_type",
 				  type, sizeof(type));
 			if (strcmp(type, "display") == 0)
 				call_prom("setprop", 4, 1, p, "linux,boot-display",
-					  0, 0);
+					  0, NULL);
 		}
 	}
 
@@ -484,8 +495,9 @@ setup_disp_fake_bi(ihandle dp)
 		  &address, sizeof(address));
 	if (address == 0) {
 		/* look for an assigned address with a size of >= 1MB */
-		naddrs = call_prom(getprop, 4, 1, dp, "assigned-addresses",
-				   addrs, sizeof(addrs));
+		naddrs = (int) call_prom(getprop, 4, 1, dp,
+				"assigned-addresses",
+				addrs, sizeof(addrs));
 		naddrs /= sizeof(struct pci_reg_property);
 		for (i = 0; i < naddrs; ++i) {
 			if (addrs[i].size_lo >= (1 << 20)) {
@@ -590,14 +602,16 @@ inspect_node(phandle node, struct device_node *dad,
 		pp = (struct property *) mem_start;
 		namep = (char *) (pp + 1);
 		pp->name = PTRUNRELOC(namep);
-		if (call_prom("nextprop", 3, 1, node, prev_name, namep) <= 0)
+		if ((int) call_prom("nextprop", 3, 1, node, prev_name,
+				    namep) <= 0)
 			break;
 		mem_start = ALIGNUL((unsigned long)namep + strlen(namep) + 1);
 		prev_name = namep;
 		valp = (unsigned char *) mem_start;
 		pp->value = PTRUNRELOC(valp);
-		pp->length = call_prom("getprop", 4, 1, node, namep,
-				       valp, mem_end - mem_start);
+		pp->length = (int)
+			call_prom("getprop", 4, 1, node, namep,
+				  valp, mem_end - mem_start);
 		if (pp->length < 0)
 			continue;
 #ifdef MAX_PROPERTY_LENGTH
@@ -608,7 +622,7 @@ inspect_node(phandle node, struct device_node *dad,
 		*prev_propp = PTRUNRELOC(pp);
 		prev_propp = &pp->next;
 	}
-	if (np->node != 0) {
+	if (np->node != NULL) {
 		/* Add a "linux,phandle" property" */
 		pp = (struct property *) mem_start;
 		*prev_propp = PTRUNRELOC(pp);
@@ -623,27 +637,17 @@ inspect_node(phandle node, struct device_node *dad,
 	*prev_propp = NULL;
 
 	/* get the node's full name */
-	l = call_prom("package-to-path", 3, 1, node,
-		      mem_start, mem_end - mem_start);
+	l = (int) call_prom("package-to-path", 3, 1, node,
+			    (char *) mem_start, mem_end - mem_start);
 	if (l >= 0) {
-		char *p, *ep;
-
 		np->full_name = PTRUNRELOC((char *) mem_start);
 		*(char *)(mem_start + l) = 0;
-		/* Fixup an Apple bug where they have bogus \0 chars in the
-		 * middle of the path in some properties
-		 */
-		for (p = (char *)mem_start, ep = p + l; p < ep; p++)
-			if ((*p) == '\0') {
-				memmove(p, p+1, ep - p);
-				ep--;
-			}
 		mem_start = ALIGNUL(mem_start + l + 1);
 	}
 
 	/* do all our children */
 	child = call_prom("child", 1, 1, node);
-	while (child != 0) {
+	while (child != (void *)0) {
 		mem_start = inspect_node(child, np, mem_start, mem_end,
 					 allnextpp);
 		child = call_prom("peer", 1, 1, child);
@@ -694,8 +698,8 @@ prom_hold_cpus(unsigned long mem)
 	 *      chrp we have a device_type property -- Cort
 	 */
 	node = call_prom("finddevice", 1, 1, "/");
-	if (call_prom("getprop", 4, 1, node,
-		      "device_type", type, sizeof(type)) <= 0)
+	if ((int)call_prom("getprop", 4, 1, node,
+			   "device_type",type, sizeof(type)) <= 0)
 		return;
 
 	/* copy the holding pattern code to someplace safe (0) */
@@ -707,7 +711,7 @@ prom_hold_cpus(unsigned long mem)
 	/* look for cpus */
 	*(unsigned long *)(0x0) = 0;
 	asm volatile("dcbf 0,%0": : "r" (0) : "memory");
-	for (node = 0; prom_next_node(&node); ) {
+	for (node = NULL; prom_next_node(&node); ) {
 		type[0] = 0;
 		call_prom("getprop", 4, 1, node, "device_type",
 			  type, sizeof(type));
@@ -715,7 +719,8 @@ prom_hold_cpus(unsigned long mem)
 			continue;
 		path = (char *) mem;
 		memset(path, 0, 256);
-		if (call_prom("package-to-path", 3, 1, node, path, 255) < 0)
+		if ((int) call_prom("package-to-path", 3, 1,
+				    node, path, 255) < 0)
 			continue;
 		reg = -1;
 		call_prom("getprop", 4, 1, node, "reg", &reg, sizeof(reg));
@@ -748,10 +753,11 @@ static void __init
 prom_instantiate_rtas(void)
 {
 	ihandle prom_rtas;
-	prom_arg_t result;
+	unsigned int i;
+	struct prom_args prom_args;
 
 	prom_rtas = call_prom("finddevice", 1, 1, "/rtas");
-	if (prom_rtas == -1)
+	if (prom_rtas == (void *) -1)
 		return;
 
 	rtas_size = 0;
@@ -773,10 +779,17 @@ prom_instantiate_rtas(void)
 
 	prom_rtas = call_prom("open", 1, 1, "/rtas");
 	prom_print("...");
-	rtas_entry = 0;
-	if (call_prom_ret("call-method", 3, 2, &result,
-			  "instantiate-rtas", prom_rtas, rtas_data) == 0)
-		rtas_entry = result;
+	prom_args.service = "call-method";
+	prom_args.nargs = 3;
+	prom_args.nret = 2;
+	prom_args.args[0] = "instantiate-rtas";
+	prom_args.args[1] = prom_rtas;
+	prom_args.args[2] = (void *) rtas_data;
+	prom(&prom_args);
+	i = 0;
+	if (prom_args.args[3] == 0)
+		i = (unsigned int)prom_args.args[4];
+	rtas_entry = i;
 	if ((rtas_entry == -1) || (rtas_entry == 0))
 		prom_print(" failed\n");
 	else
@@ -796,10 +809,7 @@ prom_init(int r3, int r4, prom_entry pp)
 	int i, l;
 	char *p, *d;
  	unsigned long phys;
-	prom_arg_t result[3];
-	char model[32];
-	phandle node;
-	int rc;
+	void *result[3];
 
  	/* Default */
  	phys = (unsigned long) &_stext;
@@ -807,10 +817,11 @@ prom_init(int r3, int r4, prom_entry pp)
 	/* First get a handle for the stdout device */
 	prom = pp;
 	prom_chosen = call_prom("finddevice", 1, 1, "/chosen");
-	if (prom_chosen == -1)
+	if (prom_chosen == (void *)-1)
 		prom_exit();
-	if (call_prom("getprop", 4, 1, prom_chosen, "stdout",
-		      &prom_stdout, sizeof(prom_stdout)) <= 0)
+	if ((int) call_prom("getprop", 4, 1, prom_chosen,
+			    "stdout", &prom_stdout,
+			    sizeof(prom_stdout)) <= 0)
 		prom_exit();
 
 	/* Get the full OF pathname of the stdout device */
@@ -823,7 +834,8 @@ prom_init(int r3, int r4, prom_entry pp)
 
 	/* Get the boot device and translate it to a full OF pathname. */
 	p = (char *) mem;
-	l = call_prom("getprop", 4, 1, prom_chosen, "bootpath", p, 1<<20);
+	l = (int) call_prom("getprop", 4, 1, prom_chosen,
+			    "bootpath", p, 1<<20);
 	if (l > 0) {
 		p[l] = 0;	/* should already be null-terminated */
 		bootpath = PTRUNRELOC(p);
@@ -854,31 +866,22 @@ prom_init(int r3, int r4, prom_entry pp)
 
 	klimit = (char *) (mem - offset);
 
-	node = call_prom("finddevice", 1, 1, "/");
-	rc = call_prom("getprop", 4, 1, node, "model", model, sizeof(model));
-	if (rc > 0 && !strncmp (model, "Pegasos", 7)
-		&& strncmp (model, "Pegasos2", 8)) {
-		/* Pegasos 1 has a broken translate method in the OF,
-		 * and furthermore the BATs are mapped 1:1 so the phys
-		 * address calculated above is correct, so let's use
-		 * it directly.
-		 */
-	} else if (offset == 0) {
-		/* If we are already running at 0xc0000000, we assume we were
-	 	 * loaded by an OF bootloader which did set a BAT for us.
-	 	 * This breaks OF translate so we force phys to be 0.
-	 	 */
+	/* If we are already running at 0xc0000000, we assume we were
+	 * loaded by an OF bootloader which did set a BAT for us.
+	 * This breaks OF translate so we force phys to be 0.
+	 */
+	if (offset == 0) {
 		prom_print("(already at 0xc0000000) phys=0\n");
 		phys = 0;
-	} else if (call_prom("getprop", 4, 1, prom_chosen, "mmu",
-			     &prom_mmu, sizeof(prom_mmu)) <= 0) {
+	} else if ((int) call_prom("getprop", 4, 1, prom_chosen, "mmu",
+				 &prom_mmu, sizeof(prom_mmu)) <= 0) {
 		prom_print(" no MMU found\n");
-	} else if (call_prom_ret("call-method", 4, 4, result, "translate",
-				 prom_mmu, &_stext, 1) != 0) {
+	} else if ((int)call_prom_ret("call-method", 4, 4, result, "translate",
+				      prom_mmu, &_stext, 1) != 0) {
 		prom_print(" (translate failed)\n");
 	} else {
 		/* We assume the phys. address size is 3 cells */
-		phys = result[2];
+		phys = (unsigned long)result[2];
 	}
 
 	if (prom_disp_node != 0)
@@ -901,7 +904,7 @@ prom_init(int r3, int r4, prom_entry pp)
 	prom_print("returning 0x");
 	prom_print_hex(phys);
 	prom_print("from prom_init\n");
-	prom_stdout = 0;
+	prom_stdout = NULL;
 
 	return phys;
 }

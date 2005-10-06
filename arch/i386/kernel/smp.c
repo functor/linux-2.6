@@ -19,6 +19,7 @@
 #include <linux/mc146818rtc.h>
 #include <linux/cache.h>
 #include <linux/interrupt.h>
+#include <linux/dump.h>
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
@@ -138,13 +139,20 @@ void __send_IPI_shortcut(unsigned int shortcut, int vector)
 	 */
 	apic_wait_icr_idle();
 
+	if (vector == CRASH_DUMP_VECTOR)
+		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+
 	/*
 	 * No need to touch the target chip field
 	 */
 	cfg = __prepare_ICR(shortcut, vector);
 
-	if (vector == CRASH_DUMP_VECTOR)
+	if (vector == CRASH_DUMP_VECTOR) {
+		/*
+		 * Setup DUMP IPI to be delivered as an NMI
+		 */
 		cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+	}
 
 	/*
 	 * Send the IPI. The write to APIC_ICR fires this off.
@@ -192,7 +200,7 @@ void send_IPI_mask_bitmask(cpumask_t cpumask, int vector)
 	local_irq_restore(flags);
 }
 
-void send_IPI_mask_sequence(cpumask_t mask, int vector)
+inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 {
 	unsigned long cfg, flags;
 	unsigned int query_cpu;
@@ -223,7 +231,13 @@ void send_IPI_mask_sequence(cpumask_t mask, int vector)
 			 * program the ICR 
 			 */
 			cfg = __prepare_ICR(0, vector);
-			
+		
+			if (vector == CRASH_DUMP_VECTOR) {
+				/*
+				 * Setup DUMP IPI to be delivered as an NMI
+				 */
+				cfg = (cfg&~APIC_VECTOR_MASK)|APIC_DM_NMI;
+			}	
 			/*
 			 * Send the IPI. The write to APIC_ICR fires this off.
 			 */
@@ -248,7 +262,7 @@ void send_IPI_mask_sequence(cpumask_t mask, int vector)
 static cpumask_t flush_cpumask;
 static struct mm_struct * flush_mm;
 static unsigned long flush_va;
-static DEFINE_SPINLOCK(tlbstate_lock);
+static spinlock_t tlbstate_lock = SPIN_LOCK_UNLOCKED;
 #define FLUSH_ALL	0xffffffff
 
 /*
@@ -473,6 +487,11 @@ void flush_tlb_all(void)
 	on_each_cpu(do_flush_tlb_all, NULL, 1, 1);
 }
 
+void dump_send_ipi(void)
+{
+	send_IPI_allbutself(CRASH_DUMP_VECTOR);
+}
+
 /*
  * this function sends a 'reschedule' IPI to another CPU.
  * it goes straight through and wastes no time serializing
@@ -492,7 +511,7 @@ void crash_dump_send_ipi(void)
  * Structure and data for smp_call_function(). This is designed to minimise
  * static memory requirements. It also looks cleaner.
  */
-static DEFINE_SPINLOCK(call_lock);
+static spinlock_t call_lock = SPIN_LOCK_UNLOCKED;
 
 struct call_data_struct {
 	void (*func) (void *info);
@@ -576,7 +595,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	return 0;
 }
 
-static void stop_this_cpu (void * dummy)
+void stop_this_cpu (void * dummy)
 {
 	/*
 	 * Remove this CPU:
@@ -601,6 +620,8 @@ void smp_send_stop(void)
 	disable_local_APIC();
 	local_irq_enable();
 }
+
+EXPORT_SYMBOL(smp_send_stop);
 
 /*
  * Reschedule call back. Nothing to do,
@@ -637,4 +658,3 @@ fastcall void smp_call_function_interrupt(struct pt_regs *regs)
 		atomic_inc(&call_data->finished);
 	}
 }
-

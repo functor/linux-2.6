@@ -467,7 +467,7 @@ static void __init init_hwif_sl82c105(ide_hwif_t *hwif)
 	hwif->ide_dma_on = &sl82c105_ide_dma_on;
 	hwif->ide_dma_off_quietly = &sl82c105_ide_dma_off_quietly;
 	hwif->ide_dma_lostirq = &sl82c105_ide_dma_lost_irq;
-	hwif->dma_start = &sl82c105_ide_dma_start;
+	hwif->ide_dma_start = &sl82c105_ide_dma_start;
 	hwif->ide_dma_timeout = &sl82c105_ide_dma_timeout;
 
 	if (!noautodma)
@@ -490,7 +490,8 @@ static ide_pci_device_t sl82c105_chipset __devinitdata = {
 
 static int __devinit sl82c105_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	return ide_setup_pci_device(dev, &sl82c105_chipset);
+	ide_setup_pci_device(dev, &sl82c105_chipset);
+	return 0;
 }
 
 static struct pci_device_id sl82c105_pci_tbl[] = {

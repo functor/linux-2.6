@@ -15,6 +15,7 @@
  * indicate that some process(es) are waiting for the semaphore.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/init.h>
@@ -63,7 +64,7 @@ static inline int __sem_update_count(struct semaphore *sem, int incr)
 		: "=&r" (old_count), "=&r" (tmp), "=m" (sem->count)
 		: "r" (incr), "m" (sem->count));
 	} else {
-		static DEFINE_SPINLOCK(semaphore_lock);
+		static spinlock_t semaphore_lock = SPIN_LOCK_UNLOCKED;
 		unsigned long flags;
 
 		spin_lock_irqsave(&semaphore_lock, flags);

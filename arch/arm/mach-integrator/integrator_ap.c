@@ -68,6 +68,7 @@
  * f1200000	12000000	EBI registers
  * f1300000	13000000	Counter/Timer
  * f1400000	14000000	Interrupt controller
+ * f1500000	15000000	RTC
  * f1600000	16000000	UART 0
  * f1700000	17000000	UART 1
  * f1a00000	1a000000	Debug LEDs
@@ -80,6 +81,7 @@ static struct map_desc ap_io_desc[] __initdata = {
  { IO_ADDRESS(INTEGRATOR_EBI_BASE),   INTEGRATOR_EBI_BASE,   SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_CT_BASE),    INTEGRATOR_CT_BASE,    SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_IC_BASE),    INTEGRATOR_IC_BASE,    SZ_4K,  MT_DEVICE },
+ { IO_ADDRESS(INTEGRATOR_RTC_BASE),   INTEGRATOR_RTC_BASE,   SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_UART0_BASE), INTEGRATOR_UART0_BASE, SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_UART1_BASE), INTEGRATOR_UART1_BASE, SZ_4K,  MT_DEVICE },
  { IO_ADDRESS(INTEGRATOR_DBG_BASE),   INTEGRATOR_DBG_BASE,   SZ_4K,  MT_DEVICE },
@@ -137,7 +139,7 @@ static void __init ap_init_irq(void)
 #ifdef CONFIG_PM
 static unsigned long ic_irq_enable;
 
-static int irq_suspend(struct sys_device *dev, pm_message_t state)
+static int irq_suspend(struct sys_device *dev, u32 state)
 {
 	ic_irq_enable = readl(VA_IC_BASE + IRQ_ENABLE);
 	return 0;

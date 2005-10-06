@@ -37,13 +37,11 @@
 #include <linux/pagemap.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/random.h>
 #include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/param.h>
 #include <asm/page.h>
-#include <asm/pgalloc.h>
 
 #include <linux/elf.h>
 
@@ -72,10 +70,6 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file);
 # define ELF_MIN_ALIGN	PAGE_SIZE
 #endif
 
-#ifndef ELF_CORE_EFLAGS
-#define ELF_CORE_EFLAGS	0
-#endif
-
 #define ELF_PAGESTART(_v) ((_v) & ~(unsigned long)(ELF_MIN_ALIGN-1))
 #define ELF_PAGEOFFSET(_v) ((_v) & (ELF_MIN_ALIGN-1))
 #define ELF_PAGEALIGN(_v) (((_v) + ELF_MIN_ALIGN - 1) & ~(ELF_MIN_ALIGN - 1))
@@ -95,10 +89,7 @@ static int set_brk(unsigned long start, unsigned long end)
 	start = ELF_PAGEALIGN(start);
 	end = ELF_PAGEALIGN(end);
 	if (end > start) {
-		unsigned long addr;
-		down_write(&current->mm->mmap_sem);
-		addr = do_brk(start, end - start);
-		up_write(&current->mm->mmap_sem);
+		unsigned long addr = do_brk(start, end - start);
 		if (BAD_ADDR(addr))
 			return addr;
 	}
@@ -113,17 +104,15 @@ static int set_brk(unsigned long start, unsigned long end)
    be in memory */
 
 
-static int padzero(unsigned long elf_bss)
+static void padzero(unsigned long elf_bss)
 {
 	unsigned long nbyte;
 
 	nbyte = ELF_PAGEOFFSET(elf_bss);
 	if (nbyte) {
 		nbyte = ELF_MIN_ALIGN - nbyte;
-		if (clear_user((void __user *) elf_bss, nbyte))
-			return -EFAULT;
+		clear_user((void __user *) elf_bss, nbyte);
 	}
-	return 0;
 }
 
 /* Let's use some macros to make this stack manipulation a litle clearer */
@@ -139,7 +128,7 @@ static int padzero(unsigned long elf_bss)
 #define STACK_ALLOC(sp, len) ({ sp -= len ; sp; })
 #endif
 
-static int
+static void
 create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 		int interp_aout, unsigned long load_addr,
 		unsigned long interp_load_addr)
@@ -168,17 +157,11 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 	if (k_platform) {
 		size_t len = strlen(k_platform) + 1;
 
-		/*
-		 * In some cases (e.g. Hyper-Threading), we want to avoid L1
-		 * evictions by the processes running on the same package. One
-		 * thing we can do is to shuffle the initial stack for them.
-		 */
-	 
-		p = arch_align_stack(p);
-
+#ifdef __HAVE_ARCH_ALIGN_STACK
+		p = (unsigned long)arch_align_stack((unsigned long)p);
+#endif
 		u_platform = (elf_addr_t __user *)STACK_ALLOC(p, len);
-		if (__copy_to_user(u_platform, k_platform, len))
-			return -EFAULT;
+		__copy_to_user(u_platform, k_platform, len);
 	}
 
 	/* Create the ELF interpreter info */
@@ -240,8 +223,7 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 #endif
 
 	/* Now, let's put argc (and argv, envp if appropriate) on the stack */
-	if (__put_user(argc, sp++))
-		return -EFAULT;
+	__put_user(argc, sp++);
 	if (interp_aout) {
 		argv = sp + 2;
 		envp = argv + argc + 1;
@@ -253,35 +235,31 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr * exec,
 	}
 
 	/* Populate argv and envp */
-	p = current->mm->arg_end = current->mm->arg_start;
+	p = current->mm->arg_start;
 	while (argc-- > 0) {
 		size_t len;
 		__put_user((elf_addr_t)p, argv++);
 		len = strnlen_user((void __user *)p, PAGE_SIZE*MAX_ARG_PAGES);
 		if (!len || len > PAGE_SIZE*MAX_ARG_PAGES)
-			return 0;
+			return;
 		p += len;
 	}
-	if (__put_user(0, argv))
-		return -EFAULT;
+	__put_user(0, argv);
 	current->mm->arg_end = current->mm->env_start = p;
 	while (envc-- > 0) {
 		size_t len;
 		__put_user((elf_addr_t)p, envp++);
 		len = strnlen_user((void __user *)p, PAGE_SIZE*MAX_ARG_PAGES);
 		if (!len || len > PAGE_SIZE*MAX_ARG_PAGES)
-			return 0;
+			return;
 		p += len;
 	}
-	if (__put_user(0, envp))
-		return -EFAULT;
+	__put_user(0, envp);
 	current->mm->env_end = p;
 
 	/* Put the elf_info on the stack in the right place.  */
 	sp = (elf_addr_t __user *)envp + 1;
-	if (copy_to_user(sp, elf_info, ei_index * sizeof(elf_addr_t)))
-		return -EFAULT;
-	return 0;
+	copy_to_user(sp, elf_info, ei_index * sizeof(elf_addr_t));
 }
 
 #ifndef elf_map
@@ -463,18 +441,12 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	 * that there are zero-mapped pages up to and including the 
 	 * last bss page.
 	 */
-	if (padzero(elf_bss)) {
-		error = -EFAULT;
-		goto out_close;
-	}
-
+	padzero(elf_bss);
 	elf_bss = ELF_PAGESTART(elf_bss + ELF_MIN_ALIGN - 1);	/* What we have mapped so far */
 
 	/* Map the last of the bss segment */
 	if (last_bss > elf_bss) {
-		down_write(&current->mm->mmap_sem);
 		error = do_brk(elf_bss, last_bss - elf_bss);
-		up_write(&current->mm->mmap_sem);
 		if (BAD_ADDR(error))
 			goto out_close;
 	}
@@ -514,9 +486,7 @@ static unsigned long load_aout_interp(struct exec * interp_ex,
 		goto out;
 	}
 
-	down_write(&current->mm->mmap_sem);	
 	do_brk(0, text_data);
-	up_write(&current->mm->mmap_sem);
 	if (!interpreter->f_op || !interpreter->f_op->read)
 		goto out;
 	if (interpreter->f_op->read(interpreter, addr, text_data, &offset) < 0)
@@ -524,11 +494,8 @@ static unsigned long load_aout_interp(struct exec * interp_ex,
 	flush_icache_range((unsigned long)addr,
 	                   (unsigned long)addr + text_data);
 
-
-	down_write(&current->mm->mmap_sem);	
 	do_brk(ELF_PAGESTART(text_data + ELF_MIN_ALIGN - 1),
 		interp_ex->a_bss);
-	up_write(&current->mm->mmap_sem);
 	elf_entry = interp_ex->a_entry;
 
 out:
@@ -544,19 +511,6 @@ out:
 #define INTERPRETER_AOUT 1
 #define INTERPRETER_ELF 2
 
-
-static unsigned long randomize_stack_top(unsigned long stack_top)
-{
-	unsigned int random_variable = 0;
-
-	if (current->flags & PF_RANDOMIZE)
-		random_variable = get_random_int() % (8*1024*1024);
-#ifdef CONFIG_STACK_GROWSUP
-	return PAGE_ALIGN(stack_top + random_variable);
-#else
-	return PAGE_ALIGN(stack_top - random_variable);
-#endif
-}
 
 static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 {
@@ -577,7 +531,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	unsigned long reloc_func_desc = 0;
 	char passed_fileno[6];
 	struct files_struct *files;
-	int have_pt_gnu_stack, executable_stack;
+	int have_pt_gnu_stack, executable_stack, relocexec, old_relocexec = current->flags & PF_RELOCEXEC;
 	unsigned long def_flags = 0;
 	struct {
 		struct elfhdr elf_ex;
@@ -745,9 +699,22 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		}
 	have_pt_gnu_stack = (i < loc->elf_ex.e_phnum);
 
-	if (current->personality == PER_LINUX && exec_shield == 2) {
+	relocexec = 0;
+
+	if (current->personality == PER_LINUX)
+	switch (exec_shield) {
+	case 1:
+		if (executable_stack == EXSTACK_DISABLE_X) {
+			current->flags |= PF_RELOCEXEC;
+			relocexec = PF_RELOCEXEC;
+		}
+		break;
+
+	case 2:
 		executable_stack = EXSTACK_DISABLE_X;
-		current->flags |= PF_RANDOMIZE;
+		current->flags |= PF_RELOCEXEC;
+		relocexec = PF_RELOCEXEC;
+		break;
 	}
 
 	/* Some simple consistency checks for the interpreter */
@@ -802,6 +769,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	retval = flush_old_exec(bprm);
 	if (retval)
 		goto out_free_dentry;
+	current->flags |= relocexec;
 
 #ifdef __i386__
 	/*
@@ -831,19 +799,17 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	   may depend on the personality.  */
 	SET_PERSONALITY(loc->elf_ex, ibcs2_interpreter);
 	if (exec_shield != 2 &&
-			elf_read_implies_exec(loc->elf_ex, executable_stack))
+			elf_read_implies_exec(loc->elf_ex, have_pt_gnu_stack))
 		current->personality |= READ_IMPLIES_EXEC;
 
-	if ( !(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
-		current->flags |= PF_RANDOMIZE;
 	arch_pick_mmap_layout(current->mm);
 
 	/* Do this so that we can load the interpreter, if need be.  We will
 	   change some of these later */
-	set_mm_counter(current->mm, rss, 0);
+	// current->mm->rss = 0;
+	vx_rsspages_sub(current->mm, current->mm->rss);
 	current->mm->free_area_cache = current->mm->mmap_base;
-	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
-				 executable_stack);
+	retval = setup_arg_pages(bprm, executable_stack);
 	if (retval < 0) {
 		send_sig(SIGKILL, current, 0);
 		goto out_free_dentry;
@@ -880,14 +846,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 				nbyte = ELF_MIN_ALIGN - nbyte;
 				if (nbyte > elf_brk - elf_bss)
 					nbyte = elf_brk - elf_bss;
-				if (clear_user((void __user *)elf_bss +
-							load_bias, nbyte)) {
-					/*
-					 * This bss-zeroing can fail if the ELF
-					 * file specifies odd protections.  So
-					 * we don't check the return value
-					 */
-				}
+				clear_user((void __user *) elf_bss + load_bias, nbyte);
 			}
 		}
 
@@ -971,11 +930,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		send_sig(SIGKILL, current, 0);
 		goto out_free_dentry;
 	}
-	if (padzero(elf_bss)) {
-		send_sig(SIGSEGV, current, 0);
-		retval = -EFAULT; /* Nobody gets to see this, but.. */
-		goto out_free_dentry;
-	}
+	padzero(elf_bss);
 
 	if (elf_interpreter) {
 		if (interpreter_type == INTERPRETER_AOUT)
@@ -1002,20 +957,20 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		elf_entry = loc->elf_ex.e_entry;
 	}
 
+	kfree(elf_phdata);
+
 	if (interpreter_type != INTERPRETER_AOUT)
 		sys_close(elf_exec_fileno);
 
 	set_binfmt(&elf_format);
 
-#ifdef ARCH_HAS_SETUP_ADDITIONAL_PAGES
-	retval = arch_setup_additional_pages(bprm, executable_stack);
-	if (retval < 0) {
-		send_sig(SIGKILL, current, 0);
-		goto out_free_fh;
-	}
-#endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
-
-	kfree(elf_phdata);
+	/*
+	 * Map the vsyscall trampoline. This address is then passed via
+	 * AT_SYSINFO.
+	 */
+#ifdef __HAVE_ARCH_VSYSCALL
+	map_vsyscall();
+#endif
 
 	compute_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
@@ -1031,7 +986,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	current->mm->start_stack = bprm->p;
 
 #ifdef __HAVE_ARCH_RANDOMIZE_BRK
-	if (current->flags & PF_RANDOMIZE)
+	if (current->flags & PF_RELOCEXEC)
 		randomize_brk(elf_brk);
 #endif
 	if (current->personality & MMAP_PAGE_ZERO) {
@@ -1089,6 +1044,8 @@ out_free_fh:
 	}
 out_free_ph:
 	kfree(elf_phdata);
+	current->flags &= ~PF_RELOCEXEC;
+	current->flags |= old_relocexec;
 	goto out;
 }
 
@@ -1146,7 +1103,7 @@ static int load_elf_library(struct file *file)
 	error = do_mmap(file,
 			ELF_PAGESTART(eppnt->p_vaddr),
 			(eppnt->p_filesz +
-			 ELF_PAGEOFFSET(eppnt->p_vaddr)),
+			  ELF_PAGEOFFSET(eppnt->p_vaddr)),
 			PROT_READ | PROT_WRITE | PROT_EXEC,
 			MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE,
 			(eppnt->p_offset -
@@ -1156,18 +1113,12 @@ static int load_elf_library(struct file *file)
 		goto out_free_ph;
 
 	elf_bss = eppnt->p_vaddr + eppnt->p_filesz;
-	if (padzero(elf_bss)) {
-		error = -EFAULT;
-		goto out_free_ph;
-	}
+	padzero(elf_bss);
 
 	len = ELF_PAGESTART(eppnt->p_filesz + eppnt->p_vaddr + ELF_MIN_ALIGN - 1);
 	bss = eppnt->p_memsz + eppnt->p_vaddr;
-	if (bss > len) {
-		down_write(&current->mm->mmap_sem);
+	if (bss > len)
 		do_brk(len, bss - len);
-		up_write(&current->mm->mmap_sem);
-	}
 	error = 0;
 
 out_free_ph:
@@ -1197,7 +1148,7 @@ static int dump_write(struct file *file, const void *addr, int nr)
 	return file->f_op->write(file, addr, nr, &file->f_pos) == nr;
 }
 
-static int dump_seek(struct file *file, loff_t off)
+static int dump_seek(struct file *file, off_t off)
 {
 	if (file->f_op->llseek) {
 		if (file->f_op->llseek(file, off, 0) != off)
@@ -1216,16 +1167,9 @@ static int dump_seek(struct file *file, loff_t off)
  */
 static int maydump(struct vm_area_struct *vma)
 {
-	/* Do not dump I/O mapped devices or special mappings */
-	if (vma->vm_flags & (VM_IO | VM_RESERVED))
+	/* Do not dump I/O mapped devices, shared memory, or special mappings */
+	if (vma->vm_flags & (VM_IO | VM_SHARED | VM_RESERVED))
 		return 0;
-
-	if (vma->vm_flags & VM_DONTEXPAND) /* Kludge for vDSO.  */
-		return 1;
-
-	/* Dump shared memory only if mapped from an anonymous file.  */
-	if (vma->vm_flags & VM_SHARED)
-		return vma->vm_file->f_dentry->d_inode->i_nlink == 0;
 
 	/* If it hasn't been written to, don't write it out */
 	if (!vma->anon_vma)
@@ -1303,7 +1247,7 @@ static inline void fill_elf_header(struct elfhdr *elf, int segs)
 	elf->e_entry = 0;
 	elf->e_phoff = sizeof(struct elfhdr);
 	elf->e_shoff = 0;
-	elf->e_flags = ELF_CORE_EFLAGS;
+	elf->e_flags = 0;
 	elf->e_ehsize = sizeof(struct elfhdr);
 	elf->e_phentsize = sizeof(struct elf_phdr);
 	elf->e_phnum = segs;
@@ -1350,7 +1294,7 @@ static void fill_prstatus(struct elf_prstatus *prstatus,
 	prstatus->pr_ppid = p->parent->pid;
 	prstatus->pr_pgrp = process_group(p);
 	prstatus->pr_sid = p->signal->session;
-	if (thread_group_leader(p)) {
+	if (p->pid == p->tgid) {
 		/*
 		 * This is the record for the group leader.  Add in the
 		 * cumulative times of previous dead threads.  This total
@@ -1361,22 +1305,22 @@ static void fill_prstatus(struct elf_prstatus *prstatus,
 		 * this and each other thread to finish dying after the
 		 * core dump synchronization phase.
 		 */
-		cputime_to_timeval(cputime_add(p->utime, p->signal->utime),
+		jiffies_to_timeval(p->utime + p->signal->utime,
 				   &prstatus->pr_utime);
-		cputime_to_timeval(cputime_add(p->stime, p->signal->stime),
+		jiffies_to_timeval(p->stime + p->signal->stime,
 				   &prstatus->pr_stime);
 	} else {
-		cputime_to_timeval(p->utime, &prstatus->pr_utime);
-		cputime_to_timeval(p->stime, &prstatus->pr_stime);
+		jiffies_to_timeval(p->utime, &prstatus->pr_utime);
+		jiffies_to_timeval(p->stime, &prstatus->pr_stime);
 	}
-	cputime_to_timeval(p->signal->cutime, &prstatus->pr_cutime);
-	cputime_to_timeval(p->signal->cstime, &prstatus->pr_cstime);
+	jiffies_to_timeval(p->signal->cutime, &prstatus->pr_cutime);
+	jiffies_to_timeval(p->signal->cstime, &prstatus->pr_cstime);
 }
 
-static int fill_psinfo(struct elf_prpsinfo *psinfo, struct task_struct *p,
-		       struct mm_struct *mm)
+static void fill_psinfo(struct elf_prpsinfo *psinfo, struct task_struct *p,
+			struct mm_struct *mm)
 {
-	unsigned int i, len;
+	int i, len;
 	
 	/* first copy the parameters from user space */
 	memset(psinfo, 0, sizeof(struct elf_prpsinfo));
@@ -1384,9 +1328,8 @@ static int fill_psinfo(struct elf_prpsinfo *psinfo, struct task_struct *p,
 	len = mm->arg_end - mm->arg_start;
 	if (len >= ELF_PRARGSZ)
 		len = ELF_PRARGSZ-1;
-	if (copy_from_user(&psinfo->pr_psargs,
-		           (const char __user *)mm->arg_start, len))
-		return -EFAULT;
+	copy_from_user(&psinfo->pr_psargs,
+		       (const char __user *)mm->arg_start, len);
 	for(i = 0; i < len; i++)
 		if (psinfo->pr_psargs[i] == 0)
 			psinfo->pr_psargs[i] = ' ';
@@ -1407,7 +1350,7 @@ static int fill_psinfo(struct elf_prpsinfo *psinfo, struct task_struct *p,
 	SET_GID(psinfo->pr_gid, p->gid);
 	strncpy(psinfo->pr_fname, p->comm, sizeof(psinfo->pr_fname));
 	
-	return 0;
+	return;
 }
 
 /* Here is the structure in which status of each thread is captured. */
@@ -1686,7 +1629,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 					DUMP_SEEK (file->f_pos + PAGE_SIZE);
 				} else {
 					void *kaddr;
-					flush_cache_page(vma, addr, page_to_pfn(page));
+					flush_cache_page(vma, addr);
 					kaddr = kmap(page);
 					if ((size += PAGE_SIZE) > limit ||
 					    !dump_write(file, kaddr,

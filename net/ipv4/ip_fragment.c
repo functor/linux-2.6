@@ -100,7 +100,7 @@ struct ipq {
 
 /* Per-bucket lock is easy to add now. */
 static struct ipq *ipq_hash[IPQ_HASHSZ];
-static DEFINE_RWLOCK(ipfrag_lock);
+static rwlock_t ipfrag_lock = RW_LOCK_UNLOCKED;
 static u32 ipfrag_hash_rnd;
 static LIST_HEAD(ipq_lru_list);
 int ip_frag_nqueues = 0;
@@ -676,6 +676,29 @@ struct sk_buff *ip_defrag(struct sk_buff *skb, u32 user)
 	kfree_skb(skb);
 	return NULL;
 }
+
+static unsigned long ip_defrag_id_bitmap;
+
+int ip_defrag_user_id_alloc(void)
+{
+	int i;
+
+	for (i = 0; i < 32; i++) {
+		if (!test_and_set_bit(i, &ip_defrag_id_bitmap))
+			return i + __IP_DEFRAG_DYNAMIC_FIRST;
+	}
+
+	return -ENFILE;
+}
+EXPORT_SYMBOL(ip_defrag_user_id_alloc);
+
+void ip_defrag_user_id_free(int user)
+{
+	user -= __IP_DEFRAG_DYNAMIC_FIRST;
+	if (user >= 0 && user < 32)
+		clear_bit(user, &ip_defrag_id_bitmap);
+}
+EXPORT_SYMBOL(ip_defrag_user_id_free);
 
 void ipfrag_init(void)
 {

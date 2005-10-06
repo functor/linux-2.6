@@ -95,8 +95,8 @@ static int ultra_io[MAX_ULTRAMCA_CARDS];
 static int ultra_irq[MAX_ULTRAMCA_CARDS];
 MODULE_LICENSE("GPL");
 
-module_param_array(ultra_io, int, NULL, 0);
-module_param_array(ultra_irq, int, NULL, 0);
+MODULE_PARM(ultra_io, "1-" __MODULE_STRING(MAX_ULTRAMCA_CARDS) "i");
+MODULE_PARM(ultra_irq, "1-" __MODULE_STRING(MAX_ULTRAMCA_CARDS) "i");
 MODULE_PARM_DESC(ultra_io, "SMC Ultra/EtherEZ MCA I/O base address(es)");
 MODULE_PARM_DESC(ultra_irq, "SMC Ultra/EtherEZ MCA IRQ number(s)");
 
@@ -310,13 +310,9 @@ int __init ultramca_probe(struct device *gen_dev)
 	ei_status.rx_start_page = START_PG + TX_PAGES;
 	ei_status.stop_page = num_pages;
 
-	ei_status.mem = ioremap(dev->mem_start, (ei_status.stop_page - START_PG) * 256);
-	if (!ei_status.mem) {
-		rc = -ENOMEM;
-		goto err_release_region;
-	}
-
-	dev->mem_end = dev->mem_start + (ei_status.stop_page - START_PG) * 256;
+	ei_status.rmem_start = dev->mem_start + TX_PAGES * 256;
+	dev->mem_end = ei_status.rmem_end =
+	dev->mem_start + (ei_status.stop_page - START_PG) * 256;
 
 	printk(", IRQ %d memory %#lx-%#lx.\n",
 	dev->irq, dev->mem_start, dev->mem_end - 1);
@@ -338,12 +334,10 @@ int __init ultramca_probe(struct device *gen_dev)
 
 	rc = register_netdev(dev);
 	if (rc)
-		goto err_unmap;
+		goto err_release_region;
 
 	return 0;
 
-err_unmap:
-	iounmap(ei_status.mem);
 err_release_region:
 	release_region(ioaddr, ULTRA_IO_EXTENT);
 err_unclaim:
@@ -401,13 +395,13 @@ static void ultramca_reset_8390(struct net_device *dev)
 
 static void ultramca_get_8390_hdr(struct net_device *dev, struct e8390_pkt_hdr *hdr, int ring_page)
 {
-	void __iomem *hdr_start = ei_status.mem + ((ring_page - START_PG) << 8);
+	unsigned long hdr_start = dev->mem_start + ((ring_page - START_PG) << 8);
 
 #ifdef notdef
 	/* Officially this is what we are doing, but the readl() is faster */
-	memcpy_fromio(hdr, hdr_start, sizeof(struct e8390_pkt_hdr));
+	isa_memcpy_fromio(hdr, hdr_start, sizeof(struct e8390_pkt_hdr));
 #else
-	((unsigned int*)hdr)[0] = readl(hdr_start);
+	((unsigned int*)hdr)[0] = isa_readl(hdr_start);
 #endif
 }
 
@@ -417,17 +411,17 @@ static void ultramca_get_8390_hdr(struct net_device *dev, struct e8390_pkt_hdr *
 
 static void ultramca_block_input(struct net_device *dev, int count, struct sk_buff *skb, int ring_offset)
 {
-	void __iomem *xfer_start = ei_status.mem + ring_offset - START_PG * 256;
+	unsigned long xfer_start = dev->mem_start + ring_offset - (START_PG << 8);
 
-	if (ring_offset + count > ei_status.stop_page * 256) {
+	if (xfer_start + count > ei_status.rmem_end) {
 		/* We must wrap the input move. */
-		int semi_count = ei_status.stop_page * 256 - ring_offset;
-		memcpy_fromio(skb->data, xfer_start, semi_count);
+		int semi_count = ei_status.rmem_end - xfer_start;
+		isa_memcpy_fromio(skb->data, xfer_start, semi_count);
 		count -= semi_count;
-		memcpy_fromio(skb->data + semi_count, ei_status.mem + TX_PAGES * 256, count);
+		isa_memcpy_fromio(skb->data + semi_count, ei_status.rmem_start, count);
 	} else {
 		/* Packet is in one chunk -- we can copy + cksum. */
-		eth_io_copy_and_sum(skb, xfer_start, count, 0);
+		isa_eth_io_copy_and_sum(skb, xfer_start, count, 0);
 	}
 
 }
@@ -435,9 +429,9 @@ static void ultramca_block_input(struct net_device *dev, int count, struct sk_bu
 static void ultramca_block_output(struct net_device *dev, int count, const unsigned char *buf,
                 int start_page)
 {
-	void __iomem *shmem = ei_status.mem + ((start_page - START_PG) << 8);
+	unsigned long shmem = dev->mem_start + ((start_page - START_PG) << 8);
 
-	memcpy_toio(shmem, buf, count);
+	isa_memcpy_toio(shmem, buf, count);
 }
 
 static int ultramca_close_card(struct net_device *dev)
@@ -472,7 +466,6 @@ static int ultramca_remove(struct device *gen_dev)
 		unregister_netdev(dev);
 		mca_device_set_claim(mca_dev, 0);
 		release_region(ioaddr, ULTRA_IO_EXTENT);
-		iounmap(ei_status.mem);
 		free_netdev(dev);
 	}
 	return 0;

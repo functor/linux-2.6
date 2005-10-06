@@ -131,7 +131,7 @@ struct cisco_packet {
 
 static struct sppp *spppq;
 static struct timer_list sppp_keepalive_timer;
-static DEFINE_SPINLOCK(spppq_lock);
+static spinlock_t spppq_lock = SPIN_LOCK_UNLOCKED;
 
 /* global xmit queue for sending packets while spinlock is held */
 static struct sk_buff_head tx_queue;
@@ -1483,6 +1483,6 @@ static void __exit sync_ppp_cleanup(void)
 
 module_init(sync_ppp_init);
 module_exit(sync_ppp_cleanup);
-module_param(debug, int, 0);
+MODULE_PARM(debug,"1i");
 MODULE_LICENSE("GPL");
 

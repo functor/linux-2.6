@@ -41,22 +41,35 @@ static struct ctl_table_header *fs_table_header;
 #define CODA_CACHE_INV 	 9       /* cache invalidation statistics */
 #define CODA_FAKE_STATFS 10	 /* don't query venus for actual cache usage */
 
-struct coda_vfs_stats		coda_vfs_stat;
-static struct coda_cache_inv_stats	coda_cache_inv_stat;
+static ctl_table coda_table[] = {
+ 	{CODA_TIMEOUT, "timeout", &coda_timeout, sizeof(int), 0644, NULL, &proc_dointvec},
+ 	{CODA_HARD, "hard", &coda_hard, sizeof(int), 0644, NULL, &proc_dointvec},
+ 	{CODA_VFS, "vfs_stats", NULL, 0, 0644, NULL, &do_reset_coda_vfs_stats},
+ 	{CODA_CACHE_INV, "cache_inv_stats", NULL, 0, 0644, NULL, &do_reset_coda_cache_inv_stats},
+ 	{CODA_FAKE_STATFS, "fake_statfs", &coda_fake_statfs, sizeof(int), 0600, NULL, &proc_dointvec},
+	{ 0 }
+};
 
-static void reset_coda_vfs_stats( void )
+static ctl_table fs_table[] = {
+       {FS_CODA, "coda",    NULL, 0, 0555, coda_table},
+       {0}
+};
+
+struct coda_vfs_stats		coda_vfs_stat;
+struct coda_cache_inv_stats	coda_cache_inv_stat;
+
+void reset_coda_vfs_stats( void )
 {
 	memset( &coda_vfs_stat, 0, sizeof( coda_vfs_stat ) );
 }
 
-static void reset_coda_cache_inv_stats( void )
+void reset_coda_cache_inv_stats( void )
 {
 	memset( &coda_cache_inv_stat, 0, sizeof( coda_cache_inv_stat ) );
 }
 
-static int do_reset_coda_vfs_stats( ctl_table * table, int write,
-				    struct file * filp, void __user * buffer,
-				    size_t * lenp, loff_t * ppos )
+int do_reset_coda_vfs_stats( ctl_table * table, int write, struct file * filp,
+			     void __user * buffer, size_t * lenp, loff_t * ppos )
 {
 	if ( write ) {
 		reset_coda_vfs_stats();
@@ -69,10 +82,9 @@ static int do_reset_coda_vfs_stats( ctl_table * table, int write,
 	return 0;
 }
 
-static int do_reset_coda_cache_inv_stats( ctl_table * table, int write,
-					  struct file * filp,
-					  void __user * buffer,
-					  size_t * lenp, loff_t * ppos )
+int do_reset_coda_cache_inv_stats( ctl_table * table, int write, 
+				   struct file * filp, void __user * buffer, 
+				   size_t * lenp, loff_t * ppos )
 {
 	if ( write ) {
 		reset_coda_cache_inv_stats();
@@ -85,8 +97,8 @@ static int do_reset_coda_cache_inv_stats( ctl_table * table, int write,
 	return 0;
 }
 
-static int coda_vfs_stats_get_info( char * buffer, char ** start,
-				    off_t offset, int length)
+int coda_vfs_stats_get_info( char * buffer, char ** start, off_t offset,
+			     int length)
 {
 	int len=0;
 	off_t begin;
@@ -146,8 +158,8 @@ static int coda_vfs_stats_get_info( char * buffer, char ** start,
 	return len;
 }
 
-static int coda_cache_inv_stats_get_info( char * buffer, char ** start,
-					  off_t offset, int length)
+int coda_cache_inv_stats_get_info( char * buffer, char ** start, off_t offset,
+				   int length)
 {
 	int len=0;
 	off_t begin;
@@ -184,20 +196,6 @@ static int coda_cache_inv_stats_get_info( char * buffer, char ** start,
 	return len;
 }
 
-static ctl_table coda_table[] = {
- 	{CODA_TIMEOUT, "timeout", &coda_timeout, sizeof(int), 0644, NULL, &proc_dointvec},
- 	{CODA_HARD, "hard", &coda_hard, sizeof(int), 0644, NULL, &proc_dointvec},
- 	{CODA_VFS, "vfs_stats", NULL, 0, 0644, NULL, &do_reset_coda_vfs_stats},
- 	{CODA_CACHE_INV, "cache_inv_stats", NULL, 0, 0644, NULL, &do_reset_coda_cache_inv_stats},
- 	{CODA_FAKE_STATFS, "fake_statfs", &coda_fake_statfs, sizeof(int), 0600, NULL, &proc_dointvec},
-	{ 0 }
-};
-
-static ctl_table fs_table[] = {
-       {FS_CODA, "coda",    NULL, 0, 0555, coda_table},
-       {0}
-};
-
 
 #ifdef CONFIG_PROC_FS
 
@@ -209,7 +207,7 @@ static ctl_table fs_table[] = {
 
 */
 
-static struct proc_dir_entry* proc_fs_coda;
+struct proc_dir_entry* proc_fs_coda;
 
 #endif
 

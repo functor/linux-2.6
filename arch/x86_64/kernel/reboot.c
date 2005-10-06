@@ -22,18 +22,18 @@ void (*pm_power_off)(void);
 
 static long no_idt[3];
 static enum { 
+	BOOT_BIOS = 'b',
 	BOOT_TRIPLE = 't',
 	BOOT_KBD = 'k'
 } reboot_type = BOOT_KBD;
 static int reboot_mode = 0;
-int reboot_force;
 
-/* reboot=t[riple] | k[bd] [, [w]arm | [c]old]
+/* reboot=b[ios] | t[riple] | k[bd] [, [w]arm | [c]old]
+   bios	  Use the CPU reboot vector for warm reset
    warm   Don't set the cold reboot flag
    cold   Set the cold reboot flag
    triple Force a triple fault (init)
    kbd    Use the keyboard controller. cold reset (default)
-   force  Avoid anything that could hang.
  */ 
 static int __init reboot_setup(char *str)
 {
@@ -51,9 +51,6 @@ static int __init reboot_setup(char *str)
 		case 'b':
 		case 'k':
 			reboot_type = *str;
-			break;
-		case 'f':
-			reboot_force = 1;
 			break;
 		}
 		if((str = strchr(str,',')) != NULL)
@@ -137,51 +134,21 @@ void machine_shutdown(void)
 	local_irq_enable();
 }
 
-static void smp_halt(void)
-{
-	int cpuid = safe_smp_processor_id(); 
-	static int first_entry = 1;
-
-	if (reboot_force)
-		return;
-
-	if (first_entry) {
-		first_entry = 0;
-		smp_call_function((void *)machine_restart, NULL, 1, 0);
-	}
-			
-	smp_stop_cpu(); 
-
-	/* AP calling this. Just halt */
-	if (cpuid != boot_cpu_id) { 
-		for (;;) 
-			asm("hlt");
-	}
-
-	/* Wait for all other CPUs to have run smp_stop_cpu */
-	while (!cpus_empty(cpu_online_map))
-		rep_nop(); 
-}
-
 void machine_restart(char * __unused)
 {
 	int i;
 
 	machine_shutdown();
-	printk("machine restart\n");
 
-#ifdef CONFIG_SMP
-	smp_halt(); 
-#endif
-
-	if (!reboot_force) {
-		local_irq_disable();
+	local_irq_disable();
+       
 #ifndef CONFIG_SMP
-		disable_local_APIC();
+	disable_local_APIC();
 #endif
-		disable_IO_APIC();
-		local_irq_enable();
-	}
+
+	disable_IO_APIC();
+	
+	local_irq_enable();
 	
 	/* Tell the BIOS if we want cold or warm reboot */
 	*((unsigned short *)__va(0x472)) = reboot_mode;
@@ -189,6 +156,9 @@ void machine_restart(char * __unused)
 	for (;;) {
 		/* Could also try the reset bit in the Hammer NB */
 		switch (reboot_type) { 
+		case BOOT_BIOS:
+			reboot_warm();
+
 		case BOOT_KBD:
 		for (i=0; i<100; i++) {
 			kb_wait();
@@ -198,8 +168,8 @@ void machine_restart(char * __unused)
 		}
 
 		case BOOT_TRIPLE: 
-			__asm__ __volatile__("lidt (%0)": :"r" (&no_idt));
-			__asm__ __volatile__("int3");
+		__asm__ __volatile__("lidt (%0)": :"r" (&no_idt));
+		__asm__ __volatile__("int3");
 
 			reboot_type = BOOT_KBD;
 			break;

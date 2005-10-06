@@ -594,9 +594,14 @@ ENTRY(cpu_xscale_set_pte)
 
 	.type	__xscale_setup, #function
 __xscale_setup:
+	mov	r0, #PSR_F_BIT|PSR_I_BIT|SVC_MODE
+	msr	cpsr_c, r0
 	mcr	p15, 0, ip, c7, c7, 0		@ invalidate I, D caches & BTB
 	mcr	p15, 0, ip, c7, c10, 4		@ Drain Write (& Fill) Buffer
 	mcr	p15, 0, ip, c8, c7, 0		@ invalidate I, D TLBs
+	mcr	p15, 0, r4, c2, c0, 0		@ load page table pointer
+	mov	r0, #0x1f			@ Domains 0, 1 = client
+	mcr	p15, 0, r0, c3, c0, 0		@ load domain access register
 #ifdef CONFIG_IWMMXT
 	mov	r0, #0				@ initially disallow access to CP0/CP1
 #else
@@ -606,25 +611,12 @@ __xscale_setup:
 	orr	r0, r0, #1 << 13		@ Its undefined whether this
 	mcr	p15, 0, r0, c15, c1, 0		@ affects USR or SVC modes
 	mrc	p15, 0, r0, c1, c0, 0		@ get control register
-	ldr	r5, xscale_cr1_clear
-	bic	r0, r0, r5
-	ldr	r5, xscale_cr1_set
-	orr	r0, r0, r5
+	bic	r0, r0, #0x0200			@ .... ..R. .... ....
+	bic	r0, r0, #0x0002			@ .... .... .... ..A.
+	orr	r0, r0, #0x0005			@ .... .... .... .C.M
+	orr	r0, r0, #0x3900			@ ..VI Z..S .... ....
 	mov	pc, lr
 	.size	__xscale_setup, . - __xscale_setup
-
-	/*
-	 *  R
-	 * .RVI ZFRS BLDP WCAM
-	 * ..11 1.01 .... .101
-	 * 
-	 */
-	.type	xscale_cr1_clear, #object
-	.type	xscale_cr1_set, #object
-xscale_cr1_clear:
-	.word	0x3b07
-xscale_cr1_set:
-	.word	0x3905
 
 	__INITDATA
 
@@ -720,11 +712,7 @@ cpu_pxa270_name:
 __80200_proc_info:
 	.long	0x69052000
 	.long	0xfffffff0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
@@ -740,11 +728,7 @@ __80200_proc_info:
 __8032x_proc_info:
 	.long	0x69052420
 	.long	0xfffff5e0      @ mask should accomodate IOP80219 also
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
@@ -758,13 +742,9 @@ __8032x_proc_info:
 
 	.type	__8033x_proc_info,#object
 __8033x_proc_info:
-	.long	0x69054010
-	.long	0xffffff30
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x69054090
+	.long	0xffffffb0
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
@@ -780,11 +760,7 @@ __8033x_proc_info:
 __pxa250_proc_info:
 	.long	0x69052100
 	.long	0xfffff7f0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
@@ -800,11 +776,7 @@ __pxa250_proc_info:
 __pxa210_proc_info:
 	.long	0x69052120
 	.long	0xfffff3f0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
@@ -820,11 +792,7 @@ __pxa210_proc_info:
 __ixp2400_proc_info:
 	.long   0x69054190
 	.long   0xfffffff0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long   0x00000c0e
 	b       __xscale_setup
 	.long   cpu_arch_name
 	.long   cpu_elf_name
@@ -840,11 +808,7 @@ __ixp2400_proc_info:
 __ixp2800_proc_info:
 	.long   0x690541a0
 	.long   0xfffffff0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long   0x00000c0e
 	b       __xscale_setup
 	.long   cpu_arch_name
 	.long   cpu_elf_name
@@ -860,11 +824,7 @@ __ixp2800_proc_info:
 __ixp42x_proc_info:
 	.long   0x690541c0
 	.long   0xffffffc0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long   0x00000c0e
 	b       __xscale_setup
 	.long   cpu_arch_name
 	.long   cpu_elf_name
@@ -896,11 +856,7 @@ __ixp46x_proc_info:
 __pxa255_proc_info:
 	.long	0x69052d00
 	.long	0xfffffff0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
@@ -916,11 +872,7 @@ __pxa255_proc_info:
 __pxa270_proc_info:
 	.long	0x69054110
 	.long	0xfffffff0
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_BUFFERABLE | \
-		PMD_SECT_CACHEABLE | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ
+	.long	0x00000c0e
 	b	__xscale_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name

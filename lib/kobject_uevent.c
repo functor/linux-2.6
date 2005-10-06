@@ -178,7 +178,6 @@ static inline int send_uevent(const char *signal, const char *obj,
 
 #ifdef CONFIG_HOTPLUG
 char hotplug_path[HOTPLUG_PATH_LEN] = "/sbin/hotplug";
-EXPORT_SYMBOL_GPL(hotplug_path);
 u64 hotplug_seqnum;
 static DEFINE_SPINLOCK(sequence_lock);
 

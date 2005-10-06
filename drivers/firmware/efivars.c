@@ -97,7 +97,7 @@ MODULE_VERSION(EFIVARS_VERSION);
  * efi.get_next_variable() is only called from efivars_init(),
  * which is protected by the BKL, so that path is safe.
  */
-static DEFINE_SPINLOCK(efivars_lock);
+static spinlock_t efivars_lock = SPIN_LOCK_UNLOCKED;
 static LIST_HEAD(efivar_list);
 
 /*
@@ -665,21 +665,13 @@ efivars_init(void)
 {
 	efi_status_t status = EFI_NOT_FOUND;
 	efi_guid_t vendor_guid;
-	efi_char16_t *variable_name;
+	efi_char16_t *variable_name = kmalloc(1024, GFP_KERNEL);
 	struct subsys_attribute *attr;
 	unsigned long variable_name_size = 1024;
-	int i, error = 0;
+	int i, rc = 0, error = 0;
 
 	if (!efi_enabled)
 		return -ENODEV;
-
-	variable_name = kmalloc(variable_name_size, GFP_KERNEL);
-	if (!variable_name) {
-		printk(KERN_ERR "efivars: Memory allocation failed.\n");
-		return -ENOMEM;
-	}
-
-	memset(variable_name, 0, variable_name_size);
 
 	printk(KERN_INFO "EFI Variables Facility v%s %s\n", EFIVARS_VERSION,
 	       EFIVARS_DATE);
@@ -688,26 +680,20 @@ efivars_init(void)
 	 * For now we'll register the efi subsys within this driver
 	 */
 
-	error = firmware_register(&efi_subsys);
+	rc = firmware_register(&efi_subsys);
 
-	if (error) {
-		printk(KERN_ERR "efivars: Firmware registration failed with error %d.\n", error);
-		goto out_free;
-	}
+	if (rc)
+		return rc;
 
 	kset_set_kset_s(&vars_subsys, efi_subsys);
-
-	error = subsystem_register(&vars_subsys);
-
-	if (error) {
-		printk(KERN_ERR "efivars: Subsystem registration failed with error %d.\n", error);
-		goto out_firmware_unregister;
-	}
+	subsystem_register(&vars_subsys);
 
 	/*
 	 * Per EFI spec, the maximum storage allocated for both
 	 * the variable name and variable data is 1024 bytes.
 	 */
+
+	memset(variable_name, 0, 1024);
 
 	do {
 		variable_name_size = 1024;
@@ -748,20 +734,8 @@ efivars_init(void)
 			error = subsys_create_file(&efi_subsys, attr);
 	}
 
-	if (error)
-		printk(KERN_ERR "efivars: Sysfs attribute export failed with error %d.\n", error);
-	else
-		goto out_free;
-
-	subsystem_unregister(&vars_subsys);
-
-out_firmware_unregister:
-	firmware_unregister(&efi_subsys);
-
-out_free:
 	kfree(variable_name);
-
-	return error;
+	return 0;
 }
 
 static void __exit

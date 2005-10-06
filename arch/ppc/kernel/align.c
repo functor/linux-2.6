@@ -248,7 +248,7 @@ fix_alignment(struct pt_regs *regs)
 		 */
 		p = (long __user *) (regs->dar & -L1_CACHE_BYTES);
 		if (user_mode(regs)
-		    && !access_ok(VERIFY_WRITE, p, L1_CACHE_BYTES))
+		    && verify_area(VERIFY_WRITE, p, L1_CACHE_BYTES))
 			return -EFAULT;
 		for (i = 0; i < L1_CACHE_BYTES / sizeof(long); ++i)
 			if (__put_user(0, p+i))
@@ -290,10 +290,6 @@ fix_alignment(struct pt_regs *regs)
 			/* lwm, stmw */
 			nb = (32 - reg) * 4;
 		}
-
-		if (!access_ok((flags & ST? VERIFY_WRITE: VERIFY_READ), addr, nb+nb0))
-			return -EFAULT;	/* bad address */
-
 		rptr = (unsigned char *) &regs->gpr[reg];
 		if (flags & LD) {
 			for (i = 0; i < nb; ++i)
@@ -332,7 +328,7 @@ fix_alignment(struct pt_regs *regs)
 
 	/* Verify the address of the operand */
 	if (user_mode(regs)) {
-		if (!access_ok((flags & ST? VERIFY_WRITE: VERIFY_READ), addr, nb))
+		if (verify_area((flags & ST? VERIFY_WRITE: VERIFY_READ), addr, nb))
 			return -EFAULT;	/* bad address */
 	}
 
@@ -372,24 +368,16 @@ fix_alignment(struct pt_regs *regs)
 
 	/* Single-precision FP load and store require conversions... */
 	case LD+F+S:
-#ifdef CONFIG_PPC_FPU
 		preempt_disable();
 		enable_kernel_fp();
 		cvt_fd(&data.f, &data.d, &current->thread.fpscr);
 		preempt_enable();
-#else
-		return 0;
-#endif
 		break;
 	case ST+F+S:
-#ifdef CONFIG_PPC_FPU
 		preempt_disable();
 		enable_kernel_fp();
 		cvt_df(&data.d, &data.f, &current->thread.fpscr);
 		preempt_enable();
-#else
-		return 0;
-#endif
 		break;
 	}
 

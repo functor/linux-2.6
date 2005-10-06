@@ -1,7 +1,6 @@
 #ifndef _NET_XFRM_H
 #define _NET_XFRM_H
 
-#include <linux/compiler.h>
 #include <linux/xfrm.h>
 #include <linux/spinlock.h>
 #include <linux/list.h>
@@ -213,7 +212,7 @@ struct xfrm_type
 	void			(*destructor)(struct xfrm_state *);
 	int			(*input)(struct xfrm_state *, struct xfrm_decap_state *, struct sk_buff *skb);
 	int			(*post_input)(struct xfrm_state *, struct xfrm_decap_state *, struct sk_buff *skb);
-	int			(*output)(struct xfrm_state *, struct sk_buff *pskb);
+	int			(*output)(struct sk_buff *pskb);
 	/* Estimate maximal size of result of transformation of a dgram */
 	u32			(*get_max_size)(struct xfrm_state *, int size);
 };
@@ -512,21 +511,7 @@ struct xfrm_dst
 		struct rtable		rt;
 		struct rt6_info		rt6;
 	} u;
-	struct dst_entry *route;
-	u32 route_mtu_cached;
-	u32 child_mtu_cached;
-	u32 route_cookie;
-	u32 path_cookie;
 };
-
-static inline void xfrm_dst_destroy(struct xfrm_dst *xdst)
-{
-	dst_release(xdst->route);
-	if (likely(xdst->u.dst.xfrm))
-		xfrm_state_put(xdst->u.dst.xfrm);
-}
-
-extern void xfrm_dst_ifdown(struct dst_entry *dst, struct net_device *dev);
 
 /* Decapsulation state, used by the input to store data during
  * decapsulation procedure, to be used later (during the policy
@@ -797,6 +782,7 @@ struct xfrm6_tunnel {
 
 extern void xfrm_init(void);
 extern void xfrm4_init(void);
+extern void xfrm4_fini(void);
 extern void xfrm6_init(void);
 extern void xfrm6_fini(void);
 extern void xfrm_state_init(void);
@@ -822,7 +808,6 @@ extern void xfrm_state_flush(u8 proto);
 extern int xfrm_replay_check(struct xfrm_state *x, u32 seq);
 extern void xfrm_replay_advance(struct xfrm_state *x, u32 seq);
 extern int xfrm_state_check(struct xfrm_state *x, struct sk_buff *skb);
-extern int xfrm_state_mtu(struct xfrm_state *x, int mtu);
 extern int xfrm4_rcv(struct sk_buff *skb);
 extern int xfrm4_output(struct sk_buff *skb);
 extern int xfrm4_tunnel_register(struct xfrm_tunnel *handler);
@@ -858,6 +843,7 @@ static inline int xfrm_dst_lookup(struct xfrm_dst **dst, struct flowi *fl, unsig
 } 
 #endif
 
+void xfrm_policy_init(void);
 struct xfrm_policy *xfrm_policy_alloc(int gfp);
 extern int xfrm_policy_walk(int (*func)(struct xfrm_policy *, int, int, void*), void *);
 int xfrm_policy_insert(int dir, struct xfrm_policy *policy, int excl);
@@ -872,11 +858,12 @@ struct xfrm_state * xfrm_find_acq(u8 mode, u32 reqid, u8 proto,
 				  int create, unsigned short family);
 extern void xfrm_policy_flush(void);
 extern int xfrm_sk_policy_insert(struct sock *sk, int dir, struct xfrm_policy *pol);
+extern struct xfrm_policy *xfrm_sk_policy_lookup(struct sock *sk, int dir, struct flowi *fl);
 extern int xfrm_flush_bundles(void);
-extern int xfrm_bundle_ok(struct xfrm_dst *xdst, struct flowi *fl, int family);
-extern void xfrm_init_pmtu(struct dst_entry *dst);
 
 extern wait_queue_head_t km_waitq;
+extern void km_state_expired(struct xfrm_state *x, int hard);
+extern int km_query(struct xfrm_state *x, struct xfrm_tmpl *, struct xfrm_policy *pol);
 extern int km_new_mapping(struct xfrm_state *x, xfrm_address_t *ipaddr, u16 sport);
 extern void km_policy_expired(struct xfrm_policy *pol, int dir, int hard);
 
@@ -888,12 +875,13 @@ extern int xfrm_count_auth_supported(void);
 extern int xfrm_count_enc_supported(void);
 extern struct xfrm_algo_desc *xfrm_aalg_get_byidx(unsigned int idx);
 extern struct xfrm_algo_desc *xfrm_ealg_get_byidx(unsigned int idx);
+extern struct xfrm_algo_desc *xfrm_calg_get_byidx(unsigned int idx);
 extern struct xfrm_algo_desc *xfrm_aalg_get_byid(int alg_id);
 extern struct xfrm_algo_desc *xfrm_ealg_get_byid(int alg_id);
 extern struct xfrm_algo_desc *xfrm_calg_get_byid(int alg_id);
-extern struct xfrm_algo_desc *xfrm_aalg_get_byname(char *name, int probe);
-extern struct xfrm_algo_desc *xfrm_ealg_get_byname(char *name, int probe);
-extern struct xfrm_algo_desc *xfrm_calg_get_byname(char *name, int probe);
+extern struct xfrm_algo_desc *xfrm_aalg_get_byname(char *name);
+extern struct xfrm_algo_desc *xfrm_ealg_get_byname(char *name);
+extern struct xfrm_algo_desc *xfrm_calg_get_byname(char *name);
 
 struct crypto_tfm;
 typedef void (icv_update_fn_t)(struct crypto_tfm *, struct scatterlist *, unsigned int);

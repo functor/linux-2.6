@@ -65,7 +65,6 @@ struct cpuinfo_x86 {
 	int	f00f_bug;
 	int	coma_bug;
 	unsigned long loops_per_jiffy;
-	unsigned char x86_num_cores;
 } __attribute__((__aligned__(SMP_CACHE_BYTES)));
 
 #define X86_VENDOR_INTEL 0
@@ -97,19 +96,12 @@ extern struct cpuinfo_x86 cpu_data[];
 #define current_cpu_data boot_cpu_data
 #endif
 
-extern	int phys_proc_id[NR_CPUS];
-extern	int cpu_core_id[NR_CPUS];
 extern char ignore_fpu_irq;
 
 extern void identify_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
 extern unsigned int init_intel_cacheinfo(struct cpuinfo_x86 *c);
-
-#ifdef CONFIG_X86_HT
-extern void detect_ht(struct cpuinfo_x86 *c);
-#else
-static inline void detect_ht(struct cpuinfo_x86 *c) {}
-#endif
+extern void dodgy_tsc(void);
 
 /*
  * EFLAGS bits
@@ -134,29 +126,15 @@ static inline void detect_ht(struct cpuinfo_x86 *c) {}
 
 /*
  * Generic CPUID function
- * clear %ecx since some cpus (Cyrix MII) do not set or clear %ecx
- * resulting in stale register contents being returned.
  */
-static inline void cpuid(unsigned int op, unsigned int *eax, unsigned int *ebx, unsigned int *ecx, unsigned int *edx)
+static inline void cpuid(int op, int *eax, int *ebx, int *ecx, int *edx)
 {
 	__asm__("cpuid"
 		: "=a" (*eax),
 		  "=b" (*ebx),
 		  "=c" (*ecx),
 		  "=d" (*edx)
-		: "0" (op), "c"(0));
-}
-
-/* Some CPUID calls want 'count' to be placed in ecx */
-static inline void cpuid_count(int op, int count, int *eax, int *ebx, int *ecx,
-	       	int *edx)
-{
-	__asm__("cpuid"
-		: "=a" (*eax),
-		  "=b" (*ebx),
-		  "=c" (*ecx),
-		  "=d" (*edx)
-		: "0" (op), "c" (count));
+		: "0" (op));
 }
 
 /*
@@ -281,6 +259,11 @@ static inline void clear_in_cr4 (unsigned long mask)
 	outb((data), 0x23); \
 } while (0)
 
+/*
+ * Bus types (default is ISA, but people can check others with these..)
+ */
+extern int MCA_bus;
+
 static inline void __monitor(const void *eax, unsigned long ecx,
 		unsigned long edx)
 {
@@ -304,9 +287,6 @@ extern unsigned int machine_id;
 extern unsigned int machine_submodel_id;
 extern unsigned int BIOS_revision;
 extern unsigned int mca_pentium_flag;
-
-/* Boot loader type from the setup header */
-extern int bootloader_type;
 
 /*
  * User space process size: (3GB default).
@@ -507,18 +487,8 @@ static inline void load_esp0(struct tss_struct *tss, struct thread_struct *threa
 	regs->xcs = __USER_CS;					\
 	regs->eip = new_eip;					\
 	regs->esp = new_esp;					\
-	preempt_disable();					\
 	load_user_cs_desc(smp_processor_id(), current->mm);	\
-	preempt_enable();					\
 } while (0)
-
-/*
- * This special macro can be used to load a debugging register
- */
-#define loaddebug(thread,register) \
-               __asm__("movl %0,%%db" #register  \
-                       : /* no output */ \
-                       :"r" ((thread)->debugreg[register]))
 
 /* Forward declaration, a strange C thing */
 struct task_struct;

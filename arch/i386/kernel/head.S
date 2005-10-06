@@ -128,6 +128,9 @@ ENTRY(startup_32_smp)
 	movl %eax,%fs
 	movl %eax,%gs
 
+	xorl %ebx,%ebx
+	incl %ebx				/* This is a secondary processor (AP) */
+
 /*
  *	New page tables may be in 4Mbyte page mode and may
  *	be using the global pages. 
@@ -145,7 +148,7 @@ ENTRY(startup_32_smp)
 #define cr4_bits mmu_cr4_features-__PAGE_OFFSET
 	movl cr4_bits,%edx
 	andl %edx,%edx
-	jz 6f
+	jz 3f
 	movl %cr4,%eax		# Turn on paging options (PSE,PAE,..)
 	orl %edx,%eax
 	movl %eax,%cr4
@@ -173,10 +176,9 @@ ENTRY(startup_32_smp)
 	wrmsr
 
 6:
-	/* This is a secondary processor (AP) */
+	/* cpuid clobbered ebx, set it up again: */
 	xorl %ebx,%ebx
 	incl %ebx
-
 3:
 #endif /* CONFIG_SMP */
 
@@ -380,7 +382,6 @@ rp_sidt:
 	ALIGN
 ignore_int:
 	cld
-#ifdef CONFIG_PRINTK
 	pushl %eax
 	pushl %ecx
 	pushl %edx
@@ -401,7 +402,6 @@ ignore_int:
 	popl %edx
 	popl %ecx
 	popl %eax
-#endif
 	iret
 
 /*
@@ -514,7 +514,7 @@ ENTRY(cpu_gdt_table)
 	.quad 0x00009a0000000000	/* 0xc0 APM CS 16 code (16 bit) */
 	.quad 0x0040920000000000	/* 0xc8 APM DS    data */
 
-	.quad 0x0000920000000000	/* 0xd0 - ESPFIX 16-bit SS */
+	.quad 0x0000000000000000	/* 0xd0 - unused */
 	.quad 0x0000000000000000	/* 0xd8 - unused */
 	.quad 0x0000000000000000	/* 0xe0 - unused */
 	.quad 0x0000000000000000	/* 0xe8 - unused */

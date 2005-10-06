@@ -59,6 +59,9 @@
 #include "sr.h"
 
 
+MODULE_PARM(xa_test, "i");	/* see sr_ioctl.c */
+
+
 #define SR_DISKS	256
 
 #define MAX_RETRIES	3
@@ -85,7 +88,7 @@ static struct scsi_driver sr_template = {
 };
 
 static unsigned long sr_index_bits[SR_DISKS / BITS_PER_LONG];
-static DEFINE_SPINLOCK(sr_index_lock);
+static spinlock_t sr_index_lock = SPIN_LOCK_UNLOCKED;
 
 /* This semaphore is used to mediate the 0->1 reference get in the
  * face of object destruction (i.e. we can't allow a get on an
@@ -152,11 +155,9 @@ static inline struct scsi_cd *scsi_cd_get(struct gendisk *disk)
 
 static inline void scsi_cd_put(struct scsi_cd *cd)
 {
-	struct scsi_device *sdev = cd->device;
-
 	down(&sr_ref_sem);
 	kref_put(&cd->kref, sr_kref_release);
-	scsi_device_put(sdev);
+	scsi_device_put(cd->device);
 	up(&sr_ref_sem);
 }
 
@@ -511,17 +512,13 @@ static int sr_block_media_changed(struct gendisk *disk)
 	return cdrom_media_changed(&cd->cdi);
 }
 
-static struct block_device_operations sr_bdops =
+struct block_device_operations sr_bdops =
 {
 	.owner		= THIS_MODULE,
 	.open		= sr_block_open,
 	.release	= sr_block_release,
 	.ioctl		= sr_block_ioctl,
 	.media_changed	= sr_block_media_changed,
-	/* 
-	 * No compat_ioctl for now because sr_block_ioctl never
-	 * seems to pass arbitary ioctls down to host drivers.
-	 */
 };
 
 static int sr_open(struct cdrom_device_info *cdi, int purpose)
@@ -548,6 +545,7 @@ static int sr_open(struct cdrom_device_info *cdi, int purpose)
 	return 0;
 
 error_out:
+	scsi_cd_put(cd);
 	return retval;	
 }
 

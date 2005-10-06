@@ -41,7 +41,7 @@ static struct daisydev {
 	int daisy;
 	int devnum;
 } *topology = NULL;
-static DEFINE_SPINLOCK(topology_lock);
+static spinlock_t topology_lock = SPIN_LOCK_UNLOCKED;
 
 static int numdevs = 0;
 

@@ -37,7 +37,8 @@
  * Entries have a ref count and a 'hashed' flag which counts the existance
  * in the hash table.
  * We only expire entries when refcount is zero.
- * Existance in the cache is counted  the refcount.
+ * Existance in the cache is not measured in refcount but rather in
+ * CACHE_HASHED flag.
  */
 
 /* Every cache item has a common header that is used
@@ -56,6 +57,7 @@ struct cache_head {
 #define	CACHE_VALID	0	/* Entry contains valid data */
 #define	CACHE_NEGATIVE	1	/* Negative entry - there is no match for the key */
 #define	CACHE_PENDING	2	/* An upcall has been sent but no reply received yet*/
+#define	CACHE_HASHED	3	/* Entry is in a hash table */
 
 #define	CACHE_NEW_EXPIRY 120	/* keep new things pending confirmation for 120 seconds */
 
@@ -183,6 +185,7 @@ RTN *FNAME ARGS										\
 											\
 			if (new)							\
 				{INIT;}							\
+			cache_get(&tmp->MEMBER);					\
 			if (set) {							\
 				if (!INPLACE && test_bit(CACHE_VALID, &tmp->MEMBER.flags))\
 				{ /* need to swap in new */				\
@@ -191,6 +194,8 @@ RTN *FNAME ARGS										\
 					new->MEMBER.next = tmp->MEMBER.next;		\
 					*hp = &new->MEMBER;				\
 					tmp->MEMBER.next = NULL;			\
+					set_bit(CACHE_HASHED, &new->MEMBER.flags);	\
+					clear_bit(CACHE_HASHED, &tmp->MEMBER.flags);	\
 					t2 = tmp; tmp = new; new = t2;			\
 				}							\
 				if (test_bit(CACHE_NEGATIVE,  &item->MEMBER.flags))	\
@@ -200,7 +205,6 @@ RTN *FNAME ARGS										\
 					clear_bit(CACHE_NEGATIVE, &tmp->MEMBER.flags);	\
 				}							\
 			}								\
-			cache_get(&tmp->MEMBER);					\
 			if (set||new) write_unlock(&(DETAIL)->hash_lock);		\
 			else read_unlock(&(DETAIL)->hash_lock);				\
 			if (set)							\
@@ -216,7 +220,7 @@ RTN *FNAME ARGS										\
 		new->MEMBER.next = *head;						\
 		*head = &new->MEMBER;							\
 		(DETAIL)->entries ++;							\
-		cache_get(&new->MEMBER);						\
+		set_bit(CACHE_HASHED, &new->MEMBER.flags);				\
 		if (set) {								\
 			tmp = new;							\
 			if (test_bit(CACHE_NEGATIVE, &item->MEMBER.flags))		\
@@ -253,6 +257,8 @@ RTN *FNAME ARGS										\
 
 	     
 
+extern void cache_defer_req(struct cache_req *req, struct cache_head *item);
+extern void cache_revisit_request(struct cache_head *item);
 extern void cache_clean_deferred(void *owner);
 
 static inline struct cache_head  *cache_get(struct cache_head *h)
@@ -264,10 +270,15 @@ static inline struct cache_head  *cache_get(struct cache_head *h)
 
 static inline int cache_put(struct cache_head *h, struct cache_detail *cd)
 {
-	if (atomic_read(&h->refcnt) <= 2 &&
+	atomic_dec(&h->refcnt);
+	if (!atomic_read(&h->refcnt) &&
 	    h->expiry_time < cd->nextcheck)
 		cd->nextcheck = h->expiry_time;
-	return atomic_dec_and_test(&h->refcnt);
+	if (!test_bit(CACHE_HASHED, &h->flags) &&
+	    !atomic_read(&h->refcnt))
+		return 1;
+
+	return 0;
 }
 
 extern void cache_init(struct cache_head *h);
@@ -275,11 +286,14 @@ extern void cache_fresh(struct cache_detail *detail,
 			struct cache_head *head, time_t expiry);
 extern int cache_check(struct cache_detail *detail,
 		       struct cache_head *h, struct cache_req *rqstp);
+extern int cache_clean(void);
 extern void cache_flush(void);
 extern void cache_purge(struct cache_detail *detail);
 #define NEVER (0x7FFFFFFF)
 extern void cache_register(struct cache_detail *cd);
 extern int cache_unregister(struct cache_detail *cd);
+extern struct cache_detail *cache_find(char *name);
+extern void cache_drop(struct cache_detail *detail);
 
 extern void qword_add(char **bpp, int *lp, char *str);
 extern void qword_addhex(char **bpp, int *lp, char *buf, int blen);

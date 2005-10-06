@@ -30,7 +30,6 @@
  */
 irq_desc_t irq_desc[NR_IRQS] __cacheline_aligned = {
 	[0 ... NR_IRQS-1] = {
-		.status = IRQ_DISABLED,
 		.handler = &no_irq_type,
 		.lock = SPIN_LOCK_UNLOCKED
 	}
@@ -71,6 +70,17 @@ struct hw_interrupt_type no_irq_type = {
 irqreturn_t no_action(int cpl, void *dev_id, struct pt_regs *regs)
 {
 	return IRQ_NONE;
+}
+
+/*
+ * Exit an interrupt context. Process softirqs if needed and possible:
+ */
+void irq_exit(void)
+{
+	preempt_count() -= IRQ_EXIT_OFFSET;
+	if (!in_interrupt() && local_softirq_pending())
+		do_softirq();
+	preempt_enable_no_resched();
 }
 
 /*
@@ -119,6 +129,8 @@ fastcall unsigned int __do_IRQ(unsigned int irq, struct pt_regs *regs)
 		 */
 		desc->handler->ack(irq);
 		action_ret = handle_IRQ_event(irq, regs, desc->action);
+		if (!noirqdebug)
+			note_interrupt(irq, desc, action_ret, regs);
 		desc->handler->end(irq);
 		return 1;
 	}
@@ -172,7 +184,7 @@ fastcall unsigned int __do_IRQ(unsigned int irq, struct pt_regs *regs)
 
 		spin_lock(&desc->lock);
 		if (!noirqdebug)
-			note_interrupt(irq, desc, action_ret);
+			note_interrupt(irq, desc, action_ret, regs);
 		if (likely(!(desc->status & IRQ_PENDING)))
 			break;
 		desc->status &= ~IRQ_PENDING;

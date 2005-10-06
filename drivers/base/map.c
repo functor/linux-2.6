@@ -25,7 +25,7 @@ struct kobj_map {
 		int (*lock)(dev_t, void *);
 		void *data;
 	} *probes[255];
-	struct semaphore *sem;
+	struct rw_semaphore *sem;
 };
 
 int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
@@ -53,7 +53,7 @@ int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
 		p->range = range;
 		p->data = data;
 	}
-	down(domain->sem);
+	down_write(domain->sem);
 	for (i = 0, p -= n; i < n; i++, p++, index++) {
 		struct probe **s = &domain->probes[index % 255];
 		while (*s && (*s)->range < range)
@@ -61,7 +61,7 @@ int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
 		p->next = *s;
 		*s = p;
 	}
-	up(domain->sem);
+	up_write(domain->sem);
 	return 0;
 }
 
@@ -75,7 +75,7 @@ void kobj_unmap(struct kobj_map *domain, dev_t dev, unsigned long range)
 	if (n > 255)
 		n = 255;
 
-	down(domain->sem);
+	down_write(domain->sem);
 	for (i = 0; i < n; i++, index++) {
 		struct probe **s;
 		for (s = &domain->probes[index % 255]; *s; s = &(*s)->next) {
@@ -88,7 +88,7 @@ void kobj_unmap(struct kobj_map *domain, dev_t dev, unsigned long range)
 			}
 		}
 	}
-	up(domain->sem);
+	up_write(domain->sem);
 	kfree(found);
 }
 
@@ -99,7 +99,7 @@ struct kobject *kobj_lookup(struct kobj_map *domain, dev_t dev, int *index)
 	unsigned long best = ~0UL;
 
 retry:
-	down(domain->sem);
+	down_read(domain->sem);
 	for (p = domain->probes[MAJOR(dev) % 255]; p; p = p->next) {
 		struct kobject *(*probe)(dev_t, int *, void *);
 		struct module *owner;
@@ -120,7 +120,7 @@ retry:
 			module_put(owner);
 			continue;
 		}
-		up(domain->sem);
+		up_read(domain->sem);
 		kobj = probe(dev, index, data);
 		/* Currently ->owner protects _only_ ->probe() itself. */
 		module_put(owner);
@@ -128,11 +128,12 @@ retry:
 			return kobj;
 		goto retry;
 	}
-	up(domain->sem);
+	up_read(domain->sem);
 	return NULL;
 }
 
-struct kobj_map *kobj_map_init(kobj_probe_t *base_probe, struct semaphore *sem)
+struct kobj_map *kobj_map_init(kobj_probe_t *base_probe,
+		struct subsystem *s)
 {
 	struct kobj_map *p = kmalloc(sizeof(struct kobj_map), GFP_KERNEL);
 	struct probe *base = kmalloc(sizeof(struct probe), GFP_KERNEL);
@@ -150,6 +151,6 @@ struct kobj_map *kobj_map_init(kobj_probe_t *base_probe, struct semaphore *sem)
 	base->get = base_probe;
 	for (i = 0; i < 255; i++)
 		p->probes[i] = base;
-	p->sem = sem;
+	p->sem = &s->rwsem;
 	return p;
 }

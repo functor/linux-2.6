@@ -34,7 +34,7 @@ static mdk_personality_t raid1_personality;
 static void unplug_slaves(mddev_t *mddev);
 
 
-static void * r1bio_pool_alloc(unsigned int __nocast gfp_flags, void *data)
+static void * r1bio_pool_alloc(int gfp_flags, void *data)
 {
 	struct pool_info *pi = data;
 	r1bio_t *r1_bio;
@@ -61,7 +61,7 @@ static void r1bio_pool_free(void *r1_bio, void *data)
 #define RESYNC_PAGES ((RESYNC_BLOCK_SIZE + PAGE_SIZE-1) / PAGE_SIZE)
 #define RESYNC_WINDOW (2048*1024)
 
-static void * r1buf_pool_alloc(unsigned int __nocast gfp_flags, void *data)
+static void * r1buf_pool_alloc(int gfp_flags, void *data)
 {
 	struct pool_info *pi = data;
 	struct page *page;
@@ -338,7 +338,6 @@ static int read_balance(conf_t *conf, r1bio_t *r1_bio)
 	int new_disk = conf->last_used, disk = new_disk;
 	const int sectors = r1_bio->sectors;
 	sector_t new_distance, current_distance;
-	mdk_rdev_t *new_rdev, *rdev;
 
 	rcu_read_lock();
 	/*
@@ -346,14 +345,13 @@ static int read_balance(conf_t *conf, r1bio_t *r1_bio)
 	 * device if no resync is going on, or below the resync window.
 	 * We take the first readable disk when above the resync window.
 	 */
- retry:
 	if (conf->mddev->recovery_cp < MaxSector &&
 	    (this_sector + sectors >= conf->next_resync)) {
 		/* Choose the first operation device, for consistancy */
 		new_disk = 0;
 
-		while ((new_rdev=conf->mirrors[new_disk].rdev) == NULL ||
-		       !new_rdev->in_sync) {
+		while (!conf->mirrors[new_disk].rdev ||
+		       !conf->mirrors[new_disk].rdev->in_sync) {
 			new_disk++;
 			if (new_disk == conf->raid_disks) {
 				new_disk = -1;
@@ -365,8 +363,8 @@ static int read_balance(conf_t *conf, r1bio_t *r1_bio)
 
 
 	/* make sure the disk is operational */
-	while ((new_rdev=conf->mirrors[new_disk].rdev) == NULL ||
-	       !new_rdev->in_sync) {
+	while (!conf->mirrors[new_disk].rdev ||
+	       !conf->mirrors[new_disk].rdev->in_sync) {
 		if (new_disk <= 0)
 			new_disk = conf->raid_disks;
 		new_disk--;
@@ -395,20 +393,18 @@ static int read_balance(conf_t *conf, r1bio_t *r1_bio)
 			disk = conf->raid_disks;
 		disk--;
 
-		if ((rdev=conf->mirrors[disk].rdev) == NULL ||
-		    !rdev->in_sync)
+		if (!conf->mirrors[disk].rdev ||
+		    !conf->mirrors[disk].rdev->in_sync)
 			continue;
 
-		if (!atomic_read(&rdev->nr_pending)) {
+		if (!atomic_read(&conf->mirrors[disk].rdev->nr_pending)) {
 			new_disk = disk;
-			new_rdev = rdev;
 			break;
 		}
 		new_distance = abs(this_sector - conf->mirrors[disk].head_position);
 		if (new_distance < current_distance) {
 			current_distance = new_distance;
 			new_disk = disk;
-			new_rdev = rdev;
 		}
 	} while (disk != conf->last_used);
 
@@ -418,14 +414,7 @@ rb_out:
 	if (new_disk >= 0) {
 		conf->next_seq_sect = this_sector + sectors;
 		conf->last_used = new_disk;
-		atomic_inc(&new_rdev->nr_pending);
-		if (!new_rdev->in_sync) {
-			/* cannot risk returning a device that failed
-			 * before we inc'ed nr_pending
-			 */
-			atomic_dec(&new_rdev->nr_pending);
-			goto retry;
-		}
+		atomic_inc(&conf->mirrors[new_disk].rdev->nr_pending);
 	}
 	rcu_read_unlock();
 
@@ -523,7 +512,6 @@ static int make_request(request_queue_t *q, struct bio * bio)
 	r1bio_t *r1_bio;
 	struct bio *read_bio;
 	int i, disks;
-	mdk_rdev_t *rdev;
 
 	/*
 	 * Register the new request and wait if the reconstruction
@@ -597,14 +585,10 @@ static int make_request(request_queue_t *q, struct bio * bio)
 	disks = conf->raid_disks;
 	rcu_read_lock();
 	for (i = 0;  i < disks; i++) {
-		if ((rdev=conf->mirrors[i].rdev) != NULL &&
-		    !rdev->faulty) {
-			atomic_inc(&rdev->nr_pending);
-			if (rdev->faulty) {
-				atomic_dec(&rdev->nr_pending);
-				r1_bio->bios[i] = NULL;
-			} else
-				r1_bio->bios[i] = bio;
+		if (conf->mirrors[i].rdev &&
+		    !conf->mirrors[i].rdev->faulty) {
+			atomic_inc(&conf->mirrors[i].rdev->nr_pending);
+			r1_bio->bios[i] = bio;
 		} else
 			r1_bio->bios[i] = NULL;
 	}
@@ -797,7 +781,7 @@ static int raid1_remove_disk(mddev_t *mddev, int number)
 			goto abort;
 		}
 		p->rdev = NULL;
-		synchronize_rcu();
+		synchronize_kernel();
 		if (atomic_read(&rdev->nr_pending)) {
 			/* lost the race, try later */
 			err = -EBUSY;
@@ -1197,6 +1181,10 @@ static int run(mddev_t *mddev)
 	if (!conf->r1bio_pool)
 		goto out_no_mem;
 
+	mddev->queue->unplug_fn = raid1_unplug;
+
+	mddev->queue->issue_flush_fn = raid1_issue_flush;
+
 	ITERATE_RDEV(mddev, rdev, tmp) {
 		disk_idx = rdev->raid_disk;
 		if (disk_idx >= mddev->raid_disks
@@ -1222,12 +1210,12 @@ static int run(mddev_t *mddev)
 	}
 	conf->raid_disks = mddev->raid_disks;
 	conf->mddev = mddev;
-	spin_lock_init(&conf->device_lock);
+	conf->device_lock = SPIN_LOCK_UNLOCKED;
 	INIT_LIST_HEAD(&conf->retry_list);
 	if (conf->working_disks == 1)
 		mddev->recovery_cp = MaxSector;
 
-	spin_lock_init(&conf->resync_lock);
+	conf->resync_lock = SPIN_LOCK_UNLOCKED;
 	init_waitqueue_head(&conf->wait_idle);
 	init_waitqueue_head(&conf->wait_resume);
 
@@ -1277,9 +1265,6 @@ static int run(mddev_t *mddev)
 	 * Ok, everything is just fine now
 	 */
 	mddev->array_size = mddev->size;
-
-	mddev->queue->unplug_fn = raid1_unplug;
-	mddev->queue->issue_flush_fn = raid1_issue_flush;
 
 	return 0;
 
@@ -1361,7 +1346,7 @@ static int raid1_reshape(mddev_t *mddev, int raid_disks)
 		if (conf->mirrors[d].rdev)
 			return -EBUSY;
 
-	newpoolinfo = kmalloc(sizeof(*newpoolinfo), GFP_KERNEL);
+	newpoolinfo = kmalloc(sizeof(newpoolinfo), GFP_KERNEL);
 	if (!newpoolinfo)
 		return -ENOMEM;
 	newpoolinfo->mddev = mddev;

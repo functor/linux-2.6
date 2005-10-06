@@ -32,8 +32,7 @@
 #include <linux/delay.h>
 #include <linux/irq.h>
 #include <linux/ptrace.h>
-#include <linux/utsname.h>
-#include <linux/random.h>
+#include <linux/version.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -53,7 +52,7 @@ asmlinkage extern void ret_from_fork(void);
 
 unsigned long kernel_thread_flags = CLONE_VM | CLONE_UNTRACED;
 
-static atomic_t hlt_counter = ATOMIC_INIT(0);
+atomic_t hlt_counter = ATOMIC_INIT(0);
 
 unsigned long boot_option_idle_override = 0;
 EXPORT_SYMBOL(boot_option_idle_override);
@@ -62,7 +61,6 @@ EXPORT_SYMBOL(boot_option_idle_override);
  * Powermanagement idle function, if any..
  */
 void (*pm_idle)(void);
-static DEFINE_PER_CPU(unsigned int, cpu_idle_state);
 
 void disable_hlt(void)
 {
@@ -125,34 +123,6 @@ static void poll_idle (void)
 	}
 }
 
-void cpu_idle_wait(void)
-{
-	unsigned int cpu, this_cpu = get_cpu();
-	cpumask_t map;
-
-	set_cpus_allowed(current, cpumask_of_cpu(this_cpu));
-	put_cpu();
-
-	cpus_clear(map);
-	for_each_online_cpu(cpu) {
-		per_cpu(cpu_idle_state, cpu) = 1;
-		cpu_set(cpu, map);
-	}
-
-	__get_cpu_var(cpu_idle_state) = 0;
-
-	wmb();
-	do {
-		ssleep(1);
-		for_each_online_cpu(cpu) {
-			if (cpu_isset(cpu, map) && !per_cpu(cpu_idle_state, cpu))
-				cpu_clear(cpu, map);
-		}
-		cpus_and(map, map, cpu_online_map);
-	} while (!cpus_empty(map));
-}
-EXPORT_SYMBOL_GPL(cpu_idle_wait);
-
 /*
  * The idle thread. There's no useful work to be
  * done, so just try to conserve power and have a
@@ -165,17 +135,18 @@ void cpu_idle (void)
 	while (1) {
 		while (!need_resched()) {
 			void (*idle)(void);
-
-			if (__get_cpu_var(cpu_idle_state))
-				__get_cpu_var(cpu_idle_state) = 0;
-
-			rmb();
+			/*
+			 * Mark this as an RCU critical section so that
+			 * synchronize_kernel() in the unload path waits
+			 * for our completion.
+			 */
+			rcu_read_lock();
 			idle = pm_idle;
 			if (!idle)
 				idle = default_idle;
 			idle();
+			rcu_read_unlock();
 		}
-
 		schedule();
 	}
 }
@@ -244,7 +215,7 @@ void __show_regs(struct pt_regs * regs)
 	printk("\n");
 	print_modules();
 	printk("Pid: %d, comm: %.20s %s %s\n", 
-	       current->pid, current->comm, print_tainted(), system_utsname.release);
+	       current->pid, current->comm, print_tainted(), UTS_RELEASE);
 	printk("RIP: %04lx:[<%016lx>] ", regs->cs & 0xffff, regs->rip);
 	printk_address(regs->rip); 
 	printk("\nRSP: %04lx:%016lx  EFLAGS: %08lx\n", regs->ss, regs->rsp, regs->eflags);
@@ -328,7 +299,7 @@ void flush_thread(void)
 	 * Forget coprocessor state..
 	 */
 	clear_fpu(tsk);
-	clear_used_math();
+	tsk->used_math = 0;
 }
 
 void release_thread(struct task_struct *dead_task)
@@ -404,10 +375,10 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long rsp,
 	p->thread.fs = me->thread.fs;
 	p->thread.gs = me->thread.gs;
 
-	asm("mov %%gs,%0" : "=m" (p->thread.gsindex));
-	asm("mov %%fs,%0" : "=m" (p->thread.fsindex));
-	asm("mov %%es,%0" : "=m" (p->thread.es));
-	asm("mov %%ds,%0" : "=m" (p->thread.ds));
+	asm("movl %%gs,%0" : "=m" (p->thread.gsindex));
+	asm("movl %%fs,%0" : "=m" (p->thread.fsindex));
+	asm("movl %%es,%0" : "=m" (p->thread.es));
+	asm("movl %%ds,%0" : "=m" (p->thread.ds));
 
 	if (unlikely(me->thread.io_bitmap_ptr != NULL)) { 
 		p->thread.io_bitmap_ptr = kmalloc(IO_BITMAP_BYTES, GFP_KERNEL);
@@ -470,11 +441,11 @@ struct task_struct *__switch_to(struct task_struct *prev_p, struct task_struct *
 	 * Switch DS and ES.
 	 * This won't pick up thread selector changes, but I guess that is ok.
 	 */
-	asm volatile("mov %%es,%0" : "=m" (prev->es));
+	asm volatile("movl %%es,%0" : "=m" (prev->es)); 
 	if (unlikely(next->es | prev->es))
 		loadsegment(es, next->es); 
 	
-	asm volatile ("mov %%ds,%0" : "=m" (prev->ds));
+	asm volatile ("movl %%ds,%0" : "=m" (prev->ds)); 
 	if (unlikely(next->ds | prev->ds))
 		loadsegment(ds, next->ds);
 
@@ -485,7 +456,7 @@ struct task_struct *__switch_to(struct task_struct *prev_p, struct task_struct *
 	 */
 	{ 
 		unsigned fsindex;
-		asm volatile("movl %%fs,%0" : "=r" (fsindex)); 
+		asm volatile("movl %%fs,%0" : "=g" (fsindex)); 
 		/* segment register != 0 always requires a reload. 
 		   also reload when it has changed. 
 		   when prev process used 64bit base always reload
@@ -506,7 +477,7 @@ struct task_struct *__switch_to(struct task_struct *prev_p, struct task_struct *
 	}
 	{ 
 		unsigned gsindex;
-		asm volatile("movl %%gs,%0" : "=r" (gsindex)); 
+		asm volatile("movl %%gs,%0" : "=g" (gsindex)); 
 		if (unlikely(gsindex | next->gsindex | prev->gs)) {
 			load_gs_index(next->gsindex);
 			if (gsindex)

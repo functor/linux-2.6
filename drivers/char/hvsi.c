@@ -631,10 +631,27 @@ static int __init poll_for_state(struct hvsi_struct *hp, int state)
 /* wait for irq handler to change our state */
 static int wait_for_state(struct hvsi_struct *hp, int state)
 {
+	unsigned long end_jiffies = jiffies + HVSI_TIMEOUT;
+	unsigned long timeout;
 	int ret = 0;
 
-	if (!wait_event_timeout(hp->stateq, (hp->state == state), HVSI_TIMEOUT))
-		ret = -EIO;
+	DECLARE_WAITQUEUE(myself, current);
+	set_current_state(TASK_INTERRUPTIBLE);
+	add_wait_queue(&hp->stateq, &myself);
+
+	for (;;) {
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (hp->state == state)
+			break;
+		timeout = end_jiffies - jiffies;
+		if (time_after(jiffies, end_jiffies)) {
+			ret = -EIO;
+			break;
+		}
+		schedule_timeout(timeout);
+	}
+	remove_wait_queue(&hp->stateq, &myself);
+	set_current_state(TASK_RUNNING);
 
 	return ret;
 }
@@ -851,7 +868,24 @@ static int hvsi_open(struct tty_struct *tty, struct file *filp)
 /* wait for hvsi_write_worker to empty hp->outbuf */
 static void hvsi_flush_output(struct hvsi_struct *hp)
 {
-	wait_event_timeout(hp->emptyq, (hp->n_outbuf <= 0), HVSI_TIMEOUT);
+	unsigned long end_jiffies = jiffies + HVSI_TIMEOUT;
+	unsigned long timeout;
+
+	DECLARE_WAITQUEUE(myself, current);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	add_wait_queue(&hp->emptyq, &myself);
+
+	for (;;) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		if (hp->n_outbuf <= 0)
+			break;
+		timeout = end_jiffies - jiffies;
+		if (time_after(jiffies, end_jiffies))
+			break;
+		schedule_timeout(timeout);
+	}
+	remove_wait_queue(&hp->emptyq, &myself);
+	set_current_state(TASK_RUNNING);
 
 	/* 'writer' could still be pending if it didn't see n_outbuf = 0 yet */
 	cancel_delayed_work(&hp->writer);
@@ -1297,7 +1331,7 @@ static int __init hvsi_console_init(void)
 		INIT_WORK(&hp->handshaker, hvsi_handshaker, hp);
 		init_waitqueue_head(&hp->emptyq);
 		init_waitqueue_head(&hp->stateq);
-		spin_lock_init(&hp->lock);
+		hp->lock = SPIN_LOCK_UNLOCKED;
 		hp->index = hvsi_count;
 		hp->inbuf_end = hp->inbuf;
 		hp->state = HVSI_CLOSED;

@@ -34,11 +34,6 @@ EXPORT_SYMBOL(strstr);
        int sym(void);                  \
        EXPORT_SYMBOL(sym);
 
-#ifdef SUBARCH_i386
-EXPORT_SYMBOL(vsyscall_ehdr);
-EXPORT_SYMBOL(vsyscall_end);
-#endif
-
 EXPORT_SYMBOL_PROTO(__errno_location);
 
 EXPORT_SYMBOL_PROTO(access);

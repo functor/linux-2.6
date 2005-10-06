@@ -10,12 +10,10 @@ static inline int
 arch_prepare_suspend(void)
 {
 	/* If you want to make non-PSE machine work, turn off paging
-           in swsusp_arch_suspend. swsusp_pg_dir should have identity mapping, so
+           in do_magic. swsusp_pg_dir should have identity mapping, so
            it could work...  */
-	if (!cpu_has_pse) {
-		printk(KERN_ERR "PSE is required for swsusp.\n");
+	if (!cpu_has_pse)
 		return -EPERM;
-	}
 	return 0;
 }
 
@@ -35,6 +33,11 @@ struct saved_context {
 	unsigned long safety;
 	unsigned long return_address;
 } __attribute__((packed));
+
+#define loaddebug(thread,register) \
+               __asm__("movl %0,%%db" #register  \
+                       : /* no output */ \
+                       :"r" ((thread)->debugreg[register]))
 
 #ifdef CONFIG_ACPI_SLEEP
 extern unsigned long saved_eip;
@@ -58,4 +61,5 @@ static inline void acpi_save_register_state(unsigned long return_point)
 
 /* routines for saving/restoring kernel state */
 extern int acpi_save_state_mem(void);
+extern int acpi_save_state_disk(void);
 #endif

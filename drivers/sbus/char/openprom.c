@@ -427,14 +427,16 @@ static int openprom_bsd_ioctl(struct inode * inode, struct file * file,
 			len = op.op_buflen = 0;
 		}
 
-		if (!access_ok(VERIFY_WRITE, argp, sizeof(op))) {
+		error = verify_area(VERIFY_WRITE, argp, sizeof(op));
+		if (error) {
 			kfree(str);
-			return -EFAULT;
+			return error;
 		}
 
-		if (!access_ok(VERIFY_WRITE, op.op_buf, len)) {
+		error = verify_area(VERIFY_WRITE, op.op_buf, len);
+		if (error) {
 			kfree(str);
-			return -EFAULT;
+			return error;
 		}
 
 		error = __copy_to_user(argp, &op, sizeof(op));

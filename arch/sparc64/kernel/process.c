@@ -60,8 +60,11 @@ void default_idle(void)
 /*
  * the idle loop on a Sparc... ;)
  */
-void cpu_idle(void)
+int cpu_idle(void)
 {
+	if (current->pid != 0)
+		return -EPERM;
+
 	/* endless idle loop with no priority at all */
 	for (;;) {
 		/* If current->work.need_resched is zero we should really
@@ -77,6 +80,7 @@ void cpu_idle(void)
 		schedule();
 		check_pgt_cache();
 	}
+	return 0;
 }
 
 #else
@@ -86,7 +90,7 @@ void cpu_idle(void)
  */
 #define idle_me_harder()	(cpu_data(smp_processor_id()).idle_volume += 1)
 #define unidle_me()		(cpu_data(smp_processor_id()).idle_volume = 0)
-void cpu_idle(void)
+int cpu_idle(void)
 {
 	set_thread_flag(TIF_POLLING_NRFLAG);
 	while(1) {
@@ -163,7 +167,7 @@ static void show_regwindow32(struct pt_regs *regs)
 	mm_segment_t old_fs;
 	
 	__asm__ __volatile__ ("flushw");
-	rw = compat_ptr((unsigned)regs->u_regs[14]);
+	rw = (struct reg_window32 __user *)((long)(unsigned)regs->u_regs[14]);
 	old_fs = get_fs();
 	set_fs (USER_DS);
 	if (copy_from_user (&r_w, rw, sizeof(r_w))) {
@@ -278,7 +282,7 @@ void show_stackframe32(struct sparc_stackf32 *sf)
 }
 
 #ifdef CONFIG_SMP
-static DEFINE_SPINLOCK(regdump_lock);
+static spinlock_t regdump_lock = SPIN_LOCK_UNLOCKED;
 #endif
 
 void __show_regs(struct pt_regs * regs)
@@ -430,13 +434,14 @@ void flush_thread(void)
 		if (test_thread_flag(TIF_32BIT)) {
 			struct mm_struct *mm = t->task->mm;
 			pgd_t *pgd0 = &mm->pgd[0];
-			pud_t *pud0 = pud_offset(pgd0, 0);
 
-			if (pud_none(*pud0)) {
-				pmd_t *page = pmd_alloc_one(mm, 0);
-				pud_set(pud0, page);
+			if (pgd_none(*pgd0)) {
+				pmd_t *page = pmd_alloc_one_fast(NULL, 0);
+				if (!page)
+					page = pmd_alloc_one(NULL, 0);
+				pgd_set(pgd0, page);
 			}
-			pgd_cache = get_pgd_cache(pgd0);
+			pgd_cache = ((unsigned long) pgd_val(*pgd0)) << 11UL;
 		}
 		__asm__ __volatile__("stxa %0, [%1] %2\n\t"
 				     "membar #Sync"

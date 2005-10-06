@@ -259,7 +259,7 @@
 #define __NR_fadvise64_64	264
 #define __NR_statfs64		265
 #define __NR_fstatfs64		266
-#define __NR_remap_file_pages	267
+/* Number 267 is reserved for new sys_remap_file_pages */
 /* Number 268 is reserved for new sys_mbind */
 /* Number 269 is reserved for new sys_get_mempolicy */
 /* Number 270 is reserved for new sys_set_mempolicy */
@@ -270,12 +270,8 @@
 #define __NR_mq_notify		275
 #define __NR_mq_getsetattr	276
 /* Number 277 is reserved for new sys_kexec_load */
-#define __NR_add_key		278
-#define __NR_request_key	279
-#define __NR_keyctl		280
-#define __NR_waitid		281
 
-#define NR_syscalls 282
+#define NR_syscalls 278
 
 /* 
  * There are some system calls that are not present on 64 bit, some
@@ -334,6 +330,7 @@
 #undef  __NR_setgid32
 #undef  __NR_setfsuid32
 #undef  __NR_setfsgid32
+#undef  __NR_getdents64
 #undef  __NR_fcntl64
 #undef  __NR_sendfile64
 #undef  __NR_fadvise64_64
@@ -523,6 +520,7 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4,    \
 #define __ARCH_WANT_SYS_GETHOSTNAME
 #define __ARCH_WANT_SYS_PAUSE
 #define __ARCH_WANT_SYS_SIGNAL
+#define __ARCH_WANT_SYS_TIME
 #define __ARCH_WANT_SYS_UTIME
 #define __ARCH_WANT_SYS_SOCKETCALL
 #define __ARCH_WANT_SYS_FADVISE64
@@ -534,11 +532,9 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4,    \
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGACTION
-# ifdef CONFIG_ARCH_S390_31
+# ifndef CONFIG_ARCH_S390X
 #   define __ARCH_WANT_STAT64
-#   define __ARCH_WANT_SYS_TIME
 # endif
-# define __ARCH_WANT_COMPAT_SYS_TIME
 #endif
 
 #ifdef __KERNEL_SYSCALLS__
@@ -600,6 +596,6 @@ asmlinkage long sys_rt_sigaction(int sig,
  * What we want is __attribute__((weak,alias("sys_ni_syscall"))),
  * but it doesn't work on all toolchains, so we just do it by hand
  */
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
+#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall");
 
 #endif /* _ASM_S390_UNISTD_H_ */

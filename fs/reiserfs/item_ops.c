@@ -110,7 +110,7 @@ static void sd_print_vi (struct virtual_item * vi)
 		      vi->vi_index, vi->vi_type, vi->vi_ih);
 }
 
-static struct item_operations stat_data_ops = {
+struct item_operations stat_data_ops = {
 	.bytes_number		= sd_bytes_number,
 	.decrement_key		= sd_decrement_key,
 	.is_left_mergeable	= sd_is_left_mergeable,
@@ -213,7 +213,7 @@ static void direct_print_vi (struct virtual_item * vi)
 		      vi->vi_index, vi->vi_type, vi->vi_ih);
 }
 
-static struct item_operations direct_ops = {
+struct item_operations direct_ops = {
 	.bytes_number		= direct_bytes_number,
 	.decrement_key		= direct_decrement_key,
 	.is_left_mergeable	= direct_is_left_mergeable,
@@ -296,11 +296,10 @@ static void print_sequence (__u32 start, int len)
 static void indirect_print_item (struct item_head * ih, char * item)
 {
     int j;
-    __le32 * unp;
-    __u32 prev = INT_MAX;
+    __u32 * unp, prev = INT_MAX;
     int num;
 
-    unp = (__le32 *)item;
+    unp = (__u32 *)item;
 
     if (ih_item_len(ih) % UNFM_P_SIZE)
 	reiserfs_warning (NULL, "indirect_print_item: invalid item len");
@@ -368,7 +367,7 @@ static void indirect_print_vi (struct virtual_item * vi)
 		      vi->vi_index, vi->vi_type, vi->vi_ih);
 }
 
-static struct item_operations indirect_ops = {
+struct item_operations indirect_ops = {
 	.bytes_number		= indirect_bytes_number,
 	.decrement_key		= indirect_decrement_key,
 	.is_left_mergeable	= indirect_is_left_mergeable,
@@ -661,7 +660,7 @@ static void direntry_print_vi (struct virtual_item * vi)
     printk ("\n");
 }
 
-static struct item_operations direntry_ops = {
+struct item_operations direntry_ops = {
 	.bytes_number		= direntry_bytes_number,
 	.decrement_key		= direntry_decrement_key,
 	.is_left_mergeable	= direntry_is_left_mergeable,
@@ -751,7 +750,7 @@ static void errcatch_print_vi (struct virtual_item * vi)
     reiserfs_warning (NULL, "green-16011: Invalid item type observed, run fsck ASAP");
 }
 
-static struct item_operations errcatch_ops = {
+struct item_operations errcatch_ops = {
     errcatch_bytes_number,
     errcatch_decrement_key,
     errcatch_is_left_mergeable,

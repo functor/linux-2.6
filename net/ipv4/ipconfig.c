@@ -53,7 +53,6 @@
 #include <linux/seq_file.h>
 #include <linux/major.h>
 #include <linux/root_dev.h>
-#include <linux/delay.h>
 #include <net/arp.h>
 #include <net/ip.h>
 #include <net/ipconfig.h>
@@ -85,8 +84,8 @@
 #endif
 
 /* Define the friendly delay before and after opening net devices */
-#define CONF_PRE_OPEN		500	/* Before opening: 1/2 second */
-#define CONF_POST_OPEN		1	/* After opening: 1 second */
+#define CONF_PRE_OPEN		(HZ/2)	/* Before opening: 1/2 second */
+#define CONF_POST_OPEN		(1*HZ)	/* After opening: 1 second */
 
 /* Define the timeout for waiting for a DHCP/BOOTP/RARP reply */
 #define CONF_OPEN_RETRIES 	2	/* (Re)open devices twice */
@@ -110,7 +109,7 @@
  */
 int ic_set_manually __initdata = 0;		/* IPconfig parameters set manually */
 
-static int ic_enable __initdata = 0;		/* IP config enabled? */
+int ic_enable __initdata = 0;			/* IP config enabled? */
 
 /* Protocol choice */
 int ic_proto_enabled __initdata = 0
@@ -125,10 +124,10 @@ int ic_proto_enabled __initdata = 0
 #endif
 			;
 
-static int ic_host_name_set __initdata = 0;	/* Host name set by us? */
+int ic_host_name_set __initdata = 0;		/* Host name set by us? */
 
 u32 ic_myaddr = INADDR_NONE;		/* My IP address */
-static u32 ic_netmask = INADDR_NONE;	/* Netmask for local subnet */
+u32 ic_netmask = INADDR_NONE;	/* Netmask for local subnet */
 u32 ic_gateway = INADDR_NONE;	/* Gateway IP address */
 
 u32 ic_servaddr = INADDR_NONE;	/* Boot server IP address */
@@ -138,9 +137,9 @@ u8 root_server_path[256] = { 0, };	/* Path to mount as root */
 
 /* Persistent data: */
 
-static int ic_proto_used;			/* Protocol used, if any */
-static u32 ic_nameservers[CONF_NAMESERVERS_MAX]; /* DNS Server IP addresses */
-static u8 ic_domain[64];		/* DNS (not NIS) domain name */
+int ic_proto_used;			/* Protocol used, if any */
+u32 ic_nameservers[CONF_NAMESERVERS_MAX]; /* DNS Server IP addresses */
+u8 ic_domain[64];		/* DNS (not NIS) domain name */
 
 /*
  * Private state.
@@ -153,7 +152,7 @@ static char user_dev_name[IFNAMSIZ] __initdata = { 0, };
 static int ic_proto_have_if __initdata = 0;
 
 #ifdef IPCONFIG_DYNAMIC
-static DEFINE_SPINLOCK(ic_recv_lock);
+static spinlock_t ic_recv_lock = SPIN_LOCK_UNLOCKED;
 static volatile int ic_got_reply __initdata = 0;    /* Proto(s) that replied */
 #endif
 #ifdef IPCONFIG_DHCP
@@ -1233,7 +1232,7 @@ u32 __init root_nfs_parse_addr(char *name)
 		if (*cp == ':')
 			*cp++ = '\0';
 		addr = in_aton(name);
-		memmove(name, cp, strlen(cp) + 1);
+		strcpy(name, cp);
 	} else
 		addr = INADDR_NONE;
 
@@ -1260,14 +1259,16 @@ static int __init ip_auto_config(void)
  try_try_again:
 #endif
 	/* Give hardware a chance to settle */
-	msleep(CONF_PRE_OPEN);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(CONF_PRE_OPEN);
 
 	/* Setup all network devices */
 	if (ic_open_devs() < 0)
 		return -1;
 
 	/* Give drivers a chance to settle */
-	ssleep(CONF_POST_OPEN);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(CONF_POST_OPEN);
 
 	/*
 	 * If the config information is insufficient (e.g., our IP address or

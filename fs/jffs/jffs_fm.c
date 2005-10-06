@@ -25,9 +25,6 @@
 static int jffs_mark_obsolete(struct jffs_fmcontrol *fmc, __u32 fm_offset);
 #endif
 
-static struct jffs_fm *jffs_alloc_fm(void);
-static void jffs_free_fm(struct jffs_fm *n);
-
 extern kmem_cache_t     *fm_cache;
 extern kmem_cache_t     *node_cache;
 
@@ -605,7 +602,7 @@ jffs_mark_obsolete(struct jffs_fmcontrol *fmc, __u32 fm_offset)
 /* check if it's possible to erase the wanted range, and if not, return
  * the range that IS erasable, or a negative error code.
  */
-static long
+long
 jffs_flash_erasable_size(struct mtd_info *mtd, __u32 offset, __u32 size)
 {
          u_long ssize;
@@ -703,7 +700,7 @@ jffs_erasable_size(struct jffs_fmcontrol *fmc)
 	return (ret >= 0 ? ret : 0);
 }
 
-static struct jffs_fm *jffs_alloc_fm(void)
+struct jffs_fm *jffs_alloc_fm(void)
 {
 	struct jffs_fm *fm;
 
@@ -713,7 +710,7 @@ static struct jffs_fm *jffs_alloc_fm(void)
 	return fm;
 }
 
-static void jffs_free_fm(struct jffs_fm *n)
+void jffs_free_fm(struct jffs_fm *n)
 {
 	kmem_cache_free(fm_cache,n);
 	DJM(no_jffs_fm--);
@@ -781,7 +778,6 @@ jffs_print_fm(struct jffs_fm *fm)
 	D(printk("}\n"));
 }
 
-#if 0
 void
 jffs_print_node_ref(struct jffs_node_ref *ref)
 {
@@ -791,5 +787,3 @@ jffs_print_node_ref(struct jffs_node_ref *ref)
 	D(printk("       0x%p, /* next  */\n", ref->next));
 	D(printk("}\n"));
 }
-#endif  /*  0  */
-

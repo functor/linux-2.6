@@ -43,7 +43,6 @@
 struct arxescsi_info {
 	FAS216_Info		info;
 	struct expansion_card	*ec;
-	void __iomem		*base;
 };
 
 #define DMADATA_OFFSET	(0x200)
@@ -74,7 +73,7 @@ arxescsi_dma_setup(struct Scsi_Host *host, Scsi_Pointer *SCp,
 	return fasdma_pseudo;
 }
 
-static void arxescsi_pseudo_dma_write(unsigned char *addr, void __iomem *base)
+static void arxescsi_pseudo_dma_write(unsigned char *addr, unsigned char *base)
 {
        __asm__ __volatile__(
        "               stmdb   sp!, {r0-r12}\n"
@@ -116,7 +115,7 @@ arxescsi_dma_pseudo(struct Scsi_Host *host, Scsi_Pointer *SCp,
 {
 	struct arxescsi_info *info = (struct arxescsi_info *)host->hostdata;
 	unsigned int length, error = 0;
-	void __iomem *base = info->info.scsi.io_base;
+	unsigned char *base = info->info.scsi.io_base;
 	unsigned char *addr;
 
 	length = SCp->this_residual;
@@ -284,7 +283,7 @@ arxescsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 	struct Scsi_Host *host;
 	struct arxescsi_info *info;
 	unsigned long resbase, reslen;
-	void __iomem *base;
+	unsigned char *base;
 	int ret;
 
 	ret = ecard_request_resources(ec);
@@ -305,13 +304,15 @@ arxescsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 		goto out_unmap;
 	}
 
+	host->base = (unsigned long)base;
+	host->irq = NO_IRQ;
+	host->dma_channel = NO_DMA;
+
 	info = (struct arxescsi_info *)host->hostdata;
 	info->ec = ec;
-	info->base = base;
 
 	info->info.scsi.io_base		= base + 0x2000;
-	info->info.scsi.irq		= NO_IRQ;
-	info->info.scsi.dma		= NO_DMA;
+	info->info.scsi.irq		= host->irq;
 	info->info.scsi.io_shift	= 5;
 	info->info.ifcfg.clockrate	= 24; /* MHz */
 	info->info.ifcfg.select_timeout = 255;
@@ -350,12 +351,11 @@ arxescsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 static void __devexit arxescsi_remove(struct expansion_card *ec)
 {
 	struct Scsi_Host *host = ecard_get_drvdata(ec);
-	struct arxescsi_info *info = (struct arxescsi_info *)host->hostdata;
 
 	ecard_set_drvdata(ec, NULL);
 	fas216_remove(host);
 
-	iounmap(info->base);
+	iounmap((void *)host->base);
 
 	fas216_release(host);
 	scsi_host_put(host);

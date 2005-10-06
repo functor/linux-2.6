@@ -7,7 +7,6 @@
 #include <linux/string.h>
 #include <linux/sched.h>
 #include <linux/init.h>
-#include <linux/kernel.h>
 #include <linux/reboot.h>
 #include <linux/delay.h>
 #include <linux/initrd.h>
@@ -41,10 +40,6 @@
 #include <asm/xmon.h>
 #include <asm/ocp.h>
 
-#if defined(CONFIG_85xx) || defined(CONFIG_83xx)
-#include <asm/ppc_sys.h>
-#endif
-
 #if defined CONFIG_KGDB
 #include <asm/kgdb.h>
 #endif
@@ -60,6 +55,7 @@ extern void ppc6xx_idle(void);
 extern void power4_idle(void);
 
 extern boot_infos_t *boot_infos;
+unsigned char aux_device_present;
 struct ide_machdep_calls ppc_ide_md;
 char *sysmap;
 unsigned long sysmap_size;
@@ -182,7 +178,7 @@ int show_cpuinfo(struct seq_file *m, void *v)
 	pvr = cpu_data[i].pvr;
 	lpj = cpu_data[i].loops_per_jiffy;
 #else
-	pvr = mfspr(SPRN_PVR);
+	pvr = mfspr(PVR);
 	lpj = loops_per_jiffy;
 #endif
 
@@ -221,26 +217,23 @@ int show_cpuinfo(struct seq_file *m, void *v)
 			return err;
 	}
 
-	/* If we are a Freescale core do a simple check so
-	 * we dont have to keep adding cases in the future */
-	if ((PVR_VER(pvr) & 0x8000) == 0x8000) {
+	switch (PVR_VER(pvr)) {
+	case 0x0020:	/* 403 family */
+		maj = PVR_MAJ(pvr) + 1;
+		min = PVR_MIN(pvr);
+		break;
+	case 0x1008:	/* 740P/750P ?? */
+		maj = ((pvr >> 8) & 0xFF) - 1;
+		min = pvr & 0xFF;
+		break;
+	case 0x8020:	/* e500 */
 		maj = PVR_MAJ(pvr);
 		min = PVR_MIN(pvr);
-	} else {
-		switch (PVR_VER(pvr)) {
-			case 0x0020:	/* 403 family */
-				maj = PVR_MAJ(pvr) + 1;
-				min = PVR_MIN(pvr);
-				break;
-			case 0x1008:	/* 740P/750P ?? */
-				maj = ((pvr >> 8) & 0xFF) - 1;
-				min = pvr & 0xFF;
-				break;
-			default:
-				maj = (pvr >> 8) & 0xFF;
-				min = pvr & 0xFF;
-				break;
-		}
+		break;
+	default:
+		maj = (pvr >> 8) & 0xFF;
+		min = pvr & 0xFF;
+		break;
 	}
 
 	seq_printf(m, "revision\t: %hd.%hd (pvr %04x %04x)\n",
@@ -248,12 +241,6 @@ int show_cpuinfo(struct seq_file *m, void *v)
 
 	seq_printf(m, "bogomips\t: %lu.%02lu\n",
 		   lpj / (500000/HZ), (lpj / (5000/HZ)) % 100);
-
-#if defined(CONFIG_85xx) || defined(CONFIG_83xx)
-	if (cur_ppc_sys_spec->ppc_sys_name)
-		seq_printf(m, "chipset\t\t: %s\n",
-			cur_ppc_sys_spec->ppc_sys_name);
-#endif
 
 #ifdef CONFIG_SMP
 	seq_printf(m, "\n");
@@ -347,15 +334,14 @@ int __openfirmware
 of_show_percpuinfo(struct seq_file *m, int i)
 {
 	struct device_node *cpu_node;
-	u32 *fp;
-	int s;
+	int *fp, s;
 	
 	cpu_node = find_type_devices("cpu");
 	if (!cpu_node)
 		return 0;
 	for (s = 0; s < i && cpu_node->next; s++)
 		cpu_node = cpu_node->next;
-	fp = (u32 *)get_property(cpu_node, "clock-frequency", NULL);
+	fp = (int *) get_property(cpu_node, "clock-frequency", NULL);
 	if (fp)
 		seq_printf(m, "clock\t\t: %dMHz\n", *fp / 1000000);
 	return 0;
@@ -499,7 +485,7 @@ static int __init set_preferred_console(void)
 {
 	struct device_node *prom_stdout;
 	char *name;
-	int offset = 0;
+	int offset;
 
 	if (of_stdout_device == NULL)
 		return -ENODEV;
@@ -632,7 +618,7 @@ machine_init(unsigned long r3, unsigned long r4, unsigned long r5,
 /* Checks "l2cr=xxxx" command-line option */
 int __init ppc_setup_l2cr(char *str)
 {
-	if (cpu_has_feature(CPU_FTR_L2CR)) {
+	if (cur_cpu_spec[0]->cpu_features & CPU_FTR_L2CR) {
 		unsigned long val = simple_strtoul(str, NULL, 0);
 		printk(KERN_INFO "l2cr set to %lx\n", val);
 		_set_L2CR(0);		/* force invalidate by disable cache */
@@ -695,6 +681,7 @@ arch_initcall(ppc_init);
 /* Warning, IO base is not yet inited */
 void __init setup_arch(char **cmdline_p)
 {
+	extern int panic_timeout;
 	extern char *klimit;
 	extern void do_init_bootmem(void);
 
@@ -733,7 +720,7 @@ void __init setup_arch(char **cmdline_p)
 	 * Systems with OF can look in the properties on the cpu node(s)
 	 * for a possibly more accurate value.
 	 */
-	if (cpu_has_feature(CPU_FTR_SPLIT_ID_CACHE)) {
+	if (cur_cpu_spec[0]->cpu_features & CPU_FTR_SPLIT_ID_CACHE) {
 		dcache_bsize = cur_cpu_spec[0]->dcache_bsize;
 		icache_bsize = cur_cpu_spec[0]->icache_bsize;
 		ucache_bsize = 0;
@@ -752,8 +739,6 @@ void __init setup_arch(char **cmdline_p)
 	/* Save unparsed command line copy for /proc/cmdline */
 	strlcpy(saved_command_line, cmd_line, COMMAND_LINE_SIZE);
 	*cmdline_p = cmd_line;
-
-	parse_early_param();
 
 	/* set up the bootmem stuff with available memory */
 	do_init_bootmem();

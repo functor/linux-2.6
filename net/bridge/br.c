@@ -16,11 +16,16 @@
 #include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/miscdevice.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/init.h>
 
 #include "br_private.h"
+
+#if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
+#include "../atm/lec.h"
+#endif
 
 int (*br_should_route_hook) (struct sk_buff **pskb) = NULL;
 
@@ -35,9 +40,10 @@ static int __init br_init(void)
 	brioctl_set(br_ioctl_deviceless_stub);
 	br_handle_frame_hook = br_handle_frame;
 
+#if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
 	br_fdb_get_hook = br_fdb_get;
 	br_fdb_put_hook = br_fdb_put;
-
+#endif
 	register_netdevice_notifier(&br_device_notifier);
 
 	return 0;
@@ -55,8 +61,10 @@ static void __exit br_deinit(void)
 
 	synchronize_net();
 
+#if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
 	br_fdb_get_hook = NULL;
 	br_fdb_put_hook = NULL;
+#endif
 
 	br_handle_frame_hook = NULL;
 	br_fdb_fini();

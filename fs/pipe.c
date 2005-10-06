@@ -14,8 +14,6 @@
 #include <linux/mount.h>
 #include <linux/pipe_fs_i.h>
 #include <linux/uio.h>
-#include <linux/highmem.h>
-
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
@@ -86,40 +84,11 @@ pipe_iov_copy_to_user(struct iovec *iov, const void *from, unsigned long len)
 	return 0;
 }
 
-static void anon_pipe_buf_release(struct pipe_inode_info *info, struct pipe_buffer *buf)
-{
-	struct page *page = buf->page;
-
-	if (info->tmp_page) {
-		__free_page(page);
-		return;
-	}
-	info->tmp_page = page;
-}
-
-static void *anon_pipe_buf_map(struct file *file, struct pipe_inode_info *info, struct pipe_buffer *buf)
-{
-	return kmap(buf->page);
-}
-
-static void anon_pipe_buf_unmap(struct pipe_inode_info *info, struct pipe_buffer *buf)
-{
-	kunmap(buf->page);
-}
-
-static struct pipe_buf_operations anon_pipe_buf_ops = {
-	.can_merge = 1,
-	.map = anon_pipe_buf_map,
-	.unmap = anon_pipe_buf_unmap,
-	.release = anon_pipe_buf_release,
-};
-
 static ssize_t
 pipe_readv(struct file *filp, const struct iovec *_iov,
 	   unsigned long nr_segs, loff_t *ppos)
 {
 	struct inode *inode = filp->f_dentry->d_inode;
-	struct pipe_inode_info *info;
 	int do_wakeup;
 	ssize_t ret;
 	struct iovec *iov = (struct iovec *)_iov;
@@ -133,43 +102,32 @@ pipe_readv(struct file *filp, const struct iovec *_iov,
 	do_wakeup = 0;
 	ret = 0;
 	down(PIPE_SEM(*inode));
-	info = inode->i_pipe;
 	for (;;) {
-		int bufs = info->nrbufs;
-		if (bufs) {
-			int curbuf = info->curbuf;
-			struct pipe_buffer *buf = info->bufs + curbuf;
-			struct pipe_buf_operations *ops = buf->ops;
-			void *addr;
-			size_t chars = buf->len;
-			int error;
+		int size = PIPE_LEN(*inode);
+		if (size) {
+			char *pipebuf = PIPE_BASE(*inode) + PIPE_START(*inode);
+			ssize_t chars = PIPE_MAX_RCHUNK(*inode);
 
 			if (chars > total_len)
 				chars = total_len;
+			if (chars > size)
+				chars = size;
 
-			addr = ops->map(filp, info, buf);
-			error = pipe_iov_copy_to_user(iov, addr + buf->offset, chars);
-			ops->unmap(info, buf);
-			if (unlikely(error)) {
+			if (pipe_iov_copy_to_user(iov, pipebuf, chars)) {
 				if (!ret) ret = -EFAULT;
 				break;
 			}
 			ret += chars;
-			buf->offset += chars;
-			buf->len -= chars;
-			if (!buf->len) {
-				buf->ops = NULL;
-				ops->release(info, buf);
-				curbuf = (curbuf + 1) & (PIPE_BUFFERS-1);
-				info->curbuf = curbuf;
-				info->nrbufs = --bufs;
-				do_wakeup = 1;
-			}
+
+			PIPE_START(*inode) += chars;
+			PIPE_START(*inode) &= (PIPE_SIZE - 1);
+			PIPE_LEN(*inode) -= chars;
 			total_len -= chars;
+			do_wakeup = 1;
 			if (!total_len)
 				break;	/* common path: read succeeded */
 		}
-		if (bufs)	/* More to do? */
+		if (PIPE_LEN(*inode)) /* test for cyclic buffers */
 			continue;
 		if (!PIPE_WRITERS(*inode))
 			break;
@@ -219,12 +177,11 @@ pipe_writev(struct file *filp, const struct iovec *_iov,
 	    unsigned long nr_segs, loff_t *ppos)
 {
 	struct inode *inode = filp->f_dentry->d_inode;
-	struct pipe_inode_info *info;
 	ssize_t ret;
+	size_t min;
 	int do_wakeup;
 	struct iovec *iov = (struct iovec *)_iov;
 	size_t total_len;
-	ssize_t chars;
 
 	total_len = iov_length(iov, nr_segs);
 	/* Null write succeeds. */
@@ -233,92 +190,48 @@ pipe_writev(struct file *filp, const struct iovec *_iov,
 
 	do_wakeup = 0;
 	ret = 0;
+	min = total_len;
+	if (min > PIPE_BUF)
+		min = 1;
 	down(PIPE_SEM(*inode));
-	info = inode->i_pipe;
-
-	if (!PIPE_READERS(*inode)) {
-		send_sig(SIGPIPE, current, 0);
-		ret = -EPIPE;
-		goto out;
-	}
-
-	/* We try to merge small writes */
-	chars = total_len & (PAGE_SIZE-1); /* size of the last buffer */
-	if (info->nrbufs && chars != 0) {
-		int lastbuf = (info->curbuf + info->nrbufs - 1) & (PIPE_BUFFERS-1);
-		struct pipe_buffer *buf = info->bufs + lastbuf;
-		struct pipe_buf_operations *ops = buf->ops;
-		int offset = buf->offset + buf->len;
-		if (ops->can_merge && offset + chars <= PAGE_SIZE) {
-			void *addr = ops->map(filp, info, buf);
-			int error = pipe_iov_copy_from_user(offset + addr, iov, chars);
-			ops->unmap(info, buf);
-			ret = error;
-			do_wakeup = 1;
-			if (error)
-				goto out;
-			buf->len += chars;
-			total_len -= chars;
-			ret = chars;
-			if (!total_len)
-				goto out;
-		}
-	}
-
 	for (;;) {
-		int bufs;
+		int free;
 		if (!PIPE_READERS(*inode)) {
 			send_sig(SIGPIPE, current, 0);
 			if (!ret) ret = -EPIPE;
 			break;
 		}
-		bufs = info->nrbufs;
-		if (bufs < PIPE_BUFFERS) {
-			int newbuf = (info->curbuf + bufs) & (PIPE_BUFFERS-1);
-			struct pipe_buffer *buf = info->bufs + newbuf;
-			struct page *page = info->tmp_page;
-			int error;
-
-			if (!page) {
-				page = alloc_page(GFP_HIGHUSER);
-				if (unlikely(!page)) {
-					ret = ret ? : -ENOMEM;
-					break;
-				}
-				info->tmp_page = page;
-			}
+		free = PIPE_FREE(*inode);
+		if (free >= min) {
+			/* transfer data */
+			ssize_t chars = PIPE_MAX_WCHUNK(*inode);
+			char *pipebuf = PIPE_BASE(*inode) + PIPE_END(*inode);
 			/* Always wakeup, even if the copy fails. Otherwise
 			 * we lock up (O_NONBLOCK-)readers that sleep due to
 			 * syscall merging.
-			 * FIXME! Is this really true?
 			 */
 			do_wakeup = 1;
-			chars = PAGE_SIZE;
 			if (chars > total_len)
 				chars = total_len;
+			if (chars > free)
+				chars = free;
 
-			error = pipe_iov_copy_from_user(kmap(page), iov, chars);
-			kunmap(page);
-			if (unlikely(error)) {
+			if (pipe_iov_copy_from_user(pipebuf, iov, chars)) {
 				if (!ret) ret = -EFAULT;
 				break;
 			}
 			ret += chars;
 
-			/* Insert it into the buffer array */
-			buf->page = page;
-			buf->ops = &anon_pipe_buf_ops;
-			buf->offset = 0;
-			buf->len = chars;
-			info->nrbufs = ++bufs;
-			info->tmp_page = NULL;
-
+			PIPE_LEN(*inode) += chars;
 			total_len -= chars;
 			if (!total_len)
 				break;
 		}
-		if (bufs < PIPE_BUFFERS)
+		if (PIPE_FREE(*inode) && ret) {
+			/* handle cyclic data buffers */
+			min = 1;
 			continue;
+		}
 		if (filp->f_flags & O_NONBLOCK) {
 			if (!ret) ret = -EAGAIN;
 			break;
@@ -336,7 +249,6 @@ pipe_writev(struct file *filp, const struct iovec *_iov,
 		pipe_wait(inode);
 		PIPE_WAITING_WRITERS(*inode)--;
 	}
-out:
 	up(PIPE_SEM(*inode));
 	if (do_wakeup) {
 		wake_up_interruptible(PIPE_WAIT(*inode));
@@ -371,23 +283,9 @@ static int
 pipe_ioctl(struct inode *pino, struct file *filp,
 	   unsigned int cmd, unsigned long arg)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
-	struct pipe_inode_info *info;
-	int count, buf, nrbufs;
-
 	switch (cmd) {
 		case FIONREAD:
-			down(PIPE_SEM(*inode));
-			info =  inode->i_pipe;
-			count = 0;
-			buf = info->curbuf;
-			nrbufs = info->nrbufs;
-			while (--nrbufs >= 0) {
-				count += info->bufs[buf].len;
-				buf = (buf+1) & (PIPE_BUFFERS-1);
-			}
-			up(PIPE_SEM(*inode));
-			return put_user(count, (int __user *)arg);
+			return put_user(PIPE_LEN(*pino), (int __user *)arg);
 		default:
 			return -EINVAL;
 	}
@@ -399,25 +297,17 @@ pipe_poll(struct file *filp, poll_table *wait)
 {
 	unsigned int mask;
 	struct inode *inode = filp->f_dentry->d_inode;
-	struct pipe_inode_info *info = inode->i_pipe;
-	int nrbufs;
 
 	poll_wait(filp, PIPE_WAIT(*inode), wait);
 
 	/* Reading only -- no need for acquiring the semaphore.  */
-	nrbufs = info->nrbufs;
-	mask = 0;
-	if (filp->f_mode & FMODE_READ) {
-		mask = (nrbufs > 0) ? POLLIN | POLLRDNORM : 0;
-		if (!PIPE_WRITERS(*inode) && filp->f_version != PIPE_WCOUNTER(*inode))
-			mask |= POLLHUP;
-	}
-
-	if (filp->f_mode & FMODE_WRITE) {
-		mask |= (nrbufs < PIPE_BUFFERS) ? POLLOUT | POLLWRNORM : 0;
-		if (!PIPE_READERS(*inode))
-			mask |= POLLERR;
-	}
+	mask = POLLIN | POLLRDNORM;
+	if (PIPE_EMPTY(*inode))
+		mask = POLLOUT | POLLWRNORM;
+	if (!PIPE_WRITERS(*inode) && filp->f_version != PIPE_WCOUNTER(*inode))
+		mask |= POLLHUP;
+	if (!PIPE_READERS(*inode))
+		mask |= POLLERR;
 
 	return mask;
 }
@@ -432,7 +322,10 @@ pipe_release(struct inode *inode, int decr, int decw)
 	PIPE_READERS(*inode) -= decr;
 	PIPE_WRITERS(*inode) -= decw;
 	if (!PIPE_READERS(*inode) && !PIPE_WRITERS(*inode)) {
-		free_pipe_info(inode);
+		struct pipe_inode_info *info = inode->i_pipe;
+		inode->i_pipe = NULL;
+		free_page((unsigned long) info->base);
+		kfree(info);
 	} else {
 		wake_up_interruptible(PIPE_WAIT(*inode));
 		kill_fasync(PIPE_FASYNC_READERS(*inode), SIGIO, POLL_IN);
@@ -637,37 +530,29 @@ struct file_operations rdwr_pipe_fops = {
 	.fasync		= pipe_rdwr_fasync,
 };
 
-void free_pipe_info(struct inode *inode)
-{
-	int i;
-	struct pipe_inode_info *info = inode->i_pipe;
-
-	inode->i_pipe = NULL;
-	for (i = 0; i < PIPE_BUFFERS; i++) {
-		struct pipe_buffer *buf = info->bufs + i;
-		if (buf->ops)
-			buf->ops->release(info, buf);
-	}
-	if (info->tmp_page)
-		__free_page(info->tmp_page);
-	kfree(info);
-}
-
 struct inode* pipe_new(struct inode* inode)
 {
-	struct pipe_inode_info *info;
+	unsigned long page;
 
-	info = kmalloc(sizeof(struct pipe_inode_info), GFP_KERNEL);
-	if (!info)
+	page = __get_free_page(GFP_USER);
+	if (!page)
+		return NULL;
+
+	inode->i_pipe = kmalloc(sizeof(struct pipe_inode_info), GFP_KERNEL);
+	if (!inode->i_pipe)
 		goto fail_page;
-	memset(info, 0, sizeof(*info));
-	inode->i_pipe = info;
 
 	init_waitqueue_head(PIPE_WAIT(*inode));
+	PIPE_BASE(*inode) = (char*) page;
+	PIPE_START(*inode) = PIPE_LEN(*inode) = 0;
+	PIPE_READERS(*inode) = PIPE_WRITERS(*inode) = 0;
+	PIPE_WAITING_WRITERS(*inode) = 0;
 	PIPE_RCOUNTER(*inode) = PIPE_WCOUNTER(*inode) = 1;
+	*PIPE_FASYNC_READERS(*inode) = *PIPE_FASYNC_WRITERS(*inode) = NULL;
 
 	return inode;
 fail_page:
+	free_page(page);
 	return NULL;
 }
 
@@ -783,7 +668,9 @@ close_f12_inode_i_j:
 close_f12_inode_i:
 	put_unused_fd(i);
 close_f12_inode:
-	free_pipe_info(inode);
+	free_page((unsigned long) PIPE_BASE(*inode));
+	kfree(inode->i_pipe);
+	inode->i_pipe = NULL;
 	iput(inode);
 close_f12:
 	put_filp(f2);

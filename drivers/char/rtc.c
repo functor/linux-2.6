@@ -73,7 +73,6 @@
 #include <linux/init.h>
 #include <linux/poll.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/spinlock.h>
 #include <linux/sysctl.h>
 #include <linux/wait.h>
@@ -152,7 +151,8 @@ static void set_rtc_irq_bit(unsigned char bit);
 static void mask_rtc_irq_bit(unsigned char bit);
 #endif
 
-static int rtc_proc_open(struct inode *inode, struct file *file);
+static int rtc_read_proc(char *page, char **start, off_t off,
+                         int count, int *eof, void *data);
 
 /*
  *	Bits in rtc_status. (6 bits of room for future expansion)
@@ -177,7 +177,7 @@ static unsigned long rtc_max_user_freq = 64; /* > this, need CAP_SYS_RESOURCE */
 /*
  * rtc_task_lock nests inside rtc_lock.
  */
-static DEFINE_SPINLOCK(rtc_task_lock);
+static spinlock_t rtc_task_lock = SPIN_LOCK_UNLOCKED;
 static rtc_task_t *rtc_callback = NULL;
 #endif
 
@@ -871,27 +871,19 @@ static struct file_operations rtc_fops = {
 	.fasync		= rtc_fasync,
 };
 
-static struct miscdevice rtc_dev = {
-	.minor		= RTC_MINOR,
-	.name		= "rtc",
-	.fops		= &rtc_fops,
+static struct miscdevice rtc_dev=
+{
+	RTC_MINOR,
+	"rtc",
+	&rtc_fops
 };
 
-static struct file_operations rtc_proc_fops = {
-	.owner = THIS_MODULE,
-	.open = rtc_proc_open,
-	.read  = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-
-#if defined(RTC_IRQ) && !defined(__sparc__)
+#ifdef RTC_IRQ
 static irqreturn_t (*rtc_int_handler_ptr)(int irq, void *dev_id, struct pt_regs *regs);
 #endif
 
 static int __init rtc_init(void)
 {
-	struct proc_dir_entry *ent;
 #if defined(__alpha__) || defined(__mips__)
 	unsigned int year, ctrl;
 	unsigned long uip_watchdog;
@@ -982,9 +974,7 @@ no_irq:
 		release_region(RTC_PORT(0), RTC_IO_EXTENT);
 		return -ENODEV;
 	}
-
-	ent = create_proc_entry("driver/rtc", 0, NULL);
-	if (!ent) {
+	if (!create_proc_read_entry ("driver/rtc", 0, NULL, rtc_read_proc, NULL)) {
 #ifdef RTC_IRQ
 		free_irq(RTC_IRQ, NULL);
 #endif
@@ -992,7 +982,6 @@ no_irq:
 		misc_deregister(&rtc_dev);
 		return -ENOMEM;
 	}
-	ent->proc_fops = &rtc_proc_fops;
 
 #if defined(__alpha__) || defined(__mips__)
 	rtc_freq = HZ;
@@ -1130,10 +1119,11 @@ static void rtc_dropped_irq(unsigned long data)
  *	Info exported via "/proc/driver/rtc".
  */
 
-static int rtc_proc_show(struct seq_file *seq, void *v)
+static int rtc_proc_output (char *buf)
 {
 #define YN(bit) ((ctrl & bit) ? "yes" : "no")
 #define NY(bit) ((ctrl & bit) ? "no" : "yes")
+	char *p;
 	struct rtc_time tm;
 	unsigned char batt, ctrl;
 	unsigned long freq;
@@ -1144,6 +1134,7 @@ static int rtc_proc_show(struct seq_file *seq, void *v)
 	freq = rtc_freq;
 	spin_unlock_irq(&rtc_lock);
 
+	p = buf;
 
 	rtc_get_rtc_time(&tm);
 
@@ -1151,12 +1142,12 @@ static int rtc_proc_show(struct seq_file *seq, void *v)
 	 * There is no way to tell if the luser has the RTC set for local
 	 * time or for Universal Standard Time (GMT). Probably local though.
 	 */
-	seq_printf(seq,
-		   "rtc_time\t: %02d:%02d:%02d\n"
-		   "rtc_date\t: %04d-%02d-%02d\n"
-		   "rtc_epoch\t: %04lu\n",
-		   tm.tm_hour, tm.tm_min, tm.tm_sec,
-		   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, epoch);
+	p += sprintf(p,
+		     "rtc_time\t: %02d:%02d:%02d\n"
+		     "rtc_date\t: %04d-%02d-%02d\n"
+	 	     "rtc_epoch\t: %04lu\n",
+		     tm.tm_hour, tm.tm_min, tm.tm_sec,
+		     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, epoch);
 
 	get_rtc_alm_time(&tm);
 
@@ -1165,50 +1156,57 @@ static int rtc_proc_show(struct seq_file *seq, void *v)
 	 * match any value for that particular field. Values that are
 	 * greater than a valid time, but less than 0xc0 shouldn't appear.
 	 */
-	seq_puts(seq, "alarm\t\t: ");
+	p += sprintf(p, "alarm\t\t: ");
 	if (tm.tm_hour <= 24)
-		seq_printf(seq, "%02d:", tm.tm_hour);
+		p += sprintf(p, "%02d:", tm.tm_hour);
 	else
-		seq_puts(seq, "**:");
+		p += sprintf(p, "**:");
 
 	if (tm.tm_min <= 59)
-		seq_printf(seq, "%02d:", tm.tm_min);
+		p += sprintf(p, "%02d:", tm.tm_min);
 	else
-		seq_puts(seq, "**:");
+		p += sprintf(p, "**:");
 
 	if (tm.tm_sec <= 59)
-		seq_printf(seq, "%02d\n", tm.tm_sec);
+		p += sprintf(p, "%02d\n", tm.tm_sec);
 	else
-		seq_puts(seq, "**\n");
+		p += sprintf(p, "**\n");
 
-	seq_printf(seq,
-		   "DST_enable\t: %s\n"
-		   "BCD\t\t: %s\n"
-		   "24hr\t\t: %s\n"
-		   "square_wave\t: %s\n"
-		   "alarm_IRQ\t: %s\n"
-		   "update_IRQ\t: %s\n"
-		   "periodic_IRQ\t: %s\n"
-		   "periodic_freq\t: %ld\n"
-		   "batt_status\t: %s\n",
-		   YN(RTC_DST_EN),
-		   NY(RTC_DM_BINARY),
-		   YN(RTC_24H),
-		   YN(RTC_SQWE),
-		   YN(RTC_AIE),
-		   YN(RTC_UIE),
-		   YN(RTC_PIE),
-		   freq,
-		   batt ? "okay" : "dead");
+	p += sprintf(p,
+		     "DST_enable\t: %s\n"
+		     "BCD\t\t: %s\n"
+		     "24hr\t\t: %s\n"
+		     "square_wave\t: %s\n"
+		     "alarm_IRQ\t: %s\n"
+		     "update_IRQ\t: %s\n"
+		     "periodic_IRQ\t: %s\n"
+		     "periodic_freq\t: %ld\n"
+		     "batt_status\t: %s\n",
+		     YN(RTC_DST_EN),
+		     NY(RTC_DM_BINARY),
+		     YN(RTC_24H),
+		     YN(RTC_SQWE),
+		     YN(RTC_AIE),
+		     YN(RTC_UIE),
+		     YN(RTC_PIE),
+		     freq,
+		     batt ? "okay" : "dead");
 
-	return  0;
+	return  p - buf;
 #undef YN
 #undef NY
 }
 
-static int rtc_proc_open(struct inode *inode, struct file *file)
+static int rtc_read_proc(char *page, char **start, off_t off,
+                         int count, int *eof, void *data)
 {
-	return single_open(file, rtc_proc_show, NULL);
+        int len = rtc_proc_output (page);
+        if (len <= off+count) *eof = 1;
+        *start = page + off;
+        len -= off;
+        if (len>count) len = count;
+        if (len<0) len = 0;
+        return len;
 }
 
 void rtc_get_rtc_time(struct rtc_time *rtc_tm)

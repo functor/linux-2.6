@@ -273,7 +273,7 @@ static int TIReadVendorRequestSync (struct usb_device *dev,
 				index,
 				data,
 				size,
-				1000);
+				HZ);
 	if (status < 0)
 		return status;
 	if (status != size) {
@@ -303,7 +303,8 @@ static int TISendVendorRequestSync (struct usb_device *dev,
 				index,
 				data,
 				size,
-				1000);
+				HZ);
+
 	if (status < 0)
 		return status;
 	if (status != size) {
@@ -984,7 +985,7 @@ static int TISendBulkTransferSync (struct usb_serial *serial, void *buffer, int 
 				buffer,
 				length,
 				num_sent,
-				1000);
+				HZ);
 	return status;
 }
 
@@ -1341,9 +1342,9 @@ static int TIDownloadFirmware (struct edgeport_serial *serial)
 	if (status)
 		return status;
 
-	if (le16_to_cpu(serial->serial->dev->descriptor.idVendor) != USB_VENDOR_ID_ION) {
+	if (serial->serial->dev->descriptor.idVendor != USB_VENDOR_ID_ION) {
 		dbg ("%s - VID = 0x%x", __FUNCTION__,
-		     le16_to_cpu(serial->serial->dev->descriptor.idVendor));
+		     serial->serial->dev->descriptor.idVendor);
 		serial->TI_I2C_Type = DTK_ADDR_SPACE_I2C_TYPE_II;
 		goto StayInBootMode;
 	}
@@ -2845,8 +2846,9 @@ static struct edge_buf *edge_buf_alloc(unsigned int size)
 
 void edge_buf_free(struct edge_buf *eb)
 {
-	if (eb) {
-		kfree(eb->buf_buf);
+	if (eb != NULL) {
+		if (eb->buf_buf != NULL)
+			kfree(eb->buf_buf);
 		kfree(eb);
 	}
 }

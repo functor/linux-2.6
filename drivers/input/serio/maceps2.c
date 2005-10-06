@@ -62,8 +62,8 @@ static int maceps2_write(struct serio *dev, unsigned char val)
 	unsigned int timeout = MACE_PS2_TIMEOUT;
 
 	do {
-		if (port->status & PS2_STATUS_TX_EMPTY) {
-			port->tx = val;
+		if (mace_read(port->status) & PS2_STATUS_TX_EMPTY) {
+			mace_write(val, port->tx);
 			return 0;
 		}
 		udelay(50);
@@ -72,15 +72,14 @@ static int maceps2_write(struct serio *dev, unsigned char val)
 	return -1;
 }
 
-static irqreturn_t maceps2_interrupt(int irq, void *dev_id,
-				     struct pt_regs *regs)
+static irqreturn_t maceps2_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	struct serio *dev = dev_id;
 	struct mace_ps2port *port = ((struct maceps2_data *)dev->port_data)->port;
-	unsigned long byte;
+	unsigned int byte;
 
-	if (port->status & PS2_STATUS_RX_FULL) {
-		byte = port->rx;
+	if (mace_read(port->status) & PS2_STATUS_RX_FULL) {
+		byte = mace_read(port->rx);
 		serio_interrupt(dev, byte & 0xff, 0, regs);
         }
 
@@ -97,13 +96,13 @@ static int maceps2_open(struct serio *dev)
 	}
 
 	/* Reset port */
-	data->port->control = PS2_CONTROL_TX_CLOCK_DISABLE | PS2_CONTROL_RESET;
+	mace_write(PS2_CONTROL_TX_CLOCK_DISABLE | PS2_CONTROL_RESET,
+		   data->port->control);
 	udelay(100);
 
         /* Enable interrupts */
-	data->port->control = PS2_CONTROL_RX_CLOCK_ENABLE |
-			      PS2_CONTROL_TX_ENABLE |
-			      PS2_CONTROL_RX_INT_ENABLE;
+	mace_write(PS2_CONTROL_RX_CLOCK_ENABLE | PS2_CONTROL_TX_ENABLE |
+		   PS2_CONTROL_RX_INT_ENABLE, data->port->control);
 
 	return 0;
 }
@@ -112,7 +111,8 @@ static void maceps2_close(struct serio *dev)
 {
 	struct maceps2_data *data = (struct maceps2_data *)dev->port_data;
 
-	data->port->control = PS2_CONTROL_TX_CLOCK_DISABLE | PS2_CONTROL_RESET;
+	mace_write(PS2_CONTROL_TX_CLOCK_DISABLE | PS2_CONTROL_RESET,
+		   data->port->control);
 	udelay(100);
 	free_irq(data->irq, dev);
 }
@@ -125,7 +125,7 @@ static struct serio * __init maceps2_allocate_port(int idx)
 	serio = kmalloc(sizeof(struct serio), GFP_KERNEL);
 	if (serio) {
 		memset(serio, 0, sizeof(struct serio));
-		serio->id.type		= SERIO_8042;
+		serio->type		= SERIO_8042;
 		serio->write		= maceps2_write;
 		serio->open		= maceps2_open;
 		serio->close		= maceps2_close;

@@ -73,7 +73,7 @@ static struct ip_tunnel *tunnels_l[HASH_SIZE];
 static struct ip_tunnel *tunnels_wc[1];
 static struct ip_tunnel **tunnels[4] = { tunnels_wc, tunnels_l, tunnels_r, tunnels_r_l };
 
-static DEFINE_RWLOCK(ipip6_lock);
+static rwlock_t ipip6_lock = RW_LOCK_UNLOCKED;
 
 static struct ip_tunnel * ipip6_tunnel_lookup(u32 remote, u32 local)
 {
@@ -135,10 +135,10 @@ static void ipip6_tunnel_link(struct ip_tunnel *t)
 {
 	struct ip_tunnel **tp = ipip6_bucket(t);
 
-	t->next = *tp;
 	write_lock_bh(&ipip6_lock);
-	*tp = t;
+	t->next = *tp;
 	write_unlock_bh(&ipip6_lock);
+	*tp = t;
 }
 
 static struct ip_tunnel * ipip6_tunnel_locate(struct ip_tunnel_parm *parms, int create)
@@ -500,9 +500,9 @@ static int ipip6_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (tiph->frag_off)
-		mtu = dst_mtu(&rt->u.dst) - sizeof(struct iphdr);
+		mtu = dst_pmtu(&rt->u.dst) - sizeof(struct iphdr);
 	else
-		mtu = skb->dst ? dst_mtu(skb->dst) : dev->mtu;
+		mtu = skb->dst ? dst_pmtu(skb->dst) : dev->mtu;
 
 	if (mtu < 68) {
 		tunnel->stat.collisions++;

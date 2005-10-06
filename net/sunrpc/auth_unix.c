@@ -21,6 +21,9 @@ struct unx_cred {
 	struct rpc_cred		uc_base;
 	gid_t			uc_gid;
 	xid_t			uc_xid;
+	uid_t			uc_puid;		/* process uid */
+	gid_t			uc_pgid;		/* process gid */
+	xid_t			uc_pxid;		/* process xid */
 	gid_t			uc_gids[NFS_NGROUPS];
 };
 #define uc_uid			uc_base.cr_uid
@@ -36,17 +39,24 @@ struct unx_cred {
 # define RPCDBG_FACILITY	RPCDBG_AUTH
 #endif
 
-static struct rpc_auth		unix_auth;
-static struct rpc_cred_cache	unix_cred_cache;
 static struct rpc_credops	unix_credops;
 
 static struct rpc_auth *
 unx_create(struct rpc_clnt *clnt, rpc_authflavor_t flavor)
 {
+	struct rpc_auth	*auth;
+
 	dprintk("RPC: creating UNIX authenticator for client %p\n", clnt);
-	if (atomic_inc_return(&unix_auth.au_count) == 0)
-		unix_cred_cache.nextgc = jiffies + (unix_cred_cache.expire >> 1);
-	return &unix_auth;
+	if (!(auth = (struct rpc_auth *) kmalloc(sizeof(*auth), GFP_KERNEL)))
+		return NULL;
+	auth->au_cslack = UNX_WRITESLACK;
+	auth->au_rslack = 2;	/* assume AUTH_NULL verf */
+	auth->au_expire = UNX_CRED_EXPIRE;
+	auth->au_ops = &authunix_ops;
+
+	rpcauth_init_credcache(auth);
+
+	return auth;
 }
 
 static void
@@ -54,15 +64,6 @@ unx_destroy(struct rpc_auth *auth)
 {
 	dprintk("RPC: destroying UNIX authenticator %p\n", auth);
 	rpcauth_free_credcache(auth);
-}
-
-/*
- * Lookup AUTH_UNIX creds for current process
- */
-static struct rpc_cred *
-unx_lookup_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
-{
-	return rpcauth_lookup_credcache(auth, acred, flags);
 }
 
 static struct rpc_cred *
@@ -75,14 +76,14 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 				acred->uid, acred->gid);
 
 	if (!(cred = (struct unx_cred *) kmalloc(sizeof(*cred), GFP_KERNEL)))
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 
-	atomic_set(&cred->uc_count, 1);
+	atomic_set(&cred->uc_count, 0);
 	cred->uc_flags = RPCAUTH_CRED_UPTODATE;
 	if (flags & RPC_TASK_ROOTCREDS) {
-		cred->uc_uid = 0;
-		cred->uc_gid = 0;
-		cred->uc_xid = vx_current_xid();
+		cred->uc_uid = cred->uc_puid = 0;
+		cred->uc_gid = cred->uc_pgid = 0;
+		cred->uc_xid = cred->uc_pxid = vx_current_xid();
 		cred->uc_gids[0] = NOGROUP;
 	} else {
 		int groups = acred->group_info->ngroups;
@@ -92,6 +93,9 @@ unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 		cred->uc_uid = acred->uid;
 		cred->uc_gid = acred->gid;
 		cred->uc_xid = acred->xid;
+		cred->uc_puid = current->uid;
+		cred->uc_pgid = current->gid;
+		cred->uc_pxid = vx_current_xid();
 		for (i = 0; i < groups; i++)
 			cred->uc_gids[i] = GROUP_AT(acred->group_info, i);
 		if (i < NFS_NGROUPS)
@@ -124,7 +128,10 @@ unx_match(struct auth_cred *acred, struct rpc_cred *rcred, int taskflags)
 
 		if (cred->uc_uid != acred->uid
 		 || cred->uc_gid != acred->gid
-		 || cred->uc_xid != acred->xid)
+		 || cred->uc_xid != acred->xid
+		 || cred->uc_puid != current->uid
+		 || cred->uc_pgid != current->gid
+		 || cred->uc_pxid != vx_current_xid())
 			return 0;
 
 		groups = acred->group_info->ngroups;
@@ -135,8 +142,8 @@ unx_match(struct auth_cred *acred, struct rpc_cred *rcred, int taskflags)
 				return 0;
 		return 1;
 	}
-	return (cred->uc_uid == 0
-	     && cred->uc_gid == 0
+	return (cred->uc_uid == 0 && cred->uc_puid == 0
+	     && cred->uc_gid == 0 && cred->uc_pgid == 0
 	     && cred->uc_gids[0] == (gid_t) NOGROUP);
 }
 
@@ -145,7 +152,7 @@ unx_match(struct auth_cred *acred, struct rpc_cred *rcred, int taskflags)
  * Maybe we should keep a cached credential for performance reasons.
  */
 static u32 *
-unx_marshal(struct rpc_task *task, u32 *p)
+unx_marshal(struct rpc_task *task, u32 *p, int ruid)
 {
 	struct rpc_clnt	*clnt = task->tk_client;
 	struct unx_cred	*cred = (struct unx_cred *) task->tk_msg.rpc_cred;
@@ -162,10 +169,18 @@ unx_marshal(struct rpc_task *task, u32 *p)
 	p = xdr_encode_array(p, clnt->cl_nodename, clnt->cl_nodelen);
 	tagxid = task->tk_client->cl_tagxid;
 
-	*p++ = htonl((u32) XIDINO_UID(tagxid,
-		cred->uc_uid, cred->uc_xid));
-	*p++ = htonl((u32) XIDINO_GID(tagxid,
-		cred->uc_gid, cred->uc_xid));
+	/* Note: we don't use real uid if it involves raising privilege */
+	if (ruid && cred->uc_puid != 0 && cred->uc_pgid != 0) {
+		*p++ = htonl((u32) XIDINO_UID(tagxid,
+			cred->uc_puid, cred->uc_pxid));
+		*p++ = htonl((u32) XIDINO_GID(tagxid,
+			cred->uc_pgid, cred->uc_pxid));
+	} else {
+		*p++ = htonl((u32) XIDINO_UID(tagxid,
+			cred->uc_uid, cred->uc_xid));
+		*p++ = htonl((u32) XIDINO_GID(tagxid,
+			cred->uc_gid, cred->uc_xid));
+	}
 	hold = p++;
 	for (i = 0; i < 16 && cred->uc_gids[i] != (gid_t) NOGROUP; i++)
 		*p++ = htonl((u32) cred->uc_gids[i]);
@@ -185,7 +200,7 @@ static int
 unx_refresh(struct rpc_task *task)
 {
 	task->tk_msg.rpc_cred->cr_flags |= RPCAUTH_CRED_UPTODATE;
-	return 0;
+	return task->tk_status = -EACCES;
 }
 
 static u32 *
@@ -221,27 +236,11 @@ struct rpc_authops	authunix_ops = {
 #endif
 	.create		= unx_create,
 	.destroy	= unx_destroy,
-	.lookup_cred	= unx_lookup_cred,
 	.crcreate	= unx_create_cred,
 };
 
 static
-struct rpc_cred_cache	unix_cred_cache = {
-	.expire		= UNX_CRED_EXPIRE,
-};
-
-static
-struct rpc_auth		unix_auth = {
-	.au_cslack	= UNX_WRITESLACK,
-	.au_rslack	= 2,			/* assume AUTH_NULL verf */
-	.au_ops		= &authunix_ops,
-	.au_count	= ATOMIC_INIT(0),
-	.au_credcache	= &unix_cred_cache,
-};
-
-static
 struct rpc_credops	unix_credops = {
-	.cr_name	= "AUTH_UNIX",
 	.crdestroy	= unx_destroy_cred,
 	.crmatch	= unx_match,
 	.crmarshal	= unx_marshal,

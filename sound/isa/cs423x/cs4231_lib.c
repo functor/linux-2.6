@@ -166,8 +166,8 @@ static __CS4231_INLINE__ u8 cs4231_inb(cs4231_t *chip, u8 offset)
 #endif
 }
 
-static void snd_cs4231_outm(cs4231_t *chip, unsigned char reg,
-			    unsigned char mask, unsigned char value)
+void snd_cs4231_outm(cs4231_t *chip, unsigned char reg,
+		     unsigned char mask, unsigned char value)
 {
 	int timeout;
 	unsigned char tmp;
@@ -271,9 +271,9 @@ unsigned char snd_cs4236_ext_in(cs4231_t *chip, unsigned char reg)
 #endif
 }
 
-#if 0
+#ifdef CONFIG_SND_DEBUG
 
-static void snd_cs4231_debug(cs4231_t *chip)
+void snd_cs4231_debug(cs4231_t *chip)
 {
 	printk("CS4231 REGS:      INDEX = 0x%02x  ", cs4231_inb(chip, CS4231P(REGSEL)));
 	printk("                 STATUS = 0x%02x\n", cs4231_inb(chip, CS4231P(STATUS)));
@@ -356,6 +356,7 @@ void snd_cs4231_mce_down(cs4231_t *chip)
 {
 	unsigned long flags;
 	int timeout;
+	signed long time;
 
 	snd_cs4231_busy_wait(chip);
 #if 0
@@ -389,26 +390,34 @@ void snd_cs4231_mce_down(cs4231_t *chip)
 #if 0
 	printk("(2) timeout = %i, jiffies = %li\n", timeout, jiffies);
 #endif
-	/* in 10 ms increments, check condition, up to 250 ms */
-	timeout = 25;
+	timeout = HZ / 4 / 2;
+	time = 2;
 	while (snd_cs4231_in(chip, CS4231_TEST_INIT) & CS4231_CALIB_IN_PROGRESS) {
+		set_current_state(TASK_INTERRUPTIBLE);
+		time = schedule_timeout(time);
+		if (time > 0)
+			continue;
+		time = 2;
 		if (--timeout < 0) {
 			snd_printk("mce_down - auto calibration time out (2)\n");
 			return;
 		}
-		msleep(10);
 	}
 #if 0
 	printk("(3) jiffies = %li\n", jiffies);
 #endif
-	/* in 10 ms increments, check condition, up to 100 ms */
-	timeout = 10;
+	timeout = HZ / 10 / 2;
+	time = 2;
 	while (cs4231_inb(chip, CS4231P(REGSEL)) & CS4231_INIT) {
+		set_current_state(TASK_INTERRUPTIBLE);		
+		time = schedule_timeout(time);
+		if (time > 0)
+			continue;
+		time = 2;
 		if (--timeout < 0) {
 			snd_printk(KERN_ERR "mce_down - auto calibration time out (3)\n");
 			return;
 		}
-		msleep(10);
 	}
 #if 0
 	printk("(4) jiffies = %li\n", jiffies);
@@ -685,7 +694,7 @@ static void snd_cs4231_init(cs4231_t *chip)
 
 	snd_cs4231_mce_down(chip);
 
-#ifdef SNDRV_DEBUG_MCE
+#ifdef SNDRV_DEBUGq_MCE
 	snd_printk("init: (1)\n");
 #endif
 	snd_cs4231_mce_up(chip);
@@ -1026,7 +1035,7 @@ static snd_pcm_uframes_t snd_cs4231_capture_pointer(snd_pcm_substream_t * substr
 
  */
 
-static int snd_cs4231_probe(cs4231_t *chip)
+int snd_cs4231_probe(cs4231_t *chip)
 {
 	unsigned long flags;
 	int i, id, rev;
@@ -1394,19 +1403,23 @@ static void snd_cs4231_resume(cs4231_t *chip)
 #endif
 }
 
-static int snd_cs4231_pm_suspend(snd_card_t *card, pm_message_t state)
+static int snd_cs4231_pm_suspend(snd_card_t *card, unsigned int state)
 {
 	cs4231_t *chip = card->pm_private_data;
-	if (chip->suspend)
+	if (chip->suspend) {
 		chip->suspend(chip);
+		snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
+	}
 	return 0;
 }
 
-static int snd_cs4231_pm_resume(snd_card_t *card)
+static int snd_cs4231_pm_resume(snd_card_t *card, unsigned int state)
 {
 	cs4231_t *chip = card->pm_private_data;
-	if (chip->resume)
+	if (chip->resume) {
 		chip->resume(chip);
+		snd_power_change_state(card, SNDRV_CTL_POWER_D0);
+	}
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -1930,6 +1943,7 @@ int snd_cs4231_mixer(cs4231_t *chip)
 
 EXPORT_SYMBOL(snd_cs4231_out);
 EXPORT_SYMBOL(snd_cs4231_in);
+EXPORT_SYMBOL(snd_cs4231_outm);
 EXPORT_SYMBOL(snd_cs4236_ext_out);
 EXPORT_SYMBOL(snd_cs4236_ext_in);
 EXPORT_SYMBOL(snd_cs4231_mce_up);

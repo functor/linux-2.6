@@ -148,7 +148,7 @@ struct moxa_str {
 	int type;
 	int port;
 	int close_delay;
-	unsigned int closing_wait;
+	unsigned short closing_wait;
 	int count;
 	int blocked_open;
 	long event; /* long req'd for set_bit --RR */
@@ -3090,7 +3090,6 @@ static int moxaloadc320(int cardno, void __iomem *baseAddr, int len, int *numPor
 	return (0);
 }
 
-#if 0
 long MoxaPortGetCurBaud(int port)
 {
 
@@ -3098,7 +3097,6 @@ long MoxaPortGetCurBaud(int port)
 		return (0);
 	return (moxaCurBaud[port]);
 }
-#endif  /*  0  */
 
 static void MoxaSetFifo(int port, int enable)
 {

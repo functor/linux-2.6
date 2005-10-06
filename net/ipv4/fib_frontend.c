@@ -75,7 +75,7 @@ struct fib_table *__fib_new_table(int id)
 #endif /* CONFIG_IP_MULTIPLE_TABLES */
 
 
-static void fib_flush(void)
+void fib_flush(void)
 {
 	int flushed = 0;
 #ifdef CONFIG_IP_MULTIPLE_TABLES
@@ -585,11 +585,11 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block fib_inetaddr_notifier = {
+struct notifier_block fib_inetaddr_notifier = {
 	.notifier_call =fib_inetaddr_event,
 };
 
-static struct notifier_block fib_netdev_notifier = {
+struct notifier_block fib_netdev_notifier = {
 	.notifier_call =fib_netdev_event,
 };
 

@@ -1885,7 +1885,7 @@ int shpchp_enable_slot (struct slot *p_slot)
 	func = shpchp_slot_find(p_slot->bus, p_slot->device, 0);
 	if (!func) {
 		dbg("%s: Error! slot NULL\n", __FUNCTION__);
-		return -ENODEV;
+		return 1;
 	}
 
 	/* Check to see if (latch closed, card present, power off) */
@@ -1894,19 +1894,19 @@ int shpchp_enable_slot (struct slot *p_slot)
 	if (rc || !getstatus) {
 		info("%s: no adapter on slot(%x)\n", __FUNCTION__, p_slot->number);
 		up(&p_slot->ctrl->crit_sect);
-		return -ENODEV;
+		return 1;
 	}
 	rc = p_slot->hpc_ops->get_latch_status(p_slot, &getstatus);
 	if (rc || getstatus) {
 		info("%s: latch open on slot(%x)\n", __FUNCTION__, p_slot->number);
 		up(&p_slot->ctrl->crit_sect);
-		return -ENODEV;
+		return 1;
 	}
 	rc = p_slot->hpc_ops->get_power_status(p_slot, &getstatus);
 	if (rc || getstatus) {
 		info("%s: already enabled on slot(%x)\n", __FUNCTION__, p_slot->number);
 		up(&p_slot->ctrl->crit_sect);
-		return -ENODEV;
+		return 1;
 	}
 	up(&p_slot->ctrl->crit_sect);
 
@@ -1914,7 +1914,7 @@ int shpchp_enable_slot (struct slot *p_slot)
 
 	func = shpchp_slot_create(p_slot->bus);
 	if (func == NULL)
-		return -ENOMEM;
+		return 1;
 
 	func->bus = p_slot->bus;
 	func->device = p_slot->device;
@@ -1939,7 +1939,7 @@ int shpchp_enable_slot (struct slot *p_slot)
 		/* Setup slot structure with entry for empty slot */
 		func = shpchp_slot_create(p_slot->bus);
 		if (func == NULL)
-			return -ENOMEM;	/* Out of memory */
+			return (1);	/* Out of memory */
 
 		func->bus = p_slot->bus;
 		func->device = p_slot->device;
@@ -1972,7 +1972,7 @@ int shpchp_disable_slot (struct slot *p_slot)
 	struct pci_func *func;
 
 	if (!p_slot->ctrl)
-		return -ENODEV;
+		return 1;
 
 	pci_bus = p_slot->ctrl->pci_dev->subordinate;
 
@@ -1983,19 +1983,19 @@ int shpchp_disable_slot (struct slot *p_slot)
 	if (ret || !getstatus) {
 		info("%s: no adapter on slot(%x)\n", __FUNCTION__, p_slot->number);
 		up(&p_slot->ctrl->crit_sect);
-		return -ENODEV;
+		return 1;
 	}
 	ret = p_slot->hpc_ops->get_latch_status(p_slot, &getstatus);
 	if (ret || getstatus) {
 		info("%s: latch open on slot(%x)\n", __FUNCTION__, p_slot->number);
 		up(&p_slot->ctrl->crit_sect);
-		return -ENODEV;
+		return 1;
 	}
 	ret = p_slot->hpc_ops->get_power_status(p_slot, &getstatus);
 	if (ret || !getstatus) {
 		info("%s: already disabled slot(%x)\n", __FUNCTION__, p_slot->number);
 		up(&p_slot->ctrl->crit_sect);
-		return -ENODEV;
+		return 1;
 	}
 	up(&p_slot->ctrl->crit_sect);
 
@@ -2011,7 +2011,7 @@ int shpchp_disable_slot (struct slot *p_slot)
 		/* Check the Class Code */
 		rc = pci_bus_read_config_byte (pci_bus, devfn, 0x0B, &class_code);
 		if (rc)
-			return -ENODEV;
+			return rc;
 
 		if (class_code == PCI_BASE_CLASS_DISPLAY) {
 			/* Display/Video adapter (not supported) */
@@ -2020,13 +2020,13 @@ int shpchp_disable_slot (struct slot *p_slot)
 			/* See if it's a bridge */
 			rc = pci_bus_read_config_byte (pci_bus, devfn, PCI_HEADER_TYPE, &header_type);
 			if (rc)
-				return -ENODEV;
+				return rc;
 
 			/* If it's a bridge, check the VGA Enable bit */
 			if ((header_type & 0x7F) == PCI_HEADER_TYPE_BRIDGE) {
 				rc = pci_bus_read_config_byte (pci_bus, devfn, PCI_BRIDGE_CONTROL, &BCR);
 				if (rc)
-					return -ENODEV;
+					return rc;
 
 				/* If the VGA Enable bit is set, remove isn't supported */
 				if (BCR & PCI_BRIDGE_CTL_VGA) {
@@ -2042,12 +2042,12 @@ int shpchp_disable_slot (struct slot *p_slot)
 	if ((func != NULL) && !rc) {
 		rc = remove_board(func, p_slot->ctrl);
 	} else if (!rc)
-		rc = -ENODEV;
+		rc = 1;
 
 	if (p_slot)
 		update_slot_info(p_slot);
 
-	return rc;
+	return(rc);
 }
 
 

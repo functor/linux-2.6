@@ -37,6 +37,8 @@
  * 	node 3:  0xac000000-0xafffffff	-->  0xcc000000-0xcfffffff
  */
 
+#define NR_NODES	4
+
 /*
  * Given a kernel address, find the home node of the underlying memory.
  */

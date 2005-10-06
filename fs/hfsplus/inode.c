@@ -40,7 +40,7 @@ static sector_t hfsplus_bmap(struct address_space *mapping, sector_t block)
 	return generic_block_bmap(mapping, block, hfsplus_get_block);
 }
 
-static int hfsplus_releasepage(struct page *page, int mask)
+int hfsplus_releasepage(struct page *page, int mask)
 {
 	struct inode *inode = page->mapping->host;
 	struct super_block *sb = inode->i_sb;
@@ -71,6 +71,12 @@ static int hfsplus_releasepage(struct page *page, int mask)
 			;
 		else if (atomic_read(&node->refcnt))
 			res = 0;
+		else for (i = 0; i < tree->pages_per_bnode; i++) {
+			if (PageActive(node->page[i])) {
+				res = 0;
+				break;
+			}
+		}
 		if (res && node) {
 			hfs_bnode_unhash(node);
 			hfs_bnode_free(node);
@@ -94,7 +100,7 @@ static int hfsplus_releasepage(struct page *page, int mask)
 		spin_unlock(&tree->hash_lock);
 	}
 	//printk("releasepage: %lu,%x = %d\n", page->index, mask, res);
-	return res ? try_to_free_buffers(page) : 0;
+	return res;
 }
 
 static int hfsplus_get_blocks(struct inode *inode, sector_t iblock, unsigned long max_blocks,
@@ -291,7 +297,7 @@ static int hfsplus_file_release(struct inode *inode, struct file *file)
 extern struct inode_operations hfsplus_dir_inode_operations;
 extern struct file_operations hfsplus_dir_operations;
 
-static struct inode_operations hfsplus_file_inode_operations = {
+struct inode_operations hfsplus_file_inode_operations = {
 	.lookup		= hfsplus_file_lookup,
 	.truncate	= hfsplus_file_truncate,
 	.permission	= hfsplus_permission,
@@ -300,7 +306,7 @@ static struct inode_operations hfsplus_file_inode_operations = {
 	.listxattr	= hfsplus_listxattr,
 };
 
-static struct file_operations hfsplus_file_operations = {
+struct file_operations hfsplus_file_operations = {
 	.llseek 	= generic_file_llseek,
 	.read		= generic_file_read,
 	.write		= generic_file_write,
@@ -328,7 +334,7 @@ struct inode *hfsplus_new_inode(struct super_block *sb, int mode)
 	inode->i_uid = current->fsuid;
 	inode->i_gid = current->fsgid;
 	inode->i_nlink = 1;
-	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	inode->i_blksize = HFSPLUS_SB(sb).alloc_blksz;
 	INIT_LIST_HEAD(&HFSPLUS_I(inode).open_dir_list);
 	init_MUTEX(&HFSPLUS_I(inode).extents_lock);

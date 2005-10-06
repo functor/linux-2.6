@@ -1046,7 +1046,8 @@ hfsc_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 	struct tc_service_curve *rsc = NULL, *fsc = NULL, *usc = NULL;
 	u64 cur_time;
 
-	if (opt == NULL || rtattr_parse_nested(tb, TCA_HFSC_MAX, opt))
+	if (opt == NULL ||
+	    rtattr_parse(tb, TCA_HFSC_MAX, RTA_DATA(opt), RTA_PAYLOAD(opt)))
 		return -EINVAL;
 
 	if (tb[TCA_HFSC_RSC-1]) {
@@ -1214,7 +1215,7 @@ hfsc_delete_class(struct Qdisc *sch, unsigned long arg)
 }
 
 static struct hfsc_class *
-hfsc_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
+hfsc_classify(struct sk_buff *skb, struct Qdisc *sch, int *qres)
 {
 	struct hfsc_sched *q = qdisc_priv(sch);
 	struct hfsc_class *cl;
@@ -1227,20 +1228,35 @@ hfsc_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 		if (cl->level == 0)
 			return cl;
 
-	*qerr = NET_XMIT_DROP;
 	tcf = q->root.filter_list;
 	while (tcf && (result = tc_classify(skb, tcf, &res)) >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
+		int terminal = 0;
 		switch (result) {
+		case TC_ACT_SHOT: 
+			*qres = NET_XMIT_DROP;
+			terminal = 1;
+			break;
 		case TC_ACT_QUEUED:
 		case TC_ACT_STOLEN: 
-			*qerr = NET_XMIT_SUCCESS;
-		case TC_ACT_SHOT: 
+			terminal = 1;
+			break;
+		case TC_ACT_RECLASSIFY: 
+		case TC_ACT_OK:
+		case TC_ACT_UNSPEC:
+		default:
+		break;
+		}
+
+		if (terminal) {
+			kfree_skb(skb);
 			return NULL;
 		}
-#elif defined(CONFIG_NET_CLS_POLICE)
+#else
+#ifdef CONFIG_NET_CLS_POLICE
 		if (result == TC_POLICE_SHOT)
 			return NULL;
+#endif
 #endif
 		if ((cl = (struct hfsc_class *)res.class) == NULL) {
 			if ((cl = hfsc_find_class(res.classid, sch)) == NULL)
@@ -1637,19 +1653,27 @@ hfsc_dump_qdisc(struct Qdisc *sch, struct sk_buff *skb)
 static int
 hfsc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
-	struct hfsc_class *cl;
-	unsigned int len;
+	int ret = NET_XMIT_SUCCESS;
+	struct hfsc_class *cl = hfsc_classify(skb, sch, &ret);
+	unsigned int len = skb->len;
 	int err;
 
-	cl = hfsc_classify(skb, sch, &err);
-	if (cl == NULL) {
-		if (err == NET_XMIT_DROP)
-			sch->qstats.drops++;
-		kfree_skb(skb);
-		return err;
-	}
 
-	len = skb->len;
+#ifdef CONFIG_NET_CLS_ACT
+	if (cl == NULL) {
+		if (NET_XMIT_DROP == ret) {
+			sch->qstats.drops++;
+		}
+		return ret;
+	}
+#else
+	if (cl == NULL) {
+		kfree_skb(skb);
+		sch->qstats.drops++;
+		return NET_XMIT_DROP;
+	}
+#endif
+
 	err = cl->qdisc->enqueue(skb, cl->qdisc);
 	if (unlikely(err != NET_XMIT_SUCCESS)) {
 		cl->qstats.drops++;

@@ -16,14 +16,13 @@ config VIDEO_BT848
 	select VIDEO_BUF
 	select VIDEO_IR
 	select VIDEO_TUNER
-	select VIDEO_TVEEPROM
 	---help---
 	  Support for BT848 based frame grabber/overlay boards. This includes
 	  the Miro, Hauppauge and STB boards. Please read the material in
 	  <file:Documentation/video4linux/bttv/> for more information.
 
 	  If you say Y or M here, you need to say Y or M to "I2C support" and
-	  "I2C bit-banging interfaces" in the device drivers section.
+	  "I2C bit-banging interfaces" in the character device section.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called bttv.
@@ -146,8 +145,7 @@ config TUNER_3036
 
 config VIDEO_VINO
 	tristate "SGI Vino Video For Linux (EXPERIMENTAL)"
-	depends on VIDEO_DEV && I2C && SGI_IP22 && EXPERIMENTAL
-	select I2C_ALGO_SGI
+	depends on EXPERIMENTAL && VIDEO_DEV && SGI
 	help
 	  Say Y here to build in support for the Vino video input system found
 	  on SGI Indy machines.
@@ -240,7 +238,6 @@ config VIDEO_SAA7134
 	select VIDEO_BUF
 	select VIDEO_IR
 	select VIDEO_TUNER
-	select CRC32
 	---help---
 	  This is a video4linux driver for Philips SAA7130/7134 based
 	  TV cards.
@@ -250,10 +247,7 @@ config VIDEO_SAA7134
 
 config VIDEO_SAA7134_DVB
 	tristate "DVB Support for saa7134 based TV cards"
-	depends on VIDEO_SAA7134 && DVB_CORE
-	select VIDEO_BUF_DVB
-	select DVB_MT352
-	select DVB_CX22702
+	depends on VIDEO_SAA7134 && DVB_CORE && BROKEN
 	---help---
 	  This adds support for DVB cards based on the
 	  Philips saa7134 chip.
@@ -309,14 +303,12 @@ config VIDEO_HEXIUM_GEMINI
 
 config VIDEO_CX88
 	tristate "Conexant 2388x (bt878 successor) support"
-	depends on VIDEO_DEV && PCI && I2C && EXPERIMENTAL
+	depends on VIDEO_DEV && PCI && EXPERIMENTAL
 	select I2C_ALGOBIT
 	select FW_LOADER
 	select VIDEO_BTCX
 	select VIDEO_BUF
 	select VIDEO_TUNER
-	select VIDEO_TVEEPROM
-	select VIDEO_IR
 	---help---
 	  This is a video4linux driver for Conexant 2388x based
 	  TV cards.
@@ -326,12 +318,10 @@ config VIDEO_CX88
 
 config VIDEO_CX88_DVB
 	tristate "DVB Support for cx2388x based TV cards"
-	depends on VIDEO_CX88 && DVB_CORE
+	depends on VIDEO_CX88 && DVB_CORE && BROKEN
 	select VIDEO_BUF_DVB
-	select DVB_MT352
-	select DVB_OR51132
 	---help---
-	  This adds support for DVB/ATSC cards based on the
+	  This adds support for DVB cards based on the
 	  Connexant 2388x chip.
 
 config VIDEO_OVCAMCHIP

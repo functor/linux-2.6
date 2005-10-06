@@ -116,6 +116,7 @@ static const struct drive_list_entry drive_blacklist [] = {
 	{ "Compaq CRD-8241B"	,	"ALL"		},
 	{ "CRD-8400B"		,	"ALL"		},
 	{ "CRD-8480B",			"ALL"		},
+	{ "CRD-8480C",			"ALL"		},
 	{ "CRD-8482B",			"ALL"		},
  	{ "CRD-84"		,	"ALL"		},
 	{ "SanDisk SDP3B"	,	"ALL"		},
@@ -157,6 +158,7 @@ static int in_drive_list(struct hd_driveid *id, const struct drive_list_entry *d
 	return 0;
 }
 
+#ifdef CONFIG_BLK_DEV_IDEDMA_PCI
 /**
  *	ide_dma_intr	-	IDE DMA interrupt handler
  *	@drive: the drive the interrupt is for
@@ -175,24 +177,17 @@ ide_startstop_t ide_dma_intr (ide_drive_t *drive)
 		if (!dma_stat) {
 			struct request *rq = HWGROUP(drive)->rq;
 
-			if (rq->rq_disk) {
-				ide_driver_t *drv;
-
-				drv = *(ide_driver_t **)rq->rq_disk->private_data;;
-				drv->end_request(drive, 1, rq->nr_sectors);
-			} else
-				ide_end_request(drive, 1, rq->nr_sectors);
+			DRIVER(drive)->end_request(drive, 1, rq->nr_sectors);
 			return ide_stopped;
 		}
 		printk(KERN_ERR "%s: dma_intr: bad DMA status (dma_stat=%x)\n", 
 		       drive->name, dma_stat);
 	}
-	return ide_error(drive, "dma_intr", stat);
+	return DRIVER(drive)->error(drive, "dma_intr", stat);
 }
 
 EXPORT_SYMBOL_GPL(ide_dma_intr);
 
-#ifdef CONFIG_BLK_DEV_IDEDMA_PCI
 /**
  *	ide_build_sglist	-	map IDE scatter gather for DMA I/O
  *	@drive: the drive to build the DMA table for
@@ -232,9 +227,7 @@ EXPORT_SYMBOL_GPL(ide_build_sglist);
  *	the PRD table that the IDE layer wants to be fed. The code
  *	knows about the 64K wrap bug in the CS5530.
  *
- *	Returns the number of built PRD entries if all went okay,
- *	returns 0 otherwise.
- *
+ *	Returns 0 if all went okay, returns 1 otherwise.
  *	May also be invoked from trm290.c
  */
  
@@ -638,7 +631,7 @@ int __ide_dma_end (ide_drive_t *drive)
 EXPORT_SYMBOL(__ide_dma_end);
 
 /* returns 1 if dma irq issued, 0 otherwise */
-static int __ide_dma_test_irq(ide_drive_t *drive)
+int __ide_dma_test_irq (ide_drive_t *drive)
 {
 	ide_hwif_t *hwif	= HWIF(drive);
 	u8 dma_stat		= hwif->INB(hwif->dma_status);
@@ -657,6 +650,8 @@ static int __ide_dma_test_irq(ide_drive_t *drive)
 			drive->name, __FUNCTION__);
 	return 0;
 }
+
+EXPORT_SYMBOL(__ide_dma_test_irq);
 #endif /* CONFIG_BLK_DEV_IDEDMA_PCI */
 
 int __ide_dma_bad_drive (ide_drive_t *drive)
@@ -789,7 +784,7 @@ EXPORT_SYMBOL(__ide_dma_timeout);
 /*
  * Needed for allowing full modular support of ide-driver
  */
-static int ide_release_dma_engine(ide_hwif_t *hwif)
+int ide_release_dma_engine (ide_hwif_t *hwif)
 {
 	if (hwif->dmatable_cpu) {
 		pci_free_consistent(hwif->pci_dev,
@@ -801,7 +796,7 @@ static int ide_release_dma_engine(ide_hwif_t *hwif)
 	return 1;
 }
 
-static int ide_release_iomio_dma(ide_hwif_t *hwif)
+int ide_release_iomio_dma (ide_hwif_t *hwif)
 {
 	if ((hwif->dma_extra) && (hwif->channel == 0))
 		release_region((hwif->dma_base + 16), hwif->dma_extra);
@@ -825,7 +820,7 @@ int ide_release_dma (ide_hwif_t *hwif)
 	return ide_release_iomio_dma(hwif);
 }
 
-static int ide_allocate_dma_engine(ide_hwif_t *hwif)
+int ide_allocate_dma_engine (ide_hwif_t *hwif)
 {
 	hwif->dmatable_cpu = pci_alloc_consistent(hwif->pci_dev,
 						  PRD_ENTRIES * PRD_BYTES,
@@ -835,13 +830,14 @@ static int ide_allocate_dma_engine(ide_hwif_t *hwif)
 		return 0;
 
 	printk(KERN_ERR "%s: -- Error, unable to allocate%s DMA table(s).\n",
-			hwif->cds->name, !hwif->dmatable_cpu ? " CPU" : "");
+		(hwif->dmatable_cpu == NULL) ? " CPU" : "",
+		hwif->cds->name);
 
 	ide_release_dma_engine(hwif);
 	return 1;
 }
 
-static int ide_mapped_mmio_dma(ide_hwif_t *hwif, unsigned long base, unsigned int ports)
+int ide_mapped_mmio_dma (ide_hwif_t *hwif, unsigned long base, unsigned int ports)
 {
 	printk(KERN_INFO "    %s: MMIO-DMA ", hwif->name);
 
@@ -856,7 +852,7 @@ static int ide_mapped_mmio_dma(ide_hwif_t *hwif, unsigned long base, unsigned in
 	return 0;
 }
 
-static int ide_iomio_dma(ide_hwif_t *hwif, unsigned long base, unsigned int ports)
+int ide_iomio_dma (ide_hwif_t *hwif, unsigned long base, unsigned int ports)
 {
 	printk(KERN_INFO "    %s: BM-DMA at 0x%04lx-0x%04lx",
 		hwif->name, base, base + ports - 1);
@@ -885,7 +881,10 @@ static int ide_iomio_dma(ide_hwif_t *hwif, unsigned long base, unsigned int port
 	return 0;
 }
 
-static int ide_dma_iobase(ide_hwif_t *hwif, unsigned long base, unsigned int ports)
+/*
+ * 
+ */
+int ide_dma_iobase (ide_hwif_t *hwif, unsigned long base, unsigned int ports)
 {
 	if (hwif->mmio == 2)
 		return ide_mapped_mmio_dma(hwif, base,ports);
@@ -927,12 +926,12 @@ void ide_setup_dma (ide_hwif_t *hwif, unsigned long dma_base, unsigned int num_p
 		hwif->ide_dma_host_on = &__ide_dma_host_on;
 	if (!hwif->ide_dma_check)
 		hwif->ide_dma_check = &__ide_dma_check;
-	if (!hwif->dma_setup)
-		hwif->dma_setup = &ide_dma_setup;
-	if (!hwif->dma_exec_cmd)
-		hwif->dma_exec_cmd = &ide_dma_exec_cmd;
-	if (!hwif->dma_start)
-		hwif->dma_start = &ide_dma_start;
+	if (!hwif->ide_dma_setup)
+		hwif->ide_dma_setup = &ide_dma_setup;
+	if (!hwif->ide_dma_exec_cmd)
+		hwif->ide_dma_exec_cmd = &ide_dma_exec_cmd;
+	if (!hwif->ide_dma_start)
+		hwif->ide_dma_start = &ide_dma_start;
 	if (!hwif->ide_dma_end)
 		hwif->ide_dma_end = &__ide_dma_end;
 	if (!hwif->ide_dma_test_irq)

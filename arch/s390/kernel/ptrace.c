@@ -31,8 +31,6 @@
 #include <linux/ptrace.h>
 #include <linux/user.h>
 #include <linux/security.h>
-#include <linux/audit.h>
-#include <linux/signal.h>
 
 #include <asm/segment.h>
 #include <asm/page.h>
@@ -40,7 +38,6 @@
 #include <asm/pgalloc.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
-#include <asm/unistd.h>
 
 #ifdef CONFIG_S390_SUPPORT
 #include "compat_ptrace.h"
@@ -131,19 +128,13 @@ static int
 peek_user(struct task_struct *child, addr_t addr, addr_t data)
 {
 	struct user *dummy = NULL;
-	addr_t offset, tmp, mask;
+	addr_t offset, tmp;
 
 	/*
 	 * Stupid gdb peeks/pokes the access registers in 64 bit with
 	 * an alignment of 4. Programmers from hell...
 	 */
-	mask = __ADDR_MASK;
-#ifdef CONFIG_ARCH_S390X
-	if (addr >= (addr_t) &dummy->regs.acrs &&
-	    addr < (addr_t) &dummy->regs.orig_gpr2)
-		mask = 3;
-#endif
-	if ((addr & mask) || addr > sizeof(struct user) - __ADDR_MASK)
+	if ((addr & 3) || addr > sizeof(struct user) - __ADDR_MASK)
 		return -EIO;
 
 	if (addr < (addr_t) &dummy->regs.acrs) {
@@ -160,16 +151,6 @@ peek_user(struct task_struct *child, addr_t addr, addr_t data)
 		 * access registers are stored in the thread structure
 		 */
 		offset = addr - (addr_t) &dummy->regs.acrs;
-#ifdef CONFIG_ARCH_S390X
-		/*
-		 * Very special case: old & broken 64 bit gdb reading
-		 * from acrs[15]. Result is a 64 bit value. Read the
-		 * 32 bit acrs[15] value and shift it by 32. Sick...
-		 */
-		if (addr == (addr_t) &dummy->regs.acrs[15])
-			tmp = ((unsigned long) child->thread.acrs[15]) << 32;
-		else
-#endif
 		tmp = *(addr_t *)((addr_t) &child->thread.acrs + offset);
 
 	} else if (addr == (addr_t) &dummy->regs.orig_gpr2) {
@@ -184,9 +165,6 @@ peek_user(struct task_struct *child, addr_t addr, addr_t data)
 		 */
 		offset = addr - (addr_t) &dummy->regs.fp_regs;
 		tmp = *(addr_t *)((addr_t) &child->thread.fp_regs + offset);
-		if (addr == (addr_t) &dummy->regs.fp_regs.fpc)
-			tmp &= (unsigned long) FPC_VALID_MASK
-				<< (BITS_PER_LONG - 32);
 
 	} else if (addr < (addr_t) (&dummy->regs.per_info + 1)) {
 		/*
@@ -211,19 +189,13 @@ static int
 poke_user(struct task_struct *child, addr_t addr, addr_t data)
 {
 	struct user *dummy = NULL;
-	addr_t offset, mask;
+	addr_t offset;
 
 	/*
 	 * Stupid gdb peeks/pokes the access registers in 64 bit with
 	 * an alignment of 4. Programmers from hell indeed...
 	 */
-	mask = __ADDR_MASK;
-#ifdef CONFIG_ARCH_S390X
-	if (addr >= (addr_t) &dummy->regs.acrs &&
-	    addr < (addr_t) &dummy->regs.orig_gpr2)
-		mask = 3;
-#endif
-	if ((addr & mask) || addr > sizeof(struct user) - __ADDR_MASK)
+	if ((addr & 3) || addr > sizeof(struct user) - __ADDR_MASK)
 		return -EIO;
 
 	if (addr < (addr_t) &dummy->regs.acrs) {
@@ -250,17 +222,6 @@ poke_user(struct task_struct *child, addr_t addr, addr_t data)
 		 * access registers are stored in the thread structure
 		 */
 		offset = addr - (addr_t) &dummy->regs.acrs;
-#ifdef CONFIG_ARCH_S390X
-		/*
-		 * Very special case: old & broken 64 bit gdb writing
-		 * to acrs[15] with a 64 bit value. Ignore the lower
-		 * half of the value and write the upper 32 bit to
-		 * acrs[15]. Sick...
-		 */
-		if (addr == (addr_t) &dummy->regs.acrs[15])
-			child->thread.acrs[15] = (unsigned int) (data >> 32);
-		else
-#endif
 		*(addr_t *)((addr_t) &child->thread.acrs + offset) = data;
 
 	} else if (addr == (addr_t) &dummy->regs.orig_gpr2) {
@@ -274,8 +235,7 @@ poke_user(struct task_struct *child, addr_t addr, addr_t data)
 		 * floating point regs. are stored in the thread structure
 		 */
 		if (addr == (addr_t) &dummy->regs.fp_regs.fpc &&
-		    (data & ~((unsigned long) FPC_VALID_MASK
-			      << (BITS_PER_LONG - 32))) != 0)
+		    (data & ~FPC_VALID_MASK) != 0)
 			return -EINVAL;
 		offset = addr - (addr_t) &dummy->regs.fp_regs;
 		*(addr_t *)((addr_t) &child->thread.fp_regs + offset) = data;
@@ -599,13 +559,13 @@ do_ptrace_emu31(struct task_struct *child, long request, long addr, long data)
 	case PTRACE_GETSIGINFO:
 		if (child->last_siginfo == NULL)
 			return -EINVAL;
-		return copy_siginfo_to_user32((compat_siginfo_t __user *) data,
+		return copy_siginfo_to_user32((siginfo_t32 __user *) data,
 					      child->last_siginfo);
 	case PTRACE_SETSIGINFO:
 		if (child->last_siginfo == NULL)
 			return -EINVAL;
 		return copy_siginfo_from_user32(child->last_siginfo,
-						(compat_siginfo_t __user *) data);
+						(siginfo_t32 __user *) data);
 	}
 	return ptrace_request(child, request, addr, data);
 }
@@ -648,7 +608,7 @@ do_ptrace(struct task_struct *child, long request, long addr, long data)
 		/* continue and stop at next (return from) syscall */
 	case PTRACE_CONT:
 		/* restart after signal. */
-		if (!valid_signal(data))
+		if ((unsigned long) data >= _NSIG)
 			return -EIO;
 		if (request == PTRACE_SYSCALL)
 			set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
@@ -676,7 +636,7 @@ do_ptrace(struct task_struct *child, long request, long addr, long data)
 
 	case PTRACE_SINGLESTEP:
 		/* set the trap flag. */
-		if (!valid_signal(data))
+		if ((unsigned long) data >= _NSIG)
 			return -EIO;
 		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		child->exit_code = data;
@@ -752,22 +712,20 @@ out:
 asmlinkage void
 syscall_trace(struct pt_regs *regs, int entryexit)
 {
-	if (unlikely(current->audit_context) && entryexit)
-		audit_syscall_exit(current, AUDITSC_RESULT(regs->gprs[2]), regs->gprs[2]);
-
+	if (unlikely(current->audit_context)) {
+		if (!entryexit)
+			audit_syscall_entry(current, regs->gprs[2],
+					    regs->orig_gpr2, regs->gprs[3],
+					    regs->gprs[4], regs->gprs[5]);
+		else
+			audit_syscall_exit(current, regs->gprs[2]);
+	}
 	if (!test_thread_flag(TIF_SYSCALL_TRACE))
-		goto out;
+		return;
 	if (!(current->ptrace & PT_PTRACED))
-		goto out;
+		return;
 	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
 				 ? 0x80 : 0));
-
-	/*
-	 * If the debuffer has set an invalid system call number,
-	 * we prepare to skip the system call restart handling.
-	 */
-	if (!entryexit && regs->gprs[2] >= NR_syscalls)
-		regs->trap = -1;
 
 	/*
 	 * this isn't the same as continuing with a signal, but it will do
@@ -778,10 +736,4 @@ syscall_trace(struct pt_regs *regs, int entryexit)
 		send_sig(current->exit_code, current, 1);
 		current->exit_code = 0;
 	}
- out:
-	if (unlikely(current->audit_context) && !entryexit)
-		audit_syscall_entry(current, 
-				    test_thread_flag(TIF_31BIT)?AUDIT_ARCH_S390:AUDIT_ARCH_S390X,
-				    regs->gprs[2], regs->orig_gpr2, regs->gprs[3],
-				    regs->gprs[4], regs->gprs[5]);
 }

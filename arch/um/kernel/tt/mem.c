@@ -15,14 +15,20 @@
 
 void before_mem_tt(unsigned long brk_start)
 {
-	if(debug)
+	if(!jail || debug)
 		remap_data(UML_ROUND_DOWN(&_stext), UML_ROUND_UP(&_etext), 1);
 	remap_data(UML_ROUND_DOWN(&_sdata), UML_ROUND_UP(&_edata), 1);
 	remap_data(UML_ROUND_DOWN(&__bss_start), UML_ROUND_UP(&_end), 1);
 }
 
+#ifdef CONFIG_HOST_2G_2G
+#define TOP 0x80000000
+#else
+#define TOP 0xc0000000
+#endif
+
 #define SIZE ((CONFIG_NEST_LEVEL + CONFIG_KERNEL_HALF_GIGS) * 0x20000000)
-#define START (CONFIG_TOP_ADDR - SIZE)
+#define START (TOP - SIZE)
 
 unsigned long set_task_sizes_tt(int arg, unsigned long *host_size_out, 
 				unsigned long *task_size_out)

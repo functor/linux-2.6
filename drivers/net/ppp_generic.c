@@ -210,7 +210,7 @@ static atomic_t ppp_unit_count = ATOMIC_INIT(0);
  * and the atomicity of find a channel and updating its file.refcnt
  * field.
  */
-static DEFINE_SPINLOCK(all_channels_lock);
+static spinlock_t all_channels_lock = SPIN_LOCK_UNLOCKED;
 static LIST_HEAD(all_channels);
 static LIST_HEAD(new_channels);
 static int last_channel_index;
@@ -2218,7 +2218,7 @@ ppp_ccp_closed(struct ppp *ppp)
 
 /* List of compressors. */
 static LIST_HEAD(compressor_list);
-static DEFINE_SPINLOCK(compressor_list_lock);
+static spinlock_t compressor_list_lock = SPIN_LOCK_UNLOCKED;
 
 struct compressor_entry {
 	struct list_head list;
@@ -2467,10 +2467,14 @@ static void ppp_destroy_interface(struct ppp *ppp)
 	skb_queue_purge(&ppp->mrq);
 #endif /* CONFIG_PPP_MULTILINK */
 #ifdef CONFIG_PPP_FILTER
-	kfree(ppp->pass_filter);
-	ppp->pass_filter = NULL;
-	kfree(ppp->active_filter);
-	ppp->active_filter = NULL;
+	if (ppp->pass_filter) {
+		kfree(ppp->pass_filter);
+		ppp->pass_filter = NULL;
+	}
+	if (ppp->active_filter) {
+		kfree(ppp->active_filter);
+		ppp->active_filter = NULL;
+	}
 #endif /* CONFIG_PPP_FILTER */
 
 	kfree(ppp);
@@ -2737,6 +2741,8 @@ EXPORT_SYMBOL(ppp_input_error);
 EXPORT_SYMBOL(ppp_output_wakeup);
 EXPORT_SYMBOL(ppp_register_compressor);
 EXPORT_SYMBOL(ppp_unregister_compressor);
+EXPORT_SYMBOL(all_ppp_units); /* for debugging */
+EXPORT_SYMBOL(all_channels); /* for debugging */
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_CHARDEV_MAJOR(PPP_MAJOR);
 MODULE_ALIAS("/dev/ppp");

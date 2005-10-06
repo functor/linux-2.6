@@ -53,10 +53,8 @@ NESTED(handle_sys64, PT_SIZE, sp)
 
 	sd	a3, PT_R26(sp)		# save a3 for syscall restarting
 
-	li	t1, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
-	LONG_L	t0, TI_FLAGS($28)	# syscall tracing enabled?
-	and	t0, t1, t0
-	bnez	t0, syscall_trace_entry
+	LONG_L	t0, TI_FLAGS($28)
+	bltz	t0, syscall_trace_entry	# syscall tracing enabled?
 
 	jalr	t2			# Do The Real Thing (TM)
 
@@ -114,7 +112,7 @@ syscall_trace_entry:
 
 illegal_syscall:
 	/* This also isn't a 64-bit syscall, throw an error.  */
-	li	v0, -ENOSYS			# error
+	li	v0, ENOSYS			# error
 	sd	v0, PT_R2(sp)
 	li	t0, 1				# set error flag
 	sd	t0, PT_R7(sp)
@@ -175,8 +173,8 @@ illegal_syscall:
 	sd	v0, PT_R2(sp)		# result
 
 	/* Success, so skip usual error handling garbage.  */
-	li	t0, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
 	LONG_L	a2, TI_FLAGS($28)	# syscall tracing enabled?
+	li	t0, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
 	and	t0, a2, t0
 	bnez	t0, 1f
 
@@ -443,7 +441,7 @@ sys_call_table:
 	PTR	sys_mq_timedreceive
 	PTR	sys_mq_notify
 	PTR	sys_mq_getsetattr		/* 5235 */
-	PTR	sys_vserver
+	PTR	sys_ni_syscall			/* sys_vserver */
 	PTR	sys_waitid
 	PTR	sys_ni_syscall			/* available, was setaltroot */
 	PTR	sys_add_key

@@ -36,6 +36,8 @@
  */
 void (*pm_power_off)(void);
 
+int reboot_thru_bios;
+
 int voyager_level = 0;
 
 struct voyager_SUS *voyager_SUS = NULL;

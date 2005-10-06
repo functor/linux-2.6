@@ -17,6 +17,7 @@
 #include <linux/gfp.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/suspend.h>
 #include <linux/fs.h>		// Needed by writeback.h
 #include <linux/writeback.h>	// Prototypes pdflush_operation()
 #include <linux/kthread.h>
@@ -44,7 +45,7 @@ static void start_one_pdflush_thread(void);
  * All the pdflush threads.  Protected by pdflush_lock
  */
 static LIST_HEAD(pdflush_list);
-static DEFINE_SPINLOCK(pdflush_lock);
+static spinlock_t pdflush_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  * The count of currently-running pdflush threads.  Protected
@@ -105,7 +106,8 @@ static int __pdflush(struct pdflush_work *my_work)
 		spin_unlock_irq(&pdflush_lock);
 
 		schedule();
-		if (try_to_freeze(PF_FREEZE)) {
+		if (current->flags & PF_FREEZE) {
+			refrigerator(PF_FREEZE);
 			spin_lock_irq(&pdflush_lock);
 			continue;
 		}

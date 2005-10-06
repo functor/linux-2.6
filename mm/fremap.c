@@ -14,6 +14,7 @@
 #include <linux/swapops.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
+#include <linux/vs_memory.h>
 #include <linux/syscalls.h>
 #include <linux/vs_memory.h>
 
@@ -31,7 +32,7 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (pte_present(pte)) {
 		unsigned long pfn = pte_pfn(pte);
 
-		flush_cache_page(vma, addr, pfn);
+		flush_cache_page(vma, addr);
 		pte = ptep_clear_flush(vma, addr, ptep);
 		if (pfn_valid(pfn)) {
 			struct page *page = pfn_to_page(pfn);
@@ -40,13 +41,14 @@ static inline void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 					set_page_dirty(page);
 				page_remove_rmap(page);
 				page_cache_release(page);
-				dec_mm_counter(mm, rss);
+				// mm->rss--;
+				vx_rsspages_dec(mm);
 			}
 		}
 	} else {
 		if (!pte_file(pte))
 			free_swap_and_cache(pte_to_swp_entry(pte));
-		pte_clear(mm, addr, ptep);
+		pte_clear(ptep);
 	}
 }
 
@@ -61,22 +63,17 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	pgoff_t size;
 	int err = -ENOMEM;
 	pte_t *pte;
-	pmd_t *pmd;
-	pud_t *pud;
 	pgd_t *pgd;
+	pmd_t *pmd;
 	pte_t pte_val;
 
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
-	
+
 	if (!vx_rsspages_avail(mm, 1))
 		goto err_unlock;
 
-	pud = pud_alloc(mm, pgd, addr);
-	if (!pud)
-		goto err_unlock;
-
-	pmd = pmd_alloc(mm, pud, addr);
+	pmd = pmd_alloc(mm, pgd, addr);
 	if (!pmd)
 		goto err_unlock;
 
@@ -89,18 +86,17 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * caller about it.
 	 */
 	err = -EINVAL;
-	if (vma->vm_file) {
-		inode = vma->vm_file->f_mapping->host;
-		size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-		if (!page->mapping || page->index >= size)
-			goto err_unlock;
-	}
+	inode = vma->vm_file->f_mapping->host;
+	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+	if (!page->mapping || page->index >= size)
+		goto err_unlock;
 
 	zap_pte(mm, vma, addr, pte);
 
-	inc_mm_counter(mm,rss);
+	// mm->rss++;
+	vx_rsspages_inc(mm);
 	flush_icache_page(vma, page);
-	set_pte_at(mm, addr, pte, mk_pte(page, prot));
+	set_pte(pte, mk_pte(page, prot));
 	page_add_file_rmap(page);
 	pte_val = *pte;
 	pte_unmap(pte);
@@ -123,19 +119,14 @@ int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 {
 	int err = -ENOMEM;
 	pte_t *pte;
-	pmd_t *pmd;
-	pud_t *pud;
 	pgd_t *pgd;
+	pmd_t *pmd;
 	pte_t pte_val;
 
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
-	
-	pud = pud_alloc(mm, pgd, addr);
-	if (!pud)
-		goto err_unlock;
 
-	pmd = pmd_alloc(mm, pud, addr);
+	pmd = pmd_alloc(mm, pgd, addr);
 	if (!pmd)
 		goto err_unlock;
 
@@ -145,7 +136,7 @@ int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	zap_pte(mm, vma, addr, pte);
 
-	set_pte_at(mm, addr, pte, pgoff_to_pte(pgoff));
+	set_pte(pte, pgoff_to_pte(pgoff));
 	pte_val = *pte;
 	pte_unmap(pte);
 	update_mmu_cache(vma, addr, pte_val);

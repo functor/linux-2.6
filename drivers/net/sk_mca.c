@@ -127,13 +127,12 @@ static unsigned char poly[] =
 #ifdef DEBUG
 static void dumpmem(struct net_device *dev, u32 start, u32 len)
 {
-	skmca_priv *priv = netdev_priv(dev);
 	int z;
 
 	for (z = 0; z < len; z++) {
 		if ((z & 15) == 0)
 			printk("%04x:", z);
-		printk(" %02x", readb(priv->base + start + z));
+		printk(" %02x", SKMCA_READB(dev->mem_start + start + z));
 		if ((z & 15) == 15)
 			printk("\n");
 	}
@@ -221,21 +220,21 @@ static int __init dofind(int *junior, int firstslot)
 
 static void ResetBoard(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 
-	writeb(CTRL_RESET_ON, priv->ctrladdr);
+	SKMCA_WRITEB(CTRL_RESET_ON, priv->ctrladdr);
 	udelay(10);
-	writeb(CTRL_RESET_OFF, priv->ctrladdr);
+	SKMCA_WRITEB(CTRL_RESET_OFF, priv->ctrladdr);
 }
 
 /* wait for LANCE interface to become not busy */
 
 static int WaitLANCE(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 	int t = 0;
 
-	while ((readb(priv->ctrladdr) & STAT_IO_BUSY) ==
+	while ((SKMCA_READB(priv->ctrladdr) & STAT_IO_BUSY) ==
 	       STAT_IO_BUSY) {
 		udelay(1);
 		if (++t > 1000) {
@@ -251,7 +250,7 @@ static int WaitLANCE(struct net_device *dev)
 
 static void SetLANCE(struct net_device *dev, u16 addr, u16 value)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 	unsigned long flags;
 
 	/* disable interrupts */
@@ -264,17 +263,19 @@ static void SetLANCE(struct net_device *dev, u16 addr, u16 value)
 
 	/* transfer register address to RAP */
 
-	writeb(CTRL_RESET_OFF | CTRL_RW_WRITE | CTRL_ADR_RAP, priv->ctrladdr);
-	writew(addr, priv->ioregaddr);
-	writeb(IOCMD_GO, priv->cmdaddr);
+	SKMCA_WRITEB(CTRL_RESET_OFF | CTRL_RW_WRITE | CTRL_ADR_RAP,
+		     priv->ctrladdr);
+	SKMCA_WRITEW(addr, priv->ioregaddr);
+	SKMCA_WRITEB(IOCMD_GO, priv->cmdaddr);
 	udelay(1);
 	WaitLANCE(dev);
 
 	/* transfer data to register */
 
-	writeb(CTRL_RESET_OFF | CTRL_RW_WRITE | CTRL_ADR_DATA, priv->ctrladdr);
-	writew(value, priv->ioregaddr);
-	writeb(IOCMD_GO, priv->cmdaddr);
+	SKMCA_WRITEB(CTRL_RESET_OFF | CTRL_RW_WRITE | CTRL_ADR_DATA,
+		     priv->ctrladdr);
+	SKMCA_WRITEW(value, priv->ioregaddr);
+	SKMCA_WRITEB(IOCMD_GO, priv->cmdaddr);
 	udelay(1);
 	WaitLANCE(dev);
 
@@ -287,7 +288,7 @@ static void SetLANCE(struct net_device *dev, u16 addr, u16 value)
 
 static u16 GetLANCE(struct net_device *dev, u16 addr)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 	unsigned long flags;
 	unsigned int res;
 
@@ -301,19 +302,21 @@ static u16 GetLANCE(struct net_device *dev, u16 addr)
 
 	/* transfer register address to RAP */
 
-	writeb(CTRL_RESET_OFF | CTRL_RW_WRITE | CTRL_ADR_RAP, priv->ctrladdr);
-	writew(addr, priv->ioregaddr);
-	writeb(IOCMD_GO, priv->cmdaddr);
+	SKMCA_WRITEB(CTRL_RESET_OFF | CTRL_RW_WRITE | CTRL_ADR_RAP,
+		     priv->ctrladdr);
+	SKMCA_WRITEW(addr, priv->ioregaddr);
+	SKMCA_WRITEB(IOCMD_GO, priv->cmdaddr);
 	udelay(1);
 	WaitLANCE(dev);
 
 	/* transfer data from register */
 
-	writeb(CTRL_RESET_OFF | CTRL_RW_READ | CTRL_ADR_DATA, priv->ctrladdr);
-	writeb(IOCMD_GO, priv->cmdaddr);
+	SKMCA_WRITEB(CTRL_RESET_OFF | CTRL_RW_READ | CTRL_ADR_DATA,
+		     priv->ctrladdr);
+	SKMCA_WRITEB(IOCMD_GO, priv->cmdaddr);
 	udelay(1);
 	WaitLANCE(dev);
-	res = readw(priv->ioregaddr);
+	res = SKMCA_READW(priv->ioregaddr);
 
 	/* reenable interrupts */
 
@@ -326,7 +329,6 @@ static u16 GetLANCE(struct net_device *dev, u16 addr)
 
 static void InitDscrs(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
 	u32 bufaddr;
 
 	/* Set up Tx descriptors. The board has only 16K RAM so bits 16..23
@@ -342,10 +344,11 @@ static void InitDscrs(struct net_device *dev)
 			descr.Flags = 0;
 			descr.Len = 0xf000;
 			descr.Status = 0;
-			memcpy_toio(priv->base + RAM_TXBASE +
+			SKMCA_TOIO(dev->mem_start + RAM_TXBASE +
 				   (z * sizeof(LANCE_TxDescr)), &descr,
 				   sizeof(LANCE_TxDescr));
-			memset_io(priv->base + bufaddr, 0, RAM_BUFSIZE);
+			SKMCA_SETIO(dev->mem_start + bufaddr, 0,
+				    RAM_BUFSIZE);
 			bufaddr += RAM_BUFSIZE;
 		}
 	}
@@ -361,10 +364,11 @@ static void InitDscrs(struct net_device *dev)
 			descr.Flags = RXDSCR_FLAGS_OWN;
 			descr.MaxLen = -RAM_BUFSIZE;
 			descr.Len = 0;
-			memcpy_toio(priv->base + RAM_RXBASE +
+			SKMCA_TOIO(dev->mem_start + RAM_RXBASE +
 				   (z * sizeof(LANCE_RxDescr)), &descr,
 				   sizeof(LANCE_RxDescr));
-			memset_io(priv->base + bufaddr, 0, RAM_BUFSIZE);
+			SKMCA_SETIO(dev->mem_start + bufaddr, 0,
+				    RAM_BUFSIZE);
 			bufaddr += RAM_BUFSIZE;
 		}
 	}
@@ -421,7 +425,7 @@ static unsigned int GetHash(char *address)
 
 static void InitLANCE(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 
 	/* build up descriptors. */
 
@@ -474,7 +478,6 @@ static void StopLANCE(struct net_device *dev)
 
 static void InitBoard(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
 	LANCE_InitBlock block;
 
 	/* Lay out the shared RAM - first we create the init block for the LANCE.
@@ -489,7 +492,7 @@ static void InitBoard(struct net_device *dev)
 	block.RdrP = (RAM_RXBASE & 0xffffff) | (LRXCOUNT << 29);
 	block.TdrP = (RAM_TXBASE & 0xffffff) | (LTXCOUNT << 29);
 
-	memcpy_toio(priv->base + RAM_INITBASE, &block, sizeof(block));
+	SKMCA_TOIO(dev->mem_start + RAM_INITBASE, &block, sizeof(block));
 
 	/* initialize LANCE. Implicitly sets up other structures in RAM. */
 
@@ -569,7 +572,7 @@ static u16 irqstart_handler(struct net_device *dev, u16 oldcsr0)
 
 static u16 irqmiss_handler(struct net_device *dev, u16 oldcsr0)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 
 	/* update statistics */
 
@@ -585,7 +588,7 @@ static u16 irqmiss_handler(struct net_device *dev, u16 oldcsr0)
 
 static u16 irqrx_handler(struct net_device *dev, u16 oldcsr0)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 	LANCE_RxDescr descr;
 	unsigned int descraddr;
 
@@ -594,7 +597,7 @@ static u16 irqrx_handler(struct net_device *dev, u16 oldcsr0)
 	descraddr = RAM_RXBASE + (priv->nextrx * sizeof(LANCE_RxDescr));
 	while (1) {
 		/* read descriptor */
-		memcpy_fromio(&descr, priv->base + descraddr,
+		SKMCA_FROMIO(&descr, dev->mem_start + descraddr,
 			     sizeof(LANCE_RxDescr));
 
 		/* if we reach a descriptor we do not own, we're done */
@@ -626,8 +629,8 @@ static u16 irqrx_handler(struct net_device *dev, u16 oldcsr0)
 			if (skb == NULL)
 				priv->stat.rx_dropped++;
 			else {
-				memcpy_fromio(skb_put(skb, descr.Len),
-					     priv->base +
+				SKMCA_FROMIO(skb_put(skb, descr.Len),
+					     dev->mem_start +
 					     descr.LowAddr, descr.Len);
 				skb->dev = dev;
 				skb->protocol = eth_type_trans(skb, dev);
@@ -644,7 +647,7 @@ static u16 irqrx_handler(struct net_device *dev, u16 oldcsr0)
 		descr.Flags |= RXDSCR_FLAGS_OWN;
 
 		/* update descriptor in shared RAM */
-		memcpy_toio(priv->base + descraddr, &descr,
+		SKMCA_TOIO(dev->mem_start + descraddr, &descr,
 			   sizeof(LANCE_RxDescr));
 
 		/* go to next descriptor */
@@ -666,7 +669,7 @@ static u16 irqrx_handler(struct net_device *dev, u16 oldcsr0)
 
 static u16 irqtx_handler(struct net_device *dev, u16 oldcsr0)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 	LANCE_TxDescr descr;
 	unsigned int descraddr;
 
@@ -676,7 +679,7 @@ static u16 irqtx_handler(struct net_device *dev, u16 oldcsr0)
 	    RAM_TXBASE + (priv->nexttxdone * sizeof(LANCE_TxDescr));
 	while (priv->txbusy > 0) {
 		/* read descriptor */
-		memcpy_fromio(&descr, priv->base + descraddr,
+		SKMCA_FROMIO(&descr, dev->mem_start + descraddr,
 			     sizeof(LANCE_TxDescr));
 
 		/* if the LANCE still owns this one, we've worked out all sent packets */
@@ -795,7 +798,9 @@ static int skmca_getinfo(char *buf, int slot, void *d)
 
 	if (dev == NULL)
 		return len;
-	priv = netdev_priv(dev);
+	if (dev->priv == NULL)
+		return len;
+	priv = (skmca_priv *) dev->priv;
 
 	/* print info */
 
@@ -820,7 +825,7 @@ static int skmca_getinfo(char *buf, int slot, void *d)
 static int skmca_open(struct net_device *dev)
 {
 	int result;
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 
 	/* register resources - only necessary for IRQ */
 	result =
@@ -863,7 +868,7 @@ static int skmca_close(struct net_device *dev)
 
 static int skmca_tx(struct sk_buff *skb, struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 	LANCE_TxDescr descr;
 	unsigned int address;
 	int tmplen, retval = 0;
@@ -889,7 +894,8 @@ static int skmca_tx(struct sk_buff *skb, struct net_device *dev)
 
 	/* get TX descriptor */
 	address = RAM_TXBASE + (priv->nexttxput * sizeof(LANCE_TxDescr));
-	memcpy_fromio(&descr, priv->base + address, sizeof(LANCE_TxDescr));
+	SKMCA_FROMIO(&descr, dev->mem_start + address,
+		     sizeof(LANCE_TxDescr));
 
 	/* enter packet length as 2s complement - assure minimum length */
 	tmplen = skb->len;
@@ -905,14 +911,14 @@ static int skmca_tx(struct sk_buff *skb, struct net_device *dev)
 		unsigned int destoffs = 0, l = strlen(fill);
 
 		while (destoffs < tmplen) {
-			memcpy_toio(priv->base + descr.LowAddr +
+			SKMCA_TOIO(dev->mem_start + descr.LowAddr +
 				   destoffs, fill, l);
 			destoffs += l;
 		}
 	}
 
 	/* do the real data copying */
-	memcpy_toio(priv->base + descr.LowAddr, skb->data, skb->len);
+	SKMCA_TOIO(dev->mem_start + descr.LowAddr, skb->data, skb->len);
 
 	/* hand descriptor over to LANCE - this is the first and last chunk */
 	descr.Flags =
@@ -939,7 +945,8 @@ static int skmca_tx(struct sk_buff *skb, struct net_device *dev)
 		netif_stop_queue(dev);
 
 	/* write descriptor back to RAM */
-	memcpy_toio(priv->base + address, &descr, sizeof(LANCE_TxDescr));
+	SKMCA_TOIO(dev->mem_start + address, &descr,
+		   sizeof(LANCE_TxDescr));
 
 	/* if no descriptors were active, give the LANCE a hint to read it
 	   immediately */
@@ -960,7 +967,7 @@ static int skmca_tx(struct sk_buff *skb, struct net_device *dev)
 
 static struct net_device_stats *skmca_stats(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = (skmca_priv *) dev->priv;
 
 	return &(priv->stat);
 }
@@ -970,14 +977,13 @@ static struct net_device_stats *skmca_stats(struct net_device *dev)
 
 static void skmca_set_multicast_list(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
 	LANCE_InitBlock block;
 
 	/* first stop the LANCE... */
 	StopLANCE(dev);
 
 	/* ...then modify the initialization block... */
-	memcpy_fromio(&block, priv->base + RAM_INITBASE, sizeof(block));
+	SKMCA_FROMIO(&block, dev->mem_start + RAM_INITBASE, sizeof(block));
 	if (dev->flags & IFF_PROMISC)
 		block.Mode |= LANCE_INIT_PROM;
 	else
@@ -997,7 +1003,7 @@ static void skmca_set_multicast_list(struct net_device *dev)
 		}
 	}
 
-	memcpy_toio(priv->base + RAM_INITBASE, &block, sizeof(block));
+	SKMCA_TOIO(dev->mem_start + RAM_INITBASE, &block, sizeof(block));
 
 	/* ...then reinit LANCE with the correct flags */
 	InitLANCE(dev);
@@ -1011,11 +1017,10 @@ static int startslot;		/* counts through slots when probing multiple devices */
 
 static void cleanup_card(struct net_device *dev)
 {
-	skmca_priv *priv = netdev_priv(dev);
+	skmca_priv *priv = dev->priv;
 	DeinitBoard(dev);
 	if (dev->irq != 0)
 		free_irq(dev->irq, dev);
-	iounmap(priv->base);
 	mca_mark_as_unused(priv->slot);
 	mca_set_adapter_procfn(priv->slot, NULL, NULL);
 }
@@ -1099,20 +1104,13 @@ struct net_device * __init skmca_probe(int unit)
 	printk("%s: SKNet %s adapter found in slot %d\n", dev->name,
 	       junior ? "Junior MC2" : "MC2+", slot + 1);
 
-	priv = netdev_priv(dev);
-	priv->base = ioremap(base, 0x4000);
-	if (!priv->base) {
-		mca_set_adapter_procfn(slot, NULL, NULL);
-		mca_mark_as_unused(slot);
-		free_netdev(dev);
-		return ERR_PTR(-ENOMEM);
-	}
-
+	/* allocate structure */
+	priv = dev->priv;
 	priv->slot = slot;
-	priv->macbase = priv->base + 0x3fc0;
-	priv->ioregaddr = priv->base + 0x3ff0;
-	priv->ctrladdr = priv->base + 0x3ff2;
-	priv->cmdaddr = priv->base + 0x3ff3;
+	priv->macbase = base + 0x3fc0;
+	priv->ioregaddr = base + 0x3ff0;
+	priv->ctrladdr = base + 0x3ff2;
+	priv->cmdaddr = base + 0x3ff3;
 	priv->medium = medium;
 	memset(&priv->stat, 0, sizeof(struct net_device_stats));
 	spin_lock_init(&priv->lock);
@@ -1149,7 +1147,7 @@ struct net_device * __init skmca_probe(int unit)
 
 	/* copy out MAC address */
 	for (i = 0; i < 6; i++)
-		dev->dev_addr[i] = readb(priv->macbase + (i << 1));
+		dev->dev_addr[i] = SKMCA_READB(priv->macbase + (i << 1));
 
 	/* print config */
 	printk("%s: IRQ %d, memory %#lx-%#lx, "

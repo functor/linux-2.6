@@ -29,7 +29,7 @@
 #include <linux/module.h>	/* Modules                        */
 #include <linux/init.h>		/* Initdata                       */
 #include <linux/ioport.h>	/* check_region, request_region   */
-#include <linux/delay.h>	/* udelay, msleep                 */
+#include <linux/delay.h>	/* udelay                 */
 #include <asm/io.h>		/* outb, outb_p                   */
 #include <asm/uaccess.h>	/* copy to/from user              */
 #include <linux/videodev.h>	/* kernel radio structs           */
@@ -51,6 +51,15 @@ struct zol_device {
 	struct semaphore lock;
 };
 
+
+/* local things */
+
+static void sleep_delay(void)
+{
+	/* Sleep nicely for +/- 10 mS */
+	schedule();
+}
+
 static int zol_setvol(struct zol_device *dev, int vol)
 {
 	dev->curvol = vol;
@@ -67,7 +76,7 @@ static int zol_setvol(struct zol_device *dev, int vol)
 	}
 
 	outb(dev->curvol-1, io);
-	msleep(10);
+	sleep_delay();
 	inb(io + 2);
 	up(&dev->lock);
 	return 0;
@@ -160,17 +169,18 @@ static int zol_setfreq(struct zol_device *dev, unsigned long freq)
 
 /* Get signal strength */
 
-static int zol_getsigstr(struct zol_device *dev)
+int zol_getsigstr(struct zol_device *dev)
 {
 	int a, b;
 
 	down(&dev->lock);
 	outb(0x00, io);         /* This stuff I found to do nothing */
 	outb(dev->curvol, io);
-	msleep(20);
+	sleep_delay();
+	sleep_delay();
 
 	a = inb(io);
-	msleep(10);
+	sleep_delay();
 	b = inb(io);
 
 	up(&dev->lock);
@@ -184,7 +194,7 @@ static int zol_getsigstr(struct zol_device *dev)
  	return (0);
 }
 
-static int zol_is_stereo (struct zol_device *dev)
+int zol_is_stereo (struct zol_device *dev)
 {
 	int x1, x2;
 
@@ -192,10 +202,11 @@ static int zol_is_stereo (struct zol_device *dev)
 	
 	outb(0x00, io);
 	outb(dev->curvol, io);
-	msleep(20);
+	sleep_delay();
+	sleep_delay();
 
 	x1 = inb(io);
-	msleep(10);
+	sleep_delay();
 	x2 = inb(io);
 
 	up(&dev->lock);
@@ -357,7 +368,8 @@ static int __init zoltrix_init(void)
 
 	outb(0, io);
 	outb(0, io);
-	msleep(20);
+	sleep_delay();
+	sleep_delay();
 	inb(io + 3);
 
 	zoltrix_unit.curvol = 0;
@@ -370,9 +382,9 @@ MODULE_AUTHOR("C.van Schaik");
 MODULE_DESCRIPTION("A driver for the Zoltrix Radio Plus.");
 MODULE_LICENSE("GPL");
 
-module_param(io, int, 0);
+MODULE_PARM(io, "i");
 MODULE_PARM_DESC(io, "I/O address of the Zoltrix Radio Plus (0x20c or 0x30c)");
-module_param(radio_nr, int, 0);
+MODULE_PARM(radio_nr, "i");
 
 static void __exit zoltrix_cleanup_module(void)
 {

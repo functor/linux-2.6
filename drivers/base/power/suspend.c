@@ -11,7 +11,7 @@
 #include <linux/device.h>
 #include "power.h"
 
-extern int sysdev_suspend(pm_message_t state);
+extern int sysdev_suspend(u32 state);
 
 /*
  * The entries in the dpm_active list are in a depth first order, simply
@@ -35,29 +35,16 @@ extern int sysdev_suspend(pm_message_t state);
  *	@state:	Power state device is entering.
  */
 
-int suspend_device(struct device * dev, pm_message_t state)
+int suspend_device(struct device * dev, u32 state)
 {
 	int error = 0;
 
-	if (dev->power.power_state) {
-		dev_dbg(dev, "PM: suspend %d-->%d\n",
-			dev->power.power_state, state);
-	}
-	if (dev->power.pm_parent
-			&& dev->power.pm_parent->power.power_state) {
-		dev_err(dev,
-			"PM: suspend %d->%d, parent %s already %d\n",
-			dev->power.power_state, state,
-			dev->power.pm_parent->bus_id,
-			dev->power.pm_parent->power.power_state);
-	}
+	dev_dbg(dev, "suspending\n");
 
 	dev->power.prev_state = dev->power.power_state;
 
-	if (dev->bus && dev->bus->suspend && !dev->power.power_state) {
-		dev_dbg(dev, "suspending\n");
+	if (dev->bus && dev->bus->suspend && !dev->power.power_state)
 		error = dev->bus->suspend(dev, state);
-	}
 
 	return error;
 }
@@ -78,7 +65,7 @@ int suspend_device(struct device * dev, pm_message_t state)
  *
  */
 
-int device_suspend(pm_message_t state)
+int device_suspend(u32 state)
 {
 	int error = 0;
 
@@ -131,7 +118,7 @@ EXPORT_SYMBOL_GPL(device_suspend);
  *	done, power down system devices.
  */
 
-int device_power_down(pm_message_t state)
+int device_power_down(u32 state)
 {
 	int error = 0;
 	struct device * dev;
@@ -147,8 +134,6 @@ int device_power_down(pm_message_t state)
  Done:
 	return error;
  Error:
-	printk(KERN_ERR "Could not power down device %s: "
-		"error %d\n", kobject_name(&dev->kobj), error);
 	dpm_power_up();
 	goto Done;
 }

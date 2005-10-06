@@ -23,7 +23,8 @@
 #include <linux/devfs_fs_kernel.h>
 #include <linux/ptrace.h>
 #include <linux/device.h>
-#include <linux/backing-dev.h>
+#include <linux/highmem.h>
+#include <linux/crash_dump.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -35,22 +36,6 @@
 #if defined(CONFIG_S390_TAPE) && defined(CONFIG_S390_TAPE_CHAR)
 extern void tapechar_init(void);
 #endif
-
-static inline int range_is_allowed(unsigned long from, unsigned long to)
-{
-	unsigned long cursor;
-
-	cursor = from >> PAGE_SHIFT;
-	while ((cursor << PAGE_SHIFT) < to) {
-		if (!devmem_is_allowed(cursor)) {
-			printk ("Program %s tried to read /dev/mem between %lx->%lx."
-					"We stopped at %lx\n", current->comm, from, to, cursor);
-			return 0;
-		}
-		cursor++;
-	}
-	return 1;
-}
 
 /*
  * Architectures vary in how they handle caching for addresses
@@ -93,6 +78,14 @@ static inline int uncached_access(struct file *file, unsigned long addr)
 	 * On ia64, we ignore O_SYNC because we cannot tolerate memory attribute aliases.
 	 */
 	return !(efi_mem_attributes(addr) & EFI_MEMORY_WB);
+#elif defined(CONFIG_PPC64)
+	/* On PPC64, we always do non-cacheable access to the IO hole and
+	 * cacheable elsewhere. Cache paradox can checkstop the CPU and
+	 * the high_memory heuristic below is wrong on machines with memory
+	 * above the IO hole... Ah, and of course, XFree86 doesn't pass
+	 * O_SYNC when mapping us to tap IO space. Surprised ?
+	 */
+	return !page_is_ram(addr >> PAGE_SHIFT);
 #else
 	/*
 	 * Accessing memory above the top the kernel knows about or through a file pointer
@@ -120,7 +113,53 @@ static inline int valid_phys_addr_range(unsigned long addr, size_t *count)
 }
 #endif
 
-#ifndef ARCH_HAS_DEV_MEM
+static inline int range_is_allowed(unsigned long from, unsigned long to)
+{
+	unsigned long cursor;
+	
+	cursor = from >> PAGE_SHIFT;
+	while ((cursor << PAGE_SHIFT) < to) {
+		if (!devmem_is_allowed(cursor))
+			return 0;
+		cursor++;
+	}
+	return 1;
+}
+static ssize_t do_write_mem(void *p, unsigned long realp,
+			    const char __user * buf, size_t count, loff_t *ppos)
+{
+	ssize_t written;
+	unsigned long copied;
+
+	written = 0;
+#if defined(__sparc__) || (defined(__mc68000__) && defined(CONFIG_MMU))
+	/* we don't have page 0 mapped on sparc and m68k.. */
+	if (realp < PAGE_SIZE) {
+		unsigned long sz = PAGE_SIZE-realp;
+		if (sz > count) sz = count; 
+		/* Hmm. Do something? */
+		buf+=sz;
+		p+=sz;
+		count-=sz;
+		written+=sz;
+	}
+#endif
+	if (!range_is_allowed(realp, realp+count))
+		return -EPERM;
+	copied = copy_from_user(p, buf, count);
+	if (copied) {
+		ssize_t ret = written + (count - copied);
+
+		if (ret)
+			return ret;
+		return -EFAULT;
+	}
+	written += count;
+	*ppos += written;
+	return written;
+}
+
+
 /*
  * This funcion reads the *physical* memory. The f_pos points directly to the 
  * memory location. 
@@ -129,16 +168,15 @@ static ssize_t read_mem(struct file * file, char __user * buf,
 			size_t count, loff_t *ppos)
 {
 	unsigned long p = *ppos;
-	ssize_t read, sz;
-	char *ptr;
+	ssize_t read;
 
 	if (!valid_phys_addr_range(p, &count))
 		return -EFAULT;
 	read = 0;
-#ifdef __ARCH_HAS_NO_PAGE_ZERO_MAPPED
+#if defined(__sparc__) || (defined(__mc68000__) && defined(CONFIG_MMU))
 	/* we don't have page 0 mapped on sparc and m68k.. */
 	if (p < PAGE_SIZE) {
-		sz = PAGE_SIZE - p;
+		unsigned long sz = PAGE_SIZE-p;
 		if (sz > count) 
 			sz = count; 
 		if (sz > 0) {
@@ -151,35 +189,11 @@ static ssize_t read_mem(struct file * file, char __user * buf,
 		}
 	}
 #endif
-
-	while (count > 0) {
-		/*
-		 * Handle first page in case it's not aligned
-		 */
-		if (-p & (PAGE_SIZE - 1))
-			sz = -p & (PAGE_SIZE - 1);
-		else
-			sz = PAGE_SIZE;
-
-		sz = min_t(unsigned long, sz, count);
-
-		/*
-		 * On ia64 if a page has been mapped somewhere as
-		 * uncached, then it must also be accessed uncached
-		 * by the kernel or data corruption may occur
-		 */
-		ptr = xlate_dev_mem_ptr(p);
-
-		if (!range_is_allowed(p, p+count))
-			return -EPERM;
-		if (copy_to_user(buf, ptr, sz))
-			return -EFAULT;
-		buf += sz;
-		p += sz;
-		count -= sz;
-		read += sz;
-	}
-
+	if (!range_is_allowed(p, p+count))
+		return -EPERM;
+	if (copy_to_user(buf, __va(p), count))
+		return -EFAULT;
+	read += count;
 	*ppos += read;
 	return read;
 }
@@ -188,78 +202,15 @@ static ssize_t write_mem(struct file * file, const char __user * buf,
 			 size_t count, loff_t *ppos)
 {
 	unsigned long p = *ppos;
-	ssize_t written, sz;
-	unsigned long copied;
-	void *ptr;
 
 	if (!valid_phys_addr_range(p, &count))
 		return -EFAULT;
-
-	written = 0;
-
-#ifdef __ARCH_HAS_NO_PAGE_ZERO_MAPPED
-	/* we don't have page 0 mapped on sparc and m68k.. */
-	if (p < PAGE_SIZE) {
-		unsigned long sz = PAGE_SIZE - p;
-		if (sz > count)
-			sz = count;
-		/* Hmm. Do something? */
-		buf += sz;
-		p += sz;
-		count -= sz;
-		written += sz;
-	}
-#endif
-
-	while (count > 0) {
-		/*
-		 * Handle first page in case it's not aligned
-		 */
-		if (-p & (PAGE_SIZE - 1))
-			sz = -p & (PAGE_SIZE - 1);
-		else
-			sz = PAGE_SIZE;
-
-		sz = min_t(unsigned long, sz, count);
-
-		/*
-		 * On ia64 if a page has been mapped somewhere as
-		 * uncached, then it must also be accessed uncached
-		 * by the kernel or data corruption may occur
-		 */
-		ptr = xlate_dev_mem_ptr(p);
-
-		if (!range_is_allowed(ptr, ptr+sz))
-			return -EPERM;
-		copied = copy_from_user(ptr, buf, sz);
-		if (copied) {
-			ssize_t ret;
-
-			ret = written + (sz - copied);
-			if (ret)
-				return ret;
-			return -EFAULT;
-		}
-		buf += sz;
-		p += sz;
-		count -= sz;
-		written += sz;
-	}
-
-	*ppos += written;
-	return written;
+	return do_write_mem(__va(p), p, buf, count, ppos);
 }
-#endif
 
 static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
-#if defined(__HAVE_PHYS_MEM_ACCESS_PROT)
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
-
-	vma->vm_page_prot = phys_mem_access_prot(file, offset,
-						 vma->vm_end - vma->vm_start,
-						 vma->vm_page_prot);
-#elif defined(pgprot_noncached)
+#ifdef pgprot_noncached
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	int uncached;
 
@@ -334,23 +285,6 @@ done:
 }
 #endif
 
-static int mmap_kmem(struct file * file, struct vm_area_struct * vma)
-{
-        unsigned long long val;
-	/*
-	 * RED-PEN: on some architectures there is more mapped memory
-	 * than available in mem_map which pfn_valid checks
-	 * for. Perhaps should add a new macro here.
-	 *
-	 * RED-PEN: vmalloc is not supported right now.
-	 */
-	if (!pfn_valid(vma->vm_pgoff))
-		return -EIO;
-	val = (u64)vma->vm_pgoff << PAGE_SHIFT;
-	vma->vm_pgoff = __pa(val) >> PAGE_SHIFT;
-	return mmap_mem(file, vma);
-}
-
 extern long vread(char *buf, char *addr, unsigned long count);
 extern long vwrite(char *buf, char *addr, unsigned long count);
 
@@ -361,57 +295,35 @@ static ssize_t read_kmem(struct file *file, char __user *buf,
 			 size_t count, loff_t *ppos)
 {
 	unsigned long p = *ppos;
-	ssize_t low_count, read, sz;
+	ssize_t read = 0;
+	ssize_t virtr = 0;
 	char * kbuf; /* k-addr because vread() takes vmlist_lock rwlock */
-
+	
 	return -EPERM;
-
-	read = 0;
+		
 	if (p < (unsigned long) high_memory) {
-		low_count = count;
+		read = count;
 		if (count > (unsigned long) high_memory - p)
-			low_count = (unsigned long) high_memory - p;
+			read = (unsigned long) high_memory - p;
 
-#ifdef __ARCH_HAS_NO_PAGE_ZERO_MAPPED
+#if defined(__sparc__) || (defined(__mc68000__) && defined(CONFIG_MMU))
 		/* we don't have page 0 mapped on sparc and m68k.. */
-		if (p < PAGE_SIZE && low_count > 0) {
+		if (p < PAGE_SIZE && read > 0) {
 			size_t tmp = PAGE_SIZE - p;
-			if (tmp > low_count) tmp = low_count;
+			if (tmp > read) tmp = read;
 			if (clear_user(buf, tmp))
 				return -EFAULT;
 			buf += tmp;
 			p += tmp;
-			read += tmp;
-			low_count -= tmp;
+			read -= tmp;
 			count -= tmp;
 		}
 #endif
-		while (low_count > 0) {
-			/*
-			 * Handle first page in case it's not aligned
-			 */
-			if (-p & (PAGE_SIZE - 1))
-				sz = -p & (PAGE_SIZE - 1);
-			else
-				sz = PAGE_SIZE;
-
-			sz = min_t(unsigned long, sz, low_count);
-
-			/*
-			 * On ia64 if a page has been mapped somewhere as
-			 * uncached, then it must also be accessed uncached
-			 * by the kernel or data corruption may occur
-			 */
-			kbuf = xlate_dev_kmem_ptr((char *)p);
-
-			if (copy_to_user(buf, kbuf, sz))
-				return -EFAULT;
-			buf += sz;
-			p += sz;
-			read += sz;
-			low_count -= sz;
-			count -= sz;
-		}
+		if (copy_to_user(buf, (char *)p, read))
+			return -EFAULT;
+		p += read;
+		buf += read;
+		count -= read;
 	}
 
 	if (count > 0) {
@@ -432,15 +344,14 @@ static ssize_t read_kmem(struct file *file, char __user *buf,
 			}
 			count -= len;
 			buf += len;
-			read += len;
+			virtr += len;
 			p += len;
 		}
 		free_page((unsigned long)kbuf);
 	}
  	*ppos = p;
- 	return read;
+ 	return virtr + read;
 }
-
 
 #if defined(CONFIG_ISA) || !defined(__mc68000__)
 static ssize_t read_port(struct file * file, char __user * buf,
@@ -449,7 +360,7 @@ static ssize_t read_port(struct file * file, char __user * buf,
 	unsigned long i = *ppos;
 	char __user *tmp = buf;
 
-	if (!access_ok(VERIFY_WRITE, buf, count))
+	if (verify_area(VERIFY_WRITE,buf,count))
 		return -EFAULT; 
 	while (count-- > 0 && i < 65536) {
 		if (__put_user(inb(i),tmp) < 0) 
@@ -467,7 +378,7 @@ static ssize_t write_port(struct file * file, const char __user * buf,
 	unsigned long i = *ppos;
 	const char __user * tmp = buf;
 
-	if (!access_ok(VERIFY_READ,buf,count))
+	if (verify_area(VERIFY_READ,buf,count))
 		return -EFAULT;
 	while (count-- > 0 && i < 65536) {
 		char c;
@@ -673,6 +584,7 @@ static int open_port(struct inode * inode, struct file * filp)
 	return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;
 }
 
+#define mmap_kmem	mmap_mem
 #define zero_lseek	null_lseek
 #define full_lseek      null_lseek
 #define write_zero	write_null
@@ -681,7 +593,6 @@ static int open_port(struct inode * inode, struct file * filp)
 #define open_kmem	open_mem
 #define open_oldmem	open_mem
 
-#ifndef ARCH_HAS_DEV_MEM
 static struct file_operations mem_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_mem,
@@ -689,9 +600,6 @@ static struct file_operations mem_fops = {
 	.mmap		= mmap_mem,
 	.open		= open_mem,
 };
-#else
-extern struct file_operations mem_fops;
-#endif
 
 static struct file_operations kmem_fops = {
 	.llseek		= memory_lseek,
@@ -720,10 +628,6 @@ static struct file_operations zero_fops = {
 	.read		= read_zero,
 	.write		= write_zero,
 	.mmap		= mmap_zero,
-};
-
-static struct backing_dev_info zero_bdi = {
-	.capabilities	= BDI_CAP_MAP_COPY,
 };
 
 static struct file_operations full_fops = {
@@ -779,7 +683,6 @@ static int memory_open(struct inode * inode, struct file * filp)
 			break;
 #endif
 		case 5:
-			filp->f_mapping->backing_dev_info = &zero_bdi;
 			filp->f_op = &zero_fops;
 			break;
 		case 7:

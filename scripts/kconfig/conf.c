@@ -35,7 +35,7 @@ static int conf_cnt;
 static signed char line[128];
 static struct menu *rootEntry;
 
-static char nohelp_text[] = N_("Sorry, no help available for this option yet.\n");
+static char nohelp_text[] = "Sorry, no help available for this option yet.\n";
 
 static int return_value = 0;
 
@@ -59,9 +59,9 @@ static void strip(signed char *str)
 static void check_stdin(void)
 {
 	if (!valid_stdin && input_mode == ask_silent) {
-		printf(_("aborted!\n\n"));
-		printf(_("Console input/output is redirected. "));
-		printf(_("Run 'make oldconfig' to update configuration.\n\n"));
+		printf("aborted!\n\n");
+		printf("Console input/output is redirected. ");
+		printf("Run 'make oldconfig' to update configuration.\n\n");
 		exit(1);
 	}
 }
@@ -483,7 +483,7 @@ static void check_conf(struct menu *menu)
 	if (sym) {
 		if (sym_is_changable(sym) && !sym_has_value(sym)) {
 			if (!conf_cnt++)
-				printf(_("*\n* Restart config...\n*\n"));
+				printf("*\n* Restart config...\n*\n");
 			rootEntry = menu_get_parent_menu(menu);
 			if (input_mode == dont_ask)
 				fprintf(stderr,"CONFIG_%s\n",sym->name);
@@ -523,7 +523,7 @@ int main(int ac, char **av)
 			input_mode = set_default;
 			defconfig_file = av[i++];
 			if (!defconfig_file) {
-				printf(_("%s: No default config file specified\n"),
+				printf("%s: No default config file specified\n",
 					av[0]);
 				exit(1);
 			}
@@ -549,7 +549,7 @@ int main(int ac, char **av)
 	}
   	name = av[i];
 	if (!name) {
-		printf(_("%s: Kconfig file missing\n"), av[0]);
+		printf("%s: Kconfig file missing\n", av[0]);
 	}
 	conf_parse(name);
 	//zconfdump(stdout);
@@ -566,12 +566,12 @@ int main(int ac, char **av)
 		break;
 	case ask_silent:
 		if (stat(".config", &tmpstat)) {
-			printf(_("***\n"
+			printf("***\n"
 				"*** You have not yet configured your kernel!\n"
 				"***\n"
 				"*** Please run some configurator (e.g. \"make oldconfig\" or\n"
 				"*** \"make menuconfig\" or \"make xconfig\").\n"
-				"***\n"));
+				"***\n");
 			exit(1);
 		}
 	case ask_all:
@@ -596,7 +596,7 @@ int main(int ac, char **av)
 		check_conf(&rootmenu);
 	} while ((conf_cnt) && (input_mode != dont_ask));
 	if (conf_write(NULL)) {
-		fprintf(stderr, _("\n*** Error during writing of the kernel configuration.\n\n"));
+		fprintf(stderr, "\n*** Error during writing of the kernel configuration.\n\n");
 		return 1;
 	}
 	return return_value;

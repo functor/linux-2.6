@@ -14,14 +14,12 @@ static inline int vx_info_proc_sched(struct _vx_sched *sched, char *buffer)
 		"TokensMin:\t%8d\n"
 		"TokensMax:\t%8d\n"
 		"PrioBias:\t%8d\n"
-		"VaVaVoom:\t%8d\n"
 		,atomic_read(&sched->tokens)
 		,sched->fill_rate
 		,sched->interval
 		,sched->tokens_min
 		,sched->tokens_max
 		,sched->priority_bias
-		,sched->vavavoom
 		);
 
 	for_each_online_cpu(i) {

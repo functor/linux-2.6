@@ -168,11 +168,12 @@ void machine_restart(char * __unused)
 
 EXPORT_SYMBOL(machine_restart);
 
-void __show_regs(struct pt_regs *regs)
+void show_regs(struct pt_regs * regs)
 {
-	unsigned long flags = condition_codes(regs);
+	unsigned long flags;
 
-	printk("CPU: %d\n", smp_processor_id());
+	flags = condition_codes(regs);
+
 	print_symbol("PC is at %s\n", instruction_pointer(regs));
 	print_symbol("LR is at %s\n", regs->ARM_lr);
 	printk("pc : [<%08lx>]    lr : [<%08lx>]    %s\n"
@@ -212,14 +213,6 @@ void __show_regs(struct pt_regs *regs)
 	}
 }
 
-void show_regs(struct pt_regs * regs)
-{
-	printk("\n");
-	printk("Pid: %d, comm: %20s\n", current->pid, current->comm);
-	__show_regs(regs);
-	__backtrace();
-}
-
 void show_fpregs(struct user_fp *regs)
 {
 	int i;
@@ -256,6 +249,8 @@ static unsigned long *thread_info_head;
 static unsigned int nr_thread_info;
 
 #define EXTRA_TASK_STRUCT	4
+#define ll_alloc_task_struct() ((struct thread_info *) __get_free_pages(GFP_KERNEL,1))
+#define ll_free_task_struct(p) free_pages((unsigned long)(p),1)
 
 struct thread_info *alloc_thread_info(struct task_struct *task)
 {
@@ -272,16 +267,17 @@ struct thread_info *alloc_thread_info(struct task_struct *task)
 	}
 
 	if (!thread)
-		thread = (struct thread_info *)
-			   __get_free_pages(GFP_KERNEL, THREAD_SIZE_ORDER);
+		thread = ll_alloc_task_struct();
 
-#ifdef CONFIG_DEBUG_STACK_USAGE
+#ifdef CONFIG_MAGIC_SYSRQ
 	/*
 	 * The stack must be cleared if you want SYSRQ-T to
 	 * give sensible stack usage information
 	 */
-	if (thread)
-		memzero(thread, THREAD_SIZE);
+	if (thread) {
+		char *p = (char *)thread;
+		memzero(p+KERNEL_STACK_SIZE, KERNEL_STACK_SIZE);
+	}
 #endif
 	return thread;
 }
@@ -294,7 +290,7 @@ void free_thread_info(struct thread_info *thread)
 		thread_info_head = p;
 		nr_thread_info += 1;
 	} else
-		free_pages((unsigned long)thread, THREAD_SIZE_ORDER);
+		ll_free_task_struct(thread);
 }
 
 /*
@@ -347,7 +343,7 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long stack_start,
 	struct thread_info *thread = p->thread_info;
 	struct pt_regs *childregs;
 
-	childregs = ((struct pt_regs *)((unsigned long)thread + THREAD_START_SP)) - 1;
+	childregs = ((struct pt_regs *)((unsigned long)thread + THREAD_SIZE - 8)) - 1;
 	*childregs = *regs;
 	childregs->ARM_r0 = 0;
 	childregs->ARM_sp = stack_start;
@@ -355,9 +351,6 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long stack_start,
 	memset(&thread->cpu_context, 0, sizeof(struct cpu_context_save));
 	thread->cpu_context.sp = (unsigned long)childregs;
 	thread->cpu_context.pc = (unsigned long)ret_from_fork;
-
-	if (clone_flags & CLONE_SETTLS)
-		thread->tp_value = regs->ARM_r3;
 
 	return 0;
 }
@@ -444,17 +437,15 @@ EXPORT_SYMBOL(kernel_thread);
 unsigned long get_wchan(struct task_struct *p)
 {
 	unsigned long fp, lr;
-	unsigned long stack_start, stack_end;
+	unsigned long stack_page;
 	int count = 0;
 	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
 
-	stack_start = (unsigned long)(p->thread_info + 1);
-	stack_end = ((unsigned long)p->thread_info) + THREAD_SIZE;
-
+	stack_page = 4096 + (unsigned long)p->thread_info;
 	fp = thread_saved_fp(p);
 	do {
-		if (fp < stack_start || fp > stack_end)
+		if (fp < stack_page || fp > 4092+stack_page)
 			return 0;
 		lr = pc_pointer (((unsigned long *)fp)[-1]);
 		if (!in_sched_functions(lr))

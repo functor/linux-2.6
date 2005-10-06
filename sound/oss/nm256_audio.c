@@ -157,7 +157,7 @@ static int samplerates[9] = {
  * attempted.
  */
 
-static int
+int
 nm256_setInfo (int dev, struct nm256_info *card)
 {
     int x;
@@ -1047,7 +1047,7 @@ nm256_peek_for_sig (struct nm256_info *card)
  * VERSTR is a human-readable version string.
  */
 
-static int __devinit
+static int __init
 nm256_install(struct pci_dev *pcidev, enum nm256rev rev, char *verstr)
 {
     struct nm256_info *card;
@@ -1673,17 +1673,17 @@ MODULE_DEVICE_TABLE(pci, nm256_pci_tbl);
 MODULE_LICENSE("GPL");
 
 
-static struct pci_driver nm256_pci_driver = {
+struct pci_driver nm256_pci_driver = {
 	.name		= "nm256_audio",
 	.id_table	= nm256_pci_tbl,
 	.probe		= nm256_probe,
 	.remove		= nm256_remove,
 };
 
-module_param(usecache, bool, 0);
-module_param(buffertop, int, 0);
-module_param(nm256_debug, bool, 0644);
-module_param(force_load, bool, 0);
+MODULE_PARM (usecache, "i");
+MODULE_PARM (buffertop, "i");
+MODULE_PARM (nm256_debug, "i");
+MODULE_PARM (force_load, "i");
 
 static int __init do_init_nm256(void)
 {

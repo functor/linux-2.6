@@ -41,7 +41,6 @@ static inline int vx_info_proc_cvirt(struct _vx_cvirt *cvirt, char *buffer)
 		"nr_onhold:\t%d\n"
 		"load_updates:\t%d\n"
 		"loadavg:\t%d.%02d %d.%02d %d.%02d\n"
-		"total_forks:\t%d\n"
 		,atomic_read(&cvirt->nr_threads)
 		,atomic_read(&cvirt->nr_running)
 		,atomic_read(&cvirt->nr_uninterruptible)
@@ -50,7 +49,6 @@ static inline int vx_info_proc_cvirt(struct _vx_cvirt *cvirt, char *buffer)
 		,LOAD_INT(a), LOAD_FRAC(a)
 		,LOAD_INT(b), LOAD_FRAC(b)
 		,LOAD_INT(c), LOAD_FRAC(c)
-		,atomic_read(&cvirt->total_forks)
 		);
 	return length;
 }

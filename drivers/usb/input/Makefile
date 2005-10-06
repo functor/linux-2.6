@@ -37,4 +37,3 @@ obj-$(CONFIG_USB_EGALAX)	+= touchkitusb.o
 obj-$(CONFIG_USB_POWERMATE)	+= powermate.o
 obj-$(CONFIG_USB_WACOM)		+= wacom.o
 obj-$(CONFIG_USB_XPAD)		+= xpad.o
-obj-$(CONFIG_USB_APPLETOUCH)	+= appletouch.o

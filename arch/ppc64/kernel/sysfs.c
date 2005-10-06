@@ -7,20 +7,13 @@
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/nodemask.h>
-#include <linux/cpumask.h>
-#include <linux/notifier.h>
 
 #include <asm/current.h>
 #include <asm/processor.h>
 #include <asm/cputable.h>
 #include <asm/hvcall.h>
 #include <asm/prom.h>
-#include <asm/systemcfg.h>
-#include <asm/paca.h>
-#include <asm/lppaca.h>
-#include <asm/machdep.h>
 
-static DEFINE_PER_CPU(struct cpu, cpu_devices);
 
 /* SMT stuff */
 
@@ -63,7 +56,7 @@ static int __init smt_setup(void)
 	unsigned int *val;
 	unsigned int cpu;
 
-	if (!cpu_has_feature(CPU_FTR_SMT))
+	if (!cur_cpu_spec->cpu_features & CPU_FTR_SMT)
 		return 1;
 
 	options = find_path_device("/options");
@@ -86,7 +79,7 @@ static int __init setup_smt_snooze_delay(char *str)
 	unsigned int cpu;
 	int snooze;
 
-	if (!cpu_has_feature(CPU_FTR_SMT))
+	if (!cur_cpu_spec->cpu_features & CPU_FTR_SMT)
 		return 1;
 
 	smt_snooze_cmdline = 1;
@@ -113,6 +106,7 @@ void ppc64_enable_pmcs(void)
 #ifdef CONFIG_PPC_PSERIES
 	unsigned long set, reset;
 	int ret;
+	unsigned int ctrl;
 #endif /* CONFIG_PPC_PSERIES */
 
 	/* Only need to enable them once */
@@ -159,15 +153,20 @@ void ppc64_enable_pmcs(void)
 
 #ifdef CONFIG_PPC_PSERIES
 	/* instruct hypervisor to maintain PMCs */
-	if (cur_cpu_spec->firmware_features & FW_FEATURE_SPLPAR)
-		get_paca()->lppaca.pmcregs_in_use = 1;
+	if (cur_cpu_spec->firmware_features & FW_FEATURE_SPLPAR) {
+		char *ptr = (char *)&paca[smp_processor_id()].lppaca;
+		ptr[0xBB] = 1;
+	}
 
 	/*
 	 * On SMT machines we have to set the run latch in the ctrl register
 	 * in order to make PMC6 spin.
 	 */
-	if (cpu_has_feature(CPU_FTR_SMT))
-		ppc64_runlatch_on();
+	if (cur_cpu_spec->cpu_features & CPU_FTR_SMT) {
+		ctrl = mfspr(CTRLF);
+		ctrl |= RUNLATCH;
+		mtspr(CTRLT, ctrl);
+	}
 #endif /* CONFIG_PPC_PSERIES */
 }
 
@@ -256,22 +255,12 @@ static SYSDEV_ATTR(pmc7, 0600, show_pmc7, store_pmc7);
 static SYSDEV_ATTR(pmc8, 0600, show_pmc8, store_pmc8);
 static SYSDEV_ATTR(purr, 0600, show_purr, NULL);
 
-static void register_cpu_online(unsigned int cpu)
+static void __init register_cpu_pmc(struct sys_device *s)
 {
-	struct cpu *c = &per_cpu(cpu_devices, cpu);
-	struct sys_device *s = &c->sysdev;
-
-#ifndef CONFIG_PPC_ISERIES
-	if (cpu_has_feature(CPU_FTR_SMT))
-		sysdev_create_file(s, &attr_smt_snooze_delay);
-#endif
-
-	/* PMC stuff */
-
 	sysdev_create_file(s, &attr_mmcr0);
 	sysdev_create_file(s, &attr_mmcr1);
 
-	if (cpu_has_feature(CPU_FTR_MMCRA))
+	if (cur_cpu_spec->cpu_features & CPU_FTR_MMCRA)
 		sysdev_create_file(s, &attr_mmcra);
 
 	sysdev_create_file(s, &attr_pmc1);
@@ -281,74 +270,15 @@ static void register_cpu_online(unsigned int cpu)
 	sysdev_create_file(s, &attr_pmc5);
 	sysdev_create_file(s, &attr_pmc6);
 
-	if (cpu_has_feature(CPU_FTR_PMC8)) {
+	if (cur_cpu_spec->cpu_features & CPU_FTR_PMC8) {
 		sysdev_create_file(s, &attr_pmc7);
 		sysdev_create_file(s, &attr_pmc8);
 	}
 
-	if (cpu_has_feature(CPU_FTR_SMT))
+	if (cur_cpu_spec->cpu_features & CPU_FTR_SMT)
 		sysdev_create_file(s, &attr_purr);
 }
 
-#ifdef CONFIG_HOTPLUG_CPU
-static void unregister_cpu_online(unsigned int cpu)
-{
-	struct cpu *c = &per_cpu(cpu_devices, cpu);
-	struct sys_device *s = &c->sysdev;
-
-	BUG_ON(c->no_control);
-
-#ifndef CONFIG_PPC_ISERIES
-	if (cpu_has_feature(CPU_FTR_SMT))
-		sysdev_remove_file(s, &attr_smt_snooze_delay);
-#endif
-
-	/* PMC stuff */
-
-	sysdev_remove_file(s, &attr_mmcr0);
-	sysdev_remove_file(s, &attr_mmcr1);
-
-	if (cpu_has_feature(CPU_FTR_MMCRA))
-		sysdev_remove_file(s, &attr_mmcra);
-
-	sysdev_remove_file(s, &attr_pmc1);
-	sysdev_remove_file(s, &attr_pmc2);
-	sysdev_remove_file(s, &attr_pmc3);
-	sysdev_remove_file(s, &attr_pmc4);
-	sysdev_remove_file(s, &attr_pmc5);
-	sysdev_remove_file(s, &attr_pmc6);
-
-	if (cpu_has_feature(CPU_FTR_PMC8)) {
-		sysdev_remove_file(s, &attr_pmc7);
-		sysdev_remove_file(s, &attr_pmc8);
-	}
-
-	if (cpu_has_feature(CPU_FTR_SMT))
-		sysdev_remove_file(s, &attr_purr);
-}
-#endif /* CONFIG_HOTPLUG_CPU */
-
-static int __devinit sysfs_cpu_notify(struct notifier_block *self,
-				      unsigned long action, void *hcpu)
-{
-	unsigned int cpu = (unsigned int)(long)hcpu;
-
-	switch (action) {
-	case CPU_ONLINE:
-		register_cpu_online(cpu);
-		break;
-#ifdef CONFIG_HOTPLUG_CPU
-	case CPU_DEAD:
-		unregister_cpu_online(cpu);
-		break;
-#endif
-	}
-	return NOTIFY_OK;
-}
-
-static struct notifier_block __devinitdata sysfs_cpu_nb = {
-	.notifier_call	= sysfs_cpu_notify,
-};
 
 /* NUMA stuff */
 
@@ -378,14 +308,18 @@ static void register_nodes(void)
 }
 #endif
 
-/* Only valid if CPU is present. */
+
+/* Only valid if CPU is online. */
 static ssize_t show_physical_id(struct sys_device *dev, char *buf)
 {
 	struct cpu *cpu = container_of(dev, struct cpu, sysdev);
 
-	return sprintf(buf, "%d\n", get_hard_smp_processor_id(cpu->sysdev.id));
+	return sprintf(buf, "%u\n", get_hard_smp_processor_id(cpu->sysdev.id));
 }
 static SYSDEV_ATTR(physical_id, 0444, show_physical_id, NULL);
+
+
+static DEFINE_PER_CPU(struct cpu, cpu_devices);
 
 static int __init topology_init(void)
 {
@@ -393,8 +327,6 @@ static int __init topology_init(void)
 	struct node *parent = NULL;
 
 	register_nodes();
-
-	register_cpu_notifier(&sysfs_cpu_nb);
 
 	for_each_cpu(cpu) {
 		struct cpu *c = &per_cpu(cpu_devices, cpu);
@@ -409,17 +341,19 @@ static int __init topology_init(void)
 		 * CPU.  For instance, the boot cpu might never be valid
 		 * for hotplugging.
 		 */
-		if (!ppc_md.cpu_die)
+		if (systemcfg->platform != PLATFORM_PSERIES_LPAR)
 			c->no_control = 1;
 
-		if (cpu_online(cpu) || (c->no_control == 0)) {
-			register_cpu(c, cpu, parent);
+		register_cpu(c, cpu, parent);
 
-			sysdev_create_file(&c->sysdev, &attr_physical_id);
-		}
+		register_cpu_pmc(&c->sysdev);
 
-		if (cpu_online(cpu))
-			register_cpu_online(cpu);
+		sysdev_create_file(&c->sysdev, &attr_physical_id);
+
+#ifndef CONFIG_PPC_ISERIES
+		if (cur_cpu_spec->cpu_features & CPU_FTR_SMT)
+			sysdev_create_file(&c->sysdev, &attr_smt_snooze_delay);
+#endif
 	}
 
 	return 0;

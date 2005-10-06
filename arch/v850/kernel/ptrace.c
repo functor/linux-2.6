@@ -23,7 +23,6 @@
 #include <linux/sched.h>
 #include <linux/smp_lock.h>
 #include <linux/ptrace.h>
-#include <linux/signal.h>
 
 #include <asm/errno.h>
 #include <asm/ptrace.h>
@@ -211,7 +210,7 @@ int sys_ptrace(long request, long pid, long addr, long data)
 	/* Execute a single instruction. */
 	case PTRACE_SINGLESTEP:
 		rval = -EIO;
-		if (!valid_signal(data))
+		if ((unsigned long) data > _NSIG)
 			break;
 
 		/* Turn CHILD's single-step flag on or off.  */

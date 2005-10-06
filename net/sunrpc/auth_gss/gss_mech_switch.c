@@ -51,7 +51,7 @@
 #endif
 
 static LIST_HEAD(registered_mechs);
-static DEFINE_SPINLOCK(registered_mechs_lock);
+static spinlock_t registered_mechs_lock = SPIN_LOCK_UNLOCKED;
 
 static void
 gss_mech_free(struct gss_api_mech *gm)
@@ -143,15 +143,16 @@ gss_mech_get(struct gss_api_mech *gm)
 EXPORT_SYMBOL(gss_mech_get);
 
 struct gss_api_mech *
-gss_mech_get_by_name(const char *name)
+gss_mech_get_by_name(char *name)
 {
 	struct gss_api_mech	*pos, *gm = NULL;
 
 	spin_lock(&registered_mechs_lock);
 	list_for_each_entry(pos, &registered_mechs, gm_list) {
 		if (0 == strcmp(name, pos->gm_name)) {
-			if (try_module_get(pos->gm_owner))
-				gm = pos;
+			if (!try_module_get(pos->gm_owner))
+				continue;
+			gm = pos;
 			break;
 		}
 	}
@@ -181,12 +182,13 @@ gss_mech_get_by_pseudoflavor(u32 pseudoflavor)
 
 	spin_lock(&registered_mechs_lock);
 	list_for_each_entry(pos, &registered_mechs, gm_list) {
+		if (!try_module_get(pos->gm_owner))
+			continue;
 		if (!mech_supports_pseudoflavor(pos, pseudoflavor)) {
 			module_put(pos->gm_owner);
 			continue;
 		}
-		if (try_module_get(pos->gm_owner))
-			gm = pos;
+		gm = pos;
 		break;
 	}
 	spin_unlock(&registered_mechs_lock);
@@ -233,8 +235,8 @@ EXPORT_SYMBOL(gss_mech_put);
 
 /* The mech could probably be determined from the token instead, but it's just
  * as easy for now to pass it in. */
-int
-gss_import_sec_context(const void *input_token, size_t bufsize,
+u32
+gss_import_sec_context(struct xdr_netobj	*input_token,
 		       struct gss_api_mech	*mech,
 		       struct gss_ctx		**ctx_id)
 {
@@ -244,7 +246,7 @@ gss_import_sec_context(const void *input_token, size_t bufsize,
 	(*ctx_id)->mech_type = gss_mech_get(mech);
 
 	return mech->gm_ops
-		->gss_import_sec_context(input_token, bufsize, *ctx_id);
+		->gss_import_sec_context(input_token, *ctx_id);
 }
 
 /* gss_get_mic: compute a mic over message and return mic_token. */

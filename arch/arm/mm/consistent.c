@@ -1,7 +1,7 @@
 /*
  *  linux/arch/arm/mm/consistent.c
  *
- *  Copyright (C) 2000-2004 Russell King
+ *  Copyright (C) 2000-2002 Russell King
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -30,7 +30,7 @@
  * This is the page table (2MB) covering uncached, DMA consistent allocations
  */
 static pte_t *consistent_pte;
-static DEFINE_SPINLOCK(consistent_lock);
+static spinlock_t consistent_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  * VM region handling support.
@@ -65,7 +65,6 @@ struct vm_region {
 	struct list_head	vm_list;
 	unsigned long		vm_start;
 	unsigned long		vm_end;
-	struct page		*vm_pages;
 };
 
 static struct vm_region consistent_head = {
@@ -207,8 +206,6 @@ __dma_alloc(struct device *dev, size_t size, dma_addr_t *handle, int gfp,
 		pte_t *pte = consistent_pte + CONSISTENT_OFFSET(c->vm_start);
 		struct page *end = page + (1 << order);
 
-		c->vm_pages = page;
-
 		/*
 		 * Set the "dma handle"
 		 */
@@ -218,9 +215,6 @@ __dma_alloc(struct device *dev, size_t size, dma_addr_t *handle, int gfp,
 			BUG_ON(!pte_none(*pte));
 
 			set_page_count(page, 1);
-			/*
-			 * x86 does not mark the pages reserved...
-			 */
 			SetPageReserved(page);
 			set_pte(pte, mk_pte(page, prot));
 			page++;
@@ -270,60 +264,13 @@ dma_alloc_writecombine(struct device *dev, size_t size, dma_addr_t *handle, int 
 }
 EXPORT_SYMBOL(dma_alloc_writecombine);
 
-static int dma_mmap(struct device *dev, struct vm_area_struct *vma,
-		    void *cpu_addr, dma_addr_t dma_addr, size_t size)
-{
-	unsigned long flags, user_size, kern_size;
-	struct vm_region *c;
-	int ret = -ENXIO;
-
-	user_size = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
-
-	spin_lock_irqsave(&consistent_lock, flags);
-	c = vm_region_find(&consistent_head, (unsigned long)cpu_addr);
-	spin_unlock_irqrestore(&consistent_lock, flags);
-
-	if (c) {
-		unsigned long off = vma->vm_pgoff;
-
-		kern_size = (c->vm_end - c->vm_start) >> PAGE_SHIFT;
-
-		if (off < kern_size &&
-		    user_size <= (kern_size - off)) {
-			vma->vm_flags |= VM_RESERVED;
-			ret = remap_pfn_range(vma, vma->vm_start,
-					      page_to_pfn(c->vm_pages) + off,
-					      user_size << PAGE_SHIFT,
-					      vma->vm_page_prot);
-		}
-	}
-
-	return ret;
-}
-
-int dma_mmap_coherent(struct device *dev, struct vm_area_struct *vma,
-		      void *cpu_addr, dma_addr_t dma_addr, size_t size)
-{
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	return dma_mmap(dev, vma, cpu_addr, dma_addr, size);
-}
-EXPORT_SYMBOL(dma_mmap_coherent);
-
-int dma_mmap_writecombine(struct device *dev, struct vm_area_struct *vma,
-			  void *cpu_addr, dma_addr_t dma_addr, size_t size)
-{
-	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	return dma_mmap(dev, vma, cpu_addr, dma_addr, size);
-}
-EXPORT_SYMBOL(dma_mmap_writecombine);
-
 /*
  * free a page as defined by the above mapping.
  */
 void dma_free_coherent(struct device *dev, size_t size, void *cpu_addr, dma_addr_t handle)
 {
 	struct vm_region *c;
-	unsigned long flags, addr;
+	unsigned long flags;
 	pte_t *ptep;
 
 	size = PAGE_ALIGN(size);
@@ -342,23 +289,17 @@ void dma_free_coherent(struct device *dev, size_t size, void *cpu_addr, dma_addr
 	}
 
 	ptep = consistent_pte + CONSISTENT_OFFSET(c->vm_start);
-	addr = c->vm_start;
 	do {
-		pte_t pte = ptep_get_and_clear(&init_mm, addr, ptep);
+		pte_t pte = ptep_get_and_clear(ptep);
 		unsigned long pfn;
 
 		ptep++;
-		addr += PAGE_SIZE;
 
 		if (!pte_none(pte) && pte_present(pte)) {
 			pfn = pte_pfn(pte);
 
 			if (pfn_valid(pfn)) {
 				struct page *page = pfn_to_page(pfn);
-
-				/*
-				 * x86 does not mark the pages reserved...
-				 */
 				ClearPageReserved(page);
 
 				__free_page(page);

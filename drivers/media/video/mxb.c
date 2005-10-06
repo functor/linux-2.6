@@ -731,7 +731,7 @@ static int mxb_ioctl(struct saa7146_fh *fh, unsigned int cmd, void *arg)
 		t->signal = 0xffff;
 		t->afc = 0;		
 
-		mxb->tda9840->driver->command(mxb->tda9840,TDA9840_DETECT, &byte);
+		byte = mxb->tda9840->driver->command(mxb->tda9840,TDA9840_DETECT, NULL);
 		t->audmode = mxb->cur_mode;
 		
 		if( byte < 0 ) {
@@ -1012,7 +1012,7 @@ static struct saa7146_extension extension = {
 	.irq_func	= NULL,
 };	
 
-static int __init mxb_init_module(void)
+int __init mxb_init_module(void) 
 {
 	if( 0 != saa7146_register_extension(&extension)) {
 		DEB_S(("failed to register extension.\n"));
@@ -1022,7 +1022,7 @@ static int __init mxb_init_module(void)
 	return 0;
 }
 
-static void __exit mxb_cleanup_module(void)
+void __exit mxb_cleanup_module(void) 
 {
 	saa7146_unregister_extension(&extension);
 }

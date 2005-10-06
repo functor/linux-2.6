@@ -437,10 +437,11 @@ asmlinkage int
 osf_getdomainname(char __user *name, int namelen)
 {
 	unsigned len;
-	int i;
+	int i, error;
 
-	if (!access_ok(VERIFY_WRITE, name, namelen))
-		return -EFAULT;
+	error = verify_area(VERIFY_WRITE, name, namelen);
+	if (error)
+		goto out;
 
 	len = namelen;
 	if (namelen > 32)
@@ -453,9 +454,25 @@ osf_getdomainname(char __user *name, int namelen)
 			break;
 	}
 	up_read(&uts_sem);
-
-	return 0;
+ out:
+	return error;
 }
+
+asmlinkage long
+osf_shmat(int shmid, void __user *shmaddr, int shmflg)
+{
+	unsigned long raddr;
+	long err;
+
+	err = do_shmat(shmid, shmaddr, shmflg, &raddr);
+
+	/*
+	 * This works because all user-level addresses are
+	 * non-negative longs!
+	 */
+	return err ? err : (long)raddr;
+}
+
 
 /*
  * The following stuff should move into a header file should it ever
@@ -973,19 +990,18 @@ osf_select(int n, fd_set __user *inp, fd_set __user *outp, fd_set __user *exp,
 	char *bits;
 	size_t size;
 	long timeout;
-	int ret = -EINVAL;
+	int ret;
 
 	timeout = MAX_SCHEDULE_TIMEOUT;
 	if (tvp) {
 		time_t sec, usec;
 
-		if (!access_ok(VERIFY_READ, tvp, sizeof(*tvp))
-		    || __get_user(sec, &tvp->tv_sec)
-		    || __get_user(usec, &tvp->tv_usec)) {
-		    	ret = -EFAULT;
+		if ((ret = verify_area(VERIFY_READ, tvp, sizeof(*tvp)))
+		    || (ret = __get_user(sec, &tvp->tv_sec))
+		    || (ret = __get_user(usec, &tvp->tv_usec)))
 			goto out_nofds;
-		}
 
+		ret = -EINVAL;
 		if (sec < 0 || usec < 0)
 			goto out_nofds;
 
@@ -995,6 +1011,7 @@ osf_select(int n, fd_set __user *inp, fd_set __user *outp, fd_set __user *exp,
 		}
 	}
 
+	ret = -EINVAL;
 	if (n < 0 || n > current->files->max_fdset)
 		goto out_nofds;
 
@@ -1150,13 +1167,16 @@ osf_usleep_thread(struct timeval32 __user *sleep, struct timeval32 __user *remai
 	if (get_tv32(&tmp, sleep))
 		goto fault;
 
-	ticks = timeval_to_jiffies(&tmp);
+	ticks = tmp.tv_usec;
+	ticks = (ticks + (1000000 / HZ) - 1) / (1000000 / HZ);
+	ticks += tmp.tv_sec * HZ;
 
 	current->state = TASK_INTERRUPTIBLE;
 	ticks = schedule_timeout(ticks);
 
 	if (remain) {
-		jiffies_to_timeval(ticks, &tmp);
+		tmp.tv_sec = ticks / HZ;
+		tmp.tv_usec = ticks % HZ;
 		if (put_tv32(remain, &tmp))
 			goto fault;
 	}

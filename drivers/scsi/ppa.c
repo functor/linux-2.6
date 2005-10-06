@@ -49,7 +49,7 @@ static inline ppa_struct *ppa_dev(struct Scsi_Host *host)
 	return *(ppa_struct **)&host->hostdata;
 }
 
-static DEFINE_SPINLOCK(arbitration_lock);
+static spinlock_t arbitration_lock = SPIN_LOCK_UNLOCKED;
 
 static void got_it(ppa_struct *dev)
 {

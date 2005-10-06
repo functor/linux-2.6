@@ -74,7 +74,7 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 #define PTRS_PER_PTE	((PAGE_SIZE << PTE_ORDER) / sizeof(pte_t))
 
 #define USER_PTRS_PER_PGD	(0x80000000UL/PGDIR_SIZE)
-#define FIRST_USER_ADDRESS	0
+#define FIRST_USER_PGD_NR	0
 
 #define VMALLOC_START     KSEG2
 
@@ -98,7 +98,7 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 extern void load_pgd(unsigned long pg_dir);
 
-extern pte_t invalid_pte_table[PAGE_SIZE/sizeof(pte_t)];
+extern pmd_t invalid_pte_table[PAGE_SIZE/sizeof(pmd_t)];
 
 /*
  * Empty pgd/pmd entries point to the invalid_pte_table.

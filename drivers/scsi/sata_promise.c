@@ -79,8 +79,6 @@ static void pdc_eng_timeout(struct ata_port *ap);
 static int pdc_port_start(struct ata_port *ap);
 static void pdc_port_stop(struct ata_port *ap);
 static void pdc_phy_reset(struct ata_port *ap);
-static void pdc_pata_phy_reset(struct ata_port *ap);
-static void pdc_pata_cbl_detect(struct ata_port *ap);
 static void pdc_qc_prep(struct ata_queued_cmd *qc);
 static void pdc_tf_load_mmio(struct ata_port *ap, struct ata_taskfile *tf);
 static void pdc_exec_command_mmio(struct ata_port *ap, struct ata_taskfile *tf);
@@ -104,7 +102,6 @@ static Scsi_Host_Template pdc_ata_sht = {
 	.dma_boundary		= ATA_DMA_BOUNDARY,
 	.slave_configure	= ata_scsi_slave_config,
 	.bios_param		= ata_std_bios_param,
-	.ordered_flush		= 1,
 };
 
 static struct ata_port_operations pdc_ata_ops = {
@@ -124,14 +121,13 @@ static struct ata_port_operations pdc_ata_ops = {
 	.scr_write		= pdc_sata_scr_write,
 	.port_start		= pdc_port_start,
 	.port_stop		= pdc_port_stop,
-	.host_stop		= ata_host_stop,
 };
 
 static struct ata_port_info pdc_port_info[] = {
 	/* board_2037x */
 	{
 		.sht		= &pdc_ata_sht,
-		.host_flags	= /* ATA_FLAG_SATA | */ ATA_FLAG_NO_LEGACY |
+		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
 				  ATA_FLAG_SRST | ATA_FLAG_MMIO,
 		.pio_mask	= 0x1f, /* pio0-4 */
 		.mwdma_mask	= 0x07, /* mwdma0-2 */
@@ -154,26 +150,16 @@ static struct ata_port_info pdc_port_info[] = {
 static struct pci_device_id pdc_ata_pci_tbl[] = {
 	{ PCI_VENDOR_ID_PROMISE, 0x3371, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_2037x },
-	{ PCI_VENDOR_ID_PROMISE, 0x3571, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_2037x },
 	{ PCI_VENDOR_ID_PROMISE, 0x3373, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_2037x },
 	{ PCI_VENDOR_ID_PROMISE, 0x3375, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_2037x },
 	{ PCI_VENDOR_ID_PROMISE, 0x3376, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_2037x },
-	{ PCI_VENDOR_ID_PROMISE, 0x3574, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_2037x },
-	{ PCI_VENDOR_ID_PROMISE, 0x3d75, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_2037x },
-
 	{ PCI_VENDOR_ID_PROMISE, 0x3318, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_20319 },
 	{ PCI_VENDOR_ID_PROMISE, 0x3319, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_20319 },
-	{ PCI_VENDOR_ID_PROMISE, 0x3d18, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	  board_20319 },
-
 	{ }	/* terminate list */
 };
 
@@ -258,35 +244,7 @@ static void pdc_reset_port(struct ata_port *ap)
 static void pdc_phy_reset(struct ata_port *ap)
 {
 	pdc_reset_port(ap);
-	if (ap->flags & ATA_FLAG_SATA)
-		sata_phy_reset(ap);
-	else
-		pdc_pata_phy_reset(ap);
-}
-
-static void pdc_pata_cbl_detect(struct ata_port *ap)
-{
-	u8 tmp;
-	void *mmio = (void *) ap->ioaddr.cmd_addr + PDC_CTLSTAT + 0x03;
-
-	tmp = readb(mmio);
-	
-	if (tmp & 0x01)
-	{
-		ap->cbl = ATA_CBL_PATA40;
-		ap->udma_mask &= ATA_UDMA_MASK_40C;
-	}
-	else
-		ap->cbl = ATA_CBL_PATA80;
-}
-		
-static void pdc_pata_phy_reset(struct ata_port *ap)
-{
-	pdc_pata_cbl_detect(ap);
-
-	ata_port_probe(ap);
-	
-	ata_bus_reset(ap);
+	sata_phy_reset(ap);
 }
 
 static u32 pdc_sata_scr_read (struct ata_port *ap, unsigned int sc_reg)
@@ -448,11 +406,9 @@ static irqreturn_t pdc_interrupt (int irq, void *dev_instance, struct pt_regs *r
 		return IRQ_NONE;
 	}
 
-	spin_lock(&host_set->lock);
+        spin_lock(&host_set->lock);
 
-	writel(mask, mmio_base + PDC_INT_SEQMASK);
-
-	for (i = 0; i < host_set->n_ports; i++) {
+        for (i = 0; i < host_set->n_ports; i++) {
 		VPRINTK("port %u\n", i);
 		ap = host_set->ports[i];
 		tmp = mask & (1 << (i + 1));
@@ -590,9 +546,7 @@ static int pdc_ata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	unsigned long base;
 	void *mmio_base;
 	unsigned int board_idx = (unsigned int) ent->driver_data;
-	int pci_dev_busy = 0;
 	int rc;
-	u8 tmp;
 
 	if (!printed_version++)
 		printk(KERN_DEBUG DRV_NAME " version " DRV_VERSION "\n");
@@ -606,10 +560,8 @@ static int pdc_ata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 		return rc;
 
 	rc = pci_request_regions(pdev, DRV_NAME);
-	if (rc) {
-		pci_dev_busy = 1;
+	if (rc)
 		goto err_out;
-	}
 
 	rc = pci_set_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
@@ -653,9 +605,6 @@ static int pdc_ata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	probe_ent->port[0].scr_addr = base + 0x400;
 	probe_ent->port[1].scr_addr = base + 0x500;
 
-	probe_ent->port_flags[0] = ATA_FLAG_SATA;
-	probe_ent->port_flags[1] = ATA_FLAG_SATA;
-	
 	/* notice 4-port boards */
 	switch (board_idx) {
 	case board_20319:
@@ -666,25 +615,9 @@ static int pdc_ata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 
 		probe_ent->port[2].scr_addr = base + 0x600;
 		probe_ent->port[3].scr_addr = base + 0x700;
-	
-		probe_ent->port_flags[2] = ATA_FLAG_SATA;
-		probe_ent->port_flags[3] = ATA_FLAG_SATA;
 		break;
 	case board_2037x:
-		/* Some boards have also PATA port */
-		tmp = readb(mmio_base + PDC_FLASH_CTL+1);
-		if (!(tmp & 0x80))
-		{
-			probe_ent->n_ports = 3;
-			
-			pdc_ata_setup_port(&probe_ent->port[2], base + 0x300);
-
-			probe_ent->port_flags[2] = ATA_FLAG_SLAVE_POSS;
-			
-			printk(KERN_INFO DRV_NAME " PATA port found\n");
-		}
-		else
-       			probe_ent->n_ports = 2;
+       		probe_ent->n_ports = 2;
 		break;
 	default:
 		BUG();
@@ -707,8 +640,7 @@ err_out_free_ent:
 err_out_regions:
 	pci_release_regions(pdev);
 err_out:
-	if (!pci_dev_busy)
-		pci_disable_device(pdev);
+	pci_disable_device(pdev);
 	return rc;
 }
 

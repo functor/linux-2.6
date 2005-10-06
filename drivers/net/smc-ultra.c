@@ -156,6 +156,8 @@ static int __init do_ultra_probe(struct net_device *dev)
 	/* Look for any installed ISAPnP cards */
 	if (isapnp_present() && (ultra_probe_isapnp(dev) == 0))
 		return 0;
+
+	printk(KERN_NOTICE "smc-ultra.c: No ISAPnP cards found, trying standard ones...\n");
 #endif
 
 	for (i = 0; ultra_portlist[i]; i++) {
@@ -176,7 +178,6 @@ static void cleanup_card(struct net_device *dev)
 		pnp_device_detach(idev);
 #endif
 	release_region(dev->base_addr - ULTRA_NIC_OFFSET, ULTRA_IO_EXTENT);
-	iounmap(ei_status.mem);
 }
 
 #ifndef MODULE
@@ -295,14 +296,9 @@ static int __init ultra_probe1(struct net_device *dev, int ioaddr)
 	ei_status.rx_start_page = START_PG + TX_PAGES;
 	ei_status.stop_page = num_pages;
 
-	ei_status.mem = ioremap(dev->mem_start, (ei_status.stop_page - START_PG)*256);
-	if (!ei_status.mem) {
-		printk(", failed to ioremap.\n");
-		retval =  -ENOMEM;
-		goto out;
-	}
-
-	dev->mem_end = dev->mem_start + (ei_status.stop_page - START_PG)*256;
+	ei_status.rmem_start = dev->mem_start + TX_PAGES*256;
+	dev->mem_end = ei_status.rmem_end
+		= dev->mem_start + (ei_status.stop_page - START_PG)*256;
 
 	if (piomode) {
 		printk(",%s IRQ %d programmed-I/O mode.\n",
@@ -436,16 +432,16 @@ ultra_reset_8390(struct net_device *dev)
 static void
 ultra_get_8390_hdr(struct net_device *dev, struct e8390_pkt_hdr *hdr, int ring_page)
 {
-	void __iomem *hdr_start = ei_status.mem + ((ring_page - START_PG)<<8);
+	unsigned long hdr_start = dev->mem_start + ((ring_page - START_PG)<<8);
 
 	outb(ULTRA_MEMENB, dev->base_addr - ULTRA_NIC_OFFSET);	/* shmem on */
 #ifdef __BIG_ENDIAN
 	/* Officially this is what we are doing, but the readl() is faster */
 	/* unfortunately it isn't endian aware of the struct               */
-	memcpy_fromio(hdr, hdr_start, sizeof(struct e8390_pkt_hdr));
+	isa_memcpy_fromio(hdr, hdr_start, sizeof(struct e8390_pkt_hdr));
 	hdr->count = le16_to_cpu(hdr->count);
 #else
-	((unsigned int*)hdr)[0] = readl(hdr_start);
+	((unsigned int*)hdr)[0] = isa_readl(hdr_start);
 #endif
 	outb(0x00, dev->base_addr - ULTRA_NIC_OFFSET); /* shmem off */
 }
@@ -456,20 +452,20 @@ ultra_get_8390_hdr(struct net_device *dev, struct e8390_pkt_hdr *hdr, int ring_p
 static void
 ultra_block_input(struct net_device *dev, int count, struct sk_buff *skb, int ring_offset)
 {
-	void __iomem *xfer_start = ei_status.mem + ring_offset - (START_PG<<8);
+	unsigned long xfer_start = dev->mem_start + ring_offset - (START_PG<<8);
 
 	/* Enable shared memory. */
 	outb(ULTRA_MEMENB, dev->base_addr - ULTRA_NIC_OFFSET);
 
-	if (ring_offset + count > ei_status.stop_page*256) {
+	if (xfer_start + count > ei_status.rmem_end) {
 		/* We must wrap the input move. */
-		int semi_count = ei_status.stop_page*256 - ring_offset;
-		memcpy_fromio(skb->data, xfer_start, semi_count);
+		int semi_count = ei_status.rmem_end - xfer_start;
+		isa_memcpy_fromio(skb->data, xfer_start, semi_count);
 		count -= semi_count;
-		memcpy_fromio(skb->data + semi_count, ei_status.mem + TX_PAGES * 256, count);
+		isa_memcpy_fromio(skb->data + semi_count, ei_status.rmem_start, count);
 	} else {
 		/* Packet is in one chunk -- we can copy + cksum. */
-		eth_io_copy_and_sum(skb, xfer_start, count, 0);
+		isa_eth_io_copy_and_sum(skb, xfer_start, count, 0);
 	}
 
 	outb(0x00, dev->base_addr - ULTRA_NIC_OFFSET);	/* Disable memory. */
@@ -479,12 +475,12 @@ static void
 ultra_block_output(struct net_device *dev, int count, const unsigned char *buf,
 				int start_page)
 {
-	void __iomem *shmem = ei_status.mem + ((start_page - START_PG)<<8);
+	unsigned long shmem = dev->mem_start + ((start_page - START_PG)<<8);
 
 	/* Enable shared memory. */
 	outb(ULTRA_MEMENB, dev->base_addr - ULTRA_NIC_OFFSET);
 
-	memcpy_toio(shmem, buf, count);
+	isa_memcpy_toio(shmem, buf, count);
 
 	outb(0x00, dev->base_addr - ULTRA_NIC_OFFSET); /* Disable memory. */
 }
@@ -557,8 +553,8 @@ static struct net_device *dev_ultra[MAX_ULTRA_CARDS];
 static int io[MAX_ULTRA_CARDS];
 static int irq[MAX_ULTRA_CARDS];
 
-module_param_array(io, int, NULL, 0);
-module_param_array(irq, int, NULL, 0);
+MODULE_PARM(io, "1-" __MODULE_STRING(MAX_ULTRA_CARDS) "i");
+MODULE_PARM(irq, "1-" __MODULE_STRING(MAX_ULTRA_CARDS) "i");
 MODULE_PARM_DESC(io, "I/O base address(es)");
 MODULE_PARM_DESC(irq, "IRQ number(s) (assigned)");
 MODULE_DESCRIPTION("SMC Ultra/EtherEZ ISA/PnP Ethernet driver");

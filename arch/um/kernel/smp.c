@@ -41,8 +41,14 @@ EXPORT_SYMBOL(cpu_possible_map);
  */
 struct cpuinfo_um cpu_data[NR_CPUS];
 
+/* Set when the idlers are all forked */
+int smp_threads_ready = 0;
+
 /* A statistic, can be a little off */
 int num_reschedules_sent = 0;
+
+/* Small, random number, never changed */
+unsigned long cache_decay_ticks = 5;
 
 /* Not changed after boot */
 struct task_struct *idle_threads[NR_CPUS];
@@ -210,7 +216,7 @@ int hard_smp_processor_id(void)
 	return(pid_to_processor_id(os_getpid()));
 }
 
-static DEFINE_SPINLOCK(call_lock);
+static spinlock_t call_lock = SPIN_LOCK_UNLOCKED;
 static atomic_t scf_started;
 static atomic_t scf_finished;
 static void (*func)(void *info);
@@ -241,8 +247,10 @@ int smp_call_function(void (*_func)(void *info), void *_info, int nonatomic,
 	func = _func;
 	info = _info;
 
-	for_each_online_cpu(i)
-		os_write_file(cpu_data[i].ipi_pipe[1], "C", 1);
+	for (i=0;i<NR_CPUS;i++)
+		if((i != current_thread->cpu) &&
+		   cpu_isset(i, cpu_online_map))
+			os_write_file(cpu_data[i].ipi_pipe[1], "C", 1);
 
 	while (atomic_read(&scf_started) != cpus)
 		barrier();

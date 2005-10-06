@@ -89,10 +89,38 @@ static unsigned char irc_level[TX3927_NUM_IR] = {
 	6, 6, 6			/* TMR */
 };
 
+static inline void mask_irq(unsigned int irq_nr)
+{
+	struct tb_irq_space* sp;
+	for (sp = tb_irq_spaces; sp; sp = sp->next) {
+		if (sp->start_irqno <= irq_nr &&
+		    irq_nr < sp->start_irqno + sp->nr_irqs) {
+			if (sp->mask_func)
+				sp->mask_func(irq_nr - sp->start_irqno,
+					      sp->space_id);
+			break;
+		}
+	}
+}
+
+static inline void unmask_irq(unsigned int irq_nr)
+{
+	struct tb_irq_space* sp;
+	for (sp = tb_irq_spaces; sp; sp = sp->next) {
+		if (sp->start_irqno <= irq_nr &&
+		    irq_nr < sp->start_irqno + sp->nr_irqs) {
+			if (sp->unmask_func)
+				sp->unmask_func(irq_nr - sp->start_irqno,
+						sp->space_id);
+			break;
+		}
+	}
+}
+
 static void jmr3927_irq_disable(unsigned int irq_nr);
 static void jmr3927_irq_enable(unsigned int irq_nr);
 
-static DEFINE_SPINLOCK(jmr3927_irq_lock);
+static spinlock_t jmr3927_irq_lock = SPIN_LOCK_UNLOCKED;
 
 static unsigned int jmr3927_irq_startup(unsigned int irq)
 {
@@ -105,8 +133,9 @@ static unsigned int jmr3927_irq_startup(unsigned int irq)
 
 static void jmr3927_irq_ack(unsigned int irq)
 {
-	if (irq == JMR3927_IRQ_IRC_TMR0)
+	if (irq == JMR3927_IRQ_IRC_TMR0) {
 		jmr3927_tmrptr->tisr = 0;       /* ack interrupt */
+	}
 
 	jmr3927_irq_disable(irq);
 }
@@ -118,37 +147,19 @@ static void jmr3927_irq_end(unsigned int irq)
 
 static void jmr3927_irq_disable(unsigned int irq_nr)
 {
-	struct tb_irq_space* sp;
 	unsigned long flags;
 
 	spinlock_irqsave(&jmr3927_irq_lock, flags);
-	for (sp = tb_irq_spaces; sp; sp = sp->next) {
-		if (sp->start_irqno <= irq_nr &&
-		    irq_nr < sp->start_irqno + sp->nr_irqs) {
-			if (sp->mask_func)
-				sp->mask_func(irq_nr - sp->start_irqno,
-					      sp->space_id);
-			break;
-		}
-	}
+	mask_irq(irq_nr);
 	spinlock_irqrestore(&jmr3927_irq_lock, flags);
 }
 
 static void jmr3927_irq_enable(unsigned int irq_nr)
 {
-	struct tb_irq_space* sp;
 	unsigned long flags;
 
 	spinlock_irqsave(&jmr3927_irq_lock, flags);
-	for (sp = tb_irq_spaces; sp; sp = sp->next) {
-		if (sp->start_irqno <= irq_nr &&
-		    irq_nr < sp->start_irqno + sp->nr_irqs) {
-			if (sp->unmask_func)
-				sp->unmask_func(irq_nr - sp->start_irqno,
-						sp->space_id);
-			break;
-		}
-	}
+	unmask_irq(irq_nr);
 	spinlock_irqrestore(&jmr3927_irq_lock, flags);
 }
 

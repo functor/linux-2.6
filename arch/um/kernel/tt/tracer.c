@@ -12,6 +12,7 @@
 #include <sched.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include "user.h"
@@ -24,9 +25,9 @@
 #include "mem_user.h"
 #include "process.h"
 #include "kern_util.h"
+#include "frame.h"
 #include "chan_user.h"
 #include "ptrace_user.h"
-#include "irq_user.h"
 #include "mode.h"
 #include "tt.h"
 
@@ -34,7 +35,7 @@ static int tracer_winch[2];
 
 int is_tracer_winch(int pid, int fd, void *data)
 {
-	if(pid != os_getpgrp())
+	if(pid != tracing_pid)
 		return(0);
 
 	register_winch_irq(tracer_winch[0], fd, -1, data);
@@ -71,8 +72,6 @@ void attach_process(int pid)
 	   (ptrace(PTRACE_CONT, pid, 0, 0) < 0))
 		tracer_panic("OP_FORK failed to attach pid");
 	wait_for_stop(pid, SIGSTOP, PTRACE_CONT, NULL);
-	if (ptrace(PTRACE_OLDSETOPTIONS, pid, 0, (void *)PTRACE_O_TRACESYSGOOD) < 0)
-		tracer_panic("OP_FORK: PTRACE_SETOPTIONS failed, errno = %d", errno);
 	if(ptrace(PTRACE_CONT, pid, 0, 0) < 0)
 		tracer_panic("OP_FORK failed to continue process");
 }
@@ -83,17 +82,14 @@ void tracer_panic(char *format, ...)
 
 	va_start(ap, format);
 	vprintf(format, ap);
-	va_end(ap);
 	printf("\n");
 	while(1) pause();
 }
 
 static void tracer_segv(int sig, struct sigcontext sc)
 {
-        struct faultinfo fi;
-        GET_FAULTINFO_FROM_SC(fi, &sc);
 	printf("Tracing thread segfault at address 0x%lx, ip 0x%lx\n",
-               FAULT_ADDRESS(fi), SC_IP(&sc));
+	       SC_FAULT_ADDR(&sc), SC_IP(&sc));
 	while(1)
 		pause();
 }
@@ -120,7 +116,6 @@ static int signal_tramp(void *arg)
 	signal(SIGSEGV, (__sighandler_t) sig_handler);
 	set_cmdline("(idle thread)");
 	set_init_pid(os_getpid());
-	init_irq_signals(0);
 	proc = arg;
 	return((*proc)(NULL));
 }
@@ -146,7 +141,7 @@ static void sleeping_process_signal(int pid, int sig)
 	 * any more, the trace of those will land here.  So, we need to just 
 	 * PTRACE_SYSCALL it.
 	 */
-	case (SIGTRAP + 0x80):
+	case SIGTRAP:
 		if(ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
 			tracer_panic("sleeping_process_signal : Failed to "
 				     "PTRACE_SYSCALL pid %d, errno = %d\n",
@@ -186,13 +181,12 @@ int tracing_pid = -1;
 int tracer(int (*init_proc)(void *), void *sp)
 {
 	void *task = NULL;
-	int status, pid = 0, sig = 0, cont_type, tracing = 0, op = 0;
-	int proc_id = 0, n, err, old_tracing = 0, strace = 0;
-	int local_using_sysemu = 0;
-#ifdef UML_CONFIG_SYSCALL_DEBUG
 	unsigned long eip = 0;
-	int last_index;
-#endif
+	int status, pid = 0, sig = 0, cont_type, tracing = 0, op = 0;
+	int last_index, proc_id = 0, n, err, old_tracing = 0, strace = 0;
+	int pt_syscall_parm, local_using_sysemu;
+
+	capture_signal_stack();
 	signal(SIGPIPE, SIG_IGN);
 	setup_tracer_winch();
 	tracing_pid = os_getpid();
@@ -202,10 +196,6 @@ int tracer(int (*init_proc)(void *), void *sp)
 	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
 	if(n < 0){
 		printf("waitpid on idle thread failed, errno = %d\n", errno);
-		exit(1);
-	}
-	if (ptrace(PTRACE_OLDSETOPTIONS, pid, 0, (void *)PTRACE_O_TRACESYSGOOD) < 0) {
-		printf("Failed to PTRACE_SETOPTIONS for idle thread, errno = %d\n", errno);
 		exit(1);
 	}
 	if((ptrace(PTRACE_CONT, pid, 0, 0) < 0)){
@@ -283,23 +273,22 @@ int tracer(int (*init_proc)(void *), void *sp)
 		else if(WIFSTOPPED(status)){
 			proc_id = pid_to_processor_id(pid);
 			sig = WSTOPSIG(status);
-#ifdef UML_CONFIG_SYSCALL_DEBUG
 			if(signal_index[proc_id] == 1024){
 				signal_index[proc_id] = 0;
 				last_index = 1023;
 			}
 			else last_index = signal_index[proc_id] - 1;
-			if(((sig == SIGPROF) || (sig == SIGVTALRM) ||
+			if(((sig == SIGPROF) || (sig == SIGVTALRM) || 
 			    (sig == SIGALRM)) &&
 			   (signal_record[proc_id][last_index].signal == sig)&&
 			   (signal_record[proc_id][last_index].pid == pid))
 				signal_index[proc_id] = last_index;
 			signal_record[proc_id][signal_index[proc_id]].pid = pid;
 			gettimeofday(&signal_record[proc_id][signal_index[proc_id]].time, NULL);
-			eip = ptrace(PTRACE_PEEKUSR, pid, PT_IP_OFFSET, 0);
+			eip = ptrace(PTRACE_PEEKUSER, pid, PT_IP_OFFSET, 0);
 			signal_record[proc_id][signal_index[proc_id]].addr = eip;
 			signal_record[proc_id][signal_index[proc_id]++].signal = sig;
-#endif
+			
 			if(proc_id == -1){
 				sleeping_process_signal(pid, sig);
 				continue;
@@ -309,24 +298,14 @@ int tracer(int (*init_proc)(void *), void *sp)
 			tracing = is_tracing(task);
 			old_tracing = tracing;
 
-			/* Assume: no syscall, when coming from user */
-			if ( tracing )
-				do_sigtrap(task);
+			local_using_sysemu = get_using_sysemu();
+			pt_syscall_parm = local_using_sysemu ? PTRACE_SYSEMU : PTRACE_SYSCALL;
 
 			switch(sig){
 			case SIGUSR1:
 				sig = 0;
 				op = do_proc_op(task, proc_id);
 				switch(op){
-				/*
-				 * This is called when entering user mode; after
-				 * this, we start intercepting syscalls.
-				 *
-				 * In fact, a process is started in kernel mode,
-				 * so with is_tracing() == 0 (and that is reset
-				 * when executing syscalls, since UML kernel has
-				 * the right to do syscalls);
-				 */
 				case OP_TRACE_ON:
 					arch_leave_kernel(task, pid);
 					tracing = 1;
@@ -335,13 +314,7 @@ int tracer(int (*init_proc)(void *), void *sp)
 				case OP_HALT:
 					unmap_physmem();
 					kmalloc_ok = 0;
-					os_kill_ptraced_process(pid, 0);
-					/* Now let's reap remaining zombies */
-					errno = 0;
-					do {
-						waitpid(-1, &status,
-							WUNTRACED);
-					} while (errno != ECHILD);
+					ptrace(PTRACE_KILL, pid, 0, 0);
 					return(op == OP_REBOOT);
 				case OP_NONE:
 					printf("Detaching pid %d\n", pid);
@@ -355,26 +328,14 @@ int tracer(int (*init_proc)(void *), void *sp)
 				 */
 				pid = cpu_tasks[proc_id].pid;
 				break;
-			case (SIGTRAP + 0x80):
-				if(!tracing && (debugger_pid != -1)){
-					child_signal(pid, status & 0x7fff);
-					continue;
-				}
-				tracing = 0;
-				/* local_using_sysemu has been already set
-				 * below, since if we are here, is_tracing() on
-				 * the traced task was 1, i.e. the process had
-				 * already run through one iteration of the
-				 * loop which executed a OP_TRACE_ON request.*/
-				do_syscall(task, pid, local_using_sysemu);
-				sig = SIGUSR2;
-				break;
 			case SIGTRAP:
 				if(!tracing && (debugger_pid != -1)){
 					child_signal(pid, status);
 					continue;
 				}
 				tracing = 0;
+				if(do_syscall(task, pid, local_using_sysemu))
+					sig = SIGUSR2;
 				break;
 			case SIGPROF:
 				if(tracing) sig = 0;
@@ -410,15 +371,16 @@ int tracer(int (*init_proc)(void *), void *sp)
 				continue;
 			}
 
-			local_using_sysemu = get_using_sysemu();
+			if(tracing){
+				if(singlestepping(task))
+					cont_type = PTRACE_SINGLESTEP;
+				else cont_type = pt_syscall_parm;
+			}
+			else cont_type = PTRACE_CONT;
 
-			if(tracing)
-				cont_type = SELECT_PTRACE_OPERATION(local_using_sysemu,
-				                                    singlestepping(task));
-			else if((debugger_pid != -1) && strace)
+			if((cont_type == PTRACE_CONT) && 
+			   (debugger_pid != -1) && strace)
 				cont_type = PTRACE_SYSCALL;
-			else
-				cont_type = PTRACE_CONT;
 
 			if(ptrace(cont_type, pid, 0, sig) != 0){
 				tracer_panic("ptrace failed to continue "
@@ -470,6 +432,19 @@ __uml_setup("debugtrace", uml_debugtrace_setup,
 "    debugger and continued.  This is mostly for debugging crashes\n"
 "    early during boot, and should be pretty much obsoleted by\n"
 "    the debug switch.\n\n"
+);
+
+static int __init uml_honeypot_setup(char *line, int *add)
+{
+	jail_setup("", add);
+	honeypot = 1;
+	return 0;
+}
+__uml_setup("honeypot", uml_honeypot_setup, 
+"honeypot\n"
+"    This makes UML put process stacks in the same location as they are\n"
+"    on the host, allowing expoits such as stack smashes to work against\n"
+"    UML.  This implies 'jail'.\n\n"
 );
 
 /*

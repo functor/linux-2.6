@@ -242,9 +242,10 @@ static void acpi_run_oshp ( struct acpi_bridge	*ab)
 {
 	acpi_status		status;
 	u8			*path_name = acpi_path_name(ab->handle);
+	struct acpi_buffer	ret_buf = { 0, NULL};
 
 	/* run OSHP */
-	status = acpi_evaluate_object(ab->handle, METHOD_NAME_OSHP, NULL, NULL);
+	status = acpi_evaluate_object(ab->handle, METHOD_NAME_OSHP, NULL, &ret_buf);
 	if (ACPI_FAILURE(status)) {
 		err("acpi_pciehprm:%s OSHP fails=0x%x\n", path_name, status);
 	} else
@@ -1626,7 +1627,7 @@ int shpchprm_set_hpp(
 	pci_bus->number = func->bus;
 	devfn = PCI_DEVFN(func->device, func->function);
 
-	ab = find_acpi_bridge_by_bus(acpi_bridges_head, ctrl->seg, ctrl->slot_bus);
+	ab = find_acpi_bridge_by_bus(acpi_bridges_head, ctrl->seg, ctrl->bus);
 
 	if (ab) {
 		if (ab->_hpp) {
@@ -1681,7 +1682,7 @@ void shpchprm_enable_card(
 		| PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
 	bcmd = bcommand  = bcommand | PCI_BRIDGE_CTL_NO_ISA;
 
-	ab = find_acpi_bridge_by_bus(acpi_bridges_head, ctrl->seg, ctrl->slot_bus);
+	ab = find_acpi_bridge_by_bus(acpi_bridges_head, ctrl->seg, ctrl->bus);
 	if (ab) {
 		if (ab->_hpp) {
 			if (ab->_hpp->enable_perr) {

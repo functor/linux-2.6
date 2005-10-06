@@ -119,13 +119,10 @@ struct pppoe_opt {
 					     relayed to (PPPoE relaying) */
 };
 
-#include <net/sock.h>
-
-struct pppox_sock {
-	/* struct sock must be the first member of pppox_sock */
-	struct sock		sk;
+struct pppox_opt {
 	struct ppp_channel	chan;
-	struct pppox_sock	*next;	  /* for hash table */
+	struct sock		*sk;
+	struct pppox_opt	*next;	  /* for hash table */
 	union {
 		struct pppoe_opt pppoe;
 	} proto;
@@ -135,15 +132,7 @@ struct pppox_sock {
 #define pppoe_pa	proto.pppoe.pa
 #define pppoe_relay	proto.pppoe.relay
 
-static inline struct pppox_sock *pppox_sk(struct sock *sk)
-{
-	return (struct pppox_sock *)sk;
-}
-
-static inline struct sock *sk_pppox(struct pppox_sock *po)
-{
-	return (struct sock *)po;
-}
+#define pppox_sk(__sk) ((struct pppox_opt *)(__sk)->sk_protinfo)
 
 struct module;
 

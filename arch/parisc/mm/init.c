@@ -21,7 +21,6 @@
 #include <linux/swap.h>
 #include <linux/unistd.h>
 #include <linux/nodemask.h>	/* for node_online_map */
-#include <linux/pagemap.h>	/* for release_pages and page_cache_release */
 
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
@@ -59,6 +58,8 @@ static struct resource pdcdata_resource = {
 };
 
 static struct resource sysram_resources[MAX_PHYSMEM_RANGES];
+
+static unsigned long max_pfn;
 
 /* The following array is initialized from the firmware specific
  * information retrieved in kernel/inventory.c.
@@ -179,7 +180,7 @@ static void __init setup_bootmem(void)
 
 			size = (pmem_ranges[i].pages << PAGE_SHIFT);
 			start = (pmem_ranges[i].start_pfn << PAGE_SHIFT);
-			printk(KERN_INFO "%2d) Start 0x%016lx End 0x%016lx Size %6ld MB\n",
+			printk(KERN_INFO "%2d) Start 0x%016lx End 0x%016lx Size %6ld Mb\n",
 				i,start, start + (size - 1), size >> 20);
 		}
 	}
@@ -212,7 +213,7 @@ static void __init setup_bootmem(void)
 
 		rsize = pmem_ranges[i].pages << PAGE_SHIFT;
 		if ((mem_max + rsize) > mem_limit) {
-			printk(KERN_WARNING "Memory truncated to %ld MB\n", mem_limit >> 20);
+			printk(KERN_WARNING "Memory truncated to %ld Mb\n", mem_limit >> 20);
 			if (mem_max == mem_limit)
 				npmem_ranges = i;
 			else {
@@ -228,7 +229,7 @@ static void __init setup_bootmem(void)
 		mem_max += rsize;
 	}
 
-	printk(KERN_INFO "Total Memory: %ld MB\n",mem_max >> 20);
+	printk(KERN_INFO "Total Memory: %ld Mb\n",mem_max >> 20);
 
 #ifndef CONFIG_DISCONTIGMEM
 	/* Merge the ranges, keeping track of the holes */
@@ -267,6 +268,8 @@ static void __init setup_bootmem(void)
 		NODE_DATA(i)->bdata = &bmem_data[i];
 	}
 	memset(pfnnid_map, 0xff, sizeof(pfnnid_map));
+
+	numnodes = npmem_ranges;
 
 	for (i = 0; i < npmem_ranges; i++)
 		node_set_online(i);
@@ -444,6 +447,7 @@ void __init mem_init(void)
 
 #ifndef CONFIG_DISCONTIGMEM
 	max_mapnr = page_to_pfn(virt_to_page(high_memory - 1)) + 1;
+	mem_map = zone_table[ZONE_DMA]->zone_mem_map;
 	totalram_pages += free_all_bootmem();
 #else
 	{
@@ -851,7 +855,7 @@ static unsigned long space_id_index;
 static unsigned long free_space_ids = NR_SPACE_IDS - 1;
 static unsigned long dirty_space_ids = 0;
 
-static DEFINE_SPINLOCK(sid_lock);
+static spinlock_t sid_lock = SPIN_LOCK_UNLOCKED;
 
 unsigned long alloc_sid(void)
 {

@@ -46,9 +46,9 @@
 #include <asm/sections.h>
 #include <asm/cpudata.h>
 
-DEFINE_SPINLOCK(mostek_lock);
-DEFINE_SPINLOCK(rtc_lock);
-void __iomem *mstk48t02_regs = NULL;
+spinlock_t mostek_lock = SPIN_LOCK_UNLOCKED;
+spinlock_t rtc_lock = SPIN_LOCK_UNLOCKED;
+unsigned long mstk48t02_regs = 0UL;
 #ifdef CONFIG_PCI
 unsigned long ds1287_regs = 0UL;
 #endif
@@ -59,8 +59,8 @@ u64 jiffies_64 = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);
 
-static void __iomem *mstk48t08_regs;
-static void __iomem *mstk48t59_regs;
+static unsigned long mstk48t08_regs = 0UL;
+static unsigned long mstk48t59_regs = 0UL;
 
 static int set_rtc_mmss(unsigned long);
 
@@ -520,7 +520,7 @@ void timer_tick_interrupt(struct pt_regs *regs)
 /* Kick start a stopped clock (procedure from the Sun NVRAM/hostid FAQ). */
 static void __init kick_start_clock(void)
 {
-	void __iomem *regs = mstk48t02_regs;
+	unsigned long regs = mstk48t02_regs;
 	u8 sec, tmp;
 	int i, count;
 
@@ -604,7 +604,7 @@ static void __init kick_start_clock(void)
 /* Return nonzero if the clock chip battery is low. */
 static int __init has_low_battery(void)
 {
-	void __iomem *regs = mstk48t02_regs;
+	unsigned long regs = mstk48t02_regs;
 	u8 data1, data2;
 
 	spin_lock_irq(&mostek_lock);
@@ -623,7 +623,7 @@ static int __init has_low_battery(void)
 static void __init set_system_time(void)
 {
 	unsigned int year, mon, day, hour, min, sec;
-	void __iomem *mregs = mstk48t02_regs;
+	unsigned long mregs = mstk48t02_regs;
 #ifdef CONFIG_PCI
 	unsigned long dregs = ds1287_regs;
 #else
@@ -779,7 +779,6 @@ void __init clock_probe(void)
 		    strcmp(model, "mk48t59") &&
 		    strcmp(model, "m5819") &&
 		    strcmp(model, "m5819p") &&
-		    strcmp(model, "m5823") &&
 		    strcmp(model, "ds1287")) {
 			if (cbus != NULL) {
 				prom_printf("clock_probe: Central bus lacks timer chip.\n");
@@ -839,12 +838,10 @@ void __init clock_probe(void)
 
 			if (!strcmp(model, "ds1287") ||
 			    !strcmp(model, "m5819") ||
-			    !strcmp(model, "m5819p") ||
-			    !strcmp(model, "m5823")) {
+			    !strcmp(model, "m5819p")) {
 				ds1287_regs = edev->resource[0].start;
 			} else {
-				mstk48t59_regs = (void __iomem *)
-					edev->resource[0].start;
+				mstk48t59_regs = edev->resource[0].start;
 				mstk48t02_regs = mstk48t59_regs + MOSTEK_48T59_48T02;
 			}
 			break;
@@ -862,12 +859,10 @@ try_isa_clock:
 			}
 			if (!strcmp(model, "ds1287") ||
 			    !strcmp(model, "m5819") ||
-			    !strcmp(model, "m5819p") ||
-			    !strcmp(model, "m5823")) {
+			    !strcmp(model, "m5819p")) {
 				ds1287_regs = isadev->resource.start;
 			} else {
-				mstk48t59_regs = (void __iomem *)
-					isadev->resource.start;
+				mstk48t59_regs = isadev->resource.start;
 				mstk48t02_regs = mstk48t59_regs + MOSTEK_48T59_48T02;
 			}
 			break;
@@ -895,24 +890,21 @@ try_isa_clock:
 		}
 
 		if(model[5] == '0' && model[6] == '2') {
-			mstk48t02_regs = (void __iomem *)
-				(((u64)clk_reg[0].phys_addr) |
-				 (((u64)clk_reg[0].which_io)<<32UL));
+			mstk48t02_regs = (((u64)clk_reg[0].phys_addr) |
+					  (((u64)clk_reg[0].which_io)<<32UL));
 		} else if(model[5] == '0' && model[6] == '8') {
-			mstk48t08_regs = (void __iomem *)
-				(((u64)clk_reg[0].phys_addr) |
-				 (((u64)clk_reg[0].which_io)<<32UL));
+			mstk48t08_regs = (((u64)clk_reg[0].phys_addr) |
+					  (((u64)clk_reg[0].which_io)<<32UL));
 			mstk48t02_regs = mstk48t08_regs + MOSTEK_48T08_48T02;
 		} else {
-			mstk48t59_regs = (void __iomem *)
-				(((u64)clk_reg[0].phys_addr) |
-				 (((u64)clk_reg[0].which_io)<<32UL));
+			mstk48t59_regs = (((u64)clk_reg[0].phys_addr) |
+					  (((u64)clk_reg[0].which_io)<<32UL));
 			mstk48t02_regs = mstk48t59_regs + MOSTEK_48T59_48T02;
 		}
 		break;
 	}
 
-	if (mstk48t02_regs != NULL) {
+	if (mstk48t02_regs != 0UL) {
 		/* Report a low battery voltage condition. */
 		if (has_low_battery())
 			prom_printf("NVRAM: Low battery voltage!\n");
@@ -1092,7 +1084,7 @@ unsigned long long sched_clock(void)
 static int set_rtc_mmss(unsigned long nowtime)
 {
 	int real_seconds, real_minutes, chip_minutes;
-	void __iomem *mregs = mstk48t02_regs;
+	unsigned long mregs = mstk48t02_regs;
 #ifdef CONFIG_PCI
 	unsigned long dregs = ds1287_regs;
 #else

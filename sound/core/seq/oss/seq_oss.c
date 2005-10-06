@@ -59,7 +59,7 @@ static int odev_open(struct inode *inode, struct file *file);
 static int odev_release(struct inode *inode, struct file *file);
 static ssize_t odev_read(struct file *file, char __user *buf, size_t count, loff_t *offset);
 static ssize_t odev_write(struct file *file, const char __user *buf, size_t count, loff_t *offset);
-static long odev_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+static int odev_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
 static unsigned int odev_poll(struct file *file, poll_table * wait);
 #ifdef CONFIG_PROC_FS
 static void info_read(snd_info_entry_t *entry, snd_info_buffer_t *buf);
@@ -177,20 +177,20 @@ odev_write(struct file *file, const char __user *buf, size_t count, loff_t *offs
 	return snd_seq_oss_write(dp, buf, count, file);
 }
 
-static long
-odev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+static int
+odev_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
 {
 	seq_oss_devinfo_t *dp;
+	int err;
 	dp = file->private_data;
 	snd_assert(dp != NULL, return -EIO);
-	return snd_seq_oss_ioctl(dp, cmd, arg);
+	/* FIXME: need to unlock BKL to allow preemption */
+	unlock_kernel();
+	err = snd_seq_oss_ioctl(dp, cmd, arg);
+	lock_kernel();
+	return err;
 }
 
-#ifdef CONFIG_COMPAT
-#define odev_ioctl_compat	odev_ioctl
-#else
-#define odev_ioctl_compat	NULL
-#endif
 
 static unsigned int
 odev_poll(struct file *file, poll_table * wait)
@@ -213,8 +213,7 @@ static struct file_operations seq_oss_f_ops =
 	.open =		odev_open,
 	.release =	odev_release,
 	.poll =		odev_poll,
-	.unlocked_ioctl =	odev_ioctl,
-	.compat_ioctl =	odev_ioctl_compat,
+	.ioctl =	odev_ioctl,
 };
 
 static snd_minor_t seq_oss_reg = {

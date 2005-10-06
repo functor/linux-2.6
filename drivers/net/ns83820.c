@@ -1,4 +1,4 @@
-#define VERSION "0.22"
+#define _VERSION "0.20"
 /* ns83820.c by Benjamin LaHaise with contributions.
  *
  * Questions/comments/discussion to linux-ns83820@kvack.org.
@@ -63,11 +63,9 @@
  *			     -	fix missed txok introduced during performance
  *				tuning
  *			0.20 -	fix stupid RFEN thinko.  i am such a smurf.
+ *
  *	20040828	0.21 -	add hardware vlan accleration
  *				by Neil Horman <nhorman@redhat.com>
- *	20050406	0.22 -	improved DAC ifdefs from Andi Kleen	
- *			     -	removal of dead code from Adrian Bunk
- *			     -	fix half duplex collision behaviour
  * Driver Overview
  * ===============
  *
@@ -130,6 +128,18 @@ static int lnksts = 0;		/* CFG_LNKSTS bit polarity */
 /* Dprintk is used for more interesting debug events */
 #undef Dprintk
 #define	Dprintk			dprintk
+
+#if defined(CONFIG_HIGHMEM64G) || defined(__ia64__)
+#define USE_64BIT_ADDR	"+"
+#endif
+
+#if defined(USE_64BIT_ADDR)
+#define	VERSION	_VERSION USE_64BIT_ADDR
+#define TRY_DAC	1
+#else
+#define	VERSION	_VERSION
+#define TRY_DAC	0
+#endif
 
 /* tunables */
 #define RX_BUF_SIZE	1500	/* 8192 */
@@ -376,16 +386,22 @@ static int lnksts = 0;		/* CFG_LNKSTS bit polarity */
 #define LINK_DOWN		0x02
 #define LINK_UP			0x04
 
-#define HW_ADDR_LEN	sizeof(dma_addr_t) 
+#ifdef USE_64BIT_ADDR
+#define HW_ADDR_LEN	8
 #define desc_addr_set(desc, addr)				\
 	do {							\
-		((desc)[0] = cpu_to_le32(addr));		\
-		if (HW_ADDR_LEN == 8)		 		\
-			(desc)[1] = cpu_to_le32(((u64)addr) >> 32);	\
+		u64 __addr = (addr);				\
+		(desc)[0] = cpu_to_le32(__addr);		\
+		(desc)[1] = cpu_to_le32(__addr >> 32);		\
 	} while(0)
 #define desc_addr_get(desc)					\
-	(le32_to_cpu((desc)[0]) | \
-	(HW_ADDR_LEN == 8 ? ((dma_addr_t)le32_to_cpu((desc)[1]))<<32 : 0))
+		(((u64)le32_to_cpu((desc)[1]) << 32)		\
+		     | le32_to_cpu((desc)[0]))
+#else
+#define HW_ADDR_LEN	4
+#define desc_addr_set(desc, addr)	((desc)[0] = cpu_to_le32(addr))
+#define desc_addr_get(desc)		(le32_to_cpu((desc)[0]))
+#endif
 
 #define DESC_LINK		0
 #define DESC_BUFPTR		(DESC_LINK + HW_ADDR_LEN/4)
@@ -711,23 +727,11 @@ static void fastcall phy_intr(struct net_device *ndev)
 		speed = ((cfg / CFG_SPDSTS0) & 3);
 		fullduplex = (cfg & CFG_DUPSTS);
 
-		if (fullduplex) {
+		if (fullduplex)
 			new_cfg |= CFG_SB;
-			writel(readl(dev->base + TXCFG)
-					| TXCFG_CSI | TXCFG_HBI,
-			       dev->base + TXCFG);
-			writel(readl(dev->base + RXCFG) | RXCFG_RX_FD,
-			       dev->base + RXCFG);
-		} else {
-			writel(readl(dev->base + TXCFG)
-					& ~(TXCFG_CSI | TXCFG_HBI),
-			       dev->base + TXCFG);
-			writel(readl(dev->base + RXCFG) & ~(RXCFG_RX_FD),
-			       dev->base + RXCFG);
-		}
 
 		if ((cfg & CFG_LNKSTS) &&
-		    ((new_cfg ^ dev->CFG_cache) != 0)) {
+		    ((new_cfg ^ dev->CFG_cache) & CFG_MODE_1000)) {
 			writel(new_cfg, dev->base + CFG);
 			dev->CFG_cache = new_cfg;
 		}
@@ -1185,6 +1189,7 @@ again:
 
 	for (;;) {
 		volatile u32 *desc = dev->tx_descs + (free_idx * DESC_SIZE);
+		u32 residue = 0;
 
 		dprintk("frag[%3u]: %4u @ 0x%08Lx\n", free_idx, len,
 			(unsigned long long)buf);
@@ -1194,10 +1199,16 @@ again:
 		desc_addr_set(desc + DESC_BUFPTR, buf);
 		desc[DESC_EXTSTS] = cpu_to_le32(extsts);
 
-		cmdsts = ((nr_frags) ? CMDSTS_MORE : do_intr ? CMDSTS_INTR : 0);
+		cmdsts = ((nr_frags|residue) ? CMDSTS_MORE : do_intr ? CMDSTS_INTR : 0);
 		cmdsts |= (desc == first_desc) ? 0 : CMDSTS_OWN;
 		cmdsts |= len;
 		desc[DESC_CMDSTS] = cpu_to_le32(cmdsts);
+
+		if (residue) {
+			buf += len;
+			len = residue;
+			continue;
+		}
 
 		if (!nr_frags)
 			break;
@@ -1830,8 +1841,7 @@ static int __devinit ns83820_init_one(struct pci_dev *pci_dev, const struct pci_
 	int using_dac = 0;
 
 	/* See if we can set the dma mask early on; failure is fatal. */
-	if (sizeof(dma_addr_t) == 8 && 
-	 	!pci_set_dma_mask(pci_dev, 0xffffffffffffffffULL)) {
+	if (TRY_DAC && !pci_set_dma_mask(pci_dev, 0xffffffffffffffffULL)) {
 		using_dac = 1;
 	} else if (!pci_set_dma_mask(pci_dev, 0xffffffff)) {
 		using_dac = 0;
@@ -1962,8 +1972,9 @@ static int __devinit ns83820_init_one(struct pci_dev *pci_dev, const struct pci_
 	/* When compiled with 64 bit addressing, we must always enable
 	 * the 64 bit descriptor format.
 	 */
-	if (sizeof(dma_addr_t) == 8) 
-		dev->CFG_cache |= CFG_M64ADDR;
+#ifdef USE_64BIT_ADDR
+	dev->CFG_cache |= CFG_M64ADDR;
+#endif
 	if (using_dac)
 		dev->CFG_cache |= CFG_T64ADDR;
 
@@ -1996,7 +2007,8 @@ static int __devinit ns83820_init_one(struct pci_dev *pci_dev, const struct pci_
 	if (reset_phy) {
 		printk(KERN_INFO "%s: resetting phy\n", ndev->name);
 		writel(dev->CFG_cache | CFG_PHY_RST, dev->base + CFG);
-		msleep(10);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout((HZ+99)/100);
 		writel(dev->CFG_cache, dev->base + CFG);
 	}
 
@@ -2192,7 +2204,7 @@ static void __exit ns83820_exit(void)
 	pci_unregister_driver(&driver);
 }
 
-MODULE_AUTHOR("Benjamin LaHaise <bcrl@kvack.org>");
+MODULE_AUTHOR("Benjamin LaHaise <bcrl@redhat.com>");
 MODULE_DESCRIPTION("National Semiconductor DP83820 10/100/1000 driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(VERSION);

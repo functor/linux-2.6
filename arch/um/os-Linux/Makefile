@@ -3,11 +3,9 @@
 # Licensed under the GPL
 #
 
-obj-y = elf_aux.o file.o process.o signal.o time.o tty.o user_syms.o drivers/ \
-	sys-$(SUBARCH)/
+obj-y = file.o process.o time.o tty.o user_syms.o drivers/
 
-USER_OBJS := elf_aux.o file.o process.o signal.o time.o tty.o
+USER_OBJS := $(foreach file,file.o process.o time.o tty.o,$(obj)/$(file))
 
-CFLAGS_user_syms.o += -DSUBARCH_$(SUBARCH)
-
-include arch/um/scripts/Makefile.rules
+$(USER_OBJS) : %.o: %.c
+	$(CC) $(CFLAGS_$(notdir $@)) $(USER_CFLAGS) -c -o $@ $<

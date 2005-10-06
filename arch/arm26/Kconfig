@@ -45,10 +45,6 @@ config RWSEM_GENERIC_SPINLOCK
 config RWSEM_XCHGADD_ALGORITHM
 	bool
 
-config GENERIC_CALIBRATE_DELAY
-	bool
-	default y
-
 config GENERIC_BUST_SPINLOCK
 	bool
 
@@ -88,10 +84,6 @@ config PAGESIZE_16
           memory, otherwise say N.  The resulting kernel will not run on a
           machine with 4MB of memory.
 endmenu
-
-config ISA_DMA_API
-	bool
-	default y
 
 menu "General setup"
 
@@ -231,3 +223,4 @@ source "security/Kconfig"
 source "crypto/Kconfig"
 
 source "lib/Kconfig"
+

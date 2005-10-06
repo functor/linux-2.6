@@ -37,10 +37,12 @@
 #include <net/ipv6.h>
 #include <linux/icmpv6.h>
 
-static int esp6_output(struct xfrm_state *x, struct sk_buff *skb)
+static int esp6_output(struct sk_buff *skb)
 {
 	int err;
 	int hdr_len;
+	struct dst_entry *dst = skb->dst;
+	struct xfrm_state *x  = dst->xfrm;
 	struct ipv6hdr *top_iph;
 	struct ipv6_esp_hdr *esph;
 	struct crypto_tfm *tfm;
@@ -327,7 +329,7 @@ static int esp6_init_state(struct xfrm_state *x, void *args)
 			goto error;
 		esp->auth.icv = esp_hmac_digest;
  
-		aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name, 0);
+		aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name);
 		BUG_ON(!aalg_desc);
  
 		if (aalg_desc->uinfo.auth.icv_fullbits/8 !=
@@ -362,8 +364,7 @@ static int esp6_init_state(struct xfrm_state *x, void *args)
 			goto error;
 		get_random_bytes(esp->conf.ivec, esp->conf.ivlen);
 	}
-	if (crypto_cipher_setkey(esp->conf.tfm, esp->conf.key, esp->conf.key_len))
-		goto error;
+	crypto_cipher_setkey(esp->conf.tfm, esp->conf.key, esp->conf.key_len);
 	x->props.header_len = sizeof(struct ipv6_esp_hdr) + esp->conf.ivlen;
 	if (x->props.mode)
 		x->props.header_len += sizeof(struct ipv6hdr);
@@ -371,9 +372,15 @@ static int esp6_init_state(struct xfrm_state *x, void *args)
 	return 0;
 
 error:
-	x->data = esp;
-	esp6_destroy(x);
-	x->data = NULL;
+	if (esp) {
+		if (esp->auth.tfm)
+			crypto_free_tfm(esp->auth.tfm);
+		if (esp->auth.work_icv)
+			kfree(esp->auth.work_icv);
+		if (esp->conf.tfm)
+			crypto_free_tfm(esp->conf.tfm);
+		kfree(esp);
+	}
 	return -EINVAL;
 }
 

@@ -16,6 +16,7 @@
 #include <linux/tty.h>
 #include <linux/highmem.h>
 #include <linux/time.h>
+#include <linux/nmi.h>
 
 #include <asm/semaphore.h>
 #include <asm/processor.h>
@@ -61,6 +62,7 @@ extern unsigned long get_cmos_time(void);
 
 /* platform dependent support */
 EXPORT_SYMBOL(boot_cpu_data);
+EXPORT_SYMBOL(MCA_bus);
 #ifdef CONFIG_DISCONTIGMEM
 EXPORT_SYMBOL(node_data);
 EXPORT_SYMBOL(physnode_map);
@@ -74,6 +76,7 @@ EXPORT_SYMBOL_GPL(kernel_fpu_begin);
 EXPORT_SYMBOL(__ioremap);
 EXPORT_SYMBOL(ioremap_nocache);
 EXPORT_SYMBOL(iounmap);
+EXPORT_SYMBOL(probe_irq_mask);
 EXPORT_SYMBOL(kernel_thread);
 EXPORT_SYMBOL(pm_idle);
 EXPORT_SYMBOL(pm_power_off);
@@ -97,11 +100,6 @@ EXPORT_SYMBOL(__get_user_1);
 EXPORT_SYMBOL(__get_user_2);
 EXPORT_SYMBOL(__get_user_4);
 
-EXPORT_SYMBOL(__put_user_1);
-EXPORT_SYMBOL(__put_user_2);
-EXPORT_SYMBOL(__put_user_4);
-EXPORT_SYMBOL(__put_user_8);
-
 EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strstr);
 
@@ -117,6 +115,7 @@ EXPORT_SYMBOL(dma_alloc_coherent);
 EXPORT_SYMBOL(dma_free_coherent);
 
 #ifdef CONFIG_PCI
+EXPORT_SYMBOL(pcibios_penalize_isa_irq);
 EXPORT_SYMBOL(pci_mem_start);
 #endif
 
@@ -148,6 +147,7 @@ EXPORT_SYMBOL(smp_call_function);
 
 /* TLB flushing */
 EXPORT_SYMBOL(flush_tlb_page);
+EXPORT_SYMBOL_GPL(flush_tlb_all);
 #endif
 
 #ifdef CONFIG_X86_IO_APIC
@@ -168,6 +168,10 @@ EXPORT_SYMBOL(rtc_lock);
 
 EXPORT_SYMBOL_GPL(set_nmi_callback);
 EXPORT_SYMBOL_GPL(unset_nmi_callback);
+
+#undef memcmp
+extern int memcmp(const void *,const void *,__kernel_size_t);
+EXPORT_SYMBOL(memcmp);
 
 EXPORT_SYMBOL(register_die_notifier);
 #ifdef CONFIG_HAVE_DEC_LOCK
@@ -195,3 +199,20 @@ EXPORT_SYMBOL(ist_info);
 #endif
 
 EXPORT_SYMBOL(csum_partial);
+
+#ifdef CONFIG_CRASH_DUMP
+#ifdef CONFIG_SMP
+extern irq_desc_t irq_desc[NR_IRQS];
+extern unsigned long irq_affinity[NR_IRQS];
+extern void stop_this_cpu(void *);
+EXPORT_SYMBOL(irq_desc);
+EXPORT_SYMBOL(irq_affinity);
+EXPORT_SYMBOL(stop_this_cpu);
+EXPORT_SYMBOL(dump_send_ipi);
+#endif
+extern int page_is_ram(unsigned long);
+EXPORT_SYMBOL(page_is_ram);
+#ifdef ARCH_HAS_NMI_WATCHDOG
+EXPORT_SYMBOL(touch_nmi_watchdog);
+#endif
+#endif

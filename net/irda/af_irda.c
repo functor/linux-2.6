@@ -87,9 +87,11 @@ static int irda_data_indication(void *instance, void *sap, struct sk_buff *skb)
 
 	IRDA_DEBUG(3, "%s()\n", __FUNCTION__);
 
-	self = instance;
-	sk = instance;
-	IRDA_ASSERT(sk != NULL, return -1;);
+	self = (struct irda_sock *) instance;
+	ASSERT(self != NULL, return -1;);
+
+	sk = self->sk;
+	ASSERT(sk != NULL, return -1;);
 
 	err = sock_queue_rcv_skb(sk, skb);
 	if (err) {
@@ -115,7 +117,7 @@ static void irda_disconnect_indication(void *instance, void *sap,
 	struct irda_sock *self;
 	struct sock *sk;
 
-	self = instance;
+	self = (struct irda_sock *) instance;
 
 	IRDA_DEBUG(2, "%s(%p)\n", __FUNCTION__, self);
 
@@ -123,7 +125,7 @@ static void irda_disconnect_indication(void *instance, void *sap,
 	if(skb)
 		dev_kfree_skb(skb);
 
-	sk = instance;
+	sk = self->sk;
 	if (sk == NULL) {
 		IRDA_DEBUG(0, "%s(%p) : BUG : sk is NULL\n",
 			   __FUNCTION__, self);
@@ -181,11 +183,11 @@ static void irda_connect_confirm(void *instance, void *sap,
 	struct irda_sock *self;
 	struct sock *sk;
 
-	self = instance;
+	self = (struct irda_sock *) instance;
 
 	IRDA_DEBUG(2, "%s(%p)\n", __FUNCTION__, self);
 
-	sk = instance;
+	sk = self->sk;
 	if (sk == NULL) {
 		dev_kfree_skb(skb);
 		return;
@@ -204,16 +206,14 @@ static void irda_connect_confirm(void *instance, void *sap,
 	switch (sk->sk_type) {
 	case SOCK_STREAM:
 		if (max_sdu_size != 0) {
-			IRDA_ERROR("%s: max_sdu_size must be 0\n",
-				   __FUNCTION__);
+			ERROR("%s: max_sdu_size must be 0\n", __FUNCTION__);
 			return;
 		}
 		self->max_data_size = irttp_get_max_seg_size(self->tsap);
 		break;
 	case SOCK_SEQPACKET:
 		if (max_sdu_size == 0) {
-			IRDA_ERROR("%s: max_sdu_size cannot be 0\n",
-				   __FUNCTION__);
+			ERROR("%s: max_sdu_size cannot be 0\n", __FUNCTION__);
 			return;
 		}
 		self->max_data_size = max_sdu_size;
@@ -245,11 +245,11 @@ static void irda_connect_indication(void *instance, void *sap,
 	struct irda_sock *self;
 	struct sock *sk;
 
-	self = instance;
+	self = (struct irda_sock *) instance;
 
 	IRDA_DEBUG(2, "%s(%p)\n", __FUNCTION__, self);
 
-	sk = instance;
+	sk = self->sk;
 	if (sk == NULL) {
 		dev_kfree_skb(skb);
 		return;
@@ -265,8 +265,7 @@ static void irda_connect_indication(void *instance, void *sap,
 	switch (sk->sk_type) {
 	case SOCK_STREAM:
 		if (max_sdu_size != 0) {
-			IRDA_ERROR("%s: max_sdu_size must be 0\n",
-				   __FUNCTION__);
+			ERROR("%s: max_sdu_size must be 0\n", __FUNCTION__);
 			kfree_skb(skb);
 			return;
 		}
@@ -274,8 +273,7 @@ static void irda_connect_indication(void *instance, void *sap,
 		break;
 	case SOCK_SEQPACKET:
 		if (max_sdu_size == 0) {
-			IRDA_ERROR("%s: max_sdu_size cannot be 0\n",
-				   __FUNCTION__);
+			ERROR("%s: max_sdu_size cannot be 0\n", __FUNCTION__);
 			kfree_skb(skb);
 			return;
 		}
@@ -300,13 +298,13 @@ static void irda_connect_indication(void *instance, void *sap,
  *    Accept incoming connection
  *
  */
-static void irda_connect_response(struct irda_sock *self)
+void irda_connect_response(struct irda_sock *self)
 {
 	struct sk_buff *skb;
 
 	IRDA_DEBUG(2, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(self != NULL, return;);
+	ASSERT(self != NULL, return;);
 
 	skb = dev_alloc_skb(64);
 	if (skb == NULL) {
@@ -334,9 +332,11 @@ static void irda_flow_indication(void *instance, void *sap, LOCAL_FLOW flow)
 
 	IRDA_DEBUG(2, "%s()\n", __FUNCTION__);
 
-	self = instance;
-	sk = instance;
-	IRDA_ASSERT(sk != NULL, return;);
+	self = (struct irda_sock *) instance;
+	ASSERT(self != NULL, return;);
+
+	sk = self->sk;
+	ASSERT(sk != NULL, return;);
 
 	switch (flow) {
 	case FLOW_STOP:
@@ -373,7 +373,7 @@ static void irda_getvalue_confirm(int result, __u16 obj_id,
 
 	self = (struct irda_sock *) priv;
 	if (!self) {
-		IRDA_WARNING("%s: lost myself!\n", __FUNCTION__);
+		WARNING("%s: lost myself!\n", __FUNCTION__);
 		return;
 	}
 
@@ -422,7 +422,7 @@ static void irda_selective_discovery_indication(discinfo_t *discovery,
 
 	self = (struct irda_sock *) priv;
 	if (!self) {
-		IRDA_WARNING("%s: lost myself!\n", __FUNCTION__);
+		WARNING("%s: lost myself!\n", __FUNCTION__);
 		return;
 	}
 
@@ -448,7 +448,7 @@ static void irda_discovery_timeout(u_long priv)
 	IRDA_DEBUG(2, "%s()\n", __FUNCTION__);
 
 	self = (struct irda_sock *) priv;
-	IRDA_ASSERT(self != NULL, return;);
+	ASSERT(self != NULL, return;);
 
 	/* Nothing for the caller */
 	self->cachelog = NULL;
@@ -470,7 +470,7 @@ static int irda_open_tsap(struct irda_sock *self, __u8 tsap_sel, char *name)
 	notify_t notify;
 
 	if (self->tsap) {
-		IRDA_WARNING("%s: busy!\n", __FUNCTION__);
+		WARNING("%s: busy!\n", __FUNCTION__);
 		return -EBUSY;
 	}
 
@@ -510,7 +510,7 @@ static int irda_open_lsap(struct irda_sock *self, int pid)
 	notify_t notify;
 
 	if (self->lsap) {
-		IRDA_WARNING("%s(), busy!\n", __FUNCTION__);
+		WARNING("%s(), busy!\n", __FUNCTION__);
 		return -EBUSY;
 	}
 
@@ -545,11 +545,10 @@ static int irda_find_lsap_sel(struct irda_sock *self, char *name)
 {
 	IRDA_DEBUG(2, "%s(%p, %s)\n", __FUNCTION__, self, name);
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	if (self->iriap) {
-		IRDA_WARNING("%s(): busy with a previous query\n",
-			     __FUNCTION__);
+		WARNING("%s(): busy with a previous query\n", __FUNCTION__);
 		return -EBUSY;
 	}
 
@@ -634,7 +633,7 @@ static int irda_discover_daddr_and_lsap_sel(struct irda_sock *self, char *name)
 
 	IRDA_DEBUG(2, "%s(), name=%s\n", __FUNCTION__, name);
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	/* Ask lmp for the current discovery log
 	 * Note : we have to use irlmp_get_discoveries(), as opposed
@@ -783,7 +782,7 @@ static int irda_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	struct irda_sock *self = irda_sk(sk);
 	int err;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	IRDA_DEBUG(2, "%s(%p)\n", __FUNCTION__, self);
 
@@ -840,7 +839,7 @@ static int irda_accept(struct socket *sock, struct socket *newsock, int flags)
 
 	IRDA_DEBUG(2, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	err = irda_create(newsock, sk->sk_protocol);
 	if (err)
@@ -909,7 +908,7 @@ static int irda_accept(struct socket *sock, struct socket *newsock, int flags)
 	newsk->sk_state = TCP_ESTABLISHED;
 
 	new = irda_sk(newsk);
-	IRDA_ASSERT(new != NULL, return -1;);
+	ASSERT(new != NULL, return -1;);
 
 	/* Now attach up the new socket */
 	new->tsap = irttp_dup(self->tsap, new);
@@ -1013,23 +1012,11 @@ static int irda_connect(struct socket *sock, struct sockaddr *uaddr,
 		self->daddr = addr->sir_addr;
 		IRDA_DEBUG(1, "%s(), daddr = %08x\n", __FUNCTION__, self->daddr);
 
-		/* If we don't have a valid service name, we assume the
-		 * user want to connect on a specific LSAP. Prevent
-		 * the use of invalid LSAPs (IrLMP 1.1 p10). Jean II */
-		if((addr->sir_name[0] != '\0') ||
-		   (addr->sir_lsap_sel >= 0x70)) {
-			/* Query remote LM-IAS using service name */
-			err = irda_find_lsap_sel(self, addr->sir_name);
-			if (err) {
-				IRDA_DEBUG(0, "%s(), connect failed!\n", __FUNCTION__);
-				return err;
-			}
-		} else {
-			/* Directly connect to the remote LSAP
-			 * specified by the sir_lsap field.
-			 * Please use with caution, in IrDA LSAPs are
-			 * dynamic and there is no "well-known" LSAP. */
-			self->dtsap_sel = addr->sir_lsap_sel;
+		/* Query remote LM-IAS */
+		err = irda_find_lsap_sel(self, addr->sir_name);
+		if (err) {
+			IRDA_DEBUG(0, "%s(), connect failed!\n", __FUNCTION__);
+			return err;
 		}
 	}
 
@@ -1071,12 +1058,6 @@ static int irda_connect(struct socket *sock, struct sockaddr *uaddr,
 	return 0;
 }
 
-static struct proto irda_proto = {
-	.name	  = "IRDA",
-	.owner	  = THIS_MODULE,
-	.obj_size = sizeof(struct irda_sock),
-};
-
 /*
  * Function irda_create (sock, protocol)
  *
@@ -1101,19 +1082,28 @@ static int irda_create(struct socket *sock, int protocol)
 	}
 
 	/* Allocate networking socket */
-	sk = sk_alloc(PF_IRDA, GFP_ATOMIC, &irda_proto, 1);
-	if (sk == NULL)
+	if ((sk = sk_alloc(PF_IRDA, GFP_ATOMIC, 1, NULL)) == NULL)
 		return -ENOMEM;
 
-	self = irda_sk(sk);
+	/* Allocate IrDA socket */
+	self = sk->sk_protinfo = kmalloc(sizeof(struct irda_sock), GFP_ATOMIC);
+	if (self == NULL) {
+		sk_free(sk);
+		return -ENOMEM;
+	}
+	memset(self, 0, sizeof(struct irda_sock));
+
 	IRDA_DEBUG(2, "%s() : self is %p\n", __FUNCTION__, self);
 
 	init_waitqueue_head(&self->query_wait);
 
 	/* Initialise networking socket struct */
 	sock_init_data(sock, sk);	/* Note : set sk->sk_refcnt to 1 */
+	sk_set_owner(sk, THIS_MODULE);
 	sk->sk_family = PF_IRDA;
 	sk->sk_protocol = protocol;
+	/* Link networking socket and IrDA socket structs together */
+	self->sk = sk;
 
 	switch (sock->type) {
 	case SOCK_STREAM:
@@ -1141,8 +1131,7 @@ static int irda_create(struct socket *sock, int protocol)
 			self->max_sdu_size_rx = TTP_SAR_UNBOUND;
 			break;
 		default:
-			IRDA_ERROR("%s: protocol not supported!\n",
-				   __FUNCTION__);
+			ERROR("%s: protocol not supported!\n", __FUNCTION__);
 			return -ESOCKTNOSUPPORT;
 		}
 		break;
@@ -1166,11 +1155,11 @@ static int irda_create(struct socket *sock, int protocol)
  *    Destroy socket
  *
  */
-static void irda_destroy_socket(struct irda_sock *self)
+void irda_destroy_socket(struct irda_sock *self)
 {
 	IRDA_DEBUG(2, "%s(%p)\n", __FUNCTION__, self);
 
-	IRDA_ASSERT(self != NULL, return;);
+	ASSERT(self != NULL, return;);
 
 	/* Unregister with IrLMP */
 	irlmp_unregister_client(self->ckey);
@@ -1198,6 +1187,7 @@ static void irda_destroy_socket(struct irda_sock *self)
 		self->lsap = NULL;
 	}
 #endif /* CONFIG_IRDA_ULTRA */
+	kfree(self);
 }
 
 /*
@@ -1218,6 +1208,8 @@ static int irda_release(struct socket *sock)
 
 	/* Destroy IrDA socket */
 	irda_destroy_socket(irda_sk(sk));
+	/* Prevent sock_def_destruct() to create havoc */
+	sk->sk_protinfo = NULL;
 
 	sock_orphan(sk);
 	sock->sk   = NULL;
@@ -1289,7 +1281,7 @@ static int irda_sendmsg(struct kiocb *iocb, struct socket *sock,
 		return -ENOTCONN;
 
 	self = irda_sk(sk);
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	/* Check if IrTTP is wants us to slow down */
 
@@ -1352,7 +1344,7 @@ static int irda_recvmsg_dgram(struct kiocb *iocb, struct socket *sock,
 
 	IRDA_DEBUG(4, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT,
 				flags & MSG_DONTWAIT, &err);
@@ -1404,7 +1396,7 @@ static int irda_recvmsg_stream(struct kiocb *iocb, struct socket *sock,
 
 	IRDA_DEBUG(3, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	if (sock->flags & __SO_ACCEPTCON)
 		return(-EINVAL);
@@ -1541,7 +1533,7 @@ static int irda_sendmsg_dgram(struct kiocb *iocb, struct socket *sock,
 		return -ENOTCONN;
 
 	self = irda_sk(sk);
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	/*
 	 * Check that we don't send out to big frames. This is an unreliable
@@ -1610,7 +1602,7 @@ static int irda_sendmsg_ultra(struct kiocb *iocb, struct socket *sock,
 	}
 
 	self = irda_sk(sk);
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	/* Check if an address was specified with sendto. Jean II */
 	if (msg->msg_name) {
@@ -1683,7 +1675,7 @@ static int irda_shutdown(struct socket *sock, int how)
 	struct sock *sk = sock->sk;
 	struct irda_sock *self = irda_sk(sk);
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	IRDA_DEBUG(1, "%s(%p)\n", __FUNCTION__, self);
 
@@ -1844,7 +1836,7 @@ static int irda_setsockopt(struct socket *sock, int level, int optname,
 	struct ias_attrib *	ias_attr;	/* Attribute in IAS object */
 	int opt;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	IRDA_DEBUG(2, "%s(%p)\n", __FUNCTION__, self);
 
@@ -2029,8 +2021,8 @@ static int irda_setsockopt(struct socket *sock, int level, int optname,
 				   __FUNCTION__, opt);
 			self->max_sdu_size_rx = opt;
 		} else {
-			IRDA_WARNING("%s: not allowed to set MAXSDUSIZE for this socket type!\n",
-				     __FUNCTION__);
+			WARNING("%s: not allowed to set MAXSDUSIZE for this socket type!\n",
+					__FUNCTION__);
 			return -ENOPROTOOPT;
 		}
 		break;
@@ -2304,8 +2296,8 @@ bed:
 
 		/* Check that we can proceed with IAP */
 		if (self->iriap) {
-			IRDA_WARNING("%s: busy with a previous query\n",
-				     __FUNCTION__);
+			WARNING("%s: busy with a previous query\n",
+					__FUNCTION__);
 			kfree(ias_opt);
 			return -EBUSY;
 		}
@@ -2565,12 +2557,9 @@ SOCKOPS_WRAP(irda_ultra, PF_IRDA);
  */
 int __init irsock_init(void)
 {
-	int rc = proto_register(&irda_proto, 0);
+	sock_register(&irda_family_ops);
 
-	if (rc == 0)
-		rc = sock_register(&irda_family_ops);
-
-	return rc;
+	return 0;
 }
 
 /*
@@ -2582,5 +2571,6 @@ int __init irsock_init(void)
 void __exit irsock_cleanup(void)
 {
 	sock_unregister(PF_IRDA);
-	proto_unregister(&irda_proto);
+
+        return;
 }

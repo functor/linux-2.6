@@ -54,7 +54,7 @@ struct memelfnote
 };
 
 static struct kcore_list *kclist;
-static DEFINE_RWLOCK(kclist_lock);
+static rwlock_t kclist_lock = RW_LOCK_UNLOCKED;
 
 void
 kclist_add(struct kcore_list *new, void *addr, size_t size)
@@ -66,6 +66,23 @@ kclist_add(struct kcore_list *new, void *addr, size_t size)
 	new->next = kclist;
 	kclist = new;
 	write_unlock(&kclist_lock);
+}
+
+struct kcore_list *
+kclist_del(void *addr)
+{
+	struct kcore_list *m, **p = &kclist;
+
+	write_lock(&kclist_lock);
+	for (m = *p; m; p = &m->next) {
+		if (m->addr == (unsigned long)addr) {
+			*p = m->next;
+			write_unlock(&kclist_lock);
+			return m;
+		}
+	}
+	write_unlock(&kclist_lock);
+	return NULL;
 }
 
 static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
@@ -84,7 +101,7 @@ static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 	}
 	*elf_buflen =	sizeof(struct elfhdr) + 
 			(*nphdr + 2)*sizeof(struct elf_phdr) + 
-			3 * (sizeof(struct elf_note) + 4) +
+			3 * sizeof(struct memelfnote) +
 			sizeof(struct elf_prstatus) +
 			sizeof(struct elf_prpsinfo) +
 			sizeof(struct task_struct);
@@ -264,7 +281,8 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 	unsigned long start;
 
 	read_lock(&kclist_lock);
-	proc_root_kcore->size = size = get_kcore_size(&nphdr, &elf_buflen);
+	tsz =  get_kcore_size(&nphdr, &elf_buflen);
+	proc_root_kcore->size = size = tsz + elf_buflen;
 	if (buflen == 0 || *fpos >= size) {
 		read_unlock(&kclist_lock);
 		return 0;

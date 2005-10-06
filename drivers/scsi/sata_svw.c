@@ -156,7 +156,7 @@ static void k2_sata_tf_read(struct ata_port *ap, struct ata_taskfile *tf)
  *	spin_lock_irqsave(host_set lock)
  */
 
-static void k2_bmdma_setup_mmio (struct ata_queued_cmd *qc)
+void k2_bmdma_setup_mmio (struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 	unsigned int rw = (qc->tf.flags & ATA_TFLAG_WRITE);
@@ -186,7 +186,7 @@ static void k2_bmdma_setup_mmio (struct ata_queued_cmd *qc)
  *	spin_lock_irqsave(host_set lock)
  */
 
-static void k2_bmdma_start_mmio (struct ata_queued_cmd *qc)
+void k2_bmdma_start_mmio (struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 	void *mmio = (void *) ap->ioaddr.bmdma_addr;
@@ -288,7 +288,6 @@ static Scsi_Host_Template k2_sata_sht = {
 	.proc_info		= k2_sata_proc_info,
 #endif
 	.bios_param		= ata_std_bios_param,
-	.ordered_flush		= 1,
 };
 
 
@@ -302,8 +301,6 @@ static struct ata_port_operations k2_sata_ops = {
 	.phy_reset		= sata_phy_reset,
 	.bmdma_setup		= k2_bmdma_setup_mmio,
 	.bmdma_start		= k2_bmdma_start_mmio,
-	.bmdma_stop		= ata_bmdma_stop,
-	.bmdma_status		= ata_bmdma_status,
 	.qc_prep		= ata_qc_prep,
 	.qc_issue		= ata_qc_issue_prot,
 	.eng_timeout		= ata_eng_timeout,
@@ -313,7 +310,6 @@ static struct ata_port_operations k2_sata_ops = {
 	.scr_write		= k2_sata_scr_write,
 	.port_start		= ata_port_start,
 	.port_stop		= ata_port_stop,
-	.host_stop		= ata_host_stop,
 };
 
 static void k2_sata_setup_port(struct ata_ioports *port, unsigned long base)
@@ -342,7 +338,6 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	struct ata_probe_ent *probe_ent = NULL;
 	unsigned long base;
 	void *mmio_base;
-	int pci_dev_busy = 0;
 	int rc;
 
 	if (!printed_version++)
@@ -364,10 +359,8 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 
 	/* Request PCI regions */
 	rc = pci_request_regions(pdev, DRV_NAME);
-	if (rc) {
-		pci_dev_busy = 1;
+	if (rc)
 		goto err_out;
-	}
 
 	rc = pci_set_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
@@ -396,7 +389,7 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 
 	/* Clear a magic bit in SCR1 according to Darwin, those help
 	 * some funky seagate drives (though so far, those were already
-	 * set by the firmware on the machines I had access to)
+	 * set by the firmware on the machines I had access to
 	 */
 	writel(readl(mmio_base + K2_SATA_SICR1_OFFSET) & ~0x00040000,
 	       mmio_base + K2_SATA_SICR1_OFFSET);
@@ -440,8 +433,7 @@ err_out_free_ent:
 err_out_regions:
 	pci_release_regions(pdev);
 err_out:
-	if (!pci_dev_busy)
-		pci_disable_device(pdev);
+	pci_disable_device(pdev);
 	return rc;
 }
 

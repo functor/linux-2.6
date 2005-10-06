@@ -51,6 +51,9 @@ I2C_CLIENT_INSMOD;
 static struct i2c_driver driver;
 static struct i2c_client client_template;
 
+/* unique ID allocation */
+static int tea6415c_id = 0;
+
 /* this function is called by i2c_probe */
 static int detect(struct i2c_adapter *adapter, int address, int kind)
 {
@@ -70,6 +73,7 @@ static int detect(struct i2c_adapter *adapter, int address, int kind)
 
 	/* fill client structure */
 	memcpy(client, &client_template, sizeof(struct i2c_client));
+	client->id = tea6415c_id++;
 	client->addr = address;
 	client->adapter = adapter;
 

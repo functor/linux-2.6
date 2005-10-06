@@ -87,8 +87,6 @@ static __inline__ int irq_canonicalize(int irq)
 	return irq;
 }
 
-extern int distribute_irqs;
-
 struct irqaction;
 struct pt_regs;
 

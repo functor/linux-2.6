@@ -493,7 +493,7 @@ smb_put_super(struct super_block *sb)
 	smb_kfree(server);
 }
 
-static int smb_fill_super(struct super_block *sb, void *raw_data, int silent)
+int smb_fill_super(struct super_block *sb, void *raw_data, int silent)
 {
 	struct smb_sb_info *server;
 	struct smb_mount_data_kernel *mnt;
@@ -516,7 +516,6 @@ static int smb_fill_super(struct super_block *sb, void *raw_data, int silent)
 	sb->s_blocksize_bits = 10;
 	sb->s_magic = SMB_SUPER_MAGIC;
 	sb->s_op = &smb_sops;
-	sb->s_time_gran = 100;
 
 	server = smb_kmalloc(sizeof(struct smb_sb_info), GFP_KERNEL);
 	if (!server)
@@ -602,7 +601,7 @@ static int smb_fill_super(struct super_block *sb, void *raw_data, int silent)
 	/*
 	 * Keep the super block locked while we get the root inode.
 	 */
-	smb_init_root_dirent(server, &root, sb);
+	smb_init_root_dirent(server, &root);
 	root_inode = smb_iget(sb, &root);
 	if (!root_inode)
 		goto out_no_root;

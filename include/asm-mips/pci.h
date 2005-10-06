@@ -137,10 +137,17 @@ extern void pcibios_resource_to_bus(struct pci_dev *dev,
 
 #define pci_domain_nr(bus) ((struct pci_controller *)(bus)->sysdata)->index
 
-static inline int pci_proc_domain(struct pci_bus *bus)
+static inline int
+pci_name_bus(char *name, struct pci_bus *bus)
 {
 	struct pci_controller *hose = bus->sysdata;
-	return hose->need_domain_info;
+
+	if (likely(hose->need_domain_info == 0)) {
+		sprintf(name, "%02x", bus->number);
+	} else {
+		sprintf(name, "%04x:%02x", hose->index, bus->number);
+	}
+	return 0;
 }
 
 #endif /* CONFIG_PCI_DOMAINS */

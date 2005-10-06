@@ -49,14 +49,14 @@
  * This macro is used to determine the 'next' bio in the list, given the sector
  * of the current stripe+device
  */
-#define r5_next_bio(bio, sect) ( ( (bio)->bi_sector + ((bio)->bi_size>>9) < sect + STRIPE_SECTORS) ? (bio)->bi_next : NULL)
+#define r5_next_bio(bio, sect) ( ( bio->bi_sector + (bio->bi_size>>9) < sect + STRIPE_SECTORS) ? bio->bi_next : NULL)
 /*
  * The following can be used to debug the driver
  */
 #define RAID5_DEBUG	0
 #define RAID5_PARANOIA	1
 #if RAID5_PARANOIA && defined(CONFIG_SMP)
-# define CHECK_DEVLOCK() assert_spin_locked(&conf->device_lock)
+# define CHECK_DEVLOCK() if (!spin_is_locked(&conf->device_lock)) BUG()
 #else
 # define CHECK_DEVLOCK()
 #endif
@@ -232,7 +232,6 @@ static struct stripe_head *__find_stripe(raid5_conf_t *conf, sector_t sector)
 }
 
 static void unplug_slaves(mddev_t *mddev);
-static void raid5_unplug_device(request_queue_t *q);
 
 static struct stripe_head *get_active_stripe(raid5_conf_t *conf, sector_t sector,
 					     int pd_idx, int noblock) 
@@ -303,7 +302,7 @@ static int grow_stripes(raid5_conf_t *conf, int num)
 			return 1;
 		memset(sh, 0, sizeof(*sh) + (devs-1)*sizeof(struct r5dev));
 		sh->raid_conf = conf;
-		spin_lock_init(&sh->lock);
+		sh->lock = SPIN_LOCK_UNLOCKED;
 
 		if (grow_buffers(sh, conf->raid_disks)) {
 			shrink_buffers(sh, conf->raid_disks);
@@ -458,7 +457,6 @@ static void raid5_build_block (struct stripe_head *sh, int i)
 	bio_init(&dev->req);
 	dev->req.bi_io_vec = &dev->vec;
 	dev->req.bi_vcnt++;
-	dev->req.bi_max_vecs++;
 	dev->vec.bv_page = dev->page;
 	dev->vec.bv_len = STRIPE_SIZE;
 	dev->vec.bv_offset = 0;
@@ -614,10 +612,11 @@ static sector_t compute_blocknr(struct stripe_head *sh, int i)
 
 
 /*
- * Copy data between a page in the stripe cache, and a bio.
- * There are no alignment or size guarantees between the page or the
- * bio except that there is some overlap.
- * All iovecs in the bio must be considered.
+ * Copy data between a page in the stripe cache, and one or more bion
+ * The page could align with the middle of the bio, or there could be 
+ * several bion, each with several bio_vecs, which cover part of the page
+ * Multiple bion are linked together on bi_next.  There may be extras
+ * at the end of this list.  We ignore them.
  */
 static void copy_data(int frombio, struct bio *bio,
 		     struct page *page,
@@ -626,38 +625,41 @@ static void copy_data(int frombio, struct bio *bio,
 	char *pa = page_address(page);
 	struct bio_vec *bvl;
 	int i;
-	int page_offset;
 
-	if (bio->bi_sector >= sector)
-		page_offset = (signed)(bio->bi_sector - sector) * 512;
-	else
-		page_offset = (signed)(sector - bio->bi_sector) * -512;
-	bio_for_each_segment(bvl, bio, i) {
-		int len = bio_iovec_idx(bio,i)->bv_len;
-		int clen;
-		int b_offset = 0;
+	for (;bio && bio->bi_sector < sector+STRIPE_SECTORS;
+	      bio = r5_next_bio(bio, sector) ) {
+		int page_offset;
+		if (bio->bi_sector >= sector)
+			page_offset = (signed)(bio->bi_sector - sector) * 512;
+		else 
+			page_offset = (signed)(sector - bio->bi_sector) * -512;
+		bio_for_each_segment(bvl, bio, i) {
+			int len = bio_iovec_idx(bio,i)->bv_len;
+			int clen;
+			int b_offset = 0;			
 
-		if (page_offset < 0) {
-			b_offset = -page_offset;
-			page_offset += b_offset;
-			len -= b_offset;
-		}
+			if (page_offset < 0) {
+				b_offset = -page_offset;
+				page_offset += b_offset;
+				len -= b_offset;
+			}
 
-		if (len > 0 && page_offset + len > STRIPE_SIZE)
-			clen = STRIPE_SIZE - page_offset;
-		else clen = len;
+			if (len > 0 && page_offset + len > STRIPE_SIZE)
+				clen = STRIPE_SIZE - page_offset;	
+			else clen = len;
 			
-		if (clen > 0) {
-			char *ba = __bio_kmap_atomic(bio, i, KM_USER0);
-			if (frombio)
-				memcpy(pa+page_offset, ba+b_offset, clen);
-			else
-				memcpy(ba+b_offset, pa+page_offset, clen);
-			__bio_kunmap_atomic(ba, KM_USER0);
+			if (clen > 0) {
+				char *ba = __bio_kmap_atomic(bio, i, KM_USER0);
+				if (frombio)
+					memcpy(pa+page_offset, ba+b_offset, clen);
+				else
+					memcpy(ba+b_offset, pa+page_offset, clen);
+				__bio_kunmap_atomic(ba, KM_USER0);
+			}	
+			if (clen < len) /* hit end of page */
+				break;
+			page_offset +=  len;
 		}
-		if (clen < len) /* hit end of page */
-			break;
-		page_offset +=  len;
 	}
 }
 
@@ -723,10 +725,6 @@ static void compute_parity(struct stripe_head *sh, int method)
 				ptr[count++] = page_address(sh->dev[i].page);
 				chosen = sh->dev[i].towrite;
 				sh->dev[i].towrite = NULL;
-
-				if (test_and_clear_bit(R5_Overlap, &sh->dev[i].flags))
-					wake_up(&conf->wait_for_overlap);
-
 				if (sh->dev[i].written) BUG();
 				sh->dev[i].written = chosen;
 				check_xor();
@@ -739,10 +737,6 @@ static void compute_parity(struct stripe_head *sh, int method)
 			if (i!=pd_idx && sh->dev[i].towrite) {
 				chosen = sh->dev[i].towrite;
 				sh->dev[i].towrite = NULL;
-
-				if (test_and_clear_bit(R5_Overlap, &sh->dev[i].flags))
-					wake_up(&conf->wait_for_overlap);
-
 				if (sh->dev[i].written) BUG();
 				sh->dev[i].written = chosen;
 			}
@@ -799,7 +793,7 @@ static void compute_parity(struct stripe_head *sh, int method)
  * toread/towrite point to the first in a chain. 
  * The bi_next chain must be in order.
  */
-static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, int forwrite)
+static void add_stripe_bio (struct stripe_head *sh, struct bio *bi, int dd_idx, int forwrite)
 {
 	struct bio **bip;
 	raid5_conf_t *conf = sh->raid_conf;
@@ -816,13 +810,10 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
 	else
 		bip = &sh->dev[dd_idx].toread;
 	while (*bip && (*bip)->bi_sector < bi->bi_sector) {
-		if ((*bip)->bi_sector + ((*bip)->bi_size >> 9) > bi->bi_sector)
-			goto overlap;
+		BUG_ON((*bip)->bi_sector + ((*bip)->bi_size >> 9) > bi->bi_sector);
 		bip = & (*bip)->bi_next;
 	}
-	if (*bip && (*bip)->bi_sector < bi->bi_sector + ((bi->bi_size)>>9))
-		goto overlap;
-
+/* FIXME do I need to worry about overlapping bion */
 	if (*bip && bi->bi_next && (*bip) != bi->bi_next)
 		BUG();
 	if (*bip)
@@ -837,7 +828,7 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
 		(unsigned long long)sh->sector, dd_idx);
 
 	if (forwrite) {
-		/* check if page is covered */
+		/* check if page is coverred */
 		sector_t sector = sh->dev[dd_idx].sector;
 		for (bi=sh->dev[dd_idx].towrite;
 		     sector < sh->dev[dd_idx].sector + STRIPE_SECTORS &&
@@ -849,13 +840,6 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
 		if (sector >= sh->dev[dd_idx].sector + STRIPE_SECTORS)
 			set_bit(R5_OVERWRITE, &sh->dev[dd_idx].flags);
 	}
-	return 1;
-
- overlap:
-	set_bit(R5_Overlap, &sh->dev[dd_idx].flags);
-	spin_unlock_irq(&conf->device_lock);
-	spin_unlock(&sh->lock);
-	return 0;
 }
 
 
@@ -916,8 +900,6 @@ static void handle_stripe(struct stripe_head *sh)
 			spin_lock_irq(&conf->device_lock);
 			rbi = dev->toread;
 			dev->toread = NULL;
-			if (test_and_clear_bit(R5_Overlap, &dev->flags))
-				wake_up(&conf->wait_for_overlap);
 			spin_unlock_irq(&conf->device_lock);
 			while (rbi && rbi->bi_sector < dev->sector + STRIPE_SECTORS) {
 				copy_data(0, rbi, dev->page, dev->sector);
@@ -965,9 +947,6 @@ static void handle_stripe(struct stripe_head *sh)
 			sh->dev[i].towrite = NULL;
 			if (bi) to_write--;
 
-			if (test_and_clear_bit(R5_Overlap, &sh->dev[i].flags))
-				wake_up(&conf->wait_for_overlap);
-
 			while (bi && bi->bi_sector < sh->dev[i].sector + STRIPE_SECTORS){
 				struct bio *nextbi = r5_next_bio(bi, sh->dev[i].sector);
 				clear_bit(BIO_UPTODATE, &bi->bi_flags);
@@ -996,8 +975,6 @@ static void handle_stripe(struct stripe_head *sh)
 			if (!test_bit(R5_Insync, &sh->dev[i].flags)) {
 				bi = sh->dev[i].toread;
 				sh->dev[i].toread = NULL;
-				if (test_and_clear_bit(R5_Overlap, &sh->dev[i].flags))
-					wake_up(&conf->wait_for_overlap);
 				if (bi) to_read--;
 				while (bi && bi->bi_sector < sh->dev[i].sector + STRIPE_SECTORS){
 					struct bio *nextbi = r5_next_bio(bi, sh->dev[i].sector);
@@ -1289,7 +1266,6 @@ static void handle_stripe(struct stripe_head *sh)
 			bi->bi_sector = sh->sector + rdev->data_offset;
 			bi->bi_flags = 1 << BIO_UPTODATE;
 			bi->bi_vcnt = 1;	
-			bi->bi_max_vecs = 1;
 			bi->bi_idx = 0;
 			bi->bi_io_vec = &sh->dev[i].vec;
 			bi->bi_io_vec[0].bv_len = STRIPE_SIZE;
@@ -1428,7 +1404,6 @@ static int make_request (request_queue_t *q, struct bio * bi)
 	if ( bio_data_dir(bi) == WRITE )
 		md_write_start(mddev);
 	for (;logical_sector < last_sector; logical_sector += STRIPE_SECTORS) {
-		DEFINE_WAIT(w);
 		
 		new_sector = raid5_compute_sector(logical_sector,
 						  raid_disks, data_disks, &dd_idx, &pd_idx, conf);
@@ -1437,28 +1412,17 @@ static int make_request (request_queue_t *q, struct bio * bi)
 			(unsigned long long)new_sector, 
 			(unsigned long long)logical_sector);
 
-	retry:
-		prepare_to_wait(&conf->wait_for_overlap, &w, TASK_UNINTERRUPTIBLE);
 		sh = get_active_stripe(conf, new_sector, pd_idx, (bi->bi_rw&RWA_MASK));
 		if (sh) {
-			if (!add_stripe_bio(sh, bi, dd_idx, (bi->bi_rw&RW_MASK))) {
-				/* Add failed due to overlap.  Flush everything
-				 * and wait a while
-				 */
-				raid5_unplug_device(mddev->queue);
-				release_stripe(sh);
-				schedule();
-				goto retry;
-			}
-			finish_wait(&conf->wait_for_overlap, &w);
+
+			add_stripe_bio(sh, bi, dd_idx, (bi->bi_rw&RW_MASK));
+
 			raid5_plug_device(conf);
 			handle_stripe(sh);
 			release_stripe(sh);
-
 		} else {
 			/* cannot get stripe for read-ahead, just give-up */
 			clear_bit(BIO_UPTODATE, &bi->bi_flags);
-			finish_wait(&conf->wait_for_overlap, &w);
 			break;
 		}
 			
@@ -1494,15 +1458,6 @@ static int sync_request (mddev_t *mddev, sector_t sector_nr, int go_faster)
 		/* just being told to finish up .. nothing much to do */
 		unplug_slaves(mddev);
 		return 0;
-	}
-	/* if there is 1 or more failed drives and we are trying
-	 * to resync, then assert that we are finished, because there is
-	 * nothing we can do.
-	 */
-	if (mddev->degraded >= 1 && test_bit(MD_RECOVERY_SYNC, &mddev->recovery)) {
-		int rv = (mddev->size << 1) - sector_nr;
-		md_done_sync(mddev, rv, 1);
-		return rv;
 	}
 
 	x = sector_nr;
@@ -1613,14 +1568,16 @@ static int run (mddev_t *mddev)
 		goto abort;
 	memset(conf->stripe_hashtbl, 0, HASH_PAGES * PAGE_SIZE);
 
-	spin_lock_init(&conf->device_lock);
+	conf->device_lock = SPIN_LOCK_UNLOCKED;
 	init_waitqueue_head(&conf->wait_for_stripe);
-	init_waitqueue_head(&conf->wait_for_overlap);
 	INIT_LIST_HEAD(&conf->handle_list);
 	INIT_LIST_HEAD(&conf->delayed_list);
 	INIT_LIST_HEAD(&conf->inactive_list);
 	atomic_set(&conf->active_stripes, 0);
 	atomic_set(&conf->preread_active_stripes, 0);
+
+	mddev->queue->unplug_fn = raid5_unplug_device;
+	mddev->queue->issue_flush_fn = raid5_issue_flush;
 
 	PRINTK("raid5: run(%s) called.\n", mdname(mddev));
 
@@ -1727,10 +1684,6 @@ memory = conf->max_nr_stripes * (sizeof(struct stripe_head) +
 	}
 
 	/* Ok, everything is just fine now */
-
-	mddev->queue->unplug_fn = raid5_unplug_device;
-	mddev->queue->issue_flush_fn = raid5_issue_flush;
-
 	mddev->array_size =  mddev->size * (mddev->raid_disks - 1);
 	return 0;
 abort:
@@ -1876,7 +1829,7 @@ static int raid5_remove_disk(mddev_t *mddev, int number)
 			goto abort;
 		}
 		p->rdev = NULL;
-		synchronize_rcu();
+		synchronize_kernel();
 		if (atomic_read(&rdev->nr_pending)) {
 			/* lost the race, try later */
 			err = -EBUSY;
@@ -1895,10 +1848,6 @@ static int raid5_add_disk(mddev_t *mddev, mdk_rdev_t *rdev)
 	int found = 0;
 	int disk;
 	struct disk_info *p;
-
-	if (mddev->degraded > 1)
-		/* no point adding a device */
-		return 0;
 
 	/*
 	 * find the disk ...

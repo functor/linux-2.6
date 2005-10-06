@@ -72,7 +72,7 @@ static int sbus_to_pil[] = {
 
 static int nsbi;
 #ifdef CONFIG_SMP
-DEFINE_SPINLOCK(sun4d_imsk_lock);
+spinlock_t sun4d_imsk_lock = SPIN_LOCK_UNLOCKED;
 #endif
 
 int show_sun4d_interrupts(struct seq_file *p, void *v)

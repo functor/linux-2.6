@@ -487,7 +487,7 @@ static int upload_dma_data(struct soundscape *s,
 		 * the userspace pointer ...
 		 */
 		len = min(size, dma.bytes);
-		len -= __copy_from_user(dma.area, data, len);
+		__copy_from_user(dma.area, data, len);
 		data += len;
 		size -= len;
 
@@ -571,9 +571,8 @@ static int sscape_upload_bootblock(struct soundscape *sscape, struct sscape_boot
 		if (data < 0) {
 			snd_printk(KERN_ERR "sscape: timeout reading firmware version\n");
 			ret = -EAGAIN;
-		}
-		else if (__copy_to_user(&bb->version, &data, sizeof(bb->version))) {
-			ret = -EFAULT;
+		} else {
+			__copy_to_user(&bb->version, &data, sizeof(bb->version));
 		}
 	}
 
@@ -592,7 +591,7 @@ static int sscape_upload_microcode(struct soundscape *sscape,
 {
 	unsigned long flags;
 	char __user *code;
-	int err;
+	int err, ret;
 
 	/*
 	 * We are going to have to copy this data into a special
@@ -602,11 +601,12 @@ static int sscape_upload_microcode(struct soundscape *sscape,
 	 * NOTE: This buffer is 64K long! That's WAY too big to
 	 *       copy into a stack-temporary anyway.
 	 */
-	if ( get_user(code, &mc->code) ||
-	     !access_ok(VERIFY_READ, code, SSCAPE_MICROCODE_SIZE) )
+	if (get_user(code, &mc->code))
 		return -EFAULT;
+	if ((err = verify_area(VERIFY_READ, code, SSCAPE_MICROCODE_SIZE)) != 0)
+		return err;
 
-	if ((err = upload_dma_data(sscape, code, SSCAPE_MICROCODE_SIZE)) == 0) {
+	if ((ret = upload_dma_data(sscape, code, SSCAPE_MICROCODE_SIZE)) == 0) {
 		snd_printk(KERN_INFO "sscape: MIDI firmware loaded\n");
 	}
 
@@ -616,7 +616,7 @@ static int sscape_upload_microcode(struct soundscape *sscape,
 
 	initialise_mpu401(sscape->mpu);
 
-	return err;
+	return ret;
 }
 
 /*
@@ -673,14 +673,14 @@ static int sscape_hw_ioctl(snd_hwdep_t * hw, struct file *file,
 			 * DMA-able buffer before we can upload it. We shall therefore
 			 * just check that the data pointer is valid for now ...
 			 */
-			if ( !access_ok(VERIFY_READ, bb->code, sizeof(bb->code)) )
-				return -EFAULT;
+			if ((err = verify_area(VERIFY_READ, bb->code, sizeof(bb->code))) != 0)
+				return err;
 
 			/*
 			 * Now check that we can write the firmware version number too...
 			 */
-			if ( !access_ok(VERIFY_WRITE, &bb->version, sizeof(bb->version)) )
-				return -EFAULT;
+			if ((err = verify_area(VERIFY_WRITE, &bb->version, sizeof(bb->version))) != 0)
+				return err;
 
 			err = sscape_upload_bootblock(sscape, bb);
 		}

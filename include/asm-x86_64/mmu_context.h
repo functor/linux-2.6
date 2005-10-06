@@ -28,11 +28,6 @@ static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 }
 #endif
 
-static inline void load_cr3(pgd_t *pgd)
-{
-	asm volatile("movq %0,%%cr3" :: "r" (__pa(pgd)) : "memory");
-}
-
 static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next, 
 			     struct task_struct *tsk)
 {
@@ -45,7 +40,9 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 		write_pda(active_mm, next);
 #endif
 		set_bit(cpu, &next->cpu_vm_mask);
-		load_cr3(next->pgd);
+		/* Re-load page tables */
+		*read_pda(level4_pgt) = __pa(next->pgd) | _PAGE_TABLE;
+		__flush_tlb();
 
 		if (unlikely(next->context.ldt != prev->context.ldt)) 
 			load_LDT_nolock(&next->context, cpu);
@@ -57,10 +54,9 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 			out_of_line_bug();
 		if(!test_and_set_bit(cpu, &next->cpu_vm_mask)) {
 			/* We were in lazy tlb mode and leave_mm disabled 
-			 * tlb flush IPI delivery. We must reload CR3
-			 * to make sure to use no freed page tables.
+			 * tlb flush IPI delivery. We must flush our tlb.
 			 */
-			load_cr3(next->pgd);
+			local_flush_tlb();
 			load_LDT_nolock(&next->context, cpu);
 		}
 	}

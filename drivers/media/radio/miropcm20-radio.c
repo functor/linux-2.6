@@ -26,7 +26,7 @@
 #include "miropcm20-rds-core.h"
 
 static int radio_nr = -1;
-module_param(radio_nr, int, 0);
+MODULE_PARM(radio_nr, "i");
 
 struct pcm20_device {
 	unsigned long freq;
@@ -75,7 +75,9 @@ static int pcm20_getflags(struct pcm20_device *dev, __u32 *flags, __u16 *signal)
 
 	if ((i=aci_rw_cmd(ACI_READ_TUNERSTATION, -1, -1))<0)
 		return i;
-	pr_debug("check_sig: 0x%x\n", i);
+#ifdef DEBUG
+	printk("check_sig: 0x%x\n", i);
+#endif
 	if (i & 0x80) {
 		/* no signal from tuner */
 		*flags=0;
@@ -105,7 +107,9 @@ static int pcm20_getflags(struct pcm20_device *dev, __u32 *flags, __u16 *signal)
 
 	if ((i=aci_rds_cmd(RDS_RXVALUE, &buf, 1))<0)
 		return i;
-	pr_debug("rds-signal: %d\n", buf);
+#ifdef DEBUG
+	printk("rds-signal: %d\n", buf);
+#endif
 	if (buf > 15) {
 		printk("miropcm20-radio: RX strengths unexpected high...\n");
 		buf=15;
@@ -168,7 +172,9 @@ static int pcm20_do_ioctl(struct inode *inode, struct file *file,
 			unsigned long *freq = arg;
 			pcm20->freq = *freq;
 			i=pcm20_setfreq(pcm20, pcm20->freq);
-			pr_debug("First view (setfreq): 0x%x\n", i);
+#ifdef DEBUG
+			printk("First view (setfreq): 0x%x\n", i);
+#endif
 			return i;
 		}
 		case VIDIOCGAUDIO:

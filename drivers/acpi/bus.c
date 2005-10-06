@@ -57,6 +57,10 @@ EXPORT_SYMBOL(acpi_root_dir);
                                 Device Management
    -------------------------------------------------------------------------- */
 
+extern void acpi_bus_data_handler (
+	acpi_handle		handle,
+	u32			function,
+	void			*context);
 int
 acpi_bus_get_device (
 	acpi_handle		handle,
@@ -73,7 +77,7 @@ acpi_bus_get_device (
 
 	status = acpi_get_data(handle, acpi_bus_data_handler, (void**) device);
 	if (ACPI_FAILURE(status) || !*device) {
-		ACPI_DEBUG_PRINT((ACPI_DB_WARN, "No context for object [%p]\n",
+		ACPI_DEBUG_PRINT((ACPI_DB_WARN, "Error getting context for object [%p]\n",
 			handle));
 		return_VALUE(-ENODEV);
 	}
@@ -281,7 +285,7 @@ EXPORT_SYMBOL(acpi_bus_set_power);
                                 Event Management
    -------------------------------------------------------------------------- */
 
-static DEFINE_SPINLOCK(acpi_bus_event_lock);
+static spinlock_t		acpi_bus_event_lock = SPIN_LOCK_UNLOCKED;
 
 LIST_HEAD(acpi_bus_event_list);
 DECLARE_WAIT_QUEUE_HEAD(acpi_bus_event_queue);

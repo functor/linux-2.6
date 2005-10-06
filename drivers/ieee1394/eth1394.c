@@ -89,7 +89,7 @@
 #define TRACE() printk(KERN_ERR "%s:%s[%d] ---- TRACE\n", driver_name, __FUNCTION__, __LINE__)
 
 static char version[] __devinitdata =
-	"$Rev: 1247 $ Ben Collins <bcollins@debian.org>";
+	"$Rev: 1224 $ Ben Collins <bcollins@debian.org>";
 
 struct fragment_info {
 	struct list_head list;
@@ -165,13 +165,14 @@ MODULE_LICENSE("GPL");
 /* The max_partial_datagrams parameter is the maximum number of fragmented
  * datagrams per node that eth1394 will keep in memory.  Providing an upper
  * bound allows us to limit the amount of memory that partial datagrams
- * consume in the event that some partial datagrams are never completed.
+ * consume in the event that some partial datagrams are never completed.  This
+ * should probably change to a sysctl item or the like if possible.
  */
-static int max_partial_datagrams = 25;
-module_param(max_partial_datagrams, int, S_IRUGO | S_IWUSR);
+MODULE_PARM(max_partial_datagrams, "i");
 MODULE_PARM_DESC(max_partial_datagrams,
 		 "Maximum number of partially received fragmented datagrams "
 		 "(default = 25).");
+static int max_partial_datagrams = 25;
 
 
 static int ether1394_header(struct sk_buff *skb, struct net_device *dev,
@@ -185,7 +186,7 @@ static void ether1394_header_cache_update(struct hh_cache *hh,
 					  unsigned char * haddr);
 static int ether1394_mac_addr(struct net_device *dev, void *p);
 
-static void purge_partial_datagram(struct list_head *old);
+static inline void purge_partial_datagram(struct list_head *old);
 static int ether1394_tx(struct sk_buff *skb, struct net_device *dev);
 static void ether1394_iso(struct hpsb_iso *iso);
 
@@ -288,7 +289,7 @@ static int ether1394_change_mtu(struct net_device *dev, int new_mtu)
 	return 0;
 }
 
-static void purge_partial_datagram(struct list_head *old)
+static inline void purge_partial_datagram(struct list_head *old)
 {
 	struct partial_datagram *pd = list_entry(old, struct partial_datagram, list);
 	struct list_head *lh, *n;
@@ -448,7 +449,7 @@ static int eth1394_update(struct unit_directory *ud)
 		if (!node_info) {
 			kfree(node);
 			return -ENOMEM;
-		}
+                }
 
 		spin_lock_init(&node_info->pdg.lock);
 		INIT_LIST_HEAD(&node_info->pdg.list);
@@ -625,7 +626,7 @@ static void ether1394_add_host (struct hpsb_host *host)
 		goto out;
 	}
 
-	ETH1394_PRINT (KERN_INFO, dev->name, "IEEE-1394 IPv4 over 1394 Ethernet (fw-host%d)\n",
+	ETH1394_PRINT (KERN_ERR, dev->name, "IEEE-1394 IPv4 over 1394 Ethernet (fw-host%d)\n",
 		       host->id);
 
 	hi->host = host;
@@ -1186,7 +1187,7 @@ static int ether1394_data_handler(struct net_device *dev, int srcid, int destid,
 		lh = find_partial_datagram(pdgl, dgl);
 
 		if (lh == NULL) {
-			while (pdg->sz >= max_partial_datagrams) {
+			if (pdg->sz == max_partial_datagrams) {
 				/* remove the oldest */
 				purge_partial_datagram(pdgl->prev);
 				pdg->sz--;
@@ -1582,7 +1583,7 @@ static inline void ether1394_dg_complete(struct packet_task *ptask, int fail)
 	struct sk_buff *skb = ptask->skb;
 	struct net_device *dev = skb->dev;
 	struct eth1394_priv *priv = netdev_priv(dev);
-	unsigned long flags;
+        unsigned long flags;
 
 	/* Statistics */
 	spin_lock_irqsave(&priv->lock, flags);
@@ -1770,7 +1771,7 @@ fail:
 static void ether1394_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
 	strcpy (info->driver, driver_name);
-	strcpy (info->version, "$Rev: 1247 $");
+	strcpy (info->version, "$Rev: 1224 $");
 	/* FIXME XXX provide sane businfo */
 	strcpy (info->bus_info, "ieee1394");
 }

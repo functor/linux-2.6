@@ -50,8 +50,7 @@
  */
 #if (defined(CONFIG_SERIAL_8250_CONSOLE) \
 	|| defined(CONFIG_VGA_CONSOLE) \
-	|| defined(CONFIG_SERIAL_MPC52xx_CONSOLE) \
-	|| defined(CONFIG_SERIAL_MPSC_CONSOLE)) \
+	|| defined(CONFIG_SERIAL_MPC52xx_CONSOLE)) \
 	&& !defined(CONFIG_GEMINI)
 #define INTERACTIVE_CONSOLE	1
 #endif
@@ -99,11 +98,11 @@ decompress_kernel(unsigned long load_addr, int num_words, unsigned long cksum)
 	struct bi_record *rec;
 	unsigned long initrd_loc = 0, TotalMemory = 0;
 
-#if defined(CONFIG_SERIAL_8250_CONSOLE) || defined(CONFIG_SERIAL_MPSC_CONSOLE)
+#ifdef CONFIG_SERIAL_8250_CONSOLE
 	com_port = serial_init(0, NULL);
 #endif
 
-#if defined(CONFIG_44x) && defined(PPC44x_EMAC0_MR0)
+#ifdef CONFIG_44x
 	/* Reset MAL */
 	mtdcr(DCRN_MALCR(DCRN_MAL_BASE), MALCR_MMSR);
 	/* Wait for reset */

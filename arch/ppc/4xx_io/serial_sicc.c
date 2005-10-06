@@ -264,7 +264,6 @@ struct SICC_state {
     unsigned int        flags;
     int         count;
     struct SICC_info    *info;
-    spinlock_t		sicc_lock;
 };
 
 #define SICC_XMIT_SIZE 1024
@@ -386,10 +385,9 @@ static void siccuart_stop(struct tty_struct *tty)
     struct SICC_info *info = tty->driver_data;
     unsigned long flags;
 
-    /* disable interrupts while stopping serial port interrupts */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     siccuart_disable_tx_interrupt(info);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 }
 
 static void siccuart_start(struct tty_struct *tty)
@@ -397,12 +395,11 @@ static void siccuart_start(struct tty_struct *tty)
     struct SICC_info *info = tty->driver_data;
     unsigned long flags;
 
-    /* disable interrupts while starting serial port interrupts */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     if (info->xmit.head != info->xmit.tail
         && info->xmit.buf)
         siccuart_enable_tx_interrupt(info);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 }
 
 
@@ -607,8 +604,7 @@ static int siccuart_startup(struct SICC_info *info)
 	return -ENOMEM;
     }
 
-    /* lock access to info while doing setup */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
 
     if (info->xmit.buf)
         free_page(page);
@@ -692,12 +688,12 @@ static int siccuart_startup(struct SICC_info *info)
     siccuart_enable_rx_interrupt(info);
 
     info->flags |= ASYNC_INITIALIZED;
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     return 0;
 
 
 errout:
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     return retval;
 }
 
@@ -712,8 +708,7 @@ static void siccuart_shutdown(struct SICC_info *info)
     if (!(info->flags & ASYNC_INITIALIZED))
         return;
 
-    /* lock while shutting down port */
-    spin_lock_irqsave(&info->state->sicc_lock,flags); /* Disable interrupts */
+    save_flags(flags); cli(); /* Disable interrupts */
 
     /*
      * clear delta_msr_wait queue to avoid mem leaks: we may free the irq
@@ -751,7 +746,7 @@ static void siccuart_shutdown(struct SICC_info *info)
 
     info->flags &= ~ASYNC_INITIALIZED;
 
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 }
 
 
@@ -873,8 +868,8 @@ static void siccuart_change_speed(struct SICC_info *info, struct termios *old_te
             info->ignore_status_mask |=  _LSR_OE_MASK;
     }
 
-    /* disable interrupts while reading and clearing registers */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    /* first, disable everything */
+    save_flags(flags); cli();
 
     old_rcr = readb(info->port->uart_base + BL_SICC_RCR);
     old_tcr = readb(info->port->uart_base + BL_SICC_TxCR);
@@ -886,7 +881,7 @@ static void siccuart_change_speed(struct SICC_info *info, struct termios *old_te
     /*RLBtrace (&ppc403Chan0, 0x2000000c, 0, 0);*/
 
 
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 
 
     /* Set baud rate */
@@ -914,13 +909,12 @@ static void siccuart_put_char(struct tty_struct *tty, u_char ch)
     if (!tty || !info->xmit.buf)
         return;
 
-    /* lock info->xmit while adding character to tx buffer */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     if (CIRC_SPACE(info->xmit.head, info->xmit.tail, SICC_XMIT_SIZE) != 0) {
         info->xmit.buf[info->xmit.head] = ch;
         info->xmit.head = (info->xmit.head + 1) & (SICC_XMIT_SIZE - 1);
     }
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 }
 
 static void siccuart_flush_chars(struct tty_struct *tty)
@@ -934,10 +928,9 @@ static void siccuart_flush_chars(struct tty_struct *tty)
         || !info->xmit.buf)
         return;
 
-    /* disable interrupts while transmitting characters */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     siccuart_enable_tx_interrupt(info);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 }
 
 static int siccuart_write(struct tty_struct *tty,
@@ -950,8 +943,8 @@ static int siccuart_write(struct tty_struct *tty,
     if (!tty || !info->xmit.buf || !tmp_buf)
         return 0;
 
-    /* lock info->xmit while removing characters from buffer */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags);
+    cli();
     while (1) {
         c = CIRC_SPACE_TO_END(info->xmit.head,
                       info->xmit.tail,
@@ -967,11 +960,11 @@ static int siccuart_write(struct tty_struct *tty,
         count -= c;
         ret += c;
     }
+    restore_flags(flags);
     if (info->xmit.head != info->xmit.tail
         && !tty->stopped
         && !tty->hw_stopped)
         siccuart_enable_tx_interrupt(info);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
     return ret;
 }
 
@@ -995,10 +988,9 @@ static void siccuart_flush_buffer(struct tty_struct *tty)
     unsigned long flags;
 
     pr_debug("siccuart_flush_buffer(%d) called\n", tty->index);
-    /* lock info->xmit while zeroing buffer counts */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     info->xmit.head = info->xmit.tail = 0;
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     wake_up_interruptible(&tty->write_wait);
     if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
         tty->ldisc.write_wakeup)
@@ -1027,11 +1019,10 @@ static void siccuart_throttle(struct tty_struct *tty)
         siccuart_send_xchar(tty, STOP_CHAR(tty));
 
     if (tty->termios->c_cflag & CRTSCTS) {
-        /* disable interrupts while setting modem control lines */
-        spin_lock_irqsave(&info->state->sicc_lock,flags);
+        save_flags(flags); cli();
         info->mctrl &= ~TIOCM_RTS;
         info->port->set_mctrl(info->port, info->mctrl);
-        spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+        restore_flags(flags);
     }
 }
 
@@ -1048,11 +1039,10 @@ static void siccuart_unthrottle(struct tty_struct *tty)
     }
 
     if (tty->termios->c_cflag & CRTSCTS) {
-        /* disable interrupts while setting modem control lines */
-        spin_lock_irqsave(&info->state->sicc_lock,flags);
+        save_flags(flags); cli();
         info->mctrl |= TIOCM_RTS;
         info->port->set_mctrl(info->port, info->mctrl);
-        spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+        restore_flags(flags);
     }
 }
 
@@ -1191,10 +1181,9 @@ static int get_lsr_info(struct SICC_info *info, unsigned int *value)
     unsigned int result, status;
     unsigned long flags;
 
-    /* disable interrupts while reading status from port */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     status = readb(info->port->uart_base +  BL_SICC_LSR);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     result = status & _LSR_TSR_EMPTY ? TIOCSER_TEMT : 0;
 
     /*
@@ -1245,11 +1234,10 @@ static int set_modem_info(struct SICC_info *info, unsigned int cmd,
     default:
         return -EINVAL;
     }
-    /* disable interrupts while setting modem control lines */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     if (old != info->mctrl)
         info->port->set_mctrl(info->port, info->mctrl);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     return 0;
 }
 
@@ -1260,15 +1248,14 @@ static void siccuart_break_ctl(struct tty_struct *tty, int break_state)
     unsigned int lcr_h;
 
 
-    /* disable interrupts while setting break state */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     lcr_h = readb(info->port + BL_SICC_LSR);
     if (break_state == -1)
         lcr_h |=  _LSR_LB_MASK;
     else
         lcr_h &= ~_LSR_LB_MASK;
     writeb(lcr_h, info->port + BL_SICC_LSRS);
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
 }
 
 static int siccuart_ioctl(struct tty_struct *tty, struct file *file,
@@ -1316,10 +1303,9 @@ static int siccuart_ioctl(struct tty_struct *tty, struct file *file,
          *     RI where only 0->1 is counted.
          */
         case TIOCGICOUNT:
-            /* disable interrupts while getting interrupt count */
-            spin_lock_irqsave(&info->state->sicc_lock,flags);
+            save_flags(flags); cli();
             cnow = info->state->icount;
-            spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+            restore_flags(flags);
             icount.cts = cnow.cts;
             icount.dsr = cnow.dsr;
             icount.rng = cnow.rng;
@@ -1356,24 +1342,22 @@ static void siccuart_set_termios(struct tty_struct *tty, struct termios *old_ter
     /* Handle transition to B0 status */
     if ((old_termios->c_cflag & CBAUD) &&
         !(cflag & CBAUD)) {
-        /* disable interrupts while setting break state */
-        spin_lock_irqsave(&info->state->sicc_lock,flags);
+        save_flags(flags); cli();
         info->mctrl &= ~(TIOCM_RTS | TIOCM_DTR);
         info->port->set_mctrl(info->port, info->mctrl);
-        spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+        restore_flags(flags);
     }
 
     /* Handle transition away from B0 status */
     if (!(old_termios->c_cflag & CBAUD) &&
         (cflag & CBAUD)) {
-        /* disable interrupts while setting break state */
-        spin_lock_irqsave(&info->state->sicc_lock,flags);
+        save_flags(flags); cli();
         info->mctrl |= TIOCM_DTR;
         if (!(cflag & CRTSCTS) ||
             !test_bit(TTY_THROTTLED, &tty->flags))
             info->mctrl |= TIOCM_RTS;
         info->port->set_mctrl(info->port, info->mctrl);
-        spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+        restore_flags(flags);
     }
 
     /* Handle turning off CRTSCTS */
@@ -1409,11 +1393,11 @@ static void siccuart_close(struct tty_struct *tty, struct file *filp)
 
     //pr_debug("siccuart_close() called\n");
 
-    /* lock tty->driver_data while closing port */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
 
     if (tty_hung_up_p(filp)) {
-        goto quick_close;
+        restore_flags(flags);
+        return;
     }
 
     if ((tty->count == 1) && (state->count != 1)) {
@@ -1432,10 +1416,11 @@ static void siccuart_close(struct tty_struct *tty, struct file *filp)
         state->count = 0;
     }
     if (state->count) {
-        goto quick_close;
+        restore_flags(flags);
+        return;
     }
     info->flags |= ASYNC_CLOSING;
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     /*
      * Now we wait for the transmit buffer to clear; and we notify
      * the line discipline to only process XON/XOFF characters.
@@ -1473,11 +1458,6 @@ static void siccuart_close(struct tty_struct *tty, struct file *filp)
     }
     info->flags &= ~(ASYNC_NORMAL_ACTIVE|ASYNC_CLOSING);
     wake_up_interruptible(&info->close_wait);
-    return;
-
-quick_close:
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
-    return;
 }
 
 static void siccuart_wait_until_sent(struct tty_struct *tty, int timeout)
@@ -1589,22 +1569,20 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
      */
     retval = 0;
     add_wait_queue(&info->open_wait, &wait);
-    /* lock while decrementing state->count */
-    spin_lock_irqsave(&info->state->sicc_lock,flags);
+    save_flags(flags); cli();
     if (!tty_hung_up_p(filp)) {
         extra_count = 1;
         state->count--;
     }
-    spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+    restore_flags(flags);
     info->blocked_open++;
     while (1) {
-        /* disable interrupts while setting modem control lines */
-        spin_lock_irqsave(&info->state->sicc_lock,flags);
+        save_flags(flags); cli();
         if (tty->termios->c_cflag & CBAUD) {
             info->mctrl = TIOCM_DTR | TIOCM_RTS;
             info->port->set_mctrl(info->port, info->mctrl);
         }
-        spin_unlock_irqrestore(&info->state->sicc_lock,flags);
+        restore_flags(flags);
         set_current_state(TASK_INTERRUPTIBLE);
         if (tty_hung_up_p(filp) ||
             !(info->flags & ASYNC_INITIALIZED)) {
@@ -1775,7 +1753,6 @@ int __init siccuart_init(void)
         state->line     = i;
         state->close_delay  = 5 * HZ / 10;
         state->closing_wait = 30 * HZ;
-	spin_lock_init(&state->sicc_lock);
     }
 
 

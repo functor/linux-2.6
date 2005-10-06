@@ -18,6 +18,8 @@
 #include <linux/init.h>
 #include <linux/idr.h>
 #include <linux/namei.h>
+#include <linux/vs_base.h>
+#include <linux/vserver/inode.h>
 #include <linux/bitops.h>
 #include <linux/vserver/inode.h>
 #include <asm/uaccess.h>
@@ -287,7 +289,7 @@ static int xlate_proc_name(const char *name,
 }
 
 static DEFINE_IDR(proc_inum_idr);
-static DEFINE_SPINLOCK(proc_inum_lock); /* protects the above */
+static spinlock_t proc_inum_lock = SPIN_LOCK_UNLOCKED; /* protects the above */
 
 #define PROC_DYNAMIC_FIRST 0xF0000000UL
 
@@ -352,8 +354,15 @@ static int proc_delete_dentry(struct dentry * dentry)
 	return 1;
 }
 
+static int proc_revalidate_dentry(struct dentry *de, struct nameidata *nd)
+{
+	/* maybe add a check if it's really necessary? */
+	return 0;
+}
+
 static struct dentry_operations proc_dentry_operations =
 {
+	.d_revalidate	= proc_revalidate_dentry,
 	.d_delete	= proc_delete_dentry,
 };
 
@@ -559,11 +568,6 @@ static struct proc_dir_entry *proc_create(struct proc_dir_entry **parent,
 
 	if (!(*parent) && xlate_proc_name(name, parent, &fn) != 0)
 		goto out;
-
-	/* At this point there must not be any '/' characters beyond *fn */
-	if (strchr(fn, '/'))
-		goto out;
-
 	len = strlen(fn);
 
 	ent = kmalloc(sizeof(struct proc_dir_entry) + len + 1, GFP_KERNEL);

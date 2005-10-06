@@ -74,12 +74,6 @@ SECTIONS
     CONSTRUCTORS
   }
 
-  . = ALIGN(4096);
-  __nosave_begin = .;
-  .data_nosave : { *(.data.nosave) }
-  . = ALIGN(4096);
-  __nosave_end = .;
-
   . = ALIGN(32);
   .data.cacheline_aligned : { *(.data.cacheline_aligned) }
 
@@ -145,7 +139,6 @@ SECTIONS
   __init_end = .;
 
   . = ALIGN(4096);
-  _sextratext = .;
   __pmac_begin = .;
   .pmac.text : { *(.pmac.text) }
   .pmac.data : { *(.pmac.data) }
@@ -172,7 +165,6 @@ SECTIONS
   .openfirmware.data : { *(.openfirmware.data) }
   . = ALIGN(4096);
   __openfirmware_end = .;
-  _eextratext = .;
 
   __bss_start = .;
   .bss       :

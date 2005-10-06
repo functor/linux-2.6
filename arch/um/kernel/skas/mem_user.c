@@ -5,20 +5,23 @@
 
 #include <errno.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include "mem_user.h"
 #include "mem.h"
 #include "user.h"
 #include "os.h"
 #include "proc_mm.h"
 
-void map(int fd, unsigned long virt, unsigned long len, int r, int w,
-	 int x, int phys_fd, unsigned long long offset)
+void map(int fd, unsigned long virt, unsigned long phys, unsigned long len, 
+	 int r, int w, int x)
 {
 	struct proc_mm_op map;
-	int prot, n;
+	__u64 offset;
+	int prot, n, phys_fd;
 
 	prot = (r ? PROT_READ : 0) | (w ? PROT_WRITE : 0) | 
 		(x ? PROT_EXEC : 0);
+	phys_fd = phys_mapping(phys, &offset);
 
 	map = ((struct proc_mm_op) { .op 	= MM_MMAP,
 				     .u 	= 
@@ -36,7 +39,7 @@ void map(int fd, unsigned long virt, unsigned long len, int r, int w,
 		printk("map : /proc/mm map failed, err = %d\n", -n);
 }
 
-int unmap(int fd, void *addr, unsigned long len)
+int unmap(int fd, void *addr, int len)
 {
 	struct proc_mm_op unmap;
 	int n;

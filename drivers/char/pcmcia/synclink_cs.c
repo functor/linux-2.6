@@ -146,8 +146,8 @@ typedef struct _mgslpc_info {
 	int			flags;
 	int			count;		/* count of opens */
 	int			line;
-	unsigned int		close_delay;
-	unsigned int		closing_wait;	/* time to wait before closing */
+	unsigned short		close_delay;
+	unsigned short		closing_wait;	/* time to wait before closing */
 	
 	struct mgsl_icount	icount;
 	
@@ -464,11 +464,21 @@ static int debug_level = 0;
 static int maxframe[MAX_DEVICE_COUNT] = {0,};
 static int dosyncppp[MAX_DEVICE_COUNT] = {1,1,1,1};
 
-module_param(break_on_load, bool, 0);
-module_param(ttymajor, int, 0);
-module_param(debug_level, int, 0);
-module_param_array(maxframe, int, NULL, 0);
-module_param_array(dosyncppp, int, NULL, 0);
+/* The old way: bit map of interrupts to choose from */
+/* This means pick from 15, 14, 12, 11, 10, 9, 7, 5, 4, and 3 */
+static u_int irq_mask = 0xdeb8;
+
+/* Newer, simpler way of listing specific interrupts */
+static int irq_list[4] = { -1 };
+
+MODULE_PARM(irq_mask, "i");
+MODULE_PARM(irq_list, "1-4i");
+
+MODULE_PARM(break_on_load,"i");
+MODULE_PARM(ttymajor,"i");
+MODULE_PARM(debug_level,"i");
+MODULE_PARM(maxframe,"1-" __MODULE_STRING(MAX_DEVICE_COUNT) "i");
+MODULE_PARM(dosyncppp,"1-" __MODULE_STRING(MAX_DEVICE_COUNT) "i");
 
 MODULE_LICENSE("GPL");
 
@@ -545,7 +555,7 @@ static dev_link_t *mgslpc_attach(void)
     MGSLPC_INFO *info;
     dev_link_t *link;
     client_reg_t client_reg;
-    int ret;
+    int ret, i;
     
     if (debug_level >= DEBUG_LEVEL_INFO)
 	    printk("mgslpc_attach\n");
@@ -582,6 +592,11 @@ static dev_link_t *mgslpc_attach(void)
     /* Interrupt setup */
     link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
     link->irq.IRQInfo1   = IRQ_INFO2_VALID | IRQ_LEVEL_ID;
+    if (irq_list[0] == -1)
+	    link->irq.IRQInfo2 = irq_mask;
+    else
+	    for (i = 0; i < 4; i++)
+		    link->irq.IRQInfo2 |= 1 << irq_list[i];
     link->irq.Handler = NULL;
     
     link->conf.Attributes = 0;
@@ -593,6 +608,7 @@ static dev_link_t *mgslpc_attach(void)
     dev_list = link;
 
     client_reg.dev_info = &dev_info;
+    client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
     client_reg.EventMask =
 	    CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
 	    CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
@@ -907,7 +923,7 @@ static void tx_release(struct tty_struct *tty)
 /* Return next bottom half action to perform.
  * or 0 if nothing to do.
  */
-static int bh_action(MGSLPC_INFO *info)
+int bh_action(MGSLPC_INFO *info)
 {
 	unsigned long flags;
 	int rc = 0;
@@ -1001,7 +1017,7 @@ void bh_status(MGSLPC_INFO *info)
 }
 
 /* eom: non-zero = end of frame */ 
-static void rx_ready_hdlc(MGSLPC_INFO *info, int eom)
+void rx_ready_hdlc(MGSLPC_INFO *info, int eom) 
 {
 	unsigned char data[2];
 	unsigned char fifo_count, read_count, i;
@@ -1063,7 +1079,7 @@ static void rx_ready_hdlc(MGSLPC_INFO *info, int eom)
 	issue_command(info, CHA, CMD_RXFIFO);
 }
 
-static void rx_ready_async(MGSLPC_INFO *info, int tcd)
+void rx_ready_async(MGSLPC_INFO *info, int tcd) 
 {
 	unsigned char data, status;
 	int fifo_count;
@@ -1137,7 +1153,7 @@ static void rx_ready_async(MGSLPC_INFO *info, int tcd)
 }
 
 
-static void tx_done(MGSLPC_INFO *info)
+void tx_done(MGSLPC_INFO *info) 
 {
 	if (!info->tx_active)
 		return;
@@ -1174,7 +1190,7 @@ static void tx_done(MGSLPC_INFO *info)
 	}
 }
 
-static void tx_ready(MGSLPC_INFO *info)
+void tx_ready(MGSLPC_INFO *info) 
 {
 	unsigned char fifo_count = 32;
 	int c;
@@ -1223,7 +1239,7 @@ static void tx_ready(MGSLPC_INFO *info)
 	}
 }
 
-static void cts_change(MGSLPC_INFO *info)
+void cts_change(MGSLPC_INFO *info) 
 {
 	get_signals(info);
 	if ((info->cts_chkcount)++ >= IO_PIN_SHUTDOWN_LIMIT)
@@ -1260,7 +1276,7 @@ static void cts_change(MGSLPC_INFO *info)
 	info->pending_bh |= BH_STATUS;
 }
 
-static void dcd_change(MGSLPC_INFO *info)
+void dcd_change(MGSLPC_INFO *info) 
 {
 	get_signals(info);
 	if ((info->dcd_chkcount)++ >= IO_PIN_SHUTDOWN_LIMIT)
@@ -1294,7 +1310,7 @@ static void dcd_change(MGSLPC_INFO *info)
 	info->pending_bh |= BH_STATUS;
 }
 
-static void dsr_change(MGSLPC_INFO *info)
+void dsr_change(MGSLPC_INFO *info) 
 {
 	get_signals(info);
 	if ((info->dsr_chkcount)++ >= IO_PIN_SHUTDOWN_LIMIT)
@@ -1309,7 +1325,7 @@ static void dsr_change(MGSLPC_INFO *info)
 	info->pending_bh |= BH_STATUS;
 }
 
-static void ri_change(MGSLPC_INFO *info)
+void ri_change(MGSLPC_INFO *info) 
 {
 	get_signals(info);
 	if ((info->ri_chkcount)++ >= IO_PIN_SHUTDOWN_LIMIT)
@@ -2939,7 +2955,7 @@ static inline int line_info(char *buf, MGSLPC_INFO *info)
 
 /* Called to print information about devices
  */
-static int mgslpc_read_proc(char *page, char **start, off_t off, int count,
+int mgslpc_read_proc(char *page, char **start, off_t off, int count,
 		 int *eof, void *data)
 {
 	int len = 0, l;
@@ -3131,7 +3147,13 @@ static void synclink_cs_cleanup(void)
 	}
 
 	pcmcia_unregister_driver(&mgslpc_driver);
-	BUG_ON(dev_list != NULL);
+
+	/* XXX: this really needs to move into generic code.. */
+	while (dev_list != NULL) {
+		if (dev_list->state & DEV_CONFIG)
+			mgslpc_release((u_long)dev_list);
+		mgslpc_detach(dev_list);
+	}
 }
 
 static int __init synclink_cs_init(void)
@@ -3196,7 +3218,7 @@ static void __exit synclink_cs_exit(void)
 module_init(synclink_cs_init);
 module_exit(synclink_cs_exit);
 
-static void mgslpc_set_rate(MGSLPC_INFO *info, unsigned char channel, unsigned int rate)
+void mgslpc_set_rate(MGSLPC_INFO *info, unsigned char channel, unsigned int rate) 
 {
 	unsigned int M, N;
 	unsigned char val;
@@ -3232,7 +3254,7 @@ static void mgslpc_set_rate(MGSLPC_INFO *info, unsigned char channel, unsigned i
 
 /* Enabled the AUX clock output at the specified frequency.
  */
-static void enable_auxclk(MGSLPC_INFO *info)
+void enable_auxclk(MGSLPC_INFO *info)
 {
 	unsigned char val;
 	

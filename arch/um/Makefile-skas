@@ -3,12 +3,15 @@
 # Licensed under the GPL
 #
 
-GPROF_OPT += -pg
-GCOV_OPT += -fprofile-arcs -ftest-coverage
+PROFILE += -pg
 
-CFLAGS-$(CONFIG_GCOV) += $(GCOV_OPT)
-CFLAGS-$(CONFIG_GPROF) += $(GPROF_OPT)
-LINK-$(CONFIG_GCOV) += $(GCOV_OPT)
-LINK-$(CONFIG_GPROF) += $(GPROF_OPT)
+CFLAGS-$(CONFIG_GCOV) += -fprofile-arcs -ftest-coverage
+CFLAGS-$(CONFIG_GPROF) += $(PROFILE)
+LINK-$(CONFIG_GPROF) += $(PROFILE)
+
+MODE_INCLUDE += -I$(srctree)/$(ARCH_DIR)/kernel/skas/include
+
+LINK_SKAS = -Wl,-rpath,/lib 
+LD_SCRIPT_SKAS = dyn.lds.S
 
 GEN_HEADERS += $(ARCH_DIR)/include/skas_ptregs.h

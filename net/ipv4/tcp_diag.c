@@ -611,9 +611,6 @@ static int tcpdiag_dump(struct sk_buff *skb, struct netlink_callback *cb)
 			sk_for_each(sk, node, &tcp_listening_hash[i]) {
 				struct inet_sock *inet = inet_sk(sk);
 
-				if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
-					continue;
-
 				if (num < s_num) {
 					num++;
 					continue;
@@ -675,8 +672,6 @@ skip_listen_ht:
 		sk_for_each(sk, node, &head->chain) {
 			struct inet_sock *inet = inet_sk(sk);
 
-			if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
-				continue;
 			if (num < s_num)
 				goto next_normal;
 			if (!(r->tcpdiag_states & (1 << sk->sk_state)))
@@ -699,8 +694,6 @@ next_normal:
 				    &tcp_ehash[i + tcp_ehash_size].chain) {
 				struct inet_sock *inet = inet_sk(sk);
 
-				if (!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
-					continue;
 				if (num < s_num)
 					goto next_dying;
 				if (r->id.tcpdiag_sport != inet->sport &&

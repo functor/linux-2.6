@@ -53,7 +53,7 @@ struct sa1111 {
 	unsigned long	phys;
 	int		irq;
 	spinlock_t	lock;
-	void __iomem	*base;
+	void		*base;
 };
 
 /*
@@ -141,16 +141,15 @@ static void
 sa1111_irq_handler(unsigned int irq, struct irqdesc *desc, struct pt_regs *regs)
 {
 	unsigned int stat0, stat1, i;
-	void __iomem *base = desc->data;
 
-	stat0 = sa1111_readl(base + SA1111_INTSTATCLR0);
-	stat1 = sa1111_readl(base + SA1111_INTSTATCLR1);
+	stat0 = sa1111_readl(desc->data + SA1111_INTSTATCLR0);
+	stat1 = sa1111_readl(desc->data + SA1111_INTSTATCLR1);
 
-	sa1111_writel(stat0, base + SA1111_INTSTATCLR0);
+	sa1111_writel(stat0, desc->data + SA1111_INTSTATCLR0);
 
 	desc->chip->ack(irq);
 
-	sa1111_writel(stat1, base + SA1111_INTSTATCLR1);
+	sa1111_writel(stat1, desc->data + SA1111_INTSTATCLR1);
 
 	if (stat0 == 0 && stat1 == 0) {
 		do_bad_IRQ(irq, desc, regs);
@@ -178,7 +177,7 @@ static void sa1111_ack_irq(unsigned int irq)
 
 static void sa1111_mask_lowirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ie0;
 
 	ie0 = sa1111_readl(mapbase + SA1111_INTEN0);
@@ -188,7 +187,7 @@ static void sa1111_mask_lowirq(unsigned int irq)
 
 static void sa1111_unmask_lowirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ie0;
 
 	ie0 = sa1111_readl(mapbase + SA1111_INTEN0);
@@ -206,7 +205,7 @@ static void sa1111_unmask_lowirq(unsigned int irq)
 static int sa1111_retrigger_lowirq(unsigned int irq)
 {
 	unsigned int mask = SA1111_IRQMASK_LO(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ip0;
 	int i;
 
@@ -227,7 +226,7 @@ static int sa1111_retrigger_lowirq(unsigned int irq)
 static int sa1111_type_lowirq(unsigned int irq, unsigned int flags)
 {
 	unsigned int mask = SA1111_IRQMASK_LO(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ip0;
 
 	if (flags == IRQT_PROBE)
@@ -250,7 +249,7 @@ static int sa1111_type_lowirq(unsigned int irq, unsigned int flags)
 static int sa1111_wake_lowirq(unsigned int irq, unsigned int on)
 {
 	unsigned int mask = SA1111_IRQMASK_LO(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long we0;
 
 	we0 = sa1111_readl(mapbase + SA1111_WAKEEN0);
@@ -274,7 +273,7 @@ static struct irqchip sa1111_low_chip = {
 
 static void sa1111_mask_highirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ie1;
 
 	ie1 = sa1111_readl(mapbase + SA1111_INTEN1);
@@ -284,7 +283,7 @@ static void sa1111_mask_highirq(unsigned int irq)
 
 static void sa1111_unmask_highirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ie1;
 
 	ie1 = sa1111_readl(mapbase + SA1111_INTEN1);
@@ -302,7 +301,7 @@ static void sa1111_unmask_highirq(unsigned int irq)
 static int sa1111_retrigger_highirq(unsigned int irq)
 {
 	unsigned int mask = SA1111_IRQMASK_HI(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ip1;
 	int i;
 
@@ -323,7 +322,7 @@ static int sa1111_retrigger_highirq(unsigned int irq)
 static int sa1111_type_highirq(unsigned int irq, unsigned int flags)
 {
 	unsigned int mask = SA1111_IRQMASK_HI(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long ip1;
 
 	if (flags == IRQT_PROBE)
@@ -346,7 +345,7 @@ static int sa1111_type_highirq(unsigned int irq, unsigned int flags)
 static int sa1111_wake_highirq(unsigned int irq, unsigned int on)
 {
 	unsigned int mask = SA1111_IRQMASK_HI(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void *mapbase = get_irq_chipdata(irq);
 	unsigned long we1;
 
 	we1 = sa1111_readl(mapbase + SA1111_WAKEEN1);
@@ -370,7 +369,7 @@ static struct irqchip sa1111_high_chip = {
 
 static void sa1111_setup_irq(struct sa1111 *sachip)
 {
-	void __iomem *irqbase = sachip->base + SA1111_INTC;
+	void *irqbase = sachip->base + SA1111_INTC;
 	unsigned int irq;
 
 	/*
@@ -724,7 +723,7 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 static void __sa1111_remove(struct sa1111 *sachip)
 {
 	struct list_head *l, *n;
-	void __iomem *irqbase = sachip->base + SA1111_INTC;
+	void *irqbase = sachip->base + SA1111_INTC;
 
 	list_for_each_safe(l, n, &sachip->dev->children) {
 		struct device *d = list_to_dev(l);
@@ -798,15 +797,15 @@ struct sa1111_save_data {
 	unsigned int	wakeen1;
 };
 
-#ifdef CONFIG_PM
+#ifdef	CONFIG_PM
 
-static int sa1111_suspend(struct device *dev, pm_message_t state, u32 level)
+static int sa1111_suspend(struct device *dev, u32 state, u32 level)
 {
 	struct sa1111 *sachip = dev_get_drvdata(dev);
 	struct sa1111_save_data *save;
 	unsigned long flags;
 	unsigned int val;
-	void __iomem *base;
+	char *base;
 
 	if (level != SUSPEND_DISABLE)
 		return 0;
@@ -867,7 +866,7 @@ static int sa1111_resume(struct device *dev, u32 level)
 	struct sa1111 *sachip = dev_get_drvdata(dev);
 	struct sa1111_save_data *save;
 	unsigned long flags, id;
-	void __iomem *base;
+	char *base;
 
 	if (level != RESUME_ENABLE)
 		return 0;
@@ -923,10 +922,11 @@ static int sa1111_resume(struct device *dev, u32 level)
 	return 0;
 }
 
-#else
-#define sa1111_suspend NULL
-#define sa1111_resume  NULL
-#endif
+#else	/* !CONFIG_PM */
+#define sa1111_resume	NULL
+#define sa1111_suspend	NULL
+#endif	/* !CONFIG_PM */
+
 
 static int sa1111_probe(struct device *dev)
 {
@@ -1095,7 +1095,7 @@ void sa1111_set_io_dir(struct sa1111_dev *sadev,
 	struct sa1111 *sachip = sa1111_chip_driver(sadev);
 	unsigned long flags;
 	unsigned int val;
-	void __iomem *gpio = sachip->base + SA1111_GPIO;
+	void *gpio = sachip->base + SA1111_GPIO;
 
 #define MODIFY_BITS(port, mask, dir)		\
 	if (mask) {				\
@@ -1121,7 +1121,7 @@ void sa1111_set_io(struct sa1111_dev *sadev, unsigned int bits, unsigned int v)
 	struct sa1111 *sachip = sa1111_chip_driver(sadev);
 	unsigned long flags;
 	unsigned int val;
-	void __iomem *gpio = sachip->base + SA1111_GPIO;
+	void *gpio = sachip->base + SA1111_GPIO;
 
 	spin_lock_irqsave(&sachip->lock, flags);
 	MODIFY_BITS(gpio + SA1111_GPIO_PADWR, bits & 15, v);
@@ -1135,7 +1135,7 @@ void sa1111_set_sleep_io(struct sa1111_dev *sadev, unsigned int bits, unsigned i
 	struct sa1111 *sachip = sa1111_chip_driver(sadev);
 	unsigned long flags;
 	unsigned int val;
-	void __iomem *gpio = sachip->base + SA1111_GPIO;
+	void *gpio = sachip->base + SA1111_GPIO;
 
 	spin_lock_irqsave(&sachip->lock, flags);
 	MODIFY_BITS(gpio + SA1111_GPIO_PASSR, bits & 15, v);
@@ -1194,7 +1194,7 @@ static int sa1111_match(struct device *_dev, struct device_driver *_drv)
 	return dev->devid == drv->devid;
 }
 
-static int sa1111_bus_suspend(struct device *dev, pm_message_t state)
+static int sa1111_bus_suspend(struct device *dev, u32 state)
 {
 	struct sa1111_dev *sadev = SA1111_DEV(dev);
 	struct sa1111_driver *drv = SA1111_DRV(dev->driver);

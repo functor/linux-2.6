@@ -119,8 +119,9 @@ void snd_ad1848_out(ad1848_t *chip,
 #endif
 }
 
-static void snd_ad1848_dout(ad1848_t *chip,
-			    unsigned char reg, unsigned char value)
+void snd_ad1848_dout(ad1848_t *chip,
+		     unsigned char reg,
+		     unsigned char value)
 {
 	int timeout;
 
@@ -131,7 +132,7 @@ static void snd_ad1848_dout(ad1848_t *chip,
 	mb();
 }
 
-static unsigned char snd_ad1848_in(ad1848_t *chip, unsigned char reg)
+unsigned char snd_ad1848_in(ad1848_t *chip, unsigned char reg)
 {
 	int timeout;
 
@@ -146,9 +147,9 @@ static unsigned char snd_ad1848_in(ad1848_t *chip, unsigned char reg)
 	return inb(AD1848P(chip, REG));
 }
 
-#if 0
+#ifdef CONFIG_SND_DEBUG
 
-static void snd_ad1848_debug(ad1848_t *chip)
+void snd_ad1848_debug(ad1848_t *chip)
 {
 	printk("AD1848 REGS:      INDEX = 0x%02x  ", inb(AD1848P(chip, REGSEL)));
 	printk("                 STATUS = 0x%02x\n", inb(AD1848P(chip, STATUS)));
@@ -176,7 +177,7 @@ static void snd_ad1848_debug(ad1848_t *chip)
  *  AD1848 detection / MCE routines
  */
 
-static void snd_ad1848_mce_up(ad1848_t *chip)
+void snd_ad1848_mce_up(ad1848_t *chip)
 {
 	unsigned long flags;
 	int timeout;
@@ -197,7 +198,7 @@ static void snd_ad1848_mce_up(ad1848_t *chip)
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
-static void snd_ad1848_mce_down(ad1848_t *chip)
+void snd_ad1848_mce_down(ad1848_t *chip)
 {
 	unsigned long flags;
 	int timeout;
@@ -583,7 +584,7 @@ static int snd_ad1848_capture_prepare(snd_pcm_substream_t * substream)
 	return 0;
 }
 
-static irqreturn_t snd_ad1848_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t snd_ad1848_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	ad1848_t *chip = dev_id;
 
@@ -644,9 +645,12 @@ static void snd_ad1848_thinkpad_twiddle(ad1848_t *chip, int on) {
 }
 
 #ifdef CONFIG_PM
-static int snd_ad1848_suspend(snd_card_t *card, pm_message_t state)
+static int snd_ad1848_suspend(snd_card_t *card, unsigned int state)
 {
 	ad1848_t *chip = card->pm_private_data;
+
+	if (card->power_state == SNDRV_CTL_POWER_D3hot)
+		return 0;
 
 	snd_pcm_suspend_all(chip->pcm);
 	/* FIXME: save registers? */
@@ -654,18 +658,23 @@ static int snd_ad1848_suspend(snd_card_t *card, pm_message_t state)
 	if (chip->thinkpad_flag)
 		snd_ad1848_thinkpad_twiddle(chip, 0);
 
+	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
-static int snd_ad1848_resume(snd_card_t *card)
+static int snd_ad1848_resume(snd_card_t *card, unsigned int state)
 {
 	ad1848_t *chip = card->pm_private_data;
+
+	if (card->power_state == SNDRV_CTL_POWER_D0)
+		return 0;
 
 	if (chip->thinkpad_flag)
 		snd_ad1848_thinkpad_twiddle(chip, 1);
 
 	/* FIXME: restore registers? */
 
+	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -1255,7 +1264,12 @@ int snd_ad1848_mixer(ad1848_t *chip)
 	return 0;
 }
 
+EXPORT_SYMBOL(snd_ad1848_in);
 EXPORT_SYMBOL(snd_ad1848_out);
+EXPORT_SYMBOL(snd_ad1848_dout);
+EXPORT_SYMBOL(snd_ad1848_mce_up);
+EXPORT_SYMBOL(snd_ad1848_mce_down);
+EXPORT_SYMBOL(snd_ad1848_interrupt);
 EXPORT_SYMBOL(snd_ad1848_create);
 EXPORT_SYMBOL(snd_ad1848_pcm);
 EXPORT_SYMBOL(snd_ad1848_get_pcm_ops);

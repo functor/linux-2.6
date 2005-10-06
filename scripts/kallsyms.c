@@ -67,9 +67,8 @@ struct sym_entry {
 
 static struct sym_entry *table;
 static int size, cnt;
-static unsigned long long _stext, _etext, _sinittext, _einittext, _sextratext, _eextratext;
+static unsigned long long _stext, _etext, _sinittext, _einittext;
 static int all_symbols = 0;
-static char symbol_prefix_char = '\0';
 
 struct token {
 	unsigned char data[MAX_TOK_SIZE];
@@ -94,7 +93,7 @@ unsigned char best_table_len[256];
 static void
 usage(void)
 {
-	fprintf(stderr, "Usage: kallsyms [--all-symbols] [--symbol-prefix=<prefix char>] < in.map > out.S\n");
+	fprintf(stderr, "Usage: kallsyms [--all-symbols] < in.map > out.S\n");
 	exit(1);
 }
 
@@ -113,7 +112,6 @@ static int
 read_symbol(FILE *in, struct sym_entry *s)
 {
 	char str[500];
-	char *sym;
 	int rc;
 
 	rc = fscanf(in, "%llx %c %499s\n", &s->addr, &s->type, str);
@@ -125,36 +123,27 @@ read_symbol(FILE *in, struct sym_entry *s)
 		return -1;
 	}
 
-	sym = str;
-	/* skip prefix char */
-	if (symbol_prefix_char && str[0] == symbol_prefix_char)
-		sym++;
-
 	/* Ignore most absolute/undefined (?) symbols. */
-	if (strcmp(sym, "_stext") == 0)
+	if (strcmp(str, "_stext") == 0)
 		_stext = s->addr;
-	else if (strcmp(sym, "_etext") == 0)
+	else if (strcmp(str, "_etext") == 0)
 		_etext = s->addr;
-	else if (strcmp(sym, "_sinittext") == 0)
+	else if (strcmp(str, "_sinittext") == 0)
 		_sinittext = s->addr;
-	else if (strcmp(sym, "_einittext") == 0)
+	else if (strcmp(str, "_einittext") == 0)
 		_einittext = s->addr;
-	else if (strcmp(sym, "_sextratext") == 0)
-		_sextratext = s->addr;
-	else if (strcmp(sym, "_eextratext") == 0)
-		_eextratext = s->addr;
 	else if (toupper(s->type) == 'A')
 	{
 		/* Keep these useful absolute symbols */
-		if (strcmp(sym, "__kernel_syscall_via_break") &&
-		    strcmp(sym, "__kernel_syscall_via_epc") &&
-		    strcmp(sym, "__kernel_sigtramp") &&
-		    strcmp(sym, "__gp"))
+		if (strcmp(str, "__kernel_syscall_via_break") &&
+		    strcmp(str, "__kernel_syscall_via_epc") &&
+		    strcmp(str, "__kernel_sigtramp") &&
+		    strcmp(str, "__gp"))
 			return -1;
 
 	}
 	else if (toupper(s->type) == 'U' ||
-		 is_arm_mapping_symbol(sym))
+		 is_arm_mapping_symbol(str))
 		return -1;
 
 	/* include the type field in the symbol name, so that it gets
@@ -188,37 +177,21 @@ symbol_valid(struct sym_entry *s)
 		"_SDA2_BASE_",		/* ppc */
 		NULL };
 	int i;
-	int offset = 1;
-
-	/* skip prefix char */
-	if (symbol_prefix_char && *(s->sym + 1) == symbol_prefix_char)
-		offset++;
 
 	/* if --all-symbols is not specified, then symbols outside the text
 	 * and inittext sections are discarded */
 	if (!all_symbols) {
 		if ((s->addr < _stext || s->addr > _etext)
-		    && (s->addr < _sinittext || s->addr > _einittext)
-		    && (s->addr < _sextratext || s->addr > _eextratext))
-			return 0;
-		/* Corner case.  Discard any symbols with the same value as
-		 * _etext _einittext or _eextratext; they can move between pass
-		 * 1 and 2 when the kallsyms data are added.  If these symbols
-		 * move then they may get dropped in pass 2, which breaks the
-		 * kallsyms rules.
-		 */
-		if ((s->addr == _etext && strcmp(s->sym + offset, "_etext")) ||
-		    (s->addr == _einittext && strcmp(s->sym + offset, "_einittext")) ||
-		    (s->addr == _eextratext && strcmp(s->sym + offset, "_eextratext")))
+		    && (s->addr < _sinittext || s->addr > _einittext))
 			return 0;
 	}
 
 	/* Exclude symbols which vary between passes. */
-	if (strstr(s->sym + offset, "_compiled."))
+	if (strstr(s->sym + 1, "_compiled."))
 		return 0;
 
 	for (i = 0; special_symbols[i]; i++)
-		if( strcmp(s->sym + offset, special_symbols[i]) == 0 )
+		if( strcmp(s->sym + 1, special_symbols[i]) == 0 )
 			return 0;
 
 	return 1;
@@ -243,15 +216,9 @@ read_map(FILE *in)
 
 static void output_label(char *label)
 {
-	if (symbol_prefix_char)
-		printf(".globl %c%s\n", symbol_prefix_char, label);
-	else
-		printf(".globl %s\n", label);
+	printf(".globl %s\n",label);
 	printf("\tALGN\n");
-	if (symbol_prefix_char)
-		printf("%c%s:\n", symbol_prefix_char, label);
-	else
-		printf("%s:\n", label);
+	printf("%s:\n",label);
 }
 
 /* uncompress a compressed symbol. When this function is called, the best table
@@ -689,13 +656,6 @@ static void optimize_token_table(void)
 
 	insert_real_symbols_in_table();
 
-	/* When valid symbol is not registered, exit to error */
-	if (good_head.left == good_head.right &&
-	    bad_head.left == bad_head.right) {
-		fprintf(stderr, "No valid symbol.\n");
-		exit(1);
-	}
-
 	optimize_result();
 }
 
@@ -703,21 +663,9 @@ static void optimize_token_table(void)
 int
 main(int argc, char **argv)
 {
-	if (argc >= 2) {
-		int i;
-		for (i = 1; i < argc; i++) {
-			if(strcmp(argv[i], "--all-symbols") == 0)
-				all_symbols = 1;
-			else if (strncmp(argv[i], "--symbol-prefix=", 16) == 0) {
-				char *p = &argv[i][16];
-				/* skip quote */
-				if ((*p == '"' && *(p+2) == '"') || (*p == '\'' && *(p+2) == '\''))
-					p++;
-				symbol_prefix_char = *p;
-			} else
-				usage();
-		}
-	} else if (argc != 1)
+	if (argc == 2 && strcmp(argv[1], "--all-symbols") == 0)
+		all_symbols = 1;
+	else if (argc != 1)
 		usage();
 
 	read_map(stdin);
@@ -726,3 +674,4 @@ main(int argc, char **argv)
 
 	return 0;
 }
+

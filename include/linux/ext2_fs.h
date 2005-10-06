@@ -197,7 +197,6 @@ struct ext2_group_desc
 #define EXT2_RESERVED_FL		0x80000000 /* reserved for ext2 lib */
 
 #ifdef CONFIG_VSERVER_LEGACY
-/* VSERVER values defined for PlanetLab */
 #define EXT2_FL_USER_VISIBLE		0x0C03DFFF /* User visible flags */
 #define EXT2_FL_USER_MODIFIABLE		0x0C0380FF /* User modifiable flags */
 #else

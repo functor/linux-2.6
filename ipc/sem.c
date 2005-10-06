@@ -71,8 +71,9 @@
 #include <linux/time.h>
 #include <linux/smp_lock.h>
 #include <linux/security.h>
+#include <linux/vs_base.h>
 #include <linux/syscalls.h>
-#include <linux/audit.h>
+
 #include <asm/uaccess.h>
 #include "util.h"
 
@@ -805,8 +806,6 @@ static int semctl_down(int semid, int semnum, int cmd, int version, union semun 
 	if(cmd == IPC_SET) {
 		if(copy_semid_from_user (&setbuf, arg.buf, version))
 			return -EFAULT;
-		if ((err = audit_ipc_perms(0, setbuf.uid, setbuf.gid, setbuf.mode)))
-			return err;
 	}
 	sma = sem_lock(semid);
 	if(sma==NULL)

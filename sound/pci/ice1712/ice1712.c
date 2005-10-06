@@ -1014,8 +1014,20 @@ static int snd_ice1712_pro_trigger(snd_pcm_substream_t *substream,
 static void snd_ice1712_set_pro_rate(ice1712_t *ice, unsigned int rate, int force)
 {
 	unsigned long flags;
-	unsigned char val, old;
+	unsigned char val;
 	unsigned int i;
+
+	spin_lock_irqsave(&ice->reg_lock, flags);
+	if (inb(ICEMT(ice, PLAYBACK_CONTROL)) & (ICE1712_CAPTURE_START_SHADOW|
+						 ICE1712_PLAYBACK_PAUSE|
+						 ICE1712_PLAYBACK_START)) {
+		spin_unlock_irqrestore(&ice->reg_lock, flags);
+		return;
+	}
+	if (!force && is_pro_rate_locked(ice)) {
+		spin_unlock_irqrestore(&ice->reg_lock, flags);
+		return;
+	}
 
 	switch (rate) {
 	case 8000: val = 6; break;
@@ -1037,22 +1049,8 @@ static void snd_ice1712_set_pro_rate(ice1712_t *ice, unsigned int rate, int forc
 		rate = 48000;
 		break;
 	}
-
-	spin_lock_irqsave(&ice->reg_lock, flags);
-	if (inb(ICEMT(ice, PLAYBACK_CONTROL)) & (ICE1712_CAPTURE_START_SHADOW|
-						 ICE1712_PLAYBACK_PAUSE|
-						 ICE1712_PLAYBACK_START)) {
-	      __out:
-		spin_unlock_irqrestore(&ice->reg_lock, flags);
-		return;
-	}
-	if (!force && is_pro_rate_locked(ice))
-		goto __out;
-
-        old = inb(ICEMT(ice, RATE));
-	if (!force && old == val)
-		goto __out;
 	outb(val, ICEMT(ice, RATE));
+
 	spin_unlock_irqrestore(&ice->reg_lock, flags);
 
 	if (ice->gpio.set_pro_rate)
@@ -2407,7 +2405,6 @@ static int __devinit snd_ice1712_chip_init(ice1712_t *ice)
 		udelay(200);
 		snd_ice1712_write(ice, ICE1712_IREG_CONSUMER_POWERDOWN, 0);
 	}
-	snd_ice1712_set_pro_rate(ice, 48000, 1);
 
 	return 0;
 }
@@ -2548,7 +2545,6 @@ static int __devinit snd_ice1712_create(snd_card_t * card,
 	ice->cs8427_timeout = cs8427_timeout;
 	spin_lock_init(&ice->reg_lock);
 	init_MUTEX(&ice->gpio_mutex);
-	init_MUTEX(&ice->i2c_mutex);
 	init_MUTEX(&ice->open_mutex);
 	ice->gpio.set_mask = snd_ice1712_set_gpio_mask;
 	ice->gpio.set_dir = snd_ice1712_set_gpio_dir;

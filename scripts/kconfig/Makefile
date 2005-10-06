@@ -2,7 +2,9 @@
 # Kernel configuration targets
 # These targets are used from top-level makefile
 
-.PHONY: oldconfig xconfig gconfig menuconfig config silentoldconfig update-po-config
+export LD_LIBRARY_PATH = scripts/kconfig
+
+.PHONY: oldconfig xconfig gconfig menuconfig config silentoldconfig
 
 xconfig: $(obj)/qconf
 	$< arch/$(ARCH)/Kconfig
@@ -22,13 +24,6 @@ oldconfig: $(obj)/conf
 
 silentoldconfig: $(obj)/conf
 	$< -s arch/$(ARCH)/Kconfig
-
-update-po-config: $(obj)/kxgettext
-	xgettext --default-domain=linux \
-          --add-comments --keyword=_ --keyword=N_ \
-          --files-from=scripts/kconfig/POTFILES.in \
-	-o scripts/kconfig/linux.pot
-	scripts/kconfig/kxgettext arch/$(ARCH)/Kconfig >> scripts/kconfig/linux.pot
 
 nonint_oldconfig: scripts/kconfig/conf
 	./scripts/kconfig/conf -b arch/$(ARCH)/Kconfig
@@ -61,12 +56,10 @@ endif
 
 # Help text used by make help
 help:
-	@echo  '  config	  - Update current config utilising a line-oriented program'
+	@echo  '  oldconfig	  - Update current config utilising a line-oriented program'
 	@echo  '  menuconfig	  - Update current config utilising a menu based program'
 	@echo  '  xconfig	  - Update current config utilising a QT based front-end'
 	@echo  '  gconfig	  - Update current config utilising a GTK based front-end'
-	@echo  '  oldconfig	  - Update current config utilising a provided .config as base'
-	@echo  '  randconfig	  - New config with random answer to all options'
 	@echo  '  defconfig	  - New config with default answer to all options'
 	@echo  '  allmodconfig	  - New config selecting modules when possible'
 	@echo  '  allyesconfig	  - New config where all options are accepted with yes'
@@ -83,10 +76,9 @@ help:
 #         Based on GTK which needs to be installed to compile it
 # object files used by all kconfig flavours
 
-hostprogs-y	:= conf mconf qconf gconf kxgettext
+hostprogs-y	:= conf mconf qconf gconf
 conf-objs	:= conf.o  zconf.tab.o
 mconf-objs	:= mconf.o zconf.tab.o
-kxgettext-objs	:= kxgettext.o zconf.tab.o
 
 ifeq ($(MAKECMDGOALS),xconfig)
 	qconf-target := 1
@@ -119,11 +111,7 @@ HOSTLOADLIBES_gconf	= `pkg-config gtk+-2.0 gmodule-2.0 libglade-2.0 --libs`
 HOSTCFLAGS_gconf.o	= `pkg-config gtk+-2.0 gmodule-2.0 libglade-2.0 --cflags` \
                           -D LKC_DIRECT_LINK
 
-$(obj)/conf.o $(obj)/mconf.o $(obj)/qconf.o $(obj)/gconf.o $(obj)/kxgettext: $(obj)/zconf.tab.h
-
-$(obj)/zconf.tab.h: $(src)/zconf.tab.h_shipped
-$(obj)/zconf.tab.c: $(src)/zconf.tab.c_shipped
-$(obj)/lex.zconf.c: $(src)/lex.zconf.c_shipped
+$(obj)/conf.o $(obj)/mconf.o $(obj)/qconf.o $(obj)/gconf.o: $(obj)/zconf.tab.h
 
 $(obj)/qconf.o: $(obj)/.tmp_qtcheck
 

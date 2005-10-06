@@ -383,7 +383,7 @@ reg_w(struct usb_ov511 *ov, unsigned char reg, unsigned char value)
 			     usb_sndctrlpipe(ov->dev, 0),
 			     (ov->bclass == BCL_OV518)?1:2 /* REG_IO */,
 			     USB_TYPE_VENDOR | USB_RECIP_DEVICE,
-			     0, (__u16)reg, &ov->cbuf[0], 1, 1000);
+			     0, (__u16)reg, &ov->cbuf[0], 1, HZ);
 	up(&ov->cbuf_lock);
 
 	if (rc < 0)
@@ -404,7 +404,7 @@ reg_r(struct usb_ov511 *ov, unsigned char reg)
 			     usb_rcvctrlpipe(ov->dev, 0),
 			     (ov->bclass == BCL_OV518)?1:3 /* REG_IO */,
 			     USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
-			     0, (__u16)reg, &ov->cbuf[0], 1, 1000);
+			     0, (__u16)reg, &ov->cbuf[0], 1, HZ);
 
 	if (rc < 0) {
 		err("reg read: error %d: %s", rc, symbolic(urb_errlist, rc));
@@ -464,7 +464,7 @@ ov518_reg_w32(struct usb_ov511 *ov, unsigned char reg, u32 val, int n)
 			     usb_sndctrlpipe(ov->dev, 0),
 			     1 /* REG_IO */,
 			     USB_TYPE_VENDOR | USB_RECIP_DEVICE,
-			     0, (__u16)reg, ov->cbuf, n, 1000);
+			     0, (__u16)reg, ov->cbuf, n, HZ);
 	up(&ov->cbuf_lock);
 
 	if (rc < 0)
@@ -3908,15 +3908,21 @@ ov51x_do_dealloc(struct usb_ov511 *ov)
 		ov->fbuf = NULL;
 	}
 
-	vfree(ov->rawfbuf);
-	ov->rawfbuf = NULL;
+	if (ov->rawfbuf) {
+		vfree(ov->rawfbuf);
+		ov->rawfbuf = NULL;
+	}
 
-	vfree(ov->tempfbuf);
-	ov->tempfbuf = NULL;
+	if (ov->tempfbuf) {
+		vfree(ov->tempfbuf);
+		ov->tempfbuf = NULL;
+	}
 
 	for (i = 0; i < OV511_NUMSBUF; i++) {
-		kfree(ov->sbuf[i].data);
-		ov->sbuf[i].data = NULL;
+		if (ov->sbuf[i].data) {
+			kfree(ov->sbuf[i].data);
+			ov->sbuf[i].data = NULL;
+		}
 	}
 
 	for (i = 0; i < OV511_NUMFRAMES; i++) {
@@ -5041,7 +5047,7 @@ ov6xx0_configure(struct usb_ov511 *ov)
 		{ OV511_I2C_BUS, 0x2a, 0x04 }, /* Disable framerate adjust */
 //		{ OV511_I2C_BUS, 0x2b, 0xac }, /* Framerate; Set 2a[7] first */
 		{ OV511_I2C_BUS, 0x2d, 0x99 },
-		{ OV511_I2C_BUS, 0x33, 0xa0 }, /* Color Processing Parameter */
+		{ OV511_I2C_BUS, 0x33, 0xa0 }, /* Color Procesing Parameter */
 		{ OV511_I2C_BUS, 0x34, 0xd2 }, /* Max A/D range */
 		{ OV511_I2C_BUS, 0x38, 0x8b },
 		{ OV511_I2C_BUS, 0x39, 0x40 },
@@ -5590,7 +5596,7 @@ ov518_configure(struct usb_ov511 *ov)
 		if (ifp) {
 			alt = usb_altnum_to_altsetting(ifp, 7);
 			if (alt)
-				mxps = le16_to_cpu(alt->endpoint[0].desc.wMaxPacketSize);
+				mxps = alt->endpoint[0].desc.wMaxPacketSize;
 		}
 
 		/* Some OV518s have packet numbering by default, some don't */
@@ -5819,7 +5825,7 @@ ov51x_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	ov->auto_gain = autogain;
 	ov->auto_exp = autoexp;
 
-	switch (le16_to_cpu(dev->descriptor.idProduct)) {
+	switch (dev->descriptor.idProduct) {
 	case PROD_OV511:
 		ov->bridge = BRG_OV511;
 		ov->bclass = BCL_OV511;
@@ -5837,13 +5843,13 @@ ov51x_probe(struct usb_interface *intf, const struct usb_device_id *id)
 		ov->bclass = BCL_OV518;
 		break;
 	case PROD_ME2CAM:
-		if (le16_to_cpu(dev->descriptor.idVendor) != VEND_MATTEL)
+		if (dev->descriptor.idVendor != VEND_MATTEL)
 			goto error;
 		ov->bridge = BRG_OV511PLUS;
 		ov->bclass = BCL_OV511;
 		break;
 	default:
-		err("Unknown product ID 0x%04x", le16_to_cpu(dev->descriptor.idProduct));
+		err("Unknown product ID 0x%04x", dev->descriptor.idProduct);
 		goto error;
 	}
 
@@ -5952,8 +5958,10 @@ error:
 		up(&ov->cbuf_lock);
 	}
 
-	kfree(ov);
-	ov = NULL;
+	if (ov) {
+		kfree(ov);
+		ov = NULL;
+	}
 
 error_out:
 	err("Camera initialization failed");

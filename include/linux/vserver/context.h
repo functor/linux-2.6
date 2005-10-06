@@ -24,8 +24,7 @@
 #define VXF_SCHED_HARD		0x00000100
 #define VXF_SCHED_PRIO		0x00000200
 #define VXF_SCHED_PAUSE		0x00000400
-#define VXF_SCHED_SHARE         0x00000800
- 
+
 #define VXF_VIRT_MEM		0x00010000
 #define VXF_VIRT_UPTIME		0x00020000
 #define VXF_VIRT_CPU		0x00040000
@@ -37,16 +36,12 @@
 #define VXF_STATE_SETUP		(1ULL<<32)
 #define VXF_STATE_INIT		(1ULL<<33)
 
-#define VXF_STATE_HELPER	(1ULL<<36)
-
 #define VXF_FORK_RSS		(1ULL<<48)
 #define VXF_PROLIFIC		(1ULL<<49)
 
 #define VXF_IGNEG_NICE		(1ULL<<52)
 
 #define VXF_ONE_TIME		(0x0003ULL<<32)
-
-#define VXF_INIT_SET		(VXF_STATE_SETUP|VXF_STATE_INIT)
 
 
 /* context caps */
@@ -57,24 +52,15 @@
 #define VXC_SET_RLIMIT		0x00000002
 
 #define VXC_RAW_ICMP		0x00000100
-#define VXC_SYSLOG		0x00001000
 
 #define VXC_SECURE_MOUNT	0x00010000
 #define VXC_SECURE_REMOUNT	0x00020000
-#define VXC_BINARY_MOUNT	0x00040000
-
-#define VXC_QUOTA_CTL		0x00100000
 
 
-/* context state changes */
+/* vshelper sync commands */
 
-enum {
-	VSC_STARTUP = 1,
-	VSC_SHUTDOWN,
-
-	VSC_NETUP,
-	VSC_NETDOWN,
-};
+#define	VS_CONTEXT_CREATED	1
+#define	VS_CONTEXT_DESTROY	2
 
 
 #ifdef	__KERNEL__
@@ -89,9 +75,10 @@ enum {
 
 struct vx_info {
 	struct hlist_node vx_hlist;		/* linked list of contexts */
+	struct rcu_head vx_rcu;			/* the rcu head */
 	xid_t vx_id;				/* context id */
 	atomic_t vx_usecnt;			/* usage count */
-	atomic_t vx_tasks;			/* tasks count */
+	atomic_t vx_refcnt;			/* reference count */
 	struct vx_info *vx_parent;		/* parent context */
 	int vx_state;				/* context state */
 
@@ -103,7 +90,8 @@ struct vx_info {
 
 	pid_t vx_initpid;			/* PID of fake init process */
 
-	wait_queue_head_t vx_wait;		/* context exit waitqueue */
+	spinlock_t vx_lock;
+	wait_queue_head_t vx_exit;		/* context exit waitqueue */
 
 	struct _vx_limit limit;			/* vserver limits */
 	struct _vx_sched sched;			/* vserver scheduler */
@@ -120,6 +108,7 @@ struct vx_info {
 #define VXS_PAUSED	0x0010
 #define VXS_ONHOLD	0x0020
 #define VXS_SHUTDOWN	0x0100
+#define VXS_DEFUNCT	0x1000
 #define VXS_RELEASED	0x8000
 
 /* check conditions */
@@ -142,19 +131,23 @@ struct vx_info {
 #define VX_ATR_MASK	0x0F00
 
 
-extern void claim_vx_info(struct vx_info *, struct task_struct *);
-extern void release_vx_info(struct vx_info *, struct task_struct *);
+struct rcu_head;
+
+extern void unhash_vx_info(struct vx_info *);
+
+extern void free_vx_info(struct vx_info *);
 
 extern struct vx_info *locate_vx_info(int);
 extern struct vx_info *locate_or_create_vx_info(int);
 
 extern int get_xid_list(int, unsigned int *, int);
-extern int xid_is_hashed(xid_t);
+extern int vx_info_is_hashed(xid_t);
 
 extern int vx_migrate_task(struct task_struct *, struct vx_info *);
 
-extern long vs_state_change(struct vx_info *, unsigned int);
+// extern int proc_pid_vx_info(struct task_struct *, char *);
 
+extern long vs_context_state(unsigned int);
 
 #endif	/* __KERNEL__ */
 #else	/* _VX_CONTEXT_H */

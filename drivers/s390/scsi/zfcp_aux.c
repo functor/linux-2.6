@@ -52,18 +52,19 @@ static inline int zfcp_sg_list_copy_from_user(struct zfcp_sg_list *,
 static inline int zfcp_sg_list_copy_to_user(void __user *,
 					    struct zfcp_sg_list *, size_t);
 
-static long zfcp_cfdc_dev_ioctl(struct file *, unsigned int, unsigned long);
+static int zfcp_cfdc_dev_ioctl(struct inode *, struct file *,
+	unsigned int, unsigned long);
 
 #define ZFCP_CFDC_IOC_MAGIC                     0xDD
 #define ZFCP_CFDC_IOC \
 	_IOWR(ZFCP_CFDC_IOC_MAGIC, 0, struct zfcp_cfdc_sense_data)
 
+#ifdef CONFIG_COMPAT
+static struct ioctl_trans zfcp_ioctl_trans = {ZFCP_CFDC_IOC, (void*) sys_ioctl};
+#endif
 
 static struct file_operations zfcp_cfdc_fops = {
-	.unlocked_ioctl = zfcp_cfdc_dev_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl = zfcp_cfdc_dev_ioctl
-#endif
+	.ioctl = zfcp_cfdc_dev_ioctl
 };
 
 static struct miscdevice zfcp_cfdc_misc = {
@@ -88,10 +89,10 @@ MODULE_DESCRIPTION
     ("FCP (SCSI over Fibre Channel) HBA driver for IBM eServer zSeries");
 MODULE_LICENSE("GPL");
 
-module_param(device, charp, 0400);
+module_param(device, charp, 0);
 MODULE_PARM_DESC(device, "specify initial device");
 
-module_param(loglevel, uint, 0400);
+module_param(loglevel, uint, 0);
 MODULE_PARM_DESC(loglevel,
 		 "log levels, 8 nibbles: "
 		 "FC ERP QDIO CIO Config FSF SCSI Other, "
@@ -307,15 +308,22 @@ zfcp_module_init(void)
 	if (!zfcp_transport_template)
 		return -ENODEV;
 
+	retval = register_ioctl32_conversion(zfcp_ioctl_trans.cmd,
+					     zfcp_ioctl_trans.handler);
+	if (retval != 0) {
+		ZFCP_LOG_INFO("registration of ioctl32 conversion failed\n");
+		goto out;
+	}
+
 	retval = misc_register(&zfcp_cfdc_misc);
 	if (retval != 0) {
 		ZFCP_LOG_INFO("registration of misc device "
 			      "zfcp_cfdc failed\n");
-		goto out;
+		goto out_misc_register;
+	} else {
+		ZFCP_LOG_TRACE("major/minor for zfcp_cfdc: %d/%d\n",
+			       ZFCP_CFDC_DEV_MAJOR, zfcp_cfdc_misc.minor);
 	}
-
-	ZFCP_LOG_TRACE("major/minor for zfcp_cfdc: %d/%d\n",
-		       ZFCP_CFDC_DEV_MAJOR, zfcp_cfdc_misc.minor);
 
 	/* Initialise proc semaphores */
 	sema_init(&zfcp_data.config_sema, 1);
@@ -340,6 +348,8 @@ zfcp_module_init(void)
 
  out_ccw_register:
 	misc_deregister(&zfcp_cfdc_misc);
+ out_misc_register:
+	unregister_ioctl32_conversion(zfcp_ioctl_trans.cmd);
  out:
 	return retval;
 }
@@ -360,9 +370,9 @@ zfcp_module_init(void)
  *              -EPERM      - Cannot create or queue FSF request or create SBALs
  *              -ERESTARTSYS- Received signal (is mapped to EAGAIN by VFS)
  */
-static long
-zfcp_cfdc_dev_ioctl(struct file *file, unsigned int command,
-		    unsigned long buffer)
+static int
+zfcp_cfdc_dev_ioctl(struct inode *inode, struct file *file,
+                    unsigned int command, unsigned long buffer)
 {
 	struct zfcp_cfdc_sense_data *sense_data, __user *sense_data_user;
 	struct zfcp_adapter *adapter = NULL;
@@ -573,7 +583,7 @@ zfcp_sg_list_alloc(struct zfcp_sg_list *sg_list, size_t size)
 		retval = -ENOMEM;
 		goto out;
 	}
-	memset(sg_list->sg, 0, sg_list->count * sizeof(struct scatterlist));
+	memset(sg_list->sg, sg_list->count * sizeof(struct scatterlist), 0);
 
 	for (i = 0, sg = sg_list->sg; i < sg_list->count; i++, sg++) {
 		sg->length = min(size, PAGE_SIZE);
@@ -918,7 +928,7 @@ zfcp_unit_dequeue(struct zfcp_unit *unit)
 }
 
 static void *
-zfcp_mempool_alloc(unsigned int __nocast gfp_mask, void *size)
+zfcp_mempool_alloc(int gfp_mask, void *size)
 {
 	return kmalloc((size_t) size, gfp_mask);
 }

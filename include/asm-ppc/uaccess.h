@@ -37,8 +37,7 @@
 #define access_ok(type, addr, size) \
 	(__chk_user_ptr(addr),__access_ok((unsigned long)(addr),(size)))
 
-/* this function will go away soon - use access_ok() instead */
-extern inline int __deprecated verify_area(int type, const void __user * addr, unsigned long size)
+extern inline int verify_area(int type, const void __user * addr, unsigned long size)
 {
 	return access_ok(type, addr, size) ? 0 : -EFAULT;
 }
@@ -181,8 +180,7 @@ do {							\
 
 #define __get_user_nocheck(x, ptr, size)			\
 ({								\
-	long __gu_err;						\
-	unsigned long __gu_val;					\
+	long __gu_err, __gu_val;				\
 	__chk_user_ptr(ptr);					\
 	__get_user_size(__gu_val, (ptr), (size), __gu_err);	\
 	(x) = (__typeof__(*(ptr)))__gu_val;			\
@@ -201,8 +199,7 @@ do {							\
 
 #define __get_user_check(x, ptr, size)					\
 ({									\
-	long __gu_err = -EFAULT;					\
-	unsigned long  __gu_val = 0;					\
+	long __gu_err = -EFAULT, __gu_val = 0;				\
 	const __typeof__(*(ptr)) __user *__gu_addr = (ptr);		\
 	if (access_ok(VERIFY_READ, __gu_addr, (size)))			\
 		__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
@@ -308,10 +305,10 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 	unsigned long over;
 
 	if (access_ok(VERIFY_READ, from, n))
-		return __copy_tofrom_user((__force void __user *)to, from, n);
+		return __copy_tofrom_user((void __user *)to, from, n);
 	if ((unsigned long)from < TASK_SIZE) {
 		over = (unsigned long)from + n - TASK_SIZE;
-		return __copy_tofrom_user((__force void __user *)to, from, n - over) + over;
+		return __copy_tofrom_user((void __user *)to, from, n - over) + over;
 	}
 	return n;
 }
@@ -322,24 +319,18 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 	unsigned long over;
 
 	if (access_ok(VERIFY_WRITE, to, n))
-		return __copy_tofrom_user(to, (__force void __user *) from, n);
+		return __copy_tofrom_user(to, (void __user *) from, n);
 	if ((unsigned long)to < TASK_SIZE) {
 		over = (unsigned long)to + n - TASK_SIZE;
-		return __copy_tofrom_user(to, (__force void __user *) from, n - over) + over;
+		return __copy_tofrom_user(to, (void __user *) from, n - over) + over;
 	}
 	return n;
 }
 
-static inline unsigned long __copy_from_user(void *to, const void __user *from, unsigned long size)
-{
-	return __copy_tofrom_user((__force void __user *)to, from, size);
-}
-
-static inline unsigned long __copy_to_user(void __user *to, const void *from, unsigned long size)
-{
-	return __copy_tofrom_user(to, (__force void __user *)from, size);
-}
-
+#define __copy_from_user(to, from, size) \
+	__copy_tofrom_user((void __user *)(to), (from), (size))
+#define __copy_to_user(to, from, size) \
+	__copy_tofrom_user((to), (void __user *)(from), (size))
 #define __copy_to_user_inatomic __copy_to_user
 #define __copy_from_user_inatomic __copy_from_user
 

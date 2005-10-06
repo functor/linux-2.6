@@ -15,6 +15,17 @@
 #include <linux/smp_lock.h>
 #include <linux/namei.h>
 
+/*
+ * The follow_link operation is special: it must behave as a no-op
+ * so that a bad root inode can at least be unmounted. To do this
+ * we must dput() the base and return the dentry with a dget().
+ */
+static int bad_follow_link(struct dentry *dent, struct nameidata *nd)
+{
+	nd_set_link(nd, ERR_PTR(-EIO));
+	return 0;
+}
+
 static int return_EIO(void)
 {
 	return -EIO;
@@ -47,7 +58,7 @@ static struct file_operations bad_file_ops =
 	.get_unmapped_area = EIO_ERROR,
 };
 
-static struct inode_operations bad_inode_ops =
+struct inode_operations bad_inode_ops =
 {
 	.create		= EIO_ERROR,
 	.lookup		= EIO_ERROR,
@@ -59,8 +70,7 @@ static struct inode_operations bad_inode_ops =
 	.mknod		= EIO_ERROR,
 	.rename		= EIO_ERROR,
 	.readlink	= EIO_ERROR,
-	/* follow_link must be no-op, otherwise unmounting this inode
-	   won't work */
+	.follow_link	= bad_follow_link,
 	.truncate	= EIO_ERROR,
 	.permission	= EIO_ERROR,
 	.getattr	= EIO_ERROR,
@@ -95,8 +105,7 @@ void make_bad_inode(struct inode * inode)
 	remove_inode_hash(inode);
 
 	inode->i_mode = S_IFREG;
-	inode->i_atime = inode->i_mtime = inode->i_ctime =
-		current_fs_time(inode->i_sb);
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	inode->i_op = &bad_inode_ops;	
 	inode->i_fop = &bad_file_ops;	
 }

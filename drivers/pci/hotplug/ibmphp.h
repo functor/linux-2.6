@@ -34,7 +34,7 @@
 
 extern int ibmphp_debug;
 
-#if !defined(MODULE)
+#if !defined(CONFIG_HOTPLUG_PCI_IBM_MODULE)
 	#define MY_NAME "ibmphpd"
 #else
 	#define MY_NAME THIS_MODULE->name
@@ -196,7 +196,7 @@ struct ebda_hpc_bus {
 
 
 /********************************************************************
-*   THREE TYPE OF HOT PLUG CONTROLLER                                *
+*   THREE TYPE OF HOT PLUG CONTROLER                                *
 ********************************************************************/
 
 struct isa_ctlr_access {

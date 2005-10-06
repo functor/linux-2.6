@@ -477,7 +477,12 @@ static struct i2c_adapter ali15x3_adapter = {
 };
 
 static struct pci_device_id ali15x3_ids[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M7101) },
+	{
+	.vendor =	PCI_VENDOR_ID_AL,
+	.device =	PCI_DEVICE_ID_AL_M7101,
+	.subvendor =	PCI_ANY_ID,
+	.subdevice =	PCI_ANY_ID,
+	},
 	{ 0, }
 };
 

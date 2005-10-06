@@ -320,7 +320,7 @@ static struct super_block *eventpollfs_get_sb(struct file_system_type *fs_type,
 /*
  * This semaphore is used to serialize ep_free() and eventpoll_release_file().
  */
-static struct semaphore epsem;
+struct semaphore epsem;
 
 /* Safe wake up implementation */
 static struct poll_safewake psw;
@@ -640,10 +640,8 @@ asmlinkage long sys_epoll_wait(int epfd, struct epoll_event __user *events,
 		return -EINVAL;
 
 	/* Verify that the area passed by the user is writeable */
-	if (!access_ok(VERIFY_WRITE, events, maxevents * sizeof(struct epoll_event))) {
-		error = -EFAULT;
+	if ((error = verify_area(VERIFY_WRITE, events, maxevents * sizeof(struct epoll_event))))
 		goto eexit_1;
-	}
 
 	/* Get the "struct file *" for the eventpoll file */
 	error = -EBADF;

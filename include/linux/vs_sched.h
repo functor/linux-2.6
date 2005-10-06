@@ -1,9 +1,6 @@
 #ifndef _VX_VS_SCHED_H
 #define _VX_VS_SCHED_H
 
-#ifndef	CONFIG_VSERVER
-#warning config options missing
-#endif
 
 #include "vserver/sched.h"
 
@@ -13,18 +10,6 @@
 #define MAX_PRIO_BIAS		 20
 #define MIN_PRIO_BIAS		-20
 
-#ifdef CONFIG_VSERVER_ACB_SCHED
-
-#define VX_INVALID_TICKS        -1000000
-#define IS_BEST_EFFORT(vxi)     (vx_info_flags(vxi, VXF_SCHED_SHARE, 0))
-
-int vx_tokens_avail(struct vx_info *vxi);
-void vx_consume_token(struct vx_info *vxi);
-void vx_scheduler_tick(void);
-void vx_advance_best_effort_ticks(int ticks);
-void vx_advance_guaranteed_ticks(int ticks);
-
-#else
 
 static inline int vx_tokens_avail(struct vx_info *vxi)
 {
@@ -35,8 +20,6 @@ static inline void vx_consume_token(struct vx_info *vxi)
 {
 	atomic_dec(&vxi->sched.tokens);
 }
-
-#endif /* CONFIG_VSERVER_ACB_SCHED */
 
 static inline int vx_need_resched(struct task_struct *p)
 {
@@ -83,26 +66,6 @@ static inline void vx_onhold_dec(struct vx_info *vxi)
 {
 	if (atomic_dec_and_test(&vxi->cvirt.nr_onhold))
 		__vx_onhold_update(vxi);
-}
-
-static inline void vx_account_user(struct vx_info *vxi,
-	cputime_t cputime, int nice)
-{
-	int cpu = smp_processor_id();
-
-	if (!vxi)
-		return;
-	vxi->sched.cpu[cpu].user_ticks += cputime;
-}
-
-static inline void vx_account_system(struct vx_info *vxi,
-	cputime_t cputime, int idle)
-{
-	int cpu = smp_processor_id();
-
-	if (!vxi)
-		return;
-	vxi->sched.cpu[cpu].sys_ticks += cputime;
 }
 
 #else

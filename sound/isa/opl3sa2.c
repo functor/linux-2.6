@@ -341,7 +341,7 @@ static int snd_opl3sa2_info_single(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t
 	return 0;
 }
 
-static int snd_opl3sa2_get_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+int snd_opl3sa2_get_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -358,7 +358,7 @@ static int snd_opl3sa2_get_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_
 	return 0;
 }
 
-static int snd_opl3sa2_put_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+int snd_opl3sa2_put_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -388,7 +388,7 @@ static int snd_opl3sa2_put_single(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_
   .get = snd_opl3sa2_get_double, .put = snd_opl3sa2_put_double, \
   .private_value = left_reg | (right_reg << 8) | (shift_left << 16) | (shift_right << 19) | (mask << 24) | (invert << 22) }
 
-static int snd_opl3sa2_info_double(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t * uinfo)
+int snd_opl3sa2_info_double(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t * uinfo)
 {
 	int mask = (kcontrol->private_value >> 24) & 0xff;
 
@@ -399,7 +399,7 @@ static int snd_opl3sa2_info_double(snd_kcontrol_t *kcontrol, snd_ctl_elem_info_t
 	return 0;
 }
 
-static int snd_opl3sa2_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+int snd_opl3sa2_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -421,7 +421,7 @@ static int snd_opl3sa2_get_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_
 	return 0;
 }
 
-static int snd_opl3sa2_put_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
+int snd_opl3sa2_put_double(snd_kcontrol_t * kcontrol, snd_ctl_elem_value_t * ucontrol)
 {
 	opl3sa2_t *chip = snd_kcontrol_chip(kcontrol);
 	unsigned long flags;
@@ -529,7 +529,7 @@ static int __init snd_opl3sa2_mixer(opl3sa2_t *chip)
 
 /* Power Management support functions */
 #ifdef CONFIG_PM
-static int snd_opl3sa2_suspend(snd_card_t *card, pm_message_t state)
+static int snd_opl3sa2_suspend(snd_card_t *card, unsigned int state)
 {
 	opl3sa2_t *chip = card->pm_private_data;
 
@@ -539,10 +539,11 @@ static int snd_opl3sa2_suspend(snd_card_t *card, pm_message_t state)
 	/* power down */
 	snd_opl3sa2_write(chip, OPL3SA2_PM_CTRL, OPL3SA2_PM_D3);
 
+	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
-static int snd_opl3sa2_resume(snd_card_t *card)
+static int snd_opl3sa2_resume(snd_card_t *card, unsigned int state)
 {
 	opl3sa2_t *chip = card->pm_private_data;
 	int i;
@@ -562,6 +563,7 @@ static int snd_opl3sa2_resume(snd_card_t *card)
 	/* restore cs4231 */
 	chip->cs4231_resume(chip->cs4231);
 
+	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
@@ -787,7 +789,7 @@ static int __devinit snd_opl3sa2_pnp_detect(struct pnp_card_link *card,
         int res;
 
         for ( ; dev < SNDRV_CARDS; dev++) {
-                if (!enable[dev] || !isapnp[dev])
+                if (!enable[dev] && !isapnp[dev])
                         continue;
                 res = snd_opl3sa2_probe(dev, card, id);
                 if (res < 0)

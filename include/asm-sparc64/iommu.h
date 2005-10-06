@@ -16,6 +16,4 @@
 #define IOPTE_CACHE   0x0000000000000010UL /* Cached (in UPA E-cache)         */
 #define IOPTE_WRITE   0x0000000000000002UL /* Writeable                       */
 
-#define IOMMU_NUM_CTXS	4096
-
 #endif /* !(_SPARC_IOMMU_H) */

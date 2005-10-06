@@ -95,7 +95,7 @@ struct qdisc_estimator_head
 static struct qdisc_estimator_head elist[EST_MAX_INTERVAL+1];
 
 /* Estimator array lock */
-static DEFINE_RWLOCK(est_lock);
+static rwlock_t est_lock = RW_LOCK_UNLOCKED;
 
 static void est_timer(unsigned long arg)
 {

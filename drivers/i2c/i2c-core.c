@@ -38,43 +38,12 @@ static LIST_HEAD(drivers);
 static DECLARE_MUTEX(core_lists);
 static DEFINE_IDR(i2c_adapter_idr);
 
-/* match always succeeds, as we want the probe() to tell if we really accept this match */
-static int i2c_device_match(struct device *dev, struct device_driver *drv)
-{
-	return 1;
-}
-
-static int i2c_bus_suspend(struct device * dev, pm_message_t state)
-{
-	int rc = 0;
-
-	if (dev->driver && dev->driver->suspend)
-		rc = dev->driver->suspend(dev,state,0);
-	return rc;
-}
-
-static int i2c_bus_resume(struct device * dev)
-{
-	int rc = 0;
-	
-	if (dev->driver && dev->driver->resume)
-		rc = dev->driver->resume(dev,0);
-	return rc;
-}
-
-static struct bus_type i2c_bus_type = {
-	.name =		"i2c",
-	.match =	i2c_device_match,
-	.suspend =      i2c_bus_suspend,
-	.resume =       i2c_bus_resume,
-};
-
-static int i2c_device_probe(struct device *dev)
+int i2c_device_probe(struct device *dev)
 {
 	return -ENODEV;
 }
 
-static int i2c_device_remove(struct device *dev)
+int i2c_device_remove(struct device *dev)
 {
 	return 0;
 }
@@ -554,6 +523,38 @@ void i2c_clients_command(struct i2c_adapter *adap, unsigned int cmd, void *arg)
        up(&adap->clist_lock);
 }
 
+
+/* match always succeeds, as we want the probe() to tell if we really accept this match */
+static int i2c_device_match(struct device *dev, struct device_driver *drv)
+{
+	return 1;
+}
+
+static int i2c_bus_suspend(struct device * dev, u32 state)
+{
+	int rc = 0;
+
+	if (dev->driver && dev->driver->suspend)
+		rc = dev->driver->suspend(dev,state,0);
+	return rc;
+}
+
+static int i2c_bus_resume(struct device * dev)
+{
+	int rc = 0;
+	
+	if (dev->driver && dev->driver->resume)
+		rc = dev->driver->resume(dev,0);
+	return rc;
+}
+
+struct bus_type i2c_bus_type = {
+	.name =		"i2c",
+	.match =	i2c_device_match,
+	.suspend =      i2c_bus_suspend,
+	.resume =       i2c_bus_resume,
+};
+
 static int __init i2c_init(void)
 {
 	int retval;
@@ -582,18 +583,12 @@ module_exit(i2c_exit);
  * ----------------------------------------------------
  */
 
-int i2c_transfer(struct i2c_adapter * adap, struct i2c_msg *msgs, int num)
+int i2c_transfer(struct i2c_adapter * adap, struct i2c_msg msgs[],int num)
 {
 	int ret;
 
 	if (adap->algo->master_xfer) {
-#ifdef DEBUG
-		for (ret = 0; ret < num; ret++) {
-			dev_dbg(&adap->dev, "master_xfer[%d] %c, addr=0x%02x, "
-				"len=%d\n", ret, msgs[ret].flags & I2C_M_RD ?
-				'R' : 'W', msgs[ret].addr, msgs[ret].len);
-		}
-#endif
+ 	 	dev_dbg(&adap->dev, "master_xfer: with %d msgs.\n", num);
 
 		down(&adap->bus_lock);
 		ret = adap->algo->master_xfer(adap,msgs,num);
@@ -715,7 +710,7 @@ int i2c_probe(struct i2c_adapter *adapter,
 		   at all */
 		found = 0;
 
-		for (i = 0; !found && (address_data->force[i] != I2C_CLIENT_END); i += 2) {
+		for (i = 0; !found && (address_data->force[i] != I2C_CLIENT_END); i += 3) {
 			if (((adap_id == address_data->force[i]) || 
 			     (address_data->force[i] == ANY_I2C_BUS)) &&
 			     (addr == address_data->force[i+1])) {
@@ -865,7 +860,7 @@ crc8(u16 data)
 /* CRC over count bytes in the first array plus the bytes in the rest
    array if it is non-null. rest[0] is the (length of rest) - 1
    and is included. */
-static u8 i2c_smbus_partial_pec(u8 crc, int count, u8 *first, u8 *rest)
+u8 i2c_smbus_partial_pec(u8 crc, int count, u8 *first, u8 *rest)
 {
 	int i;
 
@@ -877,7 +872,7 @@ static u8 i2c_smbus_partial_pec(u8 crc, int count, u8 *first, u8 *rest)
 	return crc;
 }
 
-static u8 i2c_smbus_pec(int count, u8 *first, u8 *rest)
+u8 i2c_smbus_pec(int count, u8 *first, u8 *rest)
 {
 	return i2c_smbus_partial_pec(0, count, first, rest);
 }
@@ -885,8 +880,8 @@ static u8 i2c_smbus_pec(int count, u8 *first, u8 *rest)
 /* Returns new "size" (transaction type)
    Note that we convert byte to byte_data and byte_data to word_data
    rather than invent new xxx_PEC transactions. */
-static int i2c_smbus_add_pec(u16 addr, u8 command, int size,
-			     union i2c_smbus_data *data)
+int i2c_smbus_add_pec(u16 addr, u8 command, int size,
+                      union i2c_smbus_data *data)
 {
 	u8 buf[3];
 
@@ -915,8 +910,8 @@ static int i2c_smbus_add_pec(u16 addr, u8 command, int size,
 	return size;	
 }
 
-static int i2c_smbus_check_pec(u16 addr, u8 command, int size, u8 partial,
-			       union i2c_smbus_data *data)
+int i2c_smbus_check_pec(u16 addr, u8 command, int size, u8 partial,
+                        union i2c_smbus_data *data)
 {
 	u8 buf[3], rpec, cpec;
 
@@ -1236,6 +1231,22 @@ s32 i2c_smbus_xfer(struct i2c_adapter * adapter, u16 addr, unsigned short flags,
 }
 
 
+/* You should always define `functionality'; the 'else' is just for
+   backward compatibility. */ 
+u32 i2c_get_functionality (struct i2c_adapter *adap)
+{
+	if (adap->algo->functionality)
+		return adap->algo->functionality(adap);
+	else
+		return 0xffffffff;
+}
+
+int i2c_check_functionality (struct i2c_adapter *adap, u32 func)
+{
+	u32 adap_func = i2c_get_functionality (adap);
+	return (func & adap_func) == func;
+}
+
 EXPORT_SYMBOL(i2c_add_adapter);
 EXPORT_SYMBOL(i2c_del_adapter);
 EXPORT_SYMBOL(i2c_add_driver);
@@ -1266,6 +1277,9 @@ EXPORT_SYMBOL(i2c_smbus_read_word_data);
 EXPORT_SYMBOL(i2c_smbus_write_word_data);
 EXPORT_SYMBOL(i2c_smbus_write_block_data);
 EXPORT_SYMBOL(i2c_smbus_read_i2c_block_data);
+
+EXPORT_SYMBOL(i2c_get_functionality);
+EXPORT_SYMBOL(i2c_check_functionality);
 
 MODULE_AUTHOR("Simon G. Vogl <simon@tk.uni-linz.ac.at>");
 MODULE_DESCRIPTION("I2C-Bus main module");

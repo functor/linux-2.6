@@ -43,7 +43,7 @@ static enum smbiod_state smbiod_state = SMBIOD_DEAD;
 static pid_t smbiod_pid;
 static DECLARE_WAIT_QUEUE_HEAD(smbiod_wait);
 static LIST_HEAD(smb_servers);
-static DEFINE_SPINLOCK(servers_lock);
+static spinlock_t servers_lock = SPIN_LOCK_UNLOCKED;
 
 #define SMBIOD_DATA_READY	(1<<0)
 static long smbiod_flags;

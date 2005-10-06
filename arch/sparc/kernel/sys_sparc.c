@@ -198,7 +198,8 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 				goto out;
 				}
 			case 1:	/* iBCS2 emulator entry point */
-				err = -EINVAL;
+				err = do_shmat (first, (char __user *) ptr,
+						second, (ulong *) third);
 				goto out;
 			}
 		case SHMDT: 
@@ -400,7 +401,7 @@ sparc_sigaction (int sig, const struct old_sigaction __user *act,
 	if (act) {
 		unsigned long mask;
 
-		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
+		if (verify_area(VERIFY_READ, act, sizeof(*act)) ||
 		    __get_user(new_ka.sa.sa_handler, &act->sa_handler) ||
 		    __get_user(new_ka.sa.sa_restorer, &act->sa_restorer))
 			return -EFAULT;
@@ -418,7 +419,7 @@ sparc_sigaction (int sig, const struct old_sigaction __user *act,
 		 * deadlock us if we held the signal lock on SMP.  So for
 		 * now I take the easy way out and do no locking.
 		 */
-		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		if (verify_area(VERIFY_WRITE, oact, sizeof(*oact)) ||
 		    __put_user(old_ka.sa.sa_handler, &oact->sa_handler) ||
 		    __put_user(old_ka.sa.sa_restorer, &oact->sa_restorer))
 			return -EFAULT;

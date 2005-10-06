@@ -50,8 +50,8 @@ MODULE_AUTHOR("Paul Diefenbaugh");
 MODULE_DESCRIPTION(ACPI_FAN_DRIVER_NAME);
 MODULE_LICENSE("GPL");
 
-static int acpi_fan_add (struct acpi_device *device);
-static int acpi_fan_remove (struct acpi_device *device, int type);
+int acpi_fan_add (struct acpi_device *device);
+int acpi_fan_remove (struct acpi_device *device, int type);
 
 static struct acpi_driver acpi_fan_driver = {
 	.name =		ACPI_FAN_DRIVER_NAME,
@@ -72,24 +72,27 @@ struct acpi_fan {
                               FS Interface (/proc)
    -------------------------------------------------------------------------- */
 
-static struct proc_dir_entry	*acpi_fan_dir;
+struct proc_dir_entry		*acpi_fan_dir;
 
 
 static int
 acpi_fan_read_state (struct seq_file *seq, void *offset)
 {
-	struct acpi_fan		*fan = seq->private;
+	struct acpi_fan		*fan = (struct acpi_fan *) seq->private;
 	int			state = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_fan_read_state");
 
-	if (fan) {
-		if (acpi_bus_get_power(fan->handle, &state))
-			seq_printf(seq, "status:                  ERROR\n");
-		else
-			seq_printf(seq, "status:                  %s\n",
-				     !state?"on":"off");
-	}
+	if (!fan)
+		goto end;
+
+	if (acpi_bus_get_power(fan->handle, &state))
+		goto end;
+
+	seq_printf(seq, "status:                  %s\n",
+		!state?"on":"off");
+
+end:
 	return_VALUE(0);
 }
 
@@ -194,7 +197,7 @@ acpi_fan_remove_fs (
                                  Driver Interface
    -------------------------------------------------------------------------- */
 
-static int
+int
 acpi_fan_add (
 	struct acpi_device	*device)
 {
@@ -240,7 +243,7 @@ end:
 }
 
 
-static int
+int
 acpi_fan_remove (
 	struct acpi_device	*device,
 	int			type)
@@ -262,7 +265,7 @@ acpi_fan_remove (
 }
 
 
-static int __init
+int __init
 acpi_fan_init (void)
 {
 	int			result = 0;
@@ -284,7 +287,7 @@ acpi_fan_init (void)
 }
 
 
-static void __exit
+void __exit
 acpi_fan_exit (void)
 {
 	ACPI_FUNCTION_TRACE("acpi_fan_exit");

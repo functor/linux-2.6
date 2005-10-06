@@ -60,13 +60,13 @@ MODULE_AUTHOR("Eric Sandeen <eric_sandeen@bigfoot.com>");
 MODULE_DESCRIPTION("bttv driver for the tda7432 audio processor chip");
 MODULE_LICENSE("GPL");
 
-static int maxvol;
-static int loudness; /* disable loudness by default */
-static int debug;	 /* insmod parameter */
-module_param(debug, int, S_IRUGO | S_IWUSR);
-module_param(loudness, int, S_IRUGO);
+MODULE_PARM(debug,"i");
+MODULE_PARM(loudness,"i");
 MODULE_PARM_DESC(maxvol,"Set maximium volume to +20db (0), default is 0db(1)");
-module_param(maxvol, int, S_IRUGO | S_IWUSR);
+MODULE_PARM(maxvol,"i");
+static int maxvol = 0;
+static int loudness = 0; /* disable loudness by default */
+static int debug = 0;	 /* insmod parameter */
 
 
 /* Address to scan (I2C address of this chip) */
@@ -528,6 +528,7 @@ static struct i2c_driver driver = {
 static struct i2c_client client_template =
 {
 	I2C_DEVNAME("tda7432"),
+        .id         = -1,
 	.driver     = &driver,
 };
 

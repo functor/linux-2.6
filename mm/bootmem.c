@@ -19,7 +19,6 @@
 #include <linux/module.h>
 #include <asm/dma.h>
 #include <asm/io.h>
-#include "internal.h"
 
 /*
  * Access to this subsystem has to be serialized externally. (this is
@@ -27,6 +26,7 @@
  */
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
+EXPORT_SYMBOL(min_low_pfn);
 unsigned long max_pfn;
 /*
  * If we have booted due to a crash, max_pfn will be a very low value. We need
@@ -281,18 +281,17 @@ static unsigned long __init free_all_bootmem_core(pg_data_t *pgdat)
 	for (i = 0; i < idx; ) {
 		unsigned long v = ~map[i / BITS_PER_LONG];
 		if (gofast && v == ~0UL) {
-			int j, order;
+			int j;
 
 			count += BITS_PER_LONG;
 			__ClearPageReserved(page);
-			order = ffs(BITS_PER_LONG) - 1;
-			set_page_refs(page, order);
+			set_page_count(page, 1);
 			for (j = 1; j < BITS_PER_LONG; j++) {
 				if (j + 16 < BITS_PER_LONG)
 					prefetchw(page + j + 16);
 				__ClearPageReserved(page + j);
 			}
-			__free_pages(page, order);
+			__free_pages(page, ffs(BITS_PER_LONG)-1);
 			i += BITS_PER_LONG;
 			page += BITS_PER_LONG;
 		} else if (v) {
@@ -301,7 +300,7 @@ static unsigned long __init free_all_bootmem_core(pg_data_t *pgdat)
 				if (v & m) {
 					count++;
 					__ClearPageReserved(page);
-					set_page_refs(page, 0);
+					set_page_count(page, 1);
 					__free_page(page);
 				}
 			}

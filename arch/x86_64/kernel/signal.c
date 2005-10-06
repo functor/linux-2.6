@@ -24,11 +24,11 @@
 #include <linux/stddef.h>
 #include <linux/personality.h>
 #include <linux/compiler.h>
+#include <linux/suspend.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
 #include <asm/i387.h>
 #include <asm/proto.h>
-#include <asm/ia32_unistd.h>
 
 /* #define DEBUG_SIG 1 */
 
@@ -84,7 +84,7 @@ sys_sigaltstack(const stack_t __user *uss, stack_t __user *uoss,
 
 struct rt_sigframe
 {
-	char __user *pretcode;
+	char *pretcode;
 	struct ucontext uc;
 	struct siginfo info;
 };
@@ -122,14 +122,14 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, unsigned 
 		err |= __get_user(buf, &sc->fpstate);
 
 		if (buf) {
-			if (!access_ok(VERIFY_READ, buf, sizeof(*buf)))
+			if (verify_area(VERIFY_READ, buf, sizeof(*buf)))
 				goto badframe;
 			err |= restore_i387(buf);
 		} else {
 			struct task_struct *me = current;
-			if (used_math()) {
+			if (me->used_math) {
 				clear_fpu(me);
-				clear_used_math();
+				me->used_math = 0;
 			}
 		}
 	}
@@ -145,10 +145,10 @@ asmlinkage long sys_rt_sigreturn(struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
 	sigset_t set;
-	unsigned long eax;
+	long eax;
 
 	frame = (struct rt_sigframe __user *)(regs->rsp - 8);
-	if (!access_ok(VERIFY_READ, frame, sizeof(*frame))) {
+	if (verify_area(VERIFY_READ, frame, sizeof(*frame))) { 
 		goto badframe;
 	} 
 	if (__copy_from_user(&set, &frame->uc.uc_sigmask, sizeof(set))) { 
@@ -161,8 +161,9 @@ asmlinkage long sys_rt_sigreturn(struct pt_regs *regs)
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 	
-	if (restore_sigcontext(regs, &frame->uc.uc_mcontext, &eax))
+	if (restore_sigcontext(regs, &frame->uc.uc_mcontext, &eax)) {
 		goto badframe;
+	} 
 
 #ifdef DEBUG_SIG
 	printk("%d sigreturn rip:%lx rsp:%lx frame:%p rax:%lx\n",current->pid,regs.rip,regs.rsp,frame,eax);
@@ -186,6 +187,7 @@ static inline int
 setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs, unsigned long mask, struct task_struct *me)
 {
 	int err = 0;
+	unsigned long eflags;
 
 	err |= __put_user(0, &sc->gs);
 	err |= __put_user(0, &sc->fs);
@@ -209,7 +211,11 @@ setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs, unsigned lo
 	err |= __put_user(me->thread.trap_no, &sc->trapno);
 	err |= __put_user(me->thread.error_code, &sc->err);
 	err |= __put_user(regs->rip, &sc->rip);
-	err |= __put_user(regs->eflags, &sc->eflags);
+	eflags = regs->eflags;
+	if (current->ptrace & PT_PTRACED) {
+		eflags &= ~TF_MASK;
+	}
+	err |= __put_user(eflags, &sc->eflags);
 	err |= __put_user(mask, &sc->oldmask);
 	err |= __put_user(me->thread.cr2, &sc->cr2);
 
@@ -246,26 +252,29 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	int err = 0;
 	struct task_struct *me = current;
 
-	if (used_math()) {
+	if (me->used_math) {
 		fp = get_stack(ka, regs, sizeof(struct _fpstate)); 
-		frame = (void __user *)round_down(
-			(unsigned long)fp - sizeof(struct rt_sigframe), 16) - 8;
+		frame = (void __user *)round_down((unsigned long)fp - sizeof(struct rt_sigframe), 16) - 8;
 
-		if (!access_ok(VERIFY_WRITE, fp, sizeof(struct _fpstate)))
-			goto give_sigsegv;
+		if (!access_ok(VERIFY_WRITE, fp, sizeof(struct _fpstate))) { 
+		goto give_sigsegv;
+		}
 
 		if (save_i387(fp) < 0) 
 			err |= -1; 
-	} else
+	} else {
 		frame = get_stack(ka, regs, sizeof(struct rt_sigframe)) - 8;
+	}
 
-	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
+	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame))) {
 		goto give_sigsegv;
+	}
 
 	if (ka->sa.sa_flags & SA_SIGINFO) { 
 		err |= copy_siginfo_to_user(&frame->info, info);
-		if (err)
+		if (err) { 
 			goto give_sigsegv;
+	}
 	}
 		
 	/* Create the ucontext.  */
@@ -280,8 +289,9 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	if (sizeof(*set) == 16) { 
 		__put_user(set->sig[0], &frame->uc.uc_sigmask.sig[0]);
 		__put_user(set->sig[1], &frame->uc.uc_sigmask.sig[1]); 
-	} else
-		err |= __copy_to_user(&frame->uc.uc_sigmask, set, sizeof(*set));
+	} else { 		
+	err |= __copy_to_user(&frame->uc.uc_sigmask, set, sizeof(*set));
+	}
 
 	/* Set up to return from userspace.  If provided, use a stub
 	   already in userspace.  */
@@ -293,8 +303,9 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		goto give_sigsegv; 
 	}
 
-	if (err)
+	if (err) { 
 		goto give_sigsegv;
+	} 
 
 #ifdef DEBUG_SIG
 	printk("%d old rip %lx old rsp %lx old rax %lx\n", current->pid,regs->rip,regs->rsp,regs->rax);
@@ -319,9 +330,14 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->rsp = (unsigned long)frame;
 
 	set_fs(USER_DS);
-	regs->eflags &= ~TF_MASK;
-	if (test_thread_flag(TIF_SINGLESTEP))
-		ptrace_notify(SIGTRAP);
+	if (regs->eflags & TF_MASK) {
+		if ((current->ptrace & (PT_PTRACED | PT_DTRACE)) == (PT_PTRACED | PT_DTRACE)) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
+
 #ifdef DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
 		current->comm, current->pid, frame, regs->rip, frame->pretcode);
@@ -342,8 +358,7 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 		sigset_t *oldset, struct pt_regs *regs)
 {
 #ifdef DEBUG_SIG
-	printk("handle_signal pid:%d sig:%lu rip:%lx rsp:%lx regs=%p\n",
-		current->pid, sig,
+	printk("handle_signal pid:%d sig:%lu rip:%lx rsp:%lx regs=%p\n", current->pid, sig, 
 		regs->rip, regs->rsp, regs);
 #endif
 
@@ -361,23 +376,10 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 					regs->rax = -EINTR;
 					break;
 				}
-				/* fallthrough */
+			/* fallthrough */
 			case -ERESTARTNOINTR:
 				regs->rax = regs->orig_rax;
 				regs->rip -= 2;
-				break;
-		}
-	}
-
-	/*
-	 * If TF is set due to a debugger (PT_DTRACE), clear the TF
-	 * flag so that register information in the sigcontext is
-	 * correct.
-	 */
-	if (unlikely(regs->eflags & TF_MASK)) {
-		if (likely(current->ptrace & PT_DTRACE)) {
-			current->ptrace &= ~PT_DTRACE;
-			regs->eflags &= ~TF_MASK;
 		}
 	}
 
@@ -417,11 +419,14 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 	 * kernel mode. Just return without doing anything
 	 * if so.
 	 */
-	if ((regs->cs & 3) != 3)
+	if ((regs->cs & 3) != 3) {
 		return 1;
+	} 	
 
-	if (try_to_freeze(0))
+	if (current->flags & PF_FREEZE) {
+		refrigerator(0);
 		goto no_signal;
+	}
 
 	if (!oldset)
 		oldset = &current->blocked;
@@ -453,9 +458,7 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 			regs->rip -= 2;
 		}
 		if (regs->rax == (unsigned long)-ERESTART_RESTARTBLOCK) {
-			regs->rax = test_thread_flag(TIF_IA32) ?
-					__NR_ia32_restart_syscall :
-					__NR_restart_syscall;
+			regs->rax = __NR_restart_syscall;
 			regs->rip -= 2;
 		}
 	}

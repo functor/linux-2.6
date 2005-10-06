@@ -102,8 +102,7 @@ void *module_alloc(unsigned long size)
 {
 	if (size == 0)
 		return NULL;
-
-	return vmalloc_exec(size);
+	return vmalloc(size);
 }
 
 /* Free memory returned from module_alloc */

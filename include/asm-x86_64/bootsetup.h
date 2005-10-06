@@ -2,8 +2,7 @@
 #ifndef _X86_64_BOOTSETUP_H
 #define _X86_64_BOOTSETUP_H 1
 
-#define BOOT_PARAM_SIZE		4096
-extern char x86_boot_params[BOOT_PARAM_SIZE];
+extern char x86_boot_params[2048];
 
 /*
  * This is set up by the setup-routine at boot-time

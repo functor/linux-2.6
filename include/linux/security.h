@@ -109,19 +109,12 @@ struct swap_info_struct;
  *	and the information saved in @bprm->security by the set_security hook.
  *	Since this hook function (and its caller) are void, this hook can not
  *	return an error.  However, it can leave the security attributes of the
- *	process unchanged if an access failure occurs at this point.
+ *	process unchanged if an access failure occurs at this point. It can
+ *	also perform other state changes on the process (e.g.  closing open
+ *	file descriptors to which access is no longer granted if the attributes
+ *	were changed). 
  *	bprm_apply_creds is called under task_lock.  @unsafe indicates various
  *	reasons why it may be unsafe to change security state.
- *	@bprm contains the linux_binprm structure.
- * @bprm_post_apply_creds:
- *	Runs after bprm_apply_creds with the task_lock dropped, so that
- *	functions which cannot be called safely under the task_lock can
- *	be used.  This hook is a good place to perform state changes on
- *	the process such as closing open file descriptors to which access
- *	is no longer granted if the attributes were changed.
- *	Note that a security module might need to save state between
- *	bprm_apply_creds and bprm_post_apply_creds to store the decision
- *	on whether the process may proceed.
  *	@bprm contains the linux_binprm structure.
  * @bprm_set_security:
  *	Save security information in the bprm->security field, typically based
@@ -458,15 +451,13 @@ struct swap_info_struct;
  *	Check permissions for a mmap operation.  The @file may be NULL, e.g.
  *	if mapping anonymous memory.
  *	@file contains the file structure for file to map (may be NULL).
- *	@reqprot contains the protection requested by the application.
- *	@prot contains the protection that will be applied by the kernel.
+ *	@prot contains the requested permissions.
  *	@flags contains the operational flags.
  *	Return 0 if permission is granted.
  * @file_mprotect:
  *	Check permissions before changing memory access permissions.
  *	@vma contains the memory region to modify.
- *	@reqprot contains the protection requested by the application.
- *	@prot contains the protection that will be applied by the kernel.
+ *	@prot contains the requested permissions.
  *	Return 0 if permission is granted.
  * @file_lock:
  *	Check permission before performing file locking operations.
@@ -1043,7 +1034,7 @@ struct security_operations {
 	int (*sysctl) (struct ctl_table * table, int op);
 	int (*capable) (struct task_struct * tsk, int cap);
 	int (*quotactl) (int cmds, int type, int id, struct super_block * sb);
-	int (*quota_on) (struct dentry * dentry);
+	int (*quota_on) (struct file * f);
 	int (*syslog) (int type);
 	int (*settime) (struct timespec *ts, struct timezone *tz);
 	int (*vm_enough_memory) (long pages);
@@ -1051,7 +1042,6 @@ struct security_operations {
 	int (*bprm_alloc_security) (struct linux_binprm * bprm);
 	void (*bprm_free_security) (struct linux_binprm * bprm);
 	void (*bprm_apply_creds) (struct linux_binprm * bprm, int unsafe);
-	void (*bprm_post_apply_creds) (struct linux_binprm * bprm);
 	int (*bprm_set_security) (struct linux_binprm * bprm);
 	int (*bprm_check_security) (struct linux_binprm * bprm);
 	int (*bprm_secureexec) (struct linux_binprm * bprm);
@@ -1131,11 +1121,8 @@ struct security_operations {
 	int (*file_ioctl) (struct file * file, unsigned int cmd,
 			   unsigned long arg);
 	int (*file_mmap) (struct file * file,
-			  unsigned long reqprot,
 			  unsigned long prot, unsigned long flags);
-	int (*file_mprotect) (struct vm_area_struct * vma,
-			      unsigned long reqprot,
-			      unsigned long prot);
+	int (*file_mprotect) (struct vm_area_struct * vma, unsigned long prot);
 	int (*file_lock) (struct file * file, unsigned int cmd);
 	int (*file_fcntl) (struct file * file, unsigned int cmd,
 			   unsigned long arg);
@@ -1294,9 +1281,9 @@ static inline int security_quotactl (int cmds, int type, int id,
 	return security_ops->quotactl (cmds, type, id, sb);
 }
 
-static inline int security_quota_on (struct dentry * dentry)
+static inline int security_quota_on (struct file * file)
 {
-	return security_ops->quota_on (dentry);
+	return security_ops->quota_on (file);
 }
 
 static inline int security_syslog(int type)
@@ -1326,10 +1313,6 @@ static inline void security_bprm_free (struct linux_binprm *bprm)
 static inline void security_bprm_apply_creds (struct linux_binprm *bprm, int unsafe)
 {
 	security_ops->bprm_apply_creds (bprm, unsafe);
-}
-static inline void security_bprm_post_apply_creds (struct linux_binprm *bprm)
-{
-	security_ops->bprm_post_apply_creds (bprm);
 }
 static inline int security_bprm_set (struct linux_binprm *bprm)
 {
@@ -1431,15 +1414,11 @@ static inline void security_sb_post_pivotroot (struct nameidata *old_nd,
 
 static inline int security_inode_alloc (struct inode *inode)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return 0;
 	return security_ops->inode_alloc_security (inode);
 }
 
 static inline void security_inode_free (struct inode *inode)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return;
 	security_ops->inode_free_security (inode);
 }
 	
@@ -1447,8 +1426,6 @@ static inline int security_inode_create (struct inode *dir,
 					 struct dentry *dentry,
 					 int mode)
 {
-	if (unlikely (IS_PRIVATE (dir)))
-		return 0;
 	return security_ops->inode_create (dir, dentry, mode);
 }
 
@@ -1456,8 +1433,6 @@ static inline void security_inode_post_create (struct inode *dir,
 					       struct dentry *dentry,
 					       int mode)
 {
-	if (dentry->d_inode && unlikely (IS_PRIVATE (dentry->d_inode)))
-		return;
 	security_ops->inode_post_create (dir, dentry, mode);
 }
 
@@ -1465,8 +1440,6 @@ static inline int security_inode_link (struct dentry *old_dentry,
 				       struct inode *dir,
 				       struct dentry *new_dentry)
 {
-	if (unlikely (IS_PRIVATE (old_dentry->d_inode)))
-		return 0;
 	return security_ops->inode_link (old_dentry, dir, new_dentry);
 }
 
@@ -1474,16 +1447,12 @@ static inline void security_inode_post_link (struct dentry *old_dentry,
 					     struct inode *dir,
 					     struct dentry *new_dentry)
 {
-	if (new_dentry->d_inode && unlikely (IS_PRIVATE (new_dentry->d_inode)))
-		return;
 	security_ops->inode_post_link (old_dentry, dir, new_dentry);
 }
 
 static inline int security_inode_unlink (struct inode *dir,
 					 struct dentry *dentry)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_unlink (dir, dentry);
 }
 
@@ -1491,8 +1460,6 @@ static inline int security_inode_symlink (struct inode *dir,
 					  struct dentry *dentry,
 					  const char *old_name)
 {
-	if (unlikely (IS_PRIVATE (dir)))
-		return 0;
 	return security_ops->inode_symlink (dir, dentry, old_name);
 }
 
@@ -1500,8 +1467,6 @@ static inline void security_inode_post_symlink (struct inode *dir,
 						struct dentry *dentry,
 						const char *old_name)
 {
-	if (dentry->d_inode && unlikely (IS_PRIVATE (dentry->d_inode)))
-		return;
 	security_ops->inode_post_symlink (dir, dentry, old_name);
 }
 
@@ -1509,8 +1474,6 @@ static inline int security_inode_mkdir (struct inode *dir,
 					struct dentry *dentry,
 					int mode)
 {
-	if (unlikely (IS_PRIVATE (dir)))
-		return 0;
 	return security_ops->inode_mkdir (dir, dentry, mode);
 }
 
@@ -1518,16 +1481,12 @@ static inline void security_inode_post_mkdir (struct inode *dir,
 					      struct dentry *dentry,
 					      int mode)
 {
-	if (dentry->d_inode && unlikely (IS_PRIVATE (dentry->d_inode)))
-		return;
 	security_ops->inode_post_mkdir (dir, dentry, mode);
 }
 
 static inline int security_inode_rmdir (struct inode *dir,
 					struct dentry *dentry)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_rmdir (dir, dentry);
 }
 
@@ -1535,8 +1494,6 @@ static inline int security_inode_mknod (struct inode *dir,
 					struct dentry *dentry,
 					int mode, dev_t dev)
 {
-	if (unlikely (IS_PRIVATE (dir)))
-		return 0;
 	return security_ops->inode_mknod (dir, dentry, mode, dev);
 }
 
@@ -1544,8 +1501,6 @@ static inline void security_inode_post_mknod (struct inode *dir,
 					      struct dentry *dentry,
 					      int mode, dev_t dev)
 {
-	if (dentry->d_inode && unlikely (IS_PRIVATE (dentry->d_inode)))
-		return;
 	security_ops->inode_post_mknod (dir, dentry, mode, dev);
 }
 
@@ -1554,9 +1509,6 @@ static inline int security_inode_rename (struct inode *old_dir,
 					 struct inode *new_dir,
 					 struct dentry *new_dentry)
 {
-        if (unlikely (IS_PRIVATE (old_dentry->d_inode) ||
-            (new_dentry->d_inode && IS_PRIVATE (new_dentry->d_inode))))
-		return 0;
 	return security_ops->inode_rename (old_dir, old_dentry,
 					   new_dir, new_dentry);
 }
@@ -1566,114 +1518,83 @@ static inline void security_inode_post_rename (struct inode *old_dir,
 					       struct inode *new_dir,
 					       struct dentry *new_dentry)
 {
-	if (unlikely (IS_PRIVATE (old_dentry->d_inode) ||
-	    (new_dentry->d_inode && IS_PRIVATE (new_dentry->d_inode))))
-		return;
 	security_ops->inode_post_rename (old_dir, old_dentry,
 						new_dir, new_dentry);
 }
 
 static inline int security_inode_readlink (struct dentry *dentry)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_readlink (dentry);
 }
 
 static inline int security_inode_follow_link (struct dentry *dentry,
 					      struct nameidata *nd)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_follow_link (dentry, nd);
 }
 
 static inline int security_inode_permission (struct inode *inode, int mask,
 					     struct nameidata *nd)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return 0;
 	return security_ops->inode_permission (inode, mask, nd);
 }
 
 static inline int security_inode_setattr (struct dentry *dentry,
 					  struct iattr *attr)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_setattr (dentry, attr);
 }
 
 static inline int security_inode_getattr (struct vfsmount *mnt,
 					  struct dentry *dentry)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_getattr (mnt, dentry);
 }
 
 static inline void security_inode_delete (struct inode *inode)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return;
 	security_ops->inode_delete (inode);
 }
 
 static inline int security_inode_setxattr (struct dentry *dentry, char *name,
 					   void *value, size_t size, int flags)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_setxattr (dentry, name, value, size, flags);
 }
 
 static inline void security_inode_post_setxattr (struct dentry *dentry, char *name,
 						void *value, size_t size, int flags)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return;
 	security_ops->inode_post_setxattr (dentry, name, value, size, flags);
 }
 
 static inline int security_inode_getxattr (struct dentry *dentry, char *name)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_getxattr (dentry, name);
 }
 
 static inline int security_inode_listxattr (struct dentry *dentry)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_listxattr (dentry);
 }
 
 static inline int security_inode_removexattr (struct dentry *dentry, char *name)
 {
-	if (unlikely (IS_PRIVATE (dentry->d_inode)))
-		return 0;
 	return security_ops->inode_removexattr (dentry, name);
 }
 
 static inline int security_inode_getsecurity(struct inode *inode, const char *name, void *buffer, size_t size)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return 0;
 	return security_ops->inode_getsecurity(inode, name, buffer, size);
 }
 
 static inline int security_inode_setsecurity(struct inode *inode, const char *name, const void *value, size_t size, int flags)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return 0;
 	return security_ops->inode_setsecurity(inode, name, value, size, flags);
 }
 
 static inline int security_inode_listsecurity(struct inode *inode, char *buffer, size_t buffer_size)
 {
-	if (unlikely (IS_PRIVATE (inode)))
-		return 0;
 	return security_ops->inode_listsecurity(inode, buffer, buffer_size);
 }
 
@@ -1698,18 +1619,16 @@ static inline int security_file_ioctl (struct file *file, unsigned int cmd,
 	return security_ops->file_ioctl (file, cmd, arg);
 }
 
-static inline int security_file_mmap (struct file *file, unsigned long reqprot,
-				      unsigned long prot,
+static inline int security_file_mmap (struct file *file, unsigned long prot,
 				      unsigned long flags)
 {
-	return security_ops->file_mmap (file, reqprot, prot, flags);
+	return security_ops->file_mmap (file, prot, flags);
 }
 
 static inline int security_file_mprotect (struct vm_area_struct *vma,
-					  unsigned long reqprot,
 					  unsigned long prot)
 {
-	return security_ops->file_mprotect (vma, reqprot, prot);
+	return security_ops->file_mprotect (vma, prot);
 }
 
 static inline int security_file_lock (struct file *file, unsigned int cmd)
@@ -1952,8 +1871,6 @@ static inline int security_sem_semop (struct sem_array * sma,
 
 static inline void security_d_instantiate (struct dentry *dentry, struct inode *inode)
 {
-	if (unlikely (inode && IS_PRIVATE (inode)))
-		return;
 	security_ops->d_instantiate (dentry, inode);
 }
 
@@ -2042,7 +1959,7 @@ static inline int security_quotactl (int cmds, int type, int id,
 	return 0;
 }
 
-static inline int security_quota_on (struct dentry * dentry)
+static inline int security_quota_on (struct file * file)
 {
 	return 0;
 }
@@ -2073,11 +1990,6 @@ static inline void security_bprm_free (struct linux_binprm *bprm)
 static inline void security_bprm_apply_creds (struct linux_binprm *bprm, int unsafe)
 { 
 	cap_bprm_apply_creds (bprm, unsafe);
-}
-
-static inline void security_bprm_post_apply_creds (struct linux_binprm *bprm)
-{
-	return;
 }
 
 static inline int security_bprm_set (struct linux_binprm *bprm)
@@ -2349,15 +2261,13 @@ static inline int security_file_ioctl (struct file *file, unsigned int cmd,
 	return 0;
 }
 
-static inline int security_file_mmap (struct file *file, unsigned long reqprot,
-				      unsigned long prot,
+static inline int security_file_mmap (struct file *file, unsigned long prot,
 				      unsigned long flags)
 {
 	return 0;
 }
 
 static inline int security_file_mprotect (struct vm_area_struct *vma,
-					  unsigned long reqprot,
 					  unsigned long prot)
 {
 	return 0;

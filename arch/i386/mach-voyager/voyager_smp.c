@@ -27,15 +27,22 @@
 #include <asm/mtrr.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
+#include <asm/desc.h>
 #include <asm/arch_hooks.h>
 
 #include <linux/irq.h>
+
+int reboot_smp = 0;
 
 /* TLB state -- visible externally, indexed physically */
 DEFINE_PER_CPU(struct tlb_state, cpu_tlbstate) ____cacheline_aligned = { &init_mm, 0 };
 
 /* CPU IRQ affinity -- set to all ones initially */
 static unsigned long cpu_irq_affinity[NR_CPUS] __cacheline_aligned = { [0 ... NR_CPUS-1]  = ~0UL };
+
+/* Set when the idlers are all forked - Set in main.c but not actually
+ * used by any other parts of the kernel */
+int smp_threads_ready = 0;
 
 /* per CPU data structure (for /proc/cpuinfo et al), visible externally
  * indexed physically */
@@ -77,6 +84,14 @@ cpumask_t cpu_online_map = CPU_MASK_NONE;
  * by scheduler but indexed physically */
 cpumask_t phys_cpu_present_map = CPU_MASK_NONE;
 
+/* estimate of time used to flush the SMP-local cache - used in
+ * processor affinity calculations */
+cycles_t cacheflush_time = 0;
+
+/* cache decay ticks for scheduler---a fairly useless quantity for the
+   voyager system with its odd affinity and huge L3 cache */
+unsigned long cache_decay_ticks = 20;
+
 
 /* The internal functions */
 static void send_CPI(__u32 cpuset, __u8 cpi);
@@ -97,6 +112,7 @@ static void ack_vic_irq(unsigned int irq);
 static void vic_enable_cpi(void);
 static void do_boot_cpu(__u8 cpuid);
 static void do_quad_bootstrap(void);
+static inline void wrapper_smp_local_timer_interrupt(struct pt_regs *);
 
 int hard_smp_processor_id(void);
 
@@ -122,14 +138,6 @@ send_QIC_CPI(__u32 cpuset, __u8 cpi)
 			send_one_QIC_CPI(cpu, cpi - QIC_CPI_OFFSET);
 		}
 	}
-}
-
-static inline void
-wrapper_smp_local_timer_interrupt(struct pt_regs *regs)
-{
-	irq_enter();
-	smp_local_timer_interrupt(regs);
-	irq_exit();
 }
 
 static inline void
@@ -205,14 +213,14 @@ ack_CPI(__u8 cpi)
  * 8259 IRQs except that masks and things must be kept per processor
  */
 static struct hw_interrupt_type vic_irq_type = {
-	.typename = "VIC-level",
-	.startup = startup_vic_irq,
-	.shutdown = disable_vic_irq,
-	.enable = enable_vic_irq,
-	.disable = disable_vic_irq,
-	.ack = before_handle_vic_irq,
-	.end = after_handle_vic_irq,
-	.set_affinity = set_vic_irq_affinity,
+	"VIC-level",
+	startup_vic_irq,	/* startup */
+	disable_vic_irq,	/* shutdown */
+	enable_vic_irq,		/* enable */
+	disable_vic_irq,	/* disable */
+	before_handle_vic_irq,	/* ack */
+	after_handle_vic_irq,	/* end */
+	set_vic_irq_affinity,	/* affinity */
 };
 
 /* used to count up as CPUs are brought on line (starts at 0) */
@@ -246,7 +254,7 @@ static __u16 vic_irq_mask[NR_CPUS] __cacheline_aligned;
 static __u16 vic_irq_enable_mask[NR_CPUS] __cacheline_aligned = { 0 };
 
 /* Lock for enable/disable of VIC interrupts */
-static  __cacheline_aligned DEFINE_SPINLOCK(vic_irq_lock);
+static spinlock_t vic_irq_lock __cacheline_aligned = SPIN_LOCK_UNLOCKED;
 
 /* The boot processor is correctly set up in PC mode when it 
  * comes up, but the secondaries need their master/slave 8259
@@ -449,12 +457,13 @@ setup_trampoline(void)
 }
 
 /* Routine initially called when a non-boot CPU is brought online */
-static void __init
+int __init
 start_secondary(void *unused)
 {
 	__u8 cpuid = hard_smp_processor_id();
 	/* external functions not defined in the headers */
 	extern void calibrate_delay(void);
+	extern int cpu_idle(void);
 
 	cpu_init();
 
@@ -511,7 +520,7 @@ start_secondary(void *unused)
 
 	cpu_set(cpuid, cpu_online_map);
 	wmb();
-	cpu_idle();
+	return cpu_idle();
 }
 
 
@@ -790,7 +799,7 @@ fastcall void
 smp_vic_cmn_interrupt(struct pt_regs *regs)
 {
 	static __u8 in_cmn_int = 0;
-	static DEFINE_SPINLOCK(cmn_int_lock);
+	static spinlock_t cmn_int_lock = SPIN_LOCK_UNLOCKED;
 
 	/* common ints are broadcast, so make sure we only do this once */
 	_raw_spin_lock(&cmn_int_lock);
@@ -823,7 +832,7 @@ smp_reschedule_interrupt(void)
 
 static struct mm_struct * flush_mm;
 static unsigned long flush_va;
-static DEFINE_SPINLOCK(tlbstate_lock);
+static spinlock_t tlbstate_lock = SPIN_LOCK_UNLOCKED;
 #define FLUSH_ALL	0xffffffff
 
 /*
@@ -1013,7 +1022,7 @@ smp_stop_cpu_function(void *dummy)
 	       __asm__("hlt");
 }
 
-static DEFINE_SPINLOCK(call_lock);
+static spinlock_t call_lock = SPIN_LOCK_UNLOCKED;
 
 struct call_data_struct {
 	void (*func) (void *info);
@@ -1254,6 +1263,14 @@ smp_vic_timer_interrupt(struct pt_regs *regs)
 {
 	send_CPI_allbutself(VIC_TIMER_CPI);
 	smp_local_timer_interrupt(regs);
+}
+
+static inline void
+wrapper_smp_local_timer_interrupt(struct pt_regs *regs)
+{
+	irq_enter();
+	smp_local_timer_interrupt(regs);
+	irq_exit();
 }
 
 /* local (per CPU) timer interrupt.  It does both profiling and

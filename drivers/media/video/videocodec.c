@@ -46,7 +46,7 @@
 #include "videocodec.h"
 
 static int debug = 0;
-module_param(debug, int, 0);
+MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Debug level (0-4)");
 
 #define dprintk(num, format, args...) \

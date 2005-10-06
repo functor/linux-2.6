@@ -41,7 +41,7 @@
 
 static volatile char page_n_dev = 0;
 static unsigned long iomapadr;
-static DEFINE_SPINLOCK(oct5066_spin);
+static spinlock_t oct5066_spin = SPIN_LOCK_UNLOCKED;
 
 /*
  * We use map_priv_1 to identify which device we are.

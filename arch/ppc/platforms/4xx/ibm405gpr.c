@@ -18,7 +18,6 @@
 #include <platforms/4xx/ibm405gpr.h>
 #include <asm/ibm4xx.h>
 #include <asm/ocp.h>
-#include <asm/ppc4xx_pic.h>
 
 static struct ocp_func_emac_data ibm405gpr_emac0_def = {
 	.rgmii_idx	= -1,		/* No RGMII */
@@ -105,13 +104,5 @@ struct ocp_def core_ocp[] = {
 	  .show		= &ocp_show_emac_data,
 	},
 	{ .vendor	= OCP_VENDOR_INVALID
-	}
-};
-
-/* Polarity and triggering settings for internal interrupt sources */
-struct ppc4xx_uic_settings ppc4xx_core_uic_cfg[] __initdata = {
-	{ .polarity 	= 0xffffe000,
-	  .triggering	= 0x10000000,
-	  .ext_irq_mask	= 0x00001fff,	/* IRQ7 - IRQ12, IRQ0 - IRQ6 */
 	}
 };

@@ -4,7 +4,7 @@
  *  Copyright (C) 2001  REINER SCT
  *  Author: Matthias Bruestle
  *
- *  Contact: support@reiner-sct.com (see MAINTAINERS)
+ *  Contact: linux-usb@sii.li (see MAINTAINERS)
  *
  *  This program is largely derived from work by the linux-usb group
  *  and associated source files.  Please see the usb/serial files for
@@ -20,11 +20,6 @@
  *
  *  In case of problems, please write to the contact e-mail address
  *  mentioned above.
- *
- *  Please note that later models of the cyberjack reader family are
- *  supported by a libusb-based userspace device driver.
- *
- *  Homepage: http://www.reiner-sct.de/support/treiber_cyberjack.php#linux
  */
 
 

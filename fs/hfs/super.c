@@ -16,11 +16,12 @@
 #include <linux/module.h>
 #include <linux/blkdev.h>
 #include <linux/init.h>
-#include <linux/parser.h>
 #include <linux/vfs.h>
 
 #include "hfs_fs.h"
 #include "btree.h"
+
+const char hfs_version[]="0.96";
 
 static kmem_cache_t *hfs_inode_cachep;
 
@@ -91,7 +92,7 @@ static int hfs_statfs(struct super_block *sb, struct kstatfs *buf)
 	return 0;
 }
 
-static int hfs_remount(struct super_block *sb, int *flags, char *data)
+int hfs_remount(struct super_block *sb, int *flags, char *data)
 {
 	*flags |= MS_NODIRATIME;
 	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
@@ -135,34 +136,6 @@ static struct super_operations hfs_super_operations = {
 	.remount_fs     = hfs_remount,
 };
 
-enum {
-	opt_uid, opt_gid, opt_umask, opt_file_umask, opt_dir_umask,
-	opt_part, opt_session, opt_type, opt_creator, opt_quiet,
-	opt_err
-};
-
-static match_table_t tokens = {
-	{ opt_uid, "uid=%u" },
-	{ opt_gid, "gid=%u" },
-	{ opt_umask, "umask=%o" },
-	{ opt_file_umask, "file_umask=%o" },
-	{ opt_dir_umask, "dir_umask=%o" },
-	{ opt_part, "part=%u" },
-	{ opt_session, "session=%u" },
-	{ opt_type, "type=%s" },
-	{ opt_creator, "creator=%s" },
-	{ opt_quiet, "quiet" },
-	{ opt_err, NULL }
-};
-
-static inline int match_fourchar(substring_t *arg, u32 *result)
-{
-	if (arg->to - arg->from != 4)
-		return -EINVAL;
-	memcpy(result, arg->from, 4);
-	return 0;
-}
-
 /*
  * parse_options()
  *
@@ -171,15 +144,13 @@ static inline int match_fourchar(substring_t *arg, u32 *result)
  */
 static int parse_options(char *options, struct hfs_sb_info *hsb)
 {
-	char *p;
-	substring_t args[MAX_OPT_ARGS];
-	int tmp, token;
+	char *this_char, *value;
 
 	/* initialize the sb with defaults */
 	hsb->s_uid = current->uid;
 	hsb->s_gid = current->gid;
-	hsb->s_file_umask = 0133;
-	hsb->s_dir_umask = 0022;
+	hsb->s_file_umask = 0644;
+	hsb->s_dir_umask = 0755;
 	hsb->s_type = hsb->s_creator = cpu_to_be32(0x3f3f3f3f);	/* == '????' */
 	hsb->s_quiet = 0;
 	hsb->part = -1;
@@ -188,82 +159,77 @@ static int parse_options(char *options, struct hfs_sb_info *hsb)
 	if (!options)
 		return 1;
 
-	while ((p = strsep(&options, ",")) != NULL) {
-		if (!*p)
+	while ((this_char = strsep(&options, ",")) != 0) {
+		if (!*this_char)
 			continue;
+		value = strchr(this_char, '=');
+		if (value)
+			*value++ = 0;
 
-		token = match_token(p, tokens, args);
-		switch (token) {
-		case opt_uid:
-			if (match_int(&args[0], &tmp)) {
-				printk("HFS: uid requires an argument\n");
+	/* Numeric-valued options */
+		if (!strcmp(this_char, "uid")) {
+			if (!value || !*value)
 				return 0;
-			}
-			hsb->s_uid = (uid_t)tmp;
-			break;
-		case opt_gid:
-			if (match_int(&args[0], &tmp)) {
-				printk("HFS: gid requires an argument\n");
+			hsb->s_uid = simple_strtoul(value, &value, 0);
+			if (*value)
 				return 0;
-			}
-			hsb->s_gid = (gid_t)tmp;
-			break;
-		case opt_umask:
-			if (match_octal(&args[0], &tmp)) {
-				printk("HFS: umask requires a value\n");
+		} else if (!strcmp(this_char, "gid")) {
+			if (!value || !*value)
 				return 0;
-			}
-			hsb->s_file_umask = (umode_t)tmp;
-			hsb->s_dir_umask = (umode_t)tmp;
-			break;
-		case opt_file_umask:
-			if (match_octal(&args[0], &tmp)) {
-				printk("HFS: file_umask requires a value\n");
+			hsb->s_gid = simple_strtoul(value, &value, 0);
+			if (*value)
 				return 0;
-			}
-			hsb->s_file_umask = (umode_t)tmp;
-			break;
-		case opt_dir_umask:
-			if (match_octal(&args[0], &tmp)) {
-				printk("HFS: dir_umask requires a value\n");
+		} else if (!strcmp(this_char, "umask")) {
+			if (!value || !*value)
 				return 0;
-			}
-			hsb->s_dir_umask = (umode_t)tmp;
-			break;
-		case opt_part:
-			if (match_int(&args[0], &hsb->part)) {
-				printk("HFS: part requires an argument\n");
+			hsb->s_file_umask = simple_strtoul(value, &value, 8);
+			hsb->s_dir_umask = hsb->s_file_umask;
+			if (*value)
 				return 0;
-			}
-			break;
-		case opt_session:
-			if (match_int(&args[0], &hsb->session)) {
-				printk("HFS: session requires an argument\n");
+		} else if (!strcmp(this_char, "file_umask")) {
+			if (!value || !*value)
 				return 0;
-			}
-			break;
-		case opt_type:
-			if (match_fourchar(&args[0], &hsb->s_type)) {
-				printk("HFS+-fs: type requires a 4 character value\n");
+			hsb->s_file_umask = simple_strtoul(value, &value, 8);
+			if (*value)
 				return 0;
-			}
-			break;
-		case opt_creator:
-			if (match_fourchar(&args[0], &hsb->s_creator)) {
-				printk("HFS+-fs: creator requires a 4 character value\n");
+		} else if (!strcmp(this_char, "dir_umask")) {
+			if (!value || !*value)
 				return 0;
-			}
-			break;
-		case opt_quiet:
+			hsb->s_dir_umask = simple_strtoul(value, &value, 8);
+			if (*value)
+				return 0;
+		} else if (!strcmp(this_char, "part")) {
+			if (!value || !*value)
+				return 0;
+			hsb->part = simple_strtoul(value, &value, 0);
+			if (*value)
+				return 0;
+		} else if (!strcmp(this_char, "session")) {
+			if (!value || !*value)
+				return 0;
+			hsb->session = simple_strtoul(value, &value, 0);
+			if (*value)
+				return 0;
+	/* String-valued options */
+		} else if (!strcmp(this_char, "type") && value) {
+			if (strlen(value) != 4)
+				return 0;
+			memcpy(&hsb->s_type, value, 4);
+		} else if (!strcmp(this_char, "creator") && value) {
+			if (strlen(value) != 4)
+				return 0;
+			memcpy(&hsb->s_creator, value, 4);
+	/* Boolean-valued options */
+		} else if (!strcmp(this_char, "quiet")) {
+			if (value)
+				return 0;
 			hsb->s_quiet = 1;
-			break;
-		default:
+		} else
 			return 0;
-		}
 	}
 
 	hsb->s_dir_umask &= 0777;
-	hsb->s_file_umask &= 0577;
+	hsb->s_file_umask &= 0777;
 
 	return 1;
 }
@@ -297,7 +263,7 @@ static int hfs_fill_super(struct super_block *sb, void *data, int silent)
 	res = -EINVAL;
 	if (!parse_options((char *)data, sbi)) {
 		hfs_warn("hfs_fs: unable to parse mount options.\n");
-		goto bail;
+		goto bail3;
 	}
 
 	sb->s_op = &hfs_super_operations;
@@ -310,7 +276,7 @@ static int hfs_fill_super(struct super_block *sb, void *data, int silent)
 			hfs_warn("VFS: Can't find a HFS filesystem on dev %s.\n",
 				hfs_mdb_name(sb));
 		res = -EINVAL;
-		goto bail;
+		goto bail2;
 	}
 
 	/* try to get the root inode */
@@ -340,8 +306,10 @@ bail_iput:
 	iput(root_inode);
 bail_no_root:
 	hfs_warn("hfs_fs: get root inode failed.\n");
-bail:
 	hfs_mdb_put(sb);
+bail2:
+bail3:
+	kfree(sbi);
 	return res;
 }
 

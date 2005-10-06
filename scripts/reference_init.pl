@@ -70,7 +70,7 @@ foreach $object (keys(%object)) {
 		$l = read(OBJECT, $comment, $size);
 		die "read $size bytes from $object .comment failed" if ($l != $size);
 		close(OBJECT);
-		if ($comment =~ /GCC\:.*GCC\:/m || $object =~ /built-in\.o/) {
+		if ($comment =~ /GCC\:.*GCC\:/m) {
 			++$ignore;
 			delete($object{$object});
 		}
@@ -96,9 +96,7 @@ foreach $object (sort(keys(%object))) {
 		     $from !~ /\.text\.lock$/ &&
 		     $from !~ /\.pci_fixup_header$/ &&
 		     $from !~ /\.pci_fixup_final$/ &&
-		     $from !~ /\.pdr$/ &&
 		     $from !~ /\__param$/ &&
-		     $from !~ /\.altinstructions/ &&
 		     $from !~ /\.debug_/)) {
 			printf("Error: %s %s refers to %s\n", $object, $from, $line);
 		}

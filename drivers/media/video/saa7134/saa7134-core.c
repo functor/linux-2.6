@@ -1,5 +1,5 @@
 /*
- * $Id: saa7134-core.c,v 1.28 2005/02/22 09:56:29 kraxel Exp $
+ * $Id: saa7134-core.c,v 1.15 2004/11/07 14:44:59 kraxel Exp $
  *
  * device driver for philips saa7134 based TV cards
  * driver core
@@ -21,11 +21,9 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/kmod.h>
@@ -89,7 +87,7 @@ MODULE_PARM_DESC(card,     "card type");
 static DECLARE_MUTEX(devlist_lock);
 LIST_HEAD(saa7134_devlist);
 static LIST_HEAD(mops_list);
-static unsigned int saa7134_devcount;
+unsigned int saa7134_devcount;
 
 #define dprintk(fmt, arg...)	if (core_debug) \
 	printk(KERN_DEBUG "%s/core: " fmt, dev->name , ## arg)
@@ -224,61 +222,10 @@ static void dump_statusregs(struct saa7134_dev *dev)
 }
 #endif
 
-/* ----------------------------------------------------------- */
-/* delayed request_module                                      */
-
-#ifdef CONFIG_MODULES
-
-static int need_empress;
-static int need_dvb;
-
-static int pending_call(struct notifier_block *self, unsigned long state,
-			void *module)
-{
-	if (module != THIS_MODULE || state != MODULE_STATE_LIVE)
-		return NOTIFY_DONE;
-
-        if (need_empress)
-                request_module("saa7134-empress");
-        if (need_dvb)
-                request_module("saa7134-dvb");
-	return NOTIFY_DONE;
-}
-
-static int pending_registered;
-static struct notifier_block pending_notifier = {
-	.notifier_call = pending_call,
-};
-
-static void request_module_depend(char *name, int *flag)
-{
-	switch (THIS_MODULE->state) {
-	case MODULE_STATE_COMING:
-		if (!pending_registered) {
-			register_module_notifier(&pending_notifier);
-			pending_registered = 1;
-		}
-		*flag = 1;
-		break;
-	case MODULE_STATE_LIVE:
-		request_module(name);
-		break;
-	default:
-		/* nothing */;
-		break;
-	}
-}
-
-#else
-
-#define request_module_depend(name,flag)
-
-#endif /* CONFIG_MODULES */
-
 /* ------------------------------------------------------------------ */
 
 /* nr of (saa7134-)pages for the given buffer size */
-static int saa7134_buffer_pages(int size)
+int saa7134_buffer_pages(int size)
 {
 	size  = PAGE_ALIGN(size);
 	size += PAGE_SIZE; /* for non-page-aligned buffers */
@@ -372,8 +319,10 @@ int saa7134_buffer_queue(struct saa7134_dev *dev,
 			 struct saa7134_buf *buf)
 {
 	struct saa7134_buf *next = NULL;
+#ifdef DEBUG_SPINLOCKS
+	BUG_ON(!spin_is_locked(&dev->slock));
+#endif
 
-	assert_spin_locked(&dev->slock);
 	dprintk("buffer_queue %p\n",buf);
 	if (NULL == q->curr) {
 		if (!q->need_two) {
@@ -399,7 +348,9 @@ void saa7134_buffer_finish(struct saa7134_dev *dev,
 			   struct saa7134_dmaqueue *q,
 			   unsigned int state)
 {
-	assert_spin_locked(&dev->slock);
+#ifdef DEBUG_SPINLOCKS
+	BUG_ON(!spin_is_locked(&dev->slock));
+#endif
 	dprintk("buffer_finish %p\n",q->curr);
 
 	/* finish current buffer */
@@ -414,7 +365,9 @@ void saa7134_buffer_next(struct saa7134_dev *dev,
 {
 	struct saa7134_buf *buf,*next = NULL;
 
-	assert_spin_locked(&dev->slock);
+#ifdef DEBUG_SPINLOCKS
+	BUG_ON(!spin_is_locked(&dev->slock));
+#endif
 	BUG_ON(NULL != q->curr);
 
 	if (!list_empty(&q->queue)) {
@@ -469,7 +422,9 @@ int saa7134_set_dmabits(struct saa7134_dev *dev)
 	enum v4l2_field cap = V4L2_FIELD_ANY;
 	enum v4l2_field ov  = V4L2_FIELD_ANY;
 
-	assert_spin_locked(&dev->slock);
+#ifdef DEBUG_SPINLOCKS
+	BUG_ON(!spin_is_locked(&dev->slock));
+#endif
 
 	/* video capture -- dma 0 + video task A */
 	if (dev->video_q.curr) {
@@ -621,7 +576,7 @@ static irqreturn_t saa7134_irq(int irq, void *dev_id, struct pt_regs *regs)
 			dump_statusregs(dev);
 #endif
 
-		if (report & SAA7134_IRQ_REPORT_RDCAP /* _INTL */)
+		if (report & SAA7134_IRQ_REPORT_INTL)
 			saa7134_irq_video_intl(dev);
 
 		if ((report & SAA7134_IRQ_REPORT_DONE_RA0) &&
@@ -643,8 +598,8 @@ static irqreturn_t saa7134_irq(int irq, void *dev_id, struct pt_regs *regs)
 			       SAA7134_IRQ_REPORT_GPIO18)) &&
 		    dev->remote)
 			saa7134_input_irq(dev);
-	}
 
+	};
 	if (10 == loop) {
 		print_irqstatus(dev,loop,report,status);
 		if (report & SAA7134_IRQ_REPORT_PE) {
@@ -652,13 +607,6 @@ static irqreturn_t saa7134_irq(int irq, void *dev_id, struct pt_regs *regs)
 			printk(KERN_WARNING "%s/irq: looping -- "
 			       "clearing PE (parity error!) enable bit\n",dev->name);
 			saa_clearl(SAA7134_IRQ2,SAA7134_IRQ2_INTE_PE);
-		} else if (report & (SAA7134_IRQ_REPORT_GPIO16 |
-				     SAA7134_IRQ_REPORT_GPIO18)) {
-			/* disable gpio IRQs */
-			printk(KERN_WARNING "%s/irq: looping -- "
-			       "clearing GPIO enable bits\n",dev->name);
-			saa_clearl(SAA7134_IRQ2, (SAA7134_IRQ2_INTE_GPIO16 |
-						  SAA7134_IRQ2_INTE_GPIO18));
 		} else {
 			/* disable all irqs */
 			printk(KERN_WARNING "%s/irq: looping -- "
@@ -682,7 +630,7 @@ static int saa7134_hwinit1(struct saa7134_dev *dev)
 	saa_writel(SAA7134_IRQ1, 0);
 	saa_writel(SAA7134_IRQ2, 0);
         init_MUTEX(&dev->lock);
-	spin_lock_init(&dev->slock);
+	dev->slock = SPIN_LOCK_UNLOCKED;
 
 	saa7134_track_gpio(dev,"pre-init");
 	saa7134_video_init1(dev);
@@ -733,7 +681,20 @@ static int saa7134_hwinit2(struct saa7134_dev *dev)
 
 	/* enable IRQ's */
 	saa_writel(SAA7134_IRQ1, 0);
-	saa_writel(SAA7134_IRQ2, dev->irq2_mask);
+	saa_writel(SAA7134_IRQ2,
+		   SAA7134_IRQ2_INTE_GPIO18  |
+		   SAA7134_IRQ2_INTE_GPIO18A |
+		   SAA7134_IRQ2_INTE_GPIO16  |
+		   SAA7134_IRQ2_INTE_SC2     |
+		   SAA7134_IRQ2_INTE_SC1     |
+		   SAA7134_IRQ2_INTE_SC0     |
+		   /* SAA7134_IRQ2_INTE_DEC5    |  FIXME: TRIG_ERR ??? */
+		   SAA7134_IRQ2_INTE_DEC3    |
+		   SAA7134_IRQ2_INTE_DEC2    |
+		   /* SAA7134_IRQ2_INTE_DEC1    | */
+		   SAA7134_IRQ2_INTE_DEC0    |
+		   SAA7134_IRQ2_INTE_PE      |
+		   SAA7134_IRQ2_INTE_AR);
 
 	return 0;
 }
@@ -954,13 +915,6 @@ static int __devinit saa7134_initdev(struct pci_dev *pci_dev,
 	}
 
 	/* initialize hardware #1 */
-   	dev->irq2_mask =
-		SAA7134_IRQ2_INTE_DEC3    |
-		SAA7134_IRQ2_INTE_DEC2    |
-		SAA7134_IRQ2_INTE_DEC1    |
-		SAA7134_IRQ2_INTE_DEC0    |
-		SAA7134_IRQ2_INTE_PE      |
-		SAA7134_IRQ2_INTE_AR;
 	saa7134_board_init1(dev);
 	saa7134_hwinit1(dev);
 
@@ -987,11 +941,11 @@ static int __devinit saa7134_initdev(struct pci_dev *pci_dev,
 	if (dev->tda9887_conf)
 		request_module("tda9887");
   	if (card_is_empress(dev)) {
+		request_module("saa7134-empress");
 		request_module("saa6752hs");
-		request_module_depend("saa7134-empress",&need_empress);
 	}
   	if (card_is_dvb(dev))
-		request_module_depend("saa7134-dvb",&need_dvb);
+		request_module("saa7134-dvb");
 
 	v4l2_prio_init(&dev->prio);
 
@@ -1062,9 +1016,6 @@ static int __devinit saa7134_initdev(struct pci_dev *pci_dev,
 	}
 	list_add_tail(&dev->devlist,&saa7134_devlist);
 	up(&devlist_lock);
-
-	/* check for signal */
-	saa7134_irq_video_intl(dev);
 	return 0;
 
  fail5:
@@ -1212,10 +1163,6 @@ static int saa7134_init(void)
 
 static void saa7134_fini(void)
 {
-#ifdef CONFIG_MODULES
-	if (pending_registered)
-		unregister_module_notifier(&pending_notifier);
-#endif
 	pci_unregister_driver(&saa7134_pci_driver);
 }
 

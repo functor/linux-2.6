@@ -41,7 +41,6 @@
 #include <linux/kallsyms.h>
 #include <linux/writeback.h>
 #include <linux/cpu.h>
-#include <linux/cpuset.h>
 #include <linux/efi.h>
 #include <linux/unistd.h>
 #include <linux/rmap.h>
@@ -76,6 +75,8 @@
 #error Sorry, your GCC is too old. It builds incorrect kernels.
 #endif
 
+extern char *linux_banner;
+
 static int init(void *);
 
 extern void init_IRQ(void);
@@ -108,10 +109,20 @@ enum system_states system_state;
 EXPORT_SYMBOL(system_state);
 
 /*
+ * The kernel_magic value represents the address of _end, which allows
+ * namelist tools to "match" each other respectively.  That way a tool
+ * that looks at /dev/mem can verify that it is using the right System.map
+ * file -- if kernel_magic doesn't equal the namelist value of _end,
+ * something's wrong.
+ */
+extern unsigned long _end;
+unsigned long *kernel_magic = &_end;
+
+/*
  * Boot command-line arguments
  */
-#define MAX_INIT_ARGS CONFIG_INIT_ENV_ARG_LIMIT
-#define MAX_INIT_ENVS CONFIG_INIT_ENV_ARG_LIMIT
+#define MAX_INIT_ARGS 32
+#define MAX_INIT_ENVS 32
 
 extern void time_init(void);
 /* Default late time init is NULL. archs can override this later. */
@@ -156,13 +167,12 @@ static char * argv_init[MAX_INIT_ARGS+2] = { "init", NULL, };
 char * envp_init[MAX_INIT_ENVS+2] = { "HOME=/", "TERM=linux", NULL, };
 static const char *panic_later, *panic_param;
 
-extern struct obs_kernel_param __setup_start[], __setup_end[];
-
 static int __init obsolete_checksetup(char *line)
 {
 	struct obs_kernel_param *p;
+	extern struct obs_kernel_param __setup_start, __setup_end;
 
-	p = __setup_start;
+	p = &__setup_start;
 	do {
 		int n = strlen(p->str);
 		if (!strncmp(line, p->str, n)) {
@@ -179,9 +189,18 @@ static int __init obsolete_checksetup(char *line)
 				return 1;
 		}
 		p++;
-	} while (p < __setup_end);
+	} while (p < &__setup_end);
 	return 0;
 }
+
+static unsigned long preset_lpj;
+static int __init lpj_setup(char *str)
+{
+	preset_lpj = simple_strtoul(str,NULL,0);
+	return 1;
+}
+
+__setup("lpj=", lpj_setup);
 
 /*
  * This should be approx 2 Bo*oMips to start (note initial shift), and will
@@ -190,6 +209,67 @@ static int __init obsolete_checksetup(char *line)
 unsigned long loops_per_jiffy = (1<<12);
 
 EXPORT_SYMBOL(loops_per_jiffy);
+
+/*
+ * This is the number of bits of precision for the loops_per_jiffy.  Each
+ * bit takes on average 1.5/HZ seconds.  This (like the original) is a little
+ * better than 1%
+ */
+#define LPS_PREC 8
+
+void __devinit calibrate_delay(void)
+{
+	unsigned long ticks, loopbit;
+	int lps_precision = LPS_PREC;
+
+	if (preset_lpj) {
+		loops_per_jiffy = preset_lpj;
+		printk("Calibrating delay loop (skipped)... "
+			"%lu.%02lu BogoMIPS preset\n",
+			loops_per_jiffy/(500000/HZ),
+			(loops_per_jiffy/(5000/HZ)) % 100);
+	} else {
+		loops_per_jiffy = (1<<12);
+
+		printk(KERN_DEBUG "Calibrating delay loop... ");
+		while ((loops_per_jiffy <<= 1) != 0) {
+			/* wait for "start of" clock tick */
+			ticks = jiffies;
+			while (ticks == jiffies)
+				/* nothing */;
+			/* Go .. */
+			ticks = jiffies;
+			__delay(loops_per_jiffy);
+			ticks = jiffies - ticks;
+			if (ticks)
+				break;
+		}
+
+		/*
+		 * Do a binary approximation to get loops_per_jiffy set to
+		 * equal one clock (up to lps_precision bits)
+		 */
+		loops_per_jiffy >>= 1;
+		loopbit = loops_per_jiffy;
+		while (lps_precision-- && (loopbit >>= 1)) {
+			loops_per_jiffy |= loopbit;
+			ticks = jiffies;
+			while (ticks == jiffies)
+				/* nothing */;
+			ticks = jiffies;
+			__delay(loops_per_jiffy);
+			if (jiffies != ticks)	/* longer than 1 tick */
+				loops_per_jiffy &= ~loopbit;
+		}
+
+		/* Round the value and print it */
+		printk("%lu.%02lu BogoMIPS (lpj=%lu)\n",
+			loops_per_jiffy/(500000/HZ),
+			(loops_per_jiffy/(5000/HZ)) % 100,
+			loops_per_jiffy);
+	}
+
+}
 
 static int __init debug_kernel(char *str)
 {
@@ -209,14 +289,6 @@ static int __init quiet_kernel(char *str)
 
 __setup("debug", debug_kernel);
 __setup("quiet", quiet_kernel);
-
-static int __init loglevel(char *str)
-{
-	get_option(&str, &console_loglevel);
-	return 1;
-}
-
-__setup("loglevel=", loglevel);
 
 /*
  * Unknown boot options get handed to init, unless they look like
@@ -297,6 +369,7 @@ static int __init init_setup(char *str)
 __setup("init=", init_setup);
 
 extern void setup_arch(char **);
+extern void cpu_idle(void);
 
 #ifndef CONFIG_SMP
 
@@ -356,11 +429,12 @@ static void __init smp_init(void)
 	}
 
 	/* Any cleanup work */
-	printk(KERN_INFO "Brought up %ld CPUs\n", (long)num_online_cpus());
+	printk("Brought up %ld CPUs\n", (long)num_online_cpus());
 	smp_cpus_done(max_cpus);
 #if 0
 	/* Get other processors into their bootup holding patterns. */
 
+	smp_threads_ready=1;
 	smp_commence();
 #endif
 }
@@ -382,16 +456,16 @@ static void noinline rest_init(void)
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
 	unlock_kernel();
-	preempt_enable_no_resched();
-	cpu_idle();
+ 	cpu_idle();
 } 
 
 /* Check for early params. */
 static int __init do_early_param(char *param, char *val)
 {
 	struct obs_kernel_param *p;
+	extern struct obs_kernel_param __setup_start, __setup_end;
 
-	for (p = __setup_start; p < __setup_end; p++) {
+	for (p = &__setup_start; p < &__setup_end; p++) {
 		if (p->early && strcmp(param, p->str) == 0) {
 			if (p->setup_func(val) != 0)
 				printk(KERN_WARNING
@@ -431,7 +505,6 @@ asmlinkage void __init start_kernel(void)
  */
 	lock_kernel();
 	page_address_init();
-	printk(KERN_NOTICE);
 	printk(linux_banner);
 	setup_arch(&command_line);
 	setup_per_cpu_areas();
@@ -448,14 +521,9 @@ asmlinkage void __init start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
-	/*
-	 * Disable preemption - early bootup scheduling is extremely
-	 * fragile until we cpu_idle() for the first time.
-	 */
-	preempt_disable();
 	build_all_zonelists();
 	page_alloc_init();
-	printk(KERN_NOTICE "Kernel command line: %s\n", saved_command_line);
+	printk("Kernel command line: %s\n", saved_command_line);
 	parse_early_param();
 	parse_args("Booting kernel", command_line, __start___param,
 		   __stop___param - __start___param,
@@ -506,7 +574,6 @@ asmlinkage void __init start_kernel(void)
 	proc_caches_init();
 	buffer_init();
 	unnamed_dev_init();
-	key_init();
 	security_init();
 	vfs_caches_init(num_physpages);
 	radix_tree_init();
@@ -516,8 +583,6 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
-	cpuset_init();
-
 	check_bugs();
 
 	acpi_early_init(); /* before LAPIC and SMP init */
@@ -537,14 +602,14 @@ __setup("initcall_debug", initcall_debug_setup);
 
 struct task_struct *child_reaper = &init_task;
 
-extern initcall_t __initcall_start[], __initcall_end[];
+extern initcall_t __initcall_start, __initcall_end;
 
 static void __init do_initcalls(void)
 {
 	initcall_t *call;
 	int count = preempt_count();
 
-	for (call = __initcall_start; call < __initcall_end; call++) {
+	for (call = &__initcall_start; call < &__initcall_end; call++) {
 		char *msg;
 
 		if (initcall_debug) {
@@ -565,7 +630,7 @@ static void __init do_initcalls(void)
 			local_irq_enable();
 		}
 		if (msg) {
-			printk(KERN_WARNING "error in initcall at 0x%p: "
+			printk("error in initcall at 0x%p: "
 				"returned with %s\n", *call, msg);
 		}
 	}
@@ -586,6 +651,7 @@ static void __init do_basic_setup(void)
 	/* drivers will send hotplug events */
 	init_workqueues();
 	usermodehelper_init();
+	key_init();
 	driver_init();
 
 #ifdef CONFIG_SYSCTL
@@ -637,10 +703,6 @@ static int init(void * unused)
 {
 	lock_kernel();
 	/*
-	 * init can run on any cpu.
-	 */
-	set_cpus_allowed(current, CPU_MASK_ALL);
-	/*
 	 * Tell the world that we're going to be the grim
 	 * reaper of innocent orphaned children.
 	 *
@@ -658,16 +720,12 @@ static int init(void * unused)
 	fixup_cpu_present_map();
 	smp_init();
 
-	cpuset_init_smp();
-
 	/*
 	 * Do this before initcalls, because some drivers want to access
 	 * firmware files.
 	 */
 	populate_rootfs();
-
 	do_basic_setup();
-
 	sched_init_smp();
 
 	/*
@@ -690,7 +748,7 @@ static int init(void * unused)
 	numa_default_policy();
 
 	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0)
-		printk(KERN_WARNING "Warning: unable to open an initial console.\n");
+		printk("Warning: unable to open an initial console.\n");
 
 	(void) sys_dup(0);
 	(void) sys_dup(0);
@@ -712,3 +770,16 @@ static int init(void * unused)
 
 	panic("No init found.  Try passing init= option to kernel.");
 }
+
+static int early_param_test(char *rest)
+{
+	printk("early_parm_test: %s\n", rest ?: "(null)");
+	return rest ? 0 : -EINVAL;
+}
+early_param("testsetup", early_param_test);
+static int early_setup_test(char *rest)
+{
+	printk("early_setup_test: %s\n", rest ?: "(null)");
+	return 0;
+}
+__setup("testsetup_long", early_setup_test);

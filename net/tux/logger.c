@@ -353,7 +353,7 @@ void __log_request (tux_req_t *req)
 
 void tux_push_pending (struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 
 	Dprintk("pushing pending frames on sock %p.\n", sk);
 	lock_sock(sk);

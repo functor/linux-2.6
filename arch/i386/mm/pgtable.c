@@ -65,7 +65,6 @@ EXPORT_SYMBOL_GPL(show_mem);
 static void set_pte_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 {
 	pgd_t *pgd;
-	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 
@@ -74,12 +73,7 @@ static void set_pte_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 		BUG();
 		return;
 	}
-	pud = pud_offset(pgd, vaddr);
-	if (pud_none(*pud)) {
-		BUG();
-		return;
-	}
-	pmd = pmd_offset(pud, vaddr);
+	pmd = pmd_offset(pgd, vaddr);
 	if (pmd_none(*pmd)) {
 		BUG();
 		return;
@@ -104,7 +98,6 @@ static void set_pte_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 void set_pmd_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 {
 	pgd_t *pgd;
-	pud_t *pud;
 	pmd_t *pmd;
 
 	if (vaddr & (PMD_SIZE-1)) {		/* vaddr is misaligned */
@@ -120,8 +113,7 @@ void set_pmd_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 		printk ("set_pmd_pfn: pgd_none\n");
 		return; /* BUG(); */
 	}
-	pud = pud_offset(pgd, vaddr);
-	pmd = pmd_offset(pud, vaddr);
+	pmd = pmd_offset(pgd, vaddr);
 	set_pmd(pmd, pfn_pmd(pfn, flags));
 	/*
 	 * It's enough to flush this one mapping.
@@ -143,7 +135,10 @@ void __set_fixmap (enum fixed_addresses idx, unsigned long phys, pgprot_t flags)
 
 pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 {
-	return (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT|__GFP_ZERO);
+	pte_t *pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT);
+	if (pte)
+		clear_page(pte);
+	return pte;
 }
 
 struct page *pte_alloc_one(struct mm_struct *mm, unsigned long address)
@@ -151,10 +146,12 @@ struct page *pte_alloc_one(struct mm_struct *mm, unsigned long address)
 	struct page *pte;
 
 #ifdef CONFIG_HIGHPTE
-	pte = alloc_pages(GFP_KERNEL|__GFP_HIGHMEM|__GFP_REPEAT|__GFP_ZERO, 0);
+	pte = alloc_pages(GFP_KERNEL|__GFP_HIGHMEM|__GFP_REPEAT, 0);
 #else
-	pte = alloc_pages(GFP_KERNEL|__GFP_REPEAT|__GFP_ZERO, 0);
+	pte = alloc_pages(GFP_KERNEL|__GFP_REPEAT, 0);
 #endif
+	if (pte)
+		clear_highpage(pte);
 	return pte;
 }
 
@@ -175,7 +172,7 @@ void pmd_ctor(void *pmd, kmem_cache_t *cache, unsigned long flags)
  * recommendations and having no core impact whatsoever.
  * -- wli
  */
-DEFINE_SPINLOCK(pgd_lock);
+spinlock_t pgd_lock = SPIN_LOCK_UNLOCKED;
 struct page *pgd_list;
 
 static inline void pgd_list_add(pgd_t *pgd)
@@ -258,6 +255,6 @@ void pgd_free(pgd_t *pgd)
 	if (PTRS_PER_PMD > 1)
 		for (i = 0; i < USER_PTRS_PER_PGD; ++i)
 			kmem_cache_free(pmd_cache, (void *)__va(pgd_val(pgd[i])-1));
-	/* in the non-PAE case, free_pgtables() clears user pgd entries */
+	/* in the non-PAE case, clear_page_tables() clears user pgd entries */
 	kmem_cache_free(pgd_cache, pgd);
 }

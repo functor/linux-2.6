@@ -30,8 +30,6 @@ LIST_HEAD(rxrpc_conns);
 DECLARE_RWSEM(rxrpc_conns_sem);
 unsigned long rxrpc_conn_timeout = 60 * 60;
 
-static void rxrpc_conn_do_timeout(struct rxrpc_connection *conn);
-
 static void __rxrpc_conn_timeout(rxrpc_timer_t *timer)
 {
 	struct rxrpc_connection *conn =
@@ -417,7 +415,7 @@ void rxrpc_put_connection(struct rxrpc_connection *conn)
 /*
  * free a connection record
  */
-static void rxrpc_conn_do_timeout(struct rxrpc_connection *conn)
+void rxrpc_conn_do_timeout(struct rxrpc_connection *conn)
 {
 	struct rxrpc_peer *peer;
 

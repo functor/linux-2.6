@@ -44,7 +44,6 @@ module_param(pc_debug, int, 0);
 /******************************************************************************
     Driver general functions
 ******************************************************************************/
-#if VERBOSE > SHOW_ERROR_MESSAGES
 void
 display_buffer(char *buffer, int length)
 {
@@ -59,7 +58,6 @@ display_buffer(char *buffer, int length)
 
 	printk("\n");
 }
-#endif
 
 /*****************************************************************************
     Queue handling for management frames

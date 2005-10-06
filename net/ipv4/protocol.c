@@ -7,7 +7,7 @@
  *
  * Version:	$Id: protocol.c,v 1.14 2001/05/18 02:25:49 davem Exp $
  *
- * Authors:	Ross Biro
+ * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *
  * Fixes:
@@ -49,7 +49,7 @@
 #include <linux/igmp.h>
 
 struct net_protocol *inet_protos[MAX_INET_PROTOS];
-static DEFINE_SPINLOCK(inet_proto_lock);
+static spinlock_t inet_proto_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  *	Add a protocol handler to the hash tables

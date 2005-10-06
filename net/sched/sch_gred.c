@@ -332,11 +332,13 @@ static int gred_change(struct Qdisc *sch, struct rtattr *opt)
 	struct rtattr *tb2[TCA_GRED_DPS];
 	int i;
 
-	if (opt == NULL || rtattr_parse_nested(tb, TCA_GRED_STAB, opt))
-		return -EINVAL;
+	if (opt == NULL ||
+		rtattr_parse(tb, TCA_GRED_STAB, RTA_DATA(opt), RTA_PAYLOAD(opt)) )
+			return -EINVAL;
 
 	if (tb[TCA_GRED_PARMS-1] == 0 && tb[TCA_GRED_STAB-1] == 0) {
-		rtattr_parse_nested(tb2, TCA_GRED_DPS, opt);
+		rtattr_parse(tb2, TCA_GRED_DPS, RTA_DATA(opt),
+		    RTA_PAYLOAD(opt));
 
 	    if (tb2[TCA_GRED_DPS-1] == 0) 
 			return -EINVAL;
@@ -473,11 +475,12 @@ static int gred_init(struct Qdisc *sch, struct rtattr *opt)
 	struct rtattr *tb[TCA_GRED_STAB];
 	struct rtattr *tb2[TCA_GRED_DPS];
 
-	if (opt == NULL || rtattr_parse_nested(tb, TCA_GRED_STAB, opt))
-		return -EINVAL;
+	if (opt == NULL ||
+		rtattr_parse(tb, TCA_GRED_STAB, RTA_DATA(opt), RTA_PAYLOAD(opt)) )
+			return -EINVAL;
 
 	if (tb[TCA_GRED_PARMS-1] == 0 && tb[TCA_GRED_STAB-1] == 0) {
-		rtattr_parse_nested(tb2, TCA_GRED_DPS, opt);
+		rtattr_parse(tb2, TCA_GRED_DPS, RTA_DATA(opt),RTA_PAYLOAD(opt));
 
 	    if (tb2[TCA_GRED_DPS-1] == 0) 
 			return -EINVAL;

@@ -236,8 +236,8 @@ static int dma;
 /* our stuff */
 #include "ltpc.h"
 
-static DEFINE_SPINLOCK(txqueue_lock);
-static DEFINE_SPINLOCK(mbox_lock);
+static spinlock_t txqueue_lock = SPIN_LOCK_UNLOCKED;
+static spinlock_t mbox_lock = SPIN_LOCK_UNLOCKED;
 
 /* function prototypes */
 static int do_read(struct net_device *dev, void *cbuf, int cbuflen,
@@ -1039,7 +1039,7 @@ struct net_device * __init ltpc_probe(void)
 	unsigned long f;
 	unsigned long timeout;
 
-	dev = alloc_ltalkdev(sizeof(struct ltpc_private));
+	dev = alloc_netdev(sizeof(struct ltpc_private), "lt%d", ltalk_setup);
 	if (!dev)
 		goto out;
 
@@ -1257,10 +1257,10 @@ static struct net_device *dev_ltpc;
 #ifdef MODULE
 
 MODULE_LICENSE("GPL");
-module_param(debug, int, 0);
-module_param(io, int, 0);
-module_param(irq, int, 0);
-module_param(dma, int, 0);
+MODULE_PARM(debug, "i");
+MODULE_PARM(io, "i");
+MODULE_PARM(irq, "i");
+MODULE_PARM(dma, "i");
 
 
 int __init init_module(void)

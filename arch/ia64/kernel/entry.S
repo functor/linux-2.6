@@ -3,7 +3,7 @@
  *
  * Kernel entry points.
  *
- * Copyright (C) 1998-2003, 2005 Hewlett-Packard Co
+ * Copyright (C) 1998-2003 Hewlett-Packard Co
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  * Copyright (C) 1999, 2002-2003
  *	Asit Mallick <Asit.K.Mallick@intel.com>
@@ -51,11 +51,8 @@
 	 * setup a null register window frame.
 	 */
 ENTRY(ia64_execve)
-	/*
-	 * Allocate 8 input registers since ptrace() may clobber them
-	 */
-	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
-	alloc loc1=ar.pfs,8,2,4,0
+	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(3)
+	alloc loc1=ar.pfs,3,2,4,0
 	mov loc0=rp
 	.body
 	mov out0=in0			// filename
@@ -116,11 +113,8 @@ END(ia64_execve)
  *	      u64 tls)
  */
 GLOBAL_ENTRY(sys_clone2)
-	/*
-	 * Allocate 8 input registers since ptrace() may clobber them
-	 */
-	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
-	alloc r16=ar.pfs,8,2,6,0
+	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(6)
+	alloc r16=ar.pfs,6,2,6,0
 	DO_SAVE_SWITCH_STACK
 	adds r2=PT(R16)+IA64_SWITCH_STACK_SIZE+16,sp
 	mov loc0=rp
@@ -148,11 +142,8 @@ END(sys_clone2)
  *	Deprecated.  Use sys_clone2() instead.
  */
 GLOBAL_ENTRY(sys_clone)
-	/*
-	 * Allocate 8 input registers since ptrace() may clobber them
-	 */
-	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
-	alloc r16=ar.pfs,8,2,6,0
+	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(5)
+	alloc r16=ar.pfs,5,2,6,0
 	DO_SAVE_SWITCH_STACK
 	adds r2=PT(R16)+IA64_SWITCH_STACK_SIZE+16,sp
 	mov loc0=rp
@@ -558,7 +549,7 @@ GLOBAL_ENTRY(ia64_trace_syscall)
 .mem.offset 0,0; st8.spill [r2]=r8		// store return value in slot for r8
 .mem.offset 8,0; st8.spill [r3]=r10		// clear error indication in slot for r10
 	br.call.sptk.many rp=syscall_trace_leave // give parent a chance to catch return value
-.ret3:	br.cond.sptk .work_pending_syscall_end
+.ret3:	br.cond.sptk ia64_leave_syscall
 
 strace_error:
 	ld8 r3=[r2]				// load pt_regs.r8
@@ -621,7 +612,10 @@ GLOBAL_ENTRY(ia64_ret_from_syscall)
 	PT_REGS_UNWIND_INFO(0)
 	cmp.ge p6,p7=r8,r0			// syscall executed successfully?
 	adds r2=PT(R8)+16,sp			// r2 = &pt_regs.r8
-	mov r10=r0				// clear error indication in r10
+	adds r3=PT(R10)+16,sp			// r3 = &pt_regs.r10
+	;;
+.mem.offset 0,0; (p6) st8.spill [r2]=r8	// store return value in slot for r8 and set unat bit
+.mem.offset 8,0; (p6) st8.spill [r3]=r0	// clear error indication in slot for r10 and set unat bit
 (p7)	br.cond.spnt handle_syscall_error	// handle potential syscall failure
 END(ia64_ret_from_syscall)
 	// fall through
@@ -639,12 +633,10 @@ END(ia64_ret_from_syscall)
  *		 r13: restored (user-level thread pointer)
  *		 r14: cleared
  *		 r15: restored (syscall #)
- *	     r16-r17: cleared
- *		 r18: user-level b6
- *		 r19: cleared
+ *	     r16-r19: cleared
  *		 r20: user-level ar.fpsr
  *		 r21: user-level b0
- *		 r22: cleared
+ *		 r22: user-level b6
  *		 r23: user-level ar.bspstore
  *		 r24: user-level ar.rnat
  *		 r25: user-level ar.unat
@@ -669,7 +661,7 @@ END(ia64_ret_from_syscall)
  *	      ar.csd: cleared
  *	      ar.ssd: cleared
  */
-ENTRY(ia64_leave_syscall)
+GLOBAL_ENTRY(ia64_leave_syscall)
 	PT_REGS_UNWIND_INFO(0)
 	/*
 	 * work.need_resched etc. mustn't get changed by this CPU before it returns to
@@ -698,76 +690,79 @@ ENTRY(ia64_leave_syscall)
 (pUStk)	cmp.eq.unc p6,p0=r0,r0		// p6 <- pUStk
 #endif
 .work_processed_syscall:
-	adds r2=PT(LOADRS)+16,r12
-	adds r3=PT(AR_BSPSTORE)+16,r12
+	adds r16=PT(LOADRS)+16,r12
+	adds r17=PT(AR_BSPSTORE)+16,r12
 	adds r18=TI_FLAGS+IA64_TASK_SIZE,r13
 	;;
 (p6)	ld4 r31=[r18]				// load current_thread_info()->flags
-	ld8 r19=[r2],PT(B6)-PT(LOADRS)		// load ar.rsc value for "loadrs"
-	mov b7=r0		// clear b7
+	ld8 r19=[r16],PT(B6)-PT(LOADRS)		// load ar.rsc value for "loadrs"
+	nop.i 0
 	;;
-	ld8 r23=[r3],PT(R11)-PT(AR_BSPSTORE)	// load ar.bspstore (may be garbage)
-	ld8 r18=[r2],PT(R9)-PT(B6)		// load b6
+	ld8 r23=[r17],PT(R9)-PT(AR_BSPSTORE)	// load ar.bspstore (may be garbage)
+	ld8 r22=[r16],PT(R8)-PT(B6)		// load b6
 (p6)	and r15=TIF_WORK_MASK,r31		// any work other than TIF_SYSCALL_TRACE?
 	;;
-	mov r16=ar.bsp				// M2  get existing backing store pointer
-(p6)	cmp4.ne.unc p6,p0=r15, r0		// any special work pending?
-(p6)	br.cond.spnt .work_pending_syscall
-	;;
-	// start restoring the state saved on the kernel stack (struct pt_regs):
-	ld8 r9=[r2],PT(CR_IPSR)-PT(R9)
-	ld8 r11=[r3],PT(CR_IIP)-PT(R11)
-	mov f6=f0		// clear f6
-	;;
-	invala			// M0|1 invalidate ALAT
-	rsm psr.i | psr.ic	// M2 initiate turning off of interrupt and interruption collection
-	mov f9=f0		// clear f9
-
-	ld8 r29=[r2],16		// load cr.ipsr
-	ld8 r28=[r3],16			// load cr.iip
-	mov f8=f0		// clear f8
-	;;
-	ld8 r30=[r2],16		// M0|1 load cr.ifs
-	ld8 r25=[r3],16		// M0|1 load ar.unat
-	cmp.eq p9,p0=r0,r0	// set p9 to indicate that we should restore cr.ifs
-	;;
-	ld8 r26=[r2],PT(B0)-PT(AR_PFS)	// M0|1 load ar.pfs
-(pKStk)	mov r22=psr		// M2 read PSR now that interrupts are disabled
-	mov f10=f0		// clear f10
-	;;
-	ld8 r21=[r2],PT(AR_RNAT)-PT(B0) // load b0
-	ld8 r27=[r3],PT(PR)-PT(AR_RSC)	// load ar.rsc
-	mov f11=f0		// clear f11
-	;;
-	ld8 r24=[r2],PT(AR_FPSR)-PT(AR_RNAT)	// load ar.rnat (may be garbage)
-	ld8 r31=[r3],PT(R1)-PT(PR)		// load predicates
-(pUStk) add r14=IA64_TASK_THREAD_ON_USTACK_OFFSET,r13
-	;;
-	ld8 r20=[r2],PT(R12)-PT(AR_FPSR)	// load ar.fpsr
-	ld8.fill r1=[r3],16	// load r1
-(pUStk) mov r17=1
-	;;
-	srlz.d			// M0  ensure interruption collection is off
-	ld8.fill r13=[r3],16
-	mov f7=f0		// clear f7
-	;;
-	ld8.fill r12=[r2]	// restore r12 (sp)
-	mov.m ar.ssd=r0		// M2 clear ar.ssd
-	mov r22=r0		// clear r22
-
-	ld8.fill r15=[r3]	// restore r15
-(pUStk) st1 [r14]=r17
-	addl r3=THIS_CPU(ia64_phys_stacked_size_p8),r0
-	;;
-(pUStk)	ld4 r17=[r3]		// r17 = cpu_data->phys_stacked_size_p8
-	mov.m ar.csd=r0		// M2 clear ar.csd
-	mov b6=r18		// I0  restore b6
-	;;
-	mov r14=r0		// clear r14
-	shr.u r18=r19,16	// I0|1 get byte size of existing "dirty" partition
-(pKStk) br.cond.dpnt.many skip_rbs_switch
 
 	mov.m ar.ccv=r0		// clear ar.ccv
+(p6)	cmp4.ne.unc p6,p0=r15, r0		// any special work pending?
+(p6)	br.cond.spnt .work_pending
+	;;
+	// start restoring the state saved on the kernel stack (struct pt_regs):
+	ld8.fill r8=[r16],16
+	ld8.fill r9=[r17],16
+	mov f6=f0		// clear f6
+	;;
+	ld8.fill r10=[r16],16
+	ld8.fill r11=[r17],16
+	mov f7=f0		// clear f7
+	;;
+	ld8 r29=[r16],16	// load cr.ipsr
+	ld8 r28=[r17],16	// load cr.iip
+	mov f8=f0		// clear f8
+	;;
+	ld8 r30=[r16],16	// load cr.ifs
+	ld8 r25=[r17],16	// load ar.unat
+	cmp.eq p9,p0=r0,r0	// set p9 to indicate that we should restore cr.ifs
+	;;
+	rsm psr.i | psr.ic	// initiate turning off of interrupt and interruption collection
+	invala			// invalidate ALAT
+	mov f9=f0		// clear f9
+
+	mov.m ar.ssd=r0		// clear ar.ssd
+	mov.m ar.csd=r0		// clear ar.csd
+	mov f10=f0		// clear f10
+	;;
+	ld8 r26=[r16],16	// load ar.pfs
+	ld8 r27=[r17],PT(PR)-PT(AR_RSC)	// load ar.rsc
+	mov f11=f0		// clear f11
+	;;
+	ld8 r24=[r16],PT(B0)-PT(AR_RNAT)	// load ar.rnat (may be garbage)
+	ld8 r31=[r17],PT(R1)-PT(PR)		// load predicates
+(pUStk) add r14=IA64_TASK_THREAD_ON_USTACK_OFFSET,r13
+	;;
+	ld8 r21=[r16],PT(R12)-PT(B0) // load b0
+	ld8.fill r1=[r17],16	// load r1
+(pUStk) mov r3=1
+	;;
+	ld8.fill r12=[r16],16
+	ld8.fill r13=[r17],16
+	mov r2=r0		// clear r2
+	;;
+	ld8 r20=[r16]		// load ar.fpsr
+	ld8.fill r15=[r17]	// load r15
+	mov b7=r0		// clear b7
+	;;
+(pUStk) st1 [r14]=r3
+	addl r17=THIS_CPU(ia64_phys_stacked_size_p8),r0
+	;;
+	mov r16=ar.bsp		// get existing backing store pointer
+	srlz.i			// ensure interruption collection is off
+	mov r14=r0		// clear r14
+	;;
+	ld4 r17=[r17]		// r17 = cpu_data->phys_stacked_size_p8
+	mov b6=r22				// restore b6
+	shr.u r18=r19,16	// get byte size of existing "dirty" partition
+(pKStk) br.cond.dpnt.many skip_rbs_switch
 (pNonSys) br.cond.dpnt.many dont_preserve_current_frame
 	br.cond.sptk.many rbs_switch
 END(ia64_leave_syscall)
@@ -782,7 +777,7 @@ GLOBAL_ENTRY(ia64_ret_from_ia32_execve)
 	st8.spill [r2]=r8	// store return value in slot for r8 and set unat bit
 	.mem.offset 8,0
 	st8.spill [r3]=r0	// clear error indication in slot for r10 and set unat bit
-END(ia64_ret_from_ia32_execve)
+END(ia64_ret_from_ia32_execve_syscall)
 	// fall through
 #endif /* CONFIG_IA32_SUPPORT */
 GLOBAL_ENTRY(ia64_leave_kernel)
@@ -888,16 +883,12 @@ GLOBAL_ENTRY(ia64_leave_kernel)
 	srlz.i			// ensure interruption collection is off
 	mov ar.ccv=r15
 	;;
-	ldf.fill f11=[r2]
 	bsw.0			// switch back to bank 0 (no stop bit required beforehand...)
 	;;
-(pUStk)	mov r18=IA64_KR(CURRENT)// M2 (12 cycle read latency)
+	ldf.fill f11=[r2]
+(pUStk)	mov r18=IA64_KR(CURRENT)	// Itanium 2: 12 cycle read latency
 	adds r16=PT(CR_IPSR)+16,r12
 	adds r17=PT(CR_IIP)+16,r12
-
-(pKStk)	mov r22=psr		// M2 read PSR now that interrupts are disabled
-	nop.i 0
-	nop.i 0
 	;;
 	ld8 r29=[r16],16	// load cr.ipsr
 	ld8 r28=[r17],16	// load cr.iip
@@ -910,7 +901,7 @@ GLOBAL_ENTRY(ia64_leave_kernel)
 	cmp.eq p9,p0=r0,r0	// set p9 to indicate that we should restore cr.ifs
 	;;
 	ld8 r24=[r16],16	// load ar.rnat (may be garbage)
-	ld8 r23=[r17],16	// load ar.bspstore (may be garbage)
+	ld8 r23=[r17],16// load ar.bspstore (may be garbage)
 	;;
 	ld8 r31=[r16],16	// load predicates
 	ld8 r21=[r17],16	// load b0
@@ -980,7 +971,6 @@ dont_preserve_current_frame:
 	shladd in0=loc1,3,r17
 	mov in1=0
 	;;
-	TEXT_ALIGN(32)
 rse_clear_invalid:
 #ifdef CONFIG_ITANIUM
 	// cycle 0
@@ -1041,33 +1031,23 @@ rse_clear_invalid:
 	loadrs
 	;;
 skip_rbs_switch:
-	mov ar.unat=r25		// M2
-(pKStk)	extr.u r22=r22,21,1	// I0 extract current value of psr.pp from r22
-(pLvSys)mov r19=r0		// A  clear r19 for leave_syscall, no-op otherwise
+(pLvSys)	mov r19=r0		// clear r19 for leave_syscall, no-op otherwise
+	mov b0=r21
+	mov ar.pfs=r26
+(pUStk)	mov ar.bspstore=r23
+(p9)	mov cr.ifs=r30
+(pLvSys)mov r16=r0		// clear r16 for leave_syscall, no-op otherwise
+	mov cr.ipsr=r29
+	mov ar.fpsr=r20
+(pLvSys)mov r17=r0		// clear r17 for leave_syscall, no-op otherwise
+	mov cr.iip=r28
 	;;
-(pUStk)	mov ar.bspstore=r23	// M2
-(pKStk)	dep r29=r22,r29,21,1	// I0 update ipsr.pp with psr.pp
-(pLvSys)mov r16=r0		// A  clear r16 for leave_syscall, no-op otherwise
-	;;
-	mov cr.ipsr=r29		// M2
-	mov ar.pfs=r26		// I0
-(pLvSys)mov r17=r0		// A  clear r17 for leave_syscall, no-op otherwise
-
-(p9)	mov cr.ifs=r30		// M2
-	mov b0=r21		// I0
-(pLvSys)mov r18=r0		// A  clear r18 for leave_syscall, no-op otherwise
-
-	mov ar.fpsr=r20		// M2
-	mov cr.iip=r28		// M2
-	nop 0
-	;;
-(pUStk)	mov ar.rnat=r24		// M2 must happen with RSE in lazy mode
-	nop 0
-(pLvSys)mov r2=r0
-
-	mov ar.rsc=r27		// M2
-	mov pr=r31,-1		// I0
-	rfi			// B
+(pUStk)	mov ar.rnat=r24		// must happen with RSE in lazy mode
+(pLvSys)mov r18=r0		// clear r18 for leave_syscall, no-op otherwise
+	mov ar.rsc=r27
+	mov ar.unat=r25
+	mov pr=r31,-1
+	rfi
 
 	/*
 	 * On entry:
@@ -1076,16 +1056,7 @@ skip_rbs_switch:
 	 * On exit:
 	 *	p6 = TRUE if work-pending-check needs to be redone
 	 */
-.work_pending_syscall:
-	add r2=-8,r2
-	add r3=-8,r3
-	;;
-	st8 [r2]=r8
-	st8 [r3]=r10
 .work_pending:
-	tbit.nz p6,p0=r31,TIF_SIGDELAYED		// signal delayed from  MCA/INIT/NMI/PMI context?
-(p6)	br.cond.sptk.few .sigdelayed
-	;;
 	tbit.z p6,p0=r31,TIF_NEED_RESCHED		// current_thread_info()->need_resched==0?
 (p6)	br.cond.sptk.few .notify
 #ifdef CONFIG_PREEMPT
@@ -1103,34 +1074,14 @@ skip_rbs_switch:
 	;;
 (pKStk)	st4 [r20]=r0		// preempt_count() <- 0
 #endif
-(pLvSys)br.cond.sptk.few  .work_pending_syscall_end
+(pLvSys)br.cond.sptk.many .work_processed_syscall	// re-check
 	br.cond.sptk.many .work_processed_kernel	// re-check
 
 .notify:
 (pUStk)	br.call.spnt.many rp=notify_resume_user
 .ret10:	cmp.ne p6,p0=r0,r0				// p6 <- 0
-(pLvSys)br.cond.sptk.few  .work_pending_syscall_end
+(pLvSys)br.cond.sptk.many .work_processed_syscall	// don't re-check
 	br.cond.sptk.many .work_processed_kernel	// don't re-check
-
-// There is a delayed signal that was detected in MCA/INIT/NMI/PMI context where
-// it could not be delivered.  Deliver it now.  The signal might be for us and
-// may set TIF_SIGPENDING, so redrive ia64_leave_* after processing the delayed
-// signal.
-
-.sigdelayed:
-	br.call.sptk.many rp=do_sigdelayed
-	cmp.eq p6,p0=r0,r0				// p6 <- 1, always re-check
-(pLvSys)br.cond.sptk.few  .work_pending_syscall_end
-	br.cond.sptk.many .work_processed_kernel	// re-check
-
-.work_pending_syscall_end:
-	adds r2=PT(R8)+16,r12
-	adds r3=PT(R10)+16,r12
-	;;
-	ld8 r8=[r2]
-	ld8 r10=[r3]
-	br.cond.sptk.many .work_processed_syscall	// re-check
-
 END(ia64_leave_kernel)
 
 ENTRY(handle_syscall_error)
@@ -1142,11 +1093,17 @@ ENTRY(handle_syscall_error)
 	 */
 	PT_REGS_UNWIND_INFO(0)
 	ld8 r3=[r2]		// load pt_regs.r8
+	sub r9=0,r8		// negate return value to get errno
 	;;
+	mov r10=-1		// return -1 in pt_regs.r10 to indicate error
 	cmp.eq p6,p7=r3,r0	// is pt_regs.r8==0?
+	adds r3=16,r2		// r3=&pt_regs.r10
 	;;
-(p7)	mov r10=-1
-(p7)	sub r8=0,r8		// negate return value to get errno
+(p6)	mov r9=r8
+(p6)	mov r10=0
+	;;
+.mem.offset 0,0; st8.spill [r2]=r9	// store errno in pt_regs.r8 and set unat bit
+.mem.offset 8,0; st8.spill [r3]=r10	// store error indication in pt_regs.r10 and set unat bit
 	br.cond.sptk ia64_leave_syscall
 END(handle_syscall_error)
 
@@ -1182,7 +1139,7 @@ ENTRY(notify_resume_user)
 	;;
 (pNonSys) mov out2=0				// out2==0 => not a syscall
 	.fframe 16
-	.spillsp ar.unat, 16
+	.spillpsp ar.unat, 16			// (note that offset is relative to psp+0x10!)
 	st8 [sp]=r9,-16				// allocate space for ar.unat and save it
 	st8 [out1]=loc1,-8			// save ar.pfs, out1=&sigscratch
 	.body
@@ -1208,7 +1165,7 @@ GLOBAL_ENTRY(sys_rt_sigsuspend)
 	adds out2=8,sp				// out2=&sigscratch->ar_pfs
 	;;
 	.fframe 16
-	.spillsp ar.unat, 16
+	.spillpsp ar.unat, 16			// (note that offset is relative to psp+0x10!)
 	st8 [sp]=r9,-16				// allocate space for ar.unat and save it
 	st8 [out2]=loc1,-8			// save ar.pfs, out2=&sigscratch
 	.body
@@ -1226,10 +1183,7 @@ END(sys_rt_sigsuspend)
 
 ENTRY(sys_rt_sigreturn)
 	PT_REGS_UNWIND_INFO(0)
-	/*
-	 * Allocate 8 input registers since ptrace() may clobber them
-	 */
-	alloc r2=ar.pfs,8,0,1,0
+	alloc r2=ar.pfs,0,0,1,0
 	.prologue
 	PT_REGS_SAVES(16)
 	adds sp=-16,sp
@@ -1417,7 +1371,7 @@ sys_call_table:
 	data8 sys_msgrcv
 	data8 sys_msgctl
 	data8 sys_shmget
-	data8 sys_shmat
+	data8 ia64_shmat
 	data8 sys_shmdt				// 1115
 	data8 sys_shmctl
 	data8 sys_syslog

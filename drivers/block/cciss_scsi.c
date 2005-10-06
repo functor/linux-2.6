@@ -16,7 +16,7 @@
  *    along with this program; if not, write to the Free Software
  *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- *    Questions/Comments/Bugfixes to iss_storagedev@hp.com
+ *    Questions/Comments/Bugfixes to arrays@compaq.com
  *    
  *    Author: Stephen M. Cameron
  */
@@ -53,7 +53,9 @@ static int sendcmd(
 	int cmd_type);
 
 
-static int cciss_scsi_proc_info(
+const char *cciss_scsi_info(struct Scsi_Host *sa);
+
+int cciss_scsi_proc_info(
 		struct Scsi_Host *sh,
 		char *buffer, /* data buffer */
 		char **start, 	   /* where data in buffer starts */
@@ -61,7 +63,7 @@ static int cciss_scsi_proc_info(
 		int length, 	   /* length of data in buffer */
 		int func);	   /* 0 == read, 1 == write */
 
-static int cciss_scsi_queue_command (struct scsi_cmnd *cmd,
+int cciss_scsi_queue_command (struct scsi_cmnd *cmd, 
 		void (* done)(struct scsi_cmnd *));
 
 static struct cciss_scsi_hba_t ccissscsi[MAX_CTLR] = {
@@ -532,7 +534,7 @@ cciss_scsi_setup(int cntl_num)
 	if (shba == NULL)
 		return;
 	shba->scsi_host = NULL;
-	spin_lock_init(&shba->lock);
+	shba->lock = SPIN_LOCK_UNLOCKED;
 	shba->registered = 0;
 	if (scsi_cmd_stack_setup(cntl_num, shba) != 0) {
 		kfree(shba);
@@ -689,13 +691,14 @@ static int
 cciss_scsi_detect(int ctlr)
 {
 	struct Scsi_Host *sh;
-	int error;
 
 	sh = scsi_host_alloc(&cciss_driver_template, sizeof(struct ctlr_info *));
 	if (sh == NULL)
-		goto fail;
+		return 0;
+
 	sh->io_port = 0;	// good enough?  FIXME, 
 	sh->n_io_port = 0;	// I don't think we use these two...
+
 	sh->this_id = SELF_SCSI_ID;  
 
 	((struct cciss_scsi_adapter_data_t *) 
@@ -703,17 +706,13 @@ cciss_scsi_detect(int ctlr)
 	sh->hostdata[0] = (unsigned long) hba[ctlr];
 	sh->irq = hba[ctlr]->intr;
 	sh->unique_id = sh->irq;
-	error = scsi_add_host(sh, &hba[ctlr]->pdev->dev);
-	if (error)
-		goto fail_host_put;
+	scsi_add_host(sh, &hba[ctlr]->pdev->dev); /* XXX handle failure */
 	scsi_scan_host(sh);
-	return 1;
 
- fail_host_put:
-	scsi_host_put(sh);
- fail:
-	return 0;
+	return 1;
 }
+
+static void __exit cleanup_cciss_module(void);
 
 static void
 cciss_unmap_one(struct pci_dev *pdev,
@@ -1115,7 +1114,7 @@ cciss_scsi_user_command(int ctlr, int hostno, char *buffer, int length)
 }
 
 
-static int
+int
 cciss_scsi_proc_info(struct Scsi_Host *sh,
 		char *buffer, /* data buffer */
 		char **start, 	   /* where data in buffer starts */
@@ -1149,6 +1148,29 @@ cciss_scsi_proc_info(struct Scsi_Host *sh,
 		return cciss_scsi_user_command(cntl_num, sh->host_no,
 			buffer, length);	
 } 
+
+/* this is via the generic proc support */
+const char *
+cciss_scsi_info(struct Scsi_Host *sa)
+{
+	static char buf[300];
+	ctlr_info_t *ci;
+
+	/* probably need to work on putting a bit more info in here... */
+	/* this is output via the /proc filesystem. */
+
+	ci = (ctlr_info_t *) sa->hostdata[0];
+
+	sprintf(buf, "%s %c%c%c%c\n",
+		ci->product_name, 
+		ci->firm_ver[0],
+		ci->firm_ver[1],
+		ci->firm_ver[2],
+		ci->firm_ver[3]);
+
+	return buf; 
+}
+
 
 /* cciss_scatter_gather takes a struct scsi_cmnd, (cmd), and does the pci 
    dma mapping  and fills in the scatter gather entries of the 
@@ -1203,7 +1225,7 @@ cciss_scatter_gather(struct pci_dev *pdev,
 }
 
 
-static int
+int 
 cciss_scsi_queue_command (struct scsi_cmnd *cmd, void (* done)(struct scsi_cmnd *))
 {
 	ctlr_info_t **c;

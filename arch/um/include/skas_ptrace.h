@@ -6,10 +6,21 @@
 #ifndef __SKAS_PTRACE_H
 #define __SKAS_PTRACE_H
 
-#define PTRACE_FAULTINFO 52
-#define PTRACE_SWITCH_MM 55
+struct ptrace_faultinfo {
+	int is_write;
+	unsigned long addr;
+};
 
-#include "sysdep/skas_ptrace.h"
+struct ptrace_ldt {
+	int func;
+  	void *ptr;
+	unsigned long bytecount;
+};
+
+#define PTRACE_FAULTINFO 52
+#define PTRACE_SIGPENDING 53
+#define PTRACE_LDT 54
+#define PTRACE_SWITCH_MM 55
 
 #endif
 

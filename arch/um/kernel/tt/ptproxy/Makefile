@@ -5,6 +5,7 @@
 
 obj-y = proxy.o ptrace.o sysdep.o wait.o
 
-USER_OBJS := $(obj-y)
+USER_OBJS := $(foreach file,$(obj-y),$(src)/$(file))
 
-include arch/um/scripts/Makefile.rules
+$(USER_OBJS) : %.o: %.c
+	$(CC) $(CFLAGS_$(notdir $@)) $(USER_CFLAGS) -c -o $@ $<

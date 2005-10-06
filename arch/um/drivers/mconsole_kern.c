@@ -73,12 +73,11 @@ DECLARE_WORK(mconsole_work, mc_work_proc, NULL);
 static irqreturn_t mconsole_interrupt(int irq, void *dev_id,
 				      struct pt_regs *regs)
 {
-	/* long to avoid size mismatch warnings from gcc */
-	long fd;
+	int fd;
 	struct mconsole_entry *new;
 	struct mc_request req;
 
-	fd = (long) dev_id;
+	fd = (int) dev_id;
 	while (mconsole_get_request(fd, &req)){
 		if(req.cmd->context == MCONSOLE_INTR)
 			(*req.cmd->handler)(&req);
@@ -458,9 +457,7 @@ static char *notify_socket = NULL;
 
 int mconsole_init(void)
 {
-	/* long to avoid size mismatch warnings from gcc */
-	long sock;
-	int err;
+	int err, sock;
 	char file[256];
 
 	if(umid_file_name("mconsole", file, sizeof(file))) return(-1);
@@ -499,7 +496,7 @@ int mconsole_init(void)
 
 __initcall(mconsole_init);
 
-static int write_proc_mconsole(struct file *file, const char __user *buffer,
+static int write_proc_mconsole(struct file *file, const char *buffer,
 			       unsigned long count, void *data)
 {
 	char *buf;
@@ -538,7 +535,7 @@ static int create_proc_mconsole(void)
 	return(0);
 }
 
-static DEFINE_SPINLOCK(notify_spinlock);
+static spinlock_t notify_spinlock = SPIN_LOCK_UNLOCKED;
 
 void lock_notify(void)
 {

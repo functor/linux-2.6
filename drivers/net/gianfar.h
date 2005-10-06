@@ -37,7 +37,6 @@
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
 #include <linux/mm.h>
-#include <linux/fsl_devices.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -48,6 +47,7 @@
 #include <linux/workqueue.h>
 #include <linux/ethtool.h>
 #include <linux/netdevice.h>
+#include <asm/ocp.h>
 #include "gianfar_phy.h"
 
 /* The maximum number of packets to be handled in one call of gfar_poll */
@@ -510,10 +510,7 @@ struct gfar_private {
 	unsigned int rxclean;
 
 	/* Info structure initialized by board setup code */
-	unsigned int interruptTransmit;
-	unsigned int interruptReceive;
-	unsigned int interruptError;
-	struct gianfar_platform_data *einfo;
+	struct ocp_gfar_data *einfo;
 
 	struct gfar_mii_info *mii_info;
 	int oldspeed;

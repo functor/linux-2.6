@@ -22,7 +22,6 @@
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/profile.h>
-#include <linux/ptrace.h>
 #include <linux/highmem.h>
 #include <asm/sections.h>
 #include <asm/semaphore.h>

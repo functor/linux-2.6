@@ -200,8 +200,7 @@ out:
  * This is really horribly ugly.
  */
 
-asmlinkage long sys_ipc(unsigned int call, int first, unsigned long second,
-			unsigned long third, void __user *ptr, long fifth)
+asmlinkage long sys_ipc(unsigned int call, int first, int second, unsigned long third, void __user *ptr, long fifth)
 {
 	int err;
 
@@ -209,15 +208,14 @@ asmlinkage long sys_ipc(unsigned int call, int first, unsigned long second,
 	if (call <= SEMCTL) {
 		switch (call) {
 		case SEMOP:
-			err = sys_semtimedop(first, ptr,
-					     (unsigned)second, NULL);
+			err = sys_semtimedop(first, ptr, second, NULL);
 			goto out;
 		case SEMTIMEDOP:
-			err = sys_semtimedop(first, ptr, (unsigned)second,
+			err = sys_semtimedop(first, ptr, second,
 				(const struct timespec __user *) fifth);
 			goto out;
 		case SEMGET:
-			err = sys_semget(first, (int)second, (int)third);
+			err = sys_semget(first, second, (int)third);
 			goto out;
 		case SEMCTL: {
 			union semun fourth;
@@ -228,7 +226,7 @@ asmlinkage long sys_ipc(unsigned int call, int first, unsigned long second,
 			if (get_user(fourth.__pad,
 				     (void __user * __user *) ptr))
 				goto out;
-			err = sys_semctl(first, (int)second | IPC_64,
+			err = sys_semctl(first, second | IPC_64,
 					 (int)third, fourth);
 			goto out;
 		}
@@ -240,18 +238,17 @@ asmlinkage long sys_ipc(unsigned int call, int first, unsigned long second,
 	if (call <= MSGCTL) {
 		switch (call) {
 		case MSGSND:
-			err = sys_msgsnd(first, ptr, (size_t)second,
-					 (int)third);
+			err = sys_msgsnd(first, ptr, second, (int)third);
 			goto out;
 		case MSGRCV:
-			err = sys_msgrcv(first, ptr, (size_t)second, fifth,
+			err = sys_msgrcv(first, ptr, second, fifth,
 					 (int)third);
 			goto out;
 		case MSGGET:
-			err = sys_msgget((key_t)first, (int)second);
+			err = sys_msgget((key_t) first, second);
 			goto out;
 		case MSGCTL:
-			err = sys_msgctl(first, (int)second | IPC_64, ptr);
+			err = sys_msgctl(first, second | IPC_64, ptr);
 			goto out;
 		default:
 			err = -ENOSYS;
@@ -262,7 +259,7 @@ asmlinkage long sys_ipc(unsigned int call, int first, unsigned long second,
 		switch (call) {
 		case SHMAT: {
 			ulong raddr;
-			err = do_shmat(first, ptr, (int)second, &raddr);
+			err = do_shmat(first, ptr, second, &raddr);
 			if (!err) {
 				if (put_user(raddr,
 					     (ulong __user *) third))
@@ -274,10 +271,10 @@ asmlinkage long sys_ipc(unsigned int call, int first, unsigned long second,
 			err = sys_shmdt(ptr);
 			goto out;
 		case SHMGET:
-			err = sys_shmget(first, (size_t)second, (int)third);
+			err = sys_shmget(first, second, (int)third);
 			goto out;
 		case SHMCTL:
-			err = sys_shmctl(first, (int)second | IPC_64, ptr);
+			err = sys_shmctl(first, second | IPC_64, ptr);
 			goto out;
 		default:
 			err = -ENOSYS;

@@ -49,6 +49,7 @@
  */
 int jfs_umount(struct super_block *sb)
 {
+	struct address_space *bdev_mapping = sb->s_bdev->bd_inode->i_mapping;
 	struct jfs_sb_info *sbi = JFS_SBI(sb);
 	struct inode *ipbmap = sbi->ipbmap;
 	struct inode *ipimap = sbi->ipimap;
@@ -108,8 +109,8 @@ int jfs_umount(struct super_block *sb)
 	 * Make sure all metadata makes it to disk before we mark
 	 * the superblock as clean
 	 */
-	filemap_fdatawrite(sbi->direct_inode->i_mapping);
-	filemap_fdatawait(sbi->direct_inode->i_mapping);
+	filemap_fdatawrite(bdev_mapping);
+	filemap_fdatawait(bdev_mapping);
 
 	/*
 	 * ensure all file system file pages are propagated to their
@@ -121,6 +122,9 @@ int jfs_umount(struct super_block *sb)
 	 */
 	if (log) {		/* log = NULL if read-only mount */
 		updateSuper(sb, FM_CLEAN);
+
+		/* Restore default gfp_mask for bdev */
+		mapping_set_gfp_mask(bdev_mapping, GFP_USER);
 
 		/*
 		 * close log: 
@@ -136,6 +140,7 @@ int jfs_umount(struct super_block *sb)
 
 int jfs_umount_rw(struct super_block *sb)
 {
+	struct address_space *bdev_mapping = sb->s_bdev->bd_inode->i_mapping;
 	struct jfs_sb_info *sbi = JFS_SBI(sb);
 	struct jfs_log *log = sbi->log;
 
@@ -161,10 +166,13 @@ int jfs_umount_rw(struct super_block *sb)
 	 * mark the superblock clean before everything is flushed to
 	 * disk.
 	 */
-	filemap_fdatawrite(sbi->direct_inode->i_mapping);
-	filemap_fdatawait(sbi->direct_inode->i_mapping);
+	filemap_fdatawrite(bdev_mapping);
+	filemap_fdatawait(bdev_mapping);
 
 	updateSuper(sb, FM_CLEAN);
+
+	/* Restore default gfp_mask for bdev */
+	mapping_set_gfp_mask(bdev_mapping, GFP_USER);
 
 	return lmLogClose(sb);
 }

@@ -12,6 +12,7 @@
 #include <linux/signal.h>
 #include <linux/ptrace.h>
 #include <linux/personality.h>
+#include <linux/suspend.h>
 
 #include <asm/cacheflush.h>
 #include <asm/ucontext.h>
@@ -102,7 +103,7 @@ sys_sigaction(int sig, const struct old_sigaction __user *act,
 
 	if (act) {
 		old_sigset_t mask;
-		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
+		if (verify_area(VERIFY_READ, act, sizeof(*act)) ||
 		    __get_user(new_ka.sa.sa_handler, &act->sa_handler) ||
 		    __get_user(new_ka.sa.sa_restorer, &act->sa_restorer))
 			return -EFAULT;
@@ -114,7 +115,7 @@ sys_sigaction(int sig, const struct old_sigaction __user *act,
 	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
 
 	if (!ret && oact) {
-		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		if (verify_area(VERIFY_WRITE, oact, sizeof(*oact)) ||
 		    __put_user(old_ka.sa.sa_handler, &oact->sa_handler) ||
 		    __put_user(old_ka.sa.sa_restorer, &oact->sa_restorer))
 			return -EFAULT;
@@ -317,7 +318,7 @@ asmlinkage int sys_sigreturn(struct pt_regs *regs)
 
 	frame = (struct sigframe __user *)regs->ARM_sp;
 
-	if (!access_ok(VERIFY_READ, frame, sizeof (*frame)))
+	if (verify_area(VERIFY_READ, frame, sizeof (*frame)))
 		goto badframe;
 	if (__get_user(set.sig[0], &frame->sc.oldmask)
 	    || (_NSIG_WORDS > 1
@@ -365,7 +366,7 @@ asmlinkage int sys_rt_sigreturn(struct pt_regs *regs)
 
 	frame = (struct rt_sigframe __user *)regs->ARM_sp;
 
-	if (!access_ok(VERIFY_READ, frame, sizeof (*frame)))
+	if (verify_area(VERIFY_READ, frame, sizeof (*frame)))
 		goto badframe;
 	if (__copy_from_user(&set, &frame->uc.uc_sigmask, sizeof(set)))
 		goto badframe;
@@ -688,8 +689,10 @@ static int do_signal(sigset_t *oldset, struct pt_regs *regs, int syscall)
 	if (!user_mode(regs))
 		return 0;
 
-	if (try_to_freeze(0))
+	if (current->flags & PF_FREEZE) {
+		refrigerator(0);
 		goto no_signal;
+	}
 
 	if (current->ptrace & PT_SINGLESTEP)
 		ptrace_cancel_bpt(current);

@@ -28,7 +28,6 @@
 //#include <linux/kernel_stat.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
-#include <linux/workqueue.h>
 
 #include "appldata.h"
 
@@ -129,30 +128,27 @@ static struct ctl_table appldata_dir_table[] = {
 DEFINE_PER_CPU(struct vtimer_list, appldata_timer);
 static atomic_t appldata_expire_count = ATOMIC_INIT(0);
 
-static DEFINE_SPINLOCK(appldata_timer_lock);
+static spinlock_t appldata_timer_lock = SPIN_LOCK_UNLOCKED;
 static int appldata_interval = APPLDATA_CPU_INTERVAL;
 static int appldata_timer_active;
 
 /*
- * Work queue
+ * Tasklet
  */
-static struct workqueue_struct *appldata_wq;
-static void appldata_work_fn(void *data);
-static DECLARE_WORK(appldata_work, appldata_work_fn, NULL);
-
+static struct tasklet_struct appldata_tasklet_struct;
 
 /*
  * Ops list
  */
-static DEFINE_SPINLOCK(appldata_ops_lock);
+static spinlock_t appldata_ops_lock = SPIN_LOCK_UNLOCKED;
 static LIST_HEAD(appldata_ops_list);
 
 
-/*************************** timer, work, DIAG *******************************/
+/************************* timer, tasklet, DIAG ******************************/
 /*
  * appldata_timer_function()
  *
- * schedule work and reschedule timer
+ * schedule tasklet and reschedule timer
  */
 static void appldata_timer_function(unsigned long data, struct pt_regs *regs)
 {
@@ -161,22 +157,22 @@ static void appldata_timer_function(unsigned long data, struct pt_regs *regs)
 		atomic_read(&appldata_expire_count));
 	if (atomic_dec_and_test(&appldata_expire_count)) {
 		atomic_set(&appldata_expire_count, num_online_cpus());
-		queue_work(appldata_wq, (struct work_struct *) data);
+		tasklet_schedule((struct tasklet_struct *) data);
 	}
 }
 
 /*
- * appldata_work_fn()
+ * appldata_tasklet_function()
  *
  * call data gathering function for each (active) module
  */
-static void appldata_work_fn(void *data)
+static void appldata_tasklet_function(unsigned long data)
 {
 	struct list_head *lh;
 	struct appldata_ops *ops;
 	int i;
 
-	P_DEBUG("  -= Work Queue =-\n");
+	P_DEBUG("  -= Tasklet =-\n");
 	i = 0;
 	spin_lock(&appldata_ops_lock);
 	list_for_each(lh, &appldata_ops_list) {
@@ -235,7 +231,7 @@ static int appldata_diag(char record_nr, u16 function, unsigned long buffer,
 			: "=d" (ry) : "d" (&(appldata_parameter_list)) : "cc");
 	return (int) ry;
 }
-/************************ timer, work, DIAG <END> ****************************/
+/********************** timer, tasklet, DIAG <END> ***************************/
 
 
 /****************************** /proc stuff **********************************/
@@ -415,7 +411,7 @@ appldata_generic_handler(ctl_table *ctl, int write, struct file *filp,
 	struct list_head *lh;
 
 	found = 0;
-	spin_lock(&appldata_ops_lock);
+	spin_lock_bh(&appldata_ops_lock);
 	list_for_each(lh, &appldata_ops_list) {
 		tmp_ops = list_entry(lh, struct appldata_ops, list);
 		if (&tmp_ops->ctl_table[2] == ctl) {
@@ -423,15 +419,15 @@ appldata_generic_handler(ctl_table *ctl, int write, struct file *filp,
 		}
 	}
 	if (!found) {
-		spin_unlock(&appldata_ops_lock);
+		spin_unlock_bh(&appldata_ops_lock);
 		return -ENODEV;
 	}
 	ops = ctl->data;
 	if (!try_module_get(ops->owner)) {	// protect this function
-		spin_unlock(&appldata_ops_lock);
+		spin_unlock_bh(&appldata_ops_lock);
 		return -ENODEV;
 	}
-	spin_unlock(&appldata_ops_lock);
+	spin_unlock_bh(&appldata_ops_lock);
 
 	if (!*lenp || *ppos) {
 		*lenp = 0;
@@ -455,11 +451,10 @@ appldata_generic_handler(ctl_table *ctl, int write, struct file *filp,
 		return -EFAULT;
 	}
 
-	spin_lock(&appldata_ops_lock);
+	spin_lock_bh(&appldata_ops_lock);
 	if ((buf[0] == '1') && (ops->active == 0)) {
-		// protect work queue callback
-		if (!try_module_get(ops->owner)) {
-			spin_unlock(&appldata_ops_lock);
+		if (!try_module_get(ops->owner)) {	// protect tasklet
+			spin_unlock_bh(&appldata_ops_lock);
 			module_put(ops->owner);
 			return -ENODEV;
 		}
@@ -490,7 +485,7 @@ appldata_generic_handler(ctl_table *ctl, int write, struct file *filp,
 		}
 		module_put(ops->owner);
 	}
-	spin_unlock(&appldata_ops_lock);
+	spin_unlock_bh(&appldata_ops_lock);
 out:
 	*lenp = len;
 	*ppos += len;
@@ -534,7 +529,7 @@ int appldata_register_ops(struct appldata_ops *ops)
 	}
 	memset(ops->ctl_table, 0, 4*sizeof(struct ctl_table));
 
-	spin_lock(&appldata_ops_lock);
+	spin_lock_bh(&appldata_ops_lock);
 	list_for_each(lh, &appldata_ops_list) {
 		tmp_ops = list_entry(lh, struct appldata_ops, list);
 		P_DEBUG("register_ops loop: %i) name = %s, ctl = %i\n",
@@ -546,18 +541,18 @@ int appldata_register_ops(struct appldata_ops *ops)
 				APPLDATA_PROC_NAME_LENGTH) == 0) {
 			P_ERROR("Name \"%s\" already registered!\n", ops->name);
 			kfree(ops->ctl_table);
-			spin_unlock(&appldata_ops_lock);
+			spin_unlock_bh(&appldata_ops_lock);
 			return -EBUSY;
 		}
 		if (tmp_ops->ctl_nr == ops->ctl_nr) {
 			P_ERROR("ctl_nr %i already registered!\n", ops->ctl_nr);
 			kfree(ops->ctl_table);
-			spin_unlock(&appldata_ops_lock);
+			spin_unlock_bh(&appldata_ops_lock);
 			return -EBUSY;
 		}
 	}
 	list_add(&ops->list, &appldata_ops_list);
-	spin_unlock(&appldata_ops_lock);
+	spin_unlock_bh(&appldata_ops_lock);
 
 	ops->ctl_table[0].ctl_name = CTL_APPLDATA;
 	ops->ctl_table[0].procname = appldata_proc_name;
@@ -588,12 +583,12 @@ int appldata_register_ops(struct appldata_ops *ops)
  */
 void appldata_unregister_ops(struct appldata_ops *ops)
 {
-	spin_lock(&appldata_ops_lock);
+	spin_lock_bh(&appldata_ops_lock);
 	unregister_sysctl_table(ops->sysctl_header);
 	list_del(&ops->list);
 	kfree(ops->ctl_table);
 	ops->ctl_table = NULL;
-	spin_unlock(&appldata_ops_lock);
+	spin_unlock_bh(&appldata_ops_lock);
 	P_INFO("%s-ops unregistered!\n", ops->name);
 }
 /********************** module-ops management <END> **************************/
@@ -607,7 +602,7 @@ appldata_online_cpu(int cpu)
 	init_virt_timer(&per_cpu(appldata_timer, cpu));
 	per_cpu(appldata_timer, cpu).function = appldata_timer_function;
 	per_cpu(appldata_timer, cpu).data = (unsigned long)
-		&appldata_work;
+		&appldata_tasklet_struct;
 	atomic_inc(&appldata_expire_count);
 	spin_lock(&appldata_timer_lock);
 	__appldata_vtimer_setup(APPLDATA_MOD_TIMER);
@@ -620,7 +615,7 @@ appldata_offline_cpu(int cpu)
 	del_virt_timer(&per_cpu(appldata_timer, cpu));
 	if (atomic_dec_and_test(&appldata_expire_count)) {
 		atomic_set(&appldata_expire_count, num_online_cpus());
-		queue_work(appldata_wq, &appldata_work);
+		tasklet_schedule(&appldata_tasklet_struct);
 	}
 	spin_lock(&appldata_timer_lock);
 	__appldata_vtimer_setup(APPLDATA_MOD_TIMER);
@@ -653,7 +648,7 @@ static struct notifier_block __devinitdata appldata_nb = {
 /*
  * appldata_init()
  *
- * init timer, register /proc entries
+ * init timer and tasklet, register /proc entries
  */
 static int __init appldata_init(void)
 {
@@ -661,12 +656,6 @@ static int __init appldata_init(void)
 
 	P_DEBUG("sizeof(parameter_list) = %lu\n",
 		sizeof(struct appldata_parameter_list));
-
-	appldata_wq = create_singlethread_workqueue("appldata");
-	if (!appldata_wq) {
-		P_ERROR("Could not create work queue\n");
-		return -ENOMEM;
-	}
 
 	for_each_online_cpu(i)
 		appldata_online_cpu(i);
@@ -681,6 +670,7 @@ static int __init appldata_init(void)
 	appldata_table[1].de->owner = THIS_MODULE;
 #endif
 
+	tasklet_init(&appldata_tasklet_struct, appldata_tasklet_function, 0);
 	P_DEBUG("Base interface initialized.\n");
 	return 0;
 }
@@ -688,7 +678,7 @@ static int __init appldata_init(void)
 /*
  * appldata_exit()
  *
- * stop timer, unregister /proc entries
+ * stop timer and tasklet, unregister /proc entries
  */
 static void __exit appldata_exit(void)
 {
@@ -700,7 +690,7 @@ static void __exit appldata_exit(void)
 	/*
 	 * ops list should be empty, but just in case something went wrong...
 	 */
-	spin_lock(&appldata_ops_lock);
+	spin_lock_bh(&appldata_ops_lock);
 	list_for_each(lh, &appldata_ops_list) {
 		ops = list_entry(lh, struct appldata_ops, list);
 		rc = appldata_diag(ops->record_nr, APPLDATA_STOP_REC,
@@ -710,7 +700,7 @@ static void __exit appldata_exit(void)
 				"return code: %d\n", ops->name, rc);
 		}
 	}
-	spin_unlock(&appldata_ops_lock);
+	spin_unlock_bh(&appldata_ops_lock);
 
 	for_each_online_cpu(i)
 		appldata_offline_cpu(i);
@@ -719,7 +709,7 @@ static void __exit appldata_exit(void)
 
 	unregister_sysctl_table(appldata_sysctl_header);
 
-	destroy_workqueue(appldata_wq);
+	tasklet_kill(&appldata_tasklet_struct);
 	P_DEBUG("... module unloaded!\n");
 }
 /**************************** init / exit <END> ******************************/

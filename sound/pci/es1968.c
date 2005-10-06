@@ -586,7 +586,6 @@ struct snd_es1968 {
 	spinlock_t reg_lock;
 	spinlock_t ac97_lock;
 	struct tasklet_struct hwvol_tq;
-	unsigned int in_suspend;
 
 	/* Maestro Stuff */
 	u16 maestro_map[32];
@@ -606,7 +605,8 @@ struct snd_es1968 {
 #endif
 
 #ifdef SUPPORT_JOYSTICK
-	struct gameport *gameport;
+	struct gameport gameport;
+	struct resource *res_joystick;
 #endif
 };
 
@@ -1938,9 +1938,6 @@ static void es1968_update_hw_volume(unsigned long private_data)
 	outb(0x88, chip->io_port + 0x1e);
 	outb(0x88, chip->io_port + 0x1f);
 
-	if (chip->in_suspend)
-		return;
-
 	if (! chip->master_switch || ! chip->master_volume)
 		return;
 
@@ -2040,7 +2037,6 @@ snd_es1968_mixer(es1968_t *chip)
 
 	if ((err = snd_ac97_bus(chip->card, 0, &ops, NULL, &pbus)) < 0)
 		return err;
-	pbus->no_vra = 1; /* ES1968 doesn't need VRA */
 
 	memset(&ac97, 0, sizeof(ac97));
 	ac97.private_data = chip;
@@ -2407,26 +2403,25 @@ static void snd_es1968_start_irq(es1968_t *chip)
 /*
  * PM support
  */
-static int es1968_suspend(snd_card_t *card, pm_message_t state)
+static int es1968_suspend(snd_card_t *card, unsigned int state)
 {
 	es1968_t *chip = card->pm_private_data;
 
 	if (! chip->do_pm)
 		return 0;
 
-	chip->in_suspend = 1;
 	snd_pcm_suspend_all(chip->pcm);
 	snd_ac97_suspend(chip->ac97);
 	snd_es1968_bob_stop(chip);
 	snd_es1968_set_acpi(chip, ACPI_D3);
 	pci_disable_device(chip->pci);
+	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	return 0;
 }
 
-static int es1968_resume(snd_card_t *card)
+static int es1968_resume(snd_card_t *card, unsigned int state)
 {
 	es1968_t *chip = card->pm_private_data;
-	struct list_head *p;
 
 	if (! chip->do_pm)
 		return 0;
@@ -2447,80 +2442,14 @@ static int es1968_resume(snd_card_t *card)
 	/* restore ac97 state */
 	snd_ac97_resume(chip->ac97);
 
-	list_for_each(p, &chip->substream_list) {
-		esschan_t *es = list_entry(p, esschan_t, list);
-		switch (es->mode) {
-		case ESM_MODE_PLAY:
-			snd_es1968_playback_setup(chip, es, es->substream->runtime);
-			break;
-		case ESM_MODE_CAPTURE:
-			snd_es1968_capture_setup(chip, es, es->substream->runtime);
-			break;
-		}
-	}
-
 	/* start timer again */
 	if (chip->bobclient)
 		snd_es1968_bob_start(chip);
 
-	chip->in_suspend = 0;
+	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	return 0;
 }
 #endif /* CONFIG_PM */
-
-#ifdef SUPPORT_JOYSTICK
-#define JOYSTICK_ADDR	0x200
-static int __devinit snd_es1968_create_gameport(es1968_t *chip, int dev)
-{
-	struct gameport *gp;
-	struct resource *r;
-	u16 val;
-
-	if (!joystick[dev])
-		return -ENODEV;
-
-	r = request_region(JOYSTICK_ADDR, 8, "ES1968 gameport");
-	if (!r)
-		return -EBUSY;
-
-	chip->gameport = gp = gameport_allocate_port();
-	if (!gp) {
-		printk(KERN_ERR "es1968: cannot allocate memory for gameport\n");
-		release_resource(r);
-		kfree_nocheck(r);
-		return -ENOMEM;
-	}
-
-	pci_read_config_word(chip->pci, ESM_LEGACY_AUDIO_CONTROL, &val);
-	pci_write_config_word(chip->pci, ESM_LEGACY_AUDIO_CONTROL, val | 0x04);
-
-	gameport_set_name(gp, "ES1968 Gameport");
-	gameport_set_phys(gp, "pci%s/gameport0", pci_name(chip->pci));
-	gameport_set_dev_parent(gp, &chip->pci->dev);
-	gp->io = JOYSTICK_ADDR;
-	gameport_set_port_data(gp, r);
-
-	gameport_register_port(gp);
-
-	return 0;
-}
-
-static void snd_es1968_free_gameport(es1968_t *chip)
-{
-	if (chip->gameport) {
-		struct resource *r = gameport_get_port_data(chip->gameport);
-
-		gameport_unregister_port(chip->gameport);
-		chip->gameport = NULL;
-
-		release_resource(r);
-		kfree_nocheck(r);
-	}
-}
-#else
-static inline int snd_es1968_create_gameport(es1968_t *chip, int dev) { return -ENOSYS; }
-static inline void snd_es1968_free_gameport(es1968_t *chip) { }
-#endif
 
 static int snd_es1968_free(es1968_t *chip)
 {
@@ -2532,7 +2461,13 @@ static int snd_es1968_free(es1968_t *chip)
 
 	if (chip->irq >= 0)
 		free_irq(chip->irq, (void *)chip);
-	snd_es1968_free_gameport(chip);
+#ifdef SUPPORT_JOYSTICK
+	if (chip->res_joystick) {
+		gameport_unregister_port(&chip->gameport);
+		release_resource(chip->res_joystick);
+		kfree_nocheck(chip->res_joystick);
+	}
+#endif
 	snd_es1968_set_acpi(chip, ACPI_D3);
 	chip->master_switch = NULL;
 	chip->master_volume = NULL;
@@ -2759,7 +2694,17 @@ static int __devinit snd_es1968_probe(struct pci_dev *pci,
 		}
 	}
 
-	snd_es1968_create_gameport(chip, dev);
+#ifdef SUPPORT_JOYSTICK
+#define JOYSTICK_ADDR	0x200
+	if (joystick[dev] &&
+	    (chip->res_joystick = request_region(JOYSTICK_ADDR, 8, "ES1968 gameport")) != NULL) {
+		u16 val;
+		pci_read_config_word(pci, ESM_LEGACY_AUDIO_CONTROL, &val);
+		pci_write_config_word(pci, ESM_LEGACY_AUDIO_CONTROL, val | 0x04);
+		chip->gameport.io = JOYSTICK_ADDR;
+		gameport_register_port(&chip->gameport);
+	}
+#endif
 
 	snd_es1968_start_irq(chip);
 

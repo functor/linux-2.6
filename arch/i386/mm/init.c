@@ -54,18 +54,15 @@ static int noinline do_test_wp_bit(void);
  */
 static pmd_t * __init one_md_table_init(pgd_t *pgd)
 {
-	pud_t *pud;
 	pmd_t *pmd_table;
 		
 #ifdef CONFIG_X86_PAE
 	pmd_table = (pmd_t *) alloc_bootmem_low_pages(PAGE_SIZE);
 	set_pgd(pgd, __pgd(__pa(pmd_table) | _PAGE_PRESENT));
-	pud = pud_offset(pgd, 0);
-	if (pmd_table != pmd_offset(pud, 0)) 
+	if (pmd_table != pmd_offset(pgd, 0)) 
 		BUG();
 #else
-	pud = pud_offset(pgd, 0);
-	pmd_table = pmd_offset(pud, 0);
+	pmd_table = pmd_offset(pgd, 0);
 #endif
 
 	return pmd_table;
@@ -103,7 +100,6 @@ static pte_t * __init one_page_table_init(pmd_t *pmd)
 static void __init page_table_range_init (unsigned long start, unsigned long end, pgd_t *pgd_base)
 {
 	pgd_t *pgd;
-	pud_t *pud;
 	pmd_t *pmd;
 	int pgd_idx, pmd_idx;
 	unsigned long vaddr;
@@ -116,8 +112,8 @@ static void __init page_table_range_init (unsigned long start, unsigned long end
 	for ( ; (pgd_idx < PTRS_PER_PGD) && (vaddr != end); pgd++, pgd_idx++) {
 		if (pgd_none(*pgd)) 
 			one_md_table_init(pgd);
-		pud = pud_offset(pgd, vaddr);
-		pmd = pmd_offset(pud, vaddr);
+
+		pmd = pmd_offset(pgd, vaddr);
 		for (; (pmd_idx < PTRS_PER_PMD) && (vaddr != end); pmd++, pmd_idx++) {
 			if (pmd_none(*pmd)) 
 				one_page_table_init(pmd);
@@ -130,7 +126,7 @@ static void __init page_table_range_init (unsigned long start, unsigned long end
 
 static inline int is_kernel_text(unsigned long addr)
 {
-	if (addr >= PAGE_OFFSET && addr <= (unsigned long)__init_end)
+	if (addr >= (unsigned long)_stext && addr <= (unsigned long)__init_end)
 		return 1;
 	return 0;
 }
@@ -301,10 +297,13 @@ EXPORT_SYMBOL_GPL(page_is_ram);
 pte_t *kmap_pte;
 pgprot_t kmap_prot;
 
-#define kmap_get_fixmap_pte(vaddr)					\
-	pte_offset_kernel(pmd_offset(pud_offset(pgd_offset_k(vaddr), vaddr), (vaddr)), (vaddr))
+EXPORT_SYMBOL(kmap_prot);
+EXPORT_SYMBOL(kmap_pte);
 
-static void __init kmap_init(void)
+#define kmap_get_fixmap_pte(vaddr)					\
+	pte_offset_kernel(pmd_offset(pgd_offset_k(vaddr), (vaddr)), (vaddr))
+
+void __init kmap_init(void)
 {
 	unsigned long kmap_vstart;
 
@@ -315,10 +314,9 @@ static void __init kmap_init(void)
 	kmap_prot = PAGE_KERNEL;
 }
 
-static void __init permanent_kmaps_init(pgd_t *pgd_base)
+void __init permanent_kmaps_init(pgd_t *pgd_base)
 {
 	pgd_t *pgd;
-	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 	unsigned long vaddr;
@@ -327,8 +325,7 @@ static void __init permanent_kmaps_init(pgd_t *pgd_base)
 	page_table_range_init(vaddr, vaddr + PAGE_SIZE*LAST_PKMAP, pgd_base);
 
 	pgd = swapper_pg_dir + pgd_index(vaddr);
-	pud = pud_offset(pgd, vaddr);
-	pmd = pmd_offset(pud, vaddr);
+	pmd = pmd_offset(pgd, vaddr);
 	pte = pte_offset_kernel(pmd, vaddr);
 	pkmap_page_table = pte;	
 }
@@ -346,7 +343,7 @@ void __init one_highpage_init(struct page *page, int pfn, int bad_ppro)
 }
 
 #ifndef CONFIG_DISCONTIGMEM
-static void __init set_highmem_pages_init(int bad_ppro)
+void __init set_highmem_pages_init(int bad_ppro) 
 {
 	int pfn;
 	for (pfn = highstart_pfn; pfn < highend_pfn; pfn++)
@@ -459,6 +456,31 @@ void zap_low_mappings (void)
 	flush_tlb_all();
 }
 
+#ifndef CONFIG_DISCONTIGMEM
+void __init zone_sizes_init(void)
+{
+	unsigned long zones_size[MAX_NR_ZONES] = {0, 0, 0};
+	unsigned int max_dma, high, low;
+	
+	max_dma = virt_to_phys((char *)MAX_DMA_ADDRESS) >> PAGE_SHIFT;
+	low = max_low_pfn;
+	high = highend_pfn;
+	
+	if (low < max_dma)
+		zones_size[ZONE_DMA] = low;
+	else {
+		zones_size[ZONE_DMA] = max_dma;
+		zones_size[ZONE_NORMAL] = low - max_dma;
+#ifdef CONFIG_HIGHMEM
+		zones_size[ZONE_HIGHMEM] = high - low;
+#endif
+	}
+	free_area_init(zones_size);	
+}
+#else
+extern void zone_sizes_init(void);
+#endif /* !CONFIG_DISCONTIGMEM */
+
 static int disable_nx __initdata = 0;
 u64 __supported_pte_mask = ~_PAGE_NX;
 
@@ -470,7 +492,7 @@ u64 __supported_pte_mask = ~_PAGE_NX;
  * on      Enable
  * off     Disable (disables exec-shield too)
  */
-void __init noexec_setup(const char *str)
+static int __init noexec_setup(char *str)
 {
 	if (!strncmp(str, "on",2) && cpu_has_nx) {
 		__supported_pte_mask |= _PAGE_NX;
@@ -480,7 +502,10 @@ void __init noexec_setup(const char *str)
 		__supported_pte_mask &= ~_PAGE_NX;
 		exec_shield = 0;
 	}
+	return 1;
 }
+
+__setup("noexec=", noexec_setup);
 
 int nx_enabled = 0;
 #ifdef CONFIG_X86_PAE
@@ -563,6 +588,7 @@ void __init paging_init(void)
 	__flush_tlb_all();
 
 	kmap_init();
+	zone_sizes_init();
 }
 
 /*
@@ -572,7 +598,7 @@ void __init paging_init(void)
  * but fortunately the switch to using exceptions got rid of all that.
  */
 
-static void __init test_wp_bit(void)
+void __init test_wp_bit(void)
 {
 	printk("Checking if this processor honours the WP bit even in supervisor mode... ");
 
@@ -591,17 +617,21 @@ static void __init test_wp_bit(void)
 	}
 }
 
+#ifndef CONFIG_DISCONTIGMEM
 static void __init set_max_mapnr_init(void)
 {
 #ifdef CONFIG_HIGHMEM
-	num_physpages = highend_pfn;
+	highmem_start_page = pfn_to_page(highstart_pfn);
+	max_mapnr = num_physpages = highend_pfn;
 #else
-	num_physpages = max_low_pfn;
-#endif
-#ifndef CONFIG_DISCONTIGMEM
-	max_mapnr = num_physpages;
+	max_mapnr = num_physpages = max_low_pfn;
 #endif
 }
+#define __free_all_bootmem() free_all_bootmem()
+#else
+#define __free_all_bootmem() free_all_bootmem_node(NODE_DATA(0))
+extern void set_max_mapnr_init(void);
+#endif /* !CONFIG_DISCONTIGMEM */
 
 static struct kcore_list kcore_mem, kcore_vmalloc; 
 
@@ -632,13 +662,13 @@ void __init mem_init(void)
 	set_max_mapnr_init();
 
 #ifdef CONFIG_HIGHMEM
-	high_memory = (void *) __va(highstart_pfn * PAGE_SIZE - 1) + 1;
+	high_memory = (void *) __va(highstart_pfn * PAGE_SIZE);
 #else
-	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE - 1) + 1;
+	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
 #endif
 
 	/* this will put all low memory onto the freelists */
-	totalram_pages += free_all_bootmem();
+	totalram_pages += __free_all_bootmem();
 
 	reservedpages = 0;
 	for (tmp = 0; tmp < max_low_pfn; tmp++)

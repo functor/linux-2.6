@@ -41,7 +41,6 @@
 #include <linux/limits.h>
 #include <linux/dcache.h>
 #include <linux/syscalls.h>
-#include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/processor.h>
@@ -53,15 +52,18 @@
 #if defined(CONFIG_SYSCTL)
 
 /* External variables not in a header file. */
+extern int panic_timeout;
 extern int C_A_D;
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
 extern int max_threads;
 extern int sysrq_enabled;
 extern int core_uses_pid;
+extern int suid_dumpable;
 extern char core_pattern[];
 extern int cad_pid;
 extern int pid_max;
+extern int sysctl_lower_zone_protection;
 extern int min_free_kbytes;
 extern int printk_ratelimit_jiffies;
 extern int printk_ratelimit_burst;
@@ -76,6 +78,7 @@ extern int proc_unknown_nmi_panic(ctl_table *, int, struct file *,
 extern unsigned int vdso_enabled;
 
 int exec_shield = 1;
+int exec_shield_randomize = 1;
 
 static int __init setup_exec_shield(char *str)
 {
@@ -85,6 +88,15 @@ static int __init setup_exec_shield(char *str)
 }
 
 __setup("exec-shield=", setup_exec_shield);
+
+static int __init setup_exec_shield_randomize(char *str)
+{
+        get_option (&str, &exec_shield_randomize);
+
+        return 1;
+}
+
+__setup("exec-shield-randomize=", setup_exec_shield_randomize);
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -135,8 +147,6 @@ extern int sysctl_hz_timer;
 #ifdef CONFIG_BSD_PROCESS_ACCT
 extern int acct_parm[];
 #endif
-
-int randomize_va_space = 1;
 
 static int parse_table(int __user *, int, void __user *, size_t __user *, void __user *, size_t,
 		       ctl_table *, void **);
@@ -243,7 +253,6 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.sysname),
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
-		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -253,7 +262,6 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.release),
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
-		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -263,7 +271,6 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.version),
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
-		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -273,7 +280,6 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.nodename),
 		.mode		= 0644,
 		.proc_handler	= &proc_doutsstring,
-		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -283,7 +289,6 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.domainname),
 		.mode		= 0644,
 		.proc_handler	= &proc_doutsstring,
-		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -295,7 +300,7 @@ static ctl_table kern_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 	{
-		.ctl_name	= KERN_EXEC_SHIELD,
+		.ctl_name	= KERN_PANIC,
 		.procname	= "exec-shield",
 		.data		= &exec_shield,
 		.maxlen		= sizeof(int),
@@ -303,7 +308,15 @@ static ctl_table kern_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 	{
-		.ctl_name	= KERN_PRINT_FATAL,
+		.ctl_name	= KERN_PANIC,
+		.procname	= "exec-shield-randomize",
+		.data		= &exec_shield_randomize,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= KERN_PANIC,
 		.procname	= "print-fatal-signals",
 		.data		= &print_fatal_signals,
 		.maxlen		= sizeof(int),
@@ -312,7 +325,7 @@ static ctl_table kern_table[] = {
 	},
 #if __i386__
 	{
-		.ctl_name	= KERN_VDSO,
+		.ctl_name	= KERN_PANIC,
 		.procname	= "vdso",
 		.data		= &vdso_enabled,
 		.maxlen		= sizeof(int),
@@ -679,25 +692,14 @@ static ctl_table kern_table[] = {
 		.proc_handler   = &proc_unknown_nmi_panic,
 	},
 #endif
-#if defined(CONFIG_X86)
 	{
-		.ctl_name	= KERN_BOOTLOADER_TYPE,
-		.procname	= "bootloader_type",
-		.data		= &bootloader_type,
-		.maxlen		= sizeof (int),
-		.mode		= 0444,
-		.proc_handler	= &proc_dointvec,
-	},
-#endif
-	{
-		.ctl_name	= KERN_RANDOMIZE,
-		.procname	= "randomize_va_space",
-		.data		= &randomize_va_space,
+		.ctl_name	= KERN_SETUID_DUMPABLE,
+		.procname	= "suid_dumpable",
+		.data		= &suid_dumpable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
-
 	{ .ctl_name = 0 }
 };
 
@@ -810,13 +812,14 @@ static ctl_table vm_table[] = {
 	 },
 #endif
 	{
-		.ctl_name	= VM_LOWMEM_RESERVE_RATIO,
-		.procname	= "lowmem_reserve_ratio",
-		.data		= &sysctl_lowmem_reserve_ratio,
-		.maxlen		= sizeof(sysctl_lowmem_reserve_ratio),
+		.ctl_name	= VM_LOWER_ZONE_PROTECTION,
+		.procname	= "lower_zone_protection",
+		.data		= &sysctl_lower_zone_protection,
+		.maxlen		= sizeof(sysctl_lower_zone_protection),
 		.mode		= 0644,
-		.proc_handler	= &lowmem_reserve_ratio_sysctl_handler,
+		.proc_handler	= &lower_zone_protection_sysctl_handler,
 		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
 	},
 	{
 		.ctl_name	= VM_MIN_FREE_KBYTES,
@@ -828,7 +831,6 @@ static ctl_table vm_table[] = {
 		.strategy	= &sysctl_intvec,
 		.extra1		= &zero,
 	},
-#ifdef CONFIG_MMU
 	{
 		.ctl_name	= VM_MAX_MAP_COUNT,
 		.procname	= "max_map_count",
@@ -837,7 +839,6 @@ static ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec
 	},
-#endif
 	{
 		.ctl_name	= VM_LAPTOP_MODE,
 		.procname	= "laptop_mode",
@@ -979,7 +980,6 @@ static ctl_table fs_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 #endif
-#ifdef CONFIG_MMU
 	{
 		.ctl_name	= FS_LEASE_TIME,
 		.procname	= "lease-break-time",
@@ -1004,7 +1004,6 @@ static ctl_table fs_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
-#endif
 	{ .ctl_name = 0 }
 };
 
@@ -1432,7 +1431,6 @@ static ssize_t proc_writesys(struct file * file, const char __user * buf,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
- * @ppos: file position
  *
  * Reads/writes a string from/to the user buffer. If the kernel
  * buffer provided is not large enough to hold the string, the
@@ -1446,20 +1444,16 @@ static ssize_t proc_writesys(struct file * file, const char __user * buf,
 int proc_dostring(ctl_table *table, int write, struct file *filp,
 		  void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	size_t len, maxlen;
+	size_t len;
 	char __user *p;
 	char c;
-	void *data;
-
-	data = table->data;
-	maxlen = table->maxlen;
-
-	if (!data || !maxlen || !*lenp || (*ppos && !write))
-		return (*lenp = 0);
 	
-	if (table->virt_handler)
-		table->virt_handler(table, write, filp->f_xid, &data, &maxlen);
-
+	if (!table->data || !table->maxlen || !*lenp ||
+	    (*ppos && !write)) {
+		*lenp = 0;
+		return 0;
+	}
+	
 	if (write) {
 		len = 0;
 		p = buffer;
@@ -1470,20 +1464,20 @@ int proc_dostring(ctl_table *table, int write, struct file *filp,
 				break;
 			len++;
 		}
-		if (len >= maxlen)
-			len = maxlen-1;
-		if(copy_from_user(data, buffer, len))
+		if (len >= table->maxlen)
+			len = table->maxlen-1;
+		if(copy_from_user(table->data, buffer, len))
 			return -EFAULT;
-		((char *) data)[len] = 0;
+		((char *) table->data)[len] = 0;
 		*ppos += *lenp;
 	} else {
-		len = strlen(data);
-		if (len > maxlen)
-			len = maxlen;
+		len = strlen(table->data);
+		if (len > table->maxlen)
+			len = table->maxlen;
 		if (len > *lenp)
 			len = *lenp;
 		if (len)
-			if(copy_to_user(buffer, data, len))
+			if(copy_to_user(buffer, table->data, len))
 				return -EFAULT;
 		if (len < *lenp) {
 			if(put_user('\n', ((char __user *) buffer) + len))
@@ -1653,7 +1647,6 @@ static int do_proc_dointvec(ctl_table *table, int write, struct file *filp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
- * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string. 
@@ -1758,7 +1751,6 @@ static int do_proc_dointvec_minmax_conv(int *negp, unsigned long *lvalp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
- * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string.
@@ -1891,7 +1883,6 @@ static int do_proc_doulongvec_minmax(ctl_table *table, int write,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
- * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned long) unsigned long
  * values from/to the user buffer, treated as an ASCII string.
@@ -1914,7 +1905,6 @@ int proc_doulongvec_minmax(ctl_table *table, int write, struct file *filp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
- * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned long) unsigned long
  * values from/to the user buffer, treated as an ASCII string. The values
@@ -1977,27 +1967,6 @@ static int do_proc_dointvec_userhz_jiffies_conv(int *negp, unsigned long *lvalp,
 	return 0;
 }
 
-static int do_proc_dointvec_ms_jiffies_conv(int *negp, unsigned long *lvalp,
-					    int *valp,
-					    int write, void *data)
-{
-	if (write) {
-		*valp = msecs_to_jiffies(*negp ? -*lvalp : *lvalp);
-	} else {
-		int val = *valp;
-		unsigned long lval;
-		if (val < 0) {
-			*negp = -1;
-			lval = (unsigned long)-val;
-		} else {
-			*negp = 0;
-			lval = (unsigned long)val;
-		}
-		*lvalp = jiffies_to_msecs(lval);
-	}
-	return 0;
-}
-
 /**
  * proc_dointvec_jiffies - read a vector of integers as seconds
  * @table: the sysctl table
@@ -2005,7 +1974,6 @@ static int do_proc_dointvec_ms_jiffies_conv(int *negp, unsigned long *lvalp,
  * @filp: the file structure
  * @buffer: the user buffer
  * @lenp: the size of the user buffer
- * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
  * values from/to the user buffer, treated as an ASCII string. 
@@ -2041,30 +2009,6 @@ int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
 {
     return do_proc_dointvec(table,write,filp,buffer,lenp,ppos,
 		    	    do_proc_dointvec_userhz_jiffies_conv,NULL);
-}
-
-/**
- * proc_dointvec_ms_jiffies - read a vector of integers as 1 milliseconds
- * @table: the sysctl table
- * @write: %TRUE if this is a write to the sysctl file
- * @filp: the file structure
- * @buffer: the user buffer
- * @lenp: the size of the user buffer
- * @ppos: file position
- * @ppos: the current position in the file
- *
- * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
- * values from/to the user buffer, treated as an ASCII string. 
- * The values read are assumed to be in 1/1000 seconds, and 
- * are converted into jiffies.
- *
- * Returns 0 on success.
- */
-int proc_dointvec_ms_jiffies(ctl_table *table, int write, struct file *filp,
-			     void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	return do_proc_dointvec(table, write, filp, buffer, lenp, ppos,
-				do_proc_dointvec_ms_jiffies_conv, NULL);
 }
 
 #else /* CONFIG_PROC_FS */
@@ -2107,12 +2051,6 @@ int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
 
 int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
 		    void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	return -ENOSYS;
-}
-
-int proc_dointvec_ms_jiffies(ctl_table *table, int write, struct file *filp,
-			     void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	return -ENOSYS;
 }
@@ -2246,33 +2184,6 @@ int sysctl_jiffies(ctl_table *table, int __user *name, int nlen,
 	return 1;
 }
 
-/* Strategy function to convert jiffies to seconds */ 
-int sysctl_ms_jiffies(ctl_table *table, int __user *name, int nlen,
-		void __user *oldval, size_t __user *oldlenp,
-		void __user *newval, size_t newlen, void **context)
-{
-	if (oldval) {
-		size_t olen;
-		if (oldlenp) { 
-			if (get_user(olen, oldlenp))
-				return -EFAULT;
-			if (olen!=sizeof(int))
-				return -EINVAL; 
-		}
-		if (put_user(jiffies_to_msecs(*(int *)(table->data)), (int __user *)oldval) ||
-		    (oldlenp && put_user(sizeof(int),oldlenp)))
-			return -EFAULT;
-	}
-	if (newval && newlen) { 
-		int new;
-		if (newlen != sizeof(int))
-			return -EINVAL; 
-		if (get_user(new, (int __user *)newval))
-			return -EFAULT;
-		*(int *)(table->data) = msecs_to_jiffies(new);
-	}
-	return 1;
-}
 
 #else /* CONFIG_SYSCTL */
 
@@ -2297,13 +2208,6 @@ int sysctl_intvec(ctl_table *table, int __user *name, int nlen,
 }
 
 int sysctl_jiffies(ctl_table *table, int __user *name, int nlen,
-		void __user *oldval, size_t __user *oldlenp,
-		void __user *newval, size_t newlen, void **context)
-{
-	return -ENOSYS;
-}
-
-int sysctl_ms_jiffies(ctl_table *table, int __user *name, int nlen,
 		void __user *oldval, size_t __user *oldlenp,
 		void __user *newval, size_t newlen, void **context)
 {
@@ -2346,12 +2250,6 @@ int proc_dointvec_userhz_jiffies(ctl_table *table, int write, struct file *filp,
 	return -ENOSYS;
 }
 
-int proc_dointvec_ms_jiffies(ctl_table *table, int write, struct file *filp,
-			     void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	return -ENOSYS;
-}
-
 int proc_doulongvec_minmax(ctl_table *table, int write, struct file *filp,
 		    void __user *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -2386,13 +2284,11 @@ EXPORT_SYMBOL(proc_dointvec);
 EXPORT_SYMBOL(proc_dointvec_jiffies);
 EXPORT_SYMBOL(proc_dointvec_minmax);
 EXPORT_SYMBOL(proc_dointvec_userhz_jiffies);
-EXPORT_SYMBOL(proc_dointvec_ms_jiffies);
 EXPORT_SYMBOL(proc_dostring);
 EXPORT_SYMBOL(proc_doulongvec_minmax);
 EXPORT_SYMBOL(proc_doulongvec_ms_jiffies_minmax);
 EXPORT_SYMBOL(register_sysctl_table);
 EXPORT_SYMBOL(sysctl_intvec);
 EXPORT_SYMBOL(sysctl_jiffies);
-EXPORT_SYMBOL(sysctl_ms_jiffies);
 EXPORT_SYMBOL(sysctl_string);
 EXPORT_SYMBOL(unregister_sysctl_table);

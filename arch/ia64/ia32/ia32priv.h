@@ -225,7 +225,14 @@ struct stat64 {
 	unsigned int	st_ino_hi;
 };
 
-typedef struct compat_siginfo {
+typedef union sigval32 {
+	int sival_int;
+	unsigned int sival_ptr;
+} sigval_t32;
+
+#define SIGEV_PAD_SIZE32 ((SIGEV_MAX_SIZE/sizeof(int)) - 3)
+
+typedef struct siginfo32 {
 	int si_signo;
 	int si_errno;
 	int si_code;
@@ -244,7 +251,7 @@ typedef struct compat_siginfo {
 			timer_t _tid;		/* timer id */
 			int _overrun;		/* overrun count */
 			char _pad[sizeof(unsigned int) - sizeof(int)];
-			compat_sigval_t _sigval;	/* same as below */
+			sigval_t32 _sigval;	/* same as below */
 			int _sys_private;       /* not to be passed to user */
 		} _timer;
 
@@ -252,7 +259,7 @@ typedef struct compat_siginfo {
 		struct {
 			unsigned int _pid;	/* sender's pid */
 			unsigned int _uid;	/* sender's uid */
-			compat_sigval_t _sigval;
+			sigval_t32 _sigval;
 		} _rt;
 
 		/* SIGCHLD */
@@ -275,7 +282,20 @@ typedef struct compat_siginfo {
 			int _fd;
 		} _sigpoll;
 	} _sifields;
-} compat_siginfo_t;
+} siginfo_t32;
+
+typedef struct sigevent32 {
+	sigval_t32 sigev_value;
+	int sigev_signo;
+	int sigev_notify;
+	union {
+		int _pad[SIGEV_PAD_SIZE32];
+		struct {
+			u32 _function;
+			u32 _attribute; /* really pthread_attr_t */
+		} _sigev_thread;
+	} _sigev_un;
+} sigevent_t32;
 
 struct old_linux32_dirent {
 	u32	d_ino;
@@ -538,6 +558,10 @@ struct user_regs_struct32 {
 /* Prototypes for use in elfcore32.h */
 extern int save_ia32_fpstate (struct task_struct *, struct ia32_user_i387_struct __user *);
 extern int save_ia32_fpxstate (struct task_struct *, struct ia32_user_fxsr_struct __user *);
+
+/* Prototypes for use in sys_ia32.c */
+int copy_siginfo_to_user32 (siginfo_t32 __user *to, siginfo_t *from);
+int copy_siginfo_from_user32 (siginfo_t *to, siginfo_t32 __user *from);
 
 #endif /* !CONFIG_IA32_SUPPORT */
 

@@ -621,6 +621,4 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
 
 #endif /* __ASSEMBLY__ */
 
-#define arch_align_stack(x) (x)
-
 #endif

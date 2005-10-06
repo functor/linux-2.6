@@ -22,6 +22,10 @@
 #include <asm/uaccess.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/vs_base.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_dlimit.h>
+#include <linux/vserver/xid.h>
 #include <linux/syscalls.h>
 #include <linux/vs_limit.h>
 #include <linux/vs_dlimit.h>
@@ -208,9 +212,10 @@ int do_truncate(struct dentry *dentry, loff_t length)
 
 	newattrs.ia_size = length;
 	newattrs.ia_valid = ATTR_SIZE | ATTR_CTIME;
-
 	down(&dentry->d_inode->i_sem);
+	down_write(&dentry->d_inode->i_alloc_sem);
 	err = notify_change(dentry, &newattrs);
+	up_write(&dentry->d_inode->i_alloc_sem);
 	up(&dentry->d_inode->i_sem);
 	return err;
 }
@@ -618,7 +623,7 @@ asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 	inode = dentry->d_inode;
 
 	err = -EROFS;
-	if (IS_RDONLY(inode) || MNT_IS_RDONLY(file->f_vfsmnt))
+	if (IS_RDONLY(inode) || (file && MNT_IS_RDONLY(file->f_vfsmnt)))
 		goto out_putf;
 	err = -EPERM;
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
@@ -867,24 +872,32 @@ repeat:
 	if (fd >= current->signal->rlim[RLIMIT_NOFILE].rlim_cur)
 		goto out;
 
-	/* Do we need to expand the fd array or fd set?  */
-	error = expand_files(files, fd);
-	if (error < 0)
+	/* Do we need to expand the fdset array? */
+	if (fd >= files->max_fdset) {
+		error = expand_fdset(files, fd);
+		if (!error) {
+			error = -EMFILE;
+			goto repeat;
+		}
 		goto out;
-
-	if (error) {
-		/*
-	 	 * If we needed to expand the fs array we
-		 * might have blocked - try again.
-		 */
-		error = -EMFILE;
-		goto repeat;
+	}
+	
+	/* 
+	 * Check whether we need to expand the fd array.
+	 */
+	if (fd >= files->max_fds) {
+		error = expand_fd_array(files, fd);
+		if (!error) {
+			error = -EMFILE;
+			goto repeat;
+		}
+		goto out;
 	}
 
 	FD_SET(fd, files->open_fds);
 	FD_CLR(fd, files->close_on_exec);
 	files->next_fd = fd + 1;
-	vx_openfd_inc(fd);
+	// vx_openfd_inc(fd);
 #if 1
 	/* Sanity check */
 	if (files->fd[fd] != NULL) {
@@ -906,7 +919,7 @@ static inline void __put_unused_fd(struct files_struct *files, unsigned int fd)
 	__FD_CLR(fd, files->open_fds);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
-	vx_openfd_dec(fd);
+	// vx_openfd_dec(fd);
 }
 
 void fastcall put_unused_fd(unsigned int fd)

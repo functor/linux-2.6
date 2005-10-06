@@ -11,9 +11,14 @@
  * This perhaps should live in drivers/char
  */
 
+#include <linux/module.h>
 
 #include <linux/types.h>
 #include <linux/errno.h>
+#include <linux/fs.h>
+#include <linux/miscdevice.h>
+#include <linux/fcntl.h>
+#include <linux/nvram.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -26,7 +31,7 @@
 static unsigned int nvram_size;
 static int nvram_fetch, nvram_store;
 static char nvram_buf[NVRW_CNT];	/* assume this is in the first 4GB */
-static DEFINE_SPINLOCK(nvram_lock);
+static spinlock_t nvram_lock = SPIN_LOCK_UNLOCKED;
 
 
 static ssize_t pSeries_nvram_read(char *buf, size_t count, loff_t *index)

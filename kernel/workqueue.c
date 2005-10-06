@@ -8,7 +8,7 @@
  *
  * Derived from the taskqueue/keventd code by:
  *
- *   David Woodhouse <dwmw2@infradead.org>
+ *   David Woodhouse <dwmw2@redhat.com>
  *   Andrew Morton <andrewm@uow.edu.au>
  *   Kai Petzke <wpp@marie.physik.tu-berlin.de>
  *   Theodore Ts'o <tytso@mit.edu>
@@ -64,7 +64,7 @@ struct workqueue_struct {
 
 /* All the per-cpu workqueues on the system, for hotplug cpu to add/remove
    threads to each one as cpus come/go. */
-static DEFINE_SPINLOCK(workqueue_lock);
+static spinlock_t workqueue_lock = SPIN_LOCK_UNLOCKED;
 static LIST_HEAD(workqueues);
 
 /* If it's single threaded, it isn't in the list of workqueues. */
@@ -188,7 +188,7 @@ static int worker_thread(void *__cwq)
 
 	current->flags |= PF_NOFREEZE;
 
-	set_user_nice(current, -5);
+	set_user_nice(current, -10);
 
 	/* Block and flush all signals */
 	sigfillset(&blocked);
@@ -423,31 +423,6 @@ void flush_scheduled_work(void)
 	flush_workqueue(keventd_wq);
 }
 
-/**
- * cancel_rearming_delayed_workqueue - reliably kill off a delayed
- *			work whose handler rearms the delayed work.
- * @wq:   the controlling workqueue structure
- * @work: the delayed work struct
- */
-void cancel_rearming_delayed_workqueue(struct workqueue_struct *wq,
-				       struct work_struct *work)
-{
-	while (!cancel_delayed_work(work))
-		flush_workqueue(wq);
-}
-EXPORT_SYMBOL(cancel_rearming_delayed_workqueue);
-
-/**
- * cancel_rearming_delayed_work - reliably kill off a delayed keventd
- *			work whose handler rearms the delayed work.
- * @work: the delayed work struct
- */
-void cancel_rearming_delayed_work(struct work_struct *work)
-{
-	cancel_rearming_delayed_workqueue(keventd_wq, work);
-}
-EXPORT_SYMBOL(cancel_rearming_delayed_work);
-
 int keventd_up(void)
 {
 	return keventd_wq != NULL;
@@ -541,10 +516,8 @@ static int __devinit workqueue_cpu_callback(struct notifier_block *nfb,
 
 	case CPU_ONLINE:
 		/* Kick off worker threads. */
-		list_for_each_entry(wq, &workqueues, list) {
-			kthread_bind(wq->cpu_wq[hotcpu].thread, hotcpu);
+		list_for_each_entry(wq, &workqueues, list)
 			wake_up_process(wq->cpu_wq[hotcpu].thread);
-		}
 		break;
 
 	case CPU_UP_CANCELED:

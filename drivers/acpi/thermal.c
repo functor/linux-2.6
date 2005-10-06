@@ -64,7 +64,6 @@
 #define ACPI_THERMAL_PATH_POWEROFF	"/sbin/poweroff"
 
 #define ACPI_THERMAL_MAX_ACTIVE	10
-#define ACPI_THERMAL_MAX_LIMIT_STR_LEN 65
 
 #define KELVIN_TO_CELSIUS(t)    (long)(((long)t-2732>=0) ? ((long)t-2732+5)/10 : ((long)t-2732-5)/10)
 #define CELSIUS_TO_KELVIN(t)	((t+273)*10)
@@ -774,7 +773,7 @@ acpi_thermal_check (
                               FS Interface (/proc)
    -------------------------------------------------------------------------- */
 
-static struct proc_dir_entry	*acpi_thermal_dir;
+struct proc_dir_entry		*acpi_thermal_dir;
 
 static int acpi_thermal_state_seq_show(struct seq_file *seq, void *offset)
 {
@@ -900,33 +899,21 @@ acpi_thermal_write_trip_points (
 	struct seq_file		*m = (struct seq_file *)file->private_data;
 	struct acpi_thermal	*tz = (struct acpi_thermal *)m->private;
 
-	char			*limit_string; 
+	char			limit_string[65] = {'\0'};
 	int			num, critical, hot, passive;
-	int			*active; 
+	int			active[ACPI_THERMAL_MAX_ACTIVE];
 	int			i = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_thermal_write_trip_points");
 
-	limit_string = kmalloc(ACPI_THERMAL_MAX_LIMIT_STR_LEN, GFP_KERNEL);
-	if(!limit_string)
-		return_VALUE(-ENOMEM);
-
-	memset(limit_string, 0, ACPI_THERMAL_MAX_LIMIT_STR_LEN);
-
-	active = kmalloc(ACPI_THERMAL_MAX_ACTIVE *sizeof(int), GFP_KERNEL);
-	if(!active)
-		return_VALUE(-ENOMEM);
-
-	if (!tz || (count > ACPI_THERMAL_MAX_LIMIT_STR_LEN - 1)) {
+	if (!tz || (count > sizeof(limit_string) - 1)) {
 		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "Invalid argument\n"));
-		count = -EINVAL;
-		goto end;
+		return_VALUE(-EINVAL);
 	}
 	
 	if (copy_from_user(limit_string, buffer, count)) {
 		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "Invalid data\n"));
-		count = -EFAULT;
-		goto end;
+		return_VALUE(-EFAULT);
 	}
 	
 	limit_string[count] = '\0';
@@ -937,8 +924,7 @@ acpi_thermal_write_trip_points (
 				&active[5], &active[6], &active[7], &active[8], &active[9]);
 	if(!(num >=5 && num < (ACPI_THERMAL_MAX_ACTIVE + 3))) {
 		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "Invalid data format\n"));
-		count = -EINVAL;
-		goto end;
+		return_VALUE(-EINVAL);
 	}
 
 	tz->trips.critical.temperature = CELSIUS_TO_KELVIN(critical);
@@ -950,9 +936,6 @@ acpi_thermal_write_trip_points (
 		tz->trips.active[i].temperature = CELSIUS_TO_KELVIN(active[i]);
 	}
 	
-end:
-	kfree(active);
-	kfree(limit_string);
 	return_VALUE(count);
 }
 

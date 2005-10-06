@@ -38,6 +38,7 @@ match(const struct sk_buff *skb,
       int *hotdrop)
 {
 	const struct ipt_helper_info *info = matchinfo;
+	struct ip_conntrack_expect *exp;
 	struct ip_conntrack *ct;
 	enum ip_conntrack_info ctinfo;
 	int ret = info->invert;
@@ -53,21 +54,28 @@ match(const struct sk_buff *skb,
 		return ret;
 	}
 
+	exp = ct->master;
 	READ_LOCK(&ip_conntrack_lock);
-	if (!ct->master->helper) {
+	if (!exp->expectant) {
+		DEBUGP("ipt_helper: expectation %p without expectant !?!\n", 
+			exp);
+		goto out_unlock;
+	}
+
+	if (!exp->expectant->helper) {
 		DEBUGP("ipt_helper: master ct %p has no helper\n", 
 			exp->expectant);
 		goto out_unlock;
 	}
 
 	DEBUGP("master's name = %s , info->name = %s\n", 
-		ct->master->helper->name, info->name);
+		exp->expectant->helper->name, info->name);
 
 	if (info->name[0] == '\0')
 		ret ^= 1;
 	else
-		ret ^= !strncmp(ct->master->helper->name, info->name, 
-		                strlen(ct->master->helper->name));
+		ret ^= !strncmp(exp->expectant->helper->name, info->name, 
+		                strlen(exp->expectant->helper->name));
 out_unlock:
 	READ_UNLOCK(&ip_conntrack_lock);
 	return ret;

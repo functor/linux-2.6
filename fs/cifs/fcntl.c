@@ -27,9 +27,8 @@
 #include "cifsproto.h"
 #include "cifs_unicode.h"
 #include "cifs_debug.h"
-#include "cifsfs.h"
 
-static __u32 convert_to_cifs_notify_flags(unsigned long fcntl_notify_flags)
+__u32 convert_to_cifs_notify_flags(unsigned long fcntl_notify_flags)
 {
 	__u32 cifs_ntfy_flags = 0;
 
@@ -92,8 +91,7 @@ int cifs_dir_notify(struct file * file, unsigned long arg)
 		cERROR(1,("cifs dir notify on file %s with arg 0x%lx",full_path,arg)); /* BB removeme BB */
 		rc = CIFSSMBOpen(xid, pTcon, full_path, FILE_OPEN, 
 			GENERIC_READ | SYNCHRONIZE, 0 /* create options */,
-			&netfid, &oplock,NULL, cifs_sb->local_nls,
-			cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SPECIAL_CHR);
+			&netfid, &oplock,NULL, cifs_sb->local_nls);
 		/* BB fixme - add this handle to a notify handle list */
 		if(rc) {
 			cERROR(1,("Could not open directory for notify"));  /* BB remove BB */

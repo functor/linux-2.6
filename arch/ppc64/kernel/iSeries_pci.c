@@ -35,6 +35,7 @@
 #include <asm/machdep.h>
 #include <asm/pci-bridge.h>
 #include <asm/ppcdebug.h>
+#include <asm/naca.h>
 #include <asm/iommu.h>
 
 #include <asm/iSeries/HvCallPci.h>
@@ -46,6 +47,8 @@
 #include <asm/iSeries/mf.h>
 
 #include "pci.h"
+
+extern int panic_timeout;
 
 extern unsigned long io_page_mask;
 
@@ -96,7 +99,7 @@ static u8 *iobar_table;
  * Static and Global variables
  */
 static char *pci_io_text = "iSeries PCI I/O";
-static DEFINE_SPINLOCK(iomm_table_lock);
+static spinlock_t iomm_table_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  * iomm_table_initialize
@@ -610,10 +613,6 @@ static int iSeries_pci_read_config(struct pci_bus *bus, unsigned int devfn,
 
 	if (node == NULL)
 		return PCIBIOS_DEVICE_NOT_FOUND;
-	if (offset > 255) {
-		*val = ~0;
-		return PCIBIOS_BAD_REGISTER_NUMBER;
-	}
 
 	fn = hv_cfg_read_func[(size - 1) & 3];
 	HvCall3Ret16(fn, &ret, node->DsaAddr.DsaAddr, offset, 0);
@@ -640,8 +639,6 @@ static int iSeries_pci_write_config(struct pci_bus *bus, unsigned int devfn,
 
 	if (node == NULL)
 		return PCIBIOS_DEVICE_NOT_FOUND;
-	if (offset > 255)
-		return PCIBIOS_BAD_REGISTER_NUMBER;
 
 	fn = hv_cfg_write_func[(size - 1) & 3];
 	ret = HvCall4(fn, node->DsaAddr.DsaAddr, offset, val, 0);

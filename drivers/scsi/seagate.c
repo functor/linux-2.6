@@ -103,7 +103,6 @@
 #include <asm/uaccess.h>
 
 #include "scsi.h"
-#include <scsi/scsi_dbg.h>
 #include <scsi/scsi_host.h>
 #include "seagate.h"
 
@@ -747,7 +746,7 @@ static int internal_command (unsigned char target, unsigned char lun,
 
 #if (DEBUG & PRINT_COMMAND)
 	printk("scsi%d : target = %d, command = ", hostno, target);
-	__scsi_print_command((unsigned char *) cmnd);
+	print_command((unsigned char *) cmnd);
 #endif
 
 #if (DEBUG & PHASE_RESELECT)
@@ -1554,7 +1553,7 @@ connect_loop:
 	printk("\n");
 #endif
 	printk("scsi%d : status = ", hostno);
-	scsi_print_status(status);
+	print_status(status);
 	printk(" message = %02x\n", message);
 #endif
 

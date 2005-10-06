@@ -1,9 +1,6 @@
 /*
- * Copyright (C) 1999, 2000, 2004, 2005  MIPS Technologies, Inc.
- *    All rights reserved.
- *    Authors: Carsten Langgaard <carstenl@mips.com>
- *             Maciej W. Rozycki <macro@mips.com>
- * Copyright (C) 2005 Ralf Baechle (ralf@linux-mips.org)
+ * Carsten Langgaard, carstenl@mips.com
+ * Copyright (C) 1999, 2000 MIPS Technologies, Inc.  All rights reserved.
  *
  *  This program is free software; you can distribute it and/or modify it
  *  under the terms of the GNU General Public License (Version 2) as
@@ -21,7 +18,6 @@
  * MIPS boards specific PCI support.
  *
  */
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>

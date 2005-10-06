@@ -27,8 +27,6 @@
 /* cache for request structures */
 static kmem_cache_t *req_cachep;
 
-static int smb_request_send_req(struct smb_request *req);
-
 /*
   /proc/slabinfo:
   name, active, num, objsize, active_slabs, num_slaps, #pages
@@ -134,7 +132,7 @@ static void smb_free_request(struct smb_request *req)
  * What prevents a rget to race with a rput? The count must never drop to zero
  * while it is in use. Only rput if it is ok that it is free'd.
  */
-static void smb_rget(struct smb_request *req)
+void smb_rget(struct smb_request *req)
 {
 	atomic_inc(&req->rq_count);
 }
@@ -381,7 +379,7 @@ int smb_add_request(struct smb_request *req)
  * Send a request and place it on the recvq if successfully sent.
  * Must be called with the server lock held.
  */
-static int smb_request_send_req(struct smb_request *req)
+int smb_request_send_req(struct smb_request *req)
 {
 	struct smb_sb_info *server = req->rq_server;
 	int result;

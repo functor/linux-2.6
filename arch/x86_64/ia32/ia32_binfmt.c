@@ -214,7 +214,7 @@ elf_core_copy_task_fpregs(struct task_struct *tsk, struct pt_regs *regs, elf_fpr
 	struct _fpstate_ia32 *fpstate = (void*)fpu; 
 	mm_segment_t oldfs = get_fs();
 
-	if (!tsk_used_math(tsk))
+	if (!tsk->used_math) 
 		return 0;
 	if (!regs)
 		regs = (struct pt_regs *)tsk->thread.rsp0;
@@ -235,7 +235,7 @@ static inline int
 elf_core_copy_task_xfpregs(struct task_struct *t, elf_fpxregset_t *xfpu)
 {
 	struct pt_regs *regs = ((struct pt_regs *)(t->thread.rsp0))-1; 
-	if (!tsk_used_math(t))
+	if (!t->used_math) 
 		return 0;
 	if (t == current)
 		unlazy_fpu(t); 
@@ -273,9 +273,8 @@ do {							\
 #define load_elf_binary load_elf32_binary
 
 #define ELF_PLAT_INIT(r, load_addr)	elf32_init(r)
-#define setup_arg_pages(bprm, stack_top, exec_stack) \
-	ia32_setup_arg_pages(bprm, stack_top, exec_stack)
-int ia32_setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int executable_stack);
+#define setup_arg_pages(bprm, exec_stack)	ia32_setup_arg_pages(bprm, exec_stack)
+int ia32_setup_arg_pages(struct linux_binprm *bprm, int executable_stack);
 
 #undef start_thread
 #define start_thread(regs,new_rip,new_rsp) do { \
@@ -308,10 +307,6 @@ MODULE_AUTHOR("Eric Youngdale, Andi Kleen");
 
 static void elf32_init(struct pt_regs *);
 
-#define ARCH_HAS_SETUP_ADDITIONAL_PAGES 1
-#define arch_setup_additional_pages syscall32_setup_pages
-extern int syscall32_setup_pages(struct linux_binprm *, int exstack);
-
 #include "../../../fs/binfmt_elf.c" 
 
 static void elf32_init(struct pt_regs *regs)
@@ -334,7 +329,7 @@ static void elf32_init(struct pt_regs *regs)
 	me->thread.es = __USER_DS;
 }
 
-int setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int executable_stack)
+int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 {
 	unsigned long stack_base, grow;
 	struct vm_area_struct *mpnt;
@@ -381,6 +376,7 @@ int setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int exec
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
+		// mm->stack_vm = mm->total_vm = vma_pages(mpnt);
 		vx_vmpages_sub(mm, mm->total_vm - vma_pages(mpnt));
 		mm->stack_vm = mm->total_vm;
 	} 

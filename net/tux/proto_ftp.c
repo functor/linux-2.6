@@ -103,7 +103,7 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss);
 static void ftp_lookup_vhost (tux_req_t *req, int cachemiss)
 {
 	struct dentry *dentry;
-	struct nameidata base={};
+	struct nameidata base;
 	struct vfsmount *mnt = NULL;
 	unsigned int flag = cachemiss ? 0 : LOOKUP_ATOMIC;
 	char ip[3+1+3+1+3+1+3 + 2];
@@ -887,7 +887,7 @@ out_err:
 void ftp_accept_pasv (tux_req_t *req, int cachemiss)
 {
 	struct socket *sock, *new_sock = NULL;
-	struct tcp_sock *tp1, *tp2;
+	struct tcp_opt *tp1, *tp2;
 	int err;
 
 	tp1 = tcp_sk(req->data_sock->sk);
@@ -1287,7 +1287,7 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 		struct socket *data_sock;
 		struct sockaddr_in addr;
 		unsigned int str_len;
-		struct tcp_sock *tp;
+		struct tcp_opt *tp;
 		u32 local_addr;
 		int err;
 

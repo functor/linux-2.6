@@ -15,6 +15,7 @@
 #include <linux/types.h>
 #include <asm/ppcdebug.h>
 #include <asm/processor.h>
+#include <asm/naca.h>
 #include <asm/uaccess.h>
 #include <asm/machdep.h>
 #include <asm/io.h>
@@ -322,7 +323,7 @@ void udbg_printf(const char *fmt, ...)
 /* Special print used by PPCDBG() macro */
 void udbg_ppcdbg(unsigned long debug_flags, const char *fmt, ...)
 {
-	unsigned long active_debugs = debug_flags & ppc64_debug_switch;
+	unsigned long active_debugs = debug_flags & naca->debug_switch;
 
 	if (active_debugs) {
 		va_list ap;
@@ -356,5 +357,5 @@ void udbg_ppcdbg(unsigned long debug_flags, const char *fmt, ...)
 
 unsigned long udbg_ifdebug(unsigned long flags)
 {
-	return (flags & ppc64_debug_switch);
+	return (flags & naca->debug_switch);
 }

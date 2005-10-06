@@ -2017,7 +2017,7 @@ xfs_bmbt_get_state(
 				ext_flag);
 }
 
-#if __BYTE_ORDER != __BIG_ENDIAN
+#if ARCH_CONVERT != ARCH_NOCONVERT
 /* Endian flipping versions of the bmbt extraction functions */
 void
 xfs_bmbt_disk_get_all(
@@ -2545,7 +2545,7 @@ xfs_bmbt_set_allf(
 #endif	/* XFS_BIG_BLKNOS */
 }
 
-#if __BYTE_ORDER != __BIG_ENDIAN
+#if ARCH_CONVERT != ARCH_NOCONVERT
 /*
  * Set all the fields in a bmap extent record from the uncompressed form.
  */

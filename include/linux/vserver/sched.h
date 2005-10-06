@@ -15,7 +15,7 @@ void vx_update_load(struct vx_info *);
 
 struct task_struct;
 
-int vx_effective_vavavoom(struct vx_info *, int);
+int effective_vavavoom(struct task_struct *, int);
 
 int vx_tokens_recalc(struct vx_info *);
 

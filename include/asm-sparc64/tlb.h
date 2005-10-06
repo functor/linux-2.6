@@ -4,6 +4,7 @@
 #include <linux/config.h>
 #include <linux/swap.h>
 #include <linux/vs_memory.h>
+
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/mmu_context.h>
@@ -45,7 +46,7 @@ extern void flush_tlb_pending(void);
 
 static inline struct mmu_gather *tlb_gather_mmu(struct mm_struct *mm, unsigned int full_mm_flush)
 {
-	struct mmu_gather *mp = &__get_cpu_var(mmu_gathers);
+	struct mmu_gather *mp = &per_cpu(mmu_gathers, smp_processor_id());
 
 	BUG_ON(mp->tlb_nr);
 
@@ -81,16 +82,19 @@ static inline void tlb_finish_mmu(struct mmu_gather *mp, unsigned long start, un
 {
 	unsigned long freed = mp->freed;
 	struct mm_struct *mm = mp->mm;
-	unsigned long rss = get_mm_counter(mm, rss);
+	unsigned long rss = mm->rss;
 
 	if (rss < freed)
 		freed = rss;
-	add_mm_counter(mm, rss, -freed);
+	// mm->rss = rss - freed;
+	vx_rsspages_sub(mm, freed);
 
 	tlb_flush_mmu(mp);
 
 	if (mp->tlb_frozen) {
-		if (CTX_VALID(mm->context))
+		unsigned long context = mm->context;
+
+		if (CTX_VALID(context))
 			do_flush_tlb_mm(mm);
 		mp->tlb_frozen = 0;
 	} else
@@ -120,7 +124,6 @@ static inline void tlb_remove_page(struct mmu_gather *mp, struct page *page)
 #define tlb_remove_tlb_entry(mp,ptep,addr) do { } while (0)
 #define pte_free_tlb(mp,ptepage) pte_free(ptepage)
 #define pmd_free_tlb(mp,pmdp) pmd_free(pmdp)
-#define pud_free_tlb(tlb,pudp) __pud_free_tlb(tlb,pudp)
 
 #define tlb_migrate_finish(mm)	do { } while (0)
 #define tlb_start_vma(tlb, vma) do { } while (0)

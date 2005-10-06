@@ -280,12 +280,14 @@
 #define __NR_mq_notify		275
 #define __NR_mq_getsetattr	276
 #define __NR_waitid		277
+#warning __NR_vserver is likely the wrong number
 #define __NR_vserver		278
 #define __NR_add_key		279
 #define __NR_request_key	280
 #define __NR_keyctl		281
+#define __NR_vserver		282
 
-#define NR_syscalls		282
+#define NR_syscalls		283
 
 /* user-visible error numbers are in the range -1 - -124: see
    <asm-m68k/errno.h> */
@@ -460,6 +462,6 @@ asmlinkage long sys_rt_sigaction(int sig,
  * What we want is __attribute__((weak,alias("sys_ni_syscall"))),
  * but it doesn't work on all toolchains, so we just do it by hand
  */
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
+#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall");
 
 #endif /* _ASM_M68K_UNISTD_H_ */

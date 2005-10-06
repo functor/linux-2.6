@@ -18,8 +18,7 @@
  * UID task count cache, to get fast user lookup in "alloc_uid"
  * when changing user ID's (ie setuid() and friends).
  */
-
-#define UIDHASH_BITS (CONFIG_BASE_SMALL ? 3 : 8)
+#define UIDHASH_BITS		8
 #define UIDHASH_SZ		(1 << UIDHASH_BITS)
 #define UIDHASH_MASK		(UIDHASH_SZ - 1)
 #define __uidhashfn(xid,uid)	((((uid) >> UIDHASH_BITS) + ((uid)^(xid))) & UIDHASH_MASK)
@@ -27,7 +26,7 @@
 
 static kmem_cache_t *uid_cachep;
 static struct list_head uidhash_table[UIDHASH_SZ];
-static DEFINE_SPINLOCK(uidhash_lock);
+static spinlock_t uidhash_lock = SPIN_LOCK_UNLOCKED;
 
 struct user_struct root_user = {
 	.__count	= ATOMIC_INIT(1),

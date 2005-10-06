@@ -23,6 +23,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -46,6 +47,12 @@
 #include "../lowlevel/ftape-buffer.h"
 #include "../lowlevel/ftape-proc.h"
 #include "../lowlevel/ftape-tracing.h"
+
+/*      Global vars.
+ */
+char ft_src[] __initdata = "$Source: /homes/cvs/ftape-stacked/ftape/lowlevel/ftape-init.c,v $";
+char ft_rev[] __initdata = "$Revision: 1.8 $";
+char ft_dat[] __initdata = "$Date: 1997/11/06 00:38:08 $";
 
 
 #if defined(MODULE) && !defined(CONFIG_FT_NO_TRACE_AT_ALL)
@@ -72,11 +79,12 @@ static int __init ftape_init(void)
 KERN_INFO "(c) 1993-1996 Bas Laarhoven (bas@vimec.nl)\n"
 KERN_INFO "(c) 1995-1996 Kai Harrekilde-Petersen (khp@dolphinics.no)\n"
 KERN_INFO "(c) 1996-1997 Claus-Justus Heine (claus@momo.math.rwth-aachen.de)\n"
-KERN_INFO "QIC-117 driver for QIC-40/80/3010/3020 floppy tape drives\n");
+KERN_INFO "QIC-117 driver for QIC-40/80/3010/3020 floppy tape drives\n"
+KERN_INFO "Compiled for Linux version %s\n", UTS_RELEASE);
         }
 #else /* !MODULE */
 	/* print a short no-nonsense boot message */
-	printk(KERN_INFO FTAPE_VERSION "\n");
+	printk(KERN_INFO FTAPE_VERSION " for Linux " UTS_RELEASE "\n");
 #endif /* MODULE */
 	TRACE(ft_t_info, "installing QIC-117 floppy tape hardware drive ... ");
 	TRACE(ft_t_info, "ftape_init @ 0x%p", ftape_init);

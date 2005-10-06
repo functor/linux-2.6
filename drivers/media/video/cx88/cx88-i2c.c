@@ -1,5 +1,5 @@
 /*
-    $Id: cx88-i2c.c,v 1.20 2005/02/15 15:59:35 kraxel Exp $
+    $Id: cx88-i2c.c,v 1.18 2004/10/13 10:39:00 kraxel Exp $
 
     cx88-i2c.c  --  all the i2c code is here
 
@@ -25,7 +25,6 @@
 */
 
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/init.h>
 
 #include <asm/io.h>
@@ -45,7 +44,7 @@ MODULE_PARM_DESC(i2c_scan,"scan i2c bus at insmod time");
 
 /* ----------------------------------------------------------------------- */
 
-static void cx8800_bit_setscl(void *data, int state)
+void cx8800_bit_setscl(void *data, int state)
 {
 	struct cx88_core *core = data;
 
@@ -57,7 +56,7 @@ static void cx8800_bit_setscl(void *data, int state)
 	cx_read(MO_I2C);
 }
 
-static void cx8800_bit_setsda(void *data, int state)
+void cx8800_bit_setsda(void *data, int state)
 {
 	struct cx88_core *core = data;
 
@@ -135,13 +134,14 @@ static struct i2c_algo_bit_data cx8800_i2c_algo_template = {
 static struct i2c_adapter cx8800_i2c_adap_template = {
 	I2C_DEVNAME("cx2388x"),
 	.owner             = THIS_MODULE,
-	.id                = I2C_HW_B_CX2388x,
+	.id                = I2C_HW_B_BT848,
 	.client_register   = attach_inform,
 	.client_unregister = detach_inform,
 };
 
 static struct i2c_client cx8800_i2c_client_template = {
         I2C_DEVNAME("cx88xx internal"),
+        .id   = -1,
 };
 
 static char *i2c_devs[128] = {

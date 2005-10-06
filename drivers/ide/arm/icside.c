@@ -397,6 +397,35 @@ static void icside_dma_start(ide_drive_t *drive)
 	enable_dma(hwif->hw.dma);
 }
 
+/*
+ * dma_intr() is the handler for disk read/write DMA interrupts
+ */
+static ide_startstop_t icside_dmaintr(ide_drive_t *drive)
+{
+	unsigned int stat;
+	int dma_stat;
+
+	dma_stat = icside_dma_end(drive);
+	stat = HWIF(drive)->INB(IDE_STATUS_REG);
+	if (OK_STAT(stat, DRIVE_READY, drive->bad_wstat | DRQ_STAT)) {
+		if (!dma_stat) {
+			struct request *rq = HWGROUP(drive)->rq;
+			int i;
+
+			for (i = rq->nr_sectors; i > 0; ) {
+				i -= rq->current_nr_sectors;
+				DRIVER(drive)->end_request(drive, 1, rq->nr_sectors);
+			}
+
+			return ide_stopped;
+		}
+		printk(KERN_ERR "%s: bad DMA status (dma_stat=%x)\n",
+		       drive->name, dma_stat);
+	}
+
+	return DRIVER(drive)->error(drive, __FUNCTION__, stat);
+}
+
 static int icside_dma_setup(ide_drive_t *drive)
 {
 	ide_hwif_t *hwif = HWIF(drive);
@@ -445,7 +474,7 @@ static int icside_dma_setup(ide_drive_t *drive)
 static void icside_dma_exec_cmd(ide_drive_t *drive, u8 cmd)
 {
 	/* issue cmd to drive */
-	ide_execute_command(drive, cmd, ide_dma_intr, 2 * WAIT_CMD, NULL);
+	ide_execute_command(drive, cmd, icside_dmaintr, 2*WAIT_CMD, NULL);
 }
 
 static int icside_dma_test_irq(ide_drive_t *drive)
@@ -502,9 +531,9 @@ static void icside_dma_init(ide_hwif_t *hwif)
 	hwif->ide_dma_off_quietly = icside_dma_off_quietly;
 	hwif->ide_dma_host_on	= icside_dma_host_on;
 	hwif->ide_dma_on	= icside_dma_on;
-	hwif->dma_setup		= icside_dma_setup;
-	hwif->dma_exec_cmd	= icside_dma_exec_cmd;
-	hwif->dma_start		= icside_dma_start;
+	hwif->ide_dma_setup	= icside_dma_setup;
+	hwif->ide_dma_exec_cmd	= icside_dma_exec_cmd;
+	hwif->ide_dma_start	= icside_dma_start;
 	hwif->ide_dma_end	= icside_dma_end;
 	hwif->ide_dma_test_irq	= icside_dma_test_irq;
 	hwif->ide_dma_timeout	= icside_dma_timeout;
@@ -713,7 +742,7 @@ static int __devinit
 icside_probe(struct expansion_card *ec, const struct ecard_id *id)
 {
 	struct icside_state *state;
-	void __iomem *idmem;
+	void *idmem;
 	int ret;
 
 	ret = ecard_request_resources(ec);

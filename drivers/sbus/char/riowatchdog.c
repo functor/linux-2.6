@@ -52,7 +52,7 @@ MODULE_LICENSE("GPL");
 #define RIOWD_NAME	"pmc"
 #define RIOWD_MINOR	215
 
-static DEFINE_SPINLOCK(riowd_lock);
+static spinlock_t riowd_lock = SPIN_LOCK_UNLOCKED;
 
 static void __iomem *bbc_regs;
 static void __iomem *riowd_regs;

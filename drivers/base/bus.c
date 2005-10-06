@@ -65,7 +65,7 @@ static struct sysfs_ops driver_sysfs_ops = {
 static void driver_release(struct kobject * kobj)
 {
 	struct device_driver * drv = to_driver(kobj);
-	complete(&drv->unloaded);
+	up(&drv->unload_sem);
 }
 
 static struct kobj_type ktype_driver = {
@@ -390,6 +390,7 @@ void device_release_driver(struct device * dev)
 		sysfs_remove_link(&drv->kobj, kobject_name(&dev->kobj));
 		sysfs_remove_link(&dev->kobj, "driver");
 		list_del_init(&dev->driver_list);
+		device_detach_shutdown(dev);
 		if (drv->remove)
 			drv->remove(dev);
 		dev->driver = NULL;
@@ -404,8 +405,9 @@ void device_release_driver(struct device * dev)
 
 static void driver_detach(struct device_driver * drv)
 {
-	while (!list_empty(&drv->devices)) {
-		struct device * dev = container_of(drv->devices.next, struct device, driver_list);
+	struct list_head * entry, * next;
+	list_for_each_safe(entry, next, &drv->devices) {
+		struct device * dev = container_of(entry, struct device, driver_list);
 		device_release_driver(dev);
 	}
 }
@@ -463,7 +465,6 @@ int bus_add_device(struct device * dev)
 		up_write(&dev->bus->subsys.rwsem);
 		device_add_attrs(bus, dev);
 		sysfs_create_link(&bus->devices.kobj, &dev->kobj, dev->bus_id);
-		sysfs_create_link(&dev->kobj, &dev->bus->subsys.kset.kobj, "bus");
 	}
 	return error;
 }
@@ -480,7 +481,6 @@ int bus_add_device(struct device * dev)
 void bus_remove_device(struct device * dev)
 {
 	if (dev->bus) {
-		sysfs_remove_link(&dev->kobj, "bus");
 		sysfs_remove_link(&dev->bus->devices.kobj, dev->bus_id);
 		device_remove_attrs(dev->bus, dev);
 		down_write(&dev->bus->subsys.rwsem);

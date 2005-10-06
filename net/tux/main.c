@@ -1046,7 +1046,7 @@ asmlinkage long __sys_tux (unsigned int action, user_req_t *u_info)
 			current->tux_exit = tux_exit;
 			if (ti->thread)
 				TUX_BUG();
-			Dprintk("TUX: current open files limit for TUX%d: %ld.\n", nr, current->signal->rlim[RLIMIT_NOFILE].rlim_cur);
+			Dprintk("TUX: current open files limit for TUX%d: %ld.\n", nr, current->rlim[RLIMIT_NOFILE].rlim_cur);
 			lock_kernel();
 			ret = user_req_start_thread(ti);
 			unlock_kernel();

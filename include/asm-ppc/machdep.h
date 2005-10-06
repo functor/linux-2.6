@@ -7,7 +7,6 @@
 #include <linux/kexec.h>
 
 #include <asm/setup.h>
-#include <asm/page.h>
 
 #ifdef CONFIG_APUS
 #include <asm-m68k/machdep.h>
@@ -17,7 +16,6 @@ struct pt_regs;
 struct pci_bus;	
 struct pci_dev;
 struct seq_file;
-struct file;
 
 /* We export this macro for external modules like Alsa to know if
  * ppc_md.feature_call is implemented or not
@@ -96,12 +94,6 @@ struct machdep_calls {
 	/* Called at then very end of pcibios_init() */
 	void (*pcibios_after_init)(void);
 
-	/* Get access protection for /dev/mem */
-	pgprot_t	(*phys_mem_access_prot)(struct file *file,
-						unsigned long offset,
-						unsigned long size,
-						pgprot_t vma_prot);
-
 	/* this is for modules, since _machine can be a define -- Cort */
 	int ppc_machine;
 
@@ -154,7 +146,6 @@ typedef enum sys_ctrler_kind {
 	SYS_CTRLER_UNKNOWN = 0,
 	SYS_CTRLER_CUDA = 1,
 	SYS_CTRLER_PMU = 2,
-	SYS_CTRLER_SMU = 3,
 } sys_ctrler_t;
 
 extern sys_ctrler_t sys_ctrler;

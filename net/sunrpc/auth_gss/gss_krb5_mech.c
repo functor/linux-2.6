@@ -48,48 +48,49 @@
 # define RPCDBG_FACILITY	RPCDBG_AUTH
 #endif
 
-static const void *
-simple_get_bytes(const void *p, const void *end, void *res, int len)
+struct xdr_netobj gss_mech_krb5_oid =
+   {9, "\052\206\110\206\367\022\001\002\002"};
+
+static inline int
+get_bytes(char **ptr, const char *end, void *res, int len)
 {
-	const void *q = (const void *)((const char *)p + len);
-	if (unlikely(q > end || q < p))
-		return ERR_PTR(-EFAULT);
+	char *p, *q;
+	p = *ptr;
+	q = p + len;
+	if (q > end || q < p)
+		return -1;
 	memcpy(res, p, len);
-	return q;
+	*ptr = q;
+	return 0;
 }
 
-static const void *
-simple_get_netobj(const void *p, const void *end, struct xdr_netobj *res)
+static inline int
+get_netobj(char **ptr, const char *end, struct xdr_netobj *res)
 {
-	const void *q;
-	unsigned int len;
-
-	p = simple_get_bytes(p, end, &len, sizeof(len));
-	if (IS_ERR(p))
-		return p;
-	q = (const void *)((const char *)p + len);
-	if (unlikely(q > end || q < p))
-		return ERR_PTR(-EFAULT);
-	res->data = kmalloc(len, GFP_KERNEL);
-	if (unlikely(res->data == NULL))
-		return ERR_PTR(-ENOMEM);
-	memcpy(res->data, p, len);
-	res->len = len;
-	return q;
+	char *p, *q;
+	p = *ptr;
+	if (get_bytes(&p, end, &res->len, sizeof(res->len)))
+		return -1;
+	q = p + res->len;
+	if (q > end || q < p)
+		return -1;
+	if (!(res->data = kmalloc(res->len, GFP_KERNEL)))
+		return -1;
+	memcpy(res->data, p, res->len);
+	*ptr = q;
+	return 0;
 }
 
-static inline const void *
-get_key(const void *p, const void *end, struct crypto_tfm **res)
+static inline int
+get_key(char **p, char *end, struct crypto_tfm **res)
 {
 	struct xdr_netobj	key;
 	int			alg, alg_mode;
 	char			*alg_name;
 
-	p = simple_get_bytes(p, end, &alg, sizeof(alg));
-	if (IS_ERR(p))
+	if (get_bytes(p, end, &alg, sizeof(alg)))
 		goto out_err;
-	p = simple_get_netobj(p, end, &key);
-	if (IS_ERR(p))
+	if ((get_netobj(p, end, &key)))
 		goto out_err;
 
 	switch (alg) {
@@ -107,63 +108,50 @@ get_key(const void *p, const void *end, struct crypto_tfm **res)
 		goto out_err_free_tfm;
 
 	kfree(key.data);
-	return p;
+	return 0;
 
 out_err_free_tfm:
 	crypto_free_tfm(*res);
 out_err_free_key:
 	kfree(key.data);
-	p = ERR_PTR(-EINVAL);
 out_err:
-	return p;
+	return -1;
 }
 
-static int
-gss_import_sec_context_kerberos(const void *p,
-				size_t len,
+static u32
+gss_import_sec_context_kerberos(struct xdr_netobj *inbuf,
 				struct gss_ctx *ctx_id)
 {
-	const void *end = (const void *)((const char *)p + len);
+	char	*p = inbuf->data;
+	char	*end = inbuf->data + inbuf->len;
 	struct	krb5_ctx *ctx;
 
 	if (!(ctx = kmalloc(sizeof(*ctx), GFP_KERNEL)))
 		goto out_err;
 	memset(ctx, 0, sizeof(*ctx));
 
-	p = simple_get_bytes(p, end, &ctx->initiate, sizeof(ctx->initiate));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, &ctx->initiate, sizeof(ctx->initiate)))
 		goto out_err_free_ctx;
-	p = simple_get_bytes(p, end, &ctx->seed_init, sizeof(ctx->seed_init));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, &ctx->seed_init, sizeof(ctx->seed_init)))
 		goto out_err_free_ctx;
-	p = simple_get_bytes(p, end, ctx->seed, sizeof(ctx->seed));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, ctx->seed, sizeof(ctx->seed)))
 		goto out_err_free_ctx;
-	p = simple_get_bytes(p, end, &ctx->signalg, sizeof(ctx->signalg));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, &ctx->signalg, sizeof(ctx->signalg)))
 		goto out_err_free_ctx;
-	p = simple_get_bytes(p, end, &ctx->sealalg, sizeof(ctx->sealalg));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, &ctx->sealalg, sizeof(ctx->sealalg)))
 		goto out_err_free_ctx;
-	p = simple_get_bytes(p, end, &ctx->endtime, sizeof(ctx->endtime));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, &ctx->endtime, sizeof(ctx->endtime)))
 		goto out_err_free_ctx;
-	p = simple_get_bytes(p, end, &ctx->seq_send, sizeof(ctx->seq_send));
-	if (IS_ERR(p))
+	if (get_bytes(&p, end, &ctx->seq_send, sizeof(ctx->seq_send)))
 		goto out_err_free_ctx;
-	p = simple_get_netobj(p, end, &ctx->mech_used);
-	if (IS_ERR(p))
+	if (get_netobj(&p, end, &ctx->mech_used))
 		goto out_err_free_ctx;
-	p = get_key(p, end, &ctx->enc);
-	if (IS_ERR(p))
+	if (get_key(&p, end, &ctx->enc))
 		goto out_err_free_mech;
-	p = get_key(p, end, &ctx->seq);
-	if (IS_ERR(p))
+	if (get_key(&p, end, &ctx->seq))
 		goto out_err_free_key1;
-	if (p != end) {
-		p = ERR_PTR(-EFAULT);
+	if (p != end)
 		goto out_err_free_key2;
-	}
 
 	ctx_id->internal_ctx_id = ctx;
 	dprintk("RPC:      Succesfully imported new context.\n");
@@ -178,7 +166,7 @@ out_err_free_mech:
 out_err_free_ctx:
 	kfree(ctx);
 out_err:
-	return PTR_ERR(p);
+	return GSS_S_FAILURE;
 }
 
 static void

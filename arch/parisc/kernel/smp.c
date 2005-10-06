@@ -54,11 +54,13 @@
 
 #define kDEBUG 0
 
-DEFINE_SPINLOCK(smp_lock);
+spinlock_t smp_lock = SPIN_LOCK_UNLOCKED;
 
 volatile struct task_struct *smp_init_current_idle_task;
 
 static volatile int cpu_now_booting = 0;	/* track which CPU is booting */
+
+unsigned long cache_decay_ticks;	/* declared by include/linux/sched.h */
 
 static int parisc_max_cpus = 1;
 
@@ -275,7 +277,7 @@ ipi_send(int cpu, enum ipi_message_type op)
 
 	spin_lock_irqsave(&(p->lock),flags);
 	p->pending_ipi |= 1 << op;
-	gsc_writel(IPI_IRQ - CPU_IRQ_BASE, cpu_data[cpu].hpa);
+	__raw_writel(IRQ_OFFSET(IPI_IRQ), cpu_data[cpu].hpa);
 	spin_unlock_irqrestore(&(p->lock),flags);
 }
 
@@ -330,7 +332,7 @@ smp_call_function (void (*func) (void *info), void *info, int retry, int wait)
 {
 	struct smp_call_struct data;
 	unsigned long timeout;
-	static DEFINE_SPINLOCK(lock);
+	static spinlock_t lock = SPIN_LOCK_UNLOCKED;
 	int retries = 0;
 
 	if (num_online_cpus() < 2)
@@ -457,6 +459,7 @@ smp_cpu_init(int cpunum)
  */
 void __init smp_callin(void)
 {
+	extern void cpu_idle(void);	/* arch/parisc/kernel/process.c */
 	int slave_id = cpu_now_booting;
 #if 0
 	void *istack;
@@ -531,7 +534,7 @@ int __init smp_boot_one_cpu(int cpuid)
 	** EIR{0}). MEM_RENDEZ is valid only when it is nonzero and the 
 	** contents of memory are valid."
 	*/
-	gsc_writel(TIMER_IRQ - CPU_IRQ_BASE, cpu_data[cpuid].hpa);
+	__raw_writel(IRQ_OFFSET(TIMER_IRQ), cpu_data[cpuid].hpa);
 	mb();
 
 	/* 
@@ -581,6 +584,8 @@ void __devinit smp_prepare_boot_cpu(void)
 
 	cpu_set(bootstrap_processor, cpu_online_map);
 	cpu_set(bootstrap_processor, cpu_present_map);
+
+	cache_decay_ticks = HZ/100;	/* FIXME very rough.  */
 }
 
 

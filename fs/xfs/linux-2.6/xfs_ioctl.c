@@ -202,6 +202,10 @@ STATIC int
 xfs_vget_fsop_handlereq(
 	xfs_mount_t		*mp,
 	struct inode		*parinode,	/* parent inode pointer    */
+	int			cap,		/* capability level for op */
+	void			__user *arg,	/* userspace data pointer  */
+	unsigned long		size,		/* size of expected struct */
+	/* output arguments */
 	xfs_fsop_handlereq_t	*hreq,
 	vnode_t			**vp,
 	struct inode		**inode)
@@ -218,11 +222,21 @@ xfs_vget_fsop_handlereq(
 	__u32			igen;
 	int			error;
 
+	if (!capable(cap))
+		return XFS_ERROR(EPERM);
+
 	/*
 	 * Only allow handle opens under a directory.
 	 */
 	if (!S_ISDIR(parinode->i_mode))
 		return XFS_ERROR(ENOTDIR);
+
+	/*
+	 * Copy the handle down from the user and validate
+	 * that it looks to be in the correct format.
+	 */
+	if (copy_from_user(hreq, arg, size))
+		return XFS_ERROR(EFAULT);
 
 	hanp = hreq->ihandle;
 	hlen = hreq->ihandlen;
@@ -291,12 +305,9 @@ xfs_open_by_handle(
 	vnode_t			*vp;
 	xfs_fsop_handlereq_t	hreq;
 
-	if (!capable(CAP_SYS_ADMIN))
-		return -XFS_ERROR(EPERM);
-	if (copy_from_user(&hreq, arg, sizeof(xfs_fsop_handlereq_t)))
-		return -XFS_ERROR(EFAULT);
-
-	error = xfs_vget_fsop_handlereq(mp, parinode, &hreq, &vp, &inode);
+	error = xfs_vget_fsop_handlereq(mp, parinode, CAP_SYS_ADMIN, arg,
+					sizeof(xfs_fsop_handlereq_t),
+					&hreq, &vp, &inode);
 	if (error)
 		return -error;
 
@@ -376,12 +387,9 @@ xfs_readlink_by_handle(
 	vnode_t			*vp;
 	__u32			olen;
 
-	if (!capable(CAP_SYS_ADMIN))
-		return -XFS_ERROR(EPERM);
-	if (copy_from_user(&hreq, arg, sizeof(xfs_fsop_handlereq_t)))
-		return -XFS_ERROR(EFAULT);
-
-	error = xfs_vget_fsop_handlereq(mp, parinode, &hreq, &vp, &inode);
+	error = xfs_vget_fsop_handlereq(mp, parinode, CAP_SYS_ADMIN, arg,
+					sizeof(xfs_fsop_handlereq_t),
+					&hreq, &vp, &inode);
 	if (error)
 		return -error;
 
@@ -424,12 +432,10 @@ xfs_fssetdm_by_handle(
 	bhv_desc_t		*bdp;
 	vnode_t			*vp;
 
-	if (!capable(CAP_MKNOD))
-		return -XFS_ERROR(EPERM);
-	if (copy_from_user(&dmhreq, arg, sizeof(xfs_fsop_setdm_handlereq_t)))
-		return -XFS_ERROR(EFAULT);
-
-	error = xfs_vget_fsop_handlereq(mp, parinode, &dmhreq.hreq, &vp, &inode);
+	error = xfs_vget_fsop_handlereq(mp, parinode, CAP_MKNOD, arg,
+					sizeof(xfs_fsop_setdm_handlereq_t),
+					(xfs_fsop_handlereq_t *)&dmhreq,
+					&vp, &inode);
 	if (error)
 		return -error;
 
@@ -464,113 +470,21 @@ xfs_attrlist_by_handle(
 	xfs_fsop_attrlist_handlereq_t al_hreq;
 	struct inode		*inode;
 	vnode_t			*vp;
-	char			*kbuf;
 
-	if (!capable(CAP_SYS_ADMIN))
-		return -XFS_ERROR(EPERM);
-	if (copy_from_user(&al_hreq, arg, sizeof(xfs_fsop_attrlist_handlereq_t)))
-		return -XFS_ERROR(EFAULT);
-	if (al_hreq.buflen > XATTR_LIST_MAX)
-		return -XFS_ERROR(EINVAL);
-
-	error = xfs_vget_fsop_handlereq(mp, parinode, &al_hreq.hreq,
-			&vp, &inode);
+	error = xfs_vget_fsop_handlereq(mp, parinode, CAP_SYS_ADMIN, arg,
+					sizeof(xfs_fsop_attrlist_handlereq_t),
+					(xfs_fsop_handlereq_t *)&al_hreq,
+					&vp, &inode);
 	if (error)
-		goto out;
-
-	kbuf = kmalloc(al_hreq.buflen, GFP_KERNEL);
-	if (!kbuf)
-		goto out_vn_rele;
+		return -error;
 
 	cursor = (attrlist_cursor_kern_t *)&al_hreq.pos;
-	VOP_ATTR_LIST(vp, kbuf, al_hreq.buflen, al_hreq.flags,
+	VOP_ATTR_LIST(vp, al_hreq.buffer, al_hreq.buflen, al_hreq.flags,
 			cursor, NULL, error);
-	if (error)
-		goto out_kfree;
-
-	if (copy_to_user(al_hreq.buffer, kbuf, al_hreq.buflen))
-		error = -EFAULT;
-
- out_kfree:
-	kfree(kbuf);
- out_vn_rele:
 	VN_RELE(vp);
- out:
-	return -error;
-}
-
-STATIC int
-xfs_attrmulti_attr_get(
-	struct vnode		*vp,
-	char			*name,
-	char			__user *ubuf,
-	__uint32_t		*len,
-	__uint32_t		flags)
-{
-	char			*kbuf;
-	int			error = EFAULT;
-	
-	if (*len > XATTR_SIZE_MAX)
-		return EINVAL;
-	kbuf = kmalloc(*len, GFP_KERNEL);
-	if (!kbuf)
-		return ENOMEM;
-
-	VOP_ATTR_GET(vp, name, kbuf, len, flags, NULL, error);
 	if (error)
-		goto out_kfree;
-
-	if (copy_to_user(ubuf, kbuf, *len))
-		error = EFAULT;
-
- out_kfree:
-	kfree(kbuf);
-	return error;
-}
-
-STATIC int
-xfs_attrmulti_attr_set(
-	struct vnode		*vp,
-	char			*name,
-	const char		__user *ubuf,
-	__uint32_t		len,
-	__uint32_t		flags)
-{
-	char			*kbuf;
-	int			error = EFAULT;
-
-	if (IS_IMMUTABLE(&vp->v_inode) || IS_APPEND(&vp->v_inode))
-		return EPERM;
-	if (len > XATTR_SIZE_MAX)
-		return EINVAL;
-
-	kbuf = kmalloc(len, GFP_KERNEL);
-	if (!kbuf)
-		return ENOMEM;
-
-	if (copy_from_user(kbuf, ubuf, len))
-		goto out_kfree;
-			
-	VOP_ATTR_SET(vp, name, kbuf, len, flags, NULL, error);
-
- out_kfree:
-	kfree(kbuf);
-	return error;
-}
-
-STATIC int
-xfs_attrmulti_attr_remove(
-	struct vnode		*vp,
-	char			*name,
-	__uint32_t		flags)
-{
-	int			error;
-
-	if (IS_IMMUTABLE(&vp->v_inode) || IS_APPEND(&vp->v_inode))
-		return EPERM;
-
-	VOP_ATTR_REMOVE(vp, name, flags, NULL, error);
-	return error;
+		return -error;
+	return 0;
 }
 
 STATIC int
@@ -585,60 +499,55 @@ xfs_attrmulti_by_handle(
 	xfs_fsop_attrmulti_handlereq_t am_hreq;
 	struct inode		*inode;
 	vnode_t			*vp;
-	unsigned int		i, size;
-	char			*attr_name;
+	int			i, size;
 
-	if (!capable(CAP_SYS_ADMIN))
-		return -XFS_ERROR(EPERM);
-	if (copy_from_user(&am_hreq, arg, sizeof(xfs_fsop_attrmulti_handlereq_t)))
-		return -XFS_ERROR(EFAULT);
-
-	error = xfs_vget_fsop_handlereq(mp, parinode, &am_hreq.hreq, &vp, &inode);
+	error = xfs_vget_fsop_handlereq(mp, parinode, CAP_SYS_ADMIN, arg,
+					sizeof(xfs_fsop_attrmulti_handlereq_t),
+					(xfs_fsop_handlereq_t *)&am_hreq,
+					&vp, &inode);
 	if (error)
-		goto out;
+		return -error;
 
-	error = E2BIG;
+	if(am_hreq.opcount > 1024) {
+		VN_RELE(vp);
+		return -XFS_ERROR(ENOMEM);
+	}
 	size = am_hreq.opcount * sizeof(attr_multiop_t);
-	if (!size || size > 16 * PAGE_SIZE)
-		goto out_vn_rele;
+	ops = (xfs_attr_multiop_t *)kmalloc(size, GFP_KERNEL);
+	if (!ops) {
+		VN_RELE(vp);
+		return -XFS_ERROR(ENOMEM);
+	}
 
-	error = ENOMEM;
-	ops = kmalloc(size, GFP_KERNEL);
-	if (!ops)
-		goto out_vn_rele;
+	if (copy_from_user(ops, am_hreq.ops, size)) {
+		kfree(ops);
+		VN_RELE(vp);
+		return -XFS_ERROR(EFAULT);
+	}
 
-	error = EFAULT;
-	if (copy_from_user(ops, am_hreq.ops, size))
-		goto out_kfree_ops;
-
-	attr_name = kmalloc(MAXNAMELEN, GFP_KERNEL);
-	if (!attr_name)
-		goto out_kfree_ops;
-
-
-	error = 0;
 	for (i = 0; i < am_hreq.opcount; i++) {
-		ops[i].am_error = strncpy_from_user(attr_name,
-				ops[i].am_attrname, MAXNAMELEN);
-		if (ops[i].am_error == 0 || ops[i].am_error == MAXNAMELEN)
-			error = -ERANGE;
-		if (ops[i].am_error < 0)
-			break;
-
-		switch (ops[i].am_opcode) {
+		switch(ops[i].am_opcode) {
 		case ATTR_OP_GET:
-			ops[i].am_error = xfs_attrmulti_attr_get(vp,
-					attr_name, ops[i].am_attrvalue,
-					&ops[i].am_length, ops[i].am_flags);
+			VOP_ATTR_GET(vp,ops[i].am_attrname, ops[i].am_attrvalue,
+					&ops[i].am_length, ops[i].am_flags,
+					NULL, ops[i].am_error);
 			break;
 		case ATTR_OP_SET:
-			ops[i].am_error = xfs_attrmulti_attr_set(vp,
-					attr_name, ops[i].am_attrvalue,
-					ops[i].am_length, ops[i].am_flags);
+			if (IS_IMMUTABLE(inode) || IS_APPEND(inode)) {
+				ops[i].am_error = EPERM;
+				break;
+			}
+			VOP_ATTR_SET(vp,ops[i].am_attrname, ops[i].am_attrvalue,
+					ops[i].am_length, ops[i].am_flags,
+					NULL, ops[i].am_error);
 			break;
 		case ATTR_OP_REMOVE:
-			ops[i].am_error = xfs_attrmulti_attr_remove(vp,
-					attr_name, ops[i].am_flags);
+			if (IS_IMMUTABLE(inode) || IS_APPEND(inode)) {
+				ops[i].am_error = EPERM;
+				break;
+			}
+			VOP_ATTR_REMOVE(vp, ops[i].am_attrname, ops[i].am_flags,
+					NULL, ops[i].am_error);
 			break;
 		default:
 			ops[i].am_error = EINVAL;
@@ -646,15 +555,11 @@ xfs_attrmulti_by_handle(
 	}
 
 	if (copy_to_user(am_hreq.ops, ops, size))
-		error = XFS_ERROR(EFAULT);
+		error = -XFS_ERROR(EFAULT);
 
-	kfree(attr_name);
- out_kfree_ops:
 	kfree(ops);
- out_vn_rele:
 	VN_RELE(vp);
- out:
-	return -error;
+	return error;
 }
 
 /* prototypes for a few of the stack-hungry cases that have
@@ -1107,8 +1012,8 @@ xfs_ioc_fsgeometry(
 #define LINUX_XFLAG_APPEND	0x00000020 /* writes to file may only append */
 #define LINUX_XFLAG_NODUMP	0x00000040 /* do not dump file */
 #define LINUX_XFLAG_NOATIME	0x00000080 /* do not update atime */
-#define LINUX_XFLAG_BARRIER	0x04000000 /* chroot() barrier */
-#define LINUX_XFLAG_IUNLINK	0x08000000 /* immutable unlink */
+#define LINUX_XFLAG_BARRIER	0x00004000 /* chroot() barrier */
+#define LINUX_XFLAG_IUNLINK	0x00008000 /* immutable unlink */
 
 STATIC unsigned int
 xfs_merge_ioc_xflags(
@@ -1201,7 +1106,7 @@ xfs_ioc_xattr(
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
-
+		
 		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE;
 		va.va_xflags  = fa.fsx_xflags;
 		va.va_extsize = fa.fsx_extsize;
@@ -1249,7 +1154,7 @@ xfs_ioc_xattr(
 
 		va.va_mask = XFS_AT_XFLAGS;
 		va.va_xflags = xfs_merge_ioc_xflags(flags,
-				xfs_ip2xflags(ip));
+				xfs_dic2xflags(&ip->i_d, ARCH_NOCONVERT));
 
 		VOP_SETATTR(vp, &va, attr_flags, NULL, error);
 		if (!error)

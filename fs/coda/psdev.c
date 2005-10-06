@@ -22,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/major.h>
 #include <linux/time.h>
+#include <linux/lp.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
 #include <linux/fcntl.h>
@@ -309,7 +310,8 @@ static int coda_psdev_open(struct inode * inode, struct file * file)
 static int coda_psdev_release(struct inode * inode, struct file * file)
 {
         struct venus_comm *vcp = (struct venus_comm *) file->private_data;
-        struct upc_req *req, *tmp;
+        struct upc_req *req;
+	struct list_head *lh, *next;
 
 	lock_kernel();
 	if ( !vcp->vc_inuse ) {
@@ -324,7 +326,8 @@ static int coda_psdev_release(struct inode * inode, struct file * file)
 	}
         
         /* Wakeup clients so they can return. */
-	list_for_each_entry_safe(req, tmp, &vcp->vc_pending, uc_chain) {
+	list_for_each_safe(lh, next, &vcp->vc_pending) {
+		req = list_entry(lh, struct upc_req, uc_chain);
 		/* Async requests need to be freed here */
 		if (req->uc_flags & REQ_ASYNC) {
 			CODA_FREE(req->uc_data, sizeof(struct coda_in_hdr));
@@ -358,12 +361,13 @@ static struct file_operations coda_psdev_fops = {
 static int init_coda_psdev(void)
 {
 	int i, err = 0;
-	if (register_chrdev(CODA_PSDEV_MAJOR, "coda", &coda_psdev_fops)) {
+	if (register_chrdev(CODA_PSDEV_MAJOR,"coda_psdev",
+				 &coda_psdev_fops)) {
               printk(KERN_ERR "coda_psdev: unable to get major %d\n", 
 		     CODA_PSDEV_MAJOR);
               return -EIO;
 	}
-	coda_psdev_class = class_simple_create(THIS_MODULE, "coda");
+	coda_psdev_class = class_simple_create(THIS_MODULE, "coda_psdev");
 	if (IS_ERR(coda_psdev_class)) {
 		err = PTR_ERR(coda_psdev_class);
 		goto out_chrdev;
@@ -385,7 +389,7 @@ out_class:
 		class_simple_device_remove(MKDEV(CODA_PSDEV_MAJOR, i));
 	class_simple_destroy(coda_psdev_class);
 out_chrdev:
-	unregister_chrdev(CODA_PSDEV_MAJOR, "coda");
+	unregister_chrdev(CODA_PSDEV_MAJOR, "coda_psdev");
 out:
 	return err;
 }
@@ -430,7 +434,7 @@ out:
 	}
 	class_simple_destroy(coda_psdev_class);
 	devfs_remove("coda");
-	unregister_chrdev(CODA_PSDEV_MAJOR, "coda");
+	unregister_chrdev(CODA_PSDEV_MAJOR,"coda_psdev");
 	coda_sysctl_clean();
 out1:
 	coda_destroy_inodecache();
@@ -452,7 +456,7 @@ static void __exit exit_coda(void)
 	}
 	class_simple_destroy(coda_psdev_class);
 	devfs_remove("coda");
-	unregister_chrdev(CODA_PSDEV_MAJOR, "coda");
+	unregister_chrdev(CODA_PSDEV_MAJOR, "coda_psdev");
 	coda_sysctl_clean();
 	coda_destroy_inodecache();
 }

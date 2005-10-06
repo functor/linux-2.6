@@ -1293,7 +1293,7 @@ static void sunzilog_put_char(struct zilog_channel __iomem *channel, unsigned ch
 
 #ifdef CONFIG_SERIO
 
-static DEFINE_SPINLOCK(sunzilog_serio_lock);
+static spinlock_t sunzilog_serio_lock = SPIN_LOCK_UNLOCKED;
 
 static int sunzilog_serio_write(struct serio *serio, unsigned char ch)
 {
@@ -1562,13 +1562,12 @@ static void __init sunzilog_register_serio(struct uart_sunzilog_port *up, int ch
 
 		serio->port_data = up;
 
-		serio->id.type = SERIO_RS232;
+		serio->type = SERIO_RS232;
 		if (channel == KEYBOARD_LINE) {
-			serio->id.proto = SERIO_SUNKBD;
+			serio->type |= SERIO_SUNKBD;
 			strlcpy(serio->name, "zskbd", sizeof(serio->name));
 		} else {
-			serio->id.proto = SERIO_SUN;
-			serio->id.extra = 1;
+			serio->type |= (SERIO_SUN | (1 << 16));
 			strlcpy(serio->name, "zsms", sizeof(serio->name));
 		}
 		strlcpy(serio->phys,

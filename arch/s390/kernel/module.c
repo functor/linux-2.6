@@ -396,7 +396,8 @@ int module_finalize(const Elf_Ehdr *hdr,
 		    const Elf_Shdr *sechdrs,
 		    struct module *me)
 {
-	vfree(me->arch.syminfo);
+	if (me->arch.syminfo)
+		vfree(me->arch.syminfo);
 	return 0;
 }
 

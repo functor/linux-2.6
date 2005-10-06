@@ -19,30 +19,26 @@
 #include <asm/tlbflush.h>
 
 /*
- * For the fast tlb miss handlers, we keep a per cpu array of pointers
- * to the current pgd for each processor. Also, the proc. id is stuffed
- * into the context register.
+ * For the fast tlb miss handlers, we currently keep a per cpu array
+ * of pointers to the current pgd for each processor. Also, the proc.
+ * id is stuffed into the context register. This should be changed to
+ * use the processor id via current->processor, where current is stored
+ * in watchhi/lo. The context register should be used to contiguously
+ * map the page tables.
  */
-extern unsigned long pgd_current[];
-
 #define TLBMISS_HANDLER_SETUP_PGD(pgd) \
 	pgd_current[smp_processor_id()] = (unsigned long)(pgd)
-
 #ifdef CONFIG_MIPS32
-#define TLBMISS_HANDLER_SETUP()						\
-	write_c0_context((unsigned long) smp_processor_id() << 23);	\
+#define TLBMISS_HANDLER_SETUP() \
+	write_c0_context((unsigned long) smp_processor_id() << 23); \
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir)
 #endif
-#if defined(CONFIG_MIPS64) && !defined(CONFIG_BUILD_ELF64)
-#define TLBMISS_HANDLER_SETUP()						\
+#ifdef CONFIG_MIPS64
+#define TLBMISS_HANDLER_SETUP() \
 	write_c0_context((unsigned long) &pgd_current[smp_processor_id()] << 23); \
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir)
 #endif
-#if defined(CONFIG_MIPS64) && defined(CONFIG_BUILD_ELF64)
-#define TLBMISS_HANDLER_SETUP()						\
-	write_c0_context((unsigned long) smp_processor_id() << 23);	\
-	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir)
-#endif
+extern unsigned long pgd_current[];
 
 #if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
 
@@ -154,7 +150,7 @@ static inline void
 activate_mm(struct mm_struct *prev, struct mm_struct *next)
 {
 	unsigned long flags;
-	unsigned int cpu = smp_processor_id();
+	int cpu = smp_processor_id();
 
 	local_irq_save(flags);
 

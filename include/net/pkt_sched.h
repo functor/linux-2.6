@@ -140,7 +140,7 @@ psched_tod_diff(int delta_sec, int bound)
 	if (bound <= 1000000 || delta_sec > (0x7FFFFFFF/1000000)-1)
 		return bound;
 	delta = delta_sec * 1000000;
-	if (delta > bound || delta < 0)
+	if (delta > bound)
 		delta = bound;
 	return delta;
 }
@@ -156,9 +156,7 @@ psched_tod_diff(int delta_sec, int bound)
 		   __delta += 1000000; \
 	   case 1: \
 		   __delta += 1000000; \
-	   case 0: \
- 		   if (__delta > bound || __delta < 0) \
- 			__delta = bound; \
+	   case 0: ; \
 	   } \
 	   __delta; \
 })

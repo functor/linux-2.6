@@ -60,12 +60,12 @@ MODULE_LICENSE("GPL");
 
 static struct class_simple *capi_class;
 
-static int capi_major = 68;		/* allocated */
+int capi_major = 68;		/* allocated */
 #ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
 #define CAPINC_NR_PORTS	32
 #define CAPINC_MAX_PORTS	256
-static int capi_ttymajor = 191;
-static int capi_ttyminors = CAPINC_NR_PORTS;
+int capi_ttymajor = 191;
+int capi_ttyminors = CAPINC_NR_PORTS;
 #endif /* CONFIG_ISDN_CAPI_MIDDLEWARE */
 
 module_param_named(major, capi_major, uint, 0);
@@ -143,11 +143,11 @@ struct capidev {
 
 /* -------- global variables ---------------------------------------- */
 
-static DEFINE_RWLOCK(capidev_list_lock);
+static rwlock_t capidev_list_lock = RW_LOCK_UNLOCKED;
 static LIST_HEAD(capidev_list);
 
 #ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
-static DEFINE_RWLOCK(capiminor_list_lock);
+static rwlock_t capiminor_list_lock = RW_LOCK_UNLOCKED;
 static LIST_HEAD(capiminor_list);
 #endif /* CONFIG_ISDN_CAPI_MIDDLEWARE */
 
@@ -268,7 +268,7 @@ static void capiminor_free(struct capiminor *mp)
 	kfree(mp);
 }
 
-static struct capiminor *capiminor_find(unsigned int minor)
+struct capiminor *capiminor_find(unsigned int minor)
 {
 	struct list_head *l;
 	struct capiminor *p = NULL;
@@ -1166,7 +1166,7 @@ static int capinc_tty_write_room(struct tty_struct *tty)
 	return room;
 }
 
-static int capinc_tty_chars_in_buffer(struct tty_struct *tty)
+int capinc_tty_chars_in_buffer(struct tty_struct *tty)
 {
 	struct capiminor *mp = (struct capiminor *)tty->driver_data;
 	if (!mp || !mp->nccip) {

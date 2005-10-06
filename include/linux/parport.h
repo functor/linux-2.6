@@ -105,6 +105,8 @@ typedef enum {
 #include <asm/ptrace.h>
 #include <asm/semaphore.h>
 
+#define PARPORT_NEED_GENERIC_OPS
+
 /* Define this later. */
 struct parport;
 struct pardevice;
@@ -518,8 +520,9 @@ extern int parport_device_proc_register(struct pardevice *device);
 extern int parport_device_proc_unregister(struct pardevice *device);
 
 /* If PC hardware is the only type supported, we can optimise a bit.  */
-#if !defined(CONFIG_PARPORT_NOT_PC)
+#if (defined(CONFIG_PARPORT_PC) || defined(CONFIG_PARPORT_PC_MODULE)) && !(defined(CONFIG_PARPORT_ARC) || defined(CONFIG_PARPORT_ARC_MODULE)) && !(defined(CONFIG_PARPORT_AMIGA) || defined(CONFIG_PARPORT_AMIGA_MODULE)) && !(defined(CONFIG_PARPORT_MFC3) || defined(CONFIG_PARPORT_MFC3_MODULE)) && !(defined(CONFIG_PARPORT_ATARI) || defined(CONFIG_PARPORT_ATARI_MODULE)) && !(defined(CONFIG_USB_USS720) || defined(CONFIG_USB_USS720_MODULE)) && !(defined(CONFIG_PARPORT_SUNBPP) || defined(CONFIG_PARPORT_SUNBPP_MODULE)) && !defined(CONFIG_PARPORT_OTHER)
 
+#undef PARPORT_NEED_GENERIC_OPS
 #include <linux/parport_pc.h>
 #define parport_write_data(p,x)            parport_pc_write_data(p,x)
 #define parport_read_data(p)               parport_pc_read_data(p)
@@ -531,9 +534,9 @@ extern int parport_device_proc_unregister(struct pardevice *device);
 #define parport_disable_irq(p)             parport_pc_disable_irq(p)
 #define parport_data_forward(p)            parport_pc_data_forward(p)
 #define parport_data_reverse(p)            parport_pc_data_reverse(p)
+#endif
 
-#else  /*  !CONFIG_PARPORT_NOT_PC  */
-
+#ifdef PARPORT_NEED_GENERIC_OPS
 /* Generic operations vector through the dispatch table. */
 #define parport_write_data(p,x)            (p)->ops->write_data(p,x)
 #define parport_read_data(p)               (p)->ops->read_data(p)
@@ -545,8 +548,7 @@ extern int parport_device_proc_unregister(struct pardevice *device);
 #define parport_disable_irq(p)             (p)->ops->disable_irq(p)
 #define parport_data_forward(p)            (p)->ops->data_forward(p)
 #define parport_data_reverse(p)            (p)->ops->data_reverse(p)
-
-#endif /*  !CONFIG_PARPORT_NOT_PC  */
+#endif
 
 #endif /* __KERNEL__ */
 #endif /* _PARPORT_H_ */

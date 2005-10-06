@@ -4,6 +4,7 @@
  *  Copyright (C) 2000 Geert Uytterhoeven <geert@sonycom.com>
  *                     Sony Software Development Center Europe (SDCE), Brussels
  */
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/signal.h>

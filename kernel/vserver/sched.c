@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Scheduler Support
  *
- *  Copyright (C) 2004-2005  Herbert Pötzl
+ *  Copyright (C) 2004  Herbert Pötzl
  *
  *  V0.01  adapted Sam Vilains version to 2.6.3
  *  V0.02  removed legacy interface
@@ -12,6 +12,7 @@
 
 #include <linux/config.h>
 #include <linux/sched.h>
+// #include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_sched.h>
 #include <linux/vserver/sched_cmd.h>
@@ -19,120 +20,6 @@
 #include <asm/errno.h>
 #include <asm/uaccess.h>
 
-#ifdef CONFIG_VSERVER_ACB_SCHED
-
-#define TICK_SCALE 1000
-#define TICKS_PER_TOKEN(vxi) \
-        ((vxi->sched.interval * TICK_SCALE) / vxi->sched.fill_rate)
-#define CLASS(vxi) \
-    (IS_BEST_EFFORT(vxi) ? SCH_BEST_EFFORT : SCH_GUARANTEE)
-#define GLOBAL_TICKS(vxi) \
-    (IS_BEST_EFFORT(vxi) ? vx_best_effort_ticks : vx_guaranteed_ticks)
-
-uint64_t vx_guaranteed_ticks = 0;
-uint64_t vx_best_effort_ticks = 0;
-
-void vx_tokens_set(struct vx_info *vxi, int tokens) {
-    int class = CLASS(vxi);
-
-    vxi->sched.ticks[class] = GLOBAL_TICKS(vxi);
-    vxi->sched.ticks[class] -=	tokens * TICKS_PER_TOKEN(vxi);
-}
-
-void vx_scheduler_tick(void) {
-    vx_guaranteed_ticks += TICK_SCALE;
-    vx_best_effort_ticks += TICK_SCALE;
-}
-
-void vx_advance_best_effort_ticks(int ticks) {
-    vx_best_effort_ticks += TICK_SCALE * ticks;
-}
-
-void vx_advance_guaranteed_ticks(int ticks) {
-    vx_guaranteed_ticks += TICK_SCALE * ticks;
-}
-
-int vx_tokens_avail(struct vx_info *vxi)
-{
-    uint64_t diff;
-    int tokens;
-    long rem;
-    int class = CLASS(vxi);
-
-    if (vxi->sched.state[class] == SCH_UNINITIALIZED) {
-	/* Set the "real" token count */
-	tokens = atomic_read(&vxi->sched.tokens);
-	vx_tokens_set(vxi, tokens);
-	vxi->sched.state[class] = SCH_INITIALIZED;
-	goto out;
-    } 
-
-    if (vxi->sched.last_ticks[class] == GLOBAL_TICKS(vxi)) {
-	tokens = atomic_read(&vxi->sched.tokens);
-	goto out;
-    }
-
-    /* Use of fixed-point arithmetic in these calculations leads to
-     * some limitations.  These should be made explicit.
-     */
-    diff = GLOBAL_TICKS(vxi) - vxi->sched.ticks[class];
-    tokens = div_long_long_rem(diff, TICKS_PER_TOKEN(vxi), &rem);
-
-    if (tokens > vxi->sched.tokens_max) {
-	vx_tokens_set(vxi, vxi->sched.tokens_max);
-	tokens = vxi->sched.tokens_max;
-    }
-
-    atomic_set(&vxi->sched.tokens, tokens);
-
-out:
-    vxi->sched.last_ticks[class] = GLOBAL_TICKS(vxi);
-    return tokens;
-}
-
-void vx_consume_token(struct vx_info *vxi)
-{
-    int class = CLASS(vxi);
-
-    vxi->sched.ticks[class] += TICKS_PER_TOKEN(vxi);
-}
-
-/*
- * recalculate the context's scheduling tokens
- *
- * ret > 0 : number of tokens available
- * ret = 0 : context is paused
- * ret < 0 : number of jiffies until new tokens arrive
- *
- */
-int vx_tokens_recalc(struct vx_info *vxi)
-{
-        long delta, tokens;
-
-	if (vx_info_flags(vxi, VXF_SCHED_PAUSE, 0))
-		/* we are paused */
-		return 0;
-
-	tokens = vx_tokens_avail(vxi);
-	if (tokens <= 0)
-	    vxi->vx_state |= VXS_ONHOLD;
-	if (tokens < vxi->sched.tokens_min) {
-	    delta = tokens - vxi->sched.tokens_min;
-	    /* enough tokens will be available in */
-	    return (delta * vxi->sched.interval) / vxi->sched.fill_rate;
-	}
-
-	/* we have some tokens left */
-	if (vx_info_state(vxi, VXS_ONHOLD) &&
-		(tokens >= vxi->sched.tokens_min))
-		vxi->vx_state &= ~VXS_ONHOLD;
-	if (vx_info_state(vxi, VXS_ONHOLD))
-		tokens -= vxi->sched.tokens_min;
-
-	return tokens;
-}
-
-#else
 
 /*
  * recalculate the context's scheduling tokens
@@ -195,8 +82,6 @@ int vx_tokens_recalc(struct vx_info *vxi)
 	return tokens;
 }
 
-#endif /* CONFIG_VSERVER_ACB_SCHED */
-
 /*
  * effective_prio - return the priority that is based on the static
  * priority but is modified by bonuses/penalties.
@@ -218,8 +103,9 @@ int vx_tokens_recalc(struct vx_info *vxi)
  *
  * Both properties are important to certain workloads.
  */
-int vx_effective_vavavoom(struct vx_info *vxi, int max_prio)
+int effective_vavavoom(task_t *p, int max_prio)
 {
+	struct vx_info *vxi = p->vx_info;
 	int vavavoom, max;
 
 	/* lots of tokens = lots of vavavoom
@@ -230,10 +116,15 @@ int vx_effective_vavavoom(struct vx_info *vxi, int max_prio)
 		max = max * max;
 		vavavoom = max_prio * VAVAVOOM_RATIO / 100
 			* (vavavoom*vavavoom - (max >> 2)) / max;
+		/*  alternative, geometric mapping
+		vavavoom = -( MAX_USER_PRIO*VAVAVOOM_RATIO/100 * vavavoom
+			/ vxi->sched.tokens_max -
+			MAX_USER_PRIO*VAVAVOOM_RATIO/100/2); */
 	} else
 		vavavoom = 0;
+	/* vavavoom = ( MAX_USER_PRIO*VAVAVOOM_RATIO/100*tokens_left(p) -
+		MAX_USER_PRIO*VAVAVOOM_RATIO/100/2); */
 
-	vxi->sched.vavavoom = vavavoom;
 	return vavavoom;
 }
 
@@ -274,10 +165,6 @@ int vc_set_sched_v2(uint32_t xid, void __user *data)
 		atomic_set(&vxi->sched.tokens, vxi->sched.tokens_max);
 	if (vxi->sched.tokens_min > vxi->sched.tokens_max)
 		vxi->sched.tokens_min = vxi->sched.tokens_max;
-
-#ifdef CONFIG_VSERVER_ACB_SCHED
-	vx_tokens_set(vxi, atomic_read(&vxi->sched.tokens));
-#endif
 
 	spin_unlock(&vxi->sched.tokens_lock);
 	put_vx_info(vxi);
@@ -330,10 +217,6 @@ int vc_set_sched(uint32_t xid, void __user *data)
 		vxi->sched.priority_bias = MAX_PRIO_BIAS;
 	if (vxi->sched.priority_bias < MIN_PRIO_BIAS)
 		vxi->sched.priority_bias = MIN_PRIO_BIAS;
-
-#ifdef CONFIG_VSERVER_ACB_SCHED
-	vx_tokens_set(vxi, atomic_read(&vxi->sched.tokens));
-#endif
 
 	spin_unlock(&vxi->sched.tokens_lock);
 	put_vx_info(vxi);

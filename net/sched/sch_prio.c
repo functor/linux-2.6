@@ -47,23 +47,36 @@ struct prio_sched_data
 };
 
 
-static struct Qdisc *
-prio_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
+struct Qdisc *prio_classify(struct sk_buff *skb, struct Qdisc *sch,int *r)
 {
 	struct prio_sched_data *q = qdisc_priv(sch);
 	u32 band = skb->priority;
 	struct tcf_result res;
 
-	*qerr = NET_XMIT_DROP;
 	if (TC_H_MAJ(skb->priority) != sch->handle) {
 #ifdef CONFIG_NET_CLS_ACT
-		switch (tc_classify(skb, q->filter_list, &res)) {
-		case TC_ACT_STOLEN:
-		case TC_ACT_QUEUED:
-			*qerr = NET_XMIT_SUCCESS;
-		case TC_ACT_SHOT:
-			return NULL;
+		int result = 0, terminal = 0;
+		result = tc_classify(skb, q->filter_list, &res);
+
+		switch (result) {
+			case TC_ACT_SHOT:
+				*r = NET_XMIT_DROP;
+				terminal = 1;
+				break;
+			case TC_ACT_STOLEN:
+			case TC_ACT_QUEUED:
+				terminal = 1;
+				break;
+			case TC_ACT_RECLASSIFY:
+			case TC_ACT_OK:
+			case TC_ACT_UNSPEC:
+			default:
+			break;
 		};
+		if (terminal) {
+			kfree_skb(skb);
+			return NULL;
+		} 
 
 		if (!q->filter_list ) {
 #else
@@ -83,20 +96,15 @@ prio_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 }
 
 static int
-prio_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+prio_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct Qdisc *qdisc;
-	int ret;
+	int ret = NET_XMIT_SUCCESS;
 
 	qdisc = prio_classify(skb, sch, &ret);
-#ifdef CONFIG_NET_CLS_ACT
-	if (qdisc == NULL) {
-		if (ret == NET_XMIT_DROP)
-			sch->qstats.drops++;
-		kfree_skb(skb);
-		return ret;
-	}
-#endif
+
+	if (NULL == qdisc)
+		goto dropped;
 
 	if ((ret = qdisc->enqueue(skb, qdisc)) == NET_XMIT_SUCCESS) {
 		sch->bstats.bytes += skb->len;
@@ -104,7 +112,17 @@ prio_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		sch->q.qlen++;
 		return NET_XMIT_SUCCESS;
 	}
-	sch->qstats.drops++;
+
+dropped:
+#ifdef CONFIG_NET_CLS_ACT
+	if (NET_XMIT_DROP == ret) {
+#endif
+		sch->qstats.drops++;
+#ifdef CONFIG_NET_CLS_ACT
+	} else {
+		sch->qstats.overlimits++; /* abuse, but noone uses it */
+	}
+#endif
 	return ret; 
 }
 
@@ -113,23 +131,18 @@ static int
 prio_requeue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct Qdisc *qdisc;
-	int ret;
+	int ret = NET_XMIT_DROP;
 
 	qdisc = prio_classify(skb, sch, &ret);
-#ifdef CONFIG_NET_CLS_ACT
-	if (qdisc == NULL) {
-		if (ret == NET_XMIT_DROP)
-			sch->qstats.drops++;
-		kfree_skb(skb);
-		return ret;
-	}
-#endif
+	if (qdisc == NULL)
+		goto dropped;
 
-	if ((ret = qdisc->ops->requeue(skb, qdisc)) == NET_XMIT_SUCCESS) {
+	if ((ret = qdisc->ops->requeue(skb, qdisc)) == 0) {
 		sch->q.qlen++;
 		sch->qstats.requeues++;
 		return 0;
 	}
+dropped:
 	sch->qstats.drops++;
 	return NET_XMIT_DROP;
 }

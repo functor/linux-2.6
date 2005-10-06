@@ -225,7 +225,7 @@ EXPORT_SYMBOL(physmem_forget_descriptor);
 EXPORT_SYMBOL(physmem_remove_mapping);
 EXPORT_SYMBOL(physmem_subst_mapping);
 
-int arch_free_page(struct page *page, int order)
+void arch_free_page(struct page *page, int order)
 {
 	void *virt;
 	int i;
@@ -234,8 +234,6 @@ int arch_free_page(struct page *page, int order)
 		virt = __va(page_to_phys(page + i));
 		physmem_remove_mapping(virt);
 	}
-
-	return 0;
 }
 
 int is_remapped(void *virt)
@@ -296,6 +294,7 @@ int init_maps(unsigned long physmem, unsigned long iomem, unsigned long highmem)
 		INIT_LIST_HEAD(&p->lru);
 	}
 
+	mem_map = map;
 	max_mapnr = total_pages;
 	return(0);
 }
@@ -310,7 +309,7 @@ struct page *__virt_to_page(const unsigned long virt)
 	return(&mem_map[__pa(virt) >> PAGE_SHIFT]);
 }
 
-phys_t page_to_phys(struct page *page)
+unsigned long page_to_phys(struct page *page)
 {
 	return((page - mem_map) << PAGE_SHIFT);
 }
@@ -319,9 +318,8 @@ pte_t mk_pte(struct page *page, pgprot_t pgprot)
 {
 	pte_t pte;
 
-	pte_set_val(pte, page_to_phys(page), pgprot);
-	if(pte_present(pte))
-		pte_mknewprot(pte_mknewpage(pte));
+	pte_val(pte) = page_to_phys(page) + pgprot_val(pgprot);
+	if(pte_present(pte)) pte_mknewprot(pte_mknewpage(pte));
 	return(pte);
 }
 

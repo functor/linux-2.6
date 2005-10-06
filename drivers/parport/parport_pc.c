@@ -1,6 +1,6 @@
 /* Low-level parallel-port routines for 8255-based PC-style hardware.
  * 
- * Authors: Phil Blundell <philb@gnu.org>
+ * Authors: Phil Blundell <Philip.Blundell@pobox.com>
  *          Tim Waugh <tim@cyberelk.demon.co.uk>
  *	    Jose Renau <renau@acm.org>
  *          David Campbell <campbell@torque.net>
@@ -66,10 +66,6 @@
 #include <asm/parport.h>
 
 #define PARPORT_PC_MAX_PORTS PARPORT_MAX
-
-#ifdef CONFIG_ISA_DMA_API
-#define HAS_DMA
-#endif
 
 /* ECR modes */
 #define ECR_SPP 00
@@ -197,7 +193,6 @@ static int change_mode(struct parport *p, int m)
 
 #ifdef CONFIG_PARPORT_1284
 /* Find FIFO lossage; FIFO is reset */
-#if 0
 static int get_fifo_residue (struct parport *p)
 {
 	int residue;
@@ -238,7 +233,6 @@ static int get_fifo_residue (struct parport *p)
 	DPRINTK (KERN_DEBUG "*** get_fifo_residue: done residue collecting (ecr = 0x%2.2x)\n", inb (ECONTROL (p)));
 	return residue;
 }
-#endif  /*  0 */
 #endif /* IEEE 1284 support */
 #endif /* FIFO support */
 
@@ -279,7 +273,7 @@ static irqreturn_t parport_pc_interrupt(int irq, void *dev_id, struct pt_regs *r
 	return IRQ_HANDLED;
 }
 
-static void parport_pc_init_state(struct pardevice *dev, struct parport_state *s)
+void parport_pc_init_state(struct pardevice *dev, struct parport_state *s)
 {
 	s->u.pc.ctr = 0xc;
 	if (dev->irq_func &&
@@ -291,7 +285,7 @@ static void parport_pc_init_state(struct pardevice *dev, struct parport_state *s
 			     * D.Gruszka VScom */
 }
 
-static void parport_pc_save_state(struct parport *p, struct parport_state *s)
+void parport_pc_save_state(struct parport *p, struct parport_state *s)
 {
 	const struct parport_pc_private *priv = p->physport->private_data;
 	s->u.pc.ctr = priv->ctr;
@@ -299,7 +293,7 @@ static void parport_pc_save_state(struct parport *p, struct parport_state *s)
 		s->u.pc.ecr = inb (ECONTROL (p));
 }
 
-static void parport_pc_restore_state(struct parport *p, struct parport_state *s)
+void parport_pc_restore_state(struct parport *p, struct parport_state *s)
 {
 	struct parport_pc_private *priv = p->physport->private_data;
 	register unsigned char c = s->u.pc.ctr & priv->ctr_writable;
@@ -614,7 +608,6 @@ dump_parport_state ("leave fifo_write_block_pio", port);
 	return length - left;
 }
 
-#ifdef HAS_DMA
 static size_t parport_pc_fifo_write_block_dma (struct parport *port,
 					       const void *buf, size_t length)
 {
@@ -737,22 +730,11 @@ dump_parport_state ("enter fifo_write_block_dma", port);
 dump_parport_state ("leave fifo_write_block_dma", port);
 	return length - left;
 }
-#endif
-
-static inline size_t parport_pc_fifo_write_block(struct parport *port,
-					       const void *buf, size_t length)
-{
-#ifdef HAS_DMA
-	if (port->dma != PARPORT_DMA_NONE)
-		return parport_pc_fifo_write_block_dma (port, buf, length);
-#endif
-	return parport_pc_fifo_write_block_pio (port, buf, length);
-}
 
 /* Parallel Port FIFO mode (ECP chipsets) */
-static size_t parport_pc_compat_write_block_pio (struct parport *port,
-						 const void *buf, size_t length,
-						 int flags)
+size_t parport_pc_compat_write_block_pio (struct parport *port,
+					  const void *buf, size_t length,
+					  int flags)
 {
 	size_t written;
 	int r;
@@ -774,7 +756,10 @@ static size_t parport_pc_compat_write_block_pio (struct parport *port,
 	port->physport->ieee1284.phase = IEEE1284_PH_FWD_DATA;
 
 	/* Write the data to the FIFO. */
-	written = parport_pc_fifo_write_block(port, buf, length);
+	if (port->dma != PARPORT_DMA_NONE)
+		written = parport_pc_fifo_write_block_dma (port, buf, length);
+	else
+		written = parport_pc_fifo_write_block_pio (port, buf, length);
 
 	/* Finish up. */
 	/* For some hardware we don't want to touch the mode until
@@ -824,9 +809,9 @@ static size_t parport_pc_compat_write_block_pio (struct parport *port,
 
 /* ECP */
 #ifdef CONFIG_PARPORT_1284
-static size_t parport_pc_ecp_write_block_pio (struct parport *port,
-					      const void *buf, size_t length,
-					      int flags)
+size_t parport_pc_ecp_write_block_pio (struct parport *port,
+				       const void *buf, size_t length,
+				       int flags)
 {
 	size_t written;
 	int r;
@@ -869,7 +854,10 @@ static size_t parport_pc_ecp_write_block_pio (struct parport *port,
 	port->physport->ieee1284.phase = IEEE1284_PH_FWD_DATA;
 
 	/* Write the data to the FIFO. */
-	written = parport_pc_fifo_write_block(port, buf, length);
+	if (port->dma != PARPORT_DMA_NONE)
+		written = parport_pc_fifo_write_block_dma (port, buf, length);
+	else
+		written = parport_pc_fifo_write_block_pio (port, buf, length);
 
 	/* Finish up. */
 	/* For some hardware we don't want to touch the mode until
@@ -936,10 +924,8 @@ static size_t parport_pc_ecp_write_block_pio (struct parport *port,
 	return written;
 }
 
-#if 0
-static size_t parport_pc_ecp_read_block_pio (struct parport *port,
-					     void *buf, size_t length,
-					     int flags)
+size_t parport_pc_ecp_read_block_pio (struct parport *port,
+				      void *buf, size_t length, int flags)
 {
 	size_t left = length;
 	size_t fifofull;
@@ -1157,7 +1143,7 @@ out_no_data:
 dump_parport_state ("fwd idle", port);
 	return length - left;
 }
-#endif  /*  0  */
+
 #endif /* IEEE 1284 support */
 #endif /* Allowed to use FIFO/DMA */
 
@@ -1170,7 +1156,7 @@ dump_parport_state ("fwd idle", port);
 
 /* GCC is not inlining extern inline function later overwriten to non-inline,
    so we use outlined_ variants here.  */
-static struct parport_operations parport_pc_ops =
+struct parport_operations parport_pc_ops = 
 {
 	.write_data	= parport_pc_write_data,
 	.read_data	= parport_pc_read_data,
@@ -2140,7 +2126,7 @@ static int __devinit parport_dma_probe (struct parport *p)
 /* --- Initialisation code -------------------------------- */
 
 static LIST_HEAD(ports_list);
-static DEFINE_SPINLOCK(ports_lock);
+static spinlock_t ports_lock = SPIN_LOCK_UNLOCKED;
 
 struct parport *parport_pc_probe_port (unsigned long int base,
 				       unsigned long int base_hi,
@@ -2295,7 +2281,6 @@ struct parport *parport_pc_probe_port (unsigned long int base,
 		}
 
 #ifdef CONFIG_PARPORT_PC_FIFO
-#ifdef HAS_DMA
 		if (p->dma != PARPORT_DMA_NONE) {
 			if (request_dma (p->dma, p->name)) {
 				printk (KERN_WARNING "%s: dma %d in use, "
@@ -2317,8 +2302,7 @@ struct parport *parport_pc_probe_port (unsigned long int base,
 				}
 			}
 		}
-#endif
-#endif
+#endif /* CONFIG_PARPORT_PC_FIFO */
 	}
 
 	/* Done probing.  Now put the port into a sensible start-up state. */
@@ -2379,13 +2363,11 @@ void parport_pc_unregister_port (struct parport *p)
 	if (p->modes & PARPORT_MODE_ECP)
 		release_region(p->base_hi, 3);
 #ifdef CONFIG_PARPORT_PC_FIFO
-#ifdef HAS_DMA
 	if (priv->dma_buf)
 		pci_free_consistent(priv->dev, PAGE_SIZE,
 				    priv->dma_buf,
 				    priv->dma_handle);
-#endif
-#endif
+#endif /* CONFIG_PARPORT_PC_FIFO */
 	kfree (p->private_data);
 	parport_put_port(p);
 	kfree (ops); /* hope no-one cached it */
@@ -2502,7 +2484,7 @@ static int __devinit sio_ite_8872_probe (struct pci_dev *pdev, int autoirq,
 
 /* VIA 8231 support by Pavel Fedin <sonic_amiga@rambler.ru>
    based on VIA 686a support code by Jeff Garzik <jgarzik@pobox.com> */
-static int __devinitdata parport_init_mode = 0;
+static int __initdata parport_init_mode = 0;
 
 /* Data for two known VIA chips */
 static struct parport_pc_via_data via_686a_data __devinitdata = {
@@ -2747,11 +2729,13 @@ enum parport_pc_pci_cards {
 	aks_0100,
 	mobility_pp,
 	netmos_9705,
-	netmos_9715,
-	netmos_9755,
 	netmos_9805,
 	netmos_9815,
 	netmos_9855,
+	netmos_9735,
+	netmos_9835,
+	netmos_9755,
+	netmos_9715
 };
 
 
@@ -2822,11 +2806,13 @@ static struct parport_pc_pci {
 	/* aks_0100 */                  { 1, { { 0, -1 }, } },
 	/* mobility_pp */		{ 1, { { 0, 1 }, } },
 	/* netmos_9705 */               { 1, { { 0, -1 }, } }, /* untested */
-        /* netmos_9715 */               { 2, { { 0, 1 }, { 2, 3 },} }, /* untested */
-        /* netmos_9755 */               { 2, { { 0, 1 }, { 2, 3 },} }, /* untested */
 	/* netmos_9805 */               { 1, { { 0, -1 }, } }, /* untested */
 	/* netmos_9815 */               { 2, { { 0, -1 }, { 2, -1 }, } }, /* untested */
 	/* netmos_9855 */               { 2, { { 0, -1 }, { 2, -1 }, } }, /* untested */
+	/* netmos_9735 */               { 1, { { 2, 3 }, } },  /* untested */
+	/* netmos_9835 */               { 1, { { 2, 3 }, } },  /* untested */
+        /* netmos_9755 */               { 2, { { 0, 1 }, { 2, 3 },} }, /* untested */
+        /* netmos_9715 */               { 2, { { 0, 1 }, { 2, 3 },} }, /* untested */
 };
 
 static struct pci_device_id parport_pc_pci_tbl[] = {
@@ -2899,30 +2885,28 @@ static struct pci_device_id parport_pc_pci_tbl[] = {
 	/* NetMos communication controllers */
 	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9705,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9705 },
-	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9715,
-	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9715 },
-	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9755,
-	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9755 },
 	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9805,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9805 },
 	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9815,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9815 },
 	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9855,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9855 },
+	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9735,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9735 },
+	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9835,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9835 },
+	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9755,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9755 },
+	{ PCI_VENDOR_ID_NETMOS, PCI_DEVICE_ID_NETMOS_9715,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, netmos_9715 },
 	{ 0, } /* terminate list */
 };
 MODULE_DEVICE_TABLE(pci,parport_pc_pci_tbl);
-
-struct pci_parport_data {
-	int num;
-	struct parport *ports[2];
-};
 
 static int parport_pc_pci_probe (struct pci_dev *dev,
 					   const struct pci_device_id *id)
 {
 	int err, count, n, i = id->driver_data;
-	struct pci_parport_data *data;
 
 	if (i < last_sio)
 		/* This is an onboard Super-IO and has already been probed */
@@ -2934,15 +2918,9 @@ static int parport_pc_pci_probe (struct pci_dev *dev,
 	if ((err = pci_enable_device (dev)) != 0)
 		return err;
 
-	data = kmalloc(sizeof(struct pci_parport_data), GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
-
 	if (cards[i].preinit_hook &&
-	    cards[i].preinit_hook (dev, PARPORT_IRQ_NONE, PARPORT_DMA_NONE)) {
-		kfree(data);
+	    cards[i].preinit_hook (dev, PARPORT_IRQ_NONE, PARPORT_DMA_NONE))
 		return -ENODEV;
-	}
 
 	for (n = 0; n < cards[i].numports; n++) {
 		int lo = cards[i].addr[n].lo;
@@ -2961,48 +2939,21 @@ static int parport_pc_pci_probe (struct pci_dev *dev,
 			"I/O at %#lx(%#lx)\n",
 			parport_pc_pci_tbl[i + last_sio].vendor,
 			parport_pc_pci_tbl[i + last_sio].device, io_lo, io_hi);
-		data->ports[count] =
-			parport_pc_probe_port (io_lo, io_hi, PARPORT_IRQ_NONE,
-					       PARPORT_DMA_NONE, dev);
-		if (data->ports[count])
+		if (parport_pc_probe_port (io_lo, io_hi, PARPORT_IRQ_NONE,
+					   PARPORT_DMA_NONE, dev))
 			count++;
 	}
-
-	data->num = count;
 
 	if (cards[i].postinit_hook)
 		cards[i].postinit_hook (dev, count == 0);
 
-	if (count) {
-		pci_set_drvdata(dev, data);
-		return 0;
-	}
-
-	kfree(data);
-
-	return -ENODEV;
-}
-
-static void __devexit parport_pc_pci_remove(struct pci_dev *dev)
-{
-	struct pci_parport_data *data = pci_get_drvdata(dev);
-	int i;
-
-	pci_set_drvdata(dev, NULL);
-
-	if (data) {
-		for (i = data->num - 1; i >= 0; i--)
-			parport_pc_unregister_port(data->ports[i]);
-
-		kfree(data);
-	}
+	return count == 0 ? -ENODEV : 0;
 }
 
 static struct pci_driver parport_pc_pci_driver = {
 	.name		= "parport_pc",
 	.id_table	= parport_pc_pci_tbl,
 	.probe		= parport_pc_pci_probe,
-	.remove		= __devexit_p(parport_pc_pci_remove),
 };
 
 static int __init parport_pc_init_superio (int autoirq, int autodma)

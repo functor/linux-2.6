@@ -642,12 +642,12 @@ int cpqfcTS_ioctl( struct scsi_device *ScsiDev, int Cmnd, void *arg)
 				return( -EFAULT);
 			}
 		}
-		ScsiPassThruReq->sr_data_direction = DMA_TO_DEVICE; 
+		ScsiPassThruReq->sr_data_direction = SCSI_DATA_WRITE; 
 	} else if (vendor_cmd->rw_flag == VENDOR_READ_OPCODE) {
-		ScsiPassThruReq->sr_data_direction = DMA_FROM_DEVICE;
+		ScsiPassThruReq->sr_data_direction = SCSI_DATA_READ; 
 	} else
 		// maybe this means a bug in the user app
-		ScsiPassThruReq->sr_data_direction = DMA_BIDIRECTIONAL;
+		ScsiPassThruReq->sr_data_direction = SCSI_DATA_NONE;
 	    
 	ScsiPassThruReq->sr_cmd_len = 0; // set correctly by scsi_do_req()
 	ScsiPassThruReq->sr_sense_buffer[0] = 0;
@@ -752,7 +752,7 @@ int cpqfcTS_ioctl( struct scsi_device *ScsiDev, int Cmnd, void *arg)
 		result = -ENXIO;
 		break;
 	}
-	result = access_ok(VERIFY_WRITE, arg, sizeof(Scsi_FCTargAddress)) ? 0 : -EFAULT;
+	result = verify_area(VERIFY_WRITE, arg, sizeof(Scsi_FCTargAddress));
 	if (result) break;
  
       put_user(pLoggedInPort->port_id,

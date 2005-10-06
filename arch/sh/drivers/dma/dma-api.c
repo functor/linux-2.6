@@ -17,7 +17,7 @@
 #include <linux/list.h>
 #include <asm/dma.h>
 
-DEFINE_SPINLOCK(dma_spin_lock);
+spinlock_t dma_spin_lock = SPIN_LOCK_UNLOCKED;
 static LIST_HEAD(registered_dmac_list);
 
 /*

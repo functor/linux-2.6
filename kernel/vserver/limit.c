@@ -3,7 +3,7 @@
  *
  *  Virtual Server: Context Limits
  *
- *  Copyright (C) 2004-2005  Herbert Pötzl
+ *  Copyright (C) 2004  Herbert Pötzl
  *
  *  V0.01  broken out from vcontext V0.05
  *
@@ -25,17 +25,12 @@ const char *vlimit_name[NUM_LIMITS] = {
 	[RLIMIT_CPU]		= "CPU",
 	[RLIMIT_RSS]		= "RSS",
 	[RLIMIT_NPROC]		= "NPROC",
-	[RLIMIT_NOFILE]		= "NOFILE",
+	[RLIMIT_NOFILE]	= "NOFILE",
 	[RLIMIT_MEMLOCK]	= "VML",
 	[RLIMIT_AS]		= "VM",
 	[RLIMIT_LOCKS]		= "LOCKS",
-	[RLIMIT_SIGPENDING]	= "SIGP",
 	[RLIMIT_MSGQUEUE]	= "MSGQ",
-
 	[VLIMIT_NSOCK]		= "NSOCK",
-	[VLIMIT_OPENFD]		= "OPENFD",
-	[VLIMIT_ANON]		= "ANON",
-	[VLIMIT_SHMEM]		= "SHMEM",
 };
 
 EXPORT_SYMBOL_GPL(vlimit_name);
@@ -46,16 +41,11 @@ static int is_valid_rlimit(int id)
 	int valid = 0;
 
 	switch (id) {
-		case RLIMIT_RSS:
 		case RLIMIT_NPROC:
-		case RLIMIT_NOFILE:
-		case RLIMIT_MEMLOCK:
 		case RLIMIT_AS:
-
-		case VLIMIT_NSOCK:
-		case VLIMIT_OPENFD:
-		case VLIMIT_ANON:
-		case VLIMIT_SHMEM:
+		case RLIMIT_RSS:
+		case RLIMIT_MEMLOCK:
+		case RLIMIT_NOFILE:
 			valid = 1;
 			break;
 	}
@@ -127,14 +117,11 @@ int vc_get_rlimit_mask(uint32_t id, void __user *data)
 		,	/* softlimit */
 		0
 		,	/* maximum */
-		(1 << RLIMIT_RSS) |
 		(1 << RLIMIT_NPROC) |
 		(1 << RLIMIT_NOFILE) |
 		(1 << RLIMIT_MEMLOCK) |
-		(1 << RLIMIT_LOCKS) |
 		(1 << RLIMIT_AS) |
-		(1 << VLIMIT_ANON) |
-		0
+		(1 << RLIMIT_RSS)
 		};
 
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RESOURCE))

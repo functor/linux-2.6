@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001-2003 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@infradead.org>
+ * Created by David Woodhouse <dwmw2@redhat.com>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: file.c,v 1.99 2004/11/16 20:36:11 dwmw2 Exp $
+ * $Id: file.c,v 1.98 2004/03/19 16:41:09 dwmw2 Exp $
  *
  */
 
@@ -25,11 +25,6 @@
 extern int generic_file_open(struct inode *, struct file *) __attribute__((weak));
 extern loff_t generic_file_llseek(struct file *file, loff_t offset, int origin) __attribute__((weak));
 
-static int jffs2_commit_write (struct file *filp, struct page *pg,
-			       unsigned start, unsigned end);
-static int jffs2_prepare_write (struct file *filp, struct page *pg,
-				unsigned start, unsigned end);
-static int jffs2_readpage (struct file *filp, struct page *pg);
 
 int jffs2_fsync(struct file *filp, struct dentry *dentry, int datasync)
 {
@@ -70,7 +65,7 @@ struct address_space_operations jffs2_file_address_operations =
 	.commit_write =	jffs2_commit_write
 };
 
-static int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
+int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
 {
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(inode->i_sb);
@@ -79,7 +74,8 @@ static int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
 
 	D2(printk(KERN_DEBUG "jffs2_do_readpage_nolock(): ino #%lu, page at offset 0x%lx\n", inode->i_ino, pg->index << PAGE_CACHE_SHIFT));
 
-	BUG_ON(!PageLocked(pg));
+	if (!PageLocked(pg))
+                PAGE_BUG(pg);
 
 	pg_buf = kmap(pg);
 	/* FIXME: Can kmap fail? */
@@ -109,7 +105,7 @@ int jffs2_do_readpage_unlock(struct inode *inode, struct page *pg)
 }
 
 
-static int jffs2_readpage (struct file *filp, struct page *pg)
+int jffs2_readpage (struct file *filp, struct page *pg)
 {
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(pg->mapping->host);
 	int ret;
@@ -120,8 +116,7 @@ static int jffs2_readpage (struct file *filp, struct page *pg)
 	return ret;
 }
 
-static int jffs2_prepare_write (struct file *filp, struct page *pg,
-				unsigned start, unsigned end)
+int jffs2_prepare_write (struct file *filp, struct page *pg, unsigned start, unsigned end)
 {
 	struct inode *inode = pg->mapping->host;
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(inode);
@@ -203,8 +198,7 @@ static int jffs2_prepare_write (struct file *filp, struct page *pg,
 	return ret;
 }
 
-static int jffs2_commit_write (struct file *filp, struct page *pg,
-			       unsigned start, unsigned end)
+int jffs2_commit_write (struct file *filp, struct page *pg, unsigned start, unsigned end)
 {
 	/* Actually commit the write from the page cache page we're looking at.
 	 * For now, we write the full page out each time. It sucks, but it's simple

@@ -86,8 +86,8 @@ EXPORT_SYMBOL(mips_io_port_base);
 unsigned long isa_slot_offset;
 EXPORT_SYMBOL(isa_slot_offset);
 
-static struct resource code_resource = { .name = "Kernel code", };
-static struct resource data_resource = { .name = "Kernel data", };
+static struct resource code_resource = { "Kernel code" };
+static struct resource data_resource = { "Kernel data" };
 
 void __init add_memory_region(phys_t start, phys_t size, long type)
 {
@@ -281,12 +281,12 @@ static inline void bootmem_init(void)
 		initrd_reserve_bootmem = 1;
 	} else {
 		unsigned long tmp;
-		u32 *initrd_header;
+		unsigned long *initrd_header;
 
-		tmp = ((reserved_end + PAGE_SIZE-1) & PAGE_MASK) - sizeof(u32) * 2;
+		tmp = ((reserved_end + PAGE_SIZE-1) & PAGE_MASK) - 8;
 		if (tmp < reserved_end)
 			tmp += PAGE_SIZE;
-		initrd_header = (u32 *)tmp;
+		initrd_header = (unsigned long *)tmp;
 		if (initrd_header[0] == 0x494E5244) {
 			initrd_start = (unsigned long)&initrd_header[2];
 			initrd_end = initrd_start + initrd_header[1];
@@ -425,10 +425,8 @@ static inline void bootmem_init(void)
 		if (CPHYSADDR(initrd_end) > PFN_PHYS(max_low_pfn)) {
 			printk("initrd extends beyond end of memory "
 			       "(0x%0*Lx > 0x%0*Lx)\ndisabling initrd\n",
-			       sizeof(long) * 2,
-			       (unsigned long long)CPHYSADDR(initrd_end),
-			       sizeof(long) * 2,
-			       (unsigned long long)PFN_PHYS(max_low_pfn));
+			       sizeof(long) * 2, CPHYSADDR(initrd_end),
+			       sizeof(long) * 2, PFN_PHYS(max_low_pfn));
 			initrd_start = initrd_end = 0;
 			initrd_reserve_bootmem = 0;
 		}
@@ -443,21 +441,10 @@ static inline void resource_init(void)
 {
 	int i;
 
-#if defined(CONFIG_MIPS64) && !defined(CONFIG_BUILD_ELF64)
-	/*
-	 * The 64bit code in 32bit object format trick can't represent
-	 * 64bit wide relocations for linker script symbols.
-	 */
-	code_resource.start = CPHYSADDR(&_text);
-	code_resource.end = CPHYSADDR(&_etext) - 1;
-	data_resource.start = CPHYSADDR(&_etext);
-	data_resource.end = CPHYSADDR(&_edata) - 1;
-#else
 	code_resource.start = virt_to_phys(&_text);
 	code_resource.end = virt_to_phys(&_etext) - 1;
 	data_resource.start = virt_to_phys(&_etext);
 	data_resource.end = virt_to_phys(&_edata) - 1;
-#endif
 
 	/*
 	 * Request address space for all standard RAM.

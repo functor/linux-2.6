@@ -47,12 +47,12 @@ static void rif_check_expire(unsigned long dummy);
  *	Each RIF entry we learn is kept this way
  */
  
-struct rif_cache {
+struct rif_cache_s {	
 	unsigned char addr[TR_ALEN];
 	int iface;
-	__be16 rcf;
-	__be16 rseg[8];
-	struct rif_cache *next;
+	__u16 rcf;
+	__u16 rseg[8];
+	struct rif_cache_s *next;
 	unsigned long last_used;
 	unsigned char local_ring;
 };
@@ -64,9 +64,9 @@ struct rif_cache {
  *	up a lot.
  */
  
-static struct rif_cache *rif_table[RIF_TABLE_SIZE];
+static struct rif_cache_s *rif_table[RIF_TABLE_SIZE];
 
-static DEFINE_SPINLOCK(rif_lock);
+static spinlock_t rif_lock = SPIN_LOCK_UNLOCKED;
 
 
 /*
@@ -98,9 +98,8 @@ static inline unsigned long rif_hash(const unsigned char *addr)
  *	makes this a little more exciting than on ethernet.
  */
  
-static int tr_header(struct sk_buff *skb, struct net_device *dev,
-		     unsigned short type,
-		     void *daddr, void *saddr, unsigned len) 
+int tr_header(struct sk_buff *skb, struct net_device *dev, unsigned short type,
+              void *daddr, void *saddr, unsigned len) 
 {
 	struct trh_hdr *trh;
 	int hdr_len;
@@ -154,7 +153,7 @@ static int tr_header(struct sk_buff *skb, struct net_device *dev,
  *	can now send the packet.
  */
  
-static int tr_rebuild_header(struct sk_buff *skb) 
+int tr_rebuild_header(struct sk_buff *skb) 
 {
 	struct trh_hdr *trh=(struct trh_hdr *)skb->data;
 	struct trllc *trllc=(struct trllc *)(skb->data+sizeof(struct trh_hdr));
@@ -249,7 +248,7 @@ void tr_source_route(struct sk_buff *skb,struct trh_hdr *trh,struct net_device *
 {
 	int slack;
 	unsigned int hash;
-	struct rif_cache *entry;
+	struct rif_cache_s *entry;
 	unsigned char *olddata;
 	unsigned long flags;
 	static const unsigned char mcast_func_addr[] 
@@ -339,7 +338,7 @@ static void tr_add_rif_info(struct trh_hdr *trh, struct net_device *dev)
 {
 	unsigned int hash, rii_p = 0;
 	unsigned long flags;
-	struct rif_cache *entry;
+	struct rif_cache_s *entry;
 
 
 	spin_lock_irqsave(&rif_lock, flags);
@@ -375,7 +374,7 @@ printk("adding rif_entry: addr:%02X:%02X:%02X:%02X:%02X:%02X rcf:%04X\n",
 		 *	FIXME: We ought to keep some kind of cache size
 		 *	limiting and adjust the timers to suit.
 		 */
-		entry=kmalloc(sizeof(struct rif_cache),GFP_ATOMIC);
+		entry=kmalloc(sizeof(struct rif_cache_s),GFP_ATOMIC);
 
 		if(!entry) 
 		{
@@ -437,7 +436,7 @@ static void rif_check_expire(unsigned long dummy)
 	spin_lock_irqsave(&rif_lock, flags);
 	
 	for(i =0; i < RIF_TABLE_SIZE; i++) {
-		struct rif_cache *entry, **pentry;
+		struct rif_cache_s *entry, **pentry;
 		
 		pentry = rif_table+i;
 		while((entry=*pentry) != NULL) {
@@ -469,10 +468,10 @@ static void rif_check_expire(unsigned long dummy)
  
 #ifdef CONFIG_PROC_FS
 
-static struct rif_cache *rif_get_idx(loff_t pos)
+static struct rif_cache_s *rif_get_idx(loff_t pos)
 {
 	int i;
-	struct rif_cache *entry;
+	struct rif_cache_s *entry;
 	loff_t off = 0;
 
 	for(i = 0; i < RIF_TABLE_SIZE; i++) 
@@ -495,7 +494,7 @@ static void *rif_seq_start(struct seq_file *seq, loff_t *pos)
 static void *rif_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
 	int i;
-	struct rif_cache *ent = v;
+	struct rif_cache_s *ent = v;
 
 	++*pos;
 
@@ -524,7 +523,7 @@ static void rif_seq_stop(struct seq_file *seq, void *v)
 static int rif_seq_show(struct seq_file *seq, void *v)
 {
 	int j, rcf_len, segment, brdgnmb;
-	struct rif_cache *entry = v;
+	struct rif_cache_s *entry = v;
 
 	if (v == SEQ_START_TOKEN)
 		seq_puts(seq,

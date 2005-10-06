@@ -38,7 +38,7 @@
  */
 
 
-DEFINE_SPINLOCK(dma_spin_lock);
+spinlock_t dma_spin_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  *	If our port doesn't define this it has no PC like DMA

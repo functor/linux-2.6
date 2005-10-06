@@ -8,7 +8,6 @@
 # define __kernel	/* default address space */
 # define __safe		__attribute__((safe))
 # define __force	__attribute__((force))
-# define __nocast	__attribute__((nocast))
 # define __iomem	__attribute__((noderef, address_space(2)))
 # define __acquires(x)	__attribute__((context(0,1)))
 # define __releases(x)	__attribute__((context(1,0)))
@@ -22,7 +21,6 @@ extern void __chk_io_ptr(void __iomem *);
 # define __kernel
 # define __safe
 # define __force
-# define __nocast
 # define __iomem
 # define __chk_user_ptr(x) (void)0
 # define __chk_io_ptr(x) (void)0
@@ -36,10 +34,8 @@ extern void __chk_io_ptr(void __iomem *);
 
 #ifdef __KERNEL__
 
-#if __GNUC__ > 4
-#error no compiler-gcc.h file for this gcc version
-#elif __GNUC__ == 4
-# include <linux/compiler-gcc4.h>
+#if __GNUC__ > 3
+# include <linux/compiler-gcc+.h>	/* catch-all for GCC 4, 5, etc. */
 #elif __GNUC__ == 3
 # include <linux/compiler-gcc3.h>
 #elif __GNUC__ == 2
@@ -76,9 +72,9 @@ extern void __chk_io_ptr(void __iomem *);
     (typeof(ptr)) (__ptr + (off)); })
 #endif
 
-#endif /* __KERNEL__ */
-
 #endif /* __ASSEMBLY__ */
+
+#endif /* __KERNEL__ */
 
 /*
  * Allow us to mark functions as 'deprecated' and have gcc emit a nice
@@ -88,12 +84,6 @@ extern void __chk_io_ptr(void __iomem *);
  */
 #ifndef __deprecated
 # define __deprecated		/* unimplemented */
-#endif
-
-#ifdef MODULE
-#define __deprecated_for_modules __deprecated
-#else
-#define __deprecated_for_modules
 #endif
 
 #ifndef __must_check

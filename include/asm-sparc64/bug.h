@@ -1,7 +1,6 @@
 #ifndef _SPARC64_BUG_H
 #define _SPARC64_BUG_H
 
-#ifdef CONFIG_BUG
 #include <linux/compiler.h>
 
 #ifdef CONFIG_DEBUG_BUGVERBOSE
@@ -15,8 +14,6 @@ extern void do_BUG(const char *file, int line);
 #endif
 
 #define HAVE_ARCH_BUG
-#endif
-
 #include <asm-generic/bug.h>
 
 #endif

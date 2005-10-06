@@ -87,14 +87,50 @@ static struct net_device_stats *irport_net_get_stats(struct net_device *dev);
 static int irport_change_speed_complete(struct irda_task *task);
 static void irport_timeout(struct net_device *dev);
 
-static irqreturn_t irport_interrupt(int irq, void *dev_id,
-				    struct pt_regs *regs);
-static int irport_hard_xmit(struct sk_buff *skb, struct net_device *dev);
-static void irport_change_speed(void *priv, __u32 speed);
-static int irport_net_open(struct net_device *dev);
-static int irport_net_close(struct net_device *dev);
+EXPORT_SYMBOL(irport_open);
+EXPORT_SYMBOL(irport_close);
+EXPORT_SYMBOL(irport_start);
+EXPORT_SYMBOL(irport_stop);
+EXPORT_SYMBOL(irport_interrupt);
+EXPORT_SYMBOL(irport_hard_xmit);
+EXPORT_SYMBOL(irport_timeout);
+EXPORT_SYMBOL(irport_change_speed);
+EXPORT_SYMBOL(irport_net_open);
+EXPORT_SYMBOL(irport_net_close);
 
-static struct irport_cb *
+static int __init irport_init(void)
+{
+ 	int i;
+
+ 	for (i=0; (io[i] < 2000) && (i < 4); i++) {
+ 		if (irport_open(i, io[i], irq[i]) != NULL)
+ 			return 0;
+ 	}
+	/* 
+	 * Maybe something failed, but we can still be usable for FIR drivers 
+	 */
+ 	return 0;
+}
+
+/*
+ * Function irport_cleanup ()
+ *
+ *    Close all configured ports
+ *
+ */
+static void __exit irport_cleanup(void)
+{
+ 	int i;
+
+        IRDA_DEBUG( 4, "%s()\n", __FUNCTION__);
+
+	for (i=0; i < 4; i++) {
+ 		if (dev_self[i])
+ 			irport_close(dev_self[i]);
+ 	}
+}
+
+struct irport_cb *
 irport_open(int i, unsigned int iobase, unsigned int irq)
 {
 	struct net_device *dev;
@@ -114,8 +150,8 @@ irport_open(int i, unsigned int iobase, unsigned int irq)
 	 */
 	dev = alloc_irdadev(sizeof(struct irport_cb));
 	if (!dev) {
-		IRDA_ERROR("%s(), can't allocate memory for "
-			   "irda device!\n", __FUNCTION__);
+		ERROR("%s(), can't allocate memory for "
+		      "irda device!\n", __FUNCTION__);
 		goto err_out2;
 	}
 
@@ -147,8 +183,8 @@ irport_open(int i, unsigned int iobase, unsigned int irq)
 	self->rx_buff.skb = __dev_alloc_skb(self->rx_buff.truesize,
 					    GFP_KERNEL);
 	if (self->rx_buff.skb == NULL) {
-		IRDA_ERROR("%s(), can't allocate memory for "
-			   "receive buffer!\n", __FUNCTION__);
+		ERROR("%s(), can't allocate memory for "
+		      "receive buffer!\n", __FUNCTION__);
 		goto err_out3;
 	}
 	skb_reserve(self->rx_buff.skb, 1);
@@ -168,8 +204,8 @@ irport_open(int i, unsigned int iobase, unsigned int irq)
 		self->tx_buff.head = (__u8 *) kmalloc(self->tx_buff.truesize, 
 						      GFP_KERNEL);
 		if (self->tx_buff.head == NULL) {
-			IRDA_ERROR("%s(), can't allocate memory for "
-				   "transmit buffer!\n", __FUNCTION__);
+			ERROR("%s(), can't allocate memory for "
+			      "transmit buffer!\n", __FUNCTION__);
 			goto err_out4;
 		}
 		memset(self->tx_buff.head, 0, self->tx_buff.truesize);
@@ -198,10 +234,10 @@ irport_open(int i, unsigned int iobase, unsigned int irq)
 	dev->irq = irq;
 
 	if (register_netdev(dev)) {
-		IRDA_ERROR("%s(), register_netdev() failed!\n", __FUNCTION__);
+		ERROR("%s(), register_netdev() failed!\n", __FUNCTION__);
 		goto err_out5;
 	}
-	IRDA_MESSAGE("IrDA: Registered device %s (irport io=0x%X irq=%d)\n",
+	MESSAGE("IrDA: Registered device %s (irport io=0x%X irq=%d)\n",
 		dev->name, iobase, irq);
 
 	return self;
@@ -218,9 +254,9 @@ irport_open(int i, unsigned int iobase, unsigned int irq)
 	return NULL;
 }
 
-static int irport_close(struct irport_cb *self)
+int irport_close(struct irport_cb *self)
 {
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	/* We are not using any dongle anymore! */
 	if (self->dongle)
@@ -249,25 +285,7 @@ static int irport_close(struct irport_cb *self)
 	return 0;
 }
 
-static void irport_stop(struct irport_cb *self)
-{
-	int iobase;
-
-	iobase = self->io.sir_base;
-
-	/* We can't lock, we may be called from a FIR driver - Jean II */
-
-	/* We are not transmitting any more */
-	self->transmitting = 0;
-
-	/* Reset UART */
-	outb(0, iobase+UART_MCR);
-	
-	/* Turn off interrupts */
-	outb(0, iobase+UART_IER);
-}
-
-static void irport_start(struct irport_cb *self)
+void irport_start(struct irport_cb *self)
 {
 	int iobase;
 
@@ -283,6 +301,24 @@ static void irport_start(struct irport_cb *self)
 	
 	/* Turn on interrups */
 	outb(UART_IER_RLSI | UART_IER_RDI |UART_IER_THRI, iobase+UART_IER);
+}
+
+void irport_stop(struct irport_cb *self)
+{
+	int iobase;
+
+	iobase = self->io.sir_base;
+
+	/* We can't lock, we may be called from a FIR driver - Jean II */
+
+	/* We are not transmitting any more */
+	self->transmitting = 0;
+
+	/* Reset UART */
+	outb(0, iobase+UART_MCR);
+	
+	/* Turn off interrupts */
+	outb(0, iobase+UART_IER);
 }
 
 /*
@@ -332,7 +368,7 @@ static inline unsigned int irport_get_fcr(__u32 speed)
  *
  * This function should be called with irq off and spin-lock.
  */
-static void irport_change_speed(void *priv, __u32 speed)
+void irport_change_speed(void *priv, __u32 speed)
 {
 	struct irport_cb *self = (struct irport_cb *) priv;
 	int iobase; 
@@ -340,8 +376,8 @@ static void irport_change_speed(void *priv, __u32 speed)
 	unsigned int lcr;    /* Line control reg */
 	int divisor;
 
-	IRDA_ASSERT(self != NULL, return;);
-	IRDA_ASSERT(speed != 0, return;);
+	ASSERT(self != NULL, return;);
+	ASSERT(speed != 0, return;);
 
 	IRDA_DEBUG(1, "%s(), Setting speed to: %d - iobase=%#x\n",
 		    __FUNCTION__, speed, self->io.sir_base);
@@ -395,7 +431,7 @@ int __irport_change_speed(struct irda_task *task)
 
 	self = (struct irport_cb *) task->instance;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	/* Locking notes : this function may be called from irq context with
 	 * spinlock, via irport_write_wakeup(), or from non-interrupt without
@@ -444,7 +480,7 @@ int __irport_change_speed(struct irda_task *task)
 			irda_task_next_state(task, IRDA_TASK_CHILD_DONE);
 		break;
 	case IRDA_TASK_CHILD_WAIT:
-		IRDA_WARNING("%s(), changing speed of dongle timed out!\n", __FUNCTION__);
+		WARNING("%s(), changing speed of dongle timed out!\n", __FUNCTION__);
 		ret = -1;		
 		break;
 	case IRDA_TASK_CHILD_DONE:
@@ -454,8 +490,7 @@ int __irport_change_speed(struct irda_task *task)
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		break;
 	default:
-		IRDA_ERROR("%s(), unknown state %d\n",
-			   __FUNCTION__, task->state);
+		ERROR("%s(), unknown state %d\n", __FUNCTION__, task->state);
 		irda_task_next_state(task, IRDA_TASK_DONE);
 		ret = -1;
 		break;
@@ -482,8 +517,8 @@ static int irport_change_speed_complete(struct irda_task *task)
 
 	self = (struct irport_cb *) task->instance;
 
-	IRDA_ASSERT(self != NULL, return -1;);
-	IRDA_ASSERT(self->netdev != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
+	ASSERT(self->netdev != NULL, return -1;);
 
 	/* Finished changing speed, so we are not busy any longer */
 	/* Signal network layer so it can try to send the frame */
@@ -508,10 +543,10 @@ static void irport_timeout(struct net_device *dev)
 	unsigned long flags;
 
 	self = (struct irport_cb *) dev->priv;
-	IRDA_ASSERT(self != NULL, return;);
+	ASSERT(self != NULL, return;);
 	iobase = self->io.sir_base;
 	
-	IRDA_WARNING("%s: transmit timed out, jiffies = %ld, trans_start = %ld\n",
+	WARNING("%s: transmit timed out, jiffies = %ld, trans_start = %ld\n",
 		dev->name, jiffies, dev->trans_start);
 	spin_lock_irqsave(&self->lock, flags);
 
@@ -584,7 +619,7 @@ static void irport_wait_hw_transmitter_finish(struct irport_cb *self)
  *    waits until the next transmitt interrupt, and continues until the
  *    frame is transmitted.
  */
-static int irport_hard_xmit(struct sk_buff *skb, struct net_device *dev)
+int irport_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct irport_cb *self;
 	unsigned long flags;
@@ -593,10 +628,10 @@ static int irport_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	IRDA_DEBUG(1, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(dev != NULL, return 0;);
+	ASSERT(dev != NULL, return 0;);
 	
 	self = (struct irport_cb *) dev->priv;
-	IRDA_ASSERT(self != NULL, return 0;);
+	ASSERT(self != NULL, return 0;);
 
 	iobase = self->io.sir_base;
 
@@ -693,7 +728,7 @@ static inline void irport_write_wakeup(struct irport_cb *self)
 	int iobase;
 	unsigned int fcr;
 
-	IRDA_ASSERT(self != NULL, return;);
+	ASSERT(self != NULL, return;);
 
 	IRDA_DEBUG(4, "%s()\n", __FUNCTION__);
 
@@ -754,7 +789,7 @@ static inline void irport_receive(struct irport_cb *self)
 	int boguscount = 0;
 	int iobase;
 
-	IRDA_ASSERT(self != NULL, return;);
+	ASSERT(self != NULL, return;);
 
 	iobase = self->io.sir_base;
 
@@ -779,8 +814,7 @@ static inline void irport_receive(struct irport_cb *self)
  *
  *    Interrupt handler
  */
-static irqreturn_t irport_interrupt(int irq, void *dev_id,
-				    struct pt_regs *regs) 
+irqreturn_t irport_interrupt(int irq, void *dev_id, struct pt_regs *regs) 
 {
 	struct net_device *dev = (struct net_device *) dev_id;
 	struct irport_cb *self;
@@ -790,7 +824,7 @@ static irqreturn_t irport_interrupt(int irq, void *dev_id,
 	int handled = 0;
 
 	if (!dev) {
-		IRDA_WARNING("%s() irq %d for unknown device.\n", __FUNCTION__, irq);
+		WARNING("%s() irq %d for unknown device.\n", __FUNCTION__, irq);
 		return IRQ_NONE;
 	}
 	self = (struct irport_cb *) dev->priv;
@@ -827,8 +861,8 @@ static irqreturn_t irport_interrupt(int irq, void *dev_id,
 
 		/* Make sure we don't stay here to long */
 		if (boguscount++ > 10) {
-			IRDA_WARNING("%s() irq handler looping : lsr=%02x\n",
-				     __FUNCTION__, lsr);
+			WARNING("%s() irq handler looping : lsr=%02x\n",
+				__FUNCTION__, lsr);
 			break;
 		}
 
@@ -854,7 +888,7 @@ static irqreturn_t irport_interrupt(int irq, void *dev_id,
  *    Network device is taken up. Usually this is done by "ifconfig irda0 up" 
  *   
  */
-static int irport_net_open(struct net_device *dev)
+int irport_net_open(struct net_device *dev)
 {
 	struct irport_cb *self;
 	int iobase;
@@ -863,7 +897,7 @@ static int irport_net_open(struct net_device *dev)
 
 	IRDA_DEBUG(2, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(dev != NULL, return -1;);
+	ASSERT(dev != NULL, return -1;);
 	self = (struct irport_cb *) dev->priv;
 
 	iobase = self->io.sir_base;
@@ -907,7 +941,7 @@ static int irport_net_open(struct net_device *dev)
  *    Network device is taken down. Usually this is done by 
  *    "ifconfig irda0 down" 
  */
-static int irport_net_close(struct net_device *dev)
+int irport_net_close(struct net_device *dev)
 {
 	struct irport_cb *self;
 	int iobase;
@@ -915,10 +949,10 @@ static int irport_net_close(struct net_device *dev)
 
 	IRDA_DEBUG(4, "%s()\n", __FUNCTION__);
 
-	IRDA_ASSERT(dev != NULL, return -1;);
+	ASSERT(dev != NULL, return -1;);
 	self = (struct irport_cb *) dev->priv;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	iobase = self->io.sir_base;
 
@@ -961,7 +995,7 @@ static int irport_set_dtr_rts(struct net_device *dev, int dtr, int rts)
 	struct irport_cb *self = dev->priv;
 	int iobase;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	iobase = self->io.sir_base;
 
@@ -981,7 +1015,7 @@ static int irport_raw_write(struct net_device *dev, __u8 *buf, int len)
 	int actual = 0;
 	int iobase;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	iobase = self->io.sir_base;
 
@@ -1015,11 +1049,11 @@ static int irport_net_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	unsigned long flags;
 	int ret = 0;
 
-	IRDA_ASSERT(dev != NULL, return -1;);
+	ASSERT(dev != NULL, return -1;);
 
 	self = dev->priv;
 
-	IRDA_ASSERT(self != NULL, return -1;);
+	ASSERT(self != NULL, return -1;);
 
 	IRDA_DEBUG(2, "%s(), %s, (cmd=0x%X)\n", __FUNCTION__, dev->name, cmd);
 	
@@ -1098,38 +1132,6 @@ static struct net_device_stats *irport_net_get_stats(struct net_device *dev)
 	struct irport_cb *self = (struct irport_cb *) dev->priv;
 	
 	return &self->stats;
-}
-
-static int __init irport_init(void)
-{
- 	int i;
-
- 	for (i=0; (io[i] < 2000) && (i < 4); i++) {
- 		if (irport_open(i, io[i], irq[i]) != NULL)
- 			return 0;
- 	}
-	/* 
-	 * Maybe something failed, but we can still be usable for FIR drivers 
-	 */
- 	return 0;
-}
-
-/*
- * Function irport_cleanup ()
- *
- *    Close all configured ports
- *
- */
-static void __exit irport_cleanup(void)
-{
- 	int i;
-
-        IRDA_DEBUG( 4, "%s()\n", __FUNCTION__);
-
-	for (i=0; i < 4; i++) {
- 		if (dev_self[i])
- 			irport_close(dev_self[i]);
- 	}
 }
 
 MODULE_PARM(io, "1-4i");

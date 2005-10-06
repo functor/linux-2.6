@@ -29,7 +29,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/wait.h>
 #undef DEBUG   		/* include debug macros until it's done	*/
 #include <linux/usb.h>
 
@@ -606,6 +605,7 @@ static void auerchain_blocking_completion (struct urb *urb, struct pt_regs *regs
 /* Starts chained urb and waits for completion or timeout */
 static int auerchain_start_wait_urb (pauerchain_t acp, struct urb *urb, int timeout, int* actual_length)
 {
+	DECLARE_WAITQUEUE (wait, current);
 	auerchain_chs_t chs;
 	int status;
 
@@ -613,13 +613,26 @@ static int auerchain_start_wait_urb (pauerchain_t acp, struct urb *urb, int time
 	init_waitqueue_head (&chs.wqh);
 	chs.done = 0;
 
+	set_current_state (TASK_UNINTERRUPTIBLE);
+	add_wait_queue (&chs.wqh, &wait);
 	urb->context = &chs;
 	status = auerchain_submit_urb (acp, urb);
-	if (status)
+	if (status) {
 		/* something went wrong */
+		set_current_state (TASK_RUNNING);
+		remove_wait_queue (&chs.wqh, &wait);
 		return status;
+	}
 
-	timeout = wait_event_timeout(chs.wqh, chs.done, timeout);
+	while (timeout && !chs.done)
+	{
+		timeout = schedule_timeout (timeout);
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		rmb();
+	}
+
+	set_current_state (TASK_RUNNING);
+	remove_wait_queue (&chs.wqh, &wait);
 
 	if (!timeout && !chs.done) {
 		if (urb->status != -EINPROGRESS) {	/* No callback?!! */
@@ -705,12 +718,16 @@ static int auerchain_control_msg (pauerchain_t acp, struct usb_device *dev, unsi
 /* free a single auerbuf */
 static void auerbuf_free (pauerbuf_t bp)
 {
-	kfree(bp->bufp);
-	kfree(bp->dr);
-	if (bp->urbp) {
-		usb_free_urb(bp->urbp);
+	if (bp->bufp) {
+		kfree (bp->bufp);
 	}
-	kfree(bp);
+	if (bp->dr) {
+		kfree (bp->dr);
+	}
+	if (bp->urbp) {
+		usb_free_urb (bp->urbp);
+	}
+	kfree (bp);
 }
 
 /* free the buffers from an auerbuf list */
@@ -1089,12 +1106,14 @@ exit:
 */
 static void auerswald_int_free (pauerswald_t cp)
 {
-	if (cp->inturbp) {
-		usb_free_urb(cp->inturbp);
-		cp->inturbp = NULL;
-	}
-	kfree(cp->intbufp);
-	cp->intbufp = NULL;
+        if (cp->inturbp) {
+                usb_free_urb (cp->inturbp);
+                cp->inturbp = NULL;
+        }
+        if (cp->intbufp) {
+                kfree (cp->intbufp);
+                cp->intbufp = NULL;
+        }
 }
 
 /* This function is called to activate the interrupt
@@ -1104,16 +1123,16 @@ static void auerswald_int_free (pauerswald_t cp)
 static int auerswald_int_open (pauerswald_t cp)
 {
         int ret;
-	struct usb_host_endpoint *ep;
+	struct usb_endpoint_descriptor *ep;
 	int irqsize;
 	dbg ("auerswald_int_open");
 
-	ep = cp->usbdev->ep_in[AU_IRQENDP];
+	ep = usb_epnum_to_ep_desc (cp->usbdev, USB_DIR_IN | AU_IRQENDP);
 	if (!ep) {
 		ret = -EFAULT;
   		goto intoend;
     	}
-	irqsize = le16_to_cpu(ep->desc.wMaxPacketSize);
+	irqsize = ep->wMaxPacketSize;
 	cp->irqsize = irqsize;
 
 	/* allocate the urb and data buffer */
@@ -1132,9 +1151,7 @@ static int auerswald_int_open (pauerswald_t cp)
                 }
         }
         /* setup urb */
-        usb_fill_int_urb (cp->inturbp, cp->usbdev,
-			usb_rcvintpipe (cp->usbdev,AU_IRQENDP), cp->intbufp,
-			irqsize, auerswald_int_complete, cp, ep->desc.bInterval);
+        usb_fill_int_urb (cp->inturbp, cp->usbdev, usb_rcvintpipe (cp->usbdev,AU_IRQENDP), cp->intbufp, irqsize, auerswald_int_complete, cp, ep->bInterval);
         /* start the urb */
 	cp->inturbp->status = 0;	/* needed! */
 	ret = usb_submit_urb (cp->inturbp, GFP_KERNEL);
@@ -1912,8 +1929,11 @@ static int auerswald_probe (struct usb_interface *intf,
 	int ret;
 
 	dbg ("probe: vendor id 0x%x, device id 0x%x",
-	     le16_to_cpu(usbdev->descriptor.idVendor),
-	     le16_to_cpu(usbdev->descriptor.idProduct));
+	     usbdev->descriptor.idVendor, usbdev->descriptor.idProduct);
+
+	/* See if the device offered us matches that we can accept */
+	if (usbdev->descriptor.idVendor != ID_AUERSWALD)
+		return -ENODEV;
 
         /* we use only the first -and only- interface */
         if (intf->altsetting->desc.bInterfaceNumber != 0)
@@ -1947,7 +1967,7 @@ static int auerswald_probe (struct usb_interface *intf,
 	cp->dtindex = intf->minor;
 
 	/* Get the usb version of the device */
-	cp->version = le16_to_cpu(cp->usbdev->descriptor.bcdDevice);
+	cp->version = cp->usbdev->descriptor.bcdDevice;
 	dbg ("Version is %X", cp->version);
 
 	/* allow some time to settle the device */
@@ -1990,7 +2010,7 @@ static int auerswald_probe (struct usb_interface *intf,
                 AUDI_MBCTRANS,                      /* USB message index value */
                 pbuf,                               /* pointer to the receive buffer */
                 2,                                  /* length of the buffer */
-                2000);                            /* time to wait for the message to complete before timing out */
+                HZ * 2);                            /* time to wait for the message to complete before timing out */
         if (ret == 2) {
 	        cp->maxControlLength = le16_to_cpup(pbuf);
                 kfree(pbuf);

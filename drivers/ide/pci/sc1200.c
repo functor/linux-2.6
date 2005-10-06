@@ -346,7 +346,7 @@ typedef struct sc1200_saved_state_s {
 } sc1200_saved_state_t;
 
 
-static int sc1200_suspend (struct pci_dev *dev, pm_message_t state)
+static int sc1200_suspend (struct pci_dev *dev, u32 state)
 {
 	ide_hwif_t		*hwif = NULL;
 
@@ -489,7 +489,8 @@ static ide_pci_device_t sc1200_chipset __devinitdata = {
 
 static int __devinit sc1200_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	return ide_setup_pci_device(dev, &sc1200_chipset);
+	ide_setup_pci_device(dev, &sc1200_chipset);
+	return 0;
 }
 
 static struct pci_device_id sc1200_pci_tbl[] = {

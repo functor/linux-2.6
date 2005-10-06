@@ -324,7 +324,7 @@ static int old_deviceless(void __user *uarg)
 		int *indices;
 		int ret = 0;
 
-		if (args[2] >= 2048)
+		if (args[2] >= 16384)
 			return -ENOMEM;
 		indices = kmalloc(args[2]*sizeof(int), GFP_KERNEL);
 		if (indices == NULL)

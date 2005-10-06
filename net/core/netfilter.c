@@ -47,7 +47,7 @@ static DECLARE_MUTEX(nf_sockopt_mutex);
 
 struct list_head nf_hooks[NPROTO][NF_MAX_HOOKS];
 static LIST_HEAD(nf_sockopts);
-static DEFINE_SPINLOCK(nf_hook_lock);
+static spinlock_t nf_hook_lock = SPIN_LOCK_UNLOCKED;
 
 /* 
  * A queue handler may be registered for each protocol.  Each is protected by
@@ -58,7 +58,7 @@ static struct nf_queue_handler_t {
 	nf_queue_outfn_t outfn;
 	void *data;
 } queue_handler[NPROTO];
-static DEFINE_RWLOCK(queue_handler_lock);
+static rwlock_t queue_handler_lock = RW_LOCK_UNLOCKED;
 
 int nf_register_hook(struct nf_hook_ops *reg)
 {
@@ -173,7 +173,7 @@ static void debug_print_hooks_ip(unsigned int nf_debug)
 	printk("\n");
 }
 
-static void nf_dump_skb(int pf, struct sk_buff *skb)
+void nf_dump_skb(int pf, struct sk_buff *skb)
 {
 	printk("skb: pf=%i %s dev=%s len=%u\n", 
 	       pf,
@@ -204,7 +204,7 @@ static void nf_dump_skb(int pf, struct sk_buff *skb)
 
 		for (opti = 0; opti < (ip->ihl - sizeof(struct iphdr) / 4); opti++)
 			printk(" O=0x%8.8X", *opt++);
-		printk(" MARK=%lu (0x%lx)",
+		printk(" MARK=%lu (0x%lu)",
 		       (long unsigned int)skb->nfmark,
 		       (long unsigned int)skb->nfmark);
 		printk("\n");
@@ -220,10 +220,21 @@ void nf_debug_ip_local_deliver(struct sk_buff *skb)
 	 * NF_IP_RAW_INPUT and NF_IP_PRE_ROUTING.  */
 	if (!skb->dev) {
 		printk("ip_local_deliver: skb->dev is NULL.\n");
-	} else {
+	}
+	else if (strcmp(skb->dev->name, "lo") == 0) {
+		if (skb->nf_debug != ((1 << NF_IP_LOCAL_OUT)
+				      | (1 << NF_IP_POST_ROUTING)
+				      | (1 << NF_IP_PRE_ROUTING)
+				      | (1 << NF_IP_LOCAL_IN))) {
+			printk("ip_local_deliver: bad loopback skb: ");
+			debug_print_hooks_ip(skb->nf_debug);
+			nf_dump_skb(PF_INET, skb);
+		}
+	}
+	else {
 		if (skb->nf_debug != ((1<<NF_IP_PRE_ROUTING)
 				      | (1<<NF_IP_LOCAL_IN))) {
-			printk("ip_local_deliver: bad skb: ");
+			printk("ip_local_deliver: bad non-lo skb: ");
 			debug_print_hooks_ip(skb->nf_debug);
 			nf_dump_skb(PF_INET, skb);
 		}
@@ -239,6 +250,8 @@ void nf_debug_ip_loopback_xmit(struct sk_buff *newskb)
 		debug_print_hooks_ip(newskb->nf_debug);
 		nf_dump_skb(PF_INET, newskb);
 	}
+	/* Clear to avoid confusing input check */
+	newskb->nf_debug = 0;
 }
 
 void nf_debug_ip_finish_output2(struct sk_buff *skb)
@@ -339,8 +352,6 @@ static unsigned int nf_iterate(struct list_head *head,
 			       int (*okfn)(struct sk_buff *),
 			       int hook_thresh)
 {
-	unsigned int verdict;
-
 	/*
 	 * The caller must not block between calls to this
 	 * function because of risk of continuing from deleted element.
@@ -353,18 +364,28 @@ static unsigned int nf_iterate(struct list_head *head,
 
 		/* Optimization: we don't need to hold module
                    reference here, since function can't sleep. --RR */
-		verdict = elem->hook(hook, skb, indev, outdev, okfn);
-		if (verdict != NF_ACCEPT) {
-#ifdef CONFIG_NETFILTER_DEBUG
-			if (unlikely(verdict > NF_MAX_VERDICT)) {
-				NFDEBUG("Evil return from %p(%u).\n",
-				        elem->hook, hook);
-				continue;
-			}
-#endif
-			if (verdict != NF_REPEAT)
-				return verdict;
+		switch (elem->hook(hook, skb, indev, outdev, okfn)) {
+		case NF_QUEUE:
+			return NF_QUEUE;
+
+		case NF_STOLEN:
+			return NF_STOLEN;
+
+		case NF_DROP:
+			return NF_DROP;
+
+		case NF_REPEAT:
 			*i = (*i)->prev;
+			break;
+
+#ifdef CONFIG_NETFILTER_DEBUG
+		case NF_ACCEPT:
+			break;
+
+		default:
+			NFDEBUG("Evil return from %p(%u).\n", 
+				elem->hook, hook);
+#endif
 		}
 	}
 	return NF_ACCEPT;
@@ -476,9 +497,7 @@ static int nf_queue(struct sk_buff *skb,
 	return 1;
 }
 
-/* Returns 1 if okfn() needs to be executed by the caller,
- * -EPERM for NF_DROP, 0 otherwise. */
-int nf_hook_slow(int pf, unsigned int hook, struct sk_buff **pskb,
+int nf_hook_slow(int pf, unsigned int hook, struct sk_buff *skb,
 		 struct net_device *indev,
 		 struct net_device *outdev,
 		 int (*okfn)(struct sk_buff *),
@@ -492,29 +511,34 @@ int nf_hook_slow(int pf, unsigned int hook, struct sk_buff **pskb,
 	rcu_read_lock();
 
 #ifdef CONFIG_NETFILTER_DEBUG
-	if (unlikely((*pskb)->nf_debug & (1 << hook))) {
+	if (skb->nf_debug & (1 << hook)) {
 		printk("nf_hook: hook %i already set.\n", hook);
-		nf_dump_skb(pf, *pskb);
+		nf_dump_skb(pf, skb);
 	}
-	(*pskb)->nf_debug |= (1 << hook);
+	skb->nf_debug |= (1 << hook);
 #endif
 
 	elem = &nf_hooks[pf][hook];
-next_hook:
-	verdict = nf_iterate(&nf_hooks[pf][hook], pskb, hook, indev,
+ next_hook:
+	verdict = nf_iterate(&nf_hooks[pf][hook], &skb, hook, indev,
 			     outdev, &elem, okfn, hook_thresh);
-	if (verdict == NF_ACCEPT || verdict == NF_STOP) {
-		ret = 1;
-		goto unlock;
-	} else if (verdict == NF_DROP) {
-		kfree_skb(*pskb);
-		ret = -EPERM;
-	} else if (verdict == NF_QUEUE) {
+	if (verdict == NF_QUEUE) {
 		NFDEBUG("nf_hook: Verdict = QUEUE.\n");
-		if (!nf_queue(*pskb, elem, pf, hook, indev, outdev, okfn))
+		if (!nf_queue(skb, elem, pf, hook, indev, outdev, okfn))
 			goto next_hook;
 	}
-unlock:
+
+	switch (verdict) {
+	case NF_ACCEPT:
+		ret = okfn(skb);
+		break;
+
+	case NF_DROP:
+		kfree_skb(skb);
+		ret = -EPERM;
+		break;
+	}
+
 	rcu_read_unlock();
 	return ret;
 }
@@ -657,6 +681,7 @@ EXPORT_SYMBOL(ip_route_me_harder);
 int skb_ip_make_writable(struct sk_buff **pskb, unsigned int writable_len)
 {
 	struct sk_buff *nskb;
+	unsigned int iplen;
 
 	if (writable_len > (*pskb)->len)
 		return 0;
@@ -665,7 +690,35 @@ int skb_ip_make_writable(struct sk_buff **pskb, unsigned int writable_len)
 	if (skb_shared(*pskb) || skb_cloned(*pskb))
 		goto copy_skb;
 
-	return pskb_may_pull(*pskb, writable_len);
+	/* Alexey says IP hdr is always modifiable and linear, so ok. */
+	if (writable_len <= (*pskb)->nh.iph->ihl*4)
+		return 1;
+
+	iplen = writable_len - (*pskb)->nh.iph->ihl*4;
+
+	/* DaveM says protocol headers are also modifiable. */
+	switch ((*pskb)->nh.iph->protocol) {
+	case IPPROTO_TCP: {
+		struct tcphdr _hdr, *hp;
+		hp = skb_header_pointer(*pskb, (*pskb)->nh.iph->ihl*4,
+					sizeof(_hdr), &_hdr);
+		if (hp == NULL)
+			goto copy_skb;
+		if (writable_len <= (*pskb)->nh.iph->ihl*4 + hp->doff*4)
+			goto pull_skb;
+		goto copy_skb;
+	}
+	case IPPROTO_UDP:
+		if (writable_len<=(*pskb)->nh.iph->ihl*4+sizeof(struct udphdr))
+			goto pull_skb;
+		goto copy_skb;
+	case IPPROTO_ICMP:
+		if (writable_len
+		    <= (*pskb)->nh.iph->ihl*4 + sizeof(struct icmphdr))
+			goto pull_skb;
+		goto copy_skb;
+	/* Insert other cases here as desired */
+	}
 
 copy_skb:
 	nskb = skb_copy(*pskb, GFP_ATOMIC);
@@ -680,6 +733,9 @@ copy_skb:
 	kfree_skb(*pskb);
 	*pskb = nskb;
 	return 1;
+
+pull_skb:
+	return pskb_may_pull(*pskb, writable_len);
 }
 EXPORT_SYMBOL(skb_ip_make_writable);
 #endif /*CONFIG_INET*/
@@ -691,7 +747,7 @@ EXPORT_SYMBOL(skb_ip_make_writable);
 
 static nf_logfn *nf_logging[NPROTO]; /* = NULL */
 static int reported = 0;
-static DEFINE_SPINLOCK(nf_log_lock);
+static spinlock_t nf_log_lock = SPIN_LOCK_UNLOCKED;
 
 int nf_log_register(int pf, nf_logfn *logfn)
 {

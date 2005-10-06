@@ -15,13 +15,15 @@
 #include <linux/errno.h>
 #include <asm/ptrace.h>
 #include <asm/system.h>
-#include <asm/pmc.h>
 
 #include "op_impl.h"
 
 extern struct op_ppc64_model op_model_rs64;
 extern struct op_ppc64_model op_model_power4;
 static struct op_ppc64_model *model;
+
+extern void (*perf_irq)(struct pt_regs *);
+static void (*save_perf_irq)(struct pt_regs *);
 
 static struct op_counter_config ctr[OP_MAX_COUNTER];
 static struct op_system_config sys;
@@ -33,12 +35,11 @@ static void op_handle_interrupt(struct pt_regs *regs)
 
 static int op_ppc64_setup(void)
 {
-	int err;
+	/* Install our interrupt handler into the existing hook.  */
+	save_perf_irq = perf_irq;
+	perf_irq = op_handle_interrupt;
 
-	/* Grab the hardware */
-	err = reserve_pmc_hardware(op_handle_interrupt);
-	if (err)
-		return err;
+	mb();
 
 	/* Pre-compute the values to stuff in the hardware registers.  */
 	model->reg_setup(ctr, &sys, model->num_counters);
@@ -51,7 +52,10 @@ static int op_ppc64_setup(void)
 
 static void op_ppc64_shutdown(void)
 {
-	release_pmc_hardware();
+	mb();
+
+	/* Remove our interrupt handler. We may be removing this module. */
+	perf_irq = save_perf_irq;
 }
 
 static void op_ppc64_cpu_start(void *dummy)
@@ -121,7 +125,16 @@ static int op_ppc64_create_files(struct super_block *sb, struct dentry *root)
 	return 0;
 }
 
-int __init oprofile_arch_init(struct oprofile_operations *ops)
+static struct oprofile_operations oprof_ppc64_ops = {
+	.create_files	= op_ppc64_create_files,
+	.setup		= op_ppc64_setup,
+	.shutdown	= op_ppc64_shutdown,
+	.start		= op_ppc64_start,
+	.stop		= op_ppc64_stop,
+	.cpu_type	= NULL		/* To be filled in below. */
+};
+
+int __init oprofile_arch_init(struct oprofile_operations **ops)
 {
 	unsigned int pvr;
 
@@ -132,7 +145,7 @@ int __init oprofile_arch_init(struct oprofile_operations *ops)
 		case PV_630p:
 			model = &op_model_rs64;
 			model->num_counters = 8;
-			ops->cpu_type = "ppc64/power3";
+			oprof_ppc64_ops.cpu_type = "ppc64/power3";
 			break;
 
 		case PV_NORTHSTAR:
@@ -141,42 +154,38 @@ int __init oprofile_arch_init(struct oprofile_operations *ops)
 		case PV_SSTAR:
 			model = &op_model_rs64;
 			model->num_counters = 8;
-			ops->cpu_type = "ppc64/rs64";
+			oprof_ppc64_ops.cpu_type = "ppc64/rs64";
 			break;
 
 		case PV_POWER4:
 		case PV_POWER4p:
 			model = &op_model_power4;
 			model->num_counters = 8;
-			ops->cpu_type = "ppc64/power4";
+			oprof_ppc64_ops.cpu_type = "ppc64/power4";
 			break;
 
 		case PV_970:
 		case PV_970FX:
 			model = &op_model_power4;
 			model->num_counters = 8;
-			ops->cpu_type = "ppc64/970";
+			oprof_ppc64_ops.cpu_type = "ppc64/970";
 			break;
 
 		case PV_POWER5:
 		case PV_POWER5p:
 			model = &op_model_power4;
 			model->num_counters = 6;
-			ops->cpu_type = "ppc64/power5";
+			oprof_ppc64_ops.cpu_type = "ppc64/power5";
 			break;
 
 		default:
 			return -ENODEV;
 	}
 
-	ops->create_files = op_ppc64_create_files;
-	ops->setup = op_ppc64_setup;
-	ops->shutdown = op_ppc64_shutdown;
-	ops->start = op_ppc64_start;
-	ops->stop = op_ppc64_stop;
+	*ops = &oprof_ppc64_ops;
 
 	printk(KERN_INFO "oprofile: using %s performance monitoring.\n",
-	       ops->cpu_type);
+	       oprof_ppc64_ops.cpu_type);
 
 	return 0;
 }

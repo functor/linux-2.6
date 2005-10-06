@@ -41,7 +41,7 @@ static inline unsigned long mmap_base(struct mm_struct *mm)
 	unsigned long gap = current->signal->rlim[RLIMIT_STACK].rlim_cur;
 	unsigned long random_factor = 0;
 
-	if (current->flags & PF_RANDOMIZE)
+	if (current->flags & PF_RELOCEXEC)
 		random_factor = get_random_int() % (1024*1024);
 
 	if (gap < MIN_GAP)
@@ -64,14 +64,14 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	 */
 	if ((exec_shield != 2) && (sysctl_legacy_va_layout ||
 			(current->personality & ADDR_COMPAT_LAYOUT) ||
-			current->signal->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)) {
+			current->signal->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)){
 		mm->mmap_base = TASK_UNMAPPED_BASE;
 		mm->get_unmapped_area = arch_get_unmapped_area;
 		mm->unmap_area = arch_unmap_area;
 	} else {
 		mm->mmap_base = mmap_base(mm);
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-		if (!(current->personality & READ_IMPLIES_EXEC))
+		if (current->flags & PF_RELOCEXEC)
 			mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
 		mm->unmap_area = arch_unmap_area_topdown;
 	}

@@ -146,7 +146,7 @@ typedef struct wavnc_port_info {
 
 static int		nr_waveartist_devs;
 static wavnc_info	adev_info[MAX_AUDIO_DEV];
-static DEFINE_SPINLOCK(waveartist_lock);
+static spinlock_t	waveartist_lock = SPIN_LOCK_UNLOCKED;
 
 #ifndef CONFIG_ARCH_NETWINDER
 #define machine_is_netwinder() 0

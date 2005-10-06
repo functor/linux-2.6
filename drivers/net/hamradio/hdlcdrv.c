@@ -174,10 +174,12 @@ static void hdlc_rx_flag(struct net_device *dev, struct hdlcdrv_state *s)
 		s->stats.rx_dropped++;
 		return;
 	}
+	skb->dev = dev;
 	cp = skb_put(skb, pkt_len);
 	*cp++ = 0; /* KISS kludge */
 	memcpy(cp, s->hdlcrx.buffer, pkt_len - 1);
-	skb->protocol = ax25_type_trans(skb, dev);
+	skb->protocol = htons(ETH_P_AX25);
+	skb->mac.raw = skb->data;
 	netif_rx(skb);
 	dev->last_rx = jiffies;
 	s->stats.rx_packets++;
@@ -425,10 +427,27 @@ void hdlcdrv_arbitrate(struct net_device *dev, struct hdlcdrv_state *s)
  * ===================== network driver interface =========================
  */
 
+static inline int hdlcdrv_paranoia_check(struct net_device *dev,
+					const char *routine)
+{
+	if (!dev || !dev->priv || 
+	    ((struct hdlcdrv_state *)dev->priv)->magic != HDLCDRV_MAGIC) {
+		printk(KERN_ERR "hdlcdrv: bad magic number for hdlcdrv_state "
+		       "struct in routine %s\n", routine);
+		return 1;
+	}
+	return 0;
+}
+
+/* --------------------------------------------------------------------- */
+
 static int hdlcdrv_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
-	struct hdlcdrv_state *sm = netdev_priv(dev);
+	struct hdlcdrv_state *sm;
 
+	if (hdlcdrv_paranoia_check(dev, "hdlcdrv_send_packet"))
+		return 0;
+	sm = (struct hdlcdrv_state *)dev->priv;
 	if (skb->data[0] != 0) {
 		do_kiss_params(sm, skb->data, skb->len);
 		dev_kfree_skb(skb);
@@ -456,8 +475,11 @@ static int hdlcdrv_set_mac_address(struct net_device *dev, void *addr)
 
 static struct net_device_stats *hdlcdrv_get_stats(struct net_device *dev)
 {
-	struct hdlcdrv_state *sm = netdev_priv(dev);
+	struct hdlcdrv_state *sm;
 
+	if (hdlcdrv_paranoia_check(dev, "hdlcdrv_get_stats"))
+		return NULL;
+	sm = (struct hdlcdrv_state *)dev->priv;
 	/* 
 	 * Get the current statistics.  This may be called with the
 	 * card open or closed. 
@@ -477,8 +499,12 @@ static struct net_device_stats *hdlcdrv_get_stats(struct net_device *dev)
 
 static int hdlcdrv_open(struct net_device *dev)
 {
-	struct hdlcdrv_state *s = netdev_priv(dev);
+	struct hdlcdrv_state *s;
 	int i;
+
+	if (hdlcdrv_paranoia_check(dev, "hdlcdrv_open"))
+		return -EINVAL;
+	s = (struct hdlcdrv_state *)dev->priv;
 
 	if (!s->ops || !s->ops->open)
 		return -ENODEV;
@@ -514,8 +540,12 @@ static int hdlcdrv_open(struct net_device *dev)
 
 static int hdlcdrv_close(struct net_device *dev)
 {
-	struct hdlcdrv_state *s = netdev_priv(dev);
+	struct hdlcdrv_state *s;
 	int i = 0;
+
+	if (hdlcdrv_paranoia_check(dev, "hdlcdrv_close"))
+		return -EINVAL;
+	s = (struct hdlcdrv_state *)dev->priv;
 
 	netif_stop_queue(dev);
 
@@ -532,8 +562,12 @@ static int hdlcdrv_close(struct net_device *dev)
 
 static int hdlcdrv_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
-	struct hdlcdrv_state *s = netdev_priv(dev);
+	struct hdlcdrv_state *s;
 	struct hdlcdrv_ioctl bi;
+		
+	if (hdlcdrv_paranoia_check(dev, "hdlcdrv_ioctl"))
+		return -EINVAL;
+	s = (struct hdlcdrv_state *)dev->priv;
 
 	if (cmd != SIOCDEVPRIVATE) {
 		if (s->ops && s->ops->ioctl)
@@ -664,7 +698,7 @@ static void hdlcdrv_setup(struct net_device *dev)
 	static const struct hdlcdrv_channel_params dflt_ch_params = { 
 		20, 2, 10, 40, 0 
 	};
-	struct hdlcdrv_state *s = netdev_priv(dev);
+	struct hdlcdrv_state *s = dev->priv;
 
 	/*
 	 * initialize the hdlcdrv_state struct
@@ -748,7 +782,7 @@ struct net_device *hdlcdrv_register(const struct hdlcdrv_ops *ops,
 	/*
 	 * initialize part of the hdlcdrv_state struct
 	 */
-	s = netdev_priv(dev);
+	s = dev->priv;
 	s->magic = HDLCDRV_MAGIC;
 	s->ops = ops;
 	dev->base_addr = baseaddr;
@@ -769,7 +803,7 @@ struct net_device *hdlcdrv_register(const struct hdlcdrv_ops *ops,
 
 void hdlcdrv_unregister(struct net_device *dev) 
 {
-	struct hdlcdrv_state *s = netdev_priv(dev);
+	struct hdlcdrv_state *s = dev->priv;
 
 	BUG_ON(s->magic != HDLCDRV_MAGIC);
 

@@ -61,7 +61,7 @@ typedef struct {
 	struct buffer_head *bh;
 } Indirect;
 
-static DEFINE_RWLOCK(pointers_lock);
+static rwlock_t pointers_lock = RW_LOCK_UNLOCKED;
 
 static inline void add_chain(Indirect *p, struct buffer_head *bh, sysv_zone_t *v)
 {
@@ -178,7 +178,7 @@ static inline int splice_branch(struct inode *inode,
 	*where->p = where->key;
 	write_unlock(&pointers_lock);
 
-	inode->i_ctime = CURRENT_TIME_SEC;
+	inode->i_ctime = CURRENT_TIME;
 
 	/* had we spliced it onto indirect block? */
 	if (where->bh)
@@ -418,7 +418,7 @@ do_indirects:
 		}
 		n++;
 	}
-	inode->i_mtime = inode->i_ctime = CURRENT_TIME_SEC;
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	if (IS_SYNC(inode))
 		sysv_sync_inode (inode);
 	else

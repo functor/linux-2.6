@@ -41,6 +41,7 @@ extern void calibrate_delay(void);
 
 extern volatile int smp_processors_ready;
 extern int smp_num_cpus;
+extern int smp_threads_ready;
 extern volatile unsigned long cpu_callin_map[NR_CPUS];
 extern unsigned char boot_cpu_id;
 extern int smp_activated;
@@ -120,6 +121,7 @@ void __init smp4m_callin(void)
 	local_irq_enable();
 }
 
+extern int cpu_idle(void *unused);
 extern void init_IRQ(void);
 extern void cpu_panic(void);
 
@@ -320,7 +322,7 @@ static struct smp_funcall {
 	unsigned long processors_out[NR_CPUS]; /* Set when ipi exited. */
 } ccall_info;
 
-static DEFINE_SPINLOCK(cross_call_lock);
+static spinlock_t cross_call_lock = SPIN_LOCK_UNLOCKED;
 
 /* Cross calls must be serialized, at least currently. */
 void smp4m_cross_call(smpfunc_t func, unsigned long arg1, unsigned long arg2,

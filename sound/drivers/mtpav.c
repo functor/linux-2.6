@@ -413,11 +413,10 @@ static void snd_mtpav_input_trigger(snd_rawmidi_substream_t * substream, int up)
 
 static void snd_mtpav_output_timer(unsigned long data)
 {
-	unsigned long flags;
 	mtpav_t *chip = (mtpav_t *)data;
 	int p;
 
-	spin_lock_irqsave(&chip->spinlock, flags);
+	spin_lock(&chip->spinlock);
 	/* reprogram timer */
 	chip->timer.expires = 1 + jiffies;
 	add_timer(&chip->timer);
@@ -427,7 +426,7 @@ static void snd_mtpav_output_timer(unsigned long data)
 		if ((portp->mode & MTPAV_MODE_OUTPUT_TRIGGERED) && portp->output)
 			snd_mtpav_output_port_write(portp, portp->output);
 	}
-	spin_unlock_irqrestore(&chip->spinlock, flags);
+	spin_unlock(&chip->spinlock);
 }
 
 /* spinlock held! */
@@ -515,7 +514,9 @@ static void snd_mtpav_inmidi_process(mtpav_t *mcrd, u8 inbyte)
 
 	portp = &mcrd->ports[mcrd->inmidiport];
 	if (portp->mode & MTPAV_MODE_INPUT_TRIGGERED) {
+		spin_unlock(&mcrd->spinlock);
 		snd_rawmidi_receive(portp->input, &inbyte, 1);
+		spin_lock(&mcrd->spinlock);
 	}
 }
 

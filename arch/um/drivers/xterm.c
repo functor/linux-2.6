@@ -31,7 +31,6 @@ struct xterm_chan {
 	int direct_rcv;
 };
 
-/* Not static because it's called directly by the tt mode gdb code */
 void *xterm_init(char *str, int device, struct chan_opts *opts)
 {
 	struct xterm_chan *data;
@@ -84,11 +83,8 @@ __uml_setup("xterm=", xterm_setup,
 "    are 'xterm=gnome-terminal,-t,-x'.\n\n"
 );
 
-/* XXX This badly needs some cleaning up in the error paths
- * Not static because it's called directly by the tt mode gdb code
- */
-int xterm_open(int input, int output, int primary, void *d,
-		      char **dev_out)
+/* XXX This badly needs some cleaning up in the error paths */
+int xterm_open(int input, int output, int primary, void *d, char **dev_out)
 {
 	struct xterm_chan *data = d;
 	unsigned long stack;
@@ -100,13 +96,6 @@ int xterm_open(int input, int output, int primary, void *d,
 
 	if(os_access(argv[4], OS_ACC_X_OK) < 0)
 		argv[4] = "port-helper";
-
-	/* Check that DISPLAY is set, this doesn't guarantee the xterm
-	 * will work but w/o it we can be pretty sure it won't. */
-	if (!getenv("DISPLAY")) {
-		printk("xterm_open: $DISPLAY not set.\n");
-		return -ENODEV;
-	}
 
 	fd = mkstemp(file);
 	if(fd < 0){
@@ -137,9 +126,9 @@ int xterm_open(int input, int output, int primary, void *d,
 
 	if(data->stack == 0) free_stack(stack, 0);
 
-	if (data->direct_rcv) {
+	if(data->direct_rcv)
 		new = os_rcv_fd(fd, &data->helper_pid);
-	} else {
+	else {
 		err = os_set_fd_block(fd, 0);
 		if(err < 0){
 			printk("xterm_open : failed to set descriptor "
@@ -174,7 +163,6 @@ int xterm_open(int input, int output, int primary, void *d,
 	return(new);
 }
 
-/* Not static because it's called directly by the tt mode gdb code */
 void xterm_close(int fd, void *d)
 {
 	struct xterm_chan *data = d;
@@ -188,12 +176,12 @@ void xterm_close(int fd, void *d)
 	os_close_file(fd);
 }
 
-static void xterm_free(void *d)
+void xterm_free(void *d)
 {
 	free(d);
 }
 
-static int xterm_console_write(int fd, const char *buf, int n, void *d)
+int xterm_console_write(int fd, const char *buf, int n, void *d)
 {
 	struct xterm_chan *data = d;
 

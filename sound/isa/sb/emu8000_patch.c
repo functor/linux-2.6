@@ -183,10 +183,10 @@ snd_emu8000_sample_new(snd_emux_t *rec, snd_sf_sample_t *sp,
 	}
 
 	if (sp->v.mode_flags & SNDRV_SFNT_SAMPLE_8BITS) {
-		if (!access_ok(VERIFY_READ, data, sp->v.size))
+		if (verify_area(VERIFY_READ, data, sp->v.size))
 			return -EFAULT;
 	} else {
-		if (!access_ok(VERIFY_READ, data, sp->v.size * 2))
+		if (verify_area(VERIFY_READ, data, sp->v.size * 2))
 			return -EFAULT;
 	}
 

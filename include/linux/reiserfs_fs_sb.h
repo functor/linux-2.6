@@ -410,10 +410,6 @@ struct reiserfs_sb_info
     struct rw_semaphore xattr_dir_sem;
 
     int j_errno;
-#ifdef CONFIG_QUOTA
-    char *s_qf_names[MAXQUOTAS];
-    int s_jquota_fmt;
-#endif
 };
 
 /* Definitions of reiserfs on-disk properties: */
@@ -467,7 +463,6 @@ enum reiserfs_mount_options {
     REISERFS_ERROR_PANIC,
     REISERFS_ERROR_RO,
     REISERFS_ERROR_CONTINUE,
-
     REISERFS_TEST1,
     REISERFS_TEST2,
     REISERFS_TEST3,
@@ -502,6 +497,7 @@ enum reiserfs_mount_options {
 
 #define reiserfs_error_panic(s) (REISERFS_SB(s)->s_mount_opt & (1 << REISERFS_ERROR_PANIC))
 #define reiserfs_error_ro(s) (REISERFS_SB(s)->s_mount_opt & (1 << REISERFS_ERROR_RO))
+#define reiserfs_error_continue(s) (REISERFS_SB(s)->s_mount_opt & (1 << REISERFS_ERROR_CONTINUE))
 
 void reiserfs_file_buffer (struct buffer_head * bh, int list);
 extern struct file_system_type reiserfs_fs_type;

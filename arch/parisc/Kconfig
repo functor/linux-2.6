@@ -6,7 +6,8 @@
 mainmenu "Linux/PA-RISC Kernel Configuration"
 
 config PARISC
-	def_bool y
+	bool
+	default y
 	help
 	  The PA-RISC microprocessor is designed by Hewlett-Packard and used
 	  in many of their workstations & servers (HP9000 700 and 800 series,
@@ -14,40 +15,29 @@ config PARISC
 	  at <http://www.parisc-linux.org/>.
 
 config MMU
-	def_bool y
+	bool
+	default y
 
 config STACK_GROWSUP
-	def_bool y
+	bool
+	default y
 
 config UID16
 	bool
 
 config RWSEM_GENERIC_SPINLOCK
-	def_bool y
+	bool
+	default y
 
 config RWSEM_XCHGADD_ALGORITHM
 	bool
 
-config GENERIC_CALIBRATE_DELAY
-	bool
-	default y
-
 config GENERIC_ISA_DMA
 	bool
-
-config GENERIC_HARDIRQS
-	def_bool y
-
-config GENERIC_IRQ_PROBE
-	def_bool y
 
 # unless you want to implement ACPI on PA-RISC ... ;-)
 config PM
 	bool
-
-config ISA_DMA_API
-	bool
-	default y
 
 source "init/Kconfig"
 
@@ -111,7 +101,7 @@ config PREFETCH
 	def_bool y
 	depends on PA8X00
 
-config 64BIT
+config PARISC64
 	bool "64-bit kernel"
 	depends on PA8X00
 	help
@@ -123,6 +113,9 @@ config 64BIT
 	  Since there is no 64bit userland on PA-RISC, there is no point to
 	  enable this option otherwise. The 64bit kernel is significantly bigger
 	  and slower than the 32bit one.
+
+config 64BIT
+	def_bool PARISC64
 
 config SMP
 	bool "Symmetric multi-processing support"
@@ -163,12 +156,13 @@ config PREEMPT
 	default n
 
 config COMPAT
-	def_bool y
-	depends on 64BIT
+	bool
+	depends on PARISC64
+	default y
 
 config HPUX
 	bool "Support for HP-UX binaries"
-	depends on !64BIT
+	depends on !PARISC64
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-32)"

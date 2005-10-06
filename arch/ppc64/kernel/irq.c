@@ -61,13 +61,10 @@ extern void iSeries_smp_message_recv( struct pt_regs * );
 #endif
 
 extern irq_desc_t irq_desc[NR_IRQS];
-EXPORT_SYMBOL(irq_desc);
 
-int distribute_irqs = 1;
 int __irq_offset_value;
 int ppc_spurious_interrupts;
 unsigned long lpevent_count;
-u64 ppc64_interrupt_controller;
 
 int show_interrupts(struct seq_file *p, void *v)
 {
@@ -115,35 +112,6 @@ skip:
 		seq_printf(p, "BAD: %10u\n", ppc_spurious_interrupts);
 	return 0;
 }
-
-#ifdef CONFIG_HOTPLUG_CPU
-void fixup_irqs(cpumask_t map)
-{
-	unsigned int irq;
-	static int warned;
-
-	for_each_irq(irq) {
-		cpumask_t mask;
-
-		if (irq_desc[irq].status & IRQ_PER_CPU)
-			continue;
-
-		cpus_and(mask, irq_affinity[irq], map);
-		if (any_online_cpu(mask) == NR_CPUS) {
-			printk("Breaking affinity for irq %i\n", irq);
-			mask = map;
-		}
-		if (irq_desc[irq].handler->set_affinity)
-			irq_desc[irq].handler->set_affinity(irq, mask);
-		else if (irq_desc[irq].action && !(warned++))
-			printk("Cannot set affinity for irq %i\n", irq);
-	}
-
-	local_irq_enable();
-	mdelay(1);
-	local_irq_disable();
-}
-#endif
 
 extern int noirqdebug;
 
@@ -245,7 +213,7 @@ void ppc_irq_dispatch_handler(struct pt_regs *regs, int irq)
 
 		spin_lock(&desc->lock);
 		if (!noirqdebug)
-			note_interrupt(irq, desc, action_ret);
+			note_interrupt(irq, desc, action_ret, regs);
 		if (likely(!(desc->status & IRQ_PENDING)))
 			break;
 		desc->status &= ~IRQ_PENDING;
@@ -290,8 +258,8 @@ void do_IRQ(struct pt_regs *regs)
 
 	lpaca = get_paca();
 #ifdef CONFIG_SMP
-	if (lpaca->lppaca.int_dword.fields.ipi_cnt) {
-		lpaca->lppaca.int_dword.fields.ipi_cnt = 0;
+	if (lpaca->lppaca.xIntDword.xFields.xIpiCnt) {
+		lpaca->lppaca.xIntDword.xFields.xIpiCnt = 0;
 		iSeries_smp_message_recv(regs);
 	}
 #endif /* CONFIG_SMP */
@@ -301,8 +269,8 @@ void do_IRQ(struct pt_regs *regs)
 
 	irq_exit();
 
-	if (lpaca->lppaca.int_dword.fields.decr_int) {
-		lpaca->lppaca.int_dword.fields.decr_int = 0;
+	if (lpaca->lppaca.xIntDword.xFields.xDecrInt) {
+		lpaca->lppaca.xIntDword.xFields.xDecrInt = 0;
 		/* Signal a fake decrementer interrupt */
 		timer_interrupt(regs);
 	}
@@ -392,7 +360,7 @@ int virt_irq_create_mapping(unsigned int real_irq)
 	unsigned int virq, first_virq;
 	static int warned;
 
-	if (ppc64_interrupt_controller == IC_OPEN_PIC)
+	if (naca->interrupt_controller == IC_OPEN_PIC)
 		return real_irq;	/* no mapping for openpic (for now) */
 
 	/* don't map interrupts < MIN_VIRT_IRQ */
@@ -510,10 +478,3 @@ EXPORT_SYMBOL(do_softirq);
 
 #endif /* CONFIG_IRQSTACKS */
 
-static int __init setup_noirqdistrib(char *str)
-{
-	distribute_irqs = 0;
-	return 1;
-}
-
-__setup("noirqdistrib", setup_noirqdistrib);

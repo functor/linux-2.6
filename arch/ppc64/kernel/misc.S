@@ -32,7 +32,7 @@
 	.text
 
 /*
- * Returns (address we were linked at) - (address we are running at)
+ * Returns (address we're running at) - (address we were linked at)
  * for use before the text and data are mapped to KERNELBASE.
  */
 
@@ -167,12 +167,27 @@ _GLOBAL(call_with_mmu_off)
 	xori	r0,r0,MSR_IR|MSR_DR
 	mtspr	SPRN_SRR1,r0
 	rfid
+	
+/*
+ * Flush instruction cache.
+ */
+_GLOBAL(flush_instruction_cache)
 
-
-	.section	".toc","aw"
-PPC64_CACHES:
-	.tc		ppc64_caches[TC],ppc64_caches
-	.section	".text"
+/*
+ * This is called by kgdb code
+ * and should probably go away
+ * to be replaced by invalidating
+ * the cache lines that are actually
+ * modified
+ */
+	/* use invalidate-all bit in HID0
+	 *  - is this consistent across all 64-bit cpus?  -- paulus */
+	mfspr	r3,HID0
+	ori	r3,r3,HID0_ICFI
+	mtspr	HID0,r3
+	sync
+	isync
+	blr
 
 /*
  * Write any modified data cache blocks out to memory
@@ -192,8 +207,11 @@ _GLOBAL(__flush_icache_range)
  * and in some cases i-cache and d-cache line sizes differ from
  * each other.
  */
- 	ld	r10,PPC64_CACHES@toc(r2)
-	lwz	r7,DCACHEL1LINESIZE(r10)/* Get cache line size */
+	LOADADDR(r10,naca)		/* Get Naca address */
+	ld	r10,0(r10)
+	LOADADDR(r11,systemcfg)		/* Get systemcfg address */
+	ld	r11,0(r11)
+	lwz	r7,DCACHEL1LINESIZE(r11)/* Get cache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -209,7 +227,7 @@ _GLOBAL(__flush_icache_range)
 
 /* Now invalidate the instruction cache */
 	
-	lwz	r7,ICACHEL1LINESIZE(r10)	/* Get Icache line size */
+	lwz	r7,ICACHEL1LINESIZE(r11)	/* Get Icache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -238,8 +256,11 @@ _GLOBAL(flush_dcache_range)
  * 
  * Different systems have different cache line sizes
  */
- 	ld	r10,PPC64_CACHES@toc(r2)
-	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
+	LOADADDR(r10,naca)		/* Get Naca address */
+	ld	r10,0(r10)
+	LOADADDR(r11,systemcfg)		/* Get systemcfg address */
+	ld	r11,0(r11)
+	lwz	r7,DCACHEL1LINESIZE(r11)	/* Get dcache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -265,8 +286,11 @@ _GLOBAL(flush_dcache_range)
  *    flush all bytes from start to stop-1 inclusive
  */
 _GLOBAL(flush_dcache_phys_range)
- 	ld	r10,PPC64_CACHES@toc(r2)
-	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
+	LOADADDR(r10,naca)		/* Get Naca address */
+	ld	r10,0(r10)
+	LOADADDR(r11,systemcfg)		/* Get systemcfg address */
+	ld	r11,0(r11)
+	lwz	r7,DCACHEL1LINESIZE(r11)	/* Get dcache line size */
 	addi	r5,r7,-1
 	andc	r6,r3,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
@@ -292,26 +316,6 @@ _GLOBAL(flush_dcache_phys_range)
 	isync
 	blr
 
-_GLOBAL(flush_inval_dcache_range)
- 	ld	r10,PPC64_CACHES@toc(r2)
-	lwz	r7,DCACHEL1LINESIZE(r10)	/* Get dcache line size */
-	addi	r5,r7,-1
-	andc	r6,r3,r5		/* round low to line bdy */
-	subf	r8,r6,r4		/* compute length */
-	add	r8,r8,r5		/* ensure we get enough */
-	lwz	r9,DCACHEL1LOGLINESIZE(r10)/* Get log-2 of dcache line size */
-	srw.	r8,r8,r9		/* compute line count */
-	beqlr				/* nothing to do? */
-	sync
-	isync
-	mtctr	r8
-0:	dcbf	0,r6
-	add	r6,r6,r7
-	bdnz	0b
-	sync
-	isync
-	blr
-
 
 /*
  * Flush a particular page from the data cache to RAM.
@@ -328,10 +332,13 @@ _GLOBAL(__flush_dcache_icache)
  */
 
 /* Flush the dcache */
- 	ld	r7,PPC64_CACHES@toc(r2)
+	LOADADDR(r7,naca)
+	ld	r7,0(r7)
+	LOADADDR(r8,systemcfg)			/* Get systemcfg address */
+	ld	r8,0(r8)
 	clrrdi	r3,r3,12           	    /* Page align */
 	lwz	r4,DCACHEL1LINESPERPAGE(r7)	/* Get # dcache lines per page */
-	lwz	r5,DCACHEL1LINESIZE(r7)		/* Get dcache line size */
+	lwz	r5,DCACHEL1LINESIZE(r8)		/* Get dcache line size */
 	mr	r6,r3
 	mtctr	r4
 0:	dcbst	0,r6
@@ -342,7 +349,7 @@ _GLOBAL(__flush_dcache_icache)
 /* Now invalidate the icache */	
 
 	lwz	r4,ICACHEL1LINESPERPAGE(r7)	/* Get # icache lines per page */
-	lwz	r5,ICACHEL1LINESIZE(r7)		/* Get icache line size */
+	lwz	r5,ICACHEL1LINESIZE(r8)		/* Get icache line size */
 	mtctr	r4
 1:	icbi	0,r3
 	add	r3,r3,r5
@@ -680,6 +687,10 @@ _GLOBAL(kernel_thread)
 	ld	r30,-16(r1)
 	blr
 
+#ifndef CONFIG_PPC_PSERIES	/* hack hack hack */
+#define ppc_rtas	sys_ni_syscall
+#endif
+
 /* Why isn't this a) automatic, b) written in 'C'? */	
 	.balign 8
 _GLOBAL(sys_call_table32)
@@ -696,7 +707,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_unlink      	/* 10 */
 	.llong .sys32_execve
 	.llong .sys_chdir
-	.llong .compat_sys_time
+	.llong .sys32_time
 	.llong .sys_mknod
 	.llong .sys_chmod		/* 15 */
 	.llong .sys_lchown
@@ -708,7 +719,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_oldumount
 	.llong .sys_setuid
 	.llong .sys_getuid
-	.llong .compat_sys_stime	/* 25 */
+	.llong .ppc64_sys32_stime       /* 25 */
 	.llong .sys32_ptrace
 	.llong .sys_alarm
 	.llong .sys_ni_syscall		/* old fstat syscall */
@@ -792,7 +803,7 @@ _GLOBAL(sys_call_table32)
 	.llong .compat_sys_newstat
 	.llong .compat_sys_newlstat
 	.llong .compat_sys_newfstat
-	.llong .sys32_uname
+	.llong .sys_uname
 	.llong .sys_ni_syscall		/* 110 old iopl syscall */
 	.llong .sys_vhangup
 	.llong .sys_ni_syscall		/* old idle syscall */
@@ -859,7 +870,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_rt_sigaction
 	.llong .sys32_rt_sigprocmask
 	.llong .sys32_rt_sigpending     /* 175 */
-	.llong .compat_sys_rt_sigtimedwait
+	.llong .sys32_rt_sigtimedwait
 	.llong .sys32_rt_sigqueueinfo
 	.llong .ppc32_rt_sigsuspend
 	.llong .sys32_pread64
@@ -948,7 +959,7 @@ _GLOBAL(sys_call_table32)
 	.llong .ppc32_fadvise64_64	/* 32bit only fadvise64_64 */
 	.llong .ppc_rtas		/* 255 */
 	.llong .sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
-	.llong .sys32_vserver
+	.llong .sys_vserver
 	.llong .sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
 	.llong .compat_sys_mbind
 	.llong .compat_sys_get_mempolicy	/* 260 */
@@ -963,7 +974,6 @@ _GLOBAL(sys_call_table32)
 	.llong .sys32_add_key
 	.llong .sys32_request_key
 	.llong .compat_sys_keyctl
-	.llong .compat_sys_waitid
 
 	.balign 8
 _GLOBAL(sys_call_table)
@@ -992,7 +1002,7 @@ _GLOBAL(sys_call_table)
 	.llong .sys_ni_syscall		/* old umount syscall */
 	.llong .sys_setuid
 	.llong .sys_getuid
-	.llong .sys_stime		/* 25 */
+	.llong .ppc64_sys_stime		/* 25 */
 	.llong .sys_ptrace
 	.llong .sys_alarm
 	.llong .sys_ni_syscall		/* old fstat syscall */
@@ -1232,7 +1242,7 @@ _GLOBAL(sys_call_table)
 	.llong .sys_ni_syscall		/* 32bit only fadvise64_64 */
 	.llong .ppc_rtas		/* 255 */
 	.llong .sys_ni_syscall		/* 256 reserved for sys_debug_setcontext */
-	.llong .sys_vserver
+	.llong .sys_ni_syscall		/* 257 reserved for vserver */
 	.llong .sys_ni_syscall		/* 258 reserved for new sys_remap_file_pages */
 	.llong .sys_mbind
 	.llong .sys_get_mempolicy	/* 260 */
@@ -1247,4 +1257,3 @@ _GLOBAL(sys_call_table)
 	.llong .sys_add_key
 	.llong .sys_request_key		/* 270 */
 	.llong .sys_keyctl
-	.llong .sys_waitid

@@ -28,7 +28,10 @@ int stat_file(const char *path, unsigned long long *inode_out, int *mode_out,
 	if(lstat64(path, &buf) < 0)
 		return(-errno);
 
-	if(inode_out != NULL) *inode_out = buf.st_ino;
+	/* See the Makefile for why STAT64_INO_FIELD is passed in
+	 * by the build
+	 */
+	if(inode_out != NULL) *inode_out = buf.STAT64_INO_FIELD;
 	if(mode_out != NULL) *mode_out = buf.st_mode;
 	if(nlink_out != NULL) *nlink_out = buf.st_nlink;
 	if(uid_out != NULL) *uid_out = buf.st_uid;

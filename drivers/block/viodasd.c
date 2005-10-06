@@ -72,7 +72,7 @@ enum {
 	MAX_DISK_NAME = sizeof(((struct gendisk *)0)->disk_name)
 };
 
-static DEFINE_SPINLOCK(viodasd_spinlock);
+static spinlock_t	viodasd_spinlock = SPIN_LOCK_UNLOCKED;
 
 #define VIOMAXREQ		16
 #define VIOMAXBLOCKDMA		12
@@ -250,6 +250,7 @@ static int viodasd_release(struct inode *ino, struct file *fil)
 static int viodasd_ioctl(struct inode *ino, struct file *fil,
 			 unsigned int cmd, unsigned long arg)
 {
+	int err;
 	unsigned char sectors;
 	unsigned char heads;
 	unsigned short cylinders;
@@ -262,8 +263,9 @@ static int viodasd_ioctl(struct inode *ino, struct file *fil,
 		geo = (struct hd_geometry *)arg;
 		if (geo == NULL)
 			return -EINVAL;
-		if (!access_ok(VERIFY_WRITE, geo, sizeof(*geo)))
-			return -EFAULT;
+		err = verify_area(VERIFY_WRITE, geo, sizeof(*geo));
+		if (err)
+			return err;
 		gendisk = ino->i_bdev->bd_disk;
 		d = gendisk->private_data;
 		sectors = d->sectors;

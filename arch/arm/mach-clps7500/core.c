@@ -12,7 +12,6 @@
 #include <linux/list.h>
 #include <linux/sched.h>
 #include <linux/init.h>
-#include <linux/device.h>
 #include <linux/serial_8250.h>
 
 #include <asm/mach/arch.h>
@@ -306,10 +305,11 @@ static struct irqaction clps7500_timer_irq = {
 static void __init clps7500_timer_init(void)
 {
 	ioctime_init();
+
 	setup_irq(IRQ_TIMER, &clps7500_timer_irq);
 }
 
-static struct sys_timer clps7500_timer = {
+static struct clps7500_timer = {
 	.init		= clps7500_timer_init,
 	.offset		= ioc_timer_gettimeoffset,
 };
@@ -358,9 +358,9 @@ static struct platform_device serial_device = {
 	},
 };
 
-static void __init clps7500_init(void)
+static int __init clps7500_init(void)
 {
-	platform_device_register(&serial_device);
+	return platform_register_device(&serial_device);
 }
 
 MACHINE_START(CLPS7500, "CL-PS7500")
@@ -368,7 +368,6 @@ MACHINE_START(CLPS7500, "CL-PS7500")
 	BOOT_MEM(0x10000000, 0x03000000, 0xe0000000)
 	MAPIO(clps7500_map_io)
 	INITIRQ(clps7500_init_irq)
-		.init_machine	= clps7500_init,
-		.timer		= &clps7500_timer,
+	.timer		= &clps7500_timer,
 MACHINE_END
 

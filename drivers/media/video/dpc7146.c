@@ -55,10 +55,11 @@
 #define DPC_BOARD_CAN_DO_VBI(dev)   (dev->revision != 0) 
 
 static int debug = 0;
-module_param(debug, int, 0);
+MODULE_PARM(debug,"i");
 MODULE_PARM_DESC(debug, "debug verbosity");
 
-static int dpc_num = 0;
+/* global variables */
+int dpc_num = 0;
 
 #define DPC_INPUTS	2
 static struct v4l2_input dpc_inputs[DPC_INPUTS] = {
@@ -378,7 +379,7 @@ static struct saa7146_extension extension = {
 	.irq_func	= NULL,
 };	
 
-static int __init dpc_init_module(void)
+int __init dpc_init_module(void) 
 {
 	if( 0 != saa7146_register_extension(&extension)) {
 		DEB_S(("failed to register extension.\n"));
@@ -388,7 +389,7 @@ static int __init dpc_init_module(void)
 	return 0;
 }
 
-static void __exit dpc_cleanup_module(void)
+void __exit dpc_cleanup_module(void) 
 {
 	saa7146_unregister_extension(&extension);
 }

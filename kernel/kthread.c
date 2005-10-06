@@ -14,12 +14,6 @@
 #include <linux/module.h>
 #include <asm/semaphore.h>
 
-/*
- * We dont want to execute off keventd since it might
- * hold a semaphore our callers hold too:
- */
-static struct workqueue_struct *helper_wq;
-
 struct kthread_create_info
 {
 	/* Information passed to kthread() from keventd. */
@@ -132,13 +126,12 @@ struct task_struct *kthread_create(int (*threadfn)(void *data),
 	init_completion(&create.started);
 	init_completion(&create.done);
 
-	/*
-	 * The workqueue needs to start up first:
-	 */
-	if (!helper_wq)
+	/* If we're being called to start the first workqueue, we
+	 * can't use keventd. */
+	if (!keventd_up())
 		work.func(work.data);
 	else {
-		queue_work(helper_wq, &work);
+		schedule_work(&work);
 		wait_for_completion(&create.done);
 	}
 	if (!IS_ERR(create.result)) {
@@ -174,7 +167,7 @@ int kthread_stop(struct task_struct *k)
 
 	/* Must init completion *before* thread sees kthread_stop_info.k */
 	init_completion(&kthread_stop_info.done);
-	smp_wmb();
+	wmb();
 
 	/* Now set kthread_should_stop() to true, and wake it up. */
 	kthread_stop_info.k = k;
@@ -190,13 +183,3 @@ int kthread_stop(struct task_struct *k)
 	return ret;
 }
 EXPORT_SYMBOL(kthread_stop);
-
-static __init int helper_init(void)
-{
-	helper_wq = create_singlethread_workqueue("kthread");
-	BUG_ON(!helper_wq);
-
-	return 0;
-}
-core_initcall(helper_init);
-

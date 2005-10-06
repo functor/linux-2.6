@@ -38,7 +38,7 @@
  * moves to arch independent land
  */
 
-DEFINE_SPINLOCK(i8259A_lock);
+spinlock_t i8259A_lock = SPIN_LOCK_UNLOCKED;
 
 static void end_8259A_irq (unsigned int irq)
 {
@@ -49,7 +49,7 @@ static void end_8259A_irq (unsigned int irq)
 
 #define shutdown_8259A_irq	disable_8259A_irq
 
-static void mask_and_ack_8259A(unsigned int);
+void mask_and_ack_8259A(unsigned int);
 
 unsigned int startup_8259A_irq(unsigned int irq)
 { 
@@ -58,13 +58,14 @@ unsigned int startup_8259A_irq(unsigned int irq)
 }
 
 static struct hw_interrupt_type i8259A_irq_type = {
-	.typename = "XT-PIC",
-	.startup = startup_8259A_irq,
-	.shutdown = shutdown_8259A_irq,
-	.enable = enable_8259A_irq,
-	.disable = disable_8259A_irq,
-	.ack = mask_and_ack_8259A,
-	.end = end_8259A_irq,
+	"XT-PIC",
+	startup_8259A_irq,
+	shutdown_8259A_irq,
+	enable_8259A_irq,
+	disable_8259A_irq,
+	mask_and_ack_8259A,
+	end_8259A_irq,
+	NULL
 };
 
 /*
@@ -168,7 +169,7 @@ static inline int i8259A_irq_real(unsigned int irq)
  * first, _then_ send the EOI, and the order of EOI
  * to the two 8259s is important!
  */
-static void mask_and_ack_8259A(unsigned int irq)
+void mask_and_ack_8259A(unsigned int irq)
 {
 	unsigned int irqmask = 1 << irq;
 	unsigned long flags;
@@ -262,7 +263,7 @@ static int i8259A_resume(struct sys_device *dev)
 	return 0;
 }
 
-static int i8259A_suspend(struct sys_device *dev, pm_message_t state)
+static int i8259A_suspend(struct sys_device *dev, u32 state)
 {
 	save_ELCR(irq_trigger);
 	return 0;

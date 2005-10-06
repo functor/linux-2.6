@@ -46,7 +46,7 @@
 			  /*  dumped to the console via printk)          */
 
 #if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK)
-DEFINE_SPINLOCK(pa_dbit_lock);
+spinlock_t pa_dbit_lock = SPIN_LOCK_UNLOCKED;
 #endif
 
 int printbinary(char *buf, unsigned long x, int nbits)
@@ -163,20 +163,13 @@ void show_stack(struct task_struct *task, unsigned long *s)
 	struct unwind_frame_info info;
 
 	if (!task) {
-		unsigned long sp;
-		struct pt_regs *r;
+		unsigned long sp, ip, rp;
 
 HERE:
 		asm volatile ("copy %%r30, %0" : "=r"(sp));
-		r = (struct pt_regs *)kmalloc(sizeof(struct pt_regs), GFP_KERNEL);
-		if (!r)
-			return;
-		memset(r, 0, sizeof(struct pt_regs));
-		r->iaoq[0] = (unsigned long)&&HERE;
-		r->gr[2] = (unsigned long)__builtin_return_address(0);
-		r->gr[30] = sp;
-		unwind_frame_init(&info, current, r);
-		kfree(r);
+		ip = (unsigned long)&&HERE;
+		rp = (unsigned long)__builtin_return_address(0);
+		unwind_frame_init(&info, current, sp, ip, rp);
 	} else {
 		unwind_frame_init_from_blocked_task(&info, task);
 	}
@@ -249,7 +242,7 @@ void handle_gdb_break(struct pt_regs *regs, int wot)
 	struct siginfo si;
 
 	si.si_code = wot;
-	si.si_addr = (void __user *) (regs->iaoq[0] & ~3);
+	si.si_addr = (void *) (regs->iaoq[0] & ~3);
 	si.si_signo = SIGTRAP;
 	si.si_errno = 0;
 	force_sig_info(SIGTRAP, &si, current);
@@ -270,7 +263,7 @@ void handle_break(unsigned iir, struct pt_regs *regs)
 		show_regs(regs);
 #endif
 		si.si_code = TRAP_BRKPT;
-		si.si_addr = (void __user *) (regs->iaoq[0] & ~3);
+		si.si_addr = (void *) (regs->iaoq[0] & ~3);
 		si.si_signo = SIGTRAP;
 		force_sig_info(SIGTRAP, &si, current);
 		break;
@@ -288,7 +281,7 @@ void handle_break(unsigned iir, struct pt_regs *regs)
 #endif
 		si.si_signo = SIGTRAP;
 		si.si_code = TRAP_BRKPT;
-		si.si_addr = (void __user *) (regs->iaoq[0] & ~3);
+		si.si_addr = (void *) (regs->iaoq[0] & ~3);
 		force_sig_info(SIGTRAP, &si, current);
 		return;
 	}
@@ -392,7 +385,7 @@ void transfer_pim_to_trap_frame(struct pt_regs *regs)
  */
 void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long offset)
 {
-	static DEFINE_SPINLOCK(terminate_lock);
+	static spinlock_t terminate_lock = SPIN_LOCK_UNLOCKED;
 
 	oops_in_progress = 1;
 
@@ -423,7 +416,7 @@ void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long o
 	{
 		/* show_stack(NULL, (unsigned long *)regs->gr[30]); */
 		struct unwind_frame_info info;
-		unwind_frame_init(&info, current, regs);
+		unwind_frame_init(&info, current, regs->gr[30], regs->iaoq[0], regs->gr[2]);
 		do_show_stack(&info);
 	}
 
@@ -576,7 +569,7 @@ void handle_interruption(int code, struct pt_regs *regs)
 	give_sigill:
 		si.si_signo = SIGILL;
 		si.si_errno = 0;
-		si.si_addr = (void __user *) regs->iaoq[0];
+		si.si_addr = (void *) regs->iaoq[0];
 		force_sig_info(SIGILL, &si, current);
 		return;
 
@@ -584,7 +577,7 @@ void handle_interruption(int code, struct pt_regs *regs)
 		/* Overflow Trap, let the userland signal handler do the cleanup */
 		si.si_signo = SIGFPE;
 		si.si_code = FPE_INTOVF;
-		si.si_addr = (void __user *) regs->iaoq[0];
+		si.si_addr = (void *) regs->iaoq[0];
 		force_sig_info(SIGFPE, &si, current);
 		return;
 		
@@ -706,9 +699,9 @@ void handle_interruption(int code, struct pt_regs *regs)
 		si.si_signo = SIGSEGV;
 		si.si_errno = 0;
 		if (code == 7)
-		    si.si_addr = (void __user *) regs->iaoq[0];
+		    si.si_addr = (void *) regs->iaoq[0];
 		else
-		    si.si_addr = (void __user *) regs->ior;
+		    si.si_addr = (void *) regs->ior;
 		force_sig_info(SIGSEGV, &si, current);
 		return;
 
@@ -728,7 +721,7 @@ void handle_interruption(int code, struct pt_regs *regs)
 			si.si_signo = SIGBUS;
 			si.si_code = BUS_OBJERR;
 			si.si_errno = 0;
-			si.si_addr = (void __user *) regs->ior;
+			si.si_addr = (void *) regs->ior;
 			force_sig_info(SIGBUS, &si, current);
 			return;
 		}
@@ -739,7 +732,7 @@ void handle_interruption(int code, struct pt_regs *regs)
 	}
 
 	if (user_mode(regs)) {
-	    if ((fault_space >> SPACEID_SHIFT) != (regs->sr[7] >> SPACEID_SHIFT)) {
+	    if ((fault_space>>SPACEID_SHIFT) != (regs->sr[7] >> SPACEID_SHIFT)) {
 #ifdef PRINT_USER_FAULTS
 		if (fault_space == 0)
 			printk(KERN_DEBUG "User Fault on Kernel Space ");
@@ -752,7 +745,7 @@ void handle_interruption(int code, struct pt_regs *regs)
 		si.si_signo = SIGSEGV;
 		si.si_errno = 0;
 		si.si_code = SEGV_MAPERR;
-		si.si_addr = (void __user *) regs->ior;
+		si.si_addr = (void *) regs->ior;
 		force_sig_info(SIGSEGV, &si, current);
 		return;
 	    }

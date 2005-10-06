@@ -165,6 +165,7 @@
 			 Torben Mathiasen <tmm@image.dk>
 */
 
+#include <linux/version.h>
 #include <linux/blkdev.h>
 #include "aztcd.h"
 
@@ -287,7 +288,7 @@ static volatile int azt_read_count = 1;
 
 static int azt_port = AZT_BASE_ADDR;
 
-module_param(azt_port, int, 0);
+MODULE_PARM(azt_port, "i");
 
 static int azt_port_auto[16] = AZT_BASE_AUTO;
 
@@ -311,7 +312,7 @@ static unsigned char aztIndatum;
 static unsigned long aztTimeOutCount;
 static int aztCmd = 0;
 
-static DEFINE_SPINLOCK(aztSpin);
+static spinlock_t aztSpin = SPIN_LOCK_UNLOCKED;
 
 /*###########################################################################
    Function Prototypes
@@ -1707,8 +1708,8 @@ static int __init aztcd_init(void)
 	printk(KERN_INFO "aztcd: (C) 1994-98 W.Zimmermann\n");
 	if (azt_port == -1) {
 		printk
-		    ("aztcd: DriverVersion=%s For IDE/ATAPI-drives use ide-cd.c\n",
-		     AZT_VERSION);
+		    ("aztcd: KernelVersion=%s DriverVersion=%s For IDE/ATAPI-drives use ide-cd.c\n",
+		     UTS_RELEASE, AZT_VERSION);
 	} else
 		printk
 		    ("aztcd: DriverVersion=%s BaseAddress=0x%x  For IDE/ATAPI-drives use ide-cd.c\n",

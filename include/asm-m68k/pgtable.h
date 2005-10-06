@@ -1,8 +1,6 @@
 #ifndef _M68K_PGTABLE_H
 #define _M68K_PGTABLE_H
 
-#include <asm-generic/4level-fixup.h>
-
 #include <linux/config.h>
 #include <asm/setup.h>
 
@@ -26,7 +24,6 @@
 	do{							\
 		*(pteptr) = (pteval);				\
 	} while(0)
-#define set_pte_at(mm,addr,ptep,pteval) set_pte(ptep,pteval)
 
 
 /* PMD_SHIFT determines the size of the area a second-level page table can map */
@@ -61,7 +58,7 @@
 #define PTRS_PER_PGD	128
 #endif
 #define USER_PTRS_PER_PGD	(TASK_SIZE/PGDIR_SIZE)
-#define FIRST_USER_ADDRESS	0
+#define FIRST_USER_PGD_NR	0
 
 /* Virtual address region for use by kernel_map() */
 #ifdef CONFIG_SUN3
@@ -143,13 +140,6 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 
 #define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
 		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
-
-#define io_remap_pfn_range(vma, vaddr, pfn, size, prot)		\
-		remap_pfn_range(vma, vaddr, pfn, size, prot)
-
-#define MK_IOSPACE_PFN(space, pfn)	(pfn)
-#define GET_IOSPACE(pfn)		0
-#define GET_PFN(pfn)			(pfn)
 
 /* MMU-specific headers */
 

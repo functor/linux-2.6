@@ -7,7 +7,15 @@
  *  block allocation, deallocation, calculation of free space.
  */
 
-#include "affs.h"
+#include <linux/time.h>
+#include <linux/affs_fs.h>
+#include <linux/stat.h>
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/bitops.h>
+#include <linux/amigaffs.h>
+#include <linux/buffer_head.h>
 
 /* This is, of course, shamelessly stolen from fs/minix */
 

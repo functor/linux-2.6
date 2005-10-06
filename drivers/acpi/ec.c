@@ -442,8 +442,6 @@ acpi_ec_space_handler (
 	int			result = 0;
 	struct acpi_ec		*ec = NULL;
 	u32			temp = 0;
-	acpi_integer		f_v = 0;
-	int 			i = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_ec_space_handler");
 
@@ -458,7 +456,6 @@ acpi_ec_space_handler (
 
 	ec = (struct acpi_ec *) handler_context;
 
-next_byte:
 	switch (function) {
 	case ACPI_READ:
 		result = acpi_ec_read(ec, (u8) address, &temp);
@@ -469,29 +466,9 @@ next_byte:
 		break;
 	default:
 		result = -EINVAL;
-		goto out;
 		break;
 	}
 
-	bit_width -= 8;
-	if(bit_width){
-
-		if(function == ACPI_READ)
-			f_v |= (acpi_integer) (*value) << 8*i;
-		if(function == ACPI_WRITE)
-			(*value) >>=8; 
-		i++;
-		goto next_byte;
-	}
-
-
-	if(function == ACPI_READ){
-		f_v |= (acpi_integer) (*value) << 8*i;
-		*value = f_v;
-	}
-
-		
-out:
 	switch (result) {
 	case -EINVAL:
 		return_VALUE(AE_BAD_PARAMETER);
@@ -505,7 +482,6 @@ out:
 	default:
 		return_VALUE(AE_OK);
 	}
-	
 
 }
 
@@ -514,7 +490,7 @@ out:
                               FS Interface (/proc)
    -------------------------------------------------------------------------- */
 
-static struct proc_dir_entry	*acpi_ec_dir;
+struct proc_dir_entry		*acpi_ec_dir;
 
 
 static int
@@ -623,7 +599,7 @@ acpi_ec_add (
 
 	ec->handle = device->handle;
 	ec->uid = -1;
-	spin_lock_init(&ec->lock);
+	ec->lock = SPIN_LOCK_UNLOCKED;
 	strcpy(acpi_device_name(device), ACPI_EC_DEVICE_NAME);
 	strcpy(acpi_device_class(device), ACPI_EC_CLASS);
 	acpi_driver_data(device) = ec;
@@ -811,81 +787,9 @@ acpi_ec_stop (
 	return_VALUE(0);
 }
 
-static acpi_status __init
-acpi_fake_ecdt_callback (
-	acpi_handle	handle,
-	u32		Level,
-	void		*context,
-	void		**retval)
-{
-	acpi_status	status;
 
-	status = acpi_walk_resources(handle, METHOD_NAME__CRS,
-		acpi_ec_io_ports, ec_ecdt);
-	if (ACPI_FAILURE(status))
-		return status;
-	ec_ecdt->status_addr = ec_ecdt->command_addr;
-
-	ec_ecdt->uid = -1;
-	acpi_evaluate_integer(handle, "_UID", NULL, &ec_ecdt->uid);
-
-	status = acpi_evaluate_integer(handle, "_GPE", NULL, &ec_ecdt->gpe_bit);
-	if (ACPI_FAILURE(status))
-		return status;
-	spin_lock_init(&ec_ecdt->lock);
-	ec_ecdt->global_lock = TRUE;
-	ec_ecdt->handle = handle;
-
-	printk(KERN_INFO PREFIX  "GPE=0x%02x, ports=0x%2x, 0x%2x\n",
-		(u32) ec_ecdt->gpe_bit, (u32) ec_ecdt->command_addr.address,
-		(u32) ec_ecdt->data_addr.address);
-
-	return AE_CTRL_TERMINATE;
-}
-
-/*
- * Some BIOS (such as some from Gateway laptops) access EC region very early
- * such as in BAT0._INI or EC._INI before an EC device is found and
- * do not provide an ECDT. According to ACPI spec, ECDT isn't mandatorily
- * required, but if EC regison is accessed early, it is required.
- * The routine tries to workaround the BIOS bug by pre-scan EC device
- * It assumes that _CRS, _HID, _GPE, _UID methods of EC don't touch any
- * op region (since _REG isn't invoked yet). The assumption is true for
- * all systems found.
- */
-static int __init
-acpi_ec_fake_ecdt(void)
-{
-	acpi_status	status;
-	int		ret = 0;
-
-	printk(KERN_INFO PREFIX "Try to make an fake ECDT\n");
-
-	ec_ecdt = kmalloc(sizeof(struct acpi_ec), GFP_KERNEL);
-	if (!ec_ecdt) {
-		ret = -ENOMEM;
-		goto error;
-	}
-	memset(ec_ecdt, 0, sizeof(struct acpi_ec));
-
-	status = acpi_get_devices (ACPI_EC_HID,
-				acpi_fake_ecdt_callback,
-				NULL,
-				NULL);
-	if (ACPI_FAILURE(status)) {
-		kfree(ec_ecdt);
-		ec_ecdt = NULL;
-		ret = -ENODEV;
-		goto error;
-	}
-	return 0;
-error:
-	printk(KERN_ERR PREFIX "Can't make an fake ECDT\n");
-	return ret;
-}
-
-static int __init
-acpi_ec_get_real_ecdt(void)
+int __init
+acpi_ec_ecdt_probe (void)
 {
 	acpi_status		status;
 	struct acpi_table_ecdt 	*ecdt_ptr;
@@ -893,11 +797,11 @@ acpi_ec_get_real_ecdt(void)
 	status = acpi_get_firmware_table("ECDT", 1, ACPI_LOGICAL_ADDRESSING, 
 		(struct acpi_table_header **) &ecdt_ptr);
 	if (ACPI_FAILURE(status))
-		return -ENODEV;
+		return 0;
 
 	printk(KERN_INFO PREFIX "Found ECDT\n");
 
-	/*
+	 /*
 	 * Generate a temporary ec context to use until the namespace is scanned
 	 */
 	ec_ecdt = kmalloc(sizeof(struct acpi_ec), GFP_KERNEL);
@@ -909,7 +813,7 @@ acpi_ec_get_real_ecdt(void)
 	ec_ecdt->status_addr = ecdt_ptr->ec_control;
 	ec_ecdt->data_addr = ecdt_ptr->ec_data;
 	ec_ecdt->gpe_bit = ecdt_ptr->gpe_bit;
-	spin_lock_init(&ec_ecdt->lock);
+	ec_ecdt->lock = SPIN_LOCK_UNLOCKED;
 	/* use the GL just to be safe */
 	ec_ecdt->global_lock = TRUE;
 	ec_ecdt->uid = ecdt_ptr->uid;
@@ -918,31 +822,6 @@ acpi_ec_get_real_ecdt(void)
 	if (ACPI_FAILURE(status)) {
 		goto error;
 	}
-
-	return 0;
-error:
-	printk(KERN_ERR PREFIX "Could not use ECDT\n");
-	kfree(ec_ecdt);
-	ec_ecdt = NULL;
-
-	return -ENODEV;
-}
-
-static int __initdata acpi_fake_ecdt_enabled;
-int __init
-acpi_ec_ecdt_probe (void)
-{
-	acpi_status		status;
-	int			ret;
-
-	ret = acpi_ec_get_real_ecdt();
-	/* Try to make a fake ECDT */
-	if (ret && acpi_fake_ecdt_enabled) {
-		ret = acpi_ec_fake_ecdt();
-	}
-
-	if (ret)
-		return 0;
 
 	/*
 	 * Install GPE handler
@@ -1016,9 +895,3 @@ acpi_ec_exit (void)
 }
 #endif /* 0 */
 
-static int __init acpi_fake_ecdt_setup(char *str)
-{
-	acpi_fake_ecdt_enabled = 1;
-	return 0;
-}
-__setup("acpi_fake_ecdt", acpi_fake_ecdt_setup);

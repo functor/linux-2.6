@@ -23,16 +23,10 @@
 
 typedef struct {
 	volatile unsigned int lock;
-#ifdef CONFIG_PREEMPT
-	unsigned int break_lock;
-#endif
 } spinlock_t;
 
 typedef struct {
 	volatile signed int lock;
-#ifdef CONFIG_PREEMPT
-	unsigned int break_lock;
-#endif
 } rwlock_t;
 
 #ifdef __KERNEL__
@@ -63,7 +57,7 @@ static __inline__ void _raw_spin_unlock(spinlock_t *lock)
 
 #if defined(CONFIG_PPC_SPLPAR) || defined(CONFIG_PPC_ISERIES)
 /* We only yield to the hypervisor if we are in shared processor mode */
-#define SHARED_PROCESSOR (get_paca()->lppaca.shared_proc)
+#define SHARED_PROCESSOR (get_paca()->lppaca.xSharedProc)
 extern void __spin_yield(spinlock_t *lock);
 extern void __rw_yield(rwlock_t *lock);
 #else /* SPLPAR || ISERIES */
@@ -110,7 +104,7 @@ static void __inline__ _raw_spin_lock(spinlock_t *lock)
 			HMT_low();
 			if (SHARED_PROCESSOR)
 				__spin_yield(lock);
-		} while (unlikely(lock->lock != 0));
+		} while (likely(lock->lock != 0));
 		HMT_medium();
 	}
 }
@@ -128,7 +122,7 @@ static void __inline__ _raw_spin_lock_flags(spinlock_t *lock, unsigned long flag
 			HMT_low();
 			if (SHARED_PROCESSOR)
 				__spin_yield(lock);
-		} while (unlikely(lock->lock != 0));
+		} while (likely(lock->lock != 0));
 		HMT_medium();
 		local_irq_restore(flags_dis);
 	}
@@ -147,9 +141,17 @@ static void __inline__ _raw_spin_lock_flags(spinlock_t *lock, unsigned long flag
 #define RW_LOCK_UNLOCKED (rwlock_t) { 0 }
 
 #define rwlock_init(x)		do { *(x) = RW_LOCK_UNLOCKED; } while(0)
+#define rwlock_is_locked(x)	((x)->lock)
 
-#define read_can_lock(rw)	((rw)->lock >= 0)
-#define write_can_lock(rw)	(!(rw)->lock)
+static __inline__ int is_read_locked(rwlock_t *rw)
+{
+	return rw->lock > 0;
+}
+
+static __inline__ int is_write_locked(rwlock_t *rw)
+{
+	return rw->lock < 0;
+}
 
 static __inline__ void _raw_write_unlock(rwlock_t *rw)
 {
@@ -194,7 +196,7 @@ static void __inline__ _raw_read_lock(rwlock_t *rw)
 			HMT_low();
 			if (SHARED_PROCESSOR)
 				__rw_yield(rw);
-		} while (unlikely(rw->lock < 0));
+		} while (likely(rw->lock < 0));
 		HMT_medium();
 	}
 }
@@ -251,7 +253,7 @@ static void __inline__ _raw_write_lock(rwlock_t *rw)
 			HMT_low();
 			if (SHARED_PROCESSOR)
 				__rw_yield(rw);
-		} while (unlikely(rw->lock != 0));
+		} while (likely(rw->lock != 0));
 		HMT_medium();
 	}
 }

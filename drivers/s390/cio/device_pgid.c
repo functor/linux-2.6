@@ -156,9 +156,7 @@ ccw_device_sense_pgid_irq(struct ccw_device *cdev, enum dev_event dev_event)
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)
 		return;
 	sch = to_subchannel(cdev->dev.parent);
-	ret = __ccw_device_check_sense_pgid(cdev);
-	memset(&cdev->private->irb, 0, sizeof(struct irb));
-	switch (ret) {
+	switch (__ccw_device_check_sense_pgid(cdev)) {
 	/* 0, -ETIME, -EOPNOTSUPP, -EAGAIN, -EACCES or -EUSERS */
 	case 0:			/* Sense Path Group ID successful. */
 		if (cdev->private->pgid.inf.ps.state1 == SNID_STATE1_RESET)
@@ -309,7 +307,6 @@ ccw_device_verify_irq(struct ccw_device *cdev, enum dev_event dev_event)
 {
 	struct subchannel *sch;
 	struct irb *irb;
-	int ret;
 
 	irb = (struct irb *) __LC_IRB;
 	/* Retry set pgid for cc=1. */
@@ -322,9 +319,7 @@ ccw_device_verify_irq(struct ccw_device *cdev, enum dev_event dev_event)
 	if (ccw_device_accumulate_and_sense(cdev, irb) != 0)
 		return;
 	sch = to_subchannel(cdev->dev.parent);
-	ret = __ccw_device_check_pgid(cdev);
-	memset(&cdev->private->irb, 0, sizeof(struct irb));
-	switch (ret) {
+	switch (__ccw_device_check_pgid(cdev)) {
 	/* 0, -ETIME, -EAGAIN, -EOPNOTSUPP or -EACCES */
 	case 0:
 		/* Establish or Resign Path Group done. Update vpm. */
@@ -410,7 +405,6 @@ ccw_device_disband_irq(struct ccw_device *cdev, enum dev_event dev_event)
 		return;
 	sch = to_subchannel(cdev->dev.parent);
 	ret = __ccw_device_check_pgid(cdev);
-	memset(&cdev->private->irb, 0, sizeof(struct irb));
 	switch (ret) {
 	/* 0, -ETIME, -EAGAIN, -EOPNOTSUPP or -EACCES */
 	case 0:			/* disband successful. */

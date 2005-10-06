@@ -26,7 +26,6 @@
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #include <linux/proc_fs.h>
-#include <linux/err.h>
 
 #include <linux/netfilter_ipv4/ip_tables.h>
 
@@ -409,144 +408,86 @@ ipt_do_table(struct sk_buff **pskb,
 #endif
 }
 
-/*
- * These are weird, but module loading must not be done with mutex
- * held (since they will register), and we have to have a single
- * function to use try_then_request_module().
- */
-
-/* Find table by name, grabs mutex & ref.  Returns ERR_PTR() on error. */
-static inline struct ipt_table *find_table_lock(const char *name)
+/* If it succeeds, returns element and locks mutex */
+static inline void *
+find_inlist_lock_noload(struct list_head *head,
+			const char *name,
+			int *error,
+			struct semaphore *mutex)
 {
-	struct ipt_table *t;
+	void *ret;
 
-	if (down_interruptible(&ipt_mutex) != 0)
-		return ERR_PTR(-EINTR);
+#if 0 
+	duprintf("find_inlist: searching for `%s' in %s.\n",
+		 name, head == &ipt_target ? "ipt_target"
+		 : head == &ipt_match ? "ipt_match"
+		 : head == &ipt_tables ? "ipt_tables" : "UNKNOWN");
+#endif
 
-	list_for_each_entry(t, &ipt_tables, list)
-		if (strcmp(t->name, name) == 0 && try_module_get(t->me))
-			return t;
-	up(&ipt_mutex);
-	return NULL;
-}
-
-/* Find match, grabs ref.  Returns ERR_PTR() on error. */
-static inline struct ipt_match *find_match(const char *name, u8 revision)
-{
-	struct ipt_match *m;
-	int err = 0;
-
-	if (down_interruptible(&ipt_mutex) != 0)
-		return ERR_PTR(-EINTR);
-
-	list_for_each_entry(m, &ipt_match, list) {
-		if (strcmp(m->name, name) == 0) {
-			if (m->revision == revision) {
-				if (try_module_get(m->me)) {
-					up(&ipt_mutex);
-					return m;
-				}
-			} else
-				err = -EPROTOTYPE; /* Found something. */
-		}
-	}
-	up(&ipt_mutex);
-	return ERR_PTR(err);
-}
-
-/* Find target, grabs ref.  Returns ERR_PTR() on error. */
-static inline struct ipt_target *find_target(const char *name, u8 revision)
-{
-	struct ipt_target *t;
-	int err = 0;
-
-	if (down_interruptible(&ipt_mutex) != 0)
-		return ERR_PTR(-EINTR);
-
-	list_for_each_entry(t, &ipt_target, list) {
-		if (strcmp(t->name, name) == 0) {
-			if (t->revision == revision) {
-				if (try_module_get(t->me)) {
-					up(&ipt_mutex);
-					return t;
-				}
-			} else
-				err = -EPROTOTYPE; /* Found something. */
-		}
-	}
-	up(&ipt_mutex);
-	return ERR_PTR(err);
-}
-
-struct ipt_target *ipt_find_target(const char *name, u8 revision)
-{
-	struct ipt_target *target;
-
-	target = try_then_request_module(find_target(name, revision),
-					 "ipt_%s", name);
-	if (IS_ERR(target) || !target)
+	*error = down_interruptible(mutex);
+	if (*error != 0)
 		return NULL;
-	return target;
+
+	ret = list_named_find(head, name);
+	if (!ret) {
+		*error = -ENOENT;
+		up(mutex);
+	}
+	return ret;
 }
 
-static int match_revfn(const char *name, u8 revision, int *bestp)
+#ifndef CONFIG_KMOD
+#define find_inlist_lock(h,n,p,e,m) find_inlist_lock_noload((h),(n),(e),(m))
+#else
+static void *
+find_inlist_lock(struct list_head *head,
+		 const char *name,
+		 const char *prefix,
+		 int *error,
+		 struct semaphore *mutex)
 {
-	struct ipt_match *m;
-	int have_rev = 0;
+	void *ret;
 
-	list_for_each_entry(m, &ipt_match, list) {
-		if (strcmp(m->name, name) == 0) {
-			if (m->revision > *bestp)
-				*bestp = m->revision;
-			if (m->revision == revision)
-				have_rev = 1;
-		}
+	ret = find_inlist_lock_noload(head, name, error, mutex);
+	if (!ret) {
+		duprintf("find_inlist: loading `%s%s'.\n", prefix, name);
+		request_module("%s%s", prefix, name);
+		ret = find_inlist_lock_noload(head, name, error, mutex);
 	}
-	return have_rev;
+
+	return ret;
+}
+#endif
+
+static inline struct ipt_table *
+ipt_find_table_lock(const char *name, int *error, struct semaphore *mutex)
+{
+	return find_inlist_lock(&ipt_tables, name, "iptable_", error, mutex);
 }
 
-static int target_revfn(const char *name, u8 revision, int *bestp)
+static inline struct ipt_match *
+find_match_lock(const char *name, int *error, struct semaphore *mutex)
 {
-	struct ipt_target *t;
-	int have_rev = 0;
-
-	list_for_each_entry(t, &ipt_target, list) {
-		if (strcmp(t->name, name) == 0) {
-			if (t->revision > *bestp)
-				*bestp = t->revision;
-			if (t->revision == revision)
-				have_rev = 1;
-		}
-	}
-	return have_rev;
+	return find_inlist_lock(&ipt_match, name, "ipt_", error, mutex);
 }
 
-/* Returns true or false (if no such extension at all) */
-static inline int find_revision(const char *name, u8 revision,
-				int (*revfn)(const char *, u8, int *),
-				int *err)
+static struct ipt_target *
+ipt_find_target_lock(const char *name, int *error, struct semaphore *mutex)
 {
-	int have_rev, best = -1;
+	return find_inlist_lock(&ipt_target, name, "ipt_", error, mutex);
+}
 
-	if (down_interruptible(&ipt_mutex) != 0) {
-		*err = -EINTR;
-		return 1;
-	}
-	have_rev = revfn(name, revision, &best);
+struct ipt_target *
+__ipt_find_target_lock(const char *name, int *error)
+{
+	return ipt_find_target_lock(name,error,&ipt_mutex);
+}
+
+void
+__ipt_mutex_up(void)
+{
 	up(&ipt_mutex);
-
-	/* Nothing at all?  Return 0 to try loading module. */
-	if (best == -1) {
-		*err = -ENOENT;
-		return 0;
-	}
-
-	*err = best;
-	if (!have_rev)
-		*err = -EPROTONOSUPPORT;
-	return 1;
 }
-
 
 /* All zeroes == unconditional rule. */
 static inline int
@@ -707,16 +648,20 @@ check_match(struct ipt_entry_match *m,
 	    unsigned int hookmask,
 	    unsigned int *i)
 {
+	int ret;
 	struct ipt_match *match;
 
-	match = try_then_request_module(find_match(m->u.user.name,
-						   m->u.user.revision),
-					"ipt_%s", m->u.user.name);
-	if (IS_ERR(match) || !match) {
+	match = find_match_lock(m->u.user.name, &ret, &ipt_mutex);
+	if (!match) {
 		duprintf("check_match: `%s' not found\n", m->u.user.name);
-		return match ? PTR_ERR(match) : -ENOENT;
+		return ret;
+	}
+	if (!try_module_get(match->me)) {
+		up(&ipt_mutex);
+		return -ENOENT;
 	}
 	m->u.kernel.match = match;
+	up(&ipt_mutex);
 
 	if (m->u.kernel.match->checkentry
 	    && !m->u.kernel.match->checkentry(name, ip, m->data,
@@ -754,15 +699,18 @@ check_entry(struct ipt_entry *e, const char *name, unsigned int size,
 		goto cleanup_matches;
 
 	t = ipt_get_target(e);
-	target = try_then_request_module(find_target(t->u.user.name,
-						     t->u.user.revision),
-					 "ipt_%s", t->u.user.name);
-	if (IS_ERR(target) || !target) {
+	target = ipt_find_target_lock(t->u.user.name, &ret, &ipt_mutex);
+	if (!target) {
 		duprintf("check_entry: `%s' not found\n", t->u.user.name);
-		ret = target ? PTR_ERR(target) : -ENOENT;
+		goto cleanup_matches;
+	}
+	if (!try_module_get(target->me)) {
+		up(&ipt_mutex);
+		ret = -ENOENT;
 		goto cleanup_matches;
 	}
 	t->u.kernel.target = target;
+	up(&ipt_mutex);
 
 	if (t->u.kernel.target == &ipt_standard_target) {
 		if (!standard_check(t, size)) {
@@ -923,7 +871,7 @@ translate_table(const char *name,
 	}
 
 	/* And one copy for every other CPU */
-	for (i = 1; i < num_possible_cpus(); i++) {
+	for (i = 1; i < NR_CPUS; i++) {
 		memcpy(newinfo->entries + SMP_ALIGN(newinfo->size)*i,
 		       newinfo->entries,
 		       SMP_ALIGN(newinfo->size));
@@ -945,7 +893,7 @@ replace_table(struct ipt_table *table,
 		struct ipt_entry *table_base;
 		unsigned int i;
 
-		for (i = 0; i < num_possible_cpus(); i++) {
+		for (i = 0; i < NR_CPUS; i++) {
 			table_base =
 				(void *)newinfo->entries
 				+ TABLE_OFFSET(newinfo, i);
@@ -992,7 +940,7 @@ get_counters(const struct ipt_table_info *t,
 	unsigned int cpu;
 	unsigned int i;
 
-	for (cpu = 0; cpu < num_possible_cpus(); cpu++) {
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
 		i = 0;
 		IPT_ENTRY_ITERATE(t->entries + TABLE_OFFSET(t, cpu),
 				  t->size,
@@ -1088,8 +1036,8 @@ get_entries(const struct ipt_get_entries *entries,
 	int ret;
 	struct ipt_table *t;
 
-	t = find_table_lock(entries->name);
-	if (t && !IS_ERR(t)) {
+	t = ipt_find_table_lock(entries->name, &ret, &ipt_mutex);
+	if (t) {
 		duprintf("t->private->number = %u\n",
 			 t->private->number);
 		if (entries->size == t->private->size)
@@ -1101,10 +1049,10 @@ get_entries(const struct ipt_get_entries *entries,
 				 entries->size);
 			ret = -EINVAL;
 		}
-		module_put(t->me);
 		up(&ipt_mutex);
 	} else
-		ret = t ? PTR_ERR(t) : -ENOENT;
+		duprintf("get_entries: Can't find %s!\n",
+			 entries->name);
 
 	return ret;
 }
@@ -1130,7 +1078,7 @@ do_replace(void __user *user, unsigned int len)
 		return -ENOMEM;
 
 	newinfo = vmalloc(sizeof(struct ipt_table_info)
-			  + SMP_ALIGN(tmp.size) * num_possible_cpus());
+			  + SMP_ALIGN(tmp.size) * NR_CPUS);
 	if (!newinfo)
 		return -ENOMEM;
 
@@ -1155,20 +1103,24 @@ do_replace(void __user *user, unsigned int len)
 
 	duprintf("ip_tables: Translated table\n");
 
-	t = try_then_request_module(find_table_lock(tmp.name),
-				    "iptable_%s", tmp.name);
-	if (!t || IS_ERR(t)) {
-		ret = t ? PTR_ERR(t) : -ENOENT;
+	t = ipt_find_table_lock(tmp.name, &ret, &ipt_mutex);
+	if (!t)
 		goto free_newinfo_counters_untrans;
-	}
 
 	/* You lied! */
 	if (tmp.valid_hooks != t->valid_hooks) {
 		duprintf("Valid hook crap: %08X vs %08X\n",
 			 tmp.valid_hooks, t->valid_hooks);
 		ret = -EINVAL;
-		goto put_module;
+		goto free_newinfo_counters_untrans_unlock;
 	}
+
+	/* Get a reference in advance, we're not allowed fail later */
+	if (!try_module_get(t->me)) {
+		ret = -EBUSY;
+		goto free_newinfo_counters_untrans_unlock;
+	}
+
 
 	oldinfo = replace_table(t, tmp.num_counters, newinfo, &ret);
 	if (!oldinfo)
@@ -1189,15 +1141,16 @@ do_replace(void __user *user, unsigned int len)
 	/* Decrease module usage counts and free resource */
 	IPT_ENTRY_ITERATE(oldinfo->entries, oldinfo->size, cleanup_entry,NULL);
 	vfree(oldinfo);
-	if (copy_to_user(tmp.counters, counters,
-			 sizeof(struct ipt_counters) * tmp.num_counters) != 0)
-		ret = -EFAULT;
+	/* Silent error: too late now. */
+	copy_to_user(tmp.counters, counters,
+		     sizeof(struct ipt_counters) * tmp.num_counters);
 	vfree(counters);
 	up(&ipt_mutex);
-	return ret;
+	return 0;
 
  put_module:
 	module_put(t->me);
+ free_newinfo_counters_untrans_unlock:
 	up(&ipt_mutex);
  free_newinfo_counters_untrans:
 	IPT_ENTRY_ITERATE(newinfo->entries, newinfo->size, cleanup_entry,NULL);
@@ -1236,7 +1189,7 @@ do_add_counters(void __user *user, unsigned int len)
 	unsigned int i;
 	struct ipt_counters_info tmp, *paddc;
 	struct ipt_table *t;
-	int ret = 0;
+	int ret;
 
 	if (copy_from_user(&tmp, user, sizeof(tmp)) != 0)
 		return -EFAULT;
@@ -1253,11 +1206,9 @@ do_add_counters(void __user *user, unsigned int len)
 		goto free;
 	}
 
-	t = find_table_lock(tmp.name);
-	if (!t || IS_ERR(t)) {
-		ret = t ? PTR_ERR(t) : -ENOENT;
+	t = ipt_find_table_lock(tmp.name, &ret, &ipt_mutex);
+	if (!t)
 		goto free;
-	}
 
 	write_lock_bh(&t->lock);
 	if (t->private->number != paddc->num_counters) {
@@ -1274,7 +1225,6 @@ do_add_counters(void __user *user, unsigned int len)
  unlock_up_free:
 	write_unlock_bh(&t->lock);
 	up(&ipt_mutex);
-	module_put(t->me);
  free:
 	vfree(paddc);
 
@@ -1331,10 +1281,8 @@ do_ipt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 			break;
 		}
 		name[IPT_TABLE_MAXNAMELEN-1] = '\0';
-
-		t = try_then_request_module(find_table_lock(name),
-					    "iptable_%s", name);
-		if (t && !IS_ERR(t)) {
+		t = ipt_find_table_lock(name, &ret, &ipt_mutex);
+		if (t) {
 			struct ipt_getinfo info;
 
 			info.valid_hooks = t->valid_hooks;
@@ -1350,10 +1298,9 @@ do_ipt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 				ret = -EFAULT;
 			else
 				ret = 0;
+
 			up(&ipt_mutex);
-			module_put(t->me);
-		} else
-			ret = t ? PTR_ERR(t) : -ENOENT;
+		}
 	}
 	break;
 
@@ -1374,31 +1321,6 @@ do_ipt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 		break;
 	}
 
-	case IPT_SO_GET_REVISION_MATCH:
-	case IPT_SO_GET_REVISION_TARGET: {
-		struct ipt_get_revision rev;
-		int (*revfn)(const char *, u8, int *);
-
-		if (*len != sizeof(rev)) {
-			ret = -EINVAL;
-			break;
-		}
-		if (copy_from_user(&rev, user, sizeof(rev)) != 0) {
-			ret = -EFAULT;
-			break;
-		}
-
-		if (cmd == IPT_SO_GET_REVISION_TARGET)
-			revfn = target_revfn;
-		else
-			revfn = match_revfn;
-
-		try_then_request_module(find_revision(rev.name, rev.revision,
-						      revfn, &ret),
-					"ipt_%s", rev.name);
-		break;
-	}
-
 	default:
 		duprintf("do_ipt_get_ctl: unknown request %i\n", cmd);
 		ret = -EINVAL;
@@ -1416,7 +1338,12 @@ ipt_register_target(struct ipt_target *target)
 	ret = down_interruptible(&ipt_mutex);
 	if (ret != 0)
 		return ret;
-	list_add(&target->list, &ipt_target);
+
+	if (!list_named_insert(&ipt_target, target)) {
+		duprintf("ipt_register_target: `%s' already in list!\n",
+			 target->name);
+		ret = -EINVAL;
+	}
 	up(&ipt_mutex);
 	return ret;
 }
@@ -1438,7 +1365,11 @@ ipt_register_match(struct ipt_match *match)
 	if (ret != 0)
 		return ret;
 
-	list_add(&match->list, &ipt_match);
+	if (!list_named_insert(&ipt_match, match)) {
+		duprintf("ipt_register_match: `%s' already in list!\n",
+			 match->name);
+		ret = -EINVAL;
+	}
 	up(&ipt_mutex);
 
 	return ret;
@@ -1452,7 +1383,7 @@ ipt_unregister_match(struct ipt_match *match)
 	up(&ipt_mutex);
 }
 
-int ipt_register_table(struct ipt_table *table, const struct ipt_replace *repl)
+int ipt_register_table(struct ipt_table *table)
 {
 	int ret;
 	struct ipt_table_info *newinfo;
@@ -1460,17 +1391,17 @@ int ipt_register_table(struct ipt_table *table, const struct ipt_replace *repl)
 		= { 0, 0, 0, { 0 }, { 0 }, { } };
 
 	newinfo = vmalloc(sizeof(struct ipt_table_info)
-			  + SMP_ALIGN(repl->size) * num_possible_cpus());
+			  + SMP_ALIGN(table->table->size) * NR_CPUS);
 	if (!newinfo)
 		return -ENOMEM;
 
-	memcpy(newinfo->entries, repl->entries, repl->size);
+	memcpy(newinfo->entries, table->table->entries, table->table->size);
 
 	ret = translate_table(table->name, table->valid_hooks,
-			      newinfo, repl->size,
-			      repl->num_entries,
-			      repl->hook_entry,
-			      repl->underflow);
+			      newinfo, table->table->size,
+			      table->table->num_entries,
+			      table->table->hook_entry,
+			      table->table->underflow);
 	if (ret != 0) {
 		vfree(newinfo);
 		return ret;
@@ -1958,7 +1889,8 @@ EXPORT_SYMBOL(ipt_unregister_match);
 EXPORT_SYMBOL(ipt_do_table);
 EXPORT_SYMBOL(ipt_register_target);
 EXPORT_SYMBOL(ipt_unregister_target);
-EXPORT_SYMBOL(ipt_find_target);
+EXPORT_SYMBOL_GPL(__ipt_find_target_lock);
+EXPORT_SYMBOL_GPL(__ipt_mutex_up);
 
 module_init(init);
 module_exit(fini);

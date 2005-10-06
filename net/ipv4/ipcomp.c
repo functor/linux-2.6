@@ -154,9 +154,11 @@ out:
 	return err;
 }
 
-static int ipcomp_output(struct xfrm_state *x, struct sk_buff *skb)
+static int ipcomp_output(struct sk_buff *skb)
 {
 	int err;
+	struct dst_entry *dst = skb->dst;
+	struct xfrm_state *x = dst->xfrm;
 	struct iphdr *iph;
 	struct ip_comp_hdr *ipch;
 	struct ipcomp_data *ipcd = x->data;
@@ -167,22 +169,32 @@ static int ipcomp_output(struct xfrm_state *x, struct sk_buff *skb)
 	hdr_len = iph->ihl * 4;
 	if ((skb->len - hdr_len) < ipcd->threshold) {
 		/* Don't bother compressing */
+		if (x->props.mode) {
+			ip_send_check(iph);
+		}
 		goto out_ok;
 	}
 
 	if ((skb_is_nonlinear(skb) || skb_cloned(skb)) &&
 	    skb_linearize(skb, GFP_ATOMIC) != 0) {
-		goto out_ok;
+	    	err = -ENOMEM;
+	    	goto error;
 	}
 	
 	err = ipcomp_compress(x, skb);
-	iph = skb->nh.iph;
-
 	if (err) {
-		goto out_ok;
+		if (err == -EMSGSIZE) {
+			if (x->props.mode) {
+				iph = skb->nh.iph;
+				ip_send_check(iph);
+			}
+			goto out_ok;
+		}
+		goto error;
 	}
 
 	/* Install ipcomp header, convert into ipcomp datagram. */
+	iph = skb->nh.iph;
 	iph->tot_len = htons(skb->len);
 	ipch = (struct ip_comp_hdr *)((char *)iph + iph->ihl * 4);
 	ipch->nexthdr = iph->protocol;
@@ -190,12 +202,12 @@ static int ipcomp_output(struct xfrm_state *x, struct sk_buff *skb)
 	ipch->cpi = htons((u16 )ntohl(x->id.spi));
 	iph->protocol = IPPROTO_COMP;
 	ip_send_check(iph);
-	return 0;
 
 out_ok:
-	if (x->props.mode)
-		ip_send_check(iph);
-	return 0;
+	err = 0;
+
+error:
+	return err;
 }
 
 static void ipcomp4_err(struct sk_buff *skb, u32 info)
@@ -460,7 +472,7 @@ static int ipcomp_init_state(struct xfrm_state *x, void *args)
 			goto error_tunnel;
 	}
 
-	calg_desc = xfrm_calg_get_byname(x->calg->alg_name, 0);
+	calg_desc = xfrm_calg_get_byname(x->calg->alg_name);
 	BUG_ON(!calg_desc);
 	ipcd->threshold = calg_desc->uinfo.comp.threshold;
 	x->data = ipcd;

@@ -50,9 +50,9 @@ u64 jiffies_64 = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);
 
-DEFINE_SPINLOCK(rtc_lock);
+spinlock_t rtc_lock = SPIN_LOCK_UNLOCKED;
 enum sparc_clock_type sp_clock_typ;
-DEFINE_SPINLOCK(mostek_lock);
+spinlock_t mostek_lock = SPIN_LOCK_UNLOCKED;
 void __iomem *mstk48t02_regs = NULL;
 static struct mostek48t08 *mstk48t08_regs = NULL;
 static int set_rtc_mmss(unsigned long);

@@ -16,7 +16,6 @@
 #include <linux/smp_lock.h>
 #include <linux/ptrace.h>
 #include <linux/security.h>
-#include <linux/signal.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -39,22 +38,25 @@ void __ptrace_link(task_t *child, task_t *new_parent)
 	SET_LINKS(child);
 }
  
+static inline int pending_resume_signal(struct sigpending *pending)
+{
+#define M(sig) (1UL << ((sig)-1))
+	return sigtestsetmask(&pending->signal, M(SIGCONT) | M(SIGKILL));
+}
+
 /*
  * Turn a tracing stop into a normal stop now, since with no tracer there
  * would be no way to wake it up with SIGCONT or SIGKILL.  If there was a
  * signal sent that would resume the child, but didn't because it was in
  * TASK_TRACED, resume it now.
- * Requires that irqs be disabled.
  */
 void ptrace_untrace(task_t *child)
 {
 	spin_lock(&child->sighand->siglock);
-	if (child->state == TASK_TRACED) {
-		if (child->signal->flags & SIGNAL_STOP_STOPPED) {
-			child->state = TASK_STOPPED;
-		} else {
-			signal_wake_up(child, 1);
-		}
+	child->state = TASK_STOPPED;
+	if (pending_resume_signal(&child->pending) ||
+	    pending_resume_signal(&child->signal->shared_pending)) {
+		signal_wake_up(child, 1);
 	}
 	spin_unlock(&child->sighand->siglock);
 }
@@ -136,7 +138,7 @@ int ptrace_attach(struct task_struct *task)
  	    (current->gid != task->sgid) ||
  	    (current->gid != task->gid)) && !capable(CAP_SYS_PTRACE))
 		goto bad;
-	smp_rmb();
+	rmb();
 	if (!task->mm->dumpable && !capable(CAP_SYS_PTRACE))
 		goto bad;
 	/* the same process cannot be attached many times */
@@ -167,7 +169,7 @@ bad:
 
 int ptrace_detach(struct task_struct *child, unsigned int data)
 {
-	if (!valid_signal(data))
+	if ((unsigned long) data > _NSIG)
 		return	-EIO;
 
 	/* Architecture-specific hardware disable .. */
@@ -320,45 +322,18 @@ static int ptrace_setoptions(struct task_struct *child, long data)
 
 static int ptrace_getsiginfo(struct task_struct *child, siginfo_t __user * data)
 {
-	siginfo_t lastinfo;
-	int error = -ESRCH;
-
-	read_lock(&tasklist_lock);
-	if (likely(child->sighand != NULL)) {
-		error = -EINVAL;
-		spin_lock_irq(&child->sighand->siglock);
-		if (likely(child->last_siginfo != NULL)) {
-			lastinfo = *child->last_siginfo;
-			error = 0;
-		}
-		spin_unlock_irq(&child->sighand->siglock);
-	}
-	read_unlock(&tasklist_lock);
-	if (!error)
-		return copy_siginfo_to_user(data, &lastinfo);
-	return error;
+	if (child->last_siginfo == NULL)
+		return -EINVAL;
+	return copy_siginfo_to_user(data, child->last_siginfo);
 }
 
 static int ptrace_setsiginfo(struct task_struct *child, siginfo_t __user * data)
 {
-	siginfo_t newinfo;
-	int error = -ESRCH;
-
-	if (copy_from_user(&newinfo, data, sizeof (siginfo_t)))
+	if (child->last_siginfo == NULL)
+		return -EINVAL;
+	if (copy_from_user(child->last_siginfo, data, sizeof (siginfo_t)) != 0)
 		return -EFAULT;
-
-	read_lock(&tasklist_lock);
-	if (likely(child->sighand != NULL)) {
-		error = -EINVAL;
-		spin_lock_irq(&child->sighand->siglock);
-		if (likely(child->last_siginfo != NULL)) {
-			*child->last_siginfo = newinfo;
-			error = 0;
-		}
-		spin_unlock_irq(&child->sighand->siglock);
-	}
-	read_unlock(&tasklist_lock);
-	return error;
+	return 0;
 }
 
 int ptrace_request(struct task_struct *child, long request,

@@ -54,7 +54,7 @@
 
    qdisc_tree_lock must be grabbed BEFORE dev->queue_lock!
  */
-DEFINE_RWLOCK(qdisc_tree_lock);
+rwlock_t qdisc_tree_lock = RW_LOCK_UNLOCKED;
 
 void qdisc_lock_tree(struct net_device *dev)
 {
@@ -179,7 +179,6 @@ requeue:
 		netif_schedule(dev);
 		return 1;
 	}
-	BUG_ON((int) q->q.qlen < 0);
 	return q->q.qlen;
 }
 
@@ -284,7 +283,7 @@ struct Qdisc noop_qdisc = {
 	.list		=	LIST_HEAD_INIT(noop_qdisc.list),
 };
 
-static struct Qdisc_ops noqueue_qdisc_ops = {
+struct Qdisc_ops noqueue_qdisc_ops = {
 	.next		=	NULL,
 	.cl_ops		=	NULL,
 	.id		=	"noqueue",
@@ -295,7 +294,7 @@ static struct Qdisc_ops noqueue_qdisc_ops = {
 	.owner		=	THIS_MODULE,
 };
 
-static struct Qdisc noqueue_qdisc = {
+struct Qdisc noqueue_qdisc = {
 	.enqueue	=	NULL,
 	.dequeue	=	noop_dequeue,
 	.flags		=	TCQ_F_BUILTIN,
@@ -539,10 +538,6 @@ void dev_activate(struct net_device *dev)
 		dev->qdisc_sleeping = qdisc;
 		write_unlock_bh(&qdisc_tree_lock);
 	}
-
-	if (!netif_carrier_ok(dev))
-		/* Delay activation until next carrier-on event */
-		return;
 
 	spin_lock_bh(&dev->queue_lock);
 	rcu_assign_pointer(dev->qdisc, dev->qdisc_sleeping);

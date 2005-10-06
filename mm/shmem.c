@@ -183,12 +183,12 @@ static struct vm_operations_struct shmem_vm_ops;
 
 static struct backing_dev_info shmem_backing_dev_info = {
 	.ra_pages	= 0,	/* No readahead */
-	.capabilities	= BDI_CAP_NO_ACCT_DIRTY | BDI_CAP_NO_WRITEBACK,
-	.unplug_io_fn	= default_unplug_io_fn,
+	.memory_backed	= 1,	/* Does not contribute to dirty memory */
+	.unplug_io_fn = default_unplug_io_fn,
 };
 
 static LIST_HEAD(shmem_swaplist);
-static DEFINE_SPINLOCK(shmem_swaplist_lock);
+static spinlock_t shmem_swaplist_lock = SPIN_LOCK_UNLOCKED;
 
 static void shmem_free_blocks(struct inode *inode, long pages)
 {
@@ -368,8 +368,9 @@ static swp_entry_t *shmem_swp_alloc(struct shmem_inode_info *info, unsigned long
 		}
 
 		spin_unlock(&info->lock);
-		page = shmem_dir_alloc(mapping_gfp_mask(inode->i_mapping) | __GFP_ZERO);
+		page = shmem_dir_alloc(mapping_gfp_mask(inode->i_mapping));
 		if (page) {
+			clear_highpage(page);
 			page->nr_swapped = 0;
 		}
 		spin_lock(&info->lock);
@@ -908,7 +909,7 @@ shmem_alloc_page(unsigned long gfp, struct shmem_inode_info *info,
 	pvma.vm_policy = mpol_shared_policy_lookup(&info->policy, idx);
 	pvma.vm_pgoff = idx;
 	pvma.vm_end = PAGE_SIZE;
-	page = alloc_page_vma(gfp | __GFP_ZERO, &pvma, 0);
+	page = alloc_page_vma(gfp, &pvma, 0);
 	mpol_free(pvma.vm_policy);
 	return page;
 }
@@ -921,10 +922,10 @@ shmem_swapin(struct shmem_inode_info *info,swp_entry_t entry,unsigned long idx)
 }
 
 static inline struct page *
-shmem_alloc_page(unsigned int __nocast gfp,struct shmem_inode_info *info,
+shmem_alloc_page(unsigned long gfp,struct shmem_inode_info *info,
 				 unsigned long idx)
 {
-	return alloc_page(gfp | __GFP_ZERO);
+	return alloc_page(gfp);
 }
 #endif
 
@@ -1133,6 +1134,7 @@ repeat:
 
 		info->alloced++;
 		spin_unlock(&info->lock);
+		clear_highpage(filepage);
 		flush_dcache_page(filepage);
 		SetPageUptodate(filepage);
 	}
@@ -1161,8 +1163,6 @@ struct page *shmem_nopage(struct vm_area_struct *vma, unsigned long address, int
 	idx = (address - vma->vm_start) >> PAGE_SHIFT;
 	idx += vma->vm_pgoff;
 	idx >>= PAGE_CACHE_SHIFT - PAGE_SHIFT;
-	if (((loff_t) idx << PAGE_CACHE_SHIFT) >= i_size_read(inode))
-		return NOPAGE_SIGBUS;
 
 	error = shmem_getpage(inode, idx, &page, SGP_CACHE, type);
 	if (error)
@@ -2171,7 +2171,7 @@ static int shmem_xattr_security_set(struct inode *inode, const char *name, const
 	return security_inode_setsecurity(inode, name, value, size, flags);
 }
 
-static struct xattr_handler shmem_xattr_security_handler = {
+struct xattr_handler shmem_xattr_security_handler = {
 	.prefix	= XATTR_SECURITY_PREFIX,
 	.list	= shmem_xattr_security_list,
 	.get	= shmem_xattr_security_get,

@@ -26,6 +26,7 @@
  *
  */
 
+#include "i830.h"
 #include "drmP.h"
 #include "drm.h"
 #include "i830_drm.h"
@@ -123,12 +124,15 @@ int i830_irq_emit( struct inode *inode, struct file *filp, unsigned int cmd,
 		   unsigned long arg )
 {
 	drm_file_t	  *priv	    = filp->private_data;
-	drm_device_t	  *dev	    = priv->head->dev;
+	drm_device_t	  *dev	    = priv->dev;
 	drm_i830_private_t *dev_priv = dev->dev_private;
 	drm_i830_irq_emit_t emit;
 	int result;
 
-	LOCK_TEST_WITH_RETURN(dev, filp);
+   	if(!_DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock)) {
+		DRM_ERROR("i830_irq_emit called without lock held\n");
+		return -EINVAL;
+	}
 
 	if ( !dev_priv ) {
 		DRM_ERROR( "%s called with no initialization\n", __FUNCTION__ );
@@ -155,7 +159,7 @@ int i830_irq_wait( struct inode *inode, struct file *filp, unsigned int cmd,
 		   unsigned long arg )
 {
 	drm_file_t	  *priv	    = filp->private_data;
-	drm_device_t	  *dev	    = priv->head->dev;
+	drm_device_t	  *dev	    = priv->dev;
 	drm_i830_private_t *dev_priv = dev->dev_private;
 	drm_i830_irq_wait_t irqwait;
 

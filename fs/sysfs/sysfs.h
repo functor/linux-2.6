@@ -1,6 +1,5 @@
 
 extern struct vfsmount * sysfs_mount;
-extern kmem_cache_t *sysfs_dir_cachep;
 
 extern struct inode * sysfs_new_inode(mode_t mode);
 extern int sysfs_create(struct dentry *, int mode, int (*init)(struct inode *));
@@ -75,7 +74,7 @@ static inline void release_sysfs_dirent(struct sysfs_dirent * sd)
 		kobject_put(sl->target_kobj);
 		kfree(sl);
 	}
-	kmem_cache_free(sysfs_dir_cachep, sd);
+	kfree(sd);
 }
 
 static inline struct sysfs_dirent * sysfs_get(struct sysfs_dirent * sd)

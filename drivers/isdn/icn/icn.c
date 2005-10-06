@@ -21,13 +21,13 @@ static char *icn_id2 = "\0";
 MODULE_DESCRIPTION("ISDN4Linux: Driver for ICN active ISDN card");
 MODULE_AUTHOR("Fritz Elfert");
 MODULE_LICENSE("GPL");
-module_param(portbase, int, 0);
+MODULE_PARM(portbase, "i");
 MODULE_PARM_DESC(portbase, "Port address of first card");
-module_param(membase, ulong, 0);
+MODULE_PARM(membase, "l");
 MODULE_PARM_DESC(membase, "Shared memory address of all cards");
-module_param(icn_id, charp, 0);
+MODULE_PARM(icn_id, "s");
 MODULE_PARM_DESC(icn_id, "ID-String of first card");
-module_param(icn_id2, charp, 0);
+MODULE_PARM(icn_id2, "s");
 MODULE_PARM_DESC(icn_id2, "ID-String of first card, second S0 (4B only)");
 
 /*
@@ -908,13 +908,14 @@ icn_loadproto(u_char __user * buffer, icn_card * card)
 	uint left = ICN_CODE_STAGE2;
 	uint cnt;
 	int timer;
+	int ret;
 	unsigned long flags;
 
 #ifdef BOOT_DEBUG
 	printk(KERN_DEBUG "icn_loadproto called\n");
 #endif
-	if (!access_ok(VERIFY_READ, buffer, ICN_CODE_STAGE2))
-		return -EFAULT;
+	if ((ret = verify_area(VERIFY_READ, buffer, ICN_CODE_STAGE2)))
+		return ret;
 	timer = 0;
 	spin_lock_irqsave(&dev.devlock, flags);
 	if (card->secondhalf) {
@@ -1670,8 +1671,8 @@ static void __exit icn_exit(void)
 			for (i = 0; i < ICN_BCH; i++)
 				icn_free_queue(card, i);
 		}
-		spin_unlock_irqrestore(&card->lock, flags);
 		card = card->next;
+		spin_unlock_irqrestore(&card->lock, flags);
 	}
 	card = cards;
 	cards = NULL;

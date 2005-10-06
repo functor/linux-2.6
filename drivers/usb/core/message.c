@@ -55,7 +55,7 @@ static int usb_start_wait_urb(struct urb *urb, int timeout, int* actual_length)
 	if (status == 0) {
 		if (timeout > 0) {
 			init_timer(&timer);
-			timer.expires = jiffies + msecs_to_jiffies(timeout);
+			timer.expires = jiffies + timeout;
 			timer.data = (unsigned long)urb;
 			timer.function = timeout_kill;
 			/* grr.  timeout _should_ include submit delays. */
@@ -65,18 +65,12 @@ static int usb_start_wait_urb(struct urb *urb, int timeout, int* actual_length)
 		status = urb->status;
 		/* note:  HCDs return ETIMEDOUT for other reasons too */
 		if (status == -ECONNRESET) {
-			dev_dbg(&urb->dev->dev,
-				"%s timed out on ep%d%s len=%d/%d\n",
+			dev_warn(&urb->dev->dev,
+				"%s timed out on ep%d%s\n",
 				current->comm,
 				usb_pipeendpoint(urb->pipe),
-				usb_pipein(urb->pipe) ? "in" : "out",
-				urb->actual_length,
-				urb->transfer_buffer_length
-				);
-			if (urb->actual_length > 0)
-				status = 0;
-			else
-				status = -ETIMEDOUT;
+				usb_pipein(urb->pipe) ? "in" : "out");
+			status = -ETIMEDOUT;
 		}
 		if (timeout > 0)
 			del_timer_sync(&timer);
@@ -90,10 +84,8 @@ static int usb_start_wait_urb(struct urb *urb, int timeout, int* actual_length)
 
 /*-------------------------------------------------------------------*/
 // returns status (negative) or length (positive)
-static int usb_internal_control_msg(struct usb_device *usb_dev,
-				    unsigned int pipe, 
-				    struct usb_ctrlrequest *cmd,
-				    void *data, int len, int timeout)
+int usb_internal_control_msg(struct usb_device *usb_dev, unsigned int pipe, 
+			    struct usb_ctrlrequest *cmd,  void *data, int len, int timeout)
 {
 	struct urb *urb;
 	int retv;
@@ -123,7 +115,7 @@ static int usb_internal_control_msg(struct usb_device *usb_dev,
  *	@index: USB message index value
  *	@data: pointer to the data to send
  *	@size: length in bytes of the data to send
- *	@timeout: time in msecs to wait for the message to complete before
+ *	@timeout: time in jiffies to wait for the message to complete before
  *		timing out (if 0 the wait is forever)
  *	Context: !in_interrupt ()
  *
@@ -171,7 +163,7 @@ int usb_control_msg(struct usb_device *dev, unsigned int pipe, __u8 request, __u
  *	@data: pointer to the data to send
  *	@len: length in bytes of the data to send
  *	@actual_length: pointer to a location to put the actual length transferred in bytes
- *	@timeout: time in msecs to wait for the message to complete before
+ *	@timeout: time in jiffies to wait for the message to complete before
  *		timing out (if 0 the wait is forever)
  *	Context: !in_interrupt ()
  *
@@ -204,7 +196,7 @@ int usb_bulk_msg(struct usb_device *usb_dev, unsigned int pipe,
 	usb_fill_bulk_urb(urb, usb_dev, pipe, data, len,
 			  usb_api_blocking_completion, NULL);
 
-	return usb_start_wait_urb(urb, timeout, actual_length);
+	return usb_start_wait_urb(urb,timeout,actual_length);
 }
 
 /*-------------------------------------------------------------------*/
@@ -217,7 +209,7 @@ static void sg_clean (struct usb_sg_request *io)
 		kfree (io->urbs);
 		io->urbs = NULL;
 	}
-	if (io->dev->dev.dma_mask != NULL)
+	if (io->dev->dev.dma_mask != 0)
 		usb_buffer_unmap_sg (io->dev, io->pipe, io->sg, io->nents);
 	io->dev = NULL;
 }
@@ -342,7 +334,7 @@ int usb_sg_init (
 	/* not all host controllers use DMA (like the mainstream pci ones);
 	 * they can use PIO (sl811) or be software over another transport.
 	 */
-	dma = (dev->dev.dma_mask != NULL);
+	dma = (dev->dev.dma_mask != 0);
 	if (dma)
 		io->entries = usb_buffer_map_sg (dev, pipe, sg, nents);
 	else
@@ -431,7 +423,7 @@ nomem:
  * (2) error, where io->status is a negative errno value.  The number
  *     of io->bytes transferred before the error is usually less
  *     than requested, and can be nonzero.
- * (3) cancellation, a type of error with status -ECONNRESET that
+ * (3) cancelation, a type of error with status -ECONNRESET that
  *     is initiated by usb_sg_cancel().
  *
  * When this function returns, all memory allocated through usb_sg_init() or
@@ -587,7 +579,7 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char
 		result = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
 				USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
 				(type << 8) + index, 0, buf, size,
-				USB_CTRL_GET_TIMEOUT);
+				HZ * USB_CTRL_GET_TIMEOUT);
 		if (result == 0 || result == -EPIPE)
 			continue;
 		if (result > 1 && ((u8 *)buf)[1] != type) {
@@ -632,7 +624,7 @@ int usb_get_string(struct usb_device *dev, unsigned short langid,
 		result = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
 			USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
 			(USB_DT_STRING << 8) + index, langid, buf, size,
-			USB_CTRL_GET_TIMEOUT);
+			HZ * USB_CTRL_GET_TIMEOUT);
 		if (!(result == 0 || result == -EPIPE))
 			break;
 	}
@@ -804,8 +796,13 @@ int usb_get_device_descriptor(struct usb_device *dev, unsigned int size)
 		return -ENOMEM;
 
 	ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, desc, size);
-	if (ret >= 0) 
+	if (ret >= 0) {
+		le16_to_cpus(&desc->bcdUSB);
+		le16_to_cpus(&desc->idVendor);
+		le16_to_cpus(&desc->idProduct);
+		le16_to_cpus(&desc->bcdDevice);
 		memcpy(&dev->descriptor, desc, size);
+	}
 	kfree(desc);
 	return ret;
 }
@@ -842,7 +839,7 @@ int usb_get_status(struct usb_device *dev, int type, int target, void *data)
 
 	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
 		USB_REQ_GET_STATUS, USB_DIR_IN | type, 0, target, status,
-		sizeof(*status), USB_CTRL_GET_TIMEOUT);
+		sizeof(*status), HZ * USB_CTRL_GET_TIMEOUT);
 
 	*(u16 *)data = *status;
 	kfree(status);
@@ -887,7 +884,7 @@ int usb_clear_halt(struct usb_device *dev, int pipe)
 	result = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
 		USB_REQ_CLEAR_FEATURE, USB_RECIP_ENDPOINT,
 		USB_ENDPOINT_HALT, endp, NULL, 0,
-		USB_CTRL_SET_TIMEOUT);
+		HZ * USB_CTRL_SET_TIMEOUT);
 
 	/* don't un-halt or force to DATA0 except on success */
 	if (result < 0)
@@ -921,21 +918,16 @@ int usb_clear_halt(struct usb_device *dev, int pipe)
  */
 void usb_disable_endpoint(struct usb_device *dev, unsigned int epaddr)
 {
-	unsigned int epnum = epaddr & USB_ENDPOINT_NUMBER_MASK;
-	struct usb_host_endpoint *ep;
+	if (dev && dev->bus && dev->bus->op && dev->bus->op->disable)
+		dev->bus->op->disable(dev, epaddr);
+	else {
+		unsigned int epnum = epaddr & USB_ENDPOINT_NUMBER_MASK;
 
-	if (!dev)
-		return;
-
-	if (usb_endpoint_out(epaddr)) {
-		ep = dev->ep_out[epnum];
-		dev->ep_out[epnum] = NULL;
-	} else {
-		ep = dev->ep_in[epnum];
-		dev->ep_in[epnum] = NULL;
+		if (usb_endpoint_out(epaddr))
+			dev->epmaxpacketout[epnum] = 0;
+		else
+			dev->epmaxpacketin[epnum] = 0;
 	}
-	if (ep && dev->bus && dev->bus->op && dev->bus->op->disable)
-		dev->bus->op->disable(dev, ep);
 }
 
 /**
@@ -990,8 +982,6 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 			dev_dbg (&dev->dev, "unregistering interface %s\n",
 				interface->dev.bus_id);
 			usb_remove_sysfs_intf_files(interface);
-			kfree(interface->cur_altsetting->string);
-			interface->cur_altsetting->string = NULL;
 			device_del (&interface->dev);
 		}
 
@@ -1012,27 +1002,27 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 /*
  * usb_enable_endpoint - Enable an endpoint for USB communications
  * @dev: the device whose interface is being enabled
- * @ep: the endpoint
+ * @epd: pointer to the endpoint descriptor
  *
- * Resets the endpoint toggle, and sets dev->ep_{in,out} pointers.
+ * Resets the endpoint toggle and stores its maxpacket value.
  * For control endpoints, both the input and output sides are handled.
  */
-static void
-usb_enable_endpoint(struct usb_device *dev, struct usb_host_endpoint *ep)
+void usb_enable_endpoint(struct usb_device *dev,
+		struct usb_endpoint_descriptor *epd)
 {
-	unsigned int epaddr = ep->desc.bEndpointAddress;
+	int maxsize = epd->wMaxPacketSize;
+	unsigned int epaddr = epd->bEndpointAddress;
 	unsigned int epnum = epaddr & USB_ENDPOINT_NUMBER_MASK;
-	int is_control;
+	int is_control = ((epd->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) ==
+				USB_ENDPOINT_XFER_CONTROL);
 
-	is_control = ((ep->desc.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK)
-			== USB_ENDPOINT_XFER_CONTROL);
 	if (usb_endpoint_out(epaddr) || is_control) {
 		usb_settoggle(dev, epnum, 1, 0);
-		dev->ep_out[epnum] = ep;
+		dev->epmaxpacketout[epnum] = maxsize;
 	}
 	if (!usb_endpoint_out(epaddr) || is_control) {
 		usb_settoggle(dev, epnum, 0, 0);
-		dev->ep_in[epnum] = ep;
+		dev->epmaxpacketin[epnum] = maxsize;
 	}
 }
 
@@ -1043,14 +1033,14 @@ usb_enable_endpoint(struct usb_device *dev, struct usb_host_endpoint *ep)
  *
  * Enables all the endpoints for the interface's current altsetting.
  */
-static void usb_enable_interface(struct usb_device *dev,
-				 struct usb_interface *intf)
+void usb_enable_interface(struct usb_device *dev,
+		struct usb_interface *intf)
 {
 	struct usb_host_interface *alt = intf->cur_altsetting;
 	int i;
 
 	for (i = 0; i < alt->desc.bNumEndpoints; ++i)
-		usb_enable_endpoint(dev, &alt->endpoint[i]);
+		usb_enable_endpoint(dev, &alt->endpoint[i].desc);
 }
 
 /**
@@ -1111,7 +1101,7 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 
 	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
 				   USB_REQ_SET_INTERFACE, USB_RECIP_INTERFACE,
-				   alternate, interface, NULL, 0, 5000);
+				   alternate, interface, NULL, 0, HZ * 5);
 
 	/* 9.4.10 says devices don't need this and are free to STALL the
 	 * request if the interface only has one alternate setting.
@@ -1183,9 +1173,7 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
  *
  * Because this affects multiple interfaces, avoid using this with composite
  * (multi-interface) devices.  Instead, the driver for each interface may
- * use usb_set_interface() on the interfaces it claims.  Be careful though;
- * some devices don't support the SET_INTERFACE request, and others won't
- * reset all the interface state (notably data toggles).  Resetting the whole
+ * use usb_set_interface() on the interfaces it claims.  Resetting the whole
  * configuration would affect other drivers' interfaces.
  *
  * The caller must own the device lock.
@@ -1214,7 +1202,7 @@ int usb_reset_configuration(struct usb_device *dev)
 	retval = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
 			USB_REQ_SET_CONFIGURATION, 0,
 			config->desc.bConfigurationValue, 0,
-			NULL, 0, USB_CTRL_SET_TIMEOUT);
+			NULL, 0, HZ * USB_CTRL_SET_TIMEOUT);
 	if (retval < 0) {
 		usb_set_device_state(dev, USB_STATE_ADDRESS);
 		return retval;
@@ -1282,7 +1270,7 @@ static void release_interface(struct device *dev)
  * bus rwsem; usb device driver probe() methods cannot use this routine.
  *
  * Returns zero on success, or else the status code returned by the
- * underlying call that failed.  On successful completion, each interface
+ * underlying call that failed.  On succesful completion, each interface
  * in the original device configuration has been destroyed, and each one
  * in the new configuration has been probed by all relevant usb device
  * drivers currently known to the kernel.
@@ -1349,7 +1337,7 @@ free_interfaces:
 
 	if ((ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
 			USB_REQ_SET_CONFIGURATION, 0, configuration, 0,
-			NULL, 0, USB_CTRL_SET_TIMEOUT)) < 0)
+			NULL, 0, HZ * USB_CTRL_SET_TIMEOUT)) < 0)
 		goto free_interfaces;
 
 	dev->actconfig = cp;
@@ -1398,13 +1386,6 @@ free_interfaces:
 		}
 		kfree(new_interfaces);
 
-		if ((cp->desc.iConfiguration) &&
-		    (cp->string == NULL)) {
-			cp->string = kmalloc(256, GFP_KERNEL);
-			if (cp->string)
-				usb_string(dev, cp->desc.iConfiguration, cp->string, 256);
-		}
-
 		/* Now that all the interfaces are set up, register them
 		 * to trigger binding of drivers to interfaces.  probe()
 		 * routines may install different altsettings and may
@@ -1427,13 +1408,6 @@ free_interfaces:
 					intf->dev.bus_id,
 					ret);
 				continue;
-			}
-			if ((intf->cur_altsetting->desc.iInterface) &&
-			    (intf->cur_altsetting->string == NULL)) {
-				intf->cur_altsetting->string = kmalloc(256, GFP_KERNEL);
-				if (intf->cur_altsetting->string)
-					usb_string(dev, intf->cur_altsetting->desc.iInterface,
-						   intf->cur_altsetting->string, 256);
 			}
 			usb_create_sysfs_intf_files (intf);
 		}

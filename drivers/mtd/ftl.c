@@ -80,7 +80,7 @@
 
 /* Parameters that can be set with 'insmod' */
 static int shuffle_freq = 50;
-module_param(shuffle_freq, int, 0);
+MODULE_PARM(shuffle_freq, "i");
 
 /*====================================================================*/
 

@@ -255,8 +255,10 @@ static int emi62_probe(struct usb_interface *intf, const struct usb_device_id *i
 
 	info("%s start", __FUNCTION__); 
 
-	emi62_load_firmware(dev);
-
+	if((dev->descriptor.idVendor == EMI62_VENDOR_ID) && (dev->descriptor.idProduct == EMI62_PRODUCT_ID)) {
+		emi62_load_firmware(dev);
+	}
+	
 	/* do not return the driver context, let real audio driver do that */
 	return -EIO;
 }

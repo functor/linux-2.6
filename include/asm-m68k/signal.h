@@ -105,20 +105,42 @@ typedef unsigned long sigset_t;
 #define MINSIGSTKSZ	2048
 #define SIGSTKSZ	8192
 
-#include <asm-generic/signal.h>
+#ifdef __KERNEL__
+/*
+ * These values of sa_flags are used only by the kernel as part of the
+ * irq handling routines.
+ *
+ * SA_INTERRUPT is also used by the irq handling routines.
+ * SA_SHIRQ is for shared interrupt support on PCI and EISA.
+ */
+#define SA_PROBE		SA_ONESHOT
+#define SA_SAMPLE_RANDOM	SA_RESTART
+#define SA_SHIRQ		0x04000000
+#endif
+
+#define SIG_BLOCK          0	/* for blocking signals */
+#define SIG_UNBLOCK        1	/* for unblocking signals */
+#define SIG_SETMASK        2	/* for setting the signal mask */
+
+/* Type of a signal handler.  */
+typedef void (*__sighandler_t)(int);
+
+#define SIG_DFL	((__sighandler_t)0)	/* default signal handling */
+#define SIG_IGN	((__sighandler_t)1)	/* ignore signal */
+#define SIG_ERR	((__sighandler_t)-1)	/* error return from signal */
 
 #ifdef __KERNEL__
 struct old_sigaction {
 	__sighandler_t sa_handler;
 	old_sigset_t sa_mask;
 	unsigned long sa_flags;
-	__sigrestore_t sa_restorer;
+	void (*sa_restorer)(void);
 };
 
 struct sigaction {
 	__sighandler_t sa_handler;
 	unsigned long sa_flags;
-	__sigrestore_t sa_restorer;
+	void (*sa_restorer)(void);
 	sigset_t sa_mask;		/* mask last for extensibility */
 };
 
@@ -191,7 +213,7 @@ static inline int sigfindinword(unsigned long word)
 	return word ^ 31;
 }
 
-extern void ptrace_signal_deliver(struct pt_regs *regs, void *cookie);
+#define HAVE_ARCH_GET_SIGNAL_TO_DELIVER
 
 #endif /* __KERNEL__ */
 

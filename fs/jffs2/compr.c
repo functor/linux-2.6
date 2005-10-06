@@ -15,13 +15,23 @@
 
 #include "compr.h"
 
-static DEFINE_SPINLOCK(jffs2_compressor_list_lock);
+static spinlock_t jffs2_compressor_list_lock = SPIN_LOCK_UNLOCKED;
 
 /* Available compressors are on this list */
 static LIST_HEAD(jffs2_compressor_list);
 
 /* Actual compression mode */
 static int jffs2_compression_mode = JFFS2_COMPR_MODE_PRIORITY;
+
+void jffs2_set_compression_mode(int mode) 
+{
+        jffs2_compression_mode = mode;
+}
+
+int jffs2_get_compression_mode(void)
+{
+        return jffs2_compression_mode;
+}
 
 /* Statistics for blocks stored without compression */
 static uint32_t none_stat_compr_blocks=0,none_stat_decompr_blocks=0,none_stat_compr_size=0;

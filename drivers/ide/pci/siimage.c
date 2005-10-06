@@ -592,7 +592,7 @@ static int siimage_reset_poll (ide_drive_t *drive)
 		if ((hwif->INL(SATA_STATUS_REG) & 0x03) != 0x03) {
 			printk(KERN_WARNING "%s: reset phy dead, status=0x%08x\n",
 				hwif->name, hwif->INL(SATA_STATUS_REG));
-			HWGROUP(drive)->polling = 0;
+			HWGROUP(drive)->poll_timeout = 0;
 			return ide_started;
 		}
 		return 0;
@@ -1090,9 +1090,7 @@ static void __devinit init_hwif_siimage(ide_hwif_t *hwif)
 static ide_pci_device_t siimage_chipsets[] __devinitdata = {
 	/* 0 */ DECLARE_SII_DEV("SiI680"),
 	/* 1 */ DECLARE_SII_DEV("SiI3112 Serial ATA"),
-	/* 2 */ DECLARE_SII_DEV("Adaptec AAR-1210SA"),
-	/* 3 */ DECLARE_SII_DEV("ATI IXP300"),
-	/* 4 */ DECLARE_SII_DEV("ATI IXP400")
+	/* 2 */ DECLARE_SII_DEV("Adaptec AAR-1210SA")
 };
 
 /**
@@ -1106,7 +1104,8 @@ static ide_pci_device_t siimage_chipsets[] __devinitdata = {
  
 static int __devinit siimage_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	return ide_setup_pci_device(dev, &siimage_chipsets[id->driver_data]);
+	ide_setup_pci_device(dev, &siimage_chipsets[id->driver_data]);
+	return 0;
 }
 
 static struct pci_device_id siimage_pci_tbl[] = {

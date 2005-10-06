@@ -1877,21 +1877,7 @@ int uart_resume_port(struct uart_driver *drv, struct uart_port *port)
 	 * Re-enable the console device after suspending.
 	 */
 	if (uart_console(port)) {
-		struct termios termios;
-
-		/*
-		 * First try to use the console cflag setting.
-		 */
-		memset(&termios, 0, sizeof(struct termios));
-		termios.c_cflag = port->cons->cflag;
-
-		/*
-		 * If that's unset, use the tty termios setting.
-		 */
-		if (state->info && state->info->tty && termios.c_cflag == 0)
-			termios = *state->info->tty->termios;
-
-		port->ops->set_termios(port, &termios, NULL);
+		uart_change_speed(state, NULL);
 		console_start(port->cons);
 	}
 
@@ -2233,7 +2219,7 @@ int uart_remove_one_port(struct uart_driver *drv, struct uart_port *port)
 /*
  *	Are the two ports equivalent?
  */
-int uart_match_port(struct uart_port *port1, struct uart_port *port2)
+static int uart_match_port(struct uart_port *port1, struct uart_port *port2)
 {
 	if (port1->iotype != port2->iotype)
 		return 0;
@@ -2249,7 +2235,6 @@ int uart_match_port(struct uart_port *port1, struct uart_port *port2)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(uart_match_port);
 
 /*
  *	Try to find an unused uart_state slot for a port.

@@ -7,7 +7,7 @@
  *
  * Version:	$Id: af_inet.c,v 1.137 2002/02/01 22:01:03 davem Exp $
  *
- * Authors:	Ross Biro
+ * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *		Florian La Roche, <flla@stud.uni-sb.de>
  *		Alan Cox, <A.Cox@swansea.ac.uk>
@@ -73,6 +73,7 @@
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/kernel.h>
+#include <linux/major.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/timer.h>
@@ -125,13 +126,13 @@ extern void ip_mc_drop_socket(struct sock *sk);
  * build a new socket.
  */
 static struct list_head inetsw[SOCK_MAX];
-static DEFINE_SPINLOCK(inetsw_lock);
+static spinlock_t inetsw_lock = SPIN_LOCK_UNLOCKED;
 
 /* New destruction routine */
 
 void inet_sock_destruct(struct sock *sk)
 {
-	struct inet_sock *inet = inet_sk(sk);
+	struct inet_opt *inet = inet_sk(sk);
 
 	__skb_queue_purge(&sk->sk_receive_queue);
 	__skb_queue_purge(&sk->sk_error_queue);
@@ -153,6 +154,13 @@ void inet_sock_destruct(struct sock *sk)
 
 	if (inet->opt)
 		kfree(inet->opt);
+
+	vx_sock_dec(sk);
+	clr_vx_info(&sk->sk_vx_info);
+	sk->sk_xid = -1;
+	clr_nx_info(&sk->sk_nx_info);
+	sk->sk_nid = -1;
+
 	dst_release(sk->sk_dst_cache);
 #ifdef INET_REFCNT_DEBUG
 	atomic_dec(&inet_sock_nr);
@@ -173,7 +181,7 @@ void inet_sock_destruct(struct sock *sk)
 
 static int inet_autobind(struct sock *sk)
 {
-	struct inet_sock *inet;
+	struct inet_opt *inet;
 	/* We may need to bind the socket. */
 	lock_sock(sk);
 	inet = inet_sk(sk);
@@ -232,7 +240,7 @@ static int inet_create(struct socket *sock, int protocol)
 	struct sock *sk;
 	struct list_head *p;
 	struct inet_protosw *answer;
-	struct inet_sock *inet;
+	struct inet_opt *inet;
 	struct proto *answer_prot;
 	unsigned char answer_flags;
 	char answer_no_check;
@@ -284,11 +292,14 @@ override:
 	BUG_TRAP(answer_prot->slab != NULL);
 
 	err = -ENOBUFS;
-	sk = sk_alloc(PF_INET, GFP_KERNEL, answer_prot, 1);
+	sk = sk_alloc(PF_INET, GFP_KERNEL,
+		      answer_prot->slab_obj_size,
+		      answer_prot->slab);
 	if (sk == NULL)
 		goto out;
 
 	err = 0;
+	sk->sk_prot = answer_prot;
 	sk->sk_no_check = answer_no_check;
 	if (INET_PROTOSW_REUSE & answer_flags)
 		sk->sk_reuse = 1;
@@ -309,11 +320,18 @@ override:
 	inet->id = 0;
 
 	sock_init_data(sock, sk);
+	sk_set_owner(sk, sk->sk_prot->owner);
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_family	   = PF_INET;
 	sk->sk_protocol	   = protocol;
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
+
+	set_vx_info(&sk->sk_vx_info, current->vx_info);
+	sk->sk_xid = vx_current_xid();
+	vx_sock_inc(sk);
+	set_nx_info(&sk->sk_nx_info, current->nx_info);
+	sk->sk_nid = nx_current_nid();
 
 	inet->uc_ttl	= -1;
 	inet->mc_loop	= 1;
@@ -376,6 +394,11 @@ int inet_release(struct socket *sock)
 		    !(current->flags & PF_EXITING))
 			timeout = sk->sk_lingertime;
 		sock->sk = NULL;
+		vx_sock_dec(sk);
+		clr_vx_info(&sk->sk_vx_info);
+		//sk->sk_xid = -1;
+		clr_nx_info(&sk->sk_nx_info);
+		//sk->sk_nid = -1;
 		sk->sk_prot->close(sk, timeout);
 	}
 	return 0;
@@ -388,14 +411,10 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in *addr = (struct sockaddr_in *)uaddr;
 	struct sock *sk = sock->sk;
-	struct inet_sock *inet = inet_sk(sk);
+	struct inet_opt *inet = inet_sk(sk);
 	unsigned short snum;
 	int chk_addr_ret;
 	int err;
-	__u32 s_addr;	/* Address used for validation */
-	__u32 s_addr1;	/* Address used for socket */
-	__u32 s_addr2;	/* Broadcast address for the socket */
-	struct nx_info *nxi = sk->sk_nx_info;
 
 	/* If the socket has its own bind function then use it. (RAW) */
 	if (sk->sk_prot->bind) {
@@ -406,40 +425,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (addr_len < sizeof(struct sockaddr_in))
 		goto out;
 
-	s_addr = addr->sin_addr.s_addr;
-	s_addr1 = s_addr;
-	s_addr2 = 0xffffffffl;
-
-	vxdprintk(VXD_CBIT(net, 3),
-		"inet_bind(%p)* %p,%p;%lx %d.%d.%d.%d",
-		sk, sk->sk_nx_info, sk->sk_socket,
-		(sk->sk_socket?sk->sk_socket->flags:0),
-		VXD_QUAD(s_addr));
-	if (nxi) {
-		__u32 v4_bcast = nxi->v4_bcast;
-		__u32 ipv4root = nxi->ipv4[0];
-		int nbipv4 = nxi->nbipv4;
-
-		if (s_addr == 0) {
-			/* bind to any for 1-n */
-			s_addr = ipv4root;
-			s_addr1 = (nbipv4 > 1) ? 0 : s_addr;
-			s_addr2 = v4_bcast;
-		} else if (s_addr == 0x0100007f) {
-			/* rewrite localhost to ipv4root */
-			s_addr = ipv4root;
-			s_addr1 = ipv4root;
-		} else if (s_addr != v4_bcast) {
-			/* normal address bind */
-			if (!addr_in_nx_info(nxi, s_addr))
-				return -EADDRNOTAVAIL;
-		}
-	}
-	chk_addr_ret = inet_addr_type(s_addr);
-
-	vxdprintk(VXD_CBIT(net, 3),
-		"inet_bind(%p) %d.%d.%d.%d, %d.%d.%d.%d, %d.%d.%d.%d",
-		sk, VXD_QUAD(s_addr), VXD_QUAD(s_addr1), VXD_QUAD(s_addr2));
+	chk_addr_ret = inet_addr_type(addr->sin_addr.s_addr);
 
 	/* Not specified by any standard per-se, however it breaks too
 	 * many applications when removed.  It is unfortunate since
@@ -451,7 +437,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	err = -EADDRNOTAVAIL;
 	if (!sysctl_ip_nonlocal_bind &&
 	    !inet->freebind &&
-	    s_addr != INADDR_ANY &&
+	    addr->sin_addr.s_addr != INADDR_ANY &&
 	    chk_addr_ret != RTN_LOCAL &&
 	    chk_addr_ret != RTN_MULTICAST &&
 	    chk_addr_ret != RTN_BROADCAST)
@@ -476,8 +462,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (sk->sk_state != TCP_CLOSE || inet->num)
 		goto out_release_sock;
 
-	inet->rcv_saddr = inet->saddr = s_addr1;
-	inet->rcv_saddr2 = s_addr2;
+	inet->rcv_saddr = inet->saddr = addr->sin_addr.s_addr;
 	if (chk_addr_ret == RTN_MULTICAST || chk_addr_ret == RTN_BROADCAST)
 		inet->saddr = 0;  /* Use device */
 
@@ -660,7 +645,7 @@ int inet_getname(struct socket *sock, struct sockaddr *uaddr,
 			int *uaddr_len, int peer)
 {
 	struct sock *sk		= sock->sk;
-	struct inet_sock *inet	= inet_sk(sk);
+	struct inet_opt *inet	= inet_sk(sk);
 	struct sockaddr_in *sin	= (struct sockaddr_in *)uaddr;
 
 	sin->sin_family = AF_INET;
@@ -696,7 +681,7 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 }
 
 
-static ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
+ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 
@@ -1062,7 +1047,7 @@ static int __init init_ipv4_mibs(void)
 	return 0;
 }
 
-static int ipv4_proc_init(void);
+int ipv4_proc_init(void);
 extern void ipfrag_init(void);
 
 static int __init inet_init(void)
@@ -1077,17 +1062,21 @@ static int __init inet_init(void)
 		goto out;
 	}
 
-	rc = proto_register(&tcp_prot, 1);
-	if (rc)
+	rc = sk_alloc_slab(&tcp_prot, "tcp_sock");
+	if (rc) {
+		sk_alloc_slab_error(&tcp_prot);
 		goto out;
-
-	rc = proto_register(&udp_prot, 1);
-	if (rc)
-		goto out_unregister_tcp_proto;
-
-	rc = proto_register(&raw_prot, 1);
-	if (rc)
-		goto out_unregister_udp_proto;
+	}
+	rc = sk_alloc_slab(&udp_prot, "udp_sock");
+	if (rc) {
+		sk_alloc_slab_error(&udp_prot);
+		goto out_tcp_free_slab;
+	}
+	rc = sk_alloc_slab(&raw_prot, "raw_sock");
+	if (rc) {
+		sk_alloc_slab_error(&raw_prot);
+		goto out_udp_free_slab;
+	}
 
 	/*
 	 *	Tell SOCKET that we are alive... 
@@ -1161,10 +1150,10 @@ static int __init inet_init(void)
 	rc = 0;
 out:
 	return rc;
-out_unregister_tcp_proto:
-	proto_unregister(&tcp_prot);
-out_unregister_udp_proto:
-	proto_unregister(&udp_prot);
+out_tcp_free_slab:
+	sk_free_slab(&tcp_prot);
+out_udp_free_slab:
+	sk_free_slab(&udp_prot);
 	goto out;
 }
 
@@ -1183,7 +1172,7 @@ extern void tcp4_proc_exit(void);
 extern int  udp4_proc_init(void);
 extern void udp4_proc_exit(void);
 
-static int __init ipv4_proc_init(void)
+int __init ipv4_proc_init(void)
 {
 	int rc = 0;
 
@@ -1213,7 +1202,7 @@ out_raw:
 }
 
 #else /* CONFIG_PROC_FS */
-static int __init ipv4_proc_init(void)
+int __init ipv4_proc_init(void)
 {
 	return 0;
 }
@@ -1237,7 +1226,6 @@ EXPORT_SYMBOL(inet_stream_connect);
 EXPORT_SYMBOL(inet_stream_ops);
 EXPORT_SYMBOL(inet_unregister_protosw);
 EXPORT_SYMBOL(net_statistics);
-EXPORT_SYMBOL(sysctl_ip_nonlocal_bind);
 
 #ifdef INET_REFCNT_DEBUG
 EXPORT_SYMBOL(inet_sock_nr);

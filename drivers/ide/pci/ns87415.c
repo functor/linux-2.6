@@ -265,7 +265,7 @@ static void __init init_hwif_ns87415 (ide_hwif_t *hwif)
 		return;
 
 	hwif->OUTB(0x60, hwif->dma_status);
-	hwif->dma_setup = &ns87415_ide_dma_setup;
+	hwif->ide_dma_setup = &ns87415_ide_dma_setup;
 	hwif->ide_dma_check = &ns87415_ide_dma_check;
 	hwif->ide_dma_end = &ns87415_ide_dma_end;
 
@@ -288,7 +288,8 @@ static ide_pci_device_t ns87415_chipset __devinitdata = {
 
 static int __devinit ns87415_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	return ide_setup_pci_device(dev, &ns87415_chipset);
+	ide_setup_pci_device(dev, &ns87415_chipset);
+	return 0;
 }
 
 static struct pci_device_id ns87415_pci_tbl[] = {

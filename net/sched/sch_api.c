@@ -131,7 +131,7 @@ static int tclass_notify(struct sk_buff *oskb, struct nlmsghdr *n,
  */
 
 /* Protects list of registered TC modules. It is pure SMP lock. */
-static DEFINE_RWLOCK(qdisc_mod_lock);
+static rwlock_t qdisc_mod_lock = RW_LOCK_UNLOCKED;
 
 
 /************************************************
@@ -207,7 +207,7 @@ struct Qdisc *qdisc_lookup(struct net_device *dev, u32 handle)
 	return NULL;
 }
 
-static struct Qdisc *qdisc_leaf(struct Qdisc *p, u32 classid)
+struct Qdisc *qdisc_leaf(struct Qdisc *p, u32 classid)
 {
 	unsigned long cl;
 	struct Qdisc *leaf;
@@ -226,7 +226,7 @@ static struct Qdisc *qdisc_leaf(struct Qdisc *p, u32 classid)
 
 /* Find queueing discipline by name */
 
-static struct Qdisc_ops *qdisc_lookup_ops(struct rtattr *kind)
+struct Qdisc_ops *qdisc_lookup_ops(struct rtattr *kind)
 {
 	struct Qdisc_ops *q = NULL;
 
@@ -290,7 +290,7 @@ void qdisc_put_rtab(struct qdisc_rate_table *tab)
 
 /* Allocate an unique handle from space managed by kernel */
 
-static u32 qdisc_alloc_handle(struct net_device *dev)
+u32 qdisc_alloc_handle(struct net_device *dev)
 {
 	int i = 0x10000;
 	static u32 autohandle = TC_H_MAKE(0x80000000U, 0);
@@ -356,9 +356,8 @@ dev_graft_qdisc(struct net_device *dev, struct Qdisc *qdisc)
    Old qdisc is not destroyed but returned in *old.
  */
 
-static int qdisc_graft(struct net_device *dev, struct Qdisc *parent,
-		       u32 classid,
-		       struct Qdisc *new, struct Qdisc **old)
+int qdisc_graft(struct net_device *dev, struct Qdisc *parent, u32 classid,
+		struct Qdisc *new, struct Qdisc **old)
 {
 	int err = 0;
 	struct Qdisc *q = *old;
@@ -406,29 +405,10 @@ qdisc_create(struct net_device *dev, u32 handle, struct rtattr **tca, int *errp)
 
 	ops = qdisc_lookup_ops(kind);
 #ifdef CONFIG_KMOD
-	if (ops == NULL && kind != NULL) {
-		char name[IFNAMSIZ];
-		if (rtattr_strlcpy(name, kind, IFNAMSIZ) < IFNAMSIZ) {
-			/* We dropped the RTNL semaphore in order to
-			 * perform the module load.  So, even if we
-			 * succeeded in loading the module we have to
-			 * tell the caller to replay the request.  We
-			 * indicate this using -EAGAIN.
-			 * We replay the request because the device may
-			 * go away in the mean time.
-			 */
-			rtnl_unlock();
-			request_module("sch_%s", name);
-			rtnl_lock();
+	if (ops==NULL && tca[TCA_KIND-1] != NULL) {
+		if (RTA_PAYLOAD(kind) <= IFNAMSIZ) {
+			request_module("sch_%s", (char*)RTA_DATA(kind));
 			ops = qdisc_lookup_ops(kind);
-			if (ops != NULL) {
-				/* We will try again qdisc_lookup_ops,
-				 * so don't keep a reference.
-				 */
-				module_put(ops->owner);
-				err = -EAGAIN;
-				goto err_out;
-			}
 		}
 	}
 #endif
@@ -624,19 +604,13 @@ static int tc_get_qdisc(struct sk_buff *skb, struct nlmsghdr *n, void *arg)
 
 static int tc_modify_qdisc(struct sk_buff *skb, struct nlmsghdr *n, void *arg)
 {
-	struct tcmsg *tcm;
-	struct rtattr **tca;
+	struct tcmsg *tcm = NLMSG_DATA(n);
+	struct rtattr **tca = arg;
 	struct net_device *dev;
-	u32 clid;
-	struct Qdisc *q, *p;
+	u32 clid = tcm->tcm_parent;
+	struct Qdisc *q = NULL;
+	struct Qdisc *p = NULL;
 	int err;
-
-replay:
-	/* Reinit, just in case something touches this. */
-	tcm = NLMSG_DATA(n);
-	tca = arg;
-	clid = tcm->tcm_parent;
-	q = p = NULL;
 
 	if ((dev = __dev_get_by_index(tcm->tcm_ifindex)) == NULL)
 		return -ENODEV;
@@ -731,11 +705,8 @@ create_n_graft:
 		q = qdisc_create(dev, tcm->tcm_parent, tca, &err);
         else
 		q = qdisc_create(dev, tcm->tcm_handle, tca, &err);
-	if (q == NULL) {
-		if (err == -EAGAIN)
-			goto replay;
+	if (q == NULL)
 		return err;
-	}
 
 graft:
 	if (1) {
@@ -1289,7 +1260,6 @@ static int __init pktsched_init(void)
 
 subsys_initcall(pktsched_init);
 
-EXPORT_SYMBOL(qdisc_lookup);
 EXPORT_SYMBOL(qdisc_get_rtab);
 EXPORT_SYMBOL(qdisc_put_rtab);
 EXPORT_SYMBOL(register_qdisc);

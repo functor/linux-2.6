@@ -13,9 +13,6 @@ typedef struct {
 	volatile unsigned long owner_pc;
 	volatile unsigned long owner_cpu;
 #endif
-#ifdef CONFIG_PREEMPT
-	unsigned int break_lock;
-#endif
 } spinlock_t;
 
 #ifdef __KERNEL__
@@ -82,43 +79,28 @@ extern int _raw_spin_trylock(spinlock_t *lock);
  * read-locks.
  */
 typedef struct {
-	volatile signed int lock;
-#ifdef CONFIG_PREEMPT
-	unsigned int break_lock;
+	volatile unsigned long lock;
+#ifdef CONFIG_DEBUG_SPINLOCK
+	volatile unsigned long owner_pc;
 #endif
 } rwlock_t;
 
-#define RW_LOCK_UNLOCKED (rwlock_t) { 0 }
+#ifdef CONFIG_DEBUG_SPINLOCK
+#define RWLOCK_DEBUG_INIT     , 0
+#else
+#define RWLOCK_DEBUG_INIT     /* */
+#endif
+
+#define RW_LOCK_UNLOCKED (rwlock_t) { 0 RWLOCK_DEBUG_INIT }
 #define rwlock_init(lp) do { *(lp) = RW_LOCK_UNLOCKED; } while(0)
 
-#define read_can_lock(rw)	((rw)->lock >= 0)
-#define write_can_lock(rw)	(!(rw)->lock)
+#define rwlock_is_locked(x)	((x)->lock != 0)
 
 #ifndef CONFIG_DEBUG_SPINLOCK
 
-static __inline__ int _raw_read_trylock(rwlock_t *rw)
-{
-	signed int tmp;
-
-	__asm__ __volatile__(
-"2:	lwarx	%0,0,%1		# read_trylock\n\
-	addic.	%0,%0,1\n\
-	ble-	1f\n"
-	PPC405_ERR77(0,%1)
-"	stwcx.	%0,0,%1\n\
-	bne-	2b\n\
-	isync\n\
-1:"
-	: "=&r"(tmp)
-	: "r"(&rw->lock)
-	: "cr0", "memory");
-
-	return tmp > 0;
-}
-
 static __inline__ void _raw_read_lock(rwlock_t *rw)
 {
-	signed int tmp;
+	unsigned int tmp;
 
 	__asm__ __volatile__(
 	"b	2f		# read_lock\n\
@@ -139,7 +121,7 @@ static __inline__ void _raw_read_lock(rwlock_t *rw)
 
 static __inline__ void _raw_read_unlock(rwlock_t *rw)
 {
-	signed int tmp;
+	unsigned int tmp;
 
 	__asm__ __volatile__(
 	"eieio			# read_unlock\n\
@@ -155,7 +137,7 @@ static __inline__ void _raw_read_unlock(rwlock_t *rw)
 
 static __inline__ int _raw_write_trylock(rwlock_t *rw)
 {
-	signed int tmp;
+	unsigned int tmp;
 
 	__asm__ __volatile__(
 "2:	lwarx	%0,0,%1		# write_trylock\n\
@@ -175,7 +157,7 @@ static __inline__ int _raw_write_trylock(rwlock_t *rw)
 
 static __inline__ void _raw_write_lock(rwlock_t *rw)
 {
-	signed int tmp;
+	unsigned int tmp;
 
 	__asm__ __volatile__(
 	"b	2f		# write_lock\n\
@@ -206,7 +188,6 @@ extern void _raw_read_lock(rwlock_t *rw);
 extern void _raw_read_unlock(rwlock_t *rw);
 extern void _raw_write_lock(rwlock_t *rw);
 extern void _raw_write_unlock(rwlock_t *rw);
-extern int _raw_read_trylock(rwlock_t *rw);
 extern int _raw_write_trylock(rwlock_t *rw);
 
 #endif

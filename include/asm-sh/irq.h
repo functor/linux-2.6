@@ -17,8 +17,7 @@
 
 #if defined(CONFIG_SH_HP600) || \
     defined(CONFIG_SH_RTS7751R2D) || \
-    defined(CONFIG_SH_HS7751RVOIP) || \
-    defined(CONFIG_SH_SH03)
+    defined(CONFIG_SH_HS7751RVOIP)
 #include <asm/mach/ide.h>
 #endif
 

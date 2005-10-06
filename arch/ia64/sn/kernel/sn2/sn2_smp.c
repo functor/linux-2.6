@@ -19,7 +19,6 @@
 #include <linux/mmzone.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
-#include <linux/nodemask.h>
 
 #include <asm/processor.h>
 #include <asm/irq.h>
@@ -39,23 +38,23 @@
 #include <asm/sn/nodepda.h>
 #include <asm/sn/rw_mmr.h>
 
-void sn2_ptc_deadlock_recovery(volatile unsigned long *, unsigned long data0, 
-	volatile unsigned long *, unsigned long data1);
+void sn2_ptc_deadlock_recovery(unsigned long data0, unsigned long data1);
 
-static  __cacheline_aligned DEFINE_SPINLOCK(sn2_global_ptc_lock);
+static spinlock_t sn2_global_ptc_lock __cacheline_aligned = SPIN_LOCK_UNLOCKED;
 
 static unsigned long sn2_ptc_deadlock_count;
 
 static inline unsigned long wait_piowc(void)
 {
-	volatile unsigned long *piows, zeroval;
+	volatile unsigned long *piows;
 	unsigned long ws;
 
 	piows = pda->pio_write_status_addr;
-	zeroval = pda->pio_write_status_val;
 	do {
-		cpu_relax();
-	} while (((ws = *piows) & SH_PIO_WRITE_STATUS_PENDING_WRITE_COUNT_MASK) != zeroval);
+		ia64_mfa();
+	} while (((ws =
+		   *piows) & SH_PIO_WRITE_STATUS_0_PENDING_WRITE_COUNT_MASK) !=
+		 SH_PIO_WRITE_STATUS_0_PENDING_WRITE_COUNT_MASK);
 	return ws;
 }
 
@@ -89,19 +88,20 @@ void
 sn2_global_tlb_purge(unsigned long start, unsigned long end,
 		     unsigned long nbits)
 {
-	int i, shub1, cnode, mynasid, cpu, lcpu = 0, nasid, flushed = 0;
+	int i, cnode, mynasid, cpu, lcpu = 0, nasid, flushed = 0;
 	volatile unsigned long *ptc0, *ptc1;
-	unsigned long flags = 0, data0 = 0, data1 = 0;
+	unsigned long flags = 0, data0, data1;
 	struct mm_struct *mm = current->active_mm;
-	short nasids[MAX_NUMNODES], nix;
-	nodemask_t nodes_flushed;
+	short nasids[NR_NODES], nix;
+	DECLARE_BITMAP(nodes_flushed, NR_NODES);
 
-	nodes_clear(nodes_flushed);
+	bitmap_zero(nodes_flushed, NR_NODES);
+
 	i = 0;
 
 	for_each_cpu_mask(cpu, mm->cpu_vm_mask) {
 		cnode = cpu_to_node(cpu);
-		node_set(cnode, nodes_flushed);
+		__set_bit(cnode, nodes_flushed);
 		lcpu = cpu;
 		i++;
 	}
@@ -125,45 +125,32 @@ sn2_global_tlb_purge(unsigned long start, unsigned long end,
 	}
 
 	nix = 0;
-	for_each_node_mask(cnode, nodes_flushed)
+	for (cnode = find_first_bit(&nodes_flushed, NR_NODES); cnode < NR_NODES;
+	     cnode = find_next_bit(&nodes_flushed, NR_NODES, ++cnode))
 		nasids[nix++] = cnodeid_to_nasid(cnode);
 
-	shub1 = is_shub1();
-	if (shub1) {
-		data0 = (1UL << SH1_PTC_0_A_SHFT) |
-		    	(nbits << SH1_PTC_0_PS_SHFT) |
-		    	((ia64_get_rr(start) >> 8) << SH1_PTC_0_RID_SHFT) |
-		    	(1UL << SH1_PTC_0_START_SHFT);
-		ptc0 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH1_PTC_0);
-		ptc1 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH1_PTC_1);
-	} else {
-		data0 = (1UL << SH2_PTC_A_SHFT) |
-			(nbits << SH2_PTC_PS_SHFT) |
-		    	(1UL << SH2_PTC_START_SHFT);
-		ptc0 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH2_PTC + 
-			((ia64_get_rr(start) >> 8) << SH2_PTC_RID_SHFT) );
-		ptc1 = NULL;
-	}
-	
+	data0 = (1UL << SH_PTC_0_A_SHFT) |
+	    (nbits << SH_PTC_0_PS_SHFT) |
+	    ((ia64_get_rr(start) >> 8) << SH_PTC_0_RID_SHFT) |
+	    (1UL << SH_PTC_0_START_SHFT);
+
+	ptc0 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH_PTC_0);
+	ptc1 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH_PTC_1);
 
 	mynasid = get_nasid();
 
 	spin_lock_irqsave(&sn2_global_ptc_lock, flags);
 
 	do {
-		if (shub1)
-			data1 = start | (1UL << SH1_PTC_1_START_SHFT);
-		else
-			data0 = (data0 & ~SH2_PTC_ADDR_MASK) | (start & SH2_PTC_ADDR_MASK);
+		data1 = start | (1UL << SH_PTC_1_START_SHFT);
 		for (i = 0; i < nix; i++) {
 			nasid = nasids[i];
-			if (unlikely(nasid == mynasid)) {
+			if (likely(nasid == mynasid)) {
 				ia64_ptcga(start, nbits << 2);
 				ia64_srlz_i();
 			} else {
 				ptc0 = CHANGE_NASID(nasid, ptc0);
-				if (ptc1)
-					ptc1 = CHANGE_NASID(nasid, ptc1);
+				ptc1 = CHANGE_NASID(nasid, ptc1);
 				pio_atomic_phys_write_mmrs(ptc0, data0, ptc1,
 							   data1);
 				flushed = 1;
@@ -172,8 +159,8 @@ sn2_global_tlb_purge(unsigned long start, unsigned long end,
 
 		if (flushed
 		    && (wait_piowc() &
-			SH_PIO_WRITE_STATUS_WRITE_DEADLOCK_MASK)) {
-			sn2_ptc_deadlock_recovery(ptc0, data0, ptc1, data1);
+			SH_PIO_WRITE_STATUS_0_WRITE_DEADLOCK_MASK)) {
+			sn2_ptc_deadlock_recovery(data0, data1);
 		}
 
 		start += (1UL << nbits);
@@ -192,30 +179,28 @@ sn2_global_tlb_purge(unsigned long start, unsigned long end,
  * TLB flush transaction.  The recovery sequence is somewhat tricky & is
  * coded in assembly language.
  */
-void sn2_ptc_deadlock_recovery(volatile unsigned long *ptc0, unsigned long data0,
-	volatile unsigned long *ptc1, unsigned long data1)
+void sn2_ptc_deadlock_recovery(unsigned long data0, unsigned long data1)
 {
-	extern void sn2_ptc_deadlock_recovery_core(volatile unsigned long *, unsigned long,
-	        volatile unsigned long *, unsigned long, volatile unsigned long *, unsigned long);
+	extern void sn2_ptc_deadlock_recovery_core(long *, long, long *, long,
+						   long *);
 	int cnode, mycnode, nasid;
-	volatile unsigned long *piows;
-	volatile unsigned long zeroval;
+	long *ptc0, *ptc1, *piows;
 
 	sn2_ptc_deadlock_count++;
 
-	piows = pda->pio_write_status_addr;
-	zeroval = pda->pio_write_status_val;
+	ptc0 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH_PTC_0);
+	ptc1 = (long *)GLOBAL_MMR_PHYS_ADDR(0, SH_PTC_1);
+	piows = (long *)pda->pio_write_status_addr;
 
 	mycnode = numa_node_id();
 
-	for_each_online_node(cnode) {
+	for (cnode = 0; cnode < numnodes; cnode++) {
 		if (is_headless_node(cnode) || cnode == mycnode)
 			continue;
 		nasid = cnodeid_to_nasid(cnode);
 		ptc0 = CHANGE_NASID(nasid, ptc0);
-		if (ptc1)
-			ptc1 = CHANGE_NASID(nasid, ptc1);
-		sn2_ptc_deadlock_recovery_core(ptc0, data0, ptc1, data1, piows, zeroval);
+		ptc1 = CHANGE_NASID(nasid, ptc1);
+		sn2_ptc_deadlock_recovery_core(ptc0, data0, ptc1, data1, piows);
 	}
 }
 

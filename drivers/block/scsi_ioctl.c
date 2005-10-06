@@ -328,14 +328,19 @@ static int sg_io(struct file *file, request_queue_t *q,
 	return 0;
 }
 
+#define FORMAT_UNIT_TIMEOUT		(2 * 60 * 60 * HZ)
+#define START_STOP_TIMEOUT		(60 * HZ)
+#define MOVE_MEDIUM_TIMEOUT		(5 * 60 * HZ)
+#define READ_ELEMENT_STATUS_TIMEOUT	(5 * 60 * HZ)
+#define READ_DEFECT_DATA_TIMEOUT	(60 * HZ )
 #define OMAX_SB_LEN 16          /* For backward compatibility */
 
 static int sg_scsi_ioctl(struct file *file, request_queue_t *q,
 			 struct gendisk *bd_disk, Scsi_Ioctl_Command __user *sic)
 {
 	struct request *rq;
+	unsigned int bytes, opcode, cmdlen, in_len, out_len;
 	int err;
-	unsigned int in_len, out_len, bytes, opcode, cmdlen;
 	char *buffer = NULL, sense[SCSI_SENSE_BUFFERSIZE];
 
 	/*

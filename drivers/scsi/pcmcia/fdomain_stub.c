@@ -61,9 +61,15 @@ MODULE_AUTHOR("David Hinds <dahinds@users.sourceforge.net>");
 MODULE_DESCRIPTION("Future Domain PCMCIA SCSI driver");
 MODULE_LICENSE("Dual MPL/GPL");
 
+/* Bit map of interrupts to choose from */
+static int irq_mask = 0xdeb8;
+MODULE_PARM(irq_mask, "i");
+static int irq_list[4] = { -1 };
+MODULE_PARM(irq_list, "1-4i");
+
 #ifdef PCMCIA_DEBUG
 static int pc_debug = PCMCIA_DEBUG;
-module_param(pc_debug, int, 0);
+MODULE_PARM(pc_debug, "i");
 #define DEBUG(n, args...) if (pc_debug>(n)) printk(KERN_DEBUG args)
 static char *version =
 "fdomain_cs.c 1.47 2001/10/13 00:08:52 (David Hinds)";
@@ -97,7 +103,7 @@ static dev_link_t *fdomain_attach(void)
     scsi_info_t *info;
     client_reg_t client_reg;
     dev_link_t *link;
-    int ret;
+    int i, ret;
     
     DEBUG(0, "fdomain_attach()\n");
 
@@ -110,7 +116,12 @@ static dev_link_t *fdomain_attach(void)
     link->io.Attributes1 = IO_DATA_PATH_WIDTH_AUTO;
     link->io.IOAddrLines = 10;
     link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
-    link->irq.IRQInfo1 = IRQ_LEVEL_ID;
+    link->irq.IRQInfo1 = IRQ_INFO2_VALID|IRQ_LEVEL_ID;
+    if (irq_list[0] == -1)
+	link->irq.IRQInfo2 = irq_mask;
+    else
+	for (i = 0; i < 4; i++)
+	    link->irq.IRQInfo2 |= 1 << irq_list[i];
     link->conf.Attributes = CONF_ENABLE_IRQ;
     link->conf.Vcc = 50;
     link->conf.IntType = INT_MEMORY_AND_IO;
@@ -120,6 +131,7 @@ static dev_link_t *fdomain_attach(void)
     link->next = dev_list;
     dev_list = link;
     client_reg.dev_info = &dev_info;
+    client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
     client_reg.event_handler = &fdomain_event;
     client_reg.EventMask =
 	CS_EVENT_RESET_REQUEST | CS_EVENT_CARD_RESET |
@@ -316,7 +328,10 @@ static int __init init_fdomain_cs(void)
 static void __exit exit_fdomain_cs(void)
 {
 	pcmcia_unregister_driver(&fdomain_cs_driver);
-	BUG_ON(dev_list != NULL);
+
+	/* XXX: this really needs to move into generic code.. */
+	while (dev_list != NULL)
+		fdomain_detach(dev_list);
 }
 
 module_init(init_fdomain_cs);

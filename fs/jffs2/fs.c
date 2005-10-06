@@ -3,11 +3,11 @@
  *
  * Copyright (C) 2001-2003 Red Hat, Inc.
  *
- * Created by David Woodhouse <dwmw2@infradead.org>
+ * Created by David Woodhouse <dwmw2@redhat.com>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
- * $Id: fs.c,v 1.51 2004/11/28 12:19:37 dedekind Exp $
+ * $Id: fs.c,v 1.46 2004/07/13 08:56:54 dwmw2 Exp $
  *
  */
 
@@ -20,12 +20,10 @@
 #include <linux/mtd/mtd.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 #include <linux/vfs.h>
 #include <linux/crc32.h>
 #include "nodelist.h"
 
-static int jffs2_flash_setup(struct jffs2_sb_info *c);
 
 static int jffs2_do_setattr (struct inode *inode, struct iattr *iattr)
 {
@@ -204,7 +202,7 @@ int jffs2_statfs(struct super_block *sb, struct kstatfs *buf)
 
 	buf->f_bavail = buf->f_bfree = avail >> PAGE_SHIFT;
 
-	D2(jffs2_dump_block_lists(c));
+	D1(jffs2_dump_block_lists(c));
 
 	spin_unlock(&c->erase_completion_lock);
 
@@ -428,7 +426,7 @@ struct inode *jffs2_new_inode (struct inode *dir_i, int mode, struct jffs2_raw_i
 	inode->i_mode = jemode_to_cpu(ri->mode);
 	inode->i_gid = je16_to_cpu(ri->gid);
 	inode->i_uid = je16_to_cpu(ri->uid);
-	inode->i_atime = inode->i_ctime = inode->i_mtime = CURRENT_TIME_SEC;
+	inode->i_atime = inode->i_ctime = inode->i_mtime = CURRENT_TIME;
 	ri->atime = ri->mtime = ri->ctime = cpu_to_je32(I_SEC(inode->i_mtime));
 
 	inode->i_blksize = PAGE_SIZE;
@@ -465,13 +463,11 @@ int jffs2_do_fill_super(struct super_block *sb, void *data, int silent)
 	 */
 	c->sector_size = c->mtd->erasesize; 
 	blocks = c->flash_size / c->sector_size;
-	if (!(c->mtd->flags & MTD_NO_VIRTBLOCKS)) {
-		while ((blocks * sizeof (struct jffs2_eraseblock)) > (128 * 1024)) {
-			blocks >>= 1;
-			c->sector_size <<= 1;
-		}	
-	}
-
+	while ((blocks * sizeof (struct jffs2_eraseblock)) > (128 * 1024)) {
+		blocks >>= 1;
+		c->sector_size <<= 1;
+	}	
+	
 	/*
 	 * Size alignment check
 	 */
@@ -537,10 +533,7 @@ int jffs2_do_fill_super(struct super_block *sb, void *data, int silent)
  out_nodes:
 	jffs2_free_ino_caches(c);
 	jffs2_free_raw_node_refs(c);
-	if (c->mtd->flags & MTD_NO_VIRTBLOCKS)
-		vfree(c->blocks);
-	else
-		kfree(c->blocks);
+	kfree(c->blocks);
  out_inohash:
 	kfree(c->inocache_list);
  out_wbuf:
@@ -645,7 +638,7 @@ void jffs2_gc_release_page(struct jffs2_sb_info *c,
 	page_cache_release(pg);
 }
 
-static int jffs2_flash_setup(struct jffs2_sb_info *c) {
+int jffs2_flash_setup(struct jffs2_sb_info *c) {
 	int ret = 0;
 	
 	if (jffs2_cleanmarker_oob(c)) {
@@ -656,11 +649,6 @@ static int jffs2_flash_setup(struct jffs2_sb_info *c) {
 	}
 
 	/* add setups for other bizarre flashes here... */
-	if (jffs2_nor_ecc(c)) {
-		ret = jffs2_nor_ecc_flash_setup(c);
-		if (ret)
-			return ret;
-	}
 	return ret;
 }
 
@@ -671,7 +659,4 @@ void jffs2_flash_cleanup(struct jffs2_sb_info *c) {
 	}
 
 	/* add cleanups for other bizarre flashes here... */
-	if (jffs2_nor_ecc(c)) {
-		jffs2_nor_ecc_flash_cleanup(c);
-	}
 }

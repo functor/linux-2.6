@@ -5663,9 +5663,9 @@ static int irq[SMCTR_MAX_ADAPTERS];
 
 MODULE_LICENSE("GPL");
 
-module_param_array(io, int, NULL, 0);
-module_param_array(irq, int, NULL, 0);
-module_param(ringspeed, int, 0);
+MODULE_PARM(io, "1-" __MODULE_STRING(SMCTR_MAX_ADAPTERS) "i");
+MODULE_PARM(irq, "1-" __MODULE_STRING(SMCTR_MAX_ADAPTERS) "i");
+MODULE_PARM(ringspeed, "i");
 
 static struct net_device *setup_card(int n)
 {

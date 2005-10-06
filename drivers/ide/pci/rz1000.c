@@ -62,7 +62,8 @@ static ide_pci_device_t rz1000_chipset __devinitdata = {
 
 static int __devinit rz1000_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	return ide_setup_pci_device(dev, &rz1000_chipset);
+	ide_setup_pci_device(dev, &rz1000_chipset);
+	return 0;
 }
 
 static struct pci_device_id rz1000_pci_tbl[] = {

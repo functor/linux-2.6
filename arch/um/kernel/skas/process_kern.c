@@ -19,10 +19,10 @@
 #include "os.h"
 #include "user_util.h"
 #include "tlb.h"
+#include "frame.h"
 #include "kern.h"
 #include "mode.h"
 #include "proc_mm.h"
-#include "registers.h"
 
 void *switch_to_skas(void *prev, void *next)
 {
@@ -68,11 +68,8 @@ void new_thread_handler(int sig)
 	 * 0 if it just exits
 	 */
 	n = run_kernel_thread(fn, arg, &current->thread.exec_buf);
-	if(n == 1){
-		/* Handle any immediate reschedules or signals */
-		interrupt_end();
+	if(n == 1)
 		userspace(&current->thread.regs.regs);
-	}
 	else do_exit(0);
 }
 
@@ -83,6 +80,10 @@ void new_thread_proc(void *stack, void (*handler)(int sig))
 }
 
 void release_thread_skas(struct task_struct *task)
+{
+}
+
+void exit_thread_skas(void)
 {
 }
 
@@ -99,8 +100,6 @@ void fork_handler(int sig)
 	schedule_tail(current->thread.prev_sched);
 	current->thread.prev_sched = NULL;
 
-	/* Handle any immediate reschedules or signals */
-	interrupt_end();
 	userspace(&current->thread.regs.regs);
 }
 
@@ -120,7 +119,12 @@ int copy_thread_skas(int nr, unsigned long clone_flags, unsigned long sp,
 		handler = fork_handler;
 	}
 	else {
-		init_thread_registers(&p->thread.regs.regs);
+	  	memcpy(p->thread.regs.regs.skas.regs, exec_regs, 
+		       sizeof(p->thread.regs.regs.skas.regs));
+		memcpy(p->thread.regs.regs.skas.fp, exec_fp_regs, 
+		       sizeof(p->thread.regs.regs.skas.fp));
+	  	memcpy(p->thread.regs.regs.skas.xfp, exec_fpx_regs, 
+		       sizeof(p->thread.regs.regs.skas.xfp));
                 p->thread.request.u.thread = current->thread.request.u.thread;
 		handler = new_thread_handler;
 	}
@@ -179,6 +183,7 @@ static int start_kernel_proc(void *unused)
 int start_uml_skas(void)
 {
 	start_userspace(0);
+	capture_signal_stack();
 
 	init_new_thread_signals(1);
 	uml_idle_timer();

@@ -26,8 +26,10 @@ int panic_on_oops = 1;
 int tainted;
 unsigned int crashed;
 int crash_dump_on;
+void (*dump_function_ptr)(const char *, const struct pt_regs *) = 0;
 
 EXPORT_SYMBOL(panic_timeout);
+EXPORT_SYMBOL(dump_function_ptr);
 
 struct notifier_block *panic_notifier_list;
 
@@ -53,7 +55,8 @@ EXPORT_SYMBOL(panic_blink);
  *	panic - halt the system
  *	@fmt: The text string to print
  *
- *	Display a message, then perform cleanups.
+ *	Display a message, then perform cleanups. Functions in the panic
+ *	notifier list are called after the filesystem cache is flushed (when possible).
  *
  *	This function never returns.
  */
@@ -72,7 +75,6 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
-	dump_stack();
 	if (crashdump_func())
 		BUG();
 	bust_spinlocks(0);
@@ -80,6 +82,8 @@ NORET_TYPE void panic(const char * fmt, ...)
 	/* If we have crashed, perform a kexec reboot, for dump write-out */
 	crash_machine_kexec();
 
+        notifier_call_chain(&panic_notifier_list, 0, buf);
+	
 #ifdef CONFIG_SMP
 	smp_send_stop();
 #endif
@@ -96,6 +100,17 @@ NORET_TYPE void panic(const char * fmt, ...)
 		 * We can't use the "normal" timers since we just panicked..
 	 	 */
 		printk(KERN_EMERG "Rebooting in %d seconds..",panic_timeout);
+#ifdef CONFIG_KEXEC
+ {		
+		struct kimage *image;
+		image = xchg(&kexec_image, 0);
+ 		if (image) {
+ 			printk(KERN_EMERG "by starting a new kernel ..\n");
+ 			mdelay(panic_timeout*1000);
+			machine_kexec(image);
+ 		}
+ }
+#endif
 		for (i = 0; i < panic_timeout*1000; ) {
 			touch_nmi_watchdog();
 			i += panic_blink(i);
@@ -112,9 +127,9 @@ NORET_TYPE void panic(const char * fmt, ...)
 #ifdef __sparc__
 	{
 		extern int stop_a_enabled;
-		/* Make sure the user can actually press Stop-A (L1-A) */
+		/* Make sure the user can actually press L1-A */
 		stop_a_enabled = 1;
-		printk(KERN_EMERG "Press Stop-A (L1-A) to return to the boot prom\n");
+		printk(KERN_EMERG "Press L1-A to return to the boot prom\n");
 	}
 #endif
 #if defined(CONFIG_ARCH_S390)
@@ -159,17 +174,9 @@ const char *print_tainted(void)
 		snprintf(buf, sizeof(buf), "Not tainted");
 	return(buf);
 }
-EXPORT_SYMBOL(print_tainted);
 
 void add_taint(unsigned flag)
 {
 	tainted |= flag;
 }
 EXPORT_SYMBOL(add_taint);
-
-int check_tainted(void)
-{
-	return tainted;
-}
-EXPORT_SYMBOL_GPL(check_tainted);
-

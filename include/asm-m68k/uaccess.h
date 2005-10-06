@@ -14,10 +14,9 @@
 /* We let the MMU do all checking */
 #define access_ok(type,addr,size) 1
 
-/* this function will go away soon - use access_ok() instead */
-static inline int __deprecated verify_area(int type, const void *addr, unsigned long size)
+static inline int verify_area(int type, const void *addr, unsigned long size)
 {
-	return access_ok(type,addr,size) ? 0 : -EFAULT;
+	return access_ok(type,addr,size)?0:-EFAULT;
 }
 
 /*

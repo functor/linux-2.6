@@ -1,5 +1,5 @@
 /* 
- * $Id: iucv.c,v 1.45 2005/04/26 22:59:06 braunu Exp $
+ * $Id: iucv.c,v 1.41 2004/08/11 14:54:14 geraldsc Exp $
  *
  * IUCV network driver
  *
@@ -29,7 +29,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.45 $
+ * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.41 $
  *
  */
 
@@ -103,7 +103,7 @@ static iucv_GeneralInterrupt *iucv_external_int_buffer = NULL;
 
 /* Spin Lock declaration */
 
-static DEFINE_SPINLOCK(iucv_lock);
+static spinlock_t iucv_lock = SPIN_LOCK_UNLOCKED;
 
 static int messagesDisabled = 0;
 
@@ -115,7 +115,7 @@ typedef struct {
 } iucv_irqdata;
 
 static struct list_head  iucv_irq_queue;
-static DEFINE_SPINLOCK(iucv_irq_queue_lock);
+static spinlock_t iucv_irq_queue_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  *Internal function prototypes
@@ -355,7 +355,7 @@ do { \
 static void
 iucv_banner(void)
 {
-	char vbuf[] = "$Revision: 1.45 $";
+	char vbuf[] = "$Revision: 1.41 $";
 	char *version = vbuf;
 
 	if ((version = strchr(version, ':'))) {
@@ -2285,6 +2285,7 @@ iucv_irq_handler(struct pt_regs *regs, __u16 code)
 	irqdata = kmalloc(sizeof(iucv_irqdata), GFP_ATOMIC);
 	if (!irqdata) {
 		printk(KERN_WARNING "%s: out of memory\n", __FUNCTION__);
+		irq_exit();
 		return;
 	}
 
@@ -2525,7 +2526,7 @@ iucv_tasklet_handler(unsigned long ignored)
 	return;
 }
 
-subsys_initcall(iucv_init);
+module_init(iucv_init);
 module_exit(iucv_exit);
 
 /**
@@ -2553,12 +2554,12 @@ EXPORT_SYMBOL (iucv_resume);
 #endif
 EXPORT_SYMBOL (iucv_reply_prmmsg);
 EXPORT_SYMBOL (iucv_send);
+#if 0
 EXPORT_SYMBOL (iucv_send2way);
 EXPORT_SYMBOL (iucv_send2way_array);
+EXPORT_SYMBOL (iucv_send_array);
 EXPORT_SYMBOL (iucv_send2way_prmmsg);
 EXPORT_SYMBOL (iucv_send2way_prmmsg_array);
-#if 0
-EXPORT_SYMBOL (iucv_send_array);
 EXPORT_SYMBOL (iucv_send_prmmsg);
 EXPORT_SYMBOL (iucv_setmask);
 #endif

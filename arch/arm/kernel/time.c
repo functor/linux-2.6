@@ -48,7 +48,7 @@ struct sys_timer *system_timer;
 extern unsigned long wall_jiffies;
 
 /* this needs a better home */
-DEFINE_SPINLOCK(rtc_lock);
+spinlock_t rtc_lock = SPIN_LOCK_UNLOCKED;
 
 #ifdef CONFIG_SA1100_RTC_MODULE
 EXPORT_SYMBOL(rtc_lock);
@@ -63,7 +63,7 @@ unsigned long profile_pc(struct pt_regs *regs)
 	unsigned long fp, pc = instruction_pointer(regs);
 
 	if (in_lock_functions(pc)) {
-		fp = regs->ARM_fp;
+		fp = thread_saved_fp(current);
 		pc = pc_pointer(((unsigned long *)fp)[-1]);
 	}
 
@@ -178,7 +178,7 @@ static ssize_t leds_store(struct sys_device *dev, const char *buf, size_t size)
 
 static SYSDEV_ATTR(event, 0200, NULL, leds_store);
 
-static int leds_suspend(struct sys_device *dev, pm_message_t state)
+static int leds_suspend(struct sys_device *dev, u32 state)
 {
 	leds_event(led_stop);
 	return 0;
@@ -351,7 +351,7 @@ void timer_tick(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_PM
-static int timer_suspend(struct sys_device *dev, pm_message_t state)
+static int timer_suspend(struct sys_device *dev, u32 state)
 {
 	struct sys_timer *timer = container_of(dev, struct sys_timer, dev);
 

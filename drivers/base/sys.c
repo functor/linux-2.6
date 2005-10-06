@@ -20,7 +20,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/pm.h>
 
 
 extern struct subsystem devices_subsys;
@@ -80,7 +79,7 @@ EXPORT_SYMBOL_GPL(sysdev_remove_file);
 /*
  * declare system_subsys
  */
-static decl_subsys(system, &ktype_sysdev, NULL);
+decl_subsys(system, &ktype_sysdev, NULL);
 
 int sysdev_class_register(struct sysdev_class * cls)
 {
@@ -103,8 +102,7 @@ EXPORT_SYMBOL_GPL(sysdev_class_register);
 EXPORT_SYMBOL_GPL(sysdev_class_unregister);
 
 
-static LIST_HEAD(sysdev_drivers);
-static DECLARE_MUTEX(sysdev_drivers_lock);
+static LIST_HEAD(global_drivers);
 
 /**
  *	sysdev_driver_register - Register auxillary driver
@@ -114,14 +112,14 @@ static DECLARE_MUTEX(sysdev_drivers_lock);
  *	If @cls is valid, then @drv is inserted into @cls->drivers to be
  *	called on each operation on devices of that class. The refcount
  *	of @cls is incremented.
- *	Otherwise, @drv is inserted into sysdev_drivers, and called for
+ *	Otherwise, @drv is inserted into global_drivers, and called for
  *	each device.
  */
 
 int sysdev_driver_register(struct sysdev_class * cls,
 			   struct sysdev_driver * drv)
 {
-	down(&sysdev_drivers_lock);
+	down_write(&system_subsys.rwsem);
 	if (cls && kset_get(&cls->kset)) {
 		list_add_tail(&drv->entry, &cls->drivers);
 
@@ -132,8 +130,8 @@ int sysdev_driver_register(struct sysdev_class * cls,
 				drv->add(dev);
 		}
 	} else
-		list_add_tail(&drv->entry, &sysdev_drivers);
-	up(&sysdev_drivers_lock);
+		list_add_tail(&drv->entry, &global_drivers);
+	up_write(&system_subsys.rwsem);
 	return 0;
 }
 
@@ -146,7 +144,7 @@ int sysdev_driver_register(struct sysdev_class * cls,
 void sysdev_driver_unregister(struct sysdev_class * cls,
 			      struct sysdev_driver * drv)
 {
-	down(&sysdev_drivers_lock);
+	down_write(&system_subsys.rwsem);
 	list_del_init(&drv->entry);
 	if (cls) {
 		if (drv->remove) {
@@ -156,7 +154,7 @@ void sysdev_driver_unregister(struct sysdev_class * cls,
 		}
 		kset_put(&cls->kset);
 	}
-	up(&sysdev_drivers_lock);
+	up_write(&system_subsys.rwsem);
 }
 
 EXPORT_SYMBOL_GPL(sysdev_driver_register);
@@ -195,13 +193,13 @@ int sysdev_register(struct sys_device * sysdev)
 	if (!error) {
 		struct sysdev_driver * drv;
 
-		down(&sysdev_drivers_lock);
+		down_write(&system_subsys.rwsem);
 		/* Generic notification is implicit, because it's that
 		 * code that should have called us.
 		 */
 
 		/* Notify global drivers */
-		list_for_each_entry(drv, &sysdev_drivers, entry) {
+		list_for_each_entry(drv, &global_drivers, entry) {
 			if (drv->add)
 				drv->add(sysdev);
 		}
@@ -211,7 +209,7 @@ int sysdev_register(struct sys_device * sysdev)
 			if (drv->add)
 				drv->add(sysdev);
 		}
-		up(&sysdev_drivers_lock);
+		up_write(&system_subsys.rwsem);
 	}
 	return error;
 }
@@ -220,8 +218,8 @@ void sysdev_unregister(struct sys_device * sysdev)
 {
 	struct sysdev_driver * drv;
 
-	down(&sysdev_drivers_lock);
-	list_for_each_entry(drv, &sysdev_drivers, entry) {
+	down_write(&system_subsys.rwsem);
+	list_for_each_entry(drv, &global_drivers, entry) {
 		if (drv->remove)
 			drv->remove(sysdev);
 	}
@@ -230,7 +228,7 @@ void sysdev_unregister(struct sys_device * sysdev)
 		if (drv->remove)
 			drv->remove(sysdev);
 	}
-	up(&sysdev_drivers_lock);
+	up_write(&system_subsys.rwsem);
 
 	kobject_unregister(&sysdev->kobj);
 }
@@ -257,7 +255,7 @@ void sysdev_shutdown(void)
 
 	pr_debug("Shutting Down System Devices\n");
 
-	down(&sysdev_drivers_lock);
+	down_write(&system_subsys.rwsem);
 	list_for_each_entry_reverse(cls, &system_subsys.kset.list,
 				    kset.kobj.entry) {
 		struct sys_device * sysdev;
@@ -270,7 +268,7 @@ void sysdev_shutdown(void)
 			pr_debug(" %s\n", kobject_name(&sysdev->kobj));
 
 			/* Call global drivers first. */
-			list_for_each_entry(drv, &sysdev_drivers, entry) {
+			list_for_each_entry(drv, &global_drivers, entry) {
 				if (drv->shutdown)
 					drv->shutdown(sysdev);
 			}
@@ -286,7 +284,7 @@ void sysdev_shutdown(void)
 				cls->shutdown(sysdev);
 		}
 	}
-	up(&sysdev_drivers_lock);
+	up_write(&system_subsys.rwsem);
 }
 
 
@@ -303,7 +301,7 @@ void sysdev_shutdown(void)
  *	all synchronization.
  */
 
-int sysdev_suspend(pm_message_t state)
+int sysdev_suspend(u32 state)
 {
 	struct sysdev_class * cls;
 
@@ -321,7 +319,7 @@ int sysdev_suspend(pm_message_t state)
 			pr_debug(" %s\n", kobject_name(&sysdev->kobj));
 
 			/* Call global drivers first. */
-			list_for_each_entry(drv, &sysdev_drivers, entry) {
+			list_for_each_entry(drv, &global_drivers, entry) {
 				if (drv->suspend)
 					drv->suspend(sysdev, state);
 			}
@@ -377,7 +375,7 @@ int sysdev_resume(void)
 			}
 
 			/* Call global drivers. */
-			list_for_each_entry(drv, &sysdev_drivers, entry) {
+			list_for_each_entry(drv, &global_drivers, entry) {
 				if (drv->resume)
 					drv->resume(sysdev);
 			}

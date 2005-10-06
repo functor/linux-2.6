@@ -7,7 +7,7 @@
  *
  * Version:	$Id: tcp_timer.c,v 1.88 2002/02/01 22:01:04 davem Exp $
  *
- * Authors:	Ross Biro
+ * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *		Mark Evans, <evansmp@uhura.aston.ac.uk>
  *		Corey Minyard <wf-rch!minyard@relay.EU.net>
@@ -38,7 +38,6 @@ static void tcp_keepalive_timer (unsigned long data);
 
 #ifdef TCP_DEBUG
 const char tcp_timer_bug_msg[] = KERN_DEBUG "tcpbug: unknown timer value\n";
-EXPORT_SYMBOL(tcp_timer_bug_msg);
 #endif
 
 /*
@@ -49,7 +48,7 @@ EXPORT_SYMBOL(tcp_timer_bug_msg);
 
 void tcp_init_xmit_timers(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 
 	init_timer(&tp->retransmit_timer);
 	tp->retransmit_timer.function=&tcp_write_timer;
@@ -68,7 +67,7 @@ void tcp_init_xmit_timers(struct sock *sk)
 
 void tcp_clear_xmit_timers(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 
 	tp->pending = 0;
 	sk_stop_timer(sk, &tp->retransmit_timer);
@@ -102,7 +101,7 @@ static void tcp_write_err(struct sock *sk)
  */
 static int tcp_out_of_resources(struct sock *sk, int do_reset)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 	int orphans = atomic_read(&tcp_orphan_count);
 
 	/* If peer does not open window for long time, or did not transmit 
@@ -124,7 +123,7 @@ static int tcp_out_of_resources(struct sock *sk, int do_reset)
 		 *      1. Last segment was sent recently. */
 		if ((s32)(tcp_time_stamp - tp->lsndtime) <= TCP_TIMEWAIT_LEN ||
 		    /*  2. Window is closed. */
-		    (!tp->snd_wnd && !tp->packets_out))
+		    (!tp->snd_wnd && !tcp_get_pcount(&tp->packets_out)))
 			do_reset = 1;
 		if (do_reset)
 			tcp_send_active_reset(sk, GFP_ATOMIC);
@@ -155,7 +154,7 @@ static int tcp_orphan_retries(struct sock *sk, int alive)
 /* A write timeout has occurred. Process the after effects. */
 static int tcp_write_timeout(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 	int retry_until;
 
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
@@ -209,7 +208,7 @@ static int tcp_write_timeout(struct sock *sk)
 static void tcp_delack_timer(unsigned long data)
 {
 	struct sock *sk = (struct sock*)data;
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) {
@@ -269,10 +268,10 @@ out_unlock:
 
 static void tcp_probe_timer(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 	int max_probes;
 
-	if (tp->packets_out || !sk->sk_send_head) {
+	if (tcp_get_pcount(&tp->packets_out) || !sk->sk_send_head) {
 		tp->probes_out = 0;
 		return;
 	}
@@ -317,9 +316,9 @@ static void tcp_probe_timer(struct sock *sk)
 
 static void tcp_retransmit_timer(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 
-	if (!tp->packets_out)
+	if (!tcp_get_pcount(&tp->packets_out))
 		goto out;
 
 	BUG_TRAP(!skb_queue_empty(&sk->sk_write_queue));
@@ -333,7 +332,7 @@ static void tcp_retransmit_timer(struct sock *sk)
 		 */
 #ifdef TCP_DEBUG
 		if (net_ratelimit()) {
-			struct inet_sock *inet = inet_sk(sk);
+			struct inet_opt *inet = inet_sk(sk);
 			printk(KERN_DEBUG "TCP: Treason uncloaked! Peer %u.%u.%u.%u:%u/%u shrinks window %u:%u. Repaired.\n",
 			       NIPQUAD(inet->daddr), htons(inet->dport),
 			       inet->num, tp->snd_una, tp->snd_nxt);
@@ -354,7 +353,7 @@ static void tcp_retransmit_timer(struct sock *sk)
 
 	if (tp->retransmits == 0) {
 		if (tp->ca_state == TCP_CA_Disorder || tp->ca_state == TCP_CA_Recovery) {
-			if (tp->rx_opt.sack_ok) {
+			if (tp->sack_ok) {
 				if (tp->ca_state == TCP_CA_Recovery)
 					NET_INC_STATS_BH(LINUX_MIB_TCPSACKRECOVERYFAIL);
 				else
@@ -419,7 +418,7 @@ out:;
 static void tcp_write_timer(unsigned long data)
 {
 	struct sock *sk = (struct sock*)data;
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 	int event;
 
 	bh_lock_sock(sk);
@@ -463,7 +462,7 @@ out_unlock:
 
 static void tcp_synack_timer(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 	struct tcp_listen_opt *lopt = tp->listen_opt;
 	int max_retries = tp->syn_retries ? : sysctl_tcp_synack_retries;
 	int thresh = max_retries;
@@ -518,9 +517,8 @@ static void tcp_synack_timer(struct sock *sk)
 					unsigned long timeo;
 
 					if (req->retrans++ == 0)
-						lopt->qlen_young--;
-					timeo = min((TCP_TIMEOUT_INIT << req->retrans),
-						    TCP_RTO_MAX);
+			         		lopt->qlen_young--;
+					timeo = min((TCP_TIMEOUT_INIT << req->retrans), TCP_RTO_MAX);
 					req->expires = now + timeo;
 					reqp = &req->dl_next;
 					continue;
@@ -532,7 +530,7 @@ static void tcp_synack_timer(struct sock *sk)
 				write_unlock(&tp->syn_wait_lock);
 				lopt->qlen--;
 				if (req->retrans == 0)
-					lopt->qlen_young--;
+			         		lopt->qlen_young--;
 				tcp_openreq_free(req);
 				continue;
 			}
@@ -574,7 +572,7 @@ void tcp_set_keepalive(struct sock *sk, int val)
 static void tcp_keepalive_timer (unsigned long data)
 {
 	struct sock *sk = (struct sock *) data;
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_opt *tp = tcp_sk(sk);
 	__u32 elapsed;
 
 	/* Only process if socket is not in use. */
@@ -609,7 +607,7 @@ static void tcp_keepalive_timer (unsigned long data)
 	elapsed = keepalive_time_when(tp);
 
 	/* It is alive without keepalive 8) */
-	if (tp->packets_out || sk->sk_send_head)
+	if (tcp_get_pcount(&tp->packets_out) || sk->sk_send_head)
 		goto resched;
 
 	elapsed = tcp_time_stamp - tp->rcv_tstamp;
@@ -654,3 +652,6 @@ EXPORT_SYMBOL(tcp_clear_xmit_timers);
 EXPORT_SYMBOL(tcp_delete_keepalive_timer);
 EXPORT_SYMBOL(tcp_init_xmit_timers);
 EXPORT_SYMBOL(tcp_reset_keepalive_timer);
+#ifdef TCP_DEBUG
+EXPORT_SYMBOL(tcp_timer_bug_msg);
+#endif

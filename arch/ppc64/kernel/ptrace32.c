@@ -26,7 +26,6 @@
 #include <linux/ptrace.h>
 #include <linux/user.h>
 #include <linux/security.h>
-#include <linux/signal.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -294,7 +293,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 	case PTRACE_SYSCALL: /* continue and stop at next (return from) syscall */
 	case PTRACE_CONT: { /* restart after signal. */
 		ret = -EIO;
-		if (!valid_signal(data))
+		if ((unsigned long) data > _NSIG)
 			break;
 		if (request == PTRACE_SYSCALL)
 			set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
@@ -326,7 +325,7 @@ int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)
 
 	case PTRACE_SINGLESTEP: {  /* set the trap flag. */
 		ret = -EIO;
-		if (!valid_signal(data))
+		if ((unsigned long) data > _NSIG)
 			break;
 		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 		set_single_step(child);

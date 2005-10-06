@@ -2,34 +2,45 @@
 # Makefile for the netfilter modules on top of IPv4.
 #
 
+# objects for the conntrack and NAT core (used by standalone and backw. compat)
+ip_nf_conntrack-objs	:= ip_conntrack_core.o ip_conntrack_proto_generic.o ip_conntrack_proto_tcp.o ip_conntrack_proto_udp.o ip_conntrack_proto_icmp.o
+ip_nf_nat-objs		:= ip_nat_core.o ip_nat_helper.o ip_nat_proto_unknown.o ip_nat_proto_tcp.o ip_nat_proto_udp.o ip_nat_proto_icmp.o
+
 # objects for the standalone - connection tracking / NAT
-ip_conntrack-objs	:= ip_conntrack_standalone.o ip_conntrack_core.o ip_conntrack_proto_generic.o ip_conntrack_proto_tcp.o ip_conntrack_proto_udp.o ip_conntrack_proto_icmp.o
-iptable_nat-objs	:= ip_nat_standalone.o ip_nat_rule.o ip_nat_core.o ip_nat_helper.o ip_nat_proto_unknown.o ip_nat_proto_tcp.o ip_nat_proto_udp.o ip_nat_proto_icmp.o
+ip_conntrack-objs	:= ip_conntrack_standalone.o $(ip_nf_conntrack-objs)
+iptable_nat-objs	:= ip_nat_standalone.o ip_nat_rule.o $(ip_nf_nat-objs)
+
+# objects for backwards compatibility mode
+ip_nf_compat-objs	:= ip_fw_compat.o ip_fw_compat_redir.o ip_fw_compat_masq.o $(ip_nf_conntrack-objs) $(ip_nf_nat-objs)
+
+ipfwadm-objs		:= $(ip_nf_compat-objs) ipfwadm_core.o
+ipchains-objs		:= $(ip_nf_compat-objs) ipchains_core.o
 
 # connection tracking
 obj-$(CONFIG_IP_NF_CONNTRACK) += ip_conntrack.o
 
-# SCTP protocol connection tracking
+# connection tracking protocol helpers
 obj-$(CONFIG_IP_NF_CT_PROTO_GRE) += ip_conntrack_proto_gre.o
 
 # NAT protocol helpers
 obj-$(CONFIG_IP_NF_NAT_PROTO_GRE) += ip_nat_proto_gre.o
 
+# SCTP protocol connection tracking
 obj-$(CONFIG_IP_NF_CT_PROTO_SCTP) += ip_conntrack_proto_sctp.o
 
 # connection tracking helpers
-obj-$(CONFIG_IP_NF_PPTP) += ip_conntrack_pptp.o
 obj-$(CONFIG_IP_NF_AMANDA) += ip_conntrack_amanda.o
 obj-$(CONFIG_IP_NF_TFTP) += ip_conntrack_tftp.o
 obj-$(CONFIG_IP_NF_FTP) += ip_conntrack_ftp.o
 obj-$(CONFIG_IP_NF_IRC) += ip_conntrack_irc.o
+obj-$(CONFIG_IP_NF_PPTP) += ip_conntrack_pptp.o
 
 # NAT helpers 
-obj-$(CONFIG_IP_NF_NAT_PPTP) += ip_nat_pptp.o
 obj-$(CONFIG_IP_NF_NAT_AMANDA) += ip_nat_amanda.o
 obj-$(CONFIG_IP_NF_NAT_TFTP) += ip_nat_tftp.o
 obj-$(CONFIG_IP_NF_NAT_FTP) += ip_nat_ftp.o
 obj-$(CONFIG_IP_NF_NAT_IRC) += ip_nat_irc.o
+obj-$(CONFIG_IP_NF_NAT_PPTP) += ip_nat_pptp.o
 
 # generic IP tables 
 obj-$(CONFIG_IP_NF_IPTABLES) += ip_tables.o
@@ -92,5 +103,9 @@ obj-$(CONFIG_IP_NF_ARP_MANGLE) += arpt_mangle.o
 
 # just filtering instance of ARP tables for now
 obj-$(CONFIG_IP_NF_ARPFILTER) += arptable_filter.o
+
+# backwards compatibility 
+obj-$(CONFIG_IP_NF_COMPAT_IPCHAINS) += ipchains.o
+obj-$(CONFIG_IP_NF_COMPAT_IPFWADM) += ipfwadm.o
 
 obj-$(CONFIG_IP_NF_QUEUE) += ip_queue.o

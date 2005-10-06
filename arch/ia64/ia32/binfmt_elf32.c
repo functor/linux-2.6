@@ -35,7 +35,7 @@ extern void ia64_elf32_init (struct pt_regs *regs);
 
 static void elf32_set_personality (void);
 
-#define setup_arg_pages(bprm,tos,exec)		ia32_setup_arg_pages(bprm,exec)
+#define setup_arg_pages(bprm,exec)		ia32_setup_arg_pages(bprm,exec)
 #define elf_map				elf32_map
 
 #undef SET_PERSONALITY
@@ -103,7 +103,7 @@ ia64_elf32_init (struct pt_regs *regs)
 			if (insert_vm_struct(current->mm, vma)) {
 				kmem_cache_free(vm_area_cachep, vma);
 				up_write(&current->mm->mmap_sem);
-				BUG();
+				return;
 			}
 		}
 		up_write(&current->mm->mmap_sem);
@@ -130,8 +130,31 @@ ia64_elf32_init (struct pt_regs *regs)
 			if (insert_vm_struct(current->mm, vma)) {
 				kmem_cache_free(vm_area_cachep, vma);
 				up_write(&current->mm->mmap_sem);
-				BUG();
+				return;
 			}
+		}
+		up_write(&current->mm->mmap_sem);
+	}
+
+	/*
+	 * When user stack is not executable, push sigreturn code to stack makes
+	 * segmentation fault raised when returning to kernel. So now sigreturn
+	 * code is locked in specific gate page, which is pointed by pretcode
+	 * when setup_frame_ia32
+	 */
+	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	if (vma) {
+		memset(vma, 0, sizeof(*vma));
+		vma->vm_mm = current->mm;
+		vma->vm_start = IA32_GATE_OFFSET;
+		vma->vm_end = vma->vm_start + PAGE_SIZE;
+		vma->vm_page_prot = PAGE_COPY_EXEC;
+		vma->vm_flags = VM_READ | VM_MAYREAD | VM_EXEC
+				| VM_MAYEXEC | VM_RESERVED;
+		vma->vm_ops = &ia32_gate_page_vm_ops;
+		down_write(&current->mm->mmap_sem);
+		{
+			insert_vm_struct(current->mm, vma);
 		}
 		up_write(&current->mm->mmap_sem);
 	}
@@ -153,7 +176,7 @@ ia64_elf32_init (struct pt_regs *regs)
 			if (insert_vm_struct(current->mm, vma)) {
 				kmem_cache_free(vm_area_cachep, vma);
 				up_write(&current->mm->mmap_sem);
-				BUG();
+				return;
 			}
 		}
 		up_write(&current->mm->mmap_sem);
@@ -244,6 +267,7 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
+		// current->mm->stack_vm = current->mm->total_vm = vma_pages(mpnt);
 		vx_vmpages_sub(current->mm, current->mm->total_vm - vma_pages(mpnt));
 		current->mm->stack_vm = current->mm->total_vm;
 	}

@@ -46,7 +46,7 @@ MODULE_LICENSE("GPL");
 
 static struct pi_protocol *protocols[MAX_PROTOS];
 
-static DEFINE_SPINLOCK(pi_spinlock);
+static spinlock_t pi_spinlock = SPIN_LOCK_UNLOCKED;
 
 void pi_write_regr(PIA * pi, int cont, int regr, int val)
 {

@@ -24,7 +24,7 @@
 #include <asm/ebus.h>
 #include <asm/upa.h>
 
-static DEFINE_SPINLOCK(flash_lock);
+static spinlock_t flash_lock = SPIN_LOCK_UNLOCKED;
 static struct {
 	unsigned long read_base;	/* Physical read address */
 	unsigned long write_base;	/* Physical write address */
@@ -75,7 +75,7 @@ flash_mmap(struct file *file, struct vm_area_struct *vma)
 	pgprot_val(vma->vm_page_prot) |= _PAGE_E;
 	vma->vm_flags |= (VM_SHM | VM_LOCKED);
 
-	if (io_remap_pfn_range(vma, vma->vm_start, addr, size, vma->vm_page_prot))
+	if (remap_pfn_range(vma, vma->vm_start, addr, size, vma->vm_page_prot))
 		return -EAGAIN;
 		
 	return 0;

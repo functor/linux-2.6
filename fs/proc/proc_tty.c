@@ -32,8 +32,10 @@ static void show_tty_range(struct seq_file *m, struct tty_driver *p,
 	seq_printf(m, "%-20s ", p->driver_name ? p->driver_name : "unknown");
 	seq_printf(m, "/dev/%-8s ", p->name);
 	if (p->num > 1) {
-		seq_printf(m, "%3d %d-%d ", MAJOR(from), MINOR(from),
+		char	range[20];
+		sprintf(range, "%d-%d", MINOR(from),
 			MINOR(from) + num - 1);
+		seq_printf(m, "%3d %7s ", MAJOR(from), range);
 	} else {
 		seq_printf(m, "%3d %7d ", MAJOR(from), MINOR(from));
 	}

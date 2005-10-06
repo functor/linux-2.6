@@ -58,8 +58,7 @@
 static const char *arlan_diagnostic_info_string(struct net_device *dev)
 {
 
-	struct arlan_private *priv = netdev_priv(dev);
-	volatile struct arlan_shmem __iomem *arlan = priv->card;
+	volatile struct arlan_shmem *arlan = ((struct arlan_private *) dev->priv)->card;
 	u_char diagnosticInfo;
 
 	READSHM(diagnosticInfo, arlan->diagnosticInfo, u_char);
@@ -114,8 +113,7 @@ static const char *arlan_diagnostic_info_string(struct net_device *dev)
 static const char *arlan_hardware_type_string(struct net_device *dev)
 {
 	u_char hardwareType;
-	struct arlan_private *priv = netdev_priv(dev);
-	volatile struct arlan_shmem __iomem *arlan = priv->card;
+	volatile struct arlan_shmem *arlan = ((struct arlan_private *) dev->priv)->card;
 
 	READSHM(hardwareType, arlan->hardwareType, u_char);
 	switch (hardwareType)
@@ -191,8 +189,7 @@ static void arlan_print_diagnostic_info(struct net_device *dev)
 	u_char diagnosticInfo;
 	u_short diagnosticOffset;
 	u_char hardwareType;
-	struct arlan_private *priv = netdev_priv(dev);
-	volatile struct arlan_shmem __iomem *arlan = priv->card;
+	volatile struct arlan_shmem *arlan = ((struct arlan_private *) dev->priv)->card;
 
 	//  ARLAN_DEBUG_ENTRY("arlan_print_diagnostic_info");
 
@@ -257,8 +254,7 @@ static int arlan_hw_test_memory(struct net_device *dev)
 	int i;
 	int memlen = sizeof(struct arlan_shmem) - 0xF;	/* avoid control register */
 	volatile char *arlan_mem = (char *) (dev->mem_start);
-	struct arlan_private *priv = netdev_priv(dev);
-	volatile struct arlan_shmem __iomem *arlan = priv->card;
+	volatile struct arlan_shmem *arlan = ((struct arlan_private *) dev->priv)->card;
 	char pattern;
 
 	ptr = NULL;
@@ -323,8 +319,7 @@ static int arlan_hw_test_memory(struct net_device *dev)
 static int arlan_setup_card_by_book(struct net_device *dev)
 {
 	u_char irqLevel, configuredStatusFlag;
-	struct arlan_private *priv = netdev_priv(dev);
-	volatile struct arlan_shmem __iomem *arlan = priv->card;
+	volatile struct arlan_shmem *arlan = ((struct arlan_private *) dev->priv)->card;
 
 //	ARLAN_DEBUG_ENTRY("arlan_setup_card");
 

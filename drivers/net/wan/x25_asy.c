@@ -39,7 +39,7 @@
 static struct net_device **x25_asy_devs;
 static int x25_asy_maxdev = SL_NRUNIT;
 
-module_param(x25_asy_maxdev, int, 0);
+MODULE_PARM(x25_asy_maxdev, "i");
 MODULE_LICENSE("GPL");
 
 static int x25_asy_esc(unsigned char *p, unsigned char *d, int len);
@@ -107,9 +107,13 @@ static struct x25_asy *x25_asy_alloc(void)
 static void x25_asy_free(struct x25_asy *sl)
 {
 	/* Free all X.25 frame buffers. */
-	kfree(sl->rbuff);
+	if (sl->rbuff)  {
+		kfree(sl->rbuff);
+	}
 	sl->rbuff = NULL;
-	kfree(sl->xbuff);
+	if (sl->xbuff)  {
+		kfree(sl->xbuff);
+	}
 	sl->xbuff = NULL;
 
 	if (!test_and_clear_bit(SLF_INUSE, &sl->flags)) {
@@ -130,8 +134,10 @@ static int x25_asy_change_mtu(struct net_device *dev, int newmtu)
 	{
 		printk("%s: unable to grow X.25 buffers, MTU change cancelled.\n",
 		       dev->name);
-		kfree(xbuff);
-		kfree(rbuff);
+		if (xbuff != NULL)  
+			kfree(xbuff);
+		if (rbuff != NULL)  
+			kfree(rbuff);
 		return -ENOMEM;
 	}
 
@@ -163,8 +169,10 @@ static int x25_asy_change_mtu(struct net_device *dev, int newmtu)
 
 	spin_unlock_bh(&sl->lock);
 
-	kfree(xbuff);
-	kfree(rbuff);
+	if (xbuff != NULL) 
+		kfree(xbuff);
+	if (rbuff != NULL)
+		kfree(rbuff);
 	return 0;
 }
 

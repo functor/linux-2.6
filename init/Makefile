@@ -3,13 +3,14 @@
 #
 
 obj-y				:= main.o version.o mounts.o initramfs.o
-obj-$(CONFIG_GENERIC_CALIBRATE_DELAY) += calibrate.o
-
 mounts-y			:= do_mounts.o
 mounts-$(CONFIG_DEVFS_FS)	+= do_mounts_devfs.o
 mounts-$(CONFIG_BLK_DEV_RAM)	+= do_mounts_rd.o
 mounts-$(CONFIG_BLK_DEV_INITRD)	+= do_mounts_initrd.o
 mounts-$(CONFIG_BLK_DEV_MD)	+= do_mounts_md.o
+
+extra-$(subst m,y,$(CONFIG_CRASH_DUMP))	+= kerntypes.o
+CFLAGS_kerntypes.o		:= -gstabs
 
 # files to be removed upon make clean
 clean-files := ../include/linux/compile.h

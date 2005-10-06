@@ -1,8 +1,6 @@
 #ifndef __V850_PGTABLE_H__
 #define __V850_PGTABLE_H__
 
-#include <asm-generic/4level-fixup.h>
-
 #include <linux/config.h>
 #include <asm/page.h>
 

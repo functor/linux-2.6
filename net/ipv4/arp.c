@@ -213,9 +213,6 @@ int arp_mc_map(u32 addr, u8 *haddr, struct net_device *dev, int dir)
 	case ARPHRD_IEEE802_TR:
 		ip_tr_mc_map(addr, haddr);
 		return 0;
-	case ARPHRD_INFINIBAND:
-		ip_ib_mc_map(addr, haddr);
-		return 0;
 	default:
 		if (dir) {
 			memcpy(haddr, dev->broadcast, dev->addr_len);
@@ -707,7 +704,7 @@ static void parp_redo(struct sk_buff *skb)
  *	Process an arp request.
  */
 
-static int arp_process(struct sk_buff *skb)
+int arp_process(struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
 	struct in_device *in_dev = in_dev_get(dev);
@@ -964,7 +961,7 @@ out_of_mem:
  *	Set (create) an ARP cache entry.
  */
 
-static int arp_req_set(struct arpreq *r, struct net_device * dev)
+int arp_req_set(struct arpreq *r, struct net_device * dev)
 {
 	u32 ip = ((struct sockaddr_in *) &r->arp_pa)->sin_addr.s_addr;
 	struct neighbour *neigh;
@@ -1078,7 +1075,7 @@ static int arp_req_get(struct arpreq *r, struct net_device *dev)
 	return err;
 }
 
-static int arp_req_delete(struct arpreq *r, struct net_device * dev)
+int arp_req_delete(struct arpreq *r, struct net_device * dev)
 {
 	int err;
 	u32 ip = ((struct sockaddr_in *)&r->arp_pa)->sin_addr.s_addr;
@@ -1210,7 +1207,7 @@ static int arp_netdev_event(struct notifier_block *this, unsigned long event, vo
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block arp_netdev_notifier = {
+struct notifier_block arp_netdev_notifier = {
 	.notifier_call = arp_netdev_event,
 };
 
@@ -1243,7 +1240,7 @@ void __init arp_init(void)
 	arp_proc_init();
 #ifdef CONFIG_SYSCTL
 	neigh_sysctl_register(NULL, &arp_tbl.parms, NET_IPV4,
-			      NET_IPV4_NEIGH, "ipv4", NULL, NULL);
+			      NET_IPV4_NEIGH, "ipv4", NULL);
 #endif
 	register_netdevice_notifier(&arp_netdev_notifier);
 }

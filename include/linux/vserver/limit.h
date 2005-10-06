@@ -10,12 +10,9 @@ void vx_vsi_swapinfo(struct sysinfo *);
 
 #define VXD_RLIMIT(r,l)		(VXD_CBIT(limit, (l)) && ((r) == (l)))
 
-#define NUM_LIMITS	24
+#define NUM_LIMITS	20
 
 #define VLIMIT_NSOCK	16
-#define VLIMIT_OPENFD	17
-#define VLIMIT_ANON	18
-#define VLIMIT_SHMEM	19
 
 extern const char *vlimit_name[NUM_LIMITS];
 

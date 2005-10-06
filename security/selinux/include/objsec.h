@@ -87,12 +87,6 @@ struct bprm_security_struct {
 	struct linux_binprm *bprm;     /* back pointer to bprm object */
 	u32 sid;                       /* SID for transformed process */
 	unsigned char set;
-
-	/*
-	 * unsafe is used to share failure information from bprm_apply_creds()
-	 * to bprm_post_apply_creds().
-	 */
-	char unsafe;
 };
 
 struct netif_security_struct {
@@ -107,6 +101,6 @@ struct sk_security_struct {
 	u32 peer_sid;			/* SID of peer */
 };
 
-extern unsigned int selinux_checkreqprot;
+extern int inode_security_set_sid(struct inode *inode, u32 sid);
 
 #endif /* _SELINUX_OBJSEC_H_ */

@@ -61,6 +61,7 @@
 #include <linux/nfs_page.h>
 #include <asm/uaccess.h>
 #include <linux/smp_lock.h>
+#include <linux/mempool.h>
 
 #include "delegation.h"
 
@@ -80,18 +81,17 @@ static void nfs_writeback_done_partial(struct nfs_write_data *, int);
 static void nfs_writeback_done_full(struct nfs_write_data *, int);
 static int nfs_wait_on_write_congestion(struct address_space *, int);
 static int nfs_wait_on_requests(struct inode *, unsigned long, unsigned int);
-static int nfs_flush_inode(struct inode *inode, unsigned long idx_start,
-			   unsigned int npages, int how);
 
 static kmem_cache_t *nfs_wdata_cachep;
-mempool_t *nfs_wdata_mempool;
+static mempool_t *nfs_wdata_mempool;
 static mempool_t *nfs_commit_mempool;
 
 static DECLARE_WAIT_QUEUE_HEAD(nfs_write_congestion);
 
-static inline struct nfs_write_data *nfs_commit_alloc(void)
+static __inline__ struct nfs_write_data *nfs_writedata_alloc(void)
 {
-	struct nfs_write_data *p = mempool_alloc(nfs_commit_mempool, SLAB_NOFS);
+	struct nfs_write_data	*p;
+	p = (struct nfs_write_data *)mempool_alloc(nfs_wdata_mempool, SLAB_NOFS);
 	if (p) {
 		memset(p, 0, sizeof(*p));
 		INIT_LIST_HEAD(&p->pages);
@@ -99,15 +99,31 @@ static inline struct nfs_write_data *nfs_commit_alloc(void)
 	return p;
 }
 
-static inline void nfs_commit_free(struct nfs_write_data *p)
+static __inline__ void nfs_writedata_free(struct nfs_write_data *p)
 {
-	mempool_free(p, nfs_commit_mempool);
+	mempool_free(p, nfs_wdata_mempool);
 }
 
 static void nfs_writedata_release(struct rpc_task *task)
 {
 	struct nfs_write_data	*wdata = (struct nfs_write_data *)task->tk_calldata;
 	nfs_writedata_free(wdata);
+}
+
+static __inline__ struct nfs_write_data *nfs_commit_alloc(void)
+{
+	struct nfs_write_data	*p;
+	p = (struct nfs_write_data *)mempool_alloc(nfs_commit_mempool, SLAB_NOFS);
+	if (p) {
+		memset(p, 0, sizeof(*p));
+		INIT_LIST_HEAD(&p->pages);
+	}
+	return p;
+}
+
+static __inline__ void nfs_commit_free(struct nfs_write_data *p)
+{
+	mempool_free(p, nfs_commit_mempool);
 }
 
 /* Adjust the file length if we're writing beyond the end */
@@ -168,10 +184,11 @@ static int nfs_writepage_sync(struct nfs_open_context *ctx, struct inode *inode,
 	int		result, written = 0;
 	struct nfs_write_data *wdata;
 
-	wdata = nfs_writedata_alloc();
+	wdata = kmalloc(sizeof(*wdata), GFP_NOFS);
 	if (!wdata)
 		return -ENOMEM;
 
+	memset(wdata, 0, sizeof(*wdata));
 	wdata->flags = how;
 	wdata->cred = ctx->cred;
 	wdata->inode = inode;
@@ -221,7 +238,8 @@ static int nfs_writepage_sync(struct nfs_open_context *ctx, struct inode *inode,
 
 io_error:
 	nfs_end_data_update_defer(inode);
-	nfs_writedata_free(wdata);
+
+	kfree(wdata);
 	return written ? written : result;
 }
 
@@ -1007,7 +1025,7 @@ static int nfs_flush_one(struct list_head *head, struct inode *inode, int how)
 	return -ENOMEM;
 }
 
-static int
+int
 nfs_flush_list(struct list_head *head, int wpages, int how)
 {
 	LIST_HEAD(one_request);
@@ -1181,8 +1199,7 @@ void nfs_writeback_done(struct rpc_task *task)
 		}
 		if (time_before(complain, jiffies)) {
 			printk(KERN_WARNING
-			       "NFS: Server wrote zero bytes, expected %u.\n",
-					argp->count);
+			       "NFS: Server wrote less than requested.\n");
 			complain = jiffies + 300 * HZ;
 		}
 		/* Can't do anything about it except throw an error. */
@@ -1257,7 +1274,7 @@ static void nfs_commit_rpcsetup(struct list_head *head,
 /*
  * Commit dirty pages
  */
-static int
+int
 nfs_commit_list(struct list_head *head, int how)
 {
 	struct nfs_write_data	*data;
@@ -1331,8 +1348,8 @@ nfs_commit_done(struct rpc_task *task)
 }
 #endif
 
-static int nfs_flush_inode(struct inode *inode, unsigned long idx_start,
-			   unsigned int npages, int how)
+int nfs_flush_inode(struct inode *inode, unsigned long idx_start,
+		   unsigned int npages, int how)
 {
 	struct nfs_inode *nfsi = NFS_I(inode);
 	LIST_HEAD(head);

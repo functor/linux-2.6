@@ -132,7 +132,7 @@ static struct ip_tunnel *tunnels_l[HASH_SIZE];
 static struct ip_tunnel *tunnels_wc[1];
 static struct ip_tunnel **tunnels[4] = { tunnels_wc, tunnels_l, tunnels_r, tunnels_r_l };
 
-static DEFINE_RWLOCK(ipip_lock);
+static rwlock_t ipip_lock = RW_LOCK_UNLOCKED;
 
 static struct ip_tunnel * ipip_tunnel_lookup(u32 remote, u32 local)
 {
@@ -436,7 +436,7 @@ out:
 
 	/* change mtu on this route */
 	if (type == ICMP_DEST_UNREACH && code == ICMP_FRAG_NEEDED) {
-		if (rel_info > dst_mtu(skb2->dst)) {
+		if (rel_info > dst_pmtu(skb2->dst)) {
 			kfree_skb(skb2);
 			return;
 		}
@@ -569,9 +569,9 @@ static int ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (tiph->frag_off)
-		mtu = dst_mtu(&rt->u.dst) - sizeof(struct iphdr);
+		mtu = dst_pmtu(&rt->u.dst) - sizeof(struct iphdr);
 	else
-		mtu = skb->dst ? dst_mtu(skb->dst) : dev->mtu;
+		mtu = skb->dst ? dst_pmtu(skb->dst) : dev->mtu;
 
 	if (mtu < 68) {
 		tunnel->stat.collisions++;
