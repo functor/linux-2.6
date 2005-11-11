@@ -2791,6 +2791,10 @@ need_resched_nonpreemptible:
 #ifdef CONFIG_VSERVER_HARDCPU
 # ifdef CONFIG_VSERVER_ACB_SCHED
 drain_hold_queue:
+
+	min_guarantee_ticks = VX_INVALID_TICKS;
+	min_best_effort_ticks = VX_INVALID_TICKS;
+
 # endif	
 	if (!list_empty(&rq->hold_queue)) {
 		struct list_head *l, *n;
