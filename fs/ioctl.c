@@ -197,6 +197,22 @@ int vfs_ioctl(struct file *filp, unsigned int fd, unsigned int cmd, unsigned lon
 				error = vx_proc_ioctl(filp->f_dentry->d_inode, filp, cmd, arg);
 			break;
 #endif
+		/*
+		 * These cmds needed for PLK - don't lose them!
+		 */
+                case FIOC_SETIATTR:
+                case FIOC_GETIATTR:
+                        /*
+                         * Verify that this filp is a file object,
+                         * not (say) a socket.
+                         */
+                        error = -ENOTTY;
+                        if (S_ISREG(filp->f_dentry->d_inode->i_mode) ||
+                            S_ISDIR(filp->f_dentry->d_inode->i_mode))
+                                error = vc_iattr_ioctl(filp->f_dentry,
+                                                       cmd, arg);
+                        break;
+
 		default:
 			if (S_ISREG(filp->f_dentry->d_inode->i_mode))
 				error = file_ioctl(filp, cmd, arg);
