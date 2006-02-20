@@ -502,6 +502,7 @@ init_conntrack(const struct ip_conntrack_tuple *tuple,
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
 	conntrack->xid[IP_CT_DIR_REPLY] = -1;
+	conntrack->priority = (u_int32_t)-1;
 #endif
 	if (!protocol->new(conntrack, skb)) {
 		kmem_cache_free(ip_conntrack_cachep, conntrack);
