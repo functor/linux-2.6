@@ -34,9 +34,12 @@ uint64_t vx_best_effort_ticks = 0;
 
 void vx_tokens_set(struct vx_info *vxi, int tokens) {
     int class = CLASS(vxi);
+    uint64_t tmp;
+ 
+    tmp = GLOBAL_TICKS(vxi);
+    tmp -= tokens * TICKS_PER_TOKEN(vxi);
 
-    vxi->sched.ticks[class] = GLOBAL_TICKS(vxi);
-    vxi->sched.ticks[class] -=	tokens * TICKS_PER_TOKEN(vxi);
+    vxi->sched.ticks[class] = tmp;
 }
 
 void vx_scheduler_tick(void) {
@@ -54,9 +57,9 @@ void vx_advance_guaranteed_ticks(int ticks) {
 
 int vx_tokens_avail(struct vx_info *vxi)
 {
-    uint64_t diff;
+    uint64_t diff, max_ticks;
     int tokens;
-    long rem;
+    long tpt, rem;
     int class = CLASS(vxi);
 
     if (vxi->sched.state[class] == SCH_UNINITIALIZED) {
@@ -75,12 +78,17 @@ int vx_tokens_avail(struct vx_info *vxi)
     /* Use of fixed-point arithmetic in these calculations leads to
      * some limitations.  These should be made explicit.
      */
+    max_ticks = (tpt = TICKS_PER_TOKEN(vxi));
+    max_ticks *= vxi->sched.tokens_max;
     diff = GLOBAL_TICKS(vxi) - vxi->sched.ticks[class];
-    tokens = div_long_long_rem(diff, TICKS_PER_TOKEN(vxi), &rem);
 
-    if (tokens > vxi->sched.tokens_max) {
+    /* Avoid an overflow from div_long_long_rem */
+    if (diff >= max_ticks) {
 	vx_tokens_set(vxi, vxi->sched.tokens_max);
 	tokens = vxi->sched.tokens_max;
+    } else {
+	    /* Divide ticks by ticks per token to get tokens */
+	    tokens = div_long_long_rem(diff, tpt, &rem);
     }
 
     atomic_set(&vxi->sched.tokens, tokens);
@@ -95,6 +103,7 @@ void vx_consume_token(struct vx_info *vxi)
     int class = CLASS(vxi);
 
     vxi->sched.ticks[class] += TICKS_PER_TOKEN(vxi);
+    atomic_dec(&vxi->sched.tokens);
 }
 
 /*
@@ -248,7 +257,7 @@ int vc_set_sched_v2(uint32_t xid, void __user *data)
 
 	vxi = locate_vx_info(xid);
 	if (!vxi)
-		return -EINVAL;
+		return -ESRCH;
 
 	spin_lock(&vxi->sched.tokens_lock);
 
@@ -296,7 +305,7 @@ int vc_set_sched(uint32_t xid, void __user *data)
 
 	vxi = locate_vx_info(xid);
 	if (!vxi)
-		return -EINVAL;
+		return -ESRCH;
 
 	set_mask = vc_data.set_mask;
 

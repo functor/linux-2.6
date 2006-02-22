@@ -13,4 +13,6 @@
 #define sys_time um_time
 #define old_mmap old_mmap_i386
 
+#define sys_kexec_load sys_ni_syscall
+	
 #include "../../i386/kernel/syscall_table.S"

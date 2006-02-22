@@ -23,7 +23,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root -o -n "%{?__beehive_build}" ] && echo || echo .`whoami`)
 
-%define release 1.1398_FC4.0.planetlab%{?date:.%{date}}
+%define release 1.1398_FC4.5%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
 %define signmodules 0
 %define make_target bzImage

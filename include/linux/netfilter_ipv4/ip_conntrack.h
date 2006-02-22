@@ -189,6 +189,10 @@ struct ip_conntrack
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	/* VServer context id */
 	xid_t xid[IP_CT_DIR_MAX];
+
+	/* Connection priority (pushed to skb->priority) */
+	/* Can be used directly by some classful qdiscs such as HTB */
+	u_int32_t priority;
 #endif
 
 	/* Traversed often, so hopefully in different cacheline to top */
