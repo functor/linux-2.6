@@ -68,6 +68,7 @@
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <net/tux.h>
 #include <linux/wanrouter.h>
 #include <linux/if_bridge.h>
 #include <linux/init.h>
@@ -81,6 +82,7 @@
 #include <linux/syscalls.h>
 #include <linux/compat.h>
 #include <linux/kmod.h>
+#include <linux/audit.h>
 
 #ifdef CONFIG_NET_RADIO
 #include <linux/wireless.h>		/* Note : will define WIRELESS_EXT */
@@ -93,6 +95,7 @@
 
 #include <net/sock.h>
 #include <linux/netfilter.h>
+#include <linux/vs_socket.h>
 
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, char __user *buf,
@@ -120,7 +123,7 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-static struct file_operations socket_file_ops = {
+struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -226,7 +229,7 @@ int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr)
 		return 0;
 	if(copy_from_user(kaddr,uaddr,ulen))
 		return -EFAULT;
-	return 0;
+	return audit_sockaddr(ulen, kaddr);
 }
 
 /**
@@ -362,52 +365,63 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
-int sock_map_fd(struct socket *sock)
+struct file * sock_map_file(struct socket *sock)
 {
-	int fd;
+	struct file *file;
 	struct qstr this;
 	char name[32];
 
+	file = get_empty_filp();
+
+	if (!file)
+		return ERR_PTR(-ENFILE);
+
+	sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
+	this.name = name;
+	this.len = strlen(name);
+	this.hash = SOCK_INODE(sock)->i_ino;
+
+	file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
+	if (!file->f_dentry) {
+		put_filp(file);
+		return ERR_PTR(-ENOMEM);
+	}
+	file->f_dentry->d_op = &sockfs_dentry_operations;
+	d_add(file->f_dentry, SOCK_INODE(sock));
+	file->f_vfsmnt = mntget(sock_mnt);
+file->f_mapping = file->f_dentry->d_inode->i_mapping;
+
+	if (sock->file)
+		BUG();
+	sock->file = file;
+	file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
+	file->f_mode = FMODE_READ | FMODE_WRITE;
+	file->f_flags = O_RDWR;
+	file->f_pos = 0;
+
+	return file;
+}
+
+int sock_map_fd(struct socket *sock)
+{
+	int fd;
+	struct file *file;
+ 
 	/*
 	 *	Find a file descriptor suitable for return to the user. 
 	 */
-
+  
 	fd = get_unused_fd();
-	if (fd >= 0) {
-		struct file *file = get_empty_filp();
-
-		if (!file) {
-			put_unused_fd(fd);
-			fd = -ENFILE;
-			goto out;
-		}
-
-		sprintf(name, "[%lu]", SOCK_INODE(sock)->i_ino);
-		this.name = name;
-		this.len = strlen(name);
-		this.hash = SOCK_INODE(sock)->i_ino;
-
-		file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
-		if (!file->f_dentry) {
-			put_filp(file);
-			put_unused_fd(fd);
-			fd = -ENOMEM;
-			goto out;
-		}
-		file->f_dentry->d_op = &sockfs_dentry_operations;
-		d_add(file->f_dentry, SOCK_INODE(sock));
-		file->f_vfsmnt = mntget(sock_mnt);
-		file->f_mapping = file->f_dentry->d_inode->i_mapping;
-
-		sock->file = file;
-		file->f_op = SOCK_INODE(sock)->i_fop = &socket_file_ops;
-		file->f_mode = FMODE_READ | FMODE_WRITE;
-		file->f_flags = O_RDWR;
-		file->f_pos = 0;
-		fd_install(fd, file);
+	if (fd < 0)
+		return fd;
+  
+	file = sock_map_file(sock);
+	if (IS_ERR(file)) {
+		put_unused_fd(fd);
+		return PTR_ERR(file);
 	}
-
-out:
+	fd_install(fd, file);
+  
 	return fd;
 }
 
@@ -459,7 +473,7 @@ struct socket *sockfd_lookup(int fd, int *err)
  *	NULL is returned.
  */
 
-static struct socket *sock_alloc(void)
+struct socket *sock_alloc(void)
 {
 	struct inode * inode;
 	struct socket * sock;
@@ -478,6 +492,8 @@ static struct socket *sock_alloc(void)
 	put_cpu_var(sockets_in_use);
 	return sock;
 }
+
+EXPORT_SYMBOL_GPL(sock_alloc);
 
 /*
  *	In theory you can't get an open on this inode, but /proc provides
@@ -530,7 +546,7 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 				 struct msghdr *msg, size_t size)
 {
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
-	int err;
+	int err, len;
 
 	si->sock = sock;
 	si->scm = NULL;
@@ -541,7 +557,21 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		return err;
 
-	return sock->ops->sendmsg(iocb, sock, msg, size);
+	len = sock->ops->sendmsg(iocb, sock, msg, size);
+	if (sock->sk) {
+		if (len == size)
+			vx_sock_send(sock->sk, size);
+		else
+			vx_sock_fail(sock->sk, size);
+	}
+	vxdprintk(VXD_CBIT(net, 7),
+		"__sock_sendmsg: %p[%p,%p,%p;%d]:%d/%d",
+		sock, sock->sk,
+		(sock->sk)?sock->sk->sk_nx_info:0,
+		(sock->sk)?sock->sk->sk_vx_info:0,
+		(sock->sk)?sock->sk->sk_xid:0,
+		(unsigned int)size, len);
+	return len;
 }
 
 int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
@@ -579,7 +609,7 @@ int kernel_sendmsg(struct socket *sock, struct msghdr *msg,
 static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock, 
 				 struct msghdr *msg, size_t size, int flags)
 {
-	int err;
+	int err, len;
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
 
 	si->sock = sock;
@@ -592,7 +622,17 @@ static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		return err;
 
-	return sock->ops->recvmsg(iocb, sock, msg, size, flags);
+	len = sock->ops->recvmsg(iocb, sock, msg, size, flags);
+	if ((len >= 0) && sock->sk)
+		vx_sock_recv(sock->sk, len);
+	vxdprintk(VXD_CBIT(net, 7),
+		"__sock_recvmsg: %p[%p,%p,%p;%d]:%d/%d",
+		sock, sock->sk,
+		(sock->sk)?sock->sk->sk_nx_info:0,
+		(sock->sk)?sock->sk->sk_vx_info:0,
+		(sock->sk)?sock->sk->sk_xid:0,
+		(unsigned int)size, len);
+	return len;
 }
 
 int sock_recvmsg(struct socket *sock, struct msghdr *msg, 
@@ -1035,6 +1075,8 @@ static int sock_fasync(int fd, struct file *filp, int on)
 	}
 
 out:
+	if (sock->sk != sk)
+		BUG();
 	release_sock(sock->sk);
 	return 0;
 }
@@ -1078,6 +1120,10 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 		return -EAFNOSUPPORT;
 	if (type < 0 || type >= SOCK_MAX)
 		return -EINVAL;
+
+	/* disable IPv6 inside vservers for now */
+	if (family == PF_INET6 && !vx_check(0, VX_ADMIN))
+		return -EAFNOSUPPORT;
 
 	/* Compatibility.
 
@@ -1186,6 +1232,7 @@ asmlinkage long sys_socket(int family, int type, int protocol)
 	if (retval < 0)
 		goto out;
 
+	set_bit(SOCK_USER_SOCKET, &sock->flags);
 	retval = sock_map_fd(sock);
 	if (retval < 0)
 		goto out_release;
@@ -1216,10 +1263,12 @@ asmlinkage long sys_socketpair(int family, int type, int protocol, int __user *u
 	err = sock_create(family, type, protocol, &sock1);
 	if (err < 0)
 		goto out;
+	set_bit(SOCK_USER_SOCKET, &sock1->flags);
 
 	err = sock_create(family, type, protocol, &sock2);
 	if (err < 0)
 		goto out_release_1;
+	set_bit(SOCK_USER_SOCKET, &sock2->flags);
 
 	err = sock1->ops->socketpair(sock1, sock2);
 	if (err < 0) 
@@ -1906,7 +1955,11 @@ asmlinkage long sys_socketcall(int call, unsigned long __user *args)
 	/* copy_from_user should be SMP safe. */
 	if (copy_from_user(a, args, nargs[call]))
 		return -EFAULT;
-		
+
+	err = audit_socketcall(nargs[call]/sizeof(unsigned long), a);
+	if (err)
+		return err;
+
 	a0=a[0];
 	a1=a[1];
 	
@@ -2053,6 +2106,51 @@ void __init sock_init(void)
 #endif
 }
 
+int tux_Dprintk;
+int tux_TDprintk;
+
+struct module *tux_module = NULL;
+
+#ifdef CONFIG_TUX_MODULE
+
+asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info) = NULL;
+spinlock_t tux_module_lock = SPIN_LOCK_UNLOCKED;
+
+asmlinkage long sys_tux (unsigned int action, user_req_t *u_info)
+{
+	int ret;
+
+	if (current->tux_info)
+		return sys_tux_ptr(action, u_info);
+
+	ret = -ENOSYS;
+	spin_lock(&tux_module_lock);
+	if (!tux_module)
+		goto out_unlock;
+	if (!try_module_get(tux_module))
+		goto out_unlock;
+	spin_unlock(&tux_module_lock);
+
+	if (!sys_tux_ptr)
+		TUX_BUG();
+	ret = sys_tux_ptr(action, u_info);
+
+	spin_lock(&tux_module_lock);
+	module_put(tux_module);
+out_unlock:
+	spin_unlock(&tux_module_lock);
+
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(tux_module);
+EXPORT_SYMBOL_GPL(tux_module_lock);
+EXPORT_SYMBOL_GPL(sys_tux_ptr);
+
+EXPORT_SYMBOL_GPL(tux_Dprintk);
+EXPORT_SYMBOL_GPL(tux_TDprintk);
+
+#endif
 #ifdef CONFIG_PROC_FS
 void socket_seq_show(struct seq_file *seq)
 {

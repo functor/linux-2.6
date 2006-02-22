@@ -141,6 +141,8 @@ extern __inline__ int get_order (unsigned long size)
 #define __va(x)		     ((void *)__phys_to_virt ((unsigned long)(x)))
 
 
+#define devmem_is_allowed(x) 1
+
 #endif /* KERNEL */
 
 #endif /* __V850_PAGE_H__ */

@@ -41,6 +41,7 @@
 #include <linux/limits.h>
 #include <linux/dcache.h>
 #include <linux/syscalls.h>
+#include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/processor.h>
@@ -72,6 +73,19 @@ extern int proc_unknown_nmi_panic(ctl_table *, int, struct file *,
 				  void __user *, size_t *, loff_t *);
 #endif
 
+extern unsigned int vdso_enabled;
+
+int exec_shield = 1;
+
+static int __init setup_exec_shield(char *str)
+{
+        get_option (&str, &exec_shield);
+
+        return 1;
+}
+
+__setup("exec-shield=", setup_exec_shield);
+
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
 static int minolduid;
@@ -84,6 +98,7 @@ extern char modprobe_path[];
 #ifdef CONFIG_HOTPLUG
 extern char hotplug_path[];
 #endif
+extern char vshelper_path[];
 #ifdef CONFIG_CHR_DEV_SG
 extern int sg_big_buff;
 #endif
@@ -228,6 +243,7 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.sysname),
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
+		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -237,6 +253,7 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.release),
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
+		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -246,6 +263,7 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.version),
 		.mode		= 0444,
 		.proc_handler	= &proc_doutsstring,
+		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -255,6 +273,7 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.nodename),
 		.mode		= 0644,
 		.proc_handler	= &proc_doutsstring,
+		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -264,6 +283,7 @@ static ctl_table kern_table[] = {
 		.maxlen		= sizeof(system_utsname.domainname),
 		.mode		= 0644,
 		.proc_handler	= &proc_doutsstring,
+		.virt_handler	= &vx_uts_virt_handler,
 		.strategy	= &sysctl_string,
 	},
 	{
@@ -274,6 +294,32 @@ static ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
+	{
+		.ctl_name	= KERN_EXEC_SHIELD,
+		.procname	= "exec-shield",
+		.data		= &exec_shield,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= KERN_PRINT_FATAL,
+		.procname	= "print-fatal-signals",
+		.data		= &print_fatal_signals,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#if __i386__
+	{
+		.ctl_name	= KERN_VDSO,
+		.procname	= "vdso",
+		.data		= &vdso_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
 	{
 		.ctl_name	= KERN_CORE_USES_PID,
 		.procname	= "core_uses_pid",
@@ -400,6 +446,15 @@ static ctl_table kern_table[] = {
 		.strategy	= &sysctl_string,
 	},
 #endif
+	{
+		.ctl_name	= KERN_VSHELPER,
+		.procname	= "vshelper",
+		.data		= &vshelper_path,
+		.maxlen		= 256,
+		.mode		= 0644,
+		.proc_handler	= &proc_dostring,
+		.strategy	= &sysctl_string,
+	},
 #ifdef CONFIG_CHR_DEV_SG
 	{
 		.ctl_name	= KERN_SG_BIG_BUFF,
@@ -1391,16 +1446,20 @@ static ssize_t proc_writesys(struct file * file, const char __user * buf,
 int proc_dostring(ctl_table *table, int write, struct file *filp,
 		  void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	size_t len;
+	size_t len, maxlen;
 	char __user *p;
 	char c;
+	void *data;
+
+	data = table->data;
+	maxlen = table->maxlen;
+
+	if (!data || !maxlen || !*lenp || (*ppos && !write))
+		return (*lenp = 0);
 	
-	if (!table->data || !table->maxlen || !*lenp ||
-	    (*ppos && !write)) {
-		*lenp = 0;
-		return 0;
-	}
-	
+	if (table->virt_handler)
+		table->virt_handler(table, write, filp->f_xid, &data, &maxlen);
+
 	if (write) {
 		len = 0;
 		p = buffer;
@@ -1411,20 +1470,20 @@ int proc_dostring(ctl_table *table, int write, struct file *filp,
 				break;
 			len++;
 		}
-		if (len >= table->maxlen)
-			len = table->maxlen-1;
-		if(copy_from_user(table->data, buffer, len))
+		if (len >= maxlen)
+			len = maxlen-1;
+		if(copy_from_user(data, buffer, len))
 			return -EFAULT;
-		((char *) table->data)[len] = 0;
+		((char *) data)[len] = 0;
 		*ppos += *lenp;
 	} else {
-		len = strlen(table->data);
-		if (len > table->maxlen)
-			len = table->maxlen;
+		len = strlen(data);
+		if (len > maxlen)
+			len = maxlen;
 		if (len > *lenp)
 			len = *lenp;
 		if (len)
-			if(copy_to_user(buffer, table->data, len))
+			if(copy_to_user(buffer, data, len))
 				return -EFAULT;
 		if (len < *lenp) {
 			if(put_user('\n', ((char __user *) buffer) + len))

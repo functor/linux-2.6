@@ -192,6 +192,10 @@ struct tcp_tw_bucket {
 #define tw_node			__tw_common.skc_node
 #define tw_bind_node		__tw_common.skc_bind_node
 #define tw_refcnt		__tw_common.skc_refcnt
+#define tw_xid			__tw_common.skc_xid
+#define tw_vx_info		__tw_common.skc_vx_info
+#define tw_nid			__tw_common.skc_nid
+#define tw_nx_info		__tw_common.skc_nx_info
 	volatile unsigned char	tw_substate;
 	unsigned char		tw_rcv_wscale;
 	__u16			tw_sport;
@@ -485,8 +489,8 @@ static __inline__ int tcp_sk_listen_hashfn(struct sock *sk)
    so that we select tick to get range about 4 seconds.
  */
 
-#if HZ <= 16 || HZ > 4096
-# error Unsupported: HZ <= 16 or HZ > 4096
+#if HZ <= 16 || HZ > 32768
+# error Unsupported: HZ <= 16 or HZ > 32768
 #elif HZ <= 32
 # define TCP_TW_RECYCLE_TICK (5+2-TCP_TW_RECYCLE_SLOTS_LOG)
 #elif HZ <= 64
@@ -501,8 +505,14 @@ static __inline__ int tcp_sk_listen_hashfn(struct sock *sk)
 # define TCP_TW_RECYCLE_TICK (10+2-TCP_TW_RECYCLE_SLOTS_LOG)
 #elif HZ <= 2048
 # define TCP_TW_RECYCLE_TICK (11+2-TCP_TW_RECYCLE_SLOTS_LOG)
-#else
+#elif HZ <= 4096
 # define TCP_TW_RECYCLE_TICK (12+2-TCP_TW_RECYCLE_SLOTS_LOG)
+#elif HZ <= 8192
+# define TCP_TW_RECYCLE_TICK (13+2-TCP_TW_RECYCLE_SLOTS_LOG)
+#elif HZ <= 16384
+# define TCP_TW_RECYCLE_TICK (14+2-TCP_TW_RECYCLE_SLOTS_LOG)
+#else
+# define TCP_TW_RECYCLE_TICK (15+2-TCP_TW_RECYCLE_SLOTS_LOG)
 #endif
 
 #define BICTCP_BETA_SCALE    1024	/* Scale factor beta calculation
@@ -776,6 +786,8 @@ extern void			tcp_shutdown (struct sock *sk, int how);
 
 extern int			tcp_v4_rcv(struct sk_buff *skb);
 
+extern struct sock *		tcp_v4_lookup_listener(u32 daddr, unsigned short hnum, int dif);
+
 extern int			tcp_v4_remember_stamp(struct sock *sk);
 
 extern int		    	tcp_v4_tw_remember_stamp(struct tcp_tw_bucket *tw);
@@ -954,6 +966,7 @@ extern int  tcp_send_synack(struct sock *);
 extern void tcp_push_one(struct sock *, unsigned mss_now);
 extern void tcp_send_ack(struct sock *sk);
 extern void tcp_send_delayed_ack(struct sock *sk);
+extern void cleanup_rbuf(struct sock *sk, int copied);
 
 /* tcp_timer.c */
 extern void tcp_init_xmit_timers(struct sock *);
@@ -1400,8 +1413,9 @@ static __inline__ void tcp_minshall_update(struct tcp_sock *tp, int mss,
 /* Return 0, if packet can be sent now without violation Nagle's rules:
    1. It is full sized.
    2. Or it contains FIN.
-   3. Or TCP_NODELAY was set.
-   4. Or TCP_CORK is not set, and all sent packets are ACKed.
+   3. Or higher layers meant to force a packet boundary, hence the PSH bit.
+   4. Or TCP_NODELAY was set.
+   5. Or TCP_CORK is not set, and all sent packets are ACKed.
       With Minshall's modification: all sent small packets are ACKed.
  */
 

@@ -728,7 +728,19 @@ extern struct vm_area_struct *copy_vma(struct vm_area_struct **,
 extern void exit_mmap(struct mm_struct *);
 extern int may_expand_vm(struct mm_struct *mm, unsigned long npages);
 
-extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+extern unsigned long get_unmapped_area_prot(struct file *, unsigned long, unsigned long, unsigned long, unsigned long, int);
+
+
+static inline unsigned long get_unmapped_area(struct file * file, unsigned long addr, 
+		unsigned long len, unsigned long pgoff, unsigned long flags)
+{
+	return get_unmapped_area_prot(file, addr, len, pgoff, flags, 0);	
+}
+
+extern int install_special_mapping(struct mm_struct *mm,
+				   unsigned long addr, unsigned long len,
+				   unsigned long vm_flags, pgprot_t pgprot,
+				   struct page **pages, unsigned int npages);
 
 extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,

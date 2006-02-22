@@ -343,7 +343,7 @@ out:
 		kill_fasync(PIPE_FASYNC_READERS(*inode), SIGIO, POLL_IN);
 	}
 	if (ret > 0)
-		inode_update_time(inode, 1);	/* mtime and ctime */
+		inode_update_time(inode, filp->f_vfsmnt, 1);	/* mtime and ctime */
 	return ret;
 }
 
@@ -792,6 +792,8 @@ close_f1:
 no_files:
 	return error;	
 }
+
+EXPORT_SYMBOL_GPL(do_pipe);
 
 /*
  * pipefs should _never_ be mounted by userland - too much of security hassle,

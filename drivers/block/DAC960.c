@@ -6247,6 +6247,9 @@ static boolean DAC960_V2_ExecuteUserCommand(DAC960_Controller_T *Controller,
   unsigned long flags;
   unsigned char Channel, TargetID, LogicalDriveNumber;
   unsigned short LogicalDeviceNumber;
+  wait_queue_t __wait;
+  
+  init_waitqueue_entry(&__wait, current);
 
   spin_lock_irqsave(&Controller->queue_lock, flags);
   while ((Command = DAC960_AllocateCommand(Controller)) == NULL)
@@ -6429,11 +6432,18 @@ static boolean DAC960_V2_ExecuteUserCommand(DAC960_Controller_T *Controller,
 					.SegmentByteCount =
 	    CommandMailbox->ControllerInfo.DataTransferSize;
 	  DAC960_ExecuteCommand(Command);
+	  add_wait_queue(&Controller->CommandWaitQueue, &__wait);
+	  set_current_state(TASK_UNINTERRUPTIBLE);
+	  
 	  while (Controller->V2.NewControllerInformation->PhysicalScanActive)
 	    {
 	      DAC960_ExecuteCommand(Command);
-	      sleep_on_timeout(&Controller->CommandWaitQueue, HZ);
+	      schedule_timeout(HZ);
+	      set_current_state(TASK_UNINTERRUPTIBLE);
 	    }
+	  current->state = TASK_RUNNING;
+	  remove_wait_queue(&Controller->CommandWaitQueue, &__wait);
+	   
 	  DAC960_UserCritical("Discovery Completed\n", Controller);
  	}
     }
@@ -7229,3 +7239,4 @@ module_init(DAC960_init_module);
 module_exit(DAC960_cleanup_module);
 
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DAC960_DriverVersion);

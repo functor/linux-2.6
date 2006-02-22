@@ -640,7 +640,7 @@ acpi_ec_add (
 	
 		acpi_remove_gpe_handler(NULL, ec_ecdt->gpe_bit, &acpi_ec_gpe_handler);
 
-		kfree(ec_ecdt);
+//		kfree(ec_ecdt);
 	}
 
 	/* Get GPE bit assignment (EC events). */

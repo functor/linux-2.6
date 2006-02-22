@@ -657,7 +657,6 @@ static int init(void * unused)
 
 	fixup_cpu_present_map();
 	smp_init();
-	sched_init_smp();
 
 	cpuset_init_smp();
 
@@ -668,6 +667,8 @@ static int init(void * unused)
 	populate_rootfs();
 
 	do_basic_setup();
+
+	sched_init_smp();
 
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all

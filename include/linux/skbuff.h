@@ -284,7 +284,9 @@ struct sk_buff {
 #endif
 
 #endif
-
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	xid_t			xid;			/* VServer context ID */
+#endif
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	unsigned int		truesize;
@@ -1203,6 +1205,8 @@ static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
 
 extern void skb_init(void);
 extern void skb_add_mtu(int mtu);
+
+struct tux_req_struct;
 
 #ifdef CONFIG_NETFILTER
 static inline void nf_conntrack_put(struct nf_conntrack *nfct)

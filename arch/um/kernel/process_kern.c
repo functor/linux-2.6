@@ -22,6 +22,8 @@
 #include "linux/proc_fs.h"
 #include "linux/ptrace.h"
 #include "linux/random.h"
+#include "linux/vs_cvirt.h"
+
 #include "asm/unistd.h"
 #include "asm/mman.h"
 #include "asm/segment.h"

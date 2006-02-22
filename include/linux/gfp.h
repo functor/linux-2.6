@@ -49,7 +49,7 @@ struct vm_area_struct;
 			__GFP_NOFAIL|__GFP_NORETRY|__GFP_NO_GROW|__GFP_COMP| \
 			__GFP_NOMEMALLOC)
 
-#define GFP_ATOMIC	(__GFP_HIGH)
+#define GFP_ATOMIC	(__GFP_HIGH | __GFP_NOWARN)
 #define GFP_NOIO	(__GFP_WAIT)
 #define GFP_NOFS	(__GFP_WAIT | __GFP_IO)
 #define GFP_KERNEL	(__GFP_WAIT | __GFP_IO | __GFP_FS)
@@ -77,8 +77,12 @@ struct vm_area_struct;
  * optimized to &contig_page_data at compile-time.
  */
 
+/*
+ * If arch_free_page returns non-zero then the generic free_page code can
+ * immediately bail: the arch-specific function has done all the work.
+ */
 #ifndef HAVE_ARCH_FREE_PAGE
-static inline void arch_free_page(struct page *page, int order) { }
+#define arch_free_page(page, order) 0
 #endif
 
 extern struct page *

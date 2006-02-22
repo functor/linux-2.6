@@ -48,6 +48,7 @@
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
 #include <linux/acct.h>
+#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -418,7 +419,8 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT)) {
+	if (security_vm_enough_memory(arg_size >> PAGE_SHIFT) ||
+		!vx_vmpages_avail(mm, arg_size >> PAGE_SHIFT)) {
 		kmem_cache_free(vm_area_cachep, mpnt);
 		return -ENOMEM;
 	}
@@ -451,7 +453,8 @@ int setup_arg_pages(struct linux_binprm *bprm,
 			kmem_cache_free(vm_area_cachep, mpnt);
 			return ret;
 		}
-		mm->stack_vm = mm->total_vm = vma_pages(mpnt);
+		vx_vmpages_sub(mm, mm->total_vm - vma_pages(mpnt));
+		mm->stack_vm = mm->total_vm;
 	}
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
@@ -1441,6 +1444,8 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	binfmt = current->binfmt;
 	if (!binfmt || !binfmt->core_dump)
 		goto fail;
+	if (current->tux_exit)
+		current->tux_exit();
 	down_write(&mm->mmap_sem);
 	if (!mm->dumpable) {
 		up_write(&mm->mmap_sem);

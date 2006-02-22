@@ -1837,7 +1837,7 @@ vortex_timer(unsigned long data)
 	struct net_device *dev = (struct net_device *)data;
 	struct vortex_private *vp = netdev_priv(dev);
 	long ioaddr = dev->base_addr;
-	int next_tick = 60*HZ;
+	int next_tick = 10*HZ;
 	int ok = 0;
 	int media_status, mii_status, old_window;
 

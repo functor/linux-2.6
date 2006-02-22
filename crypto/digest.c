@@ -52,6 +52,13 @@ static void update(struct crypto_tfm *tfm,
 	}
 }
 
+static void update_kernel(struct crypto_tfm *tfm,
+			  const void *data, size_t count)
+{
+	tfm->__crt_alg->cra_digest.dia_update(crypto_tfm_ctx(tfm), data, count);
+	crypto_yield(tfm);
+}
+
 static void final(struct crypto_tfm *tfm, u8 *out)
 {
 	tfm->__crt_alg->cra_digest.dia_final(crypto_tfm_ctx(tfm), out);
@@ -94,6 +101,7 @@ int crypto_init_digest_ops(struct crypto_tfm *tfm)
 	
 	ops->dit_init	= init;
 	ops->dit_update	= update;
+	ops->dit_update_kernel = update_kernel;
 	ops->dit_final	= final;
 	ops->dit_digest	= digest;
 	ops->dit_setkey	= setkey;

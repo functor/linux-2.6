@@ -261,5 +261,7 @@ extern u64 ppc64_pft_size;		/* Log 2 of page table size */
 	(test_thread_flag(TIF_32BIT) ? \
 	 VM_STACK_DEFAULT_FLAGS32 : VM_STACK_DEFAULT_FLAGS64)
 
+#define devmem_is_allowed(x) 1
+
 #endif /* __KERNEL__ */
 #endif /* _PPC64_PAGE_H */

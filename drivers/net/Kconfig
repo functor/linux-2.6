@@ -2041,6 +2041,36 @@ config BNX2
 	  To compile this driver as a module, choose M here: the module
 	  will be called bnx2.  This is recommended.
 
+config BCM5700
+	tristate "Broadcom 57xx support"
+	depends on PCI
+	---help---
+	  This driver supports the Broadcom (HP NC10xx/67xx/77xx/150x/320x/325x) Gigabit 
+	  family adapters.  Specifically, it supports:
+		HP NC1020 Gigabit Server Adapter
+		HP NC6770 Gigabit Server Adapter
+		HP NC7760 Gigabit Server Adapter
+		HP Embedded NC7761 Gigabit Server Adapter
+		HP NC7770 Gigabit Server Adapter
+		HP NC7771 Gigabit Server Adapter
+		HP NC7780 Gigabit Server Adapter
+		HP NC7781 Gigabit Server Adapter
+		HP NC7782 Embedded Gigabit Server
+		HP ProLiant NC150T PCI 4-Port Gigabit Combo Switch Adapter
+		HP NC320i Integrated Gigabit Server Adapter
+		HP NC325i Integrated Dual Port PCI Express Gigabit Server Adapter
+		HP NC320T Gigabit Server Adapter
+		HP NC324i Integrated Dual Port PCI Express Gigabit Server Adapter
+		HP NC326i Integrated Dual Port PCI Express Gigabit Server Adapter
+
+	  The source for this driver was obtained from 
+	  <http://h18000.www1.hp.com/support/files/networking/us/download/23968.html>
+
+	  To compile this driver as a module, choose M here and read
+	  <file:Documentation/networking/net-modules.txt>.  The module
+	  will be called bcm5700.
+
+
 config GIANFAR
 	tristate "Gianfar Ethernet"
 	depends on 85xx || 83xx

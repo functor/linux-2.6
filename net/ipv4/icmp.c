@@ -918,6 +918,67 @@ static void icmp_address_reply(struct sk_buff *skb)
 out:;
 }
 
+#ifdef CONFIG_ICMP_IPOD
+#include <linux/reboot.h>
+
+int sysctl_icmp_ipod_version = 2;
+int sysctl_icmp_ipod_enabled = 0;
+u32 sysctl_icmp_ipod_host = 0xffffffff;
+u32 sysctl_icmp_ipod_mask = 0xffffffff;
+char sysctl_icmp_ipod_key[32+1] = { "SETMETOSOMETHINGTHIRTYTWOBYTES!!" };
+#define IPOD_CHECK_KEY \
+	(sysctl_icmp_ipod_key[0] != 0)
+#define IPOD_VALID_KEY(d) \
+	(strncmp(sysctl_icmp_ipod_key, (char *)(d), strlen(sysctl_icmp_ipod_key)) == 0)
+
+static void icmp_ping_of_death(struct sk_buff *skb)
+{
+	struct icmphdr *icmph = skb->h.icmph;
+	struct iphdr *iph = skb->nh.iph;
+	int doit = 0;
+
+#if 0
+	printk(KERN_INFO "IPOD: got type=6, code=%d, host=%u.%u.%u.%u\n", icmph->code, ntohs(iph->tot_len), NIPQUAD(iph->saddr));
+#endif
+
+	/*
+	 * If IPOD not enabled or wrong ICMP code, ignore.
+	 */
+	if (!sysctl_icmp_ipod_enabled || icmph->code != 6)
+		return;
+
+	/*
+	 * First check the source address info.
+	 * If host not set, ignore.
+	 */
+	if (sysctl_icmp_ipod_host != 0xffffffff &&
+	    (ntohl(iph->saddr) & sysctl_icmp_ipod_mask) == sysctl_icmp_ipod_host) {
+		/*
+		 * Now check the key if enabled.
+		 * If packet doesn't contain enough data or key
+		 * is otherwise invalid, ignore.
+		 */
+		if (IPOD_CHECK_KEY) {
+			if (pskb_may_pull(skb, sizeof(sysctl_icmp_ipod_key)-1) &&
+			    IPOD_VALID_KEY(skb->data))
+				doit = 1;
+		} else {
+			doit = 1;
+		}
+	}
+
+	if (doit) {
+		sysctl_icmp_ipod_enabled = 0;
+		printk(KERN_CRIT "IPOD: reboot forced by %u.%u.%u.%u...\n",
+		       NIPQUAD(iph->saddr));
+		machine_restart(NULL);
+	} else {
+		printk(KERN_WARNING "IPOD: from %u.%u.%u.%u rejected\n",
+		       NIPQUAD(iph->saddr));
+	}
+}
+#endif
+
 static void icmp_discard(struct sk_buff *skb)
 {
 }
@@ -982,6 +1043,23 @@ int icmp_rcv(struct sk_buff *skb)
   		}
 	}
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	/* VNET: Bypass stack if the echo ID was bound to a (presumably raw) socket */
+	if (vnet_active && skb->sk) {
+		switch (icmph->type) {
+		case ICMP_ECHOREPLY:
+		case ICMP_ECHO:
+		case ICMP_TIMESTAMP:
+		case ICMP_TIMESTAMPREPLY:
+		case ICMP_INFO_REQUEST:
+		case ICMP_INFO_REPLY:
+		case ICMP_ADDRESS:
+		case ICMP_ADDRESSREPLY:
+			goto drop;
+		}
+	}
+#endif
+
 	ICMP_INC_STATS_BH(icmp_pointers[icmph->type].input_entry);
 	icmp_pointers[icmph->type].handler(skb);
 
@@ -1032,12 +1110,21 @@ static struct icmp_control icmp_pointers[NR_ICMP_TYPES + 1] = {
 		.handler = icmp_redirect,
 		.error = 1,
 	},
+#ifdef CONFIG_ICMP_IPOD
+	[6] = {
+		.output_entry = ICMP_MIB_DUMMY,
+		.input_entry = ICMP_MIB_DUMMY,
+		.handler = icmp_ping_of_death,
+		.error = 1,
+	},
+#else
 	[6] = {
 		.output_entry = ICMP_MIB_DUMMY,
 		.input_entry = ICMP_MIB_INERRORS,
 		.handler = icmp_discard,
 		.error = 1,
 	},
+#endif
 	[7] = {
 		.output_entry = ICMP_MIB_DUMMY,
 		.input_entry = ICMP_MIB_INERRORS,

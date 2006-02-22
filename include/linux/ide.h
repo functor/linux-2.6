@@ -190,7 +190,7 @@ typedef unsigned char	byte;	/* used everywhere */
 #define WAIT_READY	(5*HZ)		/* 5sec - some laptops are very slow */
 #define WAIT_PIDENTIFY	(10*HZ)	/* 10sec  - should be less than 3ms (?), if all ATAPI CD is closed at boot */
 #define WAIT_WORSTCASE	(30*HZ)	/* 30sec  - worst case when spinning up */
-#define WAIT_CMD	(10*HZ)	/* 10sec  - maximum wait for an IRQ to happen */
+#define WAIT_CMD	(15*HZ)	/* 15sec  - maximum wait for an IRQ to happen */
 #define WAIT_MIN_SLEEP	(2*HZ/100)	/* 20msec - minimum sleep time */
 
 #define HOST(hwif,chipset)					\
@@ -747,6 +747,7 @@ typedef struct ide_drive_s {
 	unsigned int	usage;		/* current "open()" count for drive */
 	unsigned int	failures;	/* current failure count */
 	unsigned int	max_failures;	/* maximum allowed failure count */
+	u64		probed_capacity;/* initial reported media capacity (ide-cd only currently) */
 
 	u64		capacity64;	/* total number of sectors */
 
@@ -908,6 +909,7 @@ typedef struct hwif_s {
 	unsigned	no_dsc     : 1;	/* 0 default, 1 dsc_overlap disabled */
 	unsigned	auto_poll  : 1; /* supports nop auto-poll */
 	unsigned	sg_mapped  : 1;	/* sg_table and sg_nents are ready */
+	unsigned 	polling    : 1; /* doing a polled command ignore irqs */
 
 	struct device	gendev;
 	struct semaphore gendev_rel_sem; /* To deal with device release() */

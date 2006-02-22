@@ -363,8 +363,11 @@ void oops_end(void)
 	die_owner = -1;
 	bust_spinlocks(0); 
 	spin_unlock(&die_lock); 
-	if (panic_on_oops)
+	if (panic_on_oops) {
+		if (netdump_func)
+			netdump_func = NULL;
 		panic("Oops"); 
+	}
 } 
 
 void __die(const char * str, struct pt_regs * regs, long err)
@@ -394,6 +397,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	oops_begin();
 	handle_BUG(regs);
 	__die(str, regs, err);
+	try_crashdump(regs);
 	oops_end();
 	do_exit(SIGSEGV); 
 }

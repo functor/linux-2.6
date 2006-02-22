@@ -646,6 +646,7 @@ extern void add_input_randomness(unsigned int type, unsigned int code,
 	add_timer_randomness(&input_timer_state,
 			     (type << 4) ^ code ^ (code >> 4) ^ value);
 }
+EXPORT_SYMBOL_GPL(add_input_randomness);
 
 void add_interrupt_randomness(int irq)
 {
@@ -1174,7 +1175,7 @@ static char sysctl_bootid[16];
 static int proc_do_uuid(ctl_table *table, int write, struct file *filp,
 			void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	ctl_table fake_table;
+	ctl_table fake_table = {0};
 	unsigned char buf[64], tmp_uuid[16], *uuid;
 
 	uuid = table->data;
@@ -1600,13 +1601,18 @@ EXPORT_SYMBOL(secure_tcpv6_port_ephemeral);
  */
 unsigned int get_random_int(void)
 {
+	unsigned int val = 0;
+
+#ifdef CONFIG_X86_HAS_TSC
+	rdtscl(val);
+#endif
 	/*
 	 * Use IP's RNG. It suits our purpose perfectly: it re-keys itself
 	 * every second, from the entropy pool (and thus creates a limited
 	 * drain on it), and uses halfMD4Transform within the second. We
 	 * also mix it with jiffies and the PID:
 	 */
-	return secure_ip_id(current->pid + jiffies);
+	return secure_ip_id(current->pid + jiffies + (int)val);
 }
 
 /*

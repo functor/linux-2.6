@@ -12,7 +12,6 @@
 #include "sigframe.h"
 #include <asm/fixmap.h>
 #include <asm/processor.h>
-#include <asm/thread_info.h>
 
 #define DEFINE(sym, val) \
         asm volatile("\n->" #sym " %0 " #val : : "i" (val))
@@ -53,6 +52,7 @@ void foo(void)
 	OFFSET(TI_preempt_count, thread_info, preempt_count);
 	OFFSET(TI_addr_limit, thread_info, addr_limit);
 	OFFSET(TI_restart_block, thread_info, restart_block);
+	OFFSET(TI_sysenter_return, thread_info, sysenter_return);
 	BLANK();
 
 	OFFSET(EXEC_DOMAIN_handler, exec_domain, handler);

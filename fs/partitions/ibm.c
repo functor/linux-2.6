@@ -130,6 +130,7 @@ ibm_partition(struct parsed_partitions *state, struct block_device *bdev)
 		while ((data = read_dev_sector(bdev, blk*(blocksize/512),
 					       &sect)) != NULL) {
 			format1_label_t f1;
+			char *ch;
 
 			memcpy(&f1, data, sizeof(format1_label_t));
 			put_dev_sector(sect);
@@ -155,6 +156,14 @@ ibm_partition(struct parsed_partitions *state, struct block_device *bdev)
 			put_partition(state, counter + 1, 
 					 offset * (blocksize >> 9),
 					 size * (blocksize >> 9));
+
+			/* Corrupting the label buffer now to save the stack. */
+			EBCASC(f1.DS1DSNAM, 44);
+			f1.DS1DSNAM[44] = 0;
+			ch = strstr(f1.DS1DSNAM, "PART");
+			if (ch != NULL && strncmp(ch + 9, "RAID  ", 6) == 0)
+				state->parts[counter + 1].flags = 1;
+
 			counter++;
 			blk++;
 		}

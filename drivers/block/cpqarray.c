@@ -52,6 +52,7 @@
 /* Original author Chris Frantz - Compaq Computer Corporation */
 MODULE_AUTHOR("Compaq Computer Corporation");
 MODULE_DESCRIPTION("Driver for Compaq Smart2 Array Controllers version 2.6.0");
+MODULE_VERSION("2.6.0");
 MODULE_LICENSE("GPL");
 
 #include "cpqarray.h"

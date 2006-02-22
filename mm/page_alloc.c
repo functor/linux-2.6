@@ -34,6 +34,7 @@
 #include <linux/cpuset.h>
 #include <linux/nodemask.h>
 #include <linux/vmalloc.h>
+#include <linux/vs_limit.h>
 
 #include <asm/tlbflush.h>
 #include "internal.h"
@@ -99,9 +100,9 @@ static void bad_page(const char *function, struct page *page)
 {
 	printk(KERN_EMERG "Bad page state at %s (in process '%s', page %p)\n",
 		function, current->comm, page);
-	printk(KERN_EMERG "flags:0x%0*lx mapping:%p mapcount:%d count:%d\n",
+	printk(KERN_EMERG "flags:0x%0*lx mapping:%p mapcount:%d count:%d (%s)\n",
 		(int)(2*sizeof(page_flags_t)), (unsigned long)page->flags,
-		page->mapping, page_mapcount(page), page_count(page));
+		page->mapping, page_mapcount(page), page_count(page), print_tainted());
 	printk(KERN_EMERG "Backtrace:\n");
 	dump_stack();
 	printk(KERN_EMERG "Trying to fix it up, but a reboot is needed\n");
@@ -368,7 +369,8 @@ void __free_pages_ok(struct page *page, unsigned int order)
 	LIST_HEAD(list);
 	int i;
 
-	arch_free_page(page, order);
+	if (arch_free_page(page, order))
+		return;
 
 	mod_page_state(pgfree, 1 << order);
 
@@ -608,7 +610,8 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
 
-	arch_free_page(page, 0);
+	if (arch_free_page(page, 0))
+		return;
 
 	kernel_map_pages(page, 1, 0);
 	inc_page_state(pgfree);
@@ -1188,6 +1191,8 @@ void si_meminfo(struct sysinfo *val)
 	val->freehigh = 0;
 #endif
 	val->mem_unit = PAGE_SIZE;
+	if (vx_flags(VXF_VIRT_MEM, 0))
+		vx_vsi_meminfo(val);
 }
 
 EXPORT_SYMBOL(si_meminfo);

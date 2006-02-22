@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/spinlock.h>
+#include <linux/module.h>
 
 #include <asm/system.h>
 #include <asm/pgtable.h>
@@ -54,6 +55,8 @@ void show_mem(void)
 	printk("%d pages shared\n",shared);
 	printk("%d pages swap cached\n",cached);
 }
+
+EXPORT_SYMBOL_GPL(show_mem);
 
 /*
  * Associate a virtual page frame with a given physical page frame 

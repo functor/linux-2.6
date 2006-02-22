@@ -7,6 +7,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -22,6 +23,7 @@
 #include <linux/pagemap.h>
 #include <linux/bootmem.h>
 #include <linux/proc_fs.h>
+#include <linux/module.h>
 
 #include <asm/processor.h>
 #include <asm/system.h>
@@ -83,6 +85,8 @@ void show_mem(void)
 	printk("%d pages shared\n",shared);
 	printk("%d pages swap cached\n",cached);
 }
+
+EXPORT_SYMBOL_GPL(show_mem);
 
 /* References to section boundaries */
 
@@ -397,6 +401,57 @@ static inline int page_is_ram (unsigned long pagenr)
 
 extern int swiotlb_force;
 
+unsigned long next_ram_page (unsigned long pagenr)
+{
+	int i;
+	unsigned long min_pageno = ULONG_MAX;
+
+	pagenr++;
+
+	for (i = 0; i < e820.nr_map; i++) {
+		unsigned long addr, end;
+
+		if (e820.map[i].type != E820_RAM)	/* not usable memory */
+			continue;
+		/*
+		 *	!!!FIXME!!! Some BIOSen report areas as RAM that
+		 *	are not. Notably the 640->1Mb area. We need a sanity
+		 *	check here.
+		 */
+		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
+		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
+		if  ((pagenr >= addr) && (pagenr < end))
+			return pagenr;
+		if ((pagenr < addr) && (addr < min_pageno))
+			min_pageno = addr;
+	}
+	return min_pageno;
+}
+
+EXPORT_SYMBOL_GPL(next_ram_page);
+
+/*
+ * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
+ * valid. The argument is a physical page number.
+ *
+ *
+ * On x86-64, access has to be given to the first megabyte of ram because that area
+ * contains bios code and data regions used by X and dosemu and similar apps.
+ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
+ * mmio resources as well as potential bios/acpi data regions.
+ */
+int devmem_is_allowed(unsigned long pagenr)
+{
+	if (pagenr <= 256)
+		return 1;
+	if (!page_is_ram(pagenr))
+		return 1;
+	return 0;
+}
+
+
+EXPORT_SYMBOL_GPL(page_is_ram);
+
 static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
 			 kcore_vsyscall;
 
@@ -406,8 +461,6 @@ void __init mem_init(void)
 	int tmp;
 
 #ifdef CONFIG_SWIOTLB
-	if (swiotlb_force)
-		swiotlb = 1;
 	if (!iommu_aperture &&
 	    (end_pfn >= 0xffffffff>>PAGE_SHIFT || force_iommu))
 	       swiotlb = 1;
@@ -553,6 +606,7 @@ int kern_addr_valid(unsigned long addr)
 		return 0;
 	return pfn_valid(pte_pfn(*pte));
 }
+EXPORT_SYMBOL_GPL(kern_addr_valid);
 
 #ifdef CONFIG_SYSCTL
 #include <linux/sysctl.h>

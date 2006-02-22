@@ -62,6 +62,7 @@ typedef enum {
 #define SOCK_ASYNC_WAITDATA	1
 #define SOCK_NOSPACE		2
 #define SOCK_PASSCRED		3
+#define SOCK_USER_SOCKET	4
 
 #ifndef ARCH_HAS_SOCKET_TYPES
 /**
@@ -181,6 +182,7 @@ extern int	     sock_create_kern(int family, int type, int proto,
 				      struct socket **res);
 extern int	     sock_create_lite(int family, int type, int proto,
 				      struct socket **res); 
+extern struct socket *sock_alloc(void);
 extern void	     sock_release(struct socket *sock);
 extern int   	     sock_sendmsg(struct socket *sock, struct msghdr *msg,
 				  size_t len);

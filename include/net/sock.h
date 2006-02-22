@@ -62,7 +62,7 @@
  */
 
 /* Define this to get the SOCK_DBG debugging facility. */
-#define SOCK_DEBUGGING
+//#define SOCK_DEBUGGING
 #ifdef SOCK_DEBUGGING
 #define SOCK_DEBUG(sk, msg...) do { if ((sk) && sock_flag((sk), SOCK_DBG)) \
 					printk(KERN_DEBUG msg); } while (0)
@@ -110,6 +110,10 @@ struct sock_common {
 	struct hlist_node	skc_node;
 	struct hlist_node	skc_bind_node;
 	atomic_t		skc_refcnt;
+	xid_t			skc_xid;
+	struct vx_info		*skc_vx_info;
+	nid_t			skc_nid;
+	struct nx_info		*skc_nx_info;
 };
 
 /**
@@ -158,7 +162,7 @@ struct sock_common {
   *	@sk_timer: sock cleanup timer
   *	@sk_stamp: time stamp of last packet received
   *	@sk_socket: Identd and reporting IO signals
-  *	@sk_user_data: RPC layer private data
+  *	@sk_user_data: RPC and Tux layer private data
   *	@sk_sndmsg_page: cached page for sendmsg
   *	@sk_sndmsg_off: cached offset for sendmsg
   *	@sk_send_head: front of stuff to transmit
@@ -168,6 +172,7 @@ struct sock_common {
   *	@sk_data_ready: callback to indicate there is data to be processed
   *	@sk_write_space: callback to indicate there is bf sending space available
   *	@sk_error_report: callback to indicate errors (e.g. %MSG_ERRQUEUE)
+  * @sk_create_child - callback to get new socket events
   *	@sk_backlog_rcv: callback to process the backlog
   *	@sk_destruct: called at sock freeing time, i.e. when all refcnt == 0
  */
@@ -184,6 +189,10 @@ struct sock {
 #define sk_node			__sk_common.skc_node
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_refcnt		__sk_common.skc_refcnt
+#define sk_xid			__sk_common.skc_xid
+#define sk_vx_info		__sk_common.skc_vx_info
+#define sk_nid			__sk_common.skc_nid
+#define sk_nx_info		__sk_common.skc_nx_info
 	unsigned char		sk_shutdown : 2,
 				sk_no_check : 2,
 				sk_userlocks : 4;
@@ -247,6 +256,7 @@ struct sock {
 	void			(*sk_error_report)(struct sock *sk);
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
+	void			(*sk_create_child)(struct sock *sk, struct sock *newsk);
 	void                    (*sk_destruct)(struct sock *sk);
 };
 
@@ -1033,10 +1043,24 @@ extern void sk_reset_timer(struct sock *sk, struct timer_list* timer,
 
 extern void sk_stop_timer(struct sock *sk, struct timer_list* timer);
 
+extern int vnet_active;
+
 static inline int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int err = 0;
 	int skb_len;
+
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	/* Silently drop if VNET is active (if INET bind() has been
+	 * overridden) and the context is not entitled to read the
+	 * packet.
+	 */
+	if (vnet_active &&
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid) {
+		err = -EPERM;
+		goto out;
+	}
+#endif
 
 	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
 	   number of warnings when compiling with -W --ANK

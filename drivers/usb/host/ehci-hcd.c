@@ -382,6 +382,7 @@ static int ehci_hc_reset (struct usb_hcd *hcd)
 	ehci->hcs_params = readl (&ehci->caps->hcs_params);
 
 #ifdef	CONFIG_PCI
+	writel(0, &ehci->regs->intr_enable);
 	if (hcd->self.controller->bus == &pci_bus_type) {
 		struct pci_dev	*pdev = to_pci_dev(hcd->self.controller);
 

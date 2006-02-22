@@ -1897,7 +1897,6 @@ static const char * ata_dma_blacklist [] = {
 	"SAMSUNG CD-ROM SC-148C",
 	"SAMSUNG CD-ROM SC",
 	"SanDisk SDP3B-64",
-	"SAMSUNG CD-ROM SN-124",
 	"ATAPI CD-ROM DRIVE 40X MAXIMUM",
 	"_NEC DV5800A",
 };
@@ -3733,6 +3732,7 @@ static void ata_host_init(struct ata_port *ap, struct Scsi_Host *host,
 	ap->mwdma_mask = ent->mwdma_mask;
 	ap->udma_mask = ent->udma_mask;
 	ap->flags |= ent->host_flags;
+	ap->flags |= ent->port_flags[port_no];
 	ap->ops = ent->port_ops;
 	ap->cbl = ATA_CBL_NONE;
 	ap->active_tag = ATA_TAG_POISON;

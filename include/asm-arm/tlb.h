@@ -20,6 +20,7 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <asm/pgalloc.h>
+#include <linux/vs_memory.h>
 
 /*
  * TLB handling.  This allows us to remove pages from the page

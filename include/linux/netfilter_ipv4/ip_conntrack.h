@@ -76,11 +76,13 @@ enum ip_conntrack_status {
 
 #include <linux/netfilter_ipv4/ip_conntrack_tcp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_icmp.h>
+#include <linux/netfilter_ipv4/ip_conntrack_proto_gre.h>
 #include <linux/netfilter_ipv4/ip_conntrack_sctp.h>
 
 /* per conntrack: protocol private data */
 union ip_conntrack_proto {
 	/* insert conntrack proto private data here */
+	struct ip_ct_gre gre;
 	struct ip_ct_sctp sctp;
 	struct ip_ct_tcp tcp;
 	struct ip_ct_icmp icmp;
@@ -91,6 +93,7 @@ union ip_conntrack_expect_proto {
 };
 
 /* Add protocol helper include file here */
+#include <linux/netfilter_ipv4/ip_conntrack_pptp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_amanda.h>
 #include <linux/netfilter_ipv4/ip_conntrack_ftp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_irc.h>
@@ -98,12 +101,20 @@ union ip_conntrack_expect_proto {
 /* per conntrack: application helper private data */
 union ip_conntrack_help {
 	/* insert conntrack helper private data (master) here */
+	struct ip_ct_pptp_master ct_pptp_info;
 	struct ip_ct_ftp_master ct_ftp_info;
 	struct ip_ct_irc_master ct_irc_info;
 };
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 #include <linux/netfilter_ipv4/ip_nat.h>
+#include <linux/netfilter_ipv4/ip_nat_pptp.h>
+
+/* per conntrack: nat application helper private data */
+union ip_conntrack_nat_help {
+	/* insert nat helper private data here */
+	struct ip_nat_pptp nat_pptp_info;
+};
 #endif
 
 #include <linux/types.h>
@@ -163,6 +174,7 @@ struct ip_conntrack
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 	struct {
 		struct ip_nat_info info;
+		union ip_conntrack_nat_help help;
 #if defined(CONFIG_IP_NF_TARGET_MASQUERADE) || \
 	defined(CONFIG_IP_NF_TARGET_MASQUERADE_MODULE)
 		int masq_index;
@@ -172,6 +184,15 @@ struct ip_conntrack
 
 #if defined(CONFIG_IP_NF_CONNTRACK_MARK)
 	unsigned long mark;
+#endif
+
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	/* VServer context id */
+	xid_t xid[IP_CT_DIR_MAX];
+
+	/* Connection priority (pushed to skb->priority) */
+	/* Can be used directly by some classful qdiscs such as HTB */
+	u_int32_t priority;
 #endif
 
 	/* Traversed often, so hopefully in different cacheline to top */

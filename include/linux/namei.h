@@ -10,7 +10,7 @@ struct open_intent {
 	int	create_mode;
 };
 
-enum { MAX_NESTED_LINKS = 5 };
+enum { MAX_NESTED_LINKS = 8 };
 
 struct nameidata {
 	struct dentry	*dentry;
@@ -47,6 +47,8 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
 #define LOOKUP_PARENT		16
 #define LOOKUP_NOALT		32
 #define LOOKUP_REVAL		64
+#define LOOKUP_ATOMIC		128
+
 /*
  * Intent data
  */

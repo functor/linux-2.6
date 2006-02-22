@@ -14,9 +14,8 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/agp_backend.h>
-
+#include <acpi/acpixf.h>
 #include <asm/acpi-ext.h>
-
 #include "agp.h"
 
 #ifndef log2

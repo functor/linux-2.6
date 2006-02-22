@@ -15,6 +15,7 @@
  *  kernel subsystems and hints as to where to find out what things do.
  */
 
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/swap.h>
@@ -54,6 +55,7 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
 	 * The memory size of the process is the basis for the badness.
 	 */
 	points = p->mm->total_vm;
+	/* FIXME add vserver badness ;) */
 
 	/*
 	 * Processes which fork a lot of child processes are likely
@@ -129,6 +131,11 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
 	return points;
 }
 
+#if defined(CONFIG_OOM_PANIC) && defined(CONFIG_OOM_KILLER)
+#warning Only define OOM_PANIC or OOM_KILLER; not both
+#endif
+
+#ifdef CONFIG_OOM_KILLER
 /*
  * Simple selection loop. We chose the process with the highest
  * number of 'points'. We expect the caller will lock the tasklist.
@@ -255,6 +262,7 @@ static struct mm_struct *oom_kill_process(struct task_struct *p)
  */
 void out_of_memory(unsigned int __nocast gfp_mask)
 {
+
 	struct mm_struct *mm = NULL;
 	task_t * p;
 
@@ -268,12 +276,12 @@ retry:
 	/* Found nothing?!?! Either we hang forever, or we panic. */
 	if (!p) {
 		read_unlock(&tasklist_lock);
-		show_free_areas();
+		show_mem();
 		panic("Out of memory and no killable processes...\n");
 	}
 
 	printk("oom-killer: gfp_mask=0x%x\n", gfp_mask);
-	show_free_areas();
+	show_mem();
 	mm = oom_kill_process(p);
 	if (!mm)
 		goto retry;
@@ -290,3 +298,37 @@ retry:
 	__set_current_state(TASK_INTERRUPTIBLE);
 	schedule_timeout(1);
 }
+#endif /* CONFIG_OOM_KILLER */
+
+#ifdef CONFIG_OOM_PANIC
+/**
+ * out_of_memory - panic if the system out of memory?
+ */
+void out_of_memory(unsigned int __nocast gfp_mask)
+{
+	/*
+	 * oom_lock protects out_of_memory()'s static variables.
+	 * It's a global lock; this is not performance-critical.
+	 */
+	static spinlock_t oom_lock = SPIN_LOCK_UNLOCKED;
+	static unsigned long count;
+
+	spin_lock(&oom_lock);
+
+	/*
+	 * If we have gotten only a few failures,
+	 * we're not really oom. 
+	 */
+	if (++count >= 10) {
+		/*
+		 * Ok, really out of memory. Panic.
+		 */
+
+		printk("oom-killer: gfp_mask=0x%x\n", gfp_mask);
+		show_free_areas();
+
+		panic("Out Of Memory");
+	}
+	spin_unlock(&oom_lock);
+}
+#endif /*  CONFIG_OOM_PANIC */

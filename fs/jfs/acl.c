@@ -20,6 +20,7 @@
 
 #include <linux/sched.h>
 #include <linux/fs.h>
+#include <linux/namei.h> 
 #include <linux/quotaops.h>
 #include "jfs_incore.h"
 #include "jfs_xattr.h"
@@ -123,25 +124,18 @@ out:
 	return rc;
 }
 
-static int jfs_check_acl(struct inode *inode, int mask)
-{
-	struct jfs_inode_info *ji = JFS_IP(inode);
-
-	if (ji->i_acl == JFS_ACL_NOT_CACHED) {
-		struct posix_acl *acl = jfs_get_acl(inode, ACL_TYPE_ACCESS);
-		if (IS_ERR(acl))
-			return PTR_ERR(acl);
-		posix_acl_release(acl);
-	}
-
-	if (ji->i_acl)
-		return posix_acl_permission(inode, ji->i_acl, mask);
-	return -EAGAIN;
-}
-
 int jfs_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
-	return generic_permission(inode, mask, jfs_check_acl);
+	int mode = inode->i_mode;
+
+#warning MEF Need new BME patch for 2.6.10
+	/* Nobody gets write access to a read-only fs */
+	if ((mask & MAY_WRITE) && (IS_RDONLY(inode) ||
+	    (nd && MNT_IS_RDONLY(nd->mnt))) &&
+	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+		return -EROFS;
+
+	return generic_permission(inode, mask, 0);
 }
 
 int jfs_init_acl(struct inode *inode, struct inode *dir)
@@ -220,7 +214,8 @@ int jfs_setattr(struct dentry *dentry, struct iattr *iattr)
 		return rc;
 
 	if ((iattr->ia_valid & ATTR_UID && iattr->ia_uid != inode->i_uid) ||
-	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid)) {
+	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid) ||
+	    (iattr->ia_valid & ATTR_XID && iattr->ia_xid != inode->i_xid)) {
 		if (DQUOT_TRANSFER(inode, iattr))
 			return -EDQUOT;
 	}

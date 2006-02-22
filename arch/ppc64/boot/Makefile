@@ -98,6 +98,9 @@ $(obj)/zImage: obj-boot += $(call obj-sec, $(required))
 $(obj)/zImage: $(call obj-sec, $(required)) $(obj-boot) $(obj)/addnote FORCE
 	$(call if_changed,addnote)
 
+$(obj)/zImage.stub: $(obj-boot) FORCE
+	$(BOOTLD) -r $(BOOTLFLAGS) -o $@ $(obj-boot)
+
 $(obj)/zImage.initrd: obj-boot += $(call obj-sec, $(required) $(initrd))
 $(obj)/zImage.initrd: $(call obj-sec, $(required) $(initrd)) $(obj-boot) $(obj)/addnote FORCE
 	$(call if_changed,addnote)

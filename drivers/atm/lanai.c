@@ -2760,6 +2760,7 @@ static void __exit lanai_module_exit(void)
 	 * gone, so there isn't much to do
 	 */
 	DPRINTK("cleanup_module()\n");
+	pci_unregister_driver(&lanai_driver);
 }
 
 module_init(lanai_module_init);

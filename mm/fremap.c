@@ -15,6 +15,7 @@
 #include <linux/rmap.h>
 #include <linux/module.h>
 #include <linux/syscalls.h>
+#include <linux/vs_memory.h>
 
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
@@ -68,6 +69,9 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	pgd = pgd_offset(mm, addr);
 	spin_lock(&mm->page_table_lock);
 	
+	if (!vx_rsspages_avail(mm, 1))
+		goto err_unlock;
+
 	pud = pud_alloc(mm, pgd, addr);
 	if (!pud)
 		goto err_unlock;
@@ -85,10 +89,12 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * caller about it.
 	 */
 	err = -EINVAL;
-	inode = vma->vm_file->f_mapping->host;
-	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-	if (!page->mapping || page->index >= size)
-		goto err_unlock;
+	if (vma->vm_file) {
+		inode = vma->vm_file->f_mapping->host;
+		size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+		if (!page->mapping || page->index >= size)
+			goto err_unlock;
+	}
 
 	zap_pte(mm, vma, addr, pte);
 

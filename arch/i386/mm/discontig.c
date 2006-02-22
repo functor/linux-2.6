@@ -32,6 +32,7 @@
 #include <asm/e820.h>
 #include <asm/setup.h>
 #include <asm/mmzone.h>
+#include <asm/crash_dump.h>
 #include <bios_ebda.h>
 
 struct pglist_data *node_data[MAX_NUMNODES];

@@ -116,7 +116,7 @@ END_FTR_SECTION_IFCLR(CPU_FTR_601)
 	li	r4,1024;			\
 	mtctr	r4;				\
 	lis	r4,KERNELBASE@h;		\
-0:	tlbie	r4;				\
+0:	tlbie	r4, 0;				\
 	addi	r4,r4,0x1000;			\
 	bdnz	0b
 #endif
