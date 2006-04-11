@@ -326,36 +326,38 @@ BuildKernel() {
 
     # and now to start the build process
 
+    CC=gcc
     gccversion=$(gcc -v 2>&1 | grep "gcc version" | awk '{print $3'} | awk -F . '{print $1}')
     if [ "$gccversion" == "4" ] ; then
 	echo "Currently not compiling kernel with gcc 4.x"
 	echo "Trying to find a recent gcc 3.x based compiler"
 	CC=
-	gcc3=$(gcc32 -v 2>&1)
-	[ $? -eq 0 ] && CC=gcc32
-	gcc3=$(gcc33 -v 2>&1)
-	[ $? -eq 0 ] && CC=gcc33
-	gcc3=$(gcc34 -v 2>&1)
-	[ $? -eq 0 ] && CC=gcc34
+	gcc3=$(which gcc32 2>/dev/null || /bin/true)
+	[ "$gcc3" != "" ] && CC=gcc32
+	echo "gcc3 = $gcc3; CC=${CC}"
+	gcc3=$(which gcc33 2>/dev/null || /bin/true)
+	[ "$gcc3" != "" ] && CC=gcc33
+	echo "gcc3 = $gcc3; CC=${CC}"
+	gcc3=$(which gcc34 2>/dev/null || /bin/true)
+	[ "$gcc3" != "" ] && CC=gcc34
+	echo "gcc3 = $gcc3; CC=${CC}"
 	if [ -z "$CC" ]; then
 	    echo "Could not find a gcc 3.x based compiler!"
 	    echo "Aborting kernel compilation!"
 	    exit -1
 	fi
-	HOSTCC=${CC}
     fi
+    HOSTCC=${CC}
 
-    make -s ARCH=$Arch mrproper
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch mrproper
     cp configs/$Config .config
+    echo "USING ARCH=$Arch CC=${CC} HOSTCC=${HOSTCC}"
 
-    echo USING ARCH=$Arch
-
-    make -s ARCH=$Arch nonint_oldconfig > /dev/null
-    make -s ARCH=$Arch include/linux/version.h 
-
-    make -s ARCH=$Arch %{?_smp_mflags} $Target
-    make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
-    make ARCH=$Arch buildcheck
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch nonint_oldconfig > /dev/null
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch include/linux/version.h 
+    make -s V=1 CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} $Target
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} modules || exit 1
+    make CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch buildcheck
     
     # Start installing the results
 
