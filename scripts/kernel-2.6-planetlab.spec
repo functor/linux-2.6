@@ -569,9 +569,9 @@ fi
 
 # make some useful links
 pushd /boot > /dev/null ; {
-	ln -sf config-%{KVERREL} config
-	ln -sf initrd-%{KVERREL}.img initrd-boot
-	ln -sf vmlinuz-%{KVERREL} kernel-boot
+	ln -sf config-%{KVERREL} configsmp
+	ln -sf initrd-%{KVERREL}.img initrd-bootsmp
+	ln -sf vmlinuz-%{KVERREL} kernel-bootsmp
 }
 popd > /dev/null
 
