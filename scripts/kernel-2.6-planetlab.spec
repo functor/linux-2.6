@@ -355,7 +355,7 @@ BuildKernel() {
 
     make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch nonint_oldconfig > /dev/null
     make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch include/linux/version.h 
-    make -s V=1 CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} $Target
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} $Target
     make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} modules || exit 1
     make CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch buildcheck
     
