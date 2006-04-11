@@ -326,6 +326,25 @@ BuildKernel() {
 
     # and now to start the build process
 
+    gccversion=$(gcc -v 2>&1 | grep "gcc version" | awk '{print $3'} | awk -F . '{print $1}')
+    if [ "$gccversion" == "4" ] ; then
+	echo "Currently not compiling kernel with gcc 4.x"
+	echo "Trying to find a recent gcc 3.x based compiler"
+	CC=
+	gcc3=$(gcc32 -v 2>&1)
+	[ $? -eq 0 ] && CC=gcc32
+	gcc3=$(gcc33 -v 2>&1)
+	[ $? -eq 0 ] && CC=gcc33
+	gcc3=$(gcc34 -v 2>&1)
+	[ $? -eq 0 ] && CC=gcc34
+	if [ -z "$CC" ]; then
+	    echo "Could not find a gcc 3.x based compiler!"
+	    echo "Aborting kernel compilation!"
+	    exit -1
+	fi
+	HOSTCC=${CC}
+    fi
+
     make -s ARCH=$Arch mrproper
     cp configs/$Config .config
 
