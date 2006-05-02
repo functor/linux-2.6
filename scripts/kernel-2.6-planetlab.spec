@@ -618,6 +618,9 @@ pushd /usr/src/kernels/%{KVERREL}-xenU-%{_target_cpu} > /dev/null
 popd > /dev/null
 fi
 
+%post uml-modules
+depmod -ae %{KVERREL}uml
+
 
 %preun 
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
@@ -630,6 +633,9 @@ fi
 %preun xenU
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rmmoddep --remove %{KVERREL}xenU
+
+%preun uml-modules
+rm -f /lib/modules/%{KVERREL}uml/modules.*
 
 
 ###
