@@ -365,6 +365,14 @@ W:	http://www.thekelleys.org.uk/atmel
 W:	http://atmelwlandriver.sourceforge.net/
 S:	Maintained
 
+AUDIT SUBSYSTEM
+L:	linux-audit@redhat.com (subscribers-only)
+P:	David Woodhouse
+M:	dwmw2@infradead.org
+L:	linux-audit@redhat.com
+W:	http://people.redhat.com/sgrubb/audit/
+S:	Maintained
+
 AX.25 NETWORK LAYER
 P:	Ralf Baechle
 M:	ralf@linux-mips.org
@@ -1311,6 +1319,17 @@ KERNEL EVENT LAYER (KOBJECT_UEVENT)
 P:	Robert Love
 M:	rml@novell.com
 L:	linux-kernel@vger.kernel.org
+S:	Maintained
+
+KEXEC
+P:	Eric Biederman
+P:	Randy Dunlap
+M:	ebiederm@xmission.com
+M:	rddunlap@osdl.org
+W:	http://www.xmission.com/~ebiederm/files/kexec/
+W:	http://developer.osdl.org/rddunlap/kexec/
+L:	linux-kernel@vger.kernel.org
+L:	fastboot@osdl.org
 S:	Maintained
 
 LANMEDIA WAN CARD DRIVER

@@ -38,6 +38,7 @@
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #include <asm/cacheflush.h>
+#include "module-verify.h"
 
 #if 0
 #define DEBUGP printk
@@ -1413,6 +1414,7 @@ static struct module *load_module(void __user *umod,
 	long err = 0;
 	void *percpu = NULL, *ptr = NULL; /* Stops spurious gcc warning */
 	struct exception_table_entry *extable;
+	int gpgsig_ok;
 
 	DEBUGP("load_module: umod=%p, len=%lu, uargs=%p\n",
 	       umod, len, uargs);
@@ -1438,8 +1440,13 @@ static struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 
-	if (len < hdr->e_shoff + hdr->e_shnum * sizeof(Elf_Shdr))
-		goto truncated;
+	/* verify the module (validates ELF and checks signature) */
+	gpgsig_ok = 0;
+	err = module_verify(hdr, len);
+	if (err < 0)
+		goto free_hdr;
+	if (err == 1)
+		gpgsig_ok = 1;
 
 	/* Convenience variables */
 	sechdrs = (void *)hdr + hdr->e_shoff;
@@ -1476,6 +1483,7 @@ static struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 	mod = (void *)sechdrs[modindex].sh_addr;
+	mod->gpgsig_ok = gpgsig_ok;
 
 	if (symindex == 0) {
 		printk(KERN_WARNING "%s: module has no symbols (stripped?)\n",
@@ -1699,8 +1707,6 @@ static struct module *load_module(void __user *umod,
 				 / sizeof(struct kernel_param),
 				 NULL);
 	}
-	if (err < 0)
-		goto arch_cleanup;
 
 	err = mod_sysfs_setup(mod, 
 			      (struct kernel_param *)
@@ -2084,8 +2090,13 @@ void print_modules(void)
 	struct module *mod;
 
 	printk("Modules linked in:");
-	list_for_each_entry(mod, &modules, list)
+	list_for_each_entry(mod, &modules, list) {
 		printk(" %s", mod->name);
+#if CONFIG_MODULE_SIG		
+		if (!mod->gpgsig_ok)
+			printk("(U)");
+#endif		
+	}
 	printk("\n");
 }
 

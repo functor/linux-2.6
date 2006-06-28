@@ -1670,8 +1670,8 @@ static void __exit icn_exit(void)
 			for (i = 0; i < ICN_BCH; i++)
 				icn_free_queue(card, i);
 		}
-		card = card->next;
 		spin_unlock_irqrestore(&card->lock, flags);
+		card = card->next;
 	}
 	card = cards;
 	cards = NULL;

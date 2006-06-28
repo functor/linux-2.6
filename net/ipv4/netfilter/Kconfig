@@ -692,5 +692,157 @@ config IP_NF_ARP_MANGLE
 	  Allows altering the ARP packet payload: source and destination
 	  hardware and network addresses.
 
+config IP_NF_CT_PROTO_GRE
+	tristate  ' GRE protocol support'
+	depends on IP_NF_CONNTRACK
+	help
+	  This module adds generic support for connection tracking and NAT of
+	  the GRE protocol (RFC1701, RFC2784).  Please note that this will
+	  only work with GRE connections using the key field of the GRE
+	  header.
+	
+	  You will need GRE support to enable PPTP support.
+	
+	  If you want to compile it as a module, say `M' here and read
+	  Documentation/modules.txt.  If unsire, say `N'.
+
+config IP_NF_PPTP
+	tristate  'PPTP protocol support'
+	depends on IP_NF_CT_PROTO_GRE
+	help
+	  This module adds support for PPTP (Point to Point Tunnelling
+	  Protocol, RFC2637) conncection tracking and NAT. 
+	
+	  If you are running PPTP sessions over a stateful firewall or NAT
+	  box, you may want to enable this feature.  
+	
+	  Please note that not all PPTP modes of operation are supported yet.
+	  For more info, read top of the file
+	  net/ipv4/netfilter/ip_conntrack_pptp.c
+	
+	  If you want to compile it as a module, say M here and read
+	  Documentation/modules.txt.  If unsure, say `N'.
+
+config IP_NF_NAT_PPTP
+	tristate
+	depends on IP_NF_NAT!=n && IP_NF_PPTP!=n
+	default IP_NF_NAT if IP_NF_PPTP=y
+	default m if IP_NF_PPTP=m
+
+config IP_NF_NAT_PROTO_GRE
+	tristate
+	depends on IP_NF_NAT!=n && IP_NF_CT_PROTO_GRE!=n
+	default IP_NF_NAT if IP_NF_CT_PROTO_GRE=y
+	default m if IP_NF_CT_PROTO_GRE=m
+
+config IP_NF_SET
+	tristate "IP set support"
+	depends on INET && NETFILTER
+	help
+	  This option adds IP set support to the kernel.
+	  In order to define and use sets, you need the userspace utility
+	  ipset(8).
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_MAX
+	int "Maximum number of IP sets"
+	default 256
+	range 2 65534
+	depends on IP_NF_SET
+	help
+	  You can define here default value of the maximum number 
+	  of IP sets for the kernel.
+
+	  The value can be overriden by the 'max_sets' module
+	  parameter of the 'ip_set' module.
+
+config IP_NF_SET_HASHSIZE
+	int "Hash size for bindings of IP sets"
+	default 1024
+	depends on IP_NF_SET
+	help
+	  You can define here default value of the hash size for
+	  bindings of IP sets.
+
+	  The value can be overriden by the 'hash_size' module
+	  parameter of the 'ip_set' module.
+
+config IP_NF_SET_IPMAP
+	tristate "ipmap set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the ipmap set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_MACIPMAP
+	tristate "macipmap set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the macipmap set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_PORTMAP
+	tristate "portmap set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the portmap set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_IPHASH
+	tristate "iphash set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the iphash set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_NETHASH
+	tristate "nethash set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the nethash set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_IPPORTHASH
+	tristate "ipporthash set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the ipporthash set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_SET_IPTREE
+	tristate "iptree set support"
+	depends on IP_NF_SET
+	help
+	  This option adds the iptree set type support.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_MATCH_SET
+	tristate "set match support"
+	depends on IP_NF_SET
+	help
+	  Set matching matches against given IP sets.
+	  You need the ipset utility to create and set up the sets.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_TARGET_SET
+	tristate "SET target support"
+	depends on IP_NF_SET
+	help
+	  The SET target makes possible to add/delete entries
+	  in IP sets.
+	  You need the ipset utility to create and set up the sets.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
+
+
 endmenu
 

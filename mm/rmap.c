@@ -53,6 +53,7 @@
 #include <linux/init.h>
 #include <linux/rmap.h>
 #include <linux/rcupdate.h>
+#include <linux/vs_memory.h>
 
 #include <asm/tlbflush.h>
 

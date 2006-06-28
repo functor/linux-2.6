@@ -11,11 +11,14 @@
 #include <linux/mman.h>
 #include <linux/smp_lock.h>
 #include <linux/notifier.h>
+#include <linux/kmod.h>
 #include <linux/reboot.h>
 #include <linux/prctl.h>
 #include <linux/init.h>
 #include <linux/highuid.h>
 #include <linux/fs.h>
+#include <linux/kernel.h>
+#include <linux/kexec.h>
 #include <linux/workqueue.h>
 #include <linux/device.h>
 #include <linux/key.h>
@@ -29,6 +32,7 @@
 
 #include <linux/compat.h>
 #include <linux/syscalls.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -229,7 +233,10 @@ static int set_one_prio(struct task_struct *p, int niceval, int error)
 		goto out;
 	}
 	if (niceval < task_nice(p) && !can_nice(p, niceval)) {
-		error = -EACCES;
+		if (vx_flags(VXF_IGNEG_NICE, 0))
+			error = 0;
+		else
+			error = -EACCES;
 		goto out;
 	}
 	no_nice = security_task_setnice(p, niceval);
@@ -281,7 +288,8 @@ asmlinkage long sys_setpriority(int which, int who, int niceval)
 			if (!who)
 				who = current->uid;
 			else
-				if ((who != current->uid) && !(user = find_user(who)))
+				if ((who != current->uid) &&
+					!(user = find_user(vx_current_xid(), who)))
 					goto out_unlock;	/* No processes for this user */
 
 			do_each_thread(g, p)
@@ -339,7 +347,8 @@ asmlinkage long sys_getpriority(int which, int who)
 			if (!who)
 				who = current->uid;
 			else
-				if ((who != current->uid) && !(user = find_user(who)))
+				if ((who != current->uid) &&
+					!(user = find_user(vx_current_xid(), who)))
 					goto out_unlock;	/* No processes for this user */
 
 			do_each_thread(g, p)
@@ -359,6 +368,7 @@ out_unlock:
 	return retval;
 }
 
+long vs_reboot(unsigned int, void *);
 
 /*
  * Reboot system call: for obvious reasons only root may call it,
@@ -383,6 +393,9 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 			magic2 != LINUX_REBOOT_MAGIC2B &&
 	                magic2 != LINUX_REBOOT_MAGIC2C))
 		return -EINVAL;
+
+	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+		return vs_reboot(cmd, arg);
 
 	lock_kernel();
 	switch (cmd) {
@@ -435,6 +448,26 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 		printk(KERN_EMERG "Restarting system with command '%s'.\n", buffer);
 		machine_restart(buffer);
 		break;
+
+#ifdef CONFIG_KEXEC
+	case LINUX_REBOOT_CMD_KEXEC:
+	{
+		struct kimage *image;
+		image = xchg(&kexec_image, 0);
+		if (!image) {
+			unlock_kernel();
+			return -EINVAL;
+		}
+		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
+		system_state = SYSTEM_RESTART;
+		device_shutdown();
+		system_state = SYSTEM_BOOTING;
+		printk(KERN_EMERG "Starting new kernel\n");
+		machine_shutdown();
+		machine_kexec(image);
+		break;
+	}
+#endif
 
 #ifdef CONFIG_SOFTWARE_SUSPEND
 	case LINUX_REBOOT_CMD_SW_SUSPEND:
@@ -581,7 +614,7 @@ static int set_user(uid_t new_ruid, int dumpclear)
 {
 	struct user_struct *new_user;
 
-	new_user = alloc_uid(new_ruid);
+	new_user = alloc_uid(vx_current_xid(), new_ruid);
 	if (!new_user)
 		return -EAGAIN;
 
@@ -950,13 +983,16 @@ asmlinkage long sys_setpgid(pid_t pid, pid_t pgid)
 {
 	struct task_struct *p;
 	int err = -EINVAL;
+	pid_t rpgid;
 
 	if (!pid)
-		pid = current->pid;
+		pid = vx_map_pid(current->pid);
 	if (!pgid)
 		pgid = pid;
 	if (pgid < 0)
 		return -EINVAL;
+
+	rpgid = vx_rmap_pid(pgid);
 
 	/* From this point forward we keep holding onto the tasklist lock
 	 * so that our parent does not change from under us. -DaveM
@@ -992,22 +1028,22 @@ asmlinkage long sys_setpgid(pid_t pid, pid_t pgid)
 	if (pgid != pid) {
 		struct task_struct *p;
 
-		do_each_task_pid(pgid, PIDTYPE_PGID, p) {
+		do_each_task_pid(rpgid, PIDTYPE_PGID, p) {
 			if (p->signal->session == current->signal->session)
 				goto ok_pgid;
-		} while_each_task_pid(pgid, PIDTYPE_PGID, p);
+		} while_each_task_pid(rpgid, PIDTYPE_PGID, p);
 		goto out;
 	}
 
 ok_pgid:
-	err = security_task_setpgid(p, pgid);
+	err = security_task_setpgid(p, rpgid);
 	if (err)
 		goto out;
 
-	if (process_group(p) != pgid) {
+	if (process_group(p) != rpgid) {
 		detach_pid(p, PIDTYPE_PGID);
-		p->signal->pgrp = pgid;
-		attach_pid(p, PIDTYPE_PGID, pgid);
+		p->signal->pgrp = rpgid;
+		attach_pid(p, PIDTYPE_PGID, rpgid);
 	}
 
 	err = 0;
@@ -1020,7 +1056,7 @@ out:
 asmlinkage long sys_getpgid(pid_t pid)
 {
 	if (!pid) {
-		return process_group(current);
+		return vx_rmap_pid(process_group(current));
 	} else {
 		int retval;
 		struct task_struct *p;
@@ -1032,7 +1068,7 @@ asmlinkage long sys_getpgid(pid_t pid)
 		if (p) {
 			retval = security_task_getpgid(p);
 			if (!retval)
-				retval = process_group(p);
+				retval = vx_rmap_pid(process_group(p));
 		}
 		read_unlock(&tasklist_lock);
 		return retval;
@@ -1370,7 +1406,7 @@ asmlinkage long sys_newuname(struct new_utsname __user * name)
 	int errno = 0;
 
 	down_read(&uts_sem);
-	if (copy_to_user(name,&system_utsname,sizeof *name))
+	if (copy_to_user(name, vx_new_utsname(), sizeof *name))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1381,15 +1417,17 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 	int errno;
 	char tmp[__NEW_UTS_LEN];
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SET_UTSNAME))
 		return -EPERM;
 	if (len < 0 || len > __NEW_UTS_LEN)
 		return -EINVAL;
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		memcpy(system_utsname.nodename, tmp, len);
-		system_utsname.nodename[len] = 0;
+		char *ptr = vx_new_uts(nodename);
+
+		memcpy(ptr, tmp, len);
+		ptr[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1401,15 +1439,17 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 asmlinkage long sys_gethostname(char __user *name, int len)
 {
 	int i, errno;
+	char *ptr;
 
 	if (len < 0)
 		return -EINVAL;
 	down_read(&uts_sem);
-	i = 1 + strlen(system_utsname.nodename);
+	ptr = vx_new_uts(nodename);
+	i = 1 + strlen(ptr);
 	if (i > len)
 		i = len;
 	errno = 0;
-	if (copy_to_user(name, system_utsname.nodename, i))
+	if (copy_to_user(name, ptr, i))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1426,7 +1466,7 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	int errno;
 	char tmp[__NEW_UTS_LEN];
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!capable(CAP_SYS_ADMIN) && !vx_ccaps(VXC_SET_UTSNAME))
 		return -EPERM;
 	if (len < 0 || len > __NEW_UTS_LEN)
 		return -EINVAL;
@@ -1434,8 +1474,10 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		memcpy(system_utsname.domainname, tmp, len);
-		system_utsname.domainname[len] = 0;
+		char *ptr = vx_new_uts(domainname);
+
+		memcpy(ptr, tmp, len);
+		ptr[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1492,7 +1534,7 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
                return -EINVAL;
 	old_rlim = current->signal->rlim + resource;
 	if ((new_rlim.rlim_max > old_rlim->rlim_max) &&
-	    !capable(CAP_SYS_RESOURCE))
+	    !capable(CAP_SYS_RESOURCE) && !vx_ccaps(VXC_SET_RLIMIT))
 		return -EPERM;
 	if (resource == RLIMIT_NOFILE && new_rlim.rlim_max > NR_OPEN)
 			return -EPERM;

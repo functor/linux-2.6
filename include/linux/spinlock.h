@@ -114,8 +114,8 @@ typedef struct {
 #define CHECK_LOCK(x) \
 	do { \
 	 	if ((x)->magic != SPINLOCK_MAGIC) { \
-			printk(KERN_ERR "%s:%d: spin_is_locked on uninitialized spinlock %p.\n", \
-					__FILE__, __LINE__, (x)); \
+			panic("%s:%d: spin_is_locked on uninitialized spinlock %p. (%s)\n", \
+					__FILE__, __LINE__, (x), print_tainted()); \
 		} \
 	} while(0)
 
@@ -124,9 +124,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_lock(%s:%p) already locked by %s/%d\n", \
+			panic("%s:%d: spin_lock(%s:%p) already locked by %s/%d. (%s)\n", \
 					__FILE__,__LINE__, (x)->module, \
-					(x), (x)->owner, (x)->oline); \
+					(x), (x)->owner, (x)->oline, print_tainted()); \
 		} \
 		(x)->lock = 1; \
 		(x)->owner = __FILE__; \
@@ -140,9 +140,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_is_locked(%s:%p) already locked by %s/%d\n", \
+			printk("%s:%d: spin_is_locked(%s:%p) already locked by %s/%d.(%s)\n", \
 					__FILE__,__LINE__, (x)->module, \
-					(x), (x)->owner, (x)->oline); \
+					(x), (x)->owner, (x)->oline, print_tainted()); \
 		} \
 		0; \
 	})
@@ -162,9 +162,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_trylock(%s:%p) already locked by %s/%d\n", \
+			printk("%s:%d: spin_trylock(%s:%p) already locked by %s/%d.(%s)\n", \
 					__FILE__,__LINE__, (x)->module, \
-					(x), (x)->owner, (x)->oline); \
+					(x), (x)->owner, (x)->oline, print_tainted()); \
 		} \
 		(x)->lock = 1; \
 		(x)->owner = __FILE__; \
@@ -177,9 +177,9 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if ((x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_unlock_wait(%s:%p) owned by %s/%d\n", \
+			panic("%s:%d: spin_unlock_wait(%s:%p) owned by %s/%d. (%s)\n", \
 					__FILE__,__LINE__, (x)->module, (x), \
-					(x)->owner, (x)->oline); \
+					(x)->owner, (x)->oline, print_tainted()); \
 		}\
 	} while (0)
 
@@ -188,8 +188,8 @@ typedef struct {
 	 	CHECK_LOCK(x); \
 		if (!(x)->lock&&(x)->babble) { \
 			(x)->babble--; \
-			printk("%s:%d: spin_unlock(%s:%p) not locked\n", \
-					__FILE__,__LINE__, (x)->module, (x));\
+			panic("%s:%d: spin_unlock(%s:%p) not locked. (%s)\n", \
+					__FILE__,__LINE__, (x)->module, (x), print_tainted());\
 		} \
 		(x)->lock = 0; \
 	} while (0)

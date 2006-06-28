@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 12
-EXTRAVERSION = .2
+EXTRAVERSION = -1.1398_FC4.5.planetlab
 NAME=Woozy Numbat
 
 # *DOCUMENTATION*
@@ -523,6 +523,10 @@ else
 CFLAGS		+= -fomit-frame-pointer
 endif
 
+ifdef CONFIG_X86_STACK_CHECK
+CFLAGS		+= -p
+endif
+
 ifdef CONFIG_DEBUG_INFO
 CFLAGS		+= -g
 endif
@@ -952,7 +956,7 @@ CLEAN_FILES +=	vmlinux System.map \
 MRPROPER_DIRS  += include/config include2
 MRPROPER_FILES += .config .config.old include/asm .version \
                   include/linux/autoconf.h include/linux/version.h \
-                  Module.symvers tags TAGS cscope*
+                  Module.symvers tags TAGS cscope* include/.asm-ignore
 
 # clean - Delete most, but leave enough to build external modules
 #

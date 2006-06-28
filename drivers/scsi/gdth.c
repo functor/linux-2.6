@@ -656,6 +656,7 @@ module_param(probe_eisa_isa, int, 0);
 module_param(force_dma32, int, 0);
 MODULE_AUTHOR("Achim Leubner");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(GDTH_VERSION_STR);
 
 /* ioctl interface */
 static struct file_operations gdth_fops = {

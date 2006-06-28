@@ -119,6 +119,10 @@ static int lba_capacity_is_ok (struct hd_driveid *id)
 {
 	unsigned long lba_sects, chs_sects, head, tail;
 
+	/* No non-LBA info .. so valid! */
+	if (id->cyls == 0)
+		return 1;
+		
 	/*
 	 * The ATA spec tells large drives to return
 	 * C/H/S = 16383/16/63 independent of their size.
@@ -475,13 +479,14 @@ static inline int idedisk_supports_lba48(const struct hd_driveid *id)
 
 static inline void idedisk_check_hpa(ide_drive_t *drive)
 {
-	unsigned long long capacity, set_max;
+	unsigned long long capacity, set_max = 0;
 	int lba48 = idedisk_supports_lba48(drive->id);
 
+	
 	capacity = drive->capacity64;
 	if (lba48)
 		set_max = idedisk_read_native_max_address_ext(drive);
-	else
+	if (set_max == 0)	/* LBA28 or LBA48 failed */
 		set_max = idedisk_read_native_max_address(drive);
 
 	if (set_max <= capacity)
@@ -494,7 +499,8 @@ static inline void idedisk_check_hpa(ide_drive_t *drive)
 			 capacity, sectors_to_MB(capacity),
 			 set_max, sectors_to_MB(set_max));
 
-	if (lba48)
+	/* Some maxtor support LBA48 but do not accept LBA48  set max... */
+	if (lba48 && set_max >= (1ULL << 28))
 		set_max = idedisk_set_max_address_ext(drive, set_max);
 	else
 		set_max = idedisk_set_max_address(drive, set_max);

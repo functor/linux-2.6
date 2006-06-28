@@ -10,15 +10,22 @@ iptable_nat-objs	:= ip_nat_standalone.o ip_nat_rule.o ip_nat_core.o ip_nat_helpe
 obj-$(CONFIG_IP_NF_CONNTRACK) += ip_conntrack.o
 
 # SCTP protocol connection tracking
+obj-$(CONFIG_IP_NF_CT_PROTO_GRE) += ip_conntrack_proto_gre.o
+
+# NAT protocol helpers
+obj-$(CONFIG_IP_NF_NAT_PROTO_GRE) += ip_nat_proto_gre.o
+
 obj-$(CONFIG_IP_NF_CT_PROTO_SCTP) += ip_conntrack_proto_sctp.o
 
 # connection tracking helpers
+obj-$(CONFIG_IP_NF_PPTP) += ip_conntrack_pptp.o
 obj-$(CONFIG_IP_NF_AMANDA) += ip_conntrack_amanda.o
 obj-$(CONFIG_IP_NF_TFTP) += ip_conntrack_tftp.o
 obj-$(CONFIG_IP_NF_FTP) += ip_conntrack_ftp.o
 obj-$(CONFIG_IP_NF_IRC) += ip_conntrack_irc.o
 
 # NAT helpers 
+obj-$(CONFIG_IP_NF_NAT_PPTP) += ip_nat_pptp.o
 obj-$(CONFIG_IP_NF_NAT_AMANDA) += ip_nat_amanda.o
 obj-$(CONFIG_IP_NF_NAT_TFTP) += ip_nat_tftp.o
 obj-$(CONFIG_IP_NF_NAT_FTP) += ip_nat_ftp.o
@@ -39,6 +46,7 @@ obj-$(CONFIG_IP_NF_MATCH_LIMIT) += ipt_limit.o
 obj-$(CONFIG_IP_NF_MATCH_HASHLIMIT) += ipt_hashlimit.o
 obj-$(CONFIG_IP_NF_MATCH_SCTP) += ipt_sctp.o
 obj-$(CONFIG_IP_NF_MATCH_MARK) += ipt_mark.o
+obj-$(CONFIG_IP_NF_MATCH_SET) += ipt_set.o
 obj-$(CONFIG_IP_NF_MATCH_MAC) += ipt_mac.o
 obj-$(CONFIG_IP_NF_MATCH_IPRANGE) += ipt_iprange.o
 obj-$(CONFIG_IP_NF_MATCH_PKTTYPE) += ipt_pkttype.o
@@ -77,6 +85,17 @@ obj-$(CONFIG_IP_NF_TARGET_CONNMARK) += ipt_CONNMARK.o
 obj-$(CONFIG_IP_NF_TARGET_ULOG) += ipt_ULOG.o
 obj-$(CONFIG_IP_NF_TARGET_TCPMSS) += ipt_TCPMSS.o
 obj-$(CONFIG_IP_NF_TARGET_NOTRACK) += ipt_NOTRACK.o
+obj-$(CONFIG_IP_NF_TARGET_SET) += ipt_SET.o
+
+# sets
+obj-$(CONFIG_IP_NF_SET) += ip_set.o
+obj-$(CONFIG_IP_NF_SET_IPMAP) += ip_set_ipmap.o
+obj-$(CONFIG_IP_NF_SET_PORTMAP) += ip_set_portmap.o
+obj-$(CONFIG_IP_NF_SET_MACIPMAP) += ip_set_macipmap.o
+obj-$(CONFIG_IP_NF_SET_IPHASH) += ip_set_iphash.o
+obj-$(CONFIG_IP_NF_SET_NETHASH) += ip_set_nethash.o
+obj-$(CONFIG_IP_NF_SET_IPPORTHASH) += ip_set_ipporthash.o
+obj-$(CONFIG_IP_NF_SET_IPTREE) += ip_set_iptree.o
 obj-$(CONFIG_IP_NF_TARGET_CLUSTERIP) += ipt_CLUSTERIP.o
 
 # generic ARP tables

@@ -90,13 +90,13 @@ static unsigned char atkbd_set2_keycode[512] = {
 	 82, 83, 80, 76, 77, 72,  1, 69, 87, 78, 81, 74, 55, 73, 70, 99,
 
 	  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-	217,100,255,  0, 97,165,  0,  0,156,  0,  0,  0,  0,  0,  0,125,
-	173,114,  0,113,  0,  0,  0,126,128,  0,  0,140,  0,  0,  0,127,
+	217,100,255,  0, 97,165,196,  0,156,  0,  0,  0,  0,  0,197,125,
+	173,114,  0,113,  0,  0,198,126,128,  0,  0,140,  0,  0,  0,127,
 	159,  0,115,  0,164,  0,  0,116,158,  0,150,166,  0,  0,  0,142,
 	157,  0,  0,  0,  0,  0,  0,  0,155,  0, 98,  0,  0,163,  0,  0,
 	226,  0,  0,  0,  0,  0,  0,  0,  0,255, 96,  0,  0,  0,143,  0,
 	  0,  0,  0,  0,  0,  0,  0,  0,  0,107,  0,105,102,  0,  0,112,
-	110,111,108,112,106,103,  0,119,  0,118,109,  0, 99,104,119,  0,
+	110,111,108,112,106,103,195,119,  0,118,109,  0, 99,104,119,  0,
 
 	  0,  0,  0, 65, 99,
 #endif
@@ -328,7 +328,7 @@ static irqreturn_t atkbd_interrupt(struct serio *serio, unsigned char data,
 			atkbd_report_key(&atkbd->dev, regs, KEY_HANJA, 3);
 			goto out;
 		case ATKBD_RET_ERR:
-			printk(KERN_DEBUG "atkbd.c: Keyboard on %s reports too many keys pressed.\n", serio->phys);
+//			printk(KERN_DEBUG "atkbd.c: Keyboard on %s reports too many keys pressed.\n", serio->phys);
 			goto out;
 	}
 
@@ -348,9 +348,13 @@ static irqreturn_t atkbd_interrupt(struct serio *serio, unsigned char data,
 			break;
 		case ATKBD_KEY_UNKNOWN:
 			if (data == ATKBD_RET_ACK || data == ATKBD_RET_NAK) {
+#if 0
+/* Quite a few key switchers and other tools trigger this and it confuses
+   people who can do nothing about it */			
 				printk(KERN_WARNING "atkbd.c: Spurious %s on %s. Some program, "
 				       "like XFree86, might be trying access hardware directly.\n",
 				       data == ATKBD_RET_ACK ? "ACK" : "NAK", serio->phys);
+#endif				       
 			} else {
 				printk(KERN_WARNING "atkbd.c: Unknown key %s "
 				       "(%s set %d, code %#x on %s).\n",

@@ -258,6 +258,11 @@ void __init paging_init(void)
 }
 #endif /* CONFIG_ARCH_S390X */
 
+int page_is_ram (unsigned long pagenr)
+{
+	return pagenr < max_mapnr;
+}
+
 void __init mem_init(void)
 {
 	unsigned long codesize, reservedpages, datasize, initsize;

@@ -24,6 +24,7 @@
 #include <linux/mount.h>
 #include <linux/mempolicy.h>
 #include <linux/rmap.h>
+#include <linux/random.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -338,6 +339,8 @@ static inline void
 __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vm_area_struct *prev, struct rb_node *rb_parent)
 {
+	if (vma->vm_flags & VM_EXEC)
+		arch_add_exec_range(mm, vma->vm_end);
 	if (prev) {
 		vma->vm_next = prev->vm_next;
 		prev->vm_next = vma;
@@ -442,6 +445,8 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+	if (vma->vm_flags & VM_EXEC)
+		arch_remove_exec_range(mm, vma->vm_end);
 }
 
 /*
@@ -747,6 +752,8 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 		} else					/* cases 2, 5, 7 */
 			vma_adjust(prev, prev->vm_start,
 				end, prev->vm_pgoff, NULL);
+		if (prev->vm_flags & VM_EXEC)
+			arch_add_exec_range(mm, prev->vm_end);
 		return prev;
 	}
 
@@ -918,7 +925,7 @@ unsigned long do_mmap_pgoff(struct file * file, unsigned long addr,
 	/* Obtain the address to map to. we verify (or select) it and ensure
 	 * that it represents a valid section of the address space.
 	 */
-	addr = get_unmapped_area(file, addr, len, pgoff, flags);
+	addr = get_unmapped_area_prot(file, addr, len, pgoff, flags, prot & PROT_EXEC);
 	if (addr & ~PAGE_MASK)
 		return addr;
 
@@ -1112,10 +1119,10 @@ munmap_back:
 		kmem_cache_free(vm_area_cachep, vma);
 	}
 out:	
-	mm->total_vm += len >> PAGE_SHIFT;
+	vx_vmpages_add(mm, len >> PAGE_SHIFT);
 	__vm_stat_account(mm, vm_flags, file, len >> PAGE_SHIFT);
 	if (vm_flags & VM_LOCKED) {
-		mm->locked_vm += len >> PAGE_SHIFT;
+		vx_vmlocked_add(mm, len >> PAGE_SHIFT);
 		make_pages_present(addr, addr + len);
 	}
 	if (flags & MAP_POPULATE) {
@@ -1298,16 +1305,21 @@ void arch_unmap_area_topdown(struct vm_area_struct *area)
 		area->vm_mm->free_area_cache = area->vm_mm->mmap_base;
 }
 
+
 unsigned long
-get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
-		unsigned long pgoff, unsigned long flags)
+get_unmapped_area_prot(struct file *file, unsigned long addr, unsigned long len,
+		unsigned long pgoff, unsigned long flags, int exec)
 {
 	unsigned long ret;
 
 	if (!(flags & MAP_FIXED)) {
 		unsigned long (*get_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 
-		get_area = current->mm->get_unmapped_area;
+		if (exec && current->mm->get_unmapped_exec_area)
+			get_area = current->mm->get_unmapped_exec_area;
+		else
+			get_area = current->mm->get_unmapped_area;
+
 		if (file && file->f_op && file->f_op->get_unmapped_area)
 			get_area = file->f_op->get_unmapped_area;
 		addr = get_area(file, addr, len, pgoff, flags);
@@ -1338,7 +1350,71 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 	return addr;
 }
 
-EXPORT_SYMBOL(get_unmapped_area);
+EXPORT_SYMBOL(get_unmapped_area_prot);
+
+#define SHLIB_BASE             0x00111000
+
+unsigned long arch_get_unmapped_exec_area(struct file *filp, unsigned long addr0,
+		unsigned long len0, unsigned long pgoff, unsigned long flags)
+{
+	unsigned long addr = addr0, len = len0;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	unsigned long tmp;
+
+	if (len > TASK_SIZE)
+		return -ENOMEM;
+
+	if (!addr && !(flags & MAP_FIXED))
+		addr = randomize_range(SHLIB_BASE, 0x01000000, len);
+
+	if (addr) {
+		addr = PAGE_ALIGN(addr);
+		vma = find_vma(mm, addr);
+		if (TASK_SIZE - len >= addr &&
+		    (!vma || addr + len <= vma->vm_start)) {
+			return addr;
+		}
+	}
+
+	addr = SHLIB_BASE;
+	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
+		/* At this point:  (!vma || addr < vma->vm_end). */
+		if (TASK_SIZE - len < addr)
+			return -ENOMEM;
+
+		if (!vma || addr + len <= vma->vm_start) {
+			/*
+			 * Must not let a PROT_EXEC mapping get into the
+			 * brk area:
+			 */
+			if (addr + len > mm->brk)
+				goto failed;
+
+			/*
+			 * Up until the brk area we randomize addresses
+			 * as much as possible:
+			 */
+			if (addr >= 0x01000000) {
+				tmp = randomize_range(0x01000000, PAGE_ALIGN(max(mm->start_brk, 0x08000000)), len);
+				vma = find_vma(mm, tmp);
+				if (TASK_SIZE - len >= tmp &&
+				    (!vma || tmp + len <= vma->vm_start))
+					return tmp;
+			}
+			/*
+			 * Ok, randomization didnt work out - return
+			 * the result of the linear search:
+			 */
+			return addr;
+		}
+		addr = vma->vm_end;
+	}
+
+failed:
+	return current->mm->get_unmapped_area(filp, addr0, len0, pgoff, flags);
+}
+
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
 struct vm_area_struct * find_vma(struct mm_struct * mm, unsigned long addr)
@@ -1413,6 +1489,14 @@ out:
 	return prev ? prev->vm_next : vma;
 }
 
+static int over_stack_limit(unsigned long sz)
+{
+	if (sz < EXEC_STACK_BIAS)
+		return 0;
+	return (sz - EXEC_STACK_BIAS) >
+			current->signal->rlim[RLIMIT_STACK].rlim_cur;
+}
+
 /*
  * Verify that the stack growth is acceptable and
  * update accounting. This is shared with both the
@@ -1428,7 +1512,7 @@ static int acct_stack_growth(struct vm_area_struct * vma, unsigned long size, un
 		return -ENOMEM;
 
 	/* Stack limit test */
-	if (size > rlim[RLIMIT_STACK].rlim_cur)
+	if (over_stack_limit(size))
 		return -ENOMEM;
 
 	/* mlock limit tests */
@@ -1449,9 +1533,9 @@ static int acct_stack_growth(struct vm_area_struct * vma, unsigned long size, un
 		return -ENOMEM;
 
 	/* Ok, everything looks good - let it rip */
-	mm->total_vm += grow;
+	vx_vmpages_add(mm, grow);
 	if (vma->vm_flags & VM_LOCKED)
-		mm->locked_vm += grow;
+		vx_vmlocked_add(mm, grow);
 	__vm_stat_account(mm, vma->vm_flags, vma->vm_file, grow);
 	return 0;
 }
@@ -1591,9 +1675,10 @@ static void unmap_vma(struct mm_struct *mm, struct vm_area_struct *area)
 {
 	size_t len = area->vm_end - area->vm_start;
 
-	area->vm_mm->total_vm -= len >> PAGE_SHIFT;
+	vx_vmpages_sub(area->vm_mm, len >> PAGE_SHIFT);
+
 	if (area->vm_flags & VM_LOCKED)
-		area->vm_mm->locked_vm -= len >> PAGE_SHIFT;
+		vx_vmlocked_sub(area->vm_mm, len >> PAGE_SHIFT);
 	vm_stat_unaccount(area);
 	area->vm_mm->unmap_area(area);
 	remove_vm_struct(area);
@@ -1705,10 +1790,14 @@ int split_vma(struct mm_struct * mm, struct vm_area_struct * vma,
 	if (new->vm_ops && new->vm_ops->open)
 		new->vm_ops->open(new);
 
-	if (new_below)
+	if (new_below) {
+		unsigned long old_end = vma->vm_end;
+
 		vma_adjust(vma, addr, vma->vm_end, vma->vm_pgoff +
 			((addr - new->vm_start) >> PAGE_SHIFT), new);
-	else
+		if (vma->vm_flags & VM_EXEC)
+			arch_remove_exec_range(mm, old_end);
+	} else
 		vma_adjust(vma, vma->vm_start, addr, vma->vm_pgoff, new);
 
 	return 0;
@@ -1832,6 +1921,8 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 		lock_limit >>= PAGE_SHIFT;
 		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 			return -EAGAIN;
+		if (!vx_vmlocked_avail(mm, len >> PAGE_SHIFT))
+			return -ENOMEM;
 	}
 
 	/*
@@ -1886,9 +1977,9 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma->vm_page_prot = protection_map[flags & 0x0f];
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 out:
-	mm->total_vm += len >> PAGE_SHIFT;
+	vx_vmpages_add(mm, len >> PAGE_SHIFT);
 	if (flags & VM_LOCKED) {
-		mm->locked_vm += len >> PAGE_SHIFT;
+		vx_vmlocked_add(mm, len >> PAGE_SHIFT);
 		make_pages_present(addr, addr + len);
 	}
 	return addr;
@@ -1919,8 +2010,9 @@ void exit_mmap(struct mm_struct *mm)
 	mm->mmap = mm->mmap_cache = NULL;
 	mm->mm_rb = RB_ROOT;
 	set_mm_counter(mm, rss, 0);
-	mm->total_vm = 0;
-	mm->locked_vm = 0;
+	vx_vmpages_sub(mm, mm->total_vm);
+	vx_vmlocked_sub(mm, mm->locked_vm);
+	arch_flush_exec_range(mm);
 
 	spin_unlock(&mm->page_table_lock);
 
@@ -2036,5 +2128,46 @@ int may_expand_vm(struct mm_struct *mm, unsigned long npages)
 
 	if (cur + npages > lim)
 		return 0;
+	if (!vx_vmpages_avail(mm, npages))
+		return 0;
 	return 1;
+}
+
+/*
+ * Insert a new vma covering the given region, with the given flags and
+ * protections.  Pre-install the mappings to zero or more leading pages
+ * in the region.  Note, this does put_page on pages[0..npages-1] in all
+ * cases, even on error return.
+ */
+int install_special_mapping(struct mm_struct *mm,
+			    unsigned long addr, unsigned long len,
+			    unsigned long vm_flags, pgprot_t pgprot,
+			    struct page **pages, unsigned int npages)
+{
+	struct vm_area_struct *vma;
+	int err = -ENOMEM;
+
+	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	if (unlikely(vma == NULL))
+		goto out;
+	memset(vma, 0, sizeof(*vma));
+
+	vma->vm_mm = mm;
+	vma->vm_start = addr;
+	vma->vm_end = addr + len;
+
+	vma->vm_flags = vm_flags;
+	vma->vm_page_prot = pgprot;
+
+	insert_vm_struct(mm, vma);
+	mm->total_vm += len >> PAGE_SHIFT;
+
+	for (err = 0; npages > 0 && !err; --npages, ++pages, addr += PAGE_SIZE)
+		err = install_page(mm, vma, addr, *pages, vma->vm_page_prot);
+
+ out:
+	for (; npages > 0; --npages, ++pages)
+		put_page(*pages);
+
+	return err;
 }

@@ -54,6 +54,7 @@ MODULE_AUTHOR("Hewlett-Packard Company");
 MODULE_DESCRIPTION("Driver for HP Controller SA5xxx SA6xxx version 2.6.6");
 MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"
 			" SA6i P600 P800 E400");
+MODULE_VERSION("2.6.6");
 MODULE_LICENSE("GPL");
 
 #include "cciss_cmd.h"

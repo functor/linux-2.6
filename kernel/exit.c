@@ -28,6 +28,8 @@
 #include <linux/cpuset.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
+#include <linux/vs_limit.h>
+#include <linux/vs_network.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -44,6 +46,11 @@ static void exit_mm(struct task_struct * tsk);
 static void __unhash_process(struct task_struct *p)
 {
 	nr_threads--;
+	/* tasklist_lock is held, is this sufficient? */
+	if (p->vx_info) {
+		atomic_dec(&p->vx_info->cvirt.nr_threads);
+		vx_nproc_dec(p);
+	}
 	detach_pid(p, PIDTYPE_PID);
 	detach_pid(p, PIDTYPE_TGID);
 	if (thread_group_leader(p)) {
@@ -100,6 +107,10 @@ repeat:
 	spin_unlock(&p->proc_lock);
 	proc_pid_flush(proc_dentry);
 	release_thread(p);
+	if (p->vx_info)
+		release_vx_info(p->vx_info, p);
+	if (p->nx_info)
+		release_nx_info(p->nx_info, p);
 	put_task_struct(p);
 
 	p = leader;
@@ -230,6 +241,7 @@ static inline void reparent_to_init(void)
 	ptrace_unlink(current);
 	/* Reparent to init */
 	REMOVE_LINKS(current);
+	/* FIXME handle vchild_reaper/initpid */
 	current->parent = child_reaper;
 	current->real_parent = child_reaper;
 	SET_LINKS(current);
@@ -376,6 +388,7 @@ static inline void close_files(struct files_struct * files)
 				struct file * file = xchg(&files->fd[i], NULL);
 				if (file)
 					filp_close(file, files);
+				vx_openfd_dec(i);
 			}
 			i++;
 			set >>= 1;
@@ -592,6 +605,7 @@ static inline void forget_original_parent(struct task_struct * father,
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
+	/* FIXME handle vchild_reaper/initpid */
 	do {
 		reaper = next_thread(reaper);
 		if (reaper == father) {
@@ -811,8 +825,16 @@ fastcall NORET_TYPE void do_exit(long code)
 	acct_update_integrals(tsk);
 	update_mem_hiwater(tsk);
 	group_dead = atomic_dec_and_test(&tsk->signal->live);
-	if (group_dead)
+	if (group_dead) {
 		acct_process(code);
+		if (current->tux_info) {
+#ifdef CONFIG_TUX_DEBUG
+			printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
+				code, __builtin_return_address(0));
+#endif
+			current->tux_exit();
+		}
+	}
 	exit_mm(tsk);
 
 	exit_sem(tsk);

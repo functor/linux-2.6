@@ -262,7 +262,7 @@ ncp_file_write(struct file *file, const char __user *buf, size_t count, loff_t *
 	}
 	vfree(bouncebuffer);
 
-	inode_update_time(inode, 1);
+	inode_update_time(inode, file->f_vfsmnt, 1); /* Both mtime and ctime */
 
 	*ppos = pos;
 

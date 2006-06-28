@@ -274,6 +274,9 @@ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct 
 	dst_release(skb->dst);
 	skb->dst = NULL;
 
+	/* drop conntrack reference */
+	nf_reset(skb);
+
 	spkt = (struct sockaddr_pkt*)skb->cb;
 
 	skb_push(skb, skb->data-skb->mac.raw);
@@ -453,6 +456,12 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
 
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	if (vnet_active &&
+	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
+		goto drop;
+#endif
+
 	skb->dev = dev;
 
 	if (dev->hard_header) {
@@ -516,6 +525,9 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,  struct packe
 	skb->dev = NULL;
 	dst_release(skb->dst);
 	skb->dst = NULL;
+
+	/* drop conntrack reference */
+	nf_reset(skb);
 
 	spin_lock(&sk->sk_receive_queue.lock);
 	po->stats.tp_packets++;
@@ -1791,7 +1803,14 @@ static struct proto_ops packet_ops = {
 	.sendpage =	sock_no_sendpage,
 };
 
-static struct net_proto_family packet_family_ops = {
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+EXPORT_SYMBOL(packet_ops);
+struct net_proto_family packet_family_ops;
+EXPORT_SYMBOL(packet_family_ops);
+#else
+static
+#endif
+struct net_proto_family packet_family_ops = {
 	.family =	PF_PACKET,
 	.create =	packet_create,
 	.owner	=	THIS_MODULE,

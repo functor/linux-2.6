@@ -286,19 +286,19 @@ static const struct parport_sysctl_table parport_sysctl_template = {
 		PARPORT_DEVICES_ROOT_DIR,
 #ifdef CONFIG_PARPORT_1284
 		{ DEV_PARPORT_AUTOPROBE, "autoprobe",
-		  NULL, 0, 0444, NULL,
+		  NULL, 0, 0200, NULL,
 		  &do_autoprobe },
 		{ DEV_PARPORT_AUTOPROBE + 1, "autoprobe0",
-		 NULL, 0, 0444, NULL,
+		 NULL, 0, 0200, NULL,
 		 &do_autoprobe },
 		{ DEV_PARPORT_AUTOPROBE + 2, "autoprobe1",
-		  NULL, 0, 0444, NULL,
+		  NULL, 0, 0200, NULL,
 		  &do_autoprobe },
 		{ DEV_PARPORT_AUTOPROBE + 3, "autoprobe2",
-		  NULL, 0, 0444, NULL,
+		  NULL, 0, 0200, NULL,
 		  &do_autoprobe },
 		{ DEV_PARPORT_AUTOPROBE + 4, "autoprobe3",
-		  NULL, 0, 0444, NULL,
+		  NULL, 0, 0200, NULL,
 		  &do_autoprobe },
 #endif /* IEEE 1284 support */
 		{0}
@@ -326,7 +326,7 @@ parport_device_sysctl_template = {
 	NULL,
 	{
 		{ DEV_PARPORT_DEVICE_TIMESLICE, "timeslice",
-		  NULL, sizeof(int), 0644, NULL,
+		  NULL, sizeof(int), 0200, NULL,
 		  &proc_doulongvec_ms_jiffies_minmax, NULL, NULL,
 		  (void*) &parport_min_timeslice_value,
 		  (void*) &parport_max_timeslice_value },

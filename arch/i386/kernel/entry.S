@@ -184,8 +184,12 @@ sysenter_past_esp:
 	pushl %ebp
 	pushfl
 	pushl $(__USER_CS)
-	pushl $SYSENTER_RETURN
-
+	/*
+	 * Push current_thread_info()->sysenter_return to the stack.
+	 * A tiny bit of offset fixup is necessary - 4*4 means the 4 words
+	 * pushed above; +8 corresponds to copy_thread's esp0 setting.
+	 */
+	pushl (TI_sysenter_return-THREAD_SIZE+8+4*4)(%esp)
 /*
  * Load the potential sixth argument from user stack.
  * Careful about security.

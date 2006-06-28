@@ -604,9 +604,25 @@ nlmclnt_reclaim(struct nlm_host *host, struct file_lock *fl)
 	nlmclnt_setlockargs(req, fl);
 	req->a_args.reclaim = 1;
 
-	if ((status = nlmclnt_call(req, NLMPROC_LOCK)) >= 0
-	 && req->a_res.status == NLM_LCK_GRANTED)
-		return 0;
+again:
+	switch ((status = nlmclnt_call(req, NLMPROC_LOCK))) {
+	case 0:
+		if (req->a_res.status == NLM_LCK_GRANTED)
+			return 0;
+		break;
+	case -EAGAIN:
+	case -EACCES: /* portmapper might be up, but lockd isn't */
+		current->state = TASK_INTERRUPTIBLE;
+		schedule_timeout(10*HZ);
+		if (signalled()) {
+			status = -EINTR;
+			dprintk("lockd: reclaim got interrupted!\n");
+			break;
+		}
+		goto again;
+	default:
+		break;
+	}
 
 	printk(KERN_WARNING "lockd: failed to reclaim lock for pid %d "
 				"(errno %d, status %d)\n", fl->fl_pid,

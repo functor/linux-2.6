@@ -24,6 +24,13 @@ extern int sysctl_icmp_echo_ignore_all;
 extern int sysctl_icmp_echo_ignore_broadcasts;
 extern int sysctl_icmp_ignore_bogus_error_responses;
 extern int sysctl_icmp_errors_use_inbound_ifaddr;
+#ifdef CONFIG_ICMP_IPOD
+extern int sysctl_icmp_ipod_version;
+extern int sysctl_icmp_ipod_enabled;
+extern u32 sysctl_icmp_ipod_host;
+extern u32 sysctl_icmp_ipod_mask;
+extern char sysctl_icmp_ipod_key[32+1];
+#endif
 
 /* From ip_fragment.c */
 extern int sysctl_ipfrag_low_thresh;
@@ -396,6 +403,49 @@ ctl_table ipv4_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec
 	},
+#ifdef CONFIG_ICMP_IPOD
+	{
+		.ctl_name	= NET_IPV4_ICMP_IPOD_VERSION,
+		.procname	= "icmp_ipod_version",
+		.data		= &sysctl_icmp_ipod_version,
+		.maxlen		= sizeof(sysctl_icmp_ipod_version),
+		.mode		= 0444,
+		.proc_handler	= &proc_dointvec
+	},
+	{
+		.ctl_name	= NET_IPV4_ICMP_IPOD_ENABLED,
+		.procname	= "icmp_ipod_enabled",
+		.data		= &sysctl_icmp_ipod_enabled,
+		.maxlen		= sizeof(sysctl_icmp_ipod_enabled),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
+	},
+	{
+		.ctl_name	= NET_IPV4_ICMP_IPOD_HOST,
+		.procname	= "icmp_ipod_host",
+		.data		= &sysctl_icmp_ipod_host,
+		.maxlen		= sizeof(sysctl_icmp_ipod_host),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
+	},
+	{
+		.ctl_name	= NET_IPV4_ICMP_IPOD_MASK,
+		.procname	= "icmp_ipod_mask",
+		.data		= &sysctl_icmp_ipod_mask,
+		.maxlen		= sizeof(sysctl_icmp_ipod_mask),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
+	},
+	{
+		.ctl_name	= NET_IPV4_ICMP_IPOD_KEY,
+		.procname	= "icmp_ipod_key",
+		.data		= &sysctl_icmp_ipod_key,
+		.maxlen		= sizeof(sysctl_icmp_ipod_key),
+		.mode		= 0600,
+		.proc_handler	= &proc_dostring,
+		.strategy	= &sysctl_string
+	},
+#endif
 	{
 		.ctl_name	= NET_IPV4_ICMP_ERRORS_USE_INBOUND_IFADDR,
 		.procname	= "icmp_errors_use_inbound_ifaddr",

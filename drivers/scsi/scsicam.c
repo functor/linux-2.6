@@ -59,6 +59,15 @@ int scsicam_bios_param(struct block_device *bdev, sector_t capacity, int *ip)
 	unsigned char *p;
 	int ret;
 
+	/* Are we above the max. allowed for cylinder/sector/head? */
+	if (capacity > 65535*63*255) {
+		ip[0] = 255;
+		ip[1] = 63;
+		ip[2] = 65535;
+
+		return 0;
+	}
+
 	p = scsi_bios_ptable(bdev);
 	if (!p)
 		return -1;
@@ -86,11 +95,7 @@ int scsicam_bios_param(struct block_device *bdev, sector_t capacity, int *ip)
 			ip[0] = 64;
 			ip[1] = 32;
 		}
-
-		if (capacity > 65535*63*255)
-			ip[2] = 65535;
-		else
-			ip[2] = (unsigned long)capacity / (ip[0] * ip[1]);
+		ip[2] = (unsigned long)capacity / (ip[0] * ip[1]);
 	}
 
 	return 0;

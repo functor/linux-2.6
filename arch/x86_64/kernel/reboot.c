@@ -66,7 +66,77 @@ static int __init reboot_setup(char *str)
 
 __setup("reboot=", reboot_setup);
 
+/* overwrites random kernel memory. Should not be kernel .text */
+#define WARMBOOT_TRAMP 0x1000UL
+
+static void reboot_warm(void)
+{
+	extern unsigned char warm_reboot[], warm_reboot_end[];
+	printk("warm reboot\n");
+
+	local_irq_disable(); 
+		
+	/* restore identity mapping */
+	init_level4_pgt[0] = __pml4(__pa(level3_ident_pgt) | 7); 
+	__flush_tlb_all(); 
+
+	/* Move the trampoline to low memory */
+	memcpy(__va(WARMBOOT_TRAMP), warm_reboot, warm_reboot_end - warm_reboot); 
+
+	/* Start it in compatibility mode. */
+	asm volatile( "   pushq $0\n" 		/* ss */
+		     "   pushq $0x2000\n" 	/* rsp */
+	             "   pushfq\n"		/* eflags */
+		     "   pushq %[cs]\n"
+		     "   pushq %[target]\n"
+		     "   iretq" :: 
+		      [cs] "i" (__KERNEL_COMPAT32_CS), 
+		      [target] "b" (WARMBOOT_TRAMP));
+}
+
+static inline void kb_wait(void)
+{
+	int i;
+  
+	for (i=0; i<0x10000; i++)
+		if ((inb_p(0x64) & 0x02) == 0)
+			break;
+}
+  
+void machine_shutdown(void)
+{
+	/* Stop the cpus and apics */
 #ifdef CONFIG_SMP
+	int reboot_cpu_id;
+  
+	/* The boot cpu is always logical cpu 0 */
+	reboot_cpu_id = 0;
+
+	/* Make certain the cpu I'm about to reboot on is online */
+	if (!cpu_isset(reboot_cpu_id, cpu_online_map)) {
+		reboot_cpu_id = smp_processor_id();
+	}
+
+	/* Make certain I only run on the appropriate processor */
+	set_cpus_allowed(current, cpumask_of_cpu(reboot_cpu_id));
+
+	/* O.K Now that I'm on the appropriate processor,
+	 * stop all of the others.
+	 */
+	smp_send_stop();
+#endif
+
+	local_irq_disable();
+  
+#ifndef CONFIG_SMP
+	disable_local_APIC();
+#endif
+
+	disable_IO_APIC();
+
+	local_irq_enable();
+}
+
 static void smp_halt(void)
 {
 	int cpuid = safe_smp_processor_id(); 
@@ -92,21 +162,12 @@ static void smp_halt(void)
 	while (!cpus_empty(cpu_online_map))
 		rep_nop(); 
 }
-#endif
-
-static inline void kb_wait(void)
-{
-	int i;
-
-	for (i=0; i<0x10000; i++)
-		if ((inb_p(0x64) & 0x02) == 0)
-			break;
-}
 
 void machine_restart(char * __unused)
 {
 	int i;
 
+	machine_shutdown();
 	printk("machine restart\n");
 
 #ifdef CONFIG_SMP

@@ -18,10 +18,14 @@
 #include <linux/sysrq.h>
 #include <linux/interrupt.h>
 #include <linux/nmi.h>
+#include <linux/kexec.h>
+#include <linux/crash_dump.h>
 
-int panic_timeout;
-int panic_on_oops;
+int panic_timeout = 900;
+int panic_on_oops = 1;
 int tainted;
+unsigned int crashed;
+int crash_dump_on;
 
 EXPORT_SYMBOL(panic_timeout);
 
@@ -68,7 +72,13 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	dump_stack();
+	if (crashdump_func())
+		BUG();
 	bust_spinlocks(0);
+
+	/* If we have crashed, perform a kexec reboot, for dump write-out */
+	crash_machine_kexec();
 
 #ifdef CONFIG_SMP
 	smp_send_stop();
@@ -149,9 +159,17 @@ const char *print_tainted(void)
 		snprintf(buf, sizeof(buf), "Not tainted");
 	return(buf);
 }
+EXPORT_SYMBOL(print_tainted);
 
 void add_taint(unsigned flag)
 {
 	tainted |= flag;
 }
 EXPORT_SYMBOL(add_taint);
+
+int check_tainted(void)
+{
+	return tainted;
+}
+EXPORT_SYMBOL_GPL(check_tainted);
+

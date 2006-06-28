@@ -2195,6 +2195,7 @@ static void __exit ns83820_exit(void)
 MODULE_AUTHOR("Benjamin LaHaise <bcrl@kvack.org>");
 MODULE_DESCRIPTION("National Semiconductor DP83820 10/100/1000 driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(VERSION);
 
 MODULE_DEVICE_TABLE(pci, ns83820_pci_tbl);
 

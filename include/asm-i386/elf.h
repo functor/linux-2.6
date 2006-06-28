@@ -9,6 +9,7 @@
 #include <asm/user.h>
 #include <asm/processor.h>
 #include <asm/system.h>		/* for savesegment */
+#include <asm/desc.h>
 
 #include <linux/utsname.h>
 
@@ -70,7 +71,7 @@ typedef struct user_fxsr_struct elf_fpxregset_t;
    the loader.  We need to make sure that it is out of the way of the program
    that it will "exec", and that there is sufficient room for the brk.  */
 
-#define ELF_ET_DYN_BASE         (TASK_SIZE / 3 * 2)
+#define ELF_ET_DYN_BASE		((TASK_UNMAPPED_BASE) * 2)
 
 /* regs is struct pt_regs, pr_reg is elf_gregset_t (which is
    now struct_user_regs, they are different) */
@@ -133,17 +134,30 @@ extern int dump_task_extended_fpu (struct task_struct *, struct user_fxsr_struct
 #define ELF_CORE_COPY_FPREGS(tsk, elf_fpregs) dump_task_fpu(tsk, elf_fpregs)
 #define ELF_CORE_COPY_XFPREGS(tsk, elf_xfpregs) dump_task_extended_fpu(tsk, elf_xfpregs)
 
-#define VSYSCALL_BASE	(__fix_to_virt(FIX_VSYSCALL))
-#define VSYSCALL_EHDR	((const struct elfhdr *) VSYSCALL_BASE)
-#define VSYSCALL_ENTRY	((unsigned long) &__kernel_vsyscall)
 extern void __kernel_vsyscall;
+#define VSYSCALL_BASE	((unsigned long)current->mm->context.vdso)
+#define VSYSCALL_EHDR	((const struct elfhdr *) VSYSCALL_BASE)
+#define VSYSCALL_OFFSET	((unsigned long) &__kernel_vsyscall)
+#define VSYSCALL_ENTRY	(VSYSCALL_BASE + VSYSCALL_OFFSET)
 
-#define ARCH_DLINFO						\
-do {								\
-		NEW_AUX_ENT(AT_SYSINFO,	VSYSCALL_ENTRY);	\
-		NEW_AUX_ENT(AT_SYSINFO_EHDR, VSYSCALL_BASE);	\
+/* kernel-internal fixmap address: */
+#define __VSYSCALL_BASE	(__fix_to_virt(FIX_VSYSCALL))
+#define __VSYSCALL_EHDR	((const struct elfhdr *) __VSYSCALL_BASE)
+
+#define ARCH_DLINFO							\
+do {									\
+	if (VSYSCALL_BASE) {						\
+		NEW_AUX_ENT(AT_SYSINFO,	VSYSCALL_ENTRY);		\
+		NEW_AUX_ENT(AT_SYSINFO_EHDR, VSYSCALL_BASE);		\
+	}								\
 } while (0)
 
+#define ARCH_HAS_SETUP_ADDITIONAL_PAGES
+struct linux_binprm;
+extern int arch_setup_additional_pages(struct linux_binprm *bprm,
+				       int executable_stack);
+
+#if 0	/* Disabled for exec-shield, where a normal vma holds the vDSO.  */
 /*
  * These macros parameterize elf_core_dump in fs/binfmt_elf.c to write out
  * extra segments containing the vsyscall DSO contents.  Dumping its
@@ -152,15 +166,15 @@ do {								\
  * Dumping its extra ELF program headers includes all the other information
  * a debugger needs to easily find how the vsyscall DSO was being used.
  */
-#define ELF_CORE_EXTRA_PHDRS		(VSYSCALL_EHDR->e_phnum)
+#define ELF_CORE_EXTRA_PHDRS		(__VSYSCALL_EHDR->e_phnum)
 #define ELF_CORE_WRITE_EXTRA_PHDRS					      \
 do {									      \
 	const struct elf_phdr *const vsyscall_phdrs =			      \
-		(const struct elf_phdr *) (VSYSCALL_BASE		      \
-					   + VSYSCALL_EHDR->e_phoff);	      \
+		(const struct elf_phdr *) (__VSYSCALL_BASE		      \
+					   + __VSYSCALL_EHDR->e_phoff);	      \
 	int i;								      \
 	Elf32_Off ofs = 0;						      \
-	for (i = 0; i < VSYSCALL_EHDR->e_phnum; ++i) {			      \
+	for (i = 0; i < __VSYSCALL_EHDR->e_phnum; ++i) {		      \
 		struct elf_phdr phdr = vsyscall_phdrs[i];		      \
 		if (phdr.p_type == PT_LOAD) {				      \
 			BUG_ON(ofs != 0);				      \
@@ -178,16 +192,20 @@ do {									      \
 #define ELF_CORE_WRITE_EXTRA_DATA					      \
 do {									      \
 	const struct elf_phdr *const vsyscall_phdrs =			      \
-		(const struct elf_phdr *) (VSYSCALL_BASE		      \
-					   + VSYSCALL_EHDR->e_phoff);	      \
+		(const struct elf_phdr *) (__VSYSCALL_BASE		      \
+					   + __VSYSCALL_EHDR->e_phoff);	      \
 	int i;								      \
-	for (i = 0; i < VSYSCALL_EHDR->e_phnum; ++i) {			      \
+	for (i = 0; i < __VSYSCALL_EHDR->e_phnum; ++i) {		      \
 		if (vsyscall_phdrs[i].p_type == PT_LOAD)		      \
 			DUMP_WRITE((void *) vsyscall_phdrs[i].p_vaddr,	      \
 				   PAGE_ALIGN(vsyscall_phdrs[i].p_memsz));    \
 	}								      \
 } while (0)
+#endif
 
 #endif
+
+#define __HAVE_ARCH_RANDOMIZE_BRK
+extern void randomize_brk(unsigned long old_brk);
 
 #endif

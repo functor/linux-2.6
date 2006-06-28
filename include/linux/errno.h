@@ -24,6 +24,9 @@
 #define EIOCBQUEUED	529	/* iocb queued, will get completion event */
 #define EIOCBRETRY	530	/* iocb queued, will trigger a retry */
 
+/* Defined for TUX async IO */
+#define EWOULDBLOCKIO	530	/* Would block due to block-IO */
+
 #endif
 
 #endif

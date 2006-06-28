@@ -272,6 +272,9 @@ static int force_measure_pll = 0;
 #ifdef CONFIG_MTRR
 static int nomtrr = 0;
 #endif
+#if defined(CONFIG_PM) && defined(CONFIG_X86)
+int radeon_force_sleep = 0;
+#endif
 
 /*
  * prototypes
@@ -2599,6 +2602,10 @@ static int __init radeonfb_setup (char *options)
 			force_measure_pll = 1;
 		} else if (!strncmp(this_opt, "ignore_edid", 11)) {
 			ignore_edid = 1;
+#if defined(CONFIG_PM) && defined(CONFIG_X86)
+		} else if (!strncmp(this_opt, "force_sleep", 11)) {
+			radeon_force_sleep = 1;
+#endif
 		} else
 			mode_option = this_opt;
 	}
@@ -2654,3 +2661,7 @@ module_param(panel_yres, int, 0);
 MODULE_PARM_DESC(panel_yres, "int: set panel yres");
 module_param(mode_option, charp, 0);
 MODULE_PARM_DESC(mode_option, "Specify resolution as \"<xres>x<yres>[-<bpp>][@<refresh>]\" ");
+#if defined(CONFIG_PM) && defined(CONFIG_X86)
+module_param(radeon_force_sleep, int, 0);
+MODULE_PARM_DESC(radeon_force_sleep, "bool: force ACPI sleep mode on untested machines");
+#endif

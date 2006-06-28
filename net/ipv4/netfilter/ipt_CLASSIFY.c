@@ -62,10 +62,16 @@ checkentry(const char *tablename,
 	}
 
 	if (strcmp(tablename, "mangle") != 0) {
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	if (strcmp(tablename, "vnet") != 0) {
+#endif
 		printk(KERN_ERR "CLASSIFY: can only be called from "
 		                "\"mangle\" table, not \"%s\".\n",
 		                tablename);
 		return 0;
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	}
+#endif
 	}
 
 	return 1;

@@ -1352,6 +1352,8 @@ static void raid5_unplug_device(request_queue_t *q)
 	raid5_conf_t *conf = mddev_to_conf(mddev);
 	unsigned long flags;
 
+	if (!conf) return;
+
 	spin_lock_irqsave(&conf->device_lock, flags);
 
 	if (blk_remove_plug(q))

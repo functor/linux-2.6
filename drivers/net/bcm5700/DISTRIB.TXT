@@ -1,0 +1,166 @@
+
+           Additional Installation Notes for Various Linux Distributions
+                       Broadcom BCM5700 Linux Driver
+                              Version 8.3.17b
+                                02/21/2006
+
+                          Broadcom Corporation
+                          16215 Alton Parkway,
+                          Irvine, CA 92619-7013
+
+                Copyright (c) 2000-2006 Broadcom Corporation
+                           All rights reserved
+
+
+Table of Contents
+=================
+
+  Introduction
+  Limitations
+  Prerequisites
+  Enable Loadable Module Support on Turbolinux 10
+  Remove tg3 Driver
+  Edit /etc/modules.conf
+  Patching PCI Files (Red Hat - Optional)
+  Patching module-info Files (Red Hat - Optional)
+  Network Installation (Red Hat)
+  Message-"no version for "struct_module" found"
+
+Introduction
+============
+
+This file contains additional installation notes for the Broadcom NetXtreme
+bcm5700 Linux driver that are specific to certain Linux distributions. General
+installation notes are contained in README.TXT.
+
+
+Limitations
+===========
+
+The current version of the driver has been tested on selected Linux
+distributions for i386, ia64, and x86_64. Limited testing has also
+been done on PPC64 systems. Testing is normally focused on the
+following distributions:
+
+   Red Hat 4.0 and 3.0AS
+   SuSE 9
+ 
+
+Prerequisites
+=============
+
+In order to compile your Broadcom NetXtreme Linux driver, you must first
+have a properly compiled kernel source tree which matches your running
+kernel.  You must also have a working C/C++ compiler and all the associated
+dependencies installed before attempting to compile the driver.
+ 
+On Red Hat distributions, if you have opted for a custom installation, you
+need to select "Development Tools" and "Kernel Development" to install
+the necessary tools and kernel source tree.
+   
+On Linux distributions, you must change the software packages
+installed by default when presented with the Installation Settings.  Under
+software selelction, select "Detailed Selection".  In this area ensure that
+"C/C++ Compiler and Tools" is selected.  This should install the C/C++
+compiler as well as the kernel-source files.
+   
+For further assistance, please review your Linux documentation. 
+    
+      
+Enable Loadable Module Support on Turboilinux 10 
+================================================
+
+When attempting to compile the driver, the following message may be displayed:
+
+   The present kernel configuration has modules disabled. Type 'make config'
+   and enable loadable module support. Then build a kernel with module
+   support enabled.
+
+Do the following to enable loadable module support:
+
+   cp /usr/src/configs/kernel-x.x.x-i586.config /usr/src/.config
+
+
+Remove tg3 Driver
+=================
+					        
+Many newer distributions and newer kernels may already contain and use the
+tg3 driver by default for Broadcom BCM5700 series devices. While tg3 is a fully
+functioning driver written by Red Hat, Broadcom recommends users to use
+the bcm5700 driver written and tested by Broadcom.
+						
+1. Use ifconfig to bring down all interfaces used by tg3, then use `rmmod` to
+   remove the module if loaded.  The following assumes eth0 and eth1 are both
+   Broadcom devices using the tg3 driver.
+
+   ifconfig eth0 down
+   ifconfig eth1 down
+   rmmod tg3
+								    
+2. Now it may be necessary to manually edit your /etc/modules.conf file to
+   allow the bcm5700 driver to load at boot time instead of the tg3 driver.  See
+   below.
+
+
+Edit /etc/modules.conf
+======================
+									
+If there is an alias entry in your /etc/modules.conf file referencing the
+tg3 driver, make sure that you replace tg3 with bcm5700.  Otherwise, add the
+entry below if necessary.
+									 
+Example:
+
+alias eth0 bcm5700
+									       
+
+Patching PCI Files (Red Hat - Optional)
+=======================================
+
+To use the Red Hat kudzu hardware detection utility, and to list the
+BCM5700 series devices by name using lspci, a script has been included
+in the bcm_sup-<version>.tar.gz package.
+The /bin/bash script to update the Red Hat PCI device list and patch
+files for the latest kernels by running this script. 
+
+For example, on Red Hat 3 i386, apply the script in the following way:
+
+   ./update_ids.sh
+
+Run kudzu:
+
+   kudzu
+
+
+Network Installation (Red Hat)
+==============================
+
+For network installations through NFS, FTP, or HTTP (using a network boot disk
+or PXE), a driver diskette that contains the bcm5700 driver is needed.  The
+driver diskette images for the most recent Red Hat versions are included. Boot
+drivers for other Linux versions can be compiled by modifying the Makefile and
+the make environment. Further information is available from Red Hat's website.
+
+To create the driver diskette, select the appropriate image file, gunzip it,
+and do the following:
+
+dd if=dd.img of=/dev/fd0H1440.
+
+
+Message -"no version for "struct_module" found"
+==============================================
+If you see this message, bring the kernel version.h file up to date by 
+executing the following command, then remake the bcm5700 module.
+
+(cd /usr/src/linux; make include/linux/version.h)
+
+
+'rpm -e' does not uninstall the bcm5700 module
+==============================================
+On some linux installations, the bcm5700 module comes as part of the kernel
+package.  In these cases, the administrator will have to install a newer
+version of the module by using the --force flag.  While this flag does
+allow the newer version module to be installed, it does not change the
+ownership of the file to the newer package.  Consequently, the 'rpm -e'
+command will not remove the file, since it is not associated with that
+package.

@@ -34,8 +34,11 @@
 #include <linux/percpu.h>
 #include <linux/topology.h>
 #include <linux/seccomp.h>
+#include <linux/vs_base.h>
 
 struct exec_domain;
+extern int exec_shield;
+extern int print_fatal_signals;
 
 /*
  * cloning flags:
@@ -112,6 +115,7 @@ extern unsigned long nr_iowait(void);
 #define TASK_TRACED		8
 #define EXIT_ZOMBIE		16
 #define EXIT_DEAD		32
+#define TASK_ONHOLD		64
 
 #define __set_task_state(tsk, state_value)		\
 	do { (tsk)->state = (state_value); } while (0)
@@ -197,6 +201,10 @@ extern int sysctl_max_map_count;
 extern unsigned long
 arch_get_unmapped_area(struct file *, unsigned long, unsigned long,
 		       unsigned long, unsigned long);
+
+extern unsigned long
+arch_get_unmapped_exec_area(struct file *, unsigned long, unsigned long,
+		       unsigned long, unsigned long);
 extern unsigned long
 arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 			  unsigned long len, unsigned long pgoff,
@@ -204,11 +212,12 @@ arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 extern void arch_unmap_area(struct vm_area_struct *area);
 extern void arch_unmap_area_topdown(struct vm_area_struct *area);
 
-#define set_mm_counter(mm, member, value) (mm)->_##member = (value)
+#define __set_mm_counter(mm, member, value) (mm)->_##member = (value)
+#define set_mm_counter(mm, member, value) vx_ ## member ## pages_sub((mm), ((mm)->_##member - value))
 #define get_mm_counter(mm, member) ((mm)->_##member)
-#define add_mm_counter(mm, member, value) (mm)->_##member += (value)
-#define inc_mm_counter(mm, member) (mm)->_##member++
-#define dec_mm_counter(mm, member) (mm)->_##member--
+#define add_mm_counter(mm, member, value) vx_ ## member ## pages_add((mm), (value))
+#define inc_mm_counter(mm, member) vx_ ## member ## pages_inc((mm))
+#define dec_mm_counter(mm, member) vx_ ## member ## pages_dec((mm))
 typedef unsigned long mm_counter_t;
 
 struct mm_struct {
@@ -216,6 +225,9 @@ struct mm_struct {
 	struct rb_root mm_rb;
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
 	unsigned long (*get_unmapped_area) (struct file *filp,
+				unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags);
+	unsigned long (*get_unmapped_exec_area) (struct file *filp,
 				unsigned long addr, unsigned long len,
 				unsigned long pgoff, unsigned long flags);
 	void (*unmap_area) (struct vm_area_struct *area);
@@ -250,6 +262,7 @@ struct mm_struct {
 
 	/* Architecture-specific MM context */
 	mm_context_t context;
+	struct vx_info *mm_vx_info;
 
 	/* Token based thrashing protection. */
 	unsigned long swap_token_time;
@@ -416,9 +429,10 @@ struct user_struct {
 	/* Hash table maintenance information */
 	struct list_head uidhash_list;
 	uid_t uid;
+	xid_t xid;
 };
 
-extern struct user_struct *find_user(uid_t);
+extern struct user_struct *find_user(xid_t, uid_t);
 
 extern struct user_struct root_user;
 #define INIT_USER (&root_user)
@@ -689,10 +703,23 @@ struct task_struct {
 	int (*notifier)(void *priv);
 	void *notifier_data;
 	sigset_t *notifier_mask;
+
+	/* TUX state */
+	void *tux_info;
+	void (*tux_exit)(void);
+
 	
 	void *security;
 	struct audit_context *audit_context;
 	seccomp_t seccomp;
+
+/* vserver context data */
+	xid_t xid;
+	struct vx_info *vx_info;
+
+/* vserver network data */
+	nid_t nid;
+	struct nx_info *nx_info;
 
 /* Thread group tracking */
    	u32 parent_exec_id;
@@ -714,6 +741,8 @@ struct task_struct {
 	struct backing_dev_info *backing_dev_info;
 
 	struct io_context *io_context;
+
+	int ioprio;
 
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
@@ -881,13 +910,19 @@ extern struct task_struct init_task;
 
 extern struct   mm_struct init_mm;
 
-#define find_task_by_pid(nr)	find_task_by_pid_type(PIDTYPE_PID, nr)
+
+#define find_task_by_real_pid(nr) \
+	find_task_by_pid_type(PIDTYPE_PID, nr)
+#define find_task_by_pid(nr) \
+	find_task_by_pid_type(PIDTYPE_PID, \
+		vx_rmap_pid(nr))
+
 extern struct task_struct *find_task_by_pid_type(int type, int pid);
 extern void set_special_pids(pid_t session, pid_t pgrp);
 extern void __set_special_pids(pid_t session, pid_t pgrp);
 
 /* per-UID process charging. */
-extern struct user_struct * alloc_uid(uid_t);
+extern struct user_struct * alloc_uid(xid_t, uid_t);
 static inline struct user_struct *get_uid(struct user_struct *u)
 {
 	atomic_inc(&u->__count);
@@ -980,10 +1015,23 @@ static inline int sas_ss_flags(unsigned long sp)
 #ifdef CONFIG_SECURITY
 /* code is in security.c */
 extern int capable(int cap);
+extern int vx_capable(int cap, int ccap);
 #else
 static inline int capable(int cap)
 {
+	if (vx_check_bit(VXC_CAP_MASK, cap) && !vx_mcaps(1L << cap))
+		return 0;
 	if (cap_raised(current->cap_effective, cap)) {
+		current->flags |= PF_SUPERPRIV;
+		return 1;
+	}
+	return 0;
+}
+
+static inline int vx_capable(int cap, int ccap)
+{
+	if (cap_raised(current->cap_effective, cap) &&
+		vx_ccaps(ccap)) {
 		current->flags |= PF_SUPERPRIV;
 		return 1;
 	}
