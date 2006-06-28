@@ -343,8 +343,10 @@ BuildKernel() {
 	echo "gcc3 = $gcc3; CC=${CC}"
 	if [ -z "$CC" ]; then
 	    echo "Could not find a gcc 3.x based compiler!"
-	    echo "Aborting kernel compilation!"
-	    exit -1
+	    echo "Trying to compile with gcc $gccversion anyway"
+	    CC=gcc
+	    #echo "Aborting kernel compilation!"
+	    #exit -1
 	fi
     fi
     HOSTCC=${CC}
