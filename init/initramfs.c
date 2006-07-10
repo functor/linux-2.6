@@ -26,10 +26,12 @@ static void __init free(void *where)
 
 /* link hash */
 
+#define N_ALIGN(len) ((((len) + 1) & ~3) + 2)
+
 static __initdata struct hash {
 	int ino, minor, major;
 	struct hash *next;
-	char *name;
+	char name[N_ALIGN(PATH_MAX)];
 } *head[32];
 
 static inline int hash(int major, int minor, int ino)
@@ -57,7 +59,7 @@ static char __init *find_link(int major, int minor, int ino, char *name)
 	q->ino = ino;
 	q->minor = minor;
 	q->major = major;
-	q->name = name;
+	strcpy(q->name, name);
 	q->next = NULL;
 	*p = q;
 	return NULL;
@@ -132,8 +134,6 @@ static inline void eat(unsigned n)
 	this_header += n;
 	count -= n;
 }
-
-#define N_ALIGN(len) ((((len) + 1) & ~3) + 2)
 
 static __initdata char *collected;
 static __initdata int remains;
@@ -249,6 +249,7 @@ static int __init do_name(void)
 	if (dry_run)
 		return 0;
 	if (S_ISREG(mode)) {
+		sys_unlink(collected);
 		if (maybe_link() >= 0) {
 			wfd = sys_open(collected, O_WRONLY|O_CREAT, mode);
 			if (wfd >= 0) {
@@ -263,6 +264,7 @@ static int __init do_name(void)
 		sys_chmod(collected, mode);
 	} else if (S_ISBLK(mode) || S_ISCHR(mode) ||
 		   S_ISFIFO(mode) || S_ISSOCK(mode)) {
+		sys_unlink(collected);
 		if (maybe_link() == 0) {
 			sys_mknod(collected, mode, rdev);
 			sys_chown(collected, uid, gid);
@@ -291,6 +293,7 @@ static int __init do_copy(void)
 static int __init do_symlink(void)
 {
 	collected[N_ALIGN(name_len) + body_len] = '\0';
+	sys_unlink(collected);
 	sys_symlink(collected + N_ALIGN(name_len), collected);
 	sys_lchown(collected, uid, gid);
 	state = SkipIt;

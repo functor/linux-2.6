@@ -23,7 +23,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define rpmversion 2.6.%{sublevel}
 %define rhbsys  %([ -r /etc/beehive-root -o -n "%{?__beehive_build}" ] && echo || echo .`whoami`)
 
-%define release 1.1398_FC4.5%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.1398_FC4.6%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
 %define signmodules 0
 %define make_target bzImage
@@ -326,17 +326,40 @@ BuildKernel() {
 
     # and now to start the build process
 
-    make -s ARCH=$Arch mrproper
+    CC=gcc
+    gccversion=$(gcc -v 2>&1 | grep "gcc version" | awk '{print $3'} | awk -F . '{print $1}')
+    if [ "$gccversion" == "4" ] ; then
+	echo "Currently not compiling kernel with gcc 4.x"
+	echo "Trying to find a recent gcc 3.x based compiler"
+	CC=
+	gcc3=$(which gcc32 2>/dev/null || /bin/true)
+	[ "$gcc3" != "" ] && CC=gcc32
+	echo "gcc3 = $gcc3; CC=${CC}"
+	gcc3=$(which gcc33 2>/dev/null || /bin/true)
+	[ "$gcc3" != "" ] && CC=gcc33
+	echo "gcc3 = $gcc3; CC=${CC}"
+	gcc3=$(which gcc34 2>/dev/null || /bin/true)
+	[ "$gcc3" != "" ] && CC=gcc34
+	echo "gcc3 = $gcc3; CC=${CC}"
+	if [ -z "$CC" ]; then
+	    echo "Could not find a gcc 3.x based compiler!"
+	    echo "Trying to compile with gcc $gccversion anyway"
+	    CC=gcc
+	    #echo "Aborting kernel compilation!"
+	    #exit -1
+	fi
+    fi
+    HOSTCC=${CC}
+
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch mrproper
     cp configs/$Config .config
+    echo "USING ARCH=$Arch CC=${CC} HOSTCC=${HOSTCC}"
 
-    echo USING ARCH=$Arch
-
-    make -s ARCH=$Arch nonint_oldconfig > /dev/null
-    make -s ARCH=$Arch include/linux/version.h 
-
-    make -s ARCH=$Arch %{?_smp_mflags} $Target
-    make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
-    make ARCH=$Arch buildcheck
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch nonint_oldconfig > /dev/null
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch include/linux/version.h 
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} $Target
+    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} modules || exit 1
+    make CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch buildcheck
     
     # Start installing the results
 
@@ -569,9 +592,9 @@ fi
 
 # make some useful links
 pushd /boot > /dev/null ; {
-	ln -sf config-%{KVERREL} config
-	ln -sf initrd-%{KVERREL}.img initrd-boot
-	ln -sf vmlinuz-%{KVERREL} kernel-boot
+	ln -sf config-%{KVERREL}smp configsmp
+	ln -sf initrd-%{KVERREL}smp.img initrd-bootsmp
+	ln -sf vmlinuz-%{KVERREL}smp kernel-bootsmp
 }
 popd > /dev/null
 
@@ -597,6 +620,9 @@ pushd /usr/src/kernels/%{KVERREL}-xenU-%{_target_cpu} > /dev/null
 popd > /dev/null
 fi
 
+%post uml-modules
+depmod -ae %{KVERREL}uml
+
 
 %preun 
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
@@ -609,6 +635,9 @@ fi
 %preun xenU
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 [ -x /sbin/new-kernel-pkg ] && /sbin/new-kernel-pkg --rmmoddep --remove %{KVERREL}xenU
+
+%preun uml-modules
+rm -f /lib/modules/%{KVERREL}uml/modules.*
 
 
 ###

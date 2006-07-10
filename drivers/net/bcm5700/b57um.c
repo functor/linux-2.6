@@ -1,6 +1,6 @@
 /******************************************************************************/
 /*                                                                            */
-/* Broadcom BCM5700 Linux Network Driver, Copyright (c) 2000 - 2005 Broadcom  */
+/* Broadcom BCM5700 Linux Network Driver, Copyright (c) 2000 - 2006 Broadcom  */
 /* Corporation.                                                               */
 /* All rights reserved.                                                       */
 /*                                                                            */
@@ -12,8 +12,8 @@
 
 
 char bcm5700_driver[] = "bcm5700";
-char bcm5700_version[] = "8.3.14a";
-char bcm5700_date[] = "(11/2/05)";
+char bcm5700_version[] = "8.3.17b";
+char bcm5700_date[] = "(02/21/06)";
 
 #define B57UM
 #include "mm.h"
@@ -128,6 +128,8 @@ static int bcm_msi_chipset_bug = 0;
 /* Operational parameters that usually are not changed. */
 /* Time in jiffies before concluding the transmitter is hung. */
 #define TX_TIMEOUT  (2*HZ)
+/* RQM 289636: */
+#define BCM_TX_TIMEOUT  (5*HZ)
 
 #if (LINUX_VERSION_CODE < 0x02030d)
 #define pci_resource_start(dev, bar)	(dev->base_address[bar] & PCI_BASE_ADDRESS_MEM_MASK)
@@ -288,6 +290,14 @@ pci_set_dma_mask(struct pci_dev *dev, dma_addr_t mask)
 	if ((pUmDevice)->do_global_lock) {				\
 		spin_unlock_irqrestore(&(pUmDevice)->global_lock, flags);\
 	}
+
+/* Fix for RQM 289636 */
+static inline void
+bcm5700_netif_stop_queue(struct net_device *dev)
+{
+	dev->trans_start = jiffies; /* prevent tx timeout */
+	netif_stop_queue(dev);
+}
 
 inline void
 bcm5700_intr_lock(PUM_DEVICE_BLOCK pUmDevice)
@@ -883,9 +893,11 @@ static struct pci_device_id bcm5700_pci_tbl[] __devinitdata = {
 	{0x14e4, 0x1600, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5752 },
 	{0x14e4, 0x1601, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5752M },
 	{0x14e4, 0x1668, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5714 },
+ 	{0x14e4, 0x1669, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5714S },
 	{0x14e4, 0x166a, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5780 },
 	{0x14e4, 0x166b, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5780S },
 	{0x14e4, 0x1678, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5715 },
+ 	{0x14e4, 0x1679, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5715S },
 	{0x14e4, 0x16ff, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5903M },
 #endif
 	{0,}
@@ -1211,7 +1223,9 @@ bcm5700_init_one(struct pci_dev *pdev,
 #endif
 #if (LINUX_VERSION_CODE >= 0x20400)
 	dev->tx_timeout = bcm5700_reset;
-	dev->watchdog_timeo = TX_TIMEOUT;
+	/* Fix for RQM 289636 */
+	/* dev->watchdog_timeo = TX_TIMEOUT; */
+	dev->watchdog_timeo = BCM_TX_TIMEOUT;
 #endif
 #ifdef BCM_VLAN
 	dev->vlan_rx_register = &bcm5700_vlan_rx_register;
@@ -1287,6 +1301,8 @@ bcm5700_init_one(struct pci_dev *pdev,
             if(( pDevice->PhyId & PHY_ID_MASK ) == PHY_BCM5780_PHY_ID)
                 printk("Broadcom BCM5780S Integrated Serdes ");
 
+            if(( pDevice->PhyId & PHY_ID_MASK ) == PHY_BCM5714_PHY_ID)
+                printk("Broadcom BCM5714S Integrated Serdes ");
         }        
 	else if ((pDevice->PhyId & PHY_ID_MASK) == PHY_BCM5705_PHY_ID)
 		printk("Broadcom BCM5705 Integrated Copper ");
@@ -2075,7 +2091,9 @@ bcm5700_start_xmit(struct sk_buff *skb, struct net_device *dev)
 #endif
 
 	if (pUmDevice->do_global_lock && pUmDevice->interrupt) {
-		netif_stop_queue(dev);
+		/* Fix for RQM 289636 */
+		/* netif_stop_queue(dev); */
+		bcm5700_netif_stop_queue(dev);
 		pUmDevice->tx_queued = 1;
 		if (!pUmDevice->interrupt) {
 			netif_wake_queue(dev);
@@ -2087,7 +2105,9 @@ bcm5700_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	pPacket = (PLM_PACKET)
 		QQ_PopHead(&pDevice->TxPacketFreeQ.Container);
 	if (pPacket == 0) {
-		netif_stop_queue(dev);
+		/* Fix for RQM 289636 */
+		/* netif_stop_queue(dev); */
+		bcm5700_netif_stop_queue(dev);
 		pUmDevice->tx_full = 1;
 		if (QQ_GetEntryCnt(&pDevice->TxPacketFreeQ.Container)) {
 			netif_wake_queue(dev);
@@ -2113,7 +2133,9 @@ bcm5700_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	frag_no = 0;
 #endif
 	if (atomic_read(&pDevice->SendBdLeft) < (frag_no + 1)) {
-		netif_stop_queue(dev);
+		/* Fix for RQM 289636 */
+		/* netif_stop_queue(dev); */
+		bcm5700_netif_stop_queue(dev);
 		pUmDevice->tx_full = 1;
 		QQ_PushHead(&pDevice->TxPacketFreeQ.Container, pPacket);
 		if (atomic_read(&pDevice->SendBdLeft) >= (frag_no + 1)) {
@@ -2472,7 +2494,9 @@ bcm5700_close(struct net_device *dev)
 #if (LINUX_VERSION_CODE < 0x02032b)
 	dev->start = 0;
 #endif
-	netif_stop_queue(dev);
+	/* Fix for RQM 289636 */
+	/* netif_stop_queue(dev); */
+	bcm5700_netif_stop_queue(dev);
 	pUmDevice->opened = 0;
 
 #ifdef BCM_ASF
@@ -4379,7 +4403,9 @@ STATIC int bcm5700_change_mtu(struct net_device *dev, int new_mtu)
 
 	BCM5700_PHY_LOCK(pUmDevice, flags);
 	if (reinit) {
-		netif_stop_queue(dev);
+		/* Fix for RQM 289636 */
+		/* netif_stop_queue(dev); */
+		bcm5700_netif_stop_queue(dev);
 		bcm5700_shutdown(pUmDevice);
 		bcm5700_freemem(dev);
 	}
@@ -4516,10 +4542,15 @@ void cleanup_module(void)
 #endif  /* MODULE */
 #else	/* LINUX_VERSION_CODE < 0x020300 */
 
+
+#if (LINUX_VERSION_CODE >= 0x2060b)
+static int bcm5700_suspend(struct pci_dev *pdev, pm_message_t state)
+#else
 #if (LINUX_VERSION_CODE >= 0x020406)
 static int bcm5700_suspend (struct pci_dev *pdev, u32 state)
 #else
 static void bcm5700_suspend (struct pci_dev *pdev)
+#endif
 #endif
 {
 	struct net_device *dev = (struct net_device *) pci_get_drvdata(pdev);
