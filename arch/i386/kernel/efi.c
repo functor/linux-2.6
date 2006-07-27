@@ -30,6 +30,7 @@
 #include <linux/ioport.h>
 #include <linux/module.h>
 #include <linux/efi.h>
+#include <linux/kexec.h>
 
 #include <asm/setup.h>
 #include <asm/io.h>
@@ -69,16 +70,19 @@ static void efi_call_phys_prelog(void)
 {
 	unsigned long cr4;
 	unsigned long temp;
+	struct Xgt_desc_struct *cpu_gdt_descr;
 
 	spin_lock(&efi_rt_lock);
 	local_irq_save(efi_rt_eflags);
+
+	cpu_gdt_descr = &per_cpu(cpu_gdt_descr, 0);
 
 	/*
 	 * If I don't have PSE, I should just duplicate two entries in page
 	 * directory. If I have PSE, I just need to duplicate one entry in
 	 * page directory.
 	 */
-	__asm__ __volatile__("movl %%cr4, %0":"=r"(cr4));
+	cr4 = read_cr4();
 
 	if (cr4 & X86_CR4_PSE) {
 		efi_bak_pg_dir_pointer[0].pgd =
@@ -102,19 +106,19 @@ static void efi_call_phys_prelog(void)
 	 */
 	local_flush_tlb();
 
-	cpu_gdt_descr[0].address = __pa(cpu_gdt_descr[0].address);
-	__asm__ __volatile__("lgdt %0":"=m"
-			    (*(struct Xgt_desc_struct *) __pa(&cpu_gdt_descr[0])));
+	cpu_gdt_descr->address = __pa(cpu_gdt_descr->address);
+	load_gdt(cpu_gdt_descr);
 }
 
 static void efi_call_phys_epilog(void)
 {
 	unsigned long cr4;
+	struct Xgt_desc_struct *cpu_gdt_descr = &per_cpu(cpu_gdt_descr, 0);
 
-	cpu_gdt_descr[0].address =
-		(unsigned long) __va(cpu_gdt_descr[0].address);
-	__asm__ __volatile__("lgdt %0":"=m"(cpu_gdt_descr));
-	__asm__ __volatile__("movl %%cr4, %0":"=r"(cr4));
+	cpu_gdt_descr->address = (unsigned long)__va(cpu_gdt_descr->address);
+	load_gdt(cpu_gdt_descr);
+
+	cr4 = read_cr4();
 
 	if (cr4 & X86_CR4_PSE) {
 		swapper_pg_dir[pgd_index(0)].pgd =
@@ -232,22 +236,23 @@ void __init efi_map_memmap(void)
 {
 	memmap.map = NULL;
 
-	memmap.map = (efi_memory_desc_t *)
-		bt_ioremap((unsigned long) memmap.phys_map,
-			(memmap.nr_map * sizeof(efi_memory_desc_t)));
-
+	memmap.map = bt_ioremap((unsigned long) memmap.phys_map,
+			(memmap.nr_map * memmap.desc_size));
 	if (memmap.map == NULL)
 		printk(KERN_ERR PFX "Could not remap the EFI memmap!\n");
+
+	memmap.map_end = memmap.map + (memmap.nr_map * memmap.desc_size);
 }
 
 #if EFI_DEBUG
 static void __init print_efi_memmap(void)
 {
 	efi_memory_desc_t *md;
+	void *p;
 	int i;
 
-	for (i = 0; i < memmap.nr_map; i++) {
-		md = &memmap.map[i];
+	for (p = memmap.map, i = 0; p < memmap.map_end; p += memmap.desc_size, i++) {
+		md = p;
 		printk(KERN_INFO "mem%02u: type=%u, attr=0x%llx, "
 			"range=[0x%016llx-0x%016llx) (%lluMB)\n",
 			i, md->type, md->attribute, md->phys_addr,
@@ -270,10 +275,10 @@ void efi_memmap_walk(efi_freemem_callback_t callback, void *arg)
 	} prev, curr;
 	efi_memory_desc_t *md;
 	unsigned long start, end;
-	int i;
+	void *p;
 
-	for (i = 0; i < memmap.nr_map; i++) {
-		md = &memmap.map[i];
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 
 		if ((md->num_pages == 0) || (!is_available_memory(md)))
 			continue;
@@ -324,6 +329,7 @@ void __init efi_init(void)
 	memmap.phys_map = EFI_MEMMAP;
 	memmap.nr_map = EFI_MEMMAP_SIZE/EFI_MEMDESC_SIZE;
 	memmap.desc_version = EFI_MEMDESC_VERSION;
+	memmap.desc_size = EFI_MEMDESC_SIZE;
 
 	efi.systab = (efi_system_table_t *)
 		boot_ioremap((unsigned long) efi_phys.systab,
@@ -355,7 +361,7 @@ void __init efi_init(void)
 	 */
 	c16 = (efi_char16_t *) boot_ioremap(efi.systab->fw_vendor, 2);
 	if (c16) {
-		for (i = 0; i < sizeof(vendor) && *c16; ++i)
+		for (i = 0; i < (sizeof(vendor) - 1) && *c16; ++i)
 			vendor[i] = *c16++;
 		vendor[i] = '\0';
 	} else
@@ -375,29 +381,38 @@ void __init efi_init(void)
 	if (config_tables == NULL)
 		printk(KERN_ERR PFX "Could not map EFI Configuration Table!\n");
 
+	efi.mps        = EFI_INVALID_TABLE_ADDR;
+	efi.acpi       = EFI_INVALID_TABLE_ADDR;
+	efi.acpi20     = EFI_INVALID_TABLE_ADDR;
+	efi.smbios     = EFI_INVALID_TABLE_ADDR;
+	efi.sal_systab = EFI_INVALID_TABLE_ADDR;
+	efi.boot_info  = EFI_INVALID_TABLE_ADDR;
+	efi.hcdp       = EFI_INVALID_TABLE_ADDR;
+	efi.uga        = EFI_INVALID_TABLE_ADDR;
+
 	for (i = 0; i < num_config_tables; i++) {
 		if (efi_guidcmp(config_tables[i].guid, MPS_TABLE_GUID) == 0) {
-			efi.mps = (void *)config_tables[i].table;
+			efi.mps = config_tables[i].table;
 			printk(KERN_INFO " MPS=0x%lx ", config_tables[i].table);
 		} else
 		    if (efi_guidcmp(config_tables[i].guid, ACPI_20_TABLE_GUID) == 0) {
-			efi.acpi20 = __va(config_tables[i].table);
+			efi.acpi20 = config_tables[i].table;
 			printk(KERN_INFO " ACPI 2.0=0x%lx ", config_tables[i].table);
 		} else
 		    if (efi_guidcmp(config_tables[i].guid, ACPI_TABLE_GUID) == 0) {
-			efi.acpi = __va(config_tables[i].table);
+			efi.acpi = config_tables[i].table;
 			printk(KERN_INFO " ACPI=0x%lx ", config_tables[i].table);
 		} else
 		    if (efi_guidcmp(config_tables[i].guid, SMBIOS_TABLE_GUID) == 0) {
-			efi.smbios = (void *) config_tables[i].table;
+			efi.smbios = config_tables[i].table;
 			printk(KERN_INFO " SMBIOS=0x%lx ", config_tables[i].table);
 		} else
 		    if (efi_guidcmp(config_tables[i].guid, HCDP_TABLE_GUID) == 0) {
-			efi.hcdp = (void *)config_tables[i].table;
+			efi.hcdp = config_tables[i].table;
 			printk(KERN_INFO " HCDP=0x%lx ", config_tables[i].table);
 		} else
 		    if (efi_guidcmp(config_tables[i].guid, UGA_IO_PROTOCOL_GUID) == 0) {
-			efi.uga = (void *)config_tables[i].table;
+			efi.uga = config_tables[i].table;
 			printk(KERN_INFO " UGA=0x%lx ", config_tables[i].table);
 		}
 	}
@@ -427,20 +442,28 @@ void __init efi_init(void)
 		printk(KERN_ERR PFX "Could not map the runtime service table!\n");
 
 	/* Map the EFI memory map for use until paging_init() */
-
-	memmap.map = (efi_memory_desc_t *)
-		boot_ioremap((unsigned long) EFI_MEMMAP, EFI_MEMMAP_SIZE);
-
+	memmap.map = boot_ioremap((unsigned long) EFI_MEMMAP, EFI_MEMMAP_SIZE);
 	if (memmap.map == NULL)
 		printk(KERN_ERR PFX "Could not map the EFI memory map!\n");
 
-	if (EFI_MEMDESC_SIZE != sizeof(efi_memory_desc_t)) {
-		printk(KERN_WARNING PFX "Warning! Kernel-defined memdesc doesn't "
-			   "match the one from EFI!\n");
-	}
+	memmap.map_end = memmap.map + (memmap.nr_map * memmap.desc_size);
+
 #if EFI_DEBUG
 	print_efi_memmap();
 #endif
+}
+
+static inline void __init check_range_for_systab(efi_memory_desc_t *md)
+{
+	if (((unsigned long)md->phys_addr <= (unsigned long)efi_phys.systab) &&
+		((unsigned long)efi_phys.systab < md->phys_addr +
+		((unsigned long)md->num_pages << EFI_PAGE_SHIFT))) {
+		unsigned long addr;
+
+		addr = md->virt_addr - md->phys_addr +
+			(unsigned long)efi_phys.systab;
+		efi.systab = (efi_system_table_t *)addr;
+	}
 }
 
 /*
@@ -456,43 +479,32 @@ void __init efi_enter_virtual_mode(void)
 {
 	efi_memory_desc_t *md;
 	efi_status_t status;
-	int i;
+	void *p;
 
 	efi.systab = NULL;
 
-	for (i = 0; i < memmap.nr_map; i++) {
-		md = &memmap.map[i];
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 
-		if (md->attribute & EFI_MEMORY_RUNTIME) {
-			md->virt_addr =
-				(unsigned long)ioremap(md->phys_addr,
-					md->num_pages << EFI_PAGE_SHIFT);
-			if (!(unsigned long)md->virt_addr) {
-				printk(KERN_ERR PFX "ioremap of 0x%lX failed\n",
-					(unsigned long)md->phys_addr);
-			}
+		if (!(md->attribute & EFI_MEMORY_RUNTIME))
+			continue;
 
-			if (((unsigned long)md->phys_addr <=
-					(unsigned long)efi_phys.systab) &&
-				((unsigned long)efi_phys.systab <
-					md->phys_addr +
-					((unsigned long)md->num_pages <<
-						EFI_PAGE_SHIFT))) {
-				unsigned long addr;
-
-				addr = md->virt_addr - md->phys_addr +
-						(unsigned long)efi_phys.systab;
-				efi.systab = (efi_system_table_t *)addr;
-			}
+		md->virt_addr = (unsigned long)ioremap(md->phys_addr,
+			md->num_pages << EFI_PAGE_SHIFT);
+		if (!(unsigned long)md->virt_addr) {
+			printk(KERN_ERR PFX "ioremap of 0x%lX failed\n",
+				(unsigned long)md->phys_addr);
 		}
+		/* update the virtual address of the EFI system table */
+		check_range_for_systab(md);
 	}
 
 	if (!efi.systab)
 		BUG();
 
 	status = phys_efi_set_virtual_address_map(
-			sizeof(efi_memory_desc_t) * memmap.nr_map,
-			sizeof(efi_memory_desc_t),
+			memmap.desc_size * memmap.nr_map,
+			memmap.desc_size,
 			memmap.desc_version,
 		       	memmap.phys_map);
 
@@ -532,15 +544,15 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 {
 	struct resource *res;
 	efi_memory_desc_t *md;
-	int i;
+	void *p;
 
-	for (i = 0; i < memmap.nr_map; i++) {
-		md = &memmap.map[i];
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 
 		if ((md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT)) >
 		    0x100000000ULL)
 			continue;
-		res = alloc_bootmem_low(sizeof(struct resource));
+		res = kzalloc(sizeof(struct resource), GFP_ATOMIC);
 		switch (md->type) {
 		case EFI_RESERVED_TYPE:
 			res->name = "Reserved Memory";
@@ -598,6 +610,9 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 		if (md->type == EFI_CONVENTIONAL_MEMORY) {
 			request_resource(res, code_resource);
 			request_resource(res, data_resource);
+#ifdef CONFIG_KEXEC
+			request_resource(res, &crashk_res);
+#endif
 		}
 	}
 }
@@ -609,10 +624,10 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 u32 efi_mem_type(unsigned long phys_addr)
 {
 	efi_memory_desc_t *md;
-	int i;
+	void *p;
 
-	for (i = 0; i < memmap.nr_map; i++) {
-		md = &memmap.map[i];
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 		if ((md->phys_addr <= phys_addr) && (phys_addr <
 			(md->phys_addr + (md-> num_pages << EFI_PAGE_SHIFT)) ))
 			return md->type;
@@ -623,10 +638,10 @@ u32 efi_mem_type(unsigned long phys_addr)
 u64 efi_mem_attributes(unsigned long phys_addr)
 {
 	efi_memory_desc_t *md;
-	int i;
+	void *p;
 
-	for (i = 0; i < memmap.nr_map; i++) {
-		md = &memmap.map[i];
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 		if ((md->phys_addr <= phys_addr) && (phys_addr <
 			(md->phys_addr + (md-> num_pages << EFI_PAGE_SHIFT)) ))
 			return md->attribute;

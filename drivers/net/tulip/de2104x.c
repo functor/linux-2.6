@@ -402,8 +402,7 @@ static void de_rx (struct de_private *de)
 		unsigned copying_skb, buflen;
 
 		skb = de->rx_skb[rx_tail].skb;
-		if (!skb)
-			BUG();
+		BUG_ON(!skb);
 		rmb();
 		status = le32_to_cpu(de->rx_ring[rx_tail].opts1);
 		if (status & DescOwn)
@@ -446,13 +445,13 @@ static void de_rx (struct de_private *de)
 
 			mapping =
 			de->rx_skb[rx_tail].mapping =
-				pci_map_single(de->pdev, copy_skb->tail,
+				pci_map_single(de->pdev, copy_skb->data,
 					       buflen, PCI_DMA_FROMDEVICE);
 			de->rx_skb[rx_tail].skb = copy_skb;
 		} else {
 			pci_dma_sync_single_for_cpu(de->pdev, mapping, len, PCI_DMA_FROMDEVICE);
 			skb_reserve(copy_skb, RX_OFFSET);
-			memcpy(skb_put(copy_skb, len), skb->tail, len);
+			memcpy(skb_put(copy_skb, len), skb->data, len);
 
 			pci_dma_sync_single_for_device(de->pdev, mapping, len, PCI_DMA_FROMDEVICE);
 
@@ -545,8 +544,7 @@ static void de_tx (struct de_private *de)
 			break;
 
 		skb = de->tx_skb[tx_tail].skb;
-		if (!skb)
-			BUG();
+		BUG_ON(!skb);
 		if (unlikely(skb == DE_DUMMY_SKB))
 			goto next;
 
@@ -789,8 +787,7 @@ static void __de_set_rx_mode (struct net_device *dev)
 
 	de->tx_head = NEXT_TX(entry);
 
-	if (TX_BUFFS_AVAIL(de) < 0)
-		BUG();
+	BUG_ON(TX_BUFFS_AVAIL(de) < 0);
 	if (TX_BUFFS_AVAIL(de) == 0)
 		netif_stop_queue(dev);
 
@@ -916,8 +913,7 @@ static void de_set_media (struct de_private *de)
 	unsigned media = de->media_type;
 	u32 macmode = dr32(MacMode);
 
-	if (de_is_running(de))
-		BUG();
+	BUG_ON(de_is_running(de));
 
 	if (de->de21040)
 		dw32(CSR11, FULL_DUPLEX_MAGIC);
@@ -1153,8 +1149,7 @@ static void de_media_interrupt (struct de_private *de, u32 status)
 		return;
 	}
 	
-	if (!(status & LinkFail))
-		BUG();
+	BUG_ON(!(status & LinkFail));
 
 	if (netif_carrier_ok(de->dev)) {
 		de_link_down(de);
@@ -1269,7 +1264,7 @@ static int de_refill_rx (struct de_private *de)
 		skb->dev = de->dev;
 
 		de->rx_skb[i].mapping = pci_map_single(de->pdev,
-			skb->tail, de->rx_buf_sz, PCI_DMA_FROMDEVICE);
+			skb->data, de->rx_buf_sz, PCI_DMA_FROMDEVICE);
 		de->rx_skb[i].skb = skb;
 
 		de->rx_ring[i].opts1 = cpu_to_le32(DescOwn);
@@ -1332,11 +1327,11 @@ static void de_clean_rings (struct de_private *de)
 		struct sk_buff *skb = de->tx_skb[i].skb;
 		if ((skb) && (skb != DE_DUMMY_SKB)) {
 			if (skb != DE_SETUP_SKB) {
-				dev_kfree_skb(skb);
 				de->net_stats.tx_dropped++;
 				pci_unmap_single(de->pdev,
 					de->tx_skb[i].mapping,
 					skb->len, PCI_DMA_TODEVICE);
+				dev_kfree_skb(skb);
 			} else {
 				pci_unmap_single(de->pdev,
 					de->tx_skb[i].mapping,
@@ -1362,7 +1357,6 @@ static int de_open (struct net_device *dev)
 {
 	struct de_private *de = dev->priv;
 	int rc;
-	unsigned long flags;
 
 	if (netif_msg_ifup(de))
 		printk(KERN_DEBUG "%s: enabling interface\n", dev->name);
@@ -1376,18 +1370,20 @@ static int de_open (struct net_device *dev)
 		return rc;
 	}
 
-	rc = de_init_hw(de);
-	if (rc) {
-		printk(KERN_ERR "%s: h/w init failure, err=%d\n",
-		       dev->name, rc);
-		goto err_out_free;
-	}
+	dw32(IntrMask, 0);
 
 	rc = request_irq(dev->irq, de_interrupt, SA_SHIRQ, dev->name, dev);
 	if (rc) {
 		printk(KERN_ERR "%s: IRQ %d request failure, err=%d\n",
 		       dev->name, dev->irq, rc);
-		goto err_out_hw;
+		goto err_out_free;
+	}
+
+	rc = de_init_hw(de);
+	if (rc) {
+		printk(KERN_ERR "%s: h/w init failure, err=%d\n",
+		       dev->name, rc);
+		goto err_out_free_irq;
 	}
 
 	netif_start_queue(dev);
@@ -1395,11 +1391,8 @@ static int de_open (struct net_device *dev)
 
 	return 0;
 
-err_out_hw:
-	spin_lock_irqsave(&de->lock, flags);
-	de_stop_hw(de);
-	spin_unlock_irqrestore(&de->lock, flags);
-
+err_out_free_irq:
+	free_irq(dev->irq, dev);
 err_out_free:
 	de_free_rings(de);
 	return rc;
@@ -1454,6 +1447,8 @@ static void de_tx_timeout (struct net_device *dev)
 
 	synchronize_irq(dev->irq);
 	de_clean_rings(de);
+
+	de_init_rings(de);
 
 	de_init_hw(de);
 	
@@ -1787,9 +1782,14 @@ static void __init de21041_get_srom_info (struct de_private *de)
 	/* DEC now has a specification but early board makers
 	   just put the address in the first EEPROM locations. */
 	/* This does  memcmp(eedata, eedata+16, 8) */
+
+#ifndef CONFIG_MIPS_COBALT
+
 	for (i = 0; i < 8; i ++)
 		if (ee_data[i] != ee_data[16+i])
 			sa_offset = 20;
+
+#endif
 
 	/* store MAC address */
 	for (i = 0; i < 6; i ++)
@@ -1934,7 +1934,7 @@ static int __init de_init_one (struct pci_dev *pdev,
 	struct de_private *de;
 	int rc;
 	void __iomem *regs;
-	long pciaddr;
+	unsigned long pciaddr;
 	static int board_idx = -1;
 
 	board_idx++;
@@ -2071,8 +2071,7 @@ static int __init de_init_one (struct pci_dev *pdev,
 	return 0;
 
 err_out_iomap:
-	if (de->ee_data)
-		kfree(de->ee_data);
+	kfree(de->ee_data);
 	iounmap(regs);
 err_out_res:
 	pci_release_regions(pdev);
@@ -2088,11 +2087,9 @@ static void __exit de_remove_one (struct pci_dev *pdev)
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct de_private *de = dev->priv;
 
-	if (!dev)
-		BUG();
+	BUG_ON(!dev);
 	unregister_netdev(dev);
-	if (de->ee_data)
-		kfree(de->ee_data);
+	kfree(de->ee_data);
 	iounmap(de->regs);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);

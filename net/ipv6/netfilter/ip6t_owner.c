@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/file.h>
+#include <linux/rcupdate.h>
 #include <net/sock.h>
 
 #include <linux/netfilter_ipv6/ip6t_owner.h>
@@ -20,76 +21,12 @@ MODULE_AUTHOR("Marc Boucher <marc@mbsi.ca>");
 MODULE_DESCRIPTION("IP6 tables owner matching module");
 MODULE_LICENSE("GPL");
 
-static int
-match_pid(const struct sk_buff *skb, pid_t pid)
-{
-	struct task_struct *p;
-	struct files_struct *files;
-	int i;
-
-	read_lock(&tasklist_lock);
-	p = find_task_by_real_pid(pid);
-	if (!p)
-		goto out;
-	task_lock(p);
-	files = p->files;
-	if(files) {
-		spin_lock(&files->file_lock);
-		for (i=0; i < files->max_fds; i++) {
-			if (fcheck_files(files, i) == skb->sk->sk_socket->file) {
-				spin_unlock(&files->file_lock);
-				task_unlock(p);
-				read_unlock(&tasklist_lock);
-				return 1;
-			}
-		}
-		spin_unlock(&files->file_lock);
-	}
-	task_unlock(p);
-out:
-	read_unlock(&tasklist_lock);
-	return 0;
-}
-
-static int
-match_sid(const struct sk_buff *skb, pid_t sid)
-{
-	struct task_struct *g, *p;
-	struct file *file = skb->sk->sk_socket->file;
-	int i, found=0;
-
-	read_lock(&tasklist_lock);
-	do_each_thread(g, p) {
-		struct files_struct *files;
-		if (p->signal->session != sid)
-			continue;
-
-		task_lock(p);
-		files = p->files;
-		if (files) {
-			spin_lock(&files->file_lock);
-			for (i=0; i < files->max_fds; i++) {
-				if (fcheck_files(files, i) == file) {
-					found = 1;
-					break;
-				}
-			}
-			spin_unlock(&files->file_lock);
-		}
-		task_unlock(p);
-		if (found)
-			goto out;
-	} while_each_thread(g, p);
-out:
-	read_unlock(&tasklist_lock);
-
-	return found;
-}
 
 static int
 match(const struct sk_buff *skb,
       const struct net_device *in,
       const struct net_device *out,
+      const struct xt_match *match,
       const void *matchinfo,
       int offset,
       unsigned int protoff,
@@ -100,27 +37,15 @@ match(const struct sk_buff *skb,
 	if (!skb->sk || !skb->sk->sk_socket || !skb->sk->sk_socket->file)
 		return 0;
 
-	if(info->match & IP6T_OWNER_UID) {
-		if((skb->sk->sk_socket->file->f_uid != info->uid) ^
+	if (info->match & IP6T_OWNER_UID) {
+		if ((skb->sk->sk_socket->file->f_uid != info->uid) ^
 		    !!(info->invert & IP6T_OWNER_UID))
 			return 0;
 	}
 
-	if(info->match & IP6T_OWNER_GID) {
-		if((skb->sk->sk_socket->file->f_gid != info->gid) ^
+	if (info->match & IP6T_OWNER_GID) {
+		if ((skb->sk->sk_socket->file->f_gid != info->gid) ^
 		    !!(info->invert & IP6T_OWNER_GID))
-			return 0;
-	}
-
-	if(info->match & IP6T_OWNER_PID) {
-		if (!match_pid(skb, info->pid) ^
-		    !!(info->invert & IP6T_OWNER_PID))
-			return 0;
-	}
-
-	if(info->match & IP6T_OWNER_SID) {
-		if (!match_sid(skb, info->sid) ^
-		    !!(info->invert & IP6T_OWNER_SID))
 			return 0;
 	}
 
@@ -129,46 +54,40 @@ match(const struct sk_buff *skb,
 
 static int
 checkentry(const char *tablename,
-           const struct ip6t_ip6 *ip,
-           void *matchinfo,
-           unsigned int matchsize,
-           unsigned int hook_mask)
+	   const void *ip,
+	   const struct xt_match *match,
+	   void *matchinfo,
+	   unsigned int matchsize,
+	   unsigned int hook_mask)
 {
-        if (hook_mask
-            & ~((1 << NF_IP6_LOCAL_OUT) | (1 << NF_IP6_POST_ROUTING))) {
-                printk("ip6t_owner: only valid for LOCAL_OUT or POST_ROUTING.\n");
-                return 0;
-        }
+	const struct ip6t_owner_info *info = matchinfo;
 
-	if (matchsize != IP6T_ALIGN(sizeof(struct ip6t_owner_info)))
-		return 0;
-#ifdef CONFIG_SMP
-	/* files->file_lock can not be used in a BH */
-	if (((struct ip6t_owner_info *)matchinfo)->match
-	    & (IP6T_OWNER_PID|IP6T_OWNER_SID)) {
-		printk("ip6t_owner: pid and sid matching is broken on SMP.\n");
+	if (info->match & (IP6T_OWNER_PID | IP6T_OWNER_SID)) {
+		printk("ipt_owner: pid and sid matching "
+		       "not supported anymore\n");
 		return 0;
 	}
-#endif
 	return 1;
 }
 
 static struct ip6t_match owner_match = {
 	.name		= "owner",
-	.match		= &match,
-	.checkentry	= &checkentry,
+	.match		= match,
+	.matchsize	= sizeof(struct ip6t_owner_info),
+	.hooks		= (1 << NF_IP6_LOCAL_OUT) | (1 << NF_IP6_POST_ROUTING),
+	.checkentry	= checkentry,
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ip6t_owner_init(void)
 {
 	return ip6t_register_match(&owner_match);
 }
 
-static void __exit fini(void)
+static void __exit ip6t_owner_fini(void)
 {
 	ip6t_unregister_match(&owner_match);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ip6t_owner_init);
+module_exit(ip6t_owner_fini);

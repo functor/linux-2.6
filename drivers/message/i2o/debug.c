@@ -4,8 +4,6 @@
 #include <linux/pci.h>
 #include <linux/i2o.h>
 
-extern struct i2o_driver **i2o_drivers;
-extern unsigned int i2o_max_drivers;
 static void i2o_report_util_cmd(u8 cmd);
 static void i2o_report_exec_cmd(u8 cmd);
 static void i2o_report_fail_status(u8 req_status, u32 * msg);
@@ -23,7 +21,6 @@ void i2o_report_status(const char *severity, const char *str,
 	u8 cmd = (msg[1] >> 24) & 0xFF;
 	u8 req_status = (msg[4] >> 24) & 0xFF;
 	u16 detailed_status = msg[4] & 0xFFFF;
-	//struct i2o_driver *h = i2o_drivers[msg[2] & (i2o_max_drivers-1)];
 
 	if (cmd == I2O_CMD_UTIL_EVT_REGISTER)
 		return;		// No status in this reply
@@ -93,7 +90,7 @@ static void i2o_report_fail_status(u8 req_status, u32 * msg)
 	};
 
 	if (req_status == I2O_FSC_TRANSPORT_UNKNOWN_FAILURE)
-		printk(KERN_DEBUG "TRANSPORT_UNKNOWN_FAILURE (%0#2x)\n.",
+		printk(KERN_DEBUG "TRANSPORT_UNKNOWN_FAILURE (%0#2x).\n",
 		       req_status);
 	else
 		printk(KERN_DEBUG "TRANSPORT_%s.\n",
@@ -422,58 +419,53 @@ void i2o_dump_hrt(struct i2o_controller *c)
 		d = (u8 *) (rows + 2);
 		state = p[1] << 8 | p[0];
 
-		printk(KERN_DEBUG "TID %04X:[", state & 0xFFF);
+		printk("TID %04X:[", state & 0xFFF);
 		state >>= 12;
 		if (state & (1 << 0))
-			printk(KERN_DEBUG "H");	/* Hidden */
+			printk("H");	/* Hidden */
 		if (state & (1 << 2)) {
-			printk(KERN_DEBUG "P");	/* Present */
+			printk("P");	/* Present */
 			if (state & (1 << 1))
-				printk(KERN_DEBUG "C");	/* Controlled */
+				printk("C");	/* Controlled */
 		}
 		if (state > 9)
-			printk(KERN_DEBUG "*");	/* Hard */
+			printk("*");	/* Hard */
 
-		printk(KERN_DEBUG "]:");
+		printk("]:");
 
 		switch (p[3] & 0xFFFF) {
 		case 0:
 			/* Adapter private bus - easy */
-			printk(KERN_DEBUG
-			       "Local bus %d: I/O at 0x%04X Mem 0x%08X", p[2],
+			printk("Local bus %d: I/O at 0x%04X Mem 0x%08X", p[2],
 			       d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 		case 1:
 			/* ISA bus */
-			printk(KERN_DEBUG
-			       "ISA %d: CSN %d I/O at 0x%04X Mem 0x%08X", p[2],
+			printk("ISA %d: CSN %d I/O at 0x%04X Mem 0x%08X", p[2],
 			       d[2], d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 
 		case 2:	/* EISA bus */
-			printk(KERN_DEBUG
-			       "EISA %d: Slot %d I/O at 0x%04X Mem 0x%08X",
+			printk("EISA %d: Slot %d I/O at 0x%04X Mem 0x%08X",
 			       p[2], d[3], d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 
 		case 3:	/* MCA bus */
-			printk(KERN_DEBUG
-			       "MCA %d: Slot %d I/O at 0x%04X Mem 0x%08X", p[2],
+			printk("MCA %d: Slot %d I/O at 0x%04X Mem 0x%08X", p[2],
 			       d[3], d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 
 		case 4:	/* PCI bus */
-			printk(KERN_DEBUG
-			       "PCI %d: Bus %d Device %d Function %d", p[2],
+			printk("PCI %d: Bus %d Device %d Function %d", p[2],
 			       d[2], d[1], d[0]);
 			break;
 
 		case 0x80:	/* Other */
 		default:
-			printk(KERN_DEBUG "Unsupported bus type.");
+			printk("Unsupported bus type.");
 			break;
 		}
-		printk(KERN_DEBUG "\n");
+		printk("\n");
 		rows += length;
 	}
 }

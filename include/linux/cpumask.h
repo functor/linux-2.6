@@ -12,6 +12,8 @@
  * see bitmap_scnprintf() and bitmap_parse() in lib/bitmap.c.
  * For details of cpulist_scnprintf() and cpulist_parse(), see
  * bitmap_scnlistprintf() and bitmap_parselist(), also in bitmap.c.
+ * For details of cpu_remap(), see bitmap_bitremap in lib/bitmap.c
+ * For details of cpus_remap(), see bitmap_remap in lib/bitmap.c.
  *
  * The available cpumask operations are:
  *
@@ -50,6 +52,8 @@
  * int cpumask_parse(ubuf, ulen, mask)	Parse ascii string as cpumask
  * int cpulist_scnprintf(buf, len, mask) Format cpumask as list for printing
  * int cpulist_parse(buf, map)		Parse ascii string as cpulist
+ * int cpu_remap(oldbit, old, new)	newbit = map(old, new)(oldbit)
+ * int cpus_remap(dst, src, old, new)	*dst = map(old, new)(src)
  *
  * for_each_cpu_mask(cpu, mask)		for-loop cpu over mask
  *
@@ -63,7 +67,7 @@
  *
  * int any_online_cpu(mask)		First online cpu in mask
  *
- * for_each_cpu(cpu)			for-loop cpu over cpu_possible_map
+ * for_each_possible_cpu(cpu)		for-loop cpu over cpu_possible_map
  * for_each_online_cpu(cpu)		for-loop cpu over cpu_online_map
  * for_each_present_cpu(cpu)		for-loop cpu over cpu_present_map
  *
@@ -80,7 +84,6 @@
 #include <linux/kernel.h>
 #include <linux/threads.h>
 #include <linux/bitmap.h>
-#include <asm/bug.h>
 
 typedef struct { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
 extern cpumask_t _unused_cpumask_arg_;
@@ -209,17 +212,15 @@ static inline void __cpus_shift_left(cpumask_t *dstp,
 	bitmap_shift_left(dstp->bits, srcp->bits, n, nbits);
 }
 
-#define first_cpu(src) __first_cpu(&(src), NR_CPUS)
-static inline int __first_cpu(const cpumask_t *srcp, int nbits)
-{
-	return min_t(int, nbits, find_first_bit(srcp->bits, nbits));
-}
-
-#define next_cpu(n, src) __next_cpu((n), &(src), NR_CPUS)
-static inline int __next_cpu(int n, const cpumask_t *srcp, int nbits)
-{
-	return min_t(int, nbits, find_next_bit(srcp->bits, nbits, n+1));
-}
+#ifdef CONFIG_SMP
+int __first_cpu(const cpumask_t *srcp);
+#define first_cpu(src) __first_cpu(&(src))
+int __next_cpu(int n, const cpumask_t *srcp);
+#define next_cpu(n, src) __next_cpu((n), &(src))
+#else
+#define first_cpu(src)		0
+#define next_cpu(n, src)	1
+#endif
 
 #define cpumask_of_cpu(cpu)						\
 ({									\
@@ -294,6 +295,22 @@ static inline int __cpulist_parse(const char *buf, cpumask_t *dstp, int nbits)
 	return bitmap_parselist(buf, dstp->bits, nbits);
 }
 
+#define cpu_remap(oldbit, old, new) \
+		__cpu_remap((oldbit), &(old), &(new), NR_CPUS)
+static inline int __cpu_remap(int oldbit,
+		const cpumask_t *oldp, const cpumask_t *newp, int nbits)
+{
+	return bitmap_bitremap(oldbit, oldp->bits, newp->bits, nbits);
+}
+
+#define cpus_remap(dst, src, old, new) \
+		__cpus_remap(&(dst), &(src), &(old), &(new), NR_CPUS)
+static inline void __cpus_remap(cpumask_t *dstp, const cpumask_t *srcp,
+		const cpumask_t *oldp, const cpumask_t *newp, int nbits)
+{
+	bitmap_remap(dstp->bits, srcp->bits, oldp->bits, newp->bits, nbits);
+}
+
 #if NR_CPUS > 1
 #define for_each_cpu_mask(cpu, mask)		\
 	for ((cpu) = first_cpu(mask);		\
@@ -309,7 +326,7 @@ static inline int __cpulist_parse(const char *buf, cpumask_t *dstp, int nbits)
  * bitmap of size NR_CPUS.
  *
  *  #ifdef CONFIG_HOTPLUG_CPU
- *     cpu_possible_map - all NR_CPUS bits set
+ *     cpu_possible_map - has bit 'cpu' set iff cpu is populatable
  *     cpu_present_map  - has bit 'cpu' set iff cpu is populated
  *     cpu_online_map   - has bit 'cpu' set iff cpu available to scheduler
  *  #else
@@ -379,16 +396,17 @@ extern cpumask_t cpu_present_map;
 #define cpu_present(cpu)	((cpu) == 0)
 #endif
 
-#define any_online_cpu(mask)			\
-({						\
-	int cpu;				\
-	for_each_cpu_mask(cpu, (mask))		\
-		if (cpu_online(cpu))		\
-			break;			\
-	cpu;					\
-})
+#ifdef CONFIG_SMP
+int highest_possible_processor_id(void);
+#define any_online_cpu(mask) __any_online_cpu(&(mask))
+int __any_online_cpu(const cpumask_t *mask);
+#else
+#define highest_possible_processor_id()	0
+#define any_online_cpu(mask)		0
+#endif
 
-#define for_each_cpu(cpu)	  for_each_cpu_mask((cpu), cpu_possible_map)
+#define for_each_cpu(cpu)  for_each_cpu_mask((cpu), cpu_possible_map)
+#define for_each_possible_cpu(cpu)  for_each_cpu_mask((cpu), cpu_possible_map)
 #define for_each_online_cpu(cpu)  for_each_cpu_mask((cpu), cpu_online_map)
 #define for_each_present_cpu(cpu) for_each_cpu_mask((cpu), cpu_present_map)
 

@@ -137,74 +137,6 @@ extern void __pgd_error(const char *file, int line, unsigned long val);
 #define SUPERSECTION_MASK	(~(SUPERSECTION_SIZE-1))
 
 /*
- * Hardware page table definitions.
- *
- * + Level 1 descriptor (PMD)
- *   - common
- */
-#define PMD_TYPE_MASK		(3 << 0)
-#define PMD_TYPE_FAULT		(0 << 0)
-#define PMD_TYPE_TABLE		(1 << 0)
-#define PMD_TYPE_SECT		(2 << 0)
-#define PMD_BIT4		(1 << 4)
-#define PMD_DOMAIN(x)		((x) << 5)
-#define PMD_PROTECTION		(1 << 9)	/* v5 */
-/*
- *   - section
- */
-#define PMD_SECT_BUFFERABLE	(1 << 2)
-#define PMD_SECT_CACHEABLE	(1 << 3)
-#define PMD_SECT_AP_WRITE	(1 << 10)
-#define PMD_SECT_AP_READ	(1 << 11)
-#define PMD_SECT_TEX(x)		((x) << 12)	/* v5 */
-#define PMD_SECT_APX		(1 << 15)	/* v6 */
-#define PMD_SECT_S		(1 << 16)	/* v6 */
-#define PMD_SECT_nG		(1 << 17)	/* v6 */
-#define PMD_SECT_SUPER		(1 << 18)	/* v6 */
-
-#define PMD_SECT_UNCACHED	(0)
-#define PMD_SECT_BUFFERED	(PMD_SECT_BUFFERABLE)
-#define PMD_SECT_WT		(PMD_SECT_CACHEABLE)
-#define PMD_SECT_WB		(PMD_SECT_CACHEABLE | PMD_SECT_BUFFERABLE)
-#define PMD_SECT_MINICACHE	(PMD_SECT_TEX(1) | PMD_SECT_CACHEABLE)
-#define PMD_SECT_WBWA		(PMD_SECT_TEX(1) | PMD_SECT_CACHEABLE | PMD_SECT_BUFFERABLE)
-
-/*
- *   - coarse table (not used)
- */
-
-/*
- * + Level 2 descriptor (PTE)
- *   - common
- */
-#define PTE_TYPE_MASK		(3 << 0)
-#define PTE_TYPE_FAULT		(0 << 0)
-#define PTE_TYPE_LARGE		(1 << 0)
-#define PTE_TYPE_SMALL		(2 << 0)
-#define PTE_TYPE_EXT		(3 << 0)	/* v5 */
-#define PTE_BUFFERABLE		(1 << 2)
-#define PTE_CACHEABLE		(1 << 3)
-
-/*
- *   - extended small page/tiny page
- */
-#define PTE_EXT_AP_MASK		(3 << 4)
-#define PTE_EXT_AP_UNO_SRO	(0 << 4)
-#define PTE_EXT_AP_UNO_SRW	(1 << 4)
-#define PTE_EXT_AP_URO_SRW	(2 << 4)
-#define PTE_EXT_AP_URW_SRW	(3 << 4)
-#define PTE_EXT_TEX(x)		((x) << 6)	/* v5 */
-
-/*
- *   - small page
- */
-#define PTE_SMALL_AP_MASK	(0xff << 4)
-#define PTE_SMALL_AP_UNO_SRO	(0x00 << 4)
-#define PTE_SMALL_AP_UNO_SRW	(0x55 << 4)
-#define PTE_SMALL_AP_URO_SRW	(0xaa << 4)
-#define PTE_SMALL_AP_URW_SRW	(0xff << 4)
-
-/*
  * "Linux" PTE definitions.
  *
  * We keep two sets of PTEs - the hardware and the linux version.
@@ -224,13 +156,11 @@ extern void __pgd_error(const char *file, int line, unsigned long val);
 #define L_PTE_WRITE		(1 << 5)
 #define L_PTE_EXEC		(1 << 6)
 #define L_PTE_DIRTY		(1 << 7)
+#define L_PTE_COHERENT		(1 << 9)	/* I/O coherent (xsc3) */
+#define L_PTE_SHARED		(1 << 10)	/* shared between CPUs (v6) */
+#define L_PTE_ASID		(1 << 11)	/* non-global (use ASID, v6) */
 
 #ifndef __ASSEMBLY__
-
-#include <asm/domain.h>
-
-#define _PAGE_USER_TABLE	(PMD_TYPE_TABLE | PMD_BIT4 | PMD_DOMAIN(DOMAIN_USER))
-#define _PAGE_KERNEL_TABLE	(PMD_TYPE_TABLE | PMD_BIT4 | PMD_DOMAIN(DOMAIN_KERNEL))
 
 /*
  * The following macros handle the cache and bufferable bits...
@@ -389,9 +319,6 @@ static inline pte_t *pmd_page_kernel(pmd_t pmd)
 #define pgd_clear(pgdp)		do { } while (0)
 #define set_pgd(pgd,pgdp)	do { } while (0)
 
-#define page_pte_prot(page,prot)	mk_pte(page, prot)
-#define page_pte(page)		mk_pte(page, __pgprot(0))
-
 /* to find an entry in a page-table-directory */
 #define pgd_index(addr)		((addr) >> PGDIR_SHIFT)
 
@@ -437,12 +364,9 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 #define HAVE_ARCH_UNMAPPED_AREA
 
 /*
- * remap a physical address `phys' of size `size' with page protection `prot'
+ * remap a physical page `pfn' of size `size' with page protection `prot'
  * into virtual address `from'
  */
-#define io_remap_page_range(vma,from,phys,size,prot) \
-		remap_pfn_range(vma, from, (phys) >> PAGE_SHIFT, size, prot)
-
 #define io_remap_pfn_range(vma,from,pfn,size,prot) \
 		remap_pfn_range(vma, from, pfn, size, prot)
 

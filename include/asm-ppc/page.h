@@ -1,9 +1,12 @@
 #ifndef _PPC_PAGE_H
 #define _PPC_PAGE_H
 
+#include <linux/config.h>
+#include <asm/asm-compat.h>
+
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
-#define PAGE_SIZE	(1UL << PAGE_SHIFT)
+#define PAGE_SIZE	(ASM_CONST(1) << PAGE_SHIFT)
 
 /*
  * Subtle: this is an int (not an unsigned long) and so it
@@ -17,6 +20,7 @@
 /* This must match what is in arch/ppc/Makefile */
 #define PAGE_OFFSET	CONFIG_KERNEL_START
 #define KERNELBASE	PAGE_OFFSET
+#define is_kernel_addr(x)	((x) >= PAGE_OFFSET)
 
 #ifndef __ASSEMBLY__
 
@@ -33,6 +37,17 @@ typedef unsigned long pte_basic_t;
 #define PTE_SHIFT	(PAGE_SHIFT - 2)	/* 1024 ptes per page */
 #define PTE_FMT		"%.8lx"
 #endif
+
+/* align addr on a size boundary - adjust address up/down if needed */
+#define _ALIGN_UP(addr,size)	(((addr)+((size)-1))&(~((size)-1)))
+#define _ALIGN_DOWN(addr,size)	((addr)&(~((size)-1)))
+
+/* align addr on a size boundary - adjust address up if needed */
+#define _ALIGN(addr,size)     _ALIGN_UP(addr,size)
+
+/* to align the pointer to the (next) page boundary */
+#define PAGE_ALIGN(addr)	_ALIGN(addr, PAGE_SIZE)
+
 
 #undef STRICT_MM_TYPECHECKS
 
@@ -75,13 +90,6 @@ typedef unsigned long pgprot_t;
 #define __pgprot(x)	(x)
 
 #endif
-
-
-/* align addr on a size boundary - adjust address up if needed -- Cort */
-#define _ALIGN(addr,size)	(((addr)+(size)-1)&(~((size)-1)))
-
-/* to align the pointer to the (next) page boundary */
-#define PAGE_ALIGN(addr)	(((addr)+PAGE_SIZE-1)&PAGE_MASK)
 
 struct page;
 extern void clear_pages(void *page, int order);
@@ -142,8 +150,7 @@ extern int page_is_ram(unsigned long pfn);
 #define __pa(x) ___pa((unsigned long)(x))
 #define __va(x) ((void *)(___va((unsigned long)(x))))
 
-#define pfn_to_page(pfn)	(mem_map + ((pfn) - PPC_PGSTART))
-#define page_to_pfn(page)	((unsigned long)((page) - mem_map) + PPC_PGSTART)
+#define ARCH_PFN_OFFSET		(PPC_PGSTART)
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 #define page_to_virt(page)	__va(page_to_pfn(page) << PAGE_SHIFT)
 
@@ -165,7 +172,11 @@ extern __inline__ int get_order(unsigned long size)
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
+/* We do define AT_SYSINFO_EHDR but don't use the gate mecanism */
+#define __HAVE_ARCH_GATE_AREA		1
+
 #define devmem_is_allowed(x) 1
 
+#include <asm-generic/memory_model.h>
 #endif /* __KERNEL__ */
 #endif /* _PPC_PAGE_H */

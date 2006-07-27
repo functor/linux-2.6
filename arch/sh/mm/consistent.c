@@ -11,7 +11,7 @@
 #include <linux/dma-mapping.h>
 #include <asm/io.h>
 
-void *consistent_alloc(int gfp, size_t size, dma_addr_t *handle)
+void *consistent_alloc(gfp_t gfp, size_t size, dma_addr_t *handle)
 {
 	struct page *page, *end, *free;
 	void *ret;
@@ -23,6 +23,7 @@ void *consistent_alloc(int gfp, size_t size, dma_addr_t *handle)
 	page = alloc_pages(gfp, order);
 	if (!page)
 		return NULL;
+	split_page(page, order);
 
 	ret = page_address(page);
 	*handle = virt_to_phys(ret);
@@ -37,8 +38,6 @@ void *consistent_alloc(int gfp, size_t size, dma_addr_t *handle)
 	end  = page + (1 << order);
 
 	while (++page < end) {
-		set_page_count(page, 1);
-
 		/* Free any unused pages */
 		if (page >= free) {
 			__free_page(page);

@@ -23,7 +23,7 @@ sys_call_table:
 /*10*/  .long sys_unlink, sunos_execv, sys_chdir, sys_chown16, sys_mknod
 /*15*/	.long sys_chmod, sys_lchown16, sparc_brk, sys_nis_syscall, sys_lseek
 /*20*/	.long sys_getpid, sys_capget, sys_capset, sys_setuid16, sys_getuid16
-/*25*/	.long sys_time, sys_ptrace, sys_alarm, sys_sigaltstack, sys_pause
+/*25*/	.long sys_vmsplice, sys_ptrace, sys_alarm, sys_sigaltstack, sys_pause
 /*30*/	.long sys_utime, sys_lchown, sys_fchown, sys_access, sys_nice
 /*35*/	.long sys_chown, sys_sync, sys_kill, sys_newstat, sys_sendfile
 /*40*/	.long sys_newlstat, sys_dup, sys_pipe, sys_times, sys_getuid
@@ -48,8 +48,8 @@ sys_call_table:
 /*135*/	.long sys_nis_syscall, sys_mkdir, sys_rmdir, sys_utimes, sys_stat64
 /*140*/	.long sys_sendfile64, sys_nis_syscall, sys_futex, sys_gettid, sys_getrlimit
 /*145*/	.long sys_setrlimit, sys_pivot_root, sys_prctl, sys_pciconfig_read, sys_pciconfig_write
-/*150*/	.long sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys_poll, sys_getdents64
-/*155*/	.long sys_fcntl64, sys_ni_syscall, sys_statfs, sys_fstatfs, sys_oldumount
+/*150*/	.long sys_nis_syscall, sys_inotify_init, sys_inotify_add_watch, sys_poll, sys_getdents64
+/*155*/	.long sys_fcntl64, sys_inotify_rm_watch, sys_statfs, sys_fstatfs, sys_oldumount
 /*160*/	.long sys_sched_setaffinity, sys_sched_getaffinity, sys_getdomainname, sys_setdomainname, sys_nis_syscall
 /*165*/	.long sys_quotactl, sys_set_tid_address, sys_mount, sys_ustat, sys_setxattr
 /*170*/	.long sys_lsetxattr, sys_fsetxattr, sys_getxattr, sys_lgetxattr, sys_getdents
@@ -57,25 +57,29 @@ sys_call_table:
 /*180*/	.long sys_flistxattr, sys_removexattr, sys_lremovexattr, sys_sigpending, sys_ni_syscall
 /*185*/	.long sys_setpgid, sys_fremovexattr, sys_tkill, sys_exit_group, sys_newuname
 /*190*/	.long sys_init_module, sys_personality, sparc_remap_file_pages, sys_epoll_create, sys_epoll_ctl
-/*195*/	.long sys_epoll_wait, sys_nis_syscall, sys_getppid, sparc_sigaction, sys_sgetmask
+/*195*/	.long sys_epoll_wait, sys_ioprio_set, sys_getppid, sparc_sigaction, sys_sgetmask
 /*200*/	.long sys_ssetmask, sys_sigsuspend, sys_newlstat, sys_uselib, old_readdir
 /*205*/	.long sys_readahead, sys_socketcall, sys_syslog, sys_lookup_dcookie, sys_fadvise64
 /*210*/	.long sys_fadvise64_64, sys_tgkill, sys_waitpid, sys_swapoff, sys_sysinfo
-/*215*/	.long sys_ipc, sys_sigreturn, sys_clone, sys_nis_syscall, sys_adjtimex
+/*215*/	.long sys_ipc, sys_sigreturn, sys_clone, sys_ioprio_get, sys_adjtimex
 /*220*/	.long sys_sigprocmask, sys_ni_syscall, sys_delete_module, sys_ni_syscall, sys_getpgid
 /*225*/	.long sys_bdflush, sys_sysfs, sys_nis_syscall, sys_setfsuid16, sys_setfsgid16
-/*230*/	.long sys_select, sys_time, sys_nis_syscall, sys_stime, sys_statfs64
+/*230*/	.long sys_select, sys_time, sys_splice, sys_stime, sys_statfs64
 					  /* "We are the Knights of the Forest of Ni!!" */
 /*235*/	.long sys_fstatfs64, sys_llseek, sys_mlock, sys_munlock, sys_mlockall
 /*240*/	.long sys_munlockall, sys_sched_setparam, sys_sched_getparam, sys_sched_setscheduler, sys_sched_getscheduler
 /*245*/	.long sys_sched_yield, sys_sched_get_priority_max, sys_sched_get_priority_min, sys_sched_rr_get_interval, sys_nanosleep
 /*250*/	.long sparc_mremap, sys_sysctl, sys_getsid, sys_fdatasync, sys_nfsservctl
-/*255*/	.long sys_nis_syscall, sys_clock_settime, sys_clock_gettime, sys_clock_getres, sys_clock_nanosleep
+/*255*/	.long sys_sync_file_range, sys_clock_settime, sys_clock_gettime, sys_clock_getres, sys_clock_nanosleep
 /*260*/	.long sys_sched_getaffinity, sys_sched_setaffinity, sys_timer_settime, sys_timer_gettime, sys_timer_getoverrun
 /*265*/	.long sys_timer_delete, sys_timer_create, sys_vserver, sys_io_setup, sys_io_destroy
 /*270*/	.long sys_io_submit, sys_io_cancel, sys_io_getevents, sys_mq_open, sys_mq_unlink
 /*275*/	.long sys_mq_timedsend, sys_mq_timedreceive, sys_mq_notify, sys_mq_getsetattr, sys_waitid
-/*280*/	.long sys_ni_syscall, sys_add_key, sys_request_key, sys_keyctl
+/*280*/	.long sys_tee, sys_add_key, sys_request_key, sys_keyctl, sys_openat
+/*285*/	.long sys_mkdirat, sys_mknodat, sys_fchownat, sys_futimesat, sys_fstatat64
+/*290*/	.long sys_unlinkat, sys_renameat, sys_linkat, sys_symlinkat, sys_readlinkat
+/*295*/	.long sys_fchmodat, sys_faccessat, sys_pselect6, sys_ppoll, sys_unshare
+/*300*/	.long sys_set_robust_list, sys_get_robust_list
 
 #ifdef CONFIG_SUNOS_EMUL
 	/* Now the SunOS syscall table. */
@@ -181,6 +185,12 @@ sunos_sys_table:
 	.long sunos_nosys, sunos_nosys, sunos_nosys
 	.long sunos_nosys
 /*280*/	.long sunos_nosys, sunos_nosys, sunos_nosys
+	.long sunos_nosys, sunos_nosys, sunos_nosys
+	.long sunos_nosys, sunos_nosys, sunos_nosys
 	.long sunos_nosys
+/*290*/	.long sunos_nosys, sunos_nosys, sunos_nosys
+	.long sunos_nosys, sunos_nosys, sunos_nosys
+	.long sunos_nosys, sunos_nosys, sunos_nosys
+	.long sunos_nosys, sunos_nosys, sunos_nosys
 
 #endif

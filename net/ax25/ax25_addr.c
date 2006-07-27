@@ -11,6 +11,7 @@
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/string.h>
@@ -33,12 +34,13 @@
  */
 ax25_address null_ax25_address = {{0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x00}};
 
+EXPORT_SYMBOL(null_ax25_address);
+
 /*
  *	ax25 -> ascii conversion
  */
-char *ax2asc(ax25_address *a)
+char *ax2asc(char *buf, ax25_address *a)
 {
-	static char buf[11];
 	char c, *s;
 	int n;
 
@@ -65,41 +67,42 @@ char *ax2asc(ax25_address *a)
 
 }
 
+EXPORT_SYMBOL(ax2asc);
+
 /*
  *	ascii -> ax25 conversion
  */
-ax25_address *asc2ax(char *callsign)
+void asc2ax(ax25_address *addr, char *callsign)
 {
-	static ax25_address addr;
 	char *s;
 	int n;
 
 	for (s = callsign, n = 0; n < 6; n++) {
 		if (*s != '\0' && *s != '-')
-			addr.ax25_call[n] = *s++;
+			addr->ax25_call[n] = *s++;
 		else
-			addr.ax25_call[n] = ' ';
-		addr.ax25_call[n] <<= 1;
-		addr.ax25_call[n] &= 0xFE;
+			addr->ax25_call[n] = ' ';
+		addr->ax25_call[n] <<= 1;
+		addr->ax25_call[n] &= 0xFE;
 	}
 
 	if (*s++ == '\0') {
-		addr.ax25_call[6] = 0x00;
-		return &addr;
+		addr->ax25_call[6] = 0x00;
+		return;
 	}
 
-	addr.ax25_call[6] = *s++ - '0';
+	addr->ax25_call[6] = *s++ - '0';
 
 	if (*s != '\0') {
-		addr.ax25_call[6] *= 10;
-		addr.ax25_call[6] += *s++ - '0';
+		addr->ax25_call[6] *= 10;
+		addr->ax25_call[6] += *s++ - '0';
 	}
 
-	addr.ax25_call[6] <<= 1;
-	addr.ax25_call[6] &= 0x1E;
-
-	return &addr;
+	addr->ax25_call[6] <<= 1;
+	addr->ax25_call[6] &= 0x1E;
 }
+
+EXPORT_SYMBOL(asc2ax);
 
 /*
  *	Compare two ax.25 addresses
@@ -119,6 +122,8 @@ int ax25cmp(ax25_address *a, ax25_address *b)
 
  	return 2;			/* Partial match */
 }
+
+EXPORT_SYMBOL(ax25cmp);
 
 /*
  *	Compare two AX.25 digipeater paths.

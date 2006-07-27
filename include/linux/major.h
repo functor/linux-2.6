@@ -15,7 +15,7 @@
 #define HD_MAJOR		IDE0_MAJOR
 #define PTY_SLAVE_MAJOR		3
 #define TTY_MAJOR		4
-#define VROOT_MAJOR	4
+#define VROOT_MAJOR		4
 #define TTYAUX_MAJOR		5
 #define LP_MAJOR		6
 #define VCS_MAJOR		7
@@ -101,6 +101,7 @@
 #define I2O_MAJOR		80	/* 80->87 */
 
 #define SHMIQ_MAJOR		85   /* Linux/mips, SGI /dev/shmiq */
+#define SCSI_CHANGER_MAJOR      86
 
 #define IDE6_MAJOR		88
 #define IDE7_MAJOR		89
@@ -113,6 +114,7 @@
 
 #define UBD_MAJOR		98
 
+#define PP_MAJOR		99
 #define JSFD_MAJOR		99
 
 #define PHONE_MAJOR		100

@@ -44,8 +44,6 @@ __asm__ __volatile__( \
 /* TX39H-style cache flush routines. */
 static void tx39h_flush_icache_all(void)
 {
-	unsigned long start = KSEG0;
-	unsigned long end = (start + icache_size);
 	unsigned long flags, config;
 
 	/* disable icache (set ICE#) */
@@ -53,33 +51,18 @@ static void tx39h_flush_icache_all(void)
 	config = read_c0_conf();
 	write_c0_conf(config & ~TX39_CONF_ICE);
 	TX39_STOP_STREAMING();
-
-	/* invalidate icache */
-	while (start < end) {
-		cache16_unroll32(start, Index_Invalidate_I);
-		start += 0x200;
-	}
-
+	blast_icache16();
 	write_c0_conf(config);
 	local_irq_restore(flags);
 }
 
 static void tx39h_dma_cache_wback_inv(unsigned long addr, unsigned long size)
 {
-	unsigned long end, a;
-	unsigned long dc_lsize = current_cpu_data.dcache.linesz;
-
 	/* Catch bad driver code */
 	BUG_ON(size == 0);
 
 	iob();
-	a = addr & ~(dc_lsize - 1);
-	end = (addr + size - 1) & ~(dc_lsize - 1);
-	while (1) {
-		invalidate_dcache_line(a); /* Hit_Invalidate_D */
-		if (a == end) break;
-		a += dc_lsize;
-	}
+	blast_inv_dcache_range(addr, addr + size);
 }
 
 
@@ -167,15 +150,16 @@ static void tx39_flush_cache_mm(struct mm_struct *mm)
 static void tx39_flush_cache_range(struct vm_area_struct *vma,
 	unsigned long start, unsigned long end)
 {
-	struct mm_struct *mm = vma->vm_mm;
+	int exec;
 
-	if (!cpu_has_dc_aliases)
+	if (!(cpu_context(smp_processor_id(), vma->vm_mm)))
 		return;
 
-	if (cpu_context(smp_processor_id(), mm) != 0) {
+	exec = vma->vm_flags & VM_EXEC;
+	if (cpu_has_dc_aliases || exec)
 		tx39_blast_dcache();
+	if (exec)
 		tx39_blast_icache();
-	}
 }
 
 static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page, unsigned long pfn)
@@ -183,6 +167,7 @@ static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page
 	int exec = vma->vm_flags & VM_EXEC;
 	struct mm_struct *mm = vma->vm_mm;
 	pgd_t *pgdp;
+	pud_t *pudp;
 	pmd_t *pmdp;
 	pte_t *ptep;
 
@@ -195,7 +180,8 @@ static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page
 
 	page &= PAGE_MASK;
 	pgdp = pgd_offset(mm, page);
-	pmdp = pmd_offset(pgdp, page);
+	pudp = pud_offset(pgdp, page);
+	pmdp = pmd_offset(pudp, page);
 	ptep = pte_offset(pmdp, page);
 
 	/*
@@ -224,11 +210,15 @@ static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page
 	 * Do indexed flush, too much work to get the (possible) TLB refills
 	 * to work correctly.
 	 */
-	page = (KSEG0 + (page & (dcache_size - 1)));
 	if (cpu_has_dc_aliases || exec)
 		tx39_blast_dcache_page_indexed(page);
 	if (exec)
 		tx39_blast_icache_page_indexed(page);
+}
+
+static void local_tx39_flush_data_cache_page(void * addr)
+{
+	tx39_blast_dcache_page(addr);
 }
 
 static void tx39_flush_data_cache_page(unsigned long addr)
@@ -238,42 +228,21 @@ static void tx39_flush_data_cache_page(unsigned long addr)
 
 static void tx39_flush_icache_range(unsigned long start, unsigned long end)
 {
-	unsigned long dc_lsize = current_cpu_data.dcache.linesz;
-	unsigned long addr, aend;
-
 	if (end - start > dcache_size)
 		tx39_blast_dcache();
-	else {
-		addr = start & ~(dc_lsize - 1);
-		aend = (end - 1) & ~(dc_lsize - 1);
-
-		while (1) {
-			/* Hit_Writeback_Inv_D */
-			protected_writeback_dcache_line(addr);
-			if (addr == aend)
-				break;
-			addr += dc_lsize;
-		}
-	}
+	else
+		protected_blast_dcache_range(start, end);
 
 	if (end - start > icache_size)
 		tx39_blast_icache();
 	else {
 		unsigned long flags, config;
-		addr = start & ~(dc_lsize - 1);
-		aend = (end - 1) & ~(dc_lsize - 1);
 		/* disable icache (set ICE#) */
 		local_irq_save(flags);
 		config = read_c0_conf();
 		write_c0_conf(config & ~TX39_CONF_ICE);
 		TX39_STOP_STREAMING();
-		while (1) {
-			/* Hit_Invalidate_I */
-			protected_flush_icache_line(addr);
-			if (addr == aend)
-				break;
-			addr += dc_lsize;
-		}
+		protected_blast_icache_range(start, end);
 		write_c0_conf(config);
 		local_irq_restore(flags);
 	}
@@ -308,7 +277,7 @@ static void tx39_flush_icache_page(struct vm_area_struct *vma, struct page *page
 
 static void tx39_dma_cache_wback_inv(unsigned long addr, unsigned long size)
 {
-	unsigned long end, a;
+	unsigned long end;
 
 	if (((size | addr) & (PAGE_SIZE - 1)) == 0) {
 		end = addr + size;
@@ -319,20 +288,13 @@ static void tx39_dma_cache_wback_inv(unsigned long addr, unsigned long size)
 	} else if (size > dcache_size) {
 		tx39_blast_dcache();
 	} else {
-		unsigned long dc_lsize = current_cpu_data.dcache.linesz;
-		a = addr & ~(dc_lsize - 1);
-		end = (addr + size - 1) & ~(dc_lsize - 1);
-		while (1) {
-			flush_dcache_line(a); /* Hit_Writeback_Inv_D */
-			if (a == end) break;
-			a += dc_lsize;
-		}
+		blast_dcache_range(addr, addr + size);
 	}
 }
 
 static void tx39_dma_cache_inv(unsigned long addr, unsigned long size)
 {
-	unsigned long end, a;
+	unsigned long end;
 
 	if (((size | addr) & (PAGE_SIZE - 1)) == 0) {
 		end = addr + size;
@@ -343,14 +305,7 @@ static void tx39_dma_cache_inv(unsigned long addr, unsigned long size)
 	} else if (size > dcache_size) {
 		tx39_blast_dcache();
 	} else {
-		unsigned long dc_lsize = current_cpu_data.dcache.linesz;
-		a = addr & ~(dc_lsize - 1);
-		end = (addr + size - 1) & ~(dc_lsize - 1);
-		while (1) {
-			invalidate_dcache_line(a); /* Hit_Invalidate_D */
-			if (a == end) break;
-			a += dc_lsize;
-		}
+		blast_inv_dcache_range(addr, addr + size);
 	}
 }
 
@@ -407,7 +362,7 @@ static __init void tx39_probe_cache(void)
 	}
 }
 
-void __init ld_mmu_tx39(void)
+void __init tx39_cache_init(void)
 {
 	extern void build_clear_page(void);
 	extern void build_copy_page(void);
@@ -431,6 +386,7 @@ void __init ld_mmu_tx39(void)
 		flush_icache_range	= (void *) tx39h_flush_icache_all;
 
 		flush_cache_sigtramp	= (void *) tx39h_flush_icache_all;
+		local_flush_data_cache_page	= (void *) tx39h_flush_icache_all;
 		flush_data_cache_page	= (void *) tx39h_flush_icache_all;
 
 		_dma_cache_wback_inv	= tx39h_dma_cache_wback_inv;
@@ -456,6 +412,7 @@ void __init ld_mmu_tx39(void)
 		flush_icache_range = tx39_flush_icache_range;
 
 		flush_cache_sigtramp = tx39_flush_cache_sigtramp;
+		local_flush_data_cache_page = local_tx39_flush_data_cache_page;
 		flush_data_cache_page = tx39_flush_data_cache_page;
 
 		_dma_cache_wback_inv = tx39_dma_cache_wback_inv;
@@ -490,4 +447,5 @@ void __init ld_mmu_tx39(void)
 
 	build_clear_page();
 	build_copy_page();
+	tx39h_flush_icache_all();
 }

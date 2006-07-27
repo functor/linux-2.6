@@ -80,18 +80,20 @@ static struct usb_device_id id_table [] = {
 MODULE_DEVICE_TABLE (usb, id_table);
 
 static struct usb_driver omninet_driver = {
-	.owner =	THIS_MODULE,
 	.name =		"omninet",
 	.probe =	usb_serial_probe,
 	.disconnect =	usb_serial_disconnect,
 	.id_table =	id_table,
+	.no_dynamic_id = 	1,
 };
 
 
-static struct usb_serial_device_type zyxel_omninet_device = {
-	.owner =		THIS_MODULE,
-	.name =			"ZyXEL - omni.net lcd plus usb",
-	.short_name =		"omninet",
+static struct usb_serial_driver zyxel_omninet_device = {
+	.driver = {
+		.owner =	THIS_MODULE,
+		.name =		"omninet",
+	},
+	.description =		"ZyXEL - omni.net lcd plus usb",
 	.id_table =		id_table,
 	.num_interrupt_in =	1,
 	.num_bulk_in =		1,
@@ -202,7 +204,7 @@ static void omninet_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	int i;
 	int result;
 
-//	dbg("omninet_read_bulk_callback");
+	dbg("%s - port %d", __FUNCTION__, port->number);
 
 	if (urb->status) {
 		dbg("%s - nonzero read bulk status received: %d", __FUNCTION__, urb->status);
@@ -248,16 +250,21 @@ static int omninet_write (struct usb_serial_port *port, const unsigned char *buf
 
 	int			result;
 
-//	dbg("omninet_write port %d", port->number);
+	dbg("%s - port %d", __FUNCTION__, port->number);
 
 	if (count == 0) {
 		dbg("%s - write request of 0 bytes", __FUNCTION__);
 		return (0);
 	}
-	if (wport->write_urb->status == -EINPROGRESS) {
+
+	spin_lock(&wport->lock);
+	if (wport->write_urb_busy) {
+		spin_unlock(&wport->lock);
 		dbg("%s - already writing", __FUNCTION__);
-		return (0);
+		return 0;
 	}
+	wport->write_urb_busy = 1;
+	spin_unlock(&wport->lock);
 
 	count = (count > OMNINET_BULKOUTSIZE) ? OMNINET_BULKOUTSIZE : count;
 
@@ -275,9 +282,10 @@ static int omninet_write (struct usb_serial_port *port, const unsigned char *buf
 
 	wport->write_urb->dev = serial->dev;
 	result = usb_submit_urb(wport->write_urb, GFP_ATOMIC);
-	if (result)
+	if (result) {
+		wport->write_urb_busy = 0;
 		err("%s - failed submitting write urb, error %d", __FUNCTION__, result);
-	else
+	} else
 		result = count;
 
 	return result;
@@ -291,10 +299,10 @@ static int omninet_write_room (struct usb_serial_port *port)
 
 	int room = 0; // Default: no room
 
-	if (wport->write_urb->status != -EINPROGRESS)
+	if (wport->write_urb_busy)
 		room = wport->bulk_out_size - OMNINET_HEADERLEN;
 
-//	dbg("omninet_write_room returns %d", room);
+	dbg("%s - returns %d", __FUNCTION__, room);
 
 	return (room);
 }
@@ -304,16 +312,15 @@ static void omninet_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 /*	struct omninet_header	*header = (struct omninet_header  *) urb->transfer_buffer; */
 	struct usb_serial_port 	*port   = (struct usb_serial_port *) urb->context;
 
-//	dbg("omninet_write_bulk_callback, port %0x\n", port);
+	dbg("%s - port %0x\n", __FUNCTION__, port->number);
 
+	port->write_urb_busy = 0;
 	if (urb->status) {
 		dbg("%s - nonzero write bulk status received: %d", __FUNCTION__, urb->status);
 		return;
 	}
 
 	schedule_work(&port->work);
-
-//	dbg("omninet_write_bulk_callback, tty %0x\n", tty);
 }
 
 

@@ -23,6 +23,7 @@
 #include <asm/io.h>
 #include <asm/proto.h>
 #include <asm/pci-direct.h>
+#include <asm/dma.h>
 
 int iommu_aperture;
 int iommu_aperture_disabled __initdata = 0;
@@ -40,11 +41,7 @@ int fix_aperture __initdata = 1;
 
 static u32 __init allocate_aperture(void) 
 {
-#ifdef CONFIG_DISCONTIGMEM
 	pg_data_t *nd0 = NODE_DATA(0);
-#else
-	pg_data_t *nd0 = &contig_page_data;
-#endif	
 	u32 aper_size;
 	void *p; 
 
@@ -63,7 +60,7 @@ static u32 __init allocate_aperture(void)
 		printk("Cannot allocate aperture memory hole (%p,%uK)\n",
 		       p, aper_size>>10);
 		if (p)
-			free_bootmem_node(nd0, (unsigned long)p, aper_size); 
+			free_bootmem_node(nd0, __pa(p), aper_size); 
 		return 0;
 	}
 	printk("Mapping aperture over %d KB of RAM @ %lx\n",
@@ -83,7 +80,7 @@ static int __init aperture_valid(char *name, u64 aper_base, u32 aper_size)
 		printk("Aperture from %s beyond 4GB. Ignoring.\n",name);
 		return 0; 
 	}
-	if (e820_mapped(aper_base, aper_base + aper_size, E820_RAM)) {  
+	if (e820_any_mapped(aper_base, aper_base + aper_size, E820_RAM)) {
 		printk("Aperture from %s pointing to e820 RAM. Ignoring.\n",name);
 		return 0; 
 	} 
@@ -164,7 +161,7 @@ static __u32 __init search_agp_bridge(u32 *order, int *valid_agp)
 	int num, slot, func;
 
 	/* Poor man's PCI discovery */
-	for (num = 0; num < 32; num++) { 
+	for (num = 0; num < 256; num++) { 
 		for (slot = 0; slot < 32; slot++) { 
 			for (func = 0; func < 8; func++) { 
 				u32 class, cap;
@@ -200,7 +197,7 @@ static __u32 __init search_agp_bridge(u32 *order, int *valid_agp)
 void __init iommu_hole_init(void) 
 { 
 	int fix, num; 
-	u32 aper_size, aper_alloc = 0, aper_order, last_aper_order = 0;
+	u32 aper_size, aper_alloc = 0, aper_order = 0, last_aper_order = 0;
 	u64 aper_base, last_aper_base = 0;
 	int valid_agp = 0;
 
@@ -249,7 +246,9 @@ void __init iommu_hole_init(void)
 		
 	if (aper_alloc) { 
 		/* Got the aperture from the AGP bridge */
-	} else if ((!no_iommu && end_pfn >= 0xffffffff>>PAGE_SHIFT) ||
+	} else if (swiotlb && !valid_agp) {
+		/* Do nothing */
+	} else if ((!no_iommu && end_pfn > MAX_DMA32_PFN) ||
 		   force_iommu ||
 		   valid_agp ||
 		   fallback_aper_force) { 

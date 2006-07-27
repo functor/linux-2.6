@@ -17,11 +17,12 @@
 #include <linux/init.h>
 #include <linux/gameport.h>
 #include <linux/wait.h>
-#include <linux/completion.h>
 #include <linux/sched.h>
-#include <linux/smp_lock.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/kthread.h>
+#include <linux/sched.h>	/* HZ */
+#include <linux/mutex.h>
 
 /*#include <asm/io.h>*/
 
@@ -43,16 +44,14 @@ EXPORT_SYMBOL(gameport_start_polling);
 EXPORT_SYMBOL(gameport_stop_polling);
 
 /*
- * gameport_sem protects entire gameport subsystem and is taken
+ * gameport_mutex protects entire gameport subsystem and is taken
  * every time gameport port or driver registrered or unregistered.
  */
-static DECLARE_MUTEX(gameport_sem);
+static DEFINE_MUTEX(gameport_mutex);
 
 static LIST_HEAD(gameport_list);
 
-static struct bus_type gameport_bus = {
-	.name =	"gameport",
-};
+static struct bus_type gameport_bus;
 
 static void gameport_add_port(struct gameport *gameport);
 static void gameport_destroy_port(struct gameport *gameport);
@@ -61,12 +60,13 @@ static void gameport_disconnect_port(struct gameport *gameport);
 
 #if defined(__i386__)
 
+#include <asm/i8253.h>
+
 #define DELTA(x,y)      ((y)-(x)+((y)<(x)?1193182/HZ:0))
 #define GET_TIME(x)     do { x = get_time_pit(); } while (0)
 
 static unsigned int get_time_pit(void)
 {
-	extern spinlock_t i8253_lock;
 	unsigned long flags;
 	unsigned int count;
 
@@ -134,7 +134,7 @@ static int gameport_measure_speed(struct gameport *gameport)
 	}
 
 	gameport_close(gameport);
-	return (cpu_data[_smp_processor_id()].loops_per_jiffy * (unsigned long)HZ / (1000 / 50)) / (tx < 1 ? 1 : tx);
+	return (cpu_data[raw_smp_processor_id()].loops_per_jiffy * (unsigned long)HZ / (1000 / 50)) / (tx < 1 ? 1 : tx);
 
 #else
 
@@ -238,8 +238,7 @@ struct gameport_event {
 static DEFINE_SPINLOCK(gameport_event_lock);	/* protects gameport_event_list */
 static LIST_HEAD(gameport_event_list);
 static DECLARE_WAIT_QUEUE_HEAD(gameport_wait);
-static DECLARE_COMPLETION(gameport_exited);
-static int gameport_pid;
+static struct task_struct *gameport_task;
 
 static void gameport_queue_event(void *object, struct module *owner,
 			      enum gameport_event_type event_type)
@@ -250,12 +249,12 @@ static void gameport_queue_event(void *object, struct module *owner,
 	spin_lock_irqsave(&gameport_event_lock, flags);
 
 	/*
- 	 * Scan event list for the other events for the same gameport port,
+	 * Scan event list for the other events for the same gameport port,
 	 * starting with the most recent one. If event is the same we
 	 * do not need add new one. If event is of different type we
 	 * need to add this event and should not look further because
 	 * we need to preseve sequence of distinct events.
- 	 */
+	 */
 	list_for_each_entry_reverse(event, &gameport_event_list, node) {
 		if (event->object == object) {
 			if (event->type == event_type)
@@ -267,6 +266,7 @@ static void gameport_queue_event(void *object, struct module *owner,
 	if ((event = kmalloc(sizeof(struct gameport_event), GFP_ATOMIC))) {
 		if (!try_module_get(owner)) {
 			printk(KERN_WARNING "gameport: Can't get module reference, dropping event %d\n", event_type);
+			kfree(event);
 			goto out;
 		}
 
@@ -339,14 +339,20 @@ static struct gameport_event *gameport_get_event(void)
 	return event;
 }
 
-static void gameport_handle_events(void)
+static void gameport_handle_event(void)
 {
 	struct gameport_event *event;
 	struct gameport_driver *gameport_drv;
 
-	down(&gameport_sem);
+	mutex_lock(&gameport_mutex);
 
-	while ((event = gameport_get_event())) {
+	/*
+	 * Note that we handle only one event here to give swsusp
+	 * a chance to freeze kgameportd thread. Gameport events
+	 * should be pretty rare so we are not concerned about
+	 * taking performance hit.
+	 */
+	if ((event = gameport_get_event())) {
 
 		switch (event->type) {
 			case GAMEPORT_REGISTER_PORT:
@@ -375,7 +381,7 @@ static void gameport_handle_events(void)
 		gameport_free_event(event);
 	}
 
-	up(&gameport_sem);
+	mutex_unlock(&gameport_mutex);
 }
 
 /*
@@ -432,20 +438,15 @@ static struct gameport *gameport_get_pending_child(struct gameport *parent)
 
 static int gameport_thread(void *nothing)
 {
-	lock_kernel();
-	daemonize("kgameportd");
-	allow_signal(SIGTERM);
-
 	do {
-		gameport_handle_events();
-		wait_event_interruptible(gameport_wait, !list_empty(&gameport_event_list));
-		try_to_freeze(PF_FREEZE);
-	} while (!signal_pending(current));
+		gameport_handle_event();
+		wait_event_interruptible(gameport_wait,
+			kthread_should_stop() || !list_empty(&gameport_event_list));
+		try_to_freeze();
+	} while (!kthread_should_stop());
 
 	printk(KERN_DEBUG "gameport: kgameportd exiting\n");
-
-	unlock_kernel();
-	complete_and_exit(&gameport_exited, 0);
+	return 0;
 }
 
 
@@ -453,19 +454,19 @@ static int gameport_thread(void *nothing)
  * Gameport port operations
  */
 
-static ssize_t gameport_show_description(struct device *dev, char *buf)
+static ssize_t gameport_show_description(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct gameport *gameport = to_gameport_port(dev);
 	return sprintf(buf, "%s\n", gameport->name);
 }
 
-static ssize_t gameport_rebind_driver(struct device *dev, const char *buf, size_t count)
+static ssize_t gameport_rebind_driver(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct gameport *gameport = to_gameport_port(dev);
 	struct device_driver *drv;
 	int retval;
 
-	retval = down_interruptible(&gameport_sem);
+	retval = mutex_lock_interruptible(&gameport_mutex);
 	if (retval)
 		return retval;
 
@@ -485,7 +486,7 @@ static ssize_t gameport_rebind_driver(struct device *dev, const char *buf, size_
 		retval = -EINVAL;
 	}
 
-	up(&gameport_sem);
+	mutex_unlock(&gameport_mutex);
 
 	return retval;
 }
@@ -522,7 +523,7 @@ static void gameport_init_port(struct gameport *gameport)
 
 	__module_get(THIS_MODULE);
 
-	init_MUTEX(&gameport->drv_sem);
+	mutex_init(&gameport->drv_mutex);
 	device_initialize(&gameport->dev);
 	snprintf(gameport->dev.bus_id, sizeof(gameport->dev.bus_id),
 		 "gameport%lu", (unsigned long)atomic_inc_return(&gameport_no) - 1);
@@ -662,10 +663,10 @@ void __gameport_register_port(struct gameport *gameport, struct module *owner)
  */
 void gameport_unregister_port(struct gameport *gameport)
 {
-	down(&gameport_sem);
+	mutex_lock(&gameport_mutex);
 	gameport_disconnect_port(gameport);
 	gameport_destroy_port(gameport);
-	up(&gameport_sem);
+	mutex_unlock(&gameport_mutex);
 }
 
 
@@ -702,11 +703,15 @@ static int gameport_driver_remove(struct device *dev)
 	return 0;
 }
 
+static struct bus_type gameport_bus = {
+	.name =	"gameport",
+	.probe = gameport_driver_probe,
+	.remove = gameport_driver_remove,
+};
+
 void __gameport_register_driver(struct gameport_driver *drv, struct module *owner)
 {
 	drv->driver.bus = &gameport_bus;
-	drv->driver.probe = gameport_driver_probe;
-	drv->driver.remove = gameport_driver_remove;
 	gameport_queue_event(drv, owner, GAMEPORT_REGISTER_DRIVER);
 }
 
@@ -714,7 +719,7 @@ void gameport_unregister_driver(struct gameport_driver *drv)
 {
 	struct gameport *gameport;
 
-	down(&gameport_sem);
+	mutex_lock(&gameport_mutex);
 	drv->ignore = 1;	/* so gameport_find_driver ignores it */
 
 start_over:
@@ -728,7 +733,7 @@ start_over:
 	}
 
 	driver_unregister(&drv->driver);
-	up(&gameport_sem);
+	mutex_unlock(&gameport_mutex);
 }
 
 static int gameport_bus_match(struct device *dev, struct device_driver *drv)
@@ -740,9 +745,9 @@ static int gameport_bus_match(struct device *dev, struct device_driver *drv)
 
 static void gameport_set_drv(struct gameport *gameport, struct gameport_driver *drv)
 {
-	down(&gameport->drv_sem);
+	mutex_lock(&gameport->drv_mutex);
 	gameport->drv = drv;
-	up(&gameport->drv_sem);
+	mutex_unlock(&gameport->drv_mutex);
 }
 
 int gameport_open(struct gameport *gameport, struct gameport_driver *drv, int mode)
@@ -773,9 +778,10 @@ void gameport_close(struct gameport *gameport)
 
 static int __init gameport_init(void)
 {
-	if (!(gameport_pid = kernel_thread(gameport_thread, NULL, CLONE_KERNEL))) {
+	gameport_task = kthread_run(gameport_thread, NULL, "kgameportd");
+	if (IS_ERR(gameport_task)) {
 		printk(KERN_ERR "gameport: Failed to start kgameportd\n");
-		return -1;
+		return PTR_ERR(gameport_task);
 	}
 
 	gameport_bus.dev_attrs = gameport_device_attrs;
@@ -789,9 +795,8 @@ static int __init gameport_init(void)
 static void __exit gameport_exit(void)
 {
 	bus_unregister(&gameport_bus);
-	kill_proc(gameport_pid, SIGTERM, 1);
-	wait_for_completion(&gameport_exited);
+	kthread_stop(gameport_task);
 }
 
-module_init(gameport_init);
+subsys_initcall(gameport_init);
 module_exit(gameport_exit);

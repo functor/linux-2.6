@@ -5,7 +5,7 @@
 */
 
 /* (C) 1999-2001 Paul `Rusty' Russell
- * (C) 2002-2004 Netfilter Core Team <coreteam@netfilter.org>
+ * (C) 2002-2005 Netfilter Core Team <coreteam@netfilter.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -27,9 +27,10 @@
 #endif
 #include <net/checksum.h>
 #include <net/ip.h>
+#include <net/route.h>
 
-#define ASSERT_READ_LOCK(x) MUST_BE_READ_LOCKED(&ip_conntrack_lock)
-#define ASSERT_WRITE_LOCK(x) MUST_BE_WRITE_LOCKED(&ip_conntrack_lock)
+#define ASSERT_READ_LOCK(x)
+#define ASSERT_WRITE_LOCK(x)
 
 #include <linux/netfilter_ipv4/ip_conntrack.h>
 #include <linux/netfilter_ipv4/ip_conntrack_protocol.h>
@@ -119,7 +120,7 @@ static struct list_head *ct_get_idx(struct seq_file *seq, loff_t pos)
 
 static void *ct_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	READ_LOCK(&ip_conntrack_lock);
+	read_lock_bh(&ip_conntrack_lock);
 	return ct_get_idx(seq, *pos);
 }
 
@@ -131,7 +132,7 @@ static void *ct_seq_next(struct seq_file *s, void *v, loff_t *pos)
   
 static void ct_seq_stop(struct seq_file *s, void *v)
 {
-	READ_UNLOCK(&ip_conntrack_lock);
+	read_unlock_bh(&ip_conntrack_lock);
 }
  
 static int ct_seq_show(struct seq_file *s, void *v)
@@ -140,15 +141,14 @@ static int ct_seq_show(struct seq_file *s, void *v)
 	const struct ip_conntrack *conntrack = tuplehash_to_ctrack(hash);
 	struct ip_conntrack_protocol *proto;
 
-	MUST_BE_READ_LOCKED(&ip_conntrack_lock);
+	ASSERT_READ_LOCK(&ip_conntrack_lock);
 	IP_NF_ASSERT(conntrack);
 
 	/* we only want to print DIR_ORIGINAL */
 	if (DIRECTION(hash))
 		return 0;
 
-	proto = ip_ct_find_proto(conntrack->tuplehash[IP_CT_DIR_ORIGINAL]
-			       .tuple.dst.protonum);
+	proto = __ip_conntrack_proto_find(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.protonum);
 	IP_NF_ASSERT(proto);
 
 	if (seq_printf(s, "%-8s %u %ld ",
@@ -195,7 +195,7 @@ static int ct_seq_show(struct seq_file *s, void *v)
 			return -ENOSPC;
 
 #if defined(CONFIG_IP_NF_CONNTRACK_MARK)
-	if (seq_printf(s, "mark=%lu ", conntrack->mark))
+	if (seq_printf(s, "mark=%u ", conntrack->mark))
 		return -ENOSPC;
 #endif
 
@@ -249,7 +249,7 @@ static void *exp_seq_start(struct seq_file *s, loff_t *pos)
 
 	/* strange seq_file api calls stop even if we fail,
 	 * thus we need to grab lock since stop unlocks */
-	READ_LOCK(&ip_conntrack_lock);
+	read_lock_bh(&ip_conntrack_lock);
 
 	if (list_empty(e))
 		return NULL;
@@ -277,7 +277,7 @@ static void *exp_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void exp_seq_stop(struct seq_file *s, void *v)
 {
-	READ_UNLOCK(&ip_conntrack_lock);
+	read_unlock_bh(&ip_conntrack_lock);
 }
 
 static int exp_seq_show(struct seq_file *s, void *v)
@@ -293,7 +293,7 @@ static int exp_seq_show(struct seq_file *s, void *v)
 	seq_printf(s, "proto=%u ", expect->tuple.dst.protonum);
 
 	print_tuple(s, &expect->tuple,
-		    ip_ct_find_proto(expect->tuple.dst.protonum));
+		    __ip_conntrack_proto_find(expect->tuple.dst.protonum));
 	return seq_putc(s, '\n');
 }
 
@@ -461,30 +461,6 @@ static unsigned int ip_conntrack_defrag(unsigned int hooknum,
 	return NF_ACCEPT;
 }
 
-static unsigned int ip_refrag(unsigned int hooknum,
-			      struct sk_buff **pskb,
-			      const struct net_device *in,
-			      const struct net_device *out,
-			      int (*okfn)(struct sk_buff *))
-{
-	struct rtable *rt = (struct rtable *)(*pskb)->dst;
-
-	/* We've seen it coming out the other side: confirm */
-	if (ip_confirm(hooknum, pskb, in, out, okfn) != NF_ACCEPT)
-		return NF_DROP;
-
-	/* Local packets are never produced too large for their
-	   interface.  We degfragment them at LOCAL_OUT, however,
-	   so we have to refragment them here. */
-	if ((*pskb)->len > dst_mtu(&rt->u.dst) &&
-	    !skb_shinfo(*pskb)->tso_size) {
-		/* No hook can be after us, so this should be OK. */
-		ip_fragment(*pskb, okfn);
-		return NF_STOLEN;
-	}
-	return NF_ACCEPT;
-}
-
 static unsigned int ip_conntrack_local(unsigned int hooknum,
 				       struct sk_buff **pskb,
 				       const struct net_device *in,
@@ -503,70 +479,63 @@ static unsigned int ip_conntrack_local(unsigned int hooknum,
 
 /* Connection tracking may drop packets, but never alters them, so
    make it the first hook. */
-static struct nf_hook_ops ip_conntrack_defrag_ops = {
-	.hook		= ip_conntrack_defrag,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_PRE_ROUTING,
-	.priority	= NF_IP_PRI_CONNTRACK_DEFRAG,
-};
-
-static struct nf_hook_ops ip_conntrack_in_ops = {
-	.hook		= ip_conntrack_in,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_PRE_ROUTING,
-	.priority	= NF_IP_PRI_CONNTRACK,
-};
-
-static struct nf_hook_ops ip_conntrack_defrag_local_out_ops = {
-	.hook		= ip_conntrack_defrag,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_LOCAL_OUT,
-	.priority	= NF_IP_PRI_CONNTRACK_DEFRAG,
-};
-
-static struct nf_hook_ops ip_conntrack_local_out_ops = {
-	.hook		= ip_conntrack_local,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_LOCAL_OUT,
-	.priority	= NF_IP_PRI_CONNTRACK,
-};
-
-/* helpers */
-static struct nf_hook_ops ip_conntrack_helper_out_ops = {
-	.hook		= ip_conntrack_help,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_POST_ROUTING,
-	.priority	= NF_IP_PRI_CONNTRACK_HELPER,
-};
-
-static struct nf_hook_ops ip_conntrack_helper_in_ops = {
-	.hook		= ip_conntrack_help,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_LOCAL_IN,
-	.priority	= NF_IP_PRI_CONNTRACK_HELPER,
-};
-
-/* Refragmenter; last chance. */
-static struct nf_hook_ops ip_conntrack_out_ops = {
-	.hook		= ip_refrag,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_POST_ROUTING,
-	.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
-};
-
-static struct nf_hook_ops ip_conntrack_local_in_ops = {
-	.hook		= ip_confirm,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_IP_LOCAL_IN,
-	.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
+static struct nf_hook_ops ip_conntrack_ops[] = {
+	{
+		.hook		= ip_conntrack_defrag,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_PRE_ROUTING,
+		.priority	= NF_IP_PRI_CONNTRACK_DEFRAG,
+	},
+	{
+		.hook		= ip_conntrack_in,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_PRE_ROUTING,
+		.priority	= NF_IP_PRI_CONNTRACK,
+	},
+	{
+		.hook		= ip_conntrack_defrag,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_LOCAL_OUT,
+		.priority	= NF_IP_PRI_CONNTRACK_DEFRAG,
+	},
+	{
+		.hook		= ip_conntrack_local,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_LOCAL_OUT,
+		.priority	= NF_IP_PRI_CONNTRACK,
+	},
+	{
+		.hook		= ip_conntrack_help,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_POST_ROUTING,
+		.priority	= NF_IP_PRI_CONNTRACK_HELPER,
+	},
+	{
+		.hook		= ip_conntrack_help,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_LOCAL_IN,
+		.priority	= NF_IP_PRI_CONNTRACK_HELPER,
+	},
+	{
+		.hook		= ip_confirm,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_POST_ROUTING,
+		.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
+	},
+	{
+		.hook		= ip_confirm,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_IP_LOCAL_IN,
+		.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
+	},
 };
 
 /* Sysctl support */
@@ -578,28 +547,28 @@ extern int ip_conntrack_max;
 extern unsigned int ip_conntrack_htable_size;
 
 /* From ip_conntrack_proto_tcp.c */
-extern unsigned long ip_ct_tcp_timeout_syn_sent;
-extern unsigned long ip_ct_tcp_timeout_syn_recv;
-extern unsigned long ip_ct_tcp_timeout_established;
-extern unsigned long ip_ct_tcp_timeout_fin_wait;
-extern unsigned long ip_ct_tcp_timeout_close_wait;
-extern unsigned long ip_ct_tcp_timeout_last_ack;
-extern unsigned long ip_ct_tcp_timeout_time_wait;
-extern unsigned long ip_ct_tcp_timeout_close;
-extern unsigned long ip_ct_tcp_timeout_max_retrans;
+extern unsigned int ip_ct_tcp_timeout_syn_sent;
+extern unsigned int ip_ct_tcp_timeout_syn_recv;
+extern unsigned int ip_ct_tcp_timeout_established;
+extern unsigned int ip_ct_tcp_timeout_fin_wait;
+extern unsigned int ip_ct_tcp_timeout_close_wait;
+extern unsigned int ip_ct_tcp_timeout_last_ack;
+extern unsigned int ip_ct_tcp_timeout_time_wait;
+extern unsigned int ip_ct_tcp_timeout_close;
+extern unsigned int ip_ct_tcp_timeout_max_retrans;
 extern int ip_ct_tcp_loose;
 extern int ip_ct_tcp_be_liberal;
 extern int ip_ct_tcp_max_retrans;
 
 /* From ip_conntrack_proto_udp.c */
-extern unsigned long ip_ct_udp_timeout;
-extern unsigned long ip_ct_udp_timeout_stream;
+extern unsigned int ip_ct_udp_timeout;
+extern unsigned int ip_ct_udp_timeout_stream;
 
 /* From ip_conntrack_proto_icmp.c */
-extern unsigned long ip_ct_icmp_timeout;
+extern unsigned int ip_ct_icmp_timeout;
 
 /* From ip_conntrack_proto_icmp.c */
-extern unsigned long ip_ct_generic_timeout;
+extern unsigned int ip_ct_generic_timeout;
 
 /* Log invalid packets of a given protocol */
 static int log_invalid_proto_min = 0;
@@ -817,18 +786,46 @@ static ctl_table ip_ct_net_table[] = {
 EXPORT_SYMBOL(ip_ct_log_invalid);
 #endif /* CONFIG_SYSCTL */
 
-static int init_or_cleanup(int init)
+/* FIXME: Allow NULL functions and sub in pointers to generic for
+   them. --RR */
+int ip_conntrack_protocol_register(struct ip_conntrack_protocol *proto)
+{
+	int ret = 0;
+
+	write_lock_bh(&ip_conntrack_lock);
+	if (ip_ct_protos[proto->proto] != &ip_conntrack_generic_protocol) {
+		ret = -EBUSY;
+		goto out;
+	}
+	ip_ct_protos[proto->proto] = proto;
+ out:
+	write_unlock_bh(&ip_conntrack_lock);
+	return ret;
+}
+
+void ip_conntrack_protocol_unregister(struct ip_conntrack_protocol *proto)
+{
+	write_lock_bh(&ip_conntrack_lock);
+	ip_ct_protos[proto->proto] = &ip_conntrack_generic_protocol;
+	write_unlock_bh(&ip_conntrack_lock);
+
+	/* Somebody could be still looking at the proto in bh. */
+	synchronize_net();
+
+	/* Remove all contrack entries for this protocol */
+	ip_ct_iterate_cleanup(kill_proto, &proto->proto);
+}
+
+static int __init ip_conntrack_standalone_init(void)
 {
 #ifdef CONFIG_PROC_FS
 	struct proc_dir_entry *proc, *proc_exp, *proc_stat;
 #endif
 	int ret = 0;
 
-	if (!init) goto cleanup;
-
 	ret = ip_conntrack_init();
 	if (ret < 0)
-		goto cleanup_nothing;
+		return ret;
 
 #ifdef CONFIG_PROC_FS
 	ret = -ENOMEM;
@@ -847,77 +844,25 @@ static int init_or_cleanup(int init)
 	proc_stat->owner = THIS_MODULE;
 #endif
 
-	ret = nf_register_hook(&ip_conntrack_defrag_ops);
+	ret = nf_register_hooks(ip_conntrack_ops, ARRAY_SIZE(ip_conntrack_ops));
 	if (ret < 0) {
-		printk("ip_conntrack: can't register pre-routing defrag hook.\n");
+		printk("ip_conntrack: can't register hooks.\n");
 		goto cleanup_proc_stat;
-	}
-	ret = nf_register_hook(&ip_conntrack_defrag_local_out_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register local_out defrag hook.\n");
-		goto cleanup_defragops;
-	}
-	ret = nf_register_hook(&ip_conntrack_in_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register pre-routing hook.\n");
-		goto cleanup_defraglocalops;
-	}
-	ret = nf_register_hook(&ip_conntrack_local_out_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register local out hook.\n");
-		goto cleanup_inops;
-	}
-	ret = nf_register_hook(&ip_conntrack_helper_in_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register local in helper hook.\n");
-		goto cleanup_inandlocalops;
-	}
-	ret = nf_register_hook(&ip_conntrack_helper_out_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register postrouting helper hook.\n");
-		goto cleanup_helperinops;
-	}
-	ret = nf_register_hook(&ip_conntrack_out_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register post-routing hook.\n");
-		goto cleanup_helperoutops;
-	}
-	ret = nf_register_hook(&ip_conntrack_local_in_ops);
-	if (ret < 0) {
-		printk("ip_conntrack: can't register local in hook.\n");
-		goto cleanup_inoutandlocalops;
 	}
 #ifdef CONFIG_SYSCTL
 	ip_ct_sysctl_header = register_sysctl_table(ip_ct_net_table, 0);
 	if (ip_ct_sysctl_header == NULL) {
 		printk("ip_conntrack: can't register to sysctl.\n");
 		ret = -ENOMEM;
-		goto cleanup_localinops;
+		goto cleanup_hooks;
 	}
 #endif
-
 	return ret;
 
- cleanup:
 #ifdef CONFIG_SYSCTL
- 	unregister_sysctl_table(ip_ct_sysctl_header);
- cleanup_localinops:
+ cleanup_hooks:
+	nf_unregister_hooks(ip_conntrack_ops, ARRAY_SIZE(ip_conntrack_ops));
 #endif
-	nf_unregister_hook(&ip_conntrack_local_in_ops);
- cleanup_inoutandlocalops:
-	nf_unregister_hook(&ip_conntrack_out_ops);
- cleanup_helperoutops:
-	nf_unregister_hook(&ip_conntrack_helper_out_ops);
- cleanup_helperinops:
-	nf_unregister_hook(&ip_conntrack_helper_in_ops);
- cleanup_inandlocalops:
-	nf_unregister_hook(&ip_conntrack_local_out_ops);
- cleanup_inops:
-	nf_unregister_hook(&ip_conntrack_in_ops);
- cleanup_defraglocalops:
-	nf_unregister_hook(&ip_conntrack_defrag_local_out_ops);
- cleanup_defragops:
-	nf_unregister_hook(&ip_conntrack_defrag_ops);
  cleanup_proc_stat:
 #ifdef CONFIG_PROC_FS
 	remove_proc_entry("ip_conntrack", proc_net_stat);
@@ -928,76 +873,62 @@ static int init_or_cleanup(int init)
  cleanup_init:
 #endif /* CONFIG_PROC_FS */
 	ip_conntrack_cleanup();
- cleanup_nothing:
 	return ret;
 }
 
-/* FIXME: Allow NULL functions and sub in pointers to generic for
-   them. --RR */
-int ip_conntrack_protocol_register(struct ip_conntrack_protocol *proto)
+static void __exit ip_conntrack_standalone_fini(void)
 {
-	int ret = 0;
-
-	WRITE_LOCK(&ip_conntrack_lock);
-	if (ip_ct_protos[proto->proto] != &ip_conntrack_generic_protocol) {
-		ret = -EBUSY;
-		goto out;
-	}
-	ip_ct_protos[proto->proto] = proto;
- out:
-	WRITE_UNLOCK(&ip_conntrack_lock);
-	return ret;
-}
-
-void ip_conntrack_protocol_unregister(struct ip_conntrack_protocol *proto)
-{
-	WRITE_LOCK(&ip_conntrack_lock);
-	ip_ct_protos[proto->proto] = &ip_conntrack_generic_protocol;
-	WRITE_UNLOCK(&ip_conntrack_lock);
-	
-	/* Somebody could be still looking at the proto in bh. */
 	synchronize_net();
-
-	/* Remove all contrack entries for this protocol */
-	ip_ct_iterate_cleanup(kill_proto, &proto->proto);
+#ifdef CONFIG_SYSCTL
+	unregister_sysctl_table(ip_ct_sysctl_header);
+#endif
+	nf_unregister_hooks(ip_conntrack_ops, ARRAY_SIZE(ip_conntrack_ops));
+#ifdef CONFIG_PROC_FS
+	remove_proc_entry("ip_conntrack", proc_net_stat);
+	proc_net_remove("ip_conntrack_expect");
+	proc_net_remove("ip_conntrack");
+#endif /* CONFIG_PROC_FS */
+	ip_conntrack_cleanup();
 }
 
-static int __init init(void)
-{
-	return init_or_cleanup(1);
-}
-
-static void __exit fini(void)
-{
-	init_or_cleanup(0);
-}
-
-module_init(init);
-module_exit(fini);
+module_init(ip_conntrack_standalone_init);
+module_exit(ip_conntrack_standalone_fini);
 
 /* Some modules need us, but don't depend directly on any symbol.
    They should call this. */
-void need_ip_conntrack(void)
+void need_conntrack(void)
 {
 }
 
+#ifdef CONFIG_IP_NF_CONNTRACK_EVENTS
+EXPORT_SYMBOL_GPL(ip_conntrack_chain);
+EXPORT_SYMBOL_GPL(ip_conntrack_expect_chain);
+EXPORT_SYMBOL_GPL(ip_conntrack_register_notifier);
+EXPORT_SYMBOL_GPL(ip_conntrack_unregister_notifier);
+EXPORT_SYMBOL_GPL(__ip_ct_event_cache_init);
+EXPORT_PER_CPU_SYMBOL_GPL(ip_conntrack_ecache);
+#endif
 EXPORT_SYMBOL(ip_conntrack_protocol_register);
 EXPORT_SYMBOL(ip_conntrack_protocol_unregister);
 EXPORT_SYMBOL(ip_ct_get_tuple);
 EXPORT_SYMBOL(invert_tuplepr);
 EXPORT_SYMBOL(ip_conntrack_alter_reply);
 EXPORT_SYMBOL(ip_conntrack_destroyed);
-EXPORT_SYMBOL(need_ip_conntrack);
+EXPORT_SYMBOL(need_conntrack);
 EXPORT_SYMBOL(ip_conntrack_helper_register);
 EXPORT_SYMBOL(ip_conntrack_helper_unregister);
 EXPORT_SYMBOL(ip_ct_iterate_cleanup);
-EXPORT_SYMBOL(ip_ct_refresh_acct);
-EXPORT_SYMBOL(ip_ct_protos);
-EXPORT_SYMBOL(ip_ct_find_proto);
+EXPORT_SYMBOL(__ip_ct_refresh_acct);
+
 EXPORT_SYMBOL(ip_conntrack_expect_alloc);
-EXPORT_SYMBOL(ip_conntrack_expect_free);
+EXPORT_SYMBOL(ip_conntrack_expect_put);
+EXPORT_SYMBOL_GPL(__ip_conntrack_expect_find);
+EXPORT_SYMBOL_GPL(ip_conntrack_expect_find);
 EXPORT_SYMBOL(ip_conntrack_expect_related);
 EXPORT_SYMBOL(ip_conntrack_unexpect_related);
+EXPORT_SYMBOL_GPL(ip_conntrack_expect_list);
+EXPORT_SYMBOL_GPL(ip_ct_unlink_expect);
+
 EXPORT_SYMBOL(ip_conntrack_tuple_taken);
 EXPORT_SYMBOL(ip_ct_gather_frags);
 EXPORT_SYMBOL(ip_conntrack_htable_size);
@@ -1005,9 +936,28 @@ EXPORT_SYMBOL(ip_conntrack_lock);
 EXPORT_SYMBOL(ip_conntrack_hash);
 EXPORT_SYMBOL(ip_conntrack_untracked);
 EXPORT_SYMBOL_GPL(ip_conntrack_find_get);
-EXPORT_SYMBOL_GPL(__ip_conntrack_find);
-EXPORT_SYMBOL_GPL(__ip_conntrack_exp_find);
-EXPORT_SYMBOL_GPL(ip_conntrack_put);
 #ifdef CONFIG_IP_NF_NAT_NEEDED
 EXPORT_SYMBOL(ip_conntrack_tcp_update);
+#endif
+
+EXPORT_SYMBOL_GPL(ip_conntrack_flush);
+EXPORT_SYMBOL_GPL(__ip_conntrack_find);
+
+EXPORT_SYMBOL_GPL(ip_conntrack_alloc);
+EXPORT_SYMBOL_GPL(ip_conntrack_free);
+EXPORT_SYMBOL_GPL(ip_conntrack_hash_insert);
+
+EXPORT_SYMBOL_GPL(ip_ct_remove_expectations);
+
+EXPORT_SYMBOL_GPL(ip_conntrack_helper_find_get);
+EXPORT_SYMBOL_GPL(ip_conntrack_helper_put);
+EXPORT_SYMBOL_GPL(__ip_conntrack_helper_find_byname);
+
+EXPORT_SYMBOL_GPL(ip_conntrack_proto_find_get);
+EXPORT_SYMBOL_GPL(ip_conntrack_proto_put);
+EXPORT_SYMBOL_GPL(__ip_conntrack_proto_find);
+#if defined(CONFIG_IP_NF_CONNTRACK_NETLINK) || \
+    defined(CONFIG_IP_NF_CONNTRACK_NETLINK_MODULE)
+EXPORT_SYMBOL_GPL(ip_ct_port_tuple_to_nfattr);
+EXPORT_SYMBOL_GPL(ip_ct_port_nfattr_to_tuple);
 #endif

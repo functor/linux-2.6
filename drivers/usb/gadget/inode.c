@@ -135,6 +135,7 @@ struct dev_data {
 					setup_out_ready : 1,
 					setup_out_error : 1,
 					setup_abort : 1;
+	unsigned			setup_wLength;
 
 	/* the rest is basically write-once */
 	struct usb_config_descriptor	*config, *hs_config;
@@ -169,10 +170,9 @@ static struct dev_data *dev_new (void)
 {
 	struct dev_data		*dev;
 
-	dev = kmalloc (sizeof *dev, GFP_KERNEL);
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return NULL;
-	memset (dev, 0, sizeof *dev);
 	dev->state = STATE_DEV_DISABLED;
 	atomic_set (&dev->count, 1);
 	spin_lock_init (&dev->lock);
@@ -417,8 +417,8 @@ ep_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
 		goto free1;
 
 	value = ep_io (data, kbuf, len);
-	VDEBUG (data->dev, "%s read %d OUT, status %d\n",
-		data->name, len, value);
+	VDEBUG (data->dev, "%s read %zu OUT, status %d\n",
+		data->name, len, (int) value);
 	if (value >= 0 && copy_to_user (buf, kbuf, value))
 		value = -EFAULT;
 
@@ -465,8 +465,8 @@ ep_write (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 	}
 
 	value = ep_io (data, kbuf, len);
-	VDEBUG (data->dev, "%s write %d IN, status %d\n",
-		data->name, len, value);
+	VDEBUG (data->dev, "%s write %zu IN, status %d\n",
+		data->name, len, (int) value);
 free1:
 	up (&data->lock);
 	kfree (kbuf);
@@ -483,6 +483,7 @@ ep_release (struct inode *inode, struct file *fd)
 		data->state = STATE_EP_DISABLED;
 		data->desc.bDescriptorType = 0;
 		data->hs_desc.bDescriptorType = 0;
+		usb_ep_disable(data->ep);
 	}
 	put_ep (data);
 	return 0;
@@ -809,7 +810,7 @@ ep_config (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 		if (value == 0)
 			data->state = STATE_EP_ENABLED;
 		break;
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 	case USB_SPEED_HIGH:
 		/* fails if caller didn't provide that descriptor... */
 		value = usb_ep_enable (ep, &data->hs_desc);
@@ -941,6 +942,7 @@ static int setup_req (struct usb_ep *ep, struct usb_request *req, u16 len)
 	}
 	req->complete = ep0_complete;
 	req->length = len;
+	req->zero = 0;
 	return 0;
 }
 
@@ -980,7 +982,7 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
 			/* assume that was SET_CONFIGURATION */
 			if (dev->current_config) {
 				unsigned power;
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 				if (dev->gadget->speed == USB_SPEED_HIGH)
 					power = dev->hs_config->bMaxPower;
 				else
@@ -1160,10 +1162,13 @@ ep0_write (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 				spin_unlock_irq (&dev->lock);
 				if (copy_from_user (dev->req->buf, buf, len))
 					retval = -EFAULT;
-				else
+				else {
+					if (len < dev->setup_wLength)
+						dev->req->zero = 1;
 					retval = usb_ep_queue (
 						dev->gadget->ep0, dev->req,
 						GFP_KERNEL);
+				}
 				if (retval < 0) {
 					spin_lock_irq (&dev->lock);
 					clean_req (dev->gadget->ep0, dev->req);
@@ -1257,7 +1262,7 @@ static struct file_operations ep0_io_operations = {
  * Unrecognized ep0 requests may be handled in user space.
  */
 
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 static void make_qualifier (struct dev_data *dev)
 {
 	struct usb_qualifier_descriptor		qual;
@@ -1286,7 +1291,7 @@ static int
 config_buf (struct dev_data *dev, u8 type, unsigned index)
 {
 	int		len;
-#ifdef HIGHSPEED
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 	int		hs;
 #endif
 
@@ -1294,7 +1299,7 @@ config_buf (struct dev_data *dev, u8 type, unsigned index)
 	if (index > 0)
 		return -EINVAL;
 
-#ifdef HIGHSPEED
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 	hs = (dev->gadget->speed == USB_SPEED_HIGH);
 	if (type == USB_DT_OTHER_SPEED_CONFIG)
 		hs = !hs;
@@ -1318,8 +1323,8 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	struct usb_request		*req = dev->req;
 	int				value = -EOPNOTSUPP;
 	struct usb_gadgetfs_event	*event;
-	u16				w_value = ctrl->wValue;
-	u16				w_length = ctrl->wLength;
+	u16				w_value = le16_to_cpu(ctrl->wValue);
+	u16				w_length = le16_to_cpu(ctrl->wLength);
 
 	spin_lock (&dev->lock);
 	dev->setup_abort = 0;
@@ -1330,12 +1335,12 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		dev->state = STATE_CONNECTED;
 		dev->dev->bMaxPacketSize0 = gadget->ep0->maxpacket;
 
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 		if (gadget->speed == USB_SPEED_HIGH && dev->hs_config == 0) {
 			ERROR (dev, "no high speed config??\n");
 			return -EINVAL;
 		}
-#endif	/* HIGHSPEED */
+#endif	/* CONFIG_USB_GADGET_DUALSPEED */
 
 		INFO (dev, "connected\n");
 		event = next_event (dev, GADGETFS_CONNECT);
@@ -1347,11 +1352,11 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			/* ... down_trylock (&data->lock) ... */
 			if (data->state != STATE_EP_DEFER_ENABLE)
 				continue;
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 			if (gadget->speed == USB_SPEED_HIGH)
 				value = usb_ep_enable (ep, &data->hs_desc);
 			else
-#endif	/* HIGHSPEED */
+#endif	/* CONFIG_USB_GADGET_DUALSPEED */
 				value = usb_ep_enable (ep, &data->desc);
 			if (value) {
 				ERROR (dev, "deferred %s enable --> %d\n",
@@ -1386,7 +1391,7 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			value = min (w_length, (u16) sizeof *dev->dev);
 			req->buf = dev->dev;
 			break;
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 		case USB_DT_DEVICE_QUALIFIER:
 			if (!dev->hs_config)
 				break;
@@ -1423,7 +1428,7 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			// user mode expected to disable endpoints
 		} else {
 			u8	config, power;
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 			if (gadget->speed == USB_SPEED_HIGH) {
 				config = dev->hs_config->bConfigurationValue;
 				power = dev->hs_config->bMaxPower;
@@ -1482,6 +1487,7 @@ unrecognized:
 delegate:
 			dev->setup_in = (ctrl->bRequestType & USB_DIR_IN)
 						? 1 : 0;
+			dev->setup_wLength = w_length;
 			dev->setup_out_ready = 0;
 			dev->setup_out_error = 0;
 			value = 0;
@@ -1561,10 +1567,10 @@ restart:
 		spin_unlock_irq (&dev->lock);
 
 		/* break link to dcache */
-		down (&parent->i_sem);
+		mutex_lock (&parent->i_mutex);
 		d_delete (dentry);
 		dput (dentry);
-		up (&parent->i_sem);
+		mutex_unlock (&parent->i_mutex);
 
 		/* fds may still be open */
 		goto restart;
@@ -1575,7 +1581,7 @@ restart:
 
 static struct inode *
 gadgetfs_create_file (struct super_block *sb, char const *name,
-		void *data, struct file_operations *fops,
+		void *data, const struct file_operations *fops,
 		struct dentry **dentry_p);
 
 static int activate_ep_files (struct dev_data *dev)
@@ -1585,10 +1591,9 @@ static int activate_ep_files (struct dev_data *dev)
 	gadget_for_each_ep (ep, dev->gadget) {
 		struct ep_data	*data;
 
-		data = kmalloc (sizeof *data, GFP_KERNEL);
+		data = kzalloc(sizeof(*data), GFP_KERNEL);
 		if (!data)
 			goto enomem;
-		memset (data, 0, sizeof data);
 		data->state = STATE_EP_DISABLED;
 		init_MUTEX (&data->lock);
 		init_waitqueue_head (&data->wait);
@@ -1609,6 +1614,7 @@ static int activate_ep_files (struct dev_data *dev)
 				data, &ep_config_operations,
 				&data->dentry);
 		if (!data->inode) {
+			usb_ep_free_request(ep, data->req);
 			kfree (data);
 			goto enomem;
 		}
@@ -1723,7 +1729,7 @@ gadgetfs_suspend (struct usb_gadget *gadget)
 }
 
 static struct usb_gadget_driver gadgetfs_driver = {
-#ifdef	HIGHSPEED
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 	.speed		= USB_SPEED_HIGH,
 #else
 	.speed		= USB_SPEED_FULL,
@@ -1737,9 +1743,6 @@ static struct usb_gadget_driver gadgetfs_driver = {
 
 	.driver 	= {
 		.name		= (char *) shortname,
-		// .shutdown = ...
-		// .suspend = ...
-		// .resume = ...
 	},
 };
 
@@ -1953,7 +1956,7 @@ module_param (default_perm, uint, 0644);
 
 static struct inode *
 gadgetfs_make_inode (struct super_block *sb,
-		void *data, struct file_operations *fops,
+		void *data, const struct file_operations *fops,
 		int mode)
 {
 	struct inode *inode = new_inode (sb);
@@ -1977,7 +1980,7 @@ gadgetfs_make_inode (struct super_block *sb,
  */
 static struct inode *
 gadgetfs_create_file (struct super_block *sb, char const *name,
-		void *data, struct file_operations *fops,
+		void *data, const struct file_operations *fops,
 		struct dentry **dentry_p)
 {
 	struct dentry	*dentry;

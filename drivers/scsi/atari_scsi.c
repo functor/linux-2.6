@@ -239,17 +239,17 @@ static int atari_read_overruns = 0;
 #endif
 
 static int setup_can_queue = -1;
-MODULE_PARM(setup_can_queue, "i");
+module_param(setup_can_queue, int, 0);
 static int setup_cmd_per_lun = -1;
-MODULE_PARM(setup_cmd_per_lun, "i");
+module_param(setup_cmd_per_lun, int, 0);
 static int setup_sg_tablesize = -1;
-MODULE_PARM(setup_sg_tablesize, "i");
+module_param(setup_sg_tablesize, int, 0);
 #ifdef SUPPORT_TAGS
 static int setup_use_tagged_queuing = -1;
-MODULE_PARM(setup_use_tagged_queuing, "i");
+module_param(setup_use_tagged_queuing, int, 0);
 #endif
 static int setup_hostid = -1;
-MODULE_PARM(setup_hostid, "i");
+module_param(setup_hostid, int, 0);
 
 
 #if defined(CONFIG_TT_DMA_EMUL)
@@ -600,7 +600,7 @@ int atari_queue_command (Scsi_Cmnd *cmd, void (*done)(Scsi_Cmnd *))
 #endif
 
 
-int atari_scsi_detect (Scsi_Host_Template *host)
+int atari_scsi_detect (struct scsi_host_template *host)
 {
 	static int called = 0;
 	struct Scsi_Host *instance;
@@ -1141,7 +1141,7 @@ static void atari_scsi_falcon_reg_write( unsigned char reg, unsigned char value 
 
 #include "atari_NCR5380.c"
 
-static Scsi_Host_Template driver_template = {
+static struct scsi_host_template driver_template = {
 	.proc_info		= atari_scsi_proc_info,
 	.name			= "Atari native SCSI",
 	.detect			= atari_scsi_detect,

@@ -225,7 +225,7 @@ struct epic_chip_info {
 
 
 /* indexed by chip_t */
-static struct epic_chip_info pci_id_tbl[] = {
+static const struct epic_chip_info pci_id_tbl[] = {
 	{ "SMSC EPIC/100 83c170",
 	 EPIC_IOTYPE, EPIC_TOTAL_SIZE, TYPE2_INTR | NO_MII | MII_PWRDWN },
 	{ "SMSC EPIC/100 83c170",
@@ -291,7 +291,7 @@ enum CommandBits {
 			 RxDone | RxStarted | RxEarlyWarn | RxOverflow | RxFull)
 #define EpicNormalEvent	(0x0000ffff & ~EpicNapiEvent)
 
-static u16 media2miictl[16] = {
+static const u16 media2miictl[16] = {
 	0, 0x0C00, 0x0C00, 0x2000,  0x0100, 0x2100, 0, 0,
 	0, 0, 0, 0,  0, 0, 0, 0 };
 
@@ -1003,7 +1003,7 @@ static void epic_init_ring(struct net_device *dev)
 		skb->dev = dev;			/* Mark as being used by this device. */
 		skb_reserve(skb, 2);	/* 16 byte align the IP header. */
 		ep->rx_ring[i].bufaddr = pci_map_single(ep->pci_dev, 
-			skb->tail, ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
+			skb->data, ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
 		ep->rx_ring[i].rxstatus = cpu_to_le32(DescOwn);
 	}
 	ep->dirty_rx = (unsigned int)(i - RX_RING_SIZE);
@@ -1274,7 +1274,7 @@ static int epic_rx(struct net_device *dev, int budget)
 							    ep->rx_ring[entry].bufaddr,
 							    ep->rx_buf_sz,
 							    PCI_DMA_FROMDEVICE);
-				eth_copy_and_sum(skb, ep->rx_skbuff[entry]->tail, pkt_len, 0);
+				eth_copy_and_sum(skb, ep->rx_skbuff[entry]->data, pkt_len, 0);
 				skb_put(skb, pkt_len);
 				pci_dma_sync_single_for_device(ep->pci_dev,
 							       ep->rx_ring[entry].bufaddr,
@@ -1308,7 +1308,7 @@ static int epic_rx(struct net_device *dev, int budget)
 			skb->dev = dev;			/* Mark as being used by this device. */
 			skb_reserve(skb, 2);	/* Align IP on 16 byte boundaries */
 			ep->rx_ring[entry].bufaddr = pci_map_single(ep->pci_dev, 
-				skb->tail, ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
+				skb->data, ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
 			work_done++;
 		}
 		ep->rx_ring[entry].rxstatus = cpu_to_le32(DescOwn);
@@ -1334,7 +1334,7 @@ static void epic_rx_err(struct net_device *dev, struct epic_private *ep)
 static int epic_poll(struct net_device *dev, int *budget)
 {
 	struct epic_private *ep = dev->priv;
-	int work_done, orig_budget;
+	int work_done = 0, orig_budget;
 	long ioaddr = dev->base_addr;
 
 	orig_budget = (*budget > dev->quota) ? dev->quota : *budget;
@@ -1343,7 +1343,7 @@ rx_action:
 
 	epic_tx(dev, ep);
 
-	work_done = epic_rx(dev, *budget);
+	work_done += epic_rx(dev, *budget);
 
 	epic_rx_err(dev, ep);
 

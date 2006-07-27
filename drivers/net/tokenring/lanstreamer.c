@@ -118,9 +118,11 @@
 #include <linux/stddef.h>
 #include <linux/init.h>
 #include <linux/pci.h>
+#include <linux/dma-mapping.h>
 #include <linux/spinlock.h>
 #include <linux/version.h>
 #include <linux/bitops.h>
+#include <linux/jiffies.h>
 
 #include <net/checksum.h>
 
@@ -257,7 +259,7 @@ static int __devinit streamer_init_one(struct pci_dev *pdev,
 #endif
 #endif
 
-	rc = pci_set_dma_mask(pdev, 0xFFFFFFFFULL);
+	rc = pci_set_dma_mask(pdev, DMA_32BIT_MASK);
 	if (rc) {
 		printk(KERN_ERR "%s: No suitable PCI mapping available.\n",
 				dev->name);
@@ -454,8 +456,7 @@ static int streamer_reset(struct net_device *dev)
 	writew(readw(streamer_mmio + BCTL) | BCTL_SOFTRESET, streamer_mmio + BCTL);
 	t = jiffies;
 	/* Hold soft reset bit for a while */
-	current->state = TASK_UNINTERRUPTIBLE;
-	schedule_timeout(HZ);
+	ssleep(1);
 	
 	writew(readw(streamer_mmio + BCTL) & ~BCTL_SOFTRESET,
 	       streamer_mmio + BCTL);
@@ -511,9 +512,8 @@ static int streamer_reset(struct net_device *dev)
 	writew(SISR_MI, streamer_mmio + SISR_MASK_SUM);
 
 	while (!((readw(streamer_mmio + SISR)) & SISR_SRB_REPLY)) {
-		current->state = TASK_INTERRUPTIBLE;
-		schedule_timeout(HZ/10);
-		if (jiffies - t > 40 * HZ) {
+		msleep_interruptible(100);
+		if (time_after(jiffies, t + 40 * HZ)) {
 			printk(KERN_ERR
 			       "IBM PCI tokenring card not responding\n");
 			release_region(dev->base_addr, STREAMER_IO_SPACE);

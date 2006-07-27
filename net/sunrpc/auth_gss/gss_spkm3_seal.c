@@ -51,15 +51,16 @@
  */
 
 u32
-spkm3_make_token(struct spkm3_ctx *ctx, int qop_req,
+spkm3_make_token(struct spkm3_ctx *ctx,
 		   struct xdr_buf * text, struct xdr_netobj * token,
 		   int toktype)
 {
 	s32			checksum_type;
 	char			tokhdrbuf[25];
-	struct xdr_netobj	md5cksum = {.len = 0, .data = NULL};
+	char			cksumdata[16];
+	struct xdr_netobj	md5cksum = {.len = 0, .data = cksumdata};
 	struct xdr_netobj	mic_hdr = {.len = 0, .data = tokhdrbuf};
-	int			tmsglen, tokenlen = 0;
+	int			tokenlen = 0;
 	unsigned char		*ptr;
 	s32			now;
 	int			ctxelen = 0, ctxzbit = 0;
@@ -68,8 +69,6 @@ spkm3_make_token(struct spkm3_ctx *ctx, int qop_req,
 	dprintk("RPC: spkm3_make_token\n");
 
 	now = jiffies;
-	if (qop_req != 0)
-		goto out_err;
 
 	if (ctx->ctx_id.len != 16) {
 		dprintk("RPC: spkm3_make_token BAD ctx_id.len %d\n",
@@ -94,38 +93,34 @@ spkm3_make_token(struct spkm3_ctx *ctx, int qop_req,
 	}
 
 	if (toktype == SPKM_MIC_TOK) {
-		tmsglen = 0;
 		/* Calculate checksum over the mic-header */
 		asn1_bitstring_len(&ctx->ctx_id, &ctxelen, &ctxzbit);
 		spkm3_mic_header(&mic_hdr.data, &mic_hdr.len, ctx->ctx_id.data,
 		                         ctxelen, ctxzbit);
 
 		if (make_checksum(checksum_type, mic_hdr.data, mic_hdr.len, 
-		                             text, &md5cksum))
+		                             text, 0, &md5cksum))
 			goto out_err;
 
 		asn1_bitstring_len(&md5cksum, &md5elen, &md5zbit);
-		tokenlen = 10 + ctxelen + 1 + 2 + md5elen + 1;
+		tokenlen = 10 + ctxelen + 1 + md5elen + 1;
 
 		/* Create token header using generic routines */
-		token->len = g_token_size(&ctx->mech_used, tokenlen + tmsglen);
+		token->len = g_token_size(&ctx->mech_used, tokenlen);
 
 		ptr = token->data;
-		g_make_token_header(&ctx->mech_used, tokenlen + tmsglen, &ptr);
+		g_make_token_header(&ctx->mech_used, tokenlen, &ptr);
 
 		spkm3_make_mic_token(&ptr, tokenlen, &mic_hdr, &md5cksum, md5elen, md5zbit);
 	} else if (toktype == SPKM_WRAP_TOK) { /* Not Supported */
 		dprintk("RPC: gss_spkm3_seal: SPKM_WRAP_TOK not supported\n");
 		goto out_err;
 	}
-	kfree(md5cksum.data);
 
 	/* XXX need to implement sequence numbers, and ctx->expired */
 
 	return  GSS_S_COMPLETE;
 out_err:
-	if (md5cksum.data) 
-		kfree(md5cksum.data);
 	token->data = NULL;
 	token->len = 0;
 	return GSS_S_FAILURE;

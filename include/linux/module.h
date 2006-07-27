@@ -51,6 +51,9 @@ struct module_attribute {
         ssize_t (*show)(struct module_attribute *, struct module *, char *);
         ssize_t (*store)(struct module_attribute *, struct module *,
 			 const char *, size_t count);
+	void (*setup)(struct module *, const char *);
+	int (*test)(struct module *);
+	void (*free)(struct module *);
 };
 
 struct module_kobject
@@ -180,6 +183,7 @@ void *__symbol_get_gpl(const char *symbol);
 
 /* For every exported symbol, place a struct in the __ksymtab section */
 #define __EXPORT_SYMBOL(sym, sec)				\
+	extern typeof(sym) sym;					\
 	__CRC_SYMBOL(sym, sec)					\
 	static const char __kstrtab_##sym[]			\
 	__attribute__((section("__ksymtab_strings")))		\
@@ -194,6 +198,9 @@ void *__symbol_get_gpl(const char *symbol);
 
 #define EXPORT_SYMBOL_GPL(sym)					\
 	__EXPORT_SYMBOL(sym, "_gpl")
+
+#define EXPORT_SYMBOL_GPL_FUTURE(sym)				\
+	__EXPORT_SYMBOL(sym, "_gpl_future")
 
 #endif
 
@@ -239,6 +246,9 @@ struct module
 	/* Sysfs stuff. */
 	struct module_kobject mkobj;
 	struct module_param_attrs *param_attrs;
+	struct module_attribute *modinfo_attrs;
+	const char *version;
+	const char *srcversion;
 
 	/* Exported symbols */
 	const struct kernel_symbol *syms;
@@ -249,6 +259,11 @@ struct module
 	const struct kernel_symbol *gpl_syms;
 	unsigned int num_gpl_syms;
 	const unsigned long *gpl_crcs;
+
+	/* symbols that will be GPL-only in the near future. */
+	const struct kernel_symbol *gpl_future_syms;
+	unsigned int num_gpl_future_syms;
+	const unsigned long *gpl_future_crcs;
 
 	/* Exception table */
 	unsigned int num_exentries;
@@ -439,6 +454,7 @@ void module_remove_driver(struct device_driver *);
 #else /* !CONFIG_MODULES... */
 #define EXPORT_SYMBOL(sym)
 #define EXPORT_SYMBOL_GPL(sym)
+#define EXPORT_SYMBOL_GPL_FUTURE(sym)
 
 /* Given an address, look for it in the exception tables. */
 static inline const struct exception_table_entry *
@@ -541,23 +557,6 @@ static inline void module_remove_driver(struct device_driver *driver)
 #define symbol_request(x) try_then_request_module(symbol_get(x), "symbol:" #x)
 
 /* BELOW HERE ALL THESE ARE OBSOLETE AND WILL VANISH */
-
-struct obsolete_modparm {
-	char name[64];
-	char type[64-sizeof(void *)];
-	void *addr;
-};
-
-static inline void MODULE_PARM_(void) { }
-#ifdef MODULE
-/* DEPRECATED: Do not use. */
-#define MODULE_PARM(var,type)						    \
-struct obsolete_modparm __parm_##var __attribute__((section("__obsparm"))) = \
-{ __stringify(var), type, &MODULE_PARM_ }; \
-__MODULE_PARM_TYPE(var, type);
-#else
-#define MODULE_PARM(var,type) static void __attribute__((__unused__)) *__parm_##var = &MODULE_PARM_;
-#endif
 
 #define __MODULE_STRING(x) __stringify(x)
 

@@ -139,11 +139,10 @@ struct sock *__inet_lookup_listener(const struct hlist_head *head, const u32 dad
 			const __u32 rcv_saddr = inet->rcv_saddr;
 			int score = sk->sk_family == PF_INET ? 1 : 0;
 
-			if (rcv_saddr) {
-				if (rcv_saddr != daddr)
-					continue;
+			if (inet_addr_match(sk->sk_nx_info, daddr, rcv_saddr))
 				score += 2;
-			}
+			else
+				continue;
 			if (sk->sk_bound_dev_if) {
 				if (sk->sk_bound_dev_if != dif)
 					continue;

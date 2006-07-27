@@ -46,7 +46,7 @@ struct dn_zone
 	u32			dz_hashmask;
 #define DZ_HASHMASK(dz)	((dz)->dz_hashmask)
 	int			dz_order;
-	u16			dz_mask;
+	__le16			dz_mask;
 #define DZ_MASK(dz)	((dz)->dz_mask)
 };
 
@@ -79,19 +79,19 @@ for( ; ((f) = *(fp)) != NULL && dn_key_eq((f)->fn_key, (key)); (fp) = &(f)->fn_n
 static DEFINE_RWLOCK(dn_fib_tables_lock);
 struct dn_fib_table *dn_fib_tables[RT_TABLE_MAX + 1];
 
-static kmem_cache_t *dn_hash_kmem;
+static kmem_cache_t *dn_hash_kmem __read_mostly;
 static int dn_fib_hash_zombies;
 
 static inline dn_fib_idx_t dn_hash(dn_fib_key_t key, struct dn_zone *dz)
 {
-	u16 h = ntohs(key.datum)>>(16 - dz->dz_order);
+	u16 h = dn_ntohs(key.datum)>>(16 - dz->dz_order);
 	h ^= (h >> 10);
 	h ^= (h >> 6);
 	h &= DZ_HASHMASK(dz);
 	return *(dn_fib_idx_t *)&h;
 }
 
-static inline dn_fib_key_t dz_key(u16 dst, struct dn_zone *dz)
+static inline dn_fib_key_t dz_key(__le16 dst, struct dn_zone *dz)
 {
 	dn_fib_key_t k;
 	k.datum = dst & DZ_MASK(dz);
@@ -250,7 +250,7 @@ static int dn_fib_nh_match(struct rtmsg *r, struct nlmsghdr *nlh, struct dn_kern
 
 	for_nexthops(fi) {
 		int attrlen = nhlen - sizeof(struct rtnexthop);
-		dn_address gw;
+		__le16 gw;
 
 		if (attrlen < 0 || (nhlen -= nhp->rtnh_len) < 0)
 			return -EINVAL;
@@ -270,13 +270,13 @@ static int dn_fib_nh_match(struct rtmsg *r, struct nlmsghdr *nlh, struct dn_kern
 
 static int dn_fib_dump_info(struct sk_buff *skb, u32 pid, u32 seq, int event,
                         u8 tb_id, u8 type, u8 scope, void *dst, int dst_len,
-                        struct dn_fib_info *fi)
+                        struct dn_fib_info *fi, unsigned int flags)
 {
         struct rtmsg *rtm;
         struct nlmsghdr *nlh;
         unsigned char *b = skb->tail;
 
-        nlh = NLMSG_PUT(skb, pid, seq, event, sizeof(*rtm));
+        nlh = NLMSG_NEW(skb, pid, seq, event, sizeof(*rtm), flags);
         rtm = NLMSG_DATA(nlh);
         rtm->rtm_family = AF_DECnet;
         rtm->rtm_dst_len = dst_len;
@@ -345,14 +345,14 @@ static void dn_rtmsg_fib(int event, struct dn_fib_node *f, int z, int tb_id,
 
         if (dn_fib_dump_info(skb, pid, nlh->nlmsg_seq, event, tb_id, 
                                 f->fn_type, f->fn_scope, &f->fn_key, z, 
-                                DN_FIB_INFO(f)) < 0) {
+                                DN_FIB_INFO(f), 0) < 0) {
                 kfree_skb(skb);
                 return;
         }
-        NETLINK_CB(skb).dst_groups = RTMGRP_DECnet_ROUTE;
+        NETLINK_CB(skb).dst_group = RTNLGRP_DECnet_ROUTE;
         if (nlh->nlmsg_flags & NLM_F_ECHO)
                 atomic_inc(&skb->users);
-        netlink_broadcast(rtnl, skb, pid, RTMGRP_DECnet_ROUTE, GFP_KERNEL);
+        netlink_broadcast(rtnl, skb, pid, RTNLGRP_DECnet_ROUTE, GFP_KERNEL);
         if (nlh->nlmsg_flags & NLM_F_ECHO)
                 netlink_unicast(rtnl, skb, pid, MSG_DONTWAIT);
 }
@@ -377,7 +377,7 @@ static __inline__ int dn_hash_dump_bucket(struct sk_buff *skb,
 				tb->n, 
 				(f->fn_state & DN_S_ZOMBIE) ? 0 : f->fn_type,
 				f->fn_scope, &f->fn_key, dz->dz_order, 
-				f->fn_info) < 0) {
+				f->fn_info, NLM_F_MULTI) < 0) {
 			cb->args[3] = i;
 			return -1;
 		}
@@ -457,7 +457,7 @@ static int dn_fib_table_insert(struct dn_fib_table *tb, struct rtmsg *r, struct 
 
 	dz_key_0(key);
 	if (rta->rta_dst) {
-		dn_address dst;
+		__le16 dst;
 		memcpy(&dst, rta->rta_dst, 2);
 		if (dst & ~DZ_MASK(dz))
 			return -EINVAL;
@@ -593,7 +593,7 @@ static int dn_fib_table_delete(struct dn_fib_table *tb, struct rtmsg *r, struct 
 
 	dz_key_0(key);
 	if (rta->rta_dst) {
-		dn_address dst;
+		__le16 dst;
 		memcpy(&dst, rta->rta_dst, 2);
 		if (dst & ~DZ_MASK(dz))
 			return -EINVAL;
@@ -784,16 +784,14 @@ struct dn_fib_table *dn_fib_get_table(int n, int create)
 
 static void dn_fib_del_tree(int n)
 {
-        struct dn_fib_table *t;
+	struct dn_fib_table *t;
 
-        write_lock(&dn_fib_tables_lock);
-        t = dn_fib_tables[n];
-        dn_fib_tables[n] = NULL;
-        write_unlock(&dn_fib_tables_lock);
+	write_lock(&dn_fib_tables_lock);
+	t = dn_fib_tables[n];
+	dn_fib_tables[n] = NULL;
+	write_unlock(&dn_fib_tables_lock);
 
-        if (t) {
-                kfree(t);
-        }
+	kfree(t);
 }
 
 struct dn_fib_table *dn_fib_empty_table(void)

@@ -2,7 +2,7 @@
  * This file implement the Wireless Extensions APIs.
  *
  * Authors :	Jean Tourrilhes - HPL - <jt@hpl.hp.com>
- * Copyright (c) 1997-2004 Jean Tourrilhes, All Rights Reserved.
+ * Copyright (c) 1997-2006 Jean Tourrilhes, All Rights Reserved.
  *
  * (As all part of the Linux kernel, this file is GPL)
  */
@@ -58,6 +58,16 @@
  *	o Add wmb() in iw_handler_set_spy() for non-coherent archs/cpus
  * Based on patch from Pavel Roskin <proski@gnu.org> :
  *	o Fix kernel data leak to user space in private handler handling
+ *
+ * v7 - 18.3.05 - Jean II
+ *	o Remove (struct iw_point *)->pointer from events and streams
+ *	o Remove spy_offset from struct iw_handler_def
+ *	o Start deprecating dev->get_wireless_stats, output a warning
+ *	o If IW_QUAL_DBM is set, show dBm values in /proc/net/wireless
+ *	o Don't loose INVALID/DBM flags when clearing UPDATED flags (iwstats)
+ *
+ * v8 - 17.02.06 - Jean II
+ *	o RtNetlink requests support (SET/GET)
  */
 
 /***************************** INCLUDES *****************************/
@@ -71,6 +81,7 @@
 #include <linux/seq_file.h>
 #include <linux/init.h>			/* for __init */
 #include <linux/if_arp.h>		/* ARPHRD_ETHER */
+#include <linux/etherdevice.h>		/* compare_ether_addr */
 
 #include <linux/wireless.h>		/* Pretty obvious */
 #include <net/iw_handler.h>		/* New driver API */
@@ -81,11 +92,13 @@
 
 /* Debugging stuff */
 #undef WE_IOCTL_DEBUG		/* Debug IOCTL API */
+#undef WE_RTNETLINK_DEBUG	/* Debug RtNetlink API */
 #undef WE_EVENT_DEBUG		/* Debug Event dispatcher */
 #undef WE_SPY_DEBUG		/* Debug enhanced spy support */
 
 /* Options */
-#define WE_EVENT_NETLINK	/* Propagate events using rtnetlink */
+//CONFIG_NET_WIRELESS_RTNETLINK	/* Wireless requests over RtNetlink */
+#define WE_EVENT_RTNETLINK	/* Propagate events using RtNetlink */
 #define WE_SET_EVENT		/* Generate an event on some set commands */
 
 /************************* GLOBAL VARIABLES *************************/
@@ -148,13 +161,18 @@ static const struct iw_ioctl_description standard_ioctl[] = {
 		.header_type	= IW_HEADER_TYPE_NULL,
 	},
 	[SIOCGIWPRIV	- SIOCIWFIRST] = { /* (handled directly by us) */
-		.header_type	= IW_HEADER_TYPE_NULL,
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= sizeof(struct iw_priv_args),
+		.max_tokens	= 16,
+		.flags		= IW_DESCR_FLAG_NOMAX,
 	},
 	[SIOCSIWSTATS	- SIOCIWFIRST] = {
 		.header_type	= IW_HEADER_TYPE_NULL,
 	},
 	[SIOCGIWSTATS	- SIOCIWFIRST] = { /* (handled directly by us) */
-		.header_type	= IW_HEADER_TYPE_NULL,
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= sizeof(struct iw_statistics),
 		.flags		= IW_DESCR_FLAG_DUMP,
 	},
 	[SIOCSIWSPY	- SIOCIWFIRST] = {
@@ -187,6 +205,12 @@ static const struct iw_ioctl_description standard_ioctl[] = {
 		.header_type	= IW_HEADER_TYPE_ADDR,
 		.flags		= IW_DESCR_FLAG_DUMP,
 	},
+	[SIOCSIWMLME	- SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.min_tokens	= sizeof(struct iw_mlme),
+		.max_tokens	= sizeof(struct iw_mlme),
+	},
 	[SIOCGIWAPLIST	- SIOCIWFIRST] = {
 		.header_type	= IW_HEADER_TYPE_POINT,
 		.token_size	= sizeof(struct sockaddr) +
@@ -195,7 +219,10 @@ static const struct iw_ioctl_description standard_ioctl[] = {
 		.flags		= IW_DESCR_FLAG_NOMAX,
 	},
 	[SIOCSIWSCAN	- SIOCIWFIRST] = {
-		.header_type	= IW_HEADER_TYPE_PARAM,
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.min_tokens	= 0,
+		.max_tokens	= sizeof(struct iw_scan_req),
 	},
 	[SIOCGIWSCAN	- SIOCIWFIRST] = {
 		.header_type	= IW_HEADER_TYPE_POINT,
@@ -273,6 +300,42 @@ static const struct iw_ioctl_description standard_ioctl[] = {
 	[SIOCGIWPOWER	- SIOCIWFIRST] = {
 		.header_type	= IW_HEADER_TYPE_PARAM,
 	},
+	[SIOCSIWGENIE	- SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= IW_GENERIC_IE_MAX,
+	},
+	[SIOCGIWGENIE	- SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= IW_GENERIC_IE_MAX,
+	},
+	[SIOCSIWAUTH	- SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_PARAM,
+	},
+	[SIOCGIWAUTH	- SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_PARAM,
+	},
+	[SIOCSIWENCODEEXT - SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.min_tokens	= sizeof(struct iw_encode_ext),
+		.max_tokens	= sizeof(struct iw_encode_ext) +
+				  IW_ENCODING_TOKEN_MAX,
+	},
+	[SIOCGIWENCODEEXT - SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.min_tokens	= sizeof(struct iw_encode_ext),
+		.max_tokens	= sizeof(struct iw_encode_ext) +
+				  IW_ENCODING_TOKEN_MAX,
+	},
+	[SIOCSIWPMKSA - SIOCIWFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.min_tokens	= sizeof(struct iw_pmksa),
+		.max_tokens	= sizeof(struct iw_pmksa),
+	},
 };
 static const int standard_ioctl_num = (sizeof(standard_ioctl) /
 				       sizeof(struct iw_ioctl_description));
@@ -298,6 +361,31 @@ static const struct iw_ioctl_description standard_event[] = {
 	},
 	[IWEVEXPIRED	- IWEVFIRST] = {
 		.header_type	= IW_HEADER_TYPE_ADDR, 
+	},
+	[IWEVGENIE	- IWEVFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= IW_GENERIC_IE_MAX,
+	},
+	[IWEVMICHAELMICFAILURE	- IWEVFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT, 
+		.token_size	= 1,
+		.max_tokens	= sizeof(struct iw_michaelmicfailure),
+	},
+	[IWEVASSOCREQIE	- IWEVFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= IW_GENERIC_IE_MAX,
+	},
+	[IWEVASSOCRESPIE	- IWEVFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= IW_GENERIC_IE_MAX,
+	},
+	[IWEVPMKIDCAND	- IWEVFIRST] = {
+		.header_type	= IW_HEADER_TYPE_POINT,
+		.token_size	= 1,
+		.max_tokens	= sizeof(struct iw_pmkid_cand),
 	},
 };
 static const int standard_event_num = (sizeof(standard_event) /
@@ -376,10 +464,19 @@ static inline struct iw_statistics *get_wireless_stats(struct net_device *dev)
 	   (dev->wireless_handlers->get_wireless_stats != NULL))
 		return dev->wireless_handlers->get_wireless_stats(dev);
 
-	/* Old location, will be phased out in next WE */
-	return (dev->get_wireless_stats ?
-		dev->get_wireless_stats(dev) :
-		(struct iw_statistics *) NULL);
+	/* Old location, field to be removed in next WE */
+	if(dev->get_wireless_stats) {
+		static int printed_message;
+
+		if (!printed_message++)
+			printk(KERN_DEBUG "%s (WE) : Driver using old /proc/net/wireless support, please fix driver !\n",
+				dev->name);
+
+		return dev->get_wireless_stats(dev);
+	}
+
+	/* Not found */
+	return (struct iw_statistics *) NULL;
 }
 
 /* ---------------------------------------------------------------- */
@@ -442,6 +539,70 @@ static inline int adjust_priv_size(__u16		args,
 	return num * iw_priv_type_size[type];
 }
 
+/* ---------------------------------------------------------------- */
+/*
+ * Standard Wireless Handler : get wireless stats
+ *	Allow programatic access to /proc/net/wireless even if /proc
+ *	doesn't exist... Also more efficient...
+ */
+static int iw_handler_get_iwstats(struct net_device *		dev,
+				  struct iw_request_info *	info,
+				  union iwreq_data *		wrqu,
+				  char *			extra)
+{
+	/* Get stats from the driver */
+	struct iw_statistics *stats;
+
+	stats = get_wireless_stats(dev);
+	if (stats != (struct iw_statistics *) NULL) {
+
+		/* Copy statistics to extra */
+		memcpy(extra, stats, sizeof(struct iw_statistics));
+		wrqu->data.length = sizeof(struct iw_statistics);
+
+		/* Check if we need to clear the updated flag */
+		if(wrqu->data.flags != 0)
+			stats->qual.updated &= ~IW_QUAL_ALL_UPDATED;
+		return 0;
+	} else
+		return -EOPNOTSUPP;
+}
+
+/* ---------------------------------------------------------------- */
+/*
+ * Standard Wireless Handler : get iwpriv definitions
+ * Export the driver private handler definition
+ * They will be picked up by tools like iwpriv...
+ */
+static int iw_handler_get_private(struct net_device *		dev,
+				  struct iw_request_info *	info,
+				  union iwreq_data *		wrqu,
+				  char *			extra)
+{
+	/* Check if the driver has something to export */
+	if((dev->wireless_handlers->num_private_args == 0) ||
+	   (dev->wireless_handlers->private_args == NULL))
+		return -EOPNOTSUPP;
+
+	/* Check if there is enough buffer up there */
+	if(wrqu->data.length < dev->wireless_handlers->num_private_args) {
+		/* User space can't know in advance how large the buffer
+		 * needs to be. Give it a hint, so that we can support
+		 * any size buffer we want somewhat efficiently... */
+		wrqu->data.length = dev->wireless_handlers->num_private_args;
+		return -E2BIG;
+	}
+
+	/* Set the number of available ioctls. */
+	wrqu->data.length = dev->wireless_handlers->num_private_args;
+
+	/* Copy structure to the user buffer. */
+	memcpy(extra, dev->wireless_handlers->private_args,
+	       sizeof(struct iw_priv_args) * wrqu->data.length);
+
+	return 0;
+}
+
 
 /******************** /proc/net/wireless SUPPORT ********************/
 /*
@@ -471,16 +632,18 @@ static __inline__ void wireless_seq_printf_stats(struct seq_file *seq,
 			   dev->name, stats->status, stats->qual.qual,
 			   stats->qual.updated & IW_QUAL_QUAL_UPDATED
 			   ? '.' : ' ',
-			   ((__u8) stats->qual.level),
+			   ((__s32) stats->qual.level) - 
+			   ((stats->qual.updated & IW_QUAL_DBM) ? 0x100 : 0),
 			   stats->qual.updated & IW_QUAL_LEVEL_UPDATED
 			   ? '.' : ' ',
-			   ((__u8) stats->qual.noise),
+			   ((__s32) stats->qual.noise) - 
+			   ((stats->qual.updated & IW_QUAL_DBM) ? 0x100 : 0),
 			   stats->qual.updated & IW_QUAL_NOISE_UPDATED
 			   ? '.' : ' ',
 			   stats->discard.nwid, stats->discard.code,
 			   stats->discard.fragment, stats->discard.retries,
 			   stats->discard.misc, stats->miss.beacon);
-		stats->qual.updated = 0;
+		stats->qual.updated &= ~IW_QUAL_ALL_UPDATED;
 	}
 }
 
@@ -500,10 +663,6 @@ static int wireless_seq_show(struct seq_file *seq, void *v)
 		wireless_seq_printf_stats(seq, v);
 	return 0;
 }
-
-extern void *dev_seq_start(struct seq_file *seq, loff_t *pos);
-extern void *dev_seq_next(struct seq_file *seq, void *v, loff_t *pos);
-extern void dev_seq_stop(struct seq_file *seq, void *v);
 
 static struct seq_operations wireless_seq_ops = {
 	.start = dev_seq_start,
@@ -527,6 +686,7 @@ static struct file_operations wireless_seq_fops = {
 
 int __init wireless_proc_init(void)
 {
+	/* Create /proc/net/wireless entry */
 	if (!proc_net_fops_create("wireless", S_IRUGO, &wireless_seq_fops))
 		return -ENOMEM;
 
@@ -544,81 +704,14 @@ int __init wireless_proc_init(void)
 
 /* ---------------------------------------------------------------- */
 /*
- *	Allow programatic access to /proc/net/wireless even if /proc
- *	doesn't exist... Also more efficient...
- */
-static inline int dev_iwstats(struct net_device *dev, struct ifreq *ifr)
-{
-	/* Get stats from the driver */
-	struct iw_statistics *stats;
-
-	stats = get_wireless_stats(dev);
-	if (stats != (struct iw_statistics *) NULL) {
-		struct iwreq *	wrq = (struct iwreq *)ifr;
-
-		/* Copy statistics to the user buffer */
-		if(copy_to_user(wrq->u.data.pointer, stats,
-				sizeof(struct iw_statistics)))
-			return -EFAULT;
-
-		/* Check if we need to clear the update flag */
-		if(wrq->u.data.flags != 0)
-			stats->qual.updated = 0;
-		return 0;
-	} else
-		return -EOPNOTSUPP;
-}
-
-/* ---------------------------------------------------------------- */
-/*
- * Export the driver private handler definition
- * They will be picked up by tools like iwpriv...
- */
-static inline int ioctl_export_private(struct net_device *	dev,
-				       struct ifreq *		ifr)
-{
-	struct iwreq *				iwr = (struct iwreq *) ifr;
-
-	/* Check if the driver has something to export */
-	if((dev->wireless_handlers->num_private_args == 0) ||
-	   (dev->wireless_handlers->private_args == NULL))
-		return -EOPNOTSUPP;
-
-	/* Check NULL pointer */
-	if(iwr->u.data.pointer == NULL)
-		return -EFAULT;
-
-	/* Check if there is enough buffer up there */
-	if(iwr->u.data.length < dev->wireless_handlers->num_private_args) {
-		/* User space can't know in advance how large the buffer
-		 * needs to be. Give it a hint, so that we can support
-		 * any size buffer we want somewhat efficiently... */
-		iwr->u.data.length = dev->wireless_handlers->num_private_args;
-		return -E2BIG;
-	}
-
-	/* Set the number of available ioctls. */
-	iwr->u.data.length = dev->wireless_handlers->num_private_args;
-
-	/* Copy structure to the user buffer. */
-	if (copy_to_user(iwr->u.data.pointer,
-			 dev->wireless_handlers->private_args,
-			 sizeof(struct iw_priv_args) * iwr->u.data.length))
-		return -EFAULT;
-
-	return 0;
-}
-
-/* ---------------------------------------------------------------- */
-/*
  * Wrapper to call a standard Wireless Extension handler.
  * We do various checks and also take care of moving data between
  * user space and kernel space.
  */
-static inline int ioctl_standard_call(struct net_device *	dev,
-				      struct ifreq *		ifr,
-				      unsigned int		cmd,
-				      iw_handler		handler)
+static int ioctl_standard_call(struct net_device *	dev,
+			       struct ifreq *		ifr,
+			       unsigned int		cmd,
+			       iw_handler		handler)
 {
 	struct iwreq *				iwr = (struct iwreq *) ifr;
 	const struct iw_ioctl_description *	descr;
@@ -962,14 +1055,20 @@ int wireless_process_ioctl(struct ifreq *ifr, unsigned int cmd)
 	{
 		case SIOCGIWSTATS:
 			/* Get Wireless Stats */
-			return dev_iwstats(dev, ifr);
+			return ioctl_standard_call(dev,
+						   ifr,
+						   cmd,
+						   &iw_handler_get_iwstats);
 
 		case SIOCGIWPRIV:
 			/* Check if we have some wireless handlers defined */
 			if(dev->wireless_handlers != NULL) {
 				/* We export to user space the definition of
 				 * the private handler ourselves */
-				return ioctl_export_private(dev, ifr);
+				return ioctl_standard_call(dev,
+							   ifr,
+							   cmd,
+							   &iw_handler_get_private);
 			}
 			// ## Fall-through for old API ##
 		default:
@@ -1002,16 +1101,747 @@ int wireless_process_ioctl(struct ifreq *ifr, unsigned int cmd)
 	return -EINVAL;
 }
 
+/********************** RTNETLINK REQUEST API **********************/
+/*
+ * The alternate user space API to configure all those Wireless Extensions
+ * is through RtNetlink.
+ * This API support only the new driver API (iw_handler).
+ *
+ * This RtNetlink API use the same query/reply model as the ioctl API.
+ * Maximum effort has been done to fit in the RtNetlink model, and
+ * we support both RtNetlink Set and RtNelink Get operations.
+ * On the other hand, we don't offer Dump operations because of the
+ * following reasons :
+ *	o Large number of parameters, most optional
+ *	o Large size of some parameters (> 100 bytes)
+ *	o Each parameters need to be extracted from hardware
+ *	o Scan requests can take seconds and disable network activity.
+ * Because of this high cost/overhead, we want to return only the
+ * parameters the user application is really interested in.
+ * We could offer partial Dump using the IW_DESCR_FLAG_DUMP flag.
+ *
+ * The API uses the standard RtNetlink socket. When the RtNetlink code
+ * find a IFLA_WIRELESS field in a RtNetlink SET_LINK request,
+ * it calls here.
+ */
+
+#ifdef CONFIG_NET_WIRELESS_RTNETLINK
+/* ---------------------------------------------------------------- */
+/*
+ * Wrapper to call a standard Wireless Extension GET handler.
+ * We do various checks and call the handler with the proper args.
+ */
+static int rtnetlink_standard_get(struct net_device *	dev,
+				  struct iw_event *	request,
+				  int			request_len,
+				  iw_handler		handler,
+				  char **		p_buf,
+				  int *			p_len)
+{
+	const struct iw_ioctl_description *	descr = NULL;
+	unsigned int				cmd;
+	union iwreq_data *			wrqu;
+	int					hdr_len;
+	struct iw_request_info			info;
+	char *					buffer = NULL;
+	int					buffer_size = 0;
+	int					ret = -EINVAL;
+
+	/* Get the description of the Request */
+	cmd = request->cmd;
+	if((cmd - SIOCIWFIRST) >= standard_ioctl_num)
+		return -EOPNOTSUPP;
+	descr = &(standard_ioctl[cmd - SIOCIWFIRST]);
+
+#ifdef WE_RTNETLINK_DEBUG
+	printk(KERN_DEBUG "%s (WE.r) : Found standard handler for 0x%04X\n",
+	       dev->name, cmd);
+	printk(KERN_DEBUG "%s (WE.r) : Header type : %d, Token type : %d, size : %d, token : %d\n", dev->name, descr->header_type, descr->token_type, descr->token_size, descr->max_tokens);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+	/* Check if wrqu is complete */
+	hdr_len = event_type_size[descr->header_type];
+	if(request_len < hdr_len) {
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG
+		       "%s (WE.r) : Wireless request too short (%d)\n",
+		       dev->name, request_len);
+#endif	/* WE_RTNETLINK_DEBUG */
+		return -EINVAL;
+	}
+
+	/* Prepare the call */
+	info.cmd = cmd;
+	info.flags = 0;
+
+	/* Check if we have extra data in the reply or not */
+	if(descr->header_type != IW_HEADER_TYPE_POINT) {
+
+		/* Create the kernel buffer that we will return.
+		 * It's at an offset to match the TYPE_POINT case... */
+		buffer_size = request_len + IW_EV_POINT_OFF;
+		buffer = kmalloc(buffer_size, GFP_KERNEL);
+		if (buffer == NULL) {
+			return -ENOMEM;
+		}
+		/* Copy event data */
+		memcpy(buffer + IW_EV_POINT_OFF, request, request_len);
+		/* Use our own copy of wrqu */
+		wrqu = (union iwreq_data *) (buffer + IW_EV_POINT_OFF
+					     + IW_EV_LCP_LEN);
+
+		/* No extra arguments. Trivial to handle */
+		ret = handler(dev, &info, wrqu, NULL);
+
+	} else {
+		union iwreq_data	wrqu_point;
+		char *			extra = NULL;
+		int			extra_size = 0;
+
+		/* Get a temp copy of wrqu (skip pointer) */
+		memcpy(((char *) &wrqu_point) + IW_EV_POINT_OFF,
+		       ((char *) request) + IW_EV_LCP_LEN,
+		       IW_EV_POINT_LEN - IW_EV_LCP_LEN);
+
+		/* Calculate space needed by arguments. Always allocate
+		 * for max space. Easier, and won't last long... */
+		extra_size = descr->max_tokens * descr->token_size;
+		/* Support for very large requests */
+		if((descr->flags & IW_DESCR_FLAG_NOMAX) &&
+		   (wrqu_point.data.length > descr->max_tokens))
+			extra_size = (wrqu_point.data.length
+				      * descr->token_size);
+		buffer_size = extra_size + IW_EV_POINT_LEN + IW_EV_POINT_OFF;
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG "%s (WE.r) : Malloc %d bytes (%d bytes)\n",
+		       dev->name, extra_size, buffer_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+		/* Create the kernel buffer that we will return */
+		buffer = kmalloc(buffer_size, GFP_KERNEL);
+		if (buffer == NULL) {
+			return -ENOMEM;
+		}
+
+		/* Put wrqu in the right place (just before extra).
+		 * Leave space for IWE header and dummy pointer...
+		 * Note that IW_EV_LCP_LEN==4 bytes, so it's still aligned...
+		 */
+		memcpy(buffer + IW_EV_LCP_LEN + IW_EV_POINT_OFF,
+		       ((char *) &wrqu_point) + IW_EV_POINT_OFF,
+		       IW_EV_POINT_LEN - IW_EV_LCP_LEN);
+		wrqu = (union iwreq_data *) (buffer + IW_EV_LCP_LEN);
+
+		/* Extra comes logically after that. Offset +12 bytes. */
+		extra = buffer + IW_EV_POINT_OFF + IW_EV_POINT_LEN;
+
+		/* Call the handler */
+		ret = handler(dev, &info, wrqu, extra);
+
+		/* Calculate real returned length */
+		extra_size = (wrqu->data.length * descr->token_size);
+		/* Re-adjust reply size */
+		request->len = extra_size + IW_EV_POINT_LEN;
+
+		/* Put the iwe header where it should, i.e. scrap the
+		 * dummy pointer. */
+		memcpy(buffer + IW_EV_POINT_OFF, request, IW_EV_LCP_LEN);
+
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG "%s (WE.r) : Reply 0x%04X, hdr_len %d, tokens %d, extra_size %d, buffer_size %d\n", dev->name, cmd, hdr_len, wrqu->data.length, extra_size, buffer_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+		/* Check if there is enough buffer up there */
+		if(wrqu_point.data.length < wrqu->data.length)
+			ret = -E2BIG;
+	}
+
+	/* Return the buffer to the caller */
+	if (!ret) {
+		*p_buf = buffer;
+		*p_len = request->len;
+	} else {
+		/* Cleanup */
+		if(buffer)
+			kfree(buffer);
+	}
+
+	return ret;
+}
+
+/* ---------------------------------------------------------------- */
+/*
+ * Wrapper to call a standard Wireless Extension SET handler.
+ * We do various checks and call the handler with the proper args.
+ */
+static inline int rtnetlink_standard_set(struct net_device *	dev,
+					 struct iw_event *	request,
+					 int			request_len,
+					 iw_handler		handler)
+{
+	const struct iw_ioctl_description *	descr = NULL;
+	unsigned int				cmd;
+	union iwreq_data *			wrqu;
+	union iwreq_data			wrqu_point;
+	int					hdr_len;
+	char *					extra = NULL;
+	int					extra_size = 0;
+	struct iw_request_info			info;
+	int					ret = -EINVAL;
+
+	/* Get the description of the Request */
+	cmd = request->cmd;
+	if((cmd - SIOCIWFIRST) >= standard_ioctl_num)
+		return -EOPNOTSUPP;
+	descr = &(standard_ioctl[cmd - SIOCIWFIRST]);
+
+#ifdef WE_RTNETLINK_DEBUG
+	printk(KERN_DEBUG "%s (WE.r) : Found standard SET handler for 0x%04X\n",
+	       dev->name, cmd);
+	printk(KERN_DEBUG "%s (WE.r) : Header type : %d, Token type : %d, size : %d, token : %d\n", dev->name, descr->header_type, descr->token_type, descr->token_size, descr->max_tokens);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+	/* Extract fixed header from request. This is properly aligned. */
+	wrqu = &request->u;
+
+	/* Check if wrqu is complete */
+	hdr_len = event_type_size[descr->header_type];
+	if(request_len < hdr_len) {
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG
+		       "%s (WE.r) : Wireless request too short (%d)\n",
+		       dev->name, request_len);
+#endif	/* WE_RTNETLINK_DEBUG */
+		return -EINVAL;
+	}
+
+	/* Prepare the call */
+	info.cmd = cmd;
+	info.flags = 0;
+
+	/* Check if we have extra data in the request or not */
+	if(descr->header_type != IW_HEADER_TYPE_POINT) {
+
+		/* No extra arguments. Trivial to handle */
+		ret = handler(dev, &info, wrqu, NULL);
+
+	} else {
+		int	extra_len;
+
+		/* Put wrqu in the right place (skip pointer) */
+		memcpy(((char *) &wrqu_point) + IW_EV_POINT_OFF,
+		       wrqu, IW_EV_POINT_LEN - IW_EV_LCP_LEN);
+		/* Don't forget about the event code... */
+		wrqu = &wrqu_point;
+
+		/* Check if number of token fits within bounds */
+		if(wrqu_point.data.length > descr->max_tokens)
+			return -E2BIG;
+		if(wrqu_point.data.length < descr->min_tokens)
+			return -EINVAL;
+
+		/* Real length of payload */
+		extra_len = wrqu_point.data.length * descr->token_size;
+
+		/* Check if request is self consistent */
+		if((request_len - hdr_len) < extra_len) {
+#ifdef WE_RTNETLINK_DEBUG
+			printk(KERN_DEBUG "%s (WE.r) : Wireless request data too short (%d)\n",
+			       dev->name, extra_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+			return -EINVAL;
+		}
+
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG "%s (WE.r) : Malloc %d bytes\n",
+		       dev->name, extra_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+		/* Always allocate for max space. Easier, and won't last
+		 * long... */
+		extra_size = descr->max_tokens * descr->token_size;
+		extra = kmalloc(extra_size, GFP_KERNEL);
+		if (extra == NULL)
+			return -ENOMEM;
+
+		/* Copy extra in aligned buffer */
+		memcpy(extra, ((char *) request) + hdr_len, extra_len);
+
+		/* Call the handler */
+		ret = handler(dev, &info, &wrqu_point, extra);
+	}
+
+#ifdef WE_SET_EVENT
+	/* Generate an event to notify listeners of the change */
+	if((descr->flags & IW_DESCR_FLAG_EVENT) &&
+	   ((ret == 0) || (ret == -EIWCOMMIT))) {
+		if(descr->flags & IW_DESCR_FLAG_RESTRICT)
+			/* If the event is restricted, don't
+			 * export the payload */
+			wireless_send_event(dev, cmd, wrqu, NULL);
+		else
+			wireless_send_event(dev, cmd, wrqu, extra);
+	}
+#endif	/* WE_SET_EVENT */
+
+	/* Cleanup - I told you it wasn't that long ;-) */
+	if(extra)
+		kfree(extra);
+
+	/* Call commit handler if needed and defined */
+	if(ret == -EIWCOMMIT)
+		ret = call_commit_handler(dev);
+
+	return ret;
+}
+
+/* ---------------------------------------------------------------- */
+/*
+ * Wrapper to call a private Wireless Extension GET handler.
+ * Same as above...
+ * It's not as nice and slimline as the standard wrapper. The cause
+ * is struct iw_priv_args, which was not really designed for the
+ * job we are going here.
+ *
+ * IMPORTANT : This function prevent to set and get data on the same
+ * IOCTL and enforce the SET/GET convention. Not doing it would be
+ * far too hairy...
+ * If you need to set and get data at the same time, please don't use
+ * a iw_handler but process it in your ioctl handler (i.e. use the
+ * old driver API).
+ */
+static inline int rtnetlink_private_get(struct net_device *	dev,
+					struct iw_event *	request,
+					int			request_len,
+					iw_handler		handler,
+					char **			p_buf,
+					int *			p_len)
+{
+	const struct iw_priv_args *	descr = NULL;
+	unsigned int			cmd;
+	union iwreq_data *		wrqu;
+	int				hdr_len;
+	struct iw_request_info		info;
+	int				extra_size = 0;
+	int				i;
+	char *				buffer = NULL;
+	int				buffer_size = 0;
+	int				ret = -EINVAL;
+
+	/* Get the description of the Request */
+	cmd = request->cmd;
+	for(i = 0; i < dev->wireless_handlers->num_private_args; i++)
+		if(cmd == dev->wireless_handlers->private_args[i].cmd) {
+			descr = &(dev->wireless_handlers->private_args[i]);
+			break;
+		}
+	if(descr == NULL)
+		return -EOPNOTSUPP;
+
+#ifdef WE_RTNETLINK_DEBUG
+	printk(KERN_DEBUG "%s (WE.r) : Found private handler for 0x%04X\n",
+	       dev->name, cmd);
+	printk(KERN_DEBUG "%s (WE.r) : Name %s, set %X, get %X\n",
+	       dev->name, descr->name, descr->set_args, descr->get_args);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+	/* Compute the max size of the get arguments */
+	extra_size = get_priv_size(descr->get_args);
+
+	/* Does it fits in wrqu ? */
+	if((descr->get_args & IW_PRIV_SIZE_FIXED) &&
+	   (extra_size <= IFNAMSIZ)) {
+		hdr_len = extra_size;
+		extra_size = 0;
+	} else {
+		hdr_len = IW_EV_POINT_LEN;
+	}
+
+	/* Check if wrqu is complete */
+	if(request_len < hdr_len) {
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG
+		       "%s (WE.r) : Wireless request too short (%d)\n",
+		       dev->name, request_len);
+#endif	/* WE_RTNETLINK_DEBUG */
+		return -EINVAL;
+	}
+
+	/* Prepare the call */
+	info.cmd = cmd;
+	info.flags = 0;
+
+	/* Check if we have a pointer to user space data or not. */
+	if(extra_size == 0) {
+
+		/* Create the kernel buffer that we will return.
+		 * It's at an offset to match the TYPE_POINT case... */
+		buffer_size = request_len + IW_EV_POINT_OFF;
+		buffer = kmalloc(buffer_size, GFP_KERNEL);
+		if (buffer == NULL) {
+			return -ENOMEM;
+		}
+		/* Copy event data */
+		memcpy(buffer + IW_EV_POINT_OFF, request, request_len);
+		/* Use our own copy of wrqu */
+		wrqu = (union iwreq_data *) (buffer + IW_EV_POINT_OFF
+					     + IW_EV_LCP_LEN);
+
+		/* No extra arguments. Trivial to handle */
+		ret = handler(dev, &info, wrqu, (char *) wrqu);
+
+	} else {
+		char *	extra;
+
+		/* Buffer for full reply */
+		buffer_size = extra_size + IW_EV_POINT_LEN + IW_EV_POINT_OFF;
+
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG "%s (WE.r) : Malloc %d bytes (%d bytes)\n",
+		       dev->name, extra_size, buffer_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+		/* Create the kernel buffer that we will return */
+		buffer = kmalloc(buffer_size, GFP_KERNEL);
+		if (buffer == NULL) {
+			return -ENOMEM;
+		}
+
+		/* Put wrqu in the right place (just before extra).
+		 * Leave space for IWE header and dummy pointer...
+		 * Note that IW_EV_LCP_LEN==4 bytes, so it's still aligned...
+		 */
+		memcpy(buffer + IW_EV_LCP_LEN + IW_EV_POINT_OFF,
+		       ((char *) request) + IW_EV_LCP_LEN,
+		       IW_EV_POINT_LEN - IW_EV_LCP_LEN);
+		wrqu = (union iwreq_data *) (buffer + IW_EV_LCP_LEN);
+
+		/* Extra comes logically after that. Offset +12 bytes. */
+		extra = buffer + IW_EV_POINT_OFF + IW_EV_POINT_LEN;
+
+		/* Call the handler */
+		ret = handler(dev, &info, wrqu, extra);
+
+		/* Adjust for the actual length if it's variable,
+		 * avoid leaking kernel bits outside. */
+		if (!(descr->get_args & IW_PRIV_SIZE_FIXED))
+			extra_size = adjust_priv_size(descr->get_args, wrqu);
+		/* Re-adjust reply size */
+		request->len = extra_size + IW_EV_POINT_LEN;
+
+		/* Put the iwe header where it should, i.e. scrap the
+		 * dummy pointer. */
+		memcpy(buffer + IW_EV_POINT_OFF, request, IW_EV_LCP_LEN);
+
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG "%s (WE.r) : Reply 0x%04X, hdr_len %d, tokens %d, extra_size %d, buffer_size %d\n", dev->name, cmd, hdr_len, wrqu->data.length, extra_size, buffer_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+	}
+
+	/* Return the buffer to the caller */
+	if (!ret) {
+		*p_buf = buffer;
+		*p_len = request->len;
+	} else {
+		/* Cleanup */
+		if(buffer)
+			kfree(buffer);
+	}
+
+	return ret;
+}
+
+/* ---------------------------------------------------------------- */
+/*
+ * Wrapper to call a private Wireless Extension SET handler.
+ * Same as above...
+ * It's not as nice and slimline as the standard wrapper. The cause
+ * is struct iw_priv_args, which was not really designed for the
+ * job we are going here.
+ *
+ * IMPORTANT : This function prevent to set and get data on the same
+ * IOCTL and enforce the SET/GET convention. Not doing it would be
+ * far too hairy...
+ * If you need to set and get data at the same time, please don't use
+ * a iw_handler but process it in your ioctl handler (i.e. use the
+ * old driver API).
+ */
+static inline int rtnetlink_private_set(struct net_device *	dev,
+					struct iw_event *	request,
+					int			request_len,
+					iw_handler		handler)
+{
+	const struct iw_priv_args *	descr = NULL;
+	unsigned int			cmd;
+	union iwreq_data *		wrqu;
+	union iwreq_data		wrqu_point;
+	int				hdr_len;
+	char *				extra = NULL;
+	int				extra_size = 0;
+	int				offset = 0;	/* For sub-ioctls */
+	struct iw_request_info		info;
+	int				i;
+	int				ret = -EINVAL;
+
+	/* Get the description of the Request */
+	cmd = request->cmd;
+	for(i = 0; i < dev->wireless_handlers->num_private_args; i++)
+		if(cmd == dev->wireless_handlers->private_args[i].cmd) {
+			descr = &(dev->wireless_handlers->private_args[i]);
+			break;
+		}
+	if(descr == NULL)
+		return -EOPNOTSUPP;
+
+#ifdef WE_RTNETLINK_DEBUG
+	printk(KERN_DEBUG "%s (WE.r) : Found private handler for 0x%04X\n",
+	       ifr->ifr_name, cmd);
+	printk(KERN_DEBUG "%s (WE.r) : Name %s, set %X, get %X\n",
+	       dev->name, descr->name, descr->set_args, descr->get_args);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+	/* Compute the size of the set arguments */
+	/* Check for sub-ioctl handler */
+	if(descr->name[0] == '\0')
+		/* Reserve one int for sub-ioctl index */
+		offset = sizeof(__u32);
+
+	/* Size of set arguments */
+	extra_size = get_priv_size(descr->set_args);
+
+	/* Does it fits in wrqu ? */
+	if((descr->set_args & IW_PRIV_SIZE_FIXED) &&
+	   (extra_size <= IFNAMSIZ)) {
+		hdr_len = IW_EV_LCP_LEN + extra_size;
+		extra_size = 0;
+	} else {
+		hdr_len = IW_EV_POINT_LEN;
+	}
+
+	/* Extract fixed header from request. This is properly aligned. */
+	wrqu = &request->u;
+
+	/* Check if wrqu is complete */
+	if(request_len < hdr_len) {
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG
+		       "%s (WE.r) : Wireless request too short (%d)\n",
+		       dev->name, request_len);
+#endif	/* WE_RTNETLINK_DEBUG */
+		return -EINVAL;
+	}
+
+	/* Prepare the call */
+	info.cmd = cmd;
+	info.flags = 0;
+
+	/* Check if we have a pointer to user space data or not. */
+	if(extra_size == 0) {
+
+		/* No extra arguments. Trivial to handle */
+		ret = handler(dev, &info, wrqu, (char *) wrqu);
+
+	} else {
+		int	extra_len;
+
+		/* Put wrqu in the right place (skip pointer) */
+		memcpy(((char *) &wrqu_point) + IW_EV_POINT_OFF,
+		       wrqu, IW_EV_POINT_LEN - IW_EV_LCP_LEN);
+
+		/* Does it fits within bounds ? */
+		if(wrqu_point.data.length > (descr->set_args &
+					     IW_PRIV_SIZE_MASK))
+			return -E2BIG;
+
+		/* Real length of payload */
+		extra_len = adjust_priv_size(descr->set_args, &wrqu_point);
+
+		/* Check if request is self consistent */
+		if((request_len - hdr_len) < extra_len) {
+#ifdef WE_RTNETLINK_DEBUG
+			printk(KERN_DEBUG "%s (WE.r) : Wireless request data too short (%d)\n",
+			       dev->name, extra_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+			return -EINVAL;
+		}
+
+#ifdef WE_RTNETLINK_DEBUG
+		printk(KERN_DEBUG "%s (WE.r) : Malloc %d bytes\n",
+		       dev->name, extra_size);
+#endif	/* WE_RTNETLINK_DEBUG */
+
+		/* Always allocate for max space. Easier, and won't last
+		 * long... */
+		extra = kmalloc(extra_size, GFP_KERNEL);
+		if (extra == NULL)
+			return -ENOMEM;
+
+		/* Copy extra in aligned buffer */
+		memcpy(extra, ((char *) request) + hdr_len, extra_len);
+
+		/* Call the handler */
+		ret = handler(dev, &info, &wrqu_point, extra);
+
+		/* Cleanup - I told you it wasn't that long ;-) */
+		kfree(extra);
+	}
+
+	/* Call commit handler if needed and defined */
+	if(ret == -EIWCOMMIT)
+		ret = call_commit_handler(dev);
+
+	return ret;
+}
+
+/* ---------------------------------------------------------------- */
+/*
+ * Main RtNetlink dispatcher. Called from the main networking code
+ * (do_getlink() in net/core/rtnetlink.c).
+ * Check the type of Request and call the appropriate wrapper...
+ */
+int wireless_rtnetlink_get(struct net_device *	dev,
+			   char *		data,
+			   int			len,
+			   char **		p_buf,
+			   int *		p_len)
+{
+	struct iw_event *	request = (struct iw_event *) data;
+	iw_handler		handler;
+
+	/* Check length */
+	if(len < IW_EV_LCP_LEN) {
+		printk(KERN_DEBUG "%s (WE.r) : RtNetlink request too short (%d)\n",
+		       dev->name, len);
+		return -EINVAL;
+	}
+
+	/* ReCheck length (len may have padding) */
+	if(request->len > len) {
+		printk(KERN_DEBUG "%s (WE.r) : RtNetlink request len invalid (%d-%d)\n",
+		       dev->name, request->len, len);
+		return -EINVAL;
+	}
+
+	/* Only accept GET requests in here */
+	if(!IW_IS_GET(request->cmd))
+		return -EOPNOTSUPP;
+
+	/* If command is `get the encoding parameters', check if
+	 * the user has the right to do it */
+	if (request->cmd == SIOCGIWENCODE ||
+	    request->cmd == SIOCGIWENCODEEXT) {
+		if (!capable(CAP_NET_ADMIN))
+			return -EPERM;
+	}
+
+	/* Special cases */
+	if(request->cmd == SIOCGIWSTATS)
+		/* Get Wireless Stats */
+		return rtnetlink_standard_get(dev,
+					      request,
+					      request->len,
+					      &iw_handler_get_iwstats,
+					      p_buf, p_len);
+	if(request->cmd == SIOCGIWPRIV) {
+		/* Check if we have some wireless handlers defined */
+		if(dev->wireless_handlers == NULL)
+			return -EOPNOTSUPP;
+		/* Get Wireless Stats */
+		return rtnetlink_standard_get(dev,
+					      request,
+					      request->len,
+					      &iw_handler_get_private,
+					      p_buf, p_len);
+	}
+
+	/* Basic check */
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	/* Try to find the handler */
+	handler = get_handler(dev, request->cmd);
+	if(handler != NULL) {
+		/* Standard and private are not the same */
+		if(request->cmd < SIOCIWFIRSTPRIV)
+			return rtnetlink_standard_get(dev,
+						      request,
+						      request->len,
+						      handler,
+						      p_buf, p_len);
+		else
+			return rtnetlink_private_get(dev,
+						     request,
+						     request->len,
+						     handler,
+						     p_buf, p_len);
+	}
+
+	return -EOPNOTSUPP;
+}
+
+/* ---------------------------------------------------------------- */
+/*
+ * Main RtNetlink dispatcher. Called from the main networking code
+ * (do_setlink() in net/core/rtnetlink.c).
+ * Check the type of Request and call the appropriate wrapper...
+ */
+int wireless_rtnetlink_set(struct net_device *	dev,
+			   char *		data,
+			   int			len)
+{
+	struct iw_event *	request = (struct iw_event *) data;
+	iw_handler		handler;
+
+	/* Check length */
+	if(len < IW_EV_LCP_LEN) {
+		printk(KERN_DEBUG "%s (WE.r) : RtNetlink request too short (%d)\n",
+		       dev->name, len);
+		return -EINVAL;
+	}
+
+	/* ReCheck length (len may have padding) */
+	if(request->len > len) {
+		printk(KERN_DEBUG "%s (WE.r) : RtNetlink request len invalid (%d-%d)\n",
+		       dev->name, request->len, len);
+		return -EINVAL;
+	}
+
+	/* Only accept SET requests in here */
+	if(!IW_IS_SET(request->cmd))
+		return -EOPNOTSUPP;
+
+	/* Basic check */
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	/* New driver API : try to find the handler */
+	handler = get_handler(dev, request->cmd);
+	if(handler != NULL) {
+		/* Standard and private are not the same */
+		if(request->cmd < SIOCIWFIRSTPRIV)
+			return rtnetlink_standard_set(dev,
+						      request,
+						      request->len,
+						      handler);
+		else
+			return rtnetlink_private_set(dev,
+						     request,
+						     request->len,
+						     handler);
+	}
+
+	return -EOPNOTSUPP;
+}
+#endif	/* CONFIG_NET_WIRELESS_RTNETLINK */
+
+
 /************************* EVENT PROCESSING *************************/
 /*
  * Process events generated by the wireless layer or the driver.
  * Most often, the event will be propagated through rtnetlink
  */
 
-#ifdef WE_EVENT_NETLINK
-/* "rtnl" is defined in net/core/rtnetlink.c, but we need it here.
- * It is declared in <linux/rtnetlink.h> */
-
+#ifdef WE_EVENT_RTNETLINK
 /* ---------------------------------------------------------------- */
 /*
  * Fill a rtnetlink message with our event data.
@@ -1032,14 +1862,14 @@ static inline int rtnetlink_fill_iwinfo(struct sk_buff *	skb,
 	nlh = NLMSG_PUT(skb, 0, 0, type, sizeof(*r));
 	r = NLMSG_DATA(nlh);
 	r->ifi_family = AF_UNSPEC;
+	r->__ifi_pad = 0;
 	r->ifi_type = dev->type;
 	r->ifi_index = dev->ifindex;
-	r->ifi_flags = dev->flags;
+	r->ifi_flags = dev_get_flags(dev);
 	r->ifi_change = 0;	/* Wireless changes don't affect those flags */
 
 	/* Add the wireless events in the netlink packet */
-	RTA_PUT(skb, IFLA_WIRELESS,
-		event_len, event);
+	RTA_PUT(skb, IFLA_WIRELESS, event_len, event);
 
 	nlh->nlmsg_len = skb->tail - b;
 	return skb->len;
@@ -1073,10 +1903,10 @@ static inline void rtmsg_iwinfo(struct net_device *	dev,
 		kfree_skb(skb);
 		return;
 	}
-	NETLINK_CB(skb).dst_groups = RTMGRP_LINK;
-	netlink_broadcast(rtnl, skb, 0, RTMGRP_LINK, GFP_ATOMIC);
+	NETLINK_CB(skb).dst_group = RTNLGRP_LINK;
+	netlink_broadcast(rtnl, skb, 0, RTNLGRP_LINK, GFP_ATOMIC);
 }
-#endif	/* WE_EVENT_NETLINK */
+#endif	/* WE_EVENT_RTNETLINK */
 
 /* ---------------------------------------------------------------- */
 /*
@@ -1094,10 +1924,11 @@ void wireless_send_event(struct net_device *	dev,
 	struct iw_event  *event;		/* Mallocated whole event */
 	int event_len;				/* Its size */
 	int hdr_len;				/* Size of the event header */
+	int wrqu_off = 0;			/* Offset in wrqu */
 	/* Don't "optimise" the following variable, it will crash */
 	unsigned	cmd_index;		/* *MUST* be unsigned */
 
-	/* Get the description of the IOCTL */
+	/* Get the description of the Event */
 	if(cmd <= SIOCIWLAST) {
 		cmd_index = cmd - SIOCIWFIRST;
 		if(cmd_index < standard_ioctl_num)
@@ -1140,6 +1971,8 @@ void wireless_send_event(struct net_device *	dev,
 		/* Calculate extra_len - extra is NULL for restricted events */
 		if(extra != NULL)
 			extra_len = wrqu->data.length * descr->token_size;
+		/* Always at an offset in wrqu */
+		wrqu_off = IW_EV_POINT_OFF;
 #ifdef WE_EVENT_DEBUG
 		printk(KERN_DEBUG "%s (WE) : Event 0x%04X, tokens %d, extra_len %d\n", dev->name, cmd, wrqu->data.length, extra_len);
 #endif	/* WE_EVENT_DEBUG */
@@ -1150,7 +1983,7 @@ void wireless_send_event(struct net_device *	dev,
 	event_len = hdr_len + extra_len;
 
 #ifdef WE_EVENT_DEBUG
-	printk(KERN_DEBUG "%s (WE) : Event 0x%04X, hdr_len %d, event_len %d\n", dev->name, cmd, hdr_len, event_len);
+	printk(KERN_DEBUG "%s (WE) : Event 0x%04X, hdr_len %d, wrqu_off %d, event_len %d\n", dev->name, cmd, hdr_len, wrqu_off, event_len);
 #endif	/* WE_EVENT_DEBUG */
 
 	/* Create temporary buffer to hold the event */
@@ -1161,14 +1994,14 @@ void wireless_send_event(struct net_device *	dev,
 	/* Fill event */
 	event->len = event_len;
 	event->cmd = cmd;
-	memcpy(&event->u, wrqu, hdr_len - IW_EV_LCP_LEN);
+	memcpy(&event->u, ((char *) wrqu) + wrqu_off, hdr_len - IW_EV_LCP_LEN);
 	if(extra != NULL)
 		memcpy(((char *) event) + hdr_len, extra, extra_len);
 
-#ifdef WE_EVENT_NETLINK
-	/* rtnetlink event channel */
+#ifdef WE_EVENT_RTNETLINK
+	/* Send via the RtNetlink event channel */
 	rtmsg_iwinfo(dev, (char *) event, event_len);
-#endif	/* WE_EVENT_NETLINK */
+#endif	/* WE_EVENT_RTNETLINK */
 
 	/* Cleanup */
 	kfree(event);
@@ -1182,7 +2015,7 @@ void wireless_send_event(struct net_device *	dev,
  * Now, the driver can delegate this task to Wireless Extensions.
  * It needs to use those standard spy iw_handler in struct iw_handler_def,
  * push data to us via wireless_spy_update() and include struct iw_spy_data
- * in its private part (and advertise it in iw_handler_def->spy_offset).
+ * in its private part (and export it in net_device->wireless_data->spy_data).
  * One of the main advantage of centralising spy support here is that
  * it becomes much easier to improve and extend it without having to touch
  * the drivers. One example is the addition of the Spy-Threshold events.
@@ -1199,10 +2032,7 @@ static inline struct iw_spy_data * get_spydata(struct net_device *dev)
 	/* This is the new way */
 	if(dev->wireless_data)
 		return(dev->wireless_data->spy_data);
-
-	/* This is the old way. Doesn't work for multi-headed drivers.
-	 * It will be removed in the next version of WE. */
-	return (dev->priv + dev->wireless_handlers->spy_offset);
+	return NULL;
 }
 
 /*------------------------------------------------------------------*/
@@ -1217,10 +2047,6 @@ int iw_handler_set_spy(struct net_device *	dev,
 	struct iw_spy_data *	spydata = get_spydata(dev);
 	struct sockaddr *	address = (struct sockaddr *) extra;
 
-	if(!dev->wireless_data)
-		/* Help user know that driver needs updating */
-		printk(KERN_DEBUG "%s (WE) : Driver using old/buggy spy support, please fix driver !\n",
-		       dev->name);
 	/* Make sure driver is not buggy or using the old API */
 	if(!spydata)
 		return -EOPNOTSUPP;
@@ -1251,7 +2077,7 @@ int iw_handler_set_spy(struct net_device *	dev,
 		       sizeof(struct iw_quality) * IW_MAX_SPY);
 
 #ifdef WE_SPY_DEBUG
-		printk(KERN_DEBUG "iw_handler_set_spy() :  offset %ld, spydata %p, num %d\n", dev->wireless_handlers->spy_offset, spydata, wrqu->data.length);
+		printk(KERN_DEBUG "iw_handler_set_spy() :  wireless_data %p, spydata %p, num %d\n", dev->wireless_data, spydata, wrqu->data.length);
 		for (i = 0; i < wrqu->data.length; i++)
 			printk(KERN_DEBUG
 			       "%02X:%02X:%02X:%02X:%02X:%02X \n",
@@ -1304,7 +2130,7 @@ int iw_handler_get_spy(struct net_device *	dev,
 		       sizeof(struct iw_quality) * spydata->spy_number);
 	/* Reset updated flags. */
 	for(i = 0; i < spydata->spy_number; i++)
-		spydata->spy_stat[i].updated = 0;
+		spydata->spy_stat[i].updated &= ~IW_QUAL_ALL_UPDATED;
 	return 0;
 }
 
@@ -1419,12 +2245,12 @@ void wireless_spy_update(struct net_device *	dev,
 		return;
 
 #ifdef WE_SPY_DEBUG
-	printk(KERN_DEBUG "wireless_spy_update() :  offset %ld, spydata %p, address %02X:%02X:%02X:%02X:%02X:%02X\n", dev->wireless_handlers->spy_offset, spydata, address[0], address[1], address[2], address[3], address[4], address[5]);
+	printk(KERN_DEBUG "wireless_spy_update() :  wireless_data %p, spydata %p, address %02X:%02X:%02X:%02X:%02X:%02X\n", dev->wireless_data, spydata, address[0], address[1], address[2], address[3], address[4], address[5]);
 #endif	/* WE_SPY_DEBUG */
 
 	/* Update all records that match */
 	for(i = 0; i < spydata->spy_number; i++)
-		if(!memcmp(address, spydata->spy_address[i], ETH_ALEN)) {
+		if(!compare_ether_addr(address, spydata->spy_address[i])) {
 			memcpy(&(spydata->spy_stat[i]), wstats,
 			       sizeof(struct iw_quality));
 			match = i;

@@ -29,11 +29,11 @@
 
 ieee754dp ieee754dp_flong(s64 x)
 {
-	COMPXDP;
+	u64 xm;
+	int xe;
+	int xs;
 
 	CLEARCX;
-
-	xc = ( 0 ? xc : xc );
 
 	if (x == 0)
 		return ieee754dp_zero(0);

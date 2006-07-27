@@ -39,8 +39,10 @@
  *		Martin J. Bligh	: 	Added support for multi-quad systems
  */
 
+#include <linux/module.h>
 #include <linux/config.h>
 #include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/smp_lock.h>
 #include <linux/irq.h>
@@ -72,11 +74,15 @@ physid_mask_t phys_cpu_present_map;
 
 /* Bitmask of currently online CPUs */
 cpumask_t cpu_online_map;
+EXPORT_SYMBOL(cpu_online_map);
 
 cpumask_t cpu_bootout_map;
 cpumask_t cpu_bootin_map;
-cpumask_t cpu_callout_map;
 static cpumask_t cpu_callin_map;
+cpumask_t cpu_callout_map;
+EXPORT_SYMBOL(cpu_callout_map);
+cpumask_t cpu_possible_map = CPU_MASK_ALL;
+EXPORT_SYMBOL(cpu_possible_map);
 
 /* Per CPU bogomips and other parameters */
 struct cpuinfo_m32r cpu_data[NR_CPUS] __cacheline_aligned;
@@ -91,6 +97,7 @@ extern struct {
 
 /* which physical physical ID maps to which logical CPU number */
 static volatile int physid_2_cpu[NR_CPUS];
+#define physid_to_cpu(physid)	physid_2_cpu[physid]
 
 /* which logical CPU number maps to which physical ID */
 volatile int cpu_2_physid[NR_CPUS];
@@ -109,7 +116,6 @@ static unsigned int calibration_result;
 
 void smp_prepare_boot_cpu(void);
 void smp_prepare_cpus(unsigned int);
-static void smp_tune_scheduling(void);
 static void init_ipi_lock(void);
 static void do_boot_cpu(int);
 int __cpu_up(unsigned int);
@@ -176,6 +182,9 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	}
 	for (phys_id = 0 ; phys_id < nr_cpu ; phys_id++)
 		physid_set(phys_id, phys_cpu_present_map);
+#ifndef CONFIG_HOTPLUG_CPU
+	cpu_present_map = cpu_possible_map;
+#endif
 
 	show_mp_info(nr_cpu);
 
@@ -185,7 +194,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	 * Setup boot CPU information
 	 */
 	smp_store_cpu_info(0); /* Final full version of the data */
-	smp_tune_scheduling();
 
 	/*
 	 * If SMP should be disabled, then really disable it!
@@ -227,11 +235,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 
 smp_done:
 	Dprintk("Boot done.\n");
-}
-
-static void __init smp_tune_scheduling(void)
-{
-	/* Nothing to do. */
 }
 
 /*
@@ -285,7 +288,7 @@ static void __init do_boot_cpu(int phys_id)
 	/* So we see what's up   */
 	printk("Booting processor %d/%d\n", phys_id, cpu_id);
 	stack_start.spi = (void *)idle->thread.sp;
-	idle->thread_info->cpu = cpu_id;
+	task_thread_info(idle)->cpu = cpu_id;
 
 	/*
 	 * Send Startup IPI
@@ -425,6 +428,7 @@ void __init smp_cpus_done(unsigned int max_cpus)
 int __init start_secondary(void *unused)
 {
 	cpu_init();
+	preempt_disable();
 	smp_callin();
 	while (!cpu_isset(smp_processor_id(), smp_commenced_mask))
 		cpu_relax();
@@ -627,4 +631,3 @@ static void __init unmap_cpu_to_physid(int cpu_id, int phys_id)
 	physid_2_cpu[phys_id] = -1;
 	cpu_2_physid[cpu_id] = -1;
 }
-

@@ -19,7 +19,6 @@
 #include "user_util.h"
 #include "net_user.h"
 #include "etap.h"
-#include "helper.h"
 #include "os.h"
 
 #define MAX_PACKET ETH_MAX_PACKET
@@ -41,7 +40,7 @@ static void etap_change(int op, unsigned char *addr, unsigned char *netmask,
 			int fd)
 {
 	struct addr_change change;
-	void *output;
+	char *output;
 	int n;
 
 	change.what = op;

@@ -98,11 +98,7 @@
  * characteristics of the hardware.  Applications such as mobile IP may
  * take advantage of it.
  *
- * You will need to enable the CONFIG_NET_RADIO define in the kernel
- * configuration to enable the wireless extensions (this is the one
- * giving access to the radio network device choice).
- *
- * It might also be a good idea as well to fetch the wireless tools to
+ * It might be a good idea as well to fetch the wireless tools to
  * configure the device and play a bit.
  */
 
@@ -409,11 +405,9 @@
 #define MULTICAST_AVOID		/* Avoid extra multicast (I'm sceptical). */
 #undef SET_MAC_ADDRESS		/* Experimental */
 
-#ifdef WIRELESS_EXT	/* If wireless extensions exist in the kernel */
 /* Warning:  this stuff will slow down the driver. */
 #define WIRELESS_SPY		/* Enable spying addresses. */
 #undef HISTOGRAM		/* Enable histogram of signal level. */
-#endif
 
 /****************************** DEBUG ******************************/
 
@@ -506,12 +500,10 @@ struct net_local
   u_short	tx_first_free;
   u_short	tx_first_in_use;
 
-#ifdef WIRELESS_EXT
   iw_stats	wstats;		/* Wireless-specific statistics */
 
   struct iw_spy_data	spy_data;
   struct iw_public_data	wireless_data;
-#endif
 
 #ifdef HISTOGRAM
   int		his_number;		/* number of intervals */

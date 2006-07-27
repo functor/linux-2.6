@@ -31,10 +31,10 @@
 
 #define MAX_ENVLEN 1000
 #define MAX_CGI_METAVARIABLES 32
-#define CGI_CHUNK_SIZE 1024 
+#define CGI_CHUNK_SIZE 1024
 #define MAX_CGI_COMMAND_LEN 256
 
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 #define PRINT_MESSAGE_LEFT \
 	Dprintk("CGI message left at %s:%d:\n--->{%s}<---\n", \
 		__FILE__, __LINE__, curr)

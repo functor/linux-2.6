@@ -32,10 +32,14 @@
 #include <linux/ethtool.h>
 #include <linux/delay.h>
 
+#ifdef CONFIG_PPC_PMAC
+#include <asm/prom.h>
+#endif
+
 #include "sungem_phy.h"
 
 /* Link modes of the BCM5400 PHY */
-static int phy_BCM5400_link_table[8][3] = {
+static const int phy_BCM5400_link_table[8][3] = {
 	{ 0, 0, 0 },	/* No link */
 	{ 0, 0, 0 },	/* 10BT Half Duplex */
 	{ 1, 0, 0 },	/* 10BT Full Duplex */
@@ -271,7 +275,7 @@ static int bcm5411_init(struct mii_phy* phy)
 	return 0;
 }
 
-static int bcm5411_suspend(struct mii_phy* phy)
+static int generic_suspend(struct mii_phy* phy)
 {
 	phy_write(phy, MII_BMCR, BMCR_PDOWN);
 
@@ -281,10 +285,12 @@ static int bcm5411_suspend(struct mii_phy* phy)
 static int bcm5421_init(struct mii_phy* phy)
 {
 	u16 data;
-	int rev;
+	unsigned int id;
 
-	rev = phy_read(phy, MII_PHYSID2) & 0x000f;
-	if (rev == 0) {
+	id = (phy_read(phy, MII_PHYSID1) << 16 | phy_read(phy, MII_PHYSID2));
+
+	/* Revision 0 of 5421 needs some fixups */
+	if (id == 0x002060e0) {
 		/* This is borrowed from MacOS
 		 */
 		phy_write(phy, 0x18, 0x1007);
@@ -297,21 +303,52 @@ static int bcm5421_init(struct mii_phy* phy)
 		data = phy_read(phy, 0x15);
 		phy_write(phy, 0x15, data | 0x0200);
 	}
-#if 0
-	/* This has to be verified before I enable it */
-	/* Enable automatic low-power */
-	phy_write(phy, 0x1c, 0x9002);
-	phy_write(phy, 0x1c, 0xa821);
-	phy_write(phy, 0x1c, 0x941d);
-#endif
+
+	/* Pick up some init code from OF for K2 version */
+	if ((id & 0xfffffff0) == 0x002062e0) {
+		phy_write(phy, 4, 0x01e1);
+		phy_write(phy, 9, 0x0300);
+	}
+
+	/* Check if we can enable automatic low power */
+#ifdef CONFIG_PPC_PMAC
+	if (phy->platform_data) {
+		struct device_node *np = of_get_parent(phy->platform_data);
+		int can_low_power = 1;
+		if (np == NULL || get_property(np, "no-autolowpower", NULL))
+			can_low_power = 0;
+		if (can_low_power) {
+			/* Enable automatic low-power */
+			phy_write(phy, 0x1c, 0x9002);
+			phy_write(phy, 0x1c, 0xa821);
+			phy_write(phy, 0x1c, 0x941d);
+		}
+	}
+#endif /* CONFIG_PPC_PMAC */
+
 	return 0;
 }
 
-static int bcm5421k2_init(struct mii_phy* phy)
+static int bcm5421_enable_fiber(struct mii_phy* phy)
 {
-	/* Init code borrowed from OF */
-	phy_write(phy, 4, 0x01e1);
-	phy_write(phy, 9, 0x0300);
+	/* enable fiber mode */
+	phy_write(phy, MII_NCONFIG, 0x9020);
+	/* LEDs active in both modes, autosense prio = fiber */
+	phy_write(phy, MII_NCONFIG, 0x945f);
+
+	/* switch off fibre autoneg */
+	phy_write(phy, MII_NCONFIG, 0xfc01);
+	phy_write(phy, 0x0b, 0x0004);
+
+	return 0;
+}
+
+static int bcm5461_enable_fiber(struct mii_phy* phy)
+{
+        phy_write(phy, MII_NCONFIG, 0xfc0c);
+        phy_write(phy, MII_BMCR, 0x4140);
+        phy_write(phy, MII_NCONFIG, 0xfc0b);
+	phy_write(phy, MII_BMCR, 0x0140);
 
 	return 0;
 }
@@ -725,7 +762,7 @@ static struct mii_phy_def bcm5401_phy_def = {
 /* Broadcom BCM 5411 */
 static struct mii_phy_ops bcm5411_phy_ops = {
 	.init		= bcm5411_init,
-	.suspend	= bcm5411_suspend,
+	.suspend	= generic_suspend,
 	.setup_aneg	= bcm54xx_setup_aneg,
 	.setup_forced	= bcm54xx_setup_forced,
 	.poll_link	= genmii_poll_link,
@@ -744,11 +781,12 @@ static struct mii_phy_def bcm5411_phy_def = {
 /* Broadcom BCM 5421 */
 static struct mii_phy_ops bcm5421_phy_ops = {
 	.init		= bcm5421_init,
-	.suspend	= bcm5411_suspend,
+	.suspend	= generic_suspend,
 	.setup_aneg	= bcm54xx_setup_aneg,
 	.setup_forced	= bcm54xx_setup_forced,
 	.poll_link	= genmii_poll_link,
 	.read_link	= bcm54xx_read_link,
+	.enable_fiber   = bcm5421_enable_fiber,
 };
 
 static struct mii_phy_def bcm5421_phy_def = {
@@ -762,8 +800,8 @@ static struct mii_phy_def bcm5421_phy_def = {
 
 /* Broadcom BCM 5421 built-in K2 */
 static struct mii_phy_ops bcm5421k2_phy_ops = {
-	.init		= bcm5421k2_init,
-	.suspend	= bcm5411_suspend,
+	.init		= bcm5421_init,
+	.suspend	= generic_suspend,
 	.setup_aneg	= bcm54xx_setup_aneg,
 	.setup_forced	= bcm54xx_setup_forced,
 	.poll_link	= genmii_poll_link,
@@ -779,11 +817,50 @@ static struct mii_phy_def bcm5421k2_phy_def = {
 	.ops		= &bcm5421k2_phy_ops
 };
 
+static struct mii_phy_ops bcm5461_phy_ops = {
+	.init		= bcm5421_init,
+	.suspend	= generic_suspend,
+	.setup_aneg	= bcm54xx_setup_aneg,
+	.setup_forced	= bcm54xx_setup_forced,
+	.poll_link	= genmii_poll_link,
+	.read_link	= bcm54xx_read_link,
+	.enable_fiber   = bcm5461_enable_fiber,
+};
+
+static struct mii_phy_def bcm5461_phy_def = {
+	.phy_id		= 0x002060c0,
+	.phy_id_mask	= 0xfffffff0,
+	.name		= "BCM5461",
+	.features	= MII_GBIT_FEATURES,
+	.magic_aneg	= 1,
+	.ops		= &bcm5461_phy_ops
+};
+
+/* Broadcom BCM 5462 built-in Vesta */
+static struct mii_phy_ops bcm5462V_phy_ops = {
+	.init		= bcm5421_init,
+	.suspend	= generic_suspend,
+	.setup_aneg	= bcm54xx_setup_aneg,
+	.setup_forced	= bcm54xx_setup_forced,
+	.poll_link	= genmii_poll_link,
+	.read_link	= bcm54xx_read_link,
+};
+
+static struct mii_phy_def bcm5462V_phy_def = {
+	.phy_id		= 0x002060d0,
+	.phy_id_mask	= 0xfffffff0,
+	.name		= "BCM5462-Vesta",
+	.features	= MII_GBIT_FEATURES,
+	.magic_aneg	= 1,
+	.ops		= &bcm5462V_phy_ops
+};
+
 /* Marvell 88E1101 (Apple seem to deal with 2 different revs,
  * I masked out the 8 last bits to get both, but some specs
  * would be useful here) --BenH.
  */
 static struct mii_phy_ops marvell_phy_ops = {
+	.suspend	= generic_suspend,
 	.setup_aneg	= marvell_setup_aneg,
 	.setup_forced	= marvell_setup_forced,
 	.poll_link	= genmii_poll_link,
@@ -824,6 +901,8 @@ static struct mii_phy_def* mii_phy_table[] = {
 	&bcm5411_phy_def,
 	&bcm5421_phy_def,
 	&bcm5421k2_phy_def,
+	&bcm5461_phy_def,
+	&bcm5462V_phy_def,
 	&marvell_phy_def,
 	&genmii_phy_def,
 	NULL

@@ -1,5 +1,5 @@
 /*
- * $Id: mtd_blkdevs.c,v 1.24 2004/11/16 18:28:59 dwmw2 Exp $
+ * $Id: mtd_blkdevs.c,v 1.27 2005/11/07 11:14:20 gleixner Exp $
  *
  * (C) 2003 David Woodhouse <dwmw2@infradead.org>
  *
@@ -19,13 +19,12 @@
 #include <linux/spinlock.h>
 #include <linux/hdreg.h>
 #include <linux/init.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
 #include <asm/uaccess.h>
-#include <linux/devfs_fs_kernel.h>
 
 static LIST_HEAD(blktrans_majors);
 
-extern struct semaphore mtd_table_mutex;
+extern struct mutex mtd_table_mutex;
 extern struct mtd_info *mtd_table[];
 
 struct mtd_blkcore_priv {
@@ -86,7 +85,7 @@ static int mtd_blktrans_thread(void *arg)
 	daemonize("%sd", tr->name);
 
 	/* daemonize() doesn't do this for us since some kernel threads
-	   actually want to deal with signals. We can't just call 
+	   actually want to deal with signals. We can't just call
 	   exit_sighand() since that'll cause an oops when we finally
 	   do exit. */
 	spin_lock_irq(&current->sighand->siglock);
@@ -95,7 +94,7 @@ static int mtd_blktrans_thread(void *arg)
 	spin_unlock_irq(&current->sighand->siglock);
 
 	spin_lock_irq(rq->queue_lock);
-		
+
 	while (!tr->blkcore_priv->exiting) {
 		struct request *req;
 		struct mtd_blktrans_dev *dev;
@@ -123,9 +122,9 @@ static int mtd_blktrans_thread(void *arg)
 
 		spin_unlock_irq(rq->queue_lock);
 
-		down(&dev->sem);
+		mutex_lock(&dev->lock);
 		res = do_blktrans_request(tr, dev, req);
-		up(&dev->sem);
+		mutex_unlock(&dev->lock);
 
 		spin_lock_irq(rq->queue_lock);
 
@@ -158,7 +157,7 @@ static int blktrans_open(struct inode *i, struct file *f)
 	if (!try_module_get(tr->owner))
 		goto out_tr;
 
-	/* FIXME: Locking. A hot pluggable device can go away 
+	/* FIXME: Locking. A hot pluggable device can go away
 	   (del_mtd_device can be called for it) without its module
 	   being unloaded. */
 	dev->mtd->usecount++;
@@ -195,8 +194,16 @@ static int blktrans_release(struct inode *i, struct file *f)
 	return ret;
 }
 
+static int blktrans_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+{
+	struct mtd_blktrans_dev *dev = bdev->bd_disk->private_data;
 
-static int blktrans_ioctl(struct inode *inode, struct file *file, 
+	if (dev->tr->getgeo)
+		return dev->tr->getgeo(dev, geo);
+	return -ENOTTY;
+}
+
+static int blktrans_ioctl(struct inode *inode, struct file *file,
 			      unsigned int cmd, unsigned long arg)
 {
 	struct mtd_blktrans_dev *dev = inode->i_bdev->bd_disk->private_data;
@@ -208,22 +215,6 @@ static int blktrans_ioctl(struct inode *inode, struct file *file,
 			return tr->flush(dev);
 		/* The core code did the work, we had nothing to do. */
 		return 0;
-
-	case HDIO_GETGEO:
-		if (tr->getgeo) {
-			struct hd_geometry g;
-			int ret;
-
-			memset(&g, 0, sizeof(g));
-			ret = tr->getgeo(dev, &g);
-			if (ret)
-				return ret;
-
-			g.start = get_start_sect(inode->i_bdev);
-			if (copy_to_user((void __user *)arg, &g, sizeof(g)))
-				return -EFAULT;
-			return 0;
-		} /* else */
 	default:
 		return -ENOTTY;
 	}
@@ -234,6 +225,7 @@ struct block_device_operations mtd_blktrans_ops = {
 	.open		= blktrans_open,
 	.release	= blktrans_release,
 	.ioctl		= blktrans_ioctl,
+	.getgeo		= blktrans_getgeo,
 };
 
 int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
@@ -243,8 +235,8 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 	int last_devnum = -1;
 	struct gendisk *gd;
 
-	if (!down_trylock(&mtd_table_mutex)) {
-		up(&mtd_table_mutex);
+	if (!!mutex_trylock(&mtd_table_mutex)) {
+		mutex_unlock(&mtd_table_mutex);
 		BUG();
 	}
 
@@ -265,7 +257,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 			/* Required number was free */
 			list_add_tail(&new->list, &d->list);
 			goto added;
-		} 
+		}
 		last_devnum = d->devnum;
 	}
 	if (new->devnum == -1)
@@ -275,7 +267,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 		return -EBUSY;
 	}
 
-	init_MUTEX(&new->sem);
+	mutex_init(&new->lock);
 	list_add_tail(&new->list, &tr->devs);
  added:
 	if (!tr->writesect)
@@ -289,11 +281,19 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 	gd->major = tr->major;
 	gd->first_minor = (new->devnum) << tr->part_bits;
 	gd->fops = &mtd_blktrans_ops;
-	
-	snprintf(gd->disk_name, sizeof(gd->disk_name),
-		 "%s%c", tr->name, (tr->part_bits?'a':'0') + new->devnum);
-	snprintf(gd->devfs_name, sizeof(gd->devfs_name),
-		 "%s/%c", tr->name, (tr->part_bits?'a':'0') + new->devnum);
+
+	if (tr->part_bits)
+		if (new->devnum < 26)
+			snprintf(gd->disk_name, sizeof(gd->disk_name),
+				 "%s%c", tr->name, 'a' + new->devnum);
+		else
+			snprintf(gd->disk_name, sizeof(gd->disk_name),
+				 "%s%c%c", tr->name,
+				 'a' - 1 + new->devnum / 26,
+				 'a' + new->devnum % 26);
+	else
+		snprintf(gd->disk_name, sizeof(gd->disk_name),
+			 "%s%d", tr->name, new->devnum);
 
 	/* 2.5 has capacity in units of 512 bytes while still
 	   having BLOCK_SIZE_BITS set to 10. Just to keep us amused. */
@@ -307,14 +307,14 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 		set_disk_ro(gd, 1);
 
 	add_disk(gd);
-	
+
 	return 0;
 }
 
 int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 {
-	if (!down_trylock(&mtd_table_mutex)) {
-		up(&mtd_table_mutex);
+	if (!!mutex_trylock(&mtd_table_mutex)) {
+		mutex_unlock(&mtd_table_mutex);
 		BUG();
 	}
 
@@ -322,7 +322,7 @@ int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 
 	del_gendisk(old->blkcore_priv);
 	put_disk(old->blkcore_priv);
-		
+
 	return 0;
 }
 
@@ -361,12 +361,12 @@ static struct mtd_notifier blktrans_notifier = {
 	.add = blktrans_notify_add,
 	.remove = blktrans_notify_remove,
 };
-      
+
 int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 {
 	int ret, i;
 
-	/* Register the notifier if/when the first device type is 
+	/* Register the notifier if/when the first device type is
 	   registered, to prevent the link/init ordering from fucking
 	   us over. */
 	if (!blktrans_notifier.list.next)
@@ -378,14 +378,14 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 
 	memset(tr->blkcore_priv, 0, sizeof(*tr->blkcore_priv));
 
-	down(&mtd_table_mutex);
+	mutex_lock(&mtd_table_mutex);
 
 	ret = register_blkdev(tr->major, tr->name);
 	if (ret) {
 		printk(KERN_WARNING "Unable to register %s block device on major %d: %d\n",
 		       tr->name, tr->major, ret);
 		kfree(tr->blkcore_priv);
-		up(&mtd_table_mutex);
+		mutex_unlock(&mtd_table_mutex);
 		return ret;
 	}
 	spin_lock_init(&tr->blkcore_priv->queue_lock);
@@ -396,7 +396,7 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 	if (!tr->blkcore_priv->rq) {
 		unregister_blkdev(tr->major, tr->name);
 		kfree(tr->blkcore_priv);
-		up(&mtd_table_mutex);
+		mutex_unlock(&mtd_table_mutex);
 		return -ENOMEM;
 	}
 
@@ -407,11 +407,9 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 		blk_cleanup_queue(tr->blkcore_priv->rq);
 		unregister_blkdev(tr->major, tr->name);
 		kfree(tr->blkcore_priv);
-		up(&mtd_table_mutex);
+		mutex_unlock(&mtd_table_mutex);
 		return ret;
-	} 
-
-	devfs_mk_dir(tr->name);
+	}
 
 	INIT_LIST_HEAD(&tr->devs);
 	list_add(&tr->list, &blktrans_majors);
@@ -421,7 +419,7 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 			tr->add_mtd(tr, mtd_table[i]);
 	}
 
-	up(&mtd_table_mutex);
+	mutex_unlock(&mtd_table_mutex);
 
 	return 0;
 }
@@ -430,7 +428,7 @@ int deregister_mtd_blktrans(struct mtd_blktrans_ops *tr)
 {
 	struct list_head *this, *next;
 
-	down(&mtd_table_mutex);
+	mutex_lock(&mtd_table_mutex);
 
 	/* Clean up the kernel thread */
 	tr->blkcore_priv->exiting = 1;
@@ -445,16 +443,14 @@ int deregister_mtd_blktrans(struct mtd_blktrans_ops *tr)
 		tr->remove_dev(dev);
 	}
 
-	devfs_remove(tr->name);
 	blk_cleanup_queue(tr->blkcore_priv->rq);
 	unregister_blkdev(tr->major, tr->name);
 
-	up(&mtd_table_mutex);
+	mutex_unlock(&mtd_table_mutex);
 
 	kfree(tr->blkcore_priv);
 
-	if (!list_empty(&tr->devs))
-		BUG();
+	BUG_ON(!list_empty(&tr->devs));
 	return 0;
 }
 

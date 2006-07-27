@@ -13,6 +13,7 @@
 #include <asm/system.h>
 #include <asm/fpumacro.h>
 #include <asm/cpudata.h>
+#include <asm/spitfire.h>
 
 DEFINE_PER_CPU(cpuinfo_sparc, __cpu_data) = { 0 };
 
@@ -39,9 +40,11 @@ struct cpu_fp_info linux_sparc_fpu[] = {
   { 0x3e, 0x15, 0, "UltraSparc III+ integrated FPU"},
   { 0x3e, 0x16, 0, "UltraSparc IIIi integrated FPU"},
   { 0x3e, 0x18, 0, "UltraSparc IV integrated FPU"},
+  { 0x3e, 0x19, 0, "UltraSparc IV+ integrated FPU"},
+  { 0x3e, 0x22, 0, "UltraSparc IIIi+ integrated FPU"},
 };
 
-#define NSPARCFPU  (sizeof(linux_sparc_fpu)/sizeof(struct cpu_fp_info))
+#define NSPARCFPU  ARRAY_SIZE(linux_sparc_fpu)
 
 struct cpu_iu_info linux_sparc_chips[] = {
   { 0x17, 0x10, "TI UltraSparc I   (SpitFire)"},
@@ -53,9 +56,11 @@ struct cpu_iu_info linux_sparc_chips[] = {
   { 0x3e, 0x15, "TI UltraSparc III+ (Cheetah+)"},
   { 0x3e, 0x16, "TI UltraSparc IIIi (Jalapeno)"},
   { 0x3e, 0x18, "TI UltraSparc IV (Jaguar)"},
+  { 0x3e, 0x19, "TI UltraSparc IV+ (Panther)"},
+  { 0x3e, 0x22, "TI UltraSparc IIIi+ (Serrano)"},
 };
 
-#define NSPARCCHIPS  (sizeof(linux_sparc_chips)/sizeof(struct cpu_iu_info))
+#define NSPARCCHIPS  ARRAY_SIZE(linux_sparc_chips)
 
 char *sparc_cpu_type = "cpu-oops";
 char *sparc_fpu_type = "fpu-oops";
@@ -67,6 +72,12 @@ void __init cpu_probe(void)
 	unsigned long ver, fpu_vers, manuf, impl, fprs;
 	int i;
 	
+	if (tlb_type == hypervisor) {
+		sparc_cpu_type = "UltraSparc T1 (Niagara)";
+		sparc_fpu_type = "UltraSparc T1 integrated FPU";
+		return;
+	}
+
 	fprs = fprs_read();
 	fprs_write(FPRS_FEF);
 	__asm__ __volatile__ ("rdpr %%ver, %0; stx %%fsr, [%1]"

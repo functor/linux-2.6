@@ -61,8 +61,6 @@ static struct scsi_host_template dmx3191d_driver_template = {
 	.queuecommand		= NCR5380_queue_command,
 	.eh_abort_handler	= NCR5380_abort,
 	.eh_bus_reset_handler	= NCR5380_bus_reset,
-	.eh_device_reset_handler= NCR5380_device_reset,
-	.eh_host_reset_handler	= NCR5380_host_reset,
 	.can_queue		= 32,
 	.this_id		= 7,
 	.sg_tablesize		= SG_ALL,
@@ -118,7 +116,7 @@ static int __devinit dmx3191d_probe_one(struct pci_dev *pdev,
  out_free_irq:
 	free_irq(shost->irq, shost);
  out_release_region:
-	release_region(shost->io_port, DMX3191D_REGION_LEN);
+	release_region(io, DMX3191D_REGION_LEN);
  out_disable_device:
 	pci_disable_device(pdev);
  out:

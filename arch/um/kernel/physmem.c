@@ -9,6 +9,7 @@
 #include "linux/vmalloc.h"
 #include "linux/bootmem.h"
 #include "linux/module.h"
+#include "linux/pfn.h"
 #include "asm/types.h"
 #include "asm/pgtable.h"
 #include "kern_util.h"
@@ -225,7 +226,7 @@ EXPORT_SYMBOL(physmem_forget_descriptor);
 EXPORT_SYMBOL(physmem_remove_mapping);
 EXPORT_SYMBOL(physmem_subst_mapping);
 
-int arch_free_page(struct page *page, int order)
+void arch_free_page(struct page *page, int order)
 {
 	void *virt;
 	int i;
@@ -234,8 +235,6 @@ int arch_free_page(struct page *page, int order)
 		virt = __va(page_to_phys(page + i));
 		physmem_remove_mapping(virt);
 	}
-
-	return 0;
 }
 
 int is_remapped(void *virt)
@@ -248,17 +247,7 @@ int is_remapped(void *virt)
 /* Changed during early boot */
 unsigned long high_physmem;
 
-extern unsigned long physmem_size;
-
-void *to_virt(unsigned long phys)
-{
-	return((void *) uml_physmem + phys);
-}
-
-unsigned long to_phys(void *virt)
-{
-	return(((unsigned long) virt) - uml_physmem);
-}
+extern unsigned long long physmem_size;
 
 int init_maps(unsigned long physmem, unsigned long iomem, unsigned long highmem)
 {
@@ -277,7 +266,7 @@ int init_maps(unsigned long physmem, unsigned long iomem, unsigned long highmem)
 	highmem_len = highmem_pages * sizeof(struct page);
 
 	total_pages = phys_pages + iomem_pages + highmem_pages;
-	total_len = phys_len + iomem_pages + highmem_len;
+	total_len = phys_len + iomem_len + highmem_len;
 
 	if(kmalloc_ok){
 		map = kmalloc(total_len, GFP_KERNEL);
@@ -291,38 +280,13 @@ int init_maps(unsigned long physmem, unsigned long iomem, unsigned long highmem)
 
 	for(i = 0; i < total_pages; i++){
 		p = &map[i];
-		set_page_count(p, 0);
+		memset(p, 0, sizeof(struct page));
 		SetPageReserved(p);
 		INIT_LIST_HEAD(&p->lru);
 	}
 
 	max_mapnr = total_pages;
 	return(0);
-}
-
-struct page *phys_to_page(const unsigned long phys)
-{
-	return(&mem_map[phys >> PAGE_SHIFT]);
-}
-
-struct page *__virt_to_page(const unsigned long virt)
-{
-	return(&mem_map[__pa(virt) >> PAGE_SHIFT]);
-}
-
-phys_t page_to_phys(struct page *page)
-{
-	return((page - mem_map) << PAGE_SHIFT);
-}
-
-pte_t mk_pte(struct page *page, pgprot_t pgprot)
-{
-	pte_t pte;
-
-	pte_set_val(pte, page_to_phys(page), pgprot);
-	if(pte_present(pte))
-		pte_mknewprot(pte_mknewpage(pte));
-	return(pte);
 }
 
 /* Changed during early boot */
@@ -353,10 +317,10 @@ void map_memory(unsigned long virt, unsigned long phys, unsigned long len,
 	}
 }
 
-#define PFN_UP(x) (((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
+extern int __syscall_stub_start, __binary_start;
 
 void setup_physmem(unsigned long start, unsigned long reserve_end,
-		   unsigned long len, unsigned long highmem)
+		   unsigned long len, unsigned long long highmem)
 {
 	unsigned long reserve = reserve_end - start;
 	int pfn = PFN_UP(__pa(reserve_end));
@@ -372,6 +336,12 @@ void setup_physmem(unsigned long start, unsigned long reserve_end,
 		os_print_error(err, "Mapping memory");
 		exit(1);
 	}
+
+	/* Special kludge - This page will be mapped in to userspace processes
+	 * from physmem_fd, so it needs to be written out there.
+	 */
+	os_seek_file(physmem_fd, __pa(&__syscall_stub_start));
+	os_write_file(physmem_fd, &__syscall_stub_start, PAGE_SIZE);
 
 	bootmap_size = init_bootmem(pfn, pfn + delta);
 	free_bootmem(__pa(reserve_end) + bootmap_size,
@@ -437,6 +407,8 @@ unsigned long find_iomem(char *driver, unsigned long *len_out)
 			*len_out = region->size;
 			return(region->virt);
 		}
+
+		region = region->next;
 	}
 
 	return(0);

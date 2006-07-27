@@ -26,6 +26,12 @@ struct __kernel_sockaddr_storage {
 #include <linux/types.h>		/* pid_t			*/
 #include <linux/compiler.h>		/* __user			*/
 
+extern int sysctl_somaxconn;
+#ifdef CONFIG_PROC_FS
+struct seq_file;
+extern void socket_seq_show(struct seq_file *seq);
+#endif
+
 typedef unsigned short	sa_family_t;
 
 /*
@@ -144,6 +150,7 @@ __KINLINE struct cmsghdr * cmsg_nxthdr (struct msghdr *__msg, struct cmsghdr *__
 
 #define	SCM_RIGHTS	0x01		/* rw: access rights (array of int) */
 #define SCM_CREDENTIALS 0x02		/* rw: struct ucred		*/
+#define SCM_SECURITY	0x03		/* rw: security label		*/
 
 struct ucred {
 	__u32	pid;
@@ -180,6 +187,7 @@ struct ucred {
 #define AF_PPPOX	24	/* PPPoX sockets		*/
 #define AF_WANPIPE	25	/* Wanpipe API Sockets */
 #define AF_LLC		26	/* Linux LLC			*/
+#define AF_TIPC		30	/* TIPC sockets			*/
 #define AF_BLUETOOTH	31	/* Bluetooth sockets 		*/
 #define AF_MAX		32	/* For now.. */
 
@@ -212,6 +220,7 @@ struct ucred {
 #define PF_PPPOX	AF_PPPOX
 #define PF_WANPIPE	AF_WANPIPE
 #define PF_LLC		AF_LLC
+#define PF_TIPC		AF_TIPC
 #define PF_BLUETOOTH	AF_BLUETOOTH
 #define PF_MAX		AF_MAX
 
@@ -271,6 +280,9 @@ struct ucred {
 #define SOL_IRDA        266
 #define SOL_NETBEUI	267
 #define SOL_LLC		268
+#define SOL_DCCP	269
+#define SOL_NETLINK	270
+#define SOL_TIPC	271
 
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 /* PlanetLab PL2525: reset the context ID of an existing socket */
@@ -296,7 +308,6 @@ extern int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
 
 struct socket;
-struct file * sock_map_file(struct socket *sock);
 extern int sock_map_fd(struct socket *sock);
 extern struct socket *sockfd_lookup(int fd, int *err);
 

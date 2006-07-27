@@ -33,13 +33,35 @@ void fastcall add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(add_wait_queue_exclusive);
 
-void fastcall remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
+int fastcall remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
+	struct list_head *list;
+	int seen, retval;
 
 	spin_lock_irqsave(&q->lock, flags);
-	__remove_wait_queue(q, wait);
+	list = &q->task_list;
+	seen = 0;
+	retval = -1;
+
+	do {
+		struct list_head *next;
+		if (list == &wait->task_list)
+			seen++;
+		next = list->next;
+		if (next->prev != list) {
+			seen += 2;
+			break;
+		}
+		list = next;
+	} while (list != &q->task_list);
+
+	if (seen == 1) {
+		__remove_wait_queue(q, wait);
+		retval = 0;
+	}
 	spin_unlock_irqrestore(&q->lock, flags);
+	return retval;
 }
 EXPORT_SYMBOL(remove_wait_queue);
 

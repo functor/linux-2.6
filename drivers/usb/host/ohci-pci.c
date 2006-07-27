@@ -14,16 +14,6 @@
  * This file is licenced under the GPL.
  */
  
-#ifdef CONFIG_PMAC_PBOOK
-#include <asm/machdep.h>
-#include <asm/pmac_feature.h>
-#include <asm/pci-bridge.h>
-#include <asm/prom.h>
-#ifndef CONFIG_PM
-#	define CONFIG_PM
-#endif
-#endif
-
 #ifndef CONFIG_PCI
 #error "This file is PCI bus glue.  CONFIG_PCI must be defined."
 #endif
@@ -45,7 +35,10 @@ ohci_pci_start (struct usb_hcd *hcd)
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 	int		ret;
 
-	if(hcd->self.controller && hcd->self.controller->bus == &pci_bus_type) {
+	/* REVISIT this whole block should move to reset(), which handles
+	 * all the other one-time init.
+	 */
+	if (hcd->self.controller) {
 		struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
 
 		/* AMD 756, for most chips (early revs), corrupts register
@@ -55,7 +48,8 @@ ohci_pci_start (struct usb_hcd *hcd)
 				&& pdev->device == 0x740c) {
 			ohci->flags = OHCI_QUIRK_AMD756;
 			ohci_dbg (ohci, "AMD756 erratum 4 workaround\n");
-			// also somewhat erratum 10 (suspend/resume issues)
+			/* also erratum 10 (suspend/resume issues) */
+			device_init_wakeup(&hcd->self.root_hub->dev, 0);
 		}
 
 		/* FIXME for some of the early AMD 760 southbridges, OHCI
@@ -98,6 +92,13 @@ ohci_pci_start (struct usb_hcd *hcd)
 			ohci_dbg (ohci,
 				"enabled Compaq ZFMicro chipset quirk\n");
 		}
+
+		/* RWC may not be set for add-in PCI cards, since boot
+		 * firmware probably ignored them.  This transfers PCI
+		 * PM wakeup capabilities (once the PCI layer is fixed).
+		 */
+		if (device_may_wakeup(&pdev->dev))
+			ohci->hc_control |= OHCI_CTRL_RWC;
 	}
 
 	/* NOTE: there may have already been a first reset, to
@@ -115,66 +116,38 @@ ohci_pci_start (struct usb_hcd *hcd)
 
 static int ohci_pci_suspend (struct usb_hcd *hcd, pm_message_t message)
 {
-	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
+	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
+	unsigned long	flags;
+	int		rc = 0;
 
-	/* suspend root hub, hoping it keeps power during suspend */
-	if (time_before (jiffies, ohci->next_statechange))
-		msleep (100);
-
-#ifdef	CONFIG_USB_SUSPEND
-	(void) usb_suspend_device (hcd->self.root_hub, message);
-#else
-	usb_lock_device (hcd->self.root_hub);
-	(void) ohci_hub_suspend (hcd);
-	usb_unlock_device (hcd->self.root_hub);
-#endif
-
-	/* let things settle down a bit */
-	msleep (100);
-	
-#ifdef CONFIG_PMAC_PBOOK
-	if (_machine == _MACH_Pmac) {
-	   	struct device_node	*of_node;
- 
-		/* Disable USB PAD & cell clock */
-		of_node = pci_device_to_OF_node (to_pci_dev(hcd->self.controller));
-		if (of_node)
-			pmac_call_feature(PMAC_FTR_USB_ENABLE, of_node, 0, 0);
+	/* Root hub was already suspended. Disable irq emission and
+	 * mark HW unaccessible, bail out if RH has been resumed. Use
+	 * the spinlock to properly synchronize with possible pending
+	 * RH suspend or resume activity.
+	 *
+	 * This is still racy as hcd->state is manipulated outside of
+	 * any locks =P But that will be a different fix.
+	 */
+	spin_lock_irqsave (&ohci->lock, flags);
+	if (hcd->state != HC_STATE_SUSPENDED) {
+		rc = -EINVAL;
+		goto bail;
 	}
-#endif /* CONFIG_PMAC_PBOOK */
-	return 0;
+	ohci_writel(ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
+	(void)ohci_readl(ohci, &ohci->regs->intrdisable);
+	clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+ bail:
+	spin_unlock_irqrestore (&ohci->lock, flags);
+
+	return rc;
 }
 
 
 static int ohci_pci_resume (struct usb_hcd *hcd)
 {
-	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
-	int			retval = 0;
-
-#ifdef CONFIG_PMAC_PBOOK
-	if (_machine == _MACH_Pmac) {
-		struct device_node *of_node;
-
-		/* Re-enable USB PAD & cell clock */
-		of_node = pci_device_to_OF_node (to_pci_dev(hcd->self.controller));
-		if (of_node)
-			pmac_call_feature (PMAC_FTR_USB_ENABLE, of_node, 0, 1);
-	}
-#endif /* CONFIG_PMAC_PBOOK */
-
-	/* resume root hub */
-	if (time_before (jiffies, ohci->next_statechange))
-		msleep (100);
-#ifdef	CONFIG_USB_SUSPEND
-	/* get extra cleanup even if remote wakeup isn't in use */
-	retval = usb_resume_device (hcd->self.root_hub);
-#else
-	usb_lock_device (hcd->self.root_hub);
-	retval = ohci_hub_resume (hcd);
-	usb_unlock_device (hcd->self.root_hub);
-#endif
-
-	return retval;
+	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+	usb_hcd_resume_root_hub(hcd);
+	return 0;
 }
 
 #endif	/* CONFIG_PM */
@@ -221,9 +194,9 @@ static const struct hc_driver ohci_pci_hc_driver = {
 	 */
 	.hub_status_data =	ohci_hub_status_data,
 	.hub_control =		ohci_hub_control,
-#ifdef	CONFIG_USB_SUSPEND
-	.hub_suspend =		ohci_hub_suspend,
-	.hub_resume =		ohci_hub_resume,
+#ifdef	CONFIG_PM
+	.bus_suspend =		ohci_bus_suspend,
+	.bus_resume =		ohci_bus_resume,
 #endif
 	.start_port_reset =	ohci_start_port_reset,
 };
@@ -233,7 +206,7 @@ static const struct hc_driver ohci_pci_hc_driver = {
 
 static const struct pci_device_id pci_ids [] = { {
 	/* handle any USB OHCI controller */
-	PCI_DEVICE_CLASS((PCI_CLASS_SERIAL_USB << 8) | 0x10, ~0),
+	PCI_DEVICE_CLASS(PCI_CLASS_SERIAL_USB_OHCI, ~0),
 	.driver_data =	(unsigned long) &ohci_pci_hc_driver,
 	}, { /* end: all zeroes */ }
 };

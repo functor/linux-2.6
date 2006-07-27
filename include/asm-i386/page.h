@@ -103,37 +103,22 @@ typedef struct { unsigned long pgprot; } pgprot_t;
  */
 extern unsigned int __VMALLOC_RESERVE;
 
-/* Pure 2^n version of get_order */
-static __inline__ int get_order(unsigned long size)
-{
-	int order;
-
-	size = (size-1) >> (PAGE_SHIFT-1);
-	order = -1;
-	do {
-		size >>= 1;
-		order++;
-	} while (size);
-	return order;
-}
-
 extern int sysctl_legacy_va_layout;
+
+extern int page_is_ram(unsigned long pagenr);
 
 extern int devmem_is_allowed(unsigned long pagenr);
 
 #endif /* __ASSEMBLY__ */
 
-#if   defined(CONFIG_SPLIT_3GB)
-#define __PAGE_OFFSET		(0xC0000000)
-#elif defined(CONFIG_SPLIT_25GB)
-#define __PAGE_OFFSET		(0xA0000000)
-#elif defined(CONFIG_SPLIT_2GB)
-#define __PAGE_OFFSET		(0x80000000)
-#elif defined(CONFIG_SPLIT_15GB)
-#define __PAGE_OFFSET		(0x60000000)
-#elif defined(CONFIG_SPLIT_1GB)
-#define __PAGE_OFFSET		(0x40000000)
+#ifdef __ASSEMBLY__
+#define __PAGE_OFFSET		CONFIG_PAGE_OFFSET
+#define __PHYSICAL_START	CONFIG_PHYSICAL_START
+#else
+#define __PAGE_OFFSET		((unsigned long)CONFIG_PAGE_OFFSET)
+#define __PHYSICAL_START	((unsigned long)CONFIG_PHYSICAL_START)
 #endif
+#define __KERNEL_START		(__PAGE_OFFSET + __PHYSICAL_START)
 
 /*
  * Under exec-shield we don't use the generic fixmap gate area.
@@ -143,17 +128,13 @@ extern int devmem_is_allowed(unsigned long pagenr);
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
-#define __MAXMEM		(-__PAGE_OFFSET-__VMALLOC_RESERVE)
-#define MAXMEM			((unsigned long)(-PAGE_OFFSET-VMALLOC_RESERVE))
-
+#define MAXMEM			(-__PAGE_OFFSET-__VMALLOC_RESERVE)
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
-#ifndef CONFIG_DISCONTIGMEM
-#define pfn_to_page(pfn)	(mem_map + (pfn))
-#define page_to_pfn(page)	((unsigned long)((page) - mem_map))
+#ifdef CONFIG_FLATMEM
 #define pfn_valid(pfn)		((pfn) < max_mapnr)
-#endif /* !CONFIG_DISCONTIGMEM */
+#endif /* CONFIG_FLATMEM */
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
@@ -166,5 +147,8 @@ extern int devmem_is_allowed(unsigned long pagenr);
 
 
 #endif /* __KERNEL__ */
+
+#include <asm-generic/memory_model.h>
+#include <asm-generic/page.h>
 
 #endif /* _I386_PAGE_H */

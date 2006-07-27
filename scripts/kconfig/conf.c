@@ -5,6 +5,7 @@
 
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -32,16 +33,16 @@ char *defconfig_file;
 static int indent = 1;
 static int valid_stdin = 1;
 static int conf_cnt;
-static signed char line[128];
+static char line[128];
 static struct menu *rootEntry;
 
 static char nohelp_text[] = N_("Sorry, no help available for this option yet.\n");
 
 static int return_value = 0;
 
-static void strip(signed char *str)
+static void strip(char *str)
 {
-	signed char *p = str;
+	char *p = str;
 	int l;
 
 	while ((isspace(*p)))
@@ -85,6 +86,15 @@ static void conf_askvalue(struct symbol *sym, const char *def)
 	}
 
 	switch (input_mode) {
+	case set_no:
+	case set_mod:
+	case set_yes:
+	case set_random:
+		if (sym_has_value(sym)) {
+			printf("%s\n", def);
+			return;
+		}
+		break;
 	case ask_new:
 	case ask_silent:
 		if (sym_has_value(sym)) {
@@ -314,8 +324,7 @@ static int conf_choice(struct menu *menu)
 		printf("%*s%s\n", indent - 1, "", menu_get_prompt(menu));
 		def_sym = sym_get_choice_value(sym);
 		cnt = def = 0;
-		line[0] = '0';
-		line[1] = 0;
+		line[0] = 0;
 		for (child = menu->list; child; child = child->next) {
 			if (!menu_is_visible(child))
 				continue;
@@ -480,8 +489,9 @@ static void check_conf(struct menu *menu)
 		return;
 
 	sym = menu->sym;
-	if (sym) {
-		if (sym_is_changable(sym) && !sym_has_value(sym)) {
+	if (sym && !sym_has_value(sym)) {
+		if (sym_is_changable(sym) ||
+		    (sym_is_choice(sym) && sym_get_tristate_value(sym) == yes)) {
 			if (!conf_cnt++)
 				printf(_("*\n* Restart config...\n*\n"));
 			rootEntry = menu_get_parent_menu(menu);
@@ -490,8 +500,6 @@ static void check_conf(struct menu *menu)
 			else
 				conf(rootEntry);
 		}
-		if (sym_is_choice(sym) && sym_get_tristate_value(sym) != mod)
-			return;
 	}
 
 	for (child = menu->list; child; child = child->next)
@@ -543,7 +551,7 @@ int main(int ac, char **av)
 			break;
 		case 'h':
 		case '?':
-			printf("%s [-o|-s] config\n", av[0]);
+			fprintf(stderr, "See README for usage info\n");
 			exit(0);
 		}
 	}
@@ -578,6 +586,27 @@ int main(int ac, char **av)
 	case ask_new:
 	case dont_ask:
 		conf_read(NULL);
+		break;
+	case set_no:
+	case set_mod:
+	case set_yes:
+	case set_random:
+		name = getenv("KCONFIG_ALLCONFIG");
+		if (name && !stat(name, &tmpstat)) {
+			conf_read_simple(name);
+			break;
+		}
+		switch (input_mode) {
+		case set_no:	 name = "allno.config"; break;
+		case set_mod:	 name = "allmod.config"; break;
+		case set_yes:	 name = "allyes.config"; break;
+		case set_random: name = "allrandom.config"; break;
+		default: break;
+		}
+		if (!stat(name, &tmpstat))
+			conf_read_simple(name);
+		else if (!stat("all.config", &tmpstat))
+			conf_read_simple("all.config");
 		break;
 	default:
 		break;

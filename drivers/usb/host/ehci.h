@@ -88,7 +88,12 @@ struct ehci_hcd {			/* one per controller */
 	unsigned long		next_statechange;
 	u32			command;
 
+	/* SILICON QUIRKS */
 	unsigned		is_tdi_rh_tt:1;	/* TDI roothub with TT */
+	unsigned		no_selective_suspend:1;
+	unsigned		has_fsl_port_bug:1; /* FreeScale */
+
+	u8			sbrn;		/* packed release number */
 
 	/* irq statistics */
 #ifdef EHCI_STATS
@@ -263,6 +268,7 @@ struct ehci_regs {
 #define PORT_PE		(1<<2)		/* port enable */
 #define PORT_CSC	(1<<1)		/* connect status change */
 #define PORT_CONNECT	(1<<0)		/* device connected */
+#define PORT_RWC_BITS   (PORT_CSC | PORT_PEC | PORT_OCC)
 } __attribute__ ((packed));
 
 /* Appendix C, Debug port ... intended for use with special "debug devices"
@@ -385,6 +391,11 @@ struct ehci_qh {
 	__le32			hw_info1;        /* see EHCI 3.6.2 */
 #define	QH_HEAD		0x00008000
 	__le32			hw_info2;        /* see EHCI 3.6.2 */
+#define	QH_SMASK	0x000000ff
+#define	QH_CMASK	0x0000ff00
+#define	QH_HUBADDR	0x007f0000
+#define	QH_HUBPORT	0x3f800000
+#define	QH_MULT		0xc0000000
 	__le32			hw_current;	 /* qtd list - see EHCI 3.6.4 */
 	
 	/* qtd overlay (hardware parts of a struct ehci_qtd) */
@@ -416,6 +427,7 @@ struct ehci_qh {
 	u8			usecs;		/* intr bandwidth */
 	u8			gap_uf;		/* uframes split/csplit gap */
 	u8			c_usecs;	/* ... split completion bw */
+	u16			tt_usecs;	/* tt downstream bandwidth */
 	unsigned short		period;		/* polling interval */
 	unsigned short		start;		/* where polling starts */
 #define NO_FRAME ((unsigned short)~0)			/* pick new start */
@@ -474,6 +486,7 @@ struct ehci_iso_stream {
 	 */
 	u8			interval;
 	u8			usecs, c_usecs;
+	u16			tt_usecs;
 	u16			maxp;
 	u16			raw_mask;
 	unsigned		bandwidth;
@@ -626,6 +639,18 @@ ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 
 #define	ehci_port_speed(ehci, portsc)	(1<<USB_PORT_FEAT_HIGHSPEED)
 #endif
+
+/*-------------------------------------------------------------------------*/
+
+#ifdef CONFIG_PPC_83xx
+/* Some Freescale processors have an erratum in which the TT
+ * port number in the queue head was 0..N-1 instead of 1..N.
+ */
+#define	ehci_has_fsl_portno_bug(e)		((e)->has_fsl_port_bug)
+#else
+#define	ehci_has_fsl_portno_bug(e)		(0)
+#endif
+
 
 /*-------------------------------------------------------------------------*/
 
