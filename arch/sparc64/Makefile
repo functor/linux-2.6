@@ -17,7 +17,6 @@ CC		:= $(shell if $(CC) -m64 -S -o /dev/null -xc /dev/null >/dev/null 2>&1; then
 NEW_GCC := $(call cc-option-yn, -m64 -mcmodel=medlow)
 NEW_GAS := $(shell if $(LD) -V 2>&1 | grep 'elf64_sparc' > /dev/null; then echo y; else echo n; fi)
 UNDECLARED_REGS := $(shell if $(CC) -c -x assembler /dev/null -Wa,--help | grep undeclared-regs > /dev/null; then echo y; else echo n; fi; )
-INLINE_LIMIT := $(call cc-option-yn, -m64 -finline-limit=100000)
 
 export NEW_GCC
 
@@ -49,10 +48,6 @@ else
   AFLAGS += -m64 -mcpu=ultrasparc $(CC_UNDECL)
 endif
 
-ifeq ($(INLINE_LIMIT),y)
-  CFLAGS := $(CFLAGS) -finline-limit=100000
-endif
-
 ifeq ($(CONFIG_MCOUNT),y)
   CFLAGS := $(CFLAGS) -pg
 endif
@@ -68,9 +63,6 @@ libs-y				+= arch/sparc64/prom/ arch/sparc64/lib/
 drivers-$(CONFIG_OPROFILE)	+= arch/sparc64/oprofile/
 
 boot := arch/sparc64/boot
-
-bzImage: image
-	cp $(boot)/image $(boot)/bzImage
 
 image tftpboot.img vmlinux.aout: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@

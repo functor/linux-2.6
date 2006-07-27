@@ -59,8 +59,7 @@ ENTRY(s3c2410_cpu_suspend)
 	mrc	p15, 0, r5, c13, c0, 0	@ PID
 	mrc	p15, 0, r6, c3, c0, 0	@ Domain ID
 	mrc	p15, 0, r7, c2, c0, 0	@ translation table base address
-	mrc	p15, 0, r8, c2, c0, 0	@ auxiliary control register
-	mrc	p15, 0, r9, c1, c0, 0	@ control register
+	mrc	p15, 0, r8, c1, c0, 0	@ control register
 
 	stmia	r0, { r4 - r13 }
 
@@ -72,7 +71,7 @@ ENTRY(s3c2410_cpu_suspend)
 	@@ prepare cpu to sleep
 
 	ldr	r4, =S3C2410_REFRESH
-	ldr	r5, =S3C2410_MISCCR
+	ldr	r5, =S3C24XX_MISCCR
 	ldr	r6, =S3C2410_CLKCON
 	ldr	r7, [ r4 ]		@ get REFRESH (and ensure in TLB)
 	ldr	r8, [ r5 ]		@ get MISCCR (and ensure in TLB)
@@ -133,12 +132,12 @@ ENTRY(s3c2410_cpu_resume)
 	@@ load UART to allow us to print the two characters for
 	@@ resume debug
 
-	mov	r2, #S3C2410_PA_UART & 0xff000000
-	orr	r2, r2, #S3C2410_PA_UART & 0xff000
+	mov	r2, #S3C24XX_PA_UART & 0xff000000
+	orr	r2, r2, #S3C24XX_PA_UART & 0xff000
 
 #if 0
 	/* SMDK2440 LED set */
-	mov	r14, #S3C2410_PA_GPIO
+	mov	r14, #S3C24XX_PA_GPIO
 	ldr	r12, [ r14, #0x54 ]
 	bic	r12, r12, #3<<4
 	orr	r12, r12, #1<<7
@@ -165,7 +164,6 @@ ENTRY(s3c2410_cpu_resume)
 	mcr	p15, 0, r5, c13, c0, 0		@ PID
 	mcr	p15, 0, r6, c3, c0, 0		@ Domain ID
 	mcr	p15, 0, r7, c2, c0, 0		@ translation table base
-	mcr	p15, 0, r8, c1, c1, 0		@ auxilliary control
 
 #ifdef CONFIG_DEBUG_RESUME
 	mov	r3, #'R'
@@ -173,7 +171,7 @@ ENTRY(s3c2410_cpu_resume)
 #endif
 
 	ldr	r2, =resume_with_mmu
-	mcr	p15, 0, r9, c1, c0, 0		@ turn on MMU, etc
+	mcr	p15, 0, r8, c1, c0, 0		@ turn on MMU, etc
 	nop					@ second-to-last before mmu
 	mov	pc, r2				@ go back to virtual address
 

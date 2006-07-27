@@ -1,12 +1,8 @@
+#
+# Makefile for the Computone IntelliPort Plus Driver
+#
 
-all:	ip2mkdev ip2trace ip2stat
+obj-$(CONFIG_COMPUTONE)         += ip2.o ip2main.o
 
-ip2mkdev: ip2mkdev.c
-	cc -o ip2mkdev ip2mkdev.c
-
-ip2trace: ip2trace.c
-	cc -o ip2trace ip2trace.c
-
-ip2stat: ip2stat.c
-	cc -o ip2stat ip2stat.c
+ip2-objs			:= ip2base.o
 

@@ -1,31 +1,29 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
- * Refer to the README file included with this package for         *
- * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Fibre Channel Host Bus Adapters.                                *
+ * Copyright (C) 2004-2006 Emulex.  All rights reserved.           *
+ * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
+ * Portions Copyright (C) 2004-2005 Christoph Hellwig              *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
- * modify it under the terms of the GNU General Public License     *
- * as published by the Free Software Foundation; either version 2  *
- * of the License, or (at your option) any later version.          *
- *                                                                 *
- * This program is distributed in the hope that it will be useful, *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of  *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the   *
- * GNU General Public License for more details, a copy of which    *
- * can be found in the file COPYING included with this package.    *
+ * modify it under the terms of version 2 of the GNU General       *
+ * Public License as published by the Free Software Foundation.    *
+ * This program is distributed in the hope that it will be useful. *
+ * ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND          *
+ * WARRANTIES, INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY,  *
+ * FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT, ARE      *
+ * DISCLAIMED, EXCEPT TO THE EXTENT THAT SUCH DISCLAIMERS ARE HELD *
+ * TO BE LEGALLY INVALID.  See the GNU General Public License for  *
+ * more details, a copy of which can be found in the file COPYING  *
+ * included with this package.                                     *
  *******************************************************************/
-
-/*
- * $Id: lpfc_nportdisc.c 1.179 2005/04/13 11:59:13EDT sf_support Exp  $
- */
 
 #include <linux/blkdev.h>
 #include <linux/pci.h>
 #include <linux/interrupt.h>
 
+#include <scsi/scsi.h>
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_transport_fc.h>
@@ -48,15 +46,14 @@ lpfc_check_adisc(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp,
 	 * table entry for that node.
 	 */
 	if (memcmp(nn, &ndlp->nlp_nodename, sizeof (struct lpfc_name)) != 0)
-		return (0);
+		return 0;
 
 	if (memcmp(pn, &ndlp->nlp_portname, sizeof (struct lpfc_name)) != 0)
-		return (0);
+		return 0;
 
 	/* we match, return success */
-	return (1);
+	return 1;
 }
-
 
 int
 lpfc_check_sparm(struct lpfc_hba * phba,
@@ -64,48 +61,70 @@ lpfc_check_sparm(struct lpfc_hba * phba,
 		 uint32_t class)
 {
 	volatile struct serv_parm *hsp = &phba->fc_sparam;
-	/* First check for supported version */
+	uint16_t hsp_value, ssp_value = 0;
 
-	/* Next check for class validity */
+	/*
+	 * The receive data field size and buffer-to-buffer receive data field
+	 * size entries are 16 bits but are represented as two 8-bit fields in
+	 * the driver data structure to account for rsvd bits and other control
+	 * bits.  Reconstruct and compare the fields as a 16-bit values before
+	 * correcting the byte values.
+	 */
 	if (sp->cls1.classValid) {
-
-		if (sp->cls1.rcvDataSizeMsb > hsp->cls1.rcvDataSizeMsb)
-			sp->cls1.rcvDataSizeMsb = hsp->cls1.rcvDataSizeMsb;
-		if (sp->cls1.rcvDataSizeLsb > hsp->cls1.rcvDataSizeLsb)
+		hsp_value = (hsp->cls1.rcvDataSizeMsb << 8) |
+				hsp->cls1.rcvDataSizeLsb;
+		ssp_value = (sp->cls1.rcvDataSizeMsb << 8) |
+				sp->cls1.rcvDataSizeLsb;
+		if (ssp_value > hsp_value) {
 			sp->cls1.rcvDataSizeLsb = hsp->cls1.rcvDataSizeLsb;
+			sp->cls1.rcvDataSizeMsb = hsp->cls1.rcvDataSizeMsb;
+		}
 	} else if (class == CLASS1) {
-		return (0);
+		return 0;
 	}
 
 	if (sp->cls2.classValid) {
-
-		if (sp->cls2.rcvDataSizeMsb > hsp->cls2.rcvDataSizeMsb)
-			sp->cls2.rcvDataSizeMsb = hsp->cls2.rcvDataSizeMsb;
-		if (sp->cls2.rcvDataSizeLsb > hsp->cls2.rcvDataSizeLsb)
+		hsp_value = (hsp->cls2.rcvDataSizeMsb << 8) |
+				hsp->cls2.rcvDataSizeLsb;
+		ssp_value = (sp->cls2.rcvDataSizeMsb << 8) |
+				sp->cls2.rcvDataSizeLsb;
+		if (ssp_value > hsp_value) {
 			sp->cls2.rcvDataSizeLsb = hsp->cls2.rcvDataSizeLsb;
+			sp->cls2.rcvDataSizeMsb = hsp->cls2.rcvDataSizeMsb;
+		}
 	} else if (class == CLASS2) {
-		return (0);
+		return 0;
 	}
 
 	if (sp->cls3.classValid) {
-
-		if (sp->cls3.rcvDataSizeMsb > hsp->cls3.rcvDataSizeMsb)
-			sp->cls3.rcvDataSizeMsb = hsp->cls3.rcvDataSizeMsb;
-		if (sp->cls3.rcvDataSizeLsb > hsp->cls3.rcvDataSizeLsb)
+		hsp_value = (hsp->cls3.rcvDataSizeMsb << 8) |
+				hsp->cls3.rcvDataSizeLsb;
+		ssp_value = (sp->cls3.rcvDataSizeMsb << 8) |
+				sp->cls3.rcvDataSizeLsb;
+		if (ssp_value > hsp_value) {
 			sp->cls3.rcvDataSizeLsb = hsp->cls3.rcvDataSizeLsb;
+			sp->cls3.rcvDataSizeMsb = hsp->cls3.rcvDataSizeMsb;
+		}
 	} else if (class == CLASS3) {
-		return (0);
+		return 0;
 	}
 
-	if (sp->cmn.bbRcvSizeMsb > hsp->cmn.bbRcvSizeMsb)
-		sp->cmn.bbRcvSizeMsb = hsp->cmn.bbRcvSizeMsb;
-	if (sp->cmn.bbRcvSizeLsb > hsp->cmn.bbRcvSizeLsb)
+	/*
+	 * Preserve the upper four bits of the MSB from the PLOGI response.
+	 * These bits contain the Buffer-to-Buffer State Change Number
+	 * from the target and need to be passed to the FW.
+	 */
+	hsp_value = (hsp->cmn.bbRcvSizeMsb << 8) | hsp->cmn.bbRcvSizeLsb;
+	ssp_value = (sp->cmn.bbRcvSizeMsb << 8) | sp->cmn.bbRcvSizeLsb;
+	if (ssp_value > hsp_value) {
 		sp->cmn.bbRcvSizeLsb = hsp->cmn.bbRcvSizeLsb;
+		sp->cmn.bbRcvSizeMsb = (sp->cmn.bbRcvSizeMsb & 0xF0) |
+				       (hsp->cmn.bbRcvSizeMsb & 0x0F);
+	}
 
-	/* If check is good, copy wwpn wwnn into ndlp */
 	memcpy(&ndlp->nlp_nodename, &sp->nodeName, sizeof (struct lpfc_name));
 	memcpy(&ndlp->nlp_portname, &sp->portName, sizeof (struct lpfc_name));
-	return (1);
+	return 1;
 }
 
 static void *
@@ -131,8 +150,7 @@ lpfc_check_elscmpl_iocb(struct lpfc_hba * phba,
 			lp = (uint32_t *) prsp->virt;
 			ptr = (void *)((uint8_t *)lp + sizeof(uint32_t));
 		}
-	}
-	else {
+	} else {
 		/* Force ulpStatus error since we are returning NULL ptr */
 		if (!(irsp->ulpStatus)) {
 			irsp->ulpStatus = IOSTAT_LOCAL_REJECT;
@@ -140,7 +158,7 @@ lpfc_check_elscmpl_iocb(struct lpfc_hba * phba,
 		}
 		ptr = NULL;
 	}
-	return (ptr);
+	return ptr;
 }
 
 
@@ -189,10 +207,8 @@ lpfc_els_abort(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp,
 					spin_unlock_irq(phba->host->host_lock);
 					(iocb->iocb_cmpl) (phba, iocb, iocb);
 					spin_lock_irq(phba->host->host_lock);
-				} else {
-					list_add_tail(&iocb->list,
-							&phba->lpfc_iocb_list);
-				}
+				} else
+					lpfc_sli_release_iocbq(phba, iocb);
 				break;
 			}
 		}
@@ -234,10 +250,8 @@ lpfc_els_abort(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp,
 					spin_unlock_irq(phba->host->host_lock);
 					(iocb->iocb_cmpl) (phba, iocb, iocb);
 					spin_lock_irq(phba->host->host_lock);
-				} else {
-					list_add_tail(&iocb->list,
-							&phba->lpfc_iocb_list);
-				}
+				} else
+					lpfc_sli_release_iocbq(phba, iocb);
 				break;
 			}
 		}
@@ -245,13 +259,9 @@ lpfc_els_abort(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp,
 	} while(found);
 
 	/* If we are delaying issuing an ELS command, cancel it */
-	if (ndlp->nlp_flag & NLP_DELAY_TMO) {
-		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
-		del_timer_sync(&ndlp->nlp_delayfunc);
-		if (!list_empty(&ndlp->els_retry_evt.evt_listp))
-			list_del_init(&ndlp->els_retry_evt.evt_listp);
-	}
-	return (0);
+	if (ndlp->nlp_flag & NLP_DELAY_TMO)
+		lpfc_cancel_retry_delay_tmo(phba, ndlp);
+	return 0;
 }
 
 static int
@@ -285,12 +295,10 @@ lpfc_rcv_plogi(struct lpfc_hba * phba,
 				/* Start discovery - this should just do
 				   CLEAR_LA */
 				lpfc_disc_start(phba);
-			}
-			else {
+			} else {
 				lpfc_initial_flogi(phba);
 			}
-		}
-		else {
+		} else {
 			stat.un.b.lsRjtRsnCode = LSRJT_LOGICAL_BSY;
 			stat.un.b.lsRjtRsnCodeExp = LSEXP_NOTHING_MORE;
 			lpfc_els_rsp_reject(phba, stat.un.lsRjtError, cmdiocb,
@@ -306,7 +314,7 @@ lpfc_rcv_plogi(struct lpfc_hba * phba,
 		stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 		stat.un.b.lsRjtRsnCodeExp = LSEXP_SPARM_OPTIONS;
 		lpfc_els_rsp_reject(phba, stat.un.lsRjtError, cmdiocb, ndlp);
-		return (0);
+		return 0;
 	}
 	icmd = &cmdiocb->iocb;
 
@@ -338,7 +346,7 @@ lpfc_rcv_plogi(struct lpfc_hba * phba,
 		((sp->cmn.bbRcvSizeMsb & 0x0F) << 8) | sp->cmn.bbRcvSizeLsb;
 
 	/* no need to reg_login if we are already in one of these states */
-	switch(ndlp->nlp_state) {
+	switch (ndlp->nlp_state) {
 	case  NLP_STE_NPR_NODE:
 		if (!(ndlp->nlp_flag & NLP_NPR_ADISC))
 			break;
@@ -347,7 +355,7 @@ lpfc_rcv_plogi(struct lpfc_hba * phba,
 	case  NLP_STE_UNMAPPED_NODE:
 	case  NLP_STE_MAPPED_NODE:
 		lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb, ndlp, NULL, 0);
-		return (1);
+		return 1;
 	}
 
 	if ((phba->fc_flag & FC_PT2PT)
@@ -383,24 +391,16 @@ lpfc_rcv_plogi(struct lpfc_hba * phba,
 	 */
 	mbox->mbox_cmpl = lpfc_mbx_cmpl_reg_login;
 	mbox->context2  = ndlp;
-	ndlp->nlp_flag |= NLP_ACC_REGLOGIN;
+	ndlp->nlp_flag |= (NLP_ACC_REGLOGIN | NLP_RCV_PLOGI);
 
-	/* If there is an outstanding PLOGI issued, abort it before
-	 * sending ACC rsp to PLOGI recieved.
-	 */
-	if (ndlp->nlp_state == NLP_STE_PLOGI_ISSUE) {
-		/* software abort outstanding PLOGI */
-		lpfc_els_abort(phba, ndlp, 1);
-	}
-	ndlp->nlp_flag |= NLP_RCV_PLOGI;
 	lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb, ndlp, mbox, 0);
-	return (1);
+	return 1;
 
 out:
 	stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 	stat.un.b.lsRjtRsnCodeExp = LSEXP_OUT_OF_RESOURCE;
 	lpfc_els_rsp_reject(phba, stat.un.lsRjtError, cmdiocb, ndlp);
-	return (0);
+	return 0;
 }
 
 static int
@@ -436,12 +436,11 @@ lpfc_rcv_padisc(struct lpfc_hba * phba,
 	    (lpfc_check_adisc(phba, ndlp, pnn, ppn))) {
 		if (cmd == ELS_CMD_ADISC) {
 			lpfc_els_rsp_adisc_acc(phba, cmdiocb, ndlp);
-		}
-		else {
+		} else {
 			lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb, ndlp,
 				NULL, 0);
 		}
-		return (1);
+		return 1;
 	}
 	/* Reject this request because invalid parameters */
 	stat.un.b.lsRjtRsvd0 = 0;
@@ -450,49 +449,62 @@ lpfc_rcv_padisc(struct lpfc_hba * phba,
 	stat.un.b.vendorUnique = 0;
 	lpfc_els_rsp_reject(phba, stat.un.lsRjtError, cmdiocb, ndlp);
 
-	ndlp->nlp_last_elscmd = (unsigned long)ELS_CMD_PLOGI;
 	/* 1 sec timeout */
 	mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ);
 
 	spin_lock_irq(phba->host->host_lock);
 	ndlp->nlp_flag |= NLP_DELAY_TMO;
 	spin_unlock_irq(phba->host->host_lock);
+	ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
+	ndlp->nlp_prev_state = ndlp->nlp_state;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
-	return (0);
+	return 0;
 }
 
 static int
 lpfc_rcv_logo(struct lpfc_hba * phba,
 		      struct lpfc_nodelist * ndlp,
-		      struct lpfc_iocbq *cmdiocb)
+		      struct lpfc_iocbq *cmdiocb,
+		      uint32_t els_cmd)
 {
 	/* Put ndlp on NPR list with 1 sec timeout for plogi, ACC logo */
 	/* Only call LOGO ACC for first LOGO, this avoids sending unnecessary
 	 * PLOGIs during LOGO storms from a device.
 	 */
 	ndlp->nlp_flag |= NLP_LOGO_ACC;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
+	if (els_cmd == ELS_CMD_PRLO)
+		lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, NULL, 0);
+	else
+		lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
 
-	if (!(ndlp->nlp_type & NLP_FABRIC)) {
+	if (!(ndlp->nlp_type & NLP_FABRIC) ||
+		(ndlp->nlp_state == NLP_STE_ADISC_ISSUE)) {
 		/* Only try to re-login if this is NOT a Fabric Node */
-		ndlp->nlp_last_elscmd = (unsigned long)ELS_CMD_PLOGI;
 		mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ * 1);
 		spin_lock_irq(phba->host->host_lock);
 		ndlp->nlp_flag |= NLP_DELAY_TMO;
 		spin_unlock_irq(phba->host->host_lock);
+
+		ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
+		ndlp->nlp_prev_state = ndlp->nlp_state;
+		ndlp->nlp_state = NLP_STE_NPR_NODE;
+		lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
+	} else {
+		ndlp->nlp_prev_state = ndlp->nlp_state;
+		ndlp->nlp_state = NLP_STE_UNUSED_NODE;
+		lpfc_nlp_list(phba, ndlp, NLP_UNUSED_LIST);
 	}
 
-	ndlp->nlp_state = NLP_STE_NPR_NODE;
-	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
-
+	spin_lock_irq(phba->host->host_lock);
 	ndlp->nlp_flag &= ~NLP_NPR_ADISC;
+	spin_unlock_irq(phba->host->host_lock);
 	/* The driver has to wait until the ACC completes before it continues
 	 * processing the LOGO.  The action will resume in
 	 * lpfc_cmpl_els_logo_acc routine. Since part of processing includes an
 	 * unreg_login, the driver waits so the ACC does not get aborted.
 	 */
-	return (0);
+	return 0;
 }
 
 static void
@@ -540,20 +552,12 @@ lpfc_disc_set_adisc(struct lpfc_hba * phba,
 	if ((phba->cfg_use_adisc == 0) &&
 		!(phba->fc_flag & FC_RSCN_MODE)) {
 		if (!(ndlp->nlp_fcp_info & NLP_FCP_2_DEVICE))
-			return (0);
+			return 0;
 	}
 	spin_lock_irq(phba->host->host_lock);
 	ndlp->nlp_flag |= NLP_NPR_ADISC;
 	spin_unlock_irq(phba->host->host_lock);
-	return (1);
-}
-
-static uint32_t
-lpfc_disc_noop(struct lpfc_hba * phba,
-		struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
-{
-	/* This routine does nothing, just return the current state */
-	return (ndlp->nlp_state);
+	return 1;
 }
 
 static uint32_t
@@ -568,7 +572,7 @@ lpfc_disc_illegal(struct lpfc_hba * phba,
 			phba->brd_no,
 			ndlp->nlp_DID, evt, ndlp->nlp_state, ndlp->nlp_rpi,
 			ndlp->nlp_flag);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 /* Start of Discovery State Machine routines */
@@ -582,12 +586,13 @@ lpfc_rcv_plogi_unused_node(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	if (lpfc_rcv_plogi(phba, ndlp, cmdiocb)) {
+		ndlp->nlp_prev_state = NLP_STE_UNUSED_NODE;
 		ndlp->nlp_state = NLP_STE_UNUSED_NODE;
 		lpfc_nlp_list(phba, ndlp, NLP_UNUSED_LIST);
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
 	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+	return NLP_STE_FREED_NODE;
 }
 
 static uint32_t
@@ -596,7 +601,7 @@ lpfc_rcv_els_unused_node(struct lpfc_hba * phba,
 {
 	lpfc_issue_els_logo(phba, ndlp, 0);
 	lpfc_nlp_list(phba, ndlp, NLP_UNUSED_LIST);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -613,7 +618,7 @@ lpfc_rcv_logo_unused_node(struct lpfc_hba * phba,
 	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
 	lpfc_nlp_list(phba, ndlp, NLP_UNUSED_LIST);
 
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -621,7 +626,7 @@ lpfc_cmpl_logo_unused_node(struct lpfc_hba * phba,
 			  struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
 {
 	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+	return NLP_STE_FREED_NODE;
 }
 
 static uint32_t
@@ -629,7 +634,7 @@ lpfc_device_rm_unused_node(struct lpfc_hba * phba,
 			   struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
 {
 	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+	return NLP_STE_FREED_NODE;
 }
 
 static uint32_t
@@ -662,12 +667,26 @@ lpfc_rcv_plogi_plogi_issue(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp,
 		stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 		stat.un.b.lsRjtRsnCodeExp = LSEXP_CMD_IN_PROGRESS;
 		lpfc_els_rsp_reject(phba, stat.un.lsRjtError, cmdiocb, ndlp);
-	}
-	else {
+	} else {
 		lpfc_rcv_plogi(phba, ndlp, cmdiocb);
 	} /* if our portname was less */
 
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
+}
+
+static uint32_t
+lpfc_rcv_logo_plogi_issue(struct lpfc_hba * phba,
+			  struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
+{
+	struct lpfc_iocbq     *cmdiocb;
+
+	cmdiocb = (struct lpfc_iocbq *) arg;
+
+	/* software abort outstanding PLOGI */
+	lpfc_els_abort(phba, ndlp, 1);
+
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -680,24 +699,24 @@ lpfc_rcv_els_plogi_issue(struct lpfc_hba * phba,
 
 	/* software abort outstanding PLOGI */
 	lpfc_els_abort(phba, ndlp, 1);
-	mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ * 1);
-	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag |= NLP_DELAY_TMO;
-	spin_unlock_irq(phba->host->host_lock);
 
 	if (evt == NLP_EVT_RCV_LOGO) {
 		lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
-	}
-	else {
+	} else {
 		lpfc_issue_els_logo(phba, ndlp, 0);
 	}
 
 	/* Put ndlp in npr list set plogi timer for 1 sec */
-	ndlp->nlp_last_elscmd = (unsigned long)ELS_CMD_PLOGI;
+	mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ * 1);
+	spin_lock_irq(phba->host->host_lock);
+	ndlp->nlp_flag |= NLP_DELAY_TMO;
+	spin_unlock_irq(phba->host->host_lock);
+	ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
+	ndlp->nlp_prev_state = NLP_STE_PLOGI_ISSUE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -716,7 +735,8 @@ lpfc_cmpl_plogi_plogi_issue(struct lpfc_hba * phba,
 	rspiocb = cmdiocb->context_un.rsp_iocb;
 
 	if (ndlp->nlp_flag & NLP_ACC_REGLOGIN) {
-		return (ndlp->nlp_state);
+		/* Recovery from PLOGI collision logic */
+		return ndlp->nlp_state;
 	}
 
 	irsp = &rspiocb->iocb;
@@ -772,11 +792,7 @@ lpfc_cmpl_plogi_plogi_issue(struct lpfc_hba * phba,
 	if (lpfc_reg_login
 	    (phba, irsp->un.elsreq64.remoteID,
 	     (uint8_t *) sp, mbox, 0) == 0) {
-		/* set_slim mailbox command needs to
-		 * execute first, queue this command to
-		 * be processed later.
-		 */
-		switch(ndlp->nlp_DID) {
+		switch (ndlp->nlp_DID) {
 		case NameServer_DID:
 			mbox->mbox_cmpl =
 				lpfc_mbx_cmpl_ns_reg_login;
@@ -797,7 +813,7 @@ lpfc_cmpl_plogi_plogi_issue(struct lpfc_hba * phba,
 				NLP_STE_REG_LOGIN_ISSUE;
 			lpfc_nlp_list(phba, ndlp,
 				      NLP_REGLOGIN_LIST);
-			return (ndlp->nlp_state);
+			return ndlp->nlp_state;
 		}
 		mempool_free(mbox, phba->mbox_mem_pool);
 	} else {
@@ -809,18 +825,24 @@ lpfc_cmpl_plogi_plogi_issue(struct lpfc_hba * phba,
 	/* Free this node since the driver cannot login or has the wrong
 	   sparm */
 	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+	return NLP_STE_FREED_NODE;
 }
 
 static uint32_t
 lpfc_device_rm_plogi_issue(struct lpfc_hba * phba,
 			   struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
 {
-	/* software abort outstanding PLOGI */
-	lpfc_els_abort(phba, ndlp, 1);
+	if(ndlp->nlp_flag & NLP_NPR_2B_DISC) {
+		ndlp->nlp_flag |= NLP_NODEV_REMOVE;
+		return ndlp->nlp_state;
+	}
+	else {
+		/* software abort outstanding PLOGI */
+		lpfc_els_abort(phba, ndlp, 1);
 
-	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
 }
 
 static uint32_t
@@ -831,13 +853,14 @@ lpfc_device_recov_plogi_issue(struct lpfc_hba * phba,
 	/* software abort outstanding PLOGI */
 	lpfc_els_abort(phba, ndlp, 1);
 
+	ndlp->nlp_prev_state = NLP_STE_PLOGI_ISSUE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
 	spin_unlock_irq(phba->host->host_lock);
 
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -853,13 +876,14 @@ lpfc_rcv_plogi_adisc_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	if (lpfc_rcv_plogi(phba, ndlp, cmdiocb)) {
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
+	ndlp->nlp_prev_state = NLP_STE_ADISC_ISSUE;
 	ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
 	lpfc_nlp_list(phba, ndlp, NLP_PLOGI_LIST);
-	lpfc_issue_els_plogi(phba, ndlp, 0);
+	lpfc_issue_els_plogi(phba, ndlp->nlp_DID, 0);
 
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -872,7 +896,7 @@ lpfc_rcv_prli_adisc_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_els_rsp_prli_acc(phba, cmdiocb, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -887,8 +911,8 @@ lpfc_rcv_logo_adisc_issue(struct lpfc_hba * phba,
 	/* software abort outstanding ADISC */
 	lpfc_els_abort(phba, ndlp, 0);
 
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -901,7 +925,7 @@ lpfc_rcv_padisc_adisc_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_padisc(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -914,8 +938,8 @@ lpfc_rcv_prlo_adisc_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	/* Treat like rcv logo */
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_PRLO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -935,24 +959,33 @@ lpfc_cmpl_adisc_adisc_issue(struct lpfc_hba * phba,
 
 	if ((irsp->ulpStatus) ||
 		(!lpfc_check_adisc(phba, ndlp, &ap->nodeName, &ap->portName))) {
-		ndlp->nlp_last_elscmd = (unsigned long)ELS_CMD_PLOGI;
 		/* 1 sec timeout */
 		mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ);
 		spin_lock_irq(phba->host->host_lock);
 		ndlp->nlp_flag |= NLP_DELAY_TMO;
 		spin_unlock_irq(phba->host->host_lock);
+		ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
 
 		memset(&ndlp->nlp_nodename, 0, sizeof (struct lpfc_name));
 		memset(&ndlp->nlp_portname, 0, sizeof (struct lpfc_name));
 
+		ndlp->nlp_prev_state = NLP_STE_ADISC_ISSUE;
 		ndlp->nlp_state = NLP_STE_NPR_NODE;
 		lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 		lpfc_unreg_rpi(phba, ndlp);
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
-	ndlp->nlp_state = NLP_STE_MAPPED_NODE;
-	lpfc_nlp_list(phba, ndlp, NLP_MAPPED_LIST);
-	return (ndlp->nlp_state);
+
+	if (ndlp->nlp_type & NLP_FCP_TARGET) {
+		ndlp->nlp_prev_state = NLP_STE_ADISC_ISSUE;
+		ndlp->nlp_state = NLP_STE_MAPPED_NODE;
+		lpfc_nlp_list(phba, ndlp, NLP_MAPPED_LIST);
+	} else {
+		ndlp->nlp_prev_state = NLP_STE_ADISC_ISSUE;
+		ndlp->nlp_state = NLP_STE_UNMAPPED_NODE;
+		lpfc_nlp_list(phba, ndlp, NLP_UNMAPPED_LIST);
+	}
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -960,11 +993,17 @@ lpfc_device_rm_adisc_issue(struct lpfc_hba * phba,
 			    struct lpfc_nodelist * ndlp, void *arg,
 			    uint32_t evt)
 {
-	/* software abort outstanding ADISC */
-	lpfc_els_abort(phba, ndlp, 1);
+	if(ndlp->nlp_flag & NLP_NPR_2B_DISC) {
+		ndlp->nlp_flag |= NLP_NODEV_REMOVE;
+		return ndlp->nlp_state;
+	}
+	else {
+		/* software abort outstanding ADISC */
+		lpfc_els_abort(phba, ndlp, 1);
 
-	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
 }
 
 static uint32_t
@@ -975,14 +1014,15 @@ lpfc_device_recov_adisc_issue(struct lpfc_hba * phba,
 	/* software abort outstanding ADISC */
 	lpfc_els_abort(phba, ndlp, 1);
 
+	ndlp->nlp_prev_state = NLP_STE_ADISC_ISSUE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
+	ndlp->nlp_flag |= NLP_NPR_ADISC;
 	spin_unlock_irq(phba->host->host_lock);
 
-	lpfc_disc_set_adisc(phba, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -995,7 +1035,7 @@ lpfc_rcv_plogi_reglogin_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_plogi(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1008,7 +1048,7 @@ lpfc_rcv_prli_reglogin_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_els_rsp_prli_acc(phba, cmdiocb, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1020,8 +1060,8 @@ lpfc_rcv_logo_reglogin_issue(struct lpfc_hba * phba,
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1034,7 +1074,7 @@ lpfc_rcv_padisc_reglogin_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_padisc(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1045,8 +1085,8 @@ lpfc_rcv_prlo_reglogin_issue(struct lpfc_hba * phba,
 	struct lpfc_iocbq *cmdiocb;
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
-	return (ndlp->nlp_state);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, NULL, 0);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1070,35 +1110,34 @@ lpfc_cmpl_reglogin_reglogin_issue(struct lpfc_hba * phba,
 				phba->brd_no,
 				did, mb->mbxStatus, phba->hba_state);
 
+		/* Put ndlp in npr list set plogi timer for 1 sec */
 		mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ * 1);
 		spin_lock_irq(phba->host->host_lock);
 		ndlp->nlp_flag |= NLP_DELAY_TMO;
 		spin_unlock_irq(phba->host->host_lock);
+		ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
 
 		lpfc_issue_els_logo(phba, ndlp, 0);
-		/* Put ndlp in npr list set plogi timer for 1 sec */
-		ndlp->nlp_last_elscmd = (unsigned long)ELS_CMD_PLOGI;
+		ndlp->nlp_prev_state = NLP_STE_REG_LOGIN_ISSUE;
 		ndlp->nlp_state = NLP_STE_NPR_NODE;
 		lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
 
-	if (ndlp->nlp_rpi != 0)
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
-
 	ndlp->nlp_rpi = mb->un.varWords[0];
-	lpfc_addnode_rpi(phba, ndlp, ndlp->nlp_rpi);
 
 	/* Only if we are not a fabric nport do we issue PRLI */
 	if (!(ndlp->nlp_type & NLP_FABRIC)) {
+		ndlp->nlp_prev_state = NLP_STE_REG_LOGIN_ISSUE;
 		ndlp->nlp_state = NLP_STE_PRLI_ISSUE;
 		lpfc_nlp_list(phba, ndlp, NLP_PRLI_LIST);
 		lpfc_issue_els_prli(phba, ndlp, 0);
 	} else {
+		ndlp->nlp_prev_state = NLP_STE_REG_LOGIN_ISSUE;
 		ndlp->nlp_state = NLP_STE_UNMAPPED_NODE;
 		lpfc_nlp_list(phba, ndlp, NLP_UNMAPPED_LIST);
 	}
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1106,8 +1145,14 @@ lpfc_device_rm_reglogin_issue(struct lpfc_hba * phba,
 			      struct lpfc_nodelist * ndlp, void *arg,
 			      uint32_t evt)
 {
-	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+	if(ndlp->nlp_flag & NLP_NPR_2B_DISC) {
+		ndlp->nlp_flag |= NLP_NODEV_REMOVE;
+		return ndlp->nlp_state;
+	}
+	else {
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
 }
 
 static uint32_t
@@ -1115,12 +1160,13 @@ lpfc_device_recov_reglogin_issue(struct lpfc_hba * phba,
 			       struct lpfc_nodelist * ndlp, void *arg,
 			       uint32_t evt)
 {
+	ndlp->nlp_prev_state = NLP_STE_REG_LOGIN_ISSUE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
 	spin_unlock_irq(phba->host->host_lock);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1132,7 +1178,7 @@ lpfc_rcv_plogi_prli_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_plogi(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1144,7 +1190,7 @@ lpfc_rcv_prli_prli_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_els_rsp_prli_acc(phba, cmdiocb, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1158,8 +1204,8 @@ lpfc_rcv_logo_prli_issue(struct lpfc_hba * phba,
 	/* Software abort outstanding PRLI before sending acc */
 	lpfc_els_abort(phba, ndlp, 1);
 
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1171,7 +1217,7 @@ lpfc_rcv_padisc_prli_issue(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_padisc(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 /* This routine is envoked when we rcv a PRLO request from a nport
@@ -1186,8 +1232,8 @@ lpfc_rcv_prlo_prli_issue(struct lpfc_hba * phba,
 	struct lpfc_iocbq *cmdiocb;
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
-	return (ndlp->nlp_state);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, NULL, 0);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1204,9 +1250,10 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_hba * phba,
 
 	irsp = &rspiocb->iocb;
 	if (irsp->ulpStatus) {
+		ndlp->nlp_prev_state = NLP_STE_PRLI_ISSUE;
 		ndlp->nlp_state = NLP_STE_UNMAPPED_NODE;
 		lpfc_nlp_list(phba, ndlp, NLP_UNMAPPED_LIST);
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
 
 	/* Check out PRLI rsp */
@@ -1222,9 +1269,10 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_hba * phba,
 			ndlp->nlp_fcp_info |= NLP_FCP_2_DEVICE;
 	}
 
+	ndlp->nlp_prev_state = NLP_STE_PRLI_ISSUE;
 	ndlp->nlp_state = NLP_STE_MAPPED_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_MAPPED_LIST);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 /*! lpfc_device_rm_prli_issue
@@ -1248,11 +1296,17 @@ static uint32_t
 lpfc_device_rm_prli_issue(struct lpfc_hba * phba,
 			  struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
 {
-	/* software abort outstanding PRLI */
-	lpfc_els_abort(phba, ndlp, 1);
+	if(ndlp->nlp_flag & NLP_NPR_2B_DISC) {
+		ndlp->nlp_flag |= NLP_NODEV_REMOVE;
+		return ndlp->nlp_state;
+	}
+	else {
+		/* software abort outstanding PLOGI */
+		lpfc_els_abort(phba, ndlp, 1);
 
-	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
 }
 
 
@@ -1279,12 +1333,13 @@ lpfc_device_recov_prli_issue(struct lpfc_hba * phba,
 	/* software abort outstanding PRLI */
 	lpfc_els_abort(phba, ndlp, 1);
 
+	ndlp->nlp_prev_state = NLP_STE_PRLI_ISSUE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
 	spin_unlock_irq(phba->host->host_lock);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1296,7 +1351,7 @@ lpfc_rcv_plogi_unmap_node(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_plogi(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1309,7 +1364,7 @@ lpfc_rcv_prli_unmap_node(struct lpfc_hba * phba,
 
 	lpfc_rcv_prli(phba, ndlp, cmdiocb);
 	lpfc_els_rsp_prli_acc(phba, cmdiocb, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1320,8 +1375,8 @@ lpfc_rcv_logo_unmap_node(struct lpfc_hba * phba,
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1333,7 +1388,7 @@ lpfc_rcv_padisc_unmap_node(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_padisc(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1344,21 +1399,21 @@ lpfc_rcv_prlo_unmap_node(struct lpfc_hba * phba,
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
-	/* Treat like rcv logo */
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, NULL, 0);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
 lpfc_device_recov_unmap_node(struct lpfc_hba * phba,
 			   struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
 {
+	ndlp->nlp_prev_state = NLP_STE_UNMAPPED_NODE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
 	lpfc_disc_set_adisc(phba, ndlp);
 
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1370,7 +1425,7 @@ lpfc_rcv_plogi_mapped_node(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_plogi(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1382,7 +1437,7 @@ lpfc_rcv_prli_mapped_node(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_els_rsp_prli_acc(phba, cmdiocb, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1393,8 +1448,8 @@ lpfc_rcv_logo_mapped_node(struct lpfc_hba * phba,
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1407,7 +1462,7 @@ lpfc_rcv_padisc_mapped_node(struct lpfc_hba * phba,
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
 	lpfc_rcv_padisc(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1425,8 +1480,8 @@ lpfc_rcv_prlo_mapped_node(struct lpfc_hba * phba,
 	spin_unlock_irq(phba->host->host_lock);
 
 	/* Treat like rcv logo */
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_PRLO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1434,13 +1489,14 @@ lpfc_device_recov_mapped_node(struct lpfc_hba * phba,
 			    struct lpfc_nodelist * ndlp, void *arg,
 			    uint32_t evt)
 {
+	ndlp->nlp_prev_state = NLP_STE_MAPPED_NODE;
 	ndlp->nlp_state = NLP_STE_NPR_NODE;
 	lpfc_nlp_list(phba, ndlp, NLP_NPR_LIST);
 	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
 	spin_unlock_irq(phba->host->host_lock);
 	lpfc_disc_set_adisc(phba, ndlp);
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1454,23 +1510,25 @@ lpfc_rcv_plogi_npr_node(struct lpfc_hba * phba,
 
 	/* Ignore PLOGI if we have an outstanding LOGO */
 	if (ndlp->nlp_flag & NLP_LOGO_SND) {
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
 
 	if (lpfc_rcv_plogi(phba, ndlp, cmdiocb)) {
 		spin_lock_irq(phba->host->host_lock);
-		ndlp->nlp_flag &= ~(NLP_NPR_ADISC | NLP_NPR_2B_DISC);
+		ndlp->nlp_flag &= ~NLP_NPR_ADISC;
 		spin_unlock_irq(phba->host->host_lock);
-		return (ndlp->nlp_state);
+		return ndlp->nlp_state;
 	}
 
 	/* send PLOGI immediately, move to PLOGI issue state */
 	if (!(ndlp->nlp_flag & NLP_DELAY_TMO)) {
-			ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
-			lpfc_nlp_list(phba, ndlp, NLP_PLOGI_LIST);
-			lpfc_issue_els_plogi(phba, ndlp, 0);
+		ndlp->nlp_prev_state = NLP_STE_NPR_NODE;
+		ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
+		lpfc_nlp_list(phba, ndlp, NLP_PLOGI_LIST);
+		lpfc_issue_els_plogi(phba, ndlp->nlp_DID, 0);
 	}
-	return (ndlp->nlp_state);
+
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1490,16 +1548,22 @@ lpfc_rcv_prli_npr_node(struct lpfc_hba * phba,
 
 	if (!(ndlp->nlp_flag & NLP_DELAY_TMO)) {
 		if (ndlp->nlp_flag & NLP_NPR_ADISC) {
+			spin_lock_irq(phba->host->host_lock);
+			ndlp->nlp_flag &= ~NLP_NPR_ADISC;
+			spin_unlock_irq(phba->host->host_lock);
+			ndlp->nlp_prev_state = NLP_STE_NPR_NODE;
 			ndlp->nlp_state = NLP_STE_ADISC_ISSUE;
 			lpfc_nlp_list(phba, ndlp, NLP_ADISC_LIST);
 			lpfc_issue_els_adisc(phba, ndlp, 0);
 		} else {
+			ndlp->nlp_prev_state = NLP_STE_NPR_NODE;
 			ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
 			lpfc_nlp_list(phba, ndlp, NLP_PLOGI_LIST);
-			lpfc_issue_els_plogi(phba, ndlp, 0);
+			lpfc_issue_els_plogi(phba, ndlp->nlp_DID, 0);
 		}
+
 	}
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1511,8 +1575,8 @@ lpfc_rcv_logo_npr_node(struct lpfc_hba * phba,
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
-	lpfc_rcv_logo(phba, ndlp, cmdiocb);
-	return (ndlp->nlp_state);
+	lpfc_rcv_logo(phba, ndlp, cmdiocb, ELS_CMD_LOGO);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1528,16 +1592,18 @@ lpfc_rcv_padisc_npr_node(struct lpfc_hba * phba,
 
 	if (!(ndlp->nlp_flag & NLP_DELAY_TMO)) {
 		if (ndlp->nlp_flag & NLP_NPR_ADISC) {
+			ndlp->nlp_prev_state = NLP_STE_NPR_NODE;
 			ndlp->nlp_state = NLP_STE_ADISC_ISSUE;
 			lpfc_nlp_list(phba, ndlp, NLP_ADISC_LIST);
 			lpfc_issue_els_adisc(phba, ndlp, 0);
 		} else {
+			ndlp->nlp_prev_state = NLP_STE_NPR_NODE;
 			ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
 			lpfc_nlp_list(phba, ndlp, NLP_PLOGI_LIST);
-			lpfc_issue_els_plogi(phba, ndlp, 0);
+			lpfc_issue_els_plogi(phba, ndlp->nlp_DID, 0);
 		}
 	}
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1549,25 +1615,61 @@ lpfc_rcv_prlo_npr_node(struct lpfc_hba * phba,
 
 	cmdiocb = (struct lpfc_iocbq *) arg;
 
+	spin_lock_irq(phba->host->host_lock);
+	ndlp->nlp_flag |= NLP_LOGO_ACC;
+	spin_unlock_irq(phba->host->host_lock);
+
 	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, NULL, 0);
 
-	if (ndlp->nlp_flag & NLP_DELAY_TMO) {
-		if (ndlp->nlp_last_elscmd == (unsigned long)ELS_CMD_PLOGI) {
-			return (ndlp->nlp_state);
-		} else {
-			spin_lock_irq(phba->host->host_lock);
-			ndlp->nlp_flag &= ~NLP_DELAY_TMO;
-			spin_unlock_irq(phba->host->host_lock);
-			del_timer_sync(&ndlp->nlp_delayfunc);
-			if (!list_empty(&ndlp->els_retry_evt.evt_listp))
-				list_del_init(&ndlp->els_retry_evt.evt_listp);
-		}
+	if (!(ndlp->nlp_flag & NLP_DELAY_TMO)) {
+		mod_timer(&ndlp->nlp_delayfunc, jiffies + HZ * 1);
+		spin_lock_irq(phba->host->host_lock);
+		ndlp->nlp_flag |= NLP_DELAY_TMO;
+		ndlp->nlp_flag &= ~NLP_NPR_ADISC;
+		spin_unlock_irq(phba->host->host_lock);
+		ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
+	} else {
+		spin_lock_irq(phba->host->host_lock);
+		ndlp->nlp_flag &= ~NLP_NPR_ADISC;
+		spin_unlock_irq(phba->host->host_lock);
 	}
+	return ndlp->nlp_state;
+}
 
-	ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
-	lpfc_nlp_list(phba, ndlp, NLP_PLOGI_LIST);
-	lpfc_issue_els_plogi(phba, ndlp, 0);
-	return (ndlp->nlp_state);
+static uint32_t
+lpfc_cmpl_plogi_npr_node(struct lpfc_hba * phba,
+			  struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
+{
+	struct lpfc_iocbq *cmdiocb, *rspiocb;
+	IOCB_t *irsp;
+
+	cmdiocb = (struct lpfc_iocbq *) arg;
+	rspiocb = cmdiocb->context_un.rsp_iocb;
+
+	irsp = &rspiocb->iocb;
+	if (irsp->ulpStatus) {
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
+	return ndlp->nlp_state;
+}
+
+static uint32_t
+lpfc_cmpl_prli_npr_node(struct lpfc_hba * phba,
+			  struct lpfc_nodelist * ndlp, void *arg, uint32_t evt)
+{
+	struct lpfc_iocbq *cmdiocb, *rspiocb;
+	IOCB_t *irsp;
+
+	cmdiocb = (struct lpfc_iocbq *) arg;
+	rspiocb = cmdiocb->context_un.rsp_iocb;
+
+	irsp = &rspiocb->iocb;
+	if (irsp->ulpStatus && (ndlp->nlp_flag & NLP_NODEV_REMOVE)) {
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1576,7 +1678,26 @@ lpfc_cmpl_logo_npr_node(struct lpfc_hba * phba,
 {
 	lpfc_unreg_rpi(phba, ndlp);
 	/* This routine does nothing, just return the current state */
-	return (ndlp->nlp_state);
+	return ndlp->nlp_state;
+}
+
+static uint32_t
+lpfc_cmpl_adisc_npr_node(struct lpfc_hba * phba,
+			    struct lpfc_nodelist * ndlp, void *arg,
+			    uint32_t evt)
+{
+	struct lpfc_iocbq *cmdiocb, *rspiocb;
+	IOCB_t *irsp;
+
+	cmdiocb = (struct lpfc_iocbq *) arg;
+	rspiocb = cmdiocb->context_un.rsp_iocb;
+
+	irsp = &rspiocb->iocb;
+	if (irsp->ulpStatus && (ndlp->nlp_flag & NLP_NODEV_REMOVE)) {
+		lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+		return NLP_STE_FREED_NODE;
+	}
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1590,14 +1711,15 @@ lpfc_cmpl_reglogin_npr_node(struct lpfc_hba * phba,
 	pmb = (LPFC_MBOXQ_t *) arg;
 	mb = &pmb->mb;
 
-	/* save rpi */
-	if (ndlp->nlp_rpi != 0)
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
-
-	ndlp->nlp_rpi = mb->un.varWords[0];
-	lpfc_addnode_rpi(phba, ndlp, ndlp->nlp_rpi);
-
-	return (ndlp->nlp_state);
+	if (!mb->mbxStatus)
+		ndlp->nlp_rpi = mb->un.varWords[0];
+	else {
+		if (ndlp->nlp_flag & NLP_NODEV_REMOVE) {
+			lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
+			return NLP_STE_FREED_NODE;
+		}
+	}
+	return ndlp->nlp_state;
 }
 
 static uint32_t
@@ -1605,8 +1727,12 @@ lpfc_device_rm_npr_node(struct lpfc_hba * phba,
 			    struct lpfc_nodelist * ndlp, void *arg,
 			    uint32_t evt)
 {
+	if (ndlp->nlp_flag & NLP_NPR_2B_DISC) {
+		ndlp->nlp_flag |= NLP_NODEV_REMOVE;
+		return ndlp->nlp_state;
+	}
 	lpfc_nlp_list(phba, ndlp, NLP_NO_LIST);
-	return (NLP_STE_FREED_NODE);
+	return NLP_STE_FREED_NODE;
 }
 
 static uint32_t
@@ -1615,9 +1741,12 @@ lpfc_device_recov_npr_node(struct lpfc_hba * phba,
 			    uint32_t evt)
 {
 	spin_lock_irq(phba->host->host_lock);
-	ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
+	ndlp->nlp_flag &= ~(NLP_NODEV_REMOVE | NLP_NPR_2B_DISC);
 	spin_unlock_irq(phba->host->host_lock);
-	return (ndlp->nlp_state);
+	if (ndlp->nlp_flag & NLP_DELAY_TMO) {
+		lpfc_cancel_retry_delay_tmo(phba, ndlp);
+	}
+	return ndlp->nlp_state;
 }
 
 
@@ -1696,7 +1825,7 @@ static uint32_t (*lpfc_disc_action[NLP_STE_MAX_STATE * NLP_EVT_MAX_EVENT])
 
 	lpfc_rcv_plogi_plogi_issue,	/* RCV_PLOGI   PLOGI_ISSUE    */
 	lpfc_rcv_els_plogi_issue,	/* RCV_PRLI        */
-	lpfc_rcv_els_plogi_issue,	/* RCV_LOGO        */
+	lpfc_rcv_logo_plogi_issue,	/* RCV_LOGO        */
 	lpfc_rcv_els_plogi_issue,	/* RCV_ADISC       */
 	lpfc_rcv_els_plogi_issue,	/* RCV_PDISC       */
 	lpfc_rcv_els_plogi_issue,	/* RCV_PRLO        */
@@ -1784,10 +1913,10 @@ static uint32_t (*lpfc_disc_action[NLP_STE_MAX_STATE * NLP_EVT_MAX_EVENT])
 	lpfc_rcv_padisc_npr_node,       /* RCV_ADISC       */
 	lpfc_rcv_padisc_npr_node,       /* RCV_PDISC       */
 	lpfc_rcv_prlo_npr_node,         /* RCV_PRLO        */
-	lpfc_disc_noop,			/* CMPL_PLOGI      */
-	lpfc_disc_noop,			/* CMPL_PRLI       */
+	lpfc_cmpl_plogi_npr_node,	/* CMPL_PLOGI      */
+	lpfc_cmpl_prli_npr_node,	/* CMPL_PRLI       */
 	lpfc_cmpl_logo_npr_node,        /* CMPL_LOGO       */
-	lpfc_disc_noop,			/* CMPL_ADISC      */
+	lpfc_cmpl_adisc_npr_node,       /* CMPL_ADISC      */
 	lpfc_cmpl_reglogin_npr_node,    /* CMPL_REG_LOGIN  */
 	lpfc_device_rm_npr_node,        /* DEVICE_RM       */
 	lpfc_device_recov_npr_node,     /* DEVICE_RECOVERY */
@@ -1833,10 +1962,9 @@ lpfc_disc_state_machine(struct lpfc_hba * phba,
 		ndlp->nlp_flag &= ~NLP_DELAY_REMOVE;
 		spin_unlock_irq(phba->host->host_lock);
 		lpfc_nlp_remove(phba, ndlp);
-		return (NLP_STE_FREED_NODE);
+		return NLP_STE_FREED_NODE;
 	}
 	if (rc == NLP_STE_FREED_NODE)
-		return (NLP_STE_FREED_NODE);
-	ndlp->nlp_state = rc;
-	return (rc);
+		return NLP_STE_FREED_NODE;
+	return rc;
 }

@@ -141,7 +141,7 @@ buf[9] = 0x03; buf[8] = 0x00; buf[10] = 0x79;
 			written = orig_size;
 		else
 			written = size;
-			
+
 	} else {
 		size = orig_size;
 		if (tux_zerocopy_sendfile && sock->ops->sendpage &&
@@ -152,12 +152,12 @@ buf[9] = 0x03; buf[8] = 0x00; buf[10] = 0x79;
 			struct iovec iov;
 			char *kaddr;
 			mm_segment_t oldmm;
-	
+
 			if (offset+size > PAGE_SIZE)
 				return -EFAULT;
 
 			kaddr = kmap(page);
-	
+
 			msg.msg_name = NULL;
 			msg.msg_namelen = 0;
 			msg.msg_iov = &iov;
@@ -267,7 +267,7 @@ repeat:
 		TUX_BUG();
 	Dprintk("sendfile() wrote: %d bytes.\n", req->desc.written);
 	if (req->output_len && !req->desc.written && !req->desc.error) {
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
 		req->in_file->f_pos = 0;
@@ -289,7 +289,7 @@ no_write_space:
 		break;
 	default:
 		len = req->desc.written;
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		if (req->desc.error)
 			TDprintk("TUX: sendfile() returned error %d (signals pending: %08lx)!\n", req->desc.error, current->pending.signal.sig[0]);
 #endif
@@ -302,7 +302,7 @@ no_write_space:
 				goto repeat;
 			}
 		}
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		if (req->desc.written != want)
 			TDprintk("TUX: sendfile() wrote %d bytes, wanted %d! (pos %Ld) (signals pending: %08lx).\n", req->desc.written, want, req->in_file->f_pos, current->pending.signal.sig[0]);
 		else

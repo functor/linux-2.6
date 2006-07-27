@@ -19,6 +19,9 @@
 #include <linux/fb.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
+#include <linux/platform_device.h>
+
+#include <video/vga.h>
 #include <asm/io.h>
 #include <asm/mtrr.h>
 
@@ -45,7 +48,7 @@ static struct fb_fix_screeninfo vesafb_fix __initdata = {
 };
 
 static int             inverse   = 0;
-static int             mtrr      = 1;
+static int             mtrr      = 0; /* disable mtrr */
 static int	       vram_remap __initdata = 0; /* Set amount of memory to be used */
 static int	       vram_total __initdata = 0; /* Set total amount of memory */
 static int             pmi_setpal = 0;	/* pmi for palette changes ??? */
@@ -54,7 +57,7 @@ static unsigned short  *pmi_base  = NULL;
 static void            (*pmi_start)(void);
 static void            (*pmi_pal)(void);
 static int             depth;
-
+static int             vga_compat;
 /* --------------------------------------------------------------------- */
 
 static int vesafb_pan_display(struct fb_var_screeninfo *var,
@@ -62,15 +65,6 @@ static int vesafb_pan_display(struct fb_var_screeninfo *var,
 {
 #ifdef __i386__
 	int offset;
-
-	if (!ypan)
-		return -EINVAL;
-	if (var->xoffset)
-		return -EINVAL;
-	if (var->yoffset > var->yres_virtual)
-		return -EINVAL;
-	if ((ypan==1) && var->yoffset+var->yres > var->yres_virtual)
-		return -EINVAL;
 
 	offset = (var->yoffset * info->fix.line_length + var->xoffset) / 4;
 
@@ -89,9 +83,10 @@ static int vesafb_pan_display(struct fb_var_screeninfo *var,
 static void vesa_setpalette(int regno, unsigned red, unsigned green,
 			    unsigned blue)
 {
+	int shift = 16 - depth;
+
 #ifdef __i386__
 	struct { u_char blue, green, red, pad; } entry;
-	int shift = 16 - depth;
 
 	if (pmi_setpal) {
 		entry.red   = red   >> shift;
@@ -107,14 +102,20 @@ static void vesa_setpalette(int regno, unsigned red, unsigned green,
                   "d" (regno),          /* EDX */
                   "D" (&entry),         /* EDI */
                   "S" (&pmi_pal));      /* ESI */
-	} else {
-		/* without protected mode interface, try VGA registers... */
+		return;
+	}
+#endif
+
+/*
+ * without protected mode interface and if VGA compatible,
+ * try VGA registers...
+ */
+	if (vga_compat) {
 		outb_p(regno,       dac_reg);
 		outb_p(red   >> shift, dac_val);
 		outb_p(green >> shift, dac_val);
 		outb_p(blue  >> shift, dac_val);
 	}
-#endif
 }
 
 static int vesafb_setcolreg(unsigned regno, unsigned red, unsigned green,
@@ -131,45 +132,39 @@ static int vesafb_setcolreg(unsigned regno, unsigned red, unsigned green,
 	if (regno >= info->cmap.len)
 		return 1;
 
-	switch (info->var.bits_per_pixel) {
-	case 8:
+	if (info->var.bits_per_pixel == 8)
 		vesa_setpalette(regno,red,green,blue);
-		break;
-	case 16:
-		if (info->var.red.offset == 10) {
-			/* 1:5:5:5 */
-			((u32*) (info->pseudo_palette))[regno] =	
+	else if (regno < 16) {
+		switch (info->var.bits_per_pixel) {
+		case 16:
+			if (info->var.red.offset == 10) {
+				/* 1:5:5:5 */
+				((u32*) (info->pseudo_palette))[regno] =
 					((red   & 0xf800) >>  1) |
 					((green & 0xf800) >>  6) |
 					((blue  & 0xf800) >> 11);
-		} else {
-			/* 0:5:6:5 */
-			((u32*) (info->pseudo_palette))[regno] =	
+			} else {
+				/* 0:5:6:5 */
+				((u32*) (info->pseudo_palette))[regno] =
 					((red   & 0xf800)      ) |
 					((green & 0xfc00) >>  5) |
 					((blue  & 0xf800) >> 11);
+			}
+			break;
+		case 24:
+		case 32:
+			red   >>= 8;
+			green >>= 8;
+			blue  >>= 8;
+			((u32 *)(info->pseudo_palette))[regno] =
+				(red   << info->var.red.offset)   |
+				(green << info->var.green.offset) |
+				(blue  << info->var.blue.offset);
+			break;
 		}
-		break;
-	case 24:
-		red   >>= 8;
-		green >>= 8;
-		blue  >>= 8;
-		((u32 *)(info->pseudo_palette))[regno] =
-			(red   << info->var.red.offset)   |
-			(green << info->var.green.offset) |
-			(blue  << info->var.blue.offset);
-		break;
-	case 32:
-		red   >>= 8;
-		green >>= 8;
-		blue  >>= 8;
-		((u32 *)(info->pseudo_palette))[regno] =
-			(red   << info->var.red.offset)   |
-			(green << info->var.green.offset) |
-			(blue  << info->var.blue.offset);
-		break;
-    }
-    return 0;
+	}
+
+	return 0;
 }
 
 static struct fb_ops vesafb_ops = {
@@ -179,7 +174,6 @@ static struct fb_ops vesafb_ops = {
 	.fb_fillrect	= cfb_fillrect,
 	.fb_copyarea	= cfb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
-	.fb_cursor	= soft_cursor,
 };
 
 static int __init vesafb_setup(char *options)
@@ -204,8 +198,8 @@ static int __init vesafb_setup(char *options)
 			pmi_setpal=0;
 		else if (! strcmp(this_opt, "pmipal"))
 			pmi_setpal=1;
-		else if (! strcmp(this_opt, "mtrr"))
-			mtrr=1;
+		else if (! strncmp(this_opt, "mtrr:", 5))
+			mtrr = simple_strtoul(this_opt+5, NULL, 0);
 		else if (! strcmp(this_opt, "nomtrr"))
 			mtrr=0;
 		else if (! strncmp(this_opt, "vtotal:", 7))
@@ -216,9 +210,8 @@ static int __init vesafb_setup(char *options)
 	return 0;
 }
 
-static int __init vesafb_probe(struct device *device)
+static int __init vesafb_probe(struct platform_device *dev)
 {
-	struct platform_device *dev = to_platform_device(device);
 	struct fb_info *info;
 	int i, err;
 	unsigned int size_vmode;
@@ -228,6 +221,7 @@ static int __init vesafb_probe(struct device *device)
 	if (screen_info.orig_video_isVGA != VIDEO_TYPE_VLFB)
 		return -ENODEV;
 
+	vga_compat = (screen_info.capabilities & 2) ? 0 : 1;
 	vesafb_fix.smem_start = screen_info.lfb_base;
 	vesafb_defined.bits_per_pixel = screen_info.lfb_depth;
 	if (15 == vesafb_defined.bits_per_pixel)
@@ -271,7 +265,7 @@ static int __init vesafb_probe(struct device *device)
 
 	if (!request_mem_region(vesafb_fix.smem_start, size_total, "vesafb")) {
 		printk(KERN_WARNING
-		       "vesafb: abort, cannot reserve video memory at 0x%lx\n",
+		       "vesafb: cannot reserve video memory at 0x%lx\n",
 			vesafb_fix.smem_start);
 		/* We cannot make this fatal. Sometimes this comes from magic
 		   spaces our resource handlers simply don't know about */
@@ -279,13 +273,13 @@ static int __init vesafb_probe(struct device *device)
 
 	info = framebuffer_alloc(sizeof(u32) * 256, &dev->dev);
 	if (!info) {
-		release_mem_region(vesafb_fix.smem_start, vesafb_fix.smem_len);
+		release_mem_region(vesafb_fix.smem_start, size_total);
 		return -ENOMEM;
 	}
 	info->pseudo_palette = info->par;
 	info->par = NULL;
 
-        info->screen_base = ioremap(vesafb_fix.smem_start, vesafb_fix.smem_len);
+	info->screen_base = ioremap(vesafb_fix.smem_start, vesafb_fix.smem_len);
 	if (!info->screen_base) {
 		printk(KERN_ERR
 		       "vesafb: abort, cannot ioremap video memory 0x%x @ 0x%lx\n",
@@ -332,6 +326,12 @@ static int __init vesafb_probe(struct device *device)
 		}
 	}
 
+	if (vesafb_defined.bits_per_pixel == 8 && !pmi_setpal && !vga_compat) {
+		printk(KERN_WARNING "vesafb: hardware palette is unchangeable,\n"
+		                    "        colors may be incorrect\n");
+		vesafb_fix.visual = FB_VISUAL_STATIC_PSEUDOCOLOR;
+	}
+
 	vesafb_defined.xres_virtual = vesafb_defined.xres;
 	vesafb_defined.yres_virtual = vesafb_fix.smem_len / vesafb_fix.line_length;
 	if (ypan && vesafb_defined.yres_virtual > vesafb_defined.yres) {
@@ -368,7 +368,8 @@ static int __init vesafb_probe(struct device *device)
 	printk(KERN_INFO "vesafb: %s: "
 	       "size=%d:%d:%d:%d, shift=%d:%d:%d:%d\n",
 	       (vesafb_defined.bits_per_pixel > 8) ?
-	       "Truecolor" : "Pseudocolor",
+	       "Truecolor" : (vga_compat || pmi_setpal) ?
+	       "Pseudocolor" : "Static Pseudocolor",
 	       screen_info.rsvd_size,
 	       screen_info.red_size,
 	       screen_info.green_size,
@@ -385,23 +386,54 @@ static int __init vesafb_probe(struct device *device)
 	 * region already (FIXME) */
 	request_region(0x3c0, 32, "vesafb");
 
+#ifdef CONFIG_MTRR
 	if (mtrr) {
-		int temp_size = size_total;
-		/* Find the largest power-of-two */
-		while (temp_size & (temp_size - 1))
-                	temp_size &= (temp_size - 1);
-                        
-                /* Try and find a power of two to add */
-		while (temp_size && mtrr_add(vesafb_fix.smem_start, temp_size, MTRR_TYPE_WRCOMB, 1)==-EINVAL) {
-			temp_size >>= 1;
+		unsigned int temp_size = size_total;
+		unsigned int type = 0;
+
+		switch (mtrr) {
+		case 1:
+			type = MTRR_TYPE_UNCACHABLE;
+			break;
+		case 2:
+			type = MTRR_TYPE_WRBACK;
+			break;
+		case 3:
+			type = MTRR_TYPE_WRCOMB;
+			break;
+		case 4:
+			type = MTRR_TYPE_WRTHROUGH;
+			break;
+		default:
+			type = 0;
+			break;
+		}
+
+		if (type) {
+			int rc;
+
+			/* Find the largest power-of-two */
+			while (temp_size & (temp_size - 1))
+				temp_size &= (temp_size - 1);
+
+			/* Try and find a power of two to add */
+			do {
+				rc = mtrr_add(vesafb_fix.smem_start, temp_size,
+					      type, 1);
+				temp_size >>= 1;
+			} while (temp_size >= PAGE_SIZE && rc == -EINVAL);
 		}
 	}
+#endif
 	
 	info->fbops = &vesafb_ops;
 	info->var = vesafb_defined;
 	info->fix = vesafb_fix;
 	info->flags = FBINFO_FLAG_DEFAULT |
 		(ypan) ? FBINFO_HWACCEL_YPAN : 0;
+
+	if (!ypan)
+		info->fbops->fb_pan_display = NULL;
 
 	if (fb_alloc_cmap(&info->cmap, 256, 0) < 0) {
 		err = -ENOMEM;
@@ -421,10 +453,11 @@ err:
 	return err;
 }
 
-static struct device_driver vesafb_driver = {
-	.name	= "vesafb",
-	.bus	= &platform_bus_type,
+static struct platform_driver vesafb_driver = {
 	.probe	= vesafb_probe,
+	.driver	= {
+		.name	= "vesafb",
+	},
 };
 
 static struct platform_device vesafb_device = {
@@ -439,12 +472,12 @@ static int __init vesafb_init(void)
 	/* ignore error return of fb_get_options */
 	fb_get_options("vesafb", &option);
 	vesafb_setup(option);
-	ret = driver_register(&vesafb_driver);
+	ret = platform_driver_register(&vesafb_driver);
 
 	if (!ret) {
 		ret = platform_device_register(&vesafb_device);
 		if (ret)
-			driver_unregister(&vesafb_driver);
+			platform_driver_unregister(&vesafb_driver);
 	}
 	return ret;
 }

@@ -36,7 +36,8 @@ struct statfs;
  * Define EXT3_RESERVATION to reserve data blocks for expanding files
  */
 #define EXT3_DEFAULT_RESERVE_BLOCKS     8
-#define EXT3_MAX_RESERVE_BLOCKS         1024
+/*max window size: 1024(direct blocks) + 3([t,d]indirect blocks) */
+#define EXT3_MAX_RESERVE_BLOCKS         1027
 #define EXT3_RESERVE_WINDOW_NOT_ALLOCATED 0
 /*
  * Always enable hashed directories
@@ -239,6 +240,20 @@ struct ext3_new_group_data {
 #define EXT3_IOC_SETRSVSZ		_IOW('f', 6, long)
 
 /*
+ *  Mount options
+ */
+struct ext3_mount_options {
+	unsigned long s_mount_opt;
+	uid_t s_resuid;
+	gid_t s_resgid;
+	unsigned long s_commit_interval;
+#ifdef CONFIG_QUOTA
+	int s_jquota_fmt;
+	char *s_qf_names[MAXQUOTAS];
+#endif
+};
+
+/*
  * Structure of an inode on the disk
  */
 struct ext3_inode {
@@ -358,6 +373,9 @@ struct ext3_inode {
 #define EXT3_MOUNT_RESERVATION		0x10000	/* Preallocation */
 #define EXT3_MOUNT_BARRIER		0x20000 /* Use block barriers */
 #define EXT3_MOUNT_NOBH			0x40000 /* No bufferheads */
+#define EXT3_MOUNT_QUOTA		0x80000 /* Some quota option set */
+#define EXT3_MOUNT_USRQUOTA		0x100000 /* "old" user quota */
+#define EXT3_MOUNT_GRPQUOTA		0x200000 /* "old" group quota */
 
 /* Compatibility, for having both ext2_fs.h and ext3_fs.h included at once */
 #ifndef _LINUX_EXT2_FS_H
@@ -715,6 +733,8 @@ struct dir_private_info {
 extern int ext3_bg_has_super(struct super_block *sb, int group);
 extern unsigned long ext3_bg_num_gdb(struct super_block *sb, int group);
 extern int ext3_new_block (handle_t *, struct inode *, unsigned long, int *);
+extern int ext3_new_blocks (handle_t *, struct inode *, unsigned long,
+			unsigned long *, int *);
 extern void ext3_free_blocks (handle_t *, struct inode *, unsigned long,
 			      unsigned long);
 extern void ext3_free_blocks_sb (handle_t *, struct super_block *,
@@ -755,9 +775,12 @@ extern unsigned long ext3_count_free (struct buffer_head *, unsigned);
 
 
 /* inode.c */
-extern int ext3_forget(handle_t *, int, struct inode *, struct buffer_head *, int);
-extern struct buffer_head * ext3_getblk (handle_t *, struct inode *, long, int, int *);
-extern struct buffer_head * ext3_bread (handle_t *, struct inode *, int, int, int *);
+int ext3_forget(handle_t *, int, struct inode *, struct buffer_head *, int);
+struct buffer_head * ext3_getblk (handle_t *, struct inode *, long, int, int *);
+struct buffer_head * ext3_bread (handle_t *, struct inode *, int, int, int *);
+int ext3_get_blocks_handle(handle_t *handle, struct inode *inode,
+	sector_t iblock, unsigned long maxblocks, struct buffer_head *bh_result,
+	int create, int extend_disksize);
 
 extern void ext3_read_inode (struct inode *);
 extern int  ext3_write_inode (struct inode *, int);
@@ -810,11 +833,11 @@ do {								\
  */
 
 /* dir.c */
-extern struct file_operations ext3_dir_operations;
+extern const struct file_operations ext3_dir_operations;
 
 /* file.c */
 extern struct inode_operations ext3_file_inode_operations;
-extern struct file_operations ext3_file_operations;
+extern const struct file_operations ext3_file_operations;
 
 /* namei.c */
 extern struct inode_operations ext3_dir_inode_operations;

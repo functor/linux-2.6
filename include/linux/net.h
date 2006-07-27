@@ -71,6 +71,7 @@ typedef enum {
  * @SOCK_RAW: raw socket
  * @SOCK_RDM: reliably-delivered message
  * @SOCK_SEQPACKET: sequential packet socket
+ * @SOCK_DCCP: Datagram Congestion Control Protocol socket
  * @SOCK_PACKET: linux specific way of getting packets at the dev level.
  *		  For writing rarp and other similar things on the user level.
  *
@@ -84,6 +85,7 @@ enum sock_type {
 	SOCK_RAW	= 3,
 	SOCK_RDM	= 4,
 	SOCK_SEQPACKET	= 5,
+	SOCK_DCCP	= 6,
 	SOCK_PACKET	= 10,
 };
 
@@ -105,7 +107,7 @@ enum sock_type {
 struct socket {
 	socket_state		state;
 	unsigned long		flags;
-	struct proto_ops	*ops;
+	const struct proto_ops	*ops;
 	struct fasync_struct	*fasync_list;
 	struct file		*file;
 	struct sock		*sk;
@@ -141,11 +143,17 @@ struct proto_ops {
 				      struct poll_table_struct *wait);
 	int		(*ioctl)     (struct socket *sock, unsigned int cmd,
 				      unsigned long arg);
+	int	 	(*compat_ioctl) (struct socket *sock, unsigned int cmd,
+				      unsigned long arg);
 	int		(*listen)    (struct socket *sock, int len);
 	int		(*shutdown)  (struct socket *sock, int flags);
 	int		(*setsockopt)(struct socket *sock, int level,
 				      int optname, char __user *optval, int optlen);
 	int		(*getsockopt)(struct socket *sock, int level,
+				      int optname, char __user *optval, int __user *optlen);
+	int		(*compat_setsockopt)(struct socket *sock, int level,
+				      int optname, char __user *optval, int optlen);
+	int		(*compat_getsockopt)(struct socket *sock, int level,
 				      int optname, char __user *optval, int __user *optlen);
 	int		(*sendmsg)   (struct kiocb *iocb, struct socket *sock,
 				      struct msghdr *m, size_t total_len);
@@ -246,6 +254,8 @@ SOCKCALL_UWRAP(name, poll, (struct file *file, struct socket *sock, struct poll_
 	      (file, sock, wait)) \
 SOCKCALL_WRAP(name, ioctl, (struct socket *sock, unsigned int cmd, \
 			 unsigned long arg), (sock, cmd, arg)) \
+SOCKCALL_WRAP(name, compat_ioctl, (struct socket *sock, unsigned int cmd, \
+			 unsigned long arg), (sock, cmd, arg)) \
 SOCKCALL_WRAP(name, listen, (struct socket *sock, int len), (sock, len)) \
 SOCKCALL_WRAP(name, shutdown, (struct socket *sock, int flags), (sock, flags)) \
 SOCKCALL_WRAP(name, setsockopt, (struct socket *sock, int level, int optname, \
@@ -259,7 +269,7 @@ SOCKCALL_WRAP(name, recvmsg, (struct kiocb *iocb, struct socket *sock, struct ms
 SOCKCALL_WRAP(name, mmap, (struct file *file, struct socket *sock, struct vm_area_struct *vma), \
 	      (file, sock, vma)) \
 	      \
-static struct proto_ops name##_ops = {			\
+static const struct proto_ops name##_ops = {			\
 	.family		= fam,				\
 	.owner		= THIS_MODULE,			\
 	.release	= __lock_##name##_release,	\
@@ -270,6 +280,7 @@ static struct proto_ops name##_ops = {			\
 	.getname	= __lock_##name##_getname,	\
 	.poll		= __lock_##name##_poll,		\
 	.ioctl		= __lock_##name##_ioctl,	\
+	.compat_ioctl	= __lock_##name##_compat_ioctl,	\
 	.listen		= __lock_##name##_listen,	\
 	.shutdown	= __lock_##name##_shutdown,	\
 	.setsockopt	= __lock_##name##_setsockopt,	\
@@ -278,10 +289,21 @@ static struct proto_ops name##_ops = {			\
 	.recvmsg	= __lock_##name##_recvmsg,	\
 	.mmap		= __lock_##name##_mmap,		\
 };
+
 #endif
 
 #define MODULE_ALIAS_NETPROTO(proto) \
 	MODULE_ALIAS("net-pf-" __stringify(proto))
+
+#define MODULE_ALIAS_NET_PF_PROTO(pf, proto) \
+	MODULE_ALIAS("net-pf-" __stringify(pf) "-proto-" __stringify(proto))
+
+#ifdef CONFIG_SYSCTL
+#include <linux/sysctl.h>
+extern ctl_table net_table[];
+extern int net_msg_cost;
+extern int net_msg_burst;
+#endif
 
 #endif /* __KERNEL__ */
 #endif	/* _LINUX_NET_H */

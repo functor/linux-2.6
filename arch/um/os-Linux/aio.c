@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2004 Jeff Dike (jdike@addtoit.com)
  * Licensed under the GPL
  */
@@ -10,7 +10,6 @@
 #include <sched.h>
 #include <sys/syscall.h>
 #include "os.h"
-#include "helper.h"
 #include "aio.h"
 #include "init.h"
 #include "user.h"
@@ -22,8 +21,7 @@ struct aio_thread_req {
 	unsigned long long offset;
 	char *buf;
 	int len;
-	int reply_fd;
-	void *data;
+	struct aio_context *aio;
 };
 
 static int aio_req_fd_r = -1;
@@ -38,24 +36,20 @@ static int aio_req_fd_w = -1;
 
 #if !defined(HAVE_AIO_LIBC)
 
-#define __NR_io_setup 245
-#define __NR_io_getevents 247
-#define __NR_io_submit 248
-
 static long io_setup(int n, aio_context_t *ctxp)
 {
-  return(syscall(__NR_io_setup, n, ctxp));
+	return syscall(__NR_io_setup, n, ctxp);
 }
 
 static long io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
 {
-  return(syscall(__NR_io_submit, ctx, nr, iocbpp));
+	return syscall(__NR_io_submit, ctx, nr, iocbpp);
 }
 
 static long io_getevents(aio_context_t ctx_id, long min_nr, long nr,
 			 struct io_event *events, struct timespec *timeout)
 {
-  return(syscall(__NR_io_getevents, ctx_id, min_nr, nr, events, timeout));
+	return syscall(__NR_io_getevents, ctx_id, min_nr, nr, events, timeout);
 }
 
 #endif
@@ -64,21 +58,21 @@ static long io_getevents(aio_context_t ctx_id, long min_nr, long nr,
  * rather than in whatever place first touches the data.  I used
  * to do this by touching the page, but that's delicate because
  * gcc is prone to optimizing that away.  So, what's done here
- * is we read from the descriptor from which the page was 
+ * is we read from the descriptor from which the page was
  * mapped.  The caller is required to pass an offset which is
- * inside the page that was mapped.  Thus, when the read 
+ * inside the page that was mapped.  Thus, when the read
  * returns, we know that the page is in the page cache, and
  * that it now backs the mmapped area.
  */
 
-static int do_aio(aio_context_t ctx, enum aio_type type, int fd, char *buf, 
-		  int len, unsigned long long offset, void *data)
+static int do_aio(aio_context_t ctx, enum aio_type type, int fd, char *buf,
+		  int len, unsigned long long offset, struct aio_context *aio)
 {
 	struct iocb iocb, *iocbp = &iocb;
 	char c;
 	int err;
 
-	iocb = ((struct iocb) { .aio_data 	= (unsigned long) data,
+	iocb = ((struct iocb) { .aio_data 	= (unsigned long) aio,
 				.aio_reqprio	= 0,
 				.aio_fildes	= fd,
 				.aio_buf	= (unsigned long) buf,
@@ -108,10 +102,13 @@ static int do_aio(aio_context_t ctx, enum aio_type type, int fd, char *buf,
 		err = -EINVAL;
 		break;
 	}
+
 	if(err > 0)
 		err = 0;
+	else
+		err = -errno;
 
-	return(err);	
+	return err;
 }
 
 static aio_context_t ctx = 0;
@@ -133,19 +130,17 @@ static int aio_thread(void *arg)
 			       "errno = %d\n", errno);
 		}
 		else {
-			reply = ((struct aio_thread_reply) 
-				{ .data = (void *) event.data,
-				  .err	= event.res });
-			reply_fd = 
-				((struct aio_context *) event.data)->reply_fd;
+			reply = ((struct aio_thread_reply)
+				{ .data = (void *) (long) event.data,
+						.err	= event.res });
+			reply_fd = ((struct aio_context *) reply.data)->reply_fd;
 			err = os_write_file(reply_fd, &reply, sizeof(reply));
 			if(err != sizeof(reply))
-				printk("not_aio_thread - write failed, "
-				       "fd = %d, err = %d\n", 
-				       aio_req_fd_r, -err);
+				printk("aio_thread - write failed, fd = %d, "
+				       "err = %d\n", aio_req_fd_r, -err);
 		}
 	}
-	return(0);
+	return 0;
 }
 
 #endif
@@ -183,8 +178,8 @@ static int do_not_aio(struct aio_thread_req *req)
 		break;
 	}
 
- out:
-	return(err);
+out:
+	return err;
 }
 
 static int not_aio_thread(void *arg)
@@ -198,8 +193,9 @@ static int not_aio_thread(void *arg)
 		err = os_read_file(aio_req_fd_r, &req, sizeof(req));
 		if(err != sizeof(req)){
 			if(err < 0)
-				printk("not_aio_thread - read failed, fd = %d, "
-				       "err = %d\n", aio_req_fd_r, -err);
+				printk("not_aio_thread - read failed, "
+				       "fd = %d, err = %d\n", aio_req_fd_r,
+				       -err);
 			else {
 				printk("not_aio_thread - short read, fd = %d, "
 				       "length = %d\n", aio_req_fd_r, err);
@@ -207,13 +203,15 @@ static int not_aio_thread(void *arg)
 			continue;
 		}
 		err = do_not_aio(&req);
-		reply = ((struct aio_thread_reply) { .data 	= req.data,
-						     .err	= err });
-		err = os_write_file(req.reply_fd, &reply, sizeof(reply));
+		reply = ((struct aio_thread_reply) { .data 	= req.aio,
+					 .err	= err });
+		err = os_write_file(req.aio->reply_fd, &reply, sizeof(reply));
 		if(err != sizeof(reply))
 			printk("not_aio_thread - write failed, fd = %d, "
 			       "err = %d\n", aio_req_fd_r, -err);
 	}
+
+	return 0;
 }
 
 static int aio_pid = -1;
@@ -222,14 +220,14 @@ static int init_aio_24(void)
 {
 	unsigned long stack;
 	int fds[2], err;
-	
+
 	err = os_pipe(fds, 1, 1);
 	if(err)
 		goto out;
 
 	aio_req_fd_w = fds[0];
 	aio_req_fd_r = fds[1];
-	err = run_helper_thread(not_aio_thread, NULL, 
+	err = run_helper_thread(not_aio_thread, NULL,
 				CLONE_FILES | CLONE_VM | SIGCHLD, &stack, 0);
 	if(err < 0)
 		goto out_close_pipe;
@@ -237,13 +235,18 @@ static int init_aio_24(void)
 	aio_pid = err;
 	goto out;
 
- out_close_pipe:
+out_close_pipe:
 	os_close_file(fds[0]);
 	os_close_file(fds[1]);
 	aio_req_fd_w = -1;
-	aio_req_fd_r = -1;	
- out:
-	return(0);
+	aio_req_fd_r = -1;
+out:
+#ifndef HAVE_AIO_ABI
+	printk("/usr/include/linux/aio_abi.h not present during build\n");
+#endif
+	printk("2.6 host AIO support not used - falling back to I/O "
+	       "thread\n");
+	return 0;
 }
 
 #ifdef HAVE_AIO_ABI
@@ -252,57 +255,56 @@ static int init_aio_26(void)
 {
 	unsigned long stack;
 	int err;
-	
+
 	if(io_setup(256, &ctx)){
+		err = -errno;
 		printk("aio_thread failed to initialize context, err = %d\n",
 		       errno);
-		return(-errno);
+		return err;
 	}
 
-	err = run_helper_thread(aio_thread, NULL, 
+	err = run_helper_thread(aio_thread, NULL,
 				CLONE_FILES | CLONE_VM | SIGCHLD, &stack, 0);
 	if(err < 0)
-		return(-errno);
+		return err;
 
 	aio_pid = err;
-	err = 0;
- out:
-	return(err);
+
+	printk("Using 2.6 host AIO\n");
+	return 0;
 }
 
-int submit_aio_26(enum aio_type type, int io_fd, char *buf, int len, 
-		  unsigned long long offset, int reply_fd, void *data)
+static int submit_aio_26(enum aio_type type, int io_fd, char *buf, int len,
+			 unsigned long long offset, struct aio_context *aio)
 {
 	struct aio_thread_reply reply;
 	int err;
 
-	((struct aio_context *) data)->reply_fd = reply_fd;
-
-	err = do_aio(ctx, type, io_fd, buf, len, offset, data);
+	err = do_aio(ctx, type, io_fd, buf, len, offset, aio);
 	if(err){
-		reply = ((struct aio_thread_reply) { .data = data,
-						     .err  = err });
-		err = os_write_file(reply_fd, &reply, sizeof(reply));
+		reply = ((struct aio_thread_reply) { .data = aio,
+					 .err  = err });
+		err = os_write_file(aio->reply_fd, &reply, sizeof(reply));
 		if(err != sizeof(reply))
 			printk("submit_aio_26 - write failed, "
-			       "fd = %d, err = %d\n", reply_fd, -err);
+			       "fd = %d, err = %d\n", aio->reply_fd, -err);
 		else err = 0;
 	}
 
-	return(err);
+	return err;
 }
 
 #else
 #define DEFAULT_24_AIO 1
 static int init_aio_26(void)
 {
-	return(-ENOSYS);
+	return -ENOSYS;
 }
 
-int submit_aio_26(enum aio_type type, int io_fd, char *buf, int len, 
-		  unsigned long long offset, int reply_fd, void *data)
+static int submit_aio_26(enum aio_type type, int io_fd, char *buf, int len,
+			 unsigned long long offset, struct aio_context *aio)
 {
-	return(-ENOSYS);
+	return -ENOSYS;
 }
 #endif
 
@@ -311,28 +313,29 @@ static int aio_24 = DEFAULT_24_AIO;
 static int __init set_aio_24(char *name, int *add)
 {
 	aio_24 = 1;
-	return(0);
+	return 0;
 }
 
 __uml_setup("aio=2.4", set_aio_24,
 "aio=2.4\n"
 "    This is used to force UML to use 2.4-style AIO even when 2.6 AIO is\n"
 "    available.  2.4 AIO is a single thread that handles one request at a\n"
-"    time, synchronously.  2.6 AIO is a thread which uses 2.5 AIO interface\n"
-"    to handle an arbitrary number of pending requests.  2.6 AIO is not\n"
-"    available in tt mode, on 2.4 hosts, or when UML is built with\n"
-"    /usr/include/linux/aio_abi no available.\n\n"
+"    time, synchronously.  2.6 AIO is a thread which uses the 2.6 AIO \n"
+"    interface to handle an arbitrary number of pending requests.  2.6 AIO \n"
+"    is not available in tt mode, on 2.4 hosts, or when UML is built with\n"
+"    /usr/include/linux/aio_abi.h not available.  Many distributions don't\n"
+"    include aio_abi.h, so you will need to copy it from a kernel tree to\n"
+"    your /usr/include/linux in order to build an AIO-capable UML\n\n"
 );
 
 static int init_aio(void)
 {
 	int err;
 
-	CHOOSE_MODE(({ 
-		if(!aio_24){ 
-			printk("Disabling 2.6 AIO in tt mode\n");
-			aio_24 = 1;
-		} }), (void) 0);
+	CHOOSE_MODE(({ if(!aio_24){
+			    printk("Disabling 2.6 AIO in tt mode\n");
+			    aio_24 = 1;
+		    } }), (void) 0);
 
 	if(!aio_24){
 		err = init_aio_26();
@@ -341,15 +344,21 @@ static int init_aio(void)
 			       "reverting to 2.4 AIO\n");
 			aio_24 = 1;
 		}
-		else return(err);
+		else return err;
 	}
 
 	if(aio_24)
-		return(init_aio_24());
+		return init_aio_24();
 
-	return(0);
+	return 0;
 }
 
+/* The reason for the __initcall/__uml_exitcall asymmetry is that init_aio
+ * needs to be called when the kernel is running because it calls run_helper,
+ * which needs get_free_page.  exit_aio is a __uml_exitcall because the generic
+ * kernel does not run __exitcalls on shutdown, and can't because many of them
+ * break when called outside of module unloading.
+ */
 __initcall(init_aio);
 
 static void exit_aio(void)
@@ -360,16 +369,15 @@ static void exit_aio(void)
 
 __uml_exitcall(exit_aio);
 
-int submit_aio_24(enum aio_type type, int io_fd, char *buf, int len, 
-		  unsigned long long offset, int reply_fd, void *data)
+static int submit_aio_24(enum aio_type type, int io_fd, char *buf, int len,
+			 unsigned long long offset, struct aio_context *aio)
 {
 	struct aio_thread_req req = { .type 		= type,
 				      .io_fd		= io_fd,
 				      .offset		= offset,
 				      .buf		= buf,
 				      .len		= len,
-				      .reply_fd		= reply_fd,
-				      .data		= data,
+				      .aio		= aio,
 	};
 	int err;
 
@@ -377,28 +385,17 @@ int submit_aio_24(enum aio_type type, int io_fd, char *buf, int len,
 	if(err == sizeof(req))
 		err = 0;
 
-	return(err);
+	return err;
 }
 
-int submit_aio(enum aio_type type, int io_fd, char *buf, int len, 
-	       unsigned long long offset, int reply_fd, void *data)
+int submit_aio(enum aio_type type, int io_fd, char *buf, int len,
+	       unsigned long long offset, int reply_fd,
+	       struct aio_context *aio)
 {
+	aio->reply_fd = reply_fd;
 	if(aio_24)
-		return(submit_aio_24(type, io_fd, buf, len, offset, reply_fd, 
-				     data));
+		return submit_aio_24(type, io_fd, buf, len, offset, aio);
 	else {
-		return(submit_aio_26(type, io_fd, buf, len, offset, reply_fd, 
-				     data));
+		return submit_aio_26(type, io_fd, buf, len, offset, aio);
 	}
 }
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */

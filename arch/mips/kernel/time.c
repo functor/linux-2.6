@@ -11,6 +11,7 @@
  * Free Software Foundation;  either version 2 of the  License, or (at your
  * option) any later version.
  */
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -25,6 +26,7 @@
 #include <linux/module.h>
 
 #include <asm/bootinfo.h>
+#include <asm/cache.h>
 #include <asm/compiler.h>
 #include <asm/cpu.h>
 #include <asm/cpu-features.h>
@@ -42,10 +44,6 @@
 #define USECS_PER_JIFFY_FRAC	((unsigned long)(u32)((1000000ULL << 32) / HZ))
 
 #define TICK_SIZE	(tick_nsec / 1000)
-
-u64 jiffies_64 = INITIAL_JIFFIES;
-
-EXPORT_SYMBOL(jiffies_64);
 
 /*
  * forward reference
@@ -67,16 +65,16 @@ static int null_rtc_set_time(unsigned long sec)
 	return 0;
 }
 
-unsigned long (*rtc_get_time)(void) = null_rtc_get_time;
-int (*rtc_set_time)(unsigned long) = null_rtc_set_time;
-int (*rtc_set_mmss)(unsigned long);
+unsigned long (*rtc_mips_get_time)(void) = null_rtc_get_time;
+int (*rtc_mips_set_time)(unsigned long) = null_rtc_set_time;
+int (*rtc_mips_set_mmss)(unsigned long);
 
 
 /* usecs per counter cycle, shifted to left by 32 bits */
 static unsigned int sll32_usecs_per_cycle;
 
 /* how many counter cycles in a jiffy */
-static unsigned long cycles_per_jiffy;
+static unsigned long cycles_per_jiffy __read_mostly;
 
 /* Cycle counter value at the previous timer interrupt.. */
 static unsigned int timerhi, timerlo;
@@ -98,7 +96,10 @@ static unsigned int null_hpt_read(void)
 	return 0;
 }
 
-static void null_hpt_init(unsigned int count) { /* nothing */ }
+static void null_hpt_init(unsigned int count)
+{
+	/* nothing */
+}
 
 
 /*
@@ -108,13 +109,14 @@ static void c0_timer_ack(void)
 {
 	unsigned int count;
 
+#ifndef CONFIG_SOC_PNX8550	/* pnx8550 resets to zero */
 	/* Ack this timer interrupt and set the next one.  */
 	expirelo += cycles_per_jiffy;
+#endif
 	write_c0_compare(expirelo);
 
 	/* Check to see if we have missed any timer interrupts.  */
-	count = read_c0_count();
-	if ((count - expirelo) < 0x7fffffff) {
+	while (((count = read_c0_count()) - expirelo) < 0x7fffffff) {
 		/* missed_timer_count++; */
 		expirelo = count + cycles_per_jiffy;
 		write_c0_compare(expirelo);
@@ -160,7 +162,7 @@ void do_gettimeofday(struct timeval *tv)
 	unsigned long seq;
 	unsigned long lost;
 	unsigned long usec, sec;
-	unsigned long max_ntp_tick = tick_usec - tickadj;
+	unsigned long max_ntp_tick;
 
 	do {
 		seq = read_seqbegin(&xtime_lock);
@@ -175,12 +177,13 @@ void do_gettimeofday(struct timeval *tv)
 		 * Better to lose some accuracy than have time go backwards..
 		 */
 		if (unlikely(time_adjust < 0)) {
+			max_ntp_tick = (USEC_PER_SEC / HZ) - tickadj;
 			usec = min(usec, max_ntp_tick);
 
 			if (lost)
 				usec += lost * max_ntp_tick;
 		} else if (unlikely(lost))
-			usec += lost * tick_usec;
+			usec += lost * (USEC_PER_SEC / HZ);
 
 		sec = xtime.tv_sec;
 		usec += (xtime.tv_nsec / 1000);
@@ -223,11 +226,7 @@ int do_settimeofday(struct timespec *tv)
 	set_normalized_timespec(&xtime, sec, nsec);
 	set_normalized_timespec(&wall_to_monotonic, wtm_sec, wtm_nsec);
 
-	time_adjust = 0;			/* stop active adjtime() */
-	time_status |= STA_UNSYNC;
-	time_maxerror = NTP_PHASE_LIMIT;
-	time_esterror = NTP_PHASE_LIMIT;
-
+	ntp_clear();
 	write_sequnlock_irq(&xtime_lock);
 	clock_was_set();
 	return 0;
@@ -424,6 +423,8 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	unsigned long j;
 	unsigned int count;
 
+	write_seqlock(&xtime_lock);
+
 	count = mips_hpt_read();
 	mips_timer_ack();
 
@@ -438,22 +439,20 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	/*
 	 * If we have an externally synchronized Linux clock, then update
-	 * CMOS clock accordingly every ~11 minutes. rtc_set_time() has to be
+	 * CMOS clock accordingly every ~11 minutes. rtc_mips_set_time() has to be
 	 * called as close as possible to 500 ms before the new second starts.
 	 */
-	write_seqlock(&xtime_lock);
-	if ((time_status & STA_UNSYNC) == 0 &&
+	if (ntp_synced() &&
 	    xtime.tv_sec > last_rtc_update + 660 &&
 	    (xtime.tv_nsec / 1000) >= 500000 - ((unsigned) TICK_SIZE) / 2 &&
 	    (xtime.tv_nsec / 1000) <= 500000 + ((unsigned) TICK_SIZE) / 2) {
-		if (rtc_set_mmss(xtime.tv_sec) == 0) {
+		if (rtc_mips_set_mmss(xtime.tv_sec) == 0) {
 			last_rtc_update = xtime.tv_sec;
 		} else {
 			/* do it again in 60 s */
 			last_rtc_update = xtime.tv_sec - 600;
 		}
 	}
-	write_sequnlock(&xtime_lock);
 
 	/*
 	 * If jiffies has overflown in this timer_interrupt, we must
@@ -496,6 +495,8 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		}
 	}
 
+	write_sequnlock(&xtime_lock);
+
 	/*
 	 * In UP mode, we call local_timer_interrupt() to do profiling
 	 * and process accouting.
@@ -508,14 +509,38 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	return IRQ_HANDLED;
 }
 
+int null_perf_irq(struct pt_regs *regs)
+{
+	return 0;
+}
+
+int (*perf_irq)(struct pt_regs *regs) = null_perf_irq;
+
+EXPORT_SYMBOL(null_perf_irq);
+EXPORT_SYMBOL(perf_irq);
+
 asmlinkage void ll_timer_interrupt(int irq, struct pt_regs *regs)
 {
+	int r2 = cpu_has_mips_r2;
+
 	irq_enter();
 	kstat_this_cpu.irqs[irq]++;
 
-	/* we keep interrupt disabled all the time */
-	timer_interrupt(irq, NULL, regs);
+	/*
+	 * Suckage alert:
+	 * Before R2 of the architecture there was no way to see if a
+	 * performance counter interrupt was pending, so we have to run the
+	 * performance counter interrupt handler anyway.
+	 */
+	if (!r2 || (read_c0_cause() & (1 << 26)))
+		if (perf_irq(regs))
+			goto out;
 
+	/* we keep interrupt disabled all the time */
+	if (!r2 || (read_c0_cause() & (1 << 30)))
+		timer_interrupt(irq, NULL, regs);
+
+out:
 	irq_exit();
 }
 
@@ -539,7 +564,7 @@ asmlinkage void ll_local_timer_interrupt(int irq, struct pt_regs *regs)
  *      b) (optional) calibrate and set the mips_hpt_frequency
  *	    (only needed if you intended to use fixed_rate_gettimeoffset
  *	     or use cpu counter as timer interrupt source)
- * 2) setup xtime based on rtc_get_time().
+ * 2) setup xtime based on rtc_mips_get_time().
  * 3) choose a appropriate gettimeoffset routine.
  * 4) calculate a couple of cached variables for later usage
  * 5) board_timer_setup() -
@@ -607,10 +632,10 @@ void __init time_init(void)
 	if (board_time_init)
 		board_time_init();
 
-	if (!rtc_set_mmss)
-		rtc_set_mmss = rtc_set_time;
+	if (!rtc_mips_set_mmss)
+		rtc_mips_set_mmss = rtc_mips_set_time;
 
-	xtime.tv_sec = rtc_get_time();
+	xtime.tv_sec = rtc_mips_get_time();
 	xtime.tv_nsec = 0;
 
 	set_normalized_timespec(&wall_to_monotonic,
@@ -629,9 +654,9 @@ void __init time_init(void)
 			mips_hpt_init = c0_hpt_init;
 		}
 
-		if ((current_cpu_data.isa_level == MIPS_CPU_ISA_M32) ||
-			 (current_cpu_data.isa_level == MIPS_CPU_ISA_I) ||
-			 (current_cpu_data.isa_level == MIPS_CPU_ISA_II))
+		if (cpu_has_mips32r1 || cpu_has_mips32r2 ||
+		    (current_cpu_data.isa_level == MIPS_CPU_ISA_I) ||
+		    (current_cpu_data.isa_level == MIPS_CPU_ISA_II))
 			/*
 			 * We need to calibrate the counter but we don't have
 			 * 64-bit division.
@@ -746,8 +771,8 @@ void to_tm(unsigned long tim, struct rtc_time *tm)
 
 EXPORT_SYMBOL(rtc_lock);
 EXPORT_SYMBOL(to_tm);
-EXPORT_SYMBOL(rtc_set_time);
-EXPORT_SYMBOL(rtc_get_time);
+EXPORT_SYMBOL(rtc_mips_set_time);
+EXPORT_SYMBOL(rtc_mips_get_time);
 
 unsigned long long sched_clock(void)
 {

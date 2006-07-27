@@ -7,6 +7,7 @@ dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-linear.o dm-stripe.o \
 dm-multipath-objs := dm-hw-handler.o dm-path-selector.o dm-mpath.o
 dm-snapshot-objs := dm-snap.o dm-exception-store.o
 dm-mirror-objs	:= dm-log.o dm-raid1.o
+md-mod-objs     := md.o bitmap.o
 raid6-objs	:= raid6main.o raid6algos.o raid6recov.o raid6tables.o \
 		   raid6int1.o raid6int2.o raid6int4.o \
 		   raid6int8.o raid6int16.o raid6int32.o \
@@ -14,8 +15,6 @@ raid6-objs	:= raid6main.o raid6algos.o raid6recov.o raid6tables.o \
 		   raid6altivec8.o \
 		   raid6mmx.o raid6sse1.o raid6sse2.o
 hostprogs-y	:= mktables
-
-CFLAGS_raid6int8.o += -O2
 
 # Note: link order is important.  All raid personalities
 # and xor.o must come before md.o, as they each initialise 
@@ -30,7 +29,7 @@ obj-$(CONFIG_MD_RAID5)		+= raid5.o xor.o
 obj-$(CONFIG_MD_RAID6)		+= raid6.o xor.o
 obj-$(CONFIG_MD_MULTIPATH)	+= multipath.o
 obj-$(CONFIG_MD_FAULTY)		+= faulty.o
-obj-$(CONFIG_BLK_DEV_MD)	+= md.o
+obj-$(CONFIG_BLK_DEV_MD)	+= md-mod.o
 obj-$(CONFIG_BLK_DEV_DM)	+= dm-mod.o
 obj-$(CONFIG_DM_CRYPT)		+= dm-crypt.o
 obj-$(CONFIG_DM_MULTIPATH)	+= dm-multipath.o dm-round-robin.o

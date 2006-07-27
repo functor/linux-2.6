@@ -143,6 +143,7 @@ restore_sigcontext (struct sigcontext __user *sc, struct sigscratch *scr)
 
 		__copy_from_user(current->thread.fph, &sc->sc_fr[32], 96*16);
 		psr->mfh = 0;	/* drop signal handler's fph contents... */
+		preempt_disable();
 		if (psr->dfh)
 			ia64_drop_fpu(current);
 		else {
@@ -150,6 +151,7 @@ restore_sigcontext (struct sigcontext __user *sc, struct sigscratch *scr)
 			__ia64_load_fpu(current->thread.fph);
 			ia64_set_local_fpu_owner(current);
 		}
+		preempt_enable();
 	}
 	return err;
 }
@@ -385,15 +387,14 @@ setup_frame (int sig, struct k_sigaction *ka, siginfo_t *info, sigset_t *set,
 	     struct sigscratch *scr)
 {
 	extern char __kernel_sigtramp[];
-	unsigned long tramp_addr, new_rbs = 0;
+	unsigned long tramp_addr, new_rbs = 0, new_sp;
 	struct sigframe __user *frame;
 	long err;
 
-	frame = (void __user *) scr->pt.r12;
+	new_sp = scr->pt.r12;
 	tramp_addr = (unsigned long) __kernel_sigtramp;
-	if ((ka->sa.sa_flags & SA_ONSTACK) && sas_ss_flags((unsigned long) frame) == 0) {
-		frame = (void __user *) ((current->sas_ss_sp + current->sas_ss_size)
-					 & ~(STACK_ALIGN - 1));
+	if ((ka->sa.sa_flags & SA_ONSTACK) && sas_ss_flags(new_sp) == 0) {
+		new_sp = current->sas_ss_sp + current->sas_ss_size;
 		/*
 		 * We need to check for the register stack being on the signal stack
 		 * separately, because it's switched separately (memory stack is switched
@@ -402,7 +403,7 @@ setup_frame (int sig, struct k_sigaction *ka, siginfo_t *info, sigset_t *set,
 		if (!rbs_on_sig_stack(scr->pt.ar_bspstore))
 			new_rbs = (current->sas_ss_sp + sizeof(long) - 1) & ~(sizeof(long) - 1);
 	}
-	frame = (void __user *) frame - ((sizeof(*frame) + STACK_ALIGN - 1) & ~(STACK_ALIGN - 1));
+	frame = (void __user *) ((new_sp - sizeof(*frame)) & -STACK_ALIGN);
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		return force_sigsegv_info(sig, frame);
@@ -465,15 +466,12 @@ handle_signal (unsigned long sig, struct k_sigaction *ka, siginfo_t *info, sigse
 		if (!setup_frame(sig, ka, info, oldset, scr))
 			return 0;
 
-	if (!(ka->sa.sa_flags & SA_NODEFER)) {
-		spin_lock_irq(&current->sighand->siglock);
-		{
-			sigorsets(&current->blocked, &current->blocked, &ka->sa.sa_mask);
-			sigaddset(&current->blocked, sig);
-			recalc_sigpending();
-		}
-		spin_unlock_irq(&current->sighand->siglock);
-	}
+	spin_lock_irq(&current->sighand->siglock);
+	sigorsets(&current->blocked, &current->blocked, &ka->sa.sa_mask);
+	if (!(ka->sa.sa_flags & SA_NODEFER))
+		sigaddset(&current->blocked, sig);
+	recalc_sigpending();
+	spin_unlock_irq(&current->sighand->siglock);
 	return 1;
 }
 
@@ -589,105 +587,4 @@ ia64_do_signal (sigset_t *oldset, struct sigscratch *scr, long in_syscall)
 		}
 	}
 	return 0;
-}
-
-/* Set a delayed signal that was detected in MCA/INIT/NMI/PMI context where it
- * could not be delivered.  It is important that the target process is not
- * allowed to do any more work in user space.  Possible cases for the target
- * process:
- *
- * - It is sleeping and will wake up soon.  Store the data in the current task,
- *   the signal will be sent when the current task returns from the next
- *   interrupt.
- *
- * - It is running in user context.  Store the data in the current task, the
- *   signal will be sent when the current task returns from the next interrupt.
- *
- * - It is running in kernel context on this or another cpu and will return to
- *   user context.  Store the data in the target task, the signal will be sent
- *   to itself when the target task returns to user space.
- *
- * - It is running in kernel context on this cpu and will sleep before
- *   returning to user context.  Because this is also the current task, the
- *   signal will not get delivered and the task could sleep indefinitely.
- *   Store the data in the idle task for this cpu, the signal will be sent
- *   after the idle task processes its next interrupt.
- *
- * To cover all cases, store the data in the target task, the current task and
- * the idle task on this cpu.  Whatever happens, the signal will be delivered
- * to the target task before it can do any useful user space work.  Multiple
- * deliveries have no unwanted side effects.
- *
- * Note: This code is executed in MCA/INIT/NMI/PMI context, with interrupts
- * disabled.  It must not take any locks nor use kernel structures or services
- * that require locks.
- */
-
-/* To ensure that we get the right pid, check its start time.  To avoid extra
- * include files in thread_info.h, convert the task start_time to unsigned long,
- * giving us a cycle time of > 580 years.
- */
-static inline unsigned long
-start_time_ul(const struct task_struct *t)
-{
-	return t->start_time.tv_sec * NSEC_PER_SEC + t->start_time.tv_nsec;
-}
-
-void
-set_sigdelayed(pid_t pid, int signo, int code, void __user *addr)
-{
-	struct task_struct *t;
-	unsigned long start_time =  0;
-	int i;
-
-	for (i = 1; i <= 3; ++i) {
-		switch (i) {
-		case 1:
-			t = find_task_by_pid(pid);
-			if (t)
-				start_time = start_time_ul(t);
-			break;
-		case 2:
-			t = current;
-			break;
-		default:
-			t = idle_task(smp_processor_id());
-			break;
-		}
-
-		if (!t)
-			return;
-		t->thread_info->sigdelayed.signo = signo;
-		t->thread_info->sigdelayed.code = code;
-		t->thread_info->sigdelayed.addr = addr;
-		t->thread_info->sigdelayed.start_time = start_time;
-		t->thread_info->sigdelayed.pid = pid;
-		wmb();
-		set_tsk_thread_flag(t, TIF_SIGDELAYED);
-	}
-}
-
-/* Called from entry.S when it detects TIF_SIGDELAYED, a delayed signal that
- * was detected in MCA/INIT/NMI/PMI context where it could not be delivered.
- */
-
-void
-do_sigdelayed(void)
-{
-	struct siginfo siginfo;
-	pid_t pid;
-	struct task_struct *t;
-
-	clear_thread_flag(TIF_SIGDELAYED);
-	memset(&siginfo, 0, sizeof(siginfo));
-	siginfo.si_signo = current_thread_info()->sigdelayed.signo;
-	siginfo.si_code = current_thread_info()->sigdelayed.code;
-	siginfo.si_addr = current_thread_info()->sigdelayed.addr;
-	pid = current_thread_info()->sigdelayed.pid;
-	t = find_task_by_pid(pid);
-	if (!t)
-		return;
-	if (current_thread_info()->sigdelayed.start_time != start_time_ul(t))
-		return;
-	force_sig_info(siginfo.si_signo, &siginfo, t);
 }

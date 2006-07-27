@@ -21,8 +21,8 @@
  * On board CPLD memory map
  */
 #define IXDP2X00_PHYS_CPLD_BASE		0xc7000000
-#define IXDP2X00_VIRT_CPLD_BASE		0xfafff000
-#define IXDP2X00_CPLD_SIZE		0x00001000
+#define IXDP2X00_VIRT_CPLD_BASE		0xfe000000
+#define IXDP2X00_CPLD_SIZE		0x00100000
 
 
 #define IXDP2X00_CPLD_REG(x)  	\
@@ -72,12 +72,11 @@
 
 #ifndef __ASSEMBLY__
 /*
- * Master NPU will always have flash and be PCI master.
- * Slave NPU may or may not have flash but will never be PCI master.
+ * The master NPU is always PCI master.
  */
 static inline unsigned int ixdp2x00_master_npu(void)
 {
-	return ((ixp2000_has_flash()) && (ixp2000_is_pcimaster()));
+	return !!ixp2000_is_pcimaster();
 }
 
 /*

@@ -30,30 +30,31 @@
 #include <linux/string.h>
 #include <linux/net.h>
 #include <linux/inet.h>
+#include <linux/mutex.h>
 #include <asm/uaccess.h>
 
 #include "sysctl.h"
 #include "ds1603.h"
 
-static DECLARE_MUTEX(lasat_info_sem);
+static DEFINE_MUTEX(lasat_info_mutex);
 
-/* Strategy function to write EEPROM after changing string entry */ 
+/* Strategy function to write EEPROM after changing string entry */
 int sysctl_lasatstring(ctl_table *table, int *name, int nlen,
 		void *oldval, size_t *oldlenp,
 		void *newval, size_t newlen, void **context)
 {
 	int r;
-	down(&lasat_info_sem);
-	r = sysctl_string(table, name, 
+	mutex_lock(&lasat_info_mutex);
+	r = sysctl_string(table, name,
 			  nlen, oldval, oldlenp, newval, newlen, context);
 	if (r < 0) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	if (newval && newlen) {
 		lasat_write_eeprom_info();
 	}
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 1;
 }
 
@@ -63,42 +64,42 @@ int proc_dolasatstring(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	r = proc_dostring(table, write, filp, buffer, lenp, ppos);
 	if ( (!write) || r) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	lasat_write_eeprom_info();
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 0;
 }
 
-/* proc function to write EEPROM after changing int entry */ 
+/* proc function to write EEPROM after changing int entry */
 int proc_dolasatint(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	r = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if ( (!write) || r) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	lasat_write_eeprom_info();
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 0;
 }
 
 static int rtctmp;
 
 #ifdef CONFIG_DS1603
-/* proc function to read/write RealTime Clock */ 
+/* proc function to read/write RealTime Clock */
 int proc_dolasatrtc(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	if (!write) {
 		rtctmp = ds1603_read();
 		/* check for time < 0 and set to 0 */
@@ -107,11 +108,11 @@ int proc_dolasatrtc(ctl_table *table, int write, struct file *filp,
 	}
 	r = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if ( (!write) || r) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	ds1603_set(rtctmp);
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 0;
 }
 #endif
@@ -122,16 +123,16 @@ int sysctl_lasat_intvec(ctl_table *table, int *name, int nlen,
 		    void *newval, size_t newlen, void **context)
 {
 	int r;
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	r = sysctl_intvec(table, name, nlen, oldval, oldlenp, newval, newlen, context);
 	if (r < 0) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	if (newval && newlen) {
 		lasat_write_eeprom_info();
 	}
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 1;
 }
 
@@ -142,19 +143,19 @@ int sysctl_lasat_rtc(ctl_table *table, int *name, int nlen,
 		    void *newval, size_t newlen, void **context)
 {
 	int r;
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	rtctmp = ds1603_read();
 	if (rtctmp < 0)
 		rtctmp = 0;
 	r = sysctl_intvec(table, name, nlen, oldval, oldlenp, newval, newlen, context);
 	if (r < 0) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	if (newval && newlen) {
 		ds1603_set(rtctmp);
 	}
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 1;
 }
 #endif
@@ -165,9 +166,9 @@ static char lasat_bcastaddr[16];
 void update_bcastaddr(void)
 {
 	unsigned int ip;
-	
-	ip = (lasat_board_info.li_eeprom_info.ipaddr & 
-		lasat_board_info.li_eeprom_info.netmask) | 
+
+	ip = (lasat_board_info.li_eeprom_info.ipaddr &
+		lasat_board_info.li_eeprom_info.netmask) |
 		~lasat_board_info.li_eeprom_info.netmask;
 
 	sprintf(lasat_bcastaddr, "%d.%d.%d.%d",
@@ -192,24 +193,24 @@ int proc_lasat_ip(ctl_table *table, int write, struct file *filp,
 		return 0;
 	}
 
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	if (write) {
 		len = 0;
 		p = buffer;
 		while (len < *lenp) {
 			if(get_user(c, p++)) {
-				up(&lasat_info_sem);
+				mutex_unlock(&lasat_info_mutex);
 				return -EFAULT;
 			}
 			if (c == 0 || c == '\n')
 				break;
 			len++;
 		}
-		if (len >= sizeof(proc_lasat_ipbuf)-1) 
+		if (len >= sizeof(proc_lasat_ipbuf)-1)
 			len = sizeof(proc_lasat_ipbuf) - 1;
 		if (copy_from_user(proc_lasat_ipbuf, buffer, len))
 		{
-			up(&lasat_info_sem);
+			mutex_unlock(&lasat_info_mutex);
 			return -EFAULT;
 		}
 		proc_lasat_ipbuf[len] = 0;
@@ -230,12 +231,12 @@ int proc_lasat_ip(ctl_table *table, int write, struct file *filp,
 			len = *lenp;
 		if (len)
 			if(copy_to_user(buffer, proc_lasat_ipbuf, len)) {
-				up(&lasat_info_sem);
+				mutex_unlock(&lasat_info_mutex);
 				return -EFAULT;
 			}
 		if (len < *lenp) {
 			if(put_user('\n', ((char *) buffer) + len)) {
-				up(&lasat_info_sem);
+				mutex_unlock(&lasat_info_mutex);
 				return -EFAULT;
 			}
 			len++;
@@ -244,22 +245,22 @@ int proc_lasat_ip(ctl_table *table, int write, struct file *filp,
 		*ppos += len;
 	}
 	update_bcastaddr();
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 	return 0;
 }
 #endif /* defined(CONFIG_INET) */
 
-static int sysctl_lasat_eeprom_value(ctl_table *table, int *name, int nlen, 
-				     void *oldval, size_t *oldlenp, 
+static int sysctl_lasat_eeprom_value(ctl_table *table, int *name, int nlen,
+				     void *oldval, size_t *oldlenp,
 				     void *newval, size_t newlen,
 				     void **context)
 {
 	int r;
 
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	r = sysctl_intvec(table, name, nlen, oldval, oldlenp, newval, newlen, context);
 	if (r < 0) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 
@@ -271,7 +272,7 @@ static int sysctl_lasat_eeprom_value(ctl_table *table, int *name, int nlen,
 		lasat_write_eeprom_info();
 		lasat_init_board_info();
 	}
-	up(&lasat_info_sem);
+	mutex_unlock(&lasat_info_mutex);
 
 	return 0;
 }
@@ -280,10 +281,10 @@ int proc_lasat_eeprom_value(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
-	down(&lasat_info_sem);
+	mutex_lock(&lasat_info_mutex);
 	r = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if ( (!write) || r) {
-		up(&lasat_info_sem);
+		mutex_unlock(&lasat_info_mutex);
 		return r;
 	}
 	if (filp && filp->f_dentry)
@@ -293,8 +294,8 @@ int proc_lasat_eeprom_value(ctl_table *table, int write, struct file *filp,
 		if (!strcmp(filp->f_dentry->d_name.name, "debugaccess"))
 			lasat_board_info.li_eeprom_info.debugaccess = lasat_board_info.li_debugaccess;
 	}
-	lasat_write_eeprom_info();	
-	up(&lasat_info_sem);
+	lasat_write_eeprom_info();
+	mutex_unlock(&lasat_info_mutex);
 	return 0;
 }
 
@@ -316,8 +317,8 @@ static ctl_table lasat_table[] = {
 	 0644, NULL, &proc_lasat_ip, &sysctl_lasat_intvec},
 	{LASAT_NETMASK, "netmask", &lasat_board_info.li_eeprom_info.netmask, sizeof(int),
 	 0644, NULL, &proc_lasat_ip, &sysctl_lasat_intvec},
-	{LASAT_BCAST, "bcastaddr", &lasat_bcastaddr, 
-		sizeof(lasat_bcastaddr), 0600, NULL, 
+	{LASAT_BCAST, "bcastaddr", &lasat_bcastaddr,
+		sizeof(lasat_bcastaddr), 0600, NULL,
 		&proc_dostring, &sysctl_string},
 #endif
 	{LASAT_PASSWORD, "passwd_hash", &lasat_board_info.li_eeprom_info.passwd_hash, sizeof(lasat_board_info.li_eeprom_info.passwd_hash),

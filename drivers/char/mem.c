@@ -23,7 +23,11 @@
 #include <linux/devfs_fs_kernel.h>
 #include <linux/ptrace.h>
 #include <linux/device.h>
+#include <linux/highmem.h>
+#include <linux/crash_dump.h>
 #include <linux/backing-dev.h>
+#include <linux/bootmem.h>
+#include <linux/pipe_fs_i.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -31,26 +35,6 @@
 #ifdef CONFIG_IA64
 # include <linux/efi.h>
 #endif
-
-#if defined(CONFIG_S390_TAPE) && defined(CONFIG_S390_TAPE_CHAR)
-extern void tapechar_init(void);
-#endif
-
-static inline int range_is_allowed(unsigned long from, unsigned long to)
-{
-	unsigned long cursor;
-
-	cursor = from >> PAGE_SHIFT;
-	while ((cursor << PAGE_SHIFT) < to) {
-		if (!devmem_is_allowed(cursor)) {
-			printk ("Program %s tried to read /dev/mem between %lx->%lx."
-					"We stopped at %lx\n", current->comm, from, to, cursor);
-			return 0;
-		}
-		cursor++;
-	}
-	return 1;
-}
 
 /*
  * Architectures vary in how they handle caching for addresses
@@ -105,22 +89,36 @@ static inline int uncached_access(struct file *file, unsigned long addr)
 }
 
 #ifndef ARCH_HAS_VALID_PHYS_ADDR_RANGE
-static inline int valid_phys_addr_range(unsigned long addr, size_t *count)
+static inline int valid_phys_addr_range(unsigned long addr, size_t count)
 {
-	unsigned long end_mem;
-
-	end_mem = __pa(high_memory);
-	if (addr >= end_mem)
+	if (addr + count > __pa(high_memory))
 		return 0;
 
-	if (*count > end_mem - addr)
-		*count = end_mem - addr;
+	return 1;
+}
 
+static inline int valid_mmap_phys_addr_range(unsigned long addr, size_t size)
+{
 	return 1;
 }
 #endif
 
-#ifndef ARCH_HAS_DEV_MEM
+static inline int range_is_allowed(unsigned long from, unsigned long to)
+{
+	unsigned long cursor;
+
+	cursor = from >> PAGE_SHIFT;
+	while ((cursor << PAGE_SHIFT) < to) {
+		if (!devmem_is_allowed(cursor)) {
+			printk ("Program %s tried to read /dev/mem between %lx->%lx.\n",
+					current->comm, from, to);
+			return 0;
+		}
+		cursor++;
+	}
+	return 1;
+}
+
 /*
  * This funcion reads the *physical* memory. The f_pos points directly to the 
  * memory location. 
@@ -132,7 +130,7 @@ static ssize_t read_mem(struct file * file, char __user * buf,
 	ssize_t read, sz;
 	char *ptr;
 
-	if (!valid_phys_addr_range(p, &count))
+	if (!valid_phys_addr_range(p, count))
 		return -EFAULT;
 	read = 0;
 #ifdef __ARCH_HAS_NO_PAGE_ZERO_MAPPED
@@ -192,7 +190,7 @@ static ssize_t write_mem(struct file * file, const char __user * buf,
 	unsigned long copied;
 	void *ptr;
 
-	if (!valid_phys_addr_range(p, &count))
+	if (!valid_phys_addr_range(p, count))
 		return -EFAULT;
 
 	written = 0;
@@ -233,11 +231,9 @@ static ssize_t write_mem(struct file * file, const char __user * buf,
 			return -EPERM;
 		copied = copy_from_user(ptr, buf, sz);
 		if (copied) {
-			ssize_t ret;
-
-			ret = written + (sz - copied);
-			if (ret)
-				return ret;
+			written += sz - copied;
+			if (written)
+				break;
 			return -EFAULT;
 		}
 		buf += sz;
@@ -249,30 +245,37 @@ static ssize_t write_mem(struct file * file, const char __user * buf,
 	*ppos += written;
 	return written;
 }
+
+#ifndef __HAVE_PHYS_MEM_ACCESS_PROT
+static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+				     unsigned long size, pgprot_t vma_prot)
+{
+#ifdef pgprot_noncached
+	unsigned long offset = pfn << PAGE_SHIFT;
+
+	if (uncached_access(file, offset))
+		return pgprot_noncached(vma_prot);
+#endif
+	return vma_prot;
+}
 #endif
 
 static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
-#if defined(__HAVE_PHYS_MEM_ACCESS_PROT)
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	size_t size = vma->vm_end - vma->vm_start;
 
-	vma->vm_page_prot = phys_mem_access_prot(file, offset,
-						 vma->vm_end - vma->vm_start,
+	if (!valid_mmap_phys_addr_range(vma->vm_pgoff << PAGE_SHIFT, size))
+		return -EINVAL;
+
+	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
+						 size,
 						 vma->vm_page_prot);
-#elif defined(pgprot_noncached)
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
-	int uncached;
-
-	uncached = uncached_access(file, offset);
-	if (uncached)
-		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-#endif
 
 	/* Remap-pfn-range will mark the range VM_IO and VM_RESERVED */
 	if (remap_pfn_range(vma,
 			    vma->vm_start,
 			    vma->vm_pgoff,
-			    vma->vm_end-vma->vm_start,
+			    size,
 			    vma->vm_page_prot))
 		return -EAGAIN;
 	return 0;
@@ -280,7 +283,11 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 
 static int mmap_kmem(struct file * file, struct vm_area_struct * vma)
 {
-        unsigned long long val;
+	unsigned long pfn;
+
+	/* Turn a kernel-virtual address into a physical page frame */
+	pfn = __pa((u64)vma->vm_pgoff << PAGE_SHIFT) >> PAGE_SHIFT;
+
 	/*
 	 * RED-PEN: on some architectures there is more mapped memory
 	 * than available in mem_map which pfn_valid checks
@@ -288,12 +295,46 @@ static int mmap_kmem(struct file * file, struct vm_area_struct * vma)
 	 *
 	 * RED-PEN: vmalloc is not supported right now.
 	 */
-	if (!pfn_valid(vma->vm_pgoff))
+	if (!pfn_valid(pfn))
 		return -EIO;
-	val = (u64)vma->vm_pgoff << PAGE_SHIFT;
-	vma->vm_pgoff = __pa(val) >> PAGE_SHIFT;
+
+	vma->vm_pgoff = pfn;
 	return mmap_mem(file, vma);
 }
+
+#ifdef CONFIG_CRASH_DUMP
+/*
+ * Read memory corresponding to the old kernel.
+ */
+static ssize_t read_oldmem(struct file *file, char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	unsigned long pfn, offset;
+	size_t read = 0, csize;
+	int rc = 0;
+
+	while (count) {
+		pfn = *ppos / PAGE_SIZE;
+		if (pfn > saved_max_pfn)
+			return read;
+
+		offset = (unsigned long)(*ppos % PAGE_SIZE);
+		if (count > PAGE_SIZE - offset)
+			csize = PAGE_SIZE - offset;
+		else
+			csize = count;
+
+		rc = copy_oldmem_page(pfn, buf, csize, offset, 1);
+		if (rc < 0)
+			return rc;
+		buf += csize;
+		*ppos += csize;
+		read += csize;
+		count -= csize;
+	}
+	return read;
+}
+#endif
 
 extern long vread(char *buf, char *addr, unsigned long count);
 extern long vwrite(char *buf, char *addr, unsigned long count);
@@ -415,8 +456,11 @@ static ssize_t write_port(struct file * file, const char __user * buf,
 		return -EFAULT;
 	while (count-- > 0 && i < 65536) {
 		char c;
-		if (__get_user(c, tmp)) 
+		if (__get_user(c, tmp)) {
+			if (tmp > buf)
+				break;
 			return -EFAULT; 
+		}
 		outb(c,i);
 		i++;
 		tmp++;
@@ -436,6 +480,18 @@ static ssize_t write_null(struct file * file, const char __user * buf,
 			  size_t count, loff_t *ppos)
 {
 	return count;
+}
+
+static int pipe_to_null(struct pipe_inode_info *info, struct pipe_buffer *buf,
+			struct splice_desc *sd)
+{
+	return sd->len;
+}
+
+static ssize_t splice_write_null(struct pipe_inode_info *pipe,struct file *out,
+				 loff_t *ppos, size_t len, unsigned int flags)
+{
+	return splice_from_pipe(pipe, out, ppos, len, flags, pipe_to_null);
 }
 
 #ifdef CONFIG_MMU
@@ -593,7 +649,7 @@ static loff_t memory_lseek(struct file * file, loff_t offset, int orig)
 {
 	loff_t ret;
 
-	down(&file->f_dentry->d_inode->i_sem);
+	mutex_lock(&file->f_dentry->d_inode->i_mutex);
 	switch (orig) {
 		case 0:
 			file->f_pos = offset;
@@ -608,7 +664,7 @@ static loff_t memory_lseek(struct file * file, loff_t offset, int orig)
 		default:
 			ret = -EINVAL;
 	}
-	up(&file->f_dentry->d_inode->i_sem);
+	mutex_unlock(&file->f_dentry->d_inode->i_mutex);
 	return ret;
 }
 
@@ -623,8 +679,8 @@ static int open_port(struct inode * inode, struct file * filp)
 #define read_full       read_zero
 #define open_mem	open_port
 #define open_kmem	open_mem
+#define open_oldmem	open_mem
 
-#ifndef ARCH_HAS_DEV_MEM
 static struct file_operations mem_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_mem,
@@ -632,9 +688,6 @@ static struct file_operations mem_fops = {
 	.mmap		= mmap_mem,
 	.open		= open_mem,
 };
-#else
-extern struct file_operations mem_fops;
-#endif
 
 static struct file_operations kmem_fops = {
 	.llseek		= memory_lseek,
@@ -647,6 +700,7 @@ static struct file_operations null_fops = {
 	.llseek		= null_lseek,
 	.read		= read_null,
 	.write		= write_null,
+	.splice_write	= splice_write_null,
 };
 
 #if defined(CONFIG_ISA) || !defined(__mc68000__)
@@ -675,11 +729,18 @@ static struct file_operations full_fops = {
 	.write		= write_full,
 };
 
+#ifdef CONFIG_CRASH_DUMP
+static struct file_operations oldmem_fops = {
+	.read	= read_oldmem,
+	.open	= open_oldmem,
+};
+#endif
+
 static ssize_t kmsg_write(struct file * file, const char __user * buf,
 			  size_t count, loff_t *ppos)
 {
 	char *tmp;
-	int ret;
+	ssize_t ret;
 
 	tmp = kmalloc(count + 1, GFP_KERNEL);
 	if (tmp == NULL)
@@ -688,6 +749,9 @@ static ssize_t kmsg_write(struct file * file, const char __user * buf,
 	if (!copy_from_user(tmp, buf, count)) {
 		tmp[count] = 0;
 		ret = printk("%s", tmp);
+		if (ret > count)
+			/* printk can add a prefix */
+			ret = count;
 	}
 	kfree(tmp);
 	return ret;
@@ -730,6 +794,11 @@ static int memory_open(struct inode * inode, struct file * filp)
 		case 11:
 			filp->f_op = &kmsg_fops;
 			break;
+#ifdef CONFIG_CRASH_DUMP
+		case 12:
+			filp->f_op = &oldmem_fops;
+			break;
+#endif
 		default:
 			return -ENXIO;
 	}
@@ -746,7 +815,7 @@ static const struct {
 	unsigned int		minor;
 	char			*name;
 	umode_t			mode;
-	struct file_operations	*fops;
+	const struct file_operations	*fops;
 } devlist[] = { /* list of minor devices */
 	{1, "mem",     S_IRUSR | S_IWUSR | S_IRGRP, &mem_fops},
 	{3, "null",    S_IRUGO | S_IWUGO,           &null_fops},
@@ -758,9 +827,12 @@ static const struct {
 	{8, "random",  S_IRUGO | S_IWUSR,           &random_fops},
 	{9, "urandom", S_IRUGO | S_IWUSR,           &urandom_fops},
 	{11,"kmsg",    S_IRUGO | S_IWUSR,           &kmsg_fops},
+#ifdef CONFIG_CRASH_DUMP
+	{12,"oldmem",    S_IRUSR | S_IWUSR | S_IRGRP, &oldmem_fops},
+#endif
 };
 
-static struct class_simple *mem_class;
+static struct class *mem_class;
 
 static int __init chr_dev_init(void)
 {
@@ -769,9 +841,9 @@ static int __init chr_dev_init(void)
 	if (register_chrdev(MEM_MAJOR,"mem",&memory_fops))
 		printk("unable to get major %d for memory devs\n", MEM_MAJOR);
 
-	mem_class = class_simple_create(THIS_MODULE, "mem");
+	mem_class = class_create(THIS_MODULE, "mem");
 	for (i = 0; i < ARRAY_SIZE(devlist); i++) {
-		class_simple_device_add(mem_class,
+		class_device_create(mem_class, NULL,
 					MKDEV(MEM_MAJOR, devlist[i].minor),
 					NULL, devlist[i].name);
 		devfs_mk_cdev(MKDEV(MEM_MAJOR, devlist[i].minor),

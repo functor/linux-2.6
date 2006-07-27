@@ -15,7 +15,7 @@
 	.globl relocate_new_kernel
 relocate_new_kernel:
 	/* read the arguments and say goodbye to the stack */
-	movl  4(%esp), %ebx /* indirection_page */
+	movl  4(%esp), %ebx /* page_list */
 	movl  8(%esp), %ebp /* reboot_code_buffer */
 	movl  12(%esp), %edx /* start address */
 	movl  16(%esp), %ecx /* cpu_has_pae */
@@ -61,27 +61,29 @@ relocate_new_kernel:
 	movl	%eax, %cr3
 
 	/* Do the copies */
-	cld
-0:	/* top, read another word for the indirection page */
-	movl    %ebx, %ecx
+	movl	%ebx, %ecx
+	jmp	1f
+
+0:	/* top, read another word from the indirection page */
 	movl	(%ebx), %ecx
 	addl	$4, %ebx
+1:
 	testl	$0x1,   %ecx  /* is it a destination page */
-	jz	1f
+	jz	2f
 	movl	%ecx,	%edi
 	andl	$0xfffff000, %edi
 	jmp     0b
-1:
+2:
 	testl	$0x2,	%ecx  /* is it an indirection page */
-	jz	1f
+	jz	2f
 	movl	%ecx,	%ebx
 	andl	$0xfffff000, %ebx
 	jmp     0b
-1:
+2:
 	testl   $0x4,   %ecx /* is it the done indicator */
-	jz      1f
-	jmp     2f
-1:
+	jz      2f
+	jmp     3f
+2:
 	testl   $0x8,   %ecx /* is it the source indicator */
 	jz      0b	     /* Ignore it otherwise */
 	movl    %ecx,   %esi /* For every source page do a copy */
@@ -91,7 +93,7 @@ relocate_new_kernel:
 	rep ; movsl
 	jmp     0b
 
-2:
+3:
 
 	/* To be certain of avoiding problems with self-modifying code
 	 * I need to execute a serializing instruction here.

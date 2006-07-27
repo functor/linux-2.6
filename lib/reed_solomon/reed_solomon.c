@@ -1,22 +1,22 @@
-/* 
+/*
  * lib/reed_solomon/rslib.c
  *
  * Overview:
  *   Generic Reed Solomon encoder / decoder library
- *   
+ *
  * Copyright (C) 2004 Thomas Gleixner (tglx@linutronix.de)
  *
  * Reed Solomon code lifted from reed solomon library written by Phil Karn
  * Copyright 2002 Phil Karn, KA9Q
  *
- * $Id: rslib.c,v 1.5 2004/10/22 15:41:47 gleixner Exp $
+ * $Id: rslib.c,v 1.7 2005/11/07 11:14:59 gleixner Exp $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  *
  * Description:
- *	
+ *
  * The generic Reed Solomon library provides runtime configurable
  * encoding / decoding of RS codes.
  * Each user must call init_rs to get a pointer to a rs_control
@@ -25,11 +25,11 @@
  * If a structure is generated then the polynomial arrays for
  * fast encoding / decoding are built. This can take some time so
  * make sure not to call this function from a time critical path.
- * Usually a module / driver should initialize the necessary 
+ * Usually a module / driver should initialize the necessary
  * rs_control structure on module / driver init and release it
  * on exit.
- * The encoding puts the calculated syndrome into a given syndrome 
- * buffer. 
+ * The encoding puts the calculated syndrome into a given syndrome
+ * buffer.
  * The decoding is a two step process. The first step calculates
  * the syndrome over the received (data + syndrome) and calls the
  * second stage, which does the decoding / error correction itself.
@@ -44,14 +44,15 @@
 #include <linux/module.h>
 #include <linux/rslib.h>
 #include <linux/slab.h>
+#include <linux/mutex.h>
 #include <asm/semaphore.h>
 
 /* This list holds all currently allocated rs control structures */
 static LIST_HEAD (rslist);
 /* Protection for the list */
-static DECLARE_MUTEX(rslistlock);
+static DEFINE_MUTEX(rslistlock);
 
-/** 
+/**
  * rs_init - Initialize a Reed-Solomon codec
  *
  * @symsize:	symbol size, bits (1-8)
@@ -63,7 +64,7 @@ static DECLARE_MUTEX(rslistlock);
  * Allocate a control structure and the polynom arrays for faster
  * en/decoding. Fill the arrays according to the given parameters
  */
-static struct rs_control *rs_init(int symsize, int gfpoly, int fcr, 
+static struct rs_control *rs_init(int symsize, int gfpoly, int fcr,
 				   int prim, int nroots)
 {
 	struct rs_control *rs;
@@ -124,15 +125,15 @@ static struct rs_control *rs_init(int symsize, int gfpoly, int fcr,
 		/* Multiply rs->genpoly[] by  @**(root + x) */
 		for (j = i; j > 0; j--) {
 			if (rs->genpoly[j] != 0) {
-				rs->genpoly[j] = rs->genpoly[j -1] ^ 
-					rs->alpha_to[rs_modnn(rs, 
+				rs->genpoly[j] = rs->genpoly[j -1] ^
+					rs->alpha_to[rs_modnn(rs,
 					rs->index_of[rs->genpoly[j]] + root)];
 			} else
 				rs->genpoly[j] = rs->genpoly[j - 1];
 		}
 		/* rs->genpoly[0] can never be zero */
-		rs->genpoly[0] = 
-			rs->alpha_to[rs_modnn(rs, 
+		rs->genpoly[0] =
+			rs->alpha_to[rs_modnn(rs,
 				rs->index_of[rs->genpoly[0]] + root)];
 	}
 	/* convert rs->genpoly[] to index form for quicker encoding */
@@ -153,7 +154,7 @@ errrs:
 }
 
 
-/** 
+/**
  *  free_rs - Free the rs control structure, if its not longer used
  *
  *  @rs:	the control structure which is not longer used by the
@@ -161,7 +162,7 @@ errrs:
  */
 void free_rs(struct rs_control *rs)
 {
-	down(&rslistlock);
+	mutex_lock(&rslistlock);
 	rs->users--;
 	if(!rs->users) {
 		list_del(&rs->list);
@@ -170,22 +171,22 @@ void free_rs(struct rs_control *rs)
 		kfree(rs->genpoly);
 		kfree(rs);
 	}
-	up(&rslistlock);
+	mutex_unlock(&rslistlock);
 }
 
-/** 
+/**
  * init_rs - Find a matching or allocate a new rs control structure
  *
  *  @symsize:	the symbol size (number of bits)
  *  @gfpoly:	the extended Galois field generator polynomial coefficients,
  *		with the 0th coefficient in the low order bit. The polynomial
  *		must be primitive;
- *  @fcr:  	the first consecutive root of the rs code generator polynomial 
+ *  @fcr:  	the first consecutive root of the rs code generator polynomial
  *		in index form
  *  @prim:	primitive element to generate polynomial roots
  *  @nroots:	RS code generator polynomial degree (number of roots)
  */
-struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim, 
+struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim,
 			   int nroots)
 {
 	struct list_head	*tmp;
@@ -198,10 +199,10 @@ struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim,
     		return NULL;
 	if (prim <= 0 || prim >= (1<<symsize))
     		return NULL;
-	if (nroots < 0 || nroots >= (1<<symsize) || nroots > 8)
+	if (nroots < 0 || nroots >= (1<<symsize))
 		return NULL;
-	
-	down(&rslistlock);
+
+	mutex_lock(&rslistlock);
 
 	/* Walk through the list and look for a matching entry */
 	list_for_each(tmp, &rslist) {
@@ -211,9 +212,9 @@ struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim,
 		if (gfpoly != rs->gfpoly)
 			continue;
 		if (fcr != rs->fcr)
-			continue;	
+			continue;
 		if (prim != rs->prim)
-			continue;	
+			continue;
 		if (nroots != rs->nroots)
 			continue;
 		/* We have a matching one already */
@@ -227,18 +228,18 @@ struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim,
 		rs->users = 1;
 		list_add(&rs->list, &rslist);
 	}
-out:	
-	up(&rslistlock);
+out:
+	mutex_unlock(&rslistlock);
 	return rs;
 }
 
 #ifdef CONFIG_REED_SOLOMON_ENC8
-/** 
+/**
  *  encode_rs8 - Calculate the parity for data values (8bit data width)
  *
  *  @rs:	the rs control structure
  *  @data:	data field of a given type
- *  @len:	data length 
+ *  @len:	data length
  *  @par:	parity data, must be initialized by caller (usually all 0)
  *  @invmsk:	invert data mask (will be xored on data)
  *
@@ -246,7 +247,7 @@ out:
  *  symbol size > 8. The calling code must take care of encoding of the
  *  syndrome result for storage itself.
  */
-int encode_rs8(struct rs_control *rs, uint8_t *data, int len, uint16_t *par, 
+int encode_rs8(struct rs_control *rs, uint8_t *data, int len, uint16_t *par,
 	       uint16_t invmsk)
 {
 #include "encode_rs.c"
@@ -255,7 +256,7 @@ EXPORT_SYMBOL_GPL(encode_rs8);
 #endif
 
 #ifdef CONFIG_REED_SOLOMON_DEC8
-/** 
+/**
  *  decode_rs8 - Decode codeword (8bit data width)
  *
  *  @rs:	the rs control structure
@@ -273,7 +274,7 @@ EXPORT_SYMBOL_GPL(encode_rs8);
  *  syndrome result and the received parity before calling this code.
  */
 int decode_rs8(struct rs_control *rs, uint8_t *data, uint16_t *par, int len,
-	       uint16_t *s, int no_eras, int *eras_pos, uint16_t invmsk, 
+	       uint16_t *s, int no_eras, int *eras_pos, uint16_t invmsk,
 	       uint16_t *corr)
 {
 #include "decode_rs.c"
@@ -287,13 +288,13 @@ EXPORT_SYMBOL_GPL(decode_rs8);
  *
  *  @rs:	the rs control structure
  *  @data:	data field of a given type
- *  @len:	data length 
+ *  @len:	data length
  *  @par:	parity data, must be initialized by caller (usually all 0)
  *  @invmsk:	invert data mask (will be xored on data, not on parity!)
  *
  *  Each field in the data array contains up to symbol size bits of valid data.
  */
-int encode_rs16(struct rs_control *rs, uint16_t *data, int len, uint16_t *par, 
+int encode_rs16(struct rs_control *rs, uint16_t *data, int len, uint16_t *par,
 	uint16_t invmsk)
 {
 #include "encode_rs.c"
@@ -302,7 +303,7 @@ EXPORT_SYMBOL_GPL(encode_rs16);
 #endif
 
 #ifdef CONFIG_REED_SOLOMON_DEC16
-/** 
+/**
  *  decode_rs16 - Decode codeword (16bit data width)
  *
  *  @rs:	the rs control structure
@@ -312,13 +313,13 @@ EXPORT_SYMBOL_GPL(encode_rs16);
  *  @s:		syndrome data field (if NULL, syndrome is calculated)
  *  @no_eras:	number of erasures
  *  @eras_pos:	position of erasures, can be NULL
- *  @invmsk:	invert data mask (will be xored on data, not on parity!) 
+ *  @invmsk:	invert data mask (will be xored on data, not on parity!)
  *  @corr:	buffer to store correction bitmask on eras_pos
  *
  *  Each field in the data array contains up to symbol size bits of valid data.
  */
 int decode_rs16(struct rs_control *rs, uint16_t *data, uint16_t *par, int len,
-		uint16_t *s, int no_eras, int *eras_pos, uint16_t invmsk, 
+		uint16_t *s, int no_eras, int *eras_pos, uint16_t invmsk,
 		uint16_t *corr)
 {
 #include "decode_rs.c"

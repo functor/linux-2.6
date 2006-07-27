@@ -14,6 +14,8 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/timer.h>
+#include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/firmware.h>
 
 
@@ -170,7 +172,6 @@ static void fw_remove_class_device(struct class_device *class_dev)
 static struct class_device *class_dev;
 
 static struct device my_device = {
-	.name      = "Sample Device",
 	.bus_id    = "my_dev0",
 };
 

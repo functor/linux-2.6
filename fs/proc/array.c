@@ -74,9 +74,7 @@
 #include <linux/file.h>
 #include <linux/times.h>
 #include <linux/cpuset.h>
-#include <linux/vs_context.h>
-#include <linux/vs_network.h>
-#include <linux/vs_cvirt.h>
+#include <linux/rcupdate.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -137,8 +135,7 @@ static const char *task_state_array[] = {
 	"T (stopped)",		/*  4 */
 	"T (tracing stop)",	/*  8 */
 	"Z (zombie)",		/* 16 */
-	"X (dead)",		/* 32 */
-	"H (on hold)"		/* 64 */
+	"X (dead)"		/* 32 */
 };
 
 static inline const char * get_task_state(struct task_struct *tsk)
@@ -147,8 +144,7 @@ static inline const char * get_task_state(struct task_struct *tsk)
 					    TASK_INTERRUPTIBLE |
 					    TASK_UNINTERRUPTIBLE |
 					    TASK_STOPPED |
-					   TASK_TRACED |
-					   TASK_ONHOLD)) |
+					    TASK_TRACED)) |
 			(tsk->exit_state & (EXIT_ZOMBIE |
 					    EXIT_DEAD));
 	const char **p = &task_state_array[0];
@@ -164,13 +160,9 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 {
 	struct group_info *group_info;
 	int g;
-	pid_t pid, ptgid, tppid, tgid;
+	struct fdtable *fdt = NULL;
 
 	read_lock(&tasklist_lock);
-	tgid = vx_map_tgid(p->tgid);
-	pid = vx_map_pid(p->pid);
-	ptgid = vx_map_pid(p->group_leader->real_parent->tgid);
-	tppid = vx_map_pid(p->parent->pid);
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
 		"SleepAVG:\t%lu%%\n"
@@ -182,16 +174,21 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		"Gid:\t%d\t%d\t%d\t%d\n",
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
-		tgid, pid, (pid > 1) ? ptgid : 0,
-		pid_alive(p) && p->ptrace ? tppid : 0,
+	       	p->tgid,
+		p->pid, pid_alive(p) ? p->group_leader->real_parent->tgid : 0,
+		pid_alive(p) && p->ptrace ? p->parent->pid : 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);
 	task_lock(p);
+	rcu_read_lock();
+	if (p->files)
+		fdt = files_fdtable(p->files);
 	buffer += sprintf(buffer,
 		"FDSize:\t%d\n"
 		"Groups:\t",
-		p->files ? p->files->max_fds : 0);
+		fdt ? fdt->max_fds : 0);
+	rcu_read_unlock();
 
 	group_info = p->group_info;
 	get_group_info(group_info);
@@ -299,12 +296,6 @@ static inline char *task_cap(struct task_struct *p, char *buffer)
 int proc_pid_status(struct task_struct *task, char * buffer)
 {
 	char * orig = buffer;
-#ifdef	CONFIG_VSERVER_LEGACY
-	struct vx_info *vxi;
-#endif
-#ifdef	CONFIG_VSERVER_LEGACYNET
-	struct nx_info *nxi;
-#endif
 	struct mm_struct *mm = get_task_mm(task);
 
 	buffer = task_name(task, buffer);
@@ -317,47 +308,7 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	buffer = task_sig(task, buffer);
 	buffer = task_cap(task, buffer);
 	buffer = cpuset_task_status_allowed(task, buffer);
-
-	if (task_vx_flags(task, VXF_INFO_HIDE, 0))
-		goto skip;
-#ifdef	CONFIG_VSERVER_LEGACY
-	buffer += sprintf (buffer,"s_context: %d\n", vx_task_xid(task));
-	vxi = task_get_vx_info(task);
-	if (vxi) {
-		buffer += sprintf (buffer,"ctxflags: %08llx\n"
-			,(unsigned long long)vxi->vx_flags);
-		buffer += sprintf (buffer,"initpid: %d\n"
-			,vxi->vx_initpid);
-	} else {
-		buffer += sprintf (buffer,"ctxflags: none\n");
-		buffer += sprintf (buffer,"initpid: none\n");
-	}
-	put_vx_info(vxi);
-#else
-	buffer += sprintf (buffer,"VxID: %d\n", vx_task_xid(task));
-#endif
-#ifdef	CONFIG_VSERVER_LEGACYNET
-	nxi = task_get_nx_info(task);
-	if (nxi) {
-		int i;
-
-		buffer += sprintf (buffer,"ipv4root:");
-		for (i=0; i<nxi->nbipv4; i++){
-			buffer += sprintf (buffer," %08x/%08x"
-				,nxi->ipv4[i]
-				,nxi->mask[i]);
-		}
-		*buffer++ = '\n';
-		buffer += sprintf (buffer,"ipv4root_bcast: %08x\n"
-			,nxi->v4_bcast);
-	} else {
-		buffer += sprintf (buffer,"ipv4root: 0\n");
-		buffer += sprintf (buffer,"ipv4root_bcast: 0\n");
-	}
-	put_nx_info(nxi);
-#endif
-skip:
-#if defined(CONFIG_ARCH_S390)
+#if defined(CONFIG_S390)
 	buffer = task_show_regs(task, buffer);
 #endif
 	return buffer - orig;
@@ -371,7 +322,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	sigset_t sigign, sigcatch;
 	char state;
 	int res;
-	pid_t pid, ppid, pgid = -1, sid = -1;
+ 	pid_t ppid, pgid = -1, sid = -1;
 	int num_threads = 0;
 	struct mm_struct *mm;
 	unsigned long long start_time;
@@ -379,7 +330,6 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	unsigned long  min_flt = 0,  maj_flt = 0;
 	cputime_t cutime, cstime, utime, stime;
 	unsigned long rsslim = 0;
-	unsigned long it_real_value = 0;
 	struct task_struct *t;
 	char tcomm[sizeof(task->comm)];
 
@@ -435,13 +385,8 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 			utime = cputime_add(utime, task->signal->utime);
 			stime = cputime_add(stime, task->signal->stime);
 		}
-		it_real_value = task->signal->it_real_value;
 	}
-	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
-	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
-		task->group_leader->real_parent->tgid);
-	pgid = vx_info_map_pid(task->vx_info, pgid);
-
+	ppid = pid_alive(task) ? task->group_leader->real_parent->tgid : 0;
 	read_unlock(&tasklist_lock);
 
 	if (!whole || num_threads<2) {
@@ -466,25 +411,13 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	/* convert timespec -> nsec*/
 	start_time = (unsigned long long)task->start_time.tv_sec * NSEC_PER_SEC
 				+ task->start_time.tv_nsec;
-
 	/* convert nsec -> ticks */
 	start_time = nsec_to_clock_t(start_time);
 
-	/* fixup start time for virt uptime */
-	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
-		unsigned long long bias =
-			current->vx_info->cvirt.bias_clock;
-
-		if (start_time > bias)
-			start_time -= bias;
-		else
-			start_time = 0;
-	}
-
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
-%lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \
+%lu %lu %lu %lu %lu %ld %ld %ld %ld %d 0 %llu %lu %ld %lu %lu %lu %lu %lu \
 %lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu\n",
-		pid,
+		task->pid,
 		tcomm,
 		state,
 		ppid,
@@ -504,10 +437,9 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		priority,
 		nice,
 		num_threads,
-		jiffies_to_clock_t(it_real_value),
 		start_time,
 		vsize,
-		mm ? get_mm_counter(mm, rss) : 0, /* you might want to shift this left 3 */
+		mm ? get_mm_rss(mm) : 0,
 	        rsslim,
 		mm ? mm->start_code : 0,
 		mm ? mm->end_code : 0,

@@ -146,6 +146,7 @@ static int (*drives[4])[6] = {&drive0, &drive1, &drive2, &drive3};
 #include <linux/slab.h>
 #include <linux/mtio.h>
 #include <linux/device.h>
+#include <linux/sched.h>	/* current, TASK_*, schedule_timeout() */
 
 #include <asm/uaccess.h>
 
@@ -242,7 +243,7 @@ static struct file_operations pt_fops = {
 };
 
 /* sysfs class support */
-static struct class_simple *pt_class;
+static struct class *pt_class;
 
 static inline int status_reg(struct pi_adapter *pi)
 {
@@ -383,8 +384,7 @@ static int pt_atapi(struct pt_unit *tape, char *cmd, int dlen, char *buf, char *
 
 static void pt_sleep(int cs)
 {
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout(cs);
+	schedule_timeout_interruptible(cs);
 }
 
 static int pt_poll_dsc(struct pt_unit *tape, int pause, int tmo, char *msg)
@@ -943,7 +943,8 @@ static ssize_t pt_write(struct file *filp, const char __user *buf, size_t count,
 
 static int __init pt_init(void)
 {
-	int unit, err = 0;
+	int unit;
+	int err;
 
 	if (disable) {
 		err = -1;
@@ -955,15 +956,16 @@ static int __init pt_init(void)
 		goto out;
 	}
 
-	if (register_chrdev(major, name, &pt_fops)) {
+	err = register_chrdev(major, name, &pt_fops);
+	if (err < 0) {
 		printk("pt_init: unable to get major number %d\n", major);
 		for (unit = 0; unit < PT_UNITS; unit++)
 			if (pt[unit].present)
 				pi_release(pt[unit].pi);
-		err = -1;
 		goto out;
 	}
-	pt_class = class_simple_create(THIS_MODULE, "pt");
+	major = err;
+	pt_class = class_create(THIS_MODULE, "pt");
 	if (IS_ERR(pt_class)) {
 		err = PTR_ERR(pt_class);
 		goto out_chrdev;
@@ -972,29 +974,29 @@ static int __init pt_init(void)
 	devfs_mk_dir("pt");
 	for (unit = 0; unit < PT_UNITS; unit++)
 		if (pt[unit].present) {
-			class_simple_device_add(pt_class, MKDEV(major, unit), 
+			class_device_create(pt_class, NULL, MKDEV(major, unit),
 					NULL, "pt%d", unit);
 			err = devfs_mk_cdev(MKDEV(major, unit),
 				      S_IFCHR | S_IRUSR | S_IWUSR,
 				      "pt/%d", unit);
 			if (err) {
-				class_simple_device_remove(MKDEV(major, unit));
+				class_device_destroy(pt_class, MKDEV(major, unit));
 				goto out_class;
 			}
-			class_simple_device_add(pt_class, MKDEV(major, unit + 128),
+			class_device_create(pt_class, NULL, MKDEV(major, unit + 128),
 					NULL, "pt%dn", unit);
 			err = devfs_mk_cdev(MKDEV(major, unit + 128),
 				      S_IFCHR | S_IRUSR | S_IWUSR,
 				      "pt/%dn", unit);
 			if (err) {
-				class_simple_device_remove(MKDEV(major, unit + 128));
+				class_device_destroy(pt_class, MKDEV(major, unit + 128));
 				goto out_class;
 			}
 		}
 	goto out;
 
 out_class:
-	class_simple_destroy(pt_class);
+	class_destroy(pt_class);
 out_chrdev:
 	unregister_chrdev(major, "pt");
 out:
@@ -1006,12 +1008,12 @@ static void __exit pt_exit(void)
 	int unit;
 	for (unit = 0; unit < PT_UNITS; unit++)
 		if (pt[unit].present) {
-			class_simple_device_remove(MKDEV(major, unit));
+			class_device_destroy(pt_class, MKDEV(major, unit));
 			devfs_remove("pt/%d", unit);
-			class_simple_device_remove(MKDEV(major, unit + 128));
+			class_device_destroy(pt_class, MKDEV(major, unit + 128));
 			devfs_remove("pt/%dn", unit);
 		}
-	class_simple_destroy(pt_class);
+	class_destroy(pt_class);
 	devfs_remove("pt");
 	unregister_chrdev(major, name);
 	for (unit = 0; unit < PT_UNITS; unit++)

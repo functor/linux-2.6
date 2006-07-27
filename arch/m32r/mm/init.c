@@ -18,6 +18,7 @@
 #include <linux/highmem.h>
 #include <linux/bitops.h>
 #include <linux/nodemask.h>
+#include <linux/pfn.h>
 #include <asm/types.h>
 #include <asm/processor.h>
 #include <asm/page.h>
@@ -47,9 +48,11 @@ void show_mem(void)
 	printk("Mem-info:\n");
 	show_free_areas();
 	printk("Free swap:       %6ldkB\n",nr_swap_pages<<(PAGE_SHIFT-10));
-	for_each_pgdat(pgdat) {
+	for_each_online_pgdat(pgdat) {
+		unsigned long flags;
+		pgdat_resize_lock(pgdat, &flags);
 		for (i = 0; i < pgdat->node_spanned_pages; ++i) {
-			page = pgdat->node_mem_map + i;
+			page = pgdat_page_nr(pgdat, i);
 			total++;
 			if (PageHighMem(page))
 				highmem++;
@@ -60,6 +63,7 @@ void show_mem(void)
 			else if (page_count(page))
 				shared += page_count(page) - 1;
 		}
+		pgdat_resize_unlock(pgdat, &flags);
 	}
 	printk("%d pages of RAM\n", total);
 	printk("%d pages of HIGHMEM\n",highmem);
@@ -150,10 +154,14 @@ int __init reservedpages_count(void)
 	int reservedpages, nid, i;
 
 	reservedpages = 0;
-	for_each_online_node(nid)
+	for_each_online_node(nid) {
+		unsigned long flags;
+		pgdat_resize_lock(NODE_DATA(nid), &flags);
 		for (i = 0 ; i < MAX_LOW_PFN(nid) - START_PFN(nid) ; i++)
-			if (PageReserved(NODE_DATA(nid)->node_mem_map + i))
+			if (PageReserved(nid_page_nr(nid, i)))
 				reservedpages++;
+		pgdat_resize_unlock(NODE_DATA(nid), &flags);
+	}
 
 	return reservedpages;
 }
@@ -219,7 +227,7 @@ void free_initmem(void)
 	addr = (unsigned long)(&__init_begin);
 	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
-		set_page_count(virt_to_page(addr), 1);
+		init_page_count(virt_to_page(addr));
 		free_page(addr);
 		totalram_pages++;
 	}
@@ -237,7 +245,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 	unsigned long p;
 	for (p = start; p < end; p += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(p));
-		set_page_count(virt_to_page(p), 1);
+		init_page_count(virt_to_page(p));
 		free_page(p);
 		totalram_pages++;
 	}

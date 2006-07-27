@@ -11,6 +11,7 @@
 
 #include <linux/config.h>
 #include <linux/types.h>
+#include <linux/inetdevice.h>
 #include <linux/ip.h>
 #include <linux/timer.h>
 #include <linux/module.h>
@@ -18,6 +19,7 @@
 #include <net/protocol.h>
 #include <net/ip.h>
 #include <net/checksum.h>
+#include <net/route.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv4/ip_nat_rule.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
@@ -33,31 +35,19 @@ MODULE_DESCRIPTION("iptables MASQUERADE target module");
 #endif
 
 /* Lock protects masq region inside conntrack */
-static DECLARE_RWLOCK(masq_lock);
+static DEFINE_RWLOCK(masq_lock);
 
 /* FIXME: Multiple targets. --RR */
 static int
 masquerade_check(const char *tablename,
-		 const struct ipt_entry *e,
+		 const void *e,
+		 const struct xt_target *target,
 		 void *targinfo,
 		 unsigned int targinfosize,
 		 unsigned int hook_mask)
 {
 	const struct ip_nat_multi_range_compat *mr = targinfo;
 
-	if (strcmp(tablename, "nat") != 0) {
-		DEBUGP("masquerade_check: bad table `%s'.\n", tablename);
-		return 0;
-	}
-	if (targinfosize != IPT_ALIGN(sizeof(*mr))) {
-		DEBUGP("masquerade_check: size %u != %u.\n",
-		       targinfosize, sizeof(*mr));
-		return 0;
-	}
-	if (hook_mask & ~(1 << NF_IP_POST_ROUTING)) {
-		DEBUGP("masquerade_check: bad hooks %x.\n", hook_mask);
-		return 0;
-	}
 	if (mr->range[0].flags & IP_NAT_RANGE_MAP_IPS) {
 		DEBUGP("masquerade_check: bad MAP_IPS.\n");
 		return 0;
@@ -74,6 +64,7 @@ masquerade_target(struct sk_buff **pskb,
 		  const struct net_device *in,
 		  const struct net_device *out,
 		  unsigned int hooknum,
+		  const struct xt_target *target,
 		  const void *targinfo,
 		  void *userinfo)
 {
@@ -86,14 +77,15 @@ masquerade_target(struct sk_buff **pskb,
 
 	IP_NF_ASSERT(hooknum == NF_IP_POST_ROUTING);
 
-	/* FIXME: For the moment, don't do local packets, breaks
-	   testsuite for 2.3.49 --RR */
-	if ((*pskb)->sk)
-		return NF_ACCEPT;
-
 	ct = ip_conntrack_get(*pskb, &ctinfo);
 	IP_NF_ASSERT(ct && (ctinfo == IP_CT_NEW || ctinfo == IP_CT_RELATED
 	                    || ctinfo == IP_CT_RELATED + IP_CT_IS_REPLY));
+
+	/* Source address is 0.0.0.0 - locally generated packet that is
+	 * probably not supposed to be masqueraded.
+	 */
+	if (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.ip == 0)
+		return NF_ACCEPT;
 
 	mr = targinfo;
 	rt = (struct rtable *)(*pskb)->dst;
@@ -103,9 +95,9 @@ masquerade_target(struct sk_buff **pskb,
 		return NF_DROP;
 	}
 
-	WRITE_LOCK(&masq_lock);
+	write_lock_bh(&masq_lock);
 	ct->nat.masq_index = out->ifindex;
-	WRITE_UNLOCK(&masq_lock);
+	write_unlock_bh(&masq_lock);
 
 	/* Transfer from original range. */
 	newrange = ((struct ip_nat_range)
@@ -122,9 +114,9 @@ device_cmp(struct ip_conntrack *i, void *ifindex)
 {
 	int ret;
 
-	READ_LOCK(&masq_lock);
+	read_lock_bh(&masq_lock);
 	ret = (i->nat.masq_index == (int)(long)ifindex);
-	READ_UNLOCK(&masq_lock);
+	read_unlock_bh(&masq_lock);
 
 	return ret;
 }
@@ -176,11 +168,14 @@ static struct notifier_block masq_inet_notifier = {
 static struct ipt_target masquerade = {
 	.name		= "MASQUERADE",
 	.target		= masquerade_target,
+	.targetsize	= sizeof(struct ip_nat_multi_range_compat),
+	.table		= "nat",
+	.hooks		= 1 << NF_IP_POST_ROUTING,
 	.checkentry	= masquerade_check,
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ipt_masquerade_init(void)
 {
 	int ret;
 
@@ -196,12 +191,12 @@ static int __init init(void)
 	return ret;
 }
 
-static void __exit fini(void)
+static void __exit ipt_masquerade_fini(void)
 {
 	ipt_unregister_target(&masquerade);
 	unregister_netdevice_notifier(&masq_dev_notifier);
 	unregister_inetaddr_notifier(&masq_inet_notifier);	
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ipt_masquerade_init);
+module_exit(ipt_masquerade_fini);

@@ -7,6 +7,7 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/agp_backend.h>
+#include <asm/page.h>		/* PAGE_SIZE */
 #include "agp.h"
 
 #define ALI_AGPCTRL	0xb8
@@ -146,7 +147,7 @@ static void *m1541_alloc_page(struct agp_bridge_data *bridge)
 
 	if (!addr)
 		return NULL;
-	
+
 	pci_read_config_dword(agp_bridge->dev, ALI_CACHE_FLUSH_CTRL, &temp);
 	pci_write_config_dword(agp_bridge->dev, ALI_CACHE_FLUSH_CTRL,
 			(((temp & ALI_CACHE_FLUSH_ADDR_MASK) |

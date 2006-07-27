@@ -251,13 +251,12 @@ static struct file_operations lcd_fops = {
 };
 
 /*
- *  * usb class driver info in order to get a minor number from the usb core,
- *   * and to have the device registered with devfs and the driver core
- *    */
+ * usb class driver info in order to get a minor number from the usb core,
+ * and to have the device registered with the driver core
+ */
 static struct usb_class_driver lcd_class = {
-        .name =         "usb/lcd%d",
+        .name =         "lcd%d",
         .fops =         &lcd_fops,
-        .mode =         S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH,
         .minor_base =   USBLCD_MINOR,
 };
 
@@ -271,12 +270,11 @@ static int lcd_probe(struct usb_interface *interface, const struct usb_device_id
 	int retval = -ENOMEM;
 
 	/* allocate memory for our device state and initialize it */
-	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (dev == NULL) {
 		err("Out of memory");
 		goto error;
 	}
-	memset(dev, 0x00, sizeof(*dev));
 	kref_init(&dev->kref);
 
 	dev->udev = usb_get_dev(interface_to_usbdev(interface));
@@ -372,7 +370,6 @@ static void lcd_disconnect(struct usb_interface *interface)
 }
 
 static struct usb_driver lcd_driver = {
-	.owner =	THIS_MODULE,
 	.name =		"usblcd",
 	.probe =	lcd_probe,
 	.disconnect =	lcd_disconnect,

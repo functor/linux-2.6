@@ -188,6 +188,7 @@ extern void psycho_init(int, char *);
 extern void schizo_init(int, char *);
 extern void schizo_plus_init(int, char *);
 extern void tomatillo_init(int, char *);
+extern void sun4v_pci_init(int, char *);
 
 static struct {
 	char *model_name;
@@ -204,6 +205,7 @@ static struct {
 	{ "pci108e,8002", schizo_plus_init },
 	{ "SUNW,tomatillo", tomatillo_init },
 	{ "pci108e,a801", tomatillo_init },
+	{ "SUNW,sun4v-pci", sun4v_pci_init },
 };
 #define PCI_NUM_CONTROLLER_TYPES (sizeof(pci_controller_table) / \
 				  sizeof(pci_controller_table[0]))
@@ -283,6 +285,12 @@ int __init pcic_present(void)
 	return pci_controller_scan(pci_is_controller);
 }
 
+struct pci_iommu_ops *pci_iommu_ops;
+EXPORT_SYMBOL(pci_iommu_ops);
+
+extern struct pci_iommu_ops pci_sun4u_iommu_ops,
+	pci_sun4v_iommu_ops;
+
 /* Find each controller in the system, attach and initialize
  * software state structure for each and link into the
  * pci_controller_root.  Setup the controller enough such
@@ -290,6 +298,11 @@ int __init pcic_present(void)
  */
 static void __init pci_controller_probe(void)
 {
+	if (tlb_type == hypervisor)
+		pci_iommu_ops = &pci_sun4v_iommu_ops;
+	else
+		pci_iommu_ops = &pci_sun4u_iommu_ops;
+
 	printk("PCI: Probing for controllers.\n");
 
 	pci_controller_scan(pci_controller_init);
@@ -359,134 +372,17 @@ void pcibios_fixup_bus(struct pci_bus *pbus)
 	pbus->resource[1] = &pbm->mem_space;
 }
 
-int pci_claim_resource(struct pci_dev *pdev, int resource)
+struct resource *pcibios_select_root(struct pci_dev *pdev, struct resource *r)
 {
 	struct pci_pbm_info *pbm = pdev->bus->sysdata;
-	struct resource *res = &pdev->resource[resource];
-	struct resource *root;
+	struct resource *root = NULL;
 
-	if (!pbm)
-		return -EINVAL;
-
-	if (res->flags & IORESOURCE_IO)
+	if (r->flags & IORESOURCE_IO)
 		root = &pbm->io_space;
-	else
+	if (r->flags & IORESOURCE_MEM)
 		root = &pbm->mem_space;
 
-	pbm->parent->resource_adjust(pdev, res, root);
-
-	return request_resource(root, res);
-}
-
-/*
- * Given the PCI bus a device resides on, try to
- * find an acceptable resource allocation for a
- * specific device resource..
- */
-static int pci_assign_bus_resource(const struct pci_bus *bus,
-	struct pci_dev *dev,
-	struct resource *res,
-	unsigned long size,
-	unsigned long min,
-	int resno)
-{
-	unsigned int type_mask;
-	int i;
-
-	type_mask = IORESOURCE_IO | IORESOURCE_MEM;
-	for (i = 0 ; i < 4; i++) {
-		struct resource *r = bus->resource[i];
-		if (!r)
-			continue;
-
-		/* type_mask must match */
-		if ((res->flags ^ r->flags) & type_mask)
-			continue;
-
-		/* Ok, try it out.. */
-		if (allocate_resource(r, res, size, min, -1, size, NULL, NULL) < 0)
-			continue;
-
-		/* PCI config space updated by caller.  */
-		return 0;
-	}
-	return -EBUSY;
-}
-
-int pci_assign_resource(struct pci_dev *pdev, int resource)
-{
-	struct pcidev_cookie *pcp = pdev->sysdata;
-	struct pci_pbm_info *pbm = pcp->pbm;
-	struct resource *res = &pdev->resource[resource];
-	unsigned long min, size;
-	int err;
-
-	if (res->flags & IORESOURCE_IO)
-		min = pbm->io_space.start + 0x400UL;
-	else
-		min = pbm->mem_space.start;
-
-	size = res->end - res->start + 1;
-
-	err = pci_assign_bus_resource(pdev->bus, pdev, res, size, min, resource);
-
-	if (err < 0) {
-		printk("PCI: Failed to allocate resource %d for %s\n",
-		       resource, pci_name(pdev));
-	} else {
-		/* Update PCI config space. */
-		pbm->parent->base_address_update(pdev, resource);
-	}
-
-	return err;
-}
-
-/* Sort resources by alignment */
-void pdev_sort_resources(struct pci_dev *dev, struct resource_list *head)
-{
-	int i;
-
-	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
-		struct resource *r;
-		struct resource_list *list, *tmp;
-		unsigned long r_align;
-
-		r = &dev->resource[i];
-		r_align = r->end - r->start;
-		
-		if (!(r->flags) || r->parent)
-			continue;
-		if (!r_align) {
-			printk(KERN_WARNING "PCI: Ignore bogus resource %d "
-					    "[%lx:%lx] of %s\n",
-					    i, r->start, r->end, pci_name(dev));
-			continue;
-		}
-		r_align = (i < PCI_BRIDGE_RESOURCES) ? r_align + 1 : r->start;
-		for (list = head; ; list = list->next) {
-			unsigned long align = 0;
-			struct resource_list *ln = list->next;
-			int idx;
-
-			if (ln) {
-				idx = ln->res - &ln->dev->resource[0];
-				align = (idx < PCI_BRIDGE_RESOURCES) ?
-					ln->res->end - ln->res->start + 1 :
-					ln->res->start;
-			}
-			if (r_align > align) {
-				tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
-				if (!tmp)
-					panic("pdev_sort_resources(): "
-					      "kmalloc() failed!\n");
-				tmp->next = ln;
-				tmp->res = r;
-				tmp->dev = dev;
-				list->next = tmp;
-				break;
-			}
-		}
-	}
+	return root;
 }
 
 void pcibios_update_irq(struct pci_dev *pdev, int irq)
@@ -523,6 +419,7 @@ void pcibios_resource_to_bus(struct pci_dev *pdev, struct pci_bus_region *region
 	region->start = res->start - zero_res.start;
 	region->end = res->end - zero_res.start;
 }
+EXPORT_SYMBOL(pcibios_resource_to_bus);
 
 void pcibios_bus_to_resource(struct pci_dev *pdev, struct resource *res,
 			     struct pci_bus_region *region)
@@ -540,6 +437,7 @@ void pcibios_bus_to_resource(struct pci_dev *pdev, struct resource *res,
 
 	pbm->parent->resource_adjust(pdev, res, root);
 }
+EXPORT_SYMBOL(pcibios_bus_to_resource);
 
 char * __init pcibios_setup(char *str)
 {
@@ -735,8 +633,7 @@ static void __pci_mmap_set_flags(struct pci_dev *dev, struct vm_area_struct *vma
 static void __pci_mmap_set_pgprot(struct pci_dev *dev, struct vm_area_struct *vma,
 					     enum pci_mmap_state mmap_state)
 {
-	/* Our io_remap_page_range/io_remap_pfn_range takes care of this,
-	   do nothing. */
+	/* Our io_remap_pfn_range takes care of this, do nothing.  */
 }
 
 /* Perform the actual remap of the pages for a PCI device mapping, as appropriate
@@ -760,6 +657,7 @@ int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
 	__pci_mmap_set_flags(dev, vma, mmap_state);
 	__pci_mmap_set_pgprot(dev, vma, mmap_state);
 
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	ret = io_remap_pfn_range(vma, vma->vm_start,
 				 vma->vm_pgoff,
 				 vma->vm_end - vma->vm_start,
@@ -767,7 +665,6 @@ int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
 	if (ret)
 		return ret;
 
-	vma->vm_flags |= VM_IO;
 	return 0;
 }
 

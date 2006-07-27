@@ -85,7 +85,7 @@ static int pppoe_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 static int pppoe_xmit(struct ppp_channel *chan, struct sk_buff *skb);
 static int __pppoe_xmit(struct sock *sk, struct sk_buff *skb);
 
-static struct proto_ops pppoe_ops;
+static const struct proto_ops pppoe_ops;
 static DEFINE_RWLOCK(pppoe_hash_lock);
 
 static struct ppp_channel_ops pppoe_chan_ops;
@@ -337,8 +337,7 @@ static int pppoe_rcv_core(struct sock *sk, struct sk_buff *skb)
 	if (sk->sk_state & PPPOX_BOUND) {
 		struct pppoe_hdr *ph = (struct pppoe_hdr *) skb->nh.raw;
 		int len = ntohs(ph->length);
-		skb_pull(skb, sizeof(struct pppoe_hdr));
-		skb_postpull_rcsum(skb, ph, sizeof(*ph));
+		skb_pull_rcsum(skb, sizeof(struct pppoe_hdr));
 		if (pskb_trim_rcsum(skb, len))
 			goto abort_kfree;
 
@@ -377,13 +376,12 @@ abort_kfree:
  ***********************************************************************/
 static int pppoe_rcv(struct sk_buff *skb,
 		     struct net_device *dev,
-		     struct packet_type *pt)
+		     struct packet_type *pt,
+		     struct net_device *orig_dev)
 
 {
 	struct pppoe_hdr *ph;
 	struct pppox_sock *po;
-	struct sock *sk;
-	int ret;
 
 	if (!pskb_may_pull(skb, sizeof(struct pppoe_hdr)))
 		goto drop;
@@ -394,24 +392,8 @@ static int pppoe_rcv(struct sk_buff *skb,
 	ph = (struct pppoe_hdr *) skb->nh.raw;
 
 	po = get_item((unsigned long) ph->sid, eth_hdr(skb)->h_source);
-	if (!po) 
-		goto drop;
-
-	sk = sk_pppox(po);
-	bh_lock_sock(sk);
-
-	/* Socket state is unknown, must put skb into backlog. */
-	if (sock_owned_by_user(sk) != 0) {
-		sk_add_backlog(sk, skb);
-		ret = NET_RX_SUCCESS;
-	} else {
-		ret = pppoe_rcv_core(sk, skb);
-	}
-
-	bh_unlock_sock(sk);
-	sock_put(sk);
-
-	return ret;
+	if (po != NULL) 
+		return sk_receive_skb(sk_pppox(po), skb);
 drop:
 	kfree_skb(skb);
 out:
@@ -426,7 +408,8 @@ out:
  ***********************************************************************/
 static int pppoe_disc_rcv(struct sk_buff *skb,
 			  struct net_device *dev,
-			  struct packet_type *pt)
+			  struct packet_type *pt,
+			  struct net_device *orig_dev)
 
 {
 	struct pppoe_hdr *ph;
@@ -878,6 +861,9 @@ static int __pppoe_xmit(struct sock *sk, struct sk_buff *skb)
 		 * give dev_queue_xmit something it can free.
 		 */
 		skb2 = skb_clone(skb, GFP_ATOMIC);
+
+		if (skb2 == NULL)
+			goto abort;
 	}
 
 	ph = (struct pppoe_hdr *) skb_push(skb2, sizeof(struct pppoe_hdr));
@@ -1068,7 +1054,7 @@ static int __init pppoe_proc_init(void)
 {
 	struct proc_dir_entry *p;
 
-	p = create_proc_entry("pppoe", S_IRUGO, proc_net);
+	p = create_proc_entry("net/pppoe", S_IRUGO, NULL);
 	if (!p)
 		return -ENOMEM;
 
@@ -1079,9 +1065,7 @@ static int __init pppoe_proc_init(void)
 static inline int pppoe_proc_init(void) { return 0; }
 #endif /* CONFIG_PROC_FS */
 
-/* ->ioctl are set at pppox_create */
-
-static struct proto_ops pppoe_ops = {
+static const struct proto_ops pppoe_ops = {
     .family		= AF_PPPOX,
     .owner		= THIS_MODULE,
     .release		= pppoe_release,
@@ -1097,7 +1081,8 @@ static struct proto_ops pppoe_ops = {
     .getsockopt		= sock_no_getsockopt,
     .sendmsg		= pppoe_sendmsg,
     .recvmsg		= pppoe_recvmsg,
-    .mmap		= sock_no_mmap
+    .mmap		= sock_no_mmap,
+    .ioctl		= pppox_ioctl,
 };
 
 static struct pppox_proto pppoe_proto = {
@@ -1140,7 +1125,7 @@ static void __exit pppoe_exit(void)
 	dev_remove_pack(&pppoes_ptype);
 	dev_remove_pack(&pppoed_ptype);
 	unregister_netdevice_notifier(&pppoe_notifier);
-	remove_proc_entry("pppoe", proc_net);
+	remove_proc_entry("net/pppoe", NULL);
 	proto_unregister(&pppoe_sk_proto);
 }
 

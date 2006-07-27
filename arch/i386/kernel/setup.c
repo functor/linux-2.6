@@ -23,8 +23,10 @@
  * This file handles the architecture-dependent parts of initialization
  */
 
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/mmzone.h>
 #include <linux/tty.h>
 #include <linux/ioport.h>
 #include <linux/acpi.h>
@@ -32,6 +34,7 @@
 #include <linux/initrd.h>
 #include <linux/bootmem.h>
 #include <linux/seq_file.h>
+#include <linux/platform_device.h>
 #include <linux/console.h>
 #include <linux/mca.h>
 #include <linux/root_dev.h>
@@ -41,7 +44,14 @@
 #include <linux/init.h>
 #include <linux/edd.h>
 #include <linux/nodemask.h>
+#include <linux/kexec.h>
+#include <linux/crash_dump.h>
+#include <linux/dmi.h>
+#include <linux/pfn.h>
+
 #include <video/edid.h>
+
+#include <asm/apic.h>
 #include <asm/e820.h>
 #include <asm/mpspec.h>
 #include <asm/setup.h>
@@ -53,12 +63,15 @@
 #include "setup_arch_pre.h"
 #include <bios_ebda.h>
 
+/* Forward Declaration. */
+void __init find_max_pfn(void);
+
 /* This value is set up by the early boot code to point to the value
    immediately after the boot time page tables.  It contains a *physical*
    address, and must not be in the .bss segment! */
 unsigned long init_pg_tables_end __initdata = ~0UL;
 
-int disable_pse __initdata = 0;
+int disable_pse __devinitdata = 0;
 
 /*
  * Machine setup..
@@ -72,30 +85,37 @@ EXPORT_SYMBOL(efi_enabled);
 /* cpu data as detected by the assembly code in head.S */
 struct cpuinfo_x86 new_cpu_data __initdata = { 0, 0, 0, 0, -1, 1, 0, 0, -1 };
 /* common cpu data for all cpus */
-struct cpuinfo_x86 boot_cpu_data = { 0, 0, 0, 0, -1, 1, 0, 0, -1 };
+struct cpuinfo_x86 boot_cpu_data __read_mostly = { 0, 0, 0, 0, -1, 1, 0, 0, -1 };
+EXPORT_SYMBOL(boot_cpu_data);
 
 unsigned long mmu_cr4_features;
 
-#ifdef	CONFIG_ACPI_INTERPRETER
+#ifdef	CONFIG_ACPI
 	int acpi_disabled = 0;
 #else
 	int acpi_disabled = 1;
 #endif
 EXPORT_SYMBOL(acpi_disabled);
 
-#ifdef	CONFIG_ACPI_BOOT
+#ifdef	CONFIG_ACPI
 int __initdata acpi_force = 0;
 extern acpi_interrupt_flags	acpi_sci_flags;
 #endif
 
 /* for MCA, but anyone else can use it if they want */
 unsigned int machine_id;
+#ifdef CONFIG_MCA
+EXPORT_SYMBOL(machine_id);
+#endif
 unsigned int machine_submodel_id;
 unsigned int BIOS_revision;
 unsigned int mca_pentium_flag;
 
 /* For PCI or other memory-mapped resources */
 unsigned long pci_mem_start = 0x10000000;
+#ifdef CONFIG_PCI
+EXPORT_SYMBOL(pci_mem_start);
+#endif
 
 /* Boot loader ID as an integer, for the benefit of proc_dointvec */
 int bootloader_type;
@@ -107,18 +127,28 @@ static unsigned int highmem_pages = -1;
  * Setup options
  */
 struct drive_info_struct { char dummy[32]; } drive_info;
+#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_HD) || \
+    defined(CONFIG_BLK_DEV_IDE_MODULE) || defined(CONFIG_BLK_DEV_HD_MODULE)
+EXPORT_SYMBOL(drive_info);
+#endif
 struct screen_info screen_info;
+EXPORT_SYMBOL(screen_info);
 struct apm_info apm_info;
+EXPORT_SYMBOL(apm_info);
 struct sys_desc_table_struct {
 	unsigned short length;
 	unsigned char table[0];
 };
 struct edid_info edid_info;
+EXPORT_SYMBOL_GPL(edid_info);
 struct ist_info ist_info;
+#if defined(CONFIG_X86_SPEEDSTEP_SMI) || \
+	defined(CONFIG_X86_SPEEDSTEP_SMI_MODULE)
+EXPORT_SYMBOL(ist_info);
+#endif
 struct e820map e820;
 
 extern void early_cpu_init(void);
-extern void dmi_scan_machine(void);
 extern void generic_apic_probe(char *);
 extern int root_mountflags;
 
@@ -341,12 +371,16 @@ static void __init limit_regions(unsigned long long size)
 	int i;
 
 	if (efi_enabled) {
-		for (i = 0; i < memmap.nr_map; i++) {
-			current_addr = memmap.map[i].phys_addr +
-				       (memmap.map[i].num_pages << 12);
-			if (memmap.map[i].type == EFI_CONVENTIONAL_MEMORY) {
+		efi_memory_desc_t *md;
+		void *p;
+
+		for (p = memmap.map, i = 0; p < memmap.map_end;
+			p += memmap.desc_size, i++) {
+			md = p;
+			current_addr = md->phys_addr + (md->num_pages << 12);
+			if (md->type == EFI_CONVENTIONAL_MEMORY) {
 				if (current_addr >= size) {
-					memmap.map[i].num_pages -=
+					md->num_pages -=
 						(((current_addr-size) + PAGE_SIZE-1) >> PAGE_SHIFT);
 					memmap.nr_map = i + 1;
 					return;
@@ -355,14 +389,24 @@ static void __init limit_regions(unsigned long long size)
 		}
 	}
 	for (i = 0; i < e820.nr_map; i++) {
-		if (e820.map[i].type == E820_RAM) {
-			current_addr = e820.map[i].addr + e820.map[i].size;
-			if (current_addr >= size) {
-				e820.map[i].size -= current_addr-size;
-				e820.nr_map = i + 1;
-				return;
-			}
+		current_addr = e820.map[i].addr + e820.map[i].size;
+		if (current_addr < size)
+			continue;
+
+		if (e820.map[i].type != E820_RAM)
+			continue;
+
+		if (e820.map[i].addr >= size) {
+			/*
+			 * This region starts past the end of the
+			 * requested size, skip it completely.
+			 */
+			e820.nr_map = i;
+		} else {
+			e820.nr_map = i + 1;
+			e820.map[i].size -= current_addr - size;
 		}
+		return;
 	}
 }
 
@@ -711,6 +755,15 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 			if (to != command_line)
 				to--;
 			if (!memcmp(from+7, "exactmap", 8)) {
+#ifdef CONFIG_CRASH_DUMP
+				/* If we are doing a crash dump, we
+				 * still need to know the real mem
+				 * size before original memory map is
+				 * reset.
+				 */
+				find_max_pfn();
+				saved_max_pfn = max_pfn;
+#endif
 				from += 8+7;
 				e820.nr_map = 0;
 				userdef = 1;
@@ -756,7 +809,7 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 		}
 #endif
 
-#ifdef CONFIG_ACPI_BOOT
+#ifdef CONFIG_ACPI
 		/* "acpi=off" disables both ACPI table parsing and interpreter */
 		else if (!memcmp(from, "acpi=off", 8)) {
 			disable_acpi();
@@ -805,14 +858,55 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 #ifdef CONFIG_X86_IO_APIC
 		else if (!memcmp(from, "acpi_skip_timer_override", 24))
 			acpi_skip_timer_override = 1;
-#endif
 
-#ifdef CONFIG_X86_LOCAL_APIC
+		if (!memcmp(from, "disable_timer_pin_1", 19))
+			disable_timer_pin_1 = 1;
+		if (!memcmp(from, "enable_timer_pin_1", 18))
+			disable_timer_pin_1 = -1;
+
 		/* disable IO-APIC */
 		else if (!memcmp(from, "noapic", 6))
 			disable_ioapic_setup();
+#endif /* CONFIG_X86_IO_APIC */
+#endif /* CONFIG_ACPI */
+
+#ifdef CONFIG_X86_LOCAL_APIC
+		/* enable local APIC */
+		else if (!memcmp(from, "lapic", 5))
+			lapic_enable();
+
+		/* disable local APIC */
+		else if (!memcmp(from, "nolapic", 6))
+			lapic_disable();
 #endif /* CONFIG_X86_LOCAL_APIC */
-#endif /* CONFIG_ACPI_BOOT */
+
+#ifdef CONFIG_KEXEC
+		/* crashkernel=size@addr specifies the location to reserve for
+		 * a crash kernel.  By reserving this memory we guarantee
+		 * that linux never set's it up as a DMA target.
+		 * Useful for holding code to do something appropriate
+		 * after a kernel panic.
+		 */
+		else if (!memcmp(from, "crashkernel=", 12)) {
+			unsigned long size, base;
+			size = memparse(from+12, &from);
+			if (*from == '@') {
+				base = memparse(from+1, &from);
+				/* FIXME: Do I want a sanity check
+				 * to validate the memory range?
+				 */
+				crashk_res.start = base;
+				crashk_res.end   = base + size - 1;
+			}
+		}
+#endif
+#ifdef CONFIG_PROC_VMCORE
+		/* elfcorehdr= specifies the location of elf core header
+		 * stored by the crashed kernel.
+		 */
+		else if (!memcmp(from, "elfcorehdr=", 11))
+			elfcorehdr_addr = memparse(from+11, &from);
+#endif
 
 		/*
 		 * highmem=size forces highmem to be exactly 'size' bytes.
@@ -862,6 +956,44 @@ efi_find_max_pfn(unsigned long start, unsigned long end, void *arg)
 	return 0;
 }
 
+static int __init
+efi_memory_present_wrapper(unsigned long start, unsigned long end, void *arg)
+{
+	memory_present(0, start, end);
+	return 0;
+}
+
+ /*
+  * This function checks if the entire range <start,end> is mapped with type.
+  *
+  * Note: this function only works correct if the e820 table is sorted and
+  * not-overlapping, which is the case
+  */
+int __init
+e820_all_mapped(unsigned long s, unsigned long e, unsigned type)
+{
+	u64 start = s;
+	u64 end = e;
+	int i;
+	for (i = 0; i < e820.nr_map; i++) {
+		struct e820entry *ei = &e820.map[i];
+		if (type && ei->type != type)
+			continue;
+		/* is the region (part) in overlap with the current region ?*/
+		if (ei->addr >= end || ei->addr + ei->size <= start)
+			continue;
+		/* if the region is at the beginning of <start,end> we move
+		 * start to the end of the region since it's ok until there
+		 */
+		if (ei->addr <= start)
+			start = ei->addr + ei->size;
+		/* if start is now at or beyond end, we're done, full
+		 * coverage */
+		if (start >= end)
+			return 1; /* we're done */
+	}
+	return 0;
+}
 
 /*
  * Find the highest page frame number we have available
@@ -873,6 +1005,7 @@ void __init find_max_pfn(void)
 	max_pfn = 0;
 	if (efi_enabled) {
 		efi_memmap_walk(efi_find_max_pfn, &max_pfn);
+		efi_memmap_walk(efi_memory_present_wrapper, NULL);
 		return;
 	}
 
@@ -887,6 +1020,7 @@ void __init find_max_pfn(void)
 			continue;
 		if (end > max_pfn)
 			max_pfn = end;
+		memory_present(0, start, end);
 	}
 }
 
@@ -958,10 +1092,10 @@ static int __init
 free_available_memory(unsigned long start, unsigned long end, void *arg)
 {
 	/* check max_low_pfn */
-	if (start >= ((max_low_pfn + 1) << PAGE_SHIFT))
+	if (start >= (max_low_pfn << PAGE_SHIFT))
 		return 0;
-	if (end >= ((max_low_pfn + 1) << PAGE_SHIFT))
-		end = (max_low_pfn + 1) << PAGE_SHIFT;
+	if (end >= (max_low_pfn << PAGE_SHIFT))
+		end = max_low_pfn << PAGE_SHIFT;
 	if (start < end)
 		free_bootmem(start, end - start);
 
@@ -1022,7 +1156,7 @@ static void __init reserve_ebda_region(void)
 		reserve_bootmem(addr, PAGE_SIZE);	
 }
 
-#ifndef CONFIG_DISCONTIGMEM
+#ifndef CONFIG_NEED_MULTIPLE_NODES
 void __init setup_bootmem_allocator(void);
 static unsigned long __init setup_memory(void)
 {
@@ -1072,9 +1206,9 @@ void __init zone_sizes_init(void)
 	free_area_init(zones_size);
 }
 #else
-extern unsigned long setup_memory(void);
+extern unsigned long __init setup_memory(void);
 extern void zone_sizes_init(void);
-#endif /* !CONFIG_DISCONTIGMEM */
+#endif /* !CONFIG_NEED_MULTIPLE_NODES */
 
 void __init setup_bootmem_allocator(void)
 {
@@ -1092,8 +1226,8 @@ void __init setup_bootmem_allocator(void)
 	 * the (very unlikely) case of us accidentally initializing the
 	 * bootmem allocator with an invalid RAM area.
 	 */
-	reserve_bootmem(HIGH_MEMORY, (PFN_PHYS(min_low_pfn) +
-			 bootmap_size + PAGE_SIZE-1) - (HIGH_MEMORY));
+	reserve_bootmem(__PHYSICAL_START, (PFN_PHYS(min_low_pfn) +
+			 bootmap_size + PAGE_SIZE-1) - (__PHYSICAL_START));
 
 	/*
 	 * reserve physical page 0 - it's a special BIOS page on many boxes,
@@ -1149,6 +1283,11 @@ void __init setup_bootmem_allocator(void)
 		}
 	}
 #endif
+#ifdef CONFIG_KEXEC
+	if (crashk_res.start != crashk_res.end)
+		reserve_bootmem(crashk_res.start,
+			crashk_res.end - crashk_res.start + 1);
+#endif
 }
 
 /*
@@ -1183,7 +1322,7 @@ legacy_init_iomem_resources(struct resource *code_resource, struct resource *dat
 		struct resource *res;
 		if (e820.map[i].addr + e820.map[i].size > 0x100000000ULL)
 			continue;
-		res = alloc_bootmem_low(sizeof(struct resource));
+		res = kzalloc(sizeof(struct resource), GFP_ATOMIC);
 		switch (e820.map[i].type) {
 		case E820_RAM:	res->name = "System RAM"; break;
 		case E820_ACPI:	res->name = "ACPI Tables"; break;
@@ -1202,19 +1341,24 @@ legacy_init_iomem_resources(struct resource *code_resource, struct resource *dat
 			 */
 			request_resource(res, code_resource);
 			request_resource(res, data_resource);
+#ifdef CONFIG_KEXEC
+			request_resource(res, &crashk_res);
+#endif
 		}
 	}
 }
 
 /*
  * Request address space for all standard resources
+ *
+ * This is called just before pcibios_init(), which is also a
+ * subsys_initcall, but is linked in later (in arch/i386/pci/common.c).
  */
-static void __init register_memory(void)
+static int __init request_standard_resources(void)
 {
-	unsigned long gapstart, gapsize;
-	unsigned long long last;
-	int	      i;
+	int i;
 
+	printk("Setting up standard PCI resources\n");
 	if (efi_enabled)
 		efi_initialize_iomem_resources(&code_resource, &data_resource);
 	else
@@ -1226,6 +1370,16 @@ static void __init register_memory(void)
 	/* request I/O space for devices used on all i[345]86 PCs */
 	for (i = 0; i < STANDARD_IO_RESOURCES; i++)
 		request_resource(&ioport_resource, &standard_io_resources[i]);
+	return 0;
+}
+
+subsys_initcall(request_standard_resources);
+
+static void __init register_memory(void)
+{
+	unsigned long gapstart, gapsize, round;
+	unsigned long long last;
+	int i;
 
 	/*
 	 * Search for the bigest gap in the low 32 bits of the e820
@@ -1256,125 +1410,18 @@ static void __init register_memory(void)
 	}
 
 	/*
-	 * Start allocating dynamic PCI memory a bit into the gap,
-	 * aligned up to the nearest megabyte.
-	 *
-	 * Question: should we try to pad it up a bit (do something
-	 * like " + (gapsize >> 3)" in there too?). We now have the
-	 * technology.
+	 * See how much we want to round up: start off with
+	 * rounding to the next 1MB area.
 	 */
-	pci_mem_start = (gapstart + 0xfffff) & ~0xfffff;
+	round = 0x100000;
+	while ((gapsize >> 4) > round)
+		round += round;
+	/* Fun with two's complement */
+	pci_mem_start = (gapstart + round) & -round;
 
 	printk("Allocating PCI resources starting at %08lx (gap: %08lx:%08lx)\n",
 		pci_mem_start, gapstart, gapsize);
 }
-
-/* Use inline assembly to define this because the nops are defined 
-   as inline assembly strings in the include files and we cannot 
-   get them easily into strings. */
-asm("\t.data\nintelnops: " 
-    GENERIC_NOP1 GENERIC_NOP2 GENERIC_NOP3 GENERIC_NOP4 GENERIC_NOP5 GENERIC_NOP6
-    GENERIC_NOP7 GENERIC_NOP8); 
-asm("\t.data\nk8nops: " 
-    K8_NOP1 K8_NOP2 K8_NOP3 K8_NOP4 K8_NOP5 K8_NOP6
-    K8_NOP7 K8_NOP8); 
-asm("\t.data\nk7nops: " 
-    K7_NOP1 K7_NOP2 K7_NOP3 K7_NOP4 K7_NOP5 K7_NOP6
-    K7_NOP7 K7_NOP8); 
-    
-extern unsigned char intelnops[], k8nops[], k7nops[];
-static unsigned char *intel_nops[ASM_NOP_MAX+1] = { 
-     NULL,
-     intelnops,
-     intelnops + 1,
-     intelnops + 1 + 2,
-     intelnops + 1 + 2 + 3,
-     intelnops + 1 + 2 + 3 + 4,
-     intelnops + 1 + 2 + 3 + 4 + 5,
-     intelnops + 1 + 2 + 3 + 4 + 5 + 6,
-     intelnops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
-}; 
-static unsigned char *k8_nops[ASM_NOP_MAX+1] = { 
-     NULL,
-     k8nops,
-     k8nops + 1,
-     k8nops + 1 + 2,
-     k8nops + 1 + 2 + 3,
-     k8nops + 1 + 2 + 3 + 4,
-     k8nops + 1 + 2 + 3 + 4 + 5,
-     k8nops + 1 + 2 + 3 + 4 + 5 + 6,
-     k8nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
-}; 
-static unsigned char *k7_nops[ASM_NOP_MAX+1] = { 
-     NULL,
-     k7nops,
-     k7nops + 1,
-     k7nops + 1 + 2,
-     k7nops + 1 + 2 + 3,
-     k7nops + 1 + 2 + 3 + 4,
-     k7nops + 1 + 2 + 3 + 4 + 5,
-     k7nops + 1 + 2 + 3 + 4 + 5 + 6,
-     k7nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
-}; 
-static struct nop { 
-     int cpuid; 
-     unsigned char **noptable; 
-} noptypes[] = { 
-     { X86_FEATURE_K8, k8_nops }, 
-     { X86_FEATURE_K7, k7_nops }, 
-     { -1, NULL }
-}; 
-
-/* Replace instructions with better alternatives for this CPU type.
-
-   This runs before SMP is initialized to avoid SMP problems with
-   self modifying code. This implies that assymetric systems where
-   APs have less capabilities than the boot processor are not handled. 
-   In this case boot with "noreplacement". */ 
-void apply_alternatives(void *start, void *end) 
-{ 
-	struct alt_instr *a; 
-	int diff, i, k;
-        unsigned char **noptable = intel_nops; 
-	for (i = 0; noptypes[i].cpuid >= 0; i++) { 
-		if (boot_cpu_has(noptypes[i].cpuid)) { 
-			noptable = noptypes[i].noptable;
-			break;
-		}
-	} 
-	for (a = start; (void *)a < end; a++) { 
-		if (!boot_cpu_has(a->cpuid))
-			continue;
-		BUG_ON(a->replacementlen > a->instrlen); 
-		memcpy(a->instr, a->replacement, a->replacementlen); 
-		diff = a->instrlen - a->replacementlen; 
-		/* Pad the rest with nops */
-		for (i = a->replacementlen; diff > 0; diff -= k, i += k) {
-			k = diff;
-			if (k > ASM_NOP_MAX)
-				k = ASM_NOP_MAX;
-			memcpy(a->instr + i, noptable[k], k); 
-		} 
-	}
-} 
-
-static int no_replacement __initdata = 0; 
- 
-void __init alternative_instructions(void)
-{
-	extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
-	if (no_replacement) 
-		return;
-	apply_alternatives(__alt_instructions, __alt_instructions_end);
-}
-
-static int __init noreplacement_setup(char *s)
-{ 
-     no_replacement = 1; 
-     return 0; 
-} 
-
-__setup("noreplacement", noreplacement_setup); 
 
 static char * __init machine_specific_memory_setup(void);
 
@@ -1458,6 +1505,16 @@ void __init setup_arch(char **cmdline_p)
 
 	parse_cmdline_early(cmdline_p);
 
+#ifdef CONFIG_EARLY_PRINTK
+	{
+		char *s = strstr(*cmdline_p, "earlyprintk=");
+		if (s) {
+			setup_early_printk(strchr(s, '=') + 1);
+			printk("early console enabled\n");
+		}
+	}
+#endif
+
 	max_low_pfn = setup_memory();
 
 	/*
@@ -1475,24 +1532,12 @@ void __init setup_arch(char **cmdline_p)
 #endif
 	paging_init();
 	remapped_pgdat_init();
+	sparse_init();
 	zone_sizes_init();
 
 	/*
 	 * NOTE: at this point the bootmem allocator is fully available.
 	 */
-
-#ifdef CONFIG_EARLY_PRINTK
-	{
-		char *s = strstr(*cmdline_p, "earlyprintk=");
-		if (s) {
-			extern void setup_early_printk(char *);
-
-			setup_early_printk(s);
-			printk("early console enabled\n");
-		}
-	}
-#endif
-
 
 	dmi_scan_machine();
 
@@ -1502,14 +1547,27 @@ void __init setup_arch(char **cmdline_p)
 	if (efi_enabled)
 		efi_map_memmap();
 
-#ifdef CONFIG_ACPI_BOOT
+#ifdef CONFIG_ACPI
 	/*
 	 * Parse the ACPI tables for possible boot-time SMP configuration.
 	 */
 	acpi_boot_table_init();
-	acpi_boot_init();
 #endif
 
+#ifdef CONFIG_X86_IO_APIC
+	check_acpi_pci();	/* Checks more than just ACPI actually */
+#endif
+
+#ifdef CONFIG_ACPI
+	acpi_boot_init();
+
+#if defined(CONFIG_SMP) && defined(CONFIG_X86_PC)
+	if (def_to_bigsmp)
+		printk(KERN_WARNING "More than 8 CPUs detected and "
+			"CONFIG_X86_PC cannot handle it.\nUse "
+			"CONFIG_X86_GENERICARCH or CONFIG_X86_BIGSMP.\n");
+#endif
+#endif
 #ifdef CONFIG_X86_LOCAL_APIC
 	if (smp_found_config)
 		get_smp_config();
@@ -1526,6 +1584,23 @@ void __init setup_arch(char **cmdline_p)
 #endif
 #endif
 }
+
+static __init int add_pcspkr(void)
+{
+	struct platform_device *pd;
+	int ret;
+
+	pd = platform_device_alloc("pcspkr", -1);
+	if (!pd)
+		return -ENOMEM;
+
+	ret = platform_device_add(pd);
+	if (ret)
+		platform_device_put(pd);
+
+	return ret;
+}
+device_initcall(add_pcspkr);
 
 #include "setup_arch_post.h"
 /*

@@ -17,7 +17,7 @@
  *
  * Documentation about PPTP can be found in RFC 2637
  *
- * (C) 2000-2004 by Harald Welte <laforge@gnumonks.org>
+ * (C) 2000-2005 by Harald Welte <laforge@gnumonks.org>
  *
  * Development of this code funded by Astaro AG (http://www.astaro.com/)
  *
@@ -36,8 +36,8 @@ MODULE_AUTHOR("Harald Welte <laforge@gnumonks.org>");
 MODULE_DESCRIPTION("Netfilter NAT protocol helper module for GRE");
 
 #if 0
-#define DEBUGP(format, args...) printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ \
-				       ": " format, ## args)
+#define DEBUGP(format, args...) printk(KERN_DEBUG "%s:%s: " format, __FILE__, \
+				       __FUNCTION__, ## args)
 #else
 #define DEBUGP(x, args...)
 #endif
@@ -49,15 +49,15 @@ gre_in_range(const struct ip_conntrack_tuple *tuple,
 	     const union ip_conntrack_manip_proto *min,
 	     const union ip_conntrack_manip_proto *max)
 {
-	u_int32_t key;
+	__be16 key;
 
 	if (maniptype == IP_NAT_MANIP_SRC)
 		key = tuple->src.u.gre.key;
 	else
 		key = tuple->dst.u.gre.key;
 
-	return ntohl(key) >= ntohl(min->gre.key)
-		&& ntohl(key) <= ntohl(max->gre.key);
+	return ntohs(key) >= ntohs(min->gre.key)
+		&& ntohs(key) <= ntohs(max->gre.key);
 }
 
 /* generate unique tuple ... */
@@ -67,8 +67,9 @@ gre_unique_tuple(struct ip_conntrack_tuple *tuple,
 		 enum ip_nat_manip_type maniptype,
 		 const struct ip_conntrack *conntrack)
 {
-	u_int32_t min, i, range_size;
-	u_int32_t key = 0, *keyptr;
+	static u_int16_t key;
+	u_int16_t *keyptr;
+	unsigned int min, i, range_size;
 
 	if (maniptype == IP_NAT_MANIP_SRC)
 		keyptr = &tuple->src.u.gre.key;
@@ -80,14 +81,14 @@ gre_unique_tuple(struct ip_conntrack_tuple *tuple,
 		min = 1;
 		range_size = 0xffff;
 	} else {
-		min = ntohl(range->min.gre.key);
-		range_size = ntohl(range->max.gre.key) - min + 1;
+		min = ntohs(range->min.gre.key);
+		range_size = ntohs(range->max.gre.key) - min + 1;
 	}
 
 	DEBUGP("min = %u, range_size = %u\n", min, range_size); 
 
 	for (i = 0; i < range_size; i++, key++) {
-		*keyptr = htonl(min + key % range_size);
+		*keyptr = htons(min + key % range_size);
 		if (!ip_nat_used_tuple(tuple, conntrack))
 			return 1;
 	}
@@ -100,14 +101,18 @@ gre_unique_tuple(struct ip_conntrack_tuple *tuple,
 /* manipulate a GRE packet according to maniptype */
 static int
 gre_manip_pkt(struct sk_buff **pskb,
-	      unsigned int hdroff,
-	      const struct ip_conntrack_manip *manip,
+	      unsigned int iphdroff,
+	      const struct ip_conntrack_tuple *tuple,
 	      enum ip_nat_manip_type maniptype)
 {
 	struct gre_hdr *greh;
 	struct gre_hdr_pptp *pgreh;
+	struct iphdr *iph = (struct iphdr *)((*pskb)->data + iphdroff);
+	unsigned int hdroff = iphdroff + iph->ihl*4;
 
-	if (!skb_ip_make_writable(pskb, hdroff + sizeof(*pgreh)))
+	/* pgreh includes two optional 32bit fields which are not required
+	 * to be there.  That's where the magic '8' comes from */
+	if (!skb_make_writable(pskb, hdroff + sizeof(*pgreh)-8))
 		return 0;
 
 	greh = (void *)(*pskb)->data + hdroff;
@@ -127,15 +132,15 @@ gre_manip_pkt(struct sk_buff **pskb,
 				/* FIXME: Never tested this code... */
 				*(gre_csum(greh)) = 
 					ip_nat_cheat_check(~*(gre_key(greh)),
-							manip->u.gre.key,
+							tuple->dst.u.gre.key,
 							*(gre_csum(greh)));
 			}
-			*(gre_key(greh)) = manip->u.gre.key;
+			*(gre_key(greh)) = tuple->dst.u.gre.key;
 			break;
 		case GRE_VERSION_PPTP:
 			DEBUGP("call_id -> 0x%04x\n", 
-				ntohl(manip->u.gre.key));
-			pgreh->call_id = htons(ntohl(manip->u.gre.key));
+				ntohs(tuple->dst.u.gre.key));
+			pgreh->call_id = tuple->dst.u.gre.key;
 			break;
 		default:
 			DEBUGP("can't nat unknown GRE version\n");
@@ -146,42 +151,6 @@ gre_manip_pkt(struct sk_buff **pskb,
 	return 1;
 }
 
-/* print out a nat tuple */
-static unsigned int 
-gre_print(char *buffer, 
-	  const struct ip_conntrack_tuple *match,
-	  const struct ip_conntrack_tuple *mask)
-{
-	unsigned int len = 0;
-
-	if (mask->src.u.gre.key)
-		len += sprintf(buffer + len, "srckey=0x%x ", 
-				ntohl(match->src.u.gre.key));
-
-	if (mask->dst.u.gre.key)
-		len += sprintf(buffer + len, "dstkey=0x%x ",
-				ntohl(match->src.u.gre.key));
-
-	return len;
-}
-
-/* print a range of keys */
-static unsigned int 
-gre_print_range(char *buffer, const struct ip_nat_range *range)
-{
-	if (range->min.gre.key != 0 
-	    || range->max.gre.key != 0xFFFF) {
-		if (range->min.gre.key == range->max.gre.key)
-			return sprintf(buffer, "key 0x%x ",
-					ntohl(range->min.gre.key));
-		else
-			return sprintf(buffer, "keys 0x%u-0x%u ",
-					ntohl(range->min.gre.key),
-					ntohl(range->max.gre.key));
-	} else
-		return 0;
-}
-
 /* nat helper struct */
 static struct ip_nat_protocol gre = { 
 	.name		= "GRE", 
@@ -189,22 +158,19 @@ static struct ip_nat_protocol gre = {
 	.manip_pkt	= gre_manip_pkt,
 	.in_range	= gre_in_range,
 	.unique_tuple	= gre_unique_tuple,
-	.print		= gre_print,
-	.print_range	= gre_print_range 
+#if defined(CONFIG_IP_NF_CONNTRACK_NETLINK) || \
+    defined(CONFIG_IP_NF_CONNTRACK_NETLINK_MODULE)
+	.range_to_nfattr	= ip_nat_port_range_to_nfattr,
+	.nfattr_to_range	= ip_nat_port_nfattr_to_range,
+#endif
 };
 				  
-static int __init init(void)
+int __init ip_nat_proto_gre_init(void)
 {
-	if (ip_nat_protocol_register(&gre))
-		return -EIO;
-
-	return 0;
+	return ip_nat_protocol_register(&gre);
 }
 
-static void __exit fini(void)
+void __exit ip_nat_proto_gre_fini(void)
 {
 	ip_nat_protocol_unregister(&gre);
 }
-
-module_init(init);
-module_exit(fini);

@@ -1128,10 +1128,7 @@
 #endif
 
 /* max number of simultaneous board */
-/* warning : make sure module array def's are coherent with PM3_MAX_BOARD */
 #define PM3_MAX_BOARD 4
-#define PM3_MAX_BOARD_MODULE_ARRAY_SHORT "1-4h"
-#define PM3_MAX_BOARD_MODULE_ARRAY_STRING "1-4s"
 
 /* max size of options */
 #define PM3_OPTIONS_SIZE 256
@@ -1141,9 +1138,6 @@
 
 /* do we want accelerated console  */
 #define PM3FB_USE_ACCEL 1
-
-/* useful ? */
-#define CHAR_IS_NUM(a)  ((((a) >= '0') && ((a) <= '9')) ? 1 : 0)
 
 /* for driver debugging ONLY */
 /* 0 = assert only, 1 = error, 2 = info, 3+ = verbose */

@@ -268,7 +268,7 @@ static int slm_get_pagesize( int device, int *w, int *h );
 /************************* End of Prototypes **************************/
 
 
-static struct timer_list slm_timer = TIMER_INITIALIZER(slm_test_ready, 0, 0);
+static DEFINE_TIMER(slm_timer, slm_test_ready, 0, 0);
 
 static struct file_operations slm_fops = {
 	.owner =	THIS_MODULE,
@@ -369,8 +369,6 @@ static ssize_t slm_read( struct file *file, char *buf, size_t count,
 	int length;
 	int end;
 
-	if (count < 0)
-		return( -EINVAL );
 	if (!(page = __get_free_page( GFP_KERNEL )))
 		return( -ENOMEM );
 	

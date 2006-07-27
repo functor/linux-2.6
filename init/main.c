@@ -51,35 +51,29 @@
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
-
-/*
- * This is one of the first .c files built. Error out early
- * if we have compiler trouble..
- */
-#if __GNUC__ == 2 && __GNUC_MINOR__ == 96
-#ifdef CONFIG_FRAME_POINTER
-#error This compiler cannot compile correctly with frame pointers enabled
-#endif
-#endif
+#include <asm/sections.h>
+#include <asm/cacheflush.h>
 
 #ifdef CONFIG_X86_LOCAL_APIC
 #include <asm/smp.h>
 #endif
 
 /*
- * Versions of gcc older than that listed below may actually compile
- * and link okay, but the end product can have subtle run time bugs.
- * To avoid associated bogus bug reports, we flatly refuse to compile
- * with a gcc that is known to be too old from the very beginning.
+ * This is one of the first .c files built. Error out early if we have compiler
+ * trouble.
+ *
+ * Versions of gcc older than that listed below may actually compile and link
+ * okay, but the end product can have subtle run time bugs.  To avoid associated
+ * bogus bug reports, we flatly refuse to compile with a gcc that is known to be
+ * too old from the very beginning.
  */
-#if __GNUC__ < 2 || (__GNUC__ == 2 && __GNUC_MINOR__ < 95)
+#if (__GNUC__ < 3) || (__GNUC__ == 3 && __GNUC_MINOR__ < 2)
 #error Sorry, your GCC is too old. It builds incorrect kernels.
 #endif
 
 static int init(void *);
 
 extern void init_IRQ(void);
-extern void sock_init(void);
 extern void fork_init(unsigned long);
 extern void mca_init(void);
 extern void sbus_init(void);
@@ -98,6 +92,9 @@ extern void prepare_namespace(void);
 extern void acpi_early_init(void);
 #else
 static inline void acpi_early_init(void) { }
+#endif
+#ifndef CONFIG_DEBUG_RODATA
+static inline void mark_rodata_ro(void) { }
 #endif
 
 #ifdef CONFIG_TC
@@ -122,6 +119,7 @@ extern void softirq_init(void);
 char saved_command_line[COMMAND_LINE_SIZE];
 
 static char *execute_command;
+static char *ramdisk_execute_command;
 
 /* Setup configured maximum number of CPUs to activate */
 static unsigned int max_cpus = NR_CPUS;
@@ -296,7 +294,17 @@ static int __init init_setup(char *str)
 }
 __setup("init=", init_setup);
 
-extern void setup_arch(char **);
+static int __init rdinit_setup(char *str)
+{
+	unsigned int i;
+
+	ramdisk_execute_command = str;
+	/* See "auto" comment in init_setup */
+	for (i = 1; i < MAX_INIT_ARGS; i++)
+		argv_init[i] = NULL;
+	return 1;
+}
+__setup("rdinit=", rdinit_setup);
 
 #ifndef CONFIG_SMP
 
@@ -315,7 +323,7 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
 #else
 
 #ifdef __GENERIC_PER_CPU
-unsigned long __per_cpu_offset[NR_CPUS];
+unsigned long __per_cpu_offset[NR_CPUS] __read_mostly;
 
 EXPORT_SYMBOL(__per_cpu_offset);
 
@@ -323,8 +331,7 @@ static void __init setup_per_cpu_areas(void)
 {
 	unsigned long size, i;
 	char *ptr;
-	/* Created by linker magic */
-	extern char __per_cpu_start[], __per_cpu_end[];
+	unsigned long nr_possible_cpus = num_possible_cpus();
 
 	/* Copy section for each CPU (we discard the original) */
 	size = ALIGN(__per_cpu_end - __per_cpu_start, SMP_CACHE_BYTES);
@@ -332,12 +339,12 @@ static void __init setup_per_cpu_areas(void)
 	if (size < PERCPU_ENOUGH_ROOM)
 		size = PERCPU_ENOUGH_ROOM;
 #endif
+	ptr = alloc_bootmem(size * nr_possible_cpus);
 
-	ptr = alloc_bootmem(size * NR_CPUS);
-
-	for (i = 0; i < NR_CPUS; i++, ptr += size) {
+	for_each_possible_cpu(i) {
 		__per_cpu_offset[i] = ptr - __per_cpu_start;
 		memcpy(ptr, __per_cpu_start, __per_cpu_end - __per_cpu_start);
+		ptr += size;
 	}
 }
 #endif /* !__GENERIC_PER_CPU */
@@ -382,7 +389,16 @@ static void noinline rest_init(void)
 	kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
 	unlock_kernel();
+
+	/*
+	 * The boot idle thread must execute schedule()
+	 * at least one to get things moving:
+	 */
 	preempt_enable_no_resched();
+	schedule();
+	preempt_disable();
+
+	/* Call into cpu_idle with preempt disabled */
 	cpu_idle();
 } 
 
@@ -421,6 +437,15 @@ void __init parse_early_param(void)
  *	Activate the first processor.
  */
 
+static void __init boot_cpu_init(void)
+{
+	int cpu = smp_processor_id();
+	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
+	cpu_set(cpu, cpu_online_map);
+	cpu_set(cpu, cpu_present_map);
+	cpu_set(cpu, cpu_possible_map);
+}
+
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
@@ -430,17 +455,13 @@ asmlinkage void __init start_kernel(void)
  * enable them
  */
 	lock_kernel();
+	boot_cpu_init();
 	page_address_init();
 	printk(KERN_NOTICE);
 	printk(linux_banner);
 	setup_arch(&command_line);
 	setup_per_cpu_areas();
-
-	/*
-	 * Mark the boot cpu "online" so that it can call console drivers in
-	 * printk() and can access its per-cpu storage.
-	 */
-	smp_prepare_boot_cpu();
+	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -466,6 +487,7 @@ asmlinkage void __init start_kernel(void)
 	init_IRQ();
 	pidhash_init();
 	init_timers();
+	hrtimers_init();
 	softirq_init();
 	time_init();
 
@@ -488,8 +510,10 @@ asmlinkage void __init start_kernel(void)
 	}
 #endif
 	vfs_caches_init_early();
+	cpuset_init_early();
 	mem_init();
 	kmem_cache_init();
+	setup_per_cpu_pageset();
 	numa_policy_init();
 	if (late_time_init)
 		late_time_init();
@@ -535,6 +559,31 @@ static int __init initcall_debug_setup(char *str)
 }
 __setup("initcall_debug", initcall_debug_setup);
 
+#ifdef CONFIG_BOOT_DELAY
+
+unsigned int boot_delay = 0; /* msecs delay after each printk during bootup */
+extern long preset_lpj;
+unsigned long long printk_delay_msec = 0; /* per msec, based on boot_delay */
+
+static int __init boot_delay_setup(char *str)
+{
+	unsigned long lpj = preset_lpj ? preset_lpj : 1000000; /* some guess */
+	unsigned long long loops_per_msec = lpj / 1000 * CONFIG_HZ;
+
+	get_option(&str, &boot_delay);
+	if (boot_delay > 10 * 1000)
+		boot_delay = 0;
+
+	printk_delay_msec = loops_per_msec;
+	printk("boot_delay: %u, preset_lpj: %ld, lpj: %lu, CONFIG_HZ: %d, printk_delay_msec: %llu\n",
+		boot_delay, preset_lpj, lpj, CONFIG_HZ, printk_delay_msec);
+
+	return 1;
+}
+__setup("boot_delay=", boot_delay_setup);
+
+#endif
+
 struct task_struct *child_reaper = &init_task;
 
 extern initcall_t __initcall_start[], __initcall_end[];
@@ -545,17 +594,23 @@ static void __init do_initcalls(void)
 	int count = preempt_count();
 
 	for (call = __initcall_start; call < __initcall_end; call++) {
-		char *msg;
+		char *msg = NULL;
+		char msgbuf[40];
+		int result;
 
 		if (initcall_debug) {
-			printk(KERN_DEBUG "Calling initcall 0x%p", *call);
-			print_fn_descriptor_symbol(": %s()", (unsigned long) *call);
+			printk("Calling initcall 0x%p", *call);
+			print_fn_descriptor_symbol(": %s()",
+					(unsigned long) *call);
 			printk("\n");
 		}
 
-		(*call)();
+		result = (*call)();
 
-		msg = NULL;
+		if (result && result != -ENODEV && initcall_debug) {
+			sprintf(msgbuf, "error code %d", result);
+			msg = msgbuf;
+		}
 		if (preempt_count() != count) {
 			msg = "preemption imbalance";
 			preempt_count() = count;
@@ -565,8 +620,10 @@ static void __init do_initcalls(void)
 			local_irq_enable();
 		}
 		if (msg) {
-			printk(KERN_WARNING "error in initcall at 0x%p: "
-				"returned with %s\n", *call, msg);
+			printk(KERN_WARNING "initcall at 0x%p", *call);
+			print_fn_descriptor_symbol(": %s()",
+					(unsigned long) *call);
+			printk(": returned with %s\n", msg);
 		}
 	}
 
@@ -592,11 +649,17 @@ static void __init do_basic_setup(void)
 	sysctl_init();
 #endif
 
-	/* Networking initialization needs a process context */ 
-	sock_init();
-
 	do_initcalls();
 }
+
+static int __initdata nosoftlockup;
+
+static int __init nosoftlockup_setup(char *str)
+{
+	nosoftlockup = 1;
+	return 1;
+}
+__setup("nosoftlockup", nosoftlockup_setup);
 
 static void do_pre_smp_initcalls(void)
 {
@@ -607,30 +670,14 @@ static void do_pre_smp_initcalls(void)
 	migration_init();
 #endif
 	spawn_ksoftirqd();
+	if (!nosoftlockup)
+		spawn_softlockup_task();
 }
 
 static void run_init_process(char *init_filename)
 {
 	argv_init[0] = init_filename;
 	execve(init_filename, argv_init, envp_init);
-}
-
-static inline void fixup_cpu_present_map(void)
-{
-#ifdef CONFIG_SMP
-	int i;
-
-	/*
-	 * If arch is not hotplug ready and did not populate
-	 * cpu_present_map, just make cpu_present_map same as cpu_possible_map
-	 * for other cpu bringup code to function as normal. e.g smp_init() etc.
-	 */
-	if (cpus_empty(cpu_present_map)) {
-		for_each_cpu(i) {
-			cpu_set(i, cpu_present_map);
-		}
-	}
-#endif
 }
 
 static int init(void * unused)
@@ -650,13 +697,12 @@ static int init(void * unused)
 	 */
 	child_reaper = current;
 
-	/* Sets up cpus_possible() */
 	smp_prepare_cpus(max_cpus);
 
 	do_pre_smp_initcalls();
 
-	fixup_cpu_present_map();
 	smp_init();
+	sched_init_smp();
 
 	cpuset_init_smp();
 
@@ -668,16 +714,18 @@ static int init(void * unused)
 
 	do_basic_setup();
 
-	sched_init_smp();
-
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all
 	 * the work
 	 */
-	if (sys_access((const char __user *) "/init", 0) == 0)
-		execute_command = "/init";
-	else
+
+	if (!ramdisk_execute_command)
+		ramdisk_execute_command = "/init";
+
+	if (sys_access((const char __user *) ramdisk_execute_command, 0) != 0) {
+		ramdisk_execute_command = NULL;
 		prepare_namespace();
+	}
 
 	/*
 	 * Ok, we have completed the initial bootup, and
@@ -686,6 +734,7 @@ static int init(void * unused)
 	 */
 	free_initmem();
 	unlock_kernel();
+	mark_rodata_ro();
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
 
@@ -694,17 +743,24 @@ static int init(void * unused)
 
 	(void) sys_dup(0);
 	(void) sys_dup(0);
-	
+
+	if (ramdisk_execute_command) {
+		run_init_process(ramdisk_execute_command);
+		printk(KERN_WARNING "Failed to execute %s\n",
+				ramdisk_execute_command);
+	}
+
 	/*
 	 * We try each of these until one succeeds.
 	 *
 	 * The Bourne shell can be used instead of init if we are 
 	 * trying to recover a really broken machine.
 	 */
-
-	if (execute_command)
+	if (execute_command) {
 		run_init_process(execute_command);
-
+		printk(KERN_WARNING "Failed to execute %s.  Attempting "
+					"defaults...\n", execute_command);
+	}
 	run_init_process("/sbin/init");
 	run_init_process("/etc/init");
 	run_init_process("/bin/init");

@@ -1,21 +1,26 @@
 /*
  *  sata_uli.c - ULi Electronics SATA
  *
- *  The contents of this file are subject to the Open
- *  Software License version 1.1 that can be found at
- *  http://www.opensource.org/licenses/osl-1.1.txt and is included herein
- *  by reference.
  *
- *  Alternatively, the contents of this file may be used under the terms
- *  of the GNU General Public License version 2 (the "GPL") as distributed
- *  in the kernel source COPYING file, in which case the provisions of
- *  the GPL are applicable instead of the above.  If you wish to allow
- *  the use of your version of this file only under the terms of the
- *  GPL and not to allow others to use your version of this file under
- *  the OSL, indicate your decision by deleting the provisions above and
- *  replace them with the notice and other provisions required by the GPL.
- *  If you do not delete the provisions above, a recipient may use your
- *  version of this file under either the OSL or the GPL.
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2, or (at your option)
+ *  any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; see the file COPYING.  If not, write to
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ *
+ *  libata documentation is available via 'make {ps|pdf}docs',
+ *  as Documentation/DocBook/libata.*
+ *
+ *  Hardware documentation available under NDA.
  *
  */
 
@@ -27,7 +32,7 @@
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include "scsi.h"
+#include <linux/device.h>
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
 
@@ -39,6 +44,8 @@ enum {
 	uli_5287		= 1,
 	uli_5281		= 2,
 
+	uli_max_ports		= 4,
+
 	/* PCI configuration registers */
 	ULI5287_BASE		= 0x90, /* sata0 phy SCR registers */
 	ULI5287_OFFS		= 0x10, /* offset from sata0->sata1 phy regs */
@@ -46,11 +53,15 @@ enum {
 	ULI5281_OFFS		= 0x60, /* offset from sata0->sata1 phy regs */
 };
 
+struct uli_priv {
+	unsigned int		scr_cfg_addr[uli_max_ports];
+};
+
 static int uli_init_one (struct pci_dev *pdev, const struct pci_device_id *ent);
 static u32 uli_scr_read (struct ata_port *ap, unsigned int sc_reg);
 static void uli_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val);
 
-static struct pci_device_id uli_pci_tbl[] = {
+static const struct pci_device_id uli_pci_tbl[] = {
 	{ PCI_VENDOR_ID_AL, 0x5289, PCI_ANY_ID, PCI_ANY_ID, 0, 0, uli_5289 },
 	{ PCI_VENDOR_ID_AL, 0x5287, PCI_ANY_ID, PCI_ANY_ID, 0, 0, uli_5287 },
 	{ PCI_VENDOR_ID_AL, 0x5281, PCI_ANY_ID, PCI_ANY_ID, 0, 0, uli_5281 },
@@ -65,16 +76,14 @@ static struct pci_driver uli_pci_driver = {
 	.remove			= ata_pci_remove_one,
 };
 
-static Scsi_Host_Template uli_sht = {
+static struct scsi_host_template uli_sht = {
 	.module			= THIS_MODULE,
 	.name			= DRV_NAME,
 	.ioctl			= ata_scsi_ioctl,
 	.queuecommand		= ata_scsi_queuecmd,
-	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
 	.this_id		= ATA_SHT_THIS_ID,
 	.sg_tablesize		= LIBATA_MAX_PRD,
-	.max_sectors		= ATA_MAX_SECTORS,
 	.cmd_per_lun		= ATA_SHT_CMD_PER_LUN,
 	.emulated		= ATA_SHT_EMULATED,
 	.use_clustering		= ATA_SHT_USE_CLUSTERING,
@@ -82,10 +91,9 @@ static Scsi_Host_Template uli_sht = {
 	.dma_boundary		= ATA_DMA_BOUNDARY,
 	.slave_configure	= ata_scsi_slave_config,
 	.bios_param		= ata_std_bios_param,
-	.ordered_flush		= 1,
 };
 
-static struct ata_port_operations uli_ops = {
+static const struct ata_port_operations uli_ops = {
 	.port_disable		= ata_port_disable,
 
 	.tf_load		= ata_tf_load,
@@ -120,8 +128,8 @@ static struct ata_port_info uli_port_info = {
 	.sht            = &uli_sht,
 	.host_flags     = ATA_FLAG_SATA | ATA_FLAG_SATA_RESET |
 			  ATA_FLAG_NO_LEGACY,
-	.pio_mask       = 0x03,		//support pio mode 4 (FIXME)
-	.udma_mask      = 0x7f,		//support udma mode 6
+	.pio_mask       = 0x1f,		/* pio0-4 */
+	.udma_mask      = 0x7f,		/* udma0-6 */
 	.port_ops       = &uli_ops,
 };
 
@@ -134,7 +142,8 @@ MODULE_VERSION(DRV_VERSION);
 
 static unsigned int get_scr_cfg_addr(struct ata_port *ap, unsigned int sc_reg)
 {
-	return ap->ioaddr.scr_addr + (4 * sc_reg);
+	struct uli_priv *hpriv = ap->host_set->private_data;
+	return hpriv->scr_cfg_addr[ap->port_no] + (4 * sc_reg);
 }
 
 static u32 uli_scr_cfg_read (struct ata_port *ap, unsigned int sc_reg)
@@ -171,25 +180,18 @@ static void uli_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val)
 	uli_scr_cfg_write(ap, sc_reg, val);
 }
 
-/* move to PCI layer, integrate w/ MSI stuff */
-static void pci_enable_intx(struct pci_dev *pdev)
-{
-	u16 pci_command;
-
-	pci_read_config_word(pdev, PCI_COMMAND, &pci_command);
-	if (pci_command & PCI_COMMAND_INTX_DISABLE) {
-		pci_command &= ~PCI_COMMAND_INTX_DISABLE;
-		pci_write_config_word(pdev, PCI_COMMAND, pci_command);
-	}
-}
-
 static int uli_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 {
+	static int printed_version;
 	struct ata_probe_ent *probe_ent;
 	struct ata_port_info *ppi;
 	int rc;
 	unsigned int board_idx = (unsigned int) ent->driver_data;
 	int pci_dev_busy = 0;
+	struct uli_priv *hpriv;
+
+	if (!printed_version++)
+		dev_printk(KERN_INFO, &pdev->dev, "version " DRV_VERSION "\n");
 
 	rc = pci_enable_device(pdev);
 	if (rc)
@@ -209,16 +211,24 @@ static int uli_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_out_regions;
 
 	ppi = &uli_port_info;
-	probe_ent = ata_pci_init_native_mode(pdev, &ppi);
+	probe_ent = ata_pci_init_native_mode(pdev, &ppi, ATA_PORT_PRIMARY | ATA_PORT_SECONDARY);
 	if (!probe_ent) {
 		rc = -ENOMEM;
 		goto err_out_regions;
 	}
-	
+
+	hpriv = kzalloc(sizeof(*hpriv), GFP_KERNEL);
+	if (!hpriv) {
+		rc = -ENOMEM;
+		goto err_out_probe_ent;
+	}
+
+	probe_ent->private_data = hpriv;
+
 	switch (board_idx) {
 	case uli_5287:
-		probe_ent->port[0].scr_addr = ULI5287_BASE;
-		probe_ent->port[1].scr_addr = ULI5287_BASE + ULI5287_OFFS;
+		hpriv->scr_cfg_addr[0] = ULI5287_BASE;
+		hpriv->scr_cfg_addr[1] = ULI5287_BASE + ULI5287_OFFS;
        		probe_ent->n_ports = 4;
 
        		probe_ent->port[2].cmd_addr = pci_resource_start(pdev, 0) + 8;
@@ -226,27 +236,27 @@ static int uli_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 		probe_ent->port[2].ctl_addr =
 			(pci_resource_start(pdev, 1) | ATA_PCI_CTL_OFS) + 4;
 		probe_ent->port[2].bmdma_addr = pci_resource_start(pdev, 4) + 16;
-		probe_ent->port[2].scr_addr = ULI5287_BASE + ULI5287_OFFS*4;
+		hpriv->scr_cfg_addr[2] = ULI5287_BASE + ULI5287_OFFS*4;
 
 		probe_ent->port[3].cmd_addr = pci_resource_start(pdev, 2) + 8;
 		probe_ent->port[3].altstatus_addr =
 		probe_ent->port[3].ctl_addr =
 			(pci_resource_start(pdev, 3) | ATA_PCI_CTL_OFS) + 4;
 		probe_ent->port[3].bmdma_addr = pci_resource_start(pdev, 4) + 24;
-		probe_ent->port[3].scr_addr = ULI5287_BASE + ULI5287_OFFS*5;
+		hpriv->scr_cfg_addr[3] = ULI5287_BASE + ULI5287_OFFS*5;
 
 		ata_std_ports(&probe_ent->port[2]);
 		ata_std_ports(&probe_ent->port[3]);
 		break;
 
 	case uli_5289:
-		probe_ent->port[0].scr_addr = ULI5287_BASE;
-		probe_ent->port[1].scr_addr = ULI5287_BASE + ULI5287_OFFS;
+		hpriv->scr_cfg_addr[0] = ULI5287_BASE;
+		hpriv->scr_cfg_addr[1] = ULI5287_BASE + ULI5287_OFFS;
 		break;
 
 	case uli_5281:
-		probe_ent->port[0].scr_addr = ULI5281_BASE;
-		probe_ent->port[1].scr_addr = ULI5281_BASE + ULI5281_OFFS;
+		hpriv->scr_cfg_addr[0] = ULI5281_BASE;
+		hpriv->scr_cfg_addr[1] = ULI5281_BASE + ULI5281_OFFS;
 		break;
 
 	default:
@@ -255,7 +265,7 @@ static int uli_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	pci_set_master(pdev);
-	pci_enable_intx(pdev);
+	pci_intx(pdev, 1);
 
 	/* FIXME: check ata_device_add return value */
 	ata_device_add(probe_ent);
@@ -263,9 +273,10 @@ static int uli_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	return 0;
 
+err_out_probe_ent:
+	kfree(probe_ent);
 err_out_regions:
 	pci_release_regions(pdev);
-
 err_out:
 	if (!pci_dev_busy)
 		pci_disable_device(pdev);

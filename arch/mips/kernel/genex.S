@@ -12,6 +12,7 @@
 #include <linux/init.h>
 
 #include <asm/asm.h>
+#include <asm/asmmacro.h>
 #include <asm/cacheops.h>
 #include <asm/regdef.h>
 #include <asm/fpregdef.h>
@@ -54,7 +55,7 @@ NESTED(except_vec3_generic, 0, sp)
 #endif
 	mfc0	k1, CP0_CAUSE
 	andi	k1, k1, 0x7c
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 	dsll	k1, k1, 1
 #endif
 	PTR_L	k0, exception_handlers(k1)
@@ -81,8 +82,8 @@ NESTED(except_vec3_r4000, 0, sp)
 	beq	k1, k0, handle_vced
 	 li	k0, 14<<2
 	beq	k1, k0, handle_vcei
-#ifdef CONFIG_MIPS64
-	dsll	k1, k1, 1
+#ifdef CONFIG_64BIT
+	 dsll	k1, k1, 1
 #endif
 	.set	pop
 	PTR_L	k0, exception_handlers(k1)
@@ -90,17 +91,17 @@ NESTED(except_vec3_r4000, 0, sp)
 
 	/*
 	 * Big shit, we now may have two dirty primary cache lines for the same
-	 * physical address.  We can savely invalidate the line pointed to by
+	 * physical address.  We can safely invalidate the line pointed to by
 	 * c0_badvaddr because after return from this exception handler the
 	 * load / store will be re-executed.
 	 */
 handle_vced:
-	DMFC0	k0, CP0_BADVADDR
+	MFC0	k0, CP0_BADVADDR
 	li	k1, -4					# Is this ...
 	and	k0, k1					# ... really needed?
 	mtc0	zero, CP0_TAGLO
-	cache	Index_Store_Tag_D,(k0)
-	cache	Hit_Writeback_Inv_SD,(k0)
+	cache	Index_Store_Tag_D, (k0)
+	cache	Hit_Writeback_Inv_SD, (k0)
 #ifdef CONFIG_PROC_FS
 	PTR_LA	k0, vced_count
 	lw	k1, (k0)
@@ -121,6 +122,20 @@ handle_vcei:
 	eret
 	.set	pop
 	END(except_vec3_r4000)
+
+	__FINIT
+
+	.align  5
+NESTED(handle_int, PT_SIZE, sp)
+	SAVE_ALL
+	CLI
+
+	PTR_LA	ra, ret_from_irq
+	move	a0, sp
+	j	plat_irq_dispatch
+	END(handle_int)
+
+	__INIT
 
 /*
  * Special interrupt vector for MIPS64 ISA & embedded MIPS processors.
@@ -146,6 +161,66 @@ NESTED(except_vec_ejtag_debug, 0, sp)
 	END(except_vec_ejtag_debug)
 
 	__FINIT
+
+/*
+ * Vectored interrupt handler.
+ * This prototype is copied to ebase + n*IntCtl.VS and patched
+ * to invoke the handler
+ */
+NESTED(except_vec_vi, 0, sp)
+	SAVE_SOME
+	SAVE_AT
+	.set	push
+	.set	noreorder
+#ifdef CONFIG_MIPS_MT_SMTC
+	/*
+	 * To keep from blindly blocking *all* interrupts
+	 * during service by SMTC kernel, we also want to
+	 * pass the IM value to be cleared.
+	 */
+EXPORT(except_vec_vi_mori)
+	ori	a0, $0, 0
+#endif /* CONFIG_MIPS_MT_SMTC */
+EXPORT(except_vec_vi_lui)
+	lui	v0, 0		/* Patched */
+	j	except_vec_vi_handler
+EXPORT(except_vec_vi_ori)
+	 ori	v0, 0		/* Patched */
+	.set	pop
+	END(except_vec_vi)
+EXPORT(except_vec_vi_end)
+
+/*
+ * Common Vectored Interrupt code
+ * Complete the register saves and invoke the handler which is passed in $v0
+ */
+NESTED(except_vec_vi_handler, 0, sp)
+	SAVE_TEMP
+	SAVE_STATIC
+#ifdef CONFIG_MIPS_MT_SMTC
+	/*
+	 * SMTC has an interesting problem that interrupts are level-triggered,
+	 * and the CLI macro will clear EXL, potentially causing a duplicate
+	 * interrupt service invocation. So we need to clear the associated
+	 * IM bit of Status prior to doing CLI, and restore it after the
+	 * service routine has been invoked - we must assume that the
+	 * service routine will have cleared the state, and any active
+	 * level represents a new or otherwised unserviced event...
+	 */
+	mfc0	t1, CP0_STATUS
+	and	t0, a0, t1
+	mfc0	t2, CP0_TCCONTEXT
+	or	t0, t0, t2
+	mtc0	t0, CP0_TCCONTEXT
+	xor	t1, t1, t0
+	mtc0	t1, CP0_STATUS
+	ehb
+#endif /* CONFIG_MIPS_MT_SMTC */
+	CLI
+	move	a0, sp
+	jalr	v0
+	j	ret_from_irq
+	END(except_vec_vi_handler)
 
 /*
  * EJTAG debug exception handler.
@@ -201,11 +276,11 @@ NESTED(except_vec_nmi, 0, sp)
 NESTED(nmi_handler, PT_SIZE, sp)
 	.set	push
 	.set	noat
-	.set	mips3
 	SAVE_ALL
  	move	a0, sp
 	jal	nmi_exception_handler
 	RESTORE_ALL
+	.set	mips3
 	eret
 	.set	pop
 	END(nmi_handler)
@@ -244,12 +319,12 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	   start with an n and gas will believe \n is ok ...  */
 	.macro	__BUILD_verbose	nexception
 	LONG_L	a1, PT_EPC(sp)
-#if CONFIG_MIPS32
+#ifdef CONFIG_32BIT
 	PRINT("Got \nexception at %08lx\012")
-#endif	
-#if CONFIG_MIPS64
+#endif
+#ifdef CONFIG_64BIT
 	PRINT("Got \nexception at %016lx\012")
-#endif	
+#endif
 	.endm
 
 	.macro	__BUILD_count exception
@@ -291,9 +366,11 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	BUILD_HANDLER mdmx mdmx sti silent		/* #22 */
 	BUILD_HANDLER watch watch sti verbose		/* #23 */
 	BUILD_HANDLER mcheck mcheck cli verbose		/* #24 */
+	BUILD_HANDLER mt mt sti verbose			/* #25 */
+	BUILD_HANDLER dsp dsp sti silent		/* #26 */
 	BUILD_HANDLER reserved reserved sti verbose	/* others */
 
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 /* A temporary overflow handler used by check_daddi(). */
 
 	__INIT

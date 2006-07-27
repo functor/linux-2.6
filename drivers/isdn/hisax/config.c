@@ -25,7 +25,6 @@
 #include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #define HISAX_STATUS_BUFSIZE 4096
-#define INCLUDE_INLINE_FUNCS
 
 /*
  * This structure array contains one entry per card. An entry looks
@@ -332,7 +331,7 @@ struct IsdnCard cards[HISAX_MAX_CARDS] = {
 #define HISAX_IDSIZE (HISAX_MAX_CARDS*8)
 static char HiSaxID[HISAX_IDSIZE] = { 0, };
 
-char *HiSax_id = HiSaxID;
+static char *HiSax_id = HiSaxID;
 #ifdef MODULE
 /* Variables for insmod */
 static int type[HISAX_MAX_CARDS] = { 0, };
@@ -391,7 +390,7 @@ char *HiSax_getrev(const char *revision)
 	return rev;
 }
 
-void __init HiSaxVersion(void)
+static void __init HiSaxVersion(void)
 {
 	char tmp[64];
 
@@ -608,6 +607,7 @@ static inline struct IsdnCardState *hisax_findcard(int driverid)
 /*
  * Find card with given card number
  */
+#if 0
 struct IsdnCardState *hisax_get_card(int cardnr)
 {
 	if ((cardnr <= nrcards) && (cardnr > 0))
@@ -615,8 +615,9 @@ struct IsdnCardState *hisax_get_card(int cardnr)
 			return cards[cardnr - 1].cs;
 	return NULL;
 }
+#endif  /*  0  */
 
-int HiSax_readstatus(u_char __user *buf, int len, int id, int channel)
+static int HiSax_readstatus(u_char __user *buf, int len, int id, int channel)
 {
 	int count, cnt;
 	u_char __user *p = buf;
@@ -768,7 +769,7 @@ int ll_run(struct IsdnCardState *cs, int addfeatures)
 	return 0;
 }
 
-void ll_stop(struct IsdnCardState *cs)
+static void ll_stop(struct IsdnCardState *cs)
 {
 	isdn_ctrl ic;
 
@@ -785,8 +786,7 @@ static void ll_unload(struct IsdnCardState *cs)
 	ic.command = ISDN_STAT_UNLOAD;
 	ic.driver = cs->myid;
 	cs->iif.statcallb(&ic);
-	if (cs->status_buf)
-		kfree(cs->status_buf);
+	kfree(cs->status_buf);
 	cs->status_read = NULL;
 	cs->status_write = NULL;
 	cs->status_end = NULL;
@@ -805,10 +805,8 @@ static void closecard(int cardnr)
 
 	skb_queue_purge(&csta->rq);
 	skb_queue_purge(&csta->sq);
-	if (csta->rcvbuf) {
-		kfree(csta->rcvbuf);
-		csta->rcvbuf = NULL;
-	}
+	kfree(csta->rcvbuf);
+	csta->rcvbuf = NULL;
 	if (csta->tx_skb) {
 		dev_kfree_skb(csta->tx_skb);
 		csta->tx_skb = NULL;
@@ -1184,7 +1182,7 @@ static int checkcard(int cardnr, char *id, int *busy_flag, struct module *lockow
 	return ret;
 }
 
-void HiSax_shiftcards(int idx)
+static void HiSax_shiftcards(int idx)
 {
 	int i;
 
@@ -1192,7 +1190,7 @@ void HiSax_shiftcards(int idx)
 		memcpy(&cards[i], &cards[i + 1], sizeof(cards[i]));
 }
 
-int HiSax_inithardware(int *busy_flag)
+static int HiSax_inithardware(int *busy_flag)
 {
 	int foundcards = 0;
 	int i = 0;
@@ -1898,6 +1896,7 @@ static struct pci_device_id hisax_pci_tbl[] __initdata = {
 	{PCI_VENDOR_ID_PLX,      PCI_DEVICE_ID_PLX_R685,         PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_PLX,      PCI_DEVICE_ID_PLX_R753,         PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_PLX,      PCI_DEVICE_ID_PLX_DJINN_ITOO,   PCI_ANY_ID, PCI_ANY_ID},
+	{PCI_VENDOR_ID_PLX,      PCI_DEVICE_ID_PLX_OLITEC,       PCI_ANY_ID, PCI_ANY_ID},
 #endif
 #ifdef CONFIG_HISAX_QUADRO
 	{PCI_VENDOR_ID_PLX,      PCI_DEVICE_ID_PLX_9050,         PCI_ANY_ID, PCI_ANY_ID},
@@ -1929,6 +1928,8 @@ static struct pci_device_id hisax_pci_tbl[] __initdata = {
 	{PCI_VENDOR_ID_CCD,      PCI_DEVICE_ID_CCD_B00B,         PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_CCD,      PCI_DEVICE_ID_CCD_B00C,         PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_CCD,      PCI_DEVICE_ID_CCD_B100,         PCI_ANY_ID, PCI_ANY_ID},
+	{PCI_VENDOR_ID_CCD,      PCI_DEVICE_ID_CCD_B700,         PCI_ANY_ID, PCI_ANY_ID},
+	{PCI_VENDOR_ID_CCD,      PCI_DEVICE_ID_CCD_B701,         PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_ABOCOM,   PCI_DEVICE_ID_ABOCOM_2BD1,      PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_ASUSTEK,  PCI_DEVICE_ID_ASUSTEK_0675,     PCI_ANY_ID, PCI_ANY_ID},
 	{PCI_VENDOR_ID_BERKOM,   PCI_DEVICE_ID_BERKOM_T_CONCEPT, PCI_ANY_ID, PCI_ANY_ID},

@@ -13,6 +13,7 @@
 #define		APIC_ID		0x20
 #define			APIC_ID_MASK		(0xFFu<<24)
 #define			GET_APIC_ID(x)		(((x)>>24)&0xFFu)
+#define			SET_APIC_ID(x)		(((x)<<24))
 #define		APIC_LVR	0x30
 #define			APIC_LVR_MASK		0xFF00FF
 #define			GET_APIC_VERSION(x)	((x)&0xFFu)
@@ -38,6 +39,7 @@
 #define			APIC_SPIV_FOCUS_DISABLED	(1<<9)
 #define			APIC_SPIV_APIC_ENABLED		(1<<8)
 #define		APIC_ISR	0x100
+#define		APIC_ISR_NR	0x8	/* Number of 32 bit ISR registers. */
 #define		APIC_TMR	0x180
 #define 	APIC_IRR	0x200
 #define 	APIC_ESR	0x280
@@ -94,7 +96,7 @@
 #define			SET_APIC_DELIVERY_MODE(x,y)	(((x)&~0x700)|((y)<<8))
 #define				APIC_MODE_FIXED		0x0
 #define				APIC_MODE_NMI		0x4
-#define				APIC_MODE_EXINT		0x7
+#define				APIC_MODE_EXTINT	0x7
 #define 	APIC_LVT1	0x360
 #define		APIC_LVTERR	0x370
 #define		APIC_TMICT	0x380
@@ -113,6 +115,7 @@
 #define APIC_BASE (fix_to_virt(FIX_APIC_BASE))
 
 #define MAX_IO_APICS 128
+#define MAX_LOCAL_APIC 256
 
 /*
  * All x86-64 systems are xAPIC compatible.

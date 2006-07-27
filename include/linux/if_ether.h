@@ -21,6 +21,8 @@
 #ifndef _LINUX_IF_ETHER_H
 #define _LINUX_IF_ETHER_H
 
+#include <linux/types.h>
+
 /*
  *	IEEE 802.3 Ethernet magic constants.  The frame sizes omit the preamble
  *	and FCS/CRC (frame check sequence). 
@@ -59,6 +61,7 @@
 #define ETH_P_8021Q	0x8100          /* 802.1Q VLAN Extended Header  */
 #define ETH_P_IPX	0x8137		/* IPX over DIX			*/
 #define ETH_P_IPV6	0x86DD		/* IPv6 over bluebook		*/
+#define ETH_P_SLOW	0x8809		/* Slow Protocol. See 802.3ad 43B */
 #define ETH_P_WCCP	0x883E		/* Web-cache coordination protocol
 					 * defined in draft-wilson-wrec-wccp-v2-00.txt */
 #define ETH_P_PPP_DISC	0x8863		/* PPPoE discovery messages     */
@@ -70,6 +73,7 @@
 					 * over Ethernet
 					 */
 #define ETH_P_AOE	0x88A2		/* ATA over Ethernet		*/
+#define ETH_P_TIPC	0x88CA		/* TIPC 			*/
 
 /*
  *	Non DIX types. Won't clash for 1500 types.
@@ -100,7 +104,7 @@
 struct ethhdr {
 	unsigned char	h_dest[ETH_ALEN];	/* destination eth addr	*/
 	unsigned char	h_source[ETH_ALEN];	/* source ether addr	*/
-	unsigned short	h_proto;		/* packet type ID field	*/
+	__be16		h_proto;		/* packet type ID field	*/
 } __attribute__((packed));
 
 #ifdef __KERNEL__
@@ -110,6 +114,10 @@ static inline struct ethhdr *eth_hdr(const struct sk_buff *skb)
 {
 	return (struct ethhdr *)skb->mac.raw;
 }
+
+#ifdef CONFIG_SYSCTL
+extern struct ctl_table ether_table[];
+#endif
 #endif
 
 #endif	/* _LINUX_IF_ETHER_H */

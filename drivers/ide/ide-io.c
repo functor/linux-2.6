@@ -55,8 +55,8 @@
 #include <asm/io.h>
 #include <asm/bitops.h>
 
-int __ide_end_request(ide_drive_t *drive, struct request *rq, int uptodate,
-		      int nr_sectors)
+static int __ide_end_request(ide_drive_t *drive, struct request *rq,
+			     int uptodate, int nr_sectors)
 {
 	int ret = 1;
 
@@ -83,18 +83,14 @@ int __ide_end_request(ide_drive_t *drive, struct request *rq, int uptodate,
 
 	if (!end_that_request_first(rq, uptodate, nr_sectors)) {
 		add_disk_randomness(rq->rq_disk);
-
-		if (blk_rq_tagged(rq))
-			blk_queue_end_tag(drive->queue, rq);
-
 		blkdev_dequeue_request(rq);
 		HWGROUP(drive)->rq = NULL;
-		end_that_request_last(rq);
+		end_that_request_last(rq, uptodate);
 		ret = 0;
 	}
+
 	return ret;
 }
-EXPORT_SYMBOL(__ide_end_request);
 
 /**
  *	ide_end_request		-	complete an IDE I/O
@@ -113,16 +109,17 @@ int ide_end_request (ide_drive_t *drive, int uptodate, int nr_sectors)
 	unsigned long flags;
 	int ret = 1;
 
+	/*
+	 * room for locking improvements here, the calls below don't
+	 * need the queue lock held at all
+	 */
 	spin_lock_irqsave(&ide_lock, flags);
 	rq = HWGROUP(drive)->rq;
 
 	if (!nr_sectors)
 		nr_sectors = rq->hard_cur_sectors;
 
-	if (blk_complete_barrier_rq_locked(drive->queue, rq, nr_sectors))
-		ret = rq->nr_sectors != 0;
-	else
-		ret = __ide_end_request(drive, rq, uptodate, nr_sectors);
+	ret = __ide_end_request(drive, rq, uptodate, nr_sectors);
 
 	spin_unlock_irqrestore(&ide_lock, flags);
 	return ret;
@@ -150,7 +147,7 @@ static void ide_complete_power_step(ide_drive_t *drive, struct request *rq, u8 s
 
 	switch (rq->pm->pm_step) {
 	case ide_pm_flush_cache:	/* Suspend step 1 (flush cache) complete */
-		if (rq->pm->pm_state == 4)
+		if (rq->pm->pm_state == PM_EVENT_FREEZE)
 			rq->pm->pm_step = ide_pm_state_completed;
 		else
 			rq->pm->pm_step = idedisk_pm_standby;
@@ -223,63 +220,6 @@ static ide_startstop_t ide_start_power_step(ide_drive_t *drive, struct request *
 }
 
 /**
- *	ide_end_dequeued_request	-	complete an IDE I/O
- *	@drive: IDE device for the I/O
- *	@uptodate:
- *	@nr_sectors: number of sectors completed
- *
- *	Complete an I/O that is no longer on the request queue. This 
- *	typically occurs when we pull the request and issue a REQUEST_SENSE.
- *	We must still finish the old request but we must not tamper with the
- *	queue in the meantime.
- *
- *	NOTE: This path does not handle barrier, but barrier is not supported
- *	on ide-cd anyway.
- */
-
-int ide_end_dequeued_request(ide_drive_t *drive, struct request *rq,
-			     int uptodate, int nr_sectors)
-{
-	unsigned long flags;
-	int ret = 1;
-
-	spin_lock_irqsave(&ide_lock, flags);
-
-	BUG_ON(!(rq->flags & REQ_STARTED));
-
-	/*
-	 * if failfast is set on a request, override number of sectors and
-	 * complete the whole request right now
-	 */
-	if (blk_noretry_request(rq) && end_io_error(uptodate))
-		nr_sectors = rq->hard_nr_sectors;
-
-	if (!blk_fs_request(rq) && end_io_error(uptodate) && !rq->errors)
-		rq->errors = -EIO;
-
-	/*
-	 * decide whether to reenable DMA -- 3 is a random magic for now,
-	 * if we DMA timeout more than 3 times, just stay in PIO
-	 */
-	if (drive->state == DMA_PIO_RETRY && drive->retry_pio <= 3) {
-		drive->state = 0;
-		HWGROUP(drive)->hwif->ide_dma_on(drive);
-	}
-
-	if (!end_that_request_first(rq, uptodate, nr_sectors)) {
-		add_disk_randomness(rq->rq_disk);
-		if (blk_rq_tagged(rq))
-			blk_queue_end_tag(drive->queue, rq);
-		end_that_request_last(rq);
-		ret = 0;
-	}
-	spin_unlock_irqrestore(&ide_lock, flags);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(ide_end_dequeued_request);
-
-
-/**
  *	ide_complete_pm_request - end the current Power Management request
  *	@drive: target drive
  *	@rq: request
@@ -304,7 +244,7 @@ static void ide_complete_pm_request (ide_drive_t *drive, struct request *rq)
 	}
 	blkdev_dequeue_request(rq);
 	HWGROUP(drive)->rq = NULL;
-	end_that_request_last(rq);
+	end_that_request_last(rq, 1);
 	spin_unlock_irqrestore(&ide_lock, flags);
 }
 
@@ -436,7 +376,7 @@ void ide_end_drive_cmd (ide_drive_t *drive, u8 stat, u8 err)
 	blkdev_dequeue_request(rq);
 	HWGROUP(drive)->rq = NULL;
 	rq->errors = err;
-	end_that_request_last(rq);
+	end_that_request_last(rq, !rq->errors);
 	spin_unlock_irqrestore(&ide_lock, flags);
 }
 
@@ -617,7 +557,7 @@ ide_startstop_t __ide_abort(ide_drive_t *drive, struct request *rq)
 EXPORT_SYMBOL_GPL(__ide_abort);
 
 /**
- *	ide_abort	-	abort pending IDE operatins
+ *	ide_abort	-	abort pending IDE operations
  *	@drive: drive the error occurred on
  *	@msg: message to report
  *
@@ -680,7 +620,7 @@ static void ide_cmd (ide_drive_t *drive, u8 cmd, u8 nsect,
  *	@drive: drive the completion interrupt occurred on
  *
  *	drive_cmd_intr() is invoked on completion of a special DRIVE_CMD.
- *	We do any necessary daya reading and then wait for the drive to
+ *	We do any necessary data reading and then wait for the drive to
  *	go non busy. At that point we may read the error data and complete
  *	the request
  */
@@ -830,7 +770,7 @@ EXPORT_SYMBOL_GPL(ide_init_sg_cmd);
 
 /**
  *	execute_drive_command	-	issue special drive command
- *	@drive: the drive to issue th command on
+ *	@drive: the drive to issue the command on
  *	@rq: the request structure holding the command
  *
  *	execute_drive_cmd() issues a special drive command,  usually 
@@ -992,7 +932,7 @@ static ide_startstop_t start_request (ide_drive_t *drive, struct request *rq)
 			printk(KERN_WARNING "%s: bus not ready on wakeup\n", drive->name);
 		SELECT_DRIVE(drive);
 		HWIF(drive)->OUTB(8, HWIF(drive)->io_ports[IDE_CONTROL_OFFSET]);
-		rc = ide_wait_not_busy(HWIF(drive), 10000);
+		rc = ide_wait_not_busy(HWIF(drive), 100000);
 		if (rc)
 			printk(KERN_WARNING "%s: drive not ready on wakeup\n", drive->name);
 	}
@@ -1158,6 +1098,7 @@ static void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 	ide_hwif_t	*hwif;
 	struct request	*rq;
 	ide_startstop_t	startstop;
+	int             loops = 0;
 
 	/* for atari only: POSSIBLY BROKEN HERE(?) */
 	ide_get_lock(ide_intr, hwgroup);
@@ -1210,6 +1151,7 @@ static void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 			/* no more work for this hwgroup (for now) */
 			return;
 		}
+	again:
 		hwif = HWIF(drive);
 		if (hwgroup->hwif->sharing_irq &&
 		    hwif != hwgroup->hwif &&
@@ -1249,8 +1191,14 @@ static void ide_do_request (ide_hwgroup_t *hwgroup, int masked_irq)
 		 * though. I hope that doesn't happen too much, hopefully not
 		 * unless the subdriver triggers such a thing in its own PM
 		 * state machine.
+		 *
+		 * We count how many times we loop here to make sure we service
+		 * all drives in the hwgroup without looping for ever
 		 */
 		if (drive->blocked && !blk_pm_request(rq) && !(rq->flags & REQ_PREEMPT)) {
+			drive = drive->next ? drive->next : hwgroup->drive;
+			if (loops++ < 4 && !blk_queue_plugged(drive->queue))
+				goto again;
 			/* We clear busy, there should be no pending ATA command at this point. */
 			hwgroup->busy = 0;
 			break;
@@ -1545,13 +1493,7 @@ irqreturn_t ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 		spin_unlock_irqrestore(&ide_lock, flags);
 		return IRQ_NONE;
 	}
-	if (hwif->polling) {
-		/* We took an interrupt during a polled drive retune. 
-		   This should go away eventually when that code uses
-		   the polling logic like do_reset1 */
-		spin_unlock_irqrestore(&ide_lock, flags);
-		return IRQ_HANDLED;
-	}
+
 	if ((handler = hwgroup->handler) == NULL || hwgroup->polling) {
 		/*
 		 * Not expecting an interrupt from this drive.
@@ -1683,12 +1625,6 @@ EXPORT_SYMBOL(ide_init_drive_cmd);
  *	request and this function returns immediately without waiting
  *	for the new rq to be completed.  This is VERY DANGEROUS, and is
  *	intended for careful use by the ATAPI tape/cdrom driver code.
- *
- *	If action is ide_next, then the rq is queued immediately after
- *	the currently-being-processed-request (if any), and the function
- *	returns without waiting for the new rq to be completed.  As above,
- *	This is VERY DANGEROUS, and is intended for careful use by the
- *	ATAPI tape/cdrom driver code.
  *
  *	If action is ide_end, then the rq is queued at the end of the
  *	request queue, and the function returns immediately without waiting

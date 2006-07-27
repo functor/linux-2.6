@@ -8,6 +8,7 @@
 #include <linux/pci.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
+#include <linux/dmi.h>
 
 #include <asm/acpi.h>
 #include <asm/segment.h>
@@ -25,7 +26,8 @@ unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2 |
 
 int pci_routeirq;
 int pcibios_last_bus = -1;
-struct pci_bus *pci_root_bus = NULL;
+unsigned long pirq_table_addr;
+struct pci_bus *pci_root_bus;
 struct pci_raw_ops *raw_pci_ops;
 
 static int pci_read(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *value)
@@ -119,10 +121,41 @@ void __devinit  pcibios_fixup_bus(struct pci_bus *b)
 	pci_read_bridge_bases(b);
 }
 
+/*
+ * Enable renumbering of PCI bus# ranges to reach all PCI busses (Cardbus)
+ */
+#ifdef __i386__
+static int __devinit assign_all_busses(struct dmi_system_id *d)
+{
+	pci_probe |= PCI_ASSIGN_ALL_BUSSES;
+	printk(KERN_INFO "%s detected: enabling PCI bus# renumbering"
+			" (pci=assign-busses)\n", d->ident);
+	return 0;
+}
+#endif
+
+/*
+ * Laptops which need pci=assign-busses to see Cardbus cards
+ */
+static struct dmi_system_id __devinitdata pciprobe_dmi_table[] = {
+#ifdef __i386__
+	{
+		.callback = assign_all_busses,
+		.ident = "Samsung X20 Laptop",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Samsung Electronics"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "SX20S"),
+		},
+	},
+#endif		/* __i386__ */
+	{}
+};
 
 struct pci_bus * __devinit pcibios_scan_root(int busnum)
 {
 	struct pci_bus *bus = NULL;
+
+	dmi_check_system(pciprobe_dmi_table);
 
 	while ((bus = pci_find_next_bus(bus)) != NULL) {
 		if (bus->number == busnum) {
@@ -131,9 +164,9 @@ struct pci_bus * __devinit pcibios_scan_root(int busnum)
 		}
 	}
 
-	printk("PCI: Probing PCI hardware (bus %02x)\n", busnum);
+	printk(KERN_DEBUG "PCI: Probing PCI hardware (bus %02x)\n", busnum);
 
-	return pci_scan_bus(busnum, &pci_root_ops, NULL);
+	return pci_scan_bus_parented(NULL, busnum, &pci_root_ops, NULL);
 }
 
 extern u8 pci_cache_line_size;
@@ -143,7 +176,7 @@ static int __init pcibios_init(void)
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 
 	if (!raw_pci_ops) {
-		printk("PCI: System does not support PCI\n");
+		printk(KERN_WARNING "PCI: System does not support PCI\n");
 		return 0;
 	}
 
@@ -187,6 +220,9 @@ char * __devinit  pcibios_setup(char *str)
 		return NULL;
 	} else if (!strcmp(str, "biosirq")) {
 		pci_probe |= PCI_BIOS_IRQ_SCAN;
+		return NULL;
+	} else if (!strncmp(str, "pirqaddr=", 9)) {
+		pirq_table_addr = simple_strtoul(str+9, NULL, 0);
 		return NULL;
 	}
 #endif
@@ -248,4 +284,10 @@ int pcibios_enable_device(struct pci_dev *dev, int mask)
 		return err;
 
 	return pcibios_enable_irq(dev);
+}
+
+void pcibios_disable_device (struct pci_dev *dev)
+{
+	if (pcibios_disable_irq)
+		pcibios_disable_irq(dev);
 }

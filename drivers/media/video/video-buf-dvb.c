@@ -1,5 +1,4 @@
 /*
- * $Id: video-buf-dvb.c,v 1.7 2004/12/09 12:51:35 kraxel Exp $
  *
  * some helper function for simple DVB cards which simply DMA the
  * complete transport stream and let the computer sort everything else
@@ -13,6 +12,7 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  */
+
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -62,8 +62,7 @@ static int videobuf_dvb_thread(void *data)
 			break;
 		if (kthread_should_stop())
 			break;
-		if (current->flags & PF_FREEZE)
-			refrigerator(PF_FREEZE);
+		try_to_freeze();
 
 		/* feed buffer data to demux */
 		if (buf->state == STATE_DONE)
@@ -97,7 +96,7 @@ static int videobuf_dvb_start_feed(struct dvb_demux_feed *feed)
 	if (!demux->dmx.frontend)
 		return -EINVAL;
 
-	down(&dvb->lock);
+	mutex_lock(&dvb->lock);
 	dvb->nfeeds++;
 	rc = dvb->nfeeds;
 
@@ -111,7 +110,7 @@ static int videobuf_dvb_start_feed(struct dvb_demux_feed *feed)
 	}
 
 out:
-	up(&dvb->lock);
+	mutex_unlock(&dvb->lock);
 	return rc;
 }
 
@@ -121,14 +120,14 @@ static int videobuf_dvb_stop_feed(struct dvb_demux_feed *feed)
 	struct videobuf_dvb *dvb = demux->priv;
 	int err = 0;
 
-	down(&dvb->lock);
+	mutex_lock(&dvb->lock);
 	dvb->nfeeds--;
 	if (0 == dvb->nfeeds  &&  NULL != dvb->thread) {
 		// FIXME: cx8802_cancel_buffers(dev);
 		err = kthread_stop(dvb->thread);
 		dvb->thread = NULL;
 	}
-	up(&dvb->lock);
+	mutex_unlock(&dvb->lock);
 	return err;
 }
 
@@ -140,7 +139,7 @@ int videobuf_dvb_register(struct videobuf_dvb *dvb,
 {
 	int result;
 
-	init_MUTEX(&dvb->lock);
+	mutex_init(&dvb->lock);
 
 	/* register adapter */
 	result = dvb_register_adapter(&dvb->adapter, dvb->name, module);
@@ -249,3 +248,4 @@ EXPORT_SYMBOL(videobuf_dvb_unregister);
  * compile-command: "make DVB=1"
  * End:
  */
+

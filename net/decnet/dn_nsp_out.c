@@ -117,7 +117,7 @@ try_again:
  * The eventual aim is for each socket to have a cached header size
  * for its outgoing packets, and to set hdr from this when sk != NULL.
  */
-struct sk_buff *dn_alloc_skb(struct sock *sk, int size, int pri)
+struct sk_buff *dn_alloc_skb(struct sock *sk, int size, gfp_t pri)
 {
 	struct sk_buff *skb;
 	int hdr = 64;
@@ -132,69 +132,6 @@ struct sk_buff *dn_alloc_skb(struct sock *sk, int size, int pri)
 		skb_set_owner_w(skb, sk);
 
 	skb_reserve(skb, hdr);
-
-	return skb;
-}
-
-/*
- * Wrapper for the above, for allocs of data skbs. We try and get the
- * whole size thats been asked for (plus 11 bytes of header). If this
- * fails, then we try for any size over 16 bytes for SOCK_STREAMS.
- */
-struct sk_buff *dn_alloc_send_skb(struct sock *sk, size_t *size, int noblock, long timeo, int *err)
-{
-	int space;
-	int len;
-	struct sk_buff *skb = NULL;
-
-	*err = 0;
-
-	while(skb == NULL) {
-		if (signal_pending(current)) {
-			*err = sock_intr_errno(timeo);
-			break;
-		}
-
-		if (sk->sk_shutdown & SEND_SHUTDOWN) {
-			*err = EINVAL;
-			break;
-		}
-
-		if (sk->sk_err)
-			break;
-
-		len = *size + 11;
-		space = sk->sk_sndbuf - atomic_read(&sk->sk_wmem_alloc);
-
-		if (space < len) {
-			if ((sk->sk_socket->type == SOCK_STREAM) &&
-			    (space >= (16 + 11)))
-				len = space;
-		}
-
-		if (space < len) {
-			set_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
-			if (noblock) {
-				*err = EWOULDBLOCK;
-				break;
-			}
-
-			clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
-			SOCK_SLEEP_PRE(sk)
-
-			if ((sk->sk_sndbuf - atomic_read(&sk->sk_wmem_alloc)) <
-			    len)
-				schedule();
-
-			SOCK_SLEEP_POST(sk)
-			continue;
-		}
-
-		if ((skb = dn_alloc_skb(sk, len, sk->sk_allocation)) == NULL)
-			continue;
-
-		*size = len - 11;
-	}
 
 	return skb;
 }
@@ -273,7 +210,8 @@ static void dn_nsp_rtt(struct sock *sk, long rtt)
  *
  * Returns: The number of times the packet has been sent previously
  */
-static inline unsigned dn_nsp_clone_and_send(struct sk_buff *skb, int gfp)
+static inline unsigned dn_nsp_clone_and_send(struct sk_buff *skb,
+					     gfp_t gfp)
 {
 	struct dn_skb_cb *cb = DN_SKB_CB(skb);
 	struct sk_buff *skb2;
@@ -342,32 +280,33 @@ int dn_nsp_xmit_timeout(struct sock *sk)
 
 	dn_nsp_output(sk);
 
-	if (skb_queue_len(&scp->data_xmit_queue) || skb_queue_len(&scp->other_xmit_queue))
+	if (!skb_queue_empty(&scp->data_xmit_queue) ||
+	    !skb_queue_empty(&scp->other_xmit_queue))
 		scp->persist = dn_nsp_persist(sk);
 
 	return 0;
 }
 
-static inline unsigned char *dn_mk_common_header(struct dn_scp *scp, struct sk_buff *skb, unsigned char msgflag, int len)
+static inline __le16 *dn_mk_common_header(struct dn_scp *scp, struct sk_buff *skb, unsigned char msgflag, int len)
 {
 	unsigned char *ptr = skb_push(skb, len);
 
 	BUG_ON(len < 5);
 
 	*ptr++ = msgflag;
-	*((unsigned short *)ptr) = scp->addrrem;
+	*((__le16 *)ptr) = scp->addrrem;
 	ptr += 2;
-	*((unsigned short *)ptr) = scp->addrloc;
+	*((__le16 *)ptr) = scp->addrloc;
 	ptr += 2;
-	return ptr;
+	return (__le16 __force *)ptr;
 }
 
-static unsigned short *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, unsigned char msgflag, int hlen, int other)
+static __le16 *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, unsigned char msgflag, int hlen, int other)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	unsigned short acknum = scp->numdat_rcv & 0x0FFF;
 	unsigned short ackcrs = scp->numoth_rcv & 0x0FFF;
-	unsigned short *ptr;
+	__le16 *ptr;
 
 	BUG_ON(hlen < 9);
 
@@ -386,7 +325,7 @@ static unsigned short *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, un
 	/* Set "cross subchannel" bit in ackcrs */
 	ackcrs |= 0x2000;
 
-	ptr = (unsigned short *)dn_mk_common_header(scp, skb, msgflag, hlen);
+	ptr = (__le16 *)dn_mk_common_header(scp, skb, msgflag, hlen);
 
 	*ptr++ = dn_htons(acknum);
 	*ptr++ = dn_htons(ackcrs);
@@ -394,11 +333,11 @@ static unsigned short *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, un
 	return ptr;
 }
 
-static unsigned short *dn_nsp_mk_data_header(struct sock *sk, struct sk_buff *skb, int oth)
+static __le16 *dn_nsp_mk_data_header(struct sock *sk, struct sk_buff *skb, int oth)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	struct dn_skb_cb *cb = DN_SKB_CB(skb);
-	unsigned short *ptr = dn_mk_ack_header(sk, skb, cb->nsp_flags, 11, oth);
+	__le16 *ptr = dn_mk_ack_header(sk, skb, cb->nsp_flags, 11, oth);
 
 	if (unlikely(oth)) {
 		cb->segnum = scp->numoth;
@@ -412,7 +351,8 @@ static unsigned short *dn_nsp_mk_data_header(struct sock *sk, struct sk_buff *sk
 	return ptr;
 }
 
-void dn_nsp_queue_xmit(struct sock *sk, struct sk_buff *skb, int gfp, int oth)
+void dn_nsp_queue_xmit(struct sock *sk, struct sk_buff *skb,
+			gfp_t gfp, int oth)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	struct dn_skb_cb *cb = DN_SKB_CB(skb);
@@ -478,7 +418,7 @@ int dn_nsp_check_xmit_queue(struct sock *sk, struct sk_buff *skb, struct sk_buff
 		xmit_count = cb2->xmit_count;
 		segnum = cb2->segnum;
 		/* Remove and drop ack'ed packet */
-		skb_unlink(ack);
+		skb_unlink(ack, q);
 		kfree_skb(ack);
 		ack = NULL;
 
@@ -579,14 +519,14 @@ static int dn_nsp_retrans_conn_conf(struct sock *sk)
 	return 0;
 }
 
-void dn_send_conn_conf(struct sock *sk, int gfp)
+void dn_send_conn_conf(struct sock *sk, gfp_t gfp)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	struct sk_buff *skb = NULL;
         struct nsp_conn_init_msg *msg;
-	unsigned char len = scp->conndata_out.opt_optl;
+	__u8 len = (__u8)dn_ntohs(scp->conndata_out.opt_optl);
 
-	if ((skb = dn_alloc_skb(sk, 50 + scp->conndata_out.opt_optl, gfp)) == NULL)
+	if ((skb = dn_alloc_skb(sk, 50 + dn_ntohs(scp->conndata_out.opt_optl), gfp)) == NULL)
 		return;
 
         msg = (struct nsp_conn_init_msg *)skb_put(skb, sizeof(*msg));
@@ -611,8 +551,9 @@ void dn_send_conn_conf(struct sock *sk, int gfp)
 
 
 static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg, 
-			unsigned short reason, int gfp, struct dst_entry *dst,
-			int ddl, unsigned char *dd, __u16 rem, __u16 loc)
+			unsigned short reason, gfp_t gfp,
+			struct dst_entry *dst,
+			int ddl, unsigned char *dd, __le16 rem, __le16 loc)
 {
 	struct sk_buff *skb = NULL;
 	int size = 7 + ddl + ((msgflg == NSP_DISCINIT) ? 1 : 0);
@@ -620,7 +561,7 @@ static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg,
 
 	if ((dst == NULL) || (rem == 0)) {
 		if (net_ratelimit())
-			printk(KERN_DEBUG "DECnet: dn_nsp_do_disc: BUG! Please report this to SteveW@ACM.org rem=%u dst=%p\n", (unsigned)rem, dst);
+			printk(KERN_DEBUG "DECnet: dn_nsp_do_disc: BUG! Please report this to SteveW@ACM.org rem=%u dst=%p\n", dn_ntohs(rem), dst);
 		return;
 	}
 
@@ -629,11 +570,11 @@ static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg,
 
 	msg = skb_put(skb, size);
 	*msg++ = msgflg;
-	*(__u16 *)msg = rem;
+	*(__le16 *)msg = rem;
 	msg += 2;
-	*(__u16 *)msg = loc;
+	*(__le16 *)msg = loc;
 	msg += 2;
-	*(__u16 *)msg = dn_htons(reason);
+	*(__le16 *)msg = dn_htons(reason);
 	msg += 2;
 	if (msgflg == NSP_DISCINIT)
 		*msg++ = ddl;
@@ -653,16 +594,16 @@ static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg,
 
 
 void dn_nsp_send_disc(struct sock *sk, unsigned char msgflg, 
-			unsigned short reason, int gfp)
+			unsigned short reason, gfp_t gfp)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	int ddl = 0;
 
 	if (msgflg == NSP_DISCINIT)
-		ddl = scp->discdata_out.opt_optl;
+		ddl = dn_ntohs(scp->discdata_out.opt_optl);
 
 	if (reason == 0)
-		reason = scp->discdata_out.opt_status;
+		reason = dn_ntohs(scp->discdata_out.opt_status);
 
 	dn_nsp_do_disc(sk, msgflg, reason, gfp, sk->sk_dst_cache, ddl, 
 		scp->discdata_out.opt_data, scp->addrrem, scp->addrloc);
@@ -674,7 +615,7 @@ void dn_nsp_return_disc(struct sk_buff *skb, unsigned char msgflg,
 {
 	struct dn_skb_cb *cb = DN_SKB_CB(skb);
 	int ddl = 0;
-	int gfp = GFP_ATOMIC;
+	gfp_t gfp = GFP_ATOMIC;
 
 	dn_nsp_do_disc(NULL, msgflg, reason, gfp, skb->dst, ddl, 
 			NULL, cb->src_port, cb->dst_port);
@@ -686,7 +627,7 @@ void dn_nsp_send_link(struct sock *sk, unsigned char lsflags, char fcval)
 	struct dn_scp *scp = DN_SK(sk);
 	struct sk_buff *skb;
 	unsigned char *ptr;
-	int gfp = GFP_ATOMIC;
+	gfp_t gfp = GFP_ATOMIC;
 
 	if ((skb = dn_alloc_skb(sk, DN_MAX_NSP_DATA_HEADER + 2, gfp)) == NULL)
 		return;
@@ -721,7 +662,7 @@ void dn_nsp_send_conninit(struct sock *sk, unsigned char msgflg)
 	unsigned char menuver;
 	struct dn_skb_cb *cb;
 	unsigned char type = 1;
-	int allocation = (msgflg == NSP_CI) ? sk->sk_allocation : GFP_ATOMIC;
+	gfp_t allocation = (msgflg == NSP_CI) ? sk->sk_allocation : GFP_ATOMIC;
 	struct sk_buff *skb = dn_alloc_skb(sk, 200, allocation);
 
 	if (!skb)
@@ -767,7 +708,7 @@ void dn_nsp_send_conninit(struct sock *sk, unsigned char msgflg)
 	if (aux > 0)
 	memcpy(skb_put(skb, aux), scp->accessdata.acc_acc, aux);
 
-	aux = scp->conndata_out.opt_optl;
+	aux = (__u8)dn_ntohs(scp->conndata_out.opt_optl);
 	*skb_put(skb, 1) = aux;
 	if (aux > 0)
 	memcpy(skb_put(skb,aux), scp->conndata_out.opt_data, aux);

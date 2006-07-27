@@ -35,6 +35,9 @@ extern void ia64_elf32_init (struct pt_regs *regs);
 
 static void elf32_set_personality (void);
 
+static unsigned long __attribute ((unused))
+randomize_stack_top(unsigned long stack_top);
+
 #define setup_arg_pages(bprm,tos,exec)		ia32_setup_arg_pages(bprm,exec)
 #define elf_map				elf32_map
 
@@ -216,12 +219,6 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 	if (!mpnt)
 		return -ENOMEM;
 
-	if (security_vm_enough_memory((IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
-				      >> PAGE_SHIFT)) {
-		kmem_cache_free(vm_area_cachep, mpnt);
-		return -ENOMEM;
-	}
-
 	memset(mpnt, 0, sizeof(*mpnt));
 
 	down_write(&current->mm->mmap_sem);
@@ -267,8 +264,6 @@ elf32_set_personality (void)
 {
 	set_personality(PER_LINUX32);
 	current->thread.map_base  = IA32_PAGE_OFFSET/3;
-	current->thread.task_size = IA32_PAGE_OFFSET;	/* use what Linux/x86 uses... */
-	set_fs(USER_DS);				/* set addr limit for new TASK_SIZE */
 }
 
 static unsigned long

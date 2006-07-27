@@ -41,7 +41,7 @@ static int __init do_linuxrc(void * shell)
 static void __init handle_initrd(void)
 {
 	int error;
-	int i, pid;
+	int pid;
 
 	real_root_dev = new_encode_dev(ROOT_DEV);
 	create_dev("/dev/root.old", Root_RAM0, NULL);
@@ -56,9 +56,10 @@ static void __init handle_initrd(void)
 	sys_chroot(".");
 	mount_devfs_fs ();
 
+	current->flags |= PF_NOFREEZE;
 	pid = kernel_thread(do_linuxrc, "/linuxrc", SIGCHLD);
 	if (pid > 0) {
-		while (pid != sys_wait4(-1, &i, 0, NULL))
+		while (pid != sys_wait4(-1, NULL, 0, NULL))
 			yield();
 	}
 
@@ -86,7 +87,10 @@ static void __init handle_initrd(void)
 		printk("okay\n");
 	else {
 		int fd = sys_open("/dev/root.old", O_RDWR, 0);
-		printk("failed\n");
+		if (error == -ENOENT)
+			printk("/initrd does not exist. Ignored.\n");
+		else
+			printk("failed\n");
 		printk(KERN_NOTICE "Unmounting old root\n");
 		sys_umount("/old", MNT_DETACH);
 		printk(KERN_NOTICE "Trying to free ramdisk memory ... ");

@@ -1,5 +1,4 @@
 /*
- * $Id: saa7134-vbi.c,v 1.6 2004/12/10 12:33:39 kraxel Exp $
  *
  * device driver for philips saa7134 based TV cards
  * video4linux video interface
@@ -60,10 +59,10 @@ static void task_init(struct saa7134_dev *dev, struct saa7134_buf *buf,
 	saa_writeb(SAA7134_VBI_H_START2(task), norm->h_start     >> 8);
 	saa_writeb(SAA7134_VBI_H_STOP1(task),  norm->h_stop      &  0xff);
 	saa_writeb(SAA7134_VBI_H_STOP2(task),  norm->h_stop      >> 8);
-	saa_writeb(SAA7134_VBI_V_START1(task), norm->vbi_v_start &  0xff);
-	saa_writeb(SAA7134_VBI_V_START2(task), norm->vbi_v_start >> 8);
-	saa_writeb(SAA7134_VBI_V_STOP1(task),  norm->vbi_v_stop  &  0xff);
-	saa_writeb(SAA7134_VBI_V_STOP2(task),  norm->vbi_v_stop  >> 8);
+	saa_writeb(SAA7134_VBI_V_START1(task), norm->vbi_v_start_0 &  0xff);
+	saa_writeb(SAA7134_VBI_V_START2(task), norm->vbi_v_start_0 >> 8);
+	saa_writeb(SAA7134_VBI_V_STOP1(task),  norm->vbi_v_stop_0  &  0xff);
+	saa_writeb(SAA7134_VBI_V_STOP2(task),  norm->vbi_v_stop_0  >> 8);
 
 	saa_writeb(SAA7134_VBI_H_SCALE_INC1(task),        VBI_SCALE & 0xff);
 	saa_writeb(SAA7134_VBI_H_SCALE_INC2(task),        VBI_SCALE >> 8);
@@ -127,22 +126,16 @@ static int buffer_prepare(struct videobuf_queue *q,
 	unsigned int lines, llength, size;
 	int err;
 
-	lines   = norm->vbi_v_stop - norm->vbi_v_start +1;
+	lines   = norm->vbi_v_stop_0 - norm->vbi_v_start_0 +1;
 	if (lines > VBI_LINE_COUNT)
 		lines = VBI_LINE_COUNT;
-#if 1
 	llength = VBI_LINE_LENGTH;
-#else
-	llength = (norm->h_stop - norm->h_start +1) * 2;
-	if (llength > VBI_LINE_LENGTH)
-		llength = VBI_LINE_LENGTH;
-#endif
 	size = lines * llength * 2;
 	if (0 != buf->vb.baddr  &&  buf->vb.bsize < size)
 		return -EINVAL;
 
 	if (buf->vb.size != size)
-		saa7134_dma_free(dev,buf);
+		saa7134_dma_free(q,buf);
 
 	if (STATE_NEEDS_INIT == buf->vb.state) {
 		buf->vb.width  = llength;
@@ -150,7 +143,7 @@ static int buffer_prepare(struct videobuf_queue *q,
 		buf->vb.size   = size;
 		buf->pt        = &fh->pt_vbi;
 
-		err = videobuf_iolock(dev->pci,&buf->vb,NULL);
+		err = videobuf_iolock(q,&buf->vb,NULL);
 		if (err)
 			goto oops;
 		err = saa7134_pgtable_build(dev->pci,buf->pt,
@@ -166,7 +159,7 @@ static int buffer_prepare(struct videobuf_queue *q,
 	return 0;
 
  oops:
-	saa7134_dma_free(dev,buf);
+	saa7134_dma_free(q,buf);
 	return err;
 }
 
@@ -177,14 +170,8 @@ buffer_setup(struct videobuf_queue *q, unsigned int *count, unsigned int *size)
 	struct saa7134_dev *dev = fh->dev;
 	int llength,lines;
 
-	lines   = dev->tvnorm->vbi_v_stop - dev->tvnorm->vbi_v_start +1;
-#if 1
+	lines   = dev->tvnorm->vbi_v_stop_0 - dev->tvnorm->vbi_v_start_0 +1;
 	llength = VBI_LINE_LENGTH;
-#else
-	llength = (norm->h_stop - norm->h_start +1) * 2;
-	if (llength > VBI_LINE_LENGTH)
-		llength = VBI_LINE_LENGTH;
-#endif
 	*size = lines * llength * 2;
 	if (0 == *count)
 		*count = vbibufs;
@@ -203,11 +190,9 @@ static void buffer_queue(struct videobuf_queue *q, struct videobuf_buffer *vb)
 
 static void buffer_release(struct videobuf_queue *q, struct videobuf_buffer *vb)
 {
-	struct saa7134_fh *fh   = q->priv_data;
-	struct saa7134_dev *dev = fh->dev;
 	struct saa7134_buf *buf = container_of(vb,struct saa7134_buf,vb);
 
-	saa7134_dma_free(dev,buf);
+	saa7134_dma_free(q,buf);
 }
 
 struct videobuf_queue_ops saa7134_vbi_qops = {

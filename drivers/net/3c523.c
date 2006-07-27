@@ -105,6 +105,7 @@
 #include <linux/mca-legacy.h>
 #include <linux/ethtool.h>
 #include <linux/bitops.h>
+#include <linux/jiffies.h>
 
 #include <asm/uaccess.h>
 #include <asm/processor.h>
@@ -572,6 +573,10 @@ static int __init do_elmc_probe(struct net_device *dev)
         dev->flags&=~IFF_MULTICAST;     /* Multicast doesn't work */
 #endif
 
+	retval = register_netdev(dev);
+	if (retval)
+		goto err_out;
+
 	return 0;
 err_out:
 	mca_set_adapter_procfn(slot, NULL, NULL);
@@ -600,12 +605,7 @@ struct net_device * __init elmc_probe(int unit)
 	err = do_elmc_probe(dev);
 	if (err)
 		goto out;
-	err = register_netdev(dev);
-	if (err)
-		goto out1;
 	return dev;
-out1:
-	cleanup_card(dev);
 out:
 	free_netdev(dev);
 	return ERR_PTR(err);
@@ -659,7 +659,7 @@ static int init586(struct net_device *dev)
 
 	s = jiffies;		/* warning: only active with interrupts on !! */
 	while (!(cfg_cmd->cmd_status & STAT_COMPL)) {
-		if (jiffies - s > 30*HZ/100)
+		if (time_after(jiffies, s + 30*HZ/100))
 			break;
 	}
 
@@ -685,7 +685,7 @@ static int init586(struct net_device *dev)
 
 	s = jiffies;
 	while (!(ias_cmd->cmd_status & STAT_COMPL)) {
-		if (jiffies - s > 30*HZ/100)
+		if (time_after(jiffies, s + 30*HZ/100))
 			break;
 	}
 
@@ -710,7 +710,7 @@ static int init586(struct net_device *dev)
 
 	s = jiffies;
 	while (!(tdr_cmd->cmd_status & STAT_COMPL)) {
-		if (jiffies - s > 30*HZ/100) {
+		if (time_after(jiffies, s + 30*HZ/100)) {
 			printk(KERN_WARNING "%s: %d Problems while running the TDR.\n", dev->name, __LINE__);
 			result = 1;
 			break;
@@ -799,7 +799,7 @@ static int init586(struct net_device *dev)
 			elmc_id_attn586();
 			s = jiffies;
 			while (!(mc_cmd->cmd_status & STAT_COMPL)) {
-				if (jiffies - s > 30*HZ/100)
+				if (time_after(jiffies, s + 30*HZ/100))
 					break;
 			}
 			if (!(mc_cmd->cmd_status & STAT_COMPL)) {
@@ -1275,6 +1275,7 @@ module_param_array(irq, int, NULL, 0);
 module_param_array(io, int, NULL, 0);
 MODULE_PARM_DESC(io, "EtherLink/MC I/O base address(es)");
 MODULE_PARM_DESC(irq, "EtherLink/MC IRQ number(s)");
+MODULE_LICENSE("GPL");
 
 int init_module(void)
 {
@@ -1288,12 +1289,9 @@ int init_module(void)
 		dev->irq=irq[this_dev];
 		dev->base_addr=io[this_dev];
 		if (do_elmc_probe(dev) == 0) {
-			if (register_netdev(dev) == 0) {
-				dev_elmc[this_dev] = dev;
-				found++;
-				continue;
-			}
-			cleanup_card(dev);
+			dev_elmc[this_dev] = dev;
+			found++;
+			continue;
 		}
 		free_netdev(dev);
 		if (io[this_dev]==0)

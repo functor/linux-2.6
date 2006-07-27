@@ -20,6 +20,7 @@
 #include <linux/config.h>
 #include <linux/threads.h>
 #include <asm/percpu.h>
+#include <linux/cpumask.h>
 
 /* flag for disabling the tsc */
 extern int tsc_disable;
@@ -29,7 +30,7 @@ struct desc_struct {
 };
 
 #define desc_empty(desc) \
-		(!((desc)->a + (desc)->b))
+		(!((desc)->a | (desc)->b))
 
 #define desc_equal(desc1, desc2) \
 		(((desc1)->a == (desc2)->a) && ((desc1)->b == (desc2)->b))
@@ -61,11 +62,18 @@ struct cpuinfo_x86 {
 	int 	x86_cache_size;  /* in KB - valid for CPUS which support this
 				    call  */
 	int 	x86_cache_alignment;	/* In bytes */
-	int	fdiv_bug;
-	int	f00f_bug;
-	int	coma_bug;
+	char	fdiv_bug;
+	char	f00f_bug;
+	char	coma_bug;
+	char	pad0;
+	int	x86_power;
 	unsigned long loops_per_jiffy;
-	unsigned char x86_num_cores;
+#ifdef CONFIG_SMP
+	cpumask_t llc_shared_map;	/* cpus sharing the last level cache */
+#endif
+	unsigned char x86_max_cores;	/* cpuid returned max cores value */
+	unsigned char booted_cores;	/* number of cores as seen by OS */
+	unsigned char apicid;
 } __attribute__((__aligned__(SMP_CACHE_BYTES)));
 
 #define X86_VENDOR_INTEL 0
@@ -99,6 +107,7 @@ extern struct cpuinfo_x86 cpu_data[];
 
 extern	int phys_proc_id[NR_CPUS];
 extern	int cpu_core_id[NR_CPUS];
+extern	int cpu_llc_id[NR_CPUS];
 extern char ignore_fpu_irq;
 
 extern void identify_cpu(struct cpuinfo_x86 *);
@@ -203,9 +212,7 @@ static inline unsigned int cpuid_edx(unsigned int op)
 	return edx;
 }
 
-#define load_cr3(pgdir) \
-	asm volatile("movl %0,%%cr3": :"r" (__pa(pgdir)))
-
+#define load_cr3(pgdir) write_cr3(__pa(pgdir))
 
 /*
  * Intel CPU features in CR4
@@ -232,22 +239,20 @@ extern unsigned long mmu_cr4_features;
 
 static inline void set_in_cr4 (unsigned long mask)
 {
+	unsigned cr4;
 	mmu_cr4_features |= mask;
-	__asm__("movl %%cr4,%%eax\n\t"
-		"orl %0,%%eax\n\t"
-		"movl %%eax,%%cr4\n"
-		: : "irg" (mask)
-		:"ax");
+	cr4 = read_cr4();
+	cr4 |= mask;
+	write_cr4(cr4);
 }
 
 static inline void clear_in_cr4 (unsigned long mask)
 {
+	unsigned cr4;
 	mmu_cr4_features &= ~mask;
-	__asm__("movl %%cr4,%%eax\n\t"
-		"andl %0,%%eax\n\t"
-		"movl %%eax,%%cr4\n"
-		: : "irg" (~mask)
-		:"ax");
+	cr4 = read_cr4();
+	cr4 &= ~mask;
+	write_cr4(cr4);
 }
 
 /*
@@ -280,6 +285,13 @@ static inline void clear_in_cr4 (unsigned long mask)
 	outb((reg), 0x22); \
 	outb((data), 0x23); \
 } while (0)
+
+/* Stop speculative execution */
+static inline void sync_core(void)
+{
+	int tmp;
+	asm volatile("cpuid" : "=a" (tmp) : "0" (1) : "ebx","ecx","edx","memory");
+}
 
 static inline void __monitor(const void *eax, unsigned long ecx,
 		unsigned long edx)
@@ -457,6 +469,7 @@ struct thread_struct {
 	unsigned int		saved_fs, saved_gs;
 /* IO permissions */
 	unsigned long	*io_bitmap_ptr;
+ 	unsigned long	iopl;
 /* max allowed port in the bitmap, in bytes: */
 	unsigned long	io_bitmap_max;
 };
@@ -477,7 +490,6 @@ struct thread_struct {
 	.esp0		= sizeof(init_stack) + (long)&init_stack,	\
 	.ss0		= __KERNEL_DS,					\
 	.ss1		= __KERNEL_CS,					\
-	.ldt		= GDT_ENTRY_LDT,				\
 	.io_bitmap_base	= INVALID_IO_BITMAP_OFFSET,			\
 	.io_bitmap	= { [ 0 ... IO_BITMAP_LONGS] = ~0 },		\
 }
@@ -507,12 +519,31 @@ static inline void load_esp0(struct tss_struct *tss, struct thread_struct *threa
 } while (0)
 
 /*
- * This special macro can be used to load a debugging register
+ * These special macros can be used to get or set a debugging register
  */
-#define loaddebug(thread,register) \
-               __asm__("movl %0,%%db" #register  \
-                       : /* no output */ \
-                       :"r" ((thread)->debugreg[register]))
+#define get_debugreg(var, register)				\
+		__asm__("movl %%db" #register ", %0"		\
+			:"=r" (var))
+#define set_debugreg(value, register)			\
+		__asm__("movl %0,%%db" #register		\
+			: /* no output */			\
+			:"r" (value))
+
+/*
+ * Set IOPL bits in EFLAGS from given mask
+ */
+static inline void set_iopl_mask(unsigned mask)
+{
+	unsigned int reg;
+	__asm__ __volatile__ ("pushfl;"
+			      "popl %0;"
+			      "andl %1, %0;"
+			      "orl %2, %0;"
+			      "pushl %0;"
+			      "popfl"
+				: "=&r" (reg)
+				: "i" (~X86_EFLAGS_IOPL), "r" (mask));
+}
 
 /* Forward declaration, a strange C thing */
 struct task_struct;
@@ -541,10 +572,20 @@ unsigned long get_wchan(struct task_struct *p);
        (unsigned long)(&__ptr[THREAD_SIZE_LONGS]);                     \
 })
 
+/*
+ * The below -8 is to reserve 8 bytes on top of the ring0 stack.
+ * This is necessary to guarantee that the entire "struct pt_regs"
+ * is accessable even if the CPU haven't stored the SS/ESP registers
+ * on the stack (interrupt gate does not save these registers
+ * when switching to the same priv ring).
+ * Therefore beware: accessing the xss/esp fields of the
+ * "struct pt_regs" is possible, but they may contain the
+ * completely wrong values.
+ */
 #define task_pt_regs(task)                                             \
 ({                                                                     \
        struct pt_regs *__regs__;                                       \
-       __regs__ = (struct pt_regs *)KSTK_TOP((task)->thread_info);     \
+       __regs__ = (struct pt_regs *)(KSTK_TOP(task_stack_page(task))-8); \
        __regs__ - 1;                                                   \
 })
 
@@ -586,8 +627,6 @@ struct extended_sigtable {
 	unsigned int reserved[3];
 	struct extended_signature sigs[0];
 };
-/* '6' because it used to be for P6 only (but now covers Pentium 4 as well) */
-#define MICROCODE_IOCFREE	_IO('6',0)
 
 /* REP NOP (PAUSE) is a good thing to insert into busy-wait loops. */
 static inline void rep_nop(void)
@@ -665,7 +704,7 @@ static inline void rep_nop(void)
    However we don't do prefetches for pre XP Athlons currently
    That should be fixed. */
 #define ARCH_HAS_PREFETCH
-extern inline void prefetch(const void *x)
+static inline void prefetch(const void *x)
 {
 	alternative_input(ASM_NOP4,
 			  "prefetchnta (%1)",
@@ -679,7 +718,7 @@ extern inline void prefetch(const void *x)
 
 /* 3dnow! prefetch to get an exclusive cache line. Useful for 
    spinlocks to avoid one state transition in the cache coherency protocol. */
-extern inline void prefetchw(const void *x)
+static inline void prefetchw(const void *x)
 {
 	alternative_input(ASM_NOP4,
 			  "prefetchw (%1)",
@@ -693,5 +732,21 @@ extern void select_idle_routine(const struct cpuinfo_x86 *c);
 #define cache_line_size() (boot_cpu_data.x86_cache_alignment)
 
 extern unsigned long boot_option_idle_override;
+extern void enable_sep_cpu(void);
+extern int sysenter_setup(void);
+
+#ifdef CONFIG_MTRR
+extern void mtrr_ap_init(void);
+extern void mtrr_bp_init(void);
+#else
+#define mtrr_ap_init() do {} while (0)
+#define mtrr_bp_init() do {} while (0)
+#endif
+
+#ifdef CONFIG_X86_MCE
+extern void mcheck_init(struct cpuinfo_x86 *c);
+#else
+#define mcheck_init(c) do {} while(0)
+#endif
 
 #endif /* __ASM_I386_PROCESSOR_H */

@@ -26,6 +26,8 @@
  * Copyright (C) 2003 David Brownell
  * Copyright (C) 2003-2005 PLX Technology, Inc.
  *
+ * Modified Seth Levy 2005 PLX Technology, Inc. to provide compatibility with 2282 chip
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -47,6 +49,7 @@
 #include <linux/config.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/dma-mapping.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/ioport.h>
@@ -70,8 +73,8 @@
 #include <asm/unaligned.h>
 
 
-#define	DRIVER_DESC		"PLX NET2280 USB Peripheral Controller"
-#define	DRIVER_VERSION		"2005 Feb 03"
+#define	DRIVER_DESC		"PLX NET228x USB Peripheral Controller"
+#define	DRIVER_VERSION		"2005 Sept 27"
 
 #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
 #define	EP_DONTUSE		13	/* nonzero */
@@ -117,7 +120,7 @@ module_param (fifo_mode, ushort, 0644);
 /* enable_suspend -- When enabled, the driver will respond to
  * USB suspend requests by powering down the NET2280.  Otherwise,
  * USB suspend requests will be ignored.  This is acceptible for
- * self-powered devices, and helps avoid some quirks.
+ * self-powered devices
  */
 static int enable_suspend = 0;
 
@@ -222,6 +225,11 @@ net2280_enable (struct usb_ep *_ep, const struct usb_endpoint_descriptor *desc)
 	ep->is_in = (tmp & USB_DIR_IN) != 0;
 	if (!ep->is_in)
 		writel ((1 << SET_NAK_OUT_PACKETS), &ep->regs->ep_rsp);
+	else if (dev->pdev->device != 0x2280) {
+		/* Added for 2282, Don't use nak packets on an in endpoint, this was ignored on 2280 */
+		writel ((1 << CLEAR_NAK_OUT_PACKETS)
+			| (1 << CLEAR_NAK_OUT_PACKETS_MODE), &ep->regs->ep_rsp);
+	}
 
 	writel (tmp, &ep->regs->ep_cfg);
 
@@ -231,8 +239,9 @@ net2280_enable (struct usb_ep *_ep, const struct usb_endpoint_descriptor *desc)
 		writel (tmp, &dev->regs->pciirqenb0);
 
 		tmp = (1 << DATA_PACKET_RECEIVED_INTERRUPT_ENABLE)
-			| (1 << DATA_PACKET_TRANSMITTED_INTERRUPT_ENABLE)
-			| readl (&ep->regs->ep_irqenb);
+			| (1 << DATA_PACKET_TRANSMITTED_INTERRUPT_ENABLE);
+		if (dev->pdev->device == 0x2280)
+			tmp |= readl (&ep->regs->ep_irqenb);
 		writel (tmp, &ep->regs->ep_irqenb);
 	} else {				/* dma, per-request */
 		tmp = (1 << (8 + ep->num));	/* completion */
@@ -313,10 +322,18 @@ static void ep_reset (struct net2280_regs __iomem *regs, struct net2280_ep *ep)
 	/* init to our chosen defaults, notably so that we NAK OUT
 	 * packets until the driver queues a read (+note erratum 0112)
 	 */
-	tmp = (1 << SET_NAK_OUT_PACKETS_MODE)
+	if (!ep->is_in || ep->dev->pdev->device == 0x2280) {
+		tmp = (1 << SET_NAK_OUT_PACKETS_MODE)
 		| (1 << SET_NAK_OUT_PACKETS)
 		| (1 << CLEAR_EP_HIDE_STATUS_PHASE)
 		| (1 << CLEAR_INTERRUPT_MODE);
+	} else {
+		/* added for 2282 */
+		tmp = (1 << CLEAR_NAK_OUT_PACKETS_MODE)
+		| (1 << CLEAR_NAK_OUT_PACKETS)
+		| (1 << CLEAR_EP_HIDE_STATUS_PHASE)
+		| (1 << CLEAR_INTERRUPT_MODE);
+	}
 
 	if (ep->num != 0) {
 		tmp |= (1 << CLEAR_ENDPOINT_TOGGLE)
@@ -325,14 +342,18 @@ static void ep_reset (struct net2280_regs __iomem *regs, struct net2280_ep *ep)
 	writel (tmp, &ep->regs->ep_rsp);
 
 	/* scrub most status bits, and flush any fifo state */
-	writel (  (1 << TIMEOUT)
+	if (ep->dev->pdev->device == 0x2280)
+		tmp = (1 << FIFO_OVERFLOW)
+			| (1 << FIFO_UNDERFLOW);
+	else
+		tmp = 0;
+
+	writel (tmp | (1 << TIMEOUT)
 		| (1 << USB_STALL_SENT)
 		| (1 << USB_IN_NAK_SENT)
 		| (1 << USB_IN_ACK_RCVD)
 		| (1 << USB_OUT_PING_NAK_SENT)
 		| (1 << USB_OUT_ACK_SENT)
-		| (1 << FIFO_OVERFLOW)
-		| (1 << FIFO_UNDERFLOW)
 		| (1 << FIFO_FLUSH)
 		| (1 << SHORT_PACKET_OUT_DONE_INTERRUPT)
 		| (1 << SHORT_PACKET_TRANSFERRED_INTERRUPT)
@@ -376,7 +397,7 @@ static int net2280_disable (struct usb_ep *_ep)
 /*-------------------------------------------------------------------------*/
 
 static struct usb_request *
-net2280_alloc_request (struct usb_ep *_ep, int gfp_flags)
+net2280_alloc_request (struct usb_ep *_ep, gfp_t gfp_flags)
 {
 	struct net2280_ep	*ep;
 	struct net2280_request	*req;
@@ -385,11 +406,10 @@ net2280_alloc_request (struct usb_ep *_ep, int gfp_flags)
 		return NULL;
 	ep = container_of (_ep, struct net2280_ep, ep);
 
-	req = kmalloc (sizeof *req, gfp_flags);
+	req = kzalloc(sizeof(*req), gfp_flags);
 	if (!req)
 		return NULL;
 
-	memset (req, 0, sizeof *req);
 	req->req.dma = DMA_ADDR_INVALID;
 	INIT_LIST_HEAD (&req->queue);
 
@@ -448,7 +468,7 @@ net2280_free_request (struct usb_ep *_ep, struct usb_request *_req)
 #elif	defined(CONFIG_PPC) && !defined(CONFIG_NOT_COHERENT_CACHE)
 #define USE_KMALLOC
 
-#elif	defined(CONFIG_MIPS) && !defined(CONFIG_NONCOHERENT_IO)
+#elif	defined(CONFIG_MIPS) && !defined(CONFIG_DMA_NONCOHERENT)
 #define USE_KMALLOC
 
 /* FIXME there are other cases, including an x86-64 one ...  */
@@ -463,7 +483,7 @@ net2280_alloc_buffer (
 	struct usb_ep		*_ep,
 	unsigned		bytes,
 	dma_addr_t		*dma,
-	int			gfp_flags
+	gfp_t			gfp_flags
 )
 {
 	void			*retval;
@@ -718,7 +738,7 @@ fill_dma_desc (struct net2280_ep *ep, struct net2280_request *req, int valid)
 	 */
 	if (ep->is_in)
 		dmacount |= (1 << DMA_DIRECTION);
-	else if ((dmacount % ep->ep.maxpacket) != 0)
+	if ((!ep->is_in && (dmacount % ep->ep.maxpacket) != 0) || ep->dev->pdev->device != 0x2280)
 		dmacount |= (1 << END_OF_CHAIN);
 
 	req->valid = valid;
@@ -760,9 +780,12 @@ static inline void stop_dma (struct net2280_dma_regs __iomem *dma)
 static void start_queue (struct net2280_ep *ep, u32 dmactl, u32 td_dma)
 {
 	struct net2280_dma_regs	__iomem *dma = ep->dma;
+	unsigned int tmp = (1 << VALID_BIT) | (ep->is_in << DMA_DIRECTION);
 
-	writel ((1 << VALID_BIT) | (ep->is_in << DMA_DIRECTION),
-			&dma->dmacount);
+	if (ep->dev->pdev->device != 0x2280)
+		tmp |= (1 << END_OF_CHAIN);
+
+	writel (tmp, &dma->dmacount);
 	writel (readl (&dma->dmastat), &dma->dmastat);
 
 	writel (td_dma, &dma->dmadesc);
@@ -897,7 +920,7 @@ done (struct net2280_ep *ep, struct net2280_request *req, int status)
 /*-------------------------------------------------------------------------*/
 
 static int
-net2280_queue (struct usb_ep *_ep, struct usb_request *_req, int gfp_flags)
+net2280_queue (struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 {
 	struct net2280_request	*req;
 	struct net2280_ep	*ep;
@@ -1113,7 +1136,7 @@ static void restart_dma (struct net2280_ep *ep)
 		if (ep->in_fifo_validate)
 			dmactl |= (1 << DMA_FIFO_VALIDATE);
 		list_for_each_entry (entry, &ep->queue, queue) {
-			u32		dmacount;
+			__le32		dmacount;
 
 			if (entry == req)
 				continue;
@@ -1238,7 +1261,7 @@ static int net2280_dequeue (struct usb_ep *_ep, struct usb_request *_req)
 				&ep->dma->dmadesc);
 			if (req->td->dmacount & dma_done_ie)
 				writel (readl (&ep->dma->dmacount)
-						| dma_done_ie,
+						| le32_to_cpu(dma_done_ie),
 					&ep->dma->dmacount);
 		} else {
 			struct net2280_request	*prev;
@@ -1469,7 +1492,7 @@ static const struct usb_gadget_ops net2280_ops = {
 
 /* "function" sysfs attribute */
 static ssize_t
-show_function (struct device *_dev, char *buf)
+show_function (struct device *_dev, struct device_attribute *attr, char *buf)
 {
 	struct net2280	*dev = dev_get_drvdata (_dev);
 
@@ -1482,7 +1505,7 @@ show_function (struct device *_dev, char *buf)
 static DEVICE_ATTR (function, S_IRUGO, show_function, NULL);
 
 static ssize_t
-show_registers (struct device *_dev, char *buf)
+show_registers (struct device *_dev, struct device_attribute *attr, char *buf)
 {
 	struct net2280		*dev;
 	char			*next;
@@ -1490,7 +1513,7 @@ show_registers (struct device *_dev, char *buf)
 	unsigned long		flags;
 	int			i;
 	u32			t1, t2;
-	char			*s;
+	const char		*s;
 
 	dev = dev_get_drvdata (_dev);
 	next = buf;
@@ -1637,7 +1660,7 @@ show_registers (struct device *_dev, char *buf)
 static DEVICE_ATTR (registers, S_IRUGO, show_registers, NULL);
 
 static ssize_t
-show_queues (struct device *_dev, char *buf)
+show_queues (struct device *_dev, struct device_attribute *attr, char *buf)
 {
 	struct net2280		*dev;
 	char			*next;
@@ -1778,6 +1801,9 @@ static void set_fifo_mode (struct net2280 *dev, int mode)
 	list_add_tail (&dev->ep [5].ep.ep_list, &dev->gadget.ep_list);
 	list_add_tail (&dev->ep [6].ep.ep_list, &dev->gadget.ep_list);
 }
+
+/* just declare this in any driver that really need it */
+extern int net2280_set_fifo_mode (struct usb_gadget *gadget, int mode);
 
 /**
  * net2280_set_fifo_mode - change allocation of fifo buffers
@@ -2107,7 +2133,11 @@ static void handle_ep_small (struct net2280_ep *ep)
 	VDEBUG (ep->dev, "%s ack ep_stat %08x, req %p\n",
 			ep->ep.name, t, req ? &req->req : 0);
 #endif
-	writel (t & ~(1 << NAK_OUT_PACKETS), &ep->regs->ep_stat);
+	if (!ep->is_in || ep->dev->pdev->device == 0x2280)
+		writel (t & ~(1 << NAK_OUT_PACKETS), &ep->regs->ep_stat);
+	else
+		/* Added for 2282 */
+		writel (t, &ep->regs->ep_stat);
 
 	/* for ep0, monitor token irqs to catch data stage length errors
 	 * and to synchronize on status.
@@ -2136,7 +2166,7 @@ static void handle_ep_small (struct net2280_ep *ep)
 					ep->stopped = 1;
 					set_halt (ep);
 					mode = 2;
-				} else if (!req && ep->stopped)
+				} else if (!req && !ep->stopped)
 					write_fifo (ep, NULL);
 			}
 		} else {
@@ -2211,7 +2241,8 @@ static void handle_ep_small (struct net2280_ep *ep)
 			if (likely (req)) {
 				req->td->dmacount = 0;
 				t = readl (&ep->regs->ep_avail);
-				dma_done (ep, req, count, t);
+				dma_done (ep, req, count,
+					(ep->out_overflow || t) ? -EOVERFLOW : 0);
 			}
 
 			/* also flush to prevent erratum 0106 trouble */
@@ -2249,9 +2280,7 @@ static void handle_ep_small (struct net2280_ep *ep)
 		/* if we wrote it all, we're usually done */
 		if (req->req.actual == req->req.length) {
 			if (ep->num == 0) {
-				/* wait for control status */
-				if (mode != 2)
-					req = NULL;
+				/* send zlps until the status stage */
 			} else if (!req->req.zero || len != ep->ep.maxpacket)
 				mode = 2;
 		}
@@ -2334,7 +2363,7 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 			u32			raw [2];
 			struct usb_ctrlrequest	r;
 		} u;
-		int				tmp = 0;
+		int				tmp;
 		struct net2280_request		*req;
 
 		if (dev->gadget.speed == USB_SPEED_UNKNOWN) {
@@ -2361,14 +2390,19 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 		}
 		ep->stopped = 0;
 		dev->protocol_stall = 0;
-		writel (  (1 << TIMEOUT)
+
+		if (ep->dev->pdev->device == 0x2280)
+			tmp = (1 << FIFO_OVERFLOW)
+				| (1 << FIFO_UNDERFLOW);
+		else
+			tmp = 0;
+
+		writel (tmp | (1 << TIMEOUT)
 			| (1 << USB_STALL_SENT)
 			| (1 << USB_IN_NAK_SENT)
 			| (1 << USB_IN_ACK_RCVD)
 			| (1 << USB_OUT_PING_NAK_SENT)
 			| (1 << USB_OUT_ACK_SENT)
-			| (1 << FIFO_OVERFLOW)
-			| (1 << FIFO_UNDERFLOW)
 			| (1 << SHORT_PACKET_OUT_DONE_INTERRUPT)
 			| (1 << SHORT_PACKET_TRANSFERRED_INTERRUPT)
 			| (1 << DATA_PACKET_RECEIVED_INTERRUPT)
@@ -2382,9 +2416,11 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 		cpu_to_le32s (&u.raw [0]);
 		cpu_to_le32s (&u.raw [1]);
 
-		le16_to_cpus (&u.r.wValue);
-		le16_to_cpus (&u.r.wIndex);
-		le16_to_cpus (&u.r.wLength);
+		tmp = 0;
+
+#define	w_value		le16_to_cpup (&u.r.wValue)
+#define	w_index		le16_to_cpup (&u.r.wIndex)
+#define	w_length	le16_to_cpup (&u.r.wLength)
 
 		/* ack the irq */
 		writel (1 << SETUP_PACKET_INTERRUPT, &dev->regs->irqstat0);
@@ -2413,25 +2449,25 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 		switch (u.r.bRequest) {
 		case USB_REQ_GET_STATUS: {
 			struct net2280_ep	*e;
-			u16			status;
+			__le32			status;
 
 			/* hw handles device and interface status */
 			if (u.r.bRequestType != (USB_DIR_IN|USB_RECIP_ENDPOINT))
 				goto delegate;
-			if ((e = get_ep_by_addr (dev, u.r.wIndex)) == 0
-					|| u.r.wLength > 2)
+			if ((e = get_ep_by_addr (dev, w_index)) == 0
+					|| w_length > 2)
 				goto do_stall;
 
 			if (readl (&e->regs->ep_rsp)
 					& (1 << SET_ENDPOINT_HALT))
-				status = __constant_cpu_to_le16 (1);
+				status = __constant_cpu_to_le32 (1);
 			else
-				status = __constant_cpu_to_le16 (0);
+				status = __constant_cpu_to_le32 (0);
 
 			/* don't bother with a request object! */
 			writel (0, &dev->epregs [0].ep_irqenb);
-			set_fifo_bytecount (ep, u.r.wLength);
-			writel (status, &dev->epregs [0].ep_data);
+			set_fifo_bytecount (ep, w_length);
+			writel ((__force u32)status, &dev->epregs [0].ep_data);
 			allow_status (ep);
 			VDEBUG (dev, "%s stat %02x\n", ep->ep.name, status);
 			goto next_endpoints;
@@ -2443,10 +2479,10 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 			/* hw handles device features */
 			if (u.r.bRequestType != USB_RECIP_ENDPOINT)
 				goto delegate;
-			if (u.r.wValue != USB_ENDPOINT_HALT
-					|| u.r.wLength != 0)
+			if (w_value != USB_ENDPOINT_HALT
+					|| w_length != 0)
 				goto do_stall;
-			if ((e = get_ep_by_addr (dev, u.r.wIndex)) == 0)
+			if ((e = get_ep_by_addr (dev, w_index)) == 0)
 				goto do_stall;
 			clear_halt (e);
 			allow_status (ep);
@@ -2460,10 +2496,10 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 			/* hw handles device features */
 			if (u.r.bRequestType != USB_RECIP_ENDPOINT)
 				goto delegate;
-			if (u.r.wValue != USB_ENDPOINT_HALT
-					|| u.r.wLength != 0)
+			if (w_value != USB_ENDPOINT_HALT
+					|| w_length != 0)
 				goto do_stall;
-			if ((e = get_ep_by_addr (dev, u.r.wIndex)) == 0)
+			if ((e = get_ep_by_addr (dev, w_index)) == 0)
 				goto do_stall;
 			set_halt (e);
 			allow_status (ep);
@@ -2473,10 +2509,10 @@ static void handle_stat0_irqs (struct net2280 *dev, u32 stat)
 			break;
 		default:
 delegate:
-			VDEBUG (dev, "setup %02x.%02x v%04x i%04x "
+			VDEBUG (dev, "setup %02x.%02x v%04x i%04x l%04x"
 				"ep_cfg %08x\n",
 				u.r.bRequestType, u.r.bRequest,
-				u.r.wValue, u.r.wIndex,
+				w_value, w_index, w_length,
 				readl (&ep->regs->ep_cfg));
 			spin_unlock (&dev->lock);
 			tmp = dev->driver->setup (&dev->gadget, &u.r);
@@ -2496,6 +2532,10 @@ do_stall:
 		 * before the host times out.
 		 */
 	}
+
+#undef	w_value
+#undef	w_index
+#undef	w_length
 
 next_endpoints:
 	/* endpoint data irq ? */
@@ -2587,10 +2627,17 @@ static void handle_stat1_irqs (struct net2280 *dev, u32 stat)
 		writel (stat, &dev->regs->irqstat1);
 
 	/* some status we can just ignore */
-	stat &= ~((1 << CONTROL_STATUS_INTERRUPT)
-			| (1 << SUSPEND_REQUEST_INTERRUPT)
-			| (1 << RESUME_INTERRUPT)
-			| (1 << SOF_INTERRUPT));
+	if (dev->pdev->device == 0x2280)
+		stat &= ~((1 << CONTROL_STATUS_INTERRUPT)
+			  | (1 << SUSPEND_REQUEST_INTERRUPT)
+			  | (1 << RESUME_INTERRUPT)
+			  | (1 << SOF_INTERRUPT));
+	else
+		stat &= ~((1 << CONTROL_STATUS_INTERRUPT)
+			  | (1 << RESUME_INTERRUPT)
+			  | (1 << SOF_DOWN_INTERRUPT)
+			  | (1 << SOF_INTERRUPT));
+
 	if (!stat)
 		return;
 	// DEBUG (dev, "irqstat1 %08x\n", stat);
@@ -2653,7 +2700,7 @@ static void handle_stat1_irqs (struct net2280 *dev, u32 stat)
 				restart_dma (ep);
 			else if (ep->is_in && use_dma_chaining) {
 				struct net2280_request	*req;
-				u32			dmacount;
+				__le32			dmacount;
 
 				/* the descriptor at the head of the chain
 				 * may still have VALID_BIT clear; that's
@@ -2694,6 +2741,10 @@ static void handle_stat1_irqs (struct net2280 *dev, u32 stat)
 static irqreturn_t net2280_irq (int irq, void *_dev, struct pt_regs * r)
 {
 	struct net2280		*dev = _dev;
+
+	/* shared interrupt, not ours */
+	if (!(readl(&dev->regs->irqstat0) & (1 << INTA_ASSERTED)))
+		return IRQ_NONE;
 
 	spin_lock (&dev->lock);
 
@@ -2782,13 +2833,13 @@ static int net2280_probe (struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	/* alloc, and start init */
-	dev = kmalloc (sizeof *dev, SLAB_KERNEL);
+	dev = kzalloc (sizeof *dev, SLAB_KERNEL);
 	if (dev == NULL){
 		retval = -ENOMEM;
 		goto done;
 	}
 
-	memset (dev, 0, sizeof *dev);
+	pci_set_drvdata (pdev, dev);
 	spin_lock_init (&dev->lock);
 	dev->pdev = pdev;
 	dev->gadget.ops = &net2280_ops;
@@ -2901,7 +2952,6 @@ static int net2280_probe (struct pci_dev *pdev, const struct pci_device_id *id)
 	dev->chiprev = get_idx_reg (dev->regs, REG_CHIPREV) & 0xffff;
 
 	/* done */
-	pci_set_drvdata (pdev, dev);
 	INFO (dev, "%s\n", driver_desc);
 	INFO (dev, "irq %s, pci mem %p, chip rev %04x\n",
 			bufp, base, dev->chiprev);
@@ -2930,6 +2980,13 @@ static struct pci_device_id pci_ids [] = { {
 	.class_mask = 	~0,
 	.vendor =	0x17cc,
 	.device =	0x2280,
+	.subvendor =	PCI_ANY_ID,
+	.subdevice =	PCI_ANY_ID,
+}, {
+	.class = 	((PCI_CLASS_SERIAL_USB << 8) | 0xfe),
+	.class_mask = 	~0,
+	.vendor =	0x17cc,
+	.device =	0x2282,
 	.subvendor =	PCI_ANY_ID,
 	.subdevice =	PCI_ANY_ID,
 

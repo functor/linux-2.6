@@ -14,6 +14,7 @@
  * Copyright (C) Frederic Rible F1OAT (frible@teaser.fr)
  */
 #include <linux/config.h>
+#include <linux/capability.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/types.h>
@@ -45,7 +46,7 @@
 #include <linux/sysctl.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
-#include <net/tcp.h>
+#include <net/tcp_states.h>
 #include <net/ip.h>
 #include <net/arp.h>
 
@@ -54,7 +55,7 @@
 HLIST_HEAD(ax25_list);
 DEFINE_SPINLOCK(ax25_list_lock);
 
-static struct proto_ops ax25_proto_ops;
+static const struct proto_ops ax25_proto_ops;
 
 static void ax25_free_sock(struct sock *sk)
 {
@@ -226,6 +227,8 @@ ax25_cb *ax25_find_cb(ax25_address *src_addr, ax25_address *dest_addr,
 
 	return NULL;
 }
+
+EXPORT_SYMBOL(ax25_find_cb);
 
 void ax25_send_to_raw(ax25_address *addr, struct sk_buff *skb, int proto)
 {
@@ -423,6 +426,26 @@ static int ax25_ctl_ioctl(const unsigned int cmd, void __user *arg)
 	return 0;
 }
 
+static void ax25_fillin_cb_from_dev(ax25_cb *ax25, ax25_dev *ax25_dev)
+{
+	ax25->rtt     = msecs_to_jiffies(ax25_dev->values[AX25_VALUES_T1]) / 2;
+	ax25->t1      = msecs_to_jiffies(ax25_dev->values[AX25_VALUES_T1]);
+	ax25->t2      = msecs_to_jiffies(ax25_dev->values[AX25_VALUES_T2]);
+	ax25->t3      = msecs_to_jiffies(ax25_dev->values[AX25_VALUES_T3]);
+	ax25->n2      = ax25_dev->values[AX25_VALUES_N2];
+	ax25->paclen  = ax25_dev->values[AX25_VALUES_PACLEN];
+	ax25->idle    = msecs_to_jiffies(ax25_dev->values[AX25_VALUES_IDLE]);
+	ax25->backoff = ax25_dev->values[AX25_VALUES_BACKOFF];
+
+	if (ax25_dev->values[AX25_VALUES_AXDEFMODE]) {
+		ax25->modulus = AX25_EMODULUS;
+		ax25->window  = ax25_dev->values[AX25_VALUES_EWINDOW];
+	} else {
+		ax25->modulus = AX25_MODULUS;
+		ax25->window  = ax25_dev->values[AX25_VALUES_WINDOW];
+	}
+}
+
 /*
  *	Fill in a created AX.25 created control block with the default
  *	values for a particular device.
@@ -432,39 +455,28 @@ void ax25_fillin_cb(ax25_cb *ax25, ax25_dev *ax25_dev)
 	ax25->ax25_dev = ax25_dev;
 
 	if (ax25->ax25_dev != NULL) {
-		ax25->rtt     = ax25_dev->values[AX25_VALUES_T1] / 2;
-		ax25->t1      = ax25_dev->values[AX25_VALUES_T1];
-		ax25->t2      = ax25_dev->values[AX25_VALUES_T2];
-		ax25->t3      = ax25_dev->values[AX25_VALUES_T3];
-		ax25->n2      = ax25_dev->values[AX25_VALUES_N2];
-		ax25->paclen  = ax25_dev->values[AX25_VALUES_PACLEN];
-		ax25->idle    = ax25_dev->values[AX25_VALUES_IDLE];
-		ax25->backoff = ax25_dev->values[AX25_VALUES_BACKOFF];
+		ax25_fillin_cb_from_dev(ax25, ax25_dev);
+		return;
+	}
 
-		if (ax25_dev->values[AX25_VALUES_AXDEFMODE]) {
-			ax25->modulus = AX25_EMODULUS;
-			ax25->window  = ax25_dev->values[AX25_VALUES_EWINDOW];
-		} else {
-			ax25->modulus = AX25_MODULUS;
-			ax25->window  = ax25_dev->values[AX25_VALUES_WINDOW];
-		}
+	/*
+	 * No device, use kernel / AX.25 spec default values
+	 */
+	ax25->rtt     = msecs_to_jiffies(AX25_DEF_T1) / 2;
+	ax25->t1      = msecs_to_jiffies(AX25_DEF_T1);
+	ax25->t2      = msecs_to_jiffies(AX25_DEF_T2);
+	ax25->t3      = msecs_to_jiffies(AX25_DEF_T3);
+	ax25->n2      = AX25_DEF_N2;
+	ax25->paclen  = AX25_DEF_PACLEN;
+	ax25->idle    = msecs_to_jiffies(AX25_DEF_IDLE);
+	ax25->backoff = AX25_DEF_BACKOFF;
+
+	if (AX25_DEF_AXDEFMODE) {
+		ax25->modulus = AX25_EMODULUS;
+		ax25->window  = AX25_DEF_EWINDOW;
 	} else {
-		ax25->rtt     = AX25_DEF_T1 / 2;
-		ax25->t1      = AX25_DEF_T1;
-		ax25->t2      = AX25_DEF_T2;
-		ax25->t3      = AX25_DEF_T3;
-		ax25->n2      = AX25_DEF_N2;
-		ax25->paclen  = AX25_DEF_PACLEN;
-		ax25->idle    = AX25_DEF_IDLE;
-		ax25->backoff = AX25_DEF_BACKOFF;
-
-		if (AX25_DEF_AXDEFMODE) {
-			ax25->modulus = AX25_EMODULUS;
-			ax25->window  = AX25_DEF_EWINDOW;
-		} else {
-			ax25->modulus = AX25_MODULUS;
-			ax25->window  = AX25_DEF_WINDOW;
-		}
+		ax25->modulus = AX25_MODULUS;
+		ax25->window  = AX25_DEF_WINDOW;
 	}
 }
 
@@ -875,12 +887,7 @@ struct sock *ax25_make_new(struct sock *osk, struct ax25_dev *ax25_dev)
 	sk->sk_sndbuf   = osk->sk_sndbuf;
 	sk->sk_state    = TCP_ESTABLISHED;
 	sk->sk_sleep    = osk->sk_sleep;
-
-	if (sock_flag(osk, SOCK_DBG))
-		sock_set_flag(sk, SOCK_DBG);
-
-	if (sock_flag(osk, SOCK_ZAPPED))
-		sock_set_flag(sk, SOCK_ZAPPED);
+	sock_copy_flags(sk, osk);
 
 	oax25 = ax25_sk(osk);
 
@@ -1007,7 +1014,8 @@ static int ax25_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	struct sock *sk = sock->sk;
 	struct full_sockaddr_ax25 *addr = (struct full_sockaddr_ax25 *)uaddr;
 	ax25_dev *ax25_dev = NULL;
-	ax25_address *call;
+	ax25_uid_assoc *user;
+	ax25_address call;
 	ax25_cb *ax25;
 	int err = 0;
 
@@ -1026,9 +1034,15 @@ static int ax25_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (addr->fsa_ax25.sax25_family != AF_AX25)
 		return -EINVAL;
 
-	call = ax25_findbyuid(current->euid);
-	if (call == NULL && ax25_uid_policy && !capable(CAP_NET_ADMIN)) {
-		return -EACCES;
+	user = ax25_findbyuid(current->euid);
+	if (user) {
+		call = user->call;
+		ax25_uid_put(user);
+	} else {
+		if (ax25_uid_policy && !capable(CAP_NET_ADMIN))
+			return -EACCES;
+
+		call = addr->fsa_ax25.sax25_call;
 	}
 
 	lock_sock(sk);
@@ -1039,10 +1053,7 @@ static int ax25_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		goto out;
 	}
 
-	if (call == NULL)
-		ax25->source_addr = addr->fsa_ax25.sax25_call;
-	else
-		ax25->source_addr = *call;
+	ax25->source_addr = call;
 
 	/*
 	 * User already set interface with SO_BINDTODEVICE
@@ -1139,10 +1150,8 @@ static int ax25_connect(struct socket *sock, struct sockaddr *uaddr,
 	sk->sk_state   = TCP_CLOSE;
 	sock->state = SS_UNCONNECTED;
 
-	if (ax25->digipeat != NULL) {
-		kfree(ax25->digipeat);
-		ax25->digipeat = NULL;
-	}
+	kfree(ax25->digipeat);
+	ax25->digipeat = NULL;
 
 	/*
 	 *	Handle digi-peaters to be used.
@@ -1696,16 +1705,12 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		/* These two are safe on a single CPU system as only user tasks fiddle here */
 		if ((skb = skb_peek(&sk->sk_receive_queue)) != NULL)
 			amount = skb->len;
-		res = put_user(amount, (int __user *)argp);
+		res = put_user(amount, (int __user *) argp);
 		break;
 	}
 
 	case SIOCGSTAMP:
-		if (sk != NULL) {
-			res = sock_get_timestamp(sk, argp);
-			break;
-	 	}
-		res = -EINVAL;
+		res = sock_get_timestamp(sk, argp);
 		break;
 
 	case SIOCAX25ADDUID:	/* Add a uid to the uid/call map table */
@@ -1834,7 +1839,7 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		break;
 
 	default:
-		res = dev_ioctl(cmd, argp);
+		res = -ENOIOCTLCMD;
 		break;
 	}
 	release_sock(sk);
@@ -1875,6 +1880,7 @@ static void ax25_info_stop(struct seq_file *seq, void *v)
 static int ax25_info_show(struct seq_file *seq, void *v)
 {
 	ax25_cb *ax25 = v;
+	char buf[11];
 	int k;
 
 
@@ -1886,13 +1892,13 @@ static int ax25_info_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "%8.8lx %s %s%s ",
 		   (long) ax25,
 		   ax25->ax25_dev == NULL? "???" : ax25->ax25_dev->dev->name,
-		   ax2asc(&ax25->source_addr),
+		   ax2asc(buf, &ax25->source_addr),
 		   ax25->iamdigi? "*":"");
-	seq_printf(seq, "%s", ax2asc(&ax25->dest_addr));
+	seq_printf(seq, "%s", ax2asc(buf, &ax25->dest_addr));
 
 	for (k=0; (ax25->digipeat != NULL) && (k < ax25->digipeat->ndigi); k++) {
 		seq_printf(seq, ",%s%s",
-			   ax2asc(&ax25->digipeat->calls[k]),
+			   ax2asc(buf, &ax25->digipeat->calls[k]),
 			   ax25->digipeat->repeated[k]? "*":"");
 	}
 
@@ -1950,25 +1956,25 @@ static struct net_proto_family ax25_family_ops = {
 	.owner	=	THIS_MODULE,
 };
 
-static struct proto_ops ax25_proto_ops = {
-	.family =	PF_AX25,
-	.owner =	THIS_MODULE,
-	.release =	ax25_release,
-	.bind =		ax25_bind,
-	.connect =	ax25_connect,
-	.socketpair =	sock_no_socketpair,
-	.accept =	ax25_accept,
-	.getname =	ax25_getname,
-	.poll =		datagram_poll,
-	.ioctl =	ax25_ioctl,
-	.listen =	ax25_listen,
-	.shutdown =	ax25_shutdown,
-	.setsockopt =	ax25_setsockopt,
-	.getsockopt =	ax25_getsockopt,
-	.sendmsg =	ax25_sendmsg,
-	.recvmsg =	ax25_recvmsg,
-	.mmap =		sock_no_mmap,
-	.sendpage =	sock_no_sendpage,
+static const struct proto_ops ax25_proto_ops = {
+	.family		= PF_AX25,
+	.owner		= THIS_MODULE,
+	.release	= ax25_release,
+	.bind		= ax25_bind,
+	.connect	= ax25_connect,
+	.socketpair	= sock_no_socketpair,
+	.accept		= ax25_accept,
+	.getname	= ax25_getname,
+	.poll		= datagram_poll,
+	.ioctl		= ax25_ioctl,
+	.listen		= ax25_listen,
+	.shutdown	= ax25_shutdown,
+	.setsockopt	= ax25_setsockopt,
+	.getsockopt	= ax25_getsockopt,
+	.sendmsg	= ax25_sendmsg,
+	.recvmsg	= ax25_recvmsg,
+	.mmap		= sock_no_mmap,
+	.sendpage	= sock_no_sendpage,
 };
 
 /*
@@ -1983,24 +1989,6 @@ static struct packet_type ax25_packet_type = {
 static struct notifier_block ax25_dev_notifier = {
 	.notifier_call =ax25_device_event,
 };
-
-EXPORT_SYMBOL(ax25_encapsulate);
-EXPORT_SYMBOL(ax25_rebuild_header);
-EXPORT_SYMBOL(ax25_findbyuid);
-EXPORT_SYMBOL(ax25_find_cb);
-EXPORT_SYMBOL(ax25_linkfail_register);
-EXPORT_SYMBOL(ax25_linkfail_release);
-EXPORT_SYMBOL(ax25_listen_register);
-EXPORT_SYMBOL(ax25_listen_release);
-EXPORT_SYMBOL(ax25_protocol_register);
-EXPORT_SYMBOL(ax25_protocol_release);
-EXPORT_SYMBOL(ax25_send_frame);
-EXPORT_SYMBOL(ax25_uid_policy);
-EXPORT_SYMBOL(ax25cmp);
-EXPORT_SYMBOL(ax2asc);
-EXPORT_SYMBOL(asc2ax);
-EXPORT_SYMBOL(null_ax25_address);
-EXPORT_SYMBOL(ax25_display_timer);
 
 static int __init ax25_init(void)
 {

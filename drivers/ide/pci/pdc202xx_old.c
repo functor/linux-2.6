@@ -786,9 +786,6 @@ static ide_pci_device_t pdc202xx_chipsets[] __devinitdata = {
 		.init_dma	= init_dma_pdc202xx,
 		.channels	= 2,
 		.autodma	= AUTODMA,
-#ifndef CONFIG_PDC202XX_FORCE
-		.enablebits	= {{0x50,0x02,0x02}, {0x50,0x04,0x04}},
-#endif
 		.bootable	= OFF_BOARD,
 		.extra		= 16,
 	},{	/* 1 */
@@ -799,12 +796,8 @@ static ide_pci_device_t pdc202xx_chipsets[] __devinitdata = {
 		.init_dma	= init_dma_pdc202xx,
 		.channels	= 2,
 		.autodma	= AUTODMA,
-#ifndef CONFIG_PDC202XX_FORCE
-		.enablebits	= {{0x50,0x02,0x02}, {0x50,0x04,0x04}},
-#endif
 		.bootable	= OFF_BOARD,
 		.extra		= 48,
-		.flags		= IDEPCI_FLAG_FORCE_PDC,
 	},{	/* 2 */
 		.name		= "PDC20263",
 		.init_setup	= init_setup_pdc202ata4,
@@ -813,9 +806,6 @@ static ide_pci_device_t pdc202xx_chipsets[] __devinitdata = {
 		.init_dma	= init_dma_pdc202xx,
 		.channels	= 2,
 		.autodma	= AUTODMA,
-#ifndef CONFIG_PDC202XX_FORCE
-		.enablebits	= {{0x50,0x02,0x02}, {0x50,0x04,0x04}},
-#endif
 		.bootable	= OFF_BOARD,
 		.extra		= 48,
 	},{	/* 3 */
@@ -826,12 +816,8 @@ static ide_pci_device_t pdc202xx_chipsets[] __devinitdata = {
 		.init_dma	= init_dma_pdc202xx,
 		.channels	= 2,
 		.autodma	= AUTODMA,
-#ifndef CONFIG_PDC202XX_FORCE
-		.enablebits	= {{0x50,0x02,0x02}, {0x50,0x04,0x04}},
-#endif
 		.bootable	= OFF_BOARD,
 		.extra		= 48,
-		.flags		= IDEPCI_FLAG_FORCE_PDC,
 	},{	/* 4 */
 		.name		= "PDC20267",
 		.init_setup	= init_setup_pdc202xx,
@@ -840,9 +826,6 @@ static ide_pci_device_t pdc202xx_chipsets[] __devinitdata = {
 		.init_dma	= init_dma_pdc202xx,
 		.channels	= 2,
 		.autodma	= AUTODMA,
-#ifndef CONFIG_PDC202XX_FORCE
-		.enablebits	= {{0x50,0x02,0x02}, {0x50,0x04,0x04}},
-#endif
 		.bootable	= OFF_BOARD,
 		.extra		= 48,
 	}

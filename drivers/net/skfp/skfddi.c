@@ -67,7 +67,7 @@
 /* each new release!!! */
 #define VERSION		"2.07"
 
-static const char *boot_msg = 
+static const char * const boot_msg = 
 	"SysKonnect FDDI PCI Adapter driver v" VERSION " for\n"
 	"  SK-55xx/SK-58xx adapters (SK-NET FDDI-FP/UP/LP)";
 
@@ -149,7 +149,6 @@ extern void hwm_rx_frag(struct s_smc *smc, char far * virt, u_long phys,
 extern void mac_drv_rx_mode(struct s_smc *smc, int mode);
 extern void mac_drv_clear_rx_queue(struct s_smc *smc);
 extern void enable_tx_irq(struct s_smc *smc, u_short queue);
-extern void mac_drv_clear_txd(struct s_smc *smc);
 
 static struct pci_device_id skfddi_pci_tbl[] = {
 	{ PCI_VENDOR_ID_SK, PCI_DEVICE_ID_SK_FP, PCI_ANY_ID, PCI_ANY_ID, },

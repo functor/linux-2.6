@@ -56,10 +56,8 @@ static unsigned int help(struct sk_buff **pskb,
 			break;
 	}
 
-	if (port == 0) {
-		ip_conntrack_expect_free(exp);
+	if (port == 0)
 		return NF_DROP;
-	}
 
 	sprintf(buffer, "%u", port);
 	ret = ip_nat_mangle_udp_packet(pskb, exp->master, ctinfo,
@@ -70,19 +68,19 @@ static unsigned int help(struct sk_buff **pskb,
 	return ret;
 }
 
-static void __exit fini(void)
+static void __exit ip_nat_amanda_fini(void)
 {
 	ip_nat_amanda_hook = NULL;
 	/* Make sure noone calls it, meanwhile. */
 	synchronize_net();
 }
 
-static int __init init(void)
+static int __init ip_nat_amanda_init(void)
 {
 	BUG_ON(ip_nat_amanda_hook);
 	ip_nat_amanda_hook = help;
 	return 0;
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ip_nat_amanda_init);
+module_exit(ip_nat_amanda_fini);

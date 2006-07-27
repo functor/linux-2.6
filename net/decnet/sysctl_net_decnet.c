@@ -10,6 +10,7 @@
  *
  * Changes:
  * Steve Whitehouse - C99 changes and default device handling
+ * Steve Whitehouse - Memory buffer settings, like the tcp ones
  *
  */
 #include <linux/config.h>
@@ -36,6 +37,11 @@ int decnet_di_count = 3;
 int decnet_dr_count = 3;
 int decnet_log_martians = 1;
 int decnet_no_fc_max_cwnd = NSP_MIN_WINDOW;
+
+/* Reasonable defaults, I hope, based on tcp's defaults */
+int sysctl_decnet_mem[3] = { 768 << 3, 1024 << 3, 1536 << 3 };
+int sysctl_decnet_wmem[3] = { 4 * 1024, 16 * 1024, 128 * 1024 };
+int sysctl_decnet_rmem[3] = { 4 * 1024, 87380, 87380 * 2 };
 
 #ifdef CONFIG_SYSCTL
 extern int decnet_dst_gc_interval;
@@ -80,9 +86,9 @@ static void strip_it(char *str)
  * Simple routine to parse an ascii DECnet address
  * into a network order address.
  */
-static int parse_addr(dn_address *addr, char *str)
+static int parse_addr(__le16 *addr, char *str)
 {
-	dn_address area, node;
+	__u16 area, node;
 
 	while(*str && !ISNUM(*str)) str++;
 
@@ -133,7 +139,7 @@ static int dn_node_address_strategy(ctl_table *table, int __user *name, int nlen
 				void **context)
 {
 	size_t len;
-	dn_address addr;
+	__le16 addr;
 
 	if (oldval && oldlenp) {
 		if (get_user(len, oldlenp))
@@ -141,14 +147,14 @@ static int dn_node_address_strategy(ctl_table *table, int __user *name, int nlen
 		if (len) {
 			if (len != sizeof(unsigned short))
 				return -EINVAL;
-			if (put_user(decnet_address, (unsigned short __user *)oldval))
+			if (put_user(decnet_address, (__le16 __user *)oldval))
 				return -EFAULT;
 		}
 	}
 	if (newval && newlen) {
 		if (newlen != sizeof(unsigned short))
 			return -EINVAL;
-		if (get_user(addr, (unsigned short __user *)newval))
+		if (get_user(addr, (__le16 __user *)newval))
 			return -EFAULT;
 
 		dn_dev_devices_off();
@@ -167,7 +173,7 @@ static int dn_node_address_handler(ctl_table *table, int write,
 {
 	char addr[DN_ASCBUF_LEN];
 	size_t len;
-	dn_address dnaddr;
+	__le16 dnaddr;
 
 	if (!*lenp || (*ppos && !write)) {
 		*lenp = 0;
@@ -428,6 +434,33 @@ static ctl_table dn_table[] = {
 		.extra1 = &min_decnet_no_fc_max_cwnd,
 		.extra2 = &max_decnet_no_fc_max_cwnd
 	},
+       {
+                .ctl_name = NET_DECNET_MEM,
+                .procname = "decnet_mem",
+                .data = &sysctl_decnet_mem,
+                .maxlen = sizeof(sysctl_decnet_mem),
+                .mode = 0644,
+                .proc_handler = &proc_dointvec,
+                .strategy = &sysctl_intvec,
+        },
+        {
+                .ctl_name = NET_DECNET_RMEM,
+                .procname = "decnet_rmem",
+                .data = &sysctl_decnet_rmem,
+                .maxlen = sizeof(sysctl_decnet_rmem),
+                .mode = 0644,
+                .proc_handler = &proc_dointvec,
+                .strategy = &sysctl_intvec,
+        },
+        {
+                .ctl_name = NET_DECNET_WMEM,
+                .procname = "decnet_wmem",
+                .data = &sysctl_decnet_wmem,
+                .maxlen = sizeof(sysctl_decnet_wmem),
+                .mode = 0644,
+                .proc_handler = &proc_dointvec,
+                .strategy = &sysctl_intvec,
+        },
 	{
 		.ctl_name = NET_DECNET_DEBUG_LEVEL,
 		.procname = "debug",

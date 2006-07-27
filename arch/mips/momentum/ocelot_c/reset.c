@@ -28,13 +28,13 @@ void momenco_ocelot_restart(char *command)
 {
 	/* base address of timekeeper portion of part */
 	void *nvram = (void *)
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 		0xfffffffffc807000;
 #else
 		0xfc807000;
 #endif
 
- 	/* Ask the NVRAM/RTC/watchdog chip to assert reset in 1/16 second */
+	/* Ask the NVRAM/RTC/watchdog chip to assert reset in 1/16 second */
 	writeb(0x84, nvram + 0xff7);
 
 	/* wait for the watchdog to go off */

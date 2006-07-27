@@ -64,7 +64,7 @@ static inline void set_pte(pte_t *ptep, pte_t pte)
 #define set_pmd(pmdptr,pmdval) \
 		set_64bit((unsigned long long *)(pmdptr),pmd_val(pmdval))
 #define set_pud(pudptr,pudval) \
-		set_64bit((unsigned long long *)(pudptr),pud_val(pudval))
+		(*(pudptr) = (pudval))
 
 /*
  * Pentium-II erratum A13: in PAE mode we explicitly have to flush
@@ -73,11 +73,6 @@ static inline void set_pte(pte_t *ptep, pte_t pte)
  * this erratum.
  */
 static inline void pud_clear (pud_t * pud) { }
-
-#define pmd_page(pmd) (pfn_to_page(pmd_val(pmd) >> PAGE_SHIFT))
-
-#define pmd_page_kernel(pmd) \
-((unsigned long) __va(pmd_val(pmd) & PAGE_MASK))
 
 #define pud_page(pud) \
 ((struct page *) __va(pud_val(pud) & PAGE_MASK))
@@ -89,6 +84,26 @@ static inline void pud_clear (pud_t * pud) { }
 /* Find an entry in the second-level page table.. */
 #define pmd_offset(pud, address) ((pmd_t *) pud_page(*(pud)) + \
 			pmd_index(address))
+
+/*
+ * For PTEs and PDEs, we must clear the P-bit first when clearing a page table
+ * entry, so clear the bottom half first and enforce ordering with a compiler
+ * barrier.
+ */
+static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+{
+	ptep->pte_low = 0;
+	smp_wmb();
+	ptep->pte_high = 0;
+}
+
+static inline void pmd_clear(pmd_t *pmd)
+{
+	u32 *tmp = (u32 *)pmd;
+	*tmp = 0;
+	smp_wmb();
+	*(tmp + 1) = 0;
+}
 
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
@@ -156,5 +171,7 @@ static inline pmd_t pfn_pmd(unsigned long page_nr, pgprot_t pgprot)
 #define __swp_entry_to_pte(x)		((pte_t){ 0, (x).val })
 
 #define __pmd_free_tlb(tlb, x)		do { } while (0)
+
+#define vmalloc_sync_all() ((void)0)
 
 #endif /* _I386_PGTABLE_3LEVEL_H */

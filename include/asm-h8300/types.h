@@ -58,7 +58,8 @@ typedef u32 dma_addr_t;
 #define HAVE_SECTOR_T
 typedef u64 sector_t;
 
-typedef unsigned int kmem_bufctl_t;
+#define HAVE_BLKCNT_T
+typedef u64 blkcnt_t;
 
 #endif /* __KERNEL__ */
 

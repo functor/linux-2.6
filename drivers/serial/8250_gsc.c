@@ -29,7 +29,6 @@
 static int __init 
 serial_init_chip(struct parisc_device *dev)
 {
-	static int serial_line_nr;
 	struct uart_port port;
 	unsigned long address;
 	int err;
@@ -42,23 +41,25 @@ serial_init_chip(struct parisc_device *dev)
 		 */
 		if (parisc_parent(dev)->id.hw_type != HPHW_IOA) {
 			printk(KERN_INFO "Serial: device 0x%lx not configured.\n"
-				"Enable support for Wax, Lasi, Asp or Dino.\n", dev->hpa);
+				"Enable support for Wax, Lasi, Asp or Dino.\n",
+				dev->hpa.start);
 		}
 		return -ENODEV;
 	}
 
-	address = dev->hpa;
+	address = dev->hpa.start;
 	if (dev->id.sversion != 0x8d) {
 		address += 0x800;
 	}
 
-	memset(&port, 0, sizeof(struct uart_port));
-	port.mapbase = address;
-	port.irq = dev->irq;
-	port.iotype = UPIO_MEM;
-	port.flags = UPF_IOREMAP | UPF_BOOT_AUTOCONF;
-	port.uartclk = LASI_BASE_BAUD * 16;
-	port.dev = &dev->dev;
+	memset(&port, 0, sizeof(port));
+	port.iotype	= UPIO_MEM;
+	port.uartclk	= LASI_BASE_BAUD * 16;
+	port.mapbase	= address;
+	port.membase	= ioremap_nocache(address, 16);
+	port.irq	= dev->irq;
+	port.flags	= UPF_BOOT_AUTOCONF;
+	port.dev	= &dev->dev;
 
 	err = serial8250_register_port(&port);
 	if (err < 0) {

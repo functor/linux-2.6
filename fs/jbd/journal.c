@@ -33,9 +33,11 @@
 #include <linux/mm.h>
 #include <linux/suspend.h>
 #include <linux/pagemap.h>
+#include <linux/kthread.h>
+#include <linux/proc_fs.h>
+
 #include <asm/uaccess.h>
 #include <asm/page.h>
-#include <linux/proc_fs.h>
 
 EXPORT_SYMBOL(journal_start);
 EXPORT_SYMBOL(journal_restart);
@@ -65,7 +67,6 @@ EXPORT_SYMBOL(journal_set_features);
 EXPORT_SYMBOL(journal_create);
 EXPORT_SYMBOL(journal_load);
 EXPORT_SYMBOL(journal_destroy);
-EXPORT_SYMBOL(journal_recover);
 EXPORT_SYMBOL(journal_update_superblock);
 EXPORT_SYMBOL(journal_abort);
 EXPORT_SYMBOL(journal_errno);
@@ -81,6 +82,7 @@ EXPORT_SYMBOL(journal_try_to_free_buffers);
 EXPORT_SYMBOL(journal_force_commit);
 
 static int journal_convert_superblock_v1(journal_t *, journal_superblock_t *);
+static void __journal_abort_soft (journal_t *journal, int errno);
 
 /*
  * Helper function used to manage commit timeouts
@@ -91,16 +93,6 @@ static void commit_timeout(unsigned long __data)
 	struct task_struct * p = (struct task_struct *) __data;
 
 	wake_up_process(p);
-}
-
-/* Static check for data structure consistency.  There's no code
- * invoked --- we'll just get a linker failure if things aren't right.
- */
-void __journal_internal_check(void)
-{
-	extern void journal_bad_superblock_size(void);
-	if (sizeof(struct journal_superblock_s) != 1024)
-		journal_bad_superblock_size();
 }
 
 /*
@@ -119,24 +111,17 @@ void __journal_internal_check(void)
  *    known as checkpointing, and this thread is responsible for that job.
  */
 
-journal_t *current_journal;		// AKPM: debug
-
-int kjournald(void *arg)
+static int kjournald(void *arg)
 {
-	journal_t *journal = (journal_t *) arg;
+	journal_t *journal = arg;
 	transaction_t *transaction;
-	struct timer_list timer;
 
-	current_journal = journal;
-
-	daemonize("kjournald");
-
-	/* Set up an interval timer which can be used to trigger a
-           commit wakeup after the commit interval expires */
-	init_timer(&timer);
-	timer.data = (unsigned long) current;
-	timer.function = commit_timeout;
-	journal->j_commit_timer = &timer;
+	/*
+	 * Set up an interval timer which can be used to trigger a commit wakeup
+	 * after the commit interval expires
+	 */
+	setup_timer(&journal->j_commit_timer, commit_timeout,
+			(unsigned long)current);
 
 	/* Record that the journal thread is running */
 	journal->j_task = current;
@@ -160,14 +145,14 @@ loop:
 	if (journal->j_commit_sequence != journal->j_commit_request) {
 		jbd_debug(1, "OK, requests differ\n");
 		spin_unlock(&journal->j_state_lock);
-		del_timer_sync(journal->j_commit_timer);
+		del_timer_sync(&journal->j_commit_timer);
 		journal_commit_transaction(journal);
 		spin_lock(&journal->j_state_lock);
 		goto loop;
 	}
 
 	wake_up(&journal->j_wait_done_commit);
-	if (current->flags & PF_FREEZE) {
+	if (freezing(current)) {
 		/*
 		 * The simpler the better. Flushing journal isn't a
 		 * good idea, because that depends on threads that may
@@ -175,7 +160,7 @@ loop:
 		 */
 		jbd_debug(1, "Now suspending kjournald\n");
 		spin_unlock(&journal->j_state_lock);
-		refrigerator(PF_FREEZE);
+		refrigerator();
 		spin_lock(&journal->j_state_lock);
 	} else {
 		/*
@@ -193,6 +178,8 @@ loop:
 		if (transaction && time_after_eq(jiffies,
 						transaction->t_expires))
 			should_sleep = 0;
+		if (journal->j_flags & JFS_UNMOUNT)
+ 			should_sleep = 0;
 		if (should_sleep) {
 			spin_unlock(&journal->j_state_lock);
 			schedule();
@@ -215,7 +202,7 @@ loop:
 
 end_loop:
 	spin_unlock(&journal->j_state_lock);
-	del_timer_sync(journal->j_commit_timer);
+	del_timer_sync(&journal->j_commit_timer);
 	journal->j_task = NULL;
 	wake_up(&journal->j_wait_done_commit);
 	jbd_debug(1, "Journal thread exiting.\n");
@@ -224,7 +211,7 @@ end_loop:
 
 static void journal_start_thread(journal_t *journal)
 {
-	kernel_thread(kjournald, journal, CLONE_VM|CLONE_FS|CLONE_FILES);
+	kthread_run(kjournald, journal, "kjournald");
 	wait_event(journal->j_wait_done_commit, journal->j_task != 0);
 }
 
@@ -671,8 +658,8 @@ static journal_t * journal_init_common (void)
 	init_waitqueue_head(&journal->j_wait_checkpoint);
 	init_waitqueue_head(&journal->j_wait_commit);
 	init_waitqueue_head(&journal->j_wait_updates);
-	init_MUTEX(&journal->j_barrier);
-	init_MUTEX(&journal->j_checkpoint_sem);
+	mutex_init(&journal->j_barrier);
+	mutex_init(&journal->j_checkpoint_mutex);
 	spin_lock_init(&journal->j_revoke_lock);
 	spin_lock_init(&journal->j_list_lock);
 	spin_lock_init(&journal->j_state_lock);
@@ -969,7 +956,7 @@ void journal_update_superblock(journal_t *journal, int wait)
 	if (wait)
 		sync_dirty_buffer(bh);
 	else
-		ll_rw_block(WRITE, 1, &bh);
+		ll_rw_block(SWRITE, 1, &bh);
 
 out:
 	/* If we have just flushed the log (by marking s_start==0), then
@@ -1439,7 +1426,7 @@ int journal_wipe(journal_t *journal, int write)
  * device this journal is present.
  */
 
-const char *journal_dev_name(journal_t *journal, char *buffer)
+static const char *journal_dev_name(journal_t *journal, char *buffer)
 {
 	struct block_device *bdev;
 
@@ -1485,7 +1472,7 @@ void __journal_abort_hard(journal_t *journal)
 
 /* Soft abort: record the abort error status in the journal superblock,
  * but don't do any other IO. */
-void __journal_abort_soft (journal_t *journal, int errno)
+static void __journal_abort_soft (journal_t *journal, int errno)
 {
 	if (journal->j_flags & JFS_ABORT)
 		return;
@@ -1618,7 +1605,7 @@ int journal_blocks_per_page(struct inode *inode)
  * Simple support for retrying memory allocations.  Introduced to help to
  * debug different VM deadlock avoidance strategies. 
  */
-void * __jbd_kmalloc (const char *where, size_t size, int flags, int retry)
+void * __jbd_kmalloc (const char *where, size_t size, gfp_t flags, int retry)
 {
 	return kmalloc(size, flags | (retry ? __GFP_NOFAIL : 0));
 }
@@ -1880,7 +1867,7 @@ EXPORT_SYMBOL(journal_enable_debug);
 
 static struct proc_dir_entry *proc_jbd_debug;
 
-int read_jbd_debug(char *page, char **start, off_t off,
+static int read_jbd_debug(char *page, char **start, off_t off,
 			  int count, int *eof, void *data)
 {
 	int ret;
@@ -1890,7 +1877,7 @@ int read_jbd_debug(char *page, char **start, off_t off,
 	return ret;
 }
 
-int write_jbd_debug(struct file *file, const char __user *buffer,
+static int write_jbd_debug(struct file *file, const char __user *buffer,
 			   unsigned long count, void *data)
 {
 	char buf[32];
@@ -1978,6 +1965,14 @@ static void journal_destroy_caches(void)
 static int __init journal_init(void)
 {
 	int ret;
+
+/* Static check for data structure consistency.  There's no code
+ * invoked --- we'll just get a linker failure if things aren't right.
+ */
+	extern void journal_bad_superblock_size(void);
+	if (sizeof(struct journal_superblock_s) != 1024)
+		journal_bad_superblock_size();
+
 
 	ret = journal_init_caches();
 	if (ret != 0)

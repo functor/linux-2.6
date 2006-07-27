@@ -48,10 +48,6 @@
 
 #include <linux/stat.h>
 
-#ifndef LINUX_VERSION_CODE
-#include <linux/version.h>
-#endif
-
 #include "scsi_logging.h"
 #include "scsi_debug.h"
 
@@ -182,7 +178,7 @@ struct sdebug_queued_cmd {
 };
 static struct sdebug_queued_cmd queued_arr[SCSI_DEBUG_CANQUEUE];
 
-static Scsi_Host_Template sdebug_driver_template = {
+static struct scsi_host_template sdebug_driver_template = {
 	.proc_info =		scsi_debug_proc_info,
 	.name =			"SCSI DEBUG",
 	.info =			scsi_debug_info,
@@ -225,8 +221,6 @@ static struct bus_type pseudo_lld_bus;
 static struct device_driver sdebug_driverfs_driver = {
 	.name 		= sdebug_proc_name,
 	.bus		= &pseudo_lld_bus,
-	.probe          = sdebug_driver_probe,
-	.remove         = sdebug_driver_remove,
 };
 
 static const int check_condition_result =
@@ -283,7 +277,7 @@ int scsi_debug_queuecommand(struct scsi_cmnd * SCpnt, done_funct_t done)
 	unsigned char *cmd = (unsigned char *) SCpnt->cmnd;
 	int block, upper_blk, num, k;
 	int errsts = 0;
-	int target = SCpnt->device->id;
+	int target = scmd_id(SCpnt);
 	struct sdebug_dev_info * devip = NULL;
 	int inj_recovered = 0;
 
@@ -1008,8 +1002,7 @@ static void timer_intr_handler(unsigned long indx)
 static int scsi_debug_slave_alloc(struct scsi_device * sdp)
 {
 	if (SCSI_DEBUG_OPT_NOISE & scsi_debug_opts)
-		printk(KERN_INFO "scsi_debug: slave_alloc <%u %u %u %u>\n",
-		       sdp->host->host_no, sdp->channel, sdp->id, sdp->lun);
+		sdev_printk(KERN_INFO, sdp, "scsi_debug: slave_alloc\n");
 	return 0;
 }
 
@@ -1018,8 +1011,7 @@ static int scsi_debug_slave_configure(struct scsi_device * sdp)
 	struct sdebug_dev_info * devip;
 
 	if (SCSI_DEBUG_OPT_NOISE & scsi_debug_opts)
-		printk(KERN_INFO "scsi_debug: slave_configure <%u %u %u %u>\n",
-		       sdp->host->host_no, sdp->channel, sdp->id, sdp->lun);
+		sdev_printk(KERN_INFO, sdp, "scsi_debug: slave_configure\n");
 	if (sdp->host->max_cmd_len != SCSI_DEBUG_MAX_CMD_LEN)
 		sdp->host->max_cmd_len = SCSI_DEBUG_MAX_CMD_LEN;
 	devip = devInfoReg(sdp);
@@ -1036,8 +1028,7 @@ static void scsi_debug_slave_destroy(struct scsi_device * sdp)
 				(struct sdebug_dev_info *)sdp->hostdata;
 
 	if (SCSI_DEBUG_OPT_NOISE & scsi_debug_opts)
-		printk(KERN_INFO "scsi_debug: slave_destroy <%u %u %u %u>\n",
-		       sdp->host->host_no, sdp->channel, sdp->id, sdp->lun);
+		sdev_printk(KERN_INFO, sdp, "scsi_debug: slave_destroy\n");
 	if (devip) {
 		/* make this slot avaliable for re-use */
 		devip->used = 0;
@@ -1070,13 +1061,12 @@ static struct sdebug_dev_info * devInfoReg(struct scsi_device * sdev)
 		}
 	}
 	if (NULL == open_devip) { /* try and make a new one */
-		open_devip = kmalloc(sizeof(*open_devip),GFP_KERNEL);
+		open_devip = kzalloc(sizeof(*open_devip),GFP_KERNEL);
 		if (NULL == open_devip) {
 			printk(KERN_ERR "%s: out of memory at line %d\n",
 				__FUNCTION__, __LINE__);
 			return NULL;
 		}
-		memset(open_devip, 0, sizeof(*open_devip));
 		open_devip->sdbg_host = sdbg_host;
 		list_add_tail(&open_devip->dev_list,
 		&sdbg_host->dev_info_list);
@@ -1326,9 +1316,9 @@ static int schedule_resp(struct scsi_cmnd * cmnd,
 		if (scsi_result) {
 			struct scsi_device * sdp = cmnd->device;
 
-			printk(KERN_INFO "scsi_debug:    <%u %u %u %u> "
-			       "non-zero result=0x%x\n", sdp->host->host_no,
-			       sdp->channel, sdp->id, sdp->lun, scsi_result);
+			sdev_printk(KERN_INFO, sdp,
+				"non-zero result=0x%x\n",
+			       	scsi_result);
 		}
 	}
 	if (cmnd && devip) {
@@ -1783,7 +1773,7 @@ static void __exit scsi_debug_exit(void)
 device_initcall(scsi_debug_init);
 module_exit(scsi_debug_exit);
 
-void pseudo_0_release(struct device * dev)
+static void pseudo_0_release(struct device * dev)
 {
 	if (SCSI_DEBUG_OPT_NOISE & scsi_debug_opts)
 		printk(KERN_INFO "scsi_debug: pseudo_0_release() called\n");
@@ -1803,6 +1793,8 @@ static int pseudo_lld_bus_match(struct device *dev,
 static struct bus_type pseudo_lld_bus = {
         .name = "pseudo",
         .match = pseudo_lld_bus_match,
+	.probe = sdebug_driver_probe,
+	.remove = sdebug_driver_remove,
 };
 
 static void sdebug_release_adapter(struct device * dev)
@@ -1821,7 +1813,7 @@ static int sdebug_add_adapter(void)
         struct sdebug_dev_info *sdbg_devinfo;
         struct list_head *lh, *lh_sf;
 
-        sdbg_host = kmalloc(sizeof(*sdbg_host),GFP_KERNEL);
+        sdbg_host = kzalloc(sizeof(*sdbg_host), GFP_KERNEL);
 
         if (NULL == sdbg_host) {
                 printk(KERN_ERR "%s: out of memory at line %d\n",
@@ -1829,19 +1821,17 @@ static int sdebug_add_adapter(void)
                 return -ENOMEM;
         }
 
-        memset(sdbg_host, 0, sizeof(*sdbg_host));
         INIT_LIST_HEAD(&sdbg_host->dev_info_list);
 
 	devs_per_host = scsi_debug_num_tgts * scsi_debug_max_luns;
         for (k = 0; k < devs_per_host; k++) {
-                sdbg_devinfo = kmalloc(sizeof(*sdbg_devinfo),GFP_KERNEL);
+                sdbg_devinfo = kzalloc(sizeof(*sdbg_devinfo), GFP_KERNEL);
                 if (NULL == sdbg_devinfo) {
                         printk(KERN_ERR "%s: out of memory at line %d\n",
                                __FUNCTION__, __LINE__);
                         error = -ENOMEM;
 			goto clean;
                 }
-                memset(sdbg_devinfo, 0, sizeof(*sdbg_devinfo));
                 sdbg_devinfo->sdbg_host = sdbg_host;
                 list_add_tail(&sdbg_devinfo->dev_list,
                               &sdbg_host->dev_info_list);

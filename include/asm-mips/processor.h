@@ -12,6 +12,7 @@
 #define _ASM_PROCESSOR_H
 
 #include <linux/config.h>
+#include <linux/cpumask.h>
 #include <linux/threads.h>
 
 #include <asm/cachectl.h>
@@ -33,7 +34,7 @@ extern void (*cpu_wait)(void);
 
 extern unsigned int vced_count, vcei_count;
 
-#ifdef CONFIG_MIPS32
+#ifdef CONFIG_32BIT
 /*
  * User space process size: 2GB. This is hardcoded into a few places,
  * so don't change it unless you know what you are doing.
@@ -47,7 +48,7 @@ extern unsigned int vced_count, vcei_count;
 #define TASK_UNMAPPED_BASE	(PAGE_ALIGN(TASK_SIZE / 3))
 #endif
 
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 /*
  * User space process size: 1TB. This is hardcoded into a few places,
  * so don't change it unless you know what you are doing.  TASK_SIZE
@@ -96,11 +97,28 @@ union mips_fpu_union {
 	{{0,},} \
 }
 
+#define NUM_DSP_REGS   6
+
+typedef __u32 dspreg_t;
+
+struct mips_dsp_state {
+	dspreg_t        dspr[NUM_DSP_REGS];
+	unsigned int    dspcontrol;
+};
+
+#define INIT_DSP {{0,},}
+
+#define INIT_CPUMASK { \
+	{0,} \
+}
+
 typedef struct {
 	unsigned long seg;
 } mm_segment_t;
 
 #define ARCH_MIN_TASKALIGN	8
+
+struct mips_abi;
 
 /*
  * If you change thread_struct remember to change the #defines below too!
@@ -116,6 +134,15 @@ struct thread_struct {
 
 	/* Saved fpu/fpu emulator stuff. */
 	union mips_fpu_union fpu;
+#ifdef CONFIG_MIPS_MT_FPAFF
+	/* Emulated instruction count */
+	unsigned long emulated_fp;
+	/* Saved per-thread scheduler affinity mask */
+	cpumask_t user_cpus_allowed;
+#endif /* CONFIG_MIPS_MT_FPAFF */
+
+	/* Saved state of the DSP ASE, if available. */
+	struct mips_dsp_state dsp;
 
 	/* Other stuff associated with the thread. */
 	unsigned long cp0_badvaddr;	/* Last user fault */
@@ -126,15 +153,23 @@ struct thread_struct {
 #define MF_LOGADE	2		/* Log address errors to syslog */
 #define MF_32BIT_REGS	4		/* also implies 16/32 fprs */
 #define MF_32BIT_ADDR	8		/* 32-bit address space (o32/n32) */
+#define MF_FPUBOUND	0x10		/* thread bound to FPU-full CPU set */
 	unsigned long mflags;
 	unsigned long irix_trampoline;  /* Wheee... */
 	unsigned long irix_oldctx;
+	struct mips_abi *abi;
 };
 
 #define MF_ABI_MASK	(MF_32BIT_REGS | MF_32BIT_ADDR)
 #define MF_O32		(MF_32BIT_REGS | MF_32BIT_ADDR)
 #define MF_N32		MF_32BIT_ADDR
 #define MF_N64		0
+
+#ifdef CONFIG_MIPS_MT_FPAFF
+#define FPAFF_INIT 0, INIT_CPUMASK,
+#else
+#define FPAFF_INIT
+#endif /* CONFIG_MIPS_MT_FPAFF */
 
 #define INIT_THREAD  { \
         /* \
@@ -150,6 +185,14 @@ struct thread_struct {
 	 * saved fpu/fpu emulator stuff \
 	 */ \
 	INIT_FPU, \
+	/* \
+	 * fpu affinity state (null if not FPAFF) \
+	 */ \
+	FPAFF_INIT \
+	/* \
+	 * saved dsp/dsp emulator stuff \
+	 */ \
+	INIT_DSP, \
 	/* \
 	 * Other stuff associated with the process \
 	 */ \
@@ -179,11 +222,11 @@ extern void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long 
 
 unsigned long get_wchan(struct task_struct *p);
 
-#define __PT_REG(reg) ((long)&((struct pt_regs *)0)->reg - sizeof(struct pt_regs))
-#define __KSTK_TOS(tsk) ((unsigned long)(tsk->thread_info) + THREAD_SIZE - 32)
-#define KSTK_EIP(tsk) (*(unsigned long *)(__KSTK_TOS(tsk) + __PT_REG(cp0_epc)))
-#define KSTK_ESP(tsk) (*(unsigned long *)(__KSTK_TOS(tsk) + __PT_REG(regs[29])))
-#define KSTK_STATUS(tsk) (*(unsigned long *)(__KSTK_TOS(tsk) + __PT_REG(cp0_status)))
+#define __KSTK_TOS(tsk) ((unsigned long)task_stack_page(tsk) + THREAD_SIZE - 32)
+#define task_pt_regs(tsk) ((struct pt_regs *)__KSTK_TOS(tsk) - 1)
+#define KSTK_EIP(tsk) (task_pt_regs(tsk)->cp0_epc)
+#define KSTK_ESP(tsk) (task_pt_regs(tsk)->regs[29])
+#define KSTK_STATUS(tsk) (task_pt_regs(tsk)->cp0_status)
 
 #define cpu_relax()	barrier()
 

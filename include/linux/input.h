@@ -56,6 +56,8 @@ struct input_absinfo {
 
 #define EVIOCGVERSION		_IOR('E', 0x01, int)			/* get driver version */
 #define EVIOCGID		_IOR('E', 0x02, struct input_id)	/* get device ID */
+#define EVIOCGREP		_IOR('E', 0x03, int[2])			/* get repeat settings */
+#define EVIOCSREP		_IOW('E', 0x03, int[2])			/* set repeat settings */
 #define EVIOCGKEYCODE		_IOR('E', 0x04, int[2])			/* get keycode */
 #define EVIOCSKEYCODE		_IOW('E', 0x04, int[2])			/* set keycode */
 
@@ -66,6 +68,7 @@ struct input_absinfo {
 #define EVIOCGKEY(len)		_IOC(_IOC_READ, 'E', 0x18, len)		/* get global keystate */
 #define EVIOCGLED(len)		_IOC(_IOC_READ, 'E', 0x19, len)		/* get all LEDs */
 #define EVIOCGSND(len)		_IOC(_IOC_READ, 'E', 0x1a, len)		/* get all sounds status */
+#define EVIOCGSW(len)		_IOC(_IOC_READ, 'E', 0x1b, len)		/* get all switch states */
 
 #define EVIOCGBIT(ev,len)	_IOC(_IOC_READ, 'E', 0x20 + ev, len)	/* get event bits */
 #define EVIOCGABS(abs)		_IOR('E', 0x40 + abs, struct input_absinfo)		/* get abs value/limits */
@@ -86,6 +89,7 @@ struct input_absinfo {
 #define EV_REL			0x02
 #define EV_ABS			0x03
 #define EV_MSC			0x04
+#define EV_SW			0x05
 #define EV_LED			0x11
 #define EV_SND			0x12
 #define EV_REP			0x14
@@ -287,6 +291,8 @@ struct input_absinfo {
 #define KEY_SCROLLDOWN		178
 #define KEY_KPLEFTPAREN		179
 #define KEY_KPRIGHTPAREN	180
+#define KEY_NEW			181
+#define KEY_REDO		182
 
 #define KEY_F13			183
 #define KEY_F14			184
@@ -332,6 +338,14 @@ struct input_absinfo {
 #define KEY_KBDILLUMTOGGLE	228
 #define KEY_KBDILLUMDOWN	229
 #define KEY_KBDILLUMUP		230
+
+#define KEY_SEND		231
+#define KEY_REPLY		232
+#define KEY_FORWARDMAIL		233
+#define KEY_SAVE		234
+#define KEY_DOCUMENTS		235
+
+#define KEY_BATTERY		236
 
 #define KEY_UNKNOWN		240
 
@@ -409,7 +423,7 @@ struct input_absinfo {
 #define BTN_GEAR_UP		0x151
 
 #define KEY_OK			0x160
-#define KEY_SELECT 		0x161
+#define KEY_SELECT		0x161
 #define KEY_GOTO		0x162
 #define KEY_CLEAR		0x163
 #define KEY_POWER2		0x164
@@ -500,6 +514,17 @@ struct input_absinfo {
 #define KEY_FN_S		0x1e3
 #define KEY_FN_B		0x1e4
 
+#define KEY_BRL_DOT1		0x1f1
+#define KEY_BRL_DOT2		0x1f2
+#define KEY_BRL_DOT3		0x1f3
+#define KEY_BRL_DOT4		0x1f4
+#define KEY_BRL_DOT5		0x1f5
+#define KEY_BRL_DOT6		0x1f6
+#define KEY_BRL_DOT7		0x1f7
+#define KEY_BRL_DOT8		0x1f8
+
+/* We avoid low common keys in module aliases so they don't get huge. */
+#define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x1ff
 
 /*
@@ -549,6 +574,15 @@ struct input_absinfo {
 #define ABS_VOLUME		0x20
 #define ABS_MISC		0x28
 #define ABS_MAX			0x3f
+
+/*
+ * Switch events
+ */
+
+#define SW_LID			0x00  /* set = lid shut */
+#define SW_TABLET_MODE		0x01  /* set = tablet mode */
+#define SW_HEADPHONE_INSERT	0x02  /* set = inserted */
+#define SW_MAX			0x0f
 
 /*
  * Misc events
@@ -620,6 +654,7 @@ struct input_absinfo {
 #define BUS_ADB			0x17
 #define BUS_I2C			0x18
 #define BUS_HOST		0x19
+#define BUS_GSC			0x1A
 
 /*
  * Values describing the status of an effect
@@ -773,8 +808,10 @@ struct ff_effect {
  * In-kernel definitions.
  */
 
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/timer.h>
+#include <linux/mod_devicetable.h>
 
 #define NBITS(x) (((x)/BITS_PER_LONG)+1)
 #define BIT(x)	(1UL<<((x)%BITS_PER_LONG))
@@ -811,9 +848,9 @@ struct input_dev {
 
 	void *private;
 
-	char *name;
-	char *phys;
-	char *uniq;
+	const char *name;
+	const char *phys;
+	const char *uniq;
 	struct input_id id;
 
 	unsigned long evbit[NBITS(EV_MAX)];
@@ -824,6 +861,7 @@ struct input_dev {
 	unsigned long ledbit[NBITS(LED_MAX)];
 	unsigned long sndbit[NBITS(SND_MAX)];
 	unsigned long ffbit[NBITS(FF_MAX)];
+	unsigned long swbit[NBITS(SW_MAX)];
 	int ff_effects_max;
 
 	unsigned int keycodemax;
@@ -844,6 +882,7 @@ struct input_dev {
 	unsigned long key[NBITS(KEY_MAX)];
 	unsigned long led[NBITS(LED_MAX)];
 	unsigned long snd[NBITS(SND_MAX)];
+	unsigned long sw[NBITS(SW_MAX)];
 
 	int absmax[ABS_MAX + 1];
 	int absmin[ABS_MAX + 1];
@@ -859,52 +898,64 @@ struct input_dev {
 	int (*erase_effect)(struct input_dev *dev, int effect_id);
 
 	struct input_handle *grab;
-	struct device *dev;
+
+	struct mutex mutex;	/* serializes open and close operations */
+	unsigned int users;
+
+	struct class_device cdev;
+	struct device *dev;	/* will be removed soon */
+
+	int dynalloc;	/* temporarily */
 
 	struct list_head	h_list;
 	struct list_head	node;
 };
+#define to_input_dev(d) container_of(d, struct input_dev, cdev)
 
 /*
- * Structure for hotplug & device<->driver matching.
+ * Verify that we are in sync with input_device_id mod_devicetable.h #defines
  */
 
-#define INPUT_DEVICE_ID_MATCH_BUS	1
-#define INPUT_DEVICE_ID_MATCH_VENDOR	2
-#define INPUT_DEVICE_ID_MATCH_PRODUCT	4
-#define INPUT_DEVICE_ID_MATCH_VERSION	8
+#if EV_MAX != INPUT_DEVICE_ID_EV_MAX
+#error "EV_MAX and INPUT_DEVICE_ID_EV_MAX do not match"
+#endif
 
-#define INPUT_DEVICE_ID_MATCH_EVBIT	0x010
-#define INPUT_DEVICE_ID_MATCH_KEYBIT	0x020
-#define INPUT_DEVICE_ID_MATCH_RELBIT	0x040
-#define INPUT_DEVICE_ID_MATCH_ABSBIT	0x080
-#define INPUT_DEVICE_ID_MATCH_MSCIT	0x100
-#define INPUT_DEVICE_ID_MATCH_LEDBIT	0x200
-#define INPUT_DEVICE_ID_MATCH_SNDBIT	0x400
-#define INPUT_DEVICE_ID_MATCH_FFBIT	0x800
+#if KEY_MAX != INPUT_DEVICE_ID_KEY_MAX
+#error "KEY_MAX and INPUT_DEVICE_ID_KEY_MAX do not match"
+#endif
 
-#define INPUT_DEVICE_ID_MATCH_DEVICE\
+#if REL_MAX != INPUT_DEVICE_ID_REL_MAX
+#error "REL_MAX and INPUT_DEVICE_ID_REL_MAX do not match"
+#endif
+
+#if ABS_MAX != INPUT_DEVICE_ID_ABS_MAX
+#error "ABS_MAX and INPUT_DEVICE_ID_ABS_MAX do not match"
+#endif
+
+#if MSC_MAX != INPUT_DEVICE_ID_MSC_MAX
+#error "MSC_MAX and INPUT_DEVICE_ID_MSC_MAX do not match"
+#endif
+
+#if LED_MAX != INPUT_DEVICE_ID_LED_MAX
+#error "LED_MAX and INPUT_DEVICE_ID_LED_MAX do not match"
+#endif
+
+#if SND_MAX != INPUT_DEVICE_ID_SND_MAX
+#error "SND_MAX and INPUT_DEVICE_ID_SND_MAX do not match"
+#endif
+
+#if FF_MAX != INPUT_DEVICE_ID_FF_MAX
+#error "FF_MAX and INPUT_DEVICE_ID_FF_MAX do not match"
+#endif
+
+#if SW_MAX != INPUT_DEVICE_ID_SW_MAX
+#error "SW_MAX and INPUT_DEVICE_ID_SW_MAX do not match"
+#endif
+
+#define INPUT_DEVICE_ID_MATCH_DEVICE \
 	(INPUT_DEVICE_ID_MATCH_BUS | INPUT_DEVICE_ID_MATCH_VENDOR | INPUT_DEVICE_ID_MATCH_PRODUCT)
-#define INPUT_DEVICE_ID_MATCH_DEVICE_AND_VERSION\
+#define INPUT_DEVICE_ID_MATCH_DEVICE_AND_VERSION \
 	(INPUT_DEVICE_ID_MATCH_DEVICE | INPUT_DEVICE_ID_MATCH_VERSION)
-
-struct input_device_id {
-
-	unsigned long flags;
-
-	struct input_id id;
-
-	unsigned long evbit[NBITS(EV_MAX)];
-	unsigned long keybit[NBITS(KEY_MAX)];
-	unsigned long relbit[NBITS(REL_MAX)];
-	unsigned long absbit[NBITS(ABS_MAX)];
-	unsigned long mscbit[NBITS(MSC_MAX)];
-	unsigned long ledbit[NBITS(LED_MAX)];
-	unsigned long sndbit[NBITS(SND_MAX)];
-	unsigned long ffbit[NBITS(FF_MAX)];
-
-	unsigned long driver_info;
-};
 
 struct input_handle;
 
@@ -916,7 +967,7 @@ struct input_handler {
 	struct input_handle* (*connect)(struct input_handler *handler, struct input_dev *dev, struct input_device_id *id);
 	void (*disconnect)(struct input_handle *handle);
 
-	struct file_operations *fops;
+	const struct file_operations *fops;
 	int minor;
 	char *name;
 
@@ -952,7 +1003,25 @@ static inline void init_input_dev(struct input_dev *dev)
 	INIT_LIST_HEAD(&dev->node);
 }
 
-void input_register_device(struct input_dev *);
+struct input_dev *input_allocate_device(void);
+
+static inline struct input_dev *input_get_device(struct input_dev *dev)
+{
+	return to_input_dev(class_device_get(&dev->cdev));
+}
+
+static inline void input_put_device(struct input_dev *dev)
+{
+	class_device_put(&dev->cdev);
+}
+
+static inline void input_free_device(struct input_dev *dev)
+{
+	if (dev)
+		input_put_device(dev);
+}
+
+int input_register_device(struct input_dev *);
 void input_unregister_device(struct input_dev *);
 
 void input_register_handler(struct input_handler *);
@@ -994,6 +1063,11 @@ static inline void input_report_ff_status(struct input_dev *dev, unsigned int co
 	input_event(dev, EV_FF_STATUS, code, value);
 }
 
+static inline void input_report_switch(struct input_dev *dev, unsigned int code, int value)
+{
+	input_event(dev, EV_SW, code, !!value);
+}
+
 static inline void input_regs(struct input_dev *dev, struct pt_regs *regs)
 {
 	dev->regs = regs;
@@ -1015,7 +1089,7 @@ static inline void input_set_abs_params(struct input_dev *dev, int axis, int min
 	dev->absbit[LONG(axis)] |= BIT(axis);
 }
 
-extern struct class_simple *input_class;
+extern struct class input_class;
 
 #endif
 #endif

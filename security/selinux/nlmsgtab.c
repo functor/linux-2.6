@@ -16,7 +16,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/if.h>
 #include <linux/netfilter_ipv4/ip_queue.h>
-#include <linux/tcp_diag.h>
+#include <linux/inet_diag.h>
 #include <linux/xfrm.h>
 #include <linux/audit.h>
 
@@ -63,6 +63,8 @@ static struct nlmsg_perm nlmsg_route_perms[] =
 	{ RTM_GETPREFIX,	NETLINK_ROUTE_SOCKET__NLMSG_READ  },
 	{ RTM_GETMULTICAST,	NETLINK_ROUTE_SOCKET__NLMSG_READ  },
 	{ RTM_GETANYCAST,	NETLINK_ROUTE_SOCKET__NLMSG_READ  },
+	{ RTM_GETNEIGHTBL,	NETLINK_ROUTE_SOCKET__NLMSG_READ  },
+	{ RTM_SETNEIGHTBL,	NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
 };
 
 static struct nlmsg_perm nlmsg_firewall_perms[] =
@@ -74,6 +76,7 @@ static struct nlmsg_perm nlmsg_firewall_perms[] =
 static struct nlmsg_perm nlmsg_tcpdiag_perms[] =
 {
 	{ TCPDIAG_GETSOCK,	NETLINK_TCPDIAG_SOCKET__NLMSG_READ },
+	{ DCCPDIAG_GETSOCK,	NETLINK_TCPDIAG_SOCKET__NLMSG_READ },
 };
 
 static struct nlmsg_perm nlmsg_xfrm_perms[] =
@@ -85,8 +88,15 @@ static struct nlmsg_perm nlmsg_xfrm_perms[] =
 	{ XFRM_MSG_DELPOLICY,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
 	{ XFRM_MSG_GETPOLICY,	NETLINK_XFRM_SOCKET__NLMSG_READ  },
 	{ XFRM_MSG_ALLOCSPI,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_ACQUIRE,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_EXPIRE,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
 	{ XFRM_MSG_UPDPOLICY,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
 	{ XFRM_MSG_UPDSA,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_POLEXPIRE,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_FLUSHSA,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_FLUSHPOLICY,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_NEWAE,	NETLINK_XFRM_SOCKET__NLMSG_WRITE },
+	{ XFRM_MSG_GETAE,	NETLINK_XFRM_SOCKET__NLMSG_READ  },
 };
 
 static struct nlmsg_perm nlmsg_audit_perms[] =
@@ -96,8 +106,14 @@ static struct nlmsg_perm nlmsg_audit_perms[] =
 	{ AUDIT_LIST,		NETLINK_AUDIT_SOCKET__NLMSG_READPRIV },
 	{ AUDIT_ADD,		NETLINK_AUDIT_SOCKET__NLMSG_WRITE    },
 	{ AUDIT_DEL,		NETLINK_AUDIT_SOCKET__NLMSG_WRITE    },
+	{ AUDIT_LIST_RULES,	NETLINK_AUDIT_SOCKET__NLMSG_READPRIV },
+	{ AUDIT_ADD_RULE,	NETLINK_AUDIT_SOCKET__NLMSG_WRITE    },
+	{ AUDIT_DEL_RULE,	NETLINK_AUDIT_SOCKET__NLMSG_WRITE    },
 	{ AUDIT_USER,		NETLINK_AUDIT_SOCKET__NLMSG_RELAY    },
 	{ AUDIT_SIGNAL_INFO,	NETLINK_AUDIT_SOCKET__NLMSG_READ     },
+	{ AUDIT_WATCH_INS,	NETLINK_AUDIT_SOCKET__NLMSG_WRITE    },
+	{ AUDIT_WATCH_REM,	NETLINK_AUDIT_SOCKET__NLMSG_WRITE    },
+	{ AUDIT_WATCH_LIST,	NETLINK_AUDIT_SOCKET__NLMSG_READPRIV },
 };
 
 
@@ -142,8 +158,10 @@ int selinux_nlmsg_lookup(u16 sclass, u16 nlmsg_type, u32 *perm)
 		break;
 
 	case SECCLASS_NETLINK_AUDIT_SOCKET:
-		if (nlmsg_type >= AUDIT_FIRST_USER_MSG &&
-		    nlmsg_type <= AUDIT_LAST_USER_MSG) {
+		if ((nlmsg_type >= AUDIT_FIRST_USER_MSG &&
+		     nlmsg_type <= AUDIT_LAST_USER_MSG) ||
+		    (nlmsg_type >= AUDIT_FIRST_USER_MSG2 &&
+                     nlmsg_type <= AUDIT_LAST_USER_MSG2)) {
 			*perm = NETLINK_AUDIT_SOCKET__NLMSG_RELAY;
 		} else {
 			err = nlmsg_perm(nlmsg_type, perm, nlmsg_audit_perms,

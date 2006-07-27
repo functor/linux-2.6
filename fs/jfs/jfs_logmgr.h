@@ -389,7 +389,7 @@ struct jfs_log {
 	int eor;		/* 4: eor of last record in eol page */
 	struct lbuf *bp;	/* 4: current log page buffer */
 
-	struct semaphore loglock;	/* 4: log write serialization lock */
+	struct mutex loglock;	/* 4: log write serialization lock */
 
 	/* syncpt */
 	int nextsync;		/* 4: bytes to write before next syncpt */
@@ -507,7 +507,9 @@ extern int lmLogClose(struct super_block *sb);
 extern int lmLogShutdown(struct jfs_log * log);
 extern int lmLogInit(struct jfs_log * log);
 extern int lmLogFormat(struct jfs_log *log, s64 logAddress, int logSize);
+extern int lmGroupCommit(struct jfs_log *, struct tblock *);
+extern int jfsIOWait(void *);
 extern void jfs_flush_journal(struct jfs_log * log, int wait);
-extern void jfs_syncpt(struct jfs_log *log);
+extern void jfs_syncpt(struct jfs_log *log, int hard_sync);
 
 #endif				/* _H_JFS_LOGMGR */

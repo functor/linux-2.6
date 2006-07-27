@@ -2,6 +2,8 @@
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
+ *
+ * Much of this is taken from binutils and GNU libc ...
  */
 #ifndef _ASM_ELF_H
 #define _ASM_ELF_H
@@ -17,6 +19,8 @@
 #define EF_MIPS_ARCH_5		0x40000000	/* -mips5 code.  */
 #define EF_MIPS_ARCH_32		0x50000000	/* MIPS32 code.  */
 #define EF_MIPS_ARCH_64		0x60000000	/* MIPS64 code.  */
+#define EF_MIPS_ARCH_32R2	0x70000000	/* MIPS32 R2 code.  */
+#define EF_MIPS_ARCH_64R2	0x80000000	/* MIPS64 R2 code.  */
 
 /* The ABI of a file. */
 #define EF_MIPS_ABI_O32		0x00001000	/* O32 ABI.  */
@@ -105,14 +109,59 @@
 #define R_MIPS_LOVENDOR		100
 #define R_MIPS_HIVENDOR		127
 
-#define SHN_MIPS_ACCOMON	0xff00
+#define SHN_MIPS_ACCOMON	0xff00		/* Allocated common symbols */
+#define SHN_MIPS_TEXT		0xff01		/* Allocated test symbols.  */
+#define SHN_MIPS_DATA		0xff02		/* Allocated data symbols.  */
+#define SHN_MIPS_SCOMMON	0xff03		/* Small common symbols */
+#define SHN_MIPS_SUNDEFINED	0xff04		/* Small undefined symbols */
 
 #define SHT_MIPS_LIST		0x70000000
 #define SHT_MIPS_CONFLICT	0x70000002
 #define SHT_MIPS_GPTAB		0x70000003
 #define SHT_MIPS_UCODE		0x70000004
+#define SHT_MIPS_DEBUG		0x70000005
+#define SHT_MIPS_REGINFO	0x70000006
+#define SHT_MIPS_PACKAGE	0x70000007
+#define SHT_MIPS_PACKSYM	0x70000008
+#define SHT_MIPS_RELD		0x70000009
+#define SHT_MIPS_IFACE		0x7000000b
+#define SHT_MIPS_CONTENT	0x7000000c
+#define SHT_MIPS_OPTIONS	0x7000000d
+#define SHT_MIPS_SHDR		0x70000010
+#define SHT_MIPS_FDESC		0x70000011
+#define SHT_MIPS_EXTSYM		0x70000012
+#define SHT_MIPS_DENSE		0x70000013
+#define SHT_MIPS_PDESC		0x70000014
+#define SHT_MIPS_LOCSYM		0x70000015
+#define SHT_MIPS_AUXSYM		0x70000016
+#define SHT_MIPS_OPTSYM		0x70000017
+#define SHT_MIPS_LOCSTR		0x70000018
+#define SHT_MIPS_LINE		0x70000019
+#define SHT_MIPS_RFDESC		0x7000001a
+#define SHT_MIPS_DELTASYM	0x7000001b
+#define SHT_MIPS_DELTAINST	0x7000001c
+#define SHT_MIPS_DELTACLASS	0x7000001d
+#define SHT_MIPS_DWARF		0x7000001e
+#define SHT_MIPS_DELTADECL	0x7000001f
+#define SHT_MIPS_SYMBOL_LIB	0x70000020
+#define SHT_MIPS_EVENTS		0x70000021
+#define SHT_MIPS_TRANSLATE	0x70000022
+#define SHT_MIPS_PIXIE		0x70000023
+#define SHT_MIPS_XLATE		0x70000024
+#define SHT_MIPS_XLATE_DEBUG	0x70000025
+#define SHT_MIPS_WHIRL		0x70000026
+#define SHT_MIPS_EH_REGION	0x70000027
+#define SHT_MIPS_XLATE_OLD	0x70000028
+#define SHT_MIPS_PDR_EXCEPTION	0x70000029
 
-#define SHF_MIPS_GPREL	0x10000000
+#define SHF_MIPS_GPREL		0x10000000
+#define SHF_MIPS_MERGE		0x20000000
+#define SHF_MIPS_ADDR		0x40000000
+#define SHF_MIPS_STRING		0x80000000
+#define SHF_MIPS_NOSTRIP	0x08000000
+#define SHF_MIPS_LOCAL		0x04000000
+#define SHF_MIPS_NAMES		0x02000000
+#define SHF_MIPS_NODUPES	0x01000000
 
 #ifndef ELF_ARCH
 /* ELF register definitions */
@@ -125,7 +174,7 @@ typedef elf_greg_t elf_gregset_t[ELF_NGREG];
 typedef double elf_fpreg_t;
 typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
 
-#ifdef CONFIG_MIPS32
+#ifdef CONFIG_32BIT
 
 /*
  * This is used to ensure we don't load something for the wrong architecture.
@@ -153,9 +202,9 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
  */
 #define ELF_CLASS	ELFCLASS32
 
-#endif /* CONFIG_MIPS32 */
+#endif /* CONFIG_32BIT */
 
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 /*
  * This is used to ensure we don't load something for the wrong architecture.
  */
@@ -177,7 +226,7 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
  */
 #define ELF_CLASS	ELFCLASS64
 
-#endif /* CONFIG_MIPS64 */
+#endif /* CONFIG_64BIT */
 
 /*
  * These are used to set parameters in the core dumps.
@@ -193,49 +242,93 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
 
 #ifdef __KERNEL__
 
-#ifdef CONFIG_MIPS32
+struct mips_abi;
 
-#define SET_PERSONALITY(ex, ibcs2)			\
-do {							\
-	if (ibcs2)					\
-		set_personality(PER_SVR4);		\
-	set_personality(PER_LINUX);			\
+extern struct mips_abi mips_abi;
+extern struct mips_abi mips_abi_32;
+extern struct mips_abi mips_abi_n32;
+
+#ifdef CONFIG_32BIT
+
+#define SET_PERSONALITY(ex, ibcs2)					\
+do {									\
+	if (ibcs2)							\
+		set_personality(PER_SVR4);				\
+	set_personality(PER_LINUX);					\
+									\
+	current->thread.abi = &mips_abi;				\
 } while (0)
 
-#endif /* CONFIG_MIPS32 */
+#endif /* CONFIG_32BIT */
 
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 
-#define SET_PERSONALITY(ex, ibcs2)				\
-do {	current->thread.mflags &= ~MF_ABI_MASK;			\
-	if ((ex).e_ident[EI_CLASS] == ELFCLASS32) {		\
-		if ((((ex).e_flags & EF_MIPS_ABI2) != 0) &&	\
-		     ((ex).e_flags & EF_MIPS_ABI) == 0)		\
-			current->thread.mflags |= MF_N32;	\
-		else						\
-			current->thread.mflags |= MF_O32;	\
-	} else							\
-		current->thread.mflags |= MF_N64;		\
-	if (ibcs2)						\
-		set_personality(PER_SVR4);			\
-	else if (current->personality != PER_LINUX32)		\
-		set_personality(PER_LINUX);			\
+#ifdef CONFIG_MIPS32_N32
+#define __SET_PERSONALITY32_N32()					\
+	do {								\
+		current->thread.mflags |= MF_N32;			\
+		current->thread.abi = &mips_abi_n32;			\
+	} while (0)
+#else
+#define __SET_PERSONALITY32_N32()					\
+	do { } while (0)
+#endif
+
+#ifdef CONFIG_MIPS32_O32
+#define __SET_PERSONALITY32_O32()					\
+	do {								\
+		current->thread.mflags |= MF_O32;			\
+		current->thread.abi = &mips_abi_32;			\
+	} while (0)
+#else
+#define __SET_PERSONALITY32_O32()					\
+	do { } while (0)
+#endif
+
+#ifdef CONFIG_MIPS32_COMPAT
+#define __SET_PERSONALITY32(ex)						\
+do {									\
+	if ((((ex).e_flags & EF_MIPS_ABI2) != 0) &&			\
+	     ((ex).e_flags & EF_MIPS_ABI) == 0)				\
+		__SET_PERSONALITY32_N32();				\
+	else								\
+		__SET_PERSONALITY32_O32();				\
+} while (0)
+#else
+#define __SET_PERSONALITY32(ex)	do { } while (0)
+#endif
+
+#define SET_PERSONALITY(ex, ibcs2)					\
+do {									\
+	current->thread.mflags &= ~MF_ABI_MASK;				\
+	if ((ex).e_ident[EI_CLASS] == ELFCLASS32)			\
+		__SET_PERSONALITY32(ex);				\
+	else {								\
+		current->thread.mflags |= MF_N64;			\
+		current->thread.abi = &mips_abi;			\
+	}								\
+									\
+	if (ibcs2)							\
+		set_personality(PER_SVR4);				\
+	else if (current->personality != PER_LINUX32)			\
+		set_personality(PER_LINUX);				\
 } while (0)
 
-#endif /* CONFIG_MIPS64 */
+#endif /* CONFIG_64BIT */
 
-extern void dump_regs(elf_greg_t *, struct pt_regs *regs);
+struct task_struct;
+
+extern void elf_dump_regs(elf_greg_t *, struct pt_regs *regs);
+extern int dump_task_regs (struct task_struct *, elf_gregset_t *);
 extern int dump_task_fpu(struct task_struct *, elf_fpregset_t *);
 
 #define ELF_CORE_COPY_REGS(elf_regs, regs)			\
-	dump_regs((elf_greg_t *)&(elf_regs), regs);
+	elf_dump_regs((elf_greg_t *)&(elf_regs), regs);
+#define ELF_CORE_COPY_TASK_REGS(tsk, elf_regs) dump_task_regs(tsk, elf_regs)
 #define ELF_CORE_COPY_FPREGS(tsk, elf_fpregs)			\
 	dump_task_fpu(tsk, elf_fpregs)
 
 #endif /* __KERNEL__ */
-
-/* This one accepts IRIX binaries.  */
-#define irix_elf_check_arch(hdr)	((hdr)->e_flags & RHF_SGI_ONLY)
 
 #define USE_ELF_CORE_DUMP
 #define ELF_EXEC_PAGESIZE	PAGE_SIZE

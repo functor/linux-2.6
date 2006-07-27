@@ -76,11 +76,12 @@
 #include <linux/netdevice.h>
 #include <linux/file.h>
 #include <linux/proc_fs.h>
-#include <linux/tcp.h>
+#include <linux/mutex.h>
 
 #include <net/sock.h>
 #include <net/af_unix.h>
 #include <net/scm.h>
+#include <net/tcp_states.h>
 
 /* Internal data structures and random procedures: */
 
@@ -169,7 +170,7 @@ static void maybe_unmark_and_push(struct sock *x)
 
 void unix_gc(void)
 {
-	static DECLARE_MUTEX(unix_gc_sem);
+	static DEFINE_MUTEX(unix_gc_sem);
 	int i;
 	struct sock *s;
 	struct sk_buff_head hitlist;
@@ -179,10 +180,10 @@ void unix_gc(void)
 	 *	Avoid a recursive GC.
 	 */
 
-	if (down_trylock(&unix_gc_sem))
+	if (!mutex_trylock(&unix_gc_sem))
 		return;
 
-	read_lock(&unix_table_lock);
+	spin_lock(&unix_table_lock);
 
 	forall_unix_sockets(i, s)
 	{
@@ -286,27 +287,27 @@ void unix_gc(void)
 			skb = skb_peek(&s->sk_receive_queue);
 			while (skb &&
 			       skb != (struct sk_buff *)&s->sk_receive_queue) {
-				nextsk=skb->next;
+				nextsk = skb->next;
 				/*
 				 *	Do we have file descriptors ?
 				 */
-				if(UNIXCB(skb).fp)
-				{
-					__skb_unlink(skb, skb->list);
-					__skb_queue_tail(&hitlist,skb);
+				if (UNIXCB(skb).fp) {
+					__skb_unlink(skb,
+						     &s->sk_receive_queue);
+					__skb_queue_tail(&hitlist, skb);
 				}
-				skb=nextsk;
+				skb = nextsk;
 			}
 			spin_unlock(&s->sk_receive_queue.lock);
 		}
 		u->gc_tree = GC_ORPHAN;
 	}
-	read_unlock(&unix_table_lock);
+	spin_unlock(&unix_table_lock);
 
 	/*
 	 *	Here we are. Hitlist is filled. Die.
 	 */
 
 	__skb_queue_purge(&hitlist);
-	up(&unix_gc_sem);
+	mutex_unlock(&unix_gc_sem);
 }

@@ -49,7 +49,7 @@
 
 /*
  * ----------------------------------------------------------------------------
- * Powermanagement bitmasks
+ * Power management bitmasks
  * ----------------------------------------------------------------------------
  */
 #define IDLE_WAIT_CYCLES		0x00000fff
@@ -61,7 +61,10 @@
 #define PER_EN				0x1
 
 #define CPU_SUSPEND_SIZE		200
-#define ULPD_LOW_POWER_EN		0x0001
+#define ULPD_LOW_PWR_EN			0x0001
+#define ULPD_DEEP_SLEEP_TRANSITION_EN	0x0010
+#define ULPD_SETUP_ANALOG_CELL_3_VAL	0
+#define ULPD_POWER_CTRL_REG_VAL		0x0219
 
 #define DSP_IDLE_DELAY			10
 #define DSP_IDLE			0x0040
@@ -86,58 +89,89 @@
 #define OMAP1510_BIG_SLEEP_REQUEST	0x0cc5
 #define OMAP1510_IDLE_LOOP_REQUEST	0x0c00
 #define OMAP1510_IDLE_CLOCK_DOMAINS	0x2
-#define OMAP1510_ULPD_LOW_POWER_REQ	0x0001
 
-#define OMAP1610_DEEP_SLEEP_REQUEST	0x17c7
-#define OMAP1610_BIG_SLEEP_REQUEST	TBD
+/* Both big sleep and deep sleep use same values. Difference is in ULPD. */
+#define OMAP1610_IDLECT1_SLEEP_VAL	0x13c7
+#define OMAP1610_IDLECT2_SLEEP_VAL	0x09c7
+#define OMAP1610_IDLECT3_VAL		0x3f
+#define OMAP1610_IDLECT3_SLEEP_ORMASK	0x2c
+#define OMAP1610_IDLECT3		0xfffece24
 #define OMAP1610_IDLE_LOOP_REQUEST	0x0400
-#define OMAP1610_IDLE_CLOCK_DOMAINS	0x09c7
-#define OMAP1610_ULPD_LOW_POWER_REQ	0x3
 
-#ifndef OMAP1510_SRAM_IDLE_SUSPEND
-#define OMAP1510_SRAM_IDLE_SUSPEND 0
-#endif
-#ifndef OMAP1610_SRAM_IDLE_SUSPEND
-#define OMAP1610_SRAM_IDLE_SUSPEND 0
-#endif
-#ifndef OMAP5912_SRAM_IDLE_SUSPEND
-#define OMAP5912_SRAM_IDLE_SUSPEND 0
-#endif
+#define OMAP730_IDLECT1_SLEEP_VAL	0x16c7
+#define OMAP730_IDLECT2_SLEEP_VAL	0x09c7
+#define OMAP730_IDLECT3_VAL		0x3f
+#define OMAP730_IDLECT3		0xfffece24
+#define OMAP730_IDLE_LOOP_REQUEST	0x0C00
 
-#ifndef OMAP1510_SRAM_API_SUSPEND
-#define OMAP1510_SRAM_API_SUSPEND 0
-#endif
-#ifndef OMAP1610_SRAM_API_SUSPEND
-#define OMAP1610_SRAM_API_SUSPEND 0
-#endif
-#ifndef OMAP5912_SRAM_API_SUSPEND
-#define OMAP5912_SRAM_API_SUSPEND 0
-#endif
-
-#if     !defined(CONFIG_ARCH_OMAP1510) && \
-	!defined(CONFIG_ARCH_OMAP16XX)
+#if     !defined(CONFIG_ARCH_OMAP730) && \
+	!defined(CONFIG_ARCH_OMAP15XX) && \
+	!defined(CONFIG_ARCH_OMAP16XX) && \
+	!defined(CONFIG_ARCH_OMAP24XX)
 #error "Power management for this processor not implemented yet"
 #endif
 
 #ifndef __ASSEMBLER__
+
+#include <linux/clk.h>
+
+extern void prevent_idle_sleep(void);
+extern void allow_idle_sleep(void);
+
+/**
+ * clk_deny_idle - Prevents the clock from being idled during MPU idle
+ * @clk: clock signal handle
+ */
+void clk_deny_idle(struct clk *clk);
+
+/**
+ * clk_allow_idle - Counters previous clk_deny_idle
+ * @clk: clock signal handle
+ */
+void clk_deny_idle(struct clk *clk);
+
 extern void omap_pm_idle(void);
 extern void omap_pm_suspend(void);
-extern int omap1510_cpu_suspend(unsigned short, unsigned short);
-extern int omap1610_cpu_suspend(unsigned short, unsigned short);
-extern int omap1510_idle_loop_suspend(void);
-extern int omap1610_idle_loop_suspend(void);
+extern void omap730_cpu_suspend(unsigned short, unsigned short);
+extern void omap1510_cpu_suspend(unsigned short, unsigned short);
+extern void omap1610_cpu_suspend(unsigned short, unsigned short);
+extern void omap24xx_cpu_suspend(u32 dll_ctrl, u32 cpu_revision);
+extern void omap730_idle_loop_suspend(void);
+extern void omap1510_idle_loop_suspend(void);
+extern void omap1610_idle_loop_suspend(void);
+extern void omap24xx_idle_loop_suspend(void);
+
+extern unsigned int omap730_cpu_suspend_sz;
 extern unsigned int omap1510_cpu_suspend_sz;
-extern unsigned int omap1510_idle_loop_suspend_sz;
 extern unsigned int omap1610_cpu_suspend_sz;
+extern unsigned int omap24xx_cpu_suspend_sz;
+extern unsigned int omap730_idle_loop_suspend_sz;
+extern unsigned int omap1510_idle_loop_suspend_sz;
 extern unsigned int omap1610_idle_loop_suspend_sz;
+extern unsigned int omap24xx_idle_loop_suspend_sz;
+
+#ifdef CONFIG_OMAP_SERIAL_WAKE
+extern void omap_serial_wake_trigger(int enable);
+#else
+#define omap_serial_wakeup_init()	{}
+#define omap_serial_wake_trigger(x)	{}
+#endif	/* CONFIG_OMAP_SERIAL_WAKE */
 
 #define ARM_SAVE(x) arm_sleep_save[ARM_SLEEP_SAVE_##x] = omap_readl(x)
 #define ARM_RESTORE(x) omap_writel((arm_sleep_save[ARM_SLEEP_SAVE_##x]), (x))
 #define ARM_SHOW(x) arm_sleep_save[ARM_SLEEP_SAVE_##x]
 
+#define DSP_SAVE(x) dsp_sleep_save[DSP_SLEEP_SAVE_##x] = __raw_readw(x)
+#define DSP_RESTORE(x) __raw_writew((dsp_sleep_save[DSP_SLEEP_SAVE_##x]), (x))
+#define DSP_SHOW(x) dsp_sleep_save[DSP_SLEEP_SAVE_##x]
+
 #define ULPD_SAVE(x) ulpd_sleep_save[ULPD_SLEEP_SAVE_##x] = omap_readw(x)
 #define ULPD_RESTORE(x) omap_writew((ulpd_sleep_save[ULPD_SLEEP_SAVE_##x]), (x))
 #define ULPD_SHOW(x) ulpd_sleep_save[ULPD_SLEEP_SAVE_##x]
+
+#define MPUI730_SAVE(x) mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x] = omap_readl(x)
+#define MPUI730_RESTORE(x) omap_writel((mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x]), (x))
+#define MPUI730_SHOW(x) mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x]
 
 #define MPUI1510_SAVE(x) mpui1510_sleep_save[MPUI1510_SLEEP_SAVE_##x] = omap_readl(x)
 #define MPUI1510_RESTORE(x) omap_writel((mpui1510_sleep_save[MPUI1510_SLEEP_SAVE_##x]), (x))
@@ -146,6 +180,10 @@ extern unsigned int omap1610_idle_loop_suspend_sz;
 #define MPUI1610_SAVE(x) mpui1610_sleep_save[MPUI1610_SLEEP_SAVE_##x] = omap_readl(x)
 #define MPUI1610_RESTORE(x) omap_writel((mpui1610_sleep_save[MPUI1610_SLEEP_SAVE_##x]), (x))
 #define MPUI1610_SHOW(x) mpui1610_sleep_save[MPUI1610_SLEEP_SAVE_##x]
+
+#define OMAP24XX_SAVE(x) omap24xx_sleep_save[OMAP24XX_SLEEP_SAVE_##x] = x
+#define OMAP24XX_RESTORE(x) x = omap24xx_sleep_save[OMAP24XX_SLEEP_SAVE_##x]
+#define OMAP24XX_SHOW(x) omap24xx_sleep_save[OMAP24XX_SLEEP_SAVE_##x]
 
 /*
  * List of global OMAP registers to preserve.
@@ -161,11 +199,21 @@ enum arm_save_state {
 	ARM_SLEEP_SAVE_ARM_CKCTL,
 	ARM_SLEEP_SAVE_ARM_IDLECT1,
 	ARM_SLEEP_SAVE_ARM_IDLECT2,
+	ARM_SLEEP_SAVE_ARM_IDLECT3,
 	ARM_SLEEP_SAVE_ARM_EWUPCT,
 	ARM_SLEEP_SAVE_ARM_RSTCT1,
 	ARM_SLEEP_SAVE_ARM_RSTCT2,
 	ARM_SLEEP_SAVE_ARM_SYSST,
 	ARM_SLEEP_SAVE_SIZE
+};
+
+enum dsp_save_state {
+	DSP_SLEEP_SAVE_START = 0,
+	/*
+	 * DSP registers 16 bits
+	 */
+	DSP_SLEEP_SAVE_DSP_IDLECT2,
+	DSP_SLEEP_SAVE_SIZE
 };
 
 enum ulpd_save_state {
@@ -195,10 +243,31 @@ enum mpui1510_save_state {
 	MPUI1510_SLEEP_SAVE_EMIFS_CONFIG,
 	MPUI1510_SLEEP_SAVE_OMAP_IH1_MIR,
 	MPUI1510_SLEEP_SAVE_OMAP_IH2_MIR,
-#if defined(CONFIG_ARCH_OMAP1510)
+#if defined(CONFIG_ARCH_OMAP15XX)
 	MPUI1510_SLEEP_SAVE_SIZE
 #else
 	MPUI1510_SLEEP_SAVE_SIZE = 0
+#endif
+};
+
+enum mpui730_save_state {
+	MPUI730_SLEEP_SAVE_START = 0,
+	/*
+	 * MPUI registers 32 bits
+	 */
+	MPUI730_SLEEP_SAVE_MPUI_CTRL,
+	MPUI730_SLEEP_SAVE_MPUI_DSP_BOOT_CONFIG,
+	MPUI730_SLEEP_SAVE_MPUI_DSP_API_CONFIG,
+	MPUI730_SLEEP_SAVE_MPUI_DSP_STATUS,
+	MPUI730_SLEEP_SAVE_EMIFF_SDRAM_CONFIG,
+	MPUI730_SLEEP_SAVE_EMIFS_CONFIG,
+	MPUI730_SLEEP_SAVE_OMAP_IH1_MIR,
+	MPUI730_SLEEP_SAVE_OMAP_IH2_0_MIR,
+	MPUI730_SLEEP_SAVE_OMAP_IH2_1_MIR,
+#if defined(CONFIG_ARCH_OMAP730)
+	MPUI730_SLEEP_SAVE_SIZE
+#else
+	MPUI730_SLEEP_SAVE_SIZE = 0
 #endif
 };
 
@@ -223,6 +292,31 @@ enum mpui1610_save_state {
 #else
 	MPUI1610_SLEEP_SAVE_SIZE = 0
 #endif
+};
+
+enum omap24xx_save_state {
+	OMAP24XX_SLEEP_SAVE_START = 0,
+	OMAP24XX_SLEEP_SAVE_INTC_MIR0,
+	OMAP24XX_SLEEP_SAVE_INTC_MIR1,
+	OMAP24XX_SLEEP_SAVE_INTC_MIR2,
+	OMAP24XX_SLEEP_SAVE_CM_FCLKEN1_CORE,
+	OMAP24XX_SLEEP_SAVE_CM_FCLKEN2_CORE,
+	OMAP24XX_SLEEP_SAVE_CM_ICLKEN1_CORE,
+	OMAP24XX_SLEEP_SAVE_CM_ICLKEN2_CORE,
+	OMAP24XX_SLEEP_SAVE_CM_ICLKEN4_CORE,
+	OMAP24XX_SLEEP_SAVE_GPIO1_IRQENABLE1,
+	OMAP24XX_SLEEP_SAVE_GPIO2_IRQENABLE1,
+	OMAP24XX_SLEEP_SAVE_GPIO3_IRQENABLE1,
+	OMAP24XX_SLEEP_SAVE_GPIO4_IRQENABLE1,
+	OMAP24XX_SLEEP_SAVE_GPIO3_OE,
+	OMAP24XX_SLEEP_SAVE_GPIO4_OE,
+	OMAP24XX_SLEEP_SAVE_GPIO3_RISINGDETECT,
+	OMAP24XX_SLEEP_SAVE_GPIO3_FALLINGDETECT,
+	OMAP24XX_SLEEP_SAVE_CONTROL_PADCONF_SPI1_NCS2,
+	OMAP24XX_SLEEP_SAVE_CONTROL_PADCONF_MCBSP1_DX,
+	OMAP24XX_SLEEP_SAVE_CONTROL_PADCONF_SSI1_FLAG_TX,
+	OMAP24XX_SLEEP_SAVE_CONTROL_PADCONF_SYS_NIRQW0,
+	OMAP24XX_SLEEP_SAVE_SIZE
 };
 
 #endif /* ASSEMBLER */

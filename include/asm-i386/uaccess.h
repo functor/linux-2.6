@@ -83,30 +83,6 @@ extern struct movsl_mask {
  */
 #define access_ok(type,addr,size) (likely(__range_ok(addr,size) == 0))
 
-/**
- * verify_area: - Obsolete/deprecated and will go away soon,
- * use access_ok() instead.
- * @type: Type of access: %VERIFY_READ or %VERIFY_WRITE
- * @addr: User space pointer to start of block to check
- * @size: Size of block to check
- *
- * Context: User context only.  This function may sleep.
- *
- * This function has been replaced by access_ok().
- *
- * Checks if a pointer to a block of memory in user space is valid.
- *
- * Returns zero if the memory block may be valid, -EFAULT
- * if it is definitely invalid.
- *
- * See access_ok() for more details.
- */
-static inline int __deprecated verify_area(int type, const void __user * addr, unsigned long size)
-{
-	return access_ok(type,addr,size) ? 0 : -EFAULT;
-}
-
-
 /*
  * The exception table consists of pairs of addresses: the first is the
  * address of an instruction that is allowed to fault, and the second is
@@ -221,13 +197,15 @@ extern void __put_user_8(void);
 
 #define put_user(x,ptr)						\
 ({	int __ret_pu;						\
+	__typeof__(*(ptr)) __pu_val;				\
 	__chk_user_ptr(ptr);					\
+	__pu_val = x;						\
 	switch(sizeof(*(ptr))) {				\
-	case 1: __put_user_1(x, ptr); break;			\
-	case 2: __put_user_2(x, ptr); break;			\
-	case 4: __put_user_4(x, ptr); break;			\
-	case 8: __put_user_8(x, ptr); break;			\
-	default:__put_user_X(x, ptr); break;			\
+	case 1: __put_user_1(__pu_val, ptr); break;		\
+	case 2: __put_user_2(__pu_val, ptr); break;		\
+	case 4: __put_user_4(__pu_val, ptr); break;		\
+	case 8: __put_user_8(__pu_val, ptr); break;		\
+	default:__put_user_X(__pu_val, ptr); break;		\
 	}							\
 	__ret_pu;						\
 })
@@ -435,7 +413,7 @@ unsigned long __must_check __copy_from_user_ll(void *to,
  * Returns number of bytes that could not be copied.
  * On success, this will be zero.
  */
-static inline unsigned long __must_check
+static __always_inline unsigned long __must_check
 __copy_to_user_inatomic(void __user *to, const void *from, unsigned long n)
 {
 	if (__builtin_constant_p(n)) {
@@ -456,7 +434,7 @@ __copy_to_user_inatomic(void __user *to, const void *from, unsigned long n)
 	return __copy_to_user_ll(to, from, n);
 }
 
-static inline unsigned long __must_check
+static __always_inline unsigned long __must_check
 __copy_to_user(void __user *to, const void *from, unsigned long n)
 {
        might_sleep();
@@ -480,7 +458,7 @@ __copy_to_user(void __user *to, const void *from, unsigned long n)
  * If some data could not be copied, this function will pad the copied
  * data to the requested size using zero bytes.
  */
-static inline unsigned long
+static __always_inline unsigned long
 __copy_from_user_inatomic(void *to, const void __user *from, unsigned long n)
 {
 	if (__builtin_constant_p(n)) {
@@ -501,7 +479,7 @@ __copy_from_user_inatomic(void *to, const void __user *from, unsigned long n)
 	return __copy_from_user_ll(to, from, n);
 }
 
-static inline unsigned long
+static __always_inline unsigned long
 __copy_from_user(void *to, const void __user *from, unsigned long n)
 {
        might_sleep();

@@ -61,8 +61,7 @@ extern asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info);
 extern int tux_TDprintk;
 extern int tux_Dprintk;
 
-#define TUX_DEBUG CONFIG_TUX_DEBUG
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 # define TUX_BUG() BUG()
 
 # define TUX_DPRINTK 1
@@ -383,7 +382,7 @@ struct tux_req_struct
 	/* the file being sent */
 
 	unsigned int bytes_sent;
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	unsigned int bytes_expected;
 #endif
 	unsigned long first_timestamp;
@@ -422,7 +421,7 @@ struct tux_req_struct
 	void (*ftp_real_create_child)(struct sock *sk, struct sock *newsk);
 	void (*ftp_real_destruct)(struct sock *sk);
 
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	unsigned long accept_timestamp;
 	unsigned long parse_timestamp;
 	unsigned long output_timestamp;
@@ -501,7 +500,7 @@ typedef enum special_mimetypes {
 	MIME_TYPE_MODULE,
 } special_mimetypes_t;
 
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 #if 0
 extern inline void url_hist_hit (int size)
 {
@@ -514,7 +513,7 @@ extern inline void url_hist_hit (int size)
 extern inline void url_hist_miss (int size)
 {
 	unsigned int idx = size/1024;
- 
+
 	if (idx >= URL_HIST_SIZE)
 		idx = URL_HIST_SIZE-1;
 	kstat.url_hist_misses[idx]++;
@@ -798,5 +797,8 @@ static inline void put_data_sock (tux_req_t *req)
 })
 
 #define tux_close(fd) sys_close(fd)
+
+extern int init_tux_request_slabs(void);
+extern void free_tux_request_slabs(void);
 
 #endif

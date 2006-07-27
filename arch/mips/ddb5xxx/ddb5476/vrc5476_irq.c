@@ -53,14 +53,13 @@ static void vrc5476_irq_end(uint irq)
 }
 
 static hw_irq_controller vrc5476_irq_controller = {
-	"vrc5476",
-	vrc5476_irq_startup,
-	vrc5476_irq_shutdown,
-	vrc5476_irq_enable,
-	vrc5476_irq_disable,
-	vrc5476_irq_ack,
-	vrc5476_irq_end,
-	NULL				/* no affinity stuff for UP */
+	.typename = "vrc5476",
+	.startup = vrc5476_irq_startup,
+	.shutdown = vrc5476_irq_shutdown,
+	.enable = vrc5476_irq_enable,
+	.disable = vrc5476_irq_disable,
+	.ack = vrc5476_irq_ack,
+	.end = vrc5476_irq_end
 };
 
 void __init
@@ -78,11 +77,9 @@ vrc5476_irq_init(u32 base)
 }
 
 
-asmlinkage void
+void
 vrc5476_irq_dispatch(struct pt_regs *regs)
 {
-	extern void spurious_interrupt(void);
-
 	u32 mask;
 	int nile4_irq;
 
@@ -108,5 +105,5 @@ vrc5476_irq_dispatch(struct pt_regs *regs)
 			return;
 		}
 	}
-	spurious_interrupt();
+	spurious_interrupt(regs);
 }

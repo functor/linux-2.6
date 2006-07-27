@@ -1,6 +1,4 @@
 /*
- * arch/ppc/kernel/mpc10x.h
- *
  * Common routines for the Motorola SPS MPC106/8240/107 Host bridge/Mem
  * ctlr/EPIC/etc.
  *
@@ -159,6 +157,14 @@ extern unsigned long			ioremap_base;
 #define	MPC10X_MAPA_EUMB_BASE		(ioremap_base - MPC10X_EUMB_SIZE)
 #define	MPC10X_MAPB_EUMB_BASE		MPC10X_MAPA_EUMB_BASE
 
+enum ppc_sys_devices {
+	MPC10X_IIC1,
+	MPC10X_DMA0,
+	MPC10X_DMA1,
+	MPC10X_UART0,
+	MPC10X_UART1,
+	NUM_PPC_SYS_DEVS,
+};
 
 int mpc10x_bridge_init(struct pci_controller *hose,
 		       uint current_map,

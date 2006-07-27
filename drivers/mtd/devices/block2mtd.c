@@ -1,10 +1,9 @@
 /*
- * $Id: block2mtd.c,v 1.23 2005/01/05 17:05:46 dwmw2 Exp $
+ * $Id: block2mtd.c,v 1.30 2005/11/29 14:48:32 gleixner Exp $
  *
  * block2mtd.c - create an mtd from a block device
  *
  * Copyright (C) 2001,2002	Simon Evans <spse@secret.org.uk>
- * Copyright (C) 2004		Gareth Bult <Gareth@Encryptec.net>
  * Copyright (C) 2004,2005	Jörn Engel <joern@wh.fh-wedel.de>
  *
  * Licence: GPL
@@ -19,8 +18,9 @@
 #include <linux/init.h>
 #include <linux/mtd/mtd.h>
 #include <linux/buffer_head.h>
+#include <linux/mutex.h>
 
-#define VERSION "$Revision: 1.23 $"
+#define VERSION "$Revision: 1.30 $"
 
 
 #define ERROR(fmt, args...) printk(KERN_ERR "block2mtd: " fmt "\n" , ## args)
@@ -32,7 +32,7 @@ struct block2mtd_dev {
 	struct list_head list;
 	struct block_device *blkdev;
 	struct mtd_info mtd;
-	struct semaphore write_mutex;
+	struct mutex write_mutex;
 };
 
 
@@ -41,7 +41,7 @@ static LIST_HEAD(blkmtd_device_list);
 
 
 #define PAGE_READAHEAD 64
-void cache_readahead(struct address_space *mapping, int index)
+static void cache_readahead(struct address_space *mapping, int index)
 {
 	filler_t *filler = (filler_t*)mapping->a_ops->readpage;
 	int i, pagei;
@@ -89,7 +89,6 @@ void cache_readahead(struct address_space *mapping, int index)
 static struct page* page_readahead(struct address_space *mapping, int index)
 {
 	filler_t *filler = (filler_t*)mapping->a_ops->readpage;
-	//do_page_cache_readahead(mapping, index, XXX, 64);
 	cache_readahead(mapping, index);
 	return read_cache_page(mapping, index, filler, NULL);
 }
@@ -113,7 +112,7 @@ static int _block2mtd_erase(struct block2mtd_dev *dev, loff_t to, size_t len)
 			return PTR_ERR(page);
 
 		max = (u_long*)page_address(page) + PAGE_SIZE;
-		for (p=(u_long*)page_address(page); p<max; p++) 
+		for (p=(u_long*)page_address(page); p<max; p++)
 			if (*p != -1UL) {
 				lock_page(page);
 				memset(page_address(page), 0xff, PAGE_SIZE);
@@ -136,9 +135,9 @@ static int block2mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 	int err;
 
 	instr->state = MTD_ERASING;
-	down(&dev->write_mutex);
+	mutex_lock(&dev->write_mutex);
 	err = _block2mtd_erase(dev, from, len);
-	up(&dev->write_mutex);
+	mutex_unlock(&dev->write_mutex);
 	if (err) {
 		ERROR("erase failed err = %d", err);
 		instr->state = MTD_ERASE_FAILED;
@@ -157,7 +156,7 @@ static int block2mtd_read(struct mtd_info *mtd, loff_t from, size_t len,
 	struct block2mtd_dev *dev = mtd->priv;
 	struct page *page;
 	int index = from >> PAGE_SHIFT;
-	int offset = from & (PAGE_SHIFT-1);
+	int offset = from & (PAGE_SIZE-1);
 	int cpylen;
 
 	if (from > mtd->size)
@@ -208,7 +207,7 @@ static int _block2mtd_write(struct block2mtd_dev *dev, const u_char *buf,
 	if (retlen)
 		*retlen = 0;
 	while (len) {
-		if ((offset+len) > PAGE_SIZE) 
+		if ((offset+len) > PAGE_SIZE)
 			cpylen = PAGE_SIZE - offset;	// multiple pages
 		else
 			cpylen = len;			// this page
@@ -251,9 +250,9 @@ static int block2mtd_write(struct mtd_info *mtd, loff_t to, size_t len,
 	if (to + len > mtd->size)
 		len = mtd->size - to;
 
-	down(&dev->write_mutex);
+	mutex_lock(&dev->write_mutex);
 	err = _block2mtd_write(dev, buf, to, len, retlen);
-	up(&dev->write_mutex);
+	mutex_unlock(&dev->write_mutex);
 	if (err > 0)
 		err = 0;
 	return err;
@@ -312,7 +311,7 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size)
 		goto devinit_err;
 	}
 
-	init_MUTEX(&dev->write_mutex);
+	mutex_init(&dev->write_mutex);
 
 	/* Setup the MTD structure */
 	/* make the name contain the block device in */
@@ -370,16 +369,16 @@ static int ustrtoul(const char *cp, char **endp, unsigned int base)
 }
 
 
-static int parse_num32(u32 *num32, const char *token)
+static int parse_num(size_t *num, const char *token)
 {
 	char *endp;
-	unsigned long n;
+	size_t n;
 
-	n = ustrtoul(token, &endp, 0);
+	n = (size_t) ustrtoul(token, &endp, 0);
 	if (*endp)
 		return -EINVAL;
 
-	*num32 = n;
+	*num = n;
 	return 0;
 }
 
@@ -422,7 +421,7 @@ static int block2mtd_setup(const char *val, struct kernel_param *kp)
 	char buf[80+12], *str=buf; /* 80 for device, 12 for erase size */
 	char *token[2];
 	char *name;
-	u32 erase_size = PAGE_SIZE;
+	size_t erase_size = PAGE_SIZE;
 	int i, ret;
 
 	if (strnlen(val, sizeof(buf)) >= sizeof(buf))
@@ -449,7 +448,7 @@ static int block2mtd_setup(const char *val, struct kernel_param *kp)
 		return 0;
 
 	if (token[1]) {
-		ret = parse_num32(&erase_size, token[1]);
+		ret = parse_num(&erase_size, token[1]);
 		if (ret)
 			parse_err("illegal erase size");
 	}

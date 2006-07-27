@@ -10,6 +10,7 @@
 #include <linux/sunrpc/svc.h>
 #include <linux/nfs4.h>
 #include <linux/nfs_fs.h>
+#include "nfs4_fs.h"
 #include "callback.h"
 
 #define CB_OP_TAGLEN_MAXSZ	(512)
@@ -329,7 +330,7 @@ static unsigned encode_op_hdr(struct xdr_stream *xdr, uint32_t op, uint32_t res)
 
 static unsigned encode_getattr_res(struct svc_rqst *rqstp, struct xdr_stream *xdr, const struct cb_getattrres *res)
 {
-	uint32_t *savep;
+	uint32_t *savep = NULL;
 	unsigned status = res->status;
 	
 	if (unlikely(status != 0))
@@ -357,23 +358,26 @@ static unsigned process_op(struct svc_rqst *rqstp,
 		struct xdr_stream *xdr_in, void *argp,
 		struct xdr_stream *xdr_out, void *resp)
 {
-	struct callback_op *op;
-	unsigned int op_nr;
+	struct callback_op *op = &callback_ops[0];
+	unsigned int op_nr = OP_CB_ILLEGAL;
 	unsigned int status = 0;
 	long maxlen;
 	unsigned res;
 
 	dprintk("%s: start\n", __FUNCTION__);
 	status = decode_op_hdr(xdr_in, &op_nr);
-	if (unlikely(status != 0)) {
-		op_nr = OP_CB_ILLEGAL;
-		op = &callback_ops[0];
-	} else if (unlikely(op_nr != OP_CB_GETATTR && op_nr != OP_CB_RECALL)) {
-		op_nr = OP_CB_ILLEGAL;
-		op = &callback_ops[0];
-		status = htonl(NFS4ERR_OP_ILLEGAL);
-	} else
-		op = &callback_ops[op_nr];
+	if (likely(status == 0)) {
+		switch (op_nr) {
+			case OP_CB_GETATTR:
+			case OP_CB_RECALL:
+				op = &callback_ops[op_nr];
+				break;
+			default:
+				op_nr = OP_CB_ILLEGAL;
+				op = &callback_ops[0];
+				status = htonl(NFS4ERR_OP_ILLEGAL);
+		}
+	}
 
 	maxlen = xdr_out->end - xdr_out->p;
 	if (maxlen > 0 && maxlen < PAGE_SIZE) {
@@ -410,12 +414,12 @@ static int nfs4_callback_compound(struct svc_rqst *rqstp, void *argp, void *resp
 	xdr_init_decode(&xdr_in, &rqstp->rq_arg, rqstp->rq_arg.head[0].iov_base);
 
 	p = (uint32_t*)((char *)rqstp->rq_res.head[0].iov_base + rqstp->rq_res.head[0].iov_len);
-	rqstp->rq_res.head[0].iov_len = PAGE_SIZE;
 	xdr_init_encode(&xdr_out, &rqstp->rq_res, p);
 
 	decode_compound_hdr_arg(&xdr_in, &hdr_arg);
 	hdr_res.taglen = hdr_arg.taglen;
 	hdr_res.tag = hdr_arg.tag;
+	hdr_res.nops = NULL;
 	encode_compound_hdr_res(&xdr_out, &hdr_res);
 
 	for (;;) {

@@ -11,7 +11,6 @@
 #include <linux/init.h>
 
 #include <linux/mm.h>
-#include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/spinlock.h>
 #include <linux/smp_lock.h>
@@ -19,6 +18,8 @@
 #include <linux/mc146818rtc.h>
 #include <linux/cache.h>
 #include <linux/interrupt.h>
+#include <linux/cpu.h>
+#include <linux/module.h>
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
@@ -164,7 +165,7 @@ void send_IPI_mask_bitmask(cpumask_t cpumask, int vector)
 	unsigned long flags;
 
 	local_irq_save(flags);
-		
+	WARN_ON(mask & ~cpus_addr(cpu_online_map)[0]);
 	/*
 	 * Wait for idle.
 	 */
@@ -348,20 +349,20 @@ out:
 static void flush_tlb_others(cpumask_t cpumask, struct mm_struct *mm,
 						unsigned long va)
 {
-	cpumask_t tmp;
 	/*
 	 * A couple of (to be removed) sanity checks:
 	 *
-	 * - we do not send IPIs to not-yet booted CPUs.
 	 * - current CPU must not be in mask
 	 * - mask must exist :)
 	 */
 	BUG_ON(cpus_empty(cpumask));
-
-	cpus_and(tmp, cpumask, cpu_online_map);
-	BUG_ON(!cpus_equal(cpumask, tmp));
 	BUG_ON(cpu_isset(smp_processor_id(), cpumask));
 	BUG_ON(!mm);
+
+	/* If a CPU which we ran on has gone down, OK. */
+	cpus_and(cpumask, cpumask, cpu_online_map);
+	if (cpus_empty(cpumask))
+		return;
 
 	/*
 	 * i'm not happy about this global shared spinlock in the
@@ -455,6 +456,7 @@ void flush_tlb_page(struct vm_area_struct * vma, unsigned long va)
 
 	preempt_enable();
 }
+EXPORT_SYMBOL(flush_tlb_page);
 
 static void do_flush_tlb_all(void* info)
 {
@@ -477,6 +479,7 @@ void flush_tlb_all(void)
  */
 void smp_send_reschedule(int cpu)
 {
+	WARN_ON(cpu_is_offline(cpu));
 	send_IPI_mask(cpumask_of_cpu(cpu), RESCHEDULE_VECTOR);
 }
 
@@ -494,79 +497,73 @@ struct call_data_struct {
 	int wait;
 };
 
-static struct call_data_struct * call_data;
+void lock_ipi_call_lock(void)
+{
+	spin_lock_irq(&call_lock);
+}
 
-/*
- * this function sends a 'generic call function' IPI to all other CPUs
- * in the system.
- */
+void unlock_ipi_call_lock(void)
+{
+	spin_unlock_irq(&call_lock);
+}
 
-int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
-			int wait)
-/*
- * [SUMMARY] Run a function on all other CPUs.
- * <func> The function to run. This must be fast and non-blocking.
- * <info> An arbitrary pointer to pass to the function.
- * <nonatomic> currently unused.
- * <wait> If 1, wait (atomically) until function has completed on other CPUs.
- *        If 0, wait for the IPI to be received by other CPUs, but do not wait 
- *        for the completion of the function on each CPU.  
- *        If -1, do not wait for other CPUs to receive IPI.
- * [RETURNS] 0 on success, else a negative status code. Does not return until
+static struct call_data_struct *call_data;
+
+/**
+ * smp_call_function(): Run a function on all other CPUs.
+ * @func: The function to run. This must be fast and non-blocking.
+ * @info: An arbitrary pointer to pass to the function.
+ * @nonatomic: currently unused.
+ * @wait: If true, wait (atomically) until function has completed on other CPUs.
+ *
+ * Returns 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute <<func>> or are or have executed.
  *
  * You must not call this function with disabled interrupts or from a
  * hardware interrupt handler or from a bottom half handler.
  */
+int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
+			int wait)
 {
-	static struct call_data_struct dumpdata;
-	struct call_data_struct normaldata;
-	struct call_data_struct *data;
-	int cpus = num_online_cpus()-1;
+	struct call_data_struct data;
+	int cpus;
 
-	if (!cpus)
+	/* Holding any lock stops cpus from going down. */
+	spin_lock(&call_lock);
+	cpus = num_online_cpus() - 1;
+	if (!cpus) {
+		spin_unlock(&call_lock);
 		return 0;
+	}
 
 	/* Can deadlock when called with interrupts disabled */
-	/* Only if we are waiting for other CPU to ack */
-	WARN_ON(irqs_disabled() && wait >= 0);
+	WARN_ON(irqs_disabled());
 
-	spin_lock(&call_lock);
-	if (wait == -1) {
-		/* if another cpu beat us, they win! */
-		if (dumpdata.func) {
-			spin_unlock(&call_lock);
-			return 0;
-		}
-		data = &dumpdata;
-	} else
-		data = &normaldata;
+	data.func = func;
+	data.info = info;
+	atomic_set(&data.started, 0);
+	data.wait = wait;
+	if (wait)
+		atomic_set(&data.finished, 0);
 
-	data->func = func;
-	data->info = info;
-	atomic_set(&data->started, 0);
-	data->wait = wait > 0 ? wait : 0;
-	if (wait > 0)
-		atomic_set(&data->finished, 0);
-
-	call_data = data;
+	call_data = &data;
 	mb();
 	
 	/* Send a message to all other CPUs and wait for them to respond */
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
-	if (wait >= 0)
-		while (atomic_read(&data->started) != cpus)
-			cpu_relax();
+	while (atomic_read(&data.started) != cpus)
+		cpu_relax();
 
-	if (wait > 0)
-		while (atomic_read(&data->finished) != cpus)
+	if (wait)
+		while (atomic_read(&data.finished) != cpus)
 			cpu_relax();
 	spin_unlock(&call_lock);
 
 	return 0;
 }
+EXPORT_SYMBOL(smp_call_function);
 
 static void stop_this_cpu (void * dummy)
 {
@@ -577,7 +574,7 @@ static void stop_this_cpu (void * dummy)
 	local_irq_disable();
 	disable_local_APIC();
 	if (cpu_data[smp_processor_id()].hlt_works_ok)
-		for(;;) __asm__("hlt");
+		for(;;) halt();
 	for (;;);
 }
 

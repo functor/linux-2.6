@@ -23,8 +23,6 @@
 	 * disable preemption during the clear.
 	 */
 
-#define TTE_BITS_TOP	(_PAGE_VALID | _PAGE_SZBITS)
-#define TTE_BITS_BOTTOM	(_PAGE_CP | _PAGE_CV | _PAGE_P | _PAGE_L | _PAGE_W)
 #define	DCACHE_SIZE	(PAGE_SIZE * 2)
 
 #if (PAGE_SHIFT == 13) || (PAGE_SHIFT == 19)
@@ -52,13 +50,12 @@ copy_user_page:		/* %o0=dest, %o1=src, %o2=vaddr */
 	sethi		%hi(PAGE_SIZE), %o3
 
 	sllx		%g2, 32, %g2
-	sethi		%uhi(TTE_BITS_TOP), %g3
+	sethi		%hi(PAGE_KERNEL_LOCKED), %g3
 
-	sllx		%g3, 32, %g3
+	ldx		[%g3 + %lo(PAGE_KERNEL_LOCKED)], %g3
 	sub		%o0, %g2, %g1		! dest paddr
 
 	sub		%o1, %g2, %g2		! src paddr
-	or		%g3, TTE_BITS_BOTTOM, %g3
 
 	and		%o2, %o3, %o0		! vaddr D-cache alias bit
 	or		%g1, %g3, %g1		! dest TTE data
@@ -87,7 +84,7 @@ copy_user_page:		/* %o0=dest, %o1=src, %o2=vaddr */
 	membar		#Sync
 	wrpr		%o2, 0x0, %pstate
 
-	BRANCH_IF_ANY_CHEETAH(g3,o2,1f)
+cheetah_copy_page_insn:
 	ba,pt		%xcc, 9f
 	 nop
 
@@ -240,3 +237,14 @@ copy_user_page:		/* %o0=dest, %o1=src, %o2=vaddr */
 	 stw		%o4, [%g6 + TI_PRE_COUNT]
 
 	.size		copy_user_page, .-copy_user_page
+
+	.globl		cheetah_patch_copy_page
+cheetah_patch_copy_page:
+	sethi		%hi(0x01000000), %o1	! NOP
+	sethi		%hi(cheetah_copy_page_insn), %o0
+	or		%o0, %lo(cheetah_copy_page_insn), %o0
+	stw		%o1, [%o0]
+	membar		#StoreStore
+	flush		%o0
+	retl
+	 nop

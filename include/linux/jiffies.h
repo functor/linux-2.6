@@ -1,21 +1,12 @@
 #ifndef _LINUX_JIFFIES_H
 #define _LINUX_JIFFIES_H
 
+#include <linux/calc64.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/time.h>
 #include <linux/timex.h>
 #include <asm/param.h>			/* for HZ */
-#include <asm/div64.h>
-
-#ifndef div_long_long_rem
-#define div_long_long_rem(dividend,divisor,remainder) \
-({							\
-	u64 result = dividend;				\
-	*remainder = do_div(result,divisor);		\
-	result;						\
-})
-#endif
 
 /*
  * The following defines establish the engineering parameters of the PLL
@@ -45,6 +36,8 @@
 /* LATCH is used in the interval timer and ftape setup. */
 #define LATCH  ((CLOCK_TICK_RATE + HZ/2) / HZ)	/* For divider */
 
+#define LATCH_HPET ((HPET_TICK_RATE + HZ/2) / HZ)
+
 /* Suppose we want to devide two numbers NOM and DEN: NOM/DEN, the we can
  * improve accuracy by shifting LSH bits, hence calculating:
  *     (NOM << LSH) / DEN
@@ -60,8 +53,12 @@
 /* HZ is the requested value. ACTHZ is actual HZ ("<< 8" is for accuracy) */
 #define ACTHZ (SH_DIV (CLOCK_TICK_RATE, LATCH, 8))
 
+#define ACTHZ_HPET (SH_DIV (HPET_TICK_RATE, LATCH_HPET, 8))
+
 /* TICK_NSEC is the time between ticks in nsec assuming real ACTHZ */
 #define TICK_NSEC (SH_DIV (1000000UL * 1000, ACTHZ, 8))
+
+#define TICK_NSEC_HPET (SH_DIV(1000000UL * 1000, ACTHZ_HPET, 8))
 
 /* TICK_USEC is the time between ticks in usec assuming fake USER_HZ */
 #define TICK_USEC ((1000000UL + USER_HZ/2) / USER_HZ)
@@ -254,23 +251,23 @@ static inline u64 get_jiffies_64(void)
  */
 static inline unsigned int jiffies_to_msecs(const unsigned long j)
 {
-#if HZ <= 1000 && !(1000 % HZ)
-	return (1000 / HZ) * j;
-#elif HZ > 1000 && !(HZ % 1000)
-	return (j + (HZ / 1000) - 1)/(HZ / 1000);
+#if HZ <= MSEC_PER_SEC && !(MSEC_PER_SEC % HZ)
+	return (MSEC_PER_SEC / HZ) * j;
+#elif HZ > MSEC_PER_SEC && !(HZ % MSEC_PER_SEC)
+	return (j + (HZ / MSEC_PER_SEC) - 1)/(HZ / MSEC_PER_SEC);
 #else
-	return (j * 1000) / HZ;
+	return (j * MSEC_PER_SEC) / HZ;
 #endif
 }
 
 static inline unsigned int jiffies_to_usecs(const unsigned long j)
 {
-#if HZ <= 1000000 && !(1000000 % HZ)
-	return (1000000 / HZ) * j;
-#elif HZ > 1000000 && !(HZ % 1000000)
-	return (j + (HZ / 1000000) - 1)/(HZ / 1000000);
+#if HZ <= USEC_PER_SEC && !(USEC_PER_SEC % HZ)
+	return (USEC_PER_SEC / HZ) * j;
+#elif HZ > USEC_PER_SEC && !(HZ % USEC_PER_SEC)
+	return (j + (HZ / USEC_PER_SEC) - 1)/(HZ / USEC_PER_SEC);
 #else
-	return (j * 1000000) / HZ;
+	return (j * USEC_PER_SEC) / HZ;
 #endif
 }
 
@@ -278,12 +275,12 @@ static inline unsigned long msecs_to_jiffies(const unsigned int m)
 {
 	if (m > jiffies_to_msecs(MAX_JIFFY_OFFSET))
 		return MAX_JIFFY_OFFSET;
-#if HZ <= 1000 && !(1000 % HZ)
-	return (m + (1000 / HZ) - 1) / (1000 / HZ);
-#elif HZ > 1000 && !(HZ % 1000)
-	return m * (HZ / 1000);
+#if HZ <= MSEC_PER_SEC && !(MSEC_PER_SEC % HZ)
+	return (m + (MSEC_PER_SEC / HZ) - 1) / (MSEC_PER_SEC / HZ);
+#elif HZ > MSEC_PER_SEC && !(HZ % MSEC_PER_SEC)
+	return m * (HZ / MSEC_PER_SEC);
 #else
-	return (m * HZ + 999) / 1000;
+	return (m * HZ + MSEC_PER_SEC - 1) / MSEC_PER_SEC;
 #endif
 }
 
@@ -291,12 +288,12 @@ static inline unsigned long usecs_to_jiffies(const unsigned int u)
 {
 	if (u > jiffies_to_usecs(MAX_JIFFY_OFFSET))
 		return MAX_JIFFY_OFFSET;
-#if HZ <= 1000000 && !(1000000 % HZ)
-	return (u + (1000000 / HZ) - 1) / (1000000 / HZ);
-#elif HZ > 1000000 && !(HZ % 1000000)
-	return u * (HZ / 1000000);
+#if HZ <= USEC_PER_SEC && !(USEC_PER_SEC % HZ)
+	return (u + (USEC_PER_SEC / HZ) - 1) / (USEC_PER_SEC / HZ);
+#elif HZ > USEC_PER_SEC && !(HZ % USEC_PER_SEC)
+	return u * (HZ / USEC_PER_SEC);
 #else
-	return (u * HZ + 999999) / 1000000;
+	return (u * HZ + USEC_PER_SEC - 1) / USEC_PER_SEC;
 #endif
 }
 
@@ -373,8 +370,11 @@ jiffies_to_timeval(const unsigned long jiffies, struct timeval *value)
 	 * one divide.
 	 */
 	u64 nsec = (u64)jiffies * TICK_NSEC;
-	value->tv_sec = div_long_long_rem(nsec, NSEC_PER_SEC, &value->tv_usec);
-	value->tv_usec /= NSEC_PER_USEC;
+	long tv_usec;
+
+	value->tv_sec = div_long_long_rem(nsec, NSEC_PER_SEC, &tv_usec);
+	tv_usec /= NSEC_PER_USEC;
+	value->tv_usec = tv_usec;
 }
 
 /*

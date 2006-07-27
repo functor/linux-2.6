@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <setjmp.h>
 #include "ptrace_user.h"
 #include "uml-config.h"
 #include "skas_ptregs.h"
@@ -61,21 +62,27 @@ void init_registers(int pid)
 	err = ptrace(PTRACE_GETREGS, pid, 0, exec_regs);
 	if(err)
 		panic("check_ptrace : PTRACE_GETREGS failed, errno = %d",
-		      err);
+		      errno);
 
 	err = ptrace(PTRACE_GETFPREGS, pid, 0, exec_fp_regs);
 	if(err)
 		panic("check_ptrace : PTRACE_GETFPREGS failed, errno = %d",
-		      err);
+		      errno);
 }
 
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+void get_safe_registers(unsigned long *regs, unsigned long *fp_regs)
+{
+	memcpy(regs, exec_regs, HOST_FRAME_SIZE * sizeof(unsigned long));
+	if(fp_regs != NULL)
+		memcpy(fp_regs, exec_fp_regs,
+		       HOST_FP_SIZE * sizeof(unsigned long));
+}
+
+void get_thread_regs(union uml_pt_regs *uml_regs, void *buffer)
+{
+	struct __jmp_buf_tag *jmpbuf = buffer;
+
+	UPT_SET(uml_regs, RIP, jmpbuf->__jmpbuf[JB_PC]);
+	UPT_SET(uml_regs, RSP, jmpbuf->__jmpbuf[JB_RSP]);
+	UPT_SET(uml_regs, RBP, jmpbuf->__jmpbuf[JB_RBP]);
+}

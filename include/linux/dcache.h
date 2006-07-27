@@ -8,7 +8,6 @@
 #include <linux/spinlock.h>
 #include <linux/cache.h>
 #include <linux/rcupdate.h>
-#include <asm/bug.h>
 
 struct nameidata;
 struct vfsmount;
@@ -78,13 +77,7 @@ full_name_hash(const unsigned char *name, unsigned int len)
 
 struct dcookie_struct;
 
-#ifdef CONFIG_64BIT
-/* Total dentry size=256 bytes */
-#define DNAME_INLINE_LEN_MIN 60
-#else
-/* Total dentry size=128 bytes */
-#define DNAME_INLINE_LEN_MIN 16
-#endif
+#define DNAME_INLINE_LEN_MIN 36
 
 struct dentry {
 	atomic_t d_count;
@@ -94,23 +87,30 @@ struct dentry {
 					 * negative */
 	/*
 	 * The next three fields are touched by __d_lookup.  Place them here
-	 * so they all fit in a 16-byte range, with 16-byte alignment.
+	 * so they all fit in a cache line.
 	 */
+	struct hlist_node d_hash;	/* lookup hash list */
 	struct dentry *d_parent;	/* parent directory */
 	struct qstr d_name;
 
 	struct list_head d_lru;		/* LRU list */
-	struct list_head d_child;	/* child of parent list */
+	/*
+	 * d_child and d_rcu can share memory
+	 */
+	union {
+		struct list_head d_child;	/* child of parent list */
+	 	struct rcu_head d_rcu;
+	} d_u;
 	struct list_head d_subdirs;	/* our children */
 	struct list_head d_alias;	/* inode alias list */
 	unsigned long d_time;		/* used by d_revalidate */
 	struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	void *d_fsdata;			/* fs-specific data */
-	void * d_extra_attributes;	/* TUX-specific data */
- 	struct rcu_head d_rcu;
+	void *d_extra_attributes;	/* TUX-specific data */
+#ifdef CONFIG_PROFILING
 	struct dcookie_struct *d_cookie; /* cookie, if any */
-	struct hlist_node d_hash;	/* lookup hash list */	
+#endif
 	int d_mounted;
 	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */
 };
@@ -162,6 +162,8 @@ d_iput:		no		no		no       yes
 
 #define DCACHE_REFERENCED	0x0008  /* Recently used, don't discard. */
 #define DCACHE_UNHASHED		0x0010	
+
+#define DCACHE_INOTIFY_PARENT_WATCHED	0x0020 /* Parent inode is watched */
 
 extern spinlock_t dcache_lock;
 
@@ -275,6 +277,7 @@ extern void d_move(struct dentry *, struct dentry *);
 /* appendix may either be NULL or be used for transname suffixes */
 extern struct dentry * d_lookup(struct dentry *, struct qstr *);
 extern struct dentry * __d_lookup(struct dentry *, struct qstr *);
+extern struct dentry * d_hash_and_lookup(struct dentry *, struct qstr *);
 
 /* validate "insecure" dentry pointer */
 extern int d_validate(struct dentry *, struct dentry *);
@@ -284,7 +287,7 @@ char * __d_path( struct dentry *dentry, struct vfsmount *vfsmnt,
 		 char *buffer, int buflen);
 
 extern char * d_path(struct dentry *, struct vfsmount *, char *, int);
- 
+
 /* Allocation counts.. */
 
 /**
@@ -341,6 +344,7 @@ static inline int d_mountpoint(struct dentry *dentry)
 }
 
 extern struct vfsmount *lookup_mnt(struct vfsmount *, struct dentry *);
+extern struct vfsmount *__lookup_mnt(struct vfsmount *, struct dentry *, int);
 extern struct dentry *lookup_create(struct nameidata *nd, int is_dir);
 
 extern int sysctl_vfs_cache_pressure;

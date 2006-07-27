@@ -1,6 +1,6 @@
 /*
- *   Copyright (c) International Business Machines Corp., 2000-2002
- *   Portions Copyright (c) Christoph Hellwig, 2001-2002
+ *   Copyright (C) International Business Machines Corp., 2000-2002
+ *   Portions Copyright (C) Christoph Hellwig, 2001-2002
  *
  *   This program is free software;  you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -19,15 +19,12 @@
 
 #include <linux/fs.h>
 #include "jfs_incore.h"
+#include "jfs_inode.h"
 #include "jfs_dmap.h"
 #include "jfs_txnmgr.h"
 #include "jfs_xattr.h"
 #include "jfs_acl.h"
 #include "jfs_debug.h"
-
-
-extern int jfs_commit_inode(struct inode *, int);
-extern void jfs_truncate(struct inode *);
 
 int jfs_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
@@ -103,7 +100,7 @@ struct inode_operations jfs_file_inode_operations = {
 #endif
 };
 
-struct file_operations jfs_file_operations = {
+const struct file_operations jfs_file_operations = {
 	.open		= jfs_open,
 	.llseek		= generic_file_llseek,
 	.write		= generic_file_write,
@@ -116,4 +113,5 @@ struct file_operations jfs_file_operations = {
  	.sendfile	= generic_file_sendfile,
 	.fsync		= jfs_fsync,
 	.release	= jfs_release,
+	.ioctl		= jfs_ioctl,
 };

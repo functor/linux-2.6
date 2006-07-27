@@ -90,7 +90,7 @@ static u32 do_solaris_mmap(u32 addr, u32 len, u32 prot, u32 flags, u32 fd, u64 o
 	len = PAGE_ALIGN(len);
 	if(!(flags & MAP_FIXED))
 		addr = 0;
-	else if (len > 0xf0000000UL || addr > 0xf0000000UL - len)
+	else if (len > STACK_TOP32 || addr > STACK_TOP32 - len)
 		goto out_putf;
 	ret_type = flags & _MAP_NEW;
 	flags &= ~_MAP_NEW;
@@ -102,7 +102,7 @@ static u32 do_solaris_mmap(u32 addr, u32 len, u32 prot, u32 flags, u32 fd, u64 o
 			 (unsigned long) prot, (unsigned long) flags, off);
 	up_write(&current->mm->mmap_sem);
 	if(!ret_type)
-		retval = ((retval < 0xf0000000) ? 0 : retval);
+		retval = ((retval < STACK_TOP32) ? 0 : retval);
 	                        
 out_putf:
 	if (file)
@@ -353,7 +353,7 @@ asmlinkage int solaris_sysconf(int id)
 {
 	switch (id) {
 	case SOLARIS_CONFIG_NGROUPS:	return NGROUPS_MAX;
-	case SOLARIS_CONFIG_CHILD_MAX:	return CHILD_MAX;
+	case SOLARIS_CONFIG_CHILD_MAX:	return -1; /* no limit */
 	case SOLARIS_CONFIG_OPEN_FILES:	return OPEN_MAX;
 	case SOLARIS_CONFIG_POSIX_VER:	return 199309;
 	case SOLARIS_CONFIG_PAGESIZE:	return PAGE_SIZE;
@@ -737,7 +737,8 @@ MODULE_LICENSE("GPL");
 extern u32 tl0_solaris[8];
 #define update_ttable(x) 										\
 	tl0_solaris[3] = (((long)(x) - (long)tl0_solaris - 3) >> 2) | 0x40000000;			\
-	__asm__ __volatile__ ("membar #StoreStore; flush %0" : : "r" (&tl0_solaris[3]))
+	wmb();		\
+	__asm__ __volatile__ ("flush %0" : : "r" (&tl0_solaris[3]))
 #else
 #endif	
 
@@ -761,7 +762,8 @@ int init_module(void)
 	entry64_personality_patch |=
 		(offsetof(struct task_struct, personality) +
 		 (sizeof(unsigned long) - 1));
-	__asm__ __volatile__("membar #StoreStore; flush %0"
+	wmb();
+	__asm__ __volatile__("flush %0"
 			     : : "r" (&entry64_personality_patch));
 	return 0;
 }

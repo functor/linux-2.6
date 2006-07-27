@@ -45,25 +45,10 @@ typedef struct { unsigned long	pgprot;	} pgprot_t;
 /* to align the pointer to the (next) page boundary */
 #define PAGE_ALIGN(addr)	(((addr) + PAGE_SIZE - 1) & PAGE_MASK)
 
-/* Pure 2^n version of get_order */
-static inline int get_order(unsigned long size) __attribute_const__;
-static inline int get_order(unsigned long size)
-{
-	int order;
-
-	size = (size - 1) >> (PAGE_SHIFT - 1);
-	order = -1;
-	do {
-		size >>= 1;
-		order++;
-	} while (size);
-	return order;
-}
-
 #define devmem_is_allowed(pfn)	1
 
-#define __pa(vaddr)		virt_to_phys((void *) vaddr)
-#define __va(paddr)		phys_to_virt((unsigned long) paddr)
+#define __pa(vaddr)		virt_to_phys((void *) (unsigned long) (vaddr))
+#define __va(paddr)		phys_to_virt((unsigned long) (paddr))
 
 #define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
 
@@ -72,13 +57,9 @@ extern unsigned long min_low_pfn;
 extern unsigned long max_pfn;
 
 #ifdef CONFIG_MMU
-#define pfn_to_page(pfn)	(mem_map + (pfn))
-#define page_to_pfn(page)	((unsigned long) ((page) - mem_map))
 #define pfn_valid(pfn)		((pfn) < max_mapnr)
-
 #else
-#define pfn_to_page(pfn)	(&mem_map[(pfn) - (PAGE_OFFSET >> PAGE_SHIFT)])
-#define page_to_pfn(page)	((PAGE_OFFSET >> PAGE_SHIFT) + (unsigned long) ((page) - mem_map))
+#define ARCH_PFN_OFFSET		(PAGE_OFFSET >> PAGE_SHIFT)
 #define pfn_valid(pfn)		((pfn) >= min_low_pfn && (pfn) < max_low_pfn)
 
 #endif
@@ -101,5 +82,8 @@ extern unsigned long max_pfn;
 #ifdef CONFIG_CONTIGUOUS_PAGE_ALLOC
 #define WANT_PAGE_VIRTUAL	1
 #endif
+
+#include <asm-generic/memory_model.h>
+#include <asm-generic/page.h>
 
 #endif /* _ASM_PAGE_H */
