@@ -20,9 +20,11 @@
 #include <linux/notifier.h>
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
+#include <linux/mutex.h>
 #include <net/flow.h>
 #include <asm/atomic.h>
 #include <asm/semaphore.h>
+#include <linux/security.h>
 
 struct flow_cache_entry {
 	struct flow_cache_entry	*next;
@@ -30,6 +32,7 @@ struct flow_cache_entry {
 	u8			dir;
 	struct flowi		key;
 	u32			genid;
+	u32			sk_sid;
 	void			*object;
 	atomic_t		*object_ref;
 };
@@ -42,7 +45,7 @@ static DEFINE_PER_CPU(struct flow_cache_entry **, flow_tables) = { NULL };
 
 #define flow_table(cpu) (per_cpu(flow_tables, cpu))
 
-static kmem_cache_t *flow_cachep;
+static kmem_cache_t *flow_cachep __read_mostly;
 
 static int flow_lwm, flow_hwm;
 
@@ -76,7 +79,7 @@ static void flow_cache_new_hashrnd(unsigned long arg)
 {
 	int i;
 
-	for_each_cpu(i)
+	for_each_possible_cpu(i)
 		flow_hash_rnd_recalc(i) = 1;
 
 	flow_hash_rnd_timer.expires = jiffies + FLOW_HASH_RND_PERIOD;
@@ -162,7 +165,7 @@ static int flow_key_compare(struct flowi *key1, struct flowi *key2)
 	return 0;
 }
 
-void *flow_cache_lookup(struct flowi *key, u16 family, u8 dir,
+void *flow_cache_lookup(struct flowi *key, u32 sk_sid, u16 family, u8 dir,
 			flow_resolve_t resolver)
 {
 	struct flow_cache_entry *fle, **head;
@@ -186,6 +189,7 @@ void *flow_cache_lookup(struct flowi *key, u16 family, u8 dir,
 	for (fle = *head; fle; fle = fle->next) {
 		if (fle->family == family &&
 		    fle->dir == dir &&
+		    fle->sk_sid == sk_sid &&
 		    flow_key_compare(key, &fle->key) == 0) {
 			if (fle->genid == atomic_read(&flow_cache_genid)) {
 				void *ret = fle->object;
@@ -210,6 +214,7 @@ void *flow_cache_lookup(struct flowi *key, u16 family, u8 dir,
 			*head = fle;
 			fle->family = family;
 			fle->dir = dir;
+			fle->sk_sid = sk_sid;
 			memcpy(&fle->key, key, sizeof(*key));
 			fle->object = NULL;
 			flow_count(cpu)++;
@@ -221,7 +226,7 @@ nocache:
 		void *obj;
 		atomic_t *obj_ref;
 
-		resolver(key, family, dir, &obj, &obj_ref);
+		resolver(key, sk_sid, family, dir, &obj, &obj_ref);
 
 		if (fle) {
 			fle->genid = atomic_read(&flow_cache_genid);
@@ -283,11 +288,11 @@ static void flow_cache_flush_per_cpu(void *data)
 void flow_cache_flush(void)
 {
 	struct flow_flush_info info;
-	static DECLARE_MUTEX(flow_flush_sem);
+	static DEFINE_MUTEX(flow_flush_sem);
 
 	/* Don't want cpus going down or up during this. */
 	lock_cpu_hotplug();
-	down(&flow_flush_sem);
+	mutex_lock(&flow_flush_sem);
 	atomic_set(&info.cpuleft, num_online_cpus());
 	init_completion(&info.completion);
 
@@ -297,7 +302,7 @@ void flow_cache_flush(void)
 	local_bh_enable();
 
 	wait_for_completion(&info.completion);
-	up(&flow_flush_sem);
+	mutex_unlock(&flow_flush_sem);
 	unlock_cpu_hotplug();
 }
 
@@ -313,11 +318,9 @@ static void __devinit flow_cache_cpu_prepare(int cpu)
 		/* NOTHING */;
 
 	flow_table(cpu) = (struct flow_cache_entry **)
-		__get_free_pages(GFP_KERNEL, order);
+		__get_free_pages(GFP_KERNEL|__GFP_ZERO, order);
 	if (!flow_table(cpu))
 		panic("NET: failed to allocate flow cache order %lu\n", order);
-
-	memset(flow_table(cpu), 0, PAGE_SIZE << order);
 
 	flow_hash_rnd_recalc(cpu) = 1;
 	flow_count(cpu) = 0;
@@ -358,7 +361,7 @@ static int __init flow_cache_init(void)
 	flow_hash_rnd_timer.expires = jiffies + FLOW_HASH_RND_PERIOD;
 	add_timer(&flow_hash_rnd_timer);
 
-	for_each_cpu(i)
+	for_each_possible_cpu(i)
 		flow_cache_cpu_prepare(i);
 
 	hotcpu_notifier(flow_cache_cpu, 0);

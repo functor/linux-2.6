@@ -79,6 +79,7 @@
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/capability.h>
 #include <linux/config.h>
 #include <linux/socket.h>
 #include <linux/sockios.h>
@@ -86,6 +87,7 @@
 #include <linux/in.h>
 #include <linux/mm.h>
 #include <linux/inet.h>
+#include <linux/inetdevice.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/fddidevice.h>
@@ -241,7 +243,7 @@ static int arp_constructor(struct neighbour *neigh)
 	neigh->type = inet_addr_type(addr);
 
 	rcu_read_lock();
-	in_dev = rcu_dereference(__in_dev_get(dev));
+	in_dev = __in_dev_get_rcu(dev);
 	if (in_dev == NULL) {
 		rcu_read_unlock();
 		return -EINVAL;
@@ -697,12 +699,6 @@ void arp_send(int type, int ptype, u32 dest_ip,
 	arp_xmit(skb);
 }
 
-static void parp_redo(struct sk_buff *skb)
-{
-	nf_reset(skb);
-	arp_rcv(skb, skb->dev, NULL);
-}
-
 /*
  *	Process an arp request.
  */
@@ -865,7 +861,7 @@ static int arp_process(struct sk_buff *skb)
 				if (n)
 					neigh_release(n);
 
-				if (skb->stamp.tv_sec == LOCALLY_ENQUEUED || 
+				if (NEIGH_CB(skb)->flags & LOCALLY_ENQUEUED || 
 				    skb->pkt_type == PACKET_HOST ||
 				    in_dev->arp_parms->proxy_delay == 0) {
 					arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,tip,sha,dev->dev_addr,sha);
@@ -883,16 +879,16 @@ static int arp_process(struct sk_buff *skb)
 
 	n = __neigh_lookup(&arp_tbl, &sip, dev, 0);
 
-#ifdef CONFIG_IP_ACCEPT_UNSOLICITED_ARP
-	/* Unsolicited ARP is not accepted by default.
-	   It is possible, that this option should be enabled for some
-	   devices (strip is candidate)
-	 */
-	if (n == NULL &&
-	    arp->ar_op == htons(ARPOP_REPLY) &&
-	    inet_addr_type(sip) == RTN_UNICAST)
-		n = __neigh_lookup(&arp_tbl, &sip, dev, -1);
-#endif
+	if (ipv4_devconf.arp_accept) {
+		/* Unsolicited ARP is not accepted by default.
+		   It is possible, that this option should be enabled for some
+		   devices (strip is candidate)
+		 */
+		if (n == NULL &&
+		    arp->ar_op == htons(ARPOP_REPLY) &&
+		    inet_addr_type(sip) == RTN_UNICAST)
+			n = __neigh_lookup(&arp_tbl, &sip, dev, -1);
+	}
 
 	if (n) {
 		int state = NUD_REACHABLE;
@@ -922,12 +918,18 @@ out:
 	return 0;
 }
 
+static void parp_redo(struct sk_buff *skb)
+{
+	arp_process(skb);
+}
+
 
 /*
  *	Receive an arp request from the device layer.
  */
 
-int arp_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
+static int arp_rcv(struct sk_buff *skb, struct net_device *dev,
+		   struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct arphdr *arp;
 
@@ -947,6 +949,8 @@ int arp_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
 
 	if ((skb = skb_share_check(skb, GFP_ATOMIC)) == NULL)
 		goto out_of_mem;
+
+	memset(NEIGH_CB(skb), 0, sizeof(struct neighbour_cb));
 
 	return NF_HOOK(NF_ARP, NF_ARP_IN, skb, dev, NULL, arp_process);
 
@@ -988,8 +992,8 @@ static int arp_req_set(struct arpreq *r, struct net_device * dev)
 			ipv4_devconf.proxy_arp = 1;
 			return 0;
 		}
-		if (__in_dev_get(dev)) {
-			__in_dev_get(dev)->cnf.proxy_arp = 1;
+		if (__in_dev_get_rtnl(dev)) {
+			__in_dev_get_rtnl(dev)->cnf.proxy_arp = 1;
 			return 0;
 		}
 		return -ENXIO;
@@ -1094,8 +1098,8 @@ static int arp_req_delete(struct arpreq *r, struct net_device * dev)
 				ipv4_devconf.proxy_arp = 0;
 				return 0;
 			}
-			if (__in_dev_get(dev)) {
-				__in_dev_get(dev)->cnf.proxy_arp = 0;
+			if (__in_dev_get_rtnl(dev)) {
+				__in_dev_get_rtnl(dev)->cnf.proxy_arp = 0;
 				return 0;
 			}
 			return -ENXIO;
@@ -1414,7 +1418,6 @@ static int __init arp_proc_init(void)
 
 EXPORT_SYMBOL(arp_broken_ops);
 EXPORT_SYMBOL(arp_find);
-EXPORT_SYMBOL(arp_rcv);
 EXPORT_SYMBOL(arp_create);
 EXPORT_SYMBOL(arp_xmit);
 EXPORT_SYMBOL(arp_send);

@@ -57,18 +57,18 @@ __uml_setup("mixer=", set_mixer, "mixer=<mixer device>\n" MIXER_HELP);
 
 #else /*MODULE*/
 
-MODULE_PARM(dsp, "s");
+module_param(dsp, charp, 0644);
 MODULE_PARM_DESC(dsp, DSP_HELP);
 
-MODULE_PARM(mixer, "s");
+module_param(mixer, charp, 0644);
 MODULE_PARM_DESC(mixer, MIXER_HELP);
 
 #endif
 
 /* /dev/dsp file operations */
 
-static ssize_t hostaudio_read(struct file *file, char *buffer, size_t count, 
-			      loff_t *ppos)
+static ssize_t hostaudio_read(struct file *file, char __user *buffer,
+			      size_t count, loff_t *ppos)
 {
         struct hostaudio_state *state = file->private_data;
 	void *kbuf;
@@ -94,7 +94,7 @@ static ssize_t hostaudio_read(struct file *file, char *buffer, size_t count,
 	return(err);
 }
 
-static ssize_t hostaudio_write(struct file *file, const char *buffer, 
+static ssize_t hostaudio_write(struct file *file, const char __user *buffer,
 			       size_t count, loff_t *ppos)
 {
         struct hostaudio_state *state = file->private_data;
@@ -152,7 +152,7 @@ static int hostaudio_ioctl(struct inode *inode, struct file *file,
 	case SNDCTL_DSP_CHANNELS:
 	case SNDCTL_DSP_SUBDIVIDE:
 	case SNDCTL_DSP_SETFRAGMENT:
-		if(get_user(data, (int *) arg))
+		if(get_user(data, (int __user *) arg))
 			return(-EFAULT);
 		break;
 	default:
@@ -168,7 +168,7 @@ static int hostaudio_ioctl(struct inode *inode, struct file *file,
 	case SNDCTL_DSP_CHANNELS:
 	case SNDCTL_DSP_SUBDIVIDE:
 	case SNDCTL_DSP_SETFRAGMENT:
-		if(put_user(data, (int *) arg))
+		if(put_user(data, (int __user *) arg))
 			return(-EFAULT);
 		break;
 	default:

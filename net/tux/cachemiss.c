@@ -121,7 +121,7 @@ static int cachemiss_thread (void *data)
 	spin_unlock_irq(&current->sighand->siglock);
 
 	spin_unlock(&iot->async_lock);
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	{
 		cpumask_t mask;
 
@@ -186,6 +186,8 @@ static void __stop_cachemiss_threads (iothread_t *iot)
 {
 	DECLARE_WAITQUEUE(wait, current);
 
+	__set_current_state(TASK_UNINTERRUPTIBLE);
+
 	Dprintk("stopping async IO threads %p.\n", iot);
 	add_wait_queue(&iot->wait_shutdown, &wait);
 
@@ -197,8 +199,7 @@ static void __stop_cachemiss_threads (iothread_t *iot)
 	iot->shutdown = 1;
 	wake_up_all(&iot->async_sleep);
 	spin_unlock(&iot->async_lock);
-		
-	__set_current_state(TASK_UNINTERRUPTIBLE);
+
 	Dprintk("waiting for async IO threads %p to exit.\n", iot);
 	schedule();
 	remove_wait_queue(&iot->wait_shutdown, &wait);
@@ -240,7 +241,7 @@ int start_cachemiss_threads (threadinfo_t *ti)
 	INIT_LIST_HEAD(&iot->async_queue);
 	init_waitqueue_head(&iot->async_sleep);
 	init_waitqueue_head(&iot->wait_shutdown);
-		
+
 	for (i = 0; i < NR_IO_THREADS; i++) {
 		pid = kernel_thread(cachemiss_thread, (void *)iot, 0);
 		if (pid < 0) {

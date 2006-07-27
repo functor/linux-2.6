@@ -25,7 +25,7 @@ fill_read(struct dentry *dentry, char *buffer, loff_t off, size_t count)
 	struct kobject * kobj = to_kobj(dentry->d_parent);
 
 	if (!attr->read)
-		return -EINVAL;
+		return -EIO;
 
 	return attr->read(kobj, buffer, off, count);
 }
@@ -71,7 +71,7 @@ flush_write(struct dentry *dentry, char *buffer, loff_t offset, size_t count)
 	struct kobject *kobj = to_kobj(dentry->d_parent);
 
 	if (!attr->write)
-		return -EINVAL;
+		return -EIO;
 
 	return attr->write(kobj, buffer, offset, count);
 }
@@ -163,7 +163,7 @@ static int release(struct inode * inode, struct file * file)
 	return 0;
 }
 
-struct file_operations bin_fops = {
+const struct file_operations bin_fops = {
 	.read		= read,
 	.write		= write,
 	.mmap		= mmap,

@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/tqm8260_setup.c
- *
  * TQM8260 platform support
  *
  * Author: Allen Curtis <acurtis@onz.com>
@@ -16,8 +14,8 @@
 
 #include <linux/init.h>
 
-#include <asm/immap_cpm2.h>
 #include <asm/mpc8260.h>
+#include <asm/cpm2.h>
 #include <asm/machdep.h>
 
 static int

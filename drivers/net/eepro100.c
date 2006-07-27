@@ -27,7 +27,7 @@
 		rx_align support: enables rx DMA without causing unaligned accesses.
 */
 
-static const char *version =
+static const char * const version =
 "eepro100.c:v1.09j-t 9/29/99 Donald Becker http://www.scyld.com/network/eepro100.html\n"
 "eepro100.c: $Revision: 1.36 $ 2000/11/17 Modified by Andrey V. Savochkin <saw@saw.sw.com.sg> and others\n";
 
@@ -469,7 +469,7 @@ static const char i82558_config_cmd[CONFIG_DATA_SIZE] = {
 	0x31, 0x05, };
 
 /* PHY media interface chips. */
-static const char *phys[] = {
+static const char * const phys[] = {
 	"None", "i82553-A/B", "i82553-C", "i82503",
 	"DP83840", "80c240", "80c24", "i82555",
 	"unknown-8", "unknown-9", "DP83840A", "unknown-11",
@@ -1263,13 +1263,13 @@ speedo_init_rx_ring(struct net_device *dev)
 	for (i = 0; i < RX_RING_SIZE; i++) {
 		struct sk_buff *skb;
 		skb = dev_alloc_skb(PKT_BUF_SZ + sizeof(struct RxFD));
-		/* XXX: do we really want to call this before the NULL check? --hch */
-		rx_align(skb);			/* Align IP on 16 byte boundary */
+		if (skb)
+			rx_align(skb);        /* Align IP on 16 byte boundary */
 		sp->rx_skbuff[i] = skb;
 		if (skb == NULL)
 			break;			/* OK.  Just initially short of Rx bufs. */
 		skb->dev = dev;			/* Mark as being used by this device. */
-		rxf = (struct RxFD *)skb->tail;
+		rxf = (struct RxFD *)skb->data;
 		sp->rx_ringp[i] = rxf;
 		sp->rx_ring_dma[i] =
 			pci_map_single(sp->pdev, rxf,
@@ -1654,14 +1654,14 @@ static inline struct RxFD *speedo_rx_alloc(struct net_device *dev, int entry)
 	struct sk_buff *skb;
 	/* Get a fresh skbuff to replace the consumed one. */
 	skb = dev_alloc_skb(PKT_BUF_SZ + sizeof(struct RxFD));
-	/* XXX: do we really want to call this before the NULL check? --hch */
-	rx_align(skb);				/* Align IP on 16 byte boundary */
+	if (skb)
+		rx_align(skb);		/* Align IP on 16 byte boundary */
 	sp->rx_skbuff[entry] = skb;
 	if (skb == NULL) {
 		sp->rx_ringp[entry] = NULL;
 		return NULL;
 	}
-	rxf = sp->rx_ringp[entry] = (struct RxFD *)skb->tail;
+	rxf = sp->rx_ringp[entry] = (struct RxFD *)skb->data;
 	sp->rx_ring_dma[entry] =
 		pci_map_single(sp->pdev, rxf,
 					   PKT_BUF_SZ + sizeof(struct RxFD), PCI_DMA_FROMDEVICE);
@@ -1808,10 +1808,10 @@ speedo_rx(struct net_device *dev)
 
 #if 1 || USE_IP_CSUM
 				/* Packet is in one chunk -- we can copy + cksum. */
-				eth_copy_and_sum(skb, sp->rx_skbuff[entry]->tail, pkt_len, 0);
+				eth_copy_and_sum(skb, sp->rx_skbuff[entry]->data, pkt_len, 0);
 				skb_put(skb, pkt_len);
 #else
-				memcpy(skb_put(skb, pkt_len), sp->rx_skbuff[entry]->tail,
+				memcpy(skb_put(skb, pkt_len), sp->rx_skbuff[entry]->data,
 					   pkt_len);
 #endif
 				pci_dma_sync_single_for_device(sp->pdev, sp->rx_ring_dma[entry],

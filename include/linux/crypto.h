@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2002 James Morris <jmorris@intercode.com.au>
  * Copyright (c) 2002 David S. Miller (davem@redhat.com)
+ * Copyright (c) 2005 Herbert Xu <herbert@gondor.apana.org.au>
  *
  * Portions derived from Cryptoapi, by Alexander Kjeldaas <astor@fast.no>
  * and Nettle, by Niels Möller.
@@ -45,6 +46,7 @@
 #define CRYPTO_TFM_MODE_CTR		0x00000008
 
 #define CRYPTO_TFM_REQ_WEAK_KEY		0x00000100
+#define CRYPTO_TFM_REQ_MAY_SLEEP	0x00000200
 #define CRYPTO_TFM_RES_WEAK_KEY		0x00100000
 #define CRYPTO_TFM_RES_BAD_KEY_LEN   	0x00200000
 #define CRYPTO_TFM_RES_BAD_KEY_SCHED 	0x00400000
@@ -61,6 +63,15 @@
 #define CRYPTO_DIR_DECRYPT		0
 
 struct scatterlist;
+struct crypto_tfm;
+
+struct cipher_desc {
+	struct crypto_tfm *tfm;
+	void (*crfn)(void *ctx, u8 *dst, const u8 *src);
+	unsigned int (*prfn)(const struct cipher_desc *desc, u8 *dst,
+			     const u8 *src, unsigned int nbytes);
+	void *info;
+};
 
 /*
  * Algorithms: modular crypto algorithm implementations, managed
@@ -73,6 +84,19 @@ struct cipher_alg {
 	                  unsigned int keylen, u32 *flags);
 	void (*cia_encrypt)(void *ctx, u8 *dst, const u8 *src);
 	void (*cia_decrypt)(void *ctx, u8 *dst, const u8 *src);
+
+	unsigned int (*cia_encrypt_ecb)(const struct cipher_desc *desc,
+					u8 *dst, const u8 *src,
+					unsigned int nbytes);
+	unsigned int (*cia_decrypt_ecb)(const struct cipher_desc *desc,
+					u8 *dst, const u8 *src,
+					unsigned int nbytes);
+	unsigned int (*cia_encrypt_cbc)(const struct cipher_desc *desc,
+					u8 *dst, const u8 *src,
+					unsigned int nbytes);
+	unsigned int (*cia_decrypt_cbc)(const struct cipher_desc *desc,
+					u8 *dst, const u8 *src,
+					unsigned int nbytes);
 };
 
 struct digest_alg {
@@ -102,7 +126,12 @@ struct crypto_alg {
 	u32 cra_flags;
 	unsigned int cra_blocksize;
 	unsigned int cra_ctxsize;
+	unsigned int cra_alignmask;
+
+	int cra_priority;
+
 	const char cra_name[CRYPTO_MAX_ALG_NAME];
+	const char cra_driver_name[CRYPTO_MAX_ALG_NAME];
 
 	union {
 		struct cipher_alg cipher;
@@ -136,7 +165,6 @@ static inline int crypto_alg_available(const char *name, u32 flags)
  * and core processing logic.  Managed via crypto_alloc_tfm() and
  * crypto_free_tfm(), as well as the various helpers below.
  */
-struct crypto_tfm;
 
 struct cipher_tfm {
 	void *cit_iv;
@@ -167,6 +195,8 @@ struct digest_tfm {
 	void (*dit_init)(struct crypto_tfm *tfm);
 	void (*dit_update)(struct crypto_tfm *tfm,
 	                   struct scatterlist *sg, unsigned int nsg);
+	void (*dit_update_kernel)(struct crypto_tfm *tfm,
+				  const void *data, size_t count);
 	void (*dit_final)(struct crypto_tfm *tfm, u8 *out);
 	void (*dit_digest)(struct crypto_tfm *tfm, struct scatterlist *sg,
 	                   unsigned int nsg, u8 *out);
@@ -201,6 +231,8 @@ struct crypto_tfm {
 	} crt_u;
 	
 	struct crypto_alg *__crt_alg;
+
+	char __crt_ctx[] __attribute__ ((__aligned__));
 };
 
 /* 
@@ -213,10 +245,14 @@ struct crypto_tfm {
  * will then attempt to load a module of the same name or alias.  A refcount
  * is grabbed on the algorithm which is then associated with the new transform.
  *
+ * crypto_alloc_tfm2() is similar, but allows module loading to be suppressed.
+ *
  * crypto_free_tfm() frees up the transform and any associated resources,
  * then drops the refcount on the associated algorithm.
  */
 struct crypto_tfm *crypto_alloc_tfm(const char *alg_name, u32 tfm_flags);
+struct crypto_tfm *crypto_alloc_tfm2(const char *alg_name, u32 tfm_flags,
+				     int nomodload);
 void crypto_free_tfm(struct crypto_tfm *tfm);
 
 /*
@@ -266,6 +302,22 @@ static inline unsigned int crypto_tfm_alg_digestsize(struct crypto_tfm *tfm)
 	return tfm->__crt_alg->cra_digest.dia_digestsize;
 }
 
+static inline unsigned int crypto_tfm_alg_alignmask(struct crypto_tfm *tfm)
+{
+	return tfm->__crt_alg->cra_alignmask;
+}
+
+static inline void *crypto_tfm_ctx(struct crypto_tfm *tfm)
+{
+	return tfm->__crt_ctx;
+}
+
+static inline unsigned int crypto_tfm_ctx_alignment(void)
+{
+	struct crypto_tfm *tfm;
+	return __alignof__(tfm->__crt_ctx);
+}
+
 /*
  * API wrappers.
  */
@@ -281,6 +333,14 @@ static inline void crypto_digest_update(struct crypto_tfm *tfm,
 {
 	BUG_ON(crypto_tfm_alg_type(tfm) != CRYPTO_ALG_TYPE_DIGEST);
 	tfm->crt_digest.dit_update(tfm, sg, nsg);
+}
+
+static inline void crypto_digest_update_kernel(struct crypto_tfm *tfm,
+					       const void *data,
+					       size_t count)
+{
+	BUG_ON(crypto_tfm_alg_type(tfm) != CRYPTO_ALG_TYPE_DIGEST);
+	tfm->crt_digest.dit_update_kernel(tfm, data, count);
 }
 
 static inline void crypto_digest_final(struct crypto_tfm *tfm, u8 *out)

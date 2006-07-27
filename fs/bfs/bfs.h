@@ -20,7 +20,6 @@ struct bfs_sb_info {
 	unsigned long si_lasti;
 	unsigned long * si_imap;
 	struct buffer_head * si_sbh;		/* buffer header w/superblock */
-	struct bfs_super_block * si_bfs_sb;	/* superblock in si_sbh->b_data */
 };
 
 /*
@@ -50,11 +49,11 @@ static inline struct bfs_inode_info *BFS_I(struct inode *inode)
 
 /* file.c */
 extern struct inode_operations bfs_file_inops;
-extern struct file_operations bfs_file_operations;
+extern const struct file_operations bfs_file_operations;
 extern struct address_space_operations bfs_aops;
 
 /* dir.c */
 extern struct inode_operations bfs_dir_inops;
-extern struct file_operations bfs_dir_operations;
+extern const struct file_operations bfs_dir_operations;
 
 #endif /* _FS_BFS_BFS_H */

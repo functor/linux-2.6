@@ -21,6 +21,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/sockios.h>
@@ -43,7 +44,6 @@
 
 #include <net/ip.h>
 #include <net/ipv6.h>
-#include <net/protocol.h>
 #include <net/ip6_route.h>
 #include <net/addrconf.h>
 #include <net/ip6_tunnel.h>
@@ -243,7 +243,7 @@ ip6_tnl_create(struct ip6_tnl_parm *p, struct ip6_tnl **pt)
 	if (dev == NULL)
 		return -ENOMEM;
 
-	t = dev->priv;
+	t = netdev_priv(dev);
 	dev->init = ip6ip6_tnl_dev_init;
 	t->parms = *p;
 
@@ -308,7 +308,7 @@ ip6ip6_tnl_locate(struct ip6_tnl_parm *p, struct ip6_tnl **pt, int create)
 static void
 ip6ip6_tnl_dev_uninit(struct net_device *dev)
 {
-	struct ip6_tnl *t = dev->priv;
+	struct ip6_tnl *t = netdev_priv(dev);
 
 	if (dev == ip6ip6_fb_tnl_dev) {
 		write_lock_bh(&ip6ip6_lock);
@@ -390,7 +390,7 @@ parse_tlv_tnl_enc_lim(struct sk_buff *skb, __u8 * raw)
  *   to the specifications in RFC 2473.
  **/
 
-static void 
+static int
 ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	   int type, int code, int offset, __u32 info)
 {
@@ -401,6 +401,7 @@ ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	int rel_code = ICMPV6_ADDR_UNREACH;
 	__u32 rel_info = 0;
 	__u16 len;
+	int err = -ENOENT;
 
 	/* If the packet doesn't contain the original IPv6 header we are 
 	   in trouble since we might need the source address for further 
@@ -409,6 +410,8 @@ ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	read_lock(&ip6ip6_lock);
 	if ((t = ip6ip6_tnl_lookup(&ipv6h->daddr, &ipv6h->saddr)) == NULL)
 		goto out;
+
+	err = 0;
 
 	switch (type) {
 		__u32 teli;
@@ -457,7 +460,7 @@ ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			mtu = IPV6_MIN_MTU;
 		t->dev->mtu = mtu;
 
-		if ((len = sizeof (*ipv6h) + ipv6h->payload_len) > mtu) {
+		if ((len = sizeof (*ipv6h) + ntohs(ipv6h->payload_len)) > mtu) {
 			rel_type = ICMPV6_PKT_TOOBIG;
 			rel_code = 0;
 			rel_info = mtu;
@@ -491,6 +494,7 @@ ip6ip6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	}
 out:
 	read_unlock(&ip6ip6_lock);
+	return err;
 }
 
 static inline void ip6ip6_ecn_decapsulate(struct ipv6hdr *outer_iph,
@@ -510,14 +514,10 @@ static inline void ip6ip6_ecn_decapsulate(struct ipv6hdr *outer_iph,
  **/
 
 static int 
-ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
+ip6ip6_rcv(struct sk_buff *skb)
 {
-	struct sk_buff *skb = *pskb;
 	struct ipv6hdr *ipv6h;
 	struct ip6_tnl *t;
-
-	if (!pskb_may_pull(skb, sizeof (*ipv6h)))
-		goto discard;
 
 	ipv6h = skb->nh.ipv6h;
 
@@ -525,8 +525,8 @@ ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 
 	if ((t = ip6ip6_tnl_lookup(&ipv6h->saddr, &ipv6h->daddr)) != NULL) {
 		if (!xfrm6_policy_check(NULL, XFRM_POLICY_IN, skb)) {
-			kfree_skb(skb);
-			return 0;
+			read_unlock(&ip6ip6_lock);
+			goto discard;
 		}
 
 		if (!(t->parms.flags & IP6_TNL_F_CAP_RCV)) {
@@ -553,9 +553,11 @@ ip6ip6_rcv(struct sk_buff **pskb, unsigned int *nhoffp)
 		return 0;
 	}
 	read_unlock(&ip6ip6_lock);
-	icmpv6_send(skb, ICMPV6_DEST_UNREACH, ICMPV6_ADDR_UNREACH, 0, skb->dev);
-discard:
 	return 1;
+
+discard:
+	kfree_skb(skb);
+	return 0;
 }
 
 static inline struct ipv6_txoptions *create_tel(__u8 encap_limit)
@@ -622,7 +624,7 @@ ip6ip6_tnl_addr_conflict(struct ip6_tnl *t, struct ipv6hdr *hdr)
 static int 
 ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct ip6_tnl *t = (struct ip6_tnl *) dev->priv;
+	struct ip6_tnl *t = netdev_priv(dev);
 	struct net_device_stats *stats = &t->stat;
 	struct ipv6hdr *ipv6h = skb->nh.ipv6h;
 	struct ipv6_txoptions *opt = NULL;
@@ -673,11 +675,12 @@ ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	if ((dst = ip6_tnl_dst_check(t)) != NULL)
 		dst_hold(dst);
-	else
+	else {
 		dst = ip6_route_output(NULL, &fl);
 
-	if (dst->error || xfrm_lookup(&dst, &fl, NULL, 0) < 0)
-		goto tx_err_link_failure;
+		if (dst->error || xfrm_lookup(&dst, &fl, NULL, 0) < 0)
+			goto tx_err_link_failure;
+	}
 
 	tdev = dst->dev;
 
@@ -755,8 +758,7 @@ ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 	ip6_tnl_dst_store(t, dst);
 
-	if (opt)
-		kfree(opt);
+	kfree(opt);
 
 	t->recursion--;
 	return 0;
@@ -765,8 +767,7 @@ tx_err_link_failure:
 	dst_link_failure(skb);
 tx_err_dst_release:
 	dst_release(dst);
-	if (opt)
-		kfree(opt);
+	kfree(opt);
 tx_err:
 	stats->tx_errors++;
 	stats->tx_dropped++;
@@ -883,6 +884,7 @@ ip6ip6_tnl_change(struct ip6_tnl *t, struct ip6_tnl_parm *p)
 	t->parms.encap_limit = p->encap_limit;
 	t->parms.flowinfo = p->flowinfo;
 	t->parms.link = p->link;
+	ip6_tnl_dst_reset(t);
 	ip6ip6_tnl_link_config(t);
 	return 0;
 }
@@ -933,11 +935,11 @@ ip6ip6_tnl_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				break;
 			}
 			if ((err = ip6ip6_tnl_locate(&p, &t, 0)) == -ENODEV)
-				t = (struct ip6_tnl *) dev->priv;
+				t = netdev_priv(dev);
 			else if (err)
 				break;
 		} else
-			t = (struct ip6_tnl *) dev->priv;
+			t = netdev_priv(dev);
 
 		memcpy(&p, &t->parms, sizeof (p));
 		if (copy_to_user(ifr->ifr_ifru.ifru_data, &p, sizeof (p))) {
@@ -955,7 +957,7 @@ ip6ip6_tnl_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			break;
 		}
 		if (!create && dev != ip6ip6_fb_tnl_dev) {
-			t = (struct ip6_tnl *) dev->priv;
+			t = netdev_priv(dev);
 		}
 		if (!t && (err = ip6ip6_tnl_locate(&p, &t, create))) {
 			break;
@@ -991,12 +993,12 @@ ip6ip6_tnl_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			err = ip6ip6_tnl_locate(&p, &t, 0);
 			if (err)
 				break;
-			if (t == ip6ip6_fb_tnl_dev->priv) {
+			if (t == netdev_priv(ip6ip6_fb_tnl_dev)) {
 				err = -EPERM;
 				break;
 			}
 		} else {
-			t = (struct ip6_tnl *) dev->priv;
+			t = netdev_priv(dev);
 		}
 		err = unregister_netdevice(t->dev);
 		break;
@@ -1016,7 +1018,7 @@ ip6ip6_tnl_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 static struct net_device_stats *
 ip6ip6_tnl_get_stats(struct net_device *dev)
 {
-	return &(((struct ip6_tnl *) dev->priv)->stat);
+	return &(((struct ip6_tnl *)netdev_priv(dev))->stat);
 }
 
 /**
@@ -1073,7 +1075,7 @@ static void ip6ip6_tnl_dev_setup(struct net_device *dev)
 static inline void
 ip6ip6_tnl_dev_init_gen(struct net_device *dev)
 {
-	struct ip6_tnl *t = (struct ip6_tnl *) dev->priv;
+	struct ip6_tnl *t = netdev_priv(dev);
 	t->fl.proto = IPPROTO_IPV6;
 	t->dev = dev;
 	strcpy(t->parms.name, dev->name);
@@ -1087,7 +1089,7 @@ ip6ip6_tnl_dev_init_gen(struct net_device *dev)
 static int
 ip6ip6_tnl_dev_init(struct net_device *dev)
 {
-	struct ip6_tnl *t = (struct ip6_tnl *) dev->priv;
+	struct ip6_tnl *t = netdev_priv(dev);
 	ip6ip6_tnl_dev_init_gen(dev);
 	ip6ip6_tnl_link_config(t);
 	return 0;
@@ -1103,7 +1105,7 @@ ip6ip6_tnl_dev_init(struct net_device *dev)
 static int 
 ip6ip6_fb_tnl_dev_init(struct net_device *dev)
 {
-	struct ip6_tnl *t = dev->priv;
+	struct ip6_tnl *t = netdev_priv(dev);
 	ip6ip6_tnl_dev_init_gen(dev);
 	dev_hold(dev);
 	tnls_wc[0] = t;
@@ -1111,8 +1113,9 @@ ip6ip6_fb_tnl_dev_init(struct net_device *dev)
 }
 
 static struct xfrm6_tunnel ip6ip6_handler = {
-	.handler = ip6ip6_rcv,
-	.err_handler = ip6ip6_err,
+	.handler	= ip6ip6_rcv,
+	.err_handler	= ip6ip6_err,
+	.priority	=	1,
 };
 
 /**
@@ -1125,7 +1128,7 @@ static int __init ip6_tunnel_init(void)
 {
 	int  err;
 
-	if (xfrm6_tunnel_register(&ip6ip6_handler) < 0) {
+	if (xfrm6_tunnel_register(&ip6ip6_handler)) {
 		printk(KERN_ERR "ip6ip6 init: can't register tunnel\n");
 		return -EAGAIN;
 	}
@@ -1154,7 +1157,7 @@ fail:
 
 static void __exit ip6_tunnel_cleanup(void)
 {
-	if (xfrm6_tunnel_deregister(&ip6ip6_handler) < 0)
+	if (xfrm6_tunnel_deregister(&ip6ip6_handler))
 		printk(KERN_INFO "ip6ip6 close: can't deregister tunnel\n");
 
 	unregister_netdev(ip6ip6_fb_tnl_dev);

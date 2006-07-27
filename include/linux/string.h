@@ -13,10 +13,7 @@
 extern "C" {
 #endif
 
-extern char * strpbrk(const char *,const char *);
-extern char * strsep(char **,const char *);
-extern __kernel_size_t strspn(const char *,const char *);
-extern __kernel_size_t strcspn(const char *,const char *);
+extern char *strndup_user(const char __user *, long);
 
 /*
  * Include machine specific inline routines
@@ -68,6 +65,18 @@ extern __kernel_size_t strlen(const char *);
 #ifndef __HAVE_ARCH_STRNLEN
 extern __kernel_size_t strnlen(const char *,__kernel_size_t);
 #endif
+#ifndef __HAVE_ARCH_STRPBRK
+extern char * strpbrk(const char *,const char *);
+#endif
+#ifndef __HAVE_ARCH_STRSEP
+extern char * strsep(char **,const char *);
+#endif
+#ifndef __HAVE_ARCH_STRSPN
+extern __kernel_size_t strspn(const char *,const char *);
+#endif
+#ifndef __HAVE_ARCH_STRCSPN
+extern __kernel_size_t strcspn(const char *,const char *);
+#endif
 
 #ifndef __HAVE_ARCH_MEMSET
 extern void * memset(void *,int,__kernel_size_t);
@@ -87,6 +96,8 @@ extern int memcmp(const void *,const void *,__kernel_size_t);
 #ifndef __HAVE_ARCH_MEMCHR
 extern void * memchr(const void *,int,__kernel_size_t);
 #endif
+
+extern char *kstrdup(const char *s, gfp_t gfp);
 
 #ifdef __cplusplus
 }

@@ -9,14 +9,14 @@ ENTRY(_start)
 jiffies = jiffies_64;
 SECTIONS
 {
-  swapper_pmd_dir = 0x0000000000402000;
-  empty_pg_dir = 0x0000000000403000;
+  swapper_low_pmd_dir = 0x0000000000402000;
   . = 0x4000;
   .text 0x0000000000404000 :
   {
     *(.text)
     SCHED_TEXT
     LOCK_TEXT
+    KPROBES_TEXT
     *(.gnu.warning)
   } =0
   _etext = .;
@@ -32,6 +32,8 @@ SECTIONS
   .data1   : { *(.data1) }
   . = ALIGN(64);
   .data.cacheline_aligned : { *(.data.cacheline_aligned) }
+  . = ALIGN(64);
+  .data.read_mostly : { *(.data.read_mostly) }
   _edata  =  .;
   PROVIDE (edata = .);
   .fixup   : { *(.fixup) }
@@ -68,6 +70,22 @@ SECTIONS
   .con_initcall.init : { *(.con_initcall.init) }
   __con_initcall_end = .;
   SECURITY_INIT
+  . = ALIGN(4);
+  __tsb_ldquad_phys_patch = .;
+  .tsb_ldquad_phys_patch : { *(.tsb_ldquad_phys_patch) }
+  __tsb_ldquad_phys_patch_end = .;
+  __tsb_phys_patch = .;
+  .tsb_phys_patch : { *(.tsb_phys_patch) }
+  __tsb_phys_patch_end = .;
+  __cpuid_patch = .;
+  .cpuid_patch : { *(.cpuid_patch) }
+  __cpuid_patch_end = .;
+  __sun4v_1insn_patch = .;
+  .sun4v_1insn_patch : { *(.sun4v_1insn_patch) }
+  __sun4v_1insn_patch_end = .;
+  __sun4v_2insn_patch = .;
+  .sun4v_2insn_patch : { *(.sun4v_2insn_patch) }
+  __sun4v_2insn_patch_end = .;
   . = ALIGN(8192); 
   __initramfs_start = .;
   .init.ramfs : { *(.init.ramfs) }
@@ -88,19 +106,9 @@ SECTIONS
   }
   _end = . ;
   PROVIDE (end = .);
-  /* Stabs debugging sections.  */
-  .stab 0 : { *(.stab) }
-  .stabstr 0 : { *(.stabstr) }
-  .stab.excl 0 : { *(.stab.excl) }
-  .stab.exclstr 0 : { *(.stab.exclstr) }
-  .stab.index 0 : { *(.stab.index) }
-  .stab.indexstr 0 : { *(.stab.indexstr) }
-  .comment 0 : { *(.comment) }
-  .debug          0 : { *(.debug) }
-  .debug_srcinfo  0 : { *(.debug_srcinfo) }
-  .debug_aranges  0 : { *(.debug_aranges) }
-  .debug_pubnames 0 : { *(.debug_pubnames) }
-  .debug_sfnames  0 : { *(.debug_sfnames) }
-  .line           0 : { *(.line) }
   /DISCARD/ : { *(.exit.text) *(.exit.data) *(.exitcall.exit) }
+
+  STABS_DEBUG
+
+  DWARF_DEBUG
 }

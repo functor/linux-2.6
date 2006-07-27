@@ -15,20 +15,10 @@
                 tst     \rx, #1                 @ MMU enabled?
                 moveq   \rx, #0xc8000000
                 movne   \rx, #0xff000000
+		orrne	\rx, \rx, #0x00b00000
                 add     \rx,\rx,#3              @ Uart regs are at off set of 3 if
 						@ byte writes used - Big Endian.
                 .endm
 
-               .macro  senduart,rd,rx
-                strb    \rd, [\rx]
-                .endm
-
-                .macro  waituart,rd,rx
-1002:           ldrb    \rd, [\rx, #0x14]
-                and     \rd, \rd, #0x60		@ check THRE and TEMT bits
-                teq     \rd, #0x60
-                bne     1002b
-                .endm
-
-                .macro  busyuart,rd,rx
-                .endm
+#define UART_SHIFT	2
+#include <asm/hardware/debug-8250.S>

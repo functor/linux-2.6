@@ -1,7 +1,6 @@
 #ifndef _VX_VS_BASE_H
 #define _VX_VS_BASE_H
 
-
 #include "vserver/context.h"
 
 
@@ -16,7 +15,7 @@
 
 /*
  * check current context for ADMIN/WATCH and
- * optionally agains supplied argument
+ * optionally against supplied argument
  */
 static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 {
@@ -97,6 +96,9 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 #define vx_current_initpid(n) \
 	(current->vx_info && \
 	(current->vx_info->vx_initpid == (n)))
+
+#define vx_capable(b,c) (capable(b) || \
+	((current->euid == 0) && vx_ccaps(c)))
 
 
 #else

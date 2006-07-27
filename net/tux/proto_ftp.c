@@ -75,7 +75,7 @@ static void __update_bandwidth (tux_req_t *req, unsigned int bytes)
 		req, bytes, ftp_bytes_sent, ftp_bandwidth);
 }
 
-#define update_bandwidth(req,bytes) 				\
+#define update_bandwidth(req,bytes)				\
 	do {							\
 		if (unlikely(tux_ftp_login_message))		\
 			__update_bandwidth(req, bytes);		\
@@ -103,13 +103,13 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss);
 static void ftp_lookup_vhost (tux_req_t *req, int cachemiss)
 {
 	struct dentry *dentry;
-	struct nameidata base;
+	struct nameidata base = { };
 	struct vfsmount *mnt = NULL;
 	unsigned int flag = cachemiss ? 0 : LOOKUP_ATOMIC;
 	char ip[3+1+3+1+3+1+3 + 2];
 
 	sprintf(ip, "%d.%d.%d.%d", NIPQUAD(inet_sk(req->sock->sk)->rcv_saddr));
-	Dprintk("ftp_lookup_vhost(%p, %d, virtual: %d, host: %s.)\n", 
+	Dprintk("ftp_lookup_vhost(%p, %d, virtual: %d, host: %s.)\n",
 		req, flag, req->virtual, ip);
 
 	base.flags = LOOKUP_FOLLOW|flag;
@@ -226,21 +226,21 @@ static int parse_ftp_message (tux_req_t *req, const int total_len)
 	PARSE_FTP_COMM('Q','U','I','T', QUIT,1);
 	PARSE_FTP_COMM('R','E','I','N', REIN,2);
 	PARSE_FTP_COMM('P','A','S','V', PASV,3);
-	PARSE_FTP_COMM('S','T','R','U', STRU,4); 
-	PARSE_FTP_COMM('S','T','O','R', STOR,2); 
-	PARSE_FTP_COMM('S','T','O','U', STOU,3); 
-	PARSE_FTP_COMM('A','P','P','E', APPE,4); 
-	PARSE_FTP_COMM('A','L','L','O', ALLO,1); 
-	PARSE_FTP_COMM('R','N','F','R', RNFR,2); 
-	PARSE_FTP_COMM('R','N','T','O', RNTO,3); 
-	PARSE_FTP_COMM('A','B','O','R', ABOR,4); 
-	PARSE_FTP_COMM('D','E','L','E', DELE,1); 
-	PARSE_FTP_COMM('R','M','D',' ', RMD, 2); 
-	PARSE_FTP_COMM('M','K','D',' ', MKD, 3); 
-	PARSE_FTP_COMM('P','W','D',' ', PWD, 4); 
-	PARSE_FTP_COMM('S','Y','S','T', SYST,2); 
-	PARSE_FTP_COMM('N','O','O','P', NOOP,3); 
-	PARSE_FTP_COMM('F','E','A','T', FEAT,4); 
+	PARSE_FTP_COMM('S','T','R','U', STRU,4);
+	PARSE_FTP_COMM('S','T','O','R', STOR,2);
+	PARSE_FTP_COMM('S','T','O','U', STOU,3);
+	PARSE_FTP_COMM('A','P','P','E', APPE,4);
+	PARSE_FTP_COMM('A','L','L','O', ALLO,1);
+	PARSE_FTP_COMM('R','N','F','R', RNFR,2);
+	PARSE_FTP_COMM('R','N','T','O', RNTO,3);
+	PARSE_FTP_COMM('A','B','O','R', ABOR,4);
+	PARSE_FTP_COMM('D','E','L','E', DELE,1);
+	PARSE_FTP_COMM('R','M','D',' ', RMD, 2);
+	PARSE_FTP_COMM('M','K','D',' ', MKD, 3);
+	PARSE_FTP_COMM('P','W','D',' ', PWD, 4);
+	PARSE_FTP_COMM('S','Y','S','T', SYST,2);
+	PARSE_FTP_COMM('N','O','O','P', NOOP,3);
+	PARSE_FTP_COMM('F','E','A','T', FEAT,4);
 
 	comm = comm1 | comm2 | comm3 | comm4;
 
@@ -250,7 +250,7 @@ static int parse_ftp_message (tux_req_t *req, const int total_len)
 		req->ftp_command = comm;
 		goto out;
 	}
-	
+
 	switch (STRING_VAL(mess[0], mess[1], mess[2], mess[3])) {
 
 #define PARSE_FTP_COMM_3CHAR(c1,c2,c3,name)				\
@@ -593,18 +593,18 @@ static int ftp_check_req_err (tux_req_t *req, int cachemiss)
 	if ((state <= TCP_SYN_RECV) && !err) {
 		if (!urg)
 			return 0;
-		req->in_file.f_pos = 0;
+		req->in_file->f_pos = 0;
 		add_tux_atom(req, flush_request);
 		zap_data_socket(req);
 		ftp_send_async_message(req, WRITE_ABORTED, 426);
 		return 1;
 	}
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	req->bytes_expected = 0;
 	if (tux_TDprintk)
 		dump_stack();
 #endif
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 	TDprintk("zapping, data sock state: %d (err: %d, urg: %d)\n",
 		state, err, urg);
 	/*
@@ -623,8 +623,8 @@ void ftp_send_file (tux_req_t *req, int cachemiss)
 	SET_TIMESTAMP(req->output_timestamp);
 repeat:
 	ret = generic_send_file(req, req->data_sock, cachemiss);
-	update_bandwidth(req, req->in_file.f_pos - req->prev_pos);
-	req->prev_pos = req->in_file.f_pos;
+	update_bandwidth(req, req->in_file->f_pos - req->prev_pos);
+	req->prev_pos = req->in_file->f_pos;
 
 	switch (ret) {
 		case -5:
@@ -645,7 +645,7 @@ repeat:
 		case -1:
 			break;
 		default:
-			req->in_file.f_pos = 0;
+			req->in_file->f_pos = 0;
 
 			if (tux_ftp_wait_close) {
 				req->data_sock->ops->shutdown(req->data_sock, SEND_SHUTDOWN);
@@ -733,7 +733,7 @@ void ftp_get_size (tux_req_t *req, int cachemiss)
 			return;
 		}
 	}
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 	len = sprintf(file_size, "213 %Li\r\n", req->dentry->d_inode->i_size);
 	__ftp_send_async_message(req, file_size, 200, len);
 }
@@ -762,7 +762,7 @@ void ftp_get_mdtm (tux_req_t *req, int cachemiss)
 	if (err)
 		goto out_err_put;
 
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 	len = mdtm_time (file_mdtm, dentry->d_inode->i_mtime.tv_sec);
 	dput(dentry);
 	mntput(mnt);
@@ -795,17 +795,17 @@ static void ftp_get_file (tux_req_t *req, int cachemiss)
 		}
 	}
 	Dprintk("ftp_send_file %p, ftp_offset: %Ld, total_len: %Ld.\n", req, req->ftp_offset_start, req->total_file_len);
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 	if (req->ftp_offset_start) {
 		if (req->ftp_offset_start <= req->total_file_len) {
 			req->offset_start = req->ftp_offset_start;
-			req->in_file.f_pos = req->offset_start;
+			req->in_file->f_pos = req->offset_start;
 		}
 		req->ftp_offset_start = 0;
 	}
 	req->output_len = req->total_file_len - req->offset_start;
-	req->prev_pos = req->in_file.f_pos;
-	Dprintk("ftp_send_file %p, f_pos: %Ld (out_len: %Ld).\n", req, req->in_file.f_pos, req->output_len);
+	req->prev_pos = req->in_file->f_pos;
+	Dprintk("ftp_send_file %p, f_pos: %Ld (out_len: %Ld).\n", req, req->in_file->f_pos, req->output_len);
 	add_tux_atom(req, ftp_send_file);
 	add_tux_atom(req, ftp_wait_syn);
 	add_tux_atom(req, ftp_flush_req);
@@ -820,7 +820,7 @@ static void __exchange_sockets (tux_req_t *req)
 	req->data_sock = req->sock;
 	req->sock = tmp;
 
-	req->in_file.f_pos = 0;
+	req->in_file->f_pos = 0;
 }
 
 static void ftp_do_ls_start (tux_req_t *req, int cachemiss)
@@ -887,23 +887,25 @@ out_err:
 void ftp_accept_pasv (tux_req_t *req, int cachemiss)
 {
 	struct socket *sock, *new_sock = NULL;
-	struct tcp_opt *tp1, *tp2;
+	struct inet_connection_sock *icsk1, *icsk2;
+	struct tcp_sock *tp1, *tp2;
 	int err;
 
 	tp1 = tcp_sk(req->data_sock->sk);
+	icsk1 = inet_csk(req->data_sock->sk);
 
 	Dprintk("PASV accept on req %p, accept_queue: %p.\n",
-			req, tp1->accept_queue);
+			req, &icsk->icsk_accept_queue);
 	if (req->error || (req->data_sock->sk->sk_state != TCP_LISTEN))
 		goto error;
 new_socket:
-	if (!tp1->accept_queue) {
+	if (reqsk_queue_empty(&icsk1->icsk_accept_queue)) {
 		spin_lock_irq(&req->ti->work_lock);
 		add_keepalive_timer(req);
 		if (test_and_set_bit(0, &req->idle_input))
 			TUX_BUG();
 		spin_unlock_irq(&req->ti->work_lock);
-		if (!tp1->accept_queue) {
+		if (reqsk_queue_empty(&icsk1->icsk_accept_queue)) {
 			add_tux_atom(req, ftp_accept_pasv);
 			return;
 		}
@@ -937,8 +939,9 @@ new_socket:
 	zap_data_socket(req);
 
 	tp2 = tcp_sk(new_sock->sk);
+	icsk2 = inet_csk(new_sock->sk);
 	tp2->nonagle = 2;
-	tp2->ack.pingpong = tux_ack_pingpong;
+	icsk2->icsk_ack.pingpong = tux_ack_pingpong;
 	new_sock->sk->sk_reuse = 1;
 	sock_set_flag(new_sock->sk, SOCK_URGINLINE);
 	sock_reset_flag(new_sock->sk, SOCK_LINGER);
@@ -1287,7 +1290,8 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 		struct socket *data_sock;
 		struct sockaddr_in addr;
 		unsigned int str_len;
-		struct tcp_opt *tp;
+		struct tcp_sock *tp;
+		struct inet_connection_sock *icsk;
 		u32 local_addr;
 		int err;
 
@@ -1296,19 +1300,19 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 		/*
 		 * Create FTP data connection to client:
 		 */
-		err = sock_create(AF_INET, SOCK_STREAM, IPPROTO_IP, &data_sock);
+		err = sock_create_kern(AF_INET, SOCK_STREAM, IPPROTO_IP, &data_sock);
 		if (err < 0) {
 			Dprintk("sock create err: %d\n", err);
 			req_err(req);
 			ftp_send_async_message(req, CLOSE, 500);
 			GOTO_ERR;
 		}
-			
+
 		local_addr = inet_sk(req->sock->sk)->rcv_saddr;
 		addr.sin_family = AF_INET;
 		addr.sin_port = 0;
 		addr.sin_addr.s_addr = local_addr;
-		Dprintk("client address: (%d,%d,%d,%d).\n", 
+		Dprintk("client address: (%d,%d,%d,%d).\n",
 			NIPQUAD(inet_sk(req->sock->sk)->daddr));
 
 		data_sock->sk->sk_reuse = 1;
@@ -1318,8 +1322,10 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 		err = data_sock->ops->bind(data_sock,
 				(struct sockaddr*)&addr, sizeof(addr));
 		tp = tcp_sk(data_sock->sk);
+		icsk = inet_csk(data_sock->sk);
+
 		tp->nonagle = 2;
-	       	Dprintk("PASV bind() ret: %d.\n", err);
+		Dprintk("PASV bind() ret: %d.\n", err);
 		if (err < 0) {
 			req_err(req);
 			sock_release(data_sock);
@@ -1327,7 +1333,7 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 			GOTO_ERR;
 		}
 
-		tp->ack.pingpong = tux_ack_pingpong;
+		icsk->icsk_ack.pingpong = tux_ack_pingpong;
 
 		if (!tux_keepalive_timeout)
 			tp->linger2 = 0;
@@ -1371,7 +1377,7 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 		/*
 		 * Create FTP data connection to client:
 		 */
-		err = sock_create(AF_INET, SOCK_STREAM, IPPROTO_IP, &data_sock);
+		err = sock_create_kern(AF_INET, SOCK_STREAM, IPPROTO_IP, &data_sock);
 		if (err < 0) {
 			Dprintk("sock create err: %d\n", err);
 			req_err(req);
@@ -1397,7 +1403,7 @@ static void ftp_execute_command (tux_req_t *req, int cachemiss)
 				(struct sockaddr*)&addr, sizeof(addr));
 		current->cap_effective = saved_cap;
 
-	       	Dprintk("ACTIVE bind() ret: %d.\n", err);
+		Dprintk("ACTIVE bind() ret: %d.\n", err);
 		if (err) {
 			sock_release(data_sock);
 			req_err(req);

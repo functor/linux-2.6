@@ -127,7 +127,7 @@ static void
 imx_gpio_ack_irq(unsigned int irq)
 {
 	DEBUG_IRQ("%s: irq %d\n", __FUNCTION__, irq);
-	ISR(IRQ_TO_REG(irq)) |= 1 << ((irq - IRQ_GPIOA(0)) % 32);
+	ISR(IRQ_TO_REG(irq)) = 1 << ((irq - IRQ_GPIOA(0)) % 32);
 }
 
 static void
@@ -152,7 +152,7 @@ imx_gpio_handler(unsigned int mask, unsigned int irq,
 	while (mask) {
 		if (mask & 1) {
 			DEBUG_IRQ("handling irq %d\n", irq);
-			desc->handle(irq, desc, regs);
+			desc_handle_irq(irq, desc, regs);
 		}
 		irq++;
 		desc++;
@@ -214,7 +214,7 @@ static struct irqchip imx_gpio_chip = {
 	.ack = imx_gpio_ack_irq,
 	.mask = imx_gpio_mask_irq,
 	.unmask = imx_gpio_unmask_irq,
-	.type = imx_gpio_irq_type,
+	.set_type = imx_gpio_irq_type,
 };
 
 void __init

@@ -32,7 +32,6 @@
     We assume there can only be one SiS96x with one SMBus interface.
 */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
@@ -43,13 +42,6 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <asm/io.h>
-
-/*
-	HISTORY:
-	2003-05-11	1.0.0 	Updated from lm_sensors project for kernel 2.5
-				(was i2c-sis645.c from lm_sensors 2.7.0)
-*/
-#define SIS96x_VERSION "1.0.0"
 
 /* base address register in PCI config space */
 #define SIS96x_BAR 0x04
@@ -83,8 +75,9 @@
 #define SIS96x_PROC_CALL  0x04
 #define SIS96x_BLOCK_DATA 0x05
 
+static struct pci_driver sis96x_driver;
 static struct i2c_adapter sis96x_adapter;
-static u16 sis96x_smbus_base = 0;
+static u16 sis96x_smbus_base;
 
 static inline u8 sis96x_read(u8 reg)
 {
@@ -250,8 +243,6 @@ static u32 sis96x_func(struct i2c_adapter *adapter)
 }
 
 static struct i2c_algorithm smbus_algorithm = {
-	.name		= "Non-I2C SMBus adapter",
-	.id		= I2C_ALGO_SMBUS,
 	.smbus_xfer	= sis96x_access,
 	.functionality	= sis96x_func,
 };
@@ -260,7 +251,6 @@ static struct i2c_adapter sis96x_adapter = {
 	.owner		= THIS_MODULE,
 	.class		= I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
-	.name		= "unset",
 };
 
 static struct pci_device_id sis96x_ids[] = {
@@ -297,7 +287,8 @@ static int __devinit sis96x_probe(struct pci_dev *dev,
 			sis96x_smbus_base);
 
 	/* Everything is happy, let's grab the memory and set things up. */
-	if (!request_region(sis96x_smbus_base, SMB_IOSIZE, "sis96x-smbus")) {
+	if (!request_region(sis96x_smbus_base, SMB_IOSIZE,
+			    sis96x_driver.name)) {
 		dev_err(&dev->dev, "SMBus registers 0x%04x-0x%04x "
 			"already in use!\n", sis96x_smbus_base,
 			sis96x_smbus_base + SMB_IOSIZE - 1);
@@ -339,7 +330,6 @@ static struct pci_driver sis96x_driver = {
 
 static int __init i2c_sis96x_init(void)
 {
-	printk(KERN_INFO "i2c-sis96x version %s\n", SIS96x_VERSION);
 	return pci_register_driver(&sis96x_driver);
 }
 

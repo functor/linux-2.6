@@ -56,13 +56,20 @@ static int
 nfsd3_proc_getattr(struct svc_rqst *rqstp, struct nfsd_fhandle  *argp,
 					   struct nfsd3_attrstat *resp)
 {
-	int	nfserr;
+	int	err, nfserr;
 
 	dprintk("nfsd: GETATTR(3)  %s\n",
-				SVCFH_fmt(&argp->fh));
+		SVCFH_fmt(&argp->fh));
 
 	fh_copy(&resp->fh, &argp->fh);
 	nfserr = fh_verify(rqstp, &resp->fh, 0, MAY_NOP);
+	if (nfserr)
+		RETURN_STATUS(nfserr);
+
+	err = vfs_getattr(resp->fh.fh_export->ex_mnt,
+			  resp->fh.fh_dentry, &resp->stat);
+	nfserr = nfserrno(err);
+
 	RETURN_STATUS(nfserr);
 }
 
@@ -675,7 +682,7 @@ static struct svc_procedure		nfsd_procedures3[22] = {
   PROC(lookup,	 dirop,		dirop,		fhandle2, RC_NOCACHE, ST+FH+pAT+pAT),
   PROC(access,	 access,	access,		fhandle,  RC_NOCACHE, ST+pAT+1),
   PROC(readlink, readlink,	readlink,	fhandle,  RC_NOCACHE, ST+pAT+1+NFS3_MAXPATHLEN/4),
-  PROC(read,	 read,		read,		fhandle,  RC_NOCACHE, ST+pAT+4+NFSSVC_MAXBLKSIZE),
+  PROC(read,	 read,		read,		fhandle,  RC_NOCACHE, ST+pAT+4+NFSSVC_MAXBLKSIZE/4),
   PROC(write,	 write,		write,		fhandle,  RC_REPLBUFF, ST+WC+4),
   PROC(create,	 create,	create,		fhandle2, RC_REPLBUFF, ST+(1+FH+pAT)+WC),
   PROC(mkdir,	 mkdir,		create,		fhandle2, RC_REPLBUFF, ST+(1+FH+pAT)+WC),

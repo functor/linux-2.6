@@ -1,5 +1,5 @@
 /*
- *  linux/kernel/sysctl.c
+ *  kernel/vserver/sysctl.c
  *
  *  Virtual Context Support
  *
@@ -9,12 +9,12 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/ctype.h>
 #include <linux/sysctl.h>
+#include <linux/parser.h>
 #include <linux/fs.h>
 
 #include <asm/uaccess.h>
@@ -24,13 +24,16 @@
 #define CTL_VSERVER	4242    /* unused? */
 
 enum {
+	CTL_DEBUG_ERROR = 0,
 	CTL_DEBUG_SWITCH = 1,
 	CTL_DEBUG_XID,
 	CTL_DEBUG_NID,
 	CTL_DEBUG_NET,
 	CTL_DEBUG_LIMIT,
+	CTL_DEBUG_CRES,
 	CTL_DEBUG_DLIM,
 	CTL_DEBUG_CVIRT,
+	CTL_DEBUG_MISC,
 };
 
 
@@ -39,8 +42,10 @@ unsigned int vx_debug_xid = 0;
 unsigned int vx_debug_nid = 0;
 unsigned int vx_debug_net = 0;
 unsigned int vx_debug_limit = 0;
+unsigned int vx_debug_cres = 0;
 unsigned int vx_debug_dlim = 0;
 unsigned int vx_debug_cvirt = 0;
+unsigned int vx_debug_misc = 0;
 
 
 static struct ctl_table_header *vserver_table_header;
@@ -165,6 +170,14 @@ static ctl_table debug_table[] = {
 		.proc_handler	= &proc_dodebug
 	},
 	{
+		.ctl_name	= CTL_DEBUG_CRES,
+		.procname	= "debug_cres",
+		.data		= &vx_debug_cres,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
 		.ctl_name	= CTL_DEBUG_DLIM,
 		.procname	= "debug_dlim",
 		.data		= &vx_debug_dlim,
@@ -176,6 +189,14 @@ static ctl_table debug_table[] = {
 		.ctl_name	= CTL_DEBUG_CVIRT,
 		.procname	= "debug_cvirt",
 		.data		= &vx_debug_cvirt,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dodebug
+	},
+	{
+		.ctl_name	= CTL_DEBUG_MISC,
+		.procname	= "debug_misc",
+		.data		= &vx_debug_misc,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= &proc_dodebug
@@ -199,6 +220,8 @@ EXPORT_SYMBOL_GPL(vx_debug_xid);
 EXPORT_SYMBOL_GPL(vx_debug_nid);
 EXPORT_SYMBOL_GPL(vx_debug_net);
 EXPORT_SYMBOL_GPL(vx_debug_limit);
+EXPORT_SYMBOL_GPL(vx_debug_cres);
 EXPORT_SYMBOL_GPL(vx_debug_dlim);
 EXPORT_SYMBOL_GPL(vx_debug_cvirt);
+EXPORT_SYMBOL_GPL(vx_debug_misc);
 

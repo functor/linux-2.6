@@ -86,7 +86,7 @@ struct meta_anchor {
 	atomic_t io_count;
 	struct metapage *mp[MPS_PER_PAGE];
 };
-#define mp_anchor(page) ((struct meta_anchor *)page->private)
+#define mp_anchor(page) ((struct meta_anchor *)page_private(page))
 
 static inline struct metapage *page_to_mp(struct page *page, uint offset)
 {
@@ -104,11 +104,10 @@ static inline int insert_metapage(struct page *page, struct metapage *mp)
 	if (PagePrivate(page))
 		a = mp_anchor(page);
 	else {
-		a = kmalloc(sizeof(struct meta_anchor), GFP_NOFS);
+		a = kzalloc(sizeof(struct meta_anchor), GFP_NOFS);
 		if (!a)
 			return -ENOMEM;
-		memset(a, 0, sizeof(struct meta_anchor));
-		page->private = (unsigned long)a;
+		set_page_private(page, (unsigned long)a);
 		SetPagePrivate(page);
 		kmap(page);
 	}
@@ -136,7 +135,7 @@ static inline void remove_metapage(struct page *page, struct metapage *mp)
 	a->mp[index] = NULL;
 	if (--a->mp_count == 0) {
 		kfree(a);
-		page->private = 0;
+		set_page_private(page, 0);
 		ClearPagePrivate(page);
 		kunmap(page);
 	}
@@ -156,13 +155,13 @@ static inline void dec_io(struct page *page, void (*handler) (struct page *))
 #else
 static inline struct metapage *page_to_mp(struct page *page, uint offset)
 {
-	return PagePrivate(page) ? (struct metapage *)page->private : NULL;
+	return PagePrivate(page) ? (struct metapage *)page_private(page) : NULL;
 }
 
 static inline int insert_metapage(struct page *page, struct metapage *mp)
 {
 	if (mp) {
-		page->private = (unsigned long)mp;
+		set_page_private(page, (unsigned long)mp);
 		SetPagePrivate(page);
 		kmap(page);
 	}
@@ -171,7 +170,7 @@ static inline int insert_metapage(struct page *page, struct metapage *mp)
 
 static inline void remove_metapage(struct page *page, struct metapage *mp)
 {
-	page->private = 0;
+	set_page_private(page, 0);
 	ClearPagePrivate(page);
 	kunmap(page);
 }
@@ -198,7 +197,7 @@ static void init_once(void *foo, kmem_cache_t *cachep, unsigned long flags)
 	}
 }
 
-static inline struct metapage *alloc_metapage(int gfp_mask)
+static inline struct metapage *alloc_metapage(gfp_t gfp_mask)
 {
 	return mempool_alloc(metapage_mempool, gfp_mask);
 }
@@ -221,8 +220,8 @@ int __init metapage_init(void)
 	if (metapage_cache == NULL)
 		return -ENOMEM;
 
-	metapage_mempool = mempool_create(METAPOOL_MIN_PAGES, mempool_alloc_slab,
-					  mempool_free_slab, metapage_cache);
+	metapage_mempool = mempool_create_slab_pool(METAPOOL_MIN_PAGES,
+						    metapage_cache);
 
 	if (metapage_mempool == NULL) {
 		kmem_cache_destroy(metapage_cache);
@@ -395,6 +394,12 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 
 		if (mp->nohomeok && !test_bit(META_forcewrite, &mp->flag)) {
 			redirty = 1;
+			/*
+			 * Make sure this page isn't blocked indefinitely.
+			 * If the journal isn't undergoing I/O, push it
+			 */
+			if (mp->log && !(mp->log->cflag & logGC_PAGEOUT))
+				jfs_flush_journal(mp->log, 0);
 			continue;
 		}
 
@@ -534,10 +539,10 @@ add_failed:
 	return -EIO;
 }
 
-static int metapage_releasepage(struct page *page, int gfp_mask)
+static int metapage_releasepage(struct page *page, gfp_t gfp_mask)
 {
 	struct metapage *mp;
-	int busy = 0;
+	int ret = 1;
 	unsigned int offset;
 
 	for (offset = 0; offset < PAGE_CACHE_SIZE; offset += PSIZE) {
@@ -547,41 +552,29 @@ static int metapage_releasepage(struct page *page, int gfp_mask)
 			continue;
 
 		jfs_info("metapage_releasepage: mp = 0x%p", mp);
-		if (mp->count || mp->nohomeok) {
+		if (mp->count || mp->nohomeok ||
+		    test_bit(META_dirty, &mp->flag)) {
 			jfs_info("count = %ld, nohomeok = %d", mp->count,
 				 mp->nohomeok);
-			busy = 1;
+			ret = 0;
 			continue;
 		}
-		wait_on_page_writeback(page);
-		//WARN_ON(test_bit(META_dirty, &mp->flag));
-		if (test_bit(META_dirty, &mp->flag)) {
-			dump_mem("dirty mp in metapage_releasepage", mp,
-				 sizeof(struct metapage));
-			dump_mem("page", page, sizeof(struct page));
-			dump_stack();
-		}
-		WARN_ON(mp->lsn);
 		if (mp->lsn)
 			remove_from_logsync(mp);
 		remove_metapage(page, mp);
 		INCREMENT(mpStat.pagefree);
 		free_metapage(mp);
 	}
-	if (busy)
-		return -1;
-
-	return 0;
+	return ret;
 }
 
-static int metapage_invalidatepage(struct page *page, unsigned long offset)
+static void metapage_invalidatepage(struct page *page, unsigned long offset)
 {
 	BUG_ON(offset);
 
-	if (PageWriteback(page))
-		return 0;
+	BUG_ON(PageWriteback(page));
 
-	return metapage_releasepage(page, 0);
+	metapage_releasepage(page, 0);
 }
 
 struct address_space_operations jfs_metapage_aops = {
@@ -641,7 +634,7 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 	} else {
 		page = read_cache_page(mapping, page_index,
 			    (filler_t *)mapping->a_ops->readpage, NULL);
-		if (IS_ERR(page)) {
+		if (IS_ERR(page) || !PageUptodate(page)) {
 			jfs_err("read_cache_page failed!");
 			return NULL;
 		}
@@ -726,12 +719,12 @@ void force_metapage(struct metapage *mp)
 	page_cache_release(page);
 }
 
-extern void hold_metapage(struct metapage *mp)
+void hold_metapage(struct metapage *mp)
 {
 	lock_page(mp->page);
 }
 
-extern void put_metapage(struct metapage *mp)
+void put_metapage(struct metapage *mp)
 {
 	if (mp->count || mp->nohomeok) {
 		/* Someone else will release this */
@@ -783,14 +776,6 @@ void release_metapage(struct metapage * mp)
 	if (test_bit(META_discard, &mp->flag) && !mp->count) {
 		clear_page_dirty(page);
 		ClearPageUptodate(page);
-#ifdef _NOT_YET
-		if (page->mapping) {
-		/* Remove from page cache and page cache reference */
-			remove_from_page_cache(page);
-			page_cache_release(page);
-			metapage_releasepage(page, 0);
-		}
-#endif
 	}
 #else
 	/* Try to keep metapages from using up too much memory */

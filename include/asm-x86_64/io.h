@@ -48,7 +48,7 @@
  * Talk about misusing macros..
  */
 #define __OUT1(s,x) \
-extern inline void out##s(unsigned x value, unsigned short port) {
+static inline void out##s(unsigned x value, unsigned short port) {
 
 #define __OUT2(s,s1,s2) \
 __asm__ __volatile__ ("out" #s " %" s1 "0,%" s2 "1"
@@ -58,7 +58,7 @@ __OUT1(s,x) __OUT2(s,s1,"w") : : "a" (value), "Nd" (port)); } \
 __OUT1(s##_p,x) __OUT2(s,s1,"w") __FULL_SLOW_DOWN_IO : : "a" (value), "Nd" (port));} \
 
 #define __IN1(s) \
-extern inline RETURN_TYPE in##s(unsigned short port) { RETURN_TYPE _v;
+static inline RETURN_TYPE in##s(unsigned short port) { RETURN_TYPE _v;
 
 #define __IN2(s,s1,s2) \
 __asm__ __volatile__ ("in" #s " %" s2 "1,%" s1 "0"
@@ -68,12 +68,12 @@ __IN1(s) __IN2(s,s1,"w") : "=a" (_v) : "Nd" (port) ,##i ); return _v; } \
 __IN1(s##_p) __IN2(s,s1,"w") __FULL_SLOW_DOWN_IO : "=a" (_v) : "Nd" (port) ,##i ); return _v; } \
 
 #define __INS(s) \
-extern inline void ins##s(unsigned short port, void * addr, unsigned long count) \
+static inline void ins##s(unsigned short port, void * addr, unsigned long count) \
 { __asm__ __volatile__ ("rep ; ins" #s \
 : "=D" (addr), "=c" (count) : "d" (port),"0" (addr),"1" (count)); }
 
 #define __OUTS(s) \
-extern inline void outs##s(unsigned short port, const void * addr, unsigned long count) \
+static inline void outs##s(unsigned short port, const void * addr, unsigned long count) \
 { __asm__ __volatile__ ("rep ; outs" #s \
 : "=S" (addr), "=c" (count) : "d" (port),"0" (addr),"1" (count)); }
 
@@ -110,12 +110,12 @@ __OUTS(l)
  * Change virtual addresses to physical addresses and vv.
  * These are pretty trivial
  */
-extern inline unsigned long virt_to_phys(volatile void * address)
+static inline unsigned long virt_to_phys(volatile void * address)
 {
 	return __pa(address);
 }
 
-extern inline void * phys_to_virt(unsigned long address)
+static inline void * phys_to_virt(unsigned long address)
 {
 	return __va(address);
 }
@@ -124,21 +124,19 @@ extern inline void * phys_to_virt(unsigned long address)
 /*
  * Change "struct page" to physical address.
  */
-#ifdef CONFIG_DISCONTIGMEM
-#include <asm/mmzone.h>
 #define page_to_phys(page)    ((dma_addr_t)page_to_pfn(page) << PAGE_SHIFT)
-#else
-#define page_to_phys(page)	((page - mem_map) << PAGE_SHIFT)
-#endif
 
 #include <asm-generic/iomap.h>
 
 extern void __iomem *__ioremap(unsigned long offset, unsigned long size, unsigned long flags);
 
-extern inline void __iomem * ioremap (unsigned long offset, unsigned long size)
+static inline void __iomem * ioremap (unsigned long offset, unsigned long size)
 {
 	return __ioremap(offset, size, 0);
 }
+
+extern void *early_ioremap(unsigned long addr, unsigned long size);
+extern void early_iounmap(void *addr, unsigned long size);
 
 /*
  * This one maps high address device memory and turns off caching for that area.
@@ -179,7 +177,7 @@ static inline __u16 __readw(const volatile void __iomem *addr)
 {
 	return *(__force volatile __u16 *)addr;
 }
-static inline __u32 __readl(const volatile void __iomem *addr)
+static __always_inline __u32 __readl(const volatile void __iomem *addr)
 {
 	return *(__force volatile __u32 *)addr;
 }
@@ -202,23 +200,6 @@ static inline __u64 __readq(const volatile void __iomem *addr)
 
 #define mmiowb()
 
-#ifdef CONFIG_UNORDERED_IO
-static inline void __writel(__u32 val, volatile void __iomem *addr)
-{
-	volatile __u32 __iomem *target = addr;
-	asm volatile("movnti %1,%0"
-		     : "=m" (*target)
-		     : "r" (val) : "memory");
-}
-
-static inline void __writeq(__u64 val, volatile void __iomem *addr)
-{
-	volatile __u64 __iomem *target = addr;
-	asm volatile("movnti %1,%0"
-		     : "=m" (*target)
-		     : "r" (val) : "memory");
-}
-#else
 static inline void __writel(__u32 b, volatile void __iomem *addr)
 {
 	*(__force volatile __u32 *)addr = b;
@@ -227,7 +208,6 @@ static inline void __writeq(__u64 b, volatile void __iomem *addr)
 {
 	*(__force volatile __u64 *)addr = b;
 }
-#endif
 static inline void __writeb(__u8 b, volatile void __iomem *addr)
 {
 	*(__force volatile __u8 *)addr = b;
@@ -269,23 +249,11 @@ void memset_io(volatile void __iomem *a, int b, size_t c);
  */
 #define __ISA_IO_base ((char __iomem *)(PAGE_OFFSET))
 
-#define isa_readb(a) readb(__ISA_IO_base + (a))
-#define isa_readw(a) readw(__ISA_IO_base + (a))
-#define isa_readl(a) readl(__ISA_IO_base + (a))
-#define isa_writeb(b,a) writeb(b,__ISA_IO_base + (a))
-#define isa_writew(w,a) writew(w,__ISA_IO_base + (a))
-#define isa_writel(l,a) writel(l,__ISA_IO_base + (a))
-#define isa_memset_io(a,b,c)		memset_io(__ISA_IO_base + (a),(b),(c))
-#define isa_memcpy_fromio(a,b,c)	memcpy_fromio((a),__ISA_IO_base + (b),(c))
-#define isa_memcpy_toio(a,b,c)		memcpy_toio(__ISA_IO_base + (a),(b),(c))
-
-
 /*
  * Again, x86-64 does not require mem IO specific function.
  */
 
 #define eth_io_copy_and_sum(a,b,c,d)		eth_copy_and_sum((a),(void *)(b),(c),(d))
-#define isa_eth_io_copy_and_sum(a,b,c,d)	eth_copy_and_sum((a),(void *)(__ISA_IO_base + (b)),(c),(d))
 
 /**
  *	check_signature		-	find BIOS signatures

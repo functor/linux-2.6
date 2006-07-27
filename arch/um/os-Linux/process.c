@@ -7,13 +7,21 @@
 #include <stdio.h>
 #include <errno.h>
 #include <signal.h>
+#include <setjmp.h>
 #include <linux/unistd.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include "ptrace_user.h"
 #include "os.h"
 #include "user.h"
 #include "user_util.h"
+#include "process.h"
+#include "irq_user.h"
+#include "kern_util.h"
+#include "longjmp.h"
+#include "skas_ptrace.h"
+#include "kern_constants.h"
 
 #define ARBITRARY_ADDR -1
 #define FAILURE_PID    -1
@@ -95,6 +103,21 @@ void os_kill_process(int pid, int reap_child)
 		
 }
 
+/* This is here uniquely to have access to the userspace errno, i.e. the one
+ * used by ptrace in case of error.
+ */
+
+long os_ptrace_ldt(long pid, long addr, long data)
+{
+	int ret;
+
+	ret = ptrace(PTRACE_LDT, pid, addr, data);
+
+	if (ret < 0)
+		return -errno;
+	return ret;
+}
+
 /* Kill off a ptraced child by all means available.  kill it normally first,
  * then PTRACE_KILL it, then PTRACE_CONT it in case it's in a run state from
  * which it can't exit directly.
@@ -114,8 +137,10 @@ void os_usr1_process(int pid)
 	kill(pid, SIGUSR1);
 }
 
-/*Don't use the glibc version, which caches the result in TLS. It misses some
- * syscalls, and also breaks with clone(), which does not unshare the TLS.*/
+/* Don't use the glibc version, which caches the result in TLS. It misses some
+ * syscalls, and also breaks with clone(), which does not unshare the TLS.
+ */
+
 inline _syscall0(pid_t, getpid)
 
 int os_getpid(void)
@@ -164,13 +189,97 @@ int os_unmap_memory(void *addr, int len)
         return(0);
 }
 
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+#ifndef MADV_REMOVE
+#define MADV_REMOVE KERNEL_MADV_REMOVE
+#endif
+
+int os_drop_memory(void *addr, int length)
+{
+	int err;
+
+	err = madvise(addr, length, MADV_REMOVE);
+	if(err < 0)
+		err = -errno;
+	return err;
+}
+
+int can_drop_memory(void)
+{
+	void *addr;
+	int fd, ok = 0;
+
+	printk("Checking host MADV_REMOVE support...");
+	fd = create_mem_file(UM_KERN_PAGE_SIZE);
+	if(fd < 0){
+		printk("Creating test memory file failed, err = %d\n", -fd);
+		goto out;
+	}
+
+	addr = mmap64(NULL, UM_KERN_PAGE_SIZE, PROT_READ | PROT_WRITE,
+		      MAP_SHARED, fd, 0);
+	if(addr == MAP_FAILED){
+		printk("Mapping test memory file failed, err = %d\n", -errno);
+		goto out_close;
+	}
+
+	if(madvise(addr, UM_KERN_PAGE_SIZE, MADV_REMOVE) != 0){
+		printk("MADV_REMOVE failed, err = %d\n", -errno);
+		goto out_unmap;
+	}
+
+	printk("OK\n");
+	ok = 1;
+
+out_unmap:
+	munmap(addr, UM_KERN_PAGE_SIZE);
+out_close:
+	close(fd);
+out:
+	return ok;
+}
+
+void init_new_thread_stack(void *sig_stack, void (*usr1_handler)(int))
+{
+	int flags = 0, pages;
+
+	if(sig_stack != NULL){
+		pages = (1 << UML_CONFIG_KERNEL_STACK_ORDER);
+		set_sigstack(sig_stack, pages * page_size());
+		flags = SA_ONSTACK;
+	}
+	if(usr1_handler) set_handler(SIGUSR1, usr1_handler, flags, -1);
+}
+
+void init_new_thread_signals(int altstack)
+{
+	int flags = altstack ? SA_ONSTACK : 0;
+
+	set_handler(SIGSEGV, (__sighandler_t) sig_handler, flags,
+		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
+	set_handler(SIGTRAP, (__sighandler_t) sig_handler, flags,
+		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
+	set_handler(SIGFPE, (__sighandler_t) sig_handler, flags,
+		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
+	set_handler(SIGILL, (__sighandler_t) sig_handler, flags,
+		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
+	set_handler(SIGBUS, (__sighandler_t) sig_handler, flags,
+		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
+	set_handler(SIGUSR2, (__sighandler_t) sig_handler,
+		    flags, SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
+	signal(SIGHUP, SIG_IGN);
+
+	init_irq_signals(altstack);
+}
+
+int run_kernel_thread(int (*fn)(void *), void *arg, void **jmp_ptr)
+{
+	jmp_buf buf;
+	int n, enable;
+
+	*jmp_ptr = &buf;
+	n = UML_SETJMP(&buf, enable);
+	if(n != 0)
+		return(n);
+	(*fn)(arg);
+	return(0);
+}

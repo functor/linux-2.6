@@ -135,6 +135,7 @@ static u8 piix_ratemask (ide_drive_t *drive)
 		case PCI_DEVICE_ID_INTEL_ICH6_19:
 		case PCI_DEVICE_ID_INTEL_ICH7_21:
 		case PCI_DEVICE_ID_INTEL_ESB2_18:
+		case PCI_DEVICE_ID_INTEL_ICH8_6:
 			mode = 3;
 			break;
 		/* UDMA 66 capable */
@@ -203,6 +204,8 @@ static u8 piix_dma_2_pio (u8 xfer_rate) {
 	}
 }
 
+static spinlock_t tune_lock = SPIN_LOCK_UNLOCKED;
+
 /**
  *	piix_tune_drive		-	tune a drive attached to a PIIX
  *	@drive: drive to tune
@@ -229,7 +232,12 @@ static void piix_tune_drive (ide_drive_t *drive, u8 pio)
 			    { 2, 3 }, };
 
 	pio = ide_get_best_pio_mode(drive, pio, 5, NULL);
-	spin_lock_irqsave(&ide_lock, flags);
+	
+	/* Master v slave is synchronized above us but the slave register is
+	   shared by the two hwifs so the corner case of two slave timeouts in
+	   parallel must be locked */
+	   
+	spin_lock_irqsave(&tune_lock, flags);
 	pci_read_config_word(dev, master_port, &master_data);
 	if (is_slave) {
 		master_data = master_data | 0x4000;
@@ -249,7 +257,7 @@ static void piix_tune_drive (ide_drive_t *drive, u8 pio)
 	pci_write_config_word(dev, master_port, master_data);
 	if (is_slave)
 		pci_write_config_byte(dev, slave_port, slave_data);
-	spin_unlock_irqrestore(&ide_lock, flags);
+	spin_unlock_irqrestore(&tune_lock, flags);
 }
 
 /**
@@ -449,6 +457,7 @@ static unsigned int __devinit init_chipset_piix (struct pci_dev *dev, const char
 		case PCI_DEVICE_ID_INTEL_ICH6_19:
 		case PCI_DEVICE_ID_INTEL_ICH7_21:
 		case PCI_DEVICE_ID_INTEL_ESB2_18:
+		case PCI_DEVICE_ID_INTEL_ICH8_6:
 		{
 			unsigned int extra = 0;
 			pci_read_config_dword(dev, 0x54, &extra);
@@ -575,6 +584,7 @@ static ide_pci_device_t piix_pci_info[] __devinitdata = {
 	/* 21 */ DECLARE_PIIX_DEV("ICH7"),
 	/* 22 */ DECLARE_PIIX_DEV("ICH4"),
 	/* 23 */ DECLARE_PIIX_DEV("ESB2"),
+	/* 24 */ DECLARE_PIIX_DEV("ICH8M"),
 };
 
 /**
@@ -651,6 +661,7 @@ static struct pci_device_id piix_pci_tbl[] = {
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH7_21, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 21},
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82801DB_1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 22},
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ESB2_18, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 23},
+	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH8_6, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 24},
 	{ 0, },
 };
 MODULE_DEVICE_TABLE(pci, piix_pci_tbl);

@@ -65,7 +65,7 @@ MODULE_PARM_DESC(thinkpad, "Force to enable Thinkpad's CLKRUN control.");
 module_param_array(mmap_valid, bool, NULL, 0444);
 MODULE_PARM_DESC(mmap_valid, "Support OSS mmap.");
 
-static struct pci_device_id snd_cs46xx_ids[] = {
+static struct pci_device_id snd_cs46xx_ids[] __devinitdata = {
         { 0x1013, 0x6001, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0, },   /* CS4280 */
         { 0x1013, 0x6003, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0, },   /* CS4612 */
         { 0x1013, 0x6004, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0, },   /* CS4615 */
@@ -78,8 +78,8 @@ static int __devinit snd_card_cs46xx_probe(struct pci_dev *pci,
 					   const struct pci_device_id *pci_id)
 {
 	static int dev;
-	snd_card_t *card;
-	cs46xx_t *chip;
+	struct snd_card *card;
+	struct snd_cs46xx *chip;
 	int err;
 
 	if (dev >= SNDRV_CARDS)
@@ -98,6 +98,7 @@ static int __devinit snd_card_cs46xx_probe(struct pci_dev *pci,
 		snd_card_free(card);
 		return err;
 	}
+	card->private_data = chip;
 	chip->accept_valid = mmap_valid[dev];
 	if ((err = snd_cs46xx_pcm(chip, 0, NULL)) < 0) {
 		snd_card_free(card);
@@ -113,7 +114,7 @@ static int __devinit snd_card_cs46xx_probe(struct pci_dev *pci,
 		return err;
 	}
 #endif
-	if ((err = snd_cs46xx_mixer(chip)) < 0) {
+	if ((err = snd_cs46xx_mixer(chip, 2)) < 0) {
 		snd_card_free(card);
 		return err;
 	}
@@ -166,12 +167,15 @@ static struct pci_driver driver = {
 	.id_table = snd_cs46xx_ids,
 	.probe = snd_card_cs46xx_probe,
 	.remove = __devexit_p(snd_card_cs46xx_remove),
-	SND_PCI_PM_CALLBACKS
+#ifdef CONFIG_PM
+	.suspend = snd_cs46xx_suspend,
+	.resume = snd_cs46xx_resume,
+#endif
 };
 
 static int __init alsa_card_cs46xx_init(void)
 {
-	return pci_module_init(&driver);
+	return pci_register_driver(&driver);
 }
 
 static void __exit alsa_card_cs46xx_exit(void)

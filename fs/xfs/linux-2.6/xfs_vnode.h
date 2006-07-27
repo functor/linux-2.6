@@ -1,33 +1,19 @@
 /*
- * Copyright (c) 2000-2003 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2000-2005 Silicon Graphics, Inc.
+ * All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
  * published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * This program is distributed in the hope that it would be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * Further, this software is distributed without any warranty that it is
- * free of the rightful claim of any third person regarding infringement
- * or the like.  Any license provided herein, whether implied or
- * otherwise, applies only to this software file.  Patent licenses, if
- * any, provided herein do not apply to combinations of this program with
- * other software, or any other product whatsoever.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write the Free Software Foundation, Inc., 59
- * Temple Place - Suite 330, Boston MA 02111-1307, USA.
- *
- * Contact information: Silicon Graphics, Inc., 1600 Amphitheatre Pkwy,
- * Mountain View, CA  94043, or:
- *
- * http://www.sgi.com
- *
- * For further information regarding this notice, see:
- *
- * http://oss.sgi.com/projects/GenInfo/SGIGPLNoticeExplan/
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write the Free Software Foundation,
+ * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  * Portions Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -65,10 +51,6 @@ struct vattr;
 struct xfs_iomap;
 struct attrlist_cursor_kern;
 
-/*
- * Vnode types.  VNON means no type.
- */
-enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VFIFO, VBAD, VSOCK };
 
 typedef xfs_ino_t vnumber_t;
 typedef struct dentry vname_t;
@@ -77,21 +59,26 @@ typedef bhv_head_t vn_bhv_head_t;
 /*
  * MP locking protocols:
  *	v_flag, v_vfsp				VN_LOCK/VN_UNLOCK
- *	v_type					read-only or fs-dependent
  */
 typedef struct vnode {
 	__u32		v_flag;			/* vnode flags (see below) */
-	enum vtype	v_type;			/* vnode type */
 	struct vfs	*v_vfsp;		/* ptr to containing VFS */
 	vnumber_t	v_number;		/* in-core vnode number */
 	vn_bhv_head_t	v_bh;			/* behavior head */
 	spinlock_t	v_lock;			/* VN_LOCK/VN_UNLOCK */
+	atomic_t	v_iocount;		/* outstanding I/O count */
 #ifdef XFS_VNODE_TRACE
 	struct ktrace	*v_trace;		/* trace header structure    */
 #endif
 	struct inode	v_inode;		/* Linux inode */
 	/* inode MUST be last */
 } vnode_t;
+
+#define VN_ISLNK(vp)	S_ISLNK((vp)->v_inode.i_mode)
+#define VN_ISREG(vp)	S_ISREG((vp)->v_inode.i_mode)
+#define VN_ISDIR(vp)	S_ISDIR((vp)->v_inode.i_mode)
+#define VN_ISCHR(vp)	S_ISCHR((vp)->v_inode.i_mode)
+#define VN_ISBLK(vp)	S_ISBLK((vp)->v_inode.i_mode)
 
 #define v_fbhv			v_bh.bh_first	       /* first behavior */
 #define v_fops			v_bh.bh_first->bd_ops  /* first behavior ops */
@@ -129,26 +116,18 @@ typedef enum {
 /*
  * Vnode to Linux inode mapping.
  */
-#define LINVFS_GET_VP(inode)	((vnode_t *)list_entry(inode, vnode_t, v_inode))
-#define LINVFS_GET_IP(vp)	(&(vp)->v_inode)
-
-/*
- * Convert between vnode types and inode formats (since POSIX.1
- * defines mode word of stat structure in terms of inode formats).
- */
-extern enum vtype	iftovt_tab[];
-extern u_short		vttoif_tab[];
-#define IFTOVT(mode)	(iftovt_tab[((mode) & S_IFMT) >> 12])
-#define VTTOIF(indx)	(vttoif_tab[(int)(indx)])
-#define MAKEIMODE(indx, mode)	(int)(VTTOIF(indx) | (mode))
-
+static inline struct vnode *vn_from_inode(struct inode *inode)
+{
+	return (vnode_t *)list_entry(inode, vnode_t, v_inode);
+}
+static inline struct inode *vn_to_inode(struct vnode *vnode)
+{
+	return &vnode->v_inode;
+}
 
 /*
  * Vnode flags.
  */
-#define VINACT		       0x1	/* vnode is being inactivated	*/
-#define VRECLM		       0x2	/* vnode is being reclaimed	*/
-#define VWAIT		       0x4	/* waiting for VINACT/VRECLM to end */
 #define VMODIFIED	       0x8	/* XFS inode state possibly differs */
 					/* to the Linux inode state.	*/
 
@@ -194,6 +173,12 @@ typedef ssize_t (*vop_write_t)(bhv_desc_t *, struct kiocb *,
 typedef ssize_t (*vop_sendfile_t)(bhv_desc_t *, struct file *,
 				loff_t *, int, size_t, read_actor_t,
 				void *, struct cred *);
+typedef ssize_t (*vop_splice_read_t)(bhv_desc_t *, struct file *, loff_t *,
+				struct pipe_inode_info *, size_t, int, int,
+				struct cred *);
+typedef ssize_t (*vop_splice_write_t)(bhv_desc_t *, struct pipe_inode_info *,
+				struct file *, loff_t *, size_t, int, int,
+				struct cred *);
 typedef int	(*vop_ioctl_t)(bhv_desc_t *, struct inode *, struct file *,
 				int, unsigned int, void __user *);
 typedef int	(*vop_getattr_t)(bhv_desc_t *, struct vattr *, int,
@@ -229,11 +214,12 @@ typedef void	(*vop_rwunlock_t)(bhv_desc_t *, vrwlock_t);
 typedef int	(*vop_bmap_t)(bhv_desc_t *, xfs_off_t, ssize_t, int,
 				struct xfs_iomap *, int *);
 typedef int	(*vop_reclaim_t)(bhv_desc_t *);
-typedef int	(*vop_attr_get_t)(bhv_desc_t *, char *, char *, int *, int,
-				struct cred *);
-typedef	int	(*vop_attr_set_t)(bhv_desc_t *, char *, char *, int, int,
-				struct cred *);
-typedef	int	(*vop_attr_remove_t)(bhv_desc_t *, char *, int, struct cred *);
+typedef int	(*vop_attr_get_t)(bhv_desc_t *, const char *, char *, int *,
+				int, struct cred *);
+typedef	int	(*vop_attr_set_t)(bhv_desc_t *, const char *, char *, int,
+				int, struct cred *);
+typedef	int	(*vop_attr_remove_t)(bhv_desc_t *, const char *,
+				int, struct cred *);
 typedef	int	(*vop_attr_list_t)(bhv_desc_t *, char *, int, int,
 				struct attrlist_cursor_kern *, struct cred *);
 typedef void	(*vop_link_removed_t)(bhv_desc_t *, vnode_t *, int);
@@ -251,6 +237,8 @@ typedef struct vnodeops {
 	vop_read_t		vop_read;
 	vop_write_t		vop_write;
 	vop_sendfile_t		vop_sendfile;
+	vop_splice_read_t	vop_splice_read;
+	vop_splice_write_t	vop_splice_write;
 	vop_ioctl_t		vop_ioctl;
 	vop_getattr_t		vop_getattr;
 	vop_setattr_t		vop_setattr;
@@ -296,6 +284,10 @@ typedef struct vnodeops {
 	rv = _VOP_(vop_write, vp)((vp)->v_fbhv,file,iov,segs,offset,ioflags,cr)
 #define VOP_SENDFILE(vp,f,off,ioflags,cnt,act,targ,cr,rv)		\
 	rv = _VOP_(vop_sendfile, vp)((vp)->v_fbhv,f,off,ioflags,cnt,act,targ,cr)
+#define VOP_SPLICE_READ(vp,f,o,pipe,cnt,fl,iofl,cr,rv)			\
+	rv = _VOP_(vop_splice_read, vp)((vp)->v_fbhv,f,o,pipe,cnt,fl,iofl,cr)
+#define VOP_SPLICE_WRITE(vp,f,o,pipe,cnt,fl,iofl,cr,rv)			\
+	rv = _VOP_(vop_splice_write, vp)((vp)->v_fbhv,f,o,pipe,cnt,fl,iofl,cr)
 #define VOP_BMAP(vp,of,sz,rw,b,n,rv)					\
 	rv = _VOP_(vop_bmap, vp)((vp)->v_fbhv,of,sz,rw,b,n)
 #define VOP_OPEN(vp, cr, rv)						\
@@ -408,7 +400,6 @@ typedef struct vnodeops {
  */
 typedef struct vattr {
 	int		va_mask;	/* bit-mask of attributes present */
-	enum vtype	va_type;	/* vnode type (for create) */
 	mode_t		va_mode;	/* file access mode and type */
 	xfs_nlink_t	va_nlink;	/* number of references to file */
 	uid_t		va_uid;		/* owner user id */
@@ -427,7 +418,7 @@ typedef struct vattr {
 	u_long		va_extsize;	/* file extent size */
 	u_long		va_nextents;	/* number of extents in file */
 	u_long		va_anextents;	/* number of attr extents in file */
-	int		va_projid;	/* project id */
+	prid_t		va_projid;	/* project id */
 } vattr_t;
 
 /*
@@ -501,25 +492,10 @@ typedef struct vattr {
  * Check whether mandatory file locking is enabled.
  */
 #define MANDLOCK(vp, mode)	\
-	((vp)->v_type == VREG && ((mode) & (VSGID|(VEXEC>>3))) == VSGID)
+	(VN_ISREG(vp) && ((mode) & (VSGID|(VEXEC>>3))) == VSGID)
 
 extern void	vn_init(void);
-extern int	vn_wait(struct vnode *);
 extern vnode_t	*vn_initialize(struct inode *);
-
-/*
- * Acquiring and invalidating vnodes:
- *
- *	if (vn_get(vp, version, 0))
- *		...;
- *	vn_purge(vp, version);
- *
- * vn_get and vn_purge must be called with vmap_t arguments, sampled
- * while a lock that the vnode's VOP_RECLAIM function acquires is
- * held, to ensure that the vnode sampled with the lock held isn't
- * recycled (VOP_RECLAIMed) or deallocated between the release of the lock
- * and the subsequent vn_get or vn_purge.
- */
 
 /*
  * vnode_map structures _must_ match vn_epoch and vnode structure sizes.
@@ -534,22 +510,22 @@ typedef struct vnode_map {
 			 (vmap).v_number = (vp)->v_number,	\
 			 (vmap).v_ino	 = (vp)->v_inode.i_ino; }
 
-extern void	vn_purge(struct vnode *, vmap_t *);
-extern vnode_t	*vn_get(struct vnode *, vmap_t *);
 extern int	vn_revalidate(struct vnode *);
+extern int	__vn_revalidate(struct vnode *, vattr_t *);
 extern void	vn_revalidate_core(struct vnode *, vattr_t *);
-extern void	vn_remove(struct vnode *);
+
+extern void	vn_iowait(struct vnode *vp);
+extern void	vn_iowake(struct vnode *vp);
 
 static inline int vn_count(struct vnode *vp)
 {
-	return atomic_read(&LINVFS_GET_IP(vp)->i_count);
+	return atomic_read(&vn_to_inode(vp)->i_count);
 }
 
 /*
  * Vnode reference counting functions (and macros for compatibility).
  */
 extern vnode_t	*vn_hold(struct vnode *);
-extern void	vn_rele(struct vnode *);
 
 #if defined(XFS_VNODE_TRACE)
 #define VN_HOLD(vp)		\
@@ -557,18 +533,24 @@ extern void	vn_rele(struct vnode *);
 	  vn_trace_hold(vp, __FILE__, __LINE__, (inst_t *)__return_address))
 #define VN_RELE(vp)		\
 	  (vn_trace_rele(vp, __FILE__, __LINE__, (inst_t *)__return_address), \
-	   iput(LINVFS_GET_IP(vp)))
+	   iput(vn_to_inode(vp)))
 #else
 #define VN_HOLD(vp)		((void)vn_hold(vp))
-#define VN_RELE(vp)		(iput(LINVFS_GET_IP(vp)))
+#define VN_RELE(vp)		(iput(vn_to_inode(vp)))
 #endif
+
+static inline struct vnode *vn_grab(struct vnode *vp)
+{
+	struct inode *inode = igrab(vn_to_inode(vp));
+	return inode ? vn_from_inode(inode) : NULL;
+}
 
 /*
  * Vname handling macros.
  */
 #define VNAME(dentry)		((char *) (dentry)->d_name.name)
 #define VNAMELEN(dentry)	((dentry)->d_name.len)
-#define VNAME_TO_VNODE(dentry)	(LINVFS_GET_VP((dentry)->d_inode))
+#define VNAME_TO_VNODE(dentry)	(vn_from_inode((dentry)->d_inode))
 
 /*
  * Vnode spinlock manipulation.
@@ -593,31 +575,43 @@ static __inline__ void vn_flagclr(struct vnode *vp, uint flag)
 }
 
 /*
- * Update modify/access/change times on the vnode
- */
-#define VN_MTIMESET(vp, tvp)	(LINVFS_GET_IP(vp)->i_mtime = *(tvp))
-#define VN_ATIMESET(vp, tvp)	(LINVFS_GET_IP(vp)->i_atime = *(tvp))
-#define VN_CTIMESET(vp, tvp)	(LINVFS_GET_IP(vp)->i_ctime = *(tvp))
-
-/*
  * Dealing with bad inodes
  */
 static inline void vn_mark_bad(struct vnode *vp)
 {
-	make_bad_inode(LINVFS_GET_IP(vp));
+	make_bad_inode(vn_to_inode(vp));
 }
 
 static inline int VN_BAD(struct vnode *vp)
 {
-	return is_bad_inode(LINVFS_GET_IP(vp));
+	return is_bad_inode(vn_to_inode(vp));
+}
+
+/*
+ * Extracting atime values in various formats
+ */
+static inline void vn_atime_to_bstime(struct vnode *vp, xfs_bstime_t *bs_atime)
+{
+	bs_atime->tv_sec = vp->v_inode.i_atime.tv_sec;
+	bs_atime->tv_nsec = vp->v_inode.i_atime.tv_nsec;
+}
+
+static inline void vn_atime_to_timespec(struct vnode *vp, struct timespec *ts)
+{
+	*ts = vp->v_inode.i_atime;
+}
+
+static inline void vn_atime_to_time_t(struct vnode *vp, time_t *tt)
+{
+	*tt = vp->v_inode.i_atime.tv_sec;
 }
 
 /*
  * Some useful predicates.
  */
-#define VN_MAPPED(vp)	mapping_mapped(LINVFS_GET_IP(vp)->i_mapping)
-#define VN_CACHED(vp)	(LINVFS_GET_IP(vp)->i_mapping->nrpages)
-#define VN_DIRTY(vp)	mapping_tagged(LINVFS_GET_IP(vp)->i_mapping, \
+#define VN_MAPPED(vp)	mapping_mapped(vn_to_inode(vp)->i_mapping)
+#define VN_CACHED(vp)	(vn_to_inode(vp)->i_mapping->nrpages)
+#define VN_DIRTY(vp)	mapping_tagged(vn_to_inode(vp)->i_mapping, \
 					PAGECACHE_TAG_DIRTY)
 #define VMODIFY(vp)	VN_FLAGSET(vp, VMODIFIED)
 #define VUNMODIFY(vp)	VN_FLAGCLR(vp, VMODIFIED)
@@ -630,6 +624,7 @@ static inline int VN_BAD(struct vnode *vp)
 #define	ATTR_LAZY	0x80	/* set/get attributes lazily */
 #define	ATTR_NONBLOCK	0x100	/* return EAGAIN if operation would block */
 #define ATTR_NOLOCK	0x200	/* Don't grab any conflicting locks */
+#define ATTR_NOSIZETOK	0x400	/* Don't get the SIZE token */
 
 /*
  * Flags to VOP_FSYNC and VOP_RECLAIM.

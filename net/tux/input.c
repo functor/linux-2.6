@@ -114,7 +114,7 @@ struct dentry * tux_lookup (tux_req_t *req, const char *filename,
 			const unsigned int flag, struct vfsmount **mnt)
 {
 	struct dentry *dentry;
-	struct nameidata base;
+	struct nameidata base = { };
 
 	Dprintk("tux_lookup(%p, %s, %d, virtual: %d, host: %s (%d).)\n", req, filename, flag, req->virtual, req->host, req->host_len);
 
@@ -192,23 +192,22 @@ void install_req_dentry (tux_req_t *req, struct dentry *dentry, struct vfsmount 
 	if (req->mnt)
 		TUX_BUG();
 	req->mnt = mnt;
-	if (req->in_file.f_dentry)
+	if (req->in_file && req->in_file->f_dentry)
 		TUX_BUG();
 	if (dentry)
-		open_private_file(&req->in_file, dentry, FMODE_READ);
+		req->in_file = dentry_open(dget(dentry), NULL, O_RDONLY);
 }
 
 void release_req_dentry (tux_req_t *req)
 {
 	if (!req->dentry) {
-		if (req->in_file.f_dentry)
+		if (req->in_file && req->in_file->f_dentry)
 			TUX_BUG();
 		return;
 	}
-	if (req->in_file.f_op && req->in_file.f_op->release)
-		req->in_file.f_op->release(req->dentry->d_inode, &req->in_file);
-	memset(&req->in_file, 0, sizeof(req->in_file));
 
+	fput(req->in_file);
+	req->in_file = NULL;
 	dput(req->dentry);
 	req->dentry = NULL;
 	mntput(req->mnt);
@@ -278,10 +277,10 @@ static int read_request (struct socket *sock, char *buf, int max_size)
 	msg.msg_control  = NULL;
 	msg.msg_controllen = 0;
 	msg.msg_flags    = 0;
-	
+
 	msg.msg_iov->iov_base = buf;
 	msg.msg_iov->iov_len  = max_size;
-	
+
 	oldmm = get_fs(); set_fs(KERNEL_DS);
 
 read_again:
@@ -328,7 +327,7 @@ static int zap_urg_data (struct socket *sock)
 	msg.msg_control		= NULL;
 	msg.msg_controllen	= 0;
 	msg.msg_flags		= 0;
-	
+
 	msg.msg_iov->iov_base = buf;
 	msg.msg_iov->iov_len  = 2;
 
@@ -394,7 +393,7 @@ void print_req (tux_req_t *req)
 		sk = req->sock->sk;
 		printk("... sock %p, sk %p, sk->state: %d, sk->err: %d\n", req->sock, sk, sk->sk_state, sk->sk_err);
 		printk("... write_queue: %d, receive_queue: %d, error_queue: %d, keepalive: %d, status: %d\n", !skb_queue_empty(&sk->sk_write_queue), !skb_queue_empty(&sk->sk_receive_queue), !skb_queue_empty(&sk->sk_error_queue), req->keep_alive, req->status);
-		printk("...tp->send_head: %p\n", tcp_sk(sk)->send_head);
+		printk("...tp->send_head: %p\n", sk->sk_send_head);
 		printk("...tp->snd_una: %08x\n", tcp_sk(sk)->snd_una);
 		printk("...tp->snd_nxt: %08x\n", tcp_sk(sk)->snd_nxt);
 		printk("...tp->packets_out: %08x\n", tcp_sk(sk)->packets_out);
@@ -403,7 +402,7 @@ void print_req (tux_req_t *req)
 	printk("... post_data:{%s}(%d).\n", req->post_data_str, req->post_data_len);
 	printk("... headers: {%s}\n", req->headers);
 }
-/* 
+/*
  * parse_request() reads all available TCP/IP data and prepares
  * the request if the TUX request is complete. (we can get TUX
  * requests in several packets.) Invalid requests are redirected
@@ -414,7 +413,8 @@ void parse_request (tux_req_t *req, int cachemiss)
 {
 	int len, parsed_len;
 	struct sock *sk = req->sock->sk;
-	struct tcp_opt *tp = tcp_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
 	int was_keepalive = req->keep_alive;
 
 	if (req->magic != TUX_MAGIC)
@@ -477,8 +477,8 @@ restart:
 		 */
 		if (was_keepalive) {
 			lock_sock(sk);
-			tp->ack.pingpong = 0;
-			tp->ack.pending |= TCP_ACK_PUSHED;
+			icsk->icsk_ack.pingpong = 0;
+			icsk->icsk_ack.pending |= ICSK_ACK_PUSHED;
 			cleanup_rbuf(sk, 1);
 			release_sock(sk);
 		}
@@ -536,7 +536,7 @@ restart_loop:
 	spin_lock_irq(&ti->work_lock);
 	head = &ti->work_pending;
 	curr = head->next;
-	
+
 	if (curr != head) {
 		int i;
 
@@ -598,10 +598,10 @@ restart:
 		DEBUG_DEL_LIST(curr);
 		DEC_STAT(nr_input_pending);
 		spin_unlock_irq(&ti->work_lock);
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
-		req->in_file.f_pos = 0;
+		req->in_file->f_pos = 0;
 		req->atom_idx = 0;
 		clear_keepalive(req);
 		req->status = -1;

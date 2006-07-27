@@ -1,6 +1,10 @@
 #ifndef _ASM_IA64_PGALLOC_H
 #define _ASM_IA64_PGALLOC_H
 
+#define arch_add_exec_range(mm, limit)		do { ; } while (0)
+#define arch_flush_exec_range(mm)		do { ; } while (0)
+#define arch_remove_exec_range(mm, limit)	do { ; } while (0)
+
 /*
  * This file contains the functions and defines necessary to allocate
  * page tables.
@@ -85,6 +89,25 @@ static inline void pgd_free(pgd_t * pgd)
 {
 	pgtable_quicklist_free(pgd);
 }
+
+#ifdef CONFIG_PGTABLE_4
+static inline void
+pgd_populate(struct mm_struct *mm, pgd_t * pgd_entry, pud_t * pud)
+{
+	pgd_val(*pgd_entry) = __pa(pud);
+}
+
+static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
+{
+	return pgtable_quicklist_alloc();
+}
+
+static inline void pud_free(pud_t * pud)
+{
+	pgtable_quicklist_free(pud);
+}
+#define __pud_free_tlb(tlb, pud)	pud_free(pud)
+#endif /* CONFIG_PGTABLE_4 */
 
 static inline void
 pud_populate(struct mm_struct *mm, pud_t * pud_entry, pmd_t * pmd)

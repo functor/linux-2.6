@@ -33,7 +33,9 @@ static inline int mc146818_set_rtc_mmss(unsigned long nowtime)
 	int real_seconds, real_minutes, cmos_minutes;
 	unsigned char save_control, save_freq_select;
 	int retval = 0;
+	unsigned long flags;
 
+	spin_lock_irqsave(&rtc_lock, flags);
 	save_control = CMOS_READ(RTC_CONTROL); /* tell the clock it's being set */
 	CMOS_WRITE((save_control|RTC_SET), RTC_CONTROL);
 
@@ -79,6 +81,7 @@ static inline int mc146818_set_rtc_mmss(unsigned long nowtime)
 	 */
 	CMOS_WRITE(save_control, RTC_CONTROL);
 	CMOS_WRITE(save_freq_select, RTC_FREQ_SELECT);
+	spin_unlock_irqrestore(&rtc_lock, flags);
 
 	return retval;
 }
@@ -86,24 +89,11 @@ static inline int mc146818_set_rtc_mmss(unsigned long nowtime)
 static inline unsigned long mc146818_get_cmos_time(void)
 {
 	unsigned int year, mon, day, hour, min, sec;
-	int i;
+	unsigned long flags;
 
-	/*
-	 * The Linux interpretation of the CMOS clock register contents:
-	 * When the Update-In-Progress (UIP) flag goes from 1 to 0, the
-	 * RTC registers show the second which has precisely just started.
-	 * Let's hope other operating systems interpret the RTC the same way.
-	 */
+	spin_lock_irqsave(&rtc_lock, flags);
 
-	/* read RTC exactly on falling edge of update flag */
-	for (i = 0 ; i < 1000000 ; i++)	/* may take up to 1 second... */
-		if (CMOS_READ(RTC_FREQ_SELECT) & RTC_UIP)
-			break;
-	for (i = 0 ; i < 1000000 ; i++)	/* must try at least 2.228 ms */
-		if (!(CMOS_READ(RTC_FREQ_SELECT) & RTC_UIP))
-			break;
-
-	do { /* Isn't this overkill ? UIP above should guarantee consistency */
+	do {
 		sec = CMOS_READ(RTC_SECONDS);
 		min = CMOS_READ(RTC_MINUTES);
 		hour = CMOS_READ(RTC_HOURS);
@@ -120,6 +110,7 @@ static inline unsigned long mc146818_get_cmos_time(void)
 		BCD_TO_BIN(mon);
 		BCD_TO_BIN(year);
 	}
+	spin_unlock_irqrestore(&rtc_lock, flags);
 	year = mc146818_decode_year(year);
 
 	return mktime(year, mon, day, hour, min, sec);

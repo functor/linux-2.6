@@ -2,21 +2,6 @@
 # Linux VServer configuration
 #
 
-config	VSERVER
-	bool
-	default y
-
-config	VSERVER_SECURITY
-	bool
-	depends on SECURITY
-	default y
-	select SECURITY_CAPABILITIES
-
-config	VSERVER_LEGACYNET
-	bool
-	depends on !VSERVER_NGNET
-	default y
-
 menu "Linux VServer"
 
 config	VSERVER_LEGACY
@@ -52,6 +37,15 @@ config	VSERVER_NGNET
 	  This disables the legacy networking API which is required
 	  by the chbind tool. Do not disable it unless you exactly
 	  know what you are doing.
+
+config	VSERVER_REMAP_SADDR
+	bool	"Remap Source IP Address"
+	depends on EXPERIMENTAL && !VSERVER_LEGACY
+	default n
+	help
+	  This allows to remap the source IP address of 'local'
+	  connections from 127.0.0.1 to the first assigned
+	  guest IP.
 
 config	VSERVER_PROC_SECURE
 	bool	"Enable Proc Security"
@@ -176,4 +170,20 @@ config	VSERVER_HISTORY_SIZE
 	  the per-CPU history buffer.
 
 endmenu
+
+
+config	VSERVER
+	bool
+	default y
+
+config	VSERVER_SECURITY
+	bool
+	depends on SECURITY
+	default y
+	select SECURITY_CAPABILITIES
+
+config	VSERVER_LEGACYNET
+	bool
+	depends on !VSERVER_NGNET
+	default y
 

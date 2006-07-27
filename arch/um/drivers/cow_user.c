@@ -9,7 +9,6 @@
 #include <sys/time.h>
 #include <sys/param.h>
 #include <sys/user.h>
-#include <netinet/in.h>
 
 #include "os.h"
 
@@ -18,30 +17,34 @@
 
 #define PATH_LEN_V1 256
 
-struct cow_header_v1 {
-	int magic;
-	int version;
-	char backing_file[PATH_LEN_V1];
-	time_t mtime;
-	__u64 size;
-	int sectorsize;
-};
+typedef __u32 time32_t;
 
-#define PATH_LEN_V2 MAXPATHLEN
+struct cow_header_v1 {
+	__s32 magic;
+	__s32 version;
+	char backing_file[PATH_LEN_V1];
+	time32_t mtime;
+	__u64 size;
+	__s32 sectorsize;
+} __attribute__((packed));
+
+/* Define PATH_LEN_V3 as the usual value of MAXPATHLEN, just hard-code it in
+ * case other systems have different values for MAXPATHLEN.
+ *
+ * The same must hold for V2 - we want file format compatibility, not anything
+ * else.
+ */
+#define PATH_LEN_V3 4096
+#define PATH_LEN_V2 PATH_LEN_V3
 
 struct cow_header_v2 {
 	__u32 magic;
 	__u32 version;
 	char backing_file[PATH_LEN_V2];
-	time_t mtime;
+	time32_t mtime;
 	__u64 size;
-	int sectorsize;
-};
-
-/* Define PATH_LEN_V3 as the usual value of MAXPATHLEN, just hard-code it in
- * case other systems have different values for MAXPATHLEN
- */
-#define PATH_LEN_V3 4096
+	__s32 sectorsize;
+} __attribute__((packed));
 
 /* Changes from V2 -
  *	PATH_LEN_V3 as described above
@@ -67,10 +70,31 @@ struct cow_header_v2 {
  *	Fixed (finally!) the rounding bug
  */
 
+/* Until Dec2005, __attribute__((packed)) was left out from the below
+ * definition, leading on 64-bit systems to 4 bytes of padding after mtime, to
+ * align size to 8-byte alignment.  This shifted all fields above (no padding
+ * was present on 32-bit, no other padding was added).
+ *
+ * However, this _can be detected_: it means that cow_format (always 0 until
+ * now) is shifted onto the first 4 bytes of backing_file, where it is otherwise
+ * impossible to find 4 zeros. -bb */
+
 struct cow_header_v3 {
 	__u32 magic;
 	__u32 version;
 	__u32 mtime;
+	__u64 size;
+	__u32 sectorsize;
+	__u32 alignment;
+	__u32 cow_format;
+	char backing_file[PATH_LEN_V3];
+} __attribute__((packed));
+
+/* This is the broken layout used by some 64-bit binaries. */
+struct cow_header_v3_broken {
+	__u32 magic;
+	__u32 version;
+	__s64 mtime;
 	__u64 size;
 	__u32 sectorsize;
 	__u32 alignment;
@@ -85,6 +109,7 @@ union cow_header {
 	struct cow_header_v1 v1;
 	struct cow_header_v2 v2;
 	struct cow_header_v3 v3;
+	struct cow_header_v3_broken v3_b;
 };
 
 #define COW_MAGIC 0x4f4f4f4d  /* MOOO */
@@ -177,7 +202,7 @@ int write_cow_header(char *cow_file, int fd, char *backing_file,
 	err = -ENOMEM;
 	header = cow_malloc(sizeof(*header));
 	if(header == NULL){
-		cow_printf("Failed to allocate COW V3 header\n");
+		cow_printf("write_cow_header - failed to allocate COW V3 header\n");
 		goto out;
 	}
 	header->magic = htonl(COW_MAGIC);
@@ -185,8 +210,9 @@ int write_cow_header(char *cow_file, int fd, char *backing_file,
 
 	err = -EINVAL;
 	if(strlen(backing_file) > sizeof(header->backing_file) - 1){
+		/* Below, %zd is for a size_t value */
 		cow_printf("Backing file name \"%s\" is too long - names are "
-			   "limited to %d characters\n", backing_file,
+			   "limited to %zd characters\n", backing_file,
 			   sizeof(header->backing_file) - 1);
 		goto out_free;
 	}
@@ -197,15 +223,17 @@ int write_cow_header(char *cow_file, int fd, char *backing_file,
 
 	err = os_file_modtime(header->backing_file, &modtime);
 	if(err < 0){
-		cow_printf("Backing file '%s' mtime request failed, "
-			   "err = %d\n", header->backing_file, -err);
+		cow_printf("write_cow_header - backing file '%s' mtime "
+			   "request failed, err = %d\n", header->backing_file,
+			   -err);
 		goto out_free;
 	}
 
 	err = cow_file_size(header->backing_file, size);
 	if(err < 0){
-		cow_printf("Couldn't get size of backing file '%s', "
-			   "err = %d\n", header->backing_file, -err);
+		cow_printf("write_cow_header - couldn't get size of "
+			   "backing file '%s', err = %d\n",
+			   header->backing_file, -err);
 		goto out_free;
 	}
 
@@ -215,10 +243,11 @@ int write_cow_header(char *cow_file, int fd, char *backing_file,
 	header->alignment = htonl(alignment);
 	header->cow_format = COW_BITMAP;
 
-	err = os_write_file(fd, header, sizeof(*header));
+	err = cow_write_file(fd, header, sizeof(*header));
 	if(err != sizeof(*header)){
-		cow_printf("Write of header to new COW file '%s' failed, "
-			   "err = %d\n", cow_file, -err);
+		cow_printf("write_cow_header - write of header to "
+			   "new COW file '%s' failed, err = %d\n", cow_file,
+			   -err);
 		goto out_free;
 	}
 	err = 0;
@@ -298,9 +327,10 @@ int read_cow_header(int (*reader)(__u64, char *, int, void *), void *arg,
 		*align_out = *sectorsize_out;
 		file = header->v2.backing_file;
 	}
-	else if(version == 3){
+	/* This is very subtle - see above at union cow_header definition */
+	else if(version == 3 && (*((int*)header->v3.backing_file) != 0)){
 		if(n < sizeof(header->v3)){
-			cow_printf("read_cow_header - failed to read V2 "
+			cow_printf("read_cow_header - failed to read V3 "
 				   "header\n");
 			goto out;
 		}
@@ -308,8 +338,42 @@ int read_cow_header(int (*reader)(__u64, char *, int, void *), void *arg,
 		*size_out = ntohll(header->v3.size);
 		*sectorsize_out = ntohl(header->v3.sectorsize);
 		*align_out = ntohl(header->v3.alignment);
+		if (*align_out == 0) {
+			cow_printf("read_cow_header - invalid COW header, "
+				   "align == 0\n");
+		}
 		*bitmap_offset_out = ROUND_UP(sizeof(header->v3), *align_out);
 		file = header->v3.backing_file;
+	}
+	else if(version == 3){
+		cow_printf("read_cow_header - broken V3 file with"
+			   " 64-bit layout - recovering content.\n");
+
+		if(n < sizeof(header->v3_b)){
+			cow_printf("read_cow_header - failed to read V3 "
+				   "header\n");
+			goto out;
+		}
+
+		/* this was used until Dec2005 - 64bits are needed to represent
+		 * 2038+. I.e. we can safely do this truncating cast.
+		 *
+		 * Additionally, we must use ntohl() instead of ntohll(), since
+		 * the program used to use the former (tested - I got mtime
+		 * mismatch "0 vs whatever").
+		 *
+		 * Ever heard about bug-to-bug-compatibility ? ;-) */
+		*mtime_out = (time32_t) ntohl(header->v3_b.mtime);
+
+		*size_out = ntohll(header->v3_b.size);
+		*sectorsize_out = ntohl(header->v3_b.sectorsize);
+		*align_out = ntohl(header->v3_b.alignment);
+		if (*align_out == 0) {
+			cow_printf("read_cow_header - invalid COW header, "
+				   "align == 0\n");
+		}
+		*bitmap_offset_out = ROUND_UP(sizeof(header->v3_b), *align_out);
+		file = header->v3_b.backing_file;
 	}
 	else {
 		cow_printf("read_cow_header - invalid COW version\n");
@@ -360,7 +424,8 @@ int init_cow_file(int fd, char *cow_file, char *backing_file, int sectorsize,
 	if(err != sizeof(zero)){
 		cow_printf("Write of bitmap to new COW file '%s' failed, "
 			   "err = %d\n", cow_file, -err);
-		err = -EINVAL;
+		if (err >= 0)
+			err = -EINVAL;
 		goto out;
 	}
 

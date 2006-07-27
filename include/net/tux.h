@@ -37,30 +37,31 @@
 #include <linux/compiler.h>
 #include <linux/mount.h>
 #include <linux/zlib.h>
+#include <linux/syscalls.h>
+#include <linux/cpumask.h>
 
 #include <net/tcp.h>
 #include <net/tux_u.h>
 
 /* Maximum number of threads: */
-#define CONFIG_TUX_NUMTHREADS 8
+#define CONFIG_TUX_NUMTHREADS 16
 
 /* Number of cachemiss/IO threads: */
-#define NR_IO_THREADS 32
+#define NR_IO_THREADS 64
 
 /* Maximum number of listen sockets per thread: */
 #define CONFIG_TUX_NUMSOCKETS 16
 
 extern spinlock_t tux_module_lock;
 extern struct module *tux_module;
-extern long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info);
+extern asmlinkage long (*sys_tux_ptr) (unsigned int action, user_req_t *u_info);
 
 #undef Dprintk
 
 extern int tux_TDprintk;
 extern int tux_Dprintk;
 
-#define TUX_DEBUG CONFIG_TUX_DEBUG
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 # define TUX_BUG() BUG()
 
 # define TUX_DPRINTK 1
@@ -206,7 +207,7 @@ struct tux_req_struct
 	struct dentry *cwd_dentry;
 	struct vfsmount *cwd_mnt;
 
-	struct file in_file;
+	struct file *in_file;
 	int fd;
 	read_descriptor_t desc;
 	u32 client_addr;
@@ -381,7 +382,7 @@ struct tux_req_struct
 	/* the file being sent */
 
 	unsigned int bytes_sent;
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	unsigned int bytes_expected;
 #endif
 	unsigned long first_timestamp;
@@ -420,7 +421,7 @@ struct tux_req_struct
 	void (*ftp_real_create_child)(struct sock *sk, struct sock *newsk);
 	void (*ftp_real_destruct)(struct sock *sk);
 
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	unsigned long accept_timestamp;
 	unsigned long parse_timestamp;
 	unsigned long output_timestamp;
@@ -499,7 +500,7 @@ typedef enum special_mimetypes {
 	MIME_TYPE_MODULE,
 } special_mimetypes_t;
 
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 #if 0
 extern inline void url_hist_hit (int size)
 {
@@ -512,7 +513,7 @@ extern inline void url_hist_hit (int size)
 extern inline void url_hist_miss (int size)
 {
 	unsigned int idx = size/1024;
- 
+
 	if (idx >= URL_HIST_SIZE)
 		idx = URL_HIST_SIZE-1;
 	kstat.url_hist_misses[idx]++;
@@ -709,13 +710,13 @@ extern void send_abuf (tux_req_t *req, unsigned int size, unsigned long flags);
 
 extern int idle_event (tux_req_t *req);
 extern int output_space_event (tux_req_t *req);
-extern unsigned int log_cpu_mask;
+extern cpumask_t tux_log_cpu_mask;
 extern unsigned int tux_compression;
 extern unsigned int tux_noid;
 extern unsigned int tux_cgi_inherit_cpu;
 extern unsigned int tux_zerocopy_header;
 extern unsigned int tux_zerocopy_sendfile;
-extern unsigned int tux_cgi_cpu_mask;
+extern cpumask_t tux_cgi_cpu_mask;
 extern tux_proto_t tux_proto_http;
 extern tux_proto_t tux_proto_ftp;
 extern unsigned int tux_all_userspace;
@@ -738,7 +739,7 @@ extern int nr_requests_used (void);
 
 #define req_err(req) do { (req)->error = 1; Dprintk("request %p error at %s:%d.\n", req, __FILE__, __LINE__); } while (0)
 
-#define enough_wspace(sk) (tcp_wspace(sk) >= tcp_min_write_space(sk))
+#define enough_wspace(sk) (sk_stream_wspace(sk) >= sk_stream_min_wspace(sk))
 #define clear_keepalive(req) do { (req)->keep_alive = 0; Dprintk("keepalive cleared for req %p.\n", req); } while (0)
 
 extern int print_all_requests (threadinfo_t *ti);
@@ -795,6 +796,9 @@ static inline void put_data_sock (tux_req_t *req)
 	__ptr;								\
 })
 
-extern long tux_close(unsigned int fd);
+#define tux_close(fd) sys_close(fd)
+
+extern int init_tux_request_slabs(void);
+extern void free_tux_request_slabs(void);
 
 #endif

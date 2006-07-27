@@ -343,7 +343,7 @@ static int in2000_queuecommand(Scsi_Cmnd * cmd, void (*done) (Scsi_Cmnd *))
 	instance = cmd->device->host;
 	hostdata = (struct IN2000_hostdata *) instance->hostdata;
 
-	DB(DB_QUEUE_COMMAND, printk("Q-%d-%02x-%ld(", cmd->device->id, cmd->cmnd[0], cmd->pid))
+	DB(DB_QUEUE_COMMAND, scmd_printk(KERN_DEBUG, cmd, "Q-%02x-%ld(", cmd->cmnd[0], cmd->pid))
 
 /* Set up a few fields in the Scsi_Cmnd structure for our own use:
  *  - host_scribble is the pointer to the next cmd in the input queue
@@ -1644,14 +1644,16 @@ static int in2000_bus_reset(Scsi_Cmnd * cmd)
 	struct Scsi_Host *instance;
 	struct IN2000_hostdata *hostdata;
 	int x;
+	unsigned long flags;
 
 	instance = cmd->device->host;
 	hostdata = (struct IN2000_hostdata *) instance->hostdata;
 
 	printk(KERN_WARNING "scsi%d: Reset. ", instance->host_no);
 
-	/* do scsi-reset here */
+	spin_lock_irqsave(instance->host_lock, flags);
 
+	/* do scsi-reset here */
 	reset_hardware(instance, RESET_CARD_AND_BUS);
 	for (x = 0; x < 8; x++) {
 		hostdata->busy[x] = 0;
@@ -1668,21 +1670,12 @@ static int in2000_bus_reset(Scsi_Cmnd * cmd)
 	hostdata->outgoing_len = 0;
 
 	cmd->result = DID_RESET << 16;
+
+	spin_unlock_irqrestore(instance->host_lock, flags);
 	return SUCCESS;
 }
 
-static int in2000_host_reset(Scsi_Cmnd * cmd)
-{
-	return FAILED;
-}
-
-static int in2000_device_reset(Scsi_Cmnd * cmd)
-{
-	return FAILED;
-}
-
-
-static int in2000_abort(Scsi_Cmnd * cmd)
+static int __in2000_abort(Scsi_Cmnd * cmd)
 {
 	struct Scsi_Host *instance;
 	struct IN2000_hostdata *hostdata;
@@ -1803,6 +1796,16 @@ static int in2000_abort(Scsi_Cmnd * cmd)
 	return SUCCESS;
 }
 
+static int in2000_abort(Scsi_Cmnd * cmd)
+{
+	int rc;
+
+	spin_lock_irq(cmd->device->host->host_lock);
+	rc = __in2000_abort(cmd);
+	spin_unlock_irq(cmd->device->host->host_lock);
+
+	return rc;
+}
 
 
 #define MAX_IN2000_HOSTS 3
@@ -1895,8 +1898,23 @@ static int int_tab[] in2000__INITDATA = {
 	10
 };
 
+static int probe_bios(u32 addr, u32 *s1, uchar *switches)
+{
+	void __iomem *p = ioremap(addr, 0x34);
+	if (!p)
+		return 0;
+	*s1 = readl(p + 0x10);
+	if (*s1 == 0x41564f4e || readl(p + 0x30) == 0x61776c41) {
+		/* Read the switch image that's mapped into EPROM space */
+		*switches = ~readb(p + 0x20);
+		iounmap(p);
+		return 1;
+	}
+	iounmap(p);
+	return 0;
+}
 
-static int __init in2000_detect(Scsi_Host_Template * tpnt)
+static int __init in2000_detect(struct scsi_host_template * tpnt)
 {
 	struct Scsi_Host *instance;
 	struct IN2000_hostdata *hostdata;
@@ -1927,6 +1945,7 @@ static int __init in2000_detect(Scsi_Host_Template * tpnt)
 
 	detect_count = 0;
 	for (bios = 0; bios_tab[bios]; bios++) {
+		u32 s1 = 0;
 		if (check_setup_args("ioport", &val, buf)) {
 			base = val;
 			switches = ~inb(base + IO_SWITCHES) & 0xff;
@@ -1938,12 +1957,8 @@ static int __init in2000_detect(Scsi_Host_Template * tpnt)
  * for the obvious ID strings. We look for the 2 most common ones and
  * hope that they cover all the cases...
  */
-		else if (isa_readl(bios_tab[bios] + 0x10) == 0x41564f4e || isa_readl(bios_tab[bios] + 0x30) == 0x61776c41) {
+		else if (probe_bios(bios_tab[bios], &s1, &switches)) {
 			printk("Found IN2000 BIOS at 0x%x ", (unsigned int) bios_tab[bios]);
-
-/* Read the switch image that's mapped into EPROM space */
-
-			switches = ~((isa_readb(bios_tab[bios] + 0x20) & 0xff));
 
 /* Find out where the IO space is */
 
@@ -2034,7 +2049,7 @@ static int __init in2000_detect(Scsi_Host_Template * tpnt)
 
 /* Older BIOS's had a 'sync on/off' switch - use its setting */
 
-		if (isa_readl(bios_tab[bios] + 0x10) == 0x41564f4e && (switches & SW_SYNC_DOS5))
+		if (s1 == 0x41564f4e && (switches & SW_SYNC_DOS5))
 			hostdata->sync_off = 0x00;	/* sync defaults to on */
 		else
 			hostdata->sync_off = 0xff;	/* sync defaults to off */
@@ -2302,7 +2317,7 @@ static int in2000_proc_info(struct Scsi_Host *instance, char *buf, char **start,
 MODULE_LICENSE("GPL");
 
 
-static Scsi_Host_Template driver_template = {
+static struct scsi_host_template driver_template = {
 	.proc_name       		= "in2000",
 	.proc_info       		= in2000_proc_info,
 	.name            		= "Always IN2000",
@@ -2311,8 +2326,6 @@ static Scsi_Host_Template driver_template = {
 	.queuecommand    		= in2000_queuecommand,
 	.eh_abort_handler		= in2000_abort,
 	.eh_bus_reset_handler		= in2000_bus_reset,
-	.eh_device_reset_handler	= in2000_device_reset,
-	.eh_host_reset_handler	= in2000_host_reset, 
 	.bios_param      		= in2000_biosparam, 
 	.can_queue       		= IN2000_CAN_Q,
 	.this_id         		= IN2000_HOST_ID,

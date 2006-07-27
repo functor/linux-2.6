@@ -240,7 +240,15 @@ sys_call_table:
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 220 */
 	.quad alpha_ni_syscall
+#ifdef CONFIG_TUX
+	.quad __sys_tux
+#else
+# ifdef CONFIG_TUX_MODULE
+	.quad sys_tux
+# else
 	.quad alpha_ni_syscall
+# endif
+#endif
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 225 */
@@ -461,6 +469,11 @@ sys_call_table:
 	.quad sys_add_key
 	.quad sys_request_key			/* 440 */
 	.quad sys_keyctl
+	.quad sys_ioprio_set
+	.quad sys_ioprio_get
+	.quad sys_inotify_init
+	.quad sys_inotify_add_watch		/* 445 */
+	.quad sys_inotify_rm_watch
 
 	.size sys_call_table, . - sys_call_table
 	.type sys_call_table, @object

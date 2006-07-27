@@ -32,3 +32,6 @@ obj-$(CONFIG_CRYPTO_MICHAEL_MIC) += michael_mic.o
 obj-$(CONFIG_CRYPTO_CRC32C) += crc32c.o
 
 obj-$(CONFIG_CRYPTO_TEST) += tcrypt.o
+
+obj-$(CONFIG_CRYPTO_SIGNATURE) += signature/
+obj-$(CONFIG_CRYPTO_MPILIB) += mpi/

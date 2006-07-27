@@ -30,7 +30,7 @@ int send_sync_buf (tux_req_t *req, struct socket *sock, const char *buf, const s
 	struct msghdr msg;
 	struct iovec iov;
 	int len, written = 0, left = length;
-	struct tcp_opt *tp = tcp_sk(sock->sk);
+	struct tcp_sock *tp = tcp_sk(sock->sk);
 
 	tp->nonagle = 2;
 
@@ -82,7 +82,7 @@ typedef struct sock_send_desc
 static int sock_send_actor (read_descriptor_t * desc, struct page *page,
 				unsigned long offset, unsigned long orig_size)
 {
-	sock_send_desc_t *sock_desc = (sock_send_desc_t *)desc->buf;
+	sock_send_desc_t *sock_desc = (sock_send_desc_t *)desc->arg.buf;
 	struct socket *sock = sock_desc->sock;
 	tux_req_t *req = sock_desc->req;
 	unsigned int flags;
@@ -141,7 +141,7 @@ buf[9] = 0x03; buf[8] = 0x00; buf[10] = 0x79;
 			written = orig_size;
 		else
 			written = size;
-			
+
 	} else {
 		size = orig_size;
 		if (tux_zerocopy_sendfile && sock->ops->sendpage &&
@@ -152,12 +152,12 @@ buf[9] = 0x03; buf[8] = 0x00; buf[10] = 0x79;
 			struct iovec iov;
 			char *kaddr;
 			mm_segment_t oldmm;
-	
+
 			if (offset+size > PAGE_SIZE)
 				return -EFAULT;
 
 			kaddr = kmap(page);
-	
+
 			msg.msg_name = NULL;
 			msg.msg_namelen = 0;
 			msg.msg_iov = &iov;
@@ -227,7 +227,7 @@ int generic_send_file (tux_req_t *req, struct socket *sock, int cachemiss)
 {
 	sock_send_desc_t sock_desc;
 	int len, want, nonblock = !cachemiss;
-	struct tcp_opt *tp = tcp_sk(sock->sk);
+	struct tcp_sock *tp = tcp_sk(sock->sk);
 
 	tp->nonagle = 2;
 
@@ -235,7 +235,7 @@ int generic_send_file (tux_req_t *req, struct socket *sock, int cachemiss)
 	sock_desc.req = req;
 
 repeat:
-	Dprintk("generic_send_file(%p,%d,%p) called, f_pos: %Ld, output_len: %Ld.\n", req, nonblock, sock, req->in_file.f_pos, req->output_len);
+	Dprintk("generic_send_file(%p,%d,%p) called, f_pos: %Ld, output_len: %Ld.\n", req, nonblock, sock, req->in_file->f_pos, req->output_len);
 
 	if (req->proto->check_req_err(req, cachemiss))
 		return -1;
@@ -243,7 +243,7 @@ repeat:
 		len = -5;
 		goto out;
 	}
-	if (req->total_file_len < req->in_file.f_pos)
+	if (req->total_file_len < req->in_file->f_pos)
 		TUX_BUG();
 
 	req->desc.written = 0;
@@ -255,10 +255,10 @@ repeat:
 	else
 		want = req->output_len;
 	req->desc.count = want;
-	req->desc.buf = (char *) &sock_desc;
+	req->desc.arg.buf = (char *) &sock_desc;
 	req->desc.error = 0;
 	Dprintk("sendfile(), desc.count: %d.\n", req->desc.count);
-	do_generic_file_read(&req->in_file, &req->in_file.f_pos, &req->desc, sock_send_actor, nonblock);
+	do_generic_file_read(req->in_file, &req->in_file->f_pos, &req->desc, sock_send_actor, nonblock);
 	if (req->desc.written > 0) {
 		req->bytes_sent += req->desc.written;
 		req->output_len -= req->desc.written;
@@ -267,10 +267,10 @@ repeat:
 		TUX_BUG();
 	Dprintk("sendfile() wrote: %d bytes.\n", req->desc.written);
 	if (req->output_len && !req->desc.written && !req->desc.error) {
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
-		req->in_file.f_pos = 0;
+		req->in_file->f_pos = 0;
 		req->error = TUX_ERROR_CONN_CLOSE;
 		zap_request(req, cachemiss);
 		return -1;
@@ -289,7 +289,7 @@ no_write_space:
 		break;
 	default:
 		len = req->desc.written;
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		if (req->desc.error)
 			TDprintk("TUX: sendfile() returned error %d (signals pending: %08lx)!\n", req->desc.error, current->pending.signal.sig[0]);
 #endif
@@ -302,9 +302,9 @@ no_write_space:
 				goto repeat;
 			}
 		}
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		if (req->desc.written != want)
-			TDprintk("TUX: sendfile() wrote %d bytes, wanted %d! (pos %Ld) (signals pending: %08lx).\n", req->desc.written, want, req->in_file.f_pos, current->pending.signal.sig[0]);
+			TDprintk("TUX: sendfile() wrote %d bytes, wanted %d! (pos %Ld) (signals pending: %08lx).\n", req->desc.written, want, req->in_file->f_pos, current->pending.signal.sig[0]);
 		else
 			Dprintk("TUX: sendfile() FINISHED for req %p, wrote %d bytes.\n", req, req->desc.written);
 		req->bytes_expected = 0;
@@ -336,10 +336,10 @@ int tux_fetch_file (tux_req_t *req, int nonblock)
 
 	req->desc.written = 0;
 	req->desc.count = req->output_len;
-	req->desc.buf = NULL;
+	req->desc.arg.buf = NULL;
 	req->desc.error = 0;
 
-	do_generic_file_read(&req->in_file, &req->in_file.f_pos, &req->desc,
+	do_generic_file_read(req->in_file, &req->in_file->f_pos, &req->desc,
 					file_fetch_actor, nonblock);
 	if (nonblock && (req->desc.error == -EWOULDBLOCKIO))
 		return 1;

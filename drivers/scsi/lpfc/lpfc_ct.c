@@ -1,26 +1,24 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
- * Refer to the README file included with this package for         *
- * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Fibre Channel Host Bus Adapters.                                *
+ * Copyright (C) 2004-2006 Emulex.  All rights reserved.           *
+ * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
- * modify it under the terms of the GNU General Public License     *
- * as published by the Free Software Foundation; either version 2  *
- * of the License, or (at your option) any later version.          *
- *                                                                 *
- * This program is distributed in the hope that it will be useful, *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of  *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the   *
- * GNU General Public License for more details, a copy of which    *
- * can be found in the file COPYING included with this package.    *
+ * modify it under the terms of version 2 of the GNU General       *
+ * Public License as published by the Free Software Foundation.    *
+ * This program is distributed in the hope that it will be useful. *
+ * ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND          *
+ * WARRANTIES, INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY,  *
+ * FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT, ARE      *
+ * DISCLAIMED, EXCEPT TO THE EXTENT THAT SUCH DISCLAIMERS ARE HELD *
+ * TO BE LEGALLY INVALID.  See the GNU General Public License for  *
+ * more details, a copy of which can be found in the file COPYING  *
+ * included with this package.                                     *
  *******************************************************************/
 
 /*
- * $Id: lpfc_ct.c 1.161 2005/04/13 11:59:01EDT sf_support Exp  $
- *
  * Fibre Channel SCSI LAN Device Driver CT support
  */
 
@@ -29,8 +27,10 @@
 #include <linux/interrupt.h>
 #include <linux/utsname.h>
 
+#include <scsi/scsi.h>
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
+#include <scsi/scsi_transport_fc.h>
 
 #include "lpfc_hw.h"
 #include "lpfc_sli.h"
@@ -224,18 +224,16 @@ lpfc_gen_req(struct lpfc_hba *phba, struct lpfc_dmabuf *bmp,
 
 	struct lpfc_sli *psli = &phba->sli;
 	struct lpfc_sli_ring *pring = &psli->ring[LPFC_ELS_RING];
-	struct list_head *lpfc_iocb_list = &phba->lpfc_iocb_list;
 	IOCB_t *icmd;
-	struct lpfc_iocbq *geniocb = NULL;
+	struct lpfc_iocbq *geniocb;
 
 	/* Allocate buffer for  command iocb */
 	spin_lock_irq(phba->host->host_lock);
-	list_remove_head(lpfc_iocb_list, geniocb, struct lpfc_iocbq, list);
+	geniocb = lpfc_sli_get_iocbq(phba);
 	spin_unlock_irq(phba->host->host_lock);
 
 	if (geniocb == NULL)
 		return 1;
-	memset(geniocb, 0, sizeof (struct lpfc_iocbq));
 
 	icmd = &geniocb->iocb;
 	icmd->un.genreq64.bdl.ulpIoTag32 = 0;
@@ -262,8 +260,10 @@ lpfc_gen_req(struct lpfc_hba *phba, struct lpfc_dmabuf *bmp,
 	icmd->un.genreq64.w5.hcsw.Rctl = FC_UNSOL_CTL;
 	icmd->un.genreq64.w5.hcsw.Type = FC_COMMON_TRANSPORT_ULP;
 
-	if (!tmo)
-		tmo = (2 * phba->fc_ratov) + 1;
+	if (!tmo) {
+		 /* FC spec states we need 3 * ratov for CT requests */
+		tmo = (3 * phba->fc_ratov);
+	}
 	icmd->ulpTimeout = tmo;
 	icmd->ulpBdeCount = 1;
 	icmd->ulpLe = 1;
@@ -279,7 +279,7 @@ lpfc_gen_req(struct lpfc_hba *phba, struct lpfc_dmabuf *bmp,
 	geniocb->drvrTimeout = icmd->ulpTimeout + LPFC_DRVR_TIMEOUT;
 	spin_lock_irq(phba->host->host_lock);
 	if (lpfc_sli_issue_iocb(phba, pring, geniocb, 0) == IOCB_ERROR) {
-		list_add_tail(&geniocb->list, lpfc_iocb_list);
+		lpfc_sli_release_iocbq(phba, geniocb);
 		spin_unlock_irq(phba->host->host_lock);
 		return 1;
 	}
@@ -323,6 +323,7 @@ lpfc_ns_rsp(struct lpfc_hba * phba, struct lpfc_dmabuf * mp, uint32_t Size)
 	struct lpfc_sli_ct_request *Response =
 		(struct lpfc_sli_ct_request *) mp->virt;
 	struct lpfc_nodelist *ndlp = NULL;
+	struct lpfc_nodelist *next_ndlp;
 	struct lpfc_dmabuf *mlast, *next_mp;
 	uint32_t *ctptr = (uint32_t *) & Response->un.gid.PortType;
 	uint32_t Did;
@@ -391,8 +392,36 @@ lpfc_ns_rsp(struct lpfc_hba * phba, struct lpfc_dmabuf * mp, uint32_t Size)
 nsout1:
 	list_del(&head);
 
-	/* Here we are finished in the case RSCN */
+	/*
+ 	 * The driver has cycled through all Nports in the RSCN payload.
+ 	 * Complete the handling by cleaning up and marking the
+ 	 * current driver state.
+ 	 */
 	if (phba->hba_state == LPFC_HBA_READY) {
+
+		/*
+		 * Switch ports that connect a loop of multiple targets need
+		 * special consideration.  The driver wants to unregister the
+		 * rpi only on the target that was pulled from the loop.  On
+		 * RSCN, the driver wants to rediscover an NPort only if the
+		 * driver flagged it as NLP_NPR_2B_DISC.  Provided adisc is
+		 * not enabled and the NPort is not capable of retransmissions
+		 * (FC Tape) prevent timing races with the scsi error handler by
+		 * unregistering the Nport's RPI.  This action causes all
+		 * outstanding IO to flush back to the midlayer.
+		 */
+		list_for_each_entry_safe(ndlp, next_ndlp, &phba->fc_npr_list,
+					 nlp_listp) {
+			if (!(ndlp->nlp_flag & NLP_NPR_2B_DISC) &&
+			    (lpfc_rscn_payload_check(phba, ndlp->nlp_DID))) {
+				if ((phba->cfg_use_adisc == 0) &&
+				    !(ndlp->nlp_fcp_info &
+				      NLP_FCP_2_DEVICE)) {
+					lpfc_unreg_rpi(phba, ndlp);
+					ndlp->nlp_flag &= ~NLP_NPR_ADISC;
+				}
+			}
+		}
 		lpfc_els_flush_rscn(phba);
 		spin_lock_irq(phba->host->host_lock);
 		phba->fc_flag |= FC_RSCN_MODE; /* we are still in RSCN mode */
@@ -451,6 +480,11 @@ lpfc_cmpl_ct_cmd_gid_ft(struct lpfc_hba * phba, struct lpfc_iocbq * cmdiocb,
 		CTrsp = (struct lpfc_sli_ct_request *) outp->virt;
 		if (CTrsp->CommandResponse.bits.CmdRsp ==
 		    be16_to_cpu(SLI_CT_RESPONSE_FS_ACC)) {
+			lpfc_printf_log(phba, KERN_INFO, LOG_DISCOVERY,
+					"%d:0239 NameServer Rsp "
+					"Data: x%x\n",
+					phba->brd_no,
+					phba->fc_flag);
 			lpfc_ns_rsp(phba, outp,
 				    (uint32_t) (irsp->un.genreq64.bdl.bdeSize));
 		} else if (CTrsp->CommandResponse.bits.CmdRsp ==
@@ -487,7 +521,7 @@ out:
 	kfree(inp);
 	kfree(bmp);
 	spin_lock_irq(phba->host->host_lock);
-	list_add_tail(&cmdiocb->list, &phba->lpfc_iocb_list);
+	lpfc_sli_release_iocbq(phba, cmdiocb);
 	spin_unlock_irq(phba->host->host_lock);
 	return;
 }
@@ -526,7 +560,7 @@ lpfc_cmpl_ct_cmd_rft_id(struct lpfc_hba * phba, struct lpfc_iocbq * cmdiocb,
 	kfree(inp);
 	kfree(bmp);
 	spin_lock_irq(phba->host->host_lock);
-	list_add_tail(&cmdiocb->list, &phba->lpfc_iocb_list);
+	lpfc_sli_release_iocbq(phba, cmdiocb);
 	spin_unlock_irq(phba->host->host_lock);
 	return;
 }
@@ -735,7 +769,7 @@ lpfc_cmpl_ct_cmd_fdmi(struct lpfc_hba * phba,
 	kfree(inp);
 	kfree(bmp);
 	spin_lock_irq(phba->host->host_lock);
-	list_add_tail(&cmdiocb->list, &phba->lpfc_iocb_list);
+	lpfc_sli_release_iocbq(phba, cmdiocb);
 	spin_unlock_irq(phba->host->host_lock);
 	return;
 }
@@ -980,19 +1014,19 @@ lpfc_fdmi_cmd(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp, int cmdcode)
 			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) pab + size);
 			ae->ad.bits.AttrType = be16_to_cpu(SUPPORTED_SPEED);
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + 4);
-			if (FC_JEDEC_ID(vp->rev.biuRev) == VIPER_JEDEC_ID)
+
+			ae->un.SupportSpeed = 0;
+			if (phba->lmt & LMT_10Gb)
 				ae->un.SupportSpeed = HBA_PORTSPEED_10GBIT;
-			else if (FC_JEDEC_ID(vp->rev.biuRev) == HELIOS_JEDEC_ID)
-				ae->un.SupportSpeed = HBA_PORTSPEED_4GBIT;
-			else if ((FC_JEDEC_ID(vp->rev.biuRev) ==
-				  CENTAUR_2G_JEDEC_ID)
-				 || (FC_JEDEC_ID(vp->rev.biuRev) ==
-				     PEGASUS_JEDEC_ID)
-				 || (FC_JEDEC_ID(vp->rev.biuRev) ==
-				     THOR_JEDEC_ID))
-				ae->un.SupportSpeed = HBA_PORTSPEED_2GBIT;
-			else
-				ae->un.SupportSpeed = HBA_PORTSPEED_1GBIT;
+			if (phba->lmt & LMT_8Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_8GBIT;
+			if (phba->lmt & LMT_4Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_4GBIT;
+			if (phba->lmt & LMT_2Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_2GBIT;
+			if (phba->lmt & LMT_1Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_1GBIT;
+
 			pab->ab.EntryCnt++;
 			size += FOURBYTES + 4;
 
@@ -1132,11 +1166,6 @@ lpfc_fdmi_tmo_handler(struct lpfc_hba *phba)
 {
 	struct lpfc_nodelist *ndlp;
 
-	spin_lock_irq(phba->host->host_lock);
-	if (!(phba->work_hba_events & WORKER_FDMI_TMO)) {
-		spin_unlock_irq(phba->host->host_lock);
-		return;
-	}
 	ndlp = lpfc_findnode_did(phba, NLP_SEARCH_ALL, FDMI_DID);
 	if (ndlp) {
 		if (system_utsname.nodename[0] != '\0') {
@@ -1145,7 +1174,6 @@ lpfc_fdmi_tmo_handler(struct lpfc_hba *phba)
 			mod_timer(&phba->fc_fdmitmo, jiffies + HZ * 60);
 		}
 	}
-	spin_unlock_irq(phba->host->host_lock);
 	return;
 }
 

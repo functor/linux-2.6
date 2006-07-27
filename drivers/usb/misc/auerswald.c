@@ -30,7 +30,6 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/wait.h>
-#undef DEBUG   		/* include debug macros until it's done	*/
 #include <linux/usb.h>
 
 /*-------------------------------------------------------------------*/
@@ -426,7 +425,7 @@ static int auerchain_submit_urb (pauerchain_t acp, struct urb * urb)
 
 /* cancel an urb which is submitted to the chain
    the result is 0 if the urb is cancelled, or -EINPROGRESS if
-   URB_ASYNC_UNLINK is set and the function is successfully started.
+   the function is successfully started.
 */
 static int auerchain_unlink_urb (pauerchain_t acp, struct urb * urb)
 {
@@ -515,7 +514,6 @@ static void auerchain_unlink_all (pauerchain_t acp)
         acep = acp->active;
         if (acep) {
                 urbp = acep->urbp;
-                urbp->transfer_flags &= ~URB_ASYNC_UNLINK;
                 dbg ("unlink active urb");
                 usb_kill_urb (urbp);
         }
@@ -572,10 +570,9 @@ static int auerchain_setup (pauerchain_t acp, unsigned int numElements)
 
         /* fill the list of free elements */
         for (;numElements; numElements--) {
-                acep = (pauerchainelement_t) kmalloc (sizeof (auerchainelement_t), GFP_KERNEL);
+                acep = kzalloc(sizeof(auerchainelement_t), GFP_KERNEL);
                 if (!acep)
 			goto ac_fail;
-		memset (acep, 0, sizeof (auerchainelement_t));
                 INIT_LIST_HEAD (&acep->list);
                 list_add_tail (&acep->list, &acp->free_list);
         }
@@ -763,13 +760,12 @@ static int auerbuf_setup (pauerbufctl_t bcp, unsigned int numElements, unsigned 
 
         /* fill the list of free elements */
         for (;numElements; numElements--) {
-                bep = (pauerbuf_t) kmalloc (sizeof (auerbuf_t), GFP_KERNEL);
+                bep = kzalloc(sizeof(auerbuf_t), GFP_KERNEL);
                 if (!bep)
 			goto bl_fail;
-	        memset (bep, 0, sizeof (auerbuf_t));
                 bep->list = bcp;
                 INIT_LIST_HEAD (&bep->buff_list);
-                bep->bufp = (char *) kmalloc (bufsize, GFP_KERNEL);
+                bep->bufp = kmalloc (bufsize, GFP_KERNEL);
                 if (!bep->bufp)
 			goto bl_fail;
                 bep->dr = (struct usb_ctrlrequest *) kmalloc (sizeof (struct usb_ctrlrequest), GFP_KERNEL);
@@ -1125,7 +1121,7 @@ static int auerswald_int_open (pauerswald_t cp)
                 }
         }
         if (!cp->intbufp) {
-                cp->intbufp = (char *) kmalloc (irqsize, GFP_KERNEL);
+                cp->intbufp = kmalloc (irqsize, GFP_KERNEL);
                 if (!cp->intbufp) {
                         ret = -ENOMEM;
                         goto intoend;
@@ -1698,7 +1694,7 @@ static ssize_t auerchar_write (struct file *file, const char __user *buf, size_t
 	int ret;
 	wait_queue_t wait;
 
-        dbg ("auerchar_write %d bytes", len);
+        dbg ("auerchar_write %zd bytes", len);
 
 	/* Error checking */
 	if (!ccp)
@@ -1874,9 +1870,8 @@ static struct file_operations auerswald_fops =
 };
 
 static struct usb_class_driver auerswald_class = {
-	.name =		"usb/auer%d",
+	.name =		"auer%d",
 	.fops =		&auerswald_fops,
-	.mode =		S_IFCHR | S_IRUGO | S_IWUGO,
 	.minor_base =	AUER_MINOR_BASE,
 };
 
@@ -2096,6 +2091,8 @@ static void auerswald_disconnect (struct usb_interface *intf)
 static struct usb_device_id auerswald_ids [] = {
 	{ USB_DEVICE (ID_AUERSWALD, 0x00C0) },          /* COMpact 2104 USB */
 	{ USB_DEVICE (ID_AUERSWALD, 0x00DB) },          /* COMpact 4410/2206 USB */
+	{ USB_DEVICE (ID_AUERSWALD, 0x00DC) }, /* COMpact 4406 DSL */
+	{ USB_DEVICE (ID_AUERSWALD, 0x00DD) }, /* COMpact 2204 USB */
 	{ USB_DEVICE (ID_AUERSWALD, 0x00F1) },          /* Comfort 2000 System Telephone */
 	{ USB_DEVICE (ID_AUERSWALD, 0x00F2) },          /* Comfort 1200 System Telephone */
         { }			                        /* Terminating entry */
@@ -2106,7 +2103,6 @@ MODULE_DEVICE_TABLE (usb, auerswald_ids);
 
 /* Standard usb driver struct */
 static struct usb_driver auerswald_driver = {
-	.owner =	THIS_MODULE,
 	.name =		"auerswald",
 	.probe =	auerswald_probe,
 	.disconnect =	auerswald_disconnect,

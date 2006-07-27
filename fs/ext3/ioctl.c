@@ -8,7 +8,9 @@
  */
 
 #include <linux/fs.h>
+#include <linux/mount.h>
 #include <linux/jbd.h>
+#include <linux/capability.h>
 #include <linux/ext3_fs.h>
 #include <linux/ext3_jbd.h>
 #include <linux/time.h>
@@ -36,7 +38,8 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		unsigned int oldflags;
 		unsigned int jflag;
 
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -48,6 +51,7 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		if (!S_ISDIR(inode->i_mode))
 			flags &= ~EXT3_DIRSYNC_FL;
 
+		mutex_lock(&inode->i_mutex);
 		oldflags = ei->i_flags;
 
 		/* The JOURNAL_DATA flag is modifiable only by root */
@@ -62,8 +66,10 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		if ((oldflags & EXT3_IMMUTABLE_FL) ||
 			((flags ^ oldflags) & (EXT3_APPEND_FL |
 			EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL))) {
-			if (!capable(CAP_LINUX_IMMUTABLE))
+			if (!capable(CAP_LINUX_IMMUTABLE)) {
+				mutex_unlock(&inode->i_mutex);
 				return -EPERM;
+			}
 		}
 
 		/*
@@ -71,14 +77,18 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 * the relevant capability.
 		 */
 		if ((jflag ^ oldflags) & (EXT3_JOURNAL_DATA_FL)) {
-			if (!capable(CAP_SYS_RESOURCE))
+			if (!capable(CAP_SYS_RESOURCE)) {
+				mutex_unlock(&inode->i_mutex);
 				return -EPERM;
+			}
 		}
 
 
 		handle = ext3_journal_start(inode, 1);
-		if (IS_ERR(handle))
+		if (IS_ERR(handle)) {
+			mutex_unlock(&inode->i_mutex);
 			return PTR_ERR(handle);
+		}
 		if (IS_SYNC(inode))
 			handle->h_sync = 1;
 		err = ext3_reserve_inode_write(handle, inode, &iloc);
@@ -95,11 +105,14 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
 flags_err:
 		ext3_journal_stop(handle);
-		if (err)
+		if (err) {
+			mutex_unlock(&inode->i_mutex);
 			return err;
+		}
 
 		if ((jflag ^ oldflags) & (EXT3_JOURNAL_DATA_FL))
 			err = ext3_change_inode_journal_flag(inode, jflag);
+		mutex_unlock(&inode->i_mutex);
 		return err;
 	}
 	case EXT3_IOC_GETVERSION:
@@ -114,7 +127,8 @@ flags_err:
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
 			return -EPERM;
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 		if (get_user(generation, (int __user *) arg))
 			return -EFAULT;
@@ -168,7 +182,8 @@ flags_err:
 		if (!test_opt(inode->i_sb, RESERVATION) ||!S_ISREG(inode->i_mode))
 			return -ENOTTY;
 
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 
 		if ((current->fsuid != inode->i_uid) && !capable(CAP_FOWNER))
@@ -184,7 +199,7 @@ flags_err:
 		 * need to allocate reservation structure for this inode
 		 * before set the window size
 		 */
-		down(&ei->truncate_sem);
+		mutex_lock(&ei->truncate_mutex);
 		if (!ei->i_block_alloc_info)
 			ext3_init_block_alloc_info(inode);
 
@@ -192,7 +207,7 @@ flags_err:
 			struct ext3_reserve_window_node *rsv = &ei->i_block_alloc_info->rsv_window_node;
 			rsv->rsv_goal_size = rsv_window_size;
 		}
-		up(&ei->truncate_sem);
+		mutex_unlock(&ei->truncate_mutex);
 		return 0;
 	}
 	case EXT3_IOC_GROUP_EXTEND: {
@@ -203,7 +218,8 @@ flags_err:
 		if (!capable(CAP_SYS_RESOURCE))
 			return -EPERM;
 
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 
 		if (get_user(n_blocks_count, (__u32 __user *)arg))
@@ -224,7 +240,8 @@ flags_err:
 		if (!capable(CAP_SYS_RESOURCE))
 			return -EPERM;
 
-		if (IS_RDONLY(inode))
+		if (IS_RDONLY(inode) ||
+			(filp && MNT_IS_RDONLY(filp->f_vfsmnt)))
 			return -EROFS;
 
 		if (copy_from_user(&input, (struct ext3_new_group_input __user *)arg,
@@ -253,7 +270,7 @@ flags_err:
 			return -EROFS;
 		if (!(inode->i_sb->s_flags & MS_TAGXID))
 			return -ENOSYS;
-		if (get_user(xid, (int *) arg))
+		if (get_user(xid, (int __user *) arg))
 			return -EFAULT;
 
 		handle = ext3_journal_start(inode, 1);

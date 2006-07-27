@@ -84,6 +84,7 @@ static int max_interrupt_work = 10;
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/pm.h>
+#include <linux/pm_legacy.h>
 #include <linux/skbuff.h>
 #include <linux/delay.h>	/* for udelay() */
 #include <linux/spinlock.h>
@@ -98,6 +99,10 @@ static int max_interrupt_work = 10;
 
 static char versionA[] __initdata = DRV_NAME ".c:" DRV_VERSION " " DRV_RELDATE " becker@scyld.com\n";
 static char versionB[] __initdata = "http://www.scyld.com/network/3c509.html\n";
+
+#if defined(CONFIG_PM) && (defined(CONFIG_MCA) || defined(CONFIG_EISA))
+#define EL3_SUSPEND
+#endif
 
 #ifdef EL3_DEBUG
 static int el3_debug = EL3_DEBUG;
@@ -173,9 +178,6 @@ struct el3_private {
 	/* skb send-queue */
 	int head, size;
 	struct sk_buff *queue[SKB_QUEUE_SIZE];
-#ifdef CONFIG_PM
-	struct pm_dev *pmdev;
-#endif
 	enum {
 		EL3_MCA,
 		EL3_PNP,
@@ -200,11 +202,15 @@ static void el3_tx_timeout (struct net_device *dev);
 static void el3_down(struct net_device *dev);
 static void el3_up(struct net_device *dev);
 static struct ethtool_ops ethtool_ops;
-#ifdef CONFIG_PM
-static int el3_suspend(struct pm_dev *pdev);
-static int el3_resume(struct pm_dev *pdev);
-static int el3_pm_callback(struct pm_dev *pdev, pm_request_t rqst, void *data);
+#ifdef EL3_SUSPEND
+static int el3_suspend(struct device *, pm_message_t);
+static int el3_resume(struct device *);
+#else
+#define el3_suspend NULL
+#define el3_resume NULL
 #endif
+
+
 /* generic device remove for all device types */
 #if defined(CONFIG_EISA) || defined(CONFIG_MCA)
 static int el3_device_remove (struct device *device);
@@ -217,6 +223,7 @@ static void el3_poll_controller(struct net_device *dev);
 static struct eisa_device_id el3_eisa_ids[] = {
 		{ "TCM5092" },
 		{ "TCM5093" },
+		{ "TCM5095" },
 		{ "" }
 };
 
@@ -227,7 +234,9 @@ static struct eisa_driver el3_eisa_driver = {
 		.driver   = {
 				.name    = "3c509",
 				.probe   = el3_eisa_probe,
-				.remove  = __devexit_p (el3_device_remove)
+				.remove  = __devexit_p (el3_device_remove),
+				.suspend = el3_suspend,
+				.resume  = el3_resume,
 		}
 };
 #endif
@@ -260,6 +269,8 @@ static struct mca_driver el3_mca_driver = {
 				.bus = &mca_bus_type,
 				.probe = el3_mca_probe,
 				.remove = __devexit_p(el3_device_remove),
+				.suspend = el3_suspend,
+				.resume  = el3_resume,
 		},
 };
 #endif /* CONFIG_MCA */
@@ -360,10 +371,6 @@ static void el3_common_remove (struct net_device *dev)
 	struct el3_private *lp = netdev_priv(dev);
 
 	(void) lp;				/* Keep gcc quiet... */
-#ifdef CONFIG_PM
-	if (lp->pmdev)
-		pm_unregister(lp->pmdev);
-#endif
 #if defined(__ISAPNP__)
 	if (lp->type == EL3_PNP)
 		pnp_device_detach(to_pnp_dev(lp->dev));
@@ -569,16 +576,6 @@ no_pnp:
 
 	if (err)
 		goto out1;
-
-#ifdef CONFIG_PM
-	/* register power management */
-	lp->pmdev = pm_register(PM_ISA_DEV, card_idx, el3_pm_callback);
-	if (lp->pmdev) {
-		struct pm_dev *p;
-		p = lp->pmdev;
-		p->data = (struct net_device *)dev;
-	}
-#endif
 
 	el3_cards++;
 	lp->next_dev = el3_root_dev;
@@ -1478,20 +1475,17 @@ el3_up(struct net_device *dev)
 }
 
 /* Power Management support functions */
-#ifdef CONFIG_PM
+#ifdef EL3_SUSPEND
 
 static int
-el3_suspend(struct pm_dev *pdev)
+el3_suspend(struct device *pdev, pm_message_t state)
 {
 	unsigned long flags;
 	struct net_device *dev;
 	struct el3_private *lp;
 	int ioaddr;
 	
-	if (!pdev && !pdev->data)
-		return -EINVAL;
-
-	dev = (struct net_device *)pdev->data;
+	dev = pdev->driver_data;
 	lp = netdev_priv(dev);
 	ioaddr = dev->base_addr;
 
@@ -1508,17 +1502,14 @@ el3_suspend(struct pm_dev *pdev)
 }
 
 static int
-el3_resume(struct pm_dev *pdev)
+el3_resume(struct device *pdev)
 {
 	unsigned long flags;
 	struct net_device *dev;
 	struct el3_private *lp;
 	int ioaddr;
 	
-	if (!pdev && !pdev->data)
-		return -EINVAL;
-
-	dev = (struct net_device *)pdev->data;
+	dev = pdev->driver_data;
 	lp = netdev_priv(dev);
 	ioaddr = dev->base_addr;
 
@@ -1534,20 +1525,7 @@ el3_resume(struct pm_dev *pdev)
 	return 0;
 }
 
-static int
-el3_pm_callback(struct pm_dev *pdev, pm_request_t rqst, void *data)
-{
-	switch (rqst) {
-		case PM_SUSPEND:
-			return el3_suspend(pdev);
-
-		case PM_RESUME:
-			return el3_resume(pdev);
-	}
-	return 0;
-}
-
-#endif /* CONFIG_PM */
+#endif /* EL3_SUSPEND */
 
 /* Parameters that may be passed into the module. */
 static int debug = -1;
@@ -1572,6 +1550,7 @@ MODULE_LICENSE("GPL");
 
 static int __init el3_init_module(void)
 {
+	int ret = 0;
 	el3_cards = 0;
 
 	if (debug >= 0)
@@ -1587,14 +1566,16 @@ static int __init el3_init_module(void)
 	}
 
 #ifdef CONFIG_EISA
-	if (eisa_driver_register (&el3_eisa_driver) < 0) {
-		eisa_driver_unregister (&el3_eisa_driver);
-	}
+	ret = eisa_driver_register(&el3_eisa_driver);
 #endif
 #ifdef CONFIG_MCA
-	mca_register_driver(&el3_mca_driver);
+	{
+		int err = mca_register_driver(&el3_mca_driver);
+		if (ret == 0)
+			ret = err;
+	}
 #endif
-	return 0;
+	return ret;
 }
 
 static void __exit el3_cleanup_module(void)

@@ -21,8 +21,6 @@ extern void *trap_table;
 EXPORT_SYMBOL (trap_table);
 
 /* platform dependent support */
-extern void dump_thread (struct pt_regs *, struct user *);
-EXPORT_SYMBOL (dump_thread);
 EXPORT_SYMBOL (kernel_thread);
 EXPORT_SYMBOL (enable_irq);
 EXPORT_SYMBOL (disable_irq);
@@ -45,7 +43,6 @@ EXPORT_SYMBOL (strncmp);
 EXPORT_SYMBOL (strchr);
 EXPORT_SYMBOL (strlen);
 EXPORT_SYMBOL (strnlen);
-EXPORT_SYMBOL (strpbrk);
 EXPORT_SYMBOL (strrchr);
 EXPORT_SYMBOL (strstr);
 EXPORT_SYMBOL (memset);

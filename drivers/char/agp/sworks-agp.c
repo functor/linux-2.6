@@ -5,6 +5,9 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/string.h>
+#include <linux/slab.h>
+#include <linux/jiffies.h>
 #include <linux/agp_backend.h>
 #include "agp.h"
 
@@ -61,7 +64,7 @@ static int serverworks_create_page_map(struct serverworks_page_map *page_map)
 	}
 	global_cache_flush();
 
-	for(i = 0; i < PAGE_SIZE / sizeof(unsigned long); i++)
+	for (i = 0; i < PAGE_SIZE / sizeof(unsigned long); i++)
 		writel(agp_bridge->scratch_page, page_map->remapped+i);
 
 	return 0;
@@ -81,7 +84,7 @@ static void serverworks_free_gatt_pages(void)
 	struct serverworks_page_map *entry;
 
 	tables = serverworks_private.gatt_pages;
-	for(i = 0; i < serverworks_private.num_tables; i++) {
+	for (i = 0; i < serverworks_private.num_tables; i++) {
 		entry = tables[i];
 		if (entry != NULL) {
 			if (entry->real != NULL) {
@@ -100,19 +103,17 @@ static int serverworks_create_gatt_pages(int nr_tables)
 	int retval = 0;
 	int i;
 
-	tables = kmalloc((nr_tables + 1) * sizeof(struct serverworks_page_map *), 
+	tables = kzalloc((nr_tables + 1) * sizeof(struct serverworks_page_map *),
 			 GFP_KERNEL);
-	if (tables == NULL) {
+	if (tables == NULL)
 		return -ENOMEM;
-	}
-	memset(tables, 0, sizeof(struct serverworks_page_map *) * (nr_tables + 1));
+
 	for (i = 0; i < nr_tables; i++) {
-		entry = kmalloc(sizeof(struct serverworks_page_map), GFP_KERNEL);
+		entry = kzalloc(sizeof(struct serverworks_page_map), GFP_KERNEL);
 		if (entry == NULL) {
 			retval = -ENOMEM;
 			break;
 		}
-		memset(entry, 0, sizeof(struct serverworks_page_map));
 		tables[i] = entry;
 		retval = serverworks_create_page_map(entry);
 		if (retval != 0) break;
@@ -160,7 +161,7 @@ static int serverworks_create_gatt_table(struct agp_bridge_data *bridge)
 		return retval;
 	}
 	/* Create a fake scratch directory */
-	for(i = 0; i < 1024; i++) {
+	for (i = 0; i < 1024; i++) {
 		writel(agp_bridge->scratch_page, serverworks_private.scratch_dir.remapped+i);
 		writel(virt_to_gart(serverworks_private.scratch_dir.real) | 1, page_dir.remapped+i);
 	}
@@ -184,9 +185,8 @@ static int serverworks_create_gatt_table(struct agp_bridge_data *bridge)
 	pci_read_config_dword(agp_bridge->dev,serverworks_private.gart_addr_ofs,&temp);
 	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
-	/* Calculate the agp offset */	
-
-	for(i = 0; i < value->num_entries / 1024; i++)
+	/* Calculate the agp offset */
+	for (i = 0; i < value->num_entries / 1024; i++)
 		writel(virt_to_gart(serverworks_private.gatt_pages[i]->real)|1, page_dir.remapped+i);
 
 	return 0;
@@ -195,7 +195,7 @@ static int serverworks_create_gatt_table(struct agp_bridge_data *bridge)
 static int serverworks_free_gatt_table(struct agp_bridge_data *bridge)
 {
 	struct serverworks_page_map page_dir;
-   
+
 	page_dir.real = (unsigned long *)agp_bridge->gatt_table_real;
 	page_dir.remapped = (unsigned long __iomem *)agp_bridge->gatt_table;
 
@@ -242,13 +242,27 @@ static int serverworks_fetch_size(void)
  */
 static void serverworks_tlbflush(struct agp_memory *temp)
 {
+	unsigned long timeout;
+
 	writeb(1, serverworks_private.registers+SVWRKS_POSTFLUSH);
-	while (readb(serverworks_private.registers+SVWRKS_POSTFLUSH) == 1)
+	timeout = jiffies + 3*HZ;
+	while (readb(serverworks_private.registers+SVWRKS_POSTFLUSH) == 1) {
 		cpu_relax();
+		if (time_after(jiffies, timeout)) {
+			printk(KERN_ERR PFX "TLB post flush took more than 3 seconds\n");
+			break;
+		}
+	}
 
 	writel(1, serverworks_private.registers+SVWRKS_DIRFLUSH);
-	while(readl(serverworks_private.registers+SVWRKS_DIRFLUSH) == 1)
+	timeout = jiffies + 3*HZ;
+	while (readl(serverworks_private.registers+SVWRKS_DIRFLUSH) == 1) {
 		cpu_relax();
+		if (time_after(jiffies, timeout)) {
+			printk(KERN_ERR PFX "TLB Dir flush took more than 3 seconds\n");
+			break;
+		}
+	}
 }
 
 static int serverworks_configure(void)
@@ -453,9 +467,7 @@ static int __devinit agp_serverworks_probe(struct pci_dev *pdev,
 
 	switch (pdev->device) {
 	case 0x0006:
-		/* ServerWorks CNB20HE
-		Fail silently.*/
-		printk (KERN_ERR PFX "Detected ServerWorks CNB20HE chipset: No AGP present.\n");
+		printk (KERN_ERR PFX "ServerWorks CNB20HE is unsupported due to lack of documentation.\n");
 		return -ENODEV;
 
 	case PCI_DEVICE_ID_SERVERWORKS_HE:

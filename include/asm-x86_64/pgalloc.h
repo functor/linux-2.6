@@ -6,6 +6,13 @@
 #include <linux/threads.h>
 #include <linux/mm.h>
 
+#define arch_add_exec_range(mm, limit) \
+		do { (void)(mm), (void)(limit); } while (0)
+#define arch_flush_exec_range(mm) \
+		do { (void)(mm); } while (0)
+#define arch_remove_exec_range(mm, limit) \
+		do { (void)(mm), (void)(limit); } while (0)
+
 #define pmd_populate_kernel(mm, pmd, pte) \
 		set_pmd(pmd, __pmd(_PAGE_TABLE | __pa(pte)))
 #define pud_populate(mm, pud, pmd) \
@@ -18,12 +25,12 @@ static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd, struct page *p
 	set_pmd(pmd, __pmd(_PAGE_TABLE | (page_to_pfn(pte) << PAGE_SHIFT)));
 }
 
-extern __inline__ pmd_t *get_pmd(void)
+static inline pmd_t *get_pmd(void)
 {
 	return (pmd_t *)get_zeroed_page(GFP_KERNEL);
 }
 
-extern __inline__ void pmd_free(pmd_t *pmd)
+static inline void pmd_free(pmd_t *pmd)
 {
 	BUG_ON((unsigned long)pmd & (PAGE_SIZE-1));
 	free_page((unsigned long)pmd);
@@ -45,12 +52,39 @@ static inline void pud_free (pud_t *pud)
 	free_page((unsigned long)pud);
 }
 
+static inline void pgd_list_add(pgd_t *pgd)
+{
+	struct page *page = virt_to_page(pgd);
+
+	spin_lock(&pgd_lock);
+	page->index = (pgoff_t)pgd_list;
+	if (pgd_list)
+		pgd_list->private = (unsigned long)&page->index;
+	pgd_list = page;
+	page->private = (unsigned long)&pgd_list;
+	spin_unlock(&pgd_lock);
+}
+
+static inline void pgd_list_del(pgd_t *pgd)
+{
+	struct page *next, **pprev, *page = virt_to_page(pgd);
+
+	spin_lock(&pgd_lock);
+	next = (struct page *)page->index;
+	pprev = (struct page **)page->private;
+	*pprev = next;
+	if (next)
+		next->private = (unsigned long)pprev;
+	spin_unlock(&pgd_lock);
+}
+
 static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	unsigned boundary;
 	pgd_t *pgd = (pgd_t *)__get_free_page(GFP_KERNEL|__GFP_REPEAT);
 	if (!pgd)
 		return NULL;
+	pgd_list_add(pgd);
 	/*
 	 * Copy kernel pointers in from init.
 	 * Could keep a freelist or slab cache of those because the kernel
@@ -67,6 +101,7 @@ static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 static inline void pgd_free(pgd_t *pgd)
 {
 	BUG_ON((unsigned long)pgd & (PAGE_SIZE-1));
+	pgd_list_del(pgd);
 	free_page((unsigned long)pgd);
 }
 
@@ -86,13 +121,13 @@ static inline struct page *pte_alloc_one(struct mm_struct *mm, unsigned long add
 /* Should really implement gc for free page table pages. This could be
    done with a reference count in struct page. */
 
-extern __inline__ void pte_free_kernel(pte_t *pte)
+static inline void pte_free_kernel(pte_t *pte)
 {
 	BUG_ON((unsigned long)pte & (PAGE_SIZE-1));
 	free_page((unsigned long)pte); 
 }
 
-extern inline void pte_free(struct page *pte)
+static inline void pte_free(struct page *pte)
 {
 	__free_page(pte);
 } 

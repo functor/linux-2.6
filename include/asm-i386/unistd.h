@@ -256,7 +256,7 @@
 #define __NR_io_submit		248
 #define __NR_io_cancel		249
 #define __NR_fadvise64		250
-
+/* 251 is available for reuse (was briefly sys_set_zone_reclaim) */
 #define __NR_exit_group		252
 #define __NR_lookup_dcookie	253
 #define __NR_epoll_create	254
@@ -288,15 +288,44 @@
 #define __NR_mq_timedreceive	(__NR_mq_open+3)
 #define __NR_mq_notify		(__NR_mq_open+4)
 #define __NR_mq_getsetattr	(__NR_mq_open+5)
-#define __NR_sys_kexec_load	283
+#define __NR_kexec_load		283
 #define __NR_waitid		284
 /* #define __NR_sys_setaltroot	285 */
 #define __NR_add_key		286
 #define __NR_request_key	287
 #define __NR_keyctl		288
+#define __NR_ioprio_set		289
+#define __NR_ioprio_get		290
+#define __NR_inotify_init	291
+#define __NR_inotify_add_watch	292
+#define __NR_inotify_rm_watch	293
+#define __NR_migrate_pages	294
+#define __NR_openat		295
+#define __NR_mkdirat		296
+#define __NR_mknodat		297
+#define __NR_fchownat		298
+#define __NR_futimesat		299
+#define __NR_fstatat64		300
+#define __NR_unlinkat		301
+#define __NR_renameat		302
+#define __NR_linkat		303
+#define __NR_symlinkat		304
+#define __NR_readlinkat		305
+#define __NR_fchmodat		306
+#define __NR_faccessat		307
+#define __NR_pselect6		308
+#define __NR_ppoll		309
+#define __NR_unshare		310
+#define __NR_set_robust_list	311
+#define __NR_get_robust_list	312
+#define __NR_splice		313
+#define __NR_sync_file_range	314
+#define __NR_tee		315
+#define __NR_vmsplice		316
 
-#define NR_syscalls 289
+#define NR_syscalls 317
 
+#ifndef __KERNEL_SYSCALLS_NO_ERRNO__
 /*
  * user-visible error numbers are in the range -1 - -128: see
  * <asm-i386/errno.h>
@@ -309,6 +338,10 @@ do { \
 	} \
 	return (type) (res); \
 } while (0)
+
+#else
+# define __syscall_return(type, res) return (type) (res)
+#endif
 
 /* XXX - _foo needs to be __foo, while __NR_bar could be _NR_bar. */
 #define _syscall0(type,name) \
@@ -325,9 +358,9 @@ __syscall_return(type,__res); \
 type name(type1 arg1) \
 { \
 long __res; \
-__asm__ volatile ("int $0x80" \
+__asm__ volatile ("push %%ebx ; movl %2,%%ebx ; int $0x80 ; pop %%ebx" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" ((long)(arg1))); \
+	: "0" (__NR_##name),"ri" ((long)(arg1)) : "memory"); \
 __syscall_return(type,__res); \
 }
 
@@ -335,9 +368,10 @@ __syscall_return(type,__res); \
 type name(type1 arg1,type2 arg2) \
 { \
 long __res; \
-__asm__ volatile ("int $0x80" \
+__asm__ volatile ("push %%ebx ; movl %2,%%ebx ; int $0x80 ; pop %%ebx" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" ((long)(arg1)),"c" ((long)(arg2))); \
+	: "0" (__NR_##name),"ri" ((long)(arg1)),"c" ((long)(arg2)) \
+	: "memory"); \
 __syscall_return(type,__res); \
 }
 
@@ -345,10 +379,10 @@ __syscall_return(type,__res); \
 type name(type1 arg1,type2 arg2,type3 arg3) \
 { \
 long __res; \
-__asm__ volatile ("int $0x80" \
+__asm__ volatile ("push %%ebx ; movl %2,%%ebx ; int $0x80 ; pop %%ebx" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" ((long)(arg1)),"c" ((long)(arg2)), \
-		  "d" ((long)(arg3))); \
+	: "0" (__NR_##name),"ri" ((long)(arg1)),"c" ((long)(arg2)), \
+		  "d" ((long)(arg3)) : "memory"); \
 __syscall_return(type,__res); \
 }
 
@@ -356,10 +390,10 @@ __syscall_return(type,__res); \
 type name (type1 arg1, type2 arg2, type3 arg3, type4 arg4) \
 { \
 long __res; \
-__asm__ volatile ("int $0x80" \
+__asm__ volatile ("push %%ebx ; movl %2,%%ebx ; int $0x80 ; pop %%ebx" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" ((long)(arg1)),"c" ((long)(arg2)), \
-	  "d" ((long)(arg3)),"S" ((long)(arg4))); \
+	: "0" (__NR_##name),"ri" ((long)(arg1)),"c" ((long)(arg2)), \
+	  "d" ((long)(arg3)),"S" ((long)(arg4)) : "memory"); \
 __syscall_return(type,__res); \
 } 
 
@@ -368,10 +402,12 @@ __syscall_return(type,__res); \
 type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5) \
 { \
 long __res; \
-__asm__ volatile ("int $0x80" \
+__asm__ volatile ("push %%ebx ; movl %2,%%ebx ; movl %1,%%eax ; " \
+                  "int $0x80 ; pop %%ebx" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" ((long)(arg1)),"c" ((long)(arg2)), \
-	  "d" ((long)(arg3)),"S" ((long)(arg4)),"D" ((long)(arg5))); \
+	: "i" (__NR_##name),"ri" ((long)(arg1)),"c" ((long)(arg2)), \
+	  "d" ((long)(arg3)),"S" ((long)(arg4)),"D" ((long)(arg5)) \
+	: "memory"); \
 __syscall_return(type,__res); \
 }
 
@@ -380,11 +416,14 @@ __syscall_return(type,__res); \
 type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5,type6 arg6) \
 { \
 long __res; \
-__asm__ volatile ("push %%ebp ; movl %%eax,%%ebp ; movl %1,%%eax ; int $0x80 ; pop %%ebp" \
+  struct { long __a1; long __a6; } __s = { (long)arg1, (long)arg6 }; \
+__asm__ volatile ("push %%ebp ; push %%ebx ; movl 4(%2),%%ebp ; " \
+                  "movl 0(%2),%%ebx ; movl %1,%%eax ; int $0x80 ; " \
+                  "pop %%ebx ;  pop %%ebp" \
 	: "=a" (__res) \
-	: "i" (__NR_##name),"b" ((long)(arg1)),"c" ((long)(arg2)), \
-	  "d" ((long)(arg3)),"S" ((long)(arg4)),"D" ((long)(arg5)), \
-	  "0" ((long)(arg6))); \
+	: "i" (__NR_##name),"0" ((long)(&__s)),"c" ((long)(arg2)), \
+	  "d" ((long)(arg3)),"S" ((long)(arg4)),"D" ((long)(arg5)) \
+	: "memory"); \
 __syscall_return(type,__res); \
 }
 
@@ -411,6 +450,7 @@ __syscall_return(type,__res); \
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGACTION
+#define __ARCH_WANT_SYS_RT_SIGSUSPEND
 #endif
 
 #ifdef __KERNEL_SYSCALLS__
@@ -443,7 +483,6 @@ asmlinkage int sys_clone(struct pt_regs regs);
 asmlinkage int sys_fork(struct pt_regs regs);
 asmlinkage int sys_vfork(struct pt_regs regs);
 asmlinkage int sys_pipe(unsigned long __user *fildes);
-asmlinkage int sys_ptrace(long request, long pid, long addr, long data);
 asmlinkage long sys_iopl(unsigned long unused);
 struct sigaction;
 asmlinkage long sys_rt_sigaction(int sig,

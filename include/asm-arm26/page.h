@@ -89,20 +89,6 @@ typedef unsigned long pgprot_t;
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
-/* Pure 2^n version of get_order */
-static inline int get_order(unsigned long size)
-{
-	int order;
-
-	size = (size-1) >> (PAGE_SHIFT-1);
-	order = -1;
-	do {
-		size >>= 1;
-		order++;
-	} while (size);
-	return order;
-}
-
 #include <asm/memory.h>
 
 #endif /* !__ASSEMBLY__ */
@@ -110,6 +96,10 @@ static inline int get_order(unsigned long size)
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
+#define devmem_is_allowed(x) 1
+
 #endif /* __KERNEL__ */
+
+#include <asm-generic/page.h>
 
 #endif

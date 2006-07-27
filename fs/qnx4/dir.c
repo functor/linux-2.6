@@ -61,7 +61,7 @@ static int qnx4_readdir(struct file *filp, void *dirent, filldir_t filldir)
 						ino = blknum * QNX4_INODES_PER_BLOCK + ix - 1;
 					else {
 						le  = (struct qnx4_link_info*)de;
-						ino = ( le->dl_inode_blk - 1 ) *
+						ino = ( le32_to_cpu(le->dl_inode_blk) - 1 ) *
 							QNX4_INODES_PER_BLOCK +
 							le->dl_inode_ndx;
 					}
@@ -81,7 +81,7 @@ out:
 	return 0;
 }
 
-struct file_operations qnx4_dir_operations =
+const struct file_operations qnx4_dir_operations =
 {
 	.read		= generic_read_dir,
 	.readdir	= qnx4_readdir,

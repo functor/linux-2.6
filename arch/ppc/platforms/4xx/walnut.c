@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/4xx/walnut.c
- *
  * Architecture- / platform-specific boot-time initialization code for
  * IBM PowerPC 4xx based boards. Adapted from original
  * code by Gary Thomas, Cort Dougan <cort@fsmlabs.com>, and Dan Malek
@@ -90,7 +88,7 @@ walnut_setup_arch(void)
 
 	kb_cs = kb_data + 1;
 
-	fpga_status = ioremap(WALNUT_FPGA_BASE, 8);
+	fpga_status = ioremap(PPC40x_FPGA_BASE, 8);
 	if (!fpga_status) {
 		printk(KERN_CRIT
 		       "walnut_setup_arch() fpga_status ioremap failed\n");

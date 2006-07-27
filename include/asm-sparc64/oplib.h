@@ -12,18 +12,8 @@
 #include <linux/config.h>
 #include <asm/openprom.h>
 
-/* Enumeration to describe the prom major version we have detected. */
-enum prom_major_version {
-	PROM_V0,      /* Original sun4c V0 prom */
-	PROM_V2,      /* sun4c and early sun4m V2 prom */
-	PROM_V3,      /* sun4m and later, up to sun4d/sun4e machines V3 */
-	PROM_P1275,   /* IEEE compliant ISA based Sun PROM, only sun4u */
-        PROM_AP1000,  /* actually no prom at all */
-};
-
-extern enum prom_major_version prom_vers;
-/* Revision, and firmware revision. */
-extern unsigned int prom_rev, prom_prev;
+/* OBP version string. */
+extern char prom_version[];
 
 /* Root node of the prom device tree, this stays constant after
  * initialization is complete.
@@ -37,6 +27,23 @@ extern int prom_stdin, prom_stdout;
  * initialization is complete.
  */
 extern int prom_chosen_node;
+
+/* Helper values and strings in arch/sparc64/kernel/head.S */
+extern const char prom_peer_name[];
+extern const char prom_compatible_name[];
+extern const char prom_root_compatible[];
+extern const char prom_finddev_name[];
+extern const char prom_chosen_path[];
+extern const char prom_getprop_name[];
+extern const char prom_mmu_name[];
+extern const char prom_callmethod_name[];
+extern const char prom_translate_name[];
+extern const char prom_map_name[];
+extern const char prom_unmap_name[];
+extern int prom_mmu_ihandle_cache;
+extern unsigned int prom_boot_mapped_pc;
+extern unsigned int prom_boot_mapping_mode;
+extern unsigned long prom_boot_mapping_phys_high, prom_boot_mapping_phys_low;
 
 struct linux_mlist_p1275 {
 	struct linux_mlist_p1275 *theres_more;
@@ -68,7 +75,7 @@ extern char *prom_getbootargs(void);
  * of the string is different on V0 vs. V2->higher proms.  The caller must
  * know what he/she is doing!  Returns the device descriptor, an int.
  */
-extern int prom_devopen(char *device_string);
+extern int prom_devopen(const char *device_string);
 
 /* Close a previously opened device described by the passed integer
  * descriptor.
@@ -81,27 +88,13 @@ extern int prom_devclose(int device_handle);
 extern void prom_seek(int device_handle, unsigned int seek_hival,
 		      unsigned int seek_lowval);
 
-/* Machine memory configuration routine. */
-
-/* This function returns a V0 format memory descriptor table, it has three
- * entries.  One for the total amount of physical ram on the machine, one
- * for the amount of physical ram available, and one describing the virtual
- * areas which are allocated by the prom.  So, in a sense the physical
- * available is a calculation of the total physical minus the physical mapped
- * by the prom with virtual mappings.
- *
- * These lists are returned pre-sorted, this should make your life easier
- * since the prom itself is way too lazy to do such nice things.
- */
-extern struct linux_mem_p1275 *prom_meminfo(void);
-
 /* Miscellaneous routines, don't really fit in any category per se. */
 
 /* Reboot the machine with the command line passed. */
-extern void prom_reboot(char *boot_command);
+extern void prom_reboot(const char *boot_command);
 
 /* Evaluate the forth string passed. */
-extern void prom_feval(char *forth_string);
+extern void prom_feval(const char *forth_string);
 
 /* Enter the prom, with possibility of continuation with the 'go'
  * command in newer proms.
@@ -130,15 +123,6 @@ extern void prom_setcallback(callback_func_t func_ptr);
  */
 extern unsigned char prom_get_idprom(char *idp_buffer, int idpbuf_size);
 
-/* Get the prom major version. */
-extern int prom_version(void);
-
-/* Get the prom plugin revision. */
-extern int prom_getrev(void);
-
-/* Get the prom firmware revision. */
-extern int prom_getprev(void);
-
 /* Character operations to/from the console.... */
 
 /* Non-blocking get character from console. */
@@ -154,7 +138,7 @@ extern char prom_getchar(void);
 extern void prom_putchar(char character);
 
 /* Prom's internal routines, don't use in kernel/boot code. */
-extern void prom_printf(char *fmt, ...);
+extern void prom_printf(const char *fmt, ...);
 extern void prom_write(const char *buf, unsigned int len);
 
 /* Query for input device type */
@@ -163,6 +147,8 @@ enum prom_input_device {
 	PROMDEV_IKBD,			/* input from keyboard */
 	PROMDEV_ITTYA,			/* input from ttya */
 	PROMDEV_ITTYB,			/* input from ttyb */
+	PROMDEV_IRSC,			/* input from rsc */
+	PROMDEV_IVCONS,			/* input from virtual-console */
 	PROMDEV_I_UNK,
 };
 
@@ -174,6 +160,8 @@ enum prom_output_device {
 	PROMDEV_OSCREEN,		/* to screen */
 	PROMDEV_OTTYA,			/* to ttya */
 	PROMDEV_OTTYB,			/* to ttyb */
+	PROMDEV_ORSC,			/* to rsc */
+	PROMDEV_OVCONS,			/* to virtual-console */
 	PROMDEV_O_UNK,
 };
 
@@ -181,10 +169,18 @@ extern enum prom_output_device prom_query_output_device(void);
 
 /* Multiprocessor operations... */
 #ifdef CONFIG_SMP
-/* Start the CPU with the given device tree node, context table, and context
- * at the passed program counter.
+/* Start the CPU with the given device tree node at the passed program
+ * counter with the given arg passed in via register %o0.
  */
-extern void prom_startcpu(int cpunode, unsigned long pc, unsigned long o0);
+extern void prom_startcpu(int cpunode, unsigned long pc, unsigned long arg);
+
+/* Start the CPU with the given cpu ID at the passed program
+ * counter with the given arg passed in via register %o0.
+ */
+extern void prom_startcpu_cpuid(int cpuid, unsigned long pc, unsigned long arg);
+
+/* Stop the CPU with the given cpu ID.  */
+extern void prom_stopcpu_cpuid(int cpuid);
 
 /* Stop the current CPU. */
 extern void prom_stopself(void);
@@ -215,7 +211,7 @@ extern int prom_getunumber(int syndrome_code,
 			   char *buf, int buflen);
 
 /* Retain physical memory to the caller across soft resets. */
-extern unsigned long prom_retain(char *name,
+extern unsigned long prom_retain(const char *name,
 				 unsigned long pa_low, unsigned long pa_high,
 				 long size, long align);
 
@@ -269,28 +265,28 @@ extern int prom_getsibling(int node);
 /* Get the length, at the passed node, of the given property type.
  * Returns -1 on error (ie. no such property at this node).
  */
-extern int prom_getproplen(int thisnode, char *property);
+extern int prom_getproplen(int thisnode, const char *property);
 
 /* Fetch the requested property using the given buffer.  Returns
  * the number of bytes the prom put into your buffer or -1 on error.
  */
-extern int prom_getproperty(int thisnode, char *property,
+extern int prom_getproperty(int thisnode, const char *property,
 			    char *prop_buffer, int propbuf_size);
 
 /* Acquire an integer property. */
-extern int prom_getint(int node, char *property);
+extern int prom_getint(int node, const char *property);
 
 /* Acquire an integer property, with a default value. */
-extern int prom_getintdefault(int node, char *property, int defval);
+extern int prom_getintdefault(int node, const char *property, int defval);
 
 /* Acquire a boolean property, 0=FALSE 1=TRUE. */
-extern int prom_getbool(int node, char *prop);
+extern int prom_getbool(int node, const char *prop);
 
 /* Acquire a string property, null string on error. */
-extern void prom_getstring(int node, char *prop, char *buf, int bufsize);
+extern void prom_getstring(int node, const char *prop, char *buf, int bufsize);
 
 /* Does the passed node have the given "name"? YES=1 NO=0 */
-extern int prom_nodematch(int thisnode, char *name);
+extern int prom_nodematch(int thisnode, const char *name);
 
 /* Puts in buffer a prom name in the form name@x,y or name (x for which_io 
  * and y for first regs phys address
@@ -300,7 +296,7 @@ extern int prom_getname(int node, char *buf, int buflen);
 /* Search all siblings starting at the passed node for "name" matching
  * the given string.  Returns the node on success, zero on failure.
  */
-extern int prom_searchsiblings(int node_start, char *name);
+extern int prom_searchsiblings(int node_start, const char *name);
 
 /* Return the first property type, as a string, for the given node.
  * Returns a null string on error. Buffer should be at least 32B long.
@@ -310,21 +306,21 @@ extern char *prom_firstprop(int node, char *buffer);
 /* Returns the next property after the passed property for the given
  * node.  Returns null string on failure. Buffer should be at least 32B long.
  */
-extern char *prom_nextprop(int node, char *prev_property, char *buffer);
+extern char *prom_nextprop(int node, const char *prev_property, char *buffer);
 
 /* Returns 1 if the specified node has given property. */
-extern int prom_node_has_property(int node, char *property);
+extern int prom_node_has_property(int node, const char *property);
 
 /* Returns phandle of the path specified */
-extern int prom_finddevice(char *name);
+extern int prom_finddevice(const char *name);
 
 /* Set the indicated property at the given node with the passed value.
  * Returns the number of bytes of your value that the prom took.
  */
-extern int prom_setprop(int node, char *prop_name, char *prop_value,
+extern int prom_setprop(int node, const char *prop_name, char *prop_value,
 			int value_size);
 			
-extern int prom_pathtoinode(char *path);
+extern int prom_pathtoinode(const char *path);
 extern int prom_inst2pkg(int);
 
 /* CPU probing helpers.  */
@@ -333,8 +329,9 @@ int cpu_find_by_mid(int mid, int *prom_node);
 
 /* Client interface level routines. */
 extern void prom_set_trap_table(unsigned long tba);
+extern void prom_set_trap_table_sun4v(unsigned long tba, unsigned long mmfsa);
 
-extern long p1275_cmd (char *, long, ...);
+extern long p1275_cmd(const char *, long, ...);
 				   
 
 #if 0

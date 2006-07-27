@@ -10,7 +10,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/fs.h>
 #include <linux/namespace.h>
 #include <linux/namei.h>
@@ -132,10 +131,12 @@ static inline struct dl_info *__lookup_dl_info(struct super_block *sb, xid_t xid
 {
 	struct hlist_head *head = &dl_info_hash[__hashval(sb, xid)];
 	struct hlist_node *pos;
+	struct dl_info *dli;
 
-	hlist_for_each_rcu(pos, head) {
-		struct dl_info *dli =
-			hlist_entry(pos, struct dl_info, dl_hlist);
+	hlist_for_each_entry_rcu(dli, pos, head, dl_hlist) {
+//	hlist_for_each_rcu(pos, head) {
+//		struct dl_info *dli =
+//			hlist_entry(pos, struct dl_info, dl_hlist);
 
 		if (dli->dl_xid == xid && dli->dl_sb == sb) {
 			return dli;
@@ -181,7 +182,7 @@ void rcu_free_dl_info(struct rcu_head *head)
 
 
 
-int do_addrem_dlimit(uint32_t id, const char __user *name,
+static int do_addrem_dlimit(uint32_t id, const char __user *name,
 	uint32_t flags, int add)
 {
 	struct nameidata nd;
@@ -493,6 +494,12 @@ void vx_vsi_statfs(struct super_block *sb, struct kstatfs *buf)
 	/* reduce max inodes available to limit */
 	if (buf->f_files > dli->dl_inodes_total)
 		buf->f_files = dli->dl_inodes_total;
+
+	/* inode hack for reiserfs */
+	if ((buf->f_files == 0) && (dli->dl_inodes_total > 0)) {
+		buf->f_files = dli->dl_inodes_total;
+		buf->f_ffree = dli->dl_inodes_total;
+	}
 
 	ifree = dli->dl_inodes_total - dli->dl_inodes_used;
 	/* reduce free inodes to min */

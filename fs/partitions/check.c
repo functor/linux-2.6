@@ -35,6 +35,7 @@
 #include "ibm.h"
 #include "ultrix.h"
 #include "efi.h"
+#include "karma.h"
 
 #ifdef CONFIG_BLK_DEV_MD
 extern void md_autodetect_dev(dev_t dev);
@@ -79,9 +80,6 @@ static int (*check_part[])(struct parsed_partitions *, struct block_device *) = 
 #ifdef CONFIG_LDM_PARTITION
 	ldm_partition,		/* this must come before msdos */
 #endif
-#ifdef CONFIG_NEC98_PARTITION
-	nec98_partition,	/* must be come before `msdos_partition' */
-#endif
 #ifdef CONFIG_MSDOS_PARTITION
 	msdos_partition,
 #endif
@@ -105,6 +103,9 @@ static int (*check_part[])(struct parsed_partitions *, struct block_device *) = 
 #endif
 #ifdef CONFIG_IBM_PARTITION
 	ibm_partition,
+#endif
+#ifdef CONFIG_KARMA_PARTITION
+	karma_partition,
 #endif
 	NULL
 };
@@ -195,6 +196,7 @@ check_partition(struct gendisk *hd, struct block_device *bdev)
 struct part_attribute {
 	struct attribute attr;
 	ssize_t (*show)(struct hd_struct *,char *);
+	ssize_t (*store)(struct hd_struct *,const char *, size_t);
 };
 
 static ssize_t 
@@ -204,14 +206,33 @@ part_attr_show(struct kobject * kobj, struct attribute * attr, char * page)
 	struct part_attribute * part_attr = container_of(attr,struct part_attribute,attr);
 	ssize_t ret = 0;
 	if (part_attr->show)
-		ret = part_attr->show(p,page);
+		ret = part_attr->show(p, page);
+	return ret;
+}
+static ssize_t
+part_attr_store(struct kobject * kobj, struct attribute * attr,
+		const char *page, size_t count)
+{
+	struct hd_struct * p = container_of(kobj,struct hd_struct,kobj);
+	struct part_attribute * part_attr = container_of(attr,struct part_attribute,attr);
+	ssize_t ret = 0;
+
+	if (part_attr->store)
+		ret = part_attr->store(p, page, count);
 	return ret;
 }
 
 static struct sysfs_ops part_sysfs_ops = {
 	.show	=	part_attr_show,
+	.store	=	part_attr_store,
 };
 
+static ssize_t part_uevent_store(struct hd_struct * p,
+				 const char *page, size_t count)
+{
+	kobject_uevent(&p->kobj, KOBJ_ADD);
+	return count;
+}
 static ssize_t part_dev_read(struct hd_struct * p, char *page)
 {
 	struct gendisk *disk = container_of(p->kobj.parent,struct gendisk,kobj);
@@ -229,9 +250,13 @@ static ssize_t part_size_read(struct hd_struct * p, char *page)
 static ssize_t part_stat_read(struct hd_struct * p, char *page)
 {
 	return sprintf(page, "%8u %8llu %8u %8llu\n",
-		       p->reads, (unsigned long long)p->read_sectors,
-		       p->writes, (unsigned long long)p->write_sectors);
+		       p->ios[0], (unsigned long long)p->sectors[0],
+		       p->ios[1], (unsigned long long)p->sectors[1]);
 }
+static struct part_attribute part_attr_uevent = {
+	.attr = {.name = "uevent", .mode = S_IWUSR },
+	.store	= part_uevent_store
+};
 static struct part_attribute part_attr_dev = {
 	.attr = {.name = "dev", .mode = S_IRUGO },
 	.show	= part_dev_read
@@ -250,6 +275,7 @@ static struct part_attribute part_attr_stat = {
 };
 
 static struct attribute * default_attrs[] = {
+	&part_attr_uevent.attr,
 	&part_attr_dev.attr,
 	&part_attr_start.attr,
 	&part_attr_size.attr,
@@ -271,6 +297,25 @@ struct kobj_type ktype_part = {
 	.sysfs_ops	= &part_sysfs_ops,
 };
 
+static inline void partition_sysfs_add_subdir(struct hd_struct *p)
+{
+	struct kobject *k;
+
+	k = kobject_get(&p->kobj);
+	p->holder_dir = kobject_add_dir(k, "holders");
+	kobject_put(k);
+}
+
+static inline void disk_sysfs_add_subdirs(struct gendisk *disk)
+{
+	struct kobject *k;
+
+	k = kobject_get(&disk->kobj);
+	disk->holder_dir = kobject_add_dir(k, "holders");
+	disk->slave_dir = kobject_add_dir(k, "slaves");
+	kobject_put(k);
+}
+
 void delete_partition(struct gendisk *disk, int part)
 {
 	struct hd_struct *p = disk->part[part-1];
@@ -281,9 +326,14 @@ void delete_partition(struct gendisk *disk, int part)
 	disk->part[part-1] = NULL;
 	p->start_sect = 0;
 	p->nr_sects = 0;
-	p->reads = p->writes = p->read_sectors = p->write_sectors = 0;
+	p->ios[0] = p->ios[1] = 0;
+	p->sectors[0] = p->sectors[1] = 0;
 	devfs_remove("%s/part%d", disk->devfs_name, part);
-	kobject_unregister(&p->kobj);
+	if (p->holder_dir)
+		kobject_unregister(p->holder_dir);
+	kobject_uevent(&p->kobj, KOBJ_REMOVE);
+	kobject_del(&p->kobj);
+	kobject_put(&p->kobj);
 }
 
 void add_partition(struct gendisk *disk, int part, sector_t start, sector_t len)
@@ -309,16 +359,44 @@ void add_partition(struct gendisk *disk, int part, sector_t start, sector_t len)
 		snprintf(p->kobj.name,KOBJ_NAME_LEN,"%s%d",disk->kobj.name,part);
 	p->kobj.parent = &disk->kobj;
 	p->kobj.ktype = &ktype_part;
-	kobject_register(&p->kobj);
+	kobject_init(&p->kobj);
+	kobject_add(&p->kobj);
+	if (!disk->part_uevent_suppress)
+		kobject_uevent(&p->kobj, KOBJ_ADD);
+	partition_sysfs_add_subdir(p);
 	disk->part[part-1] = p;
+}
+
+static char *make_block_name(struct gendisk *disk)
+{
+	char *name;
+	static char *block_str = "block:";
+	int size;
+	char *s;
+
+	size = strlen(block_str) + strlen(disk->disk_name) + 1;
+	name = kmalloc(size, GFP_KERNEL);
+	if (!name)
+		return NULL;
+	strcpy(name, block_str);
+	strcat(name, disk->disk_name);
+	/* ewww... some of these buggers have / in name... */
+	s = strchr(name, '/');
+	if (s)
+		*s = '!';
+	return name;
 }
 
 static void disk_sysfs_symlinks(struct gendisk *disk)
 {
 	struct device *target = get_device(disk->driverfs_dev);
 	if (target) {
+		char *disk_name = make_block_name(disk);
 		sysfs_create_link(&disk->kobj,&target->kobj,"device");
-		sysfs_create_link(&target->kobj,&disk->kobj,"block");
+		if (disk_name) {
+			sysfs_create_link(&target->kobj,&disk->kobj,disk_name);
+			kfree(disk_name);
+		}
 	}
 }
 
@@ -327,6 +405,8 @@ void register_disk(struct gendisk *disk)
 {
 	struct block_device *bdev;
 	char *s;
+	int i;
+	struct hd_struct *p;
 	int err;
 
 	strlcpy(disk->kobj.name,disk->disk_name,KOBJ_NAME_LEN);
@@ -337,13 +417,13 @@ void register_disk(struct gendisk *disk)
 	if ((err = kobject_add(&disk->kobj)))
 		return;
 	disk_sysfs_symlinks(disk);
-	kobject_hotplug(&disk->kobj, KOBJ_ADD);
+ 	disk_sysfs_add_subdirs(disk);
 
 	/* No minors to use for partitions */
 	if (disk->minors == 1) {
 		if (disk->devfs_name[0] != '\0')
 			devfs_add_disk(disk);
-		return;
+		goto exit;
 	}
 
 	/* always add handle for the whole disk */
@@ -351,16 +431,32 @@ void register_disk(struct gendisk *disk)
 
 	/* No such device (e.g., media were just removed) */
 	if (!get_capacity(disk))
-		return;
+		goto exit;
 
 	bdev = bdget_disk(disk, 0);
 	if (!bdev)
-		return;
+		goto exit;
 
+	/* scan partition table, but suppress uevents */
 	bdev->bd_invalidated = 1;
-	if (blkdev_get(bdev, FMODE_READ, 0) < 0)
-		return;
+	disk->part_uevent_suppress = 1;
+	err = blkdev_get(bdev, FMODE_READ, 0);
+	disk->part_uevent_suppress = 0;
+	if (err < 0)
+		goto exit;
 	blkdev_put(bdev);
+
+exit:
+	/* announce disk after possible partitions are already created */
+	kobject_uevent(&disk->kobj, KOBJ_ADD);
+
+	/* announce possible partitions */
+	for (i = 1; i < disk->minors; i++) {
+		p = disk->part[i-1];
+		if (!p || !p->nr_sects)
+			continue;
+		kobject_uevent(&p->kobj, KOBJ_ADD);
+	}
 }
 
 int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
@@ -433,15 +529,24 @@ void del_gendisk(struct gendisk *disk)
 	disk->flags &= ~GENHD_FL_UP;
 	unlink_gendisk(disk);
 	disk_stat_set_all(disk, 0);
-	disk->stamp = disk->stamp_idle = 0;
+	disk->stamp = 0;
 
 	devfs_remove_disk(disk);
 
+	kobject_uevent(&disk->kobj, KOBJ_REMOVE);
+	if (disk->holder_dir)
+		kobject_unregister(disk->holder_dir);
+	if (disk->slave_dir)
+		kobject_unregister(disk->slave_dir);
 	if (disk->driverfs_dev) {
+		char *disk_name = make_block_name(disk);
 		sysfs_remove_link(&disk->kobj, "device");
-		sysfs_remove_link(&disk->driverfs_dev->kobj, "block");
+		if (disk_name) {
+			sysfs_remove_link(&disk->driverfs_dev->kobj, disk_name);
+			kfree(disk_name);
+		}
 		put_device(disk->driverfs_dev);
+		disk->driverfs_dev = NULL;
 	}
-	kobject_hotplug(&disk->kobj, KOBJ_REMOVE);
 	kobject_del(&disk->kobj);
 }

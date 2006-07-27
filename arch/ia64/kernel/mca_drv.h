@@ -6,7 +6,7 @@
  * Copyright (C) Hidetoshi Seto (seto.hidetoshi@jp.fujitsu.com)
  */
 /*
- * Processor error section: 
+ * Processor error section:
  *
  *  +-sal_log_processor_info_t *info-------------+
  *  | sal_log_section_hdr_t header;              |
@@ -111,3 +111,10 @@ typedef struct slidx_table {
 	slidx_foreach_entry(__pos, &((slidx)->sec)) { __count++; }\
 	__count; })
 
+struct mca_table_entry {
+	int start_addr;	/* location-relative starting address of MCA recoverable range */
+	int end_addr;	/* location-relative ending address of MCA recoverable range */
+};
+
+extern const struct mca_table_entry *search_mca_tables (unsigned long addr);
+extern int mca_recover_range(unsigned long);

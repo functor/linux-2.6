@@ -83,6 +83,7 @@
 #include <linux/if_arp.h>
 #include <linux/init.h>
 #include <linux/if_shaper.h>
+#include <linux/jiffies.h>
 
 #include <net/dst.h>
 #include <net/arp.h>
@@ -135,10 +136,8 @@ static int shaper_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct shaper *shaper = dev->priv;
  	struct sk_buff *ptr;
-   
-	if (down_trylock(&shaper->sem))
-		return -1;
-
+  
+	spin_lock(&shaper->lock);
  	ptr=shaper->sendq.prev;
  	
  	/*
@@ -158,52 +157,6 @@ static int shaper_start_xmit(struct sk_buff *skb, struct net_device *dev)
  	 
  	SHAPERCB(skb)->shapelen= shaper_clocks(shaper,skb);
  	
-#ifdef SHAPER_COMPLEX /* and broken.. */
-
- 	while(ptr && ptr!=(struct sk_buff *)&shaper->sendq)
- 	{
- 		if(ptr->pri<skb->pri 
- 			&& jiffies - SHAPERCB(ptr)->shapeclock < SHAPER_MAXSLIP)
- 		{
- 			struct sk_buff *tmp=ptr->prev;
-
- 			/*
- 			 *	It goes before us therefore we slip the length
- 			 *	of the new frame.
- 			 */
-
- 			SHAPERCB(ptr)->shapeclock+=SHAPERCB(skb)->shapelen;
- 			SHAPERCB(ptr)->shapelatency+=SHAPERCB(skb)->shapelen;
-
- 			/*
- 			 *	The packet may have slipped so far back it
- 			 *	fell off.
- 			 */
- 			if(SHAPERCB(ptr)->shapelatency > SHAPER_LATENCY)
- 			{
- 				skb_unlink(ptr);
- 				dev_kfree_skb(ptr);
- 			}
- 			ptr=tmp;
- 		}
- 		else
- 			break;
- 	}
- 	if(ptr==NULL || ptr==(struct sk_buff *)&shaper->sendq)
- 		skb_queue_head(&shaper->sendq,skb);
- 	else
- 	{
- 		struct sk_buff *tmp;
- 		/*
- 		 *	Set the packet clock out time according to the
- 		 *	frames ahead. Im sure a bit of thought could drop
- 		 *	this loop.
- 		 */
- 		for(tmp=skb_peek(&shaper->sendq); tmp!=NULL && tmp!=ptr; tmp=tmp->next)
- 			SHAPERCB(skb)->shapeclock+=tmp->shapelen;
- 		skb_append(ptr,skb);
- 	}
-#else
 	{
 		struct sk_buff *tmp;
 		/*
@@ -216,13 +169,13 @@ static int shaper_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		/*
 		 *	Queue over time. Spill packet.
 		 */
-		if(SHAPERCB(skb)->shapeclock-jiffies > SHAPER_LATENCY) {
+		if(time_after(SHAPERCB(skb)->shapeclock,jiffies + SHAPER_LATENCY)) {
 			dev_kfree_skb(skb);
 			shaper->stats.tx_dropped++;
 		} else
 			skb_queue_tail(&shaper->sendq, skb);
 	}
-#endif 	
+
 	if(sh_debug)
  		printk("Frame queued.\n");
  	if(skb_queue_len(&shaper->sendq)>SHAPER_QLEN)
@@ -232,7 +185,7 @@ static int shaper_start_xmit(struct sk_buff *skb, struct net_device *dev)
                 shaper->stats.collisions++;
  	}
 	shaper_kick(shaper);
-	up(&shaper->sem);
+	spin_unlock(&shaper->lock);
  	return 0;
 }
 
@@ -271,11 +224,9 @@ static void shaper_timer(unsigned long data)
 {
 	struct shaper *shaper = (struct shaper *)data;
 
-	if (!down_trylock(&shaper->sem)) {
-		shaper_kick(shaper);
-		up(&shaper->sem);
-	} else
-		mod_timer(&shaper->timer, jiffies);
+	spin_lock(&shaper->lock);
+	shaper_kick(shaper);
+	spin_unlock(&shaper->lock);
 }
 
 /*
@@ -306,7 +257,7 @@ static void shaper_kick(struct shaper *shaper)
 			 *	Pull the frame and get interrupts back on.
 			 */
 			 
-			skb_unlink(skb);
+			skb_unlink(skb, &shaper->sendq);
 			if (shaper->recovery < 
 			    SHAPERCB(skb)->shapeclock + SHAPERCB(skb)->shapelen)
 				shaper->recovery = SHAPERCB(skb)->shapeclock + SHAPERCB(skb)->shapelen;
@@ -330,21 +281,6 @@ static void shaper_kick(struct shaper *shaper)
 		mod_timer(&shaper->timer, SHAPERCB(skb)->shapeclock);
 }
 
-
-/*
- *	Flush the shaper queues on a closedown
- */
- 
-static void shaper_flush(struct shaper *shaper)
-{
-	struct sk_buff *skb;
-
-	down(&shaper->sem);
-	while((skb=skb_dequeue(&shaper->sendq))!=NULL)
-		dev_kfree_skb(skb);
-	shaper_kick(shaper);
-	up(&shaper->sem);
-}
 
 /*
  *	Bring the interface up. We just disallow this until a 
@@ -375,7 +311,15 @@ static int shaper_open(struct net_device *dev)
 static int shaper_close(struct net_device *dev)
 {
 	struct shaper *shaper=dev->priv;
-	shaper_flush(shaper);
+	struct sk_buff *skb;
+
+	while ((skb = skb_dequeue(&shaper->sendq)) != NULL)
+		dev_kfree_skb(skb);
+
+	spin_lock_bh(&shaper->lock);
+	shaper_kick(shaper);
+	spin_unlock_bh(&shaper->lock);
+
 	del_timer_sync(&shaper->timer);
 	return 0;
 }
@@ -576,6 +520,7 @@ static void shaper_init_priv(struct net_device *dev)
 	init_timer(&sh->timer);
 	sh->timer.function=shaper_timer;
 	sh->timer.data=(unsigned long)sh;
+	spin_lock_init(&sh->lock);
 }
 
 /*

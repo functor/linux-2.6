@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2004, 2005 Topspin Communications.  All rights reserved.
+ * Copyright (c) 2005 Sun Microsystems, Inc. All rights reserved.
+ * Copyright (c) 2005 Mellanox Technologies. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -33,7 +35,6 @@
  */
 
 #include <linux/config.h>
-#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/errno.h>
@@ -50,6 +51,14 @@ MODULE_AUTHOR("Roland Dreier");
 MODULE_DESCRIPTION("Mellanox InfiniBand HCA low-level driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(DRV_VERSION);
+
+#ifdef CONFIG_INFINIBAND_MTHCA_DEBUG
+
+int mthca_debug_level = 0;
+module_param_named(debug_level, mthca_debug_level, int, 0644);
+MODULE_PARM_DESC(debug_level, "Enable debug tracing if > 0");
+
+#endif /* CONFIG_INFINIBAND_MTHCA_DEBUG */
 
 #ifdef CONFIG_PCI_MSI
 
@@ -68,8 +77,12 @@ MODULE_PARM_DESC(msi, "attempt to use MSI if nonzero");
 
 #endif /* CONFIG_PCI_MSI */
 
+static int tune_pci = 0;
+module_param(tune_pci, int, 0444);
+MODULE_PARM_DESC(tune_pci, "increase PCI burst from the default set by BIOS if nonzero");
+
 static const char mthca_version[] __devinitdata =
-	"ib_mthca: Mellanox InfiniBand HCA driver v"
+	DRV_NAME ": Mellanox InfiniBand HCA driver v"
 	DRV_VERSION " (" DRV_RELDATE ")\n";
 
 static struct mthca_profile default_profile = {
@@ -88,6 +101,9 @@ static int __devinit mthca_tune_pci(struct mthca_dev *mdev)
 {
 	int cap;
 	u16 val;
+
+	if (!tune_pci)
+		return 0;
 
 	/* First try to max out Read Byte Count */
 	cap = pci_find_capability(mdev->pdev, PCI_CAP_ID_PCIX);
@@ -154,6 +170,13 @@ static int __devinit mthca_dev_lim(struct mthca_dev *mdev, struct mthca_dev_lim 
 		return -ENODEV;
 	}
 
+	if (dev_lim->uar_size > pci_resource_len(mdev->pdev, 2)) {
+		mthca_err(mdev, "HCA reported UAR size of 0x%x bigger than "
+			  "PCI resource 2 size of 0x%lx, aborting.\n",
+			  dev_lim->uar_size, pci_resource_len(mdev->pdev, 2));
+		return -ENODEV;
+	}
+
 	mdev->limits.num_ports      	= dev_lim->num_ports;
 	mdev->limits.vl_cap             = dev_lim->max_vl;
 	mdev->limits.mtu_cap            = dev_lim->max_mtu;
@@ -161,15 +184,41 @@ static int __devinit mthca_dev_lim(struct mthca_dev *mdev, struct mthca_dev_lim 
 	mdev->limits.pkey_table_len 	= dev_lim->max_pkeys;
 	mdev->limits.local_ca_ack_delay = dev_lim->local_ca_ack_delay;
 	mdev->limits.max_sg             = dev_lim->max_sg;
+	mdev->limits.max_wqes           = dev_lim->max_qp_sz;
+	mdev->limits.max_qp_init_rdma   = dev_lim->max_requester_per_qp;
 	mdev->limits.reserved_qps       = dev_lim->reserved_qps;
+	mdev->limits.max_srq_wqes       = dev_lim->max_srq_sz;
 	mdev->limits.reserved_srqs      = dev_lim->reserved_srqs;
 	mdev->limits.reserved_eecs      = dev_lim->reserved_eecs;
+	mdev->limits.max_desc_sz        = dev_lim->max_desc_sz;
+	mdev->limits.max_srq_sge	= mthca_max_srq_sge(mdev);
+	/*
+	 * Subtract 1 from the limit because we need to allocate a
+	 * spare CQE so the HCA HW can tell the difference between an
+	 * empty CQ and a full CQ.
+	 */
+	mdev->limits.max_cqes           = dev_lim->max_cq_sz - 1;
 	mdev->limits.reserved_cqs       = dev_lim->reserved_cqs;
 	mdev->limits.reserved_eqs       = dev_lim->reserved_eqs;
 	mdev->limits.reserved_mtts      = dev_lim->reserved_mtts;
 	mdev->limits.reserved_mrws      = dev_lim->reserved_mrws;
 	mdev->limits.reserved_uars      = dev_lim->reserved_uars;
 	mdev->limits.reserved_pds       = dev_lim->reserved_pds;
+	mdev->limits.port_width_cap     = dev_lim->max_port_width;
+	mdev->limits.page_size_cap      = ~(u32) (dev_lim->min_page_sz - 1);
+	mdev->limits.flags              = dev_lim->flags;
+	/*
+	 * For old FW that doesn't return static rate support, use a
+	 * value of 0x3 (only static rate values of 0 or 1 are handled),
+	 * except on Sinai, where even old FW can handle static rate
+	 * values of 2 and 3.
+	 */
+	if (dev_lim->stat_rate_support)
+		mdev->limits.stat_rate_support = dev_lim->stat_rate_support;
+	else if (mdev->mthca_flags & MTHCA_FLAG_SINAI_OPT)
+		mdev->limits.stat_rate_support = 0xf;
+	else
+		mdev->limits.stat_rate_support = 0x3;
 
 	/* IB_DEVICE_RESIZE_MAX_WR not supported by driver.
 	   May be doable since hardware supports it for SRQ.
@@ -211,7 +260,6 @@ static int __devinit mthca_init_tavor(struct mthca_dev *mdev)
 	struct mthca_dev_lim        dev_lim;
 	struct mthca_profile        profile;
 	struct mthca_init_hca_param init_hca;
-	struct mthca_adapter        adapter;
 
 	err = mthca_SYS_EN(mdev, &status);
 	if (err) {
@@ -248,10 +296,16 @@ static int __devinit mthca_init_tavor(struct mthca_dev *mdev)
 	}
 
 	err = mthca_dev_lim(mdev, &dev_lim);
+	if (err) {
+		mthca_err(mdev, "QUERY_DEV_LIM command failed, aborting.\n");
+		goto err_disable;
+	}
 
 	profile = default_profile;
 	profile.num_uar   = dev_lim.uar_size / PAGE_SIZE;
 	profile.uarc_size = 0;
+	if (mdev->mthca_flags & MTHCA_FLAG_SRQ)
+		profile.num_srq = dev_lim.max_srqs;
 
 	err = mthca_make_profile(mdev, &profile, &dev_lim, &init_hca);
 	if (err < 0)
@@ -269,25 +323,7 @@ static int __devinit mthca_init_tavor(struct mthca_dev *mdev)
 		goto err_disable;
 	}
 
-	err = mthca_QUERY_ADAPTER(mdev, &adapter, &status);
-	if (err) {
-		mthca_err(mdev, "QUERY_ADAPTER command failed, aborting.\n");
-		goto err_close;
-	}
-	if (status) {
-		mthca_err(mdev, "QUERY_ADAPTER returned status 0x%02x, "
-			  "aborting.\n", status);
-		err = -EINVAL;
-		goto err_close;
-	}
-
-	mdev->eq_table.inta_pin = adapter.inta_pin;
-	mdev->rev_id            = adapter.revision_id;
-
 	return 0;
-
-err_close:
-	mthca_CLOSE_HCA(mdev, 0, &status);
 
 err_disable:
 	mthca_SYS_DIS(mdev, &status);
@@ -441,13 +477,27 @@ static int __devinit mthca_init_icm(struct mthca_dev *mdev,
 	}
 
        mdev->cq_table.table = mthca_alloc_icm_table(mdev, init_hca->cqc_base,
-						     dev_lim->cqc_entry_sz,
-						     mdev->limits.num_cqs,
-						     mdev->limits.reserved_cqs, 0);
+						    dev_lim->cqc_entry_sz,
+						    mdev->limits.num_cqs,
+						    mdev->limits.reserved_cqs, 0);
 	if (!mdev->cq_table.table) {
 		mthca_err(mdev, "Failed to map CQ context memory, aborting.\n");
 		err = -ENOMEM;
 		goto err_unmap_rdb;
+	}
+
+	if (mdev->mthca_flags & MTHCA_FLAG_SRQ) {
+		mdev->srq_table.table =
+			mthca_alloc_icm_table(mdev, init_hca->srqc_base,
+					      dev_lim->srq_entry_sz,
+					      mdev->limits.num_srqs,
+					      mdev->limits.reserved_srqs, 0);
+		if (!mdev->srq_table.table) {
+			mthca_err(mdev, "Failed to map SRQ context memory, "
+				  "aborting.\n");
+			err = -ENOMEM;
+			goto err_unmap_cq;
+		}
 	}
 
 	/*
@@ -465,10 +515,14 @@ static int __devinit mthca_init_icm(struct mthca_dev *mdev,
 	if (!mdev->mcg_table.table) {
 		mthca_err(mdev, "Failed to map MCG context memory, aborting.\n");
 		err = -ENOMEM;
-		goto err_unmap_cq;
+		goto err_unmap_srq;
 	}
 
 	return 0;
+
+err_unmap_srq:
+	if (mdev->mthca_flags & MTHCA_FLAG_SRQ)
+		mthca_free_icm_table(mdev, mdev->srq_table.table);
 
 err_unmap_cq:
 	mthca_free_icm_table(mdev, mdev->cq_table.table);
@@ -500,12 +554,30 @@ err_free_aux:
 	return err;
 }
 
+static void mthca_free_icms(struct mthca_dev *mdev)
+{
+	u8 status;
+
+	mthca_free_icm_table(mdev, mdev->mcg_table.table);
+	if (mdev->mthca_flags & MTHCA_FLAG_SRQ)
+		mthca_free_icm_table(mdev, mdev->srq_table.table);
+	mthca_free_icm_table(mdev, mdev->cq_table.table);
+	mthca_free_icm_table(mdev, mdev->qp_table.rdb_table);
+	mthca_free_icm_table(mdev, mdev->qp_table.eqp_table);
+	mthca_free_icm_table(mdev, mdev->qp_table.qp_table);
+	mthca_free_icm_table(mdev, mdev->mr_table.mpt_table);
+	mthca_free_icm_table(mdev, mdev->mr_table.mtt_table);
+	mthca_unmap_eq_icm(mdev);
+
+	mthca_UNMAP_ICM_AUX(mdev, &status);
+	mthca_free_icm(mdev, mdev->fw.arbel.aux_icm);
+}
+
 static int __devinit mthca_init_arbel(struct mthca_dev *mdev)
 {
 	struct mthca_dev_lim        dev_lim;
 	struct mthca_profile        profile;
 	struct mthca_init_hca_param init_hca;
-	struct mthca_adapter        adapter;
 	u64 icm_size;
 	u8 status;
 	int err;
@@ -550,6 +622,8 @@ static int __devinit mthca_init_arbel(struct mthca_dev *mdev)
 	profile = default_profile;
 	profile.num_uar  = dev_lim.uar_size / PAGE_SIZE;
 	profile.num_udav = 0;
+	if (mdev->mthca_flags & MTHCA_FLAG_SRQ)
+		profile.num_srq = dev_lim.max_srqs;
 
 	icm_size = mthca_make_profile(mdev, &profile, &dev_lim, &init_hca);
 	if ((int) icm_size < 0) {
@@ -573,34 +647,10 @@ static int __devinit mthca_init_arbel(struct mthca_dev *mdev)
 		goto err_free_icm;
 	}
 
-	err = mthca_QUERY_ADAPTER(mdev, &adapter, &status);
-	if (err) {
-		mthca_err(mdev, "QUERY_ADAPTER command failed, aborting.\n");
-		goto err_free_icm;
-	}
-	if (status) {
-		mthca_err(mdev, "QUERY_ADAPTER returned status 0x%02x, "
-			  "aborting.\n", status);
-		err = -EINVAL;
-		goto err_free_icm;
-	}
-
-	mdev->eq_table.inta_pin = adapter.inta_pin;
-	mdev->rev_id            = adapter.revision_id;
-
 	return 0;
 
 err_free_icm:
-	mthca_free_icm_table(mdev, mdev->cq_table.table);
-	mthca_free_icm_table(mdev, mdev->qp_table.rdb_table);
-	mthca_free_icm_table(mdev, mdev->qp_table.eqp_table);
-	mthca_free_icm_table(mdev, mdev->qp_table.qp_table);
-	mthca_free_icm_table(mdev, mdev->mr_table.mpt_table);
-	mthca_free_icm_table(mdev, mdev->mr_table.mtt_table);
-	mthca_unmap_eq_icm(mdev);
-
-	mthca_UNMAP_ICM_AUX(mdev, &status);
-	mthca_free_icm(mdev, mdev->fw.arbel.aux_icm);
+	mthca_free_icms(mdev);
 
 err_stop_fw:
 	mthca_UNMAP_FA(mdev, &status);
@@ -613,12 +663,59 @@ err_disable:
 	return err;
 }
 
+static void mthca_close_hca(struct mthca_dev *mdev)
+{
+	u8 status;
+
+	mthca_CLOSE_HCA(mdev, 0, &status);
+
+	if (mthca_is_memfree(mdev)) {
+		mthca_free_icms(mdev);
+
+		mthca_UNMAP_FA(mdev, &status);
+		mthca_free_icm(mdev, mdev->fw.arbel.fw_icm);
+
+		if (!(mdev->mthca_flags & MTHCA_FLAG_NO_LAM))
+			mthca_DISABLE_LAM(mdev, &status);
+	} else
+		mthca_SYS_DIS(mdev, &status);
+}
+
 static int __devinit mthca_init_hca(struct mthca_dev *mdev)
 {
+	u8 status;
+	int err;
+	struct mthca_adapter adapter;
+
 	if (mthca_is_memfree(mdev))
-		return mthca_init_arbel(mdev);
+		err = mthca_init_arbel(mdev);
 	else
-		return mthca_init_tavor(mdev);
+		err = mthca_init_tavor(mdev);
+
+	if (err)
+		return err;
+
+	err = mthca_QUERY_ADAPTER(mdev, &adapter, &status);
+	if (err) {
+		mthca_err(mdev, "QUERY_ADAPTER command failed, aborting.\n");
+		goto err_close;
+	}
+	if (status) {
+		mthca_err(mdev, "QUERY_ADAPTER returned status 0x%02x, "
+			  "aborting.\n", status);
+		err = -EINVAL;
+		goto err_close;
+	}
+
+	mdev->eq_table.inta_pin = adapter.inta_pin;
+	mdev->rev_id            = adapter.revision_id;
+	memcpy(mdev->board_id, adapter.board_id, sizeof mdev->board_id);
+
+	return 0;
+
+err_close:
+	mthca_close_hca(mdev);
+	return err;
 }
 
 static int __devinit mthca_setup_hca(struct mthca_dev *dev)
@@ -664,7 +761,7 @@ static int __devinit mthca_setup_hca(struct mthca_dev *dev)
 		goto err_pd_table_free;
 	}
 
-	err = mthca_pd_alloc(dev, &dev->driver_pd);
+	err = mthca_pd_alloc(dev, 1, &dev->driver_pd);
 	if (err) {
 		mthca_err(dev, "Failed to create driver PD, "
 			  "aborting.\n");
@@ -708,11 +805,18 @@ static int __devinit mthca_setup_hca(struct mthca_dev *dev)
 		goto err_cmd_poll;
 	}
 
+	err = mthca_init_srq_table(dev);
+	if (err) {
+		mthca_err(dev, "Failed to initialize "
+			  "shared receive queue table, aborting.\n");
+		goto err_cq_table_free;
+	}
+
 	err = mthca_init_qp_table(dev);
 	if (err) {
 		mthca_err(dev, "Failed to initialize "
 			  "queue pair table, aborting.\n");
-		goto err_cq_table_free;
+		goto err_srq_table_free;
 	}
 
 	err = mthca_init_av_table(dev);
@@ -736,6 +840,9 @@ err_av_table_free:
 
 err_qp_table_free:
 	mthca_cleanup_qp_table(dev);
+
+err_srq_table_free:
+	mthca_cleanup_srq_table(dev);
 
 err_cq_table_free:
 	mthca_cleanup_cq_table(dev);
@@ -843,33 +950,6 @@ static int __devinit mthca_enable_msi_x(struct mthca_dev *mdev)
 	return 0;
 }
 
-static void mthca_close_hca(struct mthca_dev *mdev)
-{
-	u8 status;
-
-	mthca_CLOSE_HCA(mdev, 0, &status);
-
-	if (mthca_is_memfree(mdev)) {
-		mthca_free_icm_table(mdev, mdev->cq_table.table);
-		mthca_free_icm_table(mdev, mdev->qp_table.rdb_table);
-		mthca_free_icm_table(mdev, mdev->qp_table.eqp_table);
-		mthca_free_icm_table(mdev, mdev->qp_table.qp_table);
-		mthca_free_icm_table(mdev, mdev->mr_table.mpt_table);
-		mthca_free_icm_table(mdev, mdev->mr_table.mtt_table);
-		mthca_unmap_eq_icm(mdev);
-
-		mthca_UNMAP_ICM_AUX(mdev, &status);
-		mthca_free_icm(mdev, mdev->fw.arbel.aux_icm);
-
-		mthca_UNMAP_FA(mdev, &status);
-		mthca_free_icm(mdev, mdev->fw.arbel.fw_icm);
-
-		if (!(mdev->mthca_flags & MTHCA_FLAG_NO_LAM))
-			mthca_DISABLE_LAM(mdev, &status);
-	} else
-		mthca_SYS_DIS(mdev, &status);
-}
-
 /* Types of supported HCA */
 enum {
 	TAVOR,			/* MT23108                        */
@@ -883,13 +963,19 @@ enum {
 
 static struct {
 	u64 latest_fw;
-	int is_memfree;
-	int is_pcie;
+	u32 flags;
 } mthca_hca_table[] = {
-	[TAVOR]        = { .latest_fw = MTHCA_FW_VER(3, 3, 2), .is_memfree = 0, .is_pcie = 0 },
-	[ARBEL_COMPAT] = { .latest_fw = MTHCA_FW_VER(4, 6, 2), .is_memfree = 0, .is_pcie = 1 },
-	[ARBEL_NATIVE] = { .latest_fw = MTHCA_FW_VER(5, 0, 1), .is_memfree = 1, .is_pcie = 1 },
-	[SINAI]        = { .latest_fw = MTHCA_FW_VER(1, 0, 1), .is_memfree = 1, .is_pcie = 1 }
+	[TAVOR]        = { .latest_fw = MTHCA_FW_VER(3, 4, 0),
+			   .flags     = 0 },
+	[ARBEL_COMPAT] = { .latest_fw = MTHCA_FW_VER(4, 7, 400),
+			   .flags     = MTHCA_FLAG_PCIE },
+	[ARBEL_NATIVE] = { .latest_fw = MTHCA_FW_VER(5, 1, 0),
+			   .flags     = MTHCA_FLAG_MEMFREE |
+					MTHCA_FLAG_PCIE },
+	[SINAI]        = { .latest_fw = MTHCA_FW_VER(1, 0, 800),
+			   .flags     = MTHCA_FLAG_MEMFREE |
+					MTHCA_FLAG_PCIE    |
+					MTHCA_FLAG_SINAI_OPT }
 };
 
 static int __devinit mthca_init_one(struct pci_dev *pdev,
@@ -905,12 +991,12 @@ static int __devinit mthca_init_one(struct pci_dev *pdev,
 		++mthca_version_printed;
 	}
 
-	printk(KERN_INFO PFX "Initializing %s (%s)\n",
-	       pci_pretty_name(pdev), pci_name(pdev));
+	printk(KERN_INFO PFX "Initializing %s\n",
+	       pci_name(pdev));
 
 	if (id->driver_data >= ARRAY_SIZE(mthca_hca_table)) {
-		printk(KERN_ERR PFX "%s (%s) has invalid driver data %lx\n",
-		       pci_pretty_name(pdev), pci_name(pdev), id->driver_data);
+		printk(KERN_ERR PFX "%s has invalid driver data %lx\n",
+		       pci_name(pdev), id->driver_data);
 		return -ENODEV;
 	}
 
@@ -927,13 +1013,12 @@ static int __devinit mthca_init_one(struct pci_dev *pdev,
 	 */
 	if (!(pci_resource_flags(pdev, 0) & IORESOURCE_MEM) ||
 	    pci_resource_len(pdev, 0) != 1 << 20) {
-		dev_err(&pdev->dev, "Missing DCS, aborting.");
+		dev_err(&pdev->dev, "Missing DCS, aborting.\n");
 		err = -ENODEV;
 		goto err_disable_pdev;
 	}
-	if (!(pci_resource_flags(pdev, 2) & IORESOURCE_MEM) ||
-	    pci_resource_len(pdev, 2) != 1 << 23) {
-		dev_err(&pdev->dev, "Missing UAR, aborting.");
+	if (!(pci_resource_flags(pdev, 2) & IORESOURCE_MEM)) {
+		dev_err(&pdev->dev, "Missing UAR, aborting.\n");
 		err = -ENODEV;
 		goto err_disable_pdev;
 	}
@@ -980,12 +1065,9 @@ static int __devinit mthca_init_one(struct pci_dev *pdev,
 
 	mdev->pdev = pdev;
 
+	mdev->mthca_flags = mthca_hca_table[id->driver_data].flags;
 	if (ddr_hidden)
 		mdev->mthca_flags |= MTHCA_FLAG_DDR_HIDDEN;
-	if (mthca_hca_table[id->driver_data].is_memfree)
-		mdev->mthca_flags |= MTHCA_FLAG_MEMFREE;
-	if (mthca_hca_table[id->driver_data].is_pcie)
-		mdev->mthca_flags |= MTHCA_FLAG_PCIE;
 
 	/*
 	 * Now reset the HCA before we touch the PCI capabilities or
@@ -1004,28 +1086,21 @@ static int __devinit mthca_init_one(struct pci_dev *pdev,
 	    !pci_enable_msi(pdev))
 		mdev->mthca_flags |= MTHCA_FLAG_MSI;
 
-	sema_init(&mdev->cmd.hcr_sem, 1);
-	sema_init(&mdev->cmd.poll_sem, 1);
-	mdev->cmd.use_events = 0;
-
-	mdev->hcr = ioremap(pci_resource_start(pdev, 0) + MTHCA_HCR_BASE, MTHCA_HCR_SIZE);
-	if (!mdev->hcr) {
-		mthca_err(mdev, "Couldn't map command register, "
-			  "aborting.\n");
-		err = -ENOMEM;
+	if (mthca_cmd_init(mdev)) {
+		mthca_err(mdev, "Failed to init command interface, aborting.\n");
 		goto err_free_dev;
 	}
 
 	err = mthca_tune_pci(mdev);
 	if (err)
-		goto err_iounmap;
+		goto err_cmd;
 
 	err = mthca_init_hca(mdev);
 	if (err)
-		goto err_iounmap;
+		goto err_cmd;
 
 	if (mdev->fw_ver < mthca_hca_table[id->driver_data].latest_fw) {
-		mthca_warn(mdev, "HCA FW version %x.%x.%x is old (%x.%x.%x is current).\n",
+		mthca_warn(mdev, "HCA FW version %d.%d.%d is old (%d.%d.%d is current).\n",
 			   (int) (mdev->fw_ver >> 32), (int) (mdev->fw_ver >> 16) & 0xffff,
 			   (int) (mdev->fw_ver & 0xffff),
 			   (int) (mthca_hca_table[id->driver_data].latest_fw >> 32),
@@ -1057,6 +1132,7 @@ err_cleanup:
 	mthca_cleanup_mcg_table(mdev);
 	mthca_cleanup_av_table(mdev);
 	mthca_cleanup_qp_table(mdev);
+	mthca_cleanup_srq_table(mdev);
 	mthca_cleanup_cq_table(mdev);
 	mthca_cmd_use_polling(mdev);
 	mthca_cleanup_eq_table(mdev);
@@ -1070,8 +1146,8 @@ err_cleanup:
 err_close:
 	mthca_close_hca(mdev);
 
-err_iounmap:
-	iounmap(mdev->hcr);
+err_cmd:
+	mthca_cmd_cleanup(mdev);
 
 err_free_dev:
 	if (mdev->mthca_flags & MTHCA_FLAG_MSI_X)
@@ -1106,6 +1182,7 @@ static void __devexit mthca_remove_one(struct pci_dev *pdev)
 		mthca_cleanup_mcg_table(mdev);
 		mthca_cleanup_av_table(mdev);
 		mthca_cleanup_qp_table(mdev);
+		mthca_cleanup_srq_table(mdev);
 		mthca_cleanup_cq_table(mdev);
 		mthca_cmd_use_polling(mdev);
 		mthca_cleanup_eq_table(mdev);
@@ -1118,10 +1195,8 @@ static void __devexit mthca_remove_one(struct pci_dev *pdev)
 		iounmap(mdev->kar);
 		mthca_uar_free(mdev, &mdev->driver_uar);
 		mthca_cleanup_uar_table(mdev);
-
 		mthca_close_hca(mdev);
-
-		iounmap(mdev->hcr);
+		mthca_cmd_cleanup(mdev);
 
 		if (mdev->mthca_flags & MTHCA_FLAG_MSI_X)
 			pci_disable_msix(pdev);
@@ -1163,7 +1238,7 @@ static struct pci_device_id mthca_pci_table[] = {
 MODULE_DEVICE_TABLE(pci, mthca_pci_table);
 
 static struct pci_driver mthca_driver = {
-	.name		= "ib_mthca",
+	.name		= DRV_NAME,
 	.id_table	= mthca_pci_table,
 	.probe		= mthca_init_one,
 	.remove		= __devexit_p(mthca_remove_one)

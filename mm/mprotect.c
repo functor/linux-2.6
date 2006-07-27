@@ -22,6 +22,7 @@
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
+#include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
@@ -29,8 +30,9 @@ static void change_pte_range(struct mm_struct *mm, pmd_t *pmd,
 		unsigned long addr, unsigned long end, pgprot_t newprot)
 {
 	pte_t *pte;
+	spinlock_t *ptl;
 
-	pte = pte_offset_map(pmd, addr);
+	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	do {
 		if (pte_present(*pte)) {
 			pte_t ptent;
@@ -44,7 +46,7 @@ static void change_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			lazy_mmu_prot_update(ptent);
 		}
 	} while (pte++, addr += PAGE_SIZE, addr != end);
-	pte_unmap(pte - 1);
+	pte_unmap_unlock(pte - 1, ptl);
 }
 
 static inline void change_pmd_range(struct mm_struct *mm, pud_t *pud,
@@ -88,7 +90,6 @@ static void change_protection(struct vm_area_struct *vma,
 	BUG_ON(addr >= end);
 	pgd = pgd_offset(mm, addr);
 	flush_cache_range(vma, addr, end);
-	spin_lock(&mm->page_table_lock);
 	do {
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(pgd))
@@ -96,7 +97,6 @@ static void change_protection(struct vm_area_struct *vma,
 		change_pud_range(mm, pgd, addr, next, newprot);
 	} while (pgd++, addr = next, addr != end);
 	flush_tlb_range(vma, start, end);
-	spin_unlock(&mm->page_table_lock);
 }
 
 static int
@@ -106,7 +106,7 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long oldflags = vma->vm_flags;
 	long nrpages = (end - start) >> PAGE_SHIFT;
-	unsigned long charged = 0;
+	unsigned long charged = 0, old_end = vma->vm_end;
 	pgprot_t newprot;
 	pgoff_t pgoff;
 	int error;
@@ -125,7 +125,7 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	 * a MAP_NORESERVE private mapping to writable will now reserve.
 	 */
 	if (newflags & VM_WRITE) {
-		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_SHARED|VM_HUGETLB))) {
+		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_SHARED))) {
 			charged = nrpages;
 			if (security_vm_enough_memory(charged))
 				return -ENOMEM;
@@ -167,9 +167,14 @@ success:
 	 */
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = newprot;
-	change_protection(vma, start, end, newprot);
-	__vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
-	__vm_stat_account(mm, newflags, vma->vm_file, nrpages);
+	if (oldflags & VM_EXEC)
+		arch_remove_exec_range(current->mm, old_end);
+	if (is_vm_hugetlb_page(vma))
+		hugetlb_change_protection(vma, start, end, newprot);
+	else
+		change_protection(vma, start, end, newprot);
+	vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
+	vm_stat_account(mm, newflags, vma->vm_file, nrpages);
 	return 0;
 
 fail:
@@ -241,14 +246,10 @@ sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 
-		if (is_vm_hugetlb_page(vma)) {
-			error = -EACCES;
-			goto out;
-		}
-
 		newflags = vm_flags | (vma->vm_flags & ~(VM_READ | VM_WRITE | VM_EXEC));
 
-		if ((newflags & ~(newflags >> 4)) & 0xf) {
+		/* newflags >> 4 shift VM_MAY% in place of VM_% */
+		if ((newflags & ~(newflags >> 4)) & (VM_READ | VM_WRITE | VM_EXEC)) {
 			error = -EACCES;
 			goto out;
 		}

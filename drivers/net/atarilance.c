@@ -78,7 +78,7 @@ static int lance_debug = LANCE_DEBUG;
 #else
 static int lance_debug = 1;
 #endif
-MODULE_PARM(lance_debug, "i");
+module_param(lance_debug, int, 0);
 MODULE_PARM_DESC(lance_debug, "atarilance debug level (0-3)");
 MODULE_LICENSE("GPL");
 
@@ -235,7 +235,7 @@ struct lance_private {
 #define	MEM		lp->mem
 #define	DREG	IO->data
 #define	AREG	IO->addr
-#define	REGA(a)	( AREG = (a), DREG )
+#define	REGA(a)	(*( AREG = (a), &DREG ))
 
 /* Definitions for packet buffer access: */
 #define PKT_BUF_SZ		1544

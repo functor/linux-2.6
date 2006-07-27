@@ -14,12 +14,16 @@ obj-$(CONFIG_HOTPLUG_PCI_PCIE)		+= pciehp.o
 obj-$(CONFIG_HOTPLUG_PCI_SHPC)		+= shpchp.o
 obj-$(CONFIG_HOTPLUG_PCI_RPA)		+= rpaphp.o
 obj-$(CONFIG_HOTPLUG_PCI_RPA_DLPAR)	+= rpadlpar_io.o
+obj-$(CONFIG_HOTPLUG_PCI_SGI)		+= sgi_hotplug.o
 
 pci_hotplug-objs	:=	pci_hotplug_core.o
 
 ifdef CONFIG_HOTPLUG_PCI_CPCI
 pci_hotplug-objs	+=	cpci_hotplug_core.o	\
 				cpci_hotplug_pci.o
+endif
+ifdef CONFIG_ACPI
+pci_hotplug-objs 	+= 	acpi_pcihp.o
 endif
 
 cpqphp-objs		:=	cpqphp_core.o	\
@@ -36,14 +40,12 @@ ibmphp-objs		:=	ibmphp_core.o	\
 				ibmphp_hpc.o
 
 acpiphp-objs		:=	acpiphp_core.o	\
-				acpiphp_glue.o	\
-				acpiphp_pci.o	\
-				acpiphp_res.o
+				acpiphp_glue.o  \
+				acpiphp_dock.o
 
 rpaphp-objs		:=	rpaphp_core.o	\
 				rpaphp_pci.o	\
-				rpaphp_slot.o	\
-				rpaphp_vio.o
+				rpaphp_slot.o
 
 rpadlpar_io-objs	:=	rpadlpar_core.o \
 				rpadlpar_sysfs.o
@@ -52,23 +54,9 @@ pciehp-objs		:=	pciehp_core.o	\
 				pciehp_ctrl.o	\
 				pciehp_pci.o	\
 				pciehp_hpc.o
-ifdef CONFIG_ACPI_BUS
-	pciehp-objs += pciehprm_acpi.o
-else
-	pciehp-objs += pciehprm_nonacpi.o
-endif
 
 shpchp-objs		:=	shpchp_core.o	\
 				shpchp_ctrl.o	\
 				shpchp_pci.o	\
 				shpchp_sysfs.o	\
 				shpchp_hpc.o
-ifdef CONFIG_ACPI_BUS
-	shpchp-objs += shpchprm_acpi.o
-else
-	ifdef CONFIG_HOTPLUG_PCI_SHPC_PHPRM_LEGACY
-		shpchp-objs += shpchprm_legacy.o
-	else
-		shpchp-objs += shpchprm_nonacpi.o
-	endif
-endif

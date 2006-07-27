@@ -31,6 +31,8 @@
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/list.h>
+#include <linux/timer.h>
+#include <linux/workqueue.h>
 
 /*
  * USB HID (Human Interface Device) interface class code
@@ -118,7 +120,7 @@ struct hid_item {
 #define HID_MAIN_ITEM_CONSTANT		0x001
 #define HID_MAIN_ITEM_VARIABLE		0x002
 #define HID_MAIN_ITEM_RELATIVE		0x004
-#define HID_MAIN_ITEM_WRAP		0x008	
+#define HID_MAIN_ITEM_WRAP		0x008
 #define HID_MAIN_ITEM_NONLINEAR		0x010
 #define HID_MAIN_ITEM_NO_PREFERRED	0x020
 #define HID_MAIN_ITEM_NULL_STATE	0x040
@@ -172,16 +174,19 @@ struct hid_item {
 #define HID_USAGE_PAGE		0xffff0000
 
 #define HID_UP_UNDEFINED	0x00000000
-#define HID_UP_GENDESK 		0x00010000
-#define HID_UP_KEYBOARD 	0x00070000
-#define HID_UP_LED 		0x00080000
-#define HID_UP_BUTTON 		0x00090000
-#define HID_UP_ORDINAL 		0x000a0000
+#define HID_UP_GENDESK		0x00010000
+#define HID_UP_SIMULATION	0x00020000
+#define HID_UP_KEYBOARD		0x00070000
+#define HID_UP_LED		0x00080000
+#define HID_UP_BUTTON		0x00090000
+#define HID_UP_ORDINAL		0x000a0000
 #define HID_UP_CONSUMER		0x000c0000
-#define HID_UP_DIGITIZER 	0x000d0000
-#define HID_UP_PID 		0x000f0000
+#define HID_UP_DIGITIZER	0x000d0000
+#define HID_UP_PID		0x000f0000
 #define HID_UP_HPVENDOR         0xff7f0000
 #define HID_UP_MSVENDOR		0xff000000
+#define HID_UP_CUSTOM		0x00ff0000
+#define HID_UP_LOGIVENDOR	0xffbc0000
 
 #define HID_USAGE		0x0000ffff
 
@@ -232,16 +237,20 @@ struct hid_item {
  * HID device quirks.
  */
 
-#define HID_QUIRK_INVERT			0x001
-#define HID_QUIRK_NOTOUCH			0x002
-#define HID_QUIRK_IGNORE			0x004
-#define HID_QUIRK_NOGET				0x008
-#define HID_QUIRK_HIDDEV			0x010
-#define HID_QUIRK_BADPAD			0x020
-#define HID_QUIRK_MULTI_INPUT			0x040
-#define HID_QUIRK_2WHEEL_MOUSE_HACK_7		0x080
-#define HID_QUIRK_2WHEEL_MOUSE_HACK_5		0x100
-#define HID_QUIRK_2WHEEL_MOUSE_HACK_ON		0x200
+#define HID_QUIRK_INVERT			0x00000001
+#define HID_QUIRK_NOTOUCH			0x00000002
+#define HID_QUIRK_IGNORE			0x00000004
+#define HID_QUIRK_NOGET				0x00000008
+#define HID_QUIRK_HIDDEV			0x00000010
+#define HID_QUIRK_BADPAD			0x00000020
+#define HID_QUIRK_MULTI_INPUT			0x00000040
+#define HID_QUIRK_2WHEEL_MOUSE_HACK_7		0x00000080
+#define HID_QUIRK_2WHEEL_MOUSE_HACK_5		0x00000100
+#define HID_QUIRK_2WHEEL_MOUSE_HACK_ON		0x00000200
+#define HID_QUIRK_2WHEEL_POWERMOUSE		0x00000400
+#define HID_QUIRK_CYMOTION			0x00000800
+#define HID_QUIRK_POWERBOOK_HAS_FN		0x00001000
+#define HID_QUIRK_POWERBOOK_FN_ON		0x00002000
 
 /*
  * This is the global environment of the parser. This information is
@@ -348,7 +357,8 @@ struct hid_report_enum {
 
 #define HID_REPORT_TYPES 3
 
-#define HID_BUFFER_SIZE		64		/* use 64 for compatibility with all possible packetlen */
+#define HID_MIN_BUFFER_SIZE	64		/* make sure there is at least a packet size of space */
+#define HID_MAX_BUFFER_SIZE	4096		/* 4kb */
 #define HID_CONTROL_FIFO_SIZE	256		/* to init devices with >100 reports */
 #define HID_OUTPUT_FIFO_SIZE	64
 
@@ -362,11 +372,14 @@ struct hid_control_fifo {
 
 #define HID_CTRL_RUNNING	1
 #define HID_OUT_RUNNING		2
+#define HID_IN_RUNNING		3
+#define HID_RESET_PENDING	4
+#define HID_SUSPENDED		5
 
 struct hid_input {
 	struct list_head list;
 	struct hid_report *report;
-	struct input_dev input;
+	struct input_dev *input;
 };
 
 struct hid_device {							/* device report descriptor */
@@ -385,10 +398,17 @@ struct hid_device {							/* device report descriptor */
 	int ifnum;							/* USB interface number */
 
 	unsigned long iofl;						/* I/O flags (CTRL_RUNNING, OUT_RUNNING) */
+	struct timer_list io_retry;					/* Retry timer */
+	unsigned long stop_retry;					/* Time to give up, in jiffies */
+	unsigned int retry_delay;					/* Delay length in ms */
+	struct work_struct reset_work;					/* Task context for resets */
+
+	unsigned int bufsize;						/* URB buffer size */
 
 	struct urb *urbin;						/* Input URB */
 	char *inbuf;							/* Input buffer */
 	dma_addr_t inbuf_dma;						/* Input buffer dma */
+	spinlock_t inlock;						/* Input fifo spinlock */
 
 	struct urb *urbctrl;						/* Control URB */
 	struct usb_ctrlrequest *cr;					/* Control request struct */
@@ -406,7 +426,7 @@ struct hid_device {							/* device report descriptor */
 	dma_addr_t outbuf_dma;						/* Output buffer dma */
 	spinlock_t outlock;						/* Output fifo spinlock */
 
-	unsigned claimed;						/* Claimed by hidinput, hiddev? */	
+	unsigned claimed;						/* Claimed by hidinput, hiddev? */
 	unsigned quirks;						/* Various quirks the device can pull on us */
 
 	struct list_head inputs;					/* The list of inputs */
@@ -424,6 +444,11 @@ struct hid_device {							/* device report descriptor */
 	void (*ff_exit)(struct hid_device*);                            /* Called by hid_exit_ff(hid) */
 	int (*ff_event)(struct hid_device *hid, struct input_dev *input,
 			unsigned int type, unsigned int code, int value);
+
+#ifdef CONFIG_USB_HIDINPUT_POWERBOOK
+	unsigned long pb_pressed_fn[NBITS(KEY_MAX)];
+	unsigned long pb_pressed_numlock[NBITS(KEY_MAX)];
+#endif
 };
 
 #define HID_GLOBAL_STACK_SIZE 4
@@ -508,3 +533,8 @@ static inline int hid_ff_event(struct hid_device *hid, struct input_dev *input,
 		return hid->ff_event(hid, input, type, code, value);
 	return -ENOSYS;
 }
+
+int hid_lgff_init(struct hid_device* hid);
+int hid_tmff_init(struct hid_device* hid);
+int hid_pid_init(struct hid_device* hid);
+

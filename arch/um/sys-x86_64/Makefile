@@ -4,28 +4,28 @@
 # Licensed under the GPL
 #
 
-#XXX: why into lib-y?
-lib-y = bitops.o bugs.o csum-partial.o delay.o fault.o mem.o memcpy.o \
-	ptrace.o ptrace_user.o semaphore.o sigcontext.o signal.o \
-	syscalls.o sysrq.o thunk.o syscall_table.o
+obj-y = bugs.o delay.o fault.o ldt.o mem.o ptrace.o ptrace_user.o \
+	sigcontext.o signal.o syscalls.o syscall_table.o sysrq.o ksyms.o \
+	tls.o
 
-obj-y := ksyms.o
-obj-$(CONFIG_MODULES) += module.o um_module.o
+obj-$(CONFIG_MODE_SKAS) += stub.o stub_segv.o
+obj-$(CONFIG_MODULES) += um_module.o
+
+subarch-obj-y = lib/bitops.o lib/csum-partial.o lib/memcpy.o lib/thunk.o
+subarch-obj-$(CONFIG_MODULES) += kernel/module.o
+
+ldt-y = ../sys-i386/ldt.o
 
 USER_OBJS := ptrace_user.o sigcontext.o
 
-SYMLINKS = bitops.c csum-copy.S csum-partial.c csum-wrappers.c memcpy.S \
-	semaphore.c thunk.S module.c
+USER_OBJS += user-offsets.s
+extra-y += user-offsets.s
+
+extra-$(CONFIG_MODE_TT) += unmap.o
+
+UNPROFILE_OBJS := stub_segv.o
+CFLAGS_stub_segv.o := $(CFLAGS_NO_HARDENING)
 
 include arch/um/scripts/Makefile.rules
 
-bitops.c-dir = lib
-csum-copy.S-dir = lib
-csum-partial.c-dir = lib
-csum-wrappers.c-dir = lib
-memcpy.S-dir = lib
-semaphore.c-dir = kernel
-thunk.S-dir = lib
-module.c-dir = kernel
-
-subdir- := util
+$(obj)/unmap.%: _c_flags = $(call unprofile,$(CFLAGS))

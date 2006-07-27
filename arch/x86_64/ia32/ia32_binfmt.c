@@ -46,7 +46,7 @@ struct elf_phdr;
 
 #define IA32_EMULATOR 1
 
-#define ELF_ET_DYN_BASE		(TASK_UNMAPPED_32 + 0x1000000)
+#define ELF_ET_DYN_BASE		(TASK_UNMAPPED_BASE + 0x1000000)
 
 #undef ELF_ARCH
 #define ELF_ARCH EM_386
@@ -58,7 +58,7 @@ struct elf_phdr;
 
 #define USE_ELF_CORE_DUMP 1
 
-/* Overwrite elfcore.h */ 
+/* Override elfcore.h */ 
 #define _LINUX_ELFCORE_H 1
 typedef unsigned int elf_greg_t;
 
@@ -197,8 +197,7 @@ static inline void elf_core_copy_regs(elf_gregset_t *elfregs, struct pt_regs *re
 
 static inline int elf_core_copy_task_regs(struct task_struct *t, elf_gregset_t* elfregs)
 {	
-	struct pt_regs *pp = (struct pt_regs *)(t->thread.rsp0);
-	--pp;
+	struct pt_regs *pp = task_pt_regs(t);
 	ELF_CORE_COPY_REGS((*elfregs), pp);
 	/* fix wrong segments */ 
 	(*elfregs)[7] = t->thread.ds; 
@@ -217,8 +216,7 @@ elf_core_copy_task_fpregs(struct task_struct *tsk, struct pt_regs *regs, elf_fpr
 	if (!tsk_used_math(tsk))
 		return 0;
 	if (!regs)
-		regs = (struct pt_regs *)tsk->thread.rsp0;
-	--regs;
+		regs = task_pt_regs(tsk);
 	if (tsk == current)
 		unlazy_fpu(tsk);
 	set_fs(KERNEL_DS); 
@@ -234,7 +232,7 @@ elf_core_copy_task_fpregs(struct task_struct *tsk, struct pt_regs *regs, elf_fpr
 static inline int 
 elf_core_copy_task_xfpregs(struct task_struct *t, elf_fpxregset_t *xfpu)
 {
-	struct pt_regs *regs = ((struct pt_regs *)(t->thread.rsp0))-1; 
+	struct pt_regs *regs = task_pt_regs(t);
 	if (!tsk_used_math(t))
 		return 0;
 	if (t == current)
@@ -249,8 +247,6 @@ elf_core_copy_task_xfpregs(struct task_struct *t, elf_fpxregset_t *xfpu)
 #define elf_check_arch(x) \
 	((x)->e_machine == EM_386)
 
-extern int force_personality32;
-
 #define ELF_EXEC_PAGESIZE PAGE_SIZE
 #define ELF_HWCAP (boot_cpu_data.x86_capability[0])
 #define ELF_PLATFORM  ("i686")
@@ -264,8 +260,6 @@ do {							\
 		set_thread_flag(TIF_ABI_PENDING);		\
 	else							\
 		clear_thread_flag(TIF_ABI_PENDING);		\
-	/* XXX This overwrites the user set personality */	\
-	current->personality |= force_personality32;		\
 } while (0)
 
 /* Override some function names */
@@ -295,8 +289,6 @@ int ia32_setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int
 } while(0) 
 
 
-#define elf_map elf32_map
-
 #include <linux/module.h>
 
 MODULE_DESCRIPTION("Binary format loader for compatibility with IA32 ELF binaries."); 
@@ -307,14 +299,11 @@ MODULE_AUTHOR("Eric Youngdale, Andi Kleen");
 
 #define elf_addr_t __u32
 
-#undef TASK_SIZE
-#define TASK_SIZE 0xffffffff
-
 static void elf32_init(struct pt_regs *);
 
 #define ARCH_HAS_SETUP_ADDITIONAL_PAGES 1
 #define arch_setup_additional_pages syscall32_setup_pages
-extern int syscall32_setup_pages(struct linux_binprm *, int exstack);
+extern int syscall32_setup_pages(struct linux_binprm *, int exstack, unsigned long start_code, unsigned long interp_map_address);
 
 #include "../../../fs/binfmt_elf.c" 
 
@@ -338,14 +327,15 @@ static void elf32_init(struct pt_regs *regs)
 	me->thread.es = __USER_DS;
 }
 
-int setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int executable_stack)
+int ia32_setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top,
+			 int executable_stack)
 {
-	unsigned long stack_base, grow;
+	unsigned long stack_base;
 	struct vm_area_struct *mpnt;
 	struct mm_struct *mm = current->mm;
 	int i, ret;
 
-	stack_base = IA32_STACK_TOP - MAX_ARG_PAGES * PAGE_SIZE;
+	stack_base = stack_top - MAX_ARG_PAGES * PAGE_SIZE;
 	mm->arg_start = bprm->p + stack_base;
 
 	bprm->p += stack_base;
@@ -356,14 +346,6 @@ int setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int exec
 	mpnt = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
 	if (!mpnt) 
 		return -ENOMEM; 
-	
-	grow = (IA32_STACK_TOP - (PAGE_MASK & (unsigned long) bprm->p))
-		>> PAGE_SHIFT;
-	if (security_vm_enough_memory(grow) ||
-		!vx_vmpages_avail(mm, grow)) {
-		kmem_cache_free(vm_area_cachep, mpnt);
-		return -ENOMEM;
-	}
 
 	memset(mpnt, 0, sizeof(*mpnt));
 
@@ -371,7 +353,7 @@ int setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int exec
 	{
 		mpnt->vm_mm = mm;
 		mpnt->vm_start = PAGE_MASK & (unsigned long) bprm->p;
-		mpnt->vm_end = IA32_STACK_TOP;
+		mpnt->vm_end = stack_top;
 		if (executable_stack == EXSTACK_ENABLE_X)
 			mpnt->vm_flags = VM_STACK_FLAGS |  VM_EXEC;
 		else if (executable_stack == EXSTACK_DISABLE_X)
@@ -401,21 +383,7 @@ int setup_arg_pages(struct linux_binprm *bprm, unsigned long stack_top, int exec
 	
 	return 0;
 }
-
-static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
-{
-	unsigned long map_addr;
-	struct task_struct *me = current; 
-
-	down_write(&me->mm->mmap_sem);
-	map_addr = do_mmap(filep, ELF_PAGESTART(addr),
-			   eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr), prot, 
-			   type,
-			   eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr));
-	up_write(&me->mm->mmap_sem);
-	return(map_addr);
-}
+EXPORT_SYMBOL(ia32_setup_arg_pages);
 
 #ifdef CONFIG_SYSCTL
 /* Register vsyscall32 into the ABI table */

@@ -41,6 +41,8 @@
 #include <linux/timer.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/jiffies.h>
+#include <linux/random.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include "DAC960.h"
@@ -92,34 +94,28 @@ static int DAC960_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int DAC960_ioctl(struct inode *inode, struct file *file,
-			unsigned int cmd, unsigned long arg)
+static int DAC960_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 {
-	struct gendisk *disk = inode->i_bdev->bd_disk;
+	struct gendisk *disk = bdev->bd_disk;
 	DAC960_Controller_T *p = disk->queue->queuedata;
 	int drive_nr = (long)disk->private_data;
-	struct hd_geometry g;
-	struct hd_geometry __user *loc = (struct hd_geometry __user *)arg;
-
-	if (cmd != HDIO_GETGEO || !loc)
-		return -EINVAL;
 
 	if (p->FirmwareType == DAC960_V1_Controller) {
-		g.heads = p->V1.GeometryTranslationHeads;
-		g.sectors = p->V1.GeometryTranslationSectors;
-		g.cylinders = p->V1.LogicalDriveInformation[drive_nr].
-			LogicalDriveSize / (g.heads * g.sectors);
+		geo->heads = p->V1.GeometryTranslationHeads;
+		geo->sectors = p->V1.GeometryTranslationSectors;
+		geo->cylinders = p->V1.LogicalDriveInformation[drive_nr].
+			LogicalDriveSize / (geo->heads * geo->sectors);
 	} else {
 		DAC960_V2_LogicalDeviceInfo_T *i =
 			p->V2.LogicalDeviceInformation[drive_nr];
 		switch (i->DriveGeometry) {
 		case DAC960_V2_Geometry_128_32:
-			g.heads = 128;
-			g.sectors = 32;
+			geo->heads = 128;
+			geo->sectors = 32;
 			break;
 		case DAC960_V2_Geometry_255_63:
-			g.heads = 255;
-			g.sectors = 63;
+			geo->heads = 255;
+			geo->sectors = 63;
 			break;
 		default:
 			DAC960_Error("Illegal Logical Device Geometry %d\n",
@@ -127,12 +123,11 @@ static int DAC960_ioctl(struct inode *inode, struct file *file,
 			return -EINVAL;
 		}
 
-		g.cylinders = i->ConfigurableDeviceSize / (g.heads * g.sectors);
+		geo->cylinders = i->ConfigurableDeviceSize /
+			(geo->heads * geo->sectors);
 	}
 	
-	g.start = get_start_sect(inode->i_bdev);
-
-	return copy_to_user(loc, &g, sizeof g) ? -EFAULT : 0; 
+	return 0;
 }
 
 static int DAC960_media_changed(struct gendisk *disk)
@@ -157,7 +152,7 @@ static int DAC960_revalidate_disk(struct gendisk *disk)
 static struct block_device_operations DAC960_BlockDeviceOperations = {
 	.owner			= THIS_MODULE,
 	.open			= DAC960_open,
-	.ioctl			= DAC960_ioctl,
+	.getgeo			= DAC960_getgeo,
 	.media_changed		= DAC960_media_changed,
 	.revalidate_disk	= DAC960_revalidate_disk,
 };
@@ -234,8 +229,7 @@ static void *slice_dma_loaf(struct dma_loaf *loaf, size_t len,
 	void *cpu_end = loaf->cpu_free + len;
 	void *cpu_addr = loaf->cpu_free;
 
-	if (cpu_end > loaf->cpu_base + loaf->length)
-		BUG();
+	BUG_ON(cpu_end > loaf->cpu_base + loaf->length);
 	*dma_handle = loaf->dma_free;
 	loaf->cpu_free = cpu_end;
 	loaf->dma_free += len;
@@ -318,11 +312,10 @@ static boolean DAC960_CreateAuxiliaryStructures(DAC960_Controller_T *Controller)
 		CommandsRemaining = CommandAllocationGroupSize;
 	  CommandGroupByteCount =
 		CommandsRemaining * CommandAllocationLength;
-	  AllocationPointer = kmalloc(CommandGroupByteCount, GFP_ATOMIC);
+	  AllocationPointer = kzalloc(CommandGroupByteCount, GFP_ATOMIC);
 	  if (AllocationPointer == NULL)
 		return DAC960_Failure(Controller,
 					"AUXILIARY STRUCTURE CREATION");
-	  memset(AllocationPointer, 0, CommandGroupByteCount);
 	 }
       Command = (DAC960_Command_T *) AllocationPointer;
       AllocationPointer += CommandAllocationLength;
@@ -417,14 +410,12 @@ static void DAC960_DestroyAuxiliaryStructures(DAC960_Controller_T *Controller)
             * Remember the beginning of the group, but don't free it
 	    * until we've reached the beginning of the next group.
 	    */
-	   if (CommandGroup != NULL)
-		kfree(CommandGroup);
-	    CommandGroup = Command;
+	   kfree(CommandGroup);
+	   CommandGroup = Command;
       }
       Controller->Commands[i] = NULL;
     }
-  if (CommandGroup != NULL)
-      kfree(CommandGroup);
+  kfree(CommandGroup);
 
   if (Controller->CombinedStatusBuffer != NULL)
     {
@@ -435,30 +426,23 @@ static void DAC960_DestroyAuxiliaryStructures(DAC960_Controller_T *Controller)
 
   if (ScatterGatherPool != NULL)
   	pci_pool_destroy(ScatterGatherPool);
-  if (Controller->FirmwareType == DAC960_V1_Controller) return;
+  if (Controller->FirmwareType == DAC960_V1_Controller)
+  	return;
 
   if (RequestSensePool != NULL)
 	pci_pool_destroy(RequestSensePool);
 
-  for (i = 0; i < DAC960_MaxLogicalDrives; i++)
-    if (Controller->V2.LogicalDeviceInformation[i] != NULL)
-      {
+  for (i = 0; i < DAC960_MaxLogicalDrives; i++) {
 	kfree(Controller->V2.LogicalDeviceInformation[i]);
 	Controller->V2.LogicalDeviceInformation[i] = NULL;
-      }
+  }
 
   for (i = 0; i < DAC960_V2_MaxPhysicalDevices; i++)
     {
-      if (Controller->V2.PhysicalDeviceInformation[i] != NULL)
-	{
-	  kfree(Controller->V2.PhysicalDeviceInformation[i]);
-	  Controller->V2.PhysicalDeviceInformation[i] = NULL;
-	}
-      if (Controller->V2.InquiryUnitSerialNumber[i] != NULL)
-	{
-	  kfree(Controller->V2.InquiryUnitSerialNumber[i]);
-	  Controller->V2.InquiryUnitSerialNumber[i] = NULL;
-	}
+      kfree(Controller->V2.PhysicalDeviceInformation[i]);
+      Controller->V2.PhysicalDeviceInformation[i] = NULL;
+      kfree(Controller->V2.InquiryUnitSerialNumber[i]);
+      Controller->V2.InquiryUnitSerialNumber[i] = NULL;
     }
 }
 
@@ -2725,14 +2709,12 @@ DAC960_DetectController(struct pci_dev *PCI_Device,
   void __iomem *BaseAddress;
   int i;
 
-  Controller = (DAC960_Controller_T *)
-	kmalloc(sizeof(DAC960_Controller_T), GFP_ATOMIC);
+  Controller = kzalloc(sizeof(DAC960_Controller_T), GFP_ATOMIC);
   if (Controller == NULL) {
 	DAC960_Error("Unable to allocate Controller structure for "
                        "Controller at\n", NULL);
 	return NULL;
   }
-  memset(Controller, 0, sizeof(DAC960_Controller_T));
   Controller->ControllerNumber = DAC960_ControllerCount;
   DAC960_Controllers[DAC960_ControllerCount++] = Controller;
   Controller->Bus = PCI_Device->bus->number;
@@ -3479,8 +3461,8 @@ static inline boolean DAC960_ProcessCompletedRequest(DAC960_Command_T *Command,
 		Command->SegmentCount, Command->DmaDirection);
 
 	 if (!end_that_request_first(Request, UpToDate, Command->BlockCount)) {
-
- 	 	end_that_request_last(Request);
+		add_disk_randomness(Request->rq_disk);
+ 	 	end_that_request_last(Request, UpToDate);
 
 		if (Command->Completion) {
 			complete(Command->Completion);
@@ -3673,8 +3655,8 @@ static void DAC960_V1_ProcessCompletedCommand(DAC960_Command_T *Command)
 	      (NewEnquiry->EventLogSequenceNumber !=
 	       OldEnquiry->EventLogSequenceNumber) ||
 	      Controller->MonitoringTimerCount == 0 ||
-	      (jiffies - Controller->SecondaryMonitoringTime
-	       >= DAC960_SecondaryMonitoringInterval))
+	      time_after_eq(jiffies, Controller->SecondaryMonitoringTime
+	       + DAC960_SecondaryMonitoringInterval))
 	    {
 	      Controller->V1.NeedLogicalDriveInformation = true;
 	      Controller->V1.NewEventLogSequenceNumber =
@@ -3776,7 +3758,7 @@ static void DAC960_V1_ProcessCompletedCommand(DAC960_Command_T *Command)
 	      if (SenseKey == DAC960_SenseKey_VendorSpecific &&
 		  AdditionalSenseCode == 0x80 &&
 		  AdditionalSenseCodeQualifier <
-		  sizeof(DAC960_EventMessages) / sizeof(char *))
+		  ARRAY_SIZE(DAC960_EventMessages))
 		DAC960_Critical("Physical Device %d:%d %s\n", Controller,
 				EventLogEntry->Channel,
 				EventLogEntry->TargetID,
@@ -5659,8 +5641,8 @@ static void DAC960_MonitoringTimerFunction(unsigned long TimerData)
       unsigned int StatusChangeCounter =
 	Controller->V2.HealthStatusBuffer->StatusChangeCounter;
       boolean ForceMonitoringCommand = false;
-      if (jiffies - Controller->SecondaryMonitoringTime
-	  > DAC960_SecondaryMonitoringInterval)
+      if (time_after(jiffies, Controller->SecondaryMonitoringTime
+	  + DAC960_SecondaryMonitoringInterval))
 	{
 	  int LogicalDriveNumber;
 	  for (LogicalDriveNumber = 0;
@@ -5688,8 +5670,8 @@ static void DAC960_MonitoringTimerFunction(unsigned long TimerData)
 	   ControllerInfo->ConsistencyChecksActive +
 	   ControllerInfo->RebuildsActive +
 	   ControllerInfo->OnlineExpansionsActive == 0 ||
-	   jiffies - Controller->PrimaryMonitoringTime
-	   < DAC960_MonitoringTimerInterval) &&
+	   time_before(jiffies, Controller->PrimaryMonitoringTime
+	   + DAC960_MonitoringTimerInterval)) &&
 	  !ForceMonitoringCommand)
 	{
 	  Controller->MonitoringTimer.expires =
@@ -5826,8 +5808,8 @@ static void DAC960_Message(DAC960_MessageLevel_T MessageLevel,
       Controller->ProgressBufferLength = Length;
       if (Controller->EphemeralProgressMessage)
 	{
-	  if (jiffies - Controller->LastProgressReportTime
-	      >= DAC960_ProgressReportingInterval)
+	  if (time_after_eq(jiffies, Controller->LastProgressReportTime
+	      + DAC960_ProgressReportingInterval))
 	    {
 	      printk("%sDAC960#%d: %s", DAC960_MessageLevelMap[MessageLevel],
 		     Controller->ControllerNumber, Buffer);
@@ -6247,6 +6229,9 @@ static boolean DAC960_V2_ExecuteUserCommand(DAC960_Controller_T *Controller,
   unsigned long flags;
   unsigned char Channel, TargetID, LogicalDriveNumber;
   unsigned short LogicalDeviceNumber;
+  wait_queue_t __wait;
+  
+  init_waitqueue_entry(&__wait, current);
 
   spin_lock_irqsave(&Controller->queue_lock, flags);
   while ((Command = DAC960_AllocateCommand(Controller)) == NULL)
@@ -6429,11 +6414,18 @@ static boolean DAC960_V2_ExecuteUserCommand(DAC960_Controller_T *Controller,
 					.SegmentByteCount =
 	    CommandMailbox->ControllerInfo.DataTransferSize;
 	  DAC960_ExecuteCommand(Command);
+	  add_wait_queue(&Controller->CommandWaitQueue, &__wait);
+	  set_current_state(TASK_UNINTERRUPTIBLE);
+	  
 	  while (Controller->V2.NewControllerInformation->PhysicalScanActive)
 	    {
 	      DAC960_ExecuteCommand(Command);
-	      sleep_on_timeout(&Controller->CommandWaitQueue, HZ);
+	      schedule_timeout(HZ);
+	      set_current_state(TASK_UNINTERRUPTIBLE);
 	    }
+	  current->state = TASK_RUNNING;
+	  remove_wait_queue(&Controller->CommandWaitQueue, &__wait);
+	   
 	  DAC960_UserCritical("Discovery Completed\n", Controller);
  	}
     }
@@ -7195,7 +7187,7 @@ static int DAC960_init_module(void)
 {
 	int ret;
 
-	ret =  pci_module_init(&DAC960_pci_driver);
+	ret =  pci_register_driver(&DAC960_pci_driver);
 #ifdef DAC960_GAM_MINOR
 	if (!ret)
 		DAC960_gam_init();
@@ -7229,3 +7221,4 @@ module_init(DAC960_init_module);
 module_exit(DAC960_cleanup_module);
 
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DAC960_DriverVersion);

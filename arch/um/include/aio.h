@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2004 Jeff Dike (jdike@karaya.com)
  * Licensed under the GPL
  */
@@ -15,22 +15,14 @@ struct aio_thread_reply {
 
 struct aio_context {
 	int reply_fd;
+	struct aio_context *next;
 };
 
-#define INIT_AIO_CONTEXT { .reply_fd	= -1 }
+#define INIT_AIO_CONTEXT { .reply_fd	= -1, \
+			   .next	= NULL }
 
-extern int submit_aio(enum aio_type type, int fd, char *buf, int len, 
-		      unsigned long long offset, int reply_fd, void *data);
+extern int submit_aio(enum aio_type type, int fd, char *buf, int len,
+		      unsigned long long offset, int reply_fd,
+                      struct aio_context *aio);
 
 #endif
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */

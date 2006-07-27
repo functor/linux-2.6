@@ -7,6 +7,24 @@
  *    for details.
  */
 
+/*
+ * The caller puts arg2 in %ecx, which gets pushed. The kernel will use
+ * %ecx itself for arg2. The pushing is because the sysexit instruction
+ * (found in entry.S) requires that we clobber %ecx with the desired %esp.
+ * User code might expect that %ecx is unclobbered though, as it would be
+ * for returning via the iret instruction, so we must push and pop.
+ *
+ * The caller puts arg3 in %edx, which the sysexit instruction requires
+ * for %eip. Thus, exactly as for arg2, we must push and pop.
+ *
+ * Arg6 is different. The caller puts arg6 in %ebp. Since the sysenter
+ * instruction clobbers %esp, the user's %esp won't even survive entry
+ * into the kernel. We store %esp in %ebp. Code in entry.S must fetch
+ * arg6 from the stack.
+ *
+ * You can not use this vsyscall for the clone() syscall because the
+ * three dwords on the parent stack do not get copied to the child.
+ */
 	.text
 	.globl __kernel_vsyscall
 	.type __kernel_vsyscall,@function
@@ -24,11 +42,11 @@ __kernel_vsyscall:
 	/* 7: align return point with nop's to make disassembly easier */
 	.space 7,0x90
 
-	/* 14: System call restart point is here! (SYSENTER_RETURN - 2) */
+	/* 14: System call restart point is here! (SYSENTER_RETURN_OFFSET-2) */
 	jmp .Lenter_kernel
 	/* 16: System call normal return point is here! */
-	.globl SYSENTER_RETURN	/* Symbol used by entry.S.  */
-SYSENTER_RETURN:
+	.globl SYSENTER_RETURN_OFFSET	/* Symbol used by sysenter.c  */
+SYSENTER_RETURN_OFFSET:
 	pop %ebp
 .Lpop_ebp:
 	pop %edx

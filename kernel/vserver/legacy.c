@@ -10,7 +10,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
@@ -22,14 +21,18 @@
 #include <asm/uaccess.h>
 
 
+extern int vx_set_init(struct vx_info *, struct task_struct *);
 
 static int vx_set_initpid(struct vx_info *vxi, int pid)
 {
-	if (vxi->vx_initpid)
-		return -EPERM;
+	struct task_struct *init;
 
-	vxi->vx_initpid = pid;
-	return 0;
+	init = find_task_by_real_pid(pid);
+	if (!init)
+		return -ESRCH;
+
+	vxi->vx_flags &= ~VXF_STATE_INIT;
+	return vx_set_init(vxi, init);
 }
 
 int vc_new_s_context(uint32_t ctx, void __user *data)
@@ -74,9 +77,9 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		return -EINVAL;
 
 	if ((ctx == VX_DYNAMIC_ID) || (ctx < MIN_D_CONTEXT))
-		new_vxi = locate_or_create_vx_info(ctx);
+		new_vxi = lookup_or_create_vx_info(ctx);
 	else
-		new_vxi = locate_vx_info(ctx);
+		new_vxi = lookup_vx_info(ctx);
 
 	if (!new_vxi)
 		return -EINVAL;
@@ -86,7 +89,7 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		vx_info_flags(new_vxi, VX_INFO_PRIVATE, 0))
 		goto out_put;
 
-	new_vxi->vx_flags &= ~(VXF_STATE_SETUP|VXF_STATE_INIT);
+	new_vxi->vx_flags &= ~VXF_STATE_SETUP;
 
 	ret = vx_migrate_task(current, new_vxi);
 	if (ret == 0) {
@@ -100,6 +103,9 @@ int vc_new_s_context(uint32_t ctx, void __user *data)
 		if (vc_data.flags & VX_INFO_NPROC)
 			new_vxi->limit.rlim[RLIMIT_NPROC] =
 				current->signal->rlim[RLIMIT_NPROC].rlim_max;
+
+		/* tweak some defaults for legacy */
+		new_vxi->vx_flags |= (VXF_HIDE_NETIF|VXF_INFO_INIT);
 		ret = new_vxi->vx_id;
 	}
 out_put:

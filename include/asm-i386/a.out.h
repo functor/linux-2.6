@@ -19,7 +19,7 @@ struct exec
 
 #ifdef __KERNEL__
 
-#define STACK_TOP	TASK_SIZE
+#define STACK_TOP	(TASK_SIZE - PAGE_SIZE)  /* 1 page for vdso */
 
 #endif
 

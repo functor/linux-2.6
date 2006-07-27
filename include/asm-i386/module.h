@@ -6,9 +6,14 @@ struct mod_arch_specific
 {
 };
 
+#define MODULES_ARE_ELF32
 #define Elf_Shdr Elf32_Shdr
 #define Elf_Sym Elf32_Sym
 #define Elf_Ehdr Elf32_Ehdr
+#define Elf_Rel Elf32_Rel
+#define Elf_Rela Elf32_Rela
+#define ELF_R_TYPE(X)	ELF32_R_TYPE(X)
+#define ELF_R_SYM(X)	ELF32_R_SYM(X)
 
 #ifdef CONFIG_M386
 #define MODULE_PROC_FAMILY "386 "
@@ -52,8 +57,10 @@ struct mod_arch_specific
 #define MODULE_PROC_FAMILY "CYRIXIII "
 #elif defined CONFIG_MVIAC3_2
 #define MODULE_PROC_FAMILY "VIAC3-2 "
-#elif CONFIG_MGEODEGX1
+#elif defined CONFIG_MGEODEGX1
 #define MODULE_PROC_FAMILY "GEODEGX1 "
+#elif defined CONFIG_MGEODE_LX
+#define MODULE_PROC_FAMILY "GEODE "
 #else
 #error unknown processor family
 #endif

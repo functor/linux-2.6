@@ -40,6 +40,7 @@
  *	  v4wb		- ARMv4 with writeback cache, without minicache
  *	  v4_mc		- ARMv4 with minicache
  *	  xscale	- Xscale
+ *	  xsc3		- XScalev3
  */
 #undef _USER
 #undef MULTI_USER
@@ -81,6 +82,14 @@
 #  define MULTI_USER 1
 # else
 #  define _USER xscale_mc
+# endif
+#endif
+
+#ifdef CONFIG_CPU_XSC3
+# ifdef _USER
+#  define MULTI_USER 1
+# else
+#  define _USER xsc3_mc
 # endif
 #endif
 
@@ -163,20 +172,6 @@ typedef unsigned long pgprot_t;
 /* the upper-most page table pointer */
 extern pmd_t *top_pmd;
 
-/* Pure 2^n version of get_order */
-static inline int get_order(unsigned long size)
-{
-	int order;
-
-	size = (size-1) >> (PAGE_SHIFT-1);
-	order = -1;
-	do {
-		size >>= 1;
-		order++;
-	} while (size);
-	return order;
-}
-
 #include <asm/memory.h>
 
 #endif /* !__ASSEMBLY__ */
@@ -184,6 +179,17 @@ static inline int get_order(unsigned long size)
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
+/*
+ * With EABI on ARMv5 and above we must have 64-bit aligned slab pointers.
+ */
+#if defined(CONFIG_AEABI) && (__LINUX_ARM_ARCH__ >= 5)
+#define ARCH_SLAB_MINALIGN 8
+#endif
+
+#define devmem_is_allowed(x) 1
+
 #endif /* __KERNEL__ */
+
+#include <asm-generic/page.h>
 
 #endif

@@ -21,6 +21,7 @@
 #include <linux/vt_kern.h>		/* For unblank_screen() */
 #include <linux/highmem.h>
 #include <linux/module.h>
+#include <linux/kprobes.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -107,7 +108,7 @@ static inline unsigned long get_segment_eip(struct pt_regs *regs,
 		desc = (void *)desc + (seg & ~7);
 	} else {
 		/* Must disable preemption while reading the GDT. */
-		desc = (u32 *)&per_cpu(cpu_gdt_table, get_cpu());
+ 		desc = (u32 *)get_cpu_gdt_table(get_cpu());
 		desc = (void *)desc + (seg & ~7);
 	}
 
@@ -146,7 +147,7 @@ static int __is_prefetch(struct pt_regs *regs, unsigned long addr)
 
 		if (instr > limit)
 			break;
-		if (__get_user(opcode, (unsigned char *) instr))
+		if (__get_user(opcode, (unsigned char __user *) instr))
 			break; 
 
 		instr_hi = opcode & 0xf0; 
@@ -173,7 +174,7 @@ static int __is_prefetch(struct pt_regs *regs, unsigned long addr)
 			scan_more = 0;
 			if (instr > limit)
 				break;
-			if (__get_user(opcode, (unsigned char *) instr)) 
+			if (__get_user(opcode, (unsigned char __user *) instr))
 				break;
 			prefetch = (instr_lo == 0xF) &&
 				(opcode == 0x0D || opcode == 0x18);
@@ -199,7 +200,81 @@ static inline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 	return 0;
 } 
 
+static noinline void force_sig_info_fault(int si_signo, int si_code,
+	unsigned long address, struct task_struct *tsk)
+{
+	siginfo_t info;
+
+	info.si_signo = si_signo;
+	info.si_errno = 0;
+	info.si_code = si_code;
+	info.si_addr = (void __user *)address;
+	force_sig_info(si_signo, &info, tsk);
+}
+
 fastcall void do_invalid_op(struct pt_regs *, unsigned long);
+
+static inline pmd_t *vmalloc_sync_one(pgd_t *pgd, unsigned long address)
+{
+	unsigned index = pgd_index(address);
+	pgd_t *pgd_k;
+	pud_t *pud, *pud_k;
+	pmd_t *pmd, *pmd_k;
+
+	pgd += index;
+	pgd_k = init_mm.pgd + index;
+
+	if (!pgd_present(*pgd_k))
+		return NULL;
+
+	/*
+	 * set_pgd(pgd, *pgd_k); here would be useless on PAE
+	 * and redundant with the set_pmd() on non-PAE. As would
+	 * set_pud.
+	 */
+
+	pud = pud_offset(pgd, address);
+	pud_k = pud_offset(pgd_k, address);
+	if (!pud_present(*pud_k))
+		return NULL;
+
+	pmd = pmd_offset(pud, address);
+	pmd_k = pmd_offset(pud_k, address);
+	if (!pmd_present(*pmd_k))
+		return NULL;
+	if (!pmd_present(*pmd))
+		set_pmd(pmd, *pmd_k);
+	else
+		BUG_ON(pmd_page(*pmd) != pmd_page(*pmd_k));
+	return pmd_k;
+}
+
+/*
+ * Handle a fault on the vmalloc or module mapping area
+ *
+ * This assumes no large pages in there.
+ */
+static inline int vmalloc_fault(unsigned long address)
+{
+	unsigned long pgd_paddr;
+	pmd_t *pmd_k;
+	pte_t *pte_k;
+	/*
+	 * Synchronize this task's top level page-table
+	 * with the 'reference' page table.
+	 *
+	 * Do _not_ use "current" here. We might be inside
+	 * an interrupt in the middle of a task switch..
+	 */
+	pgd_paddr = read_cr3();
+	pmd_k = vmalloc_sync_one(__va(pgd_paddr), address);
+	if (!pmd_k)
+		return -1;
+	pte_k = pte_offset_kernel(pmd_k, address);
+	if (!pte_present(*pte_k))
+		return -1;
+	return 0;
+}
 
 /*
  * This routine handles page faults.  It determines the address,
@@ -210,30 +285,25 @@ fastcall void do_invalid_op(struct pt_regs *, unsigned long);
  *	bit 0 == 0 means no page found, 1 means protection fault
  *	bit 1 == 0 means read, 1 means write
  *	bit 2 == 0 means kernel, 1 means user-mode
+ *	bit 3 == 1 means use of reserved bit detected
+ *	bit 4 == 1 means fault was an instruction fetch
  */
-fastcall void do_page_fault(struct pt_regs *regs, unsigned long error_code)
+fastcall void __kprobes do_page_fault(struct pt_regs *regs,
+				      unsigned long error_code)
 {
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct * vma;
 	unsigned long address;
 	unsigned long page;
-	int write;
-	siginfo_t info;
+	int write, si_code;
 
 	/* get the address */
-	__asm__("movl %%cr2,%0":"=r" (address));
-
-	if (notify_die(DIE_PAGE_FAULT, "page fault", regs, error_code, 14,
-					SIGSEGV) == NOTIFY_STOP)
-		return;
-	/* It's safe to allow irq's after cr2 has been saved */
-	if (regs->eflags & (X86_EFLAGS_IF|VM_MASK))
-		local_irq_enable();
+        address = read_cr2();
 
 	tsk = current;
 
-	info.si_code = SEGV_MAPERR;
+	si_code = SEGV_MAPERR;
 
 	/*
 	 * We fault-in kernel-space virtual memory on-demand. The
@@ -246,17 +316,29 @@ fastcall void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 *
 	 * This verifies that the fault happens in kernel space
 	 * (error_code & 4) == 0, and that the fault was not a
-	 * protection error (error_code & 1) == 0.
+	 * protection error (error_code & 9) == 0.
 	 */
-	if (unlikely(address >= TASK_SIZE)) { 
-		if (!(error_code & 5))
-			goto vmalloc_fault;
-		/* 
+	if (unlikely(address >= TASK_SIZE)) {
+		if (!(error_code & 0x0000000d) && vmalloc_fault(address) >= 0)
+			return;
+		if (notify_die(DIE_PAGE_FAULT, "page fault", regs, error_code, 14,
+						SIGSEGV) == NOTIFY_STOP)
+			return;
+		/*
 		 * Don't take the mm semaphore here. If we fixup a prefetch
 		 * fault we could otherwise deadlock.
 		 */
 		goto bad_area_nosemaphore;
-	} 
+	}
+
+	if (notify_die(DIE_PAGE_FAULT, "page fault", regs, error_code, 14,
+					SIGSEGV) == NOTIFY_STOP)
+		return;
+
+	/* It's safe to allow irq's after cr2 has been saved and the vmalloc
+	   fault has been handled. */
+	if (regs->eflags & (X86_EFLAGS_IF|VM_MASK))
+		local_irq_enable();
 
 	mm = tsk->mm;
 
@@ -313,7 +395,7 @@ fastcall void do_page_fault(struct pt_regs *regs, unsigned long error_code)
  * we can handle it..
  */
 good_area:
-	info.si_code = SEGV_ACCERR;
+	si_code = SEGV_ACCERR;
 	write = 0;
 	switch (error_code & 3) {
 		default:	/* 3: write, present */
@@ -387,11 +469,7 @@ bad_area_nosemaphore:
 		/* Kernel addresses are always protection faults */
 		tsk->thread.error_code = error_code | (address >= TASK_SIZE);
 		tsk->thread.trap_no = 14;
-		info.si_signo = SIGSEGV;
-		info.si_errno = 0;
-		/* info.si_code has been set above */
-		info.si_addr = (void __user *)address;
-		force_sig_info(SIGSEGV, &info, tsk);
+		force_sig_info_fault(SIGSEGV, si_code, address, tsk);
 		return;
 	}
 
@@ -431,24 +509,31 @@ no_context:
 
 	bust_spinlocks(1);
 
-#ifdef CONFIG_X86_PAE
-	if (error_code & 16) {
-		pte_t *pte = lookup_address(address);
+	if (oops_may_print()) {
+	#ifdef CONFIG_X86_PAE
+		if (error_code & 16) {
+			pte_t *pte = lookup_address(address);
 
-		if (pte && pte_present(*pte) && !pte_exec_kernel(*pte))
-			printk(KERN_CRIT "kernel tried to execute NX-protected page - exploit attempt? (uid: %d)\n", current->uid);
+			if (pte && pte_present(*pte) && !pte_exec_kernel(*pte))
+				printk(KERN_CRIT "kernel tried to execute "
+					"NX-protected page - exploit attempt? "
+					"(uid: %d)\n", current->uid);
+		}
+	#endif
+		if (address < PAGE_SIZE)
+			printk(KERN_ALERT "BUG: unable to handle kernel NULL "
+					"pointer dereference");
+		else
+			printk(KERN_ALERT "BUG: unable to handle kernel paging"
+					" request");
+		printk(" at virtual address %08lx\n",address);
+		printk(KERN_ALERT " printing eip:\n");
+		printk("%08lx\n", regs->eip);
 	}
-#endif
-	if (address < PAGE_SIZE)
-		printk(KERN_ALERT "Unable to handle kernel NULL pointer dereference");
-	else
-		printk(KERN_ALERT "Unable to handle kernel paging request");
-	printk(" at virtual address %08lx\n",address);
-	printk(KERN_ALERT " printing eip:\n");
-	printk("%08lx\n", regs->eip);
-	asm("movl %%cr3,%0":"=r" (page));
+	page = read_cr3();
 	page = ((unsigned long *) __va(page))[address >> 22];
-	printk(KERN_ALERT "*pde = %08lx\n", page);
+	if (oops_may_print())
+		printk(KERN_ALERT "*pde = %08lx\n", page);
 	/*
 	 * We must not directly access the pte in the highpte
 	 * case, the page table might be allocated in highmem.
@@ -456,13 +541,16 @@ no_context:
 	 * it's allocated already.
 	 */
 #ifndef CONFIG_HIGHPTE
-	if (page & 1) {
+	if ((page & 1) && oops_may_print()) {
 		page &= PAGE_MASK;
 		address &= 0x003ff000;
 		page = ((unsigned long *) __va(page))[address >> PAGE_SHIFT];
 		printk(KERN_ALERT "*pte = %08lx\n", page);
 	}
 #endif
+	tsk->thread.cr2 = address;
+	tsk->thread.trap_no = 14;
+	tsk->thread.error_code = error_code;
 	die("Oops", regs, error_code);
 	bust_spinlocks(0);
 	do_exit(SIGKILL);
@@ -497,56 +585,42 @@ do_sigbus:
 	tsk->thread.cr2 = address;
 	tsk->thread.error_code = error_code;
 	tsk->thread.trap_no = 14;
-	info.si_signo = SIGBUS;
-	info.si_errno = 0;
-	info.si_code = BUS_ADRERR;
-	info.si_addr = (void __user *)address;
-	force_sig_info(SIGBUS, &info, tsk);
-	return;
+	force_sig_info_fault(SIGBUS, BUS_ADRERR, address, tsk);
+}
 
-vmalloc_fault:
-	{
-		/*
-		 * Synchronize this task's top level page-table
-		 * with the 'reference' page table.
-		 *
-		 * Do _not_ use "tsk" here. We might be inside
-		 * an interrupt in the middle of a task switch..
-		 */
-		int index = pgd_index(address);
-		unsigned long pgd_paddr;
-		pgd_t *pgd, *pgd_k;
-		pud_t *pud, *pud_k;
-		pmd_t *pmd, *pmd_k;
-		pte_t *pte_k;
+#ifndef CONFIG_X86_PAE
+void vmalloc_sync_all(void)
+{
+	/*
+	 * Note that races in the updates of insync and start aren't
+	 * problematic: insync can only get set bits added, and updates to
+	 * start are only improving performance (without affecting correctness
+	 * if undone).
+	 */
+	static DECLARE_BITMAP(insync, PTRS_PER_PGD);
+	static unsigned long start = TASK_SIZE;
+	unsigned long address;
 
-		asm("movl %%cr3,%0":"=r" (pgd_paddr));
-		pgd = index + (pgd_t *)__va(pgd_paddr);
-		pgd_k = init_mm.pgd + index;
+	BUILD_BUG_ON(TASK_SIZE & ~PGDIR_MASK);
+	for (address = start; address >= TASK_SIZE; address += PGDIR_SIZE) {
+		if (!test_bit(pgd_index(address), insync)) {
+			unsigned long flags;
+			struct page *page;
 
-		if (!pgd_present(*pgd_k))
-			goto no_context;
-
-		/*
-		 * set_pgd(pgd, *pgd_k); here would be useless on PAE
-		 * and redundant with the set_pmd() on non-PAE. As would
-		 * set_pud.
-		 */
-
-		pud = pud_offset(pgd, address);
-		pud_k = pud_offset(pgd_k, address);
-		if (!pud_present(*pud_k))
-			goto no_context;
-		
-		pmd = pmd_offset(pud, address);
-		pmd_k = pmd_offset(pud_k, address);
-		if (!pmd_present(*pmd_k))
-			goto no_context;
-		set_pmd(pmd, *pmd_k);
-
-		pte_k = pte_offset_kernel(pmd_k, address);
-		if (!pte_present(*pte_k))
-			goto no_context;
-		return;
+			spin_lock_irqsave(&pgd_lock, flags);
+			for (page = pgd_list; page; page =
+					(struct page *)page->index)
+				if (!vmalloc_sync_one(page_address(page),
+								address)) {
+					BUG_ON(page != pgd_list);
+					break;
+				}
+			spin_unlock_irqrestore(&pgd_lock, flags);
+			if (!page)
+				set_bit(pgd_index(address), insync);
+		}
+		if (address == start && test_bit(pgd_index(address), insync))
+			start = address + PGDIR_SIZE;
 	}
 }
+#endif

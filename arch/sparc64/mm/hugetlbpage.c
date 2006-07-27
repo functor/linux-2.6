@@ -1,7 +1,7 @@
 /*
  * SPARC64 Huge TLB page support.
  *
- * Copyright (C) 2002, 2003 David S. Miller (davem@redhat.com)
+ * Copyright (C) 2002, 2003, 2006 David S. Miller (davem@davemloft.net)
  */
 
 #include <linux/config.h>
@@ -22,155 +22,253 @@
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
 
-static pte_t *huge_pte_alloc(struct mm_struct *mm, unsigned long addr)
+/* Slightly simplified from the non-hugepage variant because by
+ * definition we don't have to worry about any page coloring stuff
+ */
+#define VA_EXCLUDE_START (0x0000080000000000UL - (1UL << 32UL))
+#define VA_EXCLUDE_END   (0xfffff80000000000UL + (1UL << 32UL))
+
+static unsigned long hugetlb_get_unmapped_area_bottomup(struct file *filp,
+							unsigned long addr,
+							unsigned long len,
+							unsigned long pgoff,
+							unsigned long flags)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct * vma;
+	unsigned long task_size = TASK_SIZE;
+	unsigned long start_addr;
+
+	if (test_thread_flag(TIF_32BIT))
+		task_size = STACK_TOP32;
+	if (unlikely(len >= VA_EXCLUDE_START))
+		return -ENOMEM;
+
+	if (len > mm->cached_hole_size) {
+	        start_addr = addr = mm->free_area_cache;
+	} else {
+	        start_addr = addr = TASK_UNMAPPED_BASE;
+	        mm->cached_hole_size = 0;
+	}
+
+	task_size -= len;
+
+full_search:
+	addr = ALIGN(addr, HPAGE_SIZE);
+
+	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
+		/* At this point:  (!vma || addr < vma->vm_end). */
+		if (addr < VA_EXCLUDE_START &&
+		    (addr + len) >= VA_EXCLUDE_START) {
+			addr = VA_EXCLUDE_END;
+			vma = find_vma(mm, VA_EXCLUDE_END);
+		}
+		if (unlikely(task_size < addr)) {
+			if (start_addr != TASK_UNMAPPED_BASE) {
+				start_addr = addr = TASK_UNMAPPED_BASE;
+				mm->cached_hole_size = 0;
+				goto full_search;
+			}
+			return -ENOMEM;
+		}
+		if (likely(!vma || addr + len <= vma->vm_start)) {
+			/*
+			 * Remember the place where we stopped the search:
+			 */
+			mm->free_area_cache = addr + len;
+			return addr;
+		}
+		if (addr + mm->cached_hole_size < vma->vm_start)
+		        mm->cached_hole_size = vma->vm_start - addr;
+
+		addr = ALIGN(vma->vm_end, HPAGE_SIZE);
+	}
+}
+
+static unsigned long
+hugetlb_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
+				  const unsigned long len,
+				  const unsigned long pgoff,
+				  const unsigned long flags)
+{
+	struct vm_area_struct *vma;
+	struct mm_struct *mm = current->mm;
+	unsigned long addr = addr0;
+
+	/* This should only ever run for 32-bit processes.  */
+	BUG_ON(!test_thread_flag(TIF_32BIT));
+
+	/* check if free_area_cache is useful for us */
+	if (len <= mm->cached_hole_size) {
+ 	        mm->cached_hole_size = 0;
+ 		mm->free_area_cache = mm->mmap_base;
+ 	}
+
+	/* either no address requested or can't fit in requested address hole */
+	addr = mm->free_area_cache & HPAGE_MASK;
+
+	/* make sure it can fit in the remaining address space */
+	if (likely(addr > len)) {
+		vma = find_vma(mm, addr-len);
+		if (!vma || addr <= vma->vm_start) {
+			/* remember the address as a hint for next time */
+			return (mm->free_area_cache = addr-len);
+		}
+	}
+
+	if (unlikely(mm->mmap_base < len))
+		goto bottomup;
+
+	addr = (mm->mmap_base-len) & HPAGE_MASK;
+
+	do {
+		/*
+		 * Lookup failure means no vma is above this address,
+		 * else if new region fits below vma->vm_start,
+		 * return with success:
+		 */
+		vma = find_vma(mm, addr);
+		if (likely(!vma || addr+len <= vma->vm_start)) {
+			/* remember the address as a hint for next time */
+			return (mm->free_area_cache = addr);
+		}
+
+ 		/* remember the largest hole we saw so far */
+ 		if (addr + mm->cached_hole_size < vma->vm_start)
+ 		        mm->cached_hole_size = vma->vm_start - addr;
+
+		/* try just below the current vma->vm_start */
+		addr = (vma->vm_start-len) & HPAGE_MASK;
+	} while (likely(len < vma->vm_start));
+
+bottomup:
+	/*
+	 * A failed mmap() very likely causes application failure,
+	 * so fall back to the bottom-up function here. This scenario
+	 * can happen with large stack limits and large mmap()
+	 * allocations.
+	 */
+	mm->cached_hole_size = ~0UL;
+  	mm->free_area_cache = TASK_UNMAPPED_BASE;
+	addr = arch_get_unmapped_area(filp, addr0, len, pgoff, flags);
+	/*
+	 * Restore the topdown base:
+	 */
+	mm->free_area_cache = mm->mmap_base;
+	mm->cached_hole_size = ~0UL;
+
+	return addr;
+}
+
+unsigned long
+hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
+		unsigned long len, unsigned long pgoff, unsigned long flags)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	unsigned long task_size = TASK_SIZE;
+
+	if (test_thread_flag(TIF_32BIT))
+		task_size = STACK_TOP32;
+
+	if (len & ~HPAGE_MASK)
+		return -EINVAL;
+	if (len > task_size)
+		return -ENOMEM;
+
+	if (addr) {
+		addr = ALIGN(addr, HPAGE_SIZE);
+		vma = find_vma(mm, addr);
+		if (task_size - len >= addr &&
+		    (!vma || addr + len <= vma->vm_start))
+			return addr;
+	}
+	if (mm->get_unmapped_area == arch_get_unmapped_area)
+		return hugetlb_get_unmapped_area_bottomup(file, addr, len,
+				pgoff, flags);
+	else
+		return hugetlb_get_unmapped_area_topdown(file, addr, len,
+				pgoff, flags);
+}
+
+pte_t *huge_pte_alloc(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte = NULL;
 
+	/* We must align the address, because our caller will run
+	 * set_huge_pte_at() on whatever we return, which writes out
+	 * all of the sub-ptes for the hugepage range.  So we have
+	 * to give it the first such sub-pte.
+	 */
+	addr &= HPAGE_MASK;
+
 	pgd = pgd_offset(mm, addr);
-	if (pgd) {
-		pud = pud_offset(pgd, addr);
-		if (pud) {
-			pmd = pmd_alloc(mm, pud, addr);
-			if (pmd)
-				pte = pte_alloc_map(mm, pmd, addr);
-		}
+	pud = pud_alloc(mm, pgd, addr);
+	if (pud) {
+		pmd = pmd_alloc(mm, pud, addr);
+		if (pmd)
+			pte = pte_alloc_map(mm, pmd, addr);
 	}
 	return pte;
 }
 
-static pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
+pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte = NULL;
 
+	addr &= HPAGE_MASK;
+
 	pgd = pgd_offset(mm, addr);
-	if (pgd) {
+	if (!pgd_none(*pgd)) {
 		pud = pud_offset(pgd, addr);
-		if (pud) {
+		if (!pud_none(*pud)) {
 			pmd = pmd_offset(pud, addr);
-			if (pmd)
+			if (!pmd_none(*pmd))
 				pte = pte_offset_map(pmd, addr);
 		}
 	}
 	return pte;
 }
 
-#define mk_pte_huge(entry) do { pte_val(entry) |= _PAGE_SZHUGE; } while (0)
-
-static void set_huge_pte(struct mm_struct *mm, struct vm_area_struct *vma,
-			 unsigned long addr,
-			 struct page *page, pte_t * page_table, int write_access)
+void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
+		     pte_t *ptep, pte_t entry)
 {
-	unsigned long i;
-	pte_t entry;
+	int i;
 
-	add_mm_counter(mm, rss, HPAGE_SIZE / PAGE_SIZE);
-
-	if (write_access)
-		entry = pte_mkwrite(pte_mkdirty(mk_pte(page,
-						       vma->vm_page_prot)));
-	else
-		entry = pte_wrprotect(mk_pte(page, vma->vm_page_prot));
-	entry = pte_mkyoung(entry);
-	mk_pte_huge(entry);
+	if (!pte_present(*ptep) && pte_present(entry))
+		mm->context.huge_pte_count++;
 
 	for (i = 0; i < (1 << HUGETLB_PAGE_ORDER); i++) {
-		set_pte_at(mm, addr, page_table, entry);
-		page_table++;
+		set_pte_at(mm, addr, ptep, entry);
+		ptep++;
 		addr += PAGE_SIZE;
-
 		pte_val(entry) += PAGE_SIZE;
 	}
 }
 
-/*
- * This function checks for proper alignment of input addr and len parameters.
- */
-int is_aligned_hugepage_range(unsigned long addr, unsigned long len)
+pte_t huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
+			      pte_t *ptep)
 {
-	if (len & ~HPAGE_MASK)
-		return -EINVAL;
-	if (addr & ~HPAGE_MASK)
-		return -EINVAL;
-	return 0;
-}
-
-int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
-			    struct vm_area_struct *vma)
-{
-	pte_t *src_pte, *dst_pte, entry;
-	struct page *ptepage;
-	unsigned long addr = vma->vm_start;
-	unsigned long end = vma->vm_end;
+	pte_t entry;
 	int i;
 
-	while (addr < end) {
-		dst_pte = huge_pte_alloc(dst, addr);
-		if (!dst_pte)
-			goto nomem;
-		src_pte = huge_pte_offset(src, addr);
-		BUG_ON(!src_pte || pte_none(*src_pte));
-		entry = *src_pte;
-		ptepage = pte_page(entry);
-		get_page(ptepage);
-		for (i = 0; i < (1 << HUGETLB_PAGE_ORDER); i++) {
-			set_pte_at(dst, addr, dst_pte, entry);
-			pte_val(entry) += PAGE_SIZE;
-			dst_pte++;
-			addr += PAGE_SIZE;
-		}
-		add_mm_counter(dst, rss, HPAGE_SIZE / PAGE_SIZE);
-	}
-	return 0;
+	entry = *ptep;
+	if (pte_present(entry))
+		mm->context.huge_pte_count--;
 
-nomem:
-	return -ENOMEM;
-}
-
-int follow_hugetlb_page(struct mm_struct *mm, struct vm_area_struct *vma,
-			struct page **pages, struct vm_area_struct **vmas,
-			unsigned long *position, int *length, int i)
-{
-	unsigned long vaddr = *position;
-	int remainder = *length;
-
-	WARN_ON(!is_vm_hugetlb_page(vma));
-
-	while (vaddr < vma->vm_end && remainder) {
-		if (pages) {
-			pte_t *pte;
-			struct page *page;
-
-			pte = huge_pte_offset(mm, vaddr);
-
-			/* hugetlb should be locked, and hence, prefaulted */
-			BUG_ON(!pte || pte_none(*pte));
-
-			page = pte_page(*pte);
-
-			WARN_ON(!PageCompound(page));
-
-			get_page(page);
-			pages[i] = page;
-		}
-
-		if (vmas)
-			vmas[i] = vma;
-
-		vaddr += PAGE_SIZE;
-		--remainder;
-		++i;
+	for (i = 0; i < (1 << HUGETLB_PAGE_ORDER); i++) {
+		pte_clear(mm, addr, ptep);
+		addr += PAGE_SIZE;
+		ptep++;
 	}
 
-	*length = remainder;
-	*position = vaddr;
-
-	return i;
+	return entry;
 }
 
 struct page *follow_huge_addr(struct mm_struct *mm,
@@ -190,34 +288,6 @@ struct page *follow_huge_pmd(struct mm_struct *mm, unsigned long address,
 	return NULL;
 }
 
-void unmap_hugepage_range(struct vm_area_struct *vma,
-			  unsigned long start, unsigned long end)
-{
-	struct mm_struct *mm = vma->vm_mm;
-	unsigned long address;
-	pte_t *pte;
-	struct page *page;
-	int i;
-
-	BUG_ON(start & (HPAGE_SIZE - 1));
-	BUG_ON(end & (HPAGE_SIZE - 1));
-
-	for (address = start; address < end; address += HPAGE_SIZE) {
-		pte = huge_pte_offset(mm, address);
-		BUG_ON(!pte);
-		if (pte_none(*pte))
-			continue;
-		page = pte_page(*pte);
-		put_page(page);
-		for (i = 0; i < (1 << HUGETLB_PAGE_ORDER); i++) {
-			pte_clear(mm, address+(i*PAGE_SIZE), pte);
-			pte++;
-		}
-	}
-	add_mm_counter(mm, rss, -((end - start) >> PAGE_SHIFT));
-	flush_tlb_range(vma, start, end);
-}
-
 static void context_reload(void *__data)
 {
 	struct mm_struct *mm = __data;
@@ -226,11 +296,16 @@ static void context_reload(void *__data)
 		load_secondary_context(mm);
 }
 
-int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
+void hugetlb_prefault_arch_hook(struct mm_struct *mm)
 {
-	struct mm_struct *mm = current->mm;
-	unsigned long addr;
-	int ret = 0;
+	struct tsb_config *tp = &mm->context.tsb_block[MM_TSB_HUGE];
+
+	if (likely(tp->tsb != NULL))
+		return;
+
+	tsb_grow(mm, MM_TSB_HUGE, 0);
+	tsb_context_switch(mm);
+	smp_tsb_sync(mm);
 
 	/* On UltraSPARC-III+ and later, configure the second half of
 	 * the Data-TLB for huge pages.
@@ -261,50 +336,4 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 		}
 		spin_unlock(&ctx_alloc_lock);
 	}
-
-	BUG_ON(vma->vm_start & ~HPAGE_MASK);
-	BUG_ON(vma->vm_end & ~HPAGE_MASK);
-
-	spin_lock(&mm->page_table_lock);
-	for (addr = vma->vm_start; addr < vma->vm_end; addr += HPAGE_SIZE) {
-		unsigned long idx;
-		pte_t *pte = huge_pte_alloc(mm, addr);
-		struct page *page;
-
-		if (!pte) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		if (!pte_none(*pte))
-			continue;
-
-		idx = ((addr - vma->vm_start) >> HPAGE_SHIFT)
-			+ (vma->vm_pgoff >> (HPAGE_SHIFT - PAGE_SHIFT));
-		page = find_get_page(mapping, idx);
-		if (!page) {
-			/* charge the fs quota first */
-			if (hugetlb_get_quota(mapping)) {
-				ret = -ENOMEM;
-				goto out;
-			}
-			page = alloc_huge_page();
-			if (!page) {
-				hugetlb_put_quota(mapping);
-				ret = -ENOMEM;
-				goto out;
-			}
-			ret = add_to_page_cache(page, mapping, idx, GFP_ATOMIC);
-			if (! ret) {
-				unlock_page(page);
-			} else {
-				hugetlb_put_quota(mapping);
-				free_huge_page(page);
-				goto out;
-			}
-		}
-		set_huge_pte(mm, vma, addr, page, pte, vma->vm_flags & VM_WRITE);
-	}
-out:
-	spin_unlock(&mm->page_table_lock);
-	return ret;
 }

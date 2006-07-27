@@ -87,7 +87,7 @@
  *	   would fail and generate an error message in the system log.
  * 	 - For opt_c: slave should not be set to the master's setting
  *	   while it is running. It was already set during enslave. To
- *	   simplify things, it is now handeled separately.
+ *	   simplify things, it is now handled separately.
  *
  *    - 2003/12/01 - Shmulik Hen <shmulik.hen at intel dot com>
  *	 - Code cleanup and style changes
@@ -693,13 +693,7 @@ static int enslave(char *master_ifname, char *slave_ifname)
 		/* Older bonding versions would panic if the slave has no IP
 		 * address, so get the IP setting from the master.
 		 */
-		res = set_if_addr(master_ifname, slave_ifname);
-		if (res) {
-			fprintf(stderr,
-				"Slave '%s': Error: set address failed\n",
-				slave_ifname);
-			return res;
-		}
+		set_if_addr(master_ifname, slave_ifname);
 	} else {
 		res = clear_if_addr(slave_ifname);
 		if (res) {
@@ -1085,7 +1079,6 @@ static int set_if_addr(char *master_ifname, char *slave_ifname)
 				slave_ifname, ifra[i].req_name,
 				strerror(saved_errno));
 
-			return res;
 		}
 
 		ipaddr = ifr.ifr_addr.sa_data;

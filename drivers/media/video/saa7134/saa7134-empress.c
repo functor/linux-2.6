@@ -1,5 +1,4 @@
 /*
- * $Id: saa7134-empress.c,v 1.10 2005/02/03 10:24:33 kraxel Exp $
  *
  * (c) 2004 Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]
  *
@@ -30,6 +29,7 @@
 #include "saa7134.h"
 
 #include <media/saa6752hs.h>
+#include <media/v4l2-common.h>
 
 /* ------------------------------------------------------------------ */
 
@@ -37,6 +37,7 @@ MODULE_AUTHOR("Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]");
 MODULE_LICENSE("GPL");
 
 static unsigned int empress_nr[] = {[0 ... (SAA7134_MAXBOARDS - 1)] = UNSET };
+
 module_param_array(empress_nr, int, NULL, 0444);
 MODULE_PARM_DESC(empress_nr,"ts device number");
 
@@ -56,7 +57,7 @@ static void ts_reset_encoder(struct saa7134_dev* dev)
 
 	saa_writeb(SAA7134_SPECIAL_MODE, 0x00);
 	msleep(10);
-   	saa_writeb(SAA7134_SPECIAL_MODE, 0x01);
+	saa_writeb(SAA7134_SPECIAL_MODE, 0x01);
 	msleep(100);
 	dev->empress_started = 0;
 }
@@ -66,7 +67,7 @@ static int ts_init_encoder(struct saa7134_dev* dev)
 	ts_reset_encoder(dev);
 	saa7134_i2c_call_clients(dev, VIDIOC_S_MPEGCOMP, NULL);
 	dev->empress_started = 1;
- 	return 0;
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -88,7 +89,7 @@ static int ts_open(struct inode *inode, struct file *file)
 
 	dprintk("open minor=%d\n",minor);
 	err = -EBUSY;
-	if (down_trylock(&dev->empress_tsq.lock))
+	if (!mutex_trylock(&dev->empress_tsq.lock))
 		goto done;
 	if (dev->empress_users)
 		goto done_up;
@@ -98,7 +99,7 @@ static int ts_open(struct inode *inode, struct file *file)
 	err = 0;
 
 done_up:
-	up(&dev->empress_tsq.lock);
+	mutex_unlock(&dev->empress_tsq.lock);
 done:
 	return err;
 }
@@ -109,7 +110,7 @@ static int ts_release(struct inode *inode, struct file *file)
 
 	if (dev->empress_tsq.streaming)
 		videobuf_streamoff(&dev->empress_tsq);
-	down(&dev->empress_tsq.lock);
+	mutex_lock(&dev->empress_tsq.lock);
 	if (dev->empress_tsq.reading)
 		videobuf_read_stop(&dev->empress_tsq);
 	videobuf_mmap_free(&dev->empress_tsq);
@@ -118,7 +119,7 @@ static int ts_release(struct inode *inode, struct file *file)
 	/* stop the encoder */
 	ts_reset_encoder(dev);
 
-	up(&dev->empress_tsq.lock);
+	mutex_unlock(&dev->empress_tsq.lock);
 	return 0;
 }
 
@@ -163,14 +164,14 @@ static int ts_do_ioctl(struct inode *inode, struct file *file,
 	struct saa7134_dev *dev = file->private_data;
 
 	if (debug > 1)
-		saa7134_print_ioctl(dev->name,cmd);
+		v4l_print_ioctl(dev->name,cmd);
 	switch (cmd) {
 	case VIDIOC_QUERYCAP:
 	{
 		struct v4l2_capability *cap = arg;
 
 		memset(cap,0,sizeof(*cap));
-                strcpy(cap->driver, "saa7134");
+		strcpy(cap->driver, "saa7134");
 		strlcpy(cap->card, saa7134_boards[dev->board].name,
 			sizeof(cap->card));
 		sprintf(cap->bus_info,"PCI:%s",pci_name(dev->pci));

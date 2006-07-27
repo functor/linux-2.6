@@ -68,7 +68,7 @@ static struct smb_request *smb_do_alloc_request(struct smb_sb_info *server,
 		goto out;
 
 	if (bufsize > 0) {
-		buf = smb_kmalloc(bufsize, GFP_NOFS);
+		buf = kmalloc(bufsize, GFP_NOFS);
 		if (!buf) {
 			kmem_cache_free(req_cachep, req);
 			return NULL;
@@ -124,9 +124,8 @@ static void smb_free_request(struct smb_request *req)
 {
 	atomic_dec(&req->rq_server->nr_requests);
 	if (req->rq_buffer && !(req->rq_flags & SMB_REQ_STATIC))
-		smb_kfree(req->rq_buffer);
-	if (req->rq_trans2buffer)
-		smb_kfree(req->rq_trans2buffer);
+		kfree(req->rq_buffer);
+	kfree(req->rq_trans2buffer);
 	kmem_cache_free(req_cachep, req);
 }
 
@@ -183,8 +182,7 @@ static int smb_setup_request(struct smb_request *req)
 	req->rq_err = 0;
 	req->rq_errno = 0;
 	req->rq_fragment = 0;
-	if (req->rq_trans2buffer)
-		smb_kfree(req->rq_trans2buffer);
+	kfree(req->rq_trans2buffer);
 
 	return 0;
 }
@@ -341,9 +339,11 @@ int smb_add_request(struct smb_request *req)
 		/*
 		 * On timeout or on interrupt we want to try and remove the
 		 * request from the recvq/xmitq.
+		 * First check if the request is still part of a queue. (May
+		 * have been removed by some error condition)
 		 */
 		smb_lock_server(server);
-		if (!(req->rq_flags & SMB_REQ_RECEIVED)) {
+		if (!list_empty(&req->rq_queue)) {
 			list_del_init(&req->rq_queue);
 			smb_rput(req);
 		}
@@ -647,10 +647,9 @@ static int smb_recv_trans2(struct smb_sb_info *server, struct smb_request *req)
 			goto out_too_long;
 
 		req->rq_trans2bufsize = buf_len;
-		req->rq_trans2buffer = smb_kmalloc(buf_len, GFP_NOFS);
+		req->rq_trans2buffer = kzalloc(buf_len, GFP_NOFS);
 		if (!req->rq_trans2buffer)
 			goto out_no_mem;
-		memset(req->rq_trans2buffer, 0, buf_len);
 
 		req->rq_parm = req->rq_trans2buffer;
 		req->rq_data = req->rq_trans2buffer + parm_tot;
@@ -786,8 +785,7 @@ int smb_request_recv(struct smb_sb_info *server)
 		/* We should never be called with any of these states */
 	case SMB_RECV_END:
 	case SMB_RECV_REQUEST:
-		server->rstate = SMB_RECV_END;
-		break;
+		BUG();
 	}
 
 	if (result < 0) {

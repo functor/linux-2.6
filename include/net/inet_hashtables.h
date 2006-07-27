@@ -272,6 +272,25 @@ static inline int inet_iif(const struct sk_buff *skb)
 	return ((struct rtable *)skb->dst)->rt_iif;
 }
 
+/*
+ *      Check if a given address matches for an inet socket
+ *
+ *      nxi:	the socket's nx_info if any
+ *      addr:	to be verified address
+ *      saddr:	socket addresses
+ */
+static inline int inet_addr_match (
+	struct nx_info *nxi,
+	uint32_t addr,
+	uint32_t saddr)
+{
+	if (addr && (saddr == addr))
+		return 1;
+	if (!saddr)
+		return addr_in_nx_info(nxi, addr);
+	return 0;
+}
+
 extern struct sock *__inet_lookup_listener(const struct hlist_head *head,
 					   const u32 daddr,
 					   const unsigned short hnum,
@@ -292,7 +311,7 @@ static inline struct sock *
 		const struct inet_sock *inet = inet_sk((sk = __sk_head(head)));
 
 		if (inet->num == hnum && !sk->sk_node.next &&
-		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
+		    inet_addr_match(sk->sk_nx_info, daddr, inet->rcv_saddr) &&
 		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
 		    !sk->sk_bound_dev_if)
 			goto sherry_cache;

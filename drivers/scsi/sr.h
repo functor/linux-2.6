@@ -33,7 +33,6 @@ typedef struct scsi_cd {
 	struct scsi_device *device;
 	unsigned int vendor;	/* vendor code, see sr_vendor.c         */
 	unsigned long ms_offset;	/* for reading multisession-CD's        */
-	unsigned needs_sector_size:1;	/* needs to get sector size */
 	unsigned use:1;		/* is this device still supportable     */
 	unsigned xa_flag:1;	/* CD has XA sectors ? */
 	unsigned readcd_known:1;	/* drive supports READ_CD (0xbe) */
@@ -56,7 +55,6 @@ int sr_get_mcn(struct cdrom_device_info *, struct cdrom_mcn *);
 int sr_reset(struct cdrom_device_info *);
 int sr_select_speed(struct cdrom_device_info *cdi, int speed);
 int sr_audio_ioctl(struct cdrom_device_info *, unsigned int, void *);
-int sr_dev_ioctl(struct cdrom_device_info *, unsigned int, unsigned long);
 
 int sr_is_xa(Scsi_CD *);
 

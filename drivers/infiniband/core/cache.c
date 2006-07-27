@@ -1,5 +1,8 @@
 /*
  * Copyright (c) 2004 Topspin Communications.  All rights reserved.
+ * Copyright (c) 2005 Intel Corporation. All rights reserved.
+ * Copyright (c) 2005 Sun Microsystems, Inc. All rights reserved.
+ * Copyright (c) 2005 Voltaire, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -32,12 +35,12 @@
  * $Id: cache.c 1349 2004-12-16 21:09:43Z roland $
  */
 
-#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/sched.h>	/* INIT_WORK, schedule_work(), flush_scheduled_work() */
 
-#include <ib_cache.h>
+#include <rdma/ib_cache.h>
 
 #include "core_priv.h"
 
@@ -299,7 +302,7 @@ static void ib_cache_setup_one(struct ib_device *device)
 		kmalloc(sizeof *device->cache.pkey_cache *
 			(end_port(device) - start_port(device) + 1), GFP_KERNEL);
 	device->cache.gid_cache =
-		kmalloc(sizeof *device->cache.pkey_cache *
+		kmalloc(sizeof *device->cache.gid_cache *
 			(end_port(device) - start_port(device) + 1), GFP_KERNEL);
 
 	if (!device->cache.pkey_cache || !device->cache.gid_cache) {

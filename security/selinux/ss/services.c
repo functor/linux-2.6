@@ -7,12 +7,13 @@
  * Updated: Trusted Computer Solutions, Inc. <dgoeddel@trustedcs.com>
  *
  *	Support for enhanced MLS infrastructure.
+ *	Support for context based audit filters.
  *
  * Updated: Frank Mayer <mayerf@tresys.com> and Karl MacMillan <kmacmillan@tresys.com>
  *
  * 	Added conditional policy language extensions
  *
- * Copyright (C) 2004-2005 Trusted Computer Solutions, Inc.
+ * Copyright (C) 2004-2006 Trusted Computer Solutions, Inc.
  * Copyright (C) 2003 - 2004 Tresys Technology, LLC
  * Copyright (C) 2003 Red Hat, Inc., James Morris <jmorris@redhat.com>
  *	This program is free software; you can redistribute it and/or modify
@@ -27,7 +28,8 @@
 #include <linux/in.h>
 #include <linux/sched.h>
 #include <linux/audit.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
+
 #include "flask.h"
 #include "avc.h"
 #include "avc_ss.h"
@@ -48,9 +50,9 @@ static DEFINE_RWLOCK(policy_rwlock);
 #define POLICY_RDUNLOCK read_unlock(&policy_rwlock)
 #define POLICY_WRUNLOCK write_unlock_irq(&policy_rwlock)
 
-static DECLARE_MUTEX(load_sem);
-#define LOAD_LOCK down(&load_sem)
-#define LOAD_UNLOCK up(&load_sem)
+static DEFINE_MUTEX(load_mutex);
+#define LOAD_LOCK mutex_lock(&load_mutex)
+#define LOAD_UNLOCK mutex_unlock(&load_mutex)
 
 static struct sidtab sidtab;
 struct policydb policydb;
@@ -266,8 +268,11 @@ static int context_struct_compute_av(struct context *scontext,
 	struct constraint_node *constraint;
 	struct role_allow *ra;
 	struct avtab_key avkey;
-	struct avtab_datum *avdatum;
+	struct avtab_node *node;
 	struct class_datum *tclass_datum;
+	struct ebitmap *sattr, *tattr;
+	struct ebitmap_node *snode, *tnode;
+	unsigned int i, j;
 
 	/*
 	 * Remap extended Netlink classes for old policy versions.
@@ -300,21 +305,34 @@ static int context_struct_compute_av(struct context *scontext,
 	 * If a specific type enforcement rule was defined for
 	 * this permission check, then use it.
 	 */
-	avkey.source_type = scontext->type;
-	avkey.target_type = tcontext->type;
 	avkey.target_class = tclass;
-	avdatum = avtab_search(&policydb.te_avtab, &avkey, AVTAB_AV);
-	if (avdatum) {
-		if (avdatum->specified & AVTAB_ALLOWED)
-			avd->allowed = avtab_allowed(avdatum);
-		if (avdatum->specified & AVTAB_AUDITDENY)
-			avd->auditdeny = avtab_auditdeny(avdatum);
-		if (avdatum->specified & AVTAB_AUDITALLOW)
-			avd->auditallow = avtab_auditallow(avdatum);
-	}
+	avkey.specified = AVTAB_AV;
+	sattr = &policydb.type_attr_map[scontext->type - 1];
+	tattr = &policydb.type_attr_map[tcontext->type - 1];
+	ebitmap_for_each_bit(sattr, snode, i) {
+		if (!ebitmap_node_get_bit(snode, i))
+			continue;
+		ebitmap_for_each_bit(tattr, tnode, j) {
+			if (!ebitmap_node_get_bit(tnode, j))
+				continue;
+			avkey.source_type = i + 1;
+			avkey.target_type = j + 1;
+			for (node = avtab_search_node(&policydb.te_avtab, &avkey);
+			     node != NULL;
+			     node = avtab_search_node_next(node, avkey.specified)) {
+				if (node->key.specified == AVTAB_ALLOWED)
+					avd->allowed |= node->datum.data;
+				else if (node->key.specified == AVTAB_AUDITALLOW)
+					avd->auditallow |= node->datum.data;
+				else if (node->key.specified == AVTAB_AUDITDENY)
+					avd->auditdeny &= node->datum.data;
+			}
 
-	/* Check conditional av table for additional permissions */
-	cond_compute_av(&policydb.te_cond_avtab, &avkey, avd);
+			/* Check conditional av table for additional permissions */
+			cond_compute_av(&policydb.te_cond_avtab, &avkey, avd);
+
+		}
+	}
 
 	/*
 	 * Remove any permissions prohibited by a constraint (this includes
@@ -365,7 +383,7 @@ static int security_validtrans_handle_fail(struct context *ocontext,
 		goto out;
 	if (context_struct_to_string(tcontext, &t, &tlen) < 0)
 		goto out;
-	audit_log(current->audit_context,
+	audit_log(current->audit_context, GFP_ATOMIC, AUDIT_SELINUX_ERR,
 	          "security_validate_transition:  denied for"
 	          " oldcontext=%s newcontext=%s taskcontext=%s tclass=%s",
 	          o, n, t, policydb.p_class_val_to_name[tclass-1]);
@@ -576,6 +594,10 @@ int security_sid_to_context(u32 sid, char **scontext, u32 *scontext_len)
 
 			*scontext_len = strlen(initial_sid_to_string[sid]) + 1;
 			scontextp = kmalloc(*scontext_len,GFP_ATOMIC);
+			if (!scontextp) {
+				rc = -ENOMEM;
+				goto out;
+			}
 			strcpy(scontextp, initial_sid_to_string[sid]);
 			*scontext = scontextp;
 			goto out;
@@ -601,18 +623,7 @@ out:
 
 }
 
-/**
- * security_context_to_sid - Obtain a SID for a given security context.
- * @scontext: security context
- * @scontext_len: length in bytes
- * @sid: security identifier, SID
- *
- * Obtains a SID associated with the security context that
- * has the string representation specified by @scontext.
- * Returns -%EINVAL if the context is invalid, -%ENOMEM if insufficient
- * memory is available, or 0 on success.
- */
-int security_context_to_sid(char *scontext, u32 scontext_len, u32 *sid)
+static int security_context_to_sid_core(char *scontext, u32 scontext_len, u32 *sid, u32 def_sid)
 {
 	char *scontext2;
 	struct context context;
@@ -703,7 +714,7 @@ int security_context_to_sid(char *scontext, u32 scontext_len, u32 *sid)
 
 	context.type = typdatum->value;
 
-	rc = mls_context_to_sid(oldc, &p, &context);
+	rc = mls_context_to_sid(oldc, &p, &context, &sidtab, def_sid);
 	if (rc)
 		goto out_unlock;
 
@@ -727,6 +738,46 @@ out:
 	return rc;
 }
 
+/**
+ * security_context_to_sid - Obtain a SID for a given security context.
+ * @scontext: security context
+ * @scontext_len: length in bytes
+ * @sid: security identifier, SID
+ *
+ * Obtains a SID associated with the security context that
+ * has the string representation specified by @scontext.
+ * Returns -%EINVAL if the context is invalid, -%ENOMEM if insufficient
+ * memory is available, or 0 on success.
+ */
+int security_context_to_sid(char *scontext, u32 scontext_len, u32 *sid)
+{
+	return security_context_to_sid_core(scontext, scontext_len,
+	                                    sid, SECSID_NULL);
+}
+
+/**
+ * security_context_to_sid_default - Obtain a SID for a given security context,
+ * falling back to specified default if needed.
+ *
+ * @scontext: security context
+ * @scontext_len: length in bytes
+ * @sid: security identifier, SID
+ * @def_sid: default SID to assign on errror
+ *
+ * Obtains a SID associated with the security context that
+ * has the string representation specified by @scontext.
+ * The default SID is passed to the MLS layer to be used to allow
+ * kernel labeling of the MLS field if the MLS field is not present
+ * (for upgrading to MLS without full relabel).
+ * Returns -%EINVAL if the context is invalid, -%ENOMEM if insufficient
+ * memory is available, or 0 on success.
+ */
+int security_context_to_sid_default(char *scontext, u32 scontext_len, u32 *sid, u32 def_sid)
+{
+	return security_context_to_sid_core(scontext, scontext_len,
+	                                    sid, def_sid);
+}
+
 static int compute_sid_handle_invalid_context(
 	struct context *scontext,
 	struct context *tcontext,
@@ -742,7 +793,7 @@ static int compute_sid_handle_invalid_context(
 		goto out;
 	if (context_struct_to_string(newcontext, &n, &nlen) < 0)
 		goto out;
-	audit_log(current->audit_context,
+	audit_log(current->audit_context, GFP_ATOMIC, AUDIT_SELINUX_ERR,
 		  "security_compute_sid:  invalid context %s"
 		  " for scontext=%s"
 		  " tcontext=%s"
@@ -768,7 +819,6 @@ static int security_compute_sid(u32 ssid,
 	struct avtab_key avkey;
 	struct avtab_datum *avdatum;
 	struct avtab_node *node;
-	unsigned int type_change = 0;
 	int rc = 0;
 
 	if (!ss_initialized) {
@@ -833,33 +883,23 @@ static int security_compute_sid(u32 ssid,
 	avkey.source_type = scontext->type;
 	avkey.target_type = tcontext->type;
 	avkey.target_class = tclass;
-	avdatum = avtab_search(&policydb.te_avtab, &avkey, AVTAB_TYPE);
+	avkey.specified = specified;
+	avdatum = avtab_search(&policydb.te_avtab, &avkey);
 
 	/* If no permanent rule, also check for enabled conditional rules */
 	if(!avdatum) {
-		node = avtab_search_node(&policydb.te_cond_avtab, &avkey, specified);
+		node = avtab_search_node(&policydb.te_cond_avtab, &avkey);
 		for (; node != NULL; node = avtab_search_node_next(node, specified)) {
-			if (node->datum.specified & AVTAB_ENABLED) {
+			if (node->key.specified & AVTAB_ENABLED) {
 				avdatum = &node->datum;
 				break;
 			}
 		}
 	}
 
-	type_change = (avdatum && (avdatum->specified & specified));
-	if (type_change) {
+	if (avdatum) {
 		/* Use the type from the type transition/member/change rule. */
-		switch (specified) {
-		case AVTAB_TRANSITION:
-			newcontext.type = avtab_transition(avdatum);
-			break;
-		case AVTAB_MEMBER:
-			newcontext.type = avtab_member(avdatum);
-			break;
-		case AVTAB_CHANGE:
-			newcontext.type = avtab_change(avdatum);
-			break;
-		}
+		newcontext.type = avdatum->data;
 	}
 
 	/* Check for class-specific changes. */
@@ -1473,6 +1513,7 @@ int security_get_user_sids(u32 fromsid,
 	struct user_datum *user;
 	struct role_datum *role;
 	struct av_decision avd;
+	struct ebitmap_node *rnode, *tnode;
 	int rc = 0, i, j;
 
 	if (!ss_initialized) {
@@ -1496,20 +1537,19 @@ int security_get_user_sids(u32 fromsid,
 	}
 	usercon.user = user->value;
 
-	mysids = kmalloc(maxnel*sizeof(*mysids), GFP_ATOMIC);
+	mysids = kcalloc(maxnel, sizeof(*mysids), GFP_ATOMIC);
 	if (!mysids) {
 		rc = -ENOMEM;
 		goto out_unlock;
 	}
-	memset(mysids, 0, maxnel*sizeof(*mysids));
 
-	for (i = ebitmap_startbit(&user->roles); i < ebitmap_length(&user->roles); i++) {
-		if (!ebitmap_get_bit(&user->roles, i))
+	ebitmap_for_each_bit(&user->roles, rnode, i) {
+		if (!ebitmap_node_get_bit(rnode, i))
 			continue;
 		role = policydb.role_val_to_struct[i];
 		usercon.role = i+1;
-		for (j = ebitmap_startbit(&role->types); j < ebitmap_length(&role->types); j++) {
-			if (!ebitmap_get_bit(&role->types, j))
+		ebitmap_for_each_bit(&role->types, tnode, j) {
+			if (!ebitmap_node_get_bit(tnode, j))
 				continue;
 			usercon.type = j+1;
 
@@ -1531,13 +1571,12 @@ int security_get_user_sids(u32 fromsid,
 				mysids[mynel++] = sid;
 			} else {
 				maxnel += SIDS_NEL;
-				mysids2 = kmalloc(maxnel*sizeof(*mysids2), GFP_ATOMIC);
+				mysids2 = kcalloc(maxnel, sizeof(*mysids2), GFP_ATOMIC);
 				if (!mysids2) {
 					rc = -ENOMEM;
 					kfree(mysids);
 					goto out_unlock;
 				}
-				memset(mysids2, 0, maxnel*sizeof(*mysids2));
 				memcpy(mysids2, mysids, mynel * sizeof(*mysids2));
 				kfree(mysids);
 				mysids = mysids2;
@@ -1679,12 +1718,11 @@ int security_get_bools(int *len, char ***names, int **values)
 		goto out;
 	}
 
-	*names = (char**)kmalloc(sizeof(char*) * *len, GFP_ATOMIC);
+       *names = kcalloc(*len, sizeof(char*), GFP_ATOMIC);
 	if (!*names)
 		goto err;
-	memset(*names, 0, sizeof(char*) * *len);
 
-	*values = (int*)kmalloc(sizeof(int) * *len, GFP_ATOMIC);
+       *values = kcalloc(*len, sizeof(int), GFP_ATOMIC);
 	if (!*values)
 		goto err;
 
@@ -1692,7 +1730,7 @@ int security_get_bools(int *len, char ***names, int **values)
 		size_t name_len;
 		(*values)[i] = policydb.bool_val_to_struct[i]->state;
 		name_len = strlen(policydb.p_bool_val_to_name[i]) + 1;
-		(*names)[i] = (char*)kmalloc(sizeof(char) * name_len, GFP_ATOMIC);
+               (*names)[i] = kmalloc(sizeof(char) * name_len, GFP_ATOMIC);
 		if (!(*names)[i])
 			goto err;
 		strncpy((*names)[i], policydb.p_bool_val_to_name[i], name_len);
@@ -1705,11 +1743,9 @@ out:
 err:
 	if (*names) {
 		for (i = 0; i < *len; i++)
-			if ((*names)[i])
-				kfree((*names)[i]);
+			kfree((*names)[i]);
 	}
-	if (*values)
-		kfree(*values);
+	kfree(*values);
 	goto out;
 }
 
@@ -1728,19 +1764,22 @@ int security_set_bools(int len, int *values)
 		goto out;
 	}
 
-	printk(KERN_INFO "security: committed booleans { ");
 	for (i = 0; i < len; i++) {
+		if (!!values[i] != policydb.bool_val_to_struct[i]->state) {
+			audit_log(current->audit_context, GFP_ATOMIC,
+				AUDIT_MAC_CONFIG_CHANGE,
+				"bool=%s val=%d old_val=%d auid=%u",
+				policydb.p_bool_val_to_name[i],
+				!!values[i],
+				policydb.bool_val_to_struct[i]->state,
+				audit_get_loginuid(current->audit_context));
+		}
 		if (values[i]) {
 			policydb.bool_val_to_struct[i]->state = 1;
 		} else {
 			policydb.bool_val_to_struct[i]->state = 0;
 		}
-		if (i != 0)
-			printk(", ");
-		printk("%s:%d", policydb.p_bool_val_to_name[i],
-		       policydb.bool_val_to_struct[i]->state);
 	}
-	printk(" }\n");
 
 	for (cur = policydb.cond_list; cur != NULL; cur = cur->next) {
 		rc = evaluate_cond_node(&policydb, cur);
@@ -1776,4 +1815,236 @@ int security_get_bool_value(int bool)
 out:
 	POLICY_RDUNLOCK;
 	return rc;
+}
+
+struct selinux_audit_rule {
+	u32 au_seqno;
+	struct context au_ctxt;
+};
+
+void selinux_audit_rule_free(struct selinux_audit_rule *rule)
+{
+	if (rule) {
+		context_destroy(&rule->au_ctxt);
+		kfree(rule);
+	}
+}
+
+int selinux_audit_rule_init(u32 field, u32 op, char *rulestr,
+                            struct selinux_audit_rule **rule)
+{
+	struct selinux_audit_rule *tmprule;
+	struct role_datum *roledatum;
+	struct type_datum *typedatum;
+	struct user_datum *userdatum;
+	int rc = 0;
+
+	*rule = NULL;
+
+	if (!ss_initialized)
+		return -ENOTSUPP;
+
+	switch (field) {
+	case AUDIT_SE_USER:
+	case AUDIT_SE_ROLE:
+	case AUDIT_SE_TYPE:
+		/* only 'equals' and 'not equals' fit user, role, and type */
+		if (op != AUDIT_EQUAL && op != AUDIT_NOT_EQUAL)
+			return -EINVAL;
+		break;
+	case AUDIT_SE_SEN:
+	case AUDIT_SE_CLR:
+		/* we do not allow a range, indicated by the presense of '-' */
+		if (strchr(rulestr, '-'))
+			return -EINVAL;
+		break;
+	default:
+		/* only the above fields are valid */
+		return -EINVAL;
+	}
+
+	tmprule = kzalloc(sizeof(struct selinux_audit_rule), GFP_KERNEL);
+	if (!tmprule)
+		return -ENOMEM;
+
+	context_init(&tmprule->au_ctxt);
+
+	POLICY_RDLOCK;
+
+	tmprule->au_seqno = latest_granting;
+
+	switch (field) {
+	case AUDIT_SE_USER:
+		userdatum = hashtab_search(policydb.p_users.table, rulestr);
+		if (!userdatum)
+			rc = -EINVAL;
+		else
+			tmprule->au_ctxt.user = userdatum->value;
+		break;
+	case AUDIT_SE_ROLE:
+		roledatum = hashtab_search(policydb.p_roles.table, rulestr);
+		if (!roledatum)
+			rc = -EINVAL;
+		else
+			tmprule->au_ctxt.role = roledatum->value;
+		break;
+	case AUDIT_SE_TYPE:
+		typedatum = hashtab_search(policydb.p_types.table, rulestr);
+		if (!typedatum)
+			rc = -EINVAL;
+		else
+			tmprule->au_ctxt.type = typedatum->value;
+		break;
+	case AUDIT_SE_SEN:
+	case AUDIT_SE_CLR:
+		rc = mls_from_string(rulestr, &tmprule->au_ctxt, GFP_ATOMIC);
+		break;
+	}
+
+	POLICY_RDUNLOCK;
+
+	if (rc) {
+		selinux_audit_rule_free(tmprule);
+		tmprule = NULL;
+	}
+
+	*rule = tmprule;
+
+	return rc;
+}
+
+int selinux_audit_rule_match(u32 ctxid, u32 field, u32 op,
+                             struct selinux_audit_rule *rule,
+                             struct audit_context *actx)
+{
+	struct context *ctxt;
+	struct mls_level *level;
+	int match = 0;
+
+	if (!rule) {
+		audit_log(actx, GFP_ATOMIC, AUDIT_SELINUX_ERR,
+		          "selinux_audit_rule_match: missing rule\n");
+		return -ENOENT;
+	}
+
+	POLICY_RDLOCK;
+
+	if (rule->au_seqno < latest_granting) {
+		audit_log(actx, GFP_ATOMIC, AUDIT_SELINUX_ERR,
+		          "selinux_audit_rule_match: stale rule\n");
+		match = -ESTALE;
+		goto out;
+	}
+
+	ctxt = sidtab_search(&sidtab, ctxid);
+	if (!ctxt) {
+		audit_log(actx, GFP_ATOMIC, AUDIT_SELINUX_ERR,
+		          "selinux_audit_rule_match: unrecognized SID %d\n",
+		          ctxid);
+		match = -ENOENT;
+		goto out;
+	}
+
+	/* a field/op pair that is not caught here will simply fall through
+	   without a match */
+	switch (field) {
+	case AUDIT_SE_USER:
+		switch (op) {
+		case AUDIT_EQUAL:
+			match = (ctxt->user == rule->au_ctxt.user);
+			break;
+		case AUDIT_NOT_EQUAL:
+			match = (ctxt->user != rule->au_ctxt.user);
+			break;
+		}
+		break;
+	case AUDIT_SE_ROLE:
+		switch (op) {
+		case AUDIT_EQUAL:
+			match = (ctxt->role == rule->au_ctxt.role);
+			break;
+		case AUDIT_NOT_EQUAL:
+			match = (ctxt->role != rule->au_ctxt.role);
+			break;
+		}
+		break;
+	case AUDIT_SE_TYPE:
+		switch (op) {
+		case AUDIT_EQUAL:
+			match = (ctxt->type == rule->au_ctxt.type);
+			break;
+		case AUDIT_NOT_EQUAL:
+			match = (ctxt->type != rule->au_ctxt.type);
+			break;
+		}
+		break;
+	case AUDIT_SE_SEN:
+	case AUDIT_SE_CLR:
+		level = (op == AUDIT_SE_SEN ?
+		         &ctxt->range.level[0] : &ctxt->range.level[1]);
+		switch (op) {
+		case AUDIT_EQUAL:
+			match = mls_level_eq(&rule->au_ctxt.range.level[0],
+			                     level);
+			break;
+		case AUDIT_NOT_EQUAL:
+			match = !mls_level_eq(&rule->au_ctxt.range.level[0],
+			                      level);
+			break;
+		case AUDIT_LESS_THAN:
+			match = (mls_level_dom(&rule->au_ctxt.range.level[0],
+			                       level) &&
+			         !mls_level_eq(&rule->au_ctxt.range.level[0],
+			                       level));
+			break;
+		case AUDIT_LESS_THAN_OR_EQUAL:
+			match = mls_level_dom(&rule->au_ctxt.range.level[0],
+			                      level);
+			break;
+		case AUDIT_GREATER_THAN:
+			match = (mls_level_dom(level,
+			                      &rule->au_ctxt.range.level[0]) &&
+			         !mls_level_eq(level,
+			                       &rule->au_ctxt.range.level[0]));
+			break;
+		case AUDIT_GREATER_THAN_OR_EQUAL:
+			match = mls_level_dom(level,
+			                      &rule->au_ctxt.range.level[0]);
+			break;
+		}
+	}
+
+out:
+	POLICY_RDUNLOCK;
+	return match;
+}
+
+static int (*aurule_callback)(void) = NULL;
+
+static int aurule_avc_callback(u32 event, u32 ssid, u32 tsid,
+                               u16 class, u32 perms, u32 *retained)
+{
+	int err = 0;
+
+	if (event == AVC_CALLBACK_RESET && aurule_callback)
+		err = aurule_callback();
+	return err;
+}
+
+static int __init aurule_init(void)
+{
+	int err;
+
+	err = avc_add_callback(aurule_avc_callback, AVC_CALLBACK_RESET,
+	                       SECSID_NULL, SECSID_NULL, SECCLASS_NULL, 0);
+	if (err)
+		panic("avc_add_callback() failed, error %d\n", err);
+
+	return err;
+}
+__initcall(aurule_init);
+
+void selinux_audit_set_callback(int (*callback)(void))
+{
+	aurule_callback = callback;
 }

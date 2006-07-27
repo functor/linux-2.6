@@ -115,6 +115,7 @@ struct inet_sock {
 	/* Socket demultiplex comparisons on incoming packets. */
 	__u32			daddr;
 	__u32			rcv_saddr;
+	__u32			rcv_saddr2;	/* Second bound ipv4 addr, for ipv4root */
 	__u16			dport;
 	__u16			num;
 	__u32			saddr;

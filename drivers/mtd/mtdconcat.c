@@ -7,13 +7,14 @@
  *
  * This code is GPL
  *
- * $Id: mtdconcat.c,v 1.9 2004/06/30 15:17:41 dbrown Exp $
+ * $Id: mtdconcat.c,v 1.11 2005/11/07 11:14:20 gleixner Exp $
  */
 
-#include <linux/module.h>
-#include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/sched.h>
+#include <linux/types.h>
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/concat.h>
@@ -43,7 +44,7 @@ struct mtd_concat {
  */
 #define CONCAT(x)  ((struct mtd_concat *)(x))
 
-/* 
+/*
  * MTD methods which look up the relevant subdevice, translate the
  * effective address and pass through to the subdevice.
  */
@@ -476,8 +477,7 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 	}
 
 	/* must never happen since size limit has been verified above */
-	if (i >= concat->num_subdev)
-		BUG();
+	BUG_ON(i >= concat->num_subdev);
 
 	/* now do the erase: */
 	err = 0;
@@ -499,8 +499,7 @@ static int concat_erase(struct mtd_info *mtd, struct erase_info *instr)
 		if ((err = concat_dev_erase(subdev, erase))) {
 			/* sanity check: should never happen since
 			 * block alignment has been checked above */
-			if (err == -EINVAL)
-				BUG();
+			BUG_ON(err == -EINVAL);
 			if (erase->fail_addr != 0xffffffff)
 				instr->fail_addr = erase->fail_addr + offset;
 			break;
@@ -877,7 +876,7 @@ struct mtd_info *mtd_concat_create(struct mtd_info *subdev[],	/* subdevices to c
 	return &concat->mtd;
 }
 
-/* 
+/*
  * This function destroys an MTD object obtained from concat_mtd_devs()
  */
 

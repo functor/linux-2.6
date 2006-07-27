@@ -6,6 +6,7 @@
 #include <linux/crypto.h>
 #include <linux/pfkeyv2.h>
 #include <net/icmp.h>
+#include <net/protocol.h>
 #include <asm/scatterlist.h>
 
 
@@ -96,6 +97,7 @@ static int ah_output(struct xfrm_state *x, struct sk_buff *skb)
 	ah->reserved = 0;
 	ah->spi = x->id.spi;
 	ah->seq_no = htonl(++x->replay.oseq);
+	xfrm_aevent_doreplay(x);
 	ahp->icv(ahp, skb, ah->auth_data);
 
 	top_iph->tos = iph->tos;
@@ -114,7 +116,7 @@ error:
 	return err;
 }
 
-static int ah_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_buff *skb)
+static int ah_input(struct xfrm_state *x, struct sk_buff *skb)
 {
 	int ah_hlen;
 	struct iphdr *iph;
@@ -200,7 +202,7 @@ static void ah4_err(struct sk_buff *skb, u32 info)
 	xfrm_state_put(x);
 }
 
-static int ah_init_state(struct xfrm_state *x, void *args)
+static int ah_init_state(struct xfrm_state *x)
 {
 	struct ah_data *ahp = NULL;
 	struct xfrm_algo_desc *aalg_desc;
@@ -263,10 +265,8 @@ static int ah_init_state(struct xfrm_state *x, void *args)
 
 error:
 	if (ahp) {
-		if (ahp->work_icv)
-			kfree(ahp->work_icv);
-		if (ahp->tfm)
-			crypto_free_tfm(ahp->tfm);
+		kfree(ahp->work_icv);
+		crypto_free_tfm(ahp->tfm);
 		kfree(ahp);
 	}
 	return -EINVAL;
@@ -279,14 +279,10 @@ static void ah_destroy(struct xfrm_state *x)
 	if (!ahp)
 		return;
 
-	if (ahp->work_icv) {
-		kfree(ahp->work_icv);
-		ahp->work_icv = NULL;
-	}
-	if (ahp->tfm) {
-		crypto_free_tfm(ahp->tfm);
-		ahp->tfm = NULL;
-	}
+	kfree(ahp->work_icv);
+	ahp->work_icv = NULL;
+	crypto_free_tfm(ahp->tfm);
+	ahp->tfm = NULL;
 	kfree(ahp);
 }
 

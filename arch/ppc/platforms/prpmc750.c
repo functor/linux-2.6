@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/prpmc750_setup.c
- *
  * Board setup routines for Motorola PrPMC750
  *
  * Author: Matt Porter <mporter@mvista.com>
@@ -24,11 +22,11 @@
 #include <linux/initrd.h>
 #include <linux/console.h>
 #include <linux/delay.h>
-#include <linux/irq.h>
 #include <linux/seq_file.h>
 #include <linux/ide.h>
 #include <linux/root_dev.h>
 #include <linux/slab.h>
+#include <linux/serial_reg.h>
 
 #include <asm/byteorder.h>
 #include <asm/system.h>

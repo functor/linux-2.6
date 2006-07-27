@@ -12,13 +12,12 @@
  */
 
 #include <linux/pagemap.h>
-#include <linux/version.h>
 #include <linux/mpage.h>
 
 #include "hfs_fs.h"
 #include "btree.h"
 
-static struct file_operations hfs_file_operations;
+static const struct file_operations hfs_file_operations;
 static struct inode_operations hfs_file_inode_operations;
 
 /*================ Variable-like macros ================*/
@@ -46,7 +45,7 @@ static sector_t hfs_bmap(struct address_space *mapping, sector_t block)
 	return generic_block_bmap(mapping, block, hfs_get_block);
 }
 
-static int hfs_releasepage(struct page *page, int mask)
+static int hfs_releasepage(struct page *page, gfp_t mask)
 {
 	struct inode *inode = page->mapping->host;
 	struct super_block *sb = inode->i_sb;
@@ -96,19 +95,7 @@ static int hfs_releasepage(struct page *page, int mask)
 		} while (--i && nidx < tree->node_count);
 		spin_unlock(&tree->hash_lock);
 	}
-	//printk("releasepage: %lu,%x = %d\n", page->index, mask, res);
 	return res ? try_to_free_buffers(page) : 0;
-}
-
-static int hfs_get_blocks(struct inode *inode, sector_t iblock, unsigned long max_blocks,
-			  struct buffer_head *bh_result, int create)
-{
-	int ret;
-
-	ret = hfs_get_block(inode, iblock, bh_result, create);
-	if (!ret)
-		bh_result->b_size = (1 << inode->i_blkbits);
-	return ret;
 }
 
 static ssize_t hfs_direct_IO(int rw, struct kiocb *iocb,
@@ -118,7 +105,7 @@ static ssize_t hfs_direct_IO(int rw, struct kiocb *iocb,
 	struct inode *inode = file->f_dentry->d_inode->i_mapping->host;
 
 	return blockdev_direct_IO(rw, iocb, inode, inode->i_sb->s_bdev, iov,
-				  offset, nr_segs, hfs_get_blocks, NULL);
+				  offset, nr_segs, hfs_get_block, NULL);
 }
 
 static int hfs_writepages(struct address_space *mapping,
@@ -160,7 +147,7 @@ struct inode *hfs_new_inode(struct inode *dir, struct qstr *name, int mode)
 
 	init_MUTEX(&HFS_I(inode)->extents_lock);
 	INIT_LIST_HEAD(&HFS_I(inode)->open_dir_list);
-	hfs_cat_build_key((btree_key *)&HFS_I(inode)->cat_key, dir->i_ino, name);
+	hfs_cat_build_key(sb, (btree_key *)&HFS_I(inode)->cat_key, dir->i_ino, name);
 	inode->i_ino = HFS_SB(sb)->next_id++;
 	inode->i_mode = mode;
 	inode->i_uid = current->fsuid;
@@ -548,13 +535,13 @@ static int hfs_file_release(struct inode *inode, struct file *file)
 	if (atomic_read(&file->f_count) != 0)
 		return 0;
 	if (atomic_dec_and_test(&HFS_I(inode)->opencnt)) {
-		down(&inode->i_sem);
+		mutex_lock(&inode->i_mutex);
 		hfs_file_truncate(inode);
 		//if (inode->i_flags & S_DEAD) {
 		//	hfs_delete_cat(inode->i_ino, HFSPLUS_SB(sb).hidden_dir, NULL);
 		//	hfs_delete_inode(inode);
 		//}
-		up(&inode->i_sem);
+		mutex_unlock(&inode->i_mutex);
 	}
 	return 0;
 }
@@ -614,7 +601,7 @@ int hfs_inode_setattr(struct dentry *dentry, struct iattr * attr)
 }
 
 
-static struct file_operations hfs_file_operations = {
+static const struct file_operations hfs_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_file_read,
 	.write		= generic_file_write,

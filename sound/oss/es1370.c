@@ -156,10 +156,16 @@
 #include <linux/spinlock.h>
 #include <linux/gameport.h>
 #include <linux/wait.h>
+#include <linux/dma-mapping.h>
+#include <linux/mutex.h>
 
 #include <asm/io.h>
 #include <asm/page.h>
 #include <asm/uaccess.h>
+
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
+#define SUPPORT_JOYSTICK
+#endif
 
 /* --------------------------------------------------------------------- */
 
@@ -341,7 +347,7 @@ struct es1370_state {
 	unsigned sctrl;
 
 	spinlock_t lock;
-	struct semaphore open_sem;
+	struct mutex open_mutex;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 
@@ -384,8 +390,11 @@ struct es1370_state {
 		unsigned char obuf[MIDIOUTBUF];
 	} midi;
 
+#ifdef SUPPORT_JOYSTICK
 	struct gameport *gameport;
-	struct semaphore sem;
+#endif
+
+	struct mutex mutex;
 };
 
 /* --------------------------------------------------------------------- */
@@ -1151,7 +1160,7 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 		return -ENXIO;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
-	down(&s->sem);	
+	mutex_lock(&s->mutex);
 	if (!s->dma_adc.ready && (ret = prog_dmabuf_adc(s)))
 		goto out;
         
@@ -1175,14 +1184,14 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 					ret = -EAGAIN;
 				goto out;
 			}
-			up(&s->sem);
+			mutex_unlock(&s->mutex);
 			schedule();
 			if (signal_pending(current)) {
 				if (!ret)
 					ret = -ERESTARTSYS;
 				goto out;
 			}
-			down(&s->sem);
+			mutex_lock(&s->mutex);
 			if (s->dma_adc.mapped)
 			{
 				ret = -ENXIO;
@@ -1207,7 +1216,7 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 			start_adc(s);
 	}
 out:
-	up(&s->sem);
+	mutex_unlock(&s->mutex);
         remove_wait_queue(&s->dma_adc.wait, &wait);
 	set_current_state(TASK_RUNNING);
 	return ret;
@@ -1227,7 +1236,7 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 		return -ENXIO;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
-	down(&s->sem);	
+	mutex_lock(&s->mutex);
 	if (!s->dma_dac2.ready && (ret = prog_dmabuf_dac2(s)))
 		goto out;
 	ret = 0;
@@ -1255,14 +1264,14 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 					ret = -EAGAIN;
 				goto out;
 			}
-			up(&s->sem);
+			mutex_unlock(&s->mutex);
 			schedule();
 			if (signal_pending(current)) {
 				if (!ret)
 					ret = -ERESTARTSYS;
 				goto out;	
 			}
-			down(&s->sem);
+			mutex_lock(&s->mutex);
 			if (s->dma_dac2.mapped)
 			{
 			ret = -ENXIO;
@@ -1288,7 +1297,7 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 			start_dac2(s);
 	}
 out:
-	up(&s->sem);
+	mutex_unlock(&s->mutex);
         remove_wait_queue(&s->dma_dac2.wait, &wait);
 	set_current_state(TASK_RUNNING);
 	return ret;
@@ -1340,7 +1349,7 @@ static int es1370_mmap(struct file *file, struct vm_area_struct *vma)
 
 	VALIDATE_STATE(s);
 	lock_kernel();
-	down(&s->sem);
+	mutex_lock(&s->mutex);
 	if (vma->vm_flags & VM_WRITE) {
 		if ((ret = prog_dmabuf_dac2(s)) != 0) {
 			goto out;
@@ -1372,7 +1381,7 @@ static int es1370_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 	db->mapped = 1;
 out:
-	up(&s->sem);
+	mutex_unlock(&s->mutex);
 	unlock_kernel();
 	return ret;
 }
@@ -1744,21 +1753,21 @@ static int es1370_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & file->f_mode) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_READ|FMODE_WRITE)))
@@ -1785,8 +1794,8 @@ static int es1370_open(struct inode *inode, struct file *file)
 	outl(s->ctrl, s->io+ES1370_REG_CONTROL);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	up(&s->open_sem);
-	init_MUTEX(&s->sem);
+	mutex_unlock(&s->open_mutex);
+	mutex_init(&s->mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -1798,7 +1807,7 @@ static int es1370_release(struct inode *inode, struct file *file)
 	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac2(s, file->f_flags & O_NONBLOCK);
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac2(s);
 		synchronize_irq(s->irq);
@@ -1810,7 +1819,7 @@ static int es1370_release(struct inode *inode, struct file *file)
 	}
 	s->open_mode &= ~(file->f_mode & (FMODE_READ|FMODE_WRITE));
 	wake_up(&s->open_wait);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	unlock_kernel();
 	return 0;
 }
@@ -2190,21 +2199,21 @@ static int es1370_open_dac(struct inode *inode, struct file *file)
 		return -EINVAL;
        	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & FMODE_DAC) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	s->dma_dac1.ossfragshift = s->dma_dac1.ossmaxfrags = s->dma_dac1.subdivision = 0;
 	s->dma_dac1.enabled = 1;
@@ -2219,7 +2228,7 @@ static int es1370_open_dac(struct inode *inode, struct file *file)
 	outl(s->ctrl, s->io+ES1370_REG_CONTROL);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= FMODE_DAC;
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -2230,12 +2239,12 @@ static int es1370_release_dac(struct inode *inode, struct file *file)
 	VALIDATE_STATE(s);
 	lock_kernel();
 	drain_dac1(s, file->f_flags & O_NONBLOCK);
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	stop_dac1(s);
 	dealloc_dmabuf(s, &s->dma_dac1);
 	s->open_mode &= ~FMODE_DAC;
 	wake_up(&s->open_wait);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	unlock_kernel();
 	return 0;
 }
@@ -2422,21 +2431,21 @@ static int es1370_midi_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & (file->f_mode << FMODE_MIDI_SHIFT)) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -2457,7 +2466,7 @@ static int es1370_midi_open(struct inode *inode, struct file *file)
 	es1370_handle_midi(s);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -2491,7 +2500,7 @@ static int es1370_midi_release(struct inode *inode, struct file *file)
 		remove_wait_queue(&s->midi.owait, &wait);
 		set_current_state(TASK_RUNNING);
 	}
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	s->open_mode &= ~((file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ|FMODE_MIDI_WRITE));
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -2500,7 +2509,7 @@ static int es1370_midi_release(struct inode *inode, struct file *file)
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
 	wake_up(&s->open_wait);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	unlock_kernel();
 	return 0;
 }
@@ -2553,10 +2562,55 @@ static struct initvol {
 	{ SOUND_MIXER_WRITE_OGAIN, 0x4040 }
 };
 
+#ifdef SUPPORT_JOYSTICK
+
+static int __devinit es1370_register_gameport(struct es1370_state *s)
+{
+	struct gameport *gp;
+
+	if (!request_region(0x200, JOY_EXTENT, "es1370")) {
+		printk(KERN_ERR "es1370: joystick io port 0x200 in use\n");
+		return -EBUSY;
+	}
+
+	s->gameport = gp = gameport_allocate_port();
+	if (!gp) {
+		printk(KERN_ERR "es1370: can not allocate memory for gameport\n");
+		release_region(0x200, JOY_EXTENT);
+		return -ENOMEM;
+	}
+
+	gameport_set_name(gp, "ESS1370");
+	gameport_set_phys(gp, "pci%s/gameport0", pci_name(s->dev));
+	gp->dev.parent = &s->dev->dev;
+	gp->io = 0x200;
+
+	s->ctrl |= CTRL_JYSTK_EN;
+	outl(s->ctrl, s->io + ES1370_REG_CONTROL);
+
+	gameport_register_port(gp);
+
+	return 0;
+}
+
+static inline void es1370_unregister_gameport(struct es1370_state *s)
+{
+	if (s->gameport) {
+		int gpio = s->gameport->io;
+		gameport_unregister_port(s->gameport);
+		release_region(gpio, JOY_EXTENT);
+
+	}
+}
+
+#else
+static inline int es1370_register_gameport(struct es1370_state *s) { return -ENOSYS; }
+static inline void es1370_unregister_gameport(struct es1370_state *s) { }
+#endif /* SUPPORT_JOYSTICK */
+
 static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_device_id *pciid)
 {
 	struct es1370_state *s;
-	struct gameport *gp = NULL;
 	mm_segment_t fs;
 	int i, val, ret;
 
@@ -2569,7 +2623,7 @@ static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_devic
 		return -ENODEV;
 	if (pcidev->irq == 0) 
 		return -ENODEV;
-	i = pci_set_dma_mask(pcidev, 0xffffffff);
+	i = pci_set_dma_mask(pcidev, DMA_32BIT_MASK);
 	if (i) {
 		printk(KERN_WARNING "es1370: architecture does not support 32bit PCI busmaster DMA\n");
 		return i;
@@ -2585,7 +2639,7 @@ static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_devic
 	init_waitqueue_head(&s->open_wait);
 	init_waitqueue_head(&s->midi.iwait);
 	init_waitqueue_head(&s->midi.owait);
-	init_MUTEX(&s->open_sem);
+	mutex_init(&s->open_mutex);
 	spin_lock_init(&s->lock);
 	s->magic = ES1370_MAGIC;
 	s->dev = pcidev;
@@ -2605,28 +2659,14 @@ static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_devic
 	/* note: setting CTRL_SERR_DIS is reported to break
 	 * mic bias setting (by Kim.Berts@fisub.mail.abb.com) */
 	s->ctrl = CTRL_CDC_EN | (DAC2_SRTODIV(8000) << CTRL_SH_PCLKDIV) | (1 << CTRL_SH_WTSRSEL);
-	if (!request_region(0x200, JOY_EXTENT, "es1370")) {
-		printk(KERN_ERR "es1370: joystick io port 0x200 in use\n");
-	} else if (!(s->gameport = gp = gameport_allocate_port())) {
-		printk(KERN_ERR "es1370: can not allocate memory for gameport\n");
-		release_region(0x200, JOY_EXTENT);
-	} else {
-		gameport_set_name(gp, "ESS1370");
-		gameport_set_phys(gp, "pci%s/gameport0", pci_name(s->dev));
-		gp->dev.parent = &s->dev->dev;
-		gp->io = 0x200;
-		s->ctrl |= CTRL_JYSTK_EN;
-	}
 	if (lineout[devindex])
 		s->ctrl |= CTRL_XCTL0;
 	if (micbias[devindex])
 		s->ctrl |= CTRL_XCTL1;
 	s->sctrl = 0;
-	printk(KERN_INFO "es1370: found adapter at io %#lx irq %u\n"
-	       KERN_INFO "es1370: features: joystick %s, line %s, mic impedance %s\n",
-	       s->io, s->irq, (s->ctrl & CTRL_JYSTK_EN) ? "on" : "off",
-	       (s->ctrl & CTRL_XCTL0) ? "out" : "in",
-		       (s->ctrl & CTRL_XCTL1) ? "1" : "0");
+	printk(KERN_INFO "es1370: adapter at io %#lx irq %u, line %s, mic impedance %s\n",
+	       s->io, s->irq, (s->ctrl & CTRL_XCTL0) ? "out" : "in",
+	       (s->ctrl & CTRL_XCTL1) ? "1" : "0");
 	/* register devices */
 	if ((s->dev_audio = register_sound_dsp(&es1370_audio_fops, -1)) < 0) {
 		ret = s->dev_audio;
@@ -2672,9 +2712,7 @@ static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_devic
 	}
 	set_fs(fs);
 
-	/* register gameport */
-	if (gp)
-		gameport_register_port(gp);
+	es1370_register_gameport(s);
 
 	/* store it in the driver field */
 	pci_set_drvdata(pcidev, s);
@@ -2696,10 +2734,6 @@ static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_devic
  err_dev1:
 	printk(KERN_ERR "es1370: cannot register misc device\n");
 	free_irq(s->irq, s);
-	if (s->gameport) {
-		release_region(s->gameport->io, JOY_EXTENT);
-		gameport_free_port(s->gameport);
-	}
  err_irq:
 	release_region(s->io, ES1370_EXTENT);
  err_region:
@@ -2718,11 +2752,7 @@ static void __devexit es1370_remove(struct pci_dev *dev)
 	outl(0, s->io+ES1370_REG_SERIAL_CONTROL); /* clear serial interrupts */
 	synchronize_irq(s->irq);
 	free_irq(s->irq, s);
-	if (s->gameport) {
-		int gpio = s->gameport->io;
-		gameport_unregister_port(s->gameport);
-		release_region(gpio, JOY_EXTENT);
-	}
+	es1370_unregister_gameport(s);
 	release_region(s->io, ES1370_EXTENT);
 	unregister_sound_dsp(s->dev_audio);
 	unregister_sound_mixer(s->dev_mixer);
@@ -2750,7 +2780,7 @@ static struct pci_driver es1370_driver = {
 static int __init init_es1370(void)
 {
 	printk(KERN_INFO "es1370: version v0.38 time " __TIME__ " " __DATE__ "\n");
-	return pci_module_init(&es1370_driver);
+	return pci_register_driver(&es1370_driver);
 }
 
 static void __exit cleanup_es1370(void)
