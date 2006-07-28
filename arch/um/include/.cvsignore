@@ -1,4 +1,3 @@
 kern_constants.h
-skas_ptregs.h
-task.h
+user_constants.h
 uml-config.h
