@@ -261,6 +261,8 @@ config UML_REAL_TIME_CLOCK
 
 endmenu
 
+source "kernel/Kconfig.hz"
+
 source "init/Kconfig"
 
 source "drivers/block/Kconfig"
