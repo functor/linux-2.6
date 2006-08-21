@@ -35,6 +35,10 @@ nsm_mon_unmon(struct nlm_host *host, u32 proc, struct nsm_res *res)
 	struct rpc_clnt	*clnt;
 	int		status;
 	struct nsm_args	args;
+	struct rpc_message msg = {
+		.rpc_argp	= &args,
+		.rpc_resp	= res,
+	};
 
 	clnt = nsm_create();
 	if (IS_ERR(clnt)) {
@@ -49,7 +53,8 @@ nsm_mon_unmon(struct nlm_host *host, u32 proc, struct nsm_res *res)
 	args.proc = NLMPROC_NSM_NOTIFY;
 	memset(res, 0, sizeof(*res));
 
-	status = rpc_call(clnt, proc, &args, res, 0);
+	msg.rpc_proc = &clnt->cl_procinfo[proc];
+	status = rpc_call_sync(clnt, &msg, 0);
 	if (status < 0)
 		printk(KERN_DEBUG "nsm_mon_unmon: rpc failed, status=%d\n",
 			status);
@@ -115,20 +120,18 @@ nsm_create(void)
 	xprt = xprt_create_proto(IPPROTO_UDP, &sin, NULL);
 	if (IS_ERR(xprt))
 		return (struct rpc_clnt *)xprt;
+	xprt->resvport = 1;	/* NSM requires a reserved port */
 
 	clnt = rpc_create_client(xprt, "localhost",
 				&nsm_program, SM_VERSION,
 				RPC_AUTH_NULL);
 	if (IS_ERR(clnt))
-		goto out_destroy;
+		goto out_err;
 	clnt->cl_softrtry = 1;
-	clnt->cl_chatty   = 1;
 	clnt->cl_oneshot  = 1;
-	xprt->resvport = 1;	/* NSM requires a reserved port */
 	return clnt;
 
-out_destroy:
-	xprt_destroy(xprt);
+out_err:
 	return clnt;
 }
 
@@ -216,18 +219,22 @@ static struct rpc_procinfo	nsm_procedures[] = {
 		.p_encode	= (kxdrproc_t) xdr_encode_mon,
 		.p_decode	= (kxdrproc_t) xdr_decode_stat_res,
 		.p_bufsiz	= MAX(SM_mon_sz, SM_monres_sz) << 2,
+		.p_statidx	= SM_MON,
+		.p_name		= "MONITOR",
 	},
 [SM_UNMON] = {
 		.p_proc		= SM_UNMON,
 		.p_encode	= (kxdrproc_t) xdr_encode_unmon,
 		.p_decode	= (kxdrproc_t) xdr_decode_stat,
 		.p_bufsiz	= MAX(SM_mon_id_sz, SM_unmonres_sz) << 2,
+		.p_statidx	= SM_UNMON,
+		.p_name		= "UNMONITOR",
 	},
 };
 
 static struct rpc_version	nsm_version1 = {
-		.number		= 1, 
-		.nrprocs	= sizeof(nsm_procedures)/sizeof(nsm_procedures[0]),
+		.number		= 1,
+		.nrprocs	= ARRAY_SIZE(nsm_procedures),
 		.procs		= nsm_procedures
 };
 
@@ -240,7 +247,7 @@ static struct rpc_stat		nsm_stats;
 static struct rpc_program	nsm_program = {
 		.name		= "statd",
 		.number		= SM_PROGRAM,
-		.nrvers		= sizeof(nsm_version)/sizeof(nsm_version[0]),
+		.nrvers		= ARRAY_SIZE(nsm_version),
 		.version	= nsm_version,
 		.stats		= &nsm_stats
 };

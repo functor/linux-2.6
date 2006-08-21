@@ -18,7 +18,7 @@
  */
 #include <linux/ioport.h>
 #include <linux/init.h>
-#include <linux/pci.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/dma.h>
 #include <asm/io.h>
@@ -65,37 +65,41 @@ static void isa_enable_dma(dmach_t channel, dma_t *dma)
 {
 	if (dma->invalid) {
 		unsigned long address, length;
-		unsigned int mode, direction;
+		unsigned int mode;
+		enum dma_data_direction direction;
 
 		mode = channel & 3;
 		switch (dma->dma_mode & DMA_MODE_MASK) {
 		case DMA_MODE_READ:
 			mode |= ISA_DMA_MODE_READ;
-			direction = PCI_DMA_FROMDEVICE;
+			direction = DMA_FROM_DEVICE;
 			break;
 
 		case DMA_MODE_WRITE:
 			mode |= ISA_DMA_MODE_WRITE;
-			direction = PCI_DMA_TODEVICE;
+			direction = DMA_TO_DEVICE;
 			break;
 
 		case DMA_MODE_CASCADE:
 			mode |= ISA_DMA_MODE_CASCADE;
-			direction = PCI_DMA_BIDIRECTIONAL;
+			direction = DMA_BIDIRECTIONAL;
 			break;
 
 		default:
-			direction = PCI_DMA_NONE;
+			direction = DMA_NONE;
 			break;
 		}
 
-		if (!dma->using_sg) {
+		if (!dma->sg) {
 			/*
 			 * Cope with ISA-style drivers which expect cache
 			 * coherence.
 			 */
-			dma->buf.dma_address = pci_map_single(NULL,
-				dma->buf.__address, dma->buf.length,
+			dma->sg = &dma->buf;
+			dma->sgcount = 1;
+			dma->buf.length = dma->count;
+			dma->buf.dma_address = dma_map_single(NULL,
+				dma->addr, dma->count,
 				direction);
 		}
 
@@ -139,12 +143,23 @@ static struct dma_ops isa_dma_ops = {
 	.residue	= isa_get_dma_residue,
 };
 
-static struct resource dma_resources[] = {
-	{ "dma1",		0x0000, 0x000f },
-	{ "dma low page", 	0x0080, 0x008f },
-	{ "dma2",		0x00c0, 0x00df },
-	{ "dma high page",	0x0480, 0x048f }
-};
+static struct resource dma_resources[] = { {
+	.name	= "dma1",
+	.start	= 0x0000,
+	.end	= 0x000f
+}, {
+	.name	= "dma low page",
+	.start	= 0x0080,
+	.end 	= 0x008f
+}, {
+	.name	= "dma2",
+	.start	= 0x00c0,
+	.end	= 0x00df
+}, {
+	.name	= "dma high page",
+	.start	= 0x0480,
+	.end	= 0x048f
+} };
 
 void __init isa_init_dma(dma_t *dma)
 {

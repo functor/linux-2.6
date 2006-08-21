@@ -35,7 +35,6 @@
 #include <asm/checksum.h>
 #include <asm/mach-types.h>
 
-extern void dump_thread(struct pt_regs *, struct user *);
 extern int dump_fpu(struct pt_regs *, struct user_fp_struct *);
 extern void inswb(unsigned int port, void *to, int len);
 extern void outswb(unsigned int port, const void *to, int len);
@@ -153,7 +152,6 @@ EXPORT_SYMBOL(strncmp);
 EXPORT_SYMBOL(strchr);
 EXPORT_SYMBOL(strlen);
 EXPORT_SYMBOL(strnlen);
-EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strrchr);
 EXPORT_SYMBOL(strstr);
 EXPORT_SYMBOL(memset);
@@ -212,8 +210,6 @@ EXPORT_SYMBOL(sys_lseek);
 EXPORT_SYMBOL(sys_open);
 EXPORT_SYMBOL(sys_exit);
 EXPORT_SYMBOL(sys_wait4);
-
-EXPORT_SYMBOL(get_wchan);
 
 #ifdef CONFIG_PREEMPT
 EXPORT_SYMBOL(kernel_flag);

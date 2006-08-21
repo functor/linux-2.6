@@ -445,9 +445,8 @@ void irlap_disconnect_request(struct irlap_cb *self)
 	IRDA_ASSERT(self->magic == LAP_MAGIC, return;);
 
 	/* Don't disconnect until all data frames are successfully sent */
-	if (skb_queue_len(&self->txq) > 0) {
+	if (!skb_queue_empty(&self->txq)) {
 		self->disconnect_pending = TRUE;
-
 		return;
 	}
 
@@ -885,7 +884,8 @@ static void irlap_change_speed(struct irlap_cb *self, __u32 speed, int now)
 	if (now) {
 		/* Send down empty frame to trigger speed change */
 		skb = dev_alloc_skb(0);
-		irlap_queue_xmit(self, skb);
+		if (skb)
+			irlap_queue_xmit(self, skb);
 	}
 }
 

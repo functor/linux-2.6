@@ -1,9 +1,6 @@
 #ifndef _VX_DEBUG_H
 #define _VX_DEBUG_H
 
-#ifndef	CONFIG_VSERVER
-#warning config options missing
-#endif
 
 #define VXD_CBIT(n,m)	(vx_debug_ ## n & (1 << (m)))
 #define VXD_CMIN(n,m)	(vx_debug_ ## n > (m))
@@ -12,6 +9,12 @@
 #define VXD_QPOS(v,p)	(((uint32_t)(v) >> ((p)*8)) & 0xFF)
 #define VXD_QUAD(v)	VXD_QPOS(v,0), VXD_QPOS(v,1),		\
 			VXD_QPOS(v,2), VXD_QPOS(v,3)
+#define VXF_QUAD	"%u.%u.%u.%u"
+
+#define VXD_DEV(d)	(d), (d)->bd_inode->i_ino,		\
+			imajor((d)->bd_inode), iminor((d)->bd_inode)
+#define VXF_DEV		"%p[%lu,%d:%d]"
+
 
 #define __FUNC__	__func__
 
@@ -23,8 +26,10 @@ extern unsigned int vx_debug_xid;
 extern unsigned int vx_debug_nid;
 extern unsigned int vx_debug_net;
 extern unsigned int vx_debug_limit;
+extern unsigned int vx_debug_cres;
 extern unsigned int vx_debug_dlim;
 extern unsigned int vx_debug_cvirt;
+extern unsigned int vx_debug_misc;
 
 
 #define VX_LOGLEVEL	"vxD: "
@@ -55,10 +60,12 @@ extern unsigned int vx_debug_cvirt;
 			printk(VX_WARNLEVEL f "\n" , ##x);	\
 	} while (0)
 
-
 #define vxd_path(d,m)						\
 	({ static char _buffer[PATH_MAX];			\
 	   d_path((d), (m), _buffer, sizeof(_buffer)); })
+
+#define vxd_cond_path(n)					\
+	((n) ? vxd_path((n)->dentry, (n)->mnt) : "<null>" )
 
 #else	/* CONFIG_VSERVER_DEBUG */
 
@@ -67,6 +74,7 @@ extern unsigned int vx_debug_cvirt;
 #define vx_debug_nid	0
 #define vx_debug_net	0
 #define vx_debug_limit	0
+#define vx_debug_cres	0
 #define vx_debug_dlim	0
 #define vx_debug_cvirt	0
 
@@ -76,6 +84,7 @@ extern unsigned int vx_debug_cvirt;
 #define vxwprintk(x...) do { } while (0)
 
 #define vxd_path	"<none>"
+#define vxd_cond_path	vxd_path
 
 #endif	/* CONFIG_VSERVER_DEBUG */
 
@@ -135,14 +144,9 @@ struct _vx_hist_entry {
 
 struct _vx_hist_entry *vxh_advance(void *loc);
 
-#define	VXH_HERE()		\
-	({ __label__ here;	\
-		here:;		\
-		&&here; })
 
-
-
-static inline void __vxh_copy_vxi(struct _vx_hist_entry *entry, struct vx_info *vxi)
+static inline
+void	__vxh_copy_vxi(struct _vx_hist_entry *entry, struct vx_info *vxi)
 {
 	entry->vxi.ptr = vxi;
 	if (vxi) {
@@ -153,95 +157,117 @@ static inline void __vxh_copy_vxi(struct _vx_hist_entry *entry, struct vx_info *
 }
 
 
-#define __VXH_BODY(__type, __data)		\
+#define __HERE__	current_text_addr()
+
+#define __VXH_BODY(__type, __data, __here)	\
 	struct _vx_hist_entry *entry;		\
 						\
 	preempt_disable();			\
-	entry = vxh_advance(VXH_HERE());	\
+	entry = vxh_advance(__here);		\
 	__data;					\
 	entry->type = __type;			\
 	preempt_enable();
 
 
 	/* pass vxi only */
-#define __VXH_SIMPLE				\
+
+#define __VXH_SMPL				\
 	__vxh_copy_vxi(entry, vxi)
 
-#define VXH_SIMPLE(__name, __type)		\
-static inline void __name(struct vx_info *vxi)	\
-{						\
-	__VXH_BODY(__type, __VXH_SIMPLE)	\
+static inline
+void	__vxh_smpl(struct vx_info *vxi, int __type, void *__here)
+{
+	__VXH_BODY(__type, __VXH_SMPL, __here)
 }
 
 	/* pass vxi and data (void *) */
+
 #define __VXH_DATA				\
 	__vxh_copy_vxi(entry, vxi);		\
 	entry->sc.data = data
 
-#define VXH_DATA(__name, __type)		\
-static inline 					\
-void __name(struct vx_info *vxi, void *data)	\
-{						\
-	__VXH_BODY(__type, __VXH_DATA)		\
+static inline
+void	__vxh_data(struct vx_info *vxi, void *data,
+			int __type, void *__here)
+{
+	__VXH_BODY(__type, __VXH_DATA, __here)
 }
 
 	/* pass vxi and arg (long) */
-#define __VXH_LARG				\
+
+#define __VXH_LONG				\
 	__vxh_copy_vxi(entry, vxi);		\
 	entry->ll.arg = arg
 
-#define VXH_LARG(__name, __type)		\
-static inline 					\
-void __name(struct vx_info *vxi, long arg)	\
-{						\
-	__VXH_BODY(__type, __VXH_LARG)		\
+static inline
+void	__vxh_long(struct vx_info *vxi, long arg,
+			int __type, void *__here)
+{
+	__VXH_BODY(__type, __VXH_LONG, __here)
 }
 
 
-static inline void vxh_throw_oops(void)
+static inline
+void	__vxh_throw_oops(void *__here)
 {
-	__VXH_BODY(VXH_THROW_OOPS, {});
+	__VXH_BODY(VXH_THROW_OOPS, {}, __here);
 	/* prevent further acquisition */
 	vxh_active = 0;
 }
 
-VXH_SIMPLE(vxh_get_vx_info,	VXH_GET_VX_INFO);
-VXH_SIMPLE(vxh_put_vx_info,	VXH_PUT_VX_INFO);
 
-VXH_DATA(vxh_init_vx_info,	VXH_INIT_VX_INFO);
-VXH_DATA(vxh_set_vx_info,	VXH_SET_VX_INFO);
-VXH_DATA(vxh_clr_vx_info,	VXH_CLR_VX_INFO);
+#define vxh_throw_oops()	__vxh_throw_oops(__HERE__);
 
-VXH_DATA(vxh_claim_vx_info,	VXH_CLAIM_VX_INFO);
-VXH_DATA(vxh_release_vx_info,	VXH_RELEASE_VX_INFO);
+#define __vxh_get_vx_info(v,h)	__vxh_smpl(v, VXH_GET_VX_INFO, h);
+#define __vxh_put_vx_info(v,h)	__vxh_smpl(v, VXH_PUT_VX_INFO, h);
 
-VXH_SIMPLE(vxh_alloc_vx_info,	VXH_ALLOC_VX_INFO);
-VXH_SIMPLE(vxh_dealloc_vx_info, VXH_DEALLOC_VX_INFO);
+#define __vxh_init_vx_info(v,d,h) \
+	__vxh_data(v,d, VXH_INIT_VX_INFO, h);
+#define __vxh_set_vx_info(v,d,h) \
+	__vxh_data(v,d, VXH_SET_VX_INFO, h);
+#define __vxh_clr_vx_info(v,d,h) \
+	__vxh_data(v,d, VXH_CLR_VX_INFO, h);
 
-VXH_SIMPLE(vxh_hash_vx_info,	VXH_HASH_VX_INFO);
-VXH_SIMPLE(vxh_unhash_vx_info,	VXH_UNHASH_VX_INFO);
+#define __vxh_claim_vx_info(v,d,h) \
+	__vxh_data(v,d, VXH_CLAIM_VX_INFO, h);
+#define __vxh_release_vx_info(v,d,h) \
+	__vxh_data(v,d, VXH_RELEASE_VX_INFO, h);
 
-VXH_LARG(vxh_loc_vx_info,	VXH_LOC_VX_INFO);
-VXH_LARG(vxh_lookup_vx_info,	VXH_LOOKUP_VX_INFO);
-VXH_LARG(vxh_create_vx_info,	VXH_CREATE_VX_INFO);
+#define vxh_alloc_vx_info(v) \
+	__vxh_smpl(v, VXH_ALLOC_VX_INFO, __HERE__);
+#define vxh_dealloc_vx_info(v) \
+	__vxh_smpl(v, VXH_DEALLOC_VX_INFO, __HERE__);
+
+#define vxh_hash_vx_info(v) \
+	__vxh_smpl(v, VXH_HASH_VX_INFO, __HERE__);
+#define vxh_unhash_vx_info(v) \
+	__vxh_smpl(v, VXH_UNHASH_VX_INFO, __HERE__);
+
+#define vxh_loc_vx_info(v,l) \
+	__vxh_long(v,l, VXH_LOC_VX_INFO, __HERE__);
+#define vxh_lookup_vx_info(v,l) \
+	__vxh_long(v,l, VXH_LOOKUP_VX_INFO, __HERE__);
+#define vxh_create_vx_info(v,l) \
+	__vxh_long(v,l, VXH_CREATE_VX_INFO, __HERE__);
 
 extern void vxh_dump_history(void);
 
 
 #else  /* CONFIG_VSERVER_HISTORY */
 
+#define	__HERE__	0
 
 #define vxh_throw_oops()		do { } while (0)
 
-#define vxh_get_vx_info(v)		do { } while (0)
-#define vxh_put_vx_info(v)		do { } while (0)
+#define __vxh_get_vx_info(v,h)		do { } while (0)
+#define __vxh_put_vx_info(v,h)		do { } while (0)
 
-#define vxh_init_vx_info(v,d)		do { } while (0)
-#define vxh_set_vx_info(v,d)		do { } while (0)
-#define vxh_clr_vx_info(v,d)		do { } while (0)
+#define __vxh_init_vx_info(v,d,h)	do { } while (0)
+#define __vxh_set_vx_info(v,d,h)	do { } while (0)
+#define __vxh_clr_vx_info(v,d,h)	do { } while (0)
 
-#define vxh_claim_vx_info(v,d)		do { } while (0)
-#define vxh_release_vx_info(v,d)	do { } while (0)
+#define __vxh_claim_vx_info(v,d,h)	do { } while (0)
+#define __vxh_release_vx_info(v,d,h)	do { } while (0)
 
 #define vxh_alloc_vx_info(v)		do { } while (0)
 #define vxh_dealloc_vx_info(v)		do { } while (0)
@@ -261,8 +287,11 @@ extern void vxh_dump_history(void);
 
 #ifdef	CONFIG_VSERVER_DEBUG
 #define vxd_assert_lock(l)	assert_spin_locked(l)
+#define vxd_assert(c,f,x...)	vxlprintk(!(c), \
+	"assertion [" f "] failed.", ##x, __FILE__, __LINE__)
 #else
-#define	vxd_assert_lock(l)	do { } while (0)
+#define vxd_assert_lock(l)	do { } while (0)
+#define vxd_assert(c,f,x...)	do { } while (0)
 #endif
 
 

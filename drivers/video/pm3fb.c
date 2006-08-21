@@ -5,7 +5,7 @@
  *  Based on code written by:
  *           Sven Luther, <luther@dpt-info.u-strasbg.fr>
  *           Alan Hourihane, <alanh@fairlite.demon.co.uk>
- *           Russel King, <rmk@arm.linux.org.uk>
+ *           Russell King, <rmk@arm.linux.org.uk>
  *  Based on linux/drivers/video/skeletonfb.c:
  *	Copyright (C) 1997 Geert Uytterhoeven
  *  Based on linux/driver/video/pm2fb.c:
@@ -67,6 +67,7 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/ioport.h>
+#include <linux/ctype.h>
 
 #include <video/fbcon.h>
 #include <video/fbcon-mfb.h>
@@ -656,9 +657,7 @@ static void pm3fb_set_disp(const void *par, struct display *disp,
 static void pm3fb_detect(void);
 static int pm3fb_pan_display(const struct fb_var_screeninfo *var,
 			     struct fb_info_gen *info);
-static int pm3fb_ioctl(struct inode *inode, struct file *file,
-                       u_int cmd, u_long arg, int con,
-		       struct fb_info *info);
+static int pm3fb_ioctl(struct fb_info *info, u_int cmd, u_long arg);
 
 
 /* the struct that hold them together */
@@ -2594,7 +2593,7 @@ static char *pm3fb_boardnum_setup(char *options, unsigned long *bn)
 {
 	char *next;
 
-	if (!(CHAR_IS_NUM(options[0]))) {
+	if (!(isdigit(options[0]))) {
 		(*bn) = 0;
 		return (options);
 	}
@@ -3437,9 +3436,7 @@ static int pm3fb_pan_display(const struct fb_var_screeninfo *var,
 	return 0;
 }
 
-static int pm3fb_ioctl(struct inode *inode, struct file *file,
-                       u_int cmd, u_long arg, int con,
-		       struct fb_info *info)
+static int pm3fb_ioctl(struct fb_info *info, u_int cmd, u_long arg)
 {
 	struct pm3fb_info *l_fb_info = (struct pm3fb_info *) info;
 	u32 cm, i;
@@ -3535,26 +3532,26 @@ int __init pm3fb_init(void)
 MODULE_AUTHOR("Romain Dolbeau");
 MODULE_DESCRIPTION("Permedia3 framebuffer device driver");
 static char *mode[PM3_MAX_BOARD];
-MODULE_PARM(mode,PM3_MAX_BOARD_MODULE_ARRAY_STRING);
+module_param_array(mode, charp, NULL, 0);
 MODULE_PARM_DESC(mode,"video mode");
-MODULE_PARM(disable,PM3_MAX_BOARD_MODULE_ARRAY_SHORT);
+module_param_array(disable, short, NULL, 0);
 MODULE_PARM_DESC(disable,"disable board");
 static short off[PM3_MAX_BOARD];
-MODULE_PARM(off,PM3_MAX_BOARD_MODULE_ARRAY_SHORT);
+module_param_array(off, short, NULL, 0);
 MODULE_PARM_DESC(off,"disable board");
 static char *pciid[PM3_MAX_BOARD];
-MODULE_PARM(pciid,PM3_MAX_BOARD_MODULE_ARRAY_STRING);
+module_param_array(pciid, charp, NULL, 0);
 MODULE_PARM_DESC(pciid,"board PCI Id");
-MODULE_PARM(noaccel,PM3_MAX_BOARD_MODULE_ARRAY_SHORT);
+module_param_array(noaccel, short, NULL, 0);
 MODULE_PARM_DESC(noaccel,"disable accel");
 static char *font[PM3_MAX_BOARD];
-MODULE_PARM(font,PM3_MAX_BOARD_MODULE_ARRAY_STRING);
+module_param_array(font, charp, NULL, 0);
 MODULE_PARM_DESC(font,"choose font");
-MODULE_PARM(depth,PM3_MAX_BOARD_MODULE_ARRAY_SHORT);
+module_param(depth, short, NULL, 0);
 MODULE_PARM_DESC(depth,"boot-time depth");
-MODULE_PARM(printtimings, "h");
+module_param(printtimings, short, NULL, 0);
 MODULE_PARM_DESC(printtimings, "print the memory timings of the card(s)");
-MODULE_PARM(forcesize, PM3_MAX_BOARD_MODULE_ARRAY_SHORT);
+module_param(forcesize, short, NULL, 0);
 MODULE_PARM_DESC(forcesize, "force specified memory size");
 /*
 MODULE_SUPPORTED_DEVICE("Permedia3 PCI boards")

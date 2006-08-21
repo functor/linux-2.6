@@ -9,6 +9,8 @@
 #include <linux/posix_types.h>
 #include <linux/compiler.h>
 #include <linux/spinlock.h>
+#include <linux/rcupdate.h>
+#include <linux/types.h>
 
 /*
  * The default fd array needs to be at least BITS_PER_LONG,
@@ -17,21 +19,50 @@
 #define NR_OPEN_DEFAULT BITS_PER_LONG
 
 /*
+ * The embedded_fd_set is a small fd_set,
+ * suitable for most tasks (which open <= BITS_PER_LONG files)
+ */
+struct embedded_fd_set {
+	unsigned long fds_bits[1];
+};
+
+/*
+ * More than this number of fds: we use a separately allocated fd_set
+ */
+#define EMBEDDED_FD_SET_SIZE (BITS_PER_BYTE * sizeof(struct embedded_fd_set))
+
+struct fdtable {
+	unsigned int max_fds;
+	int max_fdset;
+	struct file ** fd;      /* current fd array */
+	fd_set *close_on_exec;
+	fd_set *open_fds;
+	struct rcu_head rcu;
+	struct files_struct *free_files;
+	struct fdtable *next;
+};
+
+/*
  * Open file table structure
  */
 struct files_struct {
-        atomic_t count;
-        spinlock_t file_lock;     /* Protects all the below members.  Nests inside tsk->alloc_lock */
-        int max_fds;
-        int max_fdset;
-        int next_fd;
-        struct file ** fd;      /* current fd array */
-        fd_set *close_on_exec;
-        fd_set *open_fds;
-        fd_set close_on_exec_init;
-        fd_set open_fds_init;
-        struct file * fd_array[NR_OPEN_DEFAULT];
+  /*
+   * read mostly part
+   */
+	atomic_t count;
+	struct fdtable *fdt;
+	struct fdtable fdtab;
+  /*
+   * written part on a separate cache line in SMP
+   */
+	spinlock_t file_lock ____cacheline_aligned_in_smp;
+	int next_fd;
+	struct embedded_fd_set close_on_exec_init;
+	struct embedded_fd_set open_fds_init;
+	struct file * fd_array[NR_OPEN_DEFAULT];
 };
+
+#define files_fdtable(files) (rcu_dereference((files)->fdt))
 
 extern void FASTCALL(__fput(struct file *));
 extern void FASTCALL(fput(struct file *));
@@ -48,9 +79,7 @@ extern void FASTCALL(set_close_on_exec(unsigned int fd, int flag));
 extern void put_filp(struct file *);
 extern int get_unused_fd(void);
 extern void FASTCALL(put_unused_fd(unsigned int fd));
-struct kmem_cache_s;
-extern void filp_ctor(void * objp, struct kmem_cache_s *cachep, unsigned long cflags);
-extern void filp_dtor(void * objp, struct kmem_cache_s *cachep, unsigned long dflags);
+struct kmem_cache;
 
 extern struct file ** alloc_fd_array(int);
 extern void free_fd_array(struct file **, int);
@@ -59,13 +88,16 @@ extern fd_set *alloc_fdset(int);
 extern void free_fdset(fd_set *, int);
 
 extern int expand_files(struct files_struct *, int nr);
+extern void free_fdtable(struct fdtable *fdt);
+extern void __init files_defer_init(void);
 
 static inline struct file * fcheck_files(struct files_struct *files, unsigned int fd)
 {
 	struct file * file = NULL;
+	struct fdtable *fdt = files_fdtable(files);
 
-	if (fd < files->max_fds)
-		file = files->fd[fd];
+	if (fd < fdt->max_fds)
+		file = rcu_dereference(fdt->fd[fd]);
 	return file;
 }
 

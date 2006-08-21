@@ -28,7 +28,7 @@
 #include <linux/string.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
-#include <net/tcp.h>
+#include <net/tcp_states.h>
 #include <net/x25.h>
 
 static int x25_queue_rx_frame(struct sock *sk, struct sk_buff *skb, int more)
@@ -106,7 +106,8 @@ static int x25_state1_machine(struct sock *sk, struct sk_buff *skb, int frametyp
 			skb_pull(skb, x25_addr_ntoa(skb->data, &source_addr, &dest_addr));
 			skb_pull(skb,
 				 x25_parse_facilities(skb, &x25->facilities,
-						      &x25->vc_facil_mask));
+						&x25->dte_facilities,
+						&x25->vc_facil_mask));
 			/*
 			 *	Copy any Call User Data.
 			 */

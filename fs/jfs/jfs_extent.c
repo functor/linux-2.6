@@ -18,7 +18,9 @@
 
 #include <linux/fs.h>
 #include <linux/quotaops.h>
+#include <linux/vs_dlimit.h>
 #include "jfs_incore.h"
+#include "jfs_inode.h"
 #include "jfs_superblock.h"
 #include "jfs_dmap.h"
 #include "jfs_extent.h"
@@ -32,12 +34,6 @@ static int extBalloc(struct inode *, s64, s64 *, s64 *);
 static int extBrealloc(struct inode *, s64, s64, s64 *, s64 *);
 #endif
 static s64 extRoundDown(s64 nb);
-
-/*
- * external references
- */
-extern int jfs_commit_inode(struct inode *, int);
-
 
 #define DPD(a)          (printk("(a): %d\n",(a)))
 #define DPC(a)          (printk("(a): %c\n",(a)))
@@ -99,7 +95,7 @@ extAlloc(struct inode *ip, s64 xlen, s64 pno, xad_t * xp, boolean_t abnr)
 	txBeginAnon(ip->i_sb);
 
 	/* Avoid race with jfs_commit_inode() */
-	down(&JFS_IP(ip)->commit_sem);
+	mutex_lock(&JFS_IP(ip)->commit_mutex);
 
 	/* validate extent length */
 	if (xlen > MAXXLEN)
@@ -141,15 +137,22 @@ extAlloc(struct inode *ip, s64 xlen, s64 pno, xad_t * xp, boolean_t abnr)
 	 */
 	nxlen = xlen;
 	if ((rc = extBalloc(ip, hint ? hint : INOHINT(ip), &nxlen, &nxaddr))) {
-		up(&JFS_IP(ip)->commit_sem);
+		mutex_unlock(&JFS_IP(ip)->commit_mutex);
 		return (rc);
 	}
 
 	/* Allocate blocks to quota. */
 	if (DQUOT_ALLOC_BLOCK(ip, nxlen)) {
 		dbFree(ip, nxaddr, (s64) nxlen);
-		up(&JFS_IP(ip)->commit_sem);
+		mutex_unlock(&JFS_IP(ip)->commit_mutex);
 		return -EDQUOT;
+	}
+	/* Allocate blocks to dlimit. */
+	if (DLIMIT_ALLOC_BLOCK(ip, nxlen)) {
+		DQUOT_FREE_BLOCK(ip, nxlen);
+		dbFree(ip, nxaddr, (s64) nxlen);
+		mutex_unlock(&JFS_IP(ip)->commit_mutex);
+		return -ENOSPC;
 	}
 
 	/* determine the value of the extent flag */
@@ -169,8 +172,9 @@ extAlloc(struct inode *ip, s64 xlen, s64 pno, xad_t * xp, boolean_t abnr)
 	 */
 	if (rc) {
 		dbFree(ip, nxaddr, nxlen);
+		DLIMIT_FREE_BLOCK(ip, nxlen);
 		DQUOT_FREE_BLOCK(ip, nxlen);
-		up(&JFS_IP(ip)->commit_sem);
+		mutex_unlock(&JFS_IP(ip)->commit_mutex);
 		return (rc);
 	}
 
@@ -182,7 +186,7 @@ extAlloc(struct inode *ip, s64 xlen, s64 pno, xad_t * xp, boolean_t abnr)
 
 	mark_inode_dirty(ip);
 
-	up(&JFS_IP(ip)->commit_sem);
+	mutex_unlock(&JFS_IP(ip)->commit_mutex);
 	/*
 	 * COMMIT_SyncList flags an anonymous tlock on page that is on
 	 * sync list.
@@ -227,7 +231,7 @@ int extRealloc(struct inode *ip, s64 nxlen, xad_t * xp, boolean_t abnr)
 	/* This blocks if we are low on resources */
 	txBeginAnon(ip->i_sb);
 
-	down(&JFS_IP(ip)->commit_sem);
+	mutex_lock(&JFS_IP(ip)->commit_mutex);
 	/* validate extent length */
 	if (nxlen > MAXXLEN)
 		nxlen = MAXXLEN;
@@ -263,8 +267,15 @@ int extRealloc(struct inode *ip, s64 nxlen, xad_t * xp, boolean_t abnr)
 	/* Allocat blocks to quota. */
 	if (DQUOT_ALLOC_BLOCK(ip, nxlen)) {
 		dbFree(ip, nxaddr, (s64) nxlen);
-		up(&JFS_IP(ip)->commit_sem);
+		mutex_unlock(&JFS_IP(ip)->commit_mutex);
 		return -EDQUOT;
+	}
+	/* Allocate blocks to dlimit. */
+	if (DLIMIT_ALLOC_BLOCK(ip, nxlen)) {
+		DQUOT_FREE_BLOCK(ip, nxlen);
+		dbFree(ip, nxaddr, (s64) nxlen);
+		up(&JFS_IP(ip)->commit_sem);
+		return -ENOSPC;
 	}
 
 	delta = nxlen - xlen;
@@ -302,6 +313,7 @@ int extRealloc(struct inode *ip, s64 nxlen, xad_t * xp, boolean_t abnr)
 		/* extend the extent */
 		if ((rc = xtExtend(0, ip, xoff + xlen, (int) nextend, 0))) {
 			dbFree(ip, xaddr + xlen, delta);
+			DLIMIT_FREE_BLOCK(ip, nxlen);
 			DQUOT_FREE_BLOCK(ip, nxlen);
 			goto exit;
 		}
@@ -313,6 +325,7 @@ int extRealloc(struct inode *ip, s64 nxlen, xad_t * xp, boolean_t abnr)
 		 */
 		if ((rc = xtTailgate(0, ip, xoff, (int) ntail, nxaddr, 0))) {
 			dbFree(ip, nxaddr, nxlen);
+			DLIMIT_FREE_BLOCK(ip, nxlen);
 			DQUOT_FREE_BLOCK(ip, nxlen);
 			goto exit;
 		}
@@ -343,7 +356,7 @@ int extRealloc(struct inode *ip, s64 nxlen, xad_t * xp, boolean_t abnr)
 
 	mark_inode_dirty(ip);
 exit:
-	up(&JFS_IP(ip)->commit_sem);
+	mutex_unlock(&JFS_IP(ip)->commit_mutex);
 	return (rc);
 }
 #endif			/* _NOTYET */
@@ -444,12 +457,12 @@ int extRecord(struct inode *ip, xad_t * xp)
 
 	txBeginAnon(ip->i_sb);
 
-	down(&JFS_IP(ip)->commit_sem);
+	mutex_lock(&JFS_IP(ip)->commit_mutex);
 
 	/* update the extent */
 	rc = xtUpdate(0, ip, xp);
 
-	up(&JFS_IP(ip)->commit_sem);
+	mutex_unlock(&JFS_IP(ip)->commit_mutex);
 	return rc;
 }
 

@@ -127,7 +127,7 @@ static int ncr_53c400a = NCR_NOT_SET;
 static int dtc_3181e = NCR_NOT_SET;
 
 static struct override {
-	NCR5380_implementation_fields;
+	NCR5380_map_type NCR5380_map_name;
 	int irq;
 	int dma;
 	int board;		/* Use NCR53c400, Ricoh, etc. extensions ? */
@@ -285,7 +285,7 @@ static int __init do_DTC3181E_setup(char *str)
  *	Locks: none
  */
 
-int __init generic_NCR5380_detect(Scsi_Host_Template * tpnt)
+int __init generic_NCR5380_detect(struct scsi_host_template * tpnt)
 {
 	static int current_override = 0;
 	int count, i;
@@ -299,6 +299,10 @@ int __init generic_NCR5380_detect(Scsi_Host_Template * tpnt)
 	};
 	int flags = 0;
 	struct Scsi_Host *instance;
+#ifdef CONFIG_SCSI_G_NCR5380_MEM
+	unsigned long base;
+	void __iomem *iomem;
+#endif
 
 	if (ncr_irq != NCR_NOT_SET)
 		overrides[0].irq = ncr_irq;
@@ -424,15 +428,22 @@ int __init generic_NCR5380_detect(Scsi_Host_Template * tpnt)
 			region_size = NCR5380_region_size;
 		}
 #else
-		if(!request_mem_region(overrides[current_override].NCR5380_map_name, NCR5380_region_size, "ncr5380"))
+		base = overrides[current_override].NCR5380_map_name;
+		if (!request_mem_region(base, NCR5380_region_size, "ncr5380"))
 			continue;
+		iomem = ioremap(base, NCR5380_region_size);
+		if (!iomem) {
+			release_mem_region(base, NCR5380_region_size);
+			continue;
+		}
 #endif
 		instance = scsi_register(tpnt, sizeof(struct NCR5380_hostdata));
 		if (instance == NULL) {
 #ifndef CONFIG_SCSI_G_NCR5380_MEM
 			release_region(overrides[current_override].NCR5380_map_name, region_size);
 #else
-			release_mem_region(overrides[current_override].NCR5380_map_name, NCR5380_region_size);
+			iounmap(iomem);
+			release_mem_region(base, NCR5380_region_size);
 #endif
 			continue;
 		}
@@ -440,6 +451,8 @@ int __init generic_NCR5380_detect(Scsi_Host_Template * tpnt)
 		instance->NCR5380_instance_name = overrides[current_override].NCR5380_map_name;
 #ifndef CONFIG_SCSI_G_NCR5380_MEM
 		instance->n_io_port = region_size;
+#else
+		((struct NCR5380_hostdata *)instance->hostdata).iomem = iomem;
 #endif
 
 		NCR5380_init(instance, flags);
@@ -509,6 +522,7 @@ int generic_NCR5380_release_resources(struct Scsi_Host *instance)
 #ifndef CONFIG_SCSI_G_NCR5380_MEM
 	release_region(instance->NCR5380_instance_name, instance->n_io_port);
 #else
+	iounmap(((struct NCR5380_hostdata *)instance->hostdata).iomem);
 	release_mem_region(instance->NCR5380_instance_name, NCR5380_region_size);
 #endif
 
@@ -586,7 +600,7 @@ static inline int NCR5380_pread(struct Scsi_Host *instance, unsigned char *dst, 
 		}
 #else
 		/* implies CONFIG_SCSI_G_NCR5380_MEM */
-		isa_memcpy_fromio(dst + start, NCR53C400_host_buffer + NCR5380_map_name, 128);
+		memcpy_fromio(dst + start, iomem + NCR53C400_host_buffer, 128);
 #endif
 		start += 128;
 		blocks--;
@@ -606,7 +620,7 @@ static inline int NCR5380_pread(struct Scsi_Host *instance, unsigned char *dst, 
 		}
 #else
 		/* implies CONFIG_SCSI_G_NCR5380_MEM */
-		isa_memcpy_fromio(dst + start, NCR53C400_host_buffer + NCR5380_map_name, 128);
+		memcpy_fromio(dst + start, iomem + NCR53C400_host_buffer, 128);
 #endif
 		start += 128;
 		blocks--;
@@ -671,7 +685,7 @@ static inline int NCR5380_pwrite(struct Scsi_Host *instance, unsigned char *src,
 		}
 #else
 		/* implies CONFIG_SCSI_G_NCR5380_MEM */
-		isa_memcpy_toio(NCR53C400_host_buffer + NCR5380_map_name, src + start, 128);
+		memcpy_toio(iomem + NCR53C400_host_buffer, src + start, 128);
 #endif
 		start += 128;
 		blocks--;
@@ -687,7 +701,7 @@ static inline int NCR5380_pwrite(struct Scsi_Host *instance, unsigned char *src,
 		}
 #else
 		/* implies CONFIG_SCSI_G_NCR5380_MEM */
-		isa_memcpy_toio(NCR53C400_host_buffer + NCR5380_map_name, src + start, 128);
+		memcpy_toio(iomem + NCR53C400_host_buffer, src + start, 128);
 #endif
 		start += 128;
 		blocks--;
@@ -798,7 +812,7 @@ static int generic_NCR5380_proc_info(struct Scsi_Host *scsi_ptr, char *buffer, c
 	Scsi_Cmnd *ptr;
 	struct NCR5380_hostdata *hostdata;
 #ifdef NCR5380_STATS
-	Scsi_Device *dev;
+	struct scsi_device *dev;
 	extern const char *const scsi_device_types[MAX_SCSI_DEVICE_CODE];
 #endif
 
@@ -899,7 +913,7 @@ static int generic_NCR5380_proc_info(struct Scsi_Host *scsi_ptr, char *buffer, c
 #undef PRINTP
 #undef ANDP
 
-static Scsi_Host_Template driver_template = {
+static struct scsi_host_template driver_template = {
 	.proc_info      	= generic_NCR5380_proc_info,
 	.name           	= "Generic NCR5380/NCR53C400 Scsi Driver",
 	.detect         	= generic_NCR5380_detect,
@@ -908,8 +922,6 @@ static Scsi_Host_Template driver_template = {
 	.queuecommand   	= generic_NCR5380_queue_command,
 	.eh_abort_handler	= generic_NCR5380_abort,
 	.eh_bus_reset_handler	= generic_NCR5380_bus_reset,
-	.eh_device_reset_handler = generic_NCR5380_device_reset,
-	.eh_host_reset_handler	= generic_NCR5380_host_reset,
 	.bios_param     	= NCR5380_BIOSPARAM,
 	.can_queue      	= CAN_QUEUE,
         .this_id        	= 7,

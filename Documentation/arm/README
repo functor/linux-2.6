@@ -8,10 +8,9 @@ Compilation of kernel
 ---------------------
 
   In order to compile ARM Linux, you will need a compiler capable of
-  generating ARM ELF code with GNU extensions.  GCC 2.95.1, EGCS
-  1.1.2, and GCC 3.3 are known to be good compilers.  Fortunately, you
-  needn't guess.  The kernel will report an error if your compiler is
-  a recognized offender.
+  generating ARM ELF code with GNU extensions.  GCC 3.3 is known to be
+  a good compiler.  Fortunately, you needn't guess.  The kernel will report
+  an error if your compiler is a recognized offender.
 
   To build ARM Linux natively, you shouldn't have to alter the ARCH = line
   in the top level Makefile.  However, if you don't have the ARM Linux ELF
@@ -90,7 +89,7 @@ Modules
   Although modularisation is supported (and required for the FP emulator),
   each module on an ARM2/ARM250/ARM3 machine when is loaded will take
   memory up to the next 32k boundary due to the size of the pages.
-  Therefore, modularisation on these machines really worth it?
+  Therefore, is modularisation on these machines really worth it?
 
   However, ARM6 and up machines allow modules to take multiples of 4k, and
   as such Acorn RiscPCs and other architectures using these processors can

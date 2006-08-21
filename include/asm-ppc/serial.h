@@ -18,8 +18,6 @@
 #include <platforms/powerpmc250.h>
 #elif defined(CONFIG_LOPEC)
 #include <platforms/lopec.h>
-#elif defined(CONFIG_MCPN765)
-#include <platforms/mcpn765.h>
 #elif defined(CONFIG_MVME5100)
 #include <platforms/mvme5100.h>
 #elif defined(CONFIG_PAL4)
@@ -43,14 +41,9 @@
 #else
 
 /*
- * XXX Assume for now it has PC-style ISA serial ports.
- * This is true for PReP and CHRP at least.
+ * XXX Assume it has PC-style ISA serial ports - true for PReP at least.
  */
 #include <asm/pc_serial.h>
-
-#if defined(CONFIG_MAC_SERIAL)
-#define SERIAL_DEV_OFFSET	((_machine == _MACH_prep || _machine == _MACH_chrp) ? 0 : 2)
-#endif
 
 #endif /* !CONFIG_GEMINI and others */
 #endif /* __ASM_SERIAL_H__ */

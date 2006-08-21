@@ -20,13 +20,14 @@ struct scatterlist;
 struct page;
 struct mm_struct;
 struct pci_bus;
+struct task_struct;
 
 typedef void ia64_mv_setup_t (char **);
 typedef void ia64_mv_cpu_init_t (void);
 typedef void ia64_mv_irq_init_t (void);
 typedef void ia64_mv_send_ipi_t (int, int, int, int);
 typedef void ia64_mv_timer_interrupt_t (int, void *, struct pt_regs *);
-typedef void ia64_mv_global_tlb_purge_t (unsigned long, unsigned long, unsigned long);
+typedef void ia64_mv_global_tlb_purge_t (struct mm_struct *, unsigned long, unsigned long, unsigned long);
 typedef void ia64_mv_tlb_migrate_finish_t (struct mm_struct *);
 typedef unsigned int ia64_mv_local_vector_to_irq (u8);
 typedef char *ia64_mv_pci_get_legacy_mem_t (struct pci_bus *);
@@ -34,10 +35,11 @@ typedef int ia64_mv_pci_legacy_read_t (struct pci_bus *, u16 port, u32 *val,
 				       u8 size);
 typedef int ia64_mv_pci_legacy_write_t (struct pci_bus *, u16 port, u32 val,
 					u8 size);
+typedef void ia64_mv_migrate_t(struct task_struct * task);
 
 /* DMA-mapping interface: */
 typedef void ia64_mv_dma_init (void);
-typedef void *ia64_mv_dma_alloc_coherent (struct device *, size_t, dma_addr_t *, int);
+typedef void *ia64_mv_dma_alloc_coherent (struct device *, size_t, dma_addr_t *, gfp_t);
 typedef void ia64_mv_dma_free_coherent (struct device *, size_t, void *, dma_addr_t);
 typedef dma_addr_t ia64_mv_dma_map_single (struct device *, void *, size_t, int);
 typedef void ia64_mv_dma_unmap_single (struct device *, dma_addr_t, size_t, int);
@@ -82,6 +84,11 @@ machvec_noop (void)
 
 static inline void
 machvec_noop_mm (struct mm_struct *mm)
+{
+}
+
+static inline void
+machvec_noop_task (struct task_struct *task)
 {
 }
 
@@ -146,6 +153,7 @@ extern void machvec_tlb_migrate_finish (struct mm_struct *);
 #  define platform_readw_relaxed        ia64_mv.readw_relaxed
 #  define platform_readl_relaxed        ia64_mv.readl_relaxed
 #  define platform_readq_relaxed        ia64_mv.readq_relaxed
+#  define platform_migrate		ia64_mv.migrate
 # endif
 
 /* __attribute__((__aligned__(16))) is required to make size of the
@@ -194,6 +202,7 @@ struct ia64_machine_vector {
 	ia64_mv_readw_relaxed_t *readw_relaxed;
 	ia64_mv_readl_relaxed_t *readl_relaxed;
 	ia64_mv_readq_relaxed_t *readq_relaxed;
+	ia64_mv_migrate_t *migrate;
 } __attribute__((__aligned__(16))); /* align attrib? see above comment */
 
 #define MACHVEC_INIT(name)			\
@@ -238,6 +247,7 @@ struct ia64_machine_vector {
 	platform_readw_relaxed,			\
 	platform_readl_relaxed,			\
 	platform_readq_relaxed,			\
+	platform_migrate,			\
 }
 
 extern struct ia64_machine_vector ia64_mv;
@@ -337,9 +347,11 @@ extern ia64_mv_dma_supported		swiotlb_dma_supported;
 #endif
 #ifndef platform_pci_legacy_read
 # define platform_pci_legacy_read	ia64_pci_legacy_read
+extern int ia64_pci_legacy_read(struct pci_bus *bus, u16 port, u32 *val, u8 size);
 #endif
 #ifndef platform_pci_legacy_write
 # define platform_pci_legacy_write	ia64_pci_legacy_write
+extern int ia64_pci_legacy_write(struct pci_bus *bus, u16 port, u32 val, u8 size);
 #endif
 #ifndef platform_inb
 # define platform_inb		__ia64_inb
@@ -385,6 +397,9 @@ extern ia64_mv_dma_supported		swiotlb_dma_supported;
 #endif
 #ifndef platform_readq_relaxed
 # define platform_readq_relaxed	__ia64_readq_relaxed
+#endif
+#ifndef platform_migrate
+# define platform_migrate machvec_noop_task
 #endif
 
 #endif /* _ASM_IA64_MACHVEC_H */

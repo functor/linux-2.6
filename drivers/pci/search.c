@@ -166,7 +166,7 @@ static struct pci_dev * pci_find_subsys(unsigned int vendor,
 	struct list_head *n;
 	struct pci_dev *dev;
 
-	BUG_ON(in_interrupt());
+	WARN_ON(in_interrupt());
 	spin_lock(&pci_bus_lock);
 	n = from ? from->global_list.next : pci_devices.next;
 
@@ -246,9 +246,9 @@ pci_get_subsys(unsigned int vendor, unsigned int device,
 	}
 	dev = NULL;
 exit:
-	pci_dev_put(from);
 	dev = pci_dev_get(dev);
 	spin_unlock(&pci_bus_lock);
+	pci_dev_put(from);
 	return dev;
 }
 
@@ -339,9 +339,9 @@ struct pci_dev *pci_get_class(unsigned int class, struct pci_dev *from)
 	}
 	dev = NULL;
 exit:
-	pci_dev_put(from);
 	dev = pci_dev_get(dev);
 	spin_unlock(&pci_bus_lock);
+	pci_dev_put(from);
 	return dev;
 }
 
@@ -379,6 +379,7 @@ exit:
 EXPORT_SYMBOL(pci_dev_present);
 
 EXPORT_SYMBOL(pci_find_bus);
+EXPORT_SYMBOL(pci_find_next_bus);
 EXPORT_SYMBOL(pci_find_device);
 EXPORT_SYMBOL(pci_find_device_reverse);
 EXPORT_SYMBOL(pci_find_slot);

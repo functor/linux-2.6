@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2004, 2005 Topspin Communications.  All rights reserved.
+ * Copyright (c) 2005 Sun Microsystems, Inc. All rights reserved.
+ * Copyright (c) 2004 Voltaire, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -43,15 +45,15 @@
 #include <linux/config.h>
 #include <linux/kref.h>
 #include <linux/if_infiniband.h>
+#include <linux/mutex.h>
 
 #include <net/neighbour.h>
 
 #include <asm/atomic.h>
-#include <asm/semaphore.h>
 
-#include <ib_verbs.h>
-#include <ib_pack.h>
-#include <ib_sa.h>
+#include <rdma/ib_verbs.h>
+#include <rdma/ib_pack.h>
+#include <rdma/ib_sa.h>
 
 /* constants */
 
@@ -63,6 +65,8 @@ enum {
 
 	IPOIB_RX_RING_SIZE 	  = 128,
 	IPOIB_TX_RING_SIZE 	  = 64,
+	IPOIB_MAX_QUEUE_SIZE	  = 8192,
+	IPOIB_MIN_QUEUE_SIZE	  = 2,
 
 	IPOIB_NUM_WC 		  = 4,
 
@@ -70,12 +74,14 @@ enum {
 	IPOIB_MAX_MCAST_QUEUE     = 3,
 
 	IPOIB_FLAG_OPER_UP 	  = 0,
-	IPOIB_FLAG_ADMIN_UP 	  = 1,
-	IPOIB_PKEY_ASSIGNED 	  = 2,
-	IPOIB_PKEY_STOP 	  = 3,
-	IPOIB_FLAG_SUBINTERFACE   = 4,
-	IPOIB_MCAST_RUN 	  = 5,
-	IPOIB_STOP_REAPER         = 6,
+	IPOIB_FLAG_INITIALIZED    = 1,
+	IPOIB_FLAG_ADMIN_UP 	  = 2,
+	IPOIB_PKEY_ASSIGNED 	  = 3,
+	IPOIB_PKEY_STOP 	  = 4,
+	IPOIB_FLAG_SUBINTERFACE   = 5,
+	IPOIB_MCAST_RUN 	  = 6,
+	IPOIB_STOP_REAPER         = 7,
+	IPOIB_MCAST_STARTED       = 8,
 
 	IPOIB_MAX_BACKOFF_SECONDS = 16,
 
@@ -88,8 +94,8 @@ enum {
 /* structs */
 
 struct ipoib_header {
-	u16 proto;
-	u16 reserved;
+	__be16	proto;
+	u16	reserved;
 };
 
 struct ipoib_pseudoheader {
@@ -98,7 +104,12 @@ struct ipoib_pseudoheader {
 
 struct ipoib_mcast;
 
-struct ipoib_buf {
+struct ipoib_rx_buf {
+	struct sk_buff *skb;
+	dma_addr_t	mapping;
+};
+
+struct ipoib_tx_buf {
 	struct sk_buff *skb;
 	DECLARE_PCI_UNMAP_ADDR(mapping)
 };
@@ -116,8 +127,8 @@ struct ipoib_dev_priv {
 
 	unsigned long flags;
 
-	struct semaphore mcast_mutex;
-	struct semaphore vlan_mutex;
+	struct mutex mcast_mutex;
+	struct mutex vlan_mutex;
 
 	struct rb_root  path_tree;
 	struct list_head path_list;
@@ -148,14 +159,14 @@ struct ipoib_dev_priv {
 	unsigned int admin_mtu;
 	unsigned int mcast_mtu;
 
-	struct ipoib_buf *rx_ring;
+	struct ipoib_rx_buf *rx_ring;
 
-	spinlock_t        tx_lock;
-	struct ipoib_buf *tx_ring;
-	unsigned          tx_head;
-	unsigned          tx_tail;
-	struct ib_sge     tx_sge;
-	struct ib_send_wr tx_wr;
+	spinlock_t           tx_lock;
+	struct ipoib_tx_buf *tx_ring;
+	unsigned             tx_head;
+	unsigned             tx_tail;
+	struct ib_sge        tx_sge;
+	struct ib_send_wr    tx_wr;
 
 	struct ib_wc ibwc[IPOIB_NUM_WC];
 
@@ -172,6 +183,7 @@ struct ipoib_dev_priv {
 #ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
 	struct list_head fs_list;
 	struct dentry *mcg_dentry;
+	struct dentry *path_dentry;
 #endif
 };
 
@@ -208,11 +220,20 @@ struct ipoib_neigh {
 	struct list_head    list;
 };
 
+/*
+ * We stash a pointer to our private neighbour information after our
+ * hardware address in neigh->ha.  The ALIGN() expression here makes
+ * sure that this pointer is stored aligned so that an unaligned
+ * load is not needed to dereference it.
+ */
 static inline struct ipoib_neigh **to_ipoib_neigh(struct neighbour *neigh)
 {
-	return (struct ipoib_neigh **) (neigh->ha + 24 -
-					(offsetof(struct neighbour, ha) & 4));
+	return (void*) neigh + ALIGN(offsetof(struct neighbour, ha) +
+				     INFINIBAND_ALEN, sizeof(void *));
 }
+
+struct ipoib_neigh *ipoib_neigh_alloc(struct neighbour *neigh);
+void ipoib_neigh_free(struct ipoib_neigh *neigh);
 
 extern struct workqueue_struct *ipoib_workqueue;
 
@@ -228,6 +249,7 @@ static inline void ipoib_put_ah(struct ipoib_ah *ah)
 	kref_put(&ah->ref, ipoib_free_ah);
 }
 
+int ipoib_open(struct net_device *dev);
 int ipoib_add_pkey_attr(struct net_device *dev);
 
 void ipoib_send(struct net_device *dev, struct sk_buff *skb,
@@ -243,7 +265,7 @@ void ipoib_ib_dev_cleanup(struct net_device *dev);
 
 int ipoib_ib_dev_open(struct net_device *dev);
 int ipoib_ib_dev_up(struct net_device *dev);
-int ipoib_ib_dev_down(struct net_device *dev);
+int ipoib_ib_dev_down(struct net_device *dev, int flush);
 int ipoib_ib_dev_stop(struct net_device *dev);
 
 int ipoib_dev_init(struct net_device *dev, struct ib_device *ca, int port);
@@ -255,13 +277,13 @@ void ipoib_mcast_send(struct net_device *dev, union ib_gid *mgid,
 
 void ipoib_mcast_restart_task(void *dev_ptr);
 int ipoib_mcast_start_thread(struct net_device *dev);
-int ipoib_mcast_stop_thread(struct net_device *dev);
+int ipoib_mcast_stop_thread(struct net_device *dev, int flush);
 
 void ipoib_mcast_dev_down(struct net_device *dev);
 void ipoib_mcast_dev_flush(struct net_device *dev);
 
+#ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
 struct ipoib_mcast_iter *ipoib_mcast_iter_init(struct net_device *dev);
-void ipoib_mcast_iter_free(struct ipoib_mcast_iter *iter);
 int ipoib_mcast_iter_next(struct ipoib_mcast_iter *iter);
 void ipoib_mcast_iter_read(struct ipoib_mcast_iter *iter,
 				  union ib_gid *gid,
@@ -270,12 +292,18 @@ void ipoib_mcast_iter_read(struct ipoib_mcast_iter *iter,
 				  unsigned int *complete,
 				  unsigned int *send_only);
 
+struct ipoib_path_iter *ipoib_path_iter_init(struct net_device *dev);
+int ipoib_path_iter_next(struct ipoib_path_iter *iter);
+void ipoib_path_iter_read(struct ipoib_path_iter *iter,
+			  struct ipoib_path *path);
+#endif
+
 int ipoib_mcast_attach(struct net_device *dev, u16 mlid,
 		       union ib_gid *mgid);
 int ipoib_mcast_detach(struct net_device *dev, u16 mlid,
 		       union ib_gid *mgid);
 
-int ipoib_qp_create(struct net_device *dev);
+int ipoib_init_qp(struct net_device *dev);
 int ipoib_transport_dev_init(struct net_device *dev, struct ib_device *ca);
 void ipoib_transport_dev_cleanup(struct net_device *dev);
 
@@ -289,13 +317,13 @@ void ipoib_pkey_poll(void *dev);
 int ipoib_pkey_dev_delay_open(struct net_device *dev);
 
 #ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
-int ipoib_create_debug_file(struct net_device *dev);
-void ipoib_delete_debug_file(struct net_device *dev);
+void ipoib_create_debug_files(struct net_device *dev);
+void ipoib_delete_debug_files(struct net_device *dev);
 int ipoib_register_debugfs(void);
 void ipoib_unregister_debugfs(void);
 #else
-static inline int ipoib_create_debug_file(struct net_device *dev) { return 0; }
-static inline void ipoib_delete_debug_file(struct net_device *dev) { }
+static inline void ipoib_create_debug_files(struct net_device *dev) { }
+static inline void ipoib_delete_debug_files(struct net_device *dev) { }
 static inline int ipoib_register_debugfs(void) { return 0; }
 static inline void ipoib_unregister_debugfs(void) { }
 #endif
@@ -306,6 +334,8 @@ static inline void ipoib_unregister_debugfs(void) { }
 #define ipoib_warn(priv, format, arg...)		\
 	ipoib_printk(KERN_WARNING, priv, format , ## arg)
 
+extern int ipoib_sendq_size;
+extern int ipoib_recvq_size;
 
 #ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
 extern int ipoib_debug_level;

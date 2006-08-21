@@ -162,6 +162,8 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_SLV, D_DLY};
 #include <linux/mtio.h>
 #include <linux/pg.h>
 #include <linux/device.h>
+#include <linux/sched.h>	/* current, TASK_* */
+#include <linux/jiffies.h>
 
 #include <asm/uaccess.h>
 
@@ -222,7 +224,7 @@ static int pg_identify(struct pg *dev, int log);
 
 static char pg_scratch[512];	/* scratch block buffer */
 
-static struct class_simple *pg_class;
+static struct class *pg_class;
 
 /* kernel glue structures */
 
@@ -276,8 +278,7 @@ static inline u8 DRIVE(struct pg *dev)
 
 static void pg_sleep(int cs)
 {
-	current->state = TASK_INTERRUPTIBLE;
-	schedule_timeout(cs);
+	schedule_timeout_interruptible(cs);
 }
 
 static int pg_wait(struct pg *dev, int go, int stop, unsigned long tmo, char *msg)
@@ -642,7 +643,8 @@ static ssize_t pg_read(struct file *filp, char __user *buf, size_t count, loff_t
 
 static int __init pg_init(void)
 {
-	int unit, err = 0;
+	int unit;
+	int err;
 
 	if (disable){
 		err = -1;
@@ -656,17 +658,18 @@ static int __init pg_init(void)
 		goto out;
 	}
 
-	if (register_chrdev(major, name, &pg_fops)) {
+	err = register_chrdev(major, name, &pg_fops);
+	if (err < 0) {
 		printk("pg_init: unable to get major number %d\n", major);
 		for (unit = 0; unit < PG_UNITS; unit++) {
 			struct pg *dev = &devices[unit];
 			if (dev->present)
 				pi_release(dev->pi);
 		}
-		err = -1;
 		goto out;
 	}
-	pg_class = class_simple_create(THIS_MODULE, "pg");
+	major = err;	/* In case the user specified `major=0' (dynamic) */
+	pg_class = class_create(THIS_MODULE, "pg");
 	if (IS_ERR(pg_class)) {
 		err = PTR_ERR(pg_class);
 		goto out_chrdev;
@@ -675,7 +678,7 @@ static int __init pg_init(void)
 	for (unit = 0; unit < PG_UNITS; unit++) {
 		struct pg *dev = &devices[unit];
 		if (dev->present) {
-			class_simple_device_add(pg_class, MKDEV(major, unit), 
+			class_device_create(pg_class, NULL, MKDEV(major, unit),
 					NULL, "pg%u", unit);
 			err = devfs_mk_cdev(MKDEV(major, unit),
 				      S_IFCHR | S_IRUSR | S_IWUSR, "pg/%u",
@@ -688,8 +691,8 @@ static int __init pg_init(void)
 	goto out;
 
 out_class:
-	class_simple_device_remove(MKDEV(major, unit));
-	class_simple_destroy(pg_class);
+	class_device_destroy(pg_class, MKDEV(major, unit));
+	class_destroy(pg_class);
 out_chrdev:
 	unregister_chrdev(major, "pg");
 out:
@@ -703,11 +706,11 @@ static void __exit pg_exit(void)
 	for (unit = 0; unit < PG_UNITS; unit++) {
 		struct pg *dev = &devices[unit];
 		if (dev->present) {
-			class_simple_device_remove(MKDEV(major, unit));
+			class_device_destroy(pg_class, MKDEV(major, unit));
 			devfs_remove("pg/%u", unit);
 		}
 	}
-	class_simple_destroy(pg_class);
+	class_destroy(pg_class);
 	devfs_remove("pg");
 	unregister_chrdev(major, name);
 

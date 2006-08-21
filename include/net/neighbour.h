@@ -49,8 +49,8 @@
 #ifdef __KERNEL__
 
 #include <asm/atomic.h>
-#include <linux/skbuff.h>
 #include <linux/netdevice.h>
+#include <linux/skbuff.h>
 #include <linux/rcupdate.h>
 #include <linux/seq_file.h>
 
@@ -65,11 +65,11 @@ struct neighbour;
 
 struct neigh_parms
 {
+	struct net_device *dev;
 	struct neigh_parms *next;
 	int	(*neigh_setup)(struct neighbour *);
+	void	(*neigh_destructor)(struct neighbour *);
 	struct neigh_table *tbl;
-	int	entries;
-	void	*priv;
 
 	void	*sysctl_table;
 
@@ -146,7 +146,6 @@ struct neighbour
 struct neigh_ops
 {
 	int			family;
-	void			(*destructor)(struct neighbour *);
 	void			(*solicit)(struct neighbour *, struct sk_buff*);
 	void			(*error_report)(struct neighbour *, struct sk_buff*);
 	int			(*output)(struct sk_buff*);
@@ -192,7 +191,6 @@ struct neigh_table
 	atomic_t		entries;
 	rwlock_t		lock;
 	unsigned long		last_rand;
-	struct neigh_parms	*parms_list;
 	kmem_cache_t		*kmem_cachep;
 	struct neigh_statistics	*stats;
 	struct neighbour	**hash_buckets;
@@ -213,6 +211,7 @@ struct neigh_table
 #define NEIGH_UPDATE_F_ADMIN			0x80000000
 
 extern void			neigh_table_init(struct neigh_table *tbl);
+extern void			neigh_table_init_no_netlink(struct neigh_table *tbl);
 extern int			neigh_table_clear(struct neigh_table *tbl);
 extern struct neighbour *	neigh_lookup(struct neigh_table *tbl,
 					     const void *pkey,
@@ -251,6 +250,9 @@ extern int neigh_dump_info(struct sk_buff *skb, struct netlink_callback *cb);
 extern int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg);
 extern int neigh_delete(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg);
 extern void neigh_app_ns(struct neighbour *n);
+
+extern int neightbl_dump_info(struct sk_buff *skb, struct netlink_callback *cb);
+extern int neightbl_set(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg);
 
 extern void neigh_for_each(struct neigh_table *tbl, void (*cb)(struct neighbour *, void *), void *cookie);
 extern void __neigh_for_each_release(struct neigh_table *tbl, int (*cb)(struct neighbour *));
@@ -362,7 +364,14 @@ __neigh_lookup_errno(struct neigh_table *tbl, const void *pkey,
 	return neigh_create(tbl, pkey, dev);
 }
 
-#define LOCALLY_ENQUEUED -2
+struct neighbour_cb {
+	unsigned long sched_next;
+	unsigned int flags;
+};
+
+#define LOCALLY_ENQUEUED 0x1
+
+#define NEIGH_CB(skb)	((struct neighbour_cb *)(skb)->cb)
 
 #endif
 #endif

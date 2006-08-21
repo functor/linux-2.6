@@ -14,17 +14,23 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
+#include <linux/smp.h>
+#include <linux/termios.h>
+#include <linux/amba/bus.h>
+#include <linux/amba/serial.h>
 
 #include <asm/hardware.h>
 #include <asm/irq.h>
 #include <asm/io.h>
-#include <asm/hardware/amba.h>
+#include <asm/hardware/arm_timer.h>
 #include <asm/arch/cm.h>
 #include <asm/system.h>
 #include <asm/leds.h>
 #include <asm/mach/time.h>
 
 #include "common.h"
+
+static struct amba_pl010_data integrator_uart_data;
 
 static struct amba_device rtc_device = {
 	.dev		= {
@@ -42,6 +48,7 @@ static struct amba_device rtc_device = {
 static struct amba_device uart0_device = {
 	.dev		= {
 		.bus_id	= "mb:16",
+		.platform_data = &integrator_uart_data,
 	},
 	.res		= {
 		.start	= INTEGRATOR_UART0_BASE,
@@ -55,6 +62,7 @@ static struct amba_device uart0_device = {
 static struct amba_device uart1_device = {
 	.dev		= {
 		.bus_id	= "mb:17",
+		.platform_data = &integrator_uart_data,
 	},
 	.res		= {
 		.start	= INTEGRATOR_UART1_BASE,
@@ -113,6 +121,46 @@ static int __init integrator_init(void)
 
 arch_initcall(integrator_init);
 
+/*
+ * On the Integrator platform, the port RTS and DTR are provided by
+ * bits in the following SC_CTRLS register bits:
+ *        RTS  DTR
+ *  UART0  7    6
+ *  UART1  5    4
+ */
+#define SC_CTRLC	(IO_ADDRESS(INTEGRATOR_SC_BASE) + INTEGRATOR_SC_CTRLC_OFFSET)
+#define SC_CTRLS	(IO_ADDRESS(INTEGRATOR_SC_BASE) + INTEGRATOR_SC_CTRLS_OFFSET)
+
+static void integrator_uart_set_mctrl(struct amba_device *dev, void __iomem *base, unsigned int mctrl)
+{
+	unsigned int ctrls = 0, ctrlc = 0, rts_mask, dtr_mask;
+
+	if (dev == &uart0_device) {
+		rts_mask = 1 << 4;
+		dtr_mask = 1 << 5;
+	} else {
+		rts_mask = 1 << 6;
+		dtr_mask = 1 << 7;
+	}
+
+	if (mctrl & TIOCM_RTS)
+		ctrlc |= rts_mask;
+	else
+		ctrls |= rts_mask;
+
+	if (mctrl & TIOCM_DTR)
+		ctrlc |= dtr_mask;
+	else
+		ctrls |= dtr_mask;
+
+	__raw_writel(ctrls, SC_CTRLS);
+	__raw_writel(ctrlc, SC_CTRLC);
+}
+
+static struct amba_pl010_data integrator_uart_data = {
+	.set_mctrl = integrator_uart_set_mctrl,
+};
+
 #define CM_CTRL	IO_ADDRESS(INTEGRATOR_HDR_BASE) + INTEGRATOR_HDR_CTRL_OFFSET
 
 static DEFINE_SPINLOCK(cm_lock);
@@ -155,16 +203,6 @@ EXPORT_SYMBOL(cm_control);
 #define TICKS2USECS(x)	((x) / TICKS_PER_uSEC)
 #endif
 
-/*
- * What does it look like?
- */
-typedef struct TimerStruct {
-	unsigned long TimerLoad;
-	unsigned long TimerValue;
-	unsigned long TimerControl;
-	unsigned long TimerClear;
-} TimerStruct_t;
-
 static unsigned long timer_reload;
 
 /*
@@ -173,7 +211,6 @@ static unsigned long timer_reload;
  */
 unsigned long integrator_gettimeoffset(void)
 {
-	volatile TimerStruct_t *timer1 = (TimerStruct_t *)TIMER1_VA_BASE;
 	unsigned long ticks1, ticks2, status;
 
 	/*
@@ -182,11 +219,11 @@ unsigned long integrator_gettimeoffset(void)
 	 * an interrupt.  We get around this by ensuring that the
 	 * counter has not reloaded between our two reads.
 	 */
-	ticks2 = timer1->TimerValue & 0xffff;
+	ticks2 = readl(TIMER1_VA_BASE + TIMER_VALUE) & 0xffff;
 	do {
 		ticks1 = ticks2;
 		status = __raw_readl(VA_IC_BASE + IRQ_RAW_STATUS);
-		ticks2 = timer1->TimerValue & 0xffff;
+		ticks2 = readl(TIMER1_VA_BASE + TIMER_VALUE) & 0xffff;
 	} while (ticks2 > ticks1);
 
 	/*
@@ -212,16 +249,30 @@ unsigned long integrator_gettimeoffset(void)
 static irqreturn_t
 integrator_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	volatile TimerStruct_t *timer1 = (volatile TimerStruct_t *)TIMER1_VA_BASE;
-
 	write_seqlock(&xtime_lock);
 
 	/*
 	 * clear the interrupt
 	 */
-	timer1->TimerClear = 1;
+	writel(1, TIMER1_VA_BASE + TIMER_INTCLR);
 
-	timer_tick(regs);
+	/*
+	 * the clock tick routines are only processed on the
+	 * primary CPU
+	 */
+	if (hard_smp_processor_id() == 0) {
+		timer_tick(regs);
+#ifdef CONFIG_SMP
+		smp_send_timer();
+#endif
+	}
+
+#ifdef CONFIG_SMP
+	/*
+	 * this is the ARM equivalent of the APIC timer interrupt
+	 */
+	update_process_times(user_mode(regs));
+#endif /* CONFIG_SMP */
 
 	write_sequnlock(&xtime_lock);
 
@@ -230,8 +281,8 @@ integrator_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 static struct irqaction integrator_timer_irq = {
 	.name		= "Integrator Timer Tick",
-	.flags		= SA_INTERRUPT,
-	.handler	= integrator_timer_interrupt
+	.flags		= SA_INTERRUPT | SA_TIMER,
+	.handler	= integrator_timer_interrupt,
 };
 
 /*
@@ -239,32 +290,29 @@ static struct irqaction integrator_timer_irq = {
  */
 void __init integrator_time_init(unsigned long reload, unsigned int ctrl)
 {
-	volatile TimerStruct_t *timer0 = (volatile TimerStruct_t *)TIMER0_VA_BASE;
-	volatile TimerStruct_t *timer1 = (volatile TimerStruct_t *)TIMER1_VA_BASE;
-	volatile TimerStruct_t *timer2 = (volatile TimerStruct_t *)TIMER2_VA_BASE;
-	unsigned int timer_ctrl = 0x80 | 0x40;	/* periodic */
+	unsigned int timer_ctrl = TIMER_CTRL_ENABLE | TIMER_CTRL_PERIODIC;
 
 	timer_reload = reload;
 	timer_ctrl |= ctrl;
 
 	if (timer_reload > 0x100000) {
 		timer_reload >>= 8;
-		timer_ctrl |= 0x08; /* /256 */
+		timer_ctrl |= TIMER_CTRL_DIV256;
 	} else if (timer_reload > 0x010000) {
 		timer_reload >>= 4;
-		timer_ctrl |= 0x04; /* /16 */
+		timer_ctrl |= TIMER_CTRL_DIV16;
 	}
 
 	/*
 	 * Initialise to a known state (all timers off)
 	 */
-	timer0->TimerControl = 0;
-	timer1->TimerControl = 0;
-	timer2->TimerControl = 0;
+	writel(0, TIMER0_VA_BASE + TIMER_CTRL);
+	writel(0, TIMER1_VA_BASE + TIMER_CTRL);
+	writel(0, TIMER2_VA_BASE + TIMER_CTRL);
 
-	timer1->TimerLoad    = timer_reload;
-	timer1->TimerValue   = timer_reload;
-	timer1->TimerControl = timer_ctrl;
+	writel(timer_reload, TIMER1_VA_BASE + TIMER_LOAD);
+	writel(timer_reload, TIMER1_VA_BASE + TIMER_VALUE);
+	writel(timer_ctrl, TIMER1_VA_BASE + TIMER_CTRL);
 
 	/*
 	 * Make irqs happen for the system timer

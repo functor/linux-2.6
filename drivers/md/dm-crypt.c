@@ -15,7 +15,7 @@
 #include <linux/crypto.h>
 #include <linux/workqueue.h>
 #include <asm/atomic.h>
-#include <asm/scatterlist.h>
+#include <linux/scatterlist.h>
 #include <asm/page.h>
 
 #include "dm.h"
@@ -94,20 +94,6 @@ struct crypt_config {
 static kmem_cache_t *_crypt_io_pool;
 
 /*
- * Mempool alloc and free functions for the page
- */
-static void *mempool_alloc_page(unsigned int __nocast gfp_mask, void *data)
-{
-	return alloc_page(gfp_mask);
-}
-
-static void mempool_free_page(void *page, void *data)
-{
-	__free_page(page);
-}
-
-
-/*
  * Different IV generation algorithms:
  *
  * plain: the initial vector is the 32-bit low-endian version of the sector
@@ -144,7 +130,7 @@ static int crypt_iv_essiv_ctr(struct crypt_config *cc, struct dm_target *ti,
 	}
 
 	/* Hash the cipher key with the given hash algorithm */
-	hash_tfm = crypto_alloc_tfm(opts, 0);
+	hash_tfm = crypto_alloc_tfm(opts, CRYPTO_TFM_REQ_MAY_SLEEP);
 	if (hash_tfm == NULL) {
 		ti->error = PFX "Error initializing ESSIV hash";
 		return -EINVAL;
@@ -164,15 +150,14 @@ static int crypt_iv_essiv_ctr(struct crypt_config *cc, struct dm_target *ti,
 		return -ENOMEM;
 	}
 
-	sg.page = virt_to_page(cc->key);
-	sg.offset = offset_in_page(cc->key);
-	sg.length = cc->key_size;
+	sg_set_buf(&sg, cc->key, cc->key_size);
 	crypto_digest_digest(hash_tfm, &sg, 1, salt);
 	crypto_free_tfm(hash_tfm);
 
 	/* Setup the essiv_tfm with the given salt */
 	essiv_tfm = crypto_alloc_tfm(crypto_tfm_alg_name(cc->tfm),
-	                             CRYPTO_TFM_MODE_ECB);
+	                             CRYPTO_TFM_MODE_ECB |
+	                             CRYPTO_TFM_REQ_MAY_SLEEP);
 	if (essiv_tfm == NULL) {
 		ti->error = PFX "Error allocating crypto tfm for ESSIV";
 		kfree(salt);
@@ -206,14 +191,12 @@ static void crypt_iv_essiv_dtr(struct crypt_config *cc)
 
 static int crypt_iv_essiv_gen(struct crypt_config *cc, u8 *iv, sector_t sector)
 {
-	struct scatterlist sg = { NULL, };
+	struct scatterlist sg;
 
 	memset(iv, 0, cc->iv_size);
 	*(u64 *)iv = cpu_to_le64(sector);
 
-	sg.page = virt_to_page(iv);
-	sg.offset = offset_in_page(iv);
-	sg.length = cc->iv_size;
+	sg_set_buf(&sg, iv, cc->iv_size);
 	crypto_cipher_encrypt((struct crypto_tfm *)cc->iv_gen_private,
 	                      &sg, &sg, cc->iv_size);
 
@@ -231,7 +214,7 @@ static struct crypt_iv_operations crypt_iv_essiv_ops = {
 };
 
 
-static inline int
+static int
 crypt_convert_scatterlist(struct crypt_config *cc, struct scatterlist *out,
                           struct scatterlist *in, unsigned int length,
                           int write, sector_t sector)
@@ -330,7 +313,7 @@ crypt_alloc_buffer(struct crypt_config *cc, unsigned int size,
 {
 	struct bio *bio;
 	unsigned int nr_iovecs = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
-	int gfp_mask = GFP_NOIO | __GFP_HIGHMEM;
+	gfp_t gfp_mask = GFP_NOIO | __GFP_HIGHMEM;
 	unsigned int i;
 
 	/*
@@ -535,6 +518,7 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	char *ivopts;
 	unsigned int crypto_flags;
 	unsigned int key_size;
+	unsigned long long tmpll;
 
 	if (argc != 5) {
 		ti->error = PFX "Not enough arguments";
@@ -587,7 +571,7 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad1;
 	}
 
-	tfm = crypto_alloc_tfm(cipher, crypto_flags);
+	tfm = crypto_alloc_tfm(cipher, crypto_flags | CRYPTO_TFM_REQ_MAY_SLEEP);
 	if (!tfm) {
 		ti->error = PFX "Error allocating crypto tfm";
 		goto bad1;
@@ -633,15 +617,13 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		}
 	}
 
-	cc->io_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
-				     mempool_free_slab, _crypt_io_pool);
+	cc->io_pool = mempool_create_slab_pool(MIN_IOS, _crypt_io_pool);
 	if (!cc->io_pool) {
 		ti->error = PFX "Cannot allocate crypt io mempool";
 		goto bad3;
 	}
 
-	cc->page_pool = mempool_create(MIN_POOL_PAGES, mempool_alloc_page,
-				       mempool_free_page, NULL);
+	cc->page_pool = mempool_create_page_pool(MIN_POOL_PAGES, 0);
 	if (!cc->page_pool) {
 		ti->error = PFX "Cannot allocate page mempool";
 		goto bad4;
@@ -652,15 +634,17 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad5;
 	}
 
-	if (sscanf(argv[2], SECTOR_FORMAT, &cc->iv_offset) != 1) {
+	if (sscanf(argv[2], "%llu", &tmpll) != 1) {
 		ti->error = PFX "Invalid iv_offset sector";
 		goto bad5;
 	}
+	cc->iv_offset = tmpll;
 
-	if (sscanf(argv[4], SECTOR_FORMAT, &cc->start) != 1) {
+	if (sscanf(argv[4], "%llu", &tmpll) != 1) {
 		ti->error = PFX "Invalid device sector";
 		goto bad5;
 	}
+	cc->start = tmpll;
 
 	if (dm_get_device(ti, argv[3], cc->start, ti->len,
 	                  dm_table_get_mode(ti->table), &cc->dev)) {
@@ -693,6 +677,8 @@ bad3:
 bad2:
 	crypto_free_tfm(tfm);
 bad1:
+	/* Must zero key material before freeing */
+	memset(cc, 0, sizeof(*cc) + cc->key_size * sizeof(u8));
 	kfree(cc);
 	return -EINVAL;
 }
@@ -704,12 +690,14 @@ static void crypt_dtr(struct dm_target *ti)
 	mempool_destroy(cc->page_pool);
 	mempool_destroy(cc->io_pool);
 
-	if (cc->iv_mode)
-		kfree(cc->iv_mode);
+	kfree(cc->iv_mode);
 	if (cc->iv_gen_ops && cc->iv_gen_ops->dtr)
 		cc->iv_gen_ops->dtr(cc);
 	crypto_free_tfm(cc->tfm);
 	dm_put_device(ti, cc->dev);
+
+	/* Must zero key material before freeing */
+	memset(cc, 0, sizeof(*cc) + cc->key_size * sizeof(u8));
 	kfree(cc);
 }
 
@@ -900,8 +888,8 @@ static int crypt_status(struct dm_target *ti, status_type_t type,
 			result[sz++] = '-';
 		}
 
-		DMEMIT(" " SECTOR_FORMAT " %s " SECTOR_FORMAT,
-		       cc->iv_offset, cc->dev->name, cc->start);
+		DMEMIT(" %llu %s %llu", (unsigned long long)cc->iv_offset,
+				cc->dev->name, (unsigned long long)cc->start);
 		break;
 	}
 	return 0;

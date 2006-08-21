@@ -12,12 +12,15 @@
 #include <linux/mmzone.h>
 #include <linux/initrd.h>
 #include <linux/nodemask.h>
+#include <linux/module.h>
+#include <linux/pfn.h>
 
 #include <asm/setup.h>
 
 extern char _end[];
 
 struct pglist_data *node_data[MAX_NUMNODES];
+EXPORT_SYMBOL(node_data);
 static bootmem_data_t node_bdata[MAX_NUMNODES] __initdata;
 
 pg_data_t m32r_node_data[MAX_NUMNODES];
@@ -134,12 +137,6 @@ unsigned long __init zone_sizes_init(void)
 	unsigned long holes = 0;
 	int nid, i;
 	mem_prof_t *mp;
-
-	pgdat_list = NULL;
-	for (nid = num_online_nodes() - 1 ; nid >= 0 ; nid--) {
-		NODE_DATA(nid)->pgdat_next = pgdat_list;
-		pgdat_list = NODE_DATA(nid);
-	}
 
 	for_each_online_node(nid) {
 		mp = &mem_prof[nid];

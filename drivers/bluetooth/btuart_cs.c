@@ -43,7 +43,6 @@
 #include <asm/system.h>
 #include <asm/io.h>
 
-#include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
 #include <pcmcia/cistpl.h>
@@ -69,7 +68,7 @@ MODULE_LICENSE("GPL");
 
 
 typedef struct btuart_info_t {
-	dev_link_t link;
+	struct pcmcia_device *p_dev;
 	dev_node_t node;
 
 	struct hci_dev *hdev;
@@ -85,16 +84,10 @@ typedef struct btuart_info_t {
 } btuart_info_t;
 
 
-static void btuart_config(dev_link_t *link);
-static void btuart_release(dev_link_t *link);
-static int btuart_event(event_t event, int priority, event_callback_args_t *args);
+static int btuart_config(struct pcmcia_device *link);
+static void btuart_release(struct pcmcia_device *link);
 
-static dev_info_t dev_info = "btuart_cs";
-
-static dev_link_t *btuart_attach(void);
-static void btuart_detach(dev_link_t *);
-
-static dev_link_t *dev_list = NULL;
+static void btuart_detach(struct pcmcia_device *p_dev);
 
 
 /* Maximum baud rate */
@@ -153,13 +146,13 @@ static void btuart_write_wakeup(btuart_info_t *info)
 	}
 
 	do {
-		register unsigned int iobase = info->link.io.BasePort1;
+		register unsigned int iobase = info->p_dev->io.BasePort1;
 		register struct sk_buff *skb;
 		register int len;
 
 		clear_bit(XMIT_WAKEUP, &(info->tx_state));
 
-		if (!(info->link.state & DEV_PRESENT))
+		if (!pcmcia_dev_present(info->p_dev))
 			return;
 
 		if (!(skb = skb_dequeue(&(info->txq))))
@@ -194,7 +187,7 @@ static void btuart_receive(btuart_info_t *info)
 		return;
 	}
 
-	iobase = info->link.io.BasePort1;
+	iobase = info->p_dev->io.BasePort1;
 
 	do {
 		info->hdev->stat.byte_rx++;
@@ -212,9 +205,9 @@ static void btuart_receive(btuart_info_t *info)
 		if (info->rx_state == RECV_WAIT_PACKET_TYPE) {
 
 			info->rx_skb->dev = (void *) info->hdev;
-			info->rx_skb->pkt_type = inb(iobase + UART_RX);
+			bt_cb(info->rx_skb)->pkt_type = inb(iobase + UART_RX);
 
-			switch (info->rx_skb->pkt_type) {
+			switch (bt_cb(info->rx_skb)->pkt_type) {
 
 			case HCI_EVENT_PKT:
 				info->rx_state = RECV_WAIT_EVENT_HEADER;
@@ -233,7 +226,7 @@ static void btuart_receive(btuart_info_t *info)
 
 			default:
 				/* Unknown packet */
-				BT_ERR("Unknown HCI packet with type 0x%02x received", info->rx_skb->pkt_type);
+				BT_ERR("Unknown HCI packet with type 0x%02x received", bt_cb(info->rx_skb)->pkt_type);
 				info->hdev->stat.err_rx++;
 				clear_bit(HCI_RUNNING, &(info->hdev->flags));
 
@@ -308,7 +301,7 @@ static irqreturn_t btuart_interrupt(int irq, void *dev_inst, struct pt_regs *reg
 		return IRQ_NONE;
 	}
 
-	iobase = info->link.io.BasePort1;
+	iobase = info->p_dev->io.BasePort1;
 
 	spin_lock(&(info->lock));
 
@@ -364,7 +357,7 @@ static void btuart_change_speed(btuart_info_t *info, unsigned int speed)
 		return;
 	}
 
-	iobase = info->link.io.BasePort1;
+	iobase = info->p_dev->io.BasePort1;
 
 	spin_lock_irqsave(&(info->lock), flags);
 
@@ -448,7 +441,7 @@ static int btuart_hci_send_frame(struct sk_buff *skb)
 
 	info = (btuart_info_t *)(hdev->driver_data);
 
-	switch (skb->pkt_type) {
+	switch (bt_cb(skb)->pkt_type) {
 	case HCI_COMMAND_PKT:
 		hdev->stat.cmd_tx++;
 		break;
@@ -461,7 +454,7 @@ static int btuart_hci_send_frame(struct sk_buff *skb)
 	};
 
 	/* Prepend skb with frame type */
-	memcpy(skb_push(skb, 1), &(skb->pkt_type), 1);
+	memcpy(skb_push(skb, 1), &bt_cb(skb)->pkt_type, 1);
 	skb_queue_tail(&(info->txq), skb);
 
 	btuart_write_wakeup(info);
@@ -488,7 +481,7 @@ static int btuart_hci_ioctl(struct hci_dev *hdev, unsigned int cmd, unsigned lon
 static int btuart_open(btuart_info_t *info)
 {
 	unsigned long flags;
-	unsigned int iobase = info->link.io.BasePort1;
+	unsigned int iobase = info->p_dev->io.BasePort1;
 	struct hci_dev *hdev;
 
 	spin_lock_init(&(info->lock));
@@ -557,7 +550,7 @@ static int btuart_open(btuart_info_t *info)
 static int btuart_close(btuart_info_t *info)
 {
 	unsigned long flags;
-	unsigned int iobase = info->link.io.BasePort1;
+	unsigned int iobase = info->p_dev->io.BasePort1;
 	struct hci_dev *hdev = info->hdev;
 
 	if (!hdev)
@@ -583,20 +576,16 @@ static int btuart_close(btuart_info_t *info)
 	return 0;
 }
 
-static dev_link_t *btuart_attach(void)
+static int btuart_probe(struct pcmcia_device *link)
 {
 	btuart_info_t *info;
-	client_reg_t client_reg;
-	dev_link_t *link;
-	int ret;
 
 	/* Create new info device */
-	info = kmalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
-		return NULL;
-	memset(info, 0, sizeof(*info));
+		return -ENOMEM;
 
-	link = &info->link;
+	info->p_dev = link;
 	link->priv = info;
 
 	link->io.Attributes1 = IO_DATA_PATH_WIDTH_8;
@@ -608,62 +597,21 @@ static dev_link_t *btuart_attach(void)
 	link->irq.Instance = info;
 
 	link->conf.Attributes = CONF_ENABLE_IRQ;
-	link->conf.Vcc = 50;
 	link->conf.IntType = INT_MEMORY_AND_IO;
 
-	/* Register with Card Services */
-	link->next = dev_list;
-	dev_list = link;
-	client_reg.dev_info = &dev_info;
-	client_reg.EventMask =
-		CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
-		CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
-		CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
-	client_reg.event_handler = &btuart_event;
-	client_reg.Version = 0x0210;
-	client_reg.event_callback_args.client_data = link;
-
-	ret = pcmcia_register_client(&link->handle, &client_reg);
-	if (ret != CS_SUCCESS) {
-		cs_error(link->handle, RegisterClient, ret);
-		btuart_detach(link);
-		return NULL;
-	}
-
-	return link;
+	return btuart_config(link);
 }
 
 
-static void btuart_detach(dev_link_t *link)
+static void btuart_detach(struct pcmcia_device *link)
 {
 	btuart_info_t *info = link->priv;
-	dev_link_t **linkp;
-	int ret;
 
-	/* Locate device structure */
-	for (linkp = &dev_list; *linkp; linkp = &(*linkp)->next)
-		if (*linkp == link)
-			break;
-
-	if (*linkp == NULL)
-		return;
-
-	if (link->state & DEV_CONFIG)
-		btuart_release(link);
-
-	if (link->handle) {
-		ret = pcmcia_deregister_client(link->handle);
-		if (ret != CS_SUCCESS)
-			cs_error(link->handle, DeregisterClient, ret);
-	}
-
-	/* Unlink device structure, free bits */
-	*linkp = link->next;
-
+	btuart_release(link);
 	kfree(info);
 }
 
-static int get_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
+static int get_tuple(struct pcmcia_device *handle, tuple_t *tuple, cisparse_t *parse)
 {
 	int i;
 
@@ -674,30 +622,28 @@ static int get_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
 	return pcmcia_parse_tuple(handle, tuple, parse);
 }
 
-static int first_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
+static int first_tuple(struct pcmcia_device *handle, tuple_t *tuple, cisparse_t *parse)
 {
 	if (pcmcia_get_first_tuple(handle, tuple) != CS_SUCCESS)
 		return CS_NO_MORE_ITEMS;
 	return get_tuple(handle, tuple, parse);
 }
 
-static int next_tuple(client_handle_t handle, tuple_t *tuple, cisparse_t *parse)
+static int next_tuple(struct pcmcia_device *handle, tuple_t *tuple, cisparse_t *parse)
 {
 	if (pcmcia_get_next_tuple(handle, tuple) != CS_SUCCESS)
 		return CS_NO_MORE_ITEMS;
 	return get_tuple(handle, tuple, parse);
 }
 
-static void btuart_config(dev_link_t *link)
+static int btuart_config(struct pcmcia_device *link)
 {
 	static kio_addr_t base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
-	client_handle_t handle = link->handle;
 	btuart_info_t *info = link->priv;
 	tuple_t tuple;
 	u_short buf[256];
 	cisparse_t parse;
 	cistpl_cftable_entry_t *cf = &parse.cftable_entry;
-	config_info_t config;
 	int i, j, try, last_ret, last_fn;
 
 	tuple.TupleData = (cisdata_t *)buf;
@@ -707,18 +653,13 @@ static void btuart_config(dev_link_t *link)
 
 	/* Get configuration register information */
 	tuple.DesiredTuple = CISTPL_CONFIG;
-	last_ret = first_tuple(handle, &tuple, &parse);
+	last_ret = first_tuple(link, &tuple, &parse);
 	if (last_ret != CS_SUCCESS) {
 		last_fn = ParseTuple;
 		goto cs_failed;
 	}
 	link->conf.ConfigBase = parse.config.base;
 	link->conf.Present = parse.config.rmask[0];
-
-	/* Configure card */
-	link->state |= DEV_CONFIG;
-	i = pcmcia_get_configuration_info(handle, &config);
-	link->conf.Vcc = config.Vcc;
 
 	/* First pass: look for a config entry that looks normal. */
 	tuple.TupleData = (cisdata_t *) buf;
@@ -728,29 +669,29 @@ static void btuart_config(dev_link_t *link)
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
 	/* Two tries: without IO aliases, then with aliases */
 	for (try = 0; try < 2; try++) {
-		i = first_tuple(handle, &tuple, &parse);
+		i = first_tuple(link, &tuple, &parse);
 		while (i != CS_NO_MORE_ITEMS) {
 			if (i != CS_SUCCESS)
 				goto next_entry;
 			if (cf->vpp1.present & (1 << CISTPL_POWER_VNOM))
-				link->conf.Vpp1 = link->conf.Vpp2 = cf->vpp1.param[CISTPL_POWER_VNOM] / 10000;
+				link->conf.Vpp = cf->vpp1.param[CISTPL_POWER_VNOM] / 10000;
 			if ((cf->io.nwin > 0) && (cf->io.win[0].len == 8) && (cf->io.win[0].base != 0)) {
 				link->conf.ConfigIndex = cf->index;
 				link->io.BasePort1 = cf->io.win[0].base;
 				link->io.IOAddrLines = (try == 0) ? 16 : cf->io.flags & CISTPL_IO_LINES_MASK;
-				i = pcmcia_request_io(link->handle, &link->io);
+				i = pcmcia_request_io(link, &link->io);
 				if (i == CS_SUCCESS)
 					goto found_port;
 			}
 next_entry:
-			i = next_tuple(handle, &tuple, &parse);
+			i = next_tuple(link, &tuple, &parse);
 		}
 	}
 
 	/* Second pass: try to find an entry that isn't picky about
 	   its base address, then try to grab any standard serial port
 	   address, and finally try to get any free port. */
-	i = first_tuple(handle, &tuple, &parse);
+	i = first_tuple(link, &tuple, &parse);
 	while (i != CS_NO_MORE_ITEMS) {
 		if ((i == CS_SUCCESS) && (cf->io.nwin > 0)
 		    && ((cf->io.flags & CISTPL_IO_LINES_MASK) <= 3)) {
@@ -758,30 +699,30 @@ next_entry:
 			for (j = 0; j < 5; j++) {
 				link->io.BasePort1 = base[j];
 				link->io.IOAddrLines = base[j] ? 16 : 3;
-				i = pcmcia_request_io(link->handle, &link->io);
+				i = pcmcia_request_io(link, &link->io);
 				if (i == CS_SUCCESS)
 					goto found_port;
 			}
 		}
-		i = next_tuple(handle, &tuple, &parse);
+		i = next_tuple(link, &tuple, &parse);
 	}
 
 found_port:
 	if (i != CS_SUCCESS) {
 		BT_ERR("No usable port range found");
-		cs_error(link->handle, RequestIO, i);
+		cs_error(link, RequestIO, i);
 		goto failed;
 	}
 
-	i = pcmcia_request_irq(link->handle, &link->irq);
+	i = pcmcia_request_irq(link, &link->irq);
 	if (i != CS_SUCCESS) {
-		cs_error(link->handle, RequestIRQ, i);
+		cs_error(link, RequestIRQ, i);
 		link->irq.AssignedIRQ = 0;
 	}
 
-	i = pcmcia_request_configuration(link->handle, &link->conf);
+	i = pcmcia_request_configuration(link, &link->conf);
 	if (i != CS_SUCCESS) {
-		cs_error(link->handle, RequestConfiguration, i);
+		cs_error(link, RequestConfiguration, i);
 		goto failed;
 	}
 
@@ -789,79 +730,42 @@ found_port:
 		goto failed;
 
 	strcpy(info->node.dev_name, info->hdev->name);
-	link->dev = &info->node;
-	link->state &= ~DEV_CONFIG_PENDING;
+	link->dev_node = &info->node;
 
-	return;
+	return 0;
 
 cs_failed:
-	cs_error(link->handle, last_fn, last_ret);
+	cs_error(link, last_fn, last_ret);
 
 failed:
 	btuart_release(link);
+	return -ENODEV;
 }
 
 
-static void btuart_release(dev_link_t *link)
+static void btuart_release(struct pcmcia_device *link)
 {
 	btuart_info_t *info = link->priv;
 
-	if (link->state & DEV_PRESENT)
-		btuart_close(info);
+	btuart_close(info);
 
-	link->dev = NULL;
-
-	pcmcia_release_configuration(link->handle);
-	pcmcia_release_io(link->handle, &link->io);
-	pcmcia_release_irq(link->handle, &link->irq);
-
-	link->state &= ~DEV_CONFIG;
+	pcmcia_disable_device(link);
 }
 
-
-static int btuart_event(event_t event, int priority, event_callback_args_t *args)
-{
-	dev_link_t *link = args->client_data;
-	btuart_info_t *info = link->priv;
-
-	switch (event) {
-	case CS_EVENT_CARD_REMOVAL:
-		link->state &= ~DEV_PRESENT;
-		if (link->state & DEV_CONFIG) {
-			btuart_close(info);
-			btuart_release(link);
-		}
-		break;
-	case CS_EVENT_CARD_INSERTION:
-		link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
-		btuart_config(link);
-		break;
-	case CS_EVENT_PM_SUSPEND:
-		link->state |= DEV_SUSPEND;
-		/* Fall through... */
-	case CS_EVENT_RESET_PHYSICAL:
-		if (link->state & DEV_CONFIG)
-			pcmcia_release_configuration(link->handle);
-		break;
-	case CS_EVENT_PM_RESUME:
-		link->state &= ~DEV_SUSPEND;
-		/* Fall through... */
-	case CS_EVENT_CARD_RESET:
-		if (DEV_OK(link))
-			pcmcia_request_configuration(link->handle, &link->conf);
-		break;
-	}
-
-	return 0;
-}
+static struct pcmcia_device_id btuart_ids[] = {
+	/* don't use this driver. Use serial_cs + hci_uart instead */
+	PCMCIA_DEVICE_NULL
+};
+MODULE_DEVICE_TABLE(pcmcia, btuart_ids);
 
 static struct pcmcia_driver btuart_driver = {
 	.owner		= THIS_MODULE,
 	.drv		= {
 		.name	= "btuart_cs",
 	},
-	.attach		= btuart_attach,
-	.detach		= btuart_detach,
+	.probe		= btuart_probe,
+	.remove		= btuart_detach,
+	.id_table	= btuart_ids,
 };
 
 static int __init init_btuart_cs(void)
@@ -873,7 +777,6 @@ static int __init init_btuart_cs(void)
 static void __exit exit_btuart_cs(void)
 {
 	pcmcia_unregister_driver(&btuart_driver);
-	BUG_ON(dev_list != NULL);
 }
 
 module_init(init_btuart_cs);

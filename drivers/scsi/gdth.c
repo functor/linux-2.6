@@ -94,7 +94,7 @@
  * Bugfix free_irq()
  *
  * Revision 1.56  2001/08/09 11:19:39  achim
- * Scsi_Host_Template changes
+ * struct scsi_host_template changes
  *
  * Revision 1.55  2001/08/09 10:11:28  achim
  * Command HOST_UNFREEZE_IO before cache service init.
@@ -328,7 +328,7 @@
  * hdr_channel:x                x - number of virtual bus for host drives
  * shared_access:Y              disable driver reserve/release protocol to 
  *                              access a shared resource from several nodes, 
- *                              appropiate controller firmware required
+ *                              appropriate controller firmware required
  * shared_access:N              enable driver reserve/release protocol
  * probe_eisa_isa:Y             scan for EISA/ISA controllers
  * probe_eisa_isa:N             do not scan for EISA/ISA controllers
@@ -388,6 +388,7 @@
 #include <linux/proc_fs.h>
 #include <linux/time.h>
 #include <linux/timer.h>
+#include <linux/dma-mapping.h>
 #ifdef GDTH_RTC
 #include <linux/mc146818rtc.h>
 #endif
@@ -672,7 +673,7 @@ static struct file_operations gdth_fops = {
 static struct notifier_block gdth_notifier = {
     gdth_halt, NULL, 0
 };
-
+static int notifier_disabled = 0;
 
 static void gdth_delay(int milliseconds)
 {
@@ -2817,7 +2818,7 @@ static int gdth_fill_cache_cmd(int hanum,Scsi_Cmnd *scp,ushort hdrive)
             }
 #endif
 
-        } else {
+        } else if (scp->request_bufflen) {
             scp->SCp.Status = GDTH_MAP_SINGLE;
             scp->SCp.Message = (read_write == 1 ? 
                 PCI_DMA_TODEVICE : PCI_DMA_FROMDEVICE);
@@ -4154,7 +4155,7 @@ int __init option_setup(char *str)
     return 1;
 }
 
-static int __init gdth_detect(Scsi_Host_Template *shtp)
+static int __init gdth_detect(struct scsi_host_template *shtp)
 {
     struct Scsi_Host *shp;
     gdth_pci_str pcistr[MAXHA];
@@ -4522,23 +4523,21 @@ static int __init gdth_detect(Scsi_Host_Template *shtp)
             ha->virt_bus = hdr_channel;
 
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
-            scsi_set_device(shp, &pcistr[ctr].pdev->dev);
-#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,0)
             scsi_set_pci_device(shp, pcistr[ctr].pdev);
 #endif
             if (!(ha->cache_feat & ha->raw_feat & ha->screen_feat &GDT_64BIT)||
                 /* 64-bit DMA only supported from FW >= x.43 */
                 (!ha->dma64_support)) {
-                if (pci_set_dma_mask(pcistr[ctr].pdev, 0xffffffff)) {
+                if (pci_set_dma_mask(pcistr[ctr].pdev, DMA_32BIT_MASK)) {
                     printk(KERN_WARNING "GDT-PCI %d: Unable to set 32-bit DMA\n", hanum);
                     err = TRUE;
                 }
             } else {
                 shp->max_cmd_len = 16;
-                if (!pci_set_dma_mask(pcistr[ctr].pdev, 0xffffffffffffffffULL)) {
+                if (!pci_set_dma_mask(pcistr[ctr].pdev, DMA_64BIT_MASK)) {
                     printk("GDT-PCI %d: 64-bit DMA enabled\n", hanum);
-                } else if (pci_set_dma_mask(pcistr[ctr].pdev, 0xffffffff)) {
+                } else if (pci_set_dma_mask(pcistr[ctr].pdev, DMA_32BIT_MASK)) {
                     printk(KERN_WARNING "GDT-PCI %d: Unable to set 64/32-bit DMA\n", hanum);
                     err = TRUE;
                 }
@@ -4598,12 +4597,12 @@ static int __init gdth_detect(Scsi_Host_Template *shtp)
         add_timer(&gdth_timer);
 #endif
         major = register_chrdev(0,"gdth",&gdth_fops);
+        notifier_disabled = 0;
         register_reboot_notifier(&gdth_notifier);
     }
     gdth_polling = FALSE;
     return gdth_ctr_vcount;
 }
-
 
 static int gdth_release(struct Scsi_Host *shp)
 {
@@ -4704,19 +4703,6 @@ static const char *gdth_info(struct Scsi_Host *shp)
     return ((const char *)ha->binfo.type_string);
 }
 
-/* new error handling */
-static int gdth_eh_abort(Scsi_Cmnd *scp)
-{
-    TRACE2(("gdth_eh_abort()\n"));
-    return FAILED;
-}
-
-static int gdth_eh_device_reset(Scsi_Cmnd *scp)
-{
-    TRACE2(("gdth_eh_device_reset()\n"));
-    return FAILED;
-}
-
 static int gdth_eh_bus_reset(Scsi_Cmnd *scp)
 {
     int i, hanum;
@@ -4770,13 +4756,6 @@ static int gdth_eh_bus_reset(Scsi_Cmnd *scp)
     }
     return SUCCESS;
 }
-
-static int gdth_eh_host_reset(Scsi_Cmnd *scp)
-{
-    TRACE2(("gdth_eh_host_reset()\n"));
-    return FAILED;
-}
-
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
 static int gdth_bios_param(struct scsi_device *sdev,struct block_device *bdev,sector_t cap,int *ip)
@@ -5585,7 +5564,7 @@ static void gdth_flush(int hanum)
 #else
     Scsi_Cmnd       *scp;
 #endif
-    Scsi_Device     *sdev;
+    struct scsi_device     *sdev;
     char            cmnd[MAX_COMMAND_SIZE];   
     memset(cmnd, 0xff, MAX_COMMAND_SIZE);
 
@@ -5647,18 +5626,22 @@ static int gdth_halt(struct notifier_block *nb, ulong event, void *buf)
     gdth_cmd_str    gdtcmd;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
     Scsi_Request    *srp;
-    Scsi_Device     *sdev;
+    struct scsi_device     *sdev;
 #else
     Scsi_Cmnd       *scp;
-    Scsi_Device     *sdev;
+    struct scsi_device     *sdev;
 #endif
     char            cmnd[MAX_COMMAND_SIZE];   
 #endif
+
+    if (notifier_disabled)
+    	return NOTIFY_OK;
 
     TRACE2(("gdth_halt() event %d\n",(int)event));
     if (event != SYS_RESTART && event != SYS_HALT && event != SYS_POWER_OFF)
         return NOTIFY_DONE;
 
+    notifier_disabled = 1;
     printk("GDT-HA: Flushing all host drives .. ");
     for (hanum = 0; hanum < gdth_ctr_count; ++hanum) {
         gdth_flush(hanum);
@@ -5702,11 +5685,10 @@ static int gdth_halt(struct notifier_block *nb, ulong event, void *buf)
 #ifdef GDTH_STATISTICS
     del_timer(&gdth_timer);
 #endif
-    unregister_reboot_notifier(&gdth_notifier);
     return NOTIFY_OK;
 }
 
-static Scsi_Host_Template driver_template = {
+static struct scsi_host_template driver_template = {
         .proc_name              = "gdth", 
         .proc_info              = gdth_proc_info,
         .name                   = "GDT SCSI Disk Array Controller",
@@ -5714,10 +5696,7 @@ static Scsi_Host_Template driver_template = {
         .release                = gdth_release,
         .info                   = gdth_info, 
         .queuecommand           = gdth_queuecommand,
-        .eh_abort_handler       = gdth_eh_abort, 
-        .eh_device_reset_handler = gdth_eh_device_reset,
         .eh_bus_reset_handler   = gdth_eh_bus_reset,
-        .eh_host_reset_handler  = gdth_eh_host_reset,
         .bios_param             = gdth_bios_param,
         .can_queue              = GDTH_MAXCMDS,
         .this_id                = -1,

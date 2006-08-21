@@ -7,6 +7,8 @@
  */
 
 #include <net/tux.h>
+#include <linux/module.h>
+#include <linux/init.h>
 
 /****************************************************************
  *      This program is free software; you can redistribute it and/or modify
@@ -25,23 +27,19 @@
  *
  ****************************************************************/
 
-static void dummy_destructor(struct open_request *req)
+static void nop_destructor(struct request_sock *req)
 {
 }
 
-static struct or_calltable dummy = 
+static struct request_sock_ops tux_req =
 {
-	0,
- 	NULL,
- 	NULL,
- 	&dummy_destructor,
- 	NULL
+	.destructor = &nop_destructor,
 };
 
 static int redirect_sock (tux_req_t *req, const int port)
 {
 	struct socket *sock = req->sock;
-	struct open_request *tcpreq;
+	struct request_sock *tcpreq;
 	struct sock *sk, *oldsk;
 	int err = -1;
 
@@ -49,7 +47,7 @@ static int redirect_sock (tux_req_t *req, const int port)
 	 * Look up (optional) listening user-space socket.
 	 */
 	local_bh_disable();
-	sk = tcp_v4_lookup_listener(INADDR_ANY, port, 0);
+	sk = inet_lookup_listener(&tcp_hashinfo, INADDR_ANY, port, 0);
 	/*
 	 * Look up localhost listeners as well.
 	 */
@@ -59,7 +57,7 @@ static int redirect_sock (tux_req_t *req, const int port)
 		((unsigned char *)&daddr)[1] = 0;
 		((unsigned char *)&daddr)[2] = 0;
 		((unsigned char *)&daddr)[3] = 1;
-		sk = tcp_v4_lookup_listener(daddr, port, 0);
+		sk = inet_lookup_listener(&tcp_hashinfo, daddr, port, 0);
 	}
 	local_bh_enable();
 
@@ -84,7 +82,7 @@ static int redirect_sock (tux_req_t *req, const int port)
 	if (sk->sk_state != TCP_LISTEN)
 		goto out_unlock;
 
-	tcpreq = tcp_openreq_alloc();
+	tcpreq = reqsk_alloc(&tux_req);
 	if (!tcpreq)
 		goto out_unlock;
 
@@ -93,7 +91,6 @@ static int redirect_sock (tux_req_t *req, const int port)
 	sock->sk = NULL;
 	sock->state = SS_UNCONNECTED;
 
-	tcpreq->class = &dummy;
 	write_lock_irq(&oldsk->sk_callback_lock);
 	oldsk->sk_socket = NULL;
         oldsk->sk_sleep = NULL;
@@ -101,7 +98,7 @@ static int redirect_sock (tux_req_t *req, const int port)
 
 	tcp_sk(oldsk)->nonagle = 0;
 
-	tcp_acceptq_queue(sk, tcpreq, oldsk);
+	inet_csk_reqsk_queue_add(sk, tcpreq, oldsk);
 
 	sk->sk_data_ready(sk, 0);
 
@@ -160,3 +157,16 @@ out_flush:
 	flush_request(req, cachemiss);
 }
 
+int init_tux_request_slabs(void)
+{
+	tux_req.slab = kmem_cache_create("tux-request",
+			sizeof(struct request_sock), 0, SLAB_HWCACHE_ALIGN,
+			NULL, NULL);
+
+	return tux_req.slab == NULL;
+}
+
+void free_tux_request_slabs(void)
+{
+	kmem_cache_destroy(tux_req.slab);
+}

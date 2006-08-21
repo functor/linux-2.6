@@ -31,12 +31,12 @@
 /* issue a PIO read to make sure no PIO writes are pending */
 static void inline flush_crime_bus(void)
 {
-	volatile unsigned long junk = crime->control;
+	crime->control;
 }
 
 static void inline flush_mace_bus(void)
 {
-	volatile unsigned long junk = mace->perif.ctrl.misc;
+	mace->perif.ctrl.misc;
 }
 
 #undef DEBUG_IRQ
@@ -130,8 +130,6 @@ struct irqaction memerr_irq = { crime_memerr_intr, SA_INTERRUPT,
 struct irqaction cpuerr_irq = { crime_cpuerr_intr, SA_INTERRUPT,
 			CPU_MASK_NONE, "CRIME CPU error", NULL, NULL };
 
-extern void ip32_handle_int(void);
-
 /*
  * For interrupts wired from a single device to the CPU.  Only the clock
  * uses this it seems, which is IRQ 0 and IP7.
@@ -163,14 +161,13 @@ static void end_cpu_irq(unsigned int irq)
 #define mask_and_ack_cpu_irq disable_cpu_irq
 
 static struct hw_interrupt_type ip32_cpu_interrupt = {
-	"IP32 CPU",
-	startup_cpu_irq,
-	shutdown_cpu_irq,
-	enable_cpu_irq,
-	disable_cpu_irq,
-	mask_and_ack_cpu_irq,
-	end_cpu_irq,
-	NULL
+	.typename = "IP32 CPU",
+	.startup = startup_cpu_irq,
+	.shutdown = shutdown_cpu_irq,
+	.enable = enable_cpu_irq,
+	.disable = disable_cpu_irq,
+	.ack = mask_and_ack_cpu_irq,
+	.end = end_cpu_irq,
 };
 
 /*
@@ -234,14 +231,13 @@ static void end_crime_irq(unsigned int irq)
 #define shutdown_crime_irq disable_crime_irq
 
 static struct hw_interrupt_type ip32_crime_interrupt = {
-	"IP32 CRIME",
-	startup_crime_irq,
-	shutdown_crime_irq,
-	enable_crime_irq,
-	disable_crime_irq,
-	mask_and_ack_crime_irq,
-	end_crime_irq,
-	NULL
+	.typename = "IP32 CRIME",
+	.startup = startup_crime_irq,
+	.shutdown = shutdown_crime_irq,
+	.enable = enable_crime_irq,
+	.disable = disable_crime_irq,
+	.ack = mask_and_ack_crime_irq,
+	.end = end_crime_irq,
 };
 
 /*
@@ -294,14 +290,13 @@ static void end_macepci_irq(unsigned int irq)
 #define mask_and_ack_macepci_irq disable_macepci_irq
 
 static struct hw_interrupt_type ip32_macepci_interrupt = {
-	"IP32 MACE PCI",
-	startup_macepci_irq,
-	shutdown_macepci_irq,
-	enable_macepci_irq,
-	disable_macepci_irq,
-	mask_and_ack_macepci_irq,
-	end_macepci_irq,
-	NULL
+	.typename = "IP32 MACE PCI",
+	.startup = startup_macepci_irq,
+	.shutdown = shutdown_macepci_irq,
+	.enable = enable_macepci_irq,
+	.disable = disable_macepci_irq,
+	.ack = mask_and_ack_macepci_irq,
+	.end = end_macepci_irq,
 };
 
 /* This is used for MACE ISA interrupts.  That means bits 4-6 in the
@@ -425,14 +420,13 @@ static void end_maceisa_irq(unsigned irq)
 #define shutdown_maceisa_irq disable_maceisa_irq
 
 static struct hw_interrupt_type ip32_maceisa_interrupt = {
-	"IP32 MACE ISA",
-	startup_maceisa_irq,
-	shutdown_maceisa_irq,
-	enable_maceisa_irq,
-	disable_maceisa_irq,
-	mask_and_ack_maceisa_irq,
-	end_maceisa_irq,
-	NULL
+	.typename = "IP32 MACE ISA",
+	.startup = startup_maceisa_irq,
+	.shutdown = shutdown_maceisa_irq,
+	.enable = enable_maceisa_irq,
+	.disable = disable_maceisa_irq,
+	.ack = mask_and_ack_maceisa_irq,
+	.end = end_maceisa_irq,
 };
 
 /* This is used for regular non-ISA, non-PCI MACE interrupts.  That means
@@ -476,14 +470,13 @@ static void end_mace_irq(unsigned int irq)
 #define mask_and_ack_mace_irq disable_mace_irq
 
 static struct hw_interrupt_type ip32_mace_interrupt = {
-	"IP32 MACE",
-	startup_mace_irq,
-	shutdown_mace_irq,
-	enable_mace_irq,
-	disable_mace_irq,
-	mask_and_ack_mace_irq,
-	end_mace_irq,
-	NULL
+	.typename = "IP32 MACE",
+	.startup = startup_mace_irq,
+	.shutdown = shutdown_mace_irq,
+	.enable = enable_mace_irq,
+	.disable = disable_mace_irq,
+	.ack = mask_and_ack_mace_irq,
+	.end = end_mace_irq,
 };
 
 static void ip32_unknown_interrupt(struct pt_regs *regs)
@@ -508,46 +501,65 @@ static void ip32_unknown_interrupt(struct pt_regs *regs)
 
 /* CRIME 1.1 appears to deliver all interrupts to this one pin. */
 /* change this to loop over all edge-triggered irqs, exception masked out ones */
-void ip32_irq0(struct pt_regs *regs)
+static void ip32_irq0(struct pt_regs *regs)
 {
 	uint64_t crime_int;
 	int irq = 0;
 
 	crime_int = crime->istat & crime_mask;
-	irq = ffs(crime_int);
-	crime_int = 1 << (irq - 1);
+	irq = __ffs(crime_int);
+	crime_int = 1 << irq;
 
 	if (crime_int & CRIME_MACEISA_INT_MASK) {
 		unsigned long mace_int = mace->perif.ctrl.istat;
-		irq = ffs(mace_int & maceisa_mask) + 32;
+		irq = __ffs(mace_int & maceisa_mask) + 32;
 	}
+	irq++;
 	DBG("*irq %u*\n", irq);
 	do_IRQ(irq, regs);
 }
 
-void ip32_irq1(struct pt_regs *regs)
+static void ip32_irq1(struct pt_regs *regs)
 {
 	ip32_unknown_interrupt(regs);
 }
 
-void ip32_irq2(struct pt_regs *regs)
+static void ip32_irq2(struct pt_regs *regs)
 {
 	ip32_unknown_interrupt(regs);
 }
 
-void ip32_irq3(struct pt_regs *regs)
+static void ip32_irq3(struct pt_regs *regs)
 {
 	ip32_unknown_interrupt(regs);
 }
 
-void ip32_irq4(struct pt_regs *regs)
+static void ip32_irq4(struct pt_regs *regs)
 {
 	ip32_unknown_interrupt(regs);
 }
 
-void ip32_irq5(struct pt_regs *regs)
+static void ip32_irq5(struct pt_regs *regs)
 {
 	ll_timer_interrupt(IP32_R4K_TIMER_IRQ, regs);
+}
+
+asmlinkage void plat_irq_dispatch(struct pt_regs *regs)
+{
+	unsigned int pending = read_c0_cause();
+
+	if (likely(pending & IE_IRQ0))
+		ip32_irq0(regs);
+	else if (unlikely(pending & IE_IRQ1))
+		ip32_irq1(regs);
+	else if (unlikely(pending & IE_IRQ2))
+		ip32_irq2(regs);
+	else if (unlikely(pending & IE_IRQ3))
+		ip32_irq3(regs);
+	else if (unlikely(pending & IE_IRQ4))
+		ip32_irq4(regs);
+	else if (likely(pending & IE_IRQ5))
+		ip32_irq5(regs);
 }
 
 void __init arch_init_irq(void)
@@ -561,7 +573,6 @@ void __init arch_init_irq(void)
 	crime->soft_int = 0;
 	mace->perif.ctrl.istat = 0;
 	mace->perif.ctrl.imask = 0;
-	set_except_vector(0, ip32_handle_int);
 
 	for (irq = 0; irq <= IP32_IRQ_MAX; irq++) {
 		hw_irq_controller *controller;

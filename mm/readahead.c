@@ -52,13 +52,24 @@ static inline unsigned long get_min_readahead(struct file_ra_state *ra)
 	return (VM_MIN_READAHEAD * 1024) / PAGE_CACHE_SIZE;
 }
 
+static inline void reset_ahead_window(struct file_ra_state *ra)
+{
+	/*
+	 * ... but preserve ahead_start + ahead_size value,
+	 * see 'recheck:' label in page_cache_readahead().
+	 * Note: We never use ->ahead_size as rvalue without
+	 * checking ->ahead_start != 0 first.
+	 */
+	ra->ahead_size += ra->ahead_start;
+	ra->ahead_start = 0;
+}
+
 static inline void ra_off(struct file_ra_state *ra)
 {
 	ra->start = 0;
 	ra->flags = 0;
 	ra->size = 0;
-	ra->ahead_start = 0;
-	ra->ahead_size = 0;
+	reset_ahead_window(ra);
 	return;
 }
 
@@ -72,10 +83,10 @@ static unsigned long get_init_ra_size(unsigned long size, unsigned long max)
 {
 	unsigned long newsize = roundup_pow_of_two(size);
 
-	if (newsize <= max / 64)
-		newsize = newsize * newsize;
+	if (newsize <= max / 32)
+		newsize = newsize * 4;
 	else if (newsize <= max / 4)
-		newsize = max / 4;
+		newsize = newsize * 2;
 	else
 		newsize = max;
 	return newsize;
@@ -158,7 +169,7 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 {
 	unsigned page_idx;
 	struct pagevec lru_pvec;
-	int ret = 0;
+	int ret;
 
 	if (mapping->a_ops->readpages) {
 		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);
@@ -171,14 +182,17 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 		list_del(&page->lru);
 		if (!add_to_page_cache(page, mapping,
 					page->index, GFP_KERNEL)) {
-			mapping->a_ops->readpage(filp, page);
-			if (!pagevec_add(&lru_pvec, page))
-				__pagevec_lru_add(&lru_pvec);
-		} else {
-			page_cache_release(page);
+			ret = mapping->a_ops->readpage(filp, page);
+			if (ret != AOP_TRUNCATED_PAGE) {
+				if (!pagevec_add(&lru_pvec, page))
+					__pagevec_lru_add(&lru_pvec);
+				continue;
+			} /* else fall through to release */
 		}
+		page_cache_release(page);
 	}
 	pagevec_lru_add(&lru_pvec);
+	ret = 0;
 out:
 	return ret;
 }
@@ -254,7 +268,7 @@ out:
  */
 static int
 __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
-			unsigned long offset, unsigned long nr_to_read)
+			pgoff_t offset, unsigned long nr_to_read)
 {
 	struct inode *inode = mapping->host;
 	struct page *page;
@@ -274,7 +288,7 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	 */
 	read_lock_irq(&mapping->tree_lock);
 	for (page_idx = 0; page_idx < nr_to_read; page_idx++) {
-		unsigned long page_offset = offset + page_idx;
+		pgoff_t page_offset = offset + page_idx;
 		
 		if (page_offset > end_index)
 			break;
@@ -311,7 +325,7 @@ out:
  * memory at once.
  */
 int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
-		unsigned long offset, unsigned long nr_to_read)
+		pgoff_t offset, unsigned long nr_to_read)
 {
 	int ret = 0;
 
@@ -368,7 +382,7 @@ static inline int check_ra_success(struct file_ra_state *ra,
  * request queues.
  */
 int do_page_cache_readahead(struct address_space *mapping, struct file *filp,
-			unsigned long offset, unsigned long nr_to_read)
+			pgoff_t offset, unsigned long nr_to_read)
 {
 	if (bdi_read_congested(mapping->backing_dev_info))
 		return -1;
@@ -385,7 +399,7 @@ int do_page_cache_readahead(struct address_space *mapping, struct file *filp,
  */
 static int
 blockable_page_cache_readahead(struct address_space *mapping, struct file *filp,
-			unsigned long offset, unsigned long nr_to_read,
+			pgoff_t offset, unsigned long nr_to_read,
 			struct file_ra_state *ra, int block)
 {
 	int actual;
@@ -423,21 +437,33 @@ static int make_ahead_window(struct address_space *mapping, struct file *filp,
 		 * congestion.  The ahead window will any way be closed
 		 * in case we failed due to excessive page cache hits.
 		 */
-		ra->ahead_start = 0;
-		ra->ahead_size = 0;
+		reset_ahead_window(ra);
 	}
 
 	return ret;
 }
 
-/*
- * page_cache_readahead is the main function.  If performs the adaptive
+/**
+ * page_cache_readahead - generic adaptive readahead
+ * @mapping: address_space which holds the pagecache and I/O vectors
+ * @ra: file_ra_state which holds the readahead state
+ * @filp: passed on to ->readpage() and ->readpages()
+ * @offset: start offset into @mapping, in PAGE_CACHE_SIZE units
+ * @req_size: hint: total size of the read which the caller is performing in
+ *            PAGE_CACHE_SIZE units
+ *
+ * page_cache_readahead() is the main function.  If performs the adaptive
  * readahead window size management and submits the readahead I/O.
+ *
+ * Note that @filp is purely used for passing on to the ->readpage[s]()
+ * handler: it may refer to a different file from @mapping (so we may not use
+ * @filp->f_mapping or @filp->f_dentry->d_inode here).
+ * Also, @ra may not be equal to &@filp->f_ra.
+ *
  */
 unsigned long
 page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
-		     struct file *filp, unsigned long offset,
-		     unsigned long req_size)
+		     struct file *filp, pgoff_t offset, unsigned long req_size)
 {
 	unsigned long max, newsize;
 	int sequential;
@@ -504,11 +530,11 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	 * If we get here we are doing sequential IO and this was not the first
 	 * occurence (ie we have an existing window)
 	 */
-
 	if (ra->ahead_start == 0) {	 /* no ahead window yet */
 		if (!make_ahead_window(mapping, filp, ra, 0))
-			goto out;
+			goto recheck;
 	}
+
 	/*
 	 * Already have an ahead window, check if we crossed into it.
 	 * If so, shift windows and issue a new ahead window.
@@ -520,11 +546,16 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 		ra->start = ra->ahead_start;
 		ra->size = ra->ahead_size;
 		make_ahead_window(mapping, filp, ra, 0);
+recheck:
+		/* prev_page shouldn't overrun the ahead window */
+		ra->prev_page = min(ra->prev_page,
+			ra->ahead_start + ra->ahead_size - 1);
 	}
 
 out:
 	return ra->prev_page + 1;
 }
+EXPORT_SYMBOL_GPL(page_cache_readahead);
 
 /*
  * handle_ra_miss() is called when it is known that a page which should have
@@ -540,6 +571,7 @@ void handle_ra_miss(struct address_space *mapping,
 {
 	ra->flags |= RA_FLAG_MISS;
 	ra->flags &= ~RA_FLAG_INCACHE;
+	ra->cache_hit = 0;
 }
 
 /*

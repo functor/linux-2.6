@@ -18,7 +18,6 @@
 #include <linux/init.h>
 
 #include <linux/mm.h>
-#include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/bootmem.h>
 #include <linux/smp_lock.h>
@@ -26,6 +25,8 @@
 #include <linux/mc146818rtc.h>
 #include <linux/kernel_stat.h>
 #include <linux/sysdev.h>
+#include <linux/cpu.h>
+#include <linux/module.h>
 
 #include <asm/atomic.h>
 #include <asm/smp.h>
@@ -34,10 +35,24 @@
 #include <asm/desc.h>
 #include <asm/arch_hooks.h>
 #include <asm/hpet.h>
+#include <asm/i8253.h>
 
 #include <mach_apic.h>
+#include <mach_apicdef.h>
+#include <mach_ipi.h>
 
 #include "io_ports.h"
+
+/*
+ * cpu_mask that denotes the CPUs that needs timer interrupt coming in as
+ * IPIs in place of local APIC timers
+ */
+static cpumask_t timer_bcast_ipi;
+
+/*
+ * Knob to control our willingness to enable the local APIC.
+ */
+int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
 
 /*
  * Debug level
@@ -46,6 +61,18 @@ int apic_verbosity;
 
 
 static void apic_pm_activate(void);
+
+int modern_apic(void)
+{
+	unsigned int lvr, version;
+	/* AMD systems use old APIC versions, so check the CPU */
+	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
+		boot_cpu_data.x86 >= 0xf)
+		return 1;
+	lvr = apic_read(APIC_LVR);
+	version = GET_APIC_VERSION(lvr);
+	return version >= 0x14;
+}
 
 /*
  * 'what should we do if we get a hw irq event on an illegal vector'.
@@ -61,8 +88,10 @@ void ack_bad_irq(unsigned int irq)
 	 * holds up an irq slot - in excessive cases (when multiple
 	 * unexpected vectors occur) that might lock up the APIC
 	 * completely.
+	 * But only ack when the APIC is enabled -AK
 	 */
-	ack_APIC_irq();
+	if (cpu_has_apic)
+		ack_APIC_irq();
 }
 
 void __init apic_intr_init(void)
@@ -86,10 +115,6 @@ void __init apic_intr_init(void)
 /* Using APIC to generate smp_local_timer_interrupt? */
 int using_apic_timer = 0;
 
-static DEFINE_PER_CPU(int, prof_multiplier) = 1;
-static DEFINE_PER_CPU(int, prof_old_multiplier) = 1;
-static DEFINE_PER_CPU(int, prof_counter) = 1;
-
 static int enabled_via_apicbase;
 
 void enable_NMI_through_LVT0 (void * dummy)
@@ -106,10 +131,7 @@ void enable_NMI_through_LVT0 (void * dummy)
 
 int get_physical_broadcast(void)
 {
-	unsigned int lvr, version;
-	lvr = apic_read(APIC_LVR);
-	version = GET_APIC_VERSION(lvr);
-	if (!APIC_INTEGRATED(version) || version >= 0x14)
+	if (modern_apic())
 		return 0xff;
 	else
 		return 0xf;
@@ -205,7 +227,7 @@ void __init connect_bsp_APIC(void)
 	enable_apic_mode();
 }
 
-void disconnect_bsp_APIC(void)
+void disconnect_bsp_APIC(int virt_wire_setup)
 {
 	if (pic_mode) {
 		/*
@@ -230,14 +252,20 @@ void disconnect_bsp_APIC(void)
 		value |= 0xf;
 		apic_write_around(APIC_SPIV, value);
 
-		/* For LVT0 make it edge triggered, active high, external and enabled */
-		value = apic_read(APIC_LVT0);
-		value &= ~(APIC_MODE_MASK | APIC_SEND_PENDING |
-			APIC_INPUT_POLARITY | APIC_LVT_REMOTE_IRR |
-			APIC_LVT_LEVEL_TRIGGER | APIC_LVT_MASKED );
-		value |= APIC_LVT_REMOTE_IRR | APIC_SEND_PENDING;
-		value = SET_APIC_DELIVERY_MODE(value, APIC_MODE_EXINT);
-		apic_write_around(APIC_LVT0, value);
+		if (!virt_wire_setup) {
+			/* For LVT0 make it edge triggered, active high, external and enabled */
+			value = apic_read(APIC_LVT0);
+			value &= ~(APIC_MODE_MASK | APIC_SEND_PENDING |
+				APIC_INPUT_POLARITY | APIC_LVT_REMOTE_IRR |
+				APIC_LVT_LEVEL_TRIGGER | APIC_LVT_MASKED );
+			value |= APIC_LVT_REMOTE_IRR | APIC_SEND_PENDING;
+			value = SET_APIC_DELIVERY_MODE(value, APIC_MODE_EXTINT);
+			apic_write_around(APIC_LVT0, value);
+		}
+		else {
+			/* Disable LVT0 */
+			apic_write_around(APIC_LVT0, APIC_LVT_MASKED);
+		}
 
 		/* For LVT1 make it edge triggered, active high, nmi and enabled */
 		value = apic_read(APIC_LVT1);
@@ -330,9 +358,9 @@ int __init verify_local_APIC(void)
 
 void __init sync_Arb_IDs(void)
 {
-	/* Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1 */
-	unsigned int ver = GET_APIC_VERSION(apic_read(APIC_LVR));
-	if (ver >= 0x14)	/* P4 or higher */
+	/* Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1
+	   And not needed on AMD */
+	if (modern_apic())
 		return;
 	/*
 	 * Wait for idle.
@@ -393,9 +421,10 @@ void __init init_bsp_APIC(void)
 	apic_write_around(APIC_LVT1, value);
 }
 
-void __init setup_local_APIC (void)
+void __devinit setup_local_APIC(void)
 {
 	unsigned long oldvalue, value, ver, maxlvt;
+	int i, j;
 
 	/* Pound the ESR really hard over the head with a big hammer - mbligh */
 	if (esr_disable) {
@@ -431,6 +460,25 @@ void __init setup_local_APIC (void)
 	value = apic_read(APIC_TASKPRI);
 	value &= ~APIC_TPRI_MASK;
 	apic_write_around(APIC_TASKPRI, value);
+
+	/*
+	 * After a crash, we no longer service the interrupts and a pending
+	 * interrupt from previous kernel might still have ISR bit set.
+	 *
+	 * Most probably by now CPU has serviced that pending interrupt and
+	 * it might not have done the ack_APIC_irq() because it thought,
+	 * interrupt came from i8259 as ExtInt. LAPIC did not get EOI so it
+	 * does not clear the ISR bit and cpu thinks it has already serivced
+	 * the interrupt. Hence a vector might get locked. It was noticed
+	 * for timer irq (vector 0x31). Issue an extra EOI to clear ISR.
+	 */
+	for (i = APIC_ISR_NR - 1; i >= 0; i--) {
+		value = apic_read(APIC_ISR + i*0x10);
+		for (j = 31; j >= 0; j--) {
+			if (value & (1<<j))
+				ack_APIC_irq();
+		}
+	}
 
 	/*
 	 * Now that we are all set up, enable the APIC
@@ -547,15 +595,23 @@ void __init setup_local_APIC (void)
  * If Linux enabled the LAPIC against the BIOS default
  * disable it down before re-entering the BIOS on shutdown.
  * Otherwise the BIOS may get confused and not power-off.
+ * Additionally clear all LVT entries before disable_local_APIC
+ * for the case where Linux didn't enable the LAPIC.
  */
 void lapic_shutdown(void)
 {
-	if (!cpu_has_apic || !enabled_via_apicbase)
+	unsigned long flags;
+
+	if (!cpu_has_apic)
 		return;
 
-	local_irq_disable();
-	disable_local_APIC();
-	local_irq_enable();
+	local_irq_save(flags);
+	clear_local_APIC();
+
+	if (enabled_via_apicbase)
+		disable_local_APIC();
+
+	local_irq_restore(flags);
 }
 
 #ifdef CONFIG_PM
@@ -664,7 +720,7 @@ static struct sys_device device_lapic = {
 	.cls	= &lapic_sysclass,
 };
 
-static void __init apic_pm_activate(void)
+static void __devinit apic_pm_activate(void)
 {
 	apic_pm_state.active = 1;
 }
@@ -695,37 +751,13 @@ static void apic_pm_activate(void) { }
  * Original code written by Keir Fraser.
  */
 
-/*
- * Knob to control our willingness to enable the local APIC.
- */
-int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
-
-static int __init lapic_disable(char *str)
-{
-	enable_local_apic = -1;
-	clear_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability);
-	return 0;
-}
-__setup("nolapic", lapic_disable);
-
-static int __init lapic_enable(char *str)
-{
-	enable_local_apic = 1;
-	return 0;
-}
-__setup("lapic", lapic_enable);
-
 static int __init apic_set_verbosity(char *str)
 {
 	if (strcmp("debug", str) == 0)
 		apic_verbosity = APIC_DEBUG;
 	else if (strcmp("verbose", str) == 0)
 		apic_verbosity = APIC_VERBOSE;
-	else
-		printk(KERN_WARNING "APIC Verbosity level %s not recognised"
-				" use apic=verbose or apic=debug", str);
-
-	return 0;
+	return 1;
 }
 
 __setup("apic=", apic_set_verbosity);
@@ -733,14 +765,10 @@ __setup("apic=", apic_set_verbosity);
 static int __init detect_init_APIC (void)
 {
 	u32 h, l, features;
-	extern void get_cpu_vendor(struct cpuinfo_x86*);
 
 	/* Disabled by kernel option? */
 	if (enable_local_apic < 0)
 		return -1;
-
-	/* Workaround for us being called before identify_cpu(). */
-	get_cpu_vendor(&boot_cpu_data);
 
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:
@@ -885,9 +913,8 @@ fake_ioapic_page:
  * but we do not accept timer interrupts yet. We only allow the BP
  * to calibrate.
  */
-static unsigned int __init get_8254_timer_count(void)
+static unsigned int __devinit get_8254_timer_count(void)
 {
-	extern spinlock_t i8253_lock;
 	unsigned long flags;
 
 	unsigned int count;
@@ -904,7 +931,7 @@ static unsigned int __init get_8254_timer_count(void)
 }
 
 /* next tick in 8254 can be caught by catching timer wraparound */
-static void __init wait_8254_wraparound(void)
+static void __devinit wait_8254_wraparound(void)
 {
 	unsigned int curr_count, prev_count;
 
@@ -924,7 +951,7 @@ static void __init wait_8254_wraparound(void)
  * Default initialization for 8254 timers. If we use other timers like HPET,
  * we override this later
  */
-void (*wait_timer_tick)(void) __initdata = wait_8254_wraparound;
+void (*wait_timer_tick)(void) __devinitdata = wait_8254_wraparound;
 
 /*
  * This function sets up the local APIC timer, with a timeout of
@@ -942,11 +969,16 @@ void (*wait_timer_tick)(void) __initdata = wait_8254_wraparound;
 static void __setup_APIC_LVTT(unsigned int clocks)
 {
 	unsigned int lvtt_value, tmp_value, ver;
+	int cpu = smp_processor_id();
 
 	ver = GET_APIC_VERSION(apic_read(APIC_LVR));
 	lvtt_value = APIC_LVT_TIMER_PERIODIC | LOCAL_TIMER_VECTOR;
 	if (!APIC_INTEGRATED(ver))
 		lvtt_value |= SET_APIC_TIMER_BASE(APIC_TIMER_BASE_DIV);
+
+	if (cpu_isset(cpu, timer_bcast_ipi))
+		lvtt_value |= APIC_LVT_MASKED;
+
 	apic_write_around(APIC_LVTT, lvtt_value);
 
 	/*
@@ -960,7 +992,7 @@ static void __setup_APIC_LVTT(unsigned int clocks)
 	apic_write_around(APIC_TMICT, clocks/APIC_DIVISOR);
 }
 
-static void __init setup_APIC_timer(unsigned int clocks)
+static void __devinit setup_APIC_timer(unsigned int clocks)
 {
 	unsigned long flags;
 
@@ -1059,10 +1091,11 @@ static unsigned int calibration_result;
 
 void __init setup_boot_APIC_clock(void)
 {
+	unsigned long flags;
 	apic_printk(APIC_VERBOSE, "Using local APIC timer interrupts.\n");
 	using_apic_timer = 1;
 
-	local_irq_disable();
+	local_irq_save(flags);
 
 	calibration_result = calibrate_APIC_clock();
 	/*
@@ -1070,15 +1103,15 @@ void __init setup_boot_APIC_clock(void)
 	 */
 	setup_APIC_timer(calibration_result);
 
-	local_irq_enable();
+	local_irq_restore(flags);
 }
 
-void __init setup_secondary_APIC_clock(void)
+void __devinit setup_secondary_APIC_clock(void)
 {
 	setup_APIC_timer(calibration_result);
 }
 
-void __init disable_APIC_timer(void)
+void disable_APIC_timer(void)
 {
 	if (using_apic_timer) {
 		unsigned long v;
@@ -1090,7 +1123,10 @@ void __init disable_APIC_timer(void)
 
 void enable_APIC_timer(void)
 {
-	if (using_apic_timer) {
+	int cpu = smp_processor_id();
+
+	if (using_apic_timer &&
+	    !cpu_isset(cpu, timer_bcast_ipi)) {
 		unsigned long v;
 
 		v = apic_read(APIC_LVTT);
@@ -1098,33 +1134,31 @@ void enable_APIC_timer(void)
 	}
 }
 
-/*
- * the frequency of the profiling timer can be changed
- * by writing a multiplier value into /proc/profile.
- */
-int setup_profiling_timer(unsigned int multiplier)
+void switch_APIC_timer_to_ipi(void *cpumask)
 {
-	int i;
+	cpumask_t mask = *(cpumask_t *)cpumask;
+	int cpu = smp_processor_id();
 
-	/*
-	 * Sanity check. [at least 500 APIC cycles should be
-	 * between APIC interrupts as a rule of thumb, to avoid
-	 * irqs flooding us]
-	 */
-	if ( (!multiplier) || (calibration_result/multiplier < 500))
-		return -EINVAL;
-
-	/* 
-	 * Set the new multiplier for each CPU. CPUs don't start using the
-	 * new values until the next timer interrupt in which they do process
-	 * accounting. At that time they also adjust their APIC timers
-	 * accordingly.
-	 */
-	for (i = 0; i < NR_CPUS; ++i)
-		per_cpu(prof_multiplier, i) = multiplier;
-
-	return 0;
+	if (cpu_isset(cpu, mask) &&
+	    !cpu_isset(cpu, timer_bcast_ipi)) {
+		disable_APIC_timer();
+		cpu_set(cpu, timer_bcast_ipi);
+	}
 }
+EXPORT_SYMBOL(switch_APIC_timer_to_ipi);
+
+void switch_ipi_to_APIC_timer(void *cpumask)
+{
+	cpumask_t mask = *(cpumask_t *)cpumask;
+	int cpu = smp_processor_id();
+
+	if (cpu_isset(cpu, mask) &&
+	    cpu_isset(cpu, timer_bcast_ipi)) {
+		cpu_clear(cpu, timer_bcast_ipi);
+		enable_APIC_timer();
+	}
+}
+EXPORT_SYMBOL(switch_ipi_to_APIC_timer);
 
 #undef APIC_DIVISOR
 
@@ -1140,32 +1174,10 @@ int setup_profiling_timer(unsigned int multiplier)
 
 inline void smp_local_timer_interrupt(struct pt_regs * regs)
 {
-	int cpu = smp_processor_id();
-
 	profile_tick(CPU_PROFILING, regs);
-	if (--per_cpu(prof_counter, cpu) <= 0) {
-		/*
-		 * The multiplier may have changed since the last time we got
-		 * to this point as a result of the user writing to
-		 * /proc/profile. In this case we need to adjust the APIC
-		 * timer accordingly.
-		 *
-		 * Interrupts are already masked off at this point.
-		 */
-		per_cpu(prof_counter, cpu) = per_cpu(prof_multiplier, cpu);
-		if (per_cpu(prof_counter, cpu) !=
-					per_cpu(prof_old_multiplier, cpu)) {
-			__setup_APIC_LVTT(
-					calibration_result/
-					per_cpu(prof_counter, cpu));
-			per_cpu(prof_old_multiplier, cpu) =
-						per_cpu(prof_counter, cpu);
-		}
-
 #ifdef CONFIG_SMP
-		update_process_times(user_mode(regs));
+	update_process_times(user_mode_vm(regs));
 #endif
-	}
 
 	/*
 	 * We take the 'long' return path, and there every subsystem
@@ -1210,6 +1222,43 @@ fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 	irq_enter();
 	smp_local_timer_interrupt(regs);
 	irq_exit();
+}
+
+#ifndef CONFIG_SMP
+static void up_apic_timer_interrupt_call(struct pt_regs *regs)
+{
+	int cpu = smp_processor_id();
+
+	/*
+	 * the NMI deadlock-detector uses this.
+	 */
+	per_cpu(irq_stat, cpu).apic_timer_irqs++;
+
+	smp_local_timer_interrupt(regs);
+}
+#endif
+
+void smp_send_timer_broadcast_ipi(struct pt_regs *regs)
+{
+	cpumask_t mask;
+
+	cpus_and(mask, cpu_online_map, timer_bcast_ipi);
+	if (!cpus_empty(mask)) {
+#ifdef CONFIG_SMP
+		send_IPI_mask(mask, LOCAL_TIMER_VECTOR);
+#else
+		/*
+		 * We can directly call the apic timer interrupt handler
+		 * in UP case. Minus all irq related functions
+		 */
+		up_apic_timer_interrupt_call(regs);
+#endif
+	}
+}
+
+int setup_profiling_timer(unsigned int multiplier)
+{
+	return -EINVAL;
 }
 
 /*
@@ -1284,6 +1333,7 @@ int __init APIC_init_uniprocessor (void)
 	if (!cpu_has_apic && APIC_INTEGRATED(apic_version[boot_cpu_physical_apicid])) {
 		printk(KERN_ERR "BIOS bug, local APIC #%d not detected!...\n",
 			boot_cpu_physical_apicid);
+		clear_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability);
 		return -1;
 	}
 
@@ -1291,6 +1341,14 @@ int __init APIC_init_uniprocessor (void)
 
 	connect_bsp_APIC();
 
+	/*
+	 * Hack: In case of kdump, after a crash, kernel might be booting
+	 * on a cpu with non-zero lapic id. But boot_cpu_physical_apicid
+	 * might be zero if read from MP tables. Get it from LAPIC.
+	 */
+#ifdef CONFIG_CRASH_DUMP
+	boot_cpu_physical_apicid = GET_APIC_ID(apic_read(APIC_ID));
+#endif
 	phys_cpu_present_map = physid_mask_of_physid(boot_cpu_physical_apicid);
 
 	setup_local_APIC();

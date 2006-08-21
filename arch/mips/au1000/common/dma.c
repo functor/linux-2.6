@@ -39,7 +39,6 @@
 #include <linux/string.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
 #include <asm/system.h>
 #include <asm/mach-au1x00/au1000.h>
 #include <asm/mach-au1x00/au1000_dma.h>
@@ -175,7 +174,7 @@ int request_au1000_dma(int dev_id, const char *dev_str,
 		return -EINVAL;
 #else
  	if (dev_id < 0 || dev_id >= DMA_NUM_DEV)
- 		return -EINVAL;
+		return -EINVAL;
 #endif
 
 	for (i = 0; i < NUM_AU1000_DMA_CHANNELS; i++) {

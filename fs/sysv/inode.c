@@ -292,6 +292,7 @@ int sysv_sync_inode(struct inode * inode)
 
 static void sysv_delete_inode(struct inode *inode)
 {
+	truncate_inode_pages(&inode->i_data, 0);
 	inode->i_size = 0;
 	sysv_truncate(inode);
 	lock_kernel();
@@ -341,7 +342,7 @@ int __init sysv_init_icache(void)
 {
 	sysv_inode_cachep = kmem_cache_create("sysv_inode_cache",
 			sizeof(struct sysv_inode_info), 0,
-			SLAB_RECLAIM_ACCOUNT,
+			SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD,
 			init_once, NULL);
 	if (!sysv_inode_cachep)
 		return -ENOMEM;

@@ -144,8 +144,9 @@ static void iommu_flush_iotlb(iopte_t *iopte, unsigned int niopte)
 	unsigned long start;
 	unsigned long end;
 
-	start = (unsigned long)iopte & PAGE_MASK;
+	start = (unsigned long)iopte;
 	end = PAGE_ALIGN(start + niopte*sizeof(iopte_t));
+	start &= PAGE_MASK;
 	if (viking_mxcc_present) {
 		while(start < end) {
 			viking_mxcc_flush_page(start);
@@ -295,8 +296,7 @@ static void iommu_release_one(u32 busa, int npages, struct sbus_bus *sbus)
 	int ioptex;
 	int i;
 
-	if (busa < iommu->start)
-		BUG();
+	BUG_ON(busa < iommu->start);
 	ioptex = (busa - iommu->start) >> PAGE_SHIFT;
 	for (i = 0; i < npages; i++) {
 		iopte_val(iommu->page_table[ioptex + i]) = 0;
@@ -340,9 +340,9 @@ static int iommu_map_dma_area(dma_addr_t *pba, unsigned long va,
 	iopte_t *first;
 	int ioptex;
 
-	if ((va & ~PAGE_MASK) != 0) BUG();
-	if ((addr & ~PAGE_MASK) != 0) BUG();
-	if ((len & ~PAGE_MASK) != 0) BUG();
+	BUG_ON((va & ~PAGE_MASK) != 0);
+	BUG_ON((addr & ~PAGE_MASK) != 0);
+	BUG_ON((len & ~PAGE_MASK) != 0);
 
 	/* page color = physical address */
 	ioptex = bit_map_string_get(&iommu->usemap, len >> PAGE_SHIFT,
@@ -405,8 +405,8 @@ static void iommu_unmap_dma_area(unsigned long busa, int len)
 	unsigned long end;
 	int ioptex = (busa - iommu->start) >> PAGE_SHIFT;
 
-	if ((busa & ~PAGE_MASK) != 0) BUG();
-	if ((len & ~PAGE_MASK) != 0) BUG();
+	BUG_ON((busa & ~PAGE_MASK) != 0);
+	BUG_ON((len & ~PAGE_MASK) != 0);
 
 	iopte += ioptex;
 	end = busa + len;

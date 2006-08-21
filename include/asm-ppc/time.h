@@ -58,7 +58,7 @@ static __inline__ void set_dec(unsigned int val)
 /* Accessor functions for the timebase (RTC on 601) registers. */
 /* If one day CONFIG_POWER is added just define __USE_RTC as 1 */
 #ifdef CONFIG_6xx
-extern __inline__ int const __USE_RTC(void) {
+extern __inline__ int __attribute_pure__ __USE_RTC(void) {
 	return (mfspr(SPRN_PVR)>>16) == 1;
 }
 #else
@@ -153,5 +153,10 @@ extern __inline__ unsigned binary_tbl(void) {
 ({unsigned z; asm ("mulhwu %0,%1,%2" : "=r" (z) : "r" (x), "r" (y)); z;})
 
 unsigned mulhwu_scale_factor(unsigned, unsigned);
+
+#define account_process_vtime(tsk)		do { } while (0)
+#define calculate_steal_time()			do { } while (0)
+#define snapshot_timebases()			do { } while (0)
+
 #endif /* __ASM_TIME_H__ */
 #endif /* __KERNEL__ */

@@ -364,7 +364,7 @@ static void iriap_disconnect_request(struct iriap_cb *self)
 /*
  * Function iriap_getvaluebyclass (addr, name, attr)
  *
- *    Retreive all values from attribute in all objects with given class
+ *    Retrieve all values from attribute in all objects with given class
  *    name
  */
 int iriap_getvaluebyclass_request(struct iriap_cb *self,
@@ -544,7 +544,8 @@ static void iriap_getvaluebyclass_response(struct iriap_cb *self,
 {
 	struct sk_buff *tx_skb;
 	int n;
-	__u32 tmp_be32, tmp_be16;
+	__u32 tmp_be32;
+	__be16 tmp_be16;
 	__u8 *fp;
 
 	IRDA_DEBUG(4, "%s()\n", __FUNCTION__);

@@ -20,7 +20,7 @@
 #include <linux/config.h>
 #include <linux/types.h>
 #include <linux/serial_reg.h>
-#include <asm/arch/hardware.h>
+#include <asm/arch/serial.h>
 
 unsigned int system_rev;
 
@@ -30,20 +30,25 @@ unsigned int system_rev;
 #define check_port(base, shift) ((base[UART_OMAP_MDR1 << shift] & 7) == 0)
 #define omap_get_id() ((*(volatile unsigned int *)(0xfffed404)) >> 12) & ID_MASK
 
-static void
-putstr(const char *s)
+static void putc(int c)
 {
 	volatile u8 * uart = 0;
-	int shift;
+	int shift = 2;
 
+#ifdef CONFIG_MACH_OMAP_PALMTE
+	return;
+#endif
+
+#ifdef CONFIG_ARCH_OMAP
 #ifdef	CONFIG_OMAP_LL_DEBUG_UART3
 	uart = (volatile u8 *)(OMAP_UART3_BASE);
-#elif	CONFIG_OMAP_LL_DEBUG_UART2
+#elif defined(CONFIG_OMAP_LL_DEBUG_UART2)
 	uart = (volatile u8 *)(OMAP_UART2_BASE);
 #else
 	uart = (volatile u8 *)(OMAP_UART1_BASE);
 #endif
 
+#ifdef CONFIG_ARCH_OMAP1
 	/* Determine which serial port to use */
 	do {
 		/* MMU is not on, so cpu_is_omapXXXX() won't work here */
@@ -51,28 +56,25 @@ putstr(const char *s)
 
 		if (omap_id == OMAP_ID_730)
 			shift = 0;
-		else
-			shift = 2;
 
 		if (check_port(uart, shift))
 			break;
 		/* Silent boot if no serial ports are enabled. */
 		return;
 	} while (0);
+#endif /* CONFIG_ARCH_OMAP1 */
+#endif
 
 	/*
 	 * Now, xmit each character
 	 */
-	while (*s) {
-		while (!(uart[UART_LSR << shift] & UART_LSR_THRE))
-			barrier();
-		uart[UART_TX << shift] = *s;
-		if (*s++ == '\n') {
-			while (!(uart[UART_LSR << shift] & UART_LSR_THRE))
-				barrier();
-			uart[UART_TX << shift] = '\r';
-		}
-	}
+	while (!(uart[UART_LSR << shift] & UART_LSR_THRE))
+		barrier();
+	uart[UART_TX << shift] = c;
+}
+
+static inline void flush(void)
+{
 }
 
 /*

@@ -86,6 +86,7 @@
 #include <linux/module.h>
 #include <linux/socket.h>
 #include <linux/sockios.h>
+#include <linux/igmp.h>
 #include <linux/in.h>
 #include <linux/errno.h>
 #include <linux/timer.h>
@@ -95,7 +96,8 @@
 #include <linux/ipv6.h>
 #include <linux/netdevice.h>
 #include <net/snmp.h>
-#include <net/tcp.h>
+#include <net/ip.h>
+#include <net/tcp_states.h>
 #include <net/protocol.h>
 #include <linux/skbuff.h>
 #include <linux/proc_fs.h>
@@ -112,7 +114,7 @@
  *	Snmp MIB for the UDP layer
  */
 
-DEFINE_SNMP_STAT(struct udp_mib, udp_statistics);
+DEFINE_SNMP_STAT(struct udp_mib, udp_statistics) __read_mostly;
 
 struct hlist_head udp_hash[UDP_HTABLE_SIZE];
 DEFINE_RWLOCK(udp_hash_lock);
@@ -179,7 +181,7 @@ gotit:
 			     !sk->sk_bound_dev_if ||
 			     sk2->sk_bound_dev_if == sk->sk_bound_dev_if) &&
 			    nx_addr_conflict(sk->sk_nx_info,
-			     tcp_v4_rcv_saddr(sk), sk2) &&
+			     inet_rcv_saddr(sk), sk2) &&
 			    (!sk2->sk_reuse || !sk->sk_reuse))
 				goto fail;
 		}
@@ -214,16 +216,6 @@ static void udp_v4_unhash(struct sock *sk)
 	write_unlock_bh(&udp_hash_lock);
 }
 
-static inline int udp_in_list(struct nx_info *nx_info, u32 addr)
-{
-	int n = nx_info->nbipv4;
-	int i;
-
-	for (i=0; i<n; i++)
-		if (nx_info->ipv4[i] == addr)
-			return 1;
-	return 0;
-}
 
 /* UDP is nearly always wildcards out the wazoo, it makes no sense to try
  * harder than this. -DaveM
@@ -246,7 +238,7 @@ static struct sock *udp_v4_lookup_longway(u32 saddr, u16 sport,
 					continue;
 				score+=2;
 			} else if (sk->sk_nx_info) {
-				if (udp_in_list(sk->sk_nx_info, daddr))
+				if (addr_in_nx_info(sk->sk_nx_info, daddr))
 					score+=2;
 				else
 					continue;
@@ -625,6 +617,10 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				goto out;
 			if (daddr == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
 				daddr = fl.fl4_dst = nxi->ipv4[0];
+#ifdef CONFIG_VSERVER_REMAP_SADDR
+			if (saddr == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
+				saddr = fl.fl4_src = nxi->ipv4[0];
+#endif
 		}
 		err = ip_route_output_flow(&rt, &fl, sk, !(msg->msg_flags&MSG_DONTWAIT));
 		if (err)
@@ -652,7 +648,7 @@ back_from_confirm:
 		/* ... which is an evident application bug. --ANK */
 		release_sock(sk);
 
-		NETDEBUG(if (net_ratelimit()) printk(KERN_DEBUG "udp cork app bug 2\n"));
+		LIMIT_NETDEBUG(KERN_DEBUG "udp cork app bug 2\n");
 		err = -EINVAL;
 		goto out;
 	}
@@ -717,7 +713,7 @@ static int udp_sendpage(struct sock *sk, struct page *page, int offset,
 	if (unlikely(!up->pending)) {
 		release_sock(sk);
 
-		NETDEBUG(if (net_ratelimit()) printk(KERN_DEBUG "udp cork app bug 3\n"));
+		LIMIT_NETDEBUG(KERN_DEBUG "udp cork app bug 3\n");
 		return -EINVAL;
 	}
 
@@ -784,7 +780,7 @@ int udp_ioctl(struct sock *sk, int cmd, unsigned long arg)
 
 static __inline__ int __udp_checksum_complete(struct sk_buff *skb)
 {
-	return (unsigned short)csum_fold(skb_checksum(skb, 0, skb->len, skb->csum));
+	return __skb_checksum_complete(skb);
 }
 
 static __inline__ int udp_checksum_complete(struct sk_buff *skb)
@@ -869,20 +865,7 @@ out:
 csum_copy_err:
 	UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 
-	/* Clear queue. */
-	if (flags&MSG_PEEK) {
-		int clear = 0;
-		spin_lock_bh(&sk->sk_receive_queue.lock);
-		if (skb == skb_peek(&sk->sk_receive_queue)) {
-			__skb_unlink(skb, &sk->sk_receive_queue);
-			clear = 1;
-		}
-		spin_unlock_bh(&sk->sk_receive_queue.lock);
-		if (clear)
-			kfree_skb(skb);
-	}
-
-	skb_free_datagram(sk, skb);
+	skb_kill_datagram(sk, skb, flags);
 
 	if (noblock)
 		return -EAGAIN;	
@@ -1024,6 +1007,7 @@ static int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 		kfree_skb(skb);
 		return -1;
 	}
+	nf_reset(skb);
 
 	if (up->encap_type) {
 		/*
@@ -1117,24 +1101,20 @@ static int udp_v4_mcast_deliver(struct sk_buff *skb, struct udphdr *uh,
  * Otherwise, csum completion requires chacksumming packet body,
  * including udp header and folding it to skb->csum.
  */
-static int udp_checksum_init(struct sk_buff *skb, struct udphdr *uh,
+static void udp_checksum_init(struct sk_buff *skb, struct udphdr *uh,
 			     unsigned short ulen, u32 saddr, u32 daddr)
 {
 	if (uh->check == 0) {
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	} else if (skb->ip_summed == CHECKSUM_HW) {
-		skb->ip_summed = CHECKSUM_UNNECESSARY;
 		if (!udp_check(uh, ulen, saddr, daddr, skb->csum))
-			return 0;
-		NETDEBUG(if (net_ratelimit()) printk(KERN_DEBUG "udp v4 hw csum failure.\n"));
-		skb->ip_summed = CHECKSUM_NONE;
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
 	if (skb->ip_summed != CHECKSUM_UNNECESSARY)
 		skb->csum = csum_tcpudp_nofold(saddr, daddr, ulen, IPPROTO_UDP, 0);
 	/* Probably, we should checksum udp header (it should be in cache
 	 * in any case) and data in tiny packets (< rx copybreak).
 	 */
-	return 0;
 }
 
 /* XXX (mef) need to generalize the IPOD stuff.  Right now I am borrowing 
@@ -1233,11 +1213,10 @@ int udp_rcv(struct sk_buff *skb)
 	if (ulen > len || ulen < sizeof(*uh))
 		goto short_packet;
 
-	if (pskb_trim(skb, ulen))
+	if (pskb_trim_rcsum(skb, ulen))
 		goto short_packet;
 
-	if (udp_checksum_init(skb, uh, ulen, saddr, daddr) < 0)
-		goto csum_error;
+	udp_checksum_init(skb, uh, ulen, saddr, daddr);
 
 	if(rt->rt_flags & (RTCF_BROADCAST|RTCF_MULTICAST))
 		return udp_v4_mcast_deliver(skb, uh, saddr, daddr);
@@ -1262,6 +1241,7 @@ int udp_rcv(struct sk_buff *skb)
 
 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb))
 		goto drop;
+	nf_reset(skb);
 
 	/* No socket. Drop packet silently, if checksum is wrong */
 	if (udp_checksum_complete(skb))
@@ -1286,14 +1266,13 @@ int udp_rcv(struct sk_buff *skb)
 	return(0);
 
 short_packet:
-	NETDEBUG(if (net_ratelimit())
-		printk(KERN_DEBUG "UDP: short packet: From %u.%u.%u.%u:%u %d/%d to %u.%u.%u.%u:%u\n",
-			NIPQUAD(saddr),
-			ntohs(uh->source),
-			ulen,
-			len,
-			NIPQUAD(daddr),
-			ntohs(uh->dest)));
+	LIMIT_NETDEBUG(KERN_DEBUG "UDP: short packet: From %u.%u.%u.%u:%u %d/%d to %u.%u.%u.%u:%u\n",
+		       NIPQUAD(saddr),
+		       ntohs(uh->source),
+		       ulen,
+		       len,
+		       NIPQUAD(daddr),
+		       ntohs(uh->dest));
 no_header:
 	UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 	kfree_skb(skb);
@@ -1304,13 +1283,12 @@ csum_error:
 	 * RFC1122: OK.  Discards the bad packet silently (as far as 
 	 * the network is concerned, anyway) as per 4.1.3.4 (MUST). 
 	 */
-	NETDEBUG(if (net_ratelimit())
-		 printk(KERN_DEBUG "UDP: bad checksum. From %d.%d.%d.%d:%d to %d.%d.%d.%d:%d ulen %d\n",
-			NIPQUAD(saddr),
-			ntohs(uh->source),
-			NIPQUAD(daddr),
-			ntohs(uh->dest),
-			ulen));
+	LIMIT_NETDEBUG(KERN_DEBUG "UDP: bad checksum. From %d.%d.%d.%d:%d to %d.%d.%d.%d:%d ulen %d\n",
+		       NIPQUAD(saddr),
+		       ntohs(uh->source),
+		       NIPQUAD(daddr),
+		       ntohs(uh->dest),
+		       ulen);
 drop:
 	UDP_INC_STATS_BH(UDP_MIB_INERRORS);
 	kfree_skb(skb);
@@ -1328,15 +1306,12 @@ static int udp_destroy_sock(struct sock *sk)
 /*
  *	Socket option code for UDP
  */
-static int udp_setsockopt(struct sock *sk, int level, int optname, 
+static int do_udp_setsockopt(struct sock *sk, int level, int optname,
 			  char __user *optval, int optlen)
 {
 	struct udp_sock *up = udp_sk(sk);
 	int val;
 	int err = 0;
-
-	if (level != SOL_UDP)
-		return ip_setsockopt(sk, level, optname, optval, optlen);
 
 	if(optlen<sizeof(int))
 		return -EINVAL;
@@ -1377,14 +1352,29 @@ static int udp_setsockopt(struct sock *sk, int level, int optname,
 	return err;
 }
 
-static int udp_getsockopt(struct sock *sk, int level, int optname, 
+static int udp_setsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int optlen)
+{
+	if (level != SOL_UDP)
+		return ip_setsockopt(sk, level, optname, optval, optlen);
+	return do_udp_setsockopt(sk, level, optname, optval, optlen);
+}
+
+#ifdef CONFIG_COMPAT
+static int compat_udp_setsockopt(struct sock *sk, int level, int optname,
+				 char __user *optval, int optlen)
+{
+	if (level != SOL_UDP)
+		return compat_ip_setsockopt(sk, level, optname, optval, optlen);
+	return do_udp_setsockopt(sk, level, optname, optval, optlen);
+}
+#endif
+
+static int do_udp_getsockopt(struct sock *sk, int level, int optname,
 			  char __user *optval, int __user *optlen)
 {
 	struct udp_sock *up = udp_sk(sk);
 	int val, len;
-
-	if (level != SOL_UDP)
-		return ip_getsockopt(sk, level, optname, optval, optlen);
 
 	if(get_user(len,optlen))
 		return -EFAULT;
@@ -1414,6 +1404,23 @@ static int udp_getsockopt(struct sock *sk, int level, int optname,
   	return 0;
 }
 
+static int udp_getsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int __user *optlen)
+{
+	if (level != SOL_UDP)
+		return ip_getsockopt(sk, level, optname, optval, optlen);
+	return do_udp_getsockopt(sk, level, optname, optval, optlen);
+}
+
+#ifdef CONFIG_COMPAT
+static int compat_udp_getsockopt(struct sock *sk, int level, int optname,
+				 char __user *optval, int __user *optlen)
+{
+	if (level != SOL_UDP)
+		return compat_ip_getsockopt(sk, level, optname, optval, optlen);
+	return do_udp_getsockopt(sk, level, optname, optval, optlen);
+}
+#endif
 /**
  * 	udp_poll - wait for a UDP event.
  *	@file - file struct
@@ -1462,23 +1469,27 @@ unsigned int udp_poll(struct file *file, struct socket *sock, poll_table *wait)
 }
 
 struct proto udp_prot = {
- 	.name =		"UDP",
-	.owner =	THIS_MODULE,
-	.close =	udp_close,
-	.connect =	ip4_datagram_connect,
-	.disconnect =	udp_disconnect,
-	.ioctl =	udp_ioctl,
-	.destroy =	udp_destroy_sock,
-	.setsockopt =	udp_setsockopt,
-	.getsockopt =	udp_getsockopt,
-	.sendmsg =	udp_sendmsg,
-	.recvmsg =	udp_recvmsg,
-	.sendpage =	udp_sendpage,
-	.backlog_rcv =	udp_queue_rcv_skb,
-	.hash =		udp_v4_hash,
-	.unhash =	udp_v4_unhash,
-	.get_port =	udp_v4_get_port,
-	.obj_size =	sizeof(struct udp_sock),
+ 	.name		   = "UDP",
+	.owner		   = THIS_MODULE,
+	.close		   = udp_close,
+	.connect	   = ip4_datagram_connect,
+	.disconnect	   = udp_disconnect,
+	.ioctl		   = udp_ioctl,
+	.destroy	   = udp_destroy_sock,
+	.setsockopt	   = udp_setsockopt,
+	.getsockopt	   = udp_getsockopt,
+	.sendmsg	   = udp_sendmsg,
+	.recvmsg	   = udp_recvmsg,
+	.sendpage	   = udp_sendpage,
+	.backlog_rcv	   = udp_queue_rcv_skb,
+	.hash		   = udp_v4_hash,
+	.unhash		   = udp_v4_unhash,
+	.get_port	   = udp_v4_get_port,
+	.obj_size	   = sizeof(struct udp_sock),
+#ifdef CONFIG_COMPAT
+	.compat_setsockopt = compat_udp_setsockopt,
+	.compat_getsockopt = compat_udp_getsockopt,
+#endif
 };
 
 /* ------------------------------------------------------------------------ */

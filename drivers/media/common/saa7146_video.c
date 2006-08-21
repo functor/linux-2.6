@@ -150,23 +150,23 @@ static int try_win(struct saa7146_dev *dev, struct v4l2_window *win)
 	maxh  = vv->standard->v_max_out;
 
 	if (V4L2_FIELD_ANY == field) {
-                field = (win->w.height > maxh/2)
-                        ? V4L2_FIELD_INTERLACED
-                        : V4L2_FIELD_TOP;
-	        }
-        switch (field) {
-        case V4L2_FIELD_TOP:
-        case V4L2_FIELD_BOTTOM:
-        case V4L2_FIELD_ALTERNATE:
-                maxh = maxh / 2;
-                break;
-        case V4L2_FIELD_INTERLACED:
-                break;
-        default: {
+		field = (win->w.height > maxh/2)
+			? V4L2_FIELD_INTERLACED
+			: V4L2_FIELD_TOP;
+		}
+	switch (field) {
+	case V4L2_FIELD_TOP:
+	case V4L2_FIELD_BOTTOM:
+	case V4L2_FIELD_ALTERNATE:
+		maxh = maxh / 2;
+		break;
+	case V4L2_FIELD_INTERLACED:
+		break;
+	default: {
 		DEB_D(("no known field mode '%d'.\n",field));
-                return -EINVAL;
+		return -EINVAL;
 	}
-        }
+	}
 
 	win->field = field;
 	if (win->w.width > maxw)
@@ -378,20 +378,20 @@ static int s_fmt(struct saa7146_fh *fh, struct v4l2_format *f)
 		err = try_win(dev,&f->fmt.win);
 		if (0 != err)
 			return err;
-		down(&dev->lock);
+		mutex_lock(&dev->lock);
 		fh->ov.win    = f->fmt.win;
 		fh->ov.nclips = f->fmt.win.clipcount;
 		if (fh->ov.nclips > 16)
 			fh->ov.nclips = 16;
 		if (copy_from_user(fh->ov.clips,f->fmt.win.clips,sizeof(struct v4l2_clip)*fh->ov.nclips)) {
-			up(&dev->lock);
+			mutex_unlock(&dev->lock);
 			return -EFAULT;
 		}
 
 		/* fh->ov.fh is used to indicate that we have valid overlay informations, too */
 		fh->ov.fh = fh;
 
-		up(&dev->lock);
+		mutex_unlock(&dev->lock);
 
 		/* check if our current overlay is active */
 		if (IS_OVERLAY_ACTIVE(fh) != 0) {
@@ -516,7 +516,7 @@ static int set_control(struct saa7146_fh *fh, struct v4l2_control *c)
 		return -EINVAL;
 	}
 
-	down(&dev->lock);
+	mutex_lock(&dev->lock);
 
 	switch (ctrl->type) {
 	case V4L2_CTRL_TYPE_BOOLEAN:
@@ -560,7 +560,7 @@ static int set_control(struct saa7146_fh *fh, struct v4l2_control *c)
 		/* fixme: we can support changing VFLIP and HFLIP here... */
 		if (IS_CAPTURE_ACTIVE(fh) != 0) {
 			DEB_D(("V4L2_CID_HFLIP while active capture.\n"));
-			up(&dev->lock);
+			mutex_unlock(&dev->lock);
 			return -EINVAL;
 		}
 		vv->hflip = c->value;
@@ -568,7 +568,7 @@ static int set_control(struct saa7146_fh *fh, struct v4l2_control *c)
 	case V4L2_CID_VFLIP:
 		if (IS_CAPTURE_ACTIVE(fh) != 0) {
 			DEB_D(("V4L2_CID_VFLIP while active capture.\n"));
-			up(&dev->lock);
+			mutex_unlock(&dev->lock);
 			return -EINVAL;
 		}
 		vv->vflip = c->value;
@@ -577,7 +577,7 @@ static int set_control(struct saa7146_fh *fh, struct v4l2_control *c)
 		return -EINVAL;
 	}
 	}
-	up(&dev->lock);
+	mutex_unlock(&dev->lock);
 
 	if (IS_OVERLAY_ACTIVE(fh) != 0) {
 		saa7146_stop_preview(fh);
@@ -887,7 +887,7 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 
 		DEB_EE(("VIDIOC_QUERYCAP\n"));
 
-                strcpy(cap->driver, "saa7146 v4l2");
+		strcpy(cap->driver, "saa7146 v4l2");
 		strlcpy(cap->card, dev->ext->name, sizeof(cap->card));
 		sprintf(cap->bus_info,"PCI:%s", pci_name(dev->pci));
 		cap->version = SAA7146_VERSION_CODE;
@@ -939,7 +939,7 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 			}
 		}
 
-		down(&dev->lock);
+		mutex_lock(&dev->lock);
 
 		/* ok, accept it */
 		vv->ov_fb = *fb;
@@ -948,7 +948,7 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 			vv->ov_fb.fmt.bytesperline =
 				vv->ov_fb.fmt.width*fmt->depth/8;
 
-		up(&dev->lock);
+		mutex_unlock(&dev->lock);
 
 		return 0;
 	}
@@ -1011,19 +1011,19 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 		err = set_control(fh,arg);
 		return err;
 	}
-        case VIDIOC_G_PARM:
-        {
-                struct v4l2_streamparm *parm = arg;
+	case VIDIOC_G_PARM:
+	{
+		struct v4l2_streamparm *parm = arg;
 		if( parm->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ) {
 			return -EINVAL;
 		}
-                memset(&parm->parm.capture,0,sizeof(struct v4l2_captureparm));
+		memset(&parm->parm.capture,0,sizeof(struct v4l2_captureparm));
 		parm->parm.capture.readbuffers = 1;
 		// fixme: only for PAL!
 		parm->parm.capture.timeperframe.numerator = 1;
 		parm->parm.capture.timeperframe.denominator = 25;
-                return 0;
-        }
+		return 0;
+	}
 	case VIDIOC_G_FMT:
 	{
 		struct v4l2_format *f = arg;
@@ -1086,7 +1086,7 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 			}
 		}
 
-		down(&dev->lock);
+		mutex_lock(&dev->lock);
 
 		for(i = 0; i < dev->ext_vv_data->num_stds; i++)
 			if (*id & dev->ext_vv_data->stds[i].id)
@@ -1098,7 +1098,7 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 			found = 1;
 		}
 
-		up(&dev->lock);
+		mutex_unlock(&dev->lock);
 
 		if (vv->ov_suspend != NULL) {
 			saa7146_start_preview(vv->ov_suspend);
@@ -1114,10 +1114,6 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 		return 0;
 	}
 	case VIDIOC_OVERLAY:
-
-
-
-
 	{
 		int on = *(int *)arg;
 		int err = 0;
@@ -1205,11 +1201,11 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 		DEB_D(("VIDIOCGMBUF \n"));
 
 		q = &fh->video_q;
-		down(&q->lock);
+		mutex_lock(&q->lock);
 		err = videobuf_mmap_setup(q,gbuffers,gbufsize,
 					  V4L2_MEMORY_MMAP);
 		if (err < 0) {
-			up(&q->lock);
+			mutex_unlock(&q->lock);
 			return err;
 		}
 		memset(mbuf,0,sizeof(*mbuf));
@@ -1217,7 +1213,7 @@ int saa7146_video_do_ioctl(struct inode *inode, struct file *file, unsigned int 
 		mbuf->size   = gbuffers * gbufsize;
 		for (i = 0; i < gbuffers; i++)
 			mbuf->offsets[i] = i * gbufsize;
-		up(&q->lock);
+		mutex_unlock(&q->lock);
 		return 0;
 	}
 	default:
@@ -1279,7 +1275,7 @@ static int buffer_prepare(struct videobuf_queue *q,
 	    buf->vb.field  != field      ||
 	    buf->vb.field  != fh->video_fmt.field  ||
 	    buf->fmt       != &fh->video_fmt) {
-		saa7146_dma_free(dev,buf);
+		saa7146_dma_free(dev,q,buf);
 	}
 
 	if (STATE_NEEDS_INIT == buf->vb.state) {
@@ -1308,7 +1304,7 @@ static int buffer_prepare(struct videobuf_queue *q,
 			saa7146_pgtable_alloc(dev->pci, &buf->pt[0]);
 		}
 
-		err = videobuf_iolock(dev->pci,&buf->vb, &vv->ov_fb);
+		err = videobuf_iolock(q,&buf->vb, &vv->ov_fb);
 		if (err)
 			goto oops;
 		err = saa7146_pgtable_build(dev,buf);
@@ -1322,7 +1318,7 @@ static int buffer_prepare(struct videobuf_queue *q,
 
  oops:
 	DEB_D(("error out.\n"));
-	saa7146_dma_free(dev,buf);
+	saa7146_dma_free(dev,q,buf);
 
 	return err;
 }
@@ -1359,7 +1355,6 @@ static void buffer_queue(struct videobuf_queue *q, struct videobuf_buffer *vb)
 	saa7146_buffer_queue(fh->dev,&vv->video_q,buf);
 }
 
-
 static void buffer_release(struct videobuf_queue *q, struct videobuf_buffer *vb)
 {
 	struct file *file = q->priv_data;
@@ -1368,7 +1363,7 @@ static void buffer_release(struct videobuf_queue *q, struct videobuf_buffer *vb)
 	struct saa7146_buf *buf = (struct saa7146_buf *)vb;
 
 	DEB_CAP(("vbuf:%p\n",vb));
-	saa7146_dma_free(dev,buf);
+	saa7146_dma_free(dev,q,buf);
 }
 
 static struct videobuf_queue_ops video_qops = {
@@ -1383,7 +1378,7 @@ static struct videobuf_queue_ops video_qops = {
 
 static void video_init(struct saa7146_dev *dev, struct saa7146_vv *vv)
 {
-        INIT_LIST_HEAD(&vv->video_q.queue);
+	INIT_LIST_HEAD(&vv->video_q.queue);
 
 	init_timer(&vv->video_q.timeout);
 	vv->video_q.timeout.function = saa7146_buffer_timeout;
@@ -1419,7 +1414,7 @@ static int video_open(struct saa7146_dev *dev, struct file *file)
 			    sizeof(struct saa7146_buf),
 			    file);
 
-	init_MUTEX(&fh->video_q.lock);
+	mutex_init(&fh->video_q.lock);
 
 	return 0;
 }

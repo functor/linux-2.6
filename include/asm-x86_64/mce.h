@@ -67,6 +67,11 @@ struct mce_log {
 /* Software defined banks */
 #define MCE_EXTENDED_BANK	128
 #define MCE_THERMAL_BANK	MCE_EXTENDED_BANK + 0
+#define MCE_THRESHOLD_BASE      MCE_EXTENDED_BANK + 1 /* MCE_AMD */
+#define MCE_THRESHOLD_DRAM_ECC  MCE_THRESHOLD_BASE + 4
+
+#ifdef __KERNEL__
+#include <asm/atomic.h>
 
 void mce_log(struct mce *m);
 #ifdef CONFIG_X86_MCE_INTEL
@@ -75,6 +80,18 @@ void mce_intel_feature_init(struct cpuinfo_x86 *c);
 static inline void mce_intel_feature_init(struct cpuinfo_x86 *c)
 {
 }
+#endif
+
+#ifdef CONFIG_X86_MCE_AMD
+void mce_amd_feature_init(struct cpuinfo_x86 *c);
+#else
+static inline void mce_amd_feature_init(struct cpuinfo_x86 *c)
+{
+}
+#endif
+
+extern atomic_t mce_entry;
+
 #endif
 
 #endif

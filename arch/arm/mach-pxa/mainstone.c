@@ -14,12 +14,15 @@
  */
 
 #include <linux/init.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <linux/sysdev.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
 #include <linux/bitops.h>
 #include <linux/fb.h>
+#include <linux/ioport.h>
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/partitions.h>
 
 #include <asm/types.h>
 #include <asm/setup.h>
@@ -27,16 +30,20 @@
 #include <asm/mach-types.h>
 #include <asm/hardware.h>
 #include <asm/irq.h>
+#include <asm/sizes.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
+#include <asm/mach/flash.h>
 
 #include <asm/arch/pxa-regs.h>
 #include <asm/arch/mainstone.h>
 #include <asm/arch/audio.h>
 #include <asm/arch/pxafb.h>
 #include <asm/arch/mmc.h>
+#include <asm/arch/irda.h>
+#include <asm/arch/ohci.h>
 
 #include "generic.h"
 
@@ -72,7 +79,7 @@ static void mainstone_irq_handler(unsigned int irq, struct irqdesc *desc,
 		if (likely(pending)) {
 			irq = MAINSTONE_IRQ(0) + __ffs(pending);
 			desc = irq_desc + irq;
-			desc->handle(irq, desc, regs);
+			desc_handle_irq(irq, desc, regs);
 		}
 		pending = MST_INTSETCLR & mainstone_irq_enabled;
 	} while (pending);
@@ -88,7 +95,10 @@ static void __init mainstone_init_irq(void)
 	for(irq = MAINSTONE_IRQ(0); irq <= MAINSTONE_IRQ(15); irq++) {
 		set_irq_chip(irq, &mainstone_irq_chip);
 		set_irq_handler(irq, do_level_IRQ);
-		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
+		if (irq == MAINSTONE_IRQ(10) || irq == MAINSTONE_IRQ(14))
+			set_irq_flags(irq, IRQF_VALID | IRQF_PROBE | IRQF_NOAUTOEN);
+		else
+			set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 	set_irq_flags(MAINSTONE_IRQ(8), 0);
 	set_irq_flags(MAINSTONE_IRQ(12), 0);
@@ -150,14 +160,14 @@ static struct platform_device smc91x_device = {
 	.resource	= smc91x_resources,
 };
 
-static int mst_audio_startup(snd_pcm_substream_t *substream, void *priv)
+static int mst_audio_startup(struct snd_pcm_substream *substream, void *priv)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		MST_MSCWR2 &= ~MST_MSCWR2_AC97_SPKROFF;
 	return 0;
 }
 
-static void mst_audio_shutdown(snd_pcm_substream_t *substream, void *priv)
+static void mst_audio_shutdown(struct snd_pcm_substream *substream, void *priv)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		MST_MSCWR2 |= MST_MSCWR2_AC97_SPKROFF;
@@ -187,6 +197,69 @@ static struct platform_device mst_audio_device = {
 	.name		= "pxa2xx-ac97",
 	.id		= -1,
 	.dev		= { .platform_data = &mst_audio_ops },
+};
+
+static struct resource flash_resources[] = {
+	[0] = {
+		.start	= PXA_CS0_PHYS,
+		.end	= PXA_CS0_PHYS + SZ_64M - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= PXA_CS1_PHYS,
+		.end	= PXA_CS1_PHYS + SZ_64M - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+static struct mtd_partition mainstoneflash0_partitions[] = {
+	{
+		.name =		"Bootloader",
+		.size =		0x00040000,
+		.offset =	0,
+		.mask_flags =	MTD_WRITEABLE  /* force read-only */
+	},{
+		.name =		"Kernel",
+		.size =		0x00400000,
+		.offset =	0x00040000,
+	},{
+		.name =		"Filesystem",
+		.size =		MTDPART_SIZ_FULL,
+		.offset =	0x00440000
+	}
+};
+
+static struct flash_platform_data mst_flash_data[2] = {
+	{
+		.map_name	= "cfi_probe",
+		.parts		= mainstoneflash0_partitions,
+		.nr_parts	= ARRAY_SIZE(mainstoneflash0_partitions),
+	}, {
+		.map_name	= "cfi_probe",
+		.parts		= NULL,
+		.nr_parts	= 0,
+	}
+};
+
+static struct platform_device mst_flash_device[2] = {
+	{
+		.name		= "pxa2xx-flash",
+		.id		= 0,
+		.dev = {
+			.platform_data = &mst_flash_data[0],
+		},
+		.resource = &flash_resources[0],
+		.num_resources = 1,
+	},
+	{
+		.name		= "pxa2xx-flash",
+		.id		= 1,
+		.dev = {
+			.platform_data = &mst_flash_data[1],
+		},
+		.resource = &flash_resources[1],
+		.num_resources = 1,
+	},
 };
 
 static void mainstone_backlight_power(int on)
@@ -294,16 +367,82 @@ static struct pxamci_platform_data mainstone_mci_platform_data = {
 	.exit		= mainstone_mci_exit,
 };
 
+static void mainstone_irda_transceiver_mode(struct device *dev, int mode)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	if (mode & IR_SIRMODE) {
+		MST_MSCWR1 &= ~MST_MSCWR1_IRDA_FIR;
+	} else if (mode & IR_FIRMODE) {
+		MST_MSCWR1 |= MST_MSCWR1_IRDA_FIR;
+	}
+	if (mode & IR_OFF) {
+		MST_MSCWR1 = (MST_MSCWR1 & ~MST_MSCWR1_IRDA_MASK) | MST_MSCWR1_IRDA_OFF;
+	} else {
+		MST_MSCWR1 = (MST_MSCWR1 & ~MST_MSCWR1_IRDA_MASK) | MST_MSCWR1_IRDA_FULL;
+	}
+	local_irq_restore(flags);
+}
+
+static struct pxaficp_platform_data mainstone_ficp_platform_data = {
+	.transceiver_cap  = IR_SIRMODE | IR_FIRMODE | IR_OFF,
+	.transceiver_mode = mainstone_irda_transceiver_mode,
+};
+
+static struct platform_device *platform_devices[] __initdata = {
+	&smc91x_device,
+	&mst_audio_device,
+	&mst_flash_device[0],
+	&mst_flash_device[1],
+};
+
+static int mainstone_ohci_init(struct device *dev)
+{
+	/* setup Port1 GPIO pin. */
+	pxa_gpio_mode( 88 | GPIO_ALT_FN_1_IN);	/* USBHPWR1 */
+	pxa_gpio_mode( 89 | GPIO_ALT_FN_2_OUT);	/* USBHPEN1 */
+
+	/* Set the Power Control Polarity Low and Power Sense
+	   Polarity Low to active low. */
+	UHCHR = (UHCHR | UHCHR_PCPL | UHCHR_PSPL) &
+		~(UHCHR_SSEP1 | UHCHR_SSEP2 | UHCHR_SSEP3 | UHCHR_SSE);
+
+	return 0;
+}
+
+static struct pxaohci_platform_data mainstone_ohci_platform_data = {
+	.port_mode	= PMM_PERPORT_MODE,
+	.init		= mainstone_ohci_init,
+};
+
 static void __init mainstone_init(void)
 {
+	int SW7 = 0;  /* FIXME: get from SCR (Mst doc section 3.2.1.1) */
+
+	mst_flash_data[0].width = (BOOT_DEF & 1) ? 2 : 4;
+	mst_flash_data[1].width = 4;
+
+	/* Compensate for SW7 which swaps the flash banks */
+	mst_flash_data[SW7].name = "processor-flash";
+	mst_flash_data[SW7 ^ 1].name = "mainboard-flash";
+
+	printk(KERN_NOTICE "Mainstone configured to boot from %s\n",
+	       mst_flash_data[0].name);
+
+	/* system bus arbiter setting
+	 * - Core_Park
+	 * - LCD_wt:DMA_wt:CORE_Wt = 2:3:4
+	 */
+	ARB_CNTRL = ARB_CORE_PARK | 0x234;
+
 	/*
 	 * On Mainstone, we route AC97_SYSCLK via GPIO45 to
 	 * the audio daughter card
 	 */
 	pxa_gpio_mode(GPIO45_SYSCLK_AC97_MD);
 
-	platform_device_register(&smc91x_device);
-	platform_device_register(&mst_audio_device);
+	platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
 
 	/* reading Mainstone's "Virtual Configuration Register"
 	   might be handy to select LCD type here */
@@ -313,11 +452,18 @@ static void __init mainstone_init(void)
 		set_pxa_fb_info(&toshiba_ltm035a776c);
 
 	pxa_set_mci_info(&mainstone_mci_platform_data);
+	pxa_set_ficp_info(&mainstone_ficp_platform_data);
+	pxa_set_ohci_info(&mainstone_ohci_platform_data);
 }
 
 
 static struct map_desc mainstone_io_desc[] __initdata = {
-  { MST_FPGA_VIRT, MST_FPGA_PHYS, 0x00100000, MT_DEVICE }, /* CPLD */
+  	{	/* CPLD */
+		.virtual	=  MST_FPGA_VIRT,
+		.pfn		= __phys_to_pfn(MST_FPGA_PHYS),
+		.length		= 0x00100000,
+		.type		= MT_DEVICE
+	}
 };
 
 static void __init mainstone_map_io(void)
@@ -345,10 +491,12 @@ static void __init mainstone_map_io(void)
 }
 
 MACHINE_START(MAINSTONE, "Intel HCDDBBVA0 Development Platform (aka Mainstone)")
-	MAINTAINER("MontaVista Software Inc.")
-	BOOT_MEM(0xa0000000, 0x40000000, io_p2v(0x40000000))
-	MAPIO(mainstone_map_io)
-	INITIRQ(mainstone_init_irq)
+	/* Maintainer: MontaVista Software Inc. */
+	.phys_io	= 0x40000000,
+	.boot_params	= 0xa0000100,	/* BLOB boot parameter setting */
+	.io_pg_offst	= (io_p2v(0x40000000) >> 18) & 0xfffc,
+	.map_io		= mainstone_map_io,
+	.init_irq	= mainstone_init_irq,
 	.timer		= &pxa_timer,
-	INIT_MACHINE(mainstone_init)
+	.init_machine	= mainstone_init,
 MACHINE_END

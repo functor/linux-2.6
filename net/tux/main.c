@@ -68,7 +68,7 @@ static inline int accept_pending (threadinfo_t *ti)
 			break;
 		if (!ti->listen[j].sock)
 			break;
-		if (tcp_sk(ti->listen[j].sock->sk)->accept_queue)
+		if (!reqsk_queue_empty(&inet_csk(ti->listen[j].sock->sk)->icsk_accept_queue))
 			return 1;
 	}
 	return 0;
@@ -242,7 +242,7 @@ static int user_req_startup (void)
 
 	/*
 	 * Look up the HTTP and FTP document root.
-	 * (typically they are shared, but can be 
+	 * (typically they are shared, but can be
 	 * different directories.)
 	 */
 	docroot = &tux_proto_http.main_docroot;
@@ -281,9 +281,9 @@ abort:
 	start_log_thread();
 
 	nr_tux_threads = tux_threads;
-	if (nr_tux_threads < 1) 
+	if (nr_tux_threads < 1)
 		nr_tux_threads = 1;
-	if (nr_tux_threads > CONFIG_TUX_NUMTHREADS) 
+	if (nr_tux_threads > CONFIG_TUX_NUMTHREADS)
 		nr_tux_threads = CONFIG_TUX_NUMTHREADS;
 	tux_threads = nr_tux_threads;
 
@@ -444,7 +444,7 @@ static int user_req_start_thread (threadinfo_t *ti)
 	struct k_sigaction *ka;
 
 	cpu = ti->cpu;
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	{
 		unsigned int home_cpu;
 		cpumask_t map;
@@ -454,7 +454,7 @@ static int user_req_start_thread (threadinfo_t *ti)
 
 		cpus_and(map, map, cpu_online_map);
 		if (!(cpus_empty(map)))
-			set_cpus_allowed(current, map);		
+			set_cpus_allowed(current, map);
 	}
 #endif
 	ti->thread = current;
@@ -625,7 +625,7 @@ static void flush_all_requests (threadinfo_t *ti)
 		if (count)
 			continue;
 		Dprintk("flush_all_requests: %d requests still waiting.\n", ti->nr_requests);
-#if TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		count = print_all_requests(ti);
 		Dprintk("flush_all_requests: printed %d requests.\n", count);
 #endif
@@ -856,12 +856,12 @@ static int register_mimetype(user_req_t *u_info)
 		GOTO_ERR_no_unlock;
 	mimetype[ret] = 0;
 	Dprintk("got MIME type: %s.\n", mimetype);
-        ret = strncpy_from_user(expires, u_info->cache_control, MAX_URI_LEN);
-        if (ret >= 0)
-        	expires[ret] = 0;
+       ret = strncpy_from_user(expires, u_info->cache_control, MAX_URI_LEN);
+       if (ret >= 0)
+		expires[ret] = 0;
 	else
 		expires[0] = 0;
-        Dprintk("got expires header: %s.\n", expires);
+       Dprintk("got expires header: %s.\n", expires);
 
 	add_mimetype(extension, mimetype, expires);
 	ret = 0;
@@ -999,8 +999,8 @@ asmlinkage long __sys_tux (unsigned int action, user_req_t *u_info)
 			TUX_BUG();
 
 	if (!capable(CAP_SYS_ADMIN)
-		 	&& (action != TUX_ACTION_CONTINUE_REQ) &&
-		 		(action != TUX_ACTION_STOPTHREAD))
+			&& (action != TUX_ACTION_CONTINUE_REQ) &&
+				(action != TUX_ACTION_STOPTHREAD))
 		goto userspace_actions;
 
 	switch (action) {
@@ -1068,7 +1068,7 @@ asmlinkage long __sys_tux (unsigned int action, user_req_t *u_info)
 			req = ti->userspace_req;
 			if (req)
 				zap_userspace_req(req);
-			
+
 			lock_kernel();
 			ret = user_req_stop_thread(ti);
 			unlock_kernel();
@@ -1191,7 +1191,7 @@ eventloop:
 
 			if (!req->dentry)
 				GOTO_ERR_unlock;
-			
+
 			ret = copy_from_user(&u_addr, &u_info->object_addr,
 					sizeof(u_addr));
 			if (ret)
@@ -1382,9 +1382,12 @@ void tux_exit (void)
 
 int tux_init(void)
 {
+	if (init_tux_request_slabs())
+		return -ENOMEM;
+
 	start_sysctl();
 
-#if CONFIG_TUX_MODULE
+#ifdef CONFIG_TUX_MODULE
 	spin_lock(&tux_module_lock);
 	sys_tux_ptr = __sys_tux;
 	tux_module = THIS_MODULE;
@@ -1396,14 +1399,15 @@ int tux_init(void)
 
 void tux_cleanup (void)
 {
-#if CONFIG_TUX_MODULE
+#ifdef CONFIG_TUX_MODULE
 	spin_lock(&tux_module_lock);
 	tux_module = NULL;
 	sys_tux_ptr = NULL;
 	spin_unlock(&tux_module_lock);
 #endif
-
 	end_sysctl();
+
+	free_tux_request_slabs();
 }
 
 module_init(tux_init)

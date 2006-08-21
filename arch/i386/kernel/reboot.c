@@ -2,6 +2,7 @@
  *  linux/arch/i386/kernel/reboot.c
  */
 
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/delay.h>
@@ -10,8 +11,11 @@
 #include <linux/mc146818rtc.h>
 #include <linux/efi.h>
 #include <linux/dmi.h>
+#include <linux/ctype.h>
+#include <linux/pm.h>
 #include <asm/uaccess.h>
 #include <asm/apic.h>
+#include <asm/desc.h>
 #include "mach_reboot.h"
 #include <linux/reboot_fixups.h>
 
@@ -19,14 +23,13 @@
  * Power off function, if any
  */
 void (*pm_power_off)(void);
+EXPORT_SYMBOL(pm_power_off);
 
 static int reboot_mode;
 static int reboot_thru_bios;
 
 #ifdef CONFIG_SMP
 static int reboot_cpu = -1;
-/* shamelessly grabbed from lib/vsprintf.c for readability */
-#define is_digit(c)	((c) >= '0' && (c) <= '9')
 #endif
 static int __init reboot_setup(char *str)
 {
@@ -46,9 +49,9 @@ static int __init reboot_setup(char *str)
 			break;
 #ifdef CONFIG_SMP
 		case 's': /* "smp" reboot by executing reset on BSP or other CPU*/
-			if (is_digit(*(str+1))) {
+			if (isdigit(*(str+1))) {
 				reboot_cpu = (int) (*(str+1) - '0');
-				if (is_digit(*(str+2))) 
+				if (isdigit(*(str+2)))
 					reboot_cpu = reboot_cpu*10 + (int)(*(str+2) - '0');
 			}
 				/* we will leave sorting out the final value 
@@ -107,6 +110,22 @@ static struct dmi_system_id __initdata reboot_dmi_table[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Dell Computer Corporation"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "PowerEdge 2400"),
+		},
+	},
+	{	/* Handle problems with rebooting on HP laptops */
+		.callback = set_bios_reboot,
+		.ident = "HP Compaq Laptop",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP Compaq"),
+		},
+	},
+	{	/* HP laptops have weird reboot issues */
+		.callback = set_bios_reboot,
+		.ident = "HP Laptop",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP Compaq"),
 		},
 	},
 	{ }
@@ -240,13 +259,13 @@ void machine_real_restart(unsigned char *code, int length)
 
 	/* Set up the IDT for real mode. */
 
-	__asm__ __volatile__ ("lidt %0" : : "m" (real_mode_idt));
+	load_idt(&real_mode_idt);
 
 	/* Set up a GDT from which we can load segment descriptors for real
 	   mode.  The GDT is not used in real mode; it is just needed here to
 	   prepare the descriptors. */
 
-	__asm__ __volatile__ ("lgdt %0" : : "m" (real_mode_gdt));
+	load_gdt(&real_mode_gdt);
 
 	/* Load the data segment registers, and thus the descriptors ready for
 	   real mode.  The base address of each segment is 0x100, 16 times the
@@ -269,6 +288,9 @@ void machine_real_restart(unsigned char *code, int length)
 				:
 				: "i" ((void *) (0x1000 - sizeof (real_mode_switch) - 100)));
 }
+#ifdef CONFIG_APM_MODULE
+EXPORT_SYMBOL(machine_real_restart);
+#endif
 
 void machine_shutdown(void)
 {
@@ -279,7 +301,7 @@ void machine_shutdown(void)
 	reboot_cpu_id = 0;
 
 	/* See if there has been given a command line override */
-	if ((reboot_cpu_id != -1) && (reboot_cpu < NR_CPUS) &&
+	if ((reboot_cpu != -1) && (reboot_cpu < NR_CPUS) &&
 		cpu_isset(reboot_cpu, cpu_online_map)) {
 		reboot_cpu_id = reboot_cpu;
 	}
@@ -306,14 +328,12 @@ void machine_shutdown(void)
 #endif
 }
 
-void machine_restart(char * __unused)
+void machine_emergency_restart(void)
 {
-	machine_shutdown();
-
 	if (!reboot_thru_bios) {
 		if (efi_enabled) {
 			efi.reset_system(EFI_RESET_COLD, EFI_SUCCESS, 0, NULL);
-			__asm__ __volatile__("lidt %0": :"m" (no_idt));
+			load_idt(&no_idt);
 			__asm__ __volatile__("int3");
 		}
 		/* rebooting needs to touch the page at absolute addr 0 */
@@ -322,7 +342,7 @@ void machine_restart(char * __unused)
 			mach_reboot_fixups(); /* for board specific fixups */
 			mach_reboot();
 			/* That didn't work - force a triple fault.. */
-			__asm__ __volatile__("lidt %0": :"m" (no_idt));
+			load_idt(&no_idt);
 			__asm__ __volatile__("int3");
 		}
 	}
@@ -332,23 +352,22 @@ void machine_restart(char * __unused)
 	machine_real_restart(jump_to_bios, sizeof(jump_to_bios));
 }
 
-EXPORT_SYMBOL(machine_restart);
+void machine_restart(char * __unused)
+{
+	machine_shutdown();
+	machine_emergency_restart();
+}
 
 void machine_halt(void)
 {
 }
 
-EXPORT_SYMBOL(machine_halt);
-
 void machine_power_off(void)
 {
-	lapic_shutdown();
-
-	if (efi_enabled)
-		efi.reset_system(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, NULL);
-	if (pm_power_off)
+	if (pm_power_off) {
+		machine_shutdown();
 		pm_power_off();
+	}
 }
 
-EXPORT_SYMBOL(machine_power_off);
 

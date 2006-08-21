@@ -2944,7 +2944,7 @@ alloc_new_info(void)
 {
 	awe_voice_list *newlist;
 	
-	newlist = (awe_voice_list *)kmalloc(sizeof(*newlist), GFP_KERNEL);
+	newlist = kmalloc(sizeof(*newlist), GFP_KERNEL);
 	if (newlist == NULL) {
 		printk(KERN_ERR "AWE32: can't alloc info table\n");
 		return NULL;
@@ -3547,8 +3547,10 @@ awe_load_guspatch(const char __user *addr, int offs, int size, int pmgr_flag)
 	smp->checksum_flag = 0;
 	smp->checksum = 0;
 
-	if ((rc = awe_write_wave_data(addr, sizeof_patch, smprec, -1)) < 0)
+	if ((rc = awe_write_wave_data(addr, sizeof_patch, smprec, -1)) < 0) {
+		kfree(vrec);
 		return rc;
+	}
 	sf->mem_ptr += rc;
 	add_sf_sample(sf, smprec);
 
@@ -6062,7 +6064,7 @@ static int awe_pnp_probe(struct pnp_dev *dev, const struct pnp_device_id *dev_id
 	io1 = pnp_port_start(dev,0);
 	io2 = pnp_port_start(dev,1);
 	io3 = pnp_port_start(dev,2);
-	printk(KERN_INFO "AWE32: A PnP Wave Table was detected at IO's %#x,%#x,%#x\n.",
+	printk(KERN_INFO "AWE32: A PnP Wave Table was detected at IO's %#x,%#x,%#x.\n",
 	       io1, io2, io3);
 	setup_ports(io1, io2, io3);
 

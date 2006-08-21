@@ -1,6 +1,4 @@
 /*
- * arch/ppc/syslib/gt64260_pic.c
- *
  * Interrupt controller support for Galileo's GT64260.
  *
  * Author: Chris Zankel <source@mvista.com>
@@ -45,6 +43,7 @@
 #include <asm/system.h>
 #include <asm/irq.h>
 #include <asm/mv64x60.h>
+#include <asm/machdep.h>
 
 #define CPU_INTR_STR	"gt64260 cpu interface error"
 #define PCI0_INTR_STR	"gt64260 pci 0 error"

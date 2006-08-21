@@ -41,7 +41,7 @@
 #define __NR_capset		 22 /* Linux Specific				   */
 #define __NR_setuid              23 /* Implemented via setreuid in SunOS           */
 #define __NR_getuid              24 /* Common                                      */
-/* #define __NR_time alias	 25    ENOSYS under SunOS			   */
+#define __NR_vmsplice	         25 /* ENOSYS under SunOS			   */
 #define __NR_ptrace              26 /* Common                                      */
 #define __NR_alarm               27 /* Implemented via setitimer in SunOS          */
 #define __NR_sigaltstack	 28 /* Common					   */
@@ -167,12 +167,12 @@
 #define __NR_pciconfig_read	148 /* ENOSYS under SunOS                          */
 #define __NR_pciconfig_write	149 /* ENOSYS under SunOS                          */
 #define __NR_getsockname        150 /* Common                                      */
-/* #define __NR_getmsg          151    SunOS Specific                              */
-/* #define __NR_putmsg          152    SunOS Specific                              */
+#define __NR_inotify_init       151 /* Linux specific                              */
+#define __NR_inotify_add_watch  152 /* Linux specific                              */
 #define __NR_poll               153 /* Common                                      */
 #define __NR_getdents64		154 /* Linux specific				   */
 /* #define __NR_fcntl64         155    Linux sparc32 Specific                      */
-/* #define __NR_getdirentries   156    SunOS Specific                              */
+#define __NR_inotify_rm_watch   156 /* Linux specific				   */
 #define __NR_statfs             157 /* Common                                      */
 #define __NR_fstatfs            158 /* Common                                      */
 #define __NR_umount             159 /* Common                                      */
@@ -212,7 +212,7 @@
 #define __NR_epoll_create       193 /* Linux Specific                              */
 #define __NR_epoll_ctl          194 /* Linux Specific                              */
 #define __NR_epoll_wait         195 /* Linux Specific                              */
-/* #define __NR_ulimit          196    Linux Specific                              */
+#define __NR_ioprio_set         196 /* Linux Specific                              */
 #define __NR_getppid            197 /* Linux Specific                              */
 #define __NR_sigaction          198 /* Linux Specific                              */
 #define __NR_sgetmask           199 /* Linux Specific                              */
@@ -234,7 +234,7 @@
 #define __NR_ipc                215 /* Linux Specific                              */
 #define __NR_sigreturn          216 /* Linux Specific                              */
 #define __NR_clone              217 /* Linux Specific                              */
-/* #define __NR_modify_ldt      218    Linux Specific - i386 specific, unused      */
+#define __NR_ioprio_get         218 /* Linux Specific                              */
 #define __NR_adjtimex           219 /* Linux Specific                              */
 #define __NR_sigprocmask        220 /* Linux Specific                              */
 #define __NR_create_module      221 /* Linux Specific                              */
@@ -250,7 +250,7 @@
 #ifdef __KERNEL__
 #define __NR_time		231 /* Linux sparc32                               */
 #endif
-/* #define __NR_oldstat         232    Linux Specific                              */
+#define __NR_splice             232 /* Linux Specific                              */
 #define __NR_stime              233 /* Linux Specific                              */
 #define __NR_statfs64           234 /* Linux Specific                              */
 #define __NR_fstatfs64          235 /* Linux Specific                              */
@@ -273,7 +273,7 @@
 #define __NR_getsid             252
 #define __NR_fdatasync          253
 #define __NR_nfsservctl         254
-#define __NR_aplib              255
+#define __NR_sync_file_range	255
 #define __NR_clock_settime	256
 #define __NR_clock_gettime	257
 #define __NR_clock_getres	258
@@ -298,15 +298,33 @@
 #define __NR_mq_notify		277
 #define __NR_mq_getsetattr	278
 #define __NR_waitid		279
-/*#define __NR_sys_setaltroot	280 available (was setaltroot) */
+#define __NR_tee		280
 #define __NR_add_key		281
 #define __NR_request_key	282
 #define __NR_keyctl		283
+#define __NR_openat		284
+#define __NR_mkdirat		285
+#define __NR_mknodat		286
+#define __NR_fchownat		287
+#define __NR_futimesat		288
+#define __NR_fstatat64		289
+#define __NR_unlinkat		290
+#define __NR_renameat		291
+#define __NR_linkat		292
+#define __NR_symlinkat		293
+#define __NR_readlinkat		294
+#define __NR_fchmodat		295
+#define __NR_faccessat		296
+#define __NR_pselect6		297
+#define __NR_ppoll		298
+#define __NR_unshare		299
+#define __NR_set_robust_list	300
+#define __NR_get_robust_list	301
 
-/* WARNING: You MAY NOT add syscall numbers larger than 283, since
+/* WARNING: You MAY NOT add syscall numbers larger than 301, since
  *          all of the syscall tables in the Sparc kernel are
- *          sized to have 283 entries (starting at zero).  Therefore
- *          find a free slot in the 0-282 range.
+ *          sized to have 301 entries (starting at zero).  Therefore
+ *          find a free slot in the 0-301 range.
  */
 
 #define _syscall0(type,name) \
@@ -501,6 +519,8 @@ asmlinkage long sys_rt_sigaction(int sig,
 #define __ARCH_WANT_SYS_OLDUMOUNT
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
+#define __ARCH_WANT_SYS_RT_SIGSUSPEND
+#define __ARCH_WANT_COMPAT_SYS_RT_SIGSUSPEND
 #endif
 
 /*

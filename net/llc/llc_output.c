@@ -30,7 +30,8 @@
  *	Fills MAC header fields, depending on MAC type. Returns 0, If MAC type
  *	is a valid type and initialization completes correctly 1, otherwise.
  */
-int llc_mac_hdr_init(struct sk_buff *skb, unsigned char *sa, unsigned char *da)
+int llc_mac_hdr_init(struct sk_buff *skb,
+		     const unsigned char *sa, const unsigned char *da)
 {
 	int rc = 0;
 
@@ -98,7 +99,7 @@ int llc_build_and_send_ui_pkt(struct llc_sap *sap, struct sk_buff *skb,
 			    dsap, LLC_PDU_CMD);
 	llc_pdu_init_as_ui_cmd(skb);
 	rc = llc_mac_hdr_init(skb, skb->dev->dev_addr, dmac);
-	if (!rc)
+	if (likely(!rc))
 		rc = dev_queue_xmit(skb);
 	return rc;
 }

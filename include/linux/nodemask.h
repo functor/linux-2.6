@@ -12,6 +12,8 @@
  * see bitmap_scnprintf() and bitmap_parse() in lib/bitmap.c.
  * For details of nodelist_scnprintf() and nodelist_parse(), see
  * bitmap_scnlistprintf() and bitmap_parselist(), also in bitmap.c.
+ * For details of node_remap(), see bitmap_bitremap in lib/bitmap.c.
+ * For details of nodes_remap(), see bitmap_remap in lib/bitmap.c.
  *
  * The available nodemask operations are:
  *
@@ -52,6 +54,8 @@
  * int nodemask_parse(ubuf, ulen, mask)	Parse ascii string as nodemask
  * int nodelist_scnprintf(buf, len, mask) Format nodemask as list for printing
  * int nodelist_parse(buf, map)		Parse ascii string as nodelist
+ * int node_remap(oldbit, old, new)	newbit = map(old, new)(oldbit)
+ * int nodes_remap(dst, src, old, new)	*dst = map(old, new)(dst)
  *
  * for_each_node_mask(node, mask)	for-loop node over mask
  *
@@ -80,7 +84,6 @@
 #include <linux/threads.h>
 #include <linux/bitmap.h>
 #include <linux/numa.h>
-#include <asm/bug.h>
 
 typedef struct { DECLARE_BITMAP(bits, MAX_NUMNODES); } nodemask_t;
 extern nodemask_t _unused_nodemask_arg_;
@@ -307,6 +310,22 @@ static inline int __nodelist_parse(const char *buf, nodemask_t *dstp, int nbits)
 	return bitmap_parselist(buf, dstp->bits, nbits);
 }
 
+#define node_remap(oldbit, old, new) \
+		__node_remap((oldbit), &(old), &(new), MAX_NUMNODES)
+static inline int __node_remap(int oldbit,
+		const nodemask_t *oldp, const nodemask_t *newp, int nbits)
+{
+	return bitmap_bitremap(oldbit, oldp->bits, newp->bits, nbits);
+}
+
+#define nodes_remap(dst, src, old, new) \
+		__nodes_remap(&(dst), &(src), &(old), &(new), MAX_NUMNODES)
+static inline void __nodes_remap(nodemask_t *dstp, const nodemask_t *srcp,
+		const nodemask_t *oldp, const nodemask_t *newp, int nbits)
+{
+	bitmap_remap(dstp->bits, srcp->bits, oldp->bits, newp->bits, nbits);
+}
+
 #if MAX_NUMNODES > 1
 #define for_each_node_mask(node, mask)			\
 	for ((node) = first_node(mask);			\
@@ -331,11 +350,15 @@ extern nodemask_t node_possible_map;
 #define num_possible_nodes()	nodes_weight(node_possible_map)
 #define node_online(node)	node_isset((node), node_online_map)
 #define node_possible(node)	node_isset((node), node_possible_map)
+#define first_online_node	first_node(node_online_map)
+#define next_online_node(nid)	next_node((nid), node_online_map)
 #else
 #define num_online_nodes()	1
 #define num_possible_nodes()	1
 #define node_online(node)	((node) == 0)
 #define node_possible(node)	((node) == 0)
+#define first_online_node	0
+#define next_online_node(nid)	(MAX_NUMNODES)
 #endif
 
 #define any_online_node(mask)			\

@@ -11,6 +11,7 @@
 #include <linux/string.h>
 #include <linux/time.h>
 #include <linux/in.h>
+#include <linux/mutex.h>
 #include <linux/sunrpc/svc.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/nfsd/nfsfh.h>
@@ -28,7 +29,37 @@
 #define FILE_HASH_BITS		5
 #define FILE_NRHASH		(1<<FILE_HASH_BITS)
 static struct nlm_file *	nlm_files[FILE_NRHASH];
-static DECLARE_MUTEX(nlm_file_sema);
+static DEFINE_MUTEX(nlm_file_mutex);
+
+#ifdef NFSD_DEBUG
+static inline void nlm_debug_print_fh(char *msg, struct nfs_fh *f)
+{
+	u32 *fhp = (u32*)f->data;
+
+	/* print the first 32 bytes of the fh */
+	dprintk("lockd: %s (%08x %08x %08x %08x %08x %08x %08x %08x)\n",
+		msg, fhp[0], fhp[1], fhp[2], fhp[3],
+		fhp[4], fhp[5], fhp[6], fhp[7]);
+}
+
+static inline void nlm_debug_print_file(char *msg, struct nlm_file *file)
+{
+	struct inode *inode = file->f_file->f_dentry->d_inode;
+
+	dprintk("lockd: %s %s/%ld\n",
+		msg, inode->i_sb->s_id, inode->i_ino);
+}
+#else
+static inline void nlm_debug_print_fh(char *msg, struct nfs_fh *f)
+{
+	return;
+}
+
+static inline void nlm_debug_print_file(char *msg, struct nlm_file *file)
+{
+	return;
+}
+#endif
 
 static inline unsigned int file_hash(struct nfs_fh *f)
 {
@@ -55,23 +86,19 @@ nlm_lookup_file(struct svc_rqst *rqstp, struct nlm_file **result,
 	struct nlm_file	*file;
 	unsigned int	hash;
 	u32		nfserr;
-	u32		*fhp = (u32*)f->data;
 
-	dprintk("lockd: nlm_file_lookup(%08x %08x %08x %08x %08x %08x)\n",
-		fhp[0], fhp[1], fhp[2], fhp[3], fhp[4], fhp[5]);
-
+	nlm_debug_print_fh("nlm_file_lookup", f);
 
 	hash = file_hash(f);
 
 	/* Lock file table */
-	down(&nlm_file_sema);
+	mutex_lock(&nlm_file_mutex);
 
 	for (file = nlm_files[hash]; file; file = file->f_next)
 		if (!nfs_compare_fh(&file->f_handle, f))
 			goto found;
 
-	dprintk("lockd: creating file for (%08x %08x %08x %08x %08x %08x)\n",
-		fhp[0], fhp[1], fhp[2], fhp[3], fhp[4], fhp[5]);
+	nlm_debug_print_fh("creating file for", f);
 
 	nfserr = nlm_lck_denied_nolocks;
 	file = (struct nlm_file *) kmalloc(sizeof(*file), GFP_KERNEL);
@@ -104,7 +131,7 @@ found:
 	nfserr = 0;
 
 out_unlock:
-	up(&nlm_file_sema);
+	mutex_unlock(&nlm_file_mutex);
 	return nfserr;
 
 out_free:
@@ -124,11 +151,10 @@ out_free:
 static inline void
 nlm_delete_file(struct nlm_file *file)
 {
-	struct inode *inode = file->f_file->f_dentry->d_inode;
 	struct nlm_file	**fp, *f;
 
-	dprintk("lockd: closing file %s/%ld\n",
-		inode->i_sb->s_id, inode->i_ino);
+	nlm_debug_print_file("closing file", file);
+
 	fp = nlm_files + file->f_hash;
 	while ((f = *fp) != NULL) {
 		if (f == file) {
@@ -157,7 +183,7 @@ nlm_traverse_locks(struct nlm_host *host, struct nlm_file *file, int action)
 again:
 	file->f_locks = 0;
 	for (fl = inode->i_flock; fl; fl = fl->fl_next) {
-		if (!(fl->fl_flags & FL_LOCKD))
+		if (fl->fl_lmops != &nlmsvc_lock_operations)
 			continue;
 
 		/* update current lock count */
@@ -199,9 +225,8 @@ nlm_inspect_file(struct nlm_host *host, struct nlm_file *file, int action)
 		if (file->f_count || file->f_blocks || file->f_shares)
 			return 1;
 	} else {
-		if (nlmsvc_traverse_blocks(host, file, action)
-		 || nlmsvc_traverse_shares(host, file, action))
-			return 1;
+		nlmsvc_traverse_blocks(host, file, action);
+		nlmsvc_traverse_shares(host, file, action);
 	}
 	return nlm_traverse_locks(host, file, action);
 }
@@ -215,14 +240,14 @@ nlm_traverse_files(struct nlm_host *host, int action)
 	struct nlm_file	*file, **fp;
 	int		i;
 
-	down(&nlm_file_sema);
+	mutex_lock(&nlm_file_mutex);
 	for (i = 0; i < FILE_NRHASH; i++) {
 		fp = nlm_files + i;
 		while ((file = *fp) != NULL) {
 			/* Traverse locks, blocks and shares of this file
 			 * and update file->f_locks count */
 			if (nlm_inspect_file(host, file, action)) {
-				up(&nlm_file_sema);
+				mutex_unlock(&nlm_file_mutex);
 				return 1;
 			}
 
@@ -237,7 +262,7 @@ nlm_traverse_files(struct nlm_host *host, int action)
 			}
 		}
 	}
-	up(&nlm_file_sema);
+	mutex_unlock(&nlm_file_mutex);
 	return 0;
 }
 
@@ -257,7 +282,7 @@ nlm_release_file(struct nlm_file *file)
 				file, file->f_count);
 
 	/* Lock file table */
-	down(&nlm_file_sema);
+	mutex_lock(&nlm_file_mutex);
 
 	/* If there are no more locks etc, delete the file */
 	if(--file->f_count == 0) {
@@ -265,7 +290,7 @@ nlm_release_file(struct nlm_file *file)
 			nlm_delete_file(file);
 	}
 
-	up(&nlm_file_sema);
+	mutex_unlock(&nlm_file_mutex);
 }
 
 /*

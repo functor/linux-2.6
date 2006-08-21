@@ -91,11 +91,6 @@ typedef	struct {
 
 #define EFI_PAGE_SHIFT		12
 
-/*
- * For current x86 implementations of EFI, there is
- * additional padding in the mem descriptors.  This is not
- * the case in ia64.  Need to have this fixed in the f/w.
- */
 typedef struct {
 	u32 type;
 	u32 pad;
@@ -103,9 +98,6 @@ typedef struct {
 	u64 virt_addr;
 	u64 num_pages;
 	u64 attribute;
-#if defined (__i386__)
-	u64 pad1;
-#endif
 } efi_memory_desc_t;
 
 typedef int (*efi_freemem_callback_t) (unsigned long start, unsigned long end, void *arg);
@@ -240,25 +232,29 @@ typedef struct {
 } efi_system_table_t;
 
 struct efi_memory_map {
-	efi_memory_desc_t *phys_map;
-	efi_memory_desc_t *map;
+	void *phys_map;
+	void *map;
+	void *map_end;
 	int nr_map;
 	unsigned long desc_version;
+	unsigned long desc_size;
 };
+
+#define EFI_INVALID_TABLE_ADDR		(~0UL)
 
 /*
  * All runtime access to EFI goes through this structure:
  */
 extern struct efi {
 	efi_system_table_t *systab;	/* EFI system table */
-	void *mps;			/* MPS table */
-	void *acpi;			/* ACPI table  (IA64 ext 0.71) */
-	void *acpi20;			/* ACPI table  (ACPI 2.0) */
-	void *smbios;			/* SM BIOS table */
-	void *sal_systab;		/* SAL system table */
-	void *boot_info;		/* boot info table */
-	void *hcdp;			/* HCDP table */
-	void *uga;			/* UGA table */
+	unsigned long mps;		/* MPS table */
+	unsigned long acpi;		/* ACPI table  (IA64 ext 0.71) */
+	unsigned long acpi20;		/* ACPI table  (ACPI 2.0) */
+	unsigned long smbios;		/* SM BIOS table */
+	unsigned long sal_systab;	/* SAL system table */
+	unsigned long boot_info;	/* boot info table */
+	unsigned long hcdp;		/* HCDP table */
+	unsigned long uga;		/* UGA table */
 	efi_get_time_t *get_time;
 	efi_set_time_t *set_time;
 	efi_get_wakeup_time_t *get_wakeup_time;
@@ -298,6 +294,8 @@ extern void efi_enter_virtual_mode (void);	/* switch EFI to virtual mode, if pos
 extern u64 efi_get_iobase (void);
 extern u32 efi_mem_type (unsigned long phys_addr);
 extern u64 efi_mem_attributes (unsigned long phys_addr);
+extern int efi_mem_attribute_range (unsigned long phys_addr, unsigned long size,
+				    u64 attr);
 extern int __init efi_uart_console_only (void);
 extern void efi_initialize_iomem_resources(struct resource *code_resource,
 					struct resource *data_resource);
@@ -315,7 +313,7 @@ extern struct efi_memory_map memmap;
  */
 static inline int efi_range_is_wc(unsigned long start, unsigned long len)
 {
-	int i;
+	unsigned long i;
 
 	for (i = 0; i < len; i += (1UL << EFI_PAGE_SHIFT)) {
 		unsigned long paddr = __pa(start + i);

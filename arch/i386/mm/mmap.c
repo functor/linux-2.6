@@ -62,7 +62,7 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	 * Fall back to the standard layout if the personality
 	 * bit is set, or if the expected stack growth is unlimited:
 	 */
-	if ((exec_shield != 2) && (sysctl_legacy_va_layout ||
+	if (!(2 & exec_shield) && (sysctl_legacy_va_layout ||
 			(current->personality & ADDR_COMPAT_LAYOUT) ||
 			current->signal->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)) {
 		mm->mmap_base = TASK_UNMAPPED_BASE;

@@ -32,6 +32,7 @@
  * 
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -51,6 +52,7 @@
 #include <linux/mii.h>
 #include <linux/skbuff.h>
 #include <linux/delay.h>
+#include <linux/crc32.h>
 #include <asm/mipsregs.h>
 #include <asm/irq.h>
 #include <asm/io.h>
@@ -89,8 +91,6 @@ static void au1000_tx_timeout(struct net_device *);
 static int au1000_set_config(struct net_device *dev, struct ifmap *map);
 static void set_rx_mode(struct net_device *);
 static struct net_device_stats *au1000_get_stats(struct net_device *);
-static inline void update_tx_stats(struct net_device *, u32, u32);
-static inline void update_rx_stats(struct net_device *, u32);
 static void au1000_timer(unsigned long);
 static int au1000_ioctl(struct net_device *, struct ifreq *, int);
 static int mdio_read(struct net_device *, int, int);
@@ -150,13 +150,6 @@ struct au1000_private *au_macs[NUM_ETH_INTERFACES];
 	SUPPORTED_10baseT_Half | SUPPORTED_10baseT_Full | \
 	SUPPORTED_100baseT_Half | SUPPORTED_100baseT_Full | \
 	SUPPORTED_Autoneg
-
-static char *phy_link[] = 
-{	"unknown", 
-	"10Base2", "10BaseT", 
-	"AUI",
-	"100BaseT", "100BaseTX", "100BaseFX"
-};
 
 int bcm_5201_init(struct net_device *dev, int phy_addr)
 {
@@ -785,6 +778,7 @@ static struct mii_chip_info {
 	{"Broadcom BCM5201 10/100 BaseT PHY",0x0040,0x6212, &bcm_5201_ops,0},
 	{"Broadcom BCM5221 10/100 BaseT PHY",0x0040,0x61e4, &bcm_5201_ops,0},
 	{"Broadcom BCM5222 10/100 BaseT PHY",0x0040,0x6322, &bcm_5201_ops,1},
+	{"NS DP83847 PHY", 0x2000, 0x5c30, &bcm_5201_ops ,0},
 	{"AMD 79C901 HomePNA PHY",0x0000,0x35c8, &am79c901_ops,0},
 	{"AMD 79C874 10/100 BaseT PHY",0x0022,0x561b, &am79c874_ops,0},
 	{"LSI 80227 10/100 BaseT PHY",0x0016,0xf840, &lsi_80227_ops,0},
@@ -1045,7 +1039,7 @@ found:
 #endif
 
 	if (aup->mii->chip_info == NULL) {
-		printk(KERN_ERR "%s: Au1x No MII transceivers found!\n",
+		printk(KERN_ERR "%s: Au1x No known MII transceivers found!\n",
 				dev->name);
 		return -1;
 	}
@@ -1546,6 +1540,9 @@ au1000_probe(u32 ioaddr, int irq, int port_num)
 		printk(KERN_ERR "%s: out of memory\n", dev->name);
 		goto err_out;
 	}
+	aup->mii->next = NULL;
+	aup->mii->chip_info = NULL;
+	aup->mii->status = 0;
 	aup->mii->mii_control_reg = 0;
 	aup->mii->mii_data_reg = 0;
 
@@ -1609,8 +1606,7 @@ err_out:
 	/* here we should have a valid dev plus aup-> register addresses
 	 * so we can reset the mac properly.*/
 	reset_mac(dev);
-	if (aup->mii)
-		kfree(aup->mii);
+	kfree(aup->mii);
 	for (i = 0; i < NUM_RX_DMA; i++) {
 		if (aup->rx_db_inuse[i])
 			ReleaseDB(aup, aup->rx_db_inuse[i]);
@@ -1681,10 +1677,6 @@ static int au1000_init(struct net_device *dev)
 		control |= MAC_FULL_DUPLEX;
 	}
 
-	/* fix for startup without cable */
-	if (!link) 
-		dev->flags &= ~IFF_RUNNING;
-
 	aup->mac->control = control;
 	aup->mac->vlan1_tag = 0x8100; /* activate vlan support */
 	au_sync();
@@ -1709,16 +1701,14 @@ static void au1000_timer(unsigned long data)
 	if_port = dev->if_port;
 	if (aup->phy_ops->phy_status(dev, aup->phy_addr, &link, &speed) == 0) {
 		if (link) {
-			if (!(dev->flags & IFF_RUNNING)) {
+			if (!netif_carrier_ok(dev)) {
 				netif_carrier_on(dev);
-				dev->flags |= IFF_RUNNING;
 				printk(KERN_INFO "%s: link up\n", dev->name);
 			}
 		}
 		else {
-			if (dev->flags & IFF_RUNNING) {
+			if (netif_carrier_ok(dev)) {
 				netif_carrier_off(dev);
-				dev->flags &= ~IFF_RUNNING;
 				dev->if_port = 0;
 				printk(KERN_INFO "%s: link down\n", dev->name);
 			}
@@ -1815,8 +1805,7 @@ static void __exit au1000_cleanup_module(void)
 		if (dev) {
 			aup = (struct au1000_private *) dev->priv;
 			unregister_netdev(dev);
-			if (aup->mii)
-				kfree(aup->mii);
+			kfree(aup->mii);
 			for (j = 0; j < NUM_RX_DMA; j++) {
 				if (aup->rx_db_inuse[j])
 					ReleaseDB(aup, aup->rx_db_inuse[j]);
@@ -1835,15 +1824,10 @@ static void __exit au1000_cleanup_module(void)
 	}
 }
 
-
-static inline void 
-update_tx_stats(struct net_device *dev, u32 status, u32 pkt_len)
+static void update_tx_stats(struct net_device *dev, u32 status)
 {
 	struct au1000_private *aup = (struct au1000_private *) dev->priv;
 	struct net_device_stats *ps = &aup->stats;
-
-	ps->tx_packets++;
-	ps->tx_bytes += pkt_len;
 
 	if (status & TX_FRAME_ABORTED) {
 		if (dev->if_port == IF_PORT_100BASEFX) {
@@ -1877,7 +1861,7 @@ static void au1000_tx_ack(struct net_device *dev)
 	ptxd = aup->tx_dma_ring[aup->tx_tail];
 
 	while (ptxd->buff_stat & TX_T_DONE) {
-		update_tx_stats(dev, ptxd->status, ptxd->len & 0x3ff);
+		update_tx_stats(dev, ptxd->status);
 		ptxd->buff_stat &= ~TX_T_DONE;
 		ptxd->len = 0;
 		au_sync();
@@ -1899,6 +1883,7 @@ static void au1000_tx_ack(struct net_device *dev)
 static int au1000_tx(struct sk_buff *skb, struct net_device *dev)
 {
 	struct au1000_private *aup = (struct au1000_private *) dev->priv;
+	struct net_device_stats *ps = &aup->stats;
 	volatile tx_dma_t *ptxd;
 	u32 buff_stat;
 	db_dest_t *pDB;
@@ -1918,7 +1903,7 @@ static int au1000_tx(struct sk_buff *skb, struct net_device *dev)
 		return 1;
 	}
 	else if (buff_stat & TX_T_DONE) {
-		update_tx_stats(dev, ptxd->status, ptxd->len & 0x3ff);
+		update_tx_stats(dev, ptxd->status);
 		ptxd->len = 0;
 	}
 
@@ -1938,6 +1923,9 @@ static int au1000_tx(struct sk_buff *skb, struct net_device *dev)
 	else
 		ptxd->len = skb->len;
 
+	ps->tx_packets++;
+	ps->tx_bytes += ptxd->len;
+
 	ptxd->buff_stat = pDB->dma_addr | TX_DMA_ENABLE;
 	au_sync();
 	dev_kfree_skb(skb);
@@ -1945,7 +1933,6 @@ static int au1000_tx(struct sk_buff *skb, struct net_device *dev)
 	dev->trans_start = jiffies;
 	return 0;
 }
-
 
 static inline void update_rx_stats(struct net_device *dev, u32 status)
 {
@@ -2082,23 +2069,6 @@ static void au1000_tx_timeout(struct net_device *dev)
 	au1000_init(dev);
 	dev->trans_start = jiffies;
 	netif_wake_queue(dev);
-}
-
-
-static unsigned const ethernet_polynomial = 0x04c11db7U;
-static inline u32 ether_crc(int length, unsigned char *data)
-{
-    int crc = -1;
-
-    while(--length >= 0) {
-		unsigned char current_octet = *data++;
-		int bit;
-		for (bit = 0; bit < 8; bit++, current_octet >>= 1)
-			crc = (crc << 1) ^
-				((crc < 0) ^ (current_octet & 1) ? 
-				 ethernet_polynomial : 0);
-    }
-    return crc;
 }
 
 static void set_rx_mode(struct net_device *dev)

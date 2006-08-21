@@ -30,26 +30,22 @@
 #include <linux/i2c-algo-bit.h>
 #include <linux/init.h>
 
-#include "bttv.h"
-#include <media/audiochip.h>
-#include <media/id.h>
+
+#include <media/i2c-addr.h>
 
 static int debug; /* insmod parameter */
 module_param(debug, int, S_IRUGO | S_IWUSR);
 MODULE_LICENSE("GPL");
 
-
 /* Addresses to scan */
 static unsigned short normal_i2c[] =  {
-    I2C_TDA9875 >> 1,
+    I2C_ADDR_TDA9875 >> 1,
     I2C_CLIENT_END
 };
-static unsigned short normal_i2c_range[] = {I2C_CLIENT_END};
 I2C_CLIENT_INSMOD;
 
 /* This is a superset of the TDA9875 */
 struct tda9875 {
-	int mode;
 	int rvol, lvol;
 	int bass, treble;
 	struct i2c_client c;
@@ -124,36 +120,23 @@ static int tda9875_write(struct i2c_client *client, int subaddr, unsigned char v
 	return 0;
 }
 
-#if 0
-static int tda9875_read(struct i2c_client *client)
-{
-	unsigned char buffer;
-	dprintk("In tda9875_read\n");
-	if (1 != i2c_master_recv(client,&buffer,1)) {
-		printk(KERN_WARNING "tda9875: I/O error, trying (read)\n");
-		return -1;
-	}
-	dprintk("Read 0x%02x\n", buffer);
-	return buffer;
-}
-#endif
 
 static int i2c_read_register(struct i2c_adapter *adap, int addr, int reg)
 {
-        unsigned char write[1];
-        unsigned char read[1];
-        struct i2c_msg msgs[2] = {
-                { addr, 0,        1, write },
-                { addr, I2C_M_RD, 1, read  }
-        };
-        write[0] = reg;
+	unsigned char write[1];
+	unsigned char read[1];
+	struct i2c_msg msgs[2] = {
+		{ addr, 0,        1, write },
+		{ addr, I2C_M_RD, 1, read  }
+	};
+	write[0] = reg;
 
-        if (2 != i2c_transfer(adap,msgs,2)) {
-                printk(KERN_WARNING "tda9875: I/O error (read2)\n");
-                return -1;
-        }
-        dprintk("tda9875: chip_read2: reg%d=0x%x\n",reg,read[0]);
-        return read[0];
+	if (2 != i2c_transfer(adap,msgs,2)) {
+		printk(KERN_WARNING "tda9875: I/O error (read2)\n");
+		return -1;
+	}
+	dprintk("tda9875: chip_read2: reg%d=0x%x\n",reg,read[0]);
+	return read[0];
 }
 
 static void tda9875_set(struct i2c_client *client)
@@ -198,7 +181,7 @@ static void do_tda9875_init(struct i2c_client *client)
 	tda9875_write(client, TDA9875_DACOS, 0x02 ); /* sig DAC i/o(in:nicam)*/
 	tda9875_write(client, TDA9875_ADCIS, 0x6f ); /* sig ADC input(in:mono)*/
 	tda9875_write(client, TDA9875_LOSR, 0x00 );  /* line out (in:mono)*/
- 	tda9875_write(client, TDA9875_AER, 0x00 );   /*06 Effect (AVL+PSEUDO) */
+	tda9875_write(client, TDA9875_AER, 0x00 );   /*06 Effect (AVL+PSEUDO) */
 	tda9875_write(client, TDA9875_MCS, 0x44 );   /* Main ch select (DAC) */
 	tda9875_write(client, TDA9875_MVL, 0x03 );   /* Vol Main left 10dB */
 	tda9875_write(client, TDA9875_MVR, 0x03 );   /* Vol Main right 10dB*/
@@ -212,9 +195,8 @@ static void do_tda9875_init(struct i2c_client *client)
 
 	tda9875_write(client, TDA9875_MUT, 0xcc );   /* General mute  */
 
-	t->mode=AUDIO_UNMUTE;
 	t->lvol=t->rvol =0;  	/* 0dB */
-	t->bass=0; 		        /* 0dB */
+	t->bass=0; 			/* 0dB */
 	t->treble=0;  		/* 0dB */
 	tda9875_set(client);
 
@@ -247,15 +229,14 @@ static int tda9875_attach(struct i2c_adapter *adap, int addr, int kind)
 	struct i2c_client *client;
 	dprintk("In tda9875_attach\n");
 
-	t = kmalloc(sizeof *t,GFP_KERNEL);
+	t = kzalloc(sizeof *t,GFP_KERNEL);
 	if (!t)
 		return -ENOMEM;
-	memset(t,0,sizeof *t);
 
 	client = &t->c;
-        memcpy(client,&client_template,sizeof(struct i2c_client));
-        client->adapter = adap;
-        client->addr = addr;
+	memcpy(client,&client_template,sizeof(struct i2c_client));
+	client->adapter = adap;
+	client->addr = addr;
 	i2c_set_clientdata(client, t);
 
 	if(!tda9875_checkit(adap,addr)) {
@@ -272,13 +253,8 @@ static int tda9875_attach(struct i2c_adapter *adap, int addr, int kind)
 
 static int tda9875_probe(struct i2c_adapter *adap)
 {
-#ifdef I2C_CLASS_TV_ANALOG
 	if (adap->class & I2C_CLASS_TV_ANALOG)
 		return i2c_probe(adap, &addr_data, tda9875_attach);
-#else
-	if (adap->id == (I2C_ALGO_BIT | I2C_HW_B_BT848))
-		return i2c_probe(adap, &addr_data, tda9875_attach);
-#endif
 	return 0;
 }
 
@@ -301,7 +277,7 @@ static int tda9875_command(struct i2c_client *client,
 	dprintk("In tda9875_command...\n");
 
 	switch (cmd) {
-        /* --- v4l ioctls --- */
+	/* --- v4l ioctls --- */
 	/* take care: bttv does userspace copying, we'll get a
 	   kernel pointer here... */
 	case VIDIOCGAUDIO:
@@ -369,7 +345,7 @@ static int tda9875_command(struct i2c_client *client,
 //printk("tda9875 bal:%04x vol:%04x bass:%04x treble:%04x\n",va->balance,va->volume,va->bass,va->treble);
 
 
-                tda9875_set(client);
+		tda9875_set(client);
 
 		break;
 
@@ -387,19 +363,19 @@ static int tda9875_command(struct i2c_client *client,
 
 
 static struct i2c_driver driver = {
-	.owner          = THIS_MODULE,
-        .name           = "i2c tda9875 driver",
-        .id             = I2C_DRIVERID_TDA9875,
-        .flags          = I2C_DF_NOTIFY,
+	.driver = {
+		.name   = "tda9875",
+	},
+	.id             = I2C_DRIVERID_TDA9875,
 	.attach_adapter = tda9875_probe,
-        .detach_client  = tda9875_detach,
-        .command        = tda9875_command,
+	.detach_client  = tda9875_detach,
+	.command        = tda9875_command,
 };
 
 static struct i2c_client client_template =
 {
-        I2C_DEVNAME("tda9875"),
-        .driver    = &driver,
+	.name      = "tda9875",
+	.driver    = &driver,
 };
 
 static int __init tda9875_init(void)

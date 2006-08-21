@@ -1,38 +1,22 @@
 /*
- * Copyright (c) 2000-2004 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2000-2005 Silicon Graphics, Inc.
+ * All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
  * published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * This program is distributed in the hope that it would be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * Further, this software is distributed without any warranty that it is
- * free of the rightful claim of any third person regarding infringement
- * or the like.  Any license provided herein, whether implied or
- * otherwise, applies only to this software file.  Patent licenses, if
- * any, provided herein do not apply to combinations of this program with
- * other software, or any other product whatsoever.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write the Free Software Foundation, Inc., 59
- * Temple Place - Suite 330, Boston MA 02111-1307, USA.
- *
- * Contact information: Silicon Graphics, Inc., 1600 Amphitheatre Pkwy,
- * Mountain View, CA  94043, or:
- *
- * http://www.sgi.com
- *
- * For further information regarding this notice, see:
- *
- * http://oss.sgi.com/projects/GenInfo/SGIGPLNoticeExplan/
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write the Free Software Foundation,
+ * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 #include "xfs.h"
 #include "xfs_fs.h"
-#include "xfs_macros.h"
 #include "xfs_inum.h"
 #include "xfs_log.h"
 #include "xfs_clnt.h"
@@ -243,7 +227,8 @@ vfs_freeze(
 }
 
 vfs_t *
-vfs_allocate( void )
+vfs_allocate(
+	struct super_block	*sb)
 {
 	struct vfs		*vfsp;
 
@@ -251,9 +236,22 @@ vfs_allocate( void )
 	bhv_head_init(VFS_BHVHEAD(vfsp), "vfs");
 	INIT_LIST_HEAD(&vfsp->vfs_sync_list);
 	spin_lock_init(&vfsp->vfs_sync_lock);
-	init_waitqueue_head(&vfsp->vfs_wait_sync_task);
 	init_waitqueue_head(&vfsp->vfs_wait_single_sync_task);
+
+	vfsp->vfs_super = sb;
+	sb->s_fs_info = vfsp;
+
+	if (sb->s_flags & MS_RDONLY)
+		vfsp->vfs_flag |= VFS_RDONLY;
+
 	return vfsp;
+}
+
+vfs_t *
+vfs_from_sb(
+	struct super_block	*sb)
+{
+	return (vfs_t *)sb->s_fs_info;
 }
 
 void
@@ -312,7 +310,7 @@ bhv_remove_all_vfsops(
 	bhv_remove_vfsops(vfsp, VFS_POSITION_DM);
 	if (!freebase)
 		return;
-	mp = XFS_BHVTOM(bhv_lookup(VFS_BHVHEAD(vfsp), &xfs_vfsops));
+	mp = XFS_VFSTOM(vfsp);
 	VFS_REMOVEBHV(vfsp, &mp->m_bhv);
 	xfs_mount_free(mp, 0);
 }

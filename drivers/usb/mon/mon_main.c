@@ -2,6 +2,8 @@
  * The USB Monitor, inspired by Dave Harding's USBMon.
  *
  * mon_main.c: Main file, module initiation and exit, registrations, etc.
+ *
+ * Copyright (C) 2005 Pete Zaitcev (zaitcev@redhat.com)
  */
 
 #include <linux/kernel.h>
@@ -9,6 +11,8 @@
 #include <linux/usb.h>
 #include <linux/debugfs.h>
 #include <linux/smp_lock.h>
+#include <linux/notifier.h>
+#include <linux/mutex.h>
 
 #include "usb_mon.h"
 #include "../core/hcd.h"
@@ -20,7 +24,7 @@ static void mon_dissolve(struct mon_bus *mbus, struct usb_bus *ubus);
 static void mon_bus_drop(struct kref *r);
 static void mon_bus_init(struct dentry *mondir, struct usb_bus *ubus);
 
-DECLARE_MUTEX(mon_lock);
+DEFINE_MUTEX(mon_lock);
 
 static struct dentry *mon_dir;		/* /dbg/usbmon */
 static LIST_HEAD(mon_buses);		/* All buses we know: struct mon_bus */
@@ -193,15 +197,32 @@ static void mon_bus_remove(struct usb_bus *ubus)
 {
 	struct mon_bus *mbus = ubus->mon_bus;
 
-	down(&mon_lock);
+	mutex_lock(&mon_lock);
 	list_del(&mbus->bus_link);
 	debugfs_remove(mbus->dent_t);
 	debugfs_remove(mbus->dent_s);
 
 	mon_dissolve(mbus, ubus);
 	kref_put(&mbus->ref, mon_bus_drop);
-	up(&mon_lock);
+	mutex_unlock(&mon_lock);
 }
+
+static int mon_notify(struct notifier_block *self, unsigned long action,
+		      void *dev)
+{
+	switch (action) {
+	case USB_BUS_ADD:
+		mon_bus_add(dev);
+		break;
+	case USB_BUS_REMOVE:
+		mon_bus_remove(dev);
+	}
+	return NOTIFY_OK;
+}
+
+static struct notifier_block mon_nb = {
+	.notifier_call = 	mon_notify,
+};
 
 /*
  * Ops
@@ -210,8 +231,6 @@ static struct usb_mon_operations mon_ops_0 = {
 	.urb_submit =	mon_submit,
 	.urb_submit_error = mon_submit_error,
 	.urb_complete =	mon_complete,
-	.bus_add =	mon_bus_add,
-	.bus_remove =	mon_bus_remove,
 };
 
 /*
@@ -258,9 +277,8 @@ static void mon_bus_init(struct dentry *mondir, struct usb_bus *ubus)
 	char name[NAMESZ];
 	int rc;
 
-	if ((mbus = kmalloc(sizeof(struct mon_bus), GFP_KERNEL)) == NULL)
+	if ((mbus = kzalloc(sizeof(struct mon_bus), GFP_KERNEL)) == NULL)
 		goto err_alloc;
-	memset(mbus, 0, sizeof(struct mon_bus));
 	kref_init(&mbus->ref);
 	spin_lock_init(&mbus->lock);
 	INIT_LIST_HEAD(&mbus->r_list);
@@ -289,9 +307,9 @@ static void mon_bus_init(struct dentry *mondir, struct usb_bus *ubus)
 		goto err_create_s;
 	mbus->dent_s = d;
 
-	down(&mon_lock);
+	mutex_lock(&mon_lock);
 	list_add_tail(&mbus->bus_link, &mon_buses);
-	up(&mon_lock);
+	mutex_unlock(&mon_lock);
 	return;
 
 err_create_s:
@@ -311,7 +329,7 @@ static int __init mon_init(void)
 
 	mondir = debugfs_create_dir("usbmon", NULL);
 	if (IS_ERR(mondir)) {
-		printk(KERN_NOTICE TAG ": debugs is not available\n");
+		printk(KERN_NOTICE TAG ": debugfs is not available\n");
 		return -ENODEV;
 	}
 	if (mondir == NULL) {
@@ -327,11 +345,13 @@ static int __init mon_init(void)
 	}
 	// MOD_INC_USE_COUNT(which_module?);
 
-	down(&usb_bus_list_lock);
+	usb_register_notify(&mon_nb);
+
+	mutex_lock(&usb_bus_list_lock);
 	list_for_each_entry (ubus, &usb_bus_list, bus_list) {
 		mon_bus_init(mondir, ubus);
 	}
-	up(&usb_bus_list_lock);
+	mutex_unlock(&usb_bus_list_lock);
 	return 0;
 }
 
@@ -340,9 +360,10 @@ static void __exit mon_exit(void)
 	struct mon_bus *mbus;
 	struct list_head *p;
 
+	usb_unregister_notify(&mon_nb);
 	usb_mon_deregister();
 
-	down(&mon_lock);
+	mutex_lock(&mon_lock);
 	while (!list_empty(&mon_buses)) {
 		p = mon_buses.next;
 		mbus = list_entry(p, struct mon_bus, bus_link);
@@ -366,7 +387,7 @@ static void __exit mon_exit(void)
 		mon_dissolve(mbus, mbus->u_bus);
 		kref_put(&mbus->ref, mon_bus_drop);
 	}
-	up(&mon_lock);
+	mutex_unlock(&mon_lock);
 
 	debugfs_remove(mon_dir);
 }

@@ -513,7 +513,7 @@ struct mii_phy {
     u_char  *rst;           /* Start of reset sequence in SROM           */
     u_int mc;               /* Media Capabilities                        */
     u_int ana;              /* NWay Advertisement                        */
-    u_int fdx;              /* Full DupleX capabilites for each media    */
+    u_int fdx;              /* Full DupleX capabilities for each media   */
     u_int ttm;              /* Transmit Threshold Mode for each media    */
     u_int mci;              /* 21142 MII Connector Interrupt info        */
 };
@@ -2144,9 +2144,9 @@ srom_search(struct net_device *dev, struct pci_dev *pdev)
     u_long iobase = 0;                     /* Clear upper 32 bits in Alphas */
     int i, j, cfrv;
     struct de4x5_private *lp = netdev_priv(dev);
-    struct list_head *walk = &pdev->bus_list;
+    struct list_head *walk;
 
-    for (walk = walk->next; walk != &pdev->bus_list; walk = walk->next) {
+    list_for_each(walk, &pdev->bus_list) {
 	struct pci_dev *this_dev = pci_dev_b(walk);
 
 	/* Skip the pci_bus list entry */
@@ -4160,7 +4160,7 @@ get_hw_addr(struct net_device *dev)
     ** If the address starts with 00 a0, we have to bit-reverse
     ** each byte of the address.
     */
-    if ( (_machine & _MACH_Pmac) &&
+    if ( machine_is(powermac) &&
 	 (dev->dev_addr[0] == 0) &&
 	 (dev->dev_addr[1] == 0xa0) )
     {

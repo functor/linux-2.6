@@ -43,10 +43,11 @@ struct fb_info *framebuffer_alloc(size_t size, struct device *dev)
 	if (size)
 		fb_info_size += PADDING;
 
-	p = kmalloc(fb_info_size + size, GFP_KERNEL);
+	p = kzalloc(fb_info_size + size, GFP_KERNEL);
+
 	if (!p)
 		return NULL;
-	memset(p, 0, fb_info_size + size);
+
 	info = (struct fb_info *) p;
 
 	if (size)
@@ -106,8 +107,7 @@ static int mode_string(char *buf, unsigned int offset,
 static ssize_t store_mode(struct class_device *class_device, const char * buf,
 			  size_t count)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	char mstr[100];
 	struct fb_var_screeninfo var;
 	struct fb_modelist *modelist;
@@ -137,8 +137,7 @@ static ssize_t store_mode(struct class_device *class_device, const char * buf,
 
 static ssize_t show_mode(struct class_device *class_device, char *buf)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 
 	if (!fb_info->mode)
 		return 0;
@@ -149,8 +148,7 @@ static ssize_t show_mode(struct class_device *class_device, char *buf)
 static ssize_t store_modes(struct class_device *class_device, const char * buf,
 			   size_t count)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	LIST_HEAD(old_list);
 	int i = count / sizeof(struct fb_videomode);
 
@@ -174,8 +172,7 @@ static ssize_t store_modes(struct class_device *class_device, const char * buf,
 
 static ssize_t show_modes(struct class_device *class_device, char *buf)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	unsigned int i;
 	struct list_head *pos;
 	struct fb_modelist *modelist;
@@ -193,8 +190,7 @@ static ssize_t show_modes(struct class_device *class_device, char *buf)
 static ssize_t store_bpp(struct class_device *class_device, const char * buf,
 			 size_t count)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	struct fb_var_screeninfo var;
 	char ** last = NULL;
 	int err;
@@ -208,16 +204,78 @@ static ssize_t store_bpp(struct class_device *class_device, const char * buf,
 
 static ssize_t show_bpp(struct class_device *class_device, char *buf)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	return snprintf(buf, PAGE_SIZE, "%d\n", fb_info->var.bits_per_pixel);
+}
+
+static ssize_t store_rotate(struct class_device *class_device, const char *buf,
+			    size_t count)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	struct fb_var_screeninfo var;
+	char **last = NULL;
+	int err;
+
+	var = fb_info->var;
+	var.rotate = simple_strtoul(buf, last, 0);
+
+	if ((err = activate(fb_info, &var)))
+		return err;
+
+	return count;
+}
+
+
+static ssize_t show_rotate(struct class_device *class_device, char *buf)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", fb_info->var.rotate);
+}
+
+static ssize_t store_con_rotate(struct class_device *class_device,
+				const char *buf, size_t count)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	int rotate;
+	char **last = NULL;
+
+	acquire_console_sem();
+	rotate = simple_strtoul(buf, last, 0);
+	fb_con_duit(fb_info, FB_EVENT_SET_CON_ROTATE, &rotate);
+	release_console_sem();
+	return count;
+}
+
+static ssize_t store_con_rotate_all(struct class_device *class_device,
+				const char *buf, size_t count)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	int rotate;
+	char **last = NULL;
+
+	acquire_console_sem();
+	rotate = simple_strtoul(buf, last, 0);
+	fb_con_duit(fb_info, FB_EVENT_SET_CON_ROTATE_ALL, &rotate);
+	release_console_sem();
+	return count;
+}
+
+static ssize_t show_con_rotate(struct class_device *class_device, char *buf)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	int rotate;
+
+	acquire_console_sem();
+	rotate = fb_con_duit(fb_info, FB_EVENT_GET_CON_ROTATE, NULL);
+	release_console_sem();
+	return snprintf(buf, PAGE_SIZE, "%d\n", rotate);
 }
 
 static ssize_t store_virtual(struct class_device *class_device,
 			     const char * buf, size_t count)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	struct fb_var_screeninfo var;
 	char *last = NULL;
 	int err;
@@ -228,8 +286,6 @@ static ssize_t store_virtual(struct class_device *class_device,
 	if (last - buf >= count)
 		return -EINVAL;
 	var.yres_virtual = simple_strtoul(last, &last, 0);
-	printk(KERN_ERR "fb: xres %d yres %d\n", var.xres_virtual,
-	       var.yres_virtual);
 
 	if ((err = activate(fb_info, &var)))
 		return err;
@@ -238,44 +294,21 @@ static ssize_t store_virtual(struct class_device *class_device,
 
 static ssize_t show_virtual(struct class_device *class_device, char *buf)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	return snprintf(buf, PAGE_SIZE, "%d,%d\n", fb_info->var.xres_virtual,
 			fb_info->var.yres_virtual);
 }
 
-static ssize_t store_cmap(struct class_device *class_device, const char * buf,
-			  size_t count)
+static ssize_t show_stride(struct class_device *class_device, char *buf)
 {
-//	struct fb_info *fb_info = (struct fb_info *)class_get_devdata(class_device);
-	return 0;
-}
-
-static ssize_t show_cmap(struct class_device *class_device, char *buf)
-{
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
-	unsigned int offset = 0, i;
-
-	if (!fb_info->cmap.red || !fb_info->cmap.blue ||
-	    fb_info->cmap.green || fb_info->cmap.transp)
-		return -EINVAL;
-
-	for (i = 0; i < fb_info->cmap.len; i++) {
-		offset += snprintf(buf, PAGE_SIZE - offset,
-				   "%d,%d,%d,%d,%d\n", i + fb_info->cmap.start,
-				   fb_info->cmap.red[i], fb_info->cmap.blue[i],
-				   fb_info->cmap.green[i],
-				   fb_info->cmap.transp[i]);
-	}
-	return offset;
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	return snprintf(buf, PAGE_SIZE, "%d\n", fb_info->fix.line_length);
 }
 
 static ssize_t store_blank(struct class_device *class_device, const char * buf,
 			   size_t count)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	char *last = NULL;
 	int err;
 
@@ -291,41 +324,40 @@ static ssize_t store_blank(struct class_device *class_device, const char * buf,
 
 static ssize_t show_blank(struct class_device *class_device, char *buf)
 {
-//	struct fb_info *fb_info = (struct fb_info *)class_get_devdata(class_device);
+//	struct fb_info *fb_info = class_get_devdata(class_device);
 	return 0;
 }
 
 static ssize_t store_console(struct class_device *class_device,
 			     const char * buf, size_t count)
 {
-//	struct fb_info *fb_info = (struct fb_info *)class_get_devdata(class_device);
+//	struct fb_info *fb_info = class_get_devdata(class_device);
 	return 0;
 }
 
 static ssize_t show_console(struct class_device *class_device, char *buf)
 {
-//	struct fb_info *fb_info = (struct fb_info *)class_get_devdata(class_device);
+//	struct fb_info *fb_info = class_get_devdata(class_device);
 	return 0;
 }
 
 static ssize_t store_cursor(struct class_device *class_device,
 			    const char * buf, size_t count)
 {
-//	struct fb_info *fb_info = (struct fb_info *)class_get_devdata(class_device);
+//	struct fb_info *fb_info = class_get_devdata(class_device);
 	return 0;
 }
 
 static ssize_t show_cursor(struct class_device *class_device, char *buf)
 {
-//	struct fb_info *fb_info = (struct fb_info *)class_get_devdata(class_device);
+//	struct fb_info *fb_info = class_get_devdata(class_device);
 	return 0;
 }
 
 static ssize_t store_pan(struct class_device *class_device, const char * buf,
 			 size_t count)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	struct fb_var_screeninfo var;
 	char *last = NULL;
 	int err;
@@ -348,22 +380,58 @@ static ssize_t store_pan(struct class_device *class_device, const char * buf,
 
 static ssize_t show_pan(struct class_device *class_device, char *buf)
 {
-	struct fb_info *fb_info =
-		(struct fb_info *)class_get_devdata(class_device);
+	struct fb_info *fb_info = class_get_devdata(class_device);
 	return snprintf(buf, PAGE_SIZE, "%d,%d\n", fb_info->var.xoffset,
 			fb_info->var.xoffset);
 }
 
+static ssize_t show_name(struct class_device *class_device, char *buf)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", fb_info->fix.id);
+}
+
+static ssize_t store_fbstate(struct class_device *class_device,
+			const char *buf, size_t count)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	u32 state;
+	char *last = NULL;
+
+	state = simple_strtoul(buf, &last, 0);
+
+	acquire_console_sem();
+	fb_set_suspend(fb_info, (int)state);
+	release_console_sem();
+
+	return count;
+}
+
+static ssize_t show_fbstate(struct class_device *class_device, char *buf)
+{
+	struct fb_info *fb_info = class_get_devdata(class_device);
+	return snprintf(buf, PAGE_SIZE, "%d\n", fb_info->state);
+}
+
+/* When cmap is added back in it should be a binary attribute
+ * not a text one. Consideration should also be given to converting
+ * fbdev to use configfs instead of sysfs */
 static struct class_device_attribute class_device_attrs[] = {
 	__ATTR(bits_per_pixel, S_IRUGO|S_IWUSR, show_bpp, store_bpp),
 	__ATTR(blank, S_IRUGO|S_IWUSR, show_blank, store_blank),
-	__ATTR(color_map, S_IRUGO|S_IWUSR, show_cmap, store_cmap),
 	__ATTR(console, S_IRUGO|S_IWUSR, show_console, store_console),
 	__ATTR(cursor, S_IRUGO|S_IWUSR, show_cursor, store_cursor),
 	__ATTR(mode, S_IRUGO|S_IWUSR, show_mode, store_mode),
 	__ATTR(modes, S_IRUGO|S_IWUSR, show_modes, store_modes),
 	__ATTR(pan, S_IRUGO|S_IWUSR, show_pan, store_pan),
 	__ATTR(virtual_size, S_IRUGO|S_IWUSR, show_virtual, store_virtual),
+	__ATTR(name, S_IRUGO, show_name, NULL),
+	__ATTR(stride, S_IRUGO, show_stride, NULL),
+	__ATTR(rotate, S_IRUGO|S_IWUSR, show_rotate, store_rotate),
+	__ATTR(con_rotate, S_IRUGO|S_IWUSR, show_con_rotate, store_con_rotate),
+	__ATTR(con_rotate_all, S_IWUSR, NULL, store_con_rotate_all),
+	__ATTR(state, S_IRUGO|S_IWUSR, show_fbstate, store_fbstate),
 };
 
 int fb_init_class_device(struct fb_info *fb_info)

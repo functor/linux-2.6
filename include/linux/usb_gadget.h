@@ -107,18 +107,18 @@ struct usb_ep_ops {
 	int (*disable) (struct usb_ep *ep);
 
 	struct usb_request *(*alloc_request) (struct usb_ep *ep,
-		int gfp_flags);
+		gfp_t gfp_flags);
 	void (*free_request) (struct usb_ep *ep, struct usb_request *req);
 
 	void *(*alloc_buffer) (struct usb_ep *ep, unsigned bytes,
-		dma_addr_t *dma, int gfp_flags);
+		dma_addr_t *dma, gfp_t gfp_flags);
 	void (*free_buffer) (struct usb_ep *ep, void *buf, dma_addr_t dma,
 		unsigned bytes);
 	// NOTE:  on 2.6, drivers may also use dma_map() and
 	// dma_sync_single_*() to directly manage dma overhead. 
 
 	int (*queue) (struct usb_ep *ep, struct usb_request *req,
-		int gfp_flags);
+		gfp_t gfp_flags);
 	int (*dequeue) (struct usb_ep *ep, struct usb_request *req);
 
 	int (*set_halt) (struct usb_ep *ep, int value);
@@ -214,7 +214,7 @@ usb_ep_disable (struct usb_ep *ep)
  * Returns the request, or null if one could not be allocated.
  */
 static inline struct usb_request *
-usb_ep_alloc_request (struct usb_ep *ep, int gfp_flags)
+usb_ep_alloc_request (struct usb_ep *ep, gfp_t gfp_flags)
 {
 	return ep->ops->alloc_request (ep, gfp_flags);
 }
@@ -254,7 +254,7 @@ usb_ep_free_request (struct usb_ep *ep, struct usb_request *req)
  */
 static inline void *
 usb_ep_alloc_buffer (struct usb_ep *ep, unsigned len, dma_addr_t *dma,
-	int gfp_flags)
+	gfp_t gfp_flags)
 {
 	return ep->ops->alloc_buffer (ep, len, dma, gfp_flags);
 }
@@ -330,7 +330,7 @@ usb_ep_free_buffer (struct usb_ep *ep, void *buf, dma_addr_t dma, unsigned len)
  * reported when the usb peripheral is disconnected.
  */
 static inline int
-usb_ep_queue (struct usb_ep *ep, struct usb_request *req, int gfp_flags)
+usb_ep_queue (struct usb_ep *ep, struct usb_request *req, gfp_t gfp_flags)
 {
 	return ep->ops->queue (ep, req, gfp_flags);
 }
@@ -711,7 +711,7 @@ usb_gadget_disconnect (struct usb_gadget *gadget)
  * 	the hardware level driver. Most calls must be handled by
  * 	the gadget driver, including descriptor and configuration
  * 	management.  The 16 bit members of the setup data are in
- * 	cpu order. Called in_interrupt; this may not sleep.  Driver
+ * 	USB byte order. Called in_interrupt; this may not sleep.  Driver
  *	queues a response to ep0, or returns negative to stall.
  * @disconnect: Invoked after all transfers have been stopped,
  * 	when the host is disconnected.  May be called in_interrupt; this
@@ -801,7 +801,9 @@ struct usb_gadget_driver {
  * Call this in your gadget driver's module initialization function,
  * to tell the underlying usb controller driver about your driver.
  * The driver's bind() function will be called to bind it to a
- * gadget.  This function must be called in a context that can sleep.
+ * gadget before this registration call returns.  It's expected that
+ * the bind() functions will be in init sections.
+ * This function must be called in a context that can sleep.
  */
 int usb_gadget_register_driver (struct usb_gadget_driver *driver);
 
@@ -814,7 +816,8 @@ int usb_gadget_register_driver (struct usb_gadget_driver *driver);
  * going away.  If the controller is connected to a USB host,
  * it will first disconnect().  The driver is also requested
  * to unbind() and clean up any device state, before this procedure
- * finally returns.
+ * finally returns.  It's expected that the unbind() functions
+ * will in in exit sections, so may not be linked in some kernels.
  * This function must be called in a context that can sleep.
  */
 int usb_gadget_unregister_driver (struct usb_gadget_driver *driver);

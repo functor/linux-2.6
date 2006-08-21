@@ -7,6 +7,7 @@ menu "Wireless LAN (non-hamradio)"
 
 config NET_RADIO
 	bool "Wireless LAN drivers (non-hamradio) & Wireless Extensions"
+	select WIRELESS_EXT
 	---help---
 	  Support for wireless LANs and everything having to do with radio,
 	  but not with amateur radio or FM broadcasting.
@@ -24,9 +25,15 @@ config NET_RADIO
 	  the tools from
 	  <http://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Tools.html>.
 
-	  Some user-level drivers for scarab devices which don't require
-	  special kernel support are available from
-	  <ftp://shadow.cabi.net/pub/Linux/>.
+config NET_WIRELESS_RTNETLINK
+	bool "Wireless Extension API over RtNetlink"
+	depends on NET_RADIO
+	---help---
+	  Support the Wireless Extension API over the RtNetlink socket
+	  in addition to the traditional ioctl interface (selected above).
+
+	  For now, few tools use this facility, but it might grow in the
+	  future. The only downside is that it adds 4.5 kB to your kernel.
 
 # Note : the cards are obsolete (can't buy them anymore), but the drivers
 # are not, as people are still using them...
@@ -137,88 +144,14 @@ config PCMCIA_RAYCS
 comment "Wireless 802.11b ISA/PCI cards support"
 	depends on NET_RADIO && (ISA || PCI || PPC_PMAC || PCMCIA)
 
-
-config IEEE80211
-        tristate "Generic IEEE 802.11 Networking Stack"
-        depends on NET_RADIO
-        select CRYPTO
-        select CRYPTO_ARC4
-        select CRC32
-
-config IEEE80211_DEBUG
-	bool "Enable full debugging output"
-	depends on IEEE80211
-	---help---
-	  This option will enable debug tracing output for the 
-	  ieee80211 network stack.  
-
-	  This will result in the kernel module being ~70k larger.  You 
-	  can control which debug output is sent to the kernel log by 
-	  setting the value in 
-
-	  /proc/net/ieee80211/debug_level
-
-	  For example:
-
-	  % echo 0x00000FFO > /sys/bus/pci/drivers/ipw2200/debug_level
-
-	  For a list of values you can assign to debug_level, simply perform:
-
-	  % . idvals
-	  
-	  From within drivers/net/wireless/ipw2200
-
-	  If you are not trying to debug or develop the IPW2200 driver, you 
-	  most likely want to say N here.
-
-
-config IEEE80211_CRYPT
-        tristate "IEEE 802.11 encryption"
-        depends on IEEE80211
-        ---help---
-        Software implementation of IEEE 802.11 encryption.  This module
-	adds WEP support, and the baseline capabilities required for WPA.
-
-        This can be compiled as a modules and it will be called
-        "ieee80211_crypt.ko".
-
-config IEEE80211_WPA
-        tristate "IEEE 802.11 WPA"
-        depends on IEEE80211_CRYPT
-        ---help---
-        Software implementation of IEEE 802.11 WPA.  You will need
-        to select the WPA algorithms you wish to use.
-
-config IEEE80211_CRYPT_CCMP
-        tristate "IEEE 802.11 CCMP encryption"
-        depends on IEEE80211_WPA
-	depends on CRYPTO_AES_586
-        ---help---
-        Software implementation of IEEE 802.11 CCMP encryption.
-
-        This can be compiled as a modules and it will be called
-        "ieee80211_crypt_ccmp.ko".
-
-config IEEE80211_CRYPT_TKIP
-        tristate "IEEE 802.11 TKIP encryption"
-        depends on IEEE80211_WPA
-	depends on CRYPTO_MICHAEL_MIC
-        ---help---
-        Software implementation of IEEE 802.11 TKIP encryption.
-
-        This can be compiled as a modules and it will be called
-        "ieee80211_crypt_tkip.ko".
-
 config IPW2100
-	tristate "Intel PRO/Wireless 2100 802.11b"
-	depends on NET_RADIO && PCI && IEEE80211
+	tristate "Intel PRO/Wireless 2100 Network Connection"
+	depends on NET_RADIO && PCI
 	select FW_LOADER
-	select CRYPTO
-	select CRYPTO_ARC4
-	select CRC32
+	select IEEE80211
 	---help---
-          A driver for the Intel PRO/Wireless 2100 802.11b wireless network
-          adapter.
+          A driver for the Intel PRO/Wireless 2100 Network 
+	  Connection 802.11b wireless network adapter.
 
           See <file:Documentation/networking/README.ipw2100> for information on
           the capabilities currently enabled in this driver and for tips
@@ -227,7 +160,7 @@ config IPW2100
 	  In order to use this driver, you will need a firmware image for it.
           You can obtain the firmware from
 	  <http://ipw2100.sf.net/>.  Once you have the firmware image, you 
-	  will need to place it in /etc/firmware.
+	  will need to place it in /lib/firmware.
 
           You will also very likely need the Wireless Tools in order to
           configure your card:
@@ -235,40 +168,11 @@ config IPW2100
           <http://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Tools.html>.
  
           If you want to compile the driver as a module ( = code which can be
-          inserted in and remvoed from the running kernel whenever you want),
+          inserted in and removed from the running kernel whenever you want),
           say M here and read <file:Documentation/modules.txt>.  The module
           will be called ipw2100.ko.
-
-	  NOTE:  The IPW2200 relies on the kernel crypto support 
-    	  (CONFIG_CRYPTO) in order to support WEP.  In addition to 
-	  requiring crypto support, you must have the ARC4 module 
-	  enabled, as well as the CRC library function.
-
-config IPW_DEBUG
-	bool "Enable full debugging output"
-	depends on IPW2100
-	---help---
-	  This option will enable debug tracing output for the IPW2100.  
-
-	  This will result in the kernel module being ~60k larger.  You can 
-	  control which debug output is sent to the kernel log by setting the 
-	  value in 
-
-	  /proc/ipw2100/debug_level
-
-	  This entry will only exist if this option is enabled.  For a list of 
-	  values you can assign to debug_level, simply perform:
-
-	  % cat /proc/ipw2100/debug_level
-
-	  To set a value, simply echo an 8-byte hex value to the same file:
-
-	  % echo 00000FFO > /proc/ipw2100/debug_level
-
-	  If you are not trying to debug or develop the IPW2100 driver, you 
-	  most likely want to say N here.
-
-config IPW2100_PROMISC
+	
+config IPW2100_MONITOR
         bool "Enable promiscuous mode"
         depends on IPW2100
         ---help---
@@ -277,32 +181,31 @@ config IPW2100_PROMISC
 	  promiscuous mode via the Wireless Tool's Monitor mode.  While in this
 	  mode, no packets can be sent.
 
-config IPW2100_LEGACY_FW_LOAD
-	bool "Legacy firmware loading (non-hotplug)"
+config IPW2100_DEBUG
+	bool "Enable full debugging output in IPW2100 module."
 	depends on IPW2100
 	---help---
-	  As of 0.33 we added the ability to use the hotplug request_firmware
-	  capability of Linux to load the firmware image.  If you do not have
-	  hot plug configured, or have compilation or other errors while trying
-	  to use the new mechanism, you can enable this option to use the
-	  legacy approach (loading the firmware from /etc/firmware/).
+	  This option will enable debug tracing output for the IPW2100.  
 
-	  Legacy approach will not work when IPW2100 support is directly in the
-	  kernel (not module).
+	  This will result in the kernel module being ~60k larger.  You can 
+	  control which debug output is sent to the kernel log by setting the 
+	  value in 
 
-	  Saying Y here will result in the kernel module being ~4k larger.
+	  /sys/bus/pci/drivers/ipw2100/debug_level
 
+	  This entry will only exist if this option is enabled.
+
+	  If you are not trying to debug or develop the IPW2100 driver, you 
+	  most likely want to say N here.
 
 config IPW2200
-	tristate "Intel PRO/Wireless 2200 802.11bg"
-	depends on NET_RADIO && PCI && IEEE80211
+	tristate "Intel PRO/Wireless 2200BG and 2915ABG Network Connection"
+	depends on NET_RADIO && PCI
 	select FW_LOADER
-	select CRYPTO
-	select CRYPTO_ARC4
-	select CRC32
+	select IEEE80211
 	---help---
-          A driver for the Intel PRO/Wireless 2200 802.11bg wireless 
-	  network adapter.
+          A driver for the Intel PRO/Wireless 2200BG and 2915ABG Network
+	  Connection adapters. 
 
           See <file:Documentation/networking/README.ipw2200> for 
 	  information on the capabilities currently enabled in this 
@@ -311,7 +214,7 @@ config IPW2200
 	  In order to use this driver, you will need a firmware image for it.
           You can obtain the firmware from
 	  <http://ipw2200.sf.net/>.  See the above referenced README.ipw2200 
-	  for information on where to install the firmare images.
+	  for information on where to install the firmware images.
 
           You will also very likely need the Wireless Tools in order to
           configure your card:
@@ -319,24 +222,66 @@ config IPW2200
           <http://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Tools.html>.
  
           If you want to compile the driver as a module ( = code which can be
-          inserted in and remvoed from the running kernel whenever you want),
+          inserted in and removed from the running kernel whenever you want),
           say M here and read <file:Documentation/modules.txt>.  The module
           will be called ipw2200.ko.
 
-	  NOTE:  The IPW2200 relies on the kernel crypto support 
-    	  (CONFIG_CRYPTO) in order to support WEP.  In addition to 
-	  requiring crypto support, you must have the ARC4 module 
-	  enabled, as well as the CRC library function.
-	
+config IPW2200_MONITOR
+        bool "Enable promiscuous mode"
+        depends on IPW2200
+        ---help---
+	  Enables promiscuous/monitor mode support for the ipw2200 driver.
+	  With this feature compiled into the driver, you can switch to 
+	  promiscuous mode via the Wireless Tool's Monitor mode.  While in this
+	  mode, no packets can be sent.
+
+config IPW_QOS
+        bool "Enable QoS support"
+        depends on IPW2200 && EXPERIMENTAL
+
+config IPW2200_DEBUG
+	bool "Enable full debugging output in IPW2200 module."
+	depends on IPW2200
+	---help---
+	  This option will enable debug tracing output for the IPW2200.  
+
+	  This will result in the kernel module being ~100k larger.  You can 
+	  control which debug output is sent to the kernel log by setting the 
+	  value in 
+
+	  /sys/bus/pci/drivers/ipw2200/debug_level
+
+	  This entry will only exist if this option is enabled.
+
+	  To set a value, simply echo an 8-byte hex value to the same file:
+
+	  % echo 0x00000FFO > /sys/bus/pci/drivers/ipw2200/debug_level
+
+	  You can find the list of debug mask values in 
+	  drivers/net/wireless/ipw2200.h
+
+	  If you are not trying to debug or develop the IPW2200 driver, you 
+	  most likely want to say N here.
+
+config IPW2200_MONITOR
+	bool "Enable promiscuous mode"
+	depends on IPW2200
+	---help---
+	  Enables promiscuous/monitor mode support for the ipw2200 driver.
+	  With this feature compiled into the driver, you can switch to
+	  promiscuous mode via the Wireless Tool's Monitor mode.  While in this
+	  mode, no packets can be sent.
+
 config AIRO
 	tristate "Cisco/Aironet 34X/35X/4500/4800 ISA and PCI cards"
-	depends on NET_RADIO && ISA && (PCI || BROKEN)
+ 	depends on NET_RADIO && ISA_DMA_API && (PCI || BROKEN)
+	select CRYPTO
 	---help---
 	  This is the standard Linux driver to support Cisco/Aironet ISA and
 	  PCI 802.11 wireless cards.
 	  It supports the new 802.11b cards from Cisco (Cisco 34X, Cisco 35X
 	  - with or without encryption) as well as card before the Cisco
-	  aquisition (Aironet 4500, Aironet 4800, Aironet 4800B).
+	  acquisition (Aironet 4500, Aironet 4800, Aironet 4800B).
 
 	  This driver support both the standard Linux Wireless Extensions
 	  and Cisco proprietary API, so both the Linux Wireless Tools and the
@@ -373,11 +318,14 @@ config APPLE_AIRPORT
 	  Say Y here to support the Airport 802.11b wireless Ethernet hardware
 	  built into the Macintosh iBook and other recent PowerPC-based
 	  Macintosh machines. This is essentially a Lucent Orinoco card with 
-	  a non-standard interface
+	  a non-standard interface.
+
+	  This driver does not support the Airport Extreme (802.11b/g). Use
+	  the BCM43xx driver for Airport Extreme cards.
 
 config PLX_HERMES
-	tristate "Hermes in PLX9052 based PCI adaptor support (Netgear MA301 etc.) (EXPERIMENTAL)"
-	depends on PCI && HERMES && EXPERIMENTAL
+	tristate "Hermes in PLX9052 based PCI adaptor support (Netgear MA301 etc.)"
+	depends on PCI && HERMES
 	help
 	  Enable support for PCMCIA cards supported by the "Hermes" (aka
 	  orinoco) driver when used in PLX9052 based PCI adaptors.  These
@@ -386,12 +334,9 @@ config PLX_HERMES
 	  802.11b PCMCIA cards can be used in desktop machines.  The Netgear
 	  MA301 is such an adaptor.
 
-	  Support for these adaptors is so far still incomplete and buggy.
-	  You have been warned.
-
 config TMD_HERMES
-	tristate "Hermes in TMD7160 based PCI adaptor support (EXPERIMENTAL)"
-	depends on PCI && HERMES && EXPERIMENTAL
+	tristate "Hermes in TMD7160 based PCI adaptor support"
+	depends on PCI && HERMES
 	help
 	  Enable support for PCMCIA cards supported by the "Hermes" (aka
 	  orinoco) driver when used in TMD7160 based PCI adaptors.  These
@@ -399,12 +344,18 @@ config TMD_HERMES
 	  PCI <-> PCMCIA bridge.  Several vendors sell such adaptors so that
 	  802.11b PCMCIA cards can be used in desktop machines.
 
-	  Support for these adaptors is so far still incomplete and buggy.
-	  You have been warned.
+config NORTEL_HERMES
+	tristate "Nortel emobility PCI adaptor support"
+	depends on PCI && HERMES
+	help
+	  Enable support for PCMCIA cards supported by the "Hermes" (aka
+	  orinoco) driver when used in Nortel emobility PCI adaptors.  These
+	  adaptors are not full PCMCIA controllers, but act as a more limited
+	  PCI <-> PCMCIA bridge.
 
 config PCI_HERMES
-	tristate "Prism 2.5 PCI 802.11b adaptor support (EXPERIMENTAL)"
-	depends on PCI && HERMES && EXPERIMENTAL
+	tristate "Prism 2.5 PCI 802.11b adaptor support"
+	depends on PCI && HERMES
 	help
 	  Enable support for PCI and mini-PCI 802.11b wireless NICs based on
 	  the Prism 2.5 chipset.  These are true PCI cards, not the 802.11b
@@ -414,7 +365,7 @@ config PCI_HERMES
 
 config ATMEL
       tristate "Atmel at76c50x chipset  802.11b support"
-      depends on NET_RADIO && EXPERIMENTAL
+      depends on NET_RADIO && (PCI || PCMCIA)
       select FW_LOADER
       select CRC32
        ---help---
@@ -459,16 +410,31 @@ config PCMCIA_HERMES
 	  configure your card and that /etc/pcmcia/wireless.opts works:
 	  <http://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Tools.html>.
 
+config PCMCIA_SPECTRUM
+	tristate "Symbol Spectrum24 Trilogy PCMCIA card support"
+	depends on NET_RADIO && PCMCIA && HERMES
+	select FW_LOADER
+	---help---
+
+	  This is a driver for 802.11b cards using RAM-loadable Symbol
+	  firmware, such as Symbol Wireless Networker LA4100, CompactFlash
+	  cards by Socket Communications and Intel PRO/Wireless 2011B.
+
+	  This driver requires firmware download on startup.  Utilities
+	  for downloading Symbol firmware are available at
+	  <http://sourceforge.net/projects/orinoco/>
+
 config AIRO_CS
 	tristate "Cisco/Aironet 34X/35X/4500/4800 PCMCIA cards"
-	depends on NET_RADIO && PCMCIA
+	depends on NET_RADIO && PCMCIA && (BROKEN || !M32R)
+	select CRYPTO
 	---help---
 	  This is the standard Linux driver to support Cisco/Aironet PCMCIA
 	  802.11 wireless cards.  This driver is the same as the Aironet
 	  driver part of the Linux Pcmcia package.
 	  It supports the new 802.11b cards from Cisco (Cisco 34X, Cisco 35X
 	  - with or without encryption) as well as card before the Cisco
-	  aquisition (Aironet 4500, Aironet 4800, Aironet 4800B). It also
+	  acquisition (Aironet 4500, Aironet 4800, Aironet 4800B). It also
 	  supports OEM of Cisco such as the DELL TrueMobile 4800 and Xircom
 	  802.11b cards.
 
@@ -545,6 +511,9 @@ config PRISM54
 	  inserted in and removed from the running kernel whenever you want),
 	  say M here and read <file:Documentation/modules.txt>.  The module
 	  will be called prism54.ko.
+
+source "drivers/net/wireless/hostap/Kconfig"
+source "drivers/net/wireless/bcm43xx/Kconfig"
 
 # yes, this works even when no drivers are selected
 config NET_WIRELESS

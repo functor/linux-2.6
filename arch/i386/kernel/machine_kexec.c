@@ -1,6 +1,6 @@
 /*
  * machine_kexec.c - handle transition of Linux booting another kernel
- * Copyright (C) 2002-2004 Eric Biederman  <ebiederm@xmission.com>
+ * Copyright (C) 2002-2005 Eric Biederman  <ebiederm@xmission.com>
  *
  * This source code is licensed under the GNU General Public License,
  * Version 2.  See the file COPYING for more details.
@@ -16,14 +16,8 @@
 #include <asm/io.h>
 #include <asm/apic.h>
 #include <asm/cpufeature.h>
-#include <asm/crash_dump.h>
-
-static inline unsigned long read_cr3(void)
-{
-	unsigned long cr3;
-	asm volatile("movl %%cr3,%0": "=r"(cr3));
-	return cr3;
-}
+#include <asm/desc.h>
+#include <asm/system.h>
 
 #define PAGE_ALIGNED __attribute__ ((__aligned__(PAGE_SIZE)))
 
@@ -81,7 +75,8 @@ static void identity_map_page(unsigned long address)
 	/* Identity map the page table entry */
 	pgtable_level1[level1_index] = address | L0_ATTR;
 	pgtable_level2[level2_index] = __pa(pgtable_level1) | L1_ATTR;
-	set_64bit(&pgtable_level3[level3_index], __pa(pgtable_level2) | L2_ATTR);
+	set_64bit(&pgtable_level3[level3_index],
+					       __pa(pgtable_level2) | L2_ATTR);
 
 	/* Flush the tlb so the new mapping takes effect.
 	 * Global tlb entries are not flushed but that is not an issue.
@@ -90,34 +85,27 @@ static void identity_map_page(unsigned long address)
 }
 #endif
 
-
 static void set_idt(void *newidt, __u16 limit)
 {
-	unsigned char curidt[6];
+	struct Xgt_desc_struct curidt;
 
 	/* ia32 supports unaliged loads & stores */
-	(*(__u16 *)(curidt)) = limit;
-	(*(__u32 *)(curidt +2)) = (unsigned long)(newidt);
+	curidt.size    = limit;
+	curidt.address = (unsigned long)newidt;
 
-	__asm__ __volatile__ (
-		"lidt %0\n"
-		: "=m" (curidt)
-		);
+	load_idt(&curidt);
 };
 
 
 static void set_gdt(void *newgdt, __u16 limit)
 {
-	unsigned char curgdt[6];
+	struct Xgt_desc_struct curgdt;
 
 	/* ia32 supports unaligned loads & stores */
-	(*(__u16 *)(curgdt)) = limit;
-	(*(__u32 *)(curgdt +2)) = (unsigned long)(newgdt);
+	curgdt.size    = limit;
+	curgdt.address = (unsigned long)newgdt;
 
-	__asm__ __volatile__ (
-		"lgdt %0\n"
-		: "=m" (curgdt)
-		);
+	load_gdt(&curgdt);
 };
 
 static void load_segments(void)
@@ -128,85 +116,78 @@ static void load_segments(void)
 	__asm__ __volatile__ (
 		"\tljmp $"STR(__KERNEL_CS)",$1f\n"
 		"\t1:\n"
-		"\tmovl $"STR(__KERNEL_DS)",%eax\n"
-		"\tmovl %eax,%ds\n"
-		"\tmovl %eax,%es\n"
-		"\tmovl %eax,%fs\n"
-		"\tmovl %eax,%gs\n"
-		"\tmovl %eax,%ss\n"
-		);
+		"\tmovl $"STR(__KERNEL_DS)",%%eax\n"
+		"\tmovl %%eax,%%ds\n"
+		"\tmovl %%eax,%%es\n"
+		"\tmovl %%eax,%%fs\n"
+		"\tmovl %%eax,%%gs\n"
+		"\tmovl %%eax,%%ss\n"
+		::: "eax", "memory");
 #undef STR
 #undef __STR
 }
 
-typedef asmlinkage void (*relocate_new_kernel_t)(
-	unsigned long indirection_page, unsigned long reboot_code_buffer,
-	unsigned long start_address, unsigned int has_pae);
+typedef asmlinkage NORET_TYPE void (*relocate_new_kernel_t)(
+					unsigned long indirection_page,
+					unsigned long reboot_code_buffer,
+					unsigned long start_address,
+					unsigned int has_pae) ATTRIB_NORET;
 
 const extern unsigned char relocate_new_kernel[];
 extern void relocate_new_kernel_end(void);
 const extern unsigned int relocate_new_kernel_size;
 
 /*
+ * A architecture hook called to validate the
+ * proposed image and prepare the control pages
+ * as needed.  The pages for KEXEC_CONTROL_CODE_SIZE
+ * have been allocated, but the segments have yet
+ * been copied into the kernel.
+ *
  * Do what every setup is needed on image and the
  * reboot code buffer to allow us to avoid allocations
- * later.  Currently nothing.
+ * later.
+ *
+ * Currently nothing.
  */
 int machine_kexec_prepare(struct kimage *image)
 {
 	return 0;
 }
 
+/*
+ * Undo anything leftover by machine_kexec_prepare
+ * when an image is freed.
+ */
 void machine_kexec_cleanup(struct kimage *image)
 {
-}
-
-/*
- * We are going to do a memory preserving reboot. So, we copy over the
- * first 640k of memory into a backup location. Though the second kernel
- * boots from a different location, it still requires the first 640k.
- * Hence this backup.
- */
-void __crash_relocate_mem(unsigned long backup_addr, unsigned long backup_size)
-{
-	unsigned long pfn, pfn_max;
-	void *src_addr, *dest_addr;
-	struct page *page;
-
-	pfn_max = backup_size >> PAGE_SHIFT;
-	for (pfn = 0; pfn < pfn_max; pfn++) {
-		src_addr = phys_to_virt(pfn << PAGE_SHIFT);
-		dest_addr = backup_addr + src_addr;
-		if (!pfn_valid(pfn))
-			continue;
-		page = pfn_to_page(pfn);
-		if (PageReserved(page))
-			copy_page(dest_addr, src_addr);
-	}
 }
 
 /*
  * Do not allocate memory (or fail in any way) in machine_kexec().
  * We are past the point of no return, committed to rebooting now.
  */
-void machine_kexec(struct kimage *image)
+NORET_TYPE void machine_kexec(struct kimage *image)
 {
-	unsigned long indirection_page;
+	unsigned long page_list;
 	unsigned long reboot_code_buffer;
+
 	relocate_new_kernel_t rnk;
 
 	/* Interrupts aren't acceptable while we reboot */
 	local_irq_disable();
 
 	/* Compute some offsets */
-	reboot_code_buffer = page_to_pfn(image->control_code_page) << PAGE_SHIFT;
-	indirection_page = image->head & PAGE_MASK;
+	reboot_code_buffer = page_to_pfn(image->control_code_page)
+								<< PAGE_SHIFT;
+	page_list = image->head;
 
 	/* Set up an identity mapping for the reboot_code_buffer */
 	identity_map_page(reboot_code_buffer);
 
 	/* copy it out */
-	memcpy((void *)reboot_code_buffer, relocate_new_kernel, relocate_new_kernel_size);
+	memcpy((void *)reboot_code_buffer, relocate_new_kernel,
+						relocate_new_kernel_size);
 
 	/* The segment registers are funny things, they are
 	 * automatically loaded from a table, in memory wherever you
@@ -229,5 +210,5 @@ void machine_kexec(struct kimage *image)
 
 	/* now call it */
 	rnk = (relocate_new_kernel_t) reboot_code_buffer;
-	(*rnk)(indirection_page, reboot_code_buffer, image->start, cpu_has_pae);
+	(*rnk)(page_list, reboot_code_buffer, image->start, cpu_has_pae);
 }

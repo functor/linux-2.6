@@ -7,7 +7,7 @@
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/thread_info.h>
 #include <asm/page.h>
-#include <asm/segment.h>
+#include <asm/cache.h>
 
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
@@ -15,7 +15,7 @@ ENTRY(phys_startup_32)
 jiffies = jiffies_64;
 SECTIONS
 {
-  . = LOAD_OFFSET + KERN_PHYS_OFFSET;
+  . = __KERNEL_START;
   phys_startup_32 = startup_32 - LOAD_OFFSET;
   /* read-only */
   _text = .;			/* Text and read-only data */
@@ -23,6 +23,7 @@ SECTIONS
 	*(.text)
 	SCHED_TEXT
 	LOCK_TEXT
+	KPROBES_TEXT
 	*(.fixup)
 	*(.gnu.warning)
 	} = 0x9090
@@ -37,7 +38,7 @@ SECTIONS
   RODATA
 
   /* writeable */
-  .data : AT(ADDR(.data) - LOAD_OFFSET) {			/* Data */
+  .data : AT(ADDR(.data) - LOAD_OFFSET) {	/* Data */
 	*(.data)
 	CONSTRUCTORS
 	}
@@ -49,17 +50,44 @@ SECTIONS
   __nosave_end = .;
 
   . = ALIGN(4096);
-  .data.page_aligned : AT(ADDR(.data.page_aligned) - LOAD_OFFSET) { *(.data.idt) }
+  .data.page_aligned : AT(ADDR(.data.page_aligned) - LOAD_OFFSET) {
+	*(.data.idt)
+  }
 
   . = ALIGN(32);
   .data.cacheline_aligned : AT(ADDR(.data.cacheline_aligned) - LOAD_OFFSET) {
 	*(.data.cacheline_aligned)
   }
 
+  /* rarely changed data like cpu maps */
+  . = ALIGN(32);
+  .data.read_mostly : AT(ADDR(.data.read_mostly) - LOAD_OFFSET) { *(.data.read_mostly) }
   _edata = .;			/* End of data section */
 
   . = ALIGN(THREAD_SIZE);	/* init_task */
-  .data.init_task : AT(ADDR(.data.init_task) - LOAD_OFFSET) { *(.data.init_task) }
+  .data.init_task : AT(ADDR(.data.init_task) - LOAD_OFFSET) {
+	*(.data.init_task)
+  }
+
+  /* might get freed after init */
+  . = ALIGN(4096);
+  __smp_alt_begin = .;
+  __smp_alt_instructions = .;
+  .smp_altinstructions : AT(ADDR(.smp_altinstructions) - LOAD_OFFSET) {
+	*(.smp_altinstructions)
+  }
+  __smp_alt_instructions_end = .;
+  . = ALIGN(4);
+  __smp_locks = .;
+  .smp_locks : AT(ADDR(.smp_locks) - LOAD_OFFSET) {
+	*(.smp_locks)
+  }
+  __smp_locks_end = .;
+  .smp_altinstr_replacement : AT(ADDR(.smp_altinstr_replacement) - LOAD_OFFSET) {
+	*(.smp_altinstr_replacement)
+  }
+  . = ALIGN(4096);
+  __smp_alt_end = .;
 
   /* will be freed after init */
   . = ALIGN(4096);		/* Init code and data */
@@ -96,10 +124,10 @@ SECTIONS
   .altinstructions : AT(ADDR(.altinstructions) - LOAD_OFFSET) {
 	*(.altinstructions)
   }
-  __alt_instructions_end = .;
- .altinstr_replacement : AT(ADDR(.altinstr_replacement) - LOAD_OFFSET) {
+  __alt_instructions_end = .; 
+  .altinstr_replacement : AT(ADDR(.altinstr_replacement) - LOAD_OFFSET) {
 	*(.altinstr_replacement)
- }
+  }
   /* .exit.text is discard at runtime, not link time, to deal with references
      from .altinstructions and .eh_frame */
   .exit.text : AT(ADDR(.exit.text) - LOAD_OFFSET) { *(.exit.text) }
@@ -108,7 +136,7 @@ SECTIONS
   __initramfs_start = .;
   .init.ramfs : AT(ADDR(.init.ramfs) - LOAD_OFFSET) { *(.init.ramfs) }
   __initramfs_end = .;
-  . = ALIGN(32);
+  . = ALIGN(L1_CACHE_BYTES);
   __per_cpu_start = .;
   .data.percpu  : AT(ADDR(.data.percpu) - LOAD_OFFSET) { *(.data.percpu) }
   __per_cpu_end = .;
@@ -117,8 +145,9 @@ SECTIONS
   /* freed after init ends here */
 	
   __bss_start = .;		/* BSS */
-  .bss.page_aligned  : AT(ADDR(.bss.page_aligned) - LOAD_OFFSET) {
-	*(.bss.page_aligned) }
+  .bss.page_aligned : AT(ADDR(.bss.page_aligned) - LOAD_OFFSET) {
+	*(.bss.page_aligned)
+  }
   .bss : AT(ADDR(.bss) - LOAD_OFFSET) {
 	*(.bss)
   }
@@ -136,12 +165,7 @@ SECTIONS
 	*(.exitcall.exit)
 	}
 
-  /* Stabs debugging sections.  */
-  .stab 0 : { *(.stab) }
-  .stabstr 0 : { *(.stabstr) }
-  .stab.excl 0 : { *(.stab.excl) }
-  .stab.exclstr 0 : { *(.stab.exclstr) }
-  .stab.index 0 : { *(.stab.index) }
-  .stab.indexstr 0 : { *(.stab.indexstr) }
-  .comment 0 : { *(.comment) }
+  STABS_DEBUG
+
+  DWARF_DEBUG
 }

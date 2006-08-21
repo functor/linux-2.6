@@ -62,12 +62,8 @@
 
 #define ALLINTS_NOTIMER (IE_IRQ0 | IE_IRQ1 | IE_IRQ2 | IE_IRQ3 | IE_IRQ4)
 
-void disable_it8172_irq(unsigned int irq_nr);
-void enable_it8172_irq(unsigned int irq_nr);
-
 extern void set_debug_traps(void);
 extern void mips_timer_interrupt(int irq, struct pt_regs *regs);
-extern asmlinkage void it8172_IRQ(void);
 
 struct it8172_intc_regs volatile *it8172_hw0_icregs =
 	(struct it8172_intc_regs volatile *)(KSEG1ADDR(IT8172_PCI_IO_BASE + IT_INTC_BASE));
@@ -138,14 +134,13 @@ static void end_ite_irq(unsigned int irq)
 }
 
 static struct hw_interrupt_type it8172_irq_type = {
-	"ITE8172",
-	startup_ite_irq,
-	shutdown_ite_irq,
-	enable_it8172_irq,
-	disable_it8172_irq,
-	mask_and_ack_ite_irq,
-	end_ite_irq,
-	NULL
+	.typename = "ITE8172",
+	.startup = startup_ite_irq,
+	.shutdown = shutdown_ite_irq,
+	.enable = enable_it8172_irq,
+	.disable = disable_it8172_irq,
+	.ack = mask_and_ack_ite_irq,
+	.end = end_ite_irq,
 };
 
 
@@ -159,13 +154,13 @@ static void ack_none(unsigned int irq) { }
 #define end_none	enable_none
 
 static struct hw_interrupt_type cp0_irq_type = {
-	"CP0 Count",
-	startup_none,
-	shutdown_none,
-	enable_none,
-	disable_none,
-	ack_none,
-	end_none
+	.typename = "CP0 Count",
+	.startup = startup_none,
+	.shutdown = shutdown_none,
+	.enable = enable_none,
+	.disable = disable_none,
+	.ack = ack_none,
+	.end = end_none
 };
 
 void enable_cpu_timer(void)
@@ -181,9 +176,6 @@ void __init arch_init_irq(void)
 {
 	int i;
         unsigned long flags;
-
-        memset(irq_desc, 0, sizeof(irq_desc));
-        set_except_vector(0, it8172_IRQ);
 
 	/* mask all interrupts */
 	it8172_hw0_icregs->lb_mask  = 0xffff;
@@ -282,6 +274,18 @@ void it8172_hw0_irqdispatch(struct pt_regs *regs)
 		return;
 
 	do_IRQ(irq, regs);
+}
+
+asmlinkage void plat_irq_dispatch(struct pt_regs *regs)
+{
+	unsigned int pending = read_c0_cause() & read_c0_status() & ST0_IM;
+
+	if (!pending)
+		mips_spurious_interrupt(regs);
+	else if (pending & CAUSEF_IP7)
+		ll_timer_interrupt(127, regs);
+	else if (pending & CAUSEF_IP2)
+		it8172_hw0_irqdispatch(regs);
 }
 
 void show_pending_irqs(void)

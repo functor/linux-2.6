@@ -43,8 +43,8 @@ MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
 MODULE_DESCRIPTION("Routines for control of MPU-401 in UART mode");
 MODULE_LICENSE("GPL");
 
-static void snd_mpu401_uart_input_read(mpu401_t * mpu);
-static void snd_mpu401_uart_output_write(mpu401_t * mpu);
+static void snd_mpu401_uart_input_read(struct snd_mpu401 * mpu);
+static void snd_mpu401_uart_output_write(struct snd_mpu401 * mpu);
 
 /*
 
@@ -58,28 +58,28 @@ static void snd_mpu401_uart_output_write(mpu401_t * mpu);
 #define MPU401_ACK		0xfe
 
 /* Build in lowlevel io */
-static void mpu401_write_port(mpu401_t *mpu, unsigned char data, unsigned long addr)
+static void mpu401_write_port(struct snd_mpu401 *mpu, unsigned char data, unsigned long addr)
 {
 	outb(data, addr);
 }
 
-static unsigned char mpu401_read_port(mpu401_t *mpu, unsigned long addr)
+static unsigned char mpu401_read_port(struct snd_mpu401 *mpu, unsigned long addr)
 {
 	return inb(addr);
 }
 
-static void mpu401_write_mmio(mpu401_t *mpu, unsigned char data, unsigned long addr)
+static void mpu401_write_mmio(struct snd_mpu401 *mpu, unsigned char data, unsigned long addr)
 {
 	writeb(data, (void __iomem *)addr);
 }
 
-static unsigned char mpu401_read_mmio(mpu401_t *mpu, unsigned long addr)
+static unsigned char mpu401_read_mmio(struct snd_mpu401 *mpu, unsigned long addr)
 {
 	return readb((void __iomem *)addr);
 }
 /*  */
 
-static void snd_mpu401_uart_clear_rx(mpu401_t *mpu)
+static void snd_mpu401_uart_clear_rx(struct snd_mpu401 *mpu)
 {
 	int timeout = 100000;
 	for (; timeout > 0 && snd_mpu401_input_avail(mpu); timeout--)
@@ -90,7 +90,7 @@ static void snd_mpu401_uart_clear_rx(mpu401_t *mpu)
 #endif
 }
 
-static void _snd_mpu401_uart_interrupt(mpu401_t *mpu)
+static void _snd_mpu401_uart_interrupt(struct snd_mpu401 *mpu)
 {
 	spin_lock(&mpu->input_lock);
 	if (test_bit(MPU401_MODE_BIT_INPUT, &mpu->mode)) {
@@ -118,7 +118,7 @@ static void _snd_mpu401_uart_interrupt(mpu401_t *mpu)
  */
 irqreturn_t snd_mpu401_uart_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
-	mpu401_t *mpu = dev_id;
+	struct snd_mpu401 *mpu = dev_id;
 	
 	if (mpu == NULL)
 		return IRQ_NONE;
@@ -132,13 +132,14 @@ irqreturn_t snd_mpu401_uart_interrupt(int irq, void *dev_id, struct pt_regs *reg
  */
 static void snd_mpu401_uart_timer(unsigned long data)
 {
-	mpu401_t *mpu = (mpu401_t *)data;
+	struct snd_mpu401 *mpu = (struct snd_mpu401 *)data;
+	unsigned long flags;
 
-	spin_lock(&mpu->timer_lock);
+	spin_lock_irqsave(&mpu->timer_lock, flags);
 	/*mpu->mode |= MPU401_MODE_TIMER;*/
 	mpu->timer.expires = 1 + jiffies;
 	add_timer(&mpu->timer);
-	spin_unlock(&mpu->timer_lock);
+	spin_unlock_irqrestore(&mpu->timer_lock, flags);
 	if (mpu->rmidi)
 		_snd_mpu401_uart_interrupt(mpu);
 }
@@ -146,7 +147,7 @@ static void snd_mpu401_uart_timer(unsigned long data)
 /*
  * initialize the timer callback if not programmed yet
  */
-static void snd_mpu401_uart_add_timer (mpu401_t *mpu, int input)
+static void snd_mpu401_uart_add_timer (struct snd_mpu401 *mpu, int input)
 {
 	unsigned long flags;
 
@@ -165,7 +166,7 @@ static void snd_mpu401_uart_add_timer (mpu401_t *mpu, int input)
 /*
  * remove the timer callback if still active
  */
-static void snd_mpu401_uart_remove_timer (mpu401_t *mpu, int input)
+static void snd_mpu401_uart_remove_timer (struct snd_mpu401 *mpu, int input)
 {
 	unsigned long flags;
 
@@ -182,7 +183,8 @@ static void snd_mpu401_uart_remove_timer (mpu401_t *mpu, int input)
 
  */
 
-static void snd_mpu401_uart_cmd(mpu401_t * mpu, unsigned char cmd, int ack)
+static int snd_mpu401_uart_cmd(struct snd_mpu401 * mpu, unsigned char cmd,
+		int ack)
 {
 	unsigned long flags;
 	int timeout, ok;
@@ -217,83 +219,105 @@ static void snd_mpu401_uart_cmd(mpu401_t * mpu, unsigned char cmd, int ack)
 		ok = 1;
 	}
 	spin_unlock_irqrestore(&mpu->input_lock, flags);
-	if (! ok)
+	if (!ok) {
 		snd_printk("cmd: 0x%x failed at 0x%lx (status = 0x%x, data = 0x%x)\n", cmd, mpu->port, mpu->read(mpu, MPU401C(mpu)), mpu->read(mpu, MPU401D(mpu)));
-	// snd_printk("cmd: 0x%x at 0x%lx (status = 0x%x, data = 0x%x)\n", cmd, mpu->port, mpu->read(mpu, MPU401C(mpu)), mpu->read(mpu, MPU401D(mpu)));
+		return 1;
+	}
+	return 0;
 }
 
 /*
  * input/output open/close - protected by open_mutex in rawmidi.c
  */
-static int snd_mpu401_uart_input_open(snd_rawmidi_substream_t * substream)
+static int snd_mpu401_uart_input_open(struct snd_rawmidi_substream *substream)
 {
-	mpu401_t *mpu;
+	struct snd_mpu401 *mpu;
 	int err;
 
 	mpu = substream->rmidi->private_data;
 	if (mpu->open_input && (err = mpu->open_input(mpu)) < 0)
 		return err;
 	if (! test_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode)) {
-		snd_mpu401_uart_cmd(mpu, MPU401_RESET, 1);
-		snd_mpu401_uart_cmd(mpu, MPU401_ENTER_UART, 1);
+		if (snd_mpu401_uart_cmd(mpu, MPU401_RESET, 1))
+			goto error_out;
+		if (snd_mpu401_uart_cmd(mpu, MPU401_ENTER_UART, 1))
+			goto error_out;
 	}
 	mpu->substream_input = substream;
 	set_bit(MPU401_MODE_BIT_INPUT, &mpu->mode);
 	return 0;
+
+error_out:
+	if (mpu->open_input && mpu->close_input)
+		mpu->close_input(mpu);
+	return -EIO;
 }
 
-static int snd_mpu401_uart_output_open(snd_rawmidi_substream_t * substream)
+static int snd_mpu401_uart_output_open(struct snd_rawmidi_substream *substream)
 {
-	mpu401_t *mpu;
+	struct snd_mpu401 *mpu;
 	int err;
 
 	mpu = substream->rmidi->private_data;
 	if (mpu->open_output && (err = mpu->open_output(mpu)) < 0)
 		return err;
 	if (! test_bit(MPU401_MODE_BIT_INPUT, &mpu->mode)) {
-		snd_mpu401_uart_cmd(mpu, MPU401_RESET, 1);
-		snd_mpu401_uart_cmd(mpu, MPU401_ENTER_UART, 1);
+		if (snd_mpu401_uart_cmd(mpu, MPU401_RESET, 1))
+			goto error_out;
+		if (snd_mpu401_uart_cmd(mpu, MPU401_ENTER_UART, 1))
+			goto error_out;
 	}
 	mpu->substream_output = substream;
 	set_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode);
 	return 0;
+
+error_out:
+	if (mpu->open_output && mpu->close_output)
+		mpu->close_output(mpu);
+	return -EIO;
 }
 
-static int snd_mpu401_uart_input_close(snd_rawmidi_substream_t * substream)
+static int snd_mpu401_uart_input_close(struct snd_rawmidi_substream *substream)
 {
-	mpu401_t *mpu;
+	struct snd_mpu401 *mpu;
+	int err = 0;
 
 	mpu = substream->rmidi->private_data;
 	clear_bit(MPU401_MODE_BIT_INPUT, &mpu->mode);
 	mpu->substream_input = NULL;
 	if (! test_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode))
-		snd_mpu401_uart_cmd(mpu, MPU401_RESET, 0);
+		err = snd_mpu401_uart_cmd(mpu, MPU401_RESET, 0);
 	if (mpu->close_input)
 		mpu->close_input(mpu);
+	if (err)
+		return -EIO;
 	return 0;
 }
 
-static int snd_mpu401_uart_output_close(snd_rawmidi_substream_t * substream)
+static int snd_mpu401_uart_output_close(struct snd_rawmidi_substream *substream)
 {
-	mpu401_t *mpu;
+	struct snd_mpu401 *mpu;
+	int err = 0;
 
 	mpu = substream->rmidi->private_data;
 	clear_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode);
 	mpu->substream_output = NULL;
 	if (! test_bit(MPU401_MODE_BIT_INPUT, &mpu->mode))
-		snd_mpu401_uart_cmd(mpu, MPU401_RESET, 0);
+		err = snd_mpu401_uart_cmd(mpu, MPU401_RESET, 0);
 	if (mpu->close_output)
 		mpu->close_output(mpu);
+	if (err)
+		return -EIO;
 	return 0;
 }
 
 /*
  * trigger input callback
  */
-static void snd_mpu401_uart_input_trigger(snd_rawmidi_substream_t * substream, int up)
+static void snd_mpu401_uart_input_trigger(struct snd_rawmidi_substream *substream, int up)
 {
 	unsigned long flags;
-	mpu401_t *mpu;
+	struct snd_mpu401 *mpu;
 	int max = 64;
 
 	mpu = substream->rmidi->private_data;
@@ -315,13 +339,14 @@ static void snd_mpu401_uart_input_trigger(snd_rawmidi_substream_t * substream, i
 			snd_mpu401_uart_remove_timer(mpu, 1);
 		clear_bit(MPU401_MODE_BIT_INPUT_TRIGGER, &mpu->mode);
 	}
+
 }
 
 /*
  * transfer input pending data
  * call with input_lock spinlock held
  */
-static void snd_mpu401_uart_input_read(mpu401_t * mpu)
+static void snd_mpu401_uart_input_read(struct snd_mpu401 * mpu)
 {
 	int max = 128;
 	unsigned char byte;
@@ -349,7 +374,7 @@ static void snd_mpu401_uart_input_read(mpu401_t * mpu)
  * write output pending bytes
  * call with output_lock spinlock held
  */
-static void snd_mpu401_uart_output_write(mpu401_t * mpu)
+static void snd_mpu401_uart_output_write(struct snd_mpu401 * mpu)
 {
 	unsigned char byte;
 	int max = 256, timeout;
@@ -375,10 +400,10 @@ static void snd_mpu401_uart_output_write(mpu401_t * mpu)
 /*
  * output trigger callback
  */
-static void snd_mpu401_uart_output_trigger(snd_rawmidi_substream_t * substream, int up)
+static void snd_mpu401_uart_output_trigger(struct snd_rawmidi_substream *substream, int up)
 {
 	unsigned long flags;
-	mpu401_t *mpu;
+	struct snd_mpu401 *mpu;
 
 	mpu = substream->rmidi->private_data;
 	if (up) {
@@ -404,29 +429,26 @@ static void snd_mpu401_uart_output_trigger(snd_rawmidi_substream_t * substream, 
 
  */
 
-static snd_rawmidi_ops_t snd_mpu401_uart_output =
+static struct snd_rawmidi_ops snd_mpu401_uart_output =
 {
 	.open =		snd_mpu401_uart_output_open,
 	.close =	snd_mpu401_uart_output_close,
 	.trigger =	snd_mpu401_uart_output_trigger,
 };
 
-static snd_rawmidi_ops_t snd_mpu401_uart_input =
+static struct snd_rawmidi_ops snd_mpu401_uart_input =
 {
 	.open =		snd_mpu401_uart_input_open,
 	.close =	snd_mpu401_uart_input_close,
 	.trigger =	snd_mpu401_uart_input_trigger,
 };
 
-static void snd_mpu401_uart_free(snd_rawmidi_t *rmidi)
+static void snd_mpu401_uart_free(struct snd_rawmidi *rmidi)
 {
-	mpu401_t *mpu = rmidi->private_data;
+	struct snd_mpu401 *mpu = rmidi->private_data;
 	if (mpu->irq_flags && mpu->irq >= 0)
 		free_irq(mpu->irq, (void *) mpu);
-	if (mpu->res) {
-		release_resource(mpu->res);
-		kfree_nocheck(mpu->res);
-	}
+	release_and_free_resource(mpu->res);
 	kfree(mpu);
 }
 
@@ -445,26 +467,27 @@ static void snd_mpu401_uart_free(snd_rawmidi_t *rmidi)
  *
  * Note that the rawmidi instance is returned on the rrawmidi argument,
  * not the mpu401 instance itself.  To access to the mpu401 instance,
- * cast from rawmidi->private_data (with mpu401_t magic-cast).
+ * cast from rawmidi->private_data (with struct snd_mpu401 magic-cast).
  *
  * Returns zero if successful, or a negative error code.
  */
-int snd_mpu401_uart_new(snd_card_t * card, int device,
+int snd_mpu401_uart_new(struct snd_card *card, int device,
 			unsigned short hardware,
 			unsigned long port, int integrated,
 			int irq, int irq_flags,
-			snd_rawmidi_t ** rrawmidi)
+			struct snd_rawmidi ** rrawmidi)
 {
-	mpu401_t *mpu;
-	snd_rawmidi_t *rmidi;
+	struct snd_mpu401 *mpu;
+	struct snd_rawmidi *rmidi;
 	int err;
 
 	if (rrawmidi)
 		*rrawmidi = NULL;
 	if ((err = snd_rawmidi_new(card, "MPU-401U", device, 1, 1, &rmidi)) < 0)
 		return err;
-	mpu = kcalloc(1, sizeof(*mpu), GFP_KERNEL);
+	mpu = kzalloc(sizeof(*mpu), GFP_KERNEL);
 	if (mpu == NULL) {
+		snd_printk(KERN_ERR "mpu401_uart: cannot allocate\n");
 		snd_device_free(card, rmidi);
 		return -ENOMEM;
 	}

@@ -114,7 +114,7 @@
           #include "advansys.h"
           #endif
 
-        and after "static Scsi_Host_Template builtin_scsi_hosts[] =":
+        and after "static struct scsi_host_template builtin_scsi_hosts[] =":
 
           #ifdef CONFIG_SCSI_ADVANSYS
           ADVANSYS,
@@ -160,7 +160,7 @@
            --- Driver Structures
            --- Driver Data
            --- Driver Function Prototypes
-           --- Linux 'Scsi_Host_Template' and advansys_setup() Functions
+           --- Linux 'struct scsi_host_template' and advansys_setup() Functions
            --- Loadable Driver Support
            --- Miscellaneous Driver Functions
            --- Functions Required by the Asc Library
@@ -889,10 +889,6 @@ typedef unsigned char uchar;
 #define ASC_PCI_ID2DEV(id)    (((id) >> 11) & 0x1F)
 #define ASC_PCI_ID2FUNC(id)   (((id) >> 8) & 0x7)
 #define ASC_PCI_MKID(bus, dev, func) ((((dev) & 0x1F) << 11) | (((func) & 0x7) << 8) | ((bus) & 0xFF))
-#define ASC_PCI_VENDORID                  0x10CD
-#define ASC_PCI_DEVICEID_1200A            0x1100
-#define ASC_PCI_DEVICEID_1200B            0x1200
-#define ASC_PCI_DEVICEID_ULTRA            0x1300
 #define ASC_PCI_REVISION_3150             0x02
 #define ASC_PCI_REVISION_3050             0x03
 
@@ -1493,8 +1489,6 @@ typedef struct asc_dvc_cfg {
 #define ASC_INIT_STATE_END_INQUIRY   0x0080
 #define ASC_INIT_RESET_SCSI_DONE     0x0100
 #define ASC_INIT_STATE_WITHOUT_EEP   0x8000
-#define ASC_PCI_DEVICE_ID_REV_A      0x1100
-#define ASC_PCI_DEVICE_ID_REV_B      0x1200
 #define ASC_BUG_FIX_IF_NOT_DWB       0x0001
 #define ASC_BUG_FIX_ASYN_USE_SYN     0x0002
 #define ASYN_SDTR_DATA_FIX_PCI_REV_AB 0x41
@@ -2051,7 +2045,7 @@ STATIC ASC_DCNT  AscGetMaxDmaCount(ushort);
 #define ADV_VADDR_TO_U32   virt_to_bus
 #define ADV_U32_TO_VADDR   bus_to_virt
 
-#define AdvPortAddr  ulong              /* Virtual memory address size */
+#define AdvPortAddr  void __iomem *     /* Virtual memory address size */
 
 /*
  * Define Adv Library required memory access macros.
@@ -2100,12 +2094,6 @@ STATIC ASC_DCNT  AscGetMaxDmaCount(ushort);
 
 #define ADV_NUM_PAGE_CROSSING \
     ((ADV_SG_TOTAL_MEM_SIZE + (ADV_PAGE_SIZE - 1))/ADV_PAGE_SIZE)
-
-/* a_condor.h */
-#define ADV_PCI_VENDOR_ID               0x10CD
-#define ADV_PCI_DEVICE_ID_REV_A         0x2300
-#define ADV_PCI_DEVID_38C0800_REV1      0x2500
-#define ADV_PCI_DEVID_38C1600_REV1      0x2700
 
 #define ADV_EEP_DVC_CFG_BEGIN           (0x00)
 #define ADV_EEP_DVC_CFG_END             (0x15)
@@ -3570,14 +3558,7 @@ typedef struct scsi_cmnd     REQ, *REQP;
 #define PCI_MAX_SLOT            0x1F
 #define PCI_MAX_BUS             0xFF
 #define PCI_IOADDRESS_MASK      0xFFFE
-#define ASC_PCI_VENDORID        0x10CD
 #define ASC_PCI_DEVICE_ID_CNT   6       /* PCI Device ID count. */
-#define ASC_PCI_DEVICE_ID_1100  0x1100
-#define ASC_PCI_DEVICE_ID_1200  0x1200
-#define ASC_PCI_DEVICE_ID_1300  0x1300
-#define ASC_PCI_DEVICE_ID_2300  0x2300  /* ASC-3550 */
-#define ASC_PCI_DEVICE_ID_2500  0x2500  /* ASC-38C0800 */
-#define ASC_PCI_DEVICE_ID_2700  0x2700  /* ASC-38C1600 */
 
 #ifndef ADVANSYS_STATS
 #define ASC_STATS(shp, counter)
@@ -4068,7 +4049,7 @@ STATIC void         asc_prt_hex(char *f, uchar *, int);
 
 
 /*
- * --- Linux 'Scsi_Host_Template' and advansys_setup() Functions
+ * --- Linux 'struct scsi_host_template' and advansys_setup() Functions
  */
 
 #ifdef CONFIG_PROC_FS
@@ -4331,12 +4312,12 @@ advansys_detect(struct scsi_host_template *tpnt)
     struct pci_dev      *pci_devp = NULL;
     int                 pci_device_id_cnt = 0;
     unsigned int        pci_device_id[ASC_PCI_DEVICE_ID_CNT] = {
-                                    ASC_PCI_DEVICE_ID_1100,
-                                    ASC_PCI_DEVICE_ID_1200,
-                                    ASC_PCI_DEVICE_ID_1300,
-                                    ASC_PCI_DEVICE_ID_2300,
-                                    ASC_PCI_DEVICE_ID_2500,
-                                    ASC_PCI_DEVICE_ID_2700
+                                    PCI_DEVICE_ID_ASP_1200A,
+                                    PCI_DEVICE_ID_ASP_ABP940,
+                                    PCI_DEVICE_ID_ASP_ABP940U,
+                                    PCI_DEVICE_ID_ASP_ABP940UW,
+                                    PCI_DEVICE_ID_38C0800_REV1,
+                                    PCI_DEVICE_ID_38C1600_REV1
                         };
     ADV_PADDR           pci_memory_address;
 #endif /* CONFIG_PCI */
@@ -4472,7 +4453,7 @@ advansys_detect(struct scsi_host_template *tpnt)
 
                     /* Find all PCI cards. */
                     while (pci_device_id_cnt < ASC_PCI_DEVICE_ID_CNT) {
-                        if ((pci_devp = pci_find_device(ASC_PCI_VENDORID,
+                        if ((pci_devp = pci_find_device(PCI_VENDOR_ID_ASP,
                             pci_device_id[pci_device_id_cnt], pci_devp)) ==
                             NULL) {
                             pci_device_id_cnt++;
@@ -4556,8 +4537,6 @@ advansys_detect(struct scsi_host_template *tpnt)
                 continue;
             }
 
-	    scsi_set_device(shp, dev);
-
             /* Save a pointer to the Scsi_Host of each board found. */
             asc_host[asc_board_count++] = shp;
 
@@ -4578,9 +4557,9 @@ advansys_detect(struct scsi_host_template *tpnt)
              */
 #ifdef CONFIG_PCI
             if (asc_bus[bus] == ASC_IS_PCI &&
-                (pci_devp->device == ASC_PCI_DEVICE_ID_2300 ||
-                 pci_devp->device == ASC_PCI_DEVICE_ID_2500 ||
-                 pci_devp->device == ASC_PCI_DEVICE_ID_2700))
+                (pci_devp->device == PCI_DEVICE_ID_ASP_ABP940UW ||
+                 pci_devp->device == PCI_DEVICE_ID_38C0800_REV1 ||
+                 pci_devp->device == PCI_DEVICE_ID_38C1600_REV1))
             {
                 boardp->flags |= ASC_IS_WIDE_BOARD;
             }
@@ -4603,11 +4582,11 @@ advansys_detect(struct scsi_host_template *tpnt)
                 adv_dvc_varp->isr_callback = adv_isr_callback;
                 adv_dvc_varp->async_callback = adv_async_callback;
 #ifdef CONFIG_PCI
-                if (pci_devp->device == ASC_PCI_DEVICE_ID_2300)
+                if (pci_devp->device == PCI_DEVICE_ID_ASP_ABP940UW)
                 {
                     ASC_DBG(1, "advansys_detect: ASC-3550\n");
                     adv_dvc_varp->chip_type = ADV_CHIP_ASC3550;
-                } else if (pci_devp->device == ASC_PCI_DEVICE_ID_2500)
+                } else if (pci_devp->device == PCI_DEVICE_ID_38C0800_REV1)
                 {
                     ASC_DBG(1, "advansys_detect: ASC-38C0800\n");
                     adv_dvc_varp->chip_type = ADV_CHIP_ASC38C0800;
@@ -5404,10 +5383,8 @@ advansys_detect(struct scsi_host_template *tpnt)
                 release_region(shp->io_port, boardp->asc_n_io_port);
                 if (ASC_WIDE_BOARD(boardp)) {
                     iounmap(boardp->ioremap_addr);
-                    if (boardp->orig_carrp) {
-                        kfree(boardp->orig_carrp);
-                        boardp->orig_carrp = NULL;
-                    }
+                    kfree(boardp->orig_carrp);
+                    boardp->orig_carrp = NULL;
                     if (boardp->orig_reqp) {
                         kfree(boardp->orig_reqp);
                         boardp->orig_reqp = boardp->adv_reqp = NULL;
@@ -5459,10 +5436,8 @@ advansys_release(struct Scsi_Host *shp)
         adv_sgblk_t    *sgp = NULL;
 
         iounmap(boardp->ioremap_addr);
-        if (boardp->orig_carrp) {
-            kfree(boardp->orig_carrp);
-            boardp->orig_carrp = NULL;
-        }
+        kfree(boardp->orig_carrp);
+        boardp->orig_carrp = NULL;
         if (boardp->orig_reqp) {
             kfree(boardp->orig_reqp);
             boardp->orig_reqp = boardp->adv_reqp = NULL;
@@ -9194,16 +9169,16 @@ asc_prt_scsi_cmnd(struct scsi_cmnd *s)
         s->sc_data_direction, s->resid);
 
     printk(
-" use_sg %u, sglist_len %u, abort_reason 0x%x\n",
-        s->use_sg, s->sglist_len, s->abort_reason);
+" use_sg %u, sglist_len %u\n",
+        s->use_sg, s->sglist_len);
 
     printk(
 " serial_number 0x%x, retries %d, allowed %d\n",
         (unsigned) s->serial_number, s->retries, s->allowed);
 
     printk(
-" timeout_per_command %d, timeout_total %d, timeout %d\n",
-        s->timeout_per_command, s->timeout_total, s->timeout);
+" timeout_per_command %d\n",
+        s->timeout_per_command);
 
     printk(
 " scsi_done 0x%lx, done 0x%lx, host_scribble 0x%lx, result 0x%x\n",
@@ -11929,7 +11904,7 @@ AscInitGetConfig(
         PCIRevisionID = DvcReadPCIConfigByte(asc_dvc,
                                     AscPCIConfigRevisionIDRegister);
 
-        if (PCIVendorID != ASC_PCI_VENDORID) {
+        if (PCIVendorID != PCI_VENDOR_ID_ASP) {
             warn_code |= ASC_WARN_SET_PCI_CONFIG_SPACE;
         }
         prevCmdRegBits = DvcReadPCIConfigByte(asc_dvc,
@@ -11949,15 +11924,15 @@ AscInitGetConfig(
                 warn_code |= ASC_WARN_SET_PCI_CONFIG_SPACE;
             }
         }
-        if ((PCIDeviceID == ASC_PCI_DEVICEID_1200A) ||
-            (PCIDeviceID == ASC_PCI_DEVICEID_1200B)) {
+        if ((PCIDeviceID == PCI_DEVICE_ID_ASP_1200A) ||
+            (PCIDeviceID == PCI_DEVICE_ID_ASP_ABP940)) {
             DvcWritePCIConfigByte(asc_dvc,
                             AscPCIConfigLatencyTimer, 0x00);
             if (DvcReadPCIConfigByte(asc_dvc, AscPCIConfigLatencyTimer)
                 != 0x00) {
                 warn_code |= ASC_WARN_SET_PCI_CONFIG_SPACE;
             }
-        } else if (PCIDeviceID == ASC_PCI_DEVICEID_ULTRA) {
+        } else if (PCIDeviceID == PCI_DEVICE_ID_ASP_ABP940U) {
             if (DvcReadPCIConfigByte(asc_dvc,
                                 AscPCIConfigLatencyTimer) < 0x20) {
                 DvcWritePCIConfigByte(asc_dvc,
@@ -12044,8 +12019,8 @@ AscInitFromAscDvcVar(
         AscSetChipCfgMsw(iop_base, cfg_msw);
         if ((asc_dvc->bus_type & ASC_IS_PCI_ULTRA) == ASC_IS_PCI_ULTRA) {
         } else {
-            if ((pci_device_id == ASC_PCI_DEVICE_ID_REV_A) ||
-                (pci_device_id == ASC_PCI_DEVICE_ID_REV_B)) {
+            if ((pci_device_id == PCI_DEVICE_ID_ASP_1200A) ||
+                (pci_device_id == PCI_DEVICE_ID_ASP_ABP940)) {
                 asc_dvc->bug_fix_cntl |= ASC_BUG_FIX_IF_NOT_DWB;
                 asc_dvc->bug_fix_cntl |= ASC_BUG_FIX_ASYN_USE_SYN;
             }
@@ -14282,8 +14257,8 @@ Default_38C0800_EEPROM_Config __initdata = {
     0,                          /* 55 reserved */
     0,                          /* 56 cisptr_lsw */
     0,                          /* 57 cisprt_msw */
-    ADV_PCI_VENDOR_ID,          /* 58 subsysvid */
-    ADV_PCI_DEVID_38C0800_REV1, /* 59 subsysid */
+    PCI_VENDOR_ID_ASP,          /* 58 subsysvid */
+    PCI_DEVICE_ID_38C0800_REV1, /* 59 subsysid */
     0,                          /* 60 reserved */
     0,                          /* 61 reserved */
     0,                          /* 62 reserved */
@@ -14412,8 +14387,8 @@ Default_38C1600_EEPROM_Config __initdata = {
     0,                          /* 55 reserved */
     0,                          /* 56 cisptr_lsw */
     0,                          /* 57 cisprt_msw */
-    ADV_PCI_VENDOR_ID,          /* 58 subsysvid */
-    ADV_PCI_DEVID_38C1600_REV1, /* 59 subsysid */
+    PCI_VENDOR_ID_ASP,          /* 58 subsysvid */
+    PCI_DEVICE_ID_38C1600_REV1, /* 59 subsysid */
     0,                          /* 60 reserved */
     0,                          /* 61 reserved */
     0,                          /* 62 reserved */
@@ -18232,3 +18207,22 @@ AdvInquiryHandling(
     }
 }
 MODULE_LICENSE("Dual BSD/GPL");
+
+/* PCI Devices supported by this driver */
+static struct pci_device_id advansys_pci_tbl[] __devinitdata = {
+	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_1200A,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_ABP940,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_ABP940U,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_ABP940UW,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_38C0800_REV1,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_38C1600_REV1,
+	PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ }
+};
+MODULE_DEVICE_TABLE(pci, advansys_pci_tbl);
+

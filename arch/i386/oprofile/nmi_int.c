@@ -122,7 +122,7 @@ static void nmi_save_registers(void * dummy)
 static void free_msrs(void)
 {
 	int i;
-	for (i = 0; i < NR_CPUS; ++i) {
+	for_each_possible_cpu(i) {
 		kfree(cpu_msrs[i].counters);
 		cpu_msrs[i].counters = NULL;
 		kfree(cpu_msrs[i].controls);
@@ -138,10 +138,7 @@ static int allocate_msrs(void)
 	size_t counters_size = sizeof(struct op_msr) * model->num_counters;
 
 	int i;
-	for (i = 0; i < NR_CPUS; ++i) {
-		if (!cpu_online(i))
-			continue;
-
+	for_each_online_cpu(i) {
 		cpu_msrs[i].counters = kmalloc(counters_size, GFP_KERNEL);
 		if (!cpu_msrs[i].counters) {
 			success = 0;
@@ -335,10 +332,11 @@ static int __init ppro_init(char ** cpu_type)
 {
 	__u8 cpu_model = boot_cpu_data.x86_model;
 
-	if (cpu_model > 0xd)
+	if (cpu_model == 14)
+		*cpu_type = "i386/core";
+	else if (cpu_model > 0xd)
 		return 0;
-
-	if (cpu_model == 9) {
+	else if (cpu_model == 9) {
 		*cpu_type = "i386/p6_mobile";
 	} else if (cpu_model > 5) {
 		*cpu_type = "i386/piii";
@@ -355,7 +353,7 @@ static int __init ppro_init(char ** cpu_type)
 /* in order to get driverfs right */
 static int using_nmi;
 
-int __init nmi_init(struct oprofile_operations *ops)
+int __init op_nmi_init(struct oprofile_operations *ops)
 {
 	__u8 vendor = boot_cpu_data.x86_vendor;
 	__u8 family = boot_cpu_data.x86;
@@ -420,7 +418,7 @@ int __init nmi_init(struct oprofile_operations *ops)
 }
 
 
-void nmi_exit(void)
+void op_nmi_exit(void)
 {
 	if (using_nmi)
 		exit_driverfs();

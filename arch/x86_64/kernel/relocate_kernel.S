@@ -1,6 +1,6 @@
 /*
  * relocate_kernel.S - put the kernel image in place to boot
- * Copyright (C) 2002-2004 Eric Biederman  <ebiederm@xmission.com>
+ * Copyright (C) 2002-2005 Eric Biederman  <ebiederm@xmission.com>
  *
  * This source code is licensed under the GNU General Public License,
  * Version 2.  See the file COPYING for more details.
@@ -15,7 +15,7 @@
 	.globl relocate_new_kernel
 	.code64
 relocate_new_kernel:
-	/* %rdi indirection_page
+	/* %rdi page_list
 	 * %rsi reboot_code_buffer
 	 * %rdx start address
 	 * %rcx page_table
@@ -72,30 +72,32 @@ relocate_new_kernel:
 	movq	%rcx, %cr3
 
 	/* Do the copies */
-	movq	%rdi, %rbx	/* Put the indirection page in %rbx */
+	movq	%rdi, %rcx 	/* Put the page_list in %rcx */
 	xorq	%rdi, %rdi
 	xorq	%rsi, %rsi
+	jmp	1f
 
 0:	/* top, read another word for the indirection page */
 
 	movq	(%rbx), %rcx
 	addq	$8,	%rbx
+1:
 	testq	$0x1,	%rcx  /* is it a destination page? */
-	jz	1f
+	jz	2f
 	movq	%rcx,	%rdi
 	andq	$0xfffffffffffff000, %rdi
 	jmp	0b
-1:
+2:
 	testq	$0x2,	%rcx  /* is it an indirection page? */
-	jz	1f
+	jz	2f
 	movq	%rcx,   %rbx
 	andq	$0xfffffffffffff000, %rbx
 	jmp	0b
-1:
+2:
 	testq	$0x4,	%rcx  /* is it the done indicator? */
-	jz	1f
-	jmp	2f
-1:
+	jz	2f
+	jmp	3f
+2:
 	testq	$0x8,	%rcx  /* is it the source indicator? */
 	jz	0b	      /* Ignore it otherwise */
 	movq	%rcx,   %rsi  /* For ever source page do a copy */
@@ -104,7 +106,7 @@ relocate_new_kernel:
 	movq	$512,   %rcx
 	rep ; movsq
 	jmp	0b
-2:
+3:
 
 	/* To be certain of avoiding problems with self-modifying code
 	 * I need to execute a serializing instruction here.

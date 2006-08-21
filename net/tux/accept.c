@@ -38,6 +38,7 @@ struct socket * start_listening(tux_socket_t *listen, int nr)
 	struct socket *sock = NULL;
 	struct sock *sk;
 	struct tcp_sock *tp;
+	struct inet_connection_sock *icsk;
 	int err;
 	u16 port = listen->port;
 	u32 addr = listen->ip;
@@ -58,27 +59,28 @@ struct socket * start_listening(tux_socket_t *listen, int nr)
 	sin.sin_port = htons(port);
 
 	sk = sock->sk;
+	icsk = inet_csk(sk);
 	sk->sk_reuse = 1;
 	sock_set_flag(sk, SOCK_URGINLINE);
 
 	err = sock->ops->bind(sock, (struct sockaddr*)&sin, sizeof(sin));
 	if (err) {
-		printk(KERN_ERR "TUX: error %d binding socket. This means that probably some other process is (or was a short time ago) using addr %s://%d.%d.%d.%d:%d.\n", 
+		printk(KERN_ERR "TUX: error %d binding socket. This means that probably some other process is (or was a short time ago) using addr %s://%d.%d.%d.%d:%d.\n",
 			err, proto->name, HIPQUAD(addr), port);
 		goto error;
 	}
 
 	tp = tcp_sk(sk);
-	Dprintk("listen sk accept_queue: %p/%p.\n",
-		tp->accept_queue, tp->accept_queue_tail);
-	tp->ack.pingpong = tux_ack_pingpong;
+	Dprintk("listen sk accept_queue: %d.\n",
+		!reqsk_queue_empty(&icsk->icsk_accept_queue));
+	icsk->icsk_ack.pingpong = tux_ack_pingpong;
 
 	sock_reset_flag(sk, SOCK_LINGER);
 	sk->sk_lingertime = 0;
 	tp->linger2 = tux_keepalive_timeout * HZ;
 
 	if (proto->defer_accept && !tux_keepalive_timeout && tux_defer_accept)
-		tp->defer_accept = 1;
+		icsk->icsk_accept_queue.rskq_defer_accept = 1;
 
 	/* Now, start listening on the socket */
 
@@ -226,7 +228,7 @@ void add_req_to_workqueue (tux_req_t *req)
 
 void del_output_timer (tux_req_t *req)
 {
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	if (!spin_is_locked(&req->ti->work_lock))
 		TUX_BUG();
 #endif
@@ -275,7 +277,7 @@ void output_timeout (tux_req_t *req)
 
 void __del_keepalive_timer (tux_req_t *req)
 {
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	if (!spin_is_locked(&req->ti->work_lock))
 		TUX_BUG();
 #endif
@@ -292,7 +294,7 @@ static void keepalive_timeout_fn (unsigned long data)
 {
 	tux_req_t *req = (tux_req_t *)data;
 
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	Dprintk("req %p timed out after %d sec!\n", req, tux_keepalive_timeout);
 	if (tux_Dprintk)
 		print_req(req);
@@ -309,7 +311,7 @@ void __add_keepalive_timer (tux_req_t *req)
 
 	if (!tux_keepalive_timeout)
 		TUX_BUG();
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	if (!spin_is_locked(&req->ti->work_lock))
 		TUX_BUG();
 #endif
@@ -377,7 +379,7 @@ int output_space_event (tux_req_t *req)
 
 static int __idle_event (tux_req_t *req)
 {
-	struct tcp_sock *tp;
+	struct inet_connection_sock *icsk;
 	threadinfo_t *ti;
 
 	if (!req || (req->magic != TUX_MAGIC))
@@ -394,9 +396,9 @@ static int __idle_event (tux_req_t *req)
 	del_output_timer(req);
 	DEC_STAT(nr_idle_input_pending);
 
-	tp = tcp_sk(req->sock->sk);
+	icsk = inet_csk(req->sock->sk);
 
-	tp->ack.pingpong = tux_ack_pingpong;
+	icsk->icsk_ack.pingpong = tux_ack_pingpong;
 	SET_TIMESTAMP(req->accept_timestamp);
 
 	__add_req_to_workqueue(req);
@@ -674,7 +676,7 @@ void link_tux_data_socket (tux_req_t *req, struct socket *sock)
 void unlink_tux_socket (tux_req_t *req)
 {
 	struct sock *sk;
-	
+
 	if (!req->sock || !req->sock->sk)
 		return;
 	sk = req->sock->sk;
@@ -710,7 +712,7 @@ void unlink_tux_socket (tux_req_t *req)
 void unlink_tux_data_socket (tux_req_t *req)
 {
 	struct sock *sk;
-	
+
 	if (!req->data_sock || !req->data_sock->sk)
 		return;
 	sk = req->data_sock->sk;
@@ -786,7 +788,8 @@ int accept_requests (threadinfo_t *ti)
 {
 	int count = 0, last_count = 0, error, socknr = 0;
 	struct socket *sock, *new_sock;
-	struct tcp_sock *tp1, *tp2;
+	struct tcp_sock *tp2;
+	struct inet_connection_sock *icsk1, *icsk2;
 	tux_req_t *req;
 
 	if (ti->nr_requests > tux_max_connect)
@@ -803,48 +806,49 @@ repeat:
 		if (unlikely(test_thread_flag(TIF_NEED_RESCHED)))
 			break;
 
-	tp1 = tcp_sk(sock->sk);
-	/*
-	 * Quick test to see if there are connections on the queue.
-	 * This is cheaper than accept() itself because this saves us
-	 * the allocation of a new socket. (Which doesn't seem to be
-	 * used anyway)
-	 */
-	if (tp1->accept_queue) {
-		tux_proto_t *proto;
+		icsk1 = inet_csk(sock->sk);
+		/*
+		 * Quick test to see if there are connections on the queue.
+		 * This is cheaper than accept() itself because this saves us
+		 * the allocation of a new socket. (Which doesn't seem to be
+		 * used anyway)
+		 */
+		if (!reqsk_queue_empty(&icsk1->icsk_accept_queue)) {
+			tux_proto_t *proto;
 
-		if (!count++)
-			__set_task_state(current, TASK_RUNNING);
+			if (!count++)
+				__set_task_state(current, TASK_RUNNING);
 
-		new_sock = sock_alloc();
-		if (!new_sock)
-			goto out;
+			new_sock = sock_alloc();
+			if (!new_sock)
+				goto out;
 
-		new_sock->type = sock->type;
-		new_sock->ops = sock->ops;
+			new_sock->type = sock->type;
+			new_sock->ops = sock->ops;
 
-		error = sock->ops->accept(sock, new_sock, O_NONBLOCK);
-		if (error < 0)
-			goto err;
-		if (new_sock->sk->sk_state != TCP_ESTABLISHED)
-			goto err;
+			error = sock->ops->accept(sock, new_sock, O_NONBLOCK);
+			if (error < 0)
+				goto err;
+			if (new_sock->sk->sk_state != TCP_ESTABLISHED)
+				goto err;
 
-		tp2 = tcp_sk(new_sock->sk);
-		tp2->nonagle = 2;
-		tp2->ack.pingpong = tux_ack_pingpong;
-		new_sock->sk->sk_reuse = 1;
-		sock_set_flag(new_sock->sk, SOCK_URGINLINE);
+			tp2 = tcp_sk(new_sock->sk);
+			icsk2 = inet_csk(new_sock->sk);
+			tp2->nonagle = 2;
+			icsk2->icsk_ack.pingpong = tux_ack_pingpong;
+			new_sock->sk->sk_reuse = 1;
+			sock_set_flag(new_sock->sk, SOCK_URGINLINE);
 
-		/* Allocate a request-entry for the connection */
-		req = kmalloc_req(ti);
-		if (!req)
-			BUG();
-		link_tux_socket(req, new_sock);
+			/* Allocate a request-entry for the connection */
+			req = kmalloc_req(ti);
+			if (!req)
+				BUG();
+			link_tux_socket(req, new_sock);
 
-		proto = req->proto = tux_listen->proto;
+			proto = req->proto = tux_listen->proto;
 
-		proto->got_request(req);
-	}
+			proto->got_request(req);
+		}
 	}
 	if (count != last_count) {
 		last_count = count;

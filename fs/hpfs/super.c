@@ -75,7 +75,7 @@ void hpfs_error(struct super_block *s, char *m,...)
 		} else if (s->s_flags & MS_RDONLY) printk("; going on - but anything won't be destroyed because it's read-only\n");
 		else printk("; corrupted filesystem mounted read/write - your computer will explode within 20 seconds ... but you wanted it so!\n");
 	} else printk("\n");
-	if (buf) kfree(buf);
+	kfree(buf);
 	hpfs_sb(s)->sb_was_error = 1;
 }
 
@@ -102,8 +102,8 @@ int hpfs_stop_cycles(struct super_block *s, int key, int *c1, int *c2,
 static void hpfs_put_super(struct super_block *s)
 {
 	struct hpfs_sb_info *sbi = hpfs_sb(s);
-	if (sbi->sb_cp_table) kfree(sbi->sb_cp_table);
-	if (sbi->sb_bmp_dir) kfree(sbi->sb_bmp_dir);
+	kfree(sbi->sb_cp_table);
+	kfree(sbi->sb_bmp_dir);
 	unmark_dirty(s);
 	s->s_fs_info = NULL;
 	kfree(sbi);
@@ -181,8 +181,8 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 
 	if ((flags & (SLAB_CTOR_VERIFY|SLAB_CTOR_CONSTRUCTOR)) ==
 	    SLAB_CTOR_CONSTRUCTOR) {
-		init_MUTEX(&ei->i_sem);
-		init_MUTEX(&ei->i_parent);
+		mutex_init(&ei->i_mutex);
+		mutex_init(&ei->i_parent_mutex);
 		inode_init_once(&ei->vfs_inode);
 	}
 }
@@ -191,7 +191,8 @@ static int init_inodecache(void)
 {
 	hpfs_inode_cachep = kmem_cache_create("hpfs_inode_cache",
 					     sizeof(struct hpfs_inode_info),
-					     0, SLAB_RECLAIM_ACCOUNT,
+					     0, (SLAB_RECLAIM_ACCOUNT|
+						SLAB_MEM_SPREAD),
 					     init_once, NULL);
 	if (hpfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -654,8 +655,8 @@ bail3:	brelse(bh1);
 bail2:	brelse(bh0);
 bail1:
 bail0:
-	if (sbi->sb_bmp_dir) kfree(sbi->sb_bmp_dir);
-	if (sbi->sb_cp_table) kfree(sbi->sb_cp_table);
+	kfree(sbi->sb_bmp_dir);
+	kfree(sbi->sb_cp_table);
 	s->s_fs_info = NULL;
 	kfree(sbi);
 	return -EINVAL;

@@ -116,7 +116,7 @@ mb_cache_indexes(struct mb_cache *cache)
  * What the mbcache registers as to get shrunk dynamically.
  */
 
-static int mb_cache_shrink_fn(int nr_to_scan, unsigned int gfp_mask);
+static int mb_cache_shrink_fn(int nr_to_scan, gfp_t gfp_mask);
 
 
 static inline int
@@ -126,7 +126,7 @@ __mb_cache_entry_is_hashed(struct mb_cache_entry *ce)
 }
 
 
-static inline void
+static void
 __mb_cache_entry_unhash(struct mb_cache_entry *ce)
 {
 	int n;
@@ -139,8 +139,8 @@ __mb_cache_entry_unhash(struct mb_cache_entry *ce)
 }
 
 
-static inline void
-__mb_cache_entry_forget(struct mb_cache_entry *ce, int gfp_mask)
+static void
+__mb_cache_entry_forget(struct mb_cache_entry *ce, gfp_t gfp_mask)
 {
 	struct mb_cache *cache = ce->e_cache;
 
@@ -158,7 +158,7 @@ __mb_cache_entry_forget(struct mb_cache_entry *ce, int gfp_mask)
 }
 
 
-static inline void
+static void
 __mb_cache_entry_release_unlock(struct mb_cache_entry *ce)
 {
 	/* Wake up all processes queuing for this cache entry. */
@@ -193,7 +193,7 @@ forget:
  * Returns the number of objects which are present in the cache.
  */
 static int
-mb_cache_shrink_fn(int nr_to_scan, unsigned int gfp_mask)
+mb_cache_shrink_fn(int nr_to_scan, gfp_t gfp_mask)
 {
 	LIST_HEAD(free_list);
 	struct list_head *l, *ltmp;
@@ -288,7 +288,7 @@ mb_cache_create(const char *name, struct mb_cache_op *cache_op,
 			INIT_LIST_HEAD(&cache->c_indexes_hash[m][n]);
 	}
 	cache->c_entry_cache = kmem_cache_create(name, entry_size, 0,
-		SLAB_RECLAIM_ACCOUNT, NULL, NULL);
+		SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD, NULL, NULL);
 	if (!cache->c_entry_cache)
 		goto fail;
 
@@ -301,8 +301,7 @@ fail:
 	if (cache) {
 		while (--m >= 0)
 			kfree(cache->c_indexes_hash[m]);
-		if (cache->c_block_hash)
-			kfree(cache->c_block_hash);
+		kfree(cache->c_block_hash);
 		kfree(cache);
 	}
 	return NULL;
@@ -312,15 +311,14 @@ fail:
 /*
  * mb_cache_shrink()
  *
- * Removes all cache entires of a device from the cache. All cache entries
+ * Removes all cache entries of a device from the cache. All cache entries
  * currently in use cannot be freed, and thus remain in the cache. All others
  * are freed.
  *
- * @cache: which cache to shrink
  * @bdev: which device's cache entries to shrink
  */
 void
-mb_cache_shrink(struct mb_cache *cache, struct block_device *bdev)
+mb_cache_shrink(struct block_device *bdev)
 {
 	LIST_HEAD(free_list);
 	struct list_head *l, *ltmp;

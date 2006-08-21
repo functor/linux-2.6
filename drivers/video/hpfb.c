@@ -193,7 +193,6 @@ static struct fb_ops hpfb_ops = {
 	.fb_fillrect	= hpfb_fillrect,
 	.fb_copyarea	= hpfb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
-	.fb_cursor	= soft_cursor,
 	.fb_sync	= hpfb_sync,
 };
 
@@ -387,7 +386,9 @@ int __init hpfb_init(void)
 	if (fb_get_options("hpfb", NULL))
 		return -ENODEV;
 
-	dio_module_init(&hpfb_driver);
+	err = dio_register_driver(&hpfb_driver);
+	if (err)
+		return err;
 
 	fs = get_fs();
 	set_fs(KERNEL_DS);

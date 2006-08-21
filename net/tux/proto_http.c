@@ -29,7 +29,7 @@
  *
  ****************************************************************/
 
-/* 
+/*
  * Parse the HTTP message and put results into the request structure.
  * CISAPI extensions do not see the actual message buffer.
  *
@@ -391,7 +391,7 @@ continue_parsing:
 				GOTO_REDIR;
 		}
 
-#define PARSE_STR_FIELD(char,field,str,len) 				\
+#define PARSE_STR_FIELD(char,field,str,len)				\
 	if (PARSE_TOKEN(curr,field,left)) {				\
 		req->str = curr;					\
 		SKIP_LINE(curr,left);					\
@@ -526,7 +526,7 @@ next_token:
 				 * 3) strip trailing dots
 				 * 4) potentially strip off tail
 				 */
-				
+
 #define is_w(n) ((curr[n] == 'w') || (curr[n] == 'W'))
 
 				if ((left > 4) && is_w(0) && is_w(1) &&
@@ -535,7 +535,7 @@ next_token:
 					left -= 4;
 					tmp = curr;
 				}
-			 
+
 				COPY_LINE_TOLOWER(curr, tmp2, left, req->host+MAX_HOST_LEN-2);
 				req->host_len = curr - tmp - 2;
 				while (req->host[req->host_len] == '.') {
@@ -756,7 +756,7 @@ static int lookup_url (tux_req_t *req, const unsigned int flag)
 {
 	/*
 	 * -1 : no previous checks made
-	 *  0 : previous check failed, do not check farther, 
+	 *  0 : previous check failed, do not check farther,
 	 *  1 : previous check successed, check farther
 	 */
 	int not_modified = -1;
@@ -912,7 +912,7 @@ repeat_lookup:
 			not_modified = 1;
 			TDprintk("Etag matched.\n");
 		} else
-			not_modified = 0; 
+			not_modified = 0;
 	}
 
         if ((req->if_modified_since_len >= 24) && (abs(not_modified) == 1)) {
@@ -950,7 +950,7 @@ abort:
 			mntput(mnt);
 		mnt = NULL;
 	}
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	if (!not_modified) {
 		TDprintk("req %p has lookup errors!\n", req);
 		if (tux_TDprintk)
@@ -1045,7 +1045,7 @@ void add_mimetype (char *new_ext, char *new_type, char *new_expire)
 	strncpy(ext, new_ext, ext_len);
 	strncpy(type, new_type, type_len);
 	strncpy(expire, new_expire, expire_len);
-	
+
 	// in case one of the above parameters was too long :
 
 	ext[ext_len] = '\0';
@@ -1226,11 +1226,11 @@ static void send_ret_notmodified (tux_req_t *req)
 	int size;
 
 	size = NOTMODIFIED_1_LEN + DATE_LEN - 1 + NOTMODIFIED_2_LEN + req->etaglen + NOTMODIFIED_3_LEN;
-	buf = get_abuf(req, size); 
+	buf = get_abuf(req, size);
 	memcpy(buf, NOTMODIFIED_1, NOTMODIFIED_1_LEN);
 	buf += NOTMODIFIED_1_LEN;
 	memcpy(buf, tux_date, DATE_LEN-1);
-	buf += DATE_LEN-1; 
+	buf += DATE_LEN-1;
 	memcpy(buf, NOTMODIFIED_2, NOTMODIFIED_2_LEN);
 	buf += NOTMODIFIED_2_LEN;
 	memcpy(buf, &req->etag, req->etaglen);
@@ -1556,10 +1556,10 @@ done:
 static void http_lookup_vhost (tux_req_t *req, int cachemiss)
 {
 	struct dentry *dentry;
-	struct nameidata base={};
+	struct nameidata base = { };
 	struct vfsmount *mnt = NULL;
 	unsigned int flag = cachemiss ? 0 : LOOKUP_ATOMIC;
-	
+
 	Dprintk("http_lookup_vhost(%p, %d, virtual: %d, host: %s (%d).)\n", req, flag, req->virtual, req->host, req->host_len);
 
 	base.flags = LOOKUP_FOLLOW|flag;
@@ -1685,7 +1685,7 @@ cachemiss:
 			goto error;
 
 		case MIME_TYPE_CGI:
-#if CONFIG_TUX_EXTCGI
+#ifdef CONFIG_TUX_EXTCGI
 			Dprintk("CGI request %p.\n", req);
 			query_extcgi(req);
 			return;
@@ -1747,7 +1747,7 @@ usermode:
 
 static void http_post_header (tux_req_t *req, int cachemiss)
 {
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	req->bytes_expected = req->output_len;
 #endif
 	req->bytes_sent = 0; // data comes now.
@@ -1764,7 +1764,7 @@ static void http_send_body (tux_req_t *req, int cachemiss)
 	SET_TIMESTAMP(req->output_timestamp);
 
 	if (req->error) {
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
 		req->in_file->f_pos = 0;
@@ -1786,7 +1786,7 @@ repeat:
 		ret = generic_send_file(req, req->sock, cachemiss);
 		Dprintk("body send-file returned: %d.\n", ret);
 	} else {
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 		req->bytes_expected = 0;
 #endif
 	}
@@ -1830,14 +1830,14 @@ char tux_date [DATE_LEN] = DEFAULT_DATE;
 		"Content-Type: "
 
 #define HEADER_PART1B \
-		"HTTP/1.1 200 OK" 
+		"HTTP/1.1 200 OK"
 
 #define HEADER_PART1AP \
 		"HTTP/1.1 206 Partial Content\r\n" \
 		"Content-Type: "
 
 #define HEADER_PART1BP \
-		"HTTP/1.1 206 Partial Content" 
+		"HTTP/1.1 206 Partial Content"
 
 #define HEADER_PART1C \
 		"HTTP/1.1 404 Page Not Found\r\n" \
@@ -2004,7 +2004,7 @@ dir_next:
 
 	size = curr-buf;
 
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	*curr = 0;
 	Dprintk("{%s} [%d/%d]\n", buf, size, strlen(buf));
 #endif
@@ -2035,7 +2035,7 @@ static int http_check_req_err (tux_req_t *req, int cachemiss)
 	Dprintk("http_check_req_err(%p,%d): 1 (state: %d, urg: %d)\n",
 		req, cachemiss, req->sock->sk->sk_state,
 		tcp_sk(req->sock->sk)->urg_data);
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	req->bytes_expected = 0;
 #endif
 	req->in_file->f_pos = 0;

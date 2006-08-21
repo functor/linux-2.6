@@ -1,9 +1,7 @@
 /*
- * arch/ppc/platforms/mpc8555_cds.h
- *
  * MPC8555CDS board definitions
  *
- * Maintainer: Kumar Gala <kumar.gala@freescale.com>
+ * Maintainer: Kumar Gala <galak@kernel.crashing.org>
  *
  * Copyright 2004 Freescale Semiconductor Inc.
  *
