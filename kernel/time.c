@@ -29,6 +29,7 @@
 
 #include <linux/module.h>
 #include <linux/timex.h>
+#include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/smp_lock.h>
 #include <linux/syscalls.h>
@@ -128,7 +129,7 @@ asmlinkage long sys_gettimeofday(struct timeval __user *tv, struct timezone __us
  * as real UNIX machines always do it. This avoids all headaches about
  * daylight saving times and warping kernel clocks.
  */
-inline static void warp_clock(void)
+static inline void warp_clock(void)
 {
 	write_seqlock_irq(&xtime_lock);
 	wall_to_monotonic.tv_sec -= sys_tz.tz_minuteswest * 60;
@@ -153,6 +154,9 @@ int do_sys_settimeofday(struct timespec *tv, struct timezone *tz)
 {
 	static int firsttime = 1;
 	int error = 0;
+
+	if (tv && !timespec_valid(tv))
+		return -EINVAL;
 
 	error = security_settime(tv, tz);
 	if (error)
@@ -197,24 +201,6 @@ asmlinkage long sys_settimeofday(struct timeval __user *tv,
 
 	return do_sys_settimeofday(tv ? &new_ts : NULL, tz ? &new_tz : NULL);
 }
-
-long pps_offset;		/* pps time offset (us) */
-long pps_jitter = MAXTIME;	/* time dispersion (jitter) (us) */
-
-long pps_freq;			/* frequency offset (scaled ppm) */
-long pps_stabil = MAXFREQ;	/* frequency dispersion (scaled ppm) */
-
-long pps_valid = PPS_VALID;	/* pps signal watchdog counter */
-
-int pps_shift = PPS_SHIFT;	/* interval duration (s) (shift) */
-
-long pps_jitcnt;		/* jitter limit exceeded */
-long pps_calcnt;		/* calibration intervals */
-long pps_errcnt;		/* calibration errors */
-long pps_stbcnt;		/* stability limit exceeded */
-
-/* hook for a loadable hardpps kernel module */
-void (*hardpps_ptr)(struct timeval *);
 
 /* we call this to notify the arch when the clock is being
  * controlled.  If no such arch routine, do nothing.
@@ -275,7 +261,7 @@ int do_adjtimex(struct timex *txc)
 		    result = -EINVAL;
 		    goto leave;
 		}
-		time_freq = txc->freq - pps_freq;
+		time_freq = txc->freq;
 	    }
 
 	    if (txc->modes & ADJ_MAXERROR) {
@@ -308,10 +294,8 @@ int do_adjtimex(struct timex *txc)
 		    if ((time_next_adjust = txc->offset) == 0)
 			 time_adjust = 0;
 		}
-		else if ( time_status & (STA_PLL | STA_PPSTIME) ) {
-		    ltemp = (time_status & (STA_PPSTIME | STA_PPSSIGNAL)) ==
-		            (STA_PPSTIME | STA_PPSSIGNAL) ?
-		            pps_offset : txc->offset;
+		else if (time_status & STA_PLL) {
+		    ltemp = txc->offset;
 
 		    /*
 		     * Scale the phase adjustment and
@@ -338,58 +322,36 @@ int do_adjtimex(struct timex *txc)
 		        if (mtemp >= MINSEC) {
 			    ltemp = (time_offset / mtemp) << (SHIFT_USEC -
 							      SHIFT_UPDATE);
-			    if (ltemp < 0)
-			        time_freq -= -ltemp >> SHIFT_KH;
-			    else
-			        time_freq += ltemp >> SHIFT_KH;
+			    time_freq += shift_right(ltemp, SHIFT_KH);
 			} else /* calibration interval too short (p. 12) */
 				result = TIME_ERROR;
 		    } else {	/* PLL mode */
 		        if (mtemp < MAXSEC) {
 			    ltemp *= mtemp;
-			    if (ltemp < 0)
-			        time_freq -= -ltemp >> (time_constant +
-							time_constant +
-							SHIFT_KF - SHIFT_USEC);
-			    else
-			        time_freq += ltemp >> (time_constant +
+			    time_freq += shift_right(ltemp,(time_constant +
 						       time_constant +
-						       SHIFT_KF - SHIFT_USEC);
+						       SHIFT_KF - SHIFT_USEC));
 			} else /* calibration interval too long (p. 12) */
 				result = TIME_ERROR;
 		    }
-		    if (time_freq > time_tolerance)
-		        time_freq = time_tolerance;
-		    else if (time_freq < -time_tolerance)
-		        time_freq = -time_tolerance;
-		} /* STA_PLL || STA_PPSTIME */
+		    time_freq = min(time_freq, time_tolerance);
+		    time_freq = max(time_freq, -time_tolerance);
+		} /* STA_PLL */
 	    } /* txc->modes & ADJ_OFFSET */
 	    if (txc->modes & ADJ_TICK) {
 		tick_usec = txc->tick;
 		tick_nsec = TICK_USEC_TO_NSEC(tick_usec);
 	    }
 	} /* txc->modes */
-leave:	if ((time_status & (STA_UNSYNC|STA_CLOCKERR)) != 0
-	    || ((time_status & (STA_PPSFREQ|STA_PPSTIME)) != 0
-		&& (time_status & STA_PPSSIGNAL) == 0)
-	    /* p. 24, (b) */
-	    || ((time_status & (STA_PPSTIME|STA_PPSJITTER))
-		== (STA_PPSTIME|STA_PPSJITTER))
-	    /* p. 24, (c) */
-	    || ((time_status & STA_PPSFREQ) != 0
-		&& (time_status & (STA_PPSWANDER|STA_PPSERROR)) != 0))
-	    /* p. 24, (d) */
+leave:	if ((time_status & (STA_UNSYNC|STA_CLOCKERR)) != 0)
 		result = TIME_ERROR;
 	
 	if ((txc->modes & ADJ_OFFSET_SINGLESHOT) == ADJ_OFFSET_SINGLESHOT)
 	    txc->offset	   = save_adjust;
 	else {
-	    if (time_offset < 0)
-		txc->offset = -(-time_offset >> SHIFT_UPDATE);
-	    else
-		txc->offset = time_offset >> SHIFT_UPDATE;
+	    txc->offset = shift_right(time_offset, SHIFT_UPDATE);
 	}
-	txc->freq	   = time_freq + pps_freq;
+	txc->freq	   = time_freq;
 	txc->maxerror	   = time_maxerror;
 	txc->esterror	   = time_esterror;
 	txc->status	   = time_status;
@@ -397,14 +359,16 @@ leave:	if ((time_status & (STA_UNSYNC|STA_CLOCKERR)) != 0
 	txc->precision	   = time_precision;
 	txc->tolerance	   = time_tolerance;
 	txc->tick	   = tick_usec;
-	txc->ppsfreq	   = pps_freq;
-	txc->jitter	   = pps_jitter >> PPS_AVG;
-	txc->shift	   = pps_shift;
-	txc->stabil	   = pps_stabil;
-	txc->jitcnt	   = pps_jitcnt;
-	txc->calcnt	   = pps_calcnt;
-	txc->errcnt	   = pps_errcnt;
-	txc->stbcnt	   = pps_stbcnt;
+
+	/* PPS is not implemented, so these are zero */
+	txc->ppsfreq	   = 0;
+	txc->jitter	   = 0;
+	txc->shift	   = 0;
+	txc->stabil	   = 0;
+	txc->jitcnt	   = 0;
+	txc->calcnt	   = 0;
+	txc->errcnt	   = 0;
+	txc->stbcnt	   = 0;
 	write_sequnlock_irq(&xtime_lock);
 	do_gettimeofday(&txc->time);
 	notify_arch_cmos_timer();
@@ -446,7 +410,7 @@ EXPORT_SYMBOL(current_kernel_time);
  * current_fs_time - Return FS time
  * @sb: Superblock.
  *
- * Return the current time truncated to the time granuality supported by
+ * Return the current time truncated to the time granularity supported by
  * the fs.
  */
 struct timespec current_fs_time(struct super_block *sb)
@@ -457,11 +421,11 @@ struct timespec current_fs_time(struct super_block *sb)
 EXPORT_SYMBOL(current_fs_time);
 
 /**
- * timespec_trunc - Truncate timespec to a granuality
+ * timespec_trunc - Truncate timespec to a granularity
  * @t: Timespec
- * @gran: Granuality in ns.
+ * @gran: Granularity in ns.
  *
- * Truncate a timespec to a granuality. gran must be smaller than a second.
+ * Truncate a timespec to a granularity. gran must be smaller than a second.
  * Always rounds down.
  *
  * This function should be only used for timestamps returned by
@@ -532,6 +496,7 @@ int do_settimeofday (struct timespec *tv)
 	clock_was_set();
 	return 0;
 }
+EXPORT_SYMBOL(do_settimeofday);
 
 void do_gettimeofday (struct timeval *tv)
 {
@@ -570,7 +535,111 @@ void getnstimeofday(struct timespec *tv)
 	tv->tv_sec = x.tv_sec;
 	tv->tv_nsec = x.tv_usec * NSEC_PER_USEC;
 }
+EXPORT_SYMBOL_GPL(getnstimeofday);
 #endif
+
+/* Converts Gregorian date to seconds since 1970-01-01 00:00:00.
+ * Assumes input in normal date format, i.e. 1980-12-31 23:59:59
+ * => year=1980, mon=12, day=31, hour=23, min=59, sec=59.
+ *
+ * [For the Julian calendar (which was used in Russia before 1917,
+ * Britain & colonies before 1752, anywhere else before 1582,
+ * and is still in use by some communities) leave out the
+ * -year/100+year/400 terms, and add 10.]
+ *
+ * This algorithm was first published by Gauss (I think).
+ *
+ * WARNING: this function will overflow on 2106-02-07 06:28:16 on
+ * machines were long is 32-bit! (However, as time_t is signed, we
+ * will already get problems at other places on 2038-01-19 03:14:08)
+ */
+unsigned long
+mktime(const unsigned int year0, const unsigned int mon0,
+       const unsigned int day, const unsigned int hour,
+       const unsigned int min, const unsigned int sec)
+{
+	unsigned int mon = mon0, year = year0;
+
+	/* 1..12 -> 11,12,1..10 */
+	if (0 >= (int) (mon -= 2)) {
+		mon += 12;	/* Puts Feb last since it has leap day */
+		year -= 1;
+	}
+
+	return ((((unsigned long)
+		  (year/4 - year/100 + year/400 + 367*mon/12 + day) +
+		  year*365 - 719499
+	    )*24 + hour /* now have hours */
+	  )*60 + min /* now have minutes */
+	)*60 + sec; /* finally seconds */
+}
+
+EXPORT_SYMBOL(mktime);
+
+/**
+ * set_normalized_timespec - set timespec sec and nsec parts and normalize
+ *
+ * @ts:		pointer to timespec variable to be set
+ * @sec:	seconds to set
+ * @nsec:	nanoseconds to set
+ *
+ * Set seconds and nanoseconds field of a timespec variable and
+ * normalize to the timespec storage format
+ *
+ * Note: The tv_nsec part is always in the range of
+ * 	0 <= tv_nsec < NSEC_PER_SEC
+ * For negative values only the tv_sec field is negative !
+ */
+void set_normalized_timespec(struct timespec *ts, time_t sec, long nsec)
+{
+	while (nsec >= NSEC_PER_SEC) {
+		nsec -= NSEC_PER_SEC;
+		++sec;
+	}
+	while (nsec < 0) {
+		nsec += NSEC_PER_SEC;
+		--sec;
+	}
+	ts->tv_sec = sec;
+	ts->tv_nsec = nsec;
+}
+
+/**
+ * ns_to_timespec - Convert nanoseconds to timespec
+ * @nsec:       the nanoseconds value to be converted
+ *
+ * Returns the timespec representation of the nsec parameter.
+ */
+struct timespec ns_to_timespec(const s64 nsec)
+{
+	struct timespec ts;
+
+	if (!nsec)
+		return (struct timespec) {0, 0};
+
+	ts.tv_sec = div_long_long_rem_signed(nsec, NSEC_PER_SEC, &ts.tv_nsec);
+	if (unlikely(nsec < 0))
+		set_normalized_timespec(&ts, ts.tv_sec, ts.tv_nsec);
+
+	return ts;
+}
+
+/**
+ * ns_to_timeval - Convert nanoseconds to timeval
+ * @nsec:       the nanoseconds value to be converted
+ *
+ * Returns the timeval representation of the nsec parameter.
+ */
+struct timeval ns_to_timeval(const s64 nsec)
+{
+	struct timespec ts = ns_to_timespec(nsec);
+	struct timeval tv;
+
+	tv.tv_sec = ts.tv_sec;
+	tv.tv_usec = (suseconds_t) ts.tv_nsec / 1000;
+
+	return tv;
+}
 
 #if (BITS_PER_LONG < 64)
 u64 get_jiffies_64(void)

@@ -33,9 +33,24 @@ static __u8 root_hub_hub_des[] =
 /* status change bits:  nonzero writes will clear */
 #define RWC_BITS	(USBPORTSC_OCC | USBPORTSC_PEC | USBPORTSC_CSC)
 
-static int uhci_hub_status_data(struct usb_hcd *hcd, char *buf)
+/* A port that either is connected or has a changed-bit set will prevent
+ * us from AUTO_STOPPING.
+ */
+static int any_ports_active(struct uhci_hcd *uhci)
 {
-	struct uhci_hcd *uhci = hcd_to_uhci(hcd);
+	int port;
+
+	for (port = 0; port < uhci->rh_numports; ++port) {
+		if ((inw(uhci->io_addr + USBPORTSC1 + port * 2) &
+				(USBPORTSC_CCS | RWC_BITS)) ||
+				test_bit(port, &uhci->port_c_suspend))
+			return 1;
+	}
+	return 0;
+}
+
+static inline int get_hub_status_data(struct uhci_hcd *uhci, char *buf)
+{
 	int port;
 
 	*buf = 0;
@@ -44,8 +59,6 @@ static int uhci_hub_status_data(struct usb_hcd *hcd, char *buf)
 				test_bit(port, &uhci->port_c_suspend))
 			*buf |= (1 << (port + 1));
 	}
-	if (*buf && uhci->state == UHCI_SUSPENDED)
-		uhci->resume_detect = 1;
 	return !!*buf;
 }
 
@@ -72,11 +85,10 @@ static void uhci_finish_suspend(struct uhci_hcd *uhci, int port,
 {
 	int status;
 
-	if (test_bit(port, &uhci->suspended_ports)) {
+	if (inw(port_addr) & (USBPORTSC_SUSP | USBPORTSC_RD)) {
 		CLR_RH_PORTSTAT(USBPORTSC_SUSP | USBPORTSC_RD);
-		clear_bit(port, &uhci->suspended_ports);
-		clear_bit(port, &uhci->resuming_ports);
-		set_bit(port, &uhci->port_c_suspend);
+		if (test_bit(port, &uhci->resuming_ports))
+			set_bit(port, &uhci->port_c_suspend);
 
 		/* The controller won't actually turn off the RD bit until
 		 * it has had a chance to send a low-speed EOP sequence,
@@ -84,6 +96,7 @@ static void uhci_finish_suspend(struct uhci_hcd *uhci, int port,
 		 * slightly longer for good luck. */
 		udelay(4);
 	}
+	clear_bit(port, &uhci->resuming_ports);
 }
 
 /* Wait for the UHCI controller in HP's iLO2 server management chip.
@@ -96,7 +109,7 @@ static void wait_for_HP(unsigned long port_addr)
 	for (i = 10; i < 250; i += 10) {
 		if (inw(port_addr) & USBPORTSC_CSC)
 			return;
-	udelay(10);
+		udelay(10);
 	}
 	/* Log a warning? */
 }
@@ -114,6 +127,7 @@ static void uhci_check_ports(struct uhci_hcd *uhci)
 			if (time_after_eq(jiffies, uhci->ports_timeout)) {
 				CLR_RH_PORTSTAT(USBPORTSC_PR);
 				udelay(10);
+
 				/* HP's server management chip requires
 				 * a longer delay. */
 				if (to_pci_dev(uhci_dev(uhci))->vendor ==
@@ -135,12 +149,72 @@ static void uhci_check_ports(struct uhci_hcd *uhci)
 				set_bit(port, &uhci->resuming_ports);
 				uhci->ports_timeout = jiffies +
 						msecs_to_jiffies(20);
+
+				/* Make sure we see the port again
+				 * after the resuming period is over. */
+				mod_timer(&uhci_to_hcd(uhci)->rh_timer,
+						uhci->ports_timeout);
 			} else if (time_after_eq(jiffies,
 						uhci->ports_timeout)) {
 				uhci_finish_suspend(uhci, port, port_addr);
 			}
 		}
 	}
+}
+
+static int uhci_hub_status_data(struct usb_hcd *hcd, char *buf)
+{
+	struct uhci_hcd *uhci = hcd_to_uhci(hcd);
+	unsigned long flags;
+	int status = 0;
+
+	spin_lock_irqsave(&uhci->lock, flags);
+
+	uhci_scan_schedule(uhci, NULL);
+	if (uhci->hc_inaccessible)
+		goto done;
+	check_fsbr(uhci);
+	uhci_check_ports(uhci);
+
+	status = get_hub_status_data(uhci, buf);
+
+	switch (uhci->rh_state) {
+	    case UHCI_RH_SUSPENDING:
+	    case UHCI_RH_SUSPENDED:
+		/* if port change, ask to be resumed */
+		if (status)
+			usb_hcd_resume_root_hub(hcd);
+		break;
+
+	    case UHCI_RH_AUTO_STOPPED:
+		/* if port change, auto start */
+		if (status)
+			wakeup_rh(uhci);
+		break;
+
+	    case UHCI_RH_RUNNING:
+		/* are any devices attached? */
+		if (!any_ports_active(uhci)) {
+			uhci->rh_state = UHCI_RH_RUNNING_NODEVS;
+			uhci->auto_stop_time = jiffies + HZ;
+		}
+		break;
+
+	    case UHCI_RH_RUNNING_NODEVS:
+		/* auto-stop if nothing connected for 1 second */
+		if (any_ports_active(uhci))
+			uhci->rh_state = UHCI_RH_RUNNING;
+		else if (time_after_eq(jiffies, uhci->auto_stop_time))
+			suspend_rh(uhci, UHCI_RH_AUTO_STOPPED);
+		break;
+
+	    default:
+		break;
+	}
+
+done:
+	spin_unlock_irqrestore(&uhci->lock, flags);
+	return status;
 }
 
 /* size of returned buffer is part of USB spec */
@@ -153,6 +227,9 @@ static int uhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 	unsigned long port_addr = uhci->io_addr + USBPORTSC1 + 2 * port;
 	u16 wPortChange, wPortStatus;
 	unsigned long flags;
+
+	if (uhci->hc_inaccessible)
+		return -ETIMEDOUT;
 
 	spin_lock_irqsave(&uhci->lock, flags);
 	switch (typeReq) {
@@ -188,8 +265,6 @@ static int uhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			wPortChange |= USB_PORT_STAT_C_SUSPEND;
 			lstatus |= 1;
 		}
-		if (test_bit(port, &uhci->suspended_ports))
-			lstatus |= 2;
 		if (test_bit(port, &uhci->resuming_ports))
 			lstatus |= 4;
 
@@ -232,7 +307,6 @@ static int uhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 
 		switch (wValue) {
 		case USB_PORT_FEAT_SUSPEND:
-			set_bit(port, &uhci->suspended_ports);
 			SET_RH_PORTSTAT(USBPORTSC_SUSP);
 			OK(0);
 		case USB_PORT_FEAT_RESET:
@@ -266,8 +340,11 @@ static int uhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			CLR_RH_PORTSTAT(USBPORTSC_PEC);
 			OK(0);
 		case USB_PORT_FEAT_SUSPEND:
-			if (test_bit(port, &uhci->suspended_ports) &&
-					!test_and_set_bit(port,
+			if (!(inw(port_addr) & USBPORTSC_SUSP)) {
+
+				/* Make certain the port isn't suspended */
+				uhci_finish_suspend(uhci, port, port_addr);
+			} else if (!test_and_set_bit(port,
 						&uhci->resuming_ports)) {
 				SET_RH_PORTSTAT(USBPORTSC_RD);
 

@@ -4,12 +4,22 @@
 #include <linux/device.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/workqueue.h>
 #include <asm/atomic.h>
 
 struct request_queue;
 struct scsi_cmnd;
-struct scsi_mode_data;
+struct scsi_lun;
+struct scsi_sense_hdr;
 
+struct scsi_mode_data {
+	__u32	length;
+	__u16	block_descriptor_length;
+	__u8	medium_type;
+	__u8	device_specific;
+	__u8	header_length;
+	__u8	longlba:1;
+};
 
 /*
  * sdev state: If you alter this, you also need to alter scsi_sysfs.c
@@ -64,15 +74,14 @@ struct scsi_device {
 	unsigned sector_size;	/* size in bytes */
 
 	void *hostdata;		/* available to low-level driver */
-	char devfs_name[256];	/* devfs junk */
 	char type;
 	char scsi_level;
 	char inq_periph_qual;	/* PQ from INQUIRY data */	
 	unsigned char inquiry_len;	/* valid bytes in 'inquiry' */
 	unsigned char * inquiry;	/* INQUIRY response data */
-	char * vendor;		/* [back_compat] point into 'inquiry' ... */
-	char * model;		/* ... after scan; point to static string */
-	char * rev;		/* ... "nullnullnullnull" before scan */
+	const char * vendor;		/* [back_compat] point into 'inquiry' ... */
+	const char * model;		/* ... after scan; point to static string */
+	const char * rev;		/* ... "nullnullnullnull" before scan */
 	unsigned char current_tag;	/* current tag */
 	struct scsi_target      *sdev_target;   /* used only for single_lun */
 
@@ -129,6 +138,8 @@ struct scsi_device {
 	struct device		sdev_gendev;
 	struct class_device	sdev_classdev;
 
+	struct execute_work	ew; /* used to get process context on put */
+
 	enum scsi_device_state sdev_state;
 	unsigned long		sdev_data[0];
 } __attribute__((aligned(sizeof(unsigned long))));
@@ -138,6 +149,17 @@ struct scsi_device {
 	container_of(d, struct scsi_device, sdev_classdev)
 #define transport_class_to_sdev(class_dev) \
 	to_scsi_device(class_dev->dev)
+
+#define sdev_printk(prefix, sdev, fmt, a...)	\
+	dev_printk(prefix, &(sdev)->sdev_gendev, fmt, ##a)
+
+#define scmd_printk(prefix, scmd, fmt, a...)	\
+	dev_printk(prefix, &(scmd)->device->sdev_gendev, fmt, ##a)
+
+enum scsi_target_state {
+	STARGET_RUNNING = 1,
+	STARGET_DEL,
+};
 
 /*
  * scsi_target: representation of a scsi target, for now, this is only
@@ -153,8 +175,16 @@ struct scsi_target {
 	unsigned int		channel;
 	unsigned int		id; /* target id ... replace
 				     * scsi_device.id eventually */
-	unsigned long		create:1; /* signal that it needs to be added */
-	unsigned long		starget_data[0];
+	unsigned int		create:1; /* signal that it needs to be added */
+	unsigned int		pdt_1f_for_no_lun;	/* PDT = 0x1f */
+						/* means no lun present */
+
+	char			scsi_level;
+	struct execute_work	ew;
+	enum scsi_target_state	state;
+	void 			*hostdata; /* available to low-level driver */
+	unsigned long		starget_data[0]; /* for the transport */
+	/* starget_data must be the last element!!!! */
 } __attribute__((aligned(sizeof(unsigned long))));
 
 #define to_scsi_target(d)	container_of(d, struct scsi_target, dev)
@@ -165,10 +195,13 @@ static inline struct scsi_target *scsi_target(struct scsi_device *sdev)
 #define transport_class_to_starget(class_dev) \
 	to_scsi_target(class_dev->dev)
 
+#define starget_printk(prefix, starget, fmt, a...)	\
+	dev_printk(prefix, &(starget)->dev, fmt, ##a)
+
 extern struct scsi_device *__scsi_add_device(struct Scsi_Host *,
 		uint, uint, uint, void *hostdata);
-#define scsi_add_device(host, channel, target, lun) \
-	__scsi_add_device(host, channel, target, lun, NULL)
+extern int scsi_add_device(struct Scsi_Host *host, uint channel,
+			   uint target, uint lun);
 extern void scsi_remove_device(struct scsi_device *);
 extern int scsi_device_cancel(struct scsi_device *, int);
 
@@ -226,7 +259,13 @@ extern int scsi_set_medium_removal(struct scsi_device *, char);
 
 extern int scsi_mode_sense(struct scsi_device *sdev, int dbd, int modepage,
 			   unsigned char *buffer, int len, int timeout,
-			   int retries, struct scsi_mode_data *data);
+			   int retries, struct scsi_mode_data *data,
+			   struct scsi_sense_hdr *);
+extern int scsi_mode_select(struct scsi_device *sdev, int pf, int sp,
+			    int modepage, unsigned char *buffer, int len,
+			    int timeout, int retries,
+			    struct scsi_mode_data *data,
+			    struct scsi_sense_hdr *);
 extern int scsi_test_unit_ready(struct scsi_device *sdev, int timeout,
 				int retries);
 extern int scsi_device_set_state(struct scsi_device *sdev,
@@ -241,9 +280,42 @@ extern void scsi_target_reap(struct scsi_target *);
 extern void scsi_target_block(struct device *);
 extern void scsi_target_unblock(struct device *);
 extern void scsi_remove_target(struct device *);
+extern void int_to_scsilun(unsigned int, struct scsi_lun *);
 extern const char *scsi_device_state_name(enum scsi_device_state);
 extern int scsi_is_sdev_device(const struct device *);
 extern int scsi_is_target_device(const struct device *);
+extern int scsi_execute(struct scsi_device *sdev, const unsigned char *cmd,
+			int data_direction, void *buffer, unsigned bufflen,
+			unsigned char *sense, int timeout, int retries,
+			int flag);
+extern int scsi_execute_req(struct scsi_device *sdev, const unsigned char *cmd,
+			    int data_direction, void *buffer, unsigned bufflen,
+			    struct scsi_sense_hdr *, int timeout, int retries);
+extern int scsi_execute_async(struct scsi_device *sdev,
+			      const unsigned char *cmd, int cmd_len, int data_direction,
+			      void *buffer, unsigned bufflen, int use_sg,
+			      int timeout, int retries, void *privdata,
+			      void (*done)(void *, char *, int, int),
+			      gfp_t gfp);
+
+static inline void scsi_device_reprobe(struct scsi_device *sdev)
+{
+	device_reprobe(&sdev->sdev_gendev);
+}
+
+static inline unsigned int sdev_channel(struct scsi_device *sdev)
+{
+	return sdev->channel;
+}
+
+static inline unsigned int sdev_id(struct scsi_device *sdev)
+{
+	return sdev->id;
+}
+
+#define scmd_id(scmd) sdev_id((scmd)->device)
+#define scmd_channel(scmd) sdev_channel((scmd)->device)
+
 static inline int scsi_device_online(struct scsi_device *sdev)
 {
 	return sdev->sdev_state != SDEV_OFFLINE;

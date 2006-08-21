@@ -1,6 +1,9 @@
 #
 # arch/arm26/Makefile
 #
+# This file is included by the global makefile so that you can add your own
+# architecture-specific flags and dependencies.
+#
 # This file is subject to the terms and conditions of the GNU General Public
 # License.  See the file "COPYING" in the main directory of this archive
 # for more details.
@@ -15,10 +18,6 @@ GZFLAGS		:=-9
 
 ifeq ($(CONFIG_FRAME_POINTER),y)
 CFLAGS		+=-fno-omit-frame-pointer -mno-sched-prolog
-endif
-
-ifeq ($(CONFIG_DEBUG_INFO),y)
-CFLAGS		+=-g
 endif
 
 CFLAGS_BOOT	:=-mapcs-26 -mcpu=arm3 -msoft-float -Uarm
@@ -53,13 +52,9 @@ all: zImage
 
 boot := arch/arm26/boot
 
-prepare: include/asm-$(ARCH)/asm_offsets.h
-CLEAN_FILES += include/asm-$(ARCH)/asm_offsets.h
-
-
-.PHONY: maketools FORCE
+PHONY += maketools FORCE
 maketools: FORCE
-	
+
 
 # Convert bzImage to zImage
 bzImage: vmlinux
@@ -97,12 +92,6 @@ zi:;	$(Q)$(MAKE) $(build)=$(boot) zinstall
 	  echo "$$CFG does not exist"; \
 	fi; \
 	)
-
-arch/$(ARCH)/kernel/asm-offsets.s: include/asm include/linux/version.h \
-				   include/config/MARKER
-
-include/asm-$(ARCH)/asm_offsets.h: arch/$(ARCH)/kernel/asm-offsets.s
-	$(call filechk,gen-asm-offsets)
 
 define archhelp
   echo  '* zImage        - Compressed kernel image (arch/$(ARCH)/boot/zImage)'

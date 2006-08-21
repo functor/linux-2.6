@@ -23,7 +23,7 @@
 #include "befs.h"
 #include "endian.h"
 
-#define ERRBUFSIZE 512
+#define ERRBUFSIZE 1024
 
 void
 befs_error(const struct super_block *sb, const char *fmt, ...)

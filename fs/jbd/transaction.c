@@ -53,8 +53,8 @@ get_transaction(journal_t *journal, transaction_t *transaction)
 	spin_lock_init(&transaction->t_handle_lock);
 
 	/* Set up the commit timer for the new transaction. */
-	journal->j_commit_timer->expires = transaction->t_expires;
-	add_timer(journal->j_commit_timer);
+	journal->j_commit_timer.expires = transaction->t_expires;
+	add_timer(&journal->j_commit_timer);
 
 	J_ASSERT(journal->j_running_transaction == NULL);
 	journal->j_running_transaction = transaction;
@@ -227,8 +227,7 @@ repeat_locked:
 	spin_unlock(&transaction->t_handle_lock);
 	spin_unlock(&journal->j_state_lock);
 out:
-	if (new_transaction)
-		kfree(new_transaction);
+	kfree(new_transaction);
 	return ret;
 }
 
@@ -456,7 +455,7 @@ void journal_lock_updates(journal_t *journal)
 	 * to make sure that we serialise special journal-locked operations
 	 * too.
 	 */
-	down(&journal->j_barrier);
+	mutex_lock(&journal->j_barrier);
 }
 
 /**
@@ -471,7 +470,7 @@ void journal_unlock_updates (journal_t *journal)
 {
 	J_ASSERT(journal->j_barrier_count != 0);
 
-	up(&journal->j_barrier);
+	mutex_unlock(&journal->j_barrier);
 	spin_lock(&journal->j_state_lock);
 	--journal->j_barrier_count;
 	spin_unlock(&journal->j_state_lock);
@@ -490,23 +489,21 @@ void journal_unlock_updates (journal_t *journal)
  */
 static void jbd_unexpected_dirty_buffer(struct journal_head *jh)
 {
-	struct buffer_head *bh = jh2bh(jh);
 	int jlist;
 
-	if (buffer_dirty(bh)) {
-		/* If this buffer is one which might reasonably be dirty
-		 * --- ie. data, or not part of this journal --- then
-		 * we're OK to leave it alone, but otherwise we need to
-		 * move the dirty bit to the journal's own internal
-		 * JBDDirty bit. */
-		jlist = jh->b_jlist;
+	/* If this buffer is one which might reasonably be dirty
+	 * --- ie. data, or not part of this journal --- then
+	 * we're OK to leave it alone, but otherwise we need to
+	 * move the dirty bit to the journal's own internal
+	 * JBDDirty bit. */
+	jlist = jh->b_jlist;
 
-		if (jlist == BJ_Metadata || jlist == BJ_Reserved || 
-		    jlist == BJ_Shadow || jlist == BJ_Forget) {
-			if (test_clear_buffer_dirty(jh2bh(jh))) {
-				set_bit(BH_JBDDirty, &jh2bh(jh)->b_state);
-			}
-		}
+	if (jlist == BJ_Metadata || jlist == BJ_Reserved ||
+	    jlist == BJ_Shadow || jlist == BJ_Forget) {
+		struct buffer_head *bh = jh2bh(jh);
+
+		if (test_clear_buffer_dirty(bh))
+			set_buffer_jbddirty(bh);
 	}
 }
 
@@ -574,9 +571,14 @@ repeat:
 			if (jh->b_next_transaction)
 				J_ASSERT_JH(jh, jh->b_next_transaction ==
 							transaction);
-			JBUFFER_TRACE(jh, "Unexpected dirty buffer");
-			jbd_unexpected_dirty_buffer(jh);
- 		}
+		}
+		/*
+		 * In any case we need to clean the dirty flag and we must
+		 * do it under the buffer lock to be sure we don't race
+		 * with running write-out.
+		 */
+		JBUFFER_TRACE(jh, "Unexpected dirty buffer");
+		jbd_unexpected_dirty_buffer(jh);
  	}
 
 	unlock_buffer(bh);
@@ -722,8 +724,7 @@ done:
 	journal_cancel_revoke(handle, jh);
 
 out:
-	if (frozen_buffer)
-		kfree(frozen_buffer);
+	kfree(frozen_buffer);
 
 	JBUFFER_TRACE(jh, "exit");
 	return error;
@@ -902,8 +903,7 @@ repeat:
 	jbd_unlock_bh_state(bh);
 out:
 	journal_put_journal_head(jh);
-	if (committed_data)
-		kfree(committed_data);
+	kfree(committed_data);
 	return err;
 }
 
@@ -1308,6 +1308,7 @@ int journal_stop(handle_t *handle)
 	transaction_t *transaction = handle->h_transaction;
 	journal_t *journal = transaction->t_journal;
 	int old_handle_count, err;
+	pid_t pid;
 
 	J_ASSERT(transaction->t_updates > 0);
 	J_ASSERT(journal_current_handle() == handle);
@@ -1333,12 +1334,18 @@ int journal_stop(handle_t *handle)
 	 * It doesn't cost much - we're about to run a commit and sleep
 	 * on IO anyway.  Speeds up many-threaded, many-dir operations
 	 * by 30x or more...
+	 *
+	 * But don't do this if this process was the most recent one to
+	 * perform a synchronous write.  We do this to detect the case where a
+	 * single process is doing a stream of sync writes.  No point in waiting
+	 * for joiners in that case.
 	 */
-	if (handle->h_sync) {
+	pid = current->pid;
+	if (handle->h_sync && journal->j_last_sync_writer != pid) {
+		journal->j_last_sync_writer = pid;
 		do {
 			old_handle_count = transaction->t_handle_count;
-			set_current_state(TASK_UNINTERRUPTIBLE);
-			schedule_timeout(1);
+			schedule_timeout_uninterruptible(1);
 		} while (old_handle_count != transaction->t_handle_count);
 	}
 
@@ -1619,7 +1626,7 @@ out:
  * while the data is part of a transaction.  Yes?
  */
 int journal_try_to_free_buffers(journal_t *journal, 
-				struct page *page, int unused_gfp_mask)
+				struct page *page, gfp_t unused_gfp_mask)
 {
 	struct buffer_head *head;
 	struct buffer_head *bh;
@@ -1866,16 +1873,15 @@ zap_buffer_unlocked:
 }
 
 /** 
- * int journal_invalidatepage() 
+ * void journal_invalidatepage()
  * @journal: journal to use for flush... 
  * @page:    page to flush
  * @offset:  length of page to invalidate.
  *
  * Reap page buffers containing data after offset in page.
  *
- * Return non-zero if the page's buffers were successfully reaped.
  */
-int journal_invalidatepage(journal_t *journal, 
+void journal_invalidatepage(journal_t *journal,
 		      struct page *page, 
 		      unsigned long offset)
 {
@@ -1886,7 +1892,7 @@ int journal_invalidatepage(journal_t *journal,
 	if (!PageLocked(page))
 		BUG();
 	if (!page_has_buffers(page))
-		return 1;
+		return;
 
 	/* We will potentially be playing with lists other than just the
 	 * data lists (especially for journaled data mode), so be
@@ -1909,11 +1915,9 @@ int journal_invalidatepage(journal_t *journal,
 	} while (bh != head);
 
 	if (!offset) {
-		if (!may_free || !try_to_free_buffers(page))
-			return 0;
-		J_ASSERT(!page_has_buffers(page));
+		if (may_free && try_to_free_buffers(page))
+			J_ASSERT(!page_has_buffers(page));
 	}
-	return 1;
 }
 
 /* 

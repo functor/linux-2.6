@@ -128,10 +128,16 @@
 #include <linux/ac97_codec.h>
 #include <linux/gameport.h>
 #include <linux/wait.h>
+#include <linux/dma-mapping.h>
+#include <linux/mutex.h>
 
 #include <asm/io.h>
 #include <asm/page.h>
 #include <asm/uaccess.h>
+
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
+#define SUPPORT_JOYSTICK
+#endif
 
 /* --------------------------------------------------------------------- */
 
@@ -414,7 +420,7 @@ struct es1371_state {
 	unsigned dac1rate, dac2rate, adcrate;
 
 	spinlock_t lock;
-	struct semaphore open_sem;
+	struct mutex open_mutex;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 
@@ -453,8 +459,11 @@ struct es1371_state {
 		unsigned char obuf[MIDIOUTBUF];
 	} midi;
 
+#ifdef SUPPORT_JOYSTICK
 	struct gameport *gameport;
-	struct semaphore sem;
+#endif
+
+	struct mutex sem;
 };
 
 /* --------------------------------------------------------------------- */
@@ -1338,7 +1347,7 @@ static ssize_t es1371_read(struct file *file, char __user *buffer, size_t count,
 		return -ENXIO;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
-	down(&s->sem);
+	mutex_lock(&s->sem);
 	if (!s->dma_adc.ready && (ret = prog_dmabuf_adc(s)))
 		goto out2;
 	
@@ -1362,14 +1371,14 @@ static ssize_t es1371_read(struct file *file, char __user *buffer, size_t count,
 					ret = -EAGAIN;
 				goto out;
 			}
-			up(&s->sem);
+			mutex_unlock(&s->sem);
 			schedule();
 			if (signal_pending(current)) {
 				if (!ret)
 					ret = -ERESTARTSYS;
 				goto out2;
 			}
-			down(&s->sem);
+			mutex_lock(&s->sem);
 			if (s->dma_adc.mapped)
 			{
 				ret = -ENXIO;
@@ -1394,7 +1403,7 @@ static ssize_t es1371_read(struct file *file, char __user *buffer, size_t count,
 			start_adc(s);
 	}
 out:
-	up(&s->sem);
+	mutex_unlock(&s->sem);
 out2:
 	remove_wait_queue(&s->dma_adc.wait, &wait);
 	set_current_state(TASK_RUNNING);
@@ -1415,7 +1424,7 @@ static ssize_t es1371_write(struct file *file, const char __user *buffer, size_t
 		return -ENXIO;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
-	down(&s->sem);	
+	mutex_lock(&s->sem);
 	if (!s->dma_dac2.ready && (ret = prog_dmabuf_dac2(s)))
 		goto out3;
 	ret = 0;
@@ -1443,14 +1452,14 @@ static ssize_t es1371_write(struct file *file, const char __user *buffer, size_t
 					ret = -EAGAIN;
 				goto out;
 			}	
-			up(&s->sem);
+			mutex_unlock(&s->sem);
 			schedule();
 			if (signal_pending(current)) {
 				if (!ret)
 					ret = -ERESTARTSYS;
 				goto out2;
 			}
-			down(&s->sem);
+			mutex_lock(&s->sem);
 			if (s->dma_dac2.mapped)
 			{
 				ret = -ENXIO;
@@ -1476,7 +1485,7 @@ static ssize_t es1371_write(struct file *file, const char __user *buffer, size_t
 			start_dac2(s);
 	}
 out:
-	up(&s->sem);
+	mutex_unlock(&s->sem);
 out2:
 	remove_wait_queue(&s->dma_dac2.wait, &wait);
 out3:	
@@ -1530,7 +1539,7 @@ static int es1371_mmap(struct file *file, struct vm_area_struct *vma)
 
 	VALIDATE_STATE(s);
 	lock_kernel();
-	down(&s->sem);
+	mutex_lock(&s->sem);
 	
 	if (vma->vm_flags & VM_WRITE) {
 		if ((ret = prog_dmabuf_dac2(s)) != 0) {
@@ -1563,7 +1572,7 @@ static int es1371_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 	db->mapped = 1;
 out:
-	up(&s->sem);
+	mutex_unlock(&s->sem);
 	unlock_kernel();
 	return ret;
 }
@@ -1930,21 +1939,21 @@ static int es1371_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & file->f_mode) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	if (file->f_mode & FMODE_READ) {
 		s->dma_adc.ossfragshift = s->dma_adc.ossmaxfrags = s->dma_adc.subdivision = 0;
@@ -1974,8 +1983,8 @@ static int es1371_open(struct inode *inode, struct file *file)
 	outl(s->sctrl, s->io+ES1371_REG_SERIAL_CONTROL);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	up(&s->open_sem);
-	init_MUTEX(&s->sem);
+	mutex_unlock(&s->open_mutex);
+	mutex_init(&s->sem);
 	return nonseekable_open(inode, file);
 }
 
@@ -1987,7 +1996,7 @@ static int es1371_release(struct inode *inode, struct file *file)
 	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac2(s, file->f_flags & O_NONBLOCK);
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac2(s);
 		dealloc_dmabuf(s, &s->dma_dac2);
@@ -1997,7 +2006,7 @@ static int es1371_release(struct inode *inode, struct file *file)
 		dealloc_dmabuf(s, &s->dma_adc);
 	}
 	s->open_mode &= ~(file->f_mode & (FMODE_READ|FMODE_WRITE));
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	wake_up(&s->open_wait);
 	unlock_kernel();
 	return 0;
@@ -2369,21 +2378,21 @@ static int es1371_open_dac(struct inode *inode, struct file *file)
 		return -EINVAL;
        	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & FMODE_DAC) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	s->dma_dac1.ossfragshift = s->dma_dac1.ossmaxfrags = s->dma_dac1.subdivision = 0;
 	s->dma_dac1.enabled = 1;
@@ -2397,7 +2406,7 @@ static int es1371_open_dac(struct inode *inode, struct file *file)
 	outl(s->sctrl, s->io+ES1371_REG_SERIAL_CONTROL);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= FMODE_DAC;
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -2408,11 +2417,11 @@ static int es1371_release_dac(struct inode *inode, struct file *file)
 	VALIDATE_STATE(s);
 	lock_kernel();
 	drain_dac1(s, file->f_flags & O_NONBLOCK);
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	stop_dac1(s);
 	dealloc_dmabuf(s, &s->dma_dac1);
 	s->open_mode &= ~FMODE_DAC;
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	wake_up(&s->open_wait);
 	unlock_kernel();
 	return 0;
@@ -2600,21 +2609,21 @@ static int es1371_midi_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & (file->f_mode << FMODE_MIDI_SHIFT)) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -2635,7 +2644,7 @@ static int es1371_midi_open(struct inode *inode, struct file *file)
 	es1371_handle_midi(s);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -2668,7 +2677,7 @@ static int es1371_midi_release(struct inode *inode, struct file *file)
 		remove_wait_queue(&s->midi.owait, &wait);
 		set_current_state(TASK_RUNNING);
 	}
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	s->open_mode &= ~((file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ|FMODE_MIDI_WRITE));
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -2676,7 +2685,7 @@ static int es1371_midi_release(struct inode *inode, struct file *file)
 		outl(s->ctrl, s->io+ES1371_REG_CONTROL);
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	wake_up(&s->open_wait);
 	unlock_kernel();
 	return 0;
@@ -2786,12 +2795,63 @@ static struct
 	{ PCI_ANY_ID, PCI_ANY_ID }
 };
 
+#ifdef SUPPORT_JOYSTICK
+
+static int __devinit es1371_register_gameport(struct es1371_state *s)
+{
+	struct gameport *gp;
+	int gpio;
+
+	for (gpio = 0x218; gpio >= 0x200; gpio -= 0x08)
+		if (request_region(gpio, JOY_EXTENT, "es1371"))
+			break;
+
+	if (gpio < 0x200) {
+		printk(KERN_ERR PFX "no free joystick address found\n");
+		return -EBUSY;
+	}
+
+	s->gameport = gp = gameport_allocate_port();
+	if (!gp) {
+		printk(KERN_ERR PFX "can not allocate memory for gameport\n");
+		release_region(gpio, JOY_EXTENT);
+		return -ENOMEM;
+	}
+
+	gameport_set_name(gp, "ESS1371 Gameport");
+	gameport_set_phys(gp, "isa%04x/gameport0", gpio);
+	gp->dev.parent = &s->dev->dev;
+	gp->io = gpio;
+
+	s->ctrl |= CTRL_JYSTK_EN | (((gpio >> 3) & CTRL_JOY_MASK) << CTRL_JOY_SHIFT);
+	outl(s->ctrl, s->io + ES1371_REG_CONTROL);
+
+	gameport_register_port(gp);
+
+	return 0;
+}
+
+static inline void es1371_unregister_gameport(struct es1371_state *s)
+{
+	if (s->gameport) {
+		int gpio = s->gameport->io;
+		gameport_unregister_port(s->gameport);
+		release_region(gpio, JOY_EXTENT);
+
+	}
+}
+
+#else
+static inline int es1371_register_gameport(struct es1371_state *s) { return -ENOSYS; }
+static inline void es1371_unregister_gameport(struct es1371_state *s) { }
+#endif /* SUPPORT_JOYSTICK */
+
+
 static int __devinit es1371_probe(struct pci_dev *pcidev, const struct pci_device_id *pciid)
 {
 	struct es1371_state *s;
-	struct gameport *gp;
 	mm_segment_t fs;
-	int i, gpio, val, res = -1;
+	int i, val, res = -1;
 	int idx;
 	unsigned long tmo;
 	signed long tmo2;
@@ -2804,7 +2864,7 @@ static int __devinit es1371_probe(struct pci_dev *pcidev, const struct pci_devic
 		return -ENODEV;
 	if (pcidev->irq == 0) 
 		return -ENODEV;
-	i = pci_set_dma_mask(pcidev, 0xffffffff);
+	i = pci_set_dma_mask(pcidev, DMA_32BIT_MASK);
 	if (i) {
 		printk(KERN_WARNING "es1371: architecture does not support 32bit PCI busmaster DMA\n");
 		return i;
@@ -2825,7 +2885,7 @@ static int __devinit es1371_probe(struct pci_dev *pcidev, const struct pci_devic
 	init_waitqueue_head(&s->open_wait);
 	init_waitqueue_head(&s->midi.iwait);
 	init_waitqueue_head(&s->midi.owait);
-	init_MUTEX(&s->open_sem);
+	mutex_init(&s->open_mutex);
 	spin_lock_init(&s->lock);
 	s->magic = ES1371_MAGIC;
 	s->dev = pcidev;
@@ -2880,23 +2940,6 @@ static int __devinit es1371_probe(struct pci_dev *pcidev, const struct pci_devic
                     	s->ctrl |= CTRL_GPIO_OUT0;   /* turn internal amplifier on */
                     	printk(KERN_INFO PFX "Enabling internal amplifier.\n");
 		}
-	}
-
-	for (gpio = 0x218; gpio >= 0x200; gpio -= 0x08)
-		if (request_region(gpio, JOY_EXTENT, "es1371"))
-			break;
-
-	if (gpio < 0x200) {
-		printk(KERN_ERR PFX "no free joystick address found\n");
-	} else if (!(s->gameport = gp = gameport_allocate_port())) {
-		printk(KERN_ERR PFX "can not allocate memory for gameport\n");
-		release_region(gpio, JOY_EXTENT);
-	} else {
-		gameport_set_name(gp, "ESS1371 Gameport");
-		gameport_set_phys(gp, "isa%04x/gameport0", gpio);
-		gp->dev.parent = &s->dev->dev;
-		gp->io = gpio;
-		s->ctrl |= CTRL_JYSTK_EN | (((gpio >> 3) & CTRL_JOY_MASK) << CTRL_JOY_SHIFT);
 	}
 
 	s->sctrl = 0;
@@ -2968,9 +3011,7 @@ static int __devinit es1371_probe(struct pci_dev *pcidev, const struct pci_devic
 	/* turn on S/PDIF output driver if requested */
 	outl(cssr, s->io+ES1371_REG_STATUS);
 
-	/* register gameport */
-	if (s->gameport)
-		gameport_register_port(s->gameport);
+	es1371_register_gameport(s);
 
 	/* store it in the driver field */
 	pci_set_drvdata(pcidev, s);
@@ -2979,13 +3020,9 @@ static int __devinit es1371_probe(struct pci_dev *pcidev, const struct pci_devic
 	/* increment devindex */
 	if (devindex < NR_DEVICE-1)
 		devindex++;
-       	return 0;
+	return 0;
 
  err_gp:
-	if (s->gameport) {
-		release_region(s->gameport->io, JOY_EXTENT);
-		gameport_free_port(s->gameport);
-	}
 #ifdef ES1371_DEBUG
 	if (s->ps)
 		remove_proc_entry("es1371", NULL);
@@ -3024,11 +3061,7 @@ static void __devexit es1371_remove(struct pci_dev *dev)
 	outl(0, s->io+ES1371_REG_SERIAL_CONTROL); /* clear serial interrupts */
 	synchronize_irq(s->irq);
 	free_irq(s->irq, s);
-	if (s->gameport) {
-		int gpio = s->gameport->io;
-		gameport_unregister_port(s->gameport);
-		release_region(gpio, JOY_EXTENT);
-	}
+	es1371_unregister_gameport(s);
 	release_region(s->io, ES1371_EXTENT);
 	unregister_sound_dsp(s->dev_audio);
 	unregister_sound_mixer(s->codec->dev_mixer);
@@ -3058,7 +3091,7 @@ static struct pci_driver es1371_driver = {
 static int __init init_es1371(void)
 {
 	printk(KERN_INFO PFX "version v0.32 time " __TIME__ " " __DATE__ "\n");
-	return pci_module_init(&es1371_driver);
+	return pci_register_driver(&es1371_driver);
 }
 
 static void __exit cleanup_es1371(void)

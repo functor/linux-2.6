@@ -12,14 +12,6 @@
 #include <linux/msdos_fs.h>
 #include <linux/smp_lock.h>
 
-/* MS-DOS "device special files" */
-static const unsigned char *reserved_names[] = {
-	"CON     ", "PRN     ", "NUL     ", "AUX     ",
-	"LPT1    ", "LPT2    ", "LPT3    ", "LPT4    ",
-	"COM1    ", "COM2    ", "COM3    ", "COM4    ",
-	NULL
-};
-
 /* Characters that are undesirable in an MS-DOS file name */
 static unsigned char bad_chars[] = "*?<>|\"";
 static unsigned char bad_if_strict_pc[] = "+=,; ";
@@ -40,7 +32,6 @@ static int msdos_format_name(const unsigned char *name, int len,
 	 */
 {
 	unsigned char *walk;
-	const unsigned char **reserved;
 	unsigned char c;
 	int space;
 
@@ -127,11 +118,7 @@ static int msdos_format_name(const unsigned char *name, int len,
 	}
 	while (walk - res < MSDOS_NAME)
 		*walk++ = ' ';
-	if (!opts->atari)
-		/* GEMDOS is less stupid and has no reserved names */
-		for (reserved = reserved_names; *reserved; reserved++)
-			if (!strncmp(res, *reserved, 8))
-				return -EINVAL;
+
 	return 0;
 }
 
@@ -454,10 +441,10 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 {
 	struct buffer_head *dotdot_bh;
 	struct msdos_dir_entry *dotdot_de;
-	loff_t dotdot_i_pos;
 	struct inode *old_inode, *new_inode;
 	struct fat_slot_info old_sinfo, sinfo;
 	struct timespec ts;
+	loff_t dotdot_i_pos, new_i_pos;
 	int err, old_attrs, is_dir, update_dotdot, corrupt = 0;
 
 	old_sinfo.bh = sinfo.bh = dotdot_bh = NULL;
@@ -516,28 +503,24 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 	if (new_inode) {
 		if (err)
 			goto out;
-		if (MSDOS_I(new_inode)->i_pos != sinfo.i_pos) {
-			/* WTF??? Cry and fail. */
-			printk(KERN_WARNING "msdos_rename: fs corrupted\n");
-			goto out;
-		}
-
 		if (is_dir) {
 			err = fat_dir_empty(new_inode);
 			if (err)
 				goto out;
 		}
+		new_i_pos = MSDOS_I(new_inode)->i_pos;
 		fat_detach(new_inode);
 	} else {
 		err = msdos_add_entry(new_dir, new_name, is_dir, is_hid, 0,
 				      &ts, &sinfo);
 		if (err)
 			goto out;
+		new_i_pos = sinfo.i_pos;
 	}
 	new_dir->i_version++;
 
 	fat_detach(old_inode);
-	fat_attach(old_inode, sinfo.i_pos);
+	fat_attach(old_inode, new_i_pos);
 	if (is_hid)
 		MSDOS_I(old_inode)->i_attrs |= ATTR_HIDDEN;
 	else
@@ -604,7 +587,7 @@ error_inode:
 	fat_attach(old_inode, old_sinfo.i_pos);
 	MSDOS_I(old_inode)->i_attrs = old_attrs;
 	if (new_inode) {
-		fat_attach(new_inode, sinfo.i_pos);
+		fat_attach(new_inode, new_i_pos);
 		if (corrupt)
 			corrupt |= fat_sync_inode(new_inode);
 	} else {

@@ -35,6 +35,7 @@
 #define CPM_CR_INIT_TX		((ushort)0x0002)
 #define CPM_CR_HUNT_MODE	((ushort)0x0003)
 #define CPM_CR_STOP_TX		((ushort)0x0004)
+#define CPM_CR_GRA_STOP_TX	((ushort)0x0005)
 #define CPM_CR_RESTART_TX	((ushort)0x0006)
 #define CPM_CR_CLOSE_RX_BD	((ushort)0x0007)
 #define CPM_CR_SET_GADDR	((ushort)0x0008)
@@ -82,6 +83,8 @@ extern void cpm_setbrg(uint brg, uint rate);
 extern uint m8xx_cpm_hostalloc(uint size);
 extern int  m8xx_cpm_hostfree(uint start);
 extern void m8xx_cpm_hostdump(void);
+
+extern void cpm_load_patch(volatile immap_t *immr);
 
 /* Buffer descriptors used by many of the CPM protocols.
 */

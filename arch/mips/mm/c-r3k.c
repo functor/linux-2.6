@@ -129,7 +129,7 @@ static void r3k_flush_icache_range(unsigned long start, unsigned long end)
 			"sb\t$0, 0x014(%0)\n\t"
 			"sb\t$0, 0x018(%0)\n\t"
 			"sb\t$0, 0x01c(%0)\n\t"
-		 	"sb\t$0, 0x020(%0)\n\t"
+			"sb\t$0, 0x020(%0)\n\t"
 			"sb\t$0, 0x024(%0)\n\t"
 			"sb\t$0, 0x028(%0)\n\t"
 			"sb\t$0, 0x02c(%0)\n\t"
@@ -145,7 +145,7 @@ static void r3k_flush_icache_range(unsigned long start, unsigned long end)
 			"sb\t$0, 0x054(%0)\n\t"
 			"sb\t$0, 0x058(%0)\n\t"
 			"sb\t$0, 0x05c(%0)\n\t"
-		 	"sb\t$0, 0x060(%0)\n\t"
+			"sb\t$0, 0x060(%0)\n\t"
 			"sb\t$0, 0x064(%0)\n\t"
 			"sb\t$0, 0x068(%0)\n\t"
 			"sb\t$0, 0x06c(%0)\n\t"
@@ -182,31 +182,31 @@ static void r3k_flush_dcache_range(unsigned long start, unsigned long end)
 			"sb\t$0, 0x004(%0)\n\t"
 			"sb\t$0, 0x008(%0)\n\t"
 			"sb\t$0, 0x00c(%0)\n\t"
-		 	"sb\t$0, 0x010(%0)\n\t"
+			"sb\t$0, 0x010(%0)\n\t"
 			"sb\t$0, 0x014(%0)\n\t"
 			"sb\t$0, 0x018(%0)\n\t"
 			"sb\t$0, 0x01c(%0)\n\t"
-		 	"sb\t$0, 0x020(%0)\n\t"
+			"sb\t$0, 0x020(%0)\n\t"
 			"sb\t$0, 0x024(%0)\n\t"
 			"sb\t$0, 0x028(%0)\n\t"
 			"sb\t$0, 0x02c(%0)\n\t"
-		 	"sb\t$0, 0x030(%0)\n\t"
+			"sb\t$0, 0x030(%0)\n\t"
 			"sb\t$0, 0x034(%0)\n\t"
 			"sb\t$0, 0x038(%0)\n\t"
 			"sb\t$0, 0x03c(%0)\n\t"
-		 	"sb\t$0, 0x040(%0)\n\t"
+			"sb\t$0, 0x040(%0)\n\t"
 			"sb\t$0, 0x044(%0)\n\t"
 			"sb\t$0, 0x048(%0)\n\t"
 			"sb\t$0, 0x04c(%0)\n\t"
-		 	"sb\t$0, 0x050(%0)\n\t"
+			"sb\t$0, 0x050(%0)\n\t"
 			"sb\t$0, 0x054(%0)\n\t"
 			"sb\t$0, 0x058(%0)\n\t"
 			"sb\t$0, 0x05c(%0)\n\t"
-		 	"sb\t$0, 0x060(%0)\n\t"
+			"sb\t$0, 0x060(%0)\n\t"
 			"sb\t$0, 0x064(%0)\n\t"
 			"sb\t$0, 0x068(%0)\n\t"
 			"sb\t$0, 0x06c(%0)\n\t"
-		 	"sb\t$0, 0x070(%0)\n\t"
+			"sb\t$0, 0x070(%0)\n\t"
 			"sb\t$0, 0x074(%0)\n\t"
 			"sb\t$0, 0x078(%0)\n\t"
 			"sb\t$0, 0x07c(%0)\n\t"
@@ -221,12 +221,14 @@ static inline unsigned long get_phys_page (unsigned long addr,
 					   struct mm_struct *mm)
 {
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 	unsigned long physpage;
 
 	pgd = pgd_offset(mm, addr);
-	pmd = pmd_offset(pgd, addr);
+	pud = pud_offset(pgd, addr);
+	pmd = pmd_offset(pud, addr);
 	pte = pte_offset(pmd, addr);
 
 	if ((physpage = pte_val(*pte)) & _PAGE_VALID)
@@ -255,6 +257,10 @@ static void r3k_flush_cache_range(struct vm_area_struct *vma,
 }
 
 static void r3k_flush_cache_page(struct vm_area_struct *vma, unsigned long page, unsigned long pfn)
+{
+}
+
+static void local_r3k_flush_data_cache_page(unsigned long addr)
 {
 }
 
@@ -317,7 +323,7 @@ static void r3k_dma_cache_wback_inv(unsigned long start, unsigned long size)
 	r3k_flush_dcache_range(start, start + size);
 }
 
-void __init ld_mmu_r23000(void)
+void __init r3k_cache_init(void)
 {
 	extern void build_clear_page(void);
 	extern void build_copy_page(void);
@@ -333,6 +339,7 @@ void __init ld_mmu_r23000(void)
 	flush_icache_range = r3k_flush_icache_range;
 
 	flush_cache_sigtramp = r3k_flush_cache_sigtramp;
+	local_flush_data_cache_page = local_r3k_flush_data_cache_page;
 	flush_data_cache_page = r3k_flush_data_cache_page;
 
 	_dma_cache_wback_inv = r3k_dma_cache_wback_inv;

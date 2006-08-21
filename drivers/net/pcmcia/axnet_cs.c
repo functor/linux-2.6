@@ -35,9 +35,9 @@
 #include <linux/spinlock.h>
 #include <linux/ethtool.h>
 #include <linux/netdevice.h>
+#include <linux/crc32.h>
 #include "../8390.h"
 
-#include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
 #include <pcmcia/cistpl.h>
@@ -86,10 +86,8 @@ static char *version =
 
 /*====================================================================*/
 
-static void axnet_config(dev_link_t *link);
-static void axnet_release(dev_link_t *link);
-static int axnet_event(event_t event, int priority,
-		       event_callback_args_t *args);
+static int axnet_config(struct pcmcia_device *link);
+static void axnet_release(struct pcmcia_device *link);
 static int axnet_open(struct net_device *dev);
 static int axnet_close(struct net_device *dev);
 static int axnet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
@@ -108,11 +106,7 @@ static void block_input(struct net_device *dev, int count,
 static void block_output(struct net_device *dev, int count,
 			 const u_char *buf, const int start_page);
 
-static dev_link_t *axnet_attach(void);
-static void axnet_detach(dev_link_t *);
-
-static dev_info_t dev_info = "axnet_cs";
-static dev_link_t *dev_list;
+static void axnet_detach(struct pcmcia_device *p_dev);
 
 static void axdev_setup(struct net_device *dev);
 static void AX88190_init(struct net_device *dev, int startp);
@@ -123,7 +117,7 @@ static irqreturn_t ax_interrupt(int irq, void *dev_id, struct pt_regs *regs);
 /*====================================================================*/
 
 typedef struct axnet_dev_t {
-    dev_link_t		link;
+	struct pcmcia_device	*p_dev;
     dev_node_t		node;
     caddr_t		base;
     struct timer_list	watchdog;
@@ -148,13 +142,10 @@ static inline axnet_dev_t *PRIV(struct net_device *dev)
 
 ======================================================================*/
 
-static dev_link_t *axnet_attach(void)
+static int axnet_probe(struct pcmcia_device *link)
 {
     axnet_dev_t *info;
-    dev_link_t *link;
     struct net_device *dev;
-    client_reg_t client_reg;
-    int ret;
 
     DEBUG(0, "axnet_attach()\n");
 
@@ -162,10 +153,10 @@ static dev_link_t *axnet_attach(void)
 			"eth%d", axdev_setup);
 
     if (!dev)
-	return NULL;
+	return -ENOMEM;
 
     info = PRIV(dev);
-    link = &info->link;
+    info->p_dev = link;
     link->priv = dev;
     link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
     link->irq.IRQInfo1 = IRQ_LEVEL_ID;
@@ -177,25 +168,7 @@ static dev_link_t *axnet_attach(void)
     dev->do_ioctl = &axnet_ioctl;
     SET_ETHTOOL_OPS(dev, &netdev_ethtool_ops);
 
-    /* Register with Card Services */
-    link->next = dev_list;
-    dev_list = link;
-    client_reg.dev_info = &dev_info;
-    client_reg.EventMask =
-	CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
-	CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
-	CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
-    client_reg.event_handler = &axnet_event;
-    client_reg.Version = 0x0210;
-    client_reg.event_callback_args.client_data = link;
-    ret = pcmcia_register_client(&link->handle, &client_reg);
-    if (ret != CS_SUCCESS) {
-	cs_error(link->handle, RegisterClient, ret);
-	axnet_detach(link);
-	return NULL;
-    }
-
-    return link;
+    return axnet_config(link);
 } /* axnet_attach */
 
 /*======================================================================
@@ -207,30 +180,17 @@ static dev_link_t *axnet_attach(void)
 
 ======================================================================*/
 
-static void axnet_detach(dev_link_t *link)
+static void axnet_detach(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
-    dev_link_t **linkp;
 
     DEBUG(0, "axnet_detach(0x%p)\n", link);
 
-    /* Locate device structure */
-    for (linkp = &dev_list; *linkp; linkp = &(*linkp)->next)
-	if (*linkp == link) break;
-    if (*linkp == NULL)
-	return;
-
-    if (link->dev)
+    if (link->dev_node)
 	unregister_netdev(dev);
 
-    if (link->state & DEV_CONFIG)
-	axnet_release(link);
+    axnet_release(link);
 
-    if (link->handle)
-	pcmcia_deregister_client(link->handle);
-
-    /* Unlink device structure, free bits */
-    *linkp = link->next;
     free_netdev(dev);
 } /* axnet_detach */
 
@@ -240,7 +200,7 @@ static void axnet_detach(dev_link_t *link)
 
 ======================================================================*/
 
-static int get_prom(dev_link_t *link)
+static int get_prom(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
     kio_addr_t ioaddr = dev->base_addr;
@@ -294,7 +254,7 @@ static int get_prom(dev_link_t *link)
 #define CS_CHECK(fn, ret) \
 do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 
-static int try_io_port(dev_link_t *link)
+static int try_io_port(struct pcmcia_device *link)
 {
     int j, ret;
     if (link->io.NumPorts1 == 32) {
@@ -315,25 +275,23 @@ static int try_io_port(dev_link_t *link)
 	for (j = 0; j < 0x400; j += 0x20) {
 	    link->io.BasePort1 = j ^ 0x300;
 	    link->io.BasePort2 = (j ^ 0x300) + 0x10;
-	    ret = pcmcia_request_io(link->handle, &link->io);
+	    ret = pcmcia_request_io(link, &link->io);
 	    if (ret == CS_SUCCESS) return ret;
 	}
 	return ret;
     } else {
-	return pcmcia_request_io(link->handle, &link->io);
+	return pcmcia_request_io(link, &link->io);
     }
 }
 
-static void axnet_config(dev_link_t *link)
+static int axnet_config(struct pcmcia_device *link)
 {
-    client_handle_t handle = link->handle;
     struct net_device *dev = link->priv;
     axnet_dev_t *info = PRIV(dev);
     tuple_t tuple;
     cisparse_t parse;
     int i, j, last_ret, last_fn;
     u_short buf[64];
-    config_info_t conf;
 
     DEBUG(0, "axnet_config(0x%p)\n", link);
 
@@ -342,29 +300,22 @@ static void axnet_config(dev_link_t *link)
     tuple.TupleDataMax = sizeof(buf);
     tuple.TupleOffset = 0;
     tuple.DesiredTuple = CISTPL_CONFIG;
-    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
-    CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
-    CS_CHECK(ParseTuple, pcmcia_parse_tuple(handle, &tuple, &parse));
+    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
+    CS_CHECK(GetTupleData, pcmcia_get_tuple_data(link, &tuple));
+    CS_CHECK(ParseTuple, pcmcia_parse_tuple(link, &tuple, &parse));
     link->conf.ConfigBase = parse.config.base;
     /* don't trust the CIS on this; Linksys got it wrong */
     link->conf.Present = 0x63;
 
-    /* Configure card */
-    link->state |= DEV_CONFIG;
-
-    /* Look up current Vcc */
-    CS_CHECK(GetConfigurationInfo, pcmcia_get_configuration_info(handle, &conf));
-    link->conf.Vcc = conf.Vcc;
-
     tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
     tuple.Attributes = 0;
-    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
     while (last_ret == CS_SUCCESS) {
 	cistpl_cftable_entry_t *cfg = &(parse.cftable_entry);
 	cistpl_io_t *io = &(parse.cftable_entry.io);
 	
-	if (pcmcia_get_tuple_data(handle, &tuple) != 0 ||
-		pcmcia_parse_tuple(handle, &tuple, &parse) != 0 ||
+	if (pcmcia_get_tuple_data(link, &tuple) != 0 ||
+		pcmcia_parse_tuple(link, &tuple, &parse) != 0 ||
 		cfg->index == 0 || cfg->io.nwin == 0)
 	    goto next_entry;
 	
@@ -386,21 +337,21 @@ static void axnet_config(dev_link_t *link)
 	    if (last_ret == CS_SUCCESS) break;
 	}
     next_entry:
-	last_ret = pcmcia_get_next_tuple(handle, &tuple);
+	last_ret = pcmcia_get_next_tuple(link, &tuple);
     }
     if (last_ret != CS_SUCCESS) {
-	cs_error(handle, RequestIO, last_ret);
+	cs_error(link, RequestIO, last_ret);
 	goto failed;
     }
 
-    CS_CHECK(RequestIRQ, pcmcia_request_irq(handle, &link->irq));
+    CS_CHECK(RequestIRQ, pcmcia_request_irq(link, &link->irq));
     
     if (link->io.NumPorts2 == 8) {
 	link->conf.Attributes |= CONF_ENABLE_SPKR;
 	link->conf.Status = CCSR_AUDIO_ENA;
     }
     
-    CS_CHECK(RequestConfiguration, pcmcia_request_configuration(handle, &link->conf));
+    CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link, &link->conf));
     dev->irq = link->irq.AssignedIRQ;
     dev->base_addr = link->io.BasePort1;
 
@@ -437,7 +388,7 @@ static void axnet_config(dev_link_t *link)
        Bit 2 of CCSR is active low. */ 
     if (i == 32) {
 	conf_reg_t reg = { 0, CS_WRITE, CISREG_CCSR, 0x04 };
- 	pcmcia_access_configuration_register(link->handle, &reg);
+ 	pcmcia_access_configuration_register(link, &reg);
 	for (i = 0; i < 32; i++) {
 	    j = mdio_read(dev->base_addr + AXNET_MII_EEP, i, 1);
 	    if ((j != 0) && (j != 0xffff)) break;
@@ -445,13 +396,12 @@ static void axnet_config(dev_link_t *link)
     }
 
     info->phy_id = (i < 32) ? i : -1;
-    link->dev = &info->node;
-    link->state &= ~DEV_CONFIG_PENDING;
-    SET_NETDEV_DEV(dev, &handle_to_dev(handle));
+    link->dev_node = &info->node;
+    SET_NETDEV_DEV(dev, &handle_to_dev(link));
 
     if (register_netdev(dev) != 0) {
 	printk(KERN_NOTICE "axnet_cs: register_netdev() failed\n");
-	link->dev = NULL;
+	link->dev_node = NULL;
 	goto failed;
     }
 
@@ -467,14 +417,13 @@ static void axnet_config(dev_link_t *link)
     } else {
 	printk(KERN_NOTICE "  No MII transceivers found!\n");
     }
-    return;
+    return 0;
 
 cs_failed:
-    cs_error(link->handle, last_fn, last_ret);
+    cs_error(link, last_fn, last_ret);
 failed:
     axnet_release(link);
-    link->state &= ~DEV_CONFIG_PENDING;
-    return;
+    return -ENODEV;
 } /* axnet_config */
 
 /*======================================================================
@@ -485,70 +434,34 @@ failed:
 
 ======================================================================*/
 
-static void axnet_release(dev_link_t *link)
+static void axnet_release(struct pcmcia_device *link)
 {
-    DEBUG(0, "axnet_release(0x%p)\n", link);
-
-    pcmcia_release_configuration(link->handle);
-    pcmcia_release_io(link->handle, &link->io);
-    pcmcia_release_irq(link->handle, &link->irq);
-
-    link->state &= ~DEV_CONFIG;
+	pcmcia_disable_device(link);
 }
 
-/*======================================================================
-
-    The card status event handler.  Mostly, this schedules other
-    stuff to run after an event is received.  A CARD_REMOVAL event
-    also sets some flags to discourage the net drivers from trying
-    to talk to the card any more.
-
-======================================================================*/
-
-static int axnet_event(event_t event, int priority,
-		       event_callback_args_t *args)
+static int axnet_suspend(struct pcmcia_device *link)
 {
-    dev_link_t *link = args->client_data;
-    struct net_device *dev = link->priv;
+	struct net_device *dev = link->priv;
 
-    DEBUG(2, "axnet_event(0x%06x)\n", event);
-
-    switch (event) {
-    case CS_EVENT_CARD_REMOVAL:
-	link->state &= ~DEV_PRESENT;
-	if (link->state & DEV_CONFIG)
-	    netif_device_detach(dev);
-	break;
-    case CS_EVENT_CARD_INSERTION:
-	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
-	axnet_config(link);
-	break;
-    case CS_EVENT_PM_SUSPEND:
-	link->state |= DEV_SUSPEND;
-	/* Fall through... */
-    case CS_EVENT_RESET_PHYSICAL:
-	if (link->state & DEV_CONFIG) {
-	    if (link->open)
+	if (link->open)
 		netif_device_detach(dev);
-	    pcmcia_release_configuration(link->handle);
-	}
-	break;
-    case CS_EVENT_PM_RESUME:
-	link->state &= ~DEV_SUSPEND;
-	/* Fall through... */
-    case CS_EVENT_CARD_RESET:
-	if (link->state & DEV_CONFIG) {
-	    pcmcia_request_configuration(link->handle, &link->conf);
-	    if (link->open) {
+
+	return 0;
+}
+
+static int axnet_resume(struct pcmcia_device *link)
+{
+	struct net_device *dev = link->priv;
+
+	if (link->open) {
 		axnet_reset_8390(dev);
 		AX88190_init(dev, 1);
 		netif_device_attach(dev);
-	    }
 	}
-	break;
-    }
-    return 0;
-} /* axnet_event */
+
+	return 0;
+}
+
 
 /*======================================================================
 
@@ -613,16 +526,16 @@ static void mdio_write(kio_addr_t addr, int phy_id, int loc, int value)
 static int axnet_open(struct net_device *dev)
 {
     axnet_dev_t *info = PRIV(dev);
-    dev_link_t *link = &info->link;
+    struct pcmcia_device *link = info->p_dev;
     
     DEBUG(2, "axnet_open('%s')\n", dev->name);
 
-    if (!DEV_OK(link))
+    if (!pcmcia_dev_present(link))
 	return -ENODEV;
 
     link->open++;
 
-    request_irq(dev->irq, ei_irq_wrapper, SA_SHIRQ, dev_info, dev);
+    request_irq(dev->irq, ei_irq_wrapper, SA_SHIRQ, "axnet_cs", dev);
 
     info->link_status = 0x00;
     init_timer(&info->watchdog);
@@ -639,7 +552,7 @@ static int axnet_open(struct net_device *dev)
 static int axnet_close(struct net_device *dev)
 {
     axnet_dev_t *info = PRIV(dev);
-    dev_link_t *link = &info->link;
+    struct pcmcia_device *link = info->p_dev;
 
     DEBUG(2, "axnet_close('%s')\n", dev->name);
 
@@ -850,13 +763,45 @@ static void block_output(struct net_device *dev, int count,
     outsw(nic_base + AXNET_DATAPORT, buf, count>>1);
 }
 
+static struct pcmcia_device_id axnet_ids[] = {
+	PCMCIA_PFC_DEVICE_MANF_CARD(0, 0x016c, 0x0081),
+	PCMCIA_DEVICE_MANF_CARD(0x018a, 0x0301),
+	PCMCIA_DEVICE_MANF_CARD(0x026f, 0x0301),
+	PCMCIA_DEVICE_MANF_CARD(0x026f, 0x0303),
+	PCMCIA_DEVICE_MANF_CARD(0x026f, 0x0309),
+	PCMCIA_DEVICE_MANF_CARD(0x0274, 0x1106),
+	PCMCIA_DEVICE_MANF_CARD(0x8a01, 0xc1ab),
+	PCMCIA_DEVICE_PROD_ID12("AmbiCom,Inc.", "Fast Ethernet PC Card(AMB8110)", 0x49b020a7, 0x119cc9fc),
+	PCMCIA_DEVICE_PROD_ID124("Fast Ethernet", "16-bit PC Card", "AX88190", 0xb4be14e3, 0x9a12eb6a, 0xab9be5ef),
+	PCMCIA_DEVICE_PROD_ID12("ASIX", "AX88190", 0x0959823b, 0xab9be5ef),
+	PCMCIA_DEVICE_PROD_ID12("Billionton", "LNA-100B", 0x552ab682, 0xbc3b87e1),
+	PCMCIA_DEVICE_PROD_ID12("CHEETAH ETHERCARD", "EN2228", 0x00fa7bc8, 0x00e990cc),
+	PCMCIA_DEVICE_PROD_ID12("CNet", "CNF301", 0xbc477dde, 0x78c5f40b),
+	PCMCIA_DEVICE_PROD_ID12("corega K.K.", "corega FEther PCC-TXD", 0x5261440f, 0x436768c5),
+	PCMCIA_DEVICE_PROD_ID12("corega K.K.", "corega FEtherII PCC-TXD", 0x5261440f, 0x730df72e),
+	PCMCIA_DEVICE_PROD_ID12("Dynalink", "L100C16", 0x55632fd5, 0x66bc2a90),
+	PCMCIA_DEVICE_PROD_ID12("Linksys", "EtherFast 10/100 PC Card (PCMPC100 V3)", 0x0733cc81, 0x232019a8),
+	PCMCIA_DEVICE_PROD_ID12("MELCO", "LPC3-TX", 0x481e0094, 0xf91af609),
+	PCMCIA_DEVICE_PROD_ID12("PCMCIA", "100BASE", 0x281f1c5d, 0x7c2add04),
+	PCMCIA_DEVICE_PROD_ID12("PCMCIA", "FastEtherCard", 0x281f1c5d, 0x7ef26116),
+	PCMCIA_DEVICE_PROD_ID12("PCMCIA", "FEP501", 0x281f1c5d, 0x2e272058),
+	PCMCIA_DEVICE_PROD_ID14("Network Everywhere", "AX88190", 0x820a67b6,  0xab9be5ef),
+	/* this is not specific enough */
+	/* PCMCIA_DEVICE_MANF_CARD(0x021b, 0x0202), */
+	PCMCIA_DEVICE_NULL,
+};
+MODULE_DEVICE_TABLE(pcmcia, axnet_ids);
+
 static struct pcmcia_driver axnet_cs_driver = {
 	.owner		= THIS_MODULE,
 	.drv		= {
 		.name	= "axnet_cs",
 	},
-	.attach		= axnet_attach,
-	.detach		= axnet_detach,
+	.probe		= axnet_probe,
+	.remove		= axnet_detach,
+	.id_table       = axnet_ids,
+	.suspend	= axnet_suspend,
+	.resume		= axnet_resume,
 };
 
 static int __init init_axnet_cs(void)
@@ -867,7 +812,6 @@ static int __init init_axnet_cs(void)
 static void __exit exit_axnet_cs(void)
 {
 	pcmcia_unregister_driver(&axnet_cs_driver);
-	BUG_ON(dev_list != NULL);
 }
 
 module_init(init_axnet_cs);
@@ -1616,7 +1560,7 @@ static void ei_receive(struct net_device *dev)
 
 static void ei_rx_overrun(struct net_device *dev)
 {
-	axnet_dev_t *info = (axnet_dev_t *)dev;
+	axnet_dev_t *info = PRIV(dev);
 	long e8390_base = dev->base_addr;
 	unsigned char was_txing, must_resend = 0;
 	struct ei_device *ei_local = (struct ei_device *) netdev_priv(dev);
@@ -1703,17 +1647,56 @@ static struct net_device_stats *get_stats(struct net_device *dev)
 	return &ei_local->stat;
 }
 
+/*
+ * Form the 64 bit 8390 multicast table from the linked list of addresses
+ * associated with this dev structure.
+ */
+ 
+static inline void make_mc_bits(u8 *bits, struct net_device *dev)
+{
+	struct dev_mc_list *dmi;
+	u32 crc;
+
+	for (dmi=dev->mc_list; dmi; dmi=dmi->next) {
+		
+		crc = ether_crc(ETH_ALEN, dmi->dmi_addr);
+		/* 
+		 * The 8390 uses the 6 most significant bits of the
+		 * CRC to index the multicast table.
+		 */
+		bits[crc>>29] |= (1<<((crc>>26)&7));
+	}
+}
+
 /**
  * do_set_multicast_list - set/clear multicast filter
  * @dev: net device for which multicast filter is adjusted
  *
- *	Set or clear the multicast filter for this adaptor. May be called
- *	from a BH in 2.1.x. Must be called with lock held. 
+ *	Set or clear the multicast filter for this adaptor.
+ *	Must be called with lock held. 
  */
  
 static void do_set_multicast_list(struct net_device *dev)
 {
 	long e8390_base = dev->base_addr;
+	int i;
+	struct ei_device *ei_local = (struct ei_device*)netdev_priv(dev);
+
+	if (!(dev->flags&(IFF_PROMISC|IFF_ALLMULTI))) {
+		memset(ei_local->mcfilter, 0, 8);
+		if (dev->mc_list)
+			make_mc_bits(ei_local->mcfilter, dev);
+	} else {
+		/* set to accept-all */
+		memset(ei_local->mcfilter, 0xFF, 8);
+	}
+
+	outb_p(E8390_NODMA + E8390_PAGE1, e8390_base + E8390_CMD);
+	for(i = 0; i < 8; i++) 
+	{
+		outb_p(ei_local->mcfilter[i], e8390_base + EN1_MULT_SHIFT(i));
+	}
+	outb_p(E8390_NODMA + E8390_PAGE0, e8390_base + E8390_CMD);
 
   	if(dev->flags&IFF_PROMISC)
   		outb_p(E8390_RXCONFIG | 0x58, e8390_base + EN0_RXCR);
@@ -1721,6 +1704,8 @@ static void do_set_multicast_list(struct net_device *dev)
   		outb_p(E8390_RXCONFIG | 0x48, e8390_base + EN0_RXCR);
   	else
   		outb_p(E8390_RXCONFIG | 0x40, e8390_base + EN0_RXCR);
+
+	outb_p(E8390_NODMA+E8390_PAGE0+E8390_START, e8390_base+E8390_CMD);
 }
 
 /*
@@ -1815,12 +1800,6 @@ static void AX88190_init(struct net_device *dev, int startp)
 		if(inb_p(e8390_base + EN1_PHYS_SHIFT(i))!=dev->dev_addr[i])
 			printk(KERN_ERR "Hw. address read/write mismap %d\n",i);
 	}
-	/*
-	 * Initialize the multicast list to accept-all.  If we enable multicast
-	 * the higher levels can do the filtering.
-	 */
-	for (i = 0; i < 8; i++)
-		outb_p(0xff, e8390_base + EN1_MULT + i);
 
 	outb_p(ei_local->rx_start_page, e8390_base + EN1_CURPAG);
 	outb_p(E8390_NODMA+E8390_PAGE0+E8390_STOP, e8390_base+E8390_CMD);

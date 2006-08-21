@@ -455,7 +455,7 @@ static struct chipset_bus_clock_list_entry sixty_six_base_hpt374[] = {
  *	Hold all the highpoint quirks and revision information in one
  *	place.
  */
- 
+
 struct hpt_info
 {
 	u8 max_mode;		/* Speeds allowed */
@@ -472,7 +472,7 @@ struct hpt_info
  *	(which breaks on the newest chips) but by creating an
  *	enumeration of chip variants and using that
  */
- 
+
 static __devinit u32 hpt_revision (struct pci_dev *dev)
 {
 	u32 class_rev;
@@ -506,7 +506,7 @@ static u8 hpt3xx_ratemask (ide_drive_t *drive)
 	u8 mode			= 0;
 
 	/* FIXME: TODO - move this to set info->mode once at boot */
-	
+
 	if (info->revision >= 8) {		/* HPT374 */
 		mode = (HPT374_ALLOW_ATA133_6) ? 4 : 3;
 	} else if (info->revision >= 7) {	/* HPT371 */
@@ -755,10 +755,10 @@ static int config_chipset_for_dma (ide_drive_t *drive)
 	u8 speed = ide_dma_speed(drive, hpt3xx_ratemask(drive));
 	ide_hwif_t *hwif = drive->hwif;
 	struct hpt_info	*info	= ide_get_hwifdata(hwif);
-	
+
 	if (!speed)
 		return 0;
-		
+
 	/* If we don't have any timings we can't do a lot */
 	if (info->speed == NULL)
 		return 0;
@@ -1243,14 +1243,14 @@ static void __devinit hpt37x_clocking(ide_hwif_t *hwif)
 	 * ToDo: Use 66MHz PLL when ATA133 devices are present on a
 	 * 372 device so we can get ATA133 support
 	 */
-	if (info->speed) 
+	if (info->speed)
 		goto init_hpt37X_done;
 
 	info->flags |= PLL_MODE;
 	
 	/*
 	 * FIXME: make this work correctly, esp with 372N as per
-	 * reference driver code. 
+	 * reference driver code.
 	 *
 	 * adjust PLL based upon PCI clock, enable it, and wait for
 	 * stabilization.
@@ -1288,6 +1288,10 @@ static void __devinit hpt37x_clocking(ide_hwif_t *hwif)
 				goto init_hpt37X_done;
 			}
 		}
+		if (!pci_get_drvdata(dev)) {
+			printk("No Clock Stabilization!!!\n");
+			return;
+		}
 pll_recal:
 		if (adjust & 1)
 			pll -= (adjust >> 1);
@@ -1297,7 +1301,7 @@ pll_recal:
 
 init_hpt37X_done:
 	if (!info->speed)
-		printk(KERN_ERR "HPT37X%s: unknown bus timing [%d %d].\n", 
+		printk(KERN_ERR "HPT37X%s: unknown bus timing [%d %d].\n",
 			(info->flags & IS_372N)?"N":"", pll, freq);
 	/* reset state engine */
 	pci_write_config_byte(dev, 0x50, 0x37); 
@@ -1308,7 +1312,7 @@ init_hpt37X_done:
 static int __devinit init_hpt37x(struct pci_dev *dev)
 {
 	u8 reg5ah;
-	
+
 	pci_read_config_byte(dev, 0x5a, &reg5ah);
 	/* interrupt force enable */
 	pci_write_config_byte(dev, 0x5a, (reg5ah & ~0x10));
@@ -1334,9 +1338,13 @@ static int __devinit init_hpt366(struct pci_dev *dev)
 static unsigned int __devinit init_chipset_hpt366(struct pci_dev *dev, const char *name)
 {
 	int ret = 0;
-	/* FIXME: Not portable */
+
+	/*
+	 * FIXME: Not portable. Also, why do we enable the ROM in the first place?
+	 * We don't seem to be using it.
+	 */
 	if (dev->resource[PCI_ROM_RESOURCE].start)
-		pci_write_config_byte(dev, PCI_ROM_ADDRESS,
+		pci_write_config_dword(dev, PCI_ROM_ADDRESS,
 			dev->resource[PCI_ROM_RESOURCE].start | PCI_ROM_ADDRESS_ENABLE);
 
 	pci_write_config_byte(dev, PCI_CACHE_LINE_SIZE, (L1_CACHE_BYTES / 4));
@@ -1512,32 +1520,31 @@ static void __devinit init_dma_hpt366(ide_hwif_t *hwif, unsigned long dmabase)
 
 static void __devinit init_iops_hpt366(ide_hwif_t *hwif)
 {
-	struct hpt_info *info = kmalloc(sizeof(struct hpt_info), GFP_KERNEL);
+	struct hpt_info *info = kzalloc(sizeof(struct hpt_info), GFP_KERNEL);
 	unsigned long dmabase = pci_resource_start(hwif->pci_dev, 4);
 	u8 did, rid;
-	
+
 	if(info == NULL) {
 		printk(KERN_WARNING "hpt366: out of memory.\n");
 		return;
-	}	
-	memset(info, 0, sizeof(struct hpt_info));
+	}
 	ide_set_hwifdata(hwif, info);
-	
+
 	if(dmabase) {
 		did = inb(dmabase + 0x22);
 		rid = inb(dmabase + 0x28);
-	
+
 		if((did == 4 && rid == 6) || (did == 5 && rid > 1))
 			info->flags |= IS_372N;
 	}
-	
+
 	info->revision = hpt_revision(hwif->pci_dev);
-	
+
 	if (info->revision >= 3)
 		hpt37x_clocking(hwif);
 	else
 		hpt366_clocking(hwif);
-}		
+}
 
 static int __devinit init_setup_hpt374(struct pci_dev *dev, ide_pci_device_t *d)
 {

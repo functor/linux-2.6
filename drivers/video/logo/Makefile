@@ -12,10 +12,11 @@ obj-$(CONFIG_LOGO_SUN_CLUT224)		+= logo_sun_clut224.o
 obj-$(CONFIG_LOGO_SUPERH_MONO)		+= logo_superh_mono.o
 obj-$(CONFIG_LOGO_SUPERH_VGA16)		+= logo_superh_vga16.o
 obj-$(CONFIG_LOGO_SUPERH_CLUT224)	+= logo_superh_clut224.o
+obj-$(CONFIG_LOGO_M32R_CLUT224)		+= logo_m32r_clut224.o
 
 # How to generate logo's
 
-# Use logo-cfiles to retreive list of .c files to be built
+# Use logo-cfiles to retrieve list of .c files to be built
 logo-cfiles = $(notdir $(patsubst %.$(2), %.c, \
               $(wildcard $(srctree)/$(src)/*$(1).$(2))))
 
@@ -33,7 +34,7 @@ extra-y += $(call logo-cfiles,_clut224,ppm)
 extra-y += $(call logo-cfiles,_gray256,pgm)
 
 # Create commands like "pnmtologo -t mono -n logo_mac_mono -o ..."
-quiet_cmd_logo = LOGO	$@
+quiet_cmd_logo = LOGO    $@
 	cmd_logo = scripts/pnmtologo \
 			-t $(patsubst $*_%,%,$(notdir $(basename $<))) \
 			-n $(notdir $(basename $<)) -o $@ $<

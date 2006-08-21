@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/pal4_setup.c
- *
  * Board setup routines for the SBS PalomarIV.
  *
  * Author: Dan Cox
@@ -28,6 +26,7 @@
 #include <asm/io.h>
 #include <asm/todc.h>
 #include <asm/bootinfo.h>
+#include <asm/machdep.h>
 
 #include <syslib/cpc700.h>
 

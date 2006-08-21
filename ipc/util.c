@@ -7,9 +7,11 @@
  *            Occurs in several places in the IPC code.
  *            Chris Evans, <chris@ferret.lmh.ox.ac.uk>
  * Nov 1999 - ipc helper functions, unified SMP locking
- *	      Manfred Spraul <manfreds@colorfullife.com>
+ *	      Manfred Spraul <manfred@colorfullife.com>
  * Oct 2002 - One lock per IPC id. RCU ipc_free for lock-free grow_ary().
  *            Mingming Cao <cmm@us.ibm.com>
+ * Mar 2006 - support for audit of ipc object properties
+ *            Dustin Kirkland <dustin.kirkland@us.ibm.com>
  */
 
 #include <linux/config.h>
@@ -20,14 +22,25 @@
 #include <linux/smp_lock.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
+#include <linux/capability.h>
 #include <linux/highuid.h>
 #include <linux/security.h>
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
+#include <linux/seq_file.h>
+#include <linux/proc_fs.h>
+#include <linux/audit.h>
 
 #include <asm/unistd.h>
 
 #include "util.h"
+
+struct ipc_proc_iface {
+	const char *path;
+	const char *header;
+	struct ipc_ids *ids;
+	int (*show)(struct seq_file *, void *);
+};
 
 /**
  *	ipc_init	-	initialise IPC subsystem
@@ -58,7 +71,8 @@ __initcall(ipc_init);
 void __init ipc_init_ids(struct ipc_ids* ids, int size)
 {
 	int i;
-	sema_init(&ids->sem,1);
+
+	mutex_init(&ids->mutex);
 
 	if(size > IPCMNI)
 		size = IPCMNI;
@@ -86,12 +100,49 @@ void __init ipc_init_ids(struct ipc_ids* ids, int size)
 		ids->entries->p[i] = NULL;
 }
 
+#ifdef CONFIG_PROC_FS
+static struct file_operations sysvipc_proc_fops;
+/**
+ *	ipc_init_proc_interface	-  Create a proc interface for sysipc types
+ *				   using a seq_file interface.
+ *	@path: Path in procfs
+ *	@header: Banner to be printed at the beginning of the file.
+ *	@ids: ipc id table to iterate.
+ *	@show: show routine.
+ */
+void __init ipc_init_proc_interface(const char *path, const char *header,
+				    struct ipc_ids *ids,
+				    int (*show)(struct seq_file *, void *))
+{
+	struct proc_dir_entry *pde;
+	struct ipc_proc_iface *iface;
+
+	iface = kmalloc(sizeof(*iface), GFP_KERNEL);
+	if (!iface)
+		return;
+	iface->path	= path;
+	iface->header	= header;
+	iface->ids	= ids;
+	iface->show	= show;
+
+	pde = create_proc_entry(path,
+				S_IRUGO,        /* world readable */
+				NULL            /* parent dir */);
+	if (pde) {
+		pde->data = iface;
+		pde->proc_fops = &sysvipc_proc_fops;
+	} else {
+		kfree(iface);
+	}
+}
+#endif
+
 /**
  *	ipc_findkey	-	find a key in an ipc identifier set	
  *	@ids: Identifier set
  *	@key: The key to find
  *	
- *	Requires ipc_ids.sem locked.
+ *	Requires ipc_ids.mutex locked.
  *	Returns the identifier if found or -1 if not.
  */
  
@@ -103,7 +154,7 @@ int ipc_findkey(struct ipc_ids* ids, key_t key)
 
 	/*
 	 * rcu_dereference() is not needed here
-	 * since ipc_ids.sem is held
+	 * since ipc_ids.mutex is held
 	 */
 	for (id = 0; id <= max_id; id++) {
 		p = ids->entries->p[id];
@@ -118,7 +169,7 @@ int ipc_findkey(struct ipc_ids* ids, key_t key)
 }
 
 /*
- * Requires ipc_ids.sem locked
+ * Requires ipc_ids.mutex locked
  */
 static int grow_ary(struct ipc_ids* ids, int newsize)
 {
@@ -137,8 +188,7 @@ static int grow_ary(struct ipc_ids* ids, int newsize)
 	if(new == NULL)
 		return size;
 	new->size = newsize;
-	memcpy(new->p, ids->entries->p, sizeof(struct kern_ipc_perm *)*size +
-					sizeof(struct ipc_id_ary));
+	memcpy(new->p, ids->entries->p, sizeof(struct kern_ipc_perm *)*size);
 	for(i=size;i<newsize;i++) {
 		new->p[i] = NULL;
 	}
@@ -165,7 +215,7 @@ static int grow_ary(struct ipc_ids* ids, int newsize)
  *	is returned. The list is returned in a locked state on success.
  *	On failure the list is not locked and -1 is returned.
  *
- *	Called with ipc_ids.sem held.
+ *	Called with ipc_ids.mutex held.
  */
  
 int ipc_addid(struct ipc_ids* ids, struct kern_ipc_perm* new, int size)
@@ -176,7 +226,7 @@ int ipc_addid(struct ipc_ids* ids, struct kern_ipc_perm* new, int size)
 
 	/*
 	 * rcu_dereference()() is not needed here since
-	 * ipc_ids.sem is held
+	 * ipc_ids.mutex is held
 	 */
 	for (id = 0; id < size; id++) {
 		if(ids->entries->p[id] == NULL)
@@ -212,7 +262,7 @@ found:
  *	fed an invalid identifier. The entry is removed and internal
  *	variables recomputed. The object associated with the identifier
  *	is returned.
- *	ipc_ids.sem and the spinlock for this ID is hold before this function
+ *	ipc_ids.mutex and the spinlock for this ID is hold before this function
  *	is called, and remain locked on the exit.
  */
  
@@ -220,17 +270,15 @@ struct kern_ipc_perm* ipc_rmid(struct ipc_ids* ids, int id)
 {
 	struct kern_ipc_perm* p;
 	int lid = id % SEQ_MULTIPLIER;
-	if(lid >= ids->entries->size)
-		BUG();
+	BUG_ON(lid >= ids->entries->size);
 
 	/* 
 	 * do not need a rcu_dereference()() here to force ordering
-	 * on Alpha, since the ipc_ids.sem is held.
+	 * on Alpha, since the ipc_ids.mutex is held.
 	 */	
 	p = ids->entries->p[lid];
 	ids->entries->p[lid] = NULL;
-	if(p==NULL)
-		BUG();
+	BUG_ON(p==NULL);
 	ids->in_use--;
 
 	if (lid == ids->max_id) {
@@ -366,7 +414,8 @@ void ipc_rcu_getref(void *ptr)
 }
 
 /**
- *	ipc_schedule_free	- free ipc + rcu space
+ * ipc_schedule_free - free ipc + rcu space
+ * @head: RCU callback structure for queued work
  * 
  * Since RCU callback function is called in bh,
  * we need to defer the vfree to schedule_work
@@ -383,10 +432,10 @@ static void ipc_schedule_free(struct rcu_head *head)
 }
 
 /**
- *	ipc_immediate_free	- free ipc + rcu space
+ * ipc_immediate_free - free ipc + rcu space
+ * @head: RCU callback structure that contains pointer to be freed
  *
- *	Free from the RCU callback context
- *
+ * Free from the RCU callback context
  */
 static void ipc_immediate_free(struct rcu_head *head)
 {
@@ -420,7 +469,10 @@ void ipc_rcu_putref(void *ptr)
  
 int ipcperms (struct kern_ipc_perm *ipcp, short flag)
 {	/* flag will most probably be 0 or S_...UGO from <linux/stat.h> */
-	int requested_mode, granted_mode;
+	int requested_mode, granted_mode, err;
+
+	if (unlikely((err = audit_ipc_obj(ipcp))))
+		return err;
 
 	if (!vx_check(ipcp->xid, VX_ADMIN|VX_IDENT)) /* maybe just VX_IDENT? */
 		return -1;
@@ -486,13 +538,13 @@ void ipc64_perm_to_ipc_perm (struct ipc64_perm *in, struct ipc_perm *out)
 
 /*
  * So far only shm_get_stat() calls ipc_get() via shm_get(), so ipc_get()
- * is called with shm_ids.sem locked.  Since grow_ary() is also called with
- * shm_ids.sem down(for Shared Memory), there is no need to add read 
+ * is called with shm_ids.mutex locked.  Since grow_ary() is also called with
+ * shm_ids.mutex down(for Shared Memory), there is no need to add read
  * barriers here to gurantee the writes in grow_ary() are seen in order 
  * here (for Alpha).
  *
- * However ipc_get() itself does not necessary require ipc_ids.sem down. So
- * if in the future ipc_get() is used by other places without ipc_ids.sem
+ * However ipc_get() itself does not necessary require ipc_ids.mutex down. So
+ * if in the future ipc_get() is used by other places without ipc_ids.mutex
  * down, then ipc_get() needs read memery barriers as ipc_lock() does.
  */
 struct kern_ipc_perm* ipc_get(struct ipc_ids* ids, int id)
@@ -582,3 +634,113 @@ int ipc_parse_version (int *cmd)
 }
 
 #endif /* __ARCH_WANT_IPC_PARSE_VERSION */
+
+#ifdef CONFIG_PROC_FS
+static void *sysvipc_proc_next(struct seq_file *s, void *it, loff_t *pos)
+{
+	struct ipc_proc_iface *iface = s->private;
+	struct kern_ipc_perm *ipc = it;
+	loff_t p;
+
+	/* If we had an ipc id locked before, unlock it */
+	if (ipc && ipc != SEQ_START_TOKEN)
+		ipc_unlock(ipc);
+
+	/*
+	 * p = *pos - 1 (because id 0 starts at position 1)
+	 *          + 1 (because we increment the position by one)
+	 */
+	for (p = *pos; p <= iface->ids->max_id; p++) {
+		if ((ipc = ipc_lock(iface->ids, p)) != NULL) {
+			*pos = p + 1;
+			return ipc;
+		}
+	}
+
+	/* Out of range - return NULL to terminate iteration */
+	return NULL;
+}
+
+/*
+ * File positions: pos 0 -> header, pos n -> ipc id + 1.
+ * SeqFile iterator: iterator value locked shp or SEQ_TOKEN_START.
+ */
+static void *sysvipc_proc_start(struct seq_file *s, loff_t *pos)
+{
+	struct ipc_proc_iface *iface = s->private;
+	struct kern_ipc_perm *ipc;
+	loff_t p;
+
+	/*
+	 * Take the lock - this will be released by the corresponding
+	 * call to stop().
+	 */
+	mutex_lock(&iface->ids->mutex);
+
+	/* pos < 0 is invalid */
+	if (*pos < 0)
+		return NULL;
+
+	/* pos == 0 means header */
+	if (*pos == 0)
+		return SEQ_START_TOKEN;
+
+	/* Find the (pos-1)th ipc */
+	for (p = *pos - 1; p <= iface->ids->max_id; p++) {
+		if ((ipc = ipc_lock(iface->ids, p)) != NULL) {
+			*pos = p + 1;
+			return ipc;
+		}
+	}
+	return NULL;
+}
+
+static void sysvipc_proc_stop(struct seq_file *s, void *it)
+{
+	struct kern_ipc_perm *ipc = it;
+	struct ipc_proc_iface *iface = s->private;
+
+	/* If we had a locked segment, release it */
+	if (ipc && ipc != SEQ_START_TOKEN)
+		ipc_unlock(ipc);
+
+	/* Release the lock we took in start() */
+	mutex_unlock(&iface->ids->mutex);
+}
+
+static int sysvipc_proc_show(struct seq_file *s, void *it)
+{
+	struct ipc_proc_iface *iface = s->private;
+
+	if (it == SEQ_START_TOKEN)
+		return seq_puts(s, iface->header);
+
+	return iface->show(s, it);
+}
+
+static struct seq_operations sysvipc_proc_seqops = {
+	.start = sysvipc_proc_start,
+	.stop  = sysvipc_proc_stop,
+	.next  = sysvipc_proc_next,
+	.show  = sysvipc_proc_show,
+};
+
+static int sysvipc_proc_open(struct inode *inode, struct file *file) {
+	int ret;
+	struct seq_file *seq;
+
+	ret = seq_open(file, &sysvipc_proc_seqops);
+	if (!ret) {
+		seq = file->private_data;
+		seq->private = PDE(inode)->data;
+	}
+	return ret;
+}
+
+static struct file_operations sysvipc_proc_fops = {
+	.open    = sysvipc_proc_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+};
+#endif /* CONFIG_PROC_FS */

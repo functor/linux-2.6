@@ -42,6 +42,7 @@
 #include <asm/semaphore.h>
 #ifdef CONFIG_PPC
 #include <asm/prom.h>
+#include <asm/machdep.h>
 #endif
 
 
@@ -77,10 +78,10 @@ static struct adb_driver *adb_driver_list[] = {
 	NULL
 };
 
-static struct class_simple *adb_dev_class;
+static struct class *adb_dev_class;
 
 struct adb_driver *adb_controller;
-struct notifier_block *adb_client_list = NULL;
+BLOCKING_NOTIFIER_HEAD(adb_client_list);
 static int adb_got_sleep;
 static int adb_inited;
 static pid_t adb_probe_task_pid;
@@ -90,7 +91,7 @@ static int sleepy_trackpad;
 static int autopoll_devs;
 int __adb_probe_sync;
 
-#ifdef CONFIG_PMAC_PBOOK
+#ifdef CONFIG_PM
 static int adb_notify_sleep(struct pmu_sleep_notifier *self, int when);
 static struct pmu_sleep_notifier adb_sleep_notifier = {
 	adb_notify_sleep,
@@ -294,7 +295,7 @@ int __init adb_init(void)
 	int i;
 
 #ifdef CONFIG_PPC32
-	if ( (_machine != _MACH_chrp) && (_machine != _MACH_Pmac) )
+	if (!machine_is(chrp) && !machine_is(powermac))
 		return 0;
 #endif
 #ifdef CONFIG_MAC
@@ -320,9 +321,9 @@ int __init adb_init(void)
 		printk(KERN_WARNING "Warning: no ADB interface detected\n");
 		adb_controller = NULL;
 	} else {
-#ifdef CONFIG_PMAC_PBOOK
+#ifdef CONFIG_PM
 		pmu_register_sleep_notifier(&adb_sleep_notifier);
-#endif /* CONFIG_PMAC_PBOOK */
+#endif /* CONFIG_PM */
 #ifdef CONFIG_PPC
 		if (machine_is_compatible("AAPL,PowerBook1998") ||
 			machine_is_compatible("PowerBook1,1"))
@@ -337,7 +338,7 @@ int __init adb_init(void)
 
 __initcall(adb_init);
 
-#ifdef CONFIG_PMAC_PBOOK
+#ifdef CONFIG_PM
 /*
  * notify clients before sleep and reset bus afterwards
  */
@@ -354,7 +355,8 @@ adb_notify_sleep(struct pmu_sleep_notifier *self, int when)
 		/* Stop autopoll */
 		if (adb_controller->autopoll)
 			adb_controller->autopoll(0);
-		ret = notifier_call_chain(&adb_client_list, ADB_MSG_POWERDOWN, NULL);
+		ret = blocking_notifier_call_chain(&adb_client_list,
+				ADB_MSG_POWERDOWN, NULL);
 		if (ret & NOTIFY_STOP_MASK) {
 			up(&adb_probe_mutex);
 			return PBOOK_SLEEP_REFUSE;
@@ -378,7 +380,7 @@ adb_notify_sleep(struct pmu_sleep_notifier *self, int when)
 	}
 	return PBOOK_SLEEP_OK;
 }
-#endif /* CONFIG_PMAC_PBOOK */
+#endif /* CONFIG_PM */
 
 static int
 do_adb_reset_bus(void)
@@ -391,7 +393,8 @@ do_adb_reset_bus(void)
 	if (adb_controller->autopoll)
 		adb_controller->autopoll(0);
 
-	nret = notifier_call_chain(&adb_client_list, ADB_MSG_PRE_RESET, NULL);
+	nret = blocking_notifier_call_chain(&adb_client_list,
+			ADB_MSG_PRE_RESET, NULL);
 	if (nret & NOTIFY_STOP_MASK) {
 		if (adb_controller->autopoll)
 			adb_controller->autopoll(autopoll_devs);
@@ -426,7 +429,8 @@ do_adb_reset_bus(void)
 	}
 	up(&adb_handler_sem);
 
-	nret = notifier_call_chain(&adb_client_list, ADB_MSG_POST_RESET, NULL);
+	nret = blocking_notifier_call_chain(&adb_client_list,
+			ADB_MSG_POST_RESET, NULL);
 	if (nret & NOTIFY_STOP_MASK)
 		return -EBUSY;
 	
@@ -902,9 +906,8 @@ adbdev_init(void)
 
 	devfs_mk_cdev(MKDEV(ADB_MAJOR, 0), S_IFCHR | S_IRUSR | S_IWUSR, "adb");
 
-	adb_dev_class = class_simple_create(THIS_MODULE, "adb");
-	if (IS_ERR(adb_dev_class)) {
+	adb_dev_class = class_create(THIS_MODULE, "adb");
+	if (IS_ERR(adb_dev_class))
 		return;
-	}
-	class_simple_device_add(adb_dev_class, MKDEV(ADB_MAJOR, 0), NULL, "adb");
+	class_device_create(adb_dev_class, NULL, MKDEV(ADB_MAJOR, 0), NULL, "adb");
 }

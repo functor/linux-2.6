@@ -74,6 +74,7 @@
 #include <linux/file.h>
 #include <linux/times.h>
 #include <linux/cpuset.h>
+#include <linux/rcupdate.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
@@ -138,7 +139,8 @@ static const char *task_state_array[] = {
 	"T (tracing stop)",	/*  8 */
 	"Z (zombie)",		/* 16 */
 	"X (dead)",		/* 32 */
-	"H (on hold)"		/* 64 */
+	"N (noninteractive)",	/* 64 */
+	"H (on hold)"		/* 128 */
 };
 
 static inline const char * get_task_state(struct task_struct *tsk)
@@ -164,6 +166,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 {
 	struct group_info *group_info;
 	int g;
+	struct fdtable *fdt = NULL;
 	pid_t pid, ptgid, tppid, tgid;
 
 	read_lock(&tasklist_lock);
@@ -188,10 +191,14 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);
 	task_lock(p);
+	rcu_read_lock();
+	if (p->files)
+		fdt = files_fdtable(p->files);
 	buffer += sprintf(buffer,
 		"FDSize:\t%d\n"
 		"Groups:\t",
-		p->files ? p->files->max_fds : 0);
+		fdt ? fdt->max_fds : 0);
+	rcu_read_unlock();
 
 	group_info = p->group_info;
 	get_group_info(group_info);
@@ -357,7 +364,7 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	put_nx_info(nxi);
 #endif
 skip:
-#if defined(CONFIG_ARCH_S390)
+#if defined(CONFIG_S390)
 	buffer = task_show_regs(task, buffer);
 #endif
 	return buffer - orig;
@@ -367,7 +374,6 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 {
 	unsigned long vsize, eip, esp, wchan = ~0UL;
 	long priority, nice;
-	unsigned long long bias_uptime = 0;
 	int tty_pgrp = -1, tty_nr = 0;
 	sigset_t sigign, sigcatch;
 	char state;
@@ -380,7 +386,6 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	unsigned long  min_flt = 0,  maj_flt = 0;
 	cputime_t cutime, cstime, utime, stime;
 	unsigned long rsslim = 0;
-	unsigned long it_real_value = 0;
 	struct task_struct *t;
 	char tcomm[sizeof(task->comm)];
 
@@ -436,7 +441,6 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 			utime = cputime_add(utime, task->signal->utime);
 			stime = cputime_add(stime, task->signal->stime);
 		}
-		it_real_value = task->signal->it_real_value;
 	}
 	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
 	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
@@ -463,53 +467,12 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	priority = task_prio(task);
 	nice = task_nice(task);
 
-	read_lock(&tasklist_lock);
-	pid = vx_info_map_pid(task->vx_info, task->pid);
-	ppid = (!(pid > 1)) ? 0 :
-		vx_info_map_pid(task->vx_info, task->real_parent->pid);
-	pgid = vx_info_map_pid(task->vx_info, pgid);
-	read_unlock(&tasklist_lock);
-
 	/* Temporary variable needed for gcc-2.96 */
 	/* convert timespec -> nsec*/
 	start_time = (unsigned long long)task->start_time.tv_sec * NSEC_PER_SEC
 				+ task->start_time.tv_nsec;
-
 	/* convert nsec -> ticks */
-	start_time = nsec_to_clock_t(start_time - bias_uptime);
-
-	/* fixup start time for virt uptime */
-	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
-		unsigned long long bias =
-			current->vx_info->cvirt.bias_clock;
-
-		if (start_time > bias)
-			start_time -= bias;
-		else
-			start_time = 0;
-	}
-
-	/* fixup start time for virt uptime */
-	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
-		unsigned long long bias =
-			current->vx_info->cvirt.bias_clock;
-
-		if (start_time > bias)
-			start_time -= bias;
-		else
-			start_time = 0;
-	}
-
-	/* fixup start time for virt uptime */
-	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
-		unsigned long long bias =
-			current->vx_info->cvirt.bias_clock;
-
-		if (start_time > bias)
-			start_time -= bias;
-		else
-			start_time = 0;
-	}
+	start_time = nsec_to_clock_t(start_time);
 
 	/* fixup start time for virt uptime */
 	if (vx_flags(VXF_VIRT_UPTIME, 0)) {
@@ -523,7 +486,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	}
 
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
-%lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \
+%lu %lu %lu %lu %lu %ld %ld %ld %ld %d 0 %llu %lu %ld %lu %lu %lu %lu %lu \
 %lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu\n",
 		pid,
 		tcomm,
@@ -545,10 +508,9 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		priority,
 		nice,
 		num_threads,
-		jiffies_to_clock_t(it_real_value),
 		start_time,
 		vsize,
-		mm ? get_mm_counter(mm, rss) : 0, /* you might want to shift this left 3 */
+		mm ? get_mm_rss(mm) : 0,
 	        rsslim,
 		mm ? mm->start_code : 0,
 		mm ? mm->end_code : 0,

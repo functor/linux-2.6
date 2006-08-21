@@ -26,6 +26,7 @@
 
 #define ITEGNO_VENDOR_ID	0x0eba
 #define ITEGNO_PRODUCT_ID	0x1080
+#define ITEGNO_PRODUCT_ID_2080	0x2080
 
 #define MA620_VENDOR_ID		0x0df7
 #define MA620_PRODUCT_ID	0x0620
@@ -54,7 +55,32 @@
 #define SAMSUNG_PRODUCT_ID	0x8001
 
 #define SIEMENS_VENDOR_ID	0x11f5
+#define SIEMENS_PRODUCT_ID_SX1	0x0001
 #define SIEMENS_PRODUCT_ID_X65	0x0003
+#define SIEMENS_PRODUCT_ID_X75	0x0004
 
 #define SYNTECH_VENDOR_ID	0x0745
 #define SYNTECH_PRODUCT_ID	0x0001
+
+/* Nokia CA-42 Cable */
+#define NOKIA_CA42_VENDOR_ID	0x078b
+#define NOKIA_CA42_PRODUCT_ID	0x1234
+
+/* CA-42 CLONE Cable www.ca-42.com chipset: Prolific Technology Inc */
+#define CA_42_CA42_VENDOR_ID	0x10b5
+#define CA_42_CA42_PRODUCT_ID	0xac70
+
+#define SAGEM_VENDOR_ID		0x079b
+#define SAGEM_PRODUCT_ID	0x0027
+
+/* Leadtek GPS 9531 (ID 0413:2101) */
+#define LEADTEK_VENDOR_ID	0x0413
+#define LEADTEK_9531_PRODUCT_ID	0x2101
+
+/* USB GSM cable from Speed Dragon Multimedia, Ltd */
+#define SPEEDDRAGON_VENDOR_ID	0x0e55
+#define SPEEDDRAGON_PRODUCT_ID	0x110b
+
+/* Ours Technology Inc DKU-5 clone, chipset: Prolific Technology Inc */
+#define OTI_VENDOR_ID	0x0ea0
+#define OTI_PRODUCT_ID	0x6858

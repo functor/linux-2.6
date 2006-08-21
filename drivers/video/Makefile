@@ -9,18 +9,19 @@ obj-$(CONFIG_LOGO)		  += logo/
 obj-$(CONFIG_SYSFS)		  += backlight/
 
 obj-$(CONFIG_FB)                  += fb.o
-fb-y                              := fbmem.o fbmon.o fbcmap.o fbsysfs.o modedb.o
+fb-y                              := fbmem.o fbmon.o fbcmap.o fbsysfs.o \
+                                     modedb.o fbcvt.o
 fb-objs                           := $(fb-y)
 
 obj-$(CONFIG_FB_CFB_FILLRECT)  += cfbfillrect.o
 obj-$(CONFIG_FB_CFB_COPYAREA)  += cfbcopyarea.o
 obj-$(CONFIG_FB_CFB_IMAGEBLIT) += cfbimgblt.o
-obj-$(CONFIG_FB_SOFT_CURSOR)   += softcursor.o
 obj-$(CONFIG_FB_MACMODES)      += macmodes.o
 
 # Hardware specific drivers go first
 obj-$(CONFIG_FB_RETINAZ3)         += retz3fb.o
 obj-$(CONFIG_FB_AMIGA)            += amifb.o c2p.o
+obj-$(CONFIG_FB_ARC)              += arcfb.o
 obj-$(CONFIG_FB_CLPS711X)         += clps711xfb.o
 obj-$(CONFIG_FB_CYBER)            += cyberfb.o
 obj-$(CONFIG_FB_CYBER2000)        += cyber2000fb.o
@@ -38,7 +39,6 @@ obj-$(CONFIG_FB_KYRO)             += kyro/
 obj-$(CONFIG_FB_SAVAGE)		  += savage/
 obj-$(CONFIG_FB_GEODE)		  += geode/
 obj-$(CONFIG_FB_I810)             += vgastate.o
-obj-$(CONFIG_FB_RADEON_OLD)	  += radeonfb.o
 obj-$(CONFIG_FB_NEOMAGIC)         += neofb.o vgastate.o
 obj-$(CONFIG_FB_VIRGE)            += virgefb.o
 obj-$(CONFIG_FB_3DFX)             += tdfxfb.o
@@ -49,7 +49,8 @@ obj-$(CONFIG_FB_CT65550)          += chipsfb.o
 obj-$(CONFIG_FB_IMSTT)            += imsttfb.o
 obj-$(CONFIG_FB_S3TRIO)           += S3triofb.o
 obj-$(CONFIG_FB_FM2)              += fm2fb.o
-obj-$(CONFIG_FB_TRIDENT)	  += tridentfb.o
+obj-$(CONFIG_FB_CYBLA)            += cyblafb.o
+obj-$(CONFIG_FB_TRIDENT)          += tridentfb.o
 obj-$(CONFIG_FB_STI)              += stifb.o
 obj-$(CONFIG_FB_FFB)              += ffb.o sbuslib.o
 obj-$(CONFIG_FB_CG6)              += cg6.o sbuslib.o
@@ -83,7 +84,8 @@ obj-$(CONFIG_FB_CIRRUS)		  += cirrusfb.o
 obj-$(CONFIG_FB_ASILIANT)	  += asiliantfb.o
 obj-$(CONFIG_FB_PXA)		  += pxafb.o
 obj-$(CONFIG_FB_W100)		  += w100fb.o
-obj-$(CONFIG_FB_AU1100)		  += au1100fb.o fbgen.o
+obj-$(CONFIG_FB_AU1100)		  += au1100fb.o
+obj-$(CONFIG_FB_AU1200)		  += au1200fb.o
 obj-$(CONFIG_FB_PMAG_AA)	  += pmag-aa-fb.o
 obj-$(CONFIG_FB_PMAG_BA)	  += pmag-ba-fb.o
 obj-$(CONFIG_FB_PMAGB_B)	  += pmagb-b-fb.o
@@ -91,6 +93,7 @@ obj-$(CONFIG_FB_MAXINE)		  += maxinefb.o
 obj-$(CONFIG_FB_TX3912)		  += tx3912fb.o
 obj-$(CONFIG_FB_S1D13XXX)	  += s1d13xxxfb.o
 obj-$(CONFIG_FB_IMX)              += imxfb.o
+obj-$(CONFIG_FB_S3C2410)	  += s3c2410fb.o
 
 # Platform or fallback drivers go here
 obj-$(CONFIG_FB_VESA)             += vesafb.o

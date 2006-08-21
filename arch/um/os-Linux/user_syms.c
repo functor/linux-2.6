@@ -18,13 +18,18 @@ extern void *memmove(void *, const void *, size_t);
 extern void *memset(void *, int, size_t);
 extern int printf(const char *, ...);
 
+/* If they're not defined, the export is included in lib/string.c.*/
+#ifdef __HAVE_ARCH_STRLEN
 EXPORT_SYMBOL(strlen);
+#endif
+#ifdef __HAVE_ARCH_STRSTR
+EXPORT_SYMBOL(strstr);
+#endif
+
 EXPORT_SYMBOL(memcpy);
 EXPORT_SYMBOL(memmove);
 EXPORT_SYMBOL(memset);
 EXPORT_SYMBOL(printf);
-
-EXPORT_SYMBOL(strstr);
 
 /* Here, instead, I can provide a fake prototype. Yes, someone cares: genksyms.
  * However, the modules will use the CRC defined *here*, no matter if it is
@@ -33,6 +38,11 @@ EXPORT_SYMBOL(strstr);
 #define EXPORT_SYMBOL_PROTO(sym)       \
        int sym(void);                  \
        EXPORT_SYMBOL(sym);
+
+extern void readdir64(void) __attribute__((weak));
+EXPORT_SYMBOL(readdir64);
+extern void truncate64(void) __attribute__((weak));
+EXPORT_SYMBOL(truncate64);
 
 #ifdef SUBARCH_i386
 EXPORT_SYMBOL(vsyscall_ehdr);
@@ -82,6 +92,16 @@ EXPORT_SYMBOL_PROTO(statfs);
 EXPORT_SYMBOL_PROTO(statfs64);
 
 EXPORT_SYMBOL_PROTO(getuid);
+
+EXPORT_SYMBOL_PROTO(fsync);
+EXPORT_SYMBOL_PROTO(fdatasync);
+
+/* Export symbols used by GCC for the stack protector. */
+extern void __stack_smash_handler(void *) __attribute__((weak));
+EXPORT_SYMBOL(__stack_smash_handler);
+
+extern long __guard __attribute__((weak));
+EXPORT_SYMBOL(__guard);
 
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.

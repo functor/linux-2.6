@@ -32,7 +32,6 @@
 #include <linux/font.h>
 
 
-extern struct font_desc font_vga_8x16;
 extern unsigned long sgi_gfxaddr;
 
 #define FONT_DATA ((unsigned char *)font_vga_8x16.data)
@@ -150,7 +149,7 @@ static inline void newport_clear_lines(int ystart, int yend, int ci)
 	newport_clear_screen(0, ystart, 1280 + 63, yend, ci);
 }
 
-void newport_reset(void)
+static void newport_reset(void)
 {
 	unsigned short treg;
 	int i;
@@ -194,7 +193,7 @@ void newport_reset(void)
  * calculate the actual screen size by reading
  * the video timing out of the VC2
  */
-void newport_get_screensize(void)
+static void newport_get_screensize(void)
 {
 	int i, cols;
 	unsigned short ventry, treg;

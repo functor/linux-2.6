@@ -13,7 +13,7 @@
  *    Copyright (C) 2001 Helge Deller <deller at parisc-linux.org>
  *    Copyright (C) 2000-2001 Thomas Bogendoerfer <tsbogend at parisc-linux.org>
  *    Copyright (C) 2002 Randolph Chung <tausq with parisc-linux.org>
- *
+ *    Copyright (C) 2005-2006 Kyle McMartin <kyle at parisc-linux.org>
  *
  *    This program is free software; you can redistribute it and/or modify
  *    it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@
 #undef ENTRY_UHOH
 #undef ENTRY_COMP
 #undef ENTRY_OURS
-#if defined(__LP64__) && !defined(SYSCALL_TABLE_64BIT)
+#if defined(CONFIG_64BIT) && !defined(SYSCALL_TABLE_64BIT)
 /* Use ENTRY_SAME for 32-bit syscalls which are the same on wide and
  * narrow palinux.  Use ENTRY_DIFF for those where a 32-bit specific
  * implementation is required on wide palinux.  Use ENTRY_COMP where
@@ -46,7 +46,7 @@
 #define ENTRY_UHOH(_name_) .dword sys32_##unimplemented
 #define ENTRY_OURS(_name_) .dword parisc_##_name_
 #define ENTRY_COMP(_name_) .dword compat_sys_##_name_
-#elif defined(__LP64__) && defined(SYSCALL_TABLE_64BIT)
+#elif defined(CONFIG_64BIT) && defined(SYSCALL_TABLE_64BIT)
 #define ENTRY_SAME(_name_) .dword sys_##_name_
 #define ENTRY_DIFF(_name_) .dword sys_##_name_
 #define ENTRY_UHOH(_name_) .dword sys_##_name_
@@ -207,7 +207,7 @@
 	/* struct sockaddr... */
 	ENTRY_SAME(recvfrom)
 	/* struct timex contains longs */
-	ENTRY_DIFF(adjtimex)
+	ENTRY_COMP(adjtimex)
 	ENTRY_SAME(mprotect)		/* 125 */
 	/* old_sigset_t forced to 32 bits.  Beware glibc sigset_t */
 	ENTRY_COMP(sigprocmask)
@@ -287,7 +287,7 @@
 	ENTRY_SAME(chown)		/* 180 */
 	/* setsockopt() used by iptables: SO_SET_REPLACE/SO_SET_ADD_COUNTERS */
 	ENTRY_COMP(setsockopt)
-	ENTRY_SAME(getsockopt)
+	ENTRY_COMP(getsockopt)
 	ENTRY_COMP(sendmsg)
 	ENTRY_COMP(recvmsg)
 	ENTRY_SAME(semop)		/* 185 */
@@ -368,16 +368,36 @@
 	ENTRY_COMP(mbind)		/* 260 */
 	ENTRY_COMP(get_mempolicy)
 	ENTRY_COMP(set_mempolicy)
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)		/* 265 */
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)		/* 270 */
-	ENTRY_SAME(ni_syscall)
-	ENTRY_SAME(ni_syscall)
 	ENTRY_DIFF(vserver)
+	ENTRY_SAME(add_key)
+	ENTRY_SAME(request_key)		/* 265 */
+	ENTRY_SAME(keyctl)
+	ENTRY_SAME(ioprio_set)
+	ENTRY_SAME(ioprio_get)
+	ENTRY_SAME(inotify_init)
+	ENTRY_SAME(inotify_add_watch)	/* 270 */
+	ENTRY_SAME(inotify_rm_watch)
+	ENTRY_SAME(ni_syscall)		/* 271 ENTRY_COMP(pselect6) */
+	ENTRY_SAME(ni_syscall)		/* 272 ENTRY_COMP(ppoll) */
+	ENTRY_SAME(migrate_pages)
+	ENTRY_COMP(openat)		/* 275 */
+	ENTRY_SAME(mkdirat)
+	ENTRY_SAME(mknodat)
+	ENTRY_SAME(fchownat)
+	ENTRY_COMP(futimesat)
+	ENTRY_SAME(fstatat64)		/* 280 */
+	ENTRY_SAME(unlinkat)
+	ENTRY_SAME(renameat)
+	ENTRY_SAME(linkat)
+	ENTRY_SAME(symlinkat)
+	ENTRY_SAME(readlinkat)		/* 285 */
+	ENTRY_SAME(fchmodat)
+	ENTRY_SAME(faccessat)
+	ENTRY_SAME(unshare)
+	ENTRY_COMP(set_robust_list)
+	ENTRY_COMP(get_robust_list)	/* 290 */
+	ENTRY_SAME(splice)
+	ENTRY_OURS(sync_file_range)
+	ENTRY_SAME(tee)
 	/* Nothing yet */
 

@@ -40,12 +40,12 @@
  */
  
 #include <linux/config.h> 
+#include <linux/types.h>
 #include <asm/atomic.h>
 #include <asm/byteorder.h>
 #include <asm/current.h>
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
-#include <linux/types.h>
 #include <linux/stddef.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
@@ -59,7 +59,6 @@
 #include <linux/netdevice.h>
 #include <linux/in_route.h>
 #include <linux/route.h>
-#include <linux/tcp.h>
 #include <linux/skbuff.h>
 #include <net/dst.h>
 #include <net/sock.h>
@@ -71,6 +70,7 @@
 #include <net/udp.h>
 #include <net/raw.h>
 #include <net/snmp.h>
+#include <net/tcp_states.h>
 #include <net/inet_common.h>
 #include <net/checksum.h>
 #include <net/xfrm.h>
@@ -172,10 +172,11 @@ static __inline__ int icmp_filter(struct sock *sk, struct sk_buff *skb)
  * RFC 1122: SHOULD pass TOS value up to the transport layer.
  * -> It does. And not only TOS, but all IP header.
  */
-void raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
+int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 {
 	struct sock *sk;
 	struct hlist_head *head;
+	int delivered = 0;
 
 	read_lock(&raw_v4_lock);
 	head = &raw_v4_htable[hash];
@@ -186,6 +187,7 @@ void raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 			     skb->dev->ifindex);
 
 	while (sk) {
+		delivered = 1;
 		if (iph->protocol != IPPROTO_ICMP || !icmp_filter(sk, skb)) {
 			struct sk_buff *clone = skb_clone(skb, GFP_ATOMIC);
 
@@ -199,6 +201,7 @@ void raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 	}
 out:
 	read_unlock(&raw_v4_lock);
+	return delivered;
 }
 
 void raw_err (struct sock *sk, struct sk_buff *skb, u32 info)
@@ -274,6 +277,7 @@ int raw_rcv(struct sock *sk, struct sk_buff *skb)
 		kfree_skb(skb);
 		return NET_RX_DROP;
 	}
+	nf_reset(skb);
 
 	skb_push(skb, skb->data - skb->nh.raw);
 
@@ -281,7 +285,7 @@ int raw_rcv(struct sock *sk, struct sk_buff *skb)
 	return 0;
 }
 
-static int raw_send_hdrinc(struct sock *sk, void *from, int length,
+static int raw_send_hdrinc(struct sock *sk, void *from, size_t length,
 			struct rtable *rt, 
 			unsigned int flags)
 {
@@ -320,7 +324,7 @@ static int raw_send_hdrinc(struct sock *sk, void *from, int length,
 		goto error_fault;
 
 	/* We don't modify invalid header */
-	if (length >= sizeof(*iph) && iph->ihl * 4 <= length) {
+	if (length >= sizeof(*iph) && iph->ihl * 4U <= length) {
 		if (!iph->saddr)
 			iph->saddr = rt->rt_src;
 		iph->check   = 0;
@@ -330,10 +334,11 @@ static int raw_send_hdrinc(struct sock *sk, void *from, int length,
 
 		iph->check = ip_fast_csum((unsigned char *)iph, iph->ihl);
 	}
+
 	err = -EPERM;
 	if (!vx_check(0, VX_ADMIN) && !capable(CAP_NET_RAW)
 		&& (!addr_in_nx_info(sk->sk_nx_info, iph->saddr)))
-		goto error;
+		goto error_free;
 
 	err = NF_HOOK(PF_INET, NF_IP_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
 		      dst_output);
@@ -346,6 +351,7 @@ out:
 
 error_fault:
 	err = -EFAULT;
+error_free:
 	kfree_skb(skb);
 error:
 	IP_INC_STATS(IPSTATS_MIB_OUTDISCARDS);
@@ -358,7 +364,7 @@ static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 	u8 __user *type = NULL;
 	u8 __user *code = NULL;
 	int probed = 0;
-	int i;
+	unsigned int i;
 
 	if (!msg->msg_iov)
 		return;
@@ -384,7 +390,7 @@ static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 
 			if (type && code) {
 				get_user(fl->fl_icmp_type, type);
-				__get_user(fl->fl_icmp_code, code);
+			        get_user(fl->fl_icmp_code, code);
 				probed = 1;
 			}
 			break;
@@ -410,7 +416,7 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int err;
 
 	err = -EMSGSIZE;
-	if (len < 0 || len > 0xFFFF)
+	if (len > 0xFFFF)
 		goto out;
 
 	/*
@@ -546,7 +552,10 @@ done:
 		kfree(ipc.opt);
 	ip_rt_put(rt);
 
-out:	return err < 0 ? err : len;
+out:
+	if (err < 0)
+		return err;
+	return len;
 
 do_confirm:
 	dst_confirm(&rt->u.dst);
@@ -642,7 +651,10 @@ static int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		copied = skb->len;
 done:
 	skb_free_datagram(sk, skb);
-out:	return err ? err : copied;
+out:
+	if (err)
+		return err;
+	return copied;
 }
 
 static int raw_init(struct sock *sk)
@@ -682,12 +694,9 @@ static int raw_geticmpfilter(struct sock *sk, char __user *optval, int __user *o
 out:	return ret;
 }
 
-static int raw_setsockopt(struct sock *sk, int level, int optname, 
+static int do_raw_setsockopt(struct sock *sk, int level, int optname,
 			  char __user *optval, int optlen)
 {
-	if (level != SOL_RAW)
-		return ip_setsockopt(sk, level, optname, optval, optlen);
-
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
 			return -EOPNOTSUPP;
@@ -697,12 +706,27 @@ static int raw_setsockopt(struct sock *sk, int level, int optname,
 	return -ENOPROTOOPT;
 }
 
-static int raw_getsockopt(struct sock *sk, int level, int optname, 
-			  char __user *optval, int __user *optlen)
+static int raw_setsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int optlen)
 {
 	if (level != SOL_RAW)
-		return ip_getsockopt(sk, level, optname, optval, optlen);
+		return ip_setsockopt(sk, level, optname, optval, optlen);
+	return do_raw_setsockopt(sk, level, optname, optval, optlen);
+}
 
+#ifdef CONFIG_COMPAT
+static int compat_raw_setsockopt(struct sock *sk, int level, int optname,
+				 char __user *optval, int optlen)
+{
+	if (level != SOL_RAW)
+		return compat_ip_setsockopt(sk, level, optname, optval, optlen);
+	return do_raw_setsockopt(sk, level, optname, optval, optlen);
+}
+#endif
+
+static int do_raw_getsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int __user *optlen)
+{
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
 			return -EOPNOTSUPP;
@@ -711,6 +735,24 @@ static int raw_getsockopt(struct sock *sk, int level, int optname,
 	}
 	return -ENOPROTOOPT;
 }
+
+static int raw_getsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int __user *optlen)
+{
+	if (level != SOL_RAW)
+		return ip_getsockopt(sk, level, optname, optval, optlen);
+	return do_raw_getsockopt(sk, level, optname, optval, optlen);
+}
+
+#ifdef CONFIG_COMPAT
+static int compat_raw_getsockopt(struct sock *sk, int level, int optname,
+				 char __user *optval, int __user *optlen)
+{
+	if (level != SOL_RAW)
+		return compat_ip_getsockopt(sk, level, optname, optval, optlen);
+	return do_raw_getsockopt(sk, level, optname, optval, optlen);
+}
+#endif
 
 static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 {
@@ -723,11 +765,11 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 			struct sk_buff *skb;
 			int amount = 0;
 
-			spin_lock_irq(&sk->sk_receive_queue.lock);
+			spin_lock_bh(&sk->sk_receive_queue.lock);
 			skb = skb_peek(&sk->sk_receive_queue);
 			if (skb != NULL)
 				amount = skb->len;
-			spin_unlock_irq(&sk->sk_receive_queue.lock);
+			spin_unlock_bh(&sk->sk_receive_queue.lock);
 			return put_user(amount, (int __user *)arg);
 		}
 
@@ -741,22 +783,26 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 }
 
 struct proto raw_prot = {
-	.name =		"RAW",
-	.owner =	THIS_MODULE,
-	.close =	raw_close,
-	.connect =	ip4_datagram_connect,
-	.disconnect =	udp_disconnect,
-	.ioctl =	raw_ioctl,
-	.init =		raw_init,
-	.setsockopt =	raw_setsockopt,
-	.getsockopt =	raw_getsockopt,
-	.sendmsg =	raw_sendmsg,
-	.recvmsg =	raw_recvmsg,
-	.bind =		raw_bind,
-	.backlog_rcv =	raw_rcv_skb,
-	.hash =		raw_v4_hash,
-	.unhash =	raw_v4_unhash,
-	.obj_size =	sizeof(struct raw_sock),
+	.name		   = "RAW",
+	.owner		   = THIS_MODULE,
+	.close		   = raw_close,
+	.connect	   = ip4_datagram_connect,
+	.disconnect	   = udp_disconnect,
+	.ioctl		   = raw_ioctl,
+	.init		   = raw_init,
+	.setsockopt	   = raw_setsockopt,
+	.getsockopt	   = raw_getsockopt,
+	.sendmsg	   = raw_sendmsg,
+	.recvmsg	   = raw_recvmsg,
+	.bind		   = raw_bind,
+	.backlog_rcv	   = raw_rcv_skb,
+	.hash		   = raw_v4_hash,
+	.unhash		   = raw_v4_unhash,
+	.obj_size	   = sizeof(struct raw_sock),
+#ifdef CONFIG_COMPAT
+	.compat_setsockopt = compat_raw_setsockopt,
+	.compat_getsockopt = compat_raw_getsockopt,
+#endif
 };
 
 #ifdef CONFIG_PROC_FS

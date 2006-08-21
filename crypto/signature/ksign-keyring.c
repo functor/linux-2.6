@@ -85,6 +85,8 @@ struct ksign_public_key *ksign_get_public_key(const uint32_t *keyid)
 		}
 	}
 
+	pk = NULL;
+
  found:
 	up_read(&keyring_sem);
 

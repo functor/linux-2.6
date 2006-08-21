@@ -12,6 +12,7 @@
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/string.h>
@@ -47,7 +48,7 @@
 
 #ifdef CONFIG_INET
 
-int ax25_encapsulate(struct sk_buff *skb, struct net_device *dev, unsigned short type, void *daddr, void *saddr, unsigned len)
+int ax25_hard_header(struct sk_buff *skb, struct net_device *dev, unsigned short type, void *daddr, void *saddr, unsigned len)
 {
 	unsigned char *buff;
 
@@ -88,7 +89,7 @@ int ax25_encapsulate(struct sk_buff *skb, struct net_device *dev, unsigned short
   		*buff++ = AX25_P_ARP;
   		break;
   	default:
-  		printk(KERN_ERR "AX.25: ax25_encapsulate - wrong protocol type 0x%2.2x\n", type);
+  		printk(KERN_ERR "AX.25: ax25_hard_header - wrong protocol type 0x%2.2x\n", type);
   		*buff++ = 0;
   		break;
  	}
@@ -209,7 +210,7 @@ put:
 
 #else	/* INET */
 
-int ax25_encapsulate(struct sk_buff *skb, struct net_device *dev, unsigned short type, void *daddr, void *saddr, unsigned len)
+int ax25_hard_header(struct sk_buff *skb, struct net_device *dev, unsigned short type, void *daddr, void *saddr, unsigned len)
 {
 	return -AX25_HEADER_LEN;
 }
@@ -221,3 +222,5 @@ int ax25_rebuild_header(struct sk_buff *skb)
 
 #endif
 
+EXPORT_SYMBOL(ax25_hard_header);
+EXPORT_SYMBOL(ax25_rebuild_header);

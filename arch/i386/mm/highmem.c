@@ -1,4 +1,5 @@
 #include <linux/highmem.h>
+#include <linux/module.h>
 
 void *kmap(struct page *page)
 {
@@ -77,7 +78,7 @@ void kunmap_atomic(void *kvaddr, enum km_type type)
 /* This is the same as kmap_atomic() but can map memory that doesn't
  * have a struct page associated with it.
  */
-char *kmap_atomic_pfn(unsigned long pfn, enum km_type type)
+void *kmap_atomic_pfn(unsigned long pfn, enum km_type type)
 {
 	enum fixed_addresses idx;
 	unsigned long vaddr;
@@ -89,7 +90,7 @@ char *kmap_atomic_pfn(unsigned long pfn, enum km_type type)
 	set_pte(kmap_pte-idx, pfn_pte(pfn, kmap_prot));
 	__flush_tlb_one(vaddr);
 
-	return (char *)vaddr;
+	return (void*) vaddr;
 }
 
 struct page *kmap_atomic_to_page(void *ptr)
@@ -104,3 +105,9 @@ struct page *kmap_atomic_to_page(void *ptr)
 	pte = kmap_pte - (idx - FIX_KMAP_BEGIN);
 	return pte_page(*pte);
 }
+
+EXPORT_SYMBOL(kmap);
+EXPORT_SYMBOL(kunmap);
+EXPORT_SYMBOL(kmap_atomic);
+EXPORT_SYMBOL(kunmap_atomic);
+EXPORT_SYMBOL(kmap_atomic_to_page);

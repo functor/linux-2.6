@@ -54,6 +54,7 @@
 #include <net/protocol.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
+#include <net/route.h>
 #include <net/sctp/sctp.h>
 #include <net/addrconf.h>
 #include <net/inet_common.h>
@@ -62,7 +63,7 @@
 /* Global data structures. */
 struct sctp_globals sctp_globals;
 struct proc_dir_entry	*proc_net_sctp;
-DEFINE_SNMP_STAT(struct sctp_mib, sctp_statistics);
+DEFINE_SNMP_STAT(struct sctp_mib, sctp_statistics) __read_mostly;
 
 struct idr sctp_assocs_id;
 DEFINE_SPINLOCK(sctp_assocs_id_lock);
@@ -78,8 +79,8 @@ static struct sctp_pf *sctp_pf_inet_specific;
 static struct sctp_af *sctp_af_v4_specific;
 static struct sctp_af *sctp_af_v6_specific;
 
-kmem_cache_t *sctp_chunk_cachep;
-kmem_cache_t *sctp_bucket_cachep;
+kmem_cache_t *sctp_chunk_cachep __read_mostly;
+kmem_cache_t *sctp_bucket_cachep __read_mostly;
 
 extern int sctp_snmp_proc_init(void);
 extern int sctp_snmp_proc_exit(void);
@@ -147,7 +148,7 @@ static void sctp_v4_copy_addrlist(struct list_head *addrlist,
 	struct sctp_sockaddr_entry *addr;
 
 	rcu_read_lock();
-	if ((in_dev = __in_dev_get(dev)) == NULL) {
+	if ((in_dev = __in_dev_get_rcu(dev)) == NULL) {
 		rcu_read_unlock();
 		return;
 	}
@@ -219,7 +220,7 @@ static void sctp_free_local_addr_list(void)
 
 /* Copy the local addresses which are valid for 'scope' into 'bp'.  */
 int sctp_copy_local_addr_list(struct sctp_bind_addr *bp, sctp_scope_t scope,
-			      int gfp, int copy_flags)
+			      gfp_t gfp, int copy_flags)
 {
 	struct sctp_sockaddr_entry *addr;
 	int error = 0;
@@ -364,11 +365,17 @@ static int sctp_v4_is_any(const union sctp_addr *addr)
  * Return 0 - If the address is a non-unicast or an illegal address.
  * Return 1 - If the address is a unicast.
  */
-static int sctp_v4_addr_valid(union sctp_addr *addr, struct sctp_sock *sp)
+static int sctp_v4_addr_valid(union sctp_addr *addr,
+			      struct sctp_sock *sp,
+			      const struct sk_buff *skb)
 {
 	/* Is this a non-unicast address or a unusable SCTP address? */
 	if (IS_IPV4_UNUSABLE_ADDRESS(&addr->v4.sin_addr.s_addr))
 		return 0;
+
+ 	/* Is this a broadcast address? */
+ 	if (skb && ((struct rtable *)skb->dst)->rt_flags & RTCF_BROADCAST)
+ 		return 0;
 
 	return 1;
 }
@@ -530,6 +537,9 @@ static void sctp_v4_get_saddr(struct sctp_association *asoc,
 {
 	struct rtable *rt = (struct rtable *)dst;
 
+	if (!asoc)
+		return;
+
 	if (rt) {
 		saddr->v4.sin_family = AF_INET;
 		saddr->v4.sin_port = asoc->base.bind_addr.port;  
@@ -593,9 +603,7 @@ static struct sock *sctp_v4_create_accept_sk(struct sock *sk,
 	newinet->mc_index = 0;
 	newinet->mc_list = NULL;
 
-#ifdef INET_REFCNT_DEBUG
-	atomic_inc(&inet_sock_nr);
-#endif
+	sk_refcnt_debug_inc(newsk);
 
 	if (newsk->sk_prot->init(newsk)) {
 		sk_common_release(newsk);
@@ -828,25 +836,29 @@ static struct notifier_block sctp_inetaddr_notifier = {
 };
 
 /* Socket operations.  */
-static struct proto_ops inet_seqpacket_ops = {
-	.family      = PF_INET,
-	.owner       = THIS_MODULE,
-	.release     = inet_release,       /* Needs to be wrapped... */
-	.bind        = inet_bind,
-	.connect     = inet_dgram_connect,
-	.socketpair  = sock_no_socketpair,
-	.accept      = inet_accept,
-	.getname     = inet_getname,      /* Semantics are different.  */
-	.poll        = sctp_poll,
-	.ioctl       = inet_ioctl,
-	.listen      = sctp_inet_listen,
-	.shutdown    = inet_shutdown,     /* Looks harmless.  */
-	.setsockopt  = sock_common_setsockopt,   /* IP_SOL IP_OPTION is a problem. */
-	.getsockopt  = sock_common_getsockopt,
-	.sendmsg     = inet_sendmsg,
-	.recvmsg     = sock_common_recvmsg,
-	.mmap        = sock_no_mmap,
-	.sendpage    = sock_no_sendpage,
+static const struct proto_ops inet_seqpacket_ops = {
+	.family		   = PF_INET,
+	.owner		   = THIS_MODULE,
+	.release	   = inet_release,	/* Needs to be wrapped... */
+	.bind		   = inet_bind,
+	.connect	   = inet_dgram_connect,
+	.socketpair	   = sock_no_socketpair,
+	.accept		   = inet_accept,
+	.getname	   = inet_getname,	/* Semantics are different.  */
+	.poll		   = sctp_poll,
+	.ioctl		   = inet_ioctl,
+	.listen		   = sctp_inet_listen,
+	.shutdown	   = inet_shutdown,	/* Looks harmless.  */
+	.setsockopt	   = sock_common_setsockopt, /* IP_SOL IP_OPTION is a problem */
+	.getsockopt	   = sock_common_getsockopt,
+	.sendmsg	   = inet_sendmsg,
+	.recvmsg	   = sock_common_recvmsg,
+	.mmap		   = sock_no_mmap,
+	.sendpage	   = sock_no_sendpage,
+#ifdef CONFIG_COMPAT
+	.compat_setsockopt = compat_sock_common_setsockopt,
+	.compat_getsockopt = compat_sock_common_getsockopt,
+#endif
 };
 
 /* Registration with AF_INET family.  */
@@ -878,31 +890,35 @@ static struct net_protocol sctp_protocol = {
 
 /* IPv4 address related functions.  */
 static struct sctp_af sctp_ipv4_specific = {
-	.sctp_xmit      = sctp_v4_xmit,
-	.setsockopt     = ip_setsockopt,
-	.getsockopt     = ip_getsockopt,
-	.get_dst	= sctp_v4_get_dst,
-	.get_saddr	= sctp_v4_get_saddr,
-	.copy_addrlist  = sctp_v4_copy_addrlist,
-	.from_skb       = sctp_v4_from_skb,
-	.from_sk        = sctp_v4_from_sk,
-	.to_sk_saddr    = sctp_v4_to_sk_saddr,
-	.to_sk_daddr    = sctp_v4_to_sk_daddr,
-	.from_addr_param= sctp_v4_from_addr_param,
-	.to_addr_param  = sctp_v4_to_addr_param,	
-	.dst_saddr      = sctp_v4_dst_saddr,
-	.cmp_addr       = sctp_v4_cmp_addr,
-	.addr_valid     = sctp_v4_addr_valid,
-	.inaddr_any     = sctp_v4_inaddr_any,
-	.is_any         = sctp_v4_is_any,
-	.available      = sctp_v4_available,
-	.scope          = sctp_v4_scope,
-	.skb_iif        = sctp_v4_skb_iif,
-	.is_ce          = sctp_v4_is_ce,
-	.seq_dump_addr  = sctp_v4_seq_dump_addr,
-	.net_header_len = sizeof(struct iphdr),
-	.sockaddr_len   = sizeof(struct sockaddr_in),
-	.sa_family      = AF_INET,
+	.sa_family	   = AF_INET,
+	.sctp_xmit	   = sctp_v4_xmit,
+	.setsockopt	   = ip_setsockopt,
+	.getsockopt	   = ip_getsockopt,
+	.get_dst	   = sctp_v4_get_dst,
+	.get_saddr	   = sctp_v4_get_saddr,
+	.copy_addrlist	   = sctp_v4_copy_addrlist,
+	.from_skb	   = sctp_v4_from_skb,
+	.from_sk	   = sctp_v4_from_sk,
+	.to_sk_saddr	   = sctp_v4_to_sk_saddr,
+	.to_sk_daddr	   = sctp_v4_to_sk_daddr,
+	.from_addr_param   = sctp_v4_from_addr_param,
+	.to_addr_param	   = sctp_v4_to_addr_param,
+	.dst_saddr	   = sctp_v4_dst_saddr,
+	.cmp_addr	   = sctp_v4_cmp_addr,
+	.addr_valid	   = sctp_v4_addr_valid,
+	.inaddr_any	   = sctp_v4_inaddr_any,
+	.is_any		   = sctp_v4_is_any,
+	.available	   = sctp_v4_available,
+	.scope		   = sctp_v4_scope,
+	.skb_iif	   = sctp_v4_skb_iif,
+	.is_ce		   = sctp_v4_is_ce,
+	.seq_dump_addr	   = sctp_v4_seq_dump_addr,
+	.net_header_len	   = sizeof(struct iphdr),
+	.sockaddr_len	   = sizeof(struct sockaddr_in),
+#ifdef CONFIG_COMPAT
+	.compat_setsockopt = compat_ip_setsockopt,
+	.compat_getsockopt = compat_ip_getsockopt,
+#endif
 };
 
 struct sctp_pf *sctp_get_pf_specific(sa_family_t family) {
@@ -1049,8 +1065,14 @@ SCTP_STATIC __init int sctp_init(void)
 	/* Sendbuffer growth	    - do per-socket accounting */
 	sctp_sndbuf_policy		= 0;
 
+	/* Rcvbuffer growth	    - do per-socket accounting */
+	sctp_rcvbuf_policy		= 0;
+
 	/* HB.interval              - 30 seconds */
-	sctp_hb_interval		= 30 * HZ;
+	sctp_hb_interval		= SCTP_DEFAULT_TIMEOUT_HEARTBEAT;
+
+	/* delayed SACK timeout */
+	sctp_sack_timeout		= SCTP_DEFAULT_TIMEOUT_SACK;
 
 	/* Implementation specific variables. */
 
@@ -1241,6 +1263,10 @@ SCTP_STATIC __exit void sctp_exit(void)
 module_init(sctp_init);
 module_exit(sctp_exit);
 
+/*
+ * __stringify doesn't likes enums, so use IPPROTO_SCTP value (132) directly.
+ */
+MODULE_ALIAS("net-pf-" __stringify(PF_INET) "-proto-132");
 MODULE_AUTHOR("Linux Kernel SCTP developers <lksctp-developers@lists.sourceforge.net>");
 MODULE_DESCRIPTION("Support for the SCTP protocol (RFC2960)");
 MODULE_LICENSE("GPL");

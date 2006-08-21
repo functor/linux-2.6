@@ -1,2 +1,5 @@
 crc32table.h
 gen_crc32table
+.*.cmd
+*.mod.c
+*.ko

@@ -76,16 +76,12 @@ int ip_forward(struct sk_buff *skb)
 	 *	that reaches zero, we must reply an ICMP control message telling
 	 *	that the packet's lifetime expired.
 	 */
-
-	iph = skb->nh.iph;
-
-	if (iph->ttl <= 1)
+	if (skb->nh.iph->ttl <= 1)
                 goto too_many_hops;
 
 	if (!xfrm4_route_forward(skb))
 		goto drop;
 
-	iph = skb->nh.iph;
 	rt = (struct rtable*)skb->dst;
 
 	if (opt->is_strictroute && rt->rt_dst != rt->rt_gateway)
@@ -120,6 +116,7 @@ sr_failed:
 
 too_many_hops:
         /* Tell the sender its packet died... */
+        IP_INC_STATS_BH(IPSTATS_MIB_INHDRERRORS);
         icmp_send(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
 drop:
 	kfree_skb(skb);

@@ -22,7 +22,7 @@ static char *isdnloop_id = "loop0";
 MODULE_DESCRIPTION("ISDN4Linux: Pseudo Driver that simulates an ISDN card");
 MODULE_AUTHOR("Fritz Elfert");
 MODULE_LICENSE("GPL");
-MODULE_PARM(isdnloop_id, "s");
+module_param(isdnloop_id, charp, 0);
 MODULE_PARM_DESC(isdnloop_id, "ID-String of first card");
 
 static int isdnloop_addcard(char *);
@@ -1161,12 +1161,9 @@ isdnloop_command(isdn_ctrl * c, isdnloop_card * card)
 					if (a) {
 						if (!card->leased) {
 							card->leased = 1;
-							while (card->ptype == ISDN_PTYPE_UNKNOWN) {
-								set_current_state(TASK_INTERRUPTIBLE);
-								schedule_timeout(10);
-							}
-							set_current_state(TASK_INTERRUPTIBLE);
-							schedule_timeout(10);
+							while (card->ptype == ISDN_PTYPE_UNKNOWN)
+								schedule_timeout_interruptible(10);
+							schedule_timeout_interruptible(10);
 							sprintf(cbuf, "00;FV2ON\n01;EAZ1\n02;EAZ2\n");
 							i = isdnloop_writecmd(cbuf, strlen(cbuf), 0, card);
 							printk(KERN_INFO

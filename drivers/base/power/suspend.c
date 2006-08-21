@@ -9,9 +9,10 @@
  */
 
 #include <linux/device.h>
+#include <linux/kallsyms.h>
+#include <linux/pm.h>
+#include "../base.h"
 #include "power.h"
-
-extern int sysdev_suspend(pm_message_t state);
 
 /*
  * The entries in the dpm_active list are in a depth first order, simply
@@ -39,26 +40,28 @@ int suspend_device(struct device * dev, pm_message_t state)
 {
 	int error = 0;
 
-	if (dev->power.power_state) {
+	down(&dev->sem);
+	if (dev->power.power_state.event) {
 		dev_dbg(dev, "PM: suspend %d-->%d\n",
-			dev->power.power_state, state);
+			dev->power.power_state.event, state.event);
 	}
 	if (dev->power.pm_parent
-			&& dev->power.pm_parent->power.power_state) {
+			&& dev->power.pm_parent->power.power_state.event) {
 		dev_err(dev,
 			"PM: suspend %d->%d, parent %s already %d\n",
-			dev->power.power_state, state,
+			dev->power.power_state.event, state.event,
 			dev->power.pm_parent->bus_id,
-			dev->power.pm_parent->power.power_state);
+			dev->power.pm_parent->power.power_state.event);
 	}
 
 	dev->power.prev_state = dev->power.power_state;
 
-	if (dev->bus && dev->bus->suspend && !dev->power.power_state) {
+	if (dev->bus && dev->bus->suspend && !dev->power.power_state.event) {
 		dev_dbg(dev, "suspending\n");
 		error = dev->bus->suspend(dev, state);
+		suspend_report_result(dev->bus->suspend, error);
 	}
-
+	up(&dev->sem);
 	return error;
 }
 
@@ -113,8 +116,19 @@ int device_suspend(pm_message_t state)
 		put_device(dev);
 	}
 	up(&dpm_list_sem);
-	if (error)
+	if (error) {
+		/* we failed... before resuming, bring back devices from
+		 * dpm_off_irq list back to main dpm_off list, we do want
+		 * to call resume() on them, in case they partially suspended
+		 * despite returning -EAGAIN
+		 */
+		while (!list_empty(&dpm_off_irq)) {
+			struct list_head * entry = dpm_off_irq.next;
+			list_del(entry);
+			list_add(entry, &dpm_off);
+		}
 		dpm_resume();
+	}
 	up(&dpm_sem);
 	return error;
 }
@@ -155,3 +169,12 @@ int device_power_down(pm_message_t state)
 
 EXPORT_SYMBOL_GPL(device_power_down);
 
+void __suspend_report_result(const char *function, void *fn, int ret)
+{
+	if (ret) {
+		printk(KERN_ERR "%s(): ", function);
+		print_fn_descriptor_symbol("%s() returns ", (unsigned long)fn);
+		printk("%d\n", ret);
+	}
+}
+EXPORT_SYMBOL_GPL(__suspend_report_result);

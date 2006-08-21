@@ -23,17 +23,13 @@
 #define POLICYDB_VERSION_NLCLASS	18
 #define POLICYDB_VERSION_VALIDATETRANS	19
 #define POLICYDB_VERSION_MLS		19
+#define POLICYDB_VERSION_AVTAB		20
 
 /* Range of policy versions we understand*/
 #define POLICYDB_VERSION_MIN   POLICYDB_VERSION_BASE
-#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_MLS
+#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_AVTAB
 
-#ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
 extern int selinux_enabled;
-#else
-#define selinux_enabled 1
-#endif
-
 extern int selinux_mls_enabled;
 
 int security_load_policy(void * data, size_t len);
@@ -64,6 +60,8 @@ int security_sid_to_context(u32 sid, char **scontext,
 
 int security_context_to_sid(char *scontext, u32 scontext_len,
 	u32 *out_sid);
+
+int security_context_to_sid_default(char *scontext, u32 scontext_len, u32 *out_sid, u32 def_sid);
 
 int security_get_user_sids(u32 callsid, char *username,
 			   u32 **sids, u32 *nel);

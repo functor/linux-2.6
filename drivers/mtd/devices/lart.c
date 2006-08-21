@@ -2,7 +2,7 @@
 /*
  * MTD driver for the 28F160F3 Flash Memory (non-CFI) on LART.
  *
- * $Id: lart.c,v 1.7 2004/08/09 13:19:44 dwmw2 Exp $
+ * $Id: lart.c,v 1.9 2005/11/07 11:14:25 gleixner Exp $
  *
  * Author: Abraham vd Merwe <abraham@2d3d.co.za>
  *
@@ -44,6 +44,7 @@
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/errno.h>
+#include <linux/string.h>
 #include <linux/mtd/mtd.h>
 #ifdef HAVE_PARTITIONS
 #include <linux/mtd/partitions.h>
@@ -121,7 +122,7 @@ static char module_name[] = "lart";
 
 /*
  * The data line mapping on LART is as follows:
- * 
+ *
  *   	 U2  CPU |   U3  CPU
  *   	 -------------------
  *   	  0  20  |   0   12
@@ -180,7 +181,7 @@ static char module_name[] = "lart";
 		(((x) & 0x00004000) >> 13)		\
 	)
 
-/* 
+/*
  * The address line mapping on LART is as follows:
  *
  *   	 U3  CPU |   U2  CPU
@@ -203,7 +204,7 @@ static char module_name[] = "lart";
  *   	 12  15  |   12  15
  *   	 13  14  |   13  14
  *   	 14  16  |   14  16
- * 
+ *
  *   	 MAIN BLOCK BOUNDARY
  *
  *   	 15  17  |   15  18
@@ -580,8 +581,6 @@ static int flash_write (struct mtd_info *mtd,loff_t to,size_t len,size_t *retlen
 
 /***************************************************************************************************/
 
-#define NB_OF(x) (sizeof (x) / sizeof (x[0]))
-
 static struct mtd_info mtd;
 
 static struct mtd_erase_region_info erase_regions[] = {
@@ -639,7 +638,7 @@ int __init lart_flash_init (void)
    mtd.flags = MTD_CAP_NORFLASH;
    mtd.size = FLASH_BLOCKSIZE_PARAM * FLASH_NUMBLOCKS_16m_PARAM + FLASH_BLOCKSIZE_MAIN * FLASH_NUMBLOCKS_16m_MAIN;
    mtd.erasesize = FLASH_BLOCKSIZE_MAIN;
-   mtd.numeraseregions = NB_OF (erase_regions);
+   mtd.numeraseregions = ARRAY_SIZE(erase_regions);
    mtd.eraseregions = erase_regions;
    mtd.erase = flash_erase;
    mtd.read = flash_read;
@@ -669,9 +668,9 @@ int __init lart_flash_init (void)
 			   result,mtd.eraseregions[result].numblocks);
 
 #ifdef HAVE_PARTITIONS
-   printk ("\npartitions = %d\n",NB_OF (lart_partitions));
+   printk ("\npartitions = %d\n", ARRAY_SIZE(lart_partitions));
 
-   for (result = 0; result < NB_OF (lart_partitions); result++)
+   for (result = 0; result < ARRAY_SIZE(lart_partitions); result++)
 	 printk (KERN_DEBUG
 			 "\n\n"
 			 "lart_partitions[%d].name = %s\n"
@@ -686,7 +685,7 @@ int __init lart_flash_init (void)
 #ifndef HAVE_PARTITIONS
    result = add_mtd_device (&mtd);
 #else
-   result = add_mtd_partitions (&mtd,lart_partitions,NB_OF (lart_partitions));
+   result = add_mtd_partitions (&mtd,lart_partitions, ARRAY_SIZE(lart_partitions));
 #endif
 
    return (result);

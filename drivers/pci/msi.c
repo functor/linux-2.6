@@ -23,15 +23,17 @@
 #include "pci.h"
 #include "msi.h"
 
+#define MSI_TARGET_CPU		first_cpu(cpu_online_map)
+
 static DEFINE_SPINLOCK(msi_lock);
 static struct msi_desc* msi_desc[NR_IRQS] = { [0 ... NR_IRQS-1] = NULL };
 static kmem_cache_t* msi_cachep;
 
 static int pci_msi_enable = 1;
-static int last_alloc_vector = 0;
-static int nr_released_vectors = 0;
+static int last_alloc_vector;
+static int nr_released_vectors;
 static int nr_reserved_vectors = NR_HP_RESERVED_VECTORS;
-static int nr_msix_devices = 0;
+static int nr_msix_devices;
 
 #ifndef CONFIG_X86_IO_APIC
 int vector_irq[NR_VECTORS] = { [0 ... NR_VECTORS - 1] = -1};
@@ -91,6 +93,8 @@ static void set_msi_affinity(unsigned int vector, cpumask_t cpu_mask)
 {
 	struct msi_desc *entry;
 	struct msg_address address;
+	unsigned int irq = vector;
+	unsigned int dest_cpu = first_cpu(cpu_mask);
 
 	entry = (struct msi_desc *)msi_desc[vector];
 	if (!entry || !entry->dev)
@@ -99,19 +103,20 @@ static void set_msi_affinity(unsigned int vector, cpumask_t cpu_mask)
 	switch (entry->msi_attrib.type) {
 	case PCI_CAP_ID_MSI:
 	{
-		int pos;
+		int pos = pci_find_capability(entry->dev, PCI_CAP_ID_MSI);
 
-   		if (!(pos = pci_find_capability(entry->dev, PCI_CAP_ID_MSI)))
+		if (!pos)
 			return;
 
 		pci_read_config_dword(entry->dev, msi_lower_address_reg(pos),
 			&address.lo_address.value);
 		address.lo_address.value &= MSI_ADDRESS_DEST_ID_MASK;
-		address.lo_address.value |= (cpu_mask_to_apicid(cpu_mask) <<
-			MSI_TARGET_CPU_SHIFT);
-		entry->msi_attrib.current_cpu = cpu_mask_to_apicid(cpu_mask);
+		address.lo_address.value |= (cpu_physical_id(dest_cpu) <<
+									MSI_TARGET_CPU_SHIFT);
+		entry->msi_attrib.current_cpu = cpu_physical_id(dest_cpu);
 		pci_write_config_dword(entry->dev, msi_lower_address_reg(pos),
 			address.lo_address.value);
+		set_native_irq_info(irq, cpu_mask);
 		break;
 	}
 	case PCI_CAP_ID_MSIX:
@@ -121,26 +126,19 @@ static void set_msi_affinity(unsigned int vector, cpumask_t cpu_mask)
 
 		address.lo_address.value = readl(entry->mask_base + offset);
 		address.lo_address.value &= MSI_ADDRESS_DEST_ID_MASK;
-		address.lo_address.value |= (cpu_mask_to_apicid(cpu_mask) <<
-			MSI_TARGET_CPU_SHIFT);
-		entry->msi_attrib.current_cpu = cpu_mask_to_apicid(cpu_mask);
+		address.lo_address.value |= (cpu_physical_id(dest_cpu) <<
+									MSI_TARGET_CPU_SHIFT);
+		entry->msi_attrib.current_cpu = cpu_physical_id(dest_cpu);
 		writel(address.lo_address.value, entry->mask_base + offset);
+		set_native_irq_info(irq, cpu_mask);
 		break;
 	}
 	default:
 		break;
 	}
 }
-
-#ifdef CONFIG_IRQBALANCE
-static inline void move_msi(int vector)
-{
-	if (!cpus_empty(pending_irq_balance_cpumask[vector])) {
-		set_msi_affinity(vector, pending_irq_balance_cpumask[vector]);
-		cpus_clear(pending_irq_balance_cpumask[vector]);
-	}
-}
-#endif /* CONFIG_IRQBALANCE */
+#else
+#define set_msi_affinity NULL
 #endif /* CONFIG_SMP */
 
 static void mask_MSI_irq(unsigned int vector)
@@ -170,50 +168,40 @@ static unsigned int startup_msi_irq_wo_maskbit(unsigned int vector)
 	return 0;	/* never anything pending */
 }
 
-static void release_msi(unsigned int vector);
-static void shutdown_msi_irq(unsigned int vector)
-{
-	release_msi(vector);
-}
-
-#define shutdown_msi_irq_wo_maskbit	shutdown_msi_irq
-static void enable_msi_irq_wo_maskbit(unsigned int vector) {}
-static void disable_msi_irq_wo_maskbit(unsigned int vector) {}
-static void ack_msi_irq_wo_maskbit(unsigned int vector) {}
-static void end_msi_irq_wo_maskbit(unsigned int vector)
-{
-	move_msi(vector);
-	ack_APIC_irq();
-}
-
 static unsigned int startup_msi_irq_w_maskbit(unsigned int vector)
+{
+	startup_msi_irq_wo_maskbit(vector);
+	unmask_MSI_irq(vector);
+	return 0;	/* never anything pending */
+}
+
+static void shutdown_msi_irq(unsigned int vector)
 {
 	struct msi_desc *entry;
 	unsigned long flags;
 
 	spin_lock_irqsave(&msi_lock, flags);
 	entry = msi_desc[vector];
-	if (!entry || !entry->dev) {
-		spin_unlock_irqrestore(&msi_lock, flags);
-		return 0;
-	}
-	entry->msi_attrib.state = 1;	/* Mark it active */
+	if (entry && entry->dev)
+		entry->msi_attrib.state = 0;	/* Mark it not active */
 	spin_unlock_irqrestore(&msi_lock, flags);
-
-	unmask_MSI_irq(vector);
-	return 0;	/* never anything pending */
 }
 
-#define shutdown_msi_irq_w_maskbit	shutdown_msi_irq
-#define enable_msi_irq_w_maskbit	unmask_MSI_irq
-#define disable_msi_irq_w_maskbit	mask_MSI_irq
-#define ack_msi_irq_w_maskbit		mask_MSI_irq
+static void end_msi_irq_wo_maskbit(unsigned int vector)
+{
+	move_native_irq(vector);
+	ack_APIC_irq();
+}
 
 static void end_msi_irq_w_maskbit(unsigned int vector)
 {
-	move_msi(vector);
+	move_native_irq(vector);
 	unmask_MSI_irq(vector);
 	ack_APIC_irq();
+}
+
+static void do_nothing(unsigned int vector)
+{
 }
 
 /*
@@ -223,12 +211,12 @@ static void end_msi_irq_w_maskbit(unsigned int vector)
 static struct hw_interrupt_type msix_irq_type = {
 	.typename	= "PCI-MSI-X",
 	.startup	= startup_msi_irq_w_maskbit,
-	.shutdown	= shutdown_msi_irq_w_maskbit,
-	.enable		= enable_msi_irq_w_maskbit,
-	.disable	= disable_msi_irq_w_maskbit,
-	.ack		= ack_msi_irq_w_maskbit,
+	.shutdown	= shutdown_msi_irq,
+	.enable		= unmask_MSI_irq,
+	.disable	= mask_MSI_irq,
+	.ack		= mask_MSI_irq,
 	.end		= end_msi_irq_w_maskbit,
-	.set_affinity	= set_msi_irq_affinity
+	.set_affinity	= set_msi_affinity
 };
 
 /*
@@ -239,12 +227,12 @@ static struct hw_interrupt_type msix_irq_type = {
 static struct hw_interrupt_type msi_irq_w_maskbit_type = {
 	.typename	= "PCI-MSI",
 	.startup	= startup_msi_irq_w_maskbit,
-	.shutdown	= shutdown_msi_irq_w_maskbit,
-	.enable		= enable_msi_irq_w_maskbit,
-	.disable	= disable_msi_irq_w_maskbit,
-	.ack		= ack_msi_irq_w_maskbit,
+	.shutdown	= shutdown_msi_irq,
+	.enable		= unmask_MSI_irq,
+	.disable	= mask_MSI_irq,
+	.ack		= mask_MSI_irq,
 	.end		= end_msi_irq_w_maskbit,
-	.set_affinity	= set_msi_irq_affinity
+	.set_affinity	= set_msi_affinity
 };
 
 /*
@@ -255,12 +243,12 @@ static struct hw_interrupt_type msi_irq_w_maskbit_type = {
 static struct hw_interrupt_type msi_irq_wo_maskbit_type = {
 	.typename	= "PCI-MSI",
 	.startup	= startup_msi_irq_wo_maskbit,
-	.shutdown	= shutdown_msi_irq_wo_maskbit,
-	.enable		= enable_msi_irq_wo_maskbit,
-	.disable	= disable_msi_irq_wo_maskbit,
-	.ack		= ack_msi_irq_wo_maskbit,
+	.shutdown	= shutdown_msi_irq,
+	.enable		= do_nothing,
+	.disable	= do_nothing,
+	.ack		= do_nothing,
 	.end		= end_msi_irq_wo_maskbit,
-	.set_affinity	= set_msi_irq_affinity
+	.set_affinity	= set_msi_affinity
 };
 
 static void msi_data_init(struct msg_data *msi_data,
@@ -276,14 +264,15 @@ static void msi_data_init(struct msg_data *msi_data,
 static void msi_address_init(struct msg_address *msi_address)
 {
 	unsigned int	dest_id;
+	unsigned long	dest_phys_id = cpu_physical_id(MSI_TARGET_CPU);
 
 	memset(msi_address, 0, sizeof(struct msg_address));
 	msi_address->hi_address = (u32)0;
 	dest_id = (MSI_ADDRESS_HEADER << MSI_ADDRESS_HEADER_SHIFT);
-	msi_address->lo_address.u.dest_mode = MSI_DEST_MODE;
+	msi_address->lo_address.u.dest_mode = MSI_PHYSICAL_MODE;
 	msi_address->lo_address.u.redirection_hint = MSI_REDIRECTION_HINT_MODE;
 	msi_address->lo_address.u.dest_id = dest_id;
-	msi_address->lo_address.value |= (MSI_TARGET_CPU << MSI_TARGET_CPU_SHIFT);
+	msi_address->lo_address.value |= (dest_phys_id << MSI_TARGET_CPU_SHIFT);
 }
 
 static int msi_free_vector(struct pci_dev* dev, int vector, int reassign);
@@ -358,9 +347,9 @@ static int assign_msi_vector(void)
 
 static int get_new_vector(void)
 {
-	int vector;
+	int vector = assign_msi_vector();
 
-	if ((vector = assign_msi_vector()) > 0)
+	if (vector > 0)
 		set_intr_gate(vector, interrupt[vector]);
 
 	return vector;
@@ -380,7 +369,8 @@ static int msi_init(void)
 		return status;
 	}
 
-	if ((status = msi_cache_init()) < 0) {
+	status = msi_cache_init();
+	if (status < 0) {
 		pci_msi_enable = 0;
 		printk(KERN_WARNING "PCI: MSI cache init failed\n");
 		return status;
@@ -407,7 +397,7 @@ static struct msi_desc* alloc_msi_entry(void)
 {
 	struct msi_desc *entry;
 
-	entry = (struct msi_desc*) kmem_cache_alloc(msi_cachep, SLAB_KERNEL);
+	entry = kmem_cache_alloc(msi_cachep, SLAB_KERNEL);
 	if (!entry)
 		return NULL;
 
@@ -429,7 +419,9 @@ static void attach_msi_entry(struct msi_desc *entry, int vector)
 
 static void irq_handler_init(int cap_id, int pos, int mask)
 {
-	spin_lock(&irq_desc[pos].lock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&irq_desc[pos].lock, flags);
 	if (cap_id == PCI_CAP_ID_MSIX)
 		irq_desc[pos].handler = &msix_irq_type;
 	else {
@@ -438,7 +430,7 @@ static void irq_handler_init(int cap_id, int pos, int mask)
 		else
 			irq_desc[pos].handler = &msi_irq_w_maskbit_type;
 	}
-	spin_unlock(&irq_desc[pos].lock);
+	spin_unlock_irqrestore(&irq_desc[pos].lock, flags);
 }
 
 static void enable_msi_mode(struct pci_dev *dev, int pos, int type)
@@ -456,14 +448,11 @@ static void enable_msi_mode(struct pci_dev *dev, int pos, int type)
 	}
     	if (pci_find_capability(dev, PCI_CAP_ID_EXP)) {
 		/* PCI Express Endpoint device detected */
-		u16 cmd;
-		pci_read_config_word(dev, PCI_COMMAND, &cmd);
-		cmd |= PCI_COMMAND_INTX_DISABLE;
-		pci_write_config_word(dev, PCI_COMMAND, cmd);
+		pci_intx(dev, 0);  /* disable intx */
 	}
 }
 
-static void disable_msi_mode(struct pci_dev *dev, int pos, int type)
+void disable_msi_mode(struct pci_dev *dev, int pos, int type)
 {
 	u16 control;
 
@@ -478,10 +467,7 @@ static void disable_msi_mode(struct pci_dev *dev, int pos, int type)
 	}
     	if (pci_find_capability(dev, PCI_CAP_ID_EXP)) {
 		/* PCI Express Endpoint device detected */
-		u16 cmd;
-		pci_read_config_word(dev, PCI_COMMAND, &cmd);
-		cmd &= ~PCI_COMMAND_INTX_DISABLE;
-		pci_write_config_word(dev, PCI_COMMAND, cmd);
+		pci_intx(dev, 1);  /* enable intx */
 	}
 }
 
@@ -518,48 +504,171 @@ void pci_scan_msi_device(struct pci_dev *dev)
 		nr_reserved_vectors++;
 }
 
-/**
- * msi_capability_init - configure device's MSI capability structure
- * @dev: pointer to the pci_dev data structure of MSI device function
- *
- * Setup the MSI capability structure of device function with a single
- * MSI vector, regardless of device function is capable of handling
- * multiple messages. A return of zero indicates the successful setup
- * of an entry zero with the new MSI vector or non-zero for otherwise.
- **/
-static int msi_capability_init(struct pci_dev *dev)
+#ifdef CONFIG_PM
+int pci_save_msi_state(struct pci_dev *dev)
 {
-	struct msi_desc *entry;
+	int pos, i = 0;
+	u16 control;
+	struct pci_cap_saved_state *save_state;
+	u32 *cap;
+
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
+	if (pos <= 0 || dev->no_msi)
+		return 0;
+
+	pci_read_config_word(dev, msi_control_reg(pos), &control);
+	if (!(control & PCI_MSI_FLAGS_ENABLE))
+		return 0;
+
+	save_state = kzalloc(sizeof(struct pci_cap_saved_state) + sizeof(u32) * 5,
+		GFP_KERNEL);
+	if (!save_state) {
+		printk(KERN_ERR "Out of memory in pci_save_msi_state\n");
+		return -ENOMEM;
+	}
+	cap = &save_state->data[0];
+
+	pci_read_config_dword(dev, pos, &cap[i++]);
+	control = cap[0] >> 16;
+	pci_read_config_dword(dev, pos + PCI_MSI_ADDRESS_LO, &cap[i++]);
+	if (control & PCI_MSI_FLAGS_64BIT) {
+		pci_read_config_dword(dev, pos + PCI_MSI_ADDRESS_HI, &cap[i++]);
+		pci_read_config_dword(dev, pos + PCI_MSI_DATA_64, &cap[i++]);
+	} else
+		pci_read_config_dword(dev, pos + PCI_MSI_DATA_32, &cap[i++]);
+	if (control & PCI_MSI_FLAGS_MASKBIT)
+		pci_read_config_dword(dev, pos + PCI_MSI_MASK_BIT, &cap[i++]);
+	disable_msi_mode(dev, pos, PCI_CAP_ID_MSI);
+	save_state->cap_nr = PCI_CAP_ID_MSI;
+	pci_add_saved_cap(dev, save_state);
+	return 0;
+}
+
+void pci_restore_msi_state(struct pci_dev *dev)
+{
+	int i = 0, pos;
+	u16 control;
+	struct pci_cap_saved_state *save_state;
+	u32 *cap;
+
+	save_state = pci_find_saved_cap(dev, PCI_CAP_ID_MSI);
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
+	if (!save_state || pos <= 0)
+		return;
+	cap = &save_state->data[0];
+
+	control = cap[i++] >> 16;
+	pci_write_config_dword(dev, pos + PCI_MSI_ADDRESS_LO, cap[i++]);
+	if (control & PCI_MSI_FLAGS_64BIT) {
+		pci_write_config_dword(dev, pos + PCI_MSI_ADDRESS_HI, cap[i++]);
+		pci_write_config_dword(dev, pos + PCI_MSI_DATA_64, cap[i++]);
+	} else
+		pci_write_config_dword(dev, pos + PCI_MSI_DATA_32, cap[i++]);
+	if (control & PCI_MSI_FLAGS_MASKBIT)
+		pci_write_config_dword(dev, pos + PCI_MSI_MASK_BIT, cap[i++]);
+	pci_write_config_word(dev, pos + PCI_MSI_FLAGS, control);
+	enable_msi_mode(dev, pos, PCI_CAP_ID_MSI);
+	pci_remove_saved_cap(save_state);
+	kfree(save_state);
+}
+
+int pci_save_msix_state(struct pci_dev *dev)
+{
+	int pos;
+	u16 control;
+	struct pci_cap_saved_state *save_state;
+
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+	if (pos <= 0 || dev->no_msi)
+		return 0;
+
+	pci_read_config_word(dev, msi_control_reg(pos), &control);
+	if (!(control & PCI_MSIX_FLAGS_ENABLE))
+		return 0;
+	save_state = kzalloc(sizeof(struct pci_cap_saved_state) + sizeof(u16),
+		GFP_KERNEL);
+	if (!save_state) {
+		printk(KERN_ERR "Out of memory in pci_save_msix_state\n");
+		return -ENOMEM;
+	}
+	*((u16 *)&save_state->data[0]) = control;
+
+	disable_msi_mode(dev, pos, PCI_CAP_ID_MSIX);
+	save_state->cap_nr = PCI_CAP_ID_MSIX;
+	pci_add_saved_cap(dev, save_state);
+	return 0;
+}
+
+void pci_restore_msix_state(struct pci_dev *dev)
+{
+	u16 save;
+	int pos;
+	int vector, head, tail = 0;
+	void __iomem *base;
+	int j;
 	struct msg_address address;
 	struct msg_data data;
-	int pos, vector;
+	struct msi_desc *entry;
+	int temp;
+	struct pci_cap_saved_state *save_state;
+
+	save_state = pci_find_saved_cap(dev, PCI_CAP_ID_MSIX);
+	if (!save_state)
+		return;
+	save = *((u16 *)&save_state->data[0]);
+	pci_remove_saved_cap(save_state);
+	kfree(save_state);
+
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+	if (pos <= 0)
+		return;
+
+	/* route the table */
+	temp = dev->irq;
+	if (msi_lookup_vector(dev, PCI_CAP_ID_MSIX))
+		return;
+	vector = head = dev->irq;
+	while (head != tail) {
+		entry = msi_desc[vector];
+		base = entry->mask_base;
+		j = entry->msi_attrib.entry_nr;
+
+		msi_address_init(&address);
+		msi_data_init(&data, vector);
+
+		address.lo_address.value &= MSI_ADDRESS_DEST_ID_MASK;
+		address.lo_address.value |= entry->msi_attrib.current_cpu <<
+					MSI_TARGET_CPU_SHIFT;
+
+		writel(address.lo_address.value,
+			base + j * PCI_MSIX_ENTRY_SIZE +
+			PCI_MSIX_ENTRY_LOWER_ADDR_OFFSET);
+		writel(address.hi_address,
+			base + j * PCI_MSIX_ENTRY_SIZE +
+			PCI_MSIX_ENTRY_UPPER_ADDR_OFFSET);
+		writel(*(u32*)&data,
+			base + j * PCI_MSIX_ENTRY_SIZE +
+			PCI_MSIX_ENTRY_DATA_OFFSET);
+
+		tail = msi_desc[vector]->link.tail;
+		vector = tail;
+	}
+	dev->irq = temp;
+
+	pci_write_config_word(dev, msi_control_reg(pos), save);
+	enable_msi_mode(dev, pos, PCI_CAP_ID_MSIX);
+}
+#endif
+
+static void msi_register_init(struct pci_dev *dev, struct msi_desc *entry)
+{
+	struct msg_address address;
+	struct msg_data data;
+	int pos, vector = dev->irq;
 	u16 control;
 
    	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
 	pci_read_config_word(dev, msi_control_reg(pos), &control);
-	/* MSI Entry Initialization */
-	if (!(entry = alloc_msi_entry()))
-		return -ENOMEM;
-
-	if ((vector = get_msi_vector(dev)) < 0) {
-		kmem_cache_free(msi_cachep, entry);
-		return -EBUSY;
-	}
-	entry->link.head = vector;
-	entry->link.tail = vector;
-	entry->msi_attrib.type = PCI_CAP_ID_MSI;
-	entry->msi_attrib.state = 0;			/* Mark it not active */
-	entry->msi_attrib.entry_nr = 0;
-	entry->msi_attrib.maskbit = is_mask_bit_support(control);
-	entry->msi_attrib.default_vector = dev->irq;	/* Save IOAPIC IRQ */
-	dev->irq = vector;
-	entry->dev = dev;
-	if (is_mask_bit_support(control)) {
-		entry->mask_base = (void __iomem *)(long)msi_mask_bits_reg(pos,
-				is_64bit_address(control));
-	}
-	/* Replace with MSI handler */
-	irq_handler_init(PCI_CAP_ID_MSI, vector, entry->msi_attrib.maskbit);
 	/* Configure MSI capability structure */
 	msi_address_init(&address);
 	msi_data_init(&data, vector);
@@ -588,6 +697,53 @@ static int msi_capability_init(struct pci_dev *dev)
 			msi_mask_bits_reg(pos, is_64bit_address(control)),
 			maskbits);
 	}
+}
+
+/**
+ * msi_capability_init - configure device's MSI capability structure
+ * @dev: pointer to the pci_dev data structure of MSI device function
+ *
+ * Setup the MSI capability structure of device function with a single
+ * MSI vector, regardless of device function is capable of handling
+ * multiple messages. A return of zero indicates the successful setup
+ * of an entry zero with the new MSI vector or non-zero for otherwise.
+ **/
+static int msi_capability_init(struct pci_dev *dev)
+{
+	struct msi_desc *entry;
+	int pos, vector;
+	u16 control;
+
+   	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
+	pci_read_config_word(dev, msi_control_reg(pos), &control);
+	/* MSI Entry Initialization */
+	entry = alloc_msi_entry();
+	if (!entry)
+		return -ENOMEM;
+
+	vector = get_msi_vector(dev);
+	if (vector < 0) {
+		kmem_cache_free(msi_cachep, entry);
+		return -EBUSY;
+	}
+	entry->link.head = vector;
+	entry->link.tail = vector;
+	entry->msi_attrib.type = PCI_CAP_ID_MSI;
+	entry->msi_attrib.state = 0;			/* Mark it not active */
+	entry->msi_attrib.entry_nr = 0;
+	entry->msi_attrib.maskbit = is_mask_bit_support(control);
+	entry->msi_attrib.default_vector = dev->irq;	/* Save IOAPIC IRQ */
+	dev->irq = vector;
+	entry->dev = dev;
+	if (is_mask_bit_support(control)) {
+		entry->mask_base = (void __iomem *)(long)msi_mask_bits_reg(pos,
+				is_64bit_address(control));
+	}
+	/* Replace with MSI handler */
+	irq_handler_init(PCI_CAP_ID_MSI, vector, entry->msi_attrib.maskbit);
+	/* Configure MSI capability structure */
+	msi_register_init(dev, entry);
+
 	attach_msi_entry(entry, vector);
 	/* Set MSI enabled bits	 */
 	enable_msi_mode(dev, pos, PCI_CAP_ID_MSI);
@@ -598,6 +754,8 @@ static int msi_capability_init(struct pci_dev *dev)
 /**
  * msix_capability_init - configure device's MSI-X capability
  * @dev: pointer to the pci_dev data structure of MSI-X device function
+ * @entries: pointer to an array of struct msix_entry entries
+ * @nvec: number of @entries
  *
  * Setup the MSI-X capability structure of device function with a
  * single MSI-X vector. A return of zero indicates the successful setup of
@@ -610,7 +768,8 @@ static int msix_capability_init(struct pci_dev *dev,
 	struct msg_address address;
 	struct msg_data data;
 	int vector, pos, i, j, nr_entries, temp = 0;
-	u32 phys_addr, table_offset;
+	unsigned long phys_addr;
+	u32 table_offset;
  	u16 control;
 	u8 bir;
 	void __iomem *base;
@@ -619,11 +778,11 @@ static int msix_capability_init(struct pci_dev *dev,
 	/* Request & Map MSI-X table region */
  	pci_read_config_word(dev, msi_control_reg(pos), &control);
 	nr_entries = multi_msix_capable(control);
- 	pci_read_config_dword(dev, msix_table_offset_reg(pos),
- 		&table_offset);
+
+ 	pci_read_config_dword(dev, msix_table_offset_reg(pos), &table_offset);
 	bir = (u8)(table_offset & PCI_MSIX_FLAGS_BIRMASK);
-	phys_addr = pci_resource_start (dev, bir);
-	phys_addr += (u32)(table_offset & ~PCI_MSIX_FLAGS_BIRMASK);
+	table_offset &= ~PCI_MSIX_FLAGS_BIRMASK;
+	phys_addr = pci_resource_start (dev, bir) + table_offset;
 	base = ioremap_nocache(phys_addr, nr_entries * PCI_MSIX_ENTRY_SIZE);
 	if (base == NULL)
 		return -ENOMEM;
@@ -633,8 +792,11 @@ static int msix_capability_init(struct pci_dev *dev,
 		entry = alloc_msi_entry();
 		if (!entry)
 			break;
-		if ((vector = get_msi_vector(dev)) < 0)
+		vector = get_msi_vector(dev);
+		if (vector < 0) {
+			kmem_cache_free(msi_cachep, entry);
 			break;
+		}
 
  		j = entries[i].entry;
  		entries[i].vector = vector;
@@ -709,12 +871,20 @@ int pci_enable_msi(struct pci_dev* dev)
 	if (!pci_msi_enable || !dev)
  		return status;
 
-	temp = dev->irq;
-
-	if ((status = msi_init()) < 0)
+	if (dev->no_msi)
 		return status;
 
-   	if (!(pos = pci_find_capability(dev, PCI_CAP_ID_MSI)))
+	if (dev->bus->bus_flags & PCI_BUS_FLAGS_NO_MSI)
+		return -EINVAL;
+
+	temp = dev->irq;
+
+	status = msi_init();
+	if (status < 0)
+		return status;
+
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
+	if (!pos)
 		return -EINVAL;
 
 	pci_read_config_word(dev, msi_control_reg(pos), &control);
@@ -731,6 +901,7 @@ int pci_enable_msi(struct pci_dev* dev)
 			vector_irq[dev->irq] = -1;
 			nr_released_vectors--;
 			spin_unlock_irqrestore(&msi_lock, flags);
+			msi_register_init(dev, msi_desc[dev->irq]);
 			enable_msi_mode(dev, pos, PCI_CAP_ID_MSI);
 			return 0;
 		}
@@ -738,8 +909,8 @@ int pci_enable_msi(struct pci_dev* dev)
 		dev->irq = temp;
 	}
 	/* Check whether driver already requested for MSI-X vectors */
-   	if ((pos = pci_find_capability(dev, PCI_CAP_ID_MSIX)) > 0 &&
-		!msi_lookup_vector(dev, PCI_CAP_ID_MSIX)) {
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+	if (pos > 0 && !msi_lookup_vector(dev, PCI_CAP_ID_MSIX)) {
 			printk(KERN_INFO "PCI: %s: Can't enable MSI.  "
 			       "Device already has MSI-X vectors assigned\n",
 			       pci_name(dev));
@@ -765,7 +936,13 @@ void pci_disable_msi(struct pci_dev* dev)
 	u16 control;
 	unsigned long flags;
 
-   	if (!dev || !(pos = pci_find_capability(dev, PCI_CAP_ID_MSI)))
+	if (!pci_msi_enable)
+		return;
+	if (!dev)
+		return;
+
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
+	if (!pos)
 		return;
 
 	pci_read_config_word(dev, msi_control_reg(pos), &control);
@@ -794,18 +971,6 @@ void pci_disable_msi(struct pci_dev* dev)
 		disable_msi_mode(dev, pci_find_capability(dev, PCI_CAP_ID_MSI),
 					PCI_CAP_ID_MSI);
 	}
-}
-
-static void release_msi(unsigned int vector)
-{
-	struct msi_desc *entry;
-	unsigned long flags;
-
-	spin_lock_irqsave(&msi_lock, flags);
-	entry = msi_desc[vector];
-	if (entry && entry->dev)
-		entry->msi_attrib.state = 0;	/* Mark it not active */
-	spin_unlock_irqrestore(&msi_lock, flags);
 }
 
 static int msi_free_vector(struct pci_dev* dev, int vector, int reassign)
@@ -848,8 +1013,10 @@ static int msi_free_vector(struct pci_dev* dev, int vector, int reassign)
 			 * Detect last MSI-X vector to be released.
 			 * Release the MSI-X memory-mapped table.
 			 */
+#if 0
 			int pos, nr_entries;
-			u32 phys_addr, table_offset;
+			unsigned long phys_addr;
+			u32 table_offset;
 			u16 control;
 			u8 bir;
 
@@ -860,9 +1027,12 @@ static int msi_free_vector(struct pci_dev* dev, int vector, int reassign)
 			pci_read_config_dword(dev, msix_table_offset_reg(pos),
 				&table_offset);
 			bir = (u8)(table_offset & PCI_MSIX_FLAGS_BIRMASK);
-			phys_addr = pci_resource_start (dev, bir);
-			phys_addr += (u32)(table_offset &
-				~PCI_MSIX_FLAGS_BIRMASK);
+			table_offset &= ~PCI_MSIX_FLAGS_BIRMASK;
+			phys_addr = pci_resource_start(dev, bir) + table_offset;
+/*
+ * FIXME!  and what did you want to do with phys_addr?
+ */
+#endif
 			iounmap(base);
 		}
 	}
@@ -924,7 +1094,7 @@ static int reroute_msix_table(int head, struct msix_entry *entries, int *nvec)
 /**
  * pci_enable_msix - configure device's MSI-X capability structure
  * @dev: pointer to the pci_dev data structure of MSI-X device function
- * @data: pointer to an array of MSI-X entries
+ * @entries: pointer to an array of MSI-X entries
  * @nvec: number of MSI-X vectors requested for allocation by device driver
  *
  * Setup the MSI-X capability structure of device function with the number
@@ -946,10 +1116,12 @@ int pci_enable_msix(struct pci_dev* dev, struct msix_entry *entries, int nvec)
 	if (!pci_msi_enable || !dev || !entries)
  		return -EINVAL;
 
-	if ((status = msi_init()) < 0)
+	status = msi_init();
+	if (status < 0)
 		return status;
 
-   	if (!(pos = pci_find_capability(dev, PCI_CAP_ID_MSIX)))
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+	if (!pos)
  		return -EINVAL;
 
 	pci_read_config_word(dev, msi_control_reg(pos), &control);
@@ -1028,7 +1200,13 @@ void pci_disable_msix(struct pci_dev* dev)
 	int pos, temp;
 	u16 control;
 
-   	if (!dev || !(pos = pci_find_capability(dev, PCI_CAP_ID_MSIX)))
+	if (!pci_msi_enable)
+		return;
+	if (!dev)
+		return;
+
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+	if (!pos)
 		return;
 
 	pci_read_config_word(dev, msi_control_reg(pos), &control);
@@ -1088,8 +1266,8 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
  		return;
 
 	temp = dev->irq;		/* Save IOAPIC IRQ */
-   	if ((pos = pci_find_capability(dev, PCI_CAP_ID_MSI)) > 0 &&
-		!msi_lookup_vector(dev, PCI_CAP_ID_MSI)) {
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSI);
+	if (pos > 0 && !msi_lookup_vector(dev, PCI_CAP_ID_MSI)) {
 		spin_lock_irqsave(&msi_lock, flags);
 		state = msi_desc[dev->irq]->msi_attrib.state;
 		spin_unlock_irqrestore(&msi_lock, flags);
@@ -1102,8 +1280,8 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
 			msi_free_vector(dev, dev->irq, 0);
 		dev->irq = temp;		/* Restore IOAPIC IRQ */
 	}
-   	if ((pos = pci_find_capability(dev, PCI_CAP_ID_MSIX)) > 0 &&
-		!msi_lookup_vector(dev, PCI_CAP_ID_MSIX)) {
+	pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+	if (pos > 0 && !msi_lookup_vector(dev, PCI_CAP_ID_MSIX)) {
 		int vector, head, tail = 0, warning = 0;
 		void __iomem *base = NULL;
 
@@ -1123,7 +1301,9 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
 		msi_free_vector(dev, vector, 0);
 		if (warning) {
 			/* Force to release the MSI-X memory-mapped table */
-			u32 phys_addr, table_offset;
+#if 0
+			unsigned long phys_addr;
+			u32 table_offset;
 			u16 control;
 			u8 bir;
 
@@ -1132,9 +1312,12 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
 			pci_read_config_dword(dev, msix_table_offset_reg(pos),
 				&table_offset);
 			bir = (u8)(table_offset & PCI_MSIX_FLAGS_BIRMASK);
-			phys_addr = pci_resource_start (dev, bir);
-			phys_addr += (u32)(table_offset &
-				~PCI_MSIX_FLAGS_BIRMASK);
+			table_offset &= ~PCI_MSIX_FLAGS_BIRMASK;
+			phys_addr = pci_resource_start(dev, bir) + table_offset;
+/*
+ * FIXME! and what did you want to do with phys_addr?
+ */
+#endif
 			iounmap(base);
 			printk(KERN_WARNING "PCI: %s: msi_remove_pci_irq_vectors() "
 			       "called without free_irq() on all MSI-X vectors\n",
@@ -1143,6 +1326,11 @@ void msi_remove_pci_irq_vectors(struct pci_dev* dev)
 		}
 		dev->irq = temp;		/* Restore IOAPIC IRQ */
 	}
+}
+
+void pci_no_msi(void)
+{
+	pci_msi_enable = 0;
 }
 
 EXPORT_SYMBOL(pci_enable_msi);

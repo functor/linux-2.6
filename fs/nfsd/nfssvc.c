@@ -32,6 +32,7 @@
 #include <linux/nfsd/cache.h>
 #include <linux/nfsd/syscall.h>
 #include <linux/lockd/bind.h>
+#include <linux/nfsacl.h>
 
 #define NFSDDBG_FACILITY	NFSDDBG_SVC
 
@@ -52,13 +53,42 @@
 extern struct svc_program	nfsd_program;
 static void			nfsd(struct svc_rqst *rqstp);
 struct timeval			nfssvc_boot;
-static struct svc_serv 		*nfsd_serv; static atomic_t			nfsd_busy; static unsigned long		nfsd_last_call; static DEFINE_SPINLOCK(nfsd_call_lock);
+       struct svc_serv 		*nfsd_serv;
+static atomic_t			nfsd_busy;
+static unsigned long		nfsd_last_call;
+static DEFINE_SPINLOCK(nfsd_call_lock);
 
 struct nfsd_list {
 	struct list_head 	list;
 	struct task_struct	*task;
 };
 static struct list_head nfsd_list = LIST_HEAD_INIT(nfsd_list);
+
+#if defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL)
+static struct svc_stat	nfsd_acl_svcstats;
+static struct svc_version *	nfsd_acl_version[] = {
+	[2] = &nfsd_acl_version2,
+	[3] = &nfsd_acl_version3,
+};
+
+#define NFSD_ACL_MINVERS            2
+#define NFSD_ACL_NRVERS		ARRAY_SIZE(nfsd_acl_version)
+static struct svc_version *nfsd_acl_versions[NFSD_ACL_NRVERS];
+
+static struct svc_program	nfsd_acl_program = {
+	.pg_prog		= NFS_ACL_PROGRAM,
+	.pg_nvers		= NFSD_ACL_NRVERS,
+	.pg_vers		= nfsd_acl_versions,
+	.pg_name		= "nfsd",
+	.pg_class		= "nfsd",
+	.pg_stats		= &nfsd_acl_svcstats,
+	.pg_authenticate	= &svc_set_client,
+};
+
+static struct svc_stat	nfsd_acl_svcstats = {
+	.program	= &nfsd_acl_program,
+};
+#endif /* defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL) */
 
 extern struct svc_version nfsd_version2, nfsd_version3, nfsd_version4;
 
@@ -73,11 +103,16 @@ static struct svc_version *	nfsd_version[] = {
 };
 
 #define NFSD_MINVERS    	2
-#define NFSD_NRVERS		(sizeof(nfsd_version)/sizeof(nfsd_version[0]))
+#define NFSD_NRVERS		ARRAY_SIZE(nfsd_version)
+static struct svc_version *nfsd_versions[NFSD_NRVERS];
+
 struct svc_program		nfsd_program = {
+#if defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL)
+	.pg_next		= &nfsd_acl_program,
+#endif
 	.pg_prog		= NFS_PROGRAM,		/* program number */
 	.pg_nvers		= NFSD_NRVERS,		/* nr of entries in nfsd_version */
-	.pg_vers		= nfsd_version,		/* version table */
+	.pg_vers		= nfsd_versions,	/* version table */
 	.pg_name		= "nfsd",		/* program name */
 	.pg_class		= "nfsd",		/* authentication class */
 	.pg_stats		= &nfsd_svcstats,	/* version table */
@@ -114,12 +149,22 @@ nfsd_svc(unsigned short port, int nrservs)
 	if (nrservs > NFSD_MAXSERVS)
 		nrservs = NFSD_MAXSERVS;
 	
-	/*
-	 * If set, use the nfsd_ctlbits to define which
-	 * versions that will be advertised
-	 */
-	found_one = 0;
-	if (nfsd_versbits) {
+	/* Readahead param cache - will no-op if it already exists */
+	error =	nfsd_racache_init(2*nrservs);
+	if (error<0)
+		goto out;
+	error = nfs4_state_start();
+	if (error<0)
+		goto out;
+	if (!nfsd_serv) {
+		/*
+		 * Use the nfsd_ctlbits to define which
+		 * versions that will be advertised.
+		 * If nfsd_ctlbits doesn't list any version,
+		 * export them all.
+		 */
+		found_one = 0;
+
 		for (i = NFSD_MINVERS; i < NFSD_NRVERS; i++) {
 			if (NFSCTL_VERISSET(nfsd_versbits, i)) {
 				nfsd_program.pg_vers[i] = nfsd_version[i];
@@ -127,37 +172,49 @@ nfsd_svc(unsigned short port, int nrservs)
 			} else
 				nfsd_program.pg_vers[i] = NULL;
 		}
-	}
-	if (!found_one) {
-		for (i = NFSD_MINVERS; i < NFSD_NRVERS; i++)
-			nfsd_program.pg_vers[i] = nfsd_version[i];
-	}
 
-	/* Readahead param cache - will no-op if it already exists */
-	error =	nfsd_racache_init(2*nrservs);
-	if (error<0)
-		goto out;
-	error = nfs4_state_init();
-	if (error<0)
-		goto out;
+		if (!found_one) {
+			for (i = NFSD_MINVERS; i < NFSD_NRVERS; i++)
+				nfsd_program.pg_vers[i] = nfsd_version[i];
+		}
 
-	if (!nfsd_serv) {
+
+#if defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL)
+		found_one = 0;
+
+		for (i = NFSD_ACL_MINVERS; i < NFSD_ACL_NRVERS; i++) {
+			if (NFSCTL_VERISSET(nfsd_versbits, i)) {
+				nfsd_acl_program.pg_vers[i] =
+					nfsd_acl_version[i];
+				found_one = 1;
+			} else
+				nfsd_acl_program.pg_vers[i] = NULL;
+		}
+
+		if (!found_one) {
+			for (i = NFSD_ACL_MINVERS; i < NFSD_ACL_NRVERS; i++)
+				nfsd_acl_program.pg_vers[i] =
+					nfsd_acl_version[i];
+		}
+#endif
+
 		atomic_set(&nfsd_busy, 0);
 		error = -ENOMEM;
 		nfsd_serv = svc_create(&nfsd_program, NFSD_BUFSIZE);
 		if (nfsd_serv == NULL)
 			goto out;
-		if (!nfsd_portbits || NFSCTL_UDPISSET(nfsd_portbits)) {
-			error = svc_makesock(nfsd_serv, IPPROTO_UDP, nfsd_port);
-			if (error < 0)
-				goto failure;
-		}
+		if (NFSCTL_UDPISSET(nfsd_portbits))
+			port = nfsd_port;
+		error = svc_makesock(nfsd_serv, IPPROTO_UDP, port);
+		if (error < 0)
+			goto failure;
+
 #ifdef CONFIG_NFSD_TCP
-		if (!nfsd_portbits || NFSCTL_TCPISSET(nfsd_portbits)) {
-		    error = svc_makesock(nfsd_serv, IPPROTO_TCP, nfsd_port);
-		    if (error < 0)
-			    goto failure;
-		}
+		if (NFSCTL_TCPISSET(nfsd_portbits))
+			port = nfsd_port;
+		error = svc_makesock(nfsd_serv, IPPROTO_TCP, port);
+		if (error < 0)
+			goto failure;
 #endif
 		do_gettimeofday(&nfssvc_boot);		/* record boot time */
 	} else
@@ -333,6 +390,7 @@ out:
 	svc_exit_thread(rqstp);
 
 	/* Release module */
+	unlock_kernel();
 	module_put_and_exit(0);
 }
 
@@ -408,4 +466,3 @@ nfsd_dispatch(struct svc_rqst *rqstp, u32 *statp)
 	nfsd_cache_update(rqstp, proc->pc_cachetype, statp + 1);
 	return 1;
 }
-

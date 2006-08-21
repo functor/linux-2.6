@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/stx8560_gp3.h
- *
  * STx GP3 board definitions
  *
  * Dan Malek (dan@embeddededge.com)
@@ -21,7 +19,6 @@
 
 #include <linux/config.h>
 #include <linux/init.h>
-#include <linux/seq_file.h>
 #include <asm/ppcboot.h>
 
 #define BOARD_CCSRBAR		((uint)0xe0000000)
@@ -43,7 +40,6 @@ extern void mpc85xx_setup_hose(void) __init;
 extern void mpc85xx_restart(char *cmd);
 extern void mpc85xx_power_off(void);
 extern void mpc85xx_halt(void);
-extern int mpc85xx_show_cpuinfo(struct seq_file *m);
 extern void mpc85xx_init_IRQ(void) __init;
 extern unsigned long mpc85xx_find_end_of_memory(void) __init;
 extern void mpc85xx_calibrate_decr(void) __init;

@@ -1,5 +1,4 @@
 /*
- * lib/extable.c
  * Derived from arch/ppc/mm/extable.c and arch/i386/mm/extable.c.
  *
  * Copyright (C) 2004 Paul Mackerras, IBM Corp.
@@ -15,9 +14,6 @@
 #include <linux/init.h>
 #include <linux/sort.h>
 #include <asm/uaccess.h>
-
-extern struct exception_table_entry __start___ex_table[];
-extern struct exception_table_entry __stop___ex_table[];
 
 #ifndef ARCH_HAS_SORT_EXTABLE
 /*

@@ -32,11 +32,7 @@
 
 extern unsigned long wall_jiffies;
 
-u64 jiffies_64 __cacheline_aligned_in_smp = INITIAL_JIFFIES;
-
-EXPORT_SYMBOL(jiffies_64);
-
-#define TIME_KEEPER_ID	0	/* smp_processor_id() of time-keeper */
+volatile int time_keeper_id = 0; /* smp_processor_id() of time-keeper */
 
 #ifdef CONFIG_IA64_DEBUG_IRQ
 
@@ -75,7 +71,7 @@ timer_interrupt (int irq, void *dev_id, struct pt_regs *regs)
 
 		new_itm += local_cpu_data->itm_delta;
 
-		if (smp_processor_id() == TIME_KEEPER_ID) {
+		if (smp_processor_id() == time_keeper_id) {
 			/*
 			 * Here we are in the timer irq handler. We have irqs locally
 			 * disabled, but we don't know if the timer_bh is running on
@@ -192,7 +188,7 @@ ia64_init_itm (void)
 	itc_freq = (platform_base_freq*itc_ratio.num)/itc_ratio.den;
 
 	local_cpu_data->itm_delta = (itc_freq + HZ/2) / HZ;
-	printk(KERN_DEBUG "CPU %d: base freq=%lu.%03luMHz, ITC ratio=%lu/%lu, "
+	printk(KERN_DEBUG "CPU %d: base freq=%lu.%03luMHz, ITC ratio=%u/%u, "
 	       "ITC freq=%lu.%03luMHz", smp_processor_id(),
 	       platform_base_freq / 1000000, (platform_base_freq / 1000) % 1000,
 	       itc_ratio.num, itc_ratio.den, itc_freq / 1000000, (itc_freq / 1000) % 1000);
@@ -240,6 +236,11 @@ static struct irqaction timer_irqaction = {
 	.name =		"timer"
 };
 
+void __devinit ia64_disable_timer(void)
+{
+	ia64_set_itv(1 << 16);
+}
+
 void __init
 time_init (void)
 {
@@ -252,4 +253,55 @@ time_init (void)
 	 * tv_nsec field must be normalized (i.e., 0 <= nsec < NSEC_PER_SEC).
 	 */
 	set_normalized_timespec(&wall_to_monotonic, -xtime.tv_sec, -xtime.tv_nsec);
+}
+
+/*
+ * Generic udelay assumes that if preemption is allowed and the thread
+ * migrates to another CPU, that the ITC values are synchronized across
+ * all CPUs.
+ */
+static void
+ia64_itc_udelay (unsigned long usecs)
+{
+	unsigned long start = ia64_get_itc();
+	unsigned long end = start + usecs*local_cpu_data->cyc_per_usec;
+
+	while (time_before(ia64_get_itc(), end))
+		cpu_relax();
+}
+
+void (*ia64_udelay)(unsigned long usecs) = &ia64_itc_udelay;
+
+void
+udelay (unsigned long usecs)
+{
+	(*ia64_udelay)(usecs);
+}
+EXPORT_SYMBOL(udelay);
+
+static unsigned long long ia64_itc_printk_clock(void)
+{
+	if (ia64_get_kr(IA64_KR_PER_CPU_DATA))
+		return sched_clock();
+	return 0;
+}
+
+static unsigned long long ia64_default_printk_clock(void)
+{
+	return (unsigned long long)(jiffies_64 - INITIAL_JIFFIES) *
+		(1000000000/HZ);
+}
+
+unsigned long long (*ia64_printk_clock)(void) = &ia64_default_printk_clock;
+
+unsigned long long printk_clock(void)
+{
+	return ia64_printk_clock();
+}
+
+void __init
+ia64_setup_printk_clock(void)
+{
+	if (!(sal_platform_features & IA64_SAL_PLATFORM_FEATURE_ITC_DRIFT))
+		ia64_printk_clock = ia64_itc_printk_clock;
 }

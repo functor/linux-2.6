@@ -1,11 +1,9 @@
 /*
- * $Id: cu3088.c,v 1.35 2005/03/30 19:28:52 richtera Exp $
- *
  * CTC / LCS ccw_device driver
  *
  * Copyright (C) 2002 IBM Deutschland Entwicklung GmbH, IBM Corporation
  * Author(s): Arnd Bergmann <arndb@de.ibm.com>
- *            Cornelia Huck <cohuck@de.ibm.com>
+ *            Cornelia Huck <cornelia.huck@de.ibm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,11 +20,12 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
-
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/err.h>
 
+#include <asm/s390_rdev.h>
 #include <asm/ccwdev.h>
 #include <asm/ccwgroup.h>
 
@@ -78,7 +77,7 @@ group_write(struct device_driver *drv, const char *buf, size_t count)
 		int len;
 
 		if (!(end = strchr(start, delim[i])))
-			return count;
+			return -EINVAL;
 		len = min_t(ptrdiff_t, BUS_ID_SIZE, end - start + 1);
 		strlcpy (bus_ids[i], start, len);
 		argv[i] = bus_ids[i];
@@ -95,7 +94,7 @@ static DRIVER_ATTR(group, 0200, NULL, group_write);
 
 /* Register-unregister for ctc&lcs */
 int
-register_cu3088_discipline(struct ccwgroup_driver *dcp) 
+register_cu3088_discipline(struct ccwgroup_driver *dcp)
 {
 	int rc;
 
@@ -110,7 +109,7 @@ register_cu3088_discipline(struct ccwgroup_driver *dcp)
 	rc = driver_create_file(&dcp->driver, &driver_attr_group);
 	if (rc)
 		ccwgroup_driver_unregister(dcp);
-		
+
 	return rc;
 
 }
@@ -138,7 +137,7 @@ static int __init
 cu3088_init (void)
 {
 	int rc;
-	
+
 	cu3088_root_dev = s390_root_dev_register("cu3088");
 	if (IS_ERR(cu3088_root_dev))
 		return PTR_ERR(cu3088_root_dev);

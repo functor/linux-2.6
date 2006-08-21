@@ -33,13 +33,13 @@
 
 extern const char *CardType[];
 
-const char *Elsa_revision = "$Revision: 2.32.2.4 $";
-const char *Elsa_Types[] =
+static const char *Elsa_revision = "$Revision: 2.32.2.4 $";
+static const char *Elsa_Types[] =
 {"None", "PC", "PCC-8", "PCC-16", "PCF", "PCF-Pro",
  "PCMCIA", "QS 1000", "QS 3000", "Microlink PCI", "QS 3000 PCI", 
  "PCMCIA-IPAC" };
 
-const char *ITACVer[] =
+static const char *ITACVer[] =
 {"?0?", "?1?", "?2?", "?3?", "?4?", "V2.2",
  "B1", "A1"};
 
@@ -108,7 +108,6 @@ const char *ITACVer[] =
 #define ELSA_ASSIGN      4
 
 #define RS_ISR_PASS_LIMIT 256
-#define _INLINE_ inline
 #define FLG_MODEM_ACTIVE 1
 /* IPAC AUX */
 #define ELSA_IPAC_LINE_LED	0x40	/* Bit 6 Gelbe LED */
@@ -425,7 +424,7 @@ Start_IPAC:
 	return IRQ_HANDLED;
 }
 
-void
+static void
 release_io_elsa(struct IsdnCardState *cs)
 {
 	int bytecnt = 8;

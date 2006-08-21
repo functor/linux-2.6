@@ -13,12 +13,13 @@ This optimization is more critical now as bigger and bigger physical memories
 Users can use the huge page support in Linux kernel by either using the mmap
 system call or standard SYSv shared memory system calls (shmget, shmat).
 
-First the Linux kernel needs to be built with CONFIG_HUGETLB_PAGE (present
-under Processor types and feature)  and CONFIG_HUGETLBFS (present under file
-system option on config menu) config options.
+First the Linux kernel needs to be built with the CONFIG_HUGETLBFS
+(present under "File systems") and CONFIG_HUGETLB_PAGE (selected
+automatically when CONFIG_HUGETLBFS is selected) configuration
+options.
 
 The kernel built with hugepage support should show the number of configured
-hugepages in the system by running the "cat /proc/meminfo" command.  
+hugepages in the system by running the "cat /proc/meminfo" command.
 
 /proc/meminfo also provides information about the total number of hugetlb
 pages configured in the kernel.  It also displays information about the
@@ -26,31 +27,40 @@ number of free hugetlb pages at any time.  It also displays information about
 the configured hugepage size - this is needed for generating the proper
 alignment and size of the arguments to the above system calls.
 
-The output of "cat /proc/meminfo" will have output like:
+The output of "cat /proc/meminfo" will have lines like:
 
 .....
 HugePages_Total: xxx
 HugePages_Free:  yyy
-Hugepagesize:    zzz KB
+HugePages_Rsvd:  www
+Hugepagesize:    zzz kB
+
+where:
+HugePages_Total is the size of the pool of hugepages.
+HugePages_Free is the number of hugepages in the pool that are not yet
+allocated.
+HugePages_Rsvd is short for "reserved," and is the number of hugepages
+for which a commitment to allocate from the pool has been made, but no
+allocation has yet been made. It's vaguely analogous to overcommit.
 
 /proc/filesystems should also show a filesystem of type "hugetlbfs" configured
 in the kernel.
 
 /proc/sys/vm/nr_hugepages indicates the current number of configured hugetlb
 pages in the kernel.  Super user can dynamically request more (or free some
-pre-configured) hugepages. 
-The allocation( or deallocation) of hugetlb pages is posible only if there are
+pre-configured) hugepages.
+The allocation (or deallocation) of hugetlb pages is possible only if there are
 enough physically contiguous free pages in system (freeing of hugepages is
-possible only if there are enough hugetlb pages free that can be transfered 
+possible only if there are enough hugetlb pages free that can be transferred
 back to regular memory pool).
 
-Pages that are used as hugetlb pages are reserved inside the kernel and can
-not be used for other purposes. 
+Pages that are used as hugetlb pages are reserved inside the kernel and cannot
+be used for other purposes.
 
 Once the kernel with Hugetlb page support is built and running, a user can
 use either the mmap system call or shared memory system calls to start using
 the huge pages.  It is required that the system administrator preallocate
-enough memory for huge page purposes.  
+enough memory for huge page purposes.
 
 Use the following command to dynamically allocate/deallocate hugepages:
 
@@ -59,7 +69,7 @@ Use the following command to dynamically allocate/deallocate hugepages:
 This command will try to configure 20 hugepages in the system.  The success
 or failure of allocation depends on the amount of physically contiguous
 memory that is preset in system at this time.  System administrators may want
-to put this command in one of the local rc init file.  This will enable the
+to put this command in one of the local rc init files.  This will enable the
 kernel to request huge pages early in the boot process (when the possibility
 of getting physical contiguous pages is still very high).
 
@@ -77,17 +87,17 @@ the uid and gid of the current process are taken.  The mode option sets the
 mode of root of file system to value & 0777.  This value is given in octal.
 By default the value 0755 is picked. The size option sets the maximum value of
 memory (huge pages) allowed for that filesystem (/mnt/huge). The size is
-rounded down to HPAGE_SIZE.  The option nr_inode sets the maximum number of
-inodes that /mnt/huge can use.  If the size or nr_inode options are not
+rounded down to HPAGE_SIZE.  The option nr_inodes sets the maximum number of
+inodes that /mnt/huge can use.  If the size or nr_inodes options are not
 provided on command line then no limits are set.  For size and nr_inodes
-options, you can use [G|g]/[M|m]/[K|k] to represent giga/mega/kilo. For 
-example, size=2K has the same meaning as size=2048. An example is given at 
-the end of this document. 
+options, you can use [G|g]/[M|m]/[K|k] to represent giga/mega/kilo. For
+example, size=2K has the same meaning as size=2048. An example is given at
+the end of this document.
 
 read and write system calls are not supported on files that reside on hugetlb
 file systems.
 
-A regular chown, chgrp and chmod commands (with right permissions) could be
+Regular chown, chgrp, and chmod commands (with right permissions) could be
 used to change the file attributes on hugetlbfs.
 
 Also, it is important to note that no such mount command is required if the
@@ -95,8 +105,8 @@ applications are going to use only shmat/shmget system calls.  Users who
 wish to use hugetlb page via shared memory segment should be a member of
 a supplementary group and system admin needs to configure that gid into
 /proc/sys/vm/hugetlb_shm_group.  It is possible for same or different
-applications to use any combination of mmaps and shm* calls.  Though the
-mount of filesystem will be required for using mmaps.
+applications to use any combination of mmaps and shm* calls, though the
+mount of filesystem will be required for using mmap calls.
 
 *******************************************************************
 

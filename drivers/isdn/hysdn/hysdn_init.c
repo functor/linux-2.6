@@ -13,7 +13,6 @@
 #include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/version.h>
 #include <linux/poll.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
@@ -34,7 +33,7 @@ MODULE_AUTHOR("Werner Cornelius");
 MODULE_LICENSE("GPL");
 
 static char *hysdn_init_revision = "$Revision: 1.6.6.6 $";
-int cardmax;			/* number of found cards */
+static int cardmax;		/* number of found cards */
 hysdn_card *card_root = NULL;	/* pointer to first card */
 
 /**********************************************/
@@ -42,8 +41,8 @@ hysdn_card *card_root = NULL;	/* pointer to first card */
 /* the last entry contains all 0              */
 /**********************************************/
 static struct {
-	word subid;		/* PCI sub id */
-	uchar cardtyp;		/* card type assigned */
+	unsigned short subid;		/* PCI sub id */
+	unsigned char cardtyp;		/* card type assigned */
 } pci_subid_map[] = {
 
 	{

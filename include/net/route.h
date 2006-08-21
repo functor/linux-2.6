@@ -28,12 +28,14 @@
 #include <net/dst.h>
 #include <net/inetpeer.h>
 #include <net/flow.h>
+#include <net/inet_sock.h>
 #include <linux/in_route.h>
 #include <linux/rtnetlink.h>
 #include <linux/route.h>
 #include <linux/ip.h>
 #include <linux/cache.h>
 #include <linux/vs_network.h>
+#include <linux/in.h>
 
 #ifndef __KERNEL__
 #warning This file is not supposed to be used outside of kernel.
@@ -106,16 +108,12 @@ struct rt_cache_stat
         unsigned int out_hlist_search;
 };
 
-extern struct rt_cache_stat *rt_cache_stat;
-#define RT_CACHE_STAT_INC(field)					  \
-		(per_cpu_ptr(rt_cache_stat, _smp_processor_id())->field++)
-
 extern struct ip_rt_acct *ip_rt_acct;
 
 struct in_device;
 extern int		ip_rt_init(void);
 extern void		ip_rt_redirect(u32 old_gw, u32 dst, u32 new_gw,
-				       u32 src, u8 tos, struct net_device *dev);
+				       u32 src, struct net_device *dev);
 extern void		ip_rt_advice(struct rtable **rp, int advice);
 extern void		rt_cache_flush(int how);
 extern int		__ip_route_output_key(struct rtable **, const struct flowi *flp);
@@ -130,6 +128,9 @@ extern void		ip_rt_multicast_event(struct in_device *);
 extern int		ip_rt_ioctl(unsigned int cmd, void __user *arg);
 extern void		ip_rt_get_source(u8 *src, struct rtable *rt);
 extern int		ip_rt_dump(struct sk_buff *skb,  struct netlink_callback *cb);
+
+struct in_ifaddr;
+extern void fib_add_ifaddr(struct in_ifaddr *);
 
 static inline void ip_rt_put(struct rtable * rt)
 {
@@ -146,7 +147,7 @@ static inline char rt_tos2priority(u8 tos)
 	return ip_tos2prio[IPTOS_TOS(tos)>>1];
 }
 
-#define IPI_LOOPBACK	0x0100007f
+#define IPI_LOOPBACK	htonl(INADDR_LOOPBACK)
 
 static inline int ip_find_src(struct nx_info *nxi, struct rtable **rp, struct flowi *fl)
 {
@@ -228,6 +229,10 @@ static inline int ip_route_connect(struct rtable **rp, u32 dst,
 			return err;
 		if (fl.fl4_dst == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
 			fl.fl4_dst = nx_info->ipv4[0];
+#ifdef CONFIG_VSERVER_REMAP_SADDR
+		if (fl.fl4_src == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
+			fl.fl4_src = nx_info->ipv4[0];
+#endif
 	}
 	if (!fl.fl4_dst || !fl.fl4_src) {
 		err = __ip_route_output_key(rp, &fl);
@@ -241,8 +246,8 @@ static inline int ip_route_connect(struct rtable **rp, u32 dst,
 	return ip_route_output_flow(rp, &fl, sk, 0);
 }
 
-static inline int ip_route_newports(struct rtable **rp, u16 sport, u16 dport,
-				    struct sock *sk)
+static inline int ip_route_newports(struct rtable **rp, u8 protocol,
+				    u16 sport, u16 dport, struct sock *sk)
 {
 	if (sport != (*rp)->fl.fl_ip_sport ||
 	    dport != (*rp)->fl.fl_ip_dport) {
@@ -251,6 +256,7 @@ static inline int ip_route_newports(struct rtable **rp, u16 sport, u16 dport,
 		memcpy(&fl, &(*rp)->fl, sizeof(fl));
 		fl.fl_ip_sport = sport;
 		fl.fl_ip_dport = dport;
+		fl.proto = protocol;
 		ip_rt_put(*rp);
 		*rp = NULL;
 		return ip_route_output_flow(rp, &fl, sk, 0);
@@ -268,5 +274,7 @@ static inline struct inet_peer *rt_get_peer(struct rtable *rt)
 	rt_bind_peer(rt, 0);
 	return rt->peer;
 }
+
+extern ctl_table ipv4_route_table[];
 
 #endif	/* _ROUTE_H */

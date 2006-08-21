@@ -5,24 +5,32 @@
  *  		    Please ALWAYS copy linux-ide@vger.kernel.org
  *		    on emails.
  *
- *  Copyright 2003 Red Hat, Inc.
+ *  Copyright 2003-2005 Red Hat, Inc.
  *  Copyright 2003 Benjamin Herrenschmidt
  *
- *  The contents of this file are subject to the Open
- *  Software License version 1.1 that can be found at
- *  http://www.opensource.org/licenses/osl-1.1.txt and is included herein
- *  by reference.
  *
- *  Alternatively, the contents of this file may be used under the terms
- *  of the GNU General Public License version 2 (the "GPL") as distributed
- *  in the kernel source COPYING file, in which case the provisions of
- *  the GPL are applicable instead of the above.  If you wish to allow
- *  the use of your version of this file only under the terms of the
- *  GPL and not to allow others to use your version of this file under
- *  the OSL, indicate your decision by deleting the provisions above and
- *  replace them with the notice and other provisions required by the GPL.
- *  If you do not delete the provisions above, a recipient may use your
- *  version of this file under either the OSL or the GPL.
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2, or (at your option)
+ *  any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; see the file COPYING.  If not, write to
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ *
+ *  libata documentation is available via 'make {ps|pdf}docs',
+ *  as Documentation/DocBook/libata.*
+ *
+ *  Documentation for SiI 3112:
+ *  http://gkernel.sourceforge.net/specs/sii/3112A_SiI-DS-0095-B2.pdf.bz2
+ *
+ *  Other errata and documentation available under NDA.
  *
  */
 
@@ -33,7 +41,7 @@
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include "scsi.h"
+#include <linux/device.h>
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
 
@@ -41,19 +49,30 @@
 #define DRV_VERSION	"0.9"
 
 enum {
+	/*
+	 * host flags
+	 */
+	SIL_FLAG_RERR_ON_DMA_ACT = (1 << 29),
+	SIL_FLAG_MOD15WRITE	= (1 << 30),
+	SIL_DFL_HOST_FLAGS	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
+				  ATA_FLAG_MMIO,
+
+	/*
+	 * Controller IDs
+	 */
 	sil_3112		= 0,
-	sil_3114		= 1,
+	sil_3512		= 1,
+	sil_3114		= 2,
 
-	SIL_FIFO_R0		= 0x40,
-	SIL_FIFO_W0		= 0x41,
-	SIL_FIFO_R1		= 0x44,
-	SIL_FIFO_W1		= 0x45,
-	SIL_FIFO_R2		= 0x240,
-	SIL_FIFO_W2		= 0x241,
-	SIL_FIFO_R3		= 0x244,
-	SIL_FIFO_W3		= 0x245,
-
+	/*
+	 * Register offsets
+	 */
 	SIL_SYSCFG		= 0x48,
+
+	/*
+	 * Register bits
+	 */
+	/* SYSCFG */
 	SIL_MASK_IDE0_INT	= (1 << 22),
 	SIL_MASK_IDE1_INT	= (1 << 23),
 	SIL_MASK_IDE2_INT	= (1 << 24),
@@ -62,9 +81,12 @@ enum {
 	SIL_MASK_4PORT		= SIL_MASK_2PORT |
 				  SIL_MASK_IDE2_INT | SIL_MASK_IDE3_INT,
 
-	SIL_IDE2_BMDMA		= 0x200,
-
+	/* BMDMA/BMDMA2 */
 	SIL_INTR_STEERING	= (1 << 1),
+
+	/*
+	 * Others
+	 */
 	SIL_QUIRK_MOD15WRITE	= (1 << 0),
 	SIL_QUIRK_UDMA5MAX	= (1 << 1),
 };
@@ -75,10 +97,11 @@ static u32 sil_scr_read (struct ata_port *ap, unsigned int sc_reg);
 static void sil_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val);
 static void sil_post_set_mode (struct ata_port *ap);
 
-static struct pci_device_id sil_pci_tbl[] = {
+
+static const struct pci_device_id sil_pci_tbl[] = {
 	{ 0x1095, 0x3112, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3112 },
 	{ 0x1095, 0x0240, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3112 },
-	{ 0x1095, 0x3512, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3112 },
+	{ 0x1095, 0x3512, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3512 },
 	{ 0x1095, 0x3114, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3114 },
 	{ 0x1002, 0x436e, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3112 },
 	{ 0x1002, 0x4379, PCI_ANY_ID, PCI_ANY_ID, 0, 0, sil_3112 },
@@ -118,16 +141,14 @@ static struct pci_driver sil_pci_driver = {
 	.remove			= ata_pci_remove_one,
 };
 
-static Scsi_Host_Template sil_sht = {
+static struct scsi_host_template sil_sht = {
 	.module			= THIS_MODULE,
 	.name			= DRV_NAME,
 	.ioctl			= ata_scsi_ioctl,
 	.queuecommand		= ata_scsi_queuecmd,
-	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
 	.this_id		= ATA_SHT_THIS_ID,
 	.sg_tablesize		= LIBATA_MAX_PRD,
-	.max_sectors		= ATA_MAX_SECTORS,
 	.cmd_per_lun		= ATA_SHT_CMD_PER_LUN,
 	.emulated		= ATA_SHT_EMULATED,
 	.use_clustering		= ATA_SHT_USE_CLUSTERING,
@@ -135,10 +156,9 @@ static Scsi_Host_Template sil_sht = {
 	.dma_boundary		= ATA_DMA_BOUNDARY,
 	.slave_configure	= ata_scsi_slave_config,
 	.bios_param		= ata_std_bios_param,
-	.ordered_flush		= 1,
 };
 
-static struct ata_port_operations sil_ops = {
+static const struct ata_port_operations sil_ops = {
 	.port_disable		= ata_port_disable,
 	.dev_config		= sil_dev_config,
 	.tf_load		= ata_tf_load,
@@ -146,7 +166,7 @@ static struct ata_port_operations sil_ops = {
 	.check_status		= ata_check_status,
 	.exec_command		= ata_exec_command,
 	.dev_select		= ata_std_dev_select,
-	.phy_reset		= sata_phy_reset,
+	.probe_reset		= ata_std_probe_reset,
 	.post_set_mode		= sil_post_set_mode,
 	.bmdma_setup            = ata_bmdma_setup,
 	.bmdma_start            = ata_bmdma_start,
@@ -161,24 +181,32 @@ static struct ata_port_operations sil_ops = {
 	.scr_write		= sil_scr_write,
 	.port_start		= ata_port_start,
 	.port_stop		= ata_port_stop,
-	.host_stop		= ata_host_stop,
+	.host_stop		= ata_pci_host_stop,
 };
 
-static struct ata_port_info sil_port_info[] = {
+static const struct ata_port_info sil_port_info[] = {
 	/* sil_3112 */
 	{
 		.sht		= &sil_sht,
-		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
-				  ATA_FLAG_SRST | ATA_FLAG_MMIO,
+		.host_flags	= SIL_DFL_HOST_FLAGS | SIL_FLAG_MOD15WRITE,
 		.pio_mask	= 0x1f,			/* pio0-4 */
 		.mwdma_mask	= 0x07,			/* mwdma0-2 */
 		.udma_mask	= 0x3f,			/* udma0-5 */
 		.port_ops	= &sil_ops,
-	}, /* sil_3114 */
+	},
+	/* sil_3512 */
 	{
 		.sht		= &sil_sht,
-		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
-				  ATA_FLAG_SRST | ATA_FLAG_MMIO,
+		.host_flags	= SIL_DFL_HOST_FLAGS | SIL_FLAG_RERR_ON_DMA_ACT,
+		.pio_mask	= 0x1f,			/* pio0-4 */
+		.mwdma_mask	= 0x07,			/* mwdma0-2 */
+		.udma_mask	= 0x3f,			/* udma0-5 */
+		.port_ops	= &sil_ops,
+	},
+	/* sil_3114 */
+	{
+		.sht		= &sil_sht,
+		.host_flags	= SIL_DFL_HOST_FLAGS | SIL_FLAG_RERR_ON_DMA_ACT,
 		.pio_mask	= 0x1f,			/* pio0-4 */
 		.mwdma_mask	= 0x07,			/* mwdma0-2 */
 		.udma_mask	= 0x3f,			/* udma0-5 */
@@ -192,15 +220,17 @@ static const struct {
 	unsigned long tf;	/* ATA taskfile register block */
 	unsigned long ctl;	/* ATA control/altstatus register block */
 	unsigned long bmdma;	/* DMA register block */
+	unsigned long fifo_cfg;	/* FIFO Valid Byte Count and Control */
 	unsigned long scr;	/* SATA control register block */
 	unsigned long sien;	/* SATA Interrupt Enable register */
 	unsigned long xfer_mode;/* data transfer mode register */
+	unsigned long sfis_cfg;	/* SATA FIS reception config register */
 } sil_port[] = {
 	/* port 0 ... */
-	{ 0x80, 0x8A, 0x00, 0x100, 0x148, 0xb4 },
-	{ 0xC0, 0xCA, 0x08, 0x180, 0x1c8, 0xf4 },
-	{ 0x280, 0x28A, 0x200, 0x300, 0x348, 0x2b4 },
-	{ 0x2C0, 0x2CA, 0x208, 0x380, 0x3c8, 0x2f4 },
+	{ 0x80, 0x8A, 0x00, 0x40, 0x100, 0x148, 0xb4, 0x14c },
+	{ 0xC0, 0xCA, 0x08, 0x44, 0x180, 0x1c8, 0xf4, 0x1cc },
+	{ 0x280, 0x28A, 0x200, 0x240, 0x300, 0x348, 0x2b4, 0x34c },
+	{ 0x2C0, 0x2CA, 0x208, 0x244, 0x380, 0x3c8, 0x2f4, 0x3cc },
 	/* ... port 3 */
 };
 
@@ -209,6 +239,11 @@ MODULE_DESCRIPTION("low-level driver for Silicon Image SATA controller");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, sil_pci_tbl);
 MODULE_VERSION(DRV_VERSION);
+
+static int slow_down = 0;
+module_param(slow_down, int, 0444);
+MODULE_PARM_DESC(slow_down, "Sledgehammer used to work around random problems, by limiting commands to 15 sectors (0=off, 1=on)");
+
 
 static unsigned char sil_get_device_cache_line(struct pci_dev *pdev)
 {
@@ -221,7 +256,8 @@ static void sil_post_set_mode (struct ata_port *ap)
 {
 	struct ata_host_set *host_set = ap->host_set;
 	struct ata_device *dev;
-	void *addr = host_set->mmio_base + sil_port[ap->port_no].xfer_mode;
+	void __iomem *addr =
+		host_set->mmio_base + sil_port[ap->port_no].xfer_mode;
 	u32 tmp, dev_mode[2];
 	unsigned int i;
 
@@ -265,7 +301,7 @@ static inline unsigned long sil_scr_addr(struct ata_port *ap, unsigned int sc_re
 
 static u32 sil_scr_read (struct ata_port *ap, unsigned int sc_reg)
 {
-	void *mmio = (void *) sil_scr_addr(ap, sc_reg);
+	void __iomem *mmio = (void __iomem *) sil_scr_addr(ap, sc_reg);
 	if (mmio)
 		return readl(mmio);
 	return 0xffffffffU;
@@ -273,7 +309,7 @@ static u32 sil_scr_read (struct ata_port *ap, unsigned int sc_reg)
 
 static void sil_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val)
 {
-	void *mmio = (void *) sil_scr_addr(ap, sc_reg);
+	void *mmio = (void __iomem *) sil_scr_addr(ap, sc_reg);
 	if (mmio)
 		writel(val, mmio);
 }
@@ -310,41 +346,31 @@ static void sil_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val)
 static void sil_dev_config(struct ata_port *ap, struct ata_device *dev)
 {
 	unsigned int n, quirks = 0;
-	unsigned char model_num[40];
-	const char *s;
-	unsigned int len;
+	unsigned char model_num[41];
 
-	ata_dev_id_string(dev->id, model_num, ATA_ID_PROD_OFS,
-			  sizeof(model_num));
-	s = &model_num[0];
-	len = strnlen(s, sizeof(model_num));
+	ata_id_c_string(dev->id, model_num, ATA_ID_PROD_OFS, sizeof(model_num));
 
-	/* ATAPI specifies that empty space is blank-filled; remove blanks */
-	while ((len > 0) && (s[len - 1] == ' '))
-		len--;
-
-	for (n = 0; sil_blacklist[n].product; n++) 
-		if (!memcmp(sil_blacklist[n].product, s,
-			    strlen(sil_blacklist[n].product))) {
+	for (n = 0; sil_blacklist[n].product; n++)
+		if (!strcmp(sil_blacklist[n].product, model_num)) {
 			quirks = sil_blacklist[n].quirk;
 			break;
 		}
-	
+
 	/* limit requests to 15 sectors */
-	if (quirks & SIL_QUIRK_MOD15WRITE) {
-		printk(KERN_INFO "ata%u(%u): applying Seagate errata fix\n",
+	if (slow_down ||
+	    ((ap->flags & SIL_FLAG_MOD15WRITE) &&
+	     (quirks & SIL_QUIRK_MOD15WRITE))) {
+		printk(KERN_INFO "ata%u(%u): applying Seagate errata fix (mod15write workaround)\n",
 		       ap->id, dev->devno);
-		ap->host->max_sectors = 15;
-		ap->host->hostt->max_sectors = 15;
-		dev->flags |= ATA_DFLAG_LOCK_SECTORS;
+		dev->max_sectors = 15;
 		return;
 	}
 
 	/* limit to udma5 */
 	if (quirks & SIL_QUIRK_UDMA5MAX) {
 		printk(KERN_INFO "ata%u(%u): applying Maxtor errata fix %s\n",
-		       ap->id, dev->devno, s);
-		ap->udma_mask &= ATA_UDMA5;
+		       ap->id, dev->devno, model_num);
+		dev->udma_mask &= ATA_UDMA5;
 		return;
 	}
 }
@@ -354,7 +380,7 @@ static int sil_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	static int printed_version;
 	struct ata_probe_ent *probe_ent = NULL;
 	unsigned long base;
-	void *mmio_base;
+	void __iomem *mmio_base;
 	int rc;
 	unsigned int i;
 	int pci_dev_busy = 0;
@@ -362,7 +388,7 @@ static int sil_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	u8 cls;
 
 	if (!printed_version++)
-		printk(KERN_DEBUG DRV_NAME " version " DRV_VERSION "\n");
+		dev_printk(KERN_DEBUG, &pdev->dev, "version " DRV_VERSION "\n");
 
 	/*
 	 * If this driver happens to only be useful on Apple's K2, then
@@ -385,13 +411,12 @@ static int sil_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (rc)
 		goto err_out_regions;
 
-	probe_ent = kmalloc(sizeof(*probe_ent), GFP_KERNEL);
+	probe_ent = kzalloc(sizeof(*probe_ent), GFP_KERNEL);
 	if (probe_ent == NULL) {
 		rc = -ENOMEM;
 		goto err_out_regions;
 	}
 
-	memset(probe_ent, 0, sizeof(*probe_ent));
 	INIT_LIST_HEAD(&probe_ent->node);
 	probe_ent->dev = pci_dev_to_dev(pdev);
 	probe_ent->port_ops = sil_port_info[ent->driver_data].port_ops;
@@ -404,8 +429,7 @@ static int sil_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
        	probe_ent->irq_flags = SA_SHIRQ;
 	probe_ent->host_flags = sil_port_info[ent->driver_data].host_flags;
 
-	mmio_base = ioremap(pci_resource_start(pdev, 5),
-		            pci_resource_len(pdev, 5));
+	mmio_base = pci_iomap(pdev, 5, 0);
 	if (mmio_base == NULL) {
 		rc = -ENOMEM;
 		goto err_out_free_ent;
@@ -429,28 +453,38 @@ static int sil_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (cls) {
 		cls >>= 3;
 		cls++;  /* cls = (line_size/8)+1 */
-		writeb(cls, mmio_base + SIL_FIFO_R0);
-		writeb(cls, mmio_base + SIL_FIFO_W0);
-		writeb(cls, mmio_base + SIL_FIFO_R1);
-		writeb(cls, mmio_base + SIL_FIFO_W1);
-		if (ent->driver_data == sil_3114) {
-			writeb(cls, mmio_base + SIL_FIFO_R2);
-			writeb(cls, mmio_base + SIL_FIFO_W2);
-			writeb(cls, mmio_base + SIL_FIFO_R3);
-			writeb(cls, mmio_base + SIL_FIFO_W3);
-		}
+		for (i = 0; i < probe_ent->n_ports; i++)
+			writew(cls << 8 | cls,
+			       mmio_base + sil_port[i].fifo_cfg);
 	} else
-		printk(KERN_WARNING DRV_NAME "(%s): cache line size not set.  Driver may not function\n",
-			pci_name(pdev));
+		dev_printk(KERN_WARNING, &pdev->dev,
+			   "cache line size not set.  Driver may not function\n");
+
+	/* Apply R_ERR on DMA activate FIS errata workaround */
+	if (probe_ent->host_flags & SIL_FLAG_RERR_ON_DMA_ACT) {
+		int cnt;
+
+		for (i = 0, cnt = 0; i < probe_ent->n_ports; i++) {
+			tmp = readl(mmio_base + sil_port[i].sfis_cfg);
+			if ((tmp & 0x3) != 0x01)
+				continue;
+			if (!cnt)
+				dev_printk(KERN_INFO, &pdev->dev,
+					   "Applying R_ERR on DMA activate "
+					   "FIS errata fix\n");
+			writel(tmp & ~0x3, mmio_base + sil_port[i].sfis_cfg);
+			cnt++;
+		}
+	}
 
 	if (ent->driver_data == sil_3114) {
 		irq_mask = SIL_MASK_4PORT;
 
 		/* flip the magic "make 4 ports work" bit */
-		tmp = readl(mmio_base + SIL_IDE2_BMDMA);
+		tmp = readl(mmio_base + sil_port[2].bmdma);
 		if ((tmp & SIL_INTR_STEERING) == 0)
 			writel(tmp | SIL_INTR_STEERING,
-			       mmio_base + SIL_IDE2_BMDMA);
+			       mmio_base + sil_port[2].bmdma);
 
 	} else {
 		irq_mask = SIL_MASK_2PORT;

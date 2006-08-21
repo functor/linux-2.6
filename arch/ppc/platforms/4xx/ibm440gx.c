@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/4xx/ibm440gx.c
- *
  * PPC440GX I/O descriptions
  *
  * Matt Porter <mporter@mvista.com>
@@ -58,7 +56,6 @@ static struct ocp_func_emac_data ibm440gx_emac2_def = {
 	.wol_irq        = 65,  		/* WOL interrupt number */
 	.mdio_idx       = -1,           /* No shared MDIO */
 	.tah_idx	= 0,		/* TAH device index */
-	.jumbo		= 1,		/* Jumbo frames supported */
 };
 
 static struct ocp_func_emac_data ibm440gx_emac3_def = {
@@ -72,7 +69,6 @@ static struct ocp_func_emac_data ibm440gx_emac3_def = {
 	.wol_irq        = 67,  		/* WOL interrupt number */
 	.mdio_idx       = -1,           /* No shared MDIO */
 	.tah_idx	= 1,		/* TAH device index */
-	.jumbo		= 1,		/* Jumbo frames supported */
 };
 OCP_SYSFS_EMAC_DATA()
 
@@ -84,6 +80,7 @@ static struct ocp_func_mal_data ibm440gx_mal0_def = {
 	.txde_irq	= 33,		/* TX Descriptor Error IRQ */
 	.rxde_irq	= 34,		/* RX Descriptor Error IRQ */
 	.serr_irq	= 32,		/* MAL System Error IRQ    */
+	.dcr_base	= DCRN_MAL_BASE /* MAL0_CFG DCR number */
 };
 OCP_SYSFS_MAL_DATA()
 

@@ -1,5 +1,4 @@
 /*
- * $Id: cx88-vbi.c,v 1.16 2004/12/10 12:33:39 kraxel Exp $
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -47,8 +46,8 @@ void cx8800_vbi_fmt(struct cx8800_dev *dev, struct v4l2_format *f)
 }
 
 static int cx8800_start_vbi_dma(struct cx8800_dev    *dev,
-				struct cx88_dmaqueue *q,
-				struct cx88_buffer   *buf)
+			 struct cx88_dmaqueue *q,
+			 struct cx88_buffer   *buf)
 {
 	struct cx88_core *core = dev->core;
 
@@ -176,7 +175,7 @@ vbi_prepare(struct videobuf_queue *q, struct videobuf_buffer *vb,
 		buf->vb.size   = size;
 		buf->vb.field  = V4L2_FIELD_SEQ_TB;
 
-		if (0 != (rc = videobuf_iolock(dev->pci,&buf->vb,NULL)))
+		if (0 != (rc = videobuf_iolock(q,&buf->vb,NULL)))
 			goto fail;
 		cx88_risc_buffer(dev->pci, &buf->risc,
 				 buf->vb.dma.sglist,
@@ -188,7 +187,7 @@ vbi_prepare(struct videobuf_queue *q, struct videobuf_buffer *vb,
 	return 0;
 
  fail:
-	cx88_free_buffer(dev->pci,buf);
+	cx88_free_buffer(q,buf);
 	return rc;
 }
 
@@ -228,9 +227,8 @@ vbi_queue(struct videobuf_queue *vq, struct videobuf_buffer *vb)
 static void vbi_release(struct videobuf_queue *q, struct videobuf_buffer *vb)
 {
 	struct cx88_buffer *buf = container_of(vb,struct cx88_buffer,vb);
-	struct cx8800_fh   *fh  = q->priv_data;
 
-	cx88_free_buffer(fh->dev->pci,buf);
+	cx88_free_buffer(q,buf);
 }
 
 struct videobuf_queue_ops cx8800_vbi_qops = {

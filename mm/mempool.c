@@ -51,16 +51,23 @@ static void free_pool(mempool_t *pool)
  * functions might sleep - as long as the mempool_alloc function is not called
  * from IRQ contexts.
  */
-mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
+mempool_t *mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
 				mempool_free_t *free_fn, void *pool_data)
 {
-	mempool_t *pool;
+	return  mempool_create_node(min_nr,alloc_fn,free_fn, pool_data,-1);
+}
+EXPORT_SYMBOL(mempool_create);
 
-	pool = kmalloc(sizeof(*pool), GFP_KERNEL);
+mempool_t *mempool_create_node(int min_nr, mempool_alloc_t *alloc_fn,
+			mempool_free_t *free_fn, void *pool_data, int node_id)
+{
+	mempool_t *pool;
+	pool = kmalloc_node(sizeof(*pool), GFP_KERNEL, node_id);
 	if (!pool)
 		return NULL;
 	memset(pool, 0, sizeof(*pool));
-	pool->elements = kmalloc(min_nr * sizeof(void *), GFP_KERNEL);
+	pool->elements = kmalloc_node(min_nr * sizeof(void *),
+					GFP_KERNEL, node_id);
 	if (!pool->elements) {
 		kfree(pool);
 		return NULL;
@@ -87,7 +94,7 @@ mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
 	}
 	return pool;
 }
-EXPORT_SYMBOL(mempool_create);
+EXPORT_SYMBOL(mempool_create_node);
 
 /**
  * mempool_resize - resize an existing memory pool
@@ -105,7 +112,7 @@ EXPORT_SYMBOL(mempool_create);
  * while this function is running. mempool_alloc() & mempool_free()
  * might be called (eg. from IRQ contexts) while this function executes.
  */
-int mempool_resize(mempool_t *pool, int new_min_nr, unsigned int __nocast gfp_mask)
+int mempool_resize(mempool_t *pool, int new_min_nr, gfp_t gfp_mask)
 {
 	void *element;
 	void **new_elements;
@@ -176,8 +183,8 @@ EXPORT_SYMBOL(mempool_resize);
  */
 void mempool_destroy(mempool_t *pool)
 {
-	if (pool->curr_nr != pool->min_nr)
-		BUG();		/* There were outstanding elements */
+	/* Check for outstanding elements */
+	BUG_ON(pool->curr_nr != pool->min_nr);
 	free_pool(pool);
 }
 EXPORT_SYMBOL(mempool_destroy);
@@ -193,12 +200,12 @@ EXPORT_SYMBOL(mempool_destroy);
  * *never* fails when called from process contexts. (it might
  * fail if called from an IRQ context.)
  */
-void * mempool_alloc(mempool_t *pool, unsigned int __nocast gfp_mask)
+void * mempool_alloc(mempool_t *pool, gfp_t gfp_mask)
 {
 	void *element;
 	unsigned long flags;
-	DEFINE_WAIT(wait);
-	int gfp_temp;
+	wait_queue_t wait;
+	gfp_t gfp_temp;
 
 	might_sleep_if(gfp_mask & __GFP_WAIT);
 
@@ -228,6 +235,7 @@ repeat_alloc:
 
 	/* Now start performing page reclaim */
 	gfp_temp = gfp_mask;
+	init_wait(&wait);
 	prepare_to_wait(&pool->wait, &wait, TASK_UNINTERRUPTIBLE);
 	smp_mb();
 	if (!pool->curr_nr)
@@ -268,16 +276,58 @@ EXPORT_SYMBOL(mempool_free);
 /*
  * A commonly used alloc and free fn.
  */
-void *mempool_alloc_slab(unsigned int __nocast gfp_mask, void *pool_data)
+void *mempool_alloc_slab(gfp_t gfp_mask, void *pool_data)
 {
-	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
+	struct kmem_cache *mem = pool_data;
 	return kmem_cache_alloc(mem, gfp_mask);
 }
 EXPORT_SYMBOL(mempool_alloc_slab);
 
 void mempool_free_slab(void *element, void *pool_data)
 {
-	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
+	struct kmem_cache *mem = pool_data;
 	kmem_cache_free(mem, element);
 }
 EXPORT_SYMBOL(mempool_free_slab);
+
+/*
+ * A commonly used alloc and free fn that kmalloc/kfrees the amount of memory
+ * specfied by pool_data
+ */
+void *mempool_kmalloc(gfp_t gfp_mask, void *pool_data)
+{
+	size_t size = (size_t)(long)pool_data;
+	return kmalloc(size, gfp_mask);
+}
+EXPORT_SYMBOL(mempool_kmalloc);
+
+void *mempool_kzalloc(gfp_t gfp_mask, void *pool_data)
+{
+	size_t size = (size_t) pool_data;
+	return kzalloc(size, gfp_mask);
+}
+EXPORT_SYMBOL(mempool_kzalloc);
+
+void mempool_kfree(void *element, void *pool_data)
+{
+	kfree(element);
+}
+EXPORT_SYMBOL(mempool_kfree);
+
+/*
+ * A simple mempool-backed page allocator that allocates pages
+ * of the order specified by pool_data.
+ */
+void *mempool_alloc_pages(gfp_t gfp_mask, void *pool_data)
+{
+	int order = (int)(long)pool_data;
+	return alloc_pages(gfp_mask, order);
+}
+EXPORT_SYMBOL(mempool_alloc_pages);
+
+void mempool_free_pages(void *element, void *pool_data)
+{
+	int order = (int)(long)pool_data;
+	__free_pages(element, order);
+}
+EXPORT_SYMBOL(mempool_free_pages);

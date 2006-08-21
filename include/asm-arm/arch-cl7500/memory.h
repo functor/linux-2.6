@@ -17,7 +17,7 @@
 /*
  * Physical DRAM offset.
  */
-#define PHYS_OFFSET	(0x10000000UL)
+#define PHYS_OFFSET	UL(0x10000000)
 
 /*
  * These are exactly the same on the RiscPC as the
@@ -25,5 +25,11 @@
  */
 #define __virt_to_bus(x) __virt_to_phys(x)
 #define __bus_to_virt(x) __phys_to_virt(x)
+
+/*
+ * Cache flushing area - ROM
+ */
+#define FLUSH_BASE_PHYS		0x00000000
+#define FLUSH_BASE		0xdf000000
 
 #endif

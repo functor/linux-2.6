@@ -1,5 +1,5 @@
 /*
- * $Id: blktrans.h,v 1.5 2003/06/23 12:00:08 dwmw2 Exp $
+ * $Id: blktrans.h,v 1.6 2005/11/07 11:14:54 gleixner Exp $
  *
  * (C) 2003 David Woodhouse <dwmw2@infradead.org>
  *
@@ -10,7 +10,7 @@
 #ifndef __MTD_TRANS_H__
 #define __MTD_TRANS_H__
 
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
 
 struct hd_geometry;
 struct mtd_info;
@@ -22,7 +22,7 @@ struct mtd_blktrans_dev {
 	struct mtd_blktrans_ops *tr;
 	struct list_head list;
 	struct mtd_info *mtd;
-	struct semaphore sem;
+	struct mutex lock;
 	int devnum;
 	int blksize;
 	unsigned long size;
@@ -67,6 +67,6 @@ extern int register_mtd_blktrans(struct mtd_blktrans_ops *tr);
 extern int deregister_mtd_blktrans(struct mtd_blktrans_ops *tr);
 extern int add_mtd_blktrans_dev(struct mtd_blktrans_dev *dev);
 extern int del_mtd_blktrans_dev(struct mtd_blktrans_dev *dev);
-				 
+
 
 #endif /* __MTD_TRANS_H__ */

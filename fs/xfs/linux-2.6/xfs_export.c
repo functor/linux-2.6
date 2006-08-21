@@ -1,35 +1,20 @@
 /*
- * Copyright (c) 2004-2005 Silicon Graphics, Inc.  All Rights Reserved.
+ * Copyright (c) 2004-2005 Silicon Graphics, Inc.
+ * All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
  * published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it would be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * This program is distributed in the hope that it would be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * Further, this software is distributed without any warranty that it is
- * free of the rightful claim of any third person regarding infringement
- * or the like.  Any license provided herein, whether implied or
- * otherwise, applies only to this software file.  Patent licenses, if
- * any, provided herein do not apply to combinations of this program with
- * other software, or any other product whatsoever.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write the Free Software Foundation, Inc., 59
- * Temple Place - Suite 330, Boston MA 02111-1307, USA.
- *
- * Contact information: Silicon Graphics, Inc., 1600 Amphitheatre Pkwy,
- * Mountain View, CA  94043, or:
- *
- * http://www.sgi.com
- *
- * For further information regarding this notice, see:
- *
- * http://oss.sgi.com/projects/GenInfo/SGIGPLNoticeExplan/
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write the Free Software Foundation,
+ * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 #include "xfs.h"
 #include "xfs_types.h"
 #include "xfs_dmapi.h"
@@ -40,8 +25,10 @@
 #include "xfs_mount.h"
 #include "xfs_export.h"
 
+STATIC struct dentry dotdot = { .d_name.name = "..", .d_name.len = 2, };
+
 /*
- * XFS encode and decodes the fileid portion of NFS filehandles
+ * XFS encodes and decodes the fileid portion of NFS filehandles
  * itself instead of letting the generic NFS code do it.  This
  * allows filesystems with 64 bit inode numbers to be exported.
  *
@@ -51,9 +38,8 @@
  * remains in that code.
  */
 
-
 STATIC struct dentry *
-linvfs_decode_fh(
+xfs_fs_decode_fh(
 	struct super_block	*sb,
 	__u32			*fh,
 	int			fh_len,
@@ -92,14 +78,14 @@ linvfs_decode_fh(
 		p = xfs_fileid_decode_fid2(p, &pfid, is64);
 		parent = &pfid;
 	}
-	
+
 	fh = (__u32 *)&ifid;
-	return find_exported_dentry(sb, fh, parent, acceptable, context);
+	return sb->s_export_op->find_exported_dentry(sb, fh, parent, acceptable, context);
 }
 
 
 STATIC int
-linvfs_encode_fh(
+xfs_fs_encode_fh(
 	struct dentry		*dentry,
 	__u32			*fh,
 	int			*max_len,
@@ -111,10 +97,9 @@ linvfs_encode_fh(
 	int			len;
 	int			is64 = 0;
 #if XFS_BIG_INUMS
-	vfs_t			*vfs = LINVFS_GET_VFS(inode->i_sb);
-	xfs_mount_t		*mp = XFS_VFSTOM(vfs);
-	
-	if (!(mp->m_flags & XFS_MOUNT_32BITINOOPT)) {
+	vfs_t			*vfs = vfs_from_sb(inode->i_sb);
+
+	if (!(vfs->vfs_flag & VFS_32BITINODES)) {
 		/* filesystem may contain 64bit inode numbers */
 		is64 = XFS_FILEID_TYPE_64FLAG;
 	}
@@ -147,21 +132,21 @@ linvfs_encode_fh(
 }
 
 STATIC struct dentry *
-linvfs_get_dentry(
+xfs_fs_get_dentry(
 	struct super_block	*sb,
 	void			*data)
 {
 	vnode_t			*vp;
 	struct inode		*inode;
 	struct dentry		*result;
-	vfs_t			*vfsp = LINVFS_GET_VFS(sb);
+	vfs_t			*vfsp = vfs_from_sb(sb);
 	int			error;
 
 	VFS_VGET(vfsp, &vp, (fid_t *)data, error);
 	if (error || vp == NULL)
 		return ERR_PTR(-ESTALE) ;
 
-	inode = LINVFS_GET_IP(vp);
+	inode = vn_to_inode(vp);
 	result = d_alloc_anon(inode);
         if (!result) {
 		iput(inode);
@@ -171,25 +156,20 @@ linvfs_get_dentry(
 }
 
 STATIC struct dentry *
-linvfs_get_parent(
+xfs_fs_get_parent(
 	struct dentry		*child)
 {
 	int			error;
 	vnode_t			*vp, *cvp;
 	struct dentry		*parent;
-	struct dentry		dotdot;
-
-	dotdot.d_name.name = "..";
-	dotdot.d_name.len = 2;
-	dotdot.d_inode = NULL;
 
 	cvp = NULL;
-	vp = LINVFS_GET_VP(child->d_inode);
+	vp = vn_from_inode(child->d_inode);
 	VOP_LOOKUP(vp, &dotdot, &cvp, 0, NULL, NULL, error);
 	if (unlikely(error))
 		return ERR_PTR(-error);
 
-	parent = d_alloc_anon(LINVFS_GET_IP(cvp));
+	parent = d_alloc_anon(vn_to_inode(cvp));
 	if (unlikely(!parent)) {
 		VN_RELE(cvp);
 		return ERR_PTR(-ENOMEM);
@@ -197,9 +177,9 @@ linvfs_get_parent(
 	return parent;
 }
 
-struct export_operations linvfs_export_ops = {
-	.decode_fh		= linvfs_decode_fh,
-	.encode_fh		= linvfs_encode_fh,
-	.get_parent		= linvfs_get_parent,
-	.get_dentry		= linvfs_get_dentry,
+struct export_operations xfs_export_operations = {
+	.decode_fh		= xfs_fs_decode_fh,
+	.encode_fh		= xfs_fs_encode_fh,
+	.get_parent		= xfs_fs_get_parent,
+	.get_dentry		= xfs_fs_get_dentry,
 };

@@ -379,18 +379,18 @@ int __init bridge_probe(nasid_t nasid, int widget_id, int masterwid)
 	bridge = (bridge_t *) RAW_NODE_SWIN_BASE(nasid, widget_id);
 
 	/*
- 	 * Clear all pending interrupts.
- 	 */
+	 * Clear all pending interrupts.
+	 */
 	bridge->b_int_rst_stat = BRIDGE_IRR_ALL_CLR;
 
 	/*
- 	 * Until otherwise set up, assume all interrupts are from slot 0
- 	 */
+	 * Until otherwise set up, assume all interrupts are from slot 0
+	 */
 	bridge->b_int_device = 0x0;
 
 	/*
- 	 * swap pio's to pci mem and io space (big windows)
- 	 */
+	 * swap pio's to pci mem and io space (big windows)
+	 */
 	bridge->b_wid_control |= BRIDGE_CTRL_IO_SWAP |
 	                         BRIDGE_CTRL_MEM_SWAP;
 
@@ -483,6 +483,13 @@ static inline void pci_enable_swapping(struct pci_dev *dev)
 static void __init pci_fixup_ioc3(struct pci_dev *d)
 {
 	pci_disable_swapping(d);
+}
+
+int pcibus_to_node(struct pci_bus *bus)
+{
+	struct bridge_controller *bc = BRIDGE_CONTROLLER(bus);
+
+	return bc->nasid;
 }
 
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SGI, PCI_DEVICE_ID_SGI_IOC3,

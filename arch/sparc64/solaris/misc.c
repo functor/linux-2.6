@@ -17,6 +17,7 @@
 #include <linux/timex.h>
 #include <linux/major.h>
 #include <linux/compat.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/string.h>
@@ -90,7 +91,7 @@ static u32 do_solaris_mmap(u32 addr, u32 len, u32 prot, u32 flags, u32 fd, u64 o
 	len = PAGE_ALIGN(len);
 	if(!(flags & MAP_FIXED))
 		addr = 0;
-	else if (len > 0xf0000000UL || addr > 0xf0000000UL - len)
+	else if (len > STACK_TOP32 || addr > STACK_TOP32 - len)
 		goto out_putf;
 	ret_type = flags & _MAP_NEW;
 	flags &= ~_MAP_NEW;
@@ -102,7 +103,7 @@ static u32 do_solaris_mmap(u32 addr, u32 len, u32 prot, u32 flags, u32 fd, u64 o
 			 (unsigned long) prot, (unsigned long) flags, off);
 	up_write(&current->mm->mmap_sem);
 	if(!ret_type)
-		retval = ((retval < 0xf0000000) ? 0 : retval);
+		retval = ((retval < STACK_TOP32) ? 0 : retval);
 	                        
 out_putf:
 	if (file)
@@ -239,7 +240,7 @@ asmlinkage int solaris_utssys(u32 buf, u32 flags, int which, u32 buf2)
 		/* Let's cheat */
 		err  = set_utsfield(v->sysname, "SunOS", 1, 0);
 		down_read(&uts_sem);
-		err |= set_utsfield(v->nodename, system_utsname.nodename,
+		err |= set_utsfield(v->nodename, vx_new_uts(nodename),
 				    1, 1);
 		up_read(&uts_sem);
 		err |= set_utsfield(v->release, "2.6", 0, 0);
@@ -263,7 +264,7 @@ asmlinkage int solaris_utsname(u32 buf)
 	/* Why should we not lie a bit? */
 	down_read(&uts_sem);
 	err  = set_utsfield(v->sysname, "SunOS", 0, 0);
-	err |= set_utsfield(v->nodename, system_utsname.nodename, 1, 1);
+	err |= set_utsfield(v->nodename, vx_new_uts(nodename), 1, 1);
 	err |= set_utsfield(v->release, "5.6", 0, 0);
 	err |= set_utsfield(v->version, "Generic", 0, 0);
 	err |= set_utsfield(v->machine, machine(), 0, 0);
@@ -295,7 +296,7 @@ asmlinkage int solaris_sysinfo(int cmd, u32 buf, s32 count)
 	case SI_HOSTNAME:
 		r = buffer + 256;
 		down_read(&uts_sem);
-		for (p = system_utsname.nodename, q = buffer; 
+		for (p = vx_new_uts(nodename), q = buffer;
 		     q < r && *p && *p != '.'; *q++ = *p++);
 		up_read(&uts_sem);
 		*q = 0;
@@ -353,7 +354,7 @@ asmlinkage int solaris_sysconf(int id)
 {
 	switch (id) {
 	case SOLARIS_CONFIG_NGROUPS:	return NGROUPS_MAX;
-	case SOLARIS_CONFIG_CHILD_MAX:	return CHILD_MAX;
+	case SOLARIS_CONFIG_CHILD_MAX:	return -1; /* no limit */
 	case SOLARIS_CONFIG_OPEN_FILES:	return OPEN_MAX;
 	case SOLARIS_CONFIG_POSIX_VER:	return 199309;
 	case SOLARIS_CONFIG_PAGESIZE:	return PAGE_SIZE;
@@ -737,7 +738,8 @@ MODULE_LICENSE("GPL");
 extern u32 tl0_solaris[8];
 #define update_ttable(x) 										\
 	tl0_solaris[3] = (((long)(x) - (long)tl0_solaris - 3) >> 2) | 0x40000000;			\
-	__asm__ __volatile__ ("membar #StoreStore; flush %0" : : "r" (&tl0_solaris[3]))
+	wmb();		\
+	__asm__ __volatile__ ("flush %0" : : "r" (&tl0_solaris[3]))
 #else
 #endif	
 
@@ -761,7 +763,8 @@ int init_module(void)
 	entry64_personality_patch |=
 		(offsetof(struct task_struct, personality) +
 		 (sizeof(unsigned long) - 1));
-	__asm__ __volatile__("membar #StoreStore; flush %0"
+	wmb();
+	__asm__ __volatile__("flush %0"
 			     : : "r" (&entry64_personality_patch));
 	return 0;
 }

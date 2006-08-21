@@ -46,14 +46,24 @@ extern unsigned long __bus_to_virt(unsigned long);
 #if defined(CONFIG_ARCH_FOOTBRIDGE)
 
 /* Task size and page offset at 3GB */
-#define TASK_SIZE		(0xbf000000UL)
-#define PAGE_OFFSET		(0xc0000000UL)
+#define TASK_SIZE		UL(0xbf000000)
+#define PAGE_OFFSET		UL(0xc0000000)
+
+/*
+ * Cache flushing area.
+ */
+#define FLUSH_BASE		0xf9000000
 
 #elif defined(CONFIG_ARCH_CO285)
 
 /* Task size and page offset at 1.5GB */
-#define TASK_SIZE		(0x5f000000UL)
-#define PAGE_OFFSET		(0x60000000UL)
+#define TASK_SIZE		UL(0x5f000000)
+#define PAGE_OFFSET		UL(0x60000000)
+
+/*
+ * Cache flushing area.
+ */
+#define FLUSH_BASE		0x7e000000
 
 #else
 
@@ -64,12 +74,14 @@ extern unsigned long __bus_to_virt(unsigned long);
 /*
  * Physical DRAM offset.
  */
-#define PHYS_OFFSET		(0x00000000UL)
+#define PHYS_OFFSET		UL(0x00000000)
 
 /*
  * This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
 #define TASK_UNMAPPED_BASE ((TASK_SIZE + 0x01000000) / 3)
+
+#define FLUSH_BASE_PHYS		0x50000000
 
 #endif

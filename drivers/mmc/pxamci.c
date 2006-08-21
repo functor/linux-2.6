@@ -20,7 +20,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
@@ -29,7 +29,6 @@
 
 #include <asm/dma.h>
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/scatterlist.h>
 #include <asm/sizes.h>
 
@@ -37,12 +36,6 @@
 #include <asm/arch/mmc.h>
 
 #include "pxamci.h"
-
-#ifdef CONFIG_MMC_DEBUG
-#define DBG(x...)	printk(KERN_DEBUG x)
-#else
-#define DBG(x...)	do { } while (0)
-#endif
 
 #define DRIVER_NAME	"pxa2xx-mci"
 
@@ -71,11 +64,6 @@ struct pxamci_host {
 
 	unsigned int		dma_dir;
 };
-
-static inline unsigned int ns_to_clocks(unsigned int ns)
-{
-	return (ns * (CLOCKRATE / 1000000) + 999) / 1000;
-}
 
 static void pxamci_stop_clock(struct pxamci_host *host)
 {
@@ -120,6 +108,7 @@ static void pxamci_disable_irq(struct pxamci_host *host, unsigned int mask)
 static void pxamci_setup_data(struct pxamci_host *host, struct mmc_data *data)
 {
 	unsigned int nob = data->blocks;
+	unsigned long long clks;
 	unsigned int timeout;
 	u32 dcmd;
 	int i;
@@ -130,9 +119,11 @@ static void pxamci_setup_data(struct pxamci_host *host, struct mmc_data *data)
 		nob = 0xffff;
 
 	writel(nob, host->base + MMC_NOB);
-	writel(1 << data->blksz_bits, host->base + MMC_BLKLEN);
+	writel(data->blksz, host->base + MMC_BLKLEN);
 
-	timeout = ns_to_clocks(data->timeout_ns) + data->timeout_clks;
+	clks = (unsigned long long)data->timeout_ns * CLOCKRATE;
+	do_div(clks, 1000000000UL);
+	timeout = (unsigned int)clks + (data->timeout_clks << host->clkrt);
 	writel((timeout + 255) / 256, host->base + MMC_RDTO);
 
 	if (data->flags & MMC_DATA_READ) {
@@ -179,14 +170,15 @@ static void pxamci_start_cmd(struct pxamci_host *host, struct mmc_command *cmd, 
 	if (cmd->flags & MMC_RSP_BUSY)
 		cmdat |= CMDAT_BUSY;
 
-	switch (cmd->flags & (MMC_RSP_MASK | MMC_RSP_CRC)) {
-	case MMC_RSP_SHORT | MMC_RSP_CRC:
+#define RSP_TYPE(x)	((x) & ~(MMC_RSP_BUSY|MMC_RSP_OPCODE))
+	switch (RSP_TYPE(mmc_resp_type(cmd))) {
+	case RSP_TYPE(MMC_RSP_R1): /* r1, r1b, r6 */
 		cmdat |= CMDAT_RESP_SHORT;
 		break;
-	case MMC_RSP_SHORT:
+	case RSP_TYPE(MMC_RSP_R3):
 		cmdat |= CMDAT_RESP_R3;
 		break;
-	case MMC_RSP_LONG | MMC_RSP_CRC:
+	case RSP_TYPE(MMC_RSP_R2):
 		cmdat |= CMDAT_RESP_R2;
 		break;
 	default:
@@ -206,7 +198,6 @@ static void pxamci_start_cmd(struct pxamci_host *host, struct mmc_command *cmd, 
 
 static void pxamci_finish_request(struct pxamci_host *host, struct mmc_request *mrq)
 {
-	DBG("PXAMCI: request done\n");
 	host->mrq = NULL;
 	host->cmd = NULL;
 	host->data = NULL;
@@ -252,7 +243,7 @@ static int pxamci_cmd_done(struct pxamci_host *host, unsigned int stat)
 			if ((cmd->resp[0] & 0x80000000) == 0)
 				cmd->error = MMC_ERR_BADCRC;
 		} else {
-			DBG("ignoring CRC from command %d - *risky*\n",cmd->opcode);
+			pr_debug("ignoring CRC from command %d - *risky*\n",cmd->opcode);
 		}
 #else
 		cmd->error = MMC_ERR_BADCRC;
@@ -292,14 +283,14 @@ static int pxamci_data_done(struct pxamci_host *host, unsigned int stat)
 	 * data blocks as being in error.
 	 */
 	if (data->error == MMC_ERR_NONE)
-		data->bytes_xfered = data->blocks << data->blksz_bits;
+		data->bytes_xfered = data->blocks * data->blksz;
 	else
 		data->bytes_xfered = 0;
 
 	pxamci_disable_irq(host, DATA_TRAN_DONE);
 
 	host->data = NULL;
-	if (host->mrq->stop && data->error == MMC_ERR_NONE) {
+	if (host->mrq->stop) {
 		pxamci_stop_clock(host);
 		pxamci_start_cmd(host, host->mrq->stop, 0);
 	} else {
@@ -317,12 +308,10 @@ static irqreturn_t pxamci_irq(int irq, void *devid, struct pt_regs *regs)
 
 	ireg = readl(host->base + MMC_I_REG);
 
-	DBG("PXAMCI: irq %08x\n", ireg);
-
 	if (ireg) {
 		unsigned stat = readl(host->base + MMC_STAT);
 
-		DBG("PXAMCI: stat %08x\n", stat);
+		pr_debug("PXAMCI: irq %08x stat %08x\n", ireg, stat);
 
 		if (ireg & END_CMD_RES)
 			handled |= pxamci_cmd_done(host, stat);
@@ -362,13 +351,19 @@ static void pxamci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	pxamci_start_cmd(host, mrq->cmd, cmdat);
 }
 
-static void pxamci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+static int pxamci_get_ro(struct mmc_host *mmc)
 {
 	struct pxamci_host *host = mmc_priv(mmc);
 
-	DBG("pxamci_set_ios: clock %u power %u vdd %u.%02u\n",
-	    ios->clock, ios->power_mode, ios->vdd / 100,
-	    ios->vdd % 100);
+	if (host->pdata && host->pdata->get_ro)
+		return host->pdata->get_ro(mmc->dev);
+	/* Host doesn't support read only detection so assume writeable */
+	return 0;
+}
+
+static void pxamci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+{
+	struct pxamci_host *host = mmc_priv(mmc);
 
 	if (ios->clock) {
 		unsigned int clk = CLOCKRATE / ios->clock;
@@ -395,12 +390,13 @@ static void pxamci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			host->cmdat |= CMDAT_INIT;
 	}
 
-	DBG("pxamci_set_ios: clkrt = %x cmdat = %x\n",
-	    host->clkrt, host->cmdat);
+	pr_debug("PXAMCI: clkrt = %x cmdat = %x\n",
+		 host->clkrt, host->cmdat);
 }
 
 static struct mmc_host_ops pxamci_ops = {
 	.request	= pxamci_request,
+	.get_ro		= pxamci_get_ro,
 	.set_ios	= pxamci_set_ios,
 };
 
@@ -412,13 +408,14 @@ static void pxamci_dma_irq(int dma, void *devid, struct pt_regs *regs)
 
 static irqreturn_t pxamci_detect_irq(int irq, void *devid, struct pt_regs *regs)
 {
-	mmc_detect_change(devid);
+	struct pxamci_host *host = mmc_priv(devid);
+
+	mmc_detect_change(devid, host->pdata->detect_delay);
 	return IRQ_HANDLED;
 }
 
-static int pxamci_probe(struct device *dev)
+static int pxamci_probe(struct platform_device *pdev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
 	struct mmc_host *mmc;
 	struct pxamci_host *host = NULL;
 	struct resource *r;
@@ -426,14 +423,14 @@ static int pxamci_probe(struct device *dev)
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (!r || irq == NO_IRQ)
+	if (!r || irq < 0)
 		return -ENXIO;
 
 	r = request_mem_region(r->start, SZ_4K, DRIVER_NAME);
 	if (!r)
 		return -EBUSY;
 
-	mmc = mmc_alloc_host(sizeof(struct pxamci_host), dev);
+	mmc = mmc_alloc_host(sizeof(struct pxamci_host), &pdev->dev);
 	if (!mmc) {
 		ret = -ENOMEM;
 		goto out;
@@ -462,7 +459,7 @@ static int pxamci_probe(struct device *dev)
 			 host->pdata->ocr_mask :
 			 MMC_VDD_32_33|MMC_VDD_33_34;
 
-	host->sg_cpu = dma_alloc_coherent(dev, PAGE_SIZE, &host->sg_dma, GFP_KERNEL);
+	host->sg_cpu = dma_alloc_coherent(&pdev->dev, PAGE_SIZE, &host->sg_dma, GFP_KERNEL);
 	if (!host->sg_cpu) {
 		ret = -ENOMEM;
 		goto out;
@@ -499,10 +496,10 @@ static int pxamci_probe(struct device *dev)
 	if (ret)
 		goto out;
 
-	dev_set_drvdata(dev, mmc);
+	platform_set_drvdata(pdev, mmc);
 
 	if (host->pdata && host->pdata->init)
-		host->pdata->init(dev, pxamci_detect_irq, mmc);
+		host->pdata->init(&pdev->dev, pxamci_detect_irq, mmc);
 
 	mmc_add_host(mmc);
 
@@ -515,7 +512,7 @@ static int pxamci_probe(struct device *dev)
 		if (host->base)
 			iounmap(host->base);
 		if (host->sg_cpu)
-			dma_free_coherent(dev, PAGE_SIZE, host->sg_cpu, host->sg_dma);
+			dma_free_coherent(&pdev->dev, PAGE_SIZE, host->sg_cpu, host->sg_dma);
 	}
 	if (mmc)
 		mmc_free_host(mmc);
@@ -523,17 +520,17 @@ static int pxamci_probe(struct device *dev)
 	return ret;
 }
 
-static int pxamci_remove(struct device *dev)
+static int pxamci_remove(struct platform_device *pdev)
 {
-	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct mmc_host *mmc = platform_get_drvdata(pdev);
 
-	dev_set_drvdata(dev, NULL);
+	platform_set_drvdata(pdev, NULL);
 
 	if (mmc) {
 		struct pxamci_host *host = mmc_priv(mmc);
 
 		if (host->pdata && host->pdata->exit)
-			host->pdata->exit(dev, mmc);
+			host->pdata->exit(&pdev->dev, mmc);
 
 		mmc_remove_host(mmc);
 
@@ -548,7 +545,7 @@ static int pxamci_remove(struct device *dev)
 		free_irq(host->irq, host);
 		pxa_free_dma(host->dma);
 		iounmap(host->base);
-		dma_free_coherent(dev, PAGE_SIZE, host->sg_cpu, host->sg_dma);
+		dma_free_coherent(&pdev->dev, PAGE_SIZE, host->sg_cpu, host->sg_dma);
 
 		release_resource(host->res);
 
@@ -558,23 +555,23 @@ static int pxamci_remove(struct device *dev)
 }
 
 #ifdef CONFIG_PM
-static int pxamci_suspend(struct device *dev, pm_message_t state, u32 level)
+static int pxamci_suspend(struct platform_device *dev, pm_message_t state)
 {
-	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct mmc_host *mmc = platform_get_drvdata(dev);
 	int ret = 0;
 
-	if (mmc && level == SUSPEND_DISABLE)
+	if (mmc)
 		ret = mmc_suspend_host(mmc, state);
 
 	return ret;
 }
 
-static int pxamci_resume(struct device *dev, u32 level)
+static int pxamci_resume(struct platform_device *dev)
 {
-	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct mmc_host *mmc = platform_get_drvdata(dev);
 	int ret = 0;
 
-	if (mmc && level == RESUME_ENABLE)
+	if (mmc)
 		ret = mmc_resume_host(mmc);
 
 	return ret;
@@ -584,23 +581,24 @@ static int pxamci_resume(struct device *dev, u32 level)
 #define pxamci_resume	NULL
 #endif
 
-static struct device_driver pxamci_driver = {
-	.name		= DRIVER_NAME,
-	.bus		= &platform_bus_type,
+static struct platform_driver pxamci_driver = {
 	.probe		= pxamci_probe,
 	.remove		= pxamci_remove,
 	.suspend	= pxamci_suspend,
 	.resume		= pxamci_resume,
+	.driver		= {
+		.name	= DRIVER_NAME,
+	},
 };
 
 static int __init pxamci_init(void)
 {
-	return driver_register(&pxamci_driver);
+	return platform_driver_register(&pxamci_driver);
 }
 
 static void __exit pxamci_exit(void)
 {
-	driver_unregister(&pxamci_driver);
+	platform_driver_unregister(&pxamci_driver);
 }
 
 module_init(pxamci_init);

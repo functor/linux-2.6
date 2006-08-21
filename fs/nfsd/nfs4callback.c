@@ -53,8 +53,7 @@
 #define NFSPROC4_CB_COMPOUND 1
 
 /* declarations */
-static void nfs4_cb_null(struct rpc_task *task);
-extern spinlock_t recall_lock;
+static const struct rpc_call_ops nfs4_cb_null_ops;
 
 /* Index of predefined Linux callback client operations */
 
@@ -327,16 +326,18 @@ out:
         .p_encode = (kxdrproc_t) nfs4_xdr_##argtype,                    \
         .p_decode = (kxdrproc_t) nfs4_xdr_##restype,                    \
         .p_bufsiz = MAX(NFS4_##argtype##_sz,NFS4_##restype##_sz) << 2,  \
+        .p_statidx = NFSPROC4_CB_##call,				\
+	.p_name   = #proc,                                              \
 }
 
-struct rpc_procinfo     nfs4_cb_procedures[] = {
+static struct rpc_procinfo     nfs4_cb_procedures[] = {
     PROC(CB_NULL,      NULL,     enc_cb_null,     dec_cb_null),
     PROC(CB_RECALL,    COMPOUND,   enc_cb_recall,      dec_cb_recall),
 };
 
-struct rpc_version              nfs_cb_version4 = {
+static struct rpc_version       nfs_cb_version4 = {
         .number                 = 1,
-        .nrprocs                = sizeof(nfs4_cb_procedures)/sizeof(nfs4_cb_procedures[0]),
+        .nrprocs                = ARRAY_SIZE(nfs4_cb_procedures),
         .procs                  = nfs4_cb_procedures
 };
 
@@ -348,7 +349,7 @@ static struct rpc_version *	nfs_cb_version[] = {
 /*
  * Use the SETCLIENTID credential
  */
-struct rpc_cred *
+static struct rpc_cred *
 nfsd4_lookupcred(struct nfs4_client *clp, int taskflags)
 {
         struct auth_cred acred;
@@ -387,9 +388,7 @@ nfsd4_probe_callback(struct nfs4_client *clp)
 	char                    hostname[32];
 	int status;
 
-	dprintk("NFSD: probe_callback. cb_parsed %d cb_set %d\n",
-			cb->cb_parsed, atomic_read(&cb->cb_set));
-	if (!cb->cb_parsed || atomic_read(&cb->cb_set))
+	if (atomic_read(&cb->cb_set))
 		return;
 
 	/* Initialize address */
@@ -414,7 +413,7 @@ nfsd4_probe_callback(struct nfs4_client *clp)
 	/* Initialize rpc_program */
 	program->name = "nfs4_cb";
 	program->number = cb->cb_prog;
-	program->nrvers = sizeof(nfs_cb_version)/sizeof(nfs_cb_version[0]);
+	program->nrvers = ARRAY_SIZE(nfs_cb_version);
 	program->version = nfs_cb_version;
 	program->stats = stat;
 
@@ -427,14 +426,13 @@ nfsd4_probe_callback(struct nfs4_client *clp)
 	 * XXX AUTH_UNIX only - need AUTH_GSS....
 	 */
 	sprintf(hostname, "%u.%u.%u.%u", NIPQUAD(addr.sin_addr.s_addr));
-	clnt = rpc_create_client(xprt, hostname, program, 1, RPC_AUTH_UNIX);
+	clnt = rpc_new_client(xprt, hostname, program, 1, RPC_AUTH_UNIX);
 	if (IS_ERR(clnt)) {
 		dprintk("NFSD: couldn't create callback client\n");
-		goto out_xprt;
+		goto out_err;
 	}
 	clnt->cl_intr = 0;
 	clnt->cl_softrtry = 1;
-	clnt->cl_chatty = 1;
 
 	/* Kick rpciod, put the call on the wire. */
 
@@ -443,14 +441,15 @@ nfsd4_probe_callback(struct nfs4_client *clp)
 		goto out_clnt;
 	}
 
-	/* the task holds a reference to the nfs4_client struct */
 	cb->cb_client = clnt;
+
+	/* the task holds a reference to the nfs4_client struct */
 	atomic_inc(&clp->cl_count);
 
 	msg.rpc_cred = nfsd4_lookupcred(clp,0);
 	if (IS_ERR(msg.rpc_cred))
 		goto out_rpciod;
-	status = rpc_call_async(clnt, &msg, RPC_TASK_ASYNC, nfs4_cb_null, NULL);
+	status = rpc_call_async(clnt, &msg, RPC_TASK_ASYNC, &nfs4_cb_null_ops, NULL);
 	put_rpccred(msg.rpc_cred);
 
 	if (status != 0) {
@@ -462,19 +461,16 @@ nfsd4_probe_callback(struct nfs4_client *clp)
 out_rpciod:
 	atomic_dec(&clp->cl_count);
 	rpciod_down();
+	cb->cb_client = NULL;
 out_clnt:
 	rpc_shutdown_client(clnt);
-	goto out_err;
-out_xprt:
-	xprt_destroy(xprt);
 out_err:
 	dprintk("NFSD: warning: no callback path to client %.*s\n",
 		(int)clp->cl_name.len, clp->cl_name.data);
-	cb->cb_client = NULL;
 }
 
 static void
-nfs4_cb_null(struct rpc_task *task)
+nfs4_cb_null(struct rpc_task *task, void *dummy)
 {
 	struct nfs4_client *clp = (struct nfs4_client *)task->tk_msg.rpc_argp;
 	struct nfs4_callback *cb = &clp->cl_callback;
@@ -492,6 +488,10 @@ nfs4_cb_null(struct rpc_task *task)
 out:
 	put_nfs4_client(clp);
 }
+
+static const struct rpc_call_ops nfs4_cb_null_ops = {
+	.rpc_call_done = nfs4_cb_null,
+};
 
 /*
  * called with dp->dl_count inc'ed.
