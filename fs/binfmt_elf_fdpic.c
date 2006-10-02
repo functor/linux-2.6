@@ -32,6 +32,7 @@
 #include <linux/elf.h>
 #include <linux/elf-fdpic.h>
 #include <linux/elfcore.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/param.h>
@@ -187,7 +188,7 @@ static int load_elf_fdpic_binary(struct linux_binprm *bprm, struct pt_regs *regs
 				goto error;
 
 			/* read the name of the interpreter into memory */
-			interpreter_name = (char *) kmalloc(phdr->p_filesz, GFP_KERNEL);
+			interpreter_name = kmalloc(phdr->p_filesz, GFP_KERNEL);
 			if (!interpreter_name)
 				goto error;
 
@@ -294,14 +295,7 @@ static int load_elf_fdpic_binary(struct linux_binprm *bprm, struct pt_regs *regs
 				  &interp_params,
 				  &current->mm->start_stack,
 				  &current->mm->start_brk);
-#endif
 
-	/* do this so that we can load the interpreter, if need be
-	 * - we will change some of these later
-	 */
-	set_mm_counter(current->mm, rss, 0);
-
-#ifdef CONFIG_MMU
 	retval = setup_arg_pages(bprm, current->mm->start_stack, executable_stack);
 	if (retval < 0) {
 		send_sig(SIGKILL, current, 0);
@@ -418,16 +412,11 @@ error:
 		allow_write_access(interpreter);
 		fput(interpreter);
 	}
-	if (interpreter_name)
-		kfree(interpreter_name);
-	if (exec_params.phdrs)
-		kfree(exec_params.phdrs);
-	if (exec_params.loadmap)
-		kfree(exec_params.loadmap);
-	if (interp_params.phdrs)
-		kfree(interp_params.phdrs);
-	if (interp_params.loadmap)
-		kfree(interp_params.loadmap);
+	kfree(interpreter_name);
+	kfree(exec_params.phdrs);
+	kfree(exec_params.loadmap);
+	kfree(interp_params.phdrs);
+	kfree(interp_params.loadmap);
 	return retval;
 
 	/* unrecoverable error - kill the process */
@@ -584,8 +573,7 @@ static int create_elf_fdpic_tables(struct linux_binprm *bprm,
 	csp -= sizeof(unsigned long);
 	__put_user(bprm->argc, (unsigned long *) csp);
 
-	if (csp != sp)
-		BUG();
+	BUG_ON(csp != sp);
 
 	/* fill in the argv[] array */
 #ifdef CONFIG_MMU

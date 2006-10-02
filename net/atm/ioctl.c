@@ -12,33 +12,36 @@
 #include <linux/atmdev.h>
 #include <linux/atmclip.h>	/* CLIP_*ENCAP */
 #include <linux/atmarp.h>	/* manifest constants */
+#include <linux/capability.h>
 #include <linux/sonet.h>	/* for ioctls */
 #include <linux/atmsvc.h>
 #include <linux/atmmpc.h>
 #include <net/atmclip.h>
 #include <linux/atmlec.h>
+#include <linux/mutex.h>
 #include <asm/ioctls.h>
 
 #include "resources.h"
 #include "signaling.h"		/* for WAITING and sigd_attach */
+#include "common.h"
 
 
-static DECLARE_MUTEX(ioctl_mutex);
+static DEFINE_MUTEX(ioctl_mutex);
 static LIST_HEAD(ioctl_list);
 
 
 void register_atm_ioctl(struct atm_ioctl *ioctl)
 {
-	down(&ioctl_mutex);
+	mutex_lock(&ioctl_mutex);
 	list_add_tail(&ioctl->list, &ioctl_list);
-	up(&ioctl_mutex);
+	mutex_unlock(&ioctl_mutex);
 }
 
 void deregister_atm_ioctl(struct atm_ioctl *ioctl)
 {
-	down(&ioctl_mutex);
+	mutex_lock(&ioctl_mutex);
 	list_del(&ioctl->list);
-	up(&ioctl_mutex);
+	mutex_unlock(&ioctl_mutex);
 }
 
 EXPORT_SYMBOL(register_atm_ioctl);
@@ -104,20 +107,38 @@ int vcc_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 			if (!error)
 				sock->state = SS_CONNECTED;
 			goto done;
-		default:
+		case ATM_SETBACKEND:
+		case ATM_NEWBACKENDIF:
+			{
+				atm_backend_t backend;
+				error = get_user(backend, (atm_backend_t __user *) argp);
+				if (error)
+					goto done;
+				switch (backend) {
+					case ATM_BACKEND_PPP:
+						request_module("pppoatm");
+						break;
+					case ATM_BACKEND_BR2684:
+						request_module("br2684");
+						break;
+				}
+			}
+			break;
+		case ATMMPC_CTRL:
+		case ATMMPC_DATA:
+			request_module("mpoa");
+			break;
+		case ATMARPD_CTRL:
+			request_module("clip");
+			break;
+		case ATMLEC_CTRL:
+			request_module("lec");
 			break;
 	}
 
-	if (cmd == ATMMPC_CTRL || cmd == ATMMPC_DATA)
-		request_module("mpoa");
-	if (cmd == ATMARPD_CTRL)
-		request_module("clip");
-	if (cmd == ATMLEC_CTRL)
-		request_module("lec");
-
 	error = -ENOIOCTLCMD;
 
-	down(&ioctl_mutex);
+	mutex_lock(&ioctl_mutex);
 	list_for_each(pos, &ioctl_list) {
 		struct atm_ioctl * ic = list_entry(pos, struct atm_ioctl, list);
 		if (try_module_get(ic->owner)) {
@@ -127,7 +148,7 @@ int vcc_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 				break;
 		}
 	}
-	up(&ioctl_mutex);
+	mutex_unlock(&ioctl_mutex);
 
 	if (error != -ENOIOCTLCMD)
 		goto done;

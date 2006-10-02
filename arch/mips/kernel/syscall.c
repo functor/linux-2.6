@@ -7,7 +7,9 @@
  * Copyright (C) 1999, 2000 Silicon Graphics, Inc.
  * Copyright (C) 2001 MIPS Technologies, Inc.
  */
+#include <linux/config.h>
 #include <linux/a.out.h>
+#include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/linkage.h>
 #include <linux/mm.h>
@@ -26,13 +28,14 @@
 #include <linux/msg.h>
 #include <linux/shm.h>
 #include <linux/compiler.h>
+#include <linux/module.h>
 #include <linux/vs_cvirt.h>
 
 #include <asm/branch.h>
 #include <asm/cachectl.h>
 #include <asm/cacheflush.h>
 #include <asm/ipc.h>
-#include <asm/offset.h>
+#include <asm/asm-offsets.h>
 #include <asm/signal.h>
 #include <asm/sim.h>
 #include <asm/shmparam.h>
@@ -56,6 +59,8 @@ out:
 }
 
 unsigned long shm_align_mask = PAGE_SIZE - 1;	/* Sane caches */
+
+EXPORT_SYMBOL(shm_align_mask);
 
 #define COLOUR_ALIGN(addr,pgoff)				\
 	((((addr) + shm_align_mask) & ~shm_align_mask) +	\
@@ -158,7 +163,10 @@ asmlinkage unsigned long
 sys_mmap2(unsigned long addr, unsigned long len, unsigned long prot,
           unsigned long flags, unsigned long fd, unsigned long pgoff)
 {
-	return do_mmap2(addr, len, prot, flags, fd, pgoff);
+	if (pgoff & (~PAGE_MASK >> 12))
+		return -EINVAL;
+
+	return do_mmap2(addr, len, prot, flags, fd, pgoff >> (PAGE_SHIFT-12));
 }
 
 save_static_function(sys_fork);
@@ -174,14 +182,28 @@ _sys_clone(nabi_no_regargs struct pt_regs regs)
 {
 	unsigned long clone_flags;
 	unsigned long newsp;
-	int *parent_tidptr, *child_tidptr;
+	int __user *parent_tidptr, *child_tidptr;
 
 	clone_flags = regs.regs[4];
 	newsp = regs.regs[5];
 	if (!newsp)
 		newsp = regs.regs[29];
-	parent_tidptr = (int *) regs.regs[6];
-	child_tidptr = (int *) regs.regs[7];
+	parent_tidptr = (int __user *) regs.regs[6];
+#ifdef CONFIG_32BIT
+	/* We need to fetch the fifth argument off the stack.  */
+	child_tidptr = NULL;
+	if (clone_flags & (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)) {
+		int __user *__user *usp = (int __user *__user *) regs.regs[29];
+		if (regs.regs[2] == __NR_syscall) {
+			if (get_user (child_tidptr, &usp[5]))
+				return -EFAULT;
+		}
+		else if (get_user (child_tidptr, &usp[4]))
+			return -EFAULT;
+	}
+#else
+	child_tidptr = (int __user *) regs.regs[8];
+#endif
 	return do_fork(clone_flags, newsp, &regs, 0,
 	               parent_tidptr, child_tidptr);
 }
@@ -194,12 +216,12 @@ asmlinkage int sys_execve(nabi_no_regargs struct pt_regs regs)
 	int error;
 	char * filename;
 
-	filename = getname((char *) (long)regs.regs[4]);
+	filename = getname((char __user *) (long)regs.regs[4]);
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		goto out;
-	error = do_execve(filename, (char **) (long)regs.regs[5],
-	                  (char **) (long)regs.regs[6], &regs);
+	error = do_execve(filename, (char __user *__user *) (long)regs.regs[5],
+	                  (char __user *__user *) (long)regs.regs[6], &regs);
 	putname(filename);
 
 out:
@@ -209,7 +231,7 @@ out:
 /*
  * Compacrapability ...
  */
-asmlinkage int sys_uname(struct old_utsname * name)
+asmlinkage int sys_uname(struct old_utsname __user * name)
 {
 	if (name && !copy_to_user(name, vx_new_utsname(), sizeof (*name)))
 		return 0;
@@ -219,7 +241,7 @@ asmlinkage int sys_uname(struct old_utsname * name)
 /*
  * Compacrapability ...
  */
-asmlinkage int sys_olduname(struct oldold_utsname * name)
+asmlinkage int sys_olduname(struct oldold_utsname __user * name)
 {
 	int error;
 	struct new_utsname *ptr;
@@ -245,33 +267,21 @@ asmlinkage int sys_olduname(struct oldold_utsname * name)
 	return error;
 }
 
+void sys_set_thread_area(unsigned long addr)
+{
+	struct thread_info *ti = task_thread_info(current);
+
+	ti->tp_value = addr;
+
+	/* If some future MIPS implementation has this register in hardware,
+	 * we will need to update it here (and in context switches).  */
+}
+
 asmlinkage int _sys_sysmips(int cmd, long arg1, int arg2, int arg3)
 {
-	int	tmp, len;
-	char	*name;
+	int	tmp;
 
 	switch(cmd) {
-	case SETNAME: {
-		char nodename[__NEW_UTS_LEN + 1];
-
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-
-		name = (char *) arg1;
-
-		len = strncpy_from_user(nodename, name, __NEW_UTS_LEN);
-		if (len < 0)
-			return -EFAULT;
-
-		down_write(&uts_sem);
-		strncpy(vx_new_uts(nodename), nodename, len);
-		nodename[__NEW_UTS_LEN] = '\0';
-		strlcpy(vx_new_uts(nodename), nodename,
-			sizeof(vx_new_uts(nodename)));
-		up_write(&uts_sem);
-		return 0;
-	}
-
 	case MIPS_ATOMIC_SET:
 		printk(KERN_CRIT "How did I get here?\n");
 		return -EINVAL;
@@ -284,9 +294,6 @@ asmlinkage int _sys_sysmips(int cmd, long arg1, int arg2, int arg3)
 	case FLUSH_CACHE:
 		__flush_cache_all();
 		return 0;
-
-	case MIPS_RDNVRAM:
-		return -EIO;
 	}
 
 	return -EINVAL;
@@ -298,7 +305,7 @@ asmlinkage int _sys_sysmips(int cmd, long arg1, int arg2, int arg3)
  * This is really horribly ugly.
  */
 asmlinkage int sys_ipc (uint call, int first, int second,
-			unsigned long third, void *ptr, long fifth)
+			unsigned long third, void __user *ptr, long fifth)
 {
 	int version, ret;
 
@@ -307,24 +314,25 @@ asmlinkage int sys_ipc (uint call, int first, int second,
 
 	switch (call) {
 	case SEMOP:
-		return sys_semtimedop (first, (struct sembuf *)ptr, second,
-		                       NULL);
+		return sys_semtimedop (first, (struct sembuf __user *)ptr,
+		                       second, NULL);
 	case SEMTIMEDOP:
-		return sys_semtimedop (first, (struct sembuf *)ptr, second,
-		                       (const struct timespec __user *)fifth);
+		return sys_semtimedop (first, (struct sembuf __user *)ptr,
+				       second,
+				       (const struct timespec __user *)fifth);
 	case SEMGET:
 		return sys_semget (first, second, third);
 	case SEMCTL: {
 		union semun fourth;
 		if (!ptr)
 			return -EINVAL;
-		if (get_user(fourth.__pad, (void **) ptr))
+		if (get_user(fourth.__pad, (void __user *__user *) ptr))
 			return -EFAULT;
 		return sys_semctl (first, second, third, fourth);
 	}
 
 	case MSGSND:
-		return sys_msgsnd (first, (struct msgbuf *) ptr,
+		return sys_msgsnd (first, (struct msgbuf __user *) ptr,
 				   second, third);
 	case MSGRCV:
 		switch (version) {
@@ -334,7 +342,7 @@ asmlinkage int sys_ipc (uint call, int first, int second,
 				return -EINVAL;
 
 			if (copy_from_user(&tmp,
-					   (struct ipc_kludge *) ptr,
+					   (struct ipc_kludge __user *) ptr,
 					   sizeof (tmp)))
 				return -EFAULT;
 			return sys_msgrcv (first, tmp.msgp, second,
@@ -342,35 +350,38 @@ asmlinkage int sys_ipc (uint call, int first, int second,
 		}
 		default:
 			return sys_msgrcv (first,
-					   (struct msgbuf *) ptr,
+					   (struct msgbuf __user *) ptr,
 					   second, fifth, third);
 		}
 	case MSGGET:
 		return sys_msgget ((key_t) first, second);
 	case MSGCTL:
-		return sys_msgctl (first, second, (struct msqid_ds *) ptr);
+		return sys_msgctl (first, second,
+				   (struct msqid_ds __user *) ptr);
 
 	case SHMAT:
 		switch (version) {
 		default: {
 			ulong raddr;
-			ret = do_shmat (first, (char *) ptr, second, &raddr);
+			ret = do_shmat (first, (char __user *) ptr, second,
+					&raddr);
 			if (ret)
 				return ret;
-			return put_user (raddr, (ulong *) third);
+			return put_user (raddr, (ulong __user *) third);
 		}
 		case 1:	/* iBCS2 emulator entry point */
 			if (!segment_eq(get_fs(), get_ds()))
 				return -EINVAL;
-			return do_shmat (first, (char *) ptr, second, (ulong *) third);
+			return do_shmat (first, (char __user *) ptr, second,
+					 (ulong *) third);
 		}
 	case SHMDT:
-		return sys_shmdt ((char *)ptr);
+		return sys_shmdt ((char __user *)ptr);
 	case SHMGET:
 		return sys_shmget (first, second, third);
 	case SHMCTL:
 		return sys_shmctl (first, second,
-				   (struct shmid_ds *) ptr);
+				   (struct shmid_ds __user *) ptr);
 	default:
 		return -ENOSYS;
 	}

@@ -29,25 +29,21 @@
  */
 #ifndef __ASSEMBLY__
 typedef struct { unsigned long pte; } pte_t;
-typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
 #endif
 
 #define pte_val(x)	((x).pte)
-#define pmd_val(x)	((x).pmd)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
 
 #define __pte(x)	((pte_t) { (x) } )
-#define __pmd(x)	((pmd_t) { (x) } )
 #define __pgd(x)	((pgd_t) { (x) } )
 #define __pgprot(x)	((pgprot_t) { (x) } )
 
 /* On CRIS the PFN numbers doesn't start at 0 so we have to compensate */
 /* for that before indexing into the page table starting at mem_map    */
-#define pfn_to_page(pfn)	(mem_map + ((pfn) - (PAGE_OFFSET >> PAGE_SHIFT)))
-#define page_to_pfn(page)	((unsigned long)((page) - mem_map) + (PAGE_OFFSET >> PAGE_SHIFT))
+#define ARCH_PFN_OFFSET		(PAGE_OFFSET >> PAGE_SHIFT)
 #define pfn_valid(pfn)		(((pfn) - (PAGE_OFFSET >> PAGE_SHIFT)) < max_mapnr)
 
 /* to index into the page map. our pages all start at physical addr PAGE_OFFSET so
@@ -73,23 +69,6 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 #ifndef __ASSEMBLY__
 
-#define BUG() do { \
-  printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); \
-} while (0)
-
-/* Pure 2^n version of get_order */
-static inline int get_order(unsigned long size)
-{
-	int order;
-
-	size = (size-1) >> (PAGE_SHIFT-1);
-	order = -1;
-	do {
-		size >>= 1;
-		order++;
-	} while (size);
-	return order;
-}
 #endif /* __ASSEMBLY__ */
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
@@ -98,6 +77,9 @@ static inline int get_order(unsigned long size)
 #define devmem_is_allowed(x) 1
 
 #endif /* __KERNEL__ */
+
+#include <asm-generic/memory_model.h>
+#include <asm-generic/page.h>
 
 #endif /* _CRIS_PAGE_H */
 

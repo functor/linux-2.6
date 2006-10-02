@@ -165,8 +165,8 @@ static unsigned buflen = 4096;
 static unsigned qlen = 32;
 static unsigned pattern = 0;
 
-module_param (buflen, uint, S_IRUGO|S_IWUSR);
-module_param (qlen, uint, S_IRUGO|S_IWUSR);
+module_param (buflen, uint, S_IRUGO);
+module_param (qlen, uint, S_IRUGO);
 module_param (pattern, uint, S_IRUGO|S_IWUSR);
 
 /*
@@ -572,9 +572,10 @@ static void source_sink_complete (struct usb_ep *ep, struct usb_request *req)
 	switch (status) {
 
 	case 0: 			/* normal completion? */
-		if (ep == dev->out_ep)
+		if (ep == dev->out_ep) {
 			check_read_data (dev, ep, req);
-		else
+			memset (req->buf, 0x55, req->length);
+		} else
 			reinit_write_data (dev, ep, req);
 		break;
 
@@ -612,7 +613,7 @@ static void source_sink_complete (struct usb_ep *ep, struct usb_request *req)
 }
 
 static struct usb_request *
-source_sink_start_ep (struct usb_ep *ep, int gfp_flags)
+source_sink_start_ep (struct usb_ep *ep, gfp_t gfp_flags)
 {
 	struct usb_request	*req;
 	int			status;
@@ -626,6 +627,8 @@ source_sink_start_ep (struct usb_ep *ep, int gfp_flags)
 
 	if (strcmp (ep->name, EP_IN_NAME) == 0)
 		reinit_write_data (ep->driver_data, ep, req);
+	else
+		memset (req->buf, 0x55, req->length);
 
 	status = usb_ep_queue (ep, req, gfp_flags);
 	if (status) {
@@ -640,7 +643,7 @@ source_sink_start_ep (struct usb_ep *ep, int gfp_flags)
 }
 
 static int
-set_source_sink_config (struct zero_dev *dev, int gfp_flags)
+set_source_sink_config (struct zero_dev *dev, gfp_t gfp_flags)
 {
 	int			result = 0;
 	struct usb_ep		*ep;
@@ -744,7 +747,7 @@ static void loopback_complete (struct usb_ep *ep, struct usb_request *req)
 }
 
 static int
-set_loopback_config (struct zero_dev *dev, int gfp_flags)
+set_loopback_config (struct zero_dev *dev, gfp_t gfp_flags)
 {
 	int			result = 0;
 	struct usb_ep		*ep;
@@ -845,7 +848,7 @@ static void zero_reset_config (struct zero_dev *dev)
  * by limiting configuration choices (like the pxa2xx).
  */
 static int
-zero_set_config (struct zero_dev *dev, unsigned number, int gfp_flags)
+zero_set_config (struct zero_dev *dev, unsigned number, gfp_t gfp_flags)
 {
 	int			result = 0;
 	struct usb_gadget	*gadget = dev->gadget;
@@ -919,9 +922,9 @@ zero_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	struct zero_dev		*dev = get_gadget_data (gadget);
 	struct usb_request	*req = dev->req;
 	int			value = -EOPNOTSUPP;
-	u16			w_index = ctrl->wIndex;
-	u16			w_value = ctrl->wValue;
-	u16			w_length = ctrl->wLength;
+	u16			w_index = le16_to_cpu(ctrl->wIndex);
+	u16			w_value = le16_to_cpu(ctrl->wValue);
+	u16			w_length = le16_to_cpu(ctrl->wLength);
 
 	/* usually this stores reply data in the pre-allocated ep0 buffer,
 	 * but config change events will reconfigure hardware.
@@ -1119,7 +1122,7 @@ zero_autoresume (unsigned long _dev)
 
 /*-------------------------------------------------------------------------*/
 
-static void
+static void __exit
 zero_unbind (struct usb_gadget *gadget)
 {
 	struct zero_dev		*dev = get_gadget_data (gadget);
@@ -1127,18 +1130,27 @@ zero_unbind (struct usb_gadget *gadget)
 	DBG (dev, "unbind\n");
 
 	/* we've already been disconnected ... no i/o is active */
-	if (dev->req)
+	if (dev->req) {
+		dev->req->length = USB_BUFSIZ;
 		free_ep_req (gadget->ep0, dev->req);
+	}
 	del_timer_sync (&dev->resume);
 	kfree (dev);
 	set_gadget_data (gadget, NULL);
 }
 
-static int
+static int __init
 zero_bind (struct usb_gadget *gadget)
 {
 	struct zero_dev		*dev;
 	struct usb_ep		*ep;
+	int			gcnum;
+
+	/* FIXME this can't yet work right with SH ... it has only
+	 * one configuration, numbered one.
+	 */
+	if (gadget_is_sh(gadget))
+		return -ENODEV;
 
 	/* Bulk-only drivers like this one SHOULD be able to
 	 * autoconfigure on any sane usb controller driver,
@@ -1161,43 +1173,10 @@ autoconf_fail:
 	EP_OUT_NAME = ep->name;
 	ep->driver_data = ep;	/* claim */
 
-
-	/*
-	 * DRIVER POLICY CHOICE:  you may want to do this differently.
-	 * One thing to avoid is reusing a bcdDevice revision code
-	 * with different host-visible configurations or behavior
-	 * restrictions -- using ep1in/ep2out vs ep1out/ep3in, etc
-	 */
-	if (gadget_is_net2280 (gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0201);
-	} else if (gadget_is_pxa (gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0203);
-#if 0
-	} else if (gadget_is_sh(gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0204);
-		/* SH has only one configuration; see "loopdefault" */
-		device_desc.bNumConfigurations = 1;
-		/* FIXME make 1 == default.bConfigurationValue */
-#endif
-	} else if (gadget_is_sa1100 (gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0205);
-	} else if (gadget_is_goku (gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0206);
-	} else if (gadget_is_mq11xx (gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0207);
-	} else if (gadget_is_omap (gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0208);
-	} else if (gadget_is_lh7a40x(gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0209);
-	} else if (gadget_is_n9604(gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0210);
-	} else if (gadget_is_pxa27x(gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0211);
-	} else if (gadget_is_s3c2410(gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0212);
-	} else if (gadget_is_at91(gadget)) {
-		device_desc.bcdDevice = __constant_cpu_to_le16 (0x0213);
-	} else {
+	gcnum = usb_gadget_controller_number (gadget);
+	if (gcnum >= 0)
+		device_desc.bcdDevice = cpu_to_le16 (0x0200 + gcnum);
+	else {
 		/* gadget zero is so simple (for now, no altsettings) that
 		 * it SHOULD NOT have problems with bulk-capable hardware.
 		 * so warn about unrcognized controllers, don't panic.
@@ -1212,10 +1191,9 @@ autoconf_fail:
 
 
 	/* ok, we made sense of the hardware ... */
-	dev = kmalloc (sizeof *dev, SLAB_KERNEL);
+	dev = kzalloc(sizeof(*dev), SLAB_KERNEL);
 	if (!dev)
 		return -ENOMEM;
-	memset (dev, 0, sizeof *dev);
 	spin_lock_init (&dev->lock);
 	dev->gadget = gadget;
 	set_gadget_data (gadget, dev);
@@ -1241,12 +1219,6 @@ autoconf_fail:
 	hs_source_desc.bEndpointAddress = fs_source_desc.bEndpointAddress;
 	hs_sink_desc.bEndpointAddress = fs_sink_desc.bEndpointAddress;
 #endif
-
-	if (gadget->is_otg) {
-		otg_descriptor.bmAttributes |= USB_OTG_HNP,
-		source_sink_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
-		loopback_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
-	}
 
 	if (gadget->is_otg) {
 		otg_descriptor.bmAttributes |= USB_OTG_HNP,
@@ -1318,7 +1290,7 @@ static struct usb_gadget_driver zero_driver = {
 #endif
 	.function	= (char *) longname,
 	.bind		= zero_bind,
-	.unbind		= zero_unbind,
+	.unbind		= __exit_p(zero_unbind),
 
 	.setup		= zero_setup,
 	.disconnect	= zero_disconnect,
@@ -1328,9 +1300,7 @@ static struct usb_gadget_driver zero_driver = {
 
 	.driver 	= {
 		.name		= (char *) shortname,
-		// .shutdown = ...
-		// .suspend = ...
-		// .resume = ...
+		.owner		= THIS_MODULE,
 	},
 };
 

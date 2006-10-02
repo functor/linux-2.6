@@ -47,8 +47,10 @@
 #include <linux/rtnetlink.h>
 #include <net/icmp.h>
 #include <net/ipv6.h>
+#include <net/protocol.h>
 #include <linux/ipv6.h>
 #include <linux/icmpv6.h>
+#include <linux/mutex.h>
 
 struct ipcomp6_tfms {
 	struct list_head list;
@@ -56,12 +58,12 @@ struct ipcomp6_tfms {
 	int users;
 };
 
-static DECLARE_MUTEX(ipcomp6_resource_sem);
+static DEFINE_MUTEX(ipcomp6_resource_mutex);
 static void **ipcomp6_scratches;
 static int ipcomp6_scratch_users;
 static LIST_HEAD(ipcomp6_tfms_list);
 
-static int ipcomp6_input(struct xfrm_state *x, struct xfrm_decap_state *decap, struct sk_buff *skb)
+static int ipcomp6_input(struct xfrm_state *x, struct sk_buff *skb)
 {
 	int err = 0;
 	u8 nexthdr = 0;
@@ -130,8 +132,7 @@ static int ipcomp6_input(struct xfrm_state *x, struct xfrm_decap_state *decap, s
 out_put_cpu:
 	put_cpu();
 out:
-	if (tmp_hdr)
-		kfree(tmp_hdr);
+	kfree(tmp_hdr);
 	if (err)
 		goto error_out;
 	return nexthdr;
@@ -207,13 +208,12 @@ static void ipcomp6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	if (type != ICMPV6_DEST_UNREACH && type != ICMPV6_PKT_TOOBIG)
 		return;
 
-	spi = ntohl(ntohs(ipcomph->cpi));
+	spi = htonl(ntohs(ipcomph->cpi));
 	x = xfrm_state_lookup((xfrm_address_t *)&iph->daddr, spi, IPPROTO_COMP, AF_INET6);
 	if (!x)
 		return;
 
-	printk(KERN_DEBUG "pmtu discovery on SA IPCOMP/%08x/"
-			"%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+	printk(KERN_DEBUG "pmtu discovery on SA IPCOMP/%08x/" NIP6_FMT "\n",
 			spi, NIP6(iph->daddr));
 	xfrm_state_put(x);
 }
@@ -228,27 +228,27 @@ static struct xfrm_state *ipcomp6_tunnel_create(struct xfrm_state *x)
 
 	t->id.proto = IPPROTO_IPV6;
 	t->id.spi = xfrm6_tunnel_alloc_spi((xfrm_address_t *)&x->props.saddr);
+	if (!t->id.spi)
+		goto error;
+
 	memcpy(t->id.daddr.a6, x->id.daddr.a6, sizeof(struct in6_addr));
 	memcpy(&t->sel, &x->sel, sizeof(t->sel));
 	t->props.family = AF_INET6;
 	t->props.mode = 1;
 	memcpy(t->props.saddr.a6, x->props.saddr.a6, sizeof(struct in6_addr));
 
-	t->type = xfrm_get_type(IPPROTO_IPV6, t->props.family);
-	if (t->type == NULL)
+	if (xfrm_init_state(t))
 		goto error;
 
-	if (t->type->init_state(t, NULL))
-		goto error;
-
-	t->km.state = XFRM_STATE_VALID;
 	atomic_set(&t->tunnel_users, 1);
 
 out:
 	return t;
 
 error:
+	t->km.state = XFRM_STATE_DEAD;
 	xfrm_state_put(t);
+	t = NULL;
 	goto out;
 }
 
@@ -290,10 +290,10 @@ static void ipcomp6_free_scratches(void)
 	if (!scratches)
 		return;
 
-	for_each_cpu(i) {
+	for_each_possible_cpu(i) {
 		void *scratch = *per_cpu_ptr(scratches, i);
-		if (scratch)
-			vfree(scratch);
+
+		vfree(scratch);
 	}
 
 	free_percpu(scratches);
@@ -313,7 +313,7 @@ static void **ipcomp6_alloc_scratches(void)
 
 	ipcomp6_scratches = scratches;
 
-	for_each_cpu(i) {
+	for_each_possible_cpu(i) {
 		void *scratch = vmalloc(IPCOMP_SCRATCH_SIZE);
 		if (!scratch)
 			return NULL;
@@ -344,10 +344,9 @@ static void ipcomp6_free_tfms(struct crypto_tfm **tfms)
 	if (!tfms)
 		return;
 
-	for_each_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		struct crypto_tfm *tfm = *per_cpu_ptr(tfms, cpu);
-		if (tfm)
-			crypto_free_tfm(tfm);
+		crypto_free_tfm(tfm);
 	}
 	free_percpu(tfms);
 }
@@ -359,7 +358,7 @@ static struct crypto_tfm **ipcomp6_alloc_tfms(const char *alg_name)
 	int cpu;
 
 	/* This can be any valid CPU ID so we don't need locking. */
-	cpu = smp_processor_id();
+	cpu = raw_smp_processor_id();
 
 	list_for_each_entry(pos, &ipcomp6_tfms_list, list) {
 		struct crypto_tfm *tfm;
@@ -385,7 +384,7 @@ static struct crypto_tfm **ipcomp6_alloc_tfms(const char *alg_name)
 	if (!tfms)
 		goto error;
 
-	for_each_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		struct crypto_tfm *tfm = crypto_alloc_tfm(alg_name, 0);
 		if (!tfm)
 			goto error;
@@ -412,15 +411,15 @@ static void ipcomp6_destroy(struct xfrm_state *x)
 	if (!ipcd)
 		return;
 	xfrm_state_delete_tunnel(x);
-	down(&ipcomp6_resource_sem);
+	mutex_lock(&ipcomp6_resource_mutex);
 	ipcomp6_free_data(ipcd);
-	up(&ipcomp6_resource_sem);
+	mutex_unlock(&ipcomp6_resource_mutex);
 	kfree(ipcd);
 
 	xfrm6_tunnel_free_spi((xfrm_address_t *)&x->props.saddr);
 }
 
-static int ipcomp6_init_state(struct xfrm_state *x, void *args)
+static int ipcomp6_init_state(struct xfrm_state *x)
 {
 	int err;
 	struct ipcomp_data *ipcd;
@@ -434,23 +433,22 @@ static int ipcomp6_init_state(struct xfrm_state *x, void *args)
 		goto out;
 
 	err = -ENOMEM;
-	ipcd = kmalloc(sizeof(*ipcd), GFP_KERNEL);
+	ipcd = kzalloc(sizeof(*ipcd), GFP_KERNEL);
 	if (!ipcd)
 		goto out;
 
-	memset(ipcd, 0, sizeof(*ipcd));
 	x->props.header_len = 0;
 	if (x->props.mode)
 		x->props.header_len += sizeof(struct ipv6hdr);
 	
-	down(&ipcomp6_resource_sem);
+	mutex_lock(&ipcomp6_resource_mutex);
 	if (!ipcomp6_alloc_scratches())
 		goto error;
 
 	ipcd->tfms = ipcomp6_alloc_tfms(x->calg->alg_name);
 	if (!ipcd->tfms)
 		goto error;
-	up(&ipcomp6_resource_sem);
+	mutex_unlock(&ipcomp6_resource_mutex);
 
 	if (x->props.mode) {
 		err = ipcomp6_tunnel_attach(x);
@@ -466,10 +464,10 @@ static int ipcomp6_init_state(struct xfrm_state *x, void *args)
 out:
 	return err;
 error_tunnel:
-	down(&ipcomp6_resource_sem);
+	mutex_lock(&ipcomp6_resource_mutex);
 error:
 	ipcomp6_free_data(ipcd);
-	up(&ipcomp6_resource_sem);
+	mutex_unlock(&ipcomp6_resource_mutex);
 	kfree(ipcd);
 
 	goto out;

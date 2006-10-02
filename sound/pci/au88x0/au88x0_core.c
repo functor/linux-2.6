@@ -376,7 +376,7 @@ vortex_mixer_delWTD(vortex_t * vortex, unsigned char mix, unsigned char ch)
 
 static void vortex_mixer_init(vortex_t * vortex)
 {
-	unsigned long addr;
+	u32 addr;
 	int x;
 
 	// FIXME: get rid of this crap.
@@ -639,7 +639,7 @@ static void vortex_src_setupchannel(vortex_t * card, unsigned char src,
 
 static void vortex_srcblock_init(vortex_t * vortex)
 {
-	unsigned long addr;
+	u32 addr;
 	int x;
 	hwwrite(vortex->mmio, VORTEX_SRC_SOURCESIZE, 0x1ff);
 	/*
@@ -1035,7 +1035,7 @@ vortex_fifo_setwtctrl(vortex_t * vortex, int fifo, int ctrl, int priority,
 static void vortex_fifo_init(vortex_t * vortex)
 {
 	int x;
-	unsigned long addr;
+	u32 addr;
 
 	/* ADB DMA channels fifos. */
 	addr = VORTEX_FIFO_ADBCTRL + ((NR_ADB - 1) * 4);
@@ -1054,7 +1054,7 @@ static void vortex_fifo_init(vortex_t * vortex)
 		hwwrite(vortex->mmio, addr, FIFO_U0);
 		if (hwread(vortex->mmio, addr) != FIFO_U0)
 			printk(KERN_ERR
-			       "bad wt fifo reset (0x%08lx, 0x%08x)!\n",
+			       "bad wt fifo reset (0x%08x, 0x%08x)!\n",
 			       addr, hwread(vortex->mmio, addr));
 		vortex_fifo_clearwtdata(vortex, x, FIFO_SIZE);
 		addr -= 4;
@@ -1097,7 +1097,7 @@ static void vortex_adbdma_setstartbuffer(vortex_t * vortex, int adbdma, int sb)
 
 static void
 vortex_adbdma_setbuffers(vortex_t * vortex, int adbdma,
-			 snd_pcm_sgbuf_t * sgbuf, int psize, int count)
+			 struct snd_sg_buf * sgbuf, int psize, int count)
 {
 	stream_t *dma = &vortex->dma_adb[adbdma];
 
@@ -1152,7 +1152,7 @@ vortex_adbdma_setbuffers(vortex_t * vortex, int adbdma,
 
 static void
 vortex_adbdma_setmode(vortex_t * vortex, int adbdma, int ie, int dir,
-		      int fmt, int d, unsigned long offset)
+		      int fmt, int d, u32 offset)
 {
 	stream_t *dma = &vortex->dma_adb[adbdma];
 
@@ -1367,7 +1367,7 @@ static void vortex_wtdma_setstartbuffer(vortex_t * vortex, int wtdma, int sb)
 
 static void
 vortex_wtdma_setbuffers(vortex_t * vortex, int wtdma,
-			snd_pcm_sgbuf_t * sgbuf, int psize, int count)
+			struct snd_sg_buf * sgbuf, int psize, int count)
 {
 	stream_t *dma = &vortex->dma_wt[wtdma];
 
@@ -1411,7 +1411,7 @@ vortex_wtdma_setbuffers(vortex_t * vortex, int wtdma,
 
 static void
 vortex_wtdma_setmode(vortex_t * vortex, int wtdma, int ie, int fmt, int d,
-		     /*int e, */ unsigned long offset)
+		     /*int e, */ u32 offset)
 {
 	stream_t *dma = &vortex->dma_wt[wtdma];
 
@@ -2033,7 +2033,7 @@ vortex_adb_checkinout(vortex_t * vortex, int resmap[], int out, int restype)
 			}
 		}
 	}
-	printk("vortex: FATAL: ResManager: resource type %d exhausted.\n", restype);
+	printk(KERN_ERR "vortex: FATAL: ResManager: resource type %d exhausted.\n", restype);
 	return -ENOMEM;
 }
 
@@ -2165,7 +2165,7 @@ vortex_adb_allocroute(vortex_t * vortex, int dma, int nr_ch, int dir, int type)
 				memset(stream->resources, 0,
 				       sizeof(unsigned char) *
 				       VORTEX_RESOURCE_LAST);
-				printk("vortex: out of A3D sources. Sorry\n");
+				printk(KERN_ERR "vortex: out of A3D sources. Sorry\n");
 				return -EBUSY;
 			}
 			/* (De)Initialize A3D hardware source. */
@@ -2514,7 +2514,7 @@ static void vortex_codec_init(vortex_t * vortex)
 }
 
 static void
-vortex_codec_write(ac97_t * codec, unsigned short addr, unsigned short data)
+vortex_codec_write(struct snd_ac97 * codec, unsigned short addr, unsigned short data)
 {
 
 	vortex_t *card = (vortex_t *) codec->private_data;
@@ -2532,13 +2532,14 @@ vortex_codec_write(ac97_t * codec, unsigned short addr, unsigned short data)
 	hwwrite(card->mmio, VORTEX_CODEC_IO,
 		((addr << VORTEX_CODEC_ADDSHIFT) & VORTEX_CODEC_ADDMASK) |
 		((data << VORTEX_CODEC_DATSHIFT) & VORTEX_CODEC_DATMASK) |
-		VORTEX_CODEC_WRITE);
+		VORTEX_CODEC_WRITE |
+		(codec->num << VORTEX_CODEC_ID_SHIFT) );
 
 	/* Flush Caches. */
 	hwread(card->mmio, VORTEX_CODEC_IO);
 }
 
-static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
+static unsigned short vortex_codec_read(struct snd_ac97 * codec, unsigned short addr)
 {
 
 	vortex_t *card = (vortex_t *) codec->private_data;
@@ -2554,7 +2555,8 @@ static unsigned short vortex_codec_read(ac97_t * codec, unsigned short addr)
 		}
 	}
 	/* set up read address */
-	read_addr = ((addr << VORTEX_CODEC_ADDSHIFT) & VORTEX_CODEC_ADDMASK);
+	read_addr = ((addr << VORTEX_CODEC_ADDSHIFT) & VORTEX_CODEC_ADDMASK) |
+		(codec->num << VORTEX_CODEC_ID_SHIFT) ;
 	hwwrite(card->mmio, VORTEX_CODEC_IO, read_addr);
 
 	/* wait for address */
@@ -2656,7 +2658,7 @@ static void vortex_spdif_init(vortex_t * vortex, int spdif_sr, int spdif_mode)
 
 /* Initialization */
 
-static int vortex_core_init(vortex_t * vortex)
+static int __devinit vortex_core_init(vortex_t * vortex)
 {
 
 	printk(KERN_INFO "Vortex: init.... ");

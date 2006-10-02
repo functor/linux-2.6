@@ -14,6 +14,7 @@
 #include <linux/proc_fs.h>
 #include <linux/user.h>
 #include <linux/a.out.h>
+#include <linux/capability.h>
 #include <linux/elf.h>
 #include <linux/elfcore.h>
 #include <linux/vmalloc.h>
@@ -30,7 +31,7 @@ static int open_kcore(struct inode * inode, struct file * filp)
 
 static ssize_t read_kcore(struct file *, char __user *, size_t, loff_t *);
 
-struct file_operations proc_kcore_operations = {
+const struct file_operations proc_kcore_operations = {
 	.read		= read_kcore,
 	.open		= open_kcore,
 };
@@ -97,7 +98,7 @@ static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 /*
  * determine size of ELF note
  */
-int notesize(struct memelfnote *en)
+static int notesize(struct memelfnote *en)
 {
 	int sz;
 
@@ -112,7 +113,7 @@ int notesize(struct memelfnote *en)
 /*
  * store a note in the header buffer
  */
-char *storenote(struct memelfnote *men, char *bufp)
+static char *storenote(struct memelfnote *men, char *bufp)
 {
 	struct elf_note en;
 
@@ -139,7 +140,7 @@ char *storenote(struct memelfnote *men, char *bufp)
  * store an ELF coredump header in the supplied buffer
  * nphdr is the number of elf_phdr to insert
  */
-void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff, struct kcore_list *clist)
+static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 {
 	struct elf_prstatus prstatus;	/* NT_PRSTATUS */
 	struct elf_prpsinfo prpsinfo;	/* NT_PRPSINFO */
@@ -191,7 +192,7 @@ void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff, struct kcore_list *
 	nhdr->p_align	= 0;
 
 	/* setup ELF PT_LOAD program header for every area */
-	for (m=clist; m; m=m->next) {
+	for (m=kclist; m; m=m->next) {
 		phdr = (struct elf_phdr *) bufp;
 		bufp += sizeof(struct elf_phdr);
 		offset += sizeof(struct elf_phdr);
@@ -287,7 +288,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 			return -ENOMEM;
 		}
 		memset(elf_buf, 0, elf_buflen);
-		elf_kcore_store_hdr(elf_buf, nphdr, elf_buflen, kclist);
+		elf_kcore_store_hdr(elf_buf, nphdr, elf_buflen);
 		read_unlock(&kclist_lock);
 		if (copy_to_user(buffer, elf_buf + *fpos, tsz)) {
 			kfree(elf_buf);

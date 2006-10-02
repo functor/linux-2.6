@@ -135,7 +135,6 @@ static struct net_device_stats *rose_get_stats(struct net_device *dev)
 
 void rose_setup(struct net_device *dev)
 {
-	SET_MODULE_OWNER(dev);
 	dev->mtu		= ROSE_MAX_PACKET_SIZE - 2;
 	dev->hard_start_xmit	= rose_xmit;
 	dev->open		= rose_open;
@@ -149,6 +148,6 @@ void rose_setup(struct net_device *dev)
 	dev->set_mac_address    = rose_set_mac_address;
 
 	/* New-style flags. */
-	dev->flags		= 0;
+	dev->flags		= IFF_NOARP;
 	dev->get_stats = rose_get_stats;
 }

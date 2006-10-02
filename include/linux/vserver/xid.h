@@ -1,21 +1,16 @@
 #ifndef _VX_XID_H
 #define _VX_XID_H
 
-#ifndef	CONFIG_VSERVER
-#warning config options missing
-#endif
+#include <linux/config.h>
 
-#define XID_TAG_SB(sb)	(sb->s_flags & MS_TAGXID)
 
-#define XID_TAG(in)	(!(in) || \
-	(((struct inode *)in)->i_sb && \
-	XID_TAG_SB(((struct inode *)in)->i_sb)))
+#define XID_TAG(in)	(IS_TAGXID(in))
 
 
 #ifdef CONFIG_XID_TAG_NFSD
-#define	XID_TAG_NFSD	1
+#define XID_TAG_NFSD	1
 #else
-#define	XID_TAG_NFSD	0
+#define XID_TAG_NFSD	0
 #endif
 
 
@@ -105,11 +100,17 @@
 #endif
 
 
-#ifdef CONFIG_INOXID_NONE
-#define vx_current_fsxid(sb)	(0)
-#else
+#ifndef CONFIG_INOXID_NONE
 #define vx_current_fsxid(sb)	\
-	(XID_TAG_SB(sb) ? current->xid : 0)
+	((sb)->s_flags & MS_TAGXID ? current->xid : 0)
+#else
+#define vx_current_fsxid(sb)	(0)
+#endif
+
+#ifndef CONFIG_INOXID_INTERN
+#define XIDINO_XID(tag, xid)	(0)
+#else
+#define XIDINO_XID(tag, xid)	((tag) ? (xid) : 0)
 #endif
 
 #define INOXID_UID(tag, uid, gid)	\

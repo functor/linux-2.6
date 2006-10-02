@@ -98,8 +98,8 @@ static struct irqchip sa1100_low_gpio_chip = {
 	.ack		= sa1100_low_gpio_ack,
 	.mask		= sa1100_low_gpio_mask,
 	.unmask		= sa1100_low_gpio_unmask,
-	.type		= sa1100_gpio_type,
-	.wake		= sa1100_low_gpio_wake,
+	.set_type	= sa1100_gpio_type,
+	.set_wake	= sa1100_low_gpio_wake,
 };
 
 /*
@@ -126,7 +126,7 @@ sa1100_high_gpio_handler(unsigned int irq, struct irqdesc *desc,
 		mask >>= 11;
 		do {
 			if (mask & 1)
-				desc->handle(irq, desc, regs);
+				desc_handle_irq(irq, desc, regs);
 			mask >>= 1;
 			irq++;
 			desc++;
@@ -181,8 +181,8 @@ static struct irqchip sa1100_high_gpio_chip = {
 	.ack		= sa1100_high_gpio_ack,
 	.mask		= sa1100_high_gpio_mask,
 	.unmask		= sa1100_high_gpio_unmask,
-	.type		= sa1100_gpio_type,
-	.wake		= sa1100_high_gpio_wake,
+	.set_type	= sa1100_gpio_type,
+	.set_wake	= sa1100_high_gpio_wake,
 };
 
 /*
@@ -199,10 +199,26 @@ static void sa1100_unmask_irq(unsigned int irq)
 	ICMR |= (1 << irq);
 }
 
+/*
+ * Apart form GPIOs, only the RTC alarm can be a wakeup event.
+ */
+static int sa1100_set_wake(unsigned int irq, unsigned int on)
+{
+	if (irq == IRQ_RTCAlrm) {
+		if (on)
+			PWER |= PWER_RTC;
+		else
+			PWER &= ~PWER_RTC;
+		return 0;
+	}
+	return -EINVAL;
+}
+
 static struct irqchip sa1100_normal_chip = {
 	.ack		= sa1100_mask_irq,
 	.mask		= sa1100_mask_irq,
 	.unmask		= sa1100_unmask_irq,
+	.set_wake	= sa1100_set_wake,
 };
 
 static struct resource irq_resource = {

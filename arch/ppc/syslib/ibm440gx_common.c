@@ -1,10 +1,8 @@
 /*
- * arch/ppc/kernel/ibm440gx_common.c
- *
  * PPC440GX system library
  *
  * Eugene Surovegin <eugene.surovegin@zultys.com> or <ebs@ebshome.net>
- * Copyright (c) 2003, 2004 Zultys Technologies
+ * Copyright (c) 2003 - 2006 Zultys Technologies
  *
  * This program is free software; you can redistribute  it and/or modify it
  * under  the terms of  the GNU General  Public License as published by the
@@ -34,6 +32,10 @@ void __init ibm440gx_get_clocks(struct ibm44x_clocks* p, unsigned int sys_clk,
 	u32 plld  = CPR_READ(DCRN_CPR_PLLD);
 	u32 uart0 = SDR_READ(DCRN_SDR_UART0);
 	u32 uart1 = SDR_READ(DCRN_SDR_UART1);
+#ifdef CONFIG_440EP
+	u32 uart2 = SDR_READ(DCRN_SDR_UART2);
+	u32 uart3 = SDR_READ(DCRN_SDR_UART3);
+#endif
 
 	/* Dividers */
 	u32 fbdv   = __fix_zero((plld >> 24) & 0x1f, 32);
@@ -96,6 +98,17 @@ bypass:
 		p->uart1 = ser_clk;
 	else
 		p->uart1 = p->plb / __fix_zero(uart1 & 0xff, 256);
+#ifdef CONFIG_440EP
+	if (uart2 & 0x00800000)
+		p->uart2 = ser_clk;
+	else
+		p->uart2 = p->plb / __fix_zero(uart2 & 0xff, 256);
+
+	if (uart3 & 0x00800000)
+		p->uart3 = ser_clk;
+	else
+		p->uart3 = p->plb / __fix_zero(uart3 & 0xff, 256);
+#endif
 }
 
 /* Issue L2C diagnostic command */
@@ -221,9 +234,10 @@ void __init ibm440gx_l2c_setup(struct ibm44x_clocks* p)
 	/* Disable L2C on rev.A, rev.B and 800MHz version of rev.C,
 	   enable it on all other revisions
 	 */
-	u32 pvr = mfspr(SPRN_PVR);
-	if (pvr == PVR_440GX_RA || pvr == PVR_440GX_RB ||
-	    (pvr == PVR_440GX_RC && p->cpu > 667000000))
+	if (strcmp(cur_cpu_spec->cpu_name, "440GX Rev. A") == 0 ||
+			strcmp(cur_cpu_spec->cpu_name, "440GX Rev. B") == 0
+			|| (strcmp(cur_cpu_spec->cpu_name, "440GX Rev. C")
+				== 0 && p->cpu > 667000000))
 		ibm440gx_l2c_disable();
 	else
 		ibm440gx_l2c_enable();
@@ -268,3 +282,14 @@ int ibm440gx_show_cpuinfo(struct seq_file *m){
 	return 0;
 }
 
+void __init ibm440gx_platform_init(unsigned long r3, unsigned long r4,
+				   unsigned long r5, unsigned long r6,
+				   unsigned long r7)
+{
+	/* Erratum 440_43 workaround, disable L1 cache parity checking */
+	if (!strcmp(cur_cpu_spec->cpu_name, "440GX Rev. C") ||
+	    !strcmp(cur_cpu_spec->cpu_name, "440GX Rev. F"))
+		mtspr(SPRN_CCR1, mfspr(SPRN_CCR1) | CCR1_DPC);
+
+	ibm44x_platform_init(r3, r4, r5, r6, r7);
+}

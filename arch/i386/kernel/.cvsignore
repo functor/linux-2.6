@@ -2,3 +2,6 @@ asm-offsets.s
 vmlinux.lds.s
 vmlinux.lds
 vsyscall.lds
+.*.cmd
+*.mod.c
+*.ko

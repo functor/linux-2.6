@@ -26,7 +26,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/fb.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 
 #include <asm/hardware.h>
@@ -883,7 +883,7 @@ acornfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
  * Note that we are entered with the kernel locked.
  */
 static int
-acornfb_mmap(struct fb_info *info, struct file *file, struct vm_area_struct *vma)
+acornfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	unsigned long off, start;
 	u32 len;
@@ -926,7 +926,6 @@ static struct fb_ops acornfb_ops = {
 	.fb_copyarea	= cfb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
 	.fb_mmap	= acornfb_mmap,
-	.fb_cursor	= soft_cursor,
 };
 
 /*
@@ -1270,7 +1269,7 @@ free_unused_pages(unsigned int virtual_start, unsigned int virtual_end)
 		 */
 		page = virt_to_page(virtual_start);
 		ClearPageReserved(page);
-		set_page_count(page, 1);
+		init_page_count(page);
 		free_page(virtual_start);
 
 		virtual_start += PAGE_SIZE;
@@ -1280,7 +1279,7 @@ free_unused_pages(unsigned int virtual_start, unsigned int virtual_end)
 	printk("acornfb: freed %dK memory\n", mb_freed);
 }
 
-static int __init acornfb_probe(struct device *dev)
+static int __init acornfb_probe(struct platform_device *dev)
 {
 	unsigned long size;
 	u_int h_sync, v_sync;
@@ -1293,7 +1292,7 @@ static int __init acornfb_probe(struct device *dev)
 
 	acornfb_init_fbinfo();
 
-	current_par.dev = dev;
+	current_par.dev = &dev->dev;
 
 	if (current_par.montype == -1)
 		current_par.montype = acornfb_detect_monitortype();
@@ -1309,7 +1308,7 @@ static int __init acornfb_probe(struct device *dev)
 	/*
 	 * Try to select a suitable default mode
 	 */
-	for (i = 0; i < sizeof(modedb) / sizeof(*modedb); i++) {
+	for (i = 0; i < ARRAY_SIZE(modedb); i++) {
 		unsigned long hs;
 
 		hs = modedb[i].refresh *
@@ -1381,7 +1380,7 @@ static int __init acornfb_probe(struct device *dev)
 	 */
 	free_unused_pages(PAGE_OFFSET + size, PAGE_OFFSET + MAX_SIZE);
 #endif
-	
+
 	fb_info.fix.smem_len = size;
 	current_par.palette_size   = VIDC_PALETTE_SIZE;
 
@@ -1392,7 +1391,7 @@ static int __init acornfb_probe(struct device *dev)
 	 */
 	do {
 		rc = fb_find_mode(&fb_info.var, &fb_info, NULL, modedb,
-				 sizeof(modedb) / sizeof(*modedb),
+				 ARRAY_SIZE(modedb),
 				 &acornfb_default_mode, DEFAULT_BPP);
 		/*
 		 * If we found an exact match, all ok.
@@ -1409,7 +1408,7 @@ static int __init acornfb_probe(struct device *dev)
 			break;
 
 		rc = fb_find_mode(&fb_info.var, &fb_info, NULL, modedb,
-				 sizeof(modedb) / sizeof(*modedb),
+				 ARRAY_SIZE(modedb),
 				 &acornfb_default_mode, DEFAULT_BPP);
 		if (rc)
 			break;
@@ -1454,15 +1453,16 @@ static int __init acornfb_probe(struct device *dev)
 	return 0;
 }
 
-static struct device_driver acornfb_driver = {
-	.name	= "acornfb",
-	.bus	= &platform_bus_type,
+static struct platform_driver acornfb_driver = {
 	.probe	= acornfb_probe,
+	.driver	= {
+		.name	= "acornfb",
+	},
 };
 
 static int __init acornfb_init(void)
 {
-	return driver_register(&acornfb_driver);
+	return platform_driver_register(&acornfb_driver);
 }
 
 module_init(acornfb_init);

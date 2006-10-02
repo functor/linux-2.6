@@ -24,7 +24,6 @@
    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  * ------------------------------------------------------------------------ */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -122,14 +121,16 @@ static struct i2c_adapter parport_adapter = {
 
 static int __init i2c_parport_init(void)
 {
-	int type_count;
-
-	type_count = sizeof(adapter_parm)/sizeof(struct adapter_parm);
-	if (type < 0 || type >= type_count) {
-		printk(KERN_WARNING "i2c-parport: invalid type (%d)\n", type);
-		type = 0;
+	if (type < 0) {
+		printk(KERN_WARNING "i2c-parport: adapter type unspecified\n");
+		return -ENODEV;
 	}
-	
+
+	if (type >= ARRAY_SIZE(adapter_parm)) {
+		printk(KERN_WARNING "i2c-parport: invalid type (%d)\n", type);
+		return -ENODEV;
+	}
+
 	if (base == 0) {
 		printk(KERN_INFO "i2c-parport: using default base 0x%x\n", DEFAULT_BASE);
 		base = DEFAULT_BASE;
@@ -153,7 +154,7 @@ static int __init i2c_parport_init(void)
 		release_region(base, 3);
 		return -ENODEV;
 	}
-	
+
 	return 0;
 }
 

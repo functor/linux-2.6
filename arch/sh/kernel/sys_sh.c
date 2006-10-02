@@ -21,6 +21,7 @@
 #include <linux/mman.h>
 #include <linux/file.h>
 #include <linux/utsname.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>
@@ -79,6 +80,10 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		    (!vma || addr + len <= vma->vm_start))
 			return addr;
 	}
+	if (len <= mm->cached_hole_size) {
+	        mm->cached_hole_size = 0;
+		mm->free_area_cache = TASK_UNMAPPED_BASE;
+	}
 	if (flags & MAP_PRIVATE)
 		addr = PAGE_ALIGN(mm->free_area_cache);
 	else
@@ -95,6 +100,7 @@ full_search:
 			 */
 			if (start_addr != TASK_UNMAPPED_BASE) {
 				start_addr = addr = TASK_UNMAPPED_BASE;
+				mm->cached_hole_size = 0;
 				goto full_search;
 			}
 			return -ENOMEM;
@@ -106,6 +112,9 @@ full_search:
 			mm->free_area_cache = addr + len;
 			return addr;
 		}
+		if (addr + mm->cached_hole_size < vma->vm_start)
+		        mm->cached_hole_size = vma->vm_start - addr;
+
 		addr = vma->vm_end;
 		if (!(flags & MAP_PRIVATE))
 			addr = COLOUR_ALIGN(addr);
@@ -259,7 +268,7 @@ asmlinkage int sys_uname(struct old_utsname * name)
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
-	err=copy_to_user(name, &system_utsname, sizeof (*name));
+	err=copy_to_user(name, vx_new_utsname(), sizeof (*name));
 	up_read(&uts_sem);
 	return err?-EFAULT:0;
 }

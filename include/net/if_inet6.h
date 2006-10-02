@@ -24,6 +24,7 @@
 #define IF_RA_MANAGED	0x40
 #define IF_RA_RCVD	0x20
 #define IF_RS_SENT	0x10
+#define IF_READY	0x80000000
 
 /* prefix flags */
 #define IF_PREFIX_ONLINK	0x01
@@ -82,6 +83,7 @@ struct ipv6_mc_socklist
 	struct in6_addr		addr;
 	int			ifindex;
 	struct ipv6_mc_socklist *next;
+	rwlock_t		sflock;
 	unsigned int		sfmode;		/* MCAST_{INCLUDE,EXCLUDE} */
 	struct ip6_sf_socklist	*sflist;
 };
@@ -178,11 +180,8 @@ struct inet6_dev
 
 #ifdef CONFIG_IPV6_PRIVACY
 	u8			rndid[8];
-	u8			entropy[8];
 	struct timer_list	regen_timer;
 	struct inet6_ifaddr	*tempaddr_list;
-	__u8			work_eui64[8];
-	__u8			work_digest[16];
 #endif
 
 	struct neigh_parms	*nd_parms;

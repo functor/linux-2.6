@@ -18,6 +18,7 @@
 #include <linux/security.h>
 #include <linux/audit.h>
 #include <linux/signal.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/pgtable.h>
 #include <asm/processor.h>
@@ -254,7 +255,7 @@ get_rnat (struct task_struct *task, struct switch_stack *sw,
 	long num_regs, nbits;
 	struct pt_regs *pt;
 
-	pt = ia64_task_regs(task);
+	pt = task_pt_regs(task);
 	kbsp = (unsigned long *) sw->ar_bspstore;
 	ubspstore = (unsigned long *) pt->ar_bspstore;
 
@@ -314,7 +315,7 @@ put_rnat (struct task_struct *task, struct switch_stack *sw,
 	struct pt_regs *pt;
 	unsigned long cfm, *urbs_kargs;
 
-	pt = ia64_task_regs(task);
+	pt = task_pt_regs(task);
 	kbsp = (unsigned long *) sw->ar_bspstore;
 	ubspstore = (unsigned long *) pt->ar_bspstore;
 
@@ -407,7 +408,7 @@ ia64_peek (struct task_struct *child, struct switch_stack *child_stack,
 
 	urbs_end = (long *) user_rbs_end;
 	laddr = (unsigned long *) addr;
-	child_regs = ia64_task_regs(child);
+	child_regs = task_pt_regs(child);
 	bspstore = (unsigned long *) child_regs->ar_bspstore;
 	krbs = (unsigned long *) child + IA64_RBS_OFFSET/8;
 	if (on_kernel_rbs(addr, (unsigned long) bspstore,
@@ -467,7 +468,7 @@ ia64_poke (struct task_struct *child, struct switch_stack *child_stack,
 	struct pt_regs *child_regs;
 
 	laddr = (unsigned long *) addr;
-	child_regs = ia64_task_regs(child);
+	child_regs = task_pt_regs(child);
 	bspstore = (unsigned long *) child_regs->ar_bspstore;
 	krbs = (unsigned long *) child + IA64_RBS_OFFSET/8;
 	if (on_kernel_rbs(addr, (unsigned long) bspstore,
@@ -567,7 +568,7 @@ thread_matches (struct task_struct *thread, unsigned long addr)
 		 */
 		return 0;
 
-	thread_regs = ia64_task_regs(thread);
+	thread_regs = task_pt_regs(thread);
 	thread_rbs_end = ia64_get_user_rbs_end(thread, thread_regs, NULL);
 	if (!on_kernel_rbs(addr, thread_regs->ar_bspstore, thread_rbs_end))
 		return 0;
@@ -587,8 +588,9 @@ thread_matches (struct task_struct *thread, unsigned long addr)
 static struct task_struct *
 find_thread_for_addr (struct task_struct *child, unsigned long addr)
 {
-	struct task_struct *g, *p;
+	struct task_struct *p;
 	struct mm_struct *mm;
+	struct list_head *this, *next;
 	int mm_users;
 
 	if (!(mm = get_task_mm(child)))
@@ -600,28 +602,21 @@ find_thread_for_addr (struct task_struct *child, unsigned long addr)
 		goto out;		/* not multi-threaded */
 
 	/*
-	 * First, traverse the child's thread-list.  Good for scalability with
-	 * NPTL-threads.
+	 * Traverse the current process' children list.  Every task that
+	 * one attaches to becomes a child.  And it is only attached children
+	 * of the debugger that are of interest (ptrace_check_attach checks
+	 * for this).
 	 */
-	p = child;
-	do {
-		if (thread_matches(p, addr)) {
-			child = p;
-			goto out;
-		}
-		if (mm_users-- <= 1)
-			goto out;
-	} while ((p = next_thread(p)) != child);
-
-	do_each_thread(g, p) {
-		if (child->mm != mm)
+ 	list_for_each_safe(this, next, &current->children) {
+		p = list_entry(this, struct task_struct, sibling);
+		if (p->mm != mm)
 			continue;
-
 		if (thread_matches(p, addr)) {
 			child = p;
 			goto out;
 		}
-	} while_each_thread(g, p);
+	}
+
   out:
 	mmput(mm);
 	return child;
@@ -633,7 +628,7 @@ find_thread_for_addr (struct task_struct *child, unsigned long addr)
 inline void
 ia64_flush_fph (struct task_struct *task)
 {
-	struct ia64_psr *psr = ia64_psr(ia64_task_regs(task));
+	struct ia64_psr *psr = ia64_psr(task_pt_regs(task));
 
 	/*
 	 * Prevent migrating this task while
@@ -659,7 +654,7 @@ ia64_flush_fph (struct task_struct *task)
 void
 ia64_sync_fph (struct task_struct *task)
 {
-	struct ia64_psr *psr = ia64_psr(ia64_task_regs(task));
+	struct ia64_psr *psr = ia64_psr(task_pt_regs(task));
 
 	ia64_flush_fph(task);
 	if (!(task->thread.flags & IA64_THREAD_FPH_VALID)) {
@@ -725,12 +720,32 @@ convert_to_non_syscall (struct task_struct *child, struct pt_regs  *pt,
 			break;
 	}
 
+	/*
+	 * Note: at the time of this call, the target task is blocked
+	 * in notify_resume_user() and by clearling PRED_LEAVE_SYSCALL
+	 * (aka, "pLvSys") we redirect execution from
+	 * .work_pending_syscall_end to .work_processed_kernel.
+	 */
 	unw_get_pr(&prev_info, &pr);
-	pr &= ~(1UL << PRED_SYSCALL);
+	pr &= ~((1UL << PRED_SYSCALL) | (1UL << PRED_LEAVE_SYSCALL));
 	pr |=  (1UL << PRED_NON_SYSCALL);
 	unw_set_pr(&prev_info, pr);
 
 	pt->cr_ifs = (1UL << 63) | cfm;
+	/*
+	 * Clear the memory that is NOT written on syscall-entry to
+	 * ensure we do not leak kernel-state to user when execution
+	 * resumes.
+	 */
+	pt->r2 = 0;
+	pt->r3 = 0;
+	pt->r14 = 0;
+	memset(&pt->r16, 0, 16*8);	/* clear r16-r31 */
+	memset(&pt->f6, 0, 6*16);	/* clear f6-f11 */
+	pt->b7 = 0;
+	pt->ar_ccv = 0;
+	pt->ar_csd = 0;
+	pt->ar_ssd = 0;
 }
 
 static int
@@ -780,7 +795,7 @@ access_uarea (struct task_struct *child, unsigned long addr,
 					  + offsetof(struct pt_regs, reg)))
 
 
-	pt = ia64_task_regs(child);
+	pt = task_pt_regs(child);
 	sw = (struct switch_stack *) (child->thread.ksp + 16);
 
 	if ((addr & 0x7) != 0) {
@@ -1106,7 +1121,7 @@ ptrace_getregs (struct task_struct *child, struct pt_all_user_regs __user *ppr)
 	if (!access_ok(VERIFY_WRITE, ppr, sizeof(struct pt_all_user_regs)))
 		return -EIO;
 
-	pt = ia64_task_regs(child);
+	pt = task_pt_regs(child);
 	sw = (struct switch_stack *) (child->thread.ksp + 16);
 	unw_init_from_blocked_task(&info, child);
 	if (unw_unwind_to_user(&info) < 0) {
@@ -1251,7 +1266,7 @@ ptrace_setregs (struct task_struct *child, struct pt_all_user_regs __user *ppr)
 	if (!access_ok(VERIFY_READ, ppr, sizeof(struct pt_all_user_regs)))
 		return -EIO;
 
-	pt = ia64_task_regs(child);
+	pt = task_pt_regs(child);
 	sw = (struct switch_stack *) (child->thread.ksp + 16);
 	unw_init_from_blocked_task(&info, child);
 	if (unw_unwind_to_user(&info) < 0) {
@@ -1389,7 +1404,7 @@ ptrace_setregs (struct task_struct *child, struct pt_all_user_regs __user *ppr)
 void
 ptrace_disable (struct task_struct *child)
 {
-	struct ia64_psr *child_psr = ia64_psr(ia64_task_regs(child));
+	struct ia64_psr *child_psr = ia64_psr(task_pt_regs(child));
 
 	/* make sure the single step/taken-branch trap bits are not set: */
 	child_psr->ss = 0;
@@ -1408,14 +1423,7 @@ sys_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data)
 	lock_kernel();
 	ret = -EPERM;
 	if (request == PTRACE_TRACEME) {
-		/* are we already being traced? */
-		if (current->ptrace & PT_PTRACED)
-			goto out;
-		ret = security_ptrace(current->parent, current);
-		if (ret)
-			goto out;
-		current->ptrace |= PT_PTRACED;
-		ret = 0;
+		ret = ptrace_traceme();
 		goto out;
 	}
 
@@ -1452,7 +1460,7 @@ sys_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data)
 	if (ret < 0)
 		goto out_tsk;
 
-	pt = ia64_task_regs(child);
+	pt = task_pt_regs(child);
 	sw = (struct switch_stack *) (child->thread.ksp + 16);
 
 	switch (request) {
@@ -1640,7 +1648,7 @@ syscall_trace_enter (long arg0, long arg1, long arg2, long arg3,
 			arch = AUDIT_ARCH_IA64;
 		}
 
-		audit_syscall_entry(current, arch, syscall, arg0, arg1, arg2, arg3);
+		audit_syscall_entry(arch, syscall, arg0, arg1, arg2, arg3);
 	}
 
 }
@@ -1652,8 +1660,14 @@ syscall_trace_leave (long arg0, long arg1, long arg2, long arg3,
 		     long arg4, long arg5, long arg6, long arg7,
 		     struct pt_regs regs)
 {
-	if (unlikely(current->audit_context))
-		audit_syscall_exit(current, AUDITSC_RESULT(regs.r10), regs.r8);
+	if (unlikely(current->audit_context)) {
+		int success = AUDITSC_RESULT(regs.r10);
+		long result = regs.r8;
+
+		if (success != AUDITSC_SUCCESS)
+			result = -result;
+		audit_syscall_exit(success, result);
+	}
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE)
 	    && (current->ptrace & PT_PTRACED))

@@ -68,6 +68,7 @@
 #define PAL_SHUTDOWN		40	/* enter processor shutdown state */
 #define PAL_PREFETCH_VISIBILITY	41	/* Make Processor Prefetches Visible */
 #define PAL_LOGICAL_TO_PHYSICAL 42	/* returns information on logical to physical processor mapping */
+#define PAL_CACHE_SHARED_INFO	43	/* returns information on caches shared by logical processor */
 
 #define PAL_COPY_PAL		256	/* relocate PAL procedures and PAL PMI */
 #define PAL_HALT_INFO		257	/* return the low power capabilities of processor */
@@ -75,6 +76,8 @@
 #define PAL_CACHE_READ		259	/* read tag & data of cacheline for diagnostic testing */
 #define PAL_CACHE_WRITE		260	/* write tag & data of cacheline for diagnostic testing */
 #define PAL_VM_TR_READ		261	/* read contents of translation register */
+#define PAL_GET_PSTATE		262	/* get the current P-state */
+#define PAL_SET_PSTATE		263	/* set the P-state */
 
 #ifndef __ASSEMBLY__
 
@@ -128,7 +131,7 @@ typedef u64				pal_cache_line_state_t;
 #define PAL_CACHE_LINE_STATE_MODIFIED	3	/* Modified */
 
 typedef struct pal_freq_ratio {
-	u64 den : 32, num : 32;	/* numerator & denominator */
+	u32 den, num;		/* numerator & denominator */
 } itc_ratio, proc_ratio;
 
 typedef	union  pal_cache_config_info_1_s {
@@ -149,10 +152,10 @@ typedef	union  pal_cache_config_info_1_s {
 
 typedef	union  pal_cache_config_info_2_s {
 	struct {
-		u64		cache_size	: 32,	/*cache size in bytes*/
+		u32		cache_size;		/*cache size in bytes*/
 
 
-				alias_boundary	: 8,	/* 39-32 aliased addr
+		u32		alias_boundary	: 8,	/* 39-32 aliased addr
 							 * separation for max
 							 * performance.
 							 */
@@ -925,7 +928,7 @@ static inline s64
 ia64_pal_cache_flush (u64 cache_type, u64 invalidate, u64 *progress, u64 *vector)
 {
 	struct ia64_pal_retval iprv;
-	PAL_CALL_IC_OFF(iprv, PAL_CACHE_FLUSH, cache_type, invalidate, *progress);
+	PAL_CALL(iprv, PAL_CACHE_FLUSH, cache_type, invalidate, *progress);
 	if (vector)
 		*vector = iprv.v0;
 	*progress = iprv.v1;
@@ -1108,6 +1111,25 @@ ia64_pal_halt_info (pal_power_mgmt_info_u_t *power_buf)
 {
 	struct ia64_pal_retval iprv;
 	PAL_CALL_STK(iprv, PAL_HALT_INFO, (unsigned long) power_buf, 0, 0);
+	return iprv.status;
+}
+
+/* Get the current P-state information */
+static inline s64
+ia64_pal_get_pstate (u64 *pstate_index)
+{
+	struct ia64_pal_retval iprv;
+	PAL_CALL_STK(iprv, PAL_GET_PSTATE, 0, 0, 0);
+	*pstate_index = iprv.v0;
+	return iprv.status;
+}
+
+/* Set the P-state */
+static inline s64
+ia64_pal_set_pstate (u64 pstate_index)
+{
+	struct ia64_pal_retval iprv;
+	PAL_CALL_STK(iprv, PAL_SET_PSTATE, pstate_index, 0, 0);
 	return iprv.status;
 }
 
@@ -1619,10 +1641,36 @@ ia64_pal_logical_to_phys(u64 proc_number, pal_logical_to_physical_t *mapping)
 
 	if (iprv.status == PAL_STATUS_SUCCESS)
 	{
-		if (proc_number == 0)
-			mapping->overview.overview_data = iprv.v0;
+		mapping->overview.overview_data = iprv.v0;
 		mapping->ppli1.ppli1_data = iprv.v1;
 		mapping->ppli2.ppli2_data = iprv.v2;
+	}
+
+	return iprv.status;
+}
+
+typedef struct pal_cache_shared_info_s
+{
+	u64 num_shared;
+	pal_proc_n_log_info1_t ppli1;
+	pal_proc_n_log_info2_t ppli2;
+} pal_cache_shared_info_t;
+
+/* Get information on logical to physical processor mappings. */
+static inline s64
+ia64_pal_cache_shared_info(u64 level,
+		u64 type,
+		u64 proc_number,
+		pal_cache_shared_info_t *info)
+{
+	struct ia64_pal_retval iprv;
+
+	PAL_CALL(iprv, PAL_CACHE_SHARED_INFO, level, type, proc_number);
+
+	if (iprv.status == PAL_STATUS_SUCCESS) {
+		info->num_shared = iprv.v0;
+		info->ppli1.ppli1_data = iprv.v1;
+		info->ppli2.ppli2_data = iprv.v2;
 	}
 
 	return iprv.status;

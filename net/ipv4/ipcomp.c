@@ -24,10 +24,12 @@
 #include <linux/list.h>
 #include <linux/vmalloc.h>
 #include <linux/rtnetlink.h>
+#include <linux/mutex.h>
 #include <net/ip.h>
 #include <net/xfrm.h>
 #include <net/icmp.h>
 #include <net/ipcomp.h>
+#include <net/protocol.h>
 
 struct ipcomp_tfms {
 	struct list_head list;
@@ -35,7 +37,7 @@ struct ipcomp_tfms {
 	int users;
 };
 
-static DECLARE_MUTEX(ipcomp_resource_sem);
+static DEFINE_MUTEX(ipcomp_resource_mutex);
 static void **ipcomp_scratches;
 static int ipcomp_scratch_users;
 static LIST_HEAD(ipcomp_tfms_list);
@@ -79,8 +81,7 @@ out:
 	return err;
 }
 
-static int ipcomp_input(struct xfrm_state *x,
-                        struct xfrm_decap_state *decap, struct sk_buff *skb)
+static int ipcomp_input(struct xfrm_state *x, struct sk_buff *skb)
 {
 	u8 nexthdr;
 	int err = 0;
@@ -209,13 +210,13 @@ static void ipcomp4_err(struct sk_buff *skb, u32 info)
 	    skb->h.icmph->code != ICMP_FRAG_NEEDED)
 		return;
 
-	spi = ntohl(ntohs(ipch->cpi));
+	spi = htonl(ntohs(ipch->cpi));
 	x = xfrm_state_lookup((xfrm_address_t *)&iph->daddr,
 	                      spi, IPPROTO_COMP, AF_INET);
 	if (!x)
 		return;
-	NETDEBUG(printk(KERN_DEBUG "pmtu discovery on SA IPCOMP/%08x/%u.%u.%u.%u\n",
-	       spi, NIPQUAD(iph->daddr)));
+	NETDEBUG(KERN_DEBUG "pmtu discovery on SA IPCOMP/%08x/%u.%u.%u.%u\n",
+		 spi, NIPQUAD(iph->daddr));
 	xfrm_state_put(x);
 }
 
@@ -236,15 +237,10 @@ static struct xfrm_state *ipcomp_tunnel_create(struct xfrm_state *x)
 	t->props.mode = 1;
 	t->props.saddr.a4 = x->props.saddr.a4;
 	t->props.flags = x->props.flags;
-	
-	t->type = xfrm_get_type(IPPROTO_IPIP, t->props.family);
-	if (t->type == NULL)
-		goto error;
-		
-	if (t->type->init_state(t, NULL))
+
+	if (xfrm_init_state(t))
 		goto error;
 
-	t->km.state = XFRM_STATE_VALID;
 	atomic_set(&t->tunnel_users, 1);
 out:
 	return t;
@@ -257,7 +253,7 @@ error:
 }
 
 /*
- * Must be protected by xfrm_cfg_sem.  State and tunnel user references are
+ * Must be protected by xfrm_cfg_mutex.  State and tunnel user references are
  * always incremented on success.
  */
 static int ipcomp_tunnel_attach(struct xfrm_state *x)
@@ -294,11 +290,8 @@ static void ipcomp_free_scratches(void)
 	if (!scratches)
 		return;
 
-	for_each_cpu(i) {
-		void *scratch = *per_cpu_ptr(scratches, i);
-		if (scratch)
-			vfree(scratch);
-	}
+	for_each_possible_cpu(i)
+		vfree(*per_cpu_ptr(scratches, i));
 
 	free_percpu(scratches);
 }
@@ -317,7 +310,7 @@ static void **ipcomp_alloc_scratches(void)
 
 	ipcomp_scratches = scratches;
 
-	for_each_cpu(i) {
+	for_each_possible_cpu(i) {
 		void *scratch = vmalloc(IPCOMP_SCRATCH_SIZE);
 		if (!scratch)
 			return NULL;
@@ -348,10 +341,9 @@ static void ipcomp_free_tfms(struct crypto_tfm **tfms)
 	if (!tfms)
 		return;
 
-	for_each_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		struct crypto_tfm *tfm = *per_cpu_ptr(tfms, cpu);
-		if (tfm)
-			crypto_free_tfm(tfm);
+		crypto_free_tfm(tfm);
 	}
 	free_percpu(tfms);
 }
@@ -363,7 +355,7 @@ static struct crypto_tfm **ipcomp_alloc_tfms(const char *alg_name)
 	int cpu;
 
 	/* This can be any valid CPU ID so we don't need locking. */
-	cpu = smp_processor_id();
+	cpu = raw_smp_processor_id();
 
 	list_for_each_entry(pos, &ipcomp_tfms_list, list) {
 		struct crypto_tfm *tfm;
@@ -389,7 +381,7 @@ static struct crypto_tfm **ipcomp_alloc_tfms(const char *alg_name)
 	if (!tfms)
 		goto error;
 
-	for_each_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		struct crypto_tfm *tfm = crypto_alloc_tfm(alg_name, 0);
 		if (!tfm)
 			goto error;
@@ -416,13 +408,13 @@ static void ipcomp_destroy(struct xfrm_state *x)
 	if (!ipcd)
 		return;
 	xfrm_state_delete_tunnel(x);
-	down(&ipcomp_resource_sem);
+	mutex_lock(&ipcomp_resource_mutex);
 	ipcomp_free_data(ipcd);
-	up(&ipcomp_resource_sem);
+	mutex_unlock(&ipcomp_resource_mutex);
 	kfree(ipcd);
 }
 
-static int ipcomp_init_state(struct xfrm_state *x, void *args)
+static int ipcomp_init_state(struct xfrm_state *x)
 {
 	int err;
 	struct ipcomp_data *ipcd;
@@ -445,14 +437,14 @@ static int ipcomp_init_state(struct xfrm_state *x, void *args)
 	if (x->props.mode)
 		x->props.header_len += sizeof(struct iphdr);
 
-	down(&ipcomp_resource_sem);
+	mutex_lock(&ipcomp_resource_mutex);
 	if (!ipcomp_alloc_scratches())
 		goto error;
 
 	ipcd->tfms = ipcomp_alloc_tfms(x->calg->alg_name);
 	if (!ipcd->tfms)
 		goto error;
-	up(&ipcomp_resource_sem);
+	mutex_unlock(&ipcomp_resource_mutex);
 
 	if (x->props.mode) {
 		err = ipcomp_tunnel_attach(x);
@@ -469,10 +461,10 @@ out:
 	return err;
 
 error_tunnel:
-	down(&ipcomp_resource_sem);
+	mutex_lock(&ipcomp_resource_mutex);
 error:
 	ipcomp_free_data(ipcd);
-	up(&ipcomp_resource_sem);
+	mutex_unlock(&ipcomp_resource_mutex);
 	kfree(ipcd);
 	goto out;
 }

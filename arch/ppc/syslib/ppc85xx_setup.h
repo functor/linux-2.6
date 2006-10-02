@@ -1,9 +1,7 @@
 /*
- * arch/ppc/syslib/ppc85xx_setup.h
- *
  * MPC85XX common board definitions
  *
- * Maintainer: Kumar Gala <kumar.gala@freescale.com>
+ * Maintainer: Kumar Gala <galak@kernel.crashing.org>
  *
  * Copyright 2004 Freescale Semiconductor Inc.
  *

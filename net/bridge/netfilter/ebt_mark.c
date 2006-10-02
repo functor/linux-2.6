@@ -23,10 +23,9 @@ static int ebt_target_mark(struct sk_buff **pskb, unsigned int hooknr,
 {
 	struct ebt_mark_t_info *info = (struct ebt_mark_t_info *)data;
 
-	if ((*pskb)->nfmark != info->mark) {
+	if ((*pskb)->nfmark != info->mark)
 		(*pskb)->nfmark = info->mark;
-		(*pskb)->nfcache |= NFC_ALTERED;
-	}
+
 	return info->target;
 }
 
@@ -53,16 +52,16 @@ static struct ebt_target mark_target =
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ebt_mark_init(void)
 {
 	return ebt_register_target(&mark_target);
 }
 
-static void __exit fini(void)
+static void __exit ebt_mark_fini(void)
 {
 	ebt_unregister_target(&mark_target);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ebt_mark_init);
+module_exit(ebt_mark_fini);
 MODULE_LICENSE("GPL");

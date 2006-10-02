@@ -10,7 +10,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/sysctl.h>
 #include <linux/types.h>
@@ -69,8 +68,9 @@ void vx_update_load(struct vx_info *vxi)
 	uint32_t now, last, delta;
 	unsigned int nr_running, nr_uninterruptible;
 	unsigned int total;
+	unsigned long flags;
 
-	spin_lock(&vxi->cvirt.load_lock);
+	spin_lock_irqsave(&vxi->cvirt.load_lock, flags);
 
 	now = jiffies;
 	last = vxi->cvirt.load_last;
@@ -93,7 +93,7 @@ void vx_update_load(struct vx_info *vxi)
 	vxi->cvirt.load_last = now;
 out:
 	atomic_inc(&vxi->cvirt.load_updates);
-	spin_unlock(&vxi->cvirt.load_lock);
+	spin_unlock_irqrestore(&vxi->cvirt.load_lock, flags);
 }
 
 
@@ -192,22 +192,22 @@ int vx_do_syslog(int type, char __user *buf, int len)
 static char * vx_vhi_name(struct vx_info *vxi, int id)
 {
 	switch (id) {
-		case VHIN_CONTEXT:
-			return vxi->vx_name;
-		case VHIN_SYSNAME:
-			return vxi->cvirt.utsname.sysname;
-		case VHIN_NODENAME:
-			return vxi->cvirt.utsname.nodename;
-		case VHIN_RELEASE:
-			return vxi->cvirt.utsname.release;
-		case VHIN_VERSION:
-			return vxi->cvirt.utsname.version;
-		case VHIN_MACHINE:
-			return vxi->cvirt.utsname.machine;
-		case VHIN_DOMAINNAME:
-			return vxi->cvirt.utsname.domainname;
-		default:
-			return NULL;
+	case VHIN_CONTEXT:
+		return vxi->vx_name;
+	case VHIN_SYSNAME:
+		return vxi->cvirt.utsname.sysname;
+	case VHIN_NODENAME:
+		return vxi->cvirt.utsname.nodename;
+	case VHIN_RELEASE:
+		return vxi->cvirt.utsname.release;
+	case VHIN_VERSION:
+		return vxi->cvirt.utsname.version;
+	case VHIN_MACHINE:
+		return vxi->cvirt.utsname.machine;
+	case VHIN_DOMAINNAME:
+		return vxi->cvirt.utsname.domainname;
+	default:
+		return NULL;
 	}
 	return NULL;
 }
@@ -223,7 +223,7 @@ int vc_set_vhi_name(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -243,7 +243,7 @@ int vc_get_vhi_name(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 

@@ -41,7 +41,7 @@ static int __vc_get_iattr(struct inode *in, uint32_t *xid, uint32_t *flags, uint
 	if (S_ISDIR(in->i_mode))
 		*mask |= IATTR_BARRIER;
 
-	if (in->i_sb->s_flags & MS_TAGXID) {
+	if (IS_TAGXID(in)) {
 		*xid = in->i_xid;
 		*mask |= IATTR_XID;
 	}
@@ -138,12 +138,12 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 	if ((*mask & IATTR_FLAGS) && !is_proc)
 		return -EINVAL;
 
-	has_xid = (in->i_sb->s_flags & MS_TAGXID) ||
+	has_xid = IS_TAGXID(in) ||
 		(in->i_sb->s_magic == DEVPTS_SUPER_MAGIC);
 	if ((*mask & IATTR_XID) && !has_xid)
 		return -EINVAL;
 
-	down(&in->i_sem);
+	mutex_lock(&in->i_mutex);
 	if (*mask & IATTR_XID) {
 		attr.ia_xid = *xid;
 		attr.ia_valid |= ATTR_XID;
@@ -161,30 +161,28 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 	}
 
 	if (*mask & (IATTR_BARRIER | IATTR_IUNLINK | IATTR_IMMUTABLE)) {
-
-		attr.ia_valid |= ATTR_ATTR_FLAG;
-		attr.ia_attr_flags =
-			(IS_IMMUTABLE(in) ? ATTR_FLAG_IMMUTABLE : 0) |
-			(IS_IUNLINK(in) ? ATTR_FLAG_IUNLINK : 0) |
-			(IS_BARRIER(in) ? ATTR_FLAG_BARRIER : 0);
-
 		if (*mask & IATTR_IMMUTABLE) {
 			if (*flags & IATTR_IMMUTABLE)
-				attr.ia_attr_flags |= ATTR_FLAG_IMMUTABLE;
+				in->i_flags |= S_IMMUTABLE;
 			else
-				attr.ia_attr_flags &= ~ATTR_FLAG_IMMUTABLE;
+				in->i_flags &= ~S_IMMUTABLE;
 		}
 		if (*mask & IATTR_IUNLINK) {
 			if (*flags & IATTR_IUNLINK)
-				attr.ia_attr_flags |= ATTR_FLAG_IUNLINK;
+				in->i_flags |= S_IUNLINK;
 			else
-				attr.ia_attr_flags &= ~ATTR_FLAG_IUNLINK;
+				in->i_flags &= ~S_IUNLINK;
 		}
 		if (S_ISDIR(in->i_mode) && (*mask & IATTR_BARRIER)) {
 			if (*flags & IATTR_BARRIER)
-				attr.ia_attr_flags |= ATTR_FLAG_BARRIER;
+				in->i_flags |= S_BARRIER;
 			else
-				attr.ia_attr_flags &= ~ATTR_FLAG_BARRIER;
+				in->i_flags &= ~S_BARRIER;
+		}
+		if (in->i_op && in->i_op->sync_flags) {
+			error = in->i_op->sync_flags(in);
+			if (error)
+				goto out;
 		}
 	}
 
@@ -198,8 +196,9 @@ static int __vc_set_iattr(struct dentry *de, uint32_t *xid, uint32_t *flags, uin
 		}
 	}
 
-	up(&in->i_sem);
-	return 0;
+out:
+	mutex_unlock(&in->i_mutex);
+	return error;
 }
 
 int vc_set_iattr(uint32_t id, void __user *data)
@@ -308,7 +307,7 @@ int vx_proc_ioctl(struct inode * inode, struct file * filp,
 		error = -EPERM;
 		flags = entry->vx_flags;
 		if (capable(CAP_CONTEXT))
-			error = put_user(flags, (int *) arg);
+			error = put_user(flags, (int __user *) arg);
 		break;
 	}
 	case FIOC_SETXFLG: {
@@ -320,7 +319,7 @@ int vx_proc_ioctl(struct inode * inode, struct file * filp,
 		if (IS_RDONLY(inode))
 			break;
 		error = -EFAULT;
-		if (get_user(flags, (int *) arg))
+		if (get_user(flags, (int __user *) arg))
 			break;
 		error = 0;
 		entry->vx_flags = flags;

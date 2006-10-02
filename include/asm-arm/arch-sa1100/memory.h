@@ -13,25 +13,15 @@
 /*
  * Physical DRAM offset is 0xc0000000 on the SA1100
  */
-#define PHYS_OFFSET	(0xc0000000UL)
+#define PHYS_OFFSET	UL(0xc0000000)
 
 #ifndef __ASSEMBLY__
 
 #ifdef CONFIG_SA1111
-static inline void
-__arch_adjust_zones(int node, unsigned long *size, unsigned long *holes)
-{
-	unsigned int sz = SZ_1M >> PAGE_SHIFT;
-
-	if (node != 0)
-		sz = 0;
-
-	size[1] = size[0] - sz;
-	size[0] = sz;
-}
+void sa1111_adjust_zones(int node, unsigned long *size, unsigned long *holes);
 
 #define arch_adjust_zones(node, size, holes) \
-	__arch_adjust_zones(node, size, holes)
+	sa1111_adjust_zones(node, size, holes)
 
 #define ISA_DMA_THRESHOLD	(PHYS_OFFSET + SZ_1M - 1)
 
@@ -99,10 +89,13 @@ __arch_adjust_zones(int node, unsigned long *size, unsigned long *holes)
 #define LOCAL_MAP_NR(addr) \
 	(((unsigned long)(addr) & 0x07ffffff) >> PAGE_SHIFT)
 
-#else
-
-#define PFN_TO_NID(addr)	(0)
-
 #endif
+
+/*
+ * Cache flushing area - SA1100 zero bank
+ */
+#define FLUSH_BASE_PHYS		0xe0000000
+#define FLUSH_BASE		0xf5000000
+#define FLUSH_BASE_MINICACHE	0xf5100000
 
 #endif

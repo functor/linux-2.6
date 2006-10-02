@@ -104,8 +104,6 @@ void default_hwif_iops (ide_hwif_t *hwif)
 	hwif->INSL	= ide_insl;
 }
 
-EXPORT_SYMBOL(default_hwif_iops);
-
 /*
  *	MMIO operations, typically used for SATA controllers
  */
@@ -329,8 +327,6 @@ void default_hwif_transport(ide_hwif_t *hwif)
 	hwif->atapi_output_bytes	= atapi_output_bytes;
 }
 
-EXPORT_SYMBOL(default_hwif_transport);
-
 /*
  * Beginning of Taskfile OPCODE Library and feature sets.
  */
@@ -528,8 +524,6 @@ int wait_for_ready (ide_drive_t *drive, int timeout)
 	}
 	return 0;
 }
-
-EXPORT_SYMBOL(wait_for_ready);
 
 /*
  * This routine busy-waits for the drive status to be not "busy".
@@ -767,11 +761,6 @@ int ide_driveid_update (ide_drive_t *drive)
  * It is gone..........
  *
  * const char *msg == consider adding for verbose errors.
- *
- * Beware. If we timed out from a series of CRC errors and the timer
- * expiry caused a switch to PIO mode and we take an IRQ as the drive times
- * out about the same moment we may be entering this function with a
- * pending interrupt. 
  */
 int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 {
@@ -789,20 +778,20 @@ int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 
 	/*
 	 * Don't use ide_wait_cmd here - it will
-	 * attempt to set_geometry and recalibrate, We can't
-	 * do that here as we may be in the IRQ handler already
-	 *
-         * Select the drive, and issue the SETFEATURES command in
-         * polled mode.
+	 * attempt to set_geometry and recalibrate,
+	 * but for some reason these don't work at
+	 * this point (lost interrupt).
+	 */
+        /*
+         * Select the drive, and issue the SETFEATURES command
          */
 	disable_irq_nosync(hwif->irq);
 	
 	/*
-	 *	We race against the running IRQ here if
+	 *	FIXME: we race against the running IRQ here if
 	 *	this is called from non IRQ context. If we use
-	 *	disable_irq() we hang on the error path. Instead we
-	 *	must let the core code know the hwif is doing a polling
-	 *	recovery.
+	 *	disable_irq() we hang on the error path. Work
+	 *	is needed.
 	 */
 	 
 	udelay(1);
@@ -813,43 +802,23 @@ int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 		hwif->OUTB(drive->ctl | 2, IDE_CONTROL_REG);
 	hwif->OUTB(speed, IDE_NSECTOR_REG);
 	hwif->OUTB(SETFEATURES_XFER, IDE_FEATURE_REG);
-	hwif->OUTBSYNC(drive, WIN_SETFEATURES, IDE_COMMAND_REG);
-	/* The status bits are not valid for 400nS */
-	udelay(1);
-	
-	/* Drive status is now valid which means we can allow interrupts
-	   to occur as they will see the drive as busy and will not
-	   interfere erroneously. IRQ's for this drive will also be off
-	   providing control and quirks allow for it */
-	   
-	if ((IDE_CONTROL_REG) && drive->quirk_list == 2)
+	hwif->OUTB(WIN_SETFEATURES, IDE_COMMAND_REG);
+	if ((IDE_CONTROL_REG) && (drive->quirk_list == 2))
 		hwif->OUTB(drive->ctl, IDE_CONTROL_REG);
 	udelay(1);
-	
-	/*
-	 * Tell the interrupt layer that we are doing polled recovery.
-	 * Eventually this should use the same mechanism do_reset does
-	 * internally.
-	 */
-	 
-	hwif->polling = 1;
-	
 	/*
 	 * Wait for drive to become non-BUSY
 	 */
 	if ((stat = hwif->INB(IDE_STATUS_REG)) & BUSY_STAT) {
-		unsigned long timeout;
-		/* FIXME */
-/*		spin_unlock_irq(&ide_lock); */
+		unsigned long flags, timeout;
+		local_irq_set(flags);
 		timeout = jiffies + WAIT_CMD;
 		while ((stat = hwif->INB(IDE_STATUS_REG)) & BUSY_STAT) {
 			if (time_after(jiffies, timeout))
 				break;
 		}
-/*		spin_lock_irq(&ide_lock); */
+		local_irq_restore(flags);
 	}
-	
-	hwif->polling = 0;
 
 	/*
 	 * Allow status to settle, then read it again.
@@ -1274,6 +1243,7 @@ int ide_wait_not_busy(ide_hwif_t *hwif, unsigned long timeout)
 		 */
 		if (stat == 0xff)
 			return -ENODEV;
+		touch_softlockup_watchdog();
 	}
 	return -EBUSY;
 }

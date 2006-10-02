@@ -127,7 +127,7 @@ static void __throttle_logging (void)
 	remove_wait_queue(&log_full, &wait);
 }
 
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 #define CHECK_LOGPTR(ptr) \
 do { \
 	if ((ptr < log_buffer) || (ptr > log_buffer + LOG_LEN)) { \
@@ -153,7 +153,7 @@ void __log_request (tux_req_t *req)
 	 * Log the reply status (success, or type of failure)
 	 */
 	if (!tux_log_incomplete && (!req->status || (req->bytes_sent == -1))) {
-		
+
 		Dprintk("not logging req %p: {%s} [%d/%d]\n", req, req->uri_str, req->status, req->bytes_sent);
 		return;
 	}
@@ -184,7 +184,7 @@ void __log_request (tux_req_t *req)
 	Dprintk("version_str: {%s} [%d]\n", req->version_str, req->version_len);
 	len += req->version_len + 1;
 
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	Dprintk("user_agent_str: {%s} [%d]\n", req->user_agent_str, req->user_agent_len);
 	len += req->user_agent_len + 1;
 #endif
@@ -195,7 +195,7 @@ void __log_request (tux_req_t *req)
 	len++;
 
 	inc = 5*sizeof(u32) + len;
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	inc += 7*sizeof(u32);
 #endif
 
@@ -225,7 +225,7 @@ void __log_request (tux_req_t *req)
 	 * and other damage. The signature also servers as a log format
 	 * version identifier.
 	 */
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	*(u32 *)str = 0x2223beef;
 #else
 	*(u32 *)str = 0x1112beef;
@@ -242,7 +242,7 @@ void __log_request (tux_req_t *req)
 	str += sizeof(u32);
 	CHECK_LOGPTR(str);
 
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	/*
 	 * Log the client port number:
 	 */
@@ -260,7 +260,7 @@ void __log_request (tux_req_t *req)
 	str += sizeof(u32);
 	CHECK_LOGPTR(str);
 
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	*(u32 *)str = req->accept_timestamp; str += sizeof(u32);
 	*(u32 *)str = req->parse_timestamp; str += sizeof(u32);
 	*(u32 *)str = req->output_timestamp; str += sizeof(u32);
@@ -312,7 +312,7 @@ void __log_request (tux_req_t *req)
 		CHECK_LOGPTR(str);
 	}
 	*str++ = 0;
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	if (req->user_agent_len) {
 		memcpy(str, req->user_agent_str, req->user_agent_len);
 		str += req->user_agent_len;
@@ -354,11 +354,12 @@ void __log_request (tux_req_t *req)
 void tux_push_pending (struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
 
 	Dprintk("pushing pending frames on sock %p.\n", sk);
 	lock_sock(sk);
 	if ((sk->sk_state == TCP_ESTABLISHED) && !sk->sk_err) {
-		tp->ack.pingpong = tux_ack_pingpong;
+		icsk->icsk_ack.pingpong = tux_ack_pingpong;
 		tp->nonagle = 1;
 		__tcp_push_pending_frames(sk, tp, tcp_current_mss(sk, 0), TCP_NAGLE_OFF);
 	}
@@ -397,7 +398,7 @@ void flush_request (tux_req_t *req, int cachemiss)
 		TUX_BUG();
 	if (req->ti->thread != current)
 		TUX_BUG();
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	if (req->bytes_expected && (req->bytes_sent != req->bytes_expected)) {
 		printk("hm, bytes_expected: %d != bytes_sent: %d!\n",
 			req->bytes_expected, req->bytes_sent);
@@ -531,7 +532,7 @@ void flush_request (tux_req_t *req, int cachemiss)
 	req->post_data_len = 0;
 
 	SET_TIMESTAMP(req->accept_timestamp);
-#if CONFIG_TUX_EXTENDED_LOG
+#ifdef CONFIG_TUX_EXTENDED_LOG
 	req->parse_timestamp = 0;
 	req->output_timestamp = 0;
 	req->flush_timestamp = 0;
@@ -540,7 +541,7 @@ void flush_request (tux_req_t *req, int cachemiss)
 
 	req->total_bytes += req->bytes_sent;
 	req->bytes_sent = 0;
-#if CONFIG_TUX_DEBUG
+#ifdef CONFIG_TUX_DEBUG
 	req->bytes_expected = 0;
 #endif
 	req->body_len = 0;
@@ -706,7 +707,7 @@ static unsigned int writeout_log (void)
 	inode = log_filp->f_dentry->d_inode;
 	mapping = inode->i_mapping;
 	if (mapping->nrpages > 256) {   /* batch stuff up */
-		down(&inode->i_sem);
+		mutex_lock(&inode->i_mutex);
 		filemap_fdatawrite(inode->i_mapping);
 
 		/*
@@ -716,7 +717,7 @@ static unsigned int writeout_log (void)
 		 */
 		invalidate_mapping_pages(mapping, 0, log_filp_last_index);
 		log_filp_last_index = log_filp->f_pos >> PAGE_CACHE_SHIFT;
-		up(&inode->i_sem);
+		mutex_unlock(&inode->i_mutex);
 	}
 
 out_lock:
@@ -746,7 +747,7 @@ static int logger_thread (void *data)
 	oldmm = get_fs();
 	set_fs(KERNEL_DS);
 	printk(KERN_NOTICE "TUX: logger thread started.\n");
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	{
 		cpumask_t map;
 

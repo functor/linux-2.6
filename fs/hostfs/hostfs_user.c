@@ -153,8 +153,22 @@ int lseek_file(int fd, long long offset, int whence)
 	int ret;
 
 	ret = lseek64(fd, offset, whence);
-	if(ret < 0) return(-errno);
+	if(ret < 0)
+		return(-errno);
 	return(0);
+}
+
+int fsync_file(int fd, int datasync)
+{
+	int ret;
+	if (datasync)
+		ret = fdatasync(fd);
+	else
+		ret = fsync(fd);
+
+	if (ret < 0)
+		return -errno;
+	return 0;
 }
 
 void close_file(void *stream)
@@ -346,7 +360,6 @@ int do_statfs(char *root, long *bsize_out, long long *blocks_out,
 	spare_out[2] = buf.f_spare[2];
 	spare_out[3] = buf.f_spare[3];
 	spare_out[4] = buf.f_spare[4];
-	spare_out[5] = buf.f_spare[5];
 	return(0);
 }
 

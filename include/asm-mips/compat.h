@@ -15,8 +15,10 @@ typedef s32		compat_clock_t;
 typedef s32		compat_suseconds_t;
 
 typedef s32		compat_pid_t;
-typedef s32		compat_uid_t;
-typedef s32		compat_gid_t;
+typedef s32		__compat_uid_t;
+typedef s32		__compat_gid_t;
+typedef __compat_uid_t	__compat_uid32_t;
+typedef __compat_gid_t	__compat_gid32_t;
 typedef u32		compat_mode_t;
 typedef u32		compat_ino_t;
 typedef u32		compat_dev_t;
@@ -29,6 +31,7 @@ typedef s32		compat_caddr_t;
 typedef struct {
 	s32	val[2];
 } compat_fsid_t;
+typedef s32		compat_timer_t;
 
 typedef s32		compat_int_t;
 typedef s32		compat_long_t;
@@ -51,8 +54,8 @@ struct compat_stat {
 	compat_ino_t	st_ino;
 	compat_mode_t	st_mode;
 	compat_nlink_t	st_nlink;
-	compat_uid_t	st_uid;
-	compat_gid_t	st_gid;
+	__compat_uid_t	st_uid;
+	__compat_gid_t	st_gid;
 	compat_dev_t	st_rdev;
 	s32		st_pad2[2];
 	compat_off_t	st_size;
@@ -125,17 +128,22 @@ typedef u32		compat_sigset_word;
  */
 typedef u32		compat_uptr_t;
 
-static inline void *compat_ptr(compat_uptr_t uptr)
+static inline void __user *compat_ptr(compat_uptr_t uptr)
 {
-	return (void *)(long)uptr;
+	return (void __user *)(long)uptr;
 }
 
-static inline void *compat_alloc_user_space(long len)
+static inline compat_uptr_t ptr_to_compat(void __user *uptr)
+{
+	return (u32)(unsigned long)uptr;
+}
+
+static inline void __user *compat_alloc_user_space(long len)
 {
 	struct pt_regs *regs = (struct pt_regs *)
 		((unsigned long) current_thread_info() + THREAD_SIZE - 32) - 1;
 
-	return (void *) (regs->regs[29] - len);
+	return (void __user *) (regs->regs[29] - len);
 }
 #if defined (__MIPSEL__)
 #define __COMPAT_ENDIAN_SWAP__ 	1

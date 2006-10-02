@@ -21,7 +21,31 @@
 #define PAGE_SIZE    (_AC(1,UL) << PAGE_SHIFT)
 #define PAGE_MASK    (~(PAGE_SIZE-1))
 
+/* Flushing for D-cache alias handling is only needed if
+ * the page size is smaller than 16K.
+ */
+#if PAGE_SHIFT < 14
+#define DCACHE_ALIASING_POSSIBLE
+#endif
+
 #ifdef __KERNEL__
+
+#if defined(CONFIG_HUGETLB_PAGE_SIZE_4MB)
+#define HPAGE_SHIFT		22
+#elif defined(CONFIG_HUGETLB_PAGE_SIZE_512K)
+#define HPAGE_SHIFT		19
+#elif defined(CONFIG_HUGETLB_PAGE_SIZE_64K)
+#define HPAGE_SHIFT		16
+#endif
+
+#ifdef CONFIG_HUGETLB_PAGE
+#define HPAGE_SIZE		(_AC(1,UL) << HPAGE_SHIFT)
+#define HPAGE_MASK		(~(HPAGE_SIZE - 1UL))
+#define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
+#define ARCH_HAS_SETCLEAR_HUGE_PTE
+#define ARCH_HAS_HUGETLB_PREFAULT_HOOK
+#define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
+#endif
 
 #ifndef __ASSEMBLY__
 
@@ -83,22 +107,11 @@ typedef unsigned long pgprot_t;
 
 #endif /* (STRICT_MM_TYPECHECKS) */
 
-#if defined(CONFIG_HUGETLB_PAGE_SIZE_4MB)
-#define HPAGE_SHIFT		22
-#elif defined(CONFIG_HUGETLB_PAGE_SIZE_512K)
-#define HPAGE_SHIFT		19
-#elif defined(CONFIG_HUGETLB_PAGE_SIZE_64K)
-#define HPAGE_SHIFT		16
-#endif
-
-#ifdef CONFIG_HUGETLB_PAGE
-#define HPAGE_SIZE		(_AC(1,UL) << HPAGE_SHIFT)
-#define HPAGE_MASK		(~(HPAGE_SIZE - 1UL))
-#define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
-#endif
-
 #define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_32BIT) ? \
-				 (_AC(0x0000000070000000,UL)) : (PAGE_OFFSET))
+				 (_AC(0x0000000070000000,UL)) : \
+				 (_AC(0xfffff80000000000,UL) + (1UL << 32UL)))
+
+#include <asm-generic/memory_model.h>
 
 #endif /* !(__ASSEMBLY__) */
 
@@ -115,52 +128,14 @@ typedef unsigned long pgprot_t;
 #define __pa(x)			((unsigned long)(x) - PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long) (x) + PAGE_OFFSET))
 
-/* PFNs are real physical page numbers.  However, mem_map only begins to record
- * per-page information starting at pfn_base.  This is to handle systems where
- * the first physical page in the machine is at some huge physical address,
- * such as 4GB.   This is common on a partitioned E10000, for example.
- */
-extern struct page *pfn_to_page(unsigned long pfn);
-extern unsigned long page_to_pfn(struct page *);
+#define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
 
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr)>>PAGE_SHIFT)
 
-#define pfn_valid(pfn)		(((pfn)-(pfn_base)) < max_mapnr)
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
 #define virt_to_phys __pa
 #define phys_to_virt __va
-
-/* The following structure is used to hold the physical
- * memory configuration of the machine.  This is filled in
- * probe_memory() and is later used by mem_init() to set up
- * mem_map[].  We statically allocate SPARC_PHYS_BANKS of
- * these structs, this is arbitrary.  The entry after the
- * last valid one has num_bytes==0.
- */
-
-struct sparc_phys_banks {
-	unsigned long base_addr;
-	unsigned long num_bytes;
-};
-
-#define SPARC_PHYS_BANKS 32
-
-extern struct sparc_phys_banks sp_banks[SPARC_PHYS_BANKS];
-
-/* Pure 2^n version of get_order */
-static __inline__ int get_order(unsigned long size)
-{
-	int order;
-
-	size = (size-1) >> (PAGE_SHIFT-1);
-	order = -1;
-	do {
-		size >>= 1;
-		order++;
-	} while (size);
-	return order;
-}
 
 #endif /* !(__ASSEMBLY__) */
 
@@ -170,5 +145,7 @@ static __inline__ int get_order(unsigned long size)
 #define devmem_is_allowed(x) 1
 
 #endif /* !(__KERNEL__) */
+
+#include <asm-generic/page.h>
 
 #endif /* !(_SPARC64_PAGE_H) */

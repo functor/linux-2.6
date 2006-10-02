@@ -2,7 +2,7 @@ Driver for Trust Computer Products Framegrabber, version 0.6.1
 ------ --- ----- -------- -------- ------------  ------- - - -
 
 - ZORAN ------------------------------------------------------
- Author: Pauline Middelink <middelin@polyware.nl> 
+ Author: Pauline Middelink <middelin@polyware.nl>
    Date: 18 September 1999
 Version: 0.6.1
 
@@ -76,8 +76,11 @@ activates the GRAB bit. A few ms later the VSYNC (re-)rises and
 the zoran starts to work on a new and freshly broadcasted frame....
 
 For pointers I used the specs of both chips. Below are the URLs:
-	http://www.zoran.com/ftp/download/devices/pci/ZR36120/36120data.pdf
-	http://www-us.semiconductor.philips.com/acrobat/datasheets/SAA_7110_A_1.pdf
+  http://www.zoran.com/ftp/download/devices/pci/ZR36120/36120data.pdf
+  http://www-us.semiconductor.philips.com/acrobat/datasheets/SAA_7110_A_1.pdf
+Some alternatives for the Philips SAA 7110 datasheet are:
+  http://www.datasheetcatalog.com/datasheets_pdf/S/A/A/7/SAA7110.shtml
+  http://www.datasheetarchive.com/search.php?search=SAA7110&sType=part
 
 The documentation has very little on absolute numbers or timings
 needed for the various modes/resolutions, but there are other
@@ -112,7 +115,7 @@ After making/checking the devices do:
 <n> is the cardtype of the card you have. The cardnumber can
 be found in the source of zr36120. Look for tvcards. If your
 card is not there, please try if any other card gives some
-response, and mail me if you got a working tvcard addition. 
+response, and mail me if you got a working tvcard addition.
 
 PS. <TVCard editors behold!)
     Dont forget to set video_input to the number of inputs

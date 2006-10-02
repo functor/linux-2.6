@@ -15,6 +15,7 @@
 #include <linux/elf.h>
 #include <linux/mman.h>
 
+#include <asm/a.out.h>
 #include <asm/cpufeature.h>
 #include <asm/msr.h>
 #include <asm/pgtable.h>
@@ -22,10 +23,15 @@
 
 extern asmlinkage void sysenter_entry(void);
 
-void enable_sep_cpu(void *info)
+void enable_sep_cpu(void)
 {
 	int cpu = get_cpu();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
+
+	if (!boot_cpu_has(X86_FEATURE_SEP)) {
+		put_cpu();
+		return;
+	}
 
 	tss->ss1 = __KERNEL_CS;
 	tss->esp1 = sizeof(struct tss_struct) + (unsigned long) tss;
@@ -42,15 +48,15 @@ void enable_sep_cpu(void *info)
 extern const char vsyscall_int80_start, vsyscall_int80_end;
 extern const char vsyscall_sysenter_start, vsyscall_sysenter_end;
 
-struct page *sysenter_page;
+static struct page *sysenter_pages[2];
 
-static int __init sysenter_setup(void)
+int __init sysenter_setup(void)
 {
 	void *page = (void *)get_zeroed_page(GFP_ATOMIC);
 
-	sysenter_page = virt_to_page(page);
+	sysenter_pages[0] = virt_to_page(page);
 
-	if (1 || (!boot_cpu_has(X86_FEATURE_SEP))) {
+	if (!boot_cpu_has(X86_FEATURE_SEP)) {
 		memcpy(page,
 		       &vsyscall_int80_start,
 		       &vsyscall_int80_end - &vsyscall_int80_start);
@@ -61,11 +67,8 @@ static int __init sysenter_setup(void)
 	       &vsyscall_sysenter_start,
 	       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
 
-	on_each_cpu(enable_sep_cpu, NULL, 1, 1);
 	return 0;
 }
-
-__initcall(sysenter_setup);
 
 extern void SYSENTER_RETURN_OFFSET;
 
@@ -76,14 +79,16 @@ unsigned int vdso_enabled = 1;
  * vDSO and insert it into the mm struct tree.
  */
 int arch_setup_additional_pages(struct linux_binprm *bprm,
-				int executable_stack)
+	int executable_stack, unsigned long start_code,
+	unsigned long interp_map_address)
 {
 	struct thread_info *ti = current_thread_info();
-	unsigned long addr, len;
+	unsigned long addr = 0, len;
+	unsigned flags = MAP_PRIVATE;
 	int err;
 
 	current->mm->context.vdso = NULL;
-	if (unlikely(!vdso_enabled) || unlikely(!sysenter_page))
+	if (unlikely(!vdso_enabled) || unlikely(!sysenter_pages[0]))
 		return 0;
 
 	/*
@@ -91,18 +96,32 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 	 */
 	down_write(&current->mm->mmap_sem);
 	len = PAGE_SIZE > ELF_EXEC_PAGESIZE ? PAGE_SIZE : ELF_EXEC_PAGESIZE;
-	addr = get_unmapped_area_prot(NULL, 0, len, 0,
-				      MAP_PRIVATE, PROT_READ | PROT_EXEC);
+	if (0==exec_shield) { /* off; %cs limit off */
+		addr = STACK_TOP;  /* minimal interference with anybody */
+		flags = MAP_PRIVATE | MAP_FIXED;
+	}
+	else if ((3<<2) & exec_shield) { /* vdso just below .text */
+		addr = (((2<<2) & exec_shield) && interp_map_address) ?
+			interp_map_address : start_code;
+		/* 1MB for vm86; 64K for vm86 himem */
+		if ((0x110000 + len) <= addr) {
+			addr = (PAGE_MASK & addr) - len;
+		}
+		else { /* start_code is too low */
+			addr = 0;
+		}
+	}
+	addr = get_unmapped_area_prot(NULL, addr, len, 0,
+				      flags, PROT_READ | PROT_EXEC);
 	if (unlikely(addr & ~PAGE_MASK)) {
 		up_write(&current->mm->mmap_sem);
 		return addr;
 	}
-	get_page(sysenter_page);
 	err = install_special_mapping(current->mm, addr, len,
 				      VM_DONTEXPAND | VM_READ | VM_EXEC |
 				      VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC,
 				      PAGE_READONLY_EXEC,
-				      &sysenter_page, 1);
+				      sysenter_pages);
 	if (likely(err == 0)) {
 		current->mm->context.vdso = (void *)addr;
 		ti->sysenter_return = &SYSENTER_RETURN_OFFSET + addr;
@@ -125,11 +144,3 @@ struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 {
 	return NULL;
 }
-
-static int __init vdso_setup(char *str)
-{
-        vdso_enabled = simple_strtoul(str, NULL, 0);
-        return 1;
-}
-__setup("vdso=", vdso_setup);
-

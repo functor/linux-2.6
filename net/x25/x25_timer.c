@@ -23,7 +23,7 @@
 #include <linux/jiffies.h>
 #include <linux/timer.h>
 #include <net/sock.h>
-#include <net/tcp.h>
+#include <net/tcp_states.h>
 #include <net/x25.h>
 
 static void x25_heartbeat_expiry(unsigned long);
@@ -114,8 +114,9 @@ static void x25_heartbeat_expiry(unsigned long param)
 			if (sock_flag(sk, SOCK_DESTROY) ||
 			    (sk->sk_state == TCP_LISTEN &&
 			     sock_flag(sk, SOCK_DEAD))) {
+				bh_unlock_sock(sk);
 				x25_destroy_socket(sk);
-				goto unlock;
+				return;
 			}
 			break;
 
@@ -128,7 +129,6 @@ static void x25_heartbeat_expiry(unsigned long param)
 	}
 restart_heartbeat:
 	x25_start_heartbeat(sk);
-unlock:
 	bh_unlock_sock(sk);
 }
 

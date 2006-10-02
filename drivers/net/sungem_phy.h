@@ -12,6 +12,7 @@ struct mii_phy_ops
 	int		(*setup_forced)(struct mii_phy *phy, int speed, int fd);
 	int		(*poll_link)(struct mii_phy *phy);
 	int		(*read_link)(struct mii_phy *phy);
+	int		(*enable_fiber)(struct mii_phy *phy);
 };
 
 /* Structure used to statically define an mii/gii based PHY */
@@ -43,9 +44,10 @@ struct mii_phy
 	int			pause;
 
 	/* Provided by host chip */
-	struct net_device*	dev;
+	struct net_device	*dev;
 	int (*mdio_read) (struct net_device *dev, int mii_id, int reg);
 	void (*mdio_write) (struct net_device *dev, int mii_id, int reg, int val);
+	void			*platform_data;
 };
 
 /* Pass in a struct mii_phy with dev, mdio_read and mdio_write

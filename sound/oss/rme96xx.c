@@ -44,7 +44,6 @@ TODO:
 #define RMEVERSION "0.8"
 #endif
 
-#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/sched.h>
@@ -59,6 +58,7 @@ TODO:
 #include <linux/interrupt.h>
 #include <linux/poll.h>
 #include <linux/wait.h>
+#include <linux/mutex.h>
 
 #include <asm/dma.h>
 #include <asm/page.h>
@@ -327,7 +327,7 @@ typedef struct _rme96xx_info {
 
 		/* waiting and locking */
 		wait_queue_head_t wait;
-		struct semaphore  open_sem;
+		struct mutex  open_mutex;
 		wait_queue_head_t open_wait;
 
 	} dma[RME96xx_MAX_DEVS]; 
@@ -807,7 +807,7 @@ static void* busmaster_malloc(int size) {
                 struct page* page, *last_page;
 
                 page = virt_to_page(buf);
-                last_page = virt_to_page(buf + (1 << pg));
+                last_page = page + (1 << pg);
                 DBG(printk("setting reserved bit\n"));
                 while (page < last_page) {
 			SetPageReserved(page);
@@ -843,7 +843,7 @@ static void busmaster_free(void* ptr,int size) {
 
 static int rme96xx_dmabuf_init(rme96xx_info * s,struct dmabuf* dma,int ioffset,int ooffset) {
 
-	init_MUTEX(&dma->open_sem);
+	mutex_init(&dma->open_mutex);
 	init_waitqueue_head(&dma->open_wait);
 	init_waitqueue_head(&dma->wait);
 	dma->s = s; 
@@ -1096,7 +1096,7 @@ static int __init init_rme96xx(void)
 	devices = ((devices-1) & RME96xx_MASK_DEVS) + 1;
 	printk(KERN_INFO RME_MESS" reserving %d dsp device(s)\n",devices);
         numcards = 0;
-	return pci_module_init(&rme96xx_driver);
+	return pci_register_driver(&rme96xx_driver);
 }
 
 static void __exit cleanup_rme96xx(void)
@@ -1470,21 +1470,21 @@ static int rme96xx_open(struct inode *in, struct file *f)
 	dma = &s->dma[devnum];
 	f->private_data = dma;
 	/* wait for device to become free */
-	down(&dma->open_sem);
+	mutex_lock(&dma->open_mutex);
 	while (dma->open_mode & f->f_mode) {
 		if (f->f_flags & O_NONBLOCK) {
-			up(&dma->open_sem);
+			mutex_unlock(&dma->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&dma->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&dma->open_sem);
+		mutex_unlock(&dma->open_mutex);
 		schedule();
 		remove_wait_queue(&dma->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&dma->open_sem);
+		mutex_lock(&dma->open_mutex);
 	}
 
 	COMM                ("hardware open")
@@ -1493,7 +1493,7 @@ static int rme96xx_open(struct inode *in, struct file *f)
 
 	dma->open_mode |= (f->f_mode & (FMODE_READ | FMODE_WRITE));
 	dma->opened = 1;
-	up(&dma->open_sem);
+	mutex_unlock(&dma->open_mutex);
 
 	DBG(printk("device num %d open finished\n",devnum));
 	return 0;
@@ -1525,7 +1525,7 @@ static int rme96xx_release(struct inode *in, struct file *file)
 	}
 
 	wake_up(&dma->open_wait);
-	up(&dma->open_sem);
+	mutex_unlock(&dma->open_mutex);
 
 	return 0;
 }
@@ -1750,9 +1750,7 @@ static unsigned int rme96xx_poll(struct file *file, struct poll_table_struct *wa
 
 
 static struct file_operations rme96xx_audio_fops = {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
 	.owner	 = THIS_MODULE,
-#endif
 	.read	 = rme96xx_read,
 	.write	 = rme96xx_write,
 	.poll	 = rme96xx_poll,
@@ -1852,9 +1850,7 @@ static int rme96xx_mixer_release(struct inode *inode, struct file *file)
 }
 
 static /*const*/ struct file_operations rme96xx_mixer_fops = {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
 	.owner	 = THIS_MODULE,
-#endif
 	.ioctl	 = rme96xx_mixer_ioctl,
 	.open	 = rme96xx_mixer_open,
 	.release = rme96xx_mixer_release,

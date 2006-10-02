@@ -19,7 +19,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/namespace.h>
@@ -29,8 +28,10 @@
 #include <linux/vserver/legacy.h>
 #include <linux/vserver/limit.h>
 #include <linux/vserver/debug.h>
+#include <linux/vserver/limit_int.h>
 
 #include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 #include <linux/vserver/context_cmd.h>
 
 #include <linux/err.h>
@@ -66,6 +67,10 @@ static struct vx_info *__alloc_vx_info(xid_t xid)
 	new->vx_state = 0;
 	init_waitqueue_head(&new->vx_wait);
 
+	/* prepare reaper */
+	get_task_struct(child_reaper);
+	new->vx_reaper = child_reaper;
+
 	/* rest of init goes here */
 	vx_info_init_limit(&new->limit);
 	vx_info_init_sched(&new->sched);
@@ -75,6 +80,9 @@ static struct vx_info *__alloc_vx_info(xid_t xid)
 	new->vx_flags = VXF_INIT_SET;
 	new->vx_bcaps = CAP_INIT_EFF_SET;
 	new->vx_ccaps = 0;
+
+	new->reboot_cmd = 0;
+	new->exit_code = 0;
 
 	vxdprintk(VXD_CBIT(xid, 0),
 		"alloc_vx_info(%d) = %p", xid, new);
@@ -318,7 +326,7 @@ out_unlock:
 /*	__create_vx_info()
 
 	* create the requested context
-	* get() and hash it				*/
+	* get() and hash it					*/
 
 static struct vx_info * __create_vx_info(int id)
 {
@@ -388,12 +396,12 @@ void unhash_vx_info(struct vx_info *vxi)
 }
 
 
-/*	locate_vx_info()
+/*	lookup_vx_info()
 
 	* search for a vx_info and get() it
 	* negative id means current				*/
 
-struct vx_info *locate_vx_info(int id)
+struct vx_info *lookup_vx_info(int id)
 {
 	struct vx_info *vxi = NULL;
 
@@ -423,7 +431,7 @@ int xid_is_hashed(xid_t xid)
 
 #ifdef	CONFIG_VSERVER_LEGACY
 
-struct vx_info *locate_or_create_vx_info(int id)
+struct vx_info *lookup_or_create_vx_info(int id)
 {
 	int err;
 
@@ -485,10 +493,8 @@ int vx_migrate_user(struct task_struct *p, struct vx_info *vxi)
 	return 0;
 }
 
-void vx_mask_bcaps(struct task_struct *p)
+void vx_mask_bcaps(struct vx_info *vxi, struct task_struct *p)
 {
-	struct vx_info *vxi = p->vx_info;
-
 	p->cap_effective &= vxi->vx_bcaps;
 	p->cap_inheritable &= vxi->vx_bcaps;
 	p->cap_permitted &= vxi->vx_bcaps;
@@ -500,12 +506,15 @@ void vx_mask_bcaps(struct task_struct *p)
 static int vx_openfd_task(struct task_struct *tsk)
 {
 	struct files_struct *files = tsk->files;
+	struct fdtable *fdt;
 	const unsigned long *bptr;
 	int count, total;
 
+	/* no rcu_read_lock() because of spin_lock() */
 	spin_lock(&files->file_lock);
-	bptr = files->open_fds->fds_bits;
-	count = files->max_fds / (sizeof(unsigned long) * 8);
+	fdt = files_fdtable(files);
+	bptr = fdt->open_fds->fds_bits;
+	count = fdt->max_fds / (sizeof(unsigned long) * 8);
 	for (total = 0; count > 0; count--) {
 		if (*bptr)
 			total += hweight_long(*bptr);
@@ -567,7 +576,7 @@ int vx_migrate_task(struct task_struct *p, struct vx_info *vxi)
 			"moved task %p into vxi:%p[#%d]",
 			p, vxi, vxi->vx_id);
 
-		vx_mask_bcaps(p);
+		vx_mask_bcaps(vxi, p);
 		task_unlock(p);
 	}
 out:
@@ -575,19 +584,96 @@ out:
 	return ret;
 }
 
+int vx_set_reaper(struct vx_info *vxi, struct task_struct *p)
+{
+	struct task_struct *old_reaper;
+
+	if (!vxi)
+		return -EINVAL;
+
+	vxdprintk(VXD_CBIT(xid, 6),
+		"vx_set_reaper(%p[#%d],%p[#%d,%d])",
+		vxi, vxi->vx_id, p, p->xid, p->pid);
+
+	old_reaper = vxi->vx_reaper;
+	if (old_reaper == p)
+		return 0;
+
+	/* set new child reaper */
+	get_task_struct(p);
+	vxi->vx_reaper = p;
+	put_task_struct(old_reaper);
+	return 0;
+}
+
 int vx_set_init(struct vx_info *vxi, struct task_struct *p)
 {
 	if (!vxi)
 		return -EINVAL;
-	if (vxi->vx_initpid)
-		return -EPERM;
 
 	vxdprintk(VXD_CBIT(xid, 6),
 		"vx_set_init(%p[#%d],%p[#%d,%d,%d])",
 		vxi, vxi->vx_id, p, p->xid, p->pid, p->tgid);
 
+	vxi->vx_flags &= ~VXF_STATE_INIT;
 	vxi->vx_initpid = p->tgid;
 	return 0;
+}
+
+void vx_exit_init(struct vx_info *vxi, struct task_struct *p, int code)
+{
+	vxdprintk(VXD_CBIT(xid, 6),
+		"vx_exit_init(%p[#%d],%p[#%d,%d,%d])",
+		vxi, vxi->vx_id, p, p->xid, p->pid, p->tgid);
+
+	vxi->exit_code = code;
+	vxi->vx_initpid = 0;
+}
+
+void vx_set_persistent(struct vx_info *vxi)
+{
+	vxdprintk(VXD_CBIT(xid, 6),
+		"vx_set_persistent(%p[#%d])", vxi, vxi->vx_id);
+
+	get_vx_info(vxi);
+	claim_vx_info(vxi, current);
+}
+
+void vx_clear_persistent(struct vx_info *vxi)
+{
+	vxdprintk(VXD_CBIT(xid, 6),
+		"vx_clear_persistent(%p[#%d])", vxi, vxi->vx_id);
+
+	release_vx_info(vxi, current);
+	put_vx_info(vxi);
+}
+
+void vx_update_persistent(struct vx_info *vxi)
+{
+	if (vx_info_flags(vxi, VXF_PERSISTENT, 0))
+		vx_set_persistent(vxi);
+	else
+		vx_clear_persistent(vxi);
+}
+
+
+/*	task must be current or locked		*/
+
+void	exit_vx_info(struct task_struct *p, int code)
+{
+	struct vx_info *vxi = p->vx_info;
+
+	if (vxi) {
+		atomic_dec(&vxi->cvirt.nr_threads);
+		vx_nproc_dec(p);
+
+		vxi->exit_code = code;
+		if (vxi->vx_initpid == p->tgid)
+			vx_exit_init(vxi, p, code);
+		if (vxi->vx_reaper == p)
+			vx_set_reaper(vxi, child_reaper);
+		release_vx_info(vxi, p);
+	}
 }
 
 
@@ -629,7 +715,7 @@ int vc_vx_info(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RESOURCE))
 		return -EPERM;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -668,10 +754,26 @@ int vc_ctx_create(uint32_t xid, void __user *data)
 	/* initial flags */
 	new_vxi->vx_flags = vc_data.flagword;
 
-	vs_state_change(new_vxi, VSC_STARTUP);
-	ret = new_vxi->vx_id;
-	vx_migrate_task(current, new_vxi);
-	/* if this fails, we might end up with a hashed vx_info */
+	/* get a reference for persistent contexts */
+	if ((vc_data.flagword & VXF_PERSISTENT))
+		vx_set_persistent(new_vxi);
+
+	ret = -ENOEXEC;
+	if (vs_state_change(new_vxi, VSC_STARTUP))
+		goto out_unhash;
+	ret = vx_migrate_task(current, new_vxi);
+	if (!ret) {
+		/* return context id on success */
+		ret = new_vxi->vx_id;
+		goto out;
+	}
+out_unhash:
+	/* prepare for context disposal */
+	new_vxi->vx_state |= VXS_SHUTDOWN;
+	if ((vc_data.flagword & VXF_PERSISTENT))
+		vx_clear_persistent(new_vxi);
+	__unhash_vx_info(new_vxi);
+out:
 	put_vx_info(new_vxi);
 	return ret;
 }
@@ -679,10 +781,13 @@ int vc_ctx_create(uint32_t xid, void __user *data)
 
 int vc_ctx_migrate(uint32_t id, void __user *data)
 {
+	struct vcmd_ctx_migrate vc_data = { .flagword = 0 };
 	struct vx_info *vxi;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
+	if (data && copy_from_user (&vc_data, data, sizeof(vc_data)))
+		return -EFAULT;
 
 	/* dirty hack until Spectator becomes a cap */
 	if (id == 1) {
@@ -690,10 +795,14 @@ int vc_ctx_migrate(uint32_t id, void __user *data)
 		return 0;
 	}
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 	vx_migrate_task(current, vxi);
+	if (vc_data.flagword & VXM_SET_INIT)
+		vx_set_init(vxi, current);
+	if (vc_data.flagword & VXM_SET_REAPER)
+		vx_set_reaper(vxi, current);
 	put_vx_info(vxi);
 	return 0;
 }
@@ -707,7 +816,7 @@ int vc_get_cflags(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -734,7 +843,7 @@ int vc_set_cflags(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -742,14 +851,20 @@ int vc_set_cflags(uint32_t id, void __user *data)
 	mask = vx_mask_mask(vc_data.mask, vxi->vx_flags, VXF_ONE_TIME);
 	trigger = (mask & vxi->vx_flags) ^ (mask & vc_data.flagword);
 
-	if (trigger & VXF_STATE_SETUP)
-		vx_mask_bcaps(current);
-	if (trigger & VXF_STATE_INIT)
-		if (vxi == current->vx_info)
+	if (vxi == current->vx_info) {
+		if (trigger & VXF_STATE_SETUP)
+			vx_mask_bcaps(vxi, current);
+		if (trigger & VXF_STATE_INIT) {
 			vx_set_init(vxi, current);
+			vx_set_reaper(vxi, current);
+		}
+	}
 
 	vxi->vx_flags = vx_mask_flags(vxi->vx_flags,
 		vc_data.flagword, mask);
+	if (trigger & VXF_PERSISTENT)
+		vx_update_persistent(vxi);
+
 	put_vx_info(vxi);
 	return 0;
 }
@@ -762,7 +877,7 @@ int vc_get_ccaps(uint32_t id, void __user *data)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -786,7 +901,7 @@ int vc_set_ccaps(uint32_t id, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 

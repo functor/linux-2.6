@@ -118,7 +118,7 @@
  * the hvcs_final_close() function in order to get it out of the spinlock.
  * Rearranged hvcs_close().  Cleaned up some printks and did some housekeeping
  * on the changelog.  Removed local CLC_LENGTH and used HVCS_CLC_LENGTH from
- * arch/ppc64/hvcserver.h.
+ * include/asm-powerpc/hvcserver.h 
  *
  * 1.3.2 -> 1.3.3 Replaced yield() in hvcs_close() with tty_wait_until_sent() to
  * prevent possible lockup with realtime scheduling as similarily pointed out by
@@ -168,9 +168,10 @@ MODULE_VERSION(HVCS_DRIVER_VERSION);
 
 /*
  * The hcall interface involves putting 8 chars into each of two registers.
- * We load up those 2 registers (in arch/ppc64/hvconsole.c) by casting char[16]
- * to long[2].  It would work without __ALIGNED__, but a little (tiny) bit
- * slower because an unaligned load is slower than aligned load.
+ * We load up those 2 registers (in arch/powerpc/platforms/pseries/hvconsole.c)
+ * by casting char[16] to long[2].  It would work without __ALIGNED__, but a 
+ * little (tiny) bit slower because an unaligned load is slower than aligned 
+ * load.
  */
 #define __ALIGNED__	__attribute__((__aligned__(8)))
 
@@ -438,7 +439,6 @@ static int hvcs_io(struct hvcs_struct *hvcsd)
 	char buf[HVCS_BUFF_LEN] __ALIGNED__;
 	unsigned long flags;
 	int got = 0;
-	int i;
 
 	spin_lock_irqsave(&hvcsd->lock, flags);
 
@@ -456,12 +456,11 @@ static int hvcs_io(struct hvcs_struct *hvcsd)
 	/* remove the read masks */
 	hvcsd->todo_mask &= ~(HVCS_READ_MASK);
 
-	if ((tty->flip.count + HVCS_BUFF_LEN) < TTY_FLIPBUF_SIZE) {
+	if (tty_buffer_request_room(tty, HVCS_BUFF_LEN) >= HVCS_BUFF_LEN) {
 		got = hvc_get_chars(unit_address,
 				&buf[0],
 				HVCS_BUFF_LEN);
-		for (i=0;got && i<got;i++)
-			tty_insert_flip_char(tty, buf[i], TTY_NORMAL);
+		tty_insert_flip_string(tty, buf, got);
 	}
 
 	/* Give the TTY time to process the data we just sent. */
@@ -469,10 +468,9 @@ static int hvcs_io(struct hvcs_struct *hvcsd)
 		hvcsd->todo_mask |= HVCS_QUICK_READ;
 
 	spin_unlock_irqrestore(&hvcsd->lock, flags);
-	if (tty->flip.count) {
-		/* This is synch because tty->low_latency == 1 */
+	/* This is synch because tty->low_latency == 1 */
+	if(got)
 		tty_flip_buffer_push(tty);
-	}
 
 	if (!got) {
 		/* Do this _after_ the flip_buffer_push */
@@ -527,7 +525,7 @@ static int khvcsd(void *unused)
 
 static struct vio_device_id hvcs_driver_table[] __devinitdata= {
 	{"serial-server", "hvterm2"},
-	{ NULL, }
+	{ "", "" }
 };
 MODULE_DEVICE_TABLE(vio, hvcs_driver_table);
 
@@ -720,10 +718,13 @@ static int __devexit hvcs_remove(struct vio_dev *dev)
 };
 
 static struct vio_driver hvcs_vio_driver = {
-	.name		= hvcs_driver_name,
 	.id_table	= hvcs_driver_table,
 	.probe		= hvcs_probe,
 	.remove		= hvcs_remove,
+	.driver		= {
+		.name	= hvcs_driver_name,
+		.owner	= THIS_MODULE,
+	}
 };
 
 /* Only called from hvcs_get_pi please */
@@ -903,7 +904,7 @@ static int hvcs_enable_device(struct hvcs_struct *hvcsd, uint32_t unit_address,
 		 * It is possible the vty-server was removed after the irq was
 		 * requested but before we have time to enable interrupts.
 		 */
-		if (vio_enable_interrupts(vdev) == H_Success)
+		if (vio_enable_interrupts(vdev) == H_SUCCESS)
 			return 0;
 		else {
 			printk(KERN_ERR "HVCS: int enable failed for"
@@ -1466,7 +1467,7 @@ static inline struct hvcs_struct *from_vio_dev(struct vio_dev *viod)
 }
 /* The sysfs interface for the driver and devices */
 
-static ssize_t hvcs_partner_vtys_show(struct device *dev, char *buf)
+static ssize_t hvcs_partner_vtys_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct vio_dev *viod = to_vio_dev(dev);
 	struct hvcs_struct *hvcsd = from_vio_dev(viod);
@@ -1480,7 +1481,7 @@ static ssize_t hvcs_partner_vtys_show(struct device *dev, char *buf)
 }
 static DEVICE_ATTR(partner_vtys, S_IRUGO, hvcs_partner_vtys_show, NULL);
 
-static ssize_t hvcs_partner_clcs_show(struct device *dev, char *buf)
+static ssize_t hvcs_partner_clcs_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct vio_dev *viod = to_vio_dev(dev);
 	struct hvcs_struct *hvcsd = from_vio_dev(viod);
@@ -1494,7 +1495,7 @@ static ssize_t hvcs_partner_clcs_show(struct device *dev, char *buf)
 }
 static DEVICE_ATTR(partner_clcs, S_IRUGO, hvcs_partner_clcs_show, NULL);
 
-static ssize_t hvcs_current_vty_store(struct device *dev, const char * buf,
+static ssize_t hvcs_current_vty_store(struct device *dev, struct device_attribute *attr, const char * buf,
 		size_t count)
 {
 	/*
@@ -1505,7 +1506,7 @@ static ssize_t hvcs_current_vty_store(struct device *dev, const char * buf,
 	return -EPERM;
 }
 
-static ssize_t hvcs_current_vty_show(struct device *dev, char *buf)
+static ssize_t hvcs_current_vty_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct vio_dev *viod = to_vio_dev(dev);
 	struct hvcs_struct *hvcsd = from_vio_dev(viod);
@@ -1521,7 +1522,7 @@ static ssize_t hvcs_current_vty_show(struct device *dev, char *buf)
 static DEVICE_ATTR(current_vty,
 	S_IRUGO | S_IWUSR, hvcs_current_vty_show, hvcs_current_vty_store);
 
-static ssize_t hvcs_vterm_state_store(struct device *dev, const char *buf,
+static ssize_t hvcs_vterm_state_store(struct device *dev, struct device_attribute *attr, const char *buf,
 		size_t count)
 {
 	struct vio_dev *viod = to_vio_dev(dev);
@@ -1559,7 +1560,7 @@ static ssize_t hvcs_vterm_state_store(struct device *dev, const char *buf,
 	return count;
 }
 
-static ssize_t hvcs_vterm_state_show(struct device *dev, char *buf)
+static ssize_t hvcs_vterm_state_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct vio_dev *viod = to_vio_dev(dev);
 	struct hvcs_struct *hvcsd = from_vio_dev(viod);
@@ -1574,7 +1575,7 @@ static ssize_t hvcs_vterm_state_show(struct device *dev, char *buf)
 static DEVICE_ATTR(vterm_state, S_IRUGO | S_IWUSR,
 		hvcs_vterm_state_show, hvcs_vterm_state_store);
 
-static ssize_t hvcs_index_show(struct device *dev, char *buf)
+static ssize_t hvcs_index_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct vio_dev *viod = to_vio_dev(dev);
 	struct hvcs_struct *hvcsd = from_vio_dev(viod);

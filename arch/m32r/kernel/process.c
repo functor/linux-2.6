@@ -50,6 +50,10 @@ unsigned long thread_saved_pc(struct task_struct *tsk)
  * Powermanagement idle function, if any..
  */
 void (*pm_idle)(void) = NULL;
+EXPORT_SYMBOL(pm_idle);
+
+void (*pm_power_off)(void) = NULL;
+EXPORT_SYMBOL(pm_power_off);
 
 void disable_hlt(void)
 {
@@ -104,18 +108,22 @@ void cpu_idle (void)
 
 			idle();
 		}
+		preempt_enable_no_resched();
 		schedule();
+		preempt_disable();
 	}
 }
 
 void machine_restart(char *__unused)
 {
+#if defined(CONFIG_PLAT_MAPPI3)
+	outw(1, (unsigned long)PLD_REBOOT);
+#endif
+
 	printk("Please push reset button!\n");
 	while (1)
 		cpu_relax();
 }
-
-EXPORT_SYMBOL(machine_restart);
 
 void machine_halt(void)
 {
@@ -124,14 +132,10 @@ void machine_halt(void)
 		cpu_relax();
 }
 
-EXPORT_SYMBOL(machine_halt);
-
 void machine_power_off(void)
 {
 	/* M32R_FIXME */
 }
-
-EXPORT_SYMBOL(machine_power_off);
 
 static int __init idle_setup (char *str)
 {
@@ -242,13 +246,10 @@ int dump_fpu(struct pt_regs *regs, elf_fpregset_t *fpu)
 int copy_thread(int nr, unsigned long clone_flags, unsigned long spu,
 	unsigned long unused, struct task_struct *tsk, struct pt_regs *regs)
 {
-	struct pt_regs *childregs;
-	unsigned long sp = (unsigned long)tsk->thread_info + THREAD_SIZE;
+	struct pt_regs *childregs = task_pt_regs(tsk);
 	extern void ret_from_fork(void);
 
 	/* Copy registers */
-	sp -= sizeof (struct pt_regs);
-	childregs = (struct pt_regs *)sp;
 	*childregs = *regs;
 
 	childregs->spu = spu;
@@ -258,14 +259,6 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long spu,
 	tsk->thread.lr = (unsigned long)ret_from_fork;
 
 	return 0;
-}
-
-/*
- * fill in the user structure for a core dump..
- */
-void dump_thread(struct pt_regs * regs, struct user * dump)
-{
-	/* M32R_FIXME */
 }
 
 /*

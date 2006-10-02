@@ -10,11 +10,11 @@
 #include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/smp_lock.h>
-#include <linux/dnotify.h>
+#include <linux/capability.h>
+#include <linux/fsnotify.h>
 #include <linux/fcntl.h>
 #include <linux/quotaops.h>
 #include <linux/security.h>
-#include <linux/time.h>
 #include <linux/proc_fs.h>
 #include <linux/devpts_fs.h>
 #include <linux/vserver/debug.h>
@@ -89,48 +89,22 @@ error:
 
 EXPORT_SYMBOL(inode_change_ok);
 
-int inode_setattr_flags(struct inode *inode, unsigned int flags)
-{
-	unsigned int oldflags, newflags;
-
-	oldflags = inode->i_flags;
-	newflags = oldflags & ~(S_IMMUTABLE | S_IUNLINK | S_BARRIER);
-	if (flags & ATTR_FLAG_IMMUTABLE)
-		newflags |= S_IMMUTABLE;
-	if (flags & ATTR_FLAG_IUNLINK)
-		newflags |= S_IUNLINK;
-	if (flags & ATTR_FLAG_BARRIER)
-		newflags |= S_BARRIER;
-
-	if (oldflags ^ newflags)
-		inode->i_flags = newflags;
-	return 0;
-}
-
 int inode_setattr(struct inode * inode, struct iattr * attr)
 {
 	unsigned int ia_valid = attr->ia_valid;
-	int error = 0;
 
-	if (ia_valid & ATTR_SIZE) {
-		if (attr->ia_size != i_size_read(inode)) {
-			error = vmtruncate(inode, attr->ia_size);
-			if (error || (ia_valid == ATTR_SIZE))
-				goto out;
-		} else {
-			/*
-			 * We skipped the truncate but must still update
-			 * timestamps
-			 */
-			ia_valid |= ATTR_MTIME|ATTR_CTIME;
-		}
+	if (ia_valid & ATTR_SIZE &&
+	    attr->ia_size != i_size_read(inode)) {
+		int error = vmtruncate(inode, attr->ia_size);
+		if (error)
+			return error;
 	}
 
 	if (ia_valid & ATTR_UID)
 		inode->i_uid = attr->ia_uid;
 	if (ia_valid & ATTR_GID)
 		inode->i_gid = attr->ia_gid;
-	if (ia_valid & ATTR_XID)
+	if ((ia_valid & ATTR_XID) && IS_TAGXID(inode))
 		inode->i_xid = attr->ia_xid;
 	if (ia_valid & ATTR_ATIME)
 		inode->i_atime = timespec_trunc(attr->ia_atime,
@@ -148,38 +122,11 @@ int inode_setattr(struct inode * inode, struct iattr * attr)
 			mode &= ~S_ISGID;
 		inode->i_mode = mode;
 	}
-	if (ia_valid & ATTR_ATTR_FLAG)
-		inode_setattr_flags(inode, attr->ia_attr_flags);
 	mark_inode_dirty(inode);
-out:
-	return error;
-}
 
+	return 0;
+}
 EXPORT_SYMBOL(inode_setattr);
-
-int setattr_mask(unsigned int ia_valid)
-{
-	unsigned long dn_mask = 0;
-
-	if (ia_valid & ATTR_UID)
-		dn_mask |= DN_ATTRIB;
-	if (ia_valid & ATTR_GID)
-		dn_mask |= DN_ATTRIB;
-	if (ia_valid & ATTR_XID)
-		dn_mask |= DN_ATTRIB;
-	if (ia_valid & ATTR_SIZE)
-		dn_mask |= DN_MODIFY;
-	/* both times implies a utime(s) call */
-	if ((ia_valid & (ATTR_ATIME|ATTR_MTIME)) == (ATTR_ATIME|ATTR_MTIME))
-		dn_mask |= DN_ATTRIB;
-	else if (ia_valid & ATTR_ATIME)
-		dn_mask |= DN_ACCESS;
-	else if (ia_valid & ATTR_MTIME)
-		dn_mask |= DN_MODIFY;
-	if (ia_valid & ATTR_MODE)
-		dn_mask |= DN_ATTRIB;
-	return dn_mask;
-}
 
 int notify_change(struct dentry * dentry, struct iattr * attr)
 {
@@ -188,9 +135,6 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 	int error;
 	struct timespec now;
 	unsigned int ia_valid = attr->ia_valid;
-
-	if (!inode)
-		BUG();
 
 	mode = inode->i_mode;
 	now = current_fs_time(inode->i_sb);
@@ -247,11 +191,9 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 	if (ia_valid & ATTR_SIZE)
 		up_write(&dentry->d_inode->i_alloc_sem);
 
-	if (!error) {
-		unsigned long dn_mask = setattr_mask(ia_valid);
-		if (dn_mask)
-			dnotify_parent(dentry, dn_mask);
-	}
+	if (!error)
+		fsnotify_change(dentry, ia_valid);
+
 	return error;
 }
 

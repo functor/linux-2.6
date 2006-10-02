@@ -12,27 +12,23 @@
 #define FFUART		((volatile unsigned long *)0x40100000)
 #define BTUART		((volatile unsigned long *)0x40200000)
 #define STUART		((volatile unsigned long *)0x40700000)
+#define HWUART		((volatile unsigned long *)0x41600000)
 
 #define UART		FFUART
 
 
-static __inline__ void putc(char c)
+static inline void putc(char c)
 {
-	while (!(UART[5] & 0x20));
+	while (!(UART[5] & 0x20))
+		barrier();
 	UART[0] = c;
 }
 
 /*
  * This does not append a newline
  */
-static void putstr(const char *s)
+static inline void flush(void)
 {
-	while (*s) {
-		putc(*s);
-		if (*s == '\n')
-			putc('\r');
-		s++;
-	}
 }
 
 /*

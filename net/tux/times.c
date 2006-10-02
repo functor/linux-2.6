@@ -48,7 +48,7 @@ char itoa_h[60]={'0','0','0','0','0','0','0','0','0','0',
 		 '3','3','3','3','3','3','3','3','3','3',
 		 '4','4','4','4','4','4','4','4','4','4',
 		 '5','5','5','5','5','5','5','5','5','5'};
-		
+
 char itoa_l[60]={'0','1','2','3','4','5','6','7','8','9',
 		 '0','1','2','3','4','5','6','7','8','9',
 		 '0','1','2','3','4','5','6','7','8','9',
@@ -68,11 +68,11 @@ int time_unix2ls(time_t zulu, char *buf)
 
 	I=0;
 	while (I<TUX_NUMYEARS) {
-		if (TimeDays[I][0]>zulu) 
+		if (TimeDays[I][0]>zulu)
 		   break;
 		I++;
 	}
-	
+
 	Y=--I;
 	if (I<0) {
 		Y=0;
@@ -80,13 +80,13 @@ int time_unix2ls(time_t zulu, char *buf)
 	}
 	I2=0;
 	while (I2<=12) {
-		if (TimeDays[I][I2]>zulu) 
+		if (TimeDays[I][I2]>zulu)
 		   break;
 		I2++;
-	}			   
-	
+	}
+
 	M=I2-1;
-	
+
 	rest=zulu - TimeDays[Y][M];
 	WD=WeekDays[Y][M];
 	D=rest/86400;
@@ -98,11 +98,11 @@ int time_unix2ls(time_t zulu, char *buf)
 	Min=rest/60;
 	rest=rest%60;
 	S=rest;
-	
+
 BuildYear:
 	Y+=TUX_YEAROFFSET;
-	
-	
+
+
 	/* Format:  Day, 01 Mon 1999 01:01:01 GMT */
 
 	delta = xtime.tv_sec - zulu;
@@ -135,14 +135,14 @@ time_t mimetime_to_unixtime(char *Q)
 	unsigned int Hash;
 	time_t Temp;
 	char *s,**s2;
-	
+
 	s=Q;
 	s2=&s;
-	
+
 	if (strlen(s)<30) return 0;
 	if (s[3]!=',') return 0;
 	if (s[19]!=':') return 0;
-	
+
 	s+=5; /* Skip day of week */
 	D = skip_atoi(s2);  /*  Day of month */
 	s++;
@@ -159,18 +159,18 @@ time_t mimetime_to_unixtime(char *Q)
 	s++;
 	S = skip_atoi(s2); /* Seconds */
 	s++;
-	if ((s[0]!='G')||(s[1]!='M')||(s[2]!='T')) 
-	{	
-  		return 0; /* No GMT */
-  	}
+	if ((s[0]!='G')||(s[1]!='M')||(s[2]!='T'))
+	{
+		return 0; /* No GMT */
+	}
 
 	if (Y<TUX_YEAROFFSET) Y = TUX_YEAROFFSET;
 	if (Y>TUX_YEAROFFSET+9) Y = TUX_YEAROFFSET+9;
-	
-	Temp = 	TimeDays[Y-TUX_YEAROFFSET][M];
+
+	Temp = TimeDays[Y-TUX_YEAROFFSET][M];
 	Temp += D*86400+H*3600+Min*60+S;
-	
-	return Temp;  
+
+	return Temp;
 }
 
 // writes the full http date, corresponding to time_t received
@@ -178,23 +178,23 @@ time_t mimetime_to_unixtime(char *Q)
 void last_mod_time(char * curr, const time_t t)
 {
 	int day, tod, year, wday, mon, hour, min, sec;
- 
+
 	tod = t % 86400;
 	day = t / 86400;
 	if (tod < 0) {
 		tod += 86400;
 		--day;
 	}
- 
+
 	hour = tod / 3600;
 	tod %= 3600;
 	min = tod / 60;
 	sec = tod % 60;
- 
+
 	wday = (day + 4) % 7;
 	if (wday < 0)
 		wday += 7;
- 
+
 	day -= 11017;
 	/* day 0 is march 1, 2000 */
 	year = 5 + day / 146097;
@@ -223,7 +223,7 @@ void last_mod_time(char * curr, const time_t t)
 		year += day / 365;
 		day %= 365;
 	}
- 
+
 	day *= 10;
 	mon = (day + 5) / 306;
 	day = day + 5 - 306 * mon;
@@ -233,7 +233,7 @@ void last_mod_time(char * curr, const time_t t)
 		mon -= 10;
 	} else
 		mon += 2;
- 
+
 	sprintf(curr, "%s, %.2d %s %d %.2d:%.2d:%.2d GMT", dayName[wday],
 		day+1, monthName[mon], year, hour, min, sec);
 }
@@ -245,23 +245,23 @@ void last_mod_time(char * curr, const time_t t)
 int mdtm_time(char * curr, const time_t t)
 {
 	int day, tod, year, wday, mon, hour, min, sec;
- 
+
 	tod = t % 86400;
 	day = t / 86400;
 	if (tod < 0) {
 		tod += 86400;
 		--day;
 	}
- 
+
 	hour = tod / 3600;
 	tod %= 3600;
 	min = tod / 60;
 	sec = tod % 60;
- 
+
 	wday = (day + 4) % 7;
 	if (wday < 0)
 		wday += 7;
- 
+
 	day -= 11017;
 	/* day 0 is march 1, 2000 */
 	year = 5 + day / 146097;
@@ -290,7 +290,7 @@ int mdtm_time(char * curr, const time_t t)
 		year += day / 365;
 		day %= 365;
 	}
- 
+
 	day *= 10;
 	mon = (day + 5) / 306;
 	day = day + 5 - 306 * mon;
@@ -300,7 +300,7 @@ int mdtm_time(char * curr, const time_t t)
 		mon -= 10;
 	} else
 		mon += 2;
- 
+
 	return sprintf(curr, "213 %.4d%.2d%.2d%.2d%.2d%.2d\r\n",
 		year, mon+1, day+1, hour, min, sec);
 }
@@ -335,7 +335,7 @@ time_t parse_time(const char *str, const int str_len)
 	if (str[3] == ',') {
 		/* Thu, 09 Jan 1993 01:29:59 GMT */
 
-		if (str_len < 29) 
+		if (str_len < 29)
 			return -1;
 
 		mday = make_num(str+5);
@@ -352,7 +352,7 @@ time_t parse_time(const char *str, const int str_len)
 			/* Wed Jun  9 01:29:59 1993 */
 
 			if (str_len < 24)
-                        	return -1;
+				return -1;
 
 			mon = make_month(str+4);
 			mday = make_num(str+8);

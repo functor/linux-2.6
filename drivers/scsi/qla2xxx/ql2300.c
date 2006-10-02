@@ -1,11 +1,10 @@
 /*
- * QLogic ISP2300 device driver for Linux 2.6.x
- * Copyright (C) 2003 Christoph Hellwig.
- * Copyright (C) 2003-2004 QLogic Corporation (www.qlogic.com)
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (C)  2003 Christoph Hellwig.
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * Released under GPL v2.
+ * See LICENSE.qla2xxx for copyright and licensing details.
  */
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -41,6 +40,11 @@ static struct qla_board_info qla_board_tbl[] = {
 		.isp_name	= "ISP2312",
 		.fw_info	= qla_fw_tbl,
 	},
+	{
+		.drv_name	= qla_driver_name,
+		.isp_name	= "ISP6312",
+		.fw_info	= qla_fw_tbl,
+	},
 };
 
 static struct pci_device_id qla2300_pci_tbl[] = {
@@ -57,6 +61,13 @@ static struct pci_device_id qla2300_pci_tbl[] = {
 		.subvendor	= PCI_ANY_ID,
 		.subdevice	= PCI_ANY_ID,
 		.driver_data	= (unsigned long)&qla_board_tbl[1],
+	},
+	{
+		.vendor		= PCI_VENDOR_ID_QLOGIC,
+		.device		= PCI_DEVICE_ID_QLOGIC_ISP6312,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+		.driver_data	= (unsigned long)&qla_board_tbl[2],
 	},
 	{0, 0},
 };

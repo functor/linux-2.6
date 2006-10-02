@@ -225,7 +225,7 @@
 /*====================================================================*/
 
 typedef struct scsi_info_t {
-	dev_link_t             link;
+	struct pcmcia_device	*p_dev;
 	struct Scsi_Host      *host;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,74))
 	dev_node_t             node;
@@ -296,16 +296,14 @@ typedef struct _nsp_hw_data {
  */
 
 /* Card service functions */
-static dev_link_t *nsp_cs_attach (void);
-static void        nsp_cs_detach (dev_link_t *link);
-static void        nsp_cs_release(dev_link_t *link);
-static void        nsp_cs_config (dev_link_t *link);
-static int         nsp_cs_event  (event_t event, int priority, event_callback_args_t *args);
+static void        nsp_cs_detach (struct pcmcia_device *p_dev);
+static void        nsp_cs_release(struct pcmcia_device *link);
+static int        nsp_cs_config (struct pcmcia_device *link);
 
 /* Linux SCSI subsystem specific functions */
-static struct Scsi_Host *nsp_detect     (Scsi_Host_Template *sht);
+static struct Scsi_Host *nsp_detect     (struct scsi_host_template *sht);
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0))
-static        int        nsp_detect_old (Scsi_Host_Template *sht);
+static        int        nsp_detect_old (struct scsi_host_template *sht);
 static        int        nsp_release_old(struct Scsi_Host *shpnt);
 #endif
 static const  char      *nsp_info       (struct Scsi_Host *shpnt);
@@ -345,7 +343,7 @@ static int  nsp_expect_signal    (Scsi_Cmnd *SCpnt, unsigned char current_phase,
 static int  nsp_xfer             (Scsi_Cmnd *SCpnt, int phase);
 static int  nsp_dataphase_bypass (Scsi_Cmnd *SCpnt);
 static int  nsp_reselected       (Scsi_Cmnd *SCpnt);
-static struct Scsi_Host *nsp_detect(Scsi_Host_Template *sht);
+static struct Scsi_Host *nsp_detect(struct scsi_host_template *sht);
 
 /* Interrupt handler */
 //static irqreturn_t nspintr(int irq, void *dev_id, struct pt_regs *regs);
@@ -452,7 +450,7 @@ static inline struct Scsi_Host *scsi_host_hn_get(unsigned short hostno)
 	return host;
 }
 
-static void cs_error(client_handle_t handle, int func, int ret)
+static void cs_error(struct pcmcia_device *handle, int func, int ret)
 {
 	error_info_t err = { func, ret };
 	pcmcia_report_error(handle, &err);

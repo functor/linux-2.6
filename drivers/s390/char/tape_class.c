@@ -1,6 +1,6 @@
 /*
  * (C) Copyright IBM Corp. 2004
- * tape_class.c ($Revision: 1.8 $)
+ * tape_class.c
  *
  * Tape class device support
  *
@@ -12,11 +12,11 @@
 MODULE_AUTHOR("Stefan Bader <shbader@de.ibm.com>");
 MODULE_DESCRIPTION(
 	"(C) Copyright IBM Corp. 2004   All Rights Reserved.\n"
-	"tape_class.c ($Revision: 1.8 $)"
+	"tape_class.c"
 );
 MODULE_LICENSE("GPL");
 
-struct class_simple *tape_class;
+static struct class *tape_class;
 
 /*
  * Register a tape device and return a pointer to the cdev structure.
@@ -44,11 +44,10 @@ struct tape_class_device *register_tape_dev(
 	int		rc;
 	char *		s;
 
-	tcd = kmalloc(sizeof(struct tape_class_device), GFP_KERNEL);
+	tcd = kzalloc(sizeof(struct tape_class_device), GFP_KERNEL);
 	if (!tcd)
 		return ERR_PTR(-ENOMEM);
 
-	memset(tcd, 0, sizeof(struct tape_class_device));
 	strncpy(tcd->device_name, device_name, TAPECLASS_NAME_LEN);
 	for (s = strchr(tcd->device_name, '/'); s; s = strchr(s, '/'))
 		*s = '!';
@@ -70,8 +69,9 @@ struct tape_class_device *register_tape_dev(
 	if (rc)
 		goto fail_with_cdev;
 
-	tcd->class_device = class_simple_device_add(
+	tcd->class_device = class_device_create(
 				tape_class,
+				NULL,
 				tcd->char_device->dev,
 				device,
 				"%s", tcd->device_name
@@ -101,7 +101,7 @@ void unregister_tape_dev(struct tape_class_device *tcd)
 			&tcd->class_device->dev->kobj,
 			tcd->mode_name
 		);
-		class_simple_device_remove(tcd->char_device->dev);
+		class_device_destroy(tape_class, tcd->char_device->dev);
 		cdev_del(tcd->char_device);
 		kfree(tcd);
 	}
@@ -111,14 +111,14 @@ EXPORT_SYMBOL(unregister_tape_dev);
 
 static int __init tape_init(void)
 {
-	tape_class = class_simple_create(THIS_MODULE, "tape390");
+	tape_class = class_create(THIS_MODULE, "tape390");
 
 	return 0;
 }
 
 static void __exit tape_exit(void)
 {
-	class_simple_destroy(tape_class);
+	class_destroy(tape_class);
 	tape_class = NULL;
 }
 

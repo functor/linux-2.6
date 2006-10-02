@@ -229,6 +229,7 @@ second_chance_to_dma:
 			case PCI_DEVICE_ID_AMD_VIPER_7409:
 			case PCI_DEVICE_ID_CMD_643:
 			case PCI_DEVICE_ID_SERVERWORKS_CSB5IDE:
+			case PCI_DEVICE_ID_REVOLUTION:
 				simplex_stat = hwif->INB(dma_base + 2);
 				hwif->OUTB((simplex_stat&0x60),(dma_base + 2));
 				simplex_stat = hwif->INB(dma_base + 2);
@@ -579,7 +580,6 @@ void ide_pci_setup_ports(struct pci_dev *dev, ide_pci_device_t *d, int pciirq, a
 	int port;
 	int at_least_one_hwif_enabled = 0;
 	ide_hwif_t *hwif, *mate = NULL;
-	static int secondpdc = 0;
 	u8 tmp;
 
 	index->all = 0xf0f0;
@@ -591,21 +591,9 @@ void ide_pci_setup_ports(struct pci_dev *dev, ide_pci_device_t *d, int pciirq, a
 	for (port = 0; port <= 1; ++port) {
 		ide_pci_enablebit_t *e = &(d->enablebits[port]);
 	
-		/* 
-		 * If this is a Promise FakeRaid controller,
-		 * the 2nd controller will be marked as 
-		 * disabled while it is actually there and enabled
-		 * by the bios for raid purposes. 
-		 * Skip the normal "is it enabled" test for those.
-		 */
-		if ((d->flags & IDEPCI_FLAG_FORCE_PDC) &&
-		    (secondpdc++==1) && (port==1))
-			goto controller_ok;
-			
 		if (e->reg && (pci_read_config_byte(dev, e->reg, &tmp) ||
 		    (tmp & e->mask) != e->val))
 			continue;	/* port not enabled */
-controller_ok:
 
 		if (d->channels	<= port)
 			break;
@@ -786,8 +774,9 @@ static int pre_init = 1;		/* Before first ordered IDE scan */
 static LIST_HEAD(ide_pci_drivers);
 
 /*
- *	ide_register_pci_driver		-	attach IDE driver
+ *	__ide_pci_register_driver	-	attach IDE driver
  *	@driver: pci driver
+ *	@module: owner module of the driver
  *
  *	Registers a driver with the IDE layer. The IDE layer arranges that
  *	boot time setup is done in the expected device order and then 
@@ -800,15 +789,16 @@ static LIST_HEAD(ide_pci_drivers);
  *	Returns are the same as for pci_register_driver
  */
 
-int ide_pci_register_driver(struct pci_driver *driver)
+int __ide_pci_register_driver(struct pci_driver *driver, struct module *module)
 {
 	if(!pre_init)
-		return pci_module_init(driver);
+		return __pci_register_driver(driver, module);
+	driver->driver.owner = module;
 	list_add_tail(&driver->node, &ide_pci_drivers);
 	return 0;
 }
 
-EXPORT_SYMBOL_GPL(ide_pci_register_driver);
+EXPORT_SYMBOL_GPL(__ide_pci_register_driver);
 
 /**
  *	ide_unregister_pci_driver	-	unregister an IDE driver
@@ -847,7 +837,7 @@ static int __init ide_scan_pcidev(struct pci_dev *dev)
 		d = list_entry(l, struct pci_driver, node);
 		if(d->id_table)
 		{
-			const struct pci_device_id *id = pci_match_device(d->id_table, dev);
+			const struct pci_device_id *id = pci_match_id(d->id_table, dev);
 			if(id != NULL)
 			{
 				if(d->probe(dev, id) >= 0)
@@ -896,6 +886,6 @@ void __init ide_scan_pcibus (int scan_direction)
 	{
 		list_del(l);
 		d = list_entry(l, struct pci_driver, node);
-		pci_register_driver(d);
+		__pci_register_driver(d, d->driver.owner);
 	}
 }

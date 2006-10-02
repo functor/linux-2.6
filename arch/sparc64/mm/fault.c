@@ -18,6 +18,7 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/kprobes.h>
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -28,26 +29,7 @@
 #include <asm/lsu.h>
 #include <asm/sections.h>
 #include <asm/kdebug.h>
-
-#define ELEMENTS(arr) (sizeof (arr)/sizeof (arr[0]))
-
-extern struct sparc_phys_banks sp_banks[SPARC_PHYS_BANKS];
-
-/*
- * To debug kernel during syscall entry.
- */
-void syscall_trace_entry(struct pt_regs *regs)
-{
-	printk("scall entry: %s[%d]/cpu%d: %d\n", current->comm, current->pid, smp_processor_id(), (int) regs->u_regs[UREG_G1]);
-}
-
-/*
- * To debug kernel during syscall exit.
- */
-void syscall_trace_exit(struct pt_regs *regs)
-{
-	printk("scall exit: %s[%d]/cpu%d: %d\n", current->comm, current->pid, smp_processor_id(), (int) regs->u_regs[UREG_G1]);
-}
+#include <asm/mmu_context.h>
 
 /*
  * To debug kernel to catch accesses to certain virtual/physical addresses.
@@ -86,55 +68,9 @@ void set_brkpt(unsigned long addr, unsigned char mask, int flags, int mode)
 			     : "memory");
 }
 
-/* Nice, simple, prom library does all the sweating for us. ;) */
-unsigned long __init prom_probe_memory (void)
-{
-	register struct linux_mlist_p1275 *mlist;
-	register unsigned long bytes, base_paddr, tally;
-	register int i;
-
-	i = 0;
-	mlist = *prom_meminfo()->p1275_available;
-	bytes = tally = mlist->num_bytes;
-	base_paddr = mlist->start_adr;
-  
-	sp_banks[0].base_addr = base_paddr;
-	sp_banks[0].num_bytes = bytes;
-
-	while (mlist->theres_more != (void *) 0) {
-		i++;
-		mlist = mlist->theres_more;
-		bytes = mlist->num_bytes;
-		tally += bytes;
-		if (i >= SPARC_PHYS_BANKS-1) {
-			printk ("The machine has more banks than "
-				"this kernel can support\n"
-				"Increase the SPARC_PHYS_BANKS "
-				"setting (currently %d)\n",
-				SPARC_PHYS_BANKS);
-			i = SPARC_PHYS_BANKS-1;
-			break;
-		}
-    
-		sp_banks[i].base_addr = mlist->start_adr;
-		sp_banks[i].num_bytes = mlist->num_bytes;
-	}
-
-	i++;
-	sp_banks[i].base_addr = 0xdeadbeefbeefdeadUL;
-	sp_banks[i].num_bytes = 0;
-
-	/* Now mask all bank sizes on a page boundary, it is all we can
-	 * use anyways.
-	 */
-	for (i = 0; sp_banks[i].num_bytes != 0; i++)
-		sp_banks[i].num_bytes &= PAGE_MASK;
-
-	return tally;
-}
-
-static void unhandled_fault(unsigned long address, struct task_struct *tsk,
-			    struct pt_regs *regs)
+static void __kprobes unhandled_fault(unsigned long address,
+				      struct task_struct *tsk,
+				      struct pt_regs *regs)
 {
 	if ((unsigned long) address < PAGE_SIZE) {
 		printk(KERN_ALERT "Unable to handle kernel NULL "
@@ -156,12 +92,13 @@ static void unhandled_fault(unsigned long address, struct task_struct *tsk,
 	die_if_kernel("Oops", regs);
 }
 
-static void bad_kernel_pc(struct pt_regs *regs)
+static void bad_kernel_pc(struct pt_regs *regs, unsigned long vaddr)
 {
 	unsigned long *ksp;
 
 	printk(KERN_CRIT "OOPS: Bogus kernel PC [%016lx] in fault handler\n",
 	       regs->tpc);
+	printk(KERN_CRIT "OOPS: Fault was to vaddr[%lx]\n", vaddr);
 	__asm__("mov %%sp, %0" : "=r" (ksp));
 	show_stack(current, ksp);
 	unhandled_fault(regs->tpc, current, regs);
@@ -172,7 +109,7 @@ static void bad_kernel_pc(struct pt_regs *regs)
  * this. Additionally, to prevent kswapd from ripping ptes from
  * under us, raise interrupts around the time that we look at the
  * pte, kswapd will have to wait to get his smp ipi response from
- * us. This saves us having to get page_table_lock.
+ * us. vmtruncate likewise. This saves us having to get pte lock.
  */
 static unsigned int get_user_insn(unsigned long tpc)
 {
@@ -202,7 +139,7 @@ static unsigned int get_user_insn(unsigned long tpc)
 	if (!pte_present(pte))
 		goto out;
 
-	pa  = (pte_val(pte) & _PAGE_PADDR);
+	pa  = (pte_pfn(pte) << PAGE_SHIFT);
 	pa += (tpc & ~PAGE_MASK);
 
 	/* Use phys bypass so we don't pollute dtlb/dcache. */
@@ -256,7 +193,6 @@ static unsigned int get_fault_insn(struct pt_regs *regs, unsigned int insn)
 static void do_kernel_fault(struct pt_regs *regs, int si_code, int fault_code,
 			    unsigned int insn, unsigned long address)
 {
-	unsigned long g2;
 	unsigned char asi = ASI_P;
  
 	if ((!insn) && (regs->tstate & TSTATE_PRIV))
@@ -287,11 +223,9 @@ static void do_kernel_fault(struct pt_regs *regs, int si_code, int fault_code,
 		}
 	}
 		
-	g2 = regs->u_regs[UREG_G2];
-
 	/* Is this in ex_table? */
 	if (regs->tstate & TSTATE_PRIV) {
-		unsigned long fixup;
+		const struct exception_table_entry *entry;
 
 		if (asi == ASI_P && (insn & 0xc0800000) == 0xc0800000) {
 			if (insn & 0x2000)
@@ -302,10 +236,9 @@ static void do_kernel_fault(struct pt_regs *regs, int si_code, int fault_code,
 	
 		/* Look in asi.h: All _S asis have LS bit set */
 		if ((asi & 0x1) &&
-		    (fixup = search_extables_range(regs->tpc, &g2))) {
-			regs->tpc = fixup;
+		    (entry = search_exception_tables(regs->tpc))) {
+			regs->tpc = entry->fixup;
 			regs->tnpc = regs->tpc + 4;
-			regs->u_regs[UREG_G2] = g2;
 			return;
 		}
 	} else {
@@ -320,13 +253,13 @@ cannot_handle:
 	unhandled_fault (address, current, regs);
 }
 
-asmlinkage void do_sparc64_fault(struct pt_regs *regs)
+asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	unsigned int insn = 0;
 	int si_code, fault_code;
-	unsigned long address;
+	unsigned long address, mm_rss;
 
 	fault_code = get_thread_fault_code();
 
@@ -349,7 +282,7 @@ asmlinkage void do_sparc64_fault(struct pt_regs *regs)
 		    (tpc >= MODULES_VADDR && tpc < MODULES_END)) {
 			/* Valid, no problems... */
 		} else {
-			bad_kernel_pc(regs);
+			bad_kernel_pc(regs, address);
 			return;
 		}
 	}
@@ -394,8 +327,12 @@ asmlinkage void do_sparc64_fault(struct pt_regs *regs)
 		insn = get_fault_insn(regs, 0);
 		if (!insn)
 			goto continue_fault;
+		/* All loads, stores and atomics have bits 30 and 31 both set
+		 * in the instruction.  Bit 21 is set in all stores, but we
+		 * have to avoid prefetches which also have bit 21 set.
+		 */
 		if ((insn & 0xc0200000) == 0xc0200000 &&
-		    (insn & 0x1780000) != 0x1680000) {
+		    (insn & 0x01780000) != 0x01680000) {
 			/* Don't bother updating thread struct value,
 			 * because update_mmu_cache only cares which tlb
 			 * the access came from.
@@ -475,7 +412,21 @@ good_area:
 	}
 
 	up_read(&mm->mmap_sem);
-	goto fault_done;
+
+	mm_rss = get_mm_rss(mm);
+#ifdef CONFIG_HUGETLB_PAGE
+	mm_rss -= (mm->context.huge_pte_count * (HPAGE_SIZE / PAGE_SIZE));
+#endif
+	if (unlikely(mm_rss >
+		     mm->context.tsb_block[MM_TSB_BASE].tsb_rss_limit))
+		tsb_grow(mm, MM_TSB_BASE, mm_rss);
+#ifdef CONFIG_HUGETLB_PAGE
+	mm_rss = mm->context.huge_pte_count;
+	if (unlikely(mm_rss >
+		     mm->context.tsb_block[MM_TSB_HUGE].tsb_rss_limit))
+		tsb_grow(mm, MM_TSB_HUGE, mm_rss);
+#endif
+	return;
 
 	/*
 	 * Something tried to access memory that isn't in our memory map..
@@ -487,8 +438,7 @@ bad_area:
 
 handle_kernel_fault:
 	do_kernel_fault(regs, si_code, fault_code, insn, address);
-
-	goto fault_done;
+	return;
 
 /*
  * We ran out of memory, or some other thing happened to us that made
@@ -519,9 +469,4 @@ do_sigbus:
 	/* Kernel mode? Handle exceptions or die */
 	if (regs->tstate & TSTATE_PRIV)
 		goto handle_kernel_fault;
-
-fault_done:
-	/* These values are no longer needed, clear them. */
-	set_thread_fault_code(0);
-	current_thread_info()->fault_address = 0;
 }

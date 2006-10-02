@@ -14,7 +14,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/linkage.h>
 #include <linux/sched.h>
 #include <linux/compat.h>
@@ -52,10 +51,10 @@ int vc_get_version(uint32_t id)
 
 
 #ifdef	CONFIG_COMPAT
-#define	__COMPAT(name, id, data, compat) 	\
+#define __COMPAT(name, id, data, compat)	\
 	(compat) ? name ## _x32 (id, data) : name (id, data)
 #else
-#define	__COMPAT(name, id, data, compat) 	\
+#define __COMPAT(name, id, data, compat)	\
 	name (id, data)
 #endif
 
@@ -108,10 +107,10 @@ long do_vserver(uint32_t cmd, uint32_t id, void __user *data, int compat)
 	case VCMD_nx_info:
 		return vc_nx_info(id, data);
 
+	case VCMD_set_namespace_v0:
+		return vc_set_namespace(-1, data);
 	case VCMD_set_namespace:
 		return vc_set_namespace(id, data);
-	case VCMD_cleanup_namespace:
-		return vc_cleanup_namespace(id, data);
 	}
 
 	/* those are allowed while in setup too */
@@ -129,10 +128,17 @@ long do_vserver(uint32_t cmd, uint32_t id, void __user *data, int compat)
 #endif
 
 	switch (cmd) {
+#ifdef	CONFIG_IA32_EMULATION
+	case VCMD_get_rlimit:
+		return __COMPAT(vc_get_rlimit, id, data, compat);
+	case VCMD_set_rlimit:
+		return __COMPAT(vc_set_rlimit, id, data, compat);
+#else
 	case VCMD_get_rlimit:
 		return vc_get_rlimit(id, data);
 	case VCMD_set_rlimit:
 		return vc_set_rlimit(id, data);
+#endif
 	case VCMD_get_rlimit_mask:
 		return vc_get_rlimit_mask(id, data);
 
@@ -213,6 +219,8 @@ long do_vserver(uint32_t cmd, uint32_t id, void __user *data, int compat)
 		return vc_ctx_create(id, NULL);
 	case VCMD_ctx_create:
 		return vc_ctx_create(id, data);
+	case VCMD_ctx_migrate_v0:
+		return vc_ctx_migrate(id, NULL);
 	case VCMD_ctx_migrate:
 		return vc_ctx_migrate(id, data);
 

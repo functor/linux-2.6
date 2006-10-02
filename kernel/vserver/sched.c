@@ -243,7 +243,7 @@ int vx_effective_vavavoom(struct vx_info *vxi, int max_prio)
 		vavavoom = 0;
 
 	vxi->sched.vavavoom = vavavoom;
-	return vavavoom;
+	return vavavoom + vxi->sched.priority_bias;
 }
 
 
@@ -255,7 +255,7 @@ int vc_set_sched_v2(uint32_t xid, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = locate_vx_info(xid);
+	vxi = lookup_vx_info(xid);
 	if (!vxi)
 		return -ESRCH;
 
@@ -303,7 +303,7 @@ int vc_set_sched(uint32_t xid, void __user *data)
 	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
-	vxi = locate_vx_info(xid);
+	vxi = lookup_vx_info(xid);
 	if (!vxi)
 		return -ESRCH;
 

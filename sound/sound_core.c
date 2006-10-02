@@ -53,7 +53,7 @@
 struct sound_unit
 {
 	int unit_minor;
-	struct file_operations *unit_fops;
+	const struct file_operations *unit_fops;
 	struct sound_unit *next;
 	char name[32];
 };
@@ -65,7 +65,7 @@ extern int msnd_classic_init(void);
 extern int msnd_pinnacle_init(void);
 #endif
 
-struct class_simple *sound_class;
+struct class *sound_class;
 EXPORT_SYMBOL(sound_class);
 
 /*
@@ -73,7 +73,7 @@ EXPORT_SYMBOL(sound_class);
  *	join into it. Called with the lock asserted
  */
 
-static int __sound_insert_unit(struct sound_unit * s, struct sound_unit **list, struct file_operations *fops, int index, int low, int top)
+static int __sound_insert_unit(struct sound_unit * s, struct sound_unit **list, const struct file_operations *fops, int index, int low, int top)
 {
 	int n=low;
 
@@ -153,7 +153,7 @@ static DEFINE_SPINLOCK(sound_loader_lock);
  *	list. Acquires locks as needed
  */
 
-static int sound_insert_unit(struct sound_unit **list, struct file_operations *fops, int index, int low, int top, const char *name, umode_t mode)
+static int sound_insert_unit(struct sound_unit **list, const struct file_operations *fops, int index, int low, int top, const char *name, umode_t mode, struct device *dev)
 {
 	struct sound_unit *s = kmalloc(sizeof(*s), GFP_KERNEL);
 	int r;
@@ -174,8 +174,8 @@ static int sound_insert_unit(struct sound_unit **list, struct file_operations *f
 
 	devfs_mk_cdev(MKDEV(SOUND_MAJOR, s->unit_minor),
 			S_IFCHR | mode, s->name);
-	class_simple_device_add(sound_class, MKDEV(SOUND_MAJOR, s->unit_minor),
-				NULL, s->name+6);
+	class_device_create(sound_class, NULL, MKDEV(SOUND_MAJOR, s->unit_minor),
+			    dev, s->name+6);
 	return r;
 
  fail:
@@ -198,7 +198,7 @@ static void sound_remove_unit(struct sound_unit **list, int unit)
 	spin_unlock(&sound_loader_lock);
 	if (p) {
 		devfs_remove(p->name);
-		class_simple_device_remove(MKDEV(SOUND_MAJOR, p->unit_minor));
+		class_device_destroy(sound_class, MKDEV(SOUND_MAJOR, p->unit_minor));
 		kfree(p);
 	}
 }
@@ -227,16 +227,18 @@ static void sound_remove_unit(struct sound_unit **list, int unit)
 static struct sound_unit *chains[SOUND_STEP];
 
 /**
- *	register_sound_special - register a special sound node
+ *	register_sound_special_device - register a special sound node
  *	@fops: File operations for the driver
  *	@unit: Unit number to allocate
+ *      @dev: device pointer
  *
  *	Allocate a special sound device by minor number from the sound
  *	subsystem. The allocated number is returned on succes. On failure
  *	a negative error code is returned.
  */
  
-int register_sound_special(struct file_operations *fops, int unit)
+int register_sound_special_device(const struct file_operations *fops, int unit,
+				  struct device *dev)
 {
 	const int chain = unit % SOUND_STEP;
 	int max_unit = 128 + chain;
@@ -294,9 +296,16 @@ int register_sound_special(struct file_operations *fops, int unit)
 		break;
 	}
 	return sound_insert_unit(&chains[chain], fops, -1, unit, max_unit,
-				 name, S_IRUSR | S_IWUSR);
+				 name, S_IRUSR | S_IWUSR, dev);
 }
  
+EXPORT_SYMBOL(register_sound_special_device);
+
+int register_sound_special(const struct file_operations *fops, int unit)
+{
+	return register_sound_special_device(fops, unit, NULL);
+}
+
 EXPORT_SYMBOL(register_sound_special);
 
 /**
@@ -309,10 +318,10 @@ EXPORT_SYMBOL(register_sound_special);
  *	number is returned, on failure a negative error code is returned.
  */
 
-int register_sound_mixer(struct file_operations *fops, int dev)
+int register_sound_mixer(const struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[0], fops, dev, 0, 128,
-				 "mixer", S_IRUSR | S_IWUSR);
+				 "mixer", S_IRUSR | S_IWUSR, NULL);
 }
 
 EXPORT_SYMBOL(register_sound_mixer);
@@ -327,10 +336,10 @@ EXPORT_SYMBOL(register_sound_mixer);
  *	number is returned, on failure a negative error code is returned.
  */
 
-int register_sound_midi(struct file_operations *fops, int dev)
+int register_sound_midi(const struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[2], fops, dev, 2, 130,
-				 "midi", S_IRUSR | S_IWUSR);
+				 "midi", S_IRUSR | S_IWUSR, NULL);
 }
 
 EXPORT_SYMBOL(register_sound_midi);
@@ -353,10 +362,10 @@ EXPORT_SYMBOL(register_sound_midi);
  *	and will always allocate them as a matching pair - eg dsp3/audio3
  */
 
-int register_sound_dsp(struct file_operations *fops, int dev)
+int register_sound_dsp(const struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[3], fops, dev, 3, 131,
-				 "dsp", S_IWUSR | S_IRUSR);
+				 "dsp", S_IWUSR | S_IRUSR, NULL);
 }
 
 EXPORT_SYMBOL(register_sound_dsp);
@@ -372,10 +381,10 @@ EXPORT_SYMBOL(register_sound_dsp);
  */
 
 
-int register_sound_synth(struct file_operations *fops, int dev)
+int register_sound_synth(const struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[9], fops, dev, 9, 137,
-				 "synth", S_IRUSR | S_IWUSR);
+				 "synth", S_IRUSR | S_IWUSR, NULL);
 }
 
 EXPORT_SYMBOL(register_sound_synth);
@@ -492,7 +501,7 @@ int soundcore_open(struct inode *inode, struct file *file)
 	int chain;
 	int unit = iminor(inode);
 	struct sound_unit *s;
-	struct file_operations *new_fops = NULL;
+	const struct file_operations *new_fops = NULL;
 
 	chain=unit&0x0F;
 	if(chain==4 || chain==5)	/* dsp/audio/dsp16 */
@@ -531,7 +540,7 @@ int soundcore_open(struct inode *inode, struct file *file)
 		 * switching ->f_op in the first place.
 		 */
 		int err = 0;
-		struct file_operations *old_fops = file->f_op;
+		const struct file_operations *old_fops = file->f_op;
 		file->f_op = new_fops;
 		spin_unlock(&sound_loader_lock);
 		if(file->f_op->open)
@@ -562,7 +571,7 @@ static void __exit cleanup_soundcore(void)
 	   empty */
 	unregister_chrdev(SOUND_MAJOR, "sound");
 	devfs_remove("sound");
-	class_simple_destroy(sound_class);
+	class_destroy(sound_class);
 }
 
 static int __init init_soundcore(void)
@@ -572,7 +581,7 @@ static int __init init_soundcore(void)
 		return -EBUSY;
 	}
 	devfs_mk_dir ("sound");
-	sound_class = class_simple_create(THIS_MODULE, "sound");
+	sound_class = class_create(THIS_MODULE, "sound");
 	if (IS_ERR(sound_class))
 		return PTR_ERR(sound_class);
 

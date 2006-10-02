@@ -14,6 +14,7 @@
 
 #include <linux/device.h>
 #include <linux/init.h>
+#include <linux/platform_device.h>
 #include <asm/system.h>
 #include <asm/hardware.h>
 #include <asm/irq.h>
@@ -24,65 +25,146 @@
 #include <asm/mach-types.h>
 
 #include <asm/mach/arch.h>
+#include <asm/arch/mmc.h>
+#include <asm/arch/imx-uart.h>
 #include <linux/interrupt.h>
 #include "generic.h"
-#include <asm/serial.h>
 
-static struct resource mx1ads_resources[] = {
+static struct resource cs89x0_resources[] = {
 	[0] = {
-		.start	= IMX_CS4_VIRT,
-		.end	= IMX_CS4_VIRT + 16,
+		.start	= IMX_CS4_PHYS + 0x300,
+		.end	= IMX_CS4_PHYS + 0x300 + 16,
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= 13,
-		.end	= 13,
+		.start	= IRQ_GPIOC(17),
+		.end	= IRQ_GPIOC(17),
 		.flags	= IORESOURCE_IRQ,
 	},
 };
 
-static struct platform_device mx1ads_device = {
-	.name		= "mx1ads",
-	.num_resources	= ARRAY_SIZE(mx1ads_resources),
-	.resource	= mx1ads_resources,
+static struct platform_device cs89x0_device = {
+	.name		= "cirrus-cs89x0",
+	.num_resources	= ARRAY_SIZE(cs89x0_resources),
+	.resource	= cs89x0_resources,
+};
+
+static struct imxuart_platform_data uart_pdata = {
+	.flags = IMXUART_HAVE_RTSCTS,
+};
+
+static struct resource imx_uart1_resources[] = {
+	[0] = {
+		.start	= 0x00206000,
+		.end	= 0x002060FF,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= (UART1_MINT_RX),
+		.end	= (UART1_MINT_RX),
+		.flags	= IORESOURCE_IRQ,
+	},
+	[2] = {
+		.start	= (UART1_MINT_TX),
+		.end	= (UART1_MINT_TX),
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device imx_uart1_device = {
+	.name		= "imx-uart",
+	.id		= 0,
+	.num_resources	= ARRAY_SIZE(imx_uart1_resources),
+	.resource	= imx_uart1_resources,
+	.dev = {
+		.platform_data = &uart_pdata,
+	}
+};
+
+static struct resource imx_uart2_resources[] = {
+	[0] = {
+		.start	= 0x00207000,
+		.end	= 0x002070FF,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= (UART2_MINT_RX),
+		.end	= (UART2_MINT_RX),
+		.flags	= IORESOURCE_IRQ,
+	},
+	[2] = {
+		.start	= (UART2_MINT_TX),
+		.end	= (UART2_MINT_TX),
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device imx_uart2_device = {
+	.name		= "imx-uart",
+	.id		= 1,
+	.num_resources	= ARRAY_SIZE(imx_uart2_resources),
+	.resource	= imx_uart2_resources,
+	.dev = {
+		.platform_data = &uart_pdata,
+	}
 };
 
 static struct platform_device *devices[] __initdata = {
-	&mx1ads_device,
+	&cs89x0_device,
+	&imx_uart1_device,
+	&imx_uart2_device,
 };
+
+#ifdef CONFIG_MMC_IMX
+static int mx1ads_mmc_card_present(void)
+{
+	/* MMC/SD Card Detect is PB 20 on MX1ADS V1.0.7 */
+	return (SSR(1) & (1 << 20) ? 0 : 1);
+}
+
+static struct imxmmc_platform_data mx1ads_mmc_info = {
+       .card_present = mx1ads_mmc_card_present,
+};
+#endif
 
 static void __init
 mx1ads_init(void)
 {
 #ifdef CONFIG_LEDS
-	imx_gpio_mode(GPIO_PORTA | GPIO_OUT | GPIO_GPIO | 2);
+	imx_gpio_mode(GPIO_PORTA | GPIO_OUT | 2);
 #endif
+#ifdef CONFIG_MMC_IMX
+	/* SD/MMC card detect */
+	imx_gpio_mode(GPIO_PORTB | GPIO_GIUS | GPIO_IN | 20);
+	imx_set_mmc_info(&mx1ads_mmc_info);
+#endif
+
+	imx_gpio_mode(PC9_PF_UART1_CTS);
+	imx_gpio_mode(PC10_PF_UART1_RTS);
+	imx_gpio_mode(PC11_PF_UART1_TXD);
+	imx_gpio_mode(PC12_PF_UART1_RXD);
+
+	imx_gpio_mode(PB28_PF_UART2_CTS);
+	imx_gpio_mode(PB29_PF_UART2_RTS);
+	imx_gpio_mode(PB30_PF_UART2_TXD);
+	imx_gpio_mode(PB31_PF_UART2_RXD);
+
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 }
-
-static struct map_desc mx1ads_io_desc[] __initdata = {
-	/* virtual     physical    length      type */
-	{IMX_CS0_VIRT, IMX_CS0_PHYS, IMX_CS0_SIZE, MT_DEVICE},
-	{IMX_CS1_VIRT, IMX_CS1_PHYS, IMX_CS1_SIZE, MT_DEVICE},
-	{IMX_CS2_VIRT, IMX_CS2_PHYS, IMX_CS2_SIZE, MT_DEVICE},
-	{IMX_CS3_VIRT, IMX_CS3_PHYS, IMX_CS3_SIZE, MT_DEVICE},
-	{IMX_CS4_VIRT, IMX_CS4_PHYS, IMX_CS4_SIZE, MT_DEVICE},
-	{IMX_CS5_VIRT, IMX_CS5_PHYS, IMX_CS5_SIZE, MT_DEVICE},
-};
 
 static void __init
 mx1ads_map_io(void)
 {
 	imx_map_io();
-	iotable_init(mx1ads_io_desc, ARRAY_SIZE(mx1ads_io_desc));
 }
 
 MACHINE_START(MX1ADS, "Motorola MX1ADS")
-	MAINTAINER("Sascha Hauer, Pengutronix")
-	BOOT_MEM(0x08000000, 0x00200000, 0xe0200000)
-	BOOT_PARAMS(0x08000100)
-	MAPIO(mx1ads_map_io)
-	INITIRQ(imx_init_irq)
+	/* Maintainer: Sascha Hauer, Pengutronix */
+	.phys_io	= 0x00200000,
+	.io_pg_offst	= ((0xe0000000) >> 18) & 0xfffc,
+	.boot_params	= 0x08000100,
+	.map_io		= mx1ads_map_io,
+	.init_irq	= imx_init_irq,
 	.timer		= &imx_timer,
-	INIT_MACHINE(mx1ads_init)
+	.init_machine	= mx1ads_init,
 MACHINE_END

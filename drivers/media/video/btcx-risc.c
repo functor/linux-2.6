@@ -1,5 +1,4 @@
 /*
-    $Id: btcx-risc.c,v 1.6 2005/02/21 13:57:59 kraxel Exp $
 
     btcx-risc.c
 
@@ -38,7 +37,7 @@ MODULE_DESCRIPTION("some code shared by bttv and cx88xx drivers");
 MODULE_AUTHOR("Gerd Knorr");
 MODULE_LICENSE("GPL");
 
-static unsigned int debug = 0;
+static unsigned int debug;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug,"debug messages, default is 0 (no)");
 

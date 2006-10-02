@@ -31,24 +31,11 @@
 #include <asm/cache.h>
 #include <asm/thread_info.h>
 #include <asm/ppc_asm.h>
-#include <asm/offsets.h>
+#include <asm/asm-offsets.h>
 
 #ifdef CONFIG_APUS
 #include <asm/amigappc.h>
 #endif
-
-#ifdef CONFIG_PPC64BRIDGE
-#define LOAD_BAT(n, reg, RA, RB)	\
-	ld	RA,(n*32)+0(reg);	\
-	ld	RB,(n*32)+8(reg);	\
-	mtspr	SPRN_IBAT##n##U,RA;	\
-	mtspr	SPRN_IBAT##n##L,RB;	\
-	ld	RA,(n*32)+16(reg);	\
-	ld	RB,(n*32)+24(reg);	\
-	mtspr	SPRN_DBAT##n##U,RA;	\
-	mtspr	SPRN_DBAT##n##L,RB;	\
-
-#else /* CONFIG_PPC64BRIDGE */
 
 /* 601 only have IBAT; cr0.eq is set on 601 when using this macro */
 #define LOAD_BAT(n, reg, RA, RB)	\
@@ -66,7 +53,6 @@
 	mtspr	SPRN_DBAT##n##U,RA;	\
 	mtspr	SPRN_DBAT##n##L,RB;	\
 1:
-#endif /* CONFIG_PPC64BRIDGE */
 
 	.text
 	.stabs	"arch/ppc/kernel/",N_SO,0,0,0f
@@ -129,11 +115,6 @@ _start:
 
 	.globl	__start
 __start:
-/*
- * We have to do any OF calls before we map ourselves to KERNELBASE,
- * because OF may have I/O devices mapped into that area
- * (particularly on CHRP).
- */
 	mr	r31,r3			/* save parameters */
 	mr	r30,r4
 	mr	r29,r5
@@ -148,14 +129,6 @@ __start:
  */
 	bl	early_init
 
-/*
- * On POWER4, we first need to tweak some CPU configuration registers
- * like real mode cache inhibit or exception base
- */
-#ifdef CONFIG_POWER4
-	bl	__970_cpu_preinit
-#endif /* CONFIG_POWER4 */
-
 #ifdef CONFIG_APUS
 /* On APUS the __va/__pa constants need to be set to the correct
  * values before continuing.
@@ -169,7 +142,6 @@ __start:
  */
  	bl	mmu_off
 __after_mmu_off:
-#ifndef CONFIG_POWER4
 	bl	clear_bats
 	bl	flush_tlbs
 
@@ -177,10 +149,6 @@ __after_mmu_off:
 #if !defined(CONFIG_APUS) && defined(CONFIG_BOOTX_TEXT)
 	bl	setup_disp_bat
 #endif
-#else /* CONFIG_POWER4 */
-	bl	reloc_offset
-	bl	initial_mm_power4
-#endif /* CONFIG_POWER4 */
 
 /*
  * Call setup_cpu for CPU 0 and initialize 6xx Idle
@@ -192,18 +160,11 @@ __after_mmu_off:
 	bl	reloc_offset
 	bl	init_idle_6xx
 #endif /* CONFIG_6xx */
-#ifdef CONFIG_POWER4
-	bl	reloc_offset
-	bl	init_idle_power4
-#endif /* CONFIG_POWER4 */
 
 
 #ifndef CONFIG_APUS
 /*
  * We need to run with _start at physical address 0.
- * On CHRP, we are loaded at 0x10000 since OF on CHRP uses
- * the exception vectors at 0 (and therefore this copy
- * overwrites OF's exception vectors with our own).
  * If the MMU is already turned on, we copy stuff to KERNELBASE,
  * otherwise we copy it to 0.
  */
@@ -349,60 +310,28 @@ i##n:								\
 
 /* System reset */
 /* core99 pmac starts the seconary here by changing the vector, and
-   putting it back to what it was (UnknownException) when done.  */
+   putting it back to what it was (unknown_exception) when done.  */
 #if defined(CONFIG_GEMINI) && defined(CONFIG_SMP)
 	. = 0x100
 	b	__secondary_start_gemini
 #else
-	EXCEPTION(0x100, Reset, UnknownException, EXC_XFER_STD)
+	EXCEPTION(0x100, Reset, unknown_exception, EXC_XFER_STD)
 #endif
 
 /* Machine check */
-/*
- * On CHRP, this is complicated by the fact that we could get a
- * machine check inside RTAS, and we have no guarantee that certain
- * critical registers will have the values we expect.  The set of
- * registers that might have bad values includes all the GPRs
- * and all the BATs.  We indicate that we are in RTAS by putting
- * a non-zero value, the address of the exception frame to use,
- * in SPRG2.  The machine check handler checks SPRG2 and uses its
- * value if it is non-zero.  If we ever needed to free up SPRG2,
- * we could use a field in the thread_info or thread_struct instead.
- * (Other exception handlers assume that r1 is a valid kernel stack
- * pointer when we take an exception from supervisor mode.)
- *	-- paulus.
- */
 	. = 0x200
 	mtspr	SPRN_SPRG0,r10
 	mtspr	SPRN_SPRG1,r11
 	mfcr	r10
-#ifdef CONFIG_PPC_CHRP
-	mfspr	r11,SPRN_SPRG2
-	cmpwi	0,r11,0
-	bne	7f
-#endif /* CONFIG_PPC_CHRP */
 	EXCEPTION_PROLOG_1
 7:	EXCEPTION_PROLOG_2
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-#ifdef CONFIG_PPC_CHRP
-	mfspr	r4,SPRN_SPRG2
-	cmpwi	cr1,r4,0
-	bne	cr1,1f
-#endif
-	EXC_XFER_STD(0x200, MachineCheckException)
-#ifdef CONFIG_PPC_CHRP
-1:	b	machine_check_in_rtas
-#endif
+	EXC_XFER_STD(0x200, machine_check_exception)
 
 /* Data access exception. */
 	. = 0x300
-#ifdef CONFIG_PPC64BRIDGE
-	b	DataAccess
-DataAccessCont:
-#else
 DataAccess:
 	EXCEPTION_PROLOG
-#endif /* CONFIG_PPC64BRIDGE */
 	mfspr	r10,SPRN_DSISR
 	andis.	r0,r10,0xa470		/* weird error? */
 	bne	1f			/* if not, try to put a PTE */
@@ -414,21 +343,10 @@ DataAccess:
 	mfspr	r4,SPRN_DAR
 	EXC_XFER_EE_LITE(0x300, handle_page_fault)
 
-#ifdef CONFIG_PPC64BRIDGE
-/* SLB fault on data access. */
-	. = 0x380
-	b	DataSegment
-#endif /* CONFIG_PPC64BRIDGE */
-
 /* Instruction access exception. */
 	. = 0x400
-#ifdef CONFIG_PPC64BRIDGE
-	b	InstructionAccess
-InstructionAccessCont:
-#else
 InstructionAccess:
 	EXCEPTION_PROLOG
-#endif /* CONFIG_PPC64BRIDGE */
 	andis.	r0,r9,0x4000		/* no pte found? */
 	beq	1f			/* if so, try to put a PTE */
 	li	r3,0			/* into the hash table */
@@ -437,12 +355,6 @@ InstructionAccess:
 1:	mr	r4,r12
 	mr	r5,r9
 	EXC_XFER_EE_LITE(0x400, handle_page_fault)
-
-#ifdef CONFIG_PPC64BRIDGE
-/* SLB fault on instruction access. */
-	. = 0x480
-	b	InstructionSegment
-#endif /* CONFIG_PPC64BRIDGE */
 
 /* External interrupt */
 	EXCEPTION(0x500, HardwareInterrupt, do_IRQ, EXC_XFER_LITE)
@@ -456,10 +368,10 @@ Alignment:
 	mfspr	r5,SPRN_DSISR
 	stw	r5,_DSISR(r11)
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_EE(0x600, AlignmentException)
+	EXC_XFER_EE(0x600, alignment_exception)
 
 /* Program check exception */
-	EXCEPTION(0x700, ProgramCheck, ProgramCheckException, EXC_XFER_STD)
+	EXCEPTION(0x700, ProgramCheck, program_check_exception, EXC_XFER_STD)
 
 /* Floating-point unavailable */
 	. = 0x800
@@ -467,13 +379,13 @@ FPUnavailable:
 	EXCEPTION_PROLOG
 	bne	load_up_fpu		/* if from user, just load it up */
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_EE_LITE(0x800, KernelFP)
+	EXC_XFER_EE_LITE(0x800, kernel_fp_unavailable_exception)
 
 /* Decrementer */
 	EXCEPTION(0x900, Decrementer, timer_interrupt, EXC_XFER_LITE)
 
-	EXCEPTION(0xa00, Trap_0a, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0xb00, Trap_0b, UnknownException, EXC_XFER_EE)
+	EXCEPTION(0xa00, Trap_0a, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0xb00, Trap_0b, unknown_exception, EXC_XFER_EE)
 
 /* System call */
 	. = 0xc00
@@ -482,8 +394,8 @@ SystemCall:
 	EXC_XFER_EE_LITE(0xc00, DoSyscall)
 
 /* Single step - not used on 601 */
-	EXCEPTION(0xd00, SingleStep, SingleStepException, EXC_XFER_STD)
-	EXCEPTION(0xe00, Trap_0e, UnknownException, EXC_XFER_EE)
+	EXCEPTION(0xd00, SingleStep, single_step_exception, EXC_XFER_STD)
+	EXCEPTION(0xe00, Trap_0e, unknown_exception, EXC_XFER_EE)
 
 /*
  * The Altivec unavailable trap is at 0x0f20.  Foo.
@@ -502,7 +414,7 @@ SystemCall:
 Trap_0f:
 	EXCEPTION_PROLOG
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_EE(0xf00, UnknownException)
+	EXC_XFER_EE(0xf00, unknown_exception)
 
 /*
  * Handle TLB miss for instruction on 603/603e.
@@ -702,44 +614,38 @@ DataStoreTLBMiss:
 	rfi
 
 #ifndef CONFIG_ALTIVEC
-#define AltivecAssistException	UnknownException
+#define altivec_assist_exception	unknown_exception
 #endif
 
-	EXCEPTION(0x1300, Trap_13, InstructionBreakpoint, EXC_XFER_EE)
+	EXCEPTION(0x1300, Trap_13, instruction_breakpoint_exception, EXC_XFER_EE)
 	EXCEPTION(0x1400, SMI, SMIException, EXC_XFER_EE)
-	EXCEPTION(0x1500, Trap_15, UnknownException, EXC_XFER_EE)
-#ifdef CONFIG_POWER4
-	EXCEPTION(0x1600, Trap_16, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1700, Trap_17, AltivecAssistException, EXC_XFER_EE)
-	EXCEPTION(0x1800, Trap_18, TAUException, EXC_XFER_STD)
-#else /* !CONFIG_POWER4 */
-	EXCEPTION(0x1600, Trap_16, AltivecAssistException, EXC_XFER_EE)
+	EXCEPTION(0x1500, Trap_15, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1600, Trap_16, altivec_assist_exception, EXC_XFER_EE)
 	EXCEPTION(0x1700, Trap_17, TAUException, EXC_XFER_STD)
-	EXCEPTION(0x1800, Trap_18, UnknownException, EXC_XFER_EE)
-#endif /* CONFIG_POWER4 */
-	EXCEPTION(0x1900, Trap_19, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1a00, Trap_1a, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1b00, Trap_1b, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1c00, Trap_1c, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1d00, Trap_1d, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1e00, Trap_1e, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x1f00, Trap_1f, UnknownException, EXC_XFER_EE)
+	EXCEPTION(0x1800, Trap_18, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1900, Trap_19, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1a00, Trap_1a, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1b00, Trap_1b, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1c00, Trap_1c, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1d00, Trap_1d, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1e00, Trap_1e, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1f00, Trap_1f, unknown_exception, EXC_XFER_EE)
 	EXCEPTION(0x2000, RunMode, RunModeException, EXC_XFER_EE)
-	EXCEPTION(0x2100, Trap_21, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2200, Trap_22, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2300, Trap_23, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2400, Trap_24, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2500, Trap_25, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2600, Trap_26, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2700, Trap_27, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2800, Trap_28, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2900, Trap_29, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2a00, Trap_2a, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2b00, Trap_2b, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2c00, Trap_2c, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2d00, Trap_2d, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2e00, Trap_2e, UnknownException, EXC_XFER_EE)
-	EXCEPTION(0x2f00, MOLTrampoline, UnknownException, EXC_XFER_EE_LITE)
+	EXCEPTION(0x2100, Trap_21, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2200, Trap_22, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2300, Trap_23, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2400, Trap_24, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2500, Trap_25, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2600, Trap_26, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2700, Trap_27, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2800, Trap_28, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2900, Trap_29, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2a00, Trap_2a, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2b00, Trap_2b, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2c00, Trap_2c, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2d00, Trap_2d, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2e00, Trap_2e, unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x2f00, MOLTrampoline, unknown_exception, EXC_XFER_EE_LITE)
 
 	.globl mol_trampoline
 	.set mol_trampoline, i0x2f00
@@ -751,29 +657,8 @@ AltiVecUnavailable:
 #ifdef CONFIG_ALTIVEC
 	bne	load_up_altivec		/* if from user, just load it up */
 #endif /* CONFIG_ALTIVEC */
-	EXC_XFER_EE_LITE(0xf20, AltivecUnavailException)
-
-#ifdef CONFIG_PPC64BRIDGE
-DataAccess:
-	EXCEPTION_PROLOG
-	b	DataAccessCont
-
-InstructionAccess:
-	EXCEPTION_PROLOG
-	b	InstructionAccessCont
-
-DataSegment:
-	EXCEPTION_PROLOG
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-	mfspr	r4,SPRN_DAR
-	stw	r4,_DAR(r11)
-	EXC_XFER_STD(0x380, UnknownException)
-
-InstructionSegment:
-	EXCEPTION_PROLOG
-	addi	r3,r1,STACK_FRAME_OVERHEAD
-	EXC_XFER_STD(0x480, UnknownException)
-#endif /* CONFIG_PPC64BRIDGE */
+	EXC_XFER_EE_LITE(0xf20, altivec_unavailable_exception)
 
 #ifdef CONFIG_ALTIVEC
 /* Note that the AltiVec support is closely modeled after the FP
@@ -804,7 +689,7 @@ load_up_altivec:
 	beq	1f
 	add	r4,r4,r6
 	addi	r4,r4,THREAD	/* want THREAD of last_task_used_altivec */
-	SAVE_32VR(0,r10,r4)
+	SAVE_32VRS(0,r10,r4)
 	mfvscr	vr0
 	li	r10,THREAD_VSCR
 	stvx	vr0,r10,r4
@@ -824,7 +709,7 @@ load_up_altivec:
 	stw	r4,THREAD_USED_VR(r5)
 	lvx	vr0,r10,r5
 	mtvscr	vr0
-	REST_32VR(0,r10,r5)
+	REST_32VRS(0,r10,r5)
 #ifndef CONFIG_SMP
 	subi	r4,r5,THREAD
 	sub	r4,r4,r6
@@ -870,7 +755,7 @@ giveup_altivec:
 	addi	r3,r3,THREAD		/* want THREAD of task */
 	lwz	r5,PT_REGS(r3)
 	cmpwi	0,r5,0
-	SAVE_32VR(0, r4, r3)
+	SAVE_32VRS(0, r4, r3)
 	mfvscr	vr0
 	li	r4,THREAD_VSCR
 	stvx	vr0,r4,r3
@@ -916,7 +801,7 @@ relocate_kernel:
 copy_and_flush:
 	addi	r5,r5,-4
 	addi	r6,r6,-4
-4:	li	r0,L1_CACHE_LINE_SIZE/4
+4:	li	r0,L1_CACHE_BYTES/4
 	mtctr	r0
 3:	addi	r6,r6,4			/* copy a cache line */
 	lwzx	r0,r6,r4
@@ -1023,23 +908,21 @@ __secondary_start_gemini:
         andc    r4,r4,r3
         mtspr   SPRN_HID0,r4
         sync
-        bl      gemini_prom_init
         b       __secondary_start
 #endif /* CONFIG_GEMINI */
-	.globl	__secondary_start_psurge
-__secondary_start_psurge:
-	li	r24,1			/* cpu # */
-	b	__secondary_start_psurge99
-	.globl	__secondary_start_psurge2
-__secondary_start_psurge2:
-	li	r24,2			/* cpu # */
-	b	__secondary_start_psurge99
-	.globl	__secondary_start_psurge3
-__secondary_start_psurge3:
-	li	r24,3			/* cpu # */
-	b	__secondary_start_psurge99
-__secondary_start_psurge99:
-	/* we come in here with IR=0 and DR=1, and DBAT 0
+
+	.globl	__secondary_start_pmac_0
+__secondary_start_pmac_0:
+	/* NB the entries for cpus 0, 1, 2 must each occupy 8 bytes. */
+	li	r24,0
+	b	1f
+	li	r24,1
+	b	1f
+	li	r24,2
+	b	1f
+	li	r24,3
+1:
+	/* on powersurge, we come in here with IR=0 and DR=1, and DBAT 0
 	   set to map the 0xf0000000 - 0xffffffff region */
 	mfmsr	r0
 	rlwinm	r0,r0,0,28,26		/* clear DR (0x10) */
@@ -1049,28 +932,16 @@ __secondary_start_psurge99:
 
 	.globl	__secondary_start
 __secondary_start:
-#ifdef CONFIG_PPC64BRIDGE
-	mfmsr	r0
-	clrldi	r0,r0,1			/* make sure it's in 32-bit mode */
-	SYNC
-	MTMSRD(r0)
-	isync
-#endif
 	/* Copy some CPU settings from CPU 0 */
 	bl	__restore_cpu_setup
 
 	lis	r3,-KERNELBASE@h
 	mr	r4,r24
-	bl	identify_cpu
 	bl	call_setup_cpu		/* Call setup_cpu for this CPU */
 #ifdef CONFIG_6xx
 	lis	r3,-KERNELBASE@h
 	bl	init_idle_6xx
 #endif /* CONFIG_6xx */
-#ifdef CONFIG_POWER4
-	lis	r3,-KERNELBASE@h
-	bl	init_idle_power4
-#endif /* CONFIG_POWER4 */
 
 	/* get current_thread_info and current */
 	lis	r1,secondary_ti@ha
@@ -1111,17 +982,12 @@ __secondary_start:
  * Those generic dummy functions are kept for CPUs not
  * included in CONFIG_6xx
  */
-_GLOBAL(__setup_cpu_power3)
-	blr
-_GLOBAL(__setup_cpu_generic)
-	blr
-
-#if !defined(CONFIG_6xx) && !defined(CONFIG_POWER4)
+#if !defined(CONFIG_6xx)
 _GLOBAL(__save_cpu_setup)
 	blr
 _GLOBAL(__restore_cpu_setup)
 	blr
-#endif /* !defined(CONFIG_6xx) && !defined(CONFIG_POWER4) */
+#endif /* !defined(CONFIG_6xx) */
 
 
 /*
@@ -1139,11 +1005,6 @@ load_up_mmu:
 	tophys(r6,r6)
 	lwz	r6,_SDR1@l(r6)
 	mtspr	SPRN_SDR1,r6
-#ifdef CONFIG_PPC64BRIDGE
-	/* clear the ASR so we only use the pseudo-segment registers. */
-	li	r6,0
-	mtasr	r6
-#endif /* CONFIG_PPC64BRIDGE */
 	li	r0,16		/* load up segment register values */
 	mtctr	r0		/* for context 0 */
 	lis	r3,0x2000	/* Ku = 1, VSID = 0 */
@@ -1152,7 +1013,7 @@ load_up_mmu:
 	addi	r3,r3,0x111	/* increment VSID */
 	addis	r4,r4,0x1000	/* address of next segment */
 	bdnz	3b
-#ifndef CONFIG_POWER4
+
 /* Load the BAT registers with the values set up by MMU_init.
    MMU_init takes care of whether we're on a 601 or not. */
 	mfpvr	r3
@@ -1165,7 +1026,7 @@ load_up_mmu:
 	LOAD_BAT(1,r3,r4,r5)
 	LOAD_BAT(2,r3,r4,r5)
 	LOAD_BAT(3,r3,r4,r5)
-#endif /* CONFIG_POWER4 */
+
 	blr
 
 /*
@@ -1276,9 +1137,6 @@ _GLOBAL(set_context)
 	li	r4,0
 	isync
 3:
-#ifdef CONFIG_PPC64BRIDGE
-	slbie	r4
-#endif /* CONFIG_PPC64BRIDGE */
 	mtsrin	r3,r4
 	addi	r3,r3,0x111	/* next VSID */
 	rlwinm	r3,r3,0,8,3	/* clear out any overflow from VSID field */
@@ -1349,7 +1207,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_HIGH_BATS)
 flush_tlbs:
 	lis	r10, 0x40
 1:	addic.	r10, r10, -0x1000
-	tlbie	r10,0
+	tlbie	r10
 	blt	1b
 	sync
 	blr
@@ -1365,7 +1223,6 @@ mmu_off:
 	sync
 	RFI
 
-#ifndef CONFIG_POWER4
 /*
  * Use the first pair of BAT registers to map the 1st 16MB
  * of RAM to KERNELBASE.  From this point on we can't safely
@@ -1373,7 +1230,6 @@ mmu_off:
  */
 initial_bats:
 	lis	r11,KERNELBASE@h
-#ifndef CONFIG_PPC64BRIDGE
 	mfspr	r9,SPRN_PVR
 	rlwinm	r9,r9,16,16,31		/* r9 = 1 for 601, 4 for 604 */
 	cmpwi	0,r9,1
@@ -1388,7 +1244,6 @@ initial_bats:
 	mtspr	SPRN_IBAT1L,r10
 	isync
 	blr
-#endif /* CONFIG_PPC64BRIDGE */
 
 4:	tophys(r8,r11)
 #ifdef CONFIG_SMP
@@ -1402,11 +1257,6 @@ initial_bats:
 	ori	r11,r11,BL_256M<<2|0x2	/* set up BAT registers for 604 */
 #endif /* CONFIG_APUS */
 
-#ifdef CONFIG_PPC64BRIDGE
-	/* clear out the high 32 bits in the BAT */
-	clrldi	r11,r11,32
-	clrldi	r8,r8,32
-#endif /* CONFIG_PPC64BRIDGE */
 	mtspr	SPRN_DBAT0L,r8		/* N.B. 6xx (not 601) have valid */
 	mtspr	SPRN_DBAT0U,r11		/* bit in upper BAT register */
 	mtspr	SPRN_IBAT0L,r8
@@ -1438,38 +1288,6 @@ setup_disp_bat:
 	blr
 
 #endif /* !defined(CONFIG_APUS) && defined(CONFIG_BOOTX_TEXT) */
-
-#else /* CONFIG_POWER4 */
-/*
- * Load up the SDR1 and segment register values now
- * since we don't have the BATs.
- * Also make sure we are running in 32-bit mode.
- */
-
-initial_mm_power4:
-	addis	r14,r3,_SDR1@ha		/* get the value from _SDR1 */
-	lwz	r14,_SDR1@l(r14)	/* assume hash table below 4GB */
-	mtspr	SPRN_SDR1,r14
-	slbia
-	lis	r4,0x2000		/* set pseudo-segment reg 12 */
-	ori	r5,r4,0x0ccc
-	mtsr	12,r5
-#if 0
-	ori	r5,r4,0x0888		/* set pseudo-segment reg 8 */
-	mtsr	8,r5			/* (for access to serial port) */
-#endif
-#ifdef CONFIG_BOOTX_TEXT
-	ori	r5,r4,0x0999		/* set pseudo-segment reg 9 */
-	mtsr	9,r5			/* (for access to screen) */
-#endif
-	mfmsr	r0
-	clrldi	r0,r0,1
-	sync
-	mtmsr	r0
-	isync
-	blr
-
-#endif /* CONFIG_POWER4 */
 
 #ifdef CONFIG_8260
 /* Jump into the system reset for the rom.

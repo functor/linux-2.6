@@ -91,12 +91,7 @@ MODULE_PARM_DESC(io, "io port");
 module_param(timeout, int, 0);
 MODULE_PARM_DESC(timeout, "range is 0-255 minutes, default is 1");
 
-#ifdef CONFIG_WATCHDOG_NOWAYOUT
-static int nowayout = 1;
-#else
-static int nowayout = 0;
-#endif
-
+static int nowayout = WATCHDOG_NOWAYOUT;
 module_param(nowayout, int, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started (default=CONFIG_WATCHDOG_NOWAYOUT)");
 
@@ -382,7 +377,7 @@ static int __init sc1200wdt_init(void)
 {
 	int ret;
 
-	printk(banner);
+	printk("%s\n", banner);
 
 	spin_lock_init(&sc1200wdt_lock);
 	sema_init(&open_sem, 1);

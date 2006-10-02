@@ -6,7 +6,13 @@
  *
  *  May be copied or modified under the terms of the GNU General Public License
  *
- *  Documentation available under NDA only
+ *  Documentation for CMD680:
+ *  http://gkernel.sourceforge.net/specs/sii/sii-0680a-v1.31.pdf.bz2
+ *
+ *  Documentation for SiI 3112:
+ *  http://gkernel.sourceforge.net/specs/sii/3112A_SiI-DS-0095-B2.pdf.bz2
+ *
+ *  Errata and other documentation only available under NDA.
  *
  *
  *  FAQ Items:
@@ -48,8 +54,6 @@ static int pdev_is_sata(struct pci_dev *pdev)
 	{
 		case PCI_DEVICE_ID_SII_3112:
 		case PCI_DEVICE_ID_SII_1210SA:
-		case PCI_DEVICE_ID_ATI_IXP300_SATA:
-		case PCI_DEVICE_ID_ATI_IXP400_SATA:
 			return 1;
 		case PCI_DEVICE_ID_SII_680:
 			return 0;
@@ -703,6 +707,7 @@ static unsigned int setup_mmio_siimage (struct pci_dev *dev, const char *name)
 	unsigned long barsize	= pci_resource_len(dev, 5);
 	u8 tmpbyte	= 0;
 	void __iomem *ioaddr;
+	u32 tmp, irq_mask;
 
 	/*
 	 *	Drop back to PIO if we can't map the mmio. Some
@@ -728,6 +733,14 @@ static unsigned int setup_mmio_siimage (struct pci_dev *dev, const char *name)
 	pci_set_drvdata(dev, (void *) ioaddr);
 
 	if (pdev_is_sata(dev)) {
+		/* make sure IDE0/1 interrupts are not masked */
+		irq_mask = (1 << 22) | (1 << 23);
+		tmp = readl(ioaddr + 0x48);
+		if (tmp & irq_mask) {
+			tmp &= ~irq_mask;
+			writel(tmp, ioaddr + 0x48);
+			readl(ioaddr + 0x48); /* flush */
+		}
 		writel(0, ioaddr + 0x148);
 		writel(0, ioaddr + 0x1C8);
 	}
@@ -1090,9 +1103,7 @@ static void __devinit init_hwif_siimage(ide_hwif_t *hwif)
 static ide_pci_device_t siimage_chipsets[] __devinitdata = {
 	/* 0 */ DECLARE_SII_DEV("SiI680"),
 	/* 1 */ DECLARE_SII_DEV("SiI3112 Serial ATA"),
-	/* 2 */ DECLARE_SII_DEV("Adaptec AAR-1210SA"),
-	/* 3 */ DECLARE_SII_DEV("ATI IXP300"),
-	/* 4 */ DECLARE_SII_DEV("ATI IXP400")
+	/* 2 */ DECLARE_SII_DEV("Adaptec AAR-1210SA")
 };
 
 /**
@@ -1114,8 +1125,6 @@ static struct pci_device_id siimage_pci_tbl[] = {
 #ifdef CONFIG_BLK_DEV_IDE_SATA
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_3112, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{ PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_SII_1210SA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},
-	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_IXP300_SATA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 3},
-	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_IXP400_SATA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 4},
 #endif
 	{ 0, },
 };

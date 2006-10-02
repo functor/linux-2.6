@@ -27,12 +27,12 @@
 void momenco_jaguar_restart(char *command)
 {
 	/* base address of timekeeper portion of part */
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 	void *nvram = (void*) 0xfffffffffc807000;
 #else
 	void *nvram = (void*) 0xfc807000;
 #endif
- 	/* Ask the NVRAM/RTC/watchdog chip to assert reset in 1/16 second */
+	/* Ask the NVRAM/RTC/watchdog chip to assert reset in 1/16 second */
 	writeb(0x84, nvram + 0xff7);
 
 	/* wait for the watchdog to go off */

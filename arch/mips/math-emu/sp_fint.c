@@ -29,11 +29,11 @@
 
 ieee754sp ieee754sp_fint(int x)
 {
-	COMPXSP;
+	unsigned xm;
+	int xe;
+	int xs;
 
 	CLEARCX;
-
-	xc = ( 0 ? xc : xc );
 
 	if (x == 0)
 		return ieee754sp_zero(0);

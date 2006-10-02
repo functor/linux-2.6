@@ -16,26 +16,12 @@
 
 #define PAGE_SIZE      4096 /* must be same value as in <asm/page.h> */
 
-/* returns  r3 = relocated address of sym */
-/* modifies r0 */
-#define RELOC_SYM(sym) \
-	mflr	r3; \
-	bl	1f; \
-1:	mflr	r0; \
-	mtlr	r3; \
-	lis	r3, 1b@ha; \
-	ori	r3, r3, 1b@l; \
-	subf	r0, r3, r0; \
-	lis	r3, sym@ha; \
-	ori	r3, r3, sym@l; \
-	add	r3, r3, r0
-
 	/*
 	 * Must be relocatable PIC code callable as a C function.
 	 */
 	.globl relocate_new_kernel
 relocate_new_kernel:
-	/* r3 = indirection_page   */
+	/* r3 = page_list   */
 	/* r4 = reboot_code_buffer */
 	/* r5 = start_address      */
 
@@ -48,9 +34,9 @@ relocate_new_kernel:
 
 	mr	r8, r0
 	ori     r8, r8, MSR_RI|MSR_ME
-	mtspr	SRR1, r8
+	mtspr	SPRN_SRR1, r8
 	addi	r8, r4, 1f - relocate_new_kernel
-	mtspr	SRR0, r8
+	mtspr	SPRN_SRR0, r8
 	sync
 	rfi
 
@@ -65,32 +51,34 @@ relocate_new_kernel:
 
 	/* Do the copies */
 	li	r6, 0 /* checksum */
-	subi	r3, r3, 4
+	mr	r0, r3
+	b	1f
 
 0:	/* top, read another word for the indirection page */
 	lwzu	r0, 4(r3)
 
+1:
 	/* is it a destination page? (r8) */
 	rlwinm.	r7, r0, 0, 31, 31 /* IND_DESTINATION (1<<0) */
-	beq	1f
+	beq	2f
 
 	rlwinm	r8, r0, 0, 0, 19 /* clear kexec flags, page align */
 	b	0b
 
-1:	/* is it an indirection page? (r3) */
+2:	/* is it an indirection page? (r3) */
 	rlwinm.	r7, r0, 0, 30, 30 /* IND_INDIRECTION (1<<1) */
-	beq	1f
+	beq	2f
 
 	rlwinm	r3, r0, 0, 0, 19 /* clear kexec flags, page align */
 	subi	r3, r3, 4
 	b	0b
 
-1:	/* are we done? */
+2:	/* are we done? */
 	rlwinm.	r7, r0, 0, 29, 29 /* IND_DONE (1<<2) */
-	beq	1f
-	b	2f
+	beq	2f
+	b	3f
 
-1:	/* is it a source page? (r9) */
+2:	/* is it a source page? (r9) */
 	rlwinm.	r7, r0, 0, 28, 28 /* IND_SOURCE (1<<3) */
 	beq	0b
 
@@ -113,7 +101,7 @@ relocate_new_kernel:
 	addi    r8, r8, 4
 	b	0b
 
-2:
+3:
 
 	/* To be certain of avoiding problems with self-modifying code
 	 * execute a serializing instruction here.

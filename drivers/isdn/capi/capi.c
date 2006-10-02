@@ -58,7 +58,7 @@ MODULE_LICENSE("GPL");
 
 /* -------- driver information -------------------------------------- */
 
-static struct class_simple *capi_class;
+static struct class *capi_class;
 
 static int capi_major = 68;		/* allocated */
 #ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
@@ -463,8 +463,7 @@ static int handle_recv_skb(struct capiminor *mp, struct sk_buff *skb)
 #endif
 		goto bad;
 	}
-	if (ld->receive_room &&
-	    ld->receive_room(mp->tty) < datalen) {
+	if (mp->tty->receive_room < datalen) {
 #if defined(_DEBUG_DATAFLOW) || defined(_DEBUG_TTYFUNCS)
 		printk(KERN_DEBUG "capi: no room in tty\n");
 #endif
@@ -1486,6 +1485,7 @@ static int __init capi_init(void)
 {
 	char *p;
 	char *compileinfo;
+	int major_ret;
 
 	if ((p = strchr(revision, ':')) != 0 && p[1]) {
 		strlcpy(rev, p + 2, sizeof(rev));
@@ -1494,25 +1494,25 @@ static int __init capi_init(void)
 	} else
 		strcpy(rev, "1.0");
 
-	if (register_chrdev(capi_major, "capi20", &capi_fops)) {
+	major_ret = register_chrdev(capi_major, "capi20", &capi_fops);
+	if (major_ret < 0) {
 		printk(KERN_ERR "capi20: unable to get major %d\n", capi_major);
-		return -EIO;
+		return major_ret;
 	}
-
-	capi_class = class_simple_create(THIS_MODULE, "capi");
+	capi_class = class_create(THIS_MODULE, "capi");
 	if (IS_ERR(capi_class)) {
 		unregister_chrdev(capi_major, "capi20");
 		return PTR_ERR(capi_class);
 	}
 
-	class_simple_device_add(capi_class, MKDEV(capi_major, 0), NULL, "capi");
+	class_device_create(capi_class, NULL, MKDEV(capi_major, 0), NULL, "capi");
 	devfs_mk_cdev(MKDEV(capi_major, 0), S_IFCHR | S_IRUSR | S_IWUSR,
 			"isdn/capi20");
 
 #ifdef CONFIG_ISDN_CAPI_MIDDLEWARE
 	if (capinc_tty_init() < 0) {
-		class_simple_device_remove(MKDEV(capi_major, 0));
-		class_simple_destroy(capi_class);
+		class_device_destroy(capi_class, MKDEV(capi_major, 0));
+		class_destroy(capi_class);
 		unregister_chrdev(capi_major, "capi20");
 		return -ENOMEM;
 	}
@@ -1539,8 +1539,8 @@ static void __exit capi_exit(void)
 {
 	proc_exit();
 
-	class_simple_device_remove(MKDEV(capi_major, 0));
-	class_simple_destroy(capi_class);
+	class_device_destroy(capi_class, MKDEV(capi_major, 0));
+	class_destroy(capi_class);
 	unregister_chrdev(capi_major, "capi20");
 	devfs_remove("isdn/capi20");
 

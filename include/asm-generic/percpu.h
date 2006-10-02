@@ -19,17 +19,16 @@ extern unsigned long __per_cpu_offset[NR_CPUS];
 #define percpu_modcopy(pcpudst, src, size)			\
 do {								\
 	unsigned int __i;					\
-	for (__i = 0; __i < NR_CPUS; __i++)			\
-		if (cpu_possible(__i))				\
-			memcpy((pcpudst)+__per_cpu_offset[__i],	\
-			       (src), (size));			\
+	for_each_possible_cpu(__i)				\
+		memcpy((pcpudst)+__per_cpu_offset[__i],		\
+		       (src), (size));				\
 } while (0)
 #else /* ! SMP */
 
 #define DEFINE_PER_CPU(type, name) \
     __typeof__(type) per_cpu__##name
 
-#define per_cpu(var, cpu)			(*((void)cpu, &per_cpu__##var))
+#define per_cpu(var, cpu)			(*((void)(cpu), &per_cpu__##var))
 #define __get_cpu_var(var)			per_cpu__##var
 
 #endif	/* SMP */

@@ -55,13 +55,13 @@ static inline int mmap_is_legacy(void)
 	 */
 	if (!test_thread_flag(TIF_IA32))
 		return 1;
-		
-	if (current->personality & ADDR_COMPAT_LAYOUT) 
+
+	if (current->personality & ADDR_COMPAT_LAYOUT)
 		return 1;
-	
+
 	if (current->signal->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)
 		return 1;
-		
+
 	return sysctl_legacy_va_layout;
 }
 
@@ -85,11 +85,3 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }
-
-unsigned long arch_align_stack(unsigned long sp)
-{
-	if (current->flags & PF_RANDOMIZE)
-		sp -= get_random_int() % 8192;
-	return sp & ~0xf;
-}
-

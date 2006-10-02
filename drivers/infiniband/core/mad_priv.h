@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2004, 2005, Voltaire, Inc. All rights reserved.
+ * Copyright (c) 2005 Intel Corporation. All rights reserved.
+ * Copyright (c) 2005 Sun Microsystems, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -29,17 +31,18 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
- * $Id: mad_priv.h 1389 2004-12-27 22:56:47Z roland $
+ * $Id: mad_priv.h 5596 2006-03-03 01:00:07Z sean.hefty $
  */
 
 #ifndef __IB_MAD_PRIV_H__
 #define __IB_MAD_PRIV_H__
 
+#include <linux/completion.h>
 #include <linux/pci.h>
 #include <linux/kthread.h>
 #include <linux/workqueue.h>
-#include <ib_mad.h>
-#include <ib_smi.h>
+#include <rdma/ib_mad.h>
+#include <rdma/ib_smi.h>
 
 
 #define PFX "ib_mad: "
@@ -83,6 +86,12 @@ struct ib_mad_private {
 	} mad;
 } __attribute__ ((packed));
 
+struct ib_rmpp_segment {
+	struct list_head list;
+	u32 num;
+	u8 data[0];
+};
+
 struct ib_mad_agent_private {
 	struct list_head agent_list;
 	struct ib_mad_agent agent;
@@ -92,16 +101,15 @@ struct ib_mad_agent_private {
 	spinlock_t lock;
 	struct list_head send_list;
 	struct list_head wait_list;
+	struct list_head done_list;
 	struct work_struct timed_work;
 	unsigned long timeout;
 	struct list_head local_list;
 	struct work_struct local_work;
-	struct list_head canceled_list;
-	struct work_struct canceled_work;
+	struct list_head rmpp_list;
 
 	atomic_t refcount;
-	wait_queue_head_t wait;
-	u8 rmpp_version;
+	struct completion comp;
 };
 
 struct ib_mad_snoop_private {
@@ -110,31 +118,40 @@ struct ib_mad_snoop_private {
 	int snoop_index;
 	int mad_snoop_flags;
 	atomic_t refcount;
-	wait_queue_head_t wait;
+	struct completion comp;
 };
 
 struct ib_mad_send_wr_private {
 	struct ib_mad_list_head mad_list;
 	struct list_head agent_list;
-	struct ib_mad_agent *agent;
+	struct ib_mad_agent_private *mad_agent_priv;
+	struct ib_mad_send_buf send_buf;
+	DECLARE_PCI_UNMAP_ADDR(header_mapping)
+	DECLARE_PCI_UNMAP_ADDR(payload_mapping)
 	struct ib_send_wr send_wr;
 	struct ib_sge sg_list[IB_MAD_SEND_REQ_MAX_SG];
-	u64 wr_id;			/* client WR ID */
-	u64 tid;
+	__be64 tid;
 	unsigned long timeout;
+	int retries;
 	int retry;
 	int refcount;
 	enum ib_wc_status status;
+
+	/* RMPP control */
+	struct list_head rmpp_list;
+	struct ib_rmpp_segment *last_ack_seg;
+	struct ib_rmpp_segment *cur_seg;
+	int last_ack;
+	int seg_num;
+	int newwin;
+	int pad;
 };
 
 struct ib_mad_local_private {
 	struct list_head completion_list;
 	struct ib_mad_private *mad_priv;
 	struct ib_mad_agent_private *recv_mad_agent;
-	struct ib_send_wr send_wr;
-	struct ib_sge sg_list[IB_MAD_SEND_REQ_MAX_SG];
-	u64 wr_id;			/* client WR ID */
-	u64 tid;
+	struct ib_mad_send_wr_private *mad_send_wr;
 };
 
 struct ib_mad_mgmt_method_table {
@@ -196,5 +213,19 @@ struct ib_mad_port_private {
 };
 
 extern kmem_cache_t *ib_mad_cache;
+
+int ib_send_mad(struct ib_mad_send_wr_private *mad_send_wr);
+
+struct ib_mad_send_wr_private *
+ib_find_send_mad(struct ib_mad_agent_private *mad_agent_priv,
+		 struct ib_mad_recv_wc *mad_recv_wc);
+
+void ib_mad_complete_send_wr(struct ib_mad_send_wr_private *mad_send_wr,
+			     struct ib_mad_send_wc *mad_send_wc);
+
+void ib_mark_mad_done(struct ib_mad_send_wr_private *mad_send_wr);
+
+void ib_reset_mad_timeout(struct ib_mad_send_wr_private *mad_send_wr,
+			  int timeout_ms);
 
 #endif	/* __IB_MAD_PRIV_H__ */

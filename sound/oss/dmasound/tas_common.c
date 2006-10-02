@@ -47,9 +47,9 @@ static int tas_attach_adapter(struct i2c_adapter *);
 static int tas_detach_client(struct i2c_client *);
 
 struct i2c_driver tas_driver = {
-	.owner		= THIS_MODULE,
-	.name		= "tas",
-	.flags		= I2C_DF_NOTIFY,
+	.driver = {
+		.name	= "tas",
+	},
 	.attach_adapter	= tas_attach_adapter,
 	.detach_client	= tas_detach_client,
 };
@@ -195,8 +195,8 @@ tas_init(int driver_id, const char *driver_name)
 
 	printk(KERN_INFO "tas driver [%s])\n", driver_name);
 
-#ifndef CONFIG_I2C_KEYWEST
-	request_module("i2c-keywest");
+#ifndef CONFIG_I2C_POWERMAC
+	request_module("i2c-powermac");
 #endif
 	tas_node = find_devices("deq");
 	if (tas_node == NULL)

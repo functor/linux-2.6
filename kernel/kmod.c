@@ -120,6 +120,7 @@ struct subprocess_info {
 	char *path;
 	char **argv;
 	char **envp;
+	struct key *ring;
 	int wait;
 	int retval;
 };
@@ -127,17 +128,23 @@ struct subprocess_info {
 /*
  * This is the task which runs the usermode application
  */
-int __exec_usermodehelper(char *path, char **argv, char **envp)
+int
+__exec_usermodehelper(char *path, char **argv, char **envp, struct key *ring)
 {
+	struct key *new_session, *old_session;
 	int retval;
 
-	/* Unblock all signals. */
+	/* Unblock all signals and set the session keyring. */
+	new_session = key_get(ring);
 	flush_signals(current);
 	spin_lock_irq(&current->sighand->siglock);
+	old_session = __install_session_keyring(current, new_session);
 	flush_signal_handlers(current, 1);
 	sigemptyset(&current->blocked);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
+
+	key_put(old_session);
 
 	retval = -EPERM;
 	if (current->fs->root)
@@ -160,7 +167,7 @@ static int ____call_usermodehelper(void *data)
 	set_cpus_allowed(current, CPU_MASK_ALL);
 
 	retval = __exec_usermodehelper(sub_info->path,
-			sub_info->argv, sub_info->envp);
+			sub_info->argv, sub_info->envp, sub_info->ring);
 
 	/* Exec failed? */
 	sub_info->retval = retval;
@@ -179,7 +186,7 @@ static int wait_for_helper(void *data)
 	sa.sa.sa_handler = SIG_IGN;
 	sa.sa.sa_flags = 0;
 	siginitset(&sa.sa.sa_mask, sigmask(SIGCHLD));
-	do_sigaction(SIGCHLD, &sa, (struct k_sigaction *)0);
+	do_sigaction(SIGCHLD, &sa, NULL);
 	allow_signal(SIGCHLD);
 
 	pid = kernel_thread(____call_usermodehelper, sub_info, SIGCHLD);
@@ -226,10 +233,11 @@ static void __call_usermodehelper(void *data)
 }
 
 /**
- * call_usermodehelper - start a usermode application
+ * call_usermodehelper_keys - start a usermode application
  * @path: pathname for the application
  * @argv: null-terminated argument list
  * @envp: null-terminated environment list
+ * @session_keyring: session keyring for process (NULL for an empty keyring)
  * @wait: wait for the application to finish and return status.
  *
  * Runs a user-space application.  The application is started
@@ -239,7 +247,8 @@ static void __call_usermodehelper(void *data)
  * Must be called from process context.  Returns a negative error code
  * if program was not execed successfully, or 0.
  */
-int call_usermodehelper(char *path, char **argv, char **envp, int wait)
+int call_usermodehelper_keys(char *path, char **argv, char **envp,
+			     struct key *session_keyring, int wait)
 {
 	DECLARE_COMPLETION(done);
 	struct subprocess_info sub_info = {
@@ -247,6 +256,7 @@ int call_usermodehelper(char *path, char **argv, char **envp, int wait)
 		.path		= path,
 		.argv		= argv,
 		.envp		= envp,
+		.ring		= session_keyring,
 		.wait		= wait,
 		.retval		= 0,
 	};
@@ -262,7 +272,7 @@ int call_usermodehelper(char *path, char **argv, char **envp, int wait)
 	wait_for_completion(&done);
 	return sub_info.retval;
 }
-EXPORT_SYMBOL(call_usermodehelper);
+EXPORT_SYMBOL(call_usermodehelper_keys);
 
 void __init usermodehelper_init(void)
 {

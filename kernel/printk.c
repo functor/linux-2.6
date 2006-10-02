@@ -10,8 +10,8 @@
  * elsewhere, in preparation for a serial line console (someday).
  * Ted Ts'o, 2/11/93.
  * Modified for sysctl support, 1/8/97, Chris Horn.
- * Fixed SMP synchronization, 08/08/99, Manfred Spraul 
- *     manfreds@colorfullife.com
+ * Fixed SMP synchronization, 08/08/99, Manfred Spraul
+ *     manfred@colorfullife.com
  * Rewrote bits to get rid of console_lock
  *	01Mar01 Andrew Morton <andrewm@uow.edu.au>
  */
@@ -23,6 +23,8 @@
 #include <linux/smp_lock.h>
 #include <linux/console.h>
 #include <linux/init.h>
+#include <linux/jiffies.h>
+#include <linux/nmi.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>			/* For in_interrupt() */
 #include <linux/config.h>
@@ -68,6 +70,7 @@ EXPORT_SYMBOL(oops_in_progress);
  * driver system.
  */
 static DECLARE_MUTEX(console_sem);
+static DECLARE_MUTEX(secondary_console_sem);
 struct console *console_drivers;
 /*
  * This is used for debugging the mess that is the VT code by
@@ -78,6 +81,7 @@ struct console *console_drivers;
  * locked without the console sempahore held
  */
 static int console_locked;
+int console_suspended;
 
 /*
  * logbuf_lock protects log_buf, log_start, log_end, con_start and logged_chars
@@ -123,44 +127,6 @@ static char *log_buf = __log_buf;
 static int log_buf_len = __LOG_BUF_LEN;
 static unsigned long logged_chars; /* Number of chars produced since last read+clear operation */
 
-/*
- *	Setup a list of consoles. Called from init/main.c
- */
-static int __init console_setup(char *str)
-{
-	char name[sizeof(console_cmdline[0].name)];
-	char *s, *options;
-	int idx;
-
-	/*
-	 *	Decode str into name, index, options.
-	 */
-	if (str[0] >= '0' && str[0] <= '9') {
-		strcpy(name, "ttyS");
-		strncpy(name + 4, str, sizeof(name) - 5);
-	} else
-		strncpy(name, str, sizeof(name) - 1);
-	name[sizeof(name) - 1] = 0;
-	if ((options = strchr(str, ',')) != NULL)
-		*(options++) = 0;
-#ifdef __sparc__
-	if (!strcmp(str, "ttya"))
-		strcpy(name, "ttyS0");
-	if (!strcmp(str, "ttyb"))
-		strcpy(name, "ttyS1");
-#endif
-	for(s = name; *s; s++)
-		if ((*s >= '0' && *s <= '9') || *s == ',')
-			break;
-	idx = simple_strtoul(s, NULL, 10);
-	*s = 0;
-
-	add_preferred_console(name, idx, options);
-	return 1;
-}
-
-__setup("console=", console_setup);
-
 static int __init log_buf_len_setup(char *str)
 {
 	unsigned long size = memparse(str, &str);
@@ -170,11 +136,11 @@ static int __init log_buf_len_setup(char *str)
 		size = roundup_pow_of_two(size);
 	if (size > log_buf_len) {
 		unsigned long start, dest_idx, offset;
-		char * new_log_buf;
+		char *new_log_buf;
 
 		new_log_buf = alloc_bootmem(size);
 		if (!new_log_buf) {
-			printk("log_buf_len: allocation failed\n");
+			printk(KERN_WARNING "log_buf_len: allocation failed\n");
 			goto out;
 		}
 
@@ -194,14 +160,41 @@ static int __init log_buf_len_setup(char *str)
 		log_end -= offset;
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 
-		printk("log_buf_len: %d\n", log_buf_len);
+		printk(KERN_NOTICE "log_buf_len: %d\n", log_buf_len);
 	}
 out:
-
 	return 1;
 }
 
 __setup("log_buf_len=", log_buf_len_setup);
+
+#ifdef CONFIG_BOOT_DELAY
+
+extern unsigned int boot_delay; /* msecs to delay after each printk during bootup */
+extern long preset_lpj;
+extern unsigned long long printk_delay_msec;
+
+static void boot_delay_msec(int millisecs)
+{
+	unsigned long long k = printk_delay_msec * millisecs;
+	unsigned long timeout;
+
+	timeout = jiffies + msecs_to_jiffies(millisecs);
+	while (k) {
+		k--;
+		cpu_relax();
+		/*
+		 * use (volatile) jiffies to prevent
+		 * compiler reduction; loop termination via jiffies
+		 * is secondary and may or may not happen.
+		 */
+		if (time_after(jiffies, timeout))
+			break;
+		touch_nmi_watchdog();
+	}
+}
+
+#endif
 
 /*
  * Commands to do_syslog:
@@ -218,7 +211,7 @@ __setup("log_buf_len=", log_buf_len_setup);
  *	9 -- Return number of unread characters in the log buffer
  *     10 -- Return size of the log buffer
  */
-int do_syslog(int type, char __user * buf, int len)
+int do_syslog(int type, char __user *buf, int len)
 {
 	unsigned long i, j, limit, count;
 	int do_clear = 0;
@@ -250,7 +243,8 @@ int do_syslog(int type, char __user * buf, int len)
 	case 1:		/* Open log */
 		break;
 	case 2:		/* Read from log */
-		error = wait_event_interruptible(log_wait, (log_start - log_end));
+		error = wait_event_interruptible(log_wait,
+							(log_start - log_end));
 		if (error)
 			goto out;
 		i = 0;
@@ -270,7 +264,7 @@ int do_syslog(int type, char __user * buf, int len)
 			error = i;
 		break;
 	case 4:		/* Read/clear last kernel messages */
-		do_clear = 1; 
+		do_clear = 1;
 		/* FALL THRU */
 	case 3:		/* Read last kernel messages */
 		count = len;
@@ -284,11 +278,11 @@ int do_syslog(int type, char __user * buf, int len)
 		limit = log_end;
 		/*
 		 * __put_user() could sleep, and while we sleep
-		 * printk() could overwrite the messages 
+		 * printk() could overwrite the messages
 		 * we try to copy to user space. Therefore
 		 * the messages are copied in reverse. <manfreds>
 		 */
-		for(i = 0; i < count && !error; i++) {
+		for (i = 0; i < count && !error; i++) {
 			j = limit-1-i;
 			if (j + log_buf_len < log_end)
 				break;
@@ -302,10 +296,10 @@ int do_syslog(int type, char __user * buf, int len)
 		if (error)
 			break;
 		error = i;
-		if(i != count) {
+		if (i != count) {
 			int offset = count-error;
 			/* buffer overflow during copy, correct user buffer. */
-			for(i=0;i<error;i++) {
+			for (i = 0; i < error; i++) {
 				if (__get_user(c,&buf[i+offset]) ||
 				    __put_user(c,&buf[i])) {
 					error = -EFAULT;
@@ -347,23 +341,9 @@ out:
 	return error;
 }
 
-asmlinkage long sys_syslog(int type, char __user * buf, int len)
+asmlinkage long sys_syslog(int type, char __user *buf, int len)
 {
 	return do_syslog(type, buf, len);
-}
-
-/*
- * Crashdump special routine. Don't print to global log_buf, just to the
- * actual console device(s).
- */
-static void crashdump_call_console_drivers(const char *buf, unsigned long len)
-{
-	struct console *con;
-
-	for (con = console_drivers; con; con = con->next) {
-		if ((con->flags & CON_ENABLED) && con->write)
-			con->write(con, buf, len);
-	}
 }
 
 /*
@@ -408,27 +388,24 @@ static void call_console_drivers(unsigned long start, unsigned long end)
 	unsigned long cur_index, start_print;
 	static int msg_level = -1;
 
-	if (((long)(start - end)) > 0)
-		BUG();
+	BUG_ON(((long)(start - end)) > 0);
 
 	cur_index = start;
 	start_print = start;
 	while (cur_index != end) {
-		if (	msg_level < 0 &&
-			((end - cur_index) > 2) &&
-			LOG_BUF(cur_index + 0) == '<' &&
-			LOG_BUF(cur_index + 1) >= '0' &&
-			LOG_BUF(cur_index + 1) <= '7' &&
-			LOG_BUF(cur_index + 2) == '>')
-		{
+		if (msg_level < 0 && ((end - cur_index) > 2) &&
+				LOG_BUF(cur_index + 0) == '<' &&
+				LOG_BUF(cur_index + 1) >= '0' &&
+				LOG_BUF(cur_index + 1) <= '7' &&
+				LOG_BUF(cur_index + 2) == '>') {
 			msg_level = LOG_BUF(cur_index + 1) - '0';
 			cur_index += 3;
 			start_print = cur_index;
 		}
 		while (cur_index != end) {
 			char c = LOG_BUF(cur_index);
-			cur_index++;
 
+			cur_index++;
 			if (c == '\n') {
 				if (msg_level < 0) {
 					/*
@@ -471,7 +448,7 @@ static void zap_locks(void)
 	static unsigned long oops_timestamp;
 
 	if (time_after_eq(jiffies, oops_timestamp) &&
-			!time_after(jiffies, oops_timestamp + 30*HZ))
+			!time_after(jiffies, oops_timestamp + 30 * HZ))
 		return;
 
 	oops_timestamp = jiffies;
@@ -498,9 +475,17 @@ static int __init printk_time_setup(char *str)
 
 __setup("time", printk_time_setup);
 
-/*
+__attribute__((weak)) unsigned long long printk_clock(void)
+{
+	return sched_clock();
+}
+
+/**
+ * printk - print a kernel message
+ * @fmt: format string
+ *
  * This is printk.  It can be called from any context.  We want it to work.
- * 
+ *
  * We try to grab the console_sem.  If we succeed, it's easy - we log the output and
  * call the console drivers.  If we fail to get the semaphore we place the output
  * into the log buffer and return.  The current holder of the console_sem will
@@ -510,6 +495,9 @@ __setup("time", printk_time_setup);
  * One effect of this deferred printing is that code which calls printk() and
  * then changes console_loglevel may break. This is because console_loglevel
  * is inspected when the actual printing occurs.
+ *
+ * See also:
+ * printf(3)
  */
 
 asmlinkage int printk(const char *fmt, ...)
@@ -521,10 +509,16 @@ asmlinkage int printk(const char *fmt, ...)
 	r = vprintk(fmt, args);
 	va_end(args);
 
+#ifdef CONFIG_BOOT_DELAY
+	if (boot_delay && system_state == SYSTEM_BOOTING)
+		boot_delay_msec(boot_delay);
+#endif
+
 	return r;
 }
 
-static volatile int printk_cpu = -1;
+/* cpu currently holding logbuf_lock */
+static volatile unsigned int printk_cpu = UINT_MAX;
 
 asmlinkage int vprintk(const char *fmt, va_list args)
 {
@@ -534,7 +528,10 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	static char printk_buf[1024];
 	static int log_level_unknown = 1;
 
-	if (unlikely(oops_in_progress && printk_cpu == smp_processor_id()))
+	preempt_disable();
+	if (unlikely(oops_in_progress) && printk_cpu == smp_processor_id())
+		/* If a crash is occurring during printk() on this CPU,
+		 * make sure we can't deadlock */
 		zap_locks();
 
 	/* This stops the holder of console_sem just where we want him */
@@ -543,12 +540,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 
 	/* Emit the output into the temporary buffer */
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
-
-	if (unlikely(crashdump_mode())) {
-		crashdump_call_console_drivers(printk_buf, printed_len);
-		spin_unlock_irqrestore(&logbuf_lock, flags);
-		goto out;
-	}
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide
@@ -572,12 +563,12 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 				   p[1] <= '7' && p[2] == '>') {
 					loglev_char = p[1];
 					p += 3;
-					printed_len += 3;
+					printed_len -= 3;
 				} else {
 					loglev_char = default_message_loglevel
 						+ '0';
 				}
-				t = sched_clock();
+				t = printk_clock();
 				nanosec_rem = do_div(t, 1000000000);
 				tlen = sprintf(tbuf,
 						"<%c>[%5lu.%06lu] ",
@@ -587,7 +578,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 
 				for (tp = tbuf; tp < tbuf + tlen; tp++)
 					emit_log_char(*tp);
-				printed_len += tlen - 3;
+				printed_len += tlen;
 			} else {
 				if (p[0] != '<' || p[1] < '0' ||
 				   p[1] > '7' || p[2] != '>') {
@@ -595,8 +586,8 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 					emit_log_char(default_message_loglevel
 						+ '0');
 					emit_log_char('>');
+					printed_len += 3;
 				}
-				printed_len += 3;
 			}
 			log_level_unknown = 0;
 			if (!*p)
@@ -607,14 +598,14 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 			log_level_unknown = 1;
 	}
 
-	if (!cpu_online(smp_processor_id()) &&
-	    system_state != SYSTEM_RUNNING) {
+	if (!cpu_online(smp_processor_id())) {
 		/*
 		 * Some console drivers may assume that per-cpu resources have
 		 * been allocated.  So don't allow them to be called by this
 		 * CPU until it is officially up.  We shouldn't be calling into
 		 * random console drivers on a CPU which doesn't exist yet..
 		 */
+		printk_cpu = UINT_MAX;
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 		goto out;
 	}
@@ -624,6 +615,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		 * We own the drivers.  We can drop the spinlock and let
 		 * release_console_sem() print the text
 		 */
+		printk_cpu = UINT_MAX;
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 		console_may_schedule = 0;
 		release_console_sem();
@@ -633,9 +625,11 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		 * allows the semaphore holder to proceed and to call the
 		 * console drivers with the output which we just produced.
 		 */
+		printk_cpu = UINT_MAX;
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 	}
 out:
+	preempt_enable();
 	return printed_len;
 }
 EXPORT_SYMBOL(printk);
@@ -643,18 +637,65 @@ EXPORT_SYMBOL(vprintk);
 
 #else
 
-asmlinkage long sys_syslog(int type, char __user * buf, int len)
+asmlinkage long sys_syslog(int type, char __user *buf, int len)
 {
 	return 0;
 }
 
-int do_syslog(int type, char __user * buf, int len) { return 0; }
-static void call_console_drivers(unsigned long start, unsigned long end) {}
+int do_syslog(int type, char __user *buf, int len)
+{
+	return 0;
+}
+
+static void call_console_drivers(unsigned long start, unsigned long end)
+{
+}
 
 #endif
 
+/*
+ * Set up a list of consoles.  Called from init/main.c
+ */
+static int __init console_setup(char *str)
+{
+	char name[sizeof(console_cmdline[0].name)];
+	char *s, *options;
+	int idx;
+
+	/*
+	 * Decode str into name, index, options.
+	 */
+	if (str[0] >= '0' && str[0] <= '9') {
+		strcpy(name, "ttyS");
+		strncpy(name + 4, str, sizeof(name) - 5);
+	} else {
+		strncpy(name, str, sizeof(name) - 1);
+	}
+	name[sizeof(name) - 1] = 0;
+	if ((options = strchr(str, ',')) != NULL)
+		*(options++) = 0;
+#ifdef __sparc__
+	if (!strcmp(str, "ttya"))
+		strcpy(name, "ttyS0");
+	if (!strcmp(str, "ttyb"))
+		strcpy(name, "ttyS1");
+#endif
+	for (s = name; *s; s++)
+		if ((*s >= '0' && *s <= '9') || *s == ',')
+			break;
+	idx = simple_strtoul(s, NULL, 10);
+	*s = 0;
+
+	add_preferred_console(name, idx, options);
+	return 1;
+}
+__setup("console=", console_setup);
+
 /**
  * add_preferred_console - add a device to the list of preferred consoles.
+ * @name: device name
+ * @idx: device index
+ * @options: options for this console
  *
  * The last preferred console added will be used for kernel messages
  * and stdin/out/err for init.  Normally this is used by console_setup
@@ -699,8 +740,12 @@ int __init add_preferred_console(char *name, int idx, char *options)
  */
 void acquire_console_sem(void)
 {
-	if (in_interrupt())
-		BUG();
+	if (console_suspended) {
+		down(&secondary_console_sem);
+		return;
+	}
+
+	BUG_ON(in_interrupt());
 	down(&console_sem);
 	console_locked = 1;
 	console_may_schedule = 1;
@@ -743,6 +788,11 @@ void release_console_sem(void)
 	unsigned long _con_start, _log_end;
 	unsigned long wake_klogd = 0;
 
+	if (console_suspended) {
+		up(&secondary_console_sem);
+		return;
+	}
+
 	for ( ; ; ) {
 		spin_lock_irqsave(&logbuf_lock, flags);
 		wake_klogd |= log_start - log_end;
@@ -764,7 +814,8 @@ void release_console_sem(void)
 }
 EXPORT_SYMBOL(release_console_sem);
 
-/** console_conditional_schedule - yield the CPU if required
+/**
+ * console_conditional_schedule - yield the CPU if required
  *
  * If the console code is currently allowed to sleep, and
  * if this CPU should yield the CPU to another task, do
@@ -806,7 +857,6 @@ void console_unblank(void)
 			c->unblank();
 	release_console_sem();
 }
-EXPORT_SYMBOL(console_unblank);
 
 /*
  * Return the console tty driver structure and its associated index
@@ -855,9 +905,9 @@ EXPORT_SYMBOL(console_start);
  * print any messages that were printed by the kernel before the
  * console driver was initialized.
  */
-void register_console(struct console * console)
+void register_console(struct console *console)
 {
-	int     i;
+	int i;
 	unsigned long flags;
 
 	if (preferred_console < 0)
@@ -882,7 +932,8 @@ void register_console(struct console * console)
 	 *	See if this console matches one we selected on
 	 *	the command line.
 	 */
-	for(i = 0; i < MAX_CMDLINECONSOLES && console_cmdline[i].name[0]; i++) {
+	for (i = 0; i < MAX_CMDLINECONSOLES && console_cmdline[i].name[0];
+			i++) {
 		if (strcmp(console_cmdline[i].name, console->name) != 0)
 			continue;
 		if (console->index >= 0 &&
@@ -895,8 +946,10 @@ void register_console(struct console * console)
 			break;
 		console->flags |= CON_ENABLED;
 		console->index = console_cmdline[i].index;
-		if (i == preferred_console)
+		if (i == selected_console) {
 			console->flags |= CON_CONSDEV;
+			preferred_console = selected_console;
+		}
 		break;
 	}
 
@@ -916,6 +969,8 @@ void register_console(struct console * console)
 	if ((console->flags & CON_CONSDEV) || console_drivers == NULL) {
 		console->next = console_drivers;
 		console_drivers = console;
+		if (console->next)
+			console->next->flags &= ~CON_CONSDEV;
 	} else {
 		console->next = console_drivers->next;
 		console_drivers->next = console;
@@ -933,33 +988,37 @@ void register_console(struct console * console)
 }
 EXPORT_SYMBOL(register_console);
 
-int unregister_console(struct console * console)
+int unregister_console(struct console *console)
 {
-        struct console *a,*b;
+        struct console *a, *b;
 	int res = 1;
 
 	acquire_console_sem();
 	if (console_drivers == console) {
 		console_drivers=console->next;
 		res = 0;
-	} else {
+	} else if (console_drivers) {
 		for (a=console_drivers->next, b=console_drivers ;
 		     a; b=a, a=b->next) {
 			if (a == console) {
 				b->next = a->next;
 				res = 0;
 				break;
-			}  
+			}
 		}
 	}
-	
+
 	/* If last console is removed, we re-enable picking the first
 	 * one that gets registered. Without that, pmac early boot console
 	 * would prevent fbcon from taking over.
+	 *
+	 * If this isn't the last console and it has CON_CONSDEV set, we
+	 * need to set it on the next preferred console.
 	 */
 	if (console_drivers == NULL)
 		preferred_console = selected_console;
-		
+	else if (console->flags & CON_CONSDEV)
+		console_drivers->flags |= CON_CONSDEV;
 
 	release_console_sem();
 	return res;
@@ -968,6 +1027,8 @@ EXPORT_SYMBOL(unregister_console);
 
 /**
  * tty_write_message - write a message to a certain tty, not just the console.
+ * @tty: the destination tty_struct
+ * @msg: the message to write
  *
  * This is used for messages that need to be redirected to a specific tty.
  * We don't put it into the syslog queue right now maybe in the future if
@@ -990,7 +1051,7 @@ void tty_write_message(struct tty_struct *tty, char *msg)
 int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst)
 {
 	static DEFINE_SPINLOCK(ratelimit_lock);
-	static unsigned long toks = 10*5*HZ;
+	static unsigned long toks = 10 * 5 * HZ;
 	static unsigned long last_msg;
 	static int missed;
 	unsigned long flags;
@@ -1003,6 +1064,7 @@ int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst)
 		toks = ratelimit_burst * ratelimit_jiffies;
 	if (toks >= ratelimit_jiffies) {
 		int lost = missed;
+
 		missed = 0;
 		toks -= ratelimit_jiffies;
 		spin_unlock_irqrestore(&ratelimit_lock, flags);
@@ -1017,7 +1079,7 @@ int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst)
 EXPORT_SYMBOL(__printk_ratelimit);
 
 /* minimum time in jiffies between messages */
-int printk_ratelimit_jiffies = 5*HZ;
+int printk_ratelimit_jiffies = 5 * HZ;
 
 /* number of messages we send before ratelimiting */
 int printk_ratelimit_burst = 10;

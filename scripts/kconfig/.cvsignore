@@ -3,3 +3,4 @@ lex.zconf.c
 mconf
 zconf.tab.c
 zconf.tab.h
+.*.cmd

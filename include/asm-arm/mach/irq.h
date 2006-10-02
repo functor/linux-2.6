@@ -42,11 +42,11 @@ struct irqchip {
 	/*
 	 * Set the type of the IRQ.
 	 */
-	int (*type)(unsigned int, unsigned int);
+	int (*set_type)(unsigned int, unsigned int);
 	/*
 	 * Set wakeup-enable on the selected IRQ
 	 */
-	int (*wake)(unsigned int, unsigned int);
+	int (*set_wake)(unsigned int, unsigned int);
 
 #ifdef CONFIG_SMP
 	/*
@@ -61,7 +61,7 @@ struct irqdesc {
 	struct irqchip	*chip;
 	struct irqaction *action;
 	struct list_head pend;
-	void		*chipdata;
+	void __iomem	*base;
 	void		*data;
 	unsigned int	disable_depth;
 
@@ -74,6 +74,7 @@ struct irqdesc {
 	unsigned int	noautoenable : 1;	/* don't automatically enable IRQ */
 	unsigned int	unused   :25;
 
+	unsigned int	irqs_unhandled;
 	struct proc_dir_entry *procdir;
 
 #ifdef CONFIG_SMP
@@ -92,6 +93,14 @@ struct irqdesc {
 extern struct irqdesc irq_desc[];
 
 /*
+ * Helpful inline function for calling irq descriptor handlers.
+ */
+static inline void desc_handle_irq(unsigned int irq, struct irqdesc *desc, struct pt_regs *regs)
+{
+	desc->handle(irq, desc, regs);
+}
+
+/*
  * This is internal.  Do not use it.
  */
 extern void (*init_arch_irq)(void);
@@ -105,8 +114,8 @@ void __set_irq_handler(unsigned int irq, irq_handler_t, int);
 #define set_irq_handler(irq,handler)		__set_irq_handler(irq,handler,0)
 #define set_irq_chained_handler(irq,handler)	__set_irq_handler(irq,handler,1)
 #define set_irq_data(irq,d)			do { irq_desc[irq].data = d; } while (0)
-#define set_irq_chipdata(irq,d)			do { irq_desc[irq].chipdata = d; } while (0)
-#define get_irq_chipdata(irq)			(irq_desc[irq].chipdata)
+#define set_irq_chipdata(irq,d)			do { irq_desc[irq].base = d; } while (0)
+#define get_irq_chipdata(irq)			(irq_desc[irq].base)
 
 void set_irq_chip(unsigned int irq, struct irqchip *);
 void set_irq_flags(unsigned int irq, unsigned int flags);

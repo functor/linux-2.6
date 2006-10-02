@@ -26,7 +26,9 @@
 
 struct vfp_hard_struct {
 	__u64 fpregs[16];
+#if __LINUX_ARM_ARCH__ < 6
 	__u32 fpmx_state;
+#endif
 	__u32 fpexc;
 	__u32 fpscr;
 	/*
@@ -55,8 +57,10 @@ struct fp_soft_struct {
 	unsigned int save[FP_SOFT_SIZE];		/* undefined information */
 };
 
+#define IWMMXT_SIZE	0x98
+
 struct iwmmxt_struct {
-	unsigned int save[0x98/sizeof(int) + 1];
+	unsigned int save[IWMMXT_SIZE / sizeof(unsigned int)];
 };
 
 union fp_state {
