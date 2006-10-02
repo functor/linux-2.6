@@ -1025,7 +1025,7 @@ asmlinkage long do_getxpid(long *ppid)
 	*ppid = sys_getppid();
 	return sys_getpid();
 }
-
+  
 #else /* _alpha_ */
 
 asmlinkage long sys_getuid(void)
