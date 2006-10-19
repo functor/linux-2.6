@@ -13,6 +13,7 @@
 #include <asm/fixmap.h>
 #include <asm/processor.h>
 #include <asm/thread_info.h>
+#include <asm/elf.h>
 
 #define DEFINE(sym, val) \
         asm volatile("\n->" #sym " %0 " #val : : "i" (val))
@@ -64,10 +65,14 @@ void foo(void)
 	OFFSET(pbe_orig_address, pbe, orig_address);
 	OFFSET(pbe_next, pbe, next);
 
+#ifndef CONFIG_X86_NO_TSS
 	/* Offset from the sysenter stack to tss.esp0 */
-	DEFINE(TSS_sysenter_esp0, offsetof(struct tss_struct, esp0) -
+	DEFINE(SYSENTER_stack_esp0, offsetof(struct tss_struct, esp0) -
 		 sizeof(struct tss_struct));
+#else
+	/* sysenter stack points directly to esp0 */
+	DEFINE(SYSENTER_stack_esp0, 0);
+#endif
 
 	DEFINE(PAGE_SIZE_asm, PAGE_SIZE);
-	DEFINE(VSYSCALL_BASE, __fix_to_virt(FIX_VSYSCALL));
 }

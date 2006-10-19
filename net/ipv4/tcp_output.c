@@ -197,6 +197,7 @@ void tcp_select_initial_window(int __space, __u32 mss,
 		 * See RFC1323 for an explanation of the limit to 14 
 		 */
 		space = max_t(u32, sysctl_tcp_rmem[2], sysctl_rmem_max);
+		space = min_t(u32, space, *window_clamp);
 		while (space > 65535 && (*rcv_wscale) < 14) {
 			space >>= 1;
 			(*rcv_wscale)++;
@@ -511,15 +512,17 @@ static void tcp_set_skb_tso_segs(struct sock *sk, struct sk_buff *skb, unsigned 
 		/* Avoid the costly divide in the normal
 		 * non-TSO case.
 		 */
-		skb_shinfo(skb)->tso_segs = 1;
-		skb_shinfo(skb)->tso_size = 0;
+		skb_shinfo(skb)->gso_segs = 1;
+		skb_shinfo(skb)->gso_size = 0;
+		skb_shinfo(skb)->gso_type = 0;
 	} else {
 		unsigned int factor;
 
 		factor = skb->len + (mss_now - 1);
 		factor /= mss_now;
-		skb_shinfo(skb)->tso_segs = factor;
-		skb_shinfo(skb)->tso_size = mss_now;
+		skb_shinfo(skb)->gso_segs = factor;
+		skb_shinfo(skb)->gso_size = mss_now;
+		skb_shinfo(skb)->gso_type = SKB_GSO_TCPV4;
 	}
 }
 
@@ -912,7 +915,7 @@ static int tcp_init_tso_segs(struct sock *sk, struct sk_buff *skb, unsigned int 
 
 	if (!tso_segs ||
 	    (tso_segs > 1 &&
-	     skb_shinfo(skb)->tso_size != mss_now)) {
+	     tcp_skb_mss(skb) != mss_now)) {
 		tcp_set_skb_tso_segs(sk, skb, mss_now);
 		tso_segs = tcp_skb_pcount(skb);
 	}
@@ -1723,8 +1726,9 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	   tp->snd_una == (TCP_SKB_CB(skb)->end_seq - 1)) {
 		if (!pskb_trim(skb, 0)) {
 			TCP_SKB_CB(skb)->seq = TCP_SKB_CB(skb)->end_seq - 1;
-			skb_shinfo(skb)->tso_segs = 1;
-			skb_shinfo(skb)->tso_size = 0;
+			skb_shinfo(skb)->gso_segs = 1;
+			skb_shinfo(skb)->gso_size = 0;
+			skb_shinfo(skb)->gso_type = 0;
 			skb->ip_summed = CHECKSUM_NONE;
 			skb->csum = 0;
 		}
@@ -1929,8 +1933,9 @@ void tcp_send_fin(struct sock *sk)
 		skb->csum = 0;
 		TCP_SKB_CB(skb)->flags = (TCPCB_FLAG_ACK | TCPCB_FLAG_FIN);
 		TCP_SKB_CB(skb)->sacked = 0;
-		skb_shinfo(skb)->tso_segs = 1;
-		skb_shinfo(skb)->tso_size = 0;
+		skb_shinfo(skb)->gso_segs = 1;
+		skb_shinfo(skb)->gso_size = 0;
+		skb_shinfo(skb)->gso_type = 0;
 
 		/* FIN eats a sequence byte, write_seq advanced by tcp_queue_skb(). */
 		TCP_SKB_CB(skb)->seq = tp->write_seq;
@@ -1962,8 +1967,9 @@ void tcp_send_active_reset(struct sock *sk, gfp_t priority)
 	skb->csum = 0;
 	TCP_SKB_CB(skb)->flags = (TCPCB_FLAG_ACK | TCPCB_FLAG_RST);
 	TCP_SKB_CB(skb)->sacked = 0;
-	skb_shinfo(skb)->tso_segs = 1;
-	skb_shinfo(skb)->tso_size = 0;
+	skb_shinfo(skb)->gso_segs = 1;
+	skb_shinfo(skb)->gso_size = 0;
+	skb_shinfo(skb)->gso_type = 0;
 
 	/* Send it off. */
 	TCP_SKB_CB(skb)->seq = tcp_acceptable_seq(sk, tp);
@@ -2046,8 +2052,9 @@ struct sk_buff * tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	TCP_SKB_CB(skb)->seq = tcp_rsk(req)->snt_isn;
 	TCP_SKB_CB(skb)->end_seq = TCP_SKB_CB(skb)->seq + 1;
 	TCP_SKB_CB(skb)->sacked = 0;
-	skb_shinfo(skb)->tso_segs = 1;
-	skb_shinfo(skb)->tso_size = 0;
+	skb_shinfo(skb)->gso_segs = 1;
+	skb_shinfo(skb)->gso_size = 0;
+	skb_shinfo(skb)->gso_type = 0;
 	th->seq = htonl(TCP_SKB_CB(skb)->seq);
 	th->ack_seq = htonl(tcp_rsk(req)->rcv_isn + 1);
 	if (req->rcv_wnd == 0) { /* ignored for retransmitted syns */
@@ -2151,8 +2158,9 @@ int tcp_connect(struct sock *sk)
 	TCP_SKB_CB(buff)->flags = TCPCB_FLAG_SYN;
 	TCP_ECN_send_syn(sk, tp, buff);
 	TCP_SKB_CB(buff)->sacked = 0;
-	skb_shinfo(buff)->tso_segs = 1;
-	skb_shinfo(buff)->tso_size = 0;
+	skb_shinfo(buff)->gso_segs = 1;
+	skb_shinfo(buff)->gso_size = 0;
+	skb_shinfo(buff)->gso_type = 0;
 	buff->csum = 0;
 	TCP_SKB_CB(buff)->seq = tp->write_seq++;
 	TCP_SKB_CB(buff)->end_seq = tp->write_seq;
@@ -2256,8 +2264,9 @@ void tcp_send_ack(struct sock *sk)
 		buff->csum = 0;
 		TCP_SKB_CB(buff)->flags = TCPCB_FLAG_ACK;
 		TCP_SKB_CB(buff)->sacked = 0;
-		skb_shinfo(buff)->tso_segs = 1;
-		skb_shinfo(buff)->tso_size = 0;
+		skb_shinfo(buff)->gso_segs = 1;
+		skb_shinfo(buff)->gso_size = 0;
+		skb_shinfo(buff)->gso_type = 0;
 
 		/* Send it off, this clears delayed acks for us. */
 		TCP_SKB_CB(buff)->seq = TCP_SKB_CB(buff)->end_seq = tcp_acceptable_seq(sk, tp);
@@ -2292,8 +2301,9 @@ static int tcp_xmit_probe_skb(struct sock *sk, int urgent)
 	skb->csum = 0;
 	TCP_SKB_CB(skb)->flags = TCPCB_FLAG_ACK;
 	TCP_SKB_CB(skb)->sacked = urgent;
-	skb_shinfo(skb)->tso_segs = 1;
-	skb_shinfo(skb)->tso_size = 0;
+	skb_shinfo(skb)->gso_segs = 1;
+	skb_shinfo(skb)->gso_size = 0;
+	skb_shinfo(skb)->gso_type = 0;
 
 	/* Use a previous sequence.  This should cause the other
 	 * end to send an ack.  Don't queue or clone SKB, just

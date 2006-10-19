@@ -11,6 +11,7 @@ menu "Serial drivers"
 config SERIAL_8250
 	tristate "8250/16550 and compatible serial support"
 	depends on (BROKEN || !SPARC)
+	depends on !XEN_DISABLE_SERIAL
 	select SERIAL_CORE
 	---help---
 	  This selects whether you want to include the driver for the standard
@@ -803,6 +804,7 @@ config SERIAL_MPC52xx
 	tristate "Freescale MPC52xx family PSC serial support"
 	depends on PPC_MPC52xx
 	select SERIAL_CORE
+	select FW_LOADER
 	help
 	  This drivers support the MPC52xx PSC serial ports. If you would
 	  like to use them, you must answer Y or M to this option. Not that

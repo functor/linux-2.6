@@ -177,7 +177,7 @@ need_resched:
 
 	# sysenter call handler stub
 ENTRY(sysenter_entry)
-	movl TSS_sysenter_esp0(%esp),%esp
+	movl SYSENTER_stack_esp0(%esp),%esp
 sysenter_past_esp:
 	sti
 	pushl $(__USER_DS)
@@ -414,7 +414,7 @@ vector=0
 ENTRY(irq_entries_start)
 .rept NR_IRQS
 	ALIGN
-1:	pushl $vector-256
+1:	pushl $~(vector)
 	jmp common_interrupt
 .data
 	.long 1b
@@ -431,7 +431,7 @@ common_interrupt:
 
 #define BUILD_INTERRUPT(name, nr)	\
 ENTRY(name)				\
-	pushl $nr-256;			\
+	pushl $~(nr);			\
 	SAVE_ALL			\
 	movl %esp,%eax;			\
 	call smp_/**/name;		\
@@ -500,7 +500,7 @@ device_not_available_emulate:
  * that sets up the real kernel stack. Check here, since we can't
  * allow the wrong stack to be used.
  *
- * "TSS_sysenter_esp0+12" is because the NMI/debug handler will have
+ * "SYSENTER_stack_esp0+12" is because the NMI/debug handler will have
  * already pushed 3 words if it hits on the sysenter instruction:
  * eflags, cs and eip.
  *
@@ -512,7 +512,7 @@ device_not_available_emulate:
 	cmpw $__KERNEL_CS,4(%esp);		\
 	jne ok;					\
 label:						\
-	movl TSS_sysenter_esp0+offset(%esp),%esp;	\
+	movl SYSENTER_stack_esp0+offset(%esp),%esp;	\
 	pushfl;					\
 	pushl $__KERNEL_CS;			\
 	pushl $sysenter_past_esp

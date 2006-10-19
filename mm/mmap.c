@@ -920,6 +920,10 @@ unsigned long do_mmap_pgoff(struct file * file, unsigned long addr,
 	if (!len)
 		return -EINVAL;
 
+	error = arch_mmap_check(addr, len, flags);
+	if (error)
+		return error;
+
 	/* Careful about overflows.. */
 	len = PAGE_ALIGN(len);
 	if (!len || len > TASK_SIZE)
@@ -1940,6 +1944,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	unsigned long flags;
 	struct rb_node ** rb_link, * rb_parent;
 	pgoff_t pgoff = addr >> PAGE_SHIFT;
+	int error;
 
 	len = PAGE_ALIGN(len);
 	if (!len)
@@ -1947,6 +1952,12 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 
 	if ((addr + len) > TASK_SIZE || (addr + len) < addr)
 		return -EINVAL;
+
+	flags = VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
+
+	error = arch_mmap_check(addr, len, flags);
+	if (error)
+		return error;
 
 	/*
 	 * mlock MCL_FUTURE?
@@ -1991,8 +2002,6 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 		!vx_vmpages_avail(mm, len >> PAGE_SHIFT))
 		return -ENOMEM;
 
-	flags = VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
-
 	/* Can we just expand an old private anonymous mapping? */
 	if (vma_merge(mm, prev, addr, addr + len, flags,
 					NULL, NULL, pgoff, NULL))
@@ -2032,6 +2041,10 @@ void exit_mmap(struct mm_struct *mm)
 	struct vm_area_struct *vma = mm->mmap;
 	unsigned long nr_accounted = 0;
 	unsigned long end;
+
+#ifdef arch_exit_mmap
+	arch_exit_mmap(mm);
+#endif
 
 	lru_add_drain();
 	flush_cache_mm(mm);

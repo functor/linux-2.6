@@ -559,6 +559,22 @@ found:
 	if (time_before(expires, jiffies))
 		return jiffies;
 
+	/*
+	 * It can happen that other CPUs service timer IRQs and increment
+	 * jiffies, but we have not yet got a local timer tick to process
+	 * the timer wheels.  In that case, the expiry time can be before
+	 * jiffies, but since the high-resolution timer here is relative to
+	 * jiffies, the default expression when high-resolution timers are
+	 * not active,
+	 *
+	 *   time_before(MAX_JIFFY_OFFSET + jiffies, expires)
+	 *
+	 * would falsely evaluate to true.  If that is the case, just
+	 * return jiffies so that we can immediately fire the local timer
+	 */
+	if (time_before(expires, jiffies))
+		return jiffies;
+
 	if (time_before(hr_expires, expires))
 		return hr_expires;
 
@@ -971,46 +987,18 @@ asmlinkage long sys_getpid(void)
 }
 
 /*
- * Accessing ->group_leader->real_parent is not SMP-safe, it could
- * change from under us. However, rather than getting any lock
- * we can use an optimistic algorithm: get the parent
- * pid, and go back and check that the parent is still
- * the same. If it has changed (which is extremely unlikely
- * indeed), we just try again..
- *
- * NOTE! This depends on the fact that even if we _do_
- * get an old value of "parent", we can happily dereference
- * the pointer (it was and remains a dereferencable kernel pointer
- * no matter what): we just can't necessarily trust the result
- * until we know that the parent pointer is valid.
- *
- * NOTE2: ->group_leader never changes from under us.
+ * Accessing ->real_parent is not SMP-safe, it could
+ * change from under us. However, we can use a stale
+ * value of ->real_parent under rcu_read_lock(), see
+ * release_task()->call_rcu(delayed_put_task_struct).
  */
 asmlinkage long sys_getppid(void)
 {
 	int pid;
-	struct task_struct *me = current;
-	struct task_struct *parent;
 
-	parent = me->group_leader->real_parent;
-	for (;;) {
-		pid = parent->tgid;
-#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT)
-{
-		struct task_struct *old = parent;
-
-		/*
-		 * Make sure we read the pid before re-reading the
-		 * parent pointer:
-		 */
-		smp_rmb();
-		parent = me->group_leader->real_parent;
-		if (old != parent)
-			continue;
-}
-#endif
-		break;
-	}
+	rcu_read_lock();
+	pid = rcu_dereference(current->real_parent)->tgid;
+	rcu_read_unlock();
 	return vx_map_pid(pid);
 }
 
@@ -1025,7 +1013,7 @@ asmlinkage long do_getxpid(long *ppid)
 	*ppid = sys_getppid();
 	return sys_getpid();
 }
-  
+
 #else /* _alpha_ */
 
 asmlinkage long sys_getuid(void)

@@ -147,7 +147,7 @@ static int ip6_output2(struct sk_buff *skb)
 
 int ip6_output(struct sk_buff *skb)
 {
-	if ((skb->len > dst_mtu(skb->dst) && !skb_shinfo(skb)->ufo_size) ||
+	if ((skb->len > dst_mtu(skb->dst) && !skb_is_gso(skb)) ||
 				dst_allfrag(skb->dst))
 		return ip6_fragment(skb, ip6_output2);
 	else
@@ -830,8 +830,9 @@ static inline int ip6_ufo_append_data(struct sock *sk,
 		struct frag_hdr fhdr;
 
 		/* specify the length of each IP datagram fragment*/
-		skb_shinfo(skb)->ufo_size = (mtu - fragheaderlen) - 
-						sizeof(struct frag_hdr);
+		skb_shinfo(skb)->gso_size = mtu - fragheaderlen - 
+					    sizeof(struct frag_hdr);
+		skb_shinfo(skb)->gso_type = SKB_GSO_UDPV4;
 		ipv6_select_ident(skb, &fhdr);
 		skb_shinfo(skb)->ip6_frag_id = fhdr.identification;
 		__skb_queue_tail(&sk->sk_write_queue, skb);
@@ -1047,7 +1048,7 @@ alloc_new_skb:
 				skb_prev->csum = csum_sub(skb_prev->csum,
 							  skb->csum);
 				data += fraggap;
-				skb_trim(skb_prev, maxfraglen);
+				pskb_trim_unique(skb_prev, maxfraglen);
 			}
 			copy = datalen - transhdrlen - fraggap;
 			if (copy < 0) {

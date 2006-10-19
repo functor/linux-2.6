@@ -69,8 +69,8 @@
 
 #define DRV_MODULE_NAME		"tg3"
 #define PFX DRV_MODULE_NAME	": "
-#define DRV_MODULE_VERSION	"3.59"
-#define DRV_MODULE_RELDATE	"June 8, 2006"
+#define DRV_MODULE_VERSION	"3.59.1"
+#define DRV_MODULE_RELDATE	"August 25, 2006"
 
 #define TG3_DEF_MAC_MODE	0
 #define TG3_DEF_RX_MODE		0
@@ -3743,7 +3743,7 @@ static int tg3_start_xmit(struct sk_buff *skb, struct net_device *dev)
 #if TG3_TSO_SUPPORT != 0
 	mss = 0;
 	if (skb->len > (tp->dev->mtu + ETH_HLEN) &&
-	    (mss = skb_shinfo(skb)->tso_size) != 0) {
+	    (mss = skb_shinfo(skb)->gso_size) != 0) {
 		int tcp_opt_len, ip_tcp_len;
 
 		if (skb_header_cloned(skb) &&
@@ -3871,7 +3871,7 @@ static int tg3_start_xmit_dma_bug(struct sk_buff *skb, struct net_device *dev)
 #if TG3_TSO_SUPPORT != 0
 	mss = 0;
 	if (skb->len > (tp->dev->mtu + ETH_HLEN) &&
-	    (mss = skb_shinfo(skb)->tso_size) != 0) {
+	    (mss = skb_shinfo(skb)->gso_size) != 0) {
 		int tcp_opt_len, ip_tcp_len;
 
 		if (skb_header_cloned(skb) &&
@@ -11381,11 +11381,15 @@ static int __devinit tg3_init_one(struct pci_dev *pdev,
 		tp->tg3_flags2 |= TG3_FLG2_TSO_CAPABLE;
 	}
 
-	/* TSO is on by default on chips that support hardware TSO.
+	/* TSO is on by default on chips that support HW_TSO_2.
+	 * Some HW_TSO_1 capable chips have bugs that can lead to
+	 * tx timeouts in some cases when TSO is enabled.
 	 * Firmware TSO on older chips gives lower performance, so it
 	 * is off by default, but can be enabled using ethtool.
 	 */
-	if (tp->tg3_flags2 & TG3_FLG2_HW_TSO)
+	if ((tp->tg3_flags2 & TG3_FLG2_HW_TSO_2) ||
+	    (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5750 &&
+	     tp->pci_chip_rev_id >= CHIPREV_ID_5750_C2))
 		dev->features |= NETIF_F_TSO;
 
 #endif

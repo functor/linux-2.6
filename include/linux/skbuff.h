@@ -134,9 +134,10 @@ struct skb_frag_struct {
 struct skb_shared_info {
 	atomic_t	dataref;
 	unsigned short	nr_frags;
-	unsigned short	tso_size;
-	unsigned short	tso_segs;
-	unsigned short  ufo_size;
+	unsigned short	gso_size;
+	/* Warning: this field is not always filled in (UFO)! */
+	unsigned short	gso_segs;
+	unsigned short  gso_type;
 	unsigned int    ip6_frag_id;
 	struct sk_buff	*frag_list;
 	skb_frag_t	frags[MAX_SKB_FRAGS];
@@ -168,6 +169,14 @@ enum {
 	SKB_FCLONE_CLONE,
 };
 
+enum {
+	SKB_GSO_TCPV4 = 1 << 0,
+	SKB_GSO_UDPV4 = 1 << 1,
+
+	/* This indicates the skb is from an untrusted source. */
+	SKB_GSO_DODGY = 1 << 2,
+};
+
 /** 
  *	struct sk_buff - socket buffer
  *	@next: Next buffer in list
@@ -189,6 +198,8 @@ enum {
  *	@local_df: allow local fragmentation
  *	@cloned: Head may be cloned (check refcnt to be sure)
  *	@nohdr: Payload reference only, must not modify header
+ *	@proto_data_valid: Protocol data validated since arriving at localhost
+ *	@proto_csum_blank: Protocol csum must be added before leaving localhost
  *	@pkt_type: Packet class
  *	@fclone: skbuff clone status
  *	@ip_summed: Driver fed us an IP checksum
@@ -265,7 +276,13 @@ struct sk_buff {
 				nfctinfo:3;
 	__u8			pkt_type:3,
 				fclone:2,
+#ifndef CONFIG_XEN
 				ipvs_property:1;
+#else
+				ipvs_property:1,
+				proto_data_valid:1,
+				proto_csum_blank:1;
+#endif
 	__be16			protocol;
 
 	void			(*destructor)(struct sk_buff *skb);
@@ -324,7 +341,8 @@ static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 
 extern struct sk_buff *alloc_skb_from_cache(kmem_cache_t *cp,
 					    unsigned int size,
-					    gfp_t priority);
+					    gfp_t priority,
+					    int fclone);
 extern void	       kfree_skbmem(struct sk_buff *skb);
 extern struct sk_buff *skb_clone(struct sk_buff *skb,
 				 gfp_t priority);
@@ -969,15 +987,16 @@ static inline void skb_reserve(struct sk_buff *skb, int len)
 #define NET_SKB_PAD	16
 #endif
 
-extern int ___pskb_trim(struct sk_buff *skb, unsigned int len, int realloc);
+extern int ___pskb_trim(struct sk_buff *skb, unsigned int len);
 
 static inline void __skb_trim(struct sk_buff *skb, unsigned int len)
 {
-	if (!skb->data_len) {
-		skb->len  = len;
-		skb->tail = skb->data + len;
-	} else
-		___pskb_trim(skb, len, 0);
+	if (unlikely(skb->data_len)) {
+		WARN_ON(1);
+		return;
+	}
+	skb->len  = len;
+	skb->tail = skb->data + len;
 }
 
 /**
@@ -987,6 +1006,7 @@ static inline void __skb_trim(struct sk_buff *skb, unsigned int len)
  *
  *	Cut the length of a buffer down by removing data from the tail. If
  *	the buffer is already under the length specified it is not modified.
+ *	The skb must be linear.
  */
 static inline void skb_trim(struct sk_buff *skb, unsigned int len)
 {
@@ -997,17 +1017,30 @@ static inline void skb_trim(struct sk_buff *skb, unsigned int len)
 
 static inline int __pskb_trim(struct sk_buff *skb, unsigned int len)
 {
-	if (!skb->data_len) {
-		skb->len  = len;
-		skb->tail = skb->data+len;
-		return 0;
-	}
-	return ___pskb_trim(skb, len, 1);
+	if (skb->data_len)
+		return ___pskb_trim(skb, len);
+	__skb_trim(skb, len);
+	return 0;
 }
 
 static inline int pskb_trim(struct sk_buff *skb, unsigned int len)
 {
 	return (len < skb->len) ? __pskb_trim(skb, len) : 0;
+}
+
+/**
+ *	pskb_trim_unique - remove end from a paged unique (not cloned) buffer
+ *	@skb: buffer to alter
+ *	@len: new length
+ *
+ *	This is identical to pskb_trim except that the caller knows that
+ *	the skb is not cloned so we should never get an error due to out-
+ *	of-memory.
+ */
+static inline void pskb_trim_unique(struct sk_buff *skb, unsigned int len)
+{
+	int err = pskb_trim(skb, len);
+	BUG_ON(err);
 }
 
 /**
@@ -1064,7 +1097,7 @@ static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 	return skb;
 }
 #else
-extern struct sk_buff *__dev_alloc_skb(unsigned int length, int gfp_mask);
+extern struct sk_buff *__dev_alloc_skb(unsigned int length, gfp_t gfp_mask);
 #endif
 
 /**
@@ -1163,18 +1196,34 @@ static inline int skb_can_coalesce(struct sk_buff *skb, int i,
 	return 0;
 }
 
+static inline int __skb_linearize(struct sk_buff *skb)
+{
+	return __pskb_pull_tail(skb, skb->data_len) ? 0 : -ENOMEM;
+}
+
 /**
  *	skb_linearize - convert paged skb to linear one
  *	@skb: buffer to linarize
- *	@gfp: allocation mode
  *
  *	If there is no free memory -ENOMEM is returned, otherwise zero
  *	is returned and the old skb data released.
  */
-extern int __skb_linearize(struct sk_buff *skb, gfp_t gfp);
-static inline int skb_linearize(struct sk_buff *skb, gfp_t gfp)
+static inline int skb_linearize(struct sk_buff *skb)
 {
-	return __skb_linearize(skb, gfp);
+	return skb_is_nonlinear(skb) ? __skb_linearize(skb) : 0;
+}
+
+/**
+ *	skb_linearize_cow - make sure skb is linear and writable
+ *	@skb: buffer to process
+ *
+ *	If there is no free memory -ENOMEM is returned, otherwise zero
+ *	is returned and the old skb data released.
+ */
+static inline int skb_linearize_cow(struct sk_buff *skb)
+{
+	return skb_is_nonlinear(skb) || skb_cloned(skb) ?
+	       __skb_linearize(skb) : 0;
 }
 
 /**
@@ -1271,6 +1320,7 @@ extern void	       skb_split(struct sk_buff *skb,
 				 struct sk_buff *skb1, const u32 len);
 
 extern void	       skb_release_data(struct sk_buff *skb);
+extern struct sk_buff *skb_segment(struct sk_buff *skb, int features);
 
 static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
 				       int len, void *buffer)
@@ -1399,6 +1449,11 @@ static inline void nf_reset(struct sk_buff *skb)
 #else /* CONFIG_NETFILTER */
 static inline void nf_reset(struct sk_buff *skb) {}
 #endif /* CONFIG_NETFILTER */
+
+static inline int skb_is_gso(const struct sk_buff *skb)
+{
+	return skb_shinfo(skb)->gso_size;
+}
 
 #endif	/* __KERNEL__ */
 #endif	/* _LINUX_SKBUFF_H */

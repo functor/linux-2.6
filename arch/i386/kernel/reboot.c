@@ -120,14 +120,6 @@ static struct dmi_system_id __initdata reboot_dmi_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "HP Compaq"),
 		},
 	},
-	{	/* HP laptops have weird reboot issues */
-		.callback = set_bios_reboot,
-		.ident = "HP Laptop",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "HP Compaq"),
-		},
-	},
 	{ }
 };
 
