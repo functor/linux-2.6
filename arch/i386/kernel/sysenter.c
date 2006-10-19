@@ -13,6 +13,7 @@
 #include <linux/gfp.h>
 #include <linux/string.h>
 #include <linux/elf.h>
+#include <linux/mm.h>
 #include <linux/mman.h>
 
 #include <asm/a.out.h>
@@ -21,10 +22,15 @@
 #include <asm/pgtable.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_XEN
+#include <xen/interface/callback.h>
+#endif
+
 extern asmlinkage void sysenter_entry(void);
 
 void enable_sep_cpu(void)
 {
+#ifndef CONFIG_X86_NO_TSS
 	int cpu = get_cpu();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 
@@ -39,6 +45,7 @@ void enable_sep_cpu(void)
 	wrmsr(MSR_IA32_SYSENTER_ESP, tss->esp1, 0);
 	wrmsr(MSR_IA32_SYSENTER_EIP, (unsigned long) sysenter_entry, 0);
 	put_cpu();	
+#endif
 }
 
 /*
@@ -47,7 +54,6 @@ void enable_sep_cpu(void)
  */
 extern const char vsyscall_int80_start, vsyscall_int80_end;
 extern const char vsyscall_sysenter_start, vsyscall_sysenter_end;
-
 static struct page *sysenter_pages[2];
 
 int __init sysenter_setup(void)
@@ -56,16 +62,28 @@ int __init sysenter_setup(void)
 
 	sysenter_pages[0] = virt_to_page(page);
 
-	if (!boot_cpu_has(X86_FEATURE_SEP)) {
+#ifdef CONFIG_XEN
+	if (boot_cpu_has(X86_FEATURE_SEP)) {
+		struct callback_register sysenter = {
+			.type = CALLBACKTYPE_sysenter,
+			.address = { __KERNEL_CS, (unsigned long)sysenter_entry },
+		};
+
+		if (HYPERVISOR_callback_op(CALLBACKOP_register, &sysenter) < 0)
+			clear_bit(X86_FEATURE_SEP, boot_cpu_data.x86_capability);
+	}
+#endif
+
+	if (boot_cpu_has(X86_FEATURE_SEP)) {
 		memcpy(page,
-		       &vsyscall_int80_start,
-		       &vsyscall_int80_end - &vsyscall_int80_start);
+		       &vsyscall_sysenter_start,
+		       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
 		return 0;
 	}
 
 	memcpy(page,
-	       &vsyscall_sysenter_start,
-	       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
+	       &vsyscall_int80_start,
+	       &vsyscall_int80_end - &vsyscall_int80_start);
 
 	return 0;
 }
@@ -130,6 +148,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 	return err;
 }
 
+#ifndef CONFIG_XEN
 int in_gate_area_no_task(unsigned long addr)
 {
 	return 0;
@@ -144,3 +163,4 @@ struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 {
 	return NULL;
 }
+#endif

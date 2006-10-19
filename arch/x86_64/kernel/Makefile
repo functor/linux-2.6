@@ -20,11 +20,13 @@ obj-$(CONFIG_MICROCODE)		+= microcode.o
 obj-$(CONFIG_X86_CPUID)		+= cpuid.o
 obj-$(CONFIG_SMP)		+= smp.o smpboot.o trampoline.o
 obj-$(CONFIG_X86_LOCAL_APIC)	+= apic.o  nmi.o
+obj-$(CONFIG_X86_XEN_GENAPIC)	+= genapic.o genapic_xen.o
 obj-$(CONFIG_X86_IO_APIC)	+= io_apic.o mpparse.o \
 		genapic.o genapic_cluster.o genapic_flat.o
 obj-$(CONFIG_KEXEC)		+= machine_kexec.o relocate_kernel.o crash.o
 obj-$(CONFIG_CRASH_DUMP)	+= crash_dump.o
-obj-$(CONFIG_PM)		+= suspend.o
+obj-$(CONFIG_SOFTWARE_SUSPEND)	+= suspend.o
+obj-$(CONFIG_ACPI_SLEEP)	+= suspend.o
 obj-$(CONFIG_SOFTWARE_SUSPEND)	+= suspend_asm.o
 obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
@@ -49,3 +51,18 @@ intel_cacheinfo-y		+= ../../i386/kernel/cpu/intel_cacheinfo.o
 quirks-y			+= ../../i386/kernel/quirks.o
 i8237-y				+= ../../i386/kernel/i8237.o
 msr-$(subst m,y,$(CONFIG_X86_MSR))  += ../../i386/kernel/msr.o
+
+ifdef CONFIG_XEN
+time-y				+= ../../i386/kernel/time-xen.o
+pci-dma-y			+= ../../i386/kernel/pci-dma-xen.o
+microcode-$(subst m,y,$(CONFIG_MICROCODE))  := ../../i386/kernel/microcode-xen.o
+quirks-y			:= ../../i386/kernel/quirks-xen.o
+
+n-obj-xen := i8259.o reboot.o i8237.o smpboot.o trampoline.o
+
+include $(srctree)/scripts/Makefile.xen
+
+obj-y := $(call filterxen, $(obj-y), $(n-obj-xen))
+obj-y := $(call cherrypickxen, $(obj-y))
+extra-y := $(call cherrypickxen, $(extra-y))
+endif

@@ -65,7 +65,7 @@ static LIST_HEAD(ipcomp6_tfms_list);
 
 static int ipcomp6_input(struct xfrm_state *x, struct sk_buff *skb)
 {
-	int err = 0;
+	int err = -ENOMEM;
 	u8 nexthdr = 0;
 	int hdr_len = skb->h.raw - skb->nh.raw;
 	unsigned char *tmp_hdr = NULL;
@@ -76,11 +76,8 @@ static int ipcomp6_input(struct xfrm_state *x, struct sk_buff *skb)
 	struct crypto_tfm *tfm;
 	int cpu;
 
-	if ((skb_is_nonlinear(skb) || skb_cloned(skb)) &&
-		skb_linearize(skb, GFP_ATOMIC) != 0) {
-		err = -ENOMEM;
+	if (skb_linearize_cow(skb))
 		goto out;
-	}
 
 	skb->ip_summed = CHECKSUM_NONE;
 
@@ -159,10 +156,8 @@ static int ipcomp6_output(struct xfrm_state *x, struct sk_buff *skb)
 		goto out_ok;
 	}
 
-	if ((skb_is_nonlinear(skb) || skb_cloned(skb)) &&
-		skb_linearize(skb, GFP_ATOMIC) != 0) {
+	if (skb_linearize_cow(skb))
 		goto out_ok;
-	}
 
 	/* compression */
 	plen = skb->len - hdr_len;

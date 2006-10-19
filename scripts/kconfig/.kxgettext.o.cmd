@@ -6,10 +6,11 @@ deps_scripts/kconfig/kxgettext.o := \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
   /usr/include/gnu/stubs.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stddef.h \
+  /usr/include/bits/wordsize.h \
+  /usr/include/gnu/stubs-32.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stddef.h \
   /usr/include/sys/types.h \
   /usr/include/bits/types.h \
-  /usr/include/bits/wordsize.h \
   /usr/include/bits/typesizes.h \
   /usr/include/time.h \
   /usr/include/endian.h \
@@ -20,7 +21,6 @@ deps_scripts/kconfig/kxgettext.o := \
   /usr/include/bits/time.h \
   /usr/include/sys/sysmacros.h \
   /usr/include/bits/pthreadtypes.h \
-  /usr/include/bits/sched.h \
   /usr/include/alloca.h \
   /usr/include/string.h \
   /usr/include/bits/string.h \
@@ -33,11 +33,11 @@ deps_scripts/kconfig/kxgettext.o := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
-  /usr/lib/gcc/i386-redhat-linux/3.4.2/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdbool.h \
   /usr/include/libintl.h \
   /usr/include/locale.h \
   /usr/include/bits/locale.h \

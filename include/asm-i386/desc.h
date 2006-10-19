@@ -170,7 +170,7 @@ static inline void set_user_cs(struct desc_struct *desc, unsigned long limit)
 }
 
 #define load_user_cs_desc(cpu, mm) \
-    	get_cpu_gdt_table(cpu)[GDT_ENTRY_DEFAULT_USER_CS] = (mm)->context.user_cs
+	get_cpu_gdt_table(cpu)[GDT_ENTRY_DEFAULT_USER_CS] = (mm)->context.user_cs
 
 extern void arch_add_exec_range(struct mm_struct *mm, unsigned long limit);
 extern void arch_remove_exec_range(struct mm_struct *mm, unsigned long limit);

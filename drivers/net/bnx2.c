@@ -1638,7 +1638,7 @@ bnx2_tx_int(struct bnx2 *bp)
 		skb = tx_buf->skb;
 #ifdef BCM_TSO 
 		/* partial BD completions possible with TSO packets */
-		if (skb_shinfo(skb)->tso_size) {
+		if (skb_is_gso(skb)) {
 			u16 last_idx, last_ring_idx;
 
 			last_idx = sw_cons +
@@ -2009,7 +2009,7 @@ bnx2_poll(struct net_device *dev, int *budget)
 	return 1;
 }
 
-/* Called with rtnl_lock from vlan functions and also dev->xmit_lock
+/* Called with rtnl_lock from vlan functions and also netif_tx_lock
  * from set_multicast.
  */
 static void
@@ -4252,7 +4252,7 @@ bnx2_vlan_rx_kill_vid(struct net_device *dev, uint16_t vid)
 }
 #endif
 
-/* Called with dev->xmit_lock.
+/* Called with netif_tx_lock.
  * hard_start_xmit is pseudo-lockless - a lock is only required when
  * the tx queue is full. This way, we get the benefit of lockless
  * operations most of the time without the complexities to handle
@@ -4290,7 +4290,7 @@ bnx2_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			(TX_BD_FLAGS_VLAN_TAG | (vlan_tx_tag_get(skb) << 16));
 	}
 #ifdef BCM_TSO 
-	if ((mss = skb_shinfo(skb)->tso_size) &&
+	if ((mss = skb_shinfo(skb)->gso_size) &&
 		(skb->len > (bp->dev->mtu + ETH_HLEN))) {
 		u32 tcp_opt_len, ip_tcp_len;
 

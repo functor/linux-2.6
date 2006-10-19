@@ -2149,6 +2149,8 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
 	skb->mac.raw = ((u8 *) iph) - 14 - pkt_dev->nr_labels*sizeof(u32);
 	skb->dev = odev;
 	skb->pkt_type = PACKET_HOST;
+	skb->nh.iph = iph;
+	skb->h.uh = udph;
 
 	if (pkt_dev->nfrags <= 0)
 		pgh = (struct pktgen_hdr *)skb_put(skb, datalen);
@@ -2460,6 +2462,8 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 	skb->protocol = protocol;
 	skb->dev = odev;
 	skb->pkt_type = PACKET_HOST;
+	skb->nh.ipv6h = iph;
+	skb->h.uh = udph;
 
 	if (pkt_dev->nfrags <= 0)
 		pgh = (struct pktgen_hdr *)skb_put(skb, datalen);
@@ -2896,8 +2900,8 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 			pkt_dev->clone_count = 0;	/* reset counter */
 		}
 	}
-
-	spin_lock_bh(&odev->xmit_lock);
+	
+	netif_tx_lock_bh(odev);
 	if (!netif_queue_stopped(odev)) {
 
 		atomic_inc(&(pkt_dev->skb->users));
@@ -2942,8 +2946,8 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 		pkt_dev->next_tx_ns = 0;
 	}
 
-	spin_unlock_bh(&odev->xmit_lock);
-
+	netif_tx_unlock_bh(odev);
+	
 	/* If pkt_dev->count is zero, then run forever */
 	if ((pkt_dev->count != 0) && (pkt_dev->sofar >= pkt_dev->count)) {
 		if (atomic_read(&(pkt_dev->skb->users)) != 1) {

@@ -769,7 +769,7 @@ static int br_nf_dev_queue_xmit(struct sk_buff *skb)
 {
 	if (skb->protocol == htons(ETH_P_IP) &&
 	    skb->len > skb->dev->mtu &&
-	    !(skb_shinfo(skb)->ufo_size || skb_shinfo(skb)->tso_size))
+	    !skb_is_gso(skb))
 		return ip_fragment(skb, br_dev_queue_push_xmit);
 	else
 		return br_dev_queue_push_xmit(skb);
@@ -877,8 +877,9 @@ static unsigned int ip_sabotage_out(unsigned int hook, struct sk_buff **pskb,
 	struct sk_buff *skb = *pskb;
 
 	if ((out->hard_start_xmit == br_dev_xmit &&
-	     okfn != br_nf_forward_finish &&
-	     okfn != br_nf_local_out_finish && okfn != br_nf_dev_queue_xmit)
+	    okfn != br_nf_forward_finish &&
+	    okfn != br_nf_local_out_finish &&
+	    okfn != br_nf_dev_queue_xmit)
 #if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 	    || ((out->priv_flags & IFF_802_1Q_VLAN) &&
 		VLAN_DEV_INFO(out)->real_dev->hard_start_xmit == br_dev_xmit)

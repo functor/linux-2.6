@@ -36,7 +36,7 @@
 	"\n1:\t" \
 	"lock ; decb %0\n\t" \
 	"jns 5f\n" \
-	"2:\t" \
+	"2:\t"		       \
 	"testl $0x200, %1\n\t" \
 	"jz 4f\n\t" \
 	"sti\n" \

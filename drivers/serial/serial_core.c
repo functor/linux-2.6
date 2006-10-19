@@ -1968,16 +1968,16 @@ int uart_resume_port(struct uart_driver *drv, struct uart_port *port)
 		struct termios termios;
 
 		/*
-		 * Get the termios for this line
+		 * First try to use the console cflag setting.
 		 */
-		tty_get_termios(drv->tty_driver, port->line, &termios);
+		memset(&termios, 0, sizeof(struct termios));
+		termios.c_cflag = port->cons->cflag;
 
 		/*
-		 * If the console cflag is still set, subsitute that
-		 * for the termios cflag.
+		 * If that's unset, use the tty termios setting.
 		 */
-		if (port->cons->cflag)
-			termios.c_cflag = port->cons->cflag;
+		if (state->info && state->info->tty && termios.c_cflag == 0)
+			termios = *state->info->tty->termios;
 
 		port->ops->set_termios(port, &termios, NULL);
 		console_start(port->cons);

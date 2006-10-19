@@ -133,6 +133,8 @@ LIST_HEAD(tty_drivers);			/* linked list of tty drivers */
    vt.c for deeply disgusting hack reasons */
 DEFINE_MUTEX(tty_mutex);
 
+int console_use_vt = 1;
+
 #ifdef CONFIG_UNIX98_PTYS
 extern struct tty_driver *ptm_driver;	/* Unix98 pty masters; for /dev/ptmx */
 extern int pty_limit;		/* Config limit on Unix98 ptys */
@@ -1675,19 +1677,6 @@ release_mem_out:
 }
 
 /*
- * Get a copy of the termios structure for the driver/index
- */
-void tty_get_termios(struct tty_driver *driver, int idx, struct termios *tio)
-{
-	lock_kernel();
-	if (driver->termios[idx])
-		*tio = *driver->termios[idx];
-	else
-		*tio = driver->init_termios;
-	unlock_kernel();
-}
-
-/*
  * Releases memory associated with a tty structure, and clears out the
  * driver table slots.
  */
@@ -2074,7 +2063,7 @@ retry_open:
 		goto got_driver;
 	}
 #ifdef CONFIG_VT
-	if (device == MKDEV(TTY_MAJOR,0)) {
+	if (console_use_vt && (device == MKDEV(TTY_MAJOR,0))) {
 		extern struct tty_driver *console_driver;
 		driver = console_driver;
 		index = fg_console;
@@ -2795,7 +2784,7 @@ static void flush_to_ldisc(void *private_)
 	struct tty_struct *tty = (struct tty_struct *) private_;
 	unsigned long 	flags;
 	struct tty_ldisc *disc;
-	struct tty_buffer *tbuf;
+	struct tty_buffer *tbuf, *head;
 	int count;
 	char *char_buf;
 	unsigned char *flag_buf;
@@ -2812,7 +2801,9 @@ static void flush_to_ldisc(void *private_)
 		goto out;
 	}
 	spin_lock_irqsave(&tty->buf.lock, flags);
-	while((tbuf = tty->buf.head) != NULL) {
+	head = tty->buf.head;
+	tty->buf.head = NULL;
+	while((tbuf = head) != NULL) {
 		while ((count = tbuf->commit - tbuf->read) != 0) {
 			char_buf = tbuf->char_buf_ptr + tbuf->read;
 			flag_buf = tbuf->flag_buf_ptr + tbuf->read;
@@ -2821,10 +2812,12 @@ static void flush_to_ldisc(void *private_)
 			disc->receive_buf(tty, char_buf, flag_buf, count);
 			spin_lock_irqsave(&tty->buf.lock, flags);
 		}
-		if (tbuf->active)
+		if (tbuf->active) {
+			tty->buf.head = head;
 			break;
-		tty->buf.head = tbuf->next;
-		if (tty->buf.head == NULL)
+		}
+		head = tbuf->next;
+		if (head == NULL)
 			tty->buf.tail = NULL;
 		tty_buffer_free(tty, tbuf);
 	}
@@ -3277,6 +3270,8 @@ static int __init tty_init(void)
 #endif
 
 #ifdef CONFIG_VT
+	if (!console_use_vt)
+		goto out_vt;
 	cdev_init(&vc0_cdev, &console_fops);
 	if (cdev_add(&vc0_cdev, MKDEV(TTY_MAJOR, 0), 1) ||
 	    register_chrdev_region(MKDEV(TTY_MAJOR, 0), 1, "/dev/vc/0") < 0)
@@ -3285,6 +3280,7 @@ static int __init tty_init(void)
 	class_device_create(tty_class, NULL, MKDEV(TTY_MAJOR, 0), NULL, "tty0");
 
 	vty_init();
+ out_vt:
 #endif
 	return 0;
 }

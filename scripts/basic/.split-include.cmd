@@ -1,4 +1,4 @@
-cmd_scripts/basic/split-include := gcc -Wp,-MD,scripts/basic/.split-include.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer        -o scripts/basic/split-include scripts/basic/split-include.c
+cmd_scripts/basic/split-include := gcc -Wp,-MD,scripts/basic/.split-include.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer       -o scripts/basic/split-include scripts/basic/split-include.c  
 
 deps_scripts/basic/split-include := \
   scripts/basic/split-include.c \
@@ -7,9 +7,10 @@ deps_scripts/basic/split-include := \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
   /usr/include/gnu/stubs.h \
-  /usr/include/bits/types.h \
   /usr/include/bits/wordsize.h \
-  /usr/lib/gcc-lib/i586-mandrake-linux-gnu/3.3.2/include/stddef.h \
+  /usr/include/gnu/stubs-32.h \
+  /usr/include/bits/types.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/time.h \
   /usr/include/bits/stat.h \
@@ -22,14 +23,11 @@ deps_scripts/basic/split-include := \
   /usr/include/bits/time.h \
   /usr/include/sys/sysmacros.h \
   /usr/include/bits/pthreadtypes.h \
-  /usr/include/bits/sched.h \
   /usr/include/ctype.h \
   /usr/include/errno.h \
   /usr/include/bits/errno.h \
   /usr/include/linux/errno.h \
   /usr/include/asm/errno.h \
-  /usr/include/asm-generic/errno.h \
-  /usr/include/asm-generic/errno-base.h \
   /usr/include/fcntl.h \
   /usr/include/bits/fcntl.h \
   /usr/include/stdio.h \
@@ -38,7 +36,7 @@ deps_scripts/basic/split-include := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc-lib/i586-mandrake-linux-gnu/3.3.2/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \

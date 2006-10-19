@@ -533,9 +533,9 @@ typedef union _ring_type {
  * critical parts:
  * - rx is (pseudo-) lockless: it relies on the single-threading provided
  *	by the arch code for interrupts.
- * - tx setup is lockless: it relies on dev->xmit_lock. Actual submission
+ * - tx setup is lockless: it relies on netif_tx_lock. Actual submission
  *	needs dev->priv->lock :-(
- * - set_multicast_list: preparation lockless, relies on dev->xmit_lock.
+ * - set_multicast_list: preparation lockless, relies on netif_tx_lock.
  */
 
 /* in dev: base, irq */
@@ -1213,7 +1213,7 @@ static void drain_ring(struct net_device *dev)
 
 /*
  * nv_start_xmit: dev->hard_start_xmit function
- * Called with dev->xmit_lock held.
+ * Called with netif_tx_lock held.
  */
 static int nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
@@ -1303,8 +1303,8 @@ static int nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	np->tx_skbuff[nr] = skb;
 
 #ifdef NETIF_F_TSO
-	if (skb_shinfo(skb)->tso_size)
-		tx_flags_extra = NV_TX2_TSO | (skb_shinfo(skb)->tso_size << NV_TX2_TSO_SHIFT);
+	if (skb_is_gso(skb))
+		tx_flags_extra = NV_TX2_TSO | (skb_shinfo(skb)->gso_size << NV_TX2_TSO_SHIFT);
 	else
 #endif
 	tx_flags_extra = (skb->ip_summed == CHECKSUM_HW ? (NV_TX2_CHECKSUM_L3|NV_TX2_CHECKSUM_L4) : 0);
@@ -1407,7 +1407,7 @@ static void nv_tx_done(struct net_device *dev)
 
 /*
  * nv_tx_timeout: dev->tx_timeout function
- * Called with dev->xmit_lock held.
+ * Called with netif_tx_lock held.
  */
 static void nv_tx_timeout(struct net_device *dev)
 {
@@ -1736,8 +1736,8 @@ static int nv_change_mtu(struct net_device *dev, int new_mtu)
 		 * guessed, there is probably a simpler approach.
 		 * Changing the MTU is a rare event, it shouldn't matter.
 		 */
-		nv_disable_irq(dev);
-		spin_lock_bh(&dev->xmit_lock);
+		disable_irq(dev->irq);
+		netif_tx_lock_bh(dev);
 		spin_lock(&np->lock);
 		/* stop engines */
 		nv_stop_rx(dev);
@@ -1768,8 +1768,8 @@ static int nv_change_mtu(struct net_device *dev, int new_mtu)
 		nv_start_rx(dev);
 		nv_start_tx(dev);
 		spin_unlock(&np->lock);
-		spin_unlock_bh(&dev->xmit_lock);
-		nv_enable_irq(dev);
+		netif_tx_unlock_bh(dev);
+		enable_irq(dev->irq);
 	}
 	return 0;
 }
@@ -1803,7 +1803,7 @@ static int nv_set_mac_address(struct net_device *dev, void *addr)
 	memcpy(dev->dev_addr, macaddr->sa_data, ETH_ALEN);
 
 	if (netif_running(dev)) {
-		spin_lock_bh(&dev->xmit_lock);
+		netif_tx_lock_bh(dev);
 		spin_lock_irq(&np->lock);
 
 		/* stop rx engine */
@@ -1815,7 +1815,7 @@ static int nv_set_mac_address(struct net_device *dev, void *addr)
 		/* restart rx engine */
 		nv_start_rx(dev);
 		spin_unlock_irq(&np->lock);
-		spin_unlock_bh(&dev->xmit_lock);
+		netif_tx_unlock_bh(dev);
 	} else {
 		nv_copy_mac_to_hw(dev);
 	}
@@ -1824,7 +1824,7 @@ static int nv_set_mac_address(struct net_device *dev, void *addr)
 
 /*
  * nv_set_multicast: dev->set_multicast function
- * Called with dev->xmit_lock held.
+ * Called with netif_tx_lock held.
  */
 static void nv_set_multicast(struct net_device *dev)
 {

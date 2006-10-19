@@ -439,7 +439,8 @@ static void __free_pages_ok(struct page *page, unsigned int order)
 	int i;
 	int reserved = 0;
 
-	arch_free_page(page, order);
+	if (arch_free_page(page, order))
+		return;
 	if (!PageHighMem(page))
 		mutex_debug_check_no_locks_freed(page_address(page),
 						 PAGE_SIZE<<order);
@@ -734,7 +735,8 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
 
-	arch_free_page(page, 0);
+	if (arch_free_page(page, 0))
+		return;
 
 	if (PageAnon(page))
 		page->mapping = NULL;
@@ -751,11 +753,6 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	if (pcp->count >= pcp->high) {
 		free_pages_bulk(zone, pcp->batch, &pcp->list, 0);
 		pcp->count -= pcp->batch;
-	} else if (zone->all_unreclaimable) {
-		spin_lock(&zone->lock);
-		zone->all_unreclaimable = 0;
-		zone->pages_scanned = 0;
-		spin_unlock(&zone->lock);
 	}
 	local_irq_restore(flags);
 	put_cpu();

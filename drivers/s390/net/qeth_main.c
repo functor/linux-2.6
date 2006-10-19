@@ -4417,7 +4417,6 @@ qeth_send_packet(struct qeth_card *card, struct sk_buff *skb)
 	struct qeth_eddp_context *ctx = NULL;
 	int tx_bytes = skb->len;
 	unsigned short nr_frags = skb_shinfo(skb)->nr_frags;
-	unsigned short tso_size = skb_shinfo(skb)->tso_size;
 	int rc;
 
 	QETH_DBF_TEXT(trace, 6, "sendpkt");
@@ -4453,7 +4452,7 @@ qeth_send_packet(struct qeth_card *card, struct sk_buff *skb)
 	queue = card->qdio.out_qs
 		[qeth_get_priority_queue(card, skb, ipv, cast_type)];
 
-	if (skb_shinfo(skb)->tso_size)
+	if (skb_is_gso(skb))
 		large_send = card->options.large_send;
 
 	/*are we able to do TSO ? If so ,prepare and send it from here */
@@ -4500,9 +4499,8 @@ qeth_send_packet(struct qeth_card *card, struct sk_buff *skb)
 		card->stats.tx_packets++;
 		card->stats.tx_bytes += tx_bytes;
 #ifdef CONFIG_QETH_PERF_STATS
-		if (tso_size &&
-		   !(large_send == QETH_LARGE_SEND_NO)) {
-			card->perf_stats.large_send_bytes += tx_bytes;
+		if (skb_is_gso(skb) && !(large_send == QETH_LARGE_SEND_NO)) {
+			card->perf_stats.large_send_bytes += skb->len;
 			card->perf_stats.large_send_cnt++;
 		}
  		if (nr_frags > 0){

@@ -60,7 +60,9 @@ int pmtimer_mark_offset(void)
 	delta = cyc2us((tick - last_pmtmr_tick) & ACPI_PM_MASK);
 
 	last_pmtmr_tick = tick;
+#ifndef CONFIG_XEN
 	monotonic_base += delta * NSEC_PER_USEC;
+#endif
 
 	delta += offset_delay;
 

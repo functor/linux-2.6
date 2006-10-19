@@ -27,7 +27,7 @@ int soft_cursor(struct fb_info *info, struct fb_cursor *cursor)
 	struct fb_image *image;
 	u8 *dst;
 	static u8 *src=NULL;
-	static int allocsize=0;
+	static int allocsize = 0;
 
 	if (info->state != FBINFO_STATE_RUNNING)
 		return 0;
@@ -41,8 +41,10 @@ int soft_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		allocsize = dsize + sizeof(struct fb_image);
 
 		src = kmalloc(allocsize, GFP_ATOMIC);
-		if (!src)
+		if (!src) {
+			allocsize = 0;
 			return -ENOMEM;
+		}
 	}
 
 	image = (struct fb_image *) (src + dsize);

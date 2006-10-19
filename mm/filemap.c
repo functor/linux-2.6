@@ -518,18 +518,11 @@ EXPORT_SYMBOL(unlock_page);
  */
 void end_page_writeback(struct page *page)
 {
-	struct zone *zone = page_zone(page);
 	if (!TestClearPageReclaim(page) || rotate_reclaimable_page(page)) {
 		if (!test_clear_page_writeback(page))
 			BUG();
 	}
 	smp_mb__after_clear_bit();
-	if (zone->all_unreclaimable) {
-		spin_lock(&zone->lock);
-		zone->all_unreclaimable = 0;
-		zone->pages_scanned = 0;
-		spin_unlock(&zone->lock);
-	}
 	wake_up_page(page, PG_writeback);
 }
 EXPORT_SYMBOL(end_page_writeback);
@@ -2022,14 +2015,21 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 	do {
 		unsigned long index;
 		unsigned long offset;
-		unsigned long maxlen;
 		size_t copied;
 
 		offset = (pos & (PAGE_CACHE_SIZE -1)); /* Within page */
 		index = pos >> PAGE_CACHE_SHIFT;
 		bytes = PAGE_CACHE_SIZE - offset;
-		if (bytes > count)
-			bytes = count;
+
+		/* Limit the size of the copy to the caller's write size */
+		bytes = min(bytes, count);
+
+		/*
+		 * Limit the size of the copy to that of the current segment,
+		 * because fault_in_pages_readable() doesn't know how to walk
+		 * segments.
+		 */
+		bytes = min(bytes, cur_iov->iov_len - iov_base);
 
 		/*
 		 * Bring in the user page that we will copy from _first_.
@@ -2037,15 +2037,18 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 		 * same page as we're writing to, without it being marked
 		 * up-to-date.
 		 */
-		maxlen = cur_iov->iov_len - iov_base;
-		if (maxlen > bytes)
-			maxlen = bytes;
-		fault_in_pages_readable(buf, maxlen);
+		fault_in_pages_readable(buf, bytes);
 
 		page = __grab_cache_page(mapping,index,&cached_page,&lru_pvec);
 		if (!page) {
 			status = -ENOMEM;
 			break;
+		}
+
+		if (unlikely(bytes == 0)) {
+			status = 0;
+			copied = 0;
+			goto zero_length_segment;
 		}
 
 		status = a_ops->prepare_write(file, page, offset, offset+bytes);
@@ -2077,7 +2080,8 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 			page_cache_release(page);
 			continue;
 		}
-		if (likely(copied > 0)) {
+zero_length_segment:
+		if (likely(copied >= 0)) {
 			if (!status)
 				status = copied;
 
