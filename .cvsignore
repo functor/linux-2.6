@@ -13,3 +13,4 @@ Module.symvers
 System.map
 vmlinux
 linux
+modnames
