@@ -20,7 +20,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define sublevel 17
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define release 1.2142_FC4.3%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.2187_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
 %define kernel_arch i386
