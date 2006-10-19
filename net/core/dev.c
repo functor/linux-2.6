@@ -1049,7 +1049,10 @@ static inline void net_timestamp(struct sk_buff *skb)
  *	taps currently in use.
  */
 
-static void dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev)
+#if !((defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)))
+static
+#endif
+void dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct packet_type *ptype;
 
