@@ -395,7 +395,8 @@ BuildKernel() {
     fi
 %if %{buildxen}
     if [ "$Flavour" = "xenU" ]; then
-      cp -a asm-xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cp -a xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %endif
 %if %{builduml}
