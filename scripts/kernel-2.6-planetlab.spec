@@ -6,7 +6,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define buildup 1
 %define buildsmp 1
 %define builduml 1
-%define buildxen 0
+%define buildxen 1
 %define builddoc 1
 
 # Versions of various parts
@@ -394,7 +394,7 @@ BuildKernel() {
       cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %if %{buildxen}
-    if [ "$Flavour" = "xen" ]; then
+    if [ "$Flavour" = "xenU" ]; then
       cp -a asm-xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %endif
@@ -425,6 +425,11 @@ BuildKernel() {
 %if "%{_enable_debug_packages}" == "1"
     mkdir -p $RPM_BUILD_ROOT/usr/lib/debug/lib/modules/$KernelVer
     cp vmlinux $RPM_BUILD_ROOT/usr/lib/debug/lib/modules/$KernelVer
+%endif
+%if %{buildxen}
+    if [ -f vmlinuz ]; then
+      cp vmlinuz $RPM_BUILD_ROOT/%{image_install_path}/vmlinuz-$KernelVer
+    fi
 %endif
 
     find $RPM_BUILD_ROOT/lib/modules/$KernelVer -name "*.ko" -type f >modnames
@@ -463,7 +468,7 @@ BuildKernel linux um uml
 %endif
 
 %if %{buildxen}
-BuildKernel %make_target xen xenU
+BuildKernel vmlinuz %kernel_arch xenU
 %endif
 
 ###
