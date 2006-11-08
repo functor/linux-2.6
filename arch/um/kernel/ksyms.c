@@ -20,7 +20,6 @@
 #include "user_util.h"
 #include "mem_user.h"
 #include "os.h"
-#include "helper.h"
 
 EXPORT_SYMBOL(stop);
 EXPORT_SYMBOL(uml_physmem);
@@ -34,18 +33,12 @@ EXPORT_SYMBOL(host_task_size);
 EXPORT_SYMBOL(arch_validate);
 EXPORT_SYMBOL(get_kmem_end);
 
-EXPORT_SYMBOL(page_to_phys);
-EXPORT_SYMBOL(phys_to_page);
 EXPORT_SYMBOL(high_physmem);
 EXPORT_SYMBOL(empty_zero_page);
 EXPORT_SYMBOL(um_virt_to_phys);
-EXPORT_SYMBOL(__virt_to_page);
-EXPORT_SYMBOL(to_phys);
-EXPORT_SYMBOL(to_virt);
 EXPORT_SYMBOL(mode_tt);
 EXPORT_SYMBOL(handle_page_fault);
 EXPORT_SYMBOL(find_iomem);
-EXPORT_SYMBOL(end_iomem);
 
 #ifdef CONFIG_MODE_TT
 EXPORT_SYMBOL(strncpy_from_user_tt);
@@ -95,12 +88,10 @@ EXPORT_SYMBOL(dump_thread);
 EXPORT_SYMBOL(do_gettimeofday);
 EXPORT_SYMBOL(do_settimeofday);
 
-/* This is here because UML expands open to sys_open, not to a system
+/* This is here because UML expands lseek to sys_lseek, not to a system
  * call instruction.
  */
-EXPORT_SYMBOL(sys_open);
 EXPORT_SYMBOL(sys_lseek);
-EXPORT_SYMBOL(sys_read);
 EXPORT_SYMBOL(sys_wait4);
 
 #ifdef CONFIG_SMP
@@ -114,22 +105,3 @@ extern void FASTCALL( __read_lock_failed(rwlock_t *rw));
 EXPORT_SYMBOL(__read_lock_failed);
 
 #endif
-
-#ifdef CONFIG_HIGHMEM
-EXPORT_SYMBOL(kmap);
-EXPORT_SYMBOL(kunmap);
-EXPORT_SYMBOL(kmap_atomic);
-EXPORT_SYMBOL(kunmap_atomic);
-EXPORT_SYMBOL(kmap_atomic_to_page);
-#endif
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */

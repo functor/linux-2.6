@@ -57,8 +57,10 @@ struct mod_arch_specific
 #define MODULE_PROC_FAMILY "CYRIXIII "
 #elif defined CONFIG_MVIAC3_2
 #define MODULE_PROC_FAMILY "VIAC3-2 "
-#elif CONFIG_MGEODEGX1
+#elif defined CONFIG_MGEODEGX1
 #define MODULE_PROC_FAMILY "GEODEGX1 "
+#elif defined CONFIG_MGEODE_LX
+#define MODULE_PROC_FAMILY "GEODE "
 #else
 #error unknown processor family
 #endif
@@ -69,16 +71,8 @@ struct mod_arch_specific
 #define MODULE_REGPARM ""
 #endif
 
-#if (CONFIG_STACK_SIZE_SHIFT < 12)
-#define MODULE_STACKSIZE "TINYSTACKS "
-#elif (CONFIG_STACK_SIZE_SHIFT == 12)
+#ifdef CONFIG_4KSTACKS
 #define MODULE_STACKSIZE "4KSTACKS "
-#elif (CONFIG_STACK_SIZE_SHIFT == 13)
-#define MODULE_STACKSIZE "8KSTACKS "
-#elif (CONFIG_STACK_SIZE_SHIFT == 14)
-#define MODULE_STACKSIZE "16KSTACKS "
-#elif (CONFIG_STACK_SIZE_SHIFT > 14)
-#define MODULE_STACKSIZE "HUGESTACKS "
 #else
 #define MODULE_STACKSIZE ""
 #endif

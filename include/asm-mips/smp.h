@@ -21,7 +21,7 @@
 #include <linux/cpumask.h>
 #include <asm/atomic.h>
 
-#define smp_processor_id()	(current_thread_info()->cpu)
+#define raw_smp_processor_id() (current_thread_info()->cpu)
 
 /* Map from cpu id to sequential logical cpu number.  This will only
    not be idempotent when cpus failed to come on-line.  */
@@ -48,7 +48,6 @@ extern struct call_data_struct *call_data;
 #define SMP_CALL_FUNCTION	0x2
 
 extern cpumask_t phys_cpu_present_map;
-extern cpumask_t cpu_online_map;
 #define cpu_possible_map	phys_cpu_present_map
 
 extern cpumask_t cpu_callout_map;
@@ -58,7 +57,9 @@ static inline int num_booting_cpus(void)
 	return cpus_weight(cpu_callout_map);
 }
 
-/* These are defined by the board-specific code. */
+/*
+ * These are defined by the board-specific code.
+ */
 
 /*
  * Cause the function described by call_data to be executed on the passed
@@ -79,9 +80,14 @@ extern void prom_boot_secondary(int cpu, struct task_struct *idle);
 extern void prom_init_secondary(void);
 
 /*
- * Detect available CPUs, populate phys_cpu_present_map before smp_init
+ * Populate cpu_possible_map before smp_init, called from setup_arch.
  */
-extern void prom_prepare_cpus(unsigned int max_cpus);
+extern void plat_smp_setup(void);
+
+/*
+ * Called in smp_prepare_cpus.
+ */
+extern void plat_prepare_cpus(unsigned int max_cpus);
 
 /*
  * Last chance for the board code to finish SMP initialization before

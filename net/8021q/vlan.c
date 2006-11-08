@@ -19,6 +19,7 @@
  */
 
 #include <asm/uaccess.h> /* for copy_from_user */
+#include <linux/capability.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
@@ -65,10 +66,6 @@ static struct packet_type vlan_packet_type = {
 	.type = __constant_htons(ETH_P_8021Q),
 	.func = vlan_skb_recv, /* VLAN receive method */
 };
-
-/* Bits of netdev state that are propagated from real device to virtual */
-#define VLAN_LINK_STATE_MASK \
-	((1<<__LINK_STATE_PRESENT)|(1<<__LINK_STATE_NOCARRIER))
 
 /* End of global variables definitions. */
 
@@ -343,6 +340,26 @@ static void vlan_setup(struct net_device *new_dev)
 	new_dev->do_ioctl = vlan_dev_ioctl;
 }
 
+static void vlan_transfer_operstate(const struct net_device *dev, struct net_device *vlandev)
+{
+	/* Have to respect userspace enforced dormant state
+	 * of real device, also must allow supplicant running
+	 * on VLAN device
+	 */
+	if (dev->operstate == IF_OPER_DORMANT)
+		netif_dormant_on(vlandev);
+	else
+		netif_dormant_off(vlandev);
+
+	if (netif_carrier_ok(dev)) {
+		if (!netif_carrier_ok(vlandev))
+			netif_carrier_on(vlandev);
+	} else {
+		if (netif_carrier_ok(vlandev))
+			netif_carrier_off(vlandev);
+	}
+}
+
 /*  Attach a VLAN device to a mac address (ie Ethernet Card).
  *  Returns the device that was created, or NULL if there was
  *  an error of some kind.
@@ -449,7 +466,9 @@ static struct net_device *register_vlan_device(const char *eth_IF_name,
 	new_dev->flags = real_dev->flags;
 	new_dev->flags &= ~IFF_UP;
 
-	new_dev->state = real_dev->state & VLAN_LINK_STATE_MASK;
+	new_dev->state = (real_dev->state & ((1<<__LINK_STATE_NOCARRIER) |
+					     (1<<__LINK_STATE_DORMANT))) |
+			 (1<<__LINK_STATE_PRESENT);
 
 	/* need 4 bytes for extra VLAN header info,
 	 * hope the underlying device can handle it.
@@ -496,6 +515,10 @@ static struct net_device *register_vlan_device(const char *eth_IF_name,
 	    
 	if (register_netdevice(new_dev))
 		goto out_free_newdev;
+
+	new_dev->iflink = real_dev->ifindex;
+	vlan_transfer_operstate(real_dev, new_dev);
+	linkwatch_fire_event(new_dev); /* _MUST_ call rfc2863_policy() */
 
 	/* So, got the sucker initialized, now lets place
 	 * it into our local structure.
@@ -572,17 +595,12 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	switch (event) {
 	case NETDEV_CHANGE:
 		/* Propagate real device state to vlan devices */
-		flgs = dev->state & VLAN_LINK_STATE_MASK;
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
 			vlandev = grp->vlan_devices[i];
 			if (!vlandev)
 				continue;
 
-			if ((vlandev->state & VLAN_LINK_STATE_MASK) != flgs) {
-				vlandev->state = (vlandev->state &~ VLAN_LINK_STATE_MASK) 
-					| flgs;
-				netdev_state_change(vlandev);
-			}
+			vlan_transfer_operstate(dev, vlandev);
 		}
 		break;
 
@@ -745,6 +763,8 @@ static int vlan_ioctl_handler(void __user *arg)
 		break;
 	case GET_VLAN_REALDEV_NAME_CMD:
 		err = vlan_dev_get_realdev_name(args.device1, args.u.device2);
+		if (err)
+			goto out;
 		if (copy_to_user(arg, &args,
 				 sizeof(struct vlan_ioctl_args))) {
 			err = -EFAULT;
@@ -753,6 +773,8 @@ static int vlan_ioctl_handler(void __user *arg)
 
 	case GET_VLAN_VID_CMD:
 		err = vlan_dev_get_vid(args.device1, &vid);
+		if (err)
+			goto out;
 		args.u.VID = vid;
 		if (copy_to_user(arg, &args,
 				 sizeof(struct vlan_ioctl_args))) {
@@ -766,7 +788,7 @@ static int vlan_ioctl_handler(void __user *arg)
 			__FUNCTION__, args.cmd);
 		return -EINVAL;
 	};
-
+out:
 	return err;
 }
 

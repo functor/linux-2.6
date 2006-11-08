@@ -126,11 +126,11 @@ static int numReadBufs = 4, readbufSize = 32;
 */
 static volatile cbd_t	*rx_base, *rx_cur, *tx_base, *tx_cur;
 
-MODULE_PARM(catchRadius, "i");
-MODULE_PARM(numBufs, "i");
-MODULE_PARM(bufSize, "i");
-MODULE_PARM(numreadBufs, "i");
-MODULE_PARM(readbufSize, "i");
+module_param(catchRadius, int, 0);
+module_param(numBufs, int, 0);
+module_param(bufSize, int, 0);
+module_param(numreadBufs, int, 0);
+module_param(readbufSize, int, 0);
 
 #define arraysize(x)	(sizeof(x)/sizeof(*(x)))
 #define le2be16(x)	(((x)<<8 & 0xff00) | ((x)>>8 & 0x00ff))
@@ -318,7 +318,7 @@ struct cs_sound_settings {
 
 static struct cs_sound_settings sound;
 
-static void *CS_Alloc(unsigned int size, int flags);
+static void *CS_Alloc(unsigned int size, gfp_t flags);
 static void CS_Free(void *ptr, unsigned int size);
 static int CS_IrqInit(void);
 #ifdef MODULE
@@ -959,7 +959,7 @@ static TRANS transCSNormalRead = {
 
 /*** Low level stuff *********************************************************/
 
-static void *CS_Alloc(unsigned int size, int flags)
+static void *CS_Alloc(unsigned int size, gfp_t flags)
 {
 	int	order;
 
@@ -1013,8 +1013,7 @@ static void CS_IrqCleanup(void)
 	*/
 	cpm_free_handler(CPMVEC_SMC2);
 
-	if (beep_buf)
-		kfree(beep_buf);
+	kfree(beep_buf);
 	kd_mksound = orig_mksound;
 }
 #endif /* MODULE */
@@ -1380,7 +1379,7 @@ static void cs_nosound(unsigned long xx)
 	spin_unlock_irqrestore(&cs4218_lock, flags);
 }
 
-static struct timer_list beep_timer = TIMER_INITIALIZER(cs_nosound, 0, 0);
+static DEFINE_TIMER(beep_timer, cs_nosound, 0, 0);
 };
 
 static void cs_mksound(unsigned int hz, unsigned int ticks)

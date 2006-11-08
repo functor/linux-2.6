@@ -1,7 +1,7 @@
 /*
     cx24110 - Single Chip Satellite Channel Receiver driver module
 
-    Copyright (C) 2002 Peter Hettkamp <peter.hettkamp@t-online.de> based on
+    Copyright (C) 2002 Peter Hettkamp <peter.hettkamp@htp-tel.de> based on
     work
     Copyright (C) 1999 Convergence Integrated Media GmbH <ralph@convergence.de>
 
@@ -35,6 +35,7 @@ struct cx24110_config
 	/* PLL maintenance */
 	int (*pll_init)(struct dvb_frontend* fe);
 	int (*pll_set)(struct dvb_frontend* fe, struct dvb_frontend_parameters* params);
+	int (*pll_sleep)(struct dvb_frontend* fe);
 };
 
 extern struct dvb_frontend* cx24110_attach(const struct cx24110_config* config,

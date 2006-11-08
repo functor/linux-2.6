@@ -33,15 +33,18 @@
 #include <linux/root_dev.h>
 #include <linux/highmem.h>
 #include <linux/console.h>
+#include <linux/mmzone.h>
+#include <linux/pfn.h>
 
 #include <asm/addrspace.h>
 #include <asm/bootinfo.h>
+#include <asm/cache.h>
 #include <asm/cpu.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
 #include <asm/system.h>
 
-struct cpuinfo_mips cpu_data[NR_CPUS];
+struct cpuinfo_mips cpu_data[NR_CPUS] __read_mostly;
 
 EXPORT_SYMBOL(cpu_data);
 
@@ -61,8 +64,8 @@ EXPORT_SYMBOL(PCI_DMA_BUS_IS_PHYS);
  *
  * These are initialized so they are in the .data section
  */
-unsigned long mips_machtype = MACH_UNKNOWN;
-unsigned long mips_machgroup = MACH_GROUP_UNKNOWN;
+unsigned long mips_machtype __read_mostly = MACH_UNKNOWN;
+unsigned long mips_machgroup __read_mostly = MACH_GROUP_UNKNOWN;
 
 EXPORT_SYMBOL(mips_machtype);
 EXPORT_SYMBOL(mips_machgroup);
@@ -76,7 +79,7 @@ static char command_line[CL_SIZE];
  * mips_io_port_base is the begin of the address space to which x86 style
  * I/O ports are mapped.
  */
-const unsigned long mips_io_port_base = -1;
+const unsigned long mips_io_port_base __read_mostly = -1;
 EXPORT_SYMBOL(mips_io_port_base);
 
 /*
@@ -240,10 +243,10 @@ static inline int parse_rd_cmdline(unsigned long* rd_start, unsigned long* rd_en
 	if (*tmp)
 		strcat(command_line, tmp);
 
-#ifdef CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 	/* HACK: Guess if the sign extension was forgotten */
 	if (start > 0x0000000080000000 && start < 0x00000000ffffffff)
-		start |= 0xffffffff00000000;
+		start |= 0xffffffff00000000UL;
 #endif
 
 	end = start + size;
@@ -254,10 +257,6 @@ static inline int parse_rd_cmdline(unsigned long* rd_start, unsigned long* rd_en
 	}
 	return 0;
 }
-
-#define PFN_UP(x)	(((x) + PAGE_SIZE - 1) >> PAGE_SHIFT)
-#define PFN_DOWN(x)	((x) >> PAGE_SHIFT)
-#define PFN_PHYS(x)	((x) << PAGE_SHIFT)
 
 #define MAXMEM		HIGHMEM_START
 #define MAXMEM_PFN	PFN_DOWN(MAXMEM)
@@ -409,6 +408,7 @@ static inline void bootmem_init(void)
 
 		/* Register lowmem ranges */
 		free_bootmem(PFN_PHYS(curr_pfn), PFN_PHYS(size));
+		memory_present(0, curr_pfn, curr_pfn + size - 1);
 	}
 
 	/* Reserve the bootmap memory.  */
@@ -418,17 +418,20 @@ static inline void bootmem_init(void)
 #ifdef CONFIG_BLK_DEV_INITRD
 	initrd_below_start_ok = 1;
 	if (initrd_start) {
-		unsigned long initrd_size = ((unsigned char *)initrd_end) - ((unsigned char *)initrd_start);
+		unsigned long initrd_size = ((unsigned char *)initrd_end) -
+			((unsigned char *)initrd_start);
+		const int width = sizeof(long) * 2;
+
 		printk("Initial ramdisk at: 0x%p (%lu bytes)\n",
 		       (void *)initrd_start, initrd_size);
 
 		if (CPHYSADDR(initrd_end) > PFN_PHYS(max_low_pfn)) {
 			printk("initrd extends beyond end of memory "
 			       "(0x%0*Lx > 0x%0*Lx)\ndisabling initrd\n",
-			       sizeof(long) * 2,
-			       (unsigned long long)CPHYSADDR(initrd_end),
-			       sizeof(long) * 2,
-			       (unsigned long long)PFN_PHYS(max_low_pfn));
+			       width,
+			       (unsigned long long) CPHYSADDR(initrd_end),
+			       width,
+			       (unsigned long long) PFN_PHYS(max_low_pfn));
 			initrd_start = initrd_end = 0;
 			initrd_reserve_bootmem = 0;
 		}
@@ -443,21 +446,10 @@ static inline void resource_init(void)
 {
 	int i;
 
-#if defined(CONFIG_MIPS64) && !defined(CONFIG_BUILD_ELF64)
-	/*
-	 * The 64bit code in 32bit object format trick can't represent
-	 * 64bit wide relocations for linker script symbols.
-	 */
-	code_resource.start = CPHYSADDR(&_text);
-	code_resource.end = CPHYSADDR(&_etext) - 1;
-	data_resource.start = CPHYSADDR(&_etext);
-	data_resource.end = CPHYSADDR(&_edata) - 1;
-#else
 	code_resource.start = virt_to_phys(&_text);
 	code_resource.end = virt_to_phys(&_etext) - 1;
 	data_resource.start = virt_to_phys(&_etext);
 	data_resource.end = virt_to_phys(&_edata) - 1;
-#endif
 
 	/*
 	 * Request address space for all standard RAM.
@@ -500,38 +492,10 @@ static inline void resource_init(void)
 	}
 }
 
-#undef PFN_UP
-#undef PFN_DOWN
-#undef PFN_PHYS
-
 #undef MAXMEM
 #undef MAXMEM_PFN
 
-static int __initdata earlyinit_debug;
-
-static int __init earlyinit_debug_setup(char *str)
-{
-	earlyinit_debug = 1;
-	return 1;
-}
-__setup("earlyinit_debug", earlyinit_debug_setup);
-
-extern initcall_t __earlyinitcall_start, __earlyinitcall_end;
-
-static void __init do_earlyinitcalls(void)
-{
-	initcall_t *call, *start, *end;
-
-	start = &__earlyinitcall_start;
-	end = &__earlyinitcall_end;
-
-	for (call = start; call < end; call++) {
-		if (earlyinit_debug)
-			printk("calling earlyinitcall 0x%p\n", *call);
-
-		(*call)();
-	}
-}
+extern void plat_setup(void);
 
 void __init setup_arch(char **cmdline_p)
 {
@@ -548,7 +512,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	/* call board setup routine */
-	do_earlyinitcalls();
+	plat_setup();
 
 	strlcpy(command_line, arcs_cmdline, sizeof(command_line));
 	strlcpy(saved_command_line, command_line, COMMAND_LINE_SIZE);
@@ -557,15 +521,31 @@ void __init setup_arch(char **cmdline_p)
 
 	parse_cmdline_early();
 	bootmem_init();
+	sparse_init();
 	paging_init();
 	resource_init();
+#ifdef CONFIG_SMP
+	plat_smp_setup();
+#endif
 }
 
 int __init fpu_disable(char *s)
 {
-	cpu_data[0].options &= ~MIPS_CPU_FPU;
+	int i;
+
+	for (i = 0; i < NR_CPUS; i++)
+		cpu_data[i].options &= ~MIPS_CPU_FPU;
 
 	return 1;
 }
 
 __setup("nofpu", fpu_disable);
+
+int __init dsp_disable(char *s)
+{
+	cpu_data[0].ases &= ~MIPS_ASE_DSP;
+
+	return 1;
+}
+
+__setup("nodsp", dsp_disable);

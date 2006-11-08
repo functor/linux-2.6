@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/types.h>
+#include <linux/capability.h>
 #include <linux/compat.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
@@ -34,6 +35,7 @@
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/syscalls.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -436,18 +438,20 @@ struct sunos_utsname {
 asmlinkage int sunos_uname(struct sunos_utsname __user *name)
 {
 	int ret;
+	struct new_utsname *ptr;
 
 	down_read(&uts_sem);
-	ret = copy_to_user(&name->sname[0], &system_utsname.sysname[0],
+	ptr = vx_new_utsname();
+	ret = copy_to_user(&name->sname[0], ptr->sysname,
 			   sizeof(name->sname) - 1);
-	ret |= copy_to_user(&name->nname[0], &system_utsname.nodename[0],
+	ret |= copy_to_user(&name->nname[0], ptr->nodename,
 			    sizeof(name->nname) - 1);
 	ret |= put_user('\0', &name->nname[8]);
-	ret |= copy_to_user(&name->rel[0], &system_utsname.release[0],
+	ret |= copy_to_user(&name->rel[0], ptr->release,
 			    sizeof(name->rel) - 1);
-	ret |= copy_to_user(&name->ver[0], &system_utsname.version[0],
+	ret |= copy_to_user(&name->ver[0], ptr->version,
 			    sizeof(name->ver) - 1);
-	ret |= copy_to_user(&name->mach[0], &system_utsname.machine[0],
+	ret |= copy_to_user(&name->mach[0], ptr->machine,
 			    sizeof(name->mach) - 1);
 	up_read(&uts_sem);
 	return (ret ? -EFAULT : 0);
@@ -854,7 +858,7 @@ asmlinkage s32 sunos_sysconf (int name)
 		ret = ARG_MAX;
 		break;
 	case _SC_CHILD_MAX:
-		ret = CHILD_MAX;
+		ret = -1; /* no limit */
 		break;
 	case _SC_CLK_TCK:
 		ret = HZ;

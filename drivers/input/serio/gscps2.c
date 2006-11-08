@@ -1,7 +1,7 @@
 /*
  * drivers/input/serio/gscps2.c
  *
- * Copyright (c) 2004 Helge Deller <deller@gmx.de>
+ * Copyright (c) 2004-2006 Helge Deller <deller@gmx.de>
  * Copyright (c) 2002 Laurent Canet <canetl@esiee.fr>
  * Copyright (c) 2002 Thibaut Varene <varenet@parisc-linux.org>
  *
@@ -211,9 +211,6 @@ static void gscps2_reset(struct gscps2port *ps2port)
 	writeb(0xff, addr+GSC_RESET);
 	gscps2_flush(ps2port);
 	spin_unlock_irqrestore(&ps2port->lock, flags);
-
-	/* enable it */
-	gscps2_enable(ps2port, ENABLE);
 }
 
 static LIST_HEAD(ps2port_list);
@@ -307,6 +304,9 @@ static int gscps2_open(struct serio *port)
 
 	gscps2_reset(ps2port);
 
+	/* enable it */
+	gscps2_enable(ps2port, ENABLE);
+
 	gscps2_interrupt(0, NULL, NULL);
 
 	return 0;
@@ -331,7 +331,7 @@ static int __init gscps2_probe(struct parisc_device *dev)
 {
 	struct gscps2port *ps2port;
 	struct serio *serio;
-	unsigned long hpa = dev->hpa;
+	unsigned long hpa = dev->hpa.start;
 	int ret;
 
 	if (!dev->irq)
@@ -354,7 +354,7 @@ static int __init gscps2_probe(struct parisc_device *dev)
 	memset(serio, 0, sizeof(struct serio));
 	ps2port->port = serio;
 	ps2port->padev = dev;
-	ps2port->addr = ioremap(hpa, GSC_STATUS + 4);
+	ps2port->addr = ioremap_nocache(hpa, GSC_STATUS + 4);
 	spin_lock_init(&ps2port->lock);
 
 	gscps2_reset(ps2port);
@@ -369,8 +369,6 @@ static int __init gscps2_probe(struct parisc_device *dev)
 	serio->close		= gscps2_close;
 	serio->port_data	= ps2port;
 	serio->dev.parent	= &dev->dev;
-
-	list_add_tail(&ps2port->node, &ps2port_list);
 
 	ret = -EBUSY;
 	if (request_irq(dev->irq, gscps2_interrupt, SA_SHIRQ, ps2port->port->name, ps2port))
@@ -396,15 +394,16 @@ static int __init gscps2_probe(struct parisc_device *dev)
 
 	serio_register_port(ps2port->port);
 
+	list_add_tail(&ps2port->node, &ps2port_list);
+
 	return 0;
 
 fail:
 	free_irq(dev->irq, ps2port);
 
 fail_miserably:
-	list_del(&ps2port->node);
 	iounmap(ps2port->addr);
-	release_mem_region(dev->hpa, GSC_STATUS + 4);
+	release_mem_region(dev->hpa.start, GSC_STATUS + 4);
 
 fail_nomem:
 	kfree(ps2port);
@@ -444,7 +443,7 @@ static struct parisc_device_id gscps2_device_tbl[] = {
 };
 
 static struct parisc_driver parisc_ps2_driver = {
-	.name		= "GSC PS2",
+	.name		= "gsc_ps2",
 	.id_table	= gscps2_device_tbl,
 	.probe		= gscps2_probe,
 	.remove		= gscps2_remove,

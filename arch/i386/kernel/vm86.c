@@ -4,7 +4,7 @@
  *  Copyright (C) 1994  Linus Torvalds
  *
  *  29 dec 2001 - Fixed oopses caused by unchecked access to the vm86
- *                stack - Manfred Spraul <manfreds@colorfullife.com>
+ *                stack - Manfred Spraul <manfred@colorfullife.com>
  *
  *  22 mar 2002 - Manfred detected the stackfaults, but didn't handle
  *                them correctly. Now the emulation will be in a
@@ -30,6 +30,7 @@
  *
  */
 
+#include <linux/capability.h>
 #include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
@@ -42,6 +43,7 @@
 #include <linux/smp_lock.h>
 #include <linux/highmem.h>
 #include <linux/ptrace.h>
+#include <linux/audit.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -96,7 +98,9 @@
 struct pt_regs * FASTCALL(save_v86_state(struct kernel_vm86_regs * regs));
 struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 {
+#ifndef CONFIG_X86_NO_TSS
 	struct tss_struct *tss;
+#endif
 	struct pt_regs *ret;
 	unsigned long tmp;
 
@@ -121,12 +125,16 @@ struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 		do_exit(SIGSEGV);
 	}
 
+#ifndef CONFIG_X86_NO_TSS
 	tss = &per_cpu(init_tss, get_cpu());
+#endif
 	current->thread.esp0 = current->thread.saved_esp0;
 	current->thread.sysenter_cs = __KERNEL_CS;
 	load_esp0(tss, &current->thread);
 	current->thread.saved_esp0 = 0;
+#ifndef CONFIG_X86_NO_TSS
 	put_cpu();
+#endif
 
 	loadsegment(fs, current->thread.saved_fs);
 	loadsegment(gs, current->thread.saved_gs);
@@ -134,17 +142,16 @@ struct pt_regs * fastcall save_v86_state(struct kernel_vm86_regs * regs)
 	return ret;
 }
 
-static void mark_screen_rdonly(struct task_struct * tsk)
+static void mark_screen_rdonly(struct mm_struct *mm)
 {
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
-	pte_t *pte, *mapped;
+	pte_t *pte;
+	spinlock_t *ptl;
 	int i;
 
-	preempt_disable();
-	spin_lock(&tsk->mm->page_table_lock);
-	pgd = pgd_offset(tsk->mm, 0xA0000);
+	pgd = pgd_offset(mm, 0xA0000);
 	if (pgd_none_or_clear_bad(pgd))
 		goto out;
 	pud = pud_offset(pgd, 0xA0000);
@@ -153,16 +160,14 @@ static void mark_screen_rdonly(struct task_struct * tsk)
 	pmd = pmd_offset(pud, 0xA0000);
 	if (pmd_none_or_clear_bad(pmd))
 		goto out;
-	pte = mapped = pte_offset_map(pmd, 0xA0000);
+	pte = pte_offset_map_lock(mm, pmd, 0xA0000, &ptl);
 	for (i = 0; i < 32; i++) {
 		if (pte_present(*pte))
 			set_pte(pte, pte_wrprotect(*pte));
 		pte++;
 	}
-	pte_unmap(mapped);
+	pte_unmap_unlock(pte, ptl);
 out:
-	spin_unlock(&tsk->mm->page_table_lock);
-	preempt_enable();
 	flush_tlb();
 }
 
@@ -253,7 +258,10 @@ out:
 
 static void do_sys_vm86(struct kernel_vm86_struct *info, struct task_struct *tsk)
 {
+#ifndef CONFIG_X86_NO_TSS
 	struct tss_struct *tss;
+#endif
+	long eax;
 /*
  * make sure the vm86() system call doesn't try to do anything silly
  */
@@ -294,26 +302,36 @@ static void do_sys_vm86(struct kernel_vm86_struct *info, struct task_struct *tsk
  */
 	info->regs32->eax = 0;
 	tsk->thread.saved_esp0 = tsk->thread.esp0;
-	asm volatile("mov %%fs,%0":"=m" (tsk->thread.saved_fs));
-	asm volatile("mov %%gs,%0":"=m" (tsk->thread.saved_gs));
+	savesegment(fs, tsk->thread.saved_fs);
+	savesegment(gs, tsk->thread.saved_gs);
 
+#ifndef CONFIG_X86_NO_TSS
 	tss = &per_cpu(init_tss, get_cpu());
+#endif
 	tsk->thread.esp0 = (unsigned long) &info->VM86_TSS_ESP0;
 	if (cpu_has_sep)
 		tsk->thread.sysenter_cs = 0;
 	load_esp0(tss, &tsk->thread);
+#ifndef CONFIG_X86_NO_TSS
 	put_cpu();
+#endif
 
 	tsk->thread.screen_bitmap = info->screen_bitmap;
 	if (info->flags & VM86_SCREEN_BITMAP)
-		mark_screen_rdonly(tsk);
+		mark_screen_rdonly(tsk->mm);
+	__asm__ __volatile__("xorl %eax,%eax; movl %eax,%fs; movl %eax,%gs\n\t");
+	__asm__ __volatile__("movl %%eax, %0\n" :"=r"(eax));
+
+	/*call audit_syscall_exit since we do not exit via the normal paths */
+	if (unlikely(current->audit_context))
+		audit_syscall_exit(AUDITSC_RESULT(eax), eax);
+
 	__asm__ __volatile__(
-		"xorl %%eax,%%eax; movl %%eax,%%fs; movl %%eax,%%gs\n\t"
 		"movl %0,%%esp\n\t"
 		"movl %1,%%ebp\n\t"
 		"jmp resume_userspace"
 		: /* no outputs */
-		:"r" (&info->regs), "r" (tsk->thread_info) : "ax");
+		:"r" (&info->regs), "r" (task_thread_info(tsk)));
 	/* we never return here */
 }
 
@@ -542,7 +560,7 @@ void handle_vm86_fault(struct kernel_vm86_regs * regs, long error_code)
 	unsigned char opcode;
 	unsigned char __user *csp;
 	unsigned char __user *ssp;
-	unsigned short ip, sp;
+	unsigned short ip, sp, orig_flags;
 	int data32, pref_done;
 
 #define CHECK_IF_IN_TRAP \
@@ -551,7 +569,11 @@ void handle_vm86_fault(struct kernel_vm86_regs * regs, long error_code)
 #define VM86_FAULT_RETURN do { \
 	if (VMPI.force_return_for_pic  && (VEFLAGS & (IF_MASK | VIF_MASK))) \
 		return_to_32bit(regs, VM86_PICRETURN); \
+	if (orig_flags & TF_MASK) \
+		handle_vm86_trap(regs, 0, 1); \
 	return; } while (0)
+
+	orig_flags = *(unsigned short *)&regs->eflags;
 
 	csp = (unsigned char __user *) (regs->cs << 4);
 	ssp = (unsigned char __user *) (regs->ss << 4);

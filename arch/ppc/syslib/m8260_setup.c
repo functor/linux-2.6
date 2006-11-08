@@ -1,6 +1,4 @@
 /*
- *  arch/ppc/syslib/m8260_setup.c
- *
  *  Copyright (C) 1995  Linus Torvalds
  *  Adapted from 'alpha' version by Gary Thomas
  *  Modified by Cort Dougan (cort@cs.nmt.edu)
@@ -24,7 +22,7 @@
 #include <asm/io.h>
 #include <asm/pgtable.h>
 #include <asm/mpc8260.h>
-#include <asm/immap_cpm2.h>
+#include <asm/cpm2.h>
 #include <asm/machdep.h>
 #include <asm/bootinfo.h>
 #include <asm/time.h>
@@ -33,7 +31,6 @@
 
 unsigned char __res[sizeof(bd_t)];
 
-extern void cpm2_reset(void);
 extern void pq2_find_bridges(void);
 extern void pq2pci_init_irq(void);
 extern void idma_pci9_init(void);
@@ -63,6 +60,10 @@ m8260_setup_arch(void)
 	if (initrd_start)
 		ROOT_DEV = Root_RAM0;
 #endif
+
+	identify_ppc_sys_by_name_and_id(BOARD_CHIP_NAME,
+				in_be32(CPM_MAP_ADDR + CPM_IMMR_OFFSET));
+
 	m82xx_board_setup();
 }
 

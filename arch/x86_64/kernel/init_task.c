@@ -37,6 +37,8 @@ union thread_union init_thread_union
 struct task_struct init_task = INIT_TASK(init_task);
 
 EXPORT_SYMBOL(init_task);
+
+#ifndef CONFIG_X86_NO_TSS
 /*
  * per-CPU TSS segments. Threads are completely 'soft' on Linux,
  * no more per-task TSS's. The TSS size is kept cacheline-aligned
@@ -44,6 +46,7 @@ EXPORT_SYMBOL(init_task);
  * section. Since TSS's are completely CPU-local, we want them
  * on exact cacheline boundaries, to eliminate cacheline ping-pong.
  */ 
-DEFINE_PER_CPU(struct tss_struct, init_tss) ____cacheline_maxaligned_in_smp;
+DEFINE_PER_CPU(struct tss_struct, init_tss) ____cacheline_internodealigned_in_smp = INIT_TSS;
+#endif
 
 #define ALIGN_TO_4K __attribute__((section(".data.init_task")))

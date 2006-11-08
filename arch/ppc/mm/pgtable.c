@@ -39,7 +39,7 @@ unsigned long ioremap_base;
 unsigned long ioremap_bot;
 int io_bat_index;
 
-#if defined(CONFIG_6xx) || defined(CONFIG_POWER3)
+#if defined(CONFIG_6xx)
 #define HAVE_BATS	1
 #endif
 
@@ -66,7 +66,6 @@ void setbat(int index, unsigned long virt, unsigned long phys,
 
 #ifdef HAVE_TLBCAM
 extern unsigned int tlbcam_index;
-extern unsigned int num_tlbcam_entries;
 extern unsigned long v_mapped_by_tlbcam(unsigned long va);
 extern unsigned long p_mapped_by_tlbcam(unsigned long pa);
 #else /* !HAVE_TLBCAM */
@@ -115,9 +114,9 @@ struct page *pte_alloc_one(struct mm_struct *mm, unsigned long address)
 	struct page *ptepage;
 
 #ifdef CONFIG_HIGHPTE
-	int flags = GFP_KERNEL | __GFP_HIGHMEM | __GFP_REPEAT;
+	gfp_t flags = GFP_KERNEL | __GFP_HIGHMEM | __GFP_REPEAT;
 #else
-	int flags = GFP_KERNEL | __GFP_REPEAT;
+	gfp_t flags = GFP_KERNEL | __GFP_REPEAT;
 #endif
 
 	ptepage = alloc_pages(flags, 0);
@@ -281,18 +280,16 @@ map_page(unsigned long va, phys_addr_t pa, int flags)
 	pte_t *pg;
 	int err = -ENOMEM;
 
-	spin_lock(&init_mm.page_table_lock);
 	/* Use upper 10 bits of VA to index the first level map */
 	pd = pmd_offset(pgd_offset_k(va), va);
 	/* Use middle 10 bits of VA to index the second-level map */
-	pg = pte_alloc_kernel(&init_mm, pd, va);
+	pg = pte_alloc_kernel(pd, va);
 	if (pg != 0) {
 		err = 0;
 		set_pte_at(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT, __pgprot(flags)));
 		if (mem_init_done)
 			flush_HPTE(0, va, pmd_val(*pd));
 	}
-	spin_unlock(&init_mm.page_table_lock);
 	return err;
 }
 
@@ -371,7 +368,7 @@ void __init io_block_mapping(unsigned long virt, phys_addr_t phys,
  * the PTE pointer is unmodified if PTE is not found.
  */
 int
-get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep)
+get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep, pmd_t **pmdp)
 {
         pgd_t	*pgd;
         pmd_t	*pmd;
@@ -386,6 +383,8 @@ get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep)
                         if (pte) {
 				retval = 1;
 				*ptep = pte;
+				if (pmdp)
+					*pmdp = pmd;
 				/* XXX caller needs to do pte_unmap, yuck */
                         }
                 }
@@ -423,7 +422,7 @@ unsigned long iopa(unsigned long addr)
 		mm = &init_mm;
 
 	pa = 0;
-	if (get_pteptr(mm, addr, &pte)) {
+	if (get_pteptr(mm, addr, &pte, NULL)) {
 		pa = (pte_val(*pte) & PAGE_MASK) | (addr & ~PAGE_MASK);
 		pte_unmap(pte);
 	}

@@ -1,6 +1,4 @@
 /*
- * arch/ppc/boot/simple/head.S
- *
  * Initial board bringup code for many different boards.
  *
  * Author: Tom Rini
@@ -65,6 +63,13 @@ start_:
 			 */
 #endif
 
+#if defined(CONFIG_XILINX_VIRTEX_4_FX)
+	/* PPC errata 213: only for Virtex-4 FX */
+	mfccr0  0
+	oris    0,0,0x50000000@h
+	mtccr0  0
+#endif
+
 	mflr	r3	/* Save our actual starting address. */
 
 	/* The following functions we call must not modify r3 or r4.....
@@ -118,15 +123,6 @@ haveOF:
 	 */
 	li	r4,0		/* Zero DER to prevent FRZ */
 	mtspr	SPRN_DER,r4
-#endif
-
-#ifdef CONFIG_REDWOOD_4
-	/* All of this Redwood 4 stuff will soon disappear when the
-	 * boot rom is straightened out.
-	 */
-	mr	r29, r3		/* Easier than changing the other code */
-	bl	HdwInit
-	mr	r3, r29
 #endif
 
 #if defined(CONFIG_MBX) || defined(CONFIG_RPX8260) || defined(CONFIG_PPC_PREP)

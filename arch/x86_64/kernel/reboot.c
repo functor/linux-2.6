@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/ctype.h>
 #include <linux/string.h>
+#include <linux/pm.h>
 #include <asm/io.h>
 #include <asm/kdebug.h>
 #include <asm/delay.h>
@@ -66,49 +67,22 @@ static int __init reboot_setup(char *str)
 
 __setup("reboot=", reboot_setup);
 
-/* overwrites random kernel memory. Should not be kernel .text */
-#define WARMBOOT_TRAMP 0x1000UL
-
-static void reboot_warm(void)
-{
-	extern unsigned char warm_reboot[], warm_reboot_end[];
-	printk("warm reboot\n");
-
-	local_irq_disable(); 
-		
-	/* restore identity mapping */
-	init_level4_pgt[0] = __pml4(__pa(level3_ident_pgt) | 7); 
-	__flush_tlb_all(); 
-
-	/* Move the trampoline to low memory */
-	memcpy(__va(WARMBOOT_TRAMP), warm_reboot, warm_reboot_end - warm_reboot); 
-
-	/* Start it in compatibility mode. */
-	asm volatile( "   pushq $0\n" 		/* ss */
-		     "   pushq $0x2000\n" 	/* rsp */
-	             "   pushfq\n"		/* eflags */
-		     "   pushq %[cs]\n"
-		     "   pushq %[target]\n"
-		     "   iretq" :: 
-		      [cs] "i" (__KERNEL_COMPAT32_CS), 
-		      [target] "b" (WARMBOOT_TRAMP));
-}
-
 static inline void kb_wait(void)
 {
 	int i;
-  
+
 	for (i=0; i<0x10000; i++)
 		if ((inb_p(0x64) & 0x02) == 0)
 			break;
 }
-  
+
 void machine_shutdown(void)
 {
+	unsigned long flags;
 	/* Stop the cpus and apics */
 #ifdef CONFIG_SMP
 	int reboot_cpu_id;
-  
+
 	/* The boot cpu is always logical cpu 0 */
 	reboot_cpu_id = 0;
 
@@ -126,63 +100,21 @@ void machine_shutdown(void)
 	smp_send_stop();
 #endif
 
-	local_irq_disable();
-  
+	local_irq_save(flags);
+
 #ifndef CONFIG_SMP
 	disable_local_APIC();
 #endif
 
 	disable_IO_APIC();
 
-	local_irq_enable();
+	local_irq_restore(flags);
 }
 
-static void smp_halt(void)
-{
-	int cpuid = safe_smp_processor_id(); 
-	static int first_entry = 1;
-
-	if (reboot_force)
-		return;
-
-	if (first_entry) {
-		first_entry = 0;
-		smp_call_function((void *)machine_restart, NULL, 1, 0);
-	}
-			
-	smp_stop_cpu(); 
-
-	/* AP calling this. Just halt */
-	if (cpuid != boot_cpu_id) { 
-		for (;;) 
-			asm("hlt");
-	}
-
-	/* Wait for all other CPUs to have run smp_stop_cpu */
-	while (!cpus_empty(cpu_online_map))
-		rep_nop(); 
-}
-
-void machine_restart(char * __unused)
+void machine_emergency_restart(void)
 {
 	int i;
 
-	machine_shutdown();
-	printk("machine restart\n");
-
-#ifdef CONFIG_SMP
-	smp_halt(); 
-#endif
-
-	if (!reboot_force) {
-		local_irq_disable();
-#ifndef CONFIG_SMP
-		disable_local_APIC();
-#endif
-		disable_IO_APIC();
-		local_irq_enable();
-	}
-	
 	/* Tell the BIOS if we want cold or warm reboot */
 	*((unsigned short *)__va(0x472)) = reboot_mode;
        
@@ -190,7 +122,7 @@ void machine_restart(char * __unused)
 		/* Could also try the reset bit in the Hammer NB */
 		switch (reboot_type) { 
 		case BOOT_KBD:
-		for (i=0; i<100; i++) {
+		for (i=0; i<10; i++) {
 			kb_wait();
 			udelay(50);
 			outb(0xfe,0x64);         /* pulse reset low */
@@ -207,18 +139,27 @@ void machine_restart(char * __unused)
 	}      
 }
 
-EXPORT_SYMBOL(machine_restart);
+void machine_restart(char * __unused)
+{
+	printk("machine restart\n");
+
+	if (!reboot_force) {
+		machine_shutdown();
+	}
+	machine_emergency_restart();
+}
 
 void machine_halt(void)
 {
 }
 
-EXPORT_SYMBOL(machine_halt);
-
 void machine_power_off(void)
 {
-	if (pm_power_off)
+	if (pm_power_off) {
+		if (!reboot_force) {
+			machine_shutdown();
+		}
 		pm_power_off();
+	}
 }
 
-EXPORT_SYMBOL(machine_power_off);

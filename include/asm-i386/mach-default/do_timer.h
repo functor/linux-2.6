@@ -1,6 +1,7 @@
 /* defines for inline arch setup functions */
 
 #include <asm/apic.h>
+#include <asm/i8259.h>
 
 /**
  * do_timer_interrupt_hook - hook into timer tick
@@ -17,7 +18,7 @@ static inline void do_timer_interrupt_hook(struct pt_regs *regs)
 {
 	do_timer(regs);
 #ifndef CONFIG_SMP
-	update_process_times(user_mode(regs));
+	update_process_times(user_mode_vm(regs));
 #endif
 /*
  * In the SMP case we use the local APIC timer interrupt to do the

@@ -35,7 +35,7 @@ arch_get_unmapped_area (struct file *filp, unsigned long addr, unsigned long len
 		return -ENOMEM;
 
 #ifdef CONFIG_HUGETLB_PAGE
-	if (REGION_NUMBER(addr) == REGION_HPAGE)
+	if (REGION_NUMBER(addr) == RGN_HPAGE)
 		addr = 0;
 #endif
 	if (!addr)
@@ -151,7 +151,7 @@ out:
 asmlinkage long
 sys_pipe (void)
 {
-	struct pt_regs *regs = ia64_task_regs(current);
+	struct pt_regs *regs = task_pt_regs(current);
 	int fd[2];
 	int retval;
 
@@ -164,10 +164,25 @@ sys_pipe (void)
 	return retval;
 }
 
+int ia64_map_check_rgn(unsigned long addr, unsigned long len,
+		unsigned long flags)
+{
+	unsigned long roff;
+
+	/*
+	 * Don't permit mappings into unmapped space, the virtual page table
+	 * of a region, or across a region boundary.  Note: RGN_MAP_LIMIT is
+	 * equal to 2^n-PAGE_SIZE (for some integer n <= 61) and len > 0.
+	 */
+	roff = REGION_OFFSET(addr);
+	if ((len > RGN_MAP_LIMIT) || (roff > (RGN_MAP_LIMIT - len)))
+		return -EINVAL;
+	return 0;
+}
+
 static inline unsigned long
 do_mmap2 (unsigned long addr, unsigned long len, int prot, int flags, int fd, unsigned long pgoff)
 {
-	unsigned long roff;
 	struct file *file = NULL;
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
@@ -185,17 +200,6 @@ do_mmap2 (unsigned long addr, unsigned long len, int prot, int flags, int fd, un
 	/* Careful about overflows.. */
 	len = PAGE_ALIGN(len);
 	if (!len || len > TASK_SIZE) {
-		addr = -EINVAL;
-		goto out;
-	}
-
-	/*
-	 * Don't permit mappings into unmapped space, the virtual page table of a region,
-	 * or across a region boundary.  Note: RGN_MAP_LIMIT is equal to 2^n-PAGE_SIZE
-	 * (for some integer n <= 61) and len > 0.
-	 */
-	roff = REGION_OFFSET(addr);
-	if ((len > RGN_MAP_LIMIT) || (roff > (RGN_MAP_LIMIT - len))) {
 		addr = -EINVAL;
 		goto out;
 	}

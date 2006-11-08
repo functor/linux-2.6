@@ -94,7 +94,7 @@ struct lgff_device {
 					isn't really necessary */
 
 	unsigned long flags[1];      /* Contains various information about the
-				        state of the driver for this device */	
+				        state of the driver for this device */
 
 	struct timer_list timer;
 };
@@ -154,10 +154,9 @@ int hid_lgff_init(struct hid_device* hid)
 		return -1;
 	}
 
-	private = kmalloc(sizeof(struct lgff_device), GFP_KERNEL);
+	private = kzalloc(sizeof(struct lgff_device), GFP_KERNEL);
 	if (!private)
 		return -1;
-	memset(private, 0, sizeof(struct lgff_device));
 	hid->ff_private = private;
 
 	/* Input init */
@@ -228,13 +227,12 @@ static struct hid_report* hid_lgff_duplicate_report(struct hid_report* report)
 	}
 	*ret->field[0] = *report->field[0];
 
-	ret->field[0]->value = kmalloc(sizeof(s32[8]), GFP_KERNEL);
+	ret->field[0]->value = kzalloc(sizeof(s32[8]), GFP_KERNEL);
 	if (!ret->field[0]->value) {
 		kfree(ret->field[0]);
 		kfree(ret);
 		return NULL;
 	}
-	memset(ret->field[0]->value, 0, sizeof(s32[8]));	
 
 	return ret;
 }
@@ -255,22 +253,19 @@ static void hid_lgff_input_init(struct hid_device* hid)
 	u16 idVendor = le16_to_cpu(hid->dev->descriptor.idVendor);
 	u16 idProduct = le16_to_cpu(hid->dev->descriptor.idProduct);
 	struct hid_input *hidinput = list_entry(hid->inputs.next, struct hid_input, list);
+	struct input_dev *input_dev = hidinput->input;
 
 	while (dev->idVendor && (idVendor != dev->idVendor || idProduct != dev->idProduct))
 		dev++;
 
-	ff = dev->ff;
+	for (ff = dev->ff; *ff >= 0; ff++)
+		set_bit(*ff, input_dev->ffbit);
 
-	while (*ff >= 0) {
-		set_bit(*ff, hidinput->input.ffbit);
-		++ff;
-	}
+	input_dev->upload_effect = hid_lgff_upload_effect;
+	input_dev->flush = hid_lgff_flush;
 
-	hidinput->input.upload_effect = hid_lgff_upload_effect;
-	hidinput->input.flush = hid_lgff_flush;
-
-	set_bit(EV_FF, hidinput->input.evbit);
-	hidinput->input.ff_effects_max = LGFF_EFFECTS;
+	set_bit(EV_FF, input_dev->evbit);
+	input_dev->ff_effects_max = LGFF_EFFECTS;
 }
 
 static void hid_lgff_exit(struct hid_device* hid)
@@ -295,11 +290,11 @@ static int hid_lgff_event(struct hid_device *hid, struct input_dev* input,
 	unsigned long flags;
 
 	if (type != EV_FF)                     return -EINVAL;
-       	if (!LGFF_CHECK_OWNERSHIP(code, lgff)) return -EACCES;
+	if (!LGFF_CHECK_OWNERSHIP(code, lgff)) return -EACCES;
 	if (value < 0)                         return -EINVAL;
 
 	spin_lock_irqsave(&lgff->lock, flags);
-	
+
 	if (value > 0) {
 		if (test_bit(EFFECT_STARTED, effect->flags)) {
 			spin_unlock_irqrestore(&lgff->lock, flags);
@@ -345,7 +340,7 @@ static int hid_lgff_flush(struct input_dev *dev, struct file *file)
 		  and perform ioctls on the same fd all at the same time */
 		if ( current->pid == lgff->effects[i].owner
 		     && test_bit(EFFECT_USED, lgff->effects[i].flags)) {
-			
+
 			if (hid_lgff_erase(dev, i))
 				warn("erase effect %d failed", i);
 		}
@@ -378,7 +373,7 @@ static int hid_lgff_upload_effect(struct input_dev* input,
 	struct lgff_effect new;
 	int id;
 	unsigned long flags;
-	
+
 	dbg("ioctl rumble");
 
 	if (!test_bit(effect->type, input->ffbit)) return -EINVAL;
@@ -441,7 +436,7 @@ static void hid_lgff_timer(unsigned long timer_data)
 
 	spin_lock_irqsave(&lgff->lock, flags);
 
- 	for (i=0; i<LGFF_EFFECTS; ++i) {
+	for (i=0; i<LGFF_EFFECTS; ++i) {
 		struct lgff_effect* effect = lgff->effects +i;
 
 		if (test_bit(EFFECT_PLAYING, effect->flags)) {
@@ -491,7 +486,7 @@ static void hid_lgff_timer(unsigned long timer_data)
 				set_bit(EFFECT_PLAYING, lgff->effects[i].flags);
 			}
 		}
- 	}
+	}
 
 #define CLAMP(x) if (x < 0) x = 0; if (x > 0xff) x = 0xff
 
@@ -524,5 +519,5 @@ static void hid_lgff_timer(unsigned long timer_data)
 		add_timer(&lgff->timer);
 	}
 
- 	spin_unlock_irqrestore(&lgff->lock, flags);
+	spin_unlock_irqrestore(&lgff->lock, flags);
 }

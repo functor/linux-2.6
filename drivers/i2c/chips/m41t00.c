@@ -24,13 +24,15 @@
 #include <linux/i2c.h>
 #include <linux/rtc.h>
 #include <linux/bcd.h>
+#include <linux/mutex.h>
+#include <linux/workqueue.h>
 
 #include <asm/time.h>
 #include <asm/rtc.h>
 
 #define	M41T00_DRV_NAME		"m41t00"
 
-static DECLARE_MUTEX(m41t00_mutex);
+static DEFINE_MUTEX(m41t00_mutex);
 
 static struct i2c_driver m41t00_driver;
 static struct i2c_client *save_client;
@@ -40,12 +42,8 @@ static unsigned short normal_addr[] = { 0x68, I2C_CLIENT_END };
 
 static struct i2c_client_address_data addr_data = {
 	.normal_i2c		= normal_addr,
-	.normal_i2c_range	= ignore,
 	.probe			= ignore,
-	.probe_range		= ignore,
 	.ignore			= ignore,
-	.ignore_range		= ignore,
-	.force			= ignore,
 };
 
 ulong
@@ -58,7 +56,7 @@ m41t00_get_rtc_time(void)
 	sec = min = hour = day = mon = year = 0;
 	sec1 = min1 = hour1 = day1 = mon1 = year1 = 0;
 
-	down(&m41t00_mutex);
+	mutex_lock(&m41t00_mutex);
 	do {
 		if (((sec = i2c_smbus_read_byte_data(save_client, 0)) >= 0)
 			&& ((min = i2c_smbus_read_byte_data(save_client, 1))
@@ -84,7 +82,7 @@ m41t00_get_rtc_time(void)
 		mon1 = mon;
 		year1 = year;
 	} while (--limit > 0);
-	up(&m41t00_mutex);
+	mutex_unlock(&m41t00_mutex);
 
 	if (limit == 0) {
 		dev_warn(&save_client->dev,
@@ -114,7 +112,7 @@ m41t00_get_rtc_time(void)
 }
 
 static void
-m41t00_set_tlet(ulong arg)
+m41t00_set(void *arg)
 {
 	struct rtc_time	tm;
 	ulong	nowtime = *(ulong *)arg;
@@ -129,28 +127,28 @@ m41t00_set_tlet(ulong arg)
 	BIN_TO_BCD(tm.tm_mday);
 	BIN_TO_BCD(tm.tm_year);
 
-	down(&m41t00_mutex);
+	mutex_lock(&m41t00_mutex);
 	if ((i2c_smbus_write_byte_data(save_client, 0, tm.tm_sec & 0x7f) < 0)
 		|| (i2c_smbus_write_byte_data(save_client, 1, tm.tm_min & 0x7f)
 			< 0)
-		|| (i2c_smbus_write_byte_data(save_client, 2, tm.tm_hour & 0x7f)
+		|| (i2c_smbus_write_byte_data(save_client, 2, tm.tm_hour & 0x3f)
 			< 0)
-		|| (i2c_smbus_write_byte_data(save_client, 4, tm.tm_mday & 0x7f)
+		|| (i2c_smbus_write_byte_data(save_client, 4, tm.tm_mday & 0x3f)
 			< 0)
-		|| (i2c_smbus_write_byte_data(save_client, 5, tm.tm_mon & 0x7f)
+		|| (i2c_smbus_write_byte_data(save_client, 5, tm.tm_mon & 0x1f)
 			< 0)
-		|| (i2c_smbus_write_byte_data(save_client, 6, tm.tm_year & 0x7f)
+		|| (i2c_smbus_write_byte_data(save_client, 6, tm.tm_year & 0xff)
 			< 0))
 
 		dev_warn(&save_client->dev,"m41t00: can't write to rtc chip\n");
 
-	up(&m41t00_mutex);
+	mutex_unlock(&m41t00_mutex);
 	return;
 }
 
-ulong	new_time;
-
-DECLARE_TASKLET_DISABLED(m41t00_tasklet, m41t00_set_tlet, (ulong)&new_time);
+static ulong new_time;
+static struct workqueue_struct *m41t00_wq;
+static DECLARE_WORK(m41t00_work, m41t00_set, &new_time);
 
 int
 m41t00_set_rtc_time(ulong nowtime)
@@ -158,9 +156,9 @@ m41t00_set_rtc_time(ulong nowtime)
 	new_time = nowtime;
 
 	if (in_interrupt())
-		tasklet_schedule(&m41t00_tasklet);
+		queue_work(m41t00_wq, &m41t00_work);
 	else
-		m41t00_set_tlet((ulong)&new_time);
+		m41t00_set(&new_time);
 
 	return 0;
 }
@@ -178,13 +176,11 @@ m41t00_probe(struct i2c_adapter *adap, int addr, int kind)
 	struct i2c_client *client;
 	int rc;
 
-	client = kmalloc(sizeof(struct i2c_client), GFP_KERNEL);
+	client = kzalloc(sizeof(struct i2c_client), GFP_KERNEL);
 	if (!client)
 		return -ENOMEM;
 
-	memset(client, 0, sizeof(struct i2c_client));
 	strncpy(client->name, M41T00_DRV_NAME, I2C_NAME_SIZE);
-	client->flags = I2C_DF_NOTIFY;
 	client->addr = addr;
 	client->adapter = adap;
 	client->driver = &m41t00_driver;
@@ -194,6 +190,7 @@ m41t00_probe(struct i2c_adapter *adap, int addr, int kind)
 		return rc;
 	}
 
+	m41t00_wq = create_singlethread_workqueue("m41t00");
 	save_client = client;
 	return 0;
 }
@@ -210,17 +207,17 @@ m41t00_detach(struct i2c_client *client)
 	int	rc;
 
 	if ((rc = i2c_detach_client(client)) == 0) {
-		kfree(i2c_get_clientdata(client));
-		tasklet_kill(&m41t00_tasklet);
+		kfree(client);
+		destroy_workqueue(m41t00_wq);
 	}
 	return rc;
 }
 
 static struct i2c_driver m41t00_driver = {
-	.owner		= THIS_MODULE,
-	.name		= M41T00_DRV_NAME,
+	.driver = {
+		.name	= M41T00_DRV_NAME,
+	},
 	.id		= I2C_DRIVERID_STM41T00,
-	.flags		= I2C_DF_NOTIFY,
 	.attach_adapter	= m41t00_attach,
 	.detach_client	= m41t00_detach,
 };

@@ -29,6 +29,8 @@
 
 #define SO_SNDBUF	0x1001
 #define SO_RCVBUF	0x1002
+#define SO_SNDBUFFORCE	0x100a
+#define SO_RCVBUFFORCE	0x100b
 #define SO_ERROR	0x1007
 #define SO_TYPE		0x1008
 
@@ -45,7 +47,7 @@
 #define SO_TIMESTAMP		0x001d
 #define SCM_TIMESTAMP		SO_TIMESTAMP
 
-#define SO_PEERSEC		0x100e
+#define SO_PEERSEC		0x001e
 
 /* Security levels - as per NRL IPv6 - don't actually do anything */
 #define SO_SECURITY_AUTHENTICATION		0x5001

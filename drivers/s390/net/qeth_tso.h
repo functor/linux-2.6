@@ -1,13 +1,11 @@
 /*
- * linux/drivers/s390/net/qeth_tso.h ($Revision: 1.7 $)
+ * linux/drivers/s390/net/qeth_tso.h
  *
  * Header file for qeth TCP Segmentation Offload support.
  *
  * Copyright 2004 IBM Corporation
  *
- *    Author(s): Frank Pavlic <pavlic@de.ibm.com>
- *
- *    $Revision: 1.7 $	 $Date: 2005/05/04 20:19:18 $
+ *    Author(s): Frank Pavlic <fpavlic@de.ibm.com>
  *
  */
 #ifndef __QETH_TSO_H__
@@ -53,7 +51,7 @@ qeth_tso_fill_header(struct qeth_card *card, struct sk_buff *skb)
 	hdr->ext.hdr_version = 1;
 	hdr->ext.hdr_len     = 28;
 	/*insert non-fix values */
-	hdr->ext.mss = skb_shinfo(skb)->tso_size;
+	hdr->ext.mss = skb_shinfo(skb)->gso_size;
 	hdr->ext.dg_hdr_len = (__u16)(iph->ihl*4 + tcph->doff*4);
 	hdr->ext.payload_len = (__u16)(skb->len - hdr->ext.dg_hdr_len -
 				       sizeof(struct qeth_hdr_tso));
@@ -119,11 +117,11 @@ __qeth_fill_buffer_frag(struct sk_buff *skb, struct qdio_buffer *buffer,
 	int fragno;
 	unsigned long addr;
 	int element, cnt, dlen;
-	
+
 	fragno = skb_shinfo(skb)->nr_frags;
 	element = *next_element_to_fill;
 	dlen = 0;
-	
+
 	if (is_tso)
 		buffer->element[element].flags =
 			SBAL_FLAGS_MIDDLE_FRAG;

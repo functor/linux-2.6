@@ -12,7 +12,6 @@
 #define ADFS_NDA_PUBLIC_READ	(1 << 5)
 #define ADFS_NDA_PUBLIC_WRITE	(1 << 6)
 
-#include <linux/version.h>
 #include "dir_f.h"
 
 struct buffer_head;
@@ -86,7 +85,7 @@ void __adfs_error(struct super_block *sb, const char *function,
 
 /* dir_*.c */
 extern struct inode_operations adfs_dir_inode_operations;
-extern struct file_operations adfs_dir_operations;
+extern const struct file_operations adfs_dir_operations;
 extern struct dentry_operations adfs_dentry_operations;
 extern struct adfs_dir_ops adfs_f_dir_ops;
 extern struct adfs_dir_ops adfs_fplus_dir_ops;
@@ -95,9 +94,9 @@ extern int adfs_dir_update(struct super_block *sb, struct object_info *obj);
 
 /* file.c */
 extern struct inode_operations adfs_file_inode_operations;
-extern struct file_operations adfs_file_operations;
+extern const struct file_operations adfs_file_operations;
 
-extern inline __u32 signed_asl(__u32 val, signed int shift)
+static inline __u32 signed_asl(__u32 val, signed int shift)
 {
 	if (shift >= 0)
 		val <<= shift;
@@ -112,7 +111,7 @@ extern inline __u32 signed_asl(__u32 val, signed int shift)
  *
  * The root directory ID should always be looked up in the map [3.4]
  */
-extern inline int
+static inline int
 __adfs_block_map(struct super_block *sb, unsigned int object_id,
 		 unsigned int block)
 {

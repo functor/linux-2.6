@@ -464,7 +464,7 @@ static ctl_table tux_table[] = {
 		NULL,
 		NULL
 	},
-#if TUX_DPRINTK
+#ifdef TUX_DPRINTK
 #endif
 	{	NET_TUX_LOGGING,
 		"logging",
@@ -743,8 +743,8 @@ static ctl_table tux_table[] = {
 		NULL
 	},
 	{0,0,0,0,0,0,0,0,0,0,0}	};
-	
-	
+
+
 static ctl_table tux_dir_table[] = {
 	{NET_TUX, "tux", NULL, 0, 0555, tux_table,0,0,0,0,0},
 	{0,0,0,0,0,0,0,0,0,0,0}
@@ -822,7 +822,7 @@ static int print_request_stats (threadinfo_t *ti, char *page, unsigned int skip_
 			SP("0 ");
 		else
 			SP("1 ");
-	
+
 		SP("%p ", req);
 		SP("%d ", req->atom_idx);
 		if (req->atom_idx >= 1)
@@ -1017,7 +1017,7 @@ static int listen_write_proc (struct file *file, const char *buffer,
 		listen->proto = &tux_proto_http;
 		return count;
 	}
-		
+
         if (sscanf(string, "ftp://%u.%u.%u.%u:%hu\n",
 					&d1, &d2, &d3, &d4, &port) == 5) {
 		listen->ip = MK_IP(d1,d2,d3,d4);

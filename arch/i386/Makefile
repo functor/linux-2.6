@@ -17,57 +17,41 @@
 # 20050320  Kianusch Sayah Karadji <kianusch@sk-tech.net>
 #           Added support for GEODE CPU
 
+HAS_BIARCH      := $(call cc-option-yn, -m32)
+ifeq ($(HAS_BIARCH),y)
+AS              := $(AS) --32
+LD              := $(LD) -m elf_i386
+CC              := $(CC) -m32
+endif
+
 LDFLAGS		:= -m elf_i386
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 LDFLAGS_vmlinux :=
 CHECKFLAGS	+= -D__i386__
 
-CFLAGS += -pipe -msoft-float -m32 -fno-builtin-sprintf -fno-builtin-log2 -fno-builtin-puts 
+CFLAGS += -pipe -msoft-float -fno-builtin-sprintf -fno-builtin-log2 -fno-builtin-puts 
 
 # prevent gcc from keeping the stack 16 byte aligned
 CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
 
-align := $(cc-option-align)
-cflags-$(CONFIG_M386)		+= -march=i386
-cflags-$(CONFIG_M486)		+= -march=i486
-cflags-$(CONFIG_M586)		+= -march=i586
-cflags-$(CONFIG_M586TSC)	+= -march=i586
-cflags-$(CONFIG_M586MMX)	+= $(call cc-option,-march=pentium-mmx,-march=i586)
-cflags-$(CONFIG_M686)		+= -march=i686 $(call cc-option,-mtune=pentium4,-mcpu=pentium4)
-cflags-$(CONFIG_MPENTIUMII)	+= -march=i686 $(call cc-option,-mtune=pentium2)
-cflags-$(CONFIG_MPENTIUMIII)	+= -march=i686 $(call cc-option,-mtune=pentium3)
-cflags-$(CONFIG_MPENTIUMM)	+= -march=i686 $(call cc-option,-mtune=pentium3)
-#cflags-$(CONFIG_MPENTIUM4)	+= -march=i686 $(call cc-option,-mtune=pentium4)
-cflags-$(CONFIG_MPENTIUM4)	+= -march=i686 $(call cc-option,-march=pentium4)
-cflags-$(CONFIG_MK6)		+= -march=k6
-# Please note, that patches that add -march=athlon-xp and friends are pointless.
-# They make zero difference whatsosever to performance at this time.
-cflags-$(CONFIG_MK7)		+= $(call cc-option,-march=athlon,-march=i686 $(align)-functions=4)
-cflags-$(CONFIG_MK8)		+= $(call cc-option,-march=k8,$(call cc-option,-march=athlon,-march=i686 $(align)-functions=4))
-cflags-$(CONFIG_MCRUSOE)	+= -march=i686 $(align)-functions=0 $(align)-jumps=0 $(align)-loops=0
-cflags-$(CONFIG_MEFFICEON)	+= -march=i686 $(call cc-option,-mtune=pentium3) $(align)-functions=0 $(align)-jumps=0 $(align)-loops=0
-cflags-$(CONFIG_MWINCHIPC6)	+= $(call cc-option,-march=winchip-c6,-march=i586)
-cflags-$(CONFIG_MWINCHIP2)	+= $(call cc-option,-march=winchip2,-march=i586)
-cflags-$(CONFIG_MWINCHIP3D)	+= $(call cc-option,-march=winchip2,-march=i586)
-cflags-$(CONFIG_MCYRIXIII)	+= $(call cc-option,-march=c3,-march=i486) $(align)-functions=0 $(align)-jumps=0 $(align)-loops=0
-cflags-$(CONFIG_MVIAC3_2)	+= $(call cc-option,-march=c3-2,-march=i686)
+# CPU-specific tuning. Anything which can be shared with UML should go here.
+include $(srctree)/arch/i386/Makefile.cpu
 
-# AMD Elan support
-cflags-$(CONFIG_X86_ELAN)	+= -march=i486
+cflags-$(CONFIG_REGPARM) += -mregparm=3
 
-# Geode GX1 support
-cflags-$(CONFIG_MGEODEGX1)		+= $(call cc-option,-march=pentium-mmx,-march=i486)
+# temporary until string.h is fixed
+cflags-y += -ffreestanding
 
-# -mregparm=3 works ok on gcc-3.0 and later
-#
-GCC_VERSION			:= $(call cc-version)
-cflags-$(CONFIG_REGPARM) 	+= $(shell if [ $(GCC_VERSION) -ge 0300 ] ; then echo "-mregparm=3"; fi ;)
-
-# Disable unit-at-a-time mode, it makes gcc use a lot more stack
-# due to the lack of sharing of stacklots.
-CFLAGS += $(call cc-option,-fno-unit-at-a-time)
+# Disable unit-at-a-time mode on pre-gcc-4.0 compilers, it makes gcc use
+# a lot more stack due to the lack of sharing of stacklots:
+CFLAGS				+= $(shell if [ $(call cc-version) -lt 0400 ] ; then echo $(call cc-option,-fno-unit-at-a-time); fi ;)
 
 CFLAGS += $(cflags-y)
+
+cppflags-$(CONFIG_XEN) += \
+	-D__XEN_INTERFACE_VERSION__=$(CONFIG_XEN_INTERFACE_VERSION)
+
+CPPFLAGS += $(cppflags-y)
 
 # Default subarch .c files
 mcore-y  := mach-default
@@ -91,6 +75,10 @@ mcore-$(CONFIG_X86_BIGSMP)	:= mach-default
 #Summit subarch support
 mflags-$(CONFIG_X86_SUMMIT) := -Iinclude/asm-i386/mach-summit
 mcore-$(CONFIG_X86_SUMMIT)  := mach-default
+
+# Xen subarch support
+mflags-$(CONFIG_X86_XEN)	:= -Iinclude/asm-i386/mach-xen
+mcore-$(CONFIG_X86_XEN)		:= mach-xen
 
 # generic subarchitecture
 mflags-$(CONFIG_X86_GENERICARCH) := -Iinclude/asm-i386/mach-generic
@@ -119,13 +107,26 @@ drivers-$(CONFIG_OPROFILE)		+= arch/i386/oprofile/
 drivers-$(CONFIG_PM)			+= arch/i386/power/
 
 CFLAGS += $(mflags-y)
-AFLAGS += $(mflags-y) -m32
+AFLAGS += $(mflags-y)
 
 boot := arch/i386/boot
 
-.PHONY: zImage bzImage compressed zlilo bzlilo \
-	zdisk bzdisk fdimage fdimage144 fdimage288 install kernel_install
+PHONY += zImage bzImage compressed zlilo bzlilo \
+         zdisk bzdisk fdimage fdimage144 fdimage288 isoimage install
 
+ifdef CONFIG_XEN
+CPPFLAGS := -Iinclude$(if $(KBUILD_SRC),2)/asm/mach-xen $(CPPFLAGS)
+head-y := arch/i386/kernel/head-xen.o arch/i386/kernel/init_task-xen.o
+boot := arch/i386/boot-xen
+.PHONY: vmlinuz
+all: vmlinuz
+
+vmlinuz: vmlinux
+	$(Q)$(MAKE) $(build)=$(boot) $@
+
+install:
+	$(Q)$(MAKE) $(build)=$(boot) XENGUEST=$(XENGUEST) $@
+else
 all: bzImage
 
 # KBUILD_IMAGE specify target image being built
@@ -143,21 +144,12 @@ zlilo bzlilo: vmlinux
 zdisk bzdisk: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(KBUILD_IMAGE) zdisk
 
-fdimage fdimage144 fdimage288: vmlinux
+fdimage fdimage144 fdimage288 isoimage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(KBUILD_IMAGE) $@
 
-install: vmlinux
-install kernel_install:
+install:
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(KBUILD_IMAGE) install
-
-prepare: include/asm-$(ARCH)/asm_offsets.h
-CLEAN_FILES += include/asm-$(ARCH)/asm_offsets.h
-
-arch/$(ARCH)/kernel/asm-offsets.s: include/asm include/linux/version.h \
-				   include/config/MARKER
-
-include/asm-$(ARCH)/asm_offsets.h: arch/$(ARCH)/kernel/asm-offsets.s
-	$(call filechk,gen-asm-offsets)
+endif
 
 archclean:
 	$(Q)$(MAKE) $(clean)=arch/i386/boot
@@ -170,6 +162,10 @@ define archhelp
   echo  '		   install to $$(INSTALL_PATH) and run lilo'
   echo  '  bzdisk       - Create a boot floppy in /dev/fd0'
   echo  '  fdimage      - Create a boot floppy image'
+  echo  '  isoimage     - Create a boot CD-ROM image'
 endef
 
-CLEAN_FILES += arch/$(ARCH)/boot/fdimage arch/$(ARCH)/boot/mtools.conf
+CLEAN_FILES += arch/$(ARCH)/boot/fdimage \
+	       arch/$(ARCH)/boot/image.iso \
+	       arch/$(ARCH)/boot/mtools.conf
+CLEAN_FILES += vmlinuz vmlinux-stripped

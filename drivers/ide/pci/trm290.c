@@ -5,7 +5,7 @@
  *  May be copied or modified under the terms of the GNU General Public License
  *
  *  June 22, 2004 - get rid of check_region
- *                  Jesper Juhl <juhl-lkml@dif.dk>
+ *                   - Jesper Juhl
  *
  */
 
@@ -256,7 +256,6 @@ static void __devinit init_hwif_trm290(ide_hwif_t *hwif)
 	u8 reg = 0;
 	struct pci_dev *dev = hwif->pci_dev;
 
-	/* FIXME: does this device support PIO LBA48 ? */
 	hwif->no_lba48 = 1;
 	hwif->chipset = ide_trm290;
 	cfgbase = pci_resource_start(dev, 4);

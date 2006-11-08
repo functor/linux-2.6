@@ -80,13 +80,33 @@
 	instr	regs
 
 /*
+ * Enable and disable interrupts
+ */
+#if __LINUX_ARM_ARCH__ >= 6
+	.macro	disable_irq
+	cpsid	i
+	.endm
+
+	.macro	enable_irq
+	cpsie	i
+	.endm
+#else
+	.macro	disable_irq
+	msr	cpsr_c, #PSR_I_BIT | SVC_MODE
+	.endm
+
+	.macro	enable_irq
+	msr	cpsr_c, #SVC_MODE
+	.endm
+#endif
+
+/*
  * Save the current IRQ state and disable IRQs.  Note that this macro
  * assumes FIQs are enabled, and that the processor is in SVC mode.
  */
-	.macro	save_and_disable_irqs, oldcpsr, temp
+	.macro	save_and_disable_irqs, oldcpsr
 	mrs	\oldcpsr, cpsr
-	mov	\temp, #PSR_I_BIT | MODE_SVC
-	msr	cpsr_c, \temp
+	disable_irq
 	.endm
 
 /*

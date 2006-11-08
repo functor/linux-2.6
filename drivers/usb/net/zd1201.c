@@ -21,7 +21,7 @@
 #include <linux/string.h>
 #include <linux/if_arp.h>
 #include <linux/firmware.h>
-#include <ieee802_11.h>
+#include <net/ieee80211.h>
 #include "zd1201.h"
 
 static struct usb_device_id zd1201_table[] = {
@@ -29,6 +29,7 @@ static struct usb_device_id zd1201_table[] = {
 	{USB_DEVICE(0x0ace, 0x1201)}, /* ZyDAS ZD1201 Wireless USB Adapter */
 	{USB_DEVICE(0x050d, 0x6051)}, /* Belkin F5D6051 usb  adapter */
 	{USB_DEVICE(0x0db0, 0x6823)}, /* MSI UB11B usb  adapter */
+	{USB_DEVICE(0x1044, 0x8005)}, /* GIGABYTE GN-WLBZ201 usb adapter */
 	{}
 };
 
@@ -337,25 +338,24 @@ static void zd1201_usbrx(struct urb *urb, struct pt_regs *regs)
 			goto resubmit;
 		}
 			
-		if ((seq & IEEE802_11_SCTL_FRAG) ||
-		    (fc & IEEE802_11_FCTL_MOREFRAGS)) {
+		if ((seq & IEEE80211_SCTL_FRAG) ||
+		    (fc & IEEE80211_FCTL_MOREFRAGS)) {
 			struct zd1201_frag *frag = NULL;
 			char *ptr;
 
 			if (datalen<14)
 				goto resubmit;
-			if ((seq & IEEE802_11_SCTL_FRAG) == 0) {
-				frag = kmalloc(sizeof(struct zd1201_frag*),
-				    GFP_ATOMIC);
+			if ((seq & IEEE80211_SCTL_FRAG) == 0) {
+				frag = kmalloc(sizeof(*frag), GFP_ATOMIC);
 				if (!frag)
 					goto resubmit;
-				skb = dev_alloc_skb(IEEE802_11_DATA_LEN +14+2);
+				skb = dev_alloc_skb(IEEE80211_DATA_LEN +14+2);
 				if (!skb) {
 					kfree(frag);
 					goto resubmit;
 				}
 				frag->skb = skb;
-				frag->seq = seq & IEEE802_11_SCTL_SEQ;
+				frag->seq = seq & IEEE80211_SCTL_SEQ;
 				skb_reserve(skb, 2);
 				memcpy(skb_put(skb, 12), &data[datalen-14], 12);
 				memcpy(skb_put(skb, 2), &data[6], 2);
@@ -364,7 +364,7 @@ static void zd1201_usbrx(struct urb *urb, struct pt_regs *regs)
 				goto resubmit;
 			}
 			hlist_for_each_entry(frag, node, &zd->fraglist, fnode)
-				if(frag->seq == (seq&IEEE802_11_SCTL_SEQ))
+				if(frag->seq == (seq&IEEE80211_SCTL_SEQ))
 					break;
 			if (!frag)
 				goto resubmit;
@@ -372,7 +372,7 @@ static void zd1201_usbrx(struct urb *urb, struct pt_regs *regs)
 			ptr = skb_put(skb, len);
 			if (ptr)
 				memcpy(ptr, data+8, len);
-			if (fc & IEEE802_11_FCTL_MOREFRAGS)
+			if (fc & IEEE80211_FCTL_MOREFRAGS)
 				goto resubmit;
 			hlist_del_init(&frag->fnode);
 			kfree(frag);
@@ -521,7 +521,7 @@ static int zd1201_setconfig(struct zd1201 *zd, int rid, void *buf, int len, int 
 	int reqlen;
 	char seq=0;
 	struct urb *urb;
-	unsigned int gfp_mask = wait ? GFP_NOIO : GFP_ATOMIC;
+	gfp_t gfp_mask = wait ? GFP_NOIO : GFP_ATOMIC;
 
 	len += 4;			/* first 4 are for header */
 
@@ -621,10 +621,9 @@ static int zd1201_drvr_start(struct zd1201 *zd)
 	__le16 zdmax;
 	unsigned char *buffer;
 	
-	buffer = kmalloc(ZD1201_RXSIZE, GFP_KERNEL);
+	buffer = kzalloc(ZD1201_RXSIZE, GFP_KERNEL);
 	if (!buffer)
 		return -ENOMEM;
-	memset(buffer, 0, ZD1201_RXSIZE);
 
 	usb_fill_bulk_urb(zd->rx_urb, zd->usb, 
 	    usb_rcvbulkpipe(zd->usb, zd->endp_in), buffer, ZD1201_RXSIZE,
@@ -847,7 +846,6 @@ static void zd1201_tx_timeout(struct net_device *dev)
 		return;
 	dev_warn(&zd->usb->dev, "%s: TX timeout, shooting down urb\n",
 	    dev->name);
-	zd->tx_urb->transfer_flags |= URB_ASYNC_UNLINK;
 	usb_unlink_urb(zd->tx_urb);
 	zd->stats.tx_errors++;
 	/* Restart the timeout to quiet the watchdog: */
@@ -1723,7 +1721,7 @@ static const struct iw_priv_args zd1201_private_args[] = {
 	    IW_PRIV_TYPE_NONE, "sethostauth" },
 	{ ZD1201GIWHOSTAUTH, IW_PRIV_TYPE_NONE,
 	    IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "gethostauth" },
-	{ ZD1201SIWAUTHSTA, IW_PRIV_TYPE_ADDR | IW_PRIV_SIZE_FIXED | 1, 
+	{ ZD1201SIWAUTHSTA, IW_PRIV_TYPE_ADDR | IW_PRIV_SIZE_FIXED | 1,
 	    IW_PRIV_TYPE_NONE, "authstation" },
 	{ ZD1201SIWMAXASSOC, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
 	    IW_PRIV_TYPE_NONE, "setmaxassoc" },
@@ -1732,12 +1730,13 @@ static const struct iw_priv_args zd1201_private_args[] = {
 };
 
 static const struct iw_handler_def zd1201_iw_handlers = {
-	.num_standard 		= sizeof(zd1201_iw_handler)/sizeof(iw_handler),
-	.num_private 		= sizeof(zd1201_private_handler)/sizeof(iw_handler),
-	.num_private_args 	= sizeof(zd1201_private_args)/sizeof(struct iw_priv_args),
+	.num_standard 		= ARRAY_SIZE(zd1201_iw_handler),
+	.num_private 		= ARRAY_SIZE(zd1201_private_handler),
+	.num_private_args 	= ARRAY_SIZE(zd1201_private_args),
 	.standard 		= (iw_handler *)zd1201_iw_handler,
 	.private 		= (iw_handler *)zd1201_private_handler,
 	.private_args 		= (struct iw_priv_args *) zd1201_private_args,
+	.get_wireless_stats	= zd1201_get_wireless_stats,
 };
 
 static int zd1201_probe(struct usb_interface *interface,
@@ -1751,11 +1750,9 @@ static int zd1201_probe(struct usb_interface *interface,
 
 	usb = interface_to_usbdev(interface);
 
-	zd = kmalloc(sizeof(struct zd1201), GFP_KERNEL);
-	if (!zd) {
+	zd = kzalloc(sizeof(struct zd1201), GFP_KERNEL);
+	if (!zd)
 		return -ENOMEM;
-	}
-	memset(zd, 0, sizeof(struct zd1201));
 	zd->ap = ap;
 	zd->usb = usb;
 	zd->removed = 0;
@@ -1800,7 +1797,6 @@ static int zd1201_probe(struct usb_interface *interface,
 	zd->dev->open = zd1201_net_open;
 	zd->dev->stop = zd1201_net_stop;
 	zd->dev->get_stats = zd1201_get_stats;
-	zd->dev->get_wireless_stats = zd1201_get_wireless_stats;
 	zd->dev->wireless_handlers =
 	    (struct iw_handler_def *)&zd1201_iw_handlers;
 	zd->dev->hard_start_xmit = zd1201_hard_start_xmit;
@@ -1829,6 +1825,8 @@ static int zd1201_probe(struct usb_interface *interface,
 	err = zd1201_setconfig16(zd, ZD1201_RID_CNFPORTTYPE, porttype);
 	if (err)
 		goto err_net;
+
+	SET_NETDEV_DEV(zd->dev, &usb->dev);
 
 	err = register_netdev(zd->dev);
 	if (err)
@@ -1884,12 +1882,52 @@ static void zd1201_disconnect(struct usb_interface *interface)
 	kfree(zd);
 }
 
+#ifdef CONFIG_PM
+
+static int zd1201_suspend(struct usb_interface *interface,
+			   pm_message_t message)
+{
+	struct zd1201 *zd = usb_get_intfdata(interface);
+
+	netif_device_detach(zd->dev);
+
+	zd->was_enabled = zd->mac_enabled;
+
+	if (zd->was_enabled)
+		return zd1201_disable(zd);
+	else
+		return 0;
+}
+
+static int zd1201_resume(struct usb_interface *interface)
+{
+	struct zd1201 *zd = usb_get_intfdata(interface);
+
+	if (!zd || !zd->dev)
+		return -ENODEV;
+
+	netif_device_attach(zd->dev);
+
+	if (zd->was_enabled)
+		return zd1201_enable(zd);
+	else
+		return 0;
+}
+
+#else
+
+#define zd1201_suspend NULL
+#define zd1201_resume  NULL
+
+#endif
+
 static struct usb_driver zd1201_usb = {
-	.owner = THIS_MODULE,
 	.name = "zd1201",
 	.probe = zd1201_probe,
 	.disconnect = zd1201_disconnect,
 	.id_table = zd1201_table,
+	.suspend = zd1201_suspend,
+	.resume = zd1201_resume,
 };
 
 static int __init zd1201_init(void)

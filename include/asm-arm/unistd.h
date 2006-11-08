@@ -15,10 +15,12 @@
 
 #include <linux/linkage.h>
 
-#if defined(__thumb__)
+#define __NR_OABI_SYSCALL_BASE	0x900000
+
+#if defined(__thumb__) || defined(__ARM_EABI__)
 #define __NR_SYSCALL_BASE	0
 #else
-#define __NR_SYSCALL_BASE	0x900000
+#define __NR_SYSCALL_BASE	__NR_OABI_SYSCALL_BASE
 #endif
 
 /*
@@ -295,7 +297,7 @@
 #define __NR_fstatfs64			(__NR_SYSCALL_BASE+267)
 #define __NR_tgkill			(__NR_SYSCALL_BASE+268)
 #define __NR_utimes			(__NR_SYSCALL_BASE+269)
-#define __NR_fadvise64_64		(__NR_SYSCALL_BASE+270)
+#define __NR_arm_fadvise64_64		(__NR_SYSCALL_BASE+270)
 #define __NR_pciconfig_iobase		(__NR_SYSCALL_BASE+271)
 #define __NR_pciconfig_read		(__NR_SYSCALL_BASE+272)
 #define __NR_pciconfig_write		(__NR_SYSCALL_BASE+273)
@@ -306,8 +308,6 @@
 #define __NR_mq_notify			(__NR_SYSCALL_BASE+278)
 #define __NR_mq_getsetattr		(__NR_SYSCALL_BASE+279)
 #define __NR_waitid			(__NR_SYSCALL_BASE+280)
-
-#if 0 /* reserve these for un-muxing socketcall */
 #define __NR_socket			(__NR_SYSCALL_BASE+281)
 #define __NR_bind			(__NR_SYSCALL_BASE+282)
 #define __NR_connect			(__NR_SYSCALL_BASE+283)
@@ -325,9 +325,6 @@
 #define __NR_getsockopt			(__NR_SYSCALL_BASE+295)
 #define __NR_sendmsg			(__NR_SYSCALL_BASE+296)
 #define __NR_recvmsg			(__NR_SYSCALL_BASE+297)
-#endif
-
-#if 0 /* reserve these for un-muxing ipc */
 #define __NR_semop			(__NR_SYSCALL_BASE+298)
 #define __NR_semget			(__NR_SYSCALL_BASE+299)
 #define __NR_semctl			(__NR_SYSCALL_BASE+300)
@@ -339,17 +336,19 @@
 #define __NR_shmdt			(__NR_SYSCALL_BASE+306)
 #define __NR_shmget			(__NR_SYSCALL_BASE+307)
 #define __NR_shmctl			(__NR_SYSCALL_BASE+308)
-#endif
-
 #define __NR_add_key			(__NR_SYSCALL_BASE+309)
 #define __NR_request_key		(__NR_SYSCALL_BASE+310)
 #define __NR_keyctl			(__NR_SYSCALL_BASE+311)
-
-#if 0 /* reserved for un-muxing ipc */
 #define __NR_semtimedop			(__NR_SYSCALL_BASE+312)
-#endif
-
 #define __NR_vserver			(__NR_SYSCALL_BASE+313)
+#define __NR_ioprio_set			(__NR_SYSCALL_BASE+314)
+#define __NR_ioprio_get			(__NR_SYSCALL_BASE+315)
+#define __NR_inotify_init		(__NR_SYSCALL_BASE+316)
+#define __NR_inotify_add_watch		(__NR_SYSCALL_BASE+317)
+#define __NR_inotify_rm_watch		(__NR_SYSCALL_BASE+318)
+#define __NR_mbind			(__NR_SYSCALL_BASE+319)
+#define __NR_get_mempolicy		(__NR_SYSCALL_BASE+320)
+#define __NR_set_mempolicy		(__NR_SYSCALL_BASE+321)
 
 /*
  * The following SWIs are ARM private.
@@ -361,17 +360,35 @@
 #define __ARM_NR_usr32			(__ARM_NR_BASE+4)
 #define __ARM_NR_set_tls		(__ARM_NR_BASE+5)
 
+/*
+ * The following syscalls are obsolete and no longer available for EABI.
+ */
+#if defined(__ARM_EABI__) && !defined(__KERNEL__)
+#undef __NR_time
+#undef __NR_umount
+#undef __NR_stime
+#undef __NR_alarm
+#undef __NR_utime
+#undef __NR_getrlimit
+#undef __NR_select
+#undef __NR_readdir
+#undef __NR_mmap
+#undef __NR_socketcall
+#undef __NR_syscall
+#undef __NR_ipc
+#endif
+
 #define __sys2(x) #x
 #define __sys1(x) __sys2(x)
 
 #ifndef __syscall
-#if defined(__thumb__)
-#define __syscall(name)					\
-	"push	{r7}\n\t"				\
-	"mov	r7, #" __sys1(__NR_##name) "\n\t"	\
-	"swi	0\n\t"					\
-	"pop	{r7}"
+#if defined(__thumb__) || defined(__ARM_EABI__)
+#define __SYS_REG(name) register long __sysreg __asm__("r7") = __NR_##name;
+#define __SYS_REG_LIST(regs...) "r" (__sysreg) , ##regs
+#define __syscall(name) "swi\t0"
 #else
+#define __SYS_REG(name)
+#define __SYS_REG_LIST(regs...) regs
 #define __syscall(name) "swi\t" __sys1(__NR_##name) ""
 #endif
 #endif
@@ -387,33 +404,36 @@ do {									\
 
 #define _syscall0(type,name)						\
 type name(void) {							\
+  __SYS_REG(name)							\
   register long __res_r0 __asm__("r0");					\
   long __res;								\
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	:								\
-	: "lr");							\
+	: __SYS_REG_LIST()						\
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
 
 #define _syscall1(type,name,type1,arg1) 				\
 type name(type1 arg1) { 						\
+  __SYS_REG(name)							\
   register long __r0 __asm__("r0") = (long)arg1;			\
   register long __res_r0 __asm__("r0");					\
   long __res;								\
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	: "r" (__r0)							\
-	: "lr");							\
+	: __SYS_REG_LIST( "0" (__r0) )					\
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
 
 #define _syscall2(type,name,type1,arg1,type2,arg2)			\
 type name(type1 arg1,type2 arg2) {					\
+  __SYS_REG(name)							\
   register long __r0 __asm__("r0") = (long)arg1;			\
   register long __r1 __asm__("r1") = (long)arg2;			\
   register long __res_r0 __asm__("r0");					\
@@ -421,8 +441,8 @@ type name(type1 arg1,type2 arg2) {					\
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	: "r" (__r0),"r" (__r1) 					\
-	: "lr");							\
+	: __SYS_REG_LIST( "0" (__r0), "r" (__r1) )			\
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
@@ -430,6 +450,7 @@ type name(type1 arg1,type2 arg2) {					\
 
 #define _syscall3(type,name,type1,arg1,type2,arg2,type3,arg3)		\
 type name(type1 arg1,type2 arg2,type3 arg3) {				\
+  __SYS_REG(name)							\
   register long __r0 __asm__("r0") = (long)arg1;			\
   register long __r1 __asm__("r1") = (long)arg2;			\
   register long __r2 __asm__("r2") = (long)arg3;			\
@@ -438,8 +459,8 @@ type name(type1 arg1,type2 arg2,type3 arg3) {				\
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	: "r" (__r0),"r" (__r1),"r" (__r2)				\
-	: "lr");							\
+	: __SYS_REG_LIST( "0" (__r0), "r" (__r1), "r" (__r2) )		\
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
@@ -447,6 +468,7 @@ type name(type1 arg1,type2 arg2,type3 arg3) {				\
 
 #define _syscall4(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4)\
 type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4) {		\
+  __SYS_REG(name)							\
   register long __r0 __asm__("r0") = (long)arg1;			\
   register long __r1 __asm__("r1") = (long)arg2;			\
   register long __r2 __asm__("r2") = (long)arg3;			\
@@ -456,8 +478,8 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4) {		\
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	: "r" (__r0),"r" (__r1),"r" (__r2),"r" (__r3)			\
-	: "lr");							\
+	: __SYS_REG_LIST( "0" (__r0), "r" (__r1), "r" (__r2), "r" (__r3) ) \
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
@@ -465,6 +487,7 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4) {		\
 
 #define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,type5,arg5)	\
 type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5) {	\
+  __SYS_REG(name)							\
   register long __r0 __asm__("r0") = (long)arg1;			\
   register long __r1 __asm__("r1") = (long)arg2;			\
   register long __r2 __asm__("r2") = (long)arg3;			\
@@ -475,14 +498,16 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5) {	\
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	: "r" (__r0),"r" (__r1),"r" (__r2),"r" (__r3),"r" (__r4)	\
-	: "lr");							\
+	: __SYS_REG_LIST( "0" (__r0), "r" (__r1), "r" (__r2),		\
+			  "r" (__r3), "r" (__r4) )			\
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
 
 #define _syscall6(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,type5,arg5,type6,arg6)	\
 type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg6) {	\
+  __SYS_REG(name)							\
   register long __r0 __asm__("r0") = (long)arg1;			\
   register long __r1 __asm__("r1") = (long)arg2;			\
   register long __r2 __asm__("r2") = (long)arg3;			\
@@ -494,31 +519,34 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg6
   __asm__ __volatile__ (						\
   __syscall(name)							\
 	: "=r" (__res_r0)						\
-	: "r" (__r0),"r" (__r1),"r" (__r2),"r" (__r3), "r" (__r4),"r" (__r5)		\
-	: "lr");							\
+	: __SYS_REG_LIST( "0" (__r0), "r" (__r1), "r" (__r2),		\
+			  "r" (__r3), "r" (__r4), "r" (__r5) )		\
+	: "memory" );							\
   __res = __res_r0;							\
   __syscall_return(type,__res);						\
 }
 
 #ifdef __KERNEL__
 #define __ARCH_WANT_IPC_PARSE_VERSION
-#define __ARCH_WANT_OLD_READDIR
 #define __ARCH_WANT_STAT64
-#define __ARCH_WANT_SYS_ALARM
 #define __ARCH_WANT_SYS_GETHOSTNAME
 #define __ARCH_WANT_SYS_PAUSE
-#define __ARCH_WANT_SYS_TIME
-#define __ARCH_WANT_SYS_UTIME
-#define __ARCH_WANT_SYS_SOCKETCALL
-#define __ARCH_WANT_SYS_FADVISE64
 #define __ARCH_WANT_SYS_GETPGRP
 #define __ARCH_WANT_SYS_LLSEEK
 #define __ARCH_WANT_SYS_NICE
-#define __ARCH_WANT_SYS_OLD_GETRLIMIT
-#define __ARCH_WANT_SYS_OLDUMOUNT
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGACTION
+
+#if !defined(CONFIG_AEABI) || defined(CONFIG_OABI_COMPAT)
+#define __ARCH_WANT_SYS_TIME
+#define __ARCH_WANT_SYS_OLDUMOUNT
+#define __ARCH_WANT_SYS_ALARM
+#define __ARCH_WANT_SYS_UTIME
+#define __ARCH_WANT_SYS_OLD_GETRLIMIT
+#define __ARCH_WANT_OLD_READDIR
+#define __ARCH_WANT_SYS_SOCKETCALL
+#endif
 #endif
 
 #ifdef __KERNEL_SYSCALLS__
@@ -537,7 +565,6 @@ asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp,
 asmlinkage int sys_fork(struct pt_regs *regs);
 asmlinkage int sys_vfork(struct pt_regs *regs);
 asmlinkage int sys_pipe(unsigned long *fildes);
-asmlinkage int sys_ptrace(long request, long pid, long addr, long data);
 struct sigaction;
 asmlinkage long sys_rt_sigaction(int sig,
 				const struct sigaction __user *act,

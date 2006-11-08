@@ -25,7 +25,7 @@
 #define VXF_SCHED_PRIO		0x00000200
 #define VXF_SCHED_PAUSE		0x00000400
 #define VXF_SCHED_SHARE         0x00000800
- 
+
 #define VXF_VIRT_MEM		0x00010000
 #define VXF_VIRT_UPTIME		0x00020000
 #define VXF_VIRT_CPU		0x00040000
@@ -37,7 +37,9 @@
 #define VXF_STATE_SETUP		(1ULL<<32)
 #define VXF_STATE_INIT		(1ULL<<33)
 
-#define VXF_STATE_HELPER	(1ULL<<36)
+#define VXF_SC_HELPER		(1ULL<<36)
+#define VXF_REBOOT_KILL		(1ULL<<37)
+#define VXF_PERSISTENT		(1ULL<<38)
 
 #define VXF_FORK_RSS		(1ULL<<48)
 #define VXF_PROLIFIC		(1ULL<<49)
@@ -49,9 +51,14 @@
 #define VXF_INIT_SET		(VXF_STATE_SETUP|VXF_STATE_INIT)
 
 
+/* context migration */
+
+#define VXM_SET_INIT		0x00000001
+#define VXM_SET_REAPER		0x00000002
+
 /* context caps */
 
-#define	VXC_CAP_MASK		0x00000000
+#define VXC_CAP_MASK		0x00000000
 
 #define VXC_SET_UTSNAME		0x00000001
 #define VXC_SET_RLIMIT		0x00000002
@@ -101,14 +108,17 @@ struct vx_info {
 	uint64_t vx_bcaps;			/* bounding caps (system) */
 	uint64_t vx_ccaps;			/* context caps (vserver) */
 
-	pid_t vx_initpid;			/* PID of fake init process */
-
-	wait_queue_head_t vx_wait;		/* context exit waitqueue */
+	struct task_struct *vx_reaper;		/* guest reaper process */
+	pid_t vx_initpid;			/* PID of guest init */
 
 	struct _vx_limit limit;			/* vserver limits */
 	struct _vx_sched sched;			/* vserver scheduler */
 	struct _vx_cvirt cvirt;			/* virtual/bias stuff */
 	struct _vx_cacct cacct;			/* context accounting */
+
+	wait_queue_head_t vx_wait;		/* context exit waitqueue */
+	int reboot_cmd;				/* last sys_reboot() cmd */
+	int exit_code;				/* last process exit code */
 
 	char vx_name[65];			/* vserver name */
 };
@@ -120,6 +130,7 @@ struct vx_info {
 #define VXS_PAUSED	0x0010
 #define VXS_ONHOLD	0x0020
 #define VXS_SHUTDOWN	0x0100
+#define VXS_HELPER	0x1000
 #define VXS_RELEASED	0x8000
 
 /* check conditions */
@@ -145,8 +156,8 @@ struct vx_info {
 extern void claim_vx_info(struct vx_info *, struct task_struct *);
 extern void release_vx_info(struct vx_info *, struct task_struct *);
 
-extern struct vx_info *locate_vx_info(int);
-extern struct vx_info *locate_or_create_vx_info(int);
+extern struct vx_info *lookup_vx_info(int);
+extern struct vx_info *lookup_or_create_vx_info(int);
 
 extern int get_xid_list(int, unsigned int *, int);
 extern int xid_is_hashed(xid_t);

@@ -16,8 +16,13 @@
 #ifndef _LINUX_DS_H
 #define _LINUX_DS_H
 
+#ifdef __KERNEL__
+#include <linux/mod_devicetable.h>
+#endif
+
 #include <pcmcia/bulkmem.h>
 #include <pcmcia/cs_types.h>
+#include <pcmcia/device_id.h>
 
 typedef struct tuple_parse_t {
     tuple_t		tuple;
@@ -34,7 +39,7 @@ typedef struct win_info_t {
 typedef struct bind_info_t {
     dev_info_t		dev_info;
     u_char		function;
-    struct dev_link_t	*instance;
+    struct pcmcia_device *instance;
     char		name[DEV_NAME_LEN];
     u_short		major, minor;
     void		*next;
@@ -47,7 +52,6 @@ typedef struct mtd_info_t {
 } mtd_info_t;
 
 typedef union ds_ioctl_arg_t {
-    servinfo_t		servinfo;
     adjust_t		adjust;
     config_info_t	config;
     tuple_t		tuple;
@@ -63,7 +67,6 @@ typedef union ds_ioctl_arg_t {
     cisdump_t		cisdump;
 } ds_ioctl_arg_t;
 
-#define DS_GET_CARD_SERVICES_INFO	_IOR ('d', 1, servinfo_t)
 #define DS_ADJUST_RESOURCE_INFO		_IOWR('d', 2, adjust_t)
 #define DS_GET_CONFIGURATION_INFO	_IOWR('d', 3, config_info_t)
 #define DS_GET_FIRST_TUPLE		_IOWR('d', 4, tuple_t)
@@ -93,6 +96,7 @@ typedef union ds_ioctl_arg_t {
 
 #ifdef __KERNEL__
 #include <linux/device.h>
+#include <pcmcia/ss.h>
 
 typedef struct dev_node_t {
     char		dev_name[DEV_NAME_LEN];
@@ -100,41 +104,19 @@ typedef struct dev_node_t {
     struct dev_node_t	*next;
 } dev_node_t;
 
-typedef struct dev_link_t {
-    dev_node_t		*dev;
-    u_int		state, open;
-    wait_queue_head_t	pending;
-    client_handle_t	handle;
-    io_req_t		io;
-    irq_req_t		irq;
-    config_req_t	conf;
-    window_handle_t	win;
-    void		*priv;
-    struct dev_link_t	*next;
-} dev_link_t;
-
-/* Flags for device state */
-#define DEV_PRESENT		0x01
-#define DEV_CONFIG		0x02
-#define DEV_STALE_CONFIG	0x04	/* release on close */
-#define DEV_STALE_LINK		0x08	/* detach on release */
-#define DEV_CONFIG_PENDING	0x10
-#define DEV_RELEASE_PENDING	0x20
-#define DEV_SUSPEND		0x40
-#define DEV_BUSY		0x80
-
-#define DEV_OK(l) \
-    ((l) && ((l->state & ~DEV_BUSY) == (DEV_CONFIG|DEV_PRESENT)))
-
 
 struct pcmcia_socket;
-
-extern struct bus_type pcmcia_bus_type;
+struct config_t;
 
 struct pcmcia_driver {
-	dev_link_t		*(*attach)(void);
-	void			(*detach)(dev_link_t *);
+	int (*probe)		(struct pcmcia_device *dev);
+	void (*remove)		(struct pcmcia_device *dev);
+
+	int (*suspend)		(struct pcmcia_device *dev);
+	int (*resume)		(struct pcmcia_device *dev);
+
 	struct module		*owner;
+	struct pcmcia_device_id	*id_table;
 	struct device_driver	drv;
 };
 
@@ -142,38 +124,53 @@ struct pcmcia_driver {
 int pcmcia_register_driver(struct pcmcia_driver *driver);
 void pcmcia_unregister_driver(struct pcmcia_driver *driver);
 
+
 struct pcmcia_device {
 	/* the socket and the device_no [for multifunction devices]
 	   uniquely define a pcmcia_device */
 	struct pcmcia_socket	*socket;
+
+	char			*devname;
 
 	u8			device_no;
 
 	/* the hardware "function" device; certain subdevices can
 	 * share one hardware "function" device. */
 	u8			func;
+	struct config_t*	function_config;
 
 	struct list_head	socket_device_list;
 
-	/* deprecated, a cleaned up version will be moved into this
-	   struct soon */
-	dev_link_t		*instance;
-	struct client_t {
-		u_short			client_magic;
-		struct pcmcia_socket	*Socket;
-		u_char			Function;
-		u_int			state;
-		event_t			EventMask;
-		int (*event_handler)	(event_t event, int priority,
-					 event_callback_args_t *);
-		event_callback_args_t 	event_callback_args;
-	}			client;
+	/* deprecated, will be cleaned up soon */
+	dev_node_t		*dev_node;
+	u_int			open;
+	io_req_t		io;
+	irq_req_t		irq;
+	config_req_t		conf;
+	window_handle_t		win;
+
+	/* Is the device suspended, or in the process of
+	 * being removed? */
+	u16			suspended:1;
+	u16			_removed:1;
+
+	/* Flags whether io, irq, win configurations were
+	 * requested, and whether the configuration is "locked" */
+	u16			_irq:1;
+	u16			_io:1;
+	u16			_win:4;
+	u16			_locked:1;
+
+	/* Flag whether a "fuzzy" func_id based match is
+	 * allowed. */
+	u16			allow_func_id_match:1;
 
 	/* information about this device */
-	u8			has_manf_id:1;
-	u8			has_card_id:1;
-	u8			has_func_id:1;
-	u8			reserved:5;
+	u16			has_manf_id:1;
+	u16			has_card_id:1;
+	u16			has_func_id:1;
+
+	u16			reserved:3;
 
 	u8			func_id;
 	u16			manf_id;
@@ -181,20 +178,24 @@ struct pcmcia_device {
 
 	char *			prod_id[4];
 
+	struct device		dev;
+
+#ifdef CONFIG_PCMCIA_IOCTL
 	/* device driver wanted by cardmgr */
 	struct pcmcia_driver *	cardmgr;
+#endif
 
-	struct device		dev;
+	/* data private to drivers */
+	void			*priv;
 };
 
 #define to_pcmcia_dev(n) container_of(n, struct pcmcia_device, dev)
 #define to_pcmcia_drv(n) container_of(n, struct pcmcia_driver, drv)
 
-#define handle_to_pdev(handle) container_of(handle, struct pcmcia_device, client);
-#define handle_to_dev(handle) ((container_of(handle, struct pcmcia_device, client))->dev)
+#define handle_to_dev(handle) (handle->dev)
 
 /* error reporting */
-void cs_error(client_handle_t handle, int func, int ret);
+void cs_error(struct pcmcia_device *handle, int func, int ret);
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_DS_H */

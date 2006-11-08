@@ -14,6 +14,8 @@
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/string.h>
+#include <linux/slab.h>
 
 #include <asm/hardware.h>
 #include <asm/irq.h>
@@ -66,11 +68,9 @@ static int iq80321_setup(int nr, struct pci_sys_data *sys)
 	if(nr != 0)
 		return 0;
 
-	res = kmalloc(sizeof(struct resource) * 2, GFP_KERNEL);
+	res = kzalloc(sizeof(struct resource) * 2, GFP_KERNEL);
 	if (!res)
 		panic("PCI: unable to alloc resources");
-
-	memset(res, 0, sizeof(struct resource) * 2);
 
 	res[0].start = IOP321_PCI_LOWER_IO_VA;
 	res[0].end   = IOP321_PCI_UPPER_IO_VA;

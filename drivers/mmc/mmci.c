@@ -19,24 +19,22 @@
 #include <linux/highmem.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/protocol.h>
+#include <linux/amba/bus.h>
+#include <linux/clk.h>
 
+#include <asm/cacheflush.h>
+#include <asm/div64.h>
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/scatterlist.h>
-#include <asm/hardware/amba.h>
-#include <asm/hardware/clock.h>
+#include <asm/sizes.h>
 #include <asm/mach/mmc.h>
 
 #include "mmci.h"
 
 #define DRIVER_NAME "mmci-pl18x"
 
-#ifdef CONFIG_MMC_DEBUG
 #define DBG(host,fmt,args...)	\
-	pr_debug("%s: %s: " fmt, host->mmc->host_name, __func__ , args)
-#else
-#define DBG(host,fmt,args...)	do { } while (0)
-#endif
+	pr_debug("%s: %s: " fmt, mmc_hostname(host->mmc), __func__ , args)
 
 static unsigned int fmax = 515633;
 
@@ -70,6 +68,7 @@ static void mmci_stop_data(struct mmci_host *host)
 static void mmci_start_data(struct mmci_host *host, struct mmc_data *data)
 {
 	unsigned int datactrl, timeout, irqmask;
+	unsigned long long clks;
 	void __iomem *base;
 
 	DBG(host, "blksz %04x blks %04x flags %08x\n",
@@ -81,9 +80,10 @@ static void mmci_start_data(struct mmci_host *host, struct mmc_data *data)
 
 	mmci_init_sg(host, data);
 
-	timeout = data->timeout_clks +
-		  ((unsigned long long)data->timeout_ns * host->cclk) /
-		   1000000000ULL;
+	clks = (unsigned long long)data->timeout_ns * host->cclk;
+	do_div(clks, 1000000000UL);
+
+	timeout = data->timeout_clks + (unsigned int)clks;
 
 	base = host->base;
 	writel(timeout, base + MMCIDATATIMER);
@@ -93,6 +93,13 @@ static void mmci_start_data(struct mmci_host *host, struct mmc_data *data)
 	if (data->flags & MMC_DATA_READ) {
 		datactrl |= MCI_DPSM_DIRECTION;
 		irqmask = MCI_RXFIFOHALFFULLMASK;
+
+		/*
+		 * If we have less than a FIFOSIZE of bytes to transfer,
+		 * trigger a PIO interrupt as soon as any data is available.
+		 */
+		if (host->size < MCI_FIFOSIZE)
+			irqmask |= MCI_RXDATAAVLBLMASK;
 	} else {
 		/*
 		 * We don't actually need to include "FIFO empty" here
@@ -120,15 +127,10 @@ mmci_start_command(struct mmci_host *host, struct mmc_command *cmd, u32 c)
 	}
 
 	c |= cmd->opcode | MCI_CPSM_ENABLE;
-	switch (cmd->flags & MMC_RSP_MASK) {
-	case MMC_RSP_NONE:
-	default:
-		break;
-	case MMC_RSP_LONG:
-		c |= MCI_CPSM_LONGRSP;
-	case MMC_RSP_SHORT:
+	if (cmd->flags & MMC_RSP_PRESENT) {
+		if (cmd->flags & MMC_RSP_136)
+			c |= MCI_CPSM_LONGRSP;
 		c |= MCI_CPSM_RESPONSE;
-		break;
 	}
 	if (/*interrupt*/0)
 		c |= MCI_CPSM_INTERRUPT;
@@ -154,6 +156,13 @@ mmci_data_irq(struct mmci_host *host, struct mmc_data *data,
 		else if (status & (MCI_TXUNDERRUN|MCI_RXOVERRUN))
 			data->error = MMC_ERR_FIFO;
 		status |= MCI_DATAEND;
+
+		/*
+		 * We hit an error condition.  Ensure that any data
+		 * partially written to a page is properly coherent.
+		 */
+		if (host->sg_len && data->flags & MMC_DATA_READ)
+			flush_dcache_page(host->sg_ptr->page);
 	}
 	if (status & MCI_DATAEND) {
 		mmci_stop_data(host);
@@ -289,7 +298,7 @@ static irqreturn_t mmci_pio_irq(int irq, void *dev_id, struct pt_regs *regs)
 		/*
 		 * Unmap the buffer.
 		 */
-		mmci_kunmap_atomic(host, &flags);
+		mmci_kunmap_atomic(host, buffer, &flags);
 
 		host->sg_off += len;
 		host->size -= len;
@@ -297,6 +306,13 @@ static irqreturn_t mmci_pio_irq(int irq, void *dev_id, struct pt_regs *regs)
 
 		if (remain)
 			break;
+
+		/*
+		 * If we were reading, and we have completed this
+		 * page, ensure that the data cache is coherent.
+		 */
+		if (status & MCI_RXACTIVE)
+			flush_dcache_page(host->sg_ptr->page);
 
 		if (!mmci_next_sg(host))
 			break;
@@ -386,9 +402,6 @@ static void mmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	struct mmci_host *host = mmc_priv(mmc);
 	u32 clk = 0, pwr = 0;
 
-	DBG(host, "clock %uHz busmode %u powermode %u Vdd %u\n",
-	    ios->clock, ios->bus_mode, ios->power_mode, ios->vdd);
-
 	if (ios->clock) {
 		if (ios->clock >= host->mclk) {
 			clk = MCI_CLK_BYPASS;
@@ -439,7 +452,7 @@ static void mmci_check_status(unsigned long data)
 
 	status = host->plat->status(mmc_dev(host->mmc));
 	if (status ^ host->oldstat)
-		mmc_detect_change(host->mmc);
+		mmc_detect_change(host->mmc, 0);
 
 	host->oldstat = status;
 	mod_timer(&host->timer, jiffies + HZ);
@@ -476,13 +489,9 @@ static int mmci_probe(struct amba_device *dev, void *id)
 		goto host_free;
 	}
 
-	ret = clk_use(host->clk);
-	if (ret)
-		goto clk_free;
-
 	ret = clk_enable(host->clk);
 	if (ret)
-		goto clk_unuse;
+		goto clk_free;
 
 	host->plat = plat;
 	host->mclk = clk_get_rate(host->clk);
@@ -538,7 +547,7 @@ static int mmci_probe(struct amba_device *dev, void *id)
 	mmc_add_host(mmc);
 
 	printk(KERN_INFO "%s: MMCI rev %x cfg %02x at 0x%08lx irq %d,%d\n",
-		mmc->host_name, amba_rev(dev), amba_config(dev),
+		mmc_hostname(mmc), amba_rev(dev), amba_config(dev),
 		dev->res.start, dev->irq[0], dev->irq[1]);
 
 	init_timer(&host->timer);
@@ -555,8 +564,6 @@ static int mmci_probe(struct amba_device *dev, void *id)
 	iounmap(host->base);
  clk_disable:
 	clk_disable(host->clk);
- clk_unuse:
-	clk_unuse(host->clk);
  clk_free:
 	clk_put(host->clk);
  host_free:
@@ -591,7 +598,6 @@ static int mmci_remove(struct amba_device *dev)
 
 		iounmap(host->base);
 		clk_disable(host->clk);
-		clk_unuse(host->clk);
 		clk_put(host->clk);
 
 		mmc_free_host(mmc);

@@ -16,7 +16,7 @@ arch_prepare_suspend(void)
 struct saved_context {
   	u16 ds, es, fs, gs, ss;
 	unsigned long gs_base, gs_kernel_base, fs_base;
-	unsigned long cr0, cr2, cr3, cr4;
+	unsigned long cr0, cr2, cr3, cr4, cr8;
 	u16 gdt_pad;
 	u16 gdt_limit;
 	unsigned long gdt_base;
@@ -39,9 +39,7 @@ extern unsigned long saved_context_r12, saved_context_r13, saved_context_r14, sa
 extern unsigned long saved_context_eflags;
 
 #define loaddebug(thread,register) \
-               __asm__("movq %0,%%db" #register  \
-                       : /* no output */ \
-                       :"r" ((thread)->debugreg##register))
+	set_debugreg((thread)->debugreg##register, register)
 
 extern void fix_processor_context(void);
 

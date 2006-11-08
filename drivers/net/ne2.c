@@ -75,6 +75,7 @@ static const char *version = "ne2.c:v0.91 Nov 16 1998 Wim Dumon <wimpie@kotnet.o
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/bitops.h>
+#include <linux/jiffies.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -278,14 +279,6 @@ static int __init do_ne2_probe(struct net_device *dev)
 	return -ENODEV;
 }
 
-static void cleanup_card(struct net_device *dev)
-{
-	mca_mark_as_unused(ei_status.priv);
-	mca_set_adapter_procfn( ei_status.priv, NULL, NULL);
-	free_irq(dev->irq, dev);
-	release_region(dev->base_addr, NE_IO_EXTENT);
-}
-
 #ifndef MODULE
 struct net_device * __init ne2_probe(int unit)
 {
@@ -301,12 +294,7 @@ struct net_device * __init ne2_probe(int unit)
 	err = do_ne2_probe(dev);
 	if (err)
 		goto out;
-	err = register_netdev(dev);
-	if (err)
-		goto out1;
 	return dev;
-out1:
-	cleanup_card(dev);
 out:
 	free_netdev(dev);
 	return ERR_PTR(err);
@@ -408,7 +396,7 @@ static int __init ne2_probe1(struct net_device *dev, int slot)
 		outb(inb(base_addr + NE_RESET), base_addr + NE_RESET);
 
 		while ((inb_p(base_addr + EN0_ISR) & ENISR_RESET) == 0)
-			if (jiffies - reset_start_time > 2*HZ/100) {
+			if (time_after(jiffies, reset_start_time + 2*HZ/100)) {
 				printk(" not found (no reset ack).\n");
 				retval = -ENODEV;
 				goto out;
@@ -517,7 +505,14 @@ static int __init ne2_probe1(struct net_device *dev, int slot)
 	dev->poll_controller = ei_poll;
 #endif
 	NS8390_init(dev, 0);
+
+	retval = register_netdev(dev);
+	if (retval)
+		goto out1;
 	return 0;
+out1:
+	mca_set_adapter_procfn( ei_status.priv, NULL, NULL);
+	free_irq(dev->irq, dev);
 out:
 	release_region(base_addr, NE_IO_EXTENT);
 	return retval;
@@ -554,7 +549,7 @@ static void ne_reset_8390(struct net_device *dev)
 
 	/* This check _should_not_ be necessary, omit eventually. */
 	while ((inb_p(NE_BASE+EN0_ISR) & ENISR_RESET) == 0)
-		if (jiffies - reset_start_time > 2*HZ/100) {
+		if (time_after(jiffies, reset_start_time + 2*HZ/100)) {
 			printk("%s: ne_reset_8390() did not complete.\n", 
 					dev->name);
 			break;
@@ -755,7 +750,7 @@ retry:
 #endif
 
 	while ((inb_p(nic_base + EN0_ISR) & ENISR_RDC) == 0)
-		if (jiffies - dma_start > 2*HZ/100) {		/* 20ms */
+		if (time_after(jiffies, dma_start + 2*HZ/100)) {		/* 20ms */
 			printk("%s: timeout waiting for Tx RDC.\n", dev->name);
 			ne_reset_8390(dev);
 			NS8390_init(dev,1);
@@ -798,11 +793,8 @@ int init_module(void)
 		dev->mem_end = bad[this_dev];
 		dev->base_addr = io[this_dev];
 		if (do_ne2_probe(dev) == 0) {
-			if (register_netdev(dev) == 0) {
-				dev_ne[found++] = dev;
-				continue;
-			}
-			cleanup_card(dev);
+			dev_ne[found++] = dev;
+			continue;
 		}
 		free_netdev(dev);
 		break;
@@ -811,6 +803,14 @@ int init_module(void)
 		return 0;
 	printk(KERN_WARNING "ne2.c: No NE/2 card found\n");
 	return -ENXIO;
+}
+
+static void cleanup_card(struct net_device *dev)
+{
+	mca_mark_as_unused(ei_status.priv);
+	mca_set_adapter_procfn( ei_status.priv, NULL, NULL);
+	free_irq(dev->irq, dev);
+	release_region(dev->base_addr, NE_IO_EXTENT);
 }
 
 void cleanup_module(void)

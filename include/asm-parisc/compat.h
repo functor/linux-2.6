@@ -13,8 +13,10 @@ typedef s32	compat_ssize_t;
 typedef s32	compat_time_t;
 typedef s32	compat_clock_t;
 typedef s32	compat_pid_t;
-typedef u32	compat_uid_t;
-typedef u32	compat_gid_t;
+typedef u32	__compat_uid_t;
+typedef u32	__compat_gid_t;
+typedef u32	__compat_uid32_t;
+typedef u32	__compat_gid32_t;
 typedef u16	compat_mode_t;
 typedef u32	compat_ino_t;
 typedef u32	compat_dev_t;
@@ -24,7 +26,7 @@ typedef u16	compat_nlink_t;
 typedef u16	compat_ipc_pid_t;
 typedef s32	compat_daddr_t;
 typedef u32	compat_caddr_t;
-typedef u32	compat_timer_t;
+typedef s32	compat_timer_t;
 
 typedef s32	compat_int_t;
 typedef s32	compat_long_t;
@@ -67,8 +69,8 @@ struct compat_stat {
 	compat_dev_t		st_realdev;
 	u16			st_basemode;
 	u16			st_spareshort;
-	compat_uid_t		st_uid;
-	compat_gid_t		st_gid;
+	__compat_uid32_t	st_uid;
+	__compat_gid32_t	st_gid;
 	u32			st_spare4[3];
 };
 
@@ -134,6 +136,11 @@ typedef	u32		compat_uptr_t;
 static inline void __user *compat_ptr(compat_uptr_t uptr)
 {
 	return (void __user *)(unsigned long)uptr;
+}
+
+static inline compat_uptr_t ptr_to_compat(void __user *uptr)
+{
+	return (u32)(unsigned long)uptr;
 }
 
 static __inline__ void __user *compat_alloc_user_space(long len)

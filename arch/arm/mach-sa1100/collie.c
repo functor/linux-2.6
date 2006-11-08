@@ -11,7 +11,8 @@
  * published by the Free Software Foundation.
  *
  * ChangeLog:
- *  03-06-2004 John Lenz <jelenz@wisc.edu>
+ *  2006 Pavel Machek <pavel@suse.cz>
+ *  03-06-2004 John Lenz <lenz@cs.wisc.edu>
  *  06-04-2002 Chris Larson <kergoth@digitalnemesis.net>
  *  04-16-2001 Lineo Japan,Inc. ...
  */
@@ -21,7 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/tty.h>
 #include <linux/delay.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/timer.h>
@@ -40,6 +41,7 @@
 #include <asm/hardware/scoop.h>
 #include <asm/mach/sharpsl_param.h>
 #include <asm/hardware/locomo.h>
+#include <asm/arch/mcp.h>
 
 #include "generic.h"
 
@@ -65,6 +67,95 @@ struct platform_device colliescoop_device = {
 	.num_resources	= ARRAY_SIZE(collie_scoop_resources),
 	.resource	= collie_scoop_resources,
 };
+
+static struct scoop_pcmcia_dev collie_pcmcia_scoop[] = {
+{
+       .dev        = &colliescoop_device.dev,
+       .irq        = COLLIE_IRQ_GPIO_CF_IRQ,
+       .cd_irq     = COLLIE_IRQ_GPIO_CF_CD,
+       .cd_irq_str = "PCMCIA0 CD",
+},
+};
+
+static struct scoop_pcmcia_config collie_pcmcia_config = {
+	.devs         = &collie_pcmcia_scoop[0],
+	.num_devs     = 1,
+};
+
+
+static struct mcp_plat_data collie_mcp_data = {
+	.mccr0          = MCCR0_ADM,
+	.sclk_rate      = 11981000,
+};
+
+#ifdef CONFIG_SHARP_LOCOMO
+/*
+ * low-level UART features.
+ */
+static struct locomo_dev *uart_dev = NULL;
+
+static void collie_uart_set_mctrl(struct uart_port *port, u_int mctrl)
+{
+ 	if (!uart_dev) return;
+
+ 	if (mctrl & TIOCM_RTS)
+		locomo_gpio_write(uart_dev, LOCOMO_GPIO_RTS, 0);
+ 	else
+		locomo_gpio_write(uart_dev, LOCOMO_GPIO_RTS, 1);
+
+ 	if (mctrl & TIOCM_DTR)
+		locomo_gpio_write(uart_dev, LOCOMO_GPIO_DTR, 0);
+ 	else
+		locomo_gpio_write(uart_dev, LOCOMO_GPIO_DTR, 1);
+}
+
+static u_int collie_uart_get_mctrl(struct uart_port *port)
+{
+	int ret = TIOCM_CD;
+	unsigned int r;
+	if (!uart_dev) return ret;
+
+	r = locomo_gpio_read_output(uart_dev, LOCOMO_GPIO_CTS & LOCOMO_GPIO_DSR);
+	if (r & LOCOMO_GPIO_CTS)
+		ret |= TIOCM_CTS;
+	if (r & LOCOMO_GPIO_DSR)
+		ret |= TIOCM_DSR;
+
+	return ret;
+}
+
+static struct sa1100_port_fns collie_port_fns __initdata = {
+	.set_mctrl	= collie_uart_set_mctrl,
+	.get_mctrl	= collie_uart_get_mctrl,
+};
+
+static int collie_uart_probe(struct locomo_dev *dev)
+{
+	uart_dev = dev;
+	return 0;
+}
+
+static int collie_uart_remove(struct locomo_dev *dev)
+{
+	uart_dev = NULL;
+	return 0;
+}
+
+static struct locomo_driver collie_uart_driver = {
+	.drv = {
+		.name = "collie_uart",
+	},
+	.devid	= LOCOMO_DEVID_UART,
+	.probe	= collie_uart_probe,
+	.remove	= collie_uart_remove,
+};
+
+static int __init collie_uart_init(void) {
+	return locomo_driver_register(&collie_uart_driver);
+}
+device_initcall(collie_uart_init);
+
+#endif
 
 
 static struct resource locomo_resources[] = {
@@ -111,12 +202,11 @@ static struct mtd_partition collie_partitions[] = {
 
 static void collie_set_vpp(int vpp)
 {
-	write_scoop_reg(SCOOP_GPCR, read_scoop_reg(SCOOP_GPCR) | COLLIE_SCP_VPEN);
-	if (vpp) {
-		write_scoop_reg(SCOOP_GPWR, read_scoop_reg(SCOOP_GPWR) | COLLIE_SCP_VPEN);
-	} else {
-		write_scoop_reg(SCOOP_GPWR, read_scoop_reg(SCOOP_GPWR) & ~COLLIE_SCP_VPEN);
-	}
+	write_scoop_reg(&colliescoop_device.dev, SCOOP_GPCR, read_scoop_reg(&colliescoop_device.dev, SCOOP_GPCR) | COLLIE_SCP_VPEN);
+	if (vpp)
+		write_scoop_reg(&colliescoop_device.dev, SCOOP_GPWR, read_scoop_reg(&colliescoop_device.dev, SCOOP_GPWR) | COLLIE_SCP_VPEN);
+	else
+		write_scoop_reg(&colliescoop_device.dev, SCOOP_GPWR, read_scoop_reg(&colliescoop_device.dev, SCOOP_GPWR) & ~COLLIE_SCP_VPEN);
 }
 
 static struct flash_platform_data collie_flash_data = {
@@ -160,6 +250,8 @@ static void __init collie_init(void)
 	GPDR |= GPIO_32_768kHz;
 	TUCR  = TUCR_32_768kHz;
 
+	platform_scoop_config = &collie_pcmcia_config;
+
 	ret = platform_add_devices(devices, ARRAY_SIZE(devices));
 	if (ret) {
 		printk(KERN_WARNING "collie: Unable to register LoCoMo device\n");
@@ -167,26 +259,42 @@ static void __init collie_init(void)
 
 	sa11x0_set_flash_data(&collie_flash_data, collie_flash_resources,
 			      ARRAY_SIZE(collie_flash_resources));
+	sa11x0_set_mcp_data(&collie_mcp_data);
 
 	sharpsl_save_param();
 }
 
 static struct map_desc collie_io_desc[] __initdata = {
-	/* virtual     physical    length      type */
-	{0xe8000000, 0x00000000, 0x02000000, MT_DEVICE},	/* 32M main flash (cs0) */
-	{0xea000000, 0x08000000, 0x02000000, MT_DEVICE},	/* 32M boot flash (cs1) */
+	{	/* 32M main flash (cs0) */
+		.virtual	= 0xe8000000,
+		.pfn		= __phys_to_pfn(0x00000000),
+		.length		= 0x02000000,
+		.type		= MT_DEVICE
+	}, {	/* 32M boot flash (cs1) */
+		.virtual	= 0xea000000,
+		.pfn		= __phys_to_pfn(0x08000000),
+		.length		= 0x02000000,
+		.type		= MT_DEVICE
+	}
 };
 
 static void __init collie_map_io(void)
 {
 	sa1100_map_io();
 	iotable_init(collie_io_desc, ARRAY_SIZE(collie_io_desc));
+
+#ifdef CONFIG_SHARP_LOCOMO
+	sa1100_register_uart_fns(&collie_port_fns);
+#endif
+	sa1100_register_uart(0, 3);
+	sa1100_register_uart(1, 1);
 }
 
 MACHINE_START(COLLIE, "Sharp-Collie")
-	BOOT_MEM(0xc0000000, 0x80000000, 0xf8000000)
-	MAPIO(collie_map_io)
-	INITIRQ(sa1100_init_irq)
+	.phys_io	= 0x80000000,
+	.io_pg_offst	= ((0xf8000000) >> 18) & 0xfffc,
+	.map_io		= collie_map_io,
+	.init_irq	= sa1100_init_irq,
 	.timer		= &sa1100_timer,
 	.init_machine	= collie_init,
 MACHINE_END

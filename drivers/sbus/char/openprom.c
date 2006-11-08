@@ -39,6 +39,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/miscdevice.h>
+#include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <asm/oplib.h>
@@ -391,13 +392,16 @@ static int openprom_bsd_ioctl(struct inode * inode, struct file * file,
 			return -ENOMEM;
 		}
 
-		prom_getproperty(op.op_nodeid, str, tmp, len);
+		cnt = prom_getproperty(op.op_nodeid, str, tmp, len);
+		if (cnt <= 0) {
+			error = -EINVAL;
+		} else {
+			tmp[len] = '\0';
 
-		tmp[len] = '\0';
-
-		if (__copy_to_user(argp, &op, sizeof(op)) != 0
-		    || copy_to_user(op.op_buf, tmp, len) != 0)
-			error = -EFAULT;
+			if (__copy_to_user(argp, &op, sizeof(op)) != 0 ||
+			    copy_to_user(op.op_buf, tmp, len) != 0)
+				error = -EFAULT;
+		}
 
 		kfree(tmp);
 		kfree(str);
@@ -565,6 +569,40 @@ static int openprom_ioctl(struct inode * inode, struct file * file,
 	}
 }
 
+static long openprom_compat_ioctl(struct file *file, unsigned int cmd,
+		unsigned long arg)
+{
+	long rval = -ENOTTY;
+
+	/*
+	 * SunOS/Solaris only, the NetBSD one's have embedded pointers in
+	 * the arg which we'd need to clean up...
+	 */
+	switch (cmd) {
+	case OPROMGETOPT:
+	case OPROMSETOPT:
+	case OPROMNXTOPT:
+	case OPROMSETOPT2:
+	case OPROMNEXT:
+	case OPROMCHILD:
+	case OPROMGETPROP:
+	case OPROMNXTPROP:
+	case OPROMU2P:
+	case OPROMGETCONS:
+	case OPROMGETFBNAME:
+	case OPROMGETBOOTARGS:
+	case OPROMSETCUR:
+	case OPROMPCI2NODE:
+	case OPROMPATH2NODE:
+		lock_kernel();
+		rval = openprom_ioctl(file->f_dentry->d_inode, file, cmd, arg);
+		lock_kernel();
+		break;
+	}
+
+	return rval;
+}
+
 static int openprom_open(struct inode * inode, struct file * file)
 {
 	DATA *data;
@@ -590,6 +628,7 @@ static struct file_operations openprom_fops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.ioctl =	openprom_ioctl,
+	.compat_ioctl =	openprom_compat_ioctl,
 	.open =		openprom_open,
 	.release =	openprom_release,
 };

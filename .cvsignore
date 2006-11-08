@@ -1,4 +1,5 @@
 .config
+.config.old
 .tmp_System.map
 .tmp_kallsyms1.S
 .tmp_kallsyms2.S
@@ -12,3 +13,4 @@ Module.symvers
 System.map
 vmlinux
 linux
+modnames

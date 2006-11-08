@@ -101,7 +101,7 @@ int register_tuxmodule (tcapi_template_t *tcapi)
 		Dprintk("module with VFS binding '%s' already registered!\n",
 						 tcapi->vfs_name);
 		goto out;
-	} 
+	}
 
 	list_add(&tcapi->modules, &tuxmodules_list);
 	ret = 0;

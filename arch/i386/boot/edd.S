@@ -6,7 +6,7 @@
  *   projects 1572D, 1484D, 1386D, 1226DT
  * disk signature read by Matt Domsch <Matt_Domsch@dell.com>
  *	and Andrew Wilks <Andrew_Wilks@dell.com> September 2003, June 2004
- * legacy CHS retreival by Patrick J. LoPresti <patl@users.sourceforge.net>
+ * legacy CHS retrieval by Patrick J. LoPresti <patl@users.sourceforge.net>
  *      March 2004
  * Command line option parsing, Matt Domsch, November 2004
  */
@@ -76,6 +76,8 @@ edd_mbr_sig_read:
 	popw	%es
 	popw	%bx
 	jc	edd_mbr_sig_done		# on failure, we're done.
+	cmpb	$0, %ah		# some BIOSes do not set CF
+	jne	edd_mbr_sig_done		# on failure, we're done.
 	movl	(EDDBUF+EDD_MBR_SIG_OFFSET), %eax # read sig out of the MBR
 	movl	%eax, (%bx)			# store success
 	incb	(EDD_MBR_SIG_NR_BUF)		# note that we stored something

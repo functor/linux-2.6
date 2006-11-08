@@ -141,7 +141,7 @@ ext3_xattr_handler(int name_index)
 /*
  * Inode operation listxattr()
  *
- * dentry->d_inode->i_sem: don't care
+ * dentry->d_inode->i_mutex: don't care
  */
 ssize_t
 ext3_listxattr(struct dentry *dentry, char *buffer, size_t size)
@@ -211,7 +211,7 @@ ext3_xattr_find_entry(struct ext3_xattr_entry **pentry, int name_index,
 	return cmp ? -ENODATA : 0;
 }
 
-int
+static int
 ext3_xattr_block_get(struct inode *inode, int name_index, const char *name,
 		     void *buffer, size_t buffer_size)
 {
@@ -355,7 +355,7 @@ ext3_xattr_list_entries(struct inode *inode, struct ext3_xattr_entry *entry,
 	return buffer_size - rest;
 }
 
-int
+static int
 ext3_xattr_block_list(struct inode *inode, char *buffer, size_t buffer_size)
 {
 	struct buffer_head *bh = NULL;
@@ -496,7 +496,7 @@ ext3_xattr_release_block(handle_t *handle, struct inode *inode,
 			ext3_journal_dirty_metadata(handle, bh);
 			if (IS_SYNC(inode))
 				handle->h_sync = 1;
-			DLIMIT_FREE_BLOCK(inode->i_sb, inode->i_xid, 1);
+			DLIMIT_FREE_BLOCK(inode, 1);
 			DQUOT_FREE_BLOCK(inode, 1);
 			unlock_buffer(bh);
 			ea_bdebug(bh, "refcount now=%d; releasing",
@@ -628,7 +628,7 @@ struct ext3_xattr_block_find {
 	struct buffer_head *bh;
 };
 
-int
+static int
 ext3_xattr_block_find(struct inode *inode, struct ext3_xattr_info *i,
 		      struct ext3_xattr_block_find *bs)
 {
@@ -766,7 +766,7 @@ inserted:
 				ea_bdebug(new_bh, "keeping");
 			else {
 				error = -ENOSPC;
-				if (DLIMIT_ALLOC_BLOCK(sb, inode->i_xid, 1))
+				if (DLIMIT_ALLOC_BLOCK(inode, 1))
 					goto cleanup;
 				/* The old block is released after updating
 				   the inode. */
@@ -849,7 +849,7 @@ cleanup:
 cleanup_dquot:
 	DQUOT_FREE_BLOCK(inode, 1);
 cleanup_dlimit:
-	DLIMIT_FREE_BLOCK(sb, inode->i_xid, 1);
+	DLIMIT_FREE_BLOCK(inode, 1);
 	goto cleanup;
 
 bad_block:
@@ -866,7 +866,7 @@ struct ext3_xattr_ibody_find {
 	struct ext3_iloc iloc;
 };
 
-int
+static int
 ext3_xattr_ibody_find(struct inode *inode, struct ext3_xattr_info *i,
 		      struct ext3_xattr_ibody_find *is)
 {
@@ -953,10 +953,6 @@ ext3_xattr_set_handle(handle_t *handle, struct inode *inode, int name_index,
 	};
 	int error;
 
-	if (IS_RDONLY(inode))
-		return -EROFS;
-	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
-		return -EPERM;
 	if (!name)
 		return -EINVAL;
 	if (strlen(name) > 255)
@@ -1051,7 +1047,7 @@ ext3_xattr_set(struct inode *inode, int name_index, const char *name,
 	int error, retries = 0;
 
 retry:
-	handle = ext3_journal_start(inode, EXT3_DATA_TRANS_BLOCKS);
+	handle = ext3_journal_start(inode, EXT3_DATA_TRANS_BLOCKS(inode->i_sb));
 	if (IS_ERR(handle)) {
 		error = PTR_ERR(handle);
 	} else {
@@ -1113,7 +1109,7 @@ cleanup:
 void
 ext3_xattr_put_super(struct super_block *sb)
 {
-	mb_cache_shrink(ext3_xattr_cache, sb->s_bdev);
+	mb_cache_shrink(sb->s_bdev);
 }
 
 /*

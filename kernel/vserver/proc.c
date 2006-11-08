@@ -15,7 +15,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
@@ -77,7 +76,7 @@ int proc_xid_info (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = locate_vx_info(vid);
+	vxi = lookup_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = sprintf(buffer,
@@ -97,7 +96,7 @@ int proc_xid_status (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = locate_vx_info(vid);
+	vxi = lookup_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = sprintf(buffer,
@@ -123,7 +122,7 @@ int proc_xid_limit (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = locate_vx_info(vid);
+	vxi = lookup_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = vx_info_proc_limit(&vxi->limit, buffer);
@@ -136,7 +135,7 @@ int proc_xid_sched (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = locate_vx_info(vid);
+	vxi = lookup_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = vx_info_proc_sched(&vxi->sched, buffer);
@@ -149,7 +148,7 @@ int proc_xid_cvirt (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = locate_vx_info(vid);
+	vxi = lookup_vx_info(vid);
 	if (!vxi)
 		return 0;
 	vx_update_load(vxi);
@@ -163,7 +162,7 @@ int proc_xid_cacct (int vid, char *buffer)
 	struct vx_info *vxi;
 	int length;
 
-	vxi = locate_vx_info(vid);
+	vxi = lookup_vx_info(vid);
 	if (!vxi)
 		return 0;
 	length = vx_info_proc_cacct(&vxi->cacct, buffer);
@@ -183,16 +182,13 @@ static int proc_vnet_info(int vid, char *buffer)
 		);
 }
 
-#define atoquad(a) \
-	(((a)>>0) & 0xff), (((a)>>8) & 0xff), \
-	(((a)>>16) & 0xff), (((a)>>24) & 0xff)
 
 int proc_nid_info (int vid, char *buffer)
 {
 	struct nx_info *nxi;
 	int length, i;
 
-	nxi = locate_nx_info(vid);
+	nxi = lookup_nx_info(vid);
 	if (!nxi)
 		return 0;
 	length = sprintf(buffer,
@@ -203,9 +199,8 @@ int proc_nid_info (int vid, char *buffer)
 		);
 	for (i=0; i<nxi->nbipv4; i++) {
 		length += sprintf(buffer + length,
-			"%d:\t%d.%d.%d.%d/%d.%d.%d.%d\n", i,
-			atoquad(nxi->ipv4[i]),
-			atoquad(nxi->mask[i]));
+			"%d:\t" NIPQUAD_FMT "/" NIPQUAD_FMT "\n", i,
+			NIPQUAD(nxi->ipv4[i]), NIPQUAD(nxi->mask[i]));
 	}
 	put_nx_info(nxi);
 	return length;
@@ -216,7 +211,7 @@ int proc_nid_status (int vid, char *buffer)
 	struct nx_info *nxi;
 	int length;
 
-	nxi = locate_nx_info(vid);
+	nxi = lookup_nx_info(vid);
 	if (!nxi)
 		return 0;
 	length = sprintf(buffer,
@@ -282,7 +277,7 @@ static int proc_vid_revalidate(struct dentry * dentry, struct nameidata *nd)
 
 #define PROC_BLOCK_SIZE (PAGE_SIZE - 1024)
 
-static ssize_t proc_vid_info_read(struct file * file, char * buf,
+static ssize_t proc_vid_info_read(struct file * file, char __user * buf,
 			  size_t count, loff_t *ppos)
 {
 	struct inode * inode = file->f_dentry->d_inode;
@@ -312,11 +307,11 @@ static ssize_t proc_vid_info_read(struct file * file, char * buf,
 /* here comes the lower level (vid) */
 
 static struct file_operations proc_vid_info_file_operations = {
-	read:		proc_vid_info_read,
+	.read =		proc_vid_info_read,
 };
 
 static struct dentry_operations proc_vid_dentry_operations = {
-	d_revalidate:	proc_vid_revalidate,
+	.d_revalidate =	proc_vid_revalidate,
 };
 
 
@@ -436,44 +431,44 @@ static int proc_vid_readdir(struct file * filp,
 
 	i = filp->f_pos;
 	switch (i) {
-		case 0:
-			if (filldir(dirent, ".", 1, i,
-				inode->i_ino, DT_DIR) < 0)
-				return 0;
-			i++;
-			filp->f_pos++;
-			/* fall through */
-		case 1:
-			if (filldir(dirent, "..", 2, i,
-				PROC_ROOT_INO, DT_DIR) < 0)
-				return 0;
-			i++;
-			filp->f_pos++;
-			/* fall through */
-		default:
-			i -= 2;
-			switch (inode_type(inode)) {
-				case PROC_XID_INO:
-					size = sizeof(vx_base_stuff);
-					p = vx_base_stuff + i;
-					break;
-				case PROC_NID_INO:
-					size = sizeof(vn_base_stuff);
-					p = vn_base_stuff + i;
-					break;
-				default:
-					return 1;
-			}
-			if (i >= size/sizeof(struct vid_entry))
+	case 0:
+		if (filldir(dirent, ".", 1, i,
+			inode->i_ino, DT_DIR) < 0)
+			return 0;
+		i++;
+		filp->f_pos++;
+		/* fall through */
+	case 1:
+		if (filldir(dirent, "..", 2, i,
+			PROC_ROOT_INO, DT_DIR) < 0)
+			return 0;
+		i++;
+		filp->f_pos++;
+		/* fall through */
+	default:
+		i -= 2;
+		switch (inode_type(inode)) {
+			case PROC_XID_INO:
+				size = sizeof(vx_base_stuff);
+				p = vx_base_stuff + i;
+				break;
+			case PROC_NID_INO:
+				size = sizeof(vn_base_stuff);
+				p = vn_base_stuff + i;
+				break;
+			default:
 				return 1;
-			while (p->name) {
-				if (filldir(dirent, p->name, p->len,
-					filp->f_pos, fake_ino(inode_vid(inode),
-					p->type), p->mode >> 12) < 0)
-					return 0;
-				filp->f_pos++;
-				p++;
-			}
+		}
+		if (i >= size/sizeof(struct vid_entry))
+			return 1;
+		while (p->name) {
+			if (filldir(dirent, p->name, p->len,
+				filp->f_pos, fake_ino(inode_vid(inode),
+				p->type), p->mode >> 12) < 0)
+				return 0;
+			filp->f_pos++;
+			p++;
+		}
 	}
 	return 1;
 }
@@ -484,12 +479,12 @@ static int proc_vid_readdir(struct file * filp,
 /* now the upper level (virtual) */
 
 static struct file_operations proc_vid_file_operations = {
-	read:		generic_read_dir,
-	readdir:	proc_vid_readdir,
+	.read =		generic_read_dir,
+	.readdir =	proc_vid_readdir,
 };
 
 static struct inode_operations proc_vid_inode_operations = {
-	lookup:		proc_vid_lookup,
+	.lookup =	proc_vid_lookup,
 };
 
 
@@ -554,7 +549,7 @@ struct dentry *proc_virtual_lookup(struct inode *dir,
 	xid = atovid(name, len);
 	if (xid < 0)
 		goto out;
-	vxi = locate_vx_info(xid);
+	vxi = lookup_vx_info(xid);
 	if (!vxi)
 		goto out;
 
@@ -565,7 +560,7 @@ struct dentry *proc_virtual_lookup(struct inode *dir,
 	if (!inode)
 		goto out_release;
 
-	inode->i_mode = S_IFDIR|S_IRUGO;
+	inode->i_mode = S_IFDIR|S_IRUGO|S_IXUGO;
 	inode->i_op = &proc_vid_inode_operations;
 	inode->i_fop = &proc_vid_file_operations;
 	inode->i_nlink = 2;
@@ -620,7 +615,7 @@ struct dentry *proc_vnet_lookup(struct inode *dir,
 	nid = atovid(name, len);
 	if (nid < 0)
 		goto out;
-	nxi = locate_nx_info(nid);
+	nxi = lookup_nx_info(nid);
 	if (!nxi)
 		goto out;
 
@@ -631,7 +626,7 @@ struct dentry *proc_vnet_lookup(struct inode *dir,
 	if (!inode)
 		goto out_release;
 
-	inode->i_mode = S_IFDIR|S_IRUGO;
+	inode->i_mode = S_IFDIR|S_IRUGO|S_IXUGO;
 	inode->i_op = &proc_vid_inode_operations;
 	inode->i_fop = &proc_vid_file_operations;
 	inode->i_nlink = 2;
@@ -663,35 +658,35 @@ int proc_virtual_readdir(struct file * filp,
 	ino_t ino;
 
 	switch ((long)filp->f_pos) {
-		case 0:
-			ino = fake_ino(0, PROC_XID_INO);
-			if (filldir(dirent, ".", 1,
-				filp->f_pos, ino, DT_DIR) < 0)
-				return 0;
-			filp->f_pos++;
-			/* fall through */
-		case 1:
-			ino = filp->f_dentry->d_parent->d_inode->i_ino;
-			if (filldir(dirent, "..", 2,
-				filp->f_pos, ino, DT_DIR) < 0)
-				return 0;
-			filp->f_pos++;
-			/* fall through */
-		case 2:
-			ino = fake_ino(0, PROC_XID_INFO);
-			if (filldir(dirent, "info", 4,
+	case 0:
+		ino = fake_ino(0, PROC_XID_INO);
+		if (filldir(dirent, ".", 1,
+			filp->f_pos, ino, DT_DIR) < 0)
+			return 0;
+		filp->f_pos++;
+		/* fall through */
+	case 1:
+		ino = filp->f_dentry->d_parent->d_inode->i_ino;
+		if (filldir(dirent, "..", 2,
+			filp->f_pos, ino, DT_DIR) < 0)
+			return 0;
+		filp->f_pos++;
+		/* fall through */
+	case 2:
+		ino = fake_ino(0, PROC_XID_INFO);
+		if (filldir(dirent, "info", 4,
+			filp->f_pos, ino, DT_LNK) < 0)
+			return 0;
+		filp->f_pos++;
+		/* fall through */
+	case 3:
+		if (vx_current_xid() > 1) {
+			ino = fake_ino(1, PROC_XID_INO);
+			if (filldir(dirent, "current", 7,
 				filp->f_pos, ino, DT_LNK) < 0)
 				return 0;
-			filp->f_pos++;
-			/* fall through */
-		case 3:
-			if (vx_current_xid() > 1) {
-				ino = fake_ino(1, PROC_XID_INO);
-				if (filldir(dirent, "current", 7,
-					filp->f_pos, ino, DT_LNK) < 0)
-					return 0;
-			}
-			filp->f_pos++;
+		}
+		filp->f_pos++;
 	}
 
 	nr_xids = get_xid_list(nr, xid_array, PROC_MAXVIDS);
@@ -712,12 +707,12 @@ int proc_virtual_readdir(struct file * filp,
 
 
 static struct file_operations proc_virtual_dir_operations = {
-	read:		generic_read_dir,
-	readdir:	proc_virtual_readdir,
+	.read =		generic_read_dir,
+	.readdir =	proc_virtual_readdir,
 };
 
 static struct inode_operations proc_virtual_dir_inode_operations = {
-	lookup:		proc_virtual_lookup,
+	.lookup =	proc_virtual_lookup,
 };
 
 
@@ -726,40 +721,32 @@ int proc_vnet_readdir(struct file * filp,
 {
 	unsigned int nid_array[PROC_MAXVIDS];
 	char buf[PROC_NUMBUF];
-	unsigned int nr = filp->f_pos-3;
+	unsigned int nr = filp->f_pos-2;
 	unsigned int nr_nids, i;
 	ino_t ino;
 
 	switch ((long)filp->f_pos) {
-		case 0:
-			ino = fake_ino(0, PROC_NID_INO);
-			if (filldir(dirent, ".", 1,
-				filp->f_pos, ino, DT_DIR) < 0)
-				return 0;
-			filp->f_pos++;
-			/* fall through */
-		case 1:
-			ino = filp->f_dentry->d_parent->d_inode->i_ino;
-			if (filldir(dirent, "..", 2,
-				filp->f_pos, ino, DT_DIR) < 0)
-				return 0;
-			filp->f_pos++;
-			/* fall through */
-		case 2:
-			ino = fake_ino(0, PROC_NID_INFO);
-			if (filldir(dirent, "info", 4,
-				filp->f_pos, ino, DT_LNK) < 0)
-				return 0;
-			filp->f_pos++;
-			/* fall through */
-		case 3:
-			if (vx_current_xid() > 1) {
-				ino = fake_ino(1, PROC_NID_INO);
-				if (filldir(dirent, "current", 7,
-					filp->f_pos, ino, DT_LNK) < 0)
-					return 0;
-			}
-			filp->f_pos++;
+	case 0:
+		ino = fake_ino(0, PROC_NID_INO);
+		if (filldir(dirent, ".", 1,
+			filp->f_pos, ino, DT_DIR) < 0)
+			return 0;
+		filp->f_pos++;
+		/* fall through */
+	case 1:
+		ino = filp->f_dentry->d_parent->d_inode->i_ino;
+		if (filldir(dirent, "..", 2,
+			filp->f_pos, ino, DT_DIR) < 0)
+			return 0;
+		filp->f_pos++;
+		/* fall through */
+	case 2:
+		ino = fake_ino(0, PROC_NID_INFO);
+		if (filldir(dirent, "info", 4,
+			filp->f_pos, ino, DT_REG) < 0)
+			return 0;
+		filp->f_pos++;
+		/* fall through */
 	}
 
 	nr_nids = get_nid_list(nr, nid_array, PROC_MAXVIDS);
@@ -780,12 +767,12 @@ int proc_vnet_readdir(struct file * filp,
 
 
 static struct file_operations proc_vnet_dir_operations = {
-	read:		generic_read_dir,
-	readdir:	proc_vnet_readdir,
+	.read =		generic_read_dir,
+	.readdir =	proc_vnet_readdir,
 };
 
 static struct inode_operations proc_vnet_dir_inode_operations = {
-	lookup:		proc_vnet_lookup,
+	.lookup =	proc_vnet_lookup,
 };
 
 
@@ -821,18 +808,24 @@ int proc_pid_vx_info(struct task_struct *p, char *buffer)
 	char * orig = buffer;
 
 	buffer += sprintf (buffer,"XID:\t%d\n", vx_task_xid(p));
+	if (vx_flags(VXF_INFO_HIDE, 0))
+		goto out;
+
 	vxi = task_get_vx_info(p);
-	if (vxi && !vx_flags(VXF_INFO_HIDE, 0)) {
-		buffer += sprintf (buffer,"BCaps:\t%016llx\n"
-			,(unsigned long long)vxi->vx_bcaps);
-		buffer += sprintf (buffer,"CCaps:\t%016llx\n"
-			,(unsigned long long)vxi->vx_ccaps);
-		buffer += sprintf (buffer,"CFlags:\t%016llx\n"
-			,(unsigned long long)vxi->vx_flags);
-		buffer += sprintf (buffer,"CIPid:\t%d\n"
-			,vxi->vx_initpid);
-	}
+	if (!vxi)
+		goto out;
+
+	buffer += sprintf (buffer,"BCaps:\t%016llx\n"
+		,(unsigned long long)vxi->vx_bcaps);
+	buffer += sprintf (buffer,"CCaps:\t%016llx\n"
+		,(unsigned long long)vxi->vx_ccaps);
+	buffer += sprintf (buffer,"CFlags:\t%016llx\n"
+		,(unsigned long long)vxi->vx_flags);
+	buffer += sprintf (buffer,"CIPid:\t%d\n"
+		,vxi->vx_initpid);
+
 	put_vx_info(vxi);
+out:
 	return buffer - orig;
 }
 
@@ -841,23 +834,27 @@ int proc_pid_nx_info(struct task_struct *p, char *buffer)
 {
 	struct nx_info *nxi;
 	char * orig = buffer;
+	int i;
 
 	buffer += sprintf (buffer,"NID:\t%d\n", nx_task_nid(p));
+	if (vx_flags(VXF_INFO_HIDE, 0))
+		goto out;
 	nxi = task_get_nx_info(p);
-	if (nxi && !vx_flags(VXF_INFO_HIDE, 0)) {
-		int i;
+	if (!nxi)
+		goto out;
 
-		for (i=0; i<nxi->nbipv4; i++){
-			buffer += sprintf (buffer,
-				"V4Root[%d]:\t%d.%d.%d.%d/%d.%d.%d.%d\n", i
-				,NIPQUAD(nxi->ipv4[i])
-				,NIPQUAD(nxi->mask[i]));
-		}
+	for (i=0; i<nxi->nbipv4; i++){
 		buffer += sprintf (buffer,
-			"V4Root[bcast]:\t%d.%d.%d.%d\n"
-			,NIPQUAD(nxi->v4_bcast));
+			"V4Root[%d]:\t%d.%d.%d.%d/%d.%d.%d.%d\n", i
+			,NIPQUAD(nxi->ipv4[i])
+			,NIPQUAD(nxi->mask[i]));
 	}
+	buffer += sprintf (buffer,
+		"V4Root[bcast]:\t%d.%d.%d.%d\n"
+		,NIPQUAD(nxi->v4_bcast));
+
 	put_nx_info(nxi);
+out:
 	return buffer - orig;
 }
 

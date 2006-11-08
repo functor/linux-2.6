@@ -8,6 +8,10 @@
  *  Removed page pinning, fix privately mapped COW pages and other cleanups
  *  (C) Copyright 2003, 2004 Jamie Lokier
  *
+ *  Robust futex support started by Ingo Molnar
+ *  (C) Copyright 2006 Red Hat Inc, All Rights Reserved
+ *  Thanks to Thomas Gleixner for suggestions, analysis and fixes.
+ *
  *  Thanks to Ben LaHaise for yelling "hashed waitqueues" loudly
  *  enough at me, Linus for the original (flawed) idea, Matthew
  *  Kirkwood for proof-of-concept implementation.
@@ -40,6 +44,8 @@
 #include <linux/pagemap.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
+#include <linux/vs_cvirt.h>
+#include <asm/futex.h>
 
 #define FUTEX_HASHBITS (CONFIG_BASE_SMALL ? 4 : 8)
 
@@ -200,23 +206,6 @@ static int get_futex_key(unsigned long uaddr, union futex_key *key)
 	 * from swap.  But that's a lot of code to duplicate here
 	 * for a rare case, so we simply fetch the page.
 	 */
-
-	/*
-	 * Do a quick atomic lookup first - this is the fastpath.
-	 */
-	spin_lock(&current->mm->page_table_lock);
-	page = follow_page(mm, uaddr, 0);
-	if (likely(page != NULL)) {
-		key->shared.pgoff =
-			page->index << (PAGE_CACHE_SHIFT - PAGE_SHIFT);
-		spin_unlock(&current->mm->page_table_lock);
-		return 0;
-	}
-	spin_unlock(&current->mm->page_table_lock);
-
-	/*
-	 * Do it the general way.
-	 */
 	err = get_user_pages(current, mm, uaddr, 1, 0, 0, &page, NULL);
 	if (err >= 0) {
 		key->shared.pgoff =
@@ -286,7 +275,13 @@ static void wake_futex(struct futex_q *q)
 	/*
 	 * The waiting task can free the futex_q as soon as this is written,
 	 * without taking any locks.  This must come last.
+	 *
+	 * A memory barrier is required here to prevent the following store
+	 * to lock_ptr from getting ahead of the wakeup. Clearing the lock
+	 * at the end of wake_up_all() does not prevent this store from
+	 * moving.
 	 */
+	wmb();
 	q->lock_ptr = NULL;
 }
 
@@ -321,6 +316,130 @@ static int futex_wake(unsigned long uaddr, int nr_wake)
 	}
 
 	spin_unlock(&bh->lock);
+out:
+	up_read(&current->mm->mmap_sem);
+	return ret;
+}
+
+/*
+ * Wake up all waiters hashed on the physical page that is mapped
+ * to this virtual address:
+ */
+static int futex_wake_op(unsigned long uaddr1, unsigned long uaddr2, int nr_wake, int nr_wake2, int op)
+{
+	union futex_key key1, key2;
+	struct futex_hash_bucket *bh1, *bh2;
+	struct list_head *head;
+	struct futex_q *this, *next;
+	int ret, op_ret, attempt = 0;
+
+retryfull:
+	down_read(&current->mm->mmap_sem);
+
+	ret = get_futex_key(uaddr1, &key1);
+	if (unlikely(ret != 0))
+		goto out;
+	ret = get_futex_key(uaddr2, &key2);
+	if (unlikely(ret != 0))
+		goto out;
+
+	bh1 = hash_futex(&key1);
+	bh2 = hash_futex(&key2);
+
+retry:
+	if (bh1 < bh2)
+		spin_lock(&bh1->lock);
+	spin_lock(&bh2->lock);
+	if (bh1 > bh2)
+		spin_lock(&bh1->lock);
+
+	op_ret = futex_atomic_op_inuser(op, (int __user *)uaddr2);
+	if (unlikely(op_ret < 0)) {
+		int dummy;
+
+		spin_unlock(&bh1->lock);
+		if (bh1 != bh2)
+			spin_unlock(&bh2->lock);
+
+#ifndef CONFIG_MMU
+		/* we don't get EFAULT from MMU faults if we don't have an MMU,
+		 * but we might get them from range checking */
+		ret = op_ret;
+		goto out;
+#endif
+
+		if (unlikely(op_ret != -EFAULT)) {
+			ret = op_ret;
+			goto out;
+		}
+
+		/* futex_atomic_op_inuser needs to both read and write
+		 * *(int __user *)uaddr2, but we can't modify it
+		 * non-atomically.  Therefore, if get_user below is not
+		 * enough, we need to handle the fault ourselves, while
+		 * still holding the mmap_sem.  */
+		if (attempt++) {
+			struct vm_area_struct * vma;
+			struct mm_struct *mm = current->mm;
+
+			ret = -EFAULT;
+			if (attempt >= 2 ||
+			    !(vma = find_vma(mm, uaddr2)) ||
+			    vma->vm_start > uaddr2 ||
+			    !(vma->vm_flags & VM_WRITE))
+				goto out;
+
+			switch (handle_mm_fault(mm, vma, uaddr2, 1)) {
+			case VM_FAULT_MINOR:
+				current->min_flt++;
+				break;
+			case VM_FAULT_MAJOR:
+				current->maj_flt++;
+				break;
+			default:
+				goto out;
+			}
+			goto retry;
+		}
+
+		/* If we would have faulted, release mmap_sem,
+		 * fault it in and start all over again.  */
+		up_read(&current->mm->mmap_sem);
+
+		ret = get_user(dummy, (int __user *)uaddr2);
+		if (ret)
+			return ret;
+
+		goto retryfull;
+	}
+
+	head = &bh1->chain;
+
+	list_for_each_entry_safe(this, next, head, list) {
+		if (match_futex (&this->key, &key1)) {
+			wake_futex(this);
+			if (++ret >= nr_wake)
+				break;
+		}
+	}
+
+	if (op_ret > 0) {
+		head = &bh2->chain;
+
+		op_ret = 0;
+		list_for_each_entry_safe(this, next, head, list) {
+			if (match_futex (&this->key, &key2)) {
+				wake_futex(this);
+				if (++op_ret >= nr_wake2)
+					break;
+			}
+		}
+		ret += op_ret;
+	}
+
+	spin_unlock(&bh1->lock);
+	if (bh1 != bh2)
+		spin_unlock(&bh2->lock);
 out:
 	up_read(&current->mm->mmap_sem);
 	return ret;
@@ -475,6 +594,7 @@ static int unqueue_me(struct futex_q *q)
 	/* In the common case we don't take the spinlock, which is nice. */
  retry:
 	lock_ptr = q->lock_ptr;
+	barrier();
 	if (lock_ptr != 0) {
 		spin_lock(lock_ptr);
 		/*
@@ -673,23 +793,17 @@ static int futex_fd(unsigned long uaddr, int signal)
 	filp->f_mapping = filp->f_dentry->d_inode->i_mapping;
 
 	if (signal) {
-		int err;
 		err = f_setown(filp, current->pid, 1);
 		if (err < 0) {
-			put_unused_fd(ret);
-			put_filp(filp);
-			ret = err;
-			goto out;
+			goto error;
 		}
 		filp->f_owner.signum = signal;
 	}
 
 	q = kmalloc(sizeof(*q), GFP_KERNEL);
 	if (!q) {
-		put_unused_fd(ret);
-		put_filp(filp);
-		ret = -ENOMEM;
-		goto out;
+		err = -ENOMEM;
+		goto error;
 	}
 
 	down_read(&current->mm->mmap_sem);
@@ -697,10 +811,8 @@ static int futex_fd(unsigned long uaddr, int signal)
 
 	if (unlikely(err != 0)) {
 		up_read(&current->mm->mmap_sem);
-		put_unused_fd(ret);
-		put_filp(filp);
 		kfree(q);
-		return err;
+		goto error;
 	}
 
 	/*
@@ -716,6 +828,177 @@ static int futex_fd(unsigned long uaddr, int signal)
 	fd_install(ret, filp);
 out:
 	return ret;
+error:
+	put_unused_fd(ret);
+	put_filp(filp);
+	ret = err;
+	goto out;
+}
+
+/*
+ * Support for robust futexes: the kernel cleans up held futexes at
+ * thread exit time.
+ *
+ * Implementation: user-space maintains a per-thread list of locks it
+ * is holding. Upon do_exit(), the kernel carefully walks this list,
+ * and marks all locks that are owned by this thread with the
+ * FUTEX_OWNER_DEAD bit, and wakes up a waiter (if any). The list is
+ * always manipulated with the lock held, so the list is private and
+ * per-thread. Userspace also maintains a per-thread 'list_op_pending'
+ * field, to allow the kernel to clean up if the thread dies after
+ * acquiring the lock, but just before it could have added itself to
+ * the list. There can only be one such pending lock.
+ */
+
+/**
+ * sys_set_robust_list - set the robust-futex list head of a task
+ * @head: pointer to the list-head
+ * @len: length of the list-head, as userspace expects
+ */
+asmlinkage long
+sys_set_robust_list(struct robust_list_head __user *head,
+		    size_t len)
+{
+	/*
+	 * The kernel knows only one size for now:
+	 */
+	if (unlikely(len != sizeof(*head)))
+		return -EINVAL;
+
+	current->robust_list = head;
+
+	return 0;
+}
+
+/**
+ * sys_get_robust_list - get the robust-futex list head of a task
+ * @pid: pid of the process [zero for current task]
+ * @head_ptr: pointer to a list-head pointer, the kernel fills it in
+ * @len_ptr: pointer to a length field, the kernel fills in the header size
+ */
+asmlinkage long
+sys_get_robust_list(int pid, struct robust_list_head __user **head_ptr,
+		    size_t __user *len_ptr)
+{
+	struct robust_list_head *head;
+	unsigned long ret;
+
+	if (!pid)
+		head = current->robust_list;
+	else {
+		struct task_struct *p;
+
+		ret = -ESRCH;
+		read_lock(&tasklist_lock);
+		p = find_task_by_pid(pid);
+		if (!p)
+			goto err_unlock;
+		ret = -EPERM;
+		if ((current->euid != p->euid) && (current->euid != p->uid) &&
+				!capable(CAP_SYS_PTRACE))
+			goto err_unlock;
+		head = p->robust_list;
+		read_unlock(&tasklist_lock);
+	}
+
+	if (put_user(sizeof(*head), len_ptr))
+		return -EFAULT;
+	return put_user(head, head_ptr);
+
+err_unlock:
+	read_unlock(&tasklist_lock);
+
+	return ret;
+}
+
+/*
+ * Process a futex-list entry, check whether it's owned by the
+ * dying task, and do notification if so:
+ */
+int handle_futex_death(u32 __user *uaddr, struct task_struct *curr)
+{
+	u32 uval;
+
+retry:
+	if (get_user(uval, uaddr))
+		return -1;
+
+	if ((uval & FUTEX_TID_MASK) == curr->pid) {
+		/*
+		 * Ok, this dying thread is truly holding a futex
+		 * of interest. Set the OWNER_DIED bit atomically
+		 * via cmpxchg, and if the value had FUTEX_WAITERS
+		 * set, wake up a waiter (if any). (We have to do a
+		 * futex_wake() even if OWNER_DIED is already set -
+		 * to handle the rare but possible case of recursive
+		 * thread-death.) The rest of the cleanup is done in
+		 * userspace.
+		 */
+		if (futex_atomic_cmpxchg_inatomic(uaddr, uval,
+					 uval | FUTEX_OWNER_DIED) != uval)
+			goto retry;
+
+		if (uval & FUTEX_WAITERS)
+			futex_wake((unsigned long)uaddr, 1);
+	}
+	return 0;
+}
+
+/*
+ * Walk curr->robust_list (very carefully, it's a userspace list!)
+ * and mark any locks found there dead, and notify any waiters.
+ *
+ * We silently return on any sign of list-walking problem.
+ */
+void exit_robust_list(struct task_struct *curr)
+{
+	struct robust_list_head __user *head = curr->robust_list;
+	struct robust_list __user *entry, *pending;
+	unsigned int limit = ROBUST_LIST_LIMIT;
+	unsigned long futex_offset;
+
+	/*
+	 * Fetch the list head (which was registered earlier, via
+	 * sys_set_robust_list()):
+	 */
+	if (get_user(entry, &head->list.next))
+		return;
+	/*
+	 * Fetch the relative futex offset:
+	 */
+	if (get_user(futex_offset, &head->futex_offset))
+		return;
+	/*
+	 * Fetch any possibly pending lock-add first, and handle it
+	 * if it exists:
+	 */
+	if (get_user(pending, &head->list_op_pending))
+		return;
+	if (pending)
+		handle_futex_death((void *)pending + futex_offset, curr);
+
+	while (entry != &head->list) {
+		/*
+		 * A pending lock might already be on the list, so
+		 * dont process it twice:
+		 */
+		if (entry != pending)
+			if (handle_futex_death((void *)entry + futex_offset,
+						curr))
+				return;
+		/*
+		 * Fetch the next entry in the list:
+		 */
+		if (get_user(entry, &entry->next))
+			return;
+		/*
+		 * Avoid excessively long or circular lists:
+		 */
+		if (!--limit)
+			break;
+
+		cond_resched();
+	}
 }
 
 long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
@@ -740,6 +1023,9 @@ long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
 	case FUTEX_CMP_REQUEUE:
 		ret = futex_requeue(uaddr, uaddr2, val, val2, &val3);
 		break;
+	case FUTEX_WAKE_OP:
+		ret = futex_wake_op(uaddr, uaddr2, val, val2, val3);
+		break;
 	default:
 		ret = -ENOSYS;
 	}
@@ -755,9 +1041,11 @@ asmlinkage long sys_futex(u32 __user *uaddr, int op, int val,
 	unsigned long timeout = MAX_SCHEDULE_TIMEOUT;
 	int val2 = 0;
 
-	if ((op == FUTEX_WAIT) && utime) {
+	if (utime && (op == FUTEX_WAIT)) {
 		if (copy_from_user(&t, utime, sizeof(t)) != 0)
 			return -EFAULT;
+		if (!timespec_valid(&t))
+			return -EINVAL;
 		timeout = timespec_to_jiffies(&t) + 1;
 	}
 	/*

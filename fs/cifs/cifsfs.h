@@ -61,8 +61,10 @@ extern struct inode_operations cifs_file_inode_ops;
 extern struct inode_operations cifs_symlink_inode_ops;
 
 /* Functions related to files and directories */
-extern struct file_operations cifs_file_ops;
-extern struct file_operations cifs_file_direct_ops; /* if directio mount */
+extern const struct file_operations cifs_file_ops;
+extern const struct file_operations cifs_file_direct_ops; /* if directio mount */
+extern const struct file_operations cifs_file_nobrl_ops;
+extern const struct file_operations cifs_file_direct_nobrl_ops; /* if directio mount */
 extern int cifs_open(struct inode *inode, struct file *file);
 extern int cifs_close(struct inode *inode, struct file *file);
 extern int cifs_closedir(struct inode *inode, struct file *file);
@@ -74,17 +76,18 @@ extern int cifs_lock(struct file *, int, struct file_lock *);
 extern int cifs_fsync(struct file *, struct dentry *, int);
 extern int cifs_flush(struct file *);
 extern int cifs_file_mmap(struct file * , struct vm_area_struct *);
-extern struct file_operations cifs_dir_ops;
+extern const struct file_operations cifs_dir_ops;
 extern int cifs_dir_open(struct inode *inode, struct file *file);
 extern int cifs_readdir(struct file *file, void *direntry, filldir_t filldir);
 extern int cifs_dir_notify(struct file *, unsigned long arg);
 
 /* Functions related to dir entries */
 extern struct dentry_operations cifs_dentry_ops;
+extern struct dentry_operations cifs_ci_dentry_ops;
 
 /* Functions related to symlinks */
-extern int cifs_follow_link(struct dentry *direntry, struct nameidata *nd);
-extern void cifs_put_link(struct dentry *direntry, struct nameidata *nd);
+extern void *cifs_follow_link(struct dentry *direntry, struct nameidata *nd);
+extern void cifs_put_link(struct dentry *direntry, struct nameidata *nd, void *);
 extern int cifs_readlink(struct dentry *direntry, char __user *buffer, 
 			 int buflen);
 extern int cifs_symlink(struct inode *inode, struct dentry *direntry,
@@ -96,5 +99,5 @@ extern ssize_t	cifs_getxattr(struct dentry *, const char *, void *, size_t);
 extern ssize_t	cifs_listxattr(struct dentry *, char *, size_t);
 extern int cifs_ioctl (struct inode * inode, struct file * filep,
 		       unsigned int command, unsigned long arg);
-#define CIFS_VERSION   "1.35"
+#define CIFS_VERSION   "1.43"
 #endif				/* _CIFSFS_H */

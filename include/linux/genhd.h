@@ -78,7 +78,8 @@ struct hd_struct {
 	sector_t start_sect;
 	sector_t nr_sects;
 	struct kobject kobj;
-	unsigned reads, read_sectors, writes, write_sectors;
+	struct kobject *holder_dir;
+	unsigned ios[2], sectors[2];	/* READs and WRITEs */
 	int policy, partno;
 };
 
@@ -89,12 +90,12 @@ struct hd_struct {
 #define GENHD_FL_SUPPRESS_PARTITION_INFO	32
 
 struct disk_stats {
-	unsigned read_sectors, write_sectors;
-	unsigned reads, writes;
-	unsigned read_merges, write_merges;
-	unsigned read_ticks, write_ticks;
-	unsigned io_ticks;
-	unsigned time_in_queue;
+	unsigned long sectors[2];	/* READs and WRITEs */
+	unsigned long ios[2];
+	unsigned long merges[2];
+	unsigned long ticks[2];
+	unsigned long io_ticks;
+	unsigned long time_in_queue;
 };
 	
 struct gendisk {
@@ -104,6 +105,7 @@ struct gendisk {
                                          * disks that can't be partitioned. */
 	char disk_name[32];		/* name of major driver */
 	struct hd_struct **part;	/* [indexed by minor] */
+	int part_uevent_suppress;
 	struct block_device_operations *fops;
 	struct request_queue *queue;
 	void *private_data;
@@ -114,12 +116,14 @@ struct gendisk {
 	int number;			/* more of the same */
 	struct device *driverfs_dev;
 	struct kobject kobj;
+	struct kobject *holder_dir;
+	struct kobject *slave_dir;
 
 	struct timer_rand_state *random;
 	int policy;
 
 	atomic_t sync_io;		/* RAID */
-	unsigned long stamp, stamp_idle;
+	unsigned long stamp;
 	int in_flight;
 #ifdef	CONFIG_SMP
 	struct disk_stats *dkstats;
@@ -132,6 +136,7 @@ struct gendisk {
 struct disk_attribute {
 	struct attribute attr;
 	ssize_t (*show)(struct gendisk *, char *);
+	ssize_t (*store)(struct gendisk *, const char *, size_t);
 };
 
 /* 
@@ -148,22 +153,16 @@ struct disk_attribute {
 ({									\
 	typeof(gendiskp->dkstats->field) res = 0;			\
 	int i;								\
-	for (i=0; i < NR_CPUS; i++) {					\
-		if (!cpu_possible(i))					\
-			continue;					\
+	for_each_possible_cpu(i)					\
 		res += per_cpu_ptr(gendiskp->dkstats, i)->field;	\
-	}								\
 	res;								\
 })
 
 static inline void disk_stat_set_all(struct gendisk *gendiskp, int value)	{
 	int i;
-	for (i=0; i < NR_CPUS; i++) {
-		if (cpu_possible(i)) {
-			memset(per_cpu_ptr(gendiskp->dkstats, i), value,	
-					sizeof (struct disk_stats));
-		}
-	}
+	for_each_possible_cpu(i)
+		memset(per_cpu_ptr(gendiskp->dkstats, i), value,
+				sizeof (struct disk_stats));
 }		
 				
 #else
@@ -224,7 +223,7 @@ static inline void free_disk_stats(struct gendisk *disk)
 extern void disk_round_stats(struct gendisk *disk);
 
 /* drivers/block/genhd.c */
-extern int get_blkdev_list(char *);
+extern int get_blkdev_list(char *, int);
 extern void add_disk(struct gendisk *disk);
 extern void del_gendisk(struct gendisk *gp);
 extern void unlink_gendisk(struct gendisk *gp);
@@ -403,6 +402,7 @@ extern int rescan_partitions(struct gendisk *disk, struct block_device *bdev);
 extern void add_partition(struct gendisk *, int, sector_t, sector_t);
 extern void delete_partition(struct gendisk *, int);
 
+extern struct gendisk *alloc_disk_node(int minors, int node_id);
 extern struct gendisk *alloc_disk(int minors);
 extern struct kobject *get_disk(struct gendisk *disk);
 extern void put_disk(struct gendisk *disk);

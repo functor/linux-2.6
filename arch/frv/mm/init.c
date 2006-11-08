@@ -108,7 +108,7 @@ void __init paging_init(void)
 
 	memset((void *) empty_zero_page, 0, PAGE_SIZE);
 
-#if CONFIG_HIGHMEM
+#ifdef CONFIG_HIGHMEM
 	if (num_physpages - num_mappedpages) {
 		pgd_t *pge;
 		pud_t *pue;
@@ -169,8 +169,7 @@ void __init mem_init(void)
 		struct page *page = &mem_map[pfn];
 
 		ClearPageReserved(page);
-		set_bit(PG_highmem, &page->flags);
-		set_page_count(page, 1);
+		init_page_count(page);
 		__free_page(page);
 		totalram_pages++;
 	}
@@ -211,7 +210,7 @@ void __init free_initmem(void)
 	/* next to check that the page we free is not a partial page */
 	for (addr = start; addr < end; addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
-		set_page_count(virt_to_page(addr), 1);
+		init_page_count(virt_to_page(addr));
 		free_page(addr);
 		totalram_pages++;
 	}
@@ -231,7 +230,7 @@ void __init free_initrd_mem(unsigned long start, unsigned long end)
 	int pages = 0;
 	for (; start < end; start += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(start));
-		set_page_count(virt_to_page(start), 1);
+		init_page_count(virt_to_page(start));
 		free_page(start);
 		totalram_pages++;
 		pages++;

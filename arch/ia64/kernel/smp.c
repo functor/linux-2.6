@@ -62,7 +62,7 @@ struct call_data_struct {
 	atomic_t finished;
 };
 
-static struct call_data_struct * call_data;
+static volatile struct call_data_struct *call_data;
 
 #define IPI_CALL_FUNC		0
 #define IPI_CPU_STOP		1
@@ -185,8 +185,8 @@ send_IPI_allbutself (int op)
 {
 	unsigned int i;
 
-	for (i = 0; i < NR_CPUS; i++) {
-		if (cpu_online(i) && i != smp_processor_id())
+	for_each_online_cpu(i) {
+		if (i != smp_processor_id())
 			send_IPI_single(i, op);
 	}
 }
@@ -199,9 +199,9 @@ send_IPI_all (int op)
 {
 	int i;
 
-	for (i = 0; i < NR_CPUS; i++)
-		if (cpu_online(i))
-			send_IPI_single(i, op);
+	for_each_online_cpu(i) {
+		send_IPI_single(i, op);
+	}
 }
 
 /*
@@ -231,13 +231,16 @@ smp_flush_tlb_all (void)
 void
 smp_flush_tlb_mm (struct mm_struct *mm)
 {
+	preempt_disable();
 	/* this happens for the common case of a single-threaded fork():  */
 	if (likely(mm == current->active_mm && atomic_read(&mm->mm_users) == 1))
 	{
 		local_finish_flush_tlb_mm(mm);
+		preempt_enable();
 		return;
 	}
 
+	preempt_enable();
 	/*
 	 * We could optimize this further by using mm->cpu_vm_mask to track which CPUs
 	 * have been running in the address space.  It's not clear that this is worth the
@@ -269,7 +272,7 @@ smp_call_function_single (int cpuid, void (*func) (void *info), void *info, int 
 	int me = get_cpu(); /* prevent preemption and reschedule on another processor */
 
 	if (cpuid == me) {
-		printk("%s: trying to call self\n", __FUNCTION__);
+		printk(KERN_INFO "%s: trying to call self\n", __FUNCTION__);
 		put_cpu();
 		return -EBUSY;
 	}
@@ -312,10 +315,7 @@ EXPORT_SYMBOL(smp_call_function_single);
  *  <func>	The function to run. This must be fast and non-blocking.
  *  <info>	An arbitrary pointer to pass to the function.
  *  <nonatomic>	currently unused.
- *  <wait>	If 1, wait (atomically) until function has complete on other
- *		CPUs. If 0, wait for the IPI to be received by other CPUs, but
- *		do not wait for the completion of the IPI on each CPU.  If -1,
- *		do not wait for other CPUs to receive IPI.
+ *  <wait>	If true, wait (atomically) until function has completed on other CPUs.
  *  [RETURNS]   0 on success, else a negative status code.
  *
  * Does not return until remote CPUs are nearly ready to execute <func> or are or have
@@ -327,51 +327,36 @@ EXPORT_SYMBOL(smp_call_function_single);
 int
 smp_call_function (void (*func) (void *info), void *info, int nonatomic, int wait)
 {
-	static struct call_data_struct dumpdata;
-	struct call_data_struct normaldata;
-	struct call_data_struct *data;
+	struct call_data_struct data;
 	int cpus = num_online_cpus()-1;
 
 	if (!cpus)
 		return 0;
 
 	/* Can deadlock when called with interrupts disabled */
-	/* Only if we are waiting for other CPU to ack */
-	WARN_ON(irqs_disabled() && wait >= 0);
+	WARN_ON(irqs_disabled());
+
+	data.func = func;
+	data.info = info;
+	atomic_set(&data.started, 0);
+	data.wait = wait;
+	if (wait)
+		atomic_set(&data.finished, 0);
 
 	spin_lock(&call_lock);
-	if (wait == -1) {
-		/* if another cpu beat us, they win! */
-		if (dumpdata.func) {
-			spin_unlock(&call_lock);
-			return 0;
-		}
-		data = &dumpdata;
-	} else
-		data = &normaldata;
 
-	data->func = func;
-	data->info = info;
-	atomic_set(&data->started, 0);
-	data->wait = wait > 0 ? wait : 0;
-	if (wait > 0)
-		atomic_set(&data->finished, 0);
-
-	call_data = data;
+	call_data = &data;
 	mb();	/* ensure store to call_data precedes setting of IPI_CALL_FUNC */
 	send_IPI_allbutself(IPI_CALL_FUNC);
 
 	/* Wait for response */
-	if (wait >= 0)
-		while (atomic_read(&data->started) != cpus)
-			cpu_relax();
+	while (atomic_read(&data.started) != cpus)
+		cpu_relax();
 
-	if (wait > 0)
-		while (atomic_read(&data->finished) != cpus)
+	if (wait)
+		while (atomic_read(&data.finished) != cpus)
 			cpu_relax();
-
-	if (wait >= 0)
-		call_data = NULL;
+	call_data = NULL;
 
 	spin_unlock(&call_lock);
 	return 0;

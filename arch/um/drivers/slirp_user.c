@@ -13,7 +13,6 @@
 #include "net_user.h"
 #include "slirp.h"
 #include "slip_common.h"
-#include "helper.h"
 #include "os.h"
 
 void slirp_user_init(void *data, void *dev)
@@ -105,7 +104,7 @@ static void slirp_close(int fd, void *data)
 	}
 
 	if(err == 0) {
-		printk("slirp_close: process %d has not exited\n");
+		printk("slirp_close: process %d has not exited\n", pri->pid);
 		return;
 	}
 

@@ -29,6 +29,11 @@
 #include "ixgb.h"
 
 /* Change Log
+ * 1.0.96 04/19/05
+ * - Make needlessly global code static -- bunk@stusta.de
+ * - ethtool cleanup -- shemminger@osdl.org
+ * - Support for MODULE_VERSION -- linville@tuxdriver.com
+ * - add skb_header_cloned check to the tso path -- herbert@apana.org.au
  * 1.0.88 01/05/05
  * - include fix to the condition that determines when to quit NAPI - Robert Olsson
  * - use netif_poll_{disable/enable} to synchronize between NAPI and i/f up/down
@@ -40,16 +45,16 @@
  */
 
 char ixgb_driver_name[] = "ixgb";
-char ixgb_driver_string[] = "Intel(R) PRO/10GbE Network Driver";
+static char ixgb_driver_string[] = "Intel(R) PRO/10GbE Network Driver";
 
 #ifndef CONFIG_IXGB_NAPI
 #define DRIVERNAPI
 #else
 #define DRIVERNAPI "-NAPI"
 #endif
-#define DRV_VERSION "1.0.95-k2"DRIVERNAPI
+#define DRV_VERSION		"1.0.100-k2"DRIVERNAPI
 char ixgb_driver_version[] = DRV_VERSION;
-char ixgb_copyright[] = "Copyright (c) 1999-2005 Intel Corporation.";
+static char ixgb_copyright[] = "Copyright (c) 1999-2005 Intel Corporation.";
 
 /* ixgb_pci_tbl - PCI Device ID Table
  *
@@ -144,10 +149,12 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
 
 /* some defines for controlling descriptor fetches in h/w */
-#define RXDCTL_PTHRESH_DEFAULT 128	/* chip considers prefech below this */
-#define RXDCTL_HTHRESH_DEFAULT 16	/* chip will only prefetch if tail is 
-					   pushed this many descriptors from head */
 #define RXDCTL_WTHRESH_DEFAULT 16	/* chip writes back at this many or RXT0 */
+#define RXDCTL_PTHRESH_DEFAULT 0		/* chip considers prefech below
+						 * this */
+#define RXDCTL_HTHRESH_DEFAULT 0		/* chip will only prefetch if tail
+						 * is pushed this many descriptors
+						 * from head */
 
 /**
  * ixgb_init_module - Driver Registration Routine
@@ -350,18 +357,20 @@ ixgb_probe(struct pci_dev *pdev,
 	if((err = pci_enable_device(pdev)))
 		return err;
 
-	if(!(err = pci_set_dma_mask(pdev, DMA_64BIT_MASK))) {
+	if(!(err = pci_set_dma_mask(pdev, DMA_64BIT_MASK)) &&
+	   !(err = pci_set_consistent_dma_mask(pdev, DMA_64BIT_MASK))) {
 		pci_using_dac = 1;
 	} else {
-		if((err = pci_set_dma_mask(pdev, DMA_32BIT_MASK))) {
+		if((err = pci_set_dma_mask(pdev, DMA_32BIT_MASK)) ||
+		   (err = pci_set_consistent_dma_mask(pdev, DMA_32BIT_MASK))) {
 			IXGB_ERR("No usable DMA configuration, aborting\n");
-			return err;
+			goto err_dma_mask;
 		}
 		pci_using_dac = 0;
 	}
 
 	if((err = pci_request_regions(pdev, ixgb_driver_name)))
-		return err;
+		goto err_request_regions;
 
 	pci_set_master(pdev);
 
@@ -375,7 +384,7 @@ ixgb_probe(struct pci_dev *pdev,
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 
 	pci_set_drvdata(pdev, netdev);
-	adapter = netdev->priv;
+	adapter = netdev_priv(netdev);
 	adapter->netdev = netdev;
 	adapter->pdev = pdev;
 	adapter->hw.back = adapter;
@@ -453,8 +462,9 @@ ixgb_probe(struct pci_dev *pdev,
 	}
 
 	ixgb_get_ee_mac_addr(&adapter->hw, netdev->dev_addr);
+	memcpy(netdev->perm_addr, netdev->dev_addr, netdev->addr_len);
 
-	if(!is_valid_ether_addr(netdev->dev_addr)) {
+	if(!is_valid_ether_addr(netdev->perm_addr)) {
 		err = -EIO;
 		goto err_eeprom;
 	}
@@ -494,6 +504,9 @@ err_ioremap:
 	free_netdev(netdev);
 err_alloc_etherdev:
 	pci_release_regions(pdev);
+err_request_regions:
+err_dma_mask:
+	pci_disable_device(pdev);
 	return err;
 }
 
@@ -511,7 +524,7 @@ static void __devexit
 ixgb_remove(struct pci_dev *pdev)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 
 	unregister_netdev(netdev);
 
@@ -582,7 +595,7 @@ ixgb_sw_init(struct ixgb_adapter *adapter)
 static int
 ixgb_open(struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	int err;
 
 	/* allocate transmit descriptors */
@@ -625,7 +638,7 @@ err_setup_tx:
 static int
 ixgb_close(struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 
 	ixgb_down(adapter, TRUE);
 
@@ -1016,7 +1029,7 @@ ixgb_clean_rx_ring(struct ixgb_adapter *adapter)
 static int
 ixgb_set_mac(struct net_device *netdev, void *p)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	struct sockaddr *addr = p;
 
 	if(!is_valid_ether_addr(addr->sa_data))
@@ -1042,7 +1055,7 @@ ixgb_set_mac(struct net_device *netdev, void *p)
 static void
 ixgb_set_multi(struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	struct ixgb_hw *hw = &adapter->hw;
 	struct dev_mc_list *mc_ptr;
 	uint32_t rctl;
@@ -1155,7 +1168,7 @@ ixgb_tso(struct ixgb_adapter *adapter, struct sk_buff *skb)
 	uint16_t ipcse, tucse, mss;
 	int err;
 
-	if(likely(skb_shinfo(skb)->tso_size)) {
+	if (likely(skb_is_gso(skb))) {
 		if (skb_header_cloned(skb)) {
 			err = pskb_expand_head(skb, 0, 0, GFP_ATOMIC);
 			if (err)
@@ -1163,7 +1176,7 @@ ixgb_tso(struct ixgb_adapter *adapter, struct sk_buff *skb)
 		}
 
 		hdr_len = ((skb->h.raw - skb->data) + (skb->h.th->doff << 2));
-		mss = skb_shinfo(skb)->tso_size;
+		mss = skb_shinfo(skb)->gso_size;
 		skb->nh.iph->tot_len = 0;
 		skb->nh.iph->check = 0;
 		skb->h.th->check = ~csum_tcpudp_magic(skb->nh.iph->saddr,
@@ -1370,7 +1383,7 @@ ixgb_tx_queue(struct ixgb_adapter *adapter, int count, int vlan_id,int tx_flags)
 static int
 ixgb_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	unsigned int first;
 	unsigned int tx_flags = 0;
 	unsigned long flags;
@@ -1424,7 +1437,7 @@ ixgb_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 static void
 ixgb_tx_timeout(struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 
 	/* Do the reset outside of interrupt context */
 	schedule_work(&adapter->tx_timeout_task);
@@ -1433,7 +1446,7 @@ ixgb_tx_timeout(struct net_device *netdev)
 static void
 ixgb_tx_timeout_task(struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 
 	ixgb_down(adapter, TRUE);
 	ixgb_up(adapter);
@@ -1450,7 +1463,7 @@ ixgb_tx_timeout_task(struct net_device *netdev)
 static struct net_device_stats *
 ixgb_get_stats(struct net_device *netdev)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 
 	return &adapter->net_stats;
 }
@@ -1466,7 +1479,7 @@ ixgb_get_stats(struct net_device *netdev)
 static int
 ixgb_change_mtu(struct net_device *netdev, int new_mtu)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	int max_frame = new_mtu + ENET_HEADER_SIZE + ENET_FCS_LENGTH;
 	int old_max_frame = netdev->mtu + ENET_HEADER_SIZE + ENET_FCS_LENGTH;
 
@@ -1521,7 +1534,8 @@ ixgb_update_stats(struct ixgb_adapter *adapter)
 
 		multi |= ((u64)IXGB_READ_REG(&adapter->hw, MPRCH) << 32);
 		/* fix up multicast stats by removing broadcasts */
-		multi -= bcast;
+		if(multi >= bcast)
+			multi -= bcast;
 		
 		adapter->stats.mprcl += (multi & 0xFFFFFFFF);
 		adapter->stats.mprch += (multi >> 32);
@@ -1608,8 +1622,6 @@ ixgb_update_stats(struct ixgb_adapter *adapter)
 	    adapter->stats.icbc +
 	    adapter->stats.ecbc + adapter->stats.mpc;
 
-	adapter->net_stats.rx_dropped = adapter->stats.mpc;
-
 	/* see above
 	 * adapter->net_stats.rx_length_errors = adapter->stats.rlec;
 	 */
@@ -1640,7 +1652,7 @@ static irqreturn_t
 ixgb_intr(int irq, void *data, struct pt_regs *regs)
 {
 	struct net_device *netdev = data;
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	struct ixgb_hw *hw = &adapter->hw;
 	uint32_t icr = IXGB_READ_REG(hw, ICR);
 #ifndef CONFIG_IXGB_NAPI
@@ -1687,7 +1699,7 @@ ixgb_intr(int irq, void *data, struct pt_regs *regs)
 static int
 ixgb_clean(struct net_device *netdev, int *budget)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	int work_to_do = min(*budget, netdev->quota);
 	int tx_cleaned;
 	int work_done = 0;
@@ -2016,7 +2028,7 @@ ixgb_alloc_rx_buffers(struct ixgb_adapter *adapter)
 static void
 ixgb_vlan_rx_register(struct net_device *netdev, struct vlan_group *grp)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	uint32_t ctrl, rctl;
 
 	ixgb_irq_disable(adapter);
@@ -2054,7 +2066,7 @@ ixgb_vlan_rx_register(struct net_device *netdev, struct vlan_group *grp)
 static void
 ixgb_vlan_rx_add_vid(struct net_device *netdev, uint16_t vid)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	uint32_t vfta, index;
 
 	/* add VID to filter table */
@@ -2068,7 +2080,7 @@ ixgb_vlan_rx_add_vid(struct net_device *netdev, uint16_t vid)
 static void
 ixgb_vlan_rx_kill_vid(struct net_device *netdev, uint16_t vid)
 {
-	struct ixgb_adapter *adapter = netdev->priv;
+	struct ixgb_adapter *adapter = netdev_priv(netdev);
 	uint32_t vfta, index;
 
 	ixgb_irq_disable(adapter);

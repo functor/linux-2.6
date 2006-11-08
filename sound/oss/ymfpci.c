@@ -107,14 +107,15 @@ static LIST_HEAD(ymf_devs);
  */
 
 static struct pci_device_id ymf_id_tbl[] = {
-#define DEV(v, d, data) \
-  { PCI_VENDOR_ID_##v, PCI_DEVICE_ID_##v##_##d, PCI_ANY_ID, PCI_ANY_ID, 0, 0, (unsigned long)data }
-	DEV (YAMAHA, 724,  "YMF724"),
-	DEV (YAMAHA, 724F, "YMF724F"),
-	DEV (YAMAHA, 740,  "YMF740"),
-	DEV (YAMAHA, 740C, "YMF740C"),
-	DEV (YAMAHA, 744,  "YMF744"),
-	DEV (YAMAHA, 754,  "YMF754"),
+#define DEV(dev, data) \
+	{ PCI_VENDOR_ID_YAMAHA, dev, PCI_ANY_ID, PCI_ANY_ID, 0, 0, \
+		(unsigned long)data }
+	DEV (PCI_DEVICE_ID_YAMAHA_724,  "YMF724"),
+	DEV (PCI_DEVICE_ID_YAMAHA_724F, "YMF724F"),
+	DEV (PCI_DEVICE_ID_YAMAHA_740,  "YMF740"),
+	DEV (PCI_DEVICE_ID_YAMAHA_740C, "YMF740C"),
+	DEV (PCI_DEVICE_ID_YAMAHA_744,  "YMF744"),
+	DEV (PCI_DEVICE_ID_YAMAHA_754,  "YMF754"),
 #undef DEV
 	{ }
 };
@@ -1917,10 +1918,10 @@ static int ymf_open(struct inode *inode, struct file *file)
 	if (unit == NULL)
 		return -ENODEV;
 
-	down(&unit->open_sem);
+	mutex_lock(&unit->open_mutex);
 
 	if ((state = ymf_state_alloc(unit)) == NULL) {
-		up(&unit->open_sem);
+		mutex_unlock(&unit->open_mutex);
 		return -ENOMEM;
 	}
 	list_add_tail(&state->chain, &unit->states);
@@ -1955,7 +1956,7 @@ static int ymf_open(struct inode *inode, struct file *file)
 	ymfpci_writeb(unit, YDSXGR_TIMERCTRL,
 	    (YDSXGR_TIMERCTRL_TEN|YDSXGR_TIMERCTRL_TIEN));
 #endif
-	up(&unit->open_sem);
+	mutex_unlock(&unit->open_mutex);
 
 	return nonseekable_open(inode, file);
 
@@ -1973,7 +1974,7 @@ out_nodma:
 	list_del(&state->chain);
 	kfree(state);
 
-	up(&unit->open_sem);
+	mutex_unlock(&unit->open_mutex);
 	return err;
 }
 
@@ -1986,7 +1987,7 @@ static int ymf_release(struct inode *inode, struct file *file)
 	ymfpci_writeb(unit, YDSXGR_TIMERCTRL, 0);
 #endif
 
-	down(&unit->open_sem);
+	mutex_lock(&unit->open_mutex);
 
 	/*
 	 * XXX Solve the case of O_NONBLOCK close - don't deallocate here.
@@ -2003,7 +2004,7 @@ static int ymf_release(struct inode *inode, struct file *file)
 	file->private_data = NULL;	/* Can you tell I programmed Solaris */
 	kfree(state);
 
-	up(&unit->open_sem);
+	mutex_unlock(&unit->open_mutex);
 
 	return 0;
 }
@@ -2531,7 +2532,7 @@ static int __devinit ymf_probe_one(struct pci_dev *pcidev, const struct pci_devi
 	spin_lock_init(&codec->reg_lock);
 	spin_lock_init(&codec->voice_lock);
 	spin_lock_init(&codec->ac97_lock);
-	init_MUTEX(&codec->open_sem);
+	mutex_init(&codec->open_mutex);
 	INIT_LIST_HEAD(&codec->states);
 	codec->pci = pcidev;
 
@@ -2679,7 +2680,7 @@ static struct pci_driver ymfpci_driver = {
 
 static int __init ymf_init_module(void)
 {
-	return pci_module_init(&ymfpci_driver);
+	return pci_register_driver(&ymfpci_driver);
 }
 
 static void __exit ymf_cleanup_module (void)

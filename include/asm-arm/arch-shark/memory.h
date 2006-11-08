@@ -15,7 +15,7 @@
 /*
  * Physical DRAM offset.
  */
-#define PHYS_OFFSET     (0x08000000UL)
+#define PHYS_OFFSET     UL(0x08000000)
 
 #ifndef __ASSEMBLY__
 
@@ -38,5 +38,11 @@ static inline void __arch_adjust_zones(int node, unsigned long *zone_size, unsig
 
 #define __virt_to_bus(x)	__virt_to_phys(x)
 #define __bus_to_virt(x)	__phys_to_virt(x)
+
+/*
+ * Cache flushing area
+ */
+#define FLUSH_BASE_PHYS		0x80000000
+#define FLUSH_BASE		0xdf000000
 
 #endif

@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/4xx/redwood6.c
- *
  * Author: Armin Kuster <akuster@mvista.com>
  *
  * 2002 (c) MontaVista, Software, Inc.  This file is licensed under
@@ -12,7 +10,7 @@
 #include <linux/config.h>
 #include <linux/init.h>
 #include <linux/pagemap.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <linux/ioport.h>
 #include <asm/io.h>
 #include <asm/ppc4xx_pic.h>

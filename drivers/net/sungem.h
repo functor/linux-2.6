@@ -980,15 +980,15 @@ struct gem {
 	int			tx_new, tx_old;
 
 	unsigned int has_wol : 1;	/* chip supports wake-on-lan */
-	unsigned int asleep : 1;	/* chip asleep, protected by pm_sem */
+	unsigned int asleep : 1;	/* chip asleep, protected by pm_mutex */
 	unsigned int asleep_wol : 1;	/* was asleep with WOL enabled */
-	unsigned int opened : 1;	/* driver opened, protected by pm_sem */
+	unsigned int opened : 1;	/* driver opened, protected by pm_mutex */
 	unsigned int running : 1;	/* chip running, protected by lock */
 	
 	/* cell enable count, protected by lock */
 	int			cell_enabled;  
 	
-	struct semaphore	pm_sem;
+	struct mutex		pm_mutex;
 
 	u32			msg_enable;
 	u32			status;
@@ -1020,7 +1020,7 @@ struct gem {
 		
 	struct gem_init_block	*init_block;
 	struct sk_buff		*rx_skbs[RX_RING_SIZE];
-	struct sk_buff		*tx_skbs[RX_RING_SIZE];
+	struct sk_buff		*tx_skbs[TX_RING_SIZE];
 	dma_addr_t		gblock_dvma;
 
 	struct pci_dev		*pdev;
@@ -1035,7 +1035,8 @@ struct gem {
 			
 #define ALIGNED_RX_SKB_ADDR(addr) \
         ((((unsigned long)(addr) + (64UL - 1UL)) & ~(64UL - 1UL)) - (unsigned long)(addr))
-static __inline__ struct sk_buff *gem_alloc_skb(int size, int gfp_flags)
+static __inline__ struct sk_buff *gem_alloc_skb(int size,
+						gfp_t gfp_flags)
 {
 	struct sk_buff *skb = alloc_skb(size + 64, gfp_flags);
 

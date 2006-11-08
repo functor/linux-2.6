@@ -383,11 +383,8 @@ static int keyspan_write(struct usb_serial_port *port,
 		dbg("%s - endpoint %d flip %d", __FUNCTION__, usb_pipeendpoint(this_urb->pipe), flip);
 
 		if (this_urb->status == -EINPROGRESS) {
-			if (this_urb->transfer_flags & URB_ASYNC_UNLINK)
-				break;
 			if (time_before(jiffies, p_priv->tx_start_time[flip] + 10 * HZ))
 				break;
-			this_urb->transfer_flags |= URB_ASYNC_UNLINK;
 			usb_unlink_urb(this_urb);
 			break;
 		}
@@ -402,7 +399,6 @@ static int keyspan_write(struct usb_serial_port *port,
 		/* send the data out the bulk port */
 		this_urb->transfer_buffer_length = todo + dataOffset;
 
-		this_urb->transfer_flags &= ~URB_ASYNC_UNLINK;
 		this_urb->dev = port->serial->dev;
 		if ((err = usb_submit_urb(this_urb, GFP_ATOMIC)) != 0) {
 			dbg("usb_submit_urb(write bulk) failed (%d)", err);
@@ -1119,10 +1115,8 @@ static int keyspan_open (struct usb_serial_port *port, struct file *filp)
 
 static inline void stop_urb(struct urb *urb)
 {
-	if (urb && urb->status == -EINPROGRESS) {
-		urb->transfer_flags &= ~URB_ASYNC_UNLINK;
+	if (urb && urb->status == -EINPROGRESS)
 		usb_kill_urb(urb);
-	}
 }
 
 static void keyspan_close(struct usb_serial_port *port, struct file *filp)
@@ -2256,12 +2250,11 @@ static int keyspan_startup (struct usb_serial *serial)
 	}
 
 	/* Setup private data for serial driver */
-	s_priv = kmalloc(sizeof(struct keyspan_serial_private), GFP_KERNEL);
+	s_priv = kzalloc(sizeof(struct keyspan_serial_private), GFP_KERNEL);
 	if (!s_priv) {
 		dbg("%s - kmalloc for keyspan_serial_private failed.", __FUNCTION__);
 		return -ENOMEM;
 	}
-	memset(s_priv, 0, sizeof(struct keyspan_serial_private));
 
 	s_priv->device_details = d_details;
 	usb_set_serial_data(serial, s_priv);
@@ -2269,12 +2262,11 @@ static int keyspan_startup (struct usb_serial *serial)
 	/* Now setup per port private data */
 	for (i = 0; i < serial->num_ports; i++) {
 		port = serial->port[i];
-		p_priv = kmalloc(sizeof(struct keyspan_port_private), GFP_KERNEL);
+		p_priv = kzalloc(sizeof(struct keyspan_port_private), GFP_KERNEL);
 		if (!p_priv) {
 			dbg("%s - kmalloc for keyspan_port_private (%d) failed!.", __FUNCTION__, i);
 			return (1);
 		}
-		memset(p_priv, 0, sizeof(struct keyspan_port_private));
 		p_priv->device_details = d_details;
 		usb_set_serial_port_data(port, p_priv);
 	}

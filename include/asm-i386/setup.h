@@ -6,9 +6,7 @@
 #ifndef _i386_SETUP_H
 #define _i386_SETUP_H
 
-#define PFN_UP(x)	(((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
-#define PFN_DOWN(x)	((x) >> PAGE_SHIFT)
-#define PFN_PHYS(x)	((x) << PAGE_SHIFT)
+#include <linux/pfn.h>
 
 /*
  * Reserved space for vmalloc and iomap - defined in asm/page.h
@@ -44,7 +42,7 @@ extern unsigned char boot_params[PARAM_SIZE];
 #define EFI_SYSTAB ((efi_system_table_t *) *((unsigned long *)(PARAM+0x1c4)))
 #define EFI_MEMDESC_SIZE (*((unsigned long *) (PARAM+0x1c8)))
 #define EFI_MEMDESC_VERSION (*((unsigned long *) (PARAM+0x1cc)))
-#define EFI_MEMMAP ((efi_memory_desc_t *) *((unsigned long *)(PARAM+0x1d0)))
+#define EFI_MEMMAP ((void *) *((unsigned long *)(PARAM+0x1d0)))
 #define EFI_MEMMAP_SIZE (*((unsigned long *) (PARAM+0x1d4)))
 #define MOUNT_ROOT_RDONLY (*(unsigned short *) (PARAM+0x1F2))
 #define RAMDISK_FLAGS (*(unsigned short *) (PARAM+0x1F8))

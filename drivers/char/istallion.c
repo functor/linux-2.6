@@ -135,7 +135,7 @@ static stlconf_t	stli_brdconf[] = {
 	/*{ BRD_ECP, 0x2a0, 0, 0xcc000, 0, 0 },*/
 };
 
-static int	stli_nrbrds = sizeof(stli_brdconf) / sizeof(stlconf_t);
+static int	stli_nrbrds = ARRAY_SIZE(stli_brdconf);
 
 /*
  *	There is some experimental EISA board detection code in this driver.
@@ -181,7 +181,6 @@ static struct tty_driver	*stli_serial;
  *	is already swapping a shared buffer won't make things any worse.
  */
 static char			*stli_tmpwritebuf;
-static DECLARE_MUTEX(stli_tmpwritesem);
 
 #define	STLI_TXBUFSIZE		4096
 
@@ -379,13 +378,13 @@ MODULE_DESCRIPTION("Stallion Intelligent Multiport Serial Driver");
 MODULE_LICENSE("GPL");
 
 
-MODULE_PARM(board0, "1-3s");
+module_param_array(board0, charp, NULL, 0);
 MODULE_PARM_DESC(board0, "Board 0 config -> name[,ioaddr[,memaddr]");
-MODULE_PARM(board1, "1-3s");
+module_param_array(board1, charp, NULL, 0);
 MODULE_PARM_DESC(board1, "Board 1 config -> name[,ioaddr[,memaddr]");
-MODULE_PARM(board2, "1-3s");
+module_param_array(board2, charp, NULL, 0);
 MODULE_PARM_DESC(board2, "Board 2 config -> name[,ioaddr[,memaddr]");
-MODULE_PARM(board3, "1-3s");
+module_param_array(board3, charp, NULL, 0);
 MODULE_PARM_DESC(board3, "Board 3 config -> name[,ioaddr[,memaddr]");
 
 #endif
@@ -406,8 +405,7 @@ static unsigned long	stli_eisamemprobeaddrs[] = {
 	0xff000000, 0xff010000, 0xff020000, 0xff030000,
 };
 
-static int	stli_eisamempsize = sizeof(stli_eisamemprobeaddrs) / sizeof(unsigned long);
-int		stli_eisaprobe = STLI_EISAPROBE;
+static int	stli_eisamempsize = ARRAY_SIZE(stli_eisamemprobeaddrs);
 
 /*
  *	Define the Stallion PCI vendor and device IDs.
@@ -708,7 +706,6 @@ static int	stli_portcmdstats(stliport_t *portp);
 static int	stli_clrportstats(stliport_t *portp, comstats_t __user *cp);
 static int	stli_getportstruct(stliport_t __user *arg);
 static int	stli_getbrdstruct(stlibrd_t __user *arg);
-static void	*stli_memalloc(int len);
 static stlibrd_t *stli_allocbrd(void);
 
 static void	stli_ecpinit(stlibrd_t *brdp);
@@ -781,7 +778,7 @@ static struct file_operations	stli_fsiomem = {
  *	much cheaper on host cpu than using interrupts. It turns out to
  *	not increase character latency by much either...
  */
-static struct timer_list stli_timerlist = TIMER_INITIALIZER(stli_poll, 0, 0);
+static DEFINE_TIMER(stli_timerlist, stli_poll, 0, 0);
 
 static int	stli_timeron;
 
@@ -792,7 +789,7 @@ static int	stli_timeron;
 
 /*****************************************************************************/
 
-static struct class_simple *istallion_class;
+static struct class *istallion_class;
 
 #ifdef MODULE
 
@@ -854,17 +851,16 @@ static void __exit istallion_module_exit(void)
 	put_tty_driver(stli_serial);
 	for (i = 0; i < 4; i++) {
 		devfs_remove("staliomem/%d", i);
-		class_simple_device_remove(MKDEV(STL_SIOMEMMAJOR, i));
+		class_device_destroy(istallion_class, MKDEV(STL_SIOMEMMAJOR, i));
 	}
 	devfs_remove("staliomem");
-	class_simple_destroy(istallion_class);
+	class_destroy(istallion_class);
 	if ((i = unregister_chrdev(STL_SIOMEMMAJOR, "staliomem")))
 		printk("STALLION: failed to un-register serial memory device, "
 			"errno=%d\n", -i);
-	if (stli_tmpwritebuf != (char *) NULL)
-		kfree(stli_tmpwritebuf);
-	if (stli_txcookbuf != (char *) NULL)
-		kfree(stli_txcookbuf);
+
+	kfree(stli_tmpwritebuf);
+	kfree(stli_txcookbuf);
 
 	for (i = 0; (i < stli_nrbrds); i++) {
 		if ((brdp = stli_brds[i]) == (stlibrd_t *) NULL)
@@ -901,15 +897,13 @@ static void stli_argbrds(void)
 {
 	stlconf_t	conf;
 	stlibrd_t	*brdp;
-	int		nrargs, i;
+	int		i;
 
 #ifdef DEBUG
 	printk("stli_argbrds()\n");
 #endif
 
-	nrargs = sizeof(stli_brdsp) / sizeof(char **);
-
-	for (i = stli_nrbrds; (i < nrargs); i++) {
+	for (i = stli_nrbrds; i < ARRAY_SIZE(stli_brdsp); i++) {
 		memset(&conf, 0, sizeof(conf));
 		if (stli_parsebrd(&conf, stli_brdsp[i]) == 0)
 			continue;
@@ -969,7 +963,7 @@ static unsigned long stli_atol(char *str)
 static int stli_parsebrd(stlconf_t *confp, char **argp)
 {
 	char	*sp;
-	int	nrbrdnames, i;
+	int	i;
 
 #ifdef DEBUG
 	printk("stli_parsebrd(confp=%x,argp=%x)\n", (int) confp, (int) argp);
@@ -981,14 +975,13 @@ static int stli_parsebrd(stlconf_t *confp, char **argp)
 	for (sp = argp[0], i = 0; ((*sp != 0) && (i < 25)); sp++, i++)
 		*sp = TOLOWER(*sp);
 
-	nrbrdnames = sizeof(stli_brdstr) / sizeof(stlibrdtype_t);
-	for (i = 0; (i < nrbrdnames); i++) {
+	for (i = 0; i < ARRAY_SIZE(stli_brdstr); i++) {
 		if (strcmp(stli_brdstr[i].name, argp[0]) == 0)
 			break;
 	}
-	if (i >= nrbrdnames) {
+	if (i == ARRAY_SIZE(stli_brdstr)) {
 		printk("STALLION: unknown board name, %s?\n", argp[0]);
-		return(0);
+		return 0;
 	}
 
 	confp->brdtype = stli_brdstr[i].type;
@@ -1000,17 +993,6 @@ static int stli_parsebrd(stlconf_t *confp, char **argp)
 }
 
 #endif
-
-/*****************************************************************************/
-
-/*
- *	Local driver kernel malloc routine.
- */
-
-static void *stli_memalloc(int len)
-{
-	return((void *) kmalloc(len, GFP_KERNEL));
-}
 
 /*****************************************************************************/
 
@@ -2716,17 +2698,13 @@ static void stli_read(stlibrd_t *brdp, stliport_t *portp)
 		stlen = size - tail;
 	}
 
-	len = MIN(len, (TTY_FLIPBUF_SIZE - tty->flip.count));
+	len = tty_buffer_request_room(tty, len);
+	/* FIXME : iomap ? */
 	shbuf = (volatile char *) EBRDGETMEMPTR(brdp, portp->rxoffset);
 
 	while (len > 0) {
 		stlen = MIN(len, stlen);
-		memcpy(tty->flip.char_buf_ptr, (char *) (shbuf + tail), stlen);
-		memset(tty->flip.flag_buf_ptr, 0, stlen);
-		tty->flip.char_buf_ptr += stlen;
-		tty->flip.flag_buf_ptr += stlen;
-		tty->flip.count += stlen;
-
+		tty_insert_flip_string(tty, (char *)(shbuf + tail), stlen);
 		len -= stlen;
 		tail += stlen;
 		if (tail >= size) {
@@ -2911,16 +2889,12 @@ static int stli_hostcmd(stlibrd_t *brdp, stliport_t *portp)
 
 		if ((nt.data & DT_RXBREAK) && (portp->rxmarkmsk & BRKINT)) {
 			if (tty != (struct tty_struct *) NULL) {
-				if (tty->flip.count < TTY_FLIPBUF_SIZE) {
-					tty->flip.count++;
-					*tty->flip.flag_buf_ptr++ = TTY_BREAK;
-					*tty->flip.char_buf_ptr++ = 0;
-					if (portp->flags & ASYNC_SAK) {
-						do_SAK(tty);
-						EBRDENABLE(brdp);
-					}
-					tty_schedule_flip(tty);
+				tty_insert_flip_char(tty, 0, TTY_BREAK);
+				if (portp->flags & ASYNC_SAK) {
+					do_SAK(tty);
+					EBRDENABLE(brdp);
 				}
+				tty_schedule_flip(tty);
 			}
 		}
 
@@ -3241,13 +3215,12 @@ static int stli_initports(stlibrd_t *brdp)
 #endif
 
 	for (i = 0, panelnr = 0, panelport = 0; (i < brdp->nrports); i++) {
-		portp = (stliport_t *) stli_memalloc(sizeof(stliport_t));
-		if (portp == (stliport_t *) NULL) {
+		portp = kzalloc(sizeof(stliport_t), GFP_KERNEL);
+		if (!portp) {
 			printk("STALLION: failed to allocate port structure\n");
 			continue;
 		}
 
-		memset(portp, 0, sizeof(stliport_t));
 		portp->magic = STLI_PORTMAGIC;
 		portp->portnr = i;
 		portp->brdnr = brdp->brdnr;
@@ -4624,14 +4597,13 @@ static stlibrd_t *stli_allocbrd(void)
 {
 	stlibrd_t	*brdp;
 
-	brdp = (stlibrd_t *) stli_memalloc(sizeof(stlibrd_t));
-	if (brdp == (stlibrd_t *) NULL) {
+	brdp = kzalloc(sizeof(stlibrd_t), GFP_KERNEL);
+	if (!brdp) {
 		printk(KERN_ERR "STALLION: failed to allocate memory "
 				"(size=%d)\n", sizeof(stlibrd_t));
-		return((stlibrd_t *) NULL);
+		return NULL;
 	}
 
-	memset(brdp, 0, sizeof(stlibrd_t));
 	brdp->magic = STLI_BOARDMAGIC;
 	return(brdp);
 }
@@ -4685,7 +4657,7 @@ static int stli_initbrds(void)
 #ifdef MODULE
 	stli_argbrds();
 #endif
-	if (stli_eisaprobe)
+	if (STLI_EISAPROBE)
 		stli_findeisabrds();
 #ifdef CONFIG_PCI
 	stli_findpcibrds();
@@ -4945,7 +4917,7 @@ static int stli_portcmdstats(stliport_t *portp)
 	if (portp->tty != (struct tty_struct *) NULL) {
 		if (portp->tty->driver_data == portp) {
 			stli_comstats.ttystate = portp->tty->flags;
-			stli_comstats.rxbuffered = portp->tty->flip.count;
+			stli_comstats.rxbuffered = -1 /*portp->tty->flip.count*/;
 			if (portp->tty->termios != (struct termios *) NULL) {
 				stli_comstats.cflags = portp->tty->termios->c_cflag;
 				stli_comstats.iflags = portp->tty->termios->c_iflag;
@@ -5224,12 +5196,12 @@ int __init stli_init(void)
 /*
  *	Allocate a temporary write buffer.
  */
-	stli_tmpwritebuf = (char *) stli_memalloc(STLI_TXBUFSIZE);
-	if (stli_tmpwritebuf == (char *) NULL)
+	stli_tmpwritebuf = kmalloc(STLI_TXBUFSIZE, GFP_KERNEL);
+	if (!stli_tmpwritebuf)
 		printk(KERN_ERR "STALLION: failed to allocate memory "
 				"(size=%d)\n", STLI_TXBUFSIZE);
-	stli_txcookbuf = stli_memalloc(STLI_TXBUFSIZE);
-	if (stli_txcookbuf == (char *) NULL)
+	stli_txcookbuf = kmalloc(STLI_TXBUFSIZE, GFP_KERNEL);
+	if (!stli_txcookbuf)
 		printk(KERN_ERR "STALLION: failed to allocate memory "
 				"(size=%d)\n", STLI_TXBUFSIZE);
 
@@ -5242,12 +5214,13 @@ int __init stli_init(void)
 				"device\n");
 
 	devfs_mk_dir("staliomem");
-	istallion_class = class_simple_create(THIS_MODULE, "staliomem");
+	istallion_class = class_create(THIS_MODULE, "staliomem");
 	for (i = 0; i < 4; i++) {
 		devfs_mk_cdev(MKDEV(STL_SIOMEMMAJOR, i),
 			       S_IFCHR | S_IRUSR | S_IWUSR,
 			       "staliomem/%d", i);
-		class_simple_device_add(istallion_class, MKDEV(STL_SIOMEMMAJOR, i), 
+		class_device_create(istallion_class, NULL,
+				MKDEV(STL_SIOMEMMAJOR, i),
 				NULL, "staliomem%d", i);
 	}
 

@@ -1,26 +1,22 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
- * Refer to the README file included with this package for         *
- * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Fibre Channel Host Bus Adapters.                                *
+ * Copyright (C) 2004-2006 Emulex.  All rights reserved.           *
+ * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
- * modify it under the terms of the GNU General Public License     *
- * as published by the Free Software Foundation; either version 2  *
- * of the License, or (at your option) any later version.          *
- *                                                                 *
- * This program is distributed in the hope that it will be useful, *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of  *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the   *
- * GNU General Public License for more details, a copy of which    *
- * can be found in the file COPYING included with this package.    *
+ * modify it under the terms of version 2 of the GNU General       *
+ * Public License as published by the Free Software Foundation.    *
+ * This program is distributed in the hope that it will be useful. *
+ * ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND          *
+ * WARRANTIES, INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY,  *
+ * FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT, ARE      *
+ * DISCLAIMED, EXCEPT TO THE EXTENT THAT SUCH DISCLAIMERS ARE HELD *
+ * TO BE LEGALLY INVALID.  See the GNU General Public License for  *
+ * more details, a copy of which can be found in the file COPYING  *
+ * included with this package.                                     *
  *******************************************************************/
-
-/*
- * $Id: lpfc_disc.h 1.61 2005/04/07 08:46:52EDT sf_support Exp  $
- */
 
 #define FC_MAX_HOLD_RSCN     32	      /* max number of deferred RSCNs */
 #define FC_MAX_NS_RSP        65536    /* max size NameServer rsp */
@@ -32,18 +28,24 @@
  * This is used by Fibre Channel protocol to support FCP.
  */
 
+/* worker thread events */
+enum lpfc_work_type {
+	LPFC_EVT_NODEV_TMO,
+	LPFC_EVT_ONLINE,
+	LPFC_EVT_OFFLINE,
+	LPFC_EVT_WARM_START,
+	LPFC_EVT_KILL,
+	LPFC_EVT_ELS_RETRY,
+};
+
 /* structure used to queue event to the discovery tasklet */
 struct lpfc_work_evt {
 	struct list_head      evt_listp;
 	void                * evt_arg1;
 	void                * evt_arg2;
-	uint32_t              evt;
+	enum lpfc_work_type   evt;
 };
 
-#define LPFC_EVT_NODEV_TMO	0x1
-#define LPFC_EVT_ONLINE		0x2
-#define LPFC_EVT_OFFLINE	0x3
-#define LPFC_EVT_ELS_RETRY	0x4
 
 struct lpfc_nodelist {
 	struct list_head nlp_listp;
@@ -60,6 +62,7 @@ struct lpfc_nodelist {
 
 	uint16_t        nlp_rpi;
 	uint16_t        nlp_state;		/* state transition indicator */
+	uint16_t        nlp_prev_state;		/* state transition indicator */
 	uint16_t        nlp_xri;		/* output exchange id for RPI */
 	uint16_t        nlp_sid;		/* scsi id */
 #define NLP_NO_SID		0xffff
@@ -74,10 +77,11 @@ struct lpfc_nodelist {
 	struct timer_list   nlp_tmofunc;	/* Used for nodev tmo */
 	struct fc_rport *rport;			/* Corresponding FC transport
 						   port structure */
-	struct lpfc_nodelist *nlp_rpi_hash_next;
 	struct lpfc_hba      *nlp_phba;
 	struct lpfc_work_evt nodev_timeout_evt;
 	struct lpfc_work_evt els_retry_evt;
+	unsigned long last_ramp_up_time;        /* jiffy of last ramp up */
+	unsigned long last_q_full_time;		/* jiffy of last queue full */
 };
 
 /* Defines for nlp_flag (uint32) */
@@ -109,6 +113,7 @@ struct lpfc_nodelist {
 #define NLP_NPR_ADISC      0x2000000	/* Issue ADISC when dq'ed from
 					   NPR list */
 #define NLP_DELAY_REMOVE   0x4000000	/* Defer removal till end of DSM */
+#define NLP_NODEV_REMOVE   0x8000000	/* Defer removal till discovery ends */
 
 /* Defines for list searchs */
 #define NLP_SEARCH_MAPPED    0x1	/* search mapped */

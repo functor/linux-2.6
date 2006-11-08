@@ -92,7 +92,7 @@ struct autofs_dir_ent *autofs_expire(struct super_block *sb,
 			;
 		dput(dentry);
 
-		if ( may_umount(mnt) == 0 ) {
+		if ( may_umount(mnt) ) {
 			mntput(mnt);
 			DPRINTK(("autofs: signaling expire on %s\n", ent->name));
 			return ent; /* Expirable! */
@@ -232,13 +232,13 @@ void autofs_hash_dputall(struct autofs_dirhash *dh)
 
 /* Delete everything.  This is used on filesystem destruction, so we
    make no attempt to keep the pointers valid */
-void autofs_hash_nuke(struct autofs_dirhash *dh)
+void autofs_hash_nuke(struct autofs_sb_info *sbi)
 {
 	int i;
 	struct autofs_dir_ent *ent, *nent;
 
 	for ( i = 0 ; i < AUTOFS_HASH_SIZE ; i++ ) {
-		for ( ent = dh->h[i] ; ent ; ent = nent ) {
+		for ( ent = sbi->dirhash.h[i] ; ent ; ent = nent ) {
 			nent = ent->next;
 			if ( ent->dentry )
 				dput(ent->dentry);
@@ -246,4 +246,5 @@ void autofs_hash_nuke(struct autofs_dirhash *dh)
 			kfree(ent);
 		}
 	}
+	shrink_dcache_sb(sbi->sb);
 }

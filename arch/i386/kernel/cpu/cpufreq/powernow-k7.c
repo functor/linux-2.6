@@ -171,10 +171,9 @@ static int get_ranges (unsigned char *pst)
 	unsigned int speed;
 	u8 fid, vid;
 
-	powernow_table = kmalloc((sizeof(struct cpufreq_frequency_table) * (number_scales + 1)), GFP_KERNEL);
+	powernow_table = kzalloc((sizeof(struct cpufreq_frequency_table) * (number_scales + 1)), GFP_KERNEL);
 	if (!powernow_table)
 		return -ENOMEM;
-	memset(powernow_table, 0, (sizeof(struct cpufreq_frequency_table) * (number_scales + 1)));
 
 	for (j=0 ; j < number_scales; j++) {
 		fid = *pst++;
@@ -200,8 +199,8 @@ static int get_ranges (unsigned char *pst)
 		powernow_table[j].index |= (vid << 8); /* upper 8 bits */
 
 		dprintk ("   FID: 0x%x (%d.%dx [%dMHz])  "
-			 "VID: 0x%x (%d.%03dV)\n", fid, fid_codes[fid] / 10, 
-			 fid_codes[fid] % 10, speed/1000, vid,	
+			 "VID: 0x%x (%d.%03dV)\n", fid, fid_codes[fid] / 10,
+			 fid_codes[fid] % 10, speed/1000, vid,
 			 mobile_vid_table[vid]/1000,
 			 mobile_vid_table[vid]%1000);
 	}
@@ -305,15 +304,12 @@ static int powernow_acpi_init(void)
 		goto err0;
 	}
 
-	acpi_processor_perf = kmalloc(sizeof(struct acpi_processor_performance),
+	acpi_processor_perf = kzalloc(sizeof(struct acpi_processor_performance),
 				      GFP_KERNEL);
-
 	if (!acpi_processor_perf) {
 		retval = -ENOMEM;
 		goto err0;
 	}
-
-	memset(acpi_processor_perf, 0, sizeof(struct acpi_processor_performance));
 
 	if (acpi_processor_register_performance(acpi_processor_perf, 0)) {
 		retval = -EIO;
@@ -337,13 +333,11 @@ static int powernow_acpi_init(void)
 		goto err2;
 	}
 
-	powernow_table = kmalloc((number_scales + 1) * (sizeof(struct cpufreq_frequency_table)), GFP_KERNEL);
+	powernow_table = kzalloc((number_scales + 1) * (sizeof(struct cpufreq_frequency_table)), GFP_KERNEL);
 	if (!powernow_table) {
 		retval = -ENOMEM;
 		goto err2;
 	}
-
-	memset(powernow_table, 0, ((number_scales + 1) * sizeof(struct cpufreq_frequency_table)));
 
 	pc.val = (unsigned long) acpi_processor_perf->states[0].control;
 	for (i = 0; i < number_scales; i++) {
@@ -374,8 +368,8 @@ static int powernow_acpi_init(void)
 		}
 
 		dprintk ("   FID: 0x%x (%d.%dx [%dMHz])  "
-			 "VID: 0x%x (%d.%03dV)\n", fid, fid_codes[fid] / 10, 
-			 fid_codes[fid] % 10, speed/1000, vid,	
+			 "VID: 0x%x (%d.%03dV)\n", fid, fid_codes[fid] / 10,
+			 fid_codes[fid] % 10, speed/1000, vid,
 			 mobile_vid_table[vid]/1000,
 			 mobile_vid_table[vid]%1000);
 
@@ -466,7 +460,7 @@ static int powernow_decode_bios (int maxfid, int startvid)
 				    (maxfid==pst->maxfid) && (startvid==pst->startvid))
 				{
 					dprintk ("PST:%d (@%p)\n", i, pst);
-					dprintk (" cpuid: 0x%x  fsb: %d  maxFID: 0x%x  startvid: 0x%x\n", 
+					dprintk (" cpuid: 0x%x  fsb: %d  maxFID: 0x%x  startvid: 0x%x\n",
 						 pst->cpuid, pst->fsbspeed, pst->maxfid, pst->startvid);
 
 					ret = get_ranges ((char *) pst + sizeof (struct pst_s));
@@ -587,10 +581,7 @@ static int __init powernow_cpu_init (struct cpufreq_policy *policy)
 
 	rdmsrl (MSR_K7_FID_VID_STATUS, fidvidstatus.val);
 
-	/* recalibrate cpu_khz */
-	result = recalibrate_cpu_khz();
-	if (result)
-		return result;
+	recalibrate_cpu_khz();
 
 	fsb = (10 * cpu_khz) / fid_codes[fidvidstatus.bits.CFID];
 	if (!fsb) {
@@ -648,9 +639,7 @@ static int powernow_cpu_exit (struct cpufreq_policy *policy) {
 	}
 #endif
 
-	if (powernow_table)
-		kfree(powernow_table);
-
+	kfree(powernow_table);
 	return 0;
 }
 

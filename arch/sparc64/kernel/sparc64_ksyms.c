@@ -69,7 +69,6 @@ struct poll {
 
 extern void die_if_kernel(char *str, struct pt_regs *regs);
 extern pid_t kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
-void _sigpause_common (unsigned int set, struct pt_regs *);
 extern void *__bzero(void *, size_t);
 extern void *__memscan_zero(void *, size_t);
 extern void *__memscan_generic(void *, int, size_t);
@@ -79,7 +78,7 @@ extern void linux_sparc_syscall(void);
 extern void rtrap(void);
 extern void show_regs(struct pt_regs *);
 extern void solaris_syscall(void);
-extern void syscall_trace(void);
+extern void syscall_trace(struct pt_regs *, int);
 extern u32 sunos_sys_table[], sys_call_table32[];
 extern void tl0_solaris(void);
 extern void sys_sigsuspend(void);
@@ -88,30 +87,13 @@ extern int svr4_setcontext(svr4_ucontext_t *uc, struct pt_regs *regs);
 extern int compat_sys_ioctl(unsigned int fd, unsigned int cmd, u32 arg);
 extern int (*handle_mathemu)(struct pt_regs *, struct fpustate *);
 extern long sparc32_open(const char __user * filename, int flags, int mode);
-extern int io_remap_page_range(struct vm_area_struct *vma, unsigned long from,
-	unsigned long offset, unsigned long size, pgprot_t prot, int space);
 extern int io_remap_pfn_range(struct vm_area_struct *vma, unsigned long from,
 	unsigned long pfn, unsigned long size, pgprot_t prot);
 extern void (*prom_palette)(int);
 
 extern int __ashrdi3(int, int);
 
-extern void dump_thread(struct pt_regs *, struct user *);
 extern int dump_fpu (struct pt_regs * regs, elf_fpregset_t * fpregs);
-
-#if defined(CONFIG_SMP) && defined(CONFIG_DEBUG_SPINLOCK)
-extern void _do_spin_lock (spinlock_t *lock, char *str);
-extern void _do_spin_unlock (spinlock_t *lock);
-extern int _spin_trylock (spinlock_t *lock);
-extern void _do_read_lock(rwlock_t *rw, char *str);
-extern void _do_read_unlock(rwlock_t *rw, char *str);
-extern void _do_write_lock(rwlock_t *rw, char *str);
-extern void _do_write_unlock(rwlock_t *rw);
-extern int _do_write_trylock(rwlock_t *rw, char *str);
-#endif
-
-extern unsigned long phys_base;
-extern unsigned long pfn_base;
 
 extern unsigned int sys_call_table[];
 
@@ -123,22 +105,25 @@ extern void xor_vis_4(unsigned long, unsigned long *, unsigned long *,
 extern void xor_vis_5(unsigned long, unsigned long *, unsigned long *,
 		      unsigned long *, unsigned long *, unsigned long *);
 
+extern void xor_niagara_2(unsigned long, unsigned long *, unsigned long *);
+extern void xor_niagara_3(unsigned long, unsigned long *, unsigned long *,
+			  unsigned long *);
+extern void xor_niagara_4(unsigned long, unsigned long *, unsigned long *,
+			  unsigned long *, unsigned long *);
+extern void xor_niagara_5(unsigned long, unsigned long *, unsigned long *,
+			  unsigned long *, unsigned long *, unsigned long *);
+
 /* Per-CPU information table */
 EXPORT_PER_CPU_SYMBOL(__cpu_data);
 
 /* used by various drivers */
 #ifdef CONFIG_SMP
-#ifndef CONFIG_DEBUG_SPINLOCK
 /* Out of line rw-locking implementation. */
 EXPORT_SYMBOL(__read_lock);
 EXPORT_SYMBOL(__read_unlock);
 EXPORT_SYMBOL(__write_lock);
 EXPORT_SYMBOL(__write_unlock);
 EXPORT_SYMBOL(__write_trylock);
-/* Out of line spin-locking implementation. */
-EXPORT_SYMBOL(_raw_spin_lock);
-EXPORT_SYMBOL(_raw_spin_lock_flags);
-#endif
 
 /* Hard IRQ locking */
 EXPORT_SYMBOL(synchronize_irq);
@@ -151,18 +136,6 @@ EXPORT_SYMBOL(_mcount);
 /* CPU online map and active count.  */
 EXPORT_SYMBOL(cpu_online_map);
 EXPORT_SYMBOL(phys_cpu_present_map);
-
-/* Spinlock debugging library, optional. */
-#ifdef CONFIG_DEBUG_SPINLOCK
-EXPORT_SYMBOL(_do_spin_lock);
-EXPORT_SYMBOL(_do_spin_unlock);
-EXPORT_SYMBOL(_spin_trylock);
-EXPORT_SYMBOL(_do_read_lock);
-EXPORT_SYMBOL(_do_read_unlock);
-EXPORT_SYMBOL(_do_write_lock);
-EXPORT_SYMBOL(_do_write_unlock);
-EXPORT_SYMBOL(_do_write_trylock);
-#endif
 
 EXPORT_SYMBOL(smp_call_function);
 #endif /* CONFIG_SMP */
@@ -193,9 +166,6 @@ EXPORT_SYMBOL(atomic64_add);
 EXPORT_SYMBOL(atomic64_add_ret);
 EXPORT_SYMBOL(atomic64_sub);
 EXPORT_SYMBOL(atomic64_sub_ret);
-#ifdef CONFIG_SMP
-EXPORT_SYMBOL(_atomic_dec_and_lock);
-#endif
 
 /* Atomic bit operations. */
 EXPORT_SYMBOL(test_and_set_bit);
@@ -204,11 +174,6 @@ EXPORT_SYMBOL(test_and_change_bit);
 EXPORT_SYMBOL(set_bit);
 EXPORT_SYMBOL(clear_bit);
 EXPORT_SYMBOL(change_bit);
-
-/* Bit searching */
-EXPORT_SYMBOL(find_next_bit);
-EXPORT_SYMBOL(find_next_zero_bit);
-EXPORT_SYMBOL(find_next_zero_le_bit);
 
 EXPORT_SYMBOL(ivector_table);
 EXPORT_SYMBOL(enable_irq);
@@ -227,7 +192,6 @@ EXPORT_SYMBOL(__flush_dcache_range);
 
 EXPORT_SYMBOL(mostek_lock);
 EXPORT_SYMBOL(mstk48t02_regs);
-EXPORT_SYMBOL(request_fast_irq);
 #ifdef CONFIG_SUN_AUXIO
 EXPORT_SYMBOL(auxio_set_led);
 EXPORT_SYMBOL(auxio_set_lte);
@@ -269,19 +233,14 @@ EXPORT_SYMBOL(pci_dma_supported);
 #endif
 
 /* I/O device mmaping on Sparc64. */
-EXPORT_SYMBOL(io_remap_page_range);
 EXPORT_SYMBOL(io_remap_pfn_range);
 
+#ifdef CONFIG_COMPAT
 /* Solaris/SunOS binary compatibility */
-EXPORT_SYMBOL(_sigpause_common);
 EXPORT_SYMBOL(verify_compat_iovec);
-
-EXPORT_SYMBOL(dump_thread);
-EXPORT_SYMBOL(dump_fpu);
-EXPORT_SYMBOL(pte_alloc_one_kernel);
-#ifndef CONFIG_SMP
-EXPORT_SYMBOL(pgt_quicklists);
 #endif
+
+EXPORT_SYMBOL(dump_fpu);
 EXPORT_SYMBOL(put_fs_struct);
 
 /* math-emu wants this */
@@ -315,18 +274,8 @@ EXPORT_SYMBOL(__prom_getsibling);
 
 /* sparc library symbols */
 EXPORT_SYMBOL(strlen);
-EXPORT_SYMBOL(strnlen);
 EXPORT_SYMBOL(__strlen_user);
 EXPORT_SYMBOL(__strnlen_user);
-EXPORT_SYMBOL(strcpy);
-EXPORT_SYMBOL(strncpy);
-EXPORT_SYMBOL(strcat);
-EXPORT_SYMBOL(strncat);
-EXPORT_SYMBOL(strcmp);
-EXPORT_SYMBOL(strchr);
-EXPORT_SYMBOL(strrchr);
-EXPORT_SYMBOL(strpbrk);
-EXPORT_SYMBOL(strstr);
 
 #ifdef CONFIG_SOLARIS_EMUL_MODULE
 EXPORT_SYMBOL(linux_sparc_syscall);
@@ -348,7 +297,6 @@ EXPORT_SYMBOL(svr4_getcontext);
 EXPORT_SYMBOL(svr4_setcontext);
 EXPORT_SYMBOL(compat_sys_ioctl);
 EXPORT_SYMBOL(sparc32_open);
-EXPORT_SYMBOL(sys_close);
 #endif
 
 /* Special internal versions of library functions. */
@@ -360,7 +308,6 @@ EXPORT_SYMBOL(__memscan_zero);
 EXPORT_SYMBOL(__memscan_generic);
 EXPORT_SYMBOL(__memcmp);
 EXPORT_SYMBOL(__memset);
-EXPORT_SYMBOL(memchr);
 
 EXPORT_SYMBOL(csum_partial);
 EXPORT_SYMBOL(csum_partial_copy_nocheck);
@@ -376,14 +323,10 @@ EXPORT_SYMBOL(copy_to_user_fixup);
 EXPORT_SYMBOL(copy_from_user_fixup);
 EXPORT_SYMBOL(copy_in_user_fixup);
 EXPORT_SYMBOL(__strncpy_from_user);
-EXPORT_SYMBOL(__bzero_noasi);
+EXPORT_SYMBOL(__clear_user);
 
 /* Various address conversion macros use this. */
-EXPORT_SYMBOL(phys_base);
-EXPORT_SYMBOL(pfn_base);
 EXPORT_SYMBOL(sparc64_valid_addr_bitmap);
-EXPORT_SYMBOL(page_to_pfn);
-EXPORT_SYMBOL(pfn_to_page);
 
 /* No version information on this, heavily used in inline asm,
  * and will always be 'void __ret_efault(void)'.
@@ -428,5 +371,10 @@ EXPORT_SYMBOL(xor_vis_2);
 EXPORT_SYMBOL(xor_vis_3);
 EXPORT_SYMBOL(xor_vis_4);
 EXPORT_SYMBOL(xor_vis_5);
+
+EXPORT_SYMBOL(xor_niagara_2);
+EXPORT_SYMBOL(xor_niagara_3);
+EXPORT_SYMBOL(xor_niagara_4);
+EXPORT_SYMBOL(xor_niagara_5);
 
 EXPORT_SYMBOL(prom_palette);

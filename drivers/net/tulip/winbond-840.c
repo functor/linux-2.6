@@ -121,6 +121,7 @@ static int full_duplex[MAX_UNITS] = {-1, -1, -1, -1, -1, -1, -1, -1};
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
+#include <linux/dma-mapping.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
@@ -394,7 +395,7 @@ static int __devinit w840_probe1 (struct pci_dev *pdev,
 
 	irq = pdev->irq;
 
-	if (pci_set_dma_mask(pdev,0xFFFFffff)) {
+	if (pci_set_dma_mask(pdev, DMA_32BIT_MASK)) {
 		printk(KERN_WARNING "Winbond-840: Device %s disabled due to DMA limitations.\n",
 		       pci_name(pdev));
 		return -EIO;
@@ -848,8 +849,8 @@ static void init_rxtx_rings(struct net_device *dev)
 		if (skb == NULL)
 			break;
 		skb->dev = dev;			/* Mark as being used by this device. */
-		np->rx_addr[i] = pci_map_single(np->pci_dev,skb->tail,
-					skb->len,PCI_DMA_FROMDEVICE);
+		np->rx_addr[i] = pci_map_single(np->pci_dev,skb->data,
+					np->rx_buf_sz,PCI_DMA_FROMDEVICE);
 
 		np->rx_ring[i].buffer1 = np->rx_addr[i];
 		np->rx_ring[i].status = DescOwn;
@@ -1268,7 +1269,7 @@ static int netdev_rx(struct net_device *dev)
 				pci_dma_sync_single_for_cpu(np->pci_dev,np->rx_addr[entry],
 							    np->rx_skbuff[entry]->len,
 							    PCI_DMA_FROMDEVICE);
-				eth_copy_and_sum(skb, np->rx_skbuff[entry]->tail, pkt_len, 0);
+				eth_copy_and_sum(skb, np->rx_skbuff[entry]->data, pkt_len, 0);
 				skb_put(skb, pkt_len);
 				pci_dma_sync_single_for_device(np->pci_dev,np->rx_addr[entry],
 							       np->rx_skbuff[entry]->len,
@@ -1314,8 +1315,8 @@ static int netdev_rx(struct net_device *dev)
 				break;			/* Better luck next round. */
 			skb->dev = dev;			/* Mark as being used by this device. */
 			np->rx_addr[entry] = pci_map_single(np->pci_dev,
-							skb->tail,
-							skb->len, PCI_DMA_FROMDEVICE);
+							skb->data,
+							np->rx_buf_sz, PCI_DMA_FROMDEVICE);
 			np->rx_ring[entry].buffer1 = np->rx_addr[entry];
 		}
 		wmb();
@@ -1604,11 +1605,11 @@ static void __devexit w840_remove1 (struct pci_dev *pdev)
  * - get_stats:
  * 	spin_lock_irq(np->lock), doesn't touch hw if not present
  * - hard_start_xmit:
- * 	netif_stop_queue + spin_unlock_wait(&dev->xmit_lock);
+ * 	synchronize_irq + netif_tx_disable;
  * - tx_timeout:
- * 	netif_device_detach + spin_unlock_wait(&dev->xmit_lock);
+ * 	netif_device_detach + netif_tx_disable;
  * - set_multicast_list
- * 	netif_device_detach + spin_unlock_wait(&dev->xmit_lock);
+ * 	netif_device_detach + netif_tx_disable;
  * - interrupt handler
  * 	doesn't touch hw if not present, synchronize_irq waits for
  * 	running instances of the interrupt handler.
@@ -1634,17 +1635,16 @@ static int w840_suspend (struct pci_dev *pdev, pm_message_t state)
 		netif_device_detach(dev);
 		update_csr6(dev, 0);
 		iowrite32(0, ioaddr + IntrEnable);
-		netif_stop_queue(dev);
 		spin_unlock_irq(&np->lock);
 
-		spin_unlock_wait(&dev->xmit_lock);
 		synchronize_irq(dev->irq);
+		netif_tx_disable(dev);
 	
 		np->stats.rx_missed_errors += ioread32(ioaddr + RxMissed) & 0xffff;
 
 		/* no more hardware accesses behind this line. */
 
-		if (np->csr6) BUG();
+		BUG_ON(np->csr6);
 		if (ioread32(ioaddr + IntrEnable)) BUG();
 
 		/* pci_power_off(pdev, -1); */

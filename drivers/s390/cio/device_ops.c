@@ -1,12 +1,10 @@
 /*
  *  drivers/s390/cio/device_ops.c
  *
- *   $Revision: 1.56 $
- *
  *    Copyright (C) 2002 IBM Deutschland Entwicklung GmbH,
  *			 IBM Corporation
  *    Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com)
- *               Cornelia Huck (cohuck@de.ibm.com)
+ *               Cornelia Huck (cornelia.huck@de.ibm.com)
  */
 #include <linux/config.h>
 #include <linux/module.h>
@@ -19,14 +17,12 @@
 
 #include <asm/ccwdev.h>
 #include <asm/idals.h>
-#include <asm/qdio.h>
 
 #include "cio.h"
 #include "cio_debug.h"
 #include "css.h"
 #include "chsc.h"
 #include "device.h"
-#include "qdio.h"
 
 int
 ccw_device_set_options(struct ccw_device *cdev, unsigned long flags)
@@ -363,10 +359,9 @@ read_dev_chars (struct ccw_device *cdev, void **buffer, int length)
 	CIO_TRACE_EVENT (4, "rddevch");
 	CIO_TRACE_EVENT (4, sch->dev.bus_id);
 
-	rdc_ccw = kmalloc(sizeof(struct ccw1), GFP_KERNEL | GFP_DMA);
+	rdc_ccw = kzalloc(sizeof(struct ccw1), GFP_KERNEL | GFP_DMA);
 	if (!rdc_ccw)
 		return -ENOMEM;
-	memset(rdc_ccw, 0, sizeof(struct ccw1));
 	rdc_ccw->cmd_code = CCW_CMD_RDC;
 	rdc_ccw->count = length;
 	rdc_ccw->flags = CCW_FLAG_SLI;
@@ -430,16 +425,14 @@ read_conf_data_lpm (struct ccw_device *cdev, void **buffer, int *length, __u8 lp
 	if (!ciw || ciw->cmd == 0)
 		return -EOPNOTSUPP;
 
-	rcd_ccw = kmalloc(sizeof(struct ccw1), GFP_KERNEL | GFP_DMA);
+	rcd_ccw = kzalloc(sizeof(struct ccw1), GFP_KERNEL | GFP_DMA);
 	if (!rcd_ccw)
 		return -ENOMEM;
-	memset(rcd_ccw, 0, sizeof(struct ccw1));
-	rcd_buf = kmalloc(ciw->count, GFP_KERNEL | GFP_DMA);
+	rcd_buf = kzalloc(ciw->count, GFP_KERNEL | GFP_DMA);
  	if (!rcd_buf) {
 		kfree(rcd_ccw);
 		return -ENOMEM;
 	}
- 	memset (rcd_buf, 0, ciw->count);
 	rcd_ccw->cmd_code = ciw->cmd;
 	rcd_ccw->cda = (__u32) __pa (rcd_buf);
 	rcd_ccw->count = ciw->count;
@@ -552,10 +545,8 @@ ccw_device_stlck(struct ccw_device *cdev)
 	/* Clear irb. */
 	memset(&cdev->private->irb, 0, sizeof(struct irb));
 out_unlock:
-	if (buf)
-		kfree(buf);
-	if (buf2)
-		kfree(buf2);
+	kfree(buf);
+	kfree(buf2);
 	spin_unlock_irqrestore(&sch->lock, flags);
 	return ret;
 }
@@ -574,7 +565,7 @@ ccw_device_get_chp_desc(struct ccw_device *cdev, int chp_no)
 int
 _ccw_device_get_subchannel_number(struct ccw_device *cdev)
 {
-	return cdev->private->irq;
+	return cdev->private->sch_no;
 }
 
 int

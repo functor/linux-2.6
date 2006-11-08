@@ -297,7 +297,7 @@ static char azt_auto_eject = AZT_AUTO_EJECT;
 
 static int AztTimeout, AztTries;
 static DECLARE_WAIT_QUEUE_HEAD(azt_waitq);
-static struct timer_list delay_timer = TIMER_INITIALIZER(NULL, 0, 0);
+static DEFINE_TIMER(delay_timer, NULL, 0, 0);
 
 static struct azt_DiskInfo DiskInfo;
 static struct azt_Toc Toc[MAX_TRACKS];
@@ -1763,7 +1763,7 @@ static int __init aztcd_init(void)
 				release_region(azt_port, 4);
 			}
 		}
-		if ((azt_port_auto[i] == 0) || (i == 16)) {
+		if ((i == 16) || (azt_port_auto[i] == 0)) {
 			printk(KERN_INFO "aztcd: no AZTECH CD-ROM drive found\n");
 			return -EIO;
 		}

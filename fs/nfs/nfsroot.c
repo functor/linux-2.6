@@ -125,7 +125,7 @@ enum {
 	Opt_soft, Opt_hard, Opt_intr,
 	Opt_nointr, Opt_posix, Opt_noposix, Opt_cto, Opt_nocto, Opt_ac, 
 	Opt_noac, Opt_lock, Opt_nolock, Opt_v2, Opt_v3, Opt_udp, Opt_tcp,
-	Opt_tagxid,
+	Opt_acl, Opt_noacl, Opt_tagxid,
 	/* Error token */
 	Opt_err
 };
@@ -160,6 +160,8 @@ static match_table_t __initdata tokens = {
 	{Opt_udp, "udp"},
 	{Opt_tcp, "proto=tcp"},
 	{Opt_tcp, "tcp"},
+	{Opt_acl, "acl"},
+	{Opt_noacl, "noacl"},
 	{Opt_tagxid, "tagxid"},
 	{Opt_err, NULL}
 	
@@ -269,10 +271,20 @@ static int __init root_nfs_parse(char *name, char *buf)
 			case Opt_tcp:
 				nfs_data.flags |= NFS_MOUNT_TCP;
 				break;
+			case Opt_acl:
+				nfs_data.flags &= ~NFS_MOUNT_NOACL;
+				break;
+			case Opt_noacl:
+				nfs_data.flags |= NFS_MOUNT_NOACL;
+				break;
+#ifndef CONFIG_INOXID_NONE
 			case Opt_tagxid:
 				nfs_data.flags |= NFS_MOUNT_TAGXID;
 				break;
-			default : 
+#endif
+			default:
+				printk(KERN_WARNING "Root-NFS: unknown "
+					"option: %s\n", p);
 				return 0;
 		}
 	}
@@ -293,8 +305,8 @@ static int __init root_nfs_name(char *name)
 	nfs_port          = -1;
 	nfs_data.version  = NFS_MOUNT_VERSION;
 	nfs_data.flags    = NFS_MOUNT_NONLM;	/* No lockd in nfs root yet */
-	nfs_data.rsize    = NFS_DEF_FILE_IO_BUFFER_SIZE;
-	nfs_data.wsize    = NFS_DEF_FILE_IO_BUFFER_SIZE;
+	nfs_data.rsize    = NFS_DEF_FILE_IO_SIZE;
+	nfs_data.wsize    = NFS_DEF_FILE_IO_SIZE;
 	nfs_data.acregmin = 3;
 	nfs_data.acregmax = 60;
 	nfs_data.acdirmin = 30;
@@ -460,10 +472,11 @@ static int __init root_nfs_ports(void)
 					"number from server, using default\n");
 			port = nfsd_port;
 		}
-		nfs_port = htons(port);
+		nfs_port = port;
 		dprintk("Root-NFS: Portmapper on server returned %d "
 			"as nfsd port\n", port);
 	}
+	nfs_port = htons(nfs_port);
 
 	if ((port = root_nfs_getport(NFS_MNT_PROGRAM, mountd_ver, proto)) < 0) {
 		printk(KERN_ERR "Root-NFS: Unable to get mountd port "

@@ -61,7 +61,6 @@
 #include <linux/timer.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
-#include <linux/version.h>
 #include <linux/string.h>
 #include <linux/wait.h>
 #include <asm/io.h>
@@ -249,6 +248,7 @@ static void velocity_free_rd_ring(struct velocity_info *vptr);
 static void velocity_free_tx_buf(struct velocity_info *vptr, struct velocity_td_info *);
 static int velocity_soft_reset(struct velocity_info *vptr);
 static void mii_init(struct velocity_info *vptr, u32 mii_status);
+static u32 velocity_get_link(struct net_device *dev);
 static u32 velocity_get_opt_media_mode(struct velocity_info *vptr);
 static void velocity_print_link_status(struct velocity_info *vptr);
 static void safe_disable_mii_autopoll(struct mac_regs __iomem * regs);
@@ -792,12 +792,15 @@ static int __devinit velocity_found1(struct pci_dev *pdev, const struct pci_devi
 #endif
 
 	if (vptr->flags & VELOCITY_FLAGS_TX_CSUM) {
-		dev->features |= NETIF_F_HW_CSUM;
+		dev->features |= NETIF_F_IP_CSUM;
 	}
 
 	ret = register_netdev(dev);
 	if (ret < 0)
 		goto err_iounmap;
+
+	if (velocity_get_link(dev))
+		netif_carrier_off(dev);
 
 	velocity_print_info(vptr);
 	pci_set_drvdata(pdev, dev);
@@ -1107,6 +1110,9 @@ static void velocity_free_rd_ring(struct velocity_info *vptr)
 
 	for (i = 0; i < vptr->options.numrx; i++) {
 		struct velocity_rd_info *rd_info = &(vptr->rd_info[i]);
+		struct rx_desc *rd = vptr->rd_ring + i;
+
+		memset(rd, 0, sizeof(*rd));
 
 		if (!rd_info->skb)
 			continue;
@@ -1212,10 +1218,8 @@ static void velocity_free_td_ring(struct velocity_info *vptr)
 			velocity_free_td_ring_entry(vptr, j, i);
 
 		}
-		if (vptr->td_infos[j]) {
-			kfree(vptr->td_infos[j]);
-			vptr->td_infos[j] = NULL;
-		}
+		kfree(vptr->td_infos[j]);
+		vptr->td_infos[j] = NULL;
 	}
 }
 
@@ -1335,7 +1339,7 @@ static inline int velocity_rx_copy(struct sk_buff **rx_skb, int pkt_size,
 			if (vptr->flags & VELOCITY_FLAGS_IP_ALIGN)
 				skb_reserve(new_skb, 2);
 
-			memcpy(new_skb->data, rx_skb[0]->tail, pkt_size);
+			memcpy(new_skb->data, rx_skb[0]->data, pkt_size);
 			*rx_skb = new_skb;
 			ret = 0;
 		}
@@ -1456,9 +1460,9 @@ static int velocity_alloc_rx_buf(struct velocity_info *vptr, int idx)
 	 *	Do the gymnastics to get the buffer head for data at
 	 *	64byte alignment.
 	 */
-	skb_reserve(rd_info->skb, (unsigned long) rd_info->skb->tail & 63);
+	skb_reserve(rd_info->skb, (unsigned long) rd_info->skb->data & 63);
 	rd_info->skb->dev = vptr->dev;
-	rd_info->skb_dma = pci_map_single(vptr->pdev, rd_info->skb->tail, vptr->rx_buf_sz, PCI_DMA_FROMDEVICE);
+	rd_info->skb_dma = pci_map_single(vptr->pdev, rd_info->skb->data, vptr->rx_buf_sz, PCI_DMA_FROMDEVICE);
 	
 	/*
 	 *	Fill in the descriptor to match
@@ -1653,8 +1657,10 @@ static void velocity_error(struct velocity_info *vptr, int status)
 
 		if (linked) {
 			vptr->mii_status &= ~VELOCITY_LINK_FAIL;
+			netif_carrier_on(vptr->dev);
 		} else {
 			vptr->mii_status |= VELOCITY_LINK_FAIL;
+			netif_carrier_off(vptr->dev);
 		}
 
 		velocity_print_link_status(vptr);
@@ -1899,6 +1905,13 @@ static int velocity_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	int pktlen = skb->len;
 
+#ifdef VELOCITY_ZERO_COPY_SUPPORT
+	if (skb_shinfo(skb)->nr_frags > 6 && __skb_linearize(skb)) {
+		kfree_skb(skb);
+		return 0;
+	}
+#endif
+
 	spin_lock_irqsave(&vptr->lock, flags);
 
 	index = vptr->td_curr[qnum];
@@ -1914,8 +1927,6 @@ static int velocity_xmit(struct sk_buff *skb, struct net_device *dev)
 	 */
 	if (pktlen < ETH_ZLEN) {
 		/* Cannot occur until ZC support */
-		if(skb_linearize(skb, GFP_ATOMIC))
-			return 0; 
 		pktlen = ETH_ZLEN;
 		memcpy(tdinfo->buf, skb->data, skb->len);
 		memset(tdinfo->buf + skb->len, 0, ETH_ZLEN - skb->len);
@@ -1933,7 +1944,6 @@ static int velocity_xmit(struct sk_buff *skb, struct net_device *dev)
 		int nfrags = skb_shinfo(skb)->nr_frags;
 		tdinfo->skb = skb;
 		if (nfrags > 6) {
-			skb_linearize(skb, GFP_ATOMIC);
 			memcpy(tdinfo->buf, skb->data, skb->len);
 			tdinfo->skb_dma[0] = tdinfo->buf_dma;
 			td_ptr->tdesc0.pktsize = 

@@ -82,8 +82,7 @@ struct ias_object *irias_new_object( char *name, int id)
 
 	IRDA_DEBUG( 4, "%s()\n", __FUNCTION__);
 
-	obj = (struct ias_object *) kmalloc(sizeof(struct ias_object),
-					    GFP_ATOMIC);
+	obj = kmalloc(sizeof(struct ias_object), GFP_ATOMIC);
 	if (obj == NULL) {
 		IRDA_WARNING("%s(), Unable to allocate object!\n",
 			     __FUNCTION__);
@@ -122,8 +121,7 @@ static void __irias_delete_attrib(struct ias_attrib *attrib)
 	IRDA_ASSERT(attrib != NULL, return;);
 	IRDA_ASSERT(attrib->magic == IAS_ATTRIB_MAGIC, return;);
 
-	if (attrib->name)
-		kfree(attrib->name);
+	kfree(attrib->name);
 
 	irias_delete_value(attrib->value);
 	attrib->magic = ~IAS_ATTRIB_MAGIC;
@@ -136,8 +134,7 @@ void __irias_delete_object(struct ias_object *obj)
 	IRDA_ASSERT(obj != NULL, return;);
 	IRDA_ASSERT(obj->magic == IAS_OBJECT_MAGIC, return;);
 
-	if (obj->name)
-		kfree(obj->name);
+	kfree(obj->name);
 
 	hashbin_delete(obj->attribs, (FREE_FUNC) __irias_delete_attrib);
 
@@ -260,7 +257,6 @@ struct ias_attrib *irias_find_attrib(struct ias_object *obj, char *name)
 	/* Unsafe (locking), attrib might change */
 	return attrib;
 }
-EXPORT_SYMBOL(irias_find_attrib);
 
 /*
  * Function irias_add_attribute (obj, attrib)
@@ -350,8 +346,7 @@ void irias_add_integer_attrib(struct ias_object *obj, char *name, int value,
 	IRDA_ASSERT(obj->magic == IAS_OBJECT_MAGIC, return;);
 	IRDA_ASSERT(name != NULL, return;);
 
-	attrib = (struct ias_attrib *) kmalloc(sizeof(struct ias_attrib),
-					       GFP_ATOMIC);
+	attrib = kmalloc(sizeof(struct ias_attrib), GFP_ATOMIC);
 	if (attrib == NULL) {
 		IRDA_WARNING("%s: Unable to allocate attribute!\n",
 			     __FUNCTION__);
@@ -387,8 +382,7 @@ void irias_add_octseq_attrib(struct ias_object *obj, char *name, __u8 *octets,
 	IRDA_ASSERT(name != NULL, return;);
 	IRDA_ASSERT(octets != NULL, return;);
 
-	attrib = (struct ias_attrib *) kmalloc(sizeof(struct ias_attrib),
-					       GFP_ATOMIC);
+	attrib = kmalloc(sizeof(struct ias_attrib), GFP_ATOMIC);
 	if (attrib == NULL) {
 		IRDA_WARNING("%s: Unable to allocate attribute!\n",
 			     __FUNCTION__);
@@ -422,8 +416,7 @@ void irias_add_string_attrib(struct ias_object *obj, char *name, char *value,
 	IRDA_ASSERT(name != NULL, return;);
 	IRDA_ASSERT(value != NULL, return;);
 
-	attrib = (struct ias_attrib *) kmalloc(sizeof( struct ias_attrib),
-					       GFP_ATOMIC);
+	attrib = kmalloc(sizeof( struct ias_attrib), GFP_ATOMIC);
 	if (attrib == NULL) {
 		IRDA_WARNING("%s: Unable to allocate attribute!\n",
 			     __FUNCTION__);
@@ -490,7 +483,6 @@ struct ias_value *irias_new_string_value(char *string)
 
 	return value;
 }
-EXPORT_SYMBOL(irias_new_string_value);
 
 /*
  * Function irias_new_octseq_value (octets, len)
@@ -525,7 +517,6 @@ struct ias_value *irias_new_octseq_value(__u8 *octseq , int len)
 	memcpy(value->t.oct_seq, octseq , len);
 	return value;
 }
-EXPORT_SYMBOL(irias_new_octseq_value);
 
 struct ias_value *irias_new_missing_value(void)
 {
@@ -562,14 +553,12 @@ void irias_delete_value(struct ias_value *value)
 		/* No need to deallocate */
 		break;
 	case IAS_STRING:
-		/* If string, deallocate string */
-		if (value->t.string != NULL)
-			kfree(value->t.string);
+		/* Deallocate string */
+		kfree(value->t.string);
 		break;
 	case IAS_OCT_SEQ:
-		/* If byte stream, deallocate byte stream */
-		 if (value->t.oct_seq != NULL)
-			 kfree(value->t.oct_seq);
+		/* Deallocate byte stream */
+		 kfree(value->t.oct_seq);
 		 break;
 	default:
 		IRDA_DEBUG(0, "%s(), Unknown value type!\n", __FUNCTION__);

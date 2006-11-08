@@ -31,12 +31,12 @@
 #include <linux/ip.h>
 #include <linux/in.h>
 #include <linux/list.h>
+#include <linux/seq_file.h>
+#include <linux/interrupt.h>
 
-#include <linux/netfilter_ipv4/lockhelp.h>
-
-DECLARE_RWLOCK(ip_ct_gre_lock);
-#define ASSERT_READ_LOCK(x) MUST_BE_READ_LOCKED(&ip_ct_gre_lock)
-#define ASSERT_WRITE_LOCK(x) MUST_BE_WRITE_LOCKED(&ip_ct_gre_lock)
+static DEFINE_RWLOCK(ip_ct_gre_lock);
+#define ASSERT_READ_LOCK(x)
+#define ASSERT_WRITE_LOCK(x)
 
 #include <linux/netfilter_ipv4/listhelp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_protocol.h>
@@ -82,12 +82,12 @@ static u_int32_t gre_keymap_lookup(struct ip_conntrack_tuple *t)
 	struct ip_ct_gre_keymap *km;
 	u_int32_t key = 0;
 
-	READ_LOCK(&ip_ct_gre_lock);
+	read_lock_bh(&ip_ct_gre_lock);
 	km = LIST_FIND(&gre_keymap_list, gre_key_cmpfn,
 			struct ip_ct_gre_keymap *, t);
 	if (km)
 		key = km->tuple.src.u.gre.key;
-	READ_UNLOCK(&ip_ct_gre_lock);
+	read_unlock_bh(&ip_ct_gre_lock);
 	
 	DEBUGP("lookup src key 0x%x up key for ", key);
 	DUMP_TUPLE_GRE(t);
@@ -100,64 +100,45 @@ int
 ip_ct_gre_keymap_add(struct ip_conntrack *ct,
 		     struct ip_conntrack_tuple *t, int reply)
 {
-	struct ip_ct_gre_keymap *km, *old;
+	struct ip_ct_gre_keymap **exist_km, *km, *old;
 
 	if (!ct->helper || strcmp(ct->helper->name, "pptp")) {
 		DEBUGP("refusing to add GRE keymap to non-pptp session\n");
 		return -1;
 	}
 
+	if (!reply) 
+		exist_km = &ct->help.ct_pptp_info.keymap_orig;
+	else
+		exist_km = &ct->help.ct_pptp_info.keymap_reply;
+
+	if (*exist_km) {
+		/* check whether it's a retransmission */
+		old = LIST_FIND(&gre_keymap_list, gre_key_cmpfn,
+				struct ip_ct_gre_keymap *, t);
+		if (old == *exist_km) {
+			DEBUGP("retransmission\n");
+			return 0;
+		}
+
+		DEBUGP("trying to override keymap_%s for ct %p\n", 
+			reply? "reply":"orig", ct);
+		return -EEXIST;
+	}
+
 	km = kmalloc(sizeof(*km), GFP_ATOMIC);
 	if (!km)
-		return -1;
-
-	/* initializing list head should be sufficient */
-	memset(km, 0, sizeof(*km));
+		return -ENOMEM;
 
 	memcpy(&km->tuple, t, sizeof(*t));
-
-	if (!reply) {
-		if (ct->help.ct_pptp_info.keymap_orig) {
-			kfree(km);
-
-			/* check whether it's a retransmission */
-			old = LIST_FIND(&gre_keymap_list, gre_key_cmpfn,
-					struct ip_ct_gre_keymap *, t);
-			if (old == ct->help.ct_pptp_info.keymap_orig) {
-				DEBUGP("retransmission\n");
-				return 0;
-			}
-
-			DEBUGP("trying to override keymap_orig for ct %p\n",
-				ct);
-			return -2;
-		}
-		ct->help.ct_pptp_info.keymap_orig = km;
-	} else {
-		if (ct->help.ct_pptp_info.keymap_reply) {
-			kfree(km);
-
-			/* check whether it's a retransmission */
-			old = LIST_FIND(&gre_keymap_list, gre_key_cmpfn,
-					struct ip_ct_gre_keymap *, t);
-			if (old == ct->help.ct_pptp_info.keymap_reply) {
-				DEBUGP("retransmission\n");
-				return 0;
-			}
-
-			DEBUGP("trying to override keymap_reply for ct %p\n",
-				ct);
-			return -2;
-		}
-		ct->help.ct_pptp_info.keymap_reply = km;
-	}
+	*exist_km = km;
 
 	DEBUGP("adding new entry %p: ", km);
 	DUMP_TUPLE_GRE(&km->tuple);
 
-	WRITE_LOCK(&ip_ct_gre_lock);
+	write_lock_bh(&ip_ct_gre_lock);
 	list_append(&gre_keymap_list, km);
-	WRITE_UNLOCK(&ip_ct_gre_lock);
+	write_unlock_bh(&ip_ct_gre_lock);
 
 	return 0;
 }
@@ -172,7 +153,7 @@ void ip_ct_gre_keymap_destroy(struct ip_conntrack *ct)
 		return;
 	}
 
-	WRITE_LOCK(&ip_ct_gre_lock);
+	write_lock_bh(&ip_ct_gre_lock);
 	if (ct->help.ct_pptp_info.keymap_orig) {
 		DEBUGP("removing %p from list\n", 
 			ct->help.ct_pptp_info.keymap_orig);
@@ -187,7 +168,7 @@ void ip_ct_gre_keymap_destroy(struct ip_conntrack *ct)
 		kfree(ct->help.ct_pptp_info.keymap_reply);
 		ct->help.ct_pptp_info.keymap_reply = NULL;
 	}
-	WRITE_UNLOCK(&ip_ct_gre_lock);
+	write_unlock_bh(&ip_ct_gre_lock);
 }
 
 
@@ -208,47 +189,32 @@ static int gre_pkt_to_tuple(const struct sk_buff *skb,
 			   unsigned int dataoff,
 			   struct ip_conntrack_tuple *tuple)
 {
-	struct gre_hdr _grehdr, *grehdr;
 	struct gre_hdr_pptp _pgrehdr, *pgrehdr;
 	u_int32_t srckey;
+	struct gre_hdr _grehdr, *grehdr;
 
+	/* first only delinearize old RFC1701 GRE header */
 	grehdr = skb_header_pointer(skb, dataoff, sizeof(_grehdr), &_grehdr);
-	/* PPTP header is variable length, only need up to the call_id field */
-	pgrehdr = skb_header_pointer(skb, dataoff, 8, &_pgrehdr);
-
-	if (!grehdr || !pgrehdr)
-		return 0;
-
-	switch (grehdr->version) {
-		case GRE_VERSION_1701:
-			if (!grehdr->key) {
-				DEBUGP("Can't track GRE without key\n");
-				return 0;
-			}
-			tuple->dst.u.gre.key = *(gre_key(grehdr));
-			break;
-
-		case GRE_VERSION_PPTP:
-			if (ntohs(grehdr->protocol) != GRE_PROTOCOL_PPTP) {
-				DEBUGP("GRE_VERSION_PPTP but unknown proto\n");
-				return 0;
-			}
-			tuple->dst.u.gre.key = pgrehdr->call_id;
-			break;
-
-		default:
-			printk(KERN_WARNING "unknown GRE version %hu\n",
-				grehdr->version);
-			return 0;
+	if (!grehdr || grehdr->version != GRE_VERSION_PPTP) {
+		/* try to behave like "ip_conntrack_proto_generic" */
+		tuple->src.u.all = 0;
+		tuple->dst.u.all = 0;
+		return 1;
 	}
 
-	srckey = gre_keymap_lookup(tuple);
+	/* PPTP header is variable length, only need up to the call_id field */
+	pgrehdr = skb_header_pointer(skb, dataoff, 8, &_pgrehdr);
+	if (!pgrehdr)
+		return 1;
 
+	if (ntohs(grehdr->protocol) != GRE_PROTOCOL_PPTP) {
+		DEBUGP("GRE_VERSION_PPTP but unknown proto\n");
+		return 0;
+	}
+
+	tuple->dst.u.gre.key = pgrehdr->call_id;
+	srckey = gre_keymap_lookup(tuple);
 	tuple->src.u.gre.key = srckey;
-#if 0
-	DEBUGP("found src key %x for tuple ", ntohs(srckey));
-	DUMP_TUPLE_GRE(tuple);
-#endif
 
 	return 1;
 }
@@ -283,6 +249,7 @@ static int gre_packet(struct ip_conntrack *ct,
 				   ct->proto.gre.stream_timeout);
 		/* Also, more likely to be important, and not a probe. */
 		set_bit(IPS_ASSURED_BIT, &ct->status);
+		ip_conntrack_event_cache(IPCT_STATUS, skb);
 	} else
 		ip_ct_refresh_acct(ct, conntrackinfo, skb,
 				   ct->proto.gre.timeout);
@@ -329,41 +296,38 @@ static struct ip_conntrack_protocol gre = {
 	.packet		 = gre_packet,
 	.new		 = gre_new,
 	.destroy	 = gre_destroy,
-	.me 		 = THIS_MODULE
+	.me 		 = THIS_MODULE,
+#if defined(CONFIG_IP_NF_CONNTRACK_NETLINK) || \
+    defined(CONFIG_IP_NF_CONNTRACK_NETLINK_MODULE)
+	.tuple_to_nfattr = ip_ct_port_tuple_to_nfattr,
+	.nfattr_to_tuple = ip_ct_port_nfattr_to_tuple,
+#endif
 };
 
 /* ip_conntrack_proto_gre initialization */
-static int __init init(void)
+int __init ip_ct_proto_gre_init(void)
 {
-	int retcode;
-
-	if ((retcode = ip_conntrack_protocol_register(&gre))) {
-		printk(KERN_ERR "Unable to register conntrack protocol "
-		       "helper for gre: %d\n", retcode);
-		return -EIO;
-	}
-
-	return 0;
+	return ip_conntrack_protocol_register(&gre);
 }
 
-static void __exit fini(void)
+/* This cannot be __exit, as it is invoked from ip_conntrack_helper_pptp.c's
+ * init() code on errors.
+ */
+void ip_ct_proto_gre_fini(void)
 {
 	struct list_head *pos, *n;
 
 	/* delete all keymap entries */
-	WRITE_LOCK(&ip_ct_gre_lock);
+	write_lock_bh(&ip_ct_gre_lock);
 	list_for_each_safe(pos, n, &gre_keymap_list) {
 		DEBUGP("deleting keymap %p at module unload time\n", pos);
 		list_del(pos);
 		kfree(pos);
 	}
-	WRITE_UNLOCK(&ip_ct_gre_lock);
+	write_unlock_bh(&ip_ct_gre_lock);
 
 	ip_conntrack_protocol_unregister(&gre); 
 }
 
 EXPORT_SYMBOL(ip_ct_gre_keymap_add);
 EXPORT_SYMBOL(ip_ct_gre_keymap_destroy);
-
-module_init(init);
-module_exit(fini);

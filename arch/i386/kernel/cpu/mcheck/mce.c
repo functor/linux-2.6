@@ -16,7 +16,7 @@
 
 #include "mce.h"
 
-int mce_disabled __initdata = 0;
+int mce_disabled = 0;
 int nr_mce_banks;
 
 EXPORT_SYMBOL_GPL(nr_mce_banks);	/* non-fatal.o */
@@ -31,7 +31,7 @@ static fastcall void unexpected_machine_check(struct pt_regs * regs, long error_
 void fastcall (*machine_check_vector)(struct pt_regs *, long error_code) = unexpected_machine_check;
 
 /* This has to be run for each processor */
-void __init mcheck_init(struct cpuinfo_x86 *c)
+void mcheck_init(struct cpuinfo_x86 *c)
 {
 	if (mce_disabled==1)
 		return;
@@ -64,13 +64,13 @@ void __init mcheck_init(struct cpuinfo_x86 *c)
 static int __init mcheck_disable(char *str)
 {
 	mce_disabled = 1;
-	return 0;
+	return 1;
 }
 
 static int __init mcheck_enable(char *str)
 {
 	mce_disabled = -1;
-	return 0;
+	return 1;
 }
 
 __setup("nomce", mcheck_disable);

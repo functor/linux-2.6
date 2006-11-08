@@ -35,6 +35,7 @@
 #include <linux/spinlock.h>
 #include <linux/sysctl.h>
 #include <linux/proc_fs.h>
+#include <linux/mutex.h>
 #include <net/sock.h>
 #include <net/ipv6.h>
 #include <net/ip6_route.h>
@@ -47,16 +48,10 @@
 #define NET_IPQ_QMAX 2088
 #define NET_IPQ_QMAX_NAME "ip6_queue_maxlen"
 
-struct ipq_rt_info {
-	struct in6_addr daddr;
-	struct in6_addr saddr;
-};
-
 struct ipq_queue_entry {
 	struct list_head list;
 	struct nf_info *info;
 	struct sk_buff *skb;
-	struct ipq_rt_info rt_info;
 };
 
 typedef int (*ipq_cmpfn)(struct ipq_queue_entry *, unsigned long);
@@ -71,12 +66,14 @@ static unsigned int queue_dropped = 0;
 static unsigned int queue_user_dropped = 0;
 static struct sock *ipqnl;
 static LIST_HEAD(queue_list);
-static DECLARE_MUTEX(ipqnl_sem);
+static DEFINE_MUTEX(ipqnl_mutex);
 
 static void
 ipq_issue_verdict(struct ipq_queue_entry *entry, int verdict)
 {
+	local_bh_disable();
 	nf_reinject(entry->skb, entry->info, verdict);
+	local_bh_enable();
 	kfree(entry);
 }
 
@@ -209,6 +206,12 @@ ipq_build_packet_message(struct ipq_queue_entry *entry, int *errp)
 		break;
 	
 	case IPQ_COPY_PACKET:
+		if (entry->skb->ip_summed == CHECKSUM_HW &&
+		    (*errp = skb_checksum_help(entry->skb,
+		                               entry->info->outdev == NULL))) {
+			read_unlock_bh(&queue_lock);
+			return NULL;
+		}
 		if (copy_range == 0 || copy_range > entry->skb->len)
 			data_len = entry->skb->len;
 		else
@@ -236,8 +239,8 @@ ipq_build_packet_message(struct ipq_queue_entry *entry, int *errp)
 
 	pmsg->packet_id       = (unsigned long )entry;
 	pmsg->data_len        = data_len;
-	pmsg->timestamp_sec   = entry->skb->stamp.tv_sec;
-	pmsg->timestamp_usec  = entry->skb->stamp.tv_usec;
+	pmsg->timestamp_sec   = entry->skb->tstamp.off_sec;
+	pmsg->timestamp_usec  = entry->skb->tstamp.off_usec;
 	pmsg->mark            = entry->skb->nfmark;
 	pmsg->hook            = entry->info->hook;
 	pmsg->hw_protocol     = entry->skb->protocol;
@@ -276,7 +279,8 @@ nlmsg_failure:
 }
 
 static int
-ipq_enqueue_packet(struct sk_buff *skb, struct nf_info *info, void *data)
+ipq_enqueue_packet(struct sk_buff *skb, struct nf_info *info, 
+		   unsigned int queuenum, void *data)
 {
 	int status = -EINVAL;
 	struct sk_buff *nskb;
@@ -293,13 +297,6 @@ ipq_enqueue_packet(struct sk_buff *skb, struct nf_info *info, void *data)
 
 	entry->info = info;
 	entry->skb = skb;
-
-	if (entry->info->hook == NF_IP_LOCAL_OUT) {
-		struct ipv6hdr *iph = skb->nh.ipv6h;
-
-		entry->rt_info.daddr = iph->daddr;
-		entry->rt_info.saddr = iph->saddr;
-	}
 
 	nskb = ipq_build_packet_message(entry, &status);
 	if (nskb == NULL)
@@ -376,22 +373,11 @@ ipq_mangle_ipv6(ipq_verdict_msg_t *v, struct ipq_queue_entry *e)
 		}
 		skb_put(e->skb, diff);
 	}
-	if (!skb_ip_make_writable(&e->skb, v->data_len))
+	if (!skb_make_writable(&e->skb, v->data_len))
 		return -ENOMEM;
 	memcpy(e->skb->data, v->payload, v->data_len);
-	e->skb->nfcache |= NFC_ALTERED;
+	e->skb->ip_summed = CHECKSUM_NONE;
 
-	/*
-	 * Extra routing may needed on local out, as the QUEUE target never
-	 * returns control to the table.
-         * Not a nice way to cmp, but works
-	 */
-	if (e->info->hook == NF_IP_LOCAL_OUT) {
-		struct ipv6hdr *iph = e->skb->nh.ipv6h;
-		if (!ipv6_addr_equal(&iph->daddr, &e->rt_info.daddr) ||
-		    !ipv6_addr_equal(&iph->saddr, &e->rt_info.saddr))
-			return ip6_route_me_harder(e->skb);
-	}
 	return 0;
 }
 
@@ -537,7 +523,7 @@ ipq_rcv_skb(struct sk_buff *skb)
 	write_unlock_bh(&queue_lock);
 	
 	status = ipq_receive_peer(NLMSG_DATA(nlh), type,
-	                          skblen - NLMSG_LENGTH(0));
+	                          nlmsglen - NLMSG_LENGTH(0));
 	if (status < 0)
 		RCV_SKB_FAIL(status);
 		
@@ -552,7 +538,7 @@ ipq_rcv_sk(struct sock *sk, int len)
 	struct sk_buff *skb;
 	unsigned int qlen;
 
-	down(&ipqnl_sem);
+	mutex_lock(&ipqnl_mutex);
 			
 	for (qlen = skb_queue_len(&sk->sk_receive_queue); qlen; qlen--) {
 		skb = skb_dequeue(&sk->sk_receive_queue);
@@ -560,7 +546,7 @@ ipq_rcv_sk(struct sock *sk, int len)
 		kfree_skb(skb);
 	}
 		
-	up(&ipqnl_sem);
+	mutex_unlock(&ipqnl_mutex);
 }
 
 static int
@@ -667,17 +653,19 @@ ipq_get_info(char *buffer, char **start, off_t offset, int length)
 	return len;
 }
 
-static int
-init_or_cleanup(int init)
+static struct nf_queue_handler nfqh = {
+	.name	= "ip6_queue",
+	.outfn	= &ipq_enqueue_packet,
+};
+
+static int __init ip6_queue_init(void)
 {
 	int status = -ENOMEM;
 	struct proc_dir_entry *proc;
 	
-	if (!init)
-		goto cleanup;
-
 	netlink_register_notifier(&ipq_nl_notifier);
-	ipqnl = netlink_kernel_create(NETLINK_IP6_FW, ipq_rcv_sk);
+	ipqnl = netlink_kernel_create(NETLINK_IP6_FW, 0, ipq_rcv_sk,
+	                              THIS_MODULE);
 	if (ipqnl == NULL) {
 		printk(KERN_ERR "ip6_queue: failed to create netlink socket\n");
 		goto cleanup_netlink_notifier;
@@ -694,18 +682,13 @@ init_or_cleanup(int init)
 	register_netdevice_notifier(&ipq_dev_notifier);
 	ipq_sysctl_header = register_sysctl_table(ipq_root_table, 0);
 	
-	status = nf_register_queue_handler(PF_INET6, ipq_enqueue_packet, NULL);
+	status = nf_register_queue_handler(PF_INET6, &nfqh);
 	if (status < 0) {
 		printk(KERN_ERR "ip6_queue: failed to register queue handler\n");
 		goto cleanup_sysctl;
 	}
 	return status;
 
-cleanup:
-	nf_unregister_queue_handler(PF_INET6);
-	synchronize_net();
-	ipq_flush(NF_DROP);
-	
 cleanup_sysctl:
 	unregister_sysctl_table(ipq_sysctl_header);
 	unregister_netdevice_notifier(&ipq_dev_notifier);
@@ -713,27 +696,33 @@ cleanup_sysctl:
 	
 cleanup_ipqnl:
 	sock_release(ipqnl->sk_socket);
-	down(&ipqnl_sem);
-	up(&ipqnl_sem);
+	mutex_lock(&ipqnl_mutex);
+	mutex_unlock(&ipqnl_mutex);
 	
 cleanup_netlink_notifier:
 	netlink_unregister_notifier(&ipq_nl_notifier);
 	return status;
 }
 
-static int __init init(void)
+static void __exit ip6_queue_fini(void)
 {
-	
-	return init_or_cleanup(1);
-}
+	nf_unregister_queue_handlers(&nfqh);
+	synchronize_net();
+	ipq_flush(NF_DROP);
 
-static void __exit fini(void)
-{
-	init_or_cleanup(0);
+	unregister_sysctl_table(ipq_sysctl_header);
+	unregister_netdevice_notifier(&ipq_dev_notifier);
+	proc_net_remove(IPQ_PROC_FS_NAME);
+
+	sock_release(ipqnl->sk_socket);
+	mutex_lock(&ipqnl_mutex);
+	mutex_unlock(&ipqnl_mutex);
+
+	netlink_unregister_notifier(&ipq_nl_notifier);
 }
 
 MODULE_DESCRIPTION("IPv6 packet queue handler");
 MODULE_LICENSE("GPL");
 
-module_init(init);
-module_exit(fini);
+module_init(ip6_queue_init);
+module_exit(ip6_queue_fini);

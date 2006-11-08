@@ -28,6 +28,8 @@
 #define SCSI_TRANSPORT_FC_H
 
 #include <linux/config.h>
+#include <linux/sched.h>
+#include <scsi/scsi.h>
 
 struct scsi_transport_template;
 
@@ -77,6 +79,7 @@ enum fc_port_state {
 	FC_PORTSTATE_LINKDOWN,
 	FC_PORTSTATE_ERROR,
 	FC_PORTSTATE_LOOPBACK,
+	FC_PORTSTATE_DELETED,
 };
 
 
@@ -103,8 +106,8 @@ enum fc_port_state {
 					     incapable of reporting */
 #define FC_PORTSPEED_1GBIT		1
 #define FC_PORTSPEED_2GBIT		2
-#define FC_PORTSPEED_10GBIT		4
-#define FC_PORTSPEED_4GBIT		8
+#define FC_PORTSPEED_4GBIT		4
+#define FC_PORTSPEED_10GBIT		8
 #define FC_PORTSPEED_NOT_NEGOTIATED	(1 << 15) /* Speed not established */
 
 /*
@@ -199,11 +202,18 @@ struct fc_rport {	/* aka fc_starget_attrs */
 	/* internal data */
 	unsigned int channel;
 	u32 number;
+	u8 flags;
 	struct list_head peers;
 	struct device dev;
  	struct work_struct dev_loss_work;
  	struct work_struct scan_work;
+ 	struct work_struct stgt_delete_work;
+	struct work_struct rport_delete_work;
 } __attribute__((aligned(sizeof(unsigned long))));
+
+/* bit field values for struct fc_rport "flags" field: */
+#define FC_RPORT_DEVLOSS_PENDING	0x01
+#define FC_RPORT_SCAN_PENDING		0x02
 
 #define	dev_to_rport(d)				\
 	container_of(d, struct fc_rport, dev)
@@ -300,6 +310,7 @@ struct fc_host_attrs {
 	/* Fixed Attributes */
 	u64 node_name;
 	u64 port_name;
+	u64 permanent_port_name;
 	u32 supported_classes;
 	u8  supported_fc4s[FC_FC4_LIST_SIZE];
 	char symbolic_name[FC_SYMBOLIC_NAME_SIZE];
@@ -323,12 +334,23 @@ struct fc_host_attrs {
 	struct list_head rport_bindings;
 	u32 next_rport_number;
 	u32 next_target_id;
+
+	/* work queues for rport state manipulation */
+	char work_q_name[KOBJ_NAME_LEN];
+	struct workqueue_struct *work_q;
+	char devloss_work_q_name[KOBJ_NAME_LEN];
+	struct workqueue_struct *devloss_work_q;
 };
+
+#define shost_to_fc_host(x) \
+	((struct fc_host_attrs *)(x)->shost_data)
 
 #define fc_host_node_name(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->node_name)
 #define fc_host_port_name(x)	\
 	(((struct fc_host_attrs *)(x)->shost_data)->port_name)
+#define fc_host_permanent_port_name(x)	\
+	(((struct fc_host_attrs *)(x)->shost_data)->permanent_port_name)
 #define fc_host_supported_classes(x)	\
 	(((struct fc_host_attrs *)(x)->shost_data)->supported_classes)
 #define fc_host_supported_fc4s(x)	\
@@ -363,6 +385,14 @@ struct fc_host_attrs {
 	(((struct fc_host_attrs *)(x)->shost_data)->next_rport_number)
 #define fc_host_next_target_id(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->next_target_id)
+#define fc_host_work_q_name(x) \
+	(((struct fc_host_attrs *)(x)->shost_data)->work_q_name)
+#define fc_host_work_q(x) \
+	(((struct fc_host_attrs *)(x)->shost_data)->work_q)
+#define fc_host_devloss_work_q_name(x) \
+	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q_name)
+#define fc_host_devloss_work_q(x) \
+	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q)
 
 
 /* The functions by which the transport class and the driver communicate */
@@ -383,6 +413,8 @@ struct fc_function_template {
 
 	struct fc_host_statistics * (*get_fc_host_stats)(struct Scsi_Host *);
 	void	(*reset_fc_host_stats)(struct Scsi_Host *);
+
+	int	(*issue_fc_host_lip)(struct Scsi_Host *);
 
 	/* allocation lengths for host-specific data */
 	u32	 			dd_fcrport_size;
@@ -411,6 +443,7 @@ struct fc_function_template {
 	/* host fixed attributes */
 	unsigned long	show_host_node_name:1;
 	unsigned long	show_host_port_name:1;
+	unsigned long	show_host_permanent_port_name:1;
 	unsigned long	show_host_supported_classes:1;
 	unsigned long	show_host_supported_fc4s:1;
 	unsigned long	show_host_symbolic_name:1;
@@ -427,6 +460,39 @@ struct fc_function_template {
 };
 
 
+/**
+ * fc_remote_port_chkready - called to validate the remote port state
+ *   prior to initiating io to the port.
+ *
+ * Returns a scsi result code that can be returned by the LLDD.
+ *
+ * @rport:	remote port to be checked
+ **/
+static inline int
+fc_remote_port_chkready(struct fc_rport *rport)
+{
+	int result;
+
+	switch (rport->port_state) {
+	case FC_PORTSTATE_ONLINE:
+		if (rport->roles & FC_RPORT_ROLE_FCP_TARGET)
+			result = 0;
+		else if (rport->flags & FC_RPORT_DEVLOSS_PENDING)
+			result = DID_IMM_RETRY << 16;
+		else
+			result = DID_NO_CONNECT << 16;
+		break;
+	case FC_PORTSTATE_BLOCKED:
+		result = DID_IMM_RETRY << 16;
+		break;
+	default:
+		result = DID_NO_CONNECT << 16;
+		break;
+	}
+	return result;
+}
+
+
 struct scsi_transport_template *fc_attach_transport(
 			struct fc_function_template *);
 void fc_release_transport(struct scsi_transport_template *);
@@ -435,8 +501,14 @@ struct fc_rport *fc_remote_port_add(struct Scsi_Host *shost,
 			int channel, struct fc_rport_identifiers  *ids);
 void fc_remote_port_delete(struct fc_rport  *rport);
 void fc_remote_port_rolechg(struct fc_rport  *rport, u32 roles);
-int fc_remote_port_block(struct fc_rport *rport);
-void fc_remote_port_unblock(struct fc_rport *rport);
 int scsi_is_fc_rport(const struct device *);
+
+static inline u64 wwn_to_u64(u8 *wwn)
+{
+	return (u64)wwn[0] << 56 | (u64)wwn[1] << 48 |
+	    (u64)wwn[2] << 40 | (u64)wwn[3] << 32 |
+	    (u64)wwn[4] << 24 | (u64)wwn[5] << 16 |
+	    (u64)wwn[6] <<  8 | (u64)wwn[7];
+}
 
 #endif /* SCSI_TRANSPORT_FC_H */

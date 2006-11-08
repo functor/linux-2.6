@@ -40,10 +40,15 @@
  * bitmap_weight(src, nbits)			Hamming Weight: number set bits
  * bitmap_shift_right(dst, src, n, nbits)	*dst = *src >> n
  * bitmap_shift_left(dst, src, n, nbits)	*dst = *src << n
+ * bitmap_remap(dst, src, old, new, nbits)	*dst = map(old, new)(src)
+ * bitmap_bitremap(oldbit, old, new, nbits)	newbit = map(old, new)(oldbit)
  * bitmap_scnprintf(buf, len, src, nbits)	Print bitmap src to buf
  * bitmap_parse(ubuf, ulen, dst, nbits)		Parse bitmap dst from user buf
  * bitmap_scnlistprintf(buf, len, src, nbits)	Print bitmap src as list to buf
  * bitmap_parselist(buf, dst, nbits)		Parse bitmap dst from list
+ * bitmap_find_free_region(bitmap, bits, order)	Find and allocate bit region
+ * bitmap_release_region(bitmap, pos, order)	Free specified bit region
+ * bitmap_allocate_region(bitmap, pos, order)	Allocate specified bit region
  */
 
 /*
@@ -104,6 +109,10 @@ extern int bitmap_scnlistprintf(char *buf, unsigned int len,
 			const unsigned long *src, int nbits);
 extern int bitmap_parselist(const char *buf, unsigned long *maskp,
 			int nmaskbits);
+extern void bitmap_remap(unsigned long *dst, const unsigned long *src,
+		const unsigned long *old, const unsigned long *new, int bits);
+extern int bitmap_bitremap(int oldbit,
+		const unsigned long *old, const unsigned long *new, int bits);
 extern int bitmap_find_free_region(unsigned long *bitmap, int bits, int order);
 extern void bitmap_release_region(unsigned long *bitmap, int pos, int order);
 extern int bitmap_allocate_region(unsigned long *bitmap, int pos, int order);
@@ -190,7 +199,7 @@ static inline void bitmap_complement(unsigned long *dst, const unsigned long *sr
 		__bitmap_complement(dst, src, nbits);
 }
 
-static inline int bitmap_equal(const unsigned long *src1,
+static inline int __must_check bitmap_equal(const unsigned long *src1,
 			const unsigned long *src2, int nbits)
 {
 	if (nbits <= BITS_PER_LONG)
@@ -199,7 +208,7 @@ static inline int bitmap_equal(const unsigned long *src1,
 		return __bitmap_equal(src1, src2, nbits);
 }
 
-static inline int bitmap_intersects(const unsigned long *src1,
+static inline int __must_check bitmap_intersects(const unsigned long *src1,
 			const unsigned long *src2, int nbits)
 {
 	if (nbits <= BITS_PER_LONG)
@@ -208,7 +217,7 @@ static inline int bitmap_intersects(const unsigned long *src1,
 		return __bitmap_intersects(src1, src2, nbits);
 }
 
-static inline int bitmap_subset(const unsigned long *src1,
+static inline int __must_check bitmap_subset(const unsigned long *src1,
 			const unsigned long *src2, int nbits)
 {
 	if (nbits <= BITS_PER_LONG)
@@ -217,7 +226,7 @@ static inline int bitmap_subset(const unsigned long *src1,
 		return __bitmap_subset(src1, src2, nbits);
 }
 
-static inline int bitmap_empty(const unsigned long *src, int nbits)
+static inline int __must_check bitmap_empty(const unsigned long *src, int nbits)
 {
 	if (nbits <= BITS_PER_LONG)
 		return ! (*src & BITMAP_LAST_WORD_MASK(nbits));
@@ -225,7 +234,7 @@ static inline int bitmap_empty(const unsigned long *src, int nbits)
 		return __bitmap_empty(src, nbits);
 }
 
-static inline int bitmap_full(const unsigned long *src, int nbits)
+static inline int __must_check bitmap_full(const unsigned long *src, int nbits)
 {
 	if (nbits <= BITS_PER_LONG)
 		return ! (~(*src) & BITMAP_LAST_WORD_MASK(nbits));
@@ -233,7 +242,7 @@ static inline int bitmap_full(const unsigned long *src, int nbits)
 		return __bitmap_full(src, nbits);
 }
 
-static inline int bitmap_weight(const unsigned long *src, int nbits)
+static inline int __must_check bitmap_weight(const unsigned long *src, int nbits)
 {
 	return __bitmap_weight(src, nbits);
 }

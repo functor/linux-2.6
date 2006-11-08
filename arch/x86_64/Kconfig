@@ -24,6 +24,10 @@ config X86
 	bool
 	default y
 
+config SEMAPHORE_SLEEPERS
+	bool
+	default y
+
 config MMU
 	bool
 	default y
@@ -40,6 +44,10 @@ config RWSEM_GENERIC_SPINLOCK
 
 config RWSEM_XCHGADD_ALGORITHM
 	bool
+
+config GENERIC_HWEIGHT
+	bool
+	default y
 
 config GENERIC_CALIBRATE_DELAY
 	bool
@@ -61,10 +69,36 @@ config GENERIC_IOMAP
 	bool
 	default y
 
+config ARCH_MAY_HAVE_PC_FDC
+	bool
+	default y
+
+config DMI
+	bool
+	default y
+
 source "init/Kconfig"
 
 
 menu "Processor type and features"
+
+choice
+	prompt "Subarchitecture Type"
+	default X86_PC
+
+config X86_PC
+	bool "PC-compatible"
+	help
+	  Choose this option if your computer is a standard PC or compatible.
+
+config X86_VSMP
+	bool "Support for ScaleMP vSMP"
+	 help
+	  Support for ScaleMP vSMP systems.  Say 'Y' here if this kernel is
+	  supposed to run on these EM64T-based machines.  Only choose this option
+	  if you have one of these machines.
+
+endchoice
 
 choice
 	prompt "Processor family"
@@ -89,6 +123,22 @@ config GENERIC_CPU
 
 endchoice
 
+config X86_64_XEN
+	bool "Enable Xen compatible kernel"
+	select SWIOTLB
+	help
+	  This option will compile a kernel compatible with Xen hypervisor
+
+config X86_NO_TSS
+	bool
+	depends on X86_64_XEN
+	default y
+
+config X86_NO_IDT
+	bool
+	depends on X86_64_XEN
+	default y
+
 #
 # Define implied options from the CPU selection here
 #
@@ -102,8 +152,14 @@ config X86_L1_CACHE_SHIFT
 	default "7" if GENERIC_CPU || MPSC
 	default "6" if MK8
 
+config X86_INTERNODE_CACHE_BYTES
+	int
+	default "4096" if X86_VSMP
+	default X86_L1_CACHE_BYTES if !X86_VSMP
+
 config X86_TSC
 	bool
+	depends on !X86_64_XEN
 	default y
 
 config X86_GOOD_APIC
@@ -144,10 +200,9 @@ config X86_CPUID
 	  with major 203 and minors 0 to 31 for /dev/cpu/0/cpuid to
 	  /dev/cpu/31/cpuid.
 
-# disable it for opteron optimized builds because it pulls in ACPI_BOOT
 config X86_HT
 	bool
-	depends on SMP && !MK8
+	depends on SMP && !MK8 && !X86_64_XEN
 	default y
 
 config MATH_EMULATION
@@ -161,14 +216,22 @@ config EISA
 
 config X86_IO_APIC
 	bool
+	depends !XEN_UNPRIVILEGED_GUEST
 	default y
+
+config X86_XEN_GENAPIC
+	bool
+	depends X86_64_XEN
+	default XEN_PRIVILEGED_GUEST || SMP
 
 config X86_LOCAL_APIC
 	bool
+	depends !XEN_UNPRIVILEGED_GUEST
 	default y
 
 config MTRR
 	bool "MTRR (Memory Type Range Register) support"
+	depends on !XEN_UNPRIVILEGED_GUEST
 	---help---
 	  On Intel P6 family processors (Pentium Pro, Pentium II and later)
 	  the Memory Type Range Registers (MTRRs) may be used to control
@@ -207,36 +270,9 @@ config SMP
 
 	  If you don't know what to do here, say N.
 
-config PREEMPT
-	bool "Preemptible Kernel"
-	---help---
-	  This option reduces the latency of the kernel when reacting to
-	  real-time or interactive events by allowing a low priority process to
-	  be preempted even if it is in kernel mode executing a system call.
-	  This allows applications to run more reliably even when the system is
-	  under load. On contrary it may also break your drivers and add
-	  priority inheritance problems to your system. Don't select it if
-	  you rely on a stable system or have slightly obscure hardware.
-	  It's also not very well tested on x86-64 currently.
-	  You have been warned.
-
-	  Say Y here if you are feeling brave and building a kernel for a
-	  desktop, embedded or real-time system.  Say N if you are unsure.
-
-config PREEMPT_BKL
-	bool "Preempt The Big Kernel Lock"
-	depends on PREEMPT
-	default y
-	help
-	  This option reduces the latency of the kernel by making the
-	  big kernel lock preemptible.
-
-	  Say Y here if you are building a kernel for a desktop system.
-	  Say N if you are unsure.
-
 config SCHED_SMT
 	bool "SMT (Hyperthreading) scheduler support"
-	depends on SMP
+	depends on SMP && !X86_64_XEN
 	default n
 	help
 	  SMT scheduler support improves the CPU scheduler's decision making
@@ -244,45 +280,104 @@ config SCHED_SMT
 	  cost of slightly increased overhead in some places. If unsure say
 	  N here.
 
-config K8_NUMA
-       bool "K8 NUMA support"
-       select NUMA
-       depends on SMP
+config SCHED_MC
+	bool "Multi-core scheduler support"
+	depends on SMP && !X86_64_XEN
+	default y
+	help
+	  Multi-core scheduler support improves the CPU scheduler's decision
+	  making when dealing with multi-core CPU chips at a cost of slightly
+	  increased overhead in some places. If unsure say N here.
+
+source "kernel/Kconfig.preempt"
+
+config NUMA
+       bool "Non Uniform Memory Access (NUMA) Support"
+       depends on SMP && !X86_64_XEN
        help
-	  Enable NUMA (Non Unified Memory Architecture) support for
-	  AMD Opteron Multiprocessor systems. The kernel will try to allocate
-	  memory used by a CPU on the local memory controller of the CPU
-	  and add some more NUMA awareness to the kernel.
-	  This code is recommended on all multiprocessor Opteron systems
-	  and normally doesn't hurt on others.
+	 Enable NUMA (Non Uniform Memory Access) support. The kernel 
+	 will try to allocate memory used by a CPU on the local memory 
+	 controller of the CPU and add some more NUMA awareness to the kernel.
+	 This code is recommended on all multiprocessor Opteron systems.
+	 If the system is EM64T, you should say N unless your system is EM64T 
+	 NUMA. 
+
+config K8_NUMA
+       bool "Old style AMD Opteron NUMA detection"
+       depends on NUMA
+       default y
+       help
+	 Enable K8 NUMA node topology detection.  You should say Y here if
+	 you have a multi processor AMD K8 system. This uses an old
+	 method to read the NUMA configurtion directly from the builtin
+	 Northbridge of Opteron. It is recommended to use X86_64_ACPI_NUMA
+	 instead, which also takes priority if both are compiled in.   
+
+config NODES_SHIFT
+	int
+	default "6"
+	depends on NEED_MULTIPLE_NODES
+
+# Dummy CONFIG option to select ACPI_NUMA from drivers/acpi/Kconfig.
+
+config X86_64_ACPI_NUMA
+       bool "ACPI NUMA detection"
+       depends on NUMA
+       select ACPI 
+       select ACPI_NUMA
+       default y
+       help
+	 Enable ACPI SRAT based node topology detection.
 
 config NUMA_EMU
-	bool "NUMA emulation support"
-	select NUMA
-	depends on SMP
+	bool "NUMA emulation"
+	depends on NUMA
 	help
 	  Enable NUMA emulation. A flat machine will be split
 	  into virtual nodes when booted with "numa=fake=N", where N is the
 	  number of nodes. This is only useful for debugging.
 
-config DISCONTIGMEM
+config ARCH_DISCONTIGMEM_ENABLE
        bool
        depends on NUMA
        default y
 
-config NUMA
-       bool
-       default n
 
-config HAVE_DEC_LOCK
-	bool
-	depends on SMP
-	default y
+config ARCH_DISCONTIGMEM_ENABLE
+	def_bool y
+	depends on NUMA
+
+config ARCH_DISCONTIGMEM_DEFAULT
+	def_bool y
+	depends on NUMA
+
+config ARCH_SPARSEMEM_ENABLE
+	def_bool y
+	depends on (NUMA || EXPERIMENTAL) && !X86_64_XEN
+
+config ARCH_MEMORY_PROBE
+	def_bool y
+	depends on MEMORY_HOTPLUG
+
+config ARCH_FLATMEM_ENABLE
+	def_bool y
+	depends on !NUMA
+
+source "mm/Kconfig"
+
+config HAVE_ARCH_EARLY_PFN_TO_NID
+	def_bool y
+	depends on NUMA
+
+config OUT_OF_LINE_PFN_TO_PAGE
+	def_bool y
+	depends on DISCONTIGMEM
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-256)"
-	range 2 256
+	range 2 255
 	depends on SMP
+	default "16" if X86_64_XEN
 	default "8"
 	help
 	  This allows you to specify the maximum number of CPUs which this
@@ -292,8 +387,20 @@ config NR_CPUS
 	  This is purely to save memory - each supported CPU requires
 	  memory in the static kernel configuration.
 
+config HOTPLUG_CPU
+	bool "Support for hot-pluggable CPUs (EXPERIMENTAL)"
+	depends on SMP && HOTPLUG && EXPERIMENTAL
+	help
+		Say Y here to experiment with turning CPUs off and on.  CPUs
+		can be controlled through /sys/devices/system/cpu/cpu#.
+		Say N if you want to disable CPU hotplug.
+
+config ARCH_ENABLE_MEMORY_HOTPLUG
+	def_bool y
+
 config HPET_TIMER
 	bool
+	depends on !X86_64_XEN
 	default y
 	help
 	  Use the IA-PC HPET (High Precision Event Timer) to manage
@@ -301,54 +408,37 @@ config HPET_TIMER
 	  present.  The HPET provides a stable time base on SMP
 	  systems, unlike the TSC, but it is more expensive to access,
 	  as it is off-chip.  You can find the HPET spec at
-	  <http://www.intel.com/labs/platcomp/hpet/hpetspec.htm>.
-
-config X86_PM_TIMER
-	bool "PM timer"
-	depends on ACPI
-	default y
-	help
-	  Support the ACPI PM timer for time keeping. This is slow,
-	  but is useful on some chipsets without HPET on systems with more
-	  than one CPU. On a single processor or single socket multi core
-	  system it is normally not required.
-	  When the PM timer is active 64bit vsyscalls are disabled
-	  and should not be enabled (/proc/sys/kernel/vsyscall64 should
-	  not be changed).
-	  The kernel selects the PM timer only as a last resort, so it is
-	  useful to enable just in case.
+	  <http://www.intel.com/hardwaredesign/hpetspec.htm>.
 
 config HPET_EMULATE_RTC
 	bool "Provide RTC interrupt"
 	depends on HPET_TIMER && RTC=y
 
 config GART_IOMMU
-	bool "IOMMU support"
-	depends on PCI
+	bool "K8 GART IOMMU support"
+	default y
+	select SWIOTLB
+	depends on PCI && !X86_64_XEN
 	help
-	  Support the K8 IOMMU. Needed to run systems with more than 4GB of memory
-	  properly with 32-bit PCI devices that do not support DAC (Double Address
-	  Cycle). The IOMMU can be turned off at runtime with the iommu=off parameter.
-	  Normally the kernel will take the right choice by itself.
-	  If unsure, say Y.
+	  Support for hardware IOMMU in AMD's Opteron/Athlon64 Processors
+	  and for the bounce buffering software IOMMU.
+	  Needed to run systems with more than 3GB of memory properly with
+	  32-bit PCI devices that do not support DAC (Double Address Cycle).
+	  The IOMMU can be turned off at runtime with the iommu=off parameter.
+  	  Normally the kernel will take the right choice by itself.
+  	  This option includes a driver for the AMD Opteron/Athlon64 IOMMU
+  	  northbridge and a software emulation used on other systems without
+	  hardware IOMMU.  If unsure, say Y.
 
 # need this always enabled with GART_IOMMU for the VIA workaround
 config SWIOTLB
-       bool
-       depends on GART_IOMMU
-       default y
-
-config DUMMY_IOMMU
 	bool
-	depends on !GART_IOMMU && !SWIOTLB
 	default y
-	help
-	  Don't use IOMMU code. This will cause problems when you have more than 4GB
-	  of memory and any 32-bit devices. Don't turn on unless you know what you
-	  are doing.
+	depends on GART_IOMMU
 
 config X86_MCE
 	bool "Machine check support" if EMBEDDED
+	depends on !X86_64_XEN
 	default y
 	help
 	   Include a machine check error handler to report hardware errors.
@@ -363,6 +453,56 @@ config X86_MCE_INTEL
 	help
 	   Additional support for intel specific MCE features such as
 	   the thermal monitor.
+
+config X86_MCE_AMD
+	bool "AMD MCE features"
+	depends on X86_MCE && X86_LOCAL_APIC
+	default y
+	help
+	   Additional support for AMD specific MCE features such as
+	   the DRAM Error Threshold.
+
+config KEXEC
+	bool "kexec system call (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && !X86_64_XEN
+	help
+	  kexec is a system call that implements the ability to shutdown your
+	  current kernel, and to start another kernel.  It is like a reboot
+	  but it is indepedent of the system firmware.   And like a reboot
+	  you can start any kernel with it, not just Linux.
+
+	  The name comes from the similiarity to the exec system call.
+
+	  It is an ongoing process to be certain the hardware in a machine
+	  is properly shutdown, so do not be surprised if this code does not
+	  initially work for you.  It may help to enable device hotplugging
+	  support.  As of this writing the exact hardware interface is
+	  strongly in flux, so no good recommendation can be made.
+
+config CRASH_DUMP
+	bool "kernel crash dumps (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	help
+		Generate crash dump after being started by kexec.
+
+config PHYSICAL_START
+	hex "Physical address where the kernel is loaded" if (EMBEDDED || CRASH_DUMP)
+	default "0x1000000" if CRASH_DUMP
+	default "0x200000"
+	help
+	  This gives the physical address where the kernel is loaded. Normally
+	  for regular kernels this value is 0x200000 (2MB). But in the case
+	  of kexec on panic the fail safe kernel needs to run at a different
+	  address than the panic-ed kernel. This option is used to set the load
+	  address for kernels used to capture crash dump on being kexec'ed
+	  after panic. The default value for crash dump kernels is
+	  0x1000000 (16MB). This can also be set based on the "X" value as
+	  specified in the "crashkernel=YM@XM" command line boot parameter
+	  passed to the panic-ed kernel. Typically this parameter is set as
+	  crashkernel=64M@16M. Please take a look at
+	  Documentation/kdump/kdump.txt for more details about crash dumps.
+
+	  Don't change this unless you know what you are doing.
 
 config SECCOMP
 	bool "Enable seccomp to safely compute untrusted bytecode"
@@ -380,6 +520,16 @@ config SECCOMP
 	  defined by each seccomp mode.
 
 	  If unsure, say Y. Only embedded should say N here.
+
+source kernel/Kconfig.hz
+
+config REORDER
+	bool "Function reordering"
+	default n
+	help
+         This option enables the toolchain to reorder functions for a more 
+         optimal TLB usage. If you have pretty much any version of binutils, 
+	 this can increase your kernel build time by roughly one minute.
 
 endmenu
 
@@ -399,9 +549,17 @@ config ISA_DMA_API
 	bool
 	default y
 
-menu "Power management options"
+config GENERIC_PENDING_IRQ
+	bool
+	depends on GENERIC_HARDIRQS && SMP
+	default y
 
+menu "Power management options"
+	depends on !XEN_UNPRIVILEGED_GUEST
+
+if !X86_64_XEN
 source kernel/power/Kconfig
+endif
 
 source "drivers/acpi/Kconfig"
 
@@ -423,17 +581,21 @@ config PCI_DIRECT
 config PCI_MMCONFIG
 	bool "Support mmconfig PCI config space access"
 	depends on PCI && ACPI
-	select ACPI_BOOT
 
-config UNORDERED_IO
-       bool "Unordered IO mapping access"
-       depends on EXPERIMENTAL
-       help
-         Use unordered stores to access IO memory mappings in device drivers.
-	 Still very experimental. When a driver works on IA64/ppc64/pa-risc it should
-	 work with this option, but it makes the drivers behave differently
-	 from i386. Requires that the driver writer used memory barriers
-	 properly.
+config XEN_PCIDEV_FRONTEND
+	bool "Xen PCI Frontend"
+	depends on PCI && X86_64_XEN
+	default y
+	help
+	  The PCI device frontend driver allows the kernel to import arbitrary
+	  PCI devices from a PCI backend to support PCI driver domains.
+
+config XEN_PCIDEV_FE_DEBUG
+	bool "Xen PCI Frontend Debugging"
+	depends on XEN_PCIDEV_FRONTEND
+	default n
+	help
+	  Enables some debug statements within the PCI Frontend.
 
 source "drivers/pci/pcie/Kconfig"
 
@@ -458,7 +620,7 @@ config IA32_EMULATION
 	  left.
 
 config IA32_AOUT
-       bool "IA32 a.out support"
+       tristate "IA32 a.out support"
        depends on IA32_EMULATION
        help
          Support old a.out binaries in the 32bit emulation.
@@ -473,29 +635,9 @@ config SYSVIPC_COMPAT
 	depends on COMPAT && SYSVIPC
 	default y
 
-config UID16
-	bool
-	depends on IA32_EMULATION
-	default y
-
-config KEXEC
-	bool "kexec system call (EXPERIMENTAL)"
-	depends on EXPERIMENTAL
-	help
-	  kexec is a system call that implements the ability to shutdown your
-	  current kernel, and to start another kernel.  It is like a reboot
-	  but it is indepedent of the system firmware.   And like a reboot
-	  you can start any kernel with it, not just Linux.
-
-	  The name comes from the similiarity to the exec system call.
-
-	  It is an ongoing process to be certain the hardware in a machine
-	  is properly shutdown, so do not be surprised if this code does not
-	  initially work for you.  It may help to enable device hotplugging
-	  support.  As of this writing the exact hardware interface is
-	  strongly in flux, so no good recommendation can be made.
-
 endmenu
+
+source "net/Kconfig"
 
 source drivers/Kconfig
 
@@ -503,7 +645,21 @@ source "drivers/firmware/Kconfig"
 
 source fs/Kconfig
 
+menu "Instrumentation Support"
+        depends on EXPERIMENTAL
+
 source "arch/x86_64/oprofile/Kconfig"
+
+config KPROBES
+	bool "Kprobes (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && MODULES
+	help
+	  Kprobes allows you to trap at almost any kernel address and
+	  execute a callback function.  register_kprobe() establishes
+	  a probepoint and specifies the callback.  Kprobes is useful
+	  for kernel debugging, non-intrusive instrumentation and testing.
+	  If in doubt, say "N".
+endmenu
 
 source "arch/x86_64/Kconfig.debug"
 
@@ -512,5 +668,7 @@ source "kernel/vserver/Kconfig"
 source "security/Kconfig"
 
 source "crypto/Kconfig"
+
+source "drivers/xen/Kconfig"
 
 source "lib/Kconfig"

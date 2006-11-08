@@ -6,6 +6,7 @@
  * Version 2.  See the file COPYING for more details.
  */
 
+#include <linux/capability.h>
 #include <linux/mm.h>
 #include <linux/file.h>
 #include <linux/slab.h>
@@ -14,11 +15,35 @@
 #include <linux/spinlock.h>
 #include <linux/list.h>
 #include <linux/highmem.h>
-#include <net/checksum.h>
+#include <linux/syscalls.h>
+#include <linux/reboot.h>
+#include <linux/syscalls.h>
+#include <linux/ioport.h>
+#include <linux/hardirq.h>
+
 #include <asm/page.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/system.h>
+#include <asm/semaphore.h>
+
+/* Per cpu memory for storing cpu states in case of system crash. */
+note_buf_t* crash_notes;
+
+/* Location of the reserved area for the crash kernel */
+struct resource crashk_res = {
+	.name  = "Crash kernel",
+	.start = 0,
+	.end   = 0,
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM
+};
+
+int kexec_should_crash(struct task_struct *p)
+{
+	if (in_interrupt() || !p->pid || p->pid == 1 || panic_on_oops)
+		return 1;
+	return 0;
+}
 
 /*
  * When kexec transitions to the new kernel there is a one-to-one
@@ -66,29 +91,34 @@
  */
 #define KIMAGE_NO_DEST (-1UL)
 
-static int kimage_is_destination_range(
-	struct kimage *image, unsigned long start, unsigned long end);
-static struct page *kimage_alloc_page(struct kimage *image, unsigned int gfp_mask, unsigned long dest);
+static int kimage_is_destination_range(struct kimage *image,
+				       unsigned long start, unsigned long end);
+static struct page *kimage_alloc_page(struct kimage *image,
+				       gfp_t gfp_mask,
+				       unsigned long dest);
 
-
-static int kimage_alloc(struct kimage **rimage,
-	unsigned long nr_segments, struct kexec_segment *segments)
+static int do_kimage_alloc(struct kimage **rimage, unsigned long entry,
+	                    unsigned long nr_segments,
+                            struct kexec_segment __user *segments)
 {
-	int result;
-	struct kimage *image;
 	size_t segment_bytes;
+	struct kimage *image;
 	unsigned long i;
+	int result;
 
 	/* Allocate a controlling structure */
 	result = -ENOMEM;
 	image = kmalloc(sizeof(*image), GFP_KERNEL);
-	if (!image) {
+	if (!image)
 		goto out;
-	}
+
 	memset(image, 0, sizeof(*image));
 	image->head = 0;
 	image->entry = &image->head;
 	image->last_entry = &image->head;
+	image->control_page = ~0; /* By default this does not apply */
+	image->start = entry;
+	image->type = KEXEC_TYPE_DEFAULT;
 
 	/* Initialize the list of control pages */
 	INIT_LIST_HEAD(&image->control_pages);
@@ -101,7 +131,7 @@ static int kimage_alloc(struct kimage **rimage,
 
 	/* Read in the segments */
 	image->nr_segments = nr_segments;
-	segment_bytes = nr_segments * sizeof*segments;
+	segment_bytes = nr_segments * sizeof(*segments);
 	result = copy_from_user(image->segment, segments, segment_bytes);
 	if (result)
 		goto out;
@@ -111,15 +141,84 @@ static int kimage_alloc(struct kimage **rimage,
 	 * responsible for making certain we don't attempt to load
 	 * the new image into invalid or reserved areas of RAM.  This
 	 * just verifies it is an address we can use.
+	 *
+	 * Since the kernel does everything in page size chunks ensure
+	 * the destination addreses are page aligned.  Too many
+	 * special cases crop of when we don't do this.  The most
+	 * insidious is getting overlapping destination addresses
+	 * simply because addresses are changed to page size
+	 * granularity.
 	 */
 	result = -EADDRNOTAVAIL;
 	for (i = 0; i < nr_segments; i++) {
-		unsigned long mend;
-		mend = ((unsigned long)(image->segment[i].mem)) +
-			image->segment[i].memsz;
+		unsigned long mstart, mend;
+
+		mstart = image->segment[i].mem;
+		mend   = mstart + image->segment[i].memsz;
+		if ((mstart & ~PAGE_MASK) || (mend & ~PAGE_MASK))
+			goto out;
 		if (mend >= KEXEC_DESTINATION_MEMORY_LIMIT)
 			goto out;
 	}
+
+	/* Verify our destination addresses do not overlap.
+	 * If we alloed overlapping destination addresses
+	 * through very weird things can happen with no
+	 * easy explanation as one segment stops on another.
+	 */
+	result = -EINVAL;
+	for (i = 0; i < nr_segments; i++) {
+		unsigned long mstart, mend;
+		unsigned long j;
+
+		mstart = image->segment[i].mem;
+		mend   = mstart + image->segment[i].memsz;
+		for (j = 0; j < i; j++) {
+			unsigned long pstart, pend;
+			pstart = image->segment[j].mem;
+			pend   = pstart + image->segment[j].memsz;
+			/* Do the segments overlap ? */
+			if ((mend > pstart) && (mstart < pend))
+				goto out;
+		}
+	}
+
+	/* Ensure our buffer sizes are strictly less than
+	 * our memory sizes.  This should always be the case,
+	 * and it is easier to check up front than to be surprised
+	 * later on.
+	 */
+	result = -EINVAL;
+	for (i = 0; i < nr_segments; i++) {
+		if (image->segment[i].bufsz > image->segment[i].memsz)
+			goto out;
+	}
+
+	result = 0;
+out:
+	if (result == 0)
+		*rimage = image;
+	else
+		kfree(image);
+
+	return result;
+
+}
+
+static int kimage_normal_alloc(struct kimage **rimage, unsigned long entry,
+				unsigned long nr_segments,
+				struct kexec_segment __user *segments)
+{
+	int result;
+	struct kimage *image;
+
+	/* Allocate and initialize a controlling structure */
+	image = NULL;
+	result = do_kimage_alloc(&image, entry, nr_segments, segments);
+	if (result)
+		goto out;
+
+	*rimage = image;
 
 	/*
 	 * Find a location for the control code buffer, and add it
@@ -128,7 +227,7 @@ static int kimage_alloc(struct kimage **rimage,
 	 */
 	result = -ENOMEM;
 	image->control_code_page = kimage_alloc_control_pages(image,
-		get_order(KEXEC_CONTROL_CODE_SIZE));
+					   get_order(KEXEC_CONTROL_CODE_SIZE));
 	if (!image->control_code_page) {
 		printk(KERN_ERR "Could not allocate control_code_buffer\n");
 		goto out;
@@ -136,71 +235,144 @@ static int kimage_alloc(struct kimage **rimage,
 
 	result = 0;
  out:
-	if (result == 0) {
+	if (result == 0)
 		*rimage = image;
-	} else {
+	else
 		kfree(image);
-	}
+
 	return result;
 }
 
-static int kimage_is_destination_range(
-	struct kimage *image, unsigned long start, unsigned long end)
+static int kimage_crash_alloc(struct kimage **rimage, unsigned long entry,
+				unsigned long nr_segments,
+				struct kexec_segment __user *segments)
+{
+	int result;
+	struct kimage *image;
+	unsigned long i;
+
+	image = NULL;
+	/* Verify we have a valid entry point */
+	if ((entry < crashk_res.start) || (entry > crashk_res.end)) {
+		result = -EADDRNOTAVAIL;
+		goto out;
+	}
+
+	/* Allocate and initialize a controlling structure */
+	result = do_kimage_alloc(&image, entry, nr_segments, segments);
+	if (result)
+		goto out;
+
+	/* Enable the special crash kernel control page
+	 * allocation policy.
+	 */
+	image->control_page = crashk_res.start;
+	image->type = KEXEC_TYPE_CRASH;
+
+	/*
+	 * Verify we have good destination addresses.  Normally
+	 * the caller is responsible for making certain we don't
+	 * attempt to load the new image into invalid or reserved
+	 * areas of RAM.  But crash kernels are preloaded into a
+	 * reserved area of ram.  We must ensure the addresses
+	 * are in the reserved area otherwise preloading the
+	 * kernel could corrupt things.
+	 */
+	result = -EADDRNOTAVAIL;
+	for (i = 0; i < nr_segments; i++) {
+		unsigned long mstart, mend;
+
+		mstart = image->segment[i].mem;
+		mend = mstart + image->segment[i].memsz - 1;
+		/* Ensure we are within the crash kernel limits */
+		if ((mstart < crashk_res.start) || (mend > crashk_res.end))
+			goto out;
+	}
+
+	/*
+	 * Find a location for the control code buffer, and add
+	 * the vector of segments so that it's pages will also be
+	 * counted as destination pages.
+	 */
+	result = -ENOMEM;
+	image->control_code_page = kimage_alloc_control_pages(image,
+					   get_order(KEXEC_CONTROL_CODE_SIZE));
+	if (!image->control_code_page) {
+		printk(KERN_ERR "Could not allocate control_code_buffer\n");
+		goto out;
+	}
+
+	result = 0;
+out:
+	if (result == 0)
+		*rimage = image;
+	else
+		kfree(image);
+
+	return result;
+}
+
+static int kimage_is_destination_range(struct kimage *image,
+					unsigned long start,
+					unsigned long end)
 {
 	unsigned long i;
 
 	for (i = 0; i < image->nr_segments; i++) {
 		unsigned long mstart, mend;
-		mstart = (unsigned long)image->segment[i].mem;
-		mend   = mstart + image->segment[i].memsz;
-		if ((end > mstart) && (start < mend)) {
+
+		mstart = image->segment[i].mem;
+		mend = mstart + image->segment[i].memsz;
+		if ((end > mstart) && (start < mend))
 			return 1;
-		}
 	}
+
 	return 0;
 }
 
-static struct page *kimage_alloc_pages(unsigned int gfp_mask, unsigned int order)
+static struct page *kimage_alloc_pages(gfp_t gfp_mask, unsigned int order)
 {
 	struct page *pages;
+
 	pages = alloc_pages(gfp_mask, order);
 	if (pages) {
 		unsigned int count, i;
 		pages->mapping = NULL;
-		pages->private = order;
+		set_page_private(pages, order);
 		count = 1 << order;
-		for(i = 0; i < count; i++) {
+		for (i = 0; i < count; i++)
 			SetPageReserved(pages + i);
-		}
 	}
+
 	return pages;
 }
 
 static void kimage_free_pages(struct page *page)
 {
 	unsigned int order, count, i;
-	order = page->private;
+
+	order = page_private(page);
 	count = 1 << order;
-	for(i = 0; i < count; i++) {
+	for (i = 0; i < count; i++)
 		ClearPageReserved(page + i);
-	}
 	__free_pages(page, order);
 }
 
 static void kimage_free_page_list(struct list_head *list)
 {
 	struct list_head *pos, *next;
+
 	list_for_each_safe(pos, next, list) {
 		struct page *page;
 
 		page = list_entry(pos, struct page, lru);
 		list_del(&page->lru);
-
 		kimage_free_pages(page);
 	}
 }
 
-struct page *kimage_alloc_control_pages(struct kimage *image, unsigned int order)
+static struct page *kimage_alloc_normal_control_pages(struct kimage *image,
+							unsigned int order)
 {
 	/* Control pages are special, they are the intermediaries
 	 * that are needed while we copy the rest of the pages
@@ -227,6 +399,7 @@ struct page *kimage_alloc_control_pages(struct kimage *image, unsigned int order
 	 */
 	do {
 		unsigned long pfn, epfn, addr, eaddr;
+
 		pages = kimage_alloc_pages(GFP_KERNEL, order);
 		if (!pages)
 			break;
@@ -235,12 +408,12 @@ struct page *kimage_alloc_control_pages(struct kimage *image, unsigned int order
 		addr  = pfn << PAGE_SHIFT;
 		eaddr = epfn << PAGE_SHIFT;
 		if ((epfn >= (KEXEC_CONTROL_MEMORY_LIMIT >> PAGE_SHIFT)) ||
-			kimage_is_destination_range(image, addr, eaddr))
-		{
+			      kimage_is_destination_range(image, addr, eaddr)) {
 			list_add(&pages->lru, &extra_pages);
 			pages = NULL;
 		}
-	} while(!pages);
+	} while (!pages);
+
 	if (pages) {
 		/* Remember the allocated page... */
 		list_add(&pages->lru, &image->control_pages);
@@ -260,44 +433,127 @@ struct page *kimage_alloc_control_pages(struct kimage *image, unsigned int order
 	 * For now it is simpler to just free the pages.
 	 */
 	kimage_free_page_list(&extra_pages);
-	return pages;
 
+	return pages;
+}
+
+static struct page *kimage_alloc_crash_control_pages(struct kimage *image,
+						      unsigned int order)
+{
+	/* Control pages are special, they are the intermediaries
+	 * that are needed while we copy the rest of the pages
+	 * to their final resting place.  As such they must
+	 * not conflict with either the destination addresses
+	 * or memory the kernel is already using.
+	 *
+	 * Control pages are also the only pags we must allocate
+	 * when loading a crash kernel.  All of the other pages
+	 * are specified by the segments and we just memcpy
+	 * into them directly.
+	 *
+	 * The only case where we really need more than one of
+	 * these are for architectures where we cannot disable
+	 * the MMU and must instead generate an identity mapped
+	 * page table for all of the memory.
+	 *
+	 * Given the low demand this implements a very simple
+	 * allocator that finds the first hole of the appropriate
+	 * size in the reserved memory region, and allocates all
+	 * of the memory up to and including the hole.
+	 */
+	unsigned long hole_start, hole_end, size;
+	struct page *pages;
+
+	pages = NULL;
+	size = (1 << order) << PAGE_SHIFT;
+	hole_start = (image->control_page + (size - 1)) & ~(size - 1);
+	hole_end   = hole_start + size - 1;
+	while (hole_end <= crashk_res.end) {
+		unsigned long i;
+
+		if (hole_end > KEXEC_CONTROL_MEMORY_LIMIT)
+			break;
+		if (hole_end > crashk_res.end)
+			break;
+		/* See if I overlap any of the segments */
+		for (i = 0; i < image->nr_segments; i++) {
+			unsigned long mstart, mend;
+
+			mstart = image->segment[i].mem;
+			mend   = mstart + image->segment[i].memsz - 1;
+			if ((hole_end >= mstart) && (hole_start <= mend)) {
+				/* Advance the hole to the end of the segment */
+				hole_start = (mend + (size - 1)) & ~(size - 1);
+				hole_end   = hole_start + size - 1;
+				break;
+			}
+		}
+		/* If I don't overlap any segments I have found my hole! */
+		if (i == image->nr_segments) {
+			pages = pfn_to_page(hole_start >> PAGE_SHIFT);
+			break;
+		}
+	}
+	if (pages)
+		image->control_page = hole_end;
+
+	return pages;
+}
+
+
+struct page *kimage_alloc_control_pages(struct kimage *image,
+					 unsigned int order)
+{
+	struct page *pages = NULL;
+
+	switch (image->type) {
+	case KEXEC_TYPE_DEFAULT:
+		pages = kimage_alloc_normal_control_pages(image, order);
+		break;
+	case KEXEC_TYPE_CRASH:
+		pages = kimage_alloc_crash_control_pages(image, order);
+		break;
+	}
+
+	return pages;
 }
 
 static int kimage_add_entry(struct kimage *image, kimage_entry_t entry)
 {
-	if (*image->entry != 0) {
+	if (*image->entry != 0)
 		image->entry++;
-	}
+
 	if (image->entry == image->last_entry) {
 		kimage_entry_t *ind_page;
 		struct page *page;
+
 		page = kimage_alloc_page(image, GFP_KERNEL, KIMAGE_NO_DEST);
-		if (!page) {
+		if (!page)
 			return -ENOMEM;
-		}
+
 		ind_page = page_address(page);
 		*image->entry = virt_to_phys(ind_page) | IND_INDIRECTION;
 		image->entry = ind_page;
-		image->last_entry =
-			ind_page + ((PAGE_SIZE/sizeof(kimage_entry_t)) - 1);
+		image->last_entry = ind_page +
+				      ((PAGE_SIZE/sizeof(kimage_entry_t)) - 1);
 	}
 	*image->entry = entry;
 	image->entry++;
 	*image->entry = 0;
+
 	return 0;
 }
 
-static int kimage_set_destination(
-	struct kimage *image, unsigned long destination)
+static int kimage_set_destination(struct kimage *image,
+				   unsigned long destination)
 {
 	int result;
 
 	destination &= PAGE_MASK;
 	result = kimage_add_entry(image, destination | IND_DESTINATION);
-	if (result == 0) {
+	if (result == 0)
 		image->destination = destination;
-	}
+
 	return result;
 }
 
@@ -308,9 +564,9 @@ static int kimage_add_page(struct kimage *image, unsigned long page)
 
 	page &= PAGE_MASK;
 	result = kimage_add_entry(image, page | IND_SOURCE);
-	if (result == 0) {
+	if (result == 0)
 		image->destination += PAGE_SIZE;
-	}
+
 	return result;
 }
 
@@ -326,15 +582,12 @@ static void kimage_free_extra_pages(struct kimage *image)
 }
 static int kimage_terminate(struct kimage *image)
 {
-	int result;
+	if (*image->entry != 0)
+		image->entry++;
 
-	result = kimage_add_entry(image, IND_DONE);
-	if (result == 0) {
-		/* Point at the terminating element */
-		image->entry--;
-		kimage_free_extra_pages(image);
-	}
-	return result;
+	*image->entry = IND_DONE;
+
+	return 0;
 }
 
 #define for_each_kimage_entry(image, ptr, entry) \
@@ -357,26 +610,24 @@ static void kimage_free(struct kimage *image)
 
 	if (!image)
 		return;
+
 	kimage_free_extra_pages(image);
 	for_each_kimage_entry(image, ptr, entry) {
 		if (entry & IND_INDIRECTION) {
 			/* Free the previous indirection page */
-			if (ind & IND_INDIRECTION) {
+			if (ind & IND_INDIRECTION)
 				kimage_free_entry(ind);
-			}
 			/* Save this indirection page until we are
 			 * done with it.
 			 */
 			ind = entry;
 		}
-		else if (entry & IND_SOURCE) {
+		else if (entry & IND_SOURCE)
 			kimage_free_entry(entry);
-		}
 	}
 	/* Free the final indirection page */
-	if (ind & IND_INDIRECTION) {
+	if (ind & IND_INDIRECTION)
 		kimage_free_entry(ind);
-	}
 
 	/* Handle any machine specific cleanup */
 	machine_kexec_cleanup(image);
@@ -386,26 +637,28 @@ static void kimage_free(struct kimage *image)
 	kfree(image);
 }
 
-static kimage_entry_t *kimage_dst_used(struct kimage *image, unsigned long page)
+static kimage_entry_t *kimage_dst_used(struct kimage *image,
+					unsigned long page)
 {
 	kimage_entry_t *ptr, entry;
 	unsigned long destination = 0;
 
 	for_each_kimage_entry(image, ptr, entry) {
-		if (entry & IND_DESTINATION) {
+		if (entry & IND_DESTINATION)
 			destination = entry & PAGE_MASK;
-		}
 		else if (entry & IND_SOURCE) {
-			if (page == destination) {
+			if (page == destination)
 				return ptr;
-			}
 			destination += PAGE_SIZE;
 		}
 	}
-	return 0;
+
+	return NULL;
 }
 
-static struct page *kimage_alloc_page(struct kimage *image, unsigned int gfp_mask, unsigned long destination)
+static struct page *kimage_alloc_page(struct kimage *image,
+					gfp_t gfp_mask,
+					unsigned long destination)
 {
 	/*
 	 * Here we implement safeguards to ensure that a source page
@@ -445,11 +698,11 @@ static struct page *kimage_alloc_page(struct kimage *image, unsigned int gfp_mas
 
 		/* Allocate a page, if we run out of memory give up */
 		page = kimage_alloc_pages(gfp_mask, 0);
-		if (!page) {
-			return 0;
-		}
+		if (!page)
+			return NULL;
 		/* If the page cannot be used file it away */
-		if (page_to_pfn(page) > (KEXEC_SOURCE_MEMORY_LIMIT >> PAGE_SHIFT)) {
+		if (page_to_pfn(page) >
+				(KEXEC_SOURCE_MEMORY_LIMIT >> PAGE_SHIFT)) {
 			list_add(&page->lru, &image->unuseable_pages);
 			continue;
 		}
@@ -460,7 +713,8 @@ static struct page *kimage_alloc_page(struct kimage *image, unsigned int gfp_mas
 			break;
 
 		/* If the page is not a destination page use it */
-		if (!kimage_is_destination_range(image, addr, addr + PAGE_SIZE))
+		if (!kimage_is_destination_range(image, addr,
+						  addr + PAGE_SIZE))
 			break;
 
 		/*
@@ -493,74 +747,138 @@ static struct page *kimage_alloc_page(struct kimage *image, unsigned int gfp_mas
 			list_add(&page->lru, &image->dest_pages);
 		}
 	}
+
 	return page;
 }
 
-static int kimage_load_segment(struct kimage *image,
-	struct kexec_segment *segment)
+static int kimage_load_normal_segment(struct kimage *image,
+					 struct kexec_segment *segment)
 {
-	unsigned long mstart;
+	unsigned long maddr;
+	unsigned long ubytes, mbytes;
 	int result;
-	unsigned long offset;
-	unsigned long offset_end;
-	unsigned char *buf;
+	unsigned char __user *buf;
 
 	result = 0;
 	buf = segment->buf;
-	mstart = (unsigned long)segment->mem;
+	ubytes = segment->bufsz;
+	mbytes = segment->memsz;
+	maddr = segment->mem;
 
-	offset_end = segment->memsz;
-
-	result = kimage_set_destination(image, mstart);
-	if (result < 0) {
+	result = kimage_set_destination(image, maddr);
+	if (result < 0)
 		goto out;
-	}
-	for (offset = 0;  offset < segment->memsz; offset += PAGE_SIZE) {
+
+	while (mbytes) {
 		struct page *page;
 		char *ptr;
-		size_t size, leader;
-		page = kimage_alloc_page(image, GFP_HIGHUSER, mstart + offset);
+		size_t uchunk, mchunk;
+
+		page = kimage_alloc_page(image, GFP_HIGHUSER, maddr);
 		if (page == 0) {
 			result  = -ENOMEM;
 			goto out;
 		}
-		result = kimage_add_page(image, page_to_pfn(page) << PAGE_SHIFT);
-		if (result < 0) {
+		result = kimage_add_page(image, page_to_pfn(page)
+								<< PAGE_SHIFT);
+		if (result < 0)
 			goto out;
-		}
+
 		ptr = kmap(page);
-		if (segment->bufsz < offset) {
-			/* We are past the end zero the whole page */
-			memset(ptr, 0, PAGE_SIZE);
-			kunmap(page);
-			continue;
-		}
-		size = PAGE_SIZE;
-		leader = 0;
-		if ((offset == 0)) {
-			leader = mstart & ~PAGE_MASK;
-		}
-		if (leader) {
-			/* We are on the first page zero the unused portion */
-			memset(ptr, 0, leader);
-			size -= leader;
-			ptr += leader;
-		}
-		if (size > (segment->bufsz - offset)) {
-			size = segment->bufsz - offset;
-		}
-		if (size < (PAGE_SIZE - leader)) {
-			/* zero the trailing part of the page */
-			memset(ptr + size, 0, (PAGE_SIZE - leader) - size);
-		}
-		result = copy_from_user(ptr, buf + offset, size);
+		/* Start with a clear page */
+		memset(ptr, 0, PAGE_SIZE);
+		ptr += maddr & ~PAGE_MASK;
+		mchunk = PAGE_SIZE - (maddr & ~PAGE_MASK);
+		if (mchunk > mbytes)
+			mchunk = mbytes;
+
+		uchunk = mchunk;
+		if (uchunk > ubytes)
+			uchunk = ubytes;
+
+		result = copy_from_user(ptr, buf, uchunk);
 		kunmap(page);
 		if (result) {
 			result = (result < 0) ? result : -EIO;
 			goto out;
 		}
+		ubytes -= uchunk;
+		maddr  += mchunk;
+		buf    += mchunk;
+		mbytes -= mchunk;
 	}
- out:
+out:
+	return result;
+}
+
+static int kimage_load_crash_segment(struct kimage *image,
+					struct kexec_segment *segment)
+{
+	/* For crash dumps kernels we simply copy the data from
+	 * user space to it's destination.
+	 * We do things a page at a time for the sake of kmap.
+	 */
+	unsigned long maddr;
+	unsigned long ubytes, mbytes;
+	int result;
+	unsigned char __user *buf;
+
+	result = 0;
+	buf = segment->buf;
+	ubytes = segment->bufsz;
+	mbytes = segment->memsz;
+	maddr = segment->mem;
+	while (mbytes) {
+		struct page *page;
+		char *ptr;
+		size_t uchunk, mchunk;
+
+		page = pfn_to_page(maddr >> PAGE_SHIFT);
+		if (page == 0) {
+			result  = -ENOMEM;
+			goto out;
+		}
+		ptr = kmap(page);
+		ptr += maddr & ~PAGE_MASK;
+		mchunk = PAGE_SIZE - (maddr & ~PAGE_MASK);
+		if (mchunk > mbytes)
+			mchunk = mbytes;
+
+		uchunk = mchunk;
+		if (uchunk > ubytes) {
+			uchunk = ubytes;
+			/* Zero the trailing part of the page */
+			memset(ptr + uchunk, 0, mchunk - uchunk);
+		}
+		result = copy_from_user(ptr, buf, uchunk);
+		kunmap(page);
+		if (result) {
+			result = (result < 0) ? result : -EIO;
+			goto out;
+		}
+		ubytes -= uchunk;
+		maddr  += mchunk;
+		buf    += mchunk;
+		mbytes -= mchunk;
+	}
+out:
+	return result;
+}
+
+static int kimage_load_segment(struct kimage *image,
+				struct kexec_segment *segment)
+{
+	int result = -ENOMEM;
+
+	switch (image->type) {
+	case KEXEC_TYPE_DEFAULT:
+		result = kimage_load_normal_segment(image, segment);
+		break;
+	case KEXEC_TYPE_CRASH:
+		result = kimage_load_crash_segment(image, segment);
+		break;
+	}
+
 	return result;
 }
 
@@ -585,53 +903,179 @@ static int kimage_load_segment(struct kimage *image,
  * that to happen you need to do that yourself.
  */
 struct kimage *kexec_image = NULL;
-struct kimage *kexec_crash_image = NULL;
+static struct kimage *kexec_crash_image = NULL;
+/*
+ * A home grown binary mutex.
+ * Nothing can wait so this mutex is safe to use
+ * in interrupt context :)
+ */
+static int kexec_lock = 0;
 
 asmlinkage long sys_kexec_load(unsigned long entry, unsigned long nr_segments,
-	struct kexec_segment *segments, unsigned long flags)
+				struct kexec_segment __user *segments,
+				unsigned long flags)
 {
-	struct kimage *image;
+	struct kimage **dest_image, *image;
+	int locked;
 	int result;
 
 	/* We only trust the superuser with rebooting the system. */
 	if (!capable(CAP_SYS_BOOT))
 		return -EPERM;
 
+	/*
+	 * Verify we have a legal set of flags
+	 * This leaves us room for future extensions.
+	 */
+	if ((flags & KEXEC_FLAGS) != (flags & ~KEXEC_ARCH_MASK))
+		return -EINVAL;
+
+	/* Verify we are on the appropriate architecture */
+	if (((flags & KEXEC_ARCH_MASK) != KEXEC_ARCH) &&
+		((flags & KEXEC_ARCH_MASK) != KEXEC_ARCH_DEFAULT))
+		return -EINVAL;
+
+	/* Put an artificial cap on the number
+	 * of segments passed to kexec_load.
+	 */
 	if (nr_segments > KEXEC_SEGMENT_MAX)
 		return -EINVAL;
 
 	image = NULL;
 	result = 0;
 
+	/* Because we write directly to the reserved memory
+	 * region when loading crash kernels we need a mutex here to
+	 * prevent multiple crash  kernels from attempting to load
+	 * simultaneously, and to prevent a crash kernel from loading
+	 * over the top of a in use crash kernel.
+	 *
+	 * KISS: always take the mutex.
+	 */
+	locked = xchg(&kexec_lock, 1);
+	if (locked)
+		return -EBUSY;
+
+	dest_image = &kexec_image;
+	if (flags & KEXEC_ON_CRASH)
+		dest_image = &kexec_crash_image;
 	if (nr_segments > 0) {
 		unsigned long i;
-		result = kimage_alloc(&image, nr_segments, segments);
-		if (result) {
-			goto out;
+
+		/* Loading another kernel to reboot into */
+		if ((flags & KEXEC_ON_CRASH) == 0)
+			result = kimage_normal_alloc(&image, entry,
+							nr_segments, segments);
+		/* Loading another kernel to switch to if this one crashes */
+		else if (flags & KEXEC_ON_CRASH) {
+			/* Free any current crash dump kernel before
+			 * we corrupt it.
+			 */
+			kimage_free(xchg(&kexec_crash_image, NULL));
+			result = kimage_crash_alloc(&image, entry,
+						     nr_segments, segments);
 		}
+		if (result)
+			goto out;
+
 		result = machine_kexec_prepare(image);
-		if (result) {
+		if (result)
 			goto out;
-		}
-		image->start = entry;
+
 		for (i = 0; i < nr_segments; i++) {
 			result = kimage_load_segment(image, &image->segment[i]);
-			if (result) {
+			if (result)
 				goto out;
-			}
 		}
 		result = kimage_terminate(image);
-		if (result) {
+		if (result)
 			goto out;
-		}
 	}
+	/* Install the new kernel, and  Uninstall the old */
+	image = xchg(dest_image, image);
 
-	if (!flags)
-		image = xchg(&kexec_image, image);
-	else
-		image = xchg(&kexec_crash_image, image);
-
- out:
+out:
+	xchg(&kexec_lock, 0); /* Release the mutex */
 	kimage_free(image);
+
 	return result;
 }
+
+#ifdef CONFIG_COMPAT
+asmlinkage long compat_sys_kexec_load(unsigned long entry,
+				unsigned long nr_segments,
+				struct compat_kexec_segment __user *segments,
+				unsigned long flags)
+{
+	struct compat_kexec_segment in;
+	struct kexec_segment out, __user *ksegments;
+	unsigned long i, result;
+
+	/* Don't allow clients that don't understand the native
+	 * architecture to do anything.
+	 */
+	if ((flags & KEXEC_ARCH_MASK) == KEXEC_ARCH_DEFAULT)
+		return -EINVAL;
+
+	if (nr_segments > KEXEC_SEGMENT_MAX)
+		return -EINVAL;
+
+	ksegments = compat_alloc_user_space(nr_segments * sizeof(out));
+	for (i=0; i < nr_segments; i++) {
+		result = copy_from_user(&in, &segments[i], sizeof(in));
+		if (result)
+			return -EFAULT;
+
+		out.buf   = compat_ptr(in.buf);
+		out.bufsz = in.bufsz;
+		out.mem   = in.mem;
+		out.memsz = in.memsz;
+
+		result = copy_to_user(&ksegments[i], &out, sizeof(out));
+		if (result)
+			return -EFAULT;
+	}
+
+	return sys_kexec_load(entry, nr_segments, ksegments, flags);
+}
+#endif
+
+void crash_kexec(struct pt_regs *regs)
+{
+	struct kimage *image;
+	int locked;
+
+
+	/* Take the kexec_lock here to prevent sys_kexec_load
+	 * running on one cpu from replacing the crash kernel
+	 * we are using after a panic on a different cpu.
+	 *
+	 * If the crash kernel was not located in a fixed area
+	 * of memory the xchg(&kexec_crash_image) would be
+	 * sufficient.  But since I reuse the memory...
+	 */
+	locked = xchg(&kexec_lock, 1);
+	if (!locked) {
+		image = xchg(&kexec_crash_image, NULL);
+		if (image) {
+			struct pt_regs fixed_regs;
+			crash_setup_regs(&fixed_regs, regs);
+			machine_crash_shutdown(&fixed_regs);
+			machine_kexec(image);
+		}
+		xchg(&kexec_lock, 0);
+	}
+}
+
+static int __init crash_notes_memory_init(void)
+{
+	/* Allocate memory for saving cpu registers. */
+	crash_notes = alloc_percpu(note_buf_t);
+	if (!crash_notes) {
+		printk("Kexec: Memory allocation for saving cpu register"
+		" states failed\n");
+		return -ENOMEM;
+	}
+	return 0;
+}
+module_init(crash_notes_memory_init)

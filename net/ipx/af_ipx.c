@@ -29,6 +29,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/if_arp.h>
 #include <linux/if_ether.h>
@@ -44,7 +45,6 @@
 #include <linux/socket.h>
 #include <linux/sockios.h>
 #include <linux/string.h>
-#include <linux/tcp.h>
 #include <linux/types.h>
 #include <linux/termios.h>
 
@@ -52,6 +52,7 @@
 #include <net/p8022.h>
 #include <net/psnap.h>
 #include <net/sock.h>
+#include <net/tcp_states.h>
 
 #include <asm/uaccess.h>
 
@@ -75,7 +76,7 @@ static struct datalink_proto *pEII_datalink;
 static struct datalink_proto *p8023_datalink;
 static struct datalink_proto *pSNAP_datalink;
 
-static struct proto_ops ipx_dgram_ops;
+static const struct proto_ops ipx_dgram_ops;
 
 LIST_HEAD(ipx_interfaces);
 DEFINE_SPINLOCK(ipx_interfaces_lock);
@@ -943,9 +944,9 @@ out:
 	return rc;
 }
 
-static int ipx_map_frame_type(unsigned char type)
+static __be16 ipx_map_frame_type(unsigned char type)
 {
-	int rc = 0;
+	__be16 rc = 0;
 
 	switch (type) {
 	case IPX_FRAME_ETHERII:	rc = htons(ETH_P_IPX);		break;
@@ -1627,7 +1628,7 @@ out:
 	return rc;
 }
 
-static int ipx_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
+static int ipx_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	/* NULL here for pt means the packet was looped back */
 	struct ipx_interface *intrfc;
@@ -1646,7 +1647,8 @@ static int ipx_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_ty
 	ipx_pktsize	= ntohs(ipx->ipx_pktsize);
 	
 	/* Too small or invalid header? */
-	if (ipx_pktsize < sizeof(struct ipxhdr) || ipx_pktsize > skb->len)
+	if (ipx_pktsize < sizeof(struct ipxhdr)
+	   || !pskb_may_pull(skb, ipx_pktsize))
 		goto drop;
                         
 	if (ipx->ipx_checksum != IPX_NO_CHECKSUM &&
@@ -1796,8 +1798,8 @@ static int ipx_recvmsg(struct kiocb *iocb, struct socket *sock,
 				     copied);
 	if (rc)
 		goto out_free;
-	if (skb->stamp.tv_sec)
-		sk->sk_stamp = skb->stamp;
+	if (skb->tstamp.off_sec)
+		skb_get_timestamp(skb, &sk->sk_stamp);
 
 	msg->msg_namelen = sizeof(*sipx);
 
@@ -1884,12 +1886,35 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		rc = -EINVAL;
 		break;
 	default:
-		rc = dev_ioctl(cmd, argp);
+		rc = -ENOIOCTLCMD;
 		break;
 	}
 
 	return rc;
 }
+
+
+#ifdef CONFIG_COMPAT
+static int ipx_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	/*
+	 * These 4 commands use same structure on 32bit and 64bit.  Rest of IPX
+	 * commands is handled by generic ioctl code.  As these commands are
+	 * SIOCPROTOPRIVATE..SIOCPROTOPRIVATE+3, they cannot be handled by generic
+	 * code.
+	 */
+	switch (cmd) {
+	case SIOCAIPXITFCRT:
+	case SIOCAIPXPRISLT:
+	case SIOCIPXCFGDATA:
+	case SIOCIPXNCPCONN:
+		return ipx_ioctl(sock, cmd, arg);
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+#endif
+
 
 /*
  * Socket family declarations
@@ -1901,7 +1926,7 @@ static struct net_proto_family ipx_family_ops = {
 	.owner		= THIS_MODULE,
 };
 
-static struct proto_ops SOCKOPS_WRAPPED(ipx_dgram_ops) = {
+static const struct proto_ops SOCKOPS_WRAPPED(ipx_dgram_ops) = {
 	.family		= PF_IPX,
 	.owner		= THIS_MODULE,
 	.release	= ipx_release,
@@ -1912,6 +1937,9 @@ static struct proto_ops SOCKOPS_WRAPPED(ipx_dgram_ops) = {
 	.getname	= ipx_getname,
 	.poll		= datagram_poll,
 	.ioctl		= ipx_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ipx_compat_ioctl,
+#endif
 	.listen		= sock_no_listen,
 	.shutdown	= sock_no_shutdown, /* FIXME: support shutdown */
 	.setsockopt	= ipx_setsockopt,
@@ -1940,9 +1968,7 @@ static struct notifier_block ipx_dev_notifier = {
 };
 
 extern struct datalink_proto *make_EII_client(void);
-extern struct datalink_proto *make_8023_client(void);
 extern void destroy_EII_client(struct datalink_proto *);
-extern void destroy_8023_client(struct datalink_proto *);
 
 static unsigned char ipx_8022_type = 0xE0;
 static unsigned char ipx_snap_id[5] = { 0x0, 0x0, 0x0, 0x81, 0x37 };

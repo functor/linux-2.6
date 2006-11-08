@@ -36,6 +36,7 @@
 #include <linux/console.h>
 #include <linux/seq_file.h>
 #include <linux/kernel_stat.h>
+#include <linux/device.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -76,8 +77,6 @@ extern int _text,_etext, _edata, _end;
  */
 
 #include <asm/setup.h>
-
-static char command_line[COMMAND_LINE_SIZE] = { 0, };
 
 static struct resource code_resource = {
 	.name  = "Kernel code",
@@ -198,11 +197,11 @@ static void __init conmode_default(void)
 	char *ptr;
 
         if (MACHINE_IS_VM) {
-		__cpcmd("QUERY CONSOLE", query_buffer, 1024);
+		__cpcmd("QUERY CONSOLE", query_buffer, 1024, NULL);
 		console_devno = simple_strtoul(query_buffer + 5, NULL, 16);
 		ptr = strstr(query_buffer, "SUBCHANNEL =");
 		console_irq = simple_strtoul(ptr + 13, NULL, 16);
-		__cpcmd("QUERY TERM", query_buffer, 1024);
+		__cpcmd("QUERY TERM", query_buffer, 1024, NULL);
 		ptr = strstr(query_buffer, "CONMODE");
 		/*
 		 * Set the conmode to 3215 so that the device recognition 
@@ -211,7 +210,7 @@ static void __init conmode_default(void)
 		 * 3215 and the 3270 driver will try to access the console
 		 * device (3215 as console and 3270 as normal tty).
 		 */
-		__cpcmd("TERM CONMODE 3215", NULL, 0);
+		__cpcmd("TERM CONMODE 3215", NULL, 0, NULL);
 		if (ptr == NULL) {
 #if defined(CONFIG_SCLP_CONSOLE)
 			SET_CONSOLE_SCLP;
@@ -261,10 +260,13 @@ void (*_machine_power_off)(void) = machine_power_off_smp;
  * Reboot, halt and power_off routines for non SMP.
  */
 extern void reipl(unsigned long devno);
+extern void reipl_diag(void);
 static void do_machine_restart_nonsmp(char * __unused)
 {
+	reipl_diag();
+
 	if (MACHINE_IS_VM)
-		cpcmd ("IPL", NULL, 0);
+		cpcmd ("IPL", NULL, 0, NULL);
 	else
 		reipl (0x10000 | S390_lowcore.ipl_device);
 }
@@ -272,14 +274,14 @@ static void do_machine_restart_nonsmp(char * __unused)
 static void do_machine_halt_nonsmp(void)
 {
         if (MACHINE_IS_VM && strlen(vmhalt_cmd) > 0)
-                cpcmd(vmhalt_cmd, NULL, 0);
+                cpcmd(vmhalt_cmd, NULL, 0, NULL);
         signal_processor(smp_processor_id(), sigp_stop_and_store_status);
 }
 
 static void do_machine_power_off_nonsmp(void)
 {
         if (MACHINE_IS_VM && strlen(vmpoff_cmd) > 0)
-                cpcmd(vmpoff_cmd, NULL, 0);
+                cpcmd(vmpoff_cmd, NULL, 0, NULL);
         signal_processor(smp_processor_id(), sigp_stop_and_store_status);
 }
 
@@ -299,15 +301,11 @@ void machine_restart(char *command)
 	_machine_restart(command);
 }
 
-EXPORT_SYMBOL(machine_restart);
-
 void machine_halt(void)
 {
 	console_unblank();
 	_machine_halt();
 }
-
-EXPORT_SYMBOL(machine_halt);
 
 void machine_power_off(void)
 {
@@ -315,7 +313,10 @@ void machine_power_off(void)
 	_machine_power_off();
 }
 
-EXPORT_SYMBOL(machine_power_off);
+/*
+ * Dummy power off function.
+ */
+void (*pm_power_off)(void) = machine_power_off;
 
 static void __init
 add_memory_hole(unsigned long start, unsigned long end)
@@ -332,63 +333,38 @@ add_memory_hole(unsigned long start, unsigned long end)
 	}
 }
 
-static void __init
-parse_cmdline_early(char **cmdline_p)
+static int __init early_parse_mem(char *p)
 {
-	char c = ' ', cn, *to = command_line, *from = COMMAND_LINE;
+	memory_end = memparse(p, &p);
+	return 0;
+}
+early_param("mem", early_parse_mem);
+
+/*
+ * "ipldelay=XXX[sm]" sets ipl delay in seconds or minutes
+ */
+static int __init early_parse_ipldelay(char *p)
+{
 	unsigned long delay = 0;
 
-	/* Save unparsed command line copy for /proc/cmdline */
-	memcpy(saved_command_line, COMMAND_LINE, COMMAND_LINE_SIZE);
-	saved_command_line[COMMAND_LINE_SIZE-1] = '\0';
+	delay = simple_strtoul(p, &p, 0);
 
-	for (;;) {
-		/*
-		 * "mem=XXX[kKmM]" sets memsize
-		 */
-		if (c == ' ' && strncmp(from, "mem=", 4) == 0) {
-			memory_end = simple_strtoul(from+4, &from, 0);
-			if ( *from == 'K' || *from == 'k' ) {
-				memory_end = memory_end << 10;
-				from++;
-			} else if ( *from == 'M' || *from == 'm' ) {
-				memory_end = memory_end << 20;
-				from++;
-			}
-		}
-		/*
-		 * "ipldelay=XXX[sm]" sets ipl delay in seconds or minutes
-		 */
-		if (c == ' ' && strncmp(from, "ipldelay=", 9) == 0) {
-			delay = simple_strtoul(from+9, &from, 0);
-			if (*from == 's' || *from == 'S') {
-				delay = delay*1000000;
-				from++;
-			} else if (*from == 'm' || *from == 'M') {
-				delay = delay*60*1000000;
-				from++;
-			}
-			/* now wait for the requested amount of time */
-			udelay(delay);
-		}
-		cn = *(from++);
-		if (!cn)
-			break;
-		if (cn == '\n')
-			cn = ' ';  /* replace newlines with space */
-		if (cn == 0x0d)
-			cn = ' ';  /* replace 0x0d with space */
-		if (cn == ' ' && c == ' ')
-			continue;  /* remove additional spaces */
-		c = cn;
-		if (to - command_line >= COMMAND_LINE_SIZE)
-			break;
-		*(to++) = c;
+	switch (*p) {
+	case 's':
+	case 'S':
+		delay *= 1000000;
+		break;
+	case 'm':
+	case 'M':
+		delay *= 60 * 1000000;
 	}
-	if (c == ' ' && to > command_line) to--;
-	*to = '\0';
-	*cmdline_p = command_line;
+
+	/* now wait for the requested amount of time */
+	udelay(delay);
+
+	return 0;
 }
+early_param("ipldelay", early_parse_ipldelay);
 
 static void __init
 setup_lowcore(void)
@@ -414,7 +390,8 @@ setup_lowcore(void)
 	lc->program_new_psw.mask = PSW_KERNEL_BITS;
 	lc->program_new_psw.addr =
 		PSW_ADDR_AMODE | (unsigned long)pgm_check_handler;
-	lc->mcck_new_psw.mask = PSW_KERNEL_BITS;
+	lc->mcck_new_psw.mask =
+		PSW_KERNEL_BITS & ~PSW_MASK_MCHECK & ~PSW_MASK_DAT;
 	lc->mcck_new_psw.addr =
 		PSW_ADDR_AMODE | (unsigned long) mcck_int_handler;
 	lc->io_new_psw.mask = PSW_KERNEL_BITS;
@@ -424,18 +401,18 @@ setup_lowcore(void)
 	lc->kernel_stack = ((unsigned long) &init_thread_union) + THREAD_SIZE;
 	lc->async_stack = (unsigned long)
 		__alloc_bootmem(ASYNC_SIZE, ASYNC_SIZE, 0) + ASYNC_SIZE;
-#ifdef CONFIG_CHECK_STACK
 	lc->panic_stack = (unsigned long)
 		__alloc_bootmem(PAGE_SIZE, PAGE_SIZE, 0) + PAGE_SIZE;
-#endif
 	lc->current_task = (unsigned long) init_thread_union.thread_info.task;
 	lc->thread_info = (unsigned long) &init_thread_union;
-#ifdef CONFIG_ARCH_S390X
-	if (MACHINE_HAS_DIAG44)
-		lc->diag44_opcode = 0x83000044;
-	else
-		lc->diag44_opcode = 0x07000700;
-#endif /* CONFIG_ARCH_S390X */
+#ifndef CONFIG_64BIT
+	if (MACHINE_HAS_IEEE) {
+		lc->extended_save_area_addr = (__u32)
+			__alloc_bootmem(PAGE_SIZE, PAGE_SIZE, 0);
+		/* enable extended save area */
+		ctl_set_bit(14, 29);
+	}
+#endif
 	set_prefix((u32)(unsigned long) lc);
 }
 
@@ -563,22 +540,39 @@ setup_arch(char **cmdline_p)
         /*
          * print what head.S has found out about the machine
          */
-#ifndef CONFIG_ARCH_S390X
+#ifndef CONFIG_64BIT
 	printk((MACHINE_IS_VM) ?
 	       "We are running under VM (31 bit mode)\n" :
 	       "We are running native (31 bit mode)\n");
 	printk((MACHINE_HAS_IEEE) ?
 	       "This machine has an IEEE fpu\n" :
 	       "This machine has no IEEE fpu\n");
-#else /* CONFIG_ARCH_S390X */
+#else /* CONFIG_64BIT */
 	printk((MACHINE_IS_VM) ?
 	       "We are running under VM (64 bit mode)\n" :
 	       "We are running native (64 bit mode)\n");
-#endif /* CONFIG_ARCH_S390X */
+#endif /* CONFIG_64BIT */
+
+	/* Save unparsed command line copy for /proc/cmdline */
+	strlcpy(saved_command_line, COMMAND_LINE, COMMAND_LINE_SIZE);
+
+	*cmdline_p = COMMAND_LINE;
+	*(*cmdline_p + COMMAND_LINE_SIZE - 1) = '\0';
 
         ROOT_DEV = Root_RAM0;
-#ifndef CONFIG_ARCH_S390X
-	memory_end = memory_size & ~0x400000UL;  /* align memory end to 4MB */
+
+	init_mm.start_code = PAGE_OFFSET;
+	init_mm.end_code = (unsigned long) &_etext;
+	init_mm.end_data = (unsigned long) &_edata;
+	init_mm.brk = (unsigned long) &_end;
+
+	memory_end = memory_size;
+
+	parse_early_param();
+
+#ifndef CONFIG_64BIT
+	memory_end &= ~0x400000UL;
+
         /*
          * We need some free virtual space to be able to do vmalloc.
          * On a machine with 2GB memory we make sure that we have at
@@ -586,16 +580,9 @@ setup_arch(char **cmdline_p)
          */
         if (memory_end > 1920*1024*1024)
                 memory_end = 1920*1024*1024;
-#else /* CONFIG_ARCH_S390X */
-	memory_end = memory_size & ~0x200000UL;  /* detected in head.s */
-#endif /* CONFIG_ARCH_S390X */
-
-	init_mm.start_code = PAGE_OFFSET;
-	init_mm.end_code = (unsigned long) &_etext;
-	init_mm.end_data = (unsigned long) &_edata;
-	init_mm.brk = (unsigned long) &_end;
-
-	parse_cmdline_early(cmdline_p);
+#else /* CONFIG_64BIT */
+	memory_end &= ~0x200000UL;
+#endif /* CONFIG_64BIT */
 
 	setup_memory();
 	setup_resources();
@@ -603,6 +590,7 @@ setup_arch(char **cmdline_p)
 
         cpu_init();
         __cpu_logical_map[0] = S390_lowcore.cpu_data.cpu_addr;
+	smp_setup_cpu_possible_map();
 
 	/*
 	 * Create kernel page tables and switch to virtual addressing.
@@ -639,6 +627,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
         struct cpuinfo_S390 *cpuinfo;
 	unsigned long n = (unsigned long) v - 1;
 
+	preempt_disable();
 	if (!n) {
 		seq_printf(m, "vendor_id       : IBM/S390\n"
 			       "# processors    : %i\n"
@@ -663,6 +652,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 			       cpuinfo->cpu_id.ident,
 			       cpuinfo->cpu_id.machine);
 	}
+	preempt_enable();
         return 0;
 }
 
@@ -685,3 +675,188 @@ struct seq_operations cpuinfo_op = {
 	.show	= show_cpuinfo,
 };
 
+#define DEFINE_IPL_ATTR(_name, _format, _value)			\
+static ssize_t ipl_##_name##_show(struct subsystem *subsys,	\
+		char *page)					\
+{								\
+	return sprintf(page, _format, _value);			\
+}								\
+static struct subsys_attribute ipl_##_name##_attr =		\
+	__ATTR(_name, S_IRUGO, ipl_##_name##_show, NULL);
+
+DEFINE_IPL_ATTR(wwpn, "0x%016llx\n", (unsigned long long)
+		IPL_PARMBLOCK_START->fcp.wwpn);
+DEFINE_IPL_ATTR(lun, "0x%016llx\n", (unsigned long long)
+		IPL_PARMBLOCK_START->fcp.lun);
+DEFINE_IPL_ATTR(bootprog, "%lld\n", (unsigned long long)
+		IPL_PARMBLOCK_START->fcp.bootprog);
+DEFINE_IPL_ATTR(br_lba, "%lld\n", (unsigned long long)
+		IPL_PARMBLOCK_START->fcp.br_lba);
+
+enum ipl_type_type {
+	ipl_type_unknown,
+	ipl_type_ccw,
+	ipl_type_fcp,
+};
+
+static enum ipl_type_type
+get_ipl_type(void)
+{
+	struct ipl_parameter_block *ipl = IPL_PARMBLOCK_START;
+
+	if (!IPL_DEVNO_VALID)
+		return ipl_type_unknown;
+	if (!IPL_PARMBLOCK_VALID)
+		return ipl_type_ccw;
+	if (ipl->hdr.header.version > IPL_MAX_SUPPORTED_VERSION)
+		return ipl_type_unknown;
+	if (ipl->fcp.pbt != IPL_TYPE_FCP)
+		return ipl_type_unknown;
+	return ipl_type_fcp;
+}
+
+static ssize_t
+ipl_type_show(struct subsystem *subsys, char *page)
+{
+	switch (get_ipl_type()) {
+	case ipl_type_ccw:
+		return sprintf(page, "ccw\n");
+	case ipl_type_fcp:
+		return sprintf(page, "fcp\n");
+	default:
+		return sprintf(page, "unknown\n");
+	}
+}
+
+static struct subsys_attribute ipl_type_attr = __ATTR_RO(ipl_type);
+
+static ssize_t
+ipl_device_show(struct subsystem *subsys, char *page)
+{
+	struct ipl_parameter_block *ipl = IPL_PARMBLOCK_START;
+
+	switch (get_ipl_type()) {
+	case ipl_type_ccw:
+		return sprintf(page, "0.0.%04x\n", ipl_devno);
+	case ipl_type_fcp:
+		return sprintf(page, "0.0.%04x\n", ipl->fcp.devno);
+	default:
+		return 0;
+	}
+}
+
+static struct subsys_attribute ipl_device_attr =
+	__ATTR(device, S_IRUGO, ipl_device_show, NULL);
+
+static struct attribute *ipl_fcp_attrs[] = {
+	&ipl_type_attr.attr,
+	&ipl_device_attr.attr,
+	&ipl_wwpn_attr.attr,
+	&ipl_lun_attr.attr,
+	&ipl_bootprog_attr.attr,
+	&ipl_br_lba_attr.attr,
+	NULL,
+};
+
+static struct attribute_group ipl_fcp_attr_group = {
+	.attrs = ipl_fcp_attrs,
+};
+
+static struct attribute *ipl_ccw_attrs[] = {
+	&ipl_type_attr.attr,
+	&ipl_device_attr.attr,
+	NULL,
+};
+
+static struct attribute_group ipl_ccw_attr_group = {
+	.attrs = ipl_ccw_attrs,
+};
+
+static struct attribute *ipl_unknown_attrs[] = {
+	&ipl_type_attr.attr,
+	NULL,
+};
+
+static struct attribute_group ipl_unknown_attr_group = {
+	.attrs = ipl_unknown_attrs,
+};
+
+static ssize_t
+ipl_parameter_read(struct kobject *kobj, char *buf, loff_t off, size_t count)
+{
+	unsigned int size = IPL_PARMBLOCK_SIZE;
+
+	if (off > size)
+		return 0;
+	if (off + count > size)
+		count = size - off;
+
+	memcpy(buf, (void *) IPL_PARMBLOCK_START + off, count);
+	return count;
+}
+
+static struct bin_attribute ipl_parameter_attr = {
+	.attr = {
+		.name = "binary_parameter",
+		.mode = S_IRUGO,
+		.owner = THIS_MODULE,
+	},
+	.size = PAGE_SIZE,
+	.read = &ipl_parameter_read,
+};
+
+static ssize_t
+ipl_scp_data_read(struct kobject *kobj, char *buf, loff_t off, size_t count)
+{
+	unsigned int size =  IPL_PARMBLOCK_START->fcp.scp_data_len;
+	void *scp_data = &IPL_PARMBLOCK_START->fcp.scp_data;
+
+	if (off > size)
+		return 0;
+	if (off + count > size)
+		count = size - off;
+
+	memcpy(buf, scp_data + off, count);
+	return count;
+}
+
+static struct bin_attribute ipl_scp_data_attr = {
+	.attr = {
+		.name = "scp_data",
+		.mode = S_IRUGO,
+		.owner = THIS_MODULE,
+	},
+	.size = PAGE_SIZE,
+	.read = &ipl_scp_data_read,
+};
+
+static decl_subsys(ipl, NULL, NULL);
+
+static int __init
+ipl_device_sysfs_register(void) {
+	int rc;
+
+	rc = firmware_register(&ipl_subsys);
+	if (rc)
+		return rc;
+
+	switch (get_ipl_type()) {
+	case ipl_type_ccw:
+		sysfs_create_group(&ipl_subsys.kset.kobj, &ipl_ccw_attr_group);
+		break;
+	case ipl_type_fcp:
+		sysfs_create_group(&ipl_subsys.kset.kobj, &ipl_fcp_attr_group);
+		sysfs_create_bin_file(&ipl_subsys.kset.kobj,
+				      &ipl_parameter_attr);
+		sysfs_create_bin_file(&ipl_subsys.kset.kobj,
+				      &ipl_scp_data_attr);
+		break;
+	default:
+		sysfs_create_group(&ipl_subsys.kset.kobj,
+				   &ipl_unknown_attr_group);
+		break;
+	}
+	return 0;
+}
+
+__initcall(ipl_device_sysfs_register);

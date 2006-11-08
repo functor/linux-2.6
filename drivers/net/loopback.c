@@ -68,12 +68,13 @@ static DEFINE_PER_CPU(struct net_device_stats, loopback_stats);
  * of largesending device modulo TCP checksum, which is ignored for loopback.
  */
 
+#ifdef LOOPBACK_TSO
 static void emulate_large_send_offload(struct sk_buff *skb)
 {
 	struct iphdr *iph = skb->nh.iph;
 	struct tcphdr *th = (struct tcphdr*)(skb->nh.raw + (iph->ihl * 4));
 	unsigned int doffset = (iph->ihl + th->doff) * 4;
-	unsigned int mtu = skb_shinfo(skb)->tso_size + doffset;
+	unsigned int mtu = skb_shinfo(skb)->gso_size + doffset;
 	unsigned int offset = 0;
 	u32 seq = ntohl(th->seq);
 	u16 id  = ntohs(iph->id);
@@ -119,6 +120,7 @@ static void emulate_large_send_offload(struct sk_buff *skb)
 
 	dev_kfree_skb(skb);
 }
+#endif /* LOOPBACK_TSO */
 
 /*
  * The higher levels take care of making this non-reentrant (it's
@@ -130,27 +132,28 @@ static int loopback_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	skb_orphan(skb);
 
-	skb->protocol=eth_type_trans(skb,dev);
-	skb->dev=dev;
+	skb->protocol = eth_type_trans(skb,dev);
+	skb->dev = dev;
 #ifndef LOOPBACK_MUST_CHECKSUM
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
 #endif
 
-	if (skb_shinfo(skb)->tso_size) {
+#ifdef LOOPBACK_TSO
+	if (skb_is_gso(skb)) {
 		BUG_ON(skb->protocol != htons(ETH_P_IP));
 		BUG_ON(skb->nh.iph->protocol != IPPROTO_TCP);
 
 		emulate_large_send_offload(skb);
 		return 0;
 	}
-
+#endif
 	dev->last_rx = jiffies;
 
 	lb_stats = &per_cpu(loopback_stats, get_cpu());
 	lb_stats->rx_bytes += skb->len;
-	lb_stats->tx_bytes += skb->len;
+	lb_stats->tx_bytes = lb_stats->rx_bytes;
 	lb_stats->rx_packets++;
-	lb_stats->tx_packets++;
+	lb_stats->tx_packets = lb_stats->rx_packets;
 	put_cpu();
 
 	netif_rx(skb);
@@ -169,11 +172,9 @@ static struct net_device_stats *get_stats(struct net_device *dev)
 
 	memset(stats, 0, sizeof(struct net_device_stats));
 
-	for (i=0; i < NR_CPUS; i++) {
+	for_each_possible_cpu(i) {
 		struct net_device_stats *lb_stats;
 
-		if (!cpu_possible(i)) 
-			continue;
 		lb_stats = &per_cpu(loopback_stats, i);
 		stats->rx_bytes   += lb_stats->rx_bytes;
 		stats->tx_bytes   += lb_stats->tx_bytes;
@@ -208,13 +209,16 @@ struct net_device loopback_dev = {
 	.type			= ARPHRD_LOOPBACK,	/* 0x0001*/
 	.rebuild_header		= eth_rebuild_header,
 	.flags			= IFF_LOOPBACK,
-	.features 		= NETIF_F_SG|NETIF_F_FRAGLIST
-				  |NETIF_F_NO_CSUM|NETIF_F_HIGHDMA
-				  |NETIF_F_LLTX,
+	.features 		= NETIF_F_SG | NETIF_F_FRAGLIST
+#ifdef LOOPBACK_TSO
+				  | NETIF_F_TSO
+#endif
+				  | NETIF_F_NO_CSUM | NETIF_F_HIGHDMA
+				  | NETIF_F_LLTX,
 	.ethtool_ops		= &loopback_ethtool_ops,
 };
 
-/* Setup and register the of the LOOPBACK device. */
+/* Setup and register the loopback device. */
 int __init loopback_init(void)
 {
 	struct net_device_stats *stats;

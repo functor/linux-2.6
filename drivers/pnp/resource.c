@@ -102,7 +102,7 @@ int pnp_register_irq_resource(struct pnp_option *option, struct pnp_irq *data)
 
 		for (i = 0; i < 16; i++)
 			if (test_bit(i, data->map))
-				pcibios_penalize_isa_irq(i);
+				pcibios_penalize_isa_irq(i, 0);
 	}
 #endif
 	return 0;
@@ -396,7 +396,8 @@ int pnp_check_irq(struct pnp_dev * dev, int idx)
 	/* check if the resource is already in use, skip if the
 	 * device is active because it itself may be in use */
 	if(!dev->active) {
-		if (request_irq(*irq, pnp_test_handler, SA_INTERRUPT, "pnp", NULL))
+		if (request_irq(*irq, pnp_test_handler,
+				SA_INTERRUPT|SA_PROBEIRQ, "pnp", NULL))
 			return 0;
 		free_irq(*irq, NULL);
 	}
@@ -477,12 +478,14 @@ int pnp_check_dma(struct pnp_dev * dev, int idx)
 }
 
 
+#if 0
 EXPORT_SYMBOL(pnp_register_dependent_option);
 EXPORT_SYMBOL(pnp_register_independent_option);
 EXPORT_SYMBOL(pnp_register_irq_resource);
 EXPORT_SYMBOL(pnp_register_dma_resource);
 EXPORT_SYMBOL(pnp_register_port_resource);
 EXPORT_SYMBOL(pnp_register_mem_resource);
+#endif  /*  0  */
 
 
 /* format is: pnp_reserve_irq=irq1[,irq2] .... */

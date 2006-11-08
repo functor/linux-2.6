@@ -92,10 +92,7 @@ static inline struct rtable *route_reverse(struct sk_buff *skb,
 	fl.fl_ip_sport = tcph->dest;
 	fl.fl_ip_dport = tcph->source;
 
-	if (xfrm_lookup((struct dst_entry **)&rt, &fl, NULL, 0)) {
-		dst_release(&rt->u.dst);
-		rt = NULL;
-	}
+	xfrm_lookup((struct dst_entry **)&rt, &fl, NULL, 0);
 
 	return rt;
 }
@@ -104,6 +101,7 @@ static inline struct rtable *route_reverse(struct sk_buff *skb,
 static void send_reset(struct sk_buff *oldskb, int hook)
 {
 	struct sk_buff *nskb;
+	struct iphdr *iph = oldskb->nh.iph;
 	struct tcphdr _otcph, *oth, *tcph;
 	struct rtable *rt;
 	u_int16_t tmp_port;
@@ -124,7 +122,10 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 	if (oth->rst)
 		return;
 
-	/* FIXME: Check checksum --RR */
+	/* Check checksum */
+	if (nf_ip_checksum(oldskb, hook, iph->ihl * 4, IPPROTO_TCP))
+		return;
+
 	if ((rt = route_reverse(oldskb, oth, hook)) == NULL)
 		return;
 
@@ -145,12 +146,7 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 
 	/* This packet will not be the same as the other: clear nf fields */
 	nf_reset(nskb);
-	nskb->nfcache = 0;
 	nskb->nfmark = 0;
-#ifdef CONFIG_BRIDGE_NETFILTER
-	nf_bridge_put(nskb->nf_bridge);
-	nskb->nf_bridge = NULL;
-#endif
 
 	tcph = (struct tcphdr *)((u_int32_t*)nskb->nh.iph + nskb->nh.iph->ihl);
 
@@ -196,7 +192,7 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 						sizeof(struct tcphdr), 0));
 
 	/* Adjust IP TTL, DF */
-	nskb->nh.iph->ttl = MAXTTL;
+	nskb->nh.iph->ttl = dst_metric(nskb->dst, RTAX_HOPLIMIT);
 	/* Set DF, id = 0 */
 	nskb->nh.iph->frag_off = htons(IP_DF);
 	nskb->nh.iph->id = 0;
@@ -229,6 +225,7 @@ static unsigned int reject(struct sk_buff **pskb,
 			   const struct net_device *in,
 			   const struct net_device *out,
 			   unsigned int hooknum,
+			   const struct xt_target *target,
 			   const void *targinfo,
 			   void *userinfo)
 {
@@ -275,29 +272,14 @@ static unsigned int reject(struct sk_buff **pskb,
 }
 
 static int check(const char *tablename,
-		 const struct ipt_entry *e,
+		 const void *e_void,
+		 const struct xt_target *target,
 		 void *targinfo,
 		 unsigned int targinfosize,
 		 unsigned int hook_mask)
 {
  	const struct ipt_reject_info *rejinfo = targinfo;
-
- 	if (targinfosize != IPT_ALIGN(sizeof(struct ipt_reject_info))) {
-  		DEBUGP("REJECT: targinfosize %u != 0\n", targinfosize);
-  		return 0;
-  	}
-
-	/* Only allow these for packet filtering. */
-	if (strcmp(tablename, "filter") != 0) {
-		DEBUGP("REJECT: bad table `%s'.\n", tablename);
-		return 0;
-	}
-	if ((hook_mask & ~((1 << NF_IP_LOCAL_IN)
-			   | (1 << NF_IP_FORWARD)
-			   | (1 << NF_IP_LOCAL_OUT))) != 0) {
-		DEBUGP("REJECT: bad hook mask %X\n", hook_mask);
-		return 0;
-	}
+	const struct ipt_entry *e = e_void;
 
 	if (rejinfo->with == IPT_ICMP_ECHOREPLY) {
 		printk("REJECT: ECHOREPLY no longer supported.\n");
@@ -310,26 +292,29 @@ static int check(const char *tablename,
 			return 0;
 		}
 	}
-
 	return 1;
 }
 
 static struct ipt_target ipt_reject_reg = {
 	.name		= "REJECT",
 	.target		= reject,
+	.targetsize	= sizeof(struct ipt_reject_info),
+	.table		= "filter",
+	.hooks		= (1 << NF_IP_LOCAL_IN) | (1 << NF_IP_FORWARD) |
+			  (1 << NF_IP_LOCAL_OUT),
 	.checkentry	= check,
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ipt_reject_init(void)
 {
 	return ipt_register_target(&ipt_reject_reg);
 }
 
-static void __exit fini(void)
+static void __exit ipt_reject_fini(void)
 {
 	ipt_unregister_target(&ipt_reject_reg);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ipt_reject_init);
+module_exit(ipt_reject_fini);

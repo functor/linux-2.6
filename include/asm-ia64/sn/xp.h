@@ -16,9 +16,9 @@
 #define _ASM_IA64_SN_XP_H
 
 
-#include <linux/version.h>
 #include <linux/cache.h>
 #include <linux/hardirq.h>
+#include <linux/mutex.h>
 #include <asm/sn/types.h>
 #include <asm/sn/bte.h>
 
@@ -50,7 +50,7 @@
  * C-brick nasids, thus the need for bitmaps which don't account for
  * odd-numbered (non C-brick) nasids.
  */
-#define XP_MAX_PHYSNODE_ID	(MAX_PHYSNODE_ID / 2)
+#define XP_MAX_PHYSNODE_ID	(MAX_NUMALINK_NODES / 2)
 #define XP_NASID_MASK_BYTES	((XP_MAX_PHYSNODE_ID + 7) / 8)
 #define XP_NASID_MASK_WORDS	((XP_MAX_PHYSNODE_ID + 63) / 64)
 
@@ -60,23 +60,37 @@
  * the bte_copy() once in the hope that the failure was due to a temporary
  * aberration (i.e., the link going down temporarily).
  *
- * See bte_copy for definition of the input parameters.
+ * 	src - physical address of the source of the transfer.
+ *	vdst - virtual address of the destination of the transfer.
+ *	len - number of bytes to transfer from source to destination.
+ *	mode - see bte_copy() for definition.
+ *	notification - see bte_copy() for definition.
  *
  * Note: xp_bte_copy() should never be called while holding a spinlock.
  */
 static inline bte_result_t
-xp_bte_copy(u64 src, u64 dest, u64 len, u64 mode, void *notification)
+xp_bte_copy(u64 src, u64 vdst, u64 len, u64 mode, void *notification)
 {
 	bte_result_t ret;
+	u64 pdst = ia64_tpa(vdst);
 
 
-	ret = bte_copy(src, dest, len, mode, notification);
+	/*
+	 * Ensure that the physically mapped memory is contiguous.
+	 *
+	 * We do this by ensuring that the memory is from region 7 only.
+	 * If the need should arise to use memory from one of the other
+	 * regions, then modify the BUG_ON() statement to ensure that the
+	 * memory from that region is always physically contiguous.
+	 */
+	BUG_ON(REGION_NUMBER(vdst) != RGN_KERNEL);
 
+	ret = bte_copy(src, pdst, len, mode, notification);
 	if (ret != BTE_SUCCESS) {
 		if (!in_interrupt()) {
 			cond_resched();
 		}
-		ret = bte_copy(src, dest, len, mode, notification);
+		ret = bte_copy(src, pdst, len, mode, notification);
 	}
 
 	return ret;
@@ -218,7 +232,19 @@ enum xpc_retval {
 	xpcInvalidPartid,	/* 42: invalid partition ID */
 	xpcLocalPartid,		/* 43: local partition ID */
 
-	xpcUnknownReason	/* 44: unknown reason -- must be last in list */
+	xpcOtherGoingDown,	/* 44: other side going down, reason unknown */
+	xpcSystemGoingDown,	/* 45: system is going down, reason unknown */
+	xpcSystemHalt,		/* 46: system is being halted */
+	xpcSystemReboot,	/* 47: system is being rebooted */
+	xpcSystemPoweroff,	/* 48: system is being powered off */
+
+	xpcDisconnecting,	/* 49: channel disconnecting (closing) */
+
+	xpcOpenCloseError,	/* 50: channel open/close protocol error */
+
+	xpcDisconnected,	/* 51: channel disconnected (closed) */
+
+	xpcUnknownReason	/* 52: unknown reason -- must be last in list */
 };
 
 
@@ -343,12 +369,12 @@ typedef void (*xpc_notify_func)(enum xpc_retval reason, partid_t partid,
  *
  * The 'func' field points to the function to call when aynchronous
  * notification is required for such events as: a connection established/lost,
- * or an incomming message received, or an error condition encountered. A
+ * or an incoming message received, or an error condition encountered. A
  * non-NULL 'func' field indicates that there is an active registration for
  * the channel.
  */
 struct xpc_registration {
-	struct semaphore sema;
+	struct mutex mutex;
 	xpc_channel_func func;		/* function to call */
 	void *key;			/* pointer to user's key */
 	u16 nentries;			/* #of msg entries in local msg queue */

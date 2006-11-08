@@ -10,7 +10,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/utsname.h>
 #include <linux/sched.h>
 #include <linux/vs_context.h>
@@ -47,7 +46,7 @@ int vx_set_namespace(struct vx_info *vxi, struct namespace *ns, struct fs_struct
 	return 0;
 }
 
-int vc_enter_namespace(uint32_t id, void *data)
+int vc_enter_namespace(uint32_t id, void __user *data)
 {
 	struct vx_info *vxi;
 	struct fs_struct *old_fs, *fs;
@@ -57,7 +56,7 @@ int vc_enter_namespace(uint32_t id, void *data)
 	if (!vx_check(0, VX_ADMIN))
 		return -ENOSYS;
 
-	vxi = locate_vx_info(id);
+	vxi = lookup_vx_info(id);
 	if (!vxi)
 		return -ESRCH;
 
@@ -86,16 +85,6 @@ out_put:
 	return ret;
 }
 
-int vc_cleanup_namespace(uint32_t id, void *data)
-{
-	down_write(&current->namespace->sem);
-	spin_lock(&vfsmount_lock);
-	umount_unused(current->namespace->root, current->fs);
-	spin_unlock(&vfsmount_lock);
-	up_write(&current->namespace->sem);
-	return 0;
-}
-
 int vc_set_namespace(uint32_t id, void __user *data)
 {
 	struct fs_struct *fs;
@@ -103,11 +92,11 @@ int vc_set_namespace(uint32_t id, void __user *data)
 	struct vx_info *vxi;
 	int ret;
 
-	if (vx_check(0, VX_ADMIN|VX_WATCH))
-		return -ENOSYS;
+	vxi = lookup_vx_info(id);
+	if (!vxi)
+		return -ESRCH;
 
 	task_lock(current);
-	vxi = get_vx_info(current->vx_info);
 	fs = current->fs;
 	atomic_inc(&fs->count);
 	ns = current->namespace;

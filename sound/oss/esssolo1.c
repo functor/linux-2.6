@@ -104,6 +104,9 @@
 #include <linux/smp_lock.h>
 #include <linux/gameport.h>
 #include <linux/wait.h>
+#include <linux/dma-mapping.h>
+#include <linux/mutex.h>
+
 
 #include <asm/io.h>
 #include <asm/page.h>
@@ -149,6 +152,10 @@
 
 #define FMODE_DMFM 0x10
 
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
+#define SUPPORT_JOYSTICK 1
+#endif
+
 static struct pci_driver solo1_driver;
 
 /* --------------------------------------------------------------------- */
@@ -186,7 +193,7 @@ struct solo1_state {
 	unsigned ena;
 
 	spinlock_t lock;
-	struct semaphore open_sem;
+	struct mutex open_mutex;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 
@@ -226,7 +233,9 @@ struct solo1_state {
 		unsigned char obuf[MIDIOUTBUF];
 	} midi;
 
+#if SUPPORT_JOYSTICK
 	struct gameport *gameport;
+#endif
 };
 
 /* --------------------------------------------------------------------- */
@@ -508,7 +517,7 @@ static inline int prog_dmabuf_adc(struct solo1_state *s)
 	return 0;
 }
 
-static inline int prog_dmabuf_dac(struct solo1_state *s)
+static int prog_dmabuf_dac(struct solo1_state *s)
 {
 	unsigned long va;
 	int c;
@@ -1574,7 +1583,7 @@ static int solo1_release(struct inode *inode, struct file *file)
 	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac(s, file->f_flags & O_NONBLOCK);
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac(s);
 		outb(0, s->iobase+6);  /* disable DMA */
@@ -1588,7 +1597,7 @@ static int solo1_release(struct inode *inode, struct file *file)
 	}
 	s->open_mode &= ~(FMODE_READ | FMODE_WRITE);
 	wake_up(&s->open_wait);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	unlock_kernel();
 	return 0;
 }
@@ -1617,21 +1626,21 @@ static int solo1_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & (FMODE_READ | FMODE_WRITE)) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	s->fmt = AFMT_U8;
 	s->channels = 1;
@@ -1643,7 +1652,7 @@ static int solo1_open(struct inode *inode, struct file *file)
 	s->dma_dac.ossfragshift = s->dma_dac.ossmaxfrags = s->dma_dac.subdivision = 0;
 	s->dma_dac.enabled = 1;
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	prog_codec(s);
 	return nonseekable_open(inode, file);
 }
@@ -1904,21 +1913,21 @@ static int solo1_midi_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & (file->f_mode << FMODE_MIDI_SHIFT)) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -1944,7 +1953,7 @@ static int solo1_midi_open(struct inode *inode, struct file *file)
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -1978,7 +1987,7 @@ static int solo1_midi_release(struct inode *inode, struct file *file)
 		remove_wait_queue(&s->midi.owait, &wait);
 		set_current_state(TASK_RUNNING);
 	}
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	s->open_mode &= ~((file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ|FMODE_MIDI_WRITE));
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -1987,7 +1996,7 @@ static int solo1_midi_release(struct inode *inode, struct file *file)
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
 	wake_up(&s->open_wait);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	unlock_kernel();
 	return 0;
 }
@@ -2125,24 +2134,24 @@ static int solo1_dmfm_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & FMODE_DMFM) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 	if (!request_region(s->sbbase, FMSYNTH_EXTENT, "ESS Solo1")) {
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		printk(KERN_ERR "solo1: FM synth io ports in use, opl3 loaded?\n");
 		return -EBUSY;
 	}
@@ -2154,7 +2163,7 @@ static int solo1_dmfm_open(struct inode *inode, struct file *file)
 	outb(5, s->sbbase+2);
 	outb(1, s->sbbase+3);  /* enable OPL3 */
 	s->open_mode |= FMODE_DMFM;
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	return nonseekable_open(inode, file);
 }
 
@@ -2165,7 +2174,7 @@ static int solo1_dmfm_release(struct inode *inode, struct file *file)
 
 	VALIDATE_STATE(s);
 	lock_kernel();
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	s->open_mode &= ~FMODE_DMFM;
 	for (regb = 0xb0; regb < 0xb9; regb++) {
 		outb(regb, s->sbbase);
@@ -2175,7 +2184,7 @@ static int solo1_dmfm_release(struct inode *inode, struct file *file)
 	}
 	release_region(s->sbbase, FMSYNTH_EXTENT);
 	wake_up(&s->open_wait);
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	unlock_kernel();
 	return 0;
 }
@@ -2280,6 +2289,7 @@ solo1_resume(struct pci_dev *pci_dev) {
 	return 0;
 }
 
+#ifdef SUPPORT_JOYSTICK
 static int __devinit solo1_register_gameport(struct solo1_state *s, int io_port)
 {
 	struct gameport *gp;
@@ -2306,6 +2316,19 @@ static int __devinit solo1_register_gameport(struct solo1_state *s, int io_port)
 	return 0;
 }
 
+static inline void solo1_unregister_gameport(struct solo1_state *s)
+{
+	if (s->gameport) {
+		int gpio = s->gameport->io;
+		gameport_unregister_port(s->gameport);
+		release_region(gpio, GAMEPORT_EXTENT);
+	}
+}
+#else
+static inline int solo1_register_gameport(struct solo1_state *s, int io_port) { return -ENOSYS; }
+static inline void solo1_unregister_gameport(struct solo1_state *s) { }
+#endif /* SUPPORT_JOYSTICK */
+
 static int __devinit solo1_probe(struct pci_dev *pcidev, const struct pci_device_id *pciid)
 {
 	struct solo1_state *s;
@@ -2325,8 +2348,8 @@ static int __devinit solo1_probe(struct pci_dev *pcidev, const struct pci_device
 	/* Recording requires 24-bit DMA, so attempt to set dma mask
 	 * to 24 bits first, then 32 bits (playback only) if that fails.
 	 */
-	if (pci_set_dma_mask(pcidev, 0x00ffffff) &&
-	    pci_set_dma_mask(pcidev, 0xffffffff)) {
+	if (pci_set_dma_mask(pcidev, DMA_24BIT_MASK) &&
+	    pci_set_dma_mask(pcidev, DMA_32BIT_MASK)) {
 		printk(KERN_WARNING "solo1: architecture does not support 24bit or 32bit PCI busmaster DMA\n");
 		return -ENODEV;
 	}
@@ -2341,7 +2364,7 @@ static int __devinit solo1_probe(struct pci_dev *pcidev, const struct pci_device
 	init_waitqueue_head(&s->open_wait);
 	init_waitqueue_head(&s->midi.iwait);
 	init_waitqueue_head(&s->midi.owait);
-	init_MUTEX(&s->open_sem);
+	mutex_init(&s->open_mutex);
 	spin_lock_init(&s->lock);
 	s->magic = SOLO1_MAGIC;
 	s->dev = pcidev;
@@ -2437,11 +2460,7 @@ static void __devexit solo1_remove(struct pci_dev *dev)
 	synchronize_irq(s->irq);
 	pci_write_config_word(s->dev, 0x60, 0); /* turn off DDMA controller address space */
 	free_irq(s->irq, s);
-	if (s->gameport) {
-		int gpio = s->gameport->io;
-		gameport_unregister_port(s->gameport);
-		release_region(gpio, GAMEPORT_EXTENT);
-	}
+	solo1_unregister_gameport(s);
 	release_region(s->iobase, IOBASE_EXTENT);
 	release_region(s->sbbase+FMSYNTH_EXTENT, SBBASE_EXTENT-FMSYNTH_EXTENT);
 	release_region(s->ddmabase, DDMABASE_EXTENT);

@@ -387,10 +387,8 @@ int fdc_interrupt_wait(unsigned int time)
 
 	set_current_state(TASK_INTERRUPTIBLE);
 	add_wait_queue(&ftape_wait_intr, &wait);
-	while (!ft_interrupt_seen && timeout) {
-		set_current_state(TASK_INTERRUPTIBLE);
-		timeout = schedule_timeout(timeout);
-        }
+	while (!ft_interrupt_seen && timeout)
+		timeout = schedule_timeout_interruptible(timeout);
 
 	spin_lock_irq(&current->sighand->siglock);
 	current->blocked = old_sigmask;
@@ -609,7 +607,7 @@ void fdc_reset(void)
 
 	fdc_mode = fdc_idle;
 
-	/*  maybe the cli()/sti() pair is not necessary, BUT:
+	/*  maybe the spin_lock_irq* pair is not necessary, BUT:
 	 *  the following line MUST be here. Otherwise fdc_interrupt_wait()
 	 *  won't wait. Note that fdc_reset() is called from 
 	 *  ftape_dumb_stop() when the fdc is busy transferring data. In this

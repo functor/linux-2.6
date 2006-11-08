@@ -29,9 +29,9 @@
 struct partial_page {
 	struct partial_page	*next; /* linked list, sorted by address */
 	struct rb_node		pp_rb;
-	/* 64K is the largest "normal" page supported by ia64 ABI. So 4K*32
+	/* 64K is the largest "normal" page supported by ia64 ABI. So 4K*64
 	 * should suffice.*/
-	unsigned int		bitmap;
+	unsigned long		bitmap;
 	unsigned int		base;
 };
 
@@ -241,7 +241,7 @@ typedef struct compat_siginfo {
 
 		/* POSIX.1b timers */
 		struct {
-			timer_t _tid;		/* timer id */
+			compat_timer_t _tid;		/* timer id */
 			int _overrun;		/* overrun count */
 			char _pad[sizeof(unsigned int) - sizeof(int)];
 			compat_sigval_t _sigval;	/* same as below */
@@ -305,7 +305,6 @@ struct old_linux32_dirent {
 #define ELF_DATA	ELFDATA2LSB
 #define ELF_ARCH	EM_386
 
-#define IA32_PAGE_OFFSET	0xc0000000
 #define IA32_STACK_TOP		IA32_PAGE_OFFSET
 #define IA32_GATE_OFFSET	IA32_PAGE_OFFSET
 #define IA32_GATE_END		IA32_PAGE_OFFSET + PAGE_SIZE

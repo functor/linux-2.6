@@ -2,3 +2,4 @@ bootsect
 bzImage
 setup
 vmlinux.bin
+.*.cmd
