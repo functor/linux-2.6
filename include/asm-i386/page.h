@@ -12,7 +12,6 @@
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
-#include <linux/config.h>
 
 #ifdef CONFIG_X86_USE_3DNOW
 
@@ -97,6 +96,8 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 #ifndef __ASSEMBLY__
 
+struct vm_area_struct;
+
 /*
  * This much address space is reserved for vmalloc() and iomap()
  * as well as fixmap mappings.
@@ -128,7 +129,7 @@ extern int devmem_is_allowed(unsigned long pagenr);
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
-#define MAXMEM			(__FIXADDR_TOP-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define MAXMEM			(-__PAGE_OFFSET-__VMALLOC_RESERVE)
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
@@ -144,11 +145,10 @@ extern int devmem_is_allowed(unsigned long pagenr);
 	((current->personality & READ_IMPLIES_EXEC) ? VM_EXEC : 0 ) | \
 		 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-
-
-#endif /* __KERNEL__ */
-
 #include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
+
+#define __HAVE_ARCH_GATE_AREA 1
+#endif /* __KERNEL__ */
 
 #endif /* _I386_PAGE_H */

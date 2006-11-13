@@ -26,7 +26,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -141,7 +140,7 @@ struct ctrl_dbg {
 
 static int open(struct inode *inode, struct file *file)
 {
-	struct controller *ctrl = inode->u.generic_ip;
+	struct controller *ctrl = inode->i_private;
 	struct ctrl_dbg *dbg;
 	int retval = -ENOMEM;
 

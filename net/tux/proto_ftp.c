@@ -895,7 +895,7 @@ void ftp_accept_pasv (tux_req_t *req, int cachemiss)
 	icsk1 = inet_csk(req->data_sock->sk);
 
 	Dprintk("PASV accept on req %p, accept_queue: %p.\n",
-			req, &icsk->icsk_accept_queue);
+			req, &icsk1->icsk_accept_queue);
 	if (req->error || (req->data_sock->sk->sk_state != TCP_LISTEN))
 		goto error;
 new_socket:
@@ -1541,15 +1541,15 @@ static void ftp_pre_log (tux_req_t *req)
 }
 
 tux_proto_t tux_proto_ftp = {
-	defer_accept: 0,
-	can_redirect: 0,
-	got_request: ftp_got_request,
-	parse_message: parse_ftp_message,
-	illegal_request: ftp_close,
-	request_timeout: ftp_timeout,
-	pre_log: ftp_pre_log,
-	check_req_err: ftp_check_req_err,
-	print_dir_line: ftp_print_dir_line,
-	name: "ftp",
+	.defer_accept = 0,
+	.can_redirect = 0,
+	.got_request = ftp_got_request,
+	.parse_message = parse_ftp_message,
+	.illegal_request = ftp_close,
+	.request_timeout = ftp_timeout,
+	.pre_log = ftp_pre_log,
+	.check_req_err = ftp_check_req_err,
+	.print_dir_line = ftp_print_dir_line,
+	.name = "ftp",
 };
 

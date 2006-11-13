@@ -32,7 +32,6 @@
  * IN THE SOFTWARE.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sched.h>
@@ -76,7 +75,7 @@ static unsigned long current_pages;
 static unsigned long target_pages;
 
 /* We increase/decrease in batches which fit in a page */
-static unsigned long frame_list[PAGE_SIZE / sizeof(unsigned long)]; 
+static unsigned long frame_list[PAGE_SIZE / sizeof(unsigned long)];
 
 /* VM /proc information for memory */
 extern unsigned long totalram_pages;
@@ -440,20 +439,16 @@ static int balloon_read(char *page, char **start, off_t off,
 		"Requested target:   %8lu kB\n"
 		"Low-mem balloon:    %8lu kB\n"
 		"High-mem balloon:   %8lu kB\n"
+		"Driver pages:       %8lu kB\n"
 		"Xen hard limit:     ",
 		PAGES2KB(current_pages), PAGES2KB(target_pages), 
-		PAGES2KB(balloon_low), PAGES2KB(balloon_high));
+		PAGES2KB(balloon_low), PAGES2KB(balloon_high),
+		PAGES2KB(driver_pages));
 
-	if (hard_limit != ~0UL) {
-		len += sprintf(
-			page + len, 
-			"%8lu kB (inc. %8lu kB driver headroom)\n",
-			PAGES2KB(hard_limit), PAGES2KB(driver_pages));
-	} else {
-		len += sprintf(
-			page + len,
-			"     ??? kB\n");
-	}
+	if (hard_limit != ~0UL)
+		len += sprintf(page + len, "%8lu kB\n", PAGES2KB(hard_limit));
+	else
+		len += sprintf(page + len, "     ??? kB\n");
 
 	*eof = 1;
 	return len;
@@ -538,80 +533,105 @@ static int dealloc_pte_fn(
 	return 0;
 }
 
-struct page *balloon_alloc_empty_page_range(unsigned long nr_pages)
+struct page **alloc_empty_pages_and_pagevec(int nr_pages)
 {
-	unsigned long vstart, flags;
-	unsigned int  order = get_order(nr_pages * PAGE_SIZE);
-	int ret;
-	unsigned long i;
-	struct page *page;
+	unsigned long vaddr, flags;
+	struct page *page, **pagevec;
+	int i, ret;
 
-	vstart = __get_free_pages(GFP_KERNEL, order);
-	if (vstart == 0)
+	pagevec = kmalloc(sizeof(page) * nr_pages, GFP_KERNEL);
+	if (pagevec == NULL)
 		return NULL;
 
-	scrub_pages(vstart, 1 << order);
+	for (i = 0; i < nr_pages; i++) {
+		page = pagevec[i] = alloc_page(GFP_KERNEL);
+		if (page == NULL)
+			goto err;
 
-	balloon_lock(flags);
-	if (xen_feature(XENFEAT_auto_translated_physmap)) {
-		unsigned long gmfn = __pa(vstart) >> PAGE_SHIFT;
-		struct xen_memory_reservation reservation = {
-			.nr_extents   = 1,
-			.extent_order = order,
-			.domid        = DOMID_SELF
-		};
-		set_xen_guest_handle(reservation.extent_start, &gmfn);
-		ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation,
-					   &reservation);
-		if (ret == -ENOSYS)
+		vaddr = (unsigned long)page_address(page);
+
+		scrub_pages(vaddr, 1);
+
+		balloon_lock(flags);
+
+		if (xen_feature(XENFEAT_auto_translated_physmap)) {
+			unsigned long gmfn = page_to_pfn(page);
+			struct xen_memory_reservation reservation = {
+				.nr_extents   = 1,
+				.extent_order = 0,
+				.domid        = DOMID_SELF
+			};
+			set_xen_guest_handle(reservation.extent_start, &gmfn);
+			ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation,
+						   &reservation);
+			if (ret == 1)
+				ret = 0; /* success */
+		} else {
+			ret = apply_to_page_range(&init_mm, vaddr, PAGE_SIZE,
+						  dealloc_pte_fn, NULL);
+		}
+
+		if (ret != 0) {
+			balloon_unlock(flags);
+			__free_page(page);
 			goto err;
-		BUG_ON(ret != 1);
-	} else {
-		ret = apply_to_page_range(&init_mm, vstart, PAGE_SIZE << order,
-					  dealloc_pte_fn, NULL);
-		if (ret == -ENOSYS)
-			goto err;
-		BUG_ON(ret);
+		}
+
+		totalram_pages = --current_pages;
+
+		balloon_unlock(flags);
 	}
-	current_pages -= 1UL << order;
-	totalram_pages = current_pages;
-	balloon_unlock(flags);
 
+ out:
 	schedule_work(&balloon_worker);
-
 	flush_tlb_all();
-
-	page = virt_to_page(vstart);
-
-	for (i = 0; i < (1UL << order); i++)
-		init_page_count(page + i);
-
-	return page;
+	return pagevec;
 
  err:
-	free_pages(vstart, order);
+	balloon_lock(flags);
+	while (--i >= 0)
+		balloon_append(pagevec[i]);
 	balloon_unlock(flags);
-	return NULL;
+	kfree(pagevec);
+	pagevec = NULL;
+	goto out;
 }
 
-void balloon_dealloc_empty_page_range(
-	struct page *page, unsigned long nr_pages)
+void free_empty_pages_and_pagevec(struct page **pagevec, int nr_pages)
 {
-	unsigned long i, flags;
-	unsigned int  order = get_order(nr_pages * PAGE_SIZE);
+	unsigned long flags;
+	int i;
+
+	if (pagevec == NULL)
+		return;
 
 	balloon_lock(flags);
-	for (i = 0; i < (1UL << order); i++) {
-		BUG_ON(page_count(page + i) != 1);
-		balloon_append(page + i);
+	for (i = 0; i < nr_pages; i++) {
+		BUG_ON(page_count(pagevec[i]) != 1);
+		balloon_append(pagevec[i]);
 	}
+	balloon_unlock(flags);
+
+	kfree(pagevec);
+
+	schedule_work(&balloon_worker);
+}
+
+void balloon_release_driver_page(struct page *page)
+{
+	unsigned long flags;
+
+	balloon_lock(flags);
+	balloon_append(page);
+	driver_pages--;
 	balloon_unlock(flags);
 
 	schedule_work(&balloon_worker);
 }
 
 EXPORT_SYMBOL_GPL(balloon_update_driver_allowance);
-EXPORT_SYMBOL_GPL(balloon_alloc_empty_page_range);
-EXPORT_SYMBOL_GPL(balloon_dealloc_empty_page_range);
+EXPORT_SYMBOL_GPL(alloc_empty_pages_and_pagevec);
+EXPORT_SYMBOL_GPL(free_empty_pages_and_pagevec);
+EXPORT_SYMBOL_GPL(balloon_release_driver_page);
 
 MODULE_LICENSE("Dual BSD/GPL");

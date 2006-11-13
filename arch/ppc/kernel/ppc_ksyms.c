@@ -1,4 +1,3 @@
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/threads.h>
 #include <linux/smp.h>
@@ -6,7 +5,7 @@
 #include <linux/elfcore.h>
 #include <linux/string.h>
 #include <linux/interrupt.h>
-#include <linux/tty.h>
+#include <linux/screen_info.h>
 #include <linux/vt_kern.h>
 #include <linux/nvram.h>
 #include <linux/console.h>
@@ -106,6 +105,8 @@ EXPORT_SYMBOL(__copy_tofrom_user);
 EXPORT_SYMBOL(__clear_user);
 EXPORT_SYMBOL(__strncpy_from_user);
 EXPORT_SYMBOL(__strnlen_user);
+
+EXPORT_SYMBOL(copy_page);
 
 /*
 EXPORT_SYMBOL(inb);

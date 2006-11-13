@@ -57,7 +57,6 @@
 #include <linux/if_arp.h>	/* For ARPHRD_ETHER */
 #include <linux/workqueue.h>
 #include <asm/prom.h>
-#include <linux/version.h>
 #include <asm/systemsim.h>
 
 #define MAMBO_BOGUS_NET_PROBE   119

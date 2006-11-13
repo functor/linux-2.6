@@ -17,7 +17,6 @@
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/delay.h>
-#include <linux/config.h>
 #include <linux/bootmem.h>
 #include <linux/smp_lock.h>
 #include <linux/kernel_stat.h>
@@ -673,6 +672,11 @@ void __init get_smp_config (void)
 	}
 	else if (acpi_lapic)
 		printk(KERN_INFO "Using ACPI for processor (LAPIC) configuration information\n");
+
+	else if (enable_local_apic < 0) {
+		smp_found_config = 0;
+		return;
+	}
 
 	printk(KERN_INFO "Intel MultiProcessor Specification v1.%d\n", mpf->mpf_specification);
 	if (mpf->mpf_feature2 & (1<<7)) {

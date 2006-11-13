@@ -6,7 +6,6 @@
  * Copyright (c) 2002-2004, K A Fraser, B Dragovic
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -35,9 +34,6 @@
 static struct proc_dir_entry *privcmd_intf;
 static struct proc_dir_entry *capabilities_intf;
 
-#define NR_HYPERCALLS 64
-static DECLARE_BITMAP(hypercall_permission_map, NR_HYPERCALLS);
-
 static int privcmd_ioctl(struct inode *inode, struct file *file,
 			 unsigned int cmd, unsigned long data)
 {
@@ -50,12 +46,6 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
   
 		if (copy_from_user(&hypercall, udata, sizeof(hypercall)))
 			return -EFAULT;
-
-		/* Check hypercall number for validity. */
-		if (hypercall.op >= NR_HYPERCALLS)
-			return -EINVAL;
-		if (!test_bit(hypercall.op, hypercall_permission_map))
-			return -EINVAL;
 
 #if defined(__i386__)
 		__asm__ __volatile__ (
@@ -108,94 +98,112 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 	}
 	break;
 
-#if defined(CONFIG_XEN_PRIVILEGED_GUEST)
 	case IOCTL_PRIVCMD_MMAP: {
-#define PRIVCMD_MMAP_SZ 32
 		privcmd_mmap_t mmapcmd;
-		privcmd_mmap_entry_t msg[PRIVCMD_MMAP_SZ];
+		privcmd_mmap_entry_t msg;
 		privcmd_mmap_entry_t __user *p;
+		struct mm_struct *mm = current->mm;
+		struct vm_area_struct *vma;
+		unsigned long va;
 		int i, rc;
+
+		if (!is_initial_xendomain())
+			return -EPERM;
 
 		if (copy_from_user(&mmapcmd, udata, sizeof(mmapcmd)))
 			return -EFAULT;
 
 		p = mmapcmd.entry;
+		if (copy_from_user(&msg, p, sizeof(msg)))
+			return -EFAULT;
 
-		for (i = 0; i < mmapcmd.num;
-		     i += PRIVCMD_MMAP_SZ, p += PRIVCMD_MMAP_SZ) {
-			int j, n = ((mmapcmd.num-i)>PRIVCMD_MMAP_SZ)?
-				PRIVCMD_MMAP_SZ:(mmapcmd.num-i);
+		down_read(&mm->mmap_sem);
 
-			if (copy_from_user(&msg, p,
-					   n*sizeof(privcmd_mmap_entry_t)))
-				return -EFAULT;
-     
-			for (j = 0; j < n; j++) {
-				struct vm_area_struct *vma = 
-					find_vma( current->mm, msg[j].va );
+		vma = find_vma(mm, msg.va);
+		rc = -EINVAL;
+		if (!vma || (msg.va != vma->vm_start) || vma->vm_private_data)
+			goto mmap_out;
 
-				if (!vma)
-					return -EINVAL;
+		/* Mapping is a one-shot operation per vma. */
+		vma->vm_private_data = (void *)1;
 
-				if (msg[j].va > PAGE_OFFSET)
-					return -EINVAL;
+		va = vma->vm_start;
 
-				if ((msg[j].va + (msg[j].npages << PAGE_SHIFT))
-				    > vma->vm_end )
-					return -EINVAL;
+		for (i = 0; i < mmapcmd.num; i++) {
+			rc = -EFAULT;
+			if (copy_from_user(&msg, p, sizeof(msg)))
+				goto mmap_out;
 
-				if ((rc = direct_remap_pfn_range(
-					vma,
-					msg[j].va&PAGE_MASK, 
-					msg[j].mfn, 
-					msg[j].npages<<PAGE_SHIFT, 
-					vma->vm_page_prot,
-					mmapcmd.dom)) < 0)
-					return rc;
-			}
+			/* Do not allow range to wrap the address space. */
+			rc = -EINVAL;
+			if ((msg.npages > (INT_MAX >> PAGE_SHIFT)) ||
+			    ((unsigned long)(msg.npages << PAGE_SHIFT) >= -va))
+				goto mmap_out;
+
+			/* Range chunks must be contiguous in va space. */
+			if ((msg.va != va) ||
+			    ((msg.va+(msg.npages<<PAGE_SHIFT)) > vma->vm_end))
+				goto mmap_out;
+
+			if ((rc = direct_remap_pfn_range(
+				vma,
+				msg.va & PAGE_MASK, 
+				msg.mfn, 
+				msg.npages << PAGE_SHIFT, 
+				vma->vm_page_prot,
+				mmapcmd.dom)) < 0)
+				goto mmap_out;
+
+			p++;
+			va += msg.npages << PAGE_SHIFT;
 		}
-		ret = 0;
+
+		rc = 0;
+
+	mmap_out:
+		up_read(&mm->mmap_sem);
+		ret = rc;
 	}
 	break;
 
 	case IOCTL_PRIVCMD_MMAPBATCH: {
 		privcmd_mmapbatch_t m;
-		struct vm_area_struct *vma = NULL;
+		struct mm_struct *mm = current->mm;
+		struct vm_area_struct *vma;
 		xen_pfn_t __user *p;
-		unsigned long addr, mfn; 
+		unsigned long addr, mfn;
 		int i;
 
-		if (copy_from_user(&m, udata, sizeof(m))) {
-			ret = -EFAULT;
-			goto batch_err;
+		if (!is_initial_xendomain())
+			return -EPERM;
+
+		if (copy_from_user(&m, udata, sizeof(m)))
+			return -EFAULT;
+
+		if ((m.num <= 0) || (m.num > (INT_MAX >> PAGE_SHIFT)))
+			return -EINVAL;
+
+		down_read(&mm->mmap_sem);
+
+		vma = find_vma(mm, m.addr);
+		if (!vma ||
+		    (m.addr != vma->vm_start) ||
+		    ((m.addr + (m.num<<PAGE_SHIFT)) != vma->vm_end) ||
+		    vma->vm_private_data) {
+			up_read(&mm->mmap_sem);
+			return -EINVAL;
 		}
 
-		if (m.dom == DOMID_SELF) {
-			ret = -EINVAL;
-			goto batch_err;
-		}
-
-		vma = find_vma(current->mm, m.addr);
-		if (!vma) {
-			ret = -EINVAL;
-			goto batch_err;
-		}
-
-		if (m.addr > PAGE_OFFSET) {
-			ret = -EFAULT;
-			goto batch_err;
-		}
-
-		if ((m.addr + (m.num<<PAGE_SHIFT)) > vma->vm_end) {
-			ret = -EFAULT;
-			goto batch_err;
-		}
+		/* Mapping is a one-shot operation per vma. */
+		vma->vm_private_data = (void *)1;
 
 		p = m.arr;
 		addr = m.addr;
 		for (i = 0; i < m.num; i++, addr += PAGE_SIZE, p++) {
-			if (get_user(mfn, p))
+			if (get_user(mfn, p)) {
+				up_read(&mm->mmap_sem);
 				return -EFAULT;
+			}
 
 			ret = direct_remap_pfn_range(vma, addr & PAGE_MASK,
 						     mfn, PAGE_SIZE,
@@ -204,18 +212,10 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 				put_user(0xF0000000 | mfn, p);
 		}
 
+		up_read(&mm->mmap_sem);
 		ret = 0;
-		break;
-
-	batch_err:
-		printk("batch_err ret=%d vma=%p addr=%lx "
-		       "num=%d arr=%p %lx-%lx\n", 
-		       ret, vma, (unsigned long)m.addr, m.num, m.arr,
-		       vma ? vma->vm_start : 0, vma ? vma->vm_end : 0);
-		break;
 	}
 	break;
-#endif
 
 	default:
 		ret = -EINVAL;
@@ -226,10 +226,27 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 }
 
 #ifndef HAVE_ARCH_PRIVCMD_MMAP
+static struct page *privcmd_nopage(struct vm_area_struct *vma,
+				   unsigned long address,
+				   int *type)
+{
+	return NOPAGE_SIGBUS;
+}
+
+static struct vm_operations_struct privcmd_vm_ops = {
+	.nopage = privcmd_nopage
+};
+
 static int privcmd_mmap(struct file * file, struct vm_area_struct * vma)
 {
+	/* Unsupported for auto-translate guests. */
+	if (xen_feature(XENFEAT_auto_translated_physmap))
+		return -ENOSYS;
+
 	/* DONTCOPY is essential for Xen as copy_page_range is broken. */
-	vma->vm_flags |= VM_RESERVED | VM_IO | VM_DONTCOPY;
+	vma->vm_flags |= VM_RESERVED | VM_IO | VM_DONTCOPY | VM_PFNMAP;
+	vma->vm_ops = &privcmd_vm_ops;
+	vma->vm_private_data = NULL;
 
 	return 0;
 }
@@ -246,7 +263,7 @@ static int capabilities_read(char *page, char **start, off_t off,
 	int len = 0;
 	*page = 0;
 
-	if (xen_start_info->flags & SIF_INITDOMAIN)
+	if (is_initial_xendomain())
 		len = sprintf( page, "control_d\n" );
 
 	*eof = 1;
@@ -257,20 +274,6 @@ static int __init privcmd_init(void)
 {
 	if (!is_running_on_xen())
 		return -ENODEV;
-
-	/* Set of hypercalls that privileged applications may execute. */
-	set_bit(__HYPERVISOR_acm_op,           hypercall_permission_map);
-	set_bit(__HYPERVISOR_dom0_op,          hypercall_permission_map);
-	set_bit(__HYPERVISOR_event_channel_op, hypercall_permission_map);
-	set_bit(__HYPERVISOR_memory_op,        hypercall_permission_map);
-	set_bit(__HYPERVISOR_mmu_update,       hypercall_permission_map);
-	set_bit(__HYPERVISOR_mmuext_op,        hypercall_permission_map);
-	set_bit(__HYPERVISOR_xen_version,      hypercall_permission_map);
-	set_bit(__HYPERVISOR_sched_op,         hypercall_permission_map);
-	set_bit(__HYPERVISOR_sched_op_compat,  hypercall_permission_map);
-	set_bit(__HYPERVISOR_event_channel_op_compat,
-		hypercall_permission_map);
-	set_bit(__HYPERVISOR_hvm_op,           hypercall_permission_map);
 
 	privcmd_intf = create_xen_proc_entry("privcmd", 0400);
 	if (privcmd_intf != NULL)

@@ -11,7 +11,6 @@
  *  1997-11-28  Modified for POSIX.1b signals by Richard Henderson
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
@@ -26,6 +25,7 @@
 #include <linux/tty.h>
 #include <linux/personality.h>
 #include <linux/binfmts.h>
+#include <linux/tracehook.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
 #include <asm/lowcore.h>
@@ -404,6 +404,8 @@ handle_signal(unsigned long sig, struct k_sigaction *ka,
 			sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
+
+		tracehook_report_handle_signal(sig, ka, oldset, regs);
 	}
 
 	return ret;

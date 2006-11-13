@@ -28,7 +28,6 @@
  */
 
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -40,7 +39,7 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include "usb-serial.h"
+#include <linux/usb/serial.h>
 
 #define CYBERJACK_LOCAL_BUF_SIZE 32
 
@@ -215,14 +214,14 @@ static int cyberjack_write (struct usb_serial_port *port, const unsigned char *b
 		return (0);
 	}
 
-	spin_lock(&port->lock);
+	spin_lock_bh(&port->lock);
 	if (port->write_urb_busy) {
-		spin_unlock(&port->lock);
+		spin_unlock_bh(&port->lock);
 		dbg("%s - already writing", __FUNCTION__);
 		return 0;
 	}
 	port->write_urb_busy = 1;
-	spin_unlock(&port->lock);
+	spin_unlock_bh(&port->lock);
 
 	spin_lock_irqsave(&priv->lock, flags);
 
@@ -469,7 +468,7 @@ static void cyberjack_write_bulk_callback (struct urb *urb, struct pt_regs *regs
 
 exit:
 	spin_unlock(&priv->lock);
-	schedule_work(&port->work);
+	usb_serial_port_softint(port);
 }
 
 static int __init cyberjack_init (void)

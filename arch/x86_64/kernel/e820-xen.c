@@ -1,7 +1,6 @@
 /* 
  * Handle the memory map.
  * The functions here do the job until bootmem takes over.
- * $Id: e820.c,v 1.4 2002/09/19 19:25:32 ak Exp $
  *
  *  Getting sanitize_e820_map() in sync with i386 version by applying change:
  *  -  Provisions for empty E820 memory regions (reported by certain BIOSes).
@@ -9,7 +8,6 @@
  *  Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>
  *
  */
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/init.h>
@@ -19,6 +17,7 @@
 #include <linux/kexec.h>
 #include <linux/module.h>
 
+#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <asm/e820.h>
 #include <asm/proto.h>
@@ -74,7 +73,11 @@ static inline int bad_addr(unsigned long *addrp, unsigned long size)
 #endif
 	/* kernel code + 640k memory hole (later should not be needed, but 
 	   be paranoid for now) */
-	if (last >= 640*1024 && addr < __pa_symbol(&_end)) { 
+	if (last >= 640*1024 && addr < 1024*1024) {
+		*addrp = 1024*1024;
+		return 1;
+	}
+	if (last >= __pa_symbol(&_text) && last < __pa_symbol(&_end)) {
 		*addrp = __pa_symbol(&_end);
 		return 1;
 	}
@@ -94,7 +97,6 @@ static inline int bad_addr(unsigned long *addrp, unsigned long size)
 	return 0;
 } 
 
-#ifndef CONFIG_XEN
 /*
  * This function checks if any part of the range <start,end> is mapped
  * with type.
@@ -113,7 +115,6 @@ e820_any_mapped(unsigned long start, unsigned long end, unsigned type)
 	} 
 	return 0;
 }
-#endif
 
 /*
  * This function checks if the entire range <start,end> is mapped with type.
@@ -159,7 +160,7 @@ unsigned long __init find_e820_area(unsigned long start, unsigned long end, unsi
 			addr = start;
 		if (addr > ei->addr + ei->size) 
 			continue; 
-		while (bad_addr(&addr, size) && addr+size < ei->addr + ei->size)
+		while (bad_addr(&addr, size) && addr+size <= ei->addr+ei->size)
 			;
 		last = addr + size;
 		if (last > ei->addr + ei->size)
@@ -295,8 +296,10 @@ void __init e820_reserve_resources(struct e820entry *e820, int nr_map)
 			 *  so we try it repeatedly and let the resource manager
 			 *  test it.
 			 */
+#ifndef CONFIG_XEN
 			request_resource(res, &code_resource);
 			request_resource(res, &data_resource);
+#endif
 #ifdef CONFIG_KEXEC
 			request_resource(res, &crashk_res);
 #endif
@@ -693,6 +696,7 @@ void __init parse_memmapopt(char *p, char **from)
 }
 
 unsigned long pci_mem_start = 0xaeedbabe;
+EXPORT_SYMBOL(pci_mem_start);
 
 /*
  * Search for the biggest gap in the low 32 bits of the e820

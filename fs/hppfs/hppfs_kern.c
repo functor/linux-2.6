@@ -152,7 +152,6 @@ static void hppfs_read_inode(struct inode *ino)
 	ino->i_mode = proc_ino->i_mode;
 	ino->i_nlink = proc_ino->i_nlink;
 	ino->i_size = proc_ino->i_size;
-	ino->i_blksize = proc_ino->i_blksize;
 	ino->i_blocks = proc_ino->i_blocks;
 }
 
@@ -616,7 +615,7 @@ static const struct file_operations hppfs_dir_fops = {
 	.fsync		= hppfs_fsync,
 };
 
-static int hppfs_statfs(struct super_block *sb, struct kstatfs *sf)
+static int hppfs_statfs(struct dentry *dentry, struct kstatfs *sf)
 {
 	sf->f_blocks = 0;
 	sf->f_bfree = 0;
@@ -769,11 +768,11 @@ static int hppfs_fill_super(struct super_block *sb, void *d, int silent)
 	return(err);
 }
 
-static struct super_block *hppfs_read_super(struct file_system_type *type,
-					     int flags, const char *dev_name,
-					     void *data)
+static int hppfs_read_super(struct file_system_type *type,
+			    int flags, const char *dev_name,
+			    void *data, struct vfsmount *mnt)
 {
-	return(get_sb_nodev(type, flags, data, hppfs_fill_super));
+	return get_sb_nodev(type, flags, data, hppfs_fill_super, mnt);
 }
 
 static struct file_system_type hppfs_type = {

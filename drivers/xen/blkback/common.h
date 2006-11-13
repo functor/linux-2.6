@@ -27,7 +27,6 @@
 #ifndef __BLKIF__BACKEND__COMMON_H__
 #define __BLKIF__BACKEND__COMMON_H__
 
-#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -55,9 +54,9 @@ struct vbd {
 	unsigned char  type;        /* VDISK_xxx */
 	u32            pdevice;     /* phys device that this vbd maps to */
 	struct block_device *bdev;
-}; 
+};
 
-struct backend_info; 
+struct backend_info;
 
 typedef struct blkif_st {
 	/* Unique identifier for this interface. */
@@ -72,7 +71,7 @@ typedef struct blkif_st {
 	/* The VBD attached to this interface. */
 	struct vbd        vbd;
 	/* Back pointer to the backend_info. */
-	struct backend_info *be; 
+	struct backend_info *be;
 	/* Private fields. */
 	spinlock_t       blk_ring_lock;
 	atomic_t         refcnt;
@@ -122,7 +121,7 @@ struct phys_req {
 	blkif_sector_t       sector_number;
 };
 
-int vbd_translate(struct phys_req *req, blkif_t *blkif, int operation); 
+int vbd_translate(struct phys_req *req, blkif_t *blkif, int operation);
 
 void blkif_interface_init(void);
 

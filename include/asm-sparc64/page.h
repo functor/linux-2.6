@@ -3,7 +3,8 @@
 #ifndef _SPARC64_PAGE_H
 #define _SPARC64_PAGE_H
 
-#include <linux/config.h>
+#ifdef __KERNEL__
+
 #include <asm/const.h>
 
 #if defined(CONFIG_SPARC64_PAGE_SIZE_8KB)
@@ -27,8 +28,6 @@
 #if PAGE_SHIFT < 14
 #define DCACHE_ALIASING_POSSIBLE
 #endif
-
-#ifdef __KERNEL__
 
 #if defined(CONFIG_HUGETLB_PAGE_SIZE_4MB)
 #define HPAGE_SHIFT		22
@@ -144,8 +143,7 @@ typedef unsigned long pgprot_t;
 
 #define devmem_is_allowed(x) 1
 
-#endif /* !(__KERNEL__) */
-
 #include <asm-generic/page.h>
 
-#endif /* !(_SPARC64_PAGE_H) */
+#endif /* __KERNEL__ */
+#endif /* _SPARC64_PAGE_H */

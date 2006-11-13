@@ -28,10 +28,10 @@
 #include <linux/sunrpc/clnt.h>
 #include <linux/nfs_fs.h>
 #include <linux/nfs_mount.h>
-#include <linux/mount.h>
 #include <linux/pagemap.h>
 #include <linux/smp_lock.h>
 #include <linux/namei.h>
+#include <linux/mount.h>
 #include <linux/vserver/xid.h>
 
 #include "nfs4_fs.h"
@@ -398,7 +398,7 @@ int nfs_do_filldir(nfs_readdir_descriptor_t *desc, void *dirent,
 	struct file	*file = desc->file;
 	struct nfs_entry *entry = desc->entry;
 	struct dentry	*dentry = NULL;
-	unsigned long	fileid;
+	u64		fileid;
 	int		loop_count = 0,
 			res;
 
@@ -409,7 +409,7 @@ int nfs_do_filldir(nfs_readdir_descriptor_t *desc, void *dirent,
 		unsigned d_type = DT_UNKNOWN;
 		/* Note: entry->prev_cookie contains the cookie for
 		 *	 retrieving the current dirent on the server */
-		fileid = nfs_fileid_to_ino_t(entry->ino);
+		fileid = entry->ino;
 
 		/* Get a dentry if we have one */
 		if (dentry != NULL)
@@ -419,7 +419,7 @@ int nfs_do_filldir(nfs_readdir_descriptor_t *desc, void *dirent,
 		/* Use readdirplus info */
 		if (dentry != NULL && dentry->d_inode != NULL) {
 			d_type = dt_type(dentry->d_inode);
-			fileid = dentry->d_inode->i_ino;
+			fileid = NFS_FILEID(dentry->d_inode);
 		}
 
 		res = filldir(dirent, entry->name, entry->len, 
@@ -530,7 +530,7 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 
 	lock_kernel();
 
-	res = nfs_revalidate_inode(NFS_SERVER(inode), inode);
+	res = nfs_revalidate_mapping(inode, filp->f_mapping);
 	if (res < 0) {
 		unlock_kernel();
 		return res;
@@ -692,7 +692,9 @@ int nfs_lookup_verify_inode(struct inode *inode, struct nameidata *nd)
 			goto out_force;
 		/* This is an open(2) */
 		if (nfs_lookup_check_intent(nd, LOOKUP_OPEN) != 0 &&
-				!(server->flags & NFS_MOUNT_NOCTO))
+				!(server->flags & NFS_MOUNT_NOCTO) &&
+				(S_ISREG(inode->i_mode) ||
+				 S_ISDIR(inode->i_mode)))
 			goto out_force;
 	}
 	return nfs_revalidate_inode(server, inode);
@@ -870,6 +872,17 @@ int nfs_is_exclusive_create(struct inode *dir, struct nameidata *nd)
 	return (nd->intent.open.flags & O_EXCL) != 0;
 }
 
+static inline int nfs_reval_fsid(struct vfsmount *mnt, struct inode *dir,
+				 struct nfs_fh *fh, struct nfs_fattr *fattr)
+{
+	struct nfs_server *server = NFS_SERVER(dir);
+
+	if (!nfs_fsid_equal(&server->fsid, &fattr->fsid))
+		/* Revalidate fsid on root dir */
+		return __nfs_revalidate_inode(server, mnt->mnt_root->d_inode);
+	return 0;
+}
+
 static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
 	struct dentry *res;
@@ -891,13 +904,24 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 
 	lock_kernel();
 
-	/* If we're doing an exclusive create, optimize away the lookup */
-	if (nfs_is_exclusive_create(dir, nd))
-		goto no_entry;
+	/*
+	 * If we're doing an exclusive create, optimize away the lookup
+	 * but don't hash the dentry.
+	 */
+	if (nfs_is_exclusive_create(dir, nd)) {
+		d_instantiate(dentry, NULL);
+		res = NULL;
+		goto out_unlock;
+	}
 
 	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, &fhandle, &fattr);
 	if (error == -ENOENT)
 		goto no_entry;
+	if (error < 0) {
+		res = ERR_PTR(error);
+		goto out_unlock;
+	}
+	error = nfs_reval_fsid(nd->mnt, dir, &fhandle, &fattr);
 	if (error < 0) {
 		res = ERR_PTR(error);
 		goto out_unlock;
@@ -908,7 +932,7 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 		goto out_unlock;
 	vx_propagate_xid(nd, inode);
 no_entry:
-	res = d_add_unique(dentry, inode);
+	res = d_materialise_unique(dentry, inode);
 	if (res != NULL)
 		dentry = res;
 	nfs_renew_times(dentry);
@@ -1103,11 +1127,13 @@ static struct dentry *nfs_readdir_lookup(nfs_readdir_descriptor_t *desc)
 		dput(dentry);
 		return NULL;
 	}
-	alias = d_add_unique(dentry, inode);
+
+	alias = d_materialise_unique(dentry, inode);
 	if (alias != NULL) {
 		dput(dentry);
 		dentry = alias;
 	}
+
 	nfs_renew_times(dentry);
 	nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
 	return dentry;
@@ -1133,7 +1159,7 @@ int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fhandle,
 	}
 	if (!(fattr->valid & NFS_ATTR_FATTR)) {
 		struct nfs_server *server = NFS_SB(dentry->d_sb);
-		error = server->rpc_ops->getattr(server, fhandle, fattr);
+		error = server->nfs_client->rpc_ops->getattr(server, fhandle, fattr);
 		if (error < 0)
 			goto out_err;
 	}
@@ -1142,6 +1168,8 @@ int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fhandle,
 	if (IS_ERR(inode))
 		goto out_err;
 	d_instantiate(dentry, inode);
+	if (d_unhashed(dentry))
+		d_rehash(dentry);
 	return 0;
 out_err:
 	d_drop(dentry);

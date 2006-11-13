@@ -35,6 +35,8 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 
+#include <asm/io.h>
+
 #include "mthca_dev.h"
 #include "mthca_cmd.h"
 #include "mthca_memfree.h"
@@ -243,6 +245,7 @@ int mthca_alloc_srq(struct mthca_dev *dev, struct mthca_pd *pd,
 	spin_lock_init(&srq->lock);
 	srq->refcount = 1;
 	init_waitqueue_head(&srq->wait);
+	mutex_init(&srq->mutex);
 
 	if (mthca_is_memfree(dev))
 		mthca_arbel_init_srq_context(dev, pd, srq, mailbox->buf);
@@ -369,9 +372,14 @@ int mthca_modify_srq(struct ib_srq *ibsrq, struct ib_srq_attr *attr,
 		return -EINVAL;
 
 	if (attr_mask & IB_SRQ_LIMIT) {
-		if (attr->srq_limit > srq->max)
+		u32 max_wr = mthca_is_memfree(dev) ? srq->max - 1 : srq->max;
+		if (attr->srq_limit > max_wr)
 			return -EINVAL;
+
+		mutex_lock(&srq->mutex);
 		ret = mthca_ARM_SRQ(dev, srq->srqn, attr->srq_limit, &status);
+		mutex_unlock(&srq->mutex);
+
 		if (ret)
 			return ret;
 		if (status)
@@ -586,6 +594,12 @@ int mthca_tavor_post_srq_recv(struct ib_srq *ibsrq, struct ib_recv_wr *wr,
 			      dev->kar + MTHCA_RECEIVE_DOORBELL,
 			      MTHCA_GET_DOORBELL_LOCK(&dev->doorbell_lock));
 	}
+
+	/*
+	 * Make sure doorbells don't leak out of SRQ spinlock and
+	 * reach the HCA out of order:
+	 */
+	mmiowb();
 
 	spin_unlock_irqrestore(&srq->lock, flags);
 	return err;

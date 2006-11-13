@@ -29,7 +29,7 @@
  *
  ****************************************************************/
 
-static spinlock_t log_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(log_lock);
 static unsigned int log_head, log_tail;
 static char * log_buffer = NULL;
 static DECLARE_WAIT_QUEUE_HEAD(log_wait);
@@ -767,6 +767,10 @@ static int logger_thread (void *data)
 	if (log_buffer)
 		TUX_BUG();
 	log_buffer = vmalloc(LOG_LEN);
+	if (!log_buffer) {
+		TUX_BUG();
+		goto out;
+	}
 	memset(log_buffer, 0, LOG_LEN);
 	log_head = log_tail = 0;
 
@@ -804,7 +808,7 @@ static int logger_thread (void *data)
 	log_buffer = NULL;
 	stop_logger = 0;
 	wake_up(&stop_logger_wait);
-
+out:
 	set_fs(oldmm);
 
 	return 0;

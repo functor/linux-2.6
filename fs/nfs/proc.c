@@ -44,10 +44,9 @@
 #include <linux/nfs_page.h>
 #include <linux/lockd/bind.h>
 #include <linux/smp_lock.h>
+#include "internal.h"
 
 #define NFSDBG_FACILITY		NFSDBG_PROC
-
-extern struct rpc_procinfo nfs_procedures[];
 
 /*
  * Bare-bones access to getattr: this is for nfs_read_super.
@@ -67,14 +66,14 @@ nfs_proc_get_root(struct nfs_server *server, struct nfs_fh *fhandle,
 
 	dprintk("%s: call getattr\n", __FUNCTION__);
 	nfs_fattr_init(fattr);
-	status = rpc_call_sync(server->client_sys, &msg, 0);
+	status = rpc_call_sync(server->nfs_client->cl_rpcclient, &msg, 0);
 	dprintk("%s: reply getattr: %d\n", __FUNCTION__, status);
 	if (status)
 		return status;
 	dprintk("%s: call statfs\n", __FUNCTION__);
 	msg.rpc_proc = &nfs_procedures[NFSPROC_STATFS];
 	msg.rpc_resp = &fsinfo;
-	status = rpc_call_sync(server->client_sys, &msg, 0);
+	status = rpc_call_sync(server->nfs_client->cl_rpcclient, &msg, 0);
 	dprintk("%s: reply statfs: %d\n", __FUNCTION__, status);
 	if (status)
 		return status;
@@ -611,8 +610,6 @@ nfs_proc_pathconf(struct nfs_server *server, struct nfs_fh *fhandle,
 	return 0;
 }
 
-extern u32 * nfs_decode_dirent(u32 *, struct nfs_entry *, int);
-
 static int nfs_read_done(struct rpc_task *task, struct nfs_read_data *data)
 {
 	if (task->tk_status >= 0) {
@@ -674,7 +671,7 @@ nfs_proc_lock(struct file *filp, int cmd, struct file_lock *fl)
 }
 
 
-struct nfs_rpc_ops	nfs_v2_clientops = {
+const struct nfs_rpc_ops nfs_v2_clientops = {
 	.version	= 2,		       /* protocol version */
 	.dentry_ops	= &nfs_dentry_operations,
 	.dir_inode_ops	= &nfs_dir_inode_operations,

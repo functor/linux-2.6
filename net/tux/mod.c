@@ -26,7 +26,7 @@
  *
  ****************************************************************/
 
-spinlock_t tuxmodules_lock = SPIN_LOCK_UNLOCKED;
+DEFINE_SPINLOCK(tuxmodules_lock);
 static LIST_HEAD(tuxmodules_list);
 
 tcapi_template_t * get_first_usermodule (void)

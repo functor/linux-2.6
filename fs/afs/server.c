@@ -123,8 +123,7 @@ int afs_server_lookup(struct afs_cell *cell, const struct in_addr *addr,
  resurrect_server:
 	_debug("resurrecting server");
 
-	list_del(&zombie->link);
-	list_add_tail(&zombie->link, &cell->sv_list);
+	list_move_tail(&zombie->link, &cell->sv_list);
 	afs_get_server(zombie);
 	afs_kafstimod_del_timer(&zombie->timeout);
 	spin_unlock(&cell->sv_gylock);
@@ -168,8 +167,7 @@ void afs_put_server(struct afs_server *server)
 	}
 
 	spin_lock(&cell->sv_gylock);
-	list_del(&server->link);
-	list_add_tail(&server->link, &cell->sv_graveyard);
+	list_move_tail(&server->link, &cell->sv_graveyard);
 
 	/* time out in 10 secs */
 	afs_kafstimod_add_timer(&server->timeout, 10 * HZ);
@@ -377,7 +375,6 @@ int afs_server_request_callslot(struct afs_server *server,
 	else if (list_empty(&server->fs_callq)) {
 		/* no one waiting */
 		server->fs_conn_cnt[nconn]++;
-		spin_unlock(&server->fs_lock);
 	}
 	else {
 		/* someone's waiting - dequeue them and wake them up */
@@ -395,9 +392,9 @@ int afs_server_request_callslot(struct afs_server *server,
 		}
 		pcallslot->ready = 1;
 		wake_up_process(pcallslot->task);
-		spin_unlock(&server->fs_lock);
 	}
 
+	spin_unlock(&server->fs_lock);
 	rxrpc_put_connection(callslot->conn);
 	callslot->conn = NULL;
 

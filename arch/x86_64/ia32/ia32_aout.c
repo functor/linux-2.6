@@ -422,12 +422,6 @@ beyond_if:
 	(regs)->cs = __USER32_CS;
 	(regs)->ss = __USER32_DS;
 	set_fs(USER_DS);
-	if (unlikely(current->ptrace & PT_PTRACED)) {
-		if (current->ptrace & PT_TRACE_EXEC)
-			ptrace_notify ((PTRACE_EVENT_EXEC << 8) | SIGTRAP);
-		else
-			send_sig(SIGTRAP, current, 0);
-	}
 	return 0;
 }
 

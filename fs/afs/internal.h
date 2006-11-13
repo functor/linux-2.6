@@ -16,15 +16,17 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/fscache.h>
 
 /*
  * debug tracing
  */
-#define kenter(FMT, a...)	printk("==> %s("FMT")\n",__FUNCTION__ , ## a)
-#define kleave(FMT, a...)	printk("<== %s()"FMT"\n",__FUNCTION__ , ## a)
-#define kdebug(FMT, a...)	printk(FMT"\n" , ## a)
-#define kproto(FMT, a...)	printk("### "FMT"\n" , ## a)
-#define knet(FMT, a...)		printk(FMT"\n" , ## a)
+#define __kdbg(FMT, a...)	printk("[%05d] "FMT"\n", current->pid , ## a)
+#define kenter(FMT, a...)	__kdbg("==> %s("FMT")", __FUNCTION__ , ## a)
+#define kleave(FMT, a...)	__kdbg("<== %s()"FMT, __FUNCTION__ , ## a)
+#define kdebug(FMT, a...)	__kdbg(FMT , ## a)
+#define kproto(FMT, a...)	__kdbg("### "FMT , ## a)
+#define knet(FMT, a...)		__kdbg(FMT , ## a)
 
 #ifdef __KDEBUG
 #define _enter(FMT, a...)	kenter(FMT , ## a)
@@ -56,9 +58,6 @@ static inline void afs_discard_my_signals(void)
  */
 extern struct rw_semaphore afs_proc_cells_sem;
 extern struct list_head afs_proc_cells;
-#ifdef AFS_CACHING_SUPPORT
-extern struct cachefs_index_def afs_cache_cell_index_def;
-#endif
 
 /*
  * dir.c
@@ -69,13 +68,9 @@ extern const struct file_operations afs_dir_file_operations;
 /*
  * file.c
  */
-extern struct address_space_operations afs_fs_aops;
+extern const struct address_space_operations afs_fs_aops;
 extern struct inode_operations afs_file_inode_operations;
-
-#ifdef AFS_CACHING_SUPPORT
-extern int afs_cache_get_page_cookie(struct page *page,
-				     struct cachefs_page **_page_cookie);
-#endif
+extern const struct file_operations afs_file_file_operations;
 
 /*
  * inode.c
@@ -97,8 +92,8 @@ extern void afs_key_unregister(void);
 /*
  * main.c
  */
-#ifdef AFS_CACHING_SUPPORT
-extern struct cachefs_netfs afs_cache_netfs;
+#ifdef CONFIG_AFS_FSCACHE
+extern struct fscache_netfs afs_cache_netfs;
 #endif
 
 /*

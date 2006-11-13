@@ -10,7 +10,6 @@
  *		to allow signals to be sent reliably.
  */
 
-#include <linux/config.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/smp_lock.h>
@@ -21,15 +20,14 @@
 #include <linux/binfmts.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/signal.h>
-#include <linux/audit.h>
 #include <linux/capability.h>
-#include <linux/vs_cvirt.h>
 #include <asm/param.h>
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/siginfo.h>
+#include "audit.h"	/* audit_signal_info() */
 
 /*
  * SLAB caches for signal bits.
@@ -162,12 +160,6 @@ static int sig_ignored(struct task_struct *t, int sig)
 	void __user * handler;
 
 	/*
-	 * Tracers always want to know about signals..
-	 */
-	if (t->ptrace & PT_PTRACED)
-		return 0;
-
-	/*
 	 * Blocked signals are never ignored, since the
 	 * signal handler may change by the time it is
 	 * unblocked.
@@ -177,8 +169,12 @@ static int sig_ignored(struct task_struct *t, int sig)
 
 	/* Is it explicitly or implicitly ignored? */
 	handler = t->sighand->action[sig-1].sa.sa_handler;
-	return   handler == SIG_IGN ||
-		(handler == SIG_DFL && sig_kernel_ignore(sig));
+	if (handler != SIG_IGN &&
+	    (handler != SIG_DFL || !sig_kernel_ignore(sig)))
+		return 0;
+
+	/* It's ignored, we can short-circuit unless a debugger wants it.  */
+	return !tracehook_consider_ignored_signal(t, sig, handler);
 }
 
 /*
@@ -218,7 +214,8 @@ fastcall void recalc_sigpending_tsk(struct task_struct *t)
 	if (t->signal->group_stop_count > 0 ||
 	    (freezing(t)) ||
 	    PENDING(&t->pending, &t->blocked) ||
-	    PENDING(&t->signal->shared_pending, &t->blocked))
+	    PENDING(&t->signal->shared_pending, &t->blocked) ||
+	    tracehook_induce_sigpending(t))
 		set_tsk_thread_flag(t, TIF_SIGPENDING);
 	else
 		clear_tsk_thread_flag(t, TIF_SIGPENDING);
@@ -595,14 +592,12 @@ static int check_kill_permission(int sig, struct siginfo *info,
 	if (user && !vx_check(vx_task_xid(t), VX_ADMIN|VX_IDENT))
 		return error;
 
-	error = security_task_kill(t, info, sig);
+	error = security_task_kill(t, info, sig, 0);
 	if (!error)
 		audit_signal_info(sig, t); /* Let audit system see the signal */
 	return error;
 }
 
-/* forward decl */
-static void do_notify_parent_cldstop(struct task_struct *tsk, int why);
 
 /*
  * Handle magic process-wide effects of stop/continue signals.
@@ -834,22 +829,31 @@ out:
 /*
  * Force a signal that the process can't ignore: if necessary
  * we unblock the signal and change any SIG_IGN to SIG_DFL.
+ *
+ * Note: If we unblock the signal, we always reset it to SIG_DFL,
+ * since we do not want to have a signal handler that was blocked
+ * be invoked when user space had explicitly blocked it.
+ *
+ * We don't want to have recursive SIGSEGV's etc, for example.
  */
-
 int
 force_sig_info(int sig, struct siginfo *info, struct task_struct *t)
 {
 	unsigned long int flags;
-	int ret;
+	int ret, blocked, ignored;
+	struct k_sigaction *action;
 
 	spin_lock_irqsave(&t->sighand->siglock, flags);
-	if (t->sighand->action[sig-1].sa.sa_handler == SIG_IGN) {
-		t->sighand->action[sig-1].sa.sa_handler = SIG_DFL;
+	action = &t->sighand->action[sig-1];
+	ignored = action->sa.sa_handler == SIG_IGN;
+	blocked = sigismember(&t->blocked, sig);
+	if (blocked || ignored) {
+		action->sa.sa_handler = SIG_DFL;
+		if (blocked) {
+			sigdelset(&t->blocked, sig);
+			recalc_sigpending_tsk(t);
+		}
 	}
-	if (sigismember(&t->blocked, sig)) {
-		sigdelset(&t->blocked, sig);
-	}
-	recalc_sigpending_tsk(t);
 	ret = specific_send_sig_info(sig, info, t);
 	spin_unlock_irqrestore(&t->sighand->siglock, flags);
 
@@ -930,7 +934,7 @@ __group_complete_signal(int sig, struct task_struct *p)
 	 */
 	if (sig_fatal(p, sig) && !(p->signal->flags & SIGNAL_GROUP_EXIT) &&
 	    !sigismember(&t->real_blocked, sig) &&
-	    (sig == SIGKILL || !(t->ptrace & PT_PTRACED))) {
+	    (sig == SIGKILL || !tracehook_consider_fatal_signal(t, sig))) {
 		/*
 		 * This signal will be fatal to the whole group.
 		 */
@@ -1139,7 +1143,7 @@ kill_proc_info(int sig, struct siginfo *info, pid_t pid)
 	}
 	p = find_task_by_pid(pid);
 	error = -ESRCH;
-	if (p)
+	if (p && vx_check(vx_task_xid(p), VX_IDENT))
 		error = group_send_sig_info(sig, info, p);
 	if (unlikely(acquired_tasklist_lock))
 		read_unlock(&tasklist_lock);
@@ -1149,7 +1153,7 @@ kill_proc_info(int sig, struct siginfo *info, pid_t pid)
 
 /* like kill_proc_info(), but doesn't use uid/euid of "current" */
 int kill_proc_info_as_uid(int sig, struct siginfo *info, pid_t pid,
-		      uid_t uid, uid_t euid)
+		      uid_t uid, uid_t euid, u32 secid)
 {
 	int ret = -EINVAL;
 	struct task_struct *p;
@@ -1169,6 +1173,9 @@ int kill_proc_info_as_uid(int sig, struct siginfo *info, pid_t pid,
 		ret = -EPERM;
 		goto out_unlock;
 	}
+	ret = security_task_kill(p, info, sig, secid);
+	if (ret)
+		goto out_unlock;
 	if (sig && p->sighand) {
 		unsigned long flags;
 		spin_lock_irqsave(&p->sighand->siglock, flags);
@@ -1198,7 +1205,8 @@ static int kill_something_info(int sig, struct siginfo *info, int pid)
 
 		read_lock(&tasklist_lock);
 		for_each_process(p) {
-			if (p->pid > 1 && p->tgid != current->tgid) {
+			if (vx_check(vx_task_xid(p), VX_ADMIN|VX_IDENT) &&
+				p->pid > 1 && p->tgid != current->tgid) {
 				int err = group_send_sig_info(sig, info, p);
 				++count;
 				if (err != -EPERM)
@@ -1469,8 +1477,7 @@ void do_notify_parent(struct task_struct *tsk, int sig)
  	/* do_notify_parent_cldstop should have been called instead.  */
  	BUG_ON(tsk->state & (TASK_STOPPED|TASK_TRACED));
 
-	BUG_ON(!tsk->ptrace &&
-	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
+	BUG_ON(tsk->group_leader != tsk || !thread_group_empty(tsk));
 
 	info.si_signo = sig;
 	info.si_errno = 0;
@@ -1495,7 +1502,7 @@ void do_notify_parent(struct task_struct *tsk, int sig)
 
 	psig = tsk->parent->sighand;
 	spin_lock_irqsave(&psig->siglock, flags);
-	if (!tsk->ptrace && sig == SIGCHLD &&
+	if (sig == SIGCHLD &&
 	    (psig->action[SIGCHLD-1].sa.sa_handler == SIG_IGN ||
 	     (psig->action[SIGCHLD-1].sa.sa_flags & SA_NOCLDWAIT))) {
 		/*
@@ -1523,19 +1530,12 @@ void do_notify_parent(struct task_struct *tsk, int sig)
 	spin_unlock_irqrestore(&psig->siglock, flags);
 }
 
-static void do_notify_parent_cldstop(struct task_struct *tsk, int why)
+void do_notify_parent_cldstop(struct task_struct *tsk, int why)
 {
 	struct siginfo info;
 	unsigned long flags;
 	struct task_struct *parent;
 	struct sighand_struct *sighand;
-
-	if (tsk->ptrace & PT_PTRACED)
-		parent = tsk->parent;
-	else {
-		tsk = tsk->group_leader;
-		parent = tsk->real_parent;
-	}
 
 	info.si_signo = SIGCHLD;
 	info.si_errno = 0;
@@ -1561,6 +1561,15 @@ static void do_notify_parent_cldstop(struct task_struct *tsk, int why)
  		BUG();
  	}
 
+	/*
+	 * Tracing can decide that we should not do the normal notification.
+	 */
+	if (tracehook_notify_cldstop(tsk, &info))
+		return;
+
+	tsk = tsk->group_leader;
+	parent = tsk->parent;
+
 	sighand = parent->sighand;
 	spin_lock_irqsave(&sighand->siglock, flags);
 	if (sighand->action[SIGCHLD-1].sa.sa_handler != SIG_IGN &&
@@ -1573,85 +1582,6 @@ static void do_notify_parent_cldstop(struct task_struct *tsk, int why)
 	spin_unlock_irqrestore(&sighand->siglock, flags);
 }
 
-/*
- * This must be called with current->sighand->siglock held.
- *
- * This should be the path for all ptrace stops.
- * We always set current->last_siginfo while stopped here.
- * That makes it a way to test a stopped process for
- * being ptrace-stopped vs being job-control-stopped.
- *
- * If we actually decide not to stop at all because the tracer is gone,
- * we leave nostop_code in current->exit_code.
- */
-static void ptrace_stop(int exit_code, int nostop_code, siginfo_t *info)
-{
-	/*
-	 * If there is a group stop in progress,
-	 * we must participate in the bookkeeping.
-	 */
-	if (current->signal->group_stop_count > 0)
-		--current->signal->group_stop_count;
-
-	current->last_siginfo = info;
-	current->exit_code = exit_code;
-
-	/* Let the debugger run.  */
-	set_current_state(TASK_TRACED);
-	spin_unlock_irq(&current->sighand->siglock);
-	try_to_freeze();
-	read_lock(&tasklist_lock);
-	if (likely(current->ptrace & PT_PTRACED) &&
-	    likely(current->parent != current->real_parent ||
-		   !(current->ptrace & PT_ATTACHED)) &&
-	    (likely(current->parent->signal != current->signal) ||
-	     !unlikely(current->signal->flags & SIGNAL_GROUP_EXIT))) {
-		do_notify_parent_cldstop(current, CLD_TRAPPED);
-		read_unlock(&tasklist_lock);
-		schedule();
-	} else {
-		/*
-		 * By the time we got the lock, our tracer went away.
-		 * Don't stop here.
-		 */
-		read_unlock(&tasklist_lock);
-		set_current_state(TASK_RUNNING);
-		current->exit_code = nostop_code;
-	}
-
-	/*
-	 * We are back.  Now reacquire the siglock before touching
-	 * last_siginfo, so that we are sure to have synchronized with
-	 * any signal-sending on another CPU that wants to examine it.
-	 */
-	spin_lock_irq(&current->sighand->siglock);
-	current->last_siginfo = NULL;
-
-	/*
-	 * Queued signals ignored us while we were stopped for tracing.
-	 * So check for any that we should take before resuming user mode.
-	 */
-	recalc_sigpending();
-}
-
-void ptrace_notify(int exit_code)
-{
-	siginfo_t info;
-
-	BUG_ON((exit_code & (0x7f | ~0xffff)) != SIGTRAP);
-
-	memset(&info, 0, sizeof info);
-	info.si_signo = SIGTRAP;
-	info.si_code = exit_code;
-	info.si_pid = current->pid;
-	info.si_uid = current->uid;
-
-	/* Let the debugger run.  */
-	spin_lock_irq(&current->sighand->siglock);
-	ptrace_stop(exit_code, 0, &info);
-	spin_unlock_irq(&current->sighand->siglock);
-}
-
 static void
 finish_stop(int stop_count)
 {
@@ -1660,7 +1590,7 @@ finish_stop(int stop_count)
 	 * a group stop in progress and we are the last to stop,
 	 * report to the parent.  When ptraced, every thread reports itself.
 	 */
-	if (stop_count == 0 || (current->ptrace & PT_PTRACED)) {
+	if (!tracehook_finish_stop(stop_count <= 0) && stop_count <= 0) {
 		read_lock(&tasklist_lock);
 		do_notify_parent_cldstop(current, CLD_STOPPED);
 		read_unlock(&tasklist_lock);
@@ -1785,49 +1715,24 @@ relock:
 		    handle_group_stop())
 			goto relock;
 
-		signr = dequeue_signal(current, mask, info);
+		/*
+		 * Tracing can induce an artifical signal and choose sigaction.
+		 * The return value in signr determines the default action,
+		 * but info->si_signo is the signal number we will report.
+		 */
+		signr = tracehook_get_signal(current, regs, info, return_ka);
+		if (unlikely(signr < 0))
+			goto relock;
+		if (unlikely(signr != 0))
+			ka = return_ka;
+		else {
+			signr = dequeue_signal(current, mask, info);
 
-		if (!signr)
-			break; /* will return 0 */
-
-		if ((signr == SIGSEGV) && print_fatal_signals) {
-			spin_unlock_irq(&current->sighand->siglock);
-			print_fatal_signal(regs, signr);
-			spin_lock_irq(&current->sighand->siglock);
-		}
-		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
-			ptrace_signal_deliver(regs, cookie);
-
-			/* Let the debugger run.  */
-			ptrace_stop(signr, signr, info);
-
-			/* We're back.  Did the debugger cancel the sig?  */
-			signr = current->exit_code;
-			if (signr == 0)
-				continue;
-
-			current->exit_code = 0;
-
-			/* Update the siginfo structure if the signal has
-			   changed.  If the debugger wanted something
-			   specific in the siginfo structure then it should
-			   have updated *info via PTRACE_SETSIGINFO.  */
-			if (signr != info->si_signo) {
-				info->si_signo = signr;
-				info->si_errno = 0;
-				info->si_code = SI_USER;
-				info->si_pid = current->parent->pid;
-				info->si_uid = current->parent->uid;
-			}
-
-			/* If the (new) signal is now blocked, requeue it.  */
-			if (sigismember(&current->blocked, signr)) {
-				specific_send_sig_info(signr, info, current);
-				continue;
-			}
+			if (!signr)
+				break; /* will return 0 */
+			ka = &current->sighand->action[signr-1];
 		}
 
-		ka = &current->sighand->action[signr-1];
 		if (ka->sa.sa_handler == SIG_IGN) /* Do nothing.  */
 			continue;
 		if (ka->sa.sa_handler != SIG_DFL) {
@@ -1877,7 +1782,7 @@ relock:
 				spin_lock_irq(&current->sighand->siglock);
 			}
 
-			if (likely(do_signal_stop(signr))) {
+			if (likely(do_signal_stop(info->si_signo))) {
 				/* It released the siglock.  */
 				goto relock;
 			}
@@ -1906,13 +1811,13 @@ relock:
 			 * first and our do_group_exit call below will use
 			 * that value and ignore the one we pass it.
 			 */
-			do_coredump((long)signr, signr, regs);
+			do_coredump(info->si_signo, info->si_signo, regs);
 		}
 
 		/*
 		 * Death signals, no core dump.
 		 */
-		do_group_exit(signr);
+		do_group_exit(info->si_signo);
 		/* NOTREACHED */
 	}
 	spin_unlock_irq(&current->sighand->siglock);
@@ -1925,7 +1830,6 @@ EXPORT_SYMBOL(flush_signals);
 EXPORT_SYMBOL(force_sig);
 EXPORT_SYMBOL(kill_pg);
 EXPORT_SYMBOL(kill_proc);
-EXPORT_SYMBOL(ptrace_notify);
 EXPORT_SYMBOL(send_sig);
 EXPORT_SYMBOL(send_sig_info);
 EXPORT_SYMBOL(sigprocmask);

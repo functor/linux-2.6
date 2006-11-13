@@ -51,6 +51,7 @@ static inline int spu_run_fini(struct spu_context *ctx, u32 * npc,
 
 	if (signal_pending(current))
 		ret = -ERESTARTSYS;
+#if 0 /* XXX */
 	if (unlikely(current->ptrace & PT_PTRACED)) {
 		if ((*status & SPU_STATUS_STOPPED_BY_STOP)
 		    && (*status >> SPU_STOP_STATUS_SHIFT) == 0x3fff) {
@@ -58,6 +59,7 @@ static inline int spu_run_fini(struct spu_context *ctx, u32 * npc,
 			ret = -ERESTARTSYS;
 		}
 	}
+#endif
 	return ret;
 }
 

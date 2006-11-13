@@ -82,12 +82,17 @@ struct sol_stat64 {
 
 static inline int putstat(struct sol_stat __user *ubuf, struct kstat *kbuf)
 {
+	u32 ino;
+
 	if (kbuf->size > MAX_NON_LFS ||
 	    !sysv_valid_dev(kbuf->dev) ||
 	    !sysv_valid_dev(kbuf->rdev))
 		return -EOVERFLOW;
+	ino = kbuf->ino;
+	if (sizeof(ino) < sizeof(kbuf->ino) && ino != kbuf->ino)
+		return -EOVERFLOW;
 	if (put_user (sysv_encode_dev(kbuf->dev), &ubuf->st_dev)	||
-	    __put_user (kbuf->ino, &ubuf->st_ino)		||
+	    __put_user (ino, &ubuf->st_ino)				||
 	    __put_user (kbuf->mode, &ubuf->st_mode)		||
 	    __put_user (kbuf->nlink, &ubuf->st_nlink)	||
 	    __put_user (kbuf->uid, &ubuf->st_uid)		||
@@ -356,7 +361,7 @@ static int report_statvfs(struct vfsmount *mnt, struct inode *inode, u32 buf)
 	int error;
 	struct sol_statvfs __user *ss = A(buf);
 
-	error = vfs_statfs(mnt->mnt_sb, &s);
+	error = vfs_statfs(mnt->mnt_root, &s);
 	if (!error) {
 		const char *p = mnt->mnt_sb->s_type->name;
 		int i = 0;
@@ -392,7 +397,7 @@ static int report_statvfs64(struct vfsmount *mnt, struct inode *inode, u32 buf)
 	int error;
 	struct sol_statvfs64 __user *ss = A(buf);
 			
-	error = vfs_statfs(mnt->mnt_sb, &s);
+	error = vfs_statfs(mnt->mnt_root, &s);
 	if (!error) {
 		const char *p = mnt->mnt_sb->s_type->name;
 		int i = 0;

@@ -742,17 +742,17 @@ static ctl_table tux_table[] = {
 		NULL,
 		NULL
 	},
-	{0,0,0,0,0,0,0,0,0,0,0}	};
+	{0, NULL, NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL} };
 
 
 static ctl_table tux_dir_table[] = {
-	{NET_TUX, "tux", NULL, 0, 0555, tux_table,0,0,0,0,0},
-	{0,0,0,0,0,0,0,0,0,0,0}
+	{NET_TUX, "tux", NULL, 0, 0555, tux_table, NULL, NULL, NULL, NULL, NULL},
+	{0, NULL, NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL}
 };
 
 static ctl_table tux_root_table[] = {
-	{CTL_NET, "net", NULL, 0, 0555, tux_dir_table,0,0,0,0,0},
-	{0,0,0,0,0,0,0,0,0,0,0}
+	{CTL_NET, "net", NULL, 0, 0555, tux_dir_table, NULL, NULL, NULL, NULL, NULL},
+	{0, NULL, NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL}
 };
 
 

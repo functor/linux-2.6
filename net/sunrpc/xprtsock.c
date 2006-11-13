@@ -414,6 +414,33 @@ static int xs_tcp_send_request(struct rpc_task *task)
 }
 
 /**
+ * xs_tcp_release_xprt - clean up after a tcp transmission
+ * @xprt: transport
+ * @task: rpc task
+ *
+ * This cleans up if an error causes us to abort the transmission of a request.
+ * In this case, the socket may need to be reset in order to avoid confusing
+ * the server.
+ */
+static void xs_tcp_release_xprt(struct rpc_xprt *xprt, struct rpc_task *task)
+{
+	struct rpc_rqst *req;
+
+	if (task != xprt->snd_task)
+		return;
+	if (task == NULL)
+		goto out_release;
+	req = task->tk_rqstp;
+	if (req->rq_bytes_sent == 0)
+		goto out_release;
+	if (req->rq_bytes_sent == req->rq_snd_buf.len)
+		goto out_release;
+	set_bit(XPRT_CLOSE_WAIT, &task->tk_xprt->state);
+out_release:
+	xprt_release_xprt(xprt, task);
+}
+
+/**
  * xs_close - close a socket
  * @xprt: transport
  *
@@ -930,6 +957,13 @@ static void xs_udp_timer(struct rpc_task *task)
 	xprt_adjust_cwnd(task, -ETIMEDOUT);
 }
 
+static unsigned short xs_get_random_port(void)
+{
+	unsigned short range = xprt_max_resvport - xprt_min_resvport;
+	unsigned short rand = (unsigned short) net_random() % range;
+	return rand + xprt_min_resvport;
+}
+
 /**
  * xs_set_port - reset the port number in the remote endpoint address
  * @xprt: generic transport
@@ -970,6 +1004,37 @@ static int xs_bindresvport(struct rpc_xprt *xprt, struct socket *sock)
 	return err;
 }
 
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+static struct lock_class_key xs_key[2];
+static struct lock_class_key xs_slock_key[2];
+
+static inline void xs_reclassify_socket(struct socket *sock)
+{
+	struct sock *sk = sock->sk;
+	BUG_ON(sk->sk_lock.owner != NULL);
+	switch (sk->sk_family) {
+		case AF_INET:
+			sock_lock_init_class_and_name(sk,
+				"slock-AF_INET-NFS", &xs_slock_key[0],
+				"sk_lock-AF_INET-NFS", &xs_key[0]);
+			break;
+
+		case AF_INET6:
+			sock_lock_init_class_and_name(sk,
+				"slock-AF_INET6-NFS", &xs_slock_key[1],
+				"sk_lock-AF_INET6-NFS", &xs_key[1]);
+			break;
+
+		default:
+			BUG();
+	}
+}
+#else
+static inline void xs_reclassify_socket(struct socket *sock)
+{
+}
+#endif
+
 /**
  * xs_udp_connect_worker - set up a UDP socket
  * @args: RPC transport to connect
@@ -994,6 +1059,7 @@ static void xs_udp_connect_worker(void *args)
 		dprintk("RPC:      can't create UDP transport socket (%d).\n", -err);
 		goto out;
 	}
+	xs_reclassify_socket(sock);
 
 	if (xprt->resvport && xs_bindresvport(xprt, sock) < 0) {
 		sock_release(sock);
@@ -1076,6 +1142,7 @@ static void xs_tcp_connect_worker(void *args)
 			dprintk("RPC:      can't create TCP transport socket (%d).\n", -err);
 			goto out;
 		}
+		xs_reclassify_socket(sock);
 
 		if (xprt->resvport && xs_bindresvport(xprt, sock) < 0) {
 			sock_release(sock);
@@ -1243,7 +1310,7 @@ static struct rpc_xprt_ops xs_udp_ops = {
 
 static struct rpc_xprt_ops xs_tcp_ops = {
 	.reserve_xprt		= xprt_reserve_xprt,
-	.release_xprt		= xprt_release_xprt,
+	.release_xprt		= xs_tcp_release_xprt,
 	.set_port		= xs_set_port,
 	.connect		= xs_connect,
 	.buf_alloc		= rpc_malloc,
@@ -1269,13 +1336,12 @@ int xs_setup_udp(struct rpc_xprt *xprt, struct rpc_timeout *to)
 
 	xprt->max_reqs = xprt_udp_slot_table_entries;
 	slot_table_size = xprt->max_reqs * sizeof(xprt->slot[0]);
-	xprt->slot = kmalloc(slot_table_size, GFP_KERNEL);
+	xprt->slot = kzalloc(slot_table_size, GFP_KERNEL);
 	if (xprt->slot == NULL)
 		return -ENOMEM;
-	memset(xprt->slot, 0, slot_table_size);
 
 	xprt->prot = IPPROTO_UDP;
-	xprt->port = xprt_max_resvport;
+	xprt->port = xs_get_random_port();
 	xprt->tsh_size = 0;
 	xprt->resvport = capable(CAP_NET_BIND_SERVICE) ? 1 : 0;
 	/* XXX: header size can vary due to auth type, IPv6, etc. */
@@ -1311,13 +1377,12 @@ int xs_setup_tcp(struct rpc_xprt *xprt, struct rpc_timeout *to)
 
 	xprt->max_reqs = xprt_tcp_slot_table_entries;
 	slot_table_size = xprt->max_reqs * sizeof(xprt->slot[0]);
-	xprt->slot = kmalloc(slot_table_size, GFP_KERNEL);
+	xprt->slot = kzalloc(slot_table_size, GFP_KERNEL);
 	if (xprt->slot == NULL)
 		return -ENOMEM;
-	memset(xprt->slot, 0, slot_table_size);
 
 	xprt->prot = IPPROTO_TCP;
-	xprt->port = xprt_max_resvport;
+	xprt->port = xs_get_random_port();
 	xprt->tsh_size = sizeof(rpc_fraghdr) / sizeof(u32);
 	xprt->resvport = capable(CAP_NET_BIND_SERVICE) ? 1 : 0;
 	xprt->max_payload = RPC_MAX_FRAGMENT_SIZE;

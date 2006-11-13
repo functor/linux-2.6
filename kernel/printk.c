@@ -26,13 +26,14 @@
 #include <linux/jiffies.h>
 #include <linux/nmi.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/interrupt.h>			/* For in_interrupt() */
-#include <linux/config.h>
 #include <linux/delay.h>
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/bootmem.h>
 #include <linux/syscalls.h>
+#include <linux/vs_context.h>
 #include <linux/vserver/cvirt.h>
 
 #include <asm/uaccess.h>
@@ -55,7 +56,7 @@ int console_printk[4] = {
 	DEFAULT_CONSOLE_LOGLEVEL,	/* default_console_loglevel */
 };
 
-EXPORT_SYMBOL(console_printk);
+EXPORT_UNUSED_SYMBOL(console_printk);  /*  June 2006  */
 
 /*
  * Low lever drivers may need that to know if they can schedule in
@@ -80,8 +81,7 @@ struct console *console_drivers;
  * path in the console code where we end up in places I want
  * locked without the console sempahore held
  */
-static int console_locked;
-int console_suspended;
+static int console_locked, console_suspended;
 
 /*
  * logbuf_lock protects log_buf, log_start, log_end, con_start and logged_chars
@@ -354,7 +354,9 @@ static void __call_console_drivers(unsigned long start, unsigned long end)
 	struct console *con;
 
 	for (con = console_drivers; con; con = con->next) {
-		if ((con->flags & CON_ENABLED) && con->write)
+		if ((con->flags & CON_ENABLED) && con->write &&
+				(cpu_online(smp_processor_id()) ||
+				(con->flags & CON_ANYTIME)))
 			con->write(con, &LOG_BUF(start), end - start);
 	}
 }
@@ -464,6 +466,7 @@ static int printk_time = 1;
 #else
 static int printk_time = 0;
 #endif
+module_param(printk_time, int, S_IRUGO | S_IWUSR);
 
 static int __init printk_time_setup(char *str)
 {
@@ -478,6 +481,18 @@ __setup("time", printk_time_setup);
 __attribute__((weak)) unsigned long long printk_clock(void)
 {
 	return sched_clock();
+}
+
+/* Check if we have any console registered that can be called early in boot. */
+static int have_callable_console(void)
+{
+	struct console *con;
+
+	for (con = console_drivers; con; con = con->next)
+		if (con->flags & CON_ANYTIME)
+			return 1;
+
+	return 0;
 }
 
 /**
@@ -527,15 +542,19 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	char *p;
 	static char printk_buf[1024];
 	static int log_level_unknown = 1;
+	struct vx_info_save vxis;
 
 	preempt_disable();
+	__enter_vx_admin(&vxis);
 	if (unlikely(oops_in_progress) && printk_cpu == smp_processor_id())
 		/* If a crash is occurring during printk() on this CPU,
 		 * make sure we can't deadlock */
 		zap_locks();
 
 	/* This stops the holder of console_sem just where we want him */
-	spin_lock_irqsave(&logbuf_lock, flags);
+	local_irq_save(flags);
+	lockdep_off();
+	spin_lock(&logbuf_lock);
 	printk_cpu = smp_processor_id();
 
 	/* Emit the output into the temporary buffer */
@@ -598,27 +617,31 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 			log_level_unknown = 1;
 	}
 
-	if (!cpu_online(smp_processor_id())) {
-		/*
-		 * Some console drivers may assume that per-cpu resources have
-		 * been allocated.  So don't allow them to be called by this
-		 * CPU until it is officially up.  We shouldn't be calling into
-		 * random console drivers on a CPU which doesn't exist yet..
-		 */
-		printk_cpu = UINT_MAX;
-		spin_unlock_irqrestore(&logbuf_lock, flags);
-		goto out;
-	}
 	if (!down_trylock(&console_sem)) {
-		console_locked = 1;
 		/*
-		 * We own the drivers.  We can drop the spinlock and let
-		 * release_console_sem() print the text
+		 * We own the drivers.  We can drop the spinlock and
+		 * let release_console_sem() print the text, maybe ...
 		 */
+		console_locked = 1;
 		printk_cpu = UINT_MAX;
-		spin_unlock_irqrestore(&logbuf_lock, flags);
-		console_may_schedule = 0;
-		release_console_sem();
+		spin_unlock(&logbuf_lock);
+
+		/*
+		 * Console drivers may assume that per-cpu resources have
+		 * been allocated. So unless they're explicitly marked as
+		 * being able to cope (CON_ANYTIME) don't call them until
+		 * this CPU is officially up.
+		 */
+		if (cpu_online(smp_processor_id()) || have_callable_console()) {
+			console_may_schedule = 0;
+			release_console_sem();
+		} else {
+			/* Release by hand to avoid flushing the buffer. */
+			console_locked = 0;
+			up(&console_sem);
+		}
+		lockdep_on();
+		local_irq_restore(flags);
 	} else {
 		/*
 		 * Someone else owns the drivers.  We drop the spinlock, which
@@ -626,9 +649,12 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		 * console drivers with the output which we just produced.
 		 */
 		printk_cpu = UINT_MAX;
-		spin_unlock_irqrestore(&logbuf_lock, flags);
+		spin_unlock(&logbuf_lock);
+		lockdep_on();
+		local_irq_restore(flags);
 	}
-out:
+
+	__leave_vx_admin(&vxis);
 	preempt_enable();
 	return printed_len;
 }
@@ -731,6 +757,23 @@ int __init add_preferred_console(char *name, int idx, char *options)
 }
 
 /**
+ * suspend_console - suspend the console subsystem
+ *
+ * This disables printk() while we go into suspend states
+ */
+void suspend_console(void)
+{
+	acquire_console_sem();
+	console_suspended = 1;
+}
+
+void resume_console(void)
+{
+	console_suspended = 0;
+	release_console_sem();
+}
+
+/**
  * acquire_console_sem - lock the console system for exclusive use.
  *
  * Acquires a semaphore which guarantees that the caller has
@@ -740,12 +783,11 @@ int __init add_preferred_console(char *name, int idx, char *options)
  */
 void acquire_console_sem(void)
 {
+	BUG_ON(in_interrupt());
 	if (console_suspended) {
 		down(&secondary_console_sem);
 		return;
 	}
-
-	BUG_ON(in_interrupt());
 	down(&console_sem);
 	console_locked = 1;
 	console_may_schedule = 1;
@@ -766,7 +808,7 @@ int is_console_locked(void)
 {
 	return console_locked;
 }
-EXPORT_SYMBOL(is_console_locked);
+EXPORT_UNUSED_SYMBOL(is_console_locked);  /*  June 2006  */
 
 /**
  * release_console_sem - unlock the console system
@@ -793,6 +835,8 @@ void release_console_sem(void)
 		return;
 	}
 
+	console_may_schedule = 0;
+
 	for ( ; ; ) {
 		spin_lock_irqsave(&logbuf_lock, flags);
 		wake_klogd |= log_start - log_end;
@@ -806,11 +850,17 @@ void release_console_sem(void)
 		local_irq_restore(flags);
 	}
 	console_locked = 0;
-	console_may_schedule = 0;
 	up(&console_sem);
 	spin_unlock_irqrestore(&logbuf_lock, flags);
-	if (wake_klogd && !oops_in_progress && waitqueue_active(&log_wait))
-		wake_up_interruptible(&log_wait);
+	if (wake_klogd && !oops_in_progress && waitqueue_active(&log_wait)) {
+		/*
+		 * If we printk from within the lock dependency code,
+		 * from within the scheduler code, then do not lock
+		 * up due to self-recursion:
+		 */
+		if (!lockdep_internal())
+			wake_up_interruptible(&log_wait);
+	}
 }
 EXPORT_SYMBOL(release_console_sem);
 

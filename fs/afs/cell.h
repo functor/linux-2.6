@@ -13,21 +13,11 @@
 #define _LINUX_AFS_CELL_H
 
 #include "types.h"
-#include "cache.h"
+#include <linux/fscache.h>
 
 #define AFS_CELL_MAX_ADDRS 15
 
 extern volatile int afs_cells_being_purged; /* T when cells are being purged by rmmod */
-
-/*****************************************************************************/
-/*
- * entry in the cached cell catalogue
- */
-struct afs_cache_cell
-{
-	char			name[64];	/* cell name (padded with NULs) */
-	struct in_addr		vl_servers[15];	/* cached cell VL servers */
-};
 
 /*****************************************************************************/
 /*
@@ -39,8 +29,8 @@ struct afs_cell
 	struct list_head	link;		/* main cell list link */
 	struct list_head	proc_link;	/* /proc cell list link */
 	struct proc_dir_entry	*proc_dir;	/* /proc dir for this cell */
-#ifdef AFS_CACHING_SUPPORT
-	struct cachefs_cookie	*cache;		/* caching cookie */
+#ifdef CONFIG_AFS_FSCACHE
+	struct fscache_cookie	*cache;		/* caching cookie */
 #endif
 
 	/* server record management */

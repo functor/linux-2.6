@@ -3,12 +3,13 @@
  * Thanks to Ben LaHaise for precious feedback.
  */ 
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/highmem.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/kernel.h>
+#include <asm/sections.h>
 #include <asm/uaccess.h>
 #include <asm/processor.h>
 #include <asm/tlbflush.h>
@@ -131,6 +132,12 @@ __change_page_attr(struct page *page, pgprot_t prot)
 	BUG_ON(PageHighMem(page));
 	address = (unsigned long)page_address(page);
 
+	if (address >= (unsigned long)__start_rodata && address <= (unsigned long)__end_rodata &&
+		(pgprot_val(prot) & _PAGE_RW)) {
+		pgprot_val(prot) &= ~(_PAGE_RW);
+		add_taint(TAINT_MACHINE_CHECK);
+	}
+
 	kpte = lookup_address(address);
 	if (!kpte)
 		return -EINVAL;
@@ -209,19 +216,19 @@ int change_page_attr(struct page *page, int numpages, pgprot_t prot)
 }
 
 void global_flush_tlb(void)
-{ 
-	LIST_HEAD(l);
+{
+	struct list_head l;
 	struct page *pg, *next;
 
 	BUG_ON(irqs_disabled());
 
 	spin_lock_irq(&cpa_lock);
-	list_splice_init(&df_list, &l);
+	list_replace_init(&df_list, &l);
 	spin_unlock_irq(&cpa_lock);
 	flush_map();
 	list_for_each_entry_safe(pg, next, &l, lru)
 		__free_page(pg);
-} 
+}
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 void kernel_map_pages(struct page *page, int numpages, int enable)
@@ -229,8 +236,8 @@ void kernel_map_pages(struct page *page, int numpages, int enable)
 	if (PageHighMem(page))
 		return;
 	if (!enable)
-		mutex_debug_check_no_locks_freed(page_address(page),
-						 numpages * PAGE_SIZE);
+		debug_check_no_locks_freed(page_address(page),
+					   numpages * PAGE_SIZE);
 
 	/* the return value is ignored - the calls cannot fail,
 	 * large pages are disabled at boot time.

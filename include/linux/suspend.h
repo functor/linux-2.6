@@ -6,7 +6,6 @@
 #endif
 #include <linux/swap.h>
 #include <linux/notifier.h>
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/pm.h>
 
@@ -57,14 +56,6 @@ static inline int software_suspend(void)
 	return -EPERM;
 }
 #endif /* CONFIG_PM */
-
-#ifdef CONFIG_SUSPEND_SMP
-extern void disable_nonboot_cpus(void);
-extern void enable_nonboot_cpus(void);
-#else
-static inline void disable_nonboot_cpus(void) {}
-static inline void enable_nonboot_cpus(void) {}
-#endif
 
 void save_processor_state(void);
 void restore_processor_state(void);

@@ -10,6 +10,7 @@
  */
 
 #include <linux/proc_fs.h>
+#include <linux/vs_cvirt.h>
 
 struct vmalloc_info {
 	unsigned long	used;
@@ -39,16 +40,30 @@ extern int proc_tgid_stat(struct task_struct *, char *);
 extern int proc_pid_status(struct task_struct *, char *);
 extern int proc_pid_statm(struct task_struct *, char *);
 
+extern struct file_operations proc_maps_operations;
+extern struct file_operations proc_numa_maps_operations;
+extern struct file_operations proc_smaps_operations;
+
+extern struct file_operations proc_maps_operations;
+extern struct file_operations proc_numa_maps_operations;
+extern struct file_operations proc_smaps_operations;
+
+
 void free_proc_entry(struct proc_dir_entry *de);
 
 int proc_init_inodecache(void);
 
-static inline struct task_struct *proc_task(struct inode *inode)
+static inline struct pid *proc_pid(struct inode *inode)
 {
-	return PROC_I(inode)->task;
+	return PROC_I(inode)->pid;
 }
 
-static inline int proc_type(struct inode *inode)
+static inline struct task_struct *get_proc_task(struct inode *inode)
 {
-	return PROC_I(inode)->type;
+	return vx_get_proc_task(inode, proc_pid(inode));
+}
+
+static inline int proc_fd(struct inode *inode)
+{
+	return PROC_I(inode)->fd;
 }

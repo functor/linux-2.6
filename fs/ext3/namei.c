@@ -552,6 +552,15 @@ static int htree_dirblock_to_tree(struct file *dir_file,
 					   dir->i_sb->s_blocksize -
 					   EXT3_DIR_REC_LEN(0));
 	for (; de < top; de = ext3_next_entry(de)) {
+		if (!ext3_check_dir_entry("htree_dirblock_to_tree", dir, de, bh,
+					(block<<EXT3_BLOCK_SIZE_BITS(dir->i_sb))
+						+((char *)de - bh->b_data))) {
+			/* On error, skip the f_pos to the next block. */
+			dir_file->f_pos = (dir_file->f_pos |
+					(dir->i_sb->s_blocksize - 1)) + 1;
+			brelse (bh);
+			return count;
+		}
 		ext3fs_dirhash(de->name, de->name_len, hinfo);
 		if ((hinfo->hash < start_hash) ||
 		    ((hinfo->hash == start_hash) &&
@@ -1392,7 +1401,6 @@ static int ext3_add_entry (handle_t *handle, struct dentry *dentry,
 	int	dx_fallback=0;
 #endif
 	unsigned blocksize;
-	unsigned nlen, rlen;
 	u32 block, blocks;
 
 	sb = dir->i_sb;
@@ -1430,8 +1438,7 @@ static int ext3_add_entry (handle_t *handle, struct dentry *dentry,
 		return retval;
 	de = (struct ext3_dir_entry_2 *) bh->b_data;
 	de->inode = 0;
-	de->rec_len = cpu_to_le16(rlen = blocksize);
-	nlen = 0;
+	de->rec_len = cpu_to_le16(blocksize);
 	return add_dirent_to_buf(handle, dentry, inode, de, bh);
 }
 
@@ -1923,8 +1930,8 @@ int ext3_orphan_add(handle_t *handle, struct inode *inode)
 	if (!err)
 		list_add(&EXT3_I(inode)->i_orphan, &EXT3_SB(sb)->s_orphan);
 
-	jbd_debug(4, "superblock will point to %ld\n", inode->i_ino);
-	jbd_debug(4, "orphan inode %ld will point to %d\n",
+	jbd_debug(4, "superblock will point to %lu\n", inode->i_ino);
+	jbd_debug(4, "orphan inode %lu will point to %d\n",
 			inode->i_ino, NEXT_ORPHAN(inode));
 out_unlock:
 	unlock_super(sb);

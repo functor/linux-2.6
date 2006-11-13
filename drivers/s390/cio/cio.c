@@ -11,12 +11,12 @@
  */
 
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/kernel_stat.h>
 #include <linux/interrupt.h>
+#include <linux/vs_context.h>
 
 #include <asm/cio.h>
 #include <asm/delay.h>
@@ -148,7 +148,7 @@ cio_tpi(void)
 		sch->driver->irq(&sch->dev);
 	spin_unlock(&sch->lock);
 	irq_exit ();
-	__local_bh_enable();
+	_local_bh_enable();
 	return 1;
 }
 
@@ -520,6 +520,7 @@ cio_validate_subchannel (struct subchannel *sch, struct subchannel_id schid)
 	memset(sch, 0, sizeof(struct subchannel));
 
 	spin_lock_init(&sch->lock);
+	mutex_init(&sch->reg_mutex);
 
 	/* Set a name for the subchannel */
 	snprintf (sch->dev.bus_id, BUS_ID_SIZE, "0.%x.%04x", schid.ssid,
@@ -639,12 +640,16 @@ do_IRQ (struct pt_regs *regs)
 			spin_lock(&sch->lock);
 		/* Store interrupt response block to lowcore. */
 		if (tsch (tpi_info->schid, irb) == 0 && sch) {
+			struct vx_info_save vxis;
+
 			/* Keep subchannel information word up to date. */
 			memcpy (&sch->schib.scsw, &irb->scsw,
 				sizeof (irb->scsw));
 			/* Call interrupt handler if there is one. */
+			__enter_vx_admin(&vxis);
 			if (sch->driver && sch->driver->irq)
 				sch->driver->irq(&sch->dev);
+			__leave_vx_admin(&vxis);
 		}
 		if (sch)
 			spin_unlock(&sch->lock);
@@ -798,7 +803,7 @@ struct subchannel *
 cio_get_console_subchannel(void)
 {
 	if (!console_subchannel_in_use)
-		return 0;
+		return NULL;
 	return &console_subchannel;
 }
 
@@ -876,5 +881,6 @@ void
 reipl(unsigned long devno)
 {
 	clear_all_subchannels();
+	cio_reset_channel_paths();
 	do_reipl(devno);
 }

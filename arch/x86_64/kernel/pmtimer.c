@@ -27,7 +27,7 @@
 /* The I/O port the PMTMR resides at.
  * The location is detected during setup_arch(),
  * in arch/i386/kernel/acpi/boot.c */
-u32 pmtmr_ioport;
+u32 pmtmr_ioport __read_mostly;
 
 /* value of the Power timer at last timer interrupt */
 static u32 offset_delay;
@@ -60,9 +60,7 @@ int pmtimer_mark_offset(void)
 	delta = cyc2us((tick - last_pmtmr_tick) & ACPI_PM_MASK);
 
 	last_pmtmr_tick = tick;
-#ifndef CONFIG_XEN
 	monotonic_base += delta * NSEC_PER_USEC;
-#endif
 
 	delta += offset_delay;
 

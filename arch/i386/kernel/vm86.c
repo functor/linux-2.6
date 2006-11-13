@@ -31,7 +31,6 @@
  */
 
 #include <linux/capability.h>
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
@@ -542,13 +541,6 @@ int handle_vm86_trap(struct kernel_vm86_regs * regs, long error_code, int trapno
 	}
 	if (trapno !=1)
 		return 1; /* we let this handle by the calling routine */
-	if (current->ptrace & PT_PTRACED) {
-		unsigned long flags;
-		spin_lock_irqsave(&current->sighand->siglock, flags);
-		sigdelset(&current->blocked, SIGTRAP);
-		recalc_sigpending();
-		spin_unlock_irqrestore(&current->sighand->siglock, flags);
-	}
 	send_sig(SIGTRAP, current, 1);
 	current->thread.trap_no = trapno;
 	current->thread.error_code = error_code;

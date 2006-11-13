@@ -63,7 +63,6 @@ unsigned long afs_mntpt_expiry_timeout = 20;
 int afs_mntpt_check_symlink(struct afs_vnode *vnode)
 {
 	struct page *page;
-	filler_t *filler;
 	size_t size;
 	char *buf;
 	int ret;
@@ -71,10 +70,7 @@ int afs_mntpt_check_symlink(struct afs_vnode *vnode)
 	_enter("{%u,%u}", vnode->fid.vnode, vnode->fid.unique);
 
 	/* read the contents of the symlink into the pagecache */
-	filler = (filler_t *) AFS_VNODE_TO_I(vnode)->i_mapping->a_ops->readpage;
-
-	page = read_cache_page(AFS_VNODE_TO_I(vnode)->i_mapping, 0,
-			       filler, NULL);
+	page = read_mapping_page(AFS_VNODE_TO_I(vnode)->i_mapping, 0, NULL);
 	if (IS_ERR(page)) {
 		ret = PTR_ERR(page);
 		goto out;
@@ -82,7 +78,7 @@ int afs_mntpt_check_symlink(struct afs_vnode *vnode)
 
 	ret = -EIO;
 	wait_on_page_locked(page);
-	buf = kmap(page);
+	buf = kmap_atomic(page, KM_USER0);
 	if (!PageUptodate(page))
 		goto out_free;
 	if (PageError(page))
@@ -105,7 +101,7 @@ int afs_mntpt_check_symlink(struct afs_vnode *vnode)
 	ret = 0;
 
  out_free:
-	kunmap(page);
+	kunmap_atomic(buf, KM_USER0);
 	page_cache_release(page);
  out:
 	_leave(" = %d", ret);
@@ -160,7 +156,6 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 	struct page *page = NULL;
 	size_t size;
 	char *buf, *devname = NULL, *options = NULL;
-	filler_t *filler;
 	int ret;
 
 	kenter("{%s}", mntpt->d_name.name);
@@ -182,9 +177,7 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 		goto error;
 
 	/* read the contents of the AFS special symlink */
-	filler = (filler_t *)mntpt->d_inode->i_mapping->a_ops->readpage;
-
-	page = read_cache_page(mntpt->d_inode->i_mapping, 0, filler, NULL);
+	page = read_mapping_page(mntpt->d_inode->i_mapping, 0, NULL);
 	if (IS_ERR(page)) {
 		ret = PTR_ERR(page);
 		goto error;
@@ -195,9 +188,9 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 	if (!PageUptodate(page) || PageError(page))
 		goto error;
 
-	buf = kmap(page);
+	buf = kmap_atomic(page, KM_USER0);
 	memcpy(devname, buf, size);
-	kunmap(page);
+	kunmap_atomic(buf, KM_USER0);
 	page_cache_release(page);
 	page = NULL;
 
@@ -210,7 +203,7 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 
 	/* try and do the mount */
 	kdebug("--- attempting mount %s -o %s ---", devname, options);
-	mnt = do_kern_mount("afs", 0, devname, options);
+	mnt = vfs_kern_mount(&afs_fs_type, 0, devname, options);
 	kdebug("--- mount result %p ---", mnt);
 
 	free_page((unsigned long) devname);
@@ -276,12 +269,12 @@ static void *afs_mntpt_follow_link(struct dentry *dentry, struct nameidata *nd)
  */
 static void afs_mntpt_expiry_timed_out(struct afs_timer *timer)
 {
-	kenter("");
+//	kenter("");
 
 	mark_mounts_for_expiry(&afs_vfsmounts);
 
 	afs_kafstimod_add_timer(&afs_mntpt_expiry_timer,
 				afs_mntpt_expiry_timeout * HZ);
 
-	kleave("");
+//	kleave("");
 } /* end afs_mntpt_expiry_timed_out() */

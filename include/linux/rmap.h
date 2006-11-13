@@ -4,7 +4,6 @@
  * Declarations for Reverse Mapping functions in mm/rmap.c
  */
 
-#include <linux/config.h>
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
@@ -73,7 +72,7 @@ void __anon_vma_link(struct vm_area_struct *);
 void page_add_anon_rmap(struct page *, struct vm_area_struct *, unsigned long);
 void page_add_new_anon_rmap(struct page *, struct vm_area_struct *, unsigned long);
 void page_add_file_rmap(struct page *);
-void page_remove_rmap(struct page *);
+void page_remove_rmap(struct page *, struct vm_area_struct *);
 
 /**
  * page_dup_rmap - duplicate pte mapping to a page
@@ -92,7 +91,6 @@ static inline void page_dup_rmap(struct page *page)
  */
 int page_referenced(struct page *, int is_locked);
 int try_to_unmap(struct page *, int ignore_refs);
-void remove_from_swap(struct page *page);
 
 /*
  * Called from mm/filemap_xip.c to unmap empty zero page
@@ -104,6 +102,14 @@ pte_t *page_check_address(struct page *, struct mm_struct *,
  * Used by swapoff to help locate where page is expected in vma.
  */
 unsigned long page_address_in_vma(struct page *, struct vm_area_struct *);
+
+/*
+ * Cleans the PTEs of shared mappings.
+ * (and since clean PTEs should also be readonly, write protects them too)
+ *
+ * returns the number of cleaned PTEs.
+ */
+int page_mkclean(struct page *);
 
 #else	/* !CONFIG_MMU */
 

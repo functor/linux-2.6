@@ -34,7 +34,6 @@
  *  2003-08-11	Resource Management Updates - Adam Belay <ambx1@neo.rr.com>
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -1050,6 +1049,10 @@ static int __init isapnp_init(void)
 		printk(KERN_INFO "isapnp: ISA Plug & Play support disabled\n");
 		return 0;
 	}
+#ifdef CONFIG_PPC_MERGE
+	if (check_legacy_ioport(_PIDXR) || check_legacy_ioport(_PNPWRP))
+		return -EINVAL;
+#endif
 #ifdef ISAPNP_REGION_OK
 	if (!request_region(_PIDXR, 1, "isapnp index")) {
 		printk(KERN_ERR "isapnp: Index Register 0x%x already used\n", _PIDXR);

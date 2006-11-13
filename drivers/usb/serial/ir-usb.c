@@ -46,7 +46,6 @@
  *	initial version released.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -58,7 +57,7 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include "usb-serial.h"
+#include <linux/usb/serial.h>
 
 /*
  * Version Information
@@ -343,14 +342,14 @@ static int ir_write (struct usb_serial_port *port, const unsigned char *buf, int
 	if (count == 0)
 		return 0;
 
-	spin_lock(&port->lock);
+	spin_lock_bh(&port->lock);
 	if (port->write_urb_busy) {
-		spin_unlock(&port->lock);
+		spin_unlock_bh(&port->lock);
 		dbg("%s - already writing", __FUNCTION__);
 		return 0;
 	}
 	port->write_urb_busy = 1;
-	spin_unlock(&port->lock);
+	spin_unlock_bh(&port->lock);
 
 	transfer_buffer = port->write_urb->transfer_buffer;
 	transfer_size = min(count, port->bulk_out_size - 1);
@@ -408,7 +407,7 @@ static void ir_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 		urb->actual_length,
 		urb->transfer_buffer);
 
-	schedule_work(&port->work);
+	usb_serial_port_softint(port);
 }
 
 static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
@@ -453,8 +452,7 @@ static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 			tty = port->tty;
 
 			/*
-			 *	FIXME: must not do this in IRQ context,
-			 *	must honour TTY_DONT_FLIP
+			 *	FIXME: must not do this in IRQ context
 			 */
 			tty->ldisc.receive_buf(
 				tty,

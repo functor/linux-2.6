@@ -1826,7 +1826,6 @@ smb_init_dirent(struct smb_sb_info *server, struct smb_fattr *fattr)
 	fattr->f_nlink = 1;
 	fattr->f_uid = server->mnt->uid;
 	fattr->f_gid = server->mnt->gid;
-	fattr->f_blksize = SMB_ST_BLKSIZE;
 	fattr->f_unix = 0;
 }
 
@@ -3226,9 +3225,9 @@ smb_proc_settime(struct dentry *dentry, struct smb_fattr *fattr)
 }
 
 int
-smb_proc_dskattr(struct super_block *sb, struct kstatfs *attr)
+smb_proc_dskattr(struct dentry *dentry, struct kstatfs *attr)
 {
-	struct smb_sb_info *server = SMB_SB(sb);
+	struct smb_sb_info *server = SMB_SB(dentry->d_sb);
 	int result;
 	char *p;
 	long unit;

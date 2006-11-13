@@ -4,27 +4,45 @@
 #include <asm/alternative.h>
 #include <asm/sections.h>
 
-#define DEBUG 0
-#if DEBUG
-# define DPRINTK(fmt, args...) printk(fmt, args)
+#ifdef CONFIG_X86_64_XEN
+static int no_replacement    = 1;
 #else
-# define DPRINTK(fmt, args...)
+static int no_replacement    = 0;
 #endif
+static int smp_alt_once      = 0;
+static int debug_alternative = 0;
 
+static int __init noreplacement_setup(char *s)
+{
+	no_replacement = 1;
+	return 1;
+}
+static int __init bootonly(char *str)
+{
+	smp_alt_once = 1;
+	return 1;
+}
+static int __init debug_alt(char *str)
+{
+	debug_alternative = 1;
+	return 1;
+}
+
+__setup("noreplacement", noreplacement_setup);
+__setup("smp-alt-boot", bootonly);
+__setup("debug-alternative", debug_alt);
+
+#define DPRINTK(fmt, args...) if (debug_alternative) \
+	printk(KERN_DEBUG fmt, args)
+
+#ifdef GENERIC_NOP1
 /* Use inline assembly to define this because the nops are defined
    as inline assembly strings in the include files and we cannot
    get them easily into strings. */
 asm("\t.data\nintelnops: "
 	GENERIC_NOP1 GENERIC_NOP2 GENERIC_NOP3 GENERIC_NOP4 GENERIC_NOP5 GENERIC_NOP6
 	GENERIC_NOP7 GENERIC_NOP8);
-asm("\t.data\nk8nops: "
-	K8_NOP1 K8_NOP2 K8_NOP3 K8_NOP4 K8_NOP5 K8_NOP6
-	K8_NOP7 K8_NOP8);
-asm("\t.data\nk7nops: "
-	K7_NOP1 K7_NOP2 K7_NOP3 K7_NOP4 K7_NOP5 K7_NOP6
-	K7_NOP7 K7_NOP8);
-
-extern unsigned char intelnops[], k8nops[], k7nops[];
+extern unsigned char intelnops[];
 static unsigned char *intel_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	intelnops,
@@ -36,6 +54,13 @@ static unsigned char *intel_nops[ASM_NOP_MAX+1] = {
 	intelnops + 1 + 2 + 3 + 4 + 5 + 6,
 	intelnops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
 };
+#endif
+
+#ifdef K8_NOP1
+asm("\t.data\nk8nops: "
+	K8_NOP1 K8_NOP2 K8_NOP3 K8_NOP4 K8_NOP5 K8_NOP6
+	K8_NOP7 K8_NOP8);
+extern unsigned char k8nops[];
 static unsigned char *k8_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	k8nops,
@@ -47,6 +72,13 @@ static unsigned char *k8_nops[ASM_NOP_MAX+1] = {
 	k8nops + 1 + 2 + 3 + 4 + 5 + 6,
 	k8nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
 };
+#endif
+
+#ifdef K7_NOP1
+asm("\t.data\nk7nops: "
+	K7_NOP1 K7_NOP2 K7_NOP3 K7_NOP4 K7_NOP5 K7_NOP6
+	K7_NOP7 K7_NOP8);
+extern unsigned char k7nops[];
 static unsigned char *k7_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	k7nops,
@@ -58,6 +90,18 @@ static unsigned char *k7_nops[ASM_NOP_MAX+1] = {
 	k7nops + 1 + 2 + 3 + 4 + 5 + 6,
 	k7nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
 };
+#endif
+
+#ifdef CONFIG_X86_64
+
+extern char __vsyscall_0;
+static inline unsigned char** find_nop_table(void)
+{
+	return k8_nops;
+}
+
+#else /* CONFIG_X86_64 */
+
 static struct nop {
 	int cpuid;
 	unsigned char **noptable;
@@ -66,14 +110,6 @@ static struct nop {
 	{ X86_FEATURE_K7, k7_nops },
 	{ -1, NULL }
 };
-
-
-extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
-extern struct alt_instr __smp_alt_instructions[], __smp_alt_instructions_end[];
-extern u8 *__smp_locks[], *__smp_locks_end[];
-
-extern u8 __smp_alt_begin[], __smp_alt_end[];
-
 
 static unsigned char** find_nop_table(void)
 {
@@ -89,6 +125,14 @@ static unsigned char** find_nop_table(void)
 	return noptable;
 }
 
+#endif /* CONFIG_X86_64 */
+
+extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
+extern struct alt_instr __smp_alt_instructions[], __smp_alt_instructions_end[];
+extern u8 *__smp_locks[], *__smp_locks_end[];
+
+extern u8 __smp_alt_begin[], __smp_alt_end[];
+
 /* Replace instructions with better alternatives for this CPU type.
    This runs before SMP is initialized to avoid SMP problems with
    self modifying code. This implies that assymetric systems where
@@ -99,6 +143,7 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end)
 {
 	unsigned char **noptable = find_nop_table();
 	struct alt_instr *a;
+	u8 *instr;
 	int diff, i, k;
 
 	DPRINTK("%s: alt table %p -> %p\n", __FUNCTION__, start, end);
@@ -106,7 +151,20 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end)
 		BUG_ON(a->replacementlen > a->instrlen);
 		if (!boot_cpu_has(a->cpuid))
 			continue;
-		memcpy(a->instr, a->replacement, a->replacementlen);
+		instr = a->instr;
+#ifdef CONFIG_X86_64
+		/* vsyscall code is not mapped yet. resolve it manually. */
+		if (instr >= (u8 *)VSYSCALL_START && instr < (u8*)VSYSCALL_END) {
+#ifdef CONFIG_XEN
+			instr = __va(instr - (u8*)VSYSCALL_START + (u8*)phys_to_machine(__pa_symbol(&__vsyscall_0)));
+#else
+			instr = __va(instr - (u8*)VSYSCALL_START + (u8*)__pa_symbol(&__vsyscall_0));
+#endif
+			DPRINTK("%s: vsyscall fixup: %p => %p\n",
+				__FUNCTION__, a->instr, instr);
+		}
+#endif
+		memcpy(instr, a->replacement, a->replacementlen);
 		diff = a->instrlen - a->replacementlen;
 		/* Pad the rest with nops */
 		for (i = a->replacementlen; diff > 0; diff -= k, i += k) {
@@ -119,6 +177,7 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end)
 }
 
 #ifdef CONFIG_SMP
+
 static void alternatives_smp_save(struct alt_instr *start, struct alt_instr *end)
 {
 	struct alt_instr *a;
@@ -187,20 +246,15 @@ struct smp_alt_module {
 static LIST_HEAD(smp_alt_modules);
 static DEFINE_SPINLOCK(smp_alt);
 
-static int smp_alt_once = 0;
-static int __init bootonly(char *str)
-{
-	smp_alt_once = 1;
-	return 1;
-}
-__setup("smp-alt-boot", bootonly);
-
 void alternatives_smp_module_add(struct module *mod, char *name,
 				 void *locks, void *locks_end,
 				 void *text,  void *text_end)
 {
 	struct smp_alt_module *smp;
 	unsigned long flags;
+
+	if (no_replacement)
+		return;
 
 	if (smp_alt_once) {
 		if (boot_cpu_has(X86_FEATURE_UP))
@@ -236,7 +290,7 @@ void alternatives_smp_module_del(struct module *mod)
 	struct smp_alt_module *item;
 	unsigned long flags;
 
-	if (smp_alt_once)
+	if (no_replacement || smp_alt_once)
 		return;
 
 	spin_lock_irqsave(&smp_alt, flags);
@@ -257,7 +311,17 @@ void alternatives_smp_switch(int smp)
 	struct smp_alt_module *mod;
 	unsigned long flags;
 
-	if (smp_alt_once)
+#ifdef CONFIG_LOCKDEP
+	/*
+	 * A not yet fixed binutils section handling bug prevents
+	 * alternatives-replacement from working reliably, so turn
+	 * it off:
+	 */
+	printk("lockdep: not fixing up alternatives.\n");
+	return;
+#endif
+
+	if (no_replacement || smp_alt_once)
 		return;
 	BUG_ON(!smp && (num_online_cpus() > 1));
 
@@ -283,14 +347,22 @@ void alternatives_smp_switch(int smp)
 	}
 	spin_unlock_irqrestore(&smp_alt, flags);
 }
-#endif
 
+#endif
 
 void __init alternative_instructions(void)
 {
-	apply_alternatives(__alt_instructions, __alt_instructions_end);
+	unsigned long flags;
+	if (no_replacement) {
+		printk(KERN_INFO "(SMP-)alternatives turned off\n");
+		free_init_pages("SMP alternatives",
+				(unsigned long)__smp_alt_begin,
+				(unsigned long)__smp_alt_end);
+		return;
+	}
 
-#ifdef CONFIG_SMP
+	local_irq_save(flags);
+	apply_alternatives(__alt_instructions, __alt_instructions_end);
 
 	/* switch to patch-once-at-boottime-only mode and free the
 	 * tables in case we know the number of CPUs will never ever
@@ -302,6 +374,7 @@ void __init alternative_instructions(void)
 	smp_alt_once = 1;
 #endif
 
+#ifdef CONFIG_SMP
 	if (smp_alt_once) {
 		if (1 == num_possible_cpus()) {
 			printk(KERN_INFO "SMP alternatives: switching to UP code\n");
@@ -324,4 +397,5 @@ void __init alternative_instructions(void)
 		alternatives_smp_switch(0);
 	}
 #endif
+	local_irq_restore(flags);
 }

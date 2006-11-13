@@ -5,7 +5,6 @@
  */
 
 #define ASM_OFFSETS_C 1
-#include <linux/config.h>
 
 #include <linux/sched.h>
 
@@ -45,7 +44,7 @@ void foo(void)
 	DEFINE(IA64_TASK_GROUP_LEADER_OFFSET, offsetof (struct task_struct, group_leader));
 	DEFINE(IA64_TASK_PENDING_OFFSET,offsetof (struct task_struct, pending));
 	DEFINE(IA64_TASK_PID_OFFSET, offsetof (struct task_struct, pid));
-	DEFINE(IA64_TASK_REAL_PARENT_OFFSET, offsetof (struct task_struct, real_parent));
+	DEFINE(IA64_TASK_PARENT_OFFSET, offsetof (struct task_struct, parent));
 	DEFINE(IA64_TASK_SIGHAND_OFFSET,offsetof (struct task_struct, sighand));
 	DEFINE(IA64_TASK_SIGNAL_OFFSET,offsetof (struct task_struct, signal));
 	DEFINE(IA64_TASK_TGID_OFFSET, offsetof (struct task_struct, tgid));
@@ -217,16 +216,24 @@ void foo(void)
 	DEFINE(IA64_MCA_CPU_INIT_STACK_OFFSET,
 	       offsetof (struct ia64_mca_cpu, init_stack));
 	BLANK();
-	DEFINE(IA64_SAL_OS_STATE_COMMON_OFFSET,
-	       offsetof (struct ia64_sal_os_state, sal_ra));
 	DEFINE(IA64_SAL_OS_STATE_OS_GP_OFFSET,
 	       offsetof (struct ia64_sal_os_state, os_gp));
-	DEFINE(IA64_SAL_OS_STATE_PAL_MIN_STATE_OFFSET,
-	       offsetof (struct ia64_sal_os_state, pal_min_state));
 	DEFINE(IA64_SAL_OS_STATE_PROC_STATE_PARAM_OFFSET,
 	       offsetof (struct ia64_sal_os_state, proc_state_param));
+	DEFINE(IA64_SAL_OS_STATE_SAL_RA_OFFSET,
+	       offsetof (struct ia64_sal_os_state, sal_ra));
+	DEFINE(IA64_SAL_OS_STATE_SAL_GP_OFFSET,
+	       offsetof (struct ia64_sal_os_state, sal_gp));
+	DEFINE(IA64_SAL_OS_STATE_PAL_MIN_STATE_OFFSET,
+	       offsetof (struct ia64_sal_os_state, pal_min_state));
+	DEFINE(IA64_SAL_OS_STATE_OS_STATUS_OFFSET,
+	       offsetof (struct ia64_sal_os_state, os_status));
+	DEFINE(IA64_SAL_OS_STATE_CONTEXT_OFFSET,
+	       offsetof (struct ia64_sal_os_state, context));
 	DEFINE(IA64_SAL_OS_STATE_SIZE,
 	       sizeof (struct ia64_sal_os_state));
+	BLANK();
+
 	DEFINE(IA64_PMSA_GR_OFFSET,
 	       offsetof (struct pal_min_state_area_s, pmsa_gr));
 	DEFINE(IA64_PMSA_BANK1_GR_OFFSET,
@@ -261,4 +268,29 @@ void foo(void)
 	DEFINE(IA64_TIME_SOURCE_MMIO64, TIME_SOURCE_MMIO64);
 	DEFINE(IA64_TIME_SOURCE_MMIO32, TIME_SOURCE_MMIO32);
 	DEFINE(IA64_TIMESPEC_TV_NSEC_OFFSET, offsetof (struct timespec, tv_nsec));
+
+#ifdef CONFIG_XEN
+	BLANK();
+
+#define DEFINE_MAPPED_REG_OFS(sym, field) \
+	DEFINE(sym, (XMAPPEDREGS_OFS + offsetof(mapped_regs_t, field)))
+
+	DEFINE_MAPPED_REG_OFS(XSI_PSR_I_ADDR_OFS, interrupt_mask_addr);
+	DEFINE_MAPPED_REG_OFS(XSI_IPSR_OFS, ipsr);
+	DEFINE_MAPPED_REG_OFS(XSI_IIP_OFS, iip);
+	DEFINE_MAPPED_REG_OFS(XSI_IFS_OFS, ifs);
+	DEFINE_MAPPED_REG_OFS(XSI_PRECOVER_IFS_OFS, precover_ifs);
+	DEFINE_MAPPED_REG_OFS(XSI_ISR_OFS, isr);
+	DEFINE_MAPPED_REG_OFS(XSI_IFA_OFS, ifa);
+	DEFINE_MAPPED_REG_OFS(XSI_IIPA_OFS, iipa);
+	DEFINE_MAPPED_REG_OFS(XSI_IIM_OFS, iim);
+	DEFINE_MAPPED_REG_OFS(XSI_IHA_OFS, iha);
+	DEFINE_MAPPED_REG_OFS(XSI_ITIR_OFS, itir);
+	DEFINE_MAPPED_REG_OFS(XSI_PSR_IC_OFS, interrupt_collection_enabled);
+	DEFINE_MAPPED_REG_OFS(XSI_PEND_OFS, pending_interruption);
+	DEFINE_MAPPED_REG_OFS(XSI_INCOMPL_REGFR_OFS, incomplete_regframe);
+	DEFINE_MAPPED_REG_OFS(XSI_BANKNUM_OFS, banknum);
+	DEFINE_MAPPED_REG_OFS(XSI_BANK0_R16_OFS, bank0_regs[0]);
+	DEFINE_MAPPED_REG_OFS(XSI_BANK1_R16_OFS, bank1_regs[0]);
+#endif /* CONFIG_XEN */
 }

@@ -1,17 +1,17 @@
-cmd_scripts/kconfig/conf.o := gcc -Wp,-MD,scripts/kconfig/.conf.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer       -c -o scripts/kconfig/conf.o scripts/kconfig/conf.c
+cmd_scripts/kconfig/conf.o := gcc -Wp,-MD,scripts/kconfig/.conf.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer     -c -o scripts/kconfig/conf.o scripts/kconfig/conf.c
 
 deps_scripts/kconfig/conf.o := \
   scripts/kconfig/conf.c \
     $(wildcard include/config/.h) \
     $(wildcard include/config/allconfig.h) \
+    $(wildcard include/config/nosilentupdate.h) \
   /usr/include/ctype.h \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
   /usr/include/gnu/stubs.h \
-  /usr/include/bits/wordsize.h \
-  /usr/include/gnu/stubs-32.h \
   /usr/include/bits/types.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stddef.h \
+  /usr/include/bits/wordsize.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/endian.h \
   /usr/include/bits/endian.h \
@@ -24,6 +24,7 @@ deps_scripts/kconfig/conf.o := \
   /usr/include/bits/time.h \
   /usr/include/sys/sysmacros.h \
   /usr/include/bits/pthreadtypes.h \
+  /usr/include/bits/sched.h \
   /usr/include/alloca.h \
   /usr/include/stdio.h \
   /usr/include/libio.h \
@@ -31,7 +32,7 @@ deps_scripts/kconfig/conf.o := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdarg.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
@@ -45,8 +46,9 @@ deps_scripts/kconfig/conf.o := \
   /usr/include/sys/stat.h \
   /usr/include/bits/stat.h \
   scripts/kconfig/lkc.h \
+    $(wildcard include/config/list.h) \
   scripts/kconfig/expr.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdbool.h \
+  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdbool.h \
   /usr/include/libintl.h \
   /usr/include/locale.h \
   /usr/include/bits/locale.h \

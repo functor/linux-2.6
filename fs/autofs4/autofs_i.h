@@ -96,7 +96,6 @@ struct autofs_wait_queue {
 
 struct autofs_sb_info {
 	u32 magic;
-	struct dentry *root;
 	int pipefd;
 	struct file *pipe;
 	pid_t oz_pgrp;
@@ -231,4 +230,4 @@ out:
 }
 
 void autofs4_dentry_release(struct dentry *);
-
+extern void autofs4_kill_sb(struct super_block *);

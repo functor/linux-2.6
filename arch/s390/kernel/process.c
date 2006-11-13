@@ -15,7 +15,6 @@
  * This file handles the architecture-dependent parts of process handling..
  */
 
-#include <linux/config.h>
 #include <linux/compiler.h>
 #include <linux/cpu.h>
 #include <linux/errno.h>
@@ -143,6 +142,7 @@ static void default_idle(void)
 		return;
 	}
 
+	trace_hardirqs_on();
 	/* Wait for external, I/O or machine check interrupt. */
 	__load_psw_mask(PSW_KERNEL_BITS | PSW_MASK_WAIT |
 			PSW_MASK_IO | PSW_MASK_EXT);
@@ -172,7 +172,7 @@ void show_regs(struct pt_regs *regs)
 	show_registers(regs);
 	/* Show stack backtrace if pt_regs is from kernel mode */
 	if (!(regs->psw.mask & PSW_MASK_PSTATE))
-		show_trace(0,(unsigned long *) regs->gprs[15]);
+		show_trace(NULL, (unsigned long *) regs->gprs[15]);
 }
 
 extern void kernel_thread_starter(void);
@@ -331,9 +331,6 @@ asmlinkage long sys_execve(struct pt_regs regs)
         error = do_execve(filename, (char __user * __user *) regs.gprs[3],
 			  (char __user * __user *) regs.gprs[4], &regs);
 	if (error == 0) {
-		task_lock(current);
-		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
 		current->thread.fp_regs.fpc = 0;
 		if (MACHINE_HAS_IEEE)
 			asm volatile("sfpc %0,%0" : : "d" (0));

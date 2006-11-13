@@ -6,7 +6,6 @@
 #ifndef __XEN_ASM_PCIFRONT_H__
 #define __XEN_ASM_PCIFRONT_H__
 
-#include <linux/config.h>
 #include <linux/spinlock.h>
 
 #ifdef __KERNEL__
@@ -70,7 +69,7 @@ static inline void pcifront_init_sd(struct pcifront_sd *sd, int domain,
 
 #endif /* __ia64__ */
 
-extern spinlock_t pci_bus_lock;
+extern struct rw_semaphore pci_bus_sem;
 
 #endif /* __KERNEL__ */
 
