@@ -26,7 +26,6 @@ LDFLAGS			+= -EB  -mshelf32_linux
 endif
 
 # No requirements for endianess support from AFLAGS, 'as' always run through gcc
-AFLAGS		+= -m5 -isa=sh64 -traditional
 CFLAGS		+= $(cpu-y)
 
 LDFLAGS_vmlinux	+= --defsym phys_stext=_stext-$(CONFIG_CACHED_MEMORY_OFFSET) \
@@ -73,11 +72,7 @@ compressed: zImage
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
 
-prepare: include/asm-$(ARCH)/asm-offsets.h arch/$(ARCH)/lib/syscalltab.h
-
-include/asm-$(ARCH)/asm-offsets.h: arch/$(ARCH)/kernel/asm-offsets.s \
-				   include/asm include/linux/version.h
-	$(call filechk,gen-asm-offsets)
+archprepare: arch/$(ARCH)/lib/syscalltab.h
 
 define filechk_gen-syscalltab
        (set -e; \
@@ -108,7 +103,7 @@ endef
 arch/$(ARCH)/lib/syscalltab.h: arch/sh64/kernel/syscalls.S
 	$(call filechk,gen-syscalltab)
 
-CLEAN_FILES += include/asm-$(ARCH)/asm-offsets.h arch/$(ARCH)/lib/syscalltab.h
+CLEAN_FILES += arch/$(ARCH)/lib/syscalltab.h
 
 define archhelp
 	@echo '  zImage 	           - Compressed kernel image (arch/sh64/boot/zImage)'

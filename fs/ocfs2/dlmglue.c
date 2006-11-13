@@ -242,7 +242,7 @@ static void ocfs2_build_lock_name(enum ocfs2_lock_type type,
 	mlog_exit_void();
 }
 
-static spinlock_t ocfs2_dlm_tracking_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(ocfs2_dlm_tracking_lock);
 
 static void ocfs2_add_lockres_tracking(struct ocfs2_lock_res *res,
 				       struct ocfs2_dlm_debug *dlm_debug)
@@ -1995,7 +1995,7 @@ static int ocfs2_dlm_debug_open(struct inode *inode, struct file *file)
 		mlog_errno(ret);
 		goto out;
 	}
-	osb = (struct ocfs2_super *) inode->u.generic_ip;
+	osb = inode->i_private;
 	ocfs2_get_dlm_debug(osb->osb_dlm_debug);
 	priv->p_dlm_debug = osb->osb_dlm_debug;
 	INIT_LIST_HEAD(&priv->p_iter_res.l_debug_list);
@@ -2071,8 +2071,7 @@ int ocfs2_dlm_init(struct ocfs2_super *osb)
 	}
 
 	/* launch vote thread */
-	osb->vote_task = kthread_run(ocfs2_vote_thread, osb, "ocfs2vote-%d",
-				     osb->osb_id);
+	osb->vote_task = kthread_run(ocfs2_vote_thread, osb, "ocfs2vote");
 	if (IS_ERR(osb->vote_task)) {
 		status = PTR_ERR(osb->vote_task);
 		osb->vote_task = NULL;

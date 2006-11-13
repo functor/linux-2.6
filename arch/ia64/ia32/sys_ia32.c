@@ -14,7 +14,6 @@
  * environment.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/sysctl.h>
@@ -126,6 +125,7 @@ sys32_execve (char __user *name, compat_uptr_t __user *argv, compat_uptr_t __use
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 {
+	compat_ino_t ino;
 	int err;
 
 	if ((u64) stat->size > MAX_NON_LFS ||
@@ -133,11 +133,15 @@ int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 	    !old_valid_dev(stat->rdev))
 		return -EOVERFLOW;
 
+	ino = stat->ino;
+	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
+		return -EOVERFLOW;
+
 	if (clear_user(ubuf, sizeof(*ubuf)))
 		return -EFAULT;
 
 	err  = __put_user(old_encode_dev(stat->dev), &ubuf->st_dev);
-	err |= __put_user(stat->ino, &ubuf->st_ino);
+	err |= __put_user(ino, &ubuf->st_ino);
 	err |= __put_user(stat->mode, &ubuf->st_mode);
 	err |= __put_user(stat->nlink, &ubuf->st_nlink);
 	err |= __put_user(high2lowuid(stat->uid), &ubuf->st_uid);
@@ -1223,16 +1227,20 @@ struct readdir32_callback {
 };
 
 static int
-filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
+filldir32 (void *__buf, const char *name, int namlen, loff_t offset, u64 ino,
 	   unsigned int d_type)
 {
 	struct compat_dirent __user * dirent;
 	struct getdents32_callback * buf = (struct getdents32_callback *) __buf;
 	int reclen = ROUND_UP(offsetof(struct compat_dirent, d_name) + namlen + 1, 4);
+	u32 d_ino;
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	buf->error = -EFAULT;	/* only used if we fail.. */
 	dirent = buf->previous;
 	if (dirent)
@@ -1240,7 +1248,7 @@ filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
 			return -EFAULT;
 	dirent = buf->current_dir;
 	buf->previous = dirent;
-	if (put_user(ino, &dirent->d_ino)
+	if (put_user(d_ino, &dirent->d_ino)
 	    || put_user(reclen, &dirent->d_reclen)
 	    || copy_to_user(dirent->d_name, name, namlen)
 	    || put_user(0, dirent->d_name + namlen))
@@ -1288,17 +1296,21 @@ out:
 }
 
 static int
-fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, ino_t ino,
+fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, u64 ino,
 	      unsigned int d_type)
 {
 	struct readdir32_callback * buf = (struct readdir32_callback *) __buf;
 	struct old_linux32_dirent __user * dirent;
+	u32 d_ino;
 
 	if (buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	buf->count++;
 	dirent = buf->dirent;
-	if (put_user(ino, &dirent->d_ino)
+	if (put_user(d_ino, &dirent->d_ino)
 	    || put_user(offset, &dirent->d_offset)
 	    || put_user(namlen, &dirent->d_namlen)
 	    || copy_to_user(dirent->d_name, name, namlen)
@@ -1418,25 +1430,6 @@ asmlinkage long
 sys32_waitpid (int pid, unsigned int *stat_addr, int options)
 {
 	return compat_sys_wait4(pid, stat_addr, options, NULL);
-}
-
-static unsigned int
-ia32_peek (struct task_struct *child, unsigned long addr, unsigned int *val)
-{
-	size_t copied;
-	unsigned int ret;
-
-	copied = access_process_vm(child, addr, val, sizeof(*val), 0);
-	return (copied != sizeof(ret)) ? -EIO : 0;
-}
-
-static unsigned int
-ia32_poke (struct task_struct *child, unsigned long addr, unsigned int val)
-{
-
-	if (access_process_vm(child, addr, &val, sizeof(val), 1) != sizeof(val))
-		return -EIO;
-	return 0;
 }
 
 /*
@@ -1736,6 +1729,7 @@ restore_ia32_fpxstate (struct task_struct *tsk, struct ia32_user_fxsr_struct __u
 	return 0;
 }
 
+#if 0				/* XXX */
 asmlinkage long
 sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 {
@@ -1843,9 +1837,11 @@ sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 					    compat_ptr(data));
 		break;
 
+#if 0				/* XXX */
 	      case PTRACE_GETEVENTMSG:   
 		ret = put_user(child->ptrace_message, (unsigned int __user *) compat_ptr(data));
 		break;
+#endif
 
 	      case PTRACE_SYSCALL:	/* continue, stop after next syscall */
 	      case PTRACE_CONT:		/* restart after signal. */
@@ -1866,6 +1862,7 @@ sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 	unlock_kernel();
 	return ret;
 }
+#endif
 
 typedef struct {
 	unsigned int	ss_sp;

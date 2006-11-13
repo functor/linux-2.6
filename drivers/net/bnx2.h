@@ -1,6 +1,6 @@
 /* bnx2.h: Broadcom NX2 network driver.
  *
- * Copyright (c) 2004, 2005 Broadcom Corporation
+ * Copyright (c) 2004, 2005, 2006 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -12,44 +12,6 @@
 
 #ifndef BNX2_H
 #define BNX2_H
-
-#include <linux/config.h>
-
-#include <linux/module.h>
-#include <linux/moduleparam.h>
-
-#include <linux/kernel.h>
-#include <linux/timer.h>
-#include <linux/errno.h>
-#include <linux/ioport.h>
-#include <linux/slab.h>
-#include <linux/interrupt.h>
-#include <linux/pci.h>
-#include <linux/init.h>
-#include <linux/netdevice.h>
-#include <linux/etherdevice.h>
-#include <linux/skbuff.h>
-#include <linux/dma-mapping.h>
-#include <asm/bitops.h>
-#include <asm/io.h>
-#include <asm/irq.h>
-#include <linux/delay.h>
-#include <asm/byteorder.h>
-#include <linux/time.h>
-#include <linux/ethtool.h>
-#include <linux/mii.h>
-#ifdef NETIF_F_HW_VLAN_TX
-#include <linux/if_vlan.h>
-#define BCM_VLAN 1
-#endif
-#ifdef NETIF_F_TSO
-#include <net/ip.h>
-#include <net/tcp.h>
-#include <net/checksum.h>
-#define BCM_TSO 1
-#endif
-#include <linux/workqueue.h>
-#include <linux/crc32.h>
 
 /* Hardware data structures and register definitions automatically
  * generated from RTL code. Do not modify.
@@ -269,6 +231,7 @@ struct statistics_block {
 	u32 stat_GenStat13;
 	u32 stat_GenStat14;
 	u32 stat_GenStat15;
+	u32 stat_FwRxDrop;
 };
 
 
@@ -276,19 +239,7 @@ struct statistics_block {
  *  l2_fhdr definition
  */
 struct l2_fhdr {
-#if defined(__BIG_ENDIAN)
-	u16 l2_fhdr_errors;
-	u16 l2_fhdr_status;
-#elif defined(__LITTLE_ENDIAN)
-	u16 l2_fhdr_status;
-	u16 l2_fhdr_errors;
-#endif
-		#define L2_FHDR_ERRORS_BAD_CRC		(1<<1)
-		#define L2_FHDR_ERRORS_PHY_DECODE	(1<<2)
-		#define L2_FHDR_ERRORS_ALIGNMENT	(1<<3)
-		#define L2_FHDR_ERRORS_TOO_SHORT	(1<<4)
-		#define L2_FHDR_ERRORS_GIANT_FRAME	(1<<5)
-
+	u32 l2_fhdr_status;
 		#define L2_FHDR_STATUS_RULE_CLASS	(0x7<<0)
 		#define L2_FHDR_STATUS_RULE_P2		(1<<3)
 		#define L2_FHDR_STATUS_RULE_P3		(1<<4)
@@ -299,6 +250,14 @@ struct l2_fhdr {
 		#define L2_FHDR_STATUS_IP_DATAGRAM	(1<<13)
 		#define L2_FHDR_STATUS_TCP_SEGMENT	(1<<14)
 		#define L2_FHDR_STATUS_UDP_DATAGRAM	(1<<15)
+
+		#define L2_FHDR_ERRORS_BAD_CRC		(1<<17)
+		#define L2_FHDR_ERRORS_PHY_DECODE	(1<<18)
+		#define L2_FHDR_ERRORS_ALIGNMENT	(1<<19)
+		#define L2_FHDR_ERRORS_TOO_SHORT	(1<<20)
+		#define L2_FHDR_ERRORS_GIANT_FRAME	(1<<21)
+		#define L2_FHDR_ERRORS_TCP_XSUM		(1<<28)
+		#define L2_FHDR_ERRORS_UDP_XSUM		(1<<31)
 
 	u32 l2_fhdr_hash;
 #if defined(__BIG_ENDIAN)
@@ -1448,8 +1407,9 @@ struct l2_fhdr {
 #define BNX2_EMAC_MODE_PORT_NONE			 (0L<<2)
 #define BNX2_EMAC_MODE_PORT_MII				 (1L<<2)
 #define BNX2_EMAC_MODE_PORT_GMII			 (2L<<2)
-#define BNX2_EMAC_MODE_PORT_UNDEF			 (3L<<2)
+#define BNX2_EMAC_MODE_PORT_MII_10			 (3L<<2)
 #define BNX2_EMAC_MODE_MAC_LOOP				 (1L<<4)
+#define BNX2_EMAC_MODE_25G				 (1L<<5)
 #define BNX2_EMAC_MODE_TAGGED_MAC_CTL			 (1L<<7)
 #define BNX2_EMAC_MODE_TX_BURST				 (1L<<8)
 #define BNX2_EMAC_MODE_MAX_DEFER_DROP_ENA		 (1L<<9)
@@ -3522,6 +3482,8 @@ struct l2_fhdr {
 
 #define BNX2_COM_SCRATCH				0x00120000
 
+#define BNX2_FW_RX_DROP_COUNT				 0x00120084
+
 
 /*
  *  cp_reg definition
@@ -3713,6 +3675,15 @@ struct l2_fhdr {
 #define BNX2_MCP_ROM					0x00150000
 #define BNX2_MCP_SCRATCH				0x00160000
 
+#define BNX2_SHM_HDR_SIGNATURE				BNX2_MCP_SCRATCH
+#define BNX2_SHM_HDR_SIGNATURE_SIG_MASK			 0xffff0000
+#define BNX2_SHM_HDR_SIGNATURE_SIG			 0x53530000
+#define BNX2_SHM_HDR_SIGNATURE_VER_MASK			 0x000000ff
+#define BNX2_SHM_HDR_SIGNATURE_VER_ONE			 0x00000001
+
+#define BNX2_SHM_HDR_ADDR_0				BNX2_MCP_SCRATCH + 4
+#define BNX2_SHM_HDR_ADDR_1				BNX2_MCP_SCRATCH + 8
+
 
 #define NUM_MC_HASH_REGISTERS   8
 
@@ -3723,6 +3694,53 @@ struct l2_fhdr {
 #define PHY_ID(id)                                  ((id) & 0xfffffff0)
 #define PHY_REV_ID(id)                              ((id) & 0xf)
 
+/* 5708 Serdes PHY registers */
+
+#define BCM5708S_UP1				0xb
+
+#define BCM5708S_UP1_2G5			0x1
+
+#define BCM5708S_BLK_ADDR			0x1f
+
+#define BCM5708S_BLK_ADDR_DIG			0x0000
+#define BCM5708S_BLK_ADDR_DIG3			0x0002
+#define BCM5708S_BLK_ADDR_TX_MISC		0x0005
+
+/* Digital Block */
+#define BCM5708S_1000X_CTL1			0x10
+
+#define BCM5708S_1000X_CTL1_FIBER_MODE		0x0001
+#define BCM5708S_1000X_CTL1_AUTODET_EN		0x0010
+
+#define BCM5708S_1000X_CTL2			0x11
+
+#define BCM5708S_1000X_CTL2_PLLEL_DET_EN	0x0001
+
+#define BCM5708S_1000X_STAT1			0x14
+
+#define BCM5708S_1000X_STAT1_SGMII		0x0001
+#define BCM5708S_1000X_STAT1_LINK		0x0002
+#define BCM5708S_1000X_STAT1_FD			0x0004
+#define BCM5708S_1000X_STAT1_SPEED_MASK		0x0018
+#define BCM5708S_1000X_STAT1_SPEED_10		0x0000
+#define BCM5708S_1000X_STAT1_SPEED_100		0x0008
+#define BCM5708S_1000X_STAT1_SPEED_1G		0x0010
+#define BCM5708S_1000X_STAT1_SPEED_2G5		0x0018
+#define BCM5708S_1000X_STAT1_TX_PAUSE		0x0020
+#define BCM5708S_1000X_STAT1_RX_PAUSE		0x0040
+
+/* Digital3 Block */
+#define BCM5708S_DIG_3_0			0x10
+
+#define BCM5708S_DIG_3_0_USE_IEEE		0x0001
+
+/* Tx/Misc Block */
+#define BCM5708S_TX_ACTL1			0x15
+
+#define BCM5708S_TX_ACTL1_DRIVER_VCM		0x30
+
+#define BCM5708S_TX_ACTL3			0x17
+
 #define MIN_ETHERNET_PACKET_SIZE	60
 #define MAX_ETHERNET_PACKET_SIZE	1514
 #define MAX_ETHERNET_JUMBO_PACKET_SIZE	9014
@@ -3732,14 +3750,21 @@ struct l2_fhdr {
 #define DMA_READ_CHANS	5
 #define DMA_WRITE_CHANS	3
 
-#define BCM_PAGE_BITS	12
+/* Use CPU native page size up to 16K for the ring sizes.  */
+#if (PAGE_SHIFT > 14)
+#define BCM_PAGE_BITS	14
+#else
+#define BCM_PAGE_BITS	PAGE_SHIFT
+#endif
 #define BCM_PAGE_SIZE	(1 << BCM_PAGE_BITS)
 
 #define TX_DESC_CNT  (BCM_PAGE_SIZE / sizeof(struct tx_bd))
 #define MAX_TX_DESC_CNT (TX_DESC_CNT - 1)
 
+#define MAX_RX_RINGS	4
 #define RX_DESC_CNT  (BCM_PAGE_SIZE / sizeof(struct rx_bd))
 #define MAX_RX_DESC_CNT (RX_DESC_CNT - 1)
+#define MAX_TOTAL_RX_DESC_CNT (MAX_RX_DESC_CNT * MAX_RX_RINGS)
 
 #define NEXT_TX_BD(x) (((x) & (MAX_TX_DESC_CNT - 1)) ==			\
 		(MAX_TX_DESC_CNT - 1)) ?				\
@@ -3751,8 +3776,10 @@ struct l2_fhdr {
 		(MAX_RX_DESC_CNT - 1)) ?				\
 	(x) + 2 : (x) + 1
 
-#define RX_RING_IDX(x) ((x) & MAX_RX_DESC_CNT)
+#define RX_RING_IDX(x) ((x) & bp->rx_max_ring_idx)
 
+#define RX_RING(x) (((x) & ~MAX_RX_DESC_CNT) >> (BCM_PAGE_BITS - 4))
+#define RX_IDX(x) ((x) & MAX_RX_DESC_CNT)
 
 /* Context size. */
 #define CTX_SHIFT                   7
@@ -3798,13 +3825,19 @@ struct sw_bd {
 #define BUFFERED_FLASH_PHY_PAGE_SIZE		(1 << BUFFERED_FLASH_PAGE_BITS)
 #define BUFFERED_FLASH_BYTE_ADDR_MASK		(BUFFERED_FLASH_PHY_PAGE_SIZE-1)
 #define BUFFERED_FLASH_PAGE_SIZE		264
-#define BUFFERED_FLASH_TOTAL_SIZE		131072
+#define BUFFERED_FLASH_TOTAL_SIZE		0x21000
 
 #define SAIFUN_FLASH_PAGE_BITS			8
 #define SAIFUN_FLASH_PHY_PAGE_SIZE		(1 << SAIFUN_FLASH_PAGE_BITS)
 #define SAIFUN_FLASH_BYTE_ADDR_MASK		(SAIFUN_FLASH_PHY_PAGE_SIZE-1)
 #define SAIFUN_FLASH_PAGE_SIZE			256
 #define SAIFUN_FLASH_BASE_TOTAL_SIZE		65536
+
+#define ST_MICRO_FLASH_PAGE_BITS		8
+#define ST_MICRO_FLASH_PHY_PAGE_SIZE		(1 << ST_MICRO_FLASH_PAGE_BITS)
+#define ST_MICRO_FLASH_BYTE_ADDR_MASK		(ST_MICRO_FLASH_PHY_PAGE_SIZE-1)
+#define ST_MICRO_FLASH_PAGE_SIZE		256
+#define ST_MICRO_FLASH_BASE_TOTAL_SIZE		65536
 
 #define NVRAM_TIMEOUT_COUNT			30000
 
@@ -3813,6 +3846,8 @@ struct sw_bd {
 						 BNX2_NVM_CFG1_BUFFER_MODE  | \
 						 BNX2_NVM_CFG1_PROTECT_MODE | \
 						 BNX2_NVM_CFG1_FLASH_SIZE)
+
+#define FLASH_BACKUP_STRAP_MASK			(0xf << 26)
 
 struct flash_spec {
 	u32 strapping;
@@ -3841,12 +3876,22 @@ struct bnx2 {
 	struct status_block	*status_blk;
 	u32 			last_status_idx;
 
-	atomic_t		tx_avail_bd;
-	struct tx_bd		*tx_desc_ring;
-	struct sw_bd		*tx_buf_ring;
-	u32			tx_prod_bseq;
-	u16			tx_prod;
-	u16			tx_cons;
+	u32			flags;
+#define PCIX_FLAG			1
+#define PCI_32BIT_FLAG			2
+#define ONE_TDMA_FLAG			4	/* no longer used */
+#define NO_WOL_FLAG			8
+#define USING_DAC_FLAG			0x10
+#define USING_MSI_FLAG			0x20
+#define ASF_ENABLE_FLAG			0x40
+
+	/* Put tx producer and consumer fields in separate cache lines. */
+
+	u32		tx_prod_bseq __attribute__((aligned(L1_CACHE_BYTES)));
+	u16		tx_prod;
+
+	u16		tx_cons __attribute__((aligned(L1_CACHE_BYTES)));
+	u16		hw_tx_cons;
 
 #ifdef BCM_VLAN 
 	struct			vlan_group *vlgrp;
@@ -3855,41 +3900,42 @@ struct bnx2 {
 	u32			rx_offset;
 	u32			rx_buf_use_size;	/* useable size */
 	u32			rx_buf_size;		/* with alignment */
-	struct rx_bd		*rx_desc_ring;
-	struct sw_bd		*rx_buf_ring;
+	u32			rx_max_ring_idx;
+
 	u32			rx_prod_bseq;
 	u16			rx_prod;
 	u16			rx_cons;
+	u16			hw_rx_cons;
 
 	u32			rx_csum;
 
-	/* Only used to synchronize netif_stop_queue/wake_queue when tx */
-	/* ring is full */
-	spinlock_t		tx_lock;
+	struct sw_bd		*rx_buf_ring;
+	struct rx_bd		*rx_desc_ring[MAX_RX_RINGS];
 
-	/* End of fileds used in the performance code paths. */
+	/* TX constants */
+	struct tx_bd	*tx_desc_ring;
+	struct sw_bd	*tx_buf_ring;
+	int		tx_ring_size;
+	u32		tx_wake_thresh;
+
+	/* End of fields used in the performance code paths. */
 
 	char			*name;
 
 	int			timer_interval;
+	int			current_interval;
 	struct			timer_list timer;
 	struct work_struct	reset_task;
+	int			in_reset_task;
 
 	/* Used to synchronize phy accesses. */
 	spinlock_t		phy_lock;
-
-	u32			flags;
-#define PCIX_FLAG			1
-#define PCI_32BIT_FLAG			2
-#define ONE_TDMA_FLAG			4	/* no longer used */
-#define NO_WOL_FLAG			8
-#define USING_DAC_FLAG			0x10
-#define USING_MSI_FLAG			0x20
 
 	u32			phy_flags;
 #define PHY_SERDES_FLAG			1
 #define PHY_CRC_FIX_FLAG		2
 #define PHY_PARALLEL_DETECT_FLAG	4
+#define PHY_2_5G_CAPABLE_FLAG		8
 #define PHY_INT_MODE_MASK_FLAG		0x300
 #define PHY_INT_MODE_AUTO_POLLING_FLAG	0x100
 #define PHY_INT_MODE_LINK_READY_FLAG	0x200
@@ -3898,6 +3944,7 @@ struct bnx2 {
 	/* chip num:16-31, rev:12-15, metal:4-11, bond_id:0-3 */
 #define CHIP_NUM(bp)			(((bp)->chip_id) & 0xffff0000)
 #define CHIP_NUM_5706			0x57060000
+#define CHIP_NUM_5708			0x57080000
 
 #define CHIP_REV(bp)			(((bp)->chip_id) & 0x0000f000)
 #define CHIP_REV_Ax			0x00000000
@@ -3910,6 +3957,10 @@ struct bnx2 {
 #define CHIP_ID(bp)			(((bp)->chip_id) & 0xfffffff0)
 #define CHIP_ID_5706_A0			0x57060000
 #define CHIP_ID_5706_A1			0x57060010
+#define CHIP_ID_5706_A2			0x57060020
+#define CHIP_ID_5708_A0			0x57080000
+#define CHIP_ID_5708_B0			0x57081000
+#define CHIP_ID_5708_B1			0x57081010
 
 #define CHIP_BOND_ID(bp)		(((bp)->chip_id) & 0xf)
 
@@ -3922,17 +3973,17 @@ struct bnx2 {
 	u16			bus_speed_mhz;
 	u8			wol;
 
-	u8			fw_timed_out;
+	u8			pad;
 
 	u16			fw_wr_seq;
 	u16			fw_drv_pulse_wr_seq;
 
-	int			tx_ring_size;
 	dma_addr_t		tx_desc_mapping;
 
 
+	int			rx_max_ring;
 	int			rx_ring_size;
-	dma_addr_t		rx_desc_mapping;
+	dma_addr_t		rx_desc_mapping[MAX_RX_RINGS];
 
 	u16			tx_quick_cons_trip;
 	u16			tx_quick_cons_trip_int;
@@ -3956,6 +4007,7 @@ struct bnx2 {
 	struct statistics_block	*stats_blk;
 	dma_addr_t		stats_blk_mapping;
 
+	u32			hc_cmd;
 	u32			rx_mode;
 
 	u16			req_line_speed;
@@ -3985,9 +4037,11 @@ struct bnx2 {
 #define PHY_LOOPBACK		2
 
 	u8			serdes_an_pending;
-#define SERDES_AN_TIMEOUT	(2 * HZ)
+#define SERDES_AN_TIMEOUT	(HZ / 3)
 
 	u8			mac_addr[8];
+
+	u32			shmem_base;
 
 	u32			fw_ver;
 
@@ -3997,6 +4051,12 @@ struct bnx2 {
 	struct net_device_stats net_stats;
 
 	struct flash_spec	*flash_info;
+	u32			flash_size;
+
+	int			status_stats_size;
+
+	struct z_stream_s	*strm;
+	void			*gunzip_buf;
 };
 
 static u32 bnx2_reg_rd_ind(struct bnx2 *bp, u32 offset);
@@ -4095,7 +4155,7 @@ struct fw_info {
  * the firmware has timed out, the driver will assume there is no firmware
  * running and there won't be any firmware-driver synchronization during a
  * driver reset. */
-#define FW_ACK_TIME_OUT_MS                  50
+#define FW_ACK_TIME_OUT_MS                  100
 
 
 #define BNX2_DRV_RESET_SIGNATURE		0x00000000
@@ -4112,6 +4172,7 @@ struct fw_info {
 #define BNX2_DRV_MSG_CODE_PULSE			 0x06000000
 #define BNX2_DRV_MSG_CODE_DIAG			 0x07000000
 #define BNX2_DRV_MSG_CODE_SUSPEND_NO_WOL	 0x09000000
+#define BNX2_DRV_MSG_CODE_UNLOAD_LNK_DN		 0x0b000000
 
 #define BNX2_DRV_MSG_DATA			 0x00ff0000
 #define BNX2_DRV_MSG_DATA_WAIT0			 0x00010000
@@ -4128,14 +4189,46 @@ struct fw_info {
 #define BNX2_FW_MSG_STATUS_FAILURE		 0x00ff0000
 
 #define BNX2_LINK_STATUS			0x0000000c
+#define BNX2_LINK_STATUS_INIT_VALUE		 0xffffffff 
+#define BNX2_LINK_STATUS_LINK_UP		 0x1 
+#define BNX2_LINK_STATUS_LINK_DOWN		 0x0 
+#define BNX2_LINK_STATUS_SPEED_MASK		 0x1e
+#define BNX2_LINK_STATUS_AN_INCOMPLETE		 (0<<1) 
+#define BNX2_LINK_STATUS_10HALF			 (1<<1) 
+#define BNX2_LINK_STATUS_10FULL			 (2<<1) 
+#define BNX2_LINK_STATUS_100HALF		 (3<<1) 
+#define BNX2_LINK_STATUS_100BASE_T4		 (4<<1) 
+#define BNX2_LINK_STATUS_100FULL		 (5<<1) 
+#define BNX2_LINK_STATUS_1000HALF		 (6<<1) 
+#define BNX2_LINK_STATUS_1000FULL		 (7<<1) 
+#define BNX2_LINK_STATUS_2500HALF		 (8<<1) 
+#define BNX2_LINK_STATUS_2500FULL		 (9<<1) 
+#define BNX2_LINK_STATUS_AN_ENABLED		 (1<<5) 
+#define BNX2_LINK_STATUS_AN_COMPLETE		 (1<<6) 
+#define BNX2_LINK_STATUS_PARALLEL_DET		 (1<<7) 
+#define BNX2_LINK_STATUS_RESERVED		 (1<<8) 
+#define BNX2_LINK_STATUS_PARTNER_AD_1000FULL	 (1<<9) 
+#define BNX2_LINK_STATUS_PARTNER_AD_1000HALF	 (1<<10) 
+#define BNX2_LINK_STATUS_PARTNER_AD_100BT4	 (1<<11) 
+#define BNX2_LINK_STATUS_PARTNER_AD_100FULL	 (1<<12) 
+#define BNX2_LINK_STATUS_PARTNER_AD_100HALF	 (1<<13) 
+#define BNX2_LINK_STATUS_PARTNER_AD_10FULL	 (1<<14) 
+#define BNX2_LINK_STATUS_PARTNER_AD_10HALF	 (1<<15) 
+#define BNX2_LINK_STATUS_TX_FC_ENABLED		 (1<<16) 
+#define BNX2_LINK_STATUS_RX_FC_ENABLED		 (1<<17) 
+#define BNX2_LINK_STATUS_PARTNER_SYM_PAUSE_CAP	 (1<<18) 
+#define BNX2_LINK_STATUS_PARTNER_ASYM_PAUSE_CAP	 (1<<19) 
+#define BNX2_LINK_STATUS_SERDES_LINK		 (1<<20) 
+#define BNX2_LINK_STATUS_PARTNER_AD_2500FULL	 (1<<21) 
+#define BNX2_LINK_STATUS_PARTNER_AD_2500HALF	 (1<<22) 
 
 #define BNX2_DRV_PULSE_MB			0x00000010
-#define BNX2_DRV_PULSE_SEQ_MASK			 0x0000ffff
+#define BNX2_DRV_PULSE_SEQ_MASK			 0x00007fff
 
 /* Indicate to the firmware not to go into the
  * OS absent when it is not getting driver pulse.
  * This is used for debugging. */
-#define BNX2_DRV_MSG_DATA_PULSE_CODE_ALWAYS_ALIVE	 0x00010000
+#define BNX2_DRV_MSG_DATA_PULSE_CODE_ALWAYS_ALIVE	 0x00080000
 
 #define BNX2_DEV_INFO_SIGNATURE			0x00000020
 #define BNX2_DEV_INFO_SIGNATURE_MAGIC		 0x44564900
@@ -4158,11 +4251,16 @@ struct fw_info {
 #define BNX2_SHARED_HW_CFG_DESIGN_LOM		 0x1
 #define BNX2_SHARED_HW_CFG_PHY_COPPER		 0
 #define BNX2_SHARED_HW_CFG_PHY_FIBER		 0x2
+#define BNX2_SHARED_HW_CFG_PHY_2_5G		 0x20
+#define BNX2_SHARED_HW_CFG_PHY_BACKPLANE	 0x40
 #define BNX2_SHARED_HW_CFG_LED_MODE_SHIFT_BITS	 8
 #define BNX2_SHARED_HW_CFG_LED_MODE_MASK	 0x300
 #define BNX2_SHARED_HW_CFG_LED_MODE_MAC		 0
 #define BNX2_SHARED_HW_CFG_LED_MODE_GPHY1	 0x100
 #define BNX2_SHARED_HW_CFG_LED_MODE_GPHY2	 0x200
+
+#define BNX2_SHARED_HW_CFG_CONFIG2		0x00000040
+#define BNX2_SHARED_HW_CFG2_NVM_SIZE_MASK	 0x00fff000
 
 #define BNX2_DEV_INFO_BC_REV			0x0000004c
 
@@ -4171,6 +4269,11 @@ struct fw_info {
 
 #define BNX2_PORT_HW_CFG_MAC_LOWER		0x00000054
 #define BNX2_PORT_HW_CFG_CONFIG			0x00000058
+#define BNX2_PORT_HW_CFG_CFG_TXCTL3_MASK	 0x0000ffff
+#define BNX2_PORT_HW_CFG_CFG_DFLT_LINK_MASK	 0x001f0000
+#define BNX2_PORT_HW_CFG_CFG_DFLT_LINK_AN	 0x00000000
+#define BNX2_PORT_HW_CFG_CFG_DFLT_LINK_1G	 0x00030000
+#define BNX2_PORT_HW_CFG_CFG_DFLT_LINK_2_5G	 0x00040000
 
 #define BNX2_PORT_HW_CFG_IMD_MAC_A_UPPER	0x00000068
 #define BNX2_PORT_HW_CFG_IMD_MAC_A_LOWER	0x0000006c

@@ -11,14 +11,14 @@
  * 	2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/ip.h>
 #include <linux/in.h>
+#include <net/ip.h>
 #include <net/sock.h>
-#include <net/tcp.h>
 #include <net/route.h>
+#include <net/tcp_states.h>
 
 int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {

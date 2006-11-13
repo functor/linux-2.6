@@ -20,7 +20,7 @@
  *
  *  Errata:
  *  o	Rev 0x10 also requires master/slave hold the same DMA timings and
- *	cannot do ATAPI MWDMA. 
+ *	cannot do ATAPI MWDMA.
  *  o	The identify data for raid volumes lacks CHS info (technically ok)
  *	but also fails to set the LBA28 and other bits. We fix these in
  *	the IDE probe quirk code.
@@ -62,7 +62,6 @@
  *	-	Move to libata once it grows up
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -99,7 +98,7 @@ struct it821x_dev
  *	for embedded platforms that cannot run a PC BIOS but are using this
  *	device.
  */
- 
+
 static int it8212_noraid;
 
 /**
@@ -120,7 +119,7 @@ static void it821x_program(ide_drive_t *drive, u16 timing)
 	/* Program PIO/MWDMA timing bits */
 	if(itdev->clock_mode == ATA_66)
 		conf = timing >> 8;
-	else	
+	else
 		conf = timing & 0xFF;
 	pci_write_config_byte(hwif->pci_dev, 0x54 + 4 * channel, conf);
 }
@@ -140,7 +139,7 @@ static void it821x_program_udma(ide_drive_t *drive, u16 timing)
 	int channel = hwif->channel;
 	int unit = drive->select.b.unit;
 	u8 conf;
-	
+
 	/* Program UDMA timing bits */
 	if(itdev->clock_mode == ATA_66)
 		conf = timing >> 8;
@@ -186,14 +185,14 @@ static void it821x_clock_strategy(ide_drive_t *drive)
 	/* Master doesn't care does the slave ? */
 	if(clock == ATA_ANY)
 		clock = altclock;
-		
+
 	/* Nobody cares - keep the same clock */
 	if(clock == ATA_ANY)
 		return;
 	/* No change */
 	if(clock == itdev->clock_mode)
 		return;
-		
+
 	/* Load this into the controller ? */
 	if(clock == ATA_66)
 		itdev->clock_mode = ATA_66;
@@ -205,7 +204,7 @@ static void it821x_clock_strategy(ide_drive_t *drive)
 	v &= ~(1 << (1 + hwif->channel));
 	v |= sel << (1 + hwif->channel);
 	pci_write_config_byte(hwif->pci_dev, 0x50, v);
-	
+
 	/*
 	 *	Reprogram the UDMA/PIO of the pair drive for the switch
 	 *	MWDMA will be dealt with by the dma switcher
@@ -258,11 +257,11 @@ static void it821x_tuneproc (ide_drive_t *drive, byte mode_wanted)
 	ide_hwif_t *hwif	= drive->hwif;
 	struct it821x_dev *itdev = ide_get_hwifdata(hwif);
 	int unit = drive->select.b.unit;
-	
+
 	/* Spec says 89 ref driver uses 88 */
 	static u16 pio[]	= { 0xAA88, 0xA382, 0xA181, 0x3332, 0x3121 };
 	static u8 pio_want[]    = { ATA_66, ATA_66, ATA_66, ATA_66, ATA_ANY };
-	
+
 	if(itdev->smart)
 		return;
 
@@ -292,15 +291,15 @@ static void it821x_tune_mwdma (ide_drive_t *drive, byte mode_wanted)
 	int unit = drive->select.b.unit;
 	int channel = hwif->channel;
 	u8 conf;
-	
+
 	static u16 dma[]	= { 0x8866, 0x3222, 0x3121 };
 	static u8 mwdma_want[]	= { ATA_ANY, ATA_66, ATA_ANY };
-	
+
 	itdev->want[unit][1] = mwdma_want[mode_wanted];
 	itdev->want[unit][0] = 2;	/* MWDMA is low priority */
 	itdev->mwdma[unit] = dma[mode_wanted];
 	itdev->udma[unit] = UDMA_OFF;
-	
+
 	/* UDMA bits off - Revision 0x10 do them in pairs */
 	pci_read_config_byte(hwif->pci_dev, 0x50, &conf);
 	if(itdev->timing10)
@@ -333,14 +332,14 @@ static void it821x_tune_udma (ide_drive_t *drive, byte mode_wanted)
 
 	static u16 udma[]	= { 0x4433, 0x4231, 0x3121, 0x2121, 0x1111, 0x2211, 0x1111 };
 	static u8 udma_want[]	= { ATA_ANY, ATA_50, ATA_ANY, ATA_66, ATA_66, ATA_50, ATA_66 };
-	
+
 	itdev->want[unit][1] = udma_want[mode_wanted];
 	itdev->want[unit][0] = 3;	/* UDMA is high priority */
 	itdev->mwdma[unit] = MWDMA_OFF;
 	itdev->udma[unit] = udma[mode_wanted];
 	if(mode_wanted >= 5)
 		itdev->udma[unit] |= 0x8080;	/* UDMA 5/6 select on */
-		
+
 	/* UDMA on. Again revision 0x10 must do the pair */
 	pci_read_config_byte(hwif->pci_dev, 0x50, &conf);
 	if(itdev->timing10)
@@ -351,7 +350,7 @@ static void it821x_tune_udma (ide_drive_t *drive, byte mode_wanted)
 
 	it821x_clock_strategy(drive);
 	it821x_program_udma(drive, itdev->udma[unit]);
-	
+
 }
 
 /**
@@ -371,7 +370,7 @@ static void config_it821x_chipset_for_pio (ide_drive_t *drive, byte set_speed)
 	ide_drive_t *pair = &hwif->drives[1-unit];
 	u8 speed = 0, set_pio	= ide_get_best_pio_mode(drive, 255, 5, NULL);
 	u8 pair_pio;
-	
+
 	/* We have to deal with this mess in pairs */
 	if(pair != NULL) {
 		pair_pio = ide_get_best_pio_mode(pair, 255, 5, NULL);
@@ -433,7 +432,7 @@ static int it821x_dma_end(ide_drive_t *drive)
 	return ret;
 }
 
-	
+
 /**
  *	it821x_tune_chipset	-	set controller timings
  *	@drive: Drive to set up
@@ -499,9 +498,14 @@ static int config_chipset_for_dma (ide_drive_t *drive)
 {
 	u8 speed	= ide_dma_speed(drive, it821x_ratemask(drive));
 
-	config_it821x_chipset_for_pio(drive, !speed);
-	it821x_tune_chipset(drive, speed);
-	return ide_dma_enable(drive);
+	if (speed) {
+		config_it821x_chipset_for_pio(drive, 0);
+		it821x_tune_chipset(drive, speed);
+
+		return ide_dma_enable(drive);
+	}
+
+	return 0;
 }
 
 /**
@@ -546,7 +550,7 @@ static unsigned int __devinit ata66_it821x(ide_hwif_t *hwif)
  *	@hwif: interface
  *
  *	This callback is run after the drives have been probed but
- *	before anything gets attached. It allows drivers to do any 
+ *	before anything gets attached. It allows drivers to do any
  *	final tuning that is needed, or fixups to work around bugs.
  */
 
@@ -575,17 +579,17 @@ static void __devinit it821x_fixups(ide_hwif_t *hwif)
 	 *	also patch up some capability bits that it forgets to set
 	 *	in RAID mode.
 	 */
-	
+
 	for(i = 0; i < 2; i++) {
 		ide_drive_t *drive = &hwif->drives[i];
 		struct hd_driveid *id;
 		u16 *idbits;
-		
+
 		if(!drive->present)
 			continue;
 		id = drive->id;
 		idbits = (u16 *)drive->id;
-		
+
 		/* Check for RAID v native */
 		if(strstr(id->model, "Integrated Technology Express")) {
 			/* In raid mode the ident block is slightly buggy
@@ -602,7 +606,7 @@ static void __devinit it821x_fixups(ide_hwif_t *hwif)
 				if(idbits[129] != 1)
 					printk("(%dK stripe)", idbits[146]);
 				printk(".\n");
-			/* Now the core code will have wrongly decided no DMA 
+			/* Now the core code will have wrongly decided no DMA
 			   so we need to fix this */
 			hwif->ide_dma_off_quietly(drive);
 #ifdef CONFIG_IDEDMA_ONLYDISK
@@ -610,7 +614,7 @@ static void __devinit it821x_fixups(ide_hwif_t *hwif)
 #endif
 				hwif->ide_dma_check(drive);
 		} else {
-			/* Non RAID volume. Fixups to stop the core code 
+			/* Non RAID volume. Fixups to stop the core code
 			   doing unsupported things */
 			id->field_valid &= 1;
 			id->queue_depth = 0;
@@ -628,7 +632,7 @@ static void __devinit it821x_fixups(ide_hwif_t *hwif)
 				drive->name);
 		}
 	}
-	
+
 }
 
 /**
@@ -642,15 +646,16 @@ static void __devinit it821x_fixups(ide_hwif_t *hwif)
 
 static void __devinit init_hwif_it821x(ide_hwif_t *hwif)
 {
-	struct it821x_dev *idev = kmalloc(sizeof(struct it821x_dev), GFP_KERNEL);
+	struct it821x_dev *idev = kzalloc(sizeof(struct it821x_dev), GFP_KERNEL);
 	u8 conf;
 
 	if(idev == NULL) {
 		printk(KERN_ERR "it821x: out of memory, falling back to legacy behaviour.\n");
 		goto fallback;
 	}
-	memset(idev, 0, sizeof(struct it821x_dev));
 	ide_set_hwifdata(hwif, idev);
+
+	hwif->atapi_dma = 1;
 
 	pci_read_config_byte(hwif->pci_dev, 0x50, &conf);
 	if(conf & 1) {
@@ -666,13 +671,13 @@ static void __devinit init_hwif_it821x(ide_hwif_t *hwif)
 		idev->clock_mode = ATA_50;
 	else
 		idev->clock_mode = ATA_66;
-		
+
 	idev->want[0][1] = ATA_ANY;
 	idev->want[1][1] = ATA_ANY;
-		
+
 	/*
 	 *	Not in the docs but according to the reference driver
-	 *	this is neccessary. 
+	 *	this is neccessary.
 	 */
 
 	pci_read_config_byte(hwif->pci_dev, 0x08, &conf);
@@ -682,13 +687,13 @@ static void __devinit init_hwif_it821x(ide_hwif_t *hwif)
 		if(!idev->smart)
 			printk(KERN_WARNING "it821x: Revision 0x10, workarounds activated.\n");
 	}
-		
+
 	hwif->speedproc = &it821x_tune_chipset;
 	hwif->tuneproc	= &it821x_tuneproc;
-	
+
 	/* MWDMA/PIO clock switching for pass through mode */
 	if(!idev->smart) {
-		hwif->ide_dma_start = &it821x_dma_start;
+		hwif->dma_start = &it821x_dma_start;
 		hwif->ide_dma_end = &it821x_dma_end;
 	}
 
@@ -734,7 +739,7 @@ static void __devinit it8212_disable_raid(struct pci_dev *dev)
 
 	pci_write_config_dword(dev,0x4C, 0x02040204);
 	pci_write_config_byte(dev, 0x42, 0x36);
-	pci_write_config_byte(dev, PCI_LATENCY_TIMER, 0);
+	pci_write_config_byte(dev, PCI_LATENCY_TIMER, 0x20);
 }
 
 static unsigned int __devinit init_chipset_it821x(struct pci_dev *dev, const char *name)

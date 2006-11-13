@@ -10,7 +10,6 @@
  *    Bugreports to: <Linux390@de.ibm.com>
  */
 
-#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -604,7 +603,7 @@ debug_open(struct inode *inode, struct file *file)
 	debug_info_t *debug_info, *debug_info_snapshot;
 
 	down(&debug_lock);
-	debug_info = (struct debug_info*)file->f_dentry->d_inode->u.generic_ip;
+	debug_info = file->f_dentry->d_inode->i_private;
 	/* find debug view */
 	for (i = 0; i < DEBUG_MAX_VIEWS; i++) {
 		if (!debug_info->views[i])

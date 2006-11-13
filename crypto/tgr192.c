@@ -24,8 +24,10 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
+#include <asm/byteorder.h>
 #include <asm/scatterlist.h>
 #include <linux/crypto.h>
+#include <linux/types.h>
 
 #define TGR192_DIGEST_SIZE 24
 #define TGR160_DIGEST_SIZE 20
@@ -467,18 +469,10 @@ static void tgr192_transform(struct tgr192_ctx *tctx, const u8 * data)
 	u64 a, b, c, aa, bb, cc;
 	u64 x[8];
 	int i;
-	const u8 *ptr = data;
+	const __le64 *ptr = (const __le64 *)data;
 
-	for (i = 0; i < 8; i++, ptr += 8) {
-		x[i] = (((u64)ptr[7] ) << 56) ^
-		(((u64)ptr[6] & 0xffL) << 48) ^
-		(((u64)ptr[5] & 0xffL) << 40) ^
-		(((u64)ptr[4] & 0xffL) << 32) ^
-		(((u64)ptr[3] & 0xffL) << 24) ^
-		(((u64)ptr[2] & 0xffL) << 16) ^
-		(((u64)ptr[1] & 0xffL) <<  8) ^
-		(((u64)ptr[0] & 0xffL)      );
-	}
+	for (i = 0; i < 8; i++)
+		x[i] = le64_to_cpu(ptr[i]);
 
 	/* save */
 	a = aa = tctx->a;
@@ -502,11 +496,10 @@ static void tgr192_transform(struct tgr192_ctx *tctx, const u8 * data)
 	tctx->c = c;
 }
 
-static void tgr192_init(void *ctx)
+static void tgr192_init(struct crypto_tfm *tfm)
 {
-	struct tgr192_ctx *tctx = ctx;
+	struct tgr192_ctx *tctx = crypto_tfm_ctx(tfm);
 
-	memset (tctx->hash, 0, 64);
 	tctx->a = 0x0123456789abcdefULL;
 	tctx->b = 0xfedcba9876543210ULL;
 	tctx->c = 0xf096a5b4c3b2e187ULL;
@@ -517,9 +510,10 @@ static void tgr192_init(void *ctx)
 
 /* Update the message digest with the contents
  * of INBUF with length INLEN. */
-static void tgr192_update(void *ctx, const u8 * inbuf, unsigned int len)
+static void tgr192_update(struct crypto_tfm *tfm, const u8 *inbuf,
+			  unsigned int len)
 {
-	struct tgr192_ctx *tctx = ctx;
+	struct tgr192_ctx *tctx = crypto_tfm_ctx(tfm);
 
 	if (tctx->count == 64) {	/* flush the buffer */
 		tgr192_transform(tctx, tctx->hash);
@@ -533,7 +527,7 @@ static void tgr192_update(void *ctx, const u8 * inbuf, unsigned int len)
 		for (; len && tctx->count < 64; len--) {
 			tctx->hash[tctx->count++] = *inbuf++;
 		}
-		tgr192_update(tctx, NULL, 0);
+		tgr192_update(tfm, NULL, 0);
 		if (!len) {
 			return;
 		}
@@ -555,14 +549,15 @@ static void tgr192_update(void *ctx, const u8 * inbuf, unsigned int len)
 
 
 /* The routine terminates the computation */
-static void tgr192_final(void *ctx, u8 * out)
+static void tgr192_final(struct crypto_tfm *tfm, u8 * out)
 {
-	struct tgr192_ctx *tctx = ctx;
+	struct tgr192_ctx *tctx = crypto_tfm_ctx(tfm);
+	__be64 *dst = (__be64 *)out;
+	__be64 *be64p;
+	__le32 *le32p;
 	u32 t, msb, lsb;
-	u8 *p;
-	int i, j;
 
-	tgr192_update(tctx, NULL, 0); /* flush */ ;
+	tgr192_update(tfm, NULL, 0); /* flush */ ;
 
 	msb = 0;
 	t = tctx->nblocks;
@@ -590,63 +585,36 @@ static void tgr192_final(void *ctx, u8 * out)
 		while (tctx->count < 64) {
 			tctx->hash[tctx->count++] = 0;
 		}
-		tgr192_update(tctx, NULL, 0); /* flush */ ;
+		tgr192_update(tfm, NULL, 0); /* flush */ ;
 		memset(tctx->hash, 0, 56);    /* fill next block with zeroes */
 	}
 	/* append the 64 bit count */
-	tctx->hash[56] = lsb;
-	tctx->hash[57] = lsb >> 8;
-	tctx->hash[58] = lsb >> 16;
-	tctx->hash[59] = lsb >> 24;
-	tctx->hash[60] = msb;
-	tctx->hash[61] = msb >> 8;
-	tctx->hash[62] = msb >> 16;
-	tctx->hash[63] = msb >> 24;
+	le32p = (__le32 *)&tctx->hash[56];
+	le32p[0] = cpu_to_le32(lsb);
+	le32p[1] = cpu_to_le32(msb);
+
 	tgr192_transform(tctx, tctx->hash);
 
-	p = tctx->hash;
-	*p++ = tctx->a >> 56; *p++ = tctx->a >> 48; *p++ = tctx->a >> 40;
-	*p++ = tctx->a >> 32; *p++ = tctx->a >> 24; *p++ = tctx->a >> 16;
-	*p++ = tctx->a >>  8; *p++ = tctx->a;\
-	*p++ = tctx->b >> 56; *p++ = tctx->b >> 48; *p++ = tctx->b >> 40;
-	*p++ = tctx->b >> 32; *p++ = tctx->b >> 24; *p++ = tctx->b >> 16;
-	*p++ = tctx->b >>  8; *p++ = tctx->b;
-	*p++ = tctx->c >> 56; *p++ = tctx->c >> 48; *p++ = tctx->c >> 40;
-	*p++ = tctx->c >> 32; *p++ = tctx->c >> 24; *p++ = tctx->c >> 16;
-	*p++ = tctx->c >>  8; *p++ = tctx->c;
-
-
-	/* unpack the hash */
-	j = 7;
-	for (i = 0; i < 8; i++) {
-		out[j--] = (tctx->a >> 8 * i) & 0xff;
-	}
-	j = 15;
-	for (i = 0; i < 8; i++) {
-		out[j--] = (tctx->b >> 8 * i) & 0xff;
-	}
-	j = 23;
-	for (i = 0; i < 8; i++) {
-		out[j--] = (tctx->c >> 8 * i) & 0xff;
-	}
+	be64p = (__be64 *)tctx->hash;
+	dst[0] = be64p[0] = cpu_to_be64(tctx->a);
+	dst[1] = be64p[1] = cpu_to_be64(tctx->b);
+	dst[2] = be64p[2] = cpu_to_be64(tctx->c);
 }
 
-static void tgr160_final(void *ctx, u8 * out)
+static void tgr160_final(struct crypto_tfm *tfm, u8 * out)
 {
-	struct tgr192_ctx *wctx = ctx;
 	u8 D[64];
 
-	tgr192_final(wctx, D);
+	tgr192_final(tfm, D);
 	memcpy(out, D, TGR160_DIGEST_SIZE);
 	memset(D, 0, TGR192_DIGEST_SIZE);
 }
 
-static void tgr128_final(void *ctx, u8 * out)
+static void tgr128_final(struct crypto_tfm *tfm, u8 * out)
 {
-	struct tgr192_ctx *wctx = ctx;
 	u8 D[64];
 
-	tgr192_final(wctx, D);
+	tgr192_final(tfm, D);
 	memcpy(out, D, TGR128_DIGEST_SIZE);
 	memset(D, 0, TGR192_DIGEST_SIZE);
 }
@@ -657,6 +625,7 @@ static struct crypto_alg tgr192 = {
 	.cra_blocksize = TGR192_BLOCK_SIZE,
 	.cra_ctxsize = sizeof(struct tgr192_ctx),
 	.cra_module = THIS_MODULE,
+	.cra_alignmask = 7,
 	.cra_list = LIST_HEAD_INIT(tgr192.cra_list),
 	.cra_u = {.digest = {
 			     .dia_digestsize = TGR192_DIGEST_SIZE,
@@ -671,6 +640,7 @@ static struct crypto_alg tgr160 = {
 	.cra_blocksize = TGR192_BLOCK_SIZE,
 	.cra_ctxsize = sizeof(struct tgr192_ctx),
 	.cra_module = THIS_MODULE,
+	.cra_alignmask = 7,
 	.cra_list = LIST_HEAD_INIT(tgr160.cra_list),
 	.cra_u = {.digest = {
 			     .dia_digestsize = TGR160_DIGEST_SIZE,
@@ -685,6 +655,7 @@ static struct crypto_alg tgr128 = {
 	.cra_blocksize = TGR192_BLOCK_SIZE,
 	.cra_ctxsize = sizeof(struct tgr192_ctx),
 	.cra_module = THIS_MODULE,
+	.cra_alignmask = 7,
 	.cra_list = LIST_HEAD_INIT(tgr128.cra_list),
 	.cra_u = {.digest = {
 			     .dia_digestsize = TGR128_DIGEST_SIZE,

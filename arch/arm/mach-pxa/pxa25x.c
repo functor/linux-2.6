@@ -16,7 +16,6 @@
  * initialization stuff for PXA machines which can be overridden later if
  * need be.
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -129,7 +128,7 @@ void pxa_cpu_pm_enter(suspend_state_t state)
 	case PM_SUSPEND_MEM:
 		/* set resume return address */
 		PSPR = virt_to_phys(pxa_cpu_resume);
-		pxa_cpu_suspend(3);
+		pxa_cpu_suspend(PWRMODE_SLEEP);
 		break;
 	}
 }

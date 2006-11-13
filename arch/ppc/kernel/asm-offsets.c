@@ -8,7 +8,6 @@
  * #defines from the assembly-language output.
  */
 
-#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -38,7 +37,6 @@ main(void)
 	DEFINE(THREAD, offsetof(struct task_struct, thread));
 	DEFINE(THREAD_INFO, offsetof(struct task_struct, thread_info));
 	DEFINE(MM, offsetof(struct task_struct, mm));
-	DEFINE(PTRACE, offsetof(struct task_struct, ptrace));
 	DEFINE(KSP, offsetof(struct thread_struct, ksp));
 	DEFINE(PGDIR, offsetof(struct thread_struct, pgdir));
 	DEFINE(LAST_SYSCALL, offsetof(struct thread_struct, last_syscall));
@@ -48,7 +46,6 @@ main(void)
 	DEFINE(THREAD_FPSCR, offsetof(struct thread_struct, fpscr));
 #if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
 	DEFINE(THREAD_DBCR0, offsetof(struct thread_struct, dbcr0));
-	DEFINE(PT_PTRACED, PT_PTRACED);
 #endif
 #ifdef CONFIG_ALTIVEC
 	DEFINE(THREAD_VR0, offsetof(struct thread_struct, vr[0]));

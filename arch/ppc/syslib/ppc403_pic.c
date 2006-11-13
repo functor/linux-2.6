@@ -26,6 +26,7 @@
 #include <asm/system.h>
 #include <asm/irq.h>
 #include <asm/ppc4xx_pic.h>
+#include <asm/machdep.h>
 
 /* Function Prototypes */
 
@@ -34,13 +35,10 @@ static void ppc403_aic_disable(unsigned int irq);
 static void ppc403_aic_disable_and_ack(unsigned int irq);
 
 static struct hw_interrupt_type ppc403_aic = {
-	"403GC AIC",
-	NULL,
-	NULL,
-	ppc403_aic_enable,
-	ppc403_aic_disable,
-	ppc403_aic_disable_and_ack,
-	0
+	.typename = "403GC AIC",
+	.enable = ppc403_aic_enable,
+	.disable = ppc403_aic_disable,
+	.ack = ppc403_aic_disable_and_ack,
 };
 
 int
@@ -123,5 +121,5 @@ ppc4xx_pic_init(void)
 	ppc_md.get_irq = ppc403_pic_get_irq;
 
 	for (i = 0; i < NR_IRQS; i++)
-		irq_desc[i].handler = &ppc403_aic;
+		irq_desc[i].chip = &ppc403_aic;
 }

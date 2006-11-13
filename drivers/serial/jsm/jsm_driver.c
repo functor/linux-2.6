@@ -20,7 +20,8 @@
  *
  * Contact Information:
  * Scott H Kilau <Scott_Kilau@digi.com>
- * Wendy Xiong   <wendyx@us.ltcfwd.linux.ibm.com>
+ * Wendy Xiong   <wendyx@us.ibm.com>
+ *
  *
  ***********************************************************************/
 #include <linux/moduleparam.h>
@@ -42,17 +43,14 @@ struct uart_driver jsm_uart_driver = {
 	.owner		= THIS_MODULE,
 	.driver_name	= JSM_DRIVER_NAME,
 	.dev_name	= "ttyn",
-	.major		= 253,
+	.major		= 0,
 	.minor		= JSM_MINOR_START,
 	.nr		= NR_PORTS,
 };
 
 int jsm_debug;
-int jsm_rawreadok;
 module_param(jsm_debug, int, 0);
-module_param(jsm_rawreadok, int, 0);
 MODULE_PARM_DESC(jsm_debug, "Driver debugging level");
-MODULE_PARM_DESC(jsm_rawreadok, "Bypass flip buffers on input");
 
 static int jsm_probe_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -123,7 +121,7 @@ static int jsm_probe_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	rc = request_irq(brd->irq, brd->bd_ops->intr,
-			SA_INTERRUPT|SA_SHIRQ, "JSM", brd);
+			IRQF_DISABLED|IRQF_SHARED, "JSM", brd);
 	if (rc) {
 		printk(KERN_WARNING "Failed to hook IRQ %d\n",brd->irq);
 		goto out_iounmap;

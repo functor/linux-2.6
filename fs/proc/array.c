@@ -52,7 +52,6 @@
  *			 :  base.c too.
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/time.h>
@@ -74,10 +73,11 @@
 #include <linux/file.h>
 #include <linux/times.h>
 #include <linux/cpuset.h>
+#include <linux/tracehook.h>
 #include <linux/rcupdate.h>
+#include <linux/delayacct.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -164,16 +164,21 @@ static inline const char * get_task_state(struct task_struct *tsk)
 
 static inline char * task_state(struct task_struct *p, char *buffer)
 {
+	struct task_struct *tracer;
+	pid_t tracer_pid, pid, ptgid, tgid;
 	struct group_info *group_info;
 	int g;
 	struct fdtable *fdt = NULL;
-	pid_t pid, ptgid, tppid, tgid;
+
+	rcu_read_lock();
+	tracer = tracehook_tracer_task(p);
+	tracer_pid = tracer == NULL ? 0 : vx_map_pid(tracer->pid);
+	rcu_read_unlock();
 
 	read_lock(&tasklist_lock);
 	tgid = vx_map_tgid(p->tgid);
 	pid = vx_map_pid(p->pid);
-	ptgid = vx_map_pid(p->group_leader->real_parent->tgid);
-	tppid = vx_map_pid(p->parent->pid);
+	ptgid = vx_map_pid(p->group_leader->parent->tgid);
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
 		"SleepAVG:\t%lu%%\n"
@@ -186,7 +191,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
 		tgid, pid, (pid > 1) ? ptgid : 0,
-		pid_alive(p) && p->ptrace ? tppid : 0,
+		tracer_pid,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);
@@ -444,7 +449,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	}
 	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
 	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
-		task->group_leader->real_parent->tgid);
+		task->group_leader->parent->tgid);
 	pgid = vx_info_map_pid(task->vx_info, pgid);
 
 	read_unlock(&tasklist_lock);
@@ -487,7 +492,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
 %lu %lu %lu %lu %lu %ld %ld %ld %ld %d 0 %llu %lu %ld %lu %lu %lu %lu %lu \
-%lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu\n",
+%lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu %llu\n",
 		pid,
 		tcomm,
 		state,
@@ -531,7 +536,8 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		task->exit_signal,
 		task_cpu(task),
 		task->rt_priority,
-		task->policy);
+		task->policy,
+		(unsigned long long)delayacct_blkio_ticks(task));
 	if(mm)
 		mmput(mm);
 	return res;

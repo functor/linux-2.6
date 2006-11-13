@@ -24,7 +24,6 @@
  * e-mail - mail your message to <rdamazio@lsi.usp.br>
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>

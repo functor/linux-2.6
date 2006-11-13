@@ -67,7 +67,6 @@
  *		2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/types.h>
@@ -1201,7 +1200,15 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 	int ihl;
 	int id;
 
-	if (!pskb_may_pull(skb, sizeof(*iph)))
+	if (unlikely(skb_shinfo(skb)->gso_type &
+		     ~(SKB_GSO_TCPV4 |
+		       SKB_GSO_UDP |
+		       SKB_GSO_DODGY |
+		       SKB_GSO_TCP_ECN |
+		       0)))
+		goto out;
+
+	if (unlikely(!pskb_may_pull(skb, sizeof(*iph))))
 		goto out;
 
 	iph = skb->nh.iph;
@@ -1209,7 +1216,7 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 	if (ihl < sizeof(*iph))
 		goto out;
 
-	if (!pskb_may_pull(skb, ihl))
+	if (unlikely(!pskb_may_pull(skb, ihl)))
 		goto out;
 
 	skb->h.raw = __skb_pull(skb, ihl);
@@ -1220,7 +1227,7 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 
 	rcu_read_lock();
 	ops = rcu_dereference(inet_protos[proto]);
-	if (ops && ops->gso_segment)
+	if (likely(ops && ops->gso_segment))
 		segs = ops->gso_segment(skb, features);
 	rcu_read_unlock();
 

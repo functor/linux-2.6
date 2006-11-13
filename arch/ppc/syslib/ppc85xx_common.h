@@ -1,9 +1,7 @@
 /*
- * arch/ppc/syslib/ppc85xx_common.h
- *
  * MPC85xx support routines
  *
- * Maintainer: Kumar Gala <kumar.gala@freescale.com>
+ * Maintainer: Kumar Gala <galak@kernel.crashing.org>
  *
  * Copyright 2004 Freescale Semiconductor Inc.
  *
@@ -16,7 +14,6 @@
 #ifndef __PPC_SYSLIB_PPC85XX_COMMON_H
 #define __PPC_SYSLIB_PPC85XX_COMMON_H
 
-#include <linux/config.h>
 #include <linux/init.h>
 
 /* Provide access to ccsrbar for any modules, etc */

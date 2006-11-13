@@ -10,7 +10,6 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <asm/semaphore.h>
@@ -20,7 +19,7 @@ struct sem_waiter {
 	struct task_struct	*task;
 };
 
-#if SEM_DEBUG
+#if SEMAPHORE_DEBUG
 void semtrace(struct semaphore *sem, const char *str)
 {
 	if (sem->debug)

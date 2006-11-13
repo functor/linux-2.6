@@ -12,7 +12,6 @@
  * for more details.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -30,7 +29,7 @@
 
 static void riva_gpio_setscl(void* data, int state)
 {
-	struct riva_i2c_chan 	*chan = (struct riva_i2c_chan *)data;
+	struct riva_i2c_chan 	*chan = data;
 	struct riva_par 	*par = chan->par;
 	u32			val;
 
@@ -48,7 +47,7 @@ static void riva_gpio_setscl(void* data, int state)
 
 static void riva_gpio_setsda(void* data, int state)
 {
-	struct riva_i2c_chan 	*chan = (struct riva_i2c_chan *)data;
+	struct riva_i2c_chan 	*chan = data;
 	struct riva_par 	*par = chan->par;
 	u32			val;
 
@@ -66,7 +65,7 @@ static void riva_gpio_setsda(void* data, int state)
 
 static int riva_gpio_getscl(void* data)
 {
-	struct riva_i2c_chan 	*chan = (struct riva_i2c_chan *)data;
+	struct riva_i2c_chan 	*chan = data;
 	struct riva_par 	*par = chan->par;
 	u32			val = 0;
 
@@ -81,7 +80,7 @@ static int riva_gpio_getscl(void* data)
 
 static int riva_gpio_getsda(void* data)
 {
-	struct riva_i2c_chan 	*chan = (struct riva_i2c_chan *)data;
+	struct riva_i2c_chan 	*chan = data;
 	struct riva_par 	*par = chan->par;
 	u32			val = 0;
 
@@ -92,14 +91,13 @@ static int riva_gpio_getsda(void* data)
 	return val;
 }
 
-#define I2C_ALGO_RIVA   0x0e0000
 static int riva_setup_i2c_bus(struct riva_i2c_chan *chan, const char *name)
 {
 	int rc;
 
 	strcpy(chan->adapter.name, name);
 	chan->adapter.owner		= THIS_MODULE;
-	chan->adapter.id		= I2C_ALGO_RIVA;
+	chan->adapter.id		= I2C_HW_B_RIVA;
 	chan->adapter.algo_data		= &chan->algo;
 	chan->adapter.dev.parent	= &chan->par->pdev->dev;
 	chan->algo.setsda		= riva_gpio_setsda;

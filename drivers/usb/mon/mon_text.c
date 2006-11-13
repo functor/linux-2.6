@@ -8,6 +8,7 @@
 #include <linux/list.h>
 #include <linux/usb.h>
 #include <linux/time.h>
+#include <linux/mutex.h>
 #include <asm/uaccess.h>
 
 #include "usb_mon.h"
@@ -19,11 +20,19 @@
 #define DATA_MAX  32
 
 /*
- * This limit exists to prevent OOMs when the user process stops reading.
+ * Defined by USB 2.0 clause 9.3, table 9.2.
  */
-#define EVENT_MAX  25
+#define SETUP_MAX  8
 
-#define PRINTF_DFL  120
+/*
+ * This limit exists to prevent OOMs when the user process stops reading.
+ * If usbmon were available to unprivileged processes, it might be open
+ * to a local DoS. But we have to keep to root in order to prevent
+ * password sniffing from HID devices.
+ */
+#define EVENT_MAX  (2*PAGE_SIZE / sizeof(struct mon_event_text))
+
+#define PRINTF_DFL  160
 
 struct mon_event_text {
 	struct list_head e_link;
@@ -33,7 +42,9 @@ struct mon_event_text {
 	unsigned int tstamp;
 	int length;		/* Depends on type: xfer length or act length */
 	int status;
+	char setup_flag;
 	char data_flag;
+	unsigned char setup[SETUP_MAX];
 	unsigned char data[DATA_MAX];
 };
 
@@ -47,13 +58,12 @@ struct mon_reader_text {
 	wait_queue_head_t wait;
 	int printf_size;
 	char *printf_buf;
-	struct semaphore printf_lock;
+	struct mutex printf_lock;
 
 	char slab_name[SLAB_NAME_SZ];
 };
 
 static void mon_text_ctor(void *, kmem_cache_t *, unsigned long);
-static void mon_text_dtor(void *, kmem_cache_t *, unsigned long);
 
 /*
  * mon_text_submit
@@ -64,48 +74,55 @@ static void mon_text_dtor(void *, kmem_cache_t *, unsigned long);
  * This is called with the whole mon_bus locked, so no additional lock.
  */
 
+static inline char mon_text_get_setup(struct mon_event_text *ep,
+    struct urb *urb, char ev_type)
+{
+
+	if (!usb_pipecontrol(urb->pipe) || ev_type != 'S')
+		return '-';
+
+	if (urb->transfer_flags & URB_NO_SETUP_DMA_MAP)
+		return mon_dmapeek(ep->setup, urb->setup_dma, SETUP_MAX);
+	if (urb->setup_packet == NULL)
+		return 'Z';	/* '0' would be not as pretty. */
+
+	memcpy(ep->setup, urb->setup_packet, SETUP_MAX);
+	return 0;
+}
+
 static inline char mon_text_get_data(struct mon_event_text *ep, struct urb *urb,
     int len, char ev_type)
 {
 	int pipe = urb->pipe;
-	unsigned char *data;
+
+	if (len <= 0)
+		return 'L';
+	if (len >= DATA_MAX)
+		len = DATA_MAX;
+
+	if (usb_pipein(pipe)) {
+		if (ev_type == 'S')
+			return '<';
+	} else {
+		if (ev_type == 'C')
+			return '>';
+	}
 
 	/*
 	 * The check to see if it's safe to poke at data has an enormous
 	 * number of corner cases, but it seems that the following is
 	 * more or less safe.
 	 *
-	 * We do not even try to look transfer_buffer, because it can
+	 * We do not even try to look at transfer_buffer, because it can
 	 * contain non-NULL garbage in case the upper level promised to
 	 * set DMA for the HCD.
 	 */
 	if (urb->transfer_flags & URB_NO_TRANSFER_DMA_MAP)
-		return 'D';
+		return mon_dmapeek(ep->data, urb->transfer_dma, len);
 
-	if (len <= 0)
-		return 'L';
-
-	if ((data = urb->transfer_buffer) == NULL)
+	if (urb->transfer_buffer == NULL)
 		return 'Z';	/* '0' would be not as pretty. */
 
-	/*
-	 * Bulk is easy to shortcut reliably. 
-	 * XXX Control needs setup packet taken.
-	 * XXX Other pipe types need consideration. Currently, we overdo it
-	 * and collect garbage for them: better more than less.
-	 */
-	if (usb_pipebulk(pipe) || usb_pipecontrol(pipe)) {
-		if (usb_pipein(pipe)) {
-			if (ev_type == 'S')
-				return '<';
-		} else {
-			if (ev_type == 'C')
-				return '>';
-		}
-	}
-
-	if (len >= DATA_MAX)
-		len = DATA_MAX;
 	memcpy(ep->data, urb->transfer_buffer, len);
 	return 0;
 }
@@ -144,6 +161,7 @@ static void mon_text_event(struct mon_reader_text *rp, struct urb *urb,
 	/* Collecting status makes debugging sense for submits, too */
 	ep->status = urb->status;
 
+	ep->setup_flag = mon_text_get_setup(ep, urb, ev_type);
 	ep->data_flag = mon_text_get_data(ep, urb, ep->length, ev_type);
 
 	rp->nevents++;
@@ -161,6 +179,32 @@ static void mon_text_complete(void *data, struct urb *urb)
 {
 	struct mon_reader_text *rp = data;
 	mon_text_event(rp, urb, 'C');
+}
+
+static void mon_text_error(void *data, struct urb *urb, int error)
+{
+	struct mon_reader_text *rp = data;
+	struct mon_event_text *ep;
+
+	if (rp->nevents >= EVENT_MAX ||
+	    (ep = kmem_cache_alloc(rp->e_slab, SLAB_ATOMIC)) == NULL) {
+		rp->r.m_bus->cnt_text_lost++;
+		return;
+	}
+
+	ep->type = 'E';
+	ep->pipe = urb->pipe;
+	ep->id = (unsigned long) urb;
+	ep->tstamp = 0;
+	ep->length = 0;
+	ep->status = error;
+
+	ep->setup_flag = '-';
+	ep->data_flag = 'E';
+
+	rp->nevents++;
+	list_add_tail(&ep->e_link, &rp->e_list);
+	wake_up(&rp->wait);
 }
 
 /*
@@ -193,19 +237,18 @@ static int mon_text_open(struct inode *inode, struct file *file)
 	struct mon_reader_text *rp;
 	int rc;
 
-	down(&mon_lock);
-	mbus = inode->u.generic_ip;
+	mutex_lock(&mon_lock);
+	mbus = inode->i_private;
 	ubus = mbus->u_bus;
 
-	rp = kmalloc(sizeof(struct mon_reader_text), GFP_KERNEL);
+	rp = kzalloc(sizeof(struct mon_reader_text), GFP_KERNEL);
 	if (rp == NULL) {
 		rc = -ENOMEM;
 		goto err_alloc;
 	}
-	memset(rp, 0, sizeof(struct mon_reader_text));
 	INIT_LIST_HEAD(&rp->e_list);
 	init_waitqueue_head(&rp->wait);
-	init_MUTEX(&rp->printf_lock);
+	mutex_init(&rp->printf_lock);
 
 	rp->printf_size = PRINTF_DFL;
 	rp->printf_buf = kmalloc(rp->printf_size, GFP_KERNEL);
@@ -217,13 +260,14 @@ static int mon_text_open(struct inode *inode, struct file *file)
 	rp->r.m_bus = mbus;
 	rp->r.r_data = rp;
 	rp->r.rnf_submit = mon_text_submit;
+	rp->r.rnf_error = mon_text_error;
 	rp->r.rnf_complete = mon_text_complete;
 
 	snprintf(rp->slab_name, SLAB_NAME_SZ, "mon%dt_%lx", ubus->busnum,
 	    (long)rp);
 	rp->e_slab = kmem_cache_create(rp->slab_name,
 	    sizeof(struct mon_event_text), sizeof(long), 0,
-	    mon_text_ctor, mon_text_dtor);
+	    mon_text_ctor, NULL);
 	if (rp->e_slab == NULL) {
 		rc = -ENOMEM;
 		goto err_slab;
@@ -232,7 +276,7 @@ static int mon_text_open(struct inode *inode, struct file *file)
 	mon_reader_add(mbus, &rp->r);
 
 	file->private_data = rp;
-	up(&mon_lock);
+	mutex_unlock(&mon_lock);
 	return 0;
 
 // err_busy:
@@ -242,7 +286,7 @@ err_slab:
 err_alloc_pr:
 	kfree(rp);
 err_alloc:
-	up(&mon_lock);
+	mutex_unlock(&mon_lock);
 	return rc;
 }
 
@@ -286,7 +330,7 @@ static ssize_t mon_text_read(struct file *file, char __user *buf,
 	set_current_state(TASK_RUNNING);
 	remove_wait_queue(&rp->wait, &waita);
 
-	down(&rp->printf_lock);
+	mutex_lock(&rp->printf_lock);
 	cnt = 0;
 	pbuf = rp->printf_buf;
 	limit = rp->printf_size;
@@ -299,10 +343,25 @@ static ssize_t mon_text_read(struct file *file, char __user *buf,
 	default: /* PIPE_BULK */  utype = 'B';
 	}
 	cnt += snprintf(pbuf + cnt, limit - cnt,
-	    "%lx %u %c %c%c:%03u:%02u %d %d",
+	    "%lx %u %c %c%c:%03u:%02u",
 	    ep->id, ep->tstamp, ep->type,
-	    utype, udir, usb_pipedevice(ep->pipe), usb_pipeendpoint(ep->pipe),
-	    ep->status, ep->length);
+	    utype, udir, usb_pipedevice(ep->pipe), usb_pipeendpoint(ep->pipe));
+
+	if (ep->setup_flag == 0) {   /* Setup packet is present and captured */
+		cnt += snprintf(pbuf + cnt, limit - cnt,
+		    " s %02x %02x %04x %04x %04x",
+		    ep->setup[0],
+		    ep->setup[1],
+		    (ep->setup[3] << 8) | ep->setup[2],
+		    (ep->setup[5] << 8) | ep->setup[4],
+		    (ep->setup[7] << 8) | ep->setup[6]);
+	} else if (ep->setup_flag != '-') { /* Unable to capture setup packet */
+		cnt += snprintf(pbuf + cnt, limit - cnt,
+		    " %c __ __ ____ ____ ____", ep->setup_flag);
+	} else {                     /* No setup for this kind of URB */
+		cnt += snprintf(pbuf + cnt, limit - cnt, " %d", ep->status);
+	}
+	cnt += snprintf(pbuf + cnt, limit - cnt, " %d", ep->length);
 
 	if ((data_len = ep->length) > 0) {
 		if (ep->data_flag == 0) {
@@ -328,7 +387,7 @@ static ssize_t mon_text_read(struct file *file, char __user *buf,
 
 	if (copy_to_user(buf, rp->printf_buf, cnt))
 		cnt = -EFAULT;
-	up(&rp->printf_lock);
+	mutex_unlock(&rp->printf_lock);
 	kmem_cache_free(rp->e_slab, ep);
 	return cnt;
 }
@@ -341,12 +400,12 @@ static int mon_text_release(struct inode *inode, struct file *file)
 	struct list_head *p;
 	struct mon_event_text *ep;
 
-	down(&mon_lock);
-	mbus = inode->u.generic_ip;
+	mutex_lock(&mon_lock);
+	mbus = inode->i_private;
 
 	if (mbus->nreaders <= 0) {
 		printk(KERN_ERR TAG ": consistency error on close\n");
-		up(&mon_lock);
+		mutex_unlock(&mon_lock);
 		return 0;
 	}
 	mon_reader_del(mbus, &rp->r);
@@ -372,7 +431,7 @@ static int mon_text_release(struct inode *inode, struct file *file)
 	kfree(rp->printf_buf);
 	kfree(rp);
 
-	up(&mon_lock);
+	mutex_unlock(&mon_lock);
 	return 0;
 }
 
@@ -399,7 +458,3 @@ static void mon_text_ctor(void *mem, kmem_cache_t *slab, unsigned long sflags)
 	memset(mem, 0xe5, sizeof(struct mon_event_text));
 }
 
-static void mon_text_dtor(void *mem, kmem_cache_t *slab, unsigned long sflags)
-{
-	;
-}

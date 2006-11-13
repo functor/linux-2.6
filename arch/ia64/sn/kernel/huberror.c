@@ -32,13 +32,14 @@ static irqreturn_t hub_eint_handler(int irq, void *arg, struct pt_regs *ep)
 	ret_stuff.v0 = 0;
 	hubdev_info = (struct hubdev_info *)arg;
 	nasid = hubdev_info->hdi_nasid;
-	SAL_CALL_NOLOCK(ret_stuff, SN_SAL_HUB_ERROR_INTERRUPT,
-			(u64) nasid, 0, 0, 0, 0, 0, 0);
-
-	if ((int)ret_stuff.v0)
-		panic("hubii_eint_handler(): Fatal TIO Error");
 
 	if (is_shub1()) {
+		SAL_CALL_NOLOCK(ret_stuff, SN_SAL_HUB_ERROR_INTERRUPT,
+			(u64) nasid, 0, 0, 0, 0, 0, 0);
+
+		if ((int)ret_stuff.v0)
+			panic("hubii_eint_handler(): Fatal TIO Error");
+
 		if (!(nasid & 1)) /* Not a TIO, handle CRB errors */
 			(void)hubiio_crb_error_handler(hubdev_info);
 	} else 
@@ -76,7 +77,7 @@ void hubiio_crb_free(struct hubdev_info *hubdev_info, int crbnum)
 	 */
 	REMOTE_HUB_S(hubdev_info->hdi_nasid, IIO_ICDR, (IIO_ICDR_PND | crbnum));
 	while (REMOTE_HUB_L(hubdev_info->hdi_nasid, IIO_ICDR) & IIO_ICDR_PND)
-		udelay(1);
+		cpu_relax();
 
 }
 
@@ -177,7 +178,7 @@ void hubiio_crb_error_handler(struct hubdev_info *hubdev_info)
  */
 void hub_error_init(struct hubdev_info *hubdev_info)
 {
-	if (request_irq(SGI_II_ERROR, (void *)hub_eint_handler, SA_SHIRQ,
+	if (request_irq(SGI_II_ERROR, (void *)hub_eint_handler, IRQF_SHARED,
 			"SN_hub_error", (void *)hubdev_info))
 		printk("hub_error_init: Failed to request_irq for 0x%p\n",
 		    hubdev_info);
@@ -195,7 +196,7 @@ void hub_error_init(struct hubdev_info *hubdev_info)
 void ice_error_init(struct hubdev_info *hubdev_info)
 {
         if (request_irq
-            (SGI_TIO_ERROR, (void *)hub_eint_handler, SA_SHIRQ, "SN_TIO_error",
+            (SGI_TIO_ERROR, (void *)hub_eint_handler, IRQF_SHARED, "SN_TIO_error",
              (void *)hubdev_info))
                 printk("ice_error_init: request_irq() error hubdev_info 0x%p\n",
                        hubdev_info);

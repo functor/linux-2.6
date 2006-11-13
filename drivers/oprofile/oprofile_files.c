@@ -124,9 +124,10 @@ static struct file_operations dump_fops = {
 	.write		= dump_write,
 };
 
+#ifdef CONFIG_XEN
+
 #define TMPBUFSIZE 512
 
-#ifdef CONFIG_XEN
 static unsigned int adomains = 0;
 static int active_domains[MAX_OPROF_DOMAINS + 1];
 static DEFINE_MUTEX(adom_mutex);
@@ -313,6 +314,7 @@ static struct file_operations passive_domain_ops = {
 	.read		= pdomain_read,
 	.write		= pdomain_write,
 };
+
 #endif /* CONFIG_XEN */
 
 void oprofile_create_files(struct super_block * sb, struct dentry * root)

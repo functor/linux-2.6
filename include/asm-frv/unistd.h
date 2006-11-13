@@ -289,19 +289,37 @@
 #define __NR_mq_timedreceive	(__NR_mq_open+3)
 #define __NR_mq_notify		(__NR_mq_open+4)
 #define __NR_mq_getsetattr	(__NR_mq_open+5)
-#define __NR_sys_kexec_load	283
+#define __NR_kexec_load		283
 #define __NR_waitid		284
 /* #define __NR_sys_setaltroot	285 */
 #define __NR_add_key		286
 #define __NR_request_key	287
 #define __NR_keyctl		288
-#define __NR_vperfctr_open	289
-#define __NR_vperfctr_control	(__NR_perfctr_info+1)
-#define __NR_vperfctr_unlink	(__NR_perfctr_info+2)
-#define __NR_vperfctr_iresume	(__NR_perfctr_info+3)
-#define __NR_vperfctr_read	(__NR_perfctr_info+4)
+#define __NR_ioprio_set		289
+#define __NR_ioprio_get		290
+#define __NR_inotify_init	291
+#define __NR_inotify_add_watch	292
+#define __NR_inotify_rm_watch	293
+#define __NR_migrate_pages	294
+#define __NR_openat		295
+#define __NR_mkdirat		296
+#define __NR_mknodat		297
+#define __NR_fchownat		298
+#define __NR_futimesat		299
+#define __NR_fstatat64		300
+#define __NR_unlinkat		301
+#define __NR_renameat		302
+#define __NR_linkat		303
+#define __NR_symlinkat		304
+#define __NR_readlinkat		305
+#define __NR_fchmodat		306
+#define __NR_faccessat		307
+#define __NR_pselect6		308
+#define __NR_ppoll		309
 
-#define NR_syscalls 294
+#ifdef __KERNEL__
+
+#define NR_syscalls 310
 
 /*
  * process the return value of a syscall, consigning it to one of two possible fates
@@ -313,7 +331,7 @@ do {									\
         unsigned long __sr2 = (res);					\
 	if (__builtin_expect(__sr2 >= (unsigned long)(-4095), 0)) {	\
 		errno = (-__sr2);					\
-		__sr2 = ULONG_MAX;					\
+		__sr2 = ~0UL;						\
 	}								\
 	return (type) __sr2;						\
 } while (0)
@@ -442,28 +460,10 @@ type name (type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg
  * some others too.
  */
 #define __NR__exit __NR_exit
-static inline _syscall0(int,pause)
-static inline _syscall0(int,sync)
-static inline _syscall0(pid_t,setsid)
-static inline _syscall3(int,write,int,fd,const char *,buf,off_t,count)
-static inline _syscall3(int,read,int,fd,char *,buf,off_t,count)
-static inline _syscall3(off_t,lseek,int,fd,off_t,offset,int,count)
-static inline _syscall1(int,dup,int,fd)
 static inline _syscall3(int,execve,const char *,file,char **,argv,char **,envp)
-static inline _syscall3(int,open,const char *,file,int,flag,int,mode)
-static inline _syscall1(int,close,int,fd)
-static inline _syscall1(int,_exit,int,exitcode)
-static inline _syscall3(pid_t,waitpid,pid_t,pid,int *,wait_stat,int,options)
-static inline _syscall1(int,delete_module,const char *,name)
 
-static inline pid_t wait(int * wait_stat)
-{
-	return waitpid(-1,wait_stat,0);
-}
+#endif /* __KERNEL_SYSCALLS__ */
 
-#endif
-
-#ifdef __KERNEL__
 #define __ARCH_WANT_IPC_PARSE_VERSION
 /* #define __ARCH_WANT_OLD_READDIR */
 #define __ARCH_WANT_OLD_STAT
@@ -486,7 +486,7 @@ static inline pid_t wait(int * wait_stat)
 /* #define __ARCH_WANT_SYS_SIGPENDING */
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGACTION
-#endif
+#define __ARCH_WANT_SYS_RT_SIGSUSPEND
 
 /*
  * "Conditional" syscalls
@@ -498,4 +498,5 @@ static inline pid_t wait(int * wait_stat)
 #define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 #endif
 
+#endif /* __KERNEL__ */
 #endif /* _ASM_UNISTD_H_ */

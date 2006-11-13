@@ -14,7 +14,6 @@
 #ifndef _LINUX_SKBUFF_H
 #define _LINUX_SKBUFF_H
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/compiler.h>
 #include <linux/time.h>
@@ -29,6 +28,7 @@
 #include <linux/net.h>
 #include <linux/textsearch.h>
 #include <net/checksum.h>
+#include <linux/dmaengine.h>
 
 #define HAVE_ALLOC_SKB		/* For the drivers to know */
 #define HAVE_ALIGNABLE_SKB	/* Ditto 8)		   */
@@ -171,10 +171,15 @@ enum {
 
 enum {
 	SKB_GSO_TCPV4 = 1 << 0,
-	SKB_GSO_UDPV4 = 1 << 1,
+	SKB_GSO_UDP = 1 << 1,
 
 	/* This indicates the skb is from an untrusted source. */
 	SKB_GSO_DODGY = 1 << 2,
+
+	/* This indicates the tcp segment has CWR set. */
+	SKB_GSO_TCP_ECN = 1 << 3,
+
+	SKB_GSO_TCPV6 = 1 << 4,
 };
 
 /** 
@@ -220,6 +225,9 @@ enum {
  *	@nf_bridge: Saved data about a bridged frame - see br_netfilter.c
  *	@tc_index: Traffic control index
  *	@tc_verd: traffic control verdict
+ *	@dma_cookie: a cookie to one of several possible DMA operations
+ *		done by skb DMA functions
+ *	@secmark: security marking
  */
 
 struct sk_buff {
@@ -305,6 +313,12 @@ struct sk_buff {
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	xid_t			xid;			/* VServer context ID */
 #endif
+#ifdef CONFIG_NET_DMA
+	dma_cookie_t		dma_cookie;
+#endif
+#ifdef CONFIG_NETWORK_SECMARK
+	__u32			secmark;
+#endif
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	unsigned int		truesize;
@@ -358,7 +372,7 @@ extern struct sk_buff *skb_realloc_headroom(struct sk_buff *skb,
 extern struct sk_buff *skb_copy_expand(const struct sk_buff *skb,
 				       int newheadroom, int newtailroom,
 				       gfp_t priority);
-extern struct sk_buff *		skb_pad(struct sk_buff *skb, int pad);
+extern int	       skb_pad(struct sk_buff *skb, int pad);
 #define dev_kfree_skb(a)	kfree_skb(a)
 extern void	      skb_over_panic(struct sk_buff *skb, int len,
 				     void *here);
@@ -601,6 +615,14 @@ static inline __u32 skb_queue_len(const struct sk_buff_head *list_)
 	return list_->qlen;
 }
 
+/*
+ * This function creates a split out lock class for each invocation;
+ * this is needed for now since a whole lot of users of the skb-queue
+ * infrastructure in drivers have different locking usage (in hardirq)
+ * than the networking core (in softirq only). In the long run either the
+ * network layer or drivers should need annotation to consolidate the
+ * main types of usage into 3 classes.
+ */
 static inline void skb_queue_head_init(struct sk_buff_head *list)
 {
 	spin_lock_init(&list->lock);
@@ -1077,7 +1099,7 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
 
 #ifndef CONFIG_HAVE_ARCH_DEV_ALLOC_SKB
 /**
- *	__dev_alloc_skb - allocate an skbuff for sending
+ *	__dev_alloc_skb - allocate an skbuff for receiving
  *	@length: length to allocate
  *	@gfp_mask: get_free_pages mask, passed to alloc_skb
  *
@@ -1086,7 +1108,7 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
  *	the headroom they think they need without accounting for the
  *	built in space. The built in space is used for optimisations.
  *
- *	%NULL is returned in there is no free memory.
+ *	%NULL is returned if there is no free memory.
  */
 static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 					      gfp_t gfp_mask)
@@ -1101,7 +1123,7 @@ extern struct sk_buff *__dev_alloc_skb(unsigned int length, gfp_t gfp_mask);
 #endif
 
 /**
- *	dev_alloc_skb - allocate an skbuff for sending
+ *	dev_alloc_skb - allocate an skbuff for receiving
  *	@length: length to allocate
  *
  *	Allocate a new &sk_buff and assign it a usage count of one. The
@@ -1109,12 +1131,34 @@ extern struct sk_buff *__dev_alloc_skb(unsigned int length, gfp_t gfp_mask);
  *	the headroom they think they need without accounting for the
  *	built in space. The built in space is used for optimisations.
  *
- *	%NULL is returned in there is no free memory. Although this function
+ *	%NULL is returned if there is no free memory. Although this function
  *	allocates memory it can be called from an interrupt.
  */
 static inline struct sk_buff *dev_alloc_skb(unsigned int length)
 {
 	return __dev_alloc_skb(length, GFP_ATOMIC);
+}
+
+extern struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
+		unsigned int length, gfp_t gfp_mask);
+
+/**
+ *	netdev_alloc_skb - allocate an skbuff for rx on a specific device
+ *	@dev: network device to receive on
+ *	@length: length to allocate
+ *
+ *	Allocate a new &sk_buff and assign it a usage count of one. The
+ *	buffer has unspecified headroom built in. Users should allocate
+ *	the headroom they think they need without accounting for the
+ *	built in space. The built in space is used for optimisations.
+ *
+ *	%NULL is returned if there is no free memory. Although this function
+ *	allocates memory it can be called from an interrupt.
+ */
+static inline struct sk_buff *netdev_alloc_skb(struct net_device *dev,
+		unsigned int length)
+{
+	return __netdev_alloc_skb(dev, length, GFP_ATOMIC);
 }
 
 /**
@@ -1150,16 +1194,15 @@ static inline int skb_cow(struct sk_buff *skb, unsigned int headroom)
  *
  *	Pads up a buffer to ensure the trailing bytes exist and are
  *	blanked. If the buffer already contains sufficient data it
- *	is untouched. Returns the buffer, which may be a replacement
- *	for the original, or NULL for out of memory - in which case
- *	the original buffer is still freed.
+ *	is untouched. Otherwise it is extended. Returns zero on
+ *	success. The skb is freed on error.
  */
  
-static inline struct sk_buff *skb_padto(struct sk_buff *skb, unsigned int len)
+static inline int skb_padto(struct sk_buff *skb, unsigned int len)
 {
 	unsigned int size = skb->len;
 	if (likely(size >= len))
-		return skb;
+		return 0;
 	return skb_pad(skb, len-size);
 }
 
@@ -1319,7 +1362,6 @@ extern void	       skb_copy_and_csum_dev(const struct sk_buff *skb, u8 *to);
 extern void	       skb_split(struct sk_buff *skb,
 				 struct sk_buff *skb1, const u32 len);
 
-extern void	       skb_release_data(struct sk_buff *skb);
 extern struct sk_buff *skb_segment(struct sk_buff *skb, int features);
 
 static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
@@ -1449,6 +1491,24 @@ static inline void nf_reset(struct sk_buff *skb)
 #else /* CONFIG_NETFILTER */
 static inline void nf_reset(struct sk_buff *skb) {}
 #endif /* CONFIG_NETFILTER */
+
+#ifdef CONFIG_NETWORK_SECMARK
+static inline void skb_copy_secmark(struct sk_buff *to, const struct sk_buff *from)
+{
+	to->secmark = from->secmark;
+}
+
+static inline void skb_init_secmark(struct sk_buff *skb)
+{
+	skb->secmark = 0;
+}
+#else
+static inline void skb_copy_secmark(struct sk_buff *to, const struct sk_buff *from)
+{ }
+
+static inline void skb_init_secmark(struct sk_buff *skb)
+{ }
+#endif
 
 static inline int skb_is_gso(const struct sk_buff *skb)
 {

@@ -24,7 +24,7 @@
 #include "internal.h"
 
 static unsigned afscm_usage;		/* AFS cache manager usage count */
-static struct rw_semaphore afscm_sem;	/* AFS cache manager start/stop semaphore */
+static DECLARE_RWSEM(afscm_sem);	/* AFS cache manager start/stop semaphore */
 
 static int afscm_new_call(struct rxrpc_call *call);
 static void afscm_attention(struct rxrpc_call *call);

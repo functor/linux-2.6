@@ -17,7 +17,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -27,12 +26,12 @@
 #include <linux/moduleparam.h>
 #include <linux/usb.h>
 #include <asm/uaccess.h>
-#include "usb-serial.h"
+#include <linux/usb/serial.h>
 
 /*
  * Version Information
  */
-#define DRIVER_VERSION "v0.04"
+#define DRIVER_VERSION "v0.07"
 #define DRIVER_DESC "Silicon Labs CP2101/CP2102 RS232 serial adaptor driver"
 
 /*
@@ -54,25 +53,37 @@ static void cp2101_shutdown(struct usb_serial*);
 static int debug;
 
 static struct usb_device_id id_table [] = {
-	{ USB_DEVICE(0x10C4, 0xEA60) },	/* Silicon Labs factory default */
-	{ USB_DEVICE(0x10C4, 0x80CA) },	/* Degree Controls Inc */
-	{ USB_DEVICE(0x10AB, 0x10C5) },	/* Siemens MC60 Cable */
+	{ USB_DEVICE(0x0FCF, 0x1003) }, /* Dynastream ANT development board */
+	{ USB_DEVICE(0x10A6, 0xAA26) }, /* Knock-off DCU-11 cable */
+	{ USB_DEVICE(0x10AB, 0x10C5) }, /* Siemens MC60 Cable */
+	{ USB_DEVICE(0x10B5, 0xAC70) }, /* Nokia CA-42 USB */
+	{ USB_DEVICE(0x10C4, 0x803B) }, /* Pololu USB-serial converter */
+	{ USB_DEVICE(0x10C4, 0x8066) }, /* Argussoft In-System Programmer */
+	{ USB_DEVICE(0x10C4, 0x807A) }, /* Crumb128 board */
+	{ USB_DEVICE(0x10C4, 0x80CA) }, /* Degree Controls Inc */
+	{ USB_DEVICE(0x10C4, 0x80F6) }, /* Suunto sports instrument */
+	{ USB_DEVICE(0x10C4, 0x813D) }, /* Burnside Telecom Deskmobile */
+	{ USB_DEVICE(0x10C4, 0x815E) }, /* Helicomm IP-Link 1220-DVM */
+	{ USB_DEVICE(0x10C4, 0xEA60) }, /* Silicon Labs factory default */
+	{ USB_DEVICE(0x16D6, 0x0001) }, /* Jablotron serial interface */
 	{ } /* Terminating Entry */
 };
 
 MODULE_DEVICE_TABLE (usb, id_table);
 
 static struct usb_driver cp2101_driver = {
-	.owner		= THIS_MODULE,
-	.name		= "CP2101",
+	.name		= "cp2101",
 	.probe		= usb_serial_probe,
 	.disconnect	= usb_serial_disconnect,
 	.id_table	= id_table,
+	.no_dynamic_id	= 	1,
 };
 
-static struct usb_serial_device_type cp2101_device = {
-	.owner			= THIS_MODULE,
-	.name			= "CP2101",
+static struct usb_serial_driver cp2101_device = {
+	.driver = {
+		.owner =	THIS_MODULE,
+		.name = 	"cp2101",
+	},
 	.id_table		= id_table,
 	.num_interrupt_in	= 0,
 	.num_bulk_in		= 0,
@@ -159,9 +170,7 @@ static int cp2101_get_config(struct usb_serial_port* port, u8 request,
 	/* Number of integers required to contain the array */
 	length = (((size - 1) | 3) + 1)/4;
 
-	buf = kmalloc (length * sizeof(u32), GFP_KERNEL);
-	memset(buf, 0, length * sizeof(u32));
-
+	buf = kcalloc(length, sizeof(u32), GFP_KERNEL);
 	if (!buf) {
 		dev_err(&port->dev, "%s - out of memory.\n", __FUNCTION__);
 		return -ENOMEM;

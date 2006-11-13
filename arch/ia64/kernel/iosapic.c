@@ -79,7 +79,6 @@
  * describeinterrupts.  Now we use "IRQ" only for Linux IRQ's.  ISA IRQ
  * (isa_irq) is the only exception in this source code.
  */
-#include <linux/config.h>
 
 #include <linux/acpi.h>
 #include <linux/init.h>
@@ -159,6 +158,65 @@ static unsigned char pcat_compat __devinitdata;	/* 8259 compatibility flag */
 
 static int iosapic_kmalloc_ok;
 static LIST_HEAD(free_rte_list);
+
+#ifdef CONFIG_XEN
+#include <xen/interface/xen.h>
+#include <xen/interface/physdev.h>
+#include <asm/hypervisor.h>
+static inline unsigned int xen_iosapic_read(char __iomem *iosapic, unsigned int reg)
+{
+	struct physdev_apic apic_op;
+	int ret;
+
+	apic_op.apic_physbase = (unsigned long)iosapic -
+					__IA64_UNCACHED_OFFSET;
+	apic_op.reg = reg;
+	ret = HYPERVISOR_physdev_op(PHYSDEVOP_apic_read, &apic_op);
+	if (ret)
+		return ret;
+	return apic_op.value;
+}
+
+static inline void xen_iosapic_write(char __iomem *iosapic, unsigned int reg, u32 val)
+{
+	struct physdev_apic apic_op;
+
+	apic_op.apic_physbase = (unsigned long)iosapic - 
+					__IA64_UNCACHED_OFFSET;
+	apic_op.reg = reg;
+	apic_op.value = val;
+	HYPERVISOR_physdev_op(PHYSDEVOP_apic_write, &apic_op);
+}
+
+static inline unsigned int iosapic_read(char __iomem *iosapic, unsigned int reg)
+{
+	if (!is_running_on_xen()) {
+		writel(reg, iosapic + IOSAPIC_REG_SELECT);
+		return readl(iosapic + IOSAPIC_WINDOW);
+	} else
+		return xen_iosapic_read(iosapic, reg);
+}
+
+static inline void iosapic_write(char __iomem *iosapic, unsigned int reg, u32 val)
+{
+	if (!is_running_on_xen()) {
+		writel(reg, iosapic + IOSAPIC_REG_SELECT);
+		writel(val, iosapic + IOSAPIC_WINDOW);
+	} else
+		xen_iosapic_write(iosapic, reg, val);
+}
+
+int xen_assign_irq_vector(int irq)
+{
+	struct physdev_irq irq_op;
+
+	irq_op.irq = irq;
+	if (HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op))
+		return -ENOSPC;
+
+	return irq_op.vector;
+}
+#endif /* XEN */
 
 /*
  * Find an IOSAPIC associated with a GSI
@@ -456,7 +514,7 @@ iosapic_startup_edge_irq (unsigned int irq)
 static void
 iosapic_ack_edge_irq (unsigned int irq)
 {
-	irq_desc_t *idesc = irq_descp(irq);
+	irq_desc_t *idesc = irq_desc + irq;
 
 	move_native_irq(irq);
 	/*
@@ -654,19 +712,22 @@ register_intr (unsigned int gsi, int vector, unsigned char delivery,
 	iosapic_intr_info[vector].dmode    = delivery;
 	iosapic_intr_info[vector].trigger  = trigger;
 
+	if (is_running_on_xen())
+		return 0;
+
 	if (trigger == IOSAPIC_EDGE)
 		irq_type = &irq_type_iosapic_edge;
 	else
 		irq_type = &irq_type_iosapic_level;
 
-	idesc = irq_descp(vector);
-	if (idesc->handler != irq_type) {
-		if (idesc->handler != &no_irq_type)
+	idesc = irq_desc + vector;
+	if (idesc->chip != irq_type) {
+		if (idesc->chip != &no_irq_type)
 			printk(KERN_WARNING
 			       "%s: changing vector %d from %s to %s\n",
 			       __FUNCTION__, vector,
-			       idesc->handler->typename, irq_type->typename);
-		idesc->handler = irq_type;
+			       idesc->chip->typename, irq_type->typename);
+		idesc->chip = irq_type;
 	}
 	return 0;
 }
@@ -793,14 +854,14 @@ again:
 			return -ENOSPC;
 	}
 
-	spin_lock_irqsave(&irq_descp(vector)->lock, flags);
+	spin_lock_irqsave(&irq_desc[vector].lock, flags);
 	spin_lock(&iosapic_lock);
 	{
 		if (gsi_to_vector(gsi) > 0) {
 			if (list_empty(&iosapic_intr_info[vector].rtes))
 				free_irq_vector(vector);
 			spin_unlock(&iosapic_lock);
-			spin_unlock_irqrestore(&irq_descp(vector)->lock,
+			spin_unlock_irqrestore(&irq_desc[vector].lock,
 					       flags);
 			goto again;
 		}
@@ -810,7 +871,7 @@ again:
 			      polarity, trigger);
 		if (err < 0) {
 			spin_unlock(&iosapic_lock);
-			spin_unlock_irqrestore(&irq_descp(vector)->lock,
+			spin_unlock_irqrestore(&irq_desc[vector].lock,
 					       flags);
 			return err;
 		}
@@ -825,7 +886,7 @@ again:
 		set_rte(gsi, vector, dest, mask);
 	}
 	spin_unlock(&iosapic_lock);
-	spin_unlock_irqrestore(&irq_descp(vector)->lock, flags);
+	spin_unlock_irqrestore(&irq_desc[vector].lock, flags);
 
 	printk(KERN_INFO "GSI %u (%s, %s) -> CPU %d (0x%04x) vector %d\n",
 	       gsi, (trigger == IOSAPIC_EDGE ? "edge" : "level"),
@@ -860,7 +921,7 @@ iosapic_unregister_intr (unsigned int gsi)
 	}
 	vector = irq_to_vector(irq);
 
-	idesc = irq_descp(irq);
+	idesc = irq_desc + irq;
 	spin_lock_irqsave(&idesc->lock, flags);
 	spin_lock(&iosapic_lock);
 	{
@@ -903,7 +964,7 @@ iosapic_unregister_intr (unsigned int gsi)
 			BUG_ON(iosapic_intr_info[vector].count);
 
 			/* Clear the interrupt controller descriptor */
-			idesc->handler = &no_irq_type;
+			idesc->chip = &no_irq_type;
 
 			/* Clear the interrupt information */
 			memset(&iosapic_intr_info[vector], 0,
@@ -1016,6 +1077,9 @@ iosapic_system_init (int system_pcat_compat)
 	}
 
 	pcat_compat = system_pcat_compat;
+	if (is_running_on_xen())
+		return;
+
 	if (pcat_compat) {
 		/*
 		 * Disable the compatibility mode interrupts (8259 style),

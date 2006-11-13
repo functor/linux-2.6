@@ -14,7 +14,6 @@
  * Support for CMBVR4133 board in 2.6
  * Author: Manish Lachwani (mlachwani@mvista.com)
  */
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/ide.h>
 #include <linux/ioport.h>
@@ -56,7 +55,7 @@ static struct mtd_partition cmbvr4133_mtd_parts[] = {
 
 extern void i8259_init(void);
 
-static int __init nec_cmbvr4133_setup(void)
+static void __init nec_cmbvr4133_setup(void)
 {
 #ifdef CONFIG_ROCKHOPPER
 	extern void disable_pcnet(void);
@@ -90,7 +89,4 @@ static int __init nec_cmbvr4133_setup(void)
 #ifdef CONFIG_ROCKHOPPER
 	i8259_init();
 #endif
-	return 0;
 }
-
-early_initcall(nec_cmbvr4133_setup);

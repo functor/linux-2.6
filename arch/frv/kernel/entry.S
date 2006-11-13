@@ -27,8 +27,6 @@
  *
  */
 
-#include <linux/sys.h>
-#include <linux/config.h>
 #include <linux/linkage.h>
 #include <asm/thread_info.h>
 #include <asm/setup.h>
@@ -141,7 +139,10 @@ __entry_uspace_external_interrupt_reentry:
 
 	movsg		gner0,gr4
 	movsg		gner1,gr5
-	stdi		gr4,@(gr28,#REG_GNER0)
+	stdi.p		gr4,@(gr28,#REG_GNER0)
+
+	# interrupts start off fully disabled in the interrupt handler
+	subcc		gr0,gr0,gr0,icc2		/* set Z and clear C */
 
 	# set up kernel global registers
 	sethi.p		%hi(__kernel_current_task),gr5
@@ -193,9 +194,8 @@ __entry_uspace_external_interrupt_reentry:
         .type		__entry_kernel_external_interrupt,@function
 __entry_kernel_external_interrupt:
 	LEDS		0x6210
-
-	sub		sp,gr15,gr31
-	LEDS32
+//	sub		sp,gr15,gr31
+//	LEDS32
 
 	# set up the stack pointer
 	or.p		sp,gr0,gr30
@@ -231,7 +231,10 @@ __entry_kernel_external_interrupt_reentry:
 	stdi		gr24,@(gr28,#REG_GR(24))
 	stdi		gr26,@(gr28,#REG_GR(26))
 	sti		gr29,@(gr28,#REG_GR(29))
-	stdi		gr30,@(gr28,#REG_GR(30))
+	stdi.p		gr30,@(gr28,#REG_GR(30))
+
+	# note virtual interrupts will be fully enabled upon return
+	subicc		gr0,#1,gr0,icc2			/* clear Z, set C */
 
 	movsg		tbr ,gr20
 	movsg		psr ,gr22
@@ -267,7 +270,10 @@ __entry_kernel_external_interrupt_reentry:
 
 	movsg		gner0,gr4
 	movsg		gner1,gr5
-	stdi		gr4,@(gr28,#REG_GNER0)
+	stdi.p		gr4,@(gr28,#REG_GNER0)
+
+	# interrupts start off fully disabled in the interrupt handler
+	subcc		gr0,gr0,gr0,icc2			/* set Z and clear C */
 
 	# set the return address
 	sethi.p		%hi(__entry_return_from_kernel_interrupt),gr4
@@ -291,6 +297,45 @@ __entry_kernel_external_interrupt_reentry:
 
 	.size		__entry_kernel_external_interrupt,.-__entry_kernel_external_interrupt
 
+###############################################################################
+#
+# deal with interrupts that were actually virtually disabled
+# - we need to really disable them, flag the fact and return immediately
+# - if you change this, you must alter break.S also
+#
+###############################################################################
+	.balign		L1_CACHE_BYTES
+	.globl		__entry_kernel_external_interrupt_virtually_disabled
+	.type		__entry_kernel_external_interrupt_virtually_disabled,@function
+__entry_kernel_external_interrupt_virtually_disabled:
+	movsg		psr,gr30
+	andi		gr30,#~PSR_PIL,gr30
+	ori		gr30,#PSR_PIL_14,gr30		; debugging interrupts only
+	movgs		gr30,psr
+	subcc		gr0,gr0,gr0,icc2		; leave Z set, clear C
+	rett		#0
+
+	.size		__entry_kernel_external_interrupt_virtually_disabled,.-__entry_kernel_external_interrupt_virtually_disabled
+
+###############################################################################
+#
+# deal with re-enablement of interrupts that were pending when virtually re-enabled
+# - set ICC2.C, re-enable the real interrupts and return
+# - we can clear ICC2.Z because we shouldn't be here if it's not 0 [due to TIHI]
+# - if you change this, you must alter break.S also
+#
+###############################################################################
+	.balign		L1_CACHE_BYTES
+	.globl		__entry_kernel_external_interrupt_virtual_reenable
+	.type		__entry_kernel_external_interrupt_virtual_reenable,@function
+__entry_kernel_external_interrupt_virtual_reenable:
+	movsg		psr,gr30
+	andi		gr30,#~PSR_PIL,gr30		; re-enable interrupts
+	movgs		gr30,psr
+	subicc		gr0,#1,gr0,icc2			; clear Z, set C
+	rett		#0
+
+	.size		__entry_kernel_external_interrupt_virtual_reenable,.-__entry_kernel_external_interrupt_virtual_reenable
 
 ###############################################################################
 #
@@ -335,6 +380,7 @@ __entry_uspace_softprog_interrupt_reentry:
 
 	sethi.p		%hi(__entry_return_from_user_exception),gr23
 	setlo		%lo(__entry_return_from_user_exception),gr23
+
 	bra		__entry_common
 
 	.size		__entry_uspace_softprog_interrupt,.-__entry_uspace_softprog_interrupt
@@ -495,7 +541,10 @@ __entry_common:
 
 	movsg		gner0,gr4
 	movsg		gner1,gr5
-	stdi		gr4,@(gr28,#REG_GNER0)
+	stdi.p		gr4,@(gr28,#REG_GNER0)
+
+	# set up virtual interrupt disablement
+	subicc		gr0,#1,gr0,icc2			/* clear Z flag, set C flag */
 
 	# set up kernel global registers
 	sethi.p		%hi(__kernel_current_task),gr5
@@ -1076,7 +1125,7 @@ __entry_work_notifysig:
 	LEDS		0x6410
 	ori.p		gr4,#0,gr8
 	call		do_notify_resume
-	bra		__entry_return_direct
+	bra		__entry_resume_userspace
 
 	# perform syscall entry tracing
 __syscall_trace_entry:
@@ -1119,12 +1168,6 @@ __syscall_badsys:
 # syscall vector table
 #
 ###############################################################################
-#ifdef CONFIG_MMU
-#define __MMU(X) X
-#else
-#define __MMU(X) sys_ni_syscall
-#endif
-
 	.section .rodata
 ALIGN
 	.globl		sys_call_table
@@ -1254,7 +1297,7 @@ sys_call_table:
 	.long sys_newuname
 	.long sys_ni_syscall	/* old "cacheflush" */
 	.long sys_adjtimex
-	.long __MMU(sys_mprotect) /* 125 */
+	.long sys_mprotect	/* 125 */
 	.long sys_sigprocmask
 	.long sys_ni_syscall	/* old "create_module" */
 	.long sys_init_module
@@ -1273,16 +1316,16 @@ sys_call_table:
 	.long sys_getdents
 	.long sys_select
 	.long sys_flock
-	.long __MMU(sys_msync)
+	.long sys_msync
 	.long sys_readv		/* 145 */
 	.long sys_writev
 	.long sys_getsid
 	.long sys_fdatasync
 	.long sys_sysctl
-	.long __MMU(sys_mlock)		/* 150 */
-	.long __MMU(sys_munlock)
-	.long __MMU(sys_mlockall)
-	.long __MMU(sys_munlockall)
+	.long sys_mlock		/* 150 */
+	.long sys_munlock
+	.long sys_mlockall
+	.long sys_munlockall
 	.long sys_sched_setparam
 	.long sys_sched_getparam   /* 155 */
 	.long sys_sched_setscheduler
@@ -1292,7 +1335,7 @@ sys_call_table:
 	.long sys_sched_get_priority_min  /* 160 */
 	.long sys_sched_rr_get_interval
 	.long sys_nanosleep
-	.long __MMU(sys_mremap)
+	.long sys_mremap
 	.long sys_setresuid16
 	.long sys_getresuid16	/* 165 */
 	.long sys_ni_syscall	/* for vm86 */
@@ -1347,8 +1390,8 @@ sys_call_table:
 	.long sys_setfsuid		/* 215 */
 	.long sys_setfsgid
 	.long sys_pivot_root
-	.long __MMU(sys_mincore)
-	.long __MMU(sys_madvise)
+	.long sys_mincore
+	.long sys_madvise
 	.long sys_getdents64	/* 220 */
 	.long sys_fcntl64
 	.long sys_ni_syscall	/* reserved for TUX */
@@ -1386,7 +1429,7 @@ sys_call_table:
 	.long sys_epoll_create
 	.long sys_epoll_ctl	/* 255 */
 	.long sys_epoll_wait
- 	.long __MMU(sys_remap_file_pages)
+ 	.long sys_remap_file_pages
  	.long sys_set_tid_address
  	.long sys_timer_create
  	.long sys_timer_settime		/* 260 */
@@ -1418,11 +1461,27 @@ sys_call_table:
 	.long sys_add_key
 	.long sys_request_key
 	.long sys_keyctl
-	.long sys_ni_syscall // sys_vperfctr_open
-	.long sys_ni_syscall // sys_vperfctr_control	/* 290 */
-	.long sys_ni_syscall // sys_vperfctr_unlink
-	.long sys_ni_syscall // sys_vperfctr_iresume
-	.long sys_ni_syscall // sys_vperfctr_read
+	.long sys_ioprio_set
+	.long sys_ioprio_get		/* 290 */
+	.long sys_inotify_init
+	.long sys_inotify_add_watch
+	.long sys_inotify_rm_watch
+	.long sys_migrate_pages
+	.long sys_openat		/* 295 */
+	.long sys_mkdirat
+	.long sys_mknodat
+	.long sys_fchownat
+	.long sys_futimesat
+	.long sys_fstatat64		/* 300 */
+	.long sys_unlinkat
+	.long sys_renameat
+	.long sys_linkat
+	.long sys_symlinkat
+	.long sys_readlinkat		/* 305 */
+	.long sys_fchmodat
+	.long sys_faccessat
+	.long sys_pselect6
+	.long sys_ppoll
 
 
 syscall_table_size = (. - sys_call_table)

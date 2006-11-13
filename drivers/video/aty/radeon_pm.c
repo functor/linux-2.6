@@ -25,25 +25,100 @@
 #include <asm/pmac_feature.h>
 #endif
 
-/* For detecting supported PC laptops */
-#ifdef CONFIG_X86
-#include <linux/dmi.h>
-#endif
-
 #include "ati_ids.h"
 
-#ifdef CONFIG_X86
-/* This array holds a list of supported PC laptops.
- * Currently only few IBM models are tested.
- * If you want to experiment, use dmidecode to find out
- * vendor and product codes for Your laptop.
+static void radeon_reinitialize_M10(struct radeonfb_info *rinfo);
+
+/*
+ * Workarounds for bugs in PC laptops:
+ * - enable D2 sleep in some IBM Thinkpads
+ * - special case for Samsung P35
+ *
+ * Whitelist by subsystem vendor/device because
+ * its the subsystem vendor's fault!
  */
-static struct dmi_system_id __devinitdata radeonfb_dmi_table[] = {
-#include "radeon_pm_whitelist.h"
+
+#if defined(CONFIG_PM) && defined(CONFIG_X86)
+struct radeon_device_id {
+        const char *ident;                     /* (arbitrary) Name */
+        const unsigned short subsystem_vendor; /* Subsystem Vendor ID */
+        const unsigned short subsystem_device; /* Subsystem Device ID */
+	const enum radeon_pm_mode pm_mode_modifier; /* modify pm_mode */
+	const reinit_function_ptr new_reinit_func;   /* changed reinit_func */
 };
 
-extern int radeon_force_sleep;
-#endif
+#define BUGFIX(model, sv, sd, pm, fn) { \
+	.ident = model, \
+	.subsystem_vendor = sv, \
+	.subsystem_device = sd, \
+	.pm_mode_modifier = pm, \
+	.new_reinit_func  = fn  \
+}
+
+static struct radeon_device_id radeon_workaround_list[] = {
+	BUGFIX("IBM Thinkpad R32",
+	       PCI_VENDOR_ID_IBM, 0x1905,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad R40",
+	       PCI_VENDOR_ID_IBM, 0x0526,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad R40",
+	       PCI_VENDOR_ID_IBM, 0x0527,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad R50/R51/T40/T41",
+	       PCI_VENDOR_ID_IBM, 0x0531,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad R51/T40/T41/T42",
+	       PCI_VENDOR_ID_IBM, 0x0530,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad T30",
+	       PCI_VENDOR_ID_IBM, 0x0517,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad T40p",
+	       PCI_VENDOR_ID_IBM, 0x054d,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad T42",
+	       PCI_VENDOR_ID_IBM, 0x0550,
+	       radeon_pm_d2, NULL),
+	BUGFIX("IBM Thinkpad X31/X32",
+	       PCI_VENDOR_ID_IBM, 0x052f,
+	       radeon_pm_d2, NULL),
+	BUGFIX("Samsung P35",
+	       PCI_VENDOR_ID_SAMSUNG, 0xc00c,
+	       radeon_pm_off, radeon_reinitialize_M10),
+	{ .ident = NULL }
+};
+
+static int radeon_apply_workarounds(struct radeonfb_info *rinfo)
+{
+	struct radeon_device_id *id;
+
+	for (id = radeon_workaround_list; id->ident != NULL; id++ )
+		if ((id->subsystem_vendor == rinfo->pdev->subsystem_vendor ) &&
+		    (id->subsystem_device == rinfo->pdev->subsystem_device )) {
+
+			/* we found a device that requires workaround */
+			printk(KERN_DEBUG "radeonfb: %s detected"
+			       ", enabling workaround\n", id->ident);
+
+			rinfo->pm_mode |= id->pm_mode_modifier;
+
+			if (id->new_reinit_func != NULL)
+				rinfo->reinit_func = id->new_reinit_func;
+
+			return 1;
+		}
+	return 0;  /* not found */
+}
+
+#else  /* defined(CONFIG_PM) && defined(CONFIG_X86) */
+static inline int radeon_apply_workarounds(struct radeonfb_info *rinfo)
+{
+        return 0;
+}
+#endif /* defined(CONFIG_PM) && defined(CONFIG_X86) */
+
+
 
 static void radeon_pm_disable_dynamic_mode(struct radeonfb_info *rinfo)
 {
@@ -876,18 +951,18 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 	 * now (until we get more info on how to compute the correct
 	 * value for various X86 bridges).
 	 */
-
 #ifdef CONFIG_PPC_PMAC
-	/* AGP PLL control */
-	if (rinfo->family <= CHIP_FAMILY_RV280) {
-		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1) |  BUS_CNTL1__AGPCLK_VALID);
-
-		OUTREG(BUS_CNTL1,
-		       (INREG(BUS_CNTL1) & ~BUS_CNTL1__MOBILE_PLATFORM_SEL_MASK)
-		       | (2<<BUS_CNTL1__MOBILE_PLATFORM_SEL__SHIFT));	// 440BX
-	} else {
-		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1));
-		OUTREG(BUS_CNTL1, (INREG(BUS_CNTL1) & ~0x4000) | 0x8000);
+	if (machine_is(powermac)) {
+		/* AGP PLL control */
+		if (rinfo->family <= CHIP_FAMILY_RV280) {
+			OUTREG(BUS_CNTL1, INREG(BUS_CNTL1) |  BUS_CNTL1__AGPCLK_VALID);
+			OUTREG(BUS_CNTL1,
+			       (INREG(BUS_CNTL1) & ~BUS_CNTL1__MOBILE_PLATFORM_SEL_MASK)
+			       | (2<<BUS_CNTL1__MOBILE_PLATFORM_SEL__SHIFT));	// 440BX
+		} else {
+			OUTREG(BUS_CNTL1, INREG(BUS_CNTL1));
+			OUTREG(BUS_CNTL1, (INREG(BUS_CNTL1) & ~0x4000) | 0x8000);
+		}
 	}
 #endif
 
@@ -2739,7 +2814,7 @@ static void radeonfb_early_resume(void *data)
 
 #endif /* CONFIG_PM */
 
-void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
+void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk, int ignore_devlist, int force_sleep)
 {
 	/* Find PM registers in config space if any*/
 	rinfo->pm_reg = pci_find_capability(rinfo->pdev, PCI_CAP_ID_PM);
@@ -2755,22 +2830,13 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 	}
 
 #if defined(CONFIG_PM)
+#if defined(CONFIG_PPC_PMAC)
 	/* Check if we can power manage on suspend/resume. We can do
 	 * D2 on M6, M7 and M9, and we can resume from D3 cold a few other
 	 * "Mac" cards, but that's all. We need more infos about what the
 	 * BIOS does tho. Right now, all this PM stuff is pmac-only for that
 	 * reason. --BenH
 	 */
-	/* Special case for Samsung P35 laptops
-	 */
-	if ((rinfo->pdev->vendor == PCI_VENDOR_ID_ATI) &&
-	    (rinfo->pdev->device == PCI_CHIP_RV350_NP) &&
-	    (rinfo->pdev->subsystem_vendor == PCI_VENDOR_ID_SAMSUNG) &&
-	    (rinfo->pdev->subsystem_device == 0xc00c)) {
-		rinfo->reinit_func = radeon_reinitialize_M10;
-		rinfo->pm_mode |= radeon_pm_off;
-	}
-#if defined(CONFIG_PPC_PMAC)
 	if (machine_is(powermac) && rinfo->of_node) {
 		if (rinfo->is_mobility && rinfo->pm_reg &&
 		    rinfo->family <= CHIP_FAMILY_RV250)
@@ -2817,28 +2883,17 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 #endif /* defined(CONFIG_PPC_PMAC) */
 #endif /* defined(CONFIG_PM) */
 
-/* The PM code also works on some PC laptops.
- * Only a few models are actually tested so Your mileage may vary.
- * We can do D2 on at least M7 and M9 on some IBM ThinkPad T41 models.
- */
-#if defined(CONFIG_PM) && defined(CONFIG_X86)
-	if (radeon_force_sleep || dmi_check_system(radeonfb_dmi_table)) {
-		if (radeon_force_sleep)
-			printk("radeonfb: forcefully enabling sleep mode\n");
-		else
-			printk("radeonfb: enabling sleep mode\n");
+	if (ignore_devlist)
+		printk(KERN_DEBUG
+		       "radeonfb: skipping test for device workarounds\n");
+	else
+		radeon_apply_workarounds(rinfo);
 
-		if (rinfo->is_mobility && rinfo->pm_reg &&
-		    rinfo->family <= CHIP_FAMILY_RV250)
-			rinfo->pm_mode |= radeon_pm_d2;
-
-		/* Power down TV DAC, that saves a significant amount of power,
-		 * we'll have something better once we actually have some TVOut
-		 * support
-		 */
-		OUTREG(TV_DAC_CNTL, INREG(TV_DAC_CNTL) | 0x07000000);
+	if (force_sleep) {
+		printk(KERN_DEBUG
+		       "radeonfb: forcefully enabling D2 sleep mode\n");
+		rinfo->pm_mode |= radeon_pm_d2;
 	}
-#endif /* defined(CONFIG_PM) && defined(CONFIG_X86) */
 }
 
 void radeonfb_pm_exit(struct radeonfb_info *rinfo)

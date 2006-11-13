@@ -270,7 +270,7 @@ static int read_request (struct socket *sock, char *buf, int max_size)
 
 	int len;
 
-	msg.msg_name     = 0;
+	msg.msg_name     = NULL;
 	msg.msg_namelen  = 0;
 	msg.msg_iov	 = &iov;
 	msg.msg_iovlen   = 1;
@@ -320,7 +320,7 @@ static int zap_urg_data (struct socket *sock)
 
 	oldmm = get_fs(); set_fs(KERNEL_DS);
 
-	msg.msg_name		= 0;
+	msg.msg_name		= NULL;
 	msg.msg_namelen		= 0;
 	msg.msg_iov		= &iov;
 	msg.msg_iovlen		= 1;
@@ -479,7 +479,7 @@ restart:
 			lock_sock(sk);
 			icsk->icsk_ack.pingpong = 0;
 			icsk->icsk_ack.pending |= ICSK_ACK_PUSHED;
-			cleanup_rbuf(sk, 1);
+			tcp_cleanup_rbuf(sk, 1);
 			release_sock(sk);
 		}
 		if (len >= tux_max_header_len-1)

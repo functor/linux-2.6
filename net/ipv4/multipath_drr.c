@@ -12,7 +12,6 @@
  *		2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <linux/types.h>
@@ -107,7 +106,7 @@ static int drr_dev_event(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
-struct notifier_block drr_dev_notifier = {
+static struct notifier_block drr_dev_notifier = {
 	.notifier_call	= drr_dev_event,
 };
 

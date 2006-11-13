@@ -7,7 +7,6 @@
  * Copyright (C) 1996,98,99 Jakub Jelinek  (jj@sunsite.mff.cuni.cz)
  */
 
-#include <linux/config.h>
 #include <linux/errno.h>
 
 #include <asm/head.h>
@@ -22,6 +21,7 @@
 #include <asm/estate.h>
 #include <asm/auxio.h>
 #include <asm/sfafsr.h>
+#include <asm/pil.h>
 
 #define curptr      g6
 
@@ -431,20 +431,16 @@ do_ivec:
 	membar		#Sync
 
 	sethi		%hi(ivector_table), %g2
-	sllx		%g3, 5, %g3
+	sllx		%g3, 3, %g3
 	or		%g2, %lo(ivector_table), %g2
 	add		%g2, %g3, %g3
-	ldub		[%g3 + 0x04], %g4	/* pil */
-	mov		1, %g2
-	sllx		%g2, %g4, %g2
-	sllx		%g4, 2, %g4
 
 	TRAP_LOAD_IRQ_WORK(%g6, %g1)
 
-	lduw		[%g6 + %g4], %g5	/* g5 = irq_work(cpu, pil) */
+	lduw		[%g6], %g5		/* g5 = irq_work(cpu) */
 	stw		%g5, [%g3 + 0x00]	/* bucket->irq_chain = g5 */
-	stw		%g3, [%g6 + %g4]	/* irq_work(cpu, pil) = bucket */
-	wr		%g2, 0x0, %set_softint
+	stw		%g3, [%g6]		/* irq_work(cpu) = bucket */
+	wr		%g0, 1 << PIL_DEVICE_IRQ, %set_softint
 	retry
 do_ivec_xcall:
 	mov		0x50, %g1
@@ -1414,7 +1410,6 @@ execve_merge:
 
 	.globl	sys_pipe, sys_sigpause, sys_nis_syscall
 	.globl	sys_rt_sigreturn
-	.globl	sys_ptrace
 	.globl	sys_sigaltstack
 	.align	32
 sys_pipe:	ba,pt		%xcc, sparc_pipe
@@ -1457,11 +1452,6 @@ sys32_rt_sigreturn:
 		 add		%o7, 1f-.-4, %o7
 		nop
 #endif
-sys_ptrace:	add		%sp, PTREGS_OFF, %o0
-		call		do_ptrace
-		 add		%o7, 1f-.-4, %o7
-		nop
-		.align		32
 1:		ldx		[%curptr + TI_FLAGS], %l5
 		andcc		%l5, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT), %g0
 		be,pt		%icc, rtrap

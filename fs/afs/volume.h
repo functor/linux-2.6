@@ -12,11 +12,11 @@
 #ifndef _LINUX_AFS_VOLUME_H
 #define _LINUX_AFS_VOLUME_H
 
+#include <linux/fscache.h>
 #include "types.h"
 #include "fsclient.h"
 #include "kafstimod.h"
 #include "kafsasyncd.h"
-#include "cache.h"
 
 typedef enum {
 	AFS_VLUPD_SLEEP,		/* sleeping waiting for update timer to fire */
@@ -45,24 +45,6 @@ struct afs_cache_vlocation
 	time_t			rtime;		/* last retrieval time */
 };
 
-#ifdef AFS_CACHING_SUPPORT
-extern struct cachefs_index_def afs_vlocation_cache_index_def;
-#endif
-
-/*****************************************************************************/
-/*
- * volume -> vnode hash table entry
- */
-struct afs_cache_vhash
-{
-	afs_voltype_t		vtype;		/* which volume variation */
-	uint8_t			hash_bucket;	/* which hash bucket this represents */
-} __attribute__((packed));
-
-#ifdef AFS_CACHING_SUPPORT
-extern struct cachefs_index_def afs_volume_cache_index_def;
-#endif
-
 /*****************************************************************************/
 /*
  * AFS volume location record
@@ -73,8 +55,8 @@ struct afs_vlocation
 	struct list_head	link;		/* link in cell volume location list */
 	struct afs_timer	timeout;	/* decaching timer */
 	struct afs_cell		*cell;		/* cell to which volume belongs */
-#ifdef AFS_CACHING_SUPPORT
-	struct cachefs_cookie	*cache;		/* caching cookie */
+#ifdef CONFIG_AFS_FSCACHE
+	struct fscache_cookie	*cache;		/* caching cookie */
 #endif
 	struct afs_cache_vlocation vldb;	/* volume information DB record */
 	struct afs_volume	*vols[3];	/* volume access record pointer (index by type) */
@@ -109,8 +91,8 @@ struct afs_volume
 	atomic_t		usage;
 	struct afs_cell		*cell;		/* cell to which belongs (unrefd ptr) */
 	struct afs_vlocation	*vlocation;	/* volume location */
-#ifdef AFS_CACHING_SUPPORT
-	struct cachefs_cookie	*cache;		/* caching cookie */
+#ifdef CONFIG_AFS_FSCACHE
+	struct fscache_cookie	*cache;		/* caching cookie */
 #endif
 	afs_volid_t		vid;		/* volume ID */
 	afs_voltype_t		type;		/* type of volume */

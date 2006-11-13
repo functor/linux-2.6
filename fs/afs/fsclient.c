@@ -398,6 +398,8 @@ int afs_rxfs_fetch_file_status(struct afs_server *server,
 		bp++; /* spare6 */
 	}
 
+	_debug("Data Version %llx\n", vnode->status.version);
+
 	/* success */
 	ret = 0;
 
@@ -408,7 +410,7 @@ int afs_rxfs_fetch_file_status(struct afs_server *server,
  out_put_conn:
 	afs_server_release_callslot(server, &callslot);
  out:
-	_leave("");
+	_leave(" = %d", ret);
 	return ret;
 
  abort:

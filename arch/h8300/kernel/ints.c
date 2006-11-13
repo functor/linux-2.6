@@ -23,6 +23,7 @@
 #include <linux/random.h>
 #include <linux/bootmem.h>
 #include <linux/hardirq.h>
+#include <linux/vs_context.h>
 
 #include <asm/system.h>
 #include <asm/irq.h>
@@ -158,7 +159,7 @@ int request_irq(unsigned int irq,
 	irq_handle->devname = devname;
 	irq_list[irq] = irq_handle;
 
-	if (irq_handle->flags & SA_SAMPLE_RANDOM)
+	if (irq_handle->flags & IRQF_SAMPLE_RANDOM)
 		rand_initialize_irq(irq);
 
 	enable_irq(irq);
@@ -216,18 +217,22 @@ void disable_irq(unsigned int irq)
 
 asmlinkage void process_int(int irq, struct pt_regs *fp)
 {
+	struct vx_info_save vxis;
+
 	irq_enter();
+	__enter_vx_admin(&vxis);
 	h8300_clear_isr(irq);
 	if (irq >= NR_TRAPS && irq < NR_IRQS) {
 		if (irq_list[irq]) {
 			irq_list[irq]->handler(irq, irq_list[irq]->dev_id, fp);
 			irq_list[irq]->count++;
-			if (irq_list[irq]->flags & SA_SAMPLE_RANDOM)
+			if (irq_list[irq]->flags & IRQF_SAMPLE_RANDOM)
 				add_interrupt_randomness(irq);
 		}
 	} else {
 		BUG();
 	}
+	__leave_vx_admin(&vxis);
 	irq_exit();
 }
 

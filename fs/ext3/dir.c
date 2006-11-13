@@ -151,6 +151,9 @@ static int ext3_readdir(struct file * filp,
 			ext3_error (sb, "ext3_readdir",
 				"directory #%lu contains a hole at offset %lu",
 				inode->i_ino, (unsigned long)filp->f_pos);
+			/* corrupt size?  Maybe no more blocks to read */
+			if (filp->f_pos > inode->i_blocks << 9)
+				break;
 			filp->f_pos += sb->s_blocksize - offset;
 			continue;
 		}
@@ -284,7 +287,7 @@ static void free_rb_tree_fname(struct rb_root *root)
 		 * beginning of the loop and try to free the parent
 		 * node.
 		 */
-		parent = n->rb_parent;
+		parent = rb_parent(n);
 		fname = rb_entry(n, struct fname, rb_hash);
 		while (fname) {
 			struct fname * old = fname;

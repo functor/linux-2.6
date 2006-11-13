@@ -81,7 +81,6 @@
  *      open up a beer to watch the compilation going.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -92,7 +91,6 @@
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <net/pkt_cls.h>
-#include <config/net/ematch/stack.h>
 
 static LIST_HEAD(ematch_ops);
 static DEFINE_RWLOCK(ematch_mod_lock);
@@ -298,6 +296,11 @@ int tcf_em_tree_validate(struct tcf_proto *tp, struct rtattr *rta,
 	struct tcf_ematch_tree_hdr *tree_hdr;
 	struct tcf_ematch *em;
 
+	if (!rta) {
+		memset(tree, 0, sizeof(*tree));
+		return 0;
+	}
+
 	if (rtattr_parse_nested(tb, TCA_EMATCH_TREE_MAX, rta) < 0)
 		goto errout;
 
@@ -318,10 +321,9 @@ int tcf_em_tree_validate(struct tcf_proto *tp, struct rtattr *rta,
 	list_len = RTA_PAYLOAD(rt_list);
 	matches_len = tree_hdr->nmatches * sizeof(*em);
 
-	tree->matches = kmalloc(matches_len, GFP_KERNEL);
+	tree->matches = kzalloc(matches_len, GFP_KERNEL);
 	if (tree->matches == NULL)
 		goto errout;
-	memset(tree->matches, 0, matches_len);
 
 	/* We do not use rtattr_parse_nested here because the maximum
 	 * number of attributes is unknown. This saves us the allocation

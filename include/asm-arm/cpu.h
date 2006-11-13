@@ -10,12 +10,12 @@
 #ifndef __ASM_ARM_CPU_H
 #define __ASM_ARM_CPU_H
 
-#include <linux/config.h>
 #include <linux/percpu.h>
 
 struct cpuinfo_arm {
 	struct cpu	cpu;
 #ifdef CONFIG_SMP
+	struct task_struct *idle;
 	unsigned int	loops_per_jiffy;
 #endif
 };

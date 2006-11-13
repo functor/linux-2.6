@@ -28,11 +28,11 @@ static int mon_stat_open(struct inode *inode, struct file *file)
 	if ((sp = kmalloc(sizeof(struct snap), GFP_KERNEL)) == NULL)
 		return -ENOMEM;
 
-	mbus = inode->u.generic_ip;
+	mbus = inode->i_private;
 
 	sp->slen = snprintf(sp->str, STAT_BUF_SIZE,
-	    "nreaders %d text_lost %u\n",
-	    mbus->nreaders, mbus->cnt_text_lost);
+	    "nreaders %d events %u text_lost %u\n",
+	    mbus->nreaders, mbus->cnt_events, mbus->cnt_text_lost);
 
 	file->private_data = sp;
 	return 0;

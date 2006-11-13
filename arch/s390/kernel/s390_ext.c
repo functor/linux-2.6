@@ -13,6 +13,7 @@
 #include <linux/errno.h>
 #include <linux/kernel_stat.h>
 #include <linux/interrupt.h>
+#include <linux/vs_context.h>
 
 #include <asm/lowcore.h>
 #include <asm/s390_ext.h>
@@ -24,7 +25,7 @@
  * (0x1202 external call, 0x1004 cpu timer, 0x2401 hwc console, 0x4000
  * iucv and 0x2603 pfault) this is always the first element. 
  */
-ext_int_info_t *ext_int_hash[256] = { 0, };
+ext_int_info_t *ext_int_hash[256] = { NULL, };
 
 static inline int ext_hash(__u16 code)
 {
@@ -113,6 +114,7 @@ int unregister_early_external_interrupt(__u16 code, ext_int_handler_t handler,
 void do_extint(struct pt_regs *regs, unsigned short code)
 {
         ext_int_info_t *p;
+	struct vx_info_save vxis;
         int index;
 
 	irq_enter();
@@ -125,12 +127,14 @@ void do_extint(struct pt_regs *regs, unsigned short code)
 		account_ticks(regs);
 	kstat_cpu(smp_processor_id()).irqs[EXTERNAL_INTERRUPT]++;
         index = ext_hash(code);
+	__enter_vx_admin(&vxis);
 	for (p = ext_int_hash[index]; p; p = p->next) {
 		if (likely(p->code == code)) {
 			if (likely(p->handler))
 				p->handler(regs, code);
 		}
 	}
+	__leave_vx_admin(&vxis);
 	irq_exit();
 }
 

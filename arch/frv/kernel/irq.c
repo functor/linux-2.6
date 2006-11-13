@@ -16,7 +16,6 @@
  * Naturally it's not a 1:1 relation, but there are similarities.
  */
 
-#include <linux/config.h>
 #include <linux/ptrace.h>
 #include <linux/errno.h>
 #include <linux/signal.h>
@@ -32,6 +31,8 @@
 #include <linux/irq.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/module.h>
+#include <linux/vs_context.h>
 
 #include <asm/atomic.h>
 #include <asm/io.h>
@@ -74,9 +75,8 @@ int show_interrupts(struct seq_file *p, void *v)
 	switch (i) {
 	case 0:
 		seq_printf(p, "           ");
-		for (j = 0; j < NR_CPUS; j++)
-			if (cpu_online(j))
-				seq_printf(p, "CPU%d       ",j);
+		for_each_online_cpu(j)
+			seq_printf(p, "CPU%d       ",j);
 
 		seq_putc(p, '\n');
 		break;
@@ -99,9 +99,8 @@ int show_interrupts(struct seq_file *p, void *v)
 #ifndef CONFIG_SMP
 		seq_printf(p, "%10u ", kstat_irqs(i));
 #else
-		for (j = 0; j < NR_CPUS; j++)
-			if (cpu_online(j))
-				seq_printf(p, "%10u ", kstat_cpu(j).irqs[i - 1]);
+		for_each_online_cpu(j)
+			seq_printf(p, "%10u ", kstat_cpu(j).irqs[i - 1]);
 #endif
 
 		level = group->sources[ix]->level - frv_irq_levels;
@@ -178,6 +177,8 @@ void disable_irq_nosync(unsigned int irq)
 	spin_unlock_irqrestore(&level->lock, flags);
 }
 
+EXPORT_SYMBOL(disable_irq_nosync);
+
 /**
  *	disable_irq - disable an irq and wait for completion
  *	@irq: Interrupt to disable
@@ -203,6 +204,8 @@ void disable_irq(unsigned int irq)
 	}
 #endif
 }
+
+EXPORT_SYMBOL(disable_irq);
 
 /**
  *	enable_irq - enable handling of an irq
@@ -268,6 +271,8 @@ void enable_irq(unsigned int irq)
 	spin_unlock_irqrestore(&level->lock, flags);
 }
 
+EXPORT_SYMBOL(enable_irq);
+
 /*****************************************************************************/
 /*
  * handles all normal device IRQ's
@@ -278,19 +283,13 @@ void enable_irq(unsigned int irq)
 asmlinkage void do_IRQ(void)
 {
 	struct irq_source *source;
+	struct vx_info_save vxis;
 	int level, cpu;
+
+	irq_enter();
 
 	level = (__frame->tbr >> 4) & 0xf;
 	cpu = smp_processor_id();
-
-#if 0
-	{
-		static u32 irqcount;
-		*(volatile u32 *) 0xe1200004 = ~((irqcount++ << 8) | level);
-		*(volatile u16 *) 0xffc00100 = (u16) ~0x9999;
-		mb();
-	}
-#endif
 
 	if ((unsigned long) __frame - (unsigned long) (current + 1) < 512)
 		BUG();
@@ -301,40 +300,14 @@ asmlinkage void do_IRQ(void)
 
 	kstat_this_cpu.irqs[level]++;
 
-	irq_enter();
-
+	__enter_vx_admin(&vxis);
 	for (source = frv_irq_levels[level].sources; source; source = source->next)
 		source->doirq(source);
-
-	irq_exit();
+	__leave_vx_admin(&vxis);
 
 	__clr_MASK(level);
 
-	/* only process softirqs if we didn't interrupt another interrupt handler */
-	if ((__frame->psr & PSR_PIL) == PSR_PIL_0)
-		if (local_softirq_pending())
-			do_softirq();
-
-#ifdef CONFIG_PREEMPT
-	local_irq_disable();
-	while (--current->preempt_count == 0) {
-		if (!(__frame->psr & PSR_S) ||
-		    current->need_resched == 0 ||
-		    in_interrupt())
-			break;
-		current->preempt_count++;
-		local_irq_enable();
-		preempt_schedule();
-		local_irq_disable();
-	}
-#endif
-
-#if 0
-	{
-		*(volatile u16 *) 0xffc00100 = (u16) ~0x6666;
-		mb();
-	}
-#endif
+	irq_exit();
 
 } /* end do_IRQ() */
 
@@ -372,11 +345,11 @@ asmlinkage void do_NMI(void)
  *
  *	Flags:
  *
- *	SA_SHIRQ		Interrupt is shared
+ *	IRQF_SHARED		Interrupt is shared
  *
- *	SA_INTERRUPT		Disable local interrupts while processing
+ *	IRQF_DISABLED	Disable local interrupts while processing
  *
- *	SA_SAMPLE_RANDOM	The interrupt can be used for entropy
+ *	IRQF_SAMPLE_RANDOM	The interrupt can be used for entropy
  *
  */
 
@@ -396,7 +369,7 @@ int request_irq(unsigned int irq,
 	 * to figure out which interrupt is which (messes up the
 	 * interrupt freeing logic etc).
 	 */
-	if (irqflags & SA_SHIRQ) {
+	if (irqflags & IRQF_SHARED) {
 		if (!dev_id)
 			printk("Bad boy: %s (at 0x%x) called us without a dev_id!\n",
 			       devname, (&irq)[-1]);
@@ -424,6 +397,8 @@ int request_irq(unsigned int irq,
 		kfree(action);
 	return retval;
 }
+
+EXPORT_SYMBOL(request_irq);
 
 /**
  *	free_irq - free an interrupt
@@ -496,6 +471,8 @@ void free_irq(unsigned int irq, void *dev_id)
 	}
 }
 
+EXPORT_SYMBOL(free_irq);
+
 /*
  * IRQ autodetection code..
  *
@@ -519,6 +496,8 @@ unsigned long probe_irq_on(void)
 	return 0;
 }
 
+EXPORT_SYMBOL(probe_irq_on);
+
 /*
  * Return a mask of triggered interrupts (this
  * can handle only legacy ISA interrupts).
@@ -541,6 +520,8 @@ unsigned int probe_irq_mask(unsigned long xmask)
 	up(&probe_sem);
 	return 0;
 }
+
+EXPORT_SYMBOL(probe_irq_mask);
 
 /*
  * Return the one interrupt that triggered (this can
@@ -571,6 +552,8 @@ int probe_irq_off(unsigned long xmask)
 	return -1;
 }
 
+EXPORT_SYMBOL(probe_irq_off);
+
 /* this was setup_x86_irq but it seems pretty generic */
 int setup_irq(unsigned int irq, struct irqaction *new)
 {
@@ -597,7 +580,7 @@ int setup_irq(unsigned int irq, struct irqaction *new)
 	 * so we have to be careful not to interfere with a
 	 * running system.
 	 */
-	if (new->flags & SA_SAMPLE_RANDOM) {
+	if (new->flags & IRQF_SAMPLE_RANDOM) {
 		/*
 		 * This function might sleep, we want to call it first,
 		 * outside of the atomic block.
@@ -613,7 +596,7 @@ int setup_irq(unsigned int irq, struct irqaction *new)
 	spin_lock_irqsave(&level->lock, flags);
 
 	/* can't share interrupts unless all parties agree to */
-	if (level->usage != 0 && !(level->flags & new->flags & SA_SHIRQ)) {
+	if (level->usage != 0 && !(level->flags & new->flags & IRQF_SHARED)) {
 		spin_unlock_irqrestore(&level->lock,flags);
 		return -EBUSY;
 	}
@@ -645,7 +628,7 @@ static struct proc_dir_entry * irq_dir [NR_IRQS];
 
 #define HEX_DIGITS 8
 
-static unsigned int parse_hex_value (const char *buffer,
+static unsigned int parse_hex_value (const char __user *buffer,
 				     unsigned long count, unsigned long *ret)
 {
 	unsigned char hexnum [HEX_DIGITS];
@@ -692,7 +675,7 @@ static int prof_cpu_mask_read_proc (char *page, char **start, off_t off,
 	return sprintf (page, "%08lx\n", *mask);
 }
 
-static int prof_cpu_mask_write_proc (struct file *file, const char *buffer,
+static int prof_cpu_mask_write_proc (struct file *file, const char __user *buffer,
 					unsigned long count, void *data)
 {
 	unsigned long *mask = (unsigned long *) data, full_count = count, err;
@@ -731,7 +714,7 @@ void init_irq_proc (void)
 	int i;
 
 	/* create /proc/irq */
-	root_irq_dir = proc_mkdir("irq", 0);
+	root_irq_dir = proc_mkdir("irq", NULL);
 
 	/* create /proc/irq/prof_cpu_mask */
 	entry = create_proc_entry("prof_cpu_mask", 0600, root_irq_dir);

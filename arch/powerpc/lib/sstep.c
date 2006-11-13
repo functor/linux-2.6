@@ -10,9 +10,11 @@
  */
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
-#include <linux/config.h>
 #include <asm/sstep.h>
 #include <asm/processor.h>
+#ifdef CONFIG_PPC64
+#include <asm/paca.h>
+#endif
 
 extern char system_call_common[];
 

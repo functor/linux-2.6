@@ -36,22 +36,19 @@
 .file "aes-i586-asm.S"
 .text
 
-// aes_rval aes_enc_blk(const unsigned char in_blk[], unsigned char out_blk[], const aes_ctx cx[1])//
-// aes_rval aes_dec_blk(const unsigned char in_blk[], unsigned char out_blk[], const aes_ctx cx[1])//
-	
+#include <asm/asm-offsets.h>
+
 #define tlen 1024   // length of each of 4 'xor' arrays (256 32-bit words)
 
-// offsets to parameters with one register pushed onto stack
+/* offsets to parameters with one register pushed onto stack */
+#define tfm 8
+#define out_blk 12
+#define in_blk 16
 
-#define in_blk    8  // input byte array address parameter
-#define out_blk  12  // output byte array address parameter
-#define ctx      16  // AES context structure
-
-// offsets in context structure
-
-#define ekey     0   // encryption key schedule base address
-#define nrnd   256   // number of rounds
-#define dkey   260   // decryption key schedule base address
+/* offsets in crypto_tfm structure */
+#define ekey (crypto_tfm_ctx_offset + 0)
+#define nrnd (crypto_tfm_ctx_offset + 256)
+#define dkey (crypto_tfm_ctx_offset + 260)
 
 // register mapping for encrypt and decrypt subroutines
 
@@ -220,6 +217,7 @@
 	do_col (table, r5,r0,r1,r4, r2,r3);		/* idx=r5 */
 
 // AES (Rijndael) Encryption Subroutine
+/* void aes_enc_blk(struct crypto_tfm *tfm, u8 *out_blk, const u8 *in_blk) */
 
 .global  aes_enc_blk
 
@@ -230,7 +228,7 @@
 
 aes_enc_blk:
 	push    %ebp
-	mov     ctx(%esp),%ebp      // pointer to context
+	mov     tfm(%esp),%ebp
 
 // CAUTION: the order and the values used in these assigns 
 // rely on the register mappings
@@ -255,18 +253,17 @@ aes_enc_blk:
 	xor     8(%ebp),%r4
 	xor     12(%ebp),%r5
 
-	sub     $8,%esp           // space for register saves on stack
-	add     $16,%ebp          // increment to next round key
-	sub     $10,%r3          
-	je      4f              // 10 rounds for 128-bit key
-	add     $32,%ebp
-	sub     $2,%r3
-	je      3f              // 12 rounds for 128-bit key
-	add     $32,%ebp
+	sub     $8,%esp		// space for register saves on stack
+	add     $16,%ebp	// increment to next round key
+	cmp     $12,%r3
+	jb      4f		// 10 rounds for 128-bit key
+	lea     32(%ebp),%ebp
+	je      3f		// 12 rounds for 192-bit key
+	lea     32(%ebp),%ebp
 
-2:	fwd_rnd1( -64(%ebp) ,ft_tab)	// 14 rounds for 128-bit key
+2:	fwd_rnd1( -64(%ebp) ,ft_tab)	// 14 rounds for 256-bit key
 	fwd_rnd2( -48(%ebp) ,ft_tab)
-3:	fwd_rnd1( -32(%ebp) ,ft_tab)	// 12 rounds for 128-bit key
+3:	fwd_rnd1( -32(%ebp) ,ft_tab)	// 12 rounds for 192-bit key
 	fwd_rnd2( -16(%ebp) ,ft_tab)
 4:	fwd_rnd1(    (%ebp) ,ft_tab)	// 10 rounds for 128-bit key
 	fwd_rnd2( +16(%ebp) ,ft_tab)
@@ -296,6 +293,7 @@ aes_enc_blk:
 	ret
 
 // AES (Rijndael) Decryption Subroutine
+/* void aes_dec_blk(struct crypto_tfm *tfm, u8 *out_blk, const u8 *in_blk) */
 
 .global  aes_dec_blk
 
@@ -306,7 +304,7 @@ aes_enc_blk:
 
 aes_dec_blk:
 	push    %ebp
-	mov     ctx(%esp),%ebp       // pointer to context
+	mov     tfm(%esp),%ebp
 
 // CAUTION: the order and the values used in these assigns 
 // rely on the register mappings
@@ -334,18 +332,17 @@ aes_dec_blk:
 	xor     8(%ebp),%r4
 	xor     12(%ebp),%r5
 
-	sub     $8,%esp         // space for register saves on stack
-	sub     $16,%ebp        // increment to next round key
-	sub     $10,%r3          
-	je      4f              // 10 rounds for 128-bit key
-	sub     $32,%ebp
-	sub     $2,%r3
-	je      3f              // 12 rounds for 128-bit key
-	sub     $32,%ebp
+	sub     $8,%esp		// space for register saves on stack
+	sub     $16,%ebp	// increment to next round key
+	cmp     $12,%r3
+	jb      4f		// 10 rounds for 128-bit key
+	lea     -32(%ebp),%ebp
+	je      3f		// 12 rounds for 192-bit key
+	lea     -32(%ebp),%ebp
 
-2:	inv_rnd1( +64(%ebp), it_tab)	// 14 rounds for 128-bit key
+2:	inv_rnd1( +64(%ebp), it_tab)	// 14 rounds for 256-bit key
 	inv_rnd2( +48(%ebp), it_tab)
-3:	inv_rnd1( +32(%ebp), it_tab)	// 12 rounds for 128-bit key
+3:	inv_rnd1( +32(%ebp), it_tab)	// 12 rounds for 192-bit key
 	inv_rnd2( +16(%ebp), it_tab)
 4:	inv_rnd1(    (%ebp), it_tab)	// 10 rounds for 128-bit key
 	inv_rnd2( -16(%ebp), it_tab)

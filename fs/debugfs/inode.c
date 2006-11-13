@@ -16,7 +16,6 @@
 /* uncomment to get debug messages from the debug filesystem, ah the irony. */
 /* #define DEBUG */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
@@ -41,7 +40,6 @@ static struct inode *debugfs_get_inode(struct super_block *sb, int mode, dev_t d
 		inode->i_mode = mode;
 		inode->i_uid = 0;
 		inode->i_gid = 0;
-		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		switch (mode & S_IFMT) {
@@ -67,12 +65,13 @@ static struct inode *debugfs_get_inode(struct super_block *sb, int mode, dev_t d
 static int debugfs_mknod(struct inode *dir, struct dentry *dentry,
 			 int mode, dev_t dev)
 {
-	struct inode *inode = debugfs_get_inode(dir->i_sb, mode, dev);
+	struct inode *inode;
 	int error = -EPERM;
 
 	if (dentry->d_inode)
 		return -EEXIST;
 
+	inode = debugfs_get_inode(dir->i_sb, mode, dev);
 	if (inode) {
 		d_instantiate(dentry, inode);
 		dget(dentry);
@@ -110,21 +109,11 @@ static int debug_fill_super(struct super_block *sb, void *data, int silent)
 	return simple_fill_super(sb, DEBUGFS_MAGIC, debug_files);
 }
 
-static struct dentry * get_dentry(struct dentry *parent, const char *name)
-{               
-	struct qstr qstr;
-
-	qstr.name = name;
-	qstr.len = strlen(name);
-	qstr.hash = full_name_hash(name,qstr.len);
-	return lookup_hash(&qstr,parent);
-}               
-
-static struct super_block *debug_get_sb(struct file_system_type *fs_type,
-				        int flags, const char *dev_name,
-					void *data)
+static int debug_get_sb(struct file_system_type *fs_type,
+			int flags, const char *dev_name,
+			void *data, struct vfsmount *mnt)
 {
-	return get_sb_single(fs_type, flags, data, debug_fill_super);
+	return get_sb_single(fs_type, flags, data, debug_fill_super, mnt);
 }
 
 static struct file_system_type debug_fs_type = {
@@ -156,8 +145,8 @@ static int debugfs_create_by_name(const char *name, mode_t mode,
 	}
 
 	*dentry = NULL;
-	down(&parent->d_inode->i_sem);
-	*dentry = get_dentry (parent, name);
+	mutex_lock(&parent->d_inode->i_mutex);
+	*dentry = lookup_one_len(name, parent, strlen(name));
 	if (!IS_ERR(dentry)) {
 		if ((mode & S_IFMT) == S_IFDIR)
 			error = debugfs_mkdir(parent->d_inode, *dentry, mode);
@@ -165,7 +154,7 @@ static int debugfs_create_by_name(const char *name, mode_t mode,
 			error = debugfs_create(parent->d_inode, *dentry, mode);
 	} else
 		error = PTR_ERR(dentry);
-	up(&parent->d_inode->i_sem);
+	mutex_unlock(&parent->d_inode->i_mutex);
 
 	return error;
 }
@@ -179,7 +168,7 @@ static int debugfs_create_by_name(const char *name, mode_t mode,
  *          directory dentry if set.  If this paramater is NULL, then the
  *          file will be created in the root of the debugfs filesystem.
  * @data: a pointer to something that the caller will want to get to later
- *        on.  The inode.u.generic_ip pointer will point to this value on
+ *        on.  The inode.i_private pointer will point to this value on
  *        the open() call.
  * @fops: a pointer to a struct file_operations that should be used for
  *        this file.
@@ -201,14 +190,14 @@ static int debugfs_create_by_name(const char *name, mode_t mode,
  */
 struct dentry *debugfs_create_file(const char *name, mode_t mode,
 				   struct dentry *parent, void *data,
-				   struct file_operations *fops)
+				   const struct file_operations *fops)
 {
 	struct dentry *dentry = NULL;
 	int error;
 
 	pr_debug("debugfs: creating file '%s'\n",name);
 
-	error = simple_pin_fs("debugfs", &debugfs_mount, &debugfs_mount_count);
+	error = simple_pin_fs(&debug_fs_type, &debugfs_mount, &debugfs_mount_count);
 	if (error)
 		goto exit;
 
@@ -220,7 +209,7 @@ struct dentry *debugfs_create_file(const char *name, mode_t mode,
 
 	if (dentry->d_inode) {
 		if (data)
-			dentry->d_inode->u.generic_ip = data;
+			dentry->d_inode->i_private = data;
 		if (fops)
 			dentry->d_inode->i_fop = fops;
 	}
@@ -283,7 +272,7 @@ void debugfs_remove(struct dentry *dentry)
 	if (!parent || !parent->d_inode)
 		return;
 
-	down(&parent->d_inode->i_sem);
+	mutex_lock(&parent->d_inode->i_mutex);
 	if (debugfs_positive(dentry)) {
 		if (dentry->d_inode) {
 			if (S_ISDIR(dentry->d_inode->i_mode))
@@ -293,7 +282,7 @@ void debugfs_remove(struct dentry *dentry)
 		dput(dentry);
 		}
 	}
-	up(&parent->d_inode->i_sem);
+	mutex_unlock(&parent->d_inode->i_mutex);
 	simple_release_fs(&debugfs_mount, &debugfs_mount_count);
 }
 EXPORT_SYMBOL_GPL(debugfs_remove);

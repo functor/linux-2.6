@@ -227,7 +227,8 @@ repeat_locked:
 	spin_unlock(&transaction->t_handle_lock);
 	spin_unlock(&journal->j_state_lock);
 out:
-	kfree(new_transaction);
+	if (unlikely(new_transaction))		/* It's usually NULL */
+		kfree(new_transaction);
 	return ret;
 }
 
@@ -665,8 +666,9 @@ repeat:
 			if (!frozen_buffer) {
 				JBUFFER_TRACE(jh, "allocate memory for buffer");
 				jbd_unlock_bh_state(bh);
-				frozen_buffer = jbd_kmalloc(jh2bh(jh)->b_size,
-							    GFP_NOFS);
+				frozen_buffer =
+					jbd_slab_alloc(jh2bh(jh)->b_size,
+							 GFP_NOFS);
 				if (!frozen_buffer) {
 					printk(KERN_EMERG
 					       "%s: OOM for frozen_buffer\n",
@@ -724,7 +726,8 @@ done:
 	journal_cancel_revoke(handle, jh);
 
 out:
-	kfree(frozen_buffer);
+	if (unlikely(frozen_buffer))	/* It's usually NULL */
+		jbd_slab_free(frozen_buffer, bh->b_size);
 
 	JBUFFER_TRACE(jh, "exit");
 	return error;
@@ -877,7 +880,7 @@ int journal_get_undo_access(handle_t *handle, struct buffer_head *bh)
 
 repeat:
 	if (!jh->b_committed_data) {
-		committed_data = jbd_kmalloc(jh2bh(jh)->b_size, GFP_NOFS);
+		committed_data = jbd_slab_alloc(jh2bh(jh)->b_size, GFP_NOFS);
 		if (!committed_data) {
 			printk(KERN_EMERG "%s: No memory for committed data\n",
 				__FUNCTION__);
@@ -903,7 +906,8 @@ repeat:
 	jbd_unlock_bh_state(bh);
 out:
 	journal_put_journal_head(jh);
-	kfree(committed_data);
+	if (unlikely(committed_data))
+		jbd_slab_free(committed_data, bh->b_size);
 	return err;
 }
 
@@ -963,6 +967,14 @@ int journal_dirty_data(handle_t *handle, struct buffer_head *bh)
 	 */
 	jbd_lock_bh_state(bh);
 	spin_lock(&journal->j_list_lock);
+
+	/* Now that we have bh_state locked, are we really still mapped? */
+	if (!buffer_mapped(bh)) {
+		JBUFFER_TRACE(jh, "unmapped, bailing out");
+		// printk("caught an unmapped buffer\n");
+		goto no_journal;
+	}
+		
 	if (jh->b_transaction) {
 		JBUFFER_TRACE(jh, "has transaction");
 		if (jh->b_transaction != handle->h_transaction) {
@@ -1024,6 +1036,11 @@ int journal_dirty_data(handle_t *handle, struct buffer_head *bh)
 				sync_dirty_buffer(bh);
 				jbd_lock_bh_state(bh);
 				spin_lock(&journal->j_list_lock);
+				/* Since we dropped the lock... */
+				if (!buffer_mapped(bh)) {
+					JBUFFER_TRACE(jh, "Got unmapped");
+					goto no_journal;
+				}
 				/* The buffer may become locked again at any
 				   time if it is redirtied */
 			}
@@ -1747,6 +1764,7 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 	int ret;
 
 	BUFFER_TRACE(bh, "entry");
+	//J_ASSERT_BH(bh, PageLocked(bh->b_page));
 
 	/*
 	 * It is safe to proceed here without the j_list_lock because the
@@ -1820,6 +1838,7 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 		}
 	} else if (transaction == journal->j_committing_transaction) {
 		if (jh->b_jlist == BJ_Locked) {
+			JBUFFER_TRACE(jh, "on committing BJ_Locked");
 			/*
 			 * The buffer is on the committing transaction's locked
 			 * list.  We have the buffer locked, so I/O has
@@ -1853,6 +1872,7 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 		 * i_size already for this truncate so recovery will not
 		 * expose the disk blocks we are discarding here.) */
 		J_ASSERT_JH(jh, transaction == journal->j_running_transaction);
+		JBUFFER_TRACE(jh, "on running transaction");
 		may_free = __dispose_buffer(jh, transaction);
 	}
 
@@ -2038,7 +2058,8 @@ void __journal_refile_buffer(struct journal_head *jh)
 	__journal_temp_unlink_buffer(jh);
 	jh->b_transaction = jh->b_next_transaction;
 	jh->b_next_transaction = NULL;
-	__journal_file_buffer(jh, jh->b_transaction, BJ_Metadata);
+	__journal_file_buffer(jh, jh->b_transaction,
+				was_dirty ? BJ_Metadata : BJ_Reserved);
 	J_ASSERT_JH(jh, jh->b_transaction->t_state == T_RUNNING);
 
 	if (was_dirty)

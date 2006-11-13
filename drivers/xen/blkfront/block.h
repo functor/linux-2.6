@@ -35,7 +35,6 @@
 #ifndef __XEN_DRIVERS_BLOCK_H__
 #define __XEN_DRIVERS_BLOCK_H__
 
-#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -47,7 +46,6 @@
 #include <linux/hdreg.h>
 #include <linux/blkdev.h>
 #include <linux/major.h>
-#include <linux/devfs_fs_kernel.h>
 #include <asm/hypervisor.h>
 #include <xen/xenbus.h>
 #include <xen/gnttab.h>

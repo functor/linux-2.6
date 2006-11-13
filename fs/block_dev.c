@@ -5,14 +5,12 @@
  *  Copyright (C) 2001  Andrea Arcangeli <andrea@suse.de> SuSE
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/fcntl.h>
 #include <linux/slab.h>
 #include <linux/kmod.h>
 #include <linux/major.h>
-#include <linux/devfs_fs_kernel.h>
 #include <linux/smp_lock.h>
 #include <linux/highmem.h>
 #include <linux/blkdev.h>
@@ -262,7 +260,6 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 	    SLAB_CTOR_CONSTRUCTOR)
 	{
 		memset(bdev, 0, sizeof(*bdev));
-		mutex_init(&bdev->bd_mutex);
 		mutex_init(&bdev->bd_mount_mutex);
 		INIT_LIST_HEAD(&bdev->bd_inodes);
 		INIT_LIST_HEAD(&bdev->bd_list);
@@ -300,10 +297,10 @@ static struct super_operations bdev_sops = {
 	.clear_inode = bdev_clear_inode,
 };
 
-static struct super_block *bd_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int bd_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_pseudo(fs_type, "bdev:", &bdev_sops, 0x62646576);
+	return get_sb_pseudo(fs_type, "bdev:", &bdev_sops, 0x62646576, mnt);
 }
 
 static struct file_system_type bd_type = {
@@ -355,10 +352,14 @@ static int bdev_set(struct inode *inode, void *data)
 
 static LIST_HEAD(all_bdevs);
 
+static struct lock_class_key bdev_part_lock_key;
+
 struct block_device *bdget(dev_t dev)
 {
 	struct block_device *bdev;
 	struct inode *inode;
+	struct gendisk *disk;
+	int part = 0;
 
 	inode = iget5_locked(bd_mnt->mnt_sb, hash(dev),
 			bdev_test, bdev_set, &dev);
@@ -384,6 +385,11 @@ struct block_device *bdget(dev_t dev)
 		list_add(&bdev->bd_list, &all_bdevs);
 		spin_unlock(&bdev_lock);
 		unlock_new_inode(inode);
+		mutex_init(&bdev->bd_mutex);
+		disk = get_gendisk(dev, &part);
+		if (disk && part)
+			lockdep_set_class(&bdev->bd_mutex, &bdev_part_lock_key);
+		put_disk(disk);
 	}
 	return bdev;
 }
@@ -414,21 +420,31 @@ EXPORT_SYMBOL(bdput);
 static struct block_device *bd_acquire(struct inode *inode)
 {
 	struct block_device *bdev;
+
 	spin_lock(&bdev_lock);
 	bdev = inode->i_bdev;
-	if (bdev && igrab(bdev->bd_inode)) {
+	if (bdev) {
+		atomic_inc(&bdev->bd_inode->i_count);
 		spin_unlock(&bdev_lock);
 		return bdev;
 	}
 	spin_unlock(&bdev_lock);
+
 	bdev = bdget(inode->i_rdev);
 	if (bdev) {
 		spin_lock(&bdev_lock);
-		if (inode->i_bdev)
-			__bd_forget(inode);
-		inode->i_bdev = bdev;
-		inode->i_mapping = bdev->bd_inode->i_mapping;
-		list_add(&inode->i_devices, &bdev->bd_inodes);
+		if (!inode->i_bdev) {
+			/*
+			 * We take an additional bd_inode->i_count for inode,
+			 * and it's released in clear_inode() of inode.
+			 * So, we can access it via ->i_mapping always
+			 * without igrab().
+			 */
+			atomic_inc(&bdev->bd_inode->i_count);
+			inode->i_bdev = bdev;
+			inode->i_mapping = bdev->bd_inode->i_mapping;
+			list_add(&inode->i_devices, &bdev->bd_inodes);
+		}
 		spin_unlock(&bdev_lock);
 	}
 	return bdev;
@@ -438,10 +454,18 @@ static struct block_device *bd_acquire(struct inode *inode)
 
 void bd_forget(struct inode *inode)
 {
+	struct block_device *bdev = NULL;
+
 	spin_lock(&bdev_lock);
-	if (inode->i_bdev)
+	if (inode->i_bdev) {
+		if (inode->i_sb != blockdev_superblock)
+			bdev = inode->i_bdev;
 		__bd_forget(inode);
+	}
 	spin_unlock(&bdev_lock);
+
+	if (bdev)
+		iput(bdev->bd_inode);
 }
 
 int bd_claim(struct block_device *bdev, void *holder)
@@ -1077,7 +1101,7 @@ static long block_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	return blkdev_ioctl(file->f_mapping->host, file, cmd, arg);
 }
 
-struct address_space_operations def_blk_aops = {
+const struct address_space_operations def_blk_aops = {
 	.readpage	= blkdev_readpage,
 	.writepage	= blkdev_writepage,
 	.sync_page	= block_sync_page,

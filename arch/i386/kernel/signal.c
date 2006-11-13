@@ -19,7 +19,7 @@
 #include <linux/stddef.h>
 #include <linux/personality.h>
 #include <linux/suspend.h>
-#include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/elf.h>
 #include <asm/processor.h>
 #include <asm/ucontext.h>
@@ -351,7 +351,7 @@ static int setup_frame(int sig, struct k_sigaction *ka,
 			goto give_sigsegv;
 	}
 
-	restorer = current->mm->context.vdso + (long)&__kernel_sigreturn;
+	restorer = (void *)VDSO_SYM(&__kernel_sigreturn);
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 
@@ -384,16 +384,6 @@ static int setup_frame(int sig, struct k_sigaction *ka,
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-
-	/*
-	 * Clear TF when entering the signal handler, but
-	 * notify any tracer that was single-stepping it.
-	 * The tracer may want to single-step inside the
-	 * handler too.
-	 */
-	regs->eflags &= ~TF_MASK;
-	if (test_thread_flag(TIF_SINGLESTEP))
-		ptrace_notify(SIGTRAP);
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -447,7 +437,7 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		goto give_sigsegv;
 
 	/* Set up to return from userspace.  */
-	restorer = current->mm->context.vdso + (long)&__kernel_rt_sigreturn;
+	restorer = (void *)VDSO_SYM(&__kernel_rt_sigreturn);
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 	err |= __put_user(restorer, &frame->pretcode);
@@ -478,16 +468,6 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-
-	/*
-	 * Clear TF when entering the signal handler, but
-	 * notify any tracer that was single-stepping it.
-	 * The tracer may want to single-step inside the
-	 * handler too.
-	 */
-	regs->eflags &= ~TF_MASK;
-	if (test_thread_flag(TIF_SINGLESTEP))
-		ptrace_notify(SIGTRAP);
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -533,14 +513,12 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	}
 
 	/*
-	 * If TF is set due to a debugger (PT_DTRACE), clear the TF flag so
+	 * If TF is set due to a debugger (TIF_FORCED_TF), clear the TF flag so
 	 * that register information in the sigcontext is correct.
 	 */
 	if (unlikely(regs->eflags & TF_MASK)
-	    && likely(current->ptrace & PT_DTRACE)) {
-		current->ptrace &= ~PT_DTRACE;
+	    && likely(test_and_clear_thread_flag(TIF_FORCED_TF)))
 		regs->eflags &= ~TF_MASK;
-	}
 
 	/* Set up the stack frame */
 	if (ka->sa.sa_flags & SA_SIGINFO)
@@ -555,6 +533,15 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 			sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
+
+		/*
+		 * Clear TF when entering the signal handler, but
+		 * notify any tracer that was single-stepping it.
+		 * The tracer may want to single-step inside the
+		 * handler too.
+		 */
+		regs->eflags &= ~TF_MASK;
+		tracehook_report_handle_signal(sig, ka, oldset, regs);
 	}
 
 	return ret;

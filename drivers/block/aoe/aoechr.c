@@ -13,6 +13,7 @@ enum {
 	MINOR_ERR = 2,
 	MINOR_DISCOVER,
 	MINOR_INTERFACES,
+	MINOR_REVALIDATE,
 	MSGSZ = 2048,
 	NARGS = 10,
 	NMSG = 100,		/* message backlog to retain */
@@ -36,11 +37,12 @@ static int emsgs_head_idx, emsgs_tail_idx;
 static struct semaphore emsgs_sema;
 static spinlock_t emsgs_lock;
 static int nblocked_emsgs_readers;
-static struct class_simple *aoe_class;
+static struct class *aoe_class;
 static struct aoe_chardev chardevs[] = {
 	{ MINOR_ERR, "err" },
 	{ MINOR_DISCOVER, "discover" },
 	{ MINOR_INTERFACES, "interfaces" },
+	{ MINOR_REVALIDATE, "revalidate" },
 };
 
 static int
@@ -59,6 +61,39 @@ interfaces(const char __user *str, size_t size)
 		       __FUNCTION__, "too many interfaces");
 		return -EINVAL;
 	}
+	return 0;
+}
+
+static int
+revalidate(const char __user *str, size_t size)
+{
+	int major, minor, n;
+	ulong flags;
+	struct aoedev *d;
+	char buf[16];
+
+	if (size >= sizeof buf)
+		return -EINVAL;
+	buf[sizeof buf - 1] = '\0';
+	if (copy_from_user(buf, str, size))
+		return -EFAULT;
+
+	/* should be e%d.%d format */
+	n = sscanf(buf, "e%d.%d", &major, &minor);
+	if (n != 2) {
+		printk(KERN_ERR "aoe: %s: invalid device specification\n",
+			__FUNCTION__);
+		return -EINVAL;
+	}
+	d = aoedev_by_aoeaddr(major, minor);
+	if (!d)
+		return -EINVAL;
+
+	spin_lock_irqsave(&d->lock, flags);
+	d->flags |= DEVFL_PAUSE;
+	spin_unlock_irqrestore(&d->lock, flags);
+	aoecmd_cfg(major, minor);
+
 	return 0;
 }
 
@@ -114,6 +149,8 @@ aoechr_write(struct file *filp, const char __user *buf, size_t cnt, loff_t *offp
 	case MINOR_INTERFACES:
 		ret = interfaces(buf, cnt);
 		break;
+	case MINOR_REVALIDATE:
+		ret = revalidate(buf, cnt);
 	}
 	if (ret == 0)
 		ret = cnt;
@@ -125,7 +162,7 @@ aoechr_open(struct inode *inode, struct file *filp)
 {
 	int n, i;
 
-	n = MINOR(inode->i_rdev);
+	n = iminor(inode);
 	filp->private_data = (void *) (unsigned long) n;
 
 	for (i = 0; i < ARRAY_SIZE(chardevs); ++i)
@@ -218,13 +255,13 @@ aoechr_init(void)
 	}
 	sema_init(&emsgs_sema, 0);
 	spin_lock_init(&emsgs_lock);
-	aoe_class = class_simple_create(THIS_MODULE, "aoe");
+	aoe_class = class_create(THIS_MODULE, "aoe");
 	if (IS_ERR(aoe_class)) {
 		unregister_chrdev(AOE_MAJOR, "aoechr");
 		return PTR_ERR(aoe_class);
 	}
 	for (i = 0; i < ARRAY_SIZE(chardevs); ++i)
-		class_simple_device_add(aoe_class,
+		class_device_create(aoe_class, NULL,
 					MKDEV(AOE_MAJOR, chardevs[i].minor),
 					NULL, chardevs[i].name);
 
@@ -237,8 +274,8 @@ aoechr_exit(void)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(chardevs); ++i)
-		class_simple_device_remove(MKDEV(AOE_MAJOR, chardevs[i].minor));
-	class_simple_destroy(aoe_class);
+		class_device_destroy(aoe_class, MKDEV(AOE_MAJOR, chardevs[i].minor));
+	class_destroy(aoe_class);
 	unregister_chrdev(AOE_MAJOR, "aoechr");
 }
 

@@ -12,9 +12,8 @@
 #ifndef __ASM_MIPS_REG_H
 #define __ASM_MIPS_REG_H
 
-#include <linux/config.h>
 
-#if defined(CONFIG_MIPS32) || defined(WANT_COMPAT_REG_H)
+#if defined(CONFIG_32BIT) || defined(WANT_COMPAT_REG_H)
 
 #define EF_R0			6
 #define EF_R1			7
@@ -70,7 +69,7 @@
 
 #endif
 
-#if CONFIG_MIPS64
+#ifdef CONFIG_64BIT
 
 #define EF_R0			 0
 #define EF_R1			 1
@@ -124,6 +123,6 @@
 
 #define EF_SIZE			304	/* size in bytes */
 
-#endif /* CONFIG_MIPS64 */
+#endif /* CONFIG_64BIT */
 
 #endif /* __ASM_MIPS_REG_H */

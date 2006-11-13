@@ -49,7 +49,7 @@ static int afs_inode_map_status(struct afs_vnode *vnode)
 	case AFS_FTYPE_FILE:
 		inode->i_mode	= S_IFREG | vnode->status.mode;
 		inode->i_op	= &afs_file_inode_operations;
-		inode->i_fop	= &generic_ro_fops;
+		inode->i_fop	= &afs_file_file_operations;
 		break;
 	case AFS_FTYPE_DIR:
 		inode->i_mode	= S_IFDIR | vnode->status.mode;
@@ -65,6 +65,11 @@ static int afs_inode_map_status(struct afs_vnode *vnode)
 		return -EBADMSG;
 	}
 
+#ifdef CONFIG_AFS_FSCACHE
+	if (vnode->status.size != inode->i_size)
+		fscache_set_i_size(vnode->cache, vnode->status.size);
+#endif
+
 	inode->i_nlink		= vnode->status.nlink;
 	inode->i_uid		= vnode->status.owner;
 	inode->i_gid		= 0;
@@ -72,7 +77,6 @@ static int afs_inode_map_status(struct afs_vnode *vnode)
 	inode->i_ctime.tv_sec	= vnode->status.mtime_server;
 	inode->i_ctime.tv_nsec	= 0;
 	inode->i_atime		= inode->i_mtime = inode->i_ctime;
-	inode->i_blksize	= PAGE_CACHE_SIZE;
 	inode->i_blocks		= 0;
 	inode->i_version	= vnode->fid.unique;
 	inode->i_mapping->a_ops	= &afs_fs_aops;
@@ -101,13 +105,33 @@ static int afs_inode_fetch_status(struct inode *inode)
 	struct afs_vnode *vnode;
 	int ret;
 
+	_enter("");
+
 	vnode = AFS_FS_I(inode);
 
 	ret = afs_vnode_fetch_status(vnode);
 
-	if (ret == 0)
+	if (ret == 0) {
+#ifdef CONFIG_AFS_FSCACHE
+		if (!vnode->cache) {
+			vnode->cache =
+				fscache_acquire_cookie(vnode->volume->cache,
+						       &afs_vnode_cache_index_def,
+						       vnode);
+			if (!vnode->cache)
+				printk("Negative\n");
+		}
+#endif
 		ret = afs_inode_map_status(vnode);
+#ifdef CONFIG_AFS_FSCACHE
+		if (ret < 0) {
+			fscache_relinquish_cookie(vnode->cache, 0);
+			vnode->cache = NULL;
+		}
+#endif
+	}
 
+	_leave(" = %d", ret);
 	return ret;
 
 } /* end afs_inode_fetch_status() */
@@ -122,6 +146,7 @@ static int afs_iget5_test(struct inode *inode, void *opaque)
 
 	return inode->i_ino == data->fid.vnode &&
 		inode->i_version == data->fid.unique;
+
 } /* end afs_iget5_test() */
 
 /*****************************************************************************/
@@ -179,20 +204,11 @@ inline int afs_iget(struct super_block *sb, struct afs_fid *fid,
 		return ret;
 	}
 
-#ifdef AFS_CACHING_SUPPORT
-	/* set up caching before reading the status, as fetch-status reads the
-	 * first page of symlinks to see if they're really mntpts */
-	cachefs_acquire_cookie(vnode->volume->cache,
-			       NULL,
-			       vnode,
-			       &vnode->cache);
-#endif
-
 	/* okay... it's a new inode */
 	inode->i_flags |= S_NOATIME;
 	vnode->flags |= AFS_VNODE_CHANGED;
 	ret = afs_inode_fetch_status(inode);
-	if (ret<0)
+	if (ret < 0)
 		goto bad_inode;
 
 	/* success */
@@ -278,8 +294,8 @@ void afs_clear_inode(struct inode *inode)
 
 	afs_vnode_give_up_callback(vnode);
 
-#ifdef AFS_CACHING_SUPPORT
-	cachefs_relinquish_cookie(vnode->cache, 0);
+#ifdef CONFIG_AFS_FSCACHE
+	fscache_relinquish_cookie(vnode->cache, 0);
 	vnode->cache = NULL;
 #endif
 

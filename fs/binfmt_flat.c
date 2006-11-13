@@ -16,7 +16,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -511,7 +510,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 		}
 
 		/* OK, This is the point of no return */
-		set_personality(PER_LINUX);
+		set_personality(PER_LINUX_32BIT);
 	}
 
 	/*
@@ -898,9 +897,6 @@ static int load_flat_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		(int)regs, (int)start_addr, (int)current->mm->start_stack);
 	
 	start_thread(regs, start_addr, current->mm->start_stack);
-
-	if (current->ptrace & PT_PTRACED)
-		send_sig(SIGTRAP, current, 0);
 
 	return 0;
 }

@@ -3,11 +3,13 @@
  *
  *  Driver for CPM (SCC/SMC) serial ports; CPM2 definitions
  *
- *  Maintainer: Kumar Gala (kumar.gala@freescale.com) (CPM2)
+ *  Maintainer: Kumar Gala (galak@kernel.crashing.org) (CPM2)
  *              Pantelis Antoniou (panto@intracom.gr) (CPM1)
  * 
  *  Copyright (C) 2004 Freescale Semiconductor, Inc.
  *            (C) 2004 Intracom, S.A.
+ *            (C) 2006 MontaVista Software, Inc.
+ * 		Vitaly Bordug <vbordug@ru.mvista.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +27,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/tty.h>
 #include <linux/ioport.h>
@@ -134,12 +135,21 @@ void scc1_lineif(struct uart_cpm_port *pinfo)
 
 void scc2_lineif(struct uart_cpm_port *pinfo)
 {
+	/*
+	 * STx GP3 uses the SCC2 secondary option pin assignment
+	 * which this driver doesn't account for in the static
+	 * pin assignments. This kind of board specific info
+	 * really has to get out of the driver so boards can
+	 * be supported in a sane fashion.
+	 */
+#ifndef CONFIG_STX_GP3
 	volatile iop_cpm2_t *io = &cpm2_immr->im_ioport;
 	io->iop_pparb |= 0x008b0000;
 	io->iop_pdirb |= 0x00880000;
 	io->iop_psorb |= 0x00880000;
 	io->iop_pdirb &= ~0x00030000;
 	io->iop_psorb &= ~0x00030000;
+#endif
 	cpm2_immr->im_cpmux.cmx_scr &= 0xff00ffff;
 	cpm2_immr->im_cpmux.cmx_scr |= 0x00090000;
 	pinfo->brg = 2;
@@ -200,8 +210,10 @@ int cpm_uart_allocbuf(struct uart_cpm_port *pinfo, unsigned int is_con)
 
 	memsz = L1_CACHE_ALIGN(pinfo->rx_nrfifos * pinfo->rx_fifosize) +
 	    L1_CACHE_ALIGN(pinfo->tx_nrfifos * pinfo->tx_fifosize);
-	if (is_con)
+	if (is_con) {
 		mem_addr = alloc_bootmem(memsz);
+		dma_addr = virt_to_bus(mem_addr);
+	}
 	else
 		mem_addr = dma_alloc_coherent(NULL, memsz, &dma_addr,
 					      GFP_KERNEL);
@@ -216,6 +228,7 @@ int cpm_uart_allocbuf(struct uart_cpm_port *pinfo, unsigned int is_con)
 	pinfo->dp_addr = dp_offset;
 	pinfo->mem_addr = mem_addr;
 	pinfo->dma_addr = dma_addr;
+	pinfo->mem_size = memsz;
 
 	pinfo->rx_buf = mem_addr;
 	pinfo->tx_buf = pinfo->rx_buf + L1_CACHE_ALIGN(pinfo->rx_nrfifos
@@ -248,6 +261,7 @@ int cpm_uart_init_portdesc(void)
 	cpm_uart_ports[UART_SMC1].smcp = (smc_t *) & cpm2_immr->im_smc[0];
 	cpm_uart_ports[UART_SMC1].smcup =
 	    (smc_uart_t *) & cpm2_immr->im_dprambase[PROFF_SMC1];
+	*(u16 *)(&cpm2_immr->im_dprambase[PROFF_SMC1_BASE]) = PROFF_SMC1;
 	cpm_uart_ports[UART_SMC1].port.mapbase =
 	    (unsigned long)&cpm2_immr->im_smc[0];
 	cpm_uart_ports[UART_SMC1].smcp->smc_smcm |= (SMCM_RX | SMCM_TX);
@@ -260,6 +274,7 @@ int cpm_uart_init_portdesc(void)
 	cpm_uart_ports[UART_SMC2].smcp = (smc_t *) & cpm2_immr->im_smc[1];
 	cpm_uart_ports[UART_SMC2].smcup =
 	    (smc_uart_t *) & cpm2_immr->im_dprambase[PROFF_SMC2];
+	*(u16 *)(&cpm2_immr->im_dprambase[PROFF_SMC2_BASE]) = PROFF_SMC2;
 	cpm_uart_ports[UART_SMC2].port.mapbase =
 	    (unsigned long)&cpm2_immr->im_smc[1];
 	cpm_uart_ports[UART_SMC2].smcp->smc_smcm |= (SMCM_RX | SMCM_TX);

@@ -22,8 +22,10 @@
 #ifndef DST_COMMON_H
 #define DST_COMMON_H
 
+#include <linux/smp_lock.h>
 #include <linux/dvb/frontend.h>
 #include <linux/device.h>
+#include <linux/mutex.h>
 #include "bt878.h"
 
 #include "dst_ca.h"
@@ -40,13 +42,19 @@
 #define DST_TYPE_IS_CABLE	2
 #define DST_TYPE_IS_ATSC	3
 
-#define DST_TYPE_HAS_NEWTUNE	1
+#define DST_TYPE_HAS_TS188	1
 #define DST_TYPE_HAS_TS204	2
 #define DST_TYPE_HAS_SYMDIV	4
 #define DST_TYPE_HAS_FW_1	8
 #define DST_TYPE_HAS_FW_2	16
 #define DST_TYPE_HAS_FW_3	32
 #define DST_TYPE_HAS_FW_BUILD	64
+#define DST_TYPE_HAS_OBS_REGS	128
+#define DST_TYPE_HAS_INC_COUNT	256
+#define DST_TYPE_HAS_MULTI_FE	512
+#define DST_TYPE_HAS_NEWTUNE_2	1024
+#define DST_TYPE_HAS_DBOARD	2048
+#define DST_TYPE_HAS_VLF	4096
 
 /*	Card capability list	*/
 
@@ -58,6 +66,19 @@
 #define DST_TYPE_HAS_CA		32
 #define	DST_TYPE_HAS_ANALOG	64	/*	Analog inputs	*/
 #define DST_TYPE_HAS_SESSION	128
+
+#define TUNER_TYPE_MULTI	1
+#define TUNER_TYPE_UNKNOWN	2
+/*	DVB-S		*/
+#define TUNER_TYPE_L64724	4
+#define TUNER_TYPE_STV0299	8
+#define TUNER_TYPE_MB86A15	16
+
+/*	DVB-T		*/
+#define TUNER_TYPE_TDA10046	32
+
+/*	ATSC		*/
+#define TUNER_TYPE_NXT200x	64
 
 
 #define RDC_8820_PIO_0_DISABLE	0
@@ -79,8 +100,6 @@ struct dst_state {
 	struct i2c_adapter* i2c;
 
 	struct bt878* bt;
-
-	struct dvb_frontend_ops ops;
 
 	/* configuration settings */
 	const struct dst_config* config;
@@ -110,7 +129,24 @@ struct dst_state {
 	u32 dst_hw_cap;
 	u8 dst_fw_version;
 	fe_sec_mini_cmd_t minicmd;
+	fe_modulation_t modulation;
 	u8 messages[256];
+	u8 mac_address[8];
+	u8 fw_version[8];
+	u8 card_info[8];
+	u8 vendor[8];
+	u8 board_info[8];
+	u32 tuner_type;
+	char *tuner_name;
+	struct mutex dst_mutex;
+	u8 fw_name[8];
+};
+
+struct tuner_types {
+	u32 tuner_type;
+	char *tuner_name;
+	char *board_name;
+	char *fw_name;
 };
 
 struct dst_types {
@@ -119,16 +155,14 @@ struct dst_types {
 	u8 dst_type;
 	u32 type_flags;
 	u32 dst_feature;
+	u32 tuner_type;
 };
-
-
 
 struct dst_config
 {
 	/* the ASIC i2c address */
 	u8 demod_address;
 };
-
 
 int rdc_reset_state(struct dst_state *state);
 int rdc_8820_reset(struct dst_state *state);

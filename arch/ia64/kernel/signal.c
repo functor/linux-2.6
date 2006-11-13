@@ -7,11 +7,10 @@
  * Derived from i386 and Alpha versions.
  */
 
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
-#include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/smp.h>
@@ -472,6 +471,8 @@ handle_signal (unsigned long sig, struct k_sigaction *ka, siginfo_t *info, sigse
 		sigaddset(&current->blocked, sig);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
+
+	tracehook_report_handle_signal(sig, ka, oldset, &scr->pt);
 	return 1;
 }
 

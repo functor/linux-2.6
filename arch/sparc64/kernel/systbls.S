@@ -10,7 +10,6 @@
  * Copyright (C) 1995 Adrian M. Rodriguez (adrian@remus.rutgers.edu)
  */
 
-#include <linux/config.h>
 
 	.text
 	.align	4
@@ -25,7 +24,7 @@ sys_call_table32:
 /*10*/  .word sys_unlink, sunos_execv, sys_chdir, sys32_chown16, sys32_mknod
 /*15*/	.word sys_chmod, sys32_lchown16, sparc_brk, sys32_perfctr, sys32_lseek
 /*20*/	.word sys_getpid, sys_capget, sys_capset, sys32_setuid16, sys32_getuid16
-/*25*/	.word sys32_vmsplice, sys_ptrace, sys_alarm, sys32_sigaltstack, sys32_pause
+/*25*/	.word sys32_vmsplice, compat_sys_ptrace, sys_alarm, sys32_sigaltstack, sys32_pause
 /*30*/	.word compat_sys_utime, sys_lchown, sys_fchown, sys32_access, sys32_nice
 	.word sys_chown, sys_sync, sys32_kill, compat_sys_newstat, sys32_sendfile
 /*40*/	.word compat_sys_newlstat, sys_dup, sys_pipe, compat_sys_times, sys_getuid
@@ -167,7 +166,7 @@ sunos_sys_table:
 	.word sys_chmod, sys32_lchown16, sunos_brk
 	.word sunos_nosys, sys32_lseek, sunos_getpid
 	.word sunos_nosys, sunos_nosys, sunos_nosys
-	.word sunos_getuid, sunos_nosys, sys_ptrace
+	.word sunos_getuid, sunos_nosys, compat_sys_ptrace
 	.word sunos_nosys, sunos_nosys, sunos_nosys
 	.word sunos_nosys, sunos_nosys, sunos_nosys
 	.word sys_access, sunos_nosys, sunos_nosys

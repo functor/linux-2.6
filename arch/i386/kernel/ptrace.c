@@ -12,12 +12,15 @@
 #include <linux/smp_lock.h>
 #include <linux/errno.h>
 #include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/user.h>
 #include <linux/security.h>
 #include <linux/audit.h>
 #include <linux/seccomp.h>
 #include <linux/signal.h>
+#include <linux/module.h>
 
+#include <asm/tracehook.h>
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/system.h>
@@ -27,10 +30,6 @@
 #include <asm/ldt.h>
 #include <asm/desc.h>
 
-/*
- * does not yet catch signals sent when the child dies.
- * in exit.c or in signal.c.
- */
 
 /*
  * Determines which flags the user has access to [1 = access, 0 = no access].
@@ -38,9 +37,6 @@
  * Also masks reserved bits (31-22, 15, 5, 3, 1).
  */
 #define FLAG_MASK 0x00050dd5
-
-/* set's the trap flag. */
-#define TRAP_FLAG 0x100
 
 /*
  * Offset of eflags on child stack..
@@ -114,6 +110,7 @@ static int putreg(struct task_struct *child,
 		case EFL:
 			value &= FLAG_MASK;
 			value |= get_stack_long(child, EFL_OFFSET) & ~FLAG_MASK;
+			clear_tsk_thread_flag(child, TIF_FORCED_TF);
 			break;
 	}
 	if (regno > GS*4)
@@ -134,6 +131,10 @@ static unsigned long getreg(struct task_struct *child,
 		case GS:
 			retval = child->thread.gs;
 			break;
+		case EFL:
+			if (test_tsk_thread_flag(child, TIF_FORCED_TF))
+				retval &= ~X86_EFLAGS_TF;
+			goto fetch;
 		case DS:
 		case ES:
 		case SS:
@@ -141,10 +142,12 @@ static unsigned long getreg(struct task_struct *child,
 			retval = 0xffff;
 			/* fall through */
 		default:
+		fetch:
 			if (regno > GS*4)
 				regno -= 2*4;
 			regno = regno - sizeof(struct pt_regs);
 			retval &= get_stack_long(child, regno);
+			break;
 	}
 	return retval;
 }
@@ -222,7 +225,7 @@ static inline int is_at_popf(struct task_struct *child, struct pt_regs *regs)
 	return 0;
 }
 
-static void set_singlestep(struct task_struct *child)
+void tracehook_enable_single_step(struct task_struct *child)
 {
 	struct pt_regs *regs = get_child_regs(child);
 
@@ -236,11 +239,11 @@ static void set_singlestep(struct task_struct *child)
 	/*
 	 * If TF was already set, don't do anything else
 	 */
-	if (regs->eflags & TRAP_FLAG)
+	if (regs->eflags & X86_EFLAGS_TF)
 		return;
 
 	/* Set TF on the kernel stack.. */
-	regs->eflags |= TRAP_FLAG;
+	regs->eflags |= X86_EFLAGS_TF;
 
 	/*
 	 * ..but if TF is changed by the instruction we will trace,
@@ -250,43 +253,323 @@ static void set_singlestep(struct task_struct *child)
 	if (is_at_popf(child, regs))
 		return;
 	
-	child->ptrace |= PT_DTRACE;
+	set_tsk_thread_flag(child, TIF_FORCED_TF);
 }
 
-static void clear_singlestep(struct task_struct *child)
+void tracehook_disable_single_step(struct task_struct *child)
 {
 	/* Always clear TIF_SINGLESTEP... */
 	clear_tsk_thread_flag(child, TIF_SINGLESTEP);
 
 	/* But touch TF only if it was set by us.. */
-	if (child->ptrace & PT_DTRACE) {
+	if (test_and_clear_tsk_thread_flag(child, TIF_FORCED_TF)) {
 		struct pt_regs *regs = get_child_regs(child);
-		regs->eflags &= ~TRAP_FLAG;
-		child->ptrace &= ~PT_DTRACE;
+		regs->eflags &= ~X86_EFLAGS_TF;
 	}
 }
 
-/*
- * Called by kernel/ptrace.c when detaching..
- *
- * Make sure the single step bit is not set.
- */
-void ptrace_disable(struct task_struct *child)
-{ 
-	clear_singlestep(child);
-	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-	clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
+
+static int
+genregs_get(struct task_struct *target,
+	    const struct utrace_regset *regset,
+	    unsigned int pos, unsigned int count,
+	    void *kbuf, void __user *ubuf)
+{
+	if (kbuf) {
+		unsigned long *kp = kbuf;
+		while (count > 0) {
+			*kp++ = getreg(target, pos);
+			pos += 4;
+			count -= 4;
+		}
+	}
+	else {
+		unsigned long __user *up = ubuf;
+		while (count > 0) {
+			if (__put_user(getreg(target, pos), up++))
+				return -EFAULT;
+			pos += 4;
+			count -= 4;
+		}
+	}
+
+	return 0;
 }
+
+static int
+genregs_set(struct task_struct *target,
+	    const struct utrace_regset *regset,
+	    unsigned int pos, unsigned int count,
+	    const void *kbuf, const void __user *ubuf)
+{
+	int ret = 0;
+
+	if (kbuf) {
+		const unsigned long *kp = kbuf;
+		while (!ret && count > 0) {
+			ret = putreg(target, pos, *kp++);
+			pos += 4;
+			count -= 4;
+		}
+	}
+	else {
+		int ret = 0;
+		const unsigned long __user *up = ubuf;
+		while (!ret && count > 0) {
+			unsigned long val;
+			ret = __get_user(val, up++);
+			if (!ret)
+				ret = putreg(target, pos, val);
+			pos += 4;
+			count -= 4;
+		}
+	}
+
+	return ret;
+}
+
+static int
+fpregs_active(struct task_struct *target, const struct utrace_regset *regset)
+{
+	return tsk_used_math(target) ? regset->n : 0;
+}
+
+static int
+fpregs_get(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   void *kbuf, void __user *ubuf)
+{
+	struct user_i387_struct fp;
+	int ret;
+
+	if (tsk_used_math(target)) {
+		if (target == current)
+			unlazy_fpu(target);
+	}
+	else
+		init_fpu(target);
+
+	ret = get_fpregs(&fp, target);
+	if (ret == 0)
+		ret = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					    &fp, 0, -1);
+
+	return ret;
+}
+
+static int
+fpregs_set(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   const void *kbuf, const void __user *ubuf)
+{
+	struct user_i387_struct fp;
+	int ret;
+
+	if (tsk_used_math(target)) {
+		if (target == current)
+			unlazy_fpu(target);
+	}
+	else if (pos == 0 && count == sizeof(fp))
+		set_stopped_child_used_math(target);
+	else
+		init_fpu(target);
+
+	if (pos > 0 || count < sizeof(fp)) {
+		ret = get_fpregs(&fp, target);
+		if (ret == 0)
+			ret = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+						   &fp, 0, -1);
+		if (ret)
+			return ret;
+		kbuf = &fp;
+	}
+	else if (kbuf == NULL) {
+		if (__copy_from_user(&fp, ubuf, sizeof(fp)))
+			return -EFAULT;
+		kbuf = &fp;
+	}
+
+	return set_fpregs(target, kbuf);
+}
+
+static int
+fpxregs_active(struct task_struct *target, const struct utrace_regset *regset)
+{
+	return !cpu_has_fxsr ? -ENODEV : tsk_used_math(target) ? regset->n : 0;
+}
+
+static int
+fpxregs_get(struct task_struct *target,
+	    const struct utrace_regset *regset,
+	    unsigned int pos, unsigned int count,
+	    void *kbuf, void __user *ubuf)
+{
+	if (!cpu_has_fxsr)
+		return -ENODEV;
+
+	if (tsk_used_math(target))
+		unlazy_fpu(target);
+	else
+		init_fpu(target);
+
+	return utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				     &target->thread.i387.fxsave, 0, -1);
+}
+
+static int
+fpxregs_set(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   const void *kbuf, const void __user *ubuf)
+{
+	int ret;
+
+	if (!cpu_has_fxsr)
+		return -ENODEV;
+
+	if (tsk_used_math(target))
+		unlazy_fpu(target);
+	else if (pos == 0 && count == sizeof(target->thread.i387.fxsave))
+		set_stopped_child_used_math(target);
+	else
+		init_fpu(target);
+
+	ret = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				   &target->thread.i387.fxsave, 0, -1);
+
+	updated_fpxregs(target);
+
+	return ret;
+}
+
+
+static int
+dbregs_active(struct task_struct *tsk, const struct utrace_regset *regset)
+{
+	if (tsk->thread.debugreg[DR_CONTROL] | tsk->thread.debugreg[DR_STATUS])
+		return 8;
+	return 0;
+}
+
+static int
+dbregs_get(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   void *kbuf, void __user *ubuf)
+{ 
+	/*
+	 * The hardware updates the status register on a debug trap,
+	 * but do_debug (traps.c) save it for us when that happens.
+	 * So whether the target is current or not, thread.debugreg is good.
+	 */
+
+	return utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				     target->thread.debugreg, 0, -1);
+}
+
+static int
+dbregs_set(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   const void *kbuf, const void __user *ubuf)
+{
+	for (pos >>= 2, count >>= 2; count > 0; --count, ++pos) {
+		unsigned long val;
+		unsigned int i;
+
+		if (kbuf) {
+			val = *(const unsigned long *) kbuf;
+			kbuf += sizeof(unsigned long);
+		}
+		else {
+			if (__get_user(val, (unsigned long __user *) ubuf))
+				return -EFAULT;
+			ubuf += sizeof(unsigned long);
+		}
+
+		if (pos < 4) {
+			if (val >= TASK_SIZE - 3)
+				return -EIO;
+			goto set;
+		}
+		else if (pos < 6) {
+			if (val != 0)
+				return -EIO;
+			continue;
+		}
+		else if (pos < 7)
+			goto set;
+
+		/* Sanity-check data. Take one half-byte at once with
+		 * check = (val >> (16 + 4*i)) & 0xf. It contains the
+		 * R/Wi and LENi bits; bits 0 and 1 are R/Wi, and bits
+		 * 2 and 3 are LENi. Given a list of invalid values,
+		 * we do mask |= 1 << invalid_value, so that
+		 * (mask >> check) & 1 is a correct test for invalid
+		 * values.
+		 *
+		 * R/Wi contains the type of the breakpoint /
+		 * watchpoint, LENi contains the length of the watched
+		 * data in the watchpoint case.
+		 *
+		 * The invalid values are:
+		 * - LENi == 0x10 (undefined), so mask |= 0x0f00.
+		 * - R/Wi == 0x10 (break on I/O reads or writes), so
+		 *   mask |= 0x4444.
+		 * - R/Wi == 0x00 && LENi != 0x00, so we have mask |=
+		 *   0x1110.
+		 *
+		 * Finally, mask = 0x0f00 | 0x4444 | 0x1110 == 0x5f54.
+		 *
+		 * See the Intel Manual "System Programming Guide",
+		 * 15.2.4
+		 *
+		 * Note that LENi == 0x10 is defined on x86_64 in long
+		 * mode (i.e. even for 32-bit userspace software, but
+		 * 64-bit kernel), so the x86_64 mask value is 0x5454.
+		 * See the AMD manual no. 24593 (AMD64 System
+		 * Programming)*/
+		val &= ~DR_CONTROL_RESERVED;
+		for (i = 0; i < 4; i++)
+			if ((0x5f54 >> ((val >> (16 + 4*i)) & 0xf)) & 1)
+				return -EIO;
+		if (val)
+			set_tsk_thread_flag(target, TIF_DEBUG);
+		else
+			clear_tsk_thread_flag(target, TIF_DEBUG);
+
+	set:
+		target->thread.debugreg[pos] = val;
+		if (target == current)
+			switch (pos) {
+#define DBREG(n) case n: set_debugreg(target->thread.debugreg[n], n); break
+				DBREG(0);
+				DBREG(1);
+				DBREG(2);
+				DBREG(3);
+				DBREG(6);
+				DBREG(7);
+#undef	DBREG
+			}
+	}
+
+	return 0;
+}
+
 
 /*
  * Perform get_thread_area on behalf of the traced child.
  */
 static int
-ptrace_get_thread_area(struct task_struct *child,
-		       int idx, struct user_desc __user *user_desc)
+tls_get(struct task_struct *target,
+	const struct utrace_regset *regset,
+	unsigned int pos, unsigned int count,
+	void *kbuf,  void __user *ubuf)
 {
-	struct user_desc info;
-	struct desc_struct *desc;
+	struct user_desc info, *ip;
+	const struct desc_struct *desc;
 
 /*
  * Get the current Thread-Local Storage area:
@@ -308,23 +591,29 @@ ptrace_get_thread_area(struct task_struct *child,
 #define GET_PRESENT(desc)	(((desc)->b >> 15) & 1)
 #define GET_USEABLE(desc)	(((desc)->b >> 20) & 1)
 
-	if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
-		return -EINVAL;
+	desc = &target->thread.tls_array[pos / sizeof(struct user_desc)];
+	ip = kbuf ?: &info;
+	memset(ip, 0, sizeof *ip);
+	for (; count > 0; count -= sizeof(struct user_desc), ++desc) {
+		ip->entry_number = (desc - &target->thread.tls_array[0]
+				    + GDT_ENTRY_TLS_MIN);
+		ip->base_addr = GET_BASE(desc);
+		ip->limit = GET_LIMIT(desc);
+		ip->seg_32bit = GET_32BIT(desc);
+		ip->contents = GET_CONTENTS(desc);
+		ip->read_exec_only = !GET_WRITABLE(desc);
+		ip->limit_in_pages = GET_LIMIT_PAGES(desc);
+		ip->seg_not_present = !GET_PRESENT(desc);
+		ip->useable = GET_USEABLE(desc);
 
-	desc = child->thread.tls_array + idx - GDT_ENTRY_TLS_MIN;
-
-	info.entry_number = idx;
-	info.base_addr = GET_BASE(desc);
-	info.limit = GET_LIMIT(desc);
-	info.seg_32bit = GET_32BIT(desc);
-	info.contents = GET_CONTENTS(desc);
-	info.read_exec_only = !GET_WRITABLE(desc);
-	info.limit_in_pages = GET_LIMIT_PAGES(desc);
-	info.seg_not_present = !GET_PRESENT(desc);
-	info.useable = GET_USEABLE(desc);
-
-	if (copy_to_user(user_desc, &info, sizeof(info)))
-		return -EFAULT;
+		if (kbuf)
+			++ip;
+		else {
+			if (__copy_to_user(ubuf, &info, sizeof(info)))
+				return -EFAULT;
+			ubuf += sizeof(info);
+		}
+	}
 
 	return 0;
 }
@@ -333,305 +622,154 @@ ptrace_get_thread_area(struct task_struct *child,
  * Perform set_thread_area on behalf of the traced child.
  */
 static int
-ptrace_set_thread_area(struct task_struct *child,
-		       int idx, struct user_desc __user *user_desc)
+tls_set(struct task_struct *target,
+	const struct utrace_regset *regset,
+	unsigned int pos, unsigned int count,
+	const void *kbuf, const void __user *ubuf)
 {
 	struct user_desc info;
 	struct desc_struct *desc;
+	struct desc_struct newtls[GDT_ENTRY_TLS_ENTRIES];
+	unsigned int i;
+	int cpu;
 
-	if (copy_from_user(&info, user_desc, sizeof(info)))
-		return -EFAULT;
+	pos /= sizeof(struct user_desc);
+	count /= sizeof(struct user_desc);
 
-	if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
-		return -EINVAL;
+	desc = newtls;
+	for (i = 0; i < count; ++i, ++desc) {
+		const struct user_desc *ip;
+		if (kbuf) {
+			ip = kbuf;
+			kbuf += sizeof(struct user_desc);
+		}
+		else {
+			ip = &info;
+			if (__copy_from_user(&info, ubuf, sizeof(info)))
+				return -EFAULT;
+			ubuf += sizeof(struct user_desc);
+		}
 
-	desc = child->thread.tls_array + idx - GDT_ENTRY_TLS_MIN;
-	if (LDT_empty(&info)) {
-		desc->a = 0;
-		desc->b = 0;
-	} else {
-		desc->a = LDT_entry_a(&info);
-		desc->b = LDT_entry_b(&info);
+		if (LDT_empty(ip)) {
+			desc->a = 0;
+			desc->b = 0;
+		} else {
+			desc->a = LDT_entry_a(ip);
+			desc->b = LDT_entry_b(ip);
+		}
 	}
+
+	/*
+	 * We must not get preempted while modifying the TLS.
+	 */
+	cpu = get_cpu();
+	memcpy(&target->thread.tls_array[pos], newtls,
+	       count * sizeof(newtls[0]));
+	if (target == current)
+		load_TLS(&target->thread, cpu);
+	put_cpu();
 
 	return 0;
 }
 
-long arch_ptrace(struct task_struct *child, long request, long addr, long data)
-{
-	struct user * dummy = NULL;
-	int i, ret;
-	unsigned long __user *datap = (unsigned long __user *)data;
-
-	switch (request) {
-	/* when I and D space are separate, these will need to be fixed. */
-	case PTRACE_PEEKTEXT: /* read word at location addr. */ 
-	case PTRACE_PEEKDATA: {
-		unsigned long tmp;
-		int copied;
-
-		copied = access_process_vm(child, addr, &tmp, sizeof(tmp), 0);
-		ret = -EIO;
-		if (copied != sizeof(tmp))
-			break;
-		ret = put_user(tmp, datap);
-		break;
-	}
-
-	/* read the word at location addr in the USER area. */
-	case PTRACE_PEEKUSR: {
-		unsigned long tmp;
-
-		ret = -EIO;
-		if ((addr & 3) || addr < 0 || 
-		    addr > sizeof(struct user) - 3)
-			break;
-
-		tmp = 0;  /* Default return condition */
-		if(addr < FRAME_SIZE*sizeof(long))
-			tmp = getreg(child, addr);
-		if(addr >= (long) &dummy->u_debugreg[0] &&
-		   addr <= (long) &dummy->u_debugreg[7]){
-			addr -= (long) &dummy->u_debugreg[0];
-			addr = addr >> 2;
-			tmp = child->thread.debugreg[addr];
-		}
-		ret = put_user(tmp, datap);
-		break;
-	}
-
-	/* when I and D space are separate, this will have to be fixed. */
-	case PTRACE_POKETEXT: /* write the word at location addr. */
-	case PTRACE_POKEDATA:
-		ret = 0;
-		if (access_process_vm(child, addr, &data, sizeof(data), 1) == sizeof(data))
-			break;
-		ret = -EIO;
-		break;
-
-	case PTRACE_POKEUSR: /* write the word at location addr in the USER area */
-		ret = -EIO;
-		if ((addr & 3) || addr < 0 || 
-		    addr > sizeof(struct user) - 3)
-			break;
-
-		if (addr < FRAME_SIZE*sizeof(long)) {
-			ret = putreg(child, addr, data);
-			break;
-		}
-		/* We need to be very careful here.  We implicitly
-		   want to modify a portion of the task_struct, and we
-		   have to be selective about what portions we allow someone
-		   to modify. */
-
-		  ret = -EIO;
-		  if(addr >= (long) &dummy->u_debugreg[0] &&
-		     addr <= (long) &dummy->u_debugreg[7]){
-
-			  if(addr == (long) &dummy->u_debugreg[4]) break;
-			  if(addr == (long) &dummy->u_debugreg[5]) break;
-			  if(addr < (long) &dummy->u_debugreg[4] &&
-			     ((unsigned long) data) >= TASK_SIZE-3) break;
-			  
-			  /* Sanity-check data. Take one half-byte at once with
-			   * check = (val >> (16 + 4*i)) & 0xf. It contains the
-			   * R/Wi and LENi bits; bits 0 and 1 are R/Wi, and bits
-			   * 2 and 3 are LENi. Given a list of invalid values,
-			   * we do mask |= 1 << invalid_value, so that
-			   * (mask >> check) & 1 is a correct test for invalid
-			   * values.
-			   *
-			   * R/Wi contains the type of the breakpoint /
-			   * watchpoint, LENi contains the length of the watched
-			   * data in the watchpoint case.
-			   *
-			   * The invalid values are:
-			   * - LENi == 0x10 (undefined), so mask |= 0x0f00.
-			   * - R/Wi == 0x10 (break on I/O reads or writes), so
-			   *   mask |= 0x4444.
-			   * - R/Wi == 0x00 && LENi != 0x00, so we have mask |=
-			   *   0x1110.
-			   *
-			   * Finally, mask = 0x0f00 | 0x4444 | 0x1110 == 0x5f54.
-			   *
-			   * See the Intel Manual "System Programming Guide",
-			   * 15.2.4
-			   *
-			   * Note that LENi == 0x10 is defined on x86_64 in long
-			   * mode (i.e. even for 32-bit userspace software, but
-			   * 64-bit kernel), so the x86_64 mask value is 0x5454.
-			   * See the AMD manual no. 24593 (AMD64 System
-			   * Programming)*/
-
-			  if(addr == (long) &dummy->u_debugreg[7]) {
-				  data &= ~DR_CONTROL_RESERVED;
-				  for(i=0; i<4; i++)
-					  if ((0x5f54 >> ((data >> (16 + 4*i)) & 0xf)) & 1)
-						  goto out_tsk;
-			  }
-
-			  addr -= (long) &dummy->u_debugreg;
-			  addr = addr >> 2;
-			  child->thread.debugreg[addr] = data;
-			  ret = 0;
-		  }
-		  break;
-
-	case PTRACE_SYSEMU: /* continue and stop at next syscall, which will not be executed */
-	case PTRACE_SYSCALL:	/* continue and stop at next (return from) syscall */
-	case PTRACE_CONT:	/* restart after signal. */
-		ret = -EIO;
-		if (!valid_signal(data))
-			break;
-		if (request == PTRACE_SYSEMU) {
-			set_tsk_thread_flag(child, TIF_SYSCALL_EMU);
-			clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-		} else if (request == PTRACE_SYSCALL) {
-			set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-			clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
-		} else {
-			clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
-			clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-		}
-		child->exit_code = data;
-		/* make sure the single step bit is not set. */
-		clear_singlestep(child);
-		wake_up_process(child);
-		ret = 0;
-		break;
 
 /*
- * make the child exit.  Best I can do is send it a sigkill. 
- * perhaps it should be put in the status that it wants to 
- * exit.
+ * Determine how many TLS slots are in use.
  */
-	case PTRACE_KILL:
-		ret = 0;
-		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
+static int
+tls_active(struct task_struct *target, const struct utrace_regset *regset)
+{
+	int i;
+	for (i = GDT_ENTRY_TLS_ENTRIES; i > 0; --i) {
+		struct desc_struct *desc = &target->thread.tls_array[i - 1];
+		if ((desc->a | desc->b) != 0)
 			break;
-		child->exit_code = SIGKILL;
-		/* make sure the single step bit is not set. */
-		clear_singlestep(child);
-		wake_up_process(child);
-		break;
-
-	case PTRACE_SYSEMU_SINGLESTEP: /* Same as SYSEMU, but singlestep if not syscall */
-	case PTRACE_SINGLESTEP:	/* set the trap flag. */
-		ret = -EIO;
-		if (!valid_signal(data))
-			break;
-
-		if (request == PTRACE_SYSEMU_SINGLESTEP)
-			set_tsk_thread_flag(child, TIF_SYSCALL_EMU);
-		else
-			clear_tsk_thread_flag(child, TIF_SYSCALL_EMU);
-
-		clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-		set_singlestep(child);
-		child->exit_code = data;
-		/* give it a chance to run. */
-		wake_up_process(child);
-		ret = 0;
-		break;
-
-	case PTRACE_DETACH:
-		/* detach a process that was attached. */
-		ret = ptrace_detach(child, data);
-		break;
-
-	case PTRACE_GETREGS: { /* Get all gp regs from the child. */
-	  	if (!access_ok(VERIFY_WRITE, datap, FRAME_SIZE*sizeof(long))) {
-			ret = -EIO;
-			break;
-		}
-		for ( i = 0; i < FRAME_SIZE*sizeof(long); i += sizeof(long) ) {
-			__put_user(getreg(child, i), datap);
-			datap++;
-		}
-		ret = 0;
-		break;
 	}
-
-	case PTRACE_SETREGS: { /* Set all gp regs in the child. */
-		unsigned long tmp;
-	  	if (!access_ok(VERIFY_READ, datap, FRAME_SIZE*sizeof(long))) {
-			ret = -EIO;
-			break;
-		}
-		for ( i = 0; i < FRAME_SIZE*sizeof(long); i += sizeof(long) ) {
-			__get_user(tmp, datap);
-			putreg(child, i, tmp);
-			datap++;
-		}
-		ret = 0;
-		break;
-	}
-
-	case PTRACE_GETFPREGS: { /* Get the child FPU state. */
-		if (!access_ok(VERIFY_WRITE, datap,
-			       sizeof(struct user_i387_struct))) {
-			ret = -EIO;
-			break;
-		}
-		ret = 0;
-		if (!tsk_used_math(child))
-			init_fpu(child);
-		get_fpregs((struct user_i387_struct __user *)data, child);
-		break;
-	}
-
-	case PTRACE_SETFPREGS: { /* Set the child FPU state. */
-		if (!access_ok(VERIFY_READ, datap,
-			       sizeof(struct user_i387_struct))) {
-			ret = -EIO;
-			break;
-		}
-		set_stopped_child_used_math(child);
-		set_fpregs(child, (struct user_i387_struct __user *)data);
-		ret = 0;
-		break;
-	}
-
-	case PTRACE_GETFPXREGS: { /* Get the child extended FPU state. */
-		if (!access_ok(VERIFY_WRITE, datap,
-			       sizeof(struct user_fxsr_struct))) {
-			ret = -EIO;
-			break;
-		}
-		if (!tsk_used_math(child))
-			init_fpu(child);
-		ret = get_fpxregs((struct user_fxsr_struct __user *)data, child);
-		break;
-	}
-
-	case PTRACE_SETFPXREGS: { /* Set the child extended FPU state. */
-		if (!access_ok(VERIFY_READ, datap,
-			       sizeof(struct user_fxsr_struct))) {
-			ret = -EIO;
-			break;
-		}
-		set_stopped_child_used_math(child);
-		ret = set_fpxregs(child, (struct user_fxsr_struct __user *)data);
-		break;
-	}
-
-	case PTRACE_GET_THREAD_AREA:
-		ret = ptrace_get_thread_area(child, addr,
-					(struct user_desc __user *) data);
-		break;
-
-	case PTRACE_SET_THREAD_AREA:
-		ret = ptrace_set_thread_area(child, addr,
-					(struct user_desc __user *) data);
-		break;
-
-	default:
-		ret = ptrace_request(child, request, addr, data);
-		break;
-	}
- out_tsk:
-	return ret;
+	return i;
 }
+
+
+/*
+ * These are our native regset flavors.
+ * XXX ioperm? vm86?
+ */
+static const struct utrace_regset native_regsets[] = {
+	{
+		.n = FRAME_SIZE, .size = sizeof(long), .align = sizeof(long),
+		.get = genregs_get, .set = genregs_set
+	},
+	{
+		.n = sizeof(struct user_i387_struct) / sizeof(long),
+		.size = sizeof(long), .align = sizeof(long),
+		.active = fpregs_active,
+		.get = fpregs_get, .set = fpregs_set
+	},
+	{
+		.n = sizeof(struct user_fxsr_struct) / sizeof(long),
+		.size = sizeof(long), .align = sizeof(long),
+		.active = fpxregs_active,
+		.get = fpxregs_get, .set = fpxregs_set
+	},
+	{
+		.n = GDT_ENTRY_TLS_ENTRIES,
+		.bias = GDT_ENTRY_TLS_MIN,
+		.size = sizeof(struct user_desc),
+		.align = sizeof(struct user_desc),
+		.active = tls_active, .get = tls_get, .set = tls_set
+	},
+	{
+		.n = 8, .size = sizeof(long), .align = sizeof(long),
+		.active = dbregs_active,
+		.get = dbregs_get, .set = dbregs_set
+	},
+};
+
+const struct utrace_regset_view utrace_i386_native = {
+	.name = "i386", .e_machine = EM_386,
+	.regsets = native_regsets,
+	.n = sizeof native_regsets / sizeof native_regsets[0],
+};
+EXPORT_SYMBOL_GPL(utrace_i386_native);
+
+#ifdef CONFIG_PTRACE
+static const struct ptrace_layout_segment i386_uarea[] = {
+	{0, FRAME_SIZE*4, 0, 0},
+	{offsetof(struct user, u_debugreg[0]),
+	 offsetof(struct user, u_debugreg[8]), 4, 0},
+	{0, 0, -1, 0}
+};
+
+fastcall int arch_ptrace(long *req, struct task_struct *child,
+			 struct utrace_attached_engine *engine,
+			 unsigned long addr, unsigned long data, long *val)
+{
+	switch (*req) {
+	case PTRACE_PEEKUSR:
+		return ptrace_peekusr(child, engine, i386_uarea, addr, data);
+	case PTRACE_POKEUSR:
+		return ptrace_pokeusr(child, engine, i386_uarea, addr, data);
+	case PTRACE_GETREGS:
+		return ptrace_whole_regset(child, engine, data, 0, 0);
+	case PTRACE_SETREGS:
+		return ptrace_whole_regset(child, engine, data, 0, 1);
+	case PTRACE_GETFPREGS:
+		return ptrace_whole_regset(child, engine, data, 1, 0);
+	case PTRACE_SETFPREGS:
+		return ptrace_whole_regset(child, engine, data, 1, 1);
+	case PTRACE_GETFPXREGS:
+		return ptrace_whole_regset(child, engine, data, 2, 0);
+	case PTRACE_SETFPXREGS:
+		return ptrace_whole_regset(child, engine, data, 2, 1);
+	case PTRACE_GET_THREAD_AREA:
+	case PTRACE_SET_THREAD_AREA:
+		return ptrace_onereg_access(child, engine,
+					    utrace_native_view(current), 3,
+					    addr, (void __user *)data,
+					    *req == PTRACE_SET_THREAD_AREA);
+	}
+	return -ENOSYS;
+}
+#endif
 
 void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs, int error_code)
 {
@@ -655,78 +793,24 @@ void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs, int error_code)
  * - triggered by current->work.syscall_trace
  */
 __attribute__((regparm(3)))
-int do_syscall_trace(struct pt_regs *regs, int entryexit)
+void do_syscall_trace(struct pt_regs *regs, int entryexit)
 {
-	int is_sysemu = test_thread_flag(TIF_SYSCALL_EMU);
-	/*
-	 * With TIF_SYSCALL_EMU set we want to ignore TIF_SINGLESTEP for syscall
-	 * interception
-	 */
-	int is_singlestep = !is_sysemu && test_thread_flag(TIF_SINGLESTEP);
-	int ret = 0;
-
 	/* do the secure computing check first */
 	if (!entryexit)
 		secure_computing(regs->orig_eax);
 
-	if (unlikely(current->audit_context)) {
-		if (entryexit)
-			audit_syscall_exit(AUDITSC_RESULT(regs->eax),
-						regs->eax);
-		/* Debug traps, when using PTRACE_SINGLESTEP, must be sent only
-		 * on the syscall exit path. Normally, when TIF_SYSCALL_AUDIT is
-		 * not used, entry.S will call us only on syscall exit, not
-		 * entry; so when TIF_SYSCALL_AUDIT is used we must avoid
-		 * calling send_sigtrap() on syscall entry.
-		 *
-		 * Note that when PTRACE_SYSEMU_SINGLESTEP is used,
-		 * is_singlestep is false, despite his name, so we will still do
-		 * the correct thing.
-		 */
-		else if (is_singlestep)
-			goto out;
+	if (unlikely(current->audit_context) && entryexit)
+		audit_syscall_exit(AUDITSC_RESULT(regs->eax), regs->eax);
+
+	if (test_thread_flag(TIF_SYSCALL_TRACE))
+		tracehook_report_syscall(regs, entryexit);
+
+	if (test_thread_flag(TIF_SINGLESTEP) && entryexit) {
+		send_sigtrap(current, regs, 0);	/* XXX */
+		tracehook_report_syscall_step(regs);
 	}
 
-	if (!(current->ptrace & PT_PTRACED))
-		goto out;
-
-	/* If a process stops on the 1st tracepoint with SYSCALL_TRACE
-	 * and then is resumed with SYSEMU_SINGLESTEP, it will come in
-	 * here. We have to check this and return */
-	if (is_sysemu && entryexit)
-		return 0;
-
-	/* Fake a debug trap */
-	if (is_singlestep)
-		send_sigtrap(current, regs, 0);
-
- 	if (!test_thread_flag(TIF_SYSCALL_TRACE) && !is_sysemu)
-		goto out;
-
-	/* the 0x80 provides a way for the tracing parent to distinguish
-	   between a syscall stop and SIGTRAP delivery */
-	/* Note that the debugger could change the result of test_thread_flag!*/
-	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD) ? 0x80:0));
-
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
-	}
-	ret = is_sysemu;
-out:
 	if (unlikely(current->audit_context) && !entryexit)
 		audit_syscall_entry(AUDIT_ARCH_I386, regs->orig_eax,
 				    regs->ebx, regs->ecx, regs->edx, regs->esi);
-	if (ret == 0)
-		return 0;
-
-	regs->orig_eax = -1; /* force skip of syscall restarting */
-	if (unlikely(current->audit_context))
-		audit_syscall_exit(AUDITSC_RESULT(regs->eax), regs->eax);
-	return 1;
 }

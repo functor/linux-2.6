@@ -7,12 +7,12 @@
  *             Peter Oberparleiter <peter.oberparleiter@de.ibm.com>
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/cpumask.h>
 #include <linux/smp.h>
 #include <linux/init.h>
+#include <linux/reboot.h>
 #include <asm/atomic.h>
 #include <asm/ptrace.h>
 #include <asm/sigp.h>
@@ -32,7 +32,7 @@ do_load_quiesce_psw(void * __unused)
 	psw_t quiesce_psw;
 	int cpu;
 
-	if (atomic_compare_and_swap(-1, smp_processor_id(), &cpuid))
+	if (atomic_cmpxchg(&cpuid, -1, smp_processor_id()) != -1)
 		signal_processor(smp_processor_id(), sigp_stop);
 	/* Wait for all other cpus to enter stopped state */
 	for_each_online_cpu(cpu) {
@@ -65,8 +65,6 @@ do_machine_quiesce(void)
 	__load_psw(quiesce_psw);
 }
 #endif
-
-extern void ctrl_alt_del(void);
 
 /* Handler for quiesce event. Start shutdown procedure. */
 static void

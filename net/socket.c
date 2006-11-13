@@ -58,7 +58,6 @@
  *	Based upon Swansea University Computer Society NET3.039
  */
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/smp_lock.h>
 #include <linux/socket.h>
@@ -337,10 +336,11 @@ static struct super_operations sockfs_ops = {
 	.statfs =	simple_statfs,
 };
 
-static struct super_block *sockfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int sockfs_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_pseudo(fs_type, "socket:", &sockfs_ops, SOCKFS_MAGIC);
+	return get_sb_pseudo(fs_type, "socket:", &sockfs_ops, SOCKFS_MAGIC,
+			     mnt);
 }
 
 static struct vfsmount *sock_mnt __read_mostly;
@@ -1212,7 +1212,8 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
  */
 
 	if (!(sock = sock_alloc())) {
-		printk(KERN_WARNING "socket: no more sockets\n");
+		if (net_ratelimit())
+			printk(KERN_WARNING "socket: no more sockets\n");
 		err = -ENFILE;		/* Not exactly a match, but its the
 					   closest posix thing */
 		goto out;
@@ -1266,7 +1267,13 @@ int sock_create(int family, int type, int protocol, struct socket **res)
 
 int sock_create_kern(int family, int type, int protocol, struct socket **res)
 {
-	return __sock_create(family, type, protocol, res, 1);
+	static struct lock_class_key sk_lock_internal_key;
+	int ret;
+	ret = __sock_create(family, type, protocol, res, 1);
+	if (!ret)
+		lockdep_set_class(&(*res)->sk->sk_lock.slock,
+        		&sk_lock_internal_key);
+        return ret;
 }
 
 asmlinkage long sys_socket(int family, int type, int protocol)

@@ -12,7 +12,6 @@
  *	based upon discusions in irc://irc.openprojects.net/#kernelnewbies
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/mm.h>
@@ -95,11 +94,16 @@ static struct sysrq_key_op sysrq_unraw_op = {
 #define sysrq_unraw_op (*(struct sysrq_key_op *)0)
 #endif /* CONFIG_VT */
 
-#ifdef CONFIG_KEXEC
 static void sysrq_handle_crashdump(int key, struct pt_regs *pt_regs,
 				struct tty_struct *tty)
 {
+#ifdef CONFIG_KEXEC
 	crash_kexec(pt_regs);
+	/* can't get here if crash image is loaded */
+	printk("Kexec: Warning: crash image not loaded\n");
+#endif
+	if(panic_on_oops)
+		panic("SysRq-triggered panic!\n");
 }
 static struct sysrq_key_op sysrq_crashdump_op = {
 	.handler	= sysrq_handle_crashdump,
@@ -107,13 +111,11 @@ static struct sysrq_key_op sysrq_crashdump_op = {
 	.action_msg	= "Trigger a crashdump",
 	.enable_mask	= SYSRQ_ENABLE_DUMP,
 };
-#else
-#define sysrq_crashdump_op (*(struct sysrq_key_op *)0)
-#endif
 
 static void sysrq_handle_reboot(int key, struct pt_regs *pt_regs,
 				struct tty_struct *tty)
 {
+	lockdep_off();
 	local_irq_enable();
 	emergency_restart();
 }
@@ -148,12 +150,13 @@ static struct sysrq_key_op sysrq_mountro_op = {
 	.enable_mask	= SYSRQ_ENABLE_REMOUNT,
 };
 
-#ifdef CONFIG_DEBUG_MUTEXES
+#ifdef CONFIG_LOCKDEP
 static void sysrq_handle_showlocks(int key, struct pt_regs *pt_regs,
 				struct tty_struct *tty)
 {
-	mutex_debug_show_all_locks();
+	debug_show_all_locks();
 }
+
 static struct sysrq_key_op sysrq_showlocks_op = {
 	.handler	= sysrq_handle_showlocks,
 	.help_msg	= "show-all-locks(D)",

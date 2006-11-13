@@ -170,10 +170,10 @@ static int init_queues (int nr_tux_threads)
 
 		INIT_LIST_HEAD(&ti->all_requests);
 
-		ti->free_requests_lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&ti->free_requests_lock);
 		INIT_LIST_HEAD(&ti->free_requests);
 
-		ti->work_lock = SPIN_LOCK_UNLOCKED;
+		spin_lock_init(&ti->work_lock);
 		INIT_LIST_HEAD(&ti->work_pending);
 		INIT_LIST_HEAD(&ti->lru);
 
@@ -1197,7 +1197,7 @@ eventloop:
 			if (ret)
 				GOTO_ERR_unlock;
 			addr = (char *)(unsigned long)u_addr;
-			filp = dentry_open(req->dentry, O_RDONLY, 0);
+			filp = dentry_open(req->dentry, NULL, O_RDONLY);
 			dget(req->dentry);
 			generic_file_read(filp, addr, req->total_file_len, &ppos);
 			fput(filp);

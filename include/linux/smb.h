@@ -88,7 +88,6 @@ struct smb_fattr {
 	struct timespec	f_atime;
 	struct timespec f_mtime;
 	struct timespec f_ctime;
-	unsigned long	f_blksize;
 	unsigned long	f_blocks;
 	int		f_unix;
 };

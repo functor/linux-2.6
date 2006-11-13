@@ -171,14 +171,14 @@ psched_tod_diff(int delta_sec, int bound)
 ({ \
 	   int __delta = (tv).tv_usec + (delta); \
 	   (tv_res).tv_sec = (tv).tv_sec; \
-	   if (__delta > USEC_PER_SEC) { (tv_res).tv_sec++; __delta -= USEC_PER_SEC; } \
+	   while (__delta >= USEC_PER_SEC) { (tv_res).tv_sec++; __delta -= USEC_PER_SEC; } \
 	   (tv_res).tv_usec = __delta; \
 })
 
 #define PSCHED_TADD(tv, delta) \
 ({ \
 	   (tv).tv_usec += (delta); \
-	   if ((tv).tv_usec > USEC_PER_SEC) { (tv).tv_sec++; \
+	   while ((tv).tv_usec >= USEC_PER_SEC) { (tv).tv_sec++; \
 		 (tv).tv_usec -= USEC_PER_SEC; } \
 })
 

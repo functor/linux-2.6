@@ -35,7 +35,6 @@
 
 #undef DEBUG
 
-#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/ioport.h>
@@ -53,12 +52,14 @@
 #include <linux/spinlock.h>
 #include <linux/smp_lock.h>
 #include <linux/ac97_codec.h>
+#include <linux/mutex.h>
+
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/hardirq.h>
-#include <asm/mach-au1x00/au1000.h>
 #include <asm/mach-au1x00/au1xxx_psc.h>
 #include <asm/mach-au1x00/au1xxx_dbdma.h>
+#include <asm/mach-au1x00/au1xxx.h>
 
 #undef OSS_DOCUMENTED_MIXER_SEMANTICS
 
@@ -78,7 +79,7 @@
  * 0 = no VRA, 1 = use VRA if codec supports it
  */
 static int      vra = 1;
-MODULE_PARM(vra, "i");
+module_param(vra, bool, 0);
 MODULE_PARM_DESC(vra, "if 1 use VRA if codec supports it");
 
 static struct au1550_state {
@@ -91,8 +92,8 @@ static struct au1550_state {
 	int             no_vra;		/* do not use VRA */
 
 	spinlock_t      lock;
-	struct semaphore open_sem;
-	struct semaphore sem;
+	struct mutex open_mutex;
+	struct mutex sem;
 	mode_t          open_mode;
 	wait_queue_head_t open_wait;
 
@@ -212,7 +213,8 @@ rdcodec(struct ac97_codec *codec, u8 addr)
 	}
 	if (i == POLL_COUNT) {
 		err("rdcodec: read poll expired!");
-		return 0;
+		data = 0;
+		goto out;
 	}
 
 	/* wait for command done?
@@ -225,7 +227,8 @@ rdcodec(struct ac97_codec *codec, u8 addr)
 	}
 	if (i == POLL_COUNT) {
 		err("rdcodec: read cmdwait expired!");
-		return 0;
+		data = 0;
+		goto out;
 	}
 
 	data = au_readl(PSC_AC97CDC) & 0xffff;
@@ -236,6 +239,7 @@ rdcodec(struct ac97_codec *codec, u8 addr)
 	au_writel(PSC_AC97EVNT_CD, PSC_AC97EVNT);
 	au_sync();
 
+ out:
 	spin_unlock_irqrestore(&s->lock, flags);
 
 	return data;
@@ -463,7 +467,7 @@ stop_dac(struct au1550_state *s)
 	/* Wait for Transmit Busy to show disabled.
 	*/
 	do {
-		stat = readl((void *)PSC_AC97STAT);
+		stat = au_readl(PSC_AC97STAT);
 		au_sync();
 	} while ((stat & PSC_AC97STAT_TB) != 0);
 
@@ -492,7 +496,7 @@ stop_adc(struct au1550_state *s)
 	/* Wait for Receive Busy to show disabled.
 	*/
 	do {
-		stat = readl((void *)PSC_AC97STAT);
+		stat = au_readl(PSC_AC97STAT);
 		au_sync();
 	} while ((stat & PSC_AC97STAT_RB) != 0);
 
@@ -542,7 +546,7 @@ set_xmit_slots(int num_channels)
 	/* Wait for Device ready.
 	*/
 	do {
-		stat = readl((void *)PSC_AC97STAT);
+		stat = au_readl(PSC_AC97STAT);
 		au_sync();
 	} while ((stat & PSC_AC97STAT_DR) == 0);
 }
@@ -574,21 +578,19 @@ set_recv_slots(int num_channels)
 	/* Wait for Device ready.
 	*/
 	do {
-		stat = readl((void *)PSC_AC97STAT);
+		stat = au_readl(PSC_AC97STAT);
 		au_sync();
 	} while ((stat & PSC_AC97STAT_DR) == 0);
 }
 
+/* Hold spinlock for both start_dac() and start_adc() calls */
 static void
 start_dac(struct au1550_state *s)
 {
 	struct dmabuf  *db = &s->dma_dac;
-	unsigned long   flags;
 
 	if (!db->stopped)
 		return;
-
-	spin_lock_irqsave(&s->lock, flags);
 
 	set_xmit_slots(db->num_channels);
 	au_writel(PSC_AC97PCR_TC, PSC_AC97PCR);
@@ -599,8 +601,6 @@ start_dac(struct au1550_state *s)
 	au1xxx_dbdma_start(db->dmanr);
 
 	db->stopped = 0;
-
-	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 static void
@@ -719,13 +719,14 @@ prog_dmabuf_dac(struct au1550_state *s)
 }
 
 
-/* hold spinlock for the following */
 static void
 dac_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	struct au1550_state *s = (struct au1550_state *) dev_id;
 	struct dmabuf  *db = &s->dma_dac;
 	u32	ac97c_stat;
+
+	spin_lock(&s->lock);
 
 	ac97c_stat = au_readl(PSC_AC97STAT);
 	if (ac97c_stat & (AC97C_XU | AC97C_XO | AC97C_TE))
@@ -748,6 +749,8 @@ dac_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	/* wake up anybody listening */
 	if (waitqueue_active(&db->wait))
 		wake_up(&db->wait);
+
+	spin_unlock(&s->lock);
 }
 
 
@@ -759,6 +762,8 @@ adc_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	u32	obytes;
 	char	*obuf;
 
+	spin_lock(&s->lock);
+
 	/* Pull the buffer from the dma queue.
 	*/
 	au1xxx_dbdma_get_dest(dp->dmanr, (void *)(&obuf), &obytes);
@@ -766,6 +771,7 @@ adc_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	if ((dp->count + obytes) > dp->dmasize) {
 		/* Overrun. Stop ADC and log the error
 		*/
+		spin_unlock(&s->lock);
 		stop_adc(s);
 		dp->error++;
 		err("adc overrun");
@@ -788,6 +794,7 @@ adc_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	if (waitqueue_active(&dp->wait))
 		wake_up(&dp->wait);
 
+	spin_unlock(&s->lock);
 }
 
 static loff_t
@@ -1042,16 +1049,16 @@ au1550_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 
 	count *= db->cnt_factor;
 
-	down(&s->sem);
+	mutex_lock(&s->sem);
 	add_wait_queue(&db->wait, &wait);
 
 	while (count > 0) {
 		/* wait for samples in ADC dma buffer
 		*/
 		do {
+			spin_lock_irqsave(&s->lock, flags);
 			if (db->stopped)
 				start_adc(s);
-			spin_lock_irqsave(&s->lock, flags);
 			avail = db->count;
 			if (avail <= 0)
 				__set_current_state(TASK_INTERRUPTIBLE);
@@ -1062,14 +1069,14 @@ au1550_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 						ret = -EAGAIN;
 					goto out;
 				}
-				up(&s->sem);
+				mutex_unlock(&s->sem);
 				schedule();
 				if (signal_pending(current)) {
 					if (!ret)
 						ret = -ERESTARTSYS;
 					goto out2;
 				}
-				down(&s->sem);
+				mutex_lock(&s->sem);
 			}
 		} while (avail <= 0);
 
@@ -1097,7 +1104,7 @@ au1550_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 	}			/* while (count > 0) */
 
 out:
-	up(&s->sem);
+	mutex_unlock(&s->sem);
 out2:
 	remove_wait_queue(&db->wait, &wait);
 	set_current_state(TASK_RUNNING);
@@ -1123,7 +1130,7 @@ au1550_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
 
 	count *= db->cnt_factor;
 
-	down(&s->sem);
+	mutex_lock(&s->sem);
 	add_wait_queue(&db->wait, &wait);
 
 	while (count > 0) {
@@ -1141,14 +1148,14 @@ au1550_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
 						ret = -EAGAIN;
 					goto out;
 				}
-				up(&s->sem);
+				mutex_unlock(&s->sem);
 				schedule();
 				if (signal_pending(current)) {
 					if (!ret)
 						ret = -ERESTARTSYS;
 					goto out2;
 				}
-				down(&s->sem);
+				mutex_lock(&s->sem);
 			}
 		} while (avail <= 0);
 
@@ -1194,7 +1201,7 @@ au1550_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
 	}			/* while (count > 0) */
 
 out:
-	up(&s->sem);
+	mutex_unlock(&s->sem);
 out2:
 	remove_wait_queue(&db->wait, &wait);
 	set_current_state(TASK_RUNNING);
@@ -1251,7 +1258,7 @@ au1550_mmap(struct file *file, struct vm_area_struct *vma)
 	int ret = 0;
 
 	lock_kernel();
-	down(&s->sem);
+	mutex_lock(&s->sem);
 	if (vma->vm_flags & VM_WRITE)
 		db = &s->dma_dac;
 	else if (vma->vm_flags & VM_READ)
@@ -1277,7 +1284,7 @@ au1550_mmap(struct file *file, struct vm_area_struct *vma)
 	vma->vm_flags &= ~VM_IO;
 	db->mapped = 1;
 out:
-	up(&s->sem);
+	mutex_unlock(&s->sem);
 	unlock_kernel();
 	return ret;
 }
@@ -1571,15 +1578,19 @@ au1550_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		if (get_user(val, (int *) arg))
 			return -EFAULT;
 		if (file->f_mode & FMODE_READ) {
-			if (val & PCM_ENABLE_INPUT)
+			if (val & PCM_ENABLE_INPUT) {
+				spin_lock_irqsave(&s->lock, flags);
 				start_adc(s);
-			else
+				spin_unlock_irqrestore(&s->lock, flags);
+			} else
 				stop_adc(s);
 		}
 		if (file->f_mode & FMODE_WRITE) {
-			if (val & PCM_ENABLE_OUTPUT)
+			if (val & PCM_ENABLE_OUTPUT) {
+				spin_lock_irqsave(&s->lock, flags);
 				start_dac(s);
-			else
+				spin_unlock_irqrestore(&s->lock, flags);
+			} else
 				stop_dac(s);
 		}
 		return 0;
@@ -1784,21 +1795,21 @@ au1550_open(struct inode *inode, struct file *file)
 
 	file->private_data = s;
 	/* wait for device to become free */
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	while (s->open_mode & file->f_mode) {
 		if (file->f_flags & O_NONBLOCK) {
-			up(&s->open_sem);
+			mutex_unlock(&s->open_mutex);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		up(&s->open_sem);
+		mutex_unlock(&s->open_mutex);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		down(&s->open_sem);
+		mutex_lock(&s->open_mutex);
 	}
 
 	stop_dac(s);
@@ -1834,8 +1845,8 @@ au1550_open(struct inode *inode, struct file *file)
 	}
 
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	up(&s->open_sem);
-	init_MUTEX(&s->sem);
+	mutex_unlock(&s->open_mutex);
+	mutex_init(&s->sem);
 	return 0;
 }
 
@@ -1852,7 +1863,7 @@ au1550_release(struct inode *inode, struct file *file)
 		lock_kernel();
 	}
 
-	down(&s->open_sem);
+	mutex_lock(&s->open_mutex);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac(s);
 		kfree(s->dma_dac.rawbuf);
@@ -1864,7 +1875,7 @@ au1550_release(struct inode *inode, struct file *file)
 		s->dma_adc.rawbuf = NULL;
 	}
 	s->open_mode &= ((~file->f_mode) & (FMODE_READ|FMODE_WRITE));
-	up(&s->open_sem);
+	mutex_unlock(&s->open_mutex);
 	wake_up(&s->open_wait);
 	unlock_kernel();
 	return 0;
@@ -1884,6 +1895,8 @@ static /*const */ struct file_operations au1550_audio_fops = {
 
 MODULE_AUTHOR("Advanced Micro Devices (AMD), dan@embeddededge.com");
 MODULE_DESCRIPTION("Au1550 AC97 Audio Driver");
+MODULE_LICENSE("GPL");
+
 
 static int __devinit
 au1550_probe(void)
@@ -1896,7 +1909,7 @@ au1550_probe(void)
 	init_waitqueue_head(&s->dma_adc.wait);
 	init_waitqueue_head(&s->dma_dac.wait);
 	init_waitqueue_head(&s->open_wait);
-	init_MUTEX(&s->open_sem);
+	mutex_init(&s->open_mutex);
 	spin_lock_init(&s->lock);
 
 	s->codec = ac97_alloc_codec();
@@ -1989,7 +2002,7 @@ au1550_probe(void)
 	/* Wait for PSC ready.
 	*/
 	do {
-		val = readl((void *)PSC_AC97STAT);
+		val = au_readl(PSC_AC97STAT);
 		au_sync();
 	} while ((val & PSC_AC97STAT_SR) == 0);
 
@@ -2012,7 +2025,7 @@ au1550_probe(void)
 	/* Wait for Device ready.
 	*/
 	do {
-		val = readl((void *)PSC_AC97STAT);
+		val = au_readl(PSC_AC97STAT);
 		au_sync();
 	} while ((val & PSC_AC97STAT_DR) == 0);
 

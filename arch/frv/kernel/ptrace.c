@@ -18,7 +18,6 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
-#include <linux/config.h>
 #include <linux/security.h>
 #include <linux/signal.h>
 
@@ -106,47 +105,10 @@ void ptrace_enable(struct task_struct *child)
 	child->thread.frame0->__status |= REG__STATUS_STEP;
 }
 
-asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
+long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 {
-	struct task_struct *child;
 	unsigned long tmp;
 	int ret;
-
-	lock_kernel();
-	ret = -EPERM;
-	if (request == PTRACE_TRACEME) {
-		/* are we already being traced? */
-		if (current->ptrace & PT_PTRACED)
-			goto out;
-		ret = security_ptrace(current->parent, current);
-		if (ret)
-			goto out;
-		/* set the ptrace bit in the process flags. */
-		current->ptrace |= PT_PTRACED;
-		ret = 0;
-		goto out;
-	}
-	ret = -ESRCH;
-	read_lock(&tasklist_lock);
-	child = find_task_by_pid(pid);
-	if (child)
-		get_task_struct(child);
-	read_unlock(&tasklist_lock);
-	if (!child)
-		goto out;
-
-	ret = -EPERM;
-	if (pid == 1)		/* you may not mess with init */
-		goto out_tsk;
-
-	if (request == PTRACE_ATTACH) {
-		ret = ptrace_attach(child);
-		goto out_tsk;
-	}
-
-	ret = ptrace_check_attach(child, request == PTRACE_KILL);
-	if (ret < 0)
-		goto out_tsk;
 
 	switch (request) {
 		/* when I and D space are separate, these will need to be fixed. */
@@ -351,10 +313,6 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		ret = -EIO;
 		break;
 	}
-out_tsk:
-	put_task_struct(child);
-out:
-	unlock_kernel();
 	return ret;
 }
 
@@ -742,24 +700,11 @@ asmlinkage void do_syscall_trace(int leaving)
 	if (!test_thread_flag(TIF_SYSCALL_TRACE))
 		return;
 
-	if (!(current->ptrace & PT_PTRACED))
-		return;
-
 	/* we need to indicate entry or exit to strace */
 	if (leaving)
 		__frame->__status |= REG__STATUS_SYSC_EXIT;
 	else
 		__frame->__status |= REG__STATUS_SYSC_ENTRY;
 
-	ptrace_notify(SIGTRAP);
-
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
-	}
+	tracehook_report_syscall(regs, leaving);
 }

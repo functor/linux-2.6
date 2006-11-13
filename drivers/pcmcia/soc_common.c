@@ -31,7 +31,6 @@
 ======================================================================*/
 
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -39,12 +38,12 @@
 #include <linux/timer.h>
 #include <linux/mm.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/spinlock.h>
 #include <linux/cpufreq.h>
 
 #include <asm/hardware.h>
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/system.h>
 
 #include "soc_common.h"
@@ -66,7 +65,7 @@ void soc_pcmcia_debug(struct soc_pcmcia_socket *skt, const char *func,
 	if (pc_debug > lvl) {
 		printk(KERN_DEBUG "skt%u: %s: ", skt->nr, func);
 		va_start(args, fmt);
-		printk(fmt, args);
+		vprintk(fmt, args);
 		va_end(args);
 	}
 }
@@ -297,32 +296,11 @@ soc_common_pcmcia_get_status(struct pcmcia_socket *sock, unsigned int *status)
 
 
 /*
- * Implements the get_socket() operation for the in-kernel PCMCIA
- * service (formerly SS_GetSocket in Card Services). Not a very
- * exciting routine.
- *
- * Returns: 0
- */
-static int
-soc_common_pcmcia_get_socket(struct pcmcia_socket *sock, socket_state_t *state)
-{
-	struct soc_pcmcia_socket *skt = to_soc_pcmcia_socket(sock);
-
-	debug(skt, 2, "\n");
-
-	*state = skt->cs_state;
-
-	return 0;
-}
-
-/*
  * Implements the set_socket() operation for the in-kernel PCMCIA
  * service (formerly SS_SetSocket in Card Services). We more or
  * less punt all of this work and let the kernel handle the details
  * of power configuration, reset, &c. We also record the value of
  * `state' in order to regurgitate it to the PCMCIA core later.
- *
- * Returns: 0
  */
 static int
 soc_common_pcmcia_set_socket(struct pcmcia_socket *sock, socket_state_t *state)
@@ -407,7 +385,7 @@ soc_common_pcmcia_set_io_map(struct pcmcia_socket *sock, struct pccard_io_map *m
  * the map speed as requested, but override the address ranges
  * supplied by Card Services.
  *
- * Returns: 0 on success, -1 on error
+ * Returns: 0 on success, -ERRNO on error
  */
 static int
 soc_common_pcmcia_set_mem_map(struct pcmcia_socket *sock, struct pccard_mem_map *map)
@@ -530,7 +508,6 @@ static struct pccard_operations soc_common_pcmcia_operations = {
 	.init			= soc_common_pcmcia_sock_init,
 	.suspend		= soc_common_pcmcia_suspend,
 	.get_status		= soc_common_pcmcia_get_status,
-	.get_socket		= soc_common_pcmcia_get_socket,
 	.set_socket		= soc_common_pcmcia_set_socket,
 	.set_io_map		= soc_common_pcmcia_set_io_map,
 	.set_mem_map		= soc_common_pcmcia_set_mem_map,
@@ -546,7 +523,7 @@ int soc_pcmcia_request_irqs(struct soc_pcmcia_socket *skt,
 		if (irqs[i].sock != skt->nr)
 			continue;
 		res = request_irq(irqs[i].irq, soc_common_pcmcia_interrupt,
-				  SA_INTERRUPT, irqs[i].str, skt);
+				  IRQF_DISABLED, irqs[i].str, skt);
 		if (res)
 			break;
 		set_irq_type(irqs[i].irq, IRQT_NOEDGE);
@@ -655,8 +632,8 @@ static void soc_pcmcia_cpufreq_unregister(void)
 }
 
 #else
-#define soc_pcmcia_cpufreq_register()
-#define soc_pcmcia_cpufreq_unregister()
+static int soc_pcmcia_cpufreq_register(void) { return 0; }
+static void soc_pcmcia_cpufreq_unregister(void) {}
 #endif
 
 int soc_common_drv_pcmcia_probe(struct device *dev, struct pcmcia_low_level *ops, int first, int nr)
@@ -667,13 +644,12 @@ int soc_common_drv_pcmcia_probe(struct device *dev, struct pcmcia_low_level *ops
 
 	down(&soc_pcmcia_sockets_lock);
 
-	sinfo = kmalloc(SKT_DEV_INFO_SIZE(nr), GFP_KERNEL);
+	sinfo = kzalloc(SKT_DEV_INFO_SIZE(nr), GFP_KERNEL);
 	if (!sinfo) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
-	memset(sinfo, 0, SKT_DEV_INFO_SIZE(nr));
 	sinfo->nskt = nr;
 
 	/*
@@ -738,7 +714,7 @@ int soc_common_drv_pcmcia_probe(struct device *dev, struct pcmcia_low_level *ops
 			goto out_err_5;
 		}
 
-		if ( list_empty(&soc_pcmcia_sockets) )
+		if (list_empty(&soc_pcmcia_sockets))
 			soc_pcmcia_cpufreq_register();
 
 		list_add(&skt->node, &soc_pcmcia_sockets);
@@ -839,7 +815,7 @@ int soc_common_drv_pcmcia_remove(struct device *dev)
 		release_resource(&skt->res_io);
 		release_resource(&skt->res_skt);
 	}
-	if ( list_empty(&soc_pcmcia_sockets) )
+	if (list_empty(&soc_pcmcia_sockets))
 		soc_pcmcia_cpufreq_unregister();
 
 	up(&soc_pcmcia_sockets_lock);

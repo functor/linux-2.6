@@ -13,12 +13,12 @@
  * 06/16/00	A. Mallick	added csd/ssd/tssd for ia32 support
  */
 
-#include <linux/config.h>
 
 #include <asm/intrinsics.h>
 #include <asm/kregs.h>
 #include <asm/ptrace.h>
 #include <asm/ustack.h>
+#include <asm/privop.h>
 
 #define IA64_NUM_DBG_REGS	8
 /*

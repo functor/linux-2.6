@@ -37,7 +37,7 @@ static	u_char	irq_to_siureg[] = {
 static	u_char	irq_to_siubit[] = {
 	 0, 15, 14, 13, 12, 11, 10,  9,
 	 8,  7,  6,  5,  4,  3,  2,  1,
-	 2,  1, 15, 14, 13, 12, 11, 10,
+	 2,  1,  0, 14, 13, 12, 11, 10,
 	 9,  8,  7,  6,  5,  4,  3,  0,
 	31, 30, 29, 28, 27, 26, 25, 24,
 	23, 22, 21, 20, 19, 18, 17, 16,
@@ -171,7 +171,7 @@ void cpm2_init_IRQ(void)
 	/* Enable chaining to OpenPIC, and make everything level
 	 */
 	for (i = 0; i < NR_CPM_INTS; i++) {
-		irq_desc[i+CPM_IRQ_OFFSET].handler = &cpm2_pic;
+		irq_desc[i+CPM_IRQ_OFFSET].chip = &cpm2_pic;
 		irq_desc[i+CPM_IRQ_OFFSET].status |= IRQ_LEVEL;
 	}
 }

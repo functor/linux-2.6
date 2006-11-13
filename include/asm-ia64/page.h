@@ -7,7 +7,7 @@
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
 
-#include <linux/config.h>
+# ifdef __KERNEL__
 
 #include <asm/intrinsics.h>
 #include <asm/types.h>
@@ -65,7 +65,6 @@
 # define __pa(x)		((x) - PAGE_OFFSET)
 # define __va(x)		((x) + PAGE_OFFSET)
 #else /* !__ASSEMBLY */
-# ifdef __KERNEL__
 #  define STRICT_MM_TYPECHECKS
 
 extern void clear_page (void *page);
@@ -127,7 +126,9 @@ extern unsigned long max_low_pfn;
 # define pfn_valid(pfn)		(((pfn) >= min_low_pfn) && ((pfn) < max_low_pfn) && ia64_pfn_valid(pfn))
 #endif
 
+#ifndef CONFIG_XEN
 #define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
+#endif
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 #define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
 
@@ -175,7 +176,6 @@ get_order (unsigned long size)
 	return order;
 }
 
-# endif /* __KERNEL__ */
 #endif /* !__ASSEMBLY__ */
 
 #ifdef STRICT_MM_TYPECHECKS
@@ -229,6 +229,54 @@ get_order (unsigned long size)
 					 (((current->personality & READ_IMPLIES_EXEC) != 0)	\
 					  ? VM_EXEC : 0))
 
-#define devmem_is_allowed(x) 1
+#ifndef __ASSEMBLY__
+#ifdef CONFIG_XEN
 
+#include <linux/kernel.h>
+#include <asm/hypervisor.h>
+#include <xen/features.h>	// to compile netback, netfront
+
+/*
+ * XXX hack!
+ * Linux/IA64 uses PG_arch_1.
+ * This hack will be removed once PG_foreign bit is taken.
+ * #include <xen/foreign_page.h>
+ */
+#ifdef __ASM_XEN_FOREIGN_PAGE_H__
+# error "don't include include/xen/foreign_page.h!"
+#endif
+
+extern struct address_space xen_ia64_foreign_dummy_mapping;
+#define PageForeign(page)	\
+	((page)->mapping == &xen_ia64_foreign_dummy_mapping)
+
+#define SetPageForeign(page, dtor) do {				\
+	set_page_private((page), (unsigned long)(dtor));	\
+	(page)->mapping = &xen_ia64_foreign_dummy_mapping;	\
+	smp_rmb();						\
+} while (0)
+
+#define ClearPageForeign(page) do {	\
+	(page)->mapping = NULL;		\
+	smp_rmb();			\
+	set_page_private((page), 0);	\
+} while (0)
+
+#define PageForeignDestructor(page)	\
+	( (void (*) (struct page *)) page_private(page) )
+
+#define arch_free_page(_page,_order)			\
+({      int foreign = PageForeign(_page);               \
+	if (foreign)                                    \
+		(PageForeignDestructor(_page))(_page);  \
+	foreign;                                        \
+})
+#define HAVE_ARCH_FREE_PAGE
+
+#include <asm/maddr.h>
+
+#endif /* CONFIG_XEN */
+#endif /* __ASSEMBLY__ */
+#define devmem_is_allowed(x) 1
+# endif /* __KERNEL__ */
 #endif /* _ASM_IA64_PAGE_H */

@@ -1,6 +1,6 @@
 /* main.c: AFS client file system
  *
- * Copyright (C) 2002 Red Hat, Inc. All Rights Reserved.
+ * Copyright (C) 2002,5 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -14,11 +14,11 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/completion.h>
+#include <linux/fscache.h>
 #include <rxrpc/rxrpc.h>
 #include <rxrpc/transport.h>
 #include <rxrpc/call.h>
 #include <rxrpc/peer.h>
-#include "cache.h"
 #include "cell.h"
 #include "server.h"
 #include "fsclient.h"
@@ -51,12 +51,11 @@ static struct rxrpc_peer_ops afs_peer_ops = {
 struct list_head afs_cb_hash_tbl[AFS_CB_HASH_COUNT];
 DEFINE_SPINLOCK(afs_cb_hash_lock);
 
-#ifdef AFS_CACHING_SUPPORT
-static struct cachefs_netfs_operations afs_cache_ops = {
-	.get_page_cookie	= afs_cache_get_page_cookie,
+#ifdef CONFIG_AFS_FSCACHE
+static struct fscache_netfs_operations afs_cache_ops = {
 };
 
-struct cachefs_netfs afs_cache_netfs = {
+struct fscache_netfs afs_cache_netfs = {
 	.name			= "afs",
 	.version		= 0,
 	.ops			= &afs_cache_ops,
@@ -83,10 +82,9 @@ static int __init afs_init(void)
 	if (ret < 0)
 		return ret;
 
-#ifdef AFS_CACHING_SUPPORT
+#ifdef CONFIG_AFS_FSCACHE
 	/* we want to be able to cache */
-	ret = cachefs_register_netfs(&afs_cache_netfs,
-				     &afs_cache_cell_index_def);
+	ret = fscache_register_netfs(&afs_cache_netfs);
 	if (ret < 0)
 		goto error;
 #endif
@@ -137,8 +135,8 @@ static int __init afs_init(void)
 	afs_key_unregister();
  error_cache:
 #endif
-#ifdef AFS_CACHING_SUPPORT
-	cachefs_unregister_netfs(&afs_cache_netfs);
+#ifdef CONFIG_AFS_FSCACHE
+	fscache_unregister_netfs(&afs_cache_netfs);
  error:
 #endif
 	afs_cell_purge();
@@ -167,8 +165,8 @@ static void __exit afs_exit(void)
 #ifdef CONFIG_KEYS_TURNED_OFF
 	afs_key_unregister();
 #endif
-#ifdef AFS_CACHING_SUPPORT
-	cachefs_unregister_netfs(&afs_cache_netfs);
+#ifdef CONFIG_AFS_FSCACHE
+	fscache_unregister_netfs(&afs_cache_netfs);
 #endif
 	afs_proc_cleanup();
 

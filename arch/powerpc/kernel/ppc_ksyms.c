@@ -1,4 +1,3 @@
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/threads.h>
 #include <linux/smp.h>
@@ -6,7 +5,7 @@
 #include <linux/elfcore.h>
 #include <linux/string.h>
 #include <linux/interrupt.h>
-#include <linux/tty.h>
+#include <linux/screen_info.h>
 #include <linux/vt_kern.h>
 #include <linux/nvram.h>
 #include <linux/console.h>
@@ -94,6 +93,12 @@ EXPORT_SYMBOL(__strncpy_from_user);
 EXPORT_SYMBOL(__strnlen_user);
 
 #ifndef  __powerpc64__
+EXPORT_SYMBOL(copy_page);
+#else
+EXPORT_SYMBOL(copy_4K_page);
+#endif
+
+#ifndef  __powerpc64__
 EXPORT_SYMBOL(__ide_mm_insl);
 EXPORT_SYMBOL(__ide_mm_outsw);
 EXPORT_SYMBOL(__ide_mm_insw);
@@ -126,10 +131,6 @@ EXPORT_SYMBOL(pci_bus_io_base_phys);
 EXPORT_SYMBOL(pci_bus_mem_base_phys);
 EXPORT_SYMBOL(pci_bus_to_hose);
 #endif /* CONFIG_PCI */
-
-#ifdef CONFIG_NOT_COHERENT_CACHE
-EXPORT_SYMBOL(flush_dcache_all);
-#endif
 
 EXPORT_SYMBOL(start_thread);
 EXPORT_SYMBOL(kernel_thread);

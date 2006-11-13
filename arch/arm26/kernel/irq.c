@@ -18,7 +18,6 @@
  *  IRQ's are in fact implemented a bit like signal handlers for the kernel.
  *  Naturally it's not a 1:1 relation, but there are similarities.
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/ptrace.h>
 #include <linux/kernel_stat.h>
@@ -32,6 +31,7 @@
 #include <linux/init.h>
 #include <linux/seq_file.h>
 #include <linux/errno.h>
+#include <linux/vs_context.h>
 
 #include <asm/irq.h>
 #include <asm/system.h>
@@ -191,7 +191,7 @@ __do_irq(unsigned int irq, struct irqaction *action, struct pt_regs *regs)
 	int ret;
 
 	spin_unlock(&irq_controller_lock);
-	if (!(action->flags & SA_INTERRUPT))
+	if (!(action->flags & IRQF_DISABLED))
 		local_irq_enable();
 
 	status = 0;
@@ -202,7 +202,7 @@ __do_irq(unsigned int irq, struct irqaction *action, struct pt_regs *regs)
 		action = action->next;
 	} while (action);
 
-	if (status & SA_SAMPLE_RANDOM)
+	if (status & IRQF_SAMPLE_RANDOM)
 		add_interrupt_randomness(irq);
 
 	spin_lock_irq(&irq_controller_lock);
@@ -332,6 +332,7 @@ do_level_IRQ(unsigned int irq, struct irqdesc *desc, struct pt_regs *regs)
 asmlinkage void asm_do_IRQ(int irq, struct pt_regs *regs)
 {
 	struct irqdesc *desc = irq_desc + irq;
+	struct vx_info_save vxis;
 
 	/*
 	 * Some hardware gives randomly wrong interrupts.  Rather
@@ -342,7 +343,9 @@ asmlinkage void asm_do_IRQ(int irq, struct pt_regs *regs)
 
 	irq_enter();
 	spin_lock(&irq_controller_lock);
+	__enter_vx_admin(&vxis);
 	desc->handle(irq, desc, regs);
+	__leave_vx_admin(&vxis);
 	spin_unlock(&irq_controller_lock);
 	irq_exit();
 }
@@ -452,7 +455,7 @@ int setup_irq(unsigned int irq, struct irqaction *new)
 	 * so we have to be careful not to interfere with a
 	 * running system.
 	 */
-	if (new->flags & SA_SAMPLE_RANDOM) {
+	if (new->flags & IRQF_SAMPLE_RANDOM) {
 		/*
 		 * This function might sleep, we want to call it first,
 		 * outside of the atomic block.
@@ -472,7 +475,7 @@ int setup_irq(unsigned int irq, struct irqaction *new)
 	p = &desc->action;
 	if ((old = *p) != NULL) {
 		/* Can't share interrupts unless both agree to */
-		if (!(old->flags & new->flags & SA_SHIRQ)) {
+		if (!(old->flags & new->flags & IRQF_SHARED)) {
 			spin_unlock_irqrestore(&irq_controller_lock, flags);
 			return -EBUSY;
 		}
@@ -527,11 +530,11 @@ int setup_irq(unsigned int irq, struct irqaction *new)
  *
  *	Flags:
  *
- *	SA_SHIRQ		Interrupt is shared
+ *	IRQF_SHARED		Interrupt is shared
  *
- *	SA_INTERRUPT		Disable local interrupts while processing
+ *	IRQF_DISABLED	Disable local interrupts while processing
  *
- *	SA_SAMPLE_RANDOM	The interrupt can be used for entropy
+ *	IRQF_SAMPLE_RANDOM	The interrupt can be used for entropy
  *
  */
 
@@ -543,7 +546,7 @@ int request_irq(unsigned int irq, irqreturn_t (*handler)(int, void *, struct pt_
 	struct irqaction *action;
 
 	if (irq >= NR_IRQS || !irq_desc[irq].valid || !handler ||
-	    (irq_flags & SA_SHIRQ && !dev_id))
+	    (irq_flags & IRQF_SHARED && !dev_id))
 		return -EINVAL;
 
 	action = (struct irqaction *)kmalloc(sizeof(struct irqaction), GFP_KERNEL);

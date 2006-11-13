@@ -6,7 +6,6 @@
  * structures etc.
  */
 
-#include <linux/config.h>
 #include <linux/limits.h>
 #include <linux/ioctl.h>
 
@@ -27,6 +26,10 @@
 
 #define BLOCK_SIZE_BITS 10
 #define BLOCK_SIZE (1<<BLOCK_SIZE_BITS)
+
+#define SEEK_SET	0	/* seek relative to beginning of file */
+#define SEEK_CUR	1	/* seek relative to current file position */
+#define SEEK_END	2	/* seek relative to end of file */
 
 /* And dynamically-tunable limits and defaults: */
 struct files_stat_struct {
@@ -390,7 +393,8 @@ struct address_space_operations {
 	struct page* (*get_xip_page)(struct address_space *, sector_t,
 			int);
 	/* migrate the contents of a page to the specified target */
-	int (*migratepage) (struct page *, struct page *);
+	int (*migratepage) (struct address_space *,
+			struct page *, struct page *);
 };
 
 struct backing_dev_info;
@@ -405,7 +409,7 @@ struct address_space {
 	unsigned int		truncate_count;	/* Cover race condition with truncate */
 	unsigned long		nrpages;	/* number of total pages */
 	pgoff_t			writeback_index;/* writeback starts here */
-	struct address_space_operations *a_ops;	/* methods */
+	const struct address_space_operations *a_ops;	/* methods */
 	unsigned long		flags;		/* error bits/gfp mask */
 	struct backing_dev_info *backing_dev_info; /* device readahead, etc */
 	spinlock_t		private_lock;	/* for use by the address_space */
@@ -506,7 +510,6 @@ struct inode {
 	struct timespec		i_mtime;
 	struct timespec		i_ctime;
 	unsigned int		i_blkbits;
-	unsigned long		i_blksize;
 	unsigned long		i_version;
 	blkcnt_t		i_blocks;
 	unsigned short          i_bytes;
@@ -522,11 +525,12 @@ struct inode {
 #ifdef CONFIG_QUOTA
 	struct dquot		*i_dquot[MAXQUOTAS];
 #endif
-	/* These three should probably be a union */
 	struct list_head	i_devices;
-	struct pipe_inode_info	*i_pipe;
-	struct block_device	*i_bdev;
-	struct cdev		*i_cdev;
+	union {
+		struct pipe_inode_info	*i_pipe;
+		struct block_device	*i_bdev;
+		struct cdev		*i_cdev;
+	};
 	int			i_cindex;
 
 	__u32			i_generation;
@@ -548,12 +552,30 @@ struct inode {
 
 	atomic_t		i_writecount;
 	void			*i_security;
-	union {
-		void		*generic_ip;
-	} u;
+	void			*i_private; /* fs or device private pointer */
 #ifdef __NEED_I_SIZE_ORDERED
 	seqcount_t		i_size_seqcount;
 #endif
+};
+
+/*
+ * inode->i_mutex nesting subclasses for the lock validator:
+ *
+ * 0: the object of the current VFS operation
+ * 1: parent
+ * 2: child/target
+ * 3: quota file
+ *
+ * The locking order between these classes is
+ * parent -> child -> normal -> xattr -> quota
+ */
+enum inode_i_mutex_lock_class
+{
+	I_MUTEX_NORMAL,
+	I_MUTEX_PARENT,
+	I_MUTEX_CHILD,
+	I_MUTEX_XATTR,
+	I_MUTEX_QUOTA
 };
 
 /*
@@ -697,7 +719,9 @@ extern spinlock_t files_lock;
 #define FL_POSIX	1
 #define FL_FLOCK	2
 #define FL_ACCESS	8	/* not trying to lock, just looking */
+#define FL_EXISTS	16	/* when unlocking, test for existence */
 #define FL_LEASE	32	/* lease held on this file */
+#define FL_CLOSE	64	/* unlock on close */
 #define FL_SLEEP	128	/* A blocking lock */
 
 /*
@@ -791,7 +815,6 @@ extern int posix_lock_file_conf(struct file *, struct file_lock *, struct file_l
 extern int posix_lock_file(struct file *, struct file_lock *);
 extern int posix_lock_file_wait(struct file *, struct file_lock *);
 extern int posix_unblock_lock(struct file *, struct file_lock *);
-extern int posix_locks_deadlock(struct file_lock *, struct file_lock *);
 extern int flock_lock_file_wait(struct file *filp, struct file_lock *fl);
 extern int __break_lease(struct inode *inode, unsigned int flags);
 extern void lease_get_mtime(struct inode *, struct timespec *time);
@@ -799,7 +822,6 @@ extern int setlease(struct file *, long, struct file_lock **);
 extern int lease_modify(struct file_lock **, int);
 extern int lock_may_read(struct inode *, loff_t start, unsigned long count);
 extern int lock_may_write(struct inode *, loff_t start, unsigned long count);
-extern void steal_locks(fl_owner_t from);
 
 struct fasync_struct {
 	int	magic;
@@ -981,7 +1003,7 @@ int generic_osync_inode(struct inode *, struct address_space *, int);
  * This allows the kernel to read directories into kernel space or
  * to have different dirent layouts depending on the binary type.
  */
-typedef int (*filldir_t)(void *, const char *, int, loff_t, ino_t, unsigned);
+typedef int (*filldir_t)(void *, const char *, int, loff_t, u64, unsigned);
 
 struct block_device_operations {
 	int (*open) (struct inode *, struct file *);
@@ -1042,7 +1064,7 @@ struct file_operations {
 	long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
 	int (*mmap) (struct file *, struct vm_area_struct *);
 	int (*open) (struct inode *, struct file *);
-	int (*flush) (struct file *);
+	int (*flush) (struct file *, fl_owner_t id);
 	int (*release) (struct inode *, struct file *);
 	int (*fsync) (struct file *, struct dentry *, int datasync);
 	int (*aio_fsync) (struct kiocb *, int datasync);
@@ -1115,10 +1137,10 @@ struct super_operations {
 	int (*sync_fs)(struct super_block *sb, int wait);
 	void (*write_super_lockfs) (struct super_block *);
 	void (*unlockfs) (struct super_block *);
-	int (*statfs) (struct super_block *, struct kstatfs *);
+	int (*statfs) (struct dentry *, struct kstatfs *);
 	int (*remount_fs) (struct super_block *, int *, char *);
 	void (*clear_inode) (struct inode *);
-	void (*umount_begin) (struct super_block *);
+	void (*umount_begin) (struct vfsmount *, int);
 
 	int (*show_options)(struct seq_file *, struct vfsmount *);
 	int (*show_stats)(struct seq_file *, struct vfsmount *);
@@ -1288,23 +1310,28 @@ find_exported_dentry(struct super_block *sb, void *obj, void *parent,
 struct file_system_type {
 	const char *name;
 	int fs_flags;
-	struct super_block *(*get_sb) (struct file_system_type *, int,
-				       const char *, void *);
+	int (*get_sb) (struct file_system_type *, int,
+		       const char *, void *, struct vfsmount *);
 	void (*kill_sb) (struct super_block *);
 	struct module *owner;
 	struct file_system_type * next;
 	struct list_head fs_supers;
+	struct lock_class_key s_lock_key;
+	struct lock_class_key s_umount_key;
 };
 
-struct super_block *get_sb_bdev(struct file_system_type *fs_type,
+extern int get_sb_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
-	int (*fill_super)(struct super_block *, void *, int));
-struct super_block *get_sb_single(struct file_system_type *fs_type,
+	int (*fill_super)(struct super_block *, void *, int),
+	struct vfsmount *mnt);
+extern int get_sb_single(struct file_system_type *fs_type,
 	int flags, void *data,
-	int (*fill_super)(struct super_block *, void *, int));
-struct super_block *get_sb_nodev(struct file_system_type *fs_type,
+	int (*fill_super)(struct super_block *, void *, int),
+	struct vfsmount *mnt);
+extern int get_sb_nodev(struct file_system_type *fs_type,
 	int flags, void *data,
-	int (*fill_super)(struct super_block *, void *, int));
+	int (*fill_super)(struct super_block *, void *, int),
+	struct vfsmount *mnt);
 void generic_shutdown_super(struct super_block *sb);
 void kill_block_super(struct super_block *sb);
 void kill_anon_super(struct super_block *sb);
@@ -1315,8 +1342,10 @@ struct super_block *sget(struct file_system_type *type,
 			int (*test)(struct super_block *,void *),
 			int (*set)(struct super_block *,void *),
 			void *data);
-struct super_block *get_sb_pseudo(struct file_system_type *, char *,
-			struct super_operations *ops, unsigned long);
+extern int get_sb_pseudo(struct file_system_type *, char *,
+	struct super_operations *ops, unsigned long,
+	struct vfsmount *mnt);
+extern int simple_set_mnt(struct vfsmount *mnt, struct super_block *sb);
 int __put_super(struct super_block *sb);
 int __put_super_and_need_restart(struct super_block *sb);
 void unnamed_dev_init(void);
@@ -1339,7 +1368,7 @@ extern struct vfsmount *copy_tree(struct vfsmount *, struct dentry *, int);
 extern void mnt_set_mountpoint(struct vfsmount *, struct dentry *,
 				  struct vfsmount *);
 
-extern int vfs_statfs(struct super_block *, struct kstatfs *);
+extern int vfs_statfs(struct dentry *, struct kstatfs *);
 
 /* /sys/fs */
 extern struct subsystem fs_subsys;
@@ -1418,7 +1447,7 @@ extern void bd_forget(struct inode *inode);
 extern void bdput(struct block_device *);
 extern struct block_device *open_by_devnum(dev_t, unsigned);
 extern const struct file_operations def_blk_fops;
-extern struct address_space_operations def_blk_aops;
+extern const struct address_space_operations def_blk_aops;
 extern const struct file_operations def_chr_fops;
 extern const struct file_operations bad_sock_fops;
 extern const struct file_operations def_fifo_fops;
@@ -1621,6 +1650,8 @@ extern ssize_t generic_file_direct_write(struct kiocb *, const struct iovec *,
 		unsigned long *, loff_t, loff_t *, size_t, size_t);
 extern ssize_t generic_file_buffered_write(struct kiocb *, const struct iovec *,
 		unsigned long, loff_t, loff_t *, size_t, ssize_t);
+extern int generic_file_buffered_write_one_kernel_page(struct address_space *,
+						       pgoff_t, struct page *);
 extern ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
 extern ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
 ssize_t generic_file_write_nolock(struct file *file, const struct iovec *iov,
@@ -1762,7 +1793,7 @@ extern loff_t dcache_dir_lseek(struct file *, loff_t, int);
 extern int dcache_readdir(struct file *, void *, filldir_t);
 extern int dcache_readdir_filter(struct file *, void *, filldir_t, int (*)(struct dentry *));
 extern int simple_getattr(struct vfsmount *, struct dentry *, struct kstat *);
-extern int simple_statfs(struct super_block *, struct kstatfs *);
+extern int simple_statfs(struct dentry *, struct kstatfs *);
 extern int simple_link(struct dentry *, struct inode *, struct dentry *);
 extern int simple_unlink(struct inode *, struct dentry *);
 extern int simple_rmdir(struct inode *, struct dentry *);
@@ -1782,13 +1813,14 @@ extern struct inode_operations simple_dir_inode_operations;
 struct tree_descr { char *name; const struct file_operations *ops; int mode; };
 struct dentry *d_alloc_name(struct dentry *, const char *);
 extern int simple_fill_super(struct super_block *, int, struct tree_descr *);
-extern int simple_pin_fs(char *name, struct vfsmount **mount, int *count);
+extern int simple_pin_fs(struct file_system_type *, struct vfsmount **mount, int *count);
 extern void simple_release_fs(struct vfsmount **mount, int *count);
 
 extern ssize_t simple_read_from_buffer(void __user *, size_t, loff_t *, const void *, size_t);
 
 #ifdef CONFIG_MIGRATION
-extern int buffer_migrate_page(struct page *, struct page *);
+extern int buffer_migrate_page(struct address_space *,
+				struct page *, struct page *);
 #else
 #define buffer_migrate_page NULL
 #endif

@@ -46,7 +46,6 @@ typedef unsigned long long __u64;
 
 #ifndef __ASSEMBLY__
 
-#include <linux/config.h>
 
 typedef signed char s8;
 typedef unsigned char u8;
@@ -59,13 +58,10 @@ typedef unsigned int u32;
 
 typedef signed long long s64;
 typedef unsigned long long u64;
-typedef u64 u_quad_t;
 
 /* Dma addresses are 32-bits wide.  */
 
 typedef u32 dma_addr_t;
-
-typedef unsigned short kmem_bufctl_t;
 
 #endif /* __ASSEMBLY__ */
 

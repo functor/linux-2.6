@@ -55,6 +55,7 @@ typedef struct {
 } Node;
 
 static DEFINE_RWLOCK(entries_lock);
+static struct file_system_type bm_fs_type;
 static struct vfsmount *bm_mnt;
 static int entry_count;
 
@@ -203,7 +204,6 @@ static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		goto _error;
 
 	if (files) {
-		steal_locks(files);
 		put_files_struct(files);
 		files = NULL;
 	}
@@ -507,7 +507,6 @@ static struct inode *bm_get_inode(struct super_block *sb, int mode)
 		inode->i_mode = mode;
 		inode->i_uid = 0;
 		inode->i_gid = 0;
-		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime =
 			current_fs_time(inode->i_sb);
@@ -517,7 +516,7 @@ static struct inode *bm_get_inode(struct super_block *sb, int mode)
 
 static void bm_clear_inode(struct inode *inode)
 {
-	kfree(inode->u.generic_ip);
+	kfree(inode->i_private);
 }
 
 static void kill_node(Node *e)
@@ -545,7 +544,7 @@ static void kill_node(Node *e)
 static ssize_t
 bm_entry_read(struct file * file, char __user * buf, size_t nbytes, loff_t *ppos)
 {
-	Node *e = file->f_dentry->d_inode->u.generic_ip;
+	Node *e = file->f_dentry->d_inode->i_private;
 	loff_t pos = *ppos;
 	ssize_t res;
 	char *page;
@@ -579,7 +578,7 @@ static ssize_t bm_entry_write(struct file *file, const char __user *buffer,
 				size_t count, loff_t *ppos)
 {
 	struct dentry *root;
-	Node *e = file->f_dentry->d_inode->u.generic_ip;
+	Node *e = file->f_dentry->d_inode->i_private;
 	int res = parse_command(buffer, count);
 
 	switch (res) {
@@ -638,7 +637,7 @@ static ssize_t bm_register_write(struct file *file, const char __user *buffer,
 	if (!inode)
 		goto out2;
 
-	err = simple_pin_fs("binfmt_misc", &bm_mnt, &entry_count);
+	err = simple_pin_fs(&bm_fs_type, &bm_mnt, &entry_count);
 	if (err) {
 		iput(inode);
 		inode = NULL;
@@ -646,7 +645,7 @@ static ssize_t bm_register_write(struct file *file, const char __user *buffer,
 	}
 
 	e->dentry = dget(dentry);
-	inode->u.generic_ip = e;
+	inode->i_private = e;
 	inode->i_fop = &bm_entry_operations;
 
 	d_instantiate(dentry, inode);
@@ -740,10 +739,10 @@ static int bm_fill_super(struct super_block * sb, void * data, int silent)
 	return err;
 }
 
-static struct super_block *bm_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int bm_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_single(fs_type, flags, data, bm_fill_super);
+	return get_sb_single(fs_type, flags, data, bm_fill_super, mnt);
 }
 
 static struct linux_binfmt misc_format = {

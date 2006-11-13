@@ -125,7 +125,6 @@ int module_finalize(const Elf_Ehdr *hdr,
 		void *aseg = (void *)alt->sh_addr;
 		apply_alternatives(aseg, aseg + alt->sh_size);
 	}
-#ifdef CONFIG_SMP
 	if (locks && text) {
 		void *lseg = (void *)locks->sh_addr;
 		void *tseg = (void *)text->sh_addr;
@@ -133,13 +132,10 @@ int module_finalize(const Elf_Ehdr *hdr,
 					    lseg, lseg + locks->sh_size,
 					    tseg, tseg + text->sh_size);
 	}
-#endif
 	return 0;
 }
 
 void module_arch_cleanup(struct module *mod)
 {
-#ifdef CONFIG_SMP
 	alternatives_smp_module_del(mod);
-#endif
 }

@@ -1,7 +1,7 @@
 /*
  *  tb0219.h, Include file for TANBAC TB0219.
  *
- *  Copyright (C) 2002-2004  Yoichi Yuasa <yuasa@hh.iij4u.or.jp>
+ *  Copyright (C) 2002-2004  Yoichi Yuasa <yoichi_yuasa@tripeaks.co.jp>
  *
  *  Modified for TANBAC TB0219:
  *  Copyright (C) 2003 Megasolution Inc.  <matsu@megasolution.jp>
@@ -23,7 +23,7 @@
 #ifndef __TANBAC_TB0219_H
 #define __TANBAC_TB0219_H
 
-#include <asm/vr41xx/vr41xx.h>
+#include <asm/vr41xx/irq.h>
 
 /*
  * General-Purpose I/O Pin Number

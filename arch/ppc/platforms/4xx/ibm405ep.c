@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/ibm405ep.c
- *
  * Support for IBM PPC 405EP processors.
  *
  * Author: SAW (IBM), derived from ibmnp405l.c.
@@ -12,7 +10,6 @@
  * or implied.
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/smp.h>
 #include <linux/threads.h>
@@ -33,6 +30,7 @@ static struct ocp_func_mal_data ibm405ep_mal0_def = {
 	.txde_irq	= 13,		/* TX Descriptor Error IRQ */
 	.rxde_irq	= 14,		/* RX Descriptor Error IRQ */
 	.serr_irq	= 10,		/* MAL System Error IRQ    */
+	.dcr_base	= DCRN_MAL_BASE /* MAL0_CFG DCR number */
 };
 OCP_SYSFS_MAL_DATA()
 

@@ -22,6 +22,7 @@
 #include <asm/cache.h>
 #include <asm/registers.h>
 #include <linux/threads.h>
+#include <linux/compiler.h>
 
 /*
  * Default implementation of macro that returns current
@@ -228,7 +229,7 @@ extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
  * FPU lazy state save handling.
  */
 
-extern __inline__ void release_fpu(void)
+static inline void release_fpu(void)
 {
 	unsigned long long __dummy;
 
@@ -240,7 +241,7 @@ extern __inline__ void release_fpu(void)
 			     : "r" (SR_FD));
 }
 
-extern __inline__ void grab_fpu(void)
+static inline void grab_fpu(void)
 {
 	unsigned long long __dummy;
 
@@ -279,7 +280,7 @@ extern unsigned long get_wchan(struct task_struct *p);
 #define KSTK_EIP(tsk)  ((tsk)->thread.pc)
 #define KSTK_ESP(tsk)  ((tsk)->thread.sp)
 
-#define cpu_relax()	do { } while (0)
+#define cpu_relax()	barrier()
 
 #endif	/* __ASSEMBLY__ */
 #endif /* __ASM_SH64_PROCESSOR_H */

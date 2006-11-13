@@ -15,7 +15,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
@@ -107,13 +106,13 @@ static void mask_and_ack_intc(unsigned int);
 static void end_intc_irq(unsigned int irq);
 
 static struct hw_interrupt_type intc_irq_type = {
-	"INTC",
-	startup_intc_irq,
-	shutdown_intc_irq,
-	enable_intc_irq,
-	disable_intc_irq,
-	mask_and_ack_intc,
-	end_intc_irq
+	.typename = "INTC",
+	.startup = startup_intc_irq,
+	.shutdown = shutdown_intc_irq,
+	.enable = enable_intc_irq,
+	.disable = disable_intc_irq,
+	.ack = mask_and_ack_intc,
+	.end = end_intc_irq
 };
 
 static int irlm;		/* IRL mode */
@@ -178,7 +177,7 @@ static void end_intc_irq(unsigned int irq)
 void make_intc_irq(unsigned int irq)
 {
 	disable_irq_nosync(irq);
-	irq_desc[irq].handler = &intc_irq_type;
+	irq_desc[irq].chip = &intc_irq_type;
 	disable_intc_irq(irq);
 }
 
@@ -208,7 +207,7 @@ void __init init_IRQ(void)
 	/* Set default: per-line enable/disable, priority driven ack/eoi */
 	for (i = 0; i < NR_INTC_IRQS; i++) {
 		if (platform_int_priority[i] != NO_PRIORITY) {
-			irq_desc[i].handler = &intc_irq_type;
+			irq_desc[i].chip = &intc_irq_type;
 		}
 	}
 

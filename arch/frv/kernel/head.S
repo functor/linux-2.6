@@ -9,9 +9,9 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/threads.h>
 #include <linux/linkage.h>
+#include <asm/thread_info.h>
 #include <asm/ptrace.h>
 #include <asm/page.h>
 #include <asm/spr-regs.h>
@@ -512,6 +512,9 @@ __head_mmu_enabled:
 	movgs		gr0,lcr
 	movgs		gr0,ccr
 	movgs		gr0,cccr
+
+	# initialise the virtual interrupt handling
+	subcc		gr0,gr0,gr0,icc2		/* set Z, clear C */
 
 #ifdef CONFIG_MMU
 	movgs		gr3,scr2

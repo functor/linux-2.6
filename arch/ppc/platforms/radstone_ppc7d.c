@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/radstone_ppc7d.c
- *
  * Board setup routines for the Radstone PPC7D boards.
  *
  * Author: James Chapman <jchapman@katalix.com>
@@ -20,7 +18,6 @@
  * SCSI / VGA.
  */
 
-#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -32,7 +29,6 @@
 #include <linux/initrd.h>
 #include <linux/console.h>
 #include <linux/delay.h>
-#include <linux/irq.h>
 #include <linux/ide.h>
 #include <linux/seq_file.h>
 #include <linux/root_dev.h>
@@ -41,6 +37,7 @@
 #include <linux/serial_core.h>
 #include <linux/mv643xx.h>
 #include <linux/netdevice.h>
+#include <linux/platform_device.h>
 
 #include <asm/system.h>
 #include <asm/pgtable.h>
@@ -59,7 +56,6 @@
 #include <asm/mpc10x.h>
 #include <asm/pci-bridge.h>
 #include <asm/mv64x60.h>
-#include <asm/i8259.h>
 
 #include "radstone_ppc7d.h"
 
@@ -101,7 +97,7 @@ static void __init ppc7d_early_serial_map(void)
 	serial_req.uartclk = UART_CLK;
 	serial_req.irq = 4;
 	serial_req.flags = STD_COM_FLAGS;
-	serial_req.iotype = SERIAL_IO_MEM;
+	serial_req.iotype = UPIO_MEM;
 	serial_req.membase = (u_char *) PPC7D_SERIAL_0;
 
 	gen550_init(0, &serial_req);
@@ -516,13 +512,9 @@ static void __init ppc7d_init_irq(void)
 	int irq;
 
 	pr_debug("%s\n", __FUNCTION__);
-	i8259_init(0);
+	i8259_init(0, 0);
 	mv64360_init_irq();
 
-	/* IRQ 0..15 are handled by the cascaded 8259's of the Ali1535 */
-	for (irq = 0; irq < 16; irq++) {
-		irq_desc[irq].handler = &i8259_pic;
-	}
 	/* IRQs 5,6,9,10,11,14,15 are level sensitive */
 	irq_desc[5].status |= IRQ_LEVEL;
 	irq_desc[6].status |= IRQ_LEVEL;
@@ -690,11 +682,10 @@ ppc7d_fixup_i2c_pdata(struct platform_device *pdev)
 
 	pdata = pdev->dev.platform_data;
 	if (pdata == NULL) {
-		pdata = kmalloc(sizeof(*pdata), GFP_KERNEL);
+		pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 		if (pdata == NULL)
 			return;
 
-		memset(pdata, 0, sizeof(*pdata));
 		pdev->dev.platform_data = pdata;
 	}
 
@@ -717,7 +708,7 @@ ppc7d_fixup_i2c_pdata(struct platform_device *pdev)
 }
 #endif
 
-static int __init ppc7d_platform_notify(struct device *dev)
+static int ppc7d_platform_notify(struct device *dev)
 {
 	static struct {
 		char *bus_id;
@@ -1185,18 +1176,18 @@ static void __init ppc7d_setup_arch(void)
 		ROOT_DEV = Root_HDA1;
 #endif
 
-	if ((cur_cpu_spec[0]->cpu_features & CPU_FTR_SPEC7450) ||
-	    (cur_cpu_spec[0]->cpu_features & CPU_FTR_L3CR))
+	if ((cur_cpu_spec->cpu_features & CPU_FTR_SPEC7450) ||
+	    (cur_cpu_spec->cpu_features & CPU_FTR_L3CR))
 		/* 745x is different.  We only want to pass along enable. */
 		_set_L2CR(L2CR_L2E);
-	else if (cur_cpu_spec[0]->cpu_features & CPU_FTR_L2CR)
+	else if (cur_cpu_spec->cpu_features & CPU_FTR_L2CR)
 		/* All modules have 1MB of L2.  We also assume that an
 		 * L2 divisor of 3 will work.
 		 */
 		_set_L2CR(L2CR_L2E | L2CR_L2SIZ_1MB | L2CR_L2CLK_DIV3
 			  | L2CR_L2RAM_PIPE | L2CR_L2OH_1_0 | L2CR_L2DF);
 
-	if (cur_cpu_spec[0]->cpu_features & CPU_FTR_L3CR)
+	if (cur_cpu_spec->cpu_features & CPU_FTR_L3CR)
 		/* No L3 cache */
 		_set_L3CR(0);
 
@@ -1319,7 +1310,7 @@ static void ppc7d_init2(void)
 
 	/* Hook up i8259 interrupt which is connected to GPP28 */
 	request_irq(mv64360_irq_base + MV64x60_IRQ_GPP28, ppc7d_i8259_intr,
-		    SA_INTERRUPT, "I8259 (GPP28) interrupt", (void *)0);
+		    IRQF_DISABLED, "I8259 (GPP28) interrupt", (void *)0);
 
 	/* Configure MPP16 as watchdog NMI, MPP17 as watchdog WDE */
 	spin_lock_irqsave(&mv64x60_lock, flags);
@@ -1426,6 +1417,7 @@ void __init platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	ppc_md.setup_arch = ppc7d_setup_arch;
 	ppc_md.init = ppc7d_init2;
 	ppc_md.show_cpuinfo = ppc7d_show_cpuinfo;
+	/* XXX this is broken... */
 	ppc_md.irq_canonicalize = ppc7d_irq_canonicalize;
 	ppc_md.init_IRQ = ppc7d_init_irq;
 	ppc_md.get_irq = ppc7d_get_irq;

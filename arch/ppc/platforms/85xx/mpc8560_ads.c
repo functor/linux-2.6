@@ -1,9 +1,7 @@
 /*
- * arch/ppc/platforms/85xx/mpc8560_ads.c
- *
  * MPC8560ADS board specific routines
  *
- * Maintainer: Kumar Gala <kumar.gala@freescale.com>
+ * Maintainer: Kumar Gala <galak@kernel.crashing.org>
  *
  * Copyright 2004 Freescale Semiconductor Inc.
  *
@@ -13,7 +11,6 @@
  * option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -24,7 +21,6 @@
 #include <linux/major.h>
 #include <linux/console.h>
 #include <linux/delay.h>
-#include <linux/irq.h>
 #include <linux/seq_file.h>
 #include <linux/root_dev.h>
 #include <linux/serial.h>
@@ -33,6 +29,7 @@
 #include <linux/initrd.h>
 #include <linux/module.h>
 #include <linux/fsl_devices.h>
+#include <linux/fs_enet_pd.h>
 
 #include <asm/system.h>
 #include <asm/pgtable.h>
@@ -41,7 +38,6 @@
 #include <asm/time.h>
 #include <asm/io.h>
 #include <asm/machdep.h>
-#include <asm/prom.h>
 #include <asm/open_pic.h>
 #include <asm/bootinfo.h>
 #include <asm/pci-bridge.h>
@@ -57,13 +53,77 @@
 #include <syslib/ppc85xx_common.h>
 #include <syslib/ppc85xx_setup.h>
 
-extern void cpm2_reset(void);
 
 /* ************************************************************************
  *
  * Setup the architecture
  *
  */
+static void init_fcc_ioports(void)
+{
+	struct immap *immap;
+	struct io_port *io;
+	u32 tempval;
+
+	immap = cpm2_immr;
+
+	io = &immap->im_ioport;
+	/* FCC2/3 are on the ports B/C. */
+	tempval = in_be32(&io->iop_pdirb);
+	tempval &= ~PB2_DIRB0;
+	tempval |= PB2_DIRB1;
+	out_be32(&io->iop_pdirb, tempval);
+
+	tempval = in_be32(&io->iop_psorb);
+	tempval &= ~PB2_PSORB0;
+	tempval |= PB2_PSORB1;
+	out_be32(&io->iop_psorb, tempval);
+
+	tempval = in_be32(&io->iop_pparb);
+	tempval |= (PB2_DIRB0 | PB2_DIRB1);
+	out_be32(&io->iop_pparb, tempval);
+
+	tempval = in_be32(&io->iop_pdirb);
+	tempval &= ~PB3_DIRB0;
+	tempval |= PB3_DIRB1;
+	out_be32(&io->iop_pdirb, tempval);
+
+	tempval = in_be32(&io->iop_psorb);
+	tempval &= ~PB3_PSORB0;
+	tempval |= PB3_PSORB1;
+	out_be32(&io->iop_psorb, tempval);
+
+	tempval = in_be32(&io->iop_pparb);
+	tempval |= (PB3_DIRB0 | PB3_DIRB1);
+	out_be32(&io->iop_pparb, tempval);
+
+        tempval = in_be32(&io->iop_pdirc);
+        tempval |= PC3_DIRC1;
+        out_be32(&io->iop_pdirc, tempval);
+
+        tempval = in_be32(&io->iop_pparc);
+        tempval |= PC3_DIRC1;
+        out_be32(&io->iop_pparc, tempval);
+
+	/* Port C has clocks......  */
+	tempval = in_be32(&io->iop_psorc);
+	tempval &= ~(CLK_TRX);
+	out_be32(&io->iop_psorc, tempval);
+
+	tempval = in_be32(&io->iop_pdirc);
+	tempval &= ~(CLK_TRX);
+	out_be32(&io->iop_pdirc, tempval);
+	tempval = in_be32(&io->iop_pparc);
+	tempval |= (CLK_TRX);
+	out_be32(&io->iop_pparc, tempval);
+
+	/* Configure Serial Interface clock routing.
+	 * First,  clear all FCC bits to zero,
+	 * then set the ones we want.
+	 */
+	immap->im_cpmux.cmx_fcr &= ~(CPMUX_CLK_MASK);
+	immap->im_cpmux.cmx_fcr |= CPMUX_CLK_ROUTE;
+}
 
 static void __init
 mpc8560ads_setup_arch(void)
@@ -71,6 +131,8 @@ mpc8560ads_setup_arch(void)
 	bd_t *binfo = (bd_t *) __res;
 	unsigned int freq;
 	struct gianfar_platform_data *pdata;
+	struct gianfar_mdio_data *mdata;
+	struct fs_platform_info *fpi;
 
 	cpm2_reset();
 
@@ -89,22 +151,53 @@ mpc8560ads_setup_arch(void)
 	mpc85xx_setup_hose();
 #endif
 
+	/* setup the board related info for the MDIO bus */
+	mdata = (struct gianfar_mdio_data *) ppc_sys_get_pdata(MPC85xx_MDIO);
+
+	mdata->irq[0] = MPC85xx_IRQ_EXT5;
+	mdata->irq[1] = MPC85xx_IRQ_EXT5;
+	mdata->irq[2] = -1;
+	mdata->irq[3] = MPC85xx_IRQ_EXT5;
+	mdata->irq[31] = -1;
+
 	/* setup the board related information for the enet controllers */
 	pdata = (struct gianfar_platform_data *) ppc_sys_get_pdata(MPC85xx_TSEC1);
-	pdata->board_flags = FSL_GIANFAR_BRD_HAS_PHY_INTR;
-	pdata->interruptPHY = MPC85xx_IRQ_EXT5;
-	pdata->phyid = 0;
-	/* fixup phy address */
-	pdata->phy_reg_addr += binfo->bi_immr_base;
-	memcpy(pdata->mac_addr, binfo->bi_enetaddr, 6);
+	if (pdata) {
+		pdata->board_flags = FSL_GIANFAR_BRD_HAS_PHY_INTR;
+		pdata->bus_id = 0;
+		pdata->phy_id = 0;
+		memcpy(pdata->mac_addr, binfo->bi_enetaddr, 6);
+	}
 
 	pdata = (struct gianfar_platform_data *) ppc_sys_get_pdata(MPC85xx_TSEC2);
-	pdata->board_flags = FSL_GIANFAR_BRD_HAS_PHY_INTR;
-	pdata->interruptPHY = MPC85xx_IRQ_EXT5;
-	pdata->phyid = 1;
-	/* fixup phy address */
-	pdata->phy_reg_addr += binfo->bi_immr_base;
-	memcpy(pdata->mac_addr, binfo->bi_enet1addr, 6);
+	if (pdata) {
+		pdata->board_flags = FSL_GIANFAR_BRD_HAS_PHY_INTR;
+		pdata->bus_id = 0;
+		pdata->phy_id = 1;
+		memcpy(pdata->mac_addr, binfo->bi_enet1addr, 6);
+	}
+
+	init_fcc_ioports();
+	ppc_sys_device_remove(MPC85xx_CPM_FCC1);
+
+	fpi = (struct fs_platform_info *) ppc_sys_get_pdata(MPC85xx_CPM_FCC2);
+	if (fpi) {
+		memcpy(fpi->macaddr, binfo->bi_enet2addr, 6);
+		fpi->bus_id = "0:02";
+		fpi->phy_addr = 2;
+		fpi->dpram_offset = (u32)cpm2_immr->im_dprambase;
+		fpi->fcc_regs_c = (u32)&cpm2_immr->im_fcc_c[1];
+	}
+
+	fpi = (struct fs_platform_info *) ppc_sys_get_pdata(MPC85xx_CPM_FCC3);
+	if (fpi) {
+		memcpy(fpi->macaddr, binfo->bi_enet2addr, 6);
+		fpi->macaddr[5] += 1;
+		fpi->bus_id = "0:03";
+		fpi->phy_addr = 3;
+		fpi->dpram_offset = (u32)cpm2_immr->im_dprambase;
+		fpi->fcc_regs_c = (u32)&cpm2_immr->im_fcc_c[2];
+	}
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start)
@@ -127,7 +220,7 @@ static irqreturn_t cpm2_cascade(int irq, void *dev_id, struct pt_regs *regs)
 
 static struct irqaction cpm2_irqaction = {
 	.handler = cpm2_cascade,
-	.flags = SA_INTERRUPT,
+	.flags = IRQF_DISABLED,
 	.mask = CPU_MASK_NONE,
 	.name = "cpm2_cascade",
 };

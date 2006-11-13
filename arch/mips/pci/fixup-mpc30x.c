@@ -1,7 +1,7 @@
 /*
  *  fixup-mpc30x.c, The Victor MP-C303/304 specific PCI fixups.
  *
- *  Copyright (C) 2002,2004  Yoichi Yuasa <yuasa@hh.iij4u.or.jp>
+ *  Copyright (C) 2002,2004  Yoichi Yuasa <yoichi_yuasa@tripeaks.co.jp>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,7 +21,6 @@
 #include <linux/pci.h>
 
 #include <asm/vr41xx/mpc30x.h>
-#include <asm/vr41xx/vrc4173.h>
 
 static const int internal_func_irqs[] __initdata = {
 	VRC4173_CASCADE_IRQ,

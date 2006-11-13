@@ -9,7 +9,6 @@
 #ifndef __ASM_MACH_IP32_CPU_FEATURE_OVERRIDES_H
 #define __ASM_MACH_IP32_CPU_FEATURE_OVERRIDES_H
 
-#include <linux/config.h>
 
 /*
  * R5000 has an interesting "restriction":  ll(d)/sc(d)
@@ -18,7 +17,7 @@
  * so, for 64bit IP32 kernel we just don't use ll/sc.
  * This does not affect luserland.
  */
-#if defined(CONFIG_CPU_R5000) && defined(CONFIG_MIPS64)
+#if (defined(CONFIG_CPU_R5000) || defined(CONFIG_CPU_NEVADA)) && defined(CONFIG_64BIT)
 #define cpu_has_llsc		0
 #else
 #define cpu_has_llsc		1
@@ -37,5 +36,13 @@
 #define cpu_has_ejtag		0
 #define cpu_has_vtag_icache	0
 #define cpu_has_ic_fills_f_dc	0
+#define cpu_has_dsp		0
+#define cpu_has_4k_cache	1
+
+
+#define cpu_has_mips32r1	0
+#define cpu_has_mips32r2	0
+#define cpu_has_mips64r1	0
+#define cpu_has_mips64r2	0
 
 #endif /* __ASM_MACH_IP32_CPU_FEATURE_OVERRIDES_H */

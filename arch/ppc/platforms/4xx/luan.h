@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/4xx/luan.h
- *
  * Luan board definitions
  *
  * Matt Porter <mporter@kernel.crashing.org>
@@ -18,7 +16,6 @@
 #ifndef __ASM_LUAN_H__
 #define __ASM_LUAN_H__
 
-#include <linux/config.h>
 #include <platforms/4xx/ibm440sp.h>
 
 /* F/W TLB mapping used in bootloader glue to reset EMAC */
@@ -55,7 +52,7 @@
 #define STD_UART_OP(num)					\
 	{ 0, BASE_BAUD, 0, UART##num##_INT,			\
 		(ASYNC_BOOT_AUTOCONF | ASYNC_SKIP_TEST),	\
-		iomem_base: UART##num##_IO_BASE,		\
+		iomem_base: (void*)UART##num##_IO_BASE,		\
 		io_type: SERIAL_IO_MEM},
 
 #define SERIAL_PORT_DFNS	\

@@ -64,10 +64,10 @@ pcibios_update_resource(struct pci_dev *dev, struct resource *root,
  */
 void
 pcibios_align_resource(void *data, struct resource *res,
-		       unsigned long size, unsigned long align)
+		       resource_size_t size, resource_size_t align)
 {
 	if (res->flags & IORESOURCE_IO) {
-		unsigned long start = res->start;
+		resource_size_t start = res->start;
 
 		if (start & 0x300) {
 			start = (start + 0x3ff) & ~0x3ff;
@@ -142,9 +142,7 @@ static void __init pcibios_allocate_resources(int pass)
 	u16 command;
 	struct resource *r, *pr;
 
-	while (dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev),
-	       dev != NULL
-	       ) {
+	for_each_pci_dev(dev) {
 		pci_read_config_word(dev, PCI_COMMAND, &command);
 		for(idx = 0; idx < 6; idx++) {
 			r = &dev->resource[idx];
@@ -188,9 +186,7 @@ static void __init pcibios_assign_resources(void)
 	int idx;
 	struct resource *r;
 
-	while (dev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, dev),
-	       dev != NULL
-	       ) {
+	for_each_pci_dev(dev) {
 		int class = dev->class >> 8;
 
 		/* Don't touch classless devices and host bridges */

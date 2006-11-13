@@ -1,7 +1,7 @@
 /*
  *  SSP control code for Sharp Corgi devices
  *
- *  Copyright (c) 2004 Richard Purdie
+ *  Copyright (c) 2004-2005 Richard Purdie
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -15,16 +15,18 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <asm/hardware.h>
+#include <asm/mach-types.h>
 
 #include <asm/arch/ssp.h>
-#include <asm/arch/corgi.h>
 #include <asm/arch/pxa-regs.h>
+#include "sharpsl.h"
 
-static spinlock_t corgi_ssp_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(corgi_ssp_lock);
 static struct ssp_dev corgi_ssp_dev;
 static struct ssp_state corgi_ssp_state;
+static struct corgissp_machinfo *ssp_machinfo;
 
 /*
  * There are three devices connected to the SSP interface:
@@ -45,15 +47,18 @@ static struct ssp_state corgi_ssp_state;
  */
 unsigned long corgi_ssp_ads7846_putget(ulong data)
 {
-	unsigned long ret,flag;
+	unsigned long flag;
+	u32 ret = 0;
 
 	spin_lock_irqsave(&corgi_ssp_lock, flag);
-	GPCR0 = GPIO_bit(CORGI_GPIO_ADS7846_CS);
+	if (ssp_machinfo->cs_ads7846 >= 0)
+		GPCR(ssp_machinfo->cs_ads7846) = GPIO_bit(ssp_machinfo->cs_ads7846);
 
 	ssp_write_word(&corgi_ssp_dev,data);
-	ret = ssp_read_word(&corgi_ssp_dev);
+ 	ssp_read_word(&corgi_ssp_dev, &ret);
 
-	GPSR0 = GPIO_bit(CORGI_GPIO_ADS7846_CS);
+	if (ssp_machinfo->cs_ads7846 >= 0)
+		GPSR(ssp_machinfo->cs_ads7846) = GPIO_bit(ssp_machinfo->cs_ads7846);
 	spin_unlock_irqrestore(&corgi_ssp_lock, flag);
 
 	return ret;
@@ -66,12 +71,14 @@ unsigned long corgi_ssp_ads7846_putget(ulong data)
 void corgi_ssp_ads7846_lock(void)
 {
 	spin_lock(&corgi_ssp_lock);
-	GPCR0 = GPIO_bit(CORGI_GPIO_ADS7846_CS);
+	if (ssp_machinfo->cs_ads7846 >= 0)
+		GPCR(ssp_machinfo->cs_ads7846) = GPIO_bit(ssp_machinfo->cs_ads7846);
 }
 
 void corgi_ssp_ads7846_unlock(void)
 {
-	GPSR0 = GPIO_bit(CORGI_GPIO_ADS7846_CS);
+	if (ssp_machinfo->cs_ads7846 >= 0)
+		GPSR(ssp_machinfo->cs_ads7846) = GPIO_bit(ssp_machinfo->cs_ads7846);
 	spin_unlock(&corgi_ssp_lock);
 }
 
@@ -82,7 +89,9 @@ void corgi_ssp_ads7846_put(ulong data)
 
 unsigned long corgi_ssp_ads7846_get(void)
 {
-	return ssp_read_word(&corgi_ssp_dev);
+	u32 ret = 0;
+	ssp_read_word(&corgi_ssp_dev, &ret);
+	return ret;
 }
 
 EXPORT_SYMBOL(corgi_ssp_ads7846_putget);
@@ -97,23 +106,30 @@ EXPORT_SYMBOL(corgi_ssp_ads7846_get);
  */
 unsigned long corgi_ssp_dac_put(ulong data)
 {
-	unsigned long flag;
+	unsigned long flag, sscr1 = SSCR1_SPH;
+	u32 tmp;
 
 	spin_lock_irqsave(&corgi_ssp_lock, flag);
-	GPCR0 = GPIO_bit(CORGI_GPIO_LCDCON_CS);
+
+	if (machine_is_spitz() || machine_is_akita() || machine_is_borzoi())
+		sscr1 = 0;
 
 	ssp_disable(&corgi_ssp_dev);
-	ssp_config(&corgi_ssp_dev, (SSCR0_Motorola | (SSCR0_DSS & 0x07 )), SSCR1_SPH, 0, SSCR0_SerClkDiv(76));
+	ssp_config(&corgi_ssp_dev, (SSCR0_Motorola | (SSCR0_DSS & 0x07 )), sscr1, 0, SSCR0_SerClkDiv(ssp_machinfo->clk_lcdcon));
 	ssp_enable(&corgi_ssp_dev);
 
+	if (ssp_machinfo->cs_lcdcon >= 0)
+		GPCR(ssp_machinfo->cs_lcdcon) = GPIO_bit(ssp_machinfo->cs_lcdcon);
 	ssp_write_word(&corgi_ssp_dev,data);
 	/* Read null data back from device to prevent SSP overflow */
-	ssp_read_word(&corgi_ssp_dev);
+	ssp_read_word(&corgi_ssp_dev, &tmp);
+	if (ssp_machinfo->cs_lcdcon >= 0)
+		GPSR(ssp_machinfo->cs_lcdcon) = GPIO_bit(ssp_machinfo->cs_lcdcon);
 
 	ssp_disable(&corgi_ssp_dev);
-	ssp_config(&corgi_ssp_dev, (SSCR0_National | (SSCR0_DSS & 0x0b )), 0, 0, SSCR0_SerClkDiv(2));
+	ssp_config(&corgi_ssp_dev, (SSCR0_National | (SSCR0_DSS & 0x0b )), 0, 0, SSCR0_SerClkDiv(ssp_machinfo->clk_ads7846));
 	ssp_enable(&corgi_ssp_dev);
-	GPSR0 = GPIO_bit(CORGI_GPIO_LCDCON_CS);
+
 	spin_unlock_irqrestore(&corgi_ssp_lock, flag);
 
 	return 0;
@@ -138,32 +154,34 @@ EXPORT_SYMBOL(corgi_ssp_blduty_set);
 int corgi_ssp_max1111_get(ulong data)
 {
 	unsigned long flag;
-	int voltage,voltage1,voltage2;
+	long voltage = 0, voltage1 = 0, voltage2 = 0;
 
 	spin_lock_irqsave(&corgi_ssp_lock, flag);
-	GPCR0 = GPIO_bit(CORGI_GPIO_MAX1111_CS);
+	if (ssp_machinfo->cs_max1111 >= 0)
+		GPCR(ssp_machinfo->cs_max1111) = GPIO_bit(ssp_machinfo->cs_max1111);
 	ssp_disable(&corgi_ssp_dev);
-	ssp_config(&corgi_ssp_dev, (SSCR0_Motorola | (SSCR0_DSS & 0x07 )), 0, 0, SSCR0_SerClkDiv(8));
+	ssp_config(&corgi_ssp_dev, (SSCR0_Motorola | (SSCR0_DSS & 0x07 )), 0, 0, SSCR0_SerClkDiv(ssp_machinfo->clk_max1111));
 	ssp_enable(&corgi_ssp_dev);
 
 	udelay(1);
 
 	/* TB1/RB1 */
 	ssp_write_word(&corgi_ssp_dev,data);
-	ssp_read_word(&corgi_ssp_dev); /* null read */
+	ssp_read_word(&corgi_ssp_dev, (u32*)&voltage1); /* null read */
 
 	/* TB12/RB2 */
 	ssp_write_word(&corgi_ssp_dev,0);
-	voltage1=ssp_read_word(&corgi_ssp_dev);
+	ssp_read_word(&corgi_ssp_dev, (u32*)&voltage1);
 
 	/* TB13/RB3*/
 	ssp_write_word(&corgi_ssp_dev,0);
-	voltage2=ssp_read_word(&corgi_ssp_dev);
+	ssp_read_word(&corgi_ssp_dev, (u32*)&voltage2);
 
 	ssp_disable(&corgi_ssp_dev);
-	ssp_config(&corgi_ssp_dev, (SSCR0_National | (SSCR0_DSS & 0x0b )), 0, 0, SSCR0_SerClkDiv(2));
+	ssp_config(&corgi_ssp_dev, (SSCR0_National | (SSCR0_DSS & 0x0b )), 0, 0, SSCR0_SerClkDiv(ssp_machinfo->clk_ads7846));
 	ssp_enable(&corgi_ssp_dev);
-	GPSR0 = GPIO_bit(CORGI_GPIO_MAX1111_CS);
+	if (ssp_machinfo->cs_max1111 >= 0)
+		GPSR(ssp_machinfo->cs_max1111) = GPIO_bit(ssp_machinfo->cs_max1111);
 	spin_unlock_irqrestore(&corgi_ssp_lock, flag);
 
 	if (voltage1 & 0xc0 || voltage2 & 0x3f)
@@ -179,70 +197,78 @@ EXPORT_SYMBOL(corgi_ssp_max1111_get);
 /*
  *  Support Routines
  */
-int __init corgi_ssp_probe(struct device *dev)
+
+void __init corgi_ssp_set_machinfo(struct corgissp_machinfo *machinfo)
+{
+	ssp_machinfo = machinfo;
+}
+
+static int __init corgi_ssp_probe(struct platform_device *dev)
 {
 	int ret;
 
 	/* Chip Select - Disable All */
-	GPDR0 |= GPIO_bit(CORGI_GPIO_LCDCON_CS); /* output */
-	GPSR0 = GPIO_bit(CORGI_GPIO_LCDCON_CS);  /* High - Disable LCD Control/Timing Gen */
-	GPDR0 |= GPIO_bit(CORGI_GPIO_MAX1111_CS); /* output */
-	GPSR0 = GPIO_bit(CORGI_GPIO_MAX1111_CS);  /* High - Disable MAX1111*/
-	GPDR0 |= GPIO_bit(CORGI_GPIO_ADS7846_CS);  /* output */
-	GPSR0 = GPIO_bit(CORGI_GPIO_ADS7846_CS);   /* High - Disable ADS7846*/
+	if (ssp_machinfo->cs_lcdcon >= 0)
+		pxa_gpio_mode(ssp_machinfo->cs_lcdcon  | GPIO_OUT | GPIO_DFLT_HIGH);
+	if (ssp_machinfo->cs_max1111 >= 0)
+	        pxa_gpio_mode(ssp_machinfo->cs_max1111 | GPIO_OUT | GPIO_DFLT_HIGH);
+	if (ssp_machinfo->cs_ads7846 >= 0)
+        	pxa_gpio_mode(ssp_machinfo->cs_ads7846 | GPIO_OUT | GPIO_DFLT_HIGH);
 
-	ret=ssp_init(&corgi_ssp_dev,1);
+	ret = ssp_init(&corgi_ssp_dev, ssp_machinfo->port, 0);
 
 	if (ret)
 		printk(KERN_ERR "Unable to register SSP handler!\n");
 	else {
 		ssp_disable(&corgi_ssp_dev);
-		ssp_config(&corgi_ssp_dev, (SSCR0_National | (SSCR0_DSS & 0x0b )), 0, 0, SSCR0_SerClkDiv(2));
+		ssp_config(&corgi_ssp_dev, (SSCR0_National | (SSCR0_DSS & 0x0b )), 0, 0, SSCR0_SerClkDiv(ssp_machinfo->clk_ads7846));
 		ssp_enable(&corgi_ssp_dev);
 	}
 
 	return ret;
 }
 
-static int corgi_ssp_remove(struct device *dev)
+static int corgi_ssp_remove(struct platform_device *dev)
 {
 	ssp_exit(&corgi_ssp_dev);
 	return 0;
 }
 
-static int corgi_ssp_suspend(struct device *dev, pm_message_t state, u32 level)
+static int corgi_ssp_suspend(struct platform_device *dev, pm_message_t state)
 {
-	if (level == SUSPEND_POWER_DOWN) {
-		ssp_flush(&corgi_ssp_dev);
-		ssp_save_state(&corgi_ssp_dev,&corgi_ssp_state);
-	}
+	ssp_flush(&corgi_ssp_dev);
+	ssp_save_state(&corgi_ssp_dev,&corgi_ssp_state);
+
 	return 0;
 }
 
-static int corgi_ssp_resume(struct device *dev, u32 level)
+static int corgi_ssp_resume(struct platform_device *dev)
 {
-	if (level == RESUME_POWER_ON) {
-		GPSR0 = GPIO_bit(CORGI_GPIO_LCDCON_CS);  /* High - Disable LCD Control/Timing Gen */
-		GPSR0 = GPIO_bit(CORGI_GPIO_MAX1111_CS); /* High - Disable MAX1111*/
-		GPSR0 = GPIO_bit(CORGI_GPIO_ADS7846_CS); /* High - Disable ADS7846*/
-		ssp_restore_state(&corgi_ssp_dev,&corgi_ssp_state);
-		ssp_enable(&corgi_ssp_dev);
-	}
+	if (ssp_machinfo->cs_lcdcon >= 0)
+		GPSR(ssp_machinfo->cs_lcdcon) = GPIO_bit(ssp_machinfo->cs_lcdcon);  /* High - Disable LCD Control/Timing Gen */
+	if (ssp_machinfo->cs_max1111 >= 0)
+		GPSR(ssp_machinfo->cs_max1111) = GPIO_bit(ssp_machinfo->cs_max1111); /* High - Disable MAX1111*/
+	if (ssp_machinfo->cs_ads7846 >= 0)
+		GPSR(ssp_machinfo->cs_ads7846) = GPIO_bit(ssp_machinfo->cs_ads7846); /* High - Disable ADS7846*/
+	ssp_restore_state(&corgi_ssp_dev,&corgi_ssp_state);
+	ssp_enable(&corgi_ssp_dev);
+
 	return 0;
 }
 
-static struct device_driver corgissp_driver = {
-	.name		= "corgi-ssp",
-	.bus		= &platform_bus_type,
+static struct platform_driver corgissp_driver = {
 	.probe		= corgi_ssp_probe,
 	.remove		= corgi_ssp_remove,
 	.suspend	= corgi_ssp_suspend,
 	.resume		= corgi_ssp_resume,
+	.driver		= {
+		.name	= "corgi-ssp",
+	},
 };
 
 int __init corgi_ssp_init(void)
 {
-	return driver_register(&corgissp_driver);
+	return platform_driver_register(&corgissp_driver);
 }
 
 arch_initcall(corgi_ssp_init);

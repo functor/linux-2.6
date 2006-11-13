@@ -12,7 +12,7 @@
 
 typedef long syscall_handler_t(void);
 
-extern syscall_handler_t *ia32_sys_call_table[];
+extern syscall_handler_t *sys_call_table[];
 
 #define EXECUTE_SYSCALL(syscall, regs) \
 	(((long (*)(long, long, long, long, long, long)) \

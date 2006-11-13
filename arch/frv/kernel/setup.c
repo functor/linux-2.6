@@ -10,8 +10,7 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
-#include <linux/version.h>
+#include <linux/utsrelease.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
@@ -787,15 +786,15 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	/* register those serial ports that are available */
+#ifdef CONFIG_FRV_ONCPU_SERIAL
 #ifndef CONFIG_GDBSTUB_UART0
 	__reg(UART0_BASE + UART_IER * 8) = 0;
 	early_serial_setup(&__frv_uart0);
-//	register_serial(&__frv_uart0);
 #endif
 #ifndef CONFIG_GDBSTUB_UART1
 	__reg(UART1_BASE + UART_IER * 8) = 0;
 	early_serial_setup(&__frv_uart1);
-//	register_serial(&__frv_uart1);
+#endif
 #endif
 
 #if defined(CONFIG_CHR_DEV_FLASH) || defined(CONFIG_BLK_DEV_FLASH)
@@ -814,7 +813,7 @@ void __init setup_arch(char **cmdline_p)
 	 * - by now the stack is part of the init task */
 	printk("Memory %08lx-%08lx\n", memory_start, memory_end);
 
-	if (memory_start == memory_end) BUG();
+	BUG_ON(memory_start == memory_end);
 
 	init_mm.start_code = (unsigned long) &_stext;
 	init_mm.end_code = (unsigned long) &_etext;

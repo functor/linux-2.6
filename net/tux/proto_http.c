@@ -1012,11 +1012,11 @@ int handle_gzip_req (tux_req_t *req, unsigned int flags)
 	return 0;
 }
 
-static spinlock_t mimetypes_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(mimetypes_lock);
 
 static LIST_HEAD(mimetypes_head);
 
-static mimetype_t default_mimetype = { type: "text/plain", type_len: 10, expire_str: "", expire_str_len: 0 };
+static mimetype_t default_mimetype = { .type = "text/plain", .type_len = 10, .expire_str = "", .expire_str_len = 0 };
 
 #define MAX_MIMETYPE_LEN 128
 #define MAX_CACHE_CONTROL_AGE_LEN 30
@@ -2185,13 +2185,13 @@ out_dput:
 }
 
 tux_proto_t tux_proto_http = {
-	defer_accept: 1,
-	can_redirect: 1,
-	got_request: http_got_request,
-	parse_message: parse_http_message,
-	illegal_request: http_illegal_request,
-	check_req_err: http_check_req_err,
-	print_dir_line: http_print_dir_line,
-	name: "http",
+	.defer_accept = 1,
+	.can_redirect = 1,
+	.got_request = http_got_request,
+	.parse_message = parse_http_message,
+	.illegal_request = http_illegal_request,
+	.check_req_err = http_check_req_err,
+	.print_dir_line = http_print_dir_line,
+	.name = "http",
 };
 

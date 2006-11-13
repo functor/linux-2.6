@@ -1,7 +1,4 @@
-
 /*
- * arch/ppc/platforms/hdpu_setup.c
- *
  * Board setup routines for the Sky Computers HDPU Compute Blade.
  *
  * Written by Brian Waite <waite@skycomputers.com>
@@ -15,13 +12,13 @@
  * option) any later version.
  */
 
-#include <linux/config.h>
 
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <linux/irq.h>
 #include <linux/ide.h>
 #include <linux/seq_file.h>
+#include <linux/platform_device.h>
 
 #include <linux/initrd.h>
 #include <linux/root_dev.h>
@@ -58,7 +55,7 @@ static void parse_bootinfo(unsigned long r3,
 static void hdpu_set_l1pe(void);
 static void hdpu_cpustate_set(unsigned char new_state);
 #ifdef CONFIG_SMP
-static spinlock_t timebase_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(timebase_lock);
 static unsigned int timebase_upper = 0, timebase_lower = 0;
 extern int smp_tb_synchronized;
 
@@ -318,11 +315,10 @@ static void __init hdpu_fixup_eth_pdata(struct platform_device *pd)
 	struct mv643xx_eth_platform_data *eth_pd;
 	eth_pd = pd->dev.platform_data;
 
-	eth_pd->port_serial_control =
-	    mv64x60_read(&bh, MV643XX_ETH_PORT_SERIAL_CONTROL_REG(pd->id) & ~1);
-
 	eth_pd->force_phy_addr = 1;
 	eth_pd->phy_addr = pd->id;
+	eth_pd->speed = SPEED_100;
+	eth_pd->duplex = DUPLEX_FULL;
 	eth_pd->tx_queue_size = 400;
 	eth_pd->rx_queue_size = 800;
 }
@@ -353,7 +349,7 @@ static void __init hdpu_fixup_cpustate_pdata(struct platform_device *pd)
 }
 #endif
 
-static int __init hdpu_platform_notify(struct device *dev)
+static int hdpu_platform_notify(struct device *dev)
 {
 	static struct {
 		char *bus_id;
@@ -609,11 +605,6 @@ static void parse_bootinfo(unsigned long r3,
 }
 
 #if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_IDE_MODULE)
-static int hdpu_ide_check_region(ide_ioreg_t from, unsigned int extent)
-{
-	return check_region(from, extent);
-}
-
 static void
 hdpu_ide_request_region(ide_ioreg_t from, unsigned int extent, const char *name)
 {
@@ -753,7 +744,7 @@ static int smp_hdpu_probe(void)
 }
 
 static void
-smp_hdpu_message_pass(int target, int msg, unsigned long data, int wait)
+smp_hdpu_message_pass(int target, int msg)
 {
 	if (msg > 0x3) {
 		printk("SMP %d: smp_message_pass: unknown msg %d\n",
@@ -846,7 +837,7 @@ static void smp_hdpu_setup_cpu(int cpu_nr)
 		mv64x60_write(&bh, MV64360_CPU0_DOORBELL_CLR, 0xff);
 		mv64x60_write(&bh, MV64360_CPU0_DOORBELL_MASK, 0xff);
 		request_irq(60, hdpu_smp_cpu0_int_handler,
-			    SA_INTERRUPT, hdpu_smp0, 0);
+			    IRQF_DISABLED, hdpu_smp0, 0);
 	}
 
 	if (cpu_nr == 1) {
@@ -866,7 +857,7 @@ static void smp_hdpu_setup_cpu(int cpu_nr)
 		mv64x60_write(&bh, MV64360_CPU1_DOORBELL_CLR, 0x0);
 		mv64x60_write(&bh, MV64360_CPU1_DOORBELL_MASK, 0xff);
 		request_irq(28, hdpu_smp_cpu1_int_handler,
-			    SA_INTERRUPT, hdpu_smp1, 0);
+			    IRQF_DISABLED, hdpu_smp1, 0);
 	}
 
 }
@@ -949,7 +940,7 @@ platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 #endif				/* CONFIG_SERIAL_TEXT_DEBUG */
 
 #ifdef CONFIG_SMP
-	ppc_md.smp_ops = &hdpu_smp_ops;
+	smp_ops = &hdpu_smp_ops;
 #endif				/* CONFIG_SMP */
 
 #if defined(CONFIG_SERIAL_MPSC) || defined(CONFIG_MV643XX_ETH)

@@ -112,10 +112,10 @@ static int module_load_notify(struct notifier_block * self, unsigned long val, v
 		return 0;
 
 	/* FIXME: should we process all CPU buffers ? */
-	down(&buffer_sem);
+	mutex_lock(&buffer_mutex);
 	add_event_entry(ESCAPE_CODE);
 	add_event_entry(MODULE_LOADED_CODE);
-	up(&buffer_sem);
+	mutex_unlock(&buffer_mutex);
 #endif
 	return 0;
 }
@@ -522,7 +522,7 @@ void sync_buffer(int cpu)
 	unsigned long available;
 	int domain_switch = 0;
 
-	down(&buffer_sem);
+	mutex_lock(&buffer_mutex);
  
 	add_cpu_switch(cpu);
 
@@ -578,5 +578,5 @@ void sync_buffer(int cpu)
 
 	mark_done(cpu);
 
-	up(&buffer_sem);
+	mutex_unlock(&buffer_mutex);
 }

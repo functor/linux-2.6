@@ -55,6 +55,20 @@
 
 extern void sigset_from_compat(sigset_t *set, compat_sigset_t *compat);
 
+int compat_log = 1;
+
+int compat_printk(const char *fmt, ...)
+{
+	va_list ap;
+	int ret;
+	if (!compat_log)
+		return 0;
+	va_start(ap, fmt);
+	ret = vprintk(fmt, ap);
+	va_end(ap);
+	return ret;
+}
+
 /*
  * Not all architectures have sys_utime, so implement this in terms
  * of sys_utimes.
@@ -197,7 +211,7 @@ asmlinkage long compat_sys_statfs(const char __user *path, struct compat_statfs 
 	error = user_path_walk(path, &nd);
 	if (!error) {
 		struct kstatfs tmp;
-		error = vfs_statfs(nd.dentry->d_inode->i_sb, &tmp);
+		error = vfs_statfs(nd.dentry, &tmp);
 		if (!error)
 			error = put_compat_statfs(buf, &tmp);
 		path_release(&nd);
@@ -215,7 +229,7 @@ asmlinkage long compat_sys_fstatfs(unsigned int fd, struct compat_statfs __user 
 	file = fget(fd);
 	if (!file)
 		goto out;
-	error = vfs_statfs(file->f_dentry->d_inode->i_sb, &tmp);
+	error = vfs_statfs(file->f_dentry, &tmp);
 	if (!error)
 		error = put_compat_statfs(buf, &tmp);
 	fput(file);
@@ -265,7 +279,7 @@ asmlinkage long compat_sys_statfs64(const char __user *path, compat_size_t sz, s
 	error = user_path_walk(path, &nd);
 	if (!error) {
 		struct kstatfs tmp;
-		error = vfs_statfs(nd.dentry->d_inode->i_sb, &tmp);
+		error = vfs_statfs(nd.dentry, &tmp);
 		if (!error)
 			error = put_compat_statfs64(buf, &tmp);
 		path_release(&nd);
@@ -286,7 +300,7 @@ asmlinkage long compat_sys_fstatfs64(unsigned int fd, compat_size_t sz, struct c
 	file = fget(fd);
 	if (!file)
 		goto out;
-	error = vfs_statfs(file->f_dentry->d_inode->i_sb, &tmp);
+	error = vfs_statfs(file->f_dentry, &tmp);
 	if (!error)
 		error = put_compat_statfs64(buf, &tmp);
 	fput(file);
@@ -359,7 +373,7 @@ static void compat_ioctl_error(struct file *filp, unsigned int fd,
 	sprintf(buf,"'%c'", (cmd>>24) & 0x3f);
 	if (!isprint(buf[1]))
 		sprintf(buf, "%02x", buf[1]);
-	printk("ioctl32(%s:%d): Unknown cmd fd(%d) "
+	compat_printk("ioctl32(%s:%d): Unknown cmd fd(%d) "
 			"cmd(%08x){%s} arg(%08x) on %s\n",
 			current->comm, current->pid,
 			(int)fd, (unsigned int)cmd, buf,
@@ -904,20 +918,24 @@ struct compat_readdir_callback {
 };
 
 static int compat_fillonedir(void *__buf, const char *name, int namlen,
-			loff_t offset, ino_t ino, unsigned int d_type)
+			loff_t offset, u64 ino, unsigned int d_type)
 {
 	struct compat_readdir_callback *buf = __buf;
 	struct compat_old_linux_dirent __user *dirent;
+	compat_ulong_t d_ino;
 
 	if (buf->result)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	buf->result++;
 	dirent = buf->dirent;
 	if (!access_ok(VERIFY_WRITE, dirent,
 			(unsigned long)(dirent->d_name + namlen + 1) -
 				(unsigned long)dirent))
 		goto efault;
-	if (	__put_user(ino, &dirent->d_ino) ||
+	if (	__put_user(d_ino, &dirent->d_ino) ||
 		__put_user(offset, &dirent->d_offset) ||
 		__put_user(namlen, &dirent->d_namlen) ||
 		__copy_to_user(dirent->d_name, name, namlen) ||
@@ -968,22 +986,26 @@ struct compat_getdents_callback {
 };
 
 static int compat_filldir(void *__buf, const char *name, int namlen,
-		loff_t offset, ino_t ino, unsigned int d_type)
+		loff_t offset, u64 ino, unsigned int d_type)
 {
 	struct compat_linux_dirent __user * dirent;
 	struct compat_getdents_callback *buf = __buf;
+	compat_ulong_t d_ino;
 	int reclen = COMPAT_ROUND_UP(NAME_OFFSET(dirent) + namlen + 2);
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	dirent = buf->previous;
 	if (dirent) {
 		if (__put_user(offset, &dirent->d_off))
 			goto efault;
 	}
 	dirent = buf->current_dir;
-	if (__put_user(ino, &dirent->d_ino))
+	if (__put_user(d_ino, &dirent->d_ino))
 		goto efault;
 	if (__put_user(reclen, &dirent->d_reclen))
 		goto efault;
@@ -1054,7 +1076,7 @@ struct compat_getdents_callback64 {
 };
 
 static int compat_filldir64(void * __buf, const char * name, int namlen, loff_t offset,
-		     ino_t ino, unsigned int d_type)
+		     u64 ino, unsigned int d_type)
 {
 	struct linux_dirent64 __user *dirent;
 	struct compat_getdents_callback64 *buf = __buf;

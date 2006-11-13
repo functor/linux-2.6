@@ -2,14 +2,13 @@
  *  drivers/cpufreq/cpufreq_stats.c
  *
  *  Copyright (C) 2003-2004 Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>.
- *  	      (C) 2004 Zou Nan hai <nanhai.zou@intel.com>.
+ *	      (C) 2004 Zou Nan hai <nanhai.zou@intel.com>.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sysdev.h>
 #include <linux/cpu.h>
@@ -19,6 +18,7 @@
 #include <linux/percpu.h>
 #include <linux/kobject.h>
 #include <linux/spinlock.h>
+#include <linux/notifier.h>
 #include <asm/cputime.h>
 
 static spinlock_t cpufreq_stats_lock;
@@ -73,7 +73,7 @@ static ssize_t
 show_total_trans(struct cpufreq_policy *policy, char *buf)
 {
 	struct cpufreq_stats *stat = cpufreq_stats_table[policy->cpu];
-	if(!stat)
+	if (!stat)
 		return 0;
 	return sprintf(buf, "%d\n",
 			cpufreq_stats_table[stat->cpu]->total_trans);
@@ -85,11 +85,11 @@ show_time_in_state(struct cpufreq_policy *policy, char *buf)
 	ssize_t len = 0;
 	int i;
 	struct cpufreq_stats *stat = cpufreq_stats_table[policy->cpu];
-	if(!stat)
+	if (!stat)
 		return 0;
 	cpufreq_stats_update(stat->cpu);
 	for (i = 0; i < stat->state_num; i++) {
-		len += sprintf(buf + len, "%u %llu\n", stat->freq_table[i], 
+		len += sprintf(buf + len, "%u %llu\n", stat->freq_table[i],
 			(unsigned long long)cputime64_to_clock_t(stat->time_in_state[i]));
 	}
 	return len;
@@ -103,7 +103,7 @@ show_trans_table(struct cpufreq_policy *policy, char *buf)
 	int i, j;
 
 	struct cpufreq_stats *stat = cpufreq_stats_table[policy->cpu];
-	if(!stat)
+	if (!stat)
 		return 0;
 	cpufreq_stats_update(stat->cpu);
 	len += snprintf(buf + len, PAGE_SIZE - len, "   From  :    To\n");
@@ -170,7 +170,7 @@ cpufreq_stats_free_table (unsigned int cpu)
 {
 	struct cpufreq_stats *stat = cpufreq_stats_table[cpu];
 	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
-	if (policy && policy->cpu == cpu)	
+	if (policy && policy->cpu == cpu)
 		sysfs_remove_group(&policy->kobj, &stats_attr_group);
 	if (stat) {
 		kfree(stat->time_in_state);
@@ -192,11 +192,15 @@ cpufreq_stats_create_table (struct cpufreq_policy *policy,
 	unsigned int cpu = policy->cpu;
 	if (cpufreq_stats_table[cpu])
 		return -EBUSY;
-	if ((stat = kmalloc(sizeof(struct cpufreq_stats), GFP_KERNEL)) == NULL)
+	if ((stat = kzalloc(sizeof(struct cpufreq_stats), GFP_KERNEL)) == NULL)
 		return -ENOMEM;
-	memset(stat, 0, sizeof (struct cpufreq_stats));
 
 	data = cpufreq_cpu_get(cpu);
+	if (data == NULL) {
+		ret = -EINVAL;
+		goto error_get_fail;
+	}
+
 	if ((ret = sysfs_create_group(&data->kobj, &stats_attr_group)))
 		goto error_out;
 
@@ -216,12 +220,11 @@ cpufreq_stats_create_table (struct cpufreq_policy *policy,
 	alloc_size += count * count * sizeof(int);
 #endif
 	stat->max_state = count;
-	stat->time_in_state = kmalloc(alloc_size, GFP_KERNEL);
+	stat->time_in_state = kzalloc(alloc_size, GFP_KERNEL);
 	if (!stat->time_in_state) {
 		ret = -ENOMEM;
 		goto error_out;
 	}
-	memset(stat->time_in_state, 0, alloc_size);
 	stat->freq_table = (unsigned int *)(stat->time_in_state + count);
 
 #ifdef CONFIG_CPU_FREQ_STAT_DETAILS
@@ -244,6 +247,7 @@ cpufreq_stats_create_table (struct cpufreq_policy *policy,
 	return 0;
 error_out:
 	cpufreq_cpu_put(data);
+error_get_fail:
 	kfree(stat);
 	cpufreq_stats_table[cpu] = NULL;
 	return ret;
@@ -298,6 +302,27 @@ cpufreq_stat_notifier_trans (struct notifier_block *nb, unsigned long val,
 	return 0;
 }
 
+static int cpufreq_stat_cpu_callback(struct notifier_block *nfb,
+					unsigned long action, void *hcpu)
+{
+	unsigned int cpu = (unsigned long)hcpu;
+
+	switch (action) {
+	case CPU_ONLINE:
+		cpufreq_update_policy(cpu);
+		break;
+	case CPU_DEAD:
+		cpufreq_stats_free_table(cpu);
+		break;
+	}
+	return NOTIFY_OK;
+}
+
+static struct notifier_block cpufreq_stat_cpu_notifier =
+{
+	.notifier_call = cpufreq_stat_cpu_callback,
+};
+
 static struct notifier_block notifier_policy_block = {
 	.notifier_call = cpufreq_stat_notifier_policy
 };
@@ -311,6 +336,7 @@ __init cpufreq_stats_init(void)
 {
 	int ret;
 	unsigned int cpu;
+
 	spin_lock_init(&cpufreq_stats_lock);
 	if ((ret = cpufreq_register_notifier(&notifier_policy_block,
 				CPUFREQ_POLICY_NOTIFIER)))
@@ -323,20 +349,29 @@ __init cpufreq_stats_init(void)
 		return ret;
 	}
 
-	for_each_cpu(cpu)
-		cpufreq_update_policy(cpu);
+	register_hotcpu_notifier(&cpufreq_stat_cpu_notifier);
+	for_each_online_cpu(cpu) {
+		cpufreq_stat_cpu_callback(&cpufreq_stat_cpu_notifier, CPU_ONLINE,
+			(void *)(long)cpu);
+	}
 	return 0;
 }
 static void
 __exit cpufreq_stats_exit(void)
 {
 	unsigned int cpu;
+
 	cpufreq_unregister_notifier(&notifier_policy_block,
 			CPUFREQ_POLICY_NOTIFIER);
 	cpufreq_unregister_notifier(&notifier_trans_block,
 			CPUFREQ_TRANSITION_NOTIFIER);
-	for_each_cpu(cpu)
-		cpufreq_stats_free_table(cpu);
+	unregister_hotcpu_notifier(&cpufreq_stat_cpu_notifier);
+	lock_cpu_hotplug();
+	for_each_online_cpu(cpu) {
+		cpufreq_stat_cpu_callback(&cpufreq_stat_cpu_notifier, CPU_DEAD,
+			(void *)(long)cpu);
+	}
+	unlock_cpu_hotplug();
 }
 
 MODULE_AUTHOR ("Zou Nan hai <nanhai.zou@intel.com>");
