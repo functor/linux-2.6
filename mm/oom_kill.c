@@ -15,7 +15,6 @@
  *  kernel subsystems and hints as to where to find out what things do.
  */
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/swap.h>

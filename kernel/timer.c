@@ -1322,7 +1322,7 @@ asmlinkage long sys_getpid(void)
 /*
  * Accessing ->parent is not SMP-safe, it could
  * change from under us. However, we can use a stale
- * value of ->parent under rcu_read_lock(), see
+ * value of ->real_parent under rcu_read_lock(), see
  * release_task()->call_rcu(delayed_put_task_struct).
  */
 asmlinkage long sys_getppid(void)

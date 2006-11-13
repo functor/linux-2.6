@@ -1396,7 +1396,7 @@ static int pid_revalidate(struct dentry *dentry, struct nameidata *nd)
 	if (task) {
 		int pid = (inode->i_ino >> 16) & 0xFFFF;
 
-		if (!proc_pid_visible(task, pid))
+		if (!vx_proc_pid_visible(task, pid))
 			goto out_drop;
 
 		ret = 1;
@@ -1690,6 +1690,9 @@ static struct inode_operations proc_tid_attr_inode_operations;
 static struct file_operations proc_tgid_attr_operations;
 static struct inode_operations proc_tgid_attr_inode_operations;
 #endif
+
+extern int proc_pid_vx_info(struct task_struct *, char *);
+extern int proc_pid_nx_info(struct task_struct *, char *);
 
 extern int proc_pid_vx_info(struct task_struct *, char *);
 extern int proc_pid_nx_info(struct task_struct *, char *);
@@ -2123,7 +2126,7 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, struct
 		goto out;
 
 	rcu_read_lock();
-	task = find_proc_task_by_pid(tgid);
+	task = vx_find_proc_task_by_pid(tgid);
 	if (task)
 		get_task_struct(task);
 	rcu_read_unlock();
@@ -2176,7 +2179,7 @@ static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry
 		goto out;
 
 	rcu_read_lock();
-	task = find_proc_task_by_pid(tid);
+	task = vx_find_proc_task_by_pid(tid);
 	if (task)
 		get_task_struct(task);
 	rcu_read_unlock();
@@ -2232,7 +2235,7 @@ static struct task_struct *first_tgid(int tgid, unsigned int nr)
 	struct task_struct *pos;
 	rcu_read_lock();
 	if (tgid && nr) {
-		pos = find_proc_task_by_pid(tgid);
+		pos = vx_find_proc_task_by_pid(tgid);
 		if (pos && thread_group_leader(pos))
 			goto found;
 	}
@@ -2310,7 +2313,7 @@ int proc_pid_readdir(struct file * filp, void * dirent, filldir_t filldir)
 		int len;
 		ino_t ino;
 		tgid = vx_map_tgid(task->pid);
-		if (!proc_pid_visible(task, tgid))
+		if (!vx_proc_pid_visible(task, tgid))
 			continue;
 
 		len = snprintf(buf, sizeof(buf), "%d", tgid);
@@ -2346,7 +2349,7 @@ static struct task_struct *first_tid(struct task_struct *leader,
 	rcu_read_lock();
 	/* Attempt to start with the pid of a thread */
 	if (tid && (nr > 0)) {
-		pos = find_proc_task_by_pid(tid);
+		pos = vx_find_proc_task_by_pid(tid);
 		if (pos && (pos->group_leader == leader))
 			goto found;
 	}
@@ -2437,7 +2440,7 @@ static int proc_task_readdir(struct file * filp, void * dirent, filldir_t filldi
 	     task = next_tid(task), pos++) {
 		int len;
 		tid = vx_map_pid(task->pid);
-		if (!proc_pid_visible(task, tid))
+		if (!vx_proc_pid_visible(task, tid))
 			continue;
 
 		len = snprintf(buf, sizeof(buf), "%d", tid);

@@ -3,10 +3,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
 
-%define buildup 0
+%define buildup 1
 %define buildsmp 0
 %define builduml 0
-%define buildxen 1
+%define buildxen 0
 %define builddoc 0
 
 # Versions of various parts
@@ -17,10 +17,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 17
+%define sublevel 18
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define release 1.2187_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.2224_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
 %define kernel_arch i386
@@ -376,7 +376,6 @@ BuildKernel() {
     rm -rf $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     cp arch/%{_arch}/kernel/asm-offsets.s $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch}/kernel || :
     cp .config $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    cp .kernelrelease $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/
     cp -a scripts $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     if [ -d arch/%{_arch}/scripts ]; then
       cp -a arch/%{_arch}/scripts $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/arch/%{_arch} || :
