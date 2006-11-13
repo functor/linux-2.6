@@ -14,7 +14,6 @@
  *	Mikael Pettersson	:	PM converted to driver model.
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 
 #include <linux/mm.h>
@@ -175,7 +174,8 @@ asmlinkage void smp_error_interrupt(void)
 	   6: Received illegal vector
 	   7: Illegal register address
 	*/
-	printk (KERN_DEBUG "APIC error on CPU%d: %02x(%02x)\n",
+	if (num_online_cpus() > 1)
+		printk (KERN_DEBUG "APIC error on CPU%d: %02x(%02x)\n",
 	        smp_processor_id(), v , v1);
 	irq_exit();
 }

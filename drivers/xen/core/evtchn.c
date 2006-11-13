@@ -30,7 +30,6 @@
  * IN THE SOFTWARE.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
@@ -473,6 +472,17 @@ static void set_affinity_irq(unsigned irq, cpumask_t dest)
 	rebind_irq_to_cpu(irq, tcpu);
 }
 
+static int retrigger(unsigned int irq)
+{
+	int evtchn = evtchn_from_irq(irq);
+	shared_info_t *s = HYPERVISOR_shared_info;
+	if (!VALID_EVTCHN(evtchn))
+		return 1;
+	BUG_ON(!synch_test_bit(evtchn, &s->evtchn_mask[0]));
+	synch_set_bit(evtchn, &s->evtchn_pending[0]);
+	return 1;
+}
+
 /*
  * Interface to generic handling in irq.c
  */
@@ -531,14 +541,17 @@ static void end_dynirq(unsigned int irq)
 }
 
 static struct hw_interrupt_type dynirq_type = {
-	"Dynamic-irq",
-	startup_dynirq,
-	shutdown_dynirq,
-	enable_dynirq,
-	disable_dynirq,
-	ack_dynirq,
-	end_dynirq,
-	set_affinity_irq
+	.typename	= "Dynamic-irq",
+	.startup	= startup_dynirq,
+	.shutdown	= shutdown_dynirq,
+	.enable		= enable_dynirq,
+	.disable	= disable_dynirq,
+	.ack		= ack_dynirq,
+	.end		= end_dynirq,
+#ifdef CONFIG_SMP
+	.set_affinity	= set_affinity_irq,
+#endif
+	.retrigger	= retrigger,
 };
 
 static inline void pirq_unmask_notify(int pirq)
@@ -656,14 +669,17 @@ static void end_pirq(unsigned int irq)
 }
 
 static struct hw_interrupt_type pirq_type = {
-	"Phys-irq",
-	startup_pirq,
-	shutdown_pirq,
-	enable_pirq,
-	disable_pirq,
-	ack_pirq,
-	end_pirq,
-	set_affinity_irq
+	.typename	= "Phys-irq",
+	.startup	= startup_pirq,
+	.shutdown	= shutdown_pirq,
+	.enable		= enable_pirq,
+	.disable	= disable_pirq,
+	.ack		= ack_pirq,
+	.end		= end_pirq,
+#ifdef CONFIG_SMP
+	.set_affinity	= set_affinity_irq,
+#endif
+	.retrigger	= retrigger,
 };
 
 int irq_ignore_unhandled(unsigned int irq)
@@ -677,7 +693,7 @@ int irq_ignore_unhandled(unsigned int irq)
 	return !!(irq_status.flags & XENIRQSTAT_shared);
 }
 
-void resend_irq_on_evtchn(struct hw_interrupt_type *h, unsigned int i)
+void resend_irq_on_evtchn(unsigned int i)
 {
 	int evtchn = evtchn_from_irq(i);
 	shared_info_t *s = HYPERVISOR_shared_info;
@@ -831,7 +847,7 @@ void __init xen_init_IRQ(void)
 		irq_desc[dynirq_to_irq(i)].status  = IRQ_DISABLED;
 		irq_desc[dynirq_to_irq(i)].action  = NULL;
 		irq_desc[dynirq_to_irq(i)].depth   = 1;
-		irq_desc[dynirq_to_irq(i)].handler = &dynirq_type;
+		irq_desc[dynirq_to_irq(i)].chip    = &dynirq_type;
 	}
 
 	/* Phys IRQ space is statically bound (1:1 mapping). Nail refcnts. */
@@ -840,14 +856,13 @@ void __init xen_init_IRQ(void)
 
 #ifdef RTC_IRQ
 		/* If not domain 0, force our RTC driver to fail its probe. */
-		if ((i == RTC_IRQ) &&
-		    !(xen_start_info->flags & SIF_INITDOMAIN))
+		if ((i == RTC_IRQ) && !is_initial_xendomain())
 			continue;
 #endif
 
 		irq_desc[pirq_to_irq(i)].status  = IRQ_DISABLED;
 		irq_desc[pirq_to_irq(i)].action  = NULL;
 		irq_desc[pirq_to_irq(i)].depth   = 1;
-		irq_desc[pirq_to_irq(i)].handler = &pirq_type;
+		irq_desc[pirq_to_irq(i)].chip    = &pirq_type;
 	}
 }

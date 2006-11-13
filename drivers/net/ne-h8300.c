@@ -27,6 +27,7 @@ static const char version1[] =
 #include <linux/delay.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/jiffies.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -180,12 +181,7 @@ struct net_device * __init ne_probe(int unit)
 	err = do_ne_probe(dev);
 	if (err)
 		goto out;
-	err = register_netdev(dev);
-	if (err)
-		goto out1;
 	return dev;
-out1:
-	cleanup_card(dev);
 out:
 	free_netdev(dev);
 	return ERR_PTR(err);
@@ -325,8 +321,13 @@ static int __init ne_probe1(struct net_device *dev, int ioaddr)
 	dev->poll_controller = ei_poll;
 #endif
 	NS8390_init(dev, 0);
-	return 0;
 
+	ret = register_netdev(dev);
+	if (ret)
+		goto out_irq;
+	return 0;
+out_irq:
+	free_irq(dev->irq, dev);
 err_out:
 	release_region(ioaddr, NE_IO_EXTENT);
 	return ret;
@@ -365,7 +366,7 @@ static void ne_reset_8390(struct net_device *dev)
 
 	/* This check _should_not_ be necessary, omit eventually. */
 	while ((inb_p(NE_BASE+EN0_ISR) & ENISR_RESET) == 0)
-		if (jiffies - reset_start_time > 2*HZ/100) {
+		if (time_after(jiffies, reset_start_time + 2*HZ/100)) {
 			printk(KERN_WARNING "%s: ne_reset_8390() did not complete.\n", dev->name);
 			break;
 		}
@@ -580,7 +581,7 @@ retry:
 #endif
 
 	while ((inb_p(NE_BASE + EN0_ISR) & ENISR_RDC) == 0)
-		if (jiffies - dma_start > 2*HZ/100) {		/* 20ms */
+		if (time_after(jiffies, dma_start + 2*HZ/100)) {		/* 20ms */
 			printk(KERN_WARNING "%s: timeout waiting for Tx RDC.\n", dev->name);
 			ne_reset_8390(dev);
 			NS8390_init(dev,1);
@@ -600,9 +601,9 @@ static int io[MAX_NE_CARDS];
 static int irq[MAX_NE_CARDS];
 static int bad[MAX_NE_CARDS];	/* 0xbad = bad sig or no reset ack */
 
-MODULE_PARM(io, "1-" __MODULE_STRING(MAX_NE_CARDS) "i");
-MODULE_PARM(irq, "1-" __MODULE_STRING(MAX_NE_CARDS) "i");
-MODULE_PARM(bad, "1-" __MODULE_STRING(MAX_NE_CARDS) "i");
+module_param_array(io, int, NULL, 0);
+module_param_array(irq, int, NULL, 0);
+module_param_array(bad, int, NULL, 0);
 MODULE_PARM_DESC(io, "I/O base address(es)");
 MODULE_PARM_DESC(irq, "IRQ number(s)");
 MODULE_DESCRIPTION("H8/300 NE2000 Ethernet driver");
@@ -633,11 +634,8 @@ int init_module(void)
 		err = init_reg_offset(dev, dev->base_addr);
 		if (!err) {
 			if (do_ne_probe(dev) == 0) {
-				if (register_netdev(dev) == 0) {
-					dev_ne[found++] = dev;
-					continue;
-				}
-				cleanup_card(dev);
+				dev_ne[found++] = dev;
+				continue;
 			}
 		}
 		free_netdev(dev);

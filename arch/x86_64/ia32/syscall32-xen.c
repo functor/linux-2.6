@@ -10,6 +10,7 @@
 #include <linux/init.h>
 #include <linux/stringify.h>
 #include <linux/security.h>
+#include <linux/vs_memory.h>
 #include <asm/proto.h>
 #include <asm/tlbflush.h>
 #include <asm/ia32_unistd.h>
@@ -47,7 +48,9 @@ static struct vm_operations_struct syscall32_vm_ops = {
 struct linux_binprm;
 
 /* Setup a VMA at program startup for the vsyscall page */
-int syscall32_setup_pages(struct linux_binprm *bprm, int exstack)
+int syscall32_setup_pages(struct linux_binprm *bprm, int exstack,
+			  unsigned long start_code,
+			  unsigned long interp_map_address)
 {
 	int npages = (VSYSCALL32_END - VSYSCALL32_BASE) >> PAGE_SHIFT;
 	struct vm_area_struct *vma;
@@ -75,7 +78,7 @@ int syscall32_setup_pages(struct linux_binprm *bprm, int exstack)
 		kmem_cache_free(vm_area_cachep, vma);
 		return ret;
 	}
-	mm->total_vm += npages;
+	vx_vmpages_add(mm, npages);
 	up_write(&mm->mmap_sem);
 	return 0;
 }
