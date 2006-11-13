@@ -1042,6 +1042,19 @@ out_release:
 EXPORT_SYMBOL(do_splice_direct);
 
 /*
+ * After the inode slimming patch, i_pipe/i_bdev/i_cdev share the same
+ * location, so checking ->i_pipe is not enough to verify that this is a
+ * pipe.
+ */
+static inline int is_pipe(struct inode *inode)
+{
+	if (inode->i_pipe && S_ISFIFO(inode->i_mode))
+		return 1;
+
+	return 0;
+}
+
+/*
  * Determine where to splice to/from.
  */
 static long do_splice(struct file *in, loff_t __user *off_in,
@@ -1052,8 +1065,8 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 	loff_t offset, *off;
 	long ret;
 
-	pipe = in->f_dentry->d_inode->i_pipe;
-	if (pipe) {
+	if (is_pipe(in->f_dentry->d_inode)) {
+		pipe = in->f_dentry->d_inode->i_pipe;
 		if (off_in)
 			return -ESPIPE;
 		if (off_out) {
@@ -1073,8 +1086,8 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		return ret;
 	}
 
-	pipe = out->f_dentry->d_inode->i_pipe;
-	if (pipe) {
+	if (is_pipe(out->f_dentry->d_inode)) {
+		pipe = out->f_dentry->d_inode->i_pipe;
 		if (off_out)
 			return -ESPIPE;
 		if (off_in) {
@@ -1231,7 +1244,7 @@ static int get_iovec_page_array(const struct iovec __user *iov,
 static long do_vmsplice(struct file *file, const struct iovec __user *iov,
 			unsigned long nr_segs, unsigned int flags)
 {
-	struct pipe_inode_info *pipe = file->f_dentry->d_inode->i_pipe;
+	struct pipe_inode_info *pipe;
 	struct page *pages[PIPE_BUFFERS];
 	struct partial_page partial[PIPE_BUFFERS];
 	struct splice_pipe_desc spd = {
@@ -1241,7 +1254,7 @@ static long do_vmsplice(struct file *file, const struct iovec __user *iov,
 		.ops = &user_page_pipe_buf_ops,
 	};
 
-	if (unlikely(!pipe))
+	if (!is_pipe(file->f_dentry->d_inode))
 		return -EBADF;
 	if (unlikely(nr_segs > UIO_MAXIOV))
 		return -EINVAL;
@@ -1253,6 +1266,7 @@ static long do_vmsplice(struct file *file, const struct iovec __user *iov,
 	if (spd.nr_pages <= 0)
 		return spd.nr_pages;
 
+	pipe = file->f_dentry->d_inode->i_pipe;
 	return splice_to_pipe(pipe, &spd);
 }
 
@@ -1475,15 +1489,20 @@ static int link_pipe(struct pipe_inode_info *ipipe,
 static long do_tee(struct file *in, struct file *out, size_t len,
 		   unsigned int flags)
 {
-	struct pipe_inode_info *ipipe = in->f_dentry->d_inode->i_pipe;
-	struct pipe_inode_info *opipe = out->f_dentry->d_inode->i_pipe;
+	struct pipe_inode_info *ipipe;
+	struct pipe_inode_info *opipe;
 	int ret = -EINVAL;
+
+	if (!is_pipe(in->f_dentry->d_inode) || !is_pipe(out->f_dentry->d_inode))
+		return ret;
 
 	/*
 	 * Duplicate the contents of ipipe to opipe without actually
 	 * copying the data.
 	 */
-	if (ipipe && opipe && ipipe != opipe) {
+	ipipe = in->f_dentry->d_inode->i_pipe;
+	opipe = out->f_dentry->d_inode->i_pipe;
+	if (ipipe != opipe) {
 		/*
 		 * Keep going, unless we encounter an error. The ipipe/opipe
 		 * ordering doesn't really matter.

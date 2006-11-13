@@ -817,10 +817,14 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 		audit_log_format(ab, " success=%s exit=%ld", 
 				 (context->return_valid==AUDITSC_SUCCESS)?"yes":"no",
 				 context->return_code);
+
+	mutex_lock(&tty_mutex);
+	read_lock(&tasklist_lock);
 	if (tsk->signal && tsk->signal->tty && tsk->signal->tty->name)
 		tty = tsk->signal->tty->name;
 	else
 		tty = "(none)";
+	read_unlock(&tasklist_lock);
 	audit_log_format(ab,
 		  " a0=%lx a1=%lx a2=%lx a3=%lx items=%d"
 		  " ppid=%d pid=%d auid=%u uid=%u gid=%u"
@@ -838,6 +842,9 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 		  context->gid,
 		  context->euid, context->suid, context->fsuid,
 		  context->egid, context->sgid, context->fsgid, tty);
+
+	mutex_unlock(&tty_mutex);
+
 	audit_log_task_info(ab, tsk);
 	if (context->filterkey) {
 		audit_log_format(ab, " key=");
