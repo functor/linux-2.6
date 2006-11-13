@@ -1178,8 +1178,6 @@ ptrace_report(struct utrace_attached_engine *engine, struct task_struct *tsk,
 	}
 #endif
 
-	BUG_ON(state->u.live.stopped);
-
 	/*
 	 * Set our QUIESCE flag right now, before notifying the tracer.
 	 * We do this before setting state->u.live.stopped rather than

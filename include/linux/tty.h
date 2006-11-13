@@ -174,7 +174,7 @@ struct tty_struct {
 	struct tty_driver *driver;
 	int index;
 	struct tty_ldisc ldisc;
-	struct semaphore termios_sem;
+	struct mutex termios_mutex;
 	struct termios *termios, *termios_locked;
 	char name[64];
 	int pgrp;
@@ -190,7 +190,6 @@ struct tty_struct {
 	struct tty_struct *link;
 	struct fasync_struct *fasync;
 	struct tty_bufhead buf;
-	int max_flip_cnt;
 	int alt_speed;		/* For magic substitution of 38400 bps */
 	wait_queue_head_t write_wait;
 	wait_queue_head_t read_wait;
@@ -337,6 +336,46 @@ extern int vt_ioctl(struct tty_struct *tty, struct file * file,
 static inline dev_t tty_devnum(struct tty_struct *tty)
 {
 	return MKDEV(tty->driver->major, tty->driver->minor_start) + tty->index;
+}
+
+static inline void proc_clear_tty(struct task_struct *p)
+{
+	spin_lock_irq(&p->sighand->siglock);
+	p->signal->tty = NULL;
+	spin_unlock_irq(&p->sighand->siglock);
+}
+
+static inline
+void __proc_set_tty(struct task_struct *tsk, struct tty_struct *tty)
+{
+	if (tty) {
+		tty->session = tsk->signal->session;
+		tty->pgrp = process_group(tsk);
+	}
+	tsk->signal->tty = tty;
+	tsk->signal->tty_old_pgrp = 0;
+}
+
+static inline
+void proc_set_tty(struct task_struct *tsk, struct tty_struct *tty)
+{
+	spin_lock_irq(&tsk->sighand->siglock);
+	__proc_set_tty(tsk, tty);
+	spin_unlock_irq(&tsk->sighand->siglock);
+}
+
+static inline struct tty_struct *get_current_tty(void)
+{
+	struct tty_struct *tty;
+	WARN_ON_ONCE(!mutex_is_locked(&tty_mutex));
+	tty = current->signal->tty;
+	/*
+	 * session->tty can be changed/cleared from under us, make sure we
+	 * issue the load. The obtained pointer, when not NULL, is valid as
+	 * long as we hold tty_mutex.
+	 */
+	barrier();
+	return tty;
 }
 
 #endif /* __KERNEL__ */

@@ -427,6 +427,7 @@ static void do_acct_process(struct file *file)
 	u64 elapsed;
 	u64 run_time;
 	struct timespec uptime;
+	struct tty_struct *tty;
 
 	/*
 	 * First check to see if there is enough free_space to continue
@@ -483,10 +484,10 @@ static void do_acct_process(struct file *file)
 	ac.ac_ppid = current->parent->tgid;
 #endif
 
-	read_lock(&tasklist_lock);	/* pin current->signal */
-	ac.ac_tty = current->signal->tty ?
-		old_encode_dev(tty_devnum(current->signal->tty)) : 0;
-	read_unlock(&tasklist_lock);
+	mutex_lock(&tty_mutex);
+	tty = get_current_tty();
+	ac.ac_tty = tty ? old_encode_dev(tty_devnum(tty)) : 0;
+	mutex_unlock(&tty_mutex);
 
 	spin_lock_irq(&current->sighand->siglock);
 	ac.ac_utime = encode_comp_t(jiffies_to_AHZ(cputime_to_jiffies(pacct->ac_utime)));

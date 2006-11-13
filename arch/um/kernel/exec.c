@@ -39,11 +39,14 @@ static long execve1(char *file, char __user * __user *argv,
 		    char __user *__user *env)
 {
         long error;
+	struct tty_struct *tty;
 
 #ifdef CONFIG_TTY_LOG
-	task_lock(current);
-	log_exec(argv, current->signal->tty);
-	task_unlock(current);
+	mutex_lock(&tty_mutex);
+	tty = get_current_tty();
+	if (tty)
+		log_exec(argv, tty);
+	mutex_unlock(&tty_mutex);
 #endif
         error = do_execve(file, argv, env, &current->thread.regs);
         if (error == 0){

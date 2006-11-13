@@ -146,6 +146,7 @@ struct task_struct *vx_get_proc_task(struct inode *inode, struct pid *pid)
 			"dropping task %p[#%u,%u] for %p[#%u,%u]",
 			task, task->xid, task->pid,
 			current, current->xid, current->pid);
+		put_task_struct(task);
 		task = NULL;
 	}
 	return task;
