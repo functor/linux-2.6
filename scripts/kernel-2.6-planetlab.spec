@@ -4,10 +4,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # These are the kernels that are built IF the architecture allows it.
 
 %define buildup 1
-%define buildsmp 0
+%define buildsmp 1
 %define builduml 0
-%define buildxen 0
-%define builddoc 0
+%define buildxen 1
+%define builddoc 1
 
 # Versions of various parts
 
@@ -20,7 +20,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define sublevel 18
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define release 1.2224_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.2239_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
 %define kernel_arch i386
