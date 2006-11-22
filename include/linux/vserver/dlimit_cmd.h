@@ -1,6 +1,7 @@
 #ifndef _VX_DLIMIT_CMD_H
 #define _VX_DLIMIT_CMD_H
 
+
 /*  dlimit vserver commands */
 
 #define VCMD_add_dlimit		VC_CMD(DLIMIT, 1, 0)
@@ -28,6 +29,8 @@ struct	vcmd_ctx_dlimit_v0 {
 #ifdef	__KERNEL__
 
 #ifdef	CONFIG_COMPAT
+
+#include <asm/compat.h>
 
 struct	vcmd_ctx_dlimit_base_v0_x32 {
 	compat_uptr_t name_ptr;

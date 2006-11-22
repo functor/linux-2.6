@@ -10,7 +10,6 @@
  *	Andi Kleen.
  *
  *	CPU hotplug support - ashok.raj@intel.com
- *  $Id: process.c,v 1.38 2002/01/15 10:08:03 ak Exp $
  * 
  *  Jun Nakajima <jun.nakajima@intel.com> 
  *     Modified for Xen
@@ -120,10 +119,10 @@ void xen_idle(void)
 	if (need_resched())
 		local_irq_enable();
 	else {
-		clear_thread_flag(TIF_POLLING_NRFLAG);
+		current_thread_info()->status &= ~TS_POLLING;
 		smp_mb__after_clear_bit();
 		safe_halt();
-		set_thread_flag(TIF_POLLING_NRFLAG);
+		current_thread_info()->status |= TS_POLLING;
 	}
 }
 
@@ -152,8 +151,7 @@ static inline void play_dead(void)
  */
 void cpu_idle (void)
 {
-	set_thread_flag(TIF_POLLING_NRFLAG);
-
+	current_thread_info()->status |= TS_POLLING;
 	/* endless idle loop with no priority at all */
 	while (1) {
 		while (!need_resched()) {
@@ -223,7 +221,7 @@ void __show_regs(struct pt_regs * regs)
 		system_utsname.version);
 	printk("RIP: %04lx:[<%016lx>] ", regs->cs & 0xffff, regs->rip);
 	printk_address(regs->rip); 
-	printk("\nRSP: %04lx:%016lx  EFLAGS: %08lx\n", regs->ss, regs->rsp,
+	printk("RSP: %04lx:%016lx  EFLAGS: %08lx\n", regs->ss, regs->rsp,
 		regs->eflags);
 	printk("RAX: %016lx RBX: %016lx RCX: %016lx\n",
 	       regs->rax, regs->rbx, regs->rcx);
@@ -256,7 +254,7 @@ void show_regs(struct pt_regs *regs)
 {
 	printk("CPU %d:", smp_processor_id());
 	__show_regs(regs);
-	show_trace(&regs->rsp);
+	show_trace(NULL, regs, &regs->rsp);
 }
 
 /*
@@ -301,8 +299,12 @@ void flush_thread(void)
 	struct task_struct *tsk = current;
 	struct thread_info *t = current_thread_info();
 
-	if (t->flags & _TIF_ABI_PENDING)
+	if (t->flags & _TIF_ABI_PENDING) {
 		t->flags ^= (_TIF_ABI_PENDING | _TIF_IA32);
+		if (t->flags & _TIF_IA32)
+			current_thread_info()->status |= TS_COMPAT;
+	}
+
 
 	tsk->thread.debugreg0 = 0;
 	tsk->thread.debugreg1 = 0;
@@ -336,7 +338,6 @@ static inline void set_32bit_tls(struct task_struct *t, int tls, u32 addr)
 	struct user_desc ud = { 
 		.base_addr = addr,
 		.limit = 0xfffff,
-		.contents = (3 << 3), /* user */
 		.seg_32bit = 1,
 		.limit_in_pages = 1,
 		.useable = 1,
@@ -460,18 +461,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	multicall_entry_t _mcl[8], *mcl = _mcl;
 
 	/*
-	 * This is basically '__unlazy_fpu', except that we queue a
-	 * multicall to indicate FPU task switch, rather than
-	 * synchronously trapping to Xen.
-	 */
-	if (prev_p->thread_info->status & TS_USEDFPU) {
-		__save_init_fpu(prev_p); /* _not_ save_init_fpu() */
-		mcl->op      = __HYPERVISOR_fpu_taskswitch;
-		mcl->args[0] = 1;
-		mcl++;
-	}
-
-	/*
 	 * Reload esp0, LDT and the page table pointer:
 	 */
 	mcl->op      = __HYPERVISOR_stack_switch;
@@ -539,11 +528,24 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		HYPERVISOR_set_segment_base(SEGBASE_GS_USER, next->gs); 
 
 	/* 
-	 * Switch the PDA.
+	 * Switch the PDA and FPU context.
 	 */
 	prev->userrsp = read_pda(oldrsp); 
 	write_pda(oldrsp, next->userrsp); 
 	write_pda(pcurrent, next_p); 
+
+	/* This must be here to ensure both math_state_restore() and
+	   kernel_fpu_begin() work consistently. 
+	   And the AMD workaround requires it to be after DS reload. */
+	/*
+	 * This is basically '__unlazy_fpu', except that we queue a
+	 * multicall to indicate FPU task switch, rather than
+	 * synchronously trapping to Xen.
+	 */
+	if (prev_p->thread_info->status & TS_USEDFPU) {
+		__save_init_fpu(prev_p); /* _not_ save_init_fpu() */
+		HYPERVISOR_fpu_taskswitch(1);
+	}
 	write_pda(kernelstack,
 		  task_stack_page(next_p) + THREAD_SIZE - PDA_STACKOFFSET);
 
@@ -578,11 +580,6 @@ long sys_execve(char __user *name, char __user * __user *argv,
 	if (IS_ERR(filename)) 
 		return error;
 	error = do_execve(filename, argv, envp, &regs); 
-	if (error == 0) {
-		task_lock(current);
-		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
-	}
 	putname(filename);
 	return error;
 }

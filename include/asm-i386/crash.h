@@ -37,12 +37,12 @@ map_virtual(u64 offset, struct page **pp)
 	unsigned long pfn;
 	void *vaddr;
 
-        pfn = (unsigned long)(offset >> PAGE_SHIFT);
+	pfn = (unsigned long)(offset >> PAGE_SHIFT);
 
-        if (!page_is_ram(pfn)) {
+	if (!page_is_ram(pfn)) {
 		printk(KERN_INFO
 		    "crash memory driver: !page_is_ram(pfn: %lx)\n", pfn);
-                return NULL;
+		return NULL;
 	}
 
 	if (!pfn_valid(pfn)) {

@@ -646,7 +646,7 @@ static inline void tracehook_report_clone_complete(unsigned long clone_flags,
 {
 #ifdef CONFIG_UTRACE
 	if (current->utrace_flags & UTRACE_ACTION_QUIESCE)
-		utrace_quiescent(current);
+		utrace_quiescent(current, NULL);
 #endif
 }
 

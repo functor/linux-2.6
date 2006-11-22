@@ -464,7 +464,7 @@ const struct utrace_regset *utrace_regset(struct task_struct *target,
 /*
  * Hooks in <linux/tracehook.h> call these entry points to the utrace dispatch.
  */
-void utrace_quiescent(struct task_struct *);
+int utrace_quiescent(struct task_struct *, struct utrace_signal *);
 void utrace_release_task(struct task_struct *);
 int utrace_get_signal(struct task_struct *, struct pt_regs *,
 		      siginfo_t *, struct k_sigaction *);
