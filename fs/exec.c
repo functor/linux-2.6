@@ -49,6 +49,7 @@
 #include <linux/acct.h>
 #include <linux/cn_proc.h>
 #include <linux/audit.h>
+#include <linux/vs_base.h>
 #include <linux/vs_memory.h>
 #include <linux/vs_cvirt.h>
 

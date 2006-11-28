@@ -33,6 +33,7 @@
 #include <linux/fcntl.h>
 #include <linux/namei.h>
 #include <linux/proc_fs.h>
+#include <linux/vs_base.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/debug.h>
 #include <asm/namei.h>

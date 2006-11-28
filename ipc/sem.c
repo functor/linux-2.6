@@ -78,6 +78,7 @@
 #include <linux/capability.h>
 #include <linux/seq_file.h>
 #include <linux/mutex.h>
+#include <linux/vs_base.h>
 
 #include <asm/uaccess.h>
 #include "util.h"

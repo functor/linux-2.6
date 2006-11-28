@@ -28,6 +28,8 @@
 #include <asm/tracehook.h>
 #endif
 
+#include <linux/vs_base.h>
+
 int getrusage(struct task_struct *, int, struct rusage __user *);
 
 //#define PTRACE_DEBUG

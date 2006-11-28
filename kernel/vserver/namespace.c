@@ -12,6 +12,7 @@
 
 #include <linux/utsname.h>
 #include <linux/sched.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vserver/namespace.h>
 #include <linux/vserver/namespace_cmd.h>

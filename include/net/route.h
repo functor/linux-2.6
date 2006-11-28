@@ -33,6 +33,7 @@
 #include <linux/route.h>
 #include <linux/ip.h>
 #include <linux/cache.h>
+#include <linux/vs_base.h>
 #include <linux/vs_network.h>
 #include <linux/in.h>
 

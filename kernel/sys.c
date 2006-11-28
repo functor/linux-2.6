@@ -29,6 +29,7 @@
 #include <linux/tty.h>
 #include <linux/signal.h>
 #include <linux/cn_proc.h>
+#include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 
 #include <linux/compat.h>

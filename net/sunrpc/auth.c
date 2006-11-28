@@ -13,7 +13,7 @@
 #include <linux/errno.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/spinlock.h>
-#include <linux/vserver/xid.h>
+#include <linux/vs_base.h>
 
 #ifdef RPC_DEBUG
 # define RPCDBG_FACILITY	RPCDBG_AUTH

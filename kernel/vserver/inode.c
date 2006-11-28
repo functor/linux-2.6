@@ -10,6 +10,7 @@
  */
 
 #include <linux/sched.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/proc_fs.h>
 #include <linux/devpts_fs.h>

@@ -32,6 +32,7 @@
 #include <linux/ptrace.h>
 #include <linux/seq_file.h>
 #include <linux/mutex.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
 

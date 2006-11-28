@@ -24,14 +24,14 @@
 #include <linux/namespace.h>
 
 #include <linux/sched.h>
+#include <linux/vs_base.h>
+#include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 #include <linux/vserver/network.h>
 #include <linux/vserver/legacy.h>
 #include <linux/vserver/limit.h>
 #include <linux/vserver/debug.h>
 #include <linux/vserver/limit_int.h>
-
-#include <linux/vs_context.h>
-#include <linux/vs_limit.h>
 #include <linux/vserver/context_cmd.h>
 
 #include <linux/err.h>

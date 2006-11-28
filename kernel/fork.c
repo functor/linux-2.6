@@ -45,6 +45,7 @@
 #include <linux/cn_proc.h>
 #include <linux/delayacct.h>
 #include <linux/taskstats_kern.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_limit.h>

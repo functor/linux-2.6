@@ -11,6 +11,7 @@
  */
 
 #include <linux/sched.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_sched.h>
 #include <linux/vserver/sched_cmd.h>

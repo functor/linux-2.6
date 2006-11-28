@@ -29,7 +29,7 @@
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <linux/audit.h>
-
+#include <linux/vs_base.h>
 #include <asm/unistd.h>
 
 #include "util.h"

@@ -26,6 +26,8 @@
 #include <linux/mempolicy.h>
 #include <linux/rmap.h>
 #include <linux/random.h>
+#include <linux/vs_base.h>
+#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>

@@ -22,6 +22,7 @@
 #include <linux/namei.h>
 #include <linux/security.h>
 #include <linux/mount.h>
+#include <linux/vs_base.h>
 #include <linux/vserver/namespace.h>
 #include <linux/vserver/xid.h>
 #include <asm/uaccess.h>

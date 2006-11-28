@@ -19,6 +19,7 @@
 #include <linux/quotaops.h>
 #include <linux/major.h>
 #include <linux/blkdev.h>
+#include <linux/vs_base.h>
 #include <linux/vserver/debug.h>
 
 /* Check validity of generic quotactl commands */

@@ -125,6 +125,7 @@
 #include <linux/syscalls.h>
 #include <linux/time.h>
 #include <linux/rcupdate.h>
+#include <linux/vs_base.h>
 #include <linux/vs_limit.h>
 
 #include <asm/semaphore.h>

@@ -52,12 +52,14 @@
 #include <linux/acct.h>
 #include <linux/kprobes.h>
 #include <linux/delayacct.h>
-#include <asm/tlb.h>
-
-#include <asm/unistd.h>
+#include <linux/vs_base.h>
+#include <linux/vs_memory.h>
 #include <linux/vs_context.h>
 #include <linux/vs_cvirt.h>
 #include <linux/vs_sched.h>
+
+#include <asm/tlb.h>
+#include <asm/unistd.h>
 
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]

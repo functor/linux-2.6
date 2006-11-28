@@ -29,6 +29,7 @@
 #include <linux/audit.h>
 #include <linux/signal.h>
 #include <linux/mutex.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
 

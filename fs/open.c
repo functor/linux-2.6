@@ -28,6 +28,7 @@
 #include <linux/syscalls.h>
 #include <linux/rcupdate.h>
 #include <linux/audit.h>
+#include <linux/vs_base.h>
 #include <linux/vs_limit.h>
 #include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>

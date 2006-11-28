@@ -28,6 +28,7 @@
 #include <asm/unistd.h>
 #include <asm/siginfo.h>
 #include "audit.h"	/* audit_signal_info() */
+#include <linux/vs_base.h>
 
 /*
  * SLAB caches for signal bits.

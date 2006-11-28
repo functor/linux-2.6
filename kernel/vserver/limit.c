@@ -10,9 +10,9 @@
  */
 
 #include <linux/module.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
-#include <linux/vserver/limit.h>
 #include <linux/vserver/switch.h>
 #include <linux/vserver/limit_cmd.h>
 

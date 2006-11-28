@@ -50,6 +50,8 @@
 #include <linux/delayacct.h>
 #include <linux/init.h>
 #include <linux/writeback.h>
+#include <linux/vs_base.h>
+#include <linux/vs_memory.h>
 
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>

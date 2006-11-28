@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/auth.h>
+#include <linux/vs_base.h>
 #include <linux/vserver/xid.h>
 
 #define NFS_NGROUPS	16

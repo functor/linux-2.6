@@ -40,6 +40,7 @@
 #include <linux/devpts_fs.h>
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
+#include <linux/vs_base.h>
 
 
 void get_filesystem(struct file_system_type *fs);

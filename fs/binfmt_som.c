@@ -28,11 +28,12 @@
 #include <linux/shm.h>
 #include <linux/personality.h>
 #include <linux/init.h>
+#include <linux/vs_base.h>
 #include <linux/vs_memory.h>
+
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
-
 
 #include <linux/elf.h>
 

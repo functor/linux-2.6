@@ -76,8 +76,6 @@
 #include <linux/tracehook.h>
 #include <linux/rcupdate.h>
 #include <linux/delayacct.h>
-#include <linux/vs_context.h>
-#include <linux/vs_network.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>

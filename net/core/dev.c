@@ -117,6 +117,7 @@
 #include <linux/dmaengine.h>
 #include <linux/err.h>
 #include <linux/ctype.h>
+#include <linux/vs_base.h>
 #include <linux/vs_network.h>
 
 #ifdef CONFIG_XEN

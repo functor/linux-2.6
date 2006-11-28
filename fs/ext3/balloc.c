@@ -19,6 +19,7 @@
 #include <linux/ext3_jbd.h>
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
+#include <linux/vs_base.h>
 #include <linux/vs_dlimit.h>
 
 /*

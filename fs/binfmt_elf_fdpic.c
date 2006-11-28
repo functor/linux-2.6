@@ -34,6 +34,7 @@
 #include <linux/elf.h>
 #include <linux/elf-fdpic.h>
 #include <linux/elfcore.h>
+#include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>

@@ -19,6 +19,7 @@
 #include <linux/compat.h>
 #include <asm/errno.h>
 
+#include <linux/vs_base.h>
 #include <linux/vserver/network.h>
 #include <linux/vserver/switch.h>
 #include <linux/vserver/debug.h>

@@ -5,6 +5,7 @@
 #include <linux/un.h>
 #include <linux/mutex.h>
 #include <net/sock.h>
+#include <linux/vs_base.h>
 
 extern void unix_inflight(struct file *fp);
 extern void unix_notinflight(struct file *fp);

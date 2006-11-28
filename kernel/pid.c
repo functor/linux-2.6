@@ -26,6 +26,7 @@
 #include <linux/init.h>
 #include <linux/bootmem.h>
 #include <linux/hash.h>
+#include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 
 #define pid_hashfn(nr) hash_long((unsigned long)nr, pidhash_shift)

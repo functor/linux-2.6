@@ -34,6 +34,7 @@
 #include <linux/cpu.h>
 #include <linux/syscalls.h>
 #include <linux/delay.h>
+#include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 #include <linux/vserver/sched.h>
 

@@ -39,9 +39,10 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/audit.h> /* for audit_free() */
 #include <linux/resource.h>
-#include <linux/vs_limit.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
+#include <linux/vs_limit.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>

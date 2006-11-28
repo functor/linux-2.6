@@ -27,11 +27,12 @@
 #include <linux/mutex.h>
 #include <linux/capability.h>
 #include <linux/syscalls.h>
+#include <linux/vs_base.h>
+#include <linux/vs_memory.h>
 
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 #include <linux/swapops.h>
-#include <linux/vs_memory.h>
 
 DEFINE_SPINLOCK(swap_lock);
 unsigned int nr_swapfiles;

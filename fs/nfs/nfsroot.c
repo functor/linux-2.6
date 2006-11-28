@@ -86,6 +86,7 @@
 #include <linux/root_dev.h>
 #include <net/ipconfig.h>
 #include <linux/parser.h>
+#include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 
 /* Define this to allow debugging output */

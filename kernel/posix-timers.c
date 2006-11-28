@@ -48,6 +48,7 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/module.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 
 /*

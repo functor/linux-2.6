@@ -19,6 +19,7 @@
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
 #include <linux/parser.h>
+#include <linux/vs_base.h>
 
 
 static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)

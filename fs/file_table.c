@@ -21,8 +21,9 @@
 #include <linux/fsnotify.h>
 #include <linux/sysctl.h>
 #include <linux/percpu_counter.h>
-#include <linux/vs_limit.h>
+#include <linux/vs_base.h>
 #include <linux/vs_context.h>
+#include <linux/vs_limit.h>
 
 #include <asm/atomic.h>
 
