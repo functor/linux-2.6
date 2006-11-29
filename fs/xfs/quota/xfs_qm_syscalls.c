@@ -17,6 +17,7 @@
  */
 
 #include <linux/capability.h>
+#include <linux/vs_base.h>
 
 #include "xfs.h"
 #include "xfs_fs.h"
