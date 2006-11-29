@@ -26,6 +26,7 @@
 
 #include <linux/personality.h>
 #include <linux/mm.h>
+#include <linux/random.h>
 
 /*
  * Top of mmap area (just below the process stack).
@@ -37,7 +38,7 @@
 
 static inline unsigned long mmap_base(void)
 {
-	unsigned long gap = current->rlim[RLIMIT_STACK].rlim_cur;
+	unsigned long gap = current->signal->rlim[RLIMIT_STACK].rlim_cur;
 
 	if (gap < MIN_GAP)
 		gap = MIN_GAP;
@@ -54,13 +55,13 @@ static inline int mmap_is_legacy(void)
 	 */
 	if (!test_thread_flag(TIF_IA32))
 		return 1;
-		
-	if (current->personality & ADDR_COMPAT_LAYOUT) 
+
+	if (current->personality & ADDR_COMPAT_LAYOUT)
 		return 1;
-	
-	if (current->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)
+
+	if (current->signal->rlim[RLIMIT_STACK].rlim_cur == RLIM_INFINITY)
 		return 1;
-		
+
 	return sysctl_legacy_va_layout;
 }
 
@@ -81,7 +82,6 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	} else {
 		mm->mmap_base = mmap_base();
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-		mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

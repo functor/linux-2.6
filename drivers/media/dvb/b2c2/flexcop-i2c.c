@@ -135,7 +135,7 @@ static int flexcop_master_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg msgs
 	struct flexcop_device *fc = i2c_get_adapdata(i2c_adap);
 	int i, ret = 0;
 
-	if (down_interruptible(&fc->i2c_sem))
+	if (mutex_lock_interruptible(&fc->i2c_mutex))
 		return -ERESTARTSYS;
 
 	/* reading */
@@ -161,7 +161,7 @@ static int flexcop_master_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg msgs
 	else
 		ret = num;
 
-	up(&fc->i2c_sem);
+	mutex_unlock(&fc->i2c_mutex);
 
 	return ret;
 }
@@ -172,8 +172,6 @@ static u32 flexcop_i2c_func(struct i2c_adapter *adapter)
 }
 
 static struct i2c_algorithm flexcop_algo = {
-	.name			= "FlexCop I2C algorithm",
-	.id				= I2C_ALGO_BIT,
 	.master_xfer	= flexcop_master_xfer,
 	.functionality	= flexcop_i2c_func,
 };
@@ -182,7 +180,7 @@ int flexcop_i2c_init(struct flexcop_device *fc)
 {
 	int ret;
 
-	sema_init(&fc->i2c_sem,1);
+	mutex_init(&fc->i2c_mutex);
 
 	memset(&fc->i2c_adap, 0, sizeof(struct i2c_adapter));
 	strncpy(fc->i2c_adap.name, "B2C2 FlexCop device",I2C_NAME_SIZE);
@@ -192,7 +190,6 @@ int flexcop_i2c_init(struct flexcop_device *fc)
 	fc->i2c_adap.class	    = I2C_CLASS_TV_DIGITAL;
 	fc->i2c_adap.algo       = &flexcop_algo;
 	fc->i2c_adap.algo_data  = NULL;
-	fc->i2c_adap.id         = I2C_ALGO_BIT;
 
 	if ((ret = i2c_add_adapter(&fc->i2c_adap)) < 0)
 		return ret;

@@ -38,7 +38,7 @@ map_virtual(u64 offset, struct page **pp)
 	if (REGION_NUMBER(offset) == 5) {
 		char byte;
 
-        	if (__get_user(byte, (char *)offset) == 0)
+		if (__get_user(byte, (char *)offset) == 0)
 			return (void *)offset;
 		else
 			return NULL;
@@ -62,11 +62,11 @@ map_virtual(u64 offset, struct page **pp)
 
 	pfn = offset >> PAGE_SHIFT;
 
-        if (!pfn_valid(pfn)) {
-                printk(KERN_INFO
-                    "crash memory driver: invalid pfn: %lx )\n", pfn);
-                return NULL;
-        }
+	if (!pfn_valid(pfn)) {
+		printk(KERN_INFO
+			"crash memory driver: invalid pfn: %lx )\n", pfn);
+		return NULL;
+	}
 
 	page = pfn_to_page(pfn);
 
