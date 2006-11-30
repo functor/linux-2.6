@@ -5,17 +5,18 @@
 # Marc E. Fiuczynski <mef@cs.princeton.edu>
 # Copyright (C) 2006 The Trustees of Princeton University
 #
-# $Id: kompare,v 1.1 2006/11/30 16:41:09 mef Exp $
+# $Id: kompare,v 1.2 2006/11/30 17:07:03 mef Exp $
 #
 
 import sys, re, os
+import kread
 
 def process(file):
     ORDER = []
     CONFIGS = {}
     for line in file.readlines():
         iline = line.lower()
-        iline.strip()
+        iline = iline.strip()
         if len(iline)==0: continue
         firstchar = iline[0]
 
@@ -73,6 +74,9 @@ for key in keys:
     n = new[key]
     if n==o and not showall: continue
     print "%6s -> %6s : %s" % (newstate.get(o,o),newstate.get(n,n),key)
+    if not showall: continue
+    helptxt=kread.gethelp(key)
+    if helptxt<>'':print helptxt
 
 # not sure we care about what options have been removed
 # from from.config file
@@ -84,4 +88,5 @@ for key in keys:
     o = old[key]
     if n == -1 and not showall:
         print "%c -> %c : %s" % (oldstate[o],oldstate[n],key)
+
 
