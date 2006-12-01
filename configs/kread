@@ -1,0 +1,132 @@
+#!/bin/env python
+#
+# compare: a tool to compare kernel config files
+#
+# Marc E. Fiuczynski <mef@cs.princeton.edu>
+# Copyright (C) 2006 The Trustees of Princeton University
+#
+# $Id: kread.py,v 1.3 2006/12/01 02:43:01 mef Exp $
+#
+
+import sys, re, os, stat
+import cStringIO, cPickle
+
+currentconfig = ""
+files = []
+configs = {}
+meta = None
+
+def _config(parts,fb):
+    global currentconfig
+    currentconfig = parts[1]
+    return None
+
+def _help(parts,fb):
+    global currentconfig
+    helptxt = ""
+    lineno = 0
+    while True:
+        line = fb.readline()
+        lineno = lineno + 1
+        if len(line)==0: break
+        if not line[0].isspace(): break
+        if len(line)>1: newline = line.lstrip()
+        else: newline = line
+        helptxt = helptxt+newline
+
+    configs[currentconfig]=helptxt
+    return line
+
+def _source(parts,fb):
+    filename = "".join(parts[1:])
+    if filename[0]=='"' or filename[0]=='\'':
+        filename=filename[1:]
+    if filename[-1]=='"' or filename[-1]=='\'':
+        filename=filename[:-1]
+    process(filename)
+    return None
+
+def _noop(parts,fb):
+    return None
+
+keywords = {"config":_config,
+            "help":_help,
+            "---help---":_help,
+            "source":_source}
+
+def process(filename):
+    files.append((filename,os.stat(filename)[stat.ST_MTIME])) 
+    fb = open(filename)
+    lineno = 0
+    line = fb.readline()
+    while True:
+        lineno = lineno + 1
+        if len(line)==0:break
+
+        line  = line.strip()
+        parts = line.split()
+        if len(parts)==0:
+            line = fb.readline()
+        else:
+            func  = keywords.get(parts[0],_noop)
+            line = func(parts,fb)
+            if line == None:
+                line = fb.readline()
+
+    fb.close()
+
+def init(force):
+    global configs
+    global files
+    ARCH=os.getenv("ARCH","i386")
+    reprocess = True
+    try:
+        f = open(".kread.db","r")
+        meta = cPickle.load(f)
+        f.close()
+        configs, files = meta
+        reprocess = False
+        try:
+            for file, mtime in files:
+                cur_mtime = os.stat(file)[stat.ST_MTIME]
+                if mtime <> cur_mtime:
+                    reprocess = True
+                    break
+        except:
+            pass
+    except IOError, e:
+        pass
+    if reprocess or force:
+        meta = (configs, files)
+        process("arch/%s/Kconfig" % ARCH)
+    try:
+        f = open(".kread.db.tmp","w")
+        cPickle.dump(meta,f,True)
+        f.close()
+        os.rename(".kread.db.tmp", ".kread.db")
+    except IOError, e:
+        pass
+            
+def gethelp(option):
+    if option[:len("CONFIG_")] == "CONFIG_":
+        option=option[len("CONFIG_"):]
+    helptxt = configs.get(option,"")
+    return helptxt
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        print """USAGE\n%s configoptionname""" % os.path.basename(sys.argv[0])
+    else:
+	if sys.argv[1] == "-f" and len(sys.argv)>=2:
+            force = True
+            options=sys.argv[2:]
+        else:
+            options = sys.argv[1:]
+            force = False
+
+        init(force)
+        for option in options:
+            helptxt = gethelp(option)
+            print "CONFIG_%s:\n%s" % (option,helptxt)
+
