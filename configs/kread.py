@@ -5,7 +5,7 @@
 # Marc E. Fiuczynski <mef@cs.princeton.edu>
 # Copyright (C) 2006 The Trustees of Princeton University
 #
-# $Id: kread.py,v 1.1 2006/11/30 23:02:35 mef Exp $
+# $Id: kread.py,v 1.2 2006/12/01 02:40:40 mef Exp $
 #
 
 import sys, re, os
@@ -64,15 +64,20 @@ def process(filename):
 
     fb.close()
 
+initialized = False
+def init():
+    if not initialized: 
+        initialized = True
+        ARCH=os.getenv("ARCH","i386")
+        process("arch/%s/Kconfig" % ARCH)
+
 def gethelp(option):
     if option[:len("CONFIG_")] == "CONFIG_":
         option=option[len("CONFIG_"):]
+    init()
     helptxt = configs.get(option,"")
     return helptxt
 
-def init():
-	ARCH=os.getenv("ARCH","i386")
-	process("arch/%s/Kconfig" % ARCH)
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
