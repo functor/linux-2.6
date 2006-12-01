@@ -5,7 +5,7 @@
 # Marc E. Fiuczynski <mef@cs.princeton.edu>
 # Copyright (C) 2006 The Trustees of Princeton University
 #
-# $Id: kompare,v 1.2 2006/11/30 17:07:03 mef Exp $
+# $Id: kread.py,v 1.1 2006/11/30 23:02:35 mef Exp $
 #
 
 import sys, re, os
@@ -70,14 +70,16 @@ def gethelp(option):
     helptxt = configs.get(option,"")
     return helptxt
 
-ARCH=os.getenv("ARCH","i386")
-process("arch/%s/Kconfig" % ARCH)
+def init():
+	ARCH=os.getenv("ARCH","i386")
+	process("arch/%s/Kconfig" % ARCH)
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
         print """USAGE\n%s configoptionname""" % os.path.basename(sys.argv[0])
     else:
         option = sys.argv[1]
+	init()
         helptxt = gethelp(option)
         print "CONFIG_%s:\n%s" % (option,helptxt)
 
