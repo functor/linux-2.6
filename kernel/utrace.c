@@ -119,9 +119,13 @@ utrace_free(struct rcu_head *rhead)
 	kmem_cache_free(utrace_cachep, utrace);
 }
 
+/*
+ * Called with utrace locked.  Clean it up and free it via RCU.
+ */
 static void
 rcu_utrace_free(struct utrace *utrace)
 {
+	utrace_unlock(utrace);
 	INIT_RCU_HEAD(&utrace->u.dead);
 	call_rcu(&utrace->u.dead, utrace_free);
 }
@@ -135,61 +139,125 @@ utrace_engine_free(struct rcu_head *rhead)
 }
 
 /*
+ * Remove the utrace pointer from the task, unless there is a pending
+ * forced signal (or it's quiescent in utrace_get_signal).
+ */
+static inline void
+utrace_clear_tsk(struct task_struct *tsk, struct utrace *utrace)
+{
+	if (utrace->u.live.signal == NULL) {
+		task_lock(tsk);
+		if (likely(tsk->utrace != NULL)) {
+			rcu_assign_pointer(tsk->utrace, NULL);
+			tsk->utrace_flags &= UTRACE_ACTION_NOREAP;
+		}
+		task_unlock(tsk);
+	}
+}
+
+/*
  * Called with utrace locked and the target quiescent (maybe current).
- * If this was the last engine, utrace is left locked and not freed,
- * but is removed from the task.
+ * If this was the last engine and there is no parting forced signal
+ * pending, utrace is left locked and not freed, but is removed from the task.
  */
 static void
 remove_engine(struct utrace_attached_engine *engine,
 	      struct task_struct *tsk, struct utrace *utrace)
 {
 	list_del_rcu(&engine->entry);
-	if (list_empty(&utrace->engines)) {
-		task_lock(tsk);
-		if (likely(tsk->utrace != NULL)) {
-			rcu_assign_pointer(tsk->utrace, NULL);
-			tsk->utrace_flags = 0;
-		}
-		task_unlock(tsk);
-	}
+	if (list_empty(&utrace->engines))
+		utrace_clear_tsk(tsk, utrace);
 	call_rcu(&engine->rhead, utrace_engine_free);
 }
 
-/*
- * This is pointed to by the utrace struct, but it's really a private
- * structure between utrace_get_signal and utrace_inject_signal.
- */
-struct utrace_signal
-{
-	siginfo_t *const info;
-	struct k_sigaction *return_ka;
-	int signr;
-};
 
 /*
  * Called with utrace locked, after remove_engine may have run.
  * Passed the flags from all remaining engines, i.e. zero if none left.
  * Install the flags in tsk->utrace_flags and return with utrace unlocked.
- * If no engines are left, utrace is freed and we return NULL.
+ * If no engines are left and there is no parting forced signal pending,
+ * utrace is freed and we return NULL.
  */
 static struct utrace *
 check_dead_utrace(struct task_struct *tsk, struct utrace *utrace,
-		 unsigned long flags)
+		  unsigned long flags)
 {
-	if (flags) {
-		tsk->utrace_flags = flags;
-		utrace_unlock(utrace);
-		return utrace;
+	long exit_state = 0;
+
+	if (utrace->u.live.signal != NULL)
+		/*
+		 * There is a pending forced signal.  It may have been
+		 * left by an engine now detached.  The empty utrace
+		 * remains attached until it can be processed.
+		 */
+		flags |= UTRACE_ACTION_QUIESCE;
+
+	/*
+	 * If tracing was preventing a SIGCHLD or self-reaping
+	 * and is no longer, we'll do that report or reaping now.
+	 */
+	if (((tsk->utrace_flags &~ flags) & UTRACE_ACTION_NOREAP)
+	    && tsk->exit_state && !utrace->u.exit.notified) {
+		BUG_ON(tsk->exit_state != EXIT_ZOMBIE);
+		/*
+		 * While holding the utrace lock, mark that it's been done.
+		 * For self-reaping, we need to change tsk->exit_state
+		 * before clearing tsk->utrace_flags, so that the real
+		 * parent can't see it in EXIT_ZOMBIE momentarily and reap it.
+		 */
+		utrace->u.exit.notified = 1;
+		if (tsk->exit_signal == -1) {
+			exit_state = xchg(&tsk->exit_state, EXIT_DEAD);
+			BUG_ON(exit_state != EXIT_ZOMBIE);
+			exit_state = EXIT_DEAD;
+
+			/*
+			 * Now that we've changed its state to DEAD,
+			 * it's safe to install the new tsk->utrace_flags
+			 * value without the UTRACE_ACTION_NOREAP bit set.
+			 */
+		}
+		else if (thread_group_empty(tsk)) {
+			/*
+			 * We need to prevent the real parent from reaping
+			 * until after we've called do_notify_parent, below.
+			 * It can get into wait_task_zombie any time after
+			 * the UTRACE_ACTION_NOREAP bit is cleared.  It's
+			 * safe for that to do everything it does until its
+			 * release_task call starts tearing things down.
+			 * Holding tasklist_lock for reading prevents
+			 * release_task from proceeding until we've done
+			 * everything we need to do.
+			 */
+			exit_state = EXIT_ZOMBIE;
+			read_lock(&tasklist_lock);
+		}
 	}
 
-	if (utrace->u.live.signal && utrace->u.live.signal->signr != 0) {
+	tsk->utrace_flags = flags;
+	if (flags)
 		utrace_unlock(utrace);
-		return utrace;
+	else {
+		rcu_utrace_free(utrace);
+		utrace = NULL;
 	}
 
-	utrace_unlock(utrace);
-	rcu_utrace_free(utrace);
-	return NULL;
+	/*
+	 * Now we're finished updating the utrace state.
+	 * Do a pending self-reaping or parent notification.
+	 */
+	if (exit_state == EXIT_DEAD)
+		/*
+		 * Note this can wind up in utrace_reap and do more callbacks.
+		 * Our callers must be in places where that is OK.
+		 */
+		release_task(tsk);
+	else if (exit_state == EXIT_ZOMBIE) {
+		do_notify_parent(tsk, tsk->exit_signal);
+		read_unlock(&tasklist_lock); /* See comment above.  */
+	}
+
+	return utrace;
 }
 
 
@@ -299,6 +367,7 @@ restart:
 			rcu_read_unlock();
 			return engine;
 		}
+		rcu_read_unlock();
 
 		engine = kmem_cache_alloc(utrace_engine_cachep, SLAB_KERNEL);
 		if (unlikely(engine == NULL))
@@ -311,8 +380,8 @@ restart:
 			rcu_read_unlock();
 			goto first;
 		}
-
 		utrace_lock(utrace);
+
 		if (flags & UTRACE_ATTACH_EXCLUSIVE) {
 			struct utrace_attached_engine *old;
 			old = matching_engine(utrace, flags, ops, data);
@@ -334,6 +403,8 @@ restart:
 			kmem_cache_free(utrace_engine_cachep, engine);
 			goto restart;
 		}
+		rcu_read_unlock();
+
 		list_add_tail_rcu(&engine->entry, &utrace->engines);
 	}
 
@@ -366,29 +437,6 @@ static const struct utrace_engine_ops dead_engine_ops =
 
 
 /*
- * If tracing was preventing a SIGCHLD or self-reaping
- * and is no longer, do that report or reaping right now.
- */
-static void
-check_noreap(struct task_struct *target, struct utrace *utrace,
-	     u32 old_action, u32 action)
-{
-	if ((action | ~old_action) & UTRACE_ACTION_NOREAP)
-		return;
-
-	if (utrace && xchg(&utrace->u.exit.notified, 1))
-		return;
-
-	if (target->exit_signal == -1)
-		release_task(target);
-	else if (thread_group_empty(target)) {
-		read_lock(&tasklist_lock);
-		do_notify_parent(target, target->exit_signal);
-		read_unlock(&tasklist_lock);
-	}
-}
-
-/*
  * We may have been the one keeping the target thread quiescent.
  * Check if it should wake up now.
  * Called with utrace locked, and unlocks it on return.
@@ -411,8 +459,6 @@ wake_quiescent(unsigned long old_flags,
 		list_for_each_entry(engine, &utrace->engines, entry)
 			flags |= engine->flags | UTRACE_EVENT(REAP);
 		utrace = check_dead_utrace(target, utrace, flags);
-
-		check_noreap(target, utrace, old_flags, flags);
 		return;
 	}
 
@@ -528,7 +574,6 @@ restart:
 		}
 		call_rcu(&engine->rhead, utrace_engine_free);
 	}
-	utrace_unlock(utrace);
 
 	rcu_utrace_free(utrace);
 }
@@ -694,9 +739,8 @@ remove_detached(struct task_struct *tsk, struct utrace *utrace,
 		struct utrace **utracep, u32 action)
 {
 	struct utrace_attached_engine *engine, *next;
-	unsigned long flags;
+	unsigned long flags = 0;
 
-	flags = 0;
 	list_for_each_entry_safe(engine, next, &utrace->engines, entry) {
 		if (engine->ops == &dead_engine_ops)
 			remove_engine(engine, tsk, utrace);
@@ -724,11 +768,12 @@ check_detach(struct task_struct *tsk, u32 action)
 	return action;
 }
 
-static inline void
+static inline int
 check_quiescent(struct task_struct *tsk, u32 action)
 {
 	if (action & UTRACE_ACTION_STATE_MASK)
-		utrace_quiescent(tsk);
+		return utrace_quiescent(tsk, NULL);
+	return 0;
 }
 
 /*
@@ -827,12 +872,30 @@ utrace_report_jctl(int what)
 
 
 /*
+ * Return nonzero if there is a SIGKILL that should be waking us up.
+ * Called with the siglock held.
+ */
+static inline int
+sigkill_pending(struct task_struct *tsk)
+{
+	return ((sigismember(&tsk->pending.signal, SIGKILL)
+		 || sigismember(&tsk->signal->shared_pending.signal, SIGKILL))
+		&& !unlikely(sigismember(&tsk->blocked, SIGKILL)));
+}
+
+/*
  * Called if UTRACE_EVENT(QUIESCE) or UTRACE_ACTION_QUIESCE flag is set.
  * Also called after other event reports.
  * It is a good time to block.
+ * Returns nonzero if we woke up prematurely due to SIGKILL.
+ *
+ * The signal pointer is nonzero when called from utrace_get_signal,
+ * where a pending forced signal can be processed right away.  Otherwise,
+ * we keep UTRACE_ACTION_QUIESCE set after resuming so that utrace_get_signal
+ * will be entered before user mode.
  */
-void
-utrace_quiescent(struct task_struct *tsk)
+int
+utrace_quiescent(struct task_struct *tsk, struct utrace_signal *signal)
 {
 	struct utrace *utrace = tsk->utrace;
 	unsigned long action;
@@ -846,6 +909,13 @@ restart:
 	 * If some engines want us quiescent, we block here.
 	 */
 	if (action & UTRACE_ACTION_QUIESCE) {
+		int killed;
+
+		if (signal != NULL) {
+			BUG_ON(utrace->u.live.signal != NULL);
+			utrace->u.live.signal = signal;
+		}
+
 		spin_lock_irq(&tsk->sighand->siglock);
 		/*
 		 * If wake_quiescent is trying to wake us up now, it will
@@ -855,8 +925,8 @@ restart:
 		 * release the siglock it's waiting for.
 		 * Never stop when there is a SIGKILL bringing us down.
 		 */
-		if ((tsk->utrace_flags & UTRACE_ACTION_QUIESCE)
-		    /*&& !(tsk->signal->flags & SIGNAL_GROUP_SIGKILL)*/) {
+		killed = sigkill_pending(tsk);
+		if (!killed && (tsk->utrace_flags & UTRACE_ACTION_QUIESCE)) {
 			set_current_state(TASK_TRACED);
 			/*
 			 * If there is a group stop in progress,
@@ -869,6 +939,20 @@ restart:
 		}
 		else
 			spin_unlock_irq(&tsk->sighand->siglock);
+
+		if (signal != NULL) {
+			/*
+			 * We know the struct stays in place when its
+			 * u.live.signal is set, see check_dead_utrace.
+			 * This makes it safe to clear its pointer here.
+			 */
+			BUG_ON(tsk->utrace != utrace);
+			BUG_ON(utrace->u.live.signal != signal);
+			utrace->u.live.signal = NULL;
+		}
+
+		if (killed)	/* Game over, man!  */
+			return 1;
 
 		/*
 		 * We've woken up.  One engine could be waking us up while
@@ -887,6 +971,10 @@ restart:
 		 * Our flags are out of date.
 		 * Update the set of events of interest from the union
 		 * of the interests of the remaining tracing engines.
+		 * This may notice that there are no engines left
+		 * and clean up the struct utrace.  It's left in place
+		 * and the QUIESCE flag set as long as utrace_get_signal
+		 * still needs to process a pending forced signal.
 		 */
 		struct utrace_attached_engine *engine;
 		unsigned long flags = 0;
@@ -894,8 +982,9 @@ restart:
 		utrace_lock(utrace);
 		list_for_each_entry(engine, &utrace->engines, entry)
 			flags |= engine->flags | UTRACE_EVENT(REAP);
-		tsk->utrace_flags = flags;
-		utrace_unlock(utrace);
+		if (flags == 0)
+			utrace_clear_tsk(tsk, utrace);
+		utrace = check_dead_utrace(tsk, utrace, flags);
 	}
 
 	/*
@@ -918,6 +1007,8 @@ restart:
 		tracehook_enable_syscall_trace(tsk);
 	else
 		tracehook_disable_syscall_trace(tsk);
+
+	return 0;
 }
 
 
@@ -946,7 +1037,7 @@ utrace_report_exit(long *exit_code)
 }
 
 /*
- * Called iff UTRACE_EVENT(DEATH) flag is set.
+ * Called iff UTRACE_EVENT(DEATH) or UTRACE_ACTION_QUIESCE flag is set.
  *
  * It is always possible that we are racing with utrace_release_task here,
  * if UTRACE_ACTION_NOREAP is not set, or in the case of non-leader exec
@@ -974,6 +1065,7 @@ utrace_report_death(struct task_struct *tsk, struct utrace *utrace)
 		if (engine->flags & UTRACE_EVENT(QUIESCE))
 			REPORT(report_quiesce);
 	}
+
 	/*
 	 * Unconditionally lock and recompute the flags.
 	 * This may notice that there are no engines left and
@@ -1006,8 +1098,6 @@ utrace_report_death(struct task_struct *tsk, struct utrace *utrace)
 
 			utrace_unlock(utrace);
 		}
-
-		check_noreap(tsk, utrace, oaction, action);
 	}
 }
 
@@ -1095,8 +1185,26 @@ utrace_report_syscall(struct pt_regs *regs, int is_exit)
 			break;
 	}
 	action = check_detach(tsk, action);
-	check_quiescent(tsk, action);
+	if (unlikely(check_quiescent(tsk, action)) && !is_exit)
+		/*
+		 * We are continuing despite QUIESCE because of a SIGKILL.
+		 * Don't let the system call actually proceed.
+		 */
+		tracehook_abort_syscall(regs);
 }
+
+
+/*
+ * This is pointed to by the utrace struct, but it's really a private
+ * structure between utrace_get_signal and utrace_inject_signal.
+ */
+struct utrace_signal
+{
+	siginfo_t *const info;
+	struct k_sigaction *return_ka;
+	int signr;
+};
+
 
 // XXX copied from signal.c
 #ifdef SIGEMT
@@ -1191,38 +1299,15 @@ utrace_get_signal(struct task_struct *tsk, struct pt_regs *regs,
 	struct k_sigaction *ka;
 	unsigned long action, event;
 
-#if 0				/* XXX */
-	if (tsk->signal->flags & SIGNAL_GROUP_SIGKILL)
-		return 0;
-#endif
-
-	/*
-	 * If we should quiesce, now is the time.
-	 * First stash a pointer to the state on our stack,
-	 * so that utrace_inject_signal can tell us what to do.
-	 */
-	if (utrace->u.live.signal == NULL)
-		utrace->u.live.signal = &signal;
-
-	if (tsk->utrace_flags & UTRACE_ACTION_QUIESCE) {
-		spin_unlock_irq(&tsk->sighand->siglock);
-		utrace_quiescent(tsk);
-		if (signal.signr == 0)
-			/*
-			 * This return value says to reacquire the siglock
-			 * and check again.  This will check for a pending
-			 * group stop and process it before coming back here.
-			 */
-			return -1;
-		spin_lock_irq(&tsk->sighand->siglock);
-	}
-
 	/*
 	 * If a signal was injected previously, it could not use our
 	 * stack space directly.  It had to allocate a data structure,
 	 * which we can now copy out of and free.
+	 *
+	 * We don't have to lock access to u.live.signal because it's only
+	 * touched by utrace_inject_signal when we're quiescent.
 	 */
-	if (utrace->u.live.signal != &signal) {
+	if (utrace->u.live.signal != NULL) {
 		signal.signr = utrace->u.live.signal->signr;
 		copy_siginfo(info, utrace->u.live.signal->info);
 		if (utrace->u.live.signal->return_ka)
@@ -1230,8 +1315,57 @@ utrace_get_signal(struct task_struct *tsk, struct pt_regs *regs,
 		else
 			signal.return_ka = NULL;
 		kfree(utrace->u.live.signal);
+		utrace->u.live.signal = NULL;
 	}
-	utrace->u.live.signal = NULL;
+
+	/*
+	 * If we should quiesce, now is the time.
+	 * First stash a pointer to the state on our stack,
+	 * so that utrace_inject_signal can tell us what to do.
+	 */
+	if (tsk->utrace_flags & UTRACE_ACTION_QUIESCE) {
+		int killed = sigkill_pending(tsk);
+		if (!killed) {
+			spin_unlock_irq(&tsk->sighand->siglock);
+
+			killed = utrace_quiescent(tsk, &signal);
+
+			/*
+			 * Noone wants us quiescent any more, we can take
+			 * signals.  Unless we have a forced signal to take,
+			 * back out to the signal code to resynchronize after
+			 * releasing the siglock.
+			 */
+			if (signal.signr == 0 && !killed)
+				/*
+				 * This return value says to reacquire the
+				 * siglock and check again.  This will check
+				 * for a pending group stop and process it
+				 * before coming back here.
+				 */
+				return -1;
+
+			spin_lock_irq(&tsk->sighand->siglock);
+		}
+		if (killed) {
+			/*
+			 * The only reason we woke up now was because of a
+			 * SIGKILL.  Don't do normal dequeuing in case it
+			 * might get a signal other than SIGKILL.  That would
+			 * perturb the death state so it might differ from
+			 * what the debugger would have allowed to happen.
+			 * Instead, pluck out just the SIGKILL to be sure
+			 * we'll die immediately with nothing else different
+			 * from the quiescent state the debugger wanted us in.
+			 */
+			sigset_t sigkill_only;
+			sigfillset(&sigkill_only);
+			sigdelset(&sigkill_only, SIGKILL);
+			killed = dequeue_signal(tsk, &sigkill_only, info);
+			BUG_ON(killed != SIGKILL);
+			return killed;
+		}
+	}
 
 	/*
 	 * If a signal was injected, everything is in place now.  Go do it.
@@ -1270,6 +1404,10 @@ utrace_get_signal(struct task_struct *tsk, struct pt_regs *regs,
 	ka = &tsk->sighand->action[signal.signr - 1];
 	*return_ka = *ka;
 
+	/*
+	 * We are never allowed to interfere with SIGKILL,
+	 * just punt after filling in *return_ka for our caller.
+	 */
 	if (signal.signr == SIGKILL)
 		return signal.signr;
 
@@ -1328,9 +1466,6 @@ utrace_get_signal(struct task_struct *tsk, struct pt_regs *regs,
 
 		recalc_sigpending_tsk(tsk);
 	}
-
-	if (tsk->utrace != utrace)
-		rcu_utrace_free(utrace);
 
 	/*
 	 * We express the chosen action to the signals code in terms
@@ -1416,7 +1551,9 @@ utrace_inject_signal(struct task_struct *target,
 
 	ret = 0;
 	signal = utrace->u.live.signal;
-	if (signal == NULL) {
+	if (unlikely(target->exit_state))
+		ret = -ESRCH;
+	else if (signal == NULL) {
 		ret = -ENOSYS;	/* XXX */
 	}
 	else if (signal->signr != 0)

@@ -108,6 +108,12 @@ static int netback_probe(struct xenbus_device *dev,
 			goto abort_transaction;
 		}
 
+		err = xenbus_printf(xbt, dev->nodename, "feature-rx-copy", "%d", 1);
+		if (err) {
+			message = "writing feature-copying";
+			goto abort_transaction;
+		}
+
 		err = xenbus_transaction_end(xbt, 0);
 	} while (err == -EAGAIN);
 
@@ -222,16 +228,31 @@ static void frontend_changed(struct xenbus_device *dev,
 {
 	struct backend_info *be = dev->dev.driver_data;
 
-	DPRINTK("");
+	DPRINTK("%s", xenbus_strstate(frontend_state));
 
 	be->frontend_state = frontend_state;
 
 	switch (frontend_state) {
 	case XenbusStateInitialising:
+		if (dev->state == XenbusStateClosed) {
+			printk("%s: %s: prepare for reconnect\n",
+			       __FUNCTION__, dev->nodename);
+			if (be->netif) {
+				netif_disconnect(be->netif);
+				be->netif = NULL;
+			}
+			xenbus_switch_state(dev, XenbusStateInitWait);
+		}
+		break;
+
 	case XenbusStateInitialised:
 		break;
 
 	case XenbusStateConnected:
+		if (!be->netif) {
+			/* reconnect: setup be->netif */
+			backend_changed(&be->backend_watch, NULL, 0);
+		}
 		maybe_connect(be);
 		break;
 
@@ -240,13 +261,16 @@ static void frontend_changed(struct xenbus_device *dev,
 		break;
 
 	case XenbusStateClosed:
+		xenbus_switch_state(dev, XenbusStateClosed);
+		if (xenbus_dev_is_online(dev))
+			break;
+		/* fall through if not online */
+	case XenbusStateUnknown:
 		if (be->netif != NULL)
 			kobject_uevent(&dev->dev.kobj, KOBJ_OFFLINE);
 		device_unregister(&dev->dev);
 		break;
 
-	case XenbusStateUnknown:
-	case XenbusStateInitWait:
 	default:
 		xenbus_dev_fatal(dev, -EINVAL, "saw state %d at frontend",
 				 frontend_state);
@@ -342,6 +366,10 @@ static void connect(struct backend_info *be)
 	be->netif->remaining_credit = be->netif->credit_bytes;
 
 	xenbus_switch_state(dev, XenbusStateConnected);
+
+	/* May not get a kick from the frontend, so start the tx_queue now. */
+	if (!netbk_can_queue(be->netif->dev))
+		netif_start_queue(be->netif->dev);
 }
 
 
@@ -349,7 +377,7 @@ static int connect_rings(struct backend_info *be)
 {
 	struct xenbus_device *dev = be->dev;
 	unsigned long tx_ring_ref, rx_ring_ref;
-	unsigned int evtchn;
+	unsigned int evtchn, rx_copy;
 	int err;
 	int val;
 
@@ -366,14 +394,29 @@ static int connect_rings(struct backend_info *be)
 		return err;
 	}
 
-	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-rx-notify", "%d",
-			 &val) < 0)
-		val = 0;
-	if (val)
-		be->netif->can_queue = 1;
-	else
-		/* Must be non-zero for pfifo_fast to work. */
-		be->netif->dev->tx_queue_len = 1;
+	err = xenbus_scanf(XBT_NIL, dev->otherend, "request-rx-copy", "%u",
+			   &rx_copy);
+	if (err == -ENOENT) {
+		err = 0;
+		rx_copy = 0;
+	}
+	if (err < 0) {
+		xenbus_dev_fatal(dev, err, "reading %s/request-rx-copy",
+				 dev->otherend);
+		return err;
+	}
+	be->netif->copying_receiver = !!rx_copy;
+
+	if (be->netif->dev->tx_queue_len != 0) {
+		if (xenbus_scanf(XBT_NIL, dev->otherend,
+				 "feature-rx-notify", "%d", &val) < 0)
+			val = 0;
+		if (val)
+			be->netif->can_queue = 1;
+		else
+			/* Must be non-zero for pfifo_fast to work. */
+			be->netif->dev->tx_queue_len = 1;
+	}
 
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-sg", "%d", &val) < 0)
 		val = 0;
@@ -388,6 +431,14 @@ static int connect_rings(struct backend_info *be)
 	if (val) {
 		be->netif->features |= NETIF_F_TSO;
 		be->netif->dev->features |= NETIF_F_TSO;
+	}
+
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-no-csum-offload",
+			 "%d", &val) < 0)
+		val = 0;
+	if (val) {
+		be->netif->features &= ~NETIF_F_IP_CSUM;
+		be->netif->dev->features &= ~NETIF_F_IP_CSUM;
 	}
 
 	/* Map the shared frame, irq etc. */

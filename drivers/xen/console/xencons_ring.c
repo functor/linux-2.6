@@ -52,13 +52,13 @@ static int xencons_irq;
 
 static inline struct xencons_interface *xencons_interface(void)
 {
-	return mfn_to_virt(xen_start_info->console_mfn);
+	return mfn_to_virt(xen_start_info->console.domU.mfn);
 }
 
 static inline void notify_daemon(void)
 {
 	/* Use evtchn: this is called early, before irq is set up. */
-	notify_remote_via_evtchn(xen_start_info->console_evtchn);
+	notify_remote_via_evtchn(xen_start_info->console.domU.evtchn);
 }
 
 int xencons_ring_send(const char *data, unsigned len)
@@ -110,24 +110,26 @@ static irqreturn_t handle_input(int irq, void *unused, struct pt_regs *regs)
 
 int xencons_ring_init(void)
 {
-	int err;
+	int irq;
 
 	if (xencons_irq)
 		unbind_from_irqhandler(xencons_irq, NULL);
 	xencons_irq = 0;
 
-	if (!xen_start_info->console_evtchn)
-		return 0;
+	if (!is_running_on_xen() ||
+	    is_initial_xendomain() ||
+	    !xen_start_info->console.domU.evtchn)
+		return -ENODEV;
 
-	err = bind_evtchn_to_irqhandler(
-		xen_start_info->console_evtchn,
+	irq = bind_evtchn_to_irqhandler(
+		xen_start_info->console.domU.evtchn,
 		handle_input, 0, "xencons", NULL);
-	if (err <= 0) {
-		printk(KERN_ERR "XEN console request irq failed %i\n", err);
-		return err;
+	if (irq < 0) {
+		printk(KERN_ERR "XEN console request irq failed %i\n", irq);
+		return irq;
 	}
 
-	xencons_irq = err;
+	xencons_irq = irq;
 
 	/* In case we have in-flight data after save/restore... */
 	notify_daemon();

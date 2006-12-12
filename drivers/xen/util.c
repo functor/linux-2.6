@@ -1,4 +1,4 @@
-#include <linux/config.h>
+
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/slab.h>
