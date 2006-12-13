@@ -48,7 +48,6 @@
 #include <asm/maddr.h>
 #include <asm/pgtable.h>
 #include <asm/hypervisor.h>
-#include <asm/hypercall.h>
 #include <xen/xenbus.h>
 #include <xen/xen_proc.h>
 #include <xen/evtchn.h>

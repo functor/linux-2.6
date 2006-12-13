@@ -43,6 +43,9 @@
 #include <linux/init.h>
 #include <linux/edd.h>
 #include <linux/nodemask.h>
+#include <linux/kernel.h>
+#include <linux/percpu.h>
+#include <linux/notifier.h>
 #include <linux/kexec.h>
 #include <linux/crash_dump.h>
 #include <linux/dmi.h>

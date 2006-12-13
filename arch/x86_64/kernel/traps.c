@@ -931,6 +931,14 @@ asmlinkage void __kprobes do_debug(struct pt_regs * regs,
 		 */
                 if (!user_mode(regs))
                        goto clear_TF_reenable;
+		/*
+		 * Was the TF flag set by a debugger? If so, clear it now,
+		 * so that register information is correct.
+		 */
+		if (tsk->ptrace & PT_DTRACE) {
+			regs->eflags &= ~TF_MASK;
+			tsk->ptrace &= ~PT_DTRACE;
+		}
 	}
 
 	/* Ok, finally something we can handle */

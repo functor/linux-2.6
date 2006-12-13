@@ -36,7 +36,7 @@
 #include <linux/jiffies.h>
 #include <linux/futex.h>
 #include <linux/rcupdate.h>
-#include <linux/tracehook.h>
+#include <linux/ptrace.h>
 #include <linux/mount.h>
 #include <linux/audit.h>
 #include <linux/profile.h>
@@ -923,7 +923,8 @@ static inline void copy_flags(unsigned long clone_flags, struct task_struct *p)
 
 	new_flags &= ~(PF_SUPERPRIV | PF_NOFREEZE);
 	new_flags |= PF_FORKNOEXEC;
-	new_flags |= PF_STARTING;
+	if (!(clone_flags & CLONE_PTRACE))
+		p->ptrace = 0;
 	p->flags = new_flags;
 }
 
@@ -1056,9 +1057,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	INIT_LIST_HEAD(&p->sibling);
 	p->vfork_done = NULL;
 	spin_lock_init(&p->alloc_lock);
-#ifdef CONFIG_PTRACE
-	INIT_LIST_HEAD(&p->ptracees);
-#endif
 
 	clear_tsk_thread_flag(p, TIF_SIGPENDING);
 	init_sigpending(&p->pending);
@@ -1192,6 +1190,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	 */
 	p->group_leader = p;
 	INIT_LIST_HEAD(&p->thread_group);
+	INIT_LIST_HEAD(&p->ptrace_children);
+	INIT_LIST_HEAD(&p->ptrace_list);
 
 	/* Perform scheduler related setup. Assign this task to a CPU. */
 	sched_fork(p, clone_flags);
@@ -1215,9 +1215,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	/* CLONE_PARENT re-uses the old parent */
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD))
-		p->parent = current->parent;
+		p->real_parent = current->real_parent;
 	else
-		p->parent = current;
+		p->real_parent = current;
+	p->parent = p->real_parent;
 
 	spin_lock(&current->sighand->siglock);
 
@@ -1264,7 +1265,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	if (likely(p->pid)) {
 		add_parent(p);
-		tracehook_init_task(p);
+		if (unlikely(p->ptrace & PT_PTRACED))
+			__ptrace_link(p, current->parent);
 
 		if (thread_group_leader(p)) {
 			p->signal->tty = current->signal->tty;
@@ -1363,6 +1365,22 @@ struct task_struct * __devinit fork_idle(int cpu)
 	return task;
 }
 
+static inline int fork_traceflag (unsigned clone_flags)
+{
+	if (clone_flags & CLONE_UNTRACED)
+		return 0;
+	else if (clone_flags & CLONE_VFORK) {
+		if (current->ptrace & PT_TRACE_VFORK)
+			return PTRACE_EVENT_VFORK;
+	} else if ((clone_flags & CSIGNAL) != SIGCHLD) {
+		if (current->ptrace & PT_TRACE_CLONE)
+			return PTRACE_EVENT_CLONE;
+	} else if (current->ptrace & PT_TRACE_FORK)
+		return PTRACE_EVENT_FORK;
+
+	return 0;
+}
+
 /*
  *  Ok, this is the main fork-routine.
  *
@@ -1377,12 +1395,18 @@ long do_fork(unsigned long clone_flags,
 	      int __user *child_tidptr)
 {
 	struct task_struct *p;
+	int trace = 0;
 	struct pid *pid = alloc_pid();
 	long nr;
 
 	if (!pid)
 		return -EAGAIN;
 	nr = pid->nr;
+	if (unlikely(current->ptrace)) {
+		trace = fork_traceflag (clone_flags);
+		if (trace)
+			clone_flags |= CLONE_PTRACE;
+	}
 
 	p = copy_process(clone_flags, stack_start, regs, stack_size, parent_tidptr, child_tidptr, nr);
 	/*
@@ -1397,26 +1421,30 @@ long do_fork(unsigned long clone_flags,
 			init_completion(&vfork);
 		}
 
-		tracehook_report_clone(clone_flags, p);
-
-		p->flags &= ~PF_STARTING;
-
-		if (clone_flags & CLONE_STOPPED) {
+		if ((p->ptrace & PT_PTRACED) || (clone_flags & CLONE_STOPPED)) {
 			/*
 			 * We'll start up with an immediate SIGSTOP.
 			 */
 			sigaddset(&p->pending.signal, SIGSTOP);
 			set_tsk_thread_flag(p, TIF_SIGPENDING);
-			p->state = TASK_STOPPED;
 		}
-		else
-			wake_up_new_task(p, clone_flags);
 
-		tracehook_report_clone_complete(clone_flags, nr, p);
+		if (!(clone_flags & CLONE_STOPPED))
+			wake_up_new_task(p, clone_flags);
+		else
+			p->state = TASK_STOPPED;
+
+		if (unlikely (trace)) {
+			current->ptrace_message = nr;
+			ptrace_notify ((trace << 8) | SIGTRAP);
+		}
 
 		if (clone_flags & CLONE_VFORK) {
 			wait_for_completion(&vfork);
-			tracehook_report_vfork_done(p, nr);
+			if (unlikely (current->ptrace & PT_TRACE_VFORK_DONE)) {
+				current->ptrace_message = nr;
+				ptrace_notify ((PTRACE_EVENT_VFORK_DONE << 8) | SIGTRAP);
+			}
 		}
 	} else {
 		free_pid(pid);

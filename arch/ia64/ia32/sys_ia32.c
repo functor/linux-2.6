@@ -1432,6 +1432,25 @@ sys32_waitpid (int pid, unsigned int *stat_addr, int options)
 	return compat_sys_wait4(pid, stat_addr, options, NULL);
 }
 
+static unsigned int
+ia32_peek (struct task_struct *child, unsigned long addr, unsigned int *val)
+{
+	size_t copied;
+	unsigned int ret;
+
+	copied = access_process_vm(child, addr, val, sizeof(*val), 0);
+	return (copied != sizeof(ret)) ? -EIO : 0;
+}
+
+static unsigned int
+ia32_poke (struct task_struct *child, unsigned long addr, unsigned int val)
+{
+
+	if (access_process_vm(child, addr, &val, sizeof(val), 1) != sizeof(val))
+		return -EIO;
+	return 0;
+}
+
 /*
  *  The order in which registers are stored in the ptrace regs structure
  */
@@ -1729,7 +1748,6 @@ restore_ia32_fpxstate (struct task_struct *tsk, struct ia32_user_fxsr_struct __u
 	return 0;
 }
 
-#if 0				/* XXX */
 asmlinkage long
 sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 {
@@ -1837,11 +1855,9 @@ sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 					    compat_ptr(data));
 		break;
 
-#if 0				/* XXX */
 	      case PTRACE_GETEVENTMSG:   
 		ret = put_user(child->ptrace_message, (unsigned int __user *) compat_ptr(data));
 		break;
-#endif
 
 	      case PTRACE_SYSCALL:	/* continue, stop after next syscall */
 	      case PTRACE_CONT:		/* restart after signal. */
@@ -1862,7 +1878,6 @@ sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 	unlock_kernel();
 	return ret;
 }
-#endif
 
 typedef struct {
 	unsigned int	ss_sp;

@@ -41,7 +41,7 @@
 #include <linux/module.h>
 #include <linux/namei.h>
 #include <linux/proc_fs.h>
-#include <linux/tracehook.h>
+#include <linux/ptrace.h>
 #include <linux/mount.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
@@ -961,7 +961,13 @@ EXPORT_SYMBOL(prepare_binprm);
 
 static int unsafe_exec(struct task_struct *p)
 {
-	int unsafe = tracehook_unsafe_exec(p);
+	int unsafe = 0;
+	if (p->ptrace & PT_PTRACED) {
+		if (p->ptrace & PT_PTRACE_CAP)
+			unsafe |= LSM_UNSAFE_PTRACE_CAP;
+		else
+			unsafe |= LSM_UNSAFE_PTRACE;
+	}
 	if (atomic_read(&p->fs->count) > 1 ||
 	    atomic_read(&p->files->count) > 1 ||
 	    atomic_read(&p->sighand->count) > 1)
@@ -1086,7 +1092,6 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 				bprm->file = NULL;
 				current->did_exec = 1;
 				proc_exec_connector(current);
-				tracehook_report_exec(bprm, regs);
 				return retval;
 			}
 			read_lock(&binfmt_lock);

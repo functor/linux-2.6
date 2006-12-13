@@ -2201,6 +2201,8 @@ static inline void init_IO_APIC_traps(void)
 	}
 }
 
+int timer_uses_ioapic_pin_0;
+
 #ifndef CONFIG_XEN
 static void enable_lapic_irq (unsigned int irq)
 {
@@ -2315,9 +2317,7 @@ static inline void unlock_ExtINT_logic(void)
 	io_apic_write(apic, 0x10 + 2 * pin, *(((int *)&entry0) + 0));
 	spin_unlock_irqrestore(&ioapic_lock, flags);
 }
-#endif /* CONFIG_XEN */
-int timer_uses_ioapic_pin_0;
-#ifdef CONFI_XEN
+
 /*
  * This code may look a bit paranoid, but it's supposed to cooperate with
  * a wide range of boards and BIOS bugs.  Fortunately only the timer IRQ

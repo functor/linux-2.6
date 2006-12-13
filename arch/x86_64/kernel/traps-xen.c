@@ -115,7 +115,6 @@ static int call_trace = 1;
 #define call_trace (-1)
 #endif
 
-
 #ifdef CONFIG_KALLSYMS
 # include <linux/kallsyms.h>
 void printk_address(unsigned long address)
@@ -182,7 +181,7 @@ static unsigned long *in_exception_stack(unsigned cpu, unsigned long stack,
 			break;
 #endif
 		default:
-			end = per_cpu(orig_tss, cpu).ist[k];
+			end = per_cpu(orig_ist, cpu).ist[k];
 			break;
 		}
 		/*
@@ -936,6 +935,14 @@ asmlinkage void __kprobes do_debug(struct pt_regs * regs,
 		 */
                 if (!user_mode(regs))
                        goto clear_TF_reenable;
+		/*
+		 * Was the TF flag set by a debugger? If so, clear it now,
+		 * so that register information is correct.
+		 */
+		if (tsk->ptrace & PT_DTRACE) {
+			regs->eflags &= ~TF_MASK;
+			tsk->ptrace &= ~PT_DTRACE;
+		}
 	}
 
 	/* Ok, finally something we can handle */

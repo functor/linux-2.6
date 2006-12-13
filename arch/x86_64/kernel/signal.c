@@ -17,7 +17,7 @@
 #include <linux/signal.h>
 #include <linux/errno.h>
 #include <linux/wait.h>
-#include <linux/tracehook.h>
+#include <linux/ptrace.h>
 #include <linux/unistd.h>
 #include <linux/stddef.h>
 #include <linux/personality.h>
@@ -302,6 +302,9 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	   see include/asm-x86_64/uaccess.h for details. */
 	set_fs(USER_DS);
 
+	regs->eflags &= ~TF_MASK;
+	if (test_thread_flag(TIF_SINGLESTEP))
+		ptrace_notify(SIGTRAP);
 #ifdef DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
 		current->comm, current->pid, frame, regs->rip, frame->pretcode);
@@ -353,12 +356,16 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	}
 
 	/*
-	 * If TF is set due to a debugger (TIF_FORCED_TF), clear the TF flag so
-	 * that register information in the sigcontext is correct.
+	 * If TF is set due to a debugger (PT_DTRACE), clear the TF
+	 * flag so that register information in the sigcontext is
+	 * correct.
 	 */
-	if (unlikely(regs->eflags & TF_MASK)
-	    && likely(test_and_clear_thread_flag(TIF_FORCED_TF)))
-		regs->eflags &= ~TF_MASK;
+	if (unlikely(regs->eflags & TF_MASK)) {
+		if (likely(current->ptrace & PT_DTRACE)) {
+			current->ptrace &= ~PT_DTRACE;
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #ifdef CONFIG_IA32_EMULATION
 	if (test_thread_flag(TIF_IA32)) {
@@ -377,15 +384,6 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 			sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
-
-		/*
-		 * Clear TF when entering the signal handler, but
-		 * notify any tracer that was single-stepping it.
-		 * The tracer may want to single-step inside the
-		 * handler too.
-		 */
-		regs->eflags &= ~TF_MASK;
-		tracehook_report_handle_signal(sig, ka, oldset, regs);
 	}
 
 	return ret;

@@ -6,13 +6,14 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
   /usr/include/gnu/stubs.h \
-  /usr/include/bits/types.h \
   /usr/include/bits/wordsize.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stddef.h \
+  /usr/include/gnu/stubs-32.h \
+  /usr/include/bits/types.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/endian.h \
   /usr/include/bits/endian.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdarg.h \
   /usr/include/stdio.h \
   /usr/include/libio.h \
   /usr/include/_G_config.h \
@@ -31,12 +32,11 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/bits/time.h \
   /usr/include/sys/sysmacros.h \
   /usr/include/bits/pthreadtypes.h \
-  /usr/include/bits/sched.h \
   /usr/include/alloca.h \
   /usr/include/string.h \
   /usr/include/bits/string.h \
   /usr/include/bits/string2.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdbool.h \
   scripts/kconfig/lkc.h \
     $(wildcard include/config/list.h) \
   scripts/kconfig/expr.h \
@@ -50,8 +50,8 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/bits/errno.h \
   /usr/include/linux/errno.h \
   /usr/include/asm/errno.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/limits.h \
-  /usr/lib/gcc-lib/i386-redhat-linux/3.3.3/include/syslimits.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/limits.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/syslimits.h \
   /usr/include/limits.h \
   /usr/include/bits/posix1_lim.h \
   /usr/include/bits/local_lim.h \
@@ -61,7 +61,9 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/bits/posix_opt.h \
   /usr/include/bits/confname.h \
   /usr/include/getopt.h \
+  scripts/kconfig/lkc.h \
   scripts/kconfig/util.c \
+  scripts/kconfig/lkc.h \
   scripts/kconfig/confdata.c \
     $(wildcard include/config/config.h) \
     $(wildcard include/config/.h) \
@@ -73,12 +75,16 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/bits/stat.h \
   /usr/include/fcntl.h \
   /usr/include/bits/fcntl.h \
+  scripts/kconfig/lkc.h \
   scripts/kconfig/expr.c \
+  scripts/kconfig/lkc.h \
   scripts/kconfig/symbol.c \
   /usr/include/regex.h \
   /usr/include/sys/utsname.h \
   /usr/include/bits/utsname.h \
+  scripts/kconfig/lkc.h \
   scripts/kconfig/menu.c \
+  scripts/kconfig/lkc.h \
 
 scripts/kconfig/zconf.tab.o: $(deps_scripts/kconfig/zconf.tab.o)
 

@@ -83,29 +83,29 @@ ENTRY(fsys_getppid)
 	;;
 
 	ld4 r9=[r9]
-	add r17=IA64_TASK_PARENT_OFFSET,r17 // r17 = &current->group_leader->parent
+	add r17=IA64_TASK_REAL_PARENT_OFFSET,r17 // r17 = &current->group_leader->real_parent
 	;;
 	and r9=TIF_ALLWORK_MASK,r9
 
-1:	ld8 r18=[r17]				// r18 = current->group_leader->parent
+1:	ld8 r18=[r17]				// r18 = current->group_leader->real_parent
 	;;
 	cmp.ne p8,p0=0,r9
-	add r8=IA64_TASK_TGID_OFFSET,r18	// r8 = &current->group_leader->parent->tgid
+	add r8=IA64_TASK_TGID_OFFSET,r18	// r8 = &current->group_leader->real_parent->tgid
 	;;
 
 	/*
 	 * The .acq is needed to ensure that the read of tgid has returned its data before
-	 * we re-check "parent".
+	 * we re-check "real_parent".
 	 */
-	ld4.acq r8=[r8]				// r8 = current->group_leader->parent->tgid
+	ld4.acq r8=[r8]				// r8 = current->group_leader->real_parent->tgid
 #ifdef CONFIG_SMP
 	/*
-	 * Re-read current->group_leader->parent.
+	 * Re-read current->group_leader->real_parent.
 	 */
-	ld8 r19=[r17]				// r19 = current->group_leader->parent
+	ld8 r19=[r17]				// r19 = current->group_leader->real_parent
 (p8)	br.spnt.many fsys_fallback_syscall
 	;;
-	cmp.ne p6,p0=r18,r19			// did parent change?
+	cmp.ne p6,p0=r18,r19			// did real_parent change?
 	mov r19=0			// i must not leak kernel bits...
 (p6)	br.cond.spnt.few 1b			// yes -> redo the read of tgid and the check
 	;;

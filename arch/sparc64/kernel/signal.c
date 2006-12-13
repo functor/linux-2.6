@@ -23,7 +23,6 @@
 #include <linux/smp_lock.h>
 #include <linux/binfmts.h>
 #include <linux/bitops.h>
-#include <linux/tracehook.h>
 
 #include <asm/uaccess.h>
 #include <asm/ptrace.h>
@@ -492,7 +491,6 @@ static inline void handle_signal(unsigned long signr, struct k_sigaction *ka,
 		sigaddset(&current->blocked,signr);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
-	tracehook_report_handle_signal(signr, ka, oldset, regs);
 }
 
 static inline void syscall_restart(unsigned long orig_i0, struct pt_regs *regs,

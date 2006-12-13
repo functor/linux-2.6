@@ -510,7 +510,7 @@ static int __init blkif_init(void)
 	if (!is_running_on_xen())
 		return -ENODEV;
 
-	mmap_pages            = blkif_reqs * BLKIF_MAX_SEGMENTS_PER_REQUEST;
+	mmap_pages = blkif_reqs * BLKIF_MAX_SEGMENTS_PER_REQUEST;
 
 	pending_reqs          = kmalloc(sizeof(pending_reqs[0]) *
 					blkif_reqs, GFP_KERNEL);

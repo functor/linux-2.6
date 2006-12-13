@@ -67,7 +67,6 @@
 #include <linux/mount.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
-#include <linux/tracehook.h>
 #include <linux/seccomp.h>
 #include <linux/cpuset.h>
 #include <linux/audit.h>
@@ -417,6 +416,13 @@ static int proc_root_link(struct inode *inode, struct dentry **dentry, struct vf
 	return result;
 }
 
+#define MAY_PTRACE(task) \
+	(task == current || \
+	(task->parent == current && \
+	(task->ptrace & PT_PTRACED) && \
+	 (task->state == TASK_STOPPED || task->state == TASK_TRACED) && \
+	 security_ptrace(current,task) == 0))
+
 struct mm_struct *mm_for_maps(struct task_struct *task)
 {
 	struct mm_struct *mm = get_task_mm(task);
@@ -761,8 +767,7 @@ static ssize_t mem_read(struct file * file, char __user * buf,
 	if (!task)
 		goto out_no_task;
 
-	if (!tracehook_allow_access_process_vm(task)
-	    || !ptrace_may_attach(task))
+	if (!MAY_PTRACE(task) || !ptrace_may_attach(task))
 		goto out;
 
 	ret = -ENOMEM;
@@ -788,8 +793,7 @@ static ssize_t mem_read(struct file * file, char __user * buf,
 
 		this_len = (count > PAGE_SIZE) ? PAGE_SIZE : count;
 		retval = access_process_vm(task, src, page, this_len, 0);
-		if (!retval || !tracehook_allow_access_process_vm(task)
-		    || !ptrace_may_attach(task)) {
+		if (!retval || !MAY_PTRACE(task) || !ptrace_may_attach(task)) {
 			if (!ret)
 				ret = -EIO;
 			break;
@@ -833,8 +837,7 @@ static ssize_t mem_write(struct file * file, const char * buf,
 	if (!task)
 		goto out_no_task;
 
-	if (!tracehook_allow_access_process_vm(task)
-	    || !ptrace_may_attach(task))
+	if (!MAY_PTRACE(task) || !ptrace_may_attach(task))
 		goto out;
 
 	copied = -ENOMEM;

@@ -200,7 +200,6 @@ dma_cache_sync(void *vaddr, size_t size, enum dma_data_direction dir)
 
 extern struct device fallback_dev;
 #endif
-
 extern int panic_on_overflow;
 
 #endif /* _X8664_DMA_MAPPING_H */

@@ -34,6 +34,10 @@
 static struct proc_dir_entry *privcmd_intf;
 static struct proc_dir_entry *capabilities_intf;
 
+#ifndef HAVE_ARCH_PRIVCMD_MMAP
+static int privcmd_enforce_singleshot_mapping(struct vm_area_struct *vma);
+#endif
+
 static int privcmd_ioctl(struct inode *inode, struct file *file,
 			 unsigned int cmd, unsigned long data)
 {
@@ -121,11 +125,9 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 
 		vma = find_vma(mm, msg.va);
 		rc = -EINVAL;
-		if (!vma || (msg.va != vma->vm_start) || vma->vm_private_data)
+		if (!vma || (msg.va != vma->vm_start) ||
+		    !privcmd_enforce_singleshot_mapping(vma))
 			goto mmap_out;
-
-		/* Mapping is a one-shot operation per vma. */
-		vma->vm_private_data = (void *)1;
 
 		va = vma->vm_start;
 
@@ -136,7 +138,7 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 
 			/* Do not allow range to wrap the address space. */
 			rc = -EINVAL;
-			if ((msg.npages > (INT_MAX >> PAGE_SHIFT)) ||
+			if ((msg.npages > (LONG_MAX >> PAGE_SHIFT)) ||
 			    ((unsigned long)(msg.npages << PAGE_SHIFT) >= -va))
 				goto mmap_out;
 
@@ -180,7 +182,7 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 		if (copy_from_user(&m, udata, sizeof(m)))
 			return -EFAULT;
 
-		if ((m.num <= 0) || (m.num > (INT_MAX >> PAGE_SHIFT)))
+		if ((m.num <= 0) || (m.num > (LONG_MAX >> PAGE_SHIFT)))
 			return -EINVAL;
 
 		down_read(&mm->mmap_sem);
@@ -188,14 +190,12 @@ static int privcmd_ioctl(struct inode *inode, struct file *file,
 		vma = find_vma(mm, m.addr);
 		if (!vma ||
 		    (m.addr != vma->vm_start) ||
-		    ((m.addr + (m.num<<PAGE_SHIFT)) != vma->vm_end) ||
-		    vma->vm_private_data) {
+		    ((m.addr + ((unsigned long)m.num<<PAGE_SHIFT)) !=
+		     vma->vm_end) ||
+		    !privcmd_enforce_singleshot_mapping(vma)) {
 			up_read(&mm->mmap_sem);
 			return -EINVAL;
 		}
-
-		/* Mapping is a one-shot operation per vma. */
-		vma->vm_private_data = (void *)1;
 
 		p = m.arr;
 		addr = m.addr;
@@ -249,6 +249,11 @@ static int privcmd_mmap(struct file * file, struct vm_area_struct * vma)
 	vma->vm_private_data = NULL;
 
 	return 0;
+}
+
+static int privcmd_enforce_singleshot_mapping(struct vm_area_struct *vma)
+{
+	return (xchg(&vma->vm_private_data, (void *)1) == NULL);
 }
 #endif
 

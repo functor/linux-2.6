@@ -527,25 +527,19 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	if (next->gs)
 		HYPERVISOR_set_segment_base(SEGBASE_GS_USER, next->gs); 
 
+	/* Must be after DS reload */
+	if (prev_p->thread_info->status & TS_USEDFPU) {
+		__save_init_fpu(prev_p); /* _not_ save_init_fpu() */
+		HYPERVISOR_fpu_taskswitch(1);
+	}
+
 	/* 
-	 * Switch the PDA and FPU context.
+	 * Switch the PDA and FPU contexts.
 	 */
 	prev->userrsp = read_pda(oldrsp); 
 	write_pda(oldrsp, next->userrsp); 
 	write_pda(pcurrent, next_p); 
 
-	/* This must be here to ensure both math_state_restore() and
-	   kernel_fpu_begin() work consistently. 
-	   And the AMD workaround requires it to be after DS reload. */
-	/*
-	 * This is basically '__unlazy_fpu', except that we queue a
-	 * multicall to indicate FPU task switch, rather than
-	 * synchronously trapping to Xen.
-	 */
-	if (prev_p->thread_info->status & TS_USEDFPU) {
-		__save_init_fpu(prev_p); /* _not_ save_init_fpu() */
-		HYPERVISOR_fpu_taskswitch(1);
-	}
 	write_pda(kernelstack,
 		  task_stack_page(next_p) + THREAD_SIZE - PDA_STACKOFFSET);
 
@@ -580,6 +574,11 @@ long sys_execve(char __user *name, char __user * __user *argv,
 	if (IS_ERR(filename)) 
 		return error;
 	error = do_execve(filename, argv, envp, &regs); 
+	if (error == 0) {
+		task_lock(current);
+		current->ptrace &= ~PT_DTRACE;
+		task_unlock(current);
+	}
 	putname(filename);
 	return error;
 }

@@ -120,7 +120,6 @@ static inline struct thread_info *stack_thread_info(void)
 #define TIF_FORK		18	/* ret_from_fork */
 #define TIF_ABI_PENDING		19
 #define TIF_MEMDIE		20
-#define TIF_FORCED_TF		21	/* true if TF in eflags artificially */
 
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)
@@ -134,7 +133,6 @@ static inline struct thread_info *stack_thread_info(void)
 #define _TIF_IA32		(1<<TIF_IA32)
 #define _TIF_FORK		(1<<TIF_FORK)
 #define _TIF_ABI_PENDING	(1<<TIF_ABI_PENDING)
-#define _TIF_FORCED_TF		(1<<TIF_FORCED_TF)
 
 /* work to do on interrupt/exception return */
 #define _TIF_WORK_MASK \

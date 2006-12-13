@@ -73,7 +73,6 @@
 #include <linux/file.h>
 #include <linux/times.h>
 #include <linux/cpuset.h>
-#include <linux/tracehook.h>
 #include <linux/rcupdate.h>
 #include <linux/delayacct.h>
 #include <linux/vs_context.h>
@@ -164,21 +163,16 @@ static inline const char * get_task_state(struct task_struct *tsk)
 
 static inline char * task_state(struct task_struct *p, char *buffer)
 {
-	struct task_struct *tracer;
-	pid_t tracer_pid, pid, ptgid, tgid;
 	struct group_info *group_info;
 	int g;
 	struct fdtable *fdt = NULL;
-
-	rcu_read_lock();
-	tracer = tracehook_tracer_task(p);
-	tracer_pid = tracer == NULL ? 0 : vx_map_pid(tracer->pid);
-	rcu_read_unlock();
+	pid_t pid, ptgid, tppid, tgid;
 
 	read_lock(&tasklist_lock);
 	tgid = vx_map_tgid(p->tgid);
 	pid = vx_map_pid(p->pid);
-	ptgid = vx_map_pid(p->group_leader->parent->tgid);
+	ptgid = vx_map_pid(p->group_leader->real_parent->tgid);
+	tppid = vx_map_pid(p->parent->pid);
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
 		"SleepAVG:\t%lu%%\n"
@@ -191,7 +185,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
 		tgid, pid, (pid > 1) ? ptgid : 0,
-		tracer_pid,
+		pid_alive(p) && p->ptrace ? tppid : 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);
@@ -451,7 +445,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	}
 	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
 	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
-		task->group_leader->parent->tgid);
+		task->group_leader->real_parent->tgid);
 	pgid = vx_info_map_pid(task->vx_info, pgid);
 
 	read_unlock(&tasklist_lock);

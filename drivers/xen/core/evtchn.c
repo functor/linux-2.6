@@ -478,7 +478,6 @@ static int retrigger(unsigned int irq)
 	shared_info_t *s = HYPERVISOR_shared_info;
 	if (!VALID_EVTCHN(evtchn))
 		return 1;
-	BUG_ON(!synch_test_bit(evtchn, &s->evtchn_mask[0]));
 	synch_set_bit(evtchn, &s->evtchn_pending[0]);
 	return 1;
 }

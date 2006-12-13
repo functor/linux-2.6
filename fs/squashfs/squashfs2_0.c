@@ -73,12 +73,13 @@ static int read_fragment_index_table_2(struct super_block *s)
 	}
    
 	if (SQUASHFS_FRAGMENT_INDEX_BYTES_2(sblk->fragments) &&
-					!squashfs_read_data(s, (char *)
-					msblk->fragment_index_2,
-					sblk->fragment_table_start,
-					SQUASHFS_FRAGMENT_INDEX_BYTES_2
-					(sblk->fragments) |
-					SQUASHFS_COMPRESSED_BIT_BLOCK, NULL)) {
+			!squashfs_read_data(s, (char *)
+			msblk->fragment_index_2,
+			sblk->fragment_table_start,
+			SQUASHFS_FRAGMENT_INDEX_BYTES_2
+			(sblk->fragments) |
+			SQUASHFS_COMPRESSED_BIT_BLOCK, NULL,
+			SQUASHFS_FRAGMENT_INDEX_BYTES_2(sblk->fragments))) {
 		ERROR("unable to read fragment index table\n");
 		return 0;
 	}

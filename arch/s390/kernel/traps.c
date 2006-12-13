@@ -18,7 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/errno.h>
-#include <linux/tracehook.h>
+#include <linux/ptrace.h>
 #include <linux/timer.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
@@ -338,7 +338,7 @@ static inline void __user *get_check_address(struct pt_regs *regs)
 
 void do_single_step(struct pt_regs *regs)
 {
-	if (tracehook_consider_fatal_signal(current, SIGTRAP))
+	if ((current->ptrace & PT_PTRACED) != 0)
 		force_sig(SIGTRAP, current);
 }
 
@@ -439,7 +439,7 @@ asmlinkage void illegal_op(struct pt_regs * regs, long interruption_code)
 	if (regs->psw.mask & PSW_MASK_PSTATE) {
 		get_user(*((__u16 *) opcode), (__u16 __user *) location);
 		if (*((__u16 *) opcode) == S390_BREAKPOINT_U16) {
-			if (tracehook_consider_fatal_signal(current, SIGTRAP))
+			if (current->ptrace & PT_PTRACED)
 				force_sig(SIGTRAP, current);
 			else
 				signal = SIGILL;

@@ -24,7 +24,6 @@
 #include <linux/stddef.h>
 #include <linux/elf.h>
 #include <linux/ptrace.h>
-#include <linux/tracehook.h>
 #include <linux/module.h>
 
 #include <asm/sigcontext.h>
@@ -460,8 +459,6 @@ static int handle_signal(unsigned long sig, struct k_sigaction *ka,
 			sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
-
-		tracehook_report_handle_signal(sig, ka, oldset, regs);
 	}
 
 	return ret;

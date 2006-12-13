@@ -26,7 +26,6 @@
 #include <linux/sysdev.h>
 #include <linux/cpu.h>
 #include <linux/module.h>
-#include <linux/dmi.h>
 
 #include <asm/atomic.h>
 #include <asm/smp.h>
@@ -54,9 +53,6 @@ static cpumask_t timer_bcast_ipi;
  * Knob to control our willingness to enable the local APIC.
  */
 int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
-int prefer_apic __initdata = 0;	/* when enable_local_apic == 0 prefer APIC but don't force against
-				   BIOS wishes */
-int apic_disabled_by_dmi __initdata;
 
 /*
  * Debug level
@@ -757,10 +753,6 @@ static void apic_pm_activate(void) { }
 
 static int __init apic_set_verbosity(char *str)
 {
-	if (*str == '=')
-		++str;
-	if (*str == 0)
-		prefer_apic = 1;
 	if (strcmp("debug", str) == 0)
 		apic_verbosity = APIC_DEBUG;
 	else if (strcmp("verbose", str) == 0)
@@ -768,7 +760,7 @@ static int __init apic_set_verbosity(char *str)
 	return 1;
 }
 
-__setup("apic", apic_set_verbosity);
+__setup("apic=", apic_set_verbosity);
 
 static int __init detect_init_APIC (void)
 {
@@ -799,9 +791,8 @@ static int __init detect_init_APIC (void)
 		 * APIC only if "lapic" specified.
 		 */
 		if (enable_local_apic <= 0) {
-			if (!apic_disabled_by_dmi)
-				printk("Local APIC disabled by BIOS -- "
-				       "you can enable it with \"lapic\"\n");
+			printk("Local APIC disabled by BIOS -- "
+			       "you can enable it with \"lapic\"\n");
 			return -1;
 		}
 		/*
@@ -1334,64 +1325,6 @@ fastcall void smp_error_interrupt(struct pt_regs *regs)
 	        smp_processor_id(), v , v1);
 	irq_exit();
 }
-
-#ifdef CONFIG_X86_APIC_AUTO
-
-/* Some heuristics to decide when to enable the APICs */
-
-static __init int dmi_enable_apic(void)
-{
-	int year;
-	int apic;
-	char *vendor;
-
-	/* If the machine has more than one CPU try to use APIC because it'll
-	   be running the SMP kernel with APIC soon anyways.
-	   This won't cover dual core, but they are handled by the date check
-	   below. */
-	if (dmi_cpus > 1)
-		return 1;
-
-	year = dmi_get_year(DMI_BIOS_DATE);
-	vendor = dmi_get_system_info(DMI_BIOS_VENDOR);
-	apic = 0;
-
-	/* All Intel BIOS since 1998 assumed APIC on. Don't include 1998 itself
-	   because we're not sure for that. */
-	if (vendor && !strncmp(vendor, "Intel", 5))
-		apic = 1;
-	/* Use APIC for anything since 2001 */
-	else if (year >= 2001)
-		apic = 1;
-
-#ifdef CONFIG_ACPI
-	/* When ACPI is disabled also default to APIC off on very new systems (>= 2004)
-	   which typically don't have working mptables anymore */
-	if (acpi_noirq && year >= 2004)
-		apic = 0;
-#endif
-
-	if (!apic)
-		apic_disabled_by_dmi = 1;
-
-	return apic;
-}
-
-void __init dmi_check_apic(void)
-{
-	if (enable_local_apic != 0 || prefer_apic)
-		return;
-	if (!dmi_enable_apic()) {
-		clear_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability);
-		nr_ioapics = 0;
-		enable_local_apic = -1;
-		printk(KERN_INFO "IO/L-APIC disabled because your old system seems to be old\n");
-		printk(KERN_INFO "overwrite with \"apic\"\n");
-		return;
-	}
-	printk(KERN_INFO "IO/L-APIC allowed because system is MP or new enough\n");
-}
-#endif
 
 /*
  * This initializes the IO-APIC and APIC hardware if this is

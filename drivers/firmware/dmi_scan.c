@@ -154,8 +154,6 @@ static void __init dmi_save_ipmi_device(struct dmi_header *dm)
 	list_add(&dev->list, &dmi_devices);
 }
 
-int dmi_cpus;
-
 /*
  *	Process a DMI table entry. Right now all we care about are the BIOS
  *	and machine entries. For 2.5 we should pull the smbus controller info
@@ -179,9 +177,6 @@ static void __init dmi_decode(struct dmi_header *dm)
 		dmi_save_ident(dm, DMI_BOARD_VENDOR, 4);
 		dmi_save_ident(dm, DMI_BOARD_NAME, 5);
 		dmi_save_ident(dm, DMI_BOARD_VERSION, 6);
-		break;
-	case 4:		/* Central Processor */
-		dmi_cpus++;
 		break;
 	case 10:	/* Onboard Devices Information */
 		dmi_save_devices(dm);
