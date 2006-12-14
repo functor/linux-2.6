@@ -5,7 +5,7 @@
 # Marc E. Fiuczynski <mef@cs.princeton.edu>
 # Copyright (C) 2006 The Trustees of Princeton University
 #
-# $Id: kompare,v 1.4 2006/12/01 16:21:33 mef Exp $
+# $Id: kompare,v 1.5 2006/12/14 05:08:53 mef Exp $
 #
 
 import sys, re, os
@@ -68,17 +68,20 @@ if args[0] == "-a":
 
 newstate = {None:'REMOVED',"is not set":'DISABLE','y':'BUILTIN','m':'MODULE '}
 keys = neworder
+seen = {}
 for key in keys:
     o = old.get(key,None)
     n = new[key]
     if n==o and not showall: continue
     print "%6s -> %6s : %s" % (newstate.get(o,o),newstate.get(n,n),key)
+    seen[key] = None
 
 # not sure we care about what options have been removed
 # from from.config file
 oldstate = {None:'REMOVED',"is not set":'DISABLE','y':'BUILTIN','m':'MODULE '}
 keys = oldorder
 for key in keys:
+    if seen.has_key(key): continue
     n = new.get(key,None)
     o = old[key]
     if n == o and not showall: continue
