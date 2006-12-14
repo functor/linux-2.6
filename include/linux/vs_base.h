@@ -5,7 +5,9 @@
 
 #define VX_IRQ        0x4000
 #define VX_IRQ_MASK   0xF000
+#if 0
 #include <linux/hardirq.h>
+#endif
 
 #define vx_task_xid(t)	((t)->xid)
 
@@ -38,8 +40,10 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 			(id > 1) && (id < MIN_D_CONTEXT))
 			return 1;
 	}
+#if 0
 	if ((mode & VX_IRQ) && (unlikely(in_interrupt())))
 		return 1;
+#endif
 
 	return (((mode & VX_ADMIN) && (cid == 0)) ||
 		((mode & VX_WATCH) && (cid == 1)) ||
