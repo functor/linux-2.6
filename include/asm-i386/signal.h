@@ -221,8 +221,10 @@ struct pt_regs;
 
 #define ptrace_signal_deliver(regs, cookie)		\
 	do {						\
-		if (test_and_clear_thread_flag(TIF_FORCED_TF)) \
+		if (current->ptrace & PT_DTRACE) {	\
+			current->ptrace &= ~PT_DTRACE;	\
 			(regs)->eflags &= ~TF_MASK;	\
+		}					\
 	} while (0)
 
 #endif /* __KERNEL__ */

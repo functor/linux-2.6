@@ -21,7 +21,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/tracehook.h>
+#include <linux/ptrace.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/security.h>
@@ -159,7 +159,7 @@ static int task_alloc_security(struct task_struct *task)
 		return -ENOMEM;
 
 	tsec->task = task;
-	tsec->osid = tsec->sid = SECINITSID_UNLABELED;
+	tsec->osid = tsec->sid = tsec->ptrace_sid = SECINITSID_UNLABELED;
 	task->security = tsec;
 
 	return 0;
@@ -1387,13 +1387,19 @@ static int inode_security_set_sid(struct inode *inode, u32 sid)
 
 static int selinux_ptrace(struct task_struct *parent, struct task_struct *child)
 {
+	struct task_security_struct *psec = parent->security;
+	struct task_security_struct *csec = child->security;
 	int rc;
 
 	rc = secondary_ops->ptrace(parent,child);
 	if (rc)
 		return rc;
 
-	return task_has_perm(parent, child, PROCESS__PTRACE);
+	rc = task_has_perm(parent, child, PROCESS__PTRACE);
+	/* Save the SID of the tracing process for later use in apply_creds. */
+	if (!(child->ptrace & PT_PTRACED) && !rc)
+		csec->ptrace_sid = psec->sid;
+	return rc;
 }
 
 static int selinux_capget(struct task_struct *target, kernel_cap_t *effective,
@@ -1821,24 +1827,12 @@ static void selinux_bprm_apply_creds(struct linux_binprm *bprm, int unsafe)
 		/* Check for ptracing, and update the task SID if ok.
 		   Otherwise, leave SID unchanged and kill. */
 		if (unsafe & (LSM_UNSAFE_PTRACE | LSM_UNSAFE_PTRACE_CAP)) {
-			struct task_struct *t;
-
-			rcu_read_lock();
-			t = tracehook_tracer_task(current);
-			if (unlikely(t == NULL))
-				rcu_read_unlock();
-			else {
-				struct task_security_struct *sec = t->security;
-				u32 ptsid = sec->sid;
-				rcu_read_unlock();
-
-				rc = avc_has_perm(ptsid, sid,
-						  SECCLASS_PROCESS,
-						  PROCESS__PTRACE, NULL);
-				if (rc) {
-					bsec->unsafe = 1;
-					return;
-				}
+			rc = avc_has_perm(tsec->ptrace_sid, sid,
+					  SECCLASS_PROCESS, PROCESS__PTRACE,
+					  NULL);
+			if (rc) {
+				bsec->unsafe = 1;
+				return;
 			}
 		}
 		tsec->sid = sid;
@@ -2691,6 +2685,11 @@ static int selinux_task_alloc_security(struct task_struct *tsk)
 	tsec2->create_sid = tsec1->create_sid;
 	tsec2->keycreate_sid = tsec1->keycreate_sid;
 	tsec2->sockcreate_sid = tsec1->sockcreate_sid;
+
+	/* Retain ptracer SID across fork, if any.
+	   This will be reset by the ptrace hook upon any
+	   subsequent ptrace_attach operations. */
+	tsec2->ptrace_sid = tsec1->ptrace_sid;
 
 	return 0;
 }
@@ -4296,7 +4295,6 @@ static int selinux_setprocattr(struct task_struct *p,
 			       char *name, void *value, size_t size)
 {
 	struct task_security_struct *tsec;
-	struct task_struct *tracer;
 	u32 sid = 0;
 	int error;
 	char *str = value;
@@ -4385,24 +4383,18 @@ static int selinux_setprocattr(struct task_struct *p,
 		/* Check for ptracing, and update the task SID if ok.
 		   Otherwise, leave SID unchanged and fail. */
 		task_lock(p);
-		rcu_read_lock();
-		tracer = tracehook_tracer_task(p);
-		if (tracer != NULL) {
-			struct task_security_struct *ptsec = tracer->security;
-			u32 ptsid = ptsec->sid;
-			rcu_read_unlock();
-			error = avc_has_perm_noaudit(ptsid, sid,
+		if (p->ptrace & PT_PTRACED) {
+			error = avc_has_perm_noaudit(tsec->ptrace_sid, sid,
 						     SECCLASS_PROCESS,
 						     PROCESS__PTRACE, &avd);
 			if (!error)
 				tsec->sid = sid;
 			task_unlock(p);
-			avc_audit(ptsid, sid, SECCLASS_PROCESS,
+			avc_audit(tsec->ptrace_sid, sid, SECCLASS_PROCESS,
 				  PROCESS__PTRACE, &avd, error, NULL);
 			if (error)
 				return error;
 		} else {
-			rcu_read_unlock();
 			tsec->sid = sid;
 			task_unlock(p);
 		}

@@ -784,6 +784,7 @@ struct task_struct {
 	struct thread_info *thread_info;
 	atomic_t usage;
 	unsigned long flags;	/* per process flags, defined below */
+	unsigned long ptrace;
 
 	int lock_depth;		/* BKL lock depth */
 
@@ -814,6 +815,12 @@ struct task_struct {
 #endif
 
 	struct list_head tasks;
+	/*
+	 * ptrace_list/ptrace_children forms the list of my children
+	 * that were stolen by a ptracer.
+	 */
+	struct list_head ptrace_children;
+	struct list_head ptrace_list;
 
 	struct mm_struct *mm, *active_mm;
 
@@ -828,13 +835,15 @@ struct task_struct {
 	pid_t pid;
 	pid_t tgid;
 	/* 
-	 * pointers to parent process, youngest child, younger sibling,
+	 * pointers to (original) parent process, youngest child, younger sibling,
 	 * older sibling, respectively.  (p->father can be replaced with 
 	 * p->parent->pid)
 	 */
+	struct task_struct *real_parent; /* real parent process (when being debugged) */
 	struct task_struct *parent;	/* parent process */
 	/*
-	 * children/sibling forms the list of my children
+	 * children/sibling forms the list of my children plus the
+	 * tasks I'm ptracing.
 	 */
 	struct list_head children;	/* list of my children */
 	struct list_head sibling;	/* linkage in my parent's children list */
@@ -919,11 +928,6 @@ struct task_struct {
 
 	seccomp_t seccomp;
 
-#ifdef CONFIG_UTRACE
-	struct utrace *utrace;
-	unsigned long utrace_flags;
-#endif
-
 /* Thread group tracking */
    	u32 parent_exec_id;
    	u32 self_exec_id;
@@ -977,6 +981,8 @@ struct task_struct {
 
 	struct io_context *io_context;
 
+	unsigned long ptrace_message;
+	siginfo_t *last_siginfo; /* For ptrace use.  */
 /*
  * current io wait handle: wait queue entry to use for io waits
  * If this thread is processing aio, this points at the waitqueue
@@ -1010,10 +1016,6 @@ struct task_struct {
 
 	atomic_t fs_excl;	/* holding fs exclusive resources */
 	struct rcu_head rcu;
-
-#ifdef CONFIG_PTRACE
-	struct list_head ptracees;
-#endif
 
 	/*
 	 * cache last used pipe for splice
@@ -1257,7 +1259,6 @@ extern int kill_pg_info(int, struct siginfo *, pid_t);
 extern int kill_proc_info(int, struct siginfo *, pid_t);
 extern int kill_proc_info_as_uid(int, struct siginfo *, pid_t, uid_t, uid_t, u32);
 extern void do_notify_parent(struct task_struct *, int);
-extern void do_notify_parent_cldstop(struct task_struct *, int);
 extern void force_sig(int, struct task_struct *);
 extern void force_sig_specific(int, struct task_struct *);
 extern int send_sig(int, struct task_struct *, int);

@@ -336,6 +336,8 @@ beyond_if:
 	tsb_context_switch(current->mm);
 
 	start_thread32(regs, ex.a_entry, current->mm->start_stack);
+	if (current->ptrace & PT_PTRACED)
+		send_sig(SIGTRAP, current, 0);
 	return 0;
 }
 

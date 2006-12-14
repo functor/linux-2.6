@@ -11,7 +11,7 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/types.h>
-#include <linux/tracehook.h>
+#include <linux/ptrace.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
@@ -252,7 +252,7 @@ int unhandled_signal(struct task_struct *tsk, int sig)
 {
 	if (tsk->pid == 1)
 		return 1;
-	if (tracehook_consider_fatal_signal(tsk, sig))
+	if (tsk->ptrace & PT_PTRACED)
 		return 0;
 	return (tsk->sighand->action[sig-1].sa.sa_handler == SIG_IGN) ||
 		(tsk->sighand->action[sig-1].sa.sa_handler == SIG_DFL);

@@ -34,5 +34,3 @@ obj-$(CONFIG_KEXEC) += $(S390_KEXEC_OBJS)
 # This is just to get the dependencies...
 #
 binfmt_elf32.o:	$(TOPDIR)/fs/binfmt_elf.c
-
-CFLAGS_ptrace.o		+= -DUTS_MACHINE='"$(UTS_MACHINE)"'

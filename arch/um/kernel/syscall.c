@@ -15,6 +15,7 @@
 #include "linux/unistd.h"
 #include "linux/slab.h"
 #include "linux/utime.h"
+#include <linux/vs_base.h>
 #include <linux/vs_cvirt.h>
 
 #include "asm/mman.h"

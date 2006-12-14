@@ -931,6 +931,7 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 	if (IS_ERR(res))
 		goto out_unlock;
 	vx_propagate_xid(nd, inode);
+
 no_entry:
 	res = d_materialise_unique(dentry, inode);
 	if (res != NULL)

@@ -6,7 +6,6 @@
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
 #include <asm/machvec.h>
-
 #ifndef CONFIG_XEN
 
 #define dma_alloc_coherent      platform_dma_alloc_coherent
@@ -22,7 +21,6 @@
 #define dma_sync_single_for_device platform_dma_sync_single_for_device
 #define dma_sync_sg_for_device  platform_dma_sync_sg_for_device
 #define dma_mapping_error       platform_dma_mapping_error
-
 
 #else /* CONFIG_XEN */
 /* Needed for arch/i386/kernel/swiotlb.c and arch/i386/kernel/pci-dma-xen.c */

@@ -129,6 +129,8 @@ struct nvidia_par {
 	int fpHeight;
 	int PanelTweak;
 	int paneltweak;
+	int LVDS;
+	int pm_state;
 	u32 crtcSync_read;
 	u32 fpSyncs;
 	u32 dmaPut;

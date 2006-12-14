@@ -22,10 +22,9 @@
 #include <asm/auxio.h>
 #include <asm/sfafsr.h>
 #include <asm/pil.h>
+#include <asm/unistd.h>
 
 #define curptr      g6
-
-#define NR_SYSCALLS 300      /* Each OS is different... */
 
 	.text
 	.align		32
@@ -1410,6 +1409,7 @@ execve_merge:
 
 	.globl	sys_pipe, sys_sigpause, sys_nis_syscall
 	.globl	sys_rt_sigreturn
+	.globl	sys_ptrace
 	.globl	sys_sigaltstack
 	.align	32
 sys_pipe:	ba,pt		%xcc, sparc_pipe
@@ -1452,6 +1452,11 @@ sys32_rt_sigreturn:
 		 add		%o7, 1f-.-4, %o7
 		nop
 #endif
+sys_ptrace:	add		%sp, PTREGS_OFF, %o0
+		call		do_ptrace
+		 add		%o7, 1f-.-4, %o7
+		nop
+		.align		32
 1:		ldx		[%curptr + TI_FLAGS], %l5
 		andcc		%l5, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT), %g0
 		be,pt		%icc, rtrap

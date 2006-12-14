@@ -231,7 +231,7 @@ int generic_permission(struct inode *inode, int mask,
 
 static inline int vx_barrier(struct inode *inode)
 {
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN)) {
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN|VX_WATCH)) {
 		vxwprintk(1, "xid=%d did hit the barrier.",
 			vx_current_xid());
 		return 1;
@@ -816,9 +816,11 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 		goto need_lookup;
 	if (dentry->d_op && dentry->d_op->d_revalidate)
 		goto need_revalidate;
+done:
 	inode = dentry->d_inode;
 	if (!inode)
-		goto done;
+		goto no_inode;
+
 #ifdef CONFIG_VSERVER_FILESHARING
 	/* MEF: PlanetLab FS module assumes that any file that can be
 	 * named (e.g., via a cross mount) is not hidden from another
@@ -837,7 +839,7 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 		if (de && !vx_hide_check(0, de->vx_flags))
 			goto hidden;
 	}
-done:
+no_inode:
 	path->mnt = mnt;
 	path->dentry = dentry;
 	__follow_mount(path);

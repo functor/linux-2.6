@@ -61,7 +61,6 @@
 #include <asm/io.h>
 #include <setup_arch.h>
 #include <bios_ebda.h>
-#include <asm/apic.h>
 
 /* Forward Declaration. */
 void __init find_max_pfn(void);
@@ -866,7 +865,7 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 
 #ifdef CONFIG_X86_LOCAL_APIC
 		/* enable local APIC */
-		else if (!memcmp(from, "lapic", 5) || !memcmp(from, "apic", 4))
+		else if (!memcmp(from, "lapic", 5))
 			lapic_enable();
 
 		/* disable local APIC */
@@ -1544,10 +1543,6 @@ void __init setup_arch(char **cmdline_p)
 	if (efi_enabled)
 		efi_map_memmap();
 
-#ifdef CONFIG_X86_APIC_AUTO
-	dmi_check_apic();
-#endif
-
 #ifdef CONFIG_ACPI
 	/*
 	 * Parse the ACPI tables for possible boot-time SMP configuration.
@@ -1570,7 +1565,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 #endif
 #ifdef CONFIG_X86_LOCAL_APIC
-	if (smp_found_config && cpu_has_apic)
+	if (smp_found_config)
 		get_smp_config();
 #endif
 

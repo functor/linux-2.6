@@ -79,7 +79,7 @@ static inline unsigned long idx_to_kaddr(unsigned int idx)
 
 #define PKT_PROT_LEN 64
 
-static struct {
+static struct pending_tx_info {
 	netif_tx_request_t req;
 	netif_t *netif;
 } pending_tx_info[MAX_PENDING_REQS];
@@ -375,14 +375,22 @@ static u16 netbk_gop_frag(netif_t *netif, struct netbk_rx_meta *meta,
 		   flipped. */
 		meta->copy = 1;
 		copy_gop = npo->copy + npo->copy_prod++;
-		copy_gop->source.domid = DOMID_SELF;
+		copy_gop->flags = GNTCOPY_dest_gref;
+		if (PageForeign(page)) {
+			struct pending_tx_info *src_pend =
+				&pending_tx_info[page->index];
+			copy_gop->source.domid = src_pend->netif->domid;
+			copy_gop->source.u.ref = src_pend->req.gref;
+			copy_gop->flags |= GNTCOPY_source_gref;
+		} else {
+			copy_gop->source.domid = DOMID_SELF;
+			copy_gop->source.u.gmfn = old_mfn;
+		}
 		copy_gop->source.offset = offset;
-		copy_gop->source.u.gmfn = old_mfn;
 		copy_gop->dest.domid = netif->domid;
 		copy_gop->dest.offset = 0;
 		copy_gop->dest.u.ref = req->gref;
 		copy_gop->len = size;
-		copy_gop->flags = GNTCOPY_dest_gref;
 	} else {
 		meta->copy = 0;
 		if (!xen_feature(XENFEAT_auto_translated_physmap)) {
@@ -876,20 +884,28 @@ static void netbk_tx_err(netif_t *netif, netif_tx_request_t *txp, RING_IDX end)
 	netif_put(netif);
 }
 
-static int netbk_count_requests(netif_t *netif, netif_tx_request_t *txp,
-				int work_to_do)
+static int netbk_count_requests(netif_t *netif, netif_tx_request_t *first,
+				netif_tx_request_t *txp, int work_to_do)
 {
-	netif_tx_request_t *first = txp;
 	RING_IDX cons = netif->tx.req_cons;
 	int frags = 0;
 
-	while (txp->flags & NETTXF_more_data) {
+	if (!(first->flags & NETTXF_more_data))
+		return 0;
+
+	do {
 		if (frags >= work_to_do) {
 			DPRINTK("Need more frags\n");
 			return -frags;
 		}
 
-		txp = RING_GET_REQUEST(&netif->tx, cons + frags);
+		if (unlikely(frags >= MAX_SKB_FRAGS)) {
+			DPRINTK("Too many frags\n");
+			return -frags;
+		}
+
+		memcpy(txp, RING_GET_REQUEST(&netif->tx, cons + frags),
+		       sizeof(*txp));
 		if (txp->size > first->size) {
 			DPRINTK("Frags galore\n");
 			return -frags;
@@ -903,27 +919,25 @@ static int netbk_count_requests(netif_t *netif, netif_tx_request_t *txp,
 				txp->offset, txp->size);
 			return -frags;
 		}
-	}
+	} while ((txp++)->flags & NETTXF_more_data);
 
 	return frags;
 }
 
 static gnttab_map_grant_ref_t *netbk_get_requests(netif_t *netif,
 						  struct sk_buff *skb,
+						  netif_tx_request_t *txp,
 						  gnttab_map_grant_ref_t *mop)
 {
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
 	skb_frag_t *frags = shinfo->frags;
-	netif_tx_request_t *txp;
 	unsigned long pending_idx = *((u16 *)skb->data);
-	RING_IDX cons = netif->tx.req_cons;
 	int i, start;
 
 	/* Skip first skb fragment if it is on same page as header fragment. */
 	start = ((unsigned long)shinfo->frags[0].page == pending_idx);
 
-	for (i = start; i < shinfo->nr_frags; i++) {
-		txp = RING_GET_REQUEST(&netif->tx, cons++);
+	for (i = start; i < shinfo->nr_frags; i++, txp++) {
 		pending_idx = pending_ring[MASK_PEND_IDX(pending_cons++)];
 
 		gnttab_set_map_op(mop++, idx_to_kaddr(pending_idx),
@@ -1037,7 +1051,7 @@ static void netbk_fill_frags(struct sk_buff *skb)
 int netbk_get_extras(netif_t *netif, struct netif_extra_info *extras,
 		     int work_to_do)
 {
-	struct netif_extra_info *extra;
+	struct netif_extra_info extra;
 	RING_IDX cons = netif->tx.req_cons;
 
 	do {
@@ -1046,18 +1060,18 @@ int netbk_get_extras(netif_t *netif, struct netif_extra_info *extras,
 			return -EBADR;
 		}
 
-		extra = (struct netif_extra_info *)
-			RING_GET_REQUEST(&netif->tx, cons);
-		if (unlikely(!extra->type ||
-			     extra->type >= XEN_NETIF_EXTRA_TYPE_MAX)) {
+		memcpy(&extra, RING_GET_REQUEST(&netif->tx, cons),
+		       sizeof(extra));
+		if (unlikely(!extra.type ||
+			     extra.type >= XEN_NETIF_EXTRA_TYPE_MAX)) {
 			netif->tx.req_cons = ++cons;
-			DPRINTK("Invalid extra type: %d\n", extra->type);
+			DPRINTK("Invalid extra type: %d\n", extra.type);
 			return -EINVAL;
 		}
 
-		memcpy(&extras[extra->type - 1], extra, sizeof(*extra));
+		memcpy(&extras[extra.type - 1], &extra, sizeof(extra));
 		netif->tx.req_cons = ++cons;
-	} while (extra->flags & XEN_NETIF_EXTRA_FLAG_MORE);
+	} while (extra.flags & XEN_NETIF_EXTRA_FLAG_MORE);
 
 	return work_to_do;
 }
@@ -1092,6 +1106,7 @@ static void net_tx_action(unsigned long unused)
 	struct sk_buff *skb;
 	netif_t *netif;
 	netif_tx_request_t txreq;
+	netif_tx_request_t txfrags[MAX_SKB_FRAGS];
 	struct netif_extra_info extras[XEN_NETIF_EXTRA_TYPE_MAX - 1];
 	u16 pending_idx;
 	RING_IDX i;
@@ -1168,18 +1183,12 @@ static void net_tx_action(unsigned long unused)
 			}
 		}
 
-		ret = netbk_count_requests(netif, &txreq, work_to_do);
+		ret = netbk_count_requests(netif, &txreq, txfrags, work_to_do);
 		if (unlikely(ret < 0)) {
 			netbk_tx_err(netif, &txreq, i - ret);
 			continue;
 		}
 		i += ret;
-
-		if (unlikely(ret > MAX_SKB_FRAGS)) {
-			DPRINTK("Too many frags\n");
-			netbk_tx_err(netif, &txreq, i);
-			continue;
-		}
 
 		if (unlikely(txreq.size < ETH_HLEN)) {
 			DPRINTK("Bad packet size: %d\n", txreq.size);
@@ -1249,7 +1258,7 @@ static void net_tx_action(unsigned long unused)
 
 		pending_cons++;
 
-		mop = netbk_get_requests(netif, skb, mop);
+		mop = netbk_get_requests(netif, skb, txfrags, mop);
 
 		netif->tx.req_cons = i;
 		netif_schedule_work(netif);
@@ -1339,6 +1348,7 @@ static void netif_page_release(struct page *page)
 {
 	/* Ready for next use. */
 	init_page_count(page);
+
 	netif_idx_release(page->index);
 }
 

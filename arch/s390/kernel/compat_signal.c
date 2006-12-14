@@ -28,7 +28,6 @@
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
 #include <asm/lowcore.h>
-#include <linux/tracehook.h>
 #include "compat_linux.h"
 #include "compat_ptrace.h"
 
@@ -580,9 +579,7 @@ handle_signal32(unsigned long sig, struct k_sigaction *ka,
 			sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
-
-		tracehook_report_handle_signal(sig, ka, oldset, regs);
 	}
-
 	return ret;
 }
+

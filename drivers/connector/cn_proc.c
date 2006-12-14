@@ -62,8 +62,8 @@ void proc_fork_connector(struct task_struct *task)
 	ktime_get_ts(&ts); /* get high res monotonic timestamp */
 	ev->timestamp_ns = timespec_to_ns(&ts);
 	ev->what = PROC_EVENT_FORK;
-	ev->event_data.fork.parent_pid = task->parent->pid;
-	ev->event_data.fork.parent_tgid = task->parent->tgid;
+	ev->event_data.fork.parent_pid = task->real_parent->pid;
+	ev->event_data.fork.parent_tgid = task->real_parent->tgid;
 	ev->event_data.fork.child_pid = task->pid;
 	ev->event_data.fork.child_tgid = task->tgid;
 

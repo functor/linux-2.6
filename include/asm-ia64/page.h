@@ -278,5 +278,5 @@ extern struct address_space xen_ia64_foreign_dummy_mapping;
 #endif /* CONFIG_XEN */
 #endif /* __ASSEMBLY__ */
 #define devmem_is_allowed(x) 1
-# endif /* __KERNEL__ */
+#endif /* __KERNEL__ */
 #endif /* _ASM_IA64_PAGE_H */

@@ -1321,7 +1321,7 @@ asmlinkage long sys_getpid(void)
 }
 
 /*
- * Accessing ->parent is not SMP-safe, it could
+ * Accessing ->real_parent is not SMP-safe, it could
  * change from under us. However, we can use a stale
  * value of ->real_parent under rcu_read_lock(), see
  * release_task()->call_rcu(delayed_put_task_struct).
@@ -1331,7 +1331,7 @@ asmlinkage long sys_getppid(void)
 	int pid;
 
 	rcu_read_lock();
-	pid = rcu_dereference(current->parent)->tgid;
+	pid = rcu_dereference(current->real_parent)->tgid;
 	rcu_read_unlock();
 	return vx_map_pid(pid);
 }

@@ -545,35 +545,6 @@ config STOP_MACHINE
 	  Need stop_machine() primitive.
 endmenu
 
-menu "Process debugging support"
-
-config UTRACE
-	bool "Infrastructure for tracing and debugging user processes"
-	default y
-	help
-	  Enable the utrace process tracing interface.
-	  This is an internal kernel interface to track events in user
-	  threads, extract and change user thread state.  This interface
-	  is exported to kernel modules, and is also used to implement ptrace.
-	  If you disable this, no facilities for debugging user processes
-	  will be available, nor the facilities used by UML and other
-	  applications.  Unless you are making a specially stripped-down
-	  kernel and are very sure you don't need these facilitiies,
-	  say Y.
-
-config PTRACE
-	bool "Legacy ptrace system call interface"
-	default y
-	depends on UTRACE
-	help
-	  Enable the ptrace system call.
-	  This is traditionally used by debuggers like GDB,
-	  and is used by UML and some other applications.
-	  Unless you are very sure you won't run anything that needs it,
-	  say Y.
-
-endmenu
-
 menu "Block layer"
 source "block/Kconfig"
 endmenu

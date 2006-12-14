@@ -4704,7 +4704,6 @@ e1000_resume(struct pci_dev *pdev)
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	uint32_t manc, ret_val;
-	int err;
 
 	pci_set_power_state(pdev, PCI_D0);
 	e1000_pci_restore_state(adapter);
@@ -4714,8 +4713,8 @@ e1000_resume(struct pci_dev *pdev)
 	pci_enable_wake(pdev, PCI_D3hot, 0);
 	pci_enable_wake(pdev, PCI_D3cold, 0);
 
-	if (netif_running(netdev) && (err = e1000_request_irq(adapter)))
-		return err;
+	if (netif_running(netdev) && (ret_val = e1000_request_irq(adapter)))
+		return ret_val;
 
 	e1000_power_up_phy(adapter);
 	e1000_reset(adapter);
