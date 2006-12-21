@@ -65,7 +65,6 @@
 #include "mach_time.h"
 
 #include <linux/timex.h>
-#include <linux/config.h>
 
 #include <asm/hpet.h>
 
@@ -89,6 +88,13 @@ struct timespec __xtime __section_xtime;
 struct timezone __sys_tz __section_sys_tz;
 #endif
 
+#define USEC_PER_TICK (USEC_PER_SEC / HZ)
+#define NSEC_PER_TICK (NSEC_PER_SEC / HZ)
+#define FSEC_PER_TICK (FSEC_PER_SEC / HZ)
+
+#define NS_SCALE	10 /* 2^10, carefully chosen */
+#define US_SCALE	32 /* 2^32, arbitralrily chosen */
+
 unsigned int cpu_khz;	/* Detected as we calibrate the TSC */
 EXPORT_SYMBOL(cpu_khz);
 
@@ -97,17 +103,9 @@ extern unsigned long wall_jiffies;
 DEFINE_SPINLOCK(rtc_lock);
 EXPORT_SYMBOL(rtc_lock);
 
-#if defined (__i386__)
-#include <asm/i8253.h>
-#endif
-
-DEFINE_SPINLOCK(i8253_lock);
-EXPORT_SYMBOL(i8253_lock);
-
 extern struct init_timer_opts timer_tsc_init;
 extern struct timer_opts timer_tsc;
 #define timer_none timer_tsc
-struct timer_opts *cur_timer __read_mostly = &timer_tsc;
 
 /* These are peridically updated in shared_info, and then copied here. */
 struct shadow_time_info {
@@ -166,7 +164,9 @@ static int __init __permitted_clock_jitter(char *str)
 }
 __setup("permitted_clock_jitter=", __permitted_clock_jitter);
 
+#ifndef CONFIG_X86
 int tsc_disable __devinitdata = 0;
+#endif
 
 static void delay_tsc(unsigned long loops)
 {
@@ -210,7 +210,7 @@ static inline u64 scale_delta(u64 delta, u32 mul_frac, int shift)
 		"add  %4,%%eax ; "
 		"adc  %5,%%edx ; "
 		: "=A" (product), "=r" (tmp1), "=r" (tmp2)
-		: "a" ((u32)delta), "1" ((u32)(delta >> 32)), "2" (mul_frac) );
+		: "a" ((u32)delta), "1" ((u32)(delta >> US_SCALE)), "2" (mul_frac) );
 #else
 	__asm__ (
 		"mul %%rdx ; shrd $32,%%rdx,%%rax"
@@ -230,7 +230,7 @@ int read_current_timer(unsigned long *timer_val)
 
 void init_cpu_khz(void)
 {
-	u64 __cpu_khz = 1000000ULL << 32;
+	u64 __cpu_khz = 1000000ULL << US_SCALE;
 	struct vcpu_time_info *info;
 	info = &HYPERVISOR_shared_info->vcpu_info[0].time;
 	do_div(__cpu_khz, info->tsc_to_system_mul);
@@ -470,8 +470,7 @@ int do_settimeofday(struct timespec *tv)
 	sec = tv->tv_sec;
 	__normalize_time(&sec, &nsec);
 
-	if ((xen_start_info->flags & SIF_INITDOMAIN) &&
-	    !independent_wallclock) {
+	if (is_initial_xendomain() && !independent_wallclock) {
 		op.cmd = DOM0_SETTIME;
 		op.u.settime.secs        = sec;
 		op.u.settime.nsecs       = nsec;
@@ -502,8 +501,7 @@ static void sync_xen_wallclock(unsigned long dummy)
 	s64 nsec;
 	dom0_op_t op;
 
-	if (!ntp_synced() || independent_wallclock ||
-	    !(xen_start_info->flags & SIF_INITDOMAIN))
+	if (!ntp_synced() || independent_wallclock || !is_initial_xendomain())
 		return;
 
 	write_seqlock_irq(&xtime_lock);
@@ -529,19 +527,18 @@ static void sync_xen_wallclock(unsigned long dummy)
 static int set_rtc_mmss(unsigned long nowtime)
 {
 	int retval;
+	unsigned long flags;
 
-	WARN_ON(irqs_disabled());
-
-	if (independent_wallclock || !(xen_start_info->flags & SIF_INITDOMAIN))
+	if (independent_wallclock || !is_initial_xendomain())
 		return 0;
 
 	/* gets recalled with irq locally disabled */
-	spin_lock_irq(&rtc_lock);
+	spin_lock_irqsave(&rtc_lock, flags);
 	if (efi_enabled)
 		retval = efi_set_rtc_mmss(nowtime);
 	else
 		retval = mach_set_rtc_mmss(nowtime);
-	spin_unlock_irq(&rtc_lock);
+	spin_unlock_irqrestore(&rtc_lock, flags);
 
 	return retval;
 }
@@ -589,7 +586,7 @@ unsigned long profile_pc(struct pt_regs *regs)
 	   is just accounted to the spinlock function.
 	   Better would be to write these functions in assembler again
 	   and check exactly. */
-	if (in_lock_functions(pc)) {
+	if (!user_mode_vm(regs) && in_lock_functions(pc)) {
 		char *v = *(char **)regs->rsp;
 		if ((v >= _stext && v <= _etext) ||
 			(v >= _sinittext && v <= _einittext) ||
@@ -598,7 +595,7 @@ unsigned long profile_pc(struct pt_regs *regs)
 		return ((unsigned long *)regs->rsp)[1];
 	}
 #else
-	if (in_lock_functions(pc))
+	if (!user_mode_vm(regs) && in_lock_functions(pc))
 		return *(unsigned long *)(regs->ebp + 4);
 #endif
 
@@ -743,15 +740,16 @@ static void init_missing_ticks_accounting(int cpu)
 unsigned long get_cmos_time(void)
 {
 	unsigned long retval;
+	unsigned long flags;
 
-	spin_lock(&rtc_lock);
+	spin_lock_irqsave(&rtc_lock, flags);
 
 	if (efi_enabled)
 		retval = efi_get_time();
 	else
 		retval = mach_get_cmos_time();
 
-	spin_unlock(&rtc_lock);
+	spin_unlock_irqrestore(&rtc_lock, flags);
 
 	return retval;
 }
@@ -809,7 +807,6 @@ void notify_arch_cmos_timer(void)
 
 static long clock_cmos_diff, sleep_start;
 
-static struct timer_opts *last_timer;
 static int timer_suspend(struct sys_device *dev, pm_message_t state)
 {
 	/*
@@ -818,10 +815,6 @@ static int timer_suspend(struct sys_device *dev, pm_message_t state)
 	clock_cmos_diff = -get_cmos_time();
 	clock_cmos_diff += get_seconds();
 	sleep_start = get_cmos_time();
-	last_timer = cur_timer;
-	cur_timer = &timer_none;
-	if (last_timer->suspend)
-		last_timer->suspend(state);
 	return 0;
 }
 
@@ -843,10 +836,6 @@ static int timer_resume(struct sys_device *dev)
 	jiffies_64 += sleep_length;
 	wall_jiffies += sleep_length;
 	write_sequnlock_irqrestore(&xtime_lock, flags);
-	if (last_timer->resume)
-		last_timer->resume();
-	cur_timer = last_timer;
-	last_timer = NULL;
 	touch_softlockup_watchdog();
 	return 0;
 }
@@ -887,10 +876,6 @@ static void __init hpet_time_init(void)
 	if ((hpet_enable() >= 0) && hpet_use_timer) {
 		printk("Using HPET for base-timer\n");
 	}
-
-	cur_timer = select_timer();
-	printk(KERN_INFO "Using %s for high-res timesource\n",cur_timer->name);
-
 	time_init_hook();
 }
 #endif
@@ -938,8 +923,8 @@ void __init time_init(void)
 
 #if defined(__x86_64__)
 	vxtime.mode = VXTIME_TSC;
-	vxtime.quot = (1000000L << 32) / vxtime_hz;
-	vxtime.tsc_quot = (1000L << 32) / cpu_khz;
+	vxtime.quot = (1000000L << US_SCALE) / vxtime_hz;
+	vxtime.tsc_quot = (1000L << US_SCALE) / cpu_khz;
 	sync_core();
 	rdtscll(vxtime.last_tsc);
 #endif
@@ -1011,14 +996,14 @@ static void start_hz_timer(void)
 	cpu_clear(smp_processor_id(), nohz_cpu_mask);
 }
 
-void safe_halt(void)
+void raw_safe_halt(void)
 {
 	stop_hz_timer();
 	/* Blocking includes an implicit local_irq_enable(). */
 	HYPERVISOR_block();
 	start_hz_timer();
 }
-EXPORT_SYMBOL(safe_halt);
+EXPORT_SYMBOL(raw_safe_halt);
 
 void halt(void)
 {

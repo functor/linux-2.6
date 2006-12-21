@@ -10,7 +10,6 @@
  *
  * Hacked to pieces for Xen by Chris Wright.
  */
-#include <linux/config.h>
 #include <linux/threads.h>
 #include <linux/cpumask.h>
 #include <linux/string.h>
@@ -82,24 +81,6 @@ static void xen_init_apic_ldr(void)
 	return;
 }
 
-static void xen_send_IPI_allbutself(int vector)
-{
-	/*
-	 * if there are no other CPUs in the system then
-	 * we get an APIC send error if we try to broadcast.
-	 * thus we have to avoid sending IPIs in this case.
-	 */
-	Dprintk("%s\n", __FUNCTION__);
-	if (num_online_cpus() > 1)
-		xen_send_IPI_shortcut(APIC_DEST_ALLBUT, vector, APIC_DEST_LOGICAL);
-}
-
-static void xen_send_IPI_all(int vector)
-{
-	Dprintk("%s\n", __FUNCTION__);
-	xen_send_IPI_shortcut(APIC_DEST_ALLINC, vector, APIC_DEST_LOGICAL);
-}
-
 static void xen_send_IPI_mask(cpumask_t cpumask, int vector)
 {
 	unsigned long mask = cpus_addr(cpumask)[0];
@@ -116,6 +97,40 @@ static void xen_send_IPI_mask(cpumask_t cpumask, int vector)
 		}
 	}
 	local_irq_restore(flags);
+}
+
+static void xen_send_IPI_allbutself(int vector)
+{
+#ifdef	CONFIG_HOTPLUG_CPU
+	int hotplug = 1;
+#else
+	int hotplug = 0;
+#endif
+	/*
+	 * if there are no other CPUs in the system then
+	 * we get an APIC send error if we try to broadcast.
+	 * thus we have to avoid sending IPIs in this case.
+	 */
+	Dprintk("%s\n", __FUNCTION__);
+	if (hotplug || vector == NMI_VECTOR) {
+		cpumask_t allbutme = cpu_online_map;
+
+		cpu_clear(smp_processor_id(), allbutme);
+
+		if (!cpus_empty(allbutme))
+			xen_send_IPI_mask(allbutme, vector);
+	} else if (num_online_cpus() > 1) {
+		xen_send_IPI_shortcut(APIC_DEST_ALLBUT, vector, APIC_DEST_LOGICAL);
+	}
+}
+
+static void xen_send_IPI_all(int vector)
+{
+	Dprintk("%s\n", __FUNCTION__);
+	if (vector == NMI_VECTOR)
+		xen_send_IPI_mask(cpu_online_map, vector);
+	else
+		xen_send_IPI_shortcut(APIC_DEST_ALLINC, vector, APIC_DEST_LOGICAL);
 }
 
 #ifdef CONFIG_XEN_PRIVILEGED_GUEST
@@ -135,8 +150,7 @@ static unsigned int xen_cpu_mask_to_apicid(cpumask_t cpumask)
 
 static unsigned int phys_pkg_id(int index_msb)
 {
-	u32 ebx;
-
+	int ebx;
 	Dprintk("%s\n", __FUNCTION__);
 	ebx = cpuid_ebx(1);
 	return ((ebx >> 24) & 0xFF) >> index_msb;

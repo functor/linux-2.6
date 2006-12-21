@@ -84,11 +84,6 @@ static ssize_t microcode_write (struct file *file, const char __user *buf, size_
 {
 	ssize_t ret;
 
-	if (len < DEFAULT_UCODE_TOTALSIZE) {
-		printk(KERN_ERR "microcode: not enough data\n"); 
-		return -EINVAL;
-	}
-
 	if ((len >> PAGE_SHIFT) > num_physpages) {
 		printk(KERN_ERR "microcode: too much data (max %ld pages)\n", num_physpages);
 		return -EINVAL;
@@ -117,7 +112,6 @@ static struct file_operations microcode_fops = {
 static struct miscdevice microcode_dev = {
 	.minor		= MICROCODE_MINOR,
 	.name		= "microcode",
-	.devfs_name	= "cpu/microcode",
 	.fops		= &microcode_fops,
 };
 

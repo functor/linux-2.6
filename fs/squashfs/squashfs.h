@@ -49,7 +49,7 @@ static inline struct squashfs_inode_info *SQUASHFS_I(struct inode *inode)
 #define SQSH_EXTERN
 extern unsigned int squashfs_read_data(struct super_block *s, char *buffer,
 				long long index, unsigned int length,
-				long long *next_index);
+				long long *next_index, int srclength);
 extern int squashfs_get_cached_block(struct super_block *s, char *buffer,
 				long long block, unsigned int offset,
 				int length, long long *next_block,

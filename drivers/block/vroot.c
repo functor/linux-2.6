@@ -6,21 +6,20 @@
  *
  *  based on the loop.c code by Theodore Ts'o.
  *
- * Copyright (C) 2002-2005 by Herbert Pötzl.
+ * Copyright (C) 2002-2006 by Herbert Pötzl.
  * Redistribution of this file is permitted under the
  * GNU General Public License.
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/file.h>
 #include <linux/major.h>
 #include <linux/blkdev.h>
-#include <linux/devfs_fs_kernel.h>
 
 #include <linux/vroot.h>
+#include <linux/vserver/debug.h>
 
 
 static int max_vroot = 8;
@@ -60,9 +59,9 @@ static int vroot_set_dev(
 	} else
 		goto out_fput;
 
-	printk(KERN_INFO "vroot[%d]_set_dev: dev=%p[%d,%d]\n",
-		vr->vr_number, real_bdev,
-		imajor(real_bdev->bd_inode), iminor(real_bdev->bd_inode));
+	vxdprintk(VXD_CBIT(misc, 0),
+		"vroot[%d]_set_dev: dev=" VXF_DEV,
+		vr->vr_number, VXD_DEV(real_bdev));
 
 	vr->vr_state = Vr_bound;
 	error = 0;
@@ -87,9 +86,9 @@ static int vroot_clr_dev(
 
 	real_bdev = vr->vr_device;
 
-	printk(KERN_INFO "vroot[%d]_clr_dev: dev=%p[%d,%d]\n",
-		vr->vr_number, real_bdev,
-		imajor(real_bdev->bd_inode), iminor(real_bdev->bd_inode));
+	vxdprintk(VXD_CBIT(misc, 0),
+		"vroot[%d]_clr_dev: dev=" VXF_DEV,
+		vr->vr_number, VXD_DEV(real_bdev));
 
 	bdput(real_bdev);
 	vr->vr_state = Vr_unbound;
@@ -147,7 +146,7 @@ static struct block_device_operations vr_fops = {
 	.ioctl =	vr_ioctl,
 };
 
-struct block_device *vroot_get_real_bdev(struct block_device *bdev)
+struct block_device *__vroot_get_real_bdev(struct block_device *bdev)
 {
 	struct inode *inode = bdev->bd_inode;
 	struct vroot_device *vr;
@@ -157,9 +156,9 @@ struct block_device *vroot_get_real_bdev(struct block_device *bdev)
 	vr = &vroot_dev[minor];
 	real_bdev = vr->vr_device;
 
-	printk(KERN_INFO "vroot[%d]_get_real_bdev: dev=%p[%p,%d,%d]\n",
-		vr->vr_number, real_bdev, real_bdev->bd_inode,
-		imajor(real_bdev->bd_inode), iminor(real_bdev->bd_inode));
+	vxdprintk(VXD_CBIT(misc, 0),
+		"vroot[%d]_get_real_bdev: dev=" VXF_DEV,
+		vr->vr_number, VXD_DEV(real_bdev));
 
 	if (vr->vr_state != Vr_bound)
 		return ERR_PTR(-ENXIO);
@@ -184,7 +183,7 @@ MODULE_DESCRIPTION ("Virtual Root Device Mapper");
 
 int __init vroot_init(void)
 {
-	int	i;
+	int err, i;
 
 	if (max_vroot < 1 || max_vroot > 256) {
 		max_vroot = MAX_VROOT_DEFAULT;
@@ -196,6 +195,7 @@ int __init vroot_init(void)
 	if (register_blkdev(VROOT_MAJOR, "vroot"))
 		return -EIO;
 
+	err = -ENOMEM;
 	vroot_dev = kmalloc(max_vroot * sizeof(struct vroot_device), GFP_KERNEL);
 	if (!vroot_dev)
 		goto out_mem1;
@@ -211,8 +211,6 @@ int __init vroot_init(void)
 			goto out_mem3;
 	}
 
-	devfs_mk_dir("vroot");
-
 	for (i = 0; i < max_vroot; i++) {
 		struct vroot_device *vr = &vroot_dev[i];
 		struct gendisk *disk = disks[i];
@@ -224,9 +222,12 @@ int __init vroot_init(void)
 		disk->first_minor = i;
 		disk->fops = &vr_fops;
 		sprintf(disk->disk_name, "vroot%d", i);
-		sprintf(disk->devfs_name, "vroot/%d", i);
 		disk->private_data = vr;
 	}
+
+	err = register_vroot_grb(&__vroot_get_real_bdev);
+	if (err)
+		goto out_mem3;
 
 	for (i = 0; i < max_vroot; i++)
 		add_disk(disks[i]);
@@ -242,18 +243,20 @@ out_mem2:
 out_mem1:
 	unregister_blkdev(VROOT_MAJOR, "vroot");
 	printk(KERN_ERR "vroot: ran out of memory\n");
-	return -ENOMEM;
+	return err;
 }
 
 void vroot_exit(void)
 {
 	int i;
 
+	if (unregister_vroot_grb(&__vroot_get_real_bdev))
+		printk(KERN_WARNING "vroot: cannot unregister grb\n");
+
 	for (i = 0; i < max_vroot; i++) {
 		del_gendisk(disks[i]);
 		put_disk(disks[i]);
 	}
-	devfs_remove("vroot");
 	if (unregister_blkdev(VROOT_MAJOR, "vroot"))
 		printk(KERN_WARNING "vroot: cannot unregister blkdev\n");
 
@@ -263,4 +266,16 @@ void vroot_exit(void)
 
 module_init(vroot_init);
 module_exit(vroot_exit);
+
+#ifndef MODULE
+
+static int __init max_vroot_setup(char *str)
+{
+	max_vroot = simple_strtol(str, NULL, 0);
+	return 1;
+}
+
+__setup("max_vroot=", max_vroot_setup);
+
+#endif
 

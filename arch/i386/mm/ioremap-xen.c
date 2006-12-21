@@ -22,21 +22,14 @@
 #define ISA_START_ADDRESS	0x0
 #define ISA_END_ADDRESS		0x100000
 
-#if 0 /* not PAE safe */
-/* These hacky macros avoid phys->machine translations. */
-#define __direct_pte(x) ((pte_t) { (x) } )
-#define __direct_mk_pte(page_nr,pgprot) \
-  __direct_pte(((page_nr) << PAGE_SHIFT) | pgprot_val(pgprot))
-#define direct_mk_pte_phys(physpage, pgprot) \
-  __direct_mk_pte((physpage) >> PAGE_SHIFT, pgprot)
-#endif
-
 static int direct_remap_area_pte_fn(pte_t *pte, 
 				    struct page *pmd_page,
 				    unsigned long address, 
 				    void *data)
 {
 	mmu_update_t **v = (mmu_update_t **)data;
+
+	BUG_ON(!pte_none(*pte));
 
 	(*v)->ptr = ((u64)pfn_to_mfn(page_to_pfn(pmd_page)) <<
 		     PAGE_SHIFT) | ((unsigned long)pte & ~PAGE_MASK);
@@ -66,17 +59,16 @@ static int __direct_remap_pfn_range(struct mm_struct *mm,
 
 	for (i = 0; i < size; i += PAGE_SIZE) {
 		if ((v - u) == (PAGE_SIZE / sizeof(mmu_update_t))) {
-			/* Fill in the PTE pointers. */
+			/* Flush a full batch after filling in the PTE ptrs. */
 			rc = apply_to_page_range(mm, start_address, 
 						 address - start_address,
 						 direct_remap_area_pte_fn, &w);
 			if (rc)
 				goto out;
-			w = u;
 			rc = -EFAULT;
 			if (HYPERVISOR_mmu_update(u, v - u, NULL, domid) < 0)
 				goto out;
-			v = u;
+			v = w = u;
 			start_address = address;
 		}
 
@@ -92,7 +84,7 @@ static int __direct_remap_pfn_range(struct mm_struct *mm,
 	}
 
 	if (v != u) {
-		/* get the ptep's filled in */
+		/* Final batch. */
 		rc = apply_to_page_range(mm, start_address,
 					 address - start_address,
 					 direct_remap_area_pte_fn, &w);
@@ -120,11 +112,13 @@ int direct_remap_pfn_range(struct vm_area_struct *vma,
 			   pgprot_t prot,
 			   domid_t  domid)
 {
-	/* Same as remap_pfn_range(). */
-	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP;
+	if (xen_feature(XENFEAT_auto_translated_physmap))
+		return remap_pfn_range(vma, address, mfn, size, prot);
 
 	if (domid == DOMID_SELF)
 		return -EINVAL;
+
+	vma->vm_flags |= VM_IO | VM_RESERVED;
 
 	vma->vm_mm->context.has_foreign_mappings = 1;
 
@@ -179,32 +173,6 @@ int touch_pte_range(struct mm_struct *mm,
 
 EXPORT_SYMBOL(touch_pte_range);
 
-void *vm_map_xen_pages (unsigned long maddr, int vm_size, pgprot_t prot)
-{
-	int error;
-       
-	struct vm_struct *vma;
-	vma = get_vm_area (vm_size, VM_IOREMAP);
-      
-	if (vma == NULL) {
-		printk ("ioremap.c,vm_map_xen_pages(): "
-			"Failed to get VMA area\n");
-		return NULL;
-	}
-
-	error = direct_kernel_remap_pfn_range((unsigned long) vma->addr,
-					      maddr >> PAGE_SHIFT, vm_size,
-					      prot, DOMID_SELF );
-	if (error == 0) {
-		return vma->addr;
-	} else {
-		printk ("ioremap.c,vm_map_xen_pages(): "
-			"Failed to map xen shared pages into kernel space\n");
-		return NULL;
-	}
-}
-EXPORT_SYMBOL(vm_map_xen_pages);
-
 /*
  * Does @address reside within a non-highmem page that is local to this virtual
  * machine (i.e., not an I/O page, nor a memory page belonging to another VM).
@@ -245,7 +213,7 @@ void __iomem * __ioremap(unsigned long phys_addr, unsigned long size, unsigned l
 	/*
 	 * Don't remap the low PCI/ISA area, it's always mapped..
 	 */
-	if (xen_start_info->flags & SIF_PRIVILEGED &&
+	if (is_initial_xendomain() &&
 	    phys_addr >= ISA_START_ADDRESS && last_addr < ISA_END_ADDRESS)
 		return (void __iomem *) isa_bus_to_virt(phys_addr);
 
@@ -282,9 +250,6 @@ void __iomem * __ioremap(unsigned long phys_addr, unsigned long size, unsigned l
 	area->phys_addr = phys_addr;
 	addr = (void __iomem *) area->addr;
 	flags |= _PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED;
-#ifdef __x86_64__
-	flags |= _PAGE_USER;
-#endif
 	if (__direct_remap_pfn_range(&init_mm, (unsigned long)addr,
 				     phys_addr>>PAGE_SHIFT,
 				     size, __pgprot(flags), domid)) {
@@ -423,7 +388,7 @@ void __init *bt_ioremap(unsigned long phys_addr, unsigned long size)
 	/*
 	 * Don't remap the low PCI/ISA area, it's always mapped..
 	 */
-	if (xen_start_info->flags & SIF_PRIVILEGED &&
+	if (is_initial_xendomain() &&
 	    phys_addr >= ISA_START_ADDRESS && last_addr < ISA_END_ADDRESS)
 		return isa_bus_to_virt(phys_addr);
 
