@@ -31,6 +31,41 @@ EXPORT_SYMBOL(bad_dma_address);
 int iommu_bio_merge __read_mostly = 0;
 EXPORT_SYMBOL(iommu_bio_merge);
 
+int iommu_sac_force __read_mostly = 0;
+EXPORT_SYMBOL(iommu_sac_force);
+
+int no_iommu __read_mostly;
+#ifdef CONFIG_IOMMU_DEBUG
+int panic_on_overflow __read_mostly = 1;
+int force_iommu __read_mostly = 1;
+#else
+int panic_on_overflow __read_mostly = 0;
+int force_iommu __read_mostly= 0;
+#endif
+
+/* Set this to 1 if there is a HW IOMMU in the system */
+int iommu_detected __read_mostly = 0;
+
+void __init pci_iommu_alloc(void)
+{
+	/*
+	 * The order of these functions is important for
+	 * fall-back/fail-over reasons
+	 */
+#ifdef CONFIG_IOMMU
+	iommu_hole_init();
+#endif
+
+#ifdef CONFIG_CALGARY_IOMMU
+#include <asm/calgary.h>
+	detect_calgary();
+#endif
+
+#ifdef CONFIG_SWIOTLB
+	pci_swiotlb_init();
+#endif
+}
+
 __init int iommu_setup(char *p)
 {
     return 1;

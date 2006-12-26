@@ -23,11 +23,10 @@
  * This file handles the architecture-dependent parts of initialization
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/mmzone.h>
-#include <linux/tty.h>
+#include <linux/screen_info.h>
 #include <linux/ioport.h>
 #include <linux/acpi.h>
 #include <linux/apm_bios.h>
@@ -67,7 +66,8 @@
 #include <xen/interface/physdev.h>
 #include <xen/interface/memory.h>
 #include <xen/features.h>
-#include "setup_arch_pre.h"
+#include <xen/xencons.h>
+#include "setup_arch.h"
 #include <bios_ebda.h>
 
 /* Forward Declaration. */
@@ -157,6 +157,10 @@ struct ist_info ist_info;
 EXPORT_SYMBOL(ist_info);
 #endif
 struct e820map e820;
+static void __init e820_setup_gap(struct e820entry *e820, int nr_map);
+#ifdef CONFIG_XEN
+struct e820map machine_e820;
+#endif
 
 extern void early_cpu_init(void);
 extern void generic_apic_probe(char *);
@@ -186,7 +190,6 @@ static struct resource code_resource = {
 	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
-#ifdef CONFIG_XEN_PRIVILEGED_GUEST
 static struct resource system_rom_resource = {
 	.name	= "System ROM",
 	.start	= 0xf0000,
@@ -242,7 +245,6 @@ static struct resource video_rom_resource = {
 	.end	= 0xc7fff,
 	.flags	= IORESOURCE_BUSY | IORESOURCE_READONLY | IORESOURCE_MEM
 };
-#endif
 
 static struct resource video_ram_resource = {
 	.name	= "Video RAM area",
@@ -301,7 +303,6 @@ static struct resource standard_io_resources[] = { {
 #define STANDARD_IO_RESOURCES \
 	(sizeof standard_io_resources / sizeof standard_io_resources[0])
 
-#ifdef CONFIG_XEN_PRIVILEGED_GUEST
 #define romsignature(x) (*(unsigned short *)(x) == 0xaa55)
 
 static int __init romchecksum(unsigned char *rom, unsigned long length)
@@ -319,9 +320,11 @@ static void __init probe_roms(void)
 	unsigned char *rom;
 	int	      i;
 
+#ifdef CONFIG_XEN
 	/* Nothing to do if not running in dom0. */
-	if (!(xen_start_info->flags & SIF_INITDOMAIN))
+	if (!is_initial_xendomain())
 		return;
+#endif
 
 	/* video rom */
 	upper = adapter_rom_resources[0].start;
@@ -338,8 +341,6 @@ static void __init probe_roms(void)
 		/* if checksum okay, trust length byte */
 		if (length && romchecksum(rom, length))
 			video_rom_resource.end = start + length - 1;
-
-		request_resource(&iomem_resource, &video_rom_resource);
 		break;
 	}
 
@@ -381,7 +382,6 @@ static void __init probe_roms(void)
 		start = adapter_rom_resources[i++].end & ~2047UL;
 	}
 }
-#endif
 
 /*
  * Point at the empty zero page to start with. We map the real shared_info
@@ -398,7 +398,7 @@ EXPORT_SYMBOL(phys_to_machine_mapping);
 start_info_t *xen_start_info;
 EXPORT_SYMBOL(xen_start_info);
 
-static void __init add_memory_region(unsigned long long start,
+void __init add_memory_region(unsigned long long start,
                                   unsigned long long size, int type)
 {
 	int x;
@@ -520,7 +520,7 @@ static struct change_member *change_point[2*E820MAX] __initdata;
 static struct e820entry *overlap_list[E820MAX] __initdata;
 static struct e820entry new_bios[E820MAX] __initdata;
 
-static int __init sanitize_e820_map(struct e820entry * biosmap, char * pnr_map)
+int __init sanitize_e820_map(struct e820entry * biosmap, char * pnr_map)
 {
 	struct change_member *change_tmp;
 	unsigned long current_type, last_type;
@@ -689,7 +689,7 @@ static int __init sanitize_e820_map(struct e820entry * biosmap, char * pnr_map)
  * thinkpad 560x, for example, does not cooperate with the memory
  * detection code.)
  */
-static int __init copy_e820_map(struct e820entry * biosmap, int nr_map)
+int __init copy_e820_map(struct e820entry * biosmap, int nr_map)
 {
 #ifndef CONFIG_XEN
 	/* Only one memory region (or negative)? Ignore it */
@@ -752,12 +752,6 @@ static inline void copy_edd(void)
 {
 }
 #endif
-
-/*
- * Do NOT EVER look at the BIOS memory size location.
- * It does not work on many machines.
- */
-#define LOWMEMSIZE()	(0x9f000)
 
 static void __init parse_cmdline_early (char ** cmdline_p)
 {
@@ -1147,10 +1141,10 @@ static int __init
 free_available_memory(unsigned long start, unsigned long end, void *arg)
 {
 	/* check max_low_pfn */
-	if (start >= ((max_low_pfn + 1) << PAGE_SHIFT))
+	if (start >= (max_low_pfn << PAGE_SHIFT))
 		return 0;
-	if (end >= ((max_low_pfn + 1) << PAGE_SHIFT))
-		end = (max_low_pfn + 1) << PAGE_SHIFT;
+	if (end >= (max_low_pfn << PAGE_SHIFT))
+		end = max_low_pfn << PAGE_SHIFT;
 	if (start < end)
 		free_bootmem(start, end - start);
 
@@ -1387,45 +1381,93 @@ void __init remapped_pgdat_init(void)
  * and also for regions reported as reserved by the e820.
  */
 static void __init
-legacy_init_iomem_resources(struct e820entry *e820, int nr_map,
-			    struct resource *code_resource,
-			    struct resource *data_resource)
+legacy_init_iomem_resources(struct resource *code_resource, struct resource *data_resource)
 {
 	int i;
+	struct e820entry *map = e820.map;
+	int nr_map = e820.nr_map;
+#ifdef CONFIG_XEN_PRIVILEGED_GUEST
+	struct xen_memory_map memmap;
 
-#if defined(CONFIG_XEN_PRIVILEGED_GUEST) || !defined(CONFIG_XEN)
-	probe_roms();
+	map = machine_e820.map;
+	memmap.nr_entries = E820MAX;
+
+	set_xen_guest_handle(memmap.buffer, map);
+
+	if(HYPERVISOR_memory_op(XENMEM_machine_memory_map, &memmap))
+		BUG();
+	machine_e820.nr_map = memmap.nr_entries;
+	nr_map = memmap.nr_entries;
+	e820_setup_gap(map, memmap.nr_entries);
 #endif
+
+	probe_roms();
 
 	for (i = 0; i < nr_map; i++) {
 		struct resource *res;
-		if (e820[i].addr + e820[i].size > 0x100000000ULL)
+		if (map[i].addr + map[i].size > 0x100000000ULL)
 			continue;
-		res = alloc_bootmem_low(sizeof(struct resource));
-		switch (e820[i].type) {
+		res = kzalloc(sizeof(struct resource), GFP_ATOMIC);
+		switch (map[i].type) {
 		case E820_RAM:	res->name = "System RAM"; break;
 		case E820_ACPI:	res->name = "ACPI Tables"; break;
 		case E820_NVS:	res->name = "ACPI Non-volatile Storage"; break;
 		default:	res->name = "reserved";
 		}
-		res->start = e820[i].addr;
-		res->end = res->start + e820[i].size - 1;
+		res->start = map[i].addr;
+		res->end = res->start + map[i].size - 1;
 		res->flags = IORESOURCE_MEM | IORESOURCE_BUSY;
-		request_resource(&iomem_resource, res);
-		if (e820[i].type == E820_RAM) {
+		if (request_resource(&iomem_resource, res)) {
+			kfree(res);
+			continue;
+		}
+		if (map[i].type == E820_RAM) {
 			/*
 			 *  We don't know which RAM region contains kernel data,
 			 *  so we try it repeatedly and let the resource manager
 			 *  test it.
 			 */
+#ifndef CONFIG_XEN
 			request_resource(res, code_resource);
 			request_resource(res, data_resource);
+#endif
 #ifdef CONFIG_KEXEC
 			request_resource(res, &crashk_res);
 #endif
 		}
 	}
 }
+
+/*
+ * Request address space for all standard resources
+ *
+ * This is called just before pcibios_init(), which is also a
+ * subsys_initcall, but is linked in later (in arch/i386/pci/common.c).
+ */
+static int __init request_standard_resources(void)
+{
+	int i;
+
+	/* Nothing to do if not running in dom0. */
+	if (!is_initial_xendomain())
+		return 0;
+
+	printk("Setting up standard PCI resources\n");
+	if (efi_enabled)
+		efi_initialize_iomem_resources(&code_resource, &data_resource);
+	else
+		legacy_init_iomem_resources(&code_resource, &data_resource);
+
+	/* EFI systems may still have VGA */
+	request_resource(&iomem_resource, &video_ram_resource);
+
+	/* request I/O space for devices used on all i[345]86 PCs */
+	for (i = 0; i < STANDARD_IO_RESOURCES; i++)
+		request_resource(&ioport_resource, &standard_io_resources[i]);
+	return 0;
+}
+
+subsys_initcall(request_standard_resources);
 
 /*
  * Locate a unused range of the physical address space below 4G which
@@ -1480,58 +1522,12 @@ e820_setup_gap(struct e820entry *e820, int nr_map)
 		pci_mem_start, gapstart, gapsize);
 }
 
-/*
- * Request address space for all standard resources
- */
 static void __init register_memory(void)
 {
-#ifdef CONFIG_XEN
-	struct e820entry *machine_e820;
-	struct xen_memory_map memmap;
-#endif
-	int	      i;
-
-	/* Nothing to do if not running in dom0. */
-	if (!(xen_start_info->flags & SIF_INITDOMAIN)) {
-		legacy_init_iomem_resources(e820.map, e820.nr_map,
-					    &code_resource, &data_resource);
-		return;
-	}
-
-#ifdef CONFIG_XEN
-	machine_e820 = alloc_bootmem_low_pages(PAGE_SIZE);
-
-	memmap.nr_entries = E820MAX;
-	set_xen_guest_handle(memmap.buffer, machine_e820);
-
-	BUG_ON(HYPERVISOR_memory_op(XENMEM_machine_memory_map, &memmap));
-
-	legacy_init_iomem_resources(machine_e820, memmap.nr_entries,
-				    &code_resource, &data_resource);
-#else
-	if (efi_enabled)
-		efi_initialize_iomem_resources(&code_resource, &data_resource);
-	else
-		legacy_init_iomem_resources(e820.map, e820.nr_map,
-					    &code_resource, &data_resource);
-#endif
-
-	/* EFI systems may still have VGA */
-	request_resource(&iomem_resource, &video_ram_resource);
-
-	/* request I/O space for devices used on all i[345]86 PCs */
-	for (i = 0; i < STANDARD_IO_RESOURCES; i++)
-		request_resource(&ioport_resource, &standard_io_resources[i]);
-
-#ifdef CONFIG_XEN
-	e820_setup_gap(machine_e820, memmap.nr_entries);
-	free_bootmem(__pa(machine_e820), PAGE_SIZE);
-#else
+#ifndef CONFIG_XEN
 	e820_setup_gap(e820.map, e820.nr_map);
 #endif
 }
-
-static char * __init machine_specific_memory_setup(void);
 
 #ifdef CONFIG_MCA
 static void set_mca_bus(int x)
@@ -1557,7 +1553,7 @@ void __init setup_arch(char **cmdline_p)
 
 	/* Force a quick death if the kernel panics (not domain 0). */
 	extern int panic_timeout;
-	if (!panic_timeout && !(xen_start_info->flags & SIF_INITDOMAIN))
+	if (!panic_timeout && !is_initial_xendomain())
 		panic_timeout = 1;
 
 	/* Register a call for panic conditions. */
@@ -1601,7 +1597,7 @@ void __init setup_arch(char **cmdline_p)
 	}
 	bootloader_type = LOADER_TYPE;
 
-	if (xen_start_info->flags & SIF_INITDOMAIN) {
+	if (is_initial_xendomain()) {
 		/* This is drawn from a dump from vgacon:startup in
 		 * standard Linux. */
 		screen_info.orig_video_mode = 3; 
@@ -1610,6 +1606,17 @@ void __init setup_arch(char **cmdline_p)
 		screen_info.orig_video_cols = 80;
 		screen_info.orig_video_ega_bx = 3;
 		screen_info.orig_video_points = 16;
+		screen_info.orig_y = screen_info.orig_video_lines - 1;
+		if (xen_start_info->console.dom0.info_size >=
+		    sizeof(struct dom0_vga_console_info)) {
+			const struct dom0_vga_console_info *info =
+				(struct dom0_vga_console_info *)(
+					(char *)xen_start_info +
+					xen_start_info->console.dom0.info_off);
+			dom0_init_screen_info(info);
+		}
+		xen_start_info->console.domU.mfn = 0;
+		xen_start_info->console.domU.evtchn = 0;
 	} else
 		screen_info.orig_video_isVGA = 0;
 
@@ -1726,7 +1733,7 @@ void __init setup_arch(char **cmdline_p)
 	 * NOTE: at this point the bootmem allocator is fully available.
 	 */
 
-	if (xen_start_info->flags & SIF_INITDOMAIN)
+	if (is_initial_xendomain())
 		dmi_scan_machine();
 
 #ifdef CONFIG_X86_GENERICARCH
@@ -1738,12 +1745,8 @@ void __init setup_arch(char **cmdline_p)
 	set_iopl.iopl = 1;
 	HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl);
 
-#ifdef CONFIG_X86_IO_APIC
-	check_acpi_pci();	/* Checks more than just ACPI actually */
-#endif
-
 #ifdef CONFIG_ACPI
-	if (!(xen_start_info->flags & SIF_INITDOMAIN)) {
+	if (!is_initial_xendomain()) {
 		printk(KERN_INFO "ACPI in unprivileged domain disabled\n");
 		acpi_disabled = 1;
 		acpi_ht = 0;
@@ -1753,6 +1756,13 @@ void __init setup_arch(char **cmdline_p)
 	 * Parse the ACPI tables for possible boot-time SMP configuration.
 	 */
 	acpi_boot_table_init();
+#endif
+
+#ifdef CONFIG_X86_IO_APIC
+	check_acpi_pci();	/* Checks more than just ACPI actually */
+#endif
+
+#ifdef CONFIG_ACPI
 	acpi_boot_init();
 
 #if defined(CONFIG_SMP) && defined(CONFIG_X86_PC)
@@ -1772,11 +1782,7 @@ void __init setup_arch(char **cmdline_p)
 
 	register_memory();
 
-	if (xen_start_info->flags & SIF_INITDOMAIN) {
-		if (!(xen_start_info->flags & SIF_PRIVILEGED))
-			panic("Xen granted us console access "
-			      "but not privileged status");
-
+	if (is_initial_xendomain()) {
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)
 		if (!efi_enabled ||
@@ -1787,9 +1793,13 @@ void __init setup_arch(char **cmdline_p)
 #endif
 #endif
 	} else {
-		extern int console_use_vt;
-		console_use_vt = 0;
+#if defined(CONFIG_VT) && defined(CONFIG_DUMMY_CONSOLE)
+		conswitchp = &dummy_con;
+#endif
 	}
+#ifdef CONFIG_X86_TSC
+	tsc_init();
+#endif
 }
 
 static int
@@ -1817,7 +1827,6 @@ static __init int add_pcspkr(void)
 }
 device_initcall(add_pcspkr);
 
-#include "setup_arch_post.h"
 /*
  * Local Variables:
  * mode:c
