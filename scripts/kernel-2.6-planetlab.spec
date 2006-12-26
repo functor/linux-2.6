@@ -20,7 +20,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define sublevel 18
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define release 1.2257_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.2257_FC5.1%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
 %define kernel_arch i386
@@ -99,7 +99,7 @@ BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
 BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, diffutils
 BuildRequires: gcc >= 3.3.3, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
-BuildArchitectures: i686
+#BuildArchitectures: i686
 
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
@@ -297,8 +297,8 @@ BuildKernel() {
     # other RPMs that bootstrap off of the kernel build)
     cd $RPM_BUILD_DIR
     rm -rf linux-%{kversion}$Flavour
-    cp -rl kernel-%{kversion}/vanilla linux-%{kversion}$Flavour
-    cd linux-%{kversion}$Flavour
+    cp -rl kernel-%{kversion}/vanilla linux-%{_target_cpu}-%{kversion}$Flavour
+    cd linux-%{_target_cpu}-%{kversion}$Flavour
 
     # Pick the right config file for the kernel we're building
     if [ -n "$Flavour" ] ; then
@@ -459,15 +459,15 @@ mkdir -p $RPM_BUILD_ROOT/boot
 BuildKernel %make_target %kernel_arch
 %endif
 
-%if %{buildsmp}
+%if %{buildsmp} && "%{_target_cpu}" == "i686"
 BuildKernel %make_target %kernel_arch smp
 %endif
 
-%if %{builduml}
+%if %{builduml} && "%{_target_cpu}" == "i686"
 BuildKernel linux um uml
 %endif
 
-%if %{buildxen}
+%if %{buildxen} && "%{_target_cpu}" == "i686"
 BuildKernel vmlinuz %kernel_arch xenU
 %endif
 
@@ -479,7 +479,7 @@ BuildKernel vmlinuz %kernel_arch xenU
 
 cd vanilla
 
-%if %{buildxen}
+%if %{buildxen} && "%{_target_cpu}" == "i686"
 mkdir -p $RPM_BUILD_ROOT/etc/ld.so.conf.d
 rm -f $RPM_BUILD_ROOT/etc/ld.so.conf.d/kernelcap-%{KVERREL}.conf
 cat > $RPM_BUILD_ROOT/etc/ld.so.conf.d/kernelcap-%{KVERREL}.conf <<\EOF
@@ -664,7 +664,7 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %verify(not mtime) /usr/src/kernels/%{KVERREL}-%{_target_cpu}
 %endif
 
-%if %{buildsmp}
+%if %{buildsmp} && "%{_target_cpu}" == "i686"
 %files smp
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}smp
@@ -683,7 +683,7 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 /usr/src/kernels/%{KVERREL}smp-%{_target_cpu}
 %endif
 
-%if %{builduml}
+%if %{builduml} && "%{_target_cpu}" == "i686"
 %files uml
 %defattr(-,root,root)
 %{_bindir}/linux
@@ -705,7 +705,7 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 /lib/modules/%{KVERREL}uml/updates
 %endif
 
-%if %{buildxen}
+%if %{buildxen} && "%{_target_cpu}" == "i686"
 %files xenU
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}xenU
