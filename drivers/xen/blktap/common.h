@@ -27,7 +27,6 @@
 #ifndef __BLKIF__BACKEND__COMMON_H__
 #define __BLKIF__BACKEND__COMMON_H__
 
-#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -49,7 +48,7 @@
 
 #define WPRINTK(fmt, args...) printk(KERN_WARNING "blk_tap: " fmt, ##args)
 
-struct backend_info; 
+struct backend_info;
 
 typedef struct blkif_st {
 	/* Unique identifier for this interface. */
@@ -62,7 +61,7 @@ typedef struct blkif_st {
 	blkif_back_ring_t blk_ring;
 	struct vm_struct *blk_ring_area;
 	/* Back pointer to the backend_info. */
-	struct backend_info *be; 
+	struct backend_info *be;
 	/* Private fields. */
 	spinlock_t       blk_ring_lock;
 	atomic_t         refcnt;
@@ -91,6 +90,7 @@ blkif_t *tap_alloc_blkif(domid_t domid);
 void tap_blkif_free(blkif_t *blkif);
 int tap_blkif_map(blkif_t *blkif, unsigned long shared_page, 
 		  unsigned int evtchn);
+void tap_blkif_unmap(blkif_t *blkif);
 
 #define blkif_get(_b) (atomic_inc(&(_b)->refcnt))
 #define blkif_put(_b)					\

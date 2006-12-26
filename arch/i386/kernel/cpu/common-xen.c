@@ -11,6 +11,8 @@
 #include <asm/msr.h>
 #include <asm/io.h>
 #include <asm/mmu_context.h>
+#include <asm/mtrr.h>
+#include <asm/mce.h>
 #ifdef CONFIG_X86_LOCAL_APIC
 #include <asm/mpspec.h>
 #include <asm/apic.h>
@@ -295,7 +297,7 @@ void __cpuinit generic_identify(struct cpuinfo_x86 * c)
 			if (c->x86 >= 0x6)
 				c->x86_model += ((tfms >> 16) & 0xF) << 4;
 			c->x86_mask = tfms & 15;
-#if defined(CONFIG_SMP) && defined(CONFIG_X86_LOCAL_APIC)
+#ifdef CONFIG_X86_HT
 			c->apicid = phys_pkg_id((ebx >> 24) & 0xFF, 0);
 #else
 			c->apicid = (ebx >> 24) & 0xFF;
@@ -320,7 +322,7 @@ void __cpuinit generic_identify(struct cpuinfo_x86 * c)
 	early_intel_workaround(c);
 
 #ifdef CONFIG_X86_HT
-	phys_proc_id[smp_processor_id()] = (cpuid_ebx(1) >> 24) & 0xff;
+	c->phys_proc_id = (cpuid_ebx(1) >> 24) & 0xff;
 #endif
 }
 
@@ -429,6 +431,13 @@ void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 	if (disable_pse)
 		clear_bit(X86_FEATURE_PSE, c->x86_capability);
 
+	if (exec_shield != 0) {
+#ifdef CONFIG_HIGHMEM64G   /* NX implies PAE */
+		if (!test_bit(X86_FEATURE_NX, c->x86_capability))
+#endif
+		clear_bit(X86_FEATURE_SEP, c->x86_capability);
+	}
+
 	/* If the model name is still unset, do table lookup. */
 	if ( !c->x86_model_id[0] ) {
 		char *p;
@@ -478,10 +487,8 @@ void __cpuinit detect_ht(struct cpuinfo_x86 *c)
 {
 	u32 	eax, ebx, ecx, edx;
 	int 	index_msb, core_bits;
-	int 	cpu = smp_processor_id();
 
 	cpuid(1, &eax, &ebx, &ecx, &edx);
-
 
 	if (!cpu_has(c, X86_FEATURE_HT) || cpu_has(c, X86_FEATURE_CMP_LEGACY))
 		return;
@@ -493,16 +500,17 @@ void __cpuinit detect_ht(struct cpuinfo_x86 *c)
 	} else if (smp_num_siblings > 1 ) {
 
 		if (smp_num_siblings > NR_CPUS) {
-			printk(KERN_WARNING "CPU: Unsupported number of the siblings %d", smp_num_siblings);
+			printk(KERN_WARNING "CPU: Unsupported number of the "
+					"siblings %d", smp_num_siblings);
 			smp_num_siblings = 1;
 			return;
 		}
 
 		index_msb = get_count_order(smp_num_siblings);
-		phys_proc_id[cpu] = phys_pkg_id((ebx >> 24) & 0xFF, index_msb);
+		c->phys_proc_id = phys_pkg_id((ebx >> 24) & 0xFF, index_msb);
 
 		printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
-		       phys_proc_id[cpu]);
+		       c->phys_proc_id);
 
 		smp_num_siblings = smp_num_siblings / c->x86_max_cores;
 
@@ -510,12 +518,12 @@ void __cpuinit detect_ht(struct cpuinfo_x86 *c)
 
 		core_bits = get_count_order(c->x86_max_cores);
 
-		cpu_core_id[cpu] = phys_pkg_id((ebx >> 24) & 0xFF, index_msb) &
+		c->cpu_core_id = phys_pkg_id((ebx >> 24) & 0xFF, index_msb) &
 					       ((1 << core_bits) - 1);
 
 		if (c->x86_max_cores > 1)
 			printk(KERN_INFO  "CPU: Processor Core ID: %d\n",
-			       cpu_core_id[cpu]);
+			       c->cpu_core_id);
 	}
 }
 #endif
@@ -624,7 +632,7 @@ void __cpuinit cpu_init(void)
 	}
 	printk(KERN_INFO "Initializing CPU#%d\n", cpu);
 
-	if (cpu_has_vme || cpu_has_de)
+	if (cpu_has_vme || cpu_has_tsc || cpu_has_de)
 		clear_in_cr4(X86_CR4_VME|X86_CR4_PVI|X86_CR4_TSD|X86_CR4_DE);
 	if (tsc_disable && cpu_has_tsc) {
 		printk(KERN_NOTICE "Disabling TSC...\n");
@@ -634,6 +642,12 @@ void __cpuinit cpu_init(void)
 	}
 
 #ifndef CONFIG_XEN
+	/* The CPU hotplug case */
+	if (cpu_gdt_descr->address) {
+		gdt = (struct desc_struct *)cpu_gdt_descr->address;
+		memset(gdt, 0, PAGE_SIZE);
+		goto old_gdt;
+	}
 	/*
 	 * This is a horrible hack to allocate the GDT.  The problem
 	 * is that cpu_init() is called really early for the boot CPU
@@ -652,7 +666,7 @@ void __cpuinit cpu_init(void)
 				local_irq_enable();
 		}
 	}
-
+old_gdt:
 	/*
 	 * Initialize the per-CPU GDT with the boot GDT,
 	 * and set up the GDT descriptor:

@@ -287,7 +287,7 @@ static void nfs_show_mount_options(struct seq_file *m, struct nfs_server *nfss, 
 		{ NFS_MOUNT_NONLM, ",nolock", "" },
 		{ NFS_MOUNT_NOACL, ",noacl", "" },
 		{ NFS_MOUNT_FSCACHE, ",fsc", "" },
-		{ NFS_MOUNT_TAGXID, ",tagxid", "" },
+		{ NFS_MOUNT_TAGXID, ",tagxid", ""},
 		{ 0, NULL, NULL }
 	};
 	const struct proc_nfs_info *nfs_infop;
@@ -527,6 +527,7 @@ static inline void nfs_initialise_sb(struct super_block *sb)
 
 	if (server->flags & NFS_MOUNT_NOAC)
 		sb->s_flags |= MS_SYNCHRONOUS;
+
 	if (server->flags & NFS_MOUNT_TAGXID)
 		sb->s_flags |= MS_TAGXID;
 

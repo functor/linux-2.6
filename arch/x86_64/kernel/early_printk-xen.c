@@ -1,9 +1,9 @@
-#include <linux/config.h>
+
 #include <linux/console.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/string.h>
-#include <linux/tty.h>
+#include <linux/screen_info.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/fcntl.h>
