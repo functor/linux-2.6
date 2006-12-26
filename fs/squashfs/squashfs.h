@@ -31,7 +31,7 @@
 #define TRACE(s, args...)	{}
 #endif
 
-#define ERROR(s, args...)	printk(KERN_ERR "SQUASHFS error: "s, ## args)
+#define ERROR(s, args...)	printk(KERN_NOTICE "SQUASHFS error: "s, ## args)
 
 #define SERROR(s, args...)	do { \
 				if (!silent) \
@@ -59,6 +59,7 @@ extern void release_cached_fragment(struct squashfs_sb_info *msblk, struct
 extern struct squashfs_fragment_cache *get_cached_fragment(struct super_block
 					*s, long long start_block,
 					int length);
+extern struct inode *squashfs_iget(struct super_block *s, squashfs_inode_t inode, unsigned int inode_number);
 extern struct address_space_operations squashfs_symlink_aops;
 extern struct address_space_operations squashfs_aops;
 extern struct address_space_operations squashfs_aops_4K;
