@@ -16,6 +16,7 @@
 #include <linux/string.h>
 #include <linux/elf.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/module.h>
 #include <linux/vs_memory.h>
 
