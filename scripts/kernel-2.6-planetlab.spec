@@ -23,7 +23,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define release 1.2260_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
-%define kernel_arch i386
 
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
 
@@ -99,7 +98,6 @@ BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
 BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, diffutils
 BuildRequires: gcc >= 3.3.3, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
-#BuildArchitectures: i686
 
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
@@ -455,19 +453,25 @@ BuildKernel() {
 rm -rf $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT/boot
 
+%if "%{_target_cpu}" == "x86_64"
+%define kernel_arch %{_target_cpu}
+%else
+%define kernel_arch i386
+%endif
+
 %if %{buildup}
 BuildKernel %make_target %kernel_arch
 %endif
 
-%if %{buildsmp} && "%{_target_cpu}" == "i686"
+%if %{buildsmp} && "%{_target_cpu}" != "i586"
 BuildKernel %make_target %kernel_arch smp
 %endif
 
-%if %{builduml} && "%{_target_cpu}" == "i686"
+%if %{builduml} && "%{_target_cpu}" != "i586"
 BuildKernel linux um uml
 %endif
 
-%if %{buildxen} && "%{_target_cpu}" == "i686"
+%if %{buildxen} && "%{_target_cpu}" != "i586"
 BuildKernel vmlinuz %kernel_arch xenU
 %endif
 
