@@ -199,12 +199,14 @@ static inline void __leave_vx_info(struct vx_info_save *vxis,
 
 static inline void __enter_vx_admin(struct vx_info_save *vxis)
 {
+	return;
 	vxis->vxi = xchg(&current->vx_info, NULL);
 	vxis->xid = xchg(&current->xid, (xid_t)0);
 }
 
 static inline void __leave_vx_admin(struct vx_info_save *vxis)
 {
+	return;
 	(void)xchg(&current->xid, vxis->xid);
 	(void)xchg(&current->vx_info, vxis->vxi);
 }
