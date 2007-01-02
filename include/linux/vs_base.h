@@ -5,7 +5,7 @@
 
 #define VX_IRQ        0x4000
 #define VX_IRQ_MASK   0xF000
-#if 0
+#if 1
 #include <linux/hardirq.h>
 #endif
 
@@ -40,7 +40,7 @@ static inline int __vx_check(xid_t cid, xid_t id, unsigned int mode)
 			(id > 1) && (id < MIN_D_CONTEXT))
 			return 1;
 	}
-#if 0
+#if 1
 	if ((mode & VX_IRQ) && (unlikely(in_interrupt())))
 		return 1;
 #endif
