@@ -45,9 +45,6 @@
 #include <xen/xenbus.h>
 #include "xenbus_comms.h"
 
-/* xenbus_probe.c */
-extern char *kasprintf(const char *fmt, ...);
-
 struct xs_stored_msg {
 	struct list_head list;
 
@@ -289,9 +286,9 @@ static char *join(const char *dir, const char *name)
 	char *buffer;
 
 	if (strlen(name) == 0)
-		buffer = kasprintf("%s", dir);
+		buffer = kasprintf(GFP_KERNEL, "%s", dir);
 	else
-		buffer = kasprintf("%s/%s", dir, name);
+		buffer = kasprintf(GFP_KERNEL, "%s/%s", dir, name);
 	return (!buffer) ? ERR_PTR(-ENOMEM) : buffer;
 }
 
@@ -665,7 +662,17 @@ EXPORT_SYMBOL_GPL(unregister_xenbus_watch);
 
 void xs_suspend(void)
 {
+	struct xenbus_watch *watch;
+	char token[sizeof(watch) * 2 + 1];
+
 	down_write(&xs_state.suspend_mutex);
+
+	/* No need for watches_lock: the suspend_mutex is sufficient. */
+	list_for_each_entry(watch, &watches, list) {
+		sprintf(token, "%lX", (long)watch);
+		xs_unwatch(watch->node, token);
+	}
+
 	mutex_lock(&xs_state.request_mutex);
 }
 

@@ -174,7 +174,7 @@ static int blktap_probe(struct xenbus_device *dev,
 	}
 
 	/* setup back pointer */
-	be->blkif->be = be; 
+	be->blkif->be = be;
 	be->blkif->sectors = 0;
 
 	/* set a watch on disk info, waiting for userspace to update details*/
@@ -247,6 +247,11 @@ static void tap_frontend_changed(struct xenbus_device *dev,
 
 	switch (frontend_state) {
 	case XenbusStateInitialising:
+		if (dev->state == XenbusStateClosed) {
+			printk("%s: %s: prepare for reconnect\n",
+			       __FUNCTION__, dev->nodename);
+			xenbus_switch_state(dev, XenbusStateInitWait);
+		}
 		break;
 
 	case XenbusStateInitialised:
@@ -264,15 +269,22 @@ static void tap_frontend_changed(struct xenbus_device *dev,
 		break;
 
 	case XenbusStateClosing:
+		if (be->blkif->xenblkd) {
+			kthread_stop(be->blkif->xenblkd);
+			be->blkif->xenblkd = NULL;
+		}
 		xenbus_switch_state(dev, XenbusStateClosing);
 		break;
 
 	case XenbusStateClosed:
+		xenbus_switch_state(dev, XenbusStateClosed);
+		if (xenbus_dev_is_online(dev))
+			break;
+		/* fall through if not online */
+	case XenbusStateUnknown:
 		device_unregister(&dev->dev);
 		break;
 
-	case XenbusStateUnknown:
-	case XenbusStateInitWait:
 	default:
 		xenbus_dev_fatal(dev, -EINVAL, "saw state %d at frontend",
 				 frontend_state);
