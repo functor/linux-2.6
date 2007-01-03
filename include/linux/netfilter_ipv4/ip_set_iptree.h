@@ -22,6 +22,7 @@ struct ip_set_iptree {
 	unsigned int timeout;
 	unsigned int gc_interval;
 #ifdef __KERNEL__
+	uint32_t elements;		/* number of elements */
 	struct timer_list gc;
 	struct ip_set_iptreeb *tree[256];	/* ADDR.*.*.* */
 #endif

@@ -9,7 +9,10 @@
 
 /* Kernel module for IP set management */
 
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,19)
 #include <linux/config.h>
+#endif
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kmod.h>
@@ -25,9 +28,8 @@
 #include <linux/spinlock.h>
 #include <linux/vmalloc.h>
 
-#define ASSERT_READ_LOCK(x)	/* dont use that */
+#define ASSERT_READ_LOCK(x)
 #define ASSERT_WRITE_LOCK(x)
-#include <linux/netfilter_ipv4/listhelp.h>
 #include <linux/netfilter_ipv4/ip_set.h>
 
 static struct list_head set_type_list;		/* all registered sets */
@@ -69,11 +71,16 @@ __ip_set_put(ip_set_id_t index)
  * Binding routines
  */
 
-static inline int
-ip_hash_cmp(const struct ip_set_hash *set_hash,
-	    ip_set_id_t id, ip_set_ip_t ip)
+static inline struct ip_set_hash *
+__ip_set_find(u_int32_t key, ip_set_id_t id, ip_set_ip_t ip)
 {
-	return set_hash->id == id && set_hash->ip == ip;
+	struct ip_set_hash *set_hash;
+
+	list_for_each_entry(set_hash, &ip_set_hash[key], list)
+		if (set_hash->id == id && set_hash->ip == ip)
+			return set_hash;
+			
+	return NULL;
 }
 
 static ip_set_id_t
@@ -87,8 +94,7 @@ ip_set_find_in_hash(ip_set_id_t id, ip_set_ip_t ip)
 	IP_SET_ASSERT(ip_set_list[id]);
 	DP("set: %s, ip: %u.%u.%u.%u", ip_set_list[id]->name, HIPQUAD(ip));	
 	
-	set_hash = LIST_FIND(&ip_set_hash[key], ip_hash_cmp,
-			     struct ip_set_hash *, id, ip);
+	set_hash = __ip_set_find(key, id, ip);
 	
 	DP("set: %s, ip: %u.%u.%u.%u, binding: %s", ip_set_list[id]->name, 
 	   HIPQUAD(ip),
@@ -118,8 +124,7 @@ ip_set_hash_del(ip_set_id_t id, ip_set_ip_t ip)
 	IP_SET_ASSERT(ip_set_list[id]);
 	DP("set: %s, ip: %u.%u.%u.%u", ip_set_list[id]->name, HIPQUAD(ip));	
 	write_lock_bh(&ip_set_lock);
-	set_hash = LIST_FIND(&ip_set_hash[key], ip_hash_cmp,
-			     struct ip_set_hash *, id, ip);
+	set_hash = __ip_set_find(key, id, ip);
 	DP("set: %s, ip: %u.%u.%u.%u, binding: %s", ip_set_list[id]->name,
 	   HIPQUAD(ip),
 	   set_hash != NULL ? ip_set_list[set_hash->binding]->name : "");
@@ -143,8 +148,7 @@ ip_set_hash_add(ip_set_id_t id, ip_set_ip_t ip, ip_set_id_t binding)
 	DP("set: %s, ip: %u.%u.%u.%u, binding: %s", ip_set_list[id]->name, 
 	   HIPQUAD(ip), ip_set_list[binding]->name);
 	write_lock_bh(&ip_set_lock);
-	set_hash = LIST_FIND(&ip_set_hash[key], ip_hash_cmp,
-			     struct ip_set_hash *, id, ip);
+	set_hash = __ip_set_find(key, id, ip);
 	if (!set_hash) {
 		set_hash = kmalloc(sizeof(struct ip_set_hash), GFP_KERNEL);
 		if (!set_hash) {
@@ -285,19 +289,15 @@ ip_set_delip_kernel(ip_set_id_t index,
 
 /* Register and deregister settype */
 
-static inline int
-set_type_equal(const struct ip_set_type *set_type, const char *str2)
-{
-	return !strncmp(set_type->typename, str2, IP_SET_MAXNAMELEN - 1);
-}
-
 static inline struct ip_set_type *
 find_set_type(const char *name)
 {
-	return LIST_FIND(&set_type_list,
-			 set_type_equal,
-			 struct ip_set_type *,
-			 name);
+	struct ip_set_type *set_type;
+
+	list_for_each_entry(set_type, &set_type_list, list)
+		if (!strncmp(set_type->typename, name, IP_SET_MAXNAMELEN - 1))
+			return set_type;
+	return NULL;
 }
 
 int 
@@ -325,7 +325,7 @@ ip_set_register_set_type(struct ip_set_type *set_type)
 		ret = -EFAULT;
 		goto unlock;
 	}
-	list_append(&set_type_list, set_type);
+	list_add(&set_type->list, &set_type_list);
 	DP("'%s' registered.", set_type->typename);
    unlock:
 	write_unlock_bh(&ip_set_lock);
@@ -341,7 +341,7 @@ ip_set_unregister_set_type(struct ip_set_type *set_type)
 			      set_type->typename);
 		goto unlock;
 	}
-	LIST_DELETE(&set_type_list, set_type);
+	list_del(&set_type->list);
 	module_put(THIS_MODULE);
 	DP("'%s' unregistered.", set_type->typename);
    unlock:
@@ -797,7 +797,7 @@ ip_set_create(const char *name,
 	      size_t size)
 {
 	struct ip_set *set;
-	ip_set_id_t index, id;
+	ip_set_id_t index = 0, id;
 	int res = 0;
 
 	DP("setname: %s, typename: %s, id: %u", name, typename, restore);
@@ -1161,8 +1161,8 @@ static int ip_set_save_set(ip_set_id_t index,
 	set->type->list_header(set, data + *used);
 	*used += set_save->header_size;
 
-	DP("set header filled: %s, used: %u %p %p", set->name, *used,
-	   data, data + *used);
+	DP("set header filled: %s, used: %u(%u) %p %p", set->name, *used,
+	   set_save->header_size, data, data + *used);
 	/* Get and ensure set specific members size */
 	set_save->members_size = set->type->list_members_size(set);
 	if (*used + set_save->members_size > len)
@@ -1172,8 +1172,8 @@ static int ip_set_save_set(ip_set_id_t index,
 	set->type->list_members(set, data + *used);
 	*used += set_save->members_size;
 	read_unlock_bh(&set->lock);
-	DP("set members filled: %s, used: %u %p %p", set->name, *used,
-	   data, data + *used);
+	DP("set members filled: %s, used: %u(%u) %p %p", set->name, *used,
+	   set_save->members_size, data, data + *used);
 	return 0;
 
     unlock_set:
@@ -1223,6 +1223,8 @@ static int ip_set_save_bindings(ip_set_id_t index,
 	/* Marker */
 	set_save = (struct ip_set_save *) (data + *used);
 	set_save->index = IP_SET_INVALID_ID;
+	set_save->header_size = 0;
+	set_save->members_size = 0;
 	*used += sizeof(struct ip_set_save);
 
 	DP("marker added used %u, len %u", *used, len);
@@ -1413,8 +1415,8 @@ ip_set_sockfn_set(struct sock *sk, int optval, void *user, unsigned int len)
 		struct ip_set_req_create *req_create
 			= (struct ip_set_req_create *) data;
 		
-		if (len <= sizeof(struct ip_set_req_create)) {
-			ip_set_printk("short CREATE data (want >%zu, got %u)",
+		if (len < sizeof(struct ip_set_req_create)) {
+			ip_set_printk("short CREATE data (want >=%zu, got %u)",
 				      sizeof(struct ip_set_req_create), len);
 			res = -EINVAL;
 			goto done;
@@ -1768,8 +1770,9 @@ ip_set_sockfn_get(struct sock *sk, int optval, void *user, int *len)
 				req_setnames->size += sizeof(struct ip_set_list)
 					+ set->type->header_size
 					+ set->type->list_members_size(set);
+				/* Sets are identified by id in the hash */
 				FOREACH_HASH_DO(__set_hash_bindings_size_list, 
-						i, &req_setnames->size);
+						set->id, &req_setnames->size);
 				break;
 			}
 			case IP_SET_OP_SAVE_SIZE: {
@@ -1777,7 +1780,7 @@ ip_set_sockfn_get(struct sock *sk, int optval, void *user, int *len)
 					+ set->type->header_size
 					+ set->type->list_members_size(set);
 				FOREACH_HASH_DO(__set_hash_bindings_size_save,
-						i, &req_setnames->size);
+						set->id, &req_setnames->size);
 				break;
 			}
 			default:

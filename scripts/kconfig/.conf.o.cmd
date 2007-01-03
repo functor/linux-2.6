@@ -12,7 +12,7 @@ deps_scripts/kconfig/conf.o := \
   /usr/include/bits/wordsize.h \
   /usr/include/gnu/stubs-32.h \
   /usr/include/bits/types.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stddef.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/endian.h \
   /usr/include/bits/endian.h \
@@ -32,7 +32,7 @@ deps_scripts/kconfig/conf.o := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
@@ -48,7 +48,7 @@ deps_scripts/kconfig/conf.o := \
   scripts/kconfig/lkc.h \
     $(wildcard include/config/list.h) \
   scripts/kconfig/expr.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.1/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stdbool.h \
   /usr/include/libintl.h \
   /usr/include/locale.h \
   /usr/include/bits/locale.h \

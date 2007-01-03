@@ -27,6 +27,8 @@
 #include <linux/netfilter_ipv4/ip_set_ipporthash.h>
 #include <linux/netfilter_ipv4/ip_set_jhash.h>
 
+static int limit = MAX_RANGE;
+
 /* We must handle non-linear skbs */
 static inline ip_set_ip_t
 get_port(const struct sk_buff *skb, u_int32_t flags)
@@ -175,6 +177,7 @@ __add_haship(struct ip_set_ipporthash *map, ip_set_ip_t hash_ip)
 			return -EEXIST;
 		if (!*elem) {
 			*elem = hash_ip;
+			map->elements++;
 			return 0;
 		}
 	}
@@ -186,6 +189,8 @@ static inline int
 __addip(struct ip_set_ipporthash *map, ip_set_ip_t ip, ip_set_ip_t port,
 	ip_set_ip_t *hash_ip)
 {
+	if (map->elements > limit)
+		return -ERANGE;
 	if (ip < map->first_ip || ip > map->last_ip)
 		return -ERANGE;
 
@@ -282,6 +287,7 @@ static int retry(struct ip_set *set)
 		return -ENOMEM;
 	}
 	tmp->hashsize = hashsize;
+	tmp->elements = 0;
 	tmp->probes = map->probes;
 	tmp->resize = map->resize;
 	tmp->first_ip = map->first_ip;
@@ -334,6 +340,7 @@ __delip(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t port,
 		
 	elem = HARRAY_ELEM(map->members, ip_set_ip_t *, id);
 	*elem = 0;
+	map->elements--;
 
 	return 0;
 }
@@ -420,6 +427,7 @@ static int create(struct ip_set *set, const void *data, size_t size)
 	}
 	for (i = 0; i < req->probes; i++)
 		get_random_bytes(((uint32_t *) map->initval)+i, 4);
+	map->elements = 0;
 	map->hashsize = req->hashsize;
 	map->probes = req->probes;
 	map->resize = req->resize;
@@ -450,6 +458,7 @@ static void flush(struct ip_set *set)
 {
 	struct ip_set_ipporthash *map = (struct ip_set_ipporthash *) set->data;
 	harray_flush(map->members, map->hashsize, sizeof(ip_set_ip_t));
+	map->elements = 0;
 }
 
 static void list_header(const struct ip_set *set, void *data)
@@ -508,6 +517,8 @@ static struct ip_set_type ip_set_ipporthash = {
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 MODULE_DESCRIPTION("ipporthash type of IP sets");
+module_param(limit, int, 0600);
+MODULE_PARM_DESC(limit, "maximal number of elements stored in the sets");
 
 static int __init init(void)
 {
