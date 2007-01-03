@@ -35,11 +35,22 @@
 #include <xen/xenbus.h>
 #include <xen/driver_util.h>
 
-/* xenbus_probe.c */
-extern char *kasprintf(const char *fmt, ...);
-
 #define DPRINTK(fmt, args...) \
     pr_debug("xenbus_client (%s:%d) " fmt ".\n", __FUNCTION__, __LINE__, ##args)
+
+char *xenbus_strstate(enum xenbus_state state)
+{
+	static char *name[] = {
+		[ XenbusStateUnknown      ] = "Unknown",
+		[ XenbusStateInitialising ] = "Initialising",
+		[ XenbusStateInitWait     ] = "InitWait",
+		[ XenbusStateInitialised  ] = "Initialised",
+		[ XenbusStateConnected    ] = "Connected",
+		[ XenbusStateClosing      ] = "Closing",
+		[ XenbusStateClosed	  ] = "Closed",
+	};
+	return (state < ARRAY_SIZE(name)) ? name[state] : "INVALID";
+}
 
 int xenbus_watch_path(struct xenbus_device *dev, const char *path,
 		      struct xenbus_watch *watch,
@@ -70,7 +81,7 @@ int xenbus_watch_path2(struct xenbus_device *dev, const char *path,
 					const char **, unsigned int))
 {
 	int err;
-	char *state = kasprintf("%s/%s", path, path2);
+	char *state = kasprintf(GFP_KERNEL, "%s/%s", path, path2);
 	if (!state) {
 		xenbus_dev_fatal(dev, -ENOMEM, "allocating path for watch");
 		return -ENOMEM;
@@ -124,6 +135,13 @@ int xenbus_switch_state(struct xenbus_device *dev, enum xenbus_state state)
 }
 EXPORT_SYMBOL_GPL(xenbus_switch_state);
 
+int xenbus_frontend_closed(struct xenbus_device *dev)
+{
+	xenbus_switch_state(dev, XenbusStateClosed);
+	complete(&dev->down);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xenbus_frontend_closed);
 
 /**
  * Return the path to the error node for the given device, or NULL on failure.
@@ -131,7 +149,7 @@ EXPORT_SYMBOL_GPL(xenbus_switch_state);
  */
 static char *error_path(struct xenbus_device *dev)
 {
-	return kasprintf("error/%s", dev->nodename);
+	return kasprintf(GFP_KERNEL, "error/%s", dev->nodename);
 }
 
 
@@ -274,7 +292,7 @@ enum xenbus_state xenbus_read_driver_state(const char *path)
 	enum xenbus_state result;
 	int err = xenbus_gather(XBT_NIL, path, "state", "%d", &result, NULL);
 	if (err)
-		result = XenbusStateClosed;
+		result = XenbusStateUnknown;
 
 	return result;
 }

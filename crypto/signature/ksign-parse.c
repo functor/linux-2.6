@@ -447,7 +447,7 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 	}
 
 	for (i = 0; i < DSA_NSIG; i++) {
-		size_t remaining = endp - datap;
+		unsigned remaining = endp - datap;
 		sig->data[i] = mpi_read_from_buffer(datap, &remaining);
 		datap += remaining;
 	}

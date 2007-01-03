@@ -167,7 +167,7 @@ static inline void set_user_cs(struct desc_struct *desc, unsigned long limit)
 }
 
 #define load_user_cs_desc(cpu, mm) \
-	HYPERVISOR_update_descriptor(virt_to_machine(&get_cpu_gdt_table(cpu)[GDT_ENTRY_DEFAULT_USER_CS]), (u64)(mm)->context.user_cs.a | ((u64)(mm)->context.user_cs.b) << 32);
+        HYPERVISOR_update_descriptor(virt_to_machine(&get_cpu_gdt_table(cpu)[GDT_ENTRY_DEFAULT_USER_CS]), (u64)(mm)->context.user_cs.a | ((u64)(mm)->context.user_cs.b) << 32);
 
 extern void arch_add_exec_range(struct mm_struct *mm, unsigned long limit);
 extern void arch_remove_exec_range(struct mm_struct *mm, unsigned long limit);

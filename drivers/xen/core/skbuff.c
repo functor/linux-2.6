@@ -1,5 +1,4 @@
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -18,7 +17,12 @@
 /*static*/ kmem_cache_t *skbuff_cachep;
 EXPORT_SYMBOL(skbuff_cachep);
 
-#define MAX_SKBUFF_ORDER 4
+/* Allow up to 64kB or page-sized packets (whichever is greater). */
+#if PAGE_SHIFT < 16
+#define MAX_SKBUFF_ORDER (16 - PAGE_SHIFT)
+#else
+#define MAX_SKBUFF_ORDER 0
+#endif
 static kmem_cache_t *skbuff_order_cachep[MAX_SKBUFF_ORDER + 1];
 
 static struct {
@@ -121,8 +125,7 @@ static int __init skbuff_init(void)
 	for (order = 0; order <= MAX_SKBUFF_ORDER; order++) {
 		size = PAGE_SIZE << order;
 		sprintf(name[order], "xen-skb-%lu", size);
-		if (is_running_on_xen() &&
-		    (xen_start_info->flags & SIF_PRIVILEGED))
+		if (is_running_on_xen() && is_initial_xendomain())
 			skbuff_order_cachep[order] = kmem_cache_create(
 				name[order], size, size, 0,
 				skbuff_ctor, skbuff_dtor);

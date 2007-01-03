@@ -12,7 +12,6 @@
 #include <asm/types.h>
 #include <asm/sigcontext.h>
 #include <asm/cpufeature.h>
-#include <linux/config.h>
 #include <linux/threads.h>
 #include <asm/msr.h>
 #include <asm/current.h>
@@ -70,7 +69,11 @@ struct cpuinfo_x86 {
 	cpumask_t llc_shared_map;	/* cpus sharing the last level cache */
 #endif
 	__u8	apicid;
+#ifdef CONFIG_SMP
 	__u8	booted_cores;	/* number of cores as seen by OS */
+	__u8	phys_proc_id;	/* Physical Processor id. */
+	__u8	cpu_core_id;	/* Core id. */
+#endif
 } ____cacheline_aligned;
 
 #define X86_VENDOR_INTEL 0
@@ -97,6 +100,7 @@ extern char ignore_irq13;
 extern void identify_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
 extern unsigned int init_intel_cacheinfo(struct cpuinfo_x86 *c);
+extern unsigned short num_cache_leaves;
 
 /*
  * EFLAGS bits
@@ -174,8 +178,6 @@ static inline void clear_in_cr4 (unsigned long mask)
  */
 #define TASK_SIZE64	(0x800000000000UL - 4096)
 
-#define __HAVE_ARCH_ALIGN_STACK
-
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
@@ -240,9 +242,14 @@ struct tss_struct {
 } __attribute__((packed)) ____cacheline_aligned;
 
 DECLARE_PER_CPU(struct tss_struct,init_tss);
+/* Save the original ist values for checking stack pointers during debugging */
 #endif
 
 extern struct cpuinfo_x86 boot_cpu_data;
+struct orig_ist {
+	unsigned long ist[7];
+};
+DECLARE_PER_CPU(struct orig_ist, orig_ist);
 
 #ifdef CONFIG_X86_VSMP
 #define ARCH_MIN_TASKALIGN	(1 << INTERNODE_CACHE_SHIFT)

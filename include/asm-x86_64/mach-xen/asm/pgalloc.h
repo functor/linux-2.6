@@ -7,6 +7,8 @@
 #include <linux/mm.h>
 #include <asm/io.h>		/* for phys_to_virt and page_to_pseudophys */
 
+#include <xen/features.h>
+
 #define arch_add_exec_range(mm, limit) \
 		do { (void)(mm), (void)(limit); } while (0)
 #define arch_flush_exec_range(mm) \
@@ -14,7 +16,6 @@
 #define arch_remove_exec_range(mm, limit) \
 		do { (void)(mm), (void)(limit); } while (0)
 
-#include <xen/features.h>
 void make_page_readonly(void *va, unsigned int feature);
 void make_page_writable(void *va, unsigned int feature);
 void make_pages_readonly(void *va, unsigned int nr, unsigned int feature);

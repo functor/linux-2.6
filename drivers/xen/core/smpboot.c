@@ -6,7 +6,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -39,15 +38,13 @@ extern void smp_trap_init(trap_info_t *);
 
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
-int phys_proc_id[NR_CPUS]; /* Package ID of each logical CPU */
-EXPORT_SYMBOL(phys_proc_id);
-int cpu_core_id[NR_CPUS]; /* Core ID of each logical CPU */
-EXPORT_SYMBOL(cpu_core_id);
+EXPORT_SYMBOL(smp_num_siblings);
 #if defined(__i386__)
 int cpu_llc_id[NR_CPUS] __cpuinitdata = {[0 ... NR_CPUS-1] = BAD_APICID};
 #elif defined(__x86_64__)
 u8 cpu_llc_id[NR_CPUS] __cpuinitdata  = {[0 ... NR_CPUS-1] = BAD_APICID};
 #endif
+EXPORT_SYMBOL(cpu_llc_id);
 
 cpumask_t cpu_online_map;
 EXPORT_SYMBOL(cpu_online_map);
@@ -71,6 +68,7 @@ u8 cpu_2_logical_apicid[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
 void *xquad_portio;
 
 cpumask_t cpu_sibling_map[NR_CPUS] __cacheline_aligned;
+EXPORT_SYMBOL(cpu_sibling_map);
 cpumask_t cpu_core_map[NR_CPUS] __cacheline_aligned;
 EXPORT_SYMBOL(cpu_core_map);
 
@@ -99,8 +97,8 @@ void __init smp_alloc_memory(void)
 static inline void
 set_cpu_sibling_map(int cpu)
 {
-	phys_proc_id[cpu] = cpu;
-	cpu_core_id[cpu]  = 0;
+	cpu_data[cpu].phys_proc_id = cpu;
+	cpu_data[cpu].cpu_core_id = 0;
 
 	cpu_sibling_map[cpu] = cpumask_of_cpu(cpu);
 	cpu_core_map[cpu]    = cpumask_of_cpu(cpu);
@@ -253,7 +251,14 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 
 	xen_smp_intr_init(0);
 
-	for_each_cpu_mask (cpu, cpu_possible_map) {
+	/* Restrict the possible_map according to max_cpus. */
+	while ((num_possible_cpus() > 1) && (num_possible_cpus() > max_cpus)) {
+		for (cpu = NR_CPUS-1; !cpu_isset(cpu, cpu_possible_map); cpu--)
+			continue;
+		cpu_clear(cpu, cpu_possible_map);
+	}
+
+	for_each_possible_cpu (cpu) {
 		if (cpu == 0)
 			continue;
 
@@ -264,7 +269,8 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 #endif
 		gdt_descr->address = get_zeroed_page(GFP_KERNEL);
 		if (unlikely(!gdt_descr->address)) {
-			printk(KERN_CRIT "CPU%d failed to allocate GDT\n", cpu);
+			printk(KERN_CRIT "CPU%d failed to allocate GDT\n",
+			       cpu);
 			continue;
 		}
 		gdt_descr->size = GDT_SIZE;
@@ -292,7 +298,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		irq_ctx_init(cpu);
 
 #ifdef CONFIG_HOTPLUG_CPU
-		if (xen_start_info->flags & SIF_INITDOMAIN)
+		if (is_initial_xendomain())
 			cpu_set(cpu, cpu_present_map);
 #else
 		cpu_set(cpu, cpu_present_map);
@@ -302,12 +308,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	}
 
 	init_xenbus_allowed_cpumask();
-
-	/* Currently, Xen gives no dynamic NUMA/HT info. */
-	for (cpu = 1; cpu < NR_CPUS; cpu++) {
-		cpu_sibling_map[cpu] = cpumask_of_cpu(cpu);
-		cpu_core_map[cpu]    = cpumask_of_cpu(cpu);
-	}
 
 #ifdef CONFIG_X86_IO_APIC
 	/*
@@ -340,8 +340,8 @@ core_initcall(initialize_cpu_present_map);
 static void
 remove_siblinginfo(int cpu)
 {
-	phys_proc_id[cpu] = BAD_APICID;
-	cpu_core_id[cpu]  = BAD_APICID;
+	cpu_data[cpu].phys_proc_id = BAD_APICID;
+	cpu_data[cpu].cpu_core_id = BAD_APICID;
 
 	cpus_clear(cpu_sibling_map[cpu]);
 	cpus_clear(cpu_core_map[cpu]);
@@ -375,10 +375,8 @@ void __cpu_die(unsigned int cpu)
 
 	xen_smp_intr_exit(cpu);
 
-#ifdef __i386__
 	if (num_online_cpus() == 1)
 		alternatives_smp_switch(0);
-#endif
 }
 
 #else /* !CONFIG_HOTPLUG_CPU */
@@ -403,10 +401,8 @@ int __devinit __cpu_up(unsigned int cpu)
 	if (rc)
 		return rc;
 
-#ifdef __i386__
 	if (num_online_cpus() == 1)
 		alternatives_smp_switch(1);
-#endif
 
 	/* This must be done before setting cpu_online_map */
 	set_cpu_sibling_map(cpu);

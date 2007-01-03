@@ -27,7 +27,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -39,7 +38,8 @@
 
 fastcall void do_fixup_4gb_segment(struct pt_regs *regs, long error_code)
 {
-	static unsigned long printed = 1;
+#if 0
+	static unsigned long printed = 0;
 	char info[100];
 	int i;
 
@@ -75,6 +75,12 @@ fastcall void do_fixup_4gb_segment(struct pt_regs *regs, long error_code)
 	}
 
 	printk("Continuing...\n\n");
+#else
+	if (printk_ratelimit())
+		printk(KERN_WARNING
+		       "4gb seg fixup, process %s (pid %d), cs:ip %02x:%08lx\n",
+		       current->comm, current->tgid, regs->xcs, regs->eip);
+#endif
 }
 
 static int __init fixup_init(void)

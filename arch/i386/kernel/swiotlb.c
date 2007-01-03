@@ -50,7 +50,7 @@ EXPORT_SYMBOL(swiotlb);
 /* Width of DMA addresses in the IO TLB. 31 bits is an aacraid limitation. */
 #define IO_TLB_DMA_BITS 31
 
-static int swiotlb_force;
+int swiotlb_force;
 static char *iotlb_virt_start;
 static unsigned long iotlb_nslabs;
 
@@ -199,7 +199,7 @@ swiotlb_init(void)
 		swiotlb = 1;
 	} else if ((swiotlb_force != -1) &&
 		   is_running_on_xen() &&
-		   (xen_start_info->flags & SIF_INITDOMAIN)) {
+		   is_initial_xendomain()) {
 		/* Domain 0 always has a swiotlb. */
 		ram_end = HYPERVISOR_memory_op(XENMEM_maximum_ram_page, NULL);
 		if (ram_end <= 0x7ffff)

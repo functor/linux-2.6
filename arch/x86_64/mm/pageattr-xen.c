@@ -3,7 +3,6 @@
  * Thanks to Ben LaHaise for precious feedback.
  */ 
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/highmem.h>
@@ -322,11 +321,13 @@ __change_page_attr(unsigned long address, unsigned long pfn, pgprot_t prot,
 	 */
 #ifndef CONFIG_XEN
  	BUG_ON(PageReserved(kpte_page));
+#else
+	if(!PageReserved(kpte_page))
 #endif
-	if (page_private(kpte_page) == 0) {
-		save_page(kpte_page);
-		revert_page(address, ref_prot);
-	}
+		if (page_private(kpte_page) == 0) {
+			save_page(kpte_page);
+			revert_page(address, ref_prot);
+		}
 	return 0;
 } 
 

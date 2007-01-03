@@ -16,11 +16,14 @@
 #include <linux/linkage.h>
 #include <linux/threads.h>
 #include <linux/init.h>
+#include <linux/elfnote.h>
 #include <asm/desc.h>
 #include <asm/segment.h>
 #include <asm/page.h>
 #include <asm/msr.h>
 #include <asm/cache.h>
+
+#include <xen/interface/elfnote.h>
 
 	.text
 	.section .bootstrap.text
@@ -139,6 +142,7 @@ ENTRY(idt_table)
 ENTRY(empty_zero_page)
 	.skip PAGE_SIZE
 
+#ifdef CONFIG_XEN_COMPAT_030002
 /*
  * __xen_guest information
  */
@@ -158,12 +162,8 @@ ENTRY(empty_zero_page)
 	.ascii	",XEN_VER=xen-3.0"
 	.ascii	",VIRT_BASE=0x"
 		utoh __START_KERNEL_map
-#ifdef CONFIG_XEN_COMPAT_030002
 	.ascii	",ELF_PADDR_OFFSET=0x"
 		utoh __START_KERNEL_map
-#else
-	.ascii	",ELF_PADDR_OFFSET=0x0"
-#endif /* !CONFIG_XEN_COMPAT_030002 */
 	.ascii	",VIRT_ENTRY=0x"
 		utoh (__START_KERNEL_map + __PHYSICAL_START + VIRT_ENTRY_OFFSET)
 	.ascii	",HYPERCALL_PAGE=0x"
@@ -174,3 +174,18 @@ ENTRY(empty_zero_page)
 	.ascii	         "|supervisor_mode_kernel"
 	.ascii	",LOADER=generic"
 	.byte	0
+#endif /* CONFIG_XEN_COMPAT_030002 */
+	
+	ELFNOTE(Xen, XEN_ELFNOTE_GUEST_OS,       .asciz, "linux")
+	ELFNOTE(Xen, XEN_ELFNOTE_GUEST_VERSION,  .asciz, "2.6")
+	ELFNOTE(Xen, XEN_ELFNOTE_XEN_VERSION,    .asciz, "xen-3.0")
+	ELFNOTE(Xen, XEN_ELFNOTE_VIRT_BASE,      .quad,  __START_KERNEL_map)
+#ifdef CONFIG_XEN_COMPAT_030002
+	ELFNOTE(Xen, XEN_ELFNOTE_PADDR_OFFSET,   .quad,  __START_KERNEL_map)
+#else
+	ELFNOTE(Xen, XEN_ELFNOTE_PADDR_OFFSET,   .quad,  0)
+#endif /* !CONFIG_XEN_COMPAT_030002 */
+	ELFNOTE(Xen, XEN_ELFNOTE_ENTRY,          .quad,  startup_64)
+	ELFNOTE(Xen, XEN_ELFNOTE_HYPERCALL_PAGE, .quad,  hypercall_page)
+	ELFNOTE(Xen, XEN_ELFNOTE_FEATURES,       .asciz, "writable_page_tables|writable_descriptor_tables|auto_translated_physmap|pae_pgdir_above_4gb|supervisor_mode_kernel")
+	ELFNOTE(Xen, XEN_ELFNOTE_LOADER,         .asciz, "generic")
