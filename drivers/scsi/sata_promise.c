@@ -76,8 +76,7 @@ enum {
 	PDC_RESET		= (1 << 11), /* HDMA reset */
 
 	PDC_COMMON_FLAGS	= ATA_FLAG_NO_LEGACY | ATA_FLAG_SRST |
-				  ATA_FLAG_MMIO | ATA_FLAG_NO_ATAPI |
-				  ATA_FLAG_PIO_POLLING,
+				  ATA_FLAG_MMIO | ATA_FLAG_NO_ATAPI,
 };
 
 
@@ -121,7 +120,6 @@ static struct scsi_host_template pdc_ata_sht = {
 	.proc_name		= DRV_NAME,
 	.dma_boundary		= ATA_DMA_BOUNDARY,
 	.slave_configure	= ata_scsi_slave_config,
-	.slave_destroy		= ata_scsi_slave_destroy,
 	.bios_param		= ata_std_bios_param,
 };
 
@@ -138,7 +136,6 @@ static const struct ata_port_operations pdc_sata_ops = {
 	.qc_prep		= pdc_qc_prep,
 	.qc_issue		= pdc_qc_issue_prot,
 	.eng_timeout		= pdc_eng_timeout,
-	.data_xfer		= ata_mmio_data_xfer,
 	.irq_handler		= pdc_interrupt,
 	.irq_clear		= pdc_irq_clear,
 
@@ -161,7 +158,6 @@ static const struct ata_port_operations pdc_pata_ops = {
 
 	.qc_prep		= pdc_qc_prep,
 	.qc_issue		= pdc_qc_issue_prot,
-	.data_xfer		= ata_mmio_data_xfer,
 	.eng_timeout		= pdc_eng_timeout,
 	.irq_handler		= pdc_interrupt,
 	.irq_clear		= pdc_irq_clear,
@@ -269,15 +265,8 @@ static const struct pci_device_id pdc_ata_pci_tbl[] = {
 	{ PCI_VENDOR_ID_PROMISE, 0x6629, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_20619 },
 
-/* TODO: remove all associated board_20771 code, as it completely
- * duplicates board_2037x code, unless reason for separation can be
- * divined.
- */
-#if 0
 	{ PCI_VENDOR_ID_PROMISE, 0x3570, PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	  board_20771 },
-#endif
-
 	{ }	/* terminate list */
 };
 
@@ -370,41 +359,35 @@ static void pdc_reset_port(struct ata_port *ap)
 
 static void pdc_sata_phy_reset(struct ata_port *ap)
 {
-	/*    pdc_reset_port(ap); */  /* pata fix */
-	/*    sata_phy_reset(ap); */  /* pata fix */
-	/* if no sata flag, test for pata drive */      /* pata fix */
-	if (ap->flags & ATA_FLAG_SATA)  /* pata fix */
-	{                               /* pata fix */
-		pdc_reset_port(ap);     /* pata fix */
-		sata_phy_reset(ap);     /* pata fix */
-	}                               /* pata fix */
-	else                            /* pata fix */
-		pdc_pata_phy_reset(ap); /* pata fix */
-}
-
-static void pdc_pata_cbl_detect(struct ata_port *ap)
-{
-	u8 tmp;
-	void __iomem *mmio = (void *) ap->ioaddr.cmd_addr + PDC_CTLSTAT + 0x03;
-
-	tmp = readb(mmio);
-
-	if (tmp & 0x01) {
-		ap->cbl = ATA_CBL_PATA40;
-		ap->udma_mask &= ATA_UDMA_MASK_40C;
-	} else
-		ap->cbl = ATA_CBL_PATA80;
+/*	pdc_reset_port(ap); */	/* pata fix */
+/*	sata_phy_reset(ap); */	/* pata fix */
+	/* if no sata flag, test for pata drive */	/* pata fix */
+	if (ap->flags & ATA_FLAG_SATA)	/* pata fix */
+	{				/* pata fix */
+		pdc_reset_port(ap);	/* pata fix */
+		sata_phy_reset(ap);	/* pata fix */
+	}				/* pata fix */
+	else				/* pata fix */
+		pdc_pata_phy_reset(ap);	/* pata fix */
 }
 
 static void pdc_pata_phy_reset(struct ata_port *ap)
 {
-	u8 tmp;                                         /* pata fix */
-	void *mmio = (void *) ap->ioaddr.cmd_addr + PDC_CTLSTAT + 0x03; /* pata fix */
-	tmp = readb(mmio);                              /* pata fix */
-	if (tmp & 0x01)                                 /* pata fix */
-		ap->udma_mask &= ATA_UDMA_MASK_40C;     /* pata fix */
+	/* FIXME: add cable detect.  Don't assume 40-pin cable */
+/*	ap->cbl = ATA_CBL_PATA40; */			/* pata fix */
+/*	ap->udma_mask &= ATA_UDMA_MASK_40C; */		/* pata fix */
+	/* add cable detection code for pata drives */	/* pata fix */
+	u8 tmp;						/* pata fix */
+	void *mmio = (void *) ap->ioaddr.cmd_addr + PDC_CTLSTAT + 0x03;	/* pata fix */
+	tmp = readb(mmio);				/* pata fix */
+	if (tmp & 0x01)					/* pata fix */
+	{						/* pata fix */
+		ap->cbl = ATA_CBL_PATA40;		/* pata fix */
+		ap->udma_mask &= ATA_UDMA_MASK_40C;	/* pata fix */
+	}						/* pata fix */
+	else						/* pata fix */
+		ap->cbl = ATA_CBL_PATA80;		/* pata fix */
 
-	pdc_pata_cbl_detect(ap);
 	pdc_reset_port(ap);
 	ata_port_probe(ap);
 	ata_bus_reset(ap);
@@ -412,7 +395,7 @@ static void pdc_pata_phy_reset(struct ata_port *ap)
 
 static u32 pdc_sata_scr_read (struct ata_port *ap, unsigned int sc_reg)
 {
-	if ((sc_reg > SCR_CONTROL) || (ap->flags & ATA_FLAG_SLAVE_POSS))
+	if (sc_reg > SCR_CONTROL)
 		return 0xffffffffU;
 	return readl((void __iomem *) ap->ioaddr.scr_addr + (sc_reg * 4));
 }
@@ -421,7 +404,7 @@ static u32 pdc_sata_scr_read (struct ata_port *ap, unsigned int sc_reg)
 static void pdc_sata_scr_write (struct ata_port *ap, unsigned int sc_reg,
 			       u32 val)
 {
-	if ((sc_reg > SCR_CONTROL) || (ap->flags & ATA_FLAG_SLAVE_POSS))
+	if (sc_reg > SCR_CONTROL)
 		return;
 	writel(val, (void __iomem *) ap->ioaddr.scr_addr + (sc_reg * 4));
 }
@@ -471,7 +454,7 @@ static void pdc_eng_timeout(struct ata_port *ap)
 	switch (qc->tf.protocol) {
 	case ATA_PROT_DMA:
 	case ATA_PROT_NODATA:
-		ata_port_printk(ap, KERN_ERR, "command timeout\n");
+		printk(KERN_ERR "ata%u: command timeout\n", ap->id);
 		drv_stat = ata_wait_idle(ap);
 		qc->err_mask |= __ac_err_mask(drv_stat);
 		break;
@@ -479,9 +462,8 @@ static void pdc_eng_timeout(struct ata_port *ap)
 	default:
 		drv_stat = ata_busy_wait(ap, ATA_BUSY | ATA_DRQ, 1000);
 
-		ata_port_printk(ap, KERN_ERR,
-				"unknown timeout, cmd 0x%x stat 0x%x\n",
-				qc->tf.command, drv_stat);
+		printk(KERN_ERR "ata%u: unknown timeout, cmd 0x%x stat 0x%x\n",
+		       ap->id, qc->tf.command, drv_stat);
 
 		qc->err_mask |= ac_err_mask(drv_stat);
 		break;
@@ -570,11 +552,11 @@ static irqreturn_t pdc_interrupt (int irq, void *dev_instance, struct pt_regs *r
 		ap = host_set->ports[i];
 		tmp = mask & (1 << (i + 1));
 		if (tmp && ap &&
-		    !(ap->flags & ATA_FLAG_DISABLED)) {
+		    !(ap->flags & (ATA_FLAG_PORT_DISABLED | ATA_FLAG_NOINTR))) {
 			struct ata_queued_cmd *qc;
 
 			qc = ata_qc_from_tag(ap, ap->active_tag);
-			if (qc && (!(qc->tf.flags & ATA_TFLAG_POLLING)))
+			if (qc && (!(qc->tf.ctl & ATA_NIEN)))
 				handled += pdc_host_intr(ap, qc);
 		}
 	}
@@ -714,6 +696,10 @@ static int pdc_ata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	if (!printed_version++)
 		dev_printk(KERN_DEBUG, &pdev->dev, "version " DRV_VERSION "\n");
 
+	/*
+	 * If this driver happens to only be useful on Apple's K2, then
+	 * we should check that here as it has a normal Serverworks ID
+	 */
 	rc = pci_enable_device(pdev);
 	if (rc)
 		return rc;
@@ -765,7 +751,7 @@ static int pdc_ata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	probe_ent->port_ops	= pdc_port_info[board_idx].port_ops;
 
        	probe_ent->irq = pdev->irq;
-       	probe_ent->irq_flags = IRQF_SHARED;
+       	probe_ent->irq_flags = SA_SHIRQ;
 	probe_ent->mmio_base = mmio_base;
 
 	pdc_ata_setup_port(&probe_ent->port[0], base + 0x200);

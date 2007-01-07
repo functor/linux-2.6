@@ -4,6 +4,7 @@
  * (C) 1997 Linus Torvalds
  */
 
+#include <linux/config.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/dcache.h>
@@ -101,7 +102,7 @@ static kmem_cache_t * inode_cachep __read_mostly;
 
 static struct inode *alloc_inode(struct super_block *sb)
 {
-	static const struct address_space_operations empty_aops;
+	static struct address_space_operations empty_aops;
 	static struct inode_operations empty_iops;
 	static const struct file_operations empty_fops;
 	struct inode *inode;
@@ -166,7 +167,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 				bdi = sb->s_bdev->bd_inode->i_mapping->backing_dev_info;
 			mapping->backing_dev_info = bdi;
 		}
-		inode->i_private = 0;
+		memset(&inode->u, 0, sizeof(inode->u));
 		inode->i_mapping = mapping;
 	}
 	return inode;
@@ -259,9 +260,9 @@ void clear_inode(struct inode *inode)
 	DQUOT_DROP(inode);
 	if (inode->i_sb && inode->i_sb->s_op->clear_inode)
 		inode->i_sb->s_op->clear_inode(inode);
-	if (S_ISBLK(inode->i_mode) && inode->i_bdev)
+	if (inode->i_bdev)
 		bd_forget(inode);
-	if (S_ISCHR(inode->i_mode) && inode->i_cdev)
+	if (inode->i_cdev)
 		cd_forget(inode);
 	inode->i_state = I_CLEAR;
 }
@@ -456,14 +457,15 @@ static void prune_icache(int nr_to_scan)
 		nr_pruned++;
 	}
 	inodes_stat.nr_unused -= nr_pruned;
-	if (current_is_kswapd())
-		__count_vm_events(KSWAPD_INODESTEAL, reap);
-	else
-		__count_vm_events(PGINODESTEAL, reap);
 	spin_unlock(&inode_lock);
 
 	dispose_list(&freeable);
 	mutex_unlock(&iprune_mutex);
+
+	if (current_is_kswapd())
+		mod_page_state(kswapd_inodesteal, reap);
+	else
+		mod_page_state(pginodesteal, reap);
 }
 
 /*

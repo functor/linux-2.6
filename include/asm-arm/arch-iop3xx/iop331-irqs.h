@@ -91,6 +91,7 @@
 #define NR_IRQS			NR_IOP331_IRQS
 
 
+#if defined(CONFIG_ARCH_IQ80331)
 /*
  * Interrupts available on the IQ80331 board
  */
@@ -110,6 +111,7 @@
 #define	IRQ_IQ80331_INTC	IRQ_IOP331_XINT2
 #define	IRQ_IQ80331_INTD	IRQ_IOP331_XINT3
 
+#elif defined(CONFIG_MACH_IQ80332)
 /*
  * Interrupts available on the IQ80332 board
  */
@@ -128,5 +130,7 @@
 #define	IRQ_IQ80332_INTB	IRQ_IOP331_XINT1
 #define	IRQ_IQ80332_INTC	IRQ_IOP331_XINT2
 #define	IRQ_IQ80332_INTD	IRQ_IOP331_XINT3
+
+#endif
 
 #endif // _IOP331_IRQ_H_

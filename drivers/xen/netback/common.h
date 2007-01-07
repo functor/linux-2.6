@@ -29,6 +29,7 @@
 #ifndef __NETIF__BACKEND__COMMON_H__
 #define __NETIF__BACKEND__COMMON_H__
 
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -45,7 +46,6 @@
 #include <xen/interface/grant_table.h>
 #include <xen/gnttab.h>
 #include <xen/driver_util.h>
-#include <asm/hypercall.h>
 
 #define DPRINTK(_f, _a...)			\
 	pr_debug("(file=%s, line=%d) " _f,	\
@@ -64,9 +64,9 @@ typedef struct netif_st {
 
 	/* Physical parameters of the comms window. */
 	grant_handle_t   tx_shmem_handle;
-	grant_ref_t      tx_shmem_ref;
+	grant_ref_t      tx_shmem_ref; 
 	grant_handle_t   rx_shmem_handle;
-	grant_ref_t      rx_shmem_ref;
+	grant_ref_t      rx_shmem_ref; 
 	unsigned int     evtchn;
 	unsigned int     irq;
 
@@ -78,10 +78,7 @@ typedef struct netif_st {
 
 	/* Set of features that can be turned on in dev->features. */
 	int features;
-
-	/* Internal feature information. */
-	int can_queue:1;	/* can queue packets for receiver? */
-	int copying_receiver:1;	/* copy packets to receiver?       */
+	int can_queue;
 
 	/* Allow netif_be_start_xmit() to peek ahead in the rx request ring. */
 	RING_IDX rx_req_cons_peek;
@@ -106,7 +103,7 @@ typedef struct netif_st {
 
 void netif_disconnect(netif_t *netif);
 
-netif_t *netif_alloc(domid_t domid, unsigned int handle);
+netif_t *netif_alloc(domid_t domid, unsigned int handle, u8 be_mac[ETH_ALEN]);
 int netif_map(netif_t *netif, unsigned long tx_ring_ref,
 	      unsigned long rx_ring_ref, unsigned int evtchn);
 

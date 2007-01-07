@@ -13,6 +13,7 @@
 #ifndef _S390_PGALLOC_H
 #define _S390_PGALLOC_H
 
+#include <linux/config.h>
 #include <linux/threads.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
@@ -146,7 +147,7 @@ pte_alloc_one(struct mm_struct *mm, unsigned long vmaddr)
 	pte_t *pte = pte_alloc_one_kernel(mm, vmaddr);
 	if (pte)
 		return virt_to_page(pte);
-	return NULL;
+	return 0;
 }
 
 static inline void pte_free_kernel(pte_t *pte)

@@ -39,6 +39,7 @@
 #define read_barrier_depends()  do { } while(0)
 
 #define set_mb(var, value)	do { var = value; mb(); } while (0)
+#define set_wmb(var, value)	do { var = value; wmb(); } while (0)
 
 #ifdef __KERNEL__
 #ifdef CONFIG_SMP
@@ -52,15 +53,6 @@
 #define smp_wmb()	barrier()
 #define smp_read_barrier_depends()	do { } while(0)
 #endif /* CONFIG_SMP */
-
-/*
- * This is a barrier which prevents following instructions from being
- * started until the value of the argument x is known.  For example, if
- * x is a variable loaded from memory, this prevents following
- * instructions from being executed until the load has been performed.
- */
-#define data_barrier(x)	\
-	asm volatile("twi 0,%0,0; isync" : : "r" (x) : "memory");
 
 struct task_struct;
 struct pt_regs;
@@ -228,8 +220,8 @@ __xchg_u32(volatile void *p, unsigned long val)
 "	stwcx.	%3,0,%2 \n\
 	bne-	1b"
 	ISYNC_ON_SMP
-	: "=&r" (prev), "+m" (*(volatile unsigned int *)p)
-	: "r" (p), "r" (val)
+	: "=&r" (prev), "=m" (*(volatile unsigned int *)p)
+	: "r" (p), "r" (val), "m" (*(volatile unsigned int *)p)
 	: "cc", "memory");
 
 	return prev;
@@ -248,8 +240,8 @@ __xchg_u64(volatile void *p, unsigned long val)
 "	stdcx.	%3,0,%2 \n\
 	bne-	1b"
 	ISYNC_ON_SMP
-	: "=&r" (prev), "+m" (*(volatile unsigned long *)p)
-	: "r" (p), "r" (val)
+	: "=&r" (prev), "=m" (*(volatile unsigned long *)p)
+	: "r" (p), "r" (val), "m" (*(volatile unsigned long *)p)
 	: "cc", "memory");
 
 	return prev;
@@ -307,8 +299,8 @@ __cmpxchg_u32(volatile unsigned int *p, unsigned long old, unsigned long new)
 	ISYNC_ON_SMP
 	"\n\
 2:"
-	: "=&r" (prev), "+m" (*p)
-	: "r" (p), "r" (old), "r" (new)
+	: "=&r" (prev), "=m" (*p)
+	: "r" (p), "r" (old), "r" (new), "m" (*p)
 	: "cc", "memory");
 
 	return prev;
@@ -330,8 +322,8 @@ __cmpxchg_u64(volatile unsigned long *p, unsigned long old, unsigned long new)
 	ISYNC_ON_SMP
 	"\n\
 2:"
-	: "=&r" (prev), "+m" (*p)
-	: "r" (p), "r" (old), "r" (new)
+	: "=&r" (prev), "=m" (*p)
+	: "r" (p), "r" (old), "r" (new), "m" (*p)
 	: "cc", "memory");
 
 	return prev;

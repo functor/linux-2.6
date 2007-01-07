@@ -19,6 +19,7 @@
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 #include <linux/list.h>
 #include <linux/stddef.h>
 #include <linux/spinlock.h>
@@ -68,7 +69,7 @@ struct task_struct;
 	wait_queue_t name = __WAITQUEUE_INITIALIZER(name, tsk)
 
 #define __WAIT_QUEUE_HEAD_INITIALIZER(name) {				\
-	.lock		= __SPIN_LOCK_UNLOCKED(name.lock),		\
+	.lock		= SPIN_LOCK_UNLOCKED,				\
 	.task_list	= { &(name).task_list, &(name).task_list } }
 
 #define DECLARE_WAIT_QUEUE_HEAD(name) \
@@ -77,7 +78,11 @@ struct task_struct;
 #define __WAIT_BIT_KEY_INITIALIZER(word, bit)				\
 	{ .flags = word, .bit_nr = bit, }
 
-extern void init_waitqueue_head(wait_queue_head_t *q);
+static inline void init_waitqueue_head(wait_queue_head_t *q)
+{
+	spin_lock_init(&q->lock);
+	INIT_LIST_HEAD(&q->task_list);
+}
 
 static inline void init_waitqueue_entry(wait_queue_t *q, struct task_struct *p)
 {
@@ -110,7 +115,7 @@ static inline int waitqueue_active(wait_queue_head_t *q)
 
 extern void FASTCALL(add_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
 extern void FASTCALL(add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t * wait));
-extern void FASTCALL(remove_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
+extern int FASTCALL(remove_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
 
 static inline void __add_wait_queue(wait_queue_head_t *head, wait_queue_t *new)
 {

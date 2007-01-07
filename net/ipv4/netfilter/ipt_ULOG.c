@@ -47,6 +47,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/spinlock.h>
 #include <linux/socket.h>
 #include <linux/skbuff.h>
@@ -123,6 +124,11 @@ static void ulog_send(unsigned int nlgroupnum)
 	/* last nlmsg needs NLMSG_DONE */
 	if (ub->qlen > 1)
 		ub->lastnlh->nlmsg_type = NLMSG_DONE;
+
+	if (!ub->skb) {
+		DEBUGP("ipt_ULOG: ulog_send: nothing to send\n");
+		return;
+	}
 
 	NETLINK_CB(ub->skb).dst_group = nlgroupnum + 1;
 	DEBUGP("ipt_ULOG: throwing %d packets to netlink group %u\n",

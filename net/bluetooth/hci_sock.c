@@ -24,6 +24,7 @@
 
 /* Bluetooth HCI sockets. */
 
+#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/types.h>
@@ -120,13 +121,10 @@ void hci_send_to_sock(struct hci_dev *hdev, struct sk_buff *skb)
 			if (!hci_test_bit(evt, &flt->event_mask))
 				continue;
 
-			if (flt->opcode &&
-			    ((evt == HCI_EV_CMD_COMPLETE &&
-			      flt->opcode !=
-			      get_unaligned((__u16 *)(skb->data + 3))) ||
-			     (evt == HCI_EV_CMD_STATUS &&
-			      flt->opcode !=
-			      get_unaligned((__u16 *)(skb->data + 4)))))
+			if (flt->opcode && ((evt == HCI_EV_CMD_COMPLETE && 
+					flt->opcode != *(__u16 *)(skb->data + 3)) ||
+					(evt == HCI_EV_CMD_STATUS && 
+					flt->opcode != *(__u16 *)(skb->data + 4))))
 				continue;
 		}
 

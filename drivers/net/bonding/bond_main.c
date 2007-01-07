@@ -33,6 +33,7 @@
 
 //#define BONDING_DEBUG 1
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sched.h>
@@ -3547,7 +3548,7 @@ static int bond_do_ioctl(struct net_device *bond_dev, struct ifreq *ifr, int cmd
 			mii->val_out = 0;
 			read_lock_bh(&bond->lock);
 			read_lock(&bond->curr_slave_lock);
-			if (netif_carrier_ok(bond->dev)) {
+			if (bond->curr_active_slave) {
 				mii->val_out = BMSR_LSTATUS;
 			}
 			read_unlock(&bond->curr_slave_lock);
@@ -4532,8 +4533,6 @@ static int bond_check_params(struct bond_params *params)
 	return 0;
 }
 
-static struct lock_class_key bonding_netdev_xmit_lock_key;
-
 /* Create a new bond based on the specified name and bonding parameters.
  * Caller must NOT hold rtnl_lock; we need to release it here before we
  * set up our sysfs entries.
@@ -4569,9 +4568,6 @@ int bond_create(char *name, struct bond_params *params, struct bonding **newbond
 	if (res < 0) {
 		goto out_bond;
 	}
-
-	lockdep_set_class(&bond_dev->_xmit_lock, &bonding_netdev_xmit_lock_key);
-
 	if (newbond)
 		*newbond = bond_dev->priv;
 

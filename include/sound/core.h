@@ -188,6 +188,8 @@ struct snd_minor {
 	int device;			/* device number */
 	const struct file_operations *f_ops;	/* file operations */
 	void *private_data;		/* private data for f_ops->open */
+	char name[0];			/* device name (keep at the end of
+								structure) */
 };
 
 /* sound.c */
@@ -231,8 +233,9 @@ int copy_from_user_toio(volatile void __iomem *dst, const void __user *src, size
 
 /* init.c */
 
+extern unsigned int snd_cards_lock;
 extern struct snd_card *snd_cards[SNDRV_CARDS];
-int snd_card_locked(int card);
+extern rwlock_t snd_card_rwlock;
 #if defined(CONFIG_SND_MIXER_OSS) || defined(CONFIG_SND_MIXER_OSS_MODULE)
 #define SND_MIXER_OSS_NOTIFY_REGISTER	0
 #define SND_MIXER_OSS_NOTIFY_DISCONNECT	1

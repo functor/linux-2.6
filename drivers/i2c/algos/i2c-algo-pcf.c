@@ -479,11 +479,9 @@ int i2c_pcf_add_bus(struct i2c_adapter *adap)
 	adap->timeout = 100;		/* default values, should	*/
 	adap->retries = 3;		/* be replaced by defines	*/
 
-	if ((rval = pcf_init_8584(pcf_adap)))
-		return rval;
-
-	rval = i2c_add_adapter(adap);
-
+	rval = pcf_init_8584(pcf_adap);
+	if (!rval)
+		i2c_add_adapter(adap);
 	return rval;
 }
 

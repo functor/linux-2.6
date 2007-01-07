@@ -559,7 +559,7 @@ static int ethtool_set_sg(struct net_device *dev, char __user *useraddr)
 
 static int ethtool_get_tso(struct net_device *dev, char __user *useraddr)
 {
-	struct ethtool_value edata = { ETHTOOL_GTSO };
+	struct ethtool_value edata = { ETHTOOL_GUFO };
 
 	if (!dev->ethtool_ops->get_tso)
 		return -EOPNOTSUPP;

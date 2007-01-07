@@ -112,7 +112,7 @@ static void ext2_check_page(struct page *page)
 	if (offs != limit)
 		goto Eend;
 out:
-	SetPageFsMisc(page);
+	SetPageChecked(page);
 	return;
 
 	/* Too bad, we had an error */
@@ -152,20 +152,21 @@ Eend:
 		dir->i_ino, (page->index<<PAGE_CACHE_SHIFT)+offs,
 		(unsigned long) le32_to_cpu(p->inode));
 fail:
-	SetPageFsMisc(page);
+	SetPageChecked(page);
 	SetPageError(page);
 }
 
 static struct page * ext2_get_page(struct inode *dir, unsigned long n)
 {
 	struct address_space *mapping = dir->i_mapping;
-	struct page *page = read_mapping_page(mapping, n, NULL);
+	struct page *page = read_cache_page(mapping, n,
+				(filler_t*)mapping->a_ops->readpage, NULL);
 	if (!IS_ERR(page)) {
 		wait_on_page_locked(page);
 		kmap(page);
 		if (!PageUptodate(page))
 			goto fail;
-		if (!PageFsMisc(page))
+		if (!PageChecked(page))
 			ext2_check_page(page);
 		if (PageError(page))
 			goto fail;
@@ -399,7 +400,8 @@ ino_t ext2_inode_by_name(struct inode * dir, struct dentry *dentry)
 	de = ext2_find_entry (dir, dentry, &page);
 	if (de) {
 		res = le32_to_cpu(de->inode);
-		ext2_put_page(page);
+		kunmap(page);
+		page_cache_release(page);
 	}
 	return res;
 }

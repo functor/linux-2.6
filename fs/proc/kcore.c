@@ -9,6 +9,7 @@
  *	Safe accesses to vmalloc/direct-mapped discontiguous areas, Kanoj Sarcar <kanoj@sgi.com>
  */
 
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
 #include <linux/user.h>
@@ -41,6 +42,8 @@ const struct file_operations proc_kcore_operations = {
 #ifndef	kc_offset_to_vaddr
 #define	kc_offset_to_vaddr(o) ((o) + PAGE_OFFSET)
 #endif
+
+#define roundup(x, y)  ((((x)+((y)-1))/(y))*(y))
 
 /* An ELF note in memory */
 struct memelfnote
@@ -382,7 +385,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 				 */
 				if (n) { 
 					if (clear_user(buffer + tsz - n,
-								n))
+								tsz - n))
 						return -EFAULT;
 				}
 			} else {

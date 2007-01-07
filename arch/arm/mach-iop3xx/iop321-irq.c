@@ -52,8 +52,7 @@ iop321_irq_unmask (unsigned int irq)
 	intctl_write(iop321_mask);
 }
 
-struct irq_chip ext_chip = {
-	.name	= "IOP",
+struct irqchip ext_chip = {
 	.ack    = iop321_irq_mask,
 	.mask   = iop321_irq_mask,
 	.unmask = iop321_irq_unmask,

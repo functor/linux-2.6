@@ -35,6 +35,7 @@
  */
 
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -46,8 +47,8 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
 #include <linux/ioctl.h>
+#include "usb-serial.h"
 #include "kobil_sct.h"
 
 static int debug;

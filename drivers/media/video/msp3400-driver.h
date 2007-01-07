@@ -64,7 +64,6 @@ struct msp_state {
 	u8 has_sound_processing;
 	u8 has_virtual_dolby_surround;
 	u8 has_dolby_pro_logic;
-	u8 force_btsc;
 
 	int radio;
 	int opmode;
@@ -91,8 +90,8 @@ struct msp_state {
 	/* thread */
 	struct task_struct   *kthread;
 	wait_queue_head_t    wq;
-	unsigned int         restart:1;
-	unsigned int         watch_stereo:1;
+	int                  restart:1;
+	int                  watch_stereo:1;
 };
 
 /* msp3400-driver.c */

@@ -236,7 +236,7 @@ int start_cachemiss_threads (threadinfo_t *ti)
 	memset(iot, 0, sizeof(*iot));
 
 	iot->ti = ti;
-	spin_lock_init(&iot->async_lock);
+	iot->async_lock = SPIN_LOCK_UNLOCKED;
 	iot->nr_async_pending = 0;
 	INIT_LIST_HEAD(&iot->async_queue);
 	init_waitqueue_head(&iot->async_sleep);

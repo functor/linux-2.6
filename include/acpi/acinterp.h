@@ -53,14 +53,10 @@
 #define ACPI_EXD_TABLE_SIZE(name)   (sizeof(name) / sizeof (struct acpi_exdump_info))
 
 /*
- * If possible, pack the following structures to byte alignment, since we
- * don't care about performance for debug output. Two cases where we cannot
- * pack the structures:
- *
- * 1) Hardware does not support misaligned memory transfers
- * 2) Compiler does not support pointers within packed structures
+ * If possible, pack the following structure to byte alignment, since we
+ * don't care about performance for debug output
  */
-#if (!defined(ACPI_MISALIGNMENT_NOT_SUPPORTED) && !defined(ACPI_PACKED_POINTERS_NOT_SUPPORTED))
+#ifndef ACPI_MISALIGNMENT_NOT_SUPPORTED
 #pragma pack(1)
 #endif
 
@@ -291,10 +287,7 @@ acpi_ex_system_wait_event(union acpi_operand_object *time,
 
 acpi_status acpi_ex_system_reset_event(union acpi_operand_object *obj_desc);
 
-acpi_status
-acpi_ex_system_wait_semaphore(acpi_semaphore semaphore, u16 timeout);
-
-acpi_status acpi_ex_system_wait_mutex(acpi_mutex mutex, u16 timeout);
+acpi_status acpi_ex_system_wait_semaphore(acpi_handle semaphore, u16 timeout);
 
 /*
  * exoparg1 - ACPI AML execution, 1 operand

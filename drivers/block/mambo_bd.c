@@ -46,6 +46,8 @@
 
 #include <asm/systemsim.h>
 
+#include <linux/devfs_fs_kernel.h>
+
 #include <asm/uaccess.h>
 #include <asm/types.h>
 
@@ -246,6 +248,7 @@ static int __init mbd_init(void)
 	printk("mambo bogus disk: compiled in with kernel\n");
 #endif
 
+	devfs_mk_dir("mambobd");
 	for (i = 0; i < MAX_MBD; i++) {	/* load defaults */
 		struct gendisk *disk = mbd_dev[i].disk;
 		mbd_dev[i].initialized = 0;
@@ -256,6 +259,7 @@ static int __init mbd_init(void)
 		disk->fops = &mbd_fops;
 		disk->private_data = &mbd_dev[i];
 		sprintf(disk->disk_name, "mambobd%d", i);
+		sprintf(disk->devfs_name, "mambobd%d", i);
 		set_capacity(disk, 0x7ffffc00ULL << 1);	/* 2 TB */
 		add_disk(disk);
 	}
@@ -272,6 +276,8 @@ static int __init mbd_init(void)
 
 static void __exit mbd_cleanup(void)
 {
+	devfs_remove("mambobd");
+
 	if (unregister_blkdev(MAJOR_NR, "mbd") != 0)
 		printk("mbd: cleanup_module failed\n");
 	else

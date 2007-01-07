@@ -129,8 +129,10 @@ match(const struct sk_buff *skb,
       unsigned int protoff,
       int *hotdrop)
 {
-	const struct xt_sctp_info *info = matchinfo;
+	const struct xt_sctp_info *info;
 	sctp_sctphdr_t _sh, *sh;
+
+	info = (const struct xt_sctp_info *)matchinfo;
 
 	if (offset) {
 		duprintf("Dropping non-first fragment.. FIXME\n");
@@ -151,7 +153,7 @@ match(const struct sk_buff *skb,
 		&& SCCHECK(((ntohs(sh->dest) >= info->dpts[0]) 
 			&& (ntohs(sh->dest) <= info->dpts[1])), 
 			XT_SCTP_DEST_PORTS, info->flags, info->invflags)
-		&& SCCHECK(match_packet(skb, protoff + sizeof (sctp_sctphdr_t),
+		&& SCCHECK(match_packet(skb, protoff,
 					info->chunkmap, info->chunk_match_type,
  					info->flag_info, info->flag_count, 
 					hotdrop),

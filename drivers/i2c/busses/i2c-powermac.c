@@ -20,6 +20,7 @@
 
 */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -148,6 +149,8 @@ static int i2c_powermac_master_xfer(	struct i2c_adapter *adap,
 	int			read;
 	int			addrdir;
 
+	if (num != 1)
+		return -EINVAL;
 	if (msgs->flags & I2C_M_TEN)
 		return -EINVAL;
 	read = (msgs->flags & I2C_M_RD) != 0;
@@ -164,7 +167,7 @@ static int i2c_powermac_master_xfer(	struct i2c_adapter *adap,
 	rc = pmac_i2c_xfer(bus, addrdir, 0, 0, msgs->buf, msgs->len);
  bail:
 	pmac_i2c_close(bus);
-	return rc < 0 ? rc : 1;
+	return rc < 0 ? rc : msgs->len;
 }
 
 static u32 i2c_powermac_func(struct i2c_adapter * adapter)

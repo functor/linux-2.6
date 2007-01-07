@@ -14,6 +14,7 @@
  * 08 Oct 2005 Harald Welte <lafore@netfilter.org>
  * 	- Generalize into "x_tables" layer and "{ip,ip6,arp}_tables"
  */
+#include <linux/config.h>
 #include <linux/cache.h>
 #include <linux/capability.h>
 #include <linux/skbuff.h>
@@ -404,13 +405,6 @@ mark_source_chains(struct xt_table_info *newinfo,
 			    && unconditional(&e->ip)) {
 				unsigned int oldpos, size;
 
-				if (t->verdict < -NF_MAX_VERDICT - 1) {
-					duprintf("mark_source_chains: bad "
-						"negative verdict (%i)\n",
-								t->verdict);
-					return 0;
-				}
-
 				/* Return: backtrack through the last
 				   big jump. */
 				do {
@@ -448,13 +442,6 @@ mark_source_chains(struct xt_table_info *newinfo,
 				if (strcmp(t->target.u.user.name,
 					   IPT_STANDARD_TARGET) == 0
 				    && newpos >= 0) {
-					if (newpos > newinfo->size -
-						sizeof(struct ipt_entry)) {
-						duprintf("mark_source_chains: "
-							"bad verdict (%i)\n",
-								newpos);
-						return 0;
-					}
 					/* This a jump; chase it. */
 					duprintf("Jump rule %u -> %u\n",
 						 pos, newpos);
@@ -485,6 +472,27 @@ cleanup_match(struct ipt_entry_match *m, unsigned int *i)
 					   m->u.match_size - sizeof(*m));
 	module_put(m->u.kernel.match->me);
 	return 0;
+}
+
+static inline int
+standard_check(const struct ipt_entry_target *t,
+	       unsigned int max_offset)
+{
+	struct ipt_standard_target *targ = (void *)t;
+
+	/* Check standard info. */
+	if (targ->verdict >= 0
+	    && targ->verdict > max_offset - sizeof(struct ipt_entry)) {
+		duprintf("ipt_standard_check: bad verdict (%i)\n",
+			 targ->verdict);
+		return 0;
+	}
+	if (targ->verdict < -NF_MAX_VERDICT - 1) {
+		duprintf("ipt_standard_check: bad negative verdict (%i)\n",
+			 targ->verdict);
+		return 0;
+	}
+	return 1;
 }
 
 static inline int
@@ -545,18 +553,12 @@ check_entry(struct ipt_entry *e, const char *name, unsigned int size,
 		return -EINVAL;
 	}
 
-	if (e->target_offset + sizeof(struct ipt_entry_target) > e->next_offset)
-		return -EINVAL;
-
 	j = 0;
 	ret = IPT_MATCH_ITERATE(e, check_match, name, &e->ip, e->comefrom, &j);
 	if (ret != 0)
 		goto cleanup_matches;
 
 	t = ipt_get_target(e);
-	ret = -EINVAL;
-	if (e->target_offset + t->u.target_size > e->next_offset)
-			goto cleanup_matches;
 	target = try_then_request_module(xt_find_target(AF_INET,
 						     t->u.user.name,
 						     t->u.user.revision),
@@ -574,7 +576,12 @@ check_entry(struct ipt_entry *e, const char *name, unsigned int size,
 	if (ret)
 		goto err;
 
-	if (t->u.kernel.target->checkentry
+	if (t->u.kernel.target == &ipt_standard_target) {
+		if (!standard_check(t, size)) {
+			ret = -EINVAL;
+			goto cleanup_matches;
+		}
+	} else if (t->u.kernel.target->checkentry
 		   && !t->u.kernel.target->checkentry(name, e, target, t->data,
 						      t->u.target_size
 						      - sizeof(*t),
@@ -724,7 +731,7 @@ translate_table(const char *name,
 
 	if (ret != 0) {
 		IPT_ENTRY_ITERATE(entry0, newinfo->size,
-				cleanup_entry, &i);
+				  cleanup_entry, &i);
 		return ret;
 	}
 
@@ -1525,22 +1532,15 @@ check_compat_entry_size_and_hooks(struct ipt_entry *e,
 		return -EINVAL;
 	}
 
-	if (e->target_offset + sizeof(struct compat_xt_entry_target) >
-								e->next_offset)
-		return -EINVAL;
-
 	off = 0;
 	entry_offset = (void *)e - (void *)base;
 	j = 0;
 	ret = IPT_MATCH_ITERATE(e, compat_check_calc_match, name, &e->ip,
 			e->comefrom, &off, &j);
 	if (ret != 0)
-		goto cleanup_matches;
+		goto out;
 
 	t = ipt_get_target(e);
-	ret = -EINVAL;
-	if (e->target_offset + t->u.target_size > e->next_offset)
-			goto cleanup_matches;
 	target = try_then_request_module(xt_find_target(AF_INET,
 						     t->u.user.name,
 						     t->u.user.revision),
@@ -1548,7 +1548,7 @@ check_compat_entry_size_and_hooks(struct ipt_entry *e,
 	if (IS_ERR(target) || !target) {
 		duprintf("check_entry: `%s' not found\n", t->u.user.name);
 		ret = target ? PTR_ERR(target) : -ENOENT;
-		goto cleanup_matches;
+		goto out;
 	}
 	t->u.kernel.target = target;
 
@@ -1575,10 +1575,7 @@ check_compat_entry_size_and_hooks(struct ipt_entry *e,
 
 	(*i)++;
 	return 0;
-
 out:
-	module_put(t->u.kernel.target->me);
-cleanup_matches:
 	IPT_MATCH_ITERATE(e, cleanup_match, &j);
 	return ret;
 }
@@ -1601,16 +1598,18 @@ static inline int compat_copy_match_from_user(struct ipt_entry_match *m,
 	ret = xt_check_match(match, AF_INET, dm->u.match_size - sizeof(*dm),
 			     name, hookmask, ip->proto,
 			     ip->invflags & IPT_INV_PROTO);
+	if (ret)
+		return ret;
 
-	if (!ret && m->u.kernel.match->checkentry
+	if (m->u.kernel.match->checkentry
 	    && !m->u.kernel.match->checkentry(name, ip, match, dm->data,
 					      dm->u.match_size - sizeof(*dm),
 					      hookmask)) {
 		duprintf("ip_tables: check failed for `%s'.\n",
 			 m->u.kernel.match->name);
-		ret = -EINVAL;
+		return -EINVAL;
 	}
-	return ret;
+	return 0;
 }
 
 static int compat_copy_entry_from_user(struct ipt_entry *e, void **dstptr,
@@ -1632,7 +1631,7 @@ static int compat_copy_entry_from_user(struct ipt_entry *e, void **dstptr,
 	ret = IPT_MATCH_ITERATE(e, compat_copy_match_from_user, dstptr, size,
 			name, &de->ip, de->comefrom);
 	if (ret)
-		goto err;
+		goto out;
 	de->target_offset = e->target_offset - (origsize - *size);
 	t = ipt_get_target(e);
 	target = t->u.kernel.target;
@@ -1655,18 +1654,22 @@ static int compat_copy_entry_from_user(struct ipt_entry *e, void **dstptr,
 			      name, e->comefrom, e->ip.proto,
 			      e->ip.invflags & IPT_INV_PROTO);
 	if (ret)
-		goto err;
+		goto out;
 
-	if (t->u.kernel.target->checkentry
+	ret = -EINVAL;
+	if (t->u.kernel.target == &ipt_standard_target) {
+		if (!standard_check(t, *size))
+			goto out;
+	} else if (t->u.kernel.target->checkentry
 		   && !t->u.kernel.target->checkentry(name, de, target,
 				t->data, t->u.target_size - sizeof(*t),
 				de->comefrom)) {
 		duprintf("ip_tables: compat: check failed for `%s'.\n",
 			 t->u.kernel.target->name);
-		ret = -EINVAL;
-		goto err;
+		goto out;
 	}
- err:
+	ret = 0;
+out:
 	return ret;
 }
 
@@ -1680,7 +1683,7 @@ translate_compat_table(const char *name,
 		unsigned int *hook_entries,
 		unsigned int *underflows)
 {
-	unsigned int i, j;
+	unsigned int i;
 	struct xt_table_info *newinfo, *info;
 	void *pos, *entry0, *entry1;
 	unsigned int size;
@@ -1698,21 +1701,21 @@ translate_compat_table(const char *name,
 	}
 
 	duprintf("translate_compat_table: size %u\n", info->size);
-	j = 0;
+	i = 0;
 	xt_compat_lock(AF_INET);
 	/* Walk through entries, checking offsets. */
 	ret = IPT_ENTRY_ITERATE(entry0, total_size,
 				check_compat_entry_size_and_hooks,
 				info, &size, entry0,
 				entry0 + total_size,
-				hook_entries, underflows, &j, name);
+				hook_entries, underflows, &i, name);
 	if (ret != 0)
 		goto out_unlock;
 
 	ret = -EINVAL;
-	if (j != number) {
+	if (i != number) {
 		duprintf("translate_compat_table: %u not %u entries\n",
-			 j, number);
+			 i, number);
 		goto out_unlock;
 	}
 
@@ -1759,7 +1762,7 @@ translate_compat_table(const char *name,
 		goto free_newinfo;
 
 	/* And one copy for every other CPU */
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		if (newinfo->entries[i] && newinfo->entries[i] != entry1)
 			memcpy(newinfo->entries[i], entry1, newinfo->size);
 
@@ -1771,10 +1774,8 @@ translate_compat_table(const char *name,
 free_newinfo:
 	xt_free_table_info(newinfo);
 out:
-	IPT_ENTRY_ITERATE(entry0, total_size, cleanup_entry, &j);
 	return ret;
 out_unlock:
-	compat_flush_offsets();
 	xt_compat_unlock(AF_INET);
 	goto out;
 }
@@ -1989,15 +1990,10 @@ compat_get_entries(struct compat_ipt_get_entries __user *uptr, int *len)
 	return ret;
 }
 
-static int do_ipt_get_ctl(struct sock *, int, void __user *, int *);
-
 static int
 compat_do_ipt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 {
 	int ret;
-
-	if (!capable(CAP_NET_ADMIN))
-		return -EPERM;
 
 	switch (cmd) {
 	case IPT_SO_GET_INFO:
@@ -2007,7 +2003,8 @@ compat_do_ipt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 		ret = compat_get_entries(user, len);
 		break;
 	default:
-		ret = do_ipt_get_ctl(sk, cmd, user, len);
+		duprintf("compat_do_ipt_get_ctl: unknown request %i\n", cmd);
+		ret = -EINVAL;
 	}
 	return ret;
 }
@@ -2117,8 +2114,7 @@ int ipt_register_table(struct xt_table *table, const struct ipt_replace *repl)
 		return ret;
 	}
 
-	ret = xt_register_table(table, &bootstrap, newinfo);
-	if (ret != 0) {
+	if (xt_register_table(table, &bootstrap, newinfo) != 0) {
 		xt_free_table_info(newinfo);
 		return ret;
 	}
@@ -2244,39 +2240,22 @@ static int __init ip_tables_init(void)
 {
 	int ret;
 
-	ret = xt_proto_init(AF_INET);
-	if (ret < 0)
-		goto err1;
+	xt_proto_init(AF_INET);
 
 	/* Noone else will be downing sem now, so we won't sleep */
-	ret = xt_register_target(&ipt_standard_target);
-	if (ret < 0)
-		goto err2;
-	ret = xt_register_target(&ipt_error_target);
-	if (ret < 0)
-		goto err3;
-	ret = xt_register_match(&icmp_matchstruct);
-	if (ret < 0)
-		goto err4;
+	xt_register_target(&ipt_standard_target);
+	xt_register_target(&ipt_error_target);
+	xt_register_match(&icmp_matchstruct);
 
 	/* Register setsockopt */
 	ret = nf_register_sockopt(&ipt_sockopts);
-	if (ret < 0)
-		goto err5;
+	if (ret < 0) {
+		duprintf("Unable to register sockopts.\n");
+		return ret;
+	}
 
 	printk("ip_tables: (C) 2000-2006 Netfilter Core Team\n");
 	return 0;
-
-err5:
-	xt_unregister_match(&icmp_matchstruct);
-err4:
-	xt_unregister_target(&ipt_error_target);
-err3:
-	xt_unregister_target(&ipt_standard_target);
-err2:
-	xt_proto_fini(AF_INET);
-err1:
-	return ret;
 }
 
 static void __exit ip_tables_fini(void)

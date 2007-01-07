@@ -92,9 +92,8 @@ static inline int is_broadcast_ether_addr(const u8 *addr)
  */
 static inline int is_valid_ether_addr(const u8 *addr)
 {
-	/* FF:FF:FF:FF:FF:FF is a multicast address so we don't need to
-	 * explicitly check for it here. */
-	return !is_multicast_ether_addr(addr) && !is_zero_ether_addr(addr);
+	return !is_multicast_ether_addr(addr) && !is_zero_ether_addr(addr) &&
+	       !is_broadcast_ether_addr(addr);
 }
 
 /**

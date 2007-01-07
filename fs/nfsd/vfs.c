@@ -16,6 +16,7 @@
  * Zerocpy NFS support (C) 2002 Hirokazu Takahashi <taka@valinux.co.jp>
  */
 
+#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/time.h>
 #include <linux/errno.h>
@@ -672,10 +673,7 @@ nfsd_open(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 		goto out_nfserr;
 
 	if (access & MAY_WRITE) {
-		if (access & MAY_READ)
-			flags = O_RDWR|O_LARGEFILE;
-		else
-			flags = O_WRONLY|O_LARGEFILE;
+		flags = O_WRONLY|O_LARGEFILE;
 
 		DQUOT_INIT(inode);
 	}
@@ -836,7 +834,7 @@ nfsd_vfs_read(struct svc_rqst *rqstp, struct svc_fh *fhp, struct file *file,
 	if (ra && ra->p_set)
 		file->f_ra = ra->p_ra;
 
-	if (file->f_op->sendfile && rqstp->rq_sendfile_ok) {
+	if (file->f_op->sendfile) {
 		svc_pushback_unused_pages(rqstp);
 		err = file->f_op->sendfile(file, &offset, *count,
 						 nfsd_read_actor, rqstp);
@@ -1114,7 +1112,7 @@ nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	 */
 	if (!resfhp->fh_dentry) {
 		/* called from nfsd_proc_mkdir, or possibly nfsd3_proc_create */
-		fh_lock_nested(fhp, I_MUTEX_PARENT);
+		fh_lock(fhp);
 		dchild = lookup_one_len(fname, dentry, flen);
 		err = PTR_ERR(dchild);
 		if (IS_ERR(dchild))
@@ -1240,7 +1238,7 @@ nfsd_create_v3(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	err = nfserr_notdir;
 	if(!dirp->i_op || !dirp->i_op->lookup)
 		goto out;
-	fh_lock_nested(fhp, I_MUTEX_PARENT);
+	fh_lock(fhp);
 
 	/*
 	 * Compose the response file handle.
@@ -1496,7 +1494,7 @@ nfsd_link(struct svc_rqst *rqstp, struct svc_fh *ffhp,
 	if (isdotent(name, len))
 		goto out;
 
-	fh_lock_nested(ffhp, I_MUTEX_PARENT);
+	fh_lock(ffhp);
 	ddir = ffhp->fh_dentry;
 	dirp = ddir->d_inode;
 
@@ -1521,15 +1519,14 @@ nfsd_link(struct svc_rqst *rqstp, struct svc_fh *ffhp,
 			err = nfserrno(err);
 	}
 
-	dput(dnew);
-out_unlock:
 	fh_unlock(ffhp);
+	dput(dnew);
 out:
 	return err;
 
 out_nfserr:
 	err = nfserrno(err);
-	goto out_unlock;
+	goto out;
 }
 
 /*
@@ -1558,7 +1555,7 @@ nfsd_rename(struct svc_rqst *rqstp, struct svc_fh *ffhp, char *fname, int flen,
 	tdir = tdentry->d_inode;
 
 	err = (rqstp->rq_vers == 2) ? nfserr_acces : nfserr_xdev;
-	if (ffhp->fh_export != tfhp->fh_export)
+	if (fdir->i_sb != tdir->i_sb)
 		goto out;
 
 	err = nfserr_perm;
@@ -1646,7 +1643,7 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 	if (err)
 		goto out;
 
-	fh_lock_nested(fhp, I_MUTEX_PARENT);
+	fh_lock(fhp);
 	dentry = fhp->fh_dentry;
 	dirp = dentry->d_inode;
 
@@ -1742,7 +1739,7 @@ int
 nfsd_statfs(struct svc_rqst *rqstp, struct svc_fh *fhp, struct kstatfs *stat)
 {
 	int err = fh_verify(rqstp, fhp, 0, MAY_NOP);
-	if (!err && vfs_statfs(fhp->fh_dentry,stat))
+	if (!err && vfs_statfs(fhp->fh_dentry->d_inode->i_sb,stat))
 		err = nfserr_io;
 	return err;
 }

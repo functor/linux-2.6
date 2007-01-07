@@ -4,6 +4,7 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/errno.h>
@@ -14,7 +15,6 @@
 #include <linux/namei.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/pagemap.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -34,7 +34,7 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->ctime = inode->i_ctime;
 	stat->size = i_size_read(inode);
 	stat->blocks = inode->i_blocks;
-	stat->blksize = PAGE_CACHE_SIZE;
+	stat->blksize = inode->i_blksize;
 }
 
 EXPORT_SYMBOL(generic_fillattr);
@@ -141,8 +141,6 @@ static int cp_old_stat(struct kstat *stat, struct __old_kernel_stat __user * sta
 	memset(&tmp, 0, sizeof(struct __old_kernel_stat));
 	tmp.st_dev = old_encode_dev(stat->dev);
 	tmp.st_ino = stat->ino;
-	if (sizeof(tmp.st_ino) < sizeof(stat->ino) && tmp.st_ino != stat->ino)
-		return -EOVERFLOW;
 	tmp.st_mode = stat->mode;
 	tmp.st_nlink = stat->nlink;
 	if (tmp.st_nlink != stat->nlink)
@@ -213,8 +211,6 @@ static int cp_new_stat(struct kstat *stat, struct stat __user *statbuf)
 	tmp.st_dev = new_encode_dev(stat->dev);
 #endif
 	tmp.st_ino = stat->ino;
-	if (sizeof(tmp.st_ino) < sizeof(stat->ino) && tmp.st_ino != stat->ino)
-		return -EOVERFLOW;
 	tmp.st_mode = stat->mode;
 	tmp.st_nlink = stat->nlink;
 	if (tmp.st_nlink != stat->nlink)
@@ -352,8 +348,6 @@ static long cp_new_stat64(struct kstat *stat, struct stat64 __user *statbuf)
 	tmp.st_rdev = huge_encode_dev(stat->rdev);
 #endif
 	tmp.st_ino = stat->ino;
-	if (sizeof(tmp.st_ino) < sizeof(stat->ino) && tmp.st_ino != stat->ino)
-		return -EOVERFLOW;
 #ifdef STAT64_HAS_BROKEN_ST_INO
 	tmp.__st_ino = stat->ino;
 #endif

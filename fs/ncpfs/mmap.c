@@ -93,7 +93,7 @@ static struct page* ncp_file_mmap_nopage(struct vm_area_struct *area,
 	 */
 	if (type)
 		*type = VM_FAULT_MAJOR;
-	count_vm_event(PGMAJFAULT);
+	inc_page_state(pgmajfault);
 	return page;
 }
 

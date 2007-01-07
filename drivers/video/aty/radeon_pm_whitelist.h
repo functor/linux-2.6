@@ -1,0 +1,78 @@
+#define E(_vendor, _product, _ident, _reporter)				\
+{	/* _reporter */							\
+	.ident = _ident,						\
+	.matches = {							\
+		DMI_MATCH(DMI_SYS_VENDOR, _vendor),			\
+		DMI_MATCH(DMI_PRODUCT_NAME, _product),			\
+	},								\
+}
+E("IBM", "18297RG", "IBM ThinkPad R50", "Borschuk Oleg <merlinse@yandex.ru>"),
+E("IBM", "18299MG", "IBM ThinkPad R51", "Georges Herber <gherber@gmail.com>"),
+E("IBM", "1829EHG", "IBM ThinkPad R51", "Wouter Cloetens <wouter@mind.be>"),
+E("IBM", "1829R6G", "IBM ThinkPad R51", "Sten Heinze"),
+E("IBM", "1836Q6U", "IBM ThinkPad R51", "Eugene Pavlovsky"),
+E("IBM", "236696G", "IBM ThinkPad T30", "Jakob Schiotz <schiotz@fysik.dtu.dk>"),
+E("IBM", "236697G", "IBM ThinkPad T30", "Stephan Groß <st.gross@inf.tu-dresden.de>"),
+E("IBM", "2366JBG", "IBM ThinkPad T30", "Thomas M Steenholdt <tmus@tmus.dk>"),
+E("IBM", "2366MU9", "IBM ThinkPad T30", "Phillip Jones <philljones@us.ibm.com>"),
+E("IBM", "2366QU5", "IBM ThinkPad T30", "ChazeFroy <chazefroy@gmail.com>"),
+/* brads's 2366QU8 works, but dmidecode shows bogus data */
+E("IBM", "2366QU8", "IBM ThinkPad T30", "Brad Smith <brads@redhat.com>"),
+E("IBM", "23729CU", "IBM ThinkPad T40", "George Avrunin <avrunin@math.umass.edu>"),
+E("IBM", "237314U", "IBM ThinkPad T40", "Dmitriy Zavin <dzavin@yahoo.com>"),
+E("IBM", "23731FG", "IBM ThinkPad T41", "Aivo Prykk <aivo.prykk@mail.ee>"),
+E("IBM", "237322G", "IBM ThinkPad T40", "Michele Lamarca <lammic@gmail.com>"),
+E("IBM", "237325G", "IBM ThinkPad T40", "Klaus Kurzmann <mok@fluxnetz.de>"),
+E("IBM", "23732FG", "IBM ThinkPad T41", "Antti Andreimann <Antti.Andreimann@mail.ee>"),
+E("IBM", "23733HM", "IBM ThinkPad T41", "Grahame Bowland <grahame@angrygoats.net>"),
+E("IBM", "23734G2", "IBM ThinkPad T40", "Antti P Miettinen <apm@brigitte.dna.fi>"),
+E("IBM", "23737JU", "IBM ThinkPad T41", "Matthew Saltzman <mjs@clemson.edu>"),
+E("IBM", "23738CG", "IBM ThinkPad T40", "Pete Toscano <pete@verisignlabs.com>"),
+E("IBM", "237392G", "IBM ThinkPad T40", "Pete Toscano <pete@verisignlabs.com>"),
+E("IBM", "237394G", "IBM ThinkPad T40", "Manuel Carro <mcarro@fi.upm.es>"),
+E("IBM", "237394U", "IBM ThinkPad T40", "Pete Toscano <pete@verisignlabs.com>"),
+E("IBM", "23739FU", "IBM ThinkPad T41", "Peter Jones <pjones@redhat.com>"),
+E("IBM", "23739HG", "IBM ThinkPad T41", "Chris Vanden Berghe <Chris@VandenBerghe.org>"),
+E("IBM", "23739HU", "IBM ThinkPad T41", "Ajay Ramaswamy <ajay@ramaswamy.net>"),
+E("IBM", "2373BU7", "IBM ThinkPad T40", "Peter Jones <pjones@redhat.com>"),
+E("IBM", "2373F2G", "IBM ThinkPad T42", "Isaac Wilcox"),
+E("IBM", "2373FWG", "IBM ThinkPad T42", "Jerome Poggi <Jerome.Poggi@hsc.fr> and Pete Toscano <pete@verisignlabs.com>"),
+E("IBM", "2373G1G", "IBM ThinkPad T40p", "Juerg Billeter <j@bitron.ch>"),
+E("IBM", "2373G1U", "IBM ThinkPad T40p", "Bill Nottingham <notting@redhat.com>"),
+E("IBM", "2373G3G", "IBM ThinkPad T40p", "Hartwig, Thomas <t.hartwig@itth.com>"),
+E("IBM", "2373GEU", "IBM ThinkPad T41p", "Eric Benson <eric_a_benson@yahoo.com>"),
+E("IBM", "2373HU6", "IBM ThinkPad T41", "David Zeuthen <davidz@redhat.com>"),
+E("IBM", "2373JTU", "IBM ThinkPad T42", "Dwight Barkley <barkley@maths.warwick.ac.uk>"),
+E("IBM", "2373MU4", "IBM ThinkPad T40", "Vernon Mauery <vernux@us.ibm.com>"),
+E("IBM", "2373RU1", "IBM ThinkPad T40", "Adam Glasgall <adam@simons-rock.edu>"),
+E("IBM", "2373TG5", "IBM ThinkPad T41", "Paul Ionescu <i_p_a_u_l@yahoo.com>"),
+E("IBM", "2373XNX", "IBM ThinkPad T41", "Ajay Ramaswamy <ajay@ramaswamy.net>"),
+E("IBM", "23746VU", "IBM ThinkPad T42", "Tim Hull <thully@cyberspace.org>"),
+E("IBM", "2374CTO", "IBM ThinkPad T42", "Johannes Hansen"),
+E("IBM", "2374ZEP", "IBM ThinkPad T42", "Johannes Hansen"),
+E("IBM", "2378DEU", "IBM ThinkPad T41", "obi <graziano@cs.ucsb.edu>"),
+E("IBM", "2378DLU", "IBM ThinkPad T41", "Paul Stanisci <paul@stanisci.ca>"),
+E("IBM", "2378DUU", "IBM ThinkPad T42", "Austin Clements <amdragon+osdlbugzilla@mit.edu>"),
+E("IBM", "2378R2U", "IBM ThinkPad T42", "Ulrich Drepper <drepper@redhat.com>"),
+E("IBM", "2378RBF", "IBM ThinkPad T42", "Nicolas Dufresne <nicolas.dufresne@usherbrooke.ca>"),
+E("IBM", "2378RBU", "IBM ThinkPad T42", "Nicolas Dufresne <nicolas.dufresne@usherbrooke.ca>"),
+E("IBM", "2378XXE", "IBM ThinkPad T42", "Tom Marshall"),
+E("IBM", "2379D6U", "IBM ThinkPad T41", "anonymous"),
+E("IBM", "2379DJU", "IBM ThinkPad T41", "Volker Braun <vbraun@physics.upenn.edu>"),
+E("IBM", "2658BQG", "IBM ThinkPad R32", "Frank Otto <Frank.Otto@tc.pci.uni-heidelberg.de>"),
+E("IBM", "26725KU", "IBM ThinkPad X31", "Chris Lee <clee@redhat.com>"),
+E("IBM", "2672A9U", "IBM ThinkPad X31", "Jeremy Katz <katzj@redhat.com>"),
+E("IBM", "2672JHG", "IBM ThinkPad X31", "Daniel P. Berrange <berrange@redhat.com>"),
+E("IBM", "2672RU3", "IBM ThinkPad X31", "Chris Blizzard <blizzard@redhat.com>"),
+		/* IBM ThinkPad X31 2672-XXH -> works, but doesn't fix the LCD 
+		   backlight on during S3 issue. */
+E("IBM", "2672XXH", "IBM ThinkPad X31", "Henrik Brix Andersen <brix@gentoo.org>"),
+E("IBM", "27223GG", "IBM ThinkPad R40", "Frank Schmitt <tonne2004@gehheimdienst.de>"),
+E("IBM", "27225MG", "IBM ThinkPad R40", "Nils Trebing <nils.trebing@uni-konstanz.de>"),
+E("IBM", "27226YU", "IBM ThinkPad R40", "Rushi Bhatt"),
+E("IBM", "2722B3G", "IBM ThinkPad R40", "Pete Toscano <pete@verisignlabs.com>"),
+E("IBM", "2722CDG", "IBM ThinkPad R40", "Meik Hellmund <hellmund@math.uni-leipzig.de>"),
+{ },
+/* Negative reports: */
+/* E("IBM", "2373KUU", "IBM ThinkPad T42p", "Dax Kelson <dax@gurulabs.com>"), */
+#undef E

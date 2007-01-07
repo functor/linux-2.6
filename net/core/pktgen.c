@@ -2900,7 +2900,7 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 			pkt_dev->clone_count = 0;	/* reset counter */
 		}
 	}
-
+	
 	netif_tx_lock_bh(odev);
 	if (!netif_queue_stopped(odev)) {
 
@@ -2947,7 +2947,7 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 	}
 
 	netif_tx_unlock_bh(odev);
-
+	
 	/* If pkt_dev->count is zero, then run forever */
 	if ((pkt_dev->count != 0) && (pkt_dev->sofar >= pkt_dev->count)) {
 		if (atomic_read(&(pkt_dev->skb->users)) != 1) {

@@ -7,6 +7,7 @@
  * Copyright (C) 1997 Miguel de Icaza (miguel@nuclecu.unam.mx)
  */
 
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/errno.h>
 #include <linux/threads.h>
@@ -551,10 +552,9 @@ setup_trap_table:
 	save	%sp, -192, %sp
 
 	/* Force interrupts to be disabled. */
-	rdpr	%pstate, %l0
-	andn	%l0, PSTATE_IE, %o1
+	rdpr	%pstate, %o1
+	andn	%o1, PSTATE_IE, %o1
 	wrpr	%o1, 0x0, %pstate
-	rdpr	%pil, %l1
 	wrpr	%g0, 15, %pil
 
 	/* Make the firmware call to jump over to the Linux trap table.  */
@@ -623,9 +623,11 @@ setup_trap_table:
 	call	init_irqwork_curcpu
 	 nop
 
-	/* Now we can restore interrupt state. */
-	wrpr	%l0, 0, %pstate
-	wrpr	%l1, 0x0, %pil
+	/* Now we can turn interrupts back on. */
+	rdpr	%pstate, %o1
+	or	%o1, PSTATE_IE, %o1
+	wrpr	%o1, 0, %pstate
+	wrpr	%g0, 0x0, %pil
 
 	ret
 	 restore

@@ -12,6 +12,7 @@
  * Copyright (C) 1999 Asit Mallick <asit.k.mallick@intel.com>
  * Copyright (C) 1999 Don Dugger <don.dugger@intel.com>
  */
+#include <linux/config.h>
 
 #include <asm/kregs.h>
 #include <asm/page.h>
@@ -24,7 +25,7 @@
  * 0xa000000000000000+2*PERCPU_PAGE_SIZE
  * - 0xa000000000000000+3*PERCPU_PAGE_SIZE remain unmapped (guard page)
  */
-#define KERNEL_START		 (GATE_ADDR+__IA64_UL_CONST(0x100000000))
+#define KERNEL_START		 (GATE_ADDR+0x100000000)
 #define PERCPU_ADDR		(-PERCPU_PAGE_SIZE)
 
 #ifndef __ASSEMBLY__
@@ -98,11 +99,12 @@ extern struct ia64_boot_param {
 #endif
 
 /*
- * XXX check on this ---I suspect what Linus really wants here is
+ * XXX check on these---I suspect what Linus really wants here is
  * acquire vs release semantics but we can't discuss this stuff with
  * Linus just yet.  Grrr...
  */
 #define set_mb(var, value)	do { (var) = (value); mb(); } while (0)
+#define set_wmb(var, value)	do { (var) = (value); mb(); } while (0)
 
 #define safe_halt()         ia64_pal_halt_light()    /* PAL_HALT_LIGHT */
 
@@ -123,7 +125,7 @@ extern struct ia64_boot_param {
 #define __local_irq_save(x)			\
 do {						\
 	ia64_stop();				\
-	(x) = ia64_get_psr_i();			\
+	(x) = ia64_getreg(_IA64_REG_PSR);	\
 	ia64_stop();				\
 	ia64_rsm(IA64_PSR_I);			\
 } while (0)
@@ -171,7 +173,7 @@ do {								\
 #endif /* !CONFIG_IA64_DEBUG_IRQ */
 
 #define local_irq_enable()	({ ia64_stop(); ia64_ssm(IA64_PSR_I); ia64_srlz_d(); })
-#define local_save_flags(flags)	({ ia64_stop(); (flags) = ia64_get_psr_i(); })
+#define local_save_flags(flags)	({ ia64_stop(); (flags) = ia64_getreg(_IA64_REG_PSR); })
 
 #define irqs_disabled()				\
 ({						\

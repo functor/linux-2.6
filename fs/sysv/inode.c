@@ -85,9 +85,8 @@ static void sysv_put_super(struct super_block *sb)
 	kfree(sbi);
 }
 
-static int sysv_statfs(struct dentry *dentry, struct kstatfs *buf)
+static int sysv_statfs(struct super_block *sb, struct kstatfs *buf)
 {
-	struct super_block *sb = dentry->d_sb;
 	struct sysv_sb_info *sbi = SYSV_SB(sb);
 
 	buf->f_type = sb->s_magic;
@@ -201,7 +200,7 @@ static void sysv_read_inode(struct inode *inode)
 	inode->i_ctime.tv_nsec = 0;
 	inode->i_atime.tv_nsec = 0;
 	inode->i_mtime.tv_nsec = 0;
-	inode->i_blocks = 0;
+	inode->i_blocks = inode->i_blksize = 0;
 
 	si = SYSV_I(inode);
 	for (block = 0; block < 10+1+1+1; block++)

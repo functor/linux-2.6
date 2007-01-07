@@ -220,7 +220,20 @@ scdrv_dispatch_event(char *event, int len)
 			       " Sending SIGPWR to init...\n");
 
 		/* give a SIGPWR signal to init proc */
-		kill_proc(1, SIGPWR, 0);
+
+		/* first find init's task */
+		read_lock(&tasklist_lock);
+		for_each_process(p) {
+			if (p->pid == 1)
+				break;
+		}
+		if (p) {
+			force_sig(SIGPWR, p);
+		} else {
+			printk(KERN_ERR "Failed to signal init!\n");
+			snsc_shutting_down = 0; /* so can try again (?) */
+		}
+		read_unlock(&tasklist_lock);
 	} else {
 		/* print to system log */
 		printk("%s|$(0x%x)%s\n", severity, esp_code, desc);
@@ -297,7 +310,7 @@ scdrv_event_init(struct sysctl_data_s *scd)
 
 	/* hook event subchannel up to the system controller interrupt */
 	rv = request_irq(SGI_UART_VECTOR, scdrv_event_interrupt,
-			 IRQF_SHARED | IRQF_DISABLED,
+			 SA_SHIRQ | SA_INTERRUPT,
 			 "system controller events", event_sd);
 	if (rv) {
 		printk(KERN_WARNING "%s: irq request failed (%d)\n",

@@ -61,9 +61,6 @@ static int brnf_filter_vlan_tagged = 1;
 #define brnf_filter_vlan_tagged 1
 #endif
 
-int brnf_deferred_hooks;
-EXPORT_SYMBOL_GPL(brnf_deferred_hooks);
-
 static __be16 inline vlan_proto(const struct sk_buff *skb)
 {
 	return vlan_eth_hdr(skb)->h_vlan_encapsulated_proto;
@@ -410,8 +407,12 @@ static unsigned int br_nf_pre_routing_ipv6(unsigned int hook,
 	if (pkt_len || hdr->nexthdr != NEXTHDR_HOP) {
 		if (pkt_len + sizeof(struct ipv6hdr) > skb->len)
 			goto inhdr_error;
-		if (pskb_trim_rcsum(skb, pkt_len + sizeof(struct ipv6hdr)))
-			goto inhdr_error;
+		if (pkt_len + sizeof(struct ipv6hdr) < skb->len) {
+			if (__pskb_trim(skb, pkt_len + sizeof(struct ipv6hdr)))
+				goto inhdr_error;
+			if (skb->ip_summed == CHECKSUM_HW)
+				skb->ip_summed = CHECKSUM_NONE;
+		}
 	}
 	if (hdr->nexthdr == NEXTHDR_HOP && check_hbh_len(skb))
 		goto inhdr_error;
@@ -494,7 +495,11 @@ static unsigned int br_nf_pre_routing(unsigned int hook, struct sk_buff **pskb,
 	if (skb->len < len || len < 4 * iph->ihl)
 		goto inhdr_error;
 
-	pskb_trim_rcsum(skb, len);
+	if (skb->len > len) {
+		__pskb_trim(skb, len);
+		if (skb->ip_summed == CHECKSUM_HW)
+			skb->ip_summed = CHECKSUM_NONE;
+	}
 
 	nf_bridge_put(skb->nf_bridge);
 	if (!nf_bridge_alloc(skb))
@@ -872,8 +877,9 @@ static unsigned int ip_sabotage_out(unsigned int hook, struct sk_buff **pskb,
 	struct sk_buff *skb = *pskb;
 
 	if ((out->hard_start_xmit == br_dev_xmit &&
-	     okfn != br_nf_forward_finish &&
-	     okfn != br_nf_local_out_finish && okfn != br_nf_dev_queue_xmit)
+	    okfn != br_nf_forward_finish &&
+	    okfn != br_nf_local_out_finish &&
+	    okfn != br_nf_dev_queue_xmit)
 #if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 	    || ((out->priv_flags & IFF_802_1Q_VLAN) &&
 		VLAN_DEV_INFO(out)->real_dev->hard_start_xmit == br_dev_xmit)
@@ -892,8 +898,6 @@ static unsigned int ip_sabotage_out(unsigned int hook, struct sk_buff **pskb,
 			if (ip->version == 4 && !brnf_call_iptables)
 				return NF_ACCEPT;
 			else if (ip->version == 6 && !brnf_call_ip6tables)
-				return NF_ACCEPT;
-			else if (!brnf_deferred_hooks)
 				return NF_ACCEPT;
 #endif
 			if (hook == NF_IP_POST_ROUTING)

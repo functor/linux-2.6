@@ -6,6 +6,7 @@
  * Copyright (C) 1998 Paul Mackerras.
  */
 
+#include <linux/config.h>
 
 #define PMU_DRIVER_VERSION	2
 
@@ -229,8 +230,5 @@ struct pmu_battery_info
 extern int pmu_battery_count;
 extern struct pmu_battery_info pmu_batteries[PMU_MAX_BATTERIES];
 extern unsigned int pmu_power_flags;
-
-/* Backlight */
-extern void pmu_backlight_init(void);
 
 #endif	/* __KERNEL__ */

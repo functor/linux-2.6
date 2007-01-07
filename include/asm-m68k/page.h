@@ -1,8 +1,7 @@
 #ifndef _M68K_PAGE_H
 #define _M68K_PAGE_H
 
-
-#ifdef __KERNEL__
+#include <linux/config.h>
 
 /* PAGE_SHIFT determines the page size */
 #ifndef CONFIG_SUN3
@@ -16,6 +15,8 @@
 #define PAGE_SIZE	(1UL << PAGE_SHIFT)
 #endif
 #define PAGE_MASK	(~(PAGE_SIZE-1))
+
+#ifdef __KERNEL__
 
 #include <asm/setup.h>
 
@@ -175,10 +176,10 @@ static inline void *__va(unsigned long x)
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#include <asm-generic/page.h>
-
 #define devmem_is_allowed(x) 1
 
 #endif /* __KERNEL__ */
+
+#include <asm-generic/page.h>
 
 #endif /* _M68K_PAGE_H */

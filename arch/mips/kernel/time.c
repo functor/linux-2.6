@@ -11,6 +11,7 @@
  * Free Software Foundation;  either version 2 of the  License, or (at your
  * option) any later version.
  */
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -566,19 +567,20 @@ asmlinkage void ll_local_timer_interrupt(int irq, struct pt_regs *regs)
  * 2) setup xtime based on rtc_mips_get_time().
  * 3) choose a appropriate gettimeoffset routine.
  * 4) calculate a couple of cached variables for later usage
- * 5) plat_timer_setup() -
+ * 5) board_timer_setup() -
  *	a) (optional) over-write any choices made above by time_init().
  *	b) machine specific code should setup the timer irqaction.
  *	c) enable the timer interrupt
  */
 
 void (*board_time_init)(void);
+void (*board_timer_setup)(struct irqaction *irq);
 
 unsigned int mips_hpt_frequency;
 
 static struct irqaction timer_irqaction = {
 	.handler = timer_interrupt,
-	.flags = IRQF_DISABLED,
+	.flags = SA_INTERRUPT,
 	.name = "timer",
 };
 
@@ -717,7 +719,7 @@ void __init time_init(void)
 	 * to be NULL function so that we are sure the high-level code
 	 * is not invoked accidentally.
 	 */
-	plat_timer_setup(&timer_irqaction);
+	board_timer_setup(&timer_irqaction);
 }
 
 #define FEBRUARY		2

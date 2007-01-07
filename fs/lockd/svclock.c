@@ -20,6 +20,7 @@
  * Copyright (C) 1996, Olaf Kirch <okir@monad.swb.de>
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -638,6 +639,9 @@ static void nlmsvc_grant_callback(struct rpc_task *task, void *data)
 	if (task->tk_status < 0) {
 		/* RPC error: Re-insert for retransmission */
 		timeout = 10 * HZ;
+	} else if (block->b_done) {
+		/* Block already removed, kill it for real */
+		timeout = 0;
 	} else {
 		/* Call was successful, now wait for client callback */
 		timeout = 60 * HZ;
@@ -706,10 +710,13 @@ nlmsvc_retry_blocked(void)
 			break;
 	        if (time_after(block->b_when,jiffies))
 			break;
-		dprintk("nlmsvc_retry_blocked(%p, when=%ld)\n",
-			block, block->b_when);
+		dprintk("nlmsvc_retry_blocked(%p, when=%ld, done=%d)\n",
+			block, block->b_when, block->b_done);
 		kref_get(&block->b_count);
-		nlmsvc_grant_blocked(block);
+		if (block->b_done)
+			nlmsvc_unlink_block(block);
+		else
+			nlmsvc_grant_blocked(block);
 		nlmsvc_release_block(block);
 	}
 

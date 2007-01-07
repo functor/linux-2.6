@@ -9,6 +9,7 @@
  *                    - Interrupt handling fixes
  * Copyright (C) 2001, 2003 Ladislav Michl (ladis@linux-mips.org)
  */
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/kernel_stat.h>
@@ -74,7 +75,7 @@ static void end_local0_irq (unsigned int irq)
 		enable_local0_irq(irq);
 }
 
-static struct irq_chip ip22_local0_irq_type = {
+static struct hw_interrupt_type ip22_local0_irq_type = {
 	.typename	= "IP22 local 0",
 	.startup	= startup_local0_irq,
 	.shutdown	= shutdown_local0_irq,
@@ -120,7 +121,7 @@ static void end_local1_irq (unsigned int irq)
 		enable_local1_irq(irq);
 }
 
-static struct irq_chip ip22_local1_irq_type = {
+static struct hw_interrupt_type ip22_local1_irq_type = {
 	.typename	= "IP22 local 1",
 	.startup	= startup_local1_irq,
 	.shutdown	= shutdown_local1_irq,
@@ -166,7 +167,7 @@ static void end_local2_irq (unsigned int irq)
 		enable_local2_irq(irq);
 }
 
-static struct irq_chip ip22_local2_irq_type = {
+static struct hw_interrupt_type ip22_local2_irq_type = {
 	.typename	= "IP22 local 2",
 	.startup	= startup_local2_irq,
 	.shutdown	= shutdown_local2_irq,
@@ -212,7 +213,7 @@ static void end_local3_irq (unsigned int irq)
 		enable_local3_irq(irq);
 }
 
-static struct irq_chip ip22_local3_irq_type = {
+static struct hw_interrupt_type ip22_local3_irq_type = {
 	.typename	= "IP22 local 3",
 	.startup	= startup_local3_irq,
 	.shutdown	= shutdown_local3_irq,
@@ -272,32 +273,32 @@ static void indy_buserror_irq(struct pt_regs *regs)
 
 static struct irqaction local0_cascade = {
 	.handler	= no_action,
-	.flags		= IRQF_DISABLED,
+	.flags		= SA_INTERRUPT,
 	.name		= "local0 cascade",
 };
 
 static struct irqaction local1_cascade = {
 	.handler	= no_action,
-	.flags		= IRQF_DISABLED,
+	.flags		= SA_INTERRUPT,
 	.name		= "local1 cascade",
 };
 
 static struct irqaction buserr = {
 	.handler	= no_action,
-	.flags		= IRQF_DISABLED,
+	.flags		= SA_INTERRUPT,
 	.name		= "Bus Error",
 };
 
 static struct irqaction map0_cascade = {
 	.handler	= no_action,
-	.flags		= IRQF_DISABLED,
+	.flags		= SA_INTERRUPT,
 	.name		= "mapable0 cascade",
 };
 
 #ifdef USE_LIO3_IRQ
 static struct irqaction map1_cascade = {
 	.handler	= no_action,
-	.flags		= IRQF_DISABLED,
+	.flags		= SA_INTERRUPT,
 	.name		= "mapable1 cascade",
 };
 #define SGI_INTERRUPTS	SGINT_END
@@ -421,7 +422,7 @@ void __init arch_init_irq(void)
 	mips_cpu_irq_init(SGINT_CPU);
 
 	for (i = SGINT_LOCAL0; i < SGI_INTERRUPTS; i++) {
-		struct irq_chip *handler;
+		hw_irq_controller *handler;
 
 		if (i < SGINT_LOCAL1)
 			handler		= &ip22_local0_irq_type;
@@ -435,7 +436,7 @@ void __init arch_init_irq(void)
 		irq_desc[i].status	= IRQ_DISABLED;
 		irq_desc[i].action	= 0;
 		irq_desc[i].depth	= 1;
-		irq_desc[i].chip	= handler;
+		irq_desc[i].handler	= handler;
 	}
 
 	/* vector handler. this register the IRQ as non-sharable */

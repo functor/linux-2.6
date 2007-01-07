@@ -28,6 +28,7 @@
 #include <linux/tty.h>
 #include <linux/ioport.h>
 #include <linux/delay.h>
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/initrd.h>
 #include <linux/bootmem.h>
@@ -36,7 +37,6 @@
 #include <linux/seq_file.h>
 #include <linux/kernel_stat.h>
 #include <linux/device.h>
-#include <linux/notifier.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -47,7 +47,6 @@
 #include <asm/irq.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
-#include <asm/sections.h>
 
 /*
  * Machine setup..
@@ -67,6 +66,11 @@ unsigned long __initdata zholes_size[MAX_NR_ZONES];
 static unsigned long __initdata memory_end;
 
 /*
+ * Setup options
+ */
+extern int _text,_etext, _edata, _end;
+
+/*
  * This is set up by the setup-routine at boot-time
  * for S390 need to find out, what we have to setup
  * using address 0x10400 ...
@@ -76,11 +80,15 @@ static unsigned long __initdata memory_end;
 
 static struct resource code_resource = {
 	.name  = "Kernel code",
+	.start = (unsigned long) &_text,
+	.end = (unsigned long) &_etext - 1,
 	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 static struct resource data_resource = {
 	.name = "Kernel data",
+	.start = (unsigned long) &_etext,
+	.end = (unsigned long) &_edata - 1,
 	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
@@ -115,7 +123,6 @@ void __devinit cpu_init (void)
  */
 char vmhalt_cmd[128] = "";
 char vmpoff_cmd[128] = "";
-char vmpanic_cmd[128] = "";
 
 static inline void strncpy_skip_quote(char *dst, char *src, int n)
 {
@@ -146,38 +153,6 @@ static int __init vmpoff_setup(char *str)
 }
 
 __setup("vmpoff=", vmpoff_setup);
-
-static int vmpanic_notify(struct notifier_block *self, unsigned long event,
-			  void *data)
-{
-	if (MACHINE_IS_VM && strlen(vmpanic_cmd) > 0)
-		cpcmd(vmpanic_cmd, NULL, 0, NULL);
-
-	return NOTIFY_OK;
-}
-
-#define PANIC_PRI_VMPANIC	0
-
-static struct notifier_block vmpanic_nb = {
-	.notifier_call = vmpanic_notify,
-	.priority = PANIC_PRI_VMPANIC
-};
-
-static int __init vmpanic_setup(char *str)
-{
-	static int register_done __initdata = 0;
-
-	strncpy_skip_quote(vmpanic_cmd, str, 127);
-	vmpanic_cmd[127] = 0;
-	if (!register_done) {
-		register_done = 1;
-		atomic_notifier_chain_register(&panic_notifier_list,
-					       &vmpanic_nb);
-	}
-	return 1;
-}
-
-__setup("vmpanic=", vmpanic_setup);
 
 /*
  * condev= and conmode= setup parameter.
@@ -322,34 +297,19 @@ void (*_machine_power_off)(void) = do_machine_power_off_nonsmp;
 
 void machine_restart(char *command)
 {
-	if (!in_interrupt() || oops_in_progress)
-		/*
-		 * Only unblank the console if we are called in enabled
-		 * context or a bust_spinlocks cleared the way for us.
-		 */
-		console_unblank();
+	console_unblank();
 	_machine_restart(command);
 }
 
 void machine_halt(void)
 {
-	if (!in_interrupt() || oops_in_progress)
-		/*
-		 * Only unblank the console if we are called in enabled
-		 * context or a bust_spinlocks cleared the way for us.
-		 */
-		console_unblank();
+	console_unblank();
 	_machine_halt();
 }
 
 void machine_power_off(void)
 {
-	if (!in_interrupt() || oops_in_progress)
-		/*
-		 * Only unblank the console if we are called in enabled
-		 * context or a bust_spinlocks cleared the way for us.
-		 */
-		console_unblank();
+	console_unblank();
 	_machine_power_off();
 }
 
@@ -461,11 +421,6 @@ setup_resources(void)
 {
 	struct resource *res;
 	int i;
-
-	code_resource.start = (unsigned long) &_text;
-	code_resource.end = (unsigned long) &_etext - 1;
-	data_resource.start = (unsigned long) &_etext;
-	data_resource.end = (unsigned long) &_edata - 1;
 
 	for (i = 0; i < MEMORY_CHUNKS && memory_chunk[i].size > 0; i++) {
 		res = alloc_bootmem_low(sizeof(struct resource));
@@ -877,57 +832,31 @@ static struct bin_attribute ipl_scp_data_attr = {
 
 static decl_subsys(ipl, NULL, NULL);
 
-static int ipl_register_fcp_files(void)
-{
-	int rc;
-
-	rc = sysfs_create_group(&ipl_subsys.kset.kobj,
-				&ipl_fcp_attr_group);
-	if (rc)
-		goto out;
-	rc = sysfs_create_bin_file(&ipl_subsys.kset.kobj,
-				   &ipl_parameter_attr);
-	if (rc)
-		goto out_ipl_parm;
-	rc = sysfs_create_bin_file(&ipl_subsys.kset.kobj,
-				   &ipl_scp_data_attr);
-	if (!rc)
-		goto out;
-
-	sysfs_remove_bin_file(&ipl_subsys.kset.kobj, &ipl_parameter_attr);
-
-out_ipl_parm:
-	sysfs_remove_group(&ipl_subsys.kset.kobj, &ipl_fcp_attr_group);
-out:
-	return rc;
-}
-
 static int __init
 ipl_device_sysfs_register(void) {
 	int rc;
 
 	rc = firmware_register(&ipl_subsys);
 	if (rc)
-		goto out;
+		return rc;
 
 	switch (get_ipl_type()) {
 	case ipl_type_ccw:
-		rc = sysfs_create_group(&ipl_subsys.kset.kobj,
-					&ipl_ccw_attr_group);
+		sysfs_create_group(&ipl_subsys.kset.kobj, &ipl_ccw_attr_group);
 		break;
 	case ipl_type_fcp:
-		rc = ipl_register_fcp_files();
+		sysfs_create_group(&ipl_subsys.kset.kobj, &ipl_fcp_attr_group);
+		sysfs_create_bin_file(&ipl_subsys.kset.kobj,
+				      &ipl_parameter_attr);
+		sysfs_create_bin_file(&ipl_subsys.kset.kobj,
+				      &ipl_scp_data_attr);
 		break;
 	default:
-		rc = sysfs_create_group(&ipl_subsys.kset.kobj,
-					&ipl_unknown_attr_group);
+		sysfs_create_group(&ipl_subsys.kset.kobj,
+				   &ipl_unknown_attr_group);
 		break;
 	}
-
-	if (rc)
-		firmware_unregister(&ipl_subsys);
-out:
-	return rc;
+	return 0;
 }
 
 __initcall(ipl_device_sysfs_register);

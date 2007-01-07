@@ -13,12 +13,6 @@ OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
 ENTRY(phys_startup_32)
 jiffies = jiffies_64;
-
-PHDRS {
-	text PT_LOAD FLAGS(5);	/* R_E */
-	data PT_LOAD FLAGS(7);	/* RWE */
-	note PT_NOTE FLAGS(4);	/* R__ */
-}
 SECTIONS
 {
   . = __KERNEL_START;
@@ -32,7 +26,7 @@ SECTIONS
 	KPROBES_TEXT
 	*(.fixup)
 	*(.gnu.warning)
-	} :text = 0x9090
+	} = 0x9090
 
   _etext = .;			/* End of text section */
 
@@ -43,18 +37,11 @@ SECTIONS
 
   RODATA
 
-  . = ALIGN(4);
-  __tracedata_start = .;
-  .tracedata : AT(ADDR(.tracedata) - LOAD_OFFSET) {
-	*(.tracedata)
-  }
-  __tracedata_end = .;
-
   /* writeable */
   .data : AT(ADDR(.data) - LOAD_OFFSET) {	/* Data */
 	*(.data)
 	CONSTRUCTORS
-	} :data
+	}
 
   . = ALIGN(4096);
   __nosave_begin = .;
@@ -76,15 +63,6 @@ SECTIONS
   . = ALIGN(32);
   .data.read_mostly : AT(ADDR(.data.read_mostly) - LOAD_OFFSET) { *(.data.read_mostly) }
   _edata = .;			/* End of data section */
-
-#ifdef CONFIG_STACK_UNWIND
-  . = ALIGN(4);
-  .eh_frame : AT(ADDR(.eh_frame) - LOAD_OFFSET) {
-	__start_unwind = .;
-  	*(.eh_frame)
-	__end_unwind = .;
-  }
-#endif
 
   . = ALIGN(THREAD_SIZE);	/* init_task */
   .data.init_task : AT(ADDR(.data.init_task) - LOAD_OFFSET) {
@@ -190,6 +168,4 @@ SECTIONS
   STABS_DEBUG
 
   DWARF_DEBUG
-
-  NOTES
 }

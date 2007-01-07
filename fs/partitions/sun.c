@@ -74,7 +74,7 @@ int sun_partition(struct parsed_partitions *state, struct block_device *bdev)
 	spc = be16_to_cpu(label->ntrks) * be16_to_cpu(label->nsect);
 	for (i = 0; i < 8; i++, p++) {
 		unsigned long st_sector;
-		unsigned int num_sectors;
+		int num_sectors;
 
 		st_sector = be32_to_cpu(p->start_cylinder) * spc;
 		num_sectors = be32_to_cpu(p->num_sectors);

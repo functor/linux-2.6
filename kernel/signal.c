@@ -10,6 +10,7 @@
  *		to allow signals to be sent reliably.
  */
 
+#include <linux/config.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/smp_lock.h>
@@ -22,13 +23,13 @@
 #include <linux/syscalls.h>
 #include <linux/ptrace.h>
 #include <linux/signal.h>
+#include <linux/audit.h>
 #include <linux/capability.h>
+#include <linux/vs_cvirt.h>
 #include <asm/param.h>
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/siginfo.h>
-#include "audit.h"	/* audit_signal_info() */
-#include <linux/vs_base.h>
 
 /*
  * SLAB caches for signal bits.
@@ -594,7 +595,7 @@ static int check_kill_permission(int sig, struct siginfo *info,
 	if (user && !vx_check(vx_task_xid(t), VX_ADMIN|VX_IDENT))
 		return error;
 
-	error = security_task_kill(t, info, sig, 0);
+	error = security_task_kill(t, info, sig);
 	if (!error)
 		audit_signal_info(sig, t); /* Let audit system see the signal */
 	return error;
@@ -833,31 +834,22 @@ out:
 /*
  * Force a signal that the process can't ignore: if necessary
  * we unblock the signal and change any SIG_IGN to SIG_DFL.
- *
- * Note: If we unblock the signal, we always reset it to SIG_DFL,
- * since we do not want to have a signal handler that was blocked
- * be invoked when user space had explicitly blocked it.
- *
- * We don't want to have recursive SIGSEGV's etc, for example.
  */
+
 int
 force_sig_info(int sig, struct siginfo *info, struct task_struct *t)
 {
 	unsigned long int flags;
-	int ret, blocked, ignored;
-	struct k_sigaction *action;
+	int ret;
 
 	spin_lock_irqsave(&t->sighand->siglock, flags);
-	action = &t->sighand->action[sig-1];
-	ignored = action->sa.sa_handler == SIG_IGN;
-	blocked = sigismember(&t->blocked, sig);
-	if (blocked || ignored) {
-		action->sa.sa_handler = SIG_DFL;
-		if (blocked) {
-			sigdelset(&t->blocked, sig);
-			recalc_sigpending_tsk(t);
-		}
+	if (t->sighand->action[sig-1].sa.sa_handler == SIG_IGN) {
+		t->sighand->action[sig-1].sa.sa_handler = SIG_DFL;
 	}
+	if (sigismember(&t->blocked, sig)) {
+		sigdelset(&t->blocked, sig);
+	}
+	recalc_sigpending_tsk(t);
 	ret = specific_send_sig_info(sig, info, t);
 	spin_unlock_irqrestore(&t->sighand->siglock, flags);
 
@@ -1147,7 +1139,7 @@ kill_proc_info(int sig, struct siginfo *info, pid_t pid)
 	}
 	p = find_task_by_pid(pid);
 	error = -ESRCH;
-	if (p && vx_check(vx_task_xid(p), VX_IDENT))
+	if (p)
 		error = group_send_sig_info(sig, info, p);
 	if (unlikely(acquired_tasklist_lock))
 		read_unlock(&tasklist_lock);
@@ -1157,7 +1149,7 @@ kill_proc_info(int sig, struct siginfo *info, pid_t pid)
 
 /* like kill_proc_info(), but doesn't use uid/euid of "current" */
 int kill_proc_info_as_uid(int sig, struct siginfo *info, pid_t pid,
-		      uid_t uid, uid_t euid, u32 secid)
+		      uid_t uid, uid_t euid)
 {
 	int ret = -EINVAL;
 	struct task_struct *p;
@@ -1177,9 +1169,6 @@ int kill_proc_info_as_uid(int sig, struct siginfo *info, pid_t pid,
 		ret = -EPERM;
 		goto out_unlock;
 	}
-	ret = security_task_kill(p, info, sig, secid);
-	if (ret)
-		goto out_unlock;
 	if (sig && p->sighand) {
 		unsigned long flags;
 		spin_lock_irqsave(&p->sighand->siglock, flags);
@@ -1209,8 +1198,7 @@ static int kill_something_info(int sig, struct siginfo *info, int pid)
 
 		read_lock(&tasklist_lock);
 		for_each_process(p) {
-			if (vx_check(vx_task_xid(p), VX_ADMIN|VX_IDENT) &&
-				p->pid > 1 && p->tgid != current->tgid) {
+			if (p->pid > 1 && p->tgid != current->tgid) {
 				int err = group_send_sig_info(sig, info, p);
 				++count;
 				if (err != -EPERM)
@@ -1585,35 +1573,6 @@ static void do_notify_parent_cldstop(struct task_struct *tsk, int why)
 	spin_unlock_irqrestore(&sighand->siglock, flags);
 }
 
-static inline int may_ptrace_stop(void)
-{
-	if (!likely(current->ptrace & PT_PTRACED))
-		return 0;
-
-	if (unlikely(current->parent == current->real_parent &&
-		    (current->ptrace & PT_ATTACHED)))
-		return 0;
-
-	if (unlikely(current->signal == current->parent->signal) &&
-	    unlikely(current->signal->flags & SIGNAL_GROUP_EXIT))
-		return 0;
-
-	/*
-	 * Are we in the middle of do_coredump?
-	 * If so and our tracer is also part of the coredump stopping
-	 * is a deadlock situation, and pointless because our tracer
-	 * is dead so don't allow us to stop.
-	 * If SIGKILL was already sent before the caller unlocked
-	 * ->siglock we must see ->core_waiters != 0. Otherwise it
-	 * is safe to enter schedule().
-	 */
-	if (unlikely(current->mm->core_waiters) &&
-	    unlikely(current->mm == current->parent->mm))
-		return 0;
-
-	return 1;
-}
-
 /*
  * This must be called with current->sighand->siglock held.
  *
@@ -1642,7 +1601,11 @@ static void ptrace_stop(int exit_code, int nostop_code, siginfo_t *info)
 	spin_unlock_irq(&current->sighand->siglock);
 	try_to_freeze();
 	read_lock(&tasklist_lock);
-	if (may_ptrace_stop()) {
+	if (likely(current->ptrace & PT_PTRACED) &&
+	    likely(current->parent != current->real_parent ||
+		   !(current->ptrace & PT_ATTACHED)) &&
+	    (likely(current->parent->signal != current->signal) ||
+	     !unlikely(current->signal->flags & SIGNAL_GROUP_EXIT))) {
 		do_notify_parent_cldstop(current, CLD_TRAPPED);
 		read_unlock(&tasklist_lock);
 		schedule();
@@ -1827,6 +1790,11 @@ relock:
 		if (!signr)
 			break; /* will return 0 */
 
+		if ((signr == SIGSEGV) && print_fatal_signals) {
+			spin_unlock_irq(&current->sighand->siglock);
+			print_fatal_signal(regs, signr);
+			spin_lock_irq(&current->sighand->siglock);
+		}
 		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			ptrace_signal_deliver(regs, cookie);
 

@@ -26,8 +26,6 @@
 #include <linux/init.h>
 #include <linux/bootmem.h>
 #include <linux/hash.h>
-#include <linux/vs_base.h>
-#include <linux/vs_cvirt.h>
 
 #define pid_hashfn(nr) hash_long((unsigned long)nr, pidhash_shift)
 static struct hlist_head *pid_hash;
@@ -220,7 +218,7 @@ struct pid * fastcall find_pid(int nr)
 	return NULL;
 }
 
-int fastcall attach_pid(struct task_struct *task, enum pid_type type, int nr)
+int fastcall attach_pid(task_t *task, enum pid_type type, int nr)
 {
 	struct pid_link *link;
 	struct pid *pid;
@@ -235,7 +233,7 @@ int fastcall attach_pid(struct task_struct *task, enum pid_type type, int nr)
 	return 0;
 }
 
-void fastcall detach_pid(struct task_struct *task, enum pid_type type)
+void fastcall detach_pid(task_t *task, enum pid_type type)
 {
 	struct pid_link *link;
 	struct pid *pid;
@@ -262,14 +260,6 @@ struct task_struct * fastcall pid_task(struct pid *pid, enum pid_type type)
 		first = rcu_dereference(pid->tasks[type].first);
 		if (first)
 			result = hlist_entry(first, struct task_struct, pids[(type)].node);
-		if (result && (pid->nr != 1) &&
-			!vx_check(vx_task_xid(result), VX_WATCH|VX_ADMIN|VX_IDENT)) {
-			vxwprintk((type == PIDTYPE_PID) && (current->xid),
-				"pid_task(%d,%d): task %p[#%u,%u] did lookup %p[#%u,%u]",
-				pid->nr, type, current, vx_current_xid(), current->pid,
-				result, vx_task_xid(result), result->pid);
-			result = NULL;
-		}
 	}
 	return result;
 }
@@ -277,12 +267,8 @@ struct task_struct * fastcall pid_task(struct pid *pid, enum pid_type type)
 /*
  * Must be called under rcu_read_lock() or with tasklist_lock read-held.
  */
-struct task_struct *find_task_by_pid_type(int type, int nr)
+task_t *find_task_by_pid_type(int type, int nr)
 {
-	if (type == PIDTYPE_PID)
-		nr = vx_rmap_pid(nr);
-	else if (type == PIDTYPE_REALPID)
-		type = PIDTYPE_PID;
 	return pid_task(find_pid(nr), type);
 }
 

@@ -162,7 +162,7 @@ aoechr_open(struct inode *inode, struct file *filp)
 {
 	int n, i;
 
-	n = iminor(inode);
+	n = MINOR(inode->i_rdev);
 	filp->private_data = (void *) (unsigned long) n;
 
 	for (i = 0; i < ARRAY_SIZE(chardevs); ++i)

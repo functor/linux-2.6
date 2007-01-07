@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/string.h>
+#include <linux/tty.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>

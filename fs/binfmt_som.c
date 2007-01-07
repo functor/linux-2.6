@@ -35,6 +35,8 @@
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 
+#include <linux/config.h>
+
 #include <linux/elf.h>
 
 static int load_som_binary(struct linux_binprm * bprm, struct pt_regs * regs);

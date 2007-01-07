@@ -95,7 +95,6 @@
 #define ERRinvlevel		124
 #define ERRdirnotempty		145
 #define ERRnotlocked		158
-#define ERRcancelviolation	173
 #define ERRalreadyexists	183
 #define ERRbadpipe		230
 #define ERRpipebusy		231

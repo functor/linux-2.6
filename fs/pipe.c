@@ -879,6 +879,7 @@ static struct inode * get_pipe_inode(void)
 	inode->i_uid = current->fsuid;
 	inode->i_gid = current->fsgid;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	inode->i_blksize = PAGE_SIZE;
 
 	return inode;
 
@@ -980,11 +981,12 @@ EXPORT_SYMBOL_GPL(do_pipe);
  * any operations on the root directory. However, we need a non-trivial
  * d_name - pipe: will go nicely and kill the special-casing in procfs.
  */
-static int pipefs_get_sb(struct file_system_type *fs_type,
-			 int flags, const char *dev_name, void *data,
-			 struct vfsmount *mnt)
+
+static struct super_block *
+pipefs_get_sb(struct file_system_type *fs_type, int flags,
+	      const char *dev_name, void *data)
 {
-	return get_sb_pseudo(fs_type, "pipe:", NULL, PIPEFS_MAGIC, mnt);
+	return get_sb_pseudo(fs_type, "pipe:", NULL, PIPEFS_MAGIC);
 }
 
 static struct file_system_type pipe_fs_type = {

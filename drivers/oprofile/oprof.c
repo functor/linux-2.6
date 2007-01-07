@@ -16,7 +16,7 @@
 #include <linux/init.h>
 #include <linux/oprofile.h>
 #include <linux/moduleparam.h>
-#include <asm/mutex.h>
+#include <asm/semaphore.h>
 
 #include "oprof.h"
 #include "event_buffer.h"
@@ -29,7 +29,7 @@ struct oprofile_operations oprofile_ops;
 unsigned long oprofile_started;
 unsigned long backtrace_depth;
 static unsigned long is_setup;
-static DEFINE_MUTEX(start_mutex);
+static DECLARE_MUTEX(start_sem);
 
 /* timer
    0 - use performance monitoring hardware if available
@@ -37,6 +37,7 @@ static DEFINE_MUTEX(start_mutex);
  */
 static int timer = 0;
 
+#ifdef CONFIG_XEN
 int oprofile_set_active(int active_domains[], unsigned int adomains)
 {
 	int err;
@@ -44,9 +45,9 @@ int oprofile_set_active(int active_domains[], unsigned int adomains)
 	if (!oprofile_ops.set_active)
 		return -EINVAL;
 
-	mutex_lock(&start_mutex);
+	down(&start_sem);
 	err = oprofile_ops.set_active(active_domains, adomains);
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 	return err;
 }
 
@@ -57,17 +58,18 @@ int oprofile_set_passive(int passive_domains[], unsigned int pdomains)
 	if (!oprofile_ops.set_passive)
 		return -EINVAL;
 
-	mutex_lock(&start_mutex);
+	down(&start_sem);
 	err = oprofile_ops.set_passive(passive_domains, pdomains);
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 	return err;
 }
+#endif
 
 int oprofile_setup(void)
 {
 	int err;
  
-	mutex_lock(&start_mutex);
+	down(&start_sem);
 
 	if ((err = alloc_cpu_buffers()))
 		goto out;
@@ -87,7 +89,7 @@ int oprofile_setup(void)
 		goto out3;
 
 	is_setup = 1;
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 	return 0;
  
 out3:
@@ -98,7 +100,7 @@ out2:
 out1:
 	free_cpu_buffers();
 out:
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 	return err;
 }
 
@@ -108,7 +110,7 @@ int oprofile_start(void)
 {
 	int err = -EINVAL;
  
-	mutex_lock(&start_mutex);
+	down(&start_sem);
  
 	if (!is_setup)
 		goto out;
@@ -125,7 +127,7 @@ int oprofile_start(void)
 
 	oprofile_started = 1;
 out:
-	mutex_unlock(&start_mutex);
+	up(&start_sem); 
 	return err;
 }
 
@@ -133,7 +135,7 @@ out:
 /* echo 0>/dev/oprofile/enable */
 void oprofile_stop(void)
 {
-	mutex_lock(&start_mutex);
+	down(&start_sem);
 	if (!oprofile_started)
 		goto out;
 	oprofile_ops.stop();
@@ -141,20 +143,20 @@ void oprofile_stop(void)
 	/* wake up the daemon to read what remains */
 	wake_up_buffer_waiter();
 out:
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 }
 
 
 void oprofile_shutdown(void)
 {
-	mutex_lock(&start_mutex);
+	down(&start_sem);
 	sync_stop();
 	if (oprofile_ops.shutdown)
 		oprofile_ops.shutdown();
 	is_setup = 0;
 	free_event_buffer();
 	free_cpu_buffers();
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 }
 
 
@@ -162,7 +164,7 @@ int oprofile_set_backtrace(unsigned long val)
 {
 	int err = 0;
 
-	mutex_lock(&start_mutex);
+	down(&start_sem);
 
 	if (oprofile_started) {
 		err = -EBUSY;
@@ -177,7 +179,7 @@ int oprofile_set_backtrace(unsigned long val)
 	backtrace_depth = val;
 
 out:
-	mutex_unlock(&start_mutex);
+	up(&start_sem);
 	return err;
 }
 

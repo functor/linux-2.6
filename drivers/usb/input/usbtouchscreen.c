@@ -32,13 +32,14 @@
 
 //#define DEBUG
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/usb.h>
-#include <linux/usb/input.h>
+#include <linux/usb_input.h>
 
 
 #define DRIVER_VERSION		"v0.3"
@@ -285,7 +286,7 @@ static int mtouch_init(struct usbtouch_usb *usbtouch)
 static int itm_read_data(unsigned char *pkt, int *x, int *y, int *touch, int *press)
 {
 	*x = ((pkt[0] & 0x1F) << 7) | (pkt[3] & 0x7F);
-	*y = ((pkt[1] & 0x1F) << 7) | (pkt[4] & 0x7F);
+	*x = ((pkt[1] & 0x1F) << 7) | (pkt[4] & 0x7F);
 	*press = ((pkt[2] & 0x1F) << 7) | (pkt[5] & 0x7F);
 	*touch = ~pkt[7] & 0x20;
 
@@ -521,7 +522,7 @@ static int usbtouch_probe(struct usb_interface *intf,
 		                     type->max_press, 0, 0);
 
 	usb_fill_int_urb(usbtouch->irq, usbtouch->udev,
-			 usb_rcvintpipe(usbtouch->udev, endpoint->bEndpointAddress),
+			 usb_rcvintpipe(usbtouch->udev, 0x81),
 			 usbtouch->data, type->rept_size,
 			 usbtouch_irq, usbtouch, endpoint->bInterval);
 

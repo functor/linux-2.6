@@ -29,6 +29,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/spinlock.h>
 #include <linux/socket.h>
 #include <linux/skbuff.h>
@@ -80,6 +81,9 @@ static void ulog_send(unsigned int nlgroup)
 	/* last nlmsg needs NLMSG_DONE */
 	if (ub->qlen > 1)
 		ub->lastnlh->nlmsg_type = NLMSG_DONE;
+
+	if (!ub->skb)
+		return;
 
 	NETLINK_CB(ub->skb).dst_group = nlgroup + 1;
 	netlink_broadcast(ebtulognl, ub->skb, 0, nlgroup + 1, GFP_ATOMIC);

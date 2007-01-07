@@ -39,8 +39,7 @@ static void vic_unmask_irq(unsigned int irq)
 	writel(1 << irq, base + VIC_INT_ENABLE);
 }
 
-static struct irq_chip vic_chip = {
-	.name	= "VIC",
+static struct irqchip vic_chip = {
 	.ack	= vic_mask_irq,
 	.mask	= vic_mask_irq,
 	.unmask	= vic_unmask_irq,

@@ -177,11 +177,6 @@ int ps2_command(struct ps2dev *ps2dev, unsigned char *param, int command)
 		return -1;
 	}
 
-	if (send && !param) {
-		WARN_ON(1);
-		return -1;
-	}
-
 	mutex_lock(&ps2dev->cmd_mutex);
 
 	serio_pause_rx(ps2dev->serio);
@@ -280,8 +275,6 @@ int ps2_schedule_command(struct ps2dev *ps2dev, unsigned char *param, int comman
 	return 0;
 }
 
-static struct lock_class_key ps2_mutex_key;
-
 /*
  * ps2_init() initializes ps2dev structure
  */
@@ -289,8 +282,6 @@ static struct lock_class_key ps2_mutex_key;
 void ps2_init(struct ps2dev *ps2dev, struct serio *serio)
 {
 	mutex_init(&ps2dev->cmd_mutex);
-	lockdep_set_class_and_subclass(&ps2dev->cmd_mutex, &ps2_mutex_key,
-				       serio->depth);
 	init_waitqueue_head(&ps2dev->wait);
 	ps2dev->serio = serio;
 }

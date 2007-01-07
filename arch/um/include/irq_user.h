@@ -6,8 +6,6 @@
 #ifndef __IRQ_USER_H__
 #define __IRQ_USER_H__
 
-#include "uml-config.h"
-
 struct irq_fd {
 	struct irq_fd *next;
 	void *id;
@@ -28,10 +26,9 @@ extern void free_irq_by_fd(int fd);
 extern void reactivate_fd(int fd, int irqnum);
 extern void deactivate_fd(int fd, int irqnum);
 extern int deactivate_all_fds(void);
-extern int activate_ipi(int fd, int pid);
-
-#ifdef CONFIG_MODE_TT
 extern void forward_interrupts(int pid);
-#endif
+extern int activate_ipi(int fd, int pid);
+extern unsigned long irq_lock(void);
+extern void irq_unlock(unsigned long flags);
 
 #endif

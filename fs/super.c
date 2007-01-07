@@ -20,6 +20,7 @@
  *  Heavily rewritten for 'one fs - one tree' dcache architecture. AV, Mar 2000
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -52,12 +53,11 @@ DEFINE_SPINLOCK(sb_lock);
 
 /**
  *	alloc_super	-	create new superblock
- *	@type:	filesystem type superblock should belong to
  *
  *	Allocates and initializes a new &struct super_block.  alloc_super()
  *	returns a pointer new superblock or %NULL if allocation had failed.
  */
-static struct super_block *alloc_super(struct file_system_type *type)
+static struct super_block *alloc_super(void)
 {
 	struct super_block *s = kzalloc(sizeof(struct super_block),  GFP_USER);
 	static struct super_operations default_op;
@@ -76,13 +76,6 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		INIT_LIST_HEAD(&s->s_inodes);
 		init_rwsem(&s->s_umount);
 		mutex_init(&s->s_lock);
-		lockdep_set_class(&s->s_umount, &type->s_umount_key);
-		/*
-		 * The locking rules for s_lock are up to the
-		 * filesystem. For example ext3fs has different
-		 * lock ordering than usbfs:
-		 */
-		lockdep_set_class(&s->s_lock, &type->s_lock_key);
 		down_write(&s->s_umount);
 		s->s_count = S_BIAS;
 		atomic_set(&s->s_active, 1);
@@ -232,17 +225,17 @@ static int grab_super(struct super_block *s)
  *	that need destruction out of superblock, call generic_shutdown_super()
  *	and release aforementioned objects.  Note: dentries and inodes _are_
  *	taken care of and do not need specific handling.
- *
- *	Upon calling this function, the filesystem may no longer alter or
- *	rearrange the set of dentries belonging to this super_block, nor may it
- *	change the attachments of dentries to inodes.
  */
 void generic_shutdown_super(struct super_block *sb)
 {
+	struct dentry *root = sb->s_root;
 	struct super_operations *sop = sb->s_op;
 
-	if (sb->s_root) {
-		shrink_dcache_for_umount(sb);
+	if (root) {
+		sb->s_root = NULL;
+		shrink_dcache_parent(root);
+		shrink_dcache_anon(&sb->s_anon);
+		dput(root);
 		fsync_super(sb);
 		lock_super(sb);
 		sb->s_flags &= ~MS_ACTIVE;
@@ -306,7 +299,7 @@ retry:
 	}
 	if (!s) {
 		spin_unlock(&sb_lock);
-		s = alloc_super(type);
+		s = alloc_super();
 		if (!s)
 			return ERR_PTR(-ENOMEM);
 		goto retry;
@@ -496,7 +489,7 @@ asmlinkage long sys_ustat(unsigned dev, struct ustat __user * ubuf)
         s = user_get_super(new_decode_dev(dev));
         if (s == NULL)
                 goto out;
-	err = vfs_statfs(s->s_root, &sbuf);
+	err = vfs_statfs(s, &sbuf);
 	drop_super(s);
 	if (err)
 		goto out;
@@ -686,10 +679,9 @@ static void bdev_uevent(struct block_device *bdev, enum kobject_action action)
 	}
 }
 
-int get_sb_bdev(struct file_system_type *fs_type,
+struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
-	int (*fill_super)(struct super_block *, void *, int),
-	struct vfsmount *mnt)
+	int (*fill_super)(struct super_block *, void *, int))
 {
 	struct block_device *bdev;
 	struct super_block *s;
@@ -697,7 +689,7 @@ int get_sb_bdev(struct file_system_type *fs_type,
 
 	bdev = open_bdev_excl(dev_name, flags, fs_type);
 	if (IS_ERR(bdev))
-		return PTR_ERR(bdev);
+		return (struct super_block *)bdev;
 
 	/*
 	 * once the super is inserted into the list by sget, s_umount
@@ -708,17 +700,15 @@ int get_sb_bdev(struct file_system_type *fs_type,
 	s = sget(fs_type, test_bdev_super, set_bdev_super, bdev);
 	mutex_unlock(&bdev->bd_mount_mutex);
 	if (IS_ERR(s))
-		goto error_s;
+		goto out;
 
 	if (s->s_root) {
 		if ((flags ^ s->s_flags) & MS_RDONLY) {
 			up_write(&s->s_umount);
 			deactivate_super(s);
-			error = -EBUSY;
-			goto error_bdev;
+			s = ERR_PTR(-EBUSY);
 		}
-
-		close_bdev_excl(bdev);
+		goto out;
 	} else {
 		char b[BDEVNAME_SIZE];
 
@@ -729,21 +719,18 @@ int get_sb_bdev(struct file_system_type *fs_type,
 		if (error) {
 			up_write(&s->s_umount);
 			deactivate_super(s);
-			goto error;
+			s = ERR_PTR(error);
+		} else {
+			s->s_flags |= MS_ACTIVE;
+			bdev_uevent(bdev, KOBJ_MOUNT);
 		}
-
-		s->s_flags |= MS_ACTIVE;
-		bdev_uevent(bdev, KOBJ_MOUNT);
 	}
 
-	return simple_set_mnt(mnt, s);
+	return s;
 
-error_s:
-	error = PTR_ERR(s);
-error_bdev:
+out:
 	close_bdev_excl(bdev);
-error:
-	return error;
+	return s;
 }
 
 EXPORT_SYMBOL(get_sb_bdev);
@@ -760,16 +747,15 @@ void kill_block_super(struct super_block *sb)
 
 EXPORT_SYMBOL(kill_block_super);
 
-int get_sb_nodev(struct file_system_type *fs_type,
+struct super_block *get_sb_nodev(struct file_system_type *fs_type,
 	int flags, void *data,
-	int (*fill_super)(struct super_block *, void *, int),
-	struct vfsmount *mnt)
+	int (*fill_super)(struct super_block *, void *, int))
 {
 	int error;
 	struct super_block *s = sget(fs_type, NULL, set_anon_super, NULL);
 
 	if (IS_ERR(s))
-		return PTR_ERR(s);
+		return s;
 
 	s->s_flags = flags;
 
@@ -777,10 +763,10 @@ int get_sb_nodev(struct file_system_type *fs_type,
 	if (error) {
 		up_write(&s->s_umount);
 		deactivate_super(s);
-		return error;
+		return ERR_PTR(error);
 	}
 	s->s_flags |= MS_ACTIVE;
-	return simple_set_mnt(mnt, s);
+	return s;
 }
 
 EXPORT_SYMBOL(get_sb_nodev);
@@ -790,116 +776,107 @@ static int compare_single(struct super_block *s, void *p)
 	return 1;
 }
 
-int get_sb_single(struct file_system_type *fs_type,
+struct super_block *get_sb_single(struct file_system_type *fs_type,
 	int flags, void *data,
-	int (*fill_super)(struct super_block *, void *, int),
-	struct vfsmount *mnt)
+	int (*fill_super)(struct super_block *, void *, int))
 {
 	struct super_block *s;
 	int error;
 
 	s = sget(fs_type, compare_single, set_anon_super, NULL);
 	if (IS_ERR(s))
-		return PTR_ERR(s);
+		return s;
 	if (!s->s_root) {
 		s->s_flags = flags;
 		error = fill_super(s, data, flags & MS_SILENT ? 1 : 0);
 		if (error) {
 			up_write(&s->s_umount);
 			deactivate_super(s);
-			return error;
+			return ERR_PTR(error);
 		}
 		s->s_flags |= MS_ACTIVE;
 	}
 	do_remount_sb(s, flags, data, 0);
-	return simple_set_mnt(mnt, s);
+	return s;
 }
 
 EXPORT_SYMBOL(get_sb_single);
 
 struct vfsmount *
-vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void *data)
+do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 {
-	struct vfsmount *mnt;
+	struct file_system_type *type = get_fs_type(fstype);
 	struct super_block *sb;
-	char *secdata = NULL;
+	struct vfsmount *mnt;
 	int error;
+	char *secdata = NULL;
 
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
-	error = -ENOMEM;
+	sb = ERR_PTR(-EPERM);
+	if ((type->fs_flags & FS_BINARY_MOUNTDATA) &&
+		!vx_capable(CAP_SYS_ADMIN, VXC_BINARY_MOUNT))
+		goto out;
+
+	sb = ERR_PTR(-ENOMEM);
 	mnt = alloc_vfsmnt(name);
 	if (!mnt)
 		goto out;
 
 	if (data) {
 		secdata = alloc_secdata();
-		if (!secdata)
+		if (!secdata) {
+			sb = ERR_PTR(-ENOMEM);
 			goto out_mnt;
+		}
 
 		error = security_sb_copy_data(type, data, secdata);
-		if (error)
+		if (error) {
+			sb = ERR_PTR(error);
 			goto out_free_secdata;
+		}
 	}
 
-	error = type->get_sb(type, flags, name, data, mnt);
-	if (error < 0)
+	sb = type->get_sb(type, flags, name, data);
+	if (IS_ERR(sb))
 		goto out_free_secdata;
 
-	sb = mnt->mnt_sb;
 	error = -EPERM;
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_BINARY_MOUNT) && !sb->s_bdev &&
+	if (!capable(CAP_SYS_ADMIN) && !sb->s_bdev &&
 		(sb->s_magic != PROC_SUPER_MAGIC) &&
 		(sb->s_magic != DEVPTS_SUPER_MAGIC))
 		goto out_sb;
 
-	error = security_sb_kern_mount(sb, secdata);
+ 	error = security_sb_kern_mount(sb, secdata);
  	if (error)
  		goto out_sb;
-
-	mnt->mnt_mountpoint = mnt->mnt_root;
+	mnt->mnt_sb = sb;
+	mnt->mnt_root = dget(sb->s_root);
+	mnt->mnt_mountpoint = sb->s_root;
 	mnt->mnt_parent = mnt;
-	up_write(&mnt->mnt_sb->s_umount);
+	up_write(&sb->s_umount);
 	free_secdata(secdata);
+	put_filesystem(type);
 	return mnt;
 out_sb:
-	dput(mnt->mnt_root);
-	up_write(&mnt->mnt_sb->s_umount);
-	deactivate_super(mnt->mnt_sb);
+	up_write(&sb->s_umount);
+	deactivate_super(sb);
+	sb = ERR_PTR(error);
 out_free_secdata:
 	free_secdata(secdata);
 out_mnt:
 	free_vfsmnt(mnt);
 out:
-	return ERR_PTR(error);
-}
-
-EXPORT_SYMBOL_GPL(vfs_kern_mount);
-
-struct vfsmount *
-do_kern_mount(const char *fstype, int flags, const char *name, void *data)
-{
-	struct file_system_type *type = get_fs_type(fstype);
-	struct vfsmount *mnt;
-
-	if (!type)
-		return ERR_PTR(-ENODEV);
-
-	mnt = ERR_PTR(-EPERM);
-	if ((type->fs_flags & FS_BINARY_MOUNTDATA) &&
-		!vx_capable(CAP_SYS_ADMIN, VXC_BINARY_MOUNT))
-		goto out_put;
-
-	mnt = vfs_kern_mount(type, flags, name, data);
-out_put:
 	put_filesystem(type);
-	return mnt;
+	return (struct vfsmount *)sb;
 }
+
+EXPORT_SYMBOL_GPL(do_kern_mount);
 
 struct vfsmount *kern_mount(struct file_system_type *type)
 {
-	return vfs_kern_mount(type, 0, type->name, NULL);
+	return do_kern_mount(type->name, 0, type->name, NULL);
 }
 
 EXPORT_SYMBOL(kern_mount);

@@ -3,20 +3,13 @@
  *
  * (C) 2004 William Irwin, Oracle
  */
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/wait.h>
 #include <linux/hash.h>
-
-void init_waitqueue_head(wait_queue_head_t *q)
-{
-	spin_lock_init(&q->lock);
-	INIT_LIST_HEAD(&q->task_list);
-}
-
-EXPORT_SYMBOL(init_waitqueue_head);
 
 void fastcall add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
@@ -40,13 +33,35 @@ void fastcall add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(add_wait_queue_exclusive);
 
-void fastcall remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
+int fastcall remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
+	struct list_head *list;
+	int seen, retval;
 
 	spin_lock_irqsave(&q->lock, flags);
-	__remove_wait_queue(q, wait);
+	list = &q->task_list;
+	seen = 0;
+	retval = -1;
+
+	do {
+		struct list_head *next;
+		if (list == &wait->task_list)
+			seen++;
+		next = list->next;
+		if (next->prev != list) {
+			seen += 2;
+			break;
+		}
+		list = next;
+	} while (list != &q->task_list);
+
+	if (seen == 1) {
+		__remove_wait_queue(q, wait);
+		retval = 0;
+	}
 	spin_unlock_irqrestore(&q->lock, flags);
+	return retval;
 }
 EXPORT_SYMBOL(remove_wait_queue);
 

@@ -40,7 +40,6 @@
 
 #include <linux/list.h>
 #include <linux/spinlock.h>
-#include <linux/lockdep.h>
 
 struct rwsem_waiter;
 
@@ -62,34 +61,36 @@ struct rw_semaphore {
 #define RWSEM_ACTIVE_WRITE_BIAS		(RWSEM_WAITING_BIAS + RWSEM_ACTIVE_BIAS)
 	spinlock_t		wait_lock;
 	struct list_head	wait_list;
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-	struct lockdep_map dep_map;
+#if RWSEM_DEBUG
+	int			debug;
 #endif
 };
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-# define __RWSEM_DEP_MAP_INIT(lockname) , .dep_map = { .name = #lockname }
+/*
+ * initialisation
+ */
+#if RWSEM_DEBUG
+#define __RWSEM_DEBUG_INIT      , 0
 #else
-# define __RWSEM_DEP_MAP_INIT(lockname)
+#define __RWSEM_DEBUG_INIT	/* */
 #endif
-
 
 #define __RWSEM_INITIALIZER(name) \
 { RWSEM_UNLOCKED_VALUE, SPIN_LOCK_UNLOCKED, LIST_HEAD_INIT((name).wait_list) \
-	__RWSEM_DEP_MAP_INIT(name) }
+	__RWSEM_DEBUG_INIT }
 
 #define DECLARE_RWSEM(name) \
 	struct rw_semaphore name = __RWSEM_INITIALIZER(name)
 
-extern void __init_rwsem(struct rw_semaphore *sem, const char *name,
-			 struct lock_class_key *key);
-
-#define init_rwsem(sem)						\
-do {								\
-	static struct lock_class_key __key;			\
-								\
-	__init_rwsem((sem), #sem, &__key);			\
-} while (0)
+static inline void init_rwsem(struct rw_semaphore *sem)
+{
+	sem->count = RWSEM_UNLOCKED_VALUE;
+	spin_lock_init(&sem->wait_lock);
+	INIT_LIST_HEAD(&sem->wait_list);
+#if RWSEM_DEBUG
+	sem->debug = 0;
+#endif
+}
 
 /*
  * lock for reading
@@ -111,8 +112,8 @@ LOCK_PREFIX	"  incl      (%%eax)\n\t" /* adds 0x00000001, returns the old value 
 		"  jmp       1b\n"
 		LOCK_SECTION_END
 		"# ending down_read\n\t"
-		: "+m" (sem->count)
-		: "a" (sem)
+		: "=m"(sem->count)
+		: "a"(sem), "m"(sem->count)
 		: "memory", "cc");
 }
 
@@ -133,8 +134,8 @@ LOCK_PREFIX	"  cmpxchgl  %2,%0\n\t"
 		"  jnz	     1b\n\t"
 		"2:\n\t"
 		"# ending __down_read_trylock\n\t"
-		: "+m" (sem->count), "=&a" (result), "=&r" (tmp)
-		: "i" (RWSEM_ACTIVE_READ_BIAS)
+		: "+m"(sem->count), "=&a"(result), "=&r"(tmp)
+		: "i"(RWSEM_ACTIVE_READ_BIAS)
 		: "memory", "cc");
 	return result>=0 ? 1 : 0;
 }
@@ -142,7 +143,7 @@ LOCK_PREFIX	"  cmpxchgl  %2,%0\n\t"
 /*
  * lock for writing
  */
-static inline void __down_write_nested(struct rw_semaphore *sem, int subclass)
+static inline void __down_write(struct rw_semaphore *sem)
 {
 	int tmp;
 
@@ -161,14 +162,9 @@ LOCK_PREFIX	"  xadd      %%edx,(%%eax)\n\t" /* subtract 0x0000ffff, returns the 
 		"  jmp       1b\n"
 		LOCK_SECTION_END
 		"# ending down_write"
-		: "+m" (sem->count), "=d" (tmp)
-		: "a" (sem), "1" (tmp)
+		: "=m"(sem->count), "=d"(tmp)
+		: "a"(sem), "1"(tmp), "m"(sem->count)
 		: "memory", "cc");
-}
-
-static inline void __down_write(struct rw_semaphore *sem)
-{
-	__down_write_nested(sem, 0);
 }
 
 /*
@@ -205,8 +201,8 @@ LOCK_PREFIX	"  xadd      %%edx,(%%eax)\n\t" /* subtracts 1, returns the old valu
 		"  jmp       1b\n"
 		LOCK_SECTION_END
 		"# ending __up_read\n"
-		: "+m" (sem->count), "=d" (tmp)
-		: "a" (sem), "1" (tmp)
+		: "=m"(sem->count), "=d"(tmp)
+		: "a"(sem), "1"(tmp), "m"(sem->count)
 		: "memory", "cc");
 }
 
@@ -231,8 +227,8 @@ LOCK_PREFIX	"  xaddl     %%edx,(%%eax)\n\t" /* tries to transition 0xffff0001 ->
 		"  jmp       1b\n"
 		LOCK_SECTION_END
 		"# ending __up_write\n"
-		: "+m" (sem->count)
-		: "a" (sem), "i" (-RWSEM_ACTIVE_WRITE_BIAS)
+		: "=m"(sem->count)
+		: "a"(sem), "i"(-RWSEM_ACTIVE_WRITE_BIAS), "m"(sem->count)
 		: "memory", "cc", "edx");
 }
 
@@ -256,8 +252,8 @@ LOCK_PREFIX	"  addl      %2,(%%eax)\n\t" /* transitions 0xZZZZ0001 -> 0xYYYY0001
 		"  jmp       1b\n"
 		LOCK_SECTION_END
 		"# ending __downgrade_write\n"
-		: "+m" (sem->count)
-		: "a" (sem), "i" (-RWSEM_WAITING_BIAS)
+		: "=m"(sem->count)
+		: "a"(sem), "i"(-RWSEM_WAITING_BIAS), "m"(sem->count)
 		: "memory", "cc");
 }
 
@@ -268,8 +264,8 @@ static inline void rwsem_atomic_add(int delta, struct rw_semaphore *sem)
 {
 	__asm__ __volatile__(
 LOCK_PREFIX	"addl %1,%0"
-		: "+m" (sem->count)
-		: "ir" (delta));
+		: "=m"(sem->count)
+		: "ir"(delta), "m"(sem->count));
 }
 
 /*
@@ -280,9 +276,10 @@ static inline int rwsem_atomic_update(int delta, struct rw_semaphore *sem)
 	int tmp = delta;
 
 	__asm__ __volatile__(
-LOCK_PREFIX	"xadd %0,%1"
-		: "+r" (tmp), "+m" (sem->count)
-		: : "memory");
+LOCK_PREFIX	"xadd %0,(%2)"
+		: "+r"(tmp), "=m"(sem->count)
+		: "r"(sem), "m"(sem->count)
+		: "memory");
 
 	return tmp+delta;
 }

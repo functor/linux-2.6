@@ -49,6 +49,7 @@
  *	More info available at http://www.berkprod.com/ or http://www.pcwatchdog.com/
  */
 
+#include <linux/config.h>	/* For CONFIG_WATCHDOG_NOWAYOUT/... */
 #include <linux/module.h>	/* For module specific items */
 #include <linux/moduleparam.h>	/* For new moduleparam's */
 #include <linux/types.h>	/* For standard types (like size_t) */
@@ -739,7 +740,7 @@ static int pcwd_notify_sys(struct notifier_block *this, unsigned long code, void
  *	Kernel Interfaces
  */
 
-static const struct file_operations pcwd_fops = {
+static struct file_operations pcwd_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.write		= pcwd_write,
@@ -754,7 +755,7 @@ static struct miscdevice pcwd_miscdev = {
 	.fops =		&pcwd_fops,
 };
 
-static const struct file_operations pcwd_temp_fops = {
+static struct file_operations pcwd_temp_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.read		= pcwd_temp_read,

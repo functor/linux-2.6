@@ -107,7 +107,6 @@ int hdlc_ppp_ioctl(struct net_device *dev, struct ifreq *ifr)
 		dev->hard_header = NULL;
 		dev->type = ARPHRD_PPP;
 		dev->addr_len = 0;
-		netif_dormant_off(dev);
 		return 0;
 	}
 

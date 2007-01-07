@@ -578,7 +578,7 @@ complete_scsi_command( CommandList_struct *cp, int timeout, __u32 tag)
 
 	if (cmd->use_sg) {
 		pci_unmap_sg(ctlr->pdev,
-			cmd->request_buffer, cmd->use_sg,
+			cmd->buffer, cmd->use_sg,
 				cmd->sc_data_direction); 
 	}
 	else if (cmd->request_bufflen) {
@@ -770,7 +770,7 @@ cciss_scsi_do_simple_cmd(ctlr_info_t *c,
 			int direction)
 {
 	unsigned long flags;
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 
 	cp->cmd_type = CMD_IOCTL_PEND;		// treat this like an ioctl 
 	cp->scsi_cmd = NULL;
@@ -1210,7 +1210,7 @@ cciss_scatter_gather(struct pci_dev *pdev,
 		struct scsi_cmnd *cmd)
 {
 	unsigned int use_sg, nsegs=0, len;
-	struct scatterlist *scatter = (struct scatterlist *) cmd->request_buffer;
+	struct scatterlist *scatter = (struct scatterlist *) cmd->buffer;
 	__u64 addr64;
 
 	/* is it just one virtual address? */	
@@ -1232,7 +1232,7 @@ cciss_scatter_gather(struct pci_dev *pdev,
 	} /* else, must be a list of virtual addresses.... */
 	else if (cmd->use_sg <= MAXSGENTRIES) {	/* not too many addrs? */
 
-		use_sg = pci_map_sg(pdev, cmd->request_buffer, cmd->use_sg,
+		use_sg = pci_map_sg(pdev, cmd->buffer, cmd->use_sg, 
 			cmd->sc_data_direction);
 
 		for (nsegs=0; nsegs < use_sg; nsegs++) {

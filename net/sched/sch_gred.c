@@ -18,6 +18,7 @@
  *  For all the glorious comments look at include/net/red.h
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -406,9 +407,10 @@ static inline int gred_change_vq(struct Qdisc *sch, int dp,
 	struct gred_sched_data *q;
 
 	if (table->tab[dp] == NULL) {
-		table->tab[dp] = kzalloc(sizeof(*q), GFP_KERNEL);
+		table->tab[dp] = kmalloc(sizeof(*q), GFP_KERNEL);
 		if (table->tab[dp] == NULL)
 			return -ENOMEM;
+		memset(table->tab[dp], 0, sizeof(*q));
 	}
 
 	q = table->tab[dp];

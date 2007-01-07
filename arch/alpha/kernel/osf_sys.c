@@ -117,21 +117,17 @@ osf_filldir(void *__buf, const char *name, int namlen, loff_t offset,
 	struct osf_dirent __user *dirent;
 	struct osf_dirent_callback *buf = (struct osf_dirent_callback *) __buf;
 	unsigned int reclen = ROUND_UP(NAME_OFFSET + namlen + 1);
-	unsigned int d_ino;
 
 	buf->error = -EINVAL;	/* only used if we fail */
 	if (reclen > buf->count)
 		return -EINVAL;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
-		return -EOVERFLOW;
 	if (buf->basep) {
 		if (put_user(offset, buf->basep))
 			return -EFAULT;
 		buf->basep = NULL;
 	}
 	dirent = buf->dirent;
-	put_user(d_ino, &dirent->d_ino);
+	put_user(ino, &dirent->d_ino);
 	put_user(namlen, &dirent->d_namlen);
 	put_user(reclen, &dirent->d_reclen);
 	if (copy_to_user(dirent->d_name, name, namlen) ||
@@ -249,7 +245,7 @@ do_osf_statfs(struct dentry * dentry, struct osf_statfs __user *buffer,
 	      unsigned long bufsiz)
 {
 	struct kstatfs linux_stat;
-	int error = vfs_statfs(dentry, &linux_stat);
+	int error = vfs_statfs(dentry->d_inode->i_sb, &linux_stat);
 	if (!error)
 		error = linux_to_osf_statfs(&linux_stat, buffer, bufsiz);
 	return error;	
@@ -626,7 +622,7 @@ osf_sysinfo(int command, char __user *buf, long count)
 		printk("sysinfo(%d)", command);
 		goto out;
 	}
-
+	
 	down_read(&uts_sem);
 	switch (offset)
 	{

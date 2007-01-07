@@ -2302,7 +2302,7 @@ static int cryptocop_job_setup(struct cryptocop_prio_job **pj, struct cryptocop_
 
 static int cryptocop_open(struct inode *inode, struct file *filp)
 {
-	int p = iminor(inode);
+	int p = MINOR(inode->i_rdev);
 
 	if (p != CRYPTOCOP_MINOR) return -EINVAL;
 

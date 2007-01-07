@@ -319,32 +319,6 @@ static void flush_tlb_mm_ipi(void *mm)
 }
 
 /*
- * Special Variant of smp_call_function for use by TLB functions:
- *
- *  o No return value
- *  o collapses to normal function call on UP kernels
- *  o collapses to normal function call on systems with a single shared
- *    primary cache.
- *  o CONFIG_MIPS_MT_SMTC currently implies there is only one physical core.
- */
-static inline void smp_on_other_tlbs(void (*func) (void *info), void *info)
-{
-#ifndef CONFIG_MIPS_MT_SMTC
-	smp_call_function(func, info, 1, 1);
-#endif
-}
-
-static inline void smp_on_each_tlb(void (*func) (void *info), void *info)
-{
-	preempt_disable();
-
-	smp_on_other_tlbs(func, info);
-	func(info);
-
-	preempt_enable();
-}
-
-/*
  * The following tlb flush calls are invoked when old translations are
  * being torn down, or pte attributes are changing. For single threaded
  * address spaces, a new context is obtained on the current cpu, and tlb
@@ -362,7 +336,7 @@ void flush_tlb_mm(struct mm_struct *mm)
 	preempt_disable();
 
 	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
-		smp_on_other_tlbs(flush_tlb_mm_ipi, (void *)mm);
+		smp_call_function(flush_tlb_mm_ipi, (void *)mm, 1, 1);
 	} else {
 		int i;
 		for (i = 0; i < num_online_cpus(); i++)
@@ -398,7 +372,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned l
 		fd.vma = vma;
 		fd.addr1 = start;
 		fd.addr2 = end;
-		smp_on_other_tlbs(flush_tlb_range_ipi, (void *)&fd);
+		smp_call_function(flush_tlb_range_ipi, (void *)&fd, 1, 1);
 	} else {
 		int i;
 		for (i = 0; i < num_online_cpus(); i++)
@@ -440,7 +414,7 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 
 		fd.vma = vma;
 		fd.addr1 = page;
-		smp_on_other_tlbs(flush_tlb_page_ipi, (void *)&fd);
+		smp_call_function(flush_tlb_page_ipi, (void *)&fd, 1, 1);
 	} else {
 		int i;
 		for (i = 0; i < num_online_cpus(); i++)
@@ -460,7 +434,8 @@ static void flush_tlb_one_ipi(void *info)
 
 void flush_tlb_one(unsigned long vaddr)
 {
-	smp_on_each_tlb(flush_tlb_one_ipi, (void *) vaddr);
+	smp_call_function(flush_tlb_one_ipi, (void *) vaddr, 1, 1);
+	local_flush_tlb_one(vaddr);
 }
 
 static DEFINE_PER_CPU(struct cpu, cpu_devices);
@@ -471,7 +446,7 @@ static int __init topology_init(void)
 	int ret;
 
 	for_each_present_cpu(cpu) {
-		ret = register_cpu(&per_cpu(cpu_devices, cpu), cpu);
+		ret = register_cpu(&per_cpu(cpu_devices, cpu), cpu, NULL);
 		if (ret)
 			printk(KERN_WARNING "topology_init: register_cpu %d "
 			       "failed (%d)\n", cpu, ret);

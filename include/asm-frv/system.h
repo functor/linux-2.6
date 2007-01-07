@@ -12,6 +12,7 @@
 #ifndef _ASM_SYSTEM_H
 #define _ASM_SYSTEM_H
 
+#include <linux/config.h> /* get configuration macros */
 #include <linux/linkage.h>
 #include <asm/atomic.h>
 
@@ -179,6 +180,7 @@ do {							\
 #define rmb()			asm volatile ("membar" : : :"memory")
 #define wmb()			asm volatile ("membar" : : :"memory")
 #define set_mb(var, value)	do { var = value; mb(); } while (0)
+#define set_wmb(var, value)	do { var = value; wmb(); } while (0)
 
 #define smp_mb()		mb()
 #define smp_rmb()		rmb()

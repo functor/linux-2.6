@@ -40,8 +40,6 @@
 
 #define PXA_SSP_PORTS 	3
 
-#define TIMEOUT 100000
-
 struct ssp_info_ {
 	int irq;
 	u32 clock;
@@ -94,18 +92,13 @@ static irqreturn_t ssp_interrupt(int irq, void *dev_id, struct pt_regs *regs)
  * The caller is expected to perform the necessary locking.
  *
  * Returns:
- *   %-ETIMEDOUT	timeout occurred
+ *   %-ETIMEDOUT	timeout occurred (for future)
  *   0			success
  */
 int ssp_write_word(struct ssp_dev *dev, u32 data)
 {
-	int timeout = TIMEOUT;
-
-	while (!(SSSR_P(dev->port) & SSSR_TNF)) {
-	        if (!--timeout)
-	        	return -ETIMEDOUT;
+	while (!(SSSR_P(dev->port) & SSSR_TNF))
 		cpu_relax();
-	}
 
 	SSDR_P(dev->port) = data;
 
@@ -124,21 +117,15 @@ int ssp_write_word(struct ssp_dev *dev, u32 data)
  * The caller is expected to perform the necessary locking.
  *
  * Returns:
- *   %-ETIMEDOUT	timeout occurred
+ *   %-ETIMEDOUT	timeout occurred (for future)
  *   32-bit data	success
  */
-int ssp_read_word(struct ssp_dev *dev, u32 *data)
+int ssp_read_word(struct ssp_dev *dev)
 {
-	int timeout = TIMEOUT;
-
-	while (!(SSSR_P(dev->port) & SSSR_RNE)) {
-	        if (!--timeout)
-	        	return -ETIMEDOUT;
+	while (!(SSSR_P(dev->port) & SSSR_RNE))
 		cpu_relax();
-	}
 
-	*data = SSDR_P(dev->port);
-	return 0;
+	return SSDR_P(dev->port);
 }
 
 /**
@@ -149,21 +136,13 @@ int ssp_read_word(struct ssp_dev *dev, u32 *data)
  *
  * The caller is expected to perform the necessary locking.
  */
-int ssp_flush(struct ssp_dev *dev)
+void ssp_flush(struct ssp_dev *dev)
 {
-	int timeout = TIMEOUT * 2;
-
 	do {
 		while (SSSR_P(dev->port) & SSSR_RNE) {
-		        if (!--timeout)
-		        	return -ETIMEDOUT;
 			(void) SSDR_P(dev->port);
 		}
-	        if (!--timeout)
-	        	return -ETIMEDOUT;
 	} while (SSSR_P(dev->port) & SSSR_BSY);
-
-	return 0;
 }
 
 /**

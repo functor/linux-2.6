@@ -10,6 +10,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -1926,9 +1927,10 @@ cbq_change_class(struct Qdisc *sch, u32 classid, u32 parentid, struct rtattr **t
 	}
 
 	err = -ENOBUFS;
-	cl = kzalloc(sizeof(*cl), GFP_KERNEL);
+	cl = kmalloc(sizeof(*cl), GFP_KERNEL);
 	if (cl == NULL)
 		goto failure;
+	memset(cl, 0, sizeof(*cl));
 	cl->R_tab = rtab;
 	rtab = NULL;
 	cl->refcnt = 1;

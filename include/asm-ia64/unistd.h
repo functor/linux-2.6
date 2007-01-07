@@ -265,7 +265,7 @@
 #define __NR_keyctl			1273
 #define __NR_ioprio_set			1274
 #define __NR_ioprio_get			1275
-#define __NR_move_pages			1276
+/* 1276 is available for reuse (was briefly sys_set_zone_reclaim) */
 #define __NR_inotify_init		1277
 #define __NR_inotify_add_watch		1278
 #define __NR_inotify_rm_watch		1279
@@ -286,13 +286,15 @@
 /* 1294, 1295 reserved for pselect/ppoll */
 #define __NR_unshare			1296
 #define __NR_splice			1297
-/* 1298, 1299 reserved for set_robust_list/get_robust_list */
+#define __NR_set_robust_list		1298
+#define __NR_get_robust_list		1299
 #define __NR_sync_file_range		1300
 #define __NR_tee			1301
 #define __NR_vmsplice			1302
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 
 #define NR_syscalls			279 /* length of syscall table */
 

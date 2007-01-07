@@ -7,6 +7,7 @@
  * we put the segment information here.
  *
  * cpu_vm_mask is used to optimize ldt flushing.
+ *
  * exec_limit is used to track the range PROT_EXEC
  * mappings span.
  */

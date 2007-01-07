@@ -601,8 +601,12 @@ static int ds_ioctl(struct inode * inode, struct file * file,
 	    ret = CS_BAD_ARGS;
 	else {
 	    struct pcmcia_device *p_dev = get_pcmcia_device(s, buf->config.Function);
-	    ret = pccard_get_configuration_info(s, p_dev, &buf->config);
-	    pcmcia_put_dev(p_dev);
+	    if (p_dev == NULL)
+		    ret = CS_BAD_ARGS;
+	    else {
+		    ret = pccard_get_configuration_info(s, p_dev, &buf->config);
+		    pcmcia_put_dev(p_dev);
+	    }
 	}
 	break;
     case DS_GET_FIRST_TUPLE:
@@ -632,8 +636,12 @@ static int ds_ioctl(struct inode * inode, struct file * file,
 		    ret = CS_BAD_ARGS;
 	    else {
 		    struct pcmcia_device *p_dev = get_pcmcia_device(s, buf->status.Function);
-		    ret = pccard_get_status(s, p_dev, &buf->status);
-		    pcmcia_put_dev(p_dev);
+		    if (p_dev == NULL)
+			    ret = CS_BAD_ARGS;
+		    else {
+			    ret = pccard_get_status(s, p_dev, &buf->status);
+			    pcmcia_put_dev(p_dev);
+		    }
 	    }
 	    break;
     case DS_VALIDATE_CIS:

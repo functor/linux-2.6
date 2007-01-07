@@ -2,6 +2,7 @@
  * Copyright 2000 by Hans Reiser, licensing governed by reiserfs/README
  */
 
+#include <linux/config.h>
 #include <linux/time.h>
 #include <linux/fs.h>
 #include <linux/reiserfs_fs.h>
@@ -18,6 +19,8 @@
 #include <linux/quotaops.h>
 #include <linux/vs_dlimit.h>
 #include <linux/vserver/xid.h>
+
+extern int reiserfs_default_io_size;	/* default io size devuned in super.c */
 
 static int reiserfs_commit_write(struct file *f, struct page *page,
 				 unsigned from, unsigned to);
@@ -39,10 +42,14 @@ void reiserfs_delete_inode(struct inode *inode)
 
 	/* The = 0 happens when we abort creating a new inode for some reason like lack of space.. */
 	if (!(inode->i_state & I_NEW) && INODE_PKEY(inode)->k_objectid != 0) {	/* also handles bad_inode case */
+		mutex_lock(&inode->i_mutex);
+
 		reiserfs_delete_xattrs(inode);
 
-		if (journal_begin(&th, inode->i_sb, jbegin_count))
+		if (journal_begin(&th, inode->i_sb, jbegin_count)) {
+			mutex_unlock(&inode->i_mutex);
 			goto out;
+		}
 		reiserfs_update_inode_transaction(inode);
 
 		err = reiserfs_delete_object(&th, inode);
@@ -54,8 +61,12 @@ void reiserfs_delete_inode(struct inode *inode)
 			DQUOT_FREE_INODE(inode);
 		DLIMIT_FREE_INODE(inode);
 
-		if (journal_end(&th, inode->i_sb, jbegin_count))
+		if (journal_end(&th, inode->i_sb, jbegin_count)) {
+			mutex_unlock(&inode->i_mutex);
 			goto out;
+		}
+
+		mutex_unlock(&inode->i_mutex);
 
 		/* check return value from reiserfs_delete_object after
 		 * ending the transaction
@@ -1125,6 +1136,7 @@ static void init_inode(struct inode *inode, struct path *path)
 	ih = PATH_PITEM_HEAD(path);
 
 	copy_key(INODE_PKEY(inode), &(ih->ih_key));
+	inode->i_blksize = reiserfs_default_io_size;
 
 	INIT_LIST_HEAD(&(REISERFS_I(inode)->i_prealloc_list));
 	REISERFS_I(inode)->i_flags = 0;
@@ -1891,6 +1903,7 @@ int reiserfs_new_inode(struct reiserfs_transaction_handle *th,
 	}
 	// these do not go to on-disk stat data
 	inode->i_ino = le32_to_cpu(ih.ih_key.k_objectid);
+	inode->i_blksize = reiserfs_default_io_size;
 
 	// store in in-core inode the key of stat data and version all
 	// object items will have (directory items will have old offset
@@ -2356,11 +2369,10 @@ static int reiserfs_write_full_page(struct page *page,
 	unsigned long end_index = inode->i_size >> PAGE_CACHE_SHIFT;
 	int error = 0;
 	unsigned long block;
-	sector_t last_block;
 	struct buffer_head *head, *bh;
 	int partial = 0;
 	int nr = 0;
-	int checked = PageFsMisc(page);
+	int checked = PageChecked(page);
 	struct reiserfs_transaction_handle th;
 	struct super_block *s = inode->i_sb;
 	int bh_per_page = PAGE_CACHE_SIZE / s->s_blocksize;
@@ -2404,19 +2416,10 @@ static int reiserfs_write_full_page(struct page *page,
 	}
 	bh = head;
 	block = page->index << (PAGE_CACHE_SHIFT - s->s_blocksize_bits);
-	last_block = (i_size_read(inode) - 1) >> inode->i_blkbits;
 	/* first map all the buffers, logging any direct items we find */
 	do {
-		if (block > last_block) {
-			/*
-			 * This can happen when the block size is less than
-			 * the page size.  The corresponding bytes in the page
-			 * were zero filled above
-			 */
-			clear_buffer_dirty(bh);
-			set_buffer_uptodate(bh);
-		} else if ((checked || buffer_dirty(bh)) &&
-		           (!buffer_mapped(bh) || (buffer_mapped(bh)
+		if ((checked || buffer_dirty(bh)) && (!buffer_mapped(bh) ||
+						      (buffer_mapped(bh)
 						       && bh->b_blocknr ==
 						       0))) {
 			/* not mapped yet, or it points to a direct item, search
@@ -2438,7 +2441,7 @@ static int reiserfs_write_full_page(struct page *page,
 	 * blocks we're going to log
 	 */
 	if (checked) {
-		ClearPageFsMisc(page);
+		ClearPageChecked(page);
 		reiserfs_write_lock(s);
 		error = journal_begin(&th, s, bh_per_page + 1);
 		if (error) {
@@ -2835,7 +2838,7 @@ static void reiserfs_invalidatepage(struct page *page, unsigned long offset)
 	BUG_ON(!PageLocked(page));
 
 	if (offset == 0)
-		ClearPageFsMisc(page);
+		ClearPageChecked(page);
 
 	if (!page_has_buffers(page))
 		goto out;
@@ -2876,7 +2879,7 @@ static int reiserfs_set_page_dirty(struct page *page)
 {
 	struct inode *inode = page->mapping->host;
 	if (reiserfs_file_data_log(inode)) {
-		SetPageFsMisc(page);
+		SetPageChecked(page);
 		return __set_page_dirty_nobuffers(page);
 	}
 	return __set_page_dirty_buffers(page);
@@ -2899,7 +2902,7 @@ static int reiserfs_releasepage(struct page *page, gfp_t unused_gfp_flags)
 	struct buffer_head *bh;
 	int ret = 1;
 
-	WARN_ON(PageFsMisc(page));
+	WARN_ON(PageChecked(page));
 	spin_lock(&j->j_dirty_buffers_lock);
 	head = page_buffers(page);
 	bh = head;
@@ -2982,11 +2985,6 @@ int reiserfs_setattr(struct dentry *dentry, struct iattr *attr)
 			}
 			if (error)
 				goto out;
-			/*
-			 * file size is changed, ctime and mtime are
-			 * to be updated
-			 */
-			attr->ia_valid |= (ATTR_MTIME | ATTR_CTIME);
 		}
 	}
 
@@ -3055,7 +3053,7 @@ int reiserfs_setattr(struct dentry *dentry, struct iattr *attr)
 	return error;
 }
 
-const struct address_space_operations reiserfs_address_space_operations = {
+struct address_space_operations reiserfs_address_space_operations = {
 	.writepage = reiserfs_writepage,
 	.readpage = reiserfs_readpage,
 	.readpages = reiserfs_readpages,

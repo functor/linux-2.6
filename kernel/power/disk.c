@@ -18,7 +18,6 @@
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/pm.h>
-#include <linux/cpu.h>
 
 #include "power.h"
 
@@ -73,10 +72,7 @@ static int prepare_processes(void)
 	int error;
 
 	pm_prepare_console();
-
-	error = disable_nonboot_cpus();
-	if (error)
-		goto enable_cpus;
+	disable_nonboot_cpus();
 
 	if (freeze_processes()) {
 		error = -EBUSY;
@@ -88,7 +84,6 @@ static int prepare_processes(void)
 		return 0;
 thaw:
 	thaw_processes();
-enable_cpus:
 	enable_nonboot_cpus();
 	pm_restore_console();
 	return error;
@@ -236,7 +231,7 @@ static int software_resume(void)
 late_initcall(software_resume);
 
 
-static const char * const pm_disk_modes[] = {
+static char * pm_disk_modes[] = {
 	[PM_DISK_FIRMWARE]	= "firmware",
 	[PM_DISK_PLATFORM]	= "platform",
 	[PM_DISK_SHUTDOWN]	= "shutdown",

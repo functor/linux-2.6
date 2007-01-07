@@ -17,6 +17,7 @@
  *                                 this code was copied from it.
  *
  */
+#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/net.h>
 #include <linux/socket.h>
@@ -283,10 +284,11 @@ struct dn_fib_info *dn_fib_create_info(const struct rtmsg *r, struct dn_kern_rta
 			goto err_inval;
 	}
 
-	fi = kzalloc(sizeof(*fi)+nhs*sizeof(struct dn_fib_nh), GFP_KERNEL);
+	fi = kmalloc(sizeof(*fi)+nhs*sizeof(struct dn_fib_nh), GFP_KERNEL);
 	err = -ENOBUFS;
 	if (fi == NULL)
 		goto failure;
+	memset(fi, 0, sizeof(*fi)+nhs*sizeof(struct dn_fib_nh));
 
 	fi->fib_protocol = r->rtm_protocol;
 	fi->fib_nhs = nhs;

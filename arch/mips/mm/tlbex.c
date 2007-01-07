@@ -5,7 +5,7 @@
  *
  * Synthesize TLB refill handlers at runtime.
  *
- * Copyright (C) 2004,2005,2006 by Thiemo Seufer
+ * Copyright (C) 2004,2005 by Thiemo Seufer
  * Copyright (C) 2005  Maciej W. Rozycki
  * Copyright (C) 2006  Ralf Baechle (ralf@linux-mips.org)
  *
@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -34,6 +35,8 @@
 #include <asm/elf.h>
 #include <asm/smp.h>
 #include <asm/war.h>
+
+/* #define DEBUG_TLB */
 
 static __init int __attribute__((unused)) r45k_bvahwbug(void)
 {
@@ -726,7 +729,6 @@ static void __init build_r3000_tlb_refill_handler(void)
 {
 	long pgdc = (long)pgd_current;
 	u32 *p;
-	int i;
 
 	memset(tlb_handler, 0, sizeof(tlb_handler));
 	p = tlb_handler;
@@ -752,14 +754,16 @@ static void __init build_r3000_tlb_refill_handler(void)
 	if (p > tlb_handler + 32)
 		panic("TLB refill handler space exceeded");
 
-	pr_info("Synthesized TLB refill handler (%u instructions).\n",
-		(unsigned int)(p - tlb_handler));
+	printk("Synthesized TLB refill handler (%u instructions).\n",
+	       (unsigned int)(p - tlb_handler));
+#ifdef DEBUG_TLB
+	{
+		int i;
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - tlb_handler); i++)
-		pr_debug("\t.word 0x%08x\n", tlb_handler[i]);
-	pr_debug("\t.set pop\n");
+		for (i = 0; i < (p - tlb_handler); i++)
+			printk("%08x\n", tlb_handler[i]);
+	}
+#endif
 
 	memcpy((void *)ebase, tlb_handler, 0x80);
 }
@@ -1172,7 +1176,6 @@ static void __init build_r4000_tlb_refill_handler(void)
 	struct reloc *r = relocs;
 	u32 *f;
 	unsigned int final_len;
-	int i;
 
 	memset(tlb_handler, 0, sizeof(tlb_handler));
 	memset(labels, 0, sizeof(labels));
@@ -1270,21 +1273,24 @@ static void __init build_r4000_tlb_refill_handler(void)
 #endif /* CONFIG_64BIT */
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB refill handler (%u instructions).\n",
-		final_len);
+	printk("Synthesized TLB refill handler (%u instructions).\n",
+	       final_len);
 
-	f = final_handler;
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		f = final_handler;
 #ifdef CONFIG_64BIT
-	if (final_len > 32)
-		final_len = 64;
-	else
-		f = final_handler + 32;
+		if (final_len > 32)
+			final_len = 64;
+		else
+			f = final_handler + 32;
 #endif /* CONFIG_64BIT */
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < final_len; i++)
-		pr_debug("\t.word 0x%08x\n", f[i]);
-	pr_debug("\t.set pop\n");
+		for (i = 0; i < final_len; i++)
+			printk("%08x\n", f[i]);
+	}
+#endif
 
 	memcpy((void *)ebase, final_handler, 0x100);
 }
@@ -1517,7 +1523,6 @@ static void __init build_r3000_tlb_load_handler(void)
 	u32 *p = handle_tlbl;
 	struct label *l = labels;
 	struct reloc *r = relocs;
-	int i;
 
 	memset(handle_tlbl, 0, sizeof(handle_tlbl));
 	memset(labels, 0, sizeof(labels));
@@ -1537,14 +1542,17 @@ static void __init build_r3000_tlb_load_handler(void)
 		panic("TLB load handler fastpath space exceeded");
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB load handler fastpath (%u instructions).\n",
-		(unsigned int)(p - handle_tlbl));
+	printk("Synthesized TLB load handler fastpath (%u instructions).\n",
+	       (unsigned int)(p - handle_tlbl));
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - handle_tlbl); i++)
-		pr_debug("\t.word 0x%08x\n", handle_tlbl[i]);
-	pr_debug("\t.set pop\n");
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		for (i = 0; i < (p - handle_tlbl); i++)
+			printk("%08x\n", handle_tlbl[i]);
+	}
+#endif
 }
 
 static void __init build_r3000_tlb_store_handler(void)
@@ -1552,7 +1560,6 @@ static void __init build_r3000_tlb_store_handler(void)
 	u32 *p = handle_tlbs;
 	struct label *l = labels;
 	struct reloc *r = relocs;
-	int i;
 
 	memset(handle_tlbs, 0, sizeof(handle_tlbs));
 	memset(labels, 0, sizeof(labels));
@@ -1572,14 +1579,17 @@ static void __init build_r3000_tlb_store_handler(void)
 		panic("TLB store handler fastpath space exceeded");
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB store handler fastpath (%u instructions).\n",
-		(unsigned int)(p - handle_tlbs));
+	printk("Synthesized TLB store handler fastpath (%u instructions).\n",
+	       (unsigned int)(p - handle_tlbs));
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - handle_tlbs); i++)
-		pr_debug("\t.word 0x%08x\n", handle_tlbs[i]);
-	pr_debug("\t.set pop\n");
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		for (i = 0; i < (p - handle_tlbs); i++)
+			printk("%08x\n", handle_tlbs[i]);
+	}
+#endif
 }
 
 static void __init build_r3000_tlb_modify_handler(void)
@@ -1587,7 +1597,6 @@ static void __init build_r3000_tlb_modify_handler(void)
 	u32 *p = handle_tlbm;
 	struct label *l = labels;
 	struct reloc *r = relocs;
-	int i;
 
 	memset(handle_tlbm, 0, sizeof(handle_tlbm));
 	memset(labels, 0, sizeof(labels));
@@ -1607,14 +1616,17 @@ static void __init build_r3000_tlb_modify_handler(void)
 		panic("TLB modify handler fastpath space exceeded");
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB modify handler fastpath (%u instructions).\n",
-		(unsigned int)(p - handle_tlbm));
+	printk("Synthesized TLB modify handler fastpath (%u instructions).\n",
+	       (unsigned int)(p - handle_tlbm));
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - handle_tlbm); i++)
-		pr_debug("\t.word 0x%08x\n", handle_tlbm[i]);
-	pr_debug("\t.set pop\n");
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		for (i = 0; i < (p - handle_tlbm); i++)
+			printk("%08x\n", handle_tlbm[i]);
+	}
+#endif
 }
 
 /*
@@ -1666,7 +1678,6 @@ static void __init build_r4000_tlb_load_handler(void)
 	u32 *p = handle_tlbl;
 	struct label *l = labels;
 	struct reloc *r = relocs;
-	int i;
 
 	memset(handle_tlbl, 0, sizeof(handle_tlbl));
 	memset(labels, 0, sizeof(labels));
@@ -1694,14 +1705,17 @@ static void __init build_r4000_tlb_load_handler(void)
 		panic("TLB load handler fastpath space exceeded");
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB load handler fastpath (%u instructions).\n",
-		(unsigned int)(p - handle_tlbl));
+	printk("Synthesized TLB load handler fastpath (%u instructions).\n",
+	       (unsigned int)(p - handle_tlbl));
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - handle_tlbl); i++)
-		pr_debug("\t.word 0x%08x\n", handle_tlbl[i]);
-	pr_debug("\t.set pop\n");
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		for (i = 0; i < (p - handle_tlbl); i++)
+			printk("%08x\n", handle_tlbl[i]);
+	}
+#endif
 }
 
 static void __init build_r4000_tlb_store_handler(void)
@@ -1709,7 +1723,6 @@ static void __init build_r4000_tlb_store_handler(void)
 	u32 *p = handle_tlbs;
 	struct label *l = labels;
 	struct reloc *r = relocs;
-	int i;
 
 	memset(handle_tlbs, 0, sizeof(handle_tlbs));
 	memset(labels, 0, sizeof(labels));
@@ -1728,14 +1741,17 @@ static void __init build_r4000_tlb_store_handler(void)
 		panic("TLB store handler fastpath space exceeded");
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB store handler fastpath (%u instructions).\n",
-		(unsigned int)(p - handle_tlbs));
+	printk("Synthesized TLB store handler fastpath (%u instructions).\n",
+	       (unsigned int)(p - handle_tlbs));
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - handle_tlbs); i++)
-		pr_debug("\t.word 0x%08x\n", handle_tlbs[i]);
-	pr_debug("\t.set pop\n");
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		for (i = 0; i < (p - handle_tlbs); i++)
+			printk("%08x\n", handle_tlbs[i]);
+	}
+#endif
 }
 
 static void __init build_r4000_tlb_modify_handler(void)
@@ -1743,7 +1759,6 @@ static void __init build_r4000_tlb_modify_handler(void)
 	u32 *p = handle_tlbm;
 	struct label *l = labels;
 	struct reloc *r = relocs;
-	int i;
 
 	memset(handle_tlbm, 0, sizeof(handle_tlbm));
 	memset(labels, 0, sizeof(labels));
@@ -1763,14 +1778,17 @@ static void __init build_r4000_tlb_modify_handler(void)
 		panic("TLB modify handler fastpath space exceeded");
 
 	resolve_relocs(relocs, labels);
-	pr_info("Synthesized TLB modify handler fastpath (%u instructions).\n",
-		(unsigned int)(p - handle_tlbm));
+	printk("Synthesized TLB modify handler fastpath (%u instructions).\n",
+	       (unsigned int)(p - handle_tlbm));
 
-	pr_debug("\t.set push\n");
-	pr_debug("\t.set noreorder\n");
-	for (i = 0; i < (p - handle_tlbm); i++)
-		pr_debug("\t.word 0x%08x\n", handle_tlbm[i]);
-	pr_debug("\t.set pop\n");
+#ifdef DEBUG_TLB
+	{
+		int i;
+
+		for (i = 0; i < (p - handle_tlbm); i++)
+			printk("%08x\n", handle_tlbm[i]);
+	}
+#endif
 }
 
 void __init build_tlb_refill_handler(void)

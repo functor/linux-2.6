@@ -82,7 +82,6 @@
 #ifndef __ASSEMBLY__
 
 #include <linux/types.h>
-#include <asm/processor.h>
 #include <asm/fpu.h>
 
 /*
@@ -1434,12 +1433,7 @@ typedef union  pal_version_u {
 } pal_version_u_t;
 
 
-/*
- * Return PAL version information.  While the documentation states that
- * PAL_VERSION can be called in either physical or virtual mode, some
- * implementations only allow physical calls.  We don't call it very often,
- * so the overhead isn't worth eliminating.
- */
+/* Return PAL version information */
 static inline s64
 ia64_pal_version (pal_version_u_t *pal_min_version, pal_version_u_t *pal_cur_version)
 {

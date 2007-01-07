@@ -6,6 +6,7 @@
  *
  * Derived from the x86 and Alpha versions.
  */
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -17,6 +18,7 @@
 #include <linux/security.h>
 #include <linux/audit.h>
 #include <linux/signal.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/pgtable.h>
 #include <asm/processor.h>

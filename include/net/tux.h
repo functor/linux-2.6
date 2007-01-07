@@ -19,6 +19,7 @@
 #include <linux/mman.h>
 #include <linux/swap.h>
 #include <linux/ctype.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/unistd.h>

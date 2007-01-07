@@ -24,6 +24,7 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/kernel_stat.h>
@@ -50,6 +51,7 @@
 #undef DEBUG
 
 void __init tx4927_time_init(void);
+void __init tx4927_timer_setup(struct irqaction *irq);
 void dump_cp0(char *key);
 
 
@@ -62,9 +64,10 @@ static void tx4927_write_buffer_flush(void)
 }
 
 
-void __init plat_mem_setup(void)
+void __init plat_setup(void)
 {
 	board_time_init = tx4927_time_init;
+	board_timer_setup = tx4927_timer_setup;
 	__wbflush = tx4927_write_buffer_flush;
 
 #ifdef CONFIG_TOSHIBA_RBTX4927
@@ -89,7 +92,7 @@ void __init tx4927_time_init(void)
 }
 
 
-void __init plat_timer_setup(struct irqaction *irq)
+void __init tx4927_timer_setup(struct irqaction *irq)
 {
 	u32 count;
 	u32 c1;

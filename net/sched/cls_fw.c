@@ -18,6 +18,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -267,18 +268,20 @@ static int fw_change(struct tcf_proto *tp, unsigned long base,
 		return -EINVAL;
 
 	if (head == NULL) {
-		head = kzalloc(sizeof(struct fw_head), GFP_KERNEL);
+		head = kmalloc(sizeof(struct fw_head), GFP_KERNEL);
 		if (head == NULL)
 			return -ENOBUFS;
+		memset(head, 0, sizeof(*head));
 
 		tcf_tree_lock(tp);
 		tp->root = head;
 		tcf_tree_unlock(tp);
 	}
 
-	f = kzalloc(sizeof(struct fw_filter), GFP_KERNEL);
+	f = kmalloc(sizeof(struct fw_filter), GFP_KERNEL);
 	if (f == NULL)
 		return -ENOBUFS;
+	memset(f, 0, sizeof(*f));
 
 	f->id = handle;
 

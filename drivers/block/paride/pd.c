@@ -713,7 +713,7 @@ static void do_pd_request(request_queue_t * q)
 static int pd_special_command(struct pd_unit *disk,
 		      enum action (*func)(struct pd_unit *disk))
 {
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	struct request rq;
 	int err = 0;
 

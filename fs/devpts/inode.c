@@ -144,6 +144,7 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_ino = 1;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	inode->i_blocks = 0;
+	inode->i_blksize = 1024;
 	inode->i_uid = inode->i_gid = 0;
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR;
 	inode->i_op = &simple_dir_inode_operations;
@@ -161,10 +162,10 @@ fail:
 	return -ENOMEM;
 }
 
-static int devpts_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *devpts_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_single(fs_type, flags, data, devpts_fill_super, mnt);
+	return get_sb_single(fs_type, flags, data, devpts_fill_super);
 }
 
 static struct file_system_type devpts_fs_type = {
@@ -203,13 +204,14 @@ int devpts_pty_new(struct tty_struct *tty)
 		return -ENOMEM;
 
 	inode->i_ino = number+2;
+	inode->i_blksize = 1024;
 	inode->i_uid = config.setuid ? config.uid : current->fsuid;
 	inode->i_gid = config.setgid ? config.gid : current->fsgid;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	init_special_inode(inode, S_IFCHR|config.mode, device);
 	inode->i_xid = vx_current_xid();
 	inode->i_op = &devpts_file_inode_operations;
-	inode->i_private = tty;
+	inode->u.generic_ip = tty;
 
 	dentry = get_node(number);
 	if (!IS_ERR(dentry) && !dentry->d_inode)
@@ -228,7 +230,7 @@ struct tty_struct *devpts_get_tty(int number)
 	tty = NULL;
 	if (!IS_ERR(dentry)) {
 		if (dentry->d_inode)
-			tty = dentry->d_inode->i_private;
+			tty = dentry->d_inode->u.generic_ip;
 		dput(dentry);
 	}
 

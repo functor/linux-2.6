@@ -13,6 +13,8 @@
 #ifndef __ASM_ARM_UNISTD_H
 #define __ASM_ARM_UNISTD_H
 
+#include <linux/linkage.h>
+
 #define __NR_OABI_SYSCALL_BASE	0x900000
 
 #if defined(__thumb__) || defined(__ARM_EABI__)
@@ -347,19 +349,6 @@
 #define __NR_mbind			(__NR_SYSCALL_BASE+319)
 #define __NR_get_mempolicy		(__NR_SYSCALL_BASE+320)
 #define __NR_set_mempolicy		(__NR_SYSCALL_BASE+321)
-#define __NR_openat			(__NR_SYSCALL_BASE+322)
-#define __NR_mkdirat			(__NR_SYSCALL_BASE+323)
-#define __NR_mknodat			(__NR_SYSCALL_BASE+324)
-#define __NR_fchownat			(__NR_SYSCALL_BASE+325)
-#define __NR_futimesat			(__NR_SYSCALL_BASE+326)
-#define __NR_fstatat64			(__NR_SYSCALL_BASE+327)
-#define __NR_unlinkat			(__NR_SYSCALL_BASE+328)
-#define __NR_renameat			(__NR_SYSCALL_BASE+329)
-#define __NR_linkat			(__NR_SYSCALL_BASE+330)
-#define __NR_symlinkat			(__NR_SYSCALL_BASE+331)
-#define __NR_readlinkat			(__NR_SYSCALL_BASE+332)
-#define __NR_fchmodat			(__NR_SYSCALL_BASE+333)
-#define __NR_faccessat			(__NR_SYSCALL_BASE+334)
 
 /*
  * The following SWIs are ARM private.
@@ -388,9 +377,6 @@
 #undef __NR_syscall
 #undef __NR_ipc
 #endif
-
-#ifdef __KERNEL__
-#include <linux/linkage.h>
 
 #define __sys2(x) #x
 #define __sys1(x) __sys2(x)
@@ -540,6 +526,7 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg6
   __syscall_return(type,__res);						\
 }
 
+#ifdef __KERNEL__
 #define __ARCH_WANT_IPC_PARSE_VERSION
 #define __ARCH_WANT_STAT64
 #define __ARCH_WANT_SYS_GETHOSTNAME
@@ -559,6 +546,7 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg6
 #define __ARCH_WANT_SYS_OLD_GETRLIMIT
 #define __ARCH_WANT_OLD_READDIR
 #define __ARCH_WANT_SYS_SOCKETCALL
+#endif
 #endif
 
 #ifdef __KERNEL_SYSCALLS__
@@ -583,7 +571,7 @@ asmlinkage long sys_rt_sigaction(int sig,
 				struct sigaction __user *oact,
 				size_t sigsetsize);
 
-#endif /* __KERNEL_SYSCALLS__ */
+#endif
 
 /*
  * "Conditional" syscalls
@@ -593,5 +581,4 @@ asmlinkage long sys_rt_sigaction(int sig,
  */
 #define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 
-#endif /* __KERNEL__ */
 #endif /* __ASM_ARM_UNISTD_H */

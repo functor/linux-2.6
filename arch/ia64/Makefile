@@ -45,12 +45,6 @@ ifeq ($(call cc-version),0304)
 endif
 
 CFLAGS += $(cflags-y)
-
-cppflags-$(CONFIG_XEN) += \
-	-D__XEN_INTERFACE_VERSION__=$(CONFIG_XEN_INTERFACE_VERSION)
-
-CPPFLAGS += $(cppflags-y)
-
 head-y := arch/ia64/kernel/head.o arch/ia64/kernel/init_task.o
 
 libs-y				+= arch/ia64/lib/
@@ -61,15 +55,9 @@ core-$(CONFIG_IA64_GENERIC) 	+= arch/ia64/dig/
 core-$(CONFIG_IA64_HP_ZX1)	+= arch/ia64/dig/
 core-$(CONFIG_IA64_HP_ZX1_SWIOTLB) += arch/ia64/dig/
 core-$(CONFIG_IA64_SGI_SN2)	+= arch/ia64/sn/
-core-$(CONFIG_XEN)		+= arch/ia64/xen/
 
 drivers-$(CONFIG_PCI)		+= arch/ia64/pci/
-ifneq ($(CONFIG_XEN),y)
 drivers-$(CONFIG_IA64_HP_SIM)	+= arch/ia64/hp/sim/
-endif
-ifneq ($(CONFIG_IA64_GENERIC),y)
-drivers-$(CONFIG_XEN)		+= arch/ia64/hp/sim/
-endif
 drivers-$(CONFIG_IA64_HP_ZX1)	+= arch/ia64/hp/common/ arch/ia64/hp/zx1/
 drivers-$(CONFIG_IA64_HP_ZX1_SWIOTLB) += arch/ia64/hp/common/ arch/ia64/hp/zx1/
 drivers-$(CONFIG_IA64_GENERIC)	+= arch/ia64/hp/common/ arch/ia64/hp/zx1/ arch/ia64/hp/sim/ arch/ia64/sn/
@@ -82,8 +70,6 @@ PHONY += boot compressed check
 all: compressed unwcheck
 
 compressed: vmlinux.gz
-
-vmlinuz: vmlinux.gz
 
 vmlinux.gz: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
@@ -99,8 +85,8 @@ CLEAN_FILES += vmlinux.gz bootloader
 boot:	lib/lib.a vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
 
-install:
-	-yes | sh $(srctree)/arch/ia64/install.sh $(KERNELRELEASE) vmlinux.gz System.map "$(INSTALL_PATH)"
+install: vmlinux.gz
+	sh $(srctree)/arch/ia64/install.sh $(KERNELRELEASE) $< System.map "$(INSTALL_PATH)"
 
 define archhelp
   echo '* compressed	- Build compressed kernel image'

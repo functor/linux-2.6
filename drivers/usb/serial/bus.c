@@ -8,12 +8,13 @@
  *	2 as published by the Free Software Foundation.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/tty.h>
 #include <linux/module.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
+#include "usb-serial.h"
 
 static int usb_serial_device_match (struct device *dev, struct device_driver *drv)
 {

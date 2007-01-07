@@ -9,25 +9,9 @@
 #include <linux/linkage.h>
 #include <linux/compat.h>
 #include <linux/futex.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
-
-
-/*
- * Fetch a robust-list pointer. Bit 0 signals PI futexes:
- */
-static inline int
-fetch_robust_entry(compat_uptr_t *uentry, struct robust_list __user **entry,
-		   compat_uptr_t *head, int *pi)
-{
-	if (get_user(*uentry, head))
-		return -EFAULT;
-
-	*entry = compat_ptr((*uentry) & ~1);
-	*pi = (unsigned int)(*uentry) & 1;
-
-	return 0;
-}
 
 /*
  * Walk curr->robust_list (very carefully, it's a userspace list!)
@@ -39,16 +23,17 @@ void compat_exit_robust_list(struct task_struct *curr)
 {
 	struct compat_robust_list_head __user *head = curr->compat_robust_list;
 	struct robust_list __user *entry, *pending;
-	unsigned int limit = ROBUST_LIST_LIMIT, pi, pip;
 	compat_uptr_t uentry, upending;
+	unsigned int limit = ROBUST_LIST_LIMIT;
 	compat_long_t futex_offset;
 
 	/*
 	 * Fetch the list head (which was registered earlier, via
 	 * sys_set_robust_list()):
 	 */
-	if (fetch_robust_entry(&uentry, &entry, &head->list.next, &pi))
+	if (get_user(uentry, &head->list.next))
 		return;
+	entry = compat_ptr(uentry);
 	/*
 	 * Fetch the relative futex offset:
 	 */
@@ -58,11 +43,11 @@ void compat_exit_robust_list(struct task_struct *curr)
 	 * Fetch any possibly pending lock-add first, and handle it
 	 * if it exists:
 	 */
-	if (fetch_robust_entry(&upending, &pending,
-			       &head->list_op_pending, &pip))
+	if (get_user(upending, &head->list_op_pending))
 		return;
+	pending = compat_ptr(upending);
 	if (upending)
-		handle_futex_death((void *)pending + futex_offset, curr, pip);
+		handle_futex_death((void *)pending + futex_offset, curr);
 
 	while (compat_ptr(uentry) != &head->list) {
 		/*
@@ -71,15 +56,15 @@ void compat_exit_robust_list(struct task_struct *curr)
 		 */
 		if (entry != pending)
 			if (handle_futex_death((void *)entry + futex_offset,
-						curr, pi))
+						curr))
 				return;
 
 		/*
 		 * Fetch the next entry in the list:
 		 */
-		if (fetch_robust_entry(&uentry, &entry,
-				       (compat_uptr_t *)&entry->next, &pi))
+		if (get_user(uentry, (compat_uptr_t *)&entry->next))
 			return;
+		entry = compat_ptr(uentry);
 		/*
 		 * Avoid excessively long or circular lists:
 		 */
@@ -145,20 +130,16 @@ asmlinkage long compat_sys_futex(u32 __user *uaddr, int op, u32 val,
 	unsigned long timeout = MAX_SCHEDULE_TIMEOUT;
 	int val2 = 0;
 
-	if (utime && (op == FUTEX_WAIT || op == FUTEX_LOCK_PI)) {
+	if (utime && (op == FUTEX_WAIT)) {
 		if (get_compat_timespec(&t, utime))
 			return -EFAULT;
 		if (!timespec_valid(&t))
 			return -EINVAL;
-		if (op == FUTEX_WAIT)
-			timeout = timespec_to_jiffies(&t) + 1;
-		else {
-			timeout = t.tv_sec;
-			val2 = t.tv_nsec;
-		}
+		timeout = timespec_to_jiffies(&t) + 1;
 	}
-	if (op == FUTEX_REQUEUE || op == FUTEX_CMP_REQUEUE)
+	if (op >= FUTEX_REQUEUE)
 		val2 = (int) (unsigned long) utime;
 
-	return do_futex(uaddr, op, val, timeout, uaddr2, val2, val3);
+	return do_futex((unsigned long)uaddr, op, val, timeout,
+			(unsigned long)uaddr2, val2, val3);
 }

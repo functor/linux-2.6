@@ -10,6 +10,7 @@
 /*
  * This handles all read/write requests to block devices
  */
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/backing-dev.h>
@@ -1662,8 +1663,6 @@ static void blk_unplug_timeout(unsigned long data)
  **/
 void blk_start_queue(request_queue_t *q)
 {
-	WARN_ON(!irqs_disabled());
-
 	clear_bit(QUEUE_FLAG_STOPPED, &q->queue_flags);
 
 	/*
@@ -1879,8 +1878,7 @@ EXPORT_SYMBOL(blk_alloc_queue_node);
  *    get dealt with eventually.
  *
  *    The queue spin lock must be held while manipulating the requests on the
- *    request queue; this lock will be taken also from interrupt context, so irq
- *    disabling is needed for it.
+ *    request queue.
  *
  *    Function returns a pointer to the initialized request queue, or NULL if
  *    it didn't succeed.
@@ -2516,7 +2514,7 @@ EXPORT_SYMBOL_GPL(blk_execute_rq_nowait);
 int blk_execute_rq(request_queue_t *q, struct gendisk *bd_disk,
 		   struct request *rq, int at_head)
 {
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	char sense[SCSI_SENSE_BUFFERSIZE];
 	int err = 0;
 
@@ -2744,7 +2742,7 @@ static int attempt_merge(request_queue_t *q, struct request *req,
 		return 0;
 
 	/*
-	 * not contiguous
+	 * not contigious
 	 */
 	if (req->sector + req->nr_sectors != next->sector)
 		return 0;
@@ -2825,9 +2823,6 @@ static void init_request_from_bio(struct request *req, struct bio *bio)
 	 */
 	if (unlikely(bio_barrier(bio)))
 		req->flags |= (REQ_HARDBARRIER | REQ_NOMERGE);
-
-	if (bio_sync(bio))
-		req->flags |= REQ_RW_SYNC;
 
 	req->errors = 0;
 	req->hard_sector = req->sector = bio->bi_sector;
@@ -3021,7 +3016,6 @@ void generic_make_request(struct bio *bio)
 {
 	request_queue_t *q;
 	sector_t maxsector;
-	sector_t old_sector;
 	int ret, nr_sectors = bio_sectors(bio);
 	dev_t old_dev;
 
@@ -3050,7 +3044,7 @@ void generic_make_request(struct bio *bio)
 	 * NOTE: we don't repeat the blk_size check for each new device.
 	 * Stacking drivers are expected to know what they are doing.
 	 */
-	old_sector = -1;
+	maxsector = -1;
 	old_dev = 0;
 	do {
 		char b[BDEVNAME_SIZE];
@@ -3084,29 +3078,14 @@ end_io:
 		 */
 		blk_partition_remap(bio);
 
-		if (old_sector != -1)
+		if (maxsector != -1)
 			blk_add_trace_remap(q, bio, old_dev, bio->bi_sector, 
-					    old_sector);
+					    maxsector);
 
 		blk_add_trace_bio(q, bio, BLK_TA_QUEUE);
 
-		old_sector = bio->bi_sector;
+		maxsector = bio->bi_sector;
 		old_dev = bio->bi_bdev->bd_dev;
-
-		maxsector = bio->bi_bdev->bd_inode->i_size >> 9;
-		if (maxsector) {
-			sector_t sector = bio->bi_sector;
-
-			if (maxsector < nr_sectors || maxsector - nr_sectors < sector) {
-				/*
-				 * This may well happen - partitions are not checked
-				 * to make sure they are within the size of the
-				 * whole device.
-				 */
-				handle_bad_sector(bio);
-				goto end_io;
-			}
-		}
 
 		ret = q->make_request_fn(q, bio);
 	} while (ret);
@@ -3132,9 +3111,9 @@ void submit_bio(int rw, struct bio *bio)
 	BIO_BUG_ON(!bio->bi_io_vec);
 	bio->bi_rw |= rw;
 	if (rw & WRITE)
-		count_vm_events(PGPGOUT, count);
+		mod_page_state(pgpgout, count);
 	else
-		count_vm_events(PGPGIN, count);
+		mod_page_state(pgpgin, count);
 
 	if (unlikely(block_dump)) {
 		char b[BDEVNAME_SIZE];
@@ -3380,11 +3359,12 @@ EXPORT_SYMBOL(end_that_request_chunk);
  */
 static void blk_done_softirq(struct softirq_action *h)
 {
-	struct list_head *cpu_list, local_list;
+	struct list_head *cpu_list;
+	LIST_HEAD(local_list);
 
 	local_irq_disable();
 	cpu_list = &__get_cpu_var(blk_cpu_done);
-	list_replace_init(cpu_list, &local_list);
+	list_splice_init(cpu_list, &local_list);
 	local_irq_enable();
 
 	while (!list_empty(&local_list)) {
@@ -3418,7 +3398,7 @@ static int blk_cpu_notify(struct notifier_block *self, unsigned long action,
 }
 
 
-static struct notifier_block __devinitdata blk_cpu_notifier = {
+static struct notifier_block blk_cpu_notifier = {
 	.notifier_call	= blk_cpu_notify,
 };
 
@@ -3430,7 +3410,7 @@ static struct notifier_block __devinitdata blk_cpu_notifier = {
  *
  * Description:
  *     Ends all I/O on a request. It does not handle partial completions,
- *     unless the driver actually implements this in its completion callback
+ *     unless the driver actually implements this in its completionc callback
  *     through requeueing. Theh actual completion happens out-of-order,
  *     through a softirq handler. The user must have registered a completion
  *     callback through blk_queue_softirq_done().
@@ -3507,8 +3487,8 @@ EXPORT_SYMBOL(end_request);
 
 void blk_rq_bio_prep(request_queue_t *q, struct request *rq, struct bio *bio)
 {
-	/* first two bits are identical in rq->flags and bio->bi_rw */
-	rq->flags |= (bio->bi_rw & 3);
+	/* first three bits are identical in rq->flags and bio->bi_rw */
+	rq->flags |= (bio->bi_rw & 7);
 
 	rq->nr_phys_segments = bio_phys_segments(q, bio);
 	rq->nr_hw_segments = bio_hw_segments(q, bio);
@@ -3556,7 +3536,9 @@ int __init blk_dev_init(void)
 		INIT_LIST_HEAD(&per_cpu(blk_cpu_done, i));
 
 	open_softirq(BLOCK_SOFTIRQ, blk_done_softirq, NULL);
-	register_hotcpu_notifier(&blk_cpu_notifier);
+#ifdef CONFIG_HOTPLUG_CPU
+	register_cpu_notifier(&blk_cpu_notifier);
+#endif
 
 	blk_max_low_pfn = max_low_pfn;
 	blk_max_pfn = max_pfn;
@@ -3644,8 +3626,6 @@ struct io_context *current_io_context(gfp_t gfp_flags)
 		ret->nr_batch_requests = 0; /* because this is 0 */
 		ret->aic = NULL;
 		ret->cic_root.rb_node = NULL;
-		/* make sure set_task_ioprio() sees the settings above */
-		smp_wmb();
 		tsk->io_context = ret;
 	}
 

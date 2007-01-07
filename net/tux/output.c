@@ -34,7 +34,7 @@ int send_sync_buf (tux_req_t *req, struct socket *sock, const char *buf, const s
 
 	tp->nonagle = 2;
 
-	msg.msg_name     = NULL;
+	msg.msg_name     = 0;
 	msg.msg_namelen  = 0;
 	msg.msg_iov	 = &iov;
 	msg.msg_iovlen   = 1;

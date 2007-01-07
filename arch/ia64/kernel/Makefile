@@ -29,7 +29,6 @@ obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
 obj-$(CONFIG_IA64_MCA_RECOVERY)	+= mca_recovery.o
 obj-$(CONFIG_KPROBES)		+= kprobes.o jprobes.o
 obj-$(CONFIG_IA64_UNCACHED_ALLOCATOR)	+= uncached.o
-obj-$(CONFIG_AUDIT)		+= audit.o
 mca_recovery-y			+= mca_drv.o mca_drv_asm.o
 
 # The gate DSO image is built using a special linker script.
@@ -45,8 +44,7 @@ CPPFLAGS_gate.lds := -P -C -U$(ARCH)
 quiet_cmd_gate = GATE $@
       cmd_gate = $(CC) -nostdlib $(GATECFLAGS_$(@F)) -Wl,-T,$(filter-out FORCE,$^) -o $@
 
-GATECFLAGS_gate.so = -shared -s -Wl,-soname=linux-gate.so.1 \
-		     $(call ld-option, -Wl$(comma)--hash-style=sysv)
+GATECFLAGS_gate.so = -shared -s -Wl,-soname=linux-gate.so.1
 $(obj)/gate.so: $(obj)/gate.lds $(obj)/gate.o FORCE
 	$(call if_changed,gate)
 

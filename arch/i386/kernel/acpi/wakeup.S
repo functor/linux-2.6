@@ -56,7 +56,7 @@ wakeup_code:
 1:
 
 	# set up page table
-	movl	$swsusp_pg_dir-__PAGE_OFFSET, %eax
+	movl	$swapper_pg_dir-__PAGE_OFFSET, %eax
 	movl	%eax, %cr3
 
 	testl	$1, real_efer_save_restore - wakeup_code
@@ -265,6 +265,11 @@ ENTRY(acpi_copy_wakeup_routine)
 	movl	$0x12345678, saved_magic
 	ret
 
+.data
+ALIGN
+ENTRY(saved_magic)	.long	0
+ENTRY(saved_eip)	.long	0
+
 save_registers:
 	leal	4(%esp), %eax
 	movl	%eax, saved_context_esp
@@ -292,21 +297,14 @@ ENTRY(do_suspend_lowlevel)
 	pushl	$3
 	call	acpi_enter_sleep_state
 	addl	$4, %esp
-
-#	In case of S3 failure, we'll emerge here.  Jump
-# 	to ret_point to recover
-	jmp	ret_point
+	ret
 	.p2align 4,,7
 ret_point:
 	call	restore_registers
 	call	restore_processor_state
 	ret
 
-.data
 ALIGN
-ENTRY(saved_magic)	.long	0
-ENTRY(saved_eip)	.long	0
-
 # saved registers
 saved_gdt:	.long	0,0
 saved_idt:	.long	0,0

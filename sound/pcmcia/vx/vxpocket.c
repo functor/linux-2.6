@@ -261,7 +261,7 @@ static int vxpocket_config(struct pcmcia_device *link)
 
 	link->dev_node = &vxp->node;
 	kfree(parse);
-	return 0;
+	return 9;
 
 cs_failed:
 	cs_error(link, last_fn, last_ret);

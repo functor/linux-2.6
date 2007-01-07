@@ -6,6 +6,7 @@
  * version 2 as published by the Free Software Foundation.
  */
 
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/signal.h>
@@ -128,13 +129,11 @@
 #define	VENDOR_ID_MELCO			0x0411
 #define VENDOR_ID_MICRONET		0x3980
 #define	VENDOR_ID_LONGSHINE		0x07b8
-#define	VENDOR_ID_ZYXEL			0x0586
 
 #define PRODUCT_ID_RTL8150		0x8150
 #define	PRODUCT_ID_LUAKTX		0x0012
 #define	PRODUCT_ID_LCS8138TX		0x401a
 #define PRODUCT_ID_SP128AR		0x0003
-#define	PRODUCT_ID_PRESTIGE		0x401a
 
 #undef	EEPROM_WRITE
 
@@ -144,7 +143,6 @@ static struct usb_device_id rtl8150_table[] = {
 	{USB_DEVICE(VENDOR_ID_MELCO, PRODUCT_ID_LUAKTX)},
 	{USB_DEVICE(VENDOR_ID_MICRONET, PRODUCT_ID_SP128AR)},
 	{USB_DEVICE(VENDOR_ID_LONGSHINE, PRODUCT_ID_LCS8138TX)},
-	{USB_DEVICE(VENDOR_ID_ZYXEL, PRODUCT_ID_PRESTIGE)},
 	{}
 };
 
@@ -175,8 +173,6 @@ static inline struct sk_buff *pull_skb(rtl8150_t *);
 static void rtl8150_disconnect(struct usb_interface *intf);
 static int rtl8150_probe(struct usb_interface *intf,
 			   const struct usb_device_id *id);
-static int rtl8150_suspend(struct usb_interface *intf, pm_message_t message);
-static int rtl8150_resume(struct usb_interface *intf);
 
 static const char driver_name [] = "rtl8150";
 
@@ -185,8 +181,6 @@ static struct usb_driver rtl8150_driver = {
 	.probe =	rtl8150_probe,
 	.disconnect =	rtl8150_disconnect,
 	.id_table =	rtl8150_table,
-	.suspend =	rtl8150_suspend,
-	.resume =	rtl8150_resume
 };
 
 /*
@@ -242,11 +236,9 @@ static int async_set_registers(rtl8150_t * dev, u16 indx, u16 size)
 	usb_fill_control_urb(dev->ctrl_urb, dev->udev,
 			 usb_sndctrlpipe(dev->udev, 0), (char *) &dev->dr,
 			 &dev->rx_creg, size, ctrl_callback, dev);
-	if ((ret = usb_submit_urb(dev->ctrl_urb, GFP_ATOMIC))) {
-		if (ret == -ENODEV)
-			netif_device_detach(dev->netdev);
+	if ((ret = usb_submit_urb(dev->ctrl_urb, GFP_ATOMIC)))
 		err("control request submission failed: %d", ret);
-	} else
+	else
 		set_bit(RX_REG_SET, &dev->flags);
 
 	return ret;
@@ -422,7 +414,6 @@ static void read_bulk_callback(struct urb *urb, struct pt_regs *regs)
 	struct sk_buff *skb;
 	struct net_device *netdev;
 	u16 rx_stat;
-	int status;
 
 	dev = urb->context;
 	if (!dev)
@@ -472,10 +463,7 @@ static void read_bulk_callback(struct urb *urb, struct pt_regs *regs)
 goon:
 	usb_fill_bulk_urb(dev->rx_urb, dev->udev, usb_rcvbulkpipe(dev->udev, 1),
 		      dev->rx_skb->data, RTL8150_MTU, read_bulk_callback, dev);
-	status = usb_submit_urb(dev->rx_urb, GFP_ATOMIC);
-	if (status == -ENODEV)
-		netif_device_detach(dev->netdev);
-	else if (status) {
+	if (usb_submit_urb(dev->rx_urb, GFP_ATOMIC)) {
 		set_bit(RX_URB_FAIL, &dev->flags);
 		goto resched;
 	} else {
@@ -491,7 +479,6 @@ static void rx_fixup(unsigned long data)
 {
 	rtl8150_t *dev;
 	struct sk_buff *skb;
-	int status;
 
 	dev = (rtl8150_t *)data;
 
@@ -510,13 +497,10 @@ static void rx_fixup(unsigned long data)
 	usb_fill_bulk_urb(dev->rx_urb, dev->udev, usb_rcvbulkpipe(dev->udev, 1),
 		      dev->rx_skb->data, RTL8150_MTU, read_bulk_callback, dev);
 try_again:
-	status = usb_submit_urb(dev->rx_urb, GFP_ATOMIC);
-	if (status == -ENODEV) {
-		netif_device_detach(dev->netdev);
-	} else if (status) {
+	if (usb_submit_urb(dev->rx_urb, GFP_ATOMIC)) {
 		set_bit(RX_URB_FAIL, &dev->flags);
 		goto tlsched;
-	} else {
+	 } else {
 		clear_bit(RX_URB_FAIL, &dev->flags);
 	}
 
@@ -588,43 +572,12 @@ static void intr_callback(struct urb *urb, struct pt_regs *regs)
 
 resubmit:
 	status = usb_submit_urb (urb, SLAB_ATOMIC);
-	if (status == -ENODEV)
-		netif_device_detach(dev->netdev);
-	else if (status)
+	if (status)
 		err ("can't resubmit intr, %s-%s/input0, status %d",
 				dev->udev->bus->bus_name,
 				dev->udev->devpath, status);
 }
 
-static int rtl8150_suspend(struct usb_interface *intf, pm_message_t message)
-{
-	rtl8150_t *dev = usb_get_intfdata(intf);
-
-	netif_device_detach(dev->netdev);
-
-	if (netif_running(dev->netdev)) {
-		usb_kill_urb(dev->rx_urb);
-		usb_kill_urb(dev->intr_urb);
-	}
-	return 0;
-}
-
-static int rtl8150_resume(struct usb_interface *intf)
-{
-	rtl8150_t *dev = usb_get_intfdata(intf);
-
-	netif_device_attach(dev->netdev);
-	if (netif_running(dev->netdev)) {
-		dev->rx_urb->status = 0;
-		dev->rx_urb->actual_length = 0;
-		read_bulk_callback(dev->rx_urb, NULL);
-
-		dev->intr_urb->status = 0;
-		dev->intr_urb->actual_length = 0;
-		intr_callback(dev->intr_urb, NULL);
-	}
-	return 0;
-}
 
 /*
 **
@@ -735,14 +688,9 @@ static int rtl8150_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	usb_fill_bulk_urb(dev->tx_urb, dev->udev, usb_sndbulkpipe(dev->udev, 2),
 		      skb->data, count, write_bulk_callback, dev);
 	if ((res = usb_submit_urb(dev->tx_urb, GFP_ATOMIC))) {
-		/* Can we get/handle EPIPE here? */
-		if (res == -ENODEV)
-			netif_device_detach(dev->netdev);
-		else {
-			warn("failed tx_urb %d\n", res);
-			dev->stats.tx_errors++;
-			netif_start_queue(netdev);
-		}
+		warn("failed tx_urb %d\n", res);
+		dev->stats.tx_errors++;
+		netif_start_queue(netdev);
 	} else {
 		dev->stats.tx_packets++;
 		dev->stats.tx_bytes += skb->len;
@@ -779,25 +727,16 @@ static int rtl8150_open(struct net_device *netdev)
 	
 	usb_fill_bulk_urb(dev->rx_urb, dev->udev, usb_rcvbulkpipe(dev->udev, 1),
 		      dev->rx_skb->data, RTL8150_MTU, read_bulk_callback, dev);
-	if ((res = usb_submit_urb(dev->rx_urb, GFP_KERNEL))) {
-		if (res == -ENODEV)
-			netif_device_detach(dev->netdev);
+	if ((res = usb_submit_urb(dev->rx_urb, GFP_KERNEL)))
 		warn("%s: rx_urb submit failed: %d", __FUNCTION__, res);
-		return res;
-	}
 	usb_fill_int_urb(dev->intr_urb, dev->udev, usb_rcvintpipe(dev->udev, 3),
 		     dev->intr_buff, INTBUFSIZE, intr_callback,
 		     dev, dev->intr_interval);
-	if ((res = usb_submit_urb(dev->intr_urb, GFP_KERNEL))) {
-		if (res == -ENODEV)
-			netif_device_detach(dev->netdev);
+	if ((res = usb_submit_urb(dev->intr_urb, GFP_KERNEL)))
 		warn("%s: intr_urb submit failed: %d", __FUNCTION__, res);
-		usb_kill_urb(dev->rx_urb);
-		return res;
-	}
+	netif_start_queue(netdev);
 	enable_net_traffic(dev);
 	set_carrier(netdev);
-	netif_start_queue(netdev);
 
 	return res;
 }
@@ -972,7 +911,6 @@ static void rtl8150_disconnect(struct usb_interface *intf)
 	if (dev) {
 		set_bit(RTL8150_UNPLUG, &dev->flags);
 		tasklet_disable(&dev->tl);
-		tasklet_kill(&dev->tl);
 		unregister_netdev(dev->netdev);
 		unlink_all_urbs(dev);
 		free_all_urbs(dev);

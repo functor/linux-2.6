@@ -58,6 +58,7 @@
  * 	      only available if that subsytem is enabled in the kernel.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -773,9 +774,10 @@ static int em_meta_change(struct tcf_proto *tp, void *data, int len,
 	    TCF_META_ID(hdr->right.kind) > TCF_META_ID_MAX)
 		goto errout;
 
-	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+	meta = kmalloc(sizeof(*meta), GFP_KERNEL);
 	if (meta == NULL)
 		goto errout;
+	memset(meta, 0, sizeof(*meta));
 
 	memcpy(&meta->lvalue.hdr, &hdr->left, sizeof(hdr->left));
 	memcpy(&meta->rvalue.hdr, &hdr->right, sizeof(hdr->right));

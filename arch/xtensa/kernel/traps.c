@@ -461,7 +461,7 @@ void show_code(unsigned int *pc)
 	}
 }
 
-DEFINE_SPINLOCK(die_lock);
+spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
 
 void die(const char * str, struct pt_regs * regs, long err)
 {
@@ -487,9 +487,11 @@ void die(const char * str, struct pt_regs * regs, long err)
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
-	if (panic_on_oops)
+	if (panic_on_oops) {
+		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
+		ssleep(5);
 		panic("Fatal exception");
-
+	}
 	do_exit(err);
 }
 

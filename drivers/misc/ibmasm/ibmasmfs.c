@@ -90,11 +90,10 @@ static void ibmasmfs_create_files (struct super_block *sb, struct dentry *root);
 static int ibmasmfs_fill_super (struct super_block *sb, void *data, int silent);
 
 
-static int ibmasmfs_get_super(struct file_system_type *fst,
-			int flags, const char *name, void *data,
-			struct vfsmount *mnt)
+static struct super_block *ibmasmfs_get_super(struct file_system_type *fst,
+			int flags, const char *name, void *data)
 {
-	return get_sb_single(fst, flags, data, ibmasmfs_fill_super, mnt);
+	return get_sb_single(fst, flags, data, ibmasmfs_fill_super);
 }
 
 static struct super_operations ibmasmfs_s_ops = {
@@ -147,6 +146,7 @@ static struct inode *ibmasmfs_make_inode(struct super_block *sb, int mode)
 	if (ret) {
 		ret->i_mode = mode;
 		ret->i_uid = ret->i_gid = 0;
+		ret->i_blksize = PAGE_CACHE_SIZE;
 		ret->i_blocks = 0;
 		ret->i_atime = ret->i_mtime = ret->i_ctime = CURRENT_TIME;
 	}
@@ -174,7 +174,7 @@ static struct dentry *ibmasmfs_create_file (struct super_block *sb,
 	}
 
 	inode->i_fop = fops;
-	inode->i_private = data;
+	inode->u.generic_ip = data;
 
 	d_add(dentry, inode);
 	return dentry;
@@ -243,7 +243,7 @@ static int command_file_open(struct inode *inode, struct file *file)
 {
 	struct ibmasmfs_command_data *command_data;
 
-	if (!inode->i_private)
+	if (!inode->u.generic_ip)
 		return -ENODEV;
 
 	command_data = kmalloc(sizeof(struct ibmasmfs_command_data), GFP_KERNEL);
@@ -251,7 +251,7 @@ static int command_file_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 
 	command_data->command = NULL;
-	command_data->sp = inode->i_private;
+	command_data->sp = inode->u.generic_ip;
 	file->private_data = command_data;
 	return 0;
 }
@@ -350,10 +350,10 @@ static int event_file_open(struct inode *inode, struct file *file)
 	struct ibmasmfs_event_data *event_data;
 	struct service_processor *sp; 
 
-	if (!inode->i_private)
+	if (!inode->u.generic_ip)
 		return -ENODEV;
 
-	sp = inode->i_private;
+	sp = inode->u.generic_ip;
 
 	event_data = kmalloc(sizeof(struct ibmasmfs_event_data), GFP_KERNEL);
 	if (!event_data)
@@ -438,14 +438,14 @@ static int r_heartbeat_file_open(struct inode *inode, struct file *file)
 {
 	struct ibmasmfs_heartbeat_data *rhbeat;
 
-	if (!inode->i_private)
+	if (!inode->u.generic_ip)
 		return -ENODEV;
 
 	rhbeat = kmalloc(sizeof(struct ibmasmfs_heartbeat_data), GFP_KERNEL);
 	if (!rhbeat)
 		return -ENOMEM;
 
-	rhbeat->sp = inode->i_private;
+	rhbeat->sp = (struct service_processor *)inode->u.generic_ip;
 	rhbeat->active = 0;
 	ibmasm_init_reverse_heartbeat(rhbeat->sp, &rhbeat->heartbeat);
 	file->private_data = rhbeat;
@@ -507,7 +507,7 @@ static ssize_t r_heartbeat_file_write(struct file *file, const char __user *buf,
 
 static int remote_settings_file_open(struct inode *inode, struct file *file)
 {
-	file->private_data = inode->i_private;
+	file->private_data = inode->u.generic_ip;
 	return 0;
 }
 

@@ -24,6 +24,7 @@
 
 /* Bluetooth SCO sockets. */
 
+#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/types.h>
@@ -108,14 +109,17 @@ static void sco_sock_init_timer(struct sock *sk)
 static struct sco_conn *sco_conn_add(struct hci_conn *hcon, __u8 status)
 {
 	struct hci_dev *hdev = hcon->hdev;
-	struct sco_conn *conn = hcon->sco_data;
+	struct sco_conn *conn;
 
-	if (conn || status)
+	if ((conn = hcon->sco_data))
 		return conn;
 
-	conn = kzalloc(sizeof(struct sco_conn), GFP_ATOMIC);
-	if (!conn)
+	if (status)
+		return conn;
+
+	if (!(conn = kmalloc(sizeof(struct sco_conn), GFP_ATOMIC)))
 		return NULL;
+	memset(conn, 0, sizeof(struct sco_conn));
 
 	spin_lock_init(&conn->lock);
 
@@ -131,7 +135,6 @@ static struct sco_conn *sco_conn_add(struct hci_conn *hcon, __u8 status)
 		conn->mtu = 60;
 
 	BT_DBG("hcon %p conn %p", hcon, conn);
-
 	return conn;
 }
 
@@ -967,7 +970,7 @@ static int __init sco_init(void)
 		goto error;
 	}
 
-	class_create_file(bt_class, &class_attr_sco);
+	class_create_file(&bt_class, &class_attr_sco);
 
 	BT_INFO("SCO (Voice Link) ver %s", VERSION);
 	BT_INFO("SCO socket layer initialized");
@@ -981,7 +984,7 @@ error:
 
 static void __exit sco_exit(void)
 {
-	class_remove_file(bt_class, &class_attr_sco);
+	class_remove_file(&bt_class, &class_attr_sco);
 
 	if (bt_sock_unregister(BTPROTO_SCO) < 0)
 		BT_ERR("SCO socket unregistration failed");

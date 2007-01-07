@@ -48,8 +48,8 @@ static int reiserfs_file_release(struct inode *inode, struct file *filp)
 		return 0;
 	}
 
-	mutex_lock(&inode->i_mutex);
 	reiserfs_write_lock(inode->i_sb);
+	mutex_lock(&inode->i_mutex);
 	/* freeing preallocation only involves relogging blocks that
 	 * are already in the current transaction.  preallocation gets
 	 * freed at the end of each transaction, so it is impossible for
@@ -860,12 +860,8 @@ static int reiserfs_submit_file_region_for_write(struct reiserfs_transaction_han
 			// this sets the proper flags for O_SYNC to trigger a commit
 			mark_inode_dirty(inode);
 			reiserfs_write_unlock(inode->i_sb);
-		} else {
-			reiserfs_write_lock(inode->i_sb);
-			reiserfs_update_inode_transaction(inode);
+		} else
 			mark_inode_dirty(inode);
-			reiserfs_write_unlock(inode->i_sb);
-		}
 
 		sd_update = 1;
 	}
@@ -1564,6 +1560,12 @@ static ssize_t reiserfs_file_write(struct file *file,	/* the file we are going t
 	return res;
 }
 
+static ssize_t reiserfs_aio_write(struct kiocb *iocb, const char __user * buf,
+				  size_t count, loff_t pos)
+{
+	return generic_file_aio_write(iocb, buf, count, pos);
+}
+
 const struct file_operations reiserfs_file_operations = {
 	.read = generic_file_read,
 	.write = reiserfs_file_write,
@@ -1573,7 +1575,7 @@ const struct file_operations reiserfs_file_operations = {
 	.fsync = reiserfs_sync_file,
 	.sendfile = generic_file_sendfile,
 	.aio_read = generic_file_aio_read,
-	.aio_write = generic_file_aio_write,
+	.aio_write = reiserfs_aio_write,
 	.splice_read = generic_file_splice_read,
 	.splice_write = generic_file_splice_write,
 };

@@ -56,8 +56,8 @@ unsigned int experimEnabled = 0;
 unsigned int linuxExtEnabled = 1;
 unsigned int lookupCacheEnabled = 1;
 unsigned int multiuser_mount = 0;
-unsigned int extended_security = CIFSSEC_DEF;
-/* unsigned int ntlmv2_support = 0; */
+unsigned int extended_security = 0;
+unsigned int ntlmv2_support = 0;
 unsigned int sign_CIFS_PDUs = 1;
 extern struct task_struct * oplockThread; /* remove sparse warning */
 struct task_struct * oplockThread = NULL;
@@ -166,9 +166,8 @@ cifs_put_super(struct super_block *sb)
 }
 
 static int
-cifs_statfs(struct dentry *dentry, struct kstatfs *buf)
+cifs_statfs(struct super_block *sb, struct kstatfs *buf)
 {
-	struct super_block *sb = dentry->d_sb;
 	int xid; 
 	int rc = -EOPNOTSUPP;
 	struct cifs_sb_info *cifs_sb;
@@ -255,6 +254,7 @@ cifs_alloc_inode(struct super_block *sb)
 	file data or metadata */
 	cifs_inode->clientCanCacheRead = FALSE;
 	cifs_inode->clientCanCacheAll = FALSE;
+	cifs_inode->vfs_inode.i_blksize = CIFS_MAX_MSGSIZE;
 	cifs_inode->vfs_inode.i_blkbits = 14;  /* 2**14 = CIFS_MAX_MSGSIZE */
 	cifs_inode->vfs_inode.i_flags = S_NOATIME | S_NOCMTIME;
 	INIT_LIST_HEAD(&cifs_inode->openFileList);
@@ -401,14 +401,13 @@ static struct quotactl_ops cifs_quotactl_ops = {
 };
 #endif
 
-static void cifs_umount_begin(struct vfsmount * vfsmnt, int flags)
+#ifdef CONFIG_CIFS_EXPERIMENTAL
+static void cifs_umount_begin(struct super_block * sblock)
 {
 	struct cifs_sb_info *cifs_sb;
 	struct cifsTconInfo * tcon;
 
-	if (!(flags & MNT_FORCE))
-		return;
-	cifs_sb = CIFS_SB(vfsmnt->mnt_sb);
+	cifs_sb = CIFS_SB(sblock);
 	if(cifs_sb == NULL)
 		return;
 
@@ -420,7 +419,7 @@ static void cifs_umount_begin(struct vfsmount * vfsmnt, int flags)
 		tcon->tidStatus = CifsExiting;
 	up(&tcon->tconSem);
 
-	/* cancel_brl_requests(tcon); */ /* BB mark all brl mids as exiting */
+	/* cancel_brl_requests(tcon); */
 	/* cancel_notify_requests(tcon); */
 	if(tcon->ses && tcon->ses->server)
 	{
@@ -436,6 +435,7 @@ static void cifs_umount_begin(struct vfsmount * vfsmnt, int flags)
 
 	return;
 }
+#endif	
 
 static int cifs_remount(struct super_block *sb, int *flags, char *data)
 {
@@ -454,13 +454,15 @@ struct super_operations cifs_super_ops = {
    unless later we add lazy close of inodes or unless the kernel forgets to call
    us with the same number of releases (closes) as opens */
 	.show_options = cifs_show_options,
+#ifdef CONFIG_CIFS_EXPERIMENTAL
 	.umount_begin   = cifs_umount_begin,
+#endif
 	.remount_fs = cifs_remount,
 };
 
-static int
+static struct super_block *
 cifs_get_sb(struct file_system_type *fs_type,
-	    int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+	    int flags, const char *dev_name, void *data)
 {
 	int rc;
 	struct super_block *sb = sget(fs_type, NULL, set_anon_super, NULL);
@@ -468,7 +470,7 @@ cifs_get_sb(struct file_system_type *fs_type,
 	cFYI(1, ("Devname: %s flags: %d ", dev_name, flags));
 
 	if (IS_ERR(sb))
-		return PTR_ERR(sb);
+		return sb;
 
 	sb->s_flags = flags;
 
@@ -476,10 +478,10 @@ cifs_get_sb(struct file_system_type *fs_type,
 	if (rc) {
 		up_write(&sb->s_umount);
 		deactivate_super(sb);
-		return rc;
+		return ERR_PTR(rc);
 	}
 	sb->s_flags |= MS_ACTIVE;
-	return simple_set_mnt(mnt, sb);
+	return sb;
 }
 
 static ssize_t cifs_file_writev(struct file *file, const struct iovec *iov,
@@ -903,7 +905,7 @@ static int cifs_dnotify_thread(void * dummyarg)
 	struct cifsSesInfo *ses;
 
 	do {
-		if (try_to_freeze())
+		if(try_to_freeze())
 			continue;
 		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(15*HZ);

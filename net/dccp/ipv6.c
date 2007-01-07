@@ -12,6 +12,7 @@
  *      2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/random.h>
 #include <linux/xfrm.h>
@@ -31,7 +32,6 @@
 
 #include "dccp.h"
 #include "ipv6.h"
-#include "feat.h"
 
 /* Socket used for sending RSTs and ACKs */
 static struct socket *dccp_v6_ctl_socket;
@@ -230,7 +230,7 @@ static int dccp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
 	ipv6_addr_copy(&np->saddr, saddr);
 	inet->rcv_saddr = LOOPBACK4_IPV6;
 
-	__ip6_dst_store(sk, dst, NULL);
+	ip6_dst_store(sk, dst, NULL);
 
 	icsk->icsk_ext_hdr_len = 0;
 	if (np->opt != NULL)
@@ -276,7 +276,7 @@ static void dccp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	__u64 seq;
 
 	sk = inet6_lookup(&dccp_hashinfo, &hdr->daddr, dh->dccph_dport,
-			  &hdr->saddr, dh->dccph_sport, inet6_iif(skb));
+			  &hdr->saddr, dh->dccph_sport, skb->dev->ifindex);
 
 	if (sk == NULL) {
 		ICMP6_INC_STATS_BH(__in6_dev_get(skb->dev), ICMP6_MIB_INERRORS);
@@ -708,7 +708,8 @@ static int dccp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 	ireq = inet_rsk(req);
 	ipv6_addr_copy(&ireq6->rmt_addr, &skb->nh.ipv6h->saddr);
 	ipv6_addr_copy(&ireq6->loc_addr, &skb->nh.ipv6h->daddr);
-	req->rcv_wnd	= dccp_feat_default_sequence_window;
+	req->rcv_wnd	= 100; /* Fake, option parsing will get the
+				  right value */
 	ireq6->pktopts	= NULL;
 
 	if (ipv6_opt_accepted(sk, skb) ||
@@ -863,7 +864,7 @@ static struct sock *dccp_v6_request_recv_sock(struct sock *sk,
 	 * comment in that function for the gory details. -acme
 	 */
 
-	__ip6_dst_store(newsk, dst, NULL);
+	ip6_dst_store(newsk, dst, NULL);
 	newsk->sk_route_caps = dst->dev->features & ~(NETIF_F_IP_CSUM |
 						      NETIF_F_TSO);
 	newdp6 = (struct dccp6_sock *)newsk;

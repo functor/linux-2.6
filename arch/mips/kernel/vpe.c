@@ -28,6 +28,7 @@
  * i.e cat spapp >/dev/vpe1.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/fs.h>

@@ -221,6 +221,7 @@ static void clear_subscriber_list(struct snd_seq_client *client,
 {
 	struct list_head *p, *n;
 
+	down_write(&grp->list_mutex);
 	list_for_each_safe(p, n, &grp->list_head) {
 		struct snd_seq_subscribers *subs;
 		struct snd_seq_client *c;
@@ -258,6 +259,7 @@ static void clear_subscriber_list(struct snd_seq_client *client,
 			snd_seq_client_unlock(c);
 		}
 	}
+	up_write(&grp->list_mutex);
 }
 
 /* delete port data */
@@ -514,7 +516,7 @@ int snd_seq_port_connect(struct snd_seq_client *connector,
 	atomic_set(&subs->ref_count, 2);
 
 	down_write(&src->list_mutex);
-	down_write_nested(&dest->list_mutex, SINGLE_DEPTH_NESTING);
+	down_write(&dest->list_mutex);
 
 	exclusive = info->flags & SNDRV_SEQ_PORT_SUBS_EXCLUSIVE ? 1 : 0;
 	err = -EBUSY;
@@ -587,7 +589,7 @@ int snd_seq_port_disconnect(struct snd_seq_client *connector,
 	unsigned long flags;
 
 	down_write(&src->list_mutex);
-	down_write_nested(&dest->list_mutex, SINGLE_DEPTH_NESTING);
+	down_write(&dest->list_mutex);
 
 	/* look for the connection */
 	list_for_each(p, &src->list_head) {
@@ -673,7 +675,6 @@ int snd_seq_event_port_attach(int client,
 	return ret;
 }
 
-EXPORT_SYMBOL(snd_seq_event_port_attach);
 
 /*
  * Detach the driver from a port.
@@ -693,5 +694,3 @@ int snd_seq_event_port_detach(int client, int port)
 
 	return err;
 }
-
-EXPORT_SYMBOL(snd_seq_event_port_detach);

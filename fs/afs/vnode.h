@@ -13,9 +13,9 @@
 #define _LINUX_AFS_VNODE_H
 
 #include <linux/fs.h>
-#include <linux/fscache.h>
 #include "server.h"
 #include "kafstimod.h"
+#include "cache.h"
 
 #ifdef __KERNEL__
 
@@ -32,8 +32,8 @@ struct afs_cache_vnode
 	afs_dataversion_t	data_version;	/* data version */
 };
 
-#ifdef CONFIG_AFS_FSCACHE
-extern struct fscache_cookie_def afs_vnode_cache_index_def;
+#ifdef AFS_CACHING_SUPPORT
+extern struct cachefs_index_def afs_vnode_cache_index_def;
 #endif
 
 /*****************************************************************************/
@@ -47,8 +47,8 @@ struct afs_vnode
 	struct afs_volume	*volume;	/* volume on which vnode resides */
 	struct afs_fid		fid;		/* the file identifier for this inode */
 	struct afs_file_status	status;		/* AFS status info for this file */
-#ifdef CONFIG_AFS_FSCACHE
-	struct fscache_cookie	*cache;		/* caching cookie */
+#ifdef AFS_CACHING_SUPPORT
+	struct cachefs_cookie	*cache;		/* caching cookie */
 #endif
 
 	wait_queue_head_t	update_waitq;	/* status fetch waitqueue */

@@ -177,7 +177,6 @@ int afs_proc_init(void)
  */
 void afs_proc_cleanup(void)
 {
-	remove_proc_entry("rootcell", proc_afs);
 	remove_proc_entry("cells", proc_afs);
 
 	remove_proc_entry("fs/afs", NULL);

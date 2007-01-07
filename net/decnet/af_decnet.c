@@ -99,6 +99,7 @@ Version 0.0.6    2.1.110   07-aug-98   Eduardo Marcelo Serrat
                                        dn_bind fixes
 *******************************************************************************/
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/types.h>
@@ -1177,10 +1178,8 @@ static int dn_getname(struct socket *sock, struct sockaddr *uaddr,int *uaddr_len
 	if (peer) {
 		if ((sock->state != SS_CONNECTED && 
 		     sock->state != SS_CONNECTING) && 
-		    scp->accept_mode == ACC_IMMED) {
-		    	release_sock(sk);
+		    scp->accept_mode == ACC_IMMED)
 			return -ENOTCONN;
-		}
 
 		memcpy(sa, &scp->peer, sizeof(struct sockaddr_dn));
 	} else {

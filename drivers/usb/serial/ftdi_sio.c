@@ -245,6 +245,7 @@
 /*   to talk to the device */
 /* Thanx to gkh and the rest of the usb dev group for all code I have assimilated :-) */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -257,7 +258,7 @@
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 #include <linux/serial.h>
-#include <linux/usb/serial.h>
+#include "usb-serial.h"
 #include "ftdi_sio.h"
 
 /*
@@ -306,8 +307,6 @@ static struct ftdi_sio_quirk ftdi_HE_TIRA1_quirk = {
 
 
 static struct usb_device_id id_table_combined [] = {
-	{ USB_DEVICE(FTDI_VID, FTDI_AMC232_PID) },
-	{ USB_DEVICE(FTDI_VID, FTDI_CANUSB_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_ACTZWAVE_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_IRTRANS_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_IPLUS_PID) },
@@ -315,7 +314,6 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_8U232AM_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_8U232AM_ALT_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_8U2232C_PID) },
-	{ USB_DEVICE(FTDI_VID, FTDI_MICRO_CHAMELEON_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_RELAIS_PID) },
 	{ USB_DEVICE(INTERBIOMETRICS_VID, INTERBIOMETRICS_IOBOARD_PID) },
 	{ USB_DEVICE(INTERBIOMETRICS_VID, INTERBIOMETRICS_MINI_IOBOARD_PID) },
@@ -339,7 +337,6 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_MTXORB_6_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_PERLE_ULTRAPORT_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_PIEGROUP_PID) },
-	{ USB_DEVICE(FTDI_VID, FTDI_TNC_X_PID) },
 	{ USB_DEVICE(SEALEVEL_VID, SEALEVEL_2101_PID) },
 	{ USB_DEVICE(SEALEVEL_VID, SEALEVEL_2102_PID) },
 	{ USB_DEVICE(SEALEVEL_VID, SEALEVEL_2103_PID) },
@@ -503,10 +500,6 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(ICOM_ID1_VID, ICOM_ID1_PID) },
 	{ USB_DEVICE(PAPOUCH_VID, PAPOUCH_TMU_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_ACG_HFDUAL_PID) },
-	{ USB_DEVICE(FTDI_VID, FTDI_YEI_SERVOCENTER31_PID) },
-	{ USB_DEVICE(FTDI_VID, FTDI_THORLABS_PID) },
-	{ USB_DEVICE(TESTO_VID, TESTO_USB_INTERFACE_PID) },
-	{ USB_DEVICE(FTDI_VID, FTDI_GAMMA_SCOUT_PID) },
 	{ },					/* Optional parameter entry */
 	{ }					/* Terminating entry */
 };
@@ -555,7 +548,6 @@ struct ftdi_private {
 	spinlock_t rx_lock;	/* spinlock for receive state */
 	struct work_struct rx_work;
 	int rx_processed;
-	unsigned long rx_bytes;
 
 	__u16 interface;	/* FT2232C port interface (0 for FT232/245) */
 
@@ -563,7 +555,6 @@ struct ftdi_private {
 	int force_rtscts;	/* if non-zero, force RTS-CTS to always be enabled */
 
 	spinlock_t tx_lock;	/* spinlock for transmit state */
-	unsigned long tx_bytes;
 	unsigned long tx_outstanding_bytes;
 	unsigned long tx_outstanding_urbs;
 };
@@ -1278,6 +1269,7 @@ static void ftdi_shutdown (struct usb_serial *serial)
 
 static int  ftdi_open (struct usb_serial_port *port, struct file *filp)
 { /* ftdi_open */
+	struct termios tmp_termios;
 	struct usb_device *dev = port->serial->dev;
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	unsigned long flags;
@@ -1287,15 +1279,8 @@ static int  ftdi_open (struct usb_serial_port *port, struct file *filp)
 
 	dbg("%s", __FUNCTION__);
 
-	spin_lock_irqsave(&priv->tx_lock, flags);
-	priv->tx_bytes = 0;
-	spin_unlock_irqrestore(&priv->tx_lock, flags);
-	spin_lock_irqsave(&priv->rx_lock, flags);
-	priv->rx_bytes = 0;
-	spin_unlock_irqrestore(&priv->rx_lock, flags);
 
-	if (port->tty)
-		port->tty->low_latency = (priv->flags & ASYNC_LOW_LATENCY) ? 1 : 0;
+	port->tty->low_latency = (priv->flags & ASYNC_LOW_LATENCY) ? 1 : 0;
 
 	/* No error checking for this (will get errors later anyway) */
 	/* See ftdi_sio.h for description of what is reset */
@@ -1309,8 +1294,7 @@ static int  ftdi_open (struct usb_serial_port *port, struct file *filp)
 	   This is same behaviour as serial.c/rs_open() - Kuba */
 
 	/* ftdi_set_termios  will send usb control messages */
-	if (port->tty)
-		ftdi_set_termios(port, NULL);
+	ftdi_set_termios(port, &tmp_termios);
 
 	/* FIXME: Flow control might be enabled, so it should be checked -
 	   we have no control of defaults! */
@@ -1481,7 +1465,6 @@ static int ftdi_write (struct usb_serial_port *port,
 		spin_lock_irqsave(&priv->tx_lock, flags);
 		++priv->tx_outstanding_urbs;
 		priv->tx_outstanding_bytes += count;
-		priv->tx_bytes += count;
 		spin_unlock_irqrestore(&priv->tx_lock, flags);
 	}
 
@@ -1531,7 +1514,7 @@ static void ftdi_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	priv->tx_outstanding_bytes -= countback;
 	spin_unlock_irqrestore(&priv->tx_lock, flags);
 
-	usb_serial_port_softint(port);
+	schedule_work(&port->work);
 } /* ftdi_write_bulk_callback */
 
 
@@ -1584,8 +1567,6 @@ static void ftdi_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
 	struct tty_struct *tty;
 	struct ftdi_private *priv;
-	unsigned long countread;
-	unsigned long flags;
 
 	if (urb->number_of_packets > 0) {
 		err("%s transfer_buffer_length %d actual_length %d number of packets %d",__FUNCTION__,
@@ -1619,13 +1600,6 @@ static void ftdi_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 		dbg("(this is ok on close) nonzero read bulk status received: %d", urb->status);
 		return;
 	}
-
-	/* count data bytes, but not status bytes */
-	countread = urb->actual_length;
-	countread -= 2 * ((countread + (PKTSZ - 1)) / PKTSZ);
-	spin_lock_irqsave(&priv->rx_lock, flags);
-	priv->rx_bytes += countread;
-	spin_unlock_irqrestore(&priv->rx_lock, flags);
 
 	ftdi_process_read(port);
 
@@ -1951,7 +1925,7 @@ static void ftdi_set_termios (struct usb_serial_port *port, struct termios *old_
 			err("%s urb failed to set baudrate", __FUNCTION__);
 		}
 		/* Ensure RTS and DTR are raised when baudrate changed from 0 */
-		if (!old_termios || (old_termios->c_cflag & CBAUD) == B0) {
+		if ((old_termios->c_cflag & CBAUD) == B0) {
 			set_mctrl(port, TIOCM_DTR | TIOCM_RTS);
 		}
 	}

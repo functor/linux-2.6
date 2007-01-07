@@ -6,6 +6,7 @@
  * of ugly preprocessor tricks. Talk about very very poor man's inheritance.
  */ 
 #include <linux/types.h>
+#include <linux/config.h> 
 #include <linux/stddef.h>
 #include <linux/rwsem.h>
 #include <linux/sched.h>
@@ -72,44 +73,39 @@ typedef elf_greg_t elf_gregset_t[ELF_NGREG];
  * Dumping its extra ELF program headers includes all the other information
  * a debugger needs to easily find how the vsyscall DSO was being used.
  */
-#define ELF_CORE_EXTRA_PHDRS	(find_vma(current->mm, VSYSCALL32_BASE) ?     \
-    (VSYSCALL32_EHDR->e_phnum) : 0)
+#define ELF_CORE_EXTRA_PHDRS		(VSYSCALL32_EHDR->e_phnum)
 #define ELF_CORE_WRITE_EXTRA_PHDRS					      \
 do {									      \
-	if (find_vma(current->mm, VSYSCALL32_BASE)) { 			      \
-		const struct elf32_phdr *const vsyscall_phdrs =		      \
-			(const struct elf32_phdr *) (VSYSCALL32_BASE	      \
-						   + VSYSCALL32_EHDR->e_phoff);\
-		int i;							      \
-		Elf32_Off ofs = 0;					      \
-		for (i = 0; i < VSYSCALL32_EHDR->e_phnum; ++i) {	      \
-			struct elf32_phdr phdr = vsyscall_phdrs[i];	      \
-			if (phdr.p_type == PT_LOAD) {			      \
-				BUG_ON(ofs != 0);			      \
-				ofs = phdr.p_offset = offset;		      \
-				phdr.p_memsz = PAGE_ALIGN(phdr.p_memsz);      \
-				phdr.p_filesz = phdr.p_memsz;		      \
-				offset += phdr.p_filesz;		      \
-			}						      \
-			else						      \
-				phdr.p_offset += ofs;			      \
-			phdr.p_paddr = 0; /* match other core phdrs */	      \
-			DUMP_WRITE(&phdr, sizeof(phdr));		      \
+	const struct elf32_phdr *const vsyscall_phdrs =			      \
+		(const struct elf32_phdr *) (VSYSCALL32_BASE		      \
+					   + VSYSCALL32_EHDR->e_phoff);	      \
+	int i;								      \
+	Elf32_Off ofs = 0;						      \
+	for (i = 0; i < VSYSCALL32_EHDR->e_phnum; ++i) {		      \
+		struct elf32_phdr phdr = vsyscall_phdrs[i];		      \
+		if (phdr.p_type == PT_LOAD) {				      \
+			BUG_ON(ofs != 0);				      \
+			ofs = phdr.p_offset = offset;			      \
+			phdr.p_memsz = PAGE_ALIGN(phdr.p_memsz);	      \
+			phdr.p_filesz = phdr.p_memsz;			      \
+			offset += phdr.p_filesz;			      \
 		}							      \
+		else							      \
+			phdr.p_offset += ofs;				      \
+		phdr.p_paddr = 0; /* match other core phdrs */		      \
+		DUMP_WRITE(&phdr, sizeof(phdr));			      \
 	}								      \
 } while (0)
 #define ELF_CORE_WRITE_EXTRA_DATA					      \
 do {									      \
-	if (find_vma(current->mm, VSYSCALL32_BASE)) { 			      \
-		const struct elf32_phdr *const vsyscall_phdrs =		      \
-			(const struct elf32_phdr *) (VSYSCALL32_BASE	      \
-						   + VSYSCALL32_EHDR->e_phoff);      \
-		int i;							      \
-		for (i = 0; i < VSYSCALL32_EHDR->e_phnum; ++i) {	      \
-			if (vsyscall_phdrs[i].p_type == PT_LOAD)	      \
-				DUMP_WRITE((void *) (u64) vsyscall_phdrs[i].p_vaddr,\
-				    PAGE_ALIGN(vsyscall_phdrs[i].p_memsz));   \
-		}							      \
+	const struct elf32_phdr *const vsyscall_phdrs =			      \
+		(const struct elf32_phdr *) (VSYSCALL32_BASE		      \
+					   + VSYSCALL32_EHDR->e_phoff);	      \
+	int i;								      \
+	for (i = 0; i < VSYSCALL32_EHDR->e_phnum; ++i) {		      \
+		if (vsyscall_phdrs[i].p_type == PT_LOAD)		      \
+			DUMP_WRITE((void *) (u64) vsyscall_phdrs[i].p_vaddr,	      \
+				   PAGE_ALIGN(vsyscall_phdrs[i].p_memsz));    \
 	}								      \
 } while (0)
 
@@ -186,7 +182,7 @@ struct elf_prpsinfo
 #define user user32
 
 #define __ASM_X86_64_ELF_H 1
-#define elf_read_implies_exec(ex, executable_stack)     (executable_stack != EXSTACK_DISABLE_X)
+#define elf_read_implies_exec(ex, have_pt_gnu_stack)	(!(have_pt_gnu_stack))
 //#include <asm/ia32.h>
 #include <linux/elf.h>
 

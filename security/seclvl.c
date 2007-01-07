@@ -16,6 +16,7 @@
  *	(at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -370,8 +371,6 @@ static int seclvl_settime(struct timespec *tv, struct timezone *tz)
 				      current->group_leader->pid);
 			return -EPERM;
 		}		/* if attempt to decrement time */
-		if (tv->tv_sec > 1924988400)	/* disallow dates after 2030) */
-			return -EPERM;		/* CVE-2005-4352 */
 	}			/* if seclvl > 1 */
 	return 0;
 }

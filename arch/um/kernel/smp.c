@@ -3,6 +3,7 @@
  * Licensed under the GPL
  */
 
+#include "linux/config.h"
 #include "linux/percpu.h"
 #include "asm/pgalloc.h"
 #include "asm/tlb.h"

@@ -141,9 +141,11 @@ void os_usr1_process(int pid)
  * syscalls, and also breaks with clone(), which does not unshare the TLS.
  */
 
+inline _syscall0(pid_t, getpid)
+
 int os_getpid(void)
 {
-	return syscall(__NR_getpid);
+	return(getpid());
 }
 
 int os_getpgrp(void)
@@ -248,35 +250,36 @@ void init_new_thread_stack(void *sig_stack, void (*usr1_handler)(int))
 	if(usr1_handler) set_handler(SIGUSR1, usr1_handler, flags, -1);
 }
 
-void init_new_thread_signals(void)
+void init_new_thread_signals(int altstack)
 {
-	set_handler(SIGSEGV, (__sighandler_t) sig_handler, SA_ONSTACK,
+	int flags = altstack ? SA_ONSTACK : 0;
+
+	set_handler(SIGSEGV, (__sighandler_t) sig_handler, flags,
 		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGTRAP, (__sighandler_t) sig_handler, SA_ONSTACK,
+	set_handler(SIGTRAP, (__sighandler_t) sig_handler, flags,
 		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGFPE, (__sighandler_t) sig_handler, SA_ONSTACK,
+	set_handler(SIGFPE, (__sighandler_t) sig_handler, flags,
 		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGILL, (__sighandler_t) sig_handler, SA_ONSTACK,
+	set_handler(SIGILL, (__sighandler_t) sig_handler, flags,
 		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGBUS, (__sighandler_t) sig_handler, SA_ONSTACK,
+	set_handler(SIGBUS, (__sighandler_t) sig_handler, flags,
 		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
 	set_handler(SIGUSR2, (__sighandler_t) sig_handler,
-		    SA_ONSTACK, SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM,
-		    -1);
+		    flags, SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
 	signal(SIGHUP, SIG_IGN);
 
-	init_irq_signals(1);
+	init_irq_signals(altstack);
 }
 
 int run_kernel_thread(int (*fn)(void *), void *arg, void **jmp_ptr)
 {
 	jmp_buf buf;
-	int n;
+	int n, enable;
 
 	*jmp_ptr = &buf;
-	n = UML_SETJMP(&buf);
+	n = UML_SETJMP(&buf, enable);
 	if(n != 0)
-		return n;
+		return(n);
 	(*fn)(arg);
-	return 0;
+	return(0);
 }

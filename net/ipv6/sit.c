@@ -18,6 +18,7 @@
  * Nate Thompson <nate@thebog.net>:		6to4 support
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/capability.h>
 #include <linux/errno.h>
@@ -380,6 +381,7 @@ static int ipip6_rcv(struct sk_buff *skb)
 		secpath_reset(skb);
 		skb->mac.raw = skb->nh.raw;
 		skb->nh.raw = skb->data;
+		memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
 		IPCB(skb)->flags = 0;
 		skb->protocol = htons(ETH_P_IPV6);
 		skb->pkt_type = PACKET_HOST;

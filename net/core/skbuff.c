@@ -38,6 +38,7 @@
  *	The functions in this file will not compile correctly with gcc 2.4.x
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -216,6 +217,7 @@ struct sk_buff *alloc_skb_from_cache(kmem_cache_t *cp,
 				     int fclone)
 {
 	kmem_cache_t *cache;
+	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
 	u8 *data;
 
@@ -239,13 +241,15 @@ struct sk_buff *alloc_skb_from_cache(kmem_cache_t *cp,
 	skb->data = data;
 	skb->tail = data;
 	skb->end  = data + size;
-
-	atomic_set(&(skb_shinfo(skb)->dataref), 1);
-	skb_shinfo(skb)->nr_frags  = 0;
-	skb_shinfo(skb)->gso_size = 0;
-	skb_shinfo(skb)->gso_segs = 0;
-	skb_shinfo(skb)->gso_type = 0;
-	skb_shinfo(skb)->frag_list = NULL;
+	/* make sure we initialize shinfo sequentially */
+	shinfo = skb_shinfo(skb);
+	atomic_set(&shinfo->dataref, 1);
+	shinfo->nr_frags  = 0;
+	shinfo->gso_size = 0;
+	shinfo->gso_segs = 0;
+	shinfo->gso_type = 0;
+	shinfo->ip6_frag_id = 0;
+	shinfo->frag_list = NULL;
 
 	if (fclone) {
 		struct sk_buff *child = skb + 1;
@@ -264,31 +268,6 @@ nodata:
 	goto out;
 }
 
-/**
- *	__netdev_alloc_skb - allocate an skbuff for rx on a specific device
- *	@dev: network device to receive on
- *	@length: length to allocate
- *	@gfp_mask: get_free_pages mask, passed to alloc_skb
- *
- *	Allocate a new &sk_buff and assign it a usage count of one. The
- *	buffer has unspecified headroom built in. Users should allocate
- *	the headroom they think they need without accounting for the
- *	built in space. The built in space is used for optimisations.
- *
- *	%NULL is returned if there is no free memory.
- */
-struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
-		unsigned int length, gfp_t gfp_mask)
-{
-	struct sk_buff *skb;
-
-	skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
-	if (likely(skb)) {
-		skb_reserve(skb, NET_SKB_PAD);
-		skb->dev = dev;
-	}
-	return skb;
-}
 
 static void skb_drop_list(struct sk_buff **listp)
 {
@@ -316,7 +295,7 @@ static void skb_clone_fraglist(struct sk_buff *skb)
 		skb_get(list);
 }
 
-static void skb_release_data(struct sk_buff *skb)
+void skb_release_data(struct sk_buff *skb)
 {
 	if (!skb->cloned ||
 	    !atomic_sub_return(skb->nohdr ? (1 << SKB_DATAREF_SHIFT) + 1 : 1,
@@ -513,7 +492,10 @@ struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 	n->tc_verd = CLR_TC_MUNGED(n->tc_verd);
 	C(input_dev);
 #endif
-	skb_copy_secmark(n, skb);
+
+#endif
+#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
+	C(xid);
 #endif
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	C(xid);
@@ -581,7 +563,6 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
 	new->xid	= old->xid;
 #endif
-	skb_copy_secmark(new, old);
 	atomic_set(&new->users, 1);
 	skb_shinfo(new)->gso_size = skb_shinfo(old)->gso_size;
 	skb_shinfo(new)->gso_segs = skb_shinfo(old)->gso_segs;
@@ -663,7 +644,6 @@ struct sk_buff *pskb_copy(struct sk_buff *skb, gfp_t gfp_mask)
 	n->csum	     = skb->csum;
 	n->ip_summed = skb->ip_summed;
 
-	n->truesize += skb->data_len;
 	n->data_len  = skb->data_len;
 	n->len	     = skb->len;
 
@@ -838,40 +818,24 @@ struct sk_buff *skb_copy_expand(const struct sk_buff *skb,
  *	filled. Used by network drivers which may DMA or transfer data
  *	beyond the buffer end onto the wire.
  *
- *	May return error in out of memory cases. The skb is freed on error.
+ *	May return NULL in out of memory cases.
  */
  
-int skb_pad(struct sk_buff *skb, int pad)
+struct sk_buff *skb_pad(struct sk_buff *skb, int pad)
 {
-	int err;
-	int ntail;
+	struct sk_buff *nskb;
 	
 	/* If the skbuff is non linear tailroom is always zero.. */
-	if (!skb_cloned(skb) && skb_tailroom(skb) >= pad) {
+	if (skb_tailroom(skb) >= pad) {
 		memset(skb->data+skb->len, 0, pad);
-		return 0;
+		return skb;
 	}
-
-	ntail = skb->data_len + pad - (skb->end - skb->tail);
-	if (likely(skb_cloned(skb) || ntail > 0)) {
-		err = pskb_expand_head(skb, 0, ntail, GFP_ATOMIC);
-		if (unlikely(err))
-			goto free_skb;
-	}
-
-	/* FIXME: The use of this function with non-linear skb's really needs
-	 * to be audited.
-	 */
-	err = skb_linearize(skb);
-	if (unlikely(err))
-		goto free_skb;
-
-	memset(skb->data + skb->len, 0, pad);
-	return 0;
-
-free_skb:
+	
+	nskb = skb_copy_expand(skb, skb_headroom(skb), skb_tailroom(skb) + pad, GFP_ATOMIC);
 	kfree_skb(skb);
-	return err;
+	if (nskb)
+		memset(nskb->data+nskb->len, 0, pad);
+	return nskb;
 }	
  
 /* Trims skb to length len. It can change skb pointers.
@@ -1834,15 +1798,12 @@ unsigned int skb_find_text(struct sk_buff *skb, unsigned int from,
 			   unsigned int to, struct ts_config *config,
 			   struct ts_state *state)
 {
-	unsigned int ret;
-
 	config->get_next_block = skb_ts_get_next_block;
 	config->finish = skb_ts_finish;
 
 	skb_prepare_seq_read(skb, from, to, TS_SKB_CB(state));
 
-	ret = textsearch_find(config, state);
-	return (ret <= to - from ? ret : UINT_MAX);
+	return textsearch_find(config, state);
 }
 
 /**
@@ -1971,7 +1932,7 @@ struct sk_buff *skb_segment(struct sk_buff *skb, int features)
 	do {
 		struct sk_buff *nskb;
 		skb_frag_t *frag;
-		int hsize;
+		int hsize, nsize;
 		int k;
 		int size;
 
@@ -1982,10 +1943,11 @@ struct sk_buff *skb_segment(struct sk_buff *skb, int features)
 		hsize = skb_headlen(skb) - offset;
 		if (hsize < 0)
 			hsize = 0;
-		if (hsize > len || !sg)
-			hsize = len;
+		nsize = hsize + doffset;
+		if (nsize > len + doffset || !sg)
+			nsize = len + doffset;
 
-		nskb = alloc_skb(hsize + doffset + headroom, GFP_ATOMIC);
+		nskb = alloc_skb(nsize + headroom, GFP_ATOMIC);
 		if (unlikely(!nskb))
 			goto err;
 
@@ -2091,7 +2053,6 @@ EXPORT_SYMBOL(__kfree_skb);
 EXPORT_SYMBOL(kfree_skb);
 EXPORT_SYMBOL(__pskb_pull_tail);
 EXPORT_SYMBOL(__alloc_skb);
-EXPORT_SYMBOL(__netdev_alloc_skb);
 EXPORT_SYMBOL(pskb_copy);
 EXPORT_SYMBOL(pskb_expand_head);
 EXPORT_SYMBOL(skb_checksum);

@@ -9,6 +9,7 @@
 #ifndef _ASM_BITOPS_H
 #define _ASM_BITOPS_H
 
+#include <linux/config.h>
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <asm/bug.h>
@@ -31,7 +32,7 @@
 
 #ifdef __KERNEL__
 
-#include <linux/irqflags.h>
+#include <asm/interrupt.h>
 #include <asm/sgidefs.h>
 #include <asm/war.h>
 

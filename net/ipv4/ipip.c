@@ -94,6 +94,7 @@
 
  
 #include <linux/capability.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/sched.h>
@@ -487,6 +488,7 @@ static int ipip_rcv(struct sk_buff *skb)
 
 		skb->mac.raw = skb->nh.raw;
 		skb->nh.raw = skb->data;
+		memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
 		skb->protocol = htons(ETH_P_IP);
 		skb->pkt_type = PACKET_HOST;
 

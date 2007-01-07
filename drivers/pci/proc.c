@@ -302,6 +302,12 @@ static struct file_operations proc_bus_pci_operations = {
 #endif /* HAVE_PCI_MMAP */
 };
 
+#if BITS_PER_LONG == 32
+#define LONG_FORMAT "\t%08lx"
+#else
+#define LONG_FORMAT "\t%16lx"
+#endif
+
 /* iterator */
 static void *pci_seq_start(struct seq_file *m, loff_t *pos)
 {
@@ -350,18 +356,18 @@ static int show_device(struct seq_file *m, void *v)
 			dev->irq);
 	/* Here should be 7 and not PCI_NUM_RESOURCES as we need to preserve compatibility */
 	for (i=0; i<7; i++) {
-		resource_size_t start, end;
+		u64 start, end;
 		pci_resource_to_user(dev, i, &dev->resource[i], &start, &end);
-		seq_printf(m, "\t%16llx",
-			(unsigned long long)(start |
-			(dev->resource[i].flags & PCI_REGION_FLAG_MASK)));
+		seq_printf(m, LONG_FORMAT,
+			((unsigned long)start) |
+			(dev->resource[i].flags & PCI_REGION_FLAG_MASK));
 	}
 	for (i=0; i<7; i++) {
-		resource_size_t start, end;
+		u64 start, end;
 		pci_resource_to_user(dev, i, &dev->resource[i], &start, &end);
-		seq_printf(m, "\t%16llx",
+		seq_printf(m, LONG_FORMAT,
 			dev->resource[i].start < dev->resource[i].end ?
-			(unsigned long long)(end - start) + 1 : 0);
+			(unsigned long)(end - start) + 1 : 0);
 	}
 	seq_putc(m, '\t');
 	if (drv)

@@ -12,6 +12,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/config.h>
 #include <linux/interrupt.h>
 #include <asm/hardware.h>
 #include <asm/mach/irq.h>
@@ -94,8 +95,7 @@ static void omap_mask_ack_irq(unsigned int irq)
 	omap_ack_irq(irq);
 }
 
-static struct irq_chip omap_irq_chip = {
-	.name	= "INTC",
+static struct irqchip omap_irq_chip = {
 	.ack	= omap_mask_ack_irq,
 	.mask	= omap_mask_irq,
 	.unmask	= omap_unmask_irq,

@@ -8,6 +8,10 @@
  * published by the Free Software Foundation.
  *
  * S3C2410 CPU Idle controls
+ *
+ *  Changelog:
+ *	28-Oct-2004  BJD  Initial version
+ *
 */
 
 #ifndef __ASM_ARCH_IDLE_H

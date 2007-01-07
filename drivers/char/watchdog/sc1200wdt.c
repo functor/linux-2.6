@@ -27,6 +27,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/miscdevice.h>
@@ -292,7 +293,7 @@ static struct notifier_block sc1200wdt_notifier =
 	.notifier_call =	sc1200wdt_notify_sys,
 };
 
-static const struct file_operations sc1200wdt_fops =
+static struct file_operations sc1200wdt_fops =
 {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
@@ -392,7 +393,7 @@ static int __init sc1200wdt_init(void)
 	if (io == -1) {
 		printk(KERN_ERR PFX "io parameter must be specified\n");
 		ret = -EINVAL;
-		goto out_pnp;
+		goto out_clean;
 	}
 
 #if defined CONFIG_PNP
@@ -405,7 +406,7 @@ static int __init sc1200wdt_init(void)
 	if (!request_region(io, io_len, SC1200_MODULE_NAME)) {
 		printk(KERN_ERR PFX "Unable to register IO port %#x\n", io);
 		ret = -EBUSY;
-		goto out_pnp;
+		goto out_clean;
 	}
 
 	ret = sc1200wdt_probe();
@@ -435,11 +436,6 @@ out_rbt:
 out_io:
 	release_region(io, io_len);
 
-out_pnp:
-#if defined CONFIG_PNP
-	if (isapnp)
-		pnp_unregister_driver(&scl200wdt_pnp_driver);
-#endif
 	goto out_clean;
 }
 

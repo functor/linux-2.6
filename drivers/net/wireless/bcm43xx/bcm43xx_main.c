@@ -128,15 +128,13 @@ MODULE_PARM_DESC(fwpostfix, "Postfix for .fw files. Useful for debugging.");
 	static struct pci_device_id bcm43xx_pci_tbl[] = {
 	/* Broadcom 4303 802.11b */
 	{ PCI_VENDOR_ID_BROADCOM, 0x4301, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
-	/* Broadcom 4307 802.11b */
+		/* Broadcom 4307 802.11b */
 	{ PCI_VENDOR_ID_BROADCOM, 0x4307, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
-	/* Broadcom 4318 802.11b/g */
+		/* Broadcom 4318 802.11b/g */
 	{ PCI_VENDOR_ID_BROADCOM, 0x4318, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
-	/* Broadcom 4319 802.11a/b/g */
-	{ PCI_VENDOR_ID_BROADCOM, 0x4319, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	/* Broadcom 4306 802.11b/g */
 	{ PCI_VENDOR_ID_BROADCOM, 0x4320, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
-	/* Broadcom 4306 802.11a */
+		/* Broadcom 4306 802.11a */
 //	{ PCI_VENDOR_ID_BROADCOM, 0x4321, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	/* Broadcom 4309 802.11a/b/g */
 	{ PCI_VENDOR_ID_BROADCOM, 0x4324, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
@@ -498,30 +496,22 @@ static inline u32 bcm43xx_interrupt_disable(struct bcm43xx_private *bcm, u32 mas
 	return old_mask;
 }
 
-/* Synchronize IRQ top- and bottom-half.
- * IRQs must be masked before calling this.
- * This must not be called with the irq_lock held.
- */
-static void bcm43xx_synchronize_irq(struct bcm43xx_private *bcm)
-{
-	synchronize_irq(bcm->irq);
-	tasklet_disable(&bcm->isr_tasklet);
-}
-
 /* Make sure we don't receive more data from the device. */
-static int bcm43xx_disable_interrupts_sync(struct bcm43xx_private *bcm)
+static int bcm43xx_disable_interrupts_sync(struct bcm43xx_private *bcm, u32 *oldstate)
 {
+	u32 old;
 	unsigned long flags;
 
-	spin_lock_irqsave(&bcm->irq_lock, flags);
-	if (unlikely(bcm43xx_status(bcm) != BCM43xx_STAT_INITIALIZED)) {
-		spin_unlock_irqrestore(&bcm->irq_lock, flags);
+	bcm43xx_lock_mmio(bcm, flags);
+	if (bcm43xx_is_initializing(bcm) || bcm->shutting_down) {
+		bcm43xx_unlock_mmio(bcm, flags);
 		return -EBUSY;
 	}
-	bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
-	bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_MASK); /* flush */
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
-	bcm43xx_synchronize_irq(bcm);
+	old = bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
+	tasklet_disable(&bcm->isr_tasklet);
+	bcm43xx_unlock_mmio(bcm, flags);
+	if (oldstate)
+		*oldstate = old;
 
 	return 0;
 }
@@ -534,6 +524,7 @@ static int bcm43xx_read_radioinfo(struct bcm43xx_private *bcm)
 	u16 manufact;
 	u16 version;
 	u8 revision;
+	s8 i;
 
 	if (bcm->chip_id == 0x4317) {
 		if (bcm->chip_rev == 0x00)
@@ -576,10 +567,19 @@ static int bcm43xx_read_radioinfo(struct bcm43xx_private *bcm)
 	radio->version = version;
 	radio->revision = revision;
 
+	/* Set default attenuation values. */
+	radio->baseband_atten = bcm43xx_default_baseband_attenuation(bcm);
+	radio->radio_atten = bcm43xx_default_radio_attenuation(bcm);
+	radio->txctl1 = bcm43xx_default_txctl1(bcm);
+	radio->txctl2 = 0xFFFF;
 	if (phy->type == BCM43xx_PHYTYPE_A)
 		radio->txpower_desired = bcm->sprom.maxpower_aphy;
 	else
 		radio->txpower_desired = bcm->sprom.maxpower_bgphy;
+
+	/* Initialize the in-memory nrssi Lookup Table. */
+	for (i = 0; i < 64; i++)
+		radio->nrssi_lt[i] = i;
 
 	return 0;
 
@@ -1237,6 +1237,10 @@ int bcm43xx_switch_core(struct bcm43xx_private *bcm, struct bcm43xx_coreinfo *ne
 		goto out;
 
 	bcm->current_core = new_core;
+	bcm->current_80211_core_idx = -1;
+	if (new_core->id == BCM43xx_COREID_80211)
+		bcm->current_80211_core_idx = (int)(new_core - &(bcm->core_80211[0]));
+
 out:
 	return err;
 }
@@ -1372,7 +1376,6 @@ void bcm43xx_wireless_core_reset(struct bcm43xx_private *bcm, int connect_phy)
 	if ((bcm43xx_core_enabled(bcm)) &&
 	    !bcm43xx_using_pio(bcm)) {
 //FIXME: Do we _really_ want #ifndef CONFIG_BCM947XX here?
-#if 0
 #ifndef CONFIG_BCM947XX
 		/* reset all used DMA controllers. */
 		bcm43xx_dmacontroller_tx_reset(bcm, BCM43xx_MMIO_DMA1_BASE);
@@ -1383,9 +1386,8 @@ void bcm43xx_wireless_core_reset(struct bcm43xx_private *bcm, int connect_phy)
 		if (bcm->current_core->rev < 5)
 			bcm43xx_dmacontroller_rx_reset(bcm, BCM43xx_MMIO_DMA4_BASE);
 #endif
-#endif
 	}
-	if (bcm43xx_status(bcm) == BCM43xx_STAT_SHUTTINGDOWN) {
+	if (bcm->shutting_down) {
 		bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD,
 		                bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD)
 				& ~(BCM43xx_SBF_MAC_ENABLED | 0x00000002));
@@ -1408,23 +1410,43 @@ static void bcm43xx_wireless_core_disable(struct bcm43xx_private *bcm)
 	bcm43xx_core_disable(bcm, 0);
 }
 
-/* Mark the current 80211 core inactive. */
-static void bcm43xx_wireless_core_mark_inactive(struct bcm43xx_private *bcm)
+/* Mark the current 80211 core inactive.
+ * "active_80211_core" is the other 80211 core, which is used.
+ */
+static int bcm43xx_wireless_core_mark_inactive(struct bcm43xx_private *bcm,
+					       struct bcm43xx_coreinfo *active_80211_core)
 {
 	u32 sbtmstatelow;
+	struct bcm43xx_coreinfo *old_core;
+	int err = 0;
 
 	bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
 	bcm43xx_radio_turn_off(bcm);
 	sbtmstatelow = bcm43xx_read32(bcm, BCM43xx_CIR_SBTMSTATELOW);
-	sbtmstatelow &= 0xDFF5FFFF;
-	sbtmstatelow |= 0x000A0000;
+	sbtmstatelow &= ~0x200a0000;
+	sbtmstatelow |= 0xa0000;
 	bcm43xx_write32(bcm, BCM43xx_CIR_SBTMSTATELOW, sbtmstatelow);
 	udelay(1);
 	sbtmstatelow = bcm43xx_read32(bcm, BCM43xx_CIR_SBTMSTATELOW);
-	sbtmstatelow &= 0xFFF5FFFF;
-	sbtmstatelow |= 0x00080000;
+	sbtmstatelow &= ~0xa0000;
+	sbtmstatelow |= 0x80000;
 	bcm43xx_write32(bcm, BCM43xx_CIR_SBTMSTATELOW, sbtmstatelow);
 	udelay(1);
+
+	if (bcm43xx_current_phy(bcm)->type == BCM43xx_PHYTYPE_G) {
+		old_core = bcm->current_core;
+		err = bcm43xx_switch_core(bcm, active_80211_core);
+		if (err)
+			goto out;
+		sbtmstatelow = bcm43xx_read32(bcm, BCM43xx_CIR_SBTMSTATELOW);
+		sbtmstatelow &= ~0x20000000;
+		sbtmstatelow |= 0x20000000;
+		bcm43xx_write32(bcm, BCM43xx_CIR_SBTMSTATELOW, sbtmstatelow);
+		err = bcm43xx_switch_core(bcm, old_core);
+	}
+
+out:
+	return err;
 }
 
 static void handle_irq_transmit_status(struct bcm43xx_private *bcm)
@@ -1460,23 +1482,6 @@ static void handle_irq_transmit_status(struct bcm43xx_private *bcm)
 			bcm43xx_pio_handle_xmitstatus(bcm, &stat);
 		else
 			bcm43xx_dma_handle_xmitstatus(bcm, &stat);
-	}
-}
-
-static void drain_txstatus_queue(struct bcm43xx_private *bcm)
-{
-	u32 dummy;
-
-	if (bcm->current_core->rev < 5)
-		return;
-	/* Read all entries from the microcode TXstatus FIFO
-	 * and throw them away.
-	 */
-	while (1) {
-		dummy = bcm43xx_read32(bcm, BCM43xx_MMIO_XMITSTAT_0);
-		if (!dummy)
-			break;
-		dummy = bcm43xx_read32(bcm, BCM43xx_MMIO_XMITSTAT_1);
 	}
 }
 
@@ -1529,7 +1534,7 @@ static void handle_irq_noise(struct bcm43xx_private *bcm)
 		goto generate_new;
 
 	/* Get the noise samples. */
-	assert(bcm->noisecalc.nr_samples < 8);
+	assert(bcm->noisecalc.nr_samples <= 8);
 	i = bcm->noisecalc.nr_samples;
 	noise[0] = limit_value(noise[0], 0, ARRAY_SIZE(radio->nrssi_lt) - 1);
 	noise[1] = limit_value(noise[1], 0, ARRAY_SIZE(radio->nrssi_lt) - 1);
@@ -1563,7 +1568,17 @@ static void handle_irq_noise(struct bcm43xx_private *bcm)
 		else
 			average -= 48;
 
-		bcm->stats.noise = average;
+/* FIXME: This is wrong, but people want fancy stats. well... */
+bcm->stats.noise = average;
+		if (average > -65)
+			bcm->stats.link_quality = 0;
+		else if (average > -75)
+			bcm->stats.link_quality = 1;
+		else if (average > -85)
+			bcm->stats.link_quality = 2;
+		else
+			bcm->stats.link_quality = 3;
+//		dprintk(KERN_INFO PFX "Link Quality: %u (avg was %d)\n", bcm->stats.link_quality, average);
 drop_calculation:
 		bcm->noisecalc.calculation_running = 0;
 		return;
@@ -1681,9 +1696,8 @@ static void handle_irq_beacon(struct bcm43xx_private *bcm)
 static void bcm43xx_interrupt_tasklet(struct bcm43xx_private *bcm)
 {
 	u32 reason;
-	u32 dma_reason[6];
-	u32 merged_dma_reason = 0;
-	int i, activity = 0;
+	u32 dma_reason[4];
+	int activity = 0;
 	unsigned long flags;
 
 #ifdef CONFIG_BCM43XX_DEBUG
@@ -1693,12 +1707,12 @@ static void bcm43xx_interrupt_tasklet(struct bcm43xx_private *bcm)
 # define bcmirq_handled(irq)	do { /* nothing */ } while (0)
 #endif /* CONFIG_BCM43XX_DEBUG*/
 
-	spin_lock_irqsave(&bcm->irq_lock, flags);
+	bcm43xx_lock_mmio(bcm, flags);
 	reason = bcm->irq_reason;
-	for (i = 5; i >= 0; i--) {
-		dma_reason[i] = bcm->dma_reason[i];
-		merged_dma_reason |= dma_reason[i];
-	}
+	dma_reason[0] = bcm->dma_reason[0];
+	dma_reason[1] = bcm->dma_reason[1];
+	dma_reason[2] = bcm->dma_reason[2];
+	dma_reason[3] = bcm->dma_reason[3];
 
 	if (unlikely(reason & BCM43xx_IRQ_XMIT_ERROR)) {
 		/* TX error. We get this when Template Ram is written in wrong endianess
@@ -1709,25 +1723,26 @@ static void bcm43xx_interrupt_tasklet(struct bcm43xx_private *bcm)
 		printkl(KERN_ERR PFX "FATAL ERROR: BCM43xx_IRQ_XMIT_ERROR\n");
 		bcmirq_handled(BCM43xx_IRQ_XMIT_ERROR);
 	}
-	if (unlikely(merged_dma_reason & BCM43xx_DMAIRQ_FATALMASK)) {
+	if (unlikely((dma_reason[0] & BCM43xx_DMAIRQ_FATALMASK) |
+		     (dma_reason[1] & BCM43xx_DMAIRQ_FATALMASK) |
+		     (dma_reason[2] & BCM43xx_DMAIRQ_FATALMASK) |
+		     (dma_reason[3] & BCM43xx_DMAIRQ_FATALMASK))) {
 		printkl(KERN_ERR PFX "FATAL ERROR: Fatal DMA error: "
-				     "0x%08X, 0x%08X, 0x%08X, "
-				     "0x%08X, 0x%08X, 0x%08X\n",
+				     "0x%08X, 0x%08X, 0x%08X, 0x%08X\n",
 		        dma_reason[0], dma_reason[1],
-			dma_reason[2], dma_reason[3],
-			dma_reason[4], dma_reason[5]);
+			dma_reason[2], dma_reason[3]);
 		bcm43xx_controller_restart(bcm, "DMA error");
-		mmiowb();
-		spin_unlock_irqrestore(&bcm->irq_lock, flags);
+		bcm43xx_unlock_mmio(bcm, flags);
 		return;
 	}
-	if (unlikely(merged_dma_reason & BCM43xx_DMAIRQ_NONFATALMASK)) {
+	if (unlikely((dma_reason[0] & BCM43xx_DMAIRQ_NONFATALMASK) |
+		     (dma_reason[1] & BCM43xx_DMAIRQ_NONFATALMASK) |
+		     (dma_reason[2] & BCM43xx_DMAIRQ_NONFATALMASK) |
+		     (dma_reason[3] & BCM43xx_DMAIRQ_NONFATALMASK))) {
 		printkl(KERN_ERR PFX "DMA error: "
-				     "0x%08X, 0x%08X, 0x%08X, "
-				     "0x%08X, 0x%08X, 0x%08X\n",
+				     "0x%08X, 0x%08X, 0x%08X, 0x%08X\n",
 		        dma_reason[0], dma_reason[1],
-			dma_reason[2], dma_reason[3],
-			dma_reason[4], dma_reason[5]);
+			dma_reason[2], dma_reason[3]);
 	}
 
 	if (reason & BCM43xx_IRQ_PS) {
@@ -1762,6 +1777,8 @@ static void bcm43xx_interrupt_tasklet(struct bcm43xx_private *bcm)
 	}
 
 	/* Check the DMA reason registers for received data. */
+	assert(!(dma_reason[1] & BCM43xx_DMAIRQ_RX_DONE));
+	assert(!(dma_reason[2] & BCM43xx_DMAIRQ_RX_DONE));
 	if (dma_reason[0] & BCM43xx_DMAIRQ_RX_DONE) {
 		if (bcm43xx_using_pio(bcm))
 			bcm43xx_pio_rx(bcm43xx_current_pio(bcm)->queue0);
@@ -1769,17 +1786,13 @@ static void bcm43xx_interrupt_tasklet(struct bcm43xx_private *bcm)
 			bcm43xx_dma_rx(bcm43xx_current_dma(bcm)->rx_ring0);
 		/* We intentionally don't set "activity" to 1, here. */
 	}
-	assert(!(dma_reason[1] & BCM43xx_DMAIRQ_RX_DONE));
-	assert(!(dma_reason[2] & BCM43xx_DMAIRQ_RX_DONE));
 	if (dma_reason[3] & BCM43xx_DMAIRQ_RX_DONE) {
 		if (bcm43xx_using_pio(bcm))
 			bcm43xx_pio_rx(bcm43xx_current_pio(bcm)->queue3);
 		else
-			bcm43xx_dma_rx(bcm43xx_current_dma(bcm)->rx_ring3);
+			bcm43xx_dma_rx(bcm43xx_current_dma(bcm)->rx_ring1);
 		activity = 1;
 	}
-	assert(!(dma_reason[4] & BCM43xx_DMAIRQ_RX_DONE));
-	assert(!(dma_reason[5] & BCM43xx_DMAIRQ_RX_DONE));
 	bcmirq_handled(BCM43xx_IRQ_RX);
 
 	if (reason & BCM43xx_IRQ_XMIT_STATUS) {
@@ -1806,8 +1819,7 @@ static void bcm43xx_interrupt_tasklet(struct bcm43xx_private *bcm)
 	if (!modparam_noleds)
 		bcm43xx_leds_update(bcm, activity);
 	bcm43xx_interrupt_enable(bcm, bcm->irq_savedstate);
-	mmiowb();
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
+	bcm43xx_unlock_mmio(bcm, flags);
 }
 
 static void pio_irq_workaround(struct bcm43xx_private *bcm,
@@ -1836,18 +1848,14 @@ static void bcm43xx_interrupt_ack(struct bcm43xx_private *bcm, u32 reason)
 
 	bcm43xx_write32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON, reason);
 
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA0_REASON,
-			bcm->dma_reason[0]);
 	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA1_REASON,
-			bcm->dma_reason[1]);
+			bcm->dma_reason[0]);
 	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA2_REASON,
-			bcm->dma_reason[2]);
+			bcm->dma_reason[1]);
 	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA3_REASON,
-			bcm->dma_reason[3]);
+			bcm->dma_reason[2]);
 	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA4_REASON,
-			bcm->dma_reason[4]);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA5_REASON,
-			bcm->dma_reason[5]);
+			bcm->dma_reason[3]);
 }
 
 /* Interrupt handler top-half */
@@ -1860,10 +1868,16 @@ static irqreturn_t bcm43xx_interrupt_handler(int irq, void *dev_id, struct pt_re
 	if (!bcm)
 		return IRQ_NONE;
 
-	spin_lock(&bcm->irq_lock);
+	spin_lock(&bcm->_lock);
 
-	assert(bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED);
-	assert(bcm->current_core->id == BCM43xx_COREID_80211);
+	/* Only accept IRQs, if we are initialized properly.
+	 * This avoids an RX race while initializing.
+	 * We should probably not enable IRQs before we are initialized
+	 * completely, but some careful work is needed to fix this. I think it
+	 * is best to stay with this cheap workaround for now... .
+	 */
+	if (unlikely(!bcm->initialized))
+		goto out;
 
 	reason = bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON);
 	if (reason == 0xffffffff) {
@@ -1875,18 +1889,14 @@ static irqreturn_t bcm43xx_interrupt_handler(int irq, void *dev_id, struct pt_re
 	if (!reason)
 		goto out;
 
-	bcm->dma_reason[0] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA0_REASON)
-			     & 0x0001DC00;
-	bcm->dma_reason[1] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA1_REASON)
-			     & 0x0000DC00;
-	bcm->dma_reason[2] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA2_REASON)
-			     & 0x0000DC00;
-	bcm->dma_reason[3] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA3_REASON)
-			     & 0x0001DC00;
-	bcm->dma_reason[4] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA4_REASON)
-			     & 0x0000DC00;
-	bcm->dma_reason[5] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA5_REASON)
-			     & 0x0000DC00;
+	bcm->dma_reason[0] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA1_REASON)
+			     & 0x0001dc00;
+	bcm->dma_reason[1] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA2_REASON)
+			     & 0x0000dc00;
+	bcm->dma_reason[2] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA3_REASON)
+			     & 0x0000dc00;
+	bcm->dma_reason[3] = bcm43xx_read32(bcm, BCM43xx_MMIO_DMA4_REASON)
+			     & 0x0001dc00;
 
 	bcm43xx_interrupt_ack(bcm, reason);
 
@@ -1895,28 +1905,25 @@ static irqreturn_t bcm43xx_interrupt_handler(int irq, void *dev_id, struct pt_re
 	/* save the reason code and call our bottom half. */
 	bcm->irq_reason = reason;
 	tasklet_schedule(&bcm->isr_tasklet);
-
 out:
 	mmiowb();
-	spin_unlock(&bcm->irq_lock);
+	spin_unlock(&bcm->_lock);
 
 	return ret;
 }
 
 static void bcm43xx_release_firmware(struct bcm43xx_private *bcm, int force)
 {
-	struct bcm43xx_phyinfo *phy = bcm43xx_current_phy(bcm);
-
 	if (bcm->firmware_norelease && !force)
 		return; /* Suspending or controller reset. */
-	release_firmware(phy->ucode);
-	phy->ucode = NULL;
-	release_firmware(phy->pcm);
-	phy->pcm = NULL;
-	release_firmware(phy->initvals0);
-	phy->initvals0 = NULL;
-	release_firmware(phy->initvals1);
-	phy->initvals1 = NULL;
+	release_firmware(bcm->ucode);
+	bcm->ucode = NULL;
+	release_firmware(bcm->pcm);
+	bcm->pcm = NULL;
+	release_firmware(bcm->initvals0);
+	bcm->initvals0 = NULL;
+	release_firmware(bcm->initvals1);
+	bcm->initvals1 = NULL;
 }
 
 static int bcm43xx_request_firmware(struct bcm43xx_private *bcm)
@@ -1927,11 +1934,11 @@ static int bcm43xx_request_firmware(struct bcm43xx_private *bcm)
 	int nr;
 	char buf[22 + sizeof(modparam_fwpostfix) - 1] = { 0 };
 
-	if (!phy->ucode) {
+	if (!bcm->ucode) {
 		snprintf(buf, ARRAY_SIZE(buf), "bcm43xx_microcode%d%s.fw",
 			 (rev >= 5 ? 5 : rev),
 			 modparam_fwpostfix);
-		err = request_firmware(&phy->ucode, buf, &bcm->pci_dev->dev);
+		err = request_firmware(&bcm->ucode, buf, &bcm->pci_dev->dev);
 		if (err) {
 			printk(KERN_ERR PFX 
 			       "Error: Microcode \"%s\" not available or load failed.\n",
@@ -1940,12 +1947,12 @@ static int bcm43xx_request_firmware(struct bcm43xx_private *bcm)
 		}
 	}
 
-	if (!phy->pcm) {
+	if (!bcm->pcm) {
 		snprintf(buf, ARRAY_SIZE(buf),
 			 "bcm43xx_pcm%d%s.fw",
 			 (rev < 5 ? 4 : 5),
 			 modparam_fwpostfix);
-		err = request_firmware(&phy->pcm, buf, &bcm->pci_dev->dev);
+		err = request_firmware(&bcm->pcm, buf, &bcm->pci_dev->dev);
 		if (err) {
 			printk(KERN_ERR PFX
 			       "Error: PCM \"%s\" not available or load failed.\n",
@@ -1954,7 +1961,7 @@ static int bcm43xx_request_firmware(struct bcm43xx_private *bcm)
 		}
 	}
 
-	if (!phy->initvals0) {
+	if (!bcm->initvals0) {
 		if (rev == 2 || rev == 4) {
 			switch (phy->type) {
 			case BCM43xx_PHYTYPE_A:
@@ -1985,20 +1992,20 @@ static int bcm43xx_request_firmware(struct bcm43xx_private *bcm)
 		snprintf(buf, ARRAY_SIZE(buf), "bcm43xx_initval%02d%s.fw",
 			 nr, modparam_fwpostfix);
 
-		err = request_firmware(&phy->initvals0, buf, &bcm->pci_dev->dev);
+		err = request_firmware(&bcm->initvals0, buf, &bcm->pci_dev->dev);
 		if (err) {
 			printk(KERN_ERR PFX 
 			       "Error: InitVals \"%s\" not available or load failed.\n",
 			        buf);
 			goto error;
 		}
-		if (phy->initvals0->size % sizeof(struct bcm43xx_initval)) {
+		if (bcm->initvals0->size % sizeof(struct bcm43xx_initval)) {
 			printk(KERN_ERR PFX "InitVals fileformat error.\n");
 			goto error;
 		}
 	}
 
-	if (!phy->initvals1) {
+	if (!bcm->initvals1) {
 		if (rev >= 5) {
 			u32 sbtmstatehigh;
 
@@ -2020,14 +2027,14 @@ static int bcm43xx_request_firmware(struct bcm43xx_private *bcm)
 			snprintf(buf, ARRAY_SIZE(buf), "bcm43xx_initval%02d%s.fw",
 				 nr, modparam_fwpostfix);
 
-			err = request_firmware(&phy->initvals1, buf, &bcm->pci_dev->dev);
+			err = request_firmware(&bcm->initvals1, buf, &bcm->pci_dev->dev);
 			if (err) {
 				printk(KERN_ERR PFX 
 				       "Error: InitVals \"%s\" not available or load failed.\n",
 			        	buf);
 				goto error;
 			}
-			if (phy->initvals1->size % sizeof(struct bcm43xx_initval)) {
+			if (bcm->initvals1->size % sizeof(struct bcm43xx_initval)) {
 				printk(KERN_ERR PFX "InitVals fileformat error.\n");
 				goto error;
 			}
@@ -2047,13 +2054,12 @@ err_noinitval:
 
 static void bcm43xx_upload_microcode(struct bcm43xx_private *bcm)
 {
-	struct bcm43xx_phyinfo *phy = bcm43xx_current_phy(bcm);
 	const u32 *data;
 	unsigned int i, len;
 
 	/* Upload Microcode. */
-	data = (u32 *)(phy->ucode->data);
-	len = phy->ucode->size / sizeof(u32);
+	data = (u32 *)(bcm->ucode->data);
+	len = bcm->ucode->size / sizeof(u32);
 	bcm43xx_shm_control_word(bcm, BCM43xx_SHM_UCODE, 0x0000);
 	for (i = 0; i < len; i++) {
 		bcm43xx_write32(bcm, BCM43xx_MMIO_SHM_DATA,
@@ -2062,8 +2068,8 @@ static void bcm43xx_upload_microcode(struct bcm43xx_private *bcm)
 	}
 
 	/* Upload PCM data. */
-	data = (u32 *)(phy->pcm->data);
-	len = phy->pcm->size / sizeof(u32);
+	data = (u32 *)(bcm->pcm->data);
+	len = bcm->pcm->size / sizeof(u32);
 	bcm43xx_shm_control_word(bcm, BCM43xx_SHM_PCM, 0x01ea);
 	bcm43xx_write32(bcm, BCM43xx_MMIO_SHM_DATA, 0x00004000);
 	bcm43xx_shm_control_word(bcm, BCM43xx_SHM_PCM, 0x01eb);
@@ -2109,16 +2115,15 @@ err_format:
 
 static int bcm43xx_upload_initvals(struct bcm43xx_private *bcm)
 {
-	struct bcm43xx_phyinfo *phy = bcm43xx_current_phy(bcm);
 	int err;
 
-	err = bcm43xx_write_initvals(bcm, (struct bcm43xx_initval *)phy->initvals0->data,
-				     phy->initvals0->size / sizeof(struct bcm43xx_initval));
+	err = bcm43xx_write_initvals(bcm, (struct bcm43xx_initval *)bcm->initvals0->data,
+				     bcm->initvals0->size / sizeof(struct bcm43xx_initval));
 	if (err)
 		goto out;
-	if (phy->initvals1) {
-		err = bcm43xx_write_initvals(bcm, (struct bcm43xx_initval *)phy->initvals1->data,
-					     phy->initvals1->size / sizeof(struct bcm43xx_initval));
+	if (bcm->initvals1) {
+		err = bcm43xx_write_initvals(bcm, (struct bcm43xx_initval *)bcm->initvals1->data,
+					     bcm->initvals1->size / sizeof(struct bcm43xx_initval));
 		if (err)
 			goto out;
 	}
@@ -2126,38 +2131,49 @@ out:
 	return err;
 }
 
-#ifdef CONFIG_BCM947XX
-static struct pci_device_id bcm43xx_47xx_ids[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_BROADCOM, 0x4324) },
-	{ 0 }
-};
-#endif
-
 static int bcm43xx_initialize_irq(struct bcm43xx_private *bcm)
 {
-	int err;
+	int res;
+	unsigned int i;
+	u32 data;
 
 	bcm->irq = bcm->pci_dev->irq;
 #ifdef CONFIG_BCM947XX
 	if (bcm->pci_dev->bus->number == 0) {
-		struct pci_dev *d;
-		struct pci_device_id *id;
-		for (id = bcm43xx_47xx_ids; id->vendor; id++) {
-			d = pci_get_device(id->vendor, id->device, NULL);
-			if (d != NULL) {
-				bcm->irq = d->irq;
-				pci_dev_put(d);
-				break;
-			}
+		struct pci_dev *d = NULL;
+		/* FIXME: we will probably need more device IDs here... */
+		d = pci_find_device(PCI_VENDOR_ID_BROADCOM, 0x4324, NULL);
+		if (d != NULL) {
+			bcm->irq = d->irq;
 		}
 	}
 #endif
-	err = request_irq(bcm->irq, bcm43xx_interrupt_handler,
-			  IRQF_SHARED, KBUILD_MODNAME, bcm);
-	if (err)
+	res = request_irq(bcm->irq, bcm43xx_interrupt_handler,
+			  SA_SHIRQ, KBUILD_MODNAME, bcm);
+	if (res) {
 		printk(KERN_ERR PFX "Cannot register IRQ%d\n", bcm->irq);
+		return -ENODEV;
+	}
+	bcm43xx_write32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON, 0xffffffff);
+	bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD, 0x00020402);
+	i = 0;
+	while (1) {
+		data = bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON);
+		if (data == BCM43xx_IRQ_READY)
+			break;
+		i++;
+		if (i >= BCM43xx_IRQWAIT_MAX_RETRIES) {
+			printk(KERN_ERR PFX "Card IRQ register not responding. "
+					    "Giving up.\n");
+			free_irq(bcm->irq, bcm);
+			return -ENODEV;
+		}
+		udelay(10);
+	}
+	// dummy read
+	bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON);
 
-	return err;
+	return 0;
 }
 
 /* Switch to the core used to write the GPIO register.
@@ -2255,17 +2271,13 @@ static int bcm43xx_gpio_cleanup(struct bcm43xx_private *bcm)
 /* http://bcm-specs.sipsolutions.net/EnableMac */
 void bcm43xx_mac_enable(struct bcm43xx_private *bcm)
 {
-	bcm->mac_suspended--;
-	assert(bcm->mac_suspended >= 0);
-	if (bcm->mac_suspended == 0) {
-		bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD,
-		                bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD)
-				| BCM43xx_SBF_MAC_ENABLED);
-		bcm43xx_write32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON, BCM43xx_IRQ_READY);
-		bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD); /* dummy read */
-		bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON); /* dummy read */
-		bcm43xx_power_saving_ctl_bits(bcm, -1, -1);
-	}
+	bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD,
+	                bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD)
+			| BCM43xx_SBF_MAC_ENABLED);
+	bcm43xx_write32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON, BCM43xx_IRQ_READY);
+	bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD); /* dummy read */
+	bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON); /* dummy read */
+	bcm43xx_power_saving_ctl_bits(bcm, -1, -1);
 }
 
 /* http://bcm-specs.sipsolutions.net/SuspendMAC */
@@ -2274,23 +2286,18 @@ void bcm43xx_mac_suspend(struct bcm43xx_private *bcm)
 	int i;
 	u32 tmp;
 
-	assert(bcm->mac_suspended >= 0);
-	if (bcm->mac_suspended == 0) {
-		bcm43xx_power_saving_ctl_bits(bcm, -1, 1);
-		bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD,
-		                bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD)
-				& ~BCM43xx_SBF_MAC_ENABLED);
-		bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON); /* dummy read */
-		for (i = 10000; i; i--) {
-			tmp = bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON);
-			if (tmp & BCM43xx_IRQ_READY)
-				goto out;
-			udelay(1);
-		}
-		printkl(KERN_ERR PFX "MAC suspend failed\n");
+	bcm43xx_power_saving_ctl_bits(bcm, -1, 1);
+	bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD,
+	                bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD)
+			& ~BCM43xx_SBF_MAC_ENABLED);
+	bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON); /* dummy read */
+	for (i = 100000; i; i--) {
+		tmp = bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON);
+		if (tmp & BCM43xx_IRQ_READY)
+			return;
+		udelay(10);
 	}
-out:
-	bcm->mac_suspended++;
+	printkl(KERN_ERR PFX "MAC suspend failed\n");
 }
 
 void bcm43xx_set_iwmode(struct bcm43xx_private *bcm,
@@ -2360,6 +2367,7 @@ static void bcm43xx_chip_cleanup(struct bcm43xx_private *bcm)
 	if (!modparam_noleds)
 		bcm43xx_leds_exit(bcm);
 	bcm43xx_gpio_cleanup(bcm);
+	free_irq(bcm->irq, bcm);
 	bcm43xx_release_firmware(bcm, 0);
 }
 
@@ -2371,7 +2379,7 @@ static int bcm43xx_chip_init(struct bcm43xx_private *bcm)
 	struct bcm43xx_radioinfo *radio = bcm43xx_current_radio(bcm);
 	struct bcm43xx_phyinfo *phy = bcm43xx_current_phy(bcm);
 	int err;
-	int i, tmp;
+	int tmp;
 	u32 value32;
 	u16 value16;
 
@@ -2384,53 +2392,13 @@ static int bcm43xx_chip_init(struct bcm43xx_private *bcm)
 		goto out;
 	bcm43xx_upload_microcode(bcm);
 
-	bcm43xx_write32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON, 0xFFFFFFFF);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_STATUS_BITFIELD, 0x00020402);
-	i = 0;
-	while (1) {
-		value32 = bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON);
-		if (value32 == BCM43xx_IRQ_READY)
-			break;
-		i++;
-		if (i >= BCM43xx_IRQWAIT_MAX_RETRIES) {
-			printk(KERN_ERR PFX "IRQ_READY timeout\n");
-			err = -ENODEV;
-			goto err_release_fw;
-		}
-		udelay(10);
-	}
-	bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON); /* dummy read */
-
-	value16 = bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				     BCM43xx_UCODE_REVISION);
-
-	dprintk(KERN_INFO PFX "Microcode rev 0x%x, pl 0x%x "
-		"(20%.2i-%.2i-%.2i  %.2i:%.2i:%.2i)\n", value16,
-		bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				   BCM43xx_UCODE_PATCHLEVEL),
-		(bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				    BCM43xx_UCODE_DATE) >> 12) & 0xf,
-		(bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				    BCM43xx_UCODE_DATE) >> 8) & 0xf,
-		bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				   BCM43xx_UCODE_DATE) & 0xff,
-		(bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				   BCM43xx_UCODE_TIME) >> 11) & 0x1f,
-		(bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				   BCM43xx_UCODE_TIME) >> 5) & 0x3f,
-		bcm43xx_shm_read16(bcm, BCM43xx_SHM_SHARED,
-				   BCM43xx_UCODE_TIME) & 0x1f);
-
-	if ( value16 > 0x128 ) {
-		dprintk(KERN_ERR PFX
-			"Firmware: no support for microcode rev > 0x128\n");
-		err = -1;
+	err = bcm43xx_initialize_irq(bcm);
+	if (err)
 		goto err_release_fw;
-	}
 
 	err = bcm43xx_gpio_init(bcm);
 	if (err)
-		goto err_release_fw;
+		goto err_free_irq;
 
 	err = bcm43xx_upload_initvals(bcm);
 	if (err)
@@ -2494,12 +2462,10 @@ static int bcm43xx_chip_init(struct bcm43xx_private *bcm)
 		bcm43xx_write32(bcm, 0x018C, 0x02000000);
 	}
 	bcm43xx_write32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON, 0x00004000);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA0_IRQ_MASK, 0x0001DC00);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA1_IRQ_MASK, 0x0000DC00);
+	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA1_IRQ_MASK, 0x0001DC00);
 	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA2_IRQ_MASK, 0x0000DC00);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA3_IRQ_MASK, 0x0001DC00);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA4_IRQ_MASK, 0x0000DC00);
-	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA5_IRQ_MASK, 0x0000DC00);
+	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA3_IRQ_MASK, 0x0000DC00);
+	bcm43xx_write32(bcm, BCM43xx_MMIO_DMA4_IRQ_MASK, 0x0001DC00);
 
 	value32 = bcm43xx_read32(bcm, BCM43xx_CIR_SBTMSTATELOW);
 	value32 |= 0x00100000;
@@ -2516,6 +2482,8 @@ err_radio_off:
 	bcm43xx_radio_turn_off(bcm);
 err_gpio_cleanup:
 	bcm43xx_gpio_cleanup(bcm);
+err_free_irq:
+	free_irq(bcm->irq, bcm);
 err_release_fw:
 	bcm43xx_release_firmware(bcm, 1);
 	goto out;
@@ -2555,9 +2523,11 @@ static void bcm43xx_init_struct_phyinfo(struct bcm43xx_phyinfo *phy)
 {
 	/* Initialize a "phyinfo" structure. The structure is already
 	 * zeroed out.
-	 * This is called on insmod time to initialize members.
 	 */
+	phy->antenna_diversity = 0xFFFF;
 	phy->savedpctlreg = 0xFFFF;
+	phy->minlowsig[0] = 0xFFFF;
+	phy->minlowsig[1] = 0xFFFF;
 	spin_lock_init(&phy->lock);
 }
 
@@ -2565,11 +2535,14 @@ static void bcm43xx_init_struct_radioinfo(struct bcm43xx_radioinfo *radio)
 {
 	/* Initialize a "radioinfo" structure. The structure is already
 	 * zeroed out.
-	 * This is called on insmod time to initialize members.
 	 */
 	radio->interfmode = BCM43xx_RADIO_INTERFMODE_NONE;
 	radio->channel = 0xFF;
 	radio->initial_channel = 0xFF;
+	radio->lofcal = 0xFFFF;
+	radio->initval = 0xFFFF;
+	radio->nrssi[0] = -1000;
+	radio->nrssi[1] = -1000;
 }
 
 static int bcm43xx_probe_cores(struct bcm43xx_private *bcm)
@@ -2587,6 +2560,7 @@ static int bcm43xx_probe_cores(struct bcm43xx_private *bcm)
 				    * BCM43xx_MAX_80211_CORES);
 	memset(&bcm->core_80211_ext, 0, sizeof(struct bcm43xx_coreinfo_80211)
 					* BCM43xx_MAX_80211_CORES);
+	bcm->current_80211_core_idx = -1;
 	bcm->nr_80211_available = 0;
 	bcm->current_core = NULL;
 	bcm->active_80211_core = NULL;
@@ -2756,7 +2730,6 @@ static int bcm43xx_probe_cores(struct bcm43xx_private *bcm)
 				goto out;
 			}
 			bcm->nr_80211_available++;
-			core->priv = ext_80211;
 			bcm43xx_init_struct_phyinfo(&ext_80211->phy);
 			bcm43xx_init_struct_radioinfo(&ext_80211->radio);
 			break;
@@ -2857,8 +2830,7 @@ static void bcm43xx_wireless_core_cleanup(struct bcm43xx_private *bcm)
 }
 
 /* http://bcm-specs.sipsolutions.net/80211Init */
-static int bcm43xx_wireless_core_init(struct bcm43xx_private *bcm,
-				      int active_wlcore)
+static int bcm43xx_wireless_core_init(struct bcm43xx_private *bcm)
 {
 	struct bcm43xx_phyinfo *phy = bcm43xx_current_phy(bcm);
 	struct bcm43xx_radioinfo *radio = bcm43xx_current_radio(bcm);
@@ -2940,26 +2912,19 @@ static int bcm43xx_wireless_core_init(struct bcm43xx_private *bcm,
 	if (bcm->current_core->rev >= 5)
 		bcm43xx_write16(bcm, 0x043C, 0x000C);
 
-	if (active_wlcore) {
-		if (bcm43xx_using_pio(bcm))
-			err = bcm43xx_pio_init(bcm);
-		else
-			err = bcm43xx_dma_init(bcm);
-		if (err)
-			goto err_chip_cleanup;
-	}
+	if (bcm43xx_using_pio(bcm))
+		err = bcm43xx_pio_init(bcm);
+	else
+		err = bcm43xx_dma_init(bcm);
+	if (err)
+		goto err_chip_cleanup;
 	bcm43xx_write16(bcm, 0x0612, 0x0050);
 	bcm43xx_shm_write16(bcm, BCM43xx_SHM_SHARED, 0x0416, 0x0050);
 	bcm43xx_shm_write16(bcm, BCM43xx_SHM_SHARED, 0x0414, 0x01F4);
 
-	if (active_wlcore) {
-		if (radio->initial_channel != 0xFF)
-			bcm43xx_radio_selectchannel(bcm, radio->initial_channel, 0);
-	}
+	bcm43xx_mac_enable(bcm);
+	bcm43xx_interrupt_enable(bcm, bcm->irq_savedstate);
 
-	/* Don't enable MAC/IRQ here, as it will race with the IRQ handler.
-	 * We enable it later.
-	 */
 	bcm->current_core->initialized = 1;
 out:
 	return err;
@@ -3074,6 +3039,11 @@ out:
 	return err;
 }
 
+static void bcm43xx_softmac_init(struct bcm43xx_private *bcm)
+{
+	ieee80211softmac_start(bcm->net_dev);
+}
+
 static void bcm43xx_periodic_every120sec(struct bcm43xx_private *bcm)
 {
 	struct bcm43xx_phyinfo *phy = bcm43xx_current_phy(bcm);
@@ -3134,10 +3104,15 @@ static void bcm43xx_periodic_every15sec(struct bcm43xx_private *bcm)
 	//TODO for APHY (temperature?)
 }
 
-static void do_periodic_work(struct bcm43xx_private *bcm)
+static void bcm43xx_periodic_task_handler(unsigned long d)
 {
+	struct bcm43xx_private *bcm = (struct bcm43xx_private *)d;
+	unsigned long flags;
 	unsigned int state;
 
+	bcm43xx_lock_mmio(bcm, flags);
+
+	assert(bcm->initialized);
 	state = bcm->periodic_state;
 	if (state % 8 == 0)
 		bcm43xx_periodic_every120sec(bcm);
@@ -3145,93 +3120,29 @@ static void do_periodic_work(struct bcm43xx_private *bcm)
 		bcm43xx_periodic_every60sec(bcm);
 	if (state % 2 == 0)
 		bcm43xx_periodic_every30sec(bcm);
-	if (state % 1 == 0)
-		bcm43xx_periodic_every15sec(bcm);
+	bcm43xx_periodic_every15sec(bcm);
 	bcm->periodic_state = state + 1;
 
-	schedule_delayed_work(&bcm->periodic_work, HZ * 15);
+	mod_timer(&bcm->periodic_tasks, jiffies + (HZ * 15));
+
+	bcm43xx_unlock_mmio(bcm, flags);
 }
 
-/* Estimate a "Badness" value based on the periodic work
- * state-machine state. "Badness" is worse (bigger), if the
- * periodic work will take longer.
- */
-static int estimate_periodic_work_badness(unsigned int state)
+static void bcm43xx_periodic_tasks_delete(struct bcm43xx_private *bcm)
 {
-	int badness = 0;
-
-	if (state % 8 == 0) /* every 120 sec */
-		badness += 10;
-	if (state % 4 == 0) /* every 60 sec */
-		badness += 5;
-	if (state % 2 == 0) /* every 30 sec */
-		badness += 1;
-	if (state % 1 == 0) /* every 15 sec */
-		badness += 1;
-
-#define BADNESS_LIMIT	4
-	return badness;
+	del_timer_sync(&bcm->periodic_tasks);
 }
 
-static void bcm43xx_periodic_work_handler(void *d)
+static void bcm43xx_periodic_tasks_setup(struct bcm43xx_private *bcm)
 {
-	struct bcm43xx_private *bcm = d;
-	unsigned long flags;
-	u32 savedirqs = 0;
-	int badness;
+	struct timer_list *timer = &(bcm->periodic_tasks);
 
-	badness = estimate_periodic_work_badness(bcm->periodic_state);
-	mutex_lock(&bcm->mutex);
-
-	/* We must fake a started transmission here, as we are going to
-	 * disable TX. If we wouldn't fake a TX, it would be possible to
-	 * trigger the netdev watchdog, if the last real TX is already
-	 * some time on the past (slightly less than 5secs)
-	 */
-	bcm->net_dev->trans_start = jiffies;
-	netif_tx_disable(bcm->net_dev);
-
-	spin_lock_irqsave(&bcm->irq_lock, flags);
-	if (badness > BADNESS_LIMIT) {
-		/* Periodic work will take a long time, so we want it to
-		 * be preemtible.
-		 */
-		bcm43xx_mac_suspend(bcm);
-		if (bcm43xx_using_pio(bcm))
-			bcm43xx_pio_freeze_txqueues(bcm);
-		savedirqs = bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
-		spin_unlock_irqrestore(&bcm->irq_lock, flags);
-		bcm43xx_synchronize_irq(bcm);
-	}
-
-	do_periodic_work(bcm);
-
-	if (badness > BADNESS_LIMIT) {
-		spin_lock_irqsave(&bcm->irq_lock, flags);
-		tasklet_enable(&bcm->isr_tasklet);
-		bcm43xx_interrupt_enable(bcm, savedirqs);
-		if (bcm43xx_using_pio(bcm))
-			bcm43xx_pio_thaw_txqueues(bcm);
-		bcm43xx_mac_enable(bcm);
-	}
-	mmiowb();
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
-	netif_wake_queue(bcm->net_dev);
-	mutex_unlock(&bcm->mutex);
-}
-
-void bcm43xx_periodic_tasks_delete(struct bcm43xx_private *bcm)
-{
-	cancel_rearming_delayed_work(&bcm->periodic_work);
-}
-
-void bcm43xx_periodic_tasks_setup(struct bcm43xx_private *bcm)
-{
-	struct work_struct *work = &(bcm->periodic_work);
-
-	assert(bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED);
-	INIT_WORK(work, bcm43xx_periodic_work_handler, bcm);
-	schedule_work(work);
+	assert(bcm->initialized);
+	setup_timer(timer,
+		    bcm43xx_periodic_task_handler,
+		    (unsigned long)bcm);
+	timer->expires = jiffies;
+	add_timer(timer);
 }
 
 static void bcm43xx_security_init(struct bcm43xx_private *bcm)
@@ -3241,363 +3152,143 @@ static void bcm43xx_security_init(struct bcm43xx_private *bcm)
 	bcm43xx_clear_keys(bcm);
 }
 
-static int bcm43xx_rng_read(struct hwrng *rng, u32 *data)
-{
-	struct bcm43xx_private *bcm = (struct bcm43xx_private *)rng->priv;
-	unsigned long flags;
-
-	spin_lock_irqsave(&(bcm)->irq_lock, flags);
-	*data = bcm43xx_read16(bcm, BCM43xx_MMIO_RNG);
-	spin_unlock_irqrestore(&(bcm)->irq_lock, flags);
-
-	return (sizeof(u16));
-}
-
-static void bcm43xx_rng_exit(struct bcm43xx_private *bcm)
-{
-	hwrng_unregister(&bcm->rng);
-}
-
-static int bcm43xx_rng_init(struct bcm43xx_private *bcm)
-{
-	int err;
-
-	snprintf(bcm->rng_name, ARRAY_SIZE(bcm->rng_name),
-		 "%s_%s", KBUILD_MODNAME, bcm->net_dev->name);
-	bcm->rng.name = bcm->rng_name;
-	bcm->rng.data_read = bcm43xx_rng_read;
-	bcm->rng.priv = (unsigned long)bcm;
-	err = hwrng_register(&bcm->rng);
-	if (err)
-		printk(KERN_ERR PFX "RNG init failed (%d)\n", err);
-
-	return err;
-}
-
-static int bcm43xx_shutdown_all_wireless_cores(struct bcm43xx_private *bcm)
-{
-	int ret = 0;
-	int i, err;
-	struct bcm43xx_coreinfo *core;
-
-	bcm43xx_set_status(bcm, BCM43xx_STAT_SHUTTINGDOWN);
-	for (i = 0; i < bcm->nr_80211_available; i++) {
-		core = &(bcm->core_80211[i]);
-		assert(core->available);
-		if (!core->initialized)
-			continue;
-		err = bcm43xx_switch_core(bcm, core);
-		if (err) {
-			dprintk(KERN_ERR PFX "shutdown_all_wireless_cores "
-					     "switch_core failed (%d)\n", err);
-			ret = err;
-			continue;
-		}
-		bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
-		bcm43xx_read32(bcm, BCM43xx_MMIO_GEN_IRQ_REASON); /* dummy read */
-		bcm43xx_wireless_core_cleanup(bcm);
-		if (core == bcm->active_80211_core)
-			bcm->active_80211_core = NULL;
-	}
-	free_irq(bcm->irq, bcm);
-	bcm43xx_set_status(bcm, BCM43xx_STAT_UNINIT);
-
-	return ret;
-}
-
 /* This is the opposite of bcm43xx_init_board() */
 static void bcm43xx_free_board(struct bcm43xx_private *bcm)
 {
-	bcm43xx_rng_exit(bcm);
+	int i, err;
+	unsigned long flags;
+
 	bcm43xx_sysfs_unregister(bcm);
+
 	bcm43xx_periodic_tasks_delete(bcm);
 
-	mutex_lock(&(bcm)->mutex);
-	bcm43xx_shutdown_all_wireless_cores(bcm);
-	bcm43xx_pctl_set_crystal(bcm, 0);
-	mutex_unlock(&(bcm)->mutex);
-}
+	bcm43xx_lock(bcm, flags);
+	bcm->initialized = 0;
+	bcm->shutting_down = 1;
+	bcm43xx_unlock(bcm, flags);
 
-static void prepare_phydata_for_init(struct bcm43xx_phyinfo *phy)
-{
-	phy->antenna_diversity = 0xFFFF;
-	memset(phy->minlowsig, 0xFF, sizeof(phy->minlowsig));
-	memset(phy->minlowsigpos, 0, sizeof(phy->minlowsigpos));
-
-	/* Flags */
-	phy->calibrated = 0;
-	phy->is_locked = 0;
-
-	if (phy->_lo_pairs) {
-		memset(phy->_lo_pairs, 0,
-		       sizeof(struct bcm43xx_lopair) * BCM43xx_LO_COUNT);
-	}
-	memset(phy->loopback_gain, 0, sizeof(phy->loopback_gain));
-}
-
-static void prepare_radiodata_for_init(struct bcm43xx_private *bcm,
-				       struct bcm43xx_radioinfo *radio)
-{
-	int i;
-
-	/* Set default attenuation values. */
-	radio->baseband_atten = bcm43xx_default_baseband_attenuation(bcm);
-	radio->radio_atten = bcm43xx_default_radio_attenuation(bcm);
-	radio->txctl1 = bcm43xx_default_txctl1(bcm);
-	radio->txctl2 = 0xFFFF;
-	radio->txpwr_offset = 0;
-
-	/* NRSSI */
-	radio->nrssislope = 0;
-	for (i = 0; i < ARRAY_SIZE(radio->nrssi); i++)
-		radio->nrssi[i] = -1000;
-	for (i = 0; i < ARRAY_SIZE(radio->nrssi_lt); i++)
-		radio->nrssi_lt[i] = i;
-
-	radio->lofcal = 0xFFFF;
-	radio->initval = 0xFFFF;
-
-	radio->aci_enable = 0;
-	radio->aci_wlan_automatic = 0;
-	radio->aci_hw_rssi = 0;
-}
-
-static void prepare_priv_for_init(struct bcm43xx_private *bcm)
-{
-	int i;
-	struct bcm43xx_coreinfo *core;
-	struct bcm43xx_coreinfo_80211 *wlext;
-
-	assert(!bcm->active_80211_core);
-
-	bcm43xx_set_status(bcm, BCM43xx_STAT_INITIALIZING);
-
-	/* Flags */
-	bcm->was_initialized = 0;
-	bcm->reg124_set_0x4 = 0;
-
-	/* Stats */
-	memset(&bcm->stats, 0, sizeof(bcm->stats));
-
-	/* Wireless core data */
 	for (i = 0; i < BCM43xx_MAX_80211_CORES; i++) {
-		core = &(bcm->core_80211[i]);
-		wlext = core->priv;
-
-		if (!core->available)
+		if (!bcm->core_80211[i].available)
 			continue;
-		assert(wlext == &(bcm->core_80211_ext[i]));
-
-		prepare_phydata_for_init(&wlext->phy);
-		prepare_radiodata_for_init(bcm, &wlext->radio);
-	}
-
-	/* IRQ related flags */
-	bcm->irq_reason = 0;
-	memset(bcm->dma_reason, 0, sizeof(bcm->dma_reason));
-	bcm->irq_savedstate = BCM43xx_IRQ_INITIAL;
-
-	bcm->mac_suspended = 1;
-
-	/* Noise calculation context */
-	memset(&bcm->noisecalc, 0, sizeof(bcm->noisecalc));
-
-	/* Periodic work context */
-	bcm->periodic_state = 0;
-}
-
-static int wireless_core_up(struct bcm43xx_private *bcm,
-			    int active_wlcore)
-{
-	int err;
-
-	if (!bcm43xx_core_enabled(bcm))
-		bcm43xx_wireless_core_reset(bcm, 1);
-	if (!active_wlcore)
-		bcm43xx_wireless_core_mark_inactive(bcm);
-	err = bcm43xx_wireless_core_init(bcm, active_wlcore);
-	if (err)
-		goto out;
-	if (!active_wlcore)
-		bcm43xx_radio_turn_off(bcm);
-out:
-	return err;
-}
-
-/* Select and enable the "to be used" wireless core.
- * Locking: bcm->mutex must be aquired before calling this.
- *          bcm->irq_lock must not be aquired.
- */
-int bcm43xx_select_wireless_core(struct bcm43xx_private *bcm,
-				 int phytype)
-{
-	int i, err;
-	struct bcm43xx_coreinfo *active_core = NULL;
-	struct bcm43xx_coreinfo_80211 *active_wlext = NULL;
-	struct bcm43xx_coreinfo *core;
-	struct bcm43xx_coreinfo_80211 *wlext;
-	int adjust_active_sbtmstatelow = 0;
-
-	might_sleep();
-
-	if (phytype < 0) {
-		/* If no phytype is requested, select the first core. */
-		assert(bcm->core_80211[0].available);
-		wlext = bcm->core_80211[0].priv;
-		phytype = wlext->phy.type;
-	}
-	/* Find the requested core. */
-	for (i = 0; i < bcm->nr_80211_available; i++) {
-		core = &(bcm->core_80211[i]);
-		wlext = core->priv;
-		if (wlext->phy.type == phytype) {
-			active_core = core;
-			active_wlext = wlext;
-			break;
-		}
-	}
-	if (!active_core)
-		return -ESRCH; /* No such PHYTYPE on this board. */
-
-	if (bcm->active_80211_core) {
-		/* We already selected a wl core in the past.
-		 * So first clean up everything.
-		 */
-		dprintk(KERN_INFO PFX "select_wireless_core: cleanup\n");
-		ieee80211softmac_stop(bcm->net_dev);
-		bcm43xx_set_status(bcm, BCM43xx_STAT_INITIALIZED);
-		err = bcm43xx_disable_interrupts_sync(bcm);
-		assert(!err);
-		tasklet_enable(&bcm->isr_tasklet);
-		err = bcm43xx_shutdown_all_wireless_cores(bcm);
-		if (err)
-			goto error;
-		/* Ok, everything down, continue to re-initialize. */
-		bcm43xx_set_status(bcm, BCM43xx_STAT_INITIALIZING);
-	}
-
-	/* Reset all data structures. */
-	prepare_priv_for_init(bcm);
-
-	err = bcm43xx_pctl_set_clock(bcm, BCM43xx_PCTL_CLK_FAST);
-	if (err)
-		goto error;
-
-	/* Mark all unused cores "inactive". */
-	for (i = 0; i < bcm->nr_80211_available; i++) {
-		core = &(bcm->core_80211[i]);
-		wlext = core->priv;
-
-		if (core == active_core)
+		if (!bcm->core_80211[i].initialized)
 			continue;
-		err = bcm43xx_switch_core(bcm, core);
-		if (err) {
-			dprintk(KERN_ERR PFX "Could not switch to inactive "
-					     "802.11 core (%d)\n", err);
-			goto error;
-		}
-		err = wireless_core_up(bcm, 0);
-		if (err) {
-			dprintk(KERN_ERR PFX "core_up for inactive 802.11 core "
-					     "failed (%d)\n", err);
-			goto error;
-		}
-		adjust_active_sbtmstatelow = 1;
+
+		err = bcm43xx_switch_core(bcm, &bcm->core_80211[i]);
+		assert(err == 0);
+		bcm43xx_wireless_core_cleanup(bcm);
 	}
 
-	/* Now initialize the active 802.11 core. */
-	err = bcm43xx_switch_core(bcm, active_core);
-	if (err) {
-		dprintk(KERN_ERR PFX "Could not switch to active "
-				     "802.11 core (%d)\n", err);
-		goto error;
-	}
-	if (adjust_active_sbtmstatelow &&
-	    active_wlext->phy.type == BCM43xx_PHYTYPE_G) {
-		u32 sbtmstatelow;
+	bcm43xx_pctl_set_crystal(bcm, 0);
 
-		sbtmstatelow = bcm43xx_read32(bcm, BCM43xx_CIR_SBTMSTATELOW);
-		sbtmstatelow |= 0x20000000;
-		bcm43xx_write32(bcm, BCM43xx_CIR_SBTMSTATELOW, sbtmstatelow);
-	}
-	err = wireless_core_up(bcm, 1);
-	if (err) {
-		dprintk(KERN_ERR PFX "core_up for active 802.11 core "
-				     "failed (%d)\n", err);
-		goto error;
-	}
-	err = bcm43xx_pctl_set_clock(bcm, BCM43xx_PCTL_CLK_DYNAMIC);
-	if (err)
-		goto error;
-	bcm->active_80211_core = active_core;
-
-	bcm43xx_macfilter_clear(bcm, BCM43xx_MACFILTER_ASSOC);
-	bcm43xx_macfilter_set(bcm, BCM43xx_MACFILTER_SELF, (u8 *)(bcm->net_dev->dev_addr));
-	bcm43xx_security_init(bcm);
-	drain_txstatus_queue(bcm);
-	ieee80211softmac_start(bcm->net_dev);
-
-	/* Let's go! Be careful after enabling the IRQs.
-	 * Don't switch cores, for example.
-	 */
-	bcm43xx_mac_enable(bcm);
-	bcm43xx_set_status(bcm, BCM43xx_STAT_INITIALIZED);
-	err = bcm43xx_initialize_irq(bcm);
-	if (err)
-		goto error;
-	bcm43xx_interrupt_enable(bcm, bcm->irq_savedstate);
-
-	dprintk(KERN_INFO PFX "Selected 802.11 core (phytype %d)\n",
-		active_wlext->phy.type);
-
-	return 0;
-
-error:
-	bcm43xx_set_status(bcm, BCM43xx_STAT_UNINIT);
-	bcm43xx_pctl_set_clock(bcm, BCM43xx_PCTL_CLK_SLOW);
-	return err;
+	bcm43xx_lock(bcm, flags);
+	bcm->shutting_down = 0;
+	bcm43xx_unlock(bcm, flags);
 }
 
 static int bcm43xx_init_board(struct bcm43xx_private *bcm)
 {
-	int err;
+	int i, err;
+	int connect_phy;
+	unsigned long flags;
 
-	mutex_lock(&(bcm)->mutex);
+	might_sleep();
 
-	tasklet_enable(&bcm->isr_tasklet);
+	bcm43xx_lock(bcm, flags);
+	bcm->initialized = 0;
+	bcm->shutting_down = 0;
+	bcm43xx_unlock(bcm, flags);
+
 	err = bcm43xx_pctl_set_crystal(bcm, 1);
 	if (err)
-		goto err_tasklet;
+		goto out;
 	err = bcm43xx_pctl_init(bcm);
 	if (err)
 		goto err_crystal_off;
-	err = bcm43xx_select_wireless_core(bcm, -1);
+	err = bcm43xx_pctl_set_clock(bcm, BCM43xx_PCTL_CLK_FAST);
 	if (err)
 		goto err_crystal_off;
-	err = bcm43xx_sysfs_register(bcm);
-	if (err)
-		goto err_wlshutdown;
-	err = bcm43xx_rng_init(bcm);
-	if (err)
-		goto err_sysfs_unreg;
+
+	tasklet_enable(&bcm->isr_tasklet);
+	for (i = 0; i < bcm->nr_80211_available; i++) {
+		err = bcm43xx_switch_core(bcm, &bcm->core_80211[i]);
+		assert(err != -ENODEV);
+		if (err)
+			goto err_80211_unwind;
+
+		/* Enable the selected wireless core.
+		 * Connect PHY only on the first core.
+		 */
+		if (!bcm43xx_core_enabled(bcm)) {
+			if (bcm->nr_80211_available == 1) {
+				connect_phy = bcm43xx_current_phy(bcm)->connected;
+			} else {
+				if (i == 0)
+					connect_phy = 1;
+				else
+					connect_phy = 0;
+			}
+			bcm43xx_wireless_core_reset(bcm, connect_phy);
+		}
+
+		if (i != 0)
+			bcm43xx_wireless_core_mark_inactive(bcm, &bcm->core_80211[0]);
+
+		err = bcm43xx_wireless_core_init(bcm);
+		if (err)
+			goto err_80211_unwind;
+
+		if (i != 0) {
+			bcm43xx_mac_suspend(bcm);
+			bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
+			bcm43xx_radio_turn_off(bcm);
+		}
+	}
+	bcm->active_80211_core = &bcm->core_80211[0];
+	if (bcm->nr_80211_available >= 2) {
+		bcm43xx_switch_core(bcm, &bcm->core_80211[0]);
+		bcm43xx_mac_enable(bcm);
+	}
+	bcm43xx_macfilter_clear(bcm, BCM43xx_MACFILTER_ASSOC);
+	bcm43xx_macfilter_set(bcm, BCM43xx_MACFILTER_SELF, (u8 *)(bcm->net_dev->dev_addr));
+	dprintk(KERN_INFO PFX "80211 cores initialized\n");
+	bcm43xx_security_init(bcm);
+	bcm43xx_softmac_init(bcm);
+
+	bcm43xx_pctl_set_clock(bcm, BCM43xx_PCTL_CLK_DYNAMIC);
+
+	if (bcm43xx_current_radio(bcm)->initial_channel != 0xFF) {
+		bcm43xx_mac_suspend(bcm);
+		bcm43xx_radio_selectchannel(bcm, bcm43xx_current_radio(bcm)->initial_channel, 0);
+		bcm43xx_mac_enable(bcm);
+	}
+
+	/* Initialization of the board is done. Flag it as such. */
+	bcm43xx_lock(bcm, flags);
+	bcm->initialized = 1;
+	bcm43xx_unlock(bcm, flags);
+
 	bcm43xx_periodic_tasks_setup(bcm);
+	bcm43xx_sysfs_register(bcm);
+	//FIXME: check for bcm43xx_sysfs_register failure. This function is a bit messy regarding unwinding, though...
 
 	/*FIXME: This should be handled by softmac instead. */
 	schedule_work(&bcm->softmac->associnfo.work);
 
+	assert(err == 0);
 out:
-	mutex_unlock(&(bcm)->mutex);
-
 	return err;
 
-err_sysfs_unreg:
-	bcm43xx_sysfs_unregister(bcm);
-err_wlshutdown:
-	bcm43xx_shutdown_all_wireless_cores(bcm);
+err_80211_unwind:
+	tasklet_disable(&bcm->isr_tasklet);
+	/* unwind all 80211 initialization */
+	for (i = 0; i < bcm->nr_80211_available; i++) {
+		if (!bcm->core_80211[i].initialized)
+			continue;
+		bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
+		bcm43xx_wireless_core_cleanup(bcm);
+	}
 err_crystal_off:
 	bcm43xx_pctl_set_crystal(bcm, 0);
-err_tasklet:
-	tasklet_disable(&bcm->isr_tasklet);
 	goto out;
 }
 
@@ -3608,7 +3299,8 @@ static void bcm43xx_detach_board(struct bcm43xx_private *bcm)
 
 	bcm43xx_chipset_detach(bcm);
 	/* Do _not_ access the chip, after it is detached. */
-	pci_iounmap(pci_dev, bcm->mmio_addr);
+	iounmap(bcm->mmio_addr);
+	
 	pci_release_regions(pci_dev);
 	pci_disable_device(pci_dev);
 
@@ -3698,26 +3390,40 @@ static int bcm43xx_attach_board(struct bcm43xx_private *bcm)
 	struct net_device *net_dev = bcm->net_dev;
 	int err;
 	int i;
+	unsigned long mmio_start, mmio_flags, mmio_len;
 	u32 coremask;
 
 	err = pci_enable_device(pci_dev);
 	if (err) {
-		printk(KERN_ERR PFX "pci_enable_device() failed\n");
+		printk(KERN_ERR PFX "unable to wake up pci device (%i)\n", err);
 		goto out;
+	}
+	mmio_start = pci_resource_start(pci_dev, 0);
+	mmio_flags = pci_resource_flags(pci_dev, 0);
+	mmio_len = pci_resource_len(pci_dev, 0);
+	if (!(mmio_flags & IORESOURCE_MEM)) {
+		printk(KERN_ERR PFX
+		       "%s, region #0 not an MMIO resource, aborting\n",
+		       pci_name(pci_dev));
+		err = -ENODEV;
+		goto err_pci_disable;
 	}
 	err = pci_request_regions(pci_dev, KBUILD_MODNAME);
 	if (err) {
-		printk(KERN_ERR PFX "pci_request_regions() failed\n");
+		printk(KERN_ERR PFX
+		       "could not access PCI resources (%i)\n", err);
 		goto err_pci_disable;
 	}
 	/* enable PCI bus-mastering */
 	pci_set_master(pci_dev);
-	bcm->mmio_addr = pci_iomap(pci_dev, 0, ~0UL);
+	bcm->mmio_addr = ioremap(mmio_start, mmio_len);
 	if (!bcm->mmio_addr) {
-		printk(KERN_ERR PFX "pci_iomap() failed\n");
+		printk(KERN_ERR PFX "%s: cannot remap MMIO, aborting\n",
+		       pci_name(pci_dev));
 		err = -EIO;
 		goto err_pci_release;
 	}
+	bcm->mmio_len = mmio_len;
 	net_dev->base_addr = (unsigned long)bcm->mmio_addr;
 
 	bcm43xx_pci_read_config16(bcm, PCI_SUBSYSTEM_VENDOR_ID,
@@ -3811,7 +3517,7 @@ err_80211_unwind:
 err_chipset_detach:
 	bcm43xx_chipset_detach(bcm);
 err_iounmap:
-	pci_iounmap(pci_dev, bcm->mmio_addr);
+	iounmap(bcm->mmio_addr);
 err_pci_release:
 	pci_release_regions(pci_dev);
 err_pci_disable:
@@ -3841,9 +3547,8 @@ static void bcm43xx_ieee80211_set_chan(struct net_device *net_dev,
 	struct bcm43xx_radioinfo *radio;
 	unsigned long flags;
 
-	mutex_lock(&bcm->mutex);
-	spin_lock_irqsave(&bcm->irq_lock, flags);
-	if (bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED) {
+	bcm43xx_lock_mmio(bcm, flags);
+	if (bcm->initialized) {
 		bcm43xx_mac_suspend(bcm);
 		bcm43xx_radio_selectchannel(bcm, channel, 0);
 		bcm43xx_mac_enable(bcm);
@@ -3851,8 +3556,7 @@ static void bcm43xx_ieee80211_set_chan(struct net_device *net_dev,
 		radio = bcm43xx_current_radio(bcm);
 		radio->initial_channel = channel;
 	}
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
-	mutex_unlock(&bcm->mutex);
+	bcm43xx_unlock_mmio(bcm, flags);
 }
 
 /* set_security() callback in struct ieee80211_device */
@@ -3864,10 +3568,9 @@ static void bcm43xx_ieee80211_set_security(struct net_device *net_dev,
 	unsigned long flags;
 	int keyidx;
 	
-	dprintk(KERN_INFO PFX "set security called");
+	dprintk(KERN_INFO PFX "set security called\n");
 
-	mutex_lock(&bcm->mutex);
-	spin_lock_irqsave(&bcm->irq_lock, flags);
+	bcm43xx_lock_mmio(bcm, flags);
 
 	for (keyidx = 0; keyidx<WEP_KEYS; keyidx++)
 		if (sec->flags & (1<<keyidx)) {
@@ -3878,31 +3581,25 @@ static void bcm43xx_ieee80211_set_security(struct net_device *net_dev,
 	
 	if (sec->flags & SEC_ACTIVE_KEY) {
 		secinfo->active_key = sec->active_key;
-		dprintk(", .active_key = %d", sec->active_key);
+		dprintk(KERN_INFO PFX "   .active_key = %d\n", sec->active_key);
 	}
 	if (sec->flags & SEC_UNICAST_GROUP) {
 		secinfo->unicast_uses_group = sec->unicast_uses_group;
-		dprintk(", .unicast_uses_group = %d", sec->unicast_uses_group);
+		dprintk(KERN_INFO PFX "   .unicast_uses_group = %d\n", sec->unicast_uses_group);
 	}
 	if (sec->flags & SEC_LEVEL) {
 		secinfo->level = sec->level;
-		dprintk(", .level = %d", sec->level);
+		dprintk(KERN_INFO PFX "   .level = %d\n", sec->level);
 	}
 	if (sec->flags & SEC_ENABLED) {
 		secinfo->enabled = sec->enabled;
-		dprintk(", .enabled = %d", sec->enabled);
+		dprintk(KERN_INFO PFX "   .enabled = %d\n", sec->enabled);
 	}
 	if (sec->flags & SEC_ENCRYPT) {
 		secinfo->encrypt = sec->encrypt;
-		dprintk(", .encrypt = %d", sec->encrypt);
+		dprintk(KERN_INFO PFX "   .encrypt = %d\n", sec->encrypt);
 	}
-	if (sec->flags & SEC_AUTH_MODE) {
-		secinfo->auth_mode = sec->auth_mode;
-		dprintk(", .auth_mode = %d", sec->auth_mode);
-	}
-	dprintk("\n");
-	if (bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED &&
-	    !bcm->ieee->host_encrypt) {
+	if (bcm->initialized && !bcm->ieee->host_encrypt) {
 		if (secinfo->enabled) {
 			/* upload WEP keys to hardware */
 			char null_address[6] = { 0 };
@@ -3936,8 +3633,7 @@ static void bcm43xx_ieee80211_set_security(struct net_device *net_dev,
 		} else
 				bcm43xx_clear_keys(bcm);
 	}
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
-	mutex_unlock(&bcm->mutex);
+	bcm43xx_unlock_mmio(bcm, flags);
 }
 
 /* hard_start_xmit() callback in struct ieee80211_device */
@@ -3949,14 +3645,12 @@ static int bcm43xx_ieee80211_hard_start_xmit(struct ieee80211_txb *txb,
 	int err = -ENODEV;
 	unsigned long flags;
 
-	spin_lock_irqsave(&bcm->irq_lock, flags);
-	if (likely(bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED))
+	bcm43xx_lock_mmio(bcm, flags);
+	if (likely(bcm->initialized))
 		err = bcm43xx_tx(bcm, txb);
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
+	bcm43xx_unlock_mmio(bcm, flags);
 
-	if (unlikely(err))
-		return NETDEV_TX_BUSY;
-	return NETDEV_TX_OK;
+	return err;
 }
 
 static struct net_device_stats * bcm43xx_net_get_stats(struct net_device *net_dev)
@@ -3969,9 +3663,9 @@ static void bcm43xx_net_tx_timeout(struct net_device *net_dev)
 	struct bcm43xx_private *bcm = bcm43xx_priv(net_dev);
 	unsigned long flags;
 
-	spin_lock_irqsave(&bcm->irq_lock, flags);
+	bcm43xx_lock_mmio(bcm, flags);
 	bcm43xx_controller_restart(bcm, "TX timeout");
-	spin_unlock_irqrestore(&bcm->irq_lock, flags);
+	bcm43xx_unlock_mmio(bcm, flags);
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -3981,8 +3675,7 @@ static void bcm43xx_net_poll_controller(struct net_device *net_dev)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	if (bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED)
-		bcm43xx_interrupt_handler(bcm->irq, bcm, NULL);
+	bcm43xx_interrupt_handler(bcm->irq, bcm, NULL);
 	local_irq_restore(flags);
 }
 #endif /* CONFIG_NET_POLL_CONTROLLER */
@@ -3997,13 +3690,10 @@ static int bcm43xx_net_open(struct net_device *net_dev)
 static int bcm43xx_net_stop(struct net_device *net_dev)
 {
 	struct bcm43xx_private *bcm = bcm43xx_priv(net_dev);
-	int err;
 
 	ieee80211softmac_stop(net_dev);
-	err = bcm43xx_disable_interrupts_sync(bcm);
-	assert(!err);
+	bcm43xx_disable_interrupts_sync(bcm, NULL);
 	bcm43xx_free_board(bcm);
-	flush_scheduled_work();
 
 	return 0;
 }
@@ -4014,19 +3704,15 @@ static int bcm43xx_init_private(struct bcm43xx_private *bcm,
 {
 	int err;
 
-	bcm43xx_set_status(bcm, BCM43xx_STAT_UNINIT);
 	bcm->ieee = netdev_priv(net_dev);
 	bcm->softmac = ieee80211_priv(net_dev);
 	bcm->softmac->set_channel = bcm43xx_ieee80211_set_chan;
 
 	bcm->irq_savedstate = BCM43xx_IRQ_INITIAL;
-	bcm->mac_suspended = 1;
 	bcm->pci_dev = pci_dev;
 	bcm->net_dev = net_dev;
 	bcm->bad_frames_preempt = modparam_bad_frames_preempt;
-	spin_lock_init(&bcm->irq_lock);
-	spin_lock_init(&bcm->leds_lock);
-	mutex_init(&bcm->mutex);
+	spin_lock_init(&bcm->_lock);
 	tasklet_init(&bcm->isr_tasklet,
 		     (void (*)(unsigned long))bcm43xx_interrupt_tasklet,
 		     (unsigned long)bcm);
@@ -4144,6 +3830,7 @@ static void __devexit bcm43xx_remove_one(struct pci_dev *pdev)
 	bcm43xx_debugfs_remove_device(bcm);
 	unregister_netdev(net_dev);
 	bcm43xx_detach_board(bcm);
+	assert(bcm->ucode == NULL);
 	free_ieee80211softmac(net_dev);
 }
 
@@ -4153,31 +3840,46 @@ static void __devexit bcm43xx_remove_one(struct pci_dev *pdev)
 static void bcm43xx_chip_reset(void *_bcm)
 {
 	struct bcm43xx_private *bcm = _bcm;
-	struct bcm43xx_phyinfo *phy;
-	int err = -ENODEV;
+	struct net_device *net_dev = bcm->net_dev;
+	struct pci_dev *pci_dev = bcm->pci_dev;
+	int err;
+	int was_initialized = bcm->initialized;
 
-	mutex_lock(&(bcm)->mutex);
-	if (bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED) {
-		bcm43xx_periodic_tasks_delete(bcm);
-		phy = bcm43xx_current_phy(bcm);
-		err = bcm43xx_select_wireless_core(bcm, phy->type);
-		if (!err)
-			bcm43xx_periodic_tasks_setup(bcm);
+	netif_stop_queue(bcm->net_dev);
+	tasklet_disable(&bcm->isr_tasklet);
+
+	bcm->firmware_norelease = 1;
+	if (was_initialized)
+		bcm43xx_free_board(bcm);
+	bcm->firmware_norelease = 0;
+	bcm43xx_detach_board(bcm);
+	err = bcm43xx_init_private(bcm, net_dev, pci_dev);
+	if (err)
+		goto failure;
+	err = bcm43xx_attach_board(bcm);
+	if (err)
+		goto failure;
+	if (was_initialized) {
+		err = bcm43xx_init_board(bcm);
+		if (err)
+			goto failure;
 	}
-	mutex_unlock(&(bcm)->mutex);
+	netif_wake_queue(bcm->net_dev);
+	printk(KERN_INFO PFX "Controller restarted\n");
 
-	printk(KERN_ERR PFX "Controller restart%s\n",
-	       (err == 0) ? "ed" : " failed");
+	return;
+failure:
+	printk(KERN_ERR PFX "Controller restart failed\n");
 }
 
 /* Hard-reset the chip.
  * This can be called from interrupt or process context.
- * bcm->irq_lock must be locked.
- */
+ * Make sure to _not_ re-enable device interrupts after this has been called.
+*/
 void bcm43xx_controller_restart(struct bcm43xx_private *bcm, const char *reason)
 {
-	if (bcm43xx_status(bcm) != BCM43xx_STAT_INITIALIZED)
-		return;
+	bcm43xx_interrupt_disable(bcm, BCM43xx_IRQ_ALL);
+	bcm43xx_read32(bcm, BCM43xx_MMIO_STATUS_BITFIELD); /* dummy read */
 	printk(KERN_ERR PFX "Controller RESET (%s) ...\n", reason);
 	INIT_WORK(&bcm->restart_work, bcm43xx_chip_reset, bcm);
 	schedule_work(&bcm->restart_work);
@@ -4189,16 +3891,21 @@ static int bcm43xx_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	struct net_device *net_dev = pci_get_drvdata(pdev);
 	struct bcm43xx_private *bcm = bcm43xx_priv(net_dev);
-	int err;
+	unsigned long flags;
+	int try_to_shutdown = 0, err;
 
 	dprintk(KERN_INFO PFX "Suspending...\n");
 
+	bcm43xx_lock(bcm, flags);
+	bcm->was_initialized = bcm->initialized;
+	if (bcm->initialized)
+		try_to_shutdown = 1;
+	bcm43xx_unlock(bcm, flags);
+
 	netif_device_detach(net_dev);
-	bcm->was_initialized = 0;
-	if (bcm43xx_status(bcm) == BCM43xx_STAT_INITIALIZED) {
-		bcm->was_initialized = 1;
+	if (try_to_shutdown) {
 		ieee80211softmac_stop(net_dev);
-		err = bcm43xx_disable_interrupts_sync(bcm);
+		err = bcm43xx_disable_interrupts_sync(bcm, &bcm->irq_savedstate);
 		if (unlikely(err)) {
 			dprintk(KERN_ERR PFX "Suspend failed.\n");
 			return -EAGAIN;
@@ -4231,14 +3938,17 @@ static int bcm43xx_resume(struct pci_dev *pdev)
 	pci_restore_state(pdev);
 
 	bcm43xx_chipset_attach(bcm);
-	if (bcm->was_initialized)
+	if (bcm->was_initialized) {
+		bcm->irq_savedstate = BCM43xx_IRQ_INITIAL;
 		err = bcm43xx_init_board(bcm);
+	}
 	if (err) {
 		printk(KERN_ERR PFX "Resume failed!\n");
 		return err;
 	}
-	netif_device_attach(net_dev);
 
+	netif_device_attach(net_dev);
+	
 	dprintk(KERN_INFO PFX "Device resumed.\n");
 
 	return 0;

@@ -114,8 +114,13 @@ void svc_seq_show(struct seq_file *seq, const struct svc_stat *statp) {
  */
 struct rpc_iostats *rpc_alloc_iostats(struct rpc_clnt *clnt)
 {
+	unsigned int ops = clnt->cl_maxproc;
+	size_t size = ops * sizeof(struct rpc_iostats);
 	struct rpc_iostats *new;
-	new = kcalloc(clnt->cl_maxproc, sizeof(struct rpc_iostats), GFP_KERNEL);
+
+	new = kmalloc(size, GFP_KERNEL);
+	if (new)
+		memset(new, 0 , size);
 	return new;
 }
 EXPORT_SYMBOL(rpc_alloc_iostats);

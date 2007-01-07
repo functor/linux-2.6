@@ -10,6 +10,7 @@
  *	2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/dccp.h>
 #include <linux/icmp.h>
 #include <linux/module.h>
@@ -504,7 +505,8 @@ int dccp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	ireq = inet_rsk(req);
 	ireq->loc_addr = daddr;
 	ireq->rmt_addr = saddr;
-	req->rcv_wnd	= dccp_feat_default_sequence_window;
+	req->rcv_wnd	= 100; /* Fake, option parsing will get the
+				  right value */
 	ireq->opt	= NULL;
 
 	/* 

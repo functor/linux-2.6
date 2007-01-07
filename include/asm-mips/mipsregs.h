@@ -13,6 +13,7 @@
 #ifndef _ASM_MIPSREGS_H
 #define _ASM_MIPSREGS_H
 
+#include <linux/config.h>
 #include <linux/linkage.h>
 #include <asm/hazards.h>
 
@@ -470,8 +471,6 @@
 
 /* Bits specific to the VR41xx.  */
 #define VR41_CONF_CS		(_ULCAST_(1) << 12)
-#define VR41_CONF_P4K		(_ULCAST_(1) << 13)
-#define VR41_CONF_BP		(_ULCAST_(1) << 16)
 #define VR41_CONF_M16		(_ULCAST_(1) << 20)
 #define VR41_CONF_AD		(_ULCAST_(1) << 23)
 
@@ -1418,7 +1417,7 @@ change_c0_##name(unsigned int change, unsigned int new)		\
 
 #else /* SMTC versions that manage MT scheduling */
 
-#include <linux/irqflags.h>
+#include <asm/interrupt.h>
 
 /*
  * This is a duplicate of dmt() in mipsmtregs.h to avoid problems with
@@ -1452,17 +1451,18 @@ static inline void __emt(unsigned int previous)
 {
 	if ((previous & __EMT_ENABLE))
 		__asm__ __volatile__(
+		"	.set	noreorder				\n"
 		"	.set	mips32r2				\n"
 		"	.word	0x41600be1		# emt		\n"
 		"	ehb						\n"
-		"	.set	mips0					\n");
+		"	.set	mips0					\n"
+		"	.set	reorder					\n");
 }
 
 static inline void __ehb(void)
 {
 	__asm__ __volatile__(
-	"	.set	mips32r2					\n"
-	"	ehb							\n"		"	.set	mips0						\n");
+	"	ehb							\n");
 }
 
 /*

@@ -13,6 +13,7 @@
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #include <linux/bitops.h>
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -54,14 +55,14 @@ static DEFINE_RWLOCK(gact_lock);
 #ifdef CONFIG_GACT_PROB
 static int gact_net_rand(struct tcf_gact *p)
 {
-	if (!p->pval || net_random()%p->pval)
+	if (net_random()%p->pval)
 		return p->action;
 	return p->paction;
 }
 
 static int gact_determ(struct tcf_gact *p)
 {
-	if (!p->pval || p->bstats.packets%p->pval)
+	if (p->bstats.packets%p->pval)
 		return p->action;
 	return p->paction;
 }

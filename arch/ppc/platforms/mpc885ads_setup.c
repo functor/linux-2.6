@@ -11,6 +11,7 @@
  * kind, whether express or implied.
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/param.h>
@@ -38,10 +39,7 @@ extern unsigned char __res[];
 static void setup_smc1_ioports(void);
 static void setup_smc2_ioports(void);
 
-static struct fs_mii_fec_platform_info	mpc8xx_mdio_fec_pdata;
-static void setup_fec1_ioports(void);
-static void setup_fec2_ioports(void);
-static void setup_scc3_ioports(void);
+static void __init mpc885ads_scc_phy_init(char);
 
 static struct fs_uart_platform_info mpc885_uart_pdata[] = {
 	[fsid_smc1_uart] = {
@@ -64,8 +62,23 @@ static struct fs_uart_platform_info mpc885_uart_pdata[] = {
  	},
 };
 
-static struct fs_platform_info mpc8xx_enet_pdata[] = {
-	[fsid_fec1] = {
+static struct fs_mii_bus_info fec_mii_bus_info = {
+	.method = fsmii_fec,
+	.id = 0,
+};
+
+static struct fs_mii_bus_info scc_mii_bus_info = {
+#ifdef CONFIG_SCC_ENET_8xx_FIXED
+	.method = fsmii_fixed,
+#else
+	.method = fsmii_fec,
+#endif
+
+	.id = 0,
+};
+
+static struct fs_platform_info mpc8xx_fec_pdata[] = {
+	{
 	 .rx_ring = 128,
 	 .tx_ring = 16,
 	 .rx_copybreak = 240,
@@ -73,12 +86,11 @@ static struct fs_platform_info mpc8xx_enet_pdata[] = {
 	 .use_napi = 1,
 	 .napi_weight = 17,
 
-	 .init_ioports = setup_fec1_ioports,
+	 .phy_addr = 0,
+	 .phy_irq = SIU_IRQ7,
 
-          .bus_id = "0:00",
-          .has_phy = 1,
-	 },
-	[fsid_fec2] = {
+	 .bus_info = &fec_mii_bus_info,
+	 }, {
 	     .rx_ring = 128,
 	     .tx_ring = 16,
 	     .rx_copybreak = 240,
@@ -86,32 +98,35 @@ static struct fs_platform_info mpc8xx_enet_pdata[] = {
 	     .use_napi = 1,
 	     .napi_weight = 17,
 
-	     .init_ioports = setup_fec2_ioports,
+	     .phy_addr = 1,
+	     .phy_irq = SIU_IRQ7,
 
- 	     .bus_id = "0:01",
- 	     .has_phy = 1,
-	     },
-	[fsid_scc3] = {
-		.rx_ring = 64,
-		.tx_ring = 8,
-		.rx_copybreak = 240,
+	     .bus_info = &fec_mii_bus_info,
+	     }
+};
 
-		.use_napi = 1,
-		.napi_weight = 17,
+static struct fs_platform_info mpc8xx_scc_pdata = {
+	.rx_ring = 64,
+	.tx_ring = 8,
+	.rx_copybreak = 240,
 
-		.init_ioports = setup_scc3_ioports,
-#ifdef CONFIG_FIXED_MII_10_FDX
-		.bus_id = "fixed@100:1",
+	.use_napi = 1,
+	.napi_weight = 17,
+
+	.phy_addr = 2,
+#ifdef CONFIG_MPC8xx_SCC_ENET_FIXED
+	.phy_irq = -1,
 #else
-		.bus_id = "0:02",
- #endif
-	},
+	.phy_irq = SIU_IRQ7,
+#endif
+
+	.bus_info = &scc_mii_bus_info,
 };
 
 void __init board_init(void)
 {
-	cpm8xx_t *cp = cpmp;
- 	unsigned int *bcsr_io;
+	volatile cpm8xx_t *cp = cpmp;
+	unsigned int *bcsr_io;
 
 #ifdef CONFIG_FS_ENET
 	immap_t *immap = (immap_t *) IMAP_ADDR;
@@ -150,14 +165,6 @@ void __init board_init(void)
 	/* use MDC for MII (common) */
 	setbits16(&immap->im_ioport.iop_pdpar, 0x0080);
 	clrbits16(&immap->im_ioport.iop_pddir, 0x0080);
-	bcsr_io = ioremap(BCSR5, sizeof(unsigned long));
-	clrbits32(bcsr_io,BCSR5_MII1_EN);
-	clrbits32(bcsr_io,BCSR5_MII1_RST);
-#ifdef CONFIG_MPC8xx_SECOND_ETH_FEC2
-	clrbits32(bcsr_io,BCSR5_MII2_EN);
-	clrbits32(bcsr_io,BCSR5_MII2_RST);
-#endif
-	iounmap(bcsr_io);
 #endif
 }
 
@@ -188,8 +195,8 @@ static void setup_fec2_ioports(void)
 	/* configure FEC2 pins */
 	setbits32(&immap->im_cpm.cp_pepar, 0x0003fffc);
 	setbits32(&immap->im_cpm.cp_pedir, 0x0003fffc);
-	clrbits32(&immap->im_cpm.cp_peso, 0x000087fc);
 	setbits32(&immap->im_cpm.cp_peso, 0x00037800);
+	clrbits32(&immap->im_cpm.cp_peso, 0x000087fc);
 	clrbits32(&immap->im_cpm.cp_cptr, 0x00000080);
 }
 
@@ -207,8 +214,6 @@ static void setup_scc3_ioports(void)
 
 	/* Enable the PHY.
 	 */
-	clrbits32(bcsr_io+4, BCSR4_ETH10_RST);
-	udelay(1000);
 	setbits32(bcsr_io+4, BCSR4_ETH10_RST);
 	/* Configure port A pins for Txd and Rxd.
 	 */
@@ -250,38 +255,37 @@ static void setup_scc3_ioports(void)
 	clrbits32(&immap->im_cpm.cp_pedir, PE_ENET_TENA);
 	setbits32(&immap->im_cpm.cp_peso, PE_ENET_TENA);
 
-	setbits32(bcsr_io+4, BCSR1_ETHEN);
+	setbits32(bcsr_io+1, BCSR1_ETHEN);
 	iounmap(bcsr_io);
 }
 
-static int mac_count = 0;
-
 static void mpc885ads_fixup_enet_pdata(struct platform_device *pdev, int fs_no)
 {
- 	struct fs_platform_info *fpi;
+	struct fs_platform_info *fpi = pdev->dev.platform_data;
+
+	volatile cpm8xx_t *cp;
 	bd_t *bd = (bd_t *) __res;
 	char *e;
 	int i;
 
-	if(fs_no > ARRAY_SIZE(mpc8xx_enet_pdata)) {
-		printk(KERN_ERR"No network-suitable #%d device on bus", fs_no);
-		return;
-	}
-
-	fpi = &mpc8xx_enet_pdata[fs_no];
-
+	/* Get pointer to Communication Processor */
+	cp = cpmp;
 	switch (fs_no) {
 	case fsid_fec1:
+		fpi = &mpc8xx_fec_pdata[0];
 		fpi->init_ioports = &setup_fec1_ioports;
 		break;
 	case fsid_fec2:
+		fpi = &mpc8xx_fec_pdata[1];
 		fpi->init_ioports = &setup_fec2_ioports;
 		break;
 	case fsid_scc3:
+		fpi = &mpc8xx_scc_pdata;
 		fpi->init_ioports = &setup_scc3_ioports;
+		mpc885ads_scc_phy_init(fpi->phy_addr);
 		break;
 	default:
-    	        printk(KERN_WARNING "Device %s is not supported!\n", pdev->name);
+    	        printk(KERN_WARNING"Device %s is not supported!\n", pdev->name);
 	        return;
 	}
 
@@ -292,7 +296,7 @@ static void mpc885ads_fixup_enet_pdata(struct platform_device *pdev, int fs_no)
 	for (i = 0; i < 6; i++)
 		fpi->macaddr[i] = *e++;
 
-	fpi->macaddr[5] += mac_count++;
+	fpi->macaddr[5 - pdev->id]++;
 
 }
 
@@ -313,6 +317,58 @@ static void __init mpc885ads_fixup_scc_enet_pdata(struct platform_device *pdev,
 		return;
 
 	mpc885ads_fixup_enet_pdata(pdev, fsid_scc1 + pdev->id - 1);
+}
+
+/* SCC ethernet controller does not have MII management channel. FEC1 MII
+ * channel is used to communicate with the 10Mbit PHY.
+ */
+
+#define MII_ECNTRL_PINMUX        0x4
+#define FEC_ECNTRL_PINMUX        0x00000004
+#define FEC_RCNTRL_MII_MODE        0x00000004
+
+/* Make MII read/write commands.
+ */
+#define mk_mii_write(REG, VAL, PHY_ADDR)    (0x50020000 | (((REG) & 0x1f) << 18) | \
+                ((VAL) & 0xffff) | ((PHY_ADDR) << 23))
+
+static void mpc885ads_scc_phy_init(char phy_addr)
+{
+	volatile immap_t *immap;
+	volatile fec_t *fecp;
+	bd_t *bd;
+
+	bd = (bd_t *) __res;
+	immap = (immap_t *) IMAP_ADDR;	/* pointer to internal registers */
+	fecp = &(immap->im_cpm.cp_fec);
+
+	/* Enable MII pins of the FEC1
+	 */
+	setbits16(&immap->im_ioport.iop_pdpar, 0x0080);
+	clrbits16(&immap->im_ioport.iop_pddir, 0x0080);
+	/* Set MII speed to 2.5 MHz
+	 */
+	out_be32(&fecp->fec_mii_speed,
+		 ((((bd->bi_intfreq + 4999999) / 2500000) / 2) & 0x3F) << 1);
+
+	/* Enable FEC pin MUX
+	 */
+	setbits32(&fecp->fec_ecntrl, MII_ECNTRL_PINMUX);
+	setbits32(&fecp->fec_r_cntrl, FEC_RCNTRL_MII_MODE);
+
+	out_be32(&fecp->fec_mii_data,
+		 mk_mii_write(MII_BMCR, BMCR_ISOLATE, phy_addr));
+	udelay(100);
+	out_be32(&fecp->fec_mii_data,
+		 mk_mii_write(MII_ADVERTISE,
+			      ADVERTISE_10HALF | ADVERTISE_CSMA, phy_addr));
+	udelay(100);
+
+	/* Disable FEC MII settings
+	 */
+	clrbits32(&fecp->fec_ecntrl, MII_ECNTRL_PINMUX);
+	clrbits32(&fecp->fec_r_cntrl, FEC_RCNTRL_MII_MODE);
+	out_be32(&fecp->fec_mii_speed, 0);
 }
 
 static void setup_smc1_ioports(void)
@@ -407,9 +463,6 @@ static int mpc885ads_platform_notify(struct device *dev)
 
 int __init mpc885ads_init(void)
 {
-	struct fs_mii_fec_platform_info* fmpi;
-	bd_t *bd = (bd_t *) __res;
-
 	printk(KERN_NOTICE "mpc885ads: Init\n");
 
 	platform_notify = mpc885ads_platform_notify;
@@ -419,17 +472,8 @@ int __init mpc885ads_init(void)
 
 	ppc_sys_device_enable(MPC8xx_CPM_FEC1);
 
-	ppc_sys_device_enable(MPC8xx_MDIO_FEC);
-	fmpi = ppc_sys_platform_devices[MPC8xx_MDIO_FEC].dev.platform_data =
-		&mpc8xx_mdio_fec_pdata;
-
-	fmpi->mii_speed = ((((bd->bi_intfreq + 4999999) / 2500000) / 2) & 0x3F) << 1;
-
-	/* No PHY interrupt line here */
-	fmpi->irq[0xf] = SIU_IRQ7;
-
 #ifdef CONFIG_MPC8xx_SECOND_ETH_SCC3
-	ppc_sys_device_enable(MPC8xx_CPM_SCC3);
+	ppc_sys_device_enable(MPC8xx_CPM_SCC1);
 
 #endif
 #ifdef CONFIG_MPC8xx_SECOND_ETH_FEC2

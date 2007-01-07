@@ -247,6 +247,7 @@
  *	TCP_CLOSE		socket is finished
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/fcntl.h>
@@ -264,7 +265,7 @@
 #include <net/tcp.h>
 #include <net/xfrm.h>
 #include <net/ip.h>
-#include <net/netdma.h>
+
 
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
@@ -643,7 +644,7 @@ static inline int select_size(struct sock *sk, struct tcp_sock *tp)
 	int tmp = tp->mss_cache;
 
 	if (sk->sk_route_caps & NETIF_F_SG) {
-		if (sk_can_gso(sk))
+		if (sk->sk_route_caps & NETIF_F_TSO)
 			tmp = 0;
 		else {
 			int pgbreak = SKB_MAX_HEAD(MAX_TCP_HEADER);
@@ -932,7 +933,7 @@ static int tcp_recv_urg(struct sock *sk, long timeo,
  * calculation of whether or not we must ACK for the sake of
  * a window update.
  */
-void tcp_cleanup_rbuf(struct sock *sk, int copied)
+void cleanup_rbuf(struct sock *sk, int copied)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	int time_to_ack = 0;
@@ -1067,11 +1068,11 @@ int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 				break;
 		}
 		if (skb->h.th->fin) {
-			sk_eat_skb(sk, skb, 0);
+			sk_eat_skb(sk, skb);
 			++seq;
 			break;
 		}
-		sk_eat_skb(sk, skb, 0);
+		sk_eat_skb(sk, skb);
 		if (!desc->count)
 			break;
 	}
@@ -1081,7 +1082,7 @@ int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 
 	/* Clean up data we have read: This will do ACK frames. */
 	if (copied)
-		tcp_cleanup_rbuf(sk, copied);
+		cleanup_rbuf(sk, copied);
 	return copied;
 }
 
@@ -1105,7 +1106,6 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int target;		/* Read at least this many bytes */
 	long timeo;
 	struct task_struct *user_recv = NULL;
-	int copied_early = 0;
 
 	lock_sock(sk);
 
@@ -1128,17 +1128,6 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	}
 
 	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len);
-
-#ifdef CONFIG_NET_DMA
-	tp->ucopy.dma_chan = NULL;
-	preempt_disable();
-	if ((len > sysctl_tcp_dma_copybreak) && !(flags & MSG_PEEK) &&
-	    !sysctl_tcp_low_latency && __get_cpu_var(softnet_data).net_dma) {
-		preempt_enable_no_resched();
-		tp->ucopy.pinned_list = dma_pin_iovec_pages(msg->msg_iov, len);
-	} else
-		preempt_enable_no_resched();
-#endif
 
 	do {
 		struct sk_buff *skb;
@@ -1227,7 +1216,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			}
 		}
 
-		tcp_cleanup_rbuf(sk, copied);
+		cleanup_rbuf(sk, copied);
 
 		if (!sysctl_tcp_low_latency && tp->ucopy.task == user_recv) {
 			/* Install new reader */
@@ -1280,10 +1269,6 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			lock_sock(sk);
 		} else
 			sk_wait_data(sk, &timeo);
-
-#ifdef CONFIG_NET_DMA
-		tp->ucopy.wakeup = 0;
-#endif
 
 		if (user_recv) {
 			int chunk;
@@ -1340,39 +1325,13 @@ do_prequeue:
 		}
 
 		if (!(flags & MSG_TRUNC)) {
-#ifdef CONFIG_NET_DMA
-			if (!tp->ucopy.dma_chan && tp->ucopy.pinned_list)
-				tp->ucopy.dma_chan = get_softnet_dma();
-
-			if (tp->ucopy.dma_chan) {
-				tp->ucopy.dma_cookie = dma_skb_copy_datagram_iovec(
-					tp->ucopy.dma_chan, skb, offset,
-					msg->msg_iov, used,
-					tp->ucopy.pinned_list);
-
-				if (tp->ucopy.dma_cookie < 0) {
-
-					printk(KERN_ALERT "dma_cookie < 0\n");
-
-					/* Exception. Bailout! */
-					if (!copied)
-						copied = -EFAULT;
-					break;
-				}
-				if ((offset + used) == skb->len)
-					copied_early = 1;
-
-			} else
-#endif
-			{
-				err = skb_copy_datagram_iovec(skb, offset,
-						msg->msg_iov, used);
-				if (err) {
-					/* Exception. Bailout! */
-					if (!copied)
-						copied = -EFAULT;
-					break;
-				}
+			err = skb_copy_datagram_iovec(skb, offset,
+						      msg->msg_iov, used);
+			if (err) {
+				/* Exception. Bailout! */
+				if (!copied)
+					copied = -EFAULT;
+				break;
 			}
 		}
 
@@ -1392,19 +1351,15 @@ skip_copy:
 
 		if (skb->h.th->fin)
 			goto found_fin_ok;
-		if (!(flags & MSG_PEEK)) {
-			sk_eat_skb(sk, skb, copied_early);
-			copied_early = 0;
-		}
+		if (!(flags & MSG_PEEK))
+			sk_eat_skb(sk, skb);
 		continue;
 
 	found_fin_ok:
 		/* Process the FIN. */
 		++*seq;
-		if (!(flags & MSG_PEEK)) {
-			sk_eat_skb(sk, skb, copied_early);
-			copied_early = 0;
-		}
+		if (!(flags & MSG_PEEK))
+			sk_eat_skb(sk, skb);
 		break;
 	} while (len > 0);
 
@@ -1427,42 +1382,12 @@ skip_copy:
 		tp->ucopy.len = 0;
 	}
 
-#ifdef CONFIG_NET_DMA
-	if (tp->ucopy.dma_chan) {
-		struct sk_buff *skb;
-		dma_cookie_t done, used;
-
-		dma_async_memcpy_issue_pending(tp->ucopy.dma_chan);
-
-		while (dma_async_memcpy_complete(tp->ucopy.dma_chan,
-		                                 tp->ucopy.dma_cookie, &done,
-		                                 &used) == DMA_IN_PROGRESS) {
-			/* do partial cleanup of sk_async_wait_queue */
-			while ((skb = skb_peek(&sk->sk_async_wait_queue)) &&
-			       (dma_async_is_complete(skb->dma_cookie, done,
-			                              used) == DMA_SUCCESS)) {
-				__skb_dequeue(&sk->sk_async_wait_queue);
-				kfree_skb(skb);
-			}
-		}
-
-		/* Safe to free early-copied skbs now */
-		__skb_queue_purge(&sk->sk_async_wait_queue);
-		dma_chan_put(tp->ucopy.dma_chan);
-		tp->ucopy.dma_chan = NULL;
-	}
-	if (tp->ucopy.pinned_list) {
-		dma_unpin_iovec_pages(tp->ucopy.pinned_list);
-		tp->ucopy.pinned_list = NULL;
-	}
-#endif
-
 	/* According to UNIX98, msg_name/msg_namelen are ignored
 	 * on connected socket. I was just happy when found this 8) --ANK
 	 */
 
 	/* Clean up data we have read: This will do ACK frames. */
-	tcp_cleanup_rbuf(sk, copied);
+	cleanup_rbuf(sk, copied);
 
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
@@ -1660,8 +1585,7 @@ adjudge_to_death:
 			const int tmo = tcp_fin_time(sk);
 
 			if (tmo > TCP_TIMEWAIT_LEN) {
-				inet_csk_reset_keepalive_timer(sk,
-						tmo - TCP_TIMEWAIT_LEN);
+				inet_csk_reset_keepalive_timer(sk, tcp_fin_time(sk));
 			} else {
 				tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
 				goto out;
@@ -1730,9 +1654,6 @@ int tcp_disconnect(struct sock *sk, int flags)
 	__skb_queue_purge(&sk->sk_receive_queue);
 	sk_stream_writequeue_purge(sk);
 	__skb_queue_purge(&tp->out_of_order_queue);
-#ifdef CONFIG_NET_DMA
-	__skb_queue_purge(&sk->sk_async_wait_queue);
-#endif
 
 	inet->dport = 0;
 
@@ -1933,7 +1854,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			    (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT) &&
 			    inet_csk_ack_scheduled(sk)) {
 				icsk->icsk_ack.pending |= ICSK_ACK_PUSHED;
-				tcp_cleanup_rbuf(sk, 1);
+				cleanup_rbuf(sk, 1);
 				if (!(val & 1))
 					icsk->icsk_ack.pingpong = 1;
 			}
@@ -2172,19 +2093,8 @@ struct sk_buff *tcp_tso_segment(struct sk_buff *skb, int features)
 
 	if (skb_gso_ok(skb, features | NETIF_F_GSO_ROBUST)) {
 		/* Packet is from an untrusted source, reset gso_segs. */
-		int type = skb_shinfo(skb)->gso_type;
-		int mss;
+		int mss = skb_shinfo(skb)->gso_size;
 
-		if (unlikely(type &
-			     ~(SKB_GSO_TCPV4 |
-			       SKB_GSO_DODGY |
-			       SKB_GSO_TCP_ECN |
-			       SKB_GSO_TCPV6 |
-			       0) ||
-			     !(type & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6))))
-			goto out;
-
-		mss = skb_shinfo(skb)->gso_size;
 		skb_shinfo(skb)->gso_segs = (skb->len + mss - 1) / mss;
 
 		segs = NULL;
@@ -2227,7 +2137,6 @@ struct sk_buff *tcp_tso_segment(struct sk_buff *skb, int features)
 out:
 	return segs;
 }
-EXPORT_SYMBOL(tcp_tso_segment);
 
 extern void __skb_cb_too_small_for_tcp(int, int);
 extern struct tcp_congestion_ops tcp_reno;
@@ -2270,7 +2179,7 @@ void __init tcp_init(void)
 					thash_entries,
 					(num_physpages >= 128 * 1024) ?
 					13 : 15,
-					0,
+					HASH_HIGHMEM,
 					&tcp_hashinfo.ehash_size,
 					NULL,
 					0);
@@ -2286,7 +2195,7 @@ void __init tcp_init(void)
 					tcp_hashinfo.ehash_size,
 					(num_physpages >= 128 * 1024) ?
 					13 : 15,
-					0,
+					HASH_HIGHMEM,
 					&tcp_hashinfo.bhash_size,
 					NULL,
 					64 * 1024);
@@ -2350,4 +2259,4 @@ EXPORT_SYMBOL(tcp_sendpage);
 EXPORT_SYMBOL(tcp_setsockopt);
 EXPORT_SYMBOL(tcp_shutdown);
 EXPORT_SYMBOL(tcp_statistics);
-EXPORT_SYMBOL_GPL(tcp_cleanup_rbuf);
+EXPORT_SYMBOL_GPL(cleanup_rbuf);

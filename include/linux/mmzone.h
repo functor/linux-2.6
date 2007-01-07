@@ -4,6 +4,7 @@
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
+#include <linux/config.h>
 #include <linux/spinlock.h>
 #include <linux/list.h>
 #include <linux/wait.h>
@@ -46,27 +47,6 @@ struct zone_padding {
 #define ZONE_PADDING(name)
 #endif
 
-enum zone_stat_item {
-	NR_ANON_PAGES,	/* Mapped anonymous pages */
-	NR_FILE_MAPPED,	/* pagecache pages mapped into pagetables.
-			   only modified from process context */
-	NR_FILE_PAGES,
-	NR_SLAB,	/* Pages used by slab allocator */
-	NR_PAGETABLE,	/* used for pagetables */
-	NR_FILE_DIRTY,
-	NR_WRITEBACK,
-	NR_UNSTABLE_NFS,	/* NFS unstable pages */
-	NR_BOUNCE,
-#ifdef CONFIG_NUMA
-	NUMA_HIT,		/* allocated in intended node */
-	NUMA_MISS,		/* allocated in non intended node */
-	NUMA_FOREIGN,		/* was intended here, hit elsewhere */
-	NUMA_INTERLEAVE_HIT,	/* interleaver preferred this zone */
-	NUMA_LOCAL,		/* allocation from local node */
-	NUMA_OTHER,		/* allocation from other node */
-#endif
-	NR_VM_ZONE_STAT_ITEMS };
-
 struct per_cpu_pages {
 	int count;		/* number of pages in the list */
 	int high;		/* high watermark, emptying needed */
@@ -76,9 +56,13 @@ struct per_cpu_pages {
 
 struct per_cpu_pageset {
 	struct per_cpu_pages pcp[2];	/* 0: hot.  1: cold */
-#ifdef CONFIG_SMP
-	s8 stat_threshold;
-	s8 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
+#ifdef CONFIG_NUMA
+	unsigned long numa_hit;		/* allocated in intended node */
+	unsigned long numa_miss;	/* allocated in non intended node */
+	unsigned long numa_foreign;	/* was intended here, hit elsewhere */
+	unsigned long interleave_hit; 	/* interleaver prefered this zone */
+	unsigned long local_node;	/* allocation from local node */
+	unsigned long other_node;	/* allocation from other node */
 #endif
 } ____cacheline_aligned_in_smp;
 
@@ -151,11 +135,6 @@ struct zone {
 	unsigned long		lowmem_reserve[MAX_NR_ZONES];
 
 #ifdef CONFIG_NUMA
-	/*
-	 * zone reclaim becomes active if more unmapped pages exist.
-	 */
-	unsigned long		min_unmapped_ratio;
-	unsigned long		min_slab_pages;
 	struct per_cpu_pageset	*pageset[NR_CPUS];
 #else
 	struct per_cpu_pageset	pageset[NR_CPUS];
@@ -187,8 +166,12 @@ struct zone {
 	/* A count of how many reclaimers are scanning this zone */
 	atomic_t		reclaim_in_progress;
 
-	/* Zone statistics */
-	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
+	/*
+	 * timestamp (in jiffies) of the last zone reclaim that did not
+	 * result in freeing of pages. This is used to avoid repeated scans
+	 * if all memory in the zone is in use.
+	 */
+	unsigned long		last_unsuccessful_zone_reclaim;
 
 	/*
 	 * prev_priority holds the scanning priority for this zone.  It is
@@ -200,9 +183,13 @@ struct zone {
 	 * under - it drives the swappiness decision: whether to unmap mapped
 	 * pages.
 	 *
-	 * Access to both this field is quite racy even on uniprocessor.  But
+	 * temp_priority is used to remember the scanning priority at which
+	 * this zone was successfully refilled to free_pages == pages_high.
+	 *
+	 * Access to both these fields is quite racy even on uniprocessor.  But
 	 * it is expected to average out OK.
 	 */
+	int temp_priority;
 	int prev_priority;
 
 
@@ -211,7 +198,7 @@ struct zone {
 
 	/*
 	 * wait_table		-- the array holding the hash table
-	 * wait_table_hash_nr_entries	-- the size of the hash table array
+	 * wait_table_size	-- the size of the hash table array
 	 * wait_table_bits	-- wait_table_size == (1 << wait_table_bits)
 	 *
 	 * The purpose of all these is to keep track of the people
@@ -234,7 +221,7 @@ struct zone {
 	 * free_area_init_core() performs the initialization of them.
 	 */
 	wait_queue_head_t	* wait_table;
-	unsigned long		wait_table_hash_nr_entries;
+	unsigned long		wait_table_size;
 	unsigned long		wait_table_bits;
 
 	/*
@@ -347,9 +334,6 @@ void wakeup_kswapd(struct zone *zone, int order);
 int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
 		int classzone_idx, int alloc_flags);
 
-extern int init_currently_empty_zone(struct zone *zone, unsigned long start_pfn,
-				     unsigned long size);
-
 #ifdef CONFIG_HAVE_MEMORY_PRESENT
 void memory_present(int nid, unsigned long start, unsigned long end);
 #else
@@ -416,10 +400,6 @@ int lowmem_reserve_ratio_sysctl_handler(struct ctl_table *, int, struct file *,
 					void __user *, size_t *, loff_t *);
 int percpu_pagelist_fraction_sysctl_handler(struct ctl_table *, int, struct file *,
 					void __user *, size_t *, loff_t *);
-int sysctl_min_unmapped_ratio_sysctl_handler(struct ctl_table *, int,
-			struct file *, void __user *, size_t *, loff_t *);
-int sysctl_min_slab_ratio_sysctl_handler(struct ctl_table *, int,
-			struct file *, void __user *, size_t *, loff_t *);
 
 #include <linux/topology.h>
 /* Returns the number of the current Node. */
@@ -527,10 +507,6 @@ struct mem_section {
 	 * pages.  However, it is stored with some other magic.
 	 * (see sparse.c::sparse_init_one_section())
 	 *
-	 * Additionally during early boot we encode node id of
-	 * the location of the section here to guide allocation.
-	 * (see sparse.c::memory_present())
-	 *
 	 * Making it a UL at least makes someone do a cast
 	 * before using it wrong.
 	 */
@@ -570,7 +546,6 @@ extern int __section_nr(struct mem_section* ms);
 #define SECTION_HAS_MEM_MAP	(1UL<<1)
 #define SECTION_MAP_LAST_BIT	(1UL<<2)
 #define SECTION_MAP_MASK	(~(SECTION_MAP_LAST_BIT-1))
-#define SECTION_NID_SHIFT	2
 
 static inline struct page *__section_mem_map_addr(struct mem_section *section)
 {
@@ -627,12 +602,6 @@ void sparse_init(void);
 #define sparse_init()	do {} while (0)
 #define sparse_index_init(_sec, _nid)  do {} while (0)
 #endif /* CONFIG_SPARSEMEM */
-
-#ifdef CONFIG_NODES_SPAN_OTHER_NODES
-#define early_pfn_in_nid(pfn, nid)	(early_pfn_to_nid(pfn) == (nid))
-#else
-#define early_pfn_in_nid(pfn, nid)	(1)
-#endif
 
 #ifndef early_pfn_valid
 #define early_pfn_valid(pfn)	(1)

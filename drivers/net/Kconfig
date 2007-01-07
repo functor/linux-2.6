@@ -447,7 +447,6 @@ config MIPS_GT96100ETH
 config MIPS_AU1X00_ENET
 	bool "MIPS AU1000 Ethernet support"
 	depends on NET_ETHERNET && SOC_AU1X00
-	select PHYLIB
 	select CRC32
 	help
 	  If you have an Alchemy Semi AU1X00 based system
@@ -854,17 +853,6 @@ config SMC9194
 	  <file:Documentation/networking/net-modules.txt>. The module
 	  will be called smc9194.
 
-config NET_NETX
-	tristate "NetX Ethernet support"
-	select MII
-	depends on NET_ETHERNET && ARCH_NETX
-	help
-	  This is support for the Hilscher netX builtin Ethernet ports
-
-	  To compile this driver as a module, choose M here and read
-	  <file:Documentation/networking/net-modules.txt>. The module
-	  will be called netx-eth.
-
 config DM9000
 	tristate "DM9000 support"
 	depends on (ARM || MIPS) && NET_ETHERNET
@@ -876,22 +864,6 @@ config DM9000
 	  To compile this driver as a module, choose M here and read
 	  <file:Documentation/networking/net-modules.txt>.  The module will be
 	  called dm9000.
-
-config SMC911X
-	tristate "SMSC LAN911[5678] support"
-	select CRC32
-	select MII
-	depends on NET_ETHERNET && ARCH_PXA
-	help
-	  This is a driver for SMSC's LAN911x series of Ethernet chipsets
-	  including the new LAN9115, LAN9116, LAN9117, and LAN9118.
-	  Say Y if you want it compiled into the kernel, 
-	  and read the Ethernet-HOWTO, available from
-	  <http://www.linuxdoc.org/docs.html#howto>.
-
-	  This driver is also available as a module. The module will be 
-	  called smc911x.  If you want to compile it as a module, say M 
-	  here and read <file:Documentation/modules.txt>
 
 config NET_VENDOR_RACAL
 	bool "Racal-Interlan (Micom) NI cards"
@@ -1387,8 +1359,8 @@ config APRICOT
 	  called apricot.
 
 config B44
-	tristate "Broadcom 4400 ethernet support"
-	depends on NET_PCI && PCI
+	tristate "Broadcom 4400 ethernet support (EXPERIMENTAL)"
+	depends on NET_PCI && PCI && EXPERIMENTAL
 	select MII
 	help
 	  If you have a network (Ethernet) controller of this type, say Y and
@@ -1723,20 +1695,6 @@ config VIA_RHINE_MMIO
 	  processing time in parts of the driver.
 
 	  If unsure, say Y.
-
-config VIA_RHINE_NAPI
-	bool "Use Rx Polling (NAPI)"
-	depends on VIA_RHINE
-	help
-	  NAPI is a new driver API designed to reduce CPU and interrupt load
-	  when the driver is receiving lots of packets from the card.
-
-	  If your estimated Rx load is 10kpps or more, or if the card will be
-	  deployed on potentially unfriendly networks (e.g. in a firewall),
-	  then say Y here.
-
-	  See <file:Documentation/networking/NAPI_HOWTO.txt> for more
-	  information.
 
 config LAN_SAA9730
 	bool "Philips SAA9730 Ethernet support (EXPERIMENTAL)"
@@ -2205,17 +2163,44 @@ config TIGON3
 config BNX2
 	tristate "Broadcom NetXtremeII support"
 	depends on PCI
-	select CRC32
-	select ZLIB_INFLATE
 	help
 	  This driver supports Broadcom NetXtremeII gigabit Ethernet cards.
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called bnx2.  This is recommended.
 
+config BCM5700
+	tristate "Broadcom 57xx support"
+	depends on PCI
+	---help---
+	  This driver supports the Broadcom (HP NC10xx/67xx/77xx/150x/320x/325x) Gigabit 
+	  family adapters.  Specifically, it supports:
+		HP NC1020 Gigabit Server Adapter
+		HP NC6770 Gigabit Server Adapter
+		HP NC7760 Gigabit Server Adapter
+		HP Embedded NC7761 Gigabit Server Adapter
+		HP NC7770 Gigabit Server Adapter
+		HP NC7771 Gigabit Server Adapter
+		HP NC7780 Gigabit Server Adapter
+		HP NC7781 Gigabit Server Adapter
+		HP NC7782 Embedded Gigabit Server
+		HP ProLiant NC150T PCI 4-Port Gigabit Combo Switch Adapter
+		HP NC320i Integrated Gigabit Server Adapter
+		HP NC325i Integrated Dual Port PCI Express Gigabit Server Adapter
+		HP NC320T Gigabit Server Adapter
+		HP NC324i Integrated Dual Port PCI Express Gigabit Server Adapter
+		HP NC326i Integrated Dual Port PCI Express Gigabit Server Adapter
+
+	  The source for this driver was obtained from 
+	  <http://h18000.www1.hp.com/support/files/networking/us/download/23968.html>
+
+	  To compile this driver as a module, choose M here and read
+	  <file:Documentation/networking/net-modules.txt>.  The module
+	  will be called bcm5700.
+
 config SPIDER_NET
 	tristate "Spider Gigabit Ethernet driver"
-	depends on PCI && PPC_IBM_CELL_BLADE
+	depends on PCI && PPC_CELL
 	select FW_LOADER
 	help
 	  This driver supports the Gigabit Ethernet chips present on the
@@ -2223,42 +2208,15 @@ config SPIDER_NET
 
 config GIANFAR
 	tristate "Gianfar Ethernet"
-	depends on 85xx || 83xx || PPC_86xx
+	depends on 85xx || 83xx
 	select PHYLIB
 	help
-	  This driver supports the Gigabit TSEC on the MPC83xx, MPC85xx,
-	  and MPC86xx family of chips, and the FEC on the 8540.
+	  This driver supports the Gigabit TSEC on the MPC85xx 
+	  family of chips, and the FEC on the 8540
 
 config GFAR_NAPI
 	bool "NAPI Support"
 	depends on GIANFAR
-
-config UCC_GETH
-	tristate "Freescale QE UCC GETH"
-	depends on QUICC_ENGINE && UCC_FAST
-	help
-	  This driver supports the Gigabit Ethernet mode of QE UCC.
-	  QE can be found on MPC836x CPUs.
-
-config UGETH_NAPI
-	bool "NAPI Support"
-	depends on UCC_GETH
-
-config UGETH_MAGIC_PACKET
-	bool "Magic Packet detection support"
-	depends on UCC_GETH
-
-config UGETH_FILTERING
-	bool "Mac address filtering support"
-	depends on UCC_GETH
-
-config UGETH_TX_ON_DEMOND
-	bool "Transmit on Demond support"
-	depends on UCC_GETH
-
-config UGETH_HAS_GIGA
-	bool
-	depends on UCC_GETH && MPC836x
 
 config MV643XX_ETH
 	tristate "MV-643XX Ethernet support"
@@ -2381,23 +2339,6 @@ config S2IO_NAPI
 	  information.
 
 	  If in doubt, say N.
-
-config MYRI10GE
-	tristate "Myricom Myri-10G Ethernet support"
-	depends on PCI
-	select FW_LOADER
-	select CRC32
-	---help---
-	  This driver supports Myricom Myri-10G Dual Protocol interface in
-	  Ethernet mode. If the eeprom on your board is not recent enough,
-	  you will need a newer firmware image.
-	  You may get this image or more information, at:
-
-	  <http://www.myri.com/scs/download-Myri10GE.html>
-
-	  To compile this driver as a module, choose M here and read
-	  <file:Documentation/networking/net-modules.txt>.  The module
-	  will be called myri10ge.
 
 endmenu
 

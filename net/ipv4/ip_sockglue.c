@@ -17,6 +17,7 @@
  *		Mike McLagan	:	Routing by source
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/mm.h>
@@ -112,19 +113,14 @@ static void ip_cmsg_recv_retopts(struct msghdr *msg, struct sk_buff *skb)
 static void ip_cmsg_recv_security(struct msghdr *msg, struct sk_buff *skb)
 {
 	char *secdata;
-	u32 seclen, secid;
+	u32 seclen;
 	int err;
 
-	err = security_socket_getpeersec_dgram(NULL, skb, &secid);
-	if (err)
-		return;
-
-	err = security_secid_to_secctx(secid, &secdata, &seclen);
+	err = security_socket_getpeersec_dgram(skb, &secdata, &seclen);
 	if (err)
 		return;
 
 	put_cmsg(msg, SOL_IP, SCM_SECURITY, seclen, secdata);
-	security_release_secctx(secdata, seclen);
 }
 
 

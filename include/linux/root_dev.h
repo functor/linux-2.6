@@ -2,8 +2,6 @@
 #define _ROOT_DEV_H_
 
 #include <linux/major.h>
-#include <linux/types.h>
-#include <linux/kdev_t.h>
 
 enum {
 	Root_NFS = MKDEV(UNNAMED_MAJOR, 255),

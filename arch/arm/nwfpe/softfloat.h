@@ -32,6 +32,7 @@ this code that are retained.
 #ifndef __SOFTFLOAT_H__
 #define __SOFTFLOAT_H__
 
+#include <linux/config.h>
 
 /*
 -------------------------------------------------------------------------------
@@ -61,7 +62,7 @@ typedef struct {
     u16 __padding;
 #endif
     u64 low;
-}  __attribute__ ((packed,aligned(4))) floatx80;
+} floatx80;
 
 /*
 -------------------------------------------------------------------------------

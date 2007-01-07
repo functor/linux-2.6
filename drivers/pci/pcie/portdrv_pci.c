@@ -30,6 +30,23 @@ MODULE_LICENSE("GPL");
 /* global data */
 static const char device_name[] = "pcieport-driver";
 
+static int pcie_portdrv_save_config(struct pci_dev *dev)
+{
+	return pci_save_state(dev);
+}
+
+static int pcie_portdrv_restore_config(struct pci_dev *dev)
+{
+	int retval;
+
+	pci_restore_state(dev);
+	retval = pci_enable_device(dev);
+	if (retval)
+		return retval;
+	pci_set_master(dev);
+	return 0;
+}
+
 /*
  * pcie_portdrv_probe - Probe PCI-Express port devices
  * @dev: PCI-Express port device being probed
@@ -56,10 +73,8 @@ static int __devinit pcie_portdrv_probe (struct pci_dev *dev,
 		"%s->Dev[%04x:%04x] has invalid IRQ. Check vendor BIOS\n", 
 		__FUNCTION__, dev->device, dev->vendor);
 	}
-	if (pcie_port_device_register(dev)) {
-		pci_disable_device(dev);
+	if (pcie_port_device_register(dev)) 
 		return -ENOMEM;
-	}
 
 	return 0;
 }
@@ -71,23 +86,6 @@ static void pcie_portdrv_remove (struct pci_dev *dev)
 }
 
 #ifdef CONFIG_PM
-static int pcie_portdrv_save_config(struct pci_dev *dev)
-{
-	return pci_save_state(dev);
-}
-
-static int pcie_portdrv_restore_config(struct pci_dev *dev)
-{
-	int retval;
-
-	pci_restore_state(dev);
-	retval = pci_enable_device(dev);
-	if (retval)
-		return retval;
-	pci_set_master(dev);
-	return 0;
-}
-
 static int pcie_portdrv_suspend (struct pci_dev *dev, pm_message_t state)
 {
 	int ret = pcie_port_device_suspend(dev, state);

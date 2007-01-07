@@ -25,15 +25,13 @@ extern unsigned long loops_per_jiffy;
 #define MAX_UDELAY_MS	5
 #endif
 
-#ifndef mdelay
-#define mdelay(n) (				\
-{						\
-	static int warned=0;			\
-	unsigned long __ms=(n);			\
-	WARN_ON(in_irq() && !(warned++));	\
-	while (__ms--) udelay(1000);		\
-})
-#endif
+#define mdelay(n) (					\
+	{						\
+		static int warned=0; 			\
+		unsigned long __ms=(n); 		\
+		WARN_ON(in_irq() && !(warned++)); 	\
+		while (__ms--) udelay(1000);		\
+	})
 
 #ifndef ndelay
 #define ndelay(x)	udelay(((x)+999)/1000)

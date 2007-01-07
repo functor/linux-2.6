@@ -20,7 +20,7 @@ config PREVENT_FIRMWARE_BUILD
 
 config FW_LOADER
 	tristate "Userspace firmware loading support"
-	depends on HOTPLUG
+	select HOTPLUG
 	---help---
 	  This option is provided for the case where no in-kernel-tree modules
 	  require userspace firmware loading support, but a module built outside
@@ -38,7 +38,3 @@ config DEBUG_DRIVER
 	  If you are unsure about this, say N here.
 
 endmenu
-
-config SYS_HYPERVISOR
-	bool
-	default n

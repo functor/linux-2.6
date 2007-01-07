@@ -3,6 +3,7 @@
  * Licensed under the GPL
  */
 
+#include "linux/config.h"
 #include "linux/module.h"
 #include "linux/string.h"
 #include "linux/smp_lock.h"
@@ -86,6 +87,12 @@ EXPORT_SYMBOL(dump_thread);
 
 EXPORT_SYMBOL(do_gettimeofday);
 EXPORT_SYMBOL(do_settimeofday);
+
+/* This is here because UML expands lseek to sys_lseek, not to a system
+ * call instruction.
+ */
+EXPORT_SYMBOL(sys_lseek);
+EXPORT_SYMBOL(sys_wait4);
 
 #ifdef CONFIG_SMP
 

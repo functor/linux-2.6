@@ -1,22 +1,10 @@
-#include <linux/linkage.h>
-#include <asm/dwarf2.h>
-
 /*
  * Zero a page. 	
  * rdi	page
  */			
-	ALIGN
-clear_page_c:
-	CFI_STARTPROC
-	movl $4096/8,%ecx
-	xorl %eax,%eax
-	rep stosq
-	ret
-	CFI_ENDPROC
-ENDPROC(clear_page)
-
-ENTRY(clear_page)
-	CFI_STARTPROC
+	.globl clear_page
+	.p2align 4
+clear_page:
 	xorl   %eax,%eax
 	movl   $4096/64,%ecx
 	.p2align 4
@@ -35,25 +23,28 @@ ENTRY(clear_page)
 	jnz	.Lloop
 	nop
 	ret
-	CFI_ENDPROC
-.Lclear_page_end:
-ENDPROC(clear_page)
+clear_page_end:
 
 	/* Some CPUs run faster using the string instructions.
 	   It is also a lot simpler. Use this when possible */
 
 #include <asm/cpufeature.h>
 
-	.section .altinstr_replacement,"ax"
-1:	.byte 0xeb					/* jmp <disp8> */
-	.byte (clear_page_c - clear_page) - (2f - 1b)	/* offset */
-2:
-	.previous
 	.section .altinstructions,"a"
 	.align 8
-	.quad clear_page
-	.quad 1b
-	.byte X86_FEATURE_REP_GOOD
-	.byte .Lclear_page_end - clear_page
-	.byte 2b - 1b
+	.quad  clear_page
+	.quad  clear_page_c
+	.byte  X86_FEATURE_REP_GOOD
+	.byte  clear_page_end-clear_page
+	.byte  clear_page_c_end-clear_page_c
+	.previous
+
+	.section .altinstr_replacement,"ax"
+clear_page_c:
+	movl $4096/8,%ecx
+	xorl %eax,%eax
+	rep 
+	stosq
+	ret
+clear_page_c_end:
 	.previous

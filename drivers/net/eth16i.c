@@ -1064,7 +1064,8 @@ static int eth16i_tx(struct sk_buff *skb, struct net_device *dev)
 	unsigned long flags;
 
 	if (length < ETH_ZLEN) {
-		if (skb_padto(skb, ETH_ZLEN))
+		skb = skb_padto(skb, ETH_ZLEN);
+		if (skb == NULL)
 			return 0;
 		length = ETH_ZLEN;
 	}
@@ -1434,7 +1435,7 @@ MODULE_PARM_DESC(mediatype, "eth16i media type of interface(s) (bnc,tp,dix,auto,
 module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "eth16i debug level (0-6)");
 
-int __init init_module(void)
+int init_module(void)
 {
 	int this_dev, found = 0;
 	struct net_device *dev;

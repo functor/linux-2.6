@@ -15,6 +15,7 @@
  * Jamal Hadi Salim <hadi@nortelnetworks.com>: 990601: ingress support
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -195,14 +196,14 @@ struct Qdisc *qdisc_lookup(struct net_device *dev, u32 handle)
 {
 	struct Qdisc *q;
 
-	read_lock(&qdisc_tree_lock);
+	read_lock_bh(&qdisc_tree_lock);
 	list_for_each_entry(q, &dev->qdisc_list, list) {
 		if (q->handle == handle) {
-			read_unlock(&qdisc_tree_lock);
+			read_unlock_bh(&qdisc_tree_lock);
 			return q;
 		}
 	}
-	read_unlock(&qdisc_tree_lock);
+	read_unlock_bh(&qdisc_tree_lock);
 	return NULL;
 }
 
@@ -430,7 +431,7 @@ qdisc_create(struct net_device *dev, u32 handle, struct rtattr **tca, int *errp)
 	}
 #endif
 
-	err = -ENOENT;
+	err = -EINVAL;
 	if (ops == NULL)
 		goto err_out;
 
@@ -837,7 +838,7 @@ static int tc_dump_qdisc(struct sk_buff *skb, struct netlink_callback *cb)
 			continue;
 		if (idx > s_idx)
 			s_q_idx = 0;
-		read_lock(&qdisc_tree_lock);
+		read_lock_bh(&qdisc_tree_lock);
 		q_idx = 0;
 		list_for_each_entry(q, &dev->qdisc_list, list) {
 			if (q_idx < s_q_idx) {
@@ -846,12 +847,12 @@ static int tc_dump_qdisc(struct sk_buff *skb, struct netlink_callback *cb)
 			}
 			if (tc_fill_qdisc(skb, q, q->parent, NETLINK_CB(cb->skb).pid,
 					  cb->nlh->nlmsg_seq, NLM_F_MULTI, RTM_NEWQDISC) <= 0) {
-				read_unlock(&qdisc_tree_lock);
+				read_unlock_bh(&qdisc_tree_lock);
 				goto done;
 			}
 			q_idx++;
 		}
-		read_unlock(&qdisc_tree_lock);
+		read_unlock_bh(&qdisc_tree_lock);
 	}
 
 done:
@@ -1074,7 +1075,7 @@ static int tc_dump_tclass(struct sk_buff *skb, struct netlink_callback *cb)
 	s_t = cb->args[0];
 	t = 0;
 
-	read_lock(&qdisc_tree_lock);
+	read_lock_bh(&qdisc_tree_lock);
 	list_for_each_entry(q, &dev->qdisc_list, list) {
 		if (t < s_t || !q->ops->cl_ops ||
 		    (tcm->tcm_parent &&
@@ -1096,7 +1097,7 @@ static int tc_dump_tclass(struct sk_buff *skb, struct netlink_callback *cb)
 			break;
 		t++;
 	}
-	read_unlock(&qdisc_tree_lock);
+	read_unlock_bh(&qdisc_tree_lock);
 
 	cb->args[0] = t;
 

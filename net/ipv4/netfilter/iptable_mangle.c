@@ -10,6 +10,7 @@
  *
  * Extended to all five netfilter hooks by Brad Chapman & Harald Welte
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/netdevice.h>
@@ -157,8 +158,7 @@ ipt_local_hook(unsigned int hook,
 		|| (*pskb)->nfmark != nfmark
 #endif
 		|| (*pskb)->nh.iph->tos != tos))
-		if (ip_route_me_harder(pskb, RTN_UNSPEC))
-			ret = NF_DROP;
+		return ip_route_me_harder(pskb) == 0 ? ret : NF_DROP;
 
 	return ret;
 }

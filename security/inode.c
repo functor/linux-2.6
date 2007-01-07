@@ -13,6 +13,7 @@
  */
 
 /* #define DEBUG */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
@@ -44,8 +45,8 @@ static ssize_t default_write_file(struct file *file, const char __user *buf,
 
 static int default_open(struct inode *inode, struct file *file)
 {
-	if (inode->i_private)
-		file->private_data = inode->i_private;
+	if (inode->u.generic_ip)
+		file->private_data = inode->u.generic_ip;
 
 	return 0;
 }
@@ -64,6 +65,7 @@ static struct inode *get_inode(struct super_block *sb, int mode, dev_t dev)
 		inode->i_mode = mode;
 		inode->i_uid = 0;
 		inode->i_gid = 0;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		switch (mode & S_IFMT) {
@@ -133,11 +135,11 @@ static int fill_super(struct super_block *sb, void *data, int silent)
 	return simple_fill_super(sb, SECURITYFS_MAGIC, files);
 }
 
-static int get_sb(struct file_system_type *fs_type,
-		  int flags, const char *dev_name,
-		  void *data, struct vfsmount *mnt)
+static struct super_block *get_sb(struct file_system_type *fs_type,
+				        int flags, const char *dev_name,
+					void *data)
 {
-	return get_sb_single(fs_type, flags, data, fill_super, mnt);
+	return get_sb_single(fs_type, flags, data, fill_super);
 }
 
 static struct file_system_type fs_type = {
@@ -193,7 +195,7 @@ static int create_by_name(const char *name, mode_t mode,
  *          directory dentry if set.  If this paramater is NULL, then the
  *          file will be created in the root of the securityfs filesystem.
  * @data: a pointer to something that the caller will want to get to later
- *        on.  The inode.i_private pointer will point to this value on
+ *        on.  The inode.u.generic_ip pointer will point to this value on
  *        the open() call.
  * @fops: a pointer to a struct file_operations that should be used for
  *        this file.
@@ -222,7 +224,7 @@ struct dentry *securityfs_create_file(const char *name, mode_t mode,
 
 	pr_debug("securityfs: creating file '%s'\n",name);
 
-	error = simple_pin_fs(&fs_type, &mount, &mount_count);
+	error = simple_pin_fs("securityfs", &mount, &mount_count);
 	if (error) {
 		dentry = ERR_PTR(error);
 		goto exit;
@@ -239,7 +241,7 @@ struct dentry *securityfs_create_file(const char *name, mode_t mode,
 		if (fops)
 			dentry->d_inode->i_fop = fops;
 		if (data)
-			dentry->d_inode->i_private = data;
+			dentry->d_inode->u.generic_ip = data;
 	}
 exit:
 	return dentry;

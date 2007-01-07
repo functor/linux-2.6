@@ -33,10 +33,6 @@
 #include <asm/cacheflush.h>
 #include <asm/tlb.h>
 
-#ifndef arch_mmap_check
-#define arch_mmap_check(addr, len, flags)	(0)
-#endif
-
 static void unmap_region(struct mm_struct *mm,
 		struct vm_area_struct *vma, struct vm_area_struct *prev,
 		unsigned long start, unsigned long end);
@@ -66,13 +62,6 @@ pgprot_t protection_map[16] = {
 	__P000, __P001, __P010, __P011, __P100, __P101, __P110, __P111,
 	__S000, __S001, __S010, __S011, __S100, __S101, __S110, __S111
 };
-
-pgprot_t vm_get_page_prot(unsigned long vm_flags)
-{
-	return protection_map[vm_flags &
-				(VM_READ|VM_WRITE|VM_EXEC|VM_SHARED)];
-}
-EXPORT_SYMBOL(vm_get_page_prot);
 
 int sysctl_overcommit_memory = OVERCOMMIT_GUESS;  /* heuristic overcommit */
 int sysctl_overcommit_ratio = 50;	/* default is 50% */
@@ -110,7 +99,7 @@ int __vm_enough_memory(long pages, int cap_sys_admin)
 	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
 		unsigned long n;
 
-		free = global_page_state(NR_FILE_PAGES);
+		free = get_page_cache_size();
 		free += nr_swap_pages;
 
 		/*
@@ -1089,8 +1078,7 @@ munmap_back:
 	vma->vm_start = addr;
 	vma->vm_end = addr + len;
 	vma->vm_flags = vm_flags;
-	vma->vm_page_prot = protection_map[vm_flags &
-				(VM_READ|VM_WRITE|VM_EXEC|VM_SHARED)];
+	vma->vm_page_prot = protection_map[vm_flags & 0x0f];
 	vma->vm_pgoff = pgoff;
 
 	if (file) {
@@ -1130,10 +1118,6 @@ munmap_back:
 	addr = vma->vm_start;
 	pgoff = vma->vm_pgoff;
 	vm_flags = vma->vm_flags;
-
-	if (vma_wants_writenotify(vma))
-		vma->vm_page_prot =
-			protection_map[vm_flags & (VM_READ|VM_WRITE|VM_EXEC)];
 
 	if (!file || !vma_merge(mm, prev, addr, vma->vm_end,
 			vma->vm_flags, NULL, file, pgoff, vma_policy(vma))) {
@@ -1410,7 +1394,7 @@ get_unmapped_area_prot(struct file *file, unsigned long addr, unsigned long len,
 
 EXPORT_SYMBOL(get_unmapped_area_prot);
 
-#define SHLIB_BASE             0x00110000
+#define SHLIB_BASE             0x00111000
 
 unsigned long arch_get_unmapped_exec_area(struct file *filp, unsigned long addr0,
 		unsigned long len0, unsigned long pgoff, unsigned long flags)
@@ -2039,8 +2023,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma->vm_end = addr + len;
 	vma->vm_pgoff = pgoff;
 	vma->vm_flags = flags;
-	vma->vm_page_prot = protection_map[flags &
-				(VM_READ|VM_WRITE|VM_EXEC|VM_SHARED)];
+	vma->vm_page_prot = protection_map[flags & 0x0f];
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 out:
 	vx_vmpages_add(mm, len >> PAGE_SHIFT);
@@ -2257,7 +2240,7 @@ int install_special_mapping(struct mm_struct *mm,
 	vma->vm_private_data = pages;
 
 	insert_vm_struct(mm, vma);
-	vx_vmpages_add(mm, len >> PAGE_SHIFT);
+	mm->total_vm += len >> PAGE_SHIFT;
 
 	if (!vdso_populate)
 		return 0;

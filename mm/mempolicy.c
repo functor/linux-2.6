@@ -87,8 +87,7 @@
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <linux/migrate.h>
-#include <linux/rmap.h>
-#include <linux/security.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/tlbflush.h>
 #include <asm/uaccess.h>
@@ -589,11 +588,6 @@ static void migrate_page_add(struct page *page, struct list_head *pagelist,
 		isolate_lru_page(page, pagelist);
 }
 
-static struct page *new_node_page(struct page *page, unsigned long node, int **x)
-{
-	return alloc_pages_node(node, GFP_HIGHUSER, 0);
-}
-
 /*
  * Migrate pages from one node to a target node.
  * Returns error or the number of pages not migrated.
@@ -610,9 +604,11 @@ int migrate_to_node(struct mm_struct *mm, int source, int dest, int flags)
 	check_range(mm, mm->mmap->vm_start, TASK_SIZE, &nmask,
 			flags | MPOL_MF_DISCONTIG_OK, &pagelist);
 
-	if (!list_empty(&pagelist))
-		err = migrate_pages(&pagelist, new_node_page, dest);
-
+	if (!list_empty(&pagelist)) {
+		err = migrate_pages_to(&pagelist, NULL, dest);
+		if (!list_empty(&pagelist))
+			putback_lru_pages(&pagelist);
+	}
 	return err;
 }
 
@@ -631,10 +627,6 @@ int do_migrate_pages(struct mm_struct *mm,
 	nodemask_t tmp;
 
   	down_read(&mm->mmap_sem);
-
-	err = migrate_vmas(mm, from_nodes, to_nodes, flags);
-	if (err)
-		goto out;
 
 /*
  * Find a 'source' bit set in 'tmp' whose corresponding 'dest'
@@ -695,7 +687,7 @@ int do_migrate_pages(struct mm_struct *mm,
 		if (err < 0)
 			break;
 	}
-out:
+
 	up_read(&mm->mmap_sem);
 	if (err < 0)
 		return err;
@@ -703,12 +695,6 @@ out:
 
 }
 
-static struct page *new_vma_page(struct page *page, unsigned long private, int **x)
-{
-	struct vm_area_struct *vma = (struct vm_area_struct *)private;
-
-	return alloc_page_vma(GFP_HIGHUSER, vma, page_address_in_vma(page, vma));
-}
 #else
 
 static void migrate_page_add(struct page *page, struct list_head *pagelist,
@@ -720,11 +706,6 @@ int do_migrate_pages(struct mm_struct *mm,
 	const nodemask_t *from_nodes, const nodemask_t *to_nodes, int flags)
 {
 	return -ENOSYS;
-}
-
-static struct page *new_vma_page(struct page *page, unsigned long private)
-{
-	return NULL;
 }
 #endif
 
@@ -787,12 +768,14 @@ long do_mbind(unsigned long start, unsigned long len,
 		err = mbind_range(vma, start, end, new);
 
 		if (!list_empty(&pagelist))
-			nr_failed = migrate_pages(&pagelist, new_vma_page,
-						(unsigned long)vma);
+			nr_failed = migrate_pages_to(&pagelist, vma, -1);
 
 		if (!err && nr_failed && (flags & MPOL_MF_STRICT))
 			err = -EIO;
 	}
+
+	if (!list_empty(&pagelist))
+		putback_lru_pages(&pagelist);
 
 	up_write(&mm->mmap_sem);
 	mpol_free(new);
@@ -946,10 +929,6 @@ asmlinkage long sys_migrate_pages(pid_t pid, unsigned long maxnode,
 		err = -EPERM;
 		goto out;
 	}
-
-	err = security_task_movememory(task);
-	if (err)
-		goto out;
 
 	err = do_migrate_pages(mm, &old, &new,
 		capable(CAP_SYS_NICE) ? MPOL_MF_MOVE_ALL : MPOL_MF_MOVE);
@@ -1176,15 +1155,7 @@ static inline unsigned interleave_nid(struct mempolicy *pol,
 	if (vma) {
 		unsigned long off;
 
-		/*
-		 * for small pages, there is no difference between
-		 * shift and PAGE_SHIFT, so the bit-shift is safe.
-		 * for huge pages, since vm_pgoff is in units of small
-		 * pages, we need to shift off the always 0 bits to get
-		 * a useful offset.
-		 */
-		BUG_ON(shift < PAGE_SHIFT);
-		off = vma->vm_pgoff >> (shift - PAGE_SHIFT);
+		off = vma->vm_pgoff;
 		off += (addr - vma->vm_start) >> shift;
 		return offset_il_node(pol, vma, off);
 	} else
@@ -1217,8 +1188,10 @@ static struct page *alloc_page_interleave(gfp_t gfp, unsigned order,
 
 	zl = NODE_DATA(nid)->node_zonelists + gfp_zone(gfp);
 	page = __alloc_pages(gfp, order, zl);
-	if (page && page_zone(page) == zl->zones[0])
-		inc_zone_page_state(page, NUMA_INTERLEAVE_HIT);
+	if (page && page_zone(page) == zl->zones[0]) {
+		zone_pcp(zl->zones[0],get_cpu())->interleave_hit++;
+		put_cpu();
+	}
 	return page;
 }
 
@@ -1827,7 +1800,7 @@ static inline void check_huge_range(struct vm_area_struct *vma,
 
 int show_numa_map(struct seq_file *m, void *v)
 {
-	struct proc_maps_private *priv = m->private;
+	struct task_struct *task = m->private;
 	struct vm_area_struct *vma = v;
 	struct numa_maps *md;
 	struct file *file = vma->vm_file;
@@ -1843,7 +1816,7 @@ int show_numa_map(struct seq_file *m, void *v)
 		return 0;
 
 	mpol_to_str(buffer, sizeof(buffer),
-			    get_vma_policy(priv->task, vma, vma->vm_start));
+			get_vma_policy(task, vma, vma->vm_start));
 
 	seq_printf(m, "%08lx %s", vma->vm_start, buffer);
 
@@ -1897,7 +1870,7 @@ out:
 	kfree(md);
 
 	if (m->count < m->size)
-		m->version = (vma != priv->tail_vma) ? vma->vm_start : 0;
+		m->version = (vma != get_gate_vma(task)) ? vma->vm_start : 0;
 	return 0;
 }
 

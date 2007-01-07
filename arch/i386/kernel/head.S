@@ -8,6 +8,7 @@
  */
 
 .text
+#include <linux/config.h>
 #include <linux/threads.h>
 #include <linux/linkage.h>
 #include <asm/segment.h>
@@ -317,14 +318,20 @@ is386:	movl $2,%ecx		# set MP
 	movl %eax,%gs
 	lldt %ax
 	cld			# gcc2 wants the direction flag cleared at all times
-	pushl %eax		# fake return address
 #ifdef CONFIG_SMP
 	movb ready, %cl
 	movb $1, ready
-	cmpb $0,%cl		# the first CPU calls start_kernel
-	jne initialize_secondary # all other CPUs call initialize_secondary
+	cmpb $0,%cl
+	je 1f			# the first CPU calls start_kernel
+				# all other CPUs call initialize_secondary
+	call initialize_secondary
+	jmp L6
+1:
 #endif /* CONFIG_SMP */
-	jmp start_kernel
+	call start_kernel
+L6:
+	jmp L6			# main should never return here, but
+				# just in case, we know what happens.
 
 /*
  * We depend on ET to be correct. This checks for 287/387.

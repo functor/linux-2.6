@@ -35,6 +35,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -46,7 +47,7 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
+#include "usb-serial.h"
 
 static int debug;
 
@@ -256,14 +257,14 @@ static int omninet_write (struct usb_serial_port *port, const unsigned char *buf
 		return (0);
 	}
 
-	spin_lock_bh(&wport->lock);
+	spin_lock(&wport->lock);
 	if (wport->write_urb_busy) {
-		spin_unlock_bh(&wport->lock);
+		spin_unlock(&wport->lock);
 		dbg("%s - already writing", __FUNCTION__);
 		return 0;
 	}
 	wport->write_urb_busy = 1;
-	spin_unlock_bh(&wport->lock);
+	spin_unlock(&wport->lock);
 
 	count = (count > OMNINET_BULKOUTSIZE) ? OMNINET_BULKOUTSIZE : count;
 
@@ -319,7 +320,7 @@ static void omninet_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 		return;
 	}
 
-	usb_serial_port_softint(port);
+	schedule_work(&port->work);
 }
 
 

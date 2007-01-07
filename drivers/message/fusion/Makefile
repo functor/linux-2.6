@@ -9,6 +9,7 @@
 #EXTRA_CFLAGS += -DMPT_DEBUG_EXIT
 #EXTRA_CFLAGS += -DMPT_DEBUG_FAIL
 
+
 #
 # driver/module specifics...
 #
@@ -31,11 +32,6 @@
 #
 #  For mptfc:
 #CFLAGS_mptfc.o += -DMPT_DEBUG_FC
-
-#  For mptsas:
-#CFLAGS_mptsas.o += -DMPT_DEBUG_SAS
-#CFLAGS_mptsas.o += -DMPT_DEBUG_SAS_WIDE
-
 
 #=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-} LSI_LOGIC
 

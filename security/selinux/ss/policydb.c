@@ -96,11 +96,6 @@ static struct policydb_compat_info policydb_compat[] = {
 		.sym_num        = SYM_NUM,
 		.ocon_num       = OCON_NUM,
 	},
-	{
-		.version        = POLICYDB_VERSION_RANGETRANS,
-		.sym_num        = SYM_NUM,
-		.ocon_num       = OCON_NUM,
-	},
 };
 
 static struct policydb_compat_info *policydb_lookup_compat(int version)
@@ -649,18 +644,10 @@ void policydb_destroy(struct policydb *p)
 	kfree(lra);
 
 	for (rt = p->range_tr; rt; rt = rt -> next) {
-		if (lrt) {
-			ebitmap_destroy(&lrt->target_range.level[0].cat);
-			ebitmap_destroy(&lrt->target_range.level[1].cat);
-			kfree(lrt);
-		}
+		kfree(lrt);
 		lrt = rt;
 	}
-	if (lrt) {
-		ebitmap_destroy(&lrt->target_range.level[0].cat);
-		ebitmap_destroy(&lrt->target_range.level[1].cat);
-		kfree(lrt);
-	}
+	kfree(lrt);
 
 	if (p->type_attr_map) {
 		for (i = 0; i < p->p_types.nprim; i++)
@@ -1834,7 +1821,6 @@ int policydb_read(struct policydb *p, void *fp)
 	}
 
 	if (p->policyvers >= POLICYDB_VERSION_MLS) {
-		int new_rangetr = p->policyvers >= POLICYDB_VERSION_RANGETRANS;
 		rc = next_entry(buf, fp, sizeof(u32));
 		if (rc < 0)
 			goto bad;
@@ -1853,16 +1839,9 @@ int policydb_read(struct policydb *p, void *fp)
 			rc = next_entry(buf, fp, (sizeof(u32) * 2));
 			if (rc < 0)
 				goto bad;
-			rt->source_type = le32_to_cpu(buf[0]);
-			rt->target_type = le32_to_cpu(buf[1]);
-			if (new_rangetr) {
-				rc = next_entry(buf, fp, sizeof(u32));
-				if (rc < 0)
-					goto bad;
-				rt->target_class = le32_to_cpu(buf[0]);
-			} else
-				rt->target_class = SECCLASS_PROCESS;
-			rc = mls_read_range_helper(&rt->target_range, fp);
+			rt->dom = le32_to_cpu(buf[0]);
+			rt->type = le32_to_cpu(buf[1]);
+			rc = mls_read_range_helper(&rt->range, fp);
 			if (rc)
 				goto bad;
 			lrt = rt;

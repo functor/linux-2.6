@@ -6,6 +6,7 @@
  * Copyright (c) 2000-2006 Silicon Graphics, Inc.  All Rights Reserved.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/sn/nodepda.h>
 #include <asm/sn/addrs.h>
@@ -382,13 +383,14 @@ bte_result_t bte_unaligned_copy(u64 src, u64 dest, u64 len, u64 mode)
 		 * bcopy to the destination.
 		 */
 
+		/* Add the leader from source */
+		headBteLen = len + (src & L1_CACHE_MASK);
+		/* Add the trailing bytes from footer. */
+		headBteLen += L1_CACHE_BYTES - (headBteLen & L1_CACHE_MASK);
+		headBteSource = src & ~L1_CACHE_MASK;
 		headBcopySrcOffset = src & L1_CACHE_MASK;
 		headBcopyDest = dest;
 		headBcopyLen = len;
-
-		headBteSource = src - headBcopySrcOffset;
-		/* Add the leading and trailing bytes from source */
-		headBteLen = L1_CACHE_ALIGN(len + headBcopySrcOffset);
 	}
 
 	if (headBcopyLen > 0) {

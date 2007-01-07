@@ -10,6 +10,7 @@
  *		"A Kernel Model for Precision Timekeeping" by Dave Mills
  */
 
+#include <linux/config.h> /* CONFIG_HEARTBEAT */
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -176,7 +177,7 @@ EXPORT_SYMBOL(do_settimeofday);
 static int timer_dev_id;
 static struct irqaction timer_irqaction = {
 	timer_interrupt,
-	IRQF_DISABLED,
+	SA_INTERRUPT,
 	CPU_MASK_NONE,
 	"timer",
 	&timer_dev_id,

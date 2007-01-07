@@ -130,13 +130,12 @@ void __init net_random_init(void)
 static int net_random_reseed(void)
 {
 	int i;
-	unsigned long seed;
+	unsigned long seed[NR_CPUS];
 
+	get_random_bytes(seed, sizeof(seed));
 	for_each_possible_cpu(i) {
 		struct nrnd_state *state = &per_cpu(net_rand_state,i);
-
-		get_random_bytes(&seed, sizeof(seed));
-		__net_srandom(state, seed);
+		__net_srandom(state, seed[i]);
 	}
 	return 0;
 }

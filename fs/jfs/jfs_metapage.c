@@ -257,7 +257,7 @@ static sector_t metapage_get_blocks(struct inode *inode, sector_t lblock,
 	int rc = 0;
 	int xflag;
 	s64 xaddr;
-	sector_t file_blocks = (inode->i_size + inode->i_sb->s_blocksize - 1) >>
+	sector_t file_blocks = (inode->i_size + inode->i_blksize - 1) >>
 			       inode->i_blkbits;
 
 	if (lblock >= file_blocks)
@@ -577,7 +577,7 @@ static void metapage_invalidatepage(struct page *page, unsigned long offset)
 	metapage_releasepage(page, 0);
 }
 
-const struct address_space_operations jfs_metapage_aops = {
+struct address_space_operations jfs_metapage_aops = {
 	.readpage	= metapage_readpage,
 	.writepage	= metapage_writepage,
 	.sync_page	= block_sync_page,
@@ -632,9 +632,10 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 		}
 		SetPageUptodate(page);
 	} else {
-		page = read_mapping_page(mapping, page_index, NULL);
+		page = read_cache_page(mapping, page_index,
+			    (filler_t *)mapping->a_ops->readpage, NULL);
 		if (IS_ERR(page) || !PageUptodate(page)) {
-			jfs_err("read_mapping_page failed!");
+			jfs_err("read_cache_page failed!");
 			return NULL;
 		}
 		lock_page(page);

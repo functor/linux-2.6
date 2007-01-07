@@ -91,7 +91,6 @@ mnt_create(char *hostname, struct sockaddr_in *srvaddr, int version,
 		clnt->cl_softrtry = 1;
 		clnt->cl_oneshot  = 1;
 		clnt->cl_intr = 1;
-		clnt->cl_tagxid = 1;
 	}
 	return clnt;
 }

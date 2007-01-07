@@ -19,7 +19,6 @@
 #include <asm/dma.h>	/* isa_dma_bridge_buggy */
 #include "pci.h"
 
-unsigned int pci_pm_d3_delay = 10;
 
 /**
  * pci_bus_max_busnr - returns maximum PCI bus number of given bus' children
@@ -165,6 +164,7 @@ int pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap)
 	return __pci_bus_find_cap(bus, devfn, hdr_type & 0x7f, cap);
 }
 
+#if 0
 /**
  * pci_find_ext_capability - Find an extended capability
  * @dev: PCI device to query
@@ -212,7 +212,7 @@ int pci_find_ext_capability(struct pci_dev *dev, int cap)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(pci_find_ext_capability);
+#endif  /*  0  */
 
 /**
  * pci_find_parent_resource - return resource region of parent bus of given region
@@ -314,14 +314,6 @@ pci_set_power_state(struct pci_dev *dev, pci_power_t state)
 	} else if (dev->current_state == state)
 		return 0;        /* we're already there */
 
-	/*
-	 * If the device or the parent bridge can't support PCI PM, ignore
-	 * the request if we're doing anything besides putting it into D0
-	 * (which would only happen on boot).
-	 */
-	if ((state == PCI_D1 || state == PCI_D2) && pci_no_d1d2(dev))
-		return 0;
-
 	/* find PCI PM capability in list */
 	pm = pci_find_capability(dev, PCI_CAP_ID_PM);
 	
@@ -372,13 +364,13 @@ pci_set_power_state(struct pci_dev *dev, pci_power_t state)
 	/* Mandatory power management transition delays */
 	/* see PCI PM 1.1 5.6.1 table 18 */
 	if (state == PCI_D3hot || dev->current_state == PCI_D3hot)
-		msleep(pci_pm_d3_delay);
+		msleep(10);
 	else if (state == PCI_D2 || dev->current_state == PCI_D2)
 		udelay(200);
 
 	/*
 	 * Give firmware a chance to be called, such as ACPI _PRx, _PSx
-	 * Firmware method after native method ?
+	 * Firmware method after natice method ?
 	 */
 	if (platform_pci_set_power_state)
 		platform_pci_set_power_state(dev, state);
@@ -526,12 +518,7 @@ pci_enable_device_bars(struct pci_dev *dev, int bars)
 int
 pci_enable_device(struct pci_dev *dev)
 {
-	int err;
-
-	if (dev->is_enabled)
-		return 0;
-
-	err = pci_enable_device_bars(dev, (1 << PCI_NUM_RESOURCES) - 1);
+	int err = pci_enable_device_bars(dev, (1 << PCI_NUM_RESOURCES) - 1);
 	if (err)
 		return err;
 	pci_fixup_device(pci_fixup_enable, dev);
@@ -560,14 +547,7 @@ void
 pci_disable_device(struct pci_dev *dev)
 {
 	u16 pci_command;
-
-	if (dev->msi_enabled)
-		disable_msi_mode(dev, pci_find_capability(dev, PCI_CAP_ID_MSI),
-			PCI_CAP_ID_MSI);
-	if (dev->msix_enabled)
-		disable_msi_mode(dev, pci_find_capability(dev, PCI_CAP_ID_MSI),
-			PCI_CAP_ID_MSIX);
-
+	
 	pci_read_config_word(dev, PCI_COMMAND, &pci_command);
 	if (pci_command & PCI_COMMAND_MASTER) {
 		pci_command &= ~PCI_COMMAND_MASTER;
@@ -700,12 +680,10 @@ int pci_request_region(struct pci_dev *pdev, int bar, const char *res_name)
 	return 0;
 
 err_out:
-	printk (KERN_WARNING "PCI: Unable to reserve %s region #%d:%llx@%llx "
-		"for device %s\n",
+	printk (KERN_WARNING "PCI: Unable to reserve %s region #%d:%lx@%lx for device %s\n",
 		pci_resource_flags(pdev, bar) & IORESOURCE_IO ? "I/O" : "mem",
 		bar + 1, /* PCI BAR # */
-		(unsigned long long)pci_resource_len(pdev, bar),
-		(unsigned long long)pci_resource_start(pdev, bar),
+		pci_resource_len(pdev, bar), pci_resource_start(pdev, bar),
 		pci_name(pdev));
 	return -EBUSY;
 }

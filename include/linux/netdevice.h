@@ -34,9 +34,9 @@
 #include <asm/cache.h>
 #include <asm/byteorder.h>
 
+#include <linux/config.h>
 #include <linux/device.h>
 #include <linux/percpu.h>
-#include <linux/dmaengine.h>
 
 struct divert_blk;
 struct vlan_group;
@@ -313,15 +313,9 @@ struct net_device
 
 	/* Segmentation offload features */
 #define NETIF_F_GSO_SHIFT	16
-#define NETIF_F_GSO_MASK	0xffff0000
 #define NETIF_F_TSO		(SKB_GSO_TCPV4 << NETIF_F_GSO_SHIFT)
-#define NETIF_F_UFO		(SKB_GSO_UDP << NETIF_F_GSO_SHIFT)
+#define NETIF_F_UFO		(SKB_GSO_UDPV4 << NETIF_F_GSO_SHIFT)
 #define NETIF_F_GSO_ROBUST	(SKB_GSO_DODGY << NETIF_F_GSO_SHIFT)
-#define NETIF_F_TSO_ECN		(SKB_GSO_TCP_ECN << NETIF_F_GSO_SHIFT)
-#define NETIF_F_TSO6		(SKB_GSO_TCPV6 << NETIF_F_GSO_SHIFT)
-
-	/* List of features with software fallbacks. */
-#define NETIF_F_GSO_SOFTWARE	(NETIF_F_TSO | NETIF_F_TSO_ECN | NETIF_F_TSO6)
 
 #define NETIF_F_GEN_CSUM	(NETIF_F_NO_CSUM | NETIF_F_HW_CSUM)
 #define NETIF_F_ALL_CSUM	(NETIF_F_IP_CSUM | NETIF_F_GEN_CSUM)
@@ -614,9 +608,6 @@ struct softnet_data
 	struct sk_buff		*completion_queue;
 
 	struct net_device	backlog_dev;	/* Sorry. 8) */
-#ifdef CONFIG_NET_DMA
-	struct dma_chan		*net_dma;
-#endif
 };
 
 DECLARE_PER_CPU(struct softnet_data,softnet_data);
@@ -708,6 +699,7 @@ extern int		dev_hard_start_xmit(struct sk_buff *skb,
 
 extern void		dev_init(void);
 
+extern int		netdev_nit;
 extern int		netdev_budget;
 
 /* Called by rtnetlink.c:rtnl_unlock() */
@@ -997,15 +989,10 @@ extern void dev_seq_stop(struct seq_file *seq, void *v);
 
 extern void linkwatch_run_queue(void);
 
-static inline int net_gso_ok(int features, int gso_type)
-{
-	int feature = gso_type << NETIF_F_GSO_SHIFT;
-	return (features & feature) == feature;
-}
-
 static inline int skb_gso_ok(struct sk_buff *skb, int features)
 {
-	return net_gso_ok(features, skb_shinfo(skb)->gso_type);
+	int feature = skb_shinfo(skb)->gso_type << NETIF_F_GSO_SHIFT;
+	return (features & feature) == feature;
 }
 
 static inline int netif_needs_gso(struct net_device *dev, struct sk_buff *skb)
@@ -1013,30 +1000,6 @@ static inline int netif_needs_gso(struct net_device *dev, struct sk_buff *skb)
 	return skb_is_gso(skb) &&
 	       (!skb_gso_ok(skb, dev->features) ||
 		unlikely(skb->ip_summed != CHECKSUM_HW));
-}
-
-/* On bonding slaves other than the currently active slave, suppress
- * duplicates except for 802.3ad ETH_P_SLOW and alb non-mcast/bcast.
- */
-static inline int skb_bond_should_drop(struct sk_buff *skb)
-{
-	struct net_device *dev = skb->dev;
-	struct net_device *master = dev->master;
-
-	if (master &&
-	    (dev->priv_flags & IFF_SLAVE_INACTIVE)) {
-		if (master->priv_flags & IFF_MASTER_ALB) {
-			if (skb->pkt_type != PACKET_BROADCAST &&
-			    skb->pkt_type != PACKET_MULTICAST)
-				return 0;
-		}
-		if (master->priv_flags & IFF_MASTER_8023AD &&
-		    skb->protocol == __constant_htons(ETH_P_SLOW))
-			return 0;
-
-		return 1;
-	}
-	return 0;
 }
 
 #endif /* __KERNEL__ */

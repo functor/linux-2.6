@@ -42,6 +42,7 @@
  *
  ********************************************************************/
 
+#include <linux/config.h>
 #include <linux/capability.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -308,7 +309,7 @@ static void irda_connect_response(struct irda_sock *self)
 
 	IRDA_ASSERT(self != NULL, return;);
 
-	skb = alloc_skb(64, GFP_ATOMIC);
+	skb = dev_alloc_skb(64);
 	if (skb == NULL) {
 		IRDA_DEBUG(0, "%s() Unable to allocate sk_buff!\n",
 			   __FUNCTION__);

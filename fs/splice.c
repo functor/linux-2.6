@@ -55,43 +55,31 @@ static int page_cache_pipe_buf_steal(struct pipe_inode_info *pipe,
 				     struct pipe_buffer *buf)
 {
 	struct page *page = buf->page;
-	struct address_space *mapping;
+	struct address_space *mapping = page_mapping(page);
 
 	lock_page(page);
 
-	mapping = page_mapping(page);
-	if (mapping) {
-		WARN_ON(!PageUptodate(page));
-
-		/*
-		 * At least for ext2 with nobh option, we need to wait on
-		 * writeback completing on this page, since we'll remove it
-		 * from the pagecache.  Otherwise truncate wont wait on the
-		 * page, allowing the disk blocks to be reused by someone else
-		 * before we actually wrote our data to them. fs corruption
-		 * ensues.
-		 */
-		wait_on_page_writeback(page);
-
-		if (PagePrivate(page))
-			try_to_release_page(page, mapping_gfp_mask(mapping));
-
-		/*
-		 * If we succeeded in removing the mapping, set LRU flag
-		 * and return good.
-		 */
-		if (remove_mapping(mapping, page)) {
-			buf->flags |= PIPE_BUF_FLAG_LRU;
-			return 0;
-		}
-	}
+	WARN_ON(!PageUptodate(page));
 
 	/*
-	 * Raced with truncate or failed to remove page from current
-	 * address space, unlock and return failure.
+	 * At least for ext2 with nobh option, we need to wait on writeback
+	 * completing on this page, since we'll remove it from the pagecache.
+	 * Otherwise truncate wont wait on the page, allowing the disk
+	 * blocks to be reused by someone else before we actually wrote our
+	 * data to them. fs corruption ensues.
 	 */
-	unlock_page(page);
-	return 1;
+	wait_on_page_writeback(page);
+
+	if (PagePrivate(page))
+		try_to_release_page(page, mapping_gfp_mask(mapping));
+
+	if (!remove_mapping(mapping, page)) {
+		unlock_page(page);
+		return 1;
+	}
+
+	buf->flags |= PIPE_BUF_FLAG_LRU;
+	return 0;
 }
 
 static void page_cache_pipe_buf_release(struct pipe_inode_info *pipe,
@@ -607,7 +595,7 @@ find_page:
 			ret = -ENOMEM;
 			page = page_cache_alloc_cold(mapping);
 			if (unlikely(!page))
-				goto out_ret;
+				goto out_nomem;
 
 			/*
 			 * This will also lock the page
@@ -666,7 +654,7 @@ find_page:
 		if (sd->pos + this_len > isize)
 			vmtruncate(mapping->host, isize);
 
-		goto out_ret;
+		goto out;
 	}
 
 	if (buf->page != page) {
@@ -698,7 +686,7 @@ find_page:
 out:
 	page_cache_release(page);
 	unlock_page(page);
-out_ret:
+out_nomem:
 	return ret;
 }
 
@@ -1042,19 +1030,6 @@ out_release:
 EXPORT_SYMBOL(do_splice_direct);
 
 /*
- * After the inode slimming patch, i_pipe/i_bdev/i_cdev share the same
- * location, so checking ->i_pipe is not enough to verify that this is a
- * pipe.
- */
-static inline int is_pipe(struct inode *inode)
-{
-	if (inode->i_pipe && S_ISFIFO(inode->i_mode))
-		return 1;
-
-	return 0;
-}
-
-/*
  * Determine where to splice to/from.
  */
 static long do_splice(struct file *in, loff_t __user *off_in,
@@ -1065,8 +1040,8 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 	loff_t offset, *off;
 	long ret;
 
-	if (is_pipe(in->f_dentry->d_inode)) {
-		pipe = in->f_dentry->d_inode->i_pipe;
+	pipe = in->f_dentry->d_inode->i_pipe;
+	if (pipe) {
 		if (off_in)
 			return -ESPIPE;
 		if (off_out) {
@@ -1086,8 +1061,8 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		return ret;
 	}
 
-	if (is_pipe(out->f_dentry->d_inode)) {
-		pipe = out->f_dentry->d_inode->i_pipe;
+	pipe = out->f_dentry->d_inode->i_pipe;
+	if (pipe) {
 		if (off_out)
 			return -ESPIPE;
 		if (off_in) {
@@ -1244,7 +1219,7 @@ static int get_iovec_page_array(const struct iovec __user *iov,
 static long do_vmsplice(struct file *file, const struct iovec __user *iov,
 			unsigned long nr_segs, unsigned int flags)
 {
-	struct pipe_inode_info *pipe;
+	struct pipe_inode_info *pipe = file->f_dentry->d_inode->i_pipe;
 	struct page *pages[PIPE_BUFFERS];
 	struct partial_page partial[PIPE_BUFFERS];
 	struct splice_pipe_desc spd = {
@@ -1254,7 +1229,7 @@ static long do_vmsplice(struct file *file, const struct iovec __user *iov,
 		.ops = &user_page_pipe_buf_ops,
 	};
 
-	if (!is_pipe(file->f_dentry->d_inode))
+	if (unlikely(!pipe))
 		return -EBADF;
 	if (unlikely(nr_segs > UIO_MAXIOV))
 		return -EINVAL;
@@ -1266,7 +1241,6 @@ static long do_vmsplice(struct file *file, const struct iovec __user *iov,
 	if (spd.nr_pages <= 0)
 		return spd.nr_pages;
 
-	pipe = file->f_dentry->d_inode->i_pipe;
 	return splice_to_pipe(pipe, &spd);
 }
 
@@ -1415,11 +1389,11 @@ static int link_pipe(struct pipe_inode_info *ipipe,
 	 * could deadlock (one doing tee from A -> B, the other from B -> A).
 	 */
 	if (ipipe->inode < opipe->inode) {
-		mutex_lock_nested(&ipipe->inode->i_mutex, I_MUTEX_PARENT);
-		mutex_lock_nested(&opipe->inode->i_mutex, I_MUTEX_CHILD);
+		mutex_lock(&ipipe->inode->i_mutex);
+		mutex_lock(&opipe->inode->i_mutex);
 	} else {
-		mutex_lock_nested(&opipe->inode->i_mutex, I_MUTEX_PARENT);
-		mutex_lock_nested(&ipipe->inode->i_mutex, I_MUTEX_CHILD);
+		mutex_lock(&opipe->inode->i_mutex);
+		mutex_lock(&ipipe->inode->i_mutex);
 	}
 
 	do {
@@ -1489,20 +1463,15 @@ static int link_pipe(struct pipe_inode_info *ipipe,
 static long do_tee(struct file *in, struct file *out, size_t len,
 		   unsigned int flags)
 {
-	struct pipe_inode_info *ipipe;
-	struct pipe_inode_info *opipe;
+	struct pipe_inode_info *ipipe = in->f_dentry->d_inode->i_pipe;
+	struct pipe_inode_info *opipe = out->f_dentry->d_inode->i_pipe;
 	int ret = -EINVAL;
-
-	if (!is_pipe(in->f_dentry->d_inode) || !is_pipe(out->f_dentry->d_inode))
-		return ret;
 
 	/*
 	 * Duplicate the contents of ipipe to opipe without actually
 	 * copying the data.
 	 */
-	ipipe = in->f_dentry->d_inode->i_pipe;
-	opipe = out->f_dentry->d_inode->i_pipe;
-	if (ipipe != opipe) {
+	if (ipipe && opipe && ipipe != opipe) {
 		/*
 		 * Keep going, unless we encounter an error. The ipipe/opipe
 		 * ordering doesn't really matter.

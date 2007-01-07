@@ -18,6 +18,7 @@
  * async buffer flushing, 1999 Andrea Arcangeli <andrea@suse.de>
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/fs.h>
@@ -184,8 +185,6 @@ int fsync_super(struct super_block *sb)
 	return sync_blockdev(sb->s_bdev);
 }
 
-EXPORT_SYMBOL(fsync_super);
-
 /*
  * Write out and wait upon all dirty data associated with this
  * device.   Filesystem data as well as the underlying block
@@ -332,6 +331,7 @@ long do_fsync(struct file *file, int datasync)
 		goto out;
 	}
 
+	current->flags |= PF_SYNCWRITE;
 	ret = filemap_fdatawrite(mapping);
 
 	/*
@@ -346,6 +346,7 @@ long do_fsync(struct file *file, int datasync)
 	err = filemap_fdatawait(mapping);
 	if (!ret)
 		ret = err;
+	current->flags &= ~PF_SYNCWRITE;
 out:
 	return ret;
 }
@@ -570,7 +571,7 @@ still_busy:
  * Completion handler for block_write_full_page() - pages which are unlocked
  * during I/O, and which have PageWriteback cleared upon I/O completion.
  */
-static void end_buffer_async_write(struct buffer_head *bh, int uptodate)
+void end_buffer_async_write(struct buffer_head *bh, int uptodate)
 {
 	char b[BDEVNAME_SIZE];
 	unsigned long flags;
@@ -840,10 +841,7 @@ EXPORT_SYMBOL(mark_buffer_dirty_inode);
  */
 int __set_page_dirty_buffers(struct page *page)
 {
-	struct address_space * const mapping = page_mapping(page);
-
-	if (unlikely(!mapping))
-		return !TestSetPageDirty(page);
+	struct address_space * const mapping = page->mapping;
 
 	spin_lock(&mapping->private_lock);
 	if (page_has_buffers(page)) {
@@ -861,7 +859,7 @@ int __set_page_dirty_buffers(struct page *page)
 		write_lock_irq(&mapping->tree_lock);
 		if (page->mapping) {	/* Race with truncate? */
 			if (mapping_cap_account_dirty(mapping))
-				__inc_zone_page_state(page, NR_FILE_DIRTY);
+				inc_page_state(nr_dirty);
 			radix_tree_tag_set(&mapping->page_tree,
 						page_index(page),
 						PAGECACHE_TAG_DIRTY);
@@ -1181,21 +1179,8 @@ grow_buffers(struct block_device *bdev, sector_t block, int size)
 	} while ((size << sizebits) < PAGE_SIZE);
 
 	index = block >> sizebits;
-
-	/*
-	 * Check for a block which wants to lie outside our maximum possible
-	 * pagecache index.  (this comparison is done using sector_t types).
-	 */
-	if (unlikely(index != block >> sizebits)) {
-		char b[BDEVNAME_SIZE];
-
-		printk(KERN_ERR "%s: requested out-of-range block %llu for "
-			"device %s\n",
-			__FUNCTION__, (unsigned long long)block,
-			bdevname(bdev, b));
-		return -EIO;
-	}
 	block = index << sizebits;
+
 	/* Create a page with the proper size buffers.. */
 	page = grow_dev_page(bdev, block, index, size);
 	if (!page)
@@ -1222,16 +1207,12 @@ __getblk_slow(struct block_device *bdev, sector_t block, int size)
 
 	for (;;) {
 		struct buffer_head * bh;
-		int ret;
 
 		bh = __find_get_block(bdev, block, size);
 		if (bh)
 			return bh;
 
-		ret = grow_buffers(bdev, block, size);
-		if (ret < 0)
-			return NULL;
-		if (ret == 0)
+		if (!grow_buffers(bdev, block, size))
 			free_more_memory();
 	}
 }
@@ -2624,7 +2605,7 @@ int nobh_truncate_page(struct address_space *mapping, loff_t from)
 	unsigned offset = from & (PAGE_CACHE_SIZE-1);
 	unsigned to;
 	struct page *page;
-	const struct address_space_operations *a_ops = mapping->a_ops;
+	struct address_space_operations *a_ops = mapping->a_ops;
 	char *kaddr;
 	int ret = 0;
 
@@ -3009,7 +2990,6 @@ int try_to_free_buffers(struct page *page)
 
 	spin_lock(&mapping->private_lock);
 	ret = drop_buffers(page, &buffers_to_free);
-	spin_unlock(&mapping->private_lock);
 	if (ret) {
 		/*
 		 * If the filesystem writes its buffers by hand (eg ext3)
@@ -3021,6 +3001,7 @@ int try_to_free_buffers(struct page *page)
 		 */
 		clear_page_dirty(page);
 	}
+	spin_unlock(&mapping->private_lock);
 out:
 	if (buffers_to_free) {
 		struct buffer_head *bh = buffers_to_free;
@@ -3192,6 +3173,7 @@ EXPORT_SYMBOL(block_sync_page);
 EXPORT_SYMBOL(block_truncate_page);
 EXPORT_SYMBOL(block_write_full_page);
 EXPORT_SYMBOL(cont_prepare_write);
+EXPORT_SYMBOL(end_buffer_async_write);
 EXPORT_SYMBOL(end_buffer_read_sync);
 EXPORT_SYMBOL(end_buffer_write_sync);
 EXPORT_SYMBOL(file_fsync);

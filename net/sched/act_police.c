@@ -13,6 +13,7 @@
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #include <linux/bitops.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -43,18 +44,6 @@ static u32 idx_gen;
 static struct tcf_police *tcf_police_ht[MY_TAB_SIZE];
 /* Policer hash table lock */
 static DEFINE_RWLOCK(police_lock);
-
-/* old policer structure from before tc actions */
-struct tc_police_compat
-{
-	u32			index;
-	int			action;
-	u32			limit;
-	u32			burst;
-	u32			mtu;
-	struct tc_ratespec	rate;
-	struct tc_ratespec	peakrate;
-};
 
 /* Each policer is serialized by its individual spinlock */
 
@@ -181,15 +170,12 @@ static int tcf_act_police_locate(struct rtattr *rta, struct rtattr *est,
 	struct tc_police *parm;
 	struct tcf_police *p;
 	struct qdisc_rate_table *R_tab = NULL, *P_tab = NULL;
-	int size;
 
 	if (rta == NULL || rtattr_parse_nested(tb, TCA_POLICE_MAX, rta) < 0)
 		return -EINVAL;
 
-	if (tb[TCA_POLICE_TBF-1] == NULL)
-		return -EINVAL;
-	size = RTA_PAYLOAD(tb[TCA_POLICE_TBF-1]);
-	if (size != sizeof(*parm) && size != sizeof(struct tc_police_compat))
+	if (tb[TCA_POLICE_TBF-1] == NULL ||
+	    RTA_PAYLOAD(tb[TCA_POLICE_TBF-1]) != sizeof(*parm))
 		return -EINVAL;
 	parm = RTA_DATA(tb[TCA_POLICE_TBF-1]);
 
@@ -211,9 +197,10 @@ static int tcf_act_police_locate(struct rtattr *rta, struct rtattr *est,
 		return ret;
 	}
 
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kmalloc(sizeof(*p), GFP_KERNEL);
 	if (p == NULL)
 		return -ENOMEM;
+	memset(p, 0, sizeof(*p));
 
 	ret = ACT_P_CREATED;
 	p->refcnt = 1;
@@ -428,15 +415,12 @@ struct tcf_police * tcf_police_locate(struct rtattr *rta, struct rtattr *est)
 	struct tcf_police *p;
 	struct rtattr *tb[TCA_POLICE_MAX];
 	struct tc_police *parm;
-	int size;
 
 	if (rtattr_parse_nested(tb, TCA_POLICE_MAX, rta) < 0)
 		return NULL;
 
-	if (tb[TCA_POLICE_TBF-1] == NULL)
-		return NULL;
-	size = RTA_PAYLOAD(tb[TCA_POLICE_TBF-1]);
-	if (size != sizeof(*parm) && size != sizeof(struct tc_police_compat))
+	if (tb[TCA_POLICE_TBF-1] == NULL ||
+	    RTA_PAYLOAD(tb[TCA_POLICE_TBF-1]) != sizeof(*parm))
 		return NULL;
 
 	parm = RTA_DATA(tb[TCA_POLICE_TBF-1]);
@@ -446,10 +430,11 @@ struct tcf_police * tcf_police_locate(struct rtattr *rta, struct rtattr *est)
 		return p;
 	}
 
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kmalloc(sizeof(*p), GFP_KERNEL);
 	if (p == NULL)
 		return NULL;
 
+	memset(p, 0, sizeof(*p));
 	p->refcnt = 1;
 	spin_lock_init(&p->lock);
 	p->stats_lock = &p->lock;

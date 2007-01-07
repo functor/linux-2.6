@@ -39,6 +39,7 @@
  *  with this program; if not, write  to the Free Software Foundation, Inc.,
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
+#include <linux/config.h>
 #include <linux/bcd.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -212,7 +213,7 @@ int m48t37y_set_time(unsigned long sec)
 	return 0;
 }
 
-void __init plat_timer_setup(struct irqaction *irq)
+void momenco_timer_setup(struct irqaction *irq)
 {
 	setup_irq(8, irq);
 }
@@ -226,6 +227,7 @@ void momenco_time_init(void)
 	wire_stupidity_into_tlb();
 
 	mips_hpt_frequency = cpu_clock / 2;
+	board_timer_setup = momenco_timer_setup;
 
 	rtc_mips_get_time = m48t37y_get_time;
 	rtc_mips_set_time = m48t37y_set_time;
@@ -357,7 +359,7 @@ static __init int __init ja_pci_init(void)
 
 arch_initcall(ja_pci_init);
 
-void __init plat_mem_setup(void)
+void __init plat_setup(void)
 {
 	unsigned int tmpword;
 
@@ -368,8 +370,8 @@ void __init plat_mem_setup(void)
 	pm_power_off = momenco_jaguar_power_off;
 
 	/*
-	 * initrd_start = (unsigned long)jaguar_initrd_start;
-	 * initrd_end = (unsigned long)jaguar_initrd_start + (ulong)jaguar_initrd_size;
+	 * initrd_start = (ulong)jaguar_initrd_start;
+	 * initrd_end = (ulong)jaguar_initrd_start + (ulong)jaguar_initrd_size;
 	 * initrd_below_start_ok = 1;
 	 */
 

@@ -12,6 +12,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include "hisax.h"
 #include "isac.h"
@@ -639,7 +640,7 @@ clear_pending_hdlc_ints(struct IsdnCardState *cs)
 }
 #endif  /*  0  */
 
-static void
+static void __init
 inithdlc(struct IsdnCardState *cs)
 {
 	cs->bcs[0].BC_SetStack = setstack_hdlc;
@@ -727,13 +728,13 @@ AVM_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 }
 
 #ifdef CONFIG_PCI
-static struct pci_dev *dev_avm __devinitdata = NULL;
+static struct pci_dev *dev_avm __initdata = NULL;
 #endif
 #ifdef __ISAPNP__
-static struct pnp_card *pnp_avm_c __devinitdata = NULL;
+static struct pnp_card *pnp_avm_c __initdata = NULL;
 #endif
 
-int __devinit
+int __init
 setup_avm_pcipnp(struct IsdnCard *card)
 {
 	u_int val, ver;
@@ -808,7 +809,7 @@ setup_avm_pcipnp(struct IsdnCard *card)
 		printk(KERN_WARNING "FritzPCI: No PCI card found\n");
 		return(0);
 	}
-	cs->irq_flags |= IRQF_SHARED;
+	cs->irq_flags |= SA_SHIRQ;
 #else
 	printk(KERN_WARNING "FritzPCI: NO_PCI_BIOS\n");
 	return (0);

@@ -297,7 +297,7 @@ Asus_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 }
 
 #ifdef __ISAPNP__
-static struct isapnp_device_id asus_ids[] __devinitdata = {
+static struct isapnp_device_id asus_ids[] __initdata = {
 	{ ISAPNP_VENDOR('A', 'S', 'U'), ISAPNP_FUNCTION(0x1688),
 	  ISAPNP_VENDOR('A', 'S', 'U'), ISAPNP_FUNCTION(0x1688), 
 	  (unsigned long) "Asus1688 PnP" },
@@ -313,11 +313,11 @@ static struct isapnp_device_id asus_ids[] __devinitdata = {
 	{ 0, }
 };
 
-static struct isapnp_device_id *ipid __devinitdata = &asus_ids[0];
+static struct isapnp_device_id *ipid __initdata = &asus_ids[0];
 static struct pnp_card *pnp_c __devinitdata = NULL;
 #endif
 
-int __devinit
+int __init
 setup_asuscom(struct IsdnCard *card)
 {
 	int bytecnt;

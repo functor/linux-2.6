@@ -29,7 +29,9 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
-#include <linux/usb/input.h>
+#include <linux/input.h>
+#include <linux/usb.h>
+#include <linux/usb_input.h>
 
 #undef DEBUG
 
@@ -123,12 +125,6 @@ static struct hidinput_key_translation powerbook_numlock_keys[] = {
 	{ }
 };
 
-static struct hidinput_key_translation powerbook_iso_keyboard[] = {
-	{ KEY_GRAVE,    KEY_102ND },
-	{ KEY_102ND,    KEY_GRAVE },
-	{ }
-};
-
 static int usbhid_pb_fnmode = 1;
 module_param_named(pb_fnmode, usbhid_pb_fnmode, int, 0644);
 MODULE_PARM_DESC(pb_fnmode,
@@ -203,14 +199,6 @@ static int hidinput_pb_event(struct hid_device *hid, struct input_dev *input,
 		}
 	}
 
-	if (hid->quirks & HID_QUIRK_POWERBOOK_ISO_KEYBOARD) {
-		trans = find_translation(powerbook_iso_keyboard, usage->code);
-		if (trans) {
-			input_event(input, usage->type, trans->to, value);
-			return 1;
-		}
-	}
-
 	return 0;
 }
 
@@ -225,9 +213,6 @@ static void hidinput_pb_setup(struct input_dev *input)
 		set_bit(trans->to, input->keybit);
 
 	for (trans = powerbook_numlock_keys; trans->from; trans++)
-		set_bit(trans->to, input->keybit);
-
-	for (trans = powerbook_iso_keyboard; trans->from; trans++)
 		set_bit(trans->to, input->keybit);
 }
 #else
@@ -582,23 +567,6 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 			break;
 	}
 
-	if (device->quirks & HID_QUIRK_MIGHTYMOUSE) {
-		if (usage->hid == HID_GD_Z)
-			map_rel(REL_HWHEEL);
-		else if (usage->code == BTN_1)
-			map_key(BTN_2);
-		else if (usage->code == BTN_2)
-			map_key(BTN_1);
-	}
-
-	if ((device->quirks & (HID_QUIRK_2WHEEL_MOUSE_HACK_7 | HID_QUIRK_2WHEEL_MOUSE_HACK_5)) &&
-		 (usage->type == EV_REL) && (usage->code == REL_WHEEL))
-			set_bit(REL_HWHEEL, bit);
-
-	if (((device->quirks & HID_QUIRK_2WHEEL_MOUSE_HACK_5) && (usage->hid == 0x00090005))
-		|| ((device->quirks & HID_QUIRK_2WHEEL_MOUSE_HACK_7) && (usage->hid == 0x00090007)))
-		goto ignore;
-
 	set_bit(usage->type, input->evbit);
 
 	while (usage->code <= max && test_and_set_bit(usage->code, bit))
@@ -607,6 +575,16 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 	if (usage->code > max)
 		goto ignore;
 
+	if (((device->quirks & (HID_QUIRK_2WHEEL_POWERMOUSE)) && (usage->hid == 0x00010032)))
+		map_rel(REL_HWHEEL);
+
+	if ((device->quirks & (HID_QUIRK_2WHEEL_MOUSE_HACK_7 | HID_QUIRK_2WHEEL_MOUSE_HACK_5)) &&
+		 (usage->type == EV_REL) && (usage->code == REL_WHEEL))
+			set_bit(REL_HWHEEL, bit);
+
+	if (((device->quirks & HID_QUIRK_2WHEEL_MOUSE_HACK_5) && (usage->hid == 0x00090005))
+		|| ((device->quirks & HID_QUIRK_2WHEEL_MOUSE_HACK_7) && (usage->hid == 0x00090007)))
+		goto ignore;
 
 	if (usage->type == EV_ABS) {
 
@@ -624,8 +602,7 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 
 	}
 
-	if (usage->type == EV_ABS &&
-	    (usage->hat_min < usage->hat_max || usage->hat_dir)) {
+	if (usage->hat_min < usage->hat_max || usage->hat_dir) {
 		int i;
 		for (i = usage->code; i < usage->code + 2 && i <= max; i++) {
 			input_set_abs_params(input, i, -1, 1, 0, 0);
@@ -667,11 +644,6 @@ void hidinput_hid_event(struct hid_device *hid, struct hid_field *field, struct 
 		|| ((hid->quirks & HID_QUIRK_2WHEEL_MOUSE_HACK_7) && (usage->hid == 0x00090007))) {
 		if (value) hid->quirks |=  HID_QUIRK_2WHEEL_MOUSE_HACK_ON;
 		else       hid->quirks &= ~HID_QUIRK_2WHEEL_MOUSE_HACK_ON;
-		return;
-	}
-
-	if ((hid->quirks & HID_QUIRK_INVERT_HWHEEL) && (usage->code == REL_HWHEEL)) {
-		input_event(input, usage->type, usage->code, -value);
 		return;
 	}
 

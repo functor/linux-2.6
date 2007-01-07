@@ -265,7 +265,7 @@ Teles_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return(0);
 }
 
-int __devinit
+int __init
 setup_teles0(struct IsdnCard *card)
 {
 	u_char val;

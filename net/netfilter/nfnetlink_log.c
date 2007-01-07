@@ -372,6 +372,9 @@ __nfulnl_send(struct nfulnl_instance *inst)
 	if (inst->qlen > 1)
 		inst->lastnlh->nlmsg_type = NLMSG_DONE;
 
+	if (!inst->skb)
+		return 0;
+
 	status = nfnetlink_unicast(inst->skb, inst->peer_pid, MSG_DONTWAIT);
 	if (status < 0) {
 		UDEBUG("netlink_unicast() failed\n");

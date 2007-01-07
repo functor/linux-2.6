@@ -5,9 +5,9 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define buildup 1
 %define buildsmp 1
-%define builduml 1
-%define buildxen 1
-%define builddoc 1
+%define builduml 0
+%define buildxen 0
+%define builddoc 0
 
 # Versions of various parts
 
@@ -17,10 +17,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 18
+%define sublevel 17
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define release 1.2260_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.2187_FC5.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
 

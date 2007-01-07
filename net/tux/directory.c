@@ -205,7 +205,7 @@ next_dir:
 #define ROUND_UP64(x) (((x)+sizeof(u64)-1) & ~(sizeof(u64)-1))
 
 static int filldir64(void * __buf, const char * name, int namlen, loff_t offset,
-		     u64 ino, unsigned int d_type)
+		     ino_t ino, unsigned int d_type)
 {
 	struct linux_dirent64 * dirent, d;
 	struct getdents_callback64 * buf = (struct getdents_callback64 *) __buf;

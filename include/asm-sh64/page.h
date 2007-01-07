@@ -17,6 +17,7 @@
  *
  */
 
+#include <linux/config.h>
 
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
@@ -112,10 +113,11 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#include <asm-generic/memory_model.h>
-#include <asm-generic/page.h>
-
 #define devmem_is_allowed(x) 1
 
 #endif /* __KERNEL__ */
+
+#include <asm-generic/memory_model.h>
+#include <asm-generic/page.h>
+
 #endif /* __ASM_SH64_PAGE_H */

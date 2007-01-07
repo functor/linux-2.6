@@ -6,6 +6,7 @@
  *
  * Copyright (C) Jonathan Naylor G4KLX (g4klx@g4klx.demon.co.uk)
  */
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/socket.h>
@@ -66,10 +67,10 @@ int ax25_protocol_register(unsigned int pid,
 	protocol->pid  = pid;
 	protocol->func = func;
 
-	write_lock_bh(&protocol_list_lock);
+	write_lock(&protocol_list_lock);
 	protocol->next = protocol_list;
 	protocol_list  = protocol;
-	write_unlock_bh(&protocol_list_lock);
+	write_unlock(&protocol_list_lock);
 
 	return 1;
 }
@@ -80,16 +81,16 @@ void ax25_protocol_release(unsigned int pid)
 {
 	struct protocol_struct *s, *protocol;
 
-	write_lock_bh(&protocol_list_lock);
+	write_lock(&protocol_list_lock);
 	protocol = protocol_list;
 	if (protocol == NULL) {
-		write_unlock_bh(&protocol_list_lock);
+		write_unlock(&protocol_list_lock);
 		return;
 	}
 
 	if (protocol->pid == pid) {
 		protocol_list = protocol->next;
-		write_unlock_bh(&protocol_list_lock);
+		write_unlock(&protocol_list_lock);
 		kfree(protocol);
 		return;
 	}
@@ -98,14 +99,14 @@ void ax25_protocol_release(unsigned int pid)
 		if (protocol->next->pid == pid) {
 			s = protocol->next;
 			protocol->next = protocol->next->next;
-			write_unlock_bh(&protocol_list_lock);
+			write_unlock(&protocol_list_lock);
 			kfree(s);
 			return;
 		}
 
 		protocol = protocol->next;
 	}
-	write_unlock_bh(&protocol_list_lock);
+	write_unlock(&protocol_list_lock);
 }
 
 EXPORT_SYMBOL(ax25_protocol_release);
@@ -266,13 +267,13 @@ int ax25_protocol_is_registered(unsigned int pid)
 	struct protocol_struct *protocol;
 	int res = 0;
 
-	read_lock_bh(&protocol_list_lock);
+	read_lock(&protocol_list_lock);
 	for (protocol = protocol_list; protocol != NULL; protocol = protocol->next)
 		if (protocol->pid == pid) {
 			res = 1;
 			break;
 		}
-	read_unlock_bh(&protocol_list_lock);
+	read_unlock(&protocol_list_lock);
 
 	return res;
 }

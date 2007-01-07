@@ -19,13 +19,13 @@
  */
 
 #include <linux/capability.h>
+#include <linux/config.h>
 #include <linux/in.h>
 #include <linux/skbuff.h>
 #include <linux/kmod.h>
 #include <linux/vmalloc.h>
 #include <linux/netdevice.h>
 #include <linux/module.h>
-#include <linux/poison.h>
 #include <linux/icmpv6.h>
 #include <net/ipv6.h>
 #include <asm/uaccess.h>
@@ -377,7 +377,7 @@ ip6t_do_table(struct sk_buff **pskb,
 	} while (!hotdrop);
 
 #ifdef CONFIG_NETFILTER_DEBUG
-	((struct ip6t_entry *)table_base)->comefrom = NETFILTER_LINK_POISON;
+	((struct ip6t_entry *)table_base)->comefrom = 0xdead57ac;
 #endif
 	read_unlock_bh(&table->lock);
 
@@ -444,13 +444,6 @@ mark_source_chains(struct xt_table_info *newinfo,
 			    && unconditional(&e->ipv6)) {
 				unsigned int oldpos, size;
 
-				if (t->verdict < -NF_MAX_VERDICT - 1) {
-					duprintf("mark_source_chains: bad "
-						"negative verdict (%i)\n",
-								t->verdict);
-					return 0;
-				}
-
 				/* Return: backtrack through the last
 				   big jump. */
 				do {
@@ -488,13 +481,6 @@ mark_source_chains(struct xt_table_info *newinfo,
 				if (strcmp(t->target.u.user.name,
 					   IP6T_STANDARD_TARGET) == 0
 				    && newpos >= 0) {
-					if (newpos > newinfo->size -
-						sizeof(struct ip6t_entry)) {
-						duprintf("mark_source_chains: "
-							"bad verdict (%i)\n",
-								newpos);
-						return 0;
-					}
 					/* This a jump; chase it. */
 					duprintf("Jump rule %u -> %u\n",
 						 pos, newpos);
@@ -525,6 +511,27 @@ cleanup_match(struct ip6t_entry_match *m, unsigned int *i)
 					   m->u.match_size - sizeof(*m));
 	module_put(m->u.kernel.match->me);
 	return 0;
+}
+
+static inline int
+standard_check(const struct ip6t_entry_target *t,
+	       unsigned int max_offset)
+{
+	struct ip6t_standard_target *targ = (void *)t;
+
+	/* Check standard info. */
+	if (targ->verdict >= 0
+	    && targ->verdict > max_offset - sizeof(struct ip6t_entry)) {
+		duprintf("ip6t_standard_check: bad verdict (%i)\n",
+			 targ->verdict);
+		return 0;
+	}
+	if (targ->verdict < -NF_MAX_VERDICT - 1) {
+		duprintf("ip6t_standard_check: bad negative verdict (%i)\n",
+			 targ->verdict);
+		return 0;
+	}
+	return 1;
 }
 
 static inline int
@@ -585,19 +592,12 @@ check_entry(struct ip6t_entry *e, const char *name, unsigned int size,
 		return -EINVAL;
 	}
 
-	if (e->target_offset + sizeof(struct ip6t_entry_target) >
-								e->next_offset)
-		return -EINVAL;
-
 	j = 0;
 	ret = IP6T_MATCH_ITERATE(e, check_match, name, &e->ipv6, e->comefrom, &j);
 	if (ret != 0)
 		goto cleanup_matches;
 
 	t = ip6t_get_target(e);
-	ret = -EINVAL;
-	if (e->target_offset + t->u.target_size > e->next_offset)
-			goto cleanup_matches;
 	target = try_then_request_module(xt_find_target(AF_INET6,
 							t->u.user.name,
 							t->u.user.revision),
@@ -615,7 +615,12 @@ check_entry(struct ip6t_entry *e, const char *name, unsigned int size,
 	if (ret)
 		goto err;
 
-	if (t->u.kernel.target->checkentry
+	if (t->u.kernel.target == &ip6t_standard_target) {
+		if (!standard_check(t, size)) {
+			ret = -EINVAL;
+			goto cleanup_matches;
+		}
+	} else if (t->u.kernel.target->checkentry
 		   && !t->u.kernel.target->checkentry(name, e, target, t->data,
 						      t->u.target_size
 						      - sizeof(*t),
@@ -765,7 +770,7 @@ translate_table(const char *name,
 
 	if (ret != 0) {
 		IP6T_ENTRY_ITERATE(entry0, newinfo->size,
-				   cleanup_entry, &i);
+				  cleanup_entry, &i);
 		return ret;
 	}
 
@@ -775,7 +780,7 @@ translate_table(const char *name,
 			memcpy(newinfo->entries[i], entry0, newinfo->size);
 	}
 
-	return 0;
+	return ret;
 }
 
 /* Gets counters. */
@@ -1276,8 +1281,7 @@ int ip6t_register_table(struct xt_table *table,
 		return ret;
 	}
 
-	ret = xt_register_table(table, &bootstrap, newinfo);
-	if (ret != 0) {
+	if (xt_register_table(table, &bootstrap, newinfo) != 0) {
 		xt_free_table_info(newinfo);
 		return ret;
 	}
@@ -1393,39 +1397,23 @@ static int __init ip6_tables_init(void)
 {
 	int ret;
 
-	ret = xt_proto_init(AF_INET6);
-	if (ret < 0)
-		goto err1;
+	xt_proto_init(AF_INET6);
 
 	/* Noone else will be downing sem now, so we won't sleep */
-	ret = xt_register_target(&ip6t_standard_target);
-	if (ret < 0)
-		goto err2;
-	ret = xt_register_target(&ip6t_error_target);
-	if (ret < 0)
-		goto err3;
-	ret = xt_register_match(&icmp6_matchstruct);
-	if (ret < 0)
-		goto err4;
+	xt_register_target(&ip6t_standard_target);
+	xt_register_target(&ip6t_error_target);
+	xt_register_match(&icmp6_matchstruct);
 
 	/* Register setsockopt */
 	ret = nf_register_sockopt(&ip6t_sockopts);
-	if (ret < 0)
-		goto err5;
+	if (ret < 0) {
+		duprintf("Unable to register sockopts.\n");
+		xt_proto_fini(AF_INET6);
+		return ret;
+	}
 
 	printk("ip6_tables: (C) 2000-2006 Netfilter Core Team\n");
 	return 0;
-
-err5:
-	xt_unregister_match(&icmp6_matchstruct);
-err4:
-	xt_unregister_target(&ip6t_error_target);
-err3:
-	xt_unregister_target(&ip6t_standard_target);
-err2:
-	xt_proto_fini(AF_INET6);
-err1:
-	return ret;
 }
 
 static void __exit ip6_tables_fini(void)

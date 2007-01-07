@@ -8,6 +8,7 @@
  *    Author(s): Thomas Spatzier <tspat@de.ibm.com>
  *
  */
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/ip.h>
 #include <linux/inetdevice.h>
@@ -179,8 +180,9 @@ out_check:
 			flush_cnt++;
 		}
 	} else {
-		if (queue->card->options.performance_stats)
-			queue->card->perf_stats.skbs_sent_pack++;
+#ifdef CONFIG_QETH_PERF_STATS
+		queue->card->perf_stats.skbs_sent_pack++;
+#endif
 		QETH_DBF_TEXT(trace, 6, "fillbfpa");
 		if (buf->next_element_to_fill >=
 				QETH_MAX_BUFFER_ELEMENTS(queue->card)) {

@@ -725,27 +725,23 @@ static int pcbit_stat(u_char __user *buf, int len, int driver, int channel)
 
 	if (stat_st < stat_end)
 	{
-		if (copy_to_user(buf, statbuf + stat_st, len))
-			return -EFAULT;
+		copy_to_user(buf, statbuf + stat_st, len);
 		stat_st += len;	   
 	}
 	else
 	{
 		if (len > STATBUF_LEN - stat_st)
 		{
-			if (copy_to_user(buf, statbuf + stat_st,
-				       STATBUF_LEN - stat_st))
-				return -EFAULT;
-			if (copy_to_user(buf, statbuf,
-				       len - (STATBUF_LEN - stat_st)))
-				return -EFAULT;
+			copy_to_user(buf, statbuf + stat_st, 
+				       STATBUF_LEN - stat_st);
+			copy_to_user(buf, statbuf, 
+				       len - (STATBUF_LEN - stat_st));
 
 			stat_st = len - (STATBUF_LEN - stat_st);
 		}
 		else
 		{
-			if (copy_to_user(buf, statbuf + stat_st, len))
-				return -EFAULT;
+			copy_to_user(buf, statbuf + stat_st, len);
 
 			stat_st += len;
 			

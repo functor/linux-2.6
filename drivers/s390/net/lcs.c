@@ -670,8 +670,9 @@ lcs_ready_buffer(struct lcs_channel *channel, struct lcs_buffer *buffer)
 	int index, rc;
 
 	LCS_DBF_TEXT(5, trace, "rdybuff");
-	BUG_ON(buffer->state != BUF_STATE_LOCKED &&
-	       buffer->state != BUF_STATE_PROCESSED);
+	if (buffer->state != BUF_STATE_LOCKED &&
+	    buffer->state != BUF_STATE_PROCESSED)
+		BUG();
 	spin_lock_irqsave(get_ccwdev_lock(channel->ccwdev), flags);
 	buffer->state = BUF_STATE_READY;
 	index = buffer - channel->iob;
@@ -695,7 +696,8 @@ __lcs_processed_buffer(struct lcs_channel *channel, struct lcs_buffer *buffer)
 	int index, prev, next;
 
 	LCS_DBF_TEXT(5, trace, "prcsbuff");
-	BUG_ON(buffer->state != BUF_STATE_READY);
+	if (buffer->state != BUF_STATE_READY)
+		BUG();
 	buffer->state = BUF_STATE_PROCESSED;
 	index = buffer - channel->iob;
 	prev = (index - 1) & (LCS_NUM_BUFFS - 1);
@@ -727,8 +729,9 @@ lcs_release_buffer(struct lcs_channel *channel, struct lcs_buffer *buffer)
 	unsigned long flags;
 
 	LCS_DBF_TEXT(5, trace, "relbuff");
-	BUG_ON(buffer->state != BUF_STATE_LOCKED &&
-	       buffer->state != BUF_STATE_PROCESSED);
+	if (buffer->state != BUF_STATE_LOCKED &&
+	    buffer->state != BUF_STATE_PROCESSED)
+		BUG();
 	spin_lock_irqsave(get_ccwdev_lock(channel->ccwdev), flags);
 	buffer->state = BUF_STATE_EMPTY;
 	spin_unlock_irqrestore(get_ccwdev_lock(channel->ccwdev), flags);
@@ -1137,9 +1140,10 @@ list_modified:
 		}
 	}
 	/* re-insert all entries from the failed_list into ipm_list */
-	list_for_each_entry_safe(ipm, tmp, &failed_list, list)
-		list_move_tail(&ipm->list, &card->ipm_list);
-
+	list_for_each_entry_safe(ipm, tmp, &failed_list, list) {
+		list_del_init(&ipm->list);
+		list_add_tail(&ipm->list, &card->ipm_list);
+	}
 	spin_unlock_irqrestore(&card->ipm_lock, flags);
 }
 

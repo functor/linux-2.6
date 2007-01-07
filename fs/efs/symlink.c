@@ -22,7 +22,7 @@ static int efs_symlink_readpage(struct file *file, struct page *page)
   
 	err = -ENAMETOOLONG;
 	if (size > 2 * EFS_BLOCKSIZE)
-		goto fail_notlocked;
+		goto fail;
   
 	lock_kernel();
 	/* read first 512 bytes of link target */
@@ -47,13 +47,12 @@ static int efs_symlink_readpage(struct file *file, struct page *page)
 	return 0;
 fail:
 	unlock_kernel();
-fail_notlocked:
 	SetPageError(page);
 	kunmap(page);
 	unlock_page(page);
 	return err;
 }
 
-const struct address_space_operations efs_symlink_aops = {
+struct address_space_operations efs_symlink_aops = {
 	.readpage	= efs_symlink_readpage
 };

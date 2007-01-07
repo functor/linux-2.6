@@ -8,6 +8,7 @@
  * Copyright (c) 2002, Trond Myklebust <trond.myklebust@fys.uio.no>
  *
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -438,7 +439,7 @@ struct vfsmount *rpc_get_mount(void)
 {
 	int err;
 
-	err = simple_pin_fs(&rpc_pipe_fs_type, &rpc_mount, &rpc_mount_count);
+	err = simple_pin_fs("rpc_pipefs", &rpc_mount, &rpc_mount_count);
 	if (err != 0)
 		return ERR_PTR(err);
 	return rpc_mount;
@@ -490,6 +491,7 @@ rpc_get_inode(struct super_block *sb, int mode)
 		return NULL;
 	inode->i_mode = mode;
 	inode->i_uid = inode->i_gid = 0;
+	inode->i_blksize = PAGE_CACHE_SIZE;
 	inode->i_blocks = 0;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	switch(mode & S_IFMT) {
@@ -514,7 +516,7 @@ rpc_depopulate(struct dentry *parent)
 	struct dentry *dentry, *dvec[10];
 	int n = 0;
 
-	mutex_lock_nested(&dir->i_mutex, I_MUTEX_CHILD);
+	mutex_lock(&dir->i_mutex);
 repeat:
 	spin_lock(&dcache_lock);
 	list_for_each_safe(pos, next, &parent->d_subdirs) {
@@ -538,7 +540,6 @@ repeat:
 				rpc_close_pipes(dentry->d_inode);
 				simple_unlink(dir, dentry);
 			}
-			inode_dir_notify(dir, DN_DELETE);
 			dput(dentry);
 		} while (n);
 		goto repeat;
@@ -610,8 +611,8 @@ __rpc_rmdir(struct inode *dir, struct dentry *dentry)
 	int error;
 
 	shrink_dcache_parent(dentry);
-	if (d_unhashed(dentry))
-		return 0;
+	if (dentry->d_inode)
+		rpc_close_pipes(dentry->d_inode);
 	if ((error = simple_rmdir(dir, dentry)) != 0)
 		return error;
 	if (!error) {
@@ -631,7 +632,7 @@ rpc_lookup_negative(char *path, struct nameidata *nd)
 	if ((error = rpc_lookup_parent(path, nd)) != 0)
 		return ERR_PTR(error);
 	dir = nd->dentry->d_inode;
-	mutex_lock_nested(&dir->i_mutex, I_MUTEX_PARENT);
+	mutex_lock(&dir->i_mutex);
 	dentry = lookup_one_len(nd->last.name, nd->dentry, nd->last.len);
 	if (IS_ERR(dentry))
 		goto out_err;
@@ -667,11 +668,10 @@ rpc_mkdir(char *path, struct rpc_clnt *rpc_client)
 			RPCAUTH_info, RPCAUTH_EOF);
 	if (error)
 		goto err_depopulate;
-	dget(dentry);
 out:
 	mutex_unlock(&dir->i_mutex);
 	rpc_release_path(&nd);
-	return dentry;
+	return dget(dentry);
 err_depopulate:
 	rpc_depopulate(dentry);
 	__rpc_rmdir(dir, dentry);
@@ -684,20 +684,28 @@ err_dput:
 }
 
 int
-rpc_rmdir(struct dentry *dentry)
+rpc_rmdir(char *path)
 {
-	struct dentry *parent;
+	struct nameidata nd;
+	struct dentry *dentry;
 	struct inode *dir;
 	int error;
 
-	parent = dget_parent(dentry);
-	dir = parent->d_inode;
-	mutex_lock_nested(&dir->i_mutex, I_MUTEX_PARENT);
+	if ((error = rpc_lookup_parent(path, &nd)) != 0)
+		return error;
+	dir = nd.dentry->d_inode;
+	mutex_lock(&dir->i_mutex);
+	dentry = lookup_one_len(nd.last.name, nd.dentry, nd.last.len);
+	if (IS_ERR(dentry)) {
+		error = PTR_ERR(dentry);
+		goto out_release;
+	}
 	rpc_depopulate(dentry);
 	error = __rpc_rmdir(dir, dentry);
 	dput(dentry);
+out_release:
 	mutex_unlock(&dir->i_mutex);
-	dput(parent);
+	rpc_release_path(&nd);
 	return error;
 }
 
@@ -713,7 +721,7 @@ rpc_mkpipe(char *path, void *private, struct rpc_pipe_ops *ops, int flags)
 	if (IS_ERR(dentry))
 		return dentry;
 	dir = nd.dentry->d_inode;
-	inode = rpc_get_inode(dir->i_sb, S_IFIFO | S_IRUSR | S_IWUSR);
+	inode = rpc_get_inode(dir->i_sb, S_IFSOCK | S_IRUSR | S_IWUSR);
 	if (!inode)
 		goto err_dput;
 	inode->i_ino = iunique(dir->i_sb, 100);
@@ -724,11 +732,10 @@ rpc_mkpipe(char *path, void *private, struct rpc_pipe_ops *ops, int flags)
 	rpci->flags = flags;
 	rpci->ops = ops;
 	inode_dir_notify(dir, DN_CREATE);
-	dget(dentry);
 out:
 	mutex_unlock(&dir->i_mutex);
 	rpc_release_path(&nd);
-	return dentry;
+	return dget(dentry);
 err_dput:
 	dput(dentry);
 	dentry = ERR_PTR(-ENOMEM);
@@ -738,26 +745,32 @@ err_dput:
 }
 
 int
-rpc_unlink(struct dentry *dentry)
+rpc_unlink(char *path)
 {
-	struct dentry *parent;
+	struct nameidata nd;
+	struct dentry *dentry;
 	struct inode *dir;
-	int error = 0;
+	int error;
 
-	parent = dget_parent(dentry);
-	dir = parent->d_inode;
-	mutex_lock_nested(&dir->i_mutex, I_MUTEX_PARENT);
-	if (!d_unhashed(dentry)) {
-		d_drop(dentry);
-		if (dentry->d_inode) {
-			rpc_close_pipes(dentry->d_inode);
-			error = simple_unlink(dir, dentry);
-		}
-		inode_dir_notify(dir, DN_DELETE);
+	if ((error = rpc_lookup_parent(path, &nd)) != 0)
+		return error;
+	dir = nd.dentry->d_inode;
+	mutex_lock(&dir->i_mutex);
+	dentry = lookup_one_len(nd.last.name, nd.dentry, nd.last.len);
+	if (IS_ERR(dentry)) {
+		error = PTR_ERR(dentry);
+		goto out_release;
+	}
+	d_drop(dentry);
+	if (dentry->d_inode) {
+		rpc_close_pipes(dentry->d_inode);
+		error = simple_unlink(dir, dentry);
 	}
 	dput(dentry);
+	inode_dir_notify(dir, DN_DELETE);
+out_release:
 	mutex_unlock(&dir->i_mutex);
-	dput(parent);
+	rpc_release_path(&nd);
 	return error;
 }
 
@@ -802,11 +815,11 @@ out:
 	return -ENOMEM;
 }
 
-static int
+static struct super_block *
 rpc_get_sb(struct file_system_type *fs_type,
-		int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+		int flags, const char *dev_name, void *data)
 {
-	return get_sb_single(fs_type, flags, data, rpc_fill_super, mnt);
+	return get_sb_single(fs_type, flags, data, rpc_fill_super);
 }
 
 static struct file_system_type rpc_pipe_fs_type = {

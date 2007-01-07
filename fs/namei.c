@@ -163,7 +163,7 @@ char * getname(const char __user * filename)
 #ifdef CONFIG_AUDITSYSCALL
 void putname(const char *name)
 {
-	if (unlikely(!audit_dummy_context()))
+	if (unlikely(current->audit_context))
 		audit_putname(name);
 	else
 		__putname(name);
@@ -231,7 +231,7 @@ int generic_permission(struct inode *inode, int mask,
 
 static inline int vx_barrier(struct inode *inode)
 {
-	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN|VX_WATCH)) {
+	if (IS_BARRIER(inode) && !vx_check(0, VX_ADMIN)) {
 		vxwprintk(1, "xid=%d did hit the barrier.",
 			vx_current_xid());
 		return 1;
@@ -264,10 +264,10 @@ static inline int xid_permission(struct inode *inode, int mask, struct nameidata
 
 int permission(struct inode *inode, int mask, struct nameidata *nd)
 {
-	umode_t mode = inode->i_mode;
 	int retval, submask;
 
 	if (mask & MAY_WRITE) {
+		umode_t mode = inode->i_mode;
 
 		/*
 		 * Nobody gets write access to a read-only fs.
@@ -283,13 +283,6 @@ int permission(struct inode *inode, int mask, struct nameidata *nd)
 			return -EACCES;
 	}
 
-
-	/*
-	 * MAY_EXEC on regular files requires special handling: We override
-	 * filesystem execute permissions if the mode bits aren't set.
-	 */
-	if ((mask & MAY_EXEC) && S_ISREG(mode) && !(mode & S_IXUGO))
-		return -EACCES;
 
 	/* Ordinary permission routines do not understand MAY_APPEND. */
 	submask = mask & ~MAY_APPEND;
@@ -411,29 +404,6 @@ void release_open_intent(struct nameidata *nd)
 		fput(nd->intent.open.file);
 }
 
-static inline struct dentry *do_revalidate(struct dentry *dentry, struct nameidata *nd)
-{
-	int status = dentry->d_op->d_revalidate(dentry, nd);
-	if (unlikely(status <= 0)) {
-		/*
-		 * The dentry failed validation.
-		 * If d_revalidate returned 0 attempt to invalidate
-		 * the dentry otherwise d_revalidate is asking us
-		 * to return a fail status.
-		 */
-		if (!status) {
-			if (!d_invalidate(dentry)) {
-				dput(dentry);
-				dentry = NULL;
-			}
-		} else {
-			dput(dentry);
-			dentry = ERR_PTR(status);
-		}
-	}
-	return dentry;
-}
-
 /*
  * Internal lookup() using the new generic dcache.
  * SMP-safe
@@ -448,9 +418,12 @@ static struct dentry * cached_lookup(struct dentry * parent, struct qstr * name,
 	if (!dentry)
 		dentry = d_lookup(parent, name);
 
-	if (dentry && dentry->d_op && dentry->d_op->d_revalidate)
-		dentry = do_revalidate(dentry, nd);
-
+	if (dentry && dentry->d_op && dentry->d_op->d_revalidate) {
+		if (!dentry->d_op->d_revalidate(dentry, nd) && !d_invalidate(dentry)) {
+			dput(dentry);
+			dentry = NULL;
+		}
+	}
 	return dentry;
 }
 
@@ -545,9 +518,10 @@ static struct dentry * real_lookup(struct dentry * parent, struct qstr * name, s
 	 */
 	mutex_unlock(&dir->i_mutex);
 	if (result->d_op && result->d_op->d_revalidate) {
-		result = do_revalidate(result, nd);
-		if (!result)
+		if (!result->d_op->d_revalidate(result, nd) && !d_invalidate(result)) {
+			dput(result);
 			result = ERR_PTR(-ENOENT);
+		}
 	}
 	return result;
 }
@@ -816,11 +790,9 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 		goto need_lookup;
 	if (dentry->d_op && dentry->d_op->d_revalidate)
 		goto need_revalidate;
-done:
 	inode = dentry->d_inode;
 	if (!inode)
-		goto no_inode;
-
+		goto done;
 #ifdef CONFIG_VSERVER_FILESHARING
 	/* MEF: PlanetLab FS module assumes that any file that can be
 	 * named (e.g., via a cross mount) is not hidden from another
@@ -839,7 +811,7 @@ done:
 		if (de && !vx_hide_check(0, de->vx_flags))
 			goto hidden;
 	}
-no_inode:
+done:
 	path->mnt = mnt;
 	path->dentry = dentry;
 	__follow_mount(path);
@@ -862,12 +834,12 @@ need_lookup:
 need_revalidate:
 	if (atomic)
 		return -EWOULDBLOCKIO;
-	dentry = do_revalidate(dentry, nd);
-	if (!dentry)
-		goto need_lookup;
-	if (IS_ERR(dentry))
-		goto fail;
-	goto done;
+	if (dentry->d_op->d_revalidate(dentry, nd))
+		goto done;
+	if (d_invalidate(dentry))
+		goto done;
+	dput(dentry);
+	goto need_lookup;
 
 fail:
 	return PTR_ERR(dentry);
@@ -1229,9 +1201,9 @@ static int fastcall do_path_lookup(int dfd, const char *name,
 	retval = link_path_walk(name, nd);
 out:
 	if (likely(retval == 0)) {
-		if (unlikely(!audit_dummy_context() && nd && nd->dentry &&
+		if (unlikely(current->audit_context && nd && nd->dentry &&
 				nd->dentry->d_inode))
-		audit_inode(name, nd->dentry->d_inode);
+		audit_inode(name, nd->dentry->d_inode, flags);
 	}
 out_fail:
 	return retval;
@@ -1462,7 +1434,7 @@ static int may_delete(struct inode *dir, struct dentry *victim,
 		return -ENOENT;
 
 	BUG_ON(victim->d_parent->d_inode != dir);
-	audit_inode_child(victim->d_name.name, victim->d_inode, dir);
+	audit_inode_child(victim->d_name.name, victim->d_inode, dir->i_ino);
 
 	error = permission(dir,MAY_WRITE | MAY_EXEC, nd);
 	if (error)
@@ -1530,7 +1502,7 @@ struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
 	struct dentry *p;
 
 	if (p1 == p2) {
-		mutex_lock_nested(&p1->d_inode->i_mutex, I_MUTEX_PARENT);
+		mutex_lock(&p1->d_inode->i_mutex);
 		return NULL;
 	}
 
@@ -1538,22 +1510,22 @@ struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
 
 	for (p = p1; p->d_parent != p; p = p->d_parent) {
 		if (p->d_parent == p2) {
-			mutex_lock_nested(&p2->d_inode->i_mutex, I_MUTEX_PARENT);
-			mutex_lock_nested(&p1->d_inode->i_mutex, I_MUTEX_CHILD);
+			mutex_lock(&p2->d_inode->i_mutex);
+			mutex_lock(&p1->d_inode->i_mutex);
 			return p;
 		}
 	}
 
 	for (p = p2; p->d_parent != p; p = p->d_parent) {
 		if (p->d_parent == p1) {
-			mutex_lock_nested(&p1->d_inode->i_mutex, I_MUTEX_PARENT);
-			mutex_lock_nested(&p2->d_inode->i_mutex, I_MUTEX_CHILD);
+			mutex_lock(&p1->d_inode->i_mutex);
+			mutex_lock(&p2->d_inode->i_mutex);
 			return p;
 		}
 	}
 
-	mutex_lock_nested(&p1->d_inode->i_mutex, I_MUTEX_PARENT);
-	mutex_lock_nested(&p2->d_inode->i_mutex, I_MUTEX_CHILD);
+	mutex_lock(&p1->d_inode->i_mutex);
+	mutex_lock(&p2->d_inode->i_mutex);
 	return NULL;
 }
 
@@ -1767,7 +1739,6 @@ do_last:
 	 * It already exists.
 	 */
 	mutex_unlock(&dir->d_inode->i_mutex);
-	audit_inode_update(path.dentry->d_inode);
 
 	error = -EEXIST;
 	if (flag & O_EXCL)
@@ -1778,7 +1749,6 @@ do_last:
 		if (flag & O_NOFOLLOW)
 			goto exit_dput;
 	}
-
 	error = -ENOENT;
 	if (!path.dentry->d_inode)
 		goto exit_dput;
@@ -1867,7 +1837,7 @@ struct dentry *lookup_create(struct nameidata *nd, int is_dir)
 {
 	struct dentry *dentry = ERR_PTR(-EEXIST);
 
-	mutex_lock_nested(&nd->dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+	mutex_lock(&nd->dentry->d_inode->i_mutex);
 	/*
 	 * Yucky last component or no last component at all?
 	 * (foo/., foo/.., /////)
@@ -1875,8 +1845,6 @@ struct dentry *lookup_create(struct nameidata *nd, int is_dir)
 	if (nd->last_type != LAST_NORM)
 		goto fail;
 	nd->flags &= ~LOOKUP_PARENT;
-	nd->flags |= LOOKUP_CREATE;
-	nd->intent.open.flags = O_EXCL;
 
 	/*
 	 * Do the final lookup.
@@ -2131,7 +2099,7 @@ static long do_rmdir(int dfd, const char __user *pathname)
 			error = -EBUSY;
 			goto exit1;
 	}
-	mutex_lock_nested(&nd.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+	mutex_lock(&nd.dentry->d_inode->i_mutex);
 	dentry = lookup_hash(&nd);
 	error = PTR_ERR(dentry);
 	if (!IS_ERR(dentry)) {
@@ -2206,7 +2174,7 @@ static long do_unlinkat(int dfd, const char __user *pathname)
 	error = -EISDIR;
 	if (nd.last_type != LAST_NORM)
 		goto exit1;
-	mutex_lock_nested(&nd.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+	mutex_lock(&nd.dentry->d_inode->i_mutex);
 	dentry = lookup_hash(&nd);
 	error = PTR_ERR(dentry);
 	if (!IS_ERR(dentry)) {
@@ -2370,16 +2338,14 @@ asmlinkage long sys_linkat(int olddfd, const char __user *oldname,
 	int error;
 	char * to;
 
-	if ((flags & ~AT_SYMLINK_FOLLOW) != 0)
+	if (flags != 0)
 		return -EINVAL;
 
 	to = getname(newname);
 	if (IS_ERR(to))
 		return PTR_ERR(to);
 
-	error = __user_walk_fd(olddfd, oldname,
-			       flags & AT_SYMLINK_FOLLOW ? LOOKUP_FOLLOW : 0,
-			       &old_nd);
+	error = __user_walk_fd(olddfd, oldname, 0, &old_nd);
 	if (error)
 		goto exit;
 	error = do_path_lookup(newdfd, to, LOOKUP_PARENT, &nd);
@@ -2715,7 +2681,8 @@ static char *page_getlink(struct dentry * dentry, struct page **ppage)
 {
 	struct page * page;
 	struct address_space *mapping = dentry->d_inode->i_mapping;
-	page = read_mapping_page(mapping, 0, NULL);
+	page = read_cache_page(mapping, 0, (filler_t *)mapping->a_ops->readpage,
+				NULL);
 	if (IS_ERR(page))
 		goto sync_fail;
 	wait_on_page_locked(page);

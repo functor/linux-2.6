@@ -4,6 +4,7 @@
  */
 
 #include "linux/stddef.h"
+#include "linux/config.h"
 #include "linux/sched.h"
 #include "linux/slab.h"
 #include "linux/types.h"

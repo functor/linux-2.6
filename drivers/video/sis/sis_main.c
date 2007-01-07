@@ -33,6 +33,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
@@ -44,13 +45,7 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/mm.h>
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,17)
 #include <linux/tty.h>
-#else
-#include <linux/screen_info.h>
-#endif
-
 #include <linux/slab.h>
 #include <linux/fb.h>
 #include <linux/selection.h>
@@ -280,7 +275,7 @@ sisfb_search_mode(char *name, BOOLEAN quiet)
 static void __devinit
 sisfb_get_vga_mode_from_kernel(void)
 {
-#ifdef CONFIG_X86
+#if (defined(__i386__) || defined(__x86_64__)) && defined(CONFIG_VIDEO_SELECT)
 	char mymode[32];
 	int  mydepth = screen_info.lfb_depth;
 

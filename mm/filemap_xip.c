@@ -191,7 +191,7 @@ __xip_unmap (struct address_space * mapping,
 			/* Nuke the page table entry. */
 			flush_cache_page(vma, address, pte_pfn(*pte));
 			pteval = ptep_clear_flush(vma, address, pte);
-			page_remove_rmap(page, vma);
+			page_remove_rmap(page);
 			dec_mm_counter(mm, file_rss);
 			BUG_ON(pte_dirty(pteval));
 			pte_unmap_unlock(pte, ptl);
@@ -275,7 +275,7 @@ __xip_file_write(struct file *filp, const char __user *buf,
 		  size_t count, loff_t pos, loff_t *ppos)
 {
 	struct address_space * mapping = filp->f_mapping;
-	const struct address_space_operations *a_ops = mapping->a_ops;
+	struct address_space_operations *a_ops = mapping->a_ops;
 	struct inode 	*inode = mapping->host;
 	long		status = 0;
 	struct page	*page;

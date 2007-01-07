@@ -8,6 +8,7 @@
  *  Collaborative memory management interface.
  */
 
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/init.h>
@@ -161,7 +162,7 @@ cmm_thread(void *dummy)
 static void
 cmm_start_thread(void)
 {
-	kernel_thread(cmm_thread, NULL, 0);
+	kernel_thread(cmm_thread, 0, 0);
 }
 
 static void

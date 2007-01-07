@@ -13,6 +13,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
@@ -32,8 +33,8 @@ static ssize_t default_write_file(struct file *file, const char __user *buf,
 
 static int default_open(struct inode *inode, struct file *file)
 {
-	if (inode->i_private)
-		file->private_data = inode->i_private;
+	if (inode->u.generic_ip)
+		file->private_data = inode->u.generic_ip;
 
 	return 0;
 }

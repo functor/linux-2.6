@@ -20,9 +20,10 @@
 #include <linux/nfs_mount.h>
 
 #include "iostat.h"
-#include "internal.h"
 
 #define NFSDBG_FACILITY		NFSDBG_PROC
+
+extern struct rpc_procinfo nfs3_procedures[];
 
 /* A wrapper to handle the EJUKEBOX error message */
 static int
@@ -81,7 +82,7 @@ do_proc_get_root(struct rpc_clnt *client, struct nfs_fh *fhandle,
 }
 
 /*
- * Bare-bones access to getattr: this is for nfs_get_root/nfs_get_sb
+ * Bare-bones access to getattr: this is for nfs_read_super.
  */
 static int
 nfs3_proc_get_root(struct nfs_server *server, struct nfs_fh *fhandle,
@@ -90,8 +91,8 @@ nfs3_proc_get_root(struct nfs_server *server, struct nfs_fh *fhandle,
 	int	status;
 
 	status = do_proc_get_root(server->client, fhandle, info);
-	if (status && server->nfs_client->cl_rpcclient != server->client)
-		status = do_proc_get_root(server->nfs_client->cl_rpcclient, fhandle, info);
+	if (status && server->client_sys != server->client)
+		status = do_proc_get_root(server->client_sys, fhandle, info);
 	return status;
 }
 
@@ -785,7 +786,7 @@ nfs3_proc_fsinfo(struct nfs_server *server, struct nfs_fh *fhandle,
 
 	dprintk("NFS call  fsinfo\n");
 	nfs_fattr_init(info->fattr);
-	status = rpc_call_sync(server->nfs_client->cl_rpcclient, &msg, 0);
+	status = rpc_call_sync(server->client_sys, &msg, 0);
 	dprintk("NFS reply fsinfo: %d\n", status);
 	return status;
 }
@@ -807,6 +808,8 @@ nfs3_proc_pathconf(struct nfs_server *server, struct nfs_fh *fhandle,
 	dprintk("NFS reply pathconf: %d\n", status);
 	return status;
 }
+
+extern u32 *nfs3_decode_dirent(u32 *, struct nfs_entry *, int);
 
 static int nfs3_read_done(struct rpc_task *task, struct nfs_read_data *data)
 {
@@ -886,7 +889,7 @@ nfs3_proc_lock(struct file *filp, int cmd, struct file_lock *fl)
 	return nlmclnt_proc(filp->f_dentry->d_inode, cmd, fl);
 }
 
-const struct nfs_rpc_ops nfs_v3_clientops = {
+struct nfs_rpc_ops	nfs_v3_clientops = {
 	.version	= 3,			/* protocol version */
 	.dentry_ops	= &nfs_dentry_operations,
 	.dir_inode_ops	= &nfs3_dir_inode_operations,

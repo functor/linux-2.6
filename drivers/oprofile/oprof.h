@@ -36,7 +36,9 @@ void oprofile_timer_init(struct oprofile_operations * ops);
 
 int oprofile_set_backtrace(unsigned long depth);
 
+#ifdef CONFIG_XEN
 int oprofile_set_active(int active_domains[], unsigned int adomains);
 int oprofile_set_passive(int passive_domains[], unsigned int pdomains);
- 
+#endif
+
 #endif /* OPROF_H */

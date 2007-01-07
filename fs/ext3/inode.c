@@ -63,7 +63,7 @@ static int ext3_inode_is_fast_symlink(struct inode *inode)
  * still needs to be revoked.
  */
 int ext3_forget(handle_t *handle, int is_metadata, struct inode *inode,
-			struct buffer_head *bh, ext3_fsblk_t blocknr)
+			struct buffer_head *bh, int blocknr)
 {
 	int err;
 
@@ -408,13 +408,13 @@ no_block:
  *
  *	Caller must make sure that @ind is valid and will stay that way.
  */
-static ext3_fsblk_t ext3_find_near(struct inode *inode, Indirect *ind)
+static unsigned long ext3_find_near(struct inode *inode, Indirect *ind)
 {
 	struct ext3_inode_info *ei = EXT3_I(inode);
 	__le32 *start = ind->bh ? (__le32*) ind->bh->b_data : ei->i_data;
 	__le32 *p;
-	ext3_fsblk_t bg_start;
-	ext3_grpblk_t colour;
+	unsigned long bg_start;
+	unsigned long colour;
 
 	/* Try to find previous block */
 	for (p = ind->p - 1; p >= start; p--) {
@@ -430,7 +430,8 @@ static ext3_fsblk_t ext3_find_near(struct inode *inode, Indirect *ind)
 	 * It is going to be referred to from the inode itself? OK, just put it
 	 * into the same cylinder group then.
 	 */
-	bg_start = ext3_group_first_block_no(inode->i_sb, ei->i_block_group);
+	bg_start = (ei->i_block_group * EXT3_BLOCKS_PER_GROUP(inode->i_sb)) +
+		le32_to_cpu(EXT3_SB(inode->i_sb)->s_es->s_first_data_block);
 	colour = (current->pid % 16) *
 			(EXT3_BLOCKS_PER_GROUP(inode->i_sb) / 16);
 	return bg_start + colour;
@@ -448,7 +449,7 @@ static ext3_fsblk_t ext3_find_near(struct inode *inode, Indirect *ind)
  *	stores it in *@goal and returns zero.
  */
 
-static ext3_fsblk_t ext3_find_goal(struct inode *inode, long block,
+static unsigned long ext3_find_goal(struct inode *inode, long block,
 		Indirect chain[4], Indirect *partial)
 {
 	struct ext3_block_alloc_info *block_i;
@@ -516,13 +517,13 @@ static int ext3_blks_to_allocate(Indirect *branch, int k, unsigned long blks,
  *		direct blocks
  */
 static int ext3_alloc_blocks(handle_t *handle, struct inode *inode,
-			ext3_fsblk_t goal, int indirect_blks, int blks,
-			ext3_fsblk_t new_blocks[4], int *err)
+			unsigned long goal, int indirect_blks, int blks,
+			unsigned long long new_blocks[4], int *err)
 {
 	int target, i;
 	unsigned long count = 0;
 	int index = 0;
-	ext3_fsblk_t current_block = 0;
+	unsigned long current_block = 0;
 	int ret = 0;
 
 	/*
@@ -592,7 +593,7 @@ failed_out:
  *	as described above and return 0.
  */
 static int ext3_alloc_branch(handle_t *handle, struct inode *inode,
-			int indirect_blks, int *blks, ext3_fsblk_t goal,
+			int indirect_blks, int *blks, unsigned long goal,
 			int *offsets, Indirect *branch)
 {
 	int blocksize = inode->i_sb->s_blocksize;
@@ -600,8 +601,8 @@ static int ext3_alloc_branch(handle_t *handle, struct inode *inode,
 	int err = 0;
 	struct buffer_head *bh;
 	int num;
-	ext3_fsblk_t new_blocks[4];
-	ext3_fsblk_t current_block;
+	unsigned long long new_blocks[4];
+	unsigned long long current_block;
 
 	num = ext3_alloc_blocks(handle, inode, goal, indirect_blks,
 				*blks, new_blocks, &err);
@@ -688,7 +689,7 @@ static int ext3_splice_branch(handle_t *handle, struct inode *inode,
 	int i;
 	int err = 0;
 	struct ext3_block_alloc_info *block_i;
-	ext3_fsblk_t current_block;
+	unsigned long current_block;
 
 	block_i = EXT3_I(inode)->i_block_alloc_info;
 	/*
@@ -795,13 +796,13 @@ int ext3_get_blocks_handle(handle_t *handle, struct inode *inode,
 	int offsets[4];
 	Indirect chain[4];
 	Indirect *partial;
-	ext3_fsblk_t goal;
+	unsigned long goal;
 	int indirect_blks;
 	int blocks_to_boundary = 0;
 	int depth;
 	struct ext3_inode_info *ei = EXT3_I(inode);
 	int count = 0;
-	ext3_fsblk_t first_block = 0;
+	unsigned long first_block = 0;
 
 
 	J_ASSERT(handle != NULL || create == 0);
@@ -819,7 +820,7 @@ int ext3_get_blocks_handle(handle_t *handle, struct inode *inode,
 		count++;
 		/*map more blocks*/
 		while (count < maxblocks && count <= blocks_to_boundary) {
-			ext3_fsblk_t blk;
+			unsigned long blk;
 
 			if (!verify_chain(chain, partial)) {
 				/*
@@ -926,7 +927,7 @@ int ext3_get_blocks_handle(handle_t *handle, struct inode *inode,
 	set_buffer_new(bh_result);
 got_it:
 	map_bh(bh_result, inode->i_sb, le32_to_cpu(chain[depth-1].key));
-	if (count > blocks_to_boundary)
+	if (blocks_to_boundary == 0)
 		set_buffer_boundary(bh_result);
 	err = count;
 	/* Clean up and exit */
@@ -1010,14 +1011,11 @@ struct buffer_head *ext3_getblk(handle_t *handle, struct inode *inode,
 	buffer_trace_init(&dummy.b_history);
 	err = ext3_get_blocks_handle(handle, inode, block, 1,
 					&dummy, create, 1);
-	/*
-	 * ext3_get_blocks_handle() returns number of blocks
-	 * mapped. 0 in case of a HOLE.
-	 */
-	if (err > 0) {
-		if (err > 1)
-			WARN_ON(1);
+	if (err == 1) {
 		err = 0;
+	} else if (err >= 0) {
+		WARN_ON(1);
+		err = -EIO;
 	}
 	*errp = err;
 	if (!err && buffer_mapped(&dummy)) {
@@ -1531,12 +1529,12 @@ static int ext3_journalled_writepage(struct page *page,
 		goto no_write;
 	}
 
-	if (!page_has_buffers(page) || PageFsMisc(page)) {
+	if (!page_has_buffers(page) || PageChecked(page)) {
 		/*
 		 * It's mmapped pagecache.  Add buffers and journal it.  There
 		 * doesn't seem much point in redirtying the page here.
 		 */
-		ClearPageFsMisc(page);
+		ClearPageChecked(page);
 		ret = block_prepare_write(page, 0, PAGE_CACHE_SIZE,
 					ext3_get_block);
 		if (ret != 0) {
@@ -1593,7 +1591,7 @@ static void ext3_invalidatepage(struct page *page, unsigned long offset)
 	 * If it's a full truncate we just forget about the pending dirtying
 	 */
 	if (offset == 0)
-		ClearPageFsMisc(page);
+		ClearPageChecked(page);
 
 	journal_invalidatepage(journal, page, offset);
 }
@@ -1602,7 +1600,7 @@ static int ext3_releasepage(struct page *page, gfp_t wait)
 {
 	journal_t *journal = EXT3_JOURNAL(page->mapping->host);
 
-	WARN_ON(PageFsMisc(page));
+	WARN_ON(PageChecked(page));
 	if (!page_has_buffers(page))
 		return 0;
 	return journal_try_to_free_buffers(journal, page, wait);
@@ -1698,11 +1696,11 @@ out:
  */
 static int ext3_journalled_set_page_dirty(struct page *page)
 {
-	SetPageFsMisc(page);
+	SetPageChecked(page);
 	return __set_page_dirty_nobuffers(page);
 }
 
-static const struct address_space_operations ext3_ordered_aops = {
+static struct address_space_operations ext3_ordered_aops = {
 	.readpage	= ext3_readpage,
 	.readpages	= ext3_readpages,
 	.writepage	= ext3_ordered_writepage,
@@ -1716,7 +1714,7 @@ static const struct address_space_operations ext3_ordered_aops = {
 	.migratepage	= buffer_migrate_page,
 };
 
-static const struct address_space_operations ext3_writeback_aops = {
+static struct address_space_operations ext3_writeback_aops = {
 	.readpage	= ext3_readpage,
 	.readpages	= ext3_readpages,
 	.writepage	= ext3_writeback_writepage,
@@ -1730,7 +1728,7 @@ static const struct address_space_operations ext3_writeback_aops = {
 	.migratepage	= buffer_migrate_page,
 };
 
-static const struct address_space_operations ext3_journalled_aops = {
+static struct address_space_operations ext3_journalled_aops = {
 	.readpage	= ext3_readpage,
 	.readpages	= ext3_readpages,
 	.writepage	= ext3_journalled_writepage,
@@ -1762,7 +1760,7 @@ void ext3_set_aops(struct inode *inode)
 static int ext3_block_truncate_page(handle_t *handle, struct page *page,
 		struct address_space *mapping, loff_t from)
 {
-	ext3_fsblk_t index = from >> PAGE_CACHE_SHIFT;
+	unsigned long index = from >> PAGE_CACHE_SHIFT;
 	unsigned offset = from & (PAGE_CACHE_SIZE-1);
 	unsigned blocksize, iblock, length, pos;
 	struct inode *inode = mapping->host;
@@ -1963,7 +1961,7 @@ no_top:
  * than `count' because there can be holes in there.
  */
 static void ext3_clear_blocks(handle_t *handle, struct inode *inode,
-		struct buffer_head *bh, ext3_fsblk_t block_to_free,
+		struct buffer_head *bh, unsigned long block_to_free,
 		unsigned long count, __le32 *first, __le32 *last)
 {
 	__le32 *p;
@@ -2025,12 +2023,12 @@ static void ext3_free_data(handle_t *handle, struct inode *inode,
 			   struct buffer_head *this_bh,
 			   __le32 *first, __le32 *last)
 {
-	ext3_fsblk_t block_to_free = 0;    /* Starting block # of a run */
+	unsigned long block_to_free = 0;    /* Starting block # of a run */
 	unsigned long count = 0;	    /* Number of blocks in the run */ 
 	__le32 *block_to_free_p = NULL;	    /* Pointer into inode/ind
 					       corresponding to
 					       block_to_free */
-	ext3_fsblk_t nr;		    /* Current block # */
+	unsigned long nr;		    /* Current block # */
 	__le32 *p;			    /* Pointer into inode/ind
 					       for current block */
 	int err;
@@ -2092,7 +2090,7 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
 			       struct buffer_head *parent_bh,
 			       __le32 *first, __le32 *last, int depth)
 {
-	ext3_fsblk_t nr;
+	unsigned long nr;
 	__le32 *p;
 
 	if (is_handle_aborted(handle))
@@ -2116,7 +2114,7 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
 			 */
 			if (!bh) {
 				ext3_error(inode->i_sb, "ext3_free_branches",
-					   "Read failure, inode=%lu, block="E3FSBLK,
+					   "Read failure, inode=%ld, block=%ld",
 					   inode->i_ino, nr);
 				continue;
 			}
@@ -2246,7 +2244,7 @@ void ext3_truncate(struct inode *inode)
 		return;
 	if (ext3_inode_is_fast_symlink(inode))
 		return;
-	if (IS_APPEND(inode) || IS_IXORUNLINK(inode))
+	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
 
 	/*
@@ -2397,12 +2395,11 @@ out_stop:
 	ext3_journal_stop(handle);
 }
 
-static ext3_fsblk_t ext3_get_inode_block(struct super_block *sb,
+static unsigned long ext3_get_inode_block(struct super_block *sb,
 		unsigned long ino, struct ext3_iloc *iloc)
 {
 	unsigned long desc, group_desc, block_group;
-	unsigned long offset;
-	ext3_fsblk_t block;
+	unsigned long offset, block;
 	struct buffer_head *bh;
 	struct ext3_group_desc * gdp;
 
@@ -2453,7 +2450,7 @@ static ext3_fsblk_t ext3_get_inode_block(struct super_block *sb,
 static int __ext3_get_inode_loc(struct inode *inode,
 				struct ext3_iloc *iloc, int in_mem)
 {
-	ext3_fsblk_t block;
+	unsigned long block;
 	struct buffer_head *bh;
 
 	block = ext3_get_inode_block(inode->i_sb, inode->i_ino, iloc);
@@ -2464,8 +2461,7 @@ static int __ext3_get_inode_loc(struct inode *inode,
 	if (!bh) {
 		ext3_error (inode->i_sb, "ext3_get_inode_loc",
 				"unable to read inode block - "
-				"inode=%lu, block="E3FSBLK,
-				 inode->i_ino, block);
+				"inode=%lu, block=%lu", inode->i_ino, block);
 		return -EIO;
 	}
 	if (!buffer_uptodate(bh)) {
@@ -2546,7 +2542,7 @@ make_io:
 		if (!buffer_uptodate(bh)) {
 			ext3_error(inode->i_sb, "ext3_get_inode_loc",
 					"unable to read inode block - "
-					"inode=%lu, block="E3FSBLK,
+					"inode=%lu, block=%lu",
 					inode->i_ino, block);
 			brelse(bh);
 			return -EIO;
@@ -2698,6 +2694,9 @@ void ext3_read_inode(struct inode * inode)
 		 * recovery code: that's fine, we're about to complete
 		 * the process of deleting those. */
 	}
+	inode->i_blksize = PAGE_SIZE;	/* This is the optimal IO size
+					 * (for stat), not the fs block
+					 * size */  
 	inode->i_blocks = le32_to_cpu(raw_inode->i_blocks);
 	ei->i_flags = le32_to_cpu(raw_inode->i_flags);
 #ifdef EXT3_FRAGMENTS

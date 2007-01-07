@@ -64,8 +64,7 @@ static void mainstone_unmask_irq(unsigned int irq)
 	MST_INTMSKENA = (mainstone_irq_enabled |= (1 << mainstone_irq));
 }
 
-static struct irq_chip mainstone_irq_chip = {
-	.name		= "FPGA",
+static struct irqchip mainstone_irq_chip = {
 	.ack		= mainstone_mask_irq,
 	.mask		= mainstone_mask_irq,
 	.unmask		= mainstone_unmask_irq,
@@ -332,7 +331,7 @@ static int mainstone_mci_init(struct device *dev, irqreturn_t (*mstone_detect_in
 	 */
 	MST_MSCWR1 &= ~MST_MSCWR1_MS_SEL;
 
-	err = request_irq(MAINSTONE_MMC_IRQ, mstone_detect_int, IRQF_DISABLED,
+	err = request_irq(MAINSTONE_MMC_IRQ, mstone_detect_int, SA_INTERRUPT,
 			     "MMC card detect", data);
 	if (err) {
 		printk(KERN_ERR "mainstone_mci_init: MMC/SD: can't request MMC card detect IRQ\n");

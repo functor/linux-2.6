@@ -371,7 +371,7 @@
 
      1.5 (8/8/96):
          1. Add support for ABP-940U (PCI Ultra) adapter.
-         2. Add support for IRQ sharing by setting the IRQF_SHARED flag for
+         2. Add support for IRQ sharing by setting the SA_SHIRQ flag for
             request_irq and supplying a dev_id pointer to both request_irq()
             and free_irq().
          3. In AscSearchIOPortAddr11() restore a call to check_region() which
@@ -504,9 +504,9 @@
          3. For v2.1.93 and newer kernels use CONFIG_PCI and new PCI BIOS
             access functions.
          4. Update board serial number printing.
-         5. Try allocating an IRQ both with and without the IRQF_DISABLED
+         5. Try allocating an IRQ both with and without the SA_INTERRUPT
             flag set to allow IRQ sharing with drivers that do not set
-            the IRQF_DISABLED flag. Also display a more descriptive error
+            the SA_INTERRUPT flag. Also display a more descriptive error
             message if request_irq() fails.
          6. Update to latest Asc and Adv Libraries.
 
@@ -754,6 +754,7 @@
  * --- Linux Include Files
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 
 #if defined(CONFIG_X86) && !defined(CONFIG_ISA)
@@ -894,14 +895,6 @@ typedef unsigned char uchar;
 #define  ASC_DVCLIB_CALL_DONE     (1)
 #define  ASC_DVCLIB_CALL_FAILED   (0)
 #define  ASC_DVCLIB_CALL_ERROR    (-1)
-
-#define PCI_VENDOR_ID_ASP		0x10cd
-#define PCI_DEVICE_ID_ASP_1200A		0x1100
-#define PCI_DEVICE_ID_ASP_ABP940	0x1200
-#define PCI_DEVICE_ID_ASP_ABP940U	0x1300
-#define PCI_DEVICE_ID_ASP_ABP940UW	0x2300
-#define PCI_DEVICE_ID_38C0800_REV1	0x2500
-#define PCI_DEVICE_ID_38C1600_REV1	0x2700
 
 /*
  * Enable CC_VERY_LONG_SG_LIST to support up to 64K element SG lists.
@@ -5191,19 +5184,19 @@ advansys_detect(struct scsi_host_template *tpnt)
             /* Register IRQ Number. */
             ASC_DBG1(2, "advansys_detect: request_irq() %d\n", shp->irq);
            /*
-            * If request_irq() fails with the IRQF_DISABLED flag set,
-            * then try again without the IRQF_DISABLED flag set. This
+            * If request_irq() fails with the SA_INTERRUPT flag set,
+            * then try again without the SA_INTERRUPT flag set. This
             * allows IRQ sharing to work even with other drivers that
-            * do not set the IRQF_DISABLED flag.
+            * do not set the SA_INTERRUPT flag.
             *
-            * If IRQF_DISABLED is not set, then interrupts are enabled
+            * If SA_INTERRUPT is not set, then interrupts are enabled
             * before the driver interrupt function is called.
             */
             if (((ret = request_irq(shp->irq, advansys_interrupt,
-                            IRQF_DISABLED | (share_irq == TRUE ? IRQF_SHARED : 0),
+                            SA_INTERRUPT | (share_irq == TRUE ? SA_SHIRQ : 0),
                             "advansys", boardp)) != 0) &&
                 ((ret = request_irq(shp->irq, advansys_interrupt,
-                            (share_irq == TRUE ? IRQF_SHARED : 0),
+                            (share_irq == TRUE ? SA_SHIRQ : 0),
                             "advansys", boardp)) != 0))
             {
                 if (ret == -EBUSY) {
@@ -12362,7 +12355,7 @@ AscInitFromEEP(ASC_DVC_VAR *asc_dvc)
                 ASC_PRINT1(
 "AscInitFromEEP: Failed to re-write EEPROM with %d errors.\n", i);
         } else {
-                ASC_PRINT("AscInitFromEEP: Successfully re-wrote EEPROM.\n");
+                ASC_PRINT("AscInitFromEEP: Succesfully re-wrote EEPROM.");
         }
     }
     return (warn_code);
@@ -17304,7 +17297,7 @@ AdvWaitEEPCmd(AdvPortAddr iop_base)
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void __init
+void
 AdvSet3550EEPConfig(AdvPortAddr iop_base, ADVEEP_3550_CONFIG *cfg_buf)
 {
     ushort *wbuf;
@@ -17371,7 +17364,7 @@ AdvSet3550EEPConfig(AdvPortAddr iop_base, ADVEEP_3550_CONFIG *cfg_buf)
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void __init
+void
 AdvSet38C0800EEPConfig(AdvPortAddr iop_base,
                        ADVEEP_38C0800_CONFIG *cfg_buf)
 {
@@ -17439,7 +17432,7 @@ AdvSet38C0800EEPConfig(AdvPortAddr iop_base,
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void __init
+void
 AdvSet38C1600EEPConfig(AdvPortAddr iop_base,
                        ADVEEP_38C1600_CONFIG *cfg_buf)
 {

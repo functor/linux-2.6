@@ -59,7 +59,7 @@ static int end_swap_bio_write(struct bio *bio, unsigned int bytes_done, int err)
 	return 0;
 }
 
-int end_swap_bio_read(struct bio *bio, unsigned int bytes_done, int err)
+static int end_swap_bio_read(struct bio *bio, unsigned int bytes_done, int err)
 {
 	const int uptodate = test_bit(BIO_UPTODATE, &bio->bi_flags);
 	struct page *page = bio->bi_io_vec[0].bv_page;
@@ -101,7 +101,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 	}
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		rw |= (1 << BIO_RW_SYNC);
-	count_vm_event(PSWPOUT);
+	inc_page_state(pswpout);
 	set_page_writeback(page);
 	unlock_page(page);
 	submit_bio(rw, bio);
@@ -123,7 +123,7 @@ int swap_readpage(struct file *file, struct page *page)
 		ret = -ENOMEM;
 		goto out;
 	}
-	count_vm_event(PSWPIN);
+	inc_page_state(pswpin);
 	submit_bio(READ, bio);
 out:
 	return ret;
@@ -137,12 +137,10 @@ out:
  * We use end_swap_bio_read() even for writes, because it happens to do what
  * we want.
  */
-int rw_swap_page_sync(int rw, swp_entry_t entry, struct page *page,
-			struct bio **bio_chain)
+int rw_swap_page_sync(int rw, swp_entry_t entry, struct page *page)
 {
 	struct bio *bio;
 	int ret = 0;
-	int bio_rw;
 
 	lock_page(page);
 
@@ -153,22 +151,11 @@ int rw_swap_page_sync(int rw, swp_entry_t entry, struct page *page,
 		goto out;
 	}
 
-	bio_rw = rw;
-	if (!bio_chain)
-		bio_rw |= (1 << BIO_RW_SYNC);
-	if (bio_chain)
-		bio_get(bio);
-	submit_bio(bio_rw, bio);
-	if (bio_chain == NULL) {
-		wait_on_page_locked(page);
+	submit_bio(rw | (1 << BIO_RW_SYNC), bio);
+	wait_on_page_locked(page);
 
-		if (!PageUptodate(page) || PageError(page))
-			ret = -EIO;
-	}
-	if (bio_chain) {
-		bio->bi_private = *bio_chain;
-		*bio_chain = bio;
-	}
+	if (!PageUptodate(page) || PageError(page))
+		ret = -EIO;
 out:
 	return ret;
 }

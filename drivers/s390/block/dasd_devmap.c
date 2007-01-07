@@ -13,6 +13,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/ctype.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -26,7 +27,7 @@
 #include "dasd_int.h"
 
 kmem_cache_t *dasd_page_cache;
-EXPORT_SYMBOL_GPL(dasd_page_cache);
+EXPORT_SYMBOL(dasd_page_cache);
 
 /*
  * dasd_devmap_t is used to store the features and the relation
@@ -48,22 +49,6 @@ struct dasd_devmap {
 };
 
 /*
- * dasd_server_ssid_map contains a globally unique storage server subsystem ID.
- * dasd_server_ssid_list contains the list of all subsystem IDs accessed by
- * the DASD device driver.
- */
-struct dasd_server_ssid_map {
-	struct list_head list;
-	struct system_id {
-		char vendor[4];
-		char serial[15];
-		__u16 ssid;
-	} sid;
-};
-
-static struct list_head dasd_server_ssid_list;
-
-/*
  * Parameter parsing functions for dasd= parameter. The syntax is:
  *   <devno>		: (0x)?[0-9a-fA-F]+
  *   <busid>		: [0-0a-f]\.[0-9a-f]\.(0x)?[0-9a-fA-F]+
@@ -79,8 +64,6 @@ static struct list_head dasd_server_ssid_list;
 
 int dasd_probeonly =  0;	/* is true, when probeonly mode is active */
 int dasd_autodetect = 0;	/* is true, when autodetection is active */
-int dasd_nopav = 0;		/* is true, when PAV is disabled */
-EXPORT_SYMBOL_GPL(dasd_nopav);
 
 /*
  * char *dasd[] is intended to hold the ranges supplied by the dasd= statement
@@ -91,7 +74,7 @@ static char *dasd[256];
 module_param_array(dasd, charp, NULL, 0);
 
 /*
- * Single spinlock to protect devmap and servermap structures and lists.
+ * Single spinlock to protect devmap structures and lists.
  */
 static DEFINE_SPINLOCK(dasd_devmap_lock);
 
@@ -140,7 +123,7 @@ static inline int
 dasd_busid(char **str, int *id0, int *id1, int *devno)
 {
 	int val, old_style;
-
+ 
 	/* check for leading '0x' */
 	old_style = 0;
 	if ((*str)[0] == '0' && (*str)[1] == 'x') {
@@ -196,7 +179,7 @@ dasd_feature_list(char *str, char **endp)
 	features = 0;
 
 	while (1) {
-		for (len = 0;
+		for (len = 0; 
 		     str[len] && str[len] != ':' && str[len] != ')'; len++);
 		if (len == 2 && !strncmp(str, "ro", 2))
 			features |= DASD_FEATURE_READONLY;
@@ -245,30 +228,24 @@ dasd_parse_keyword( char *parsestring ) {
 		length = strlen(parsestring);
 		residual_str = parsestring + length;
         }
-	if (strncmp("autodetect", parsestring, length) == 0) {
+	if (strncmp ("autodetect", parsestring, length) == 0) {
 		dasd_autodetect = 1;
 		MESSAGE (KERN_INFO, "%s",
 			 "turning to autodetection mode");
                 return residual_str;
         }
-	if (strncmp("probeonly", parsestring, length) == 0) {
+        if (strncmp ("probeonly", parsestring, length) == 0) {
 		dasd_probeonly = 1;
 		MESSAGE(KERN_INFO, "%s",
 			"turning to probeonly mode");
                 return residual_str;
         }
-	if (strncmp("nopav", parsestring, length) == 0) {
-		dasd_nopav = 1;
-		MESSAGE(KERN_INFO, "%s", "disable PAV mode");
-		return residual_str;
-	}
-	if (strncmp("fixedbuffers", parsestring, length) == 0) {
+        if (strncmp ("fixedbuffers", parsestring, length) == 0) {
 		if (dasd_page_cache)
 			return residual_str;
 		dasd_page_cache =
-			kmem_cache_create("dasd_page_cache", PAGE_SIZE,
-					  PAGE_SIZE, SLAB_CACHE_DMA,
-					  NULL, NULL );
+			kmem_cache_create("dasd_page_cache", PAGE_SIZE, 0,
+					  SLAB_CACHE_DMA, NULL, NULL );
 		if (!dasd_page_cache)
 			MESSAGE(KERN_WARNING, "%s", "Failed to create slab, "
 				"fixed buffer mode disabled.");
@@ -317,8 +294,6 @@ dasd_parse_range( char *parsestring ) {
 	features = dasd_feature_list(str, &str);
 	if (features < 0)
 		return ERR_PTR(-EINVAL);
-	/* each device in dasd= parameter should be set initially online */
-	features |= DASD_FEATURE_INITIAL_ONLINE;
 	while (from <= to) {
 		sprintf(bus_id, "%01x.%01x.%04x",
 			from_id0, from_id1, from++);
@@ -384,7 +359,7 @@ dasd_parse(void)
  * Add a devmap for the device specified by busid. It is possible that
  * the devmap already exists (dasd= parameter). The order of the devices
  * added through this function will define the kdevs for the individual
- * devices.
+ * devices. 
  */
 static struct dasd_devmap *
 dasd_add_busid(char *bus_id, int features)
@@ -393,11 +368,11 @@ dasd_add_busid(char *bus_id, int features)
 	int hash;
 
 	new = (struct dasd_devmap *)
-		kzalloc(sizeof(struct dasd_devmap), GFP_KERNEL);
+		kmalloc(sizeof(struct dasd_devmap), GFP_KERNEL);
 	if (!new)
 		return ERR_PTR(-ENOMEM);
 	spin_lock(&dasd_devmap_lock);
-	devmap = NULL;
+	devmap = 0;
 	hash = dasd_hash_busid(bus_id);
 	list_for_each_entry(tmp, &dasd_hashlists[hash], list)
 		if (strncmp(tmp->bus_id, bus_id, BUS_ID_SIZE) == 0) {
@@ -409,10 +384,10 @@ dasd_add_busid(char *bus_id, int features)
 		new->devindex = dasd_max_devindex++;
 		strncpy(new->bus_id, bus_id, BUS_ID_SIZE);
 		new->features = features;
-		new->device = NULL;
+		new->device = 0;
 		list_add(&new->list, &dasd_hashlists[hash]);
 		devmap = new;
-		new = NULL;
+		new = 0;
 	}
 	spin_unlock(&dasd_devmap_lock);
 	kfree(new);
@@ -482,7 +457,7 @@ dasd_device_from_devindex(int devindex)
 	int i;
 
 	spin_lock(&dasd_devmap_lock);
-	devmap = NULL;
+	devmap = 0;
 	for (i = 0; (i < 256) && !devmap; i++)
 		list_for_each_entry(tmp, &dasd_hashlists[i], list)
 			if (tmp->devindex == devindex) {
@@ -655,8 +630,7 @@ dasd_ro_show(struct device *dev, struct device_attribute *attr, char *buf)
 }
 
 static ssize_t
-dasd_ro_store(struct device *dev, struct device_attribute *attr,
-	      const char *buf, size_t count)
+dasd_ro_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct dasd_devmap *devmap;
 	int ro_flag;
@@ -684,7 +658,7 @@ static DEVICE_ATTR(readonly, 0644, dasd_ro_show, dasd_ro_store);
  * use_diag controls whether the driver should use diag rather than ssch
  * to talk to the device
  */
-static ssize_t
+static ssize_t 
 dasd_use_diag_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct dasd_devmap *devmap;
@@ -699,8 +673,7 @@ dasd_use_diag_show(struct device *dev, struct device_attribute *attr, char *buf)
 }
 
 static ssize_t
-dasd_use_diag_store(struct device *dev, struct device_attribute *attr,
-		    const char *buf, size_t count)
+dasd_use_diag_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct dasd_devmap *devmap;
 	ssize_t rc;
@@ -724,11 +697,11 @@ dasd_use_diag_store(struct device *dev, struct device_attribute *attr,
 	return rc;
 }
 
-static DEVICE_ATTR(use_diag, 0644, dasd_use_diag_show, dasd_use_diag_store);
+static
+DEVICE_ATTR(use_diag, 0644, dasd_use_diag_show, dasd_use_diag_store);
 
 static ssize_t
-dasd_discipline_show(struct device *dev, struct device_attribute *attr,
-		     char *buf)
+dasd_discipline_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct dasd_devmap *devmap;
 	char *dname;
@@ -861,6 +834,7 @@ static struct attribute_group dasd_attr_group = {
 	.attrs = dasd_attrs,
 };
 
+
 /*
  * Return copy of the device unique identifier.
  */
@@ -880,52 +854,21 @@ dasd_get_uid(struct ccw_device *cdev, struct dasd_uid *uid)
 
 /*
  * Register the given device unique identifier into devmap struct.
- * In addition check if the related storage server subsystem ID is already
- * contained in the dasd_server_ssid_list. If subsystem ID is not contained,
- * create new entry.
- * Return 0 if server was already in serverlist,
- *	  1 if the server was added successful
- *	 <0 in case of error.
  */
 int
 dasd_set_uid(struct ccw_device *cdev, struct dasd_uid *uid)
 {
 	struct dasd_devmap *devmap;
-	struct dasd_server_ssid_map *srv, *tmp;
 
 	devmap = dasd_find_busid(cdev->dev.bus_id);
 	if (IS_ERR(devmap))
 		return PTR_ERR(devmap);
-
-	/* generate entry for server_ssid_map */
-	srv = (struct dasd_server_ssid_map *)
-		kzalloc(sizeof(struct dasd_server_ssid_map), GFP_KERNEL);
-	if (!srv)
-		return -ENOMEM;
-	strncpy(srv->sid.vendor, uid->vendor, sizeof(srv->sid.vendor) - 1);
-	strncpy(srv->sid.serial, uid->serial, sizeof(srv->sid.serial) - 1);
-	srv->sid.ssid = uid->ssid;
-
-	/* server is already contained ? */
 	spin_lock(&dasd_devmap_lock);
 	devmap->uid = *uid;
-	list_for_each_entry(tmp, &dasd_server_ssid_list, list) {
-		if (!memcmp(&srv->sid, &tmp->sid,
-			    sizeof(struct system_id))) {
-			kfree(srv);
-			srv = NULL;
-			break;
-		}
-	}
-
-	/* add servermap to serverlist */
-	if (srv)
-		list_add(&srv->list, &dasd_server_ssid_list);
 	spin_unlock(&dasd_devmap_lock);
-
-	return (srv ? 1 : 0);
+	return 0;
 }
-EXPORT_SYMBOL_GPL(dasd_set_uid);
+EXPORT_SYMBOL(dasd_set_uid);
 
 /*
  * Return value of the specified feature.
@@ -937,7 +880,7 @@ dasd_get_feature(struct ccw_device *cdev, int feature)
 
 	devmap = dasd_find_busid(cdev->dev.bus_id);
 	if (IS_ERR(devmap))
-		return PTR_ERR(devmap);
+		return (int) PTR_ERR(devmap);
 
 	return ((devmap->features & feature) != 0);
 }
@@ -953,7 +896,7 @@ dasd_set_feature(struct ccw_device *cdev, int feature, int flag)
 
 	devmap = dasd_find_busid(cdev->dev.bus_id);
 	if (IS_ERR(devmap))
-		return PTR_ERR(devmap);
+		return (int) PTR_ERR(devmap);
 
 	spin_lock(&dasd_devmap_lock);
 	if (flag)
@@ -989,10 +932,8 @@ dasd_devmap_init(void)
 	dasd_max_devindex = 0;
 	for (i = 0; i < 256; i++)
 		INIT_LIST_HEAD(&dasd_hashlists[i]);
-
-	/* Initialize servermap structure. */
-	INIT_LIST_HEAD(&dasd_server_ssid_list);
 	return 0;
+
 }
 
 void

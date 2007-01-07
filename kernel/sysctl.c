@@ -18,6 +18,7 @@
  *  Removed it and replaced it with older style, 03/23/00, Bill Wendling
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
@@ -59,7 +60,6 @@ extern int proc_nr_files(ctl_table *table, int write, struct file *filp,
 extern int C_A_D;
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
-extern int sysctl_panic_on_oom;
 extern int max_threads;
 extern int sysrq_enabled;
 extern int core_uses_pid;
@@ -73,7 +73,6 @@ extern int printk_ratelimit_burst;
 extern int pid_max_min, pid_max_max;
 extern int sysctl_drop_caches;
 extern int percpu_pagelist_fraction;
-extern int compat_log;
 
 #if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_X86)
 int unknown_nmi_panic;
@@ -83,15 +82,16 @@ extern int proc_unknown_nmi_panic(ctl_table *, int, struct file *,
 
 extern unsigned int vdso_enabled, vdso_populate;
 
-int exec_shield = (1<<0);
+int exec_shield = (1<<3) | (1<<0);
 /* exec_shield is a bitmask:
           0: off; vdso at STACK_TOP, 1 page below TASK_SIZE
    (1<<0) 1: on [also on if !=0]
-   (1<<1) 2: force noexecstack regardless of PT_GNU_STACK
-   The old settings
+   (1<<1) 2: noexecstack by default
    (1<<2) 4: vdso just below .text of main (unless too low)
    (1<<3) 8: vdso just below .text of PT_INTERP (unless too low)
-   are ignored because the vdso is placed completely randomly
+Yes, vdso placement is overloaded here; but exec_shield off
+is a strong incentive to place vdso at STACK_TOP, so the bit
+for vdso just below .text comes along for the ride.
 */
 
 static int __init setup_exec_shield(char *str)
@@ -156,10 +156,6 @@ extern int acct_parm[];
 extern int no_unaligned_warning;
 #endif
 
-#ifdef CONFIG_RT_MUTEXES
-extern int max_lock_depth;
-#endif
-
 static int parse_table(int __user *, int, void __user *, size_t __user *, void __user *, size_t,
 		       ctl_table *, void **);
 static int proc_doutsstring(ctl_table *table, int write, struct file *filp,
@@ -171,6 +167,7 @@ static struct ctl_table_header root_table_header =
 
 static ctl_table kern_table[];
 static ctl_table vm_table[];
+static ctl_table proc_table[];
 static ctl_table fs_table[];
 static ctl_table debug_table[];
 static ctl_table dev_table[];
@@ -178,7 +175,7 @@ extern ctl_table random_table[];
 #ifdef CONFIG_UNIX98_PTYS
 extern ctl_table pty_table[];
 #endif
-#ifdef CONFIG_INOTIFY_USER
+#ifdef CONFIG_INOTIFY
 extern ctl_table inotify_table[];
 #endif
 
@@ -229,6 +226,12 @@ static ctl_table root_table[] = {
 		.child		= net_table,
 	},
 #endif
+	{
+		.ctl_name	= CTL_PROC,
+		.procname	= "proc",
+		.mode		= 0555,
+		.child		= proc_table,
+	},
 	{
 		.ctl_name	= CTL_FS,
 		.procname	= "fs",
@@ -459,7 +462,7 @@ static ctl_table kern_table[] = {
 		.strategy	= &sysctl_string,
 	},
 #endif
-#if defined(CONFIG_HOTPLUG) && defined(CONFIG_NET)
+#ifdef CONFIG_HOTPLUG
 	{
 		.ctl_name	= KERN_HOTPLUG,
 		.procname	= "hotplug",
@@ -753,27 +756,6 @@ static ctl_table kern_table[] = {
 		.proc_handler	= &proc_dointvec,
 	},
 #endif
-#ifdef CONFIG_COMPAT
-	{
-		.ctl_name	= KERN_COMPAT_LOG,
-		.procname	= "compat-log",
-		.data		= &compat_log,
-		.maxlen		= sizeof (int),
-	 	.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-#endif
-#ifdef CONFIG_RT_MUTEXES
-	{
-		.ctl_name	= KERN_MAX_LOCK_DEPTH,
-		.procname	= "max_lock_depth",
-		.data		= &max_lock_depth,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-#endif
-
 	{ .ctl_name = 0 }
 };
 
@@ -789,14 +771,6 @@ static ctl_table vm_table[] = {
 		.procname	= "overcommit_memory",
 		.data		= &sysctl_overcommit_memory,
 		.maxlen		= sizeof(sysctl_overcommit_memory),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-	{
-		.ctl_name	= VM_PANIC_ON_OOM,
-		.procname	= "panic_on_oom",
-		.data		= &sysctl_panic_on_oom,
-		.maxlen		= sizeof(sysctl_panic_on_oom),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
@@ -1005,40 +979,19 @@ static ctl_table vm_table[] = {
 		.extra1		= &zero,
 	},
 	{
-		.ctl_name	= VM_MIN_UNMAPPED,
-		.procname	= "min_unmapped_ratio",
-		.data		= &sysctl_min_unmapped_ratio,
-		.maxlen		= sizeof(sysctl_min_unmapped_ratio),
+		.ctl_name	= VM_ZONE_RECLAIM_INTERVAL,
+		.procname	= "zone_reclaim_interval",
+		.data		= &zone_reclaim_interval,
+		.maxlen		= sizeof(zone_reclaim_interval),
 		.mode		= 0644,
-		.proc_handler	= &sysctl_min_unmapped_ratio_sysctl_handler,
-		.strategy	= &sysctl_intvec,
-		.extra1		= &zero,
-		.extra2		= &one_hundred,
-	},
-	{
-		.ctl_name	= VM_MIN_SLAB,
-		.procname	= "min_slab_ratio",
-		.data		= &sysctl_min_slab_ratio,
-		.maxlen		= sizeof(sysctl_min_slab_ratio),
-		.mode		= 0644,
-		.proc_handler	= &sysctl_min_slab_ratio_sysctl_handler,
-		.strategy	= &sysctl_intvec,
-		.extra1		= &zero,
-		.extra2		= &one_hundred,
+		.proc_handler	= &proc_dointvec_jiffies,
+		.strategy	= &sysctl_jiffies,
 	},
 #endif
-#ifdef CONFIG_X86_32
-	{
-		.ctl_name	= VM_VDSO_ENABLED,
-		.procname	= "vdso_enabled",
-		.data		= &vdso_enabled,
-		.maxlen		= sizeof(vdso_enabled),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-		.strategy	= &sysctl_intvec,
-		.extra1		= &zero,
-	},
-#endif
+	{ .ctl_name = 0 }
+};
+
+static ctl_table proc_table[] = {
 	{ .ctl_name = 0 }
 };
 
@@ -1148,7 +1101,7 @@ static ctl_table fs_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_doulongvec_minmax,
 	},
-#ifdef CONFIG_INOTIFY_USER
+#ifdef CONFIG_INOTIFY
 	{
 		.ctl_name	= FS_INOTIFY,
 		.procname	= "inotify",

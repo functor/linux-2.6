@@ -44,6 +44,7 @@
  *************************************************************************/
 
 #include <linux/pktcdvd.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -348,7 +349,7 @@ static int pkt_generic_packet(struct pktcdvd_device *pd, struct packet_command *
 	char sense[SCSI_SENSE_BUFFERSIZE];
 	request_queue_t *q;
 	struct request *rq;
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	int err = 0;
 
 	q = bdev_get_queue(pd->bdev);
@@ -2577,19 +2578,19 @@ static int pkt_ctl_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	case PKT_CTRL_CMD_SETUP:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+		mutex_lock(&ctl_mutex);
 		ret = pkt_setup_dev(&ctrl_cmd);
 		mutex_unlock(&ctl_mutex);
 		break;
 	case PKT_CTRL_CMD_TEARDOWN:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+		mutex_lock(&ctl_mutex);
 		ret = pkt_remove_dev(&ctrl_cmd);
 		mutex_unlock(&ctl_mutex);
 		break;
 	case PKT_CTRL_CMD_STATUS:
-		mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+		mutex_lock(&ctl_mutex);
 		pkt_get_status(&ctrl_cmd);
 		mutex_unlock(&ctl_mutex);
 		break;
@@ -2611,6 +2612,7 @@ static struct file_operations pkt_ctl_fops = {
 static struct miscdevice pkt_misc = {
 	.minor 		= MISC_DYNAMIC_MINOR,
 	.name  		= "pktcdvd",
+	.devfs_name 	= "pktcdvd/control",
 	.fops  		= &pkt_ctl_fops
 };
 

@@ -4,7 +4,6 @@
  * and format the required data.
  */
 
-#include <linux/crypto.h>
 #include <linux/sched.h> 
 #include <linux/stddef.h>
 #include <linux/errno.h> 
@@ -71,7 +70,5 @@ int main(void)
 	BLANK();
 	DEFINE(TSS_ist, offsetof(struct tss_struct, ist));
 #endif
-	BLANK();
-	DEFINE(crypto_tfm_ctx_offset, offsetof(struct crypto_tfm, __crt_ctx));
 	return 0;
 }

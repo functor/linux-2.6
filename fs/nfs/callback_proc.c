@@ -5,25 +5,25 @@
  *
  * NFSv4 callback procedures
  */
+#include <linux/config.h>
 #include <linux/nfs4.h>
 #include <linux/nfs_fs.h>
 #include "nfs4_fs.h"
 #include "callback.h"
 #include "delegation.h"
-#include "internal.h"
 
 #define NFSDBG_FACILITY NFSDBG_CALLBACK
  
 unsigned nfs4_callback_getattr(struct cb_getattrargs *args, struct cb_getattrres *res)
 {
-	struct nfs_client *clp;
+	struct nfs4_client *clp;
 	struct nfs_delegation *delegation;
 	struct nfs_inode *nfsi;
 	struct inode *inode;
 	
 	res->bitmap[0] = res->bitmap[1] = 0;
 	res->status = htonl(NFS4ERR_BADHANDLE);
-	clp = nfs_find_client(args->addr, 4);
+	clp = nfs4_find_client(&args->addr->sin_addr);
 	if (clp == NULL)
 		goto out;
 	inode = nfs_delegation_find_inode(clp, &args->fh);
@@ -49,7 +49,7 @@ out_iput:
 	up_read(&nfsi->rwsem);
 	iput(inode);
 out_putclient:
-	nfs_put_client(clp);
+	nfs4_put_client(clp);
 out:
 	dprintk("%s: exit with status = %d\n", __FUNCTION__, ntohl(res->status));
 	return res->status;
@@ -57,12 +57,12 @@ out:
 
 unsigned nfs4_callback_recall(struct cb_recallargs *args, void *dummy)
 {
-	struct nfs_client *clp;
+	struct nfs4_client *clp;
 	struct inode *inode;
 	unsigned res;
 	
 	res = htonl(NFS4ERR_BADHANDLE);
-	clp = nfs_find_client(args->addr, 4);
+	clp = nfs4_find_client(&args->addr->sin_addr);
 	if (clp == NULL)
 		goto out;
 	inode = nfs_delegation_find_inode(clp, &args->fh);
@@ -81,7 +81,7 @@ unsigned nfs4_callback_recall(struct cb_recallargs *args, void *dummy)
 	}
 	iput(inode);
 out_putclient:
-	nfs_put_client(clp);
+	nfs4_put_client(clp);
 out:
 	dprintk("%s: exit with status = %d\n", __FUNCTION__, ntohl(res));
 	return res;

@@ -33,6 +33,7 @@
 // #define	DEBUG			// error path messages, extra info
 // #define	VERBOSE			// more; success messages
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/init.h>
@@ -520,18 +521,6 @@ static int unlink_urbs (struct usbnet *dev, struct sk_buff_head *q)
 	spin_unlock_irqrestore (&q->lock, flags);
 	return count;
 }
-
-// Flush all pending rx urbs
-// minidrivers may need to do this when the MTU changes
-
-void usbnet_unlink_rx_urbs(struct usbnet *dev)
-{
-	if (netif_running(dev->net)) {
-		(void) unlink_urbs (dev, &dev->rxq);
-		tasklet_schedule(&dev->bh);
-	}
-}
-EXPORT_SYMBOL_GPL(usbnet_unlink_rx_urbs);
 
 
 /*-------------------------------------------------------------------------*/

@@ -370,7 +370,8 @@ MODULE_PARM_DESC(mem, "Memory base address(es)");
 MODULE_DESCRIPTION("Ansel AC3200 EISA ethernet driver");
 MODULE_LICENSE("GPL");
 
-int __init init_module(void)
+int
+init_module(void)
 {
 	struct net_device *dev;
 	int this_dev, found = 0;

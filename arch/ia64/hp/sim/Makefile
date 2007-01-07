@@ -14,5 +14,3 @@ obj-$(CONFIG_HP_SIMETH)	+= simeth.o
 obj-$(CONFIG_HP_SIMSERIAL) += simserial.o
 obj-$(CONFIG_HP_SIMSERIAL_CONSOLE) += hpsim_console.o
 obj-$(CONFIG_HP_SIMSCSI) += simscsi.o
-obj-$(CONFIG_XEN) += simserial.o
-obj-$(CONFIG_XEN) += hpsim_console.o

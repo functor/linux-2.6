@@ -22,6 +22,7 @@
  * 06/24/99 W.Drummond	added boot_cpu_data.
  * 05/28/05 Z. Menyhart	Dynamic stride size for "flush_icache_range()"
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 
@@ -35,7 +36,7 @@
 #include <linux/seq_file.h>
 #include <linux/string.h>
 #include <linux/threads.h>
-#include <linux/screen_info.h>
+#include <linux/tty.h>
 #include <linux/dmi.h>
 #include <linux/serial.h>
 #include <linux/serial_core.h>
@@ -60,10 +61,6 @@
 #include <asm/system.h>
 #include <asm/unistd.h>
 #include <asm/system.h>
-#ifdef CONFIG_XEN
-#include <asm/hypervisor.h>
-#endif
-#include <linux/dma-mapping.h>
 
 #if defined(CONFIG_SMP) && (IA64_CPU_SIZE > PAGE_SIZE)
 # error "struct cpuinfo_ia64 too big!"
@@ -72,22 +69,6 @@
 #ifdef CONFIG_SMP
 unsigned long __per_cpu_offset[NR_CPUS];
 EXPORT_SYMBOL(__per_cpu_offset);
-#endif
-
-#ifdef CONFIG_XEN
-static int
-xen_panic_event(struct notifier_block *this, unsigned long event, void *ptr)
-{
-	HYPERVISOR_shutdown(SHUTDOWN_crash);
-	/* we're never actually going to get here... */
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block xen_panic_block = {
-	.notifier_call	= xen_panic_event,
-	.next		= NULL,
-	.priority	= 0	/* try to go last */
-};
 #endif
 
 extern void ia64_setup_printk_clock(void);
@@ -196,69 +177,21 @@ filter_rsvd_memory (unsigned long start, unsigned long end, void *arg)
 	return 0;
 }
 
-static int __init
-rsvd_region_cmp(struct rsvd_region *lhs, struct rsvd_region *rhs)
-{
-	if (lhs->start > rhs->start)
-		return 1;
-	if (lhs->start < rhs->start)
-		return -1;
-
-	if (lhs->end > rhs->end)
-		return 1;
-	if (lhs->end < rhs->end)
-		return -1;
-
-	return 0;
-}
-
 static void __init
 sort_regions (struct rsvd_region *rsvd_region, int max)
 {
-	int num = max;
 	int j;
 
 	/* simple bubble sorting */
 	while (max--) {
 		for (j = 0; j < max; ++j) {
-			if (rsvd_region_cmp(&rsvd_region[j],
-					    &rsvd_region[j + 1]) > 0) {
+			if (rsvd_region[j].start > rsvd_region[j+1].start) {
 				struct rsvd_region tmp;
 				tmp = rsvd_region[j];
 				rsvd_region[j] = rsvd_region[j + 1];
 				rsvd_region[j + 1] = tmp;
 			}
 		}
-	}
-
-	for (j = 0; j < num - 1; j++) {
-		int k;
-		unsigned long start = rsvd_region[j].start;
-		unsigned long end = rsvd_region[j].end;
-		int collapsed;
-		
-		for (k = j + 1; k < num; k++) {
-			BUG_ON(start > rsvd_region[k].start);
-			if (end < rsvd_region[k].start) {
-				k--;
-				break;
-			}
-			end = max(end, rsvd_region[k].end);
-		}
-		if (k == num)
-			k--;
-		rsvd_region[j].end = end;
-		collapsed = k - j;
-		num -= collapsed;
-		for (k = j + 1; k < num; k++) {
-			rsvd_region[k] = rsvd_region[k + collapsed];
-		}
-	}
-
-	num_rsvd_regions = num;
-	for (j = 0; j < num; j++) {
-		printk("rsvd_region[%d]: [0x%016lx, 0x%06lx)\n",
-		       j, rsvd_region[j].start, rsvd_region[j].end);
 	}
 }
 
@@ -310,14 +243,6 @@ reserve_memory (void)
 	rsvd_region[n].end   = (unsigned long) ia64_imva(_end);
 	n++;
 
-#ifdef CONFIG_XEN
-	if (is_running_on_xen()) {
-		rsvd_region[n].start = (unsigned long)__va((HYPERVISOR_shared_info->arch.start_info_pfn << PAGE_SHIFT));
-		rsvd_region[n].end   = rsvd_region[n].start + PAGE_SIZE;
-		n++;
- 	}
-#endif
-
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (ia64_boot_param->initrd_start) {
 		rsvd_region[n].start = (unsigned long)__va(ia64_boot_param->initrd_start);
@@ -335,7 +260,6 @@ reserve_memory (void)
 	n++;
 
 	num_rsvd_regions = n;
-	BUG_ON(IA64_MAX_RSVD_REGIONS + 1 < n);
 
 	sort_regions(rsvd_region, num_rsvd_regions);
 }
@@ -409,16 +333,6 @@ early_console_setup (char *cmdline)
 {
 	int earlycons = 0;
 
-#ifdef CONFIG_XEN
-#ifndef CONFIG_IA64_HP_SIM
-	if (is_running_on_xen()) {
-		extern struct console hpsim_cons;
-		hpsim_cons.flags |= CON_BOOT;
-		register_console(&hpsim_cons);
-		earlycons++;
-	}
-#endif
-#endif
 #ifdef CONFIG_SERIAL_SGI_L1_CONSOLE
 	{
 		extern int sn_serial_console_early_setup(void);
@@ -487,14 +401,6 @@ void __init
 setup_arch (char **cmdline_p)
 {
 	unw_init();
-
-#ifdef CONFIG_XEN
-	if (is_running_on_xen()) {
-		setup_xen_features();
-		/* Register a call for panic conditions. */
-		atomic_notifier_chain_register(&panic_notifier_list, &xen_panic_block);
-	}
-#endif
 
 	ia64_patch_vtop((u64) __start___vtop_patchlist, (u64) __end___vtop_patchlist);
 
@@ -572,23 +478,6 @@ setup_arch (char **cmdline_p)
 			conswitchp = &vga_con;
 # endif
 	}
-#ifdef CONFIG_XEN
-	if (is_running_on_xen()) {
-		shared_info_t *s = HYPERVISOR_shared_info;
-
-		xen_start_info = __va(s->arch.start_info_pfn << PAGE_SHIFT);
-
-		printk("Running on Xen! start_info_pfn=0x%lx nr_pages=%ld "
-		       "flags=0x%x\n", s->arch.start_info_pfn,
-		       xen_start_info->nr_pages, xen_start_info->flags);
-
-		if (!is_initial_xendomain()) {
-#if !defined(CONFIG_VT) || !defined(CONFIG_DUMMY_CONSOLE)
-			conswitchp = NULL;
-#endif
-		}
-	}
-#endif
 #endif
 
 	/* enable IA-64 Machine Check Abort Handling unless disabled */
@@ -597,9 +486,6 @@ setup_arch (char **cmdline_p)
 
 	platform_setup(cmdline_p);
 	paging_init();
-#ifdef CONFIG_XEN
-	contiguous_bitmap_init(max_pfn);
-#endif
 }
 
 /*
@@ -984,15 +870,6 @@ cpu_init (void)
 	/* size of physical stacked register partition plus 8 bytes: */
 	__get_cpu_var(ia64_phys_stacked_size_p8) = num_phys_stacked*8 + 8;
 	platform_cpu_init();
-
-#ifdef CONFIG_XEN
-	/* Need to be moved into platform_cpu_init later */
-	if (is_running_on_xen()) {
-		extern void xen_smp_intr_init(void);
-		xen_smp_intr_init();
-	}
-#endif
-
 	pm_idle = default_idle;
 }
 

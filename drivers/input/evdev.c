@@ -78,19 +78,14 @@ static int evdev_fasync(int fd, struct file *file, int on)
 {
 	int retval;
 	struct evdev_list *list = file->private_data;
-
 	retval = fasync_helper(fd, file, on, &list->fasync);
-
 	return retval < 0 ? retval : 0;
 }
 
-static int evdev_flush(struct file *file, fl_owner_t id)
+static int evdev_flush(struct file * file)
 {
 	struct evdev_list *list = file->private_data;
-
-	if (!list->evdev->exist)
-		return -ENODEV;
-
+	if (!list->evdev->exist) return -ENODEV;
 	return input_flush_device(&list->evdev->handle, file);
 }
 
@@ -127,9 +122,13 @@ static int evdev_open(struct inode * inode, struct file * file)
 {
 	struct evdev_list *list;
 	int i = iminor(inode) - EVDEV_MINOR_BASE;
+	int accept_err;
 
 	if (i >= EVDEV_MINORS || !evdev_table[i] || !evdev_table[i]->exist)
 		return -ENODEV;
+
+	if ((accept_err = input_accept_process(&(evdev_table[i]->handle), file)))
+		return accept_err;
 
 	if (!(list = kzalloc(sizeof(struct evdev_list), GFP_KERNEL)))
 		return -ENOMEM;
@@ -256,7 +255,7 @@ static ssize_t evdev_write(struct file * file, const char __user * buffer, size_
 
 		if (evdev_event_from_user(buffer + retval, &event))
 			return -EFAULT;
-		input_inject_event(&list->evdev->handle, event.type, event.code, event.value);
+		input_event(list->evdev->handle.dev, event.type, event.code, event.value);
 		retval += evdev_event_size();
 	}
 
@@ -301,7 +300,6 @@ static ssize_t evdev_read(struct file * file, char __user * buffer, size_t count
 static unsigned int evdev_poll(struct file *file, poll_table *wait)
 {
 	struct evdev_list *list = file->private_data;
-
 	poll_wait(file, &list->evdev->wait, wait);
 	return ((list->head == list->tail) ? 0 : (POLLIN | POLLRDNORM)) |
 		(list->evdev->exist ? 0 : (POLLHUP | POLLERR));
@@ -424,8 +422,8 @@ static long evdev_ioctl_handler(struct file *file, unsigned int cmd,
 			if (get_user(v, ip + 1))
 				return -EFAULT;
 
-			input_inject_event(&evdev->handle, EV_REP, REP_DELAY, u);
-			input_inject_event(&evdev->handle, EV_REP, REP_PERIOD, v);
+			input_event(dev, EV_REP, REP_DELAY, u);
+			input_event(dev, EV_REP, REP_PERIOD, v);
 
 			return 0;
 

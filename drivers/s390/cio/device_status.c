@@ -9,6 +9,7 @@
  * Status accumulation and basic sense functions.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 
@@ -67,7 +68,8 @@ ccw_device_path_notoper(struct ccw_device *cdev)
 		      sch->schib.pmcw.pnom);
 
 	sch->lpm &= ~sch->schib.pmcw.pnom;
-	cdev->private->flags.doverify = 1;
+	if (cdev->private->options.pgroup)
+		cdev->private->flags.doverify = 1;
 }
 
 /*
@@ -179,7 +181,7 @@ ccw_device_accumulate_esw(struct ccw_device *cdev, struct irb *irb)
 	cdev_irb->esw.esw0.erw.auth = irb->esw.esw0.erw.auth;
 	/* Copy path verification required flag. */
 	cdev_irb->esw.esw0.erw.pvrf = irb->esw.esw0.erw.pvrf;
-	if (irb->esw.esw0.erw.pvrf)
+	if (irb->esw.esw0.erw.pvrf && cdev->private->options.pgroup)
 		cdev->private->flags.doverify = 1;
 	/* Copy concurrent sense bit. */
 	cdev_irb->esw.esw0.erw.cons = irb->esw.esw0.erw.cons;
@@ -353,7 +355,7 @@ ccw_device_accumulate_basic_sense(struct ccw_device *cdev, struct irb *irb)
 	}
 	/* Check if path verification is required. */
 	if (ccw_device_accumulate_esw_valid(irb) &&
-	    irb->esw.esw0.erw.pvrf)
+	    irb->esw.esw0.erw.pvrf && cdev->private->options.pgroup) 
 		cdev->private->flags.doverify = 1;
 }
 

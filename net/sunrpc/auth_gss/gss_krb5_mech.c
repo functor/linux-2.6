@@ -129,8 +129,9 @@ gss_import_sec_context_kerberos(const void *p,
 	const void *end = (const void *)((const char *)p + len);
 	struct	krb5_ctx *ctx;
 
-	if (!(ctx = kzalloc(sizeof(*ctx), GFP_KERNEL)))
+	if (!(ctx = kmalloc(sizeof(*ctx), GFP_KERNEL)))
 		goto out_err;
+	memset(ctx, 0, sizeof(*ctx));
 
 	p = simple_get_bytes(p, end, &ctx->initiate, sizeof(ctx->initiate));
 	if (IS_ERR(p))
@@ -168,7 +169,7 @@ gss_import_sec_context_kerberos(const void *p,
 	}
 
 	ctx_id->internal_ctx_id = ctx;
-	dprintk("RPC:      Successfully imported new context.\n");
+	dprintk("RPC:      Succesfully imported new context.\n");
 	return 0;
 
 out_err_free_key2:

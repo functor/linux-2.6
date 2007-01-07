@@ -13,6 +13,7 @@
  */
 
 #include <linux/types.h>
+#include <asm/processor.h>
 #include <asm/ptrace.h>
 #include <asm/page.h>
 

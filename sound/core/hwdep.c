@@ -158,7 +158,6 @@ static int snd_hwdep_release(struct inode *inode, struct file * file)
 {
 	int err = -ENXIO;
 	struct snd_hwdep *hw = file->private_data;
-	struct module *mod = hw->card->module;
 	mutex_lock(&hw->open_mutex);
 	if (hw->ops.release) {
 		err = hw->ops.release(hw, file);
@@ -168,7 +167,7 @@ static int snd_hwdep_release(struct inode *inode, struct file * file)
 		hw->used--;
 	snd_card_file_remove(hw->card, file);
 	mutex_unlock(&hw->open_mutex);
-	module_put(mod);
+	module_put(hw->card->module);
 	return err;
 }
 
@@ -487,6 +486,7 @@ static void __init snd_hwdep_proc_init(void)
 	struct snd_info_entry *entry;
 
 	if ((entry = snd_info_create_module_entry(THIS_MODULE, "hwdep", NULL)) != NULL) {
+		entry->c.text.read_size = PAGE_SIZE;
 		entry->c.text.read = snd_hwdep_proc_read;
 		if (snd_info_register(entry) < 0) {
 			snd_info_free_entry(entry);

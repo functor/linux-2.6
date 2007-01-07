@@ -30,6 +30,7 @@
  * IN THE SOFTWARE.
  */
 
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -38,7 +39,6 @@
 #include <linux/interrupt.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
-#include <linux/vt.h>
 #include <linux/serial.h>
 #include <linux/major.h>
 #include <linux/ptrace.h>
@@ -49,7 +49,6 @@
 #include <linux/console.h>
 #include <linux/bootmem.h>
 #include <linux/sysrq.h>
-#include <linux/screen_info.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/uaccess.h>
@@ -58,27 +57,19 @@
 #include <asm/hypervisor.h>
 #include <xen/evtchn.h>
 #include <xen/xencons.h>
-#include <xen/xenbus.h>
 
 /*
  * Modes:
  *  'xencons=off'  [XC_OFF]:     Console is disabled.
  *  'xencons=tty'  [XC_TTY]:     Console attached to '/dev/tty[0-9]+'.
  *  'xencons=ttyS' [XC_SERIAL]:  Console attached to '/dev/ttyS[0-9]+'.
- *  'xencons=xvc'  [XC_XVC]:     Console attached to '/dev/xvc[0-9]+'.
  *                 [XC_DEFAULT]: DOM0 -> XC_SERIAL ; all others -> XC_TTY.
  * 
  * NB. In mode XC_TTY, we create dummy consoles for tty2-63. This suppresses
  * warnings from standard distro startup scripts.
  */
-static enum { XC_OFF, XC_DEFAULT, XC_TTY, XC_SERIAL, XC_XVC } 
-    xc_mode = XC_DEFAULT;
+static enum { XC_OFF, XC_DEFAULT, XC_TTY, XC_SERIAL } xc_mode = XC_DEFAULT;
 static int xc_num = -1;
-
-/* If we are in XC_XVC mode (a virtual console at /dev/xvcX), we need to
- * comply with Lanana and use a minor under the low density serial major.
- */
-#define XEN_XVC_MINOR 187
 
 #ifdef CONFIG_MAGIC_SYSRQ
 static unsigned long sysrq_requested;
@@ -94,8 +85,6 @@ static int __init xencons_setup(char *str)
 		xc_mode = XC_SERIAL;
 	else if (!strncmp(str, "tty", 3))
 		xc_mode = XC_TTY;
-	else if (!strncmp(str, "xvc", 3))
-		xc_mode = XC_XVC;
 	else if (!strncmp(str, "off", 3))
 		xc_mode = XC_OFF;
 
@@ -106,11 +95,6 @@ static int __init xencons_setup(char *str)
 			xc_num = n;
 		break;
 	case XC_TTY:
-		n = simple_strtol(str+3, &q, 10);
-		if (q > (str + 3))
-			xc_num = n;
-		break;
-	case XC_XVC:
 		n = simple_strtol(str+3, &q, 10);
 		if (q > (str + 3))
 			xc_num = n;
@@ -198,30 +182,23 @@ static struct console kcons_info = {
 	.index	= -1,
 };
 
+#define __RETCODE 0
 static int __init xen_console_init(void)
 {
 	if (!is_running_on_xen())
-		goto out;
+		return __RETCODE;
 
-	if (is_initial_xendomain()) {
+	if (xen_start_info->flags & SIF_INITDOMAIN) {
 		if (xc_mode == XC_DEFAULT)
 			xc_mode = XC_SERIAL;
 		kcons_info.write = kcons_write_dom0;
 	} else {
-		if (!xen_start_info->console.domU.evtchn)
-			goto out;
 		if (xc_mode == XC_DEFAULT)
-			xc_mode = XC_XVC;
+			xc_mode = XC_TTY;
 		kcons_info.write = kcons_write;
 	}
 
 	switch (xc_mode) {
-	case XC_XVC:
-		strcpy(kcons_info.name, "xvc");
-		if (xc_num == -1)
-			xc_num = 0;
-		break;
-
 	case XC_SERIAL:
 		strcpy(kcons_info.name, "ttyS");
 		if (xc_num == -1)
@@ -235,15 +212,14 @@ static int __init xen_console_init(void)
 		break;
 
 	default:
-		goto out;
+		return __RETCODE;
 	}
 
 	wbuf = alloc_bootmem(wbuf_size);
 
 	register_console(&kcons_info);
 
- out:
-	return 0;
+	return __RETCODE;
 }
 console_initcall(xen_console_init);
 
@@ -271,9 +247,7 @@ void xencons_force_flush(void)
 	int sz;
 
 	/* Emergency console is synchronous, so there's nothing to flush. */
-	if (!is_running_on_xen() ||
-	    is_initial_xendomain() ||
-	    !xen_start_info->console.domU.evtchn)
+	if (xen_start_info->flags & SIF_INITDOMAIN)
 		return;
 
 	/* Spin until console data is flushed through to the daemon. */
@@ -288,45 +262,10 @@ void xencons_force_flush(void)
 }
 
 
-void dom0_init_screen_info(const struct dom0_vga_console_info *info)
-{
-	switch (info->video_type) {
-	case XEN_VGATYPE_TEXT_MODE_3:
-		screen_info.orig_video_mode = 3;
-		screen_info.orig_video_ega_bx = 3;
-		screen_info.orig_video_isVGA = 1;
-		screen_info.orig_video_lines = info->u.text_mode_3.rows;
-		screen_info.orig_video_cols = info->u.text_mode_3.columns;
-		screen_info.orig_x = info->u.text_mode_3.cursor_x;
-		screen_info.orig_y = info->u.text_mode_3.cursor_y;
-		screen_info.orig_video_points =
-			info->u.text_mode_3.font_height;
-		break;
-	case XEN_VGATYPE_VESA_LFB:
-		screen_info.orig_video_isVGA = VIDEO_TYPE_VLFB;
-		screen_info.lfb_width = info->u.vesa_lfb.width;
-		screen_info.lfb_height = info->u.vesa_lfb.height;
-		screen_info.lfb_depth = info->u.vesa_lfb.bits_per_pixel;
-		screen_info.lfb_base = info->u.vesa_lfb.lfb_base;
-		screen_info.lfb_size = info->u.vesa_lfb.lfb_size;
-		screen_info.lfb_linelength = info->u.vesa_lfb.bytes_per_line;
-		screen_info.red_size = info->u.vesa_lfb.red_size;
-		screen_info.red_pos = info->u.vesa_lfb.red_pos;
-		screen_info.green_size = info->u.vesa_lfb.green_size;
-		screen_info.green_pos = info->u.vesa_lfb.green_pos;
-		screen_info.blue_size = info->u.vesa_lfb.blue_size;
-		screen_info.blue_pos = info->u.vesa_lfb.blue_pos;
-		screen_info.rsvd_size = info->u.vesa_lfb.rsvd_size;
-		screen_info.rsvd_pos = info->u.vesa_lfb.rsvd_pos;
-		break;
-	}
-}
-
-
 /******************** User-space console driver (/dev/console) ************/
 
 #define DRV(_d)         (_d)
-#define DUMMY_TTY(_tty) ((xc_mode != XC_SERIAL) && (xc_mode != XC_XVC) && \
+#define DUMMY_TTY(_tty) ((xc_mode != XC_SERIAL) &&		\
 			 ((_tty)->index != (xc_num - 1)))
 
 static struct termios *xencons_termios[MAX_NR_CONSOLES];
@@ -379,7 +318,7 @@ static void __xencons_tx_flush(void)
 	int sent, sz, work_done = 0;
 
 	if (x_char) {
-		if (is_initial_xendomain())
+		if (xen_start_info->flags & SIF_INITDOMAIN)
 			kcons_write_dom0(NULL, &x_char, 1);
 		else
 			while (x_char)
@@ -393,7 +332,7 @@ static void __xencons_tx_flush(void)
 		sz = wp - wc;
 		if (sz > (wbuf_size - WBUF_MASK(wc)))
 			sz = wbuf_size - WBUF_MASK(wc);
-		if (is_initial_xendomain()) {
+		if (xen_start_info->flags & SIF_INITDOMAIN) {
 			kcons_write_dom0(NULL, &wbuf[WBUF_MASK(wc)], sz);
 			wc += sz;
 		} else {
@@ -643,14 +582,9 @@ static int __init xencons_init(void)
 	if (xc_mode == XC_OFF)
 		return 0;
 
-	if (!is_initial_xendomain()) {
-		rc = xencons_ring_init();
-		if (rc)
-			return rc;
-	}
+	xencons_ring_init();
 
-	xencons_driver = alloc_tty_driver(((xc_mode == XC_SERIAL) || 
-					   (xc_mode == XC_XVC)) ?
+	xencons_driver = alloc_tty_driver((xc_mode == XC_SERIAL) ?
 					  1 : MAX_NR_CONSOLES);
 	if (xencons_driver == NULL)
 		return -ENOMEM;
@@ -670,11 +604,6 @@ static int __init xencons_init(void)
 		DRV(xencons_driver)->name        = "ttyS";
 		DRV(xencons_driver)->minor_start = 64 + xc_num;
 		DRV(xencons_driver)->name_base   = 0 + xc_num;
-	} else if (xc_mode == XC_XVC) {
-		DRV(xencons_driver)->name        = "xvc";
-		DRV(xencons_driver)->major       = 250; /* FIXME: until lanana approves for 204:187 */
-		DRV(xencons_driver)->minor_start = XEN_XVC_MINOR;
-		DRV(xencons_driver)->name_base   = xc_num;
 	} else {
 		DRV(xencons_driver)->name        = "tty";
 		DRV(xencons_driver)->minor_start = 1;
@@ -693,7 +622,7 @@ static int __init xencons_init(void)
 		return rc;
 	}
 
-	if (is_initial_xendomain()) {
+	if (xen_start_info->flags & SIF_INITDOMAIN) {
 		xencons_priv_irq = bind_virq_to_irqhandler(
 			VIRQ_CONSOLE,
 			0,
@@ -706,20 +635,6 @@ static int __init xencons_init(void)
 
 	printk("Xen virtual console successfully installed as %s%d\n",
 	       DRV(xencons_driver)->name, xc_num);
-
-        /* Don't need to check about graphical fb for domain 0 */
-        if (is_initial_xendomain())
-	  return 0;
-
-	rc = 0;
-	if (xenbus_scanf(XBT_NIL, "console", "use_graphics", "%d", &rc) < 0)
-		printk(KERN_ERR "Unable to read console/use_graphics\n");
-	if (rc == 0) {
-               /* FIXME: this is ugly */
-	       unregister_console(&kcons_info);
-	       kcons_info.flags |= CON_CONSDEV;
-	       register_console(&kcons_info);
-	}
 
 	return 0;
 }

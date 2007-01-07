@@ -57,7 +57,7 @@
 #include <linux/time.h>
 
 struct kstat {
-	u64		ino;
+	unsigned long	ino;
 	dev_t		dev;
 	umode_t		mode;
 	unsigned int	nlink;

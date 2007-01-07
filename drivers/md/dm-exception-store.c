@@ -16,8 +16,6 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 
-#define DM_MSG_PREFIX "snapshots"
-
 /*-----------------------------------------------------------------
  * Persistent snapshots, by persistent we mean that the snapshot
  * will survive a reboot.

@@ -2,11 +2,19 @@
 #define __ASM_SH64_SHMPARAM_H
 
 /*
- * Set this to a sensible safe default, we'll work out the specifics for the
- * align mask from the cache descriptor at run-time.
+ * This file is subject to the terms and conditions of the GNU General Public
+ * License.  See the file "COPYING" in the main directory of this archive
+ * for more details.
+ *
+ * include/asm-sh64/shmparam.h
+ *
+ * Copyright (C) 2000, 2001  Paolo Alberelli
+ *
  */
-#define	SHMLBA	0x4000
 
-#define __ARCH_FORCE_SHMLBA
+#include <asm/cache.h>
+
+/* attach addr a multiple of this */
+#define	SHMLBA	(cpu_data->dcache.sets * L1_CACHE_BYTES)
 
 #endif /* __ASM_SH64_SHMPARAM_H */

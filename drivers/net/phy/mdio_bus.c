@@ -13,6 +13,7 @@
  * option) any later version.
  *
  */
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -159,7 +160,6 @@ struct bus_type mdio_bus_type = {
 	.suspend	= mdio_bus_suspend,
 	.resume		= mdio_bus_resume,
 };
-EXPORT_SYMBOL(mdio_bus_type);
 
 int __init mdio_bus_init(void)
 {

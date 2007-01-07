@@ -2,8 +2,6 @@
  * linux/arch/i386/kernel/sysenter.c
  *
  * (C) Copyright 2002 Linus Torvalds
- * Portions based on the vdso-randomization code from exec-shield:
- * Copyright(C) 2005-2006, Red Hat, Inc., Ingo Molnar
  *
  * This file contains the needed initializations to support sysenter.
  */
@@ -17,10 +15,8 @@
 #include <linux/elf.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
-#include <linux/module.h>
-#include <linux/vs_base.h>
-#include <linux/vs_memory.h>
 
+#include <asm/a.out.h>
 #include <asm/cpufeature.h>
 #include <asm/msr.h>
 #include <asm/pgtable.h>
@@ -29,23 +25,6 @@
 #ifdef CONFIG_XEN
 #include <xen/interface/callback.h>
 #endif
-
-/*
- * Should the kernel map a VDSO page into processes and pass its
- * address down to glibc upon exec()?
- */
-unsigned int __read_mostly vdso_enabled = 1;
-
-EXPORT_SYMBOL_GPL(vdso_enabled);
-
-static int __init vdso_setup(char *s)
-{
-	vdso_enabled = simple_strtoul(s, NULL, 0);
-
-	return 1;
-}
-
-__setup("vdso=", vdso_setup);
 
 extern asmlinkage void sysenter_entry(void);
 
@@ -75,11 +54,13 @@ void enable_sep_cpu(void)
  */
 extern const char vsyscall_int80_start, vsyscall_int80_end;
 extern const char vsyscall_sysenter_start, vsyscall_sysenter_end;
-static void *syscall_page;
+static struct page *sysenter_pages[2];
 
 int __init sysenter_setup(void)
 {
-	syscall_page = (void *)get_zeroed_page(GFP_ATOMIC);
+	void *page = (void *)get_zeroed_page(GFP_ATOMIC);
+
+	sysenter_pages[0] = virt_to_page(page);
 
 #ifdef CONFIG_XEN
 	if (boot_cpu_has(X86_FEATURE_SEP)) {
@@ -93,111 +74,84 @@ int __init sysenter_setup(void)
 	}
 #endif
 
-#ifdef CONFIG_COMPAT_VDSO
-	__set_fixmap(FIX_VDSO, __pa(syscall_page), PAGE_READONLY);
-	printk("Compat vDSO mapped to %08lx.\n", __fix_to_virt(FIX_VDSO));
-#else
-	/*
-	 * In the non-compat case the ELF coredumping code needs the fixmap:
-	 */
-#ifdef CONFIG_XEN
-	__set_fixmap(FIX_VDSO, virt_to_machine(syscall_page), PAGE_KERNEL_RO);
-#else
-	__set_fixmap(FIX_VDSO, __pa(syscall_page), PAGE_KERNEL_RO);
-#endif
-#endif
-
-	if (!boot_cpu_has(X86_FEATURE_SEP)) {
-		memcpy(syscall_page,
-		       &vsyscall_int80_start,
-		       &vsyscall_int80_end - &vsyscall_int80_start);
+	if (boot_cpu_has(X86_FEATURE_SEP)) {
+		memcpy(page,
+		       &vsyscall_sysenter_start,
+		       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
 		return 0;
 	}
 
-	memcpy(syscall_page,
-	       &vsyscall_sysenter_start,
-	       &vsyscall_sysenter_end - &vsyscall_sysenter_start);
+	memcpy(page,
+	       &vsyscall_int80_start,
+	       &vsyscall_int80_end - &vsyscall_int80_start);
 
 	return 0;
 }
 
-static struct page *syscall_nopage(struct vm_area_struct *vma,
-				unsigned long adr, int *type)
+extern void SYSENTER_RETURN_OFFSET;
+
+unsigned int vdso_enabled = 1;
+
+/*
+ * This is called from binfmt_elf, we create the special vma for the
+ * vDSO and insert it into the mm struct tree.
+ */
+int arch_setup_additional_pages(struct linux_binprm *bprm,
+	int executable_stack, unsigned long start_code,
+	unsigned long interp_map_address)
 {
-	struct page *p = virt_to_page(adr - vma->vm_start + syscall_page);
-	get_page(p);
-	return p;
-}
+	struct thread_info *ti = current_thread_info();
+	unsigned long addr = 0, len;
+	unsigned flags = MAP_PRIVATE;
+	int err;
 
-/* Prevent VMA merging */
-static void syscall_vma_close(struct vm_area_struct *vma)
-{
-}
+	current->mm->context.vdso = NULL;
+	if (unlikely(!vdso_enabled) || unlikely(!sysenter_pages[0]))
+		return 0;
 
-static struct vm_operations_struct syscall_vm_ops = {
-	.close = syscall_vma_close,
-	.nopage = syscall_nopage,
-};
-
-/* Defined in vsyscall-sysenter.S */
-extern void SYSENTER_RETURN;
-
-/* Setup a VMA at program startup for the vsyscall page */
-int arch_setup_additional_pages(struct linux_binprm *bprm, int exstack,
-				unsigned long start_code, unsigned long interp_map_address)
-{
-	struct vm_area_struct *vma;
-	struct mm_struct *mm = current->mm;
-	unsigned long addr;
-	int ret;
-
-	down_write(&mm->mmap_sem);
-	addr = get_unmapped_area_prot(NULL, 0, PAGE_SIZE, 0, 0, 1);
-	if (IS_ERR_VALUE(addr)) {
-		ret = addr;
-		goto up_fail;
+	/*
+	 * Map the vDSO (it will be randomized):
+	 */
+	down_write(&current->mm->mmap_sem);
+	len = PAGE_SIZE > ELF_EXEC_PAGESIZE ? PAGE_SIZE : ELF_EXEC_PAGESIZE;
+	if (0==exec_shield) { /* off; %cs limit off */
+		addr = STACK_TOP;  /* minimal interference with anybody */
+		flags = MAP_PRIVATE | MAP_FIXED;
 	}
-
-	vma = kmem_cache_zalloc(vm_area_cachep, SLAB_KERNEL);
-	if (!vma) {
-		ret = -ENOMEM;
-		goto up_fail;
+	else if ((3<<2) & exec_shield) { /* vdso just below .text */
+		addr = (((2<<2) & exec_shield) && interp_map_address) ?
+			interp_map_address : start_code;
+		/* 1MB for vm86; 64K for vm86 himem */
+		if ((0x110000 + len) <= addr) {
+			addr = (PAGE_MASK & addr) - len;
+		}
+		else { /* start_code is too low */
+			addr = 0;
+		}
 	}
-
-	vma->vm_start = addr;
-	vma->vm_end = addr + PAGE_SIZE;
-	/* MAYWRITE to allow gdb to COW and set breakpoints */
-	vma->vm_flags = VM_READ|VM_EXEC|VM_MAYREAD|VM_MAYEXEC|VM_MAYWRITE;
-	vma->vm_flags |= mm->def_flags;
-	vma->vm_page_prot = protection_map[vma->vm_flags & 7];
-	vma->vm_ops = &syscall_vm_ops;
-	vma->vm_mm = mm;
-
-	ret = insert_vm_struct(mm, vma);
-	if (unlikely(ret)) {
-		kmem_cache_free(vm_area_cachep, vma);
-		goto up_fail;
+	addr = get_unmapped_area_prot(NULL, addr, len, 0,
+				      flags, PROT_READ | PROT_EXEC);
+	if (unlikely(addr & ~PAGE_MASK)) {
+		up_write(&current->mm->mmap_sem);
+		return addr;
 	}
-
-	current->mm->context.vdso = (void *)addr;
-	current_thread_info()->sysenter_return =
-				    (void *)VDSO_SYM(&SYSENTER_RETURN);
-	vx_vmpages_inc(mm);
-up_fail:
-	up_write(&mm->mmap_sem);
-	return ret;
+	err = install_special_mapping(current->mm, addr, len,
+				      VM_DONTEXPAND | VM_READ | VM_EXEC |
+				      VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC,
+				      PAGE_READONLY_EXEC,
+				      sysenter_pages);
+	if (likely(err == 0)) {
+		current->mm->context.vdso = (void *)addr;
+		ti->sysenter_return = &SYSENTER_RETURN_OFFSET + addr;
+	}
+	up_write(&current->mm->mmap_sem);
+	return err;
 }
 
-const char *arch_vma_name(struct vm_area_struct *vma)
+#ifndef CONFIG_XEN
+int in_gate_area_no_task(unsigned long addr)
 {
-	if (vma->vm_mm && vma->vm_start == (long)vma->vm_mm->context.vdso)
-		return "[vdso]";
-	return NULL;
-}
-
-struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
-{
-	return NULL;
+	return 0;
 }
 
 int in_gate_area(struct task_struct *task, unsigned long addr)
@@ -205,7 +159,8 @@ int in_gate_area(struct task_struct *task, unsigned long addr)
 	return 0;
 }
 
-int in_gate_area_no_task(unsigned long addr)
+struct vm_area_struct *get_gate_vma(struct task_struct *tsk)
 {
-	return 0;
+	return NULL;
 }
+#endif

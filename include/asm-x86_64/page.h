@@ -1,6 +1,7 @@
 #ifndef _X86_64_PAGE_H
 #define _X86_64_PAGE_H
 
+#include <linux/config.h>
 
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
@@ -19,7 +20,7 @@
 #define EXCEPTION_STACK_ORDER 0
 #define EXCEPTION_STKSZ (PAGE_SIZE << EXCEPTION_STACK_ORDER)
 
-#define DEBUG_STACK_ORDER (EXCEPTION_STACK_ORDER + 1)
+#define DEBUG_STACK_ORDER EXCEPTION_STACK_ORDER
 #define DEBUG_STKSZ (PAGE_SIZE << DEBUG_STACK_ORDER)
 
 #define IRQSTACK_ORDER 2
@@ -135,13 +136,13 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 #define __HAVE_ARCH_GATE_AREA 1	
 
-#include <asm-generic/memory_model.h>
-#include <asm-generic/page.h>
-
 #ifndef __ASSEMBLY__
 extern int devmem_is_allowed(unsigned long pagenr);
 #endif
 
 #endif /* __KERNEL__ */
+
+#include <asm-generic/memory_model.h>
+#include <asm-generic/page.h>
 
 #endif /* _X86_64_PAGE_H */

@@ -64,6 +64,7 @@
  *		2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -104,7 +105,6 @@
 #include <net/icmp.h>
 #include <net/xfrm.h>
 #include <net/ip_mp_alg.h>
-#include <net/netevent.h>
 #ifdef CONFIG_SYSCTL
 #include <linux/sysctl.h>
 #endif
@@ -206,27 +206,21 @@ __u8 ip_tos2prio[16] = {
 struct rt_hash_bucket {
 	struct rtable	*chain;
 };
-#if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK) || \
-	defined(CONFIG_PROVE_LOCKING)
+#if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK)
 /*
  * Instead of using one spinlock for each rt_hash_bucket, we use a table of spinlocks
  * The size of this table is a power of two and depends on the number of CPUS.
- * (on lockdep we have a quite big spinlock_t, so keep the size down there)
  */
-#ifdef CONFIG_LOCKDEP
-# define RT_HASH_LOCK_SZ	256
+#if NR_CPUS >= 32
+#define RT_HASH_LOCK_SZ	4096
+#elif NR_CPUS >= 16
+#define RT_HASH_LOCK_SZ	2048
+#elif NR_CPUS >= 8
+#define RT_HASH_LOCK_SZ	1024
+#elif NR_CPUS >= 4
+#define RT_HASH_LOCK_SZ	512
 #else
-# if NR_CPUS >= 32
-#  define RT_HASH_LOCK_SZ	4096
-# elif NR_CPUS >= 16
-#  define RT_HASH_LOCK_SZ	2048
-# elif NR_CPUS >= 8
-#  define RT_HASH_LOCK_SZ	1024
-# elif NR_CPUS >= 4
-#  define RT_HASH_LOCK_SZ	512
-# else
-#  define RT_HASH_LOCK_SZ	256
-# endif
+#define RT_HASH_LOCK_SZ	256
 #endif
 
 static spinlock_t	*rt_hash_locks;
@@ -250,7 +244,7 @@ static unsigned int		rt_hash_rnd;
 
 static DEFINE_PER_CPU(struct rt_cache_stat, rt_cache_stat);
 #define RT_CACHE_STAT_INC(field) \
-	(__raw_get_cpu_var(rt_cache_stat).field++)
+	(per_cpu(rt_cache_stat, raw_smp_processor_id()).field++)
 
 static int rt_intern_hash(unsigned hash, struct rtable *rth,
 				struct rtable **res);
@@ -1126,7 +1120,6 @@ void ip_rt_redirect(u32 old_gw, u32 daddr, u32 new_gw,
 	struct rtable *rth, **rthp;
 	u32  skeys[2] = { saddr, 0 };
 	int  ikeys[2] = { dev->ifindex, 0 };
-	struct netevent_redirect netevent;
 
 	if (!in_dev)
 		return;
@@ -1218,11 +1211,6 @@ void ip_rt_redirect(u32 old_gw, u32 daddr, u32 new_gw,
 					rt_drop(rt);
 					goto do_next;
 				}
-				
-				netevent.old = &rth->u.dst;
-				netevent.new = &rt->u.dst;
-				call_netevent_notifiers(NETEVENT_REDIRECT, 
-						        &netevent);
 
 				rt_del(hash, rth);
 				if (!rt_intern_hash(hash, rt, &rt))
@@ -1459,7 +1447,6 @@ static void ip_rt_update_pmtu(struct dst_entry *dst, u32 mtu)
 		}
 		dst->metrics[RTAX_MTU-1] = mtu;
 		dst_set_expires(dst, ip_rt_mtu_expires);
-		call_netevent_notifiers(NETEVENT_PMTU_UPDATE, dst);
 	}
 }
 
@@ -1775,7 +1762,7 @@ static inline int __mkroute_input(struct sk_buff *skb,
 #endif
 	if (in_dev->cnf.no_policy)
 		rth->u.dst.flags |= DST_NOPOLICY;
-	if (out_dev->cnf.no_xfrm)
+	if (in_dev->cnf.no_xfrm)
 		rth->u.dst.flags |= DST_NOXFRM;
 	rth->fl.fl4_dst	= daddr;
 	rth->rt_dst	= daddr;

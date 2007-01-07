@@ -319,7 +319,7 @@ int diRead(struct inode *ip)
 	struct inomap *imap;
 	int block_offset;
 	int inodes_left;
-	unsigned long pageno;
+	uint pageno;
 	int rel_inode;
 
 	jfs_info("diRead: ino = %ld", ip->i_ino);
@@ -607,7 +607,7 @@ int diWrite(tid_t tid, struct inode *ip)
 	int block_offset;
 	int inodes_left;
 	struct metapage *mp;
-	unsigned long pageno;
+	uint pageno;
 	int rel_inode;
 	int dioffset;
 	struct inode *ipimap;
@@ -3122,6 +3122,7 @@ static int copy_from_dinode(struct dinode * dip, struct inode *ip)
 	ip->i_mtime.tv_nsec = le32_to_cpu(dip->di_mtime.tv_nsec);
 	ip->i_ctime.tv_sec = le32_to_cpu(dip->di_ctime.tv_sec);
 	ip->i_ctime.tv_nsec = le32_to_cpu(dip->di_ctime.tv_nsec);
+	ip->i_blksize = ip->i_sb->s_blocksize;
 	ip->i_blocks = LBLK2PBLK(ip->i_sb, le64_to_cpu(dip->di_nblocks));
 	ip->i_generation = le32_to_cpu(dip->di_gen);
 

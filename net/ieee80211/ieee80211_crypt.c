@@ -110,10 +110,11 @@ int ieee80211_register_crypto_ops(struct ieee80211_crypto_ops *ops)
 	unsigned long flags;
 	struct ieee80211_crypto_alg *alg;
 
-	alg = kzalloc(sizeof(*alg), GFP_KERNEL);
+	alg = kmalloc(sizeof(*alg), GFP_KERNEL);
 	if (alg == NULL)
 		return -ENOMEM;
 
+	memset(alg, 0, sizeof(*alg));
 	alg->ops = ops;
 
 	spin_lock_irqsave(&ieee80211_crypto_lock, flags);

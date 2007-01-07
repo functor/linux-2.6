@@ -1907,8 +1907,7 @@ static int if_readstat(u8 __user *buf, int len, int id, int channel)
 	}
 
 	for (p=buf, count=0; count < len; p++, count++) {
-		if (put_user(*card->q931_read++, p))
-			return -EFAULT;
+		put_user(*card->q931_read++, p);
 	        if (card->q931_read > card->q931_end)
 	                card->q931_read = card->q931_buf;
 	}

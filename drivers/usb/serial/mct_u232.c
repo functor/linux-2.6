@@ -64,6 +64,7 @@
  *   (via linux-usb-devel).
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -75,7 +76,7 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
+#include "usb-serial.h"
 #include "mct_u232.h"
 
 /*

@@ -149,10 +149,7 @@ static inline void wanxl_cable_intr(port_t *port)
 	printk(KERN_INFO "%s: %s%s module, %s cable%s%s\n",
 	       port->dev->name, pm, dte, cable, dsr, dcd);
 
-	if (value & STATUS_CABLE_DCD)
-		netif_carrier_on(port->dev);
-	else
-		netif_carrier_off(port->dev);
+	hdlc_set_carrier(value & STATUS_CABLE_DCD, port->dev);
 }
 
 
@@ -637,13 +634,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 
 	/* set up PLX mapping */
 	plx_phy = pci_resource_start(pdev, 0);
-
 	card->plx = ioremap_nocache(plx_phy, 0x70);
-	if (!card->plx) {
-		printk(KERN_ERR "wanxl: ioremap() failed\n");
- 		wanxl_pci_remove_one(pdev);
-		return -EFAULT;
-	}
 
 #if RESET_WHILE_LOADING
 	wanxl_reset(card);
@@ -709,12 +700,6 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 	}
 
 	mem = ioremap_nocache(mem_phy, PDM_OFFSET + sizeof(firmware));
-	if (!mem) {
-		printk(KERN_ERR "wanxl: ioremap() failed\n");
- 		wanxl_pci_remove_one(pdev);
-		return -EFAULT;
-	}
-
 	for (i = 0; i < sizeof(firmware); i += 4)
 		writel(htonl(*(u32*)(firmware + i)), mem + PDM_OFFSET + i);
 
@@ -758,7 +743,7 @@ static int __devinit wanxl_pci_init_one(struct pci_dev *pdev,
 	       pci_name(pdev), plx_phy, ramsize / 1024, mem_phy, pdev->irq);
 
 	/* Allocate IRQ */
-	if (request_irq(pdev->irq, wanxl_intr, IRQF_SHARED, "wanXL", card)) {
+	if (request_irq(pdev->irq, wanxl_intr, SA_SHIRQ, "wanXL", card)) {
 		printk(KERN_WARNING "wanXL %s: could not allocate IRQ%i.\n",
 		       pci_name(pdev), pdev->irq);
 		wanxl_pci_remove_one(pdev);

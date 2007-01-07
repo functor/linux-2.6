@@ -6,6 +6,7 @@
 #include <linux/posix-timers.h>
 #include <asm/uaccess.h>
 #include <linux/errno.h>
+#include <linux/vs_cvirt.h>
 
 static int check_clock(const clockid_t which_clock)
 {
@@ -85,19 +86,6 @@ static inline union cpu_time_count cpu_time_sub(const clockid_t which_clock,
 		a.cpu = cputime_sub(a.cpu, b.cpu);
 	}
 	return a;
-}
-
-/*
- * Divide and limit the result to res >= 1
- *
- * This is necessary to prevent signal delivery starvation, when the result of
- * the division would be rounded down to 0.
- */
-static inline cputime_t cputime_div_non_zero(cputime_t time, unsigned long div)
-{
-	cputime_t res = cputime_div(time, div);
-
-	return max_t(cputime_t, res, 1);
 }
 
 /*
@@ -496,8 +484,8 @@ static void process_timer_rebalance(struct task_struct *p,
 		BUG();
 		break;
 	case CPUCLOCK_PROF:
-		left = cputime_div_non_zero(cputime_sub(expires.cpu, val.cpu),
-				       nthreads);
+		left = cputime_div(cputime_sub(expires.cpu, val.cpu),
+				   nthreads);
 		do {
 			if (likely(!(t->flags & PF_EXITING))) {
 				ticks = cputime_add(prof_ticks(t), left);
@@ -511,8 +499,8 @@ static void process_timer_rebalance(struct task_struct *p,
 		} while (t != p);
 		break;
 	case CPUCLOCK_VIRT:
-		left = cputime_div_non_zero(cputime_sub(expires.cpu, val.cpu),
-				       nthreads);
+		left = cputime_div(cputime_sub(expires.cpu, val.cpu),
+				   nthreads);
 		do {
 			if (likely(!(t->flags & PF_EXITING))) {
 				ticks = cputime_add(virt_ticks(t), left);
@@ -528,7 +516,6 @@ static void process_timer_rebalance(struct task_struct *p,
 	case CPUCLOCK_SCHED:
 		nsleft = expires.sched - val.sched;
 		do_div(nsleft, nthreads);
-		nsleft = max_t(unsigned long long, nsleft, 1);
 		do {
 			if (likely(!(t->flags & PF_EXITING))) {
 				ns = t->sched_time + nsleft;
@@ -1173,13 +1160,12 @@ static void check_process_timers(struct task_struct *tsk,
 
 		prof_left = cputime_sub(prof_expires, utime);
 		prof_left = cputime_sub(prof_left, stime);
-		prof_left = cputime_div_non_zero(prof_left, nthreads);
+		prof_left = cputime_div(prof_left, nthreads);
 		virt_left = cputime_sub(virt_expires, utime);
-		virt_left = cputime_div_non_zero(virt_left, nthreads);
+		virt_left = cputime_div(virt_left, nthreads);
 		if (sched_expires) {
 			sched_left = sched_expires - sched_time;
 			do_div(sched_left, nthreads);
-			sched_left = max_t(unsigned long long, sched_left, 1);
 		} else {
 			sched_left = 0;
 		}

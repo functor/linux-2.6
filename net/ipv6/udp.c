@@ -23,6 +23,7 @@
  *      2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/socket.h>
@@ -314,13 +315,14 @@ static void udpv6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 {
 	struct ipv6_pinfo *np;
 	struct ipv6hdr *hdr = (struct ipv6hdr*)skb->data;
+	struct net_device *dev = skb->dev;
 	struct in6_addr *saddr = &hdr->saddr;
 	struct in6_addr *daddr = &hdr->daddr;
 	struct udphdr *uh = (struct udphdr*)(skb->data+offset);
 	struct sock *sk;
 	int err;
 
-	sk = udp_v6_lookup(daddr, uh->dest, saddr, uh->source, inet6_iif(skb));
+	sk = udp_v6_lookup(daddr, uh->dest, saddr, uh->source, dev->ifindex);
    
 	if (sk == NULL)
 		return;
@@ -414,7 +416,7 @@ static void udpv6_mcast_deliver(struct udphdr *uh,
 
 	read_lock(&udp_hash_lock);
 	sk = sk_head(&udp_hash[ntohs(uh->dest) & (UDP_HTABLE_SIZE - 1)]);
-	dif = inet6_iif(skb);
+	dif = skb->dev->ifindex;
 	sk = udp_v6_mcast_next(sk, uh->dest, daddr, uh->source, saddr, dif);
 	if (!sk) {
 		kfree_skb(skb);
@@ -495,7 +497,7 @@ static int udpv6_rcv(struct sk_buff **pskb)
 	 * check socket cache ... must talk to Alan about his plans
 	 * for sock caches... i'll skip this for now.
 	 */
-	sk = udp_v6_lookup(saddr, uh->source, daddr, uh->dest, inet6_iif(skb));
+	sk = udp_v6_lookup(saddr, uh->source, daddr, uh->dest, dev->ifindex);
 
 	if (sk == NULL) {
 		if (!xfrm6_policy_check(NULL, XFRM_POLICY_IN, skb))
@@ -781,7 +783,7 @@ do_udp_sendmsg:
 		connected = 0;
 	}
 
-	err = ip6_sk_dst_lookup(sk, &dst, fl);
+	err = ip6_dst_lookup(sk, &dst, fl);
 	if (err)
 		goto out;
 	if (final_p)

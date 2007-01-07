@@ -91,6 +91,7 @@
 #include <linux/errno.h>
 #include <linux/timer.h>
 #include <linux/mm.h>
+#include <linux/config.h>
 #include <linux/inet.h>
 #include <linux/ipv6.h>
 #include <linux/netdevice.h>
@@ -909,32 +910,23 @@ static int udp_encap_rcv(struct sock * sk, struct sk_buff *skb)
 	return 1; 
 #else
 	struct udp_sock *up = udp_sk(sk);
-  	struct udphdr *uh;
+  	struct udphdr *uh = skb->h.uh;
 	struct iphdr *iph;
 	int iphlen, len;
   
-	__u8 *udpdata;
-	__u32 *udpdata32;
+	__u8 *udpdata = (__u8 *)uh + sizeof(struct udphdr);
+	__u32 *udpdata32 = (__u32 *)udpdata;
 	__u16 encap_type = up->encap_type;
 
 	/* if we're overly short, let UDP handle it */
-	len = skb->len - sizeof(struct udphdr);
-	if (len <= 0)
+	if (udpdata > skb->tail)
 		return 1;
 
 	/* if this is not encapsulated socket, then just return now */
 	if (!encap_type)
 		return 1;
 
-	/* If this is a paged skb, make sure we pull up
-	 * whatever data we need to look at. */
-	if (!pskb_may_pull(skb, sizeof(struct udphdr) + min(len, 8)))
-		return 1;
-
-	/* Now we can get the pointers */
-	uh = skb->h.uh;
-	udpdata = (__u8 *)uh + sizeof(struct udphdr);
-	udpdata32 = (__u32 *)udpdata;
+	len = skb->tail - udpdata;
 
 	switch (encap_type) {
 	default:
@@ -1578,10 +1570,11 @@ static int udp_seq_open(struct inode *inode, struct file *file)
 	struct udp_seq_afinfo *afinfo = PDE(inode)->data;
 	struct seq_file *seq;
 	int rc = -ENOMEM;
-	struct udp_iter_state *s = kzalloc(sizeof(*s), GFP_KERNEL);
+	struct udp_iter_state *s = kmalloc(sizeof(*s), GFP_KERNEL);
 
 	if (!s)
 		goto out;
+	memset(s, 0, sizeof(*s));
 	s->family		= afinfo->family;
 	s->seq_ops.start	= udp_seq_start;
 	s->seq_ops.next		= udp_seq_next;

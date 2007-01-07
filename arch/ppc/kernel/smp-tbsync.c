@@ -5,6 +5,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
@@ -47,9 +48,8 @@ void __devinit
 smp_generic_take_timebase( void )
 {
 	int cmd, tbl, tbu;
-	unsigned long flags;
 
-	local_irq_save(flags);
+	local_irq_disable();
 	while( !running )
 		;
 	rmb();
@@ -65,7 +65,7 @@ smp_generic_take_timebase( void )
 		tbu = tbsync->tbu;
 		tbsync->ack = 0;
 		if( cmd == kExit )
-			break;
+			return;
 
 		if( cmd == kSetAndTest ) {
 			while( tbsync->handshake )
@@ -78,7 +78,7 @@ smp_generic_take_timebase( void )
 		}
 		enter_contest( tbsync->mark, -1 );
 	}
-	local_irq_restore(flags);
+	local_irq_enable();
 }
 
 static int __devinit

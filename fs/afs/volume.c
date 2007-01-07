@@ -15,10 +15,10 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
-#include <linux/fscache.h>
 #include "volume.h"
 #include "vnode.h"
 #include "cell.h"
+#include "cache.h"
 #include "cmservice.h"
 #include "fsclient.h"
 #include "vlclient.h"
@@ -28,14 +28,18 @@
 static const char *afs_voltypes[] = { "R/W", "R/O", "BAK" };
 #endif
 
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_volume_cache_get_key(const void *cookie_netfs_data,
-					 void *buffer, uint16_t buflen);
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_volume_cache_match(void *target,
+						  const void *entry);
+static void afs_volume_cache_update(void *source, void *entry);
 
-static struct fscache_cookie_def afs_volume_cache_index_def = {
-	.name		= "AFS.volume",
-	.type		= FSCACHE_COOKIE_TYPE_INDEX,
-	.get_key	= afs_volume_cache_get_key,
+struct cachefs_index_def afs_volume_cache_index_def = {
+	.name		= "volume",
+	.data_size	= sizeof(struct afs_cache_vhash),
+	.keys[0]	= { CACHEFS_INDEX_KEYS_BIN, 1 },
+	.keys[1]	= { CACHEFS_INDEX_KEYS_BIN, 1 },
+	.match		= afs_volume_cache_match,
+	.update		= afs_volume_cache_update,
 };
 #endif
 
@@ -210,10 +214,11 @@ int afs_volume_lookup(const char *name, struct afs_cell *cell, int rwpath,
 	}
 
 	/* attach the cache and volume location */
-#ifdef CONFIG_AFS_FSCACHE
-	volume->cache = fscache_acquire_cookie(vlocation->cache,
-					       &afs_volume_cache_index_def,
-					       volume);
+#ifdef AFS_CACHING_SUPPORT
+	cachefs_acquire_cookie(vlocation->cache,
+			       &afs_vnode_cache_index_def,
+			       volume,
+			       &volume->cache);
 #endif
 
 	afs_get_vlocation(vlocation);
@@ -281,8 +286,8 @@ void afs_put_volume(struct afs_volume *volume)
 	up_write(&vlocation->cell->vl_sem);
 
 	/* finish cleaning up the volume */
-#ifdef CONFIG_AFS_FSCACHE
-	fscache_relinquish_cookie(volume->cache, 0);
+#ifdef AFS_CACHING_SUPPORT
+	cachefs_relinquish_cookie(volume->cache, 0);
 #endif
 	afs_put_vlocation(vlocation);
 
@@ -476,25 +481,40 @@ int afs_volume_release_fileserver(struct afs_volume *volume,
 
 /*****************************************************************************/
 /*
- * set the key for the index entry
+ * match a volume hash record stored in the cache
  */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_volume_cache_get_key(const void *cookie_netfs_data,
-					void *buffer, uint16_t bufmax)
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_volume_cache_match(void *target,
+						  const void *entry)
 {
-	const struct afs_volume *volume = cookie_netfs_data;
-	uint16_t klen;
+	const struct afs_cache_vhash *vhash = entry;
+	struct afs_volume *volume = target;
 
-	_enter("{%u},%p,%u", volume->type, buffer, bufmax);
+	_enter("{%u},{%u}", volume->type, vhash->vtype);
 
-	klen = sizeof(volume->type);
-	if (klen > bufmax)
-		return 0;
+	if (volume->type == vhash->vtype) {
+		_leave(" = SUCCESS");
+		return CACHEFS_MATCH_SUCCESS;
+	}
 
-	memcpy(buffer, &volume->type, sizeof(volume->type));
+	_leave(" = FAILED");
+	return CACHEFS_MATCH_FAILED;
+} /* end afs_volume_cache_match() */
+#endif
 
-	_leave(" = %u", klen);
-	return klen;
+/*****************************************************************************/
+/*
+ * update a volume hash record stored in the cache
+ */
+#ifdef AFS_CACHING_SUPPORT
+static void afs_volume_cache_update(void *source, void *entry)
+{
+	struct afs_cache_vhash *vhash = entry;
+	struct afs_volume *volume = source;
 
-} /* end afs_volume_cache_get_key() */
+	_enter("");
+
+	vhash->vtype = volume->type;
+
+} /* end afs_volume_cache_update() */
 #endif

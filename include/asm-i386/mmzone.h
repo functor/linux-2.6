@@ -14,7 +14,7 @@ extern struct pglist_data *node_data[];
 
 #ifdef CONFIG_X86_NUMAQ
 	#include <asm/numaq.h>
-#elif defined(CONFIG_ACPI_SRAT)/* summit or generic arch */
+#else	/* summit or generic arch */
 	#include <asm/srat.h>
 #endif
 

@@ -161,8 +161,7 @@ static void sc_unmask_irq(unsigned int irq)
 	writel(1 << irq, VA_IC_BASE + IRQ_ENABLE_SET);
 }
 
-static struct irq_chip sc_chip = {
-	.name	= "SC",
+static struct irqchip sc_chip = {
 	.ack	= sc_mask_irq,
 	.mask	= sc_mask_irq,
 	.unmask = sc_unmask_irq,

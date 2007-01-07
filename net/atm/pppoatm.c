@@ -34,6 +34,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/skbuff.h>
 #include <linux/atm.h>
@@ -287,9 +288,10 @@ static int pppoatm_assign_vcc(struct atm_vcc *atmvcc, void __user *arg)
 	if (be.encaps != PPPOATM_ENCAPS_AUTODETECT &&
 	    be.encaps != PPPOATM_ENCAPS_VC && be.encaps != PPPOATM_ENCAPS_LLC)
 		return -EINVAL;
-	pvcc = kzalloc(sizeof(*pvcc), GFP_KERNEL);
+	pvcc = kmalloc(sizeof(*pvcc), GFP_KERNEL);
 	if (pvcc == NULL)
 		return -ENOMEM;
+	memset(pvcc, 0, sizeof(*pvcc));
 	pvcc->atmvcc = atmvcc;
 	pvcc->old_push = atmvcc->push;
 	pvcc->old_pop = atmvcc->pop;

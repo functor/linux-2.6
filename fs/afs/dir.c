@@ -30,7 +30,7 @@ static int afs_dir_readdir(struct file *file, void *dirent, filldir_t filldir);
 static int afs_d_revalidate(struct dentry *dentry, struct nameidata *nd);
 static int afs_d_delete(struct dentry *dentry);
 static int afs_dir_lookup_filldir(void *_cookie, const char *name, int nlen,
-				  loff_t fpos, u64 ino, unsigned dtype);
+				  loff_t fpos, ino_t ino, unsigned dtype);
 
 const struct file_operations afs_dir_file_operations = {
 	.open		= afs_dir_open,
@@ -145,7 +145,7 @@ static inline void afs_dir_check_page(struct inode *dir, struct page *page)
 	qty /= sizeof(union afs_dir_block);
 
 	/* check them */
-	dbuf = kmap_atomic(page, KM_USER0);
+	dbuf = page_address(page);
 	for (tmp = 0; tmp < qty; tmp++) {
 		if (dbuf->blocks[tmp].pagehdr.magic != AFS_DIR_MAGIC) {
 			printk("kAFS: %s(%lu): bad magic %d/%d is %04hx\n",
@@ -154,12 +154,12 @@ static inline void afs_dir_check_page(struct inode *dir, struct page *page)
 			goto error;
 		}
 	}
-	kunmap_atomic(dbuf, KM_USER0);
 
+	SetPageChecked(page);
 	return;
 
  error:
-	kunmap_atomic(dbuf, KM_USER0);
+	SetPageChecked(page);
 	SetPageError(page);
 
 } /* end afs_dir_check_page() */
@@ -170,6 +170,7 @@ static inline void afs_dir_check_page(struct inode *dir, struct page *page)
  */
 static inline void afs_dir_put_page(struct page *page)
 {
+	kunmap(page);
 	page_cache_release(page);
 
 } /* end afs_dir_put_page() */
@@ -184,12 +185,16 @@ static struct page *afs_dir_get_page(struct inode *dir, unsigned long index)
 
 	_enter("{%lu},%lu", dir->i_ino, index);
 
-	page = read_mapping_page(dir->i_mapping, index, NULL);
+	page = read_cache_page(dir->i_mapping,index,
+			       (filler_t *) dir->i_mapping->a_ops->readpage,
+			       NULL);
 	if (!IS_ERR(page)) {
 		wait_on_page_locked(page);
+		kmap(page);
 		if (!PageUptodate(page))
 			goto fail;
-		afs_dir_check_page(dir, page);
+		if (!PageChecked(page))
+			afs_dir_check_page(dir, page);
 		if (PageError(page))
 			goto fail;
 	}
@@ -354,7 +359,7 @@ static int afs_dir_iterate(struct inode *dir, unsigned *fpos, void *cookie,
 
 		limit = blkoff & ~(PAGE_SIZE - 1);
 
-		dbuf = kmap_atomic(page, KM_USER0);
+		dbuf = page_address(page);
 
 		/* deal with the individual blocks stashed on this page */
 		do {
@@ -363,7 +368,6 @@ static int afs_dir_iterate(struct inode *dir, unsigned *fpos, void *cookie,
 			ret = afs_dir_iterate_block(fpos, dblock, blkoff,
 						    cookie, filldir);
 			if (ret != 1) {
-				kunmap_atomic(dbuf, KM_USER0);
 				afs_dir_put_page(page);
 				goto out;
 			}
@@ -372,7 +376,6 @@ static int afs_dir_iterate(struct inode *dir, unsigned *fpos, void *cookie,
 
 		} while (*fpos < dir->i_size && blkoff < limit);
 
-		kunmap_atomic(dbuf, KM_USER0);
 		afs_dir_put_page(page);
 		ret = 0;
 	}
@@ -408,7 +411,7 @@ static int afs_dir_readdir(struct file *file, void *cookie, filldir_t filldir)
  *   uniquifier through dtype
  */
 static int afs_dir_lookup_filldir(void *_cookie, const char *name, int nlen,
-				  loff_t fpos, u64 ino, unsigned dtype)
+				  loff_t fpos, ino_t ino, unsigned dtype)
 {
 	struct afs_dir_lookup_cookie *cookie = _cookie;
 

@@ -4,7 +4,6 @@
  * to extract and format the required data.
  */
 
-#include <linux/crypto.h>
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/personality.h>
@@ -76,7 +75,4 @@ void foo(void)
 #endif
 
 	DEFINE(PAGE_SIZE_asm, PAGE_SIZE);
-	DEFINE(VDSO_PRELINK, VDSO_PRELINK);
-
-	OFFSET(crypto_tfm_ctx_offset, crypto_tfm, __crt_ctx);
 }

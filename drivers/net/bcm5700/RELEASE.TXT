@@ -1,0 +1,3726 @@
+
+                              Release Notes
+                       Broadcom BCM5700 Linux Driver
+                              Version 8.3.17b
+                                02/21/2006
+
+                          Broadcom Corporation
+                          16215 Alton Parkway,
+                          Irvine, CA 92619-7013
+
+                Copyright (c) 2000-2006 Broadcom Corporation
+                           All rights reserved
+
+
+v8.3.17b (February 21 2006)
+=========================
+    Fixes:
+    ------
+    1. Problem : (ISSUE289636) 5715 ports hang under linux with 6 or more
+    		 ports are active in the RFC2544 test.
+       Cause   : While running RFC2544 test with 6 or more ports active
+      		 the linux error message "NETDEV_WATCHDOG transmitt timed out"
+		 gets displayed multiple times. After multiple errors 5715
+		 ports stop working.
+       Change  : Updated trans_start with jiffies before calling
+      		 netif_stop_queue to prevent false NETDEV WATCHDOG
+       Impact  : 5715.
+
+v8.3.17 (January 18 2006)
+=========================
+The patch file in the bcm_sup-8.3.16 tar file will not compile
+in 2.6.14 kernels. This release version is using a patch
+file for 2.6.13 kernels.
+
+v8.3.16 (January 10 2006)
+=========================
+    Enhancement:
+    ------------
+	ECD13216 complete workaround for 5714/5715 fiber:
+	During chip init set: 
+	0x5b0[10]=1
+	0x6808[5:4]=01
+	To check link status read:
+	0x460 bit 3 is set when link is established.	
+
+
+v8.3.15 (December 16, 2005)
+===========================
+    Enhancement:
+    ------------
+	Added support for 5714S and 5715S.
+ 
+
+v8.3.14 (November 02, 2005)
+===========================
+    Fixes:
+    ------
+    1. Problem : (CQ14546) Montara A2 devices cannot write to ST flash
+                 parts.
+       Cause   : ST parts require an additional "write enable" command
+                 to be executed before any write operations can
+                 commence.  Montara A2 devices do not issue this
+                 command on behalf of the driver.
+       Change  : Code already exists in the driver to issue the
+                 "write enable" command, but the code is only enabled
+                 on an opt-in basis.  The 5714 family devices have
+                 been added to the list of devices that explicitly
+                 issue this command.
+       Impact  : This fix only impacts 5714 family of devices.
+
+
+v8.3.13 (October 28, 2005)
+==========================
+    Fixes:
+    ------
+    1. Problem : CQ13326 NETDEV Watchdog timeout followed by kernel panic.
+       Cause   : A NETDEV watchdog timeout was occurring because writes to the
+                 indirect memory register were not being flushed when setting
+                 the watchdog timer's keep alive bit.
+       Change  : Changed the driver to use direct memory writes instead of
+                 indirect memory writes when setting the keep alive bit.
+       Impact  : This fix impacts any PCI-E device that has ASF/IPMI enabled.
+
+
+
+v8.3.11 (October 20, 2005)
+==========================
+    Fixes:
+    ------
+    1. Problem : CQ13326 NETDEV Watchdog timeout followed by kernel panic. 
+                 Some systems would generate NMI's followed by NETDEV Watchdog
+                 timeouts and eventually panic when running a stress test using
+                 multiple NIC's in a BASP team with ASF/IPMI enabled.
+       Cause   : The NMI was caused by the ASF/IPMI firmware reseting the NIC
+                 while the driver was operational because of a watchdog timeout. 
+                 The watchdog timeout was occurring because the keep alive
+                 handshake between the driver and firmware would fail
+                 occasionally for the same reason as documented in CQ13369 in
+                 v8.3.1. In this case, the driver was using pci config writes to
+                 set the keep alive flag when ASF/IPMI was enabled. Pci config
+                 writes made by the driver while it is running can result in the
+                 chipset misrouting the write to another device. When this
+                 happens, the firmware does not see the keep alive bit being set
+                 by the driver and concludes that the driver had failed and
+                 resets the chip accordingly. 
+       Change  : There are two methods available to workaround this problem. One
+                 workaround is to set the pci=nommconfig switch when starting
+                 the kernel. This switch is available only with newer kernels
+                 (2.6) and on systems that support PCI-E (i.e. ICH6-7). Starting
+                 the kernel with this switch will disable memory mapped config
+                 cycles from being used by the kernel, so the kernel instead
+                 uses the standard 0xcf8/0xcfc i/o ports to generate pci config
+                 cycles. The other method is to upgrade to this driver which
+                 avoids using pci config cycles when updating the keep alive
+                 flag and uses memory writes cycles instead.
+       Impact  : This problem occurs on devices that have ASF/IPMI enabled and 
+                 are running on a 2.6 kernel and in a system that is PCI-E
+                 capable. Similarly, this patch is executed only on systems with
+                 an Intel ICH4 or newer chipsets and when ASF/IPMI is enable.
+                 The patch is not executed if ASF is disable. Also, the old
+                 method of using pci config writes to update the keep alive flag
+                 is used when the chipset is older than ICH4.
+
+    2. Problem : Broadcom Teaming driver would not fail over when controller
+		 speed was forced to 100 half duplex.
+        Cause  : The driver did not indicate a link down state when necessary.
+                 The LineSpeed variable was not being set properly in the NICE
+                 interface for teaming.
+        Change : The driver indicates the proper link state in the NICE interface.
+        Impact : Broadcom Teaming driver will failover properly.
+
+
+v8.3.11 (October 18, 2005)
+==========================
+
+Note: Removal of support for 5714S, 5715S, 5755, 5787 controllers.
+
+
+
+v8.3.10 (October 14, 2005)
+==========================
+    Fixes:
+    ------
+
+    1. Problem : CQ13716 Netdump does not work on RH4EL U1 with bcm5700 
+                 driver. When intentionally crashing the system to test the 
+                 netdump application, the bcm5700 driver would hang on the 
+                 client and so the dump file would not be created on the netdump
+                 server. 
+       Cause   : The interface to the driver poll function called by netdump
+                 when the system crashes changed slightly between RHEL3 and
+                 RHEL4. For RHEL4, the poll function in the driver called by
+                 netdump (poll_bcm5700) no longer has to call the bcm_poll() as
+                 it had previously. This is because the netdump controller calls
+                 the bcm_poll() function from outside the driver. Calling 
+                 bcm_poll() from within the driver results in recursively 
+                 re-entering netdump, hanging the application.
+       Change  : The driver was modified to detect the version of Redhat it's 
+                 being built for and to use the appropriate algorithm in
+                 poll_bcm5700(). 
+       Impact  : This change applies specifically to Redhat and Fedora OS's, and
+                 is independent of the device type.
+
+    2. Problem : CQ14274 Linux bcm5700 build errors on SUSE 10.2.6.13-15.
+       Cause   : The driver was using "#if"'s instead of "#ifdef"'s on variables
+                 that could remain undefined. This caused the compiler
+                 distributed with SUSE to issue compiler warnings when building
+                 the bcm5700 driver.
+       Change  : Two categories of changes made to the driver to fix this
+                 problem. First, if the variable causing the warning was used
+                 such that it either simply was "defined" or "not defined", then
+                 the "#if" was changed to "#ifdef" in the driver. However, if
+                 the variable usage was such that it could either be
+                 "not defined" or a number from 0-n, then a conditional was
+                 added into the header file to define the variable and set its
+                 value to 0 whenever it was not defined. This allowed the code
+                 in the driver to still use the "#if" and not have to change
+       Impact  : This change was applied to the driver in general and applies to
+                 all linux distributions, not just SUSE. These changes do not
+                 apply to a specific NIC, though they are used enable and
+                 disable specific features in the driver, such as, software
+                 workarounds for 570x, enabling Jumbo Frames, TBI support and
+                 PCI-X software workarounds.
+
+
+v8.3.9 (September 30, 2005)
+===========================
+    Fixes:
+    ------
+       Problem :The PHY registers can become corrupted on all 5714S,
+                5715S, and 5780S devices.
+        Cause  :The periodic link check code does not acquire the phy
+                lock before performing its task.
+        Change :Add phy lock acquisition and release code around
+                the link check function call.
+        Impact : 5714/5715/5780 fiber.
+
+
+v8.3.8 (September 29, 2005)
+===========================
+    Fixes:
+    ------
+       Problem :CQ14155 5714 fiber occasionally does not get link.
+        Cause  :This problem occurs when the duplex and line_speed
+                parameters are used with the 5714 fiber controller.
+                The driver allowed autonegotiation with only half
+                duplex advertised. Some switches do not support 1G fiber at half
+                duplex.
+        Change :If the controller is fiber, autonegotiation has full and half 
+                duplex advertised regardless of parameter settings.
+        Impact : 5714/5715/5780 fiber.
+
+    Note: Removed support for 5903F that was introducd in v8.3.2. 
+
+v8.3.7 (September 27, 2005)
+===========================
+    Fixes:
+    ------
+    1. Problem : The 5780 fiber ports on an IBM Maui PPC Blade server would stop
+                 receiving packets during a simple ping test.
+       Cause   : The RX DMA Engine (RDE) was not being re-enabled after the RX
+                 MAC was reset. This happens only after driver v8.3.2.
+       Change  : The sequence of reseting the Rx MAC was changed so that the RDE
+                 is enabled after the Rx MAC is reset.
+       Impact  : This change was made to specifically correct a problem seen on
+                 5780 and 5714 fiber devices. However, it should be noted that
+                 the implementation applies the change to all fiber devices.
+    
+    2. Problem : CQ 13980 BCM5780S can't pass link test with bcm5700 v8.3.2. 
+       Cause   : The link test would fail when running "ethtool -t ethx" on 
+                 fiber links that were in forced fallback mode. The test failed 
+                 because the PHY_FIBER_FALLBACK flag in the PhyFlags variable
+                 was not being reinitialized when the PHY was reset. This caused
+                 the driver to think it was already in forced fallback mode when
+                 it wasn't. Running ethtool -t would reset the PHY and the
+                 driver would autoneg the link. When autoneg would fail, the
+                 driver wouldn't force the link because the force fallback flag 
+                 (PHY_FIBER_FALLBACK) was already set from the initial PHY reset
+                 and hence the driver though it had already fallen back. 
+       Change  : Changing the driver to clear the PHY_FIBER_FALLBACK flag in
+                 the PhyFlags variable whenever 1) auto-neg is initiated or
+                 2) whenever the PHY is reset fixed this problem.
+       Impact  : This problem only occurred on 5780, 5714 and 5715 devices with
+                 fiber phys attached to a switch that forces the link to gigabit
+                 speed (e.g a switch that doesn't auto negotiate the link).
+
+
+v8.3.6 (September 22, 2005)
+===========================
+    Fixes:
+    ------
+    1. Problem :CQ14069 5714s causes NMI when bringing interface down 
+                with ASFIPMI enabled.
+        Cause  :5714 Switching to VAUX power on certain systems caused
+                NMI to occur.
+        Change :The 5714/5715 will not switch to VAUX power.
+        Impact :5714/5715 controllers.
+ 
+    2. Problem :CQ14119 Using 5714 fiber a linking loop occurs when restrictive
+                autoneg is used.
+        Cause  :The driver continually configures the fiber link causing 
+                continual phy interrupts. Only when user forces link.
+        Change :The driver reconfigures the phy when requested configuration
+                differs from current configuration.
+        Impact :5714/5715 fiber.
+ 
+
+v8.3.5 (September 19, 2005)
+==========================
+    Fixes:
+    ------
+    1. Problem :CQ14063 parameter nic_tx_bd not getting set.
+        Cause  :5705 and later controllers do not support this
+                feature.
+        Change :README.TXT was updated to include the description
+                "and later"
+        Impact :None.
+
+    2. Problem :CQ14054 Two adapter names for each lom in Linux.
+        Cause  :The driver displayed a different integrated phy
+                number than the controller type.
+        Change :Changed the code to ensure the correct phy number
+                is displayed.
+        Impact :5780 SERDES only.
+
+    3. Problem :CQ13971 5714S stops passing traffic after a few seconds.
+        Cause  :The Rx Mac Mode reset was causing this to occur.
+        Change :No longer reset RxMode for 5714 SERDES.
+        Impact :5714/5715 SERDES.
+  
+
+v8.3.4 (September 15, 2005)
+==========================
+
+
+    Enhancements:
+    ============
+    1. Added basic support for 5755 and 5787 to driver.
+       - Added device, asic and phy ids for 5755/5787 devices.
+       - Modified the id macros to include these new devices.
+       - Added code to recognize the new phy id.
+       - Changed the PCI-E detection algorithm to use the kernel api.
+    2. Enabled hardware fix for CQ12384 and CQ12156 on 5755 and 5787.
+       - The 5751/5752/5753 devices may assert #INTA before writting
+         the corresponding status block to host memory.
+       - A software workaround for this problem was first implemented in
+         v8.1.10 of the driver (change #1 in release.txt).
+       - A hardware workaround to this problem has also been implemented
+         in 5755 and 5787 devices.
+       - This change enables the hardware workaround to this problem by
+         setting bit-29 in register 0x4c00 on 5755 and 5787 devices.
+    3. Enabled full hardware checksum offloading on 5755 and 5787.
+       - Use NETIF_F_HW_CSUM instead of NETIF_F_IP_CSUM on 5755/5787 
+         devices.
+    4. Added TSO support for 5755 and 5787 to the driver.
+       - The definition of the L3/L4 header length field in the send
+         buffer descriptor has been changed on 5755/5787 devices.
+       - The driver was modified to use a new algorithm to calculate
+         the L3/L4 header length for 5755/5787 devices.
+    5. Added fix for ECD13216 for the SERDES cross link problem.
+
+
+
+v8.3.3 (September 7, 2005)
+==========================
+    Fixes:
+    ------
+    1. Problem : CQ13626 Wrong message is displayed on the console when jumbo
+                 frames are enabled.
+       Cause   : Redo of fix #2 in 8.3.1. 
+       Change  : Reordered some of the printk's in the driver so that the 
+                 messages will be displayed correctly for all options.
+       Impact  : This bug is cosmetic, though it will cause some confusion 
+                 regarding whether TSO or jumbo frames has been enabled on 
+                 adapters other than the 5714 family.
+
+    2. Problem : 5714, 5715, and 5780 devices do not work with ST flash
+                 parts.
+       Cause   : The NVRAM discovery code was using the legacy
+                 discovery method instead of the 5750 method.
+       Change  : Change code to use the 5750 NVRAM discovery method.
+       Impact  : ST NVRAM parts operate correctly.
+
+    3. Problem : CQ13846 Call Trace When Jumbo Frames Are Enabled.
+       Cause   : When jumbo frames are enabled the driver will use vmalloc
+                 and vfree to setup the jumbo packet descriptors.  
+                 vfree/vmalloc can only be used in user context (open/close/ioctle)
+                 and enterrupts must be enabled. The driver was using vfree with 
+                 interrupts disabled causing the call trace.
+       Change  : The vmalloc/vfree was replaced with kmalloc/kfree.
+       Impact : None.
+
+    4. Problem : CQ13660 Ethtool Offline Test, intermittently Fails Loopback Test.	 
+        Cause  : The driver did not reset the RX mode in the mac causing the 
+                 phy to drop the first few packets. This only occured in
+                 the 5780/5714/5715 devices. Other serdes devices have the rx
+                 mode reset in the code.
+        Change : Added  rx mode reset to ensure the phy is in sync with the mac.
+        Impact : Only 5780/5714/5715.
+
+
+
+v8.3.2 (August 26, 2005)
+=======================
+    Fixes:
+    ------
+    1. Problem : CQ13025 Unable to force speed on legacy serdes (5704,03,etc).
+        Cause  : Failed in ethtool due to code that did not include 5704/3
+                 fiber properly.
+        Change : Changed code to allow fiber to be forced to 1000Mbs.
+        Impact : All Serdes adapters.
+
+    2. Problem : CQ13533 Cannot compile on PPC w/SuSe 8.
+        Cause  : Missing #include <linux\vmalloc>. This problem
+                 was originally reported in driver v8.2.14 as 
+                 vmalloc() was introduced. The vmalloc was removed at that 
+                 time.  
+        Change : Added missing include.
+        Impact : none.
+
+  Enhancements :
+  =============
+     Added support for 5903M and 5903F adapters.
+
+
+
+v8.3.1 (August 23, 2005)
+=======================
+    Fixes :
+    -------
+    1. Problem : CQ13369 Kernel panic occurs under stress with large 802.3ad
+                 teams.
+       Cause   : The kernel panic was caused by the ICH6 rev. C2 misdirecting
+                 pci config reads to the wrong device. The driver was using pci
+                 config cycle to read the low-priority mailbox of the 5703
+                 attached to the 5714's expansion bus. The driver was using
+                 indirect pci config cycles to read the MB to apply a special
+                 cycle  workaround needed for 5703-A1/2 and 5704-A0 when they
+                 are  connected to the PCI-X bus of an ICH1-ICH4.
+       Change  : This workaround is really only needed when the 5703/4 is
+                 directly attached to older ICH chips. This problem was resolved
+                 by modifying the driver to only apply the workaround when a
+                 5703-A1/2 or 5704-A0 is directly attached to an ICH1-ICH4
+                 chipset. This problem can also be worked around by setting the
+                 switch pci=nommconfig when starting the kernel. This switch is
+                 available only with newer kernels (2.6) and on systems with
+                 PCI-E (i.e. ICH6-7). Starting the kernel with the above switch
+                 disables memory mapped config cycles being used by the kernel,
+                 so the kernel instead uses the standard 0xcf8/0xcfc i/o ports
+                 to generate pci config cycles.
+       Impact  : This problem and the fix only applies to 5703-A1/A2 or 5704-A0
+                 connect to a PCI-X bus in systems with an ICH6 or ICH7 chipset.
+
+    2. Problem : CQ13626 Wrong message is displayed on the console when jumbo
+                 frames are enabled.
+       Cause   : The 5714 family of adapters cannot support both jumbo frames
+                 and TSO at the same time. When the driver detects that a user
+                 is trying to enable both features on a 5714, it will disable
+                 TSO, enable jumbo frames, and log a message to the syslog.
+                 There was a bug in the driver logic that caused it to log a
+                 message saying jumbo frames and TSO cannot simultaneously
+                 be supported even if the adapter could support both features
+                 being enabled at the same time.
+       Change  : The driver logic was changed to only log this message when the
+                 adapter is a member of the 5714 family of controllers.
+       Impact  : This bug is cosmetic, though it will cause some confusion 
+                 regarding whether TSO or jumbo frames has been enabled on 
+                 adapters other than the 5714 family.
+
+    3. Problem : CQ13658 stats_coalesce_ticks parameter does not default to 
+                 the correct number.
+       Cause   : If the parameter value is set by the user and it is below 
+                 the minimum supported value, then the parameter value used
+                 will be the minimum supported value for this parameter.
+                 When the value exceeds the maximum supported 
+                 value, then the value will become the default value.
+       Change  : The driver will not validate this paremeter if the 
+                 adaptive_coalesce parameter is set.
+       Impact  : The driver will display a message when stats_coalesce_ticks
+                 and adaptive_coalesce parameters are set.
+
+    4. Problem : CQ13025 Unable to force speed on legacy serdes (5704,03,etc).
+       Cause   : A bug in the driver prevented the user from forcing speed on
+                 serdes adapters. The speed parameter was not being checked
+                 properly.
+       Change  : The driver checks the speed input correctly.
+       Impact  : All legacy serdes adapters can now be forced to 1000.
+
+    5. Problem : CQ13612 Rx_Jumbo_Packets counter does not increment on 5780.
+       Cause   : The adapters 5705 and later do not have the jumbo packet 
+                 counters.
+       Change  : The driver does not display the jumbo packets counter.
+       Impact  : 5705 and new adapters will not display the counter.
+
+    6. Problem : CQ13263 5780 fiber intermittently fails to link properly with 
+                 3COM 4900 SX switch.
+       Cause   : Occasionally the 4900 switch and the 5780 fiber will not
+                 autonegotiate.
+       Change  : A delay was put in the driver to allow better autonegotiation.
+       Impact  : 5780 Serdes only.
+ 
+    7. Problem : CQ13759 bcm5700 corrupts memory when doing ethtool -t eth0.
+       Cause   : The driver was using a wrong value in the driver self test
+                 allowing  data writes to user space.
+       Change  : The test value was changed to the correct value. This bug
+                 was found and fixed by York Chung.
+       Impact  : All adapters when running this test.
+       
+
+    Enhancements:
+    ============
+    1. Added support for 5714/5715 family of adapters.
+    2. Added the 5714/5714 performance fix for CQ13140.
+    3. Added new IPMI handshake.
+
+
+v8.2.18 (August 1, 2005)
+========================
+    Fixes:
+    ======
+       Problem : CQ13578 Linux i386 2.4:insmod bcm5700 8.2.XX with tg3
+                 already loaded causes panic.
+       Cause   : The netdevice_notifier was being registered to the bcm
+                 driver code and the code did not unregister the notifier
+                 callback routine when the bcm device was not present.
+                 This bug was introduced in driver v8.2.6 cq10262.
+       Change  : Registering of notifier is done when a device is found.
+       Impact  : 2.4 kernel
+
+
+v8.2.17 (July 29, 2005)
+======================
+    Fixes:
+    ======
+       Problem : CQ13550 Linux 8.2.12+ driver fails BASP Automation.
+       Cause   : A bug was introduced in v8.2.12 that prevented the
+                 5703 from getting proper link after closing and opening
+                 the driver interface.
+       Change  : The code was modified to ensure 5703 is configured
+                 properly after each interface open.
+       Impact  : 5703 copper nics using using v8.2.12 upto v8.2.16.
+
+
+v8.2.16 (July 27, 2005)
+======================
+    Enhancement:
+    ============
+    Added the skb_cloned_header check for tco support in 2.6.12 kernels.
+
+
+v8.2.15 (July 26, 2005)
+=======================
+    Fixes:
+    ======
+
+    1. Problem : CQ13533 Cannot compile on PPC w/SuSe 8.
+       Cause   : vmalloc is not in the SuSe 8 library.
+                 vamalloc was introduced into the driver in v8.2.13.
+       Change  : Replaced vmalloc with kmalloc.
+       Impact  : Problem resolved on SuSe 8 PPC.
+
+    2. Problem : CQ13525 Missing items in supplemental tar file.
+       Cause   : latest patch file was not included, nor was disk image.
+       Change  : included patch files and disk image.
+       Impact  : None.
+
+    3. Problem : CQ13519 Jumbo enabled causes call trace.
+       Cause   : vmalloc was being used outsie of init or close functions.
+       Change  : Replaced vmalloc with kmalloc.
+       Impact  : None.
+
+
+v8.2.14 (July 21, 2005)
+=======================
+
+This version does not have support for 5714/5715 controllers.
+
+
+v8.2.13 (July 21, 2005)
+=======================
+    1. Problem : CQ 13381 5715s: Driver incorrectly reports the PCI-X bus
+                 speed is 33 MHz instead of 133 MHz.
+       Cause   : The driver was incorrectly using just the Bond ID (and not
+                 the ASIC IC) to determine if chip was a 5704CIOBE. On a
+                 5714Cu, the Bond ID by luck matched the CIOBE which led the
+                 driver to conclude that the PCI-X bus speed was 133 MHz. On
+                 a 5714S, the Bond ID did NOT match the CIOBE, and so the
+                 driver used the bits 0-4 (=0) in the Clock Control register
+                 (0x70) to incorrectly conclude that the PCI-X bus speed was
+                 33 MHz.
+       Change  : The driver was hardcoded to display the PCI-X bus speed as
+                 133 MHz when 1) both the ASIC Id AND the Bond Id both
+                 identify the chip as a 5704CIOBE, or 2) the ASIC ID is a
+                 5714, 5715 or 5780.
+       Impact  : This change is only cosmetic and will not have any impact
+                 on system performance or functionality. The change was only to
+                 correctly display the bus speed stored in /proc/net/nicinfo.
+                 The code that was changed is used by all PCI-X devices,
+                 in particular CIOBE, 5714, 5715 and 57890.
+
+    2. Problem : CQ 13431 B57LDIAG nictest fails on 5780/5714/5715.
+        Cause  : The driver was not restoring the MSI state properly
+                 after resets. This bug was introduced in driver v8.2.12.
+        Change : Save the MSI state before reset and retore it after
+                 reset.
+        Impact : All msi supported drivers.
+
+   Enhancement : 5703 DMA read water mark was to 512 in pcix mode as
+                 the proper value for the workaround below after
+                 tests determined this setting to be the optimal value.
+
+
+v8.2.12 (July 20, 2005)
+=======================
+    Fixes :
+    -------
+    1. Problem : CQ13208 Kernel panics when using ethtool on an
+                 inactive interface.
+       Cause   : The ethtool command executes LM_SetupPhy(), which
+                 dereferences the device's status block.  When an
+                 interface is not active though, the status block
+                 memory will have been freed / will be NULL.  The
+                 crash is due to a NULL pointer dereference.
+       Change  : Avoid calling LM_SetupPhy() if the interface is not
+                 active.
+       Impact  : None.
+
+    2. Problem : A 5703 or 5704 can hang when connected to a PCI-X bus if the
+                 DMA Read Watermark register is not programmed correctly. This
+                 problem typically manifests itself as a watchdog timeout and
+                 possible loss of a TCP session. The driver monitors watchdog
+                 timeout events and will automatically recovers from these
+                 events by reseting the chip.
+       Cause   : This problem was documented in the hardware errata for the
+                 5703 chips, though it was not implemented in prior driver
+                 releases.
+       Change  : When a 5703 or 5704 is connected to a PCI-X bus, the DMA Read
+                 Watermark is programmed as follows:
+
+                 Max Read Byte Count = PCI Config. Reg. 0x42, bits 3-2
+                 DMA Read Watermark  = PCI Config. Reg. 0x6C, bits 18-16
+
+                 Max Read Byte Count  Allowable DMA Read Watermark Values
+                 -------------------  -----------------------------------
+                 00 =  512 bytes      0-4
+                 01 = 1024 bytes      0-5
+                 10 = 2048 bytes      0-7
+
+       Impact  : Systems using a 5703 or 5704 chip in a PCI-X bus may
+                 experience NETDEV watchdog timouts without this change.
+                 Upgrading the driver to this version should fix this problem.
+                 No other system components need to be changed.
+
+    3. Problem : ethtool -t causing oops when interface is down.
+        Cause  : Driver code would attempt to free  memory based
+                 on the index of the receive packet queue after the
+                 queue memory had already been freed.
+        Change : The re-initializeation of the receive packet queue at driver
+                 close to clear the index.
+        Impact : none.
+
+    4. Problem : CQ13263 5780 fiber occasionally looses link on 3com 4900sx.
+        Cause  : Phy link would go down during reset and the reset phy
+                 function was not waiting long enough.
+        Change : Added longer delay in Reset Phy driver code and the driver
+                 does not toggle the gigabit setting in Mac.
+        Impact : 5780 fiber only.
+
+
+    Enhancement: Added loopback mode support for testing.
+
+
+v8.2.11 (July 01, 2005)
+=======================
+
+    Fixes :
+    -------
+    1. Problem : CQ13321 Driver does not build.
+       Cause   : Undefined constant.
+       Change  : Recode so that the constant is no longer needed.
+       Impact  : None.
+
+
+v8.2.10 (July 01, 2005)
+=======================
+
+    1. Problem : CQ12559 Call trace occurs when enslaving interface.
+       Cause   : The bonding driver can call the bcm5700 in a context
+                 where preemption is disabled. Some kernels will
+                 issue a call trace when an interface function involves
+                 a sleep thread when there should be none.
+       Change  : The driver was changed to detect if a call was being
+                 made to it in a non sleep context and it uses the
+                 appropriate copy function.
+                 ( the prior implementation of this fix was incorrect )
+       Impact  : All adapters with this version driver and kernel 2.6.x
+                 and above.
+                 There is still a call trace when the bonding driver is
+                 brought down, but it occurs with the tg3 driver as well.
+
+    2. Problem : CQ13280 5780 displays incorrect speed and duplex
+                 advertisements in the procfile.
+       Cause   : The 5780 uses new phy code, which did not include
+                 filling in the "advertising" field of our device
+                 structure.  This field is used to construct strings
+                 for the procfile.
+       Change  : Add code to properly construct speed advertisement
+                 strings for the 5780.
+       Impact  : None.
+
+
+v8.2.9 (June 28, 2005)
+=======================
+
+    Fixes :
+    -------
+    1. Problem : CQ13274 5780 cannot get link on copper PHYs.
+       Cause   : The 5780 uses the same PHY, but a different PHY mode
+                 when configured as a serdes device.  The different
+                 PHY mode requires the use of a different PHY register
+                 set.  The driver was coded to always use the alternate
+                 PHY mode when setting the flow control advertisement.
+       Change  : Change the code to use the alternate PHY mode only
+                 when on a 5714 family serdes device.
+       Impact  : None.
+
+
+v8.2.8 (June 24, 2005)
+=======================
+
+    Fixes :
+    -------
+    1. Problem : CQ13202 Shasta C1 fails ethtool -t test and stops
+                 responding.
+       Cause   : The new HaltCpu code was improperly attempting to
+                 halt a non-existant Tx Cpu.  This is because the
+                 T3_HAS_TWO_CPUS bit was somehow set.
+       Change  : Explicitly turn off T3_HAS_TWO_CPUS before detecting
+                 devices that actually have two CPUS.
+       Impact  : All non-two-cpu devices.
+
+    2. Problem : CQ13205 5714 fiber boards repeatedly display message
+         of link down.
+    Cause  : RH 4 seems to continually open and close the interface
+         of one of the ports of the 5714. If the cable of that
+         port is not linked, the message will be displayed.
+    Change : The driver will report link status when it changes.
+    Impact : All 5714 family fiber.
+
+
+v8.2.7 (June 21, 2005)
+=======================
+
+    Fixes :
+    -------
+    1. Problem : CQ13011 5714s/5715s does not link when switch is forced
+                 to a 1000 and not set to Auto Negotiation.
+       Cause   : The speed forcing code for 5714s was not in place.
+       Change  : Code was added to the driver to allow forcing the
+                 speed to 1000Mbs and the driver will fall back to
+         1000Mbs when connection is sensed but autonegotiation
+         is disabled on the switch.
+       Impact  : 5714s/5715s/5780s
+
+    2. Problem : CQ13051 5714s/5715s does have flow control function.
+       Cause   : The code for flow control  was not in place.
+       Change  : Code was added to the driver to allow flow control.
+       Impact  : 5714s/5715s/5780s
+
+    3. Problem : CQ13072 Do not switch to VAUX power on 5714/5715.
+       Cause   : Power consumption is excessive.
+       Change  : Code was added to the driver to ensure VAUX power is
+         not consumed.
+       Impact  : 5714s/5715s
+
+    4. Problem : CQ12559 Call trace occurs when enslaving interface.
+       Cause   : The bonding driver can call the bcm5700 in a context
+         where preemption is disabled. Some kernels will
+         issue a call trace when an interface function involves
+         a sleep thread when there should be none.
+       Change  : The driver was changed to detect if a call was being
+         made to it in a non sleep context and it uses the
+         appropriate copy function.
+       Impact  : All adapters with this version driver and kernel 2.6.x
+         and above.
+
+
+
+v8.2.6 (June 13, 2005)
+=======================
+
+    Fixes :
+    -------
+    1. Problem : CQ10262 iThe /proc/net/nicinfo filename does
+                 not match the device name in the output of
+                 ifconfig.
+       Cause   : No mechanism existed to notify the driver when the
+                 administrator changes the name of the device.
+       Change  : Added a callback function to respond to name change
+                 events.  When a name change event occurs, the proc
+                 filesystem entry is torn down and rebuilt.
+       Impact  : None.
+
+    2. Problem : CQ12637 When running 'ethtool -t <interface>', the
+                 system becomes unresponsive for a several seconds.
+       Cause   : On uniprocessor systems, the kernel is busy performing
+                 the ethtool test.  This processing comes at the
+                 expense of servicing user events.
+       Change  : Added a message before the test begins notifying the
+                 administrator that the test will take some time.
+                 Littered the code with sleep() calls so that the
+                 kernel can service user events in between tests.
+       Impact  : None.
+
+    3. Problem : CQ12972 Kernel panics when ethtool test is run after
+                 being up'd and down'd.
+       Cause   : When attempting to restore the previous power state
+                 (D3), the code dereferences a NULL status block
+                 pointer.
+       Change  : Detect if the status block pointer is NULL.  If so,
+                 forgo any packet ring cleanups.
+       Impact  : None.
+
+    4. Problem : CQ12969 During 'ethtool -t <interface>' tests, the
+                 kernel issues "transmit timed out" messages.
+       Cause   : In normal operation, MM_IndicateStatus turns on and
+                 off the kernel transmit queues.  When the transmit
+                 queues are on, a packet must be transmitted within a
+                 certain amount of time, or else these warnings will
+                 appear.  During ethtool tests, the device is suspended
+                 and all kernel transmit queues are turned off.  It is
+                 possible however, for MM_IndicateStatus to be called
+                 after suspending the device.  In this scenario, on
+                 link up, MM_IndicateStatus would reenable the transmit
+                 queue during the ethtool test.  The end result is the
+                 above messages.
+       Change  : Modify the MM_IndicateStatus() function to only toggle
+                 the kernel queues if we are not suspended.
+       Impact  : None.
+
+    5. Problem : CQ12215 Ethtool failures during ethtool test.
+       Cause   : There is a race condition between the driver and the
+                 firmware with respect to nvram lock acquisition.
+                 There can be cases where a terminated firmware
+                 acquires the NVRAM lock post-mortem.
+       Change  : Modify LM_HaltCpu() to free the nvram lock on behalf
+                 of the firmware whenever we can.  Flag the error
+                 otherwise.
+       Impact  : None.
+
+    6. Problem : CQ12884 Linux DMA problem with ldiag.
+       Cause   : Some new distributions do not allow user space apps
+         access to memory allocated by a kernel process.
+       Change  : The driver will map/unmap memory that was allocated
+                 in user space.
+       Impact  : Ldiag application only.
+
+    7. Problem : CQ12427 Enabling TSO causes random link down/up.
+    Cause  : Oversized message stress tests may impact TSO in
+         some machines causing NETDEV Timeouts.
+    Change : Added code to disable TSO if Timeouts detected
+         with TSO enabled.
+    Impact : 575x
+
+v8.2.5 (May 20, 2005)
+=======================
+
+    Fixes :
+    -------
+    1. Problem : CQ12806 Random kernel panics with 5714A1
+                 the kernel.
+                 CQ12827 Load/Unload with MSI enabled causes
+                 "nobody cared! (screaming interrupt)"
+
+       Cause   : MSI enable bit in MSI capability block
+                 is cleared during GRC reset.
+
+       Change  : Added software work-around to restore
+                 the state of this bit after a GRC reset
+
+       Impact  : None.
+
+
+v8.2.4 (May 16, 2005)
+=======================
+
+    Enhancements :
+    --------------
+    1. Change  : Added support for new HP NC32Xi products.
+       Impact  : None.
+
+
+v8.2.3 (May 13, 2005)
+=======================
+
+   Fix:
+   ----
+    1. Problem : CQ12133 Ethtool reports the wrong link speed.
+       Cause   : When the driver forces the link, the link will
+                 many times be acquired before finishing the
+                 SetupCopperPhy() call.  This, in turn, will
+                 cause MM_IndicateStatus() _not_ to be called.
+                 MM_IndicateStatus() updates the line_speed
+                 variable which is used to report the link
+                 speed when using the ethtool method.  In effect,
+                 the ethtool query reports a stale link speed.
+        Change : Code the driver to obtain the link speed from
+                 the pDevice->LinkSpeed field instead.  Removed
+                 the line_speed member from the device structure.
+        Impact : None.
+
+    2. Problem : CQ12831 Bootcode version string missing device
+                 name for 5714 devices.
+        Cause  : The GetBootCodeVersion function tests the value
+                 of an instruction it read from NVRAM to determine
+                 whether it should use the new version extraction
+                 routines or the old extraction routines.  The test
+                 was overly restrictive, which would force the
+                 driver to use the old method.
+        Change : Change the test to only inspect the opcode portion
+                 of the instruction.  The rest of the bits are
+                 offset bits which can and do change between
+                 firmware versions.
+        Impact : None.
+
+
+v8.2.2 (May 10, 2005)
+=======================
+
+   Fix:
+   ----
+    1.Problem : CQ12784 hogging interrupts message seen with 5714.
+       Cause  : The device was not initializing properly due to the
+                the driver putting the device into slow clock mode.
+       Change : The driver keeps the device in full power mode.
+       Impact : This impacts the 5714/15 and 5780.
+
+    2.Problem : CQ12785 NMI seen using 5714.
+    Cause : Same as above.
+
+    3.Problem : CQ12786 5715 cannot get link.
+        Cause : Sambe as above.
+
+    4.Problem : CQ12824 5714 removing driver from bonding team and
+                basp team results in kernel panic.
+        Cause : Same as above.
+
+ Enhancement
+ -----------
+    Added msi support for 5780.
+
+
+v8.2.1 (April 29, 2005)
+=======================
+
+   Fix:
+   ----
+    1.Problem : CQ12781 5714C stops passing traffic after ifup/down.
+       Cause  : The driver puts the device into slow clock mode when
+                shutting down the interface to conserve power and this
+                occasionally creates an inability for the device to
+                transmit when brought back up. The real problem may
+                lay in the driver initialization code of the device
+                clock speed on power up. This driver release is to allow
+                internal testing to contine, until debug is completed.
+      Change  : The driver does not slow the clock when shutting down
+                the interface.
+      Impact  : 5714/5715 should function as expected.
+
+    2.Problem : CQ12469 Add 5780 Device IDs.
+       Cause  : The 5780 copper and fiber have PCI Device IDs of 0x166a
+                and 0x166b respectively.
+       Change : Added the ids.
+       Impact : 5780.
+
+
+v8.2.0 (April 22, 2005)
+========================
+
+  Enhancements
+  ------------
+   1. Change : Added support for 5714
+
+   2. Change : CQ12081 Added MSI support for 5714.
+      Impact : Only 5714.
+
+   3. Change : Added support in Makefile for PPC and SuSE.
+      Impact : Only in PPC machines.
+
+  Fix:
+  ----
+     Problem : CQ12677 "$" character appended to device name.
+       Cause : Typo in script file.
+      Change : Deleted extra character.
+      Impact : Only visual.
+
+
+v8.1.55 (April 8, 2005)
+========================
+
+  Enhancement: Using the updated GPHY BIAS for 5752.
+  ------------
+      Change : The code was changed to include a setting to the GPHY
+               to ensure a high quality network link over long cable
+               lengths. No problems have been reported with the
+               previous GPHY BIAS setting.
+
+      Impact : 5752 has no noticable impact.
+
+
+v8.1.54 (April 8, 2005)
+=======================
+
+   Fix:
+   ----
+     Problem : CQ12639 Latest driver causes panic on DELL 6650.
+       Cause : A bug introduced in driver v8.1.50 created a timing
+               window on the 5700 where a releasing spinlock
+               was out of sync with the acquiring spinlock.
+               This problem was specific to the 5700 and only
+               seen on the 6650 integrated 5700 device.
+      Change : The driver code was changed to ensure the 5700
+               spinlock is not released before is is acquired.
+      Impact : 5700 only.
+
+
+
+v8.1.53 (April 6, 2005)
+=======================
+
+   Fix:
+   ----
+   1.Problem : CQ12628 Driver does not compile on Beta SuSE 9.3
+      Cause  : A coding bug in the driver code accessed only
+               by kernel versions greater than 2.6.10. This bug
+               was introduced in driver v8.1.10.
+      Change : This bug was a typo that was corrected.
+      Impact : None.
+
+
+   2.Problem : CQ12450 bcm5700 does not compile on PPC64 RHEL3 U3.
+      Cause  : Additional Makefile switches were needed to compile on
+               the RHEL3 U3 PPC64.
+      Change : The Makefile was updated to include a makefile
+               switch and an LD line to allow PPC64 compilation on
+               RHEL3 U3 PPC64.
+      Impact : May no longer  build on older PPC64 kernels.
+
+
+v8.1.52 (April 1, 2005)
+============================
+
+   Fix:
+   ----
+     Problem1: CQ12549 Error 63 getting the ASF configuration table.
+      Cause  : The NVRAM was not being read properly.
+      Change : The NVRAM access code was changed to properly access
+               NVRAM.
+      Impact : None.
+
+     Problem2: CQ12467 System hanging after unloading driver.
+      Cause  : The driver accessed reserved registers.
+      Change : Removed the code that accessed the reserved registers.
+      Impact : None.
+
+
+v8.1.51 (March 29, 2005)
+============================
+
+   Fix:
+   ----
+     Problem : CQ12549 Error writing to ASF config table in NVRAM.
+      Cause  : The 5752 will not allow an NVRAM to write above 64k.
+      Change : The reported size of the NVRAM was changed to 64k.
+      Impact : None.
+
+   Removed support for that 5714 ASIC revision.
+
+v8.1.50 (March 16, 2005)
+============================
+
+   Fix:
+   ----
+      Problem : CQ11136 GPIOs need to be configured to outputs.
+       Cause  : 5752 GPIOs default to inputs.
+       Change : Added code to enable GPIO output.
+       Impact : None.
+
+
+   Added support for ASIC revisions 5752, 5714.
+
+
+v8.1.11 (March 11, 2005)
+============================
+
+   Fix:
+   ----
+      Problem : CQ12400 Removing driver causes a kernel panic
+       Cause  : The statistics timer was not being disabled at
+                shutdown.
+       Change : Disable statistics timer at shutdown.
+       Impact : None.
+
+
+v8.1.10 (March 10, 2005)
+============================
+
+   Fix:
+   ----
+      Problem : CQ12156 ATI transmit timeout-"NETDEV WATCHDOG".
+       Cause  : The ATI chipset did not call the driver ISR
+                after the ISR did not service an INTx interrupt.
+       Change : The driver will check a register to determine if
+                the INTx should be claimed if the status block has
+                not been updated on ISR entry.
+       Impact : This fix may improve system performance on some
+                systems as it reduces the amount of spurious or
+                unclaimed interrupts.
+
+  Enhancemnts
+  -----------
+
+   1. Problem : Users want command line parameters.
+
+      Change  : All the parameters are accessible on the command line.
+        The code uses MODULE_PARAM for new kernels.
+
+   2. Problem : MSI support needs to test for older non-msi supported
+        machines running kernels with MSI support enabled.
+      Change  : Added MSI validity test.
+
+   3. Problem : Jumbo frame support on some systems caused device
+        counters to increment CRC errors.
+      Change  : Added additional setting to PHY.
+      Impact  : None.
+
+   4. Problem : pci_find_device() will be deprecated.
+      Change  : Added pci_dev_present() and pci_get_device() where
+        pci_find_device() is.
+
+   5. Change  : Added mmiowb() in tx/rx paths.
+
+   6. Change  : Changed makefile for netdump service build to not
+        rely on #define RED_HAT_LINUX_KERNEL.
+
+   7. Change  : Added code to better scale the timer intervals
+        dependent on device.
+
+
+v8.1.9 (March 1, 2005)
+============================
+
+   Support for ASIC revisions 5752, 5714 and 5715 was taken out of
+   the driver.
+
+
+v8.1.8 (February 28, 2005)
+============================
+   Fixes:
+   ------
+
+   1. Problem : CQ11788 5721 not receiving probes in Intel team.
+       Cause  : Statistics do not get updated fast enough.
+       Change : Connect the stats_coalesce_ticks module parameter
+                to the actual statistics update frequency.
+       Impact : System behaves as expected.
+
+
+   2. Problem : CQ12273 "MODULE_PARM is deprecated" messages are
+                displayed when compiling on Red Hat 4.0.
+
+        Cause : Drivers using the deprecated macro MODULE_PARM will
+                cause compile warnings to be displayed in systems
+                using RedHat 4. The bcm5700 driver was still using
+                the MODULE_PARM as the parameter interface.
+
+       Change : The driver now uses ethtool for passing most parameters.
+
+       Impact : The driver operating in environments with kernel versions
+                of 2.6.5 and above requires the use of ethtool to set
+                parameters. When the driver is used with a kernel version
+                older than 2.6.5 it will accept all command line parameters.
+
+                The only parameters accepted from the command line in
+                kernel versions 2.6.5 and later are:
+
+                                            nic_tx_bd
+                                            delay_link
+                                            disable_d3hot
+                                            disable_msi
+
+   3. Problem : CQ12278 Make driver errors on Suse 9.
+
+        Cause : The MODULE_PARAM macro is defined differently in kernel
+                versions below 2.6.10 than they are in the 2.6.10
+                kernel verion. The driver did not account for the
+                different macro definitions and the driver code path
+                was flawed for 2.4.x kernels when declaring
+                MODULE_PARM.
+
+       Change : The driver parameters are declared in three ways and all
+                the original parameters are still used when the driver
+                is operating in systems with kernel versions below 2.6.5.
+
+       Impact : The driver operating in systems with kernel versions
+                of 2.6.5 and above requires the use of ethtool to set
+                parameters. The driver accepts all parameters from
+                the command line when running in systems with kernel
+                versions older than 2.6.5.
+
+                The only parameters accepted from the command line in
+                kernel versions 2.6.5 and later are:
+
+                                            nic_tx_bd
+                                            delay_link
+                                            disable_d3hot
+                                            disable_msi
+
+
+
+v8.1.7 (February 25, 2005)
+============================
+   Fixes:
+   ------
+
+   1. Problem : CQ12168 Running ethtool -d <interface> causes
+                system to hang or panic.
+       Cause  : Driver stores two copies of memory allocated for
+                register data.  One copy gets incremented as it
+                gets filled.  The other does not.  The driver was
+                using the incremented pointer to free the memory
+                instead of the non-incremented pointer.
+       Change : Pass the original pointer value to kfree().
+       Impact : System behaves as expected.
+
+   2. Problem : External loopback test not working with 5752 devices.
+       Cause  : 5752 ISR was dereferencing an invalid packet
+                descriptor pointer.
+       Change : Turn off interrupts when loopback tests are running.
+       Impact : System behaves as expected.
+
+   3. Problem : CQ11916 HTLE has intermittent problem passing traffic.
+       Cause  : The HTLE seems to have a problem with low clock speed.
+       Change : The driver will not slow the clock down when unloading
+                for HTLE.
+       Impact : None.
+
+   4. Problem : CQ12080 TSO should be disabled by the driver when
+                jumbo frames are used with the 5714.
+       Cause  : The driver did not disable TSO when running
+                jumbo frames on the 5714
+       Change : Added code to disable TSO when 5714 is running in
+                jumbo frame mode.
+       Impact : None.
+
+   5. Problem : CQ12209 5714 Fiber would not pass traffic with IPMI
+                enabled.
+       Cause  : The fiber would not get initialized due to the driver
+                using the wrong phy type.
+       Change : The driver now checks for the correct phy id when
+                IPMI is loaded.
+       Impact : None.
+
+   6. Problem : CQ12166 Running ethtool -t fails register and memory
+                tests on 5752.
+       Cause  : Test was performing tests for this device.
+       Change : Change code to use 5705 register and memory tests.
+       Impact : None.
+
+
+
+v8.1.6 (February 23, 2005)
+============================
+   Fixes:
+   ------
+
+   1. Problem : CQ12128 5701 locks up system when driver loads.
+       Cause  : The driver used the wrong NVRAM access type.
+       Change : The driver code was changed to use the correct
+                NVRAM type to access the NVRAM.
+       Impact : 5701 will not lock up the system.
+
+   2. Problem : CQ12212 Unwanted information is displayed.
+       Cause  : The driver displayed debug information.
+       Change : The debug information was removed from the driver.
+       Imapct : None.
+
+
+  Enhancements
+  ------------
+
+   1. Problem : CQ11650 Driver does not show ASF / IPMI version.
+      Change  : Added code to extract ASF / IPMI version info from
+                NVRAM.
+      Impact  : None.
+
+
+
+v8.1.5 (February 18, 2005)
+============================
+
+   Fixes:
+   -----
+    1. Problem : CQ12097 Unable to link with  5714S.
+        Cause  : The v8.1.4 driver did not fully support 5714S.
+       Change  : Added support for the 5714S.
+       Impact  : 5714S is functional w/v8.1.5.
+
+
+    2. Problem : CQ11807 Driver will not pass traffic with
+                 forced speed.
+        Cause  : The driver default setting of gigabit mode
+                 was interferring with the forced settings.
+       Change  : The gigabit mode setting is now cleared until used.
+       Impact  : None.
+
+
+   3. Problem  : CQ12104 VPD Read error on 5714 LOM.
+        Cause  : The race condition described CQ11951.
+       Change  : Change is described in v8.1.3. and actually
+                 fixed in v8.1.3.
+       Impact  : None.
+
+
+
+v8.1.4 (February 16, 2005)
+============================
+
+   Fixes:
+   -----
+    1. Problem : CQ11918 Customer reported problem with kernel dump.
+        Cause  : When the driver was using the NAPI POLL function, it
+                 did not have a way for the kernel dump to function.
+        Change : The driver NAPI POLL function code was change so that
+                 it now will call the driver ISR to allow the kernel
+                 dump function to run when the kernel dump feature
+                 is enabled in the kernel.
+        Impact : None.
+
+    2. Problem : CQ12114 The MSI state machine on the device is not
+                 disabled on the in the event that the system
+                 call to enable msi fails.
+        Change : The driver will disable the MSI state machine
+                 when the call to pci_enable_msi() fails.
+        Impact : None.
+
+
+
+
+v8.1.3 (February 15, 2005)
+============================
+
+   Fixes:
+   -----
+
+    1. Problem : (CQ11951) "Failed to access NVRAM" messages are
+                 showing up in the message file.
+       Cause   : Because EEPROM accesses are much slower than flash
+                 accesses, the bootcode can take that much longer to
+                 initialize the hardware.  The problem here was that
+                 Linux was downloading the LSO firmware to the NIC
+                 before the bootcode had a chance to complete it's
+                 task.  As a result, the firmware would crash, while
+                 still holding the NVRAM lock.
+       Change  : Acquire the NVRAM lock before halting the CPU and
+                 downloading the LSO firmware.
+       Impact  : None.
+
+    2. Problem : (CQ12096) MODULE_PARM deprecated warnings.
+       Cause   : Linux is moving to a new module parameter declaration
+                 format.  The kernel has deprecated the older
+                 parameter declaration style.
+       Change  : For those module parameters that do not have a
+                 configuration tool equivalent, the parameter
+                 declarations have been converted to the new style.
+                 All other module parameters have been dropped in
+                 favor of their configuration tool equivalents.
+       Impact  : None.
+
+
+   Enhancements:
+   -------------
+
+   1. Problem : (CQ10408) Driver does not issue a "Link is DOWN"
+                message when bringing the interface down.
+      Change  : Issue a "Link down" message upon device closure.
+      Impact  : None.
+
+   2. Problem : (CQ10828) The driver needs a way to isolate
+                loopback testing.
+      Change  : Added a NICE command to invoke loopback tests.
+      Impact  : None.
+
+   3. Problem : CQ12159 Older silicon has memory location 0xd38 uninitialized
+                and bits 17,18 may be set which causes the capacitive
+                coupling and pre-emphasis settings to be enabled by mistake.
+      Change  : Validate memory location 0xd38 before using it.
+                The patch is similiar to a patch done in tg3.
+      Impact  : none.
+
+   4. Problem : Added changed asic revs for 5714 family.
+
+
+
+v8.1.2 (February 1, 2005)
+============================
+   Fixes:
+   -----
+
+   1. Problem : (CQ12046)Does not compile on some supported distrobutions.
+       Cause  : The disable_msi switch was declared but then used within
+                #defines
+       Change : The disable_msi switch is declared within the same defines
+                as where it is used.
+
+   Impact: None.
+
+   2. Problem: (CQ12045)Unable to pass traffic on the 5714.
+      Cause  : The disable_msi switch seems to have caused compile problems.
+      Change : The above change resolves this problem too.
+
+   Impact: None.
+
+   Enhancment: Added support for the 5751_C0.
+
+
+v8.1.1 (February 1, 2005)
+============================
+   Enhancements:
+   ------------
+   Change: MAC address is read from NVRAM on 5714s for now.
+
+   Impact: None.
+
+
+v8.1.0.5 (January 28, 2005)
+============================
+   Enhancement:
+   ------------
+   Change: Jumbo frames are supported on the 5714.
+           msi is supported on the 5714
+           NVRAM support code was enhanced.
+
+   Impact: None.
+
+   Note: This is a preliminary driver for internal testing only.
+
+
+8.1.0.4.msi (January 1, 2005)
+============================
+   Enhancement:
+   ------------
+   Change: Additional tweeking to support 5752 & 5714/5715 including:
+           -msi is enabled for 5752 only.
+           -detection of 5752 & 5714 is fixed.
+
+   Impact: None.
+
+   Note: This is still a preliminary driver release for internal
+         testing only.
+
+
+
+v8.1.0.2 (December 16, 2004)
+============================
+   Enhancement:
+   ------------
+   Change: PCI IDs were added to support the 5752
+
+   Impact: None.
+
+   Note: This is a very preliminary and internal release for internal
+         testing only.
+
+
+
+v8.1.0.1 (December 14, 2004)
+============================
+   Enhancement:
+   ------------
+   Change: PCI IDs were added to support the 5714 and 1515.
+
+   Impact: None.
+
+   Note: This is an alpha release for support of the 5714 & 5715
+
+
+v7.4.10 (December 3, 2004)
+=========================
+
+   1. Problem : (CQ11042)ASF IP Monitoring cannot update config table.
+
+      Cause   : The NVRAM on 5750 LOM systems could not be written as
+                the NVRAM write protection was not being cleared by
+                the driver.
+
+      Change  : The driver now  correctly uses the write protection
+                capabilities of the 5750 LOM NVRAM.
+
+      Impact  : The driver can write to the NVRAM for 5750 LOMs.
+
+
+
+v7.4.9 (December 1, 2004)
+=========================
+
+   1. Problem : EEPROM_ExecuteCommand warnings showing up on the console.
+
+      Cause   : Code incorrectly uses old EEPROM routines.
+
+      Change  : Use new nvram routines when available.
+
+      Impact  : Flash works as expected.
+
+   2. Problem : (CQ11472)Add PLL workaround.
+
+      Cause   : Occasionally a problem occurs when the device is put
+                into D3 cold. The problem can result in a chip lockup.
+                This only occurs on 5750 AX/BX chips.
+
+      Change  : Added the workaroud to code, which is to keep the
+                power clks ticking when transitioning to d3 cold/hot.
+
+      Impact  : D3 transition is robust.
+
+
+v7.4.8 (November 24, 2004)
+=========================
+
+   1. Problem : Vpd cannot be read on 5704 and other legacy devices.
+
+      Cause   : Code incorrectly identifies flash type.
+
+      Change  : Ignore bits 24 and 25 on Config1 for legacy devices.
+
+      Impact  : Flash works as expected.
+
+
+   2. Problem : (CQ11402) Driver crashes while obtaining chip size on 5701.
+
+      Cause   : Code uses incorrect read routine.  Chipsize was not
+                initialized which caused a divide by zero.
+
+      Change  : Change code to use correct read routine.  Made sure
+                to set the chipsize to a valid chipsize (nonzero)
+                before calling the read routine.
+
+      Impact  : EEPROM works as expected.
+
+
+   3. Problem : Firmware version not correct for 5721 devices.
+
+      Cause   : Offset calculation error for Atmel parts.
+
+      Change  : Fix calculation error.
+
+      Impact  : Firmware version correct.
+
+
+v7.4.7 (November 18, 2004)
+=========================
+
+   1. Problem : Firmware version not displaying on BCM5753 devices.
+
+      Cause   : Reads being performed before the NVRAM is locked.
+
+      Change  : Lock the NVRAM before performing any reads.
+
+      Impact  : None.
+
+
+   2. Problem : (CQ11142) OOPS occuring on PPC750
+
+      Cause   : Statistic and status memory pointers were initialized
+                even after driver shutdown and memory deallocation
+                causing OOPS to occur when statistics were probed.
+
+      Change  : Reset pointers to zero after shutdown.
+
+      Impact  : None.
+
+
+   3. Problem : (CQ11115) Driver allows for invalid user adminstered
+                MAC address.
+
+      Cause   : Driver did not check for valid address.
+
+      Change  : Driver checks for valid MAC address.
+
+      Impact  : None.
+
+
+   4. Problem : (CQ10598) Driver occasionally cannot get link on certain
+                machines.
+
+      Cause   : The certain machines had interrupt sharing between many
+                devices and occasionally the driver would lose the
+                link change interrupt.
+
+      Change  : The ISR was modified to ensure the interrupt being cleared
+        has been serviced properly.
+
+      Impact  : None.
+
+
+   5. Problem : (CQ11117) Need SERDES pre-emphasis support.
+
+        Cause : Certain 5704 designs have requested that certain bits be
+                set in SERDES configuration registers.
+
+       Change : Changes made use presupplied value for SERDES configuration.
+
+       Impact : None.
+
+
+  Enhancement :
+  -------------
+
+   1. Change  : GPIO2 will not have an output for the 5753 family.
+
+   2. Change  : Added code to support more flash (and EEPROM) types.
+                The flash write code has been separated into buffered
+                and unbuffered versions.  The flash and EEPROM read
+                code has been modified to support sub-32bit word reads.
+                New nvram sizing functions have been introduced.
+
+
+v7.4.6 (October 25, 2004)
+=========================
+
+   1. Problem : (CQ11088) Remove the ability to set speed & duplex on the 150T
+
+       Cause  : The switch on the 150T nic is set to autoneg. The line speed
+                on the 5705 should only be set to auto for proper link to
+                be established with the internal switch.
+
+      Change  : Added code in b57um.c line 4316 to check for this nic and
+                always set it to auto.
+
+      Impact  : None.
+
+
+   2. Problem : (CQ11102) NMI occurs during load/unload w/ASF enabled.
+
+       Cause  : The 5753 drove GPIO2 as an output, which did not allow
+                ASF to use it to sense main power properly.
+
+      Change  : The driver does not driver GPIO2.
+
+      Impact  : None.
+
+
+v7.4.5 (October 11, 2004)
+========================
+   Enhancement:
+   ------------
+   Change: PCI IDs were added to support the 5753, 5753M, 5753F and 5789.
+
+   Impact: None.
+
+
+v7.4.4 (October 4, 2004)
+=======================
+
+   1. Problem : (CQ10955) DELL 6650 kernel panic during negotiation
+        using 5700 lom.
+
+       Cause  : Spinlock deadlock during reset & link up.
+
+      Change  : Removed the spinlock contention.
+
+      Impact  : None.
+
+
+   2. Problem : (CQ10436)Man page needs update.
+
+       Cause  : bcm5700.ko was not noted in man page.
+
+      Change  : Modified man page.
+
+      Impact  : None.
+
+
+   3. Problem : (CQ10396) Cannot ping when Dell PowerEdge 6650(#459)
+                is configured for 10half forced.
+
+      Cause   : 5411 PHY does not require a PHY reset before being set
+                up to 10 half, or a PHY reset was being called without
+                sufficient delay before the PHY was being set up.
+
+                The code in LM_ResetAdapter()calls
+                LM_ResetPhy()(on line 3479 in tigon3.c) immediately before
+                calling LM_SetupPhy().
+                If a 2 second delay is placed between these two functions,
+                then 10half forced will function, or when LM_ResetPhy()
+                is removed, 10half forced will again function.
+
+                It is not clear why This delay is needed or why
+                LM_ResetPhy()is needed here as the MII control reg shows
+                the same values for a successful or failed case.
+                LM_ResetPhy() is not called for the 5401 PHY for the
+                same reason this problem occurs.
+                A request for assistance was emailed to HWEng  with no
+                response.
+
+      Change  : Removed unnecessary PHY reset for 5411 PHY.
+
+      Impact  : Forcing 5411 PHY to 10 half will function as expected.
+
+
+
+v7.4.3 (August 26, 2004)
+======================
+   Fixes:
+   ------
+   1. Problem : (CQ10437) Driver is installed in a directory other
+                than the directory noted in the README.TXT file.
+
+       Cause  : Note omission.
+
+       Change : Added a line in the README.TXT file diclosing an
+                alternative install directory
+                (/lib/modules/<kernel_version>/kernel/drivers/net/bcm/)
+                for SLES9 installations.
+
+       Impact : Problem resolved.
+
+   2. Problem : (CQ10396) Cannot ping when Dell PowerEdge 6650(#459)
+                is configured for 10half forced.
+
+      Cause   : 5411 PHY does not require a PHY reset before being
+                forced to 10 half.
+
+      Change  : Removed unnecessary PHY reset for 5411 PHY.
+
+      Impact  : Forcing 5411 PHY to 10 half will function as expected.
+
+
+   3. Problem : (CQ10540)Max value for "stats_coalesce_ticks" is
+                rejected in 2.6 kernels.
+
+       Cause  : 2.6 kernels are using a different parameter interface
+                that limits the value range.
+
+       Change : README.TXT was changed to inform the user that the
+                value range for this parameter may very by kernel version.
+
+      Impact  : None.
+
+
+   4. Problem : (CQ9804)5751 freezes in certain platforms under heavy
+                stress.
+
+       Cause  : A logic bug in clearing interrupts caused this to occur.
+                See previous entry for CQ9804.
+
+      Change  : Setting Bit 29 in 0x7c00 (TLP control reg) prevents
+        the lock-up from occurring and was set as a safeguard.
+
+       Impact : None.
+
+
+   Enhancement: (CQ10355) Ethtool -i shows no value for "firmware-version"
+   ------------
+      Change  : Added bootcode version value to Ethtool driver info structure.
+
+      Impact  : None.
+
+
+
+
+v7.4.2 (July 29, 2004)
+======================
+   Fixes:
+   ------
+   1. Problem:(CQ10695) System screen froze after third port.
+
+       Cause: Third port was pci and driver was treating it
+          as a pciexpress. Bug introduced v7.4.1.
+
+       Change:Driver checks for PCIE or PCI and then executes
+          PCIE code only on PCIE adapter.
+
+       Impact:Problem resolved.
+
+   2. Problem:(CQ10627)Remove 5751-A0 support.
+
+       Cause: 5751-A0 is not shipping.
+
+       Change:Driver checks for 5751 A0 then fails if found.
+
+       Impact:Driver will not load on 5751-A0
+
+
+v7.4.1 (July 27, 2004)
+======================
+   Fixes:
+   ------
+   1. Problem:(CQ10602) FSC 1899 system may freeze/reboot when bringing the
+        initerface up/down with ASF enabled.
+
+      Cause:  Handshake between ASF & driver disrupted by 7.4.0 extra
+          delay, allowing the driver to enable D3 state before ASF
+          was ready.
+
+      Change: Delay was moved to immediately before enabling D3.
+
+      Impact: Driver will not freeze or reboot system.
+
+   2. Problem:(CQ10481)Driver displays gigabit speed on adapter
+          that only supports 10/100.
+
+      Cause:  The Driver displayed support for 10/100/1000 link
+              do to an error in the code.
+
+      Change: Code changed to display correct link support
+          values.
+
+      Impact: Driver displays correct supported link speeds.
+
+
+v7.4.0 (July 12, 2004)
+======================
+   Enhancement:
+   ------------
+   Change: Added extra delay after GRC reset to make the
+           firmware D3hot workaround in 3.29i effective.
+
+   Impact: None.
+
+   Fixes:
+   ------
+   1. Problem: (CQ10549) "BCM_DRV: command not found" when compiling
+               the source RPM.
+
+      Cause: $(BCM_DRV) not substituted properly.
+
+      Change: Changed all $(BCM_DRV) to $BCM_DRV in bcm5700.spec.
+
+      Impact: None.
+
+   2. Problem: (CQ10468) Driver not working properly in bridging environment
+               after changing mtu.
+
+      Cause: Promiscuous mode not preserved after changing mtu.
+
+      Change: Fixed by setting the rx mode after mtu change.
+
+      Impact: None.
+
+   3. Problem: (CQ10557) Kernel panics with 17 or more devices installed.
+
+      Cause: Driver parameters checking logic assumes maximum of 16
+             devices.
+
+      Change: Added logic to skip parameter processing if the device
+              index is higher than or equal to 16.
+
+      Impact: This will prevent the kernel panic and the driver will load with
+              any number of devices in the system. Driver parameters will
+              only work for the first 16 devices.
+
+   4. Problem: Changing mtu may cause the kernel to print a warning message:
+               sleeping function called from invalid context at mm/slab.c.
+
+      Cause: Calling kmalloc with GFP_KERNEL from invalid context.
+
+      Change: Changed to GFP_ATOMIC.
+
+      Impact: None.
+
+v7.3.5 (June 23, 2004)
+======================
+   Fixes:
+   ------
+   1. Problem: (CQ10407) Linux 2.6 kernel fails to get IP address using DHCP
+               on 5751 A1.
+
+      Cause: When DHCP fails, ifup script will shutdown the NIC and it
+             will go to D3hot state. On 2.6 kernels, the config write
+             to put device in D3hot will be written using mmconfig with
+             a mmconfig read of register 0 to flush the write. The
+             read immediately following the write when the device is
+             transitioning to L1 link state may cause problems. The symptom
+             is that the device will lose the memory space bit in the
+             PCI command register. When ifup brings up the NIC again
+             to retry DHCP, the device will not be functional.
+
+     Change: The fix for the problem is in bootcode 3.29 which will
+             greatly reduce if not eliminate this problem from happening.
+             To further reduce the risk, 2 changes were made to the driver.
+             1. Add a parameter to disable D3hot (disable_d3hot).
+             2. Check PCI command register and re-enable the memory space
+                and other bits multiple times until the bits are set
+                or up to a maximum during driver init.
+
+      Impact: None.
+
+v7.3.4 (June 18, 2004)
+======================
+   Fixes:
+   ------
+   1. Problem: (CQ10312) System Hangs when loading and unloading the driver
+               continuously with 5705.
+
+      Cause: Hang was caused by infinite retry soon after writing to register
+             0x74 to speed up the core clock.
+
+      Change: Implemented a 2-step sequence to speed up the core clock on
+              5705 and shasta devices.
+
+      Impact: None.
+
+   2. Problem: System crashes occasionally when loading and unloading the
+               driver.
+
+      Cause: System may be unable to map memory.
+
+      Change: Added error check on memory mapping and gracefully fail
+              the driver load.
+
+      Impact: None.
+
+   3. Problem: (CQ10364) System hangs when issuing reset from b57ldiag.
+
+      Cause: Deadlock when trying to get a spinlock.
+
+      Change: Removed the deadlock.
+
+      Impact: None.
+
+   4. Problem: (CQ10379) Driver allows jumbo frames on 5751/5721 devices
+               using ifconfig.
+
+      Cause: Missing validity check for mtu on shasta devices.
+
+      Change: Added checks.
+
+      Impact: None.
+
+   5. Problem: (CQ#10110) ethtool -d still hangs on some systems.
+
+      Cause: Chip does not respond to reserved registers, causing
+             some machines to hang.
+
+      Change: More changes to only dump the valid registers in the
+              memory space.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Change: Added Capacitive coupling phy support.
+
+v7.3.3 (June 03, 2004)
+======================
+   Enhancements:
+   -------------
+   1. Change: Added support for 5789.
+
+   Fixes:
+   ------
+   1. Problem: 5704 may run on Vaux during normal operations.
+
+      Cause: Depending on the sequence of shutdown, the first port
+             of a 5704 may be brought up and run on Vaux due to
+             a programming error.
+
+      Change: Corrected the GPIO programming sequence to take
+              both ports of the 5704 into account.
+
+      Impact: None.
+
+   2. Problem: NC150T not identified.
+
+      Change: Added OEM string.
+
+      Impact: None.
+
+   3. Problem: (CQ #10340) NC1020 identified as NC7722.
+
+      Cause: String not updated.
+
+      Change: Updated OEM string.
+
+      Impact: None.
+
+v7.3.2 (June 03, 2004)
+======================
+   Enhancements:
+   -------------
+   1. Change: Added support for 5751F.
+
+   Fixes:
+   ------
+   1. Problem: (CQ #10145) IBM PPC64 PBlade crashes after many hours.
+
+      Cause: Speculative execution path reading an old descriptor, causing
+             the wrong buffer to be freed.
+
+      Change: Added read memory barriers to prevent this.
+
+      Impact: None
+
+   2. Problem: 5701 does not link up intermittently.
+
+      Cause: Concurrent register writes when adding multicast address and
+             sevicing link change interrupt. This is a chip bug.
+
+      Change: Added locking to prevent this one case of concurrent register
+              access.
+
+      Impact: None.
+
+v7.3.1 (May 27, 2004)
+=====================
+   Fixes:
+   ------
+   1. Change: Added workaround for 5750 A3 to disable the CPU after
+              reset.
+
+      Impact: None.
+
+v7.3.0 (May 21, 2004)
+=====================
+   Enhancements:
+   -------------
+   1. Change: Added support for 5751M devices.
+
+   Fixes:
+   ------
+   1. Problem: (CQ#10109) CIOBE hangs machine after many hours of heavy traffic.
+
+      Cause: New hw errata on 5704 PCIX multi-split mode.
+
+      Change: Disabled multi-split on CIOBE.
+
+      Impact: None.
+
+   2. Problem: (CQ#10110) ethtool -d hangs on some systems.
+
+      Cause: Chip does not respond to reserved registers, causing
+             some machines to hang.
+
+      Change: Changed code to only dump the valis registers in the
+              memory space.
+
+      Impact: None.
+
+   3. Problem: Driver contains unresolved genapic symbol when compiled
+               on some kernels.
+
+      Cause: genapic may be referenced by hard_smp_processor_id.
+
+      Change: Removed hard_smp_processor_id which is purely for
+              debugging and not needed.
+
+      Impact: None.
+
+   3. Problem: (CQ#9959) ethtool returns wrong flow control settings.
+
+      Cause: Minor bug.
+
+      Impact: None.
+
+v7.2.24 (April 23, 2004)
+========================
+   Enhancements:
+   -------------
+   1. Change: (CQ #9955) Remove support for 5751M devices.
+
+      Impact: None.
+
+   2. Change: Added support for cache line aligned write DMA on PPC64.
+              This feature is only supported on 5700/5701.
+
+      Impact: None.
+
+   Fixes:
+   ------
+   1. Problem: ASF doesn't run properly after ifdown on 5750 chips.
+
+      Cause: Driver sets device to run on slow core clock during
+             shutdown. ASF cannot run on slow clock.
+
+      Change: Added check to skip slowing the core clock if ASF
+              is running on 5750 chips.
+
+      Impact: None.
+
+   2. Problem: TSO doesn't work on non-x86 architectures.
+
+      Cause: U32 misdefined.
+
+      Impact: None.
+
+v7.2.23 (April 19, 2004)
+========================
+   Fixes:
+   ------
+   1. Problem: (CQ #9782) ethtool link test fails on 5703 intermittently.
+
+      Cause: Not waiting long enough for link up.
+
+      Change: Added 3 more seconds if copper link is still down.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Change: Added PHY workaround for 5705/5750 to improve bit error rate.
+
+      Impact: None.
+
+v7.2.22 (April 14, 2004)
+========================
+   Fixes:
+   ------
+   1. Problem: (CQ #9804) PCIE system freezes under heavy stress.
+
+      Cause: 2 problems - 1. Logic in poll routine prematurely clears
+             the next interrupt, causing tx timeout. 2. Bug in reset
+             logic causing hang.
+
+      Change: Made changes to the logic that reenables rx interrupt
+              in the poll routine. Fixed the tx timeout reset routine.
+
+      Impact: None.
+
+   2. Problem: (CQ #9836) 5700 LOMs not recognising link down.
+
+      Cause: 5700 in 66 MHz or higher bus speeds will go through
+             chip reset instead of the normal link down interrupt
+             when link goes down at gigabit link speed. There is
+             a bug in the reset logic that causes the link down
+             event to be unreported.
+
+      Change: Simple change in the reset logic.
+
+      Impact: None.
+
+
+v7.2.21 (April 08, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: (CQ #9645) Unable to pass traffic on 5701 with long cable.
+
+      Cause: Phy register 0x18 shadow 0 not set correctly.
+
+      Change: Changed the code to do read-modify-write on that register
+              to preserve the contents of that register.
+
+      Impact: None.
+
+v7.2.20 (Mar. 31, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: Poor performance in NAPI mode in certain test cases.
+
+      Cause: Stale packets not processed by the driver after polling
+             completes. This is caused by rx interrupt being
+             enabled right after a new status block is already
+             initiated and pending DMA.
+
+      Change: Implemented a new scheme to detect possible missed
+              packets after rx interrupt is enabled. Also set
+              the "during-int" coalescing parameters to be the
+              same as the normal coalescing parameters.
+
+      Impact: None.
+
+   2. Problem: Driver unable to identify the PHY intermittently.
+
+      Cause: In some cases, both boot code and driver
+             cannot read the proper PHY ID from the PHY. Driver
+             relies on either the PHY ID read by boot code or
+             directly read from the PHY register to idendify the PHY.
+
+      Change: Changed the PHY detection logic to make it more
+              robust by doing PHY reset when boot code and PHY
+              registers return invalid PHY ID.
+
+      Impact: None.
+
+   3. Problem: LEDs not working perfectly on shasta devices.
+
+      Cause: Some new shasta LED modes require driver to update
+             register 0x450.
+
+      Change: Added necessary code to update register 0x450.
+              Also changed driver to program register 0x40c
+              instead of relying on boot code to program it.
+
+      Impact: None.
+
+   3. Problem: Driver does not compile on kernels not supporting
+               NAPI.
+
+      Cause: Minor syntax error.
+
+   Enhancements:
+   -------------
+   1. Change: Added a new OEM ID and string.
+
+v7.2.19 (Mar. 11, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: (CQ9188) Gigabit link light still does not work on 5751.
+
+      Cause: bug in implementation.
+
+      Change: Cleaned up the LED code in the driver and let the
+              bootcode program the LEDs on shasta (575x/572x) devices.
+
+      Impact: None.
+
+   2. Problem: CRC errors reported on 5700 using 5411 PHYs.
+
+      Cause: PHY register 0x18 shadow register 0 not programmed
+             correctly.
+
+      Change: Fixed code to use the same setting as 5401.
+
+      Impact: None.
+
+   3. Change: Enabled hw bug fix for 5703/04 PCI-X write DMA bug.
+
+      Impact: None.
+
+   4. Problem: ethtool -t fails nvram test in big endian systems.
+
+      Cause: Endian bug in calculating CRC in nvram.
+
+      Change: Simple fix by swapping data.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Change: (CQ8586) Added some missing stats counters to
+              ETHTOOL_GSTATS
+
+      Impact: None
+
+v7.2.18 (Feb. 24, 2004)
+=======================
+   Fixes:
+   ------
+   1. Change: Changed driver for 5751 A1 by disabling PCIE reset
+              during GRC reset.
+
+      Impact: None.
+
+   2. Change: Changed driver for 5751 A1 by enabing PCIE data
+              fifo bug fix in the chip.
+
+      Impact: None.
+
+v7.2.16 (Feb. 20, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: (CQ9188) Gigabit link light does not work on 5751.
+
+      Cause: Driver did not support the new shasta LED modes.
+
+      Change: Added support for the new shasta LED modes.
+
+      Impact: None.
+
+   2. Problem: (CQ9418) 5700 NIC fails to pass traffic at 10Mbps
+               half duplex when connected to a switch port forced
+               to the same speed setting.
+
+      Cause: The 5401 PHY requires a long delay after PHY reset
+             before the PHY can be confiured.
+
+      Change: Changed code to skip PHY reset if it is 5401.
+
+      Impact: None.
+
+   3. Problem: (CQ9430) RPM build errors occur on 2.6.x kernels.
+
+      Cause: spec file was not handling 2.6 kernels with the new
+             kernel build mechanism properly.
+
+      Change: Modified the spec file.
+
+      Impact: None.
+
+   4. Problem: (CQ9410 & CQ9393) Delayed link report to MII and
+               ETHTOOL ioctls causing problems.
+
+      Cause: Workaround for ifup problem (see v6.2.11, CQ7791 bug
+             fix descript for details) causing problems in
+             other applications that require accurate link information.
+
+      Change: Changed driver so that the delayed link workaround is
+              enabled using a delay_link driver parameter. The parameter
+              is disabled be default.
+
+      Impact: ifup may not be able to obtain IP address using DHCP.
+              Use the delay_link parameter or modify the ifup script
+              to increase the wait time for link up.
+
+v7.2.15 (Feb. 12, 2004)
+=======================
+   Enhancement:
+   ------------
+   1. Change:  Added diagnostics functions to support ethtool -t.
+
+      Impact: None.
+
+v7.2.12 (Feb. 05, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: Tx timeout reset may crash when hardware is unreliable.
+
+      Cause: Reset routine relies on a valid rx consumer index in status
+             block to free the rx buffers. (related to problem #1
+             fixed in 7.2.10)
+
+      Change: Changed logic to not rely on the hw rx consumer index.
+
+      Impact: None.
+
+   2. Problem: Driver not running in NAPI mode
+
+      Cause: see Problem #1 fixed in 7.2.10.
+
+      Change: Fixed NAPI code so that it will also run in single-threaded
+              mode.
+      Impact: None.
+
+   3. Problem: (CQ 9293) Driver hangs intermittently during ifdown.
+
+      Cause: Writing to Nic's memory when memory arbiter is disabled.
+
+      Change: Changed code to write firmware mailbox signatures before
+              memory arbiter is disabled.
+
+      Impact: None.
+
+   4. Problem: PHY's extended packet length bit not set when using
+               jumbo frames.
+
+      Change: Added change to always set this bit on NICs that
+              support jumbo frames.
+
+      Impact: None, but testing required.
+
+   5. Problem: Posted writes not flushed before delay loop, causing
+               the delay to be less than intended in duration.
+
+      Change: Added register read back to flush the writes before delay
+              loop, where appropriate.
+
+      Impact: None.
+
+   6. Problem: (CQ 9263) ethtool -a returning wrong autonegotiation
+                status.
+
+      Cause: Minor bug.
+
+      Change: Minor change.
+
+      Impact: None.
+
+   Enhancement:
+   ------------
+   1. Change: Implemented TSO for 5788 and changed name to NetLink
+
+      Impact: None.
+
+v7.2.11 (Jan. 21, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: (CQ#9207) ASF does not work when driver is loaded on 5751.
+
+      Cause:  Driver/ASF handshake problem caused by a long delay after
+              GRC reset.
+
+      Change: Added the new Driver/ASF handshake mechanism.
+
+      Impact: None.
+
+   2. Problem: (CQ#9179) Driver allows jumbo frames on 575x.
+
+      Change: Minor change to disallow setting jumbo frames on 575x.
+
+      Impact: None.
+
+v7.2.10 (Jan. 13, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: (CQ#9181) Panic on IBM PCIE system running chariot.
+
+      Cause: The panic was caused by a problem in the tx timeout
+             reset logic that assumed a good rx BD consumer index
+             can always be read from the chip during reset. When
+             something is wrong with the chip and a bogus rx BD
+             consumer is read, the system panics when trying to
+             recycle a wrong BD.
+
+             The tx timeout itself was caused by buggy single-threaded
+             workaround code and register read back code originally
+             implemented for the 5700 and 5701.
+
+      Change: Fixed the single-threaded and register read back
+              workaround. The fix was implemented for non-NAPI
+              mode only as the fix for NAPI will take more time.
+              The driver will only run in non-NAPI mode.
+
+      Impact: Minor.
+
+   2. Problem: ASF does not run on 5751.
+
+      Cause: FTQ reset after chip reset.
+
+      Change: Removed FTQ reset.
+
+      Impact: Should be none, but need to be tested on all 570x chips.
+
+   3. Problem: (CQ#9170) NMI occurs intermittently when doing ifconfig down.
+
+      Cause: HW bug when programming 5751 to low power mode.
+
+      Change: Removed low power mode setting for 5751.
+
+      Impact: Wol will not work on 5751.
+
+   4. Change: Changed delay after GRC reset to 500 msec.
+
+   5. Change: Changed shasta_smp_fix to 1 (enabled) be default.
+
+v7.2.9 (Jan. 09, 2004)
+======================
+   Enhancements:
+   -------------
+   1. Change: Added parameter shasta_smp_fix to enable/disable
+              SMP workaround (see fix #2 in v7.2.8). Default
+              is workaround disabled.
+
+      Impact: None.
+
+v7.2.8 (Jan. 05, 2004)
+======================
+   Fixes:
+   ------
+   1. Problem: (CQ#9096) Data corruption with large ping packets.
+
+      Cause: Mbuf pool start and length registers overwritten by
+             driver.
+
+      Change: Fixed code so that the 2 mbuf registers will not be
+              overwritten for the 5750.
+
+      Impact: None.
+
+   2. Change: Added register read back and single-threaded workaround
+              for 5750 PCIE.
+
+      Impact: Lower performance.
+
+v7.2.7 (Dec. 24, 2003)
+======================
+   Fixes:
+   ------
+   1. Change: Changed delay to 300msec after GRC reset for 5751/5721 A0 PCI
+              Express devices.
+
+      Impact: None.
+
+v7.2.6 (Dec. 10, 2003)
+======================
+   Fixes:
+   ------
+   1. Problem: Driver does not receive interrupts on some PCI
+               Express systems.
+
+      Cause: A register bit could not be set using config. cycles.
+
+      Change: Changed to memory write cycle to write the register.
+
+      Impact: None.
+
+v7.2.5 (Dec. 02, 2003)
+======================
+   Fixes:
+   ------
+   1. Problem: Driver crashes during transmit timeout reset.
+
+      Cause: Driver was calling schedule_timeout which is a
+             blocking function and cannot be called in interrupt
+             context.
+
+      Change: Changed to udelay.
+
+      Impact: None.
+
+v7.2.4 (Nov. 24, 2003)
+======================
+   Fixes:
+   ------
+   1. Problem: (CQ #8908) System freezes when 5751 PCI Express device
+               is brought up.
+
+      Cause: PCI Express device was not detected properly.
+
+      Change: Corrected the PCI Express detection logic.
+
+      Impact: None.
+
+   2. Problem: (CQ #8910) PCI_Bus_Speed is misreported for PCI Express
+               device.
+
+      Cause: Old logic did not take PCI Express into account.
+
+      Change: Made simple change to account for PCI Express device.
+
+      Impact: None.
+
+v7.2.1 (Nov. 18, 2003)
+======================
+
+   Enhancements:
+   -------------
+   1. Change: Made some changes to make 5751 work on PCIE 1.0 systems.
+
+v7.2.0 (Nov. 17, 2003)
+======================
+
+   Enhancements:
+   -------------
+   1. Change: Added support for 575x and 572x PCI and PCIE chips.
+
+v7.1.21 (Jan. 05, 2004)
+=======================
+   Fixes:
+   ------
+   1. Problem: ASF stops working after driver is loaded if PXE ran
+               and did not shutdown properly.
+
+      Cause: The wait time to gain NVRAM arbitration was not long
+             enough in 5704 using serial eprom. As a result, a
+             reset can happen to one channel of a 5704 while
+             the other channel is still loading boot code. This
+             will cause ASF to subsequently hang waiting forever
+             for NVRAM arbitration.
+
+      Change: Changed the wait time to cover the worst case
+              serial eprom boot code load time plus a safety margin.
+
+      Impact: None.
+
+   2. Problem: (CQ#8890) Receive errors on 5700 NICs.
+
+      Cause: Incorrect PHY settings on the 5401 introduced in 6.2.18
+             when PHY loopback was implemented.
+
+      Change: Fixed the PHY settings.
+
+      Impact: None.
+
+   3. Problem: Driver does not compile on some 2.4 kernels.
+
+      Cause: Driver not compatible with some older ethtool.h files.
+
+      Change: Added #ifdef to fix the problem.
+
+      Impact: None.
+
+v7.1.20 (Dec. 24, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: ASF stops working after driver is loaded if PXE is enabled.
+
+      Cause: The fix for the PXE problem in version 7.1.18 (fix #3, see below)
+             has a flaw that causes reset to always occur if PXE is enabled.
+             This reset causes ASF to stop functioning.
+
+      Change: Fixed the flawed logic.
+
+      Imapct: None.
+
+v7.1.19 (Dec. 10, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: (CQ #8961) Interrupt test fails intermitently.
+
+      Cause: A race condition between the ioctl and interrupt
+             service routine can cause the interrupt test to fail.
+
+      Change: Added code to regenerate the interrupt in the loop
+              that waits for interrupt to complete.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Change: Changed Makefile to use ppc64 compiler and linker
+              if compiling on ppc64 environment.
+
+      Impact: None.
+
+v7.1.18 (Nov. 21, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: IPMI firmware receiving VLAN tagged packets stops working
+               after ifconfig up.
+
+      Cause: Driver sets NIC to keep VLAN tags by default.
+
+      Change: Added code and driver parameter vlan_tag_mode to control whether
+              VLAN tags will be stripped or not. By default, the driver will
+              always strip VLAN tags if ASF/IPMI firmware is enabled.
+
+      Imapct: If ASF is enabled, the NIC may not work properly when VLAN
+              and bonding are used together. Sniffer applications that
+              wants to receive raw VLAN-tagged frames will also be affected.
+
+   2. Problem: IPMI firmware stops working after ifconfig up on PPC64 machine.
+
+      Cause: Timing differences on PPC cause the driver to reset a certain
+             chip block after firmware has enabled it. Timing difference
+             is due to very slow config cycles on the PPC.
+
+      Change: Rearranged some code in LM_ResetAdapter to get around the problem.
+
+      Impact: None.
+
+   3. Problem: Driver does not load if PXE ran previously and did not shutdown
+               the chip.
+
+      Cause: Driver does not work properly as it expects the chip to be
+             disabled during reset.
+
+      Change: Added code to check if the chip is enabled and reset it
+              if necessary before setup.
+
+      Imapct: None.
+
+   4. Problem: Driver takes a long time to reset if the bootcode is
+               disabled on the PPC.
+
+      Cause: Config cycles are very slow on the PPC and the loop
+             to check for the firmware signature is too tight.
+
+      Change: Loosened the loop to check for the firmeare signature
+              after reset. Also made the maximum loop count smaller
+              if it is using flash NVRAM.
+
+      Imapct: None.
+
+   Enhancements:
+   -------------
+   1. Change: Added ETHTOOL_GRINGPARAM ioctl
+
+      Imapct: None.
+
+   2. Change: Added PPC64 specific compile switches in Makefile to allow
+              the driver to be compiled as a standalone module.
+
+      Imapct: None.
+
+v7.1.11 (Nov. 05, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: Running b57ldiag on PPC system crashes after a while.
+
+      Cause: PCI addresses not properly unmapped during diagnostics
+             suspend operation.
+
+      Change: Added code to unmap PCI addresses in rx buffers during
+              suspend.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Problem: Driver doesn't load on SerDes and 5704 devices when
+               the NVRAM is blank or corrupted. Driver needs to load
+               to support diagnostics.
+
+      Cause: 5704 NVRAM cannot be reliably accessed when boot code is
+             not running, so driver cannot get proper MAC address
+             and proper PHY ID.
+
+      Change: Changed code to allow driver to load with warnings when
+              even when NVRAM cannot be accessed.
+
+      Impact: When boot code is blank, driver will load with a bogus
+              MAC address.
+
+   2. Problem: Driver cannot reliably read/write NVRAM when NVRAM
+               is corrupted or blank.
+
+      Cause: When bootcode is not running, the NVRAM interface state
+             machines will get locked up.
+
+      Change: Added code to reset the NVRAM interfaces of both
+              ports in 5704.
+
+      Impact: None.
+
+   3. Change: Added ioctl to get and clear statistics block.
+
+      Impact: None.
+
+v7.1.9 (Nov. 03, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: Driver does not load on 5704S devices if the eeprom is
+               blank.
+
+      Cause: 5704S defaults to an unsupported device ID when eeprom
+             is blank.
+
+      Change: Added the default 5704S device ID.
+
+      Impact: None.
+
+
+v7.1.8 (Oct. 31, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: ASF/IPMI stops passing traffic after driver is loaded.
+
+      Cause: GRC mode control register overwritten when driver loads.
+
+      Change: Changed driver to preserve the relevant bit in the GRC
+              mode control register during driver load.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Change: Changed memory allocation ioctl to support diagnostics
+              program doing DMA tests.
+              Added a new ioctl to force Nvram write protect on/off
+              in case the write protect setting is wrong in the nvram.
+
+      Impact: None.
+
+v7.1.6 (Oct. 27, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: (CQ #8732) Unloading bcm5700.ko in 2.6 kernels causes
+               segmentation fault.
+
+      Cause: Driver uses init_etherdev which has been deprecated by
+             alloc_etherdev and register_netdev.
+
+      Change: Changed to use the new APIs in 2.6 kernels.
+
+      Impact: None.
+
+v7.1.5 (Oct. 21, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: Driver does not compile on 2.5+ kernels.
+
+      Cause:  mem_map_reserve/mem_unmap_reserve no longer defined in 2.5+
+              kernels.
+
+      Change: Changed to SetPageReserved/ClearPageReserved (More testing
+              is needed to make sure this works on 2.5+ kernels)
+
+      Impact: No impact on normal driver operations. The memory
+              allocation ioctl that supports diagnostics may be impacted.
+
+v7.1.4 (Oct. 17, 2003)
+======================
+
+   Enhancements:
+   -------------
+   1. Change: Added memory allocation ioctl to allow user apps to mmap it
+              for dma tests.
+
+      Imapct: None.
+
+   Fixes:
+   ------
+   1. Problem: Driver does not load on ia64 with register_ioctl32_conversion
+               undefined.
+
+      Cause:   register_ioctl32_conversion not defined for ia64.
+
+      Change:  Removed this routine for ia64.
+
+      Imapct: None.
+
+v7.1.2 (Oct. 13, 2003)
+======================
+
+   Enhancements:
+   -------------
+   1. Change: Added OEM string.
+
+      Impact: None.
+
+v7.1.1 (Oct. 07, 2003)
+======================
+
+   Enhancements:
+   -------------
+   1. Change: Added a few more diagnostics ioctl commands.
+
+      Impact: None.
+
+   2. Change: (CQ #8428) Added nic_tx_bd parameter.
+
+      Impact: None.
+
+   3. Change: Added ETHTOOL_GTSO and ETHTOL_STSO ioctl commands and
+              changed TSO to be enabled by default (when supported
+              by the NIC and the kernel)
+
+      Impact: None.
+
+   4. Problem: (CQ #8469) Mandrake 9.1 has new module path.
+
+      Change: Modified Makefile to install driver in the new 3rdparty path.
+
+      Impact: None.
+
+   5. Problem: (CQ #8438) Some parameters do not assume default values
+               as documented.
+
+      Cause: When running in NAPI mode, some coalescing parameters have
+             different default values.
+
+      Change: Updated documentation and man page.
+
+      Impact: None.
+
+
+v7.1.0 (Sep. 22, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: SIOCNICE ioctl does not work in 64-bit systems when
+               the calling application is 32-bit.
+
+      Cause: The 32-bit ifreq data structure is converted by the
+             kernel to 64-bit, messing up the nice_req structure.
+
+      Change: Added 32-bit ioctl conversion routine to handle the
+              proper conversion.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Problem: Ethtool -e does not output the same data on big
+               and little endian systems.
+
+      Change: Change swapping scheme so that nvram read/write routines
+              will work with the same byte-stream data in big and little
+              endian systems.
+
+      Impact: None.
+
+    2. Change: Added support for 5705F.
+
+       Impact: None.
+
+v7.0.0 (Aug. 14, 2003)
+======================
+
+   Enhancements:
+   -------------
+   1. Problem: Phy ADC and gamma fix not applied properly to all
+               relevant PHY cores.
+
+      Change: Made appropriate changes to apply the fix to the
+              relevant PHYs after PHY reset.
+
+   2. Problem: 5704 SerDes drive transmission level not set properly.
+
+      Change: Changed 5704 SerDes' drive transmission level to 1.2V.
+
+v6.2.20 (Aug. 08, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: (CQ #8275) 5704B0 NICs not working properly on HP rx2600
+               PCIX systems
+
+      Cause: Problem in one of the hardware fixes in 5704 B0.
+
+      Change: Disable the h/w fix.
+
+      Impact: None.
+
+v6.2.19 (July 31, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: Repeated ifup/ifdown hangs systems using iommu's.
+
+      Cause: Rx buffers not properly unmapped during ifdown.
+
+      Change: Fixed driver to unmap all buffers during ifdown.
+
+      Impact: None.
+
+   2. Problem: (CQ# 8232) Copper NICs drop packets when connected
+               to some switches.
+
+      Cause: Phy register 0x18 (aux. ctrl) shadow 0 not set up
+             properly. This bug was introduced when adding
+             external loop back function in v6.2.18.
+
+      Change: Fixed the phy register setting.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Problem: Not setting up dma mask (pci_set_dma_mask) according to
+      Documentation/DMA-mapping.txt.
+
+      Change: Made the required changes when calling pci_set_dma_mask.
+
+      Impact: None.
+
+   2. Problem: Driver does not restore line speed settings after
+               external loopback.
+
+      Change: Added code to save line_speed settings before ext.
+              loopback and to restore the settings afterward.
+
+      Impact: None.
+
+   3. Problem: Makefile does not compile driver properly on 2.5+ kernels.
+
+      Change: Modified Makefile to support 2.4 anf 2.5+ kernels
+              transparently. (More work needs to be done)
+
+      Impact: None.
+
+v6.2.18 (July 25, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: TSO doesn't work on ia64 and big endian machines.
+
+      Cause: U32 typedef as unsigned long and TSO firmware was not
+             downloaded properly on big endian machines.
+
+      Change: Fixed U32 typedef and big endian code for firmware
+              downloading. Also made additional cleanup and testing
+              on the big endian code.
+
+      Impact: None.
+
+   Enhancements:
+   -------------
+   1. Problem: TSO performance slightly below (< 10%) non-TSO
+               performance on 5703/5704.
+
+      Change: Optimized firmware to narrow the performance gap.
+
+      Impact: None.
+
+   2. Problem: (CQ #8184) Driver limits the number of Multicast addresses
+               to 32.
+
+      Change: Changed scheme to allow unlimited Multicast addresses by
+              by just keeping the Hash values.
+
+      Impact: None.
+
+   3. Problem: (CQ #7822) Driver does not support ETHTOOL_GSTRINGS,
+               ETHTOOL_GSTATS, ETHTOOL_GREGS, ETHTOOL_PHYS_ID ioctls.
+
+      Change: Added these ioctls.
+
+      Impact: None.
+
+   4. Problem: Driver does not support 5704 B0.
+
+      Change: Added support for 5704 B0.
+
+      Impact: None.
+
+v6.2.17 (July 14, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: (CQ8125) ethtool -e hangs system
+
+      Cause: ethtool tries to read 1Mbytes of data from the slow
+             nvram.
+
+      Change: Changed maximum size of nvram to 128K and added a 1K
+              limit to ETHTOOL_GEEPROM ioctl.
+
+      Impact: None.
+
+   2. Problem: Driver does not work properly on the latest 2.5 kernels
+               and generates "irq xx: nobody cared!" message.
+
+      Cause: Interrupt service routine needs to return value to indicate
+             whether interrupt was serviced or not in the latest 2.5
+             kernels.
+
+      Change: Made the necessary change in the ISR.
+
+      Impact: None. Still compatible with 2.4 and older kernels.
+
+v6.2.16 (July 11, 2003)
+=======================
+
+   Enhancements:
+   -------------
+   1. Problem: Link polling interval for 5703S NICs is too long.
+
+      Change: Decreased the link polling interval to 1/4 second.
+
+      Impact: None.
+
+v6.2.15 (July 10, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: (CQ7987) Blade NIC link toggles up and down under network
+               stress.
+
+      Cause: PCS SYNC signal appears to be unstable in some cases
+             under stress.
+
+      Change: Changed driver to poll for link changes instead of using
+              interrupts. Also added code to proceed with PHY setup
+              only if PCS SYNC or SIGNAL DETECT are down. These changes
+              allow the NIC to run with minimal interruption when the NIC
+              occasionally loses PCS SYNC for short periods of time.
+
+      Impact: May slightly affect link change/autoneg behavior.
+
+v6.2.14 (July 01, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: Driver panics when loading on 2.4.20-18.7 RH kernel.
+
+      Cause: Makefile compiles driver with kgcc, making the driver
+             incompatible with the kernel that was compiled with gcc.
+
+      Change: Modified Makefile to choose kgcc only if the kernel
+              was compiled with kgcc.
+
+      Impact: None.
+
+   2. Problem: Link error when compiling driver into kernel with
+               CONFIG_HOTPLUG not defined.
+
+      Cause: __devexit_p not used in the bcm5700_remove_one pointer.
+
+      Change: Added __devexit_p for the bcm5700_remove_one pointer.
+
+      Impact: None.
+
+v6.2.11 (May 16, 2003)
+======================
+
+   Fixes:
+   ------
+   1. Problem: CQ#7791 Driver cannot consistently lease DHCP address.
+
+      Cause: The Broadcom NICs sometimes takes longer to link up
+             when connected to certain switches. This may cause
+             the ifup script to conclude that link is down and not
+             proceed to obtain an IP address using DHCP.
+
+      Change: The workaround is done in the driver to return error when the
+              mii-tool or ethtool getlink ioctl interfaces are called during
+              the first 6 seconds after driver reset. When the driver returns
+              error, the ifup script will assume link is up and proceed with
+              the DHCP request. After 6 seconds, these ioctl interfaces will
+              return the true link states at the time they are called.
+
+      Impact: ifup always proceeds with DHCP request whether link is up
+              or down.
+
+v6.2.7 (May 14, 2003)
+=====================
+
+   Enhancements:
+   -------------
+   1. Problem: Driver does not have OEM strings for some 5703 B0 NICs.
+
+      Change: Added OEM sub IDs and description strings.
+
+
+v6.2.6 (May 09, 2003)
+=======================
+
+   Enhancements:
+   -------------
+   1. Problem: Driver does not support 5901 A2/A3.
+
+      Change: Added support for 5901 A2/A3.
+
+
+v6.2.5 (May 05, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: Driver intermittently won't load when ASF is enabled.
+
+      Cause: Driver's init function's PHY routines contend with ASF.
+
+      Change: Removed PHY access routines in init function when ASF is
+              enabled. Using the latest firmware (2.33) will guarantee
+              that the proper PHY ID will be obtained by the driver.
+
+   Enhancements:
+   -------------
+   1. Problem: Driver does not support 5901.
+
+      Change: Added support for 5901.
+
+v6.2.4 (April 29, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: The PHY lockup problem described in v6.2.3 Fix #4 below
+               theoretically can affect other PHY cores in 5703 and 5705.
+
+      Cause: Hardware bug in the PHY core. Probability of lockup is
+             extremely small.
+
+      Change: Expanded the lockup detection and recovery code to 5703,
+              5704, and 5705. Also changed the driver to do a PHY reset
+              on link down on all versions of 5705. Also added PHY reset
+              before restart autoneg in ethtool for 5703, 04, and 05.
+
+v6.2.3 (April 18, 2003)
+=======================
+
+   Fixes:
+   ------
+   1. Problem: (CQ #7518) Using ethtool to set speed before ifup crashes
+               the system when using fiber NICs.
+
+      Cause: ethtool ioctl may access the status block which is not
+             initialized before ifup.
+
+      Change: Added check before proceeding with some ethtool ioctls.
+
+      Impact: Only impact certain ethtool commands.
+
+
+   2. Problem: (CQ #7577) Cannot receive traffic in some rare situations
+               after loading the driver.
+
+      Cause: In some rare situations when running in NAPI mode, the chip
+             generates a receive interrupt before the interface state is
+             up. The driver then disables rx interrupt and schedules the
+             polling function which fails because the interface is not up.
+             This polling function will not be called and no rx packets
+             will be processed.
+
+      Change: Added check for the return value of netif_rx_schedule_prep()
+              and will only disable rx interrupt if it returns success.
+
+      Impact: Receive code path in NAPI mode.
+
+
+   3. Problem: ethtool -r (restart autoneg) does not work on 5704S.
+
+      Cause: LM_SetupPhy does not restart autoneg if autoneg is already
+             set for 5704S.
+
+      Change: Added code to first disable autoneg and then reneable it.
+
+      Impact: Only affects ethtool -r for fiber NICs.
+
+
+   4. Problem: In some extremely rare situations, 5704 Copper NICs
+               may not link up after a PHY reset.
+
+      Cause: On some 5704 PHY cores, there is a small probability of
+             lock up after a PHY reset.
+
+      Change: Added code to detect PHY lock up after a PHY reset and
+              reset again if lock up is detected.
+
+      Impact: The added lock up detection and recovery code affects
+              driver reset and link down events where PHY resets are
+              performed.
+
+
+v6.2.2 (04/09/03)
+
+- Fixed the problem of intermittently using a MAC address of all zeros.
+- Added support for BASP in NAPI mode.
+- Added polling mode to support netdump.
+
+v6.2.1 (03/25/03)
+
+- Added NAPI.
+
+v6.2.0 (03/18/03)
+
+- Added support for 5788.
+- Changed locking functions into macros to avoid passing the flags.
+
+v6.0.3 (02/25/03)
+
+- Fixed the problem of 5704S not linking when it is set to autoneg. and the
+  link partner has autoneg. disabled.
+
+v6.0.2 (02/14/03)
+
+- Fixed the problem of T3_CHIP_ID_5705_A2 not defined in tigon3.h
+
+v6.0.1 (02/11/03)
+
+- Fixed some minor bugs in the adaptive coalescing logic.
+
+v6.0.0 (02/10/03)
+
+- Fixed another ASF problem that occurred when WOL was disabled in firmware
+  but enabled in the driver.
+
+- Added new device IDs for 5705 A2/A3 and made necessary changes to support
+  5705 A3.
+
+v5.0.22 (02/07/03)
+
+- Fixed the problem of ASF malfunction when the device is shutdown.
+
+v5.0.21 (02/06/03)
+
+- Fixed the problem of ifup (mii-tool) always detecting link down on 5704S.
+- Fixed the problem of high CPU utilization when receiving line-rate traffic
+  from Smartbits or Ixia by limiting the number of buffers allocated in the ISR.
+
+v5.0.20 (02/05/03)
+
+- Fixed a bad IP checksum problem in the 5702/03/04 TSO firmware.
+
+v5.0.19 (01/23/03)
+
+- Changed Makefile to include proper compiler switches for x86_64 architectures.
+- Fixed a bug in the adaptive coalescing function. Some variables were not
+  properly initialized after ifdown and ifup and this bug may cause
+  low performance especially when using jumbo frames.
+- Tweaked the adaptive coalescing parameters slightly to improve netperf
+  performance.
+
+v5.0.17 (01/10/03)
+
+- Made changes for 5705 A2.
+- Added autoneg. workaround for 5704S.
+
+v5.0.16 (01/03/03)
+
+- Fixed the hang problem on 5700 during ifdown.
+
+v5.0.15 (01/03/03)
+
+- Fixed some WOL issues.
+- Fixed TSO problems on 5702/03/04.
+- Fixed problems with the network_install dd images.
+
+v5.0.14 (12/19/02)
+
+- Made flow control work better.
+- Added 10Mbps limit for 5704 WOL.
+- Removed 5901 and 5705MFE support.
+
+v5.0.12 (12/12/02)
+
+- Added diagnostics ioctls.
+- Enabled flow control by default.
+
+v5.0.11 (12/06/02)
+
+- Fixed data corruption problem on 5705 with TSO enabled.
+- Fixed 5701 lockup during initialization.
+
+v5.0.10 (11/20/02)
+
+- Added support for 5705MFE and 5901.
+- Added TSO for 5705 A1.
+- Fixed ifconfig hang on Intel McKinley.
+
+v5.0.9  (11/08/02)
+
+- Made changes for 5705 A1 chips.
+
+v5.0.8  (11/05/02)
+
+- Fixed ASF problem on 5705.
+- Fixed problem with changing MAC address.
+- Added MTU change using ifconfig.
+- Fixed problem running on AMD X86_64 machines.
+
+v5.0.7  (10/11/02)
+
+- Fixed 5704S link related problems.
+- Improved performance slightly on some PCIX machines.
+- Fixed GEEPROM to allow full access to NVRAM.
+
+v5.0.6  (10/03/02)
+
+- Fixed problem of 5704S not linking up.
+- Added code to support autoneg in 5704S hardware.
+
+v5.0.5  (09/24/02)
+
+- Fine-tuned some parameters for improved performance.
+- Added TSO.
+- Fixed WOL problems on 5704.
+- Fixed the problem of not enabling ASF on the fly.
+- Fixed incorrect PCIX speed in proc file.
+- Added 5704S support.
+- Fixed incorrect PCIX speed in proc file.
+- Fixed the initialization failure on 5701 LOMs.
+
+v3.0.12 (08/22/02)
+
+- Fixed the problem of not loading on CIOBE A1.
+- Fixed intermittent hang problem when configuring 802.1q VLAN.
+
+v3.0.11 (08/21/02)
+
+- Added DIAG_SUSPEND/DIAG_RESUME ioctls.
+- Added some workarounds for 5705.
+- Added vlan tag size adjustment when receiving vlan tagged packets.
+
+v3.0.10 (08/07/02)
+
+- Fixed NVRAM write corruption.
+- Added check to not allow jumbo MTUs on 5705.
+- Added WOL on OEM 5703 Fiber LOM.
+
+v3.0.9 (08/05/02)
+
+- Added support for 5705.
+
+v3.0.8 (07/25/02)
+
+- Fixed VLAN problem with BASP.
+- Added new 5704 IDs.
+- Added support for 5702FE.
+
+v3.0.7 (07/17/02)
+
+- Changed to enable VLAN tag stripping only when VLAN or BASP is registered.
+- Fixed problem of sending bad zero-copy packets.
+- Added additional workaround for systems with AMD762.
+- Adjusted EEPROM delay loop.
+
+v3.0.6 (06/25/02)
+
+- Fixed an ASF failure.
+- Added 802.1Q VLAN
+- Added a locking scheme for PHY access.
+- Fixed an intermittent crash problem with fiber NICs.
+- Adjusted fiber autoneg. logic to work with 3Com 4900SX switch.
+- Added netif_carrier_on and netif_carrier_off.
+
+v3.0.5 (05/30/02)
+
+- Fixed occasional hang during load and unload.
+- Fixed non-zero statistics when stats_coalesce_ticks is 0.
+
+v3.0.4 (05/15/02)
+
+- Fixed 10Mbps line speed setting bug.
+- Fixed problem with jumbo packets.
+- Fixed a compile warning on Red Hat 7.3
+
+v3.0.3 (05/13/02)
+
+- Added support for ASF.
+- Added 64-bit counters for 64-bit machines.
+- Reduced code size.
+- Fixed intermittent VPD failures.
+
+v3.0.2 (05/03/02)
+
+- Fixed a bug on PCIX systems.
+
+v3.0.1 (05/02/02)
+
+- Added workaround for Intel ICH and ICH0 chipsets.
+- Fixed 5704 related problems.
+
+v3.0.0 (04/22/02)
+
+- Added 5704 support
+- Reduced some overhead in the upper/lower driver interface.
+
+v2.2.19 (04/10/02)
+
+- Fixed a panic problem on 5700 under heavy traffic on certain machines.
+- Reduced code size slightly.
+- Added necessary delays after changes to GPIO.
+
+v2.2.18 (04/03/02)
+
+- Added new OEM subsystem IDs.
+- Fixed some ethtool problems.
+
+v2.2.17 (04/02/02)
+
+- Adjusted some delay loops to avoid hangs during intermittent failures.
+
+v2.3.0 (03/29/02)
+
+- Special version with external memory and Mini ring support.
+
+v2.2.12 (03/27/02)
+
+- Minor fix for some fiber related issues.
+
+v2.2.11 (03/23/02)
+
+- Adjusted fiber autoneg scheme to be consistent with other Broadcom
+  drivers.
+
+v2.2.10 (03/21/02)
+
+- Changed Fiber LED to software control.
+- Fixed 4 GByte boundary check for 5700.
+
+v2.2.9 (03/13/02)
+
+- Fixed a hang problem on 5703S with cable disconnected.
+
+v2.2.8 (03/07/02)
+
+- More changes to fiber autonegotiation - interrupt with polling backup
+  for fiber link changes.
+
+v2.2.7 (03/06/02)
+
+- Made some changes to autonegotiation of fiber.
+
+v2.2.6 (03/05/02)
+
+- Added fix for 5703S.
+- Improved adaptive interrupt coalescing.
+- Fixed a problem in WOL.
+
+v2.2.5 (02/27/02)
+
+- Fixed a big endian problem.
+
+v2.2.4 (02/27/02)
+
+- Added new device IDs for 5703/5702.
+- Fixed parity error NMIs with 5703 on PCIX systems.
+- Added Ethernet@WireSpeed.
+
+v2.2.3 (02/07/02)
+
+- Fixed EEPROM corruption during repeated load/unload of the driver.
+- Changed driver to use polling for fiber link changes.
+
+v2.2.1 (01/23/02)
+
+- Increased eeprom timing delays for slower clocks.
+
+v2.2.0 (01/22/02)
+
+- First release for 5702/5703 A1.
+
+v2.0.34 (01/04/02)
+
+- Fixed data corruption problem on PCIX systems under heavy traffic.
+
+v2.0.32 (01/02/02)
+
+- No change.
+
+v2.0.31 (12/14/01)
+
+- Changed i/o accesses to use writel/readl macros.
+- Fixed problem when loading driver on an OEM LOM with no cable attached.
+- Fixed problem of setting IFF_ALLMULTI.
+- Changed to use pci_map_page to map the zero copy transmit fragments.
+
+v2.0.28 (11/05/01)
+
+- Added SIOCETHTOOL ioctl support.
+
+v2.0.27 (10/26/01)
+
+- Fixed a link up problem for an OEM LOM.
+
+v2.0.26 (10/25/01)
+
+- Added 5702 support.
+
+v2.0.25 (10/22/01)
+
+- Added Rx_Short_Fragments and other counters.
+- Added code to detect AMD762 Northbridge and enable PCI ordering on that chip.
+
+v2.0.24 (09/19/01)
+
+- Fixed intermittent link failures.
+
+v2.0.21 (09/14/01)
+
+- Fixed zero copy failure.
+
+v2.0.19 (09/11/01)
+
+- Fixed the problem of over reporting CRC errors.
+- Fixed the problem of late collisions in 1000Mbps half duplex.
+
+v2.0.18 (08/24/01)
+
+- Added same fix in 2.0.17 for the latest A3 chips.
+
+v2.0.17 (08/22/01)
+
+- Fixed a lock-up problem when loading fibre card with no cable attached.
+
+v2.0.16 (08/18/01)
+
+- Fixed a panic caused by an interrupt before the NIC is fully initialized.
+
+v2.0.15 (08/14/01)
+
+- Fixed a problem that caused unnecessary resets to the chip during
+heavy traffic.
+
+v2.0.14 (08/09/01)
+
+- Lowered core clock freq. in latest 5701 chip in 100Mbps WOL mode.
+
+v2.0.12 (08/02/01)
+
+- Fixed a 100Mbps fixed speed problem.
+- Fixed the accidental clearing of RX stats during link changes.
+- Added reentrancy protection in tasklet so that it will work on RH7.2 beta3.
+
+v2.0.11 (07/19/01)
+
+- Fixed some fiber autonegotiation problems.
+
+v2.0.10 (07/13/01)
+
+- Added promiscuous mode support.
+- Improved performance, especially on 5700 chips.
+
+v2.0.9 (07/04/01)
+
+- Fixed IA64 DMA alignment problem.
+
+v2.0.8 (07/03/01)
+
+- Fixed panic during ifdown.
+
+v2.0.7 (07/01/01)
+
+- Fixed problems with fibre cards.
+- Added 100Mbps WOL for 5701 B2 chip.
+
+v2.0.6 (06/22/01)
+
+- Improved adaptive receive interrupt coalescing.
+- Added LED blinking ioctl.
+- Added support for new boards.
+- Fixed hang problem when cable is not attached.
+
+v2.0.5 (06/18/01)
+
+- Some performance improvements.
+- Added adaptive receive interrupt coalescing.
+- Preliminary release for IA64.
+
+v2.0.4 (06/01/01)
+
+- Fixed a problem with multiple cards using jumbo frames.
+
+v2.0.3 (05/22/01)
+
+- Fixed panic during hotplug.
+- Fixed RPM error on Mandrake.
+
+v2.0.2 (05/21/01)
+
+- Fixed a spin lock problem.
+
+v2.0.1 (05/18/01)
+
+- Fixed memory leak when unloading driver.
+
+v1.5.6 (05/11/01)
+
+- Added additional OEM support.
+- Added Wake-On-LAN support.
+
+v1.5.4 (05/04/01)
+
+- Fixed interrupt and TX hung problem on 5701.
+- Added OEM strings.
+
+v1.5.3 (04/26/01)
+
+- Fixed parameter defaults.
+- Added /proc filesystem reporting.
+
+v1.5.2 (04/18/01)
+
+- Fixed bug in transmit IP checksum.
+
+v1.5.1 (04/15/01)
+
+- Added scatter/gather, HIGHMEM DMA, and IP transmit checksum offload for the
+  TUX kernel.
+- Added support of BCM5701.
+
+v1.5.0 (03/14/01)
+
+- Added Fibre transceiver support.
+
+v1.4.6 (02/14/01)
+
+- Fixed the problem of dropping VLAN tagged 802.2/802.3 frames.
+- Fixed Makefile to work in non Red Hat environments.
+- Fixed the problem of over-counting receive errors.
+
+v1.4.5 (01/31/01)
+
+- Added PCI-X support for BCM5700.
+- Fixed Jumbo frame problems by modifying some thresholds and increased
+Jumbo frame size to 9K.
+
+v1.4.4 (01/18/01)
+
+- Fixed the problem of transmit congestion during very heavy traffic in pre-
+2.4.0 kernels.
+
+v1.4.3 (01/10/01)
+
+- Changed driver to use new PCI DMA functions in 2.4 kernel.
+
+v1.4.2 (01/03/01)
+
+- Changed driver to use spin locks for SMP machines.
+- Added spin locks around PRIVATE ioctls for MII registers .
+
+v1.4.1 (12/26/00)
+
+- Made changes for B1 chips.
+
+v1.4.0 (12/19/00)
+
+- Made changes for 2.4.0 kernel.
+
+v1.3.8 (12/13/00)
+
+- Fixed the problem of setting a user assigned MAC address.
+- Added VLAN support for BASP.
+
+v1.3.7 (12/01/00)
+
+- Added code to handle BCM5401 B0 phy chips.
+
+v1.3.6 (11/22/00)
+
+- Fixed LED problems.
+
+v1.3.5 (11/21/00)
+
+- Fixed some flow control auto negotiation problems.
+
+v1.3.4 (11/17/00)
+
+- Fixed a problem of missing interrupts.
+- Resolved all fixed speed related problems.
+
+v1.3.3 (11/13/00)
+
+- Fixed the problem of memory allocation failure in some machines.
+
+v1.3.2 (11/09/00)
+
+- Made more changes regarding fixed speeds. Also removed manual selection
+  of 1000 Mbps.
+- Made a SRPM package.
+
+v1.03b (10/31/00)
+
+- Fixed problems #452, #441, #364, and other speed related problems in the
+  Lower Module.
+
+v1.03 (10/30/00)
+
+- Released Lower Module as tigon3.o.
+
+v1.02c (10/27/00)
+
+- Fixed the fixed speed problem in Lower Module.
+
+v1.02b (10/24/00)
+
+- Added new parameters for flow control settings.
+- Fixed problem with uninitialized statistics counters (problem #338).
+
+v1.02  (10/16/00)
+
+- Modified for B0 chips, should also work for other chips.
+- Reenabled TCP/UDP receive hardware checksums.
+
+v1.01b (10/09/00)
+
+- Changed driver to use pci* routines instead of pcibios* routines to obtain
+  the correct IRQ on some MP machines.
+- Resolved Problems #253, #257.
+
+v1.01 (09/27/00)
+
+- Added statistics collection function.
+- Added jumbo frames support.
+- Added MII related ioctl calls.
+- Disabled UDP/TCP receive checksum offload to workaround a memory corruption
+  problem in A1 chips.
+- Fixed interrupt sharing problem.
+
+v1.00 (09/13/00)
+
+-First release of the driver for BCM5700 A1 chips.
+

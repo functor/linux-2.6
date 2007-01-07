@@ -35,20 +35,18 @@
 
 #include <asm/unistd.h>
 
-int vfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+int vfs_statfs(struct super_block *sb, struct kstatfs *buf)
 {
 	int retval = -ENODEV;
 
-	if (dentry) {
-		struct super_block *sb = dentry->d_sb;
-
+	if (sb) {
 		retval = -ENOSYS;
 		if (sb->s_op->statfs) {
 			memset(buf, 0, sizeof(*buf));
-			retval = security_sb_statfs(dentry);
+			retval = security_sb_statfs(sb);
 			if (retval)
 				return retval;
-			retval = sb->s_op->statfs(dentry, buf);
+			retval = sb->s_op->statfs(sb, buf);
 			if (retval == 0 && buf->f_frsize == 0)
 				buf->f_frsize = buf->f_bsize;
 		}
@@ -60,12 +58,12 @@ int vfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 EXPORT_SYMBOL(vfs_statfs);
 
-static int vfs_statfs_native(struct dentry *dentry, struct statfs *buf)
+static int vfs_statfs_native(struct super_block *sb, struct statfs *buf)
 {
 	struct kstatfs st;
 	int retval;
 
-	retval = vfs_statfs(dentry, &st);
+	retval = vfs_statfs(sb, &st);
 	if (retval)
 		return retval;
 
@@ -103,12 +101,12 @@ static int vfs_statfs_native(struct dentry *dentry, struct statfs *buf)
 	return 0;
 }
 
-static int vfs_statfs64(struct dentry *dentry, struct statfs64 *buf)
+static int vfs_statfs64(struct super_block *sb, struct statfs64 *buf)
 {
 	struct kstatfs st;
 	int retval;
 
-	retval = vfs_statfs(dentry, &st);
+	retval = vfs_statfs(sb, &st);
 	if (retval)
 		return retval;
 
@@ -138,7 +136,7 @@ asmlinkage long sys_statfs(const char __user * path, struct statfs __user * buf)
 	error = user_path_walk(path, &nd);
 	if (!error) {
 		struct statfs tmp;
-		error = vfs_statfs_native(nd.dentry, &tmp);
+		error = vfs_statfs_native(nd.dentry->d_inode->i_sb, &tmp);
 		if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
 			error = -EFAULT;
 		path_release(&nd);
@@ -157,7 +155,7 @@ asmlinkage long sys_statfs64(const char __user *path, size_t sz, struct statfs64
 	error = user_path_walk(path, &nd);
 	if (!error) {
 		struct statfs64 tmp;
-		error = vfs_statfs64(nd.dentry, &tmp);
+		error = vfs_statfs64(nd.dentry->d_inode->i_sb, &tmp);
 		if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
 			error = -EFAULT;
 		path_release(&nd);
@@ -176,7 +174,7 @@ asmlinkage long sys_fstatfs(unsigned int fd, struct statfs __user * buf)
 	file = fget(fd);
 	if (!file)
 		goto out;
-	error = vfs_statfs_native(file->f_dentry, &tmp);
+	error = vfs_statfs_native(file->f_dentry->d_inode->i_sb, &tmp);
 	if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
 		error = -EFAULT;
 	fput(file);
@@ -197,7 +195,7 @@ asmlinkage long sys_fstatfs64(unsigned int fd, size_t sz, struct statfs64 __user
 	file = fget(fd);
 	if (!file)
 		goto out;
-	error = vfs_statfs64(file->f_dentry, &tmp);
+	error = vfs_statfs64(file->f_dentry->d_inode->i_sb, &tmp);
 	if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
 		error = -EFAULT;
 	fput(file);
@@ -330,7 +328,7 @@ static long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
 
 	error = locks_verify_truncate(inode, file, length);
 	if (!error)
-		error = do_truncate(dentry, length, ATTR_MTIME|ATTR_CTIME, file);
+		error = do_truncate(dentry, length, 0, file);
 out_putf:
 	fput(file);
 out:
@@ -646,7 +644,7 @@ asmlinkage long sys_fchmod(unsigned int fd, mode_t mode)
 	dentry = file->f_dentry;
 	inode = dentry->d_inode;
 
-	audit_inode(NULL, inode);
+	audit_inode(NULL, inode, 0);
 
 	err = -EROFS;
 	if (IS_RDONLY(inode) || MNT_IS_RDONLY(file->f_vfsmnt))
@@ -800,7 +798,7 @@ asmlinkage long sys_fchown(unsigned int fd, uid_t user, gid_t group)
 	if (file) {
 		struct dentry * dentry;
 		dentry = file->f_dentry;
-		audit_inode(NULL, dentry->d_inode);
+		audit_inode(NULL, dentry->d_inode, 0);
 		error = chown_common(dentry, file->f_vfsmnt, user, group);
 		fput(file);
 	}
@@ -1167,7 +1165,7 @@ int filp_close(struct file *filp, fl_owner_t id)
 	}
 
 	if (filp->f_op && filp->f_op->flush)
-		retval = filp->f_op->flush(filp, id);
+		retval = filp->f_op->flush(filp);
 
 	dnotify_flush(filp, id);
 	locks_remove_posix(filp, id);
@@ -1215,7 +1213,6 @@ EXPORT_SYMBOL(sys_close);
 asmlinkage long sys_vhangup(void)
 {
 	if (capable(CAP_SYS_TTY_CONFIG)) {
-		/* XXX: this needs locking */
 		tty_vhangup(current->signal->tty);
 		return 0;
 	}

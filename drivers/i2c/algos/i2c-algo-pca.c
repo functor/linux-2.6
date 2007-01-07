@@ -374,10 +374,10 @@ int i2c_pca_add_bus(struct i2c_adapter *adap)
 	adap->timeout = 100;		/* default values, should	*/
 	adap->retries = 3;		/* be replaced by defines	*/
 
-	if ((rval = pca_init(pca_adap)))
-		return rval;
+	rval = pca_init(pca_adap);
 
-	rval = i2c_add_adapter(adap);
+	if (!rval)
+		i2c_add_adapter(adap);
 
 	return rval;
 }

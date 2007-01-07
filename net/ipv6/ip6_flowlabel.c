@@ -10,6 +10,7 @@
  */
 
 #include <linux/capability.h>
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/socket.h>
@@ -587,8 +588,6 @@ static struct ip6_flowlabel *ip6fl_get_next(struct seq_file *seq, struct ip6_flo
 	while (!fl) {
 		if (++state->bucket <= FL_HASH_MASK)
 			fl = fl_ht[state->bucket];
-		else
-			break;
 	}
 	return fl;
 }

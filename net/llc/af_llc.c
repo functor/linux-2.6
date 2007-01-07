@@ -20,6 +20,7 @@
  *
  * See the GNU General Public License for more details.
  */
+#include <linux/config.h>
 #include <linux/compiler.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -673,7 +674,7 @@ static int llc_ui_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 	lock_sock(sk);
 	copied = -ENOTCONN;
-	if (unlikely(sk->sk_type == SOCK_STREAM && sk->sk_state == TCP_LISTEN))
+	if (sk->sk_state == TCP_LISTEN)
 		goto out;
 
 	timeo = sock_rcvtimeo(sk, nonblock);
@@ -732,7 +733,7 @@ static int llc_ui_recvmsg(struct kiocb *iocb, struct socket *sock,
 			if (sk->sk_shutdown & RCV_SHUTDOWN)
 				break;
 
-			if (sk->sk_type == SOCK_STREAM && sk->sk_state == TCP_CLOSE) {
+			if (sk->sk_state == TCP_CLOSE) {
 				if (!sock_flag(sk, SOCK_DONE)) {
 					/*
 					 * This occurs when user tries to read
@@ -784,20 +785,24 @@ static int llc_ui_recvmsg(struct kiocb *iocb, struct socket *sock,
 		copied += used;
 		len -= used;
 
-		if (!(flags & MSG_PEEK)) {
-			sk_eat_skb(sk, skb, 0);
-			*seq = 0;
-		}
-
-		/* For non stream protcols we get one packet per recvmsg call */
-		if (sk->sk_type != SOCK_STREAM)
-			goto copy_uaddr;
-
-		/* Partial read */
 		if (used + offset < skb->len)
 			continue;
+
+		if (!(flags & MSG_PEEK)) {
+			sk_eat_skb(sk, skb);
+			*seq = 0;
+		}
 	} while (len > 0);
 
+	/* 
+	 * According to UNIX98, msg_name/msg_namelen are ignored
+	 * on connected socket. -ANK
+	 * But... af_llc still doesn't have separate sets of methods for
+	 * SOCK_DGRAM and SOCK_STREAM :-( So we have to do this test, will
+	 * eventually fix this tho :-) -acme
+	 */
+	if (sk->sk_type == SOCK_DGRAM)
+		goto copy_uaddr;
 out:
 	release_sock(sk);
 	return copied;

@@ -170,15 +170,16 @@ void jfs_dirty_inode(struct inode *inode)
 	set_cflag(COMMIT_Dirty, inode);
 }
 
-int jfs_get_block(struct inode *ip, sector_t lblock,
-		  struct buffer_head *bh_result, int create)
+static int
+jfs_get_blocks(struct inode *ip, sector_t lblock, unsigned long max_blocks,
+			struct buffer_head *bh_result, int create)
 {
 	s64 lblock64 = lblock;
 	int rc = 0;
 	xad_t xad;
 	s64 xaddr;
 	int xflag;
-	s32 xlen = bh_result->b_size >> ip->i_blkbits;
+	s32 xlen = max_blocks;
 
 	/*
 	 * Take appropriate lock on inode
@@ -189,7 +190,7 @@ int jfs_get_block(struct inode *ip, sector_t lblock,
 		IREAD_LOCK(ip);
 
 	if (((lblock64 << ip->i_sb->s_blocksize_bits) < ip->i_size) &&
-	    (!xtLookup(ip, lblock64, xlen, &xflag, &xaddr, &xlen, 0)) &&
+	    (!xtLookup(ip, lblock64, max_blocks, &xflag, &xaddr, &xlen, 0)) &&
 	    xaddr) {
 		if (xflag & XAD_NOTRECORDED) {
 			if (!create)
@@ -256,6 +257,13 @@ int jfs_get_block(struct inode *ip, sector_t lblock,
 	return rc;
 }
 
+static int jfs_get_block(struct inode *ip, sector_t lblock,
+			 struct buffer_head *bh_result, int create)
+{
+	return jfs_get_blocks(ip, lblock, bh_result->b_size >> ip->i_blkbits,
+			bh_result, create);
+}
+
 static int jfs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	return nobh_writepage(page, jfs_get_block, wbc);
@@ -299,7 +307,7 @@ static ssize_t jfs_direct_IO(int rw, struct kiocb *iocb,
 				offset, nr_segs, jfs_get_block, NULL);
 }
 
-const struct address_space_operations jfs_aops = {
+struct address_space_operations jfs_aops = {
 	.readpage	= jfs_readpage,
 	.readpages	= jfs_readpages,
 	.writepage	= jfs_writepage,

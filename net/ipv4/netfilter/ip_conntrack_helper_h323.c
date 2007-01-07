@@ -11,6 +11,7 @@
  * For more information, please see http://nath323.sourceforge.net/
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/netfilter.h>
 #include <linux/ip.h>
@@ -21,8 +22,6 @@
 #include <linux/netfilter_ipv4/ip_conntrack_tuple.h>
 #include <linux/netfilter_ipv4/ip_conntrack_h323.h>
 #include <linux/moduleparam.h>
-#include <linux/ctype.h>
-#include <linux/inet.h>
 
 #if 0
 #define DEBUGP printk
@@ -38,12 +37,6 @@ MODULE_PARM_DESC(default_rrq_ttl, "use this TTL if it's missing in RRQ");
 static int gkrouted_only = 1;
 module_param(gkrouted_only, int, 0600);
 MODULE_PARM_DESC(gkrouted_only, "only accept calls from gatekeeper");
-
-static int callforward_filter = 1;
-module_param(callforward_filter, bool, 0600);
-MODULE_PARM_DESC(callforward_filter, "only create call forwarding expectations "
-		                     "if both endpoints are on different sides "
-				     "(determined by routing information)");
 
 /* Hooks for NAT */
 int (*set_h245_addr_hook) (struct sk_buff ** pskb,
@@ -84,12 +77,6 @@ int (*nat_h245_hook) (struct sk_buff ** pskb,
 		      unsigned char **data, int dataoff,
 		      TransportAddress * addr, u_int16_t port,
 		      struct ip_conntrack_expect * exp);
-int (*nat_callforwarding_hook) (struct sk_buff ** pskb,
-				struct ip_conntrack * ct,
-				enum ip_conntrack_info ctinfo,
-				unsigned char **data, int dataoff,
-				TransportAddress * addr, u_int16_t port,
-				struct ip_conntrack_expect * exp);
 int (*nat_q931_hook) (struct sk_buff ** pskb,
 		      struct ip_conntrack * ct,
 		      enum ip_conntrack_info ctinfo,
@@ -696,92 +683,6 @@ static int expect_h245(struct sk_buff **pskb, struct ip_conntrack *ct,
 	return ret;
 }
 
-/* Forwarding declaration */
-void ip_conntrack_q931_expect(struct ip_conntrack *new,
-			      struct ip_conntrack_expect *this);
-
-/****************************************************************************/
-static int expect_callforwarding(struct sk_buff **pskb,
-				 struct ip_conntrack *ct,
-				 enum ip_conntrack_info ctinfo,
-				 unsigned char **data, int dataoff,
-				 TransportAddress * addr)
-{
-	int dir = CTINFO2DIR(ctinfo);
-	int ret = 0;
-	u_int32_t ip;
-	u_int16_t port;
-	struct ip_conntrack_expect *exp = NULL;
-
-	/* Read alternativeAddress */
-	if (!get_h225_addr(*data, addr, &ip, &port) || port == 0)
-		return 0;
-
-	/* If the calling party is on the same side of the forward-to party,
-	 * we don't need to track the second call */
-	if (callforward_filter) {
-		struct rtable *rt1, *rt2;
-		struct flowi fl1 = {
-			.fl4_dst = ip,
-		};
-		struct flowi fl2 = {
-			.fl4_dst = ct->tuplehash[!dir].tuple.src.ip,
-		};
-
-		if (ip_route_output_key(&rt1, &fl1) == 0) {
-			if (ip_route_output_key(&rt2, &fl2) == 0) {
-				if (rt1->rt_gateway == rt2->rt_gateway &&
-				    rt1->u.dst.dev  == rt2->u.dst.dev)
-					ret = 1;
-				dst_release(&rt2->u.dst);
-			}
-			dst_release(&rt1->u.dst);
-		}
-		if (ret) {
-			DEBUGP("ip_ct_q931: Call Forwarding not tracked\n");
-			return 0;
-		}
-	}
-
-	/* Create expect for the second call leg */
-	if ((exp = ip_conntrack_expect_alloc(ct)) == NULL)
-		return -1;
-	exp->tuple.src.ip = ct->tuplehash[!dir].tuple.src.ip;
-	exp->tuple.src.u.tcp.port = 0;
-	exp->tuple.dst.ip = ip;
-	exp->tuple.dst.u.tcp.port = htons(port);
-	exp->tuple.dst.protonum = IPPROTO_TCP;
-	exp->mask.src.ip = 0xFFFFFFFF;
-	exp->mask.src.u.tcp.port = 0;
-	exp->mask.dst.ip = 0xFFFFFFFF;
-	exp->mask.dst.u.tcp.port = 0xFFFF;
-	exp->mask.dst.protonum = 0xFF;
-	exp->flags = 0;
-
-	if (ct->tuplehash[dir].tuple.src.ip !=
-	    ct->tuplehash[!dir].tuple.dst.ip && nat_callforwarding_hook) {
-		/* Need NAT */
-		ret = nat_callforwarding_hook(pskb, ct, ctinfo, data, dataoff,
-					      addr, port, exp);
-	} else {		/* Conntrack only */
-		exp->expectfn = ip_conntrack_q931_expect;
-
-		if (ip_conntrack_expect_related(exp) == 0) {
-			DEBUGP("ip_ct_q931: expect Call Forwarding "
-			       "%u.%u.%u.%u:%hu->%u.%u.%u.%u:%hu\n",
-			       NIPQUAD(exp->tuple.src.ip),
-			       ntohs(exp->tuple.src.u.tcp.port),
-			       NIPQUAD(exp->tuple.dst.ip),
-			       ntohs(exp->tuple.dst.u.tcp.port));
-		} else
-			ret = -1;
-	}
-
-	ip_conntrack_expect_put(exp);
-
-	return ret;
-}
-
 /****************************************************************************/
 static int process_setup(struct sk_buff **pskb, struct ip_conntrack *ct,
 			 enum ip_conntrack_info ctinfo,
@@ -976,15 +877,6 @@ static int process_facility(struct sk_buff **pskb, struct ip_conntrack *ct,
 	int i;
 
 	DEBUGP("ip_ct_q931: Facility\n");
-
-	if (facility->reason.choice == eFacilityReason_callForwarded) {
-		if (facility->options & eFacility_UUIE_alternativeAddress)
-			return expect_callforwarding(pskb, ct, ctinfo, data,
-						     dataoff,
-						     &facility->
-						     alternativeAddress);
-		return 0;
-	}
 
 	if (facility->options & eFacility_UUIE_h245Address) {
 		ret = expect_h245(pskb, ct, ctinfo, data, dataoff,
@@ -1417,7 +1309,7 @@ static int process_rcf(struct sk_buff **pskb, struct ip_conntrack *ct,
 		DEBUGP
 		    ("ip_ct_ras: set RAS connection timeout to %u seconds\n",
 		     info->timeout);
-		ip_ct_refresh(ct, *pskb, info->timeout * HZ);
+		ip_ct_refresh_acct(ct, ctinfo, NULL, info->timeout * HZ);
 
 		/* Set expect timeout */
 		read_lock_bh(&ip_conntrack_lock);
@@ -1465,7 +1357,7 @@ static int process_urq(struct sk_buff **pskb, struct ip_conntrack *ct,
 	info->sig_port[!dir] = 0;
 
 	/* Give it 30 seconds for UCF or URJ */
-	ip_ct_refresh(ct, *pskb, 30 * HZ);
+	ip_ct_refresh_acct(ct, ctinfo, NULL, 30 * HZ);
 
 	return 0;
 }
@@ -1785,6 +1677,7 @@ static int __init init(void)
 		fini();
 		return ret;
 	}
+
 	DEBUGP("ip_ct_h323: init success\n");
 	return 0;
 }
@@ -1803,7 +1696,6 @@ EXPORT_SYMBOL_GPL(set_ras_addr_hook);
 EXPORT_SYMBOL_GPL(nat_rtp_rtcp_hook);
 EXPORT_SYMBOL_GPL(nat_t120_hook);
 EXPORT_SYMBOL_GPL(nat_h245_hook);
-EXPORT_SYMBOL_GPL(nat_callforwarding_hook);
 EXPORT_SYMBOL_GPL(nat_q931_hook);
 
 MODULE_AUTHOR("Jing Min Zhao <zhaojingmin@users.sourceforge.net>");

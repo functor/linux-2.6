@@ -353,6 +353,7 @@ MODULE_PARM_DESC(aic7xxx,
 "				periodically to prevent tag starvation.\n"
 "				This may be required by some older disk\n"
 "				drives or RAID arrays.\n"
+"	reverse_scan		Sort PCI devices highest Bus/Slot to lowest\n"
 "	tag_info:<tag_str>	Set per-target tag depth\n"
 "	global_tag_depth:<int>	Global tag depth for every target\n"
 "				on every bus\n"
@@ -885,7 +886,7 @@ ahc_linux_setup_tag_info_global(char *p)
 	tags = simple_strtoul(p + 1, NULL, 0) & 0xff;
 	printf("Setting Global Tags= %d\n", tags);
 
-	for (i = 0; i < ARRAY_SIZE(aic7xxx_tag_info); i++) {
+	for (i = 0; i < NUM_ELEMENTS(aic7xxx_tag_info); i++) {
 		for (j = 0; j < AHC_NUM_TARGETS; j++) {
 			aic7xxx_tag_info[i].tag_commands[j] = tags;
 		}
@@ -897,7 +898,7 @@ ahc_linux_setup_tag_info(u_long arg, int instance, int targ, int32_t value)
 {
 
 	if ((instance >= 0) && (targ >= 0)
-	 && (instance < ARRAY_SIZE(aic7xxx_tag_info))
+	 && (instance < NUM_ELEMENTS(aic7xxx_tag_info))
 	 && (targ < AHC_NUM_TARGETS)) {
 		aic7xxx_tag_info[instance].tag_commands[targ] = value & 0xff;
 		if (bootverbose)
@@ -1019,7 +1020,7 @@ aic7xxx_setup(char *s)
 	end = strchr(s, '\0');
 
 	/*
-	 * XXX ia64 gcc isn't smart enough to know that ARRAY_SIZE
+	 * XXX ia64 gcc isn't smart enough to know that NUM_ELEMENTS
 	 * will never be 0 in this case.
 	 */
 	n = 0;
@@ -1027,13 +1028,13 @@ aic7xxx_setup(char *s)
 	while ((p = strsep(&s, ",.")) != NULL) {
 		if (*p == '\0')
 			continue;
-		for (i = 0; i < ARRAY_SIZE(options); i++) {
+		for (i = 0; i < NUM_ELEMENTS(options); i++) {
 
 			n = strlen(options[i].name);
 			if (strncmp(options[i].name, p, n) == 0)
 				break;
 		}
-		if (i == ARRAY_SIZE(options))
+		if (i == NUM_ELEMENTS(options))
 			continue;
 
 		if (strncmp(p, "global_tag_depth", n) == 0) {
@@ -1359,7 +1360,7 @@ ahc_linux_user_tagdepth(struct ahc_softc *ahc, struct ahc_devinfo *devinfo)
 
 	tags = 0;
 	if ((ahc->user_discenable & devinfo->target_mask) != 0) {
-		if (ahc->unit >= ARRAY_SIZE(aic7xxx_tag_info)) {
+		if (ahc->unit >= NUM_ELEMENTS(aic7xxx_tag_info)) {
 			if (warned_user == 0) {
 
 				printf(KERN_WARNING
@@ -2335,7 +2336,7 @@ done:
 	if (paused)
 		ahc_unpause(ahc);
 	if (wait) {
-		DECLARE_COMPLETION_ONSTACK(done);
+		DECLARE_COMPLETION(done);
 
 		ahc->platform_data->eh_done = &done;
 		ahc_unlock(ahc, &flags);
@@ -2536,35 +2537,6 @@ static void ahc_linux_set_iu(struct scsi_target *starget, int iu)
 }
 #endif
 
-static void ahc_linux_get_signalling(struct Scsi_Host *shost)
-{
-	struct ahc_softc *ahc = *(struct ahc_softc **)shost->hostdata;
-	unsigned long flags;
-	u8 mode;
-
-	if (!(ahc->features & AHC_ULTRA2)) {
-		/* non-LVD chipset, may not have SBLKCTL reg */
-		spi_signalling(shost) = 
-			ahc->features & AHC_HVD ?
-			SPI_SIGNAL_HVD :
-			SPI_SIGNAL_SE;
-		return;
-	}
-
-	ahc_lock(ahc, &flags);
-	ahc_pause(ahc);
-	mode = ahc_inb(ahc, SBLKCTL);
-	ahc_unpause(ahc);
-	ahc_unlock(ahc, &flags);
-
-	if (mode & ENAB40)
-		spi_signalling(shost) = SPI_SIGNAL_LVD;
-	else if (mode & ENAB20)
-		spi_signalling(shost) = SPI_SIGNAL_SE;
-	else
-		spi_signalling(shost) = SPI_SIGNAL_UNKNOWN;
-}
-
 static struct spi_function_template ahc_linux_transport_functions = {
 	.set_offset	= ahc_linux_set_offset,
 	.show_offset	= 1,
@@ -2580,7 +2552,6 @@ static struct spi_function_template ahc_linux_transport_functions = {
 	.set_qas	= ahc_linux_set_qas,
 	.show_qas	= 1,
 #endif
-	.get_signalling	= ahc_linux_get_signalling,
 };
 
 

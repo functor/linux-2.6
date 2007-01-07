@@ -119,7 +119,7 @@ module_frob_arch_sections(Elf_Ehdr *hdr, Elf_Shdr *sechdrs,
 	int nrela, i, j;
 
 	/* Find symbol table and string table. */
-	symtab = NULL;
+	symtab = 0;
 	for (i = 0; i < hdr->e_shnum; i++)
 		switch (sechdrs[i].sh_type) {
 		case SHT_SYMTAB:
