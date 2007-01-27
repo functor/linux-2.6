@@ -1,6 +1,6 @@
 /******************************************************************************/
 /*                                                                            */
-/* Broadcom BCM5700 Linux Network Driver, Copyright (c) 2000 - 2006 Broadcom  */
+/* Broadcom BCM5700 Linux Network Driver, Copyright (c) 2000 - 2005 Broadcom  */
 /* Corporation.                                                               */
 /* All rights reserved.                                                       */
 /*                                                                            */
@@ -3011,7 +3011,7 @@ PLM_DEVICE_BLOCK pDevice)
             {
                 pDevice->PhyId = EePhyId;
                 
-                if (EePhyTypeSerdes && ((pDevice->PhyId == PHY_BCM5714_PHY_ID) || (pDevice->PhyId == PHY_BCM5780_PHY_ID)) )
+                if (EePhyTypeSerdes && ((pDevice->PhyId == PHY_BCM5780_PHY_ID)) )
                 {
                     pDevice->PhyFlags |= PHY_IS_FIBER;
                 }
@@ -4866,13 +4866,12 @@ restart_reset:
     REG_WR(pDevice, MacCtrl.LowWaterMarkMaxRxFrame, 2);
 
     /* ecd 13216 workaround for serdes */
-    if ((pDevice->PhyFlags & PHY_IS_FIBER) && 
-        (T3_ASIC_REV(pDevice->ChipRevId) != T3_ASIC_REV_5780))
+    if(pDevice->PhyFlags & PHY_IS_FIBER)
     {
         Value32 = REG_RD_OFFSET(pDevice, 0x5b0);
         REG_WR_OFFSET(pDevice, 0x5b0, Value32 | BIT_10 );
-
-        pDevice->GrcLocalCtrl |= BIT_4 ; 
+      
+	 pDevice->GrcLocalCtrl |= BIT_4 ; 
         pDevice->GrcLocalCtrl &= ~BIT_5 ; 
 
         REG_WR(pDevice, Grc.LocalCtrl, pDevice->GrcLocalCtrl);
@@ -4887,7 +4886,7 @@ restart_reset:
 
     if (!(pDevice->TbiFlags & ENABLE_TBI_FLAG) &&
         ( ((pDevice->PhyId & PHY_ID_MASK) != PHY_BCM5401_PHY_ID)&&
-          ((pDevice->PhyId & PHY_ID_MASK) != PHY_BCM5411_PHY_ID) ))
+	 ((pDevice->PhyId & PHY_ID_MASK) != PHY_BCM5411_PHY_ID) ))
     {
         /* 5401/5411 PHY needs a delay of about 1 second after PHY reset */
         /* Without the delay, it has problem linking at forced 10 half */
@@ -7783,12 +7782,10 @@ LM_SetupNewFiberPhy(
 
         LM_5714_FamForceFiber(pDevice);
     }
+    LM_ReadPhy(pDevice, PHY_STATUS_REG, &Sreg);
+    LM_ReadPhy(pDevice, PHY_STATUS_REG, &Sreg);
 
-    /* 5714/15 Serdes link status is valid only in reg 0x460 */	
-    /* ecd 13216 workaround for serdes */
-    Sreg = REG_RD(pDevice, MacCtrl.TxStatus);
-
-    if(Sreg & TX_STATUS_LINK_UP){
+    if(Sreg & PHY_STATUS_LINK_PASS){
 
         pDevice->LinkStatus = LM_STATUS_LINK_ACTIVE;
         pDevice->LineSpeed = LM_LINE_SPEED_1000MBPS;
