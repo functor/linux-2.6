@@ -33,7 +33,8 @@ cflags-$(CONFIG_M486)		+= -march=i486
 cflags-$(CONFIG_M586)		+= -march=i586
 cflags-$(CONFIG_M586TSC)	+= -march=i586
 cflags-$(CONFIG_M586MMX)	+= $(call cc-option,-march=pentium-mmx,-march=i586)
-cflags-$(CONFIG_M686)		+= -march=i686 $(call cc-option,-mtune=pentium4,-mcpu=pentium4)
+#cflags-$(CONFIG_M686)		+= -march=i686 -mtune=pentium4
+cflags-$(CONFIG_M686)		+= -march=i686 -mcpu=pentium4
 cflags-$(CONFIG_MPENTIUMII)	+= -march=i686 $(call cc-option,-mtune=pentium2)
 cflags-$(CONFIG_MPENTIUMIII)	+= -march=i686 $(call cc-option,-mtune=pentium3)
 cflags-$(CONFIG_MPENTIUMM)	+= -march=i686 $(call cc-option,-mtune=pentium3)
