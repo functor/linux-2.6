@@ -5,8 +5,8 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define buildup 1
 %define buildsmp 1
-%define builduml 1
-%define buildxen 1
+%define builduml 0
+%define buildxen 0
 %define builddoc 1
 
 
