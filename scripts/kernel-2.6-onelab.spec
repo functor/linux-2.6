@@ -4,7 +4,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # These are the kernels that are built IF the architecture allows it.
 
 %define buildup 1
-%define buildsmp 0
+%define buildsmp 1
 %define builduml 0
 %define buildxen 0
 %define builddoc 0
