@@ -1,6 +1,4 @@
 /*
- * arch/ppc/syslib/mpc52xx_devices.c
- *
  * Freescale MPC52xx device descriptions
  *
  *
@@ -15,6 +13,7 @@
 
 #include <linux/fsl_devices.h>
 #include <linux/resource.h>
+#include <linux/platform_device.h>
 #include <asm/mpc52xx.h>
 #include <asm/ppc_sys.h>
 
