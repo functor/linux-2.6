@@ -1,8 +1,8 @@
 
            Additional Installation Notes for Various Linux Distributions
                        Broadcom BCM5700 Linux Driver
-                              Version 8.3.17b
-                                02/21/2006
+                              Version 8.3.17c
+                                03/10/2006
 
                           Broadcom Corporation
                           16215 Alton Parkway,

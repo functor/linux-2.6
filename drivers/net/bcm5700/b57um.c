@@ -12,8 +12,8 @@
 
 
 char bcm5700_driver[] = "bcm5700";
-char bcm5700_version[] = "8.3.17b";
-char bcm5700_date[] = "(02/21/06)";
+char bcm5700_version[] = "8.3.17c";
+char bcm5700_date[] = "(03/10/06)";
 
 #define B57UM
 #include "mm.h"
@@ -654,8 +654,10 @@ typedef enum {
 	NC320T,
 	NC320I,
 	NC325I,
+	NC325m,
 	NC324I,
 	NC326I,
+	NC326m,
 #ifdef MEFHACK_NOTFORPLANETLAB
 	BCM5704CIOBE,
 	BCM5704,
@@ -681,9 +683,11 @@ typedef enum {
 	BCM5752,
 	BCM5752M,
 	BCM5714,
+	BCM5714S,
 	BCM5780,
 	BCM5780S,
 	BCM5715,
+	BCM5715S,
 	BCM5903M
 #endif
 } board_t;
@@ -740,8 +744,10 @@ static struct {
 	{ "HP ProLiant NC 320T PCI Express Gigabit Server Adapter" },
 	{ "HP ProLiant NC 320i PCI Express Gigabit Server Adapter" },
 	{ "HP NC325i Integrated Dual Port PCI Express Gigabit Server Adapter" },
-	{ "HP NC324i Integrated Dual Port PCI Express Gigabit Server Adapter" },
-	{ "HP NC326i Integrated Dual Port PCI Express Gigabit Server Adapter" },
+	{ "HP NC325m Quad Port PCI Express Gigabit Server Adapter" },
+	{ "HP NC324i Integrated Dual Port PCIe Gigabit Server Adapter" },
+	{ "HP NC326i Integrated Dual Port PCIe Gigabit Server Adapter" },
+	{ "HP NC326m Dual Port PCI Express Gigabit Server Adapter" },
 #ifdef MEFHACK_NOTFORPLANETLAB
 	{ "Broadcom BCM5704 CIOB-E 1000Base-T" },
 	{ "Broadcom BCM5704 1000Base-T" },
@@ -767,9 +773,11 @@ static struct {
 	{ "Broadcom BCM5752 1000Base-T PCI Express" },
 	{ "Broadcom BCM5752M 1000Base-T PCI Express" },
 	{ "Broadcom BCM5714 1000Base-T " },
+	{ "Broadcom BCM5714S 1000Base-SX " },
 	{ "Broadcom BCM5780 1000Base-T" },
 	{ "Broadcom BCM5780S 1000Base-SX" },
 	{ "Broadcom BCM5715 1000Base-T " },
+	{ "Broadcom BCM5715S 1000Base-SX " },
 	{ "Broadcom BCM5903M Gigabit Ethernet " },
 #endif
 	{ 0 }
@@ -884,6 +892,8 @@ static struct pci_device_id bcm5700_pci_tbl[] __devinitdata = {
 	{0x14e4, 0x1669, 0x103c, 0x703a, 0, 0, NC324I },
 	{0x14e4, 0x1678, 0x103c, 0x703e, 0, 0, NC326I },
 	{0x14e4, 0x1679, 0x103c, 0x703c, 0, 0, NC326I },
+	{0x14e4, 0x1679, 0x103c, 0x170c, 0, 0, NC325m },
+	{0x14e4, 0x1679, 0x103c, 0x1707, 0, 0, NC326m },
 #ifdef MEFHACK_NOTFORPLANETLAB
 	{0x14e4, 0x1659, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5721 },
 	{0x14e4, 0x16f7, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5753 },
@@ -893,11 +903,11 @@ static struct pci_device_id bcm5700_pci_tbl[] __devinitdata = {
 	{0x14e4, 0x1600, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5752 },
 	{0x14e4, 0x1601, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5752M },
 	{0x14e4, 0x1668, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5714 },
- 	{0x14e4, 0x1669, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5714S },
+	{0x14e4, 0x1669, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5714S },
 	{0x14e4, 0x166a, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5780 },
 	{0x14e4, 0x166b, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5780S },
 	{0x14e4, 0x1678, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5715 },
- 	{0x14e4, 0x1679, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5715S },
+	{0x14e4, 0x1679, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5715S },
 	{0x14e4, 0x16ff, PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5903M },
 #endif
 	{0,}
