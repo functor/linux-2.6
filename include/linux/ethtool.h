@@ -434,6 +434,7 @@ struct ethtool_ops {
 #define SPEED_10		10
 #define SPEED_100		100
 #define SPEED_1000		1000
+#define SPEED_2500		2500
 #define SPEED_10000		10000
 
 /* Duplex, half or full. */
