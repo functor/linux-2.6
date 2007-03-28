@@ -1,8 +1,8 @@
 
                            Installation Notes
                        Broadcom BCM5700 Linux Driver
-                              Version 8.3.17b
-                                02/21/2006
+                              Version 8.3.17c
+                                03/10/2006
 
                           Broadcom Corporation
                           16215 Alton Parkway,
@@ -529,7 +529,7 @@ The following are the most common sample messages that may be logged in the file
 will appear on the console. Most systems are set to level 6 by default.
 
 Broadcom Gigabit Ethernet Driver bcm5700 with Broadcom NIC Extension (NICE)
-ver. 8.3.17b (02/21/06)
+ver. 8.3.17c (03/10/06)
 
     Driver signon
 
