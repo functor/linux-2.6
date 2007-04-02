@@ -91,8 +91,10 @@ static void print_raid6_conf (raid6_conf_t *conf);
 static void __release_stripe(raid6_conf_t *conf, struct stripe_head *sh)
 {
 	if (atomic_dec_and_test(&sh->count)) {
-		BUG_ON(!list_empty(&sh->lru));
-		BUG_ON(atomic_read(&conf->active_stripes)==0);
+		if (!list_empty(&sh->lru))
+			BUG();
+		if (atomic_read(&conf->active_stripes)==0)
+			BUG();
 		if (test_bit(STRIPE_HANDLE, &sh->state)) {
 			if (test_bit(STRIPE_DELAYED, &sh->state))
 				list_add_tail(&sh->lru, &conf->delayed_list);
@@ -200,8 +202,10 @@ static void init_stripe(struct stripe_head *sh, sector_t sector, int pd_idx)
 	raid6_conf_t *conf = sh->raid_conf;
 	int disks = conf->raid_disks, i;
 
-	BUG_ON(atomic_read(&sh->count) != 0);
-	BUG_ON(test_bit(STRIPE_HANDLE, &sh->state));
+	if (atomic_read(&sh->count) != 0)
+		BUG();
+	if (test_bit(STRIPE_HANDLE, &sh->state))
+		BUG();
 
 	CHECK_DEVLOCK();
 	PRINTK("init_stripe called, stripe %llu\n",
@@ -280,11 +284,13 @@ static struct stripe_head *get_active_stripe(raid6_conf_t *conf, sector_t sector
 				init_stripe(sh, sector, pd_idx);
 		} else {
 			if (atomic_read(&sh->count)) {
-				BUG_ON(!list_empty(&sh->lru));
+				if (!list_empty(&sh->lru))
+					BUG();
 			} else {
 				if (!test_bit(STRIPE_HANDLE, &sh->state))
 					atomic_inc(&conf->active_stripes);
-				BUG_ON(list_empty(&sh->lru));
+				if (list_empty(&sh->lru))
+					BUG();
 				list_del_init(&sh->lru);
 			}
 		}
@@ -325,9 +331,9 @@ static int grow_stripes(raid6_conf_t *conf, int num)
 	kmem_cache_t *sc;
 	int devs = conf->raid_disks;
 
-	sprintf(conf->cache_name[0], "raid6/%s", mdname(conf->mddev));
+	sprintf(conf->cache_name, "raid6/%s", mdname(conf->mddev));
 
-	sc = kmem_cache_create(conf->cache_name[0],
+	sc = kmem_cache_create(conf->cache_name,
 			       sizeof(struct stripe_head)+(devs-1)*sizeof(struct r5dev),
 			       0, 0, NULL, NULL);
 	if (!sc)
@@ -347,7 +353,8 @@ static int drop_one_stripe(raid6_conf_t *conf)
 	spin_unlock_irq(&conf->device_lock);
 	if (!sh)
 		return 0;
-	BUG_ON(atomic_read(&sh->count));
+	if (atomic_read(&sh->count))
+		BUG();
 	shrink_buffers(sh, conf->raid_disks);
 	kmem_cache_free(conf->slab_cache, sh);
 	atomic_dec(&conf->active_stripes);
@@ -773,7 +780,7 @@ static void compute_parity(struct stripe_head *sh, int method)
 				if (test_and_clear_bit(R5_Overlap, &sh->dev[i].flags))
 					wake_up(&conf->wait_for_overlap);
 
-				BUG_ON(sh->dev[i].written);
+				if (sh->dev[i].written) BUG();
 				sh->dev[i].written = chosen;
 			}
 		break;
@@ -963,7 +970,8 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
 	if (*bip && (*bip)->bi_sector < bi->bi_sector + ((bi->bi_size)>>9))
 		goto overlap;
 
-	BUG_ON(*bip && bi->bi_next && (*bip) != bi->bi_next);
+	if (*bip && bi->bi_next && (*bip) != bi->bi_next)
+		BUG();
 	if (*bip)
 		bi->bi_next = *bip;
 	*bip = bi;
@@ -1898,7 +1906,8 @@ static void raid6d (mddev_t *mddev)
 
 		list_del_init(first);
 		atomic_inc(&sh->count);
-		BUG_ON(atomic_read(&sh->count)!= 1);
+		if (atomic_read(&sh->count)!= 1)
+			BUG();
 		spin_unlock_irq(&conf->device_lock);
 
 		handled++;
@@ -1997,14 +2006,11 @@ static int run(mddev_t *mddev)
 		return -EIO;
 	}
 
-	mddev->private = kzalloc(sizeof (raid6_conf_t), GFP_KERNEL);
+	mddev->private = kzalloc(sizeof (raid6_conf_t)
+				 + mddev->raid_disks * sizeof(struct disk_info),
+				 GFP_KERNEL);
 	if ((conf = mddev->private) == NULL)
 		goto abort;
-	conf->disks = kzalloc(mddev->raid_disks * sizeof(struct disk_info),
-				 GFP_KERNEL);
-	if (!conf->disks)
-		goto abort;
-
 	conf->mddev = mddev;
 
 	if ((conf->stripe_hashtbl = kzalloc(PAGE_SIZE, GFP_KERNEL)) == NULL)
@@ -2142,8 +2148,6 @@ static int run(mddev_t *mddev)
 	}
 
 	/* Ok, everything is just fine now */
-	sysfs_create_group(&mddev->kobj, &raid6_attrs_group);
-
 	mddev->array_size =  mddev->size * (mddev->raid_disks - 2);
 
 	mddev->queue->unplug_fn = raid6_unplug_device;
@@ -2154,7 +2158,6 @@ abort:
 		print_raid6_conf(conf);
 		safe_put_page(conf->spare_page);
 		kfree(conf->stripe_hashtbl);
-		kfree(conf->disks);
 		kfree(conf);
 	}
 	mddev->private = NULL;

@@ -273,21 +273,24 @@ static void netpoll_send_skb(struct netpoll *np, struct sk_buff *skb)
 
 	do {
 		npinfo->tries--;
-		netif_tx_lock(np->dev);
+		spin_lock(&np->dev->xmit_lock);
+		np->dev->xmit_lock_owner = smp_processor_id();
 
 		/*
 		 * network drivers do not expect to be called if the queue is
 		 * stopped.
 		 */
 		if (netif_queue_stopped(np->dev)) {
-			netif_tx_unlock(np->dev);
+			np->dev->xmit_lock_owner = -1;
+			spin_unlock(&np->dev->xmit_lock);
 			netpoll_poll(np);
 			udelay(50);
 			continue;
 		}
 
 		status = np->dev->hard_start_xmit(skb, np->dev);
-		netif_tx_unlock(np->dev);
+		np->dev->xmit_lock_owner = -1;
+		spin_unlock(&np->dev->xmit_lock);
 
 		/* success */
 		if(!status) {
@@ -666,14 +669,14 @@ int netpoll_setup(struct netpoll *np)
 		printk(KERN_INFO "%s: device %s not up yet, forcing it\n",
 		       np->name, np->dev_name);
 
-		rtnl_lock();
+		rtnl_shlock();
 		if (dev_change_flags(ndev, ndev->flags | IFF_UP) < 0) {
 			printk(KERN_ERR "%s: failed to open %s\n",
 			       np->name, np->dev_name);
-			rtnl_unlock();
+			rtnl_shunlock();
 			goto release;
 		}
-		rtnl_unlock();
+		rtnl_shunlock();
 
 		atleast = jiffies + HZ/10;
  		atmost = jiffies + 4*HZ;

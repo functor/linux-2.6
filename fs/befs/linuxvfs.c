@@ -64,7 +64,7 @@ static const struct super_operations befs_sops = {
 /* slab cache for befs_inode_info objects */
 static kmem_cache_t *befs_inode_cachep;
 
-static const struct file_operations befs_dir_operations = {
+static struct file_operations befs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= befs_readdir,
 };
@@ -427,8 +427,7 @@ befs_init_inodecache(void)
 {
 	befs_inode_cachep = kmem_cache_create("befs_inode_cache",
 					      sizeof (struct befs_inode_info),
-					      0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					      0, SLAB_RECLAIM_ACCOUNT,
 					      init_once, NULL);
 	if (befs_inode_cachep == NULL) {
 		printk(KERN_ERR "befs_init_inodecache: "
@@ -566,7 +565,7 @@ befs_utf2nls(struct super_block *sb, const char *in,
  * @sb: Superblock
  * @src: Input string buffer in NLS format
  * @srclen: Length of input string in bytes
- * @dest: The output string in UTF-8 format
+ * @dest: The output string in UTF8 format
  * @destlen: Length of the output buffer
  * 
  * Converts input string @src, which is in the format of the loaded NLS map,

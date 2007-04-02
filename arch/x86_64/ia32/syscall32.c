@@ -43,9 +43,7 @@ static struct vm_operations_struct syscall32_vm_ops = {
 struct linux_binprm;
 
 /* Setup a VMA at program startup for the vsyscall page */
-int syscall32_setup_pages(struct linux_binprm *bprm, int exstack,
-			  unsigned long start_code,
-			  unsigned long interp_map_address)
+int syscall32_setup_pages(struct linux_binprm *bprm, int exstack)
 {
 	int npages = (VSYSCALL32_END - VSYSCALL32_BASE) >> PAGE_SHIFT;
 	struct vm_area_struct *vma;

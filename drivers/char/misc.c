@@ -129,7 +129,7 @@ static int misc_open(struct inode * inode, struct file * file)
 	int minor = iminor(inode);
 	struct miscdevice *c;
 	int err = -ENODEV;
-	const struct file_operations *old_fops, *new_fops = NULL;
+	struct file_operations *old_fops, *new_fops = NULL;
 	
 	down(&misc_sem);
 	

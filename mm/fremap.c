@@ -69,17 +69,15 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * caller about it.
 	 */
 	err = -EINVAL;
-	if (vma->vm_file) {
-		inode = vma->vm_file->f_mapping->host;
-		size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-		if (!page->mapping || page->index >= size)
-			goto unlock;
-		err = -ENOMEM;
-		if (page_mapcount(page) > INT_MAX/2)
-			goto unlock;
-		if (!vx_rsspages_avail(mm, 1))
-			goto unlock;
-	}
+	inode = vma->vm_file->f_mapping->host;
+	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+	if (!page->mapping || page->index >= size)
+		goto unlock;
+	err = -ENOMEM;
+	if (page_mapcount(page) > INT_MAX/2)
+		goto unlock;
+	if (!vx_rsspages_avail(mm, 1))
+		goto unlock;
 
 	if (pte_none(*pte) || !zap_pte(mm, vma, addr, pte))
 		inc_mm_counter(mm, file_rss);

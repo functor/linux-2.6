@@ -23,13 +23,36 @@
 #include <asm/asm-offsets.h>
 #include <asm/procinfo.h>
 #include <asm/hardware.h>
-#include <asm/pgtable-hwdef.h>
 #include <asm/pgtable.h>
 
 /*
  * the cache line size of the I and D cache
  */
 #define DCACHELINESIZE	32
+#define FLUSH_OFFSET	32768
+
+	.macro flush_1100_dcache rd, ra, re
+	ldr	\rd, =flush_base
+	ldr	\ra, [\rd]
+	eor	\ra, \ra, #FLUSH_OFFSET
+	str	\ra, [\rd]
+	add	\re, \ra, #8192			@ only necessary for 8k
+1001:	ldr	\rd, [\ra], #DCACHELINESIZE
+	teq	\re, \ra
+	bne	1001b
+#ifdef FLUSH_BASE_MINICACHE
+	add	\ra, \ra, #FLUSH_BASE_MINICACHE - FLUSH_BASE
+	add	\re, \ra, #512			@ only 512 bytes
+1002:	ldr	\rd, [\ra], #DCACHELINESIZE
+	teq	\re, \ra
+	bne	1002b
+#endif
+	.endm
+
+	.data
+flush_base:
+	.long	FLUSH_BASE
+	.text
 
 	__INIT
 
@@ -55,8 +78,9 @@ ENTRY(cpu_sa1100_proc_fin)
 	stmfd	sp!, {lr}
 	mov	ip, #PSR_F_BIT | PSR_I_BIT | SVC_MODE
 	msr	cpsr_c, ip
-	bl	v4wb_flush_kern_cache_all
-	mcr	p15, 0, ip, c15, c2, 2		@ Disable clock switching
+	flush_1100_dcache r0, r1, r2		@ clean caches
+	mov	r0, #0
+	mcr	p15, 0, r0, c15, c2, 2		@ Disable clock switching
 	mrc	p15, 0, r0, c1, c0, 0		@ ctrl register
 	bic	r0, r0, #0x1000			@ ...i............
 	bic	r0, r0, #0x000e			@ ............wca.
@@ -142,12 +166,14 @@ ENTRY(cpu_sa1100_dcache_clean_area)
  */
 	.align	5
 ENTRY(cpu_sa1100_switch_mm)
-	str	lr, [sp, #-4]!
-	bl	v4wb_flush_kern_cache_all	@ clears IP
+	flush_1100_dcache r3, ip, r1
+	mov	ip, #0
+	mcr	p15, 0, ip, c7, c5, 0		@ invalidate I cache
 	mcr	p15, 0, ip, c9, c0, 0		@ invalidate RB
+	mcr	p15, 0, ip, c7, c10, 4		@ drain WB
 	mcr	p15, 0, r0, c2, c0, 0		@ load page table pointer
 	mcr	p15, 0, ip, c8, c7, 0		@ invalidate I & D TLBs
-	ldr	pc, [sp], #4
+	mov	pc, lr
 
 /*
  * cpu_sa1100_set_pte(ptep, pte)

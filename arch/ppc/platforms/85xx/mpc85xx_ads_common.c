@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/mpc85xx_ads_common.c
+ *
  * MPC85xx ADS board common routines
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

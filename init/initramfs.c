@@ -26,12 +26,10 @@ static void __init free(void *where)
 
 /* link hash */
 
-#define N_ALIGN(len) ((((len) + 1) & ~3) + 2)
-
 static __initdata struct hash {
 	int ino, minor, major;
 	struct hash *next;
-	char name[N_ALIGN(PATH_MAX)];
+	char *name;
 } *head[32];
 
 static inline int hash(int major, int minor, int ino)
@@ -59,7 +57,7 @@ static char __init *find_link(int major, int minor, int ino, char *name)
 	q->ino = ino;
 	q->minor = minor;
 	q->major = major;
-	strcpy(q->name, name);
+	q->name = name;
 	q->next = NULL;
 	*p = q;
 	return NULL;
@@ -134,6 +132,8 @@ static inline void eat(unsigned n)
 	this_header += n;
 	count -= n;
 }
+
+#define N_ALIGN(len) ((((len) + 1) & ~3) + 2)
 
 static __initdata char *collected;
 static __initdata int remains;
@@ -509,7 +509,6 @@ void __init populate_rootfs(void)
 		panic(err);
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start) {
-#ifdef CONFIG_BLK_DEV_RAM
 		int fd;
 		printk(KERN_INFO "checking if image is initramfs...");
 		err = unpack_to_rootfs((char *)initrd_start,
@@ -522,22 +521,13 @@ void __init populate_rootfs(void)
 			return;
 		}
 		printk("it isn't (%s); looks like an initrd\n", err);
-		fd = sys_open("/initrd.image", O_WRONLY|O_CREAT, 0700);
+		fd = sys_open("/initrd.image", O_WRONLY|O_CREAT, 700);
 		if (fd >= 0) {
 			sys_write(fd, (char *)initrd_start,
 					initrd_end - initrd_start);
 			sys_close(fd);
 			free_initrd();
 		}
-#else
-		printk(KERN_INFO "Unpacking initramfs...");
-		err = unpack_to_rootfs((char *)initrd_start,
-			initrd_end - initrd_start, 0);
-		if (err)
-			panic(err);
-		printk(" done\n");
-		free_initrd();
-#endif
 	}
 #endif
 }

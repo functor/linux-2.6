@@ -839,8 +839,8 @@ static int __init media_bay_init(void)
 		media_bays[i].cd_index		= -1;
 #endif
 	}
-	if (!machine_is(powermac))
-		return 0;
+	if (_machine != _MACH_Pmac)
+		return -ENODEV;
 
 	macio_register_driver(&media_bay_driver);	
 

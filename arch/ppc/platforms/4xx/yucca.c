@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/yucca.c
+ *
  * Yucca board specific routines
  *
  * Roland Dreier <rolandd@cisco.com> (based on luan.c by Matt Porter)

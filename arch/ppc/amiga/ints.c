@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/amiga/ints.c
+ *
  *  Linux/m68k general interrupt handling code from arch/m68k/kernel/ints.c
  *  Needed to drive the m68k emulating IRQ hardware on the PowerUp boards.
  */

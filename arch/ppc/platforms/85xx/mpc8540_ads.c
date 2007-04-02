@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/mpc8540_ads.c
+ *
  * MPC8540ADS board specific routines
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

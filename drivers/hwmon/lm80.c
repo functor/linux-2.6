@@ -28,7 +28,6 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /* Addresses to scan */
 static unsigned short normal_i2c[] = { 0x28, 0x29, 0x2a, 0x2b, 0x2c,
@@ -109,7 +108,7 @@ static inline long TEMP_FROM_REG(u16 temp)
 struct lm80_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -192,10 +191,10 @@ static ssize_t set_in_##suffix(struct device *dev, struct device_attribute *attr
 	struct lm80_data *data = i2c_get_clientdata(client); \
 	long val = simple_strtol(buf, NULL, 10); \
  \
-	mutex_lock(&data->update_lock);\
+	down(&data->update_lock);\
 	data->value = IN_TO_REG(val); \
 	lm80_write_value(client, reg, data->value); \
-	mutex_unlock(&data->update_lock);\
+	up(&data->update_lock);\
 	return count; \
 }
 set_in(min0, in_min[0], LM80_REG_IN_MIN(0));
@@ -242,10 +241,10 @@ static ssize_t set_fan_##suffix(struct device *dev, struct device_attribute *att
 	struct lm80_data *data = i2c_get_clientdata(client); \
 	long val = simple_strtoul(buf, NULL, 10); \
  \
-	mutex_lock(&data->update_lock);\
+	down(&data->update_lock);\
 	data->value = FAN_TO_REG(val, DIV_FROM_REG(data->div)); \
 	lm80_write_value(client, reg, data->value); \
-	mutex_unlock(&data->update_lock);\
+	up(&data->update_lock);\
 	return count; \
 }
 set_fan(min1, fan_min[0], LM80_REG_FAN_MIN(1), fan_div[0]);
@@ -264,7 +263,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	u8 reg;
 
 	/* Save fan_min */
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	min = FAN_FROM_REG(data->fan_min[nr],
 			   DIV_FROM_REG(data->fan_div[nr]));
 
@@ -276,7 +275,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	default:
 		dev_err(&client->dev, "fan_div value %ld not "
 			"supported. Choose one of 1, 2, 4 or 8!\n", val);
-		mutex_unlock(&data->update_lock);
+		up(&data->update_lock);
 		return -EINVAL;
 	}
 
@@ -287,7 +286,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	/* Restore fan_min */
 	data->fan_min[nr] = FAN_TO_REG(min, DIV_FROM_REG(data->fan_div[nr]));
 	lm80_write_value(client, LM80_REG_FAN_MIN(nr + 1), data->fan_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return count;
 }
@@ -326,10 +325,10 @@ static ssize_t set_temp_##suffix(struct device *dev, struct device_attribute *at
 	struct lm80_data *data = i2c_get_clientdata(client); \
 	long val = simple_strtoul(buf, NULL, 10); \
  \
-	mutex_lock(&data->update_lock); \
+	down(&data->update_lock); \
 	data->value = TEMP_LIMIT_TO_REG(val); \
 	lm80_write_value(client, reg, data->value); \
-	mutex_unlock(&data->update_lock); \
+	up(&data->update_lock); \
 	return count; \
 }
 set_temp(hot_max, temp_hot_max, LM80_REG_TEMP_HOT_MAX);
@@ -438,7 +437,7 @@ static int lm80_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* Fill in the remaining client fields and put it into the global list */
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->valid = 0;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -546,7 +545,7 @@ static struct lm80_data *lm80_update_device(struct device *dev)
 	struct lm80_data *data = i2c_get_clientdata(client);
 	int i;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + 2 * HZ) || !data->valid) {
 		dev_dbg(&client->dev, "Starting lm80 update\n");
@@ -586,7 +585,7 @@ static struct lm80_data *lm80_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return data;
 }

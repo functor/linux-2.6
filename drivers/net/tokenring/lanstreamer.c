@@ -122,7 +122,6 @@
 #include <linux/spinlock.h>
 #include <linux/version.h>
 #include <linux/bitops.h>
-#include <linux/jiffies.h>
 
 #include <net/checksum.h>
 
@@ -513,7 +512,7 @@ static int streamer_reset(struct net_device *dev)
 
 	while (!((readw(streamer_mmio + SISR)) & SISR_SRB_REPLY)) {
 		msleep_interruptible(100);
-		if (time_after(jiffies, t + 40 * HZ)) {
+		if (jiffies - t > 40 * HZ) {
 			printk(KERN_ERR
 			       "IBM PCI tokenring card not responding\n");
 			release_region(dev->base_addr, STREAMER_IO_SPACE);

@@ -17,9 +17,6 @@
 #include <asm/isadep.h>
 #include <asm/thread_info.h>
 #include <asm/war.h>
-#ifdef CONFIG_MIPS_MT_SMTC
-#include <asm/mipsmtregs.h>
-#endif
 
 #ifdef CONFIG_PREEMPT
 	.macro	preempt_stop
@@ -78,37 +75,6 @@ FEXPORT(syscall_exit)
 	bnez	t0, syscall_exit_work
 
 FEXPORT(restore_all)			# restore full frame
-#ifdef CONFIG_MIPS_MT_SMTC
-/* Detect and execute deferred IPI "interrupts" */
-	move	a0,sp
-	jal	deferred_smtc_ipi
-/* Re-arm any temporarily masked interrupts not explicitly "acked" */
-	mfc0	v0, CP0_TCSTATUS
-	ori	v1, v0, TCSTATUS_IXMT
-	mtc0	v1, CP0_TCSTATUS
-	andi	v0, TCSTATUS_IXMT
-	ehb
-	mfc0	t0, CP0_TCCONTEXT
-	DMT	9				# dmt t1
-	jal	mips_ihb
-	mfc0	t2, CP0_STATUS
-	andi	t3, t0, 0xff00
-	or	t2, t2, t3
-	mtc0	t2, CP0_STATUS
-	ehb
-	andi	t1, t1, VPECONTROL_TE
-	beqz	t1, 1f
-	EMT
-1:
-	mfc0	v1, CP0_TCSTATUS
-	/* We set IXMT above, XOR should clear it here */
-	xori	v1, v1, TCSTATUS_IXMT
-	or	v1, v0, v1
-	mtc0	v1, CP0_TCSTATUS
-	ehb
-	xor	t0, t0, t3
-	mtc0	t0, CP0_TCCONTEXT
-#endif /* CONFIG_MIPS_MT_SMTC */
 	.set	noat
 	RESTORE_TEMP
 	RESTORE_AT
@@ -154,17 +120,28 @@ syscall_exit_work:
 	jal	do_syscall_trace
 	b	resume_userspace
 
-#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_MIPS_MT)
-
 /*
- * MIPS32R2 Instruction Hazard Barrier - must be called
- *
- * For C code use the inline version named instruction_hazard().
+ * Common spurious interrupt handler.
  */
-LEAF(mips_ihb)
-	.set	mips32r2
-	jr.hb	ra
-	nop
-	END(mips_ihb)
-
-#endif /* CONFIG_CPU_MIPSR2 or CONFIG_MIPS_MT */
+LEAF(spurious_interrupt)
+	/*
+	 * Someone tried to fool us by sending an interrupt but we
+	 * couldn't find a cause for it.
+	 */
+	PTR_LA	t1, irq_err_count
+#ifdef CONFIG_SMP
+1:	ll      t0, (t1)
+	addiu   t0, 1
+	sc      t0, (t1)
+#if R10000_LLSC_WAR
+	beqzl	t0, 1b
+#else
+	beqz	t0, 1b
+#endif
+#else
+	lw      t0, (t1)
+	addiu   t0, 1
+	sw      t0, (t1)
+#endif
+	j	ret_from_irq
+	END(spurious_interrupt)

@@ -76,13 +76,13 @@ static int dvb_bt8xx_start_feed(struct dvb_demux_feed *dvbdmxfeed)
 	if (!dvbdmx->dmx.frontend)
 		return -EINVAL;
 
-	mutex_lock(&card->lock);
+	down(&card->lock);
 	card->nfeeds++;
 	rc = card->nfeeds;
 	if (card->nfeeds == 1)
 		bt878_start(card->bt, card->gpio_mode,
 			    card->op_sync_orin, card->irq_err_ignore);
-	mutex_unlock(&card->lock);
+	up(&card->lock);
 	return rc;
 }
 
@@ -96,11 +96,11 @@ static int dvb_bt8xx_stop_feed(struct dvb_demux_feed *dvbdmxfeed)
 	if (!dvbdmx->dmx.frontend)
 		return -EINVAL;
 
-	mutex_lock(&card->lock);
+	down(&card->lock);
 	card->nfeeds--;
 	if (card->nfeeds == 0)
 		bt878_stop(card->bt);
-	mutex_unlock(&card->lock);
+	up(&card->lock);
 
 	return 0;
 }
@@ -115,7 +115,7 @@ static int is_pci_slot_eq(struct pci_dev* adev, struct pci_dev* bdev)
 	return 0;
 }
 
-static struct bt878 __devinit *dvb_bt8xx_878_match(unsigned int bttv_nr, struct pci_dev* bttv_pci_dev)
+static struct bt878 __init *dvb_bt8xx_878_match(unsigned int bttv_nr, struct pci_dev* bttv_pci_dev)
 {
 	unsigned int card_nr;
 
@@ -184,11 +184,6 @@ static struct mt352_config thomson_dtt7579_config = {
 	.pll_set = thomson_dtt7579_pll_set,
 };
 
-static struct zl10353_config thomson_dtt7579_zl10353_config = {
-	.demod_address = 0x0f,
-	.pll_set = thomson_dtt7579_pll_set,
-};
-
 static int cx24108_pll_set(struct dvb_frontend* fe, struct dvb_frontend_parameters* params)
 {
 	u32 freq = params->frequency;
@@ -244,20 +239,6 @@ static int cx24108_pll_set(struct dvb_frontend* fe, struct dvb_frontend_paramete
 
 static int pinnsat_pll_init(struct dvb_frontend* fe)
 {
-	struct dvb_bt8xx_card *card = fe->dvb->priv;
-
-	bttv_gpio_enable(card->bttv_nr, 1, 1);  /* output */
-	bttv_write_gpio(card->bttv_nr, 1, 1);   /* relay on */
-
-	return 0;
-}
-
-static int pinnsat_pll_sleep(struct dvb_frontend* fe)
-{
-	struct dvb_bt8xx_card *card = fe->dvb->priv;
-
-	bttv_write_gpio(card->bttv_nr, 1, 0);   /* relay off */
-
 	return 0;
 }
 
@@ -265,7 +246,6 @@ static struct cx24110_config pctvsat_config = {
 	.demod_address = 0x55,
 	.pll_init = pinnsat_pll_init,
 	.pll_set = cx24108_pll_set,
-	.pll_sleep = pinnsat_pll_sleep,
 };
 
 static int microtune_mt7202dtf_pll_set(struct dvb_frontend* fe, struct dvb_frontend_parameters* params)
@@ -622,11 +602,6 @@ static void frontend_init(struct dvb_bt8xx_card *card, u32 type)
 	switch(type) {
 	case BTTV_BOARD_DVICO_DVBT_LITE:
 		card->fe = mt352_attach(&thomson_dtt7579_config, card->i2c_adapter);
-
-		if (card->fe == NULL)
-			card->fe = zl10353_attach(&thomson_dtt7579_zl10353_config,
-						  card->i2c_adapter);
-
 		if (card->fe != NULL) {
 			card->fe->ops->info.frequency_min = 174000000;
 			card->fe->ops->info.frequency_max = 862000000;
@@ -719,7 +694,7 @@ static void frontend_init(struct dvb_bt8xx_card *card, u32 type)
 		}
 }
 
-static int __devinit dvb_bt8xx_load_card(struct dvb_bt8xx_card *card, u32 type)
+static int __init dvb_bt8xx_load_card(struct dvb_bt8xx_card *card, u32 type)
 {
 	int result;
 
@@ -804,7 +779,7 @@ static int __devinit dvb_bt8xx_load_card(struct dvb_bt8xx_card *card, u32 type)
 	return 0;
 }
 
-static int __devinit dvb_bt8xx_probe(struct bttv_sub_device *sub)
+static int dvb_bt8xx_probe(struct bttv_sub_device *sub)
 {
 	struct dvb_bt8xx_card *card;
 	struct pci_dev* bttv_pci_dev;
@@ -813,7 +788,7 @@ static int __devinit dvb_bt8xx_probe(struct bttv_sub_device *sub)
 	if (!(card = kzalloc(sizeof(struct dvb_bt8xx_card), GFP_KERNEL)))
 		return -ENOMEM;
 
-	mutex_init(&card->lock);
+	init_MUTEX(&card->lock);
 	card->bttv_nr = sub->core->nr;
 	strncpy(card->card_name, sub->core->name, sizeof(sub->core->name));
 	card->i2c_adapter = &sub->core->i2c_adap;
@@ -823,14 +798,14 @@ static int __devinit dvb_bt8xx_probe(struct bttv_sub_device *sub)
 		card->gpio_mode = 0x0400c060;
 		/* should be: BT878_A_GAIN=0,BT878_A_PWRDN,BT878_DA_DPM,BT878_DA_SBR,
 			      BT878_DA_IOM=1,BT878_DA_APP to enable serial highspeed mode. */
-		card->op_sync_orin = BT878_RISC_SYNC_MASK;
-		card->irq_err_ignore = BT878_AFBUS | BT878_AFDSR;
+		card->op_sync_orin = 0;
+		card->irq_err_ignore = 0;
 		break;
 
 	case BTTV_BOARD_DVICO_DVBT_LITE:
 		card->gpio_mode = 0x0400C060;
-		card->op_sync_orin = BT878_RISC_SYNC_MASK;
-		card->irq_err_ignore = BT878_AFBUS | BT878_AFDSR;
+		card->op_sync_orin = 0;
+		card->irq_err_ignore = 0;
 		/* 26, 15, 14, 6, 5
 		 * A_PWRDN  DA_DPM DA_SBR DA_IOM_DA
 		 * DA_APP(parallel) */
@@ -845,15 +820,15 @@ static int __devinit dvb_bt8xx_probe(struct bttv_sub_device *sub)
 	case BTTV_BOARD_NEBULA_DIGITV:
 	case BTTV_BOARD_AVDVBT_761:
 		card->gpio_mode = (1 << 26) | (1 << 14) | (1 << 5);
-		card->op_sync_orin = BT878_RISC_SYNC_MASK;
-		card->irq_err_ignore = BT878_AFBUS | BT878_AFDSR;
+		card->op_sync_orin = 0;
+		card->irq_err_ignore = 0;
 		/* A_PWRDN DA_SBR DA_APP (high speed serial) */
 		break;
 
 	case BTTV_BOARD_AVDVBT_771: //case 0x07711461:
 		card->gpio_mode = 0x0400402B;
 		card->op_sync_orin = BT878_RISC_SYNC_MASK;
-		card->irq_err_ignore = BT878_AFBUS | BT878_AFDSR;
+		card->irq_err_ignore = 0;
 		/* A_PWRDN DA_SBR  DA_APP[0] PKTP=10 RISC_ENABLE FIFO_ENABLE*/
 		break;
 
@@ -877,8 +852,8 @@ static int __devinit dvb_bt8xx_probe(struct bttv_sub_device *sub)
 
 	case BTTV_BOARD_PC_HDTV:
 		card->gpio_mode = 0x0100EC7B;
-		card->op_sync_orin = BT878_RISC_SYNC_MASK;
-		card->irq_err_ignore = BT878_AFBUS | BT878_AFDSR;
+		card->op_sync_orin = 0;
+		card->irq_err_ignore = 0;
 		break;
 
 	default:
@@ -906,7 +881,7 @@ static int __devinit dvb_bt8xx_probe(struct bttv_sub_device *sub)
 		return -EFAULT;
 	}
 
-	mutex_init(&card->bt->gpio_lock);
+	init_MUTEX(&card->bt->gpio_lock);
 	card->bt->bttv_nr = sub->core->nr;
 
 	if ( (ret = dvb_bt8xx_load_card(card, sub->core->type)) ) {

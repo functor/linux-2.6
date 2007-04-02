@@ -64,7 +64,7 @@
 
 #undef AUTOUNLOCK  /* automatically unlocks blocks before erasing */
 
-static struct mtd_info *sharp_probe(struct map_info *);
+struct mtd_info *sharp_probe(struct map_info *);
 
 static int sharp_probe_map(struct map_info *map,struct mtd_info *mtd);
 
@@ -96,6 +96,7 @@ struct sharp_info{
 	struct flchip chips[1];
 };
 
+struct mtd_info *sharp_probe(struct map_info *map);
 static void sharp_destroy(struct mtd_info *mtd);
 
 static struct mtd_chip_driver sharp_chipdrv = {
@@ -106,7 +107,7 @@ static struct mtd_chip_driver sharp_chipdrv = {
 };
 
 
-static struct mtd_info *sharp_probe(struct map_info *map)
+struct mtd_info *sharp_probe(struct map_info *map)
 {
 	struct mtd_info *mtd = NULL;
 	struct sharp_info *sharp = NULL;
@@ -580,7 +581,7 @@ static void sharp_destroy(struct mtd_info *mtd)
 
 }
 
-static int __init sharp_probe_init(void)
+int __init sharp_probe_init(void)
 {
 	printk("MTD Sharp chip driver <ds@lineo.com>\n");
 

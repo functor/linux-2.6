@@ -18,6 +18,8 @@
 
 struct thread_struct;
 
+#define prepare_to_switch()    do { } while(0)
+
 /*
  * switch_to(prev, next) should switch from task `prev' to `next'
  * `prev' will never be the same as `next'.

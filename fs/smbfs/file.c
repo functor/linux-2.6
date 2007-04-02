@@ -178,9 +178,11 @@ smb_writepage(struct page *page, struct writeback_control *wbc)
 	unsigned offset = PAGE_CACHE_SIZE;
 	int err;
 
-	BUG_ON(!mapping);
+	if (!mapping)
+		BUG();
 	inode = mapping->host;
-	BUG_ON(!inode);
+	if (!inode)
+		BUG();
 
 	end_index = inode->i_size >> PAGE_CACHE_SHIFT;
 
@@ -399,7 +401,7 @@ smb_file_permission(struct inode *inode, int mask, struct nameidata *nd)
 	return error;
 }
 
-const struct file_operations smb_file_operations =
+struct file_operations smb_file_operations =
 {
 	.llseek		= remote_llseek,
 	.read		= smb_file_read,

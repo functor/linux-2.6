@@ -30,7 +30,8 @@ unsigned int system_rev;
 #define check_port(base, shift) ((base[UART_OMAP_MDR1 << shift] & 7) == 0)
 #define omap_get_id() ((*(volatile unsigned int *)(0xfffed404)) >> 12) & ID_MASK
 
-static void putc(int c)
+static void
+putstr(const char *s)
 {
 	volatile u8 * uart = 0;
 	int shift = 2;
@@ -68,13 +69,16 @@ static void putc(int c)
 	/*
 	 * Now, xmit each character
 	 */
-	while (!(uart[UART_LSR << shift] & UART_LSR_THRE))
-		barrier();
-	uart[UART_TX << shift] = c;
-}
-
-static inline void flush(void)
-{
+	while (*s) {
+		while (!(uart[UART_LSR << shift] & UART_LSR_THRE))
+			barrier();
+		uart[UART_TX << shift] = *s;
+		if (*s++ == '\n') {
+			while (!(uart[UART_LSR << shift] & UART_LSR_THRE))
+				barrier();
+			uart[UART_TX << shift] = '\r';
+		}
+	}
 }
 
 /*

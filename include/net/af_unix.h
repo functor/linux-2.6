@@ -4,7 +4,6 @@
 #include <linux/config.h>
 #include <linux/socket.h>
 #include <linux/un.h>
-#include <linux/mutex.h>
 #include <net/sock.h>
 #include <linux/vs_base.h>
 
@@ -76,7 +75,7 @@ struct unix_sock {
         struct unix_address     *addr;
         struct dentry		*dentry;
         struct vfsmount		*mnt;
-	struct mutex		readlock;
+        struct semaphore        readsem;
         struct sock		*peer;
         struct sock		*other;
         struct sock		*gc_tree;

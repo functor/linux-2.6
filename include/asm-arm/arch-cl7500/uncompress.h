@@ -3,19 +3,27 @@
  *
  * Copyright (C) 1999, 2000 Nexus Electronics Ltd.
  */
+
 #define BASE 0x03010000
 #define SERBASE (BASE + (0x2f8 << 2))
 
-static inline void putc(char c)
+static __inline__ void putc(char c)
 {
-	while (!(*((volatile unsigned int *)(SERBASE + 0x14)) & 0x20))
-		barrier();
-
+	while (!(*((volatile unsigned int *)(SERBASE + 0x14)) & 0x20));
 	*((volatile unsigned int *)(SERBASE)) = c;
 }
 
-static inline void flush(void)
+/*
+ * This does not append a newline
+ */
+static void putstr(const char *s)
 {
+	while (*s) {
+		putc(*s);
+		if (*s == '\n')
+			putc('\r');
+		s++;
+	}
 }
 
 static __inline__ void arch_decomp_setup(void)

@@ -104,9 +104,10 @@ static inline int insert_metapage(struct page *page, struct metapage *mp)
 	if (PagePrivate(page))
 		a = mp_anchor(page);
 	else {
-		a = kzalloc(sizeof(struct meta_anchor), GFP_NOFS);
+		a = kmalloc(sizeof(struct meta_anchor), GFP_NOFS);
 		if (!a)
 			return -ENOMEM;
+		memset(a, 0, sizeof(struct meta_anchor));
 		set_page_private(page, (unsigned long)a);
 		SetPagePrivate(page);
 		kmap(page);
@@ -220,8 +221,8 @@ int __init metapage_init(void)
 	if (metapage_cache == NULL)
 		return -ENOMEM;
 
-	metapage_mempool = mempool_create_slab_pool(METAPOOL_MIN_PAGES,
-						    metapage_cache);
+	metapage_mempool = mempool_create(METAPOOL_MIN_PAGES, mempool_alloc_slab,
+					  mempool_free_slab, metapage_cache);
 
 	if (metapage_mempool == NULL) {
 		kmem_cache_destroy(metapage_cache);
@@ -568,13 +569,14 @@ static int metapage_releasepage(struct page *page, gfp_t gfp_mask)
 	return ret;
 }
 
-static void metapage_invalidatepage(struct page *page, unsigned long offset)
+static int metapage_invalidatepage(struct page *page, unsigned long offset)
 {
 	BUG_ON(offset);
 
-	BUG_ON(PageWriteback(page));
+	if (PageWriteback(page))
+		return 0;
 
-	metapage_releasepage(page, 0);
+	return metapage_releasepage(page, 0);
 }
 
 struct address_space_operations jfs_metapage_aops = {

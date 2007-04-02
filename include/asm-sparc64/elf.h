@@ -10,7 +10,6 @@
 #ifdef __KERNEL__
 #include <asm/processor.h>
 #include <asm/uaccess.h>
-#include <asm/spitfire.h>
 #endif
 
 /*
@@ -69,7 +68,6 @@
 #define HWCAP_SPARC_MULDIV      8
 #define HWCAP_SPARC_V9		16
 #define HWCAP_SPARC_ULTRA3	32
-#define HWCAP_SPARC_BLKINIT	64
 
 /*
  * These are used to set parameters in the core dumps.
@@ -147,21 +145,11 @@ typedef struct {
    instruction set this cpu supports.  */
 
 /* On Ultra, we support all of the v8 capabilities. */
-static inline unsigned int sparc64_elf_hwcap(void)
-{
-	unsigned int cap = (HWCAP_SPARC_FLUSH | HWCAP_SPARC_STBAR |
-			    HWCAP_SPARC_SWAP | HWCAP_SPARC_MULDIV |
-			    HWCAP_SPARC_V9);
-
-	if (tlb_type == cheetah || tlb_type == cheetah_plus)
-		cap |= HWCAP_SPARC_ULTRA3;
-	else if (tlb_type == hypervisor)
-		cap |= HWCAP_SPARC_BLKINIT;
-
-	return cap;
-}
-
-#define ELF_HWCAP	sparc64_elf_hwcap();
+#define ELF_HWCAP	((HWCAP_SPARC_FLUSH | HWCAP_SPARC_STBAR | \
+			  HWCAP_SPARC_SWAP | HWCAP_SPARC_MULDIV | \
+			  HWCAP_SPARC_V9) | \
+			 ((tlb_type == cheetah || tlb_type == cheetah_plus) ? \
+			  HWCAP_SPARC_ULTRA3 : 0))
 
 /* This yields a string that ld.so will use to load implementation
    specific libraries for optimization.  This is more specific in

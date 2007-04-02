@@ -620,7 +620,7 @@ int ufs_empty_dir (struct inode * inode)
 	return 1;
 }
 
-const struct file_operations ufs_dir_operations = {
+struct file_operations ufs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= ufs_readdir,
 	.fsync		= file_fsync,

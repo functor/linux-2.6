@@ -356,7 +356,9 @@ void st5481_b_l2l1(struct hisax_if *ifc, int pr, void *arg)
 
 	switch (pr) {
 	case PH_DATA | REQUEST:
-		BUG_ON(bcs->b_out.tx_skb);
+		if (bcs->b_out.tx_skb)
+			BUG();
+		
 		bcs->b_out.tx_skb = skb;
 		break;
 	case PH_ACTIVATE | REQUEST:

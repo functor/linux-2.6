@@ -634,7 +634,7 @@ static void vrc4171_remove_sockets(void)
 static int __devinit vrc4171_card_setup(char *options)
 {
 	if (options == NULL || *options == '\0')
-		return 1;
+		return 0;
 
 	if (strncmp(options, "irq:", 4) == 0) {
 		int irq;
@@ -644,7 +644,7 @@ static int __devinit vrc4171_card_setup(char *options)
 			vrc4171_irq = irq;
 
 		if (*options != ',')
-			return 1;
+			return 0;
 		options++;
 	}
 
@@ -663,10 +663,10 @@ static int __devinit vrc4171_card_setup(char *options)
 			}
 
 			if (*options != ',')
-				return 1;
+				return 0;
 			options++;
 		} else
-			return 1;
+			return 0;
 
 	}
 
@@ -688,7 +688,7 @@ static int __devinit vrc4171_card_setup(char *options)
 			}
 
 			if (*options != ',')
-				return 1;
+				return 0;
 			options++;
 
 			if (strncmp(options, "memnoprobe", 10) == 0)
@@ -700,7 +700,7 @@ static int __devinit vrc4171_card_setup(char *options)
 		}
 	}
 
-	return 1;
+	return 0;
 }
 
 __setup("vrc4171_card=", vrc4171_card_setup);

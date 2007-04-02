@@ -20,12 +20,13 @@
 #define __RESTORE(reg,offset) "movq (14-" #offset ")*8(%%rsp),%%" #reg "\n\t"
 
 /* frame pointer must be last for get_wchan */
-#define SAVE_CONTEXT    "pushq %%rbp ; movq %%rsi,%%rbp\n\t"
-#define RESTORE_CONTEXT "movq %%rbp,%%rsi ; popq %%rbp\n\t"
+#define SAVE_CONTEXT    "pushf ; pushq %%rbp ; movq %%rsi,%%rbp\n\t"
+#define RESTORE_CONTEXT "movq %%rbp,%%rsi ; popq %%rbp ; popf\n\t"
 
 #define __EXTRA_CLOBBER  \
 	,"rcx","rbx","rdx","r8","r9","r10","r11","r12","r13","r14","r15"
 
+/* Save restore flags to clear handle leaking NT */
 #define switch_to(prev,next,last) \
 	asm volatile(SAVE_CONTEXT						    \
 		     "movq %%rsp,%P[threadrsp](%[prev])\n\t" /* save RSP */	  \
@@ -69,6 +70,12 @@ extern void load_gs_index(unsigned);
 		".quad 1b,3b\n"			\
 		".previous"			\
 		: :"r" (value), "r" (0))
+
+#define set_debug(value,register) \
+                __asm__("movq %0,%%db" #register  \
+		: /* no output */ \
+		:"r" ((unsigned long) value))
+
 
 #ifdef __KERNEL__
 struct alt_instr { 
@@ -150,6 +157,23 @@ struct alt_instr {
  * Clear and set 'TS' bit respectively
  */
 #define clts() __asm__ __volatile__ ("clts")
+
+static inline unsigned long __raw_local_save_flags(void)
+{
+	unsigned long flags;
+
+	__asm__ __volatile__(
+		"# __raw_save_flags\n\t"
+		"pushfq ; popq %q0"
+		: "=g" (flags)
+		: /* no input */
+		: "memory"
+	);
+
+	return flags;
+}
+#define raw_local_save_flags(flags) \
+		do { (flags) = __raw_local_save_flags(); } while (0)
 
 static inline unsigned long read_cr0(void)
 { 

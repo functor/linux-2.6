@@ -19,6 +19,7 @@
 #include <asm/dma.h>	/* isa_dma_bridge_buggy */
 #include "pci.h"
 
+#if 0
 
 /**
  * pci_bus_max_busnr - returns maximum PCI bus number of given bus' children
@@ -33,7 +34,7 @@ pci_bus_max_busnr(struct pci_bus* bus)
 	struct list_head *tmp;
 	unsigned char max, n;
 
-	max = bus->subordinate;
+	max = bus->number;
 	list_for_each(tmp, &bus->children) {
 		n = pci_bus_max_busnr(pci_bus_b(tmp));
 		if(n > max)
@@ -41,9 +42,7 @@ pci_bus_max_busnr(struct pci_bus* bus)
 	}
 	return max;
 }
-EXPORT_SYMBOL_GPL(pci_bus_max_busnr);
 
-#if 0
 /**
  * pci_max_busnr - returns maximum PCI bus number
  *
@@ -307,11 +306,9 @@ pci_set_power_state(struct pci_dev *dev, pci_power_t state)
 	 * Can enter D0 from any state, but if we can only go deeper 
 	 * to sleep if we're already in a low power state
 	 */
-	if (state != PCI_D0 && dev->current_state > state) {
-		printk(KERN_ERR "%s(): %s: state=%d, current state=%d\n",
-			__FUNCTION__, pci_name(dev), state, dev->current_state);
+	if (state != PCI_D0 && dev->current_state > state)
 		return -EINVAL;
-	} else if (dev->current_state == state)
+	else if (dev->current_state == state) 
 		return 0;        /* we're already there */
 
 	/* find PCI PM capability in list */
@@ -446,10 +443,6 @@ pci_save_state(struct pci_dev *dev)
 	/* XXX: 100% dword access ok here? */
 	for (i = 0; i < 16; i++)
 		pci_read_config_dword(dev, i * 4,&dev->saved_config_space[i]);
-	if ((i = pci_save_msi_state(dev)) != 0)
-		return i;
-	if ((i = pci_save_msix_state(dev)) != 0)
-		return i;
 	return 0;
 }
 
@@ -461,25 +454,9 @@ int
 pci_restore_state(struct pci_dev *dev)
 {
 	int i;
-	int val;
 
-	/*
-	 * The Base Address register should be programmed before the command
-	 * register(s)
-	 */
-	for (i = 15; i >= 0; i--) {
-		pci_read_config_dword(dev, i * 4, &val);
-		if (val != dev->saved_config_space[i]) {
-			printk(KERN_DEBUG "PM: Writing back config space on "
-				"device %s at offset %x (was %x, writing %x)\n",
-				pci_name(dev), i,
-				val, (int)dev->saved_config_space[i]);
-			pci_write_config_dword(dev,i * 4,
-				dev->saved_config_space[i]);
-		}
-	}
-	pci_restore_msi_state(dev);
-	pci_restore_msix_state(dev);
+	for (i = 0; i < 16; i++)
+		pci_write_config_dword(dev,i * 4, dev->saved_config_space[i]);
 	return 0;
 }
 
@@ -518,8 +495,9 @@ pci_enable_device_bars(struct pci_dev *dev, int bars)
 int
 pci_enable_device(struct pci_dev *dev)
 {
-	int err = pci_enable_device_bars(dev, (1 << PCI_NUM_RESOURCES) - 1);
-	if (err)
+	int err;
+
+	if ((err = pci_enable_device_bars(dev, (1 << PCI_NUM_RESOURCES) - 1)))
 		return err;
 	pci_fixup_device(pci_fixup_enable, dev);
 	dev->is_enabled = 1;
@@ -661,7 +639,7 @@ void pci_release_region(struct pci_dev *pdev, int bar)
  *	Returns 0 on success, or %EBUSY on error.  A warning
  *	message is also printed on failure.
  */
-int pci_request_region(struct pci_dev *pdev, int bar, const char *res_name)
+int pci_request_region(struct pci_dev *pdev, int bar, char *res_name)
 {
 	if (pci_resource_len(pdev, bar) == 0)
 		return 0;
@@ -719,7 +697,7 @@ void pci_release_regions(struct pci_dev *pdev)
  *	Returns 0 on success, or %EBUSY on error.  A warning
  *	message is also printed on failure.
  */
-int pci_request_regions(struct pci_dev *pdev, const char *res_name)
+int pci_request_regions(struct pci_dev *pdev, char *res_name)
 {
 	int i;
 	
@@ -922,12 +900,8 @@ static int __devinit pci_setup(char *str)
 		if (k)
 			*k++ = 0;
 		if (*str && (str = pcibios_setup(str)) && *str) {
-			if (!strcmp(str, "nomsi")) {
-				pci_no_msi();
-			} else {
-				printk(KERN_ERR "PCI: Unknown option `%s'\n",
-						str);
-			}
+			/* PCI layer options should be handled here */
+			printk(KERN_ERR "PCI: Unknown option `%s'\n", str);
 		}
 		str = k;
 	}

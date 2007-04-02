@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/sbc85xx.h
+ *
  * WindRiver PowerQUICC III SBC85xx common board definitions
  *
  * Copyright 2003 Motorola Inc.

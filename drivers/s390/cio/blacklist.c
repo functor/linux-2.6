@@ -414,11 +414,11 @@ cio_ignore_proc_init (void)
 	entry = create_proc_entry ("cio_ignore", S_IFREG | S_IRUGO | S_IWUSR,
 				   &proc_root);
 	if (!entry)
-		return -ENOENT;
+		return 0;
 
 	entry->proc_fops = &cio_ignore_proc_fops;
 
-	return 0;
+	return 1;
 }
 
 __initcall (cio_ignore_proc_init);

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/mpc8555_cds.h
+ *
  * MPC8555CDS board definitions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

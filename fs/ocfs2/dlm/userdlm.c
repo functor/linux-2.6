@@ -139,10 +139,6 @@ static void user_ast(void *opaque)
 		return;
 	}
 
-	mlog_bug_on_msg(lockres->l_requested == LKM_IVMODE,
-			"Lockres %s, requested ivmode. flags 0x%x\n",
-			lockres->l_name, lockres->l_flags);
-
 	/* we're downconverting. */
 	if (lockres->l_requested < lockres->l_level) {
 		if (lockres->l_requested <=
@@ -233,42 +229,23 @@ static void user_unlock_ast(void *opaque, enum dlm_status status)
 
 	mlog(0, "UNLOCK AST called on lock %s\n", lockres->l_name);
 
-	if (status != DLM_NORMAL && status != DLM_CANCELGRANT)
+	if (status != DLM_NORMAL)
 		mlog(ML_ERROR, "Dlm returns status %d\n", status);
 
 	spin_lock(&lockres->l_lock);
-	/* The teardown flag gets set early during the unlock process,
-	 * so test the cancel flag to make sure that this ast isn't
-	 * for a concurrent cancel. */
-	if (lockres->l_flags & USER_LOCK_IN_TEARDOWN
-	    && !(lockres->l_flags & USER_LOCK_IN_CANCEL)) {
+	if (lockres->l_flags & USER_LOCK_IN_TEARDOWN)
 		lockres->l_level = LKM_IVMODE;
-	} else if (status == DLM_CANCELGRANT) {
-		mlog(0, "Lock %s, cancel fails, flags 0x%x\n",
-		     lockres->l_name, lockres->l_flags);
-		/* We tried to cancel a convert request, but it was
-		 * already granted. Don't clear the busy flag - the
-		 * ast should've done this already. */
-		BUG_ON(!(lockres->l_flags & USER_LOCK_IN_CANCEL));
-		lockres->l_flags &= ~USER_LOCK_IN_CANCEL;
-		goto out_noclear;
-	} else {
-		BUG_ON(!(lockres->l_flags & USER_LOCK_IN_CANCEL));
-		/* Cancel succeeded, we want to re-queue */
-		mlog(0, "Lock %s, cancel succeeds, flags 0x%x\n",
-		     lockres->l_name, lockres->l_flags);
+	else {
 		lockres->l_requested = LKM_IVMODE; /* cancel an
 						    * upconvert
 						    * request. */
 		lockres->l_flags &= ~USER_LOCK_IN_CANCEL;
 		/* we want the unblock thread to look at it again
 		 * now. */
-		if (lockres->l_flags & USER_LOCK_BLOCKED)
-			__user_dlm_queue_lockres(lockres);
+		__user_dlm_queue_lockres(lockres);
 	}
 
 	lockres->l_flags &= ~USER_LOCK_BUSY;
-out_noclear:
 	spin_unlock(&lockres->l_lock);
 
 	wake_up(&lockres->l_event);
@@ -291,25 +268,12 @@ static void user_dlm_unblock_lock(void *opaque)
 
 	spin_lock(&lockres->l_lock);
 
-	mlog_bug_on_msg(!(lockres->l_flags & USER_LOCK_QUEUED),
-			"Lockres %s, flags 0x%x\n",
-			lockres->l_name, lockres->l_flags);
+	BUG_ON(!(lockres->l_flags & USER_LOCK_BLOCKED));
+	BUG_ON(!(lockres->l_flags & USER_LOCK_QUEUED));
 
-	/* notice that we don't clear USER_LOCK_BLOCKED here. If it's
-	 * set, we want user_ast clear it. */
+	/* notice that we don't clear USER_LOCK_BLOCKED here. That's
+	 * for user_ast to do. */
 	lockres->l_flags &= ~USER_LOCK_QUEUED;
-
-	/* It's valid to get here and no longer be blocked - if we get
-	 * several basts in a row, we might be queued by the first
-	 * one, the unblock thread might run and clear the queued
-	 * flag, and finally we might get another bast which re-queues
-	 * us before our ast for the downconvert is called. */
-	if (!(lockres->l_flags & USER_LOCK_BLOCKED)) {
-		mlog(0, "Lockres %s, flags 0x%x: queued but not blocking\n",
-			lockres->l_name, lockres->l_flags);
-		spin_unlock(&lockres->l_lock);
-		goto drop_ref;
-	}
 
 	if (lockres->l_flags & USER_LOCK_IN_TEARDOWN) {
 		mlog(0, "lock is in teardown so we do nothing\n");
@@ -318,9 +282,7 @@ static void user_dlm_unblock_lock(void *opaque)
 	}
 
 	if (lockres->l_flags & USER_LOCK_BUSY) {
-		mlog(0, "Cancel lock %s, flags 0x%x\n",
-		     lockres->l_name, lockres->l_flags);
-
+		mlog(0, "BUSY flag detected...\n");
 		if (lockres->l_flags & USER_LOCK_IN_CANCEL) {
 			spin_unlock(&lockres->l_lock);
 			goto drop_ref;
@@ -334,7 +296,14 @@ static void user_dlm_unblock_lock(void *opaque)
 				   LKM_CANCEL,
 				   user_unlock_ast,
 				   lockres);
-		if (status != DLM_NORMAL)
+		if (status == DLM_CANCELGRANT) {
+			/* If we got this, then the ast was fired
+			 * before we could cancel. We cleanup our
+			 * state, and restart the function. */
+			spin_lock(&lockres->l_lock);
+			lockres->l_flags &= ~USER_LOCK_IN_CANCEL;
+			spin_unlock(&lockres->l_lock);
+		} else if (status != DLM_NORMAL)
 			user_log_dlm_error("dlmunlock", status, lockres);
 		goto drop_ref;
 	}
@@ -612,14 +581,6 @@ int user_dlm_destroy_lock(struct user_lock_res *lockres)
 	mlog(0, "asked to destroy %s\n", lockres->l_name);
 
 	spin_lock(&lockres->l_lock);
-	if (lockres->l_flags & USER_LOCK_IN_TEARDOWN) {
-		mlog(0, "Lock is already torn down\n");
-		spin_unlock(&lockres->l_lock);
-		return 0;
-	}
-
-	lockres->l_flags |= USER_LOCK_IN_TEARDOWN;
-
 	while (lockres->l_flags & USER_LOCK_BUSY) {
 		spin_unlock(&lockres->l_lock);
 
@@ -645,6 +606,7 @@ int user_dlm_destroy_lock(struct user_lock_res *lockres)
 
 	lockres->l_flags &= ~USER_LOCK_ATTACHED;
 	lockres->l_flags |= USER_LOCK_BUSY;
+	lockres->l_flags |= USER_LOCK_IN_TEARDOWN;
 	spin_unlock(&lockres->l_lock);
 
 	mlog(0, "unlocking lockres %s\n", lockres->l_name);

@@ -105,8 +105,6 @@
 #include <linux/gameport.h>
 #include <linux/wait.h>
 #include <linux/dma-mapping.h>
-#include <linux/mutex.h>
-
 
 #include <asm/io.h>
 #include <asm/page.h>
@@ -193,7 +191,7 @@ struct solo1_state {
 	unsigned ena;
 
 	spinlock_t lock;
-	struct mutex open_mutex;
+	struct semaphore open_sem;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 
@@ -1583,7 +1581,7 @@ static int solo1_release(struct inode *inode, struct file *file)
 	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac(s, file->f_flags & O_NONBLOCK);
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac(s);
 		outb(0, s->iobase+6);  /* disable DMA */
@@ -1597,7 +1595,7 @@ static int solo1_release(struct inode *inode, struct file *file)
 	}
 	s->open_mode &= ~(FMODE_READ | FMODE_WRITE);
 	wake_up(&s->open_wait);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	unlock_kernel();
 	return 0;
 }
@@ -1626,21 +1624,21 @@ static int solo1_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & (FMODE_READ | FMODE_WRITE)) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 	s->fmt = AFMT_U8;
 	s->channels = 1;
@@ -1652,7 +1650,7 @@ static int solo1_open(struct inode *inode, struct file *file)
 	s->dma_dac.ossfragshift = s->dma_dac.ossmaxfrags = s->dma_dac.subdivision = 0;
 	s->dma_dac.enabled = 1;
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	prog_codec(s);
 	return nonseekable_open(inode, file);
 }
@@ -1913,21 +1911,21 @@ static int solo1_midi_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & (file->f_mode << FMODE_MIDI_SHIFT)) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -1953,7 +1951,7 @@ static int solo1_midi_open(struct inode *inode, struct file *file)
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	return nonseekable_open(inode, file);
 }
 
@@ -1987,7 +1985,7 @@ static int solo1_midi_release(struct inode *inode, struct file *file)
 		remove_wait_queue(&s->midi.owait, &wait);
 		set_current_state(TASK_RUNNING);
 	}
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	s->open_mode &= ~((file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ|FMODE_MIDI_WRITE));
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -1996,7 +1994,7 @@ static int solo1_midi_release(struct inode *inode, struct file *file)
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
 	wake_up(&s->open_wait);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	unlock_kernel();
 	return 0;
 }
@@ -2134,24 +2132,24 @@ static int solo1_dmfm_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & FMODE_DMFM) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 	if (!request_region(s->sbbase, FMSYNTH_EXTENT, "ESS Solo1")) {
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		printk(KERN_ERR "solo1: FM synth io ports in use, opl3 loaded?\n");
 		return -EBUSY;
 	}
@@ -2163,7 +2161,7 @@ static int solo1_dmfm_open(struct inode *inode, struct file *file)
 	outb(5, s->sbbase+2);
 	outb(1, s->sbbase+3);  /* enable OPL3 */
 	s->open_mode |= FMODE_DMFM;
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	return nonseekable_open(inode, file);
 }
 
@@ -2174,7 +2172,7 @@ static int solo1_dmfm_release(struct inode *inode, struct file *file)
 
 	VALIDATE_STATE(s);
 	lock_kernel();
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	s->open_mode &= ~FMODE_DMFM;
 	for (regb = 0xb0; regb < 0xb9; regb++) {
 		outb(regb, s->sbbase);
@@ -2184,7 +2182,7 @@ static int solo1_dmfm_release(struct inode *inode, struct file *file)
 	}
 	release_region(s->sbbase, FMSYNTH_EXTENT);
 	wake_up(&s->open_wait);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	unlock_kernel();
 	return 0;
 }
@@ -2348,7 +2346,7 @@ static int __devinit solo1_probe(struct pci_dev *pcidev, const struct pci_device
 	/* Recording requires 24-bit DMA, so attempt to set dma mask
 	 * to 24 bits first, then 32 bits (playback only) if that fails.
 	 */
-	if (pci_set_dma_mask(pcidev, DMA_24BIT_MASK) &&
+	if (pci_set_dma_mask(pcidev, 0x00ffffff) &&
 	    pci_set_dma_mask(pcidev, DMA_32BIT_MASK)) {
 		printk(KERN_WARNING "solo1: architecture does not support 24bit or 32bit PCI busmaster DMA\n");
 		return -ENODEV;
@@ -2364,7 +2362,7 @@ static int __devinit solo1_probe(struct pci_dev *pcidev, const struct pci_device
 	init_waitqueue_head(&s->open_wait);
 	init_waitqueue_head(&s->midi.iwait);
 	init_waitqueue_head(&s->midi.owait);
-	mutex_init(&s->open_mutex);
+	init_MUTEX(&s->open_sem);
 	spin_lock_init(&s->lock);
 	s->magic = SOLO1_MAGIC;
 	s->dev = pcidev;

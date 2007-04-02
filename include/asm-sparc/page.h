@@ -152,7 +152,8 @@ extern unsigned long pfn_base;
 #define virt_to_phys		__pa
 #define phys_to_virt		__va
 
-#define ARCH_PFN_OFFSET		(pfn_base)
+#define pfn_to_page(pfn)	(mem_map + ((pfn)-(pfn_base)))
+#define page_to_pfn(page)	((unsigned long)(((page) - mem_map) + pfn_base))
 #define virt_to_page(kaddr)	(mem_map + ((((unsigned long)(kaddr)-PAGE_OFFSET)>>PAGE_SHIFT)))
 
 #define pfn_valid(pfn)		(((pfn) >= (pfn_base)) && (((pfn)-(pfn_base)) < max_mapnr))
@@ -161,11 +162,8 @@ extern unsigned long pfn_base;
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#define devmem_is_allowed(x) 1
-
 #endif /* __KERNEL__ */
 
-#include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
 
 #endif /* _SPARC_PAGE_H */

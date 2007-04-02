@@ -43,21 +43,21 @@ MODULE_VERSION(HVCS_ARCH_VERSION);
 static int hvcs_convert(long to_convert)
 {
 	switch (to_convert) {
-		case H_SUCCESS:
+		case H_Success:
 			return 0;
-		case H_PARAMETER:
+		case H_Parameter:
 			return -EINVAL;
-		case H_HARDWARE:
+		case H_Hardware:
 			return -EIO;
-		case H_BUSY:
-		case H_LONG_BUSY_ORDER_1_MSEC:
-		case H_LONG_BUSY_ORDER_10_MSEC:
-		case H_LONG_BUSY_ORDER_100_MSEC:
-		case H_LONG_BUSY_ORDER_1_SEC:
-		case H_LONG_BUSY_ORDER_10_SEC:
-		case H_LONG_BUSY_ORDER_100_SEC:
+		case H_Busy:
+		case H_LongBusyOrder1msec:
+		case H_LongBusyOrder10msec:
+		case H_LongBusyOrder100msec:
+		case H_LongBusyOrder1sec:
+		case H_LongBusyOrder10sec:
+		case H_LongBusyOrder100sec:
 			return -EBUSY;
-		case H_FUNCTION: /* fall through */
+		case H_Function: /* fall through */
 		default:
 			return -EPERM;
 	}

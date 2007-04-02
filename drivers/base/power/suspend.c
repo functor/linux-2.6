@@ -9,8 +9,6 @@
  */
 
 #include <linux/device.h>
-#include <linux/kallsyms.h>
-#include <linux/pm.h>
 #include "../base.h"
 #include "power.h"
 
@@ -59,7 +57,6 @@ int suspend_device(struct device * dev, pm_message_t state)
 	if (dev->bus && dev->bus->suspend && !dev->power.power_state.event) {
 		dev_dbg(dev, "suspending\n");
 		error = dev->bus->suspend(dev, state);
-		suspend_report_result(dev->bus->suspend, error);
 	}
 	up(&dev->sem);
 	return error;
@@ -169,12 +166,3 @@ int device_power_down(pm_message_t state)
 
 EXPORT_SYMBOL_GPL(device_power_down);
 
-void __suspend_report_result(const char *function, void *fn, int ret)
-{
-	if (ret) {
-		printk(KERN_ERR "%s(): ", function);
-		print_fn_descriptor_symbol("%s() returns ", (unsigned long)fn);
-		printk("%d\n", ret);
-	}
-}
-EXPORT_SYMBOL_GPL(__suspend_report_result);

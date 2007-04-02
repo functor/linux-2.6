@@ -30,7 +30,6 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
-#include <linux/kthread.h>
 
 #include <asm/atomic.h>
 
@@ -58,7 +57,9 @@ module_param_named(slave_ttl, w1_max_slave_ttl, int, 0);
 DEFINE_SPINLOCK(w1_mlock);
 LIST_HEAD(w1_masters);
 
-static struct task_struct *w1_control_thread;
+static pid_t control_thread;
+static int control_needs_exit;
+static DECLARE_COMPLETION(w1_control_complete);
 
 static int w1_master_match(struct device *dev, struct device_driver *drv)
 {
@@ -163,12 +164,11 @@ struct device w1_master_device = {
 	.release = &w1_master_release
 };
 
-static struct device_driver w1_slave_driver = {
+struct device_driver w1_slave_driver = {
 	.name = "w1_slave_driver",
 	.bus = &w1_bus_type,
 };
 
-#if 0
 struct device w1_slave_device = {
 	.parent = NULL,
 	.bus = &w1_bus_type,
@@ -176,7 +176,6 @@ struct device w1_slave_device = {
 	.driver = &w1_slave_driver,
 	.release = &w1_slave_release
 };
-#endif  /*  0  */
 
 static ssize_t w1_master_attribute_show_name(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -356,7 +355,7 @@ int w1_create_master_attributes(struct w1_master *master)
 	return sysfs_create_group(&master->dev.kobj, &w1_master_defattr_group);
 }
 
-static void w1_destroy_master_attributes(struct w1_master *master)
+void w1_destroy_master_attributes(struct w1_master *master)
 {
 	sysfs_remove_group(&master->dev.kobj, &w1_master_defattr_group);
 }
@@ -387,14 +386,11 @@ static int w1_uevent(struct device *dev, char **envp, int num_envp, char *buffer
 	if (dev->driver != &w1_slave_driver || !sl)
 		return 0;
 
-	err = add_uevent_var(envp, num_envp, &cur_index, buffer, buffer_size,
-			&cur_len, "W1_FID=%02X", sl->reg_num.family);
+	err = add_uevent_var(envp, num_envp, &cur_index, buffer, buffer_size, &cur_len, "W1_FID=%02X", sl->reg_num.family);
 	if (err)
 		return err;
 
-	err = add_uevent_var(envp, num_envp, &cur_index, buffer, buffer_size,
-			&cur_len, "W1_SLAVE_ID=%024LX",
-			(unsigned long long)sl->reg_num.id);
+	err = add_uevent_var(envp, num_envp, &cur_index, buffer, buffer_size, &cur_len, "W1_SLAVE_ID=%024LX", (u64)sl->reg_num.id);
 	if (err)
 		return err;
 
@@ -556,7 +552,7 @@ static void w1_slave_detach(struct w1_slave *sl)
 	kfree(sl);
 }
 
-static struct w1_master *w1_search_master(void *data)
+static struct w1_master *w1_search_master(unsigned long data)
 {
 	struct w1_master *dev;
 	int found = 0;
@@ -587,7 +583,7 @@ void w1_reconnect_slaves(struct w1_family *f)
 	spin_unlock_bh(&w1_mlock);
 }
 
-static void w1_slave_found(void *data, u64 rn)
+static void w1_slave_found(unsigned long data, u64 rn)
 {
 	int slave_count;
 	struct w1_slave *sl;
@@ -599,8 +595,8 @@ static void w1_slave_found(void *data, u64 rn)
 
 	dev = w1_search_master(data);
 	if (!dev) {
-		printk(KERN_ERR "Failed to find w1 master device for data %p, "
-		       "it is impossible.\n", data);
+		printk(KERN_ERR "Failed to find w1 master device for data %08lx, it is impossible.\n",
+				data);
 		return;
 	}
 
@@ -672,7 +668,7 @@ void w1_search(struct w1_master *dev, w1_slave_found_callback cb)
 		 * Return 0 - device(s) present, 1 - no devices present.
 		 */
 		if (w1_reset_bus(dev)) {
-			//dev_dbg(&dev->dev, "No devices present on the wire.\n");
+			dev_dbg(&dev->dev, "No devices present on the wire.\n");
 			break;
 		}
 
@@ -716,16 +712,22 @@ static int w1_control(void *data)
 {
 	struct w1_slave *sl, *sln;
 	struct w1_master *dev, *n;
-	int have_to_wait = 0;
+	int err, have_to_wait = 0;
 
-	while (!kthread_should_stop() || have_to_wait) {
+	daemonize("w1_control");
+	allow_signal(SIGTERM);
+
+	while (!control_needs_exit || have_to_wait) {
 		have_to_wait = 0;
 
 		try_to_freeze();
 		msleep_interruptible(w1_control_timeout * 1000);
 
+		if (signal_pending(current))
+			flush_signals(current);
+
 		list_for_each_entry_safe(dev, n, &w1_masters, w1_master_entry) {
-			if (!kthread_should_stop() && !dev->flags)
+			if (!control_needs_exit && !dev->flags)
 				continue;
 			/*
 			 * Little race: we can create thread but not set the flag.
@@ -736,12 +738,21 @@ static int w1_control(void *data)
 				continue;
 			}
 
-			if (kthread_should_stop() || test_bit(W1_MASTER_NEED_EXIT, &dev->flags)) {
+			if (control_needs_exit) {
 				set_bit(W1_MASTER_NEED_EXIT, &dev->flags);
 
-				spin_lock(&w1_mlock);
+				err = kill_proc(dev->kpid, SIGTERM, 1);
+				if (err)
+					dev_err(&dev->dev,
+						 "Failed to send signal to w1 kernel thread %d.\n",
+						 dev->kpid);
+			}
+
+			if (test_bit(W1_MASTER_NEED_EXIT, &dev->flags)) {
+				wait_for_completion(&dev->dev_exited);
+				spin_lock_bh(&w1_mlock);
 				list_del(&dev->w1_master_entry);
-				spin_unlock(&w1_mlock);
+				spin_unlock_bh(&w1_mlock);
 
 				down(&dev->mutex);
 				list_for_each_entry_safe(sl, sln, &dev->slist, w1_slave_entry) {
@@ -773,7 +784,7 @@ static int w1_control(void *data)
 		}
 	}
 
-	return 0;
+	complete_and_exit(&w1_control_complete, 0);
 }
 
 int w1_process(void *data)
@@ -781,11 +792,17 @@ int w1_process(void *data)
 	struct w1_master *dev = (struct w1_master *) data;
 	struct w1_slave *sl, *sln;
 
-	while (!kthread_should_stop() && !test_bit(W1_MASTER_NEED_EXIT, &dev->flags)) {
+	daemonize("%s", dev->name);
+	allow_signal(SIGTERM);
+
+	while (!test_bit(W1_MASTER_NEED_EXIT, &dev->flags)) {
 		try_to_freeze();
 		msleep_interruptible(w1_timeout * 1000);
 
-		if (kthread_should_stop() || test_bit(W1_MASTER_NEED_EXIT, &dev->flags))
+		if (signal_pending(current))
+			flush_signals(current);
+
+		if (test_bit(W1_MASTER_NEED_EXIT, &dev->flags))
 			break;
 
 		if (!dev->initialized)
@@ -818,6 +835,7 @@ int w1_process(void *data)
 	}
 
 	atomic_dec(&dev->refcnt);
+	complete_and_exit(&dev->dev_exited, 0);
 
 	return 0;
 }
@@ -850,11 +868,11 @@ static int w1_init(void)
 		goto err_out_master_unregister;
 	}
 
-	w1_control_thread = kthread_run(w1_control, NULL, "w1_control");
-	if (IS_ERR(w1_control_thread)) {
-		retval = PTR_ERR(w1_control_thread);
+	control_thread = kernel_thread(&w1_control, NULL, 0);
+	if (control_thread < 0) {
 		printk(KERN_ERR "Failed to create control thread. err=%d\n",
-			retval);
+			control_thread);
+		retval = control_thread;
 		goto err_out_slave_unregister;
 	}
 
@@ -880,7 +898,8 @@ static void w1_fini(void)
 	list_for_each_entry(dev, &w1_masters, w1_master_entry)
 		__w1_remove_master_device(dev);
 
-	kthread_stop(w1_control_thread);
+	control_needs_exit = 1;
+	wait_for_completion(&w1_control_complete);
 
 	driver_unregister(&w1_slave_driver);
 	driver_unregister(&w1_master_driver);

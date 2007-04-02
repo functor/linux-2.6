@@ -48,6 +48,7 @@ extern struct call_data_struct *call_data;
 #define SMP_CALL_FUNCTION	0x2
 
 extern cpumask_t phys_cpu_present_map;
+extern cpumask_t cpu_online_map;
 #define cpu_possible_map	phys_cpu_present_map
 
 extern cpumask_t cpu_callout_map;
@@ -85,9 +86,9 @@ extern void prom_init_secondary(void);
 extern void plat_smp_setup(void);
 
 /*
- * Called in smp_prepare_cpus.
+ * Called after init_IRQ but before __cpu_up.
  */
-extern void plat_prepare_cpus(unsigned int max_cpus);
+extern void prom_prepare_cpus(unsigned int max_cpus);
 
 /*
  * Last chance for the board code to finish SMP initialization before

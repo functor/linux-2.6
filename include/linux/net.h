@@ -144,17 +144,11 @@ struct proto_ops {
 				      struct poll_table_struct *wait);
 	int		(*ioctl)     (struct socket *sock, unsigned int cmd,
 				      unsigned long arg);
-	int	 	(*compat_ioctl) (struct socket *sock, unsigned int cmd,
-				      unsigned long arg);
 	int		(*listen)    (struct socket *sock, int len);
 	int		(*shutdown)  (struct socket *sock, int flags);
 	int		(*setsockopt)(struct socket *sock, int level,
 				      int optname, char __user *optval, int optlen);
 	int		(*getsockopt)(struct socket *sock, int level,
-				      int optname, char __user *optval, int __user *optlen);
-	int		(*compat_setsockopt)(struct socket *sock, int level,
-				      int optname, char __user *optval, int optlen);
-	int		(*compat_getsockopt)(struct socket *sock, int level,
 				      int optname, char __user *optval, int __user *optlen);
 	int		(*sendmsg)   (struct kiocb *iocb, struct socket *sock,
 				      struct msghdr *m, size_t total_len);
@@ -190,7 +184,6 @@ extern int	     sock_create_kern(int family, int type, int proto,
 				      struct socket **res);
 extern int	     sock_create_lite(int family, int type, int proto,
 				      struct socket **res); 
-extern struct socket *sock_alloc(void);
 extern void	     sock_release(struct socket *sock);
 extern int   	     sock_sendmsg(struct socket *sock, struct msghdr *msg,
 				  size_t len);
@@ -255,8 +248,6 @@ SOCKCALL_UWRAP(name, poll, (struct file *file, struct socket *sock, struct poll_
 	      (file, sock, wait)) \
 SOCKCALL_WRAP(name, ioctl, (struct socket *sock, unsigned int cmd, \
 			 unsigned long arg), (sock, cmd, arg)) \
-SOCKCALL_WRAP(name, compat_ioctl, (struct socket *sock, unsigned int cmd, \
-			 unsigned long arg), (sock, cmd, arg)) \
 SOCKCALL_WRAP(name, listen, (struct socket *sock, int len), (sock, len)) \
 SOCKCALL_WRAP(name, shutdown, (struct socket *sock, int flags), (sock, flags)) \
 SOCKCALL_WRAP(name, setsockopt, (struct socket *sock, int level, int optname, \
@@ -281,7 +272,6 @@ static const struct proto_ops name##_ops = {			\
 	.getname	= __lock_##name##_getname,	\
 	.poll		= __lock_##name##_poll,		\
 	.ioctl		= __lock_##name##_ioctl,	\
-	.compat_ioctl	= __lock_##name##_compat_ioctl,	\
 	.listen		= __lock_##name##_listen,	\
 	.shutdown	= __lock_##name##_shutdown,	\
 	.setsockopt	= __lock_##name##_setsockopt,	\
@@ -290,7 +280,6 @@ static const struct proto_ops name##_ops = {			\
 	.recvmsg	= __lock_##name##_recvmsg,	\
 	.mmap		= __lock_##name##_mmap,		\
 };
-
 #endif
 
 #define MODULE_ALIAS_NETPROTO(proto) \

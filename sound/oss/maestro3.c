@@ -144,8 +144,6 @@
 #include <linux/spinlock.h>
 #include <linux/ac97_codec.h>
 #include <linux/wait.h>
-#include <linux/mutex.h>
-
 
 #include <asm/io.h>
 #include <asm/dma.h>
@@ -207,7 +205,7 @@ struct m3_state {
 		when irqhandler uses s->lock
 		and m3_assp_read uses card->lock ?
 		*/
-    struct mutex open_mutex;
+    struct semaphore open_sem;
     wait_queue_head_t open_wait;
     mode_t open_mode;
 
@@ -2015,17 +2013,17 @@ static int m3_open(struct inode *inode, struct file *file)
     file->private_data = s;
 
     /* wait for device to become free */
-    mutex_lock(&s->open_mutex);
+    down(&s->open_sem);
     while (s->open_mode & file->f_mode) {
         if (file->f_flags & O_NONBLOCK) {
-            mutex_unlock(&s->open_mutex);
+            up(&s->open_sem);
             return -EWOULDBLOCK;
         }
-        mutex_unlock(&s->open_mutex);
+        up(&s->open_sem);
         interruptible_sleep_on(&s->open_wait);
         if (signal_pending(current))
             return -ERESTARTSYS;
-        mutex_lock(&s->open_mutex);
+        down(&s->open_sem);
     }
     
     spin_lock_irqsave(&c->lock, flags);
@@ -2049,7 +2047,7 @@ static int m3_open(struct inode *inode, struct file *file)
     set_fmt(s, fmtm, fmts);
     s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 
-    mutex_unlock(&s->open_mutex);
+    up(&s->open_sem);
     spin_unlock_irqrestore(&c->lock, flags);
     return nonseekable_open(inode, file);
 }
@@ -2064,7 +2062,7 @@ static int m3_release(struct inode *inode, struct file *file)
     if (file->f_mode & FMODE_WRITE)
         drain_dac(s, file->f_flags & O_NONBLOCK);
 
-    mutex_lock(&s->open_mutex);
+    down(&s->open_sem);
     spin_lock_irqsave(&card->lock, flags);
 
     if (file->f_mode & FMODE_WRITE) {
@@ -2085,7 +2083,7 @@ static int m3_release(struct inode *inode, struct file *file)
     s->open_mode &= (~file->f_mode) & (FMODE_READ|FMODE_WRITE);
 
     spin_unlock_irqrestore(&card->lock, flags);
-    mutex_unlock(&s->open_mutex);
+    up(&s->open_sem);
     wake_up(&s->open_wait);
 
     return 0;
@@ -2582,9 +2580,15 @@ static int alloc_dsp_suspendmem(struct m3_card *card)
 
     return 0;
 }
+static void free_dsp_suspendmem(struct m3_card *card)
+{
+   if(card->suspend_mem)
+       vfree(card->suspend_mem);
+}
 
 #else
 #define alloc_dsp_suspendmem(args...) 0
+#define free_dsp_suspendmem(args...) 
 #endif
 
 /*
@@ -2675,7 +2679,7 @@ static int __devinit m3_probe(struct pci_dev *pci_dev, const struct pci_device_i
         init_waitqueue_head(&s->dma_adc.wait);
         init_waitqueue_head(&s->dma_dac.wait);
         init_waitqueue_head(&s->open_wait);
-        mutex_init(&(s->open_mutex));
+        init_MUTEX(&(s->open_sem));
         s->magic = M3_STATE_MAGIC;
 
         m3_assp_client_init(s);
@@ -2711,7 +2715,7 @@ out:
     if(ret) {
         if(card->iobase)
             release_region(pci_resource_start(pci_dev, 0), pci_resource_len(pci_dev, 0));
-        vfree(card->suspend_mem);
+        free_dsp_suspendmem(card);
         if(card->ac97) {
             unregister_sound_mixer(card->ac97->dev_mixer);
             kfree(card->ac97);
@@ -2754,7 +2758,7 @@ static void m3_remove(struct pci_dev *pci_dev)
         }
 
         release_region(card->iobase, 256);
-        vfree(card->suspend_mem);
+        free_dsp_suspendmem(card);
         kfree(card);
     }
     devs = NULL;

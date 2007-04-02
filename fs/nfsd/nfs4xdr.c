@@ -300,10 +300,11 @@ nfsd4_decode_fattr(struct nfsd4_compoundargs *argp, u32 *bmval, struct iattr *ia
 						buf, dummy32, &ace.who);
 			if (status)
 				goto out_nfserr;
-			status = nfs4_acl_add_ace(*acl, ace.type, ace.flag,
-				 ace.access_mask, ace.whotype, ace.who);
-			if (status)
+			if (nfs4_acl_add_ace(*acl, ace.type, ace.flag,
+				 ace.access_mask, ace.whotype, ace.who) != 0) {
+				status = -ENOMEM;
 				goto out_nfserr;
+			}
 		}
 	} else
 		*acl = NULL;
@@ -992,7 +993,7 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 	if (argp->opcnt > 100)
 		goto xdr_error;
 
-	if (argp->opcnt > ARRAY_SIZE(argp->iops)) {
+	if (argp->opcnt > sizeof(argp->iops)/sizeof(argp->iops[0])) {
 		argp->ops = kmalloc(argp->opcnt * sizeof(*argp->ops), GFP_KERNEL);
 		if (!argp->ops) {
 			argp->ops = argp->iops;
@@ -2089,20 +2090,27 @@ nfsd4_encode_read(struct nfsd4_compoundres *resp, int nfserr, struct nfsd4_read 
 	WRITE32(eof);
 	WRITE32(maxcount);
 	ADJUST_ARGS();
-	resp->xbuf->head[0].iov_len = (char*)p
-					- (char*)resp->xbuf->head[0].iov_base;
+	resp->xbuf->head[0].iov_len = ((char*)resp->p) - (char*)resp->xbuf->head[0].iov_base;
+
 	resp->xbuf->page_len = maxcount;
 
-	/* Use rest of head for padding and remaining ops: */
-	resp->rqstp->rq_restailpage = 0;
-	resp->xbuf->tail[0].iov_base = p;
+	/* read zero bytes -> don't set up tail */
+	if(!maxcount)
+		return 0;        
+
+	/* set up page for remaining responses */
+	svc_take_page(resp->rqstp);
+	resp->xbuf->tail[0].iov_base = 
+		page_address(resp->rqstp->rq_respages[resp->rqstp->rq_resused-1]);
+	resp->rqstp->rq_restailpage = resp->rqstp->rq_resused-1;
 	resp->xbuf->tail[0].iov_len = 0;
+	resp->p = resp->xbuf->tail[0].iov_base;
+	resp->end = resp->p + PAGE_SIZE/4;
+
 	if (maxcount&3) {
-		RESERVE_SPACE(4);
-		WRITE32(0);
+		*(resp->p)++ = 0;
 		resp->xbuf->tail[0].iov_base += maxcount&3;
 		resp->xbuf->tail[0].iov_len = 4 - (maxcount&3);
-		ADJUST_ARGS();
 	}
 	return 0;
 }
@@ -2139,20 +2147,21 @@ nfsd4_encode_readlink(struct nfsd4_compoundres *resp, int nfserr, struct nfsd4_r
 
 	WRITE32(maxcount);
 	ADJUST_ARGS();
-	resp->xbuf->head[0].iov_len = (char*)p
-				- (char*)resp->xbuf->head[0].iov_base;
-	resp->xbuf->page_len = maxcount;
+	resp->xbuf->head[0].iov_len = ((char*)resp->p) - (char*)resp->xbuf->head[0].iov_base;
 
-	/* Use rest of head for padding and remaining ops: */
-	resp->rqstp->rq_restailpage = 0;
-	resp->xbuf->tail[0].iov_base = p;
+	svc_take_page(resp->rqstp);
+	resp->xbuf->tail[0].iov_base = 
+		page_address(resp->rqstp->rq_respages[resp->rqstp->rq_resused-1]);
+	resp->rqstp->rq_restailpage = resp->rqstp->rq_resused-1;
 	resp->xbuf->tail[0].iov_len = 0;
+	resp->p = resp->xbuf->tail[0].iov_base;
+	resp->end = resp->p + PAGE_SIZE/4;
+
+	resp->xbuf->page_len = maxcount;
 	if (maxcount&3) {
-		RESERVE_SPACE(4);
-		WRITE32(0);
+		*(resp->p)++ = 0;
 		resp->xbuf->tail[0].iov_base += maxcount&3;
 		resp->xbuf->tail[0].iov_len = 4 - (maxcount&3);
-		ADJUST_ARGS();
 	}
 	return 0;
 }
@@ -2162,7 +2171,7 @@ nfsd4_encode_readdir(struct nfsd4_compoundres *resp, int nfserr, struct nfsd4_re
 {
 	int maxcount;
 	loff_t offset;
-	u32 *page, *savep, *tailbase;
+	u32 *page, *savep;
 	ENCODE_HEAD;
 
 	if (nfserr)
@@ -2178,7 +2187,6 @@ nfsd4_encode_readdir(struct nfsd4_compoundres *resp, int nfserr, struct nfsd4_re
 	WRITE32(0);
 	ADJUST_ARGS();
 	resp->xbuf->head[0].iov_len = ((char*)resp->p) - (char*)resp->xbuf->head[0].iov_base;
-	tailbase = p;
 
 	maxcount = PAGE_SIZE;
 	if (maxcount > readdir->rd_maxcount)
@@ -2223,12 +2231,14 @@ nfsd4_encode_readdir(struct nfsd4_compoundres *resp, int nfserr, struct nfsd4_re
 	*p++ = htonl(readdir->common.err == nfserr_eof);
 	resp->xbuf->page_len = ((char*)p) - (char*)page_address(resp->rqstp->rq_respages[resp->rqstp->rq_resused-1]);
 
-	/* Use rest of head for padding and remaining ops: */
-	resp->rqstp->rq_restailpage = 0;
-	resp->xbuf->tail[0].iov_base = tailbase;
+	/* allocate a page for the tail */
+	svc_take_page(resp->rqstp);
+	resp->xbuf->tail[0].iov_base = 
+		page_address(resp->rqstp->rq_respages[resp->rqstp->rq_resused-1]);
+	resp->rqstp->rq_restailpage = resp->rqstp->rq_resused-1;
 	resp->xbuf->tail[0].iov_len = 0;
 	resp->p = resp->xbuf->tail[0].iov_base;
-	resp->end = resp->p + (PAGE_SIZE - resp->xbuf->head[0].iov_len)/4;
+	resp->end = resp->p + PAGE_SIZE/4;
 
 	return 0;
 err_no_verf:

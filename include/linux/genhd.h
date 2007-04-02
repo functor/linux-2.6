@@ -78,7 +78,6 @@ struct hd_struct {
 	sector_t start_sect;
 	sector_t nr_sects;
 	struct kobject kobj;
-	struct kobject *holder_dir;
 	unsigned ios[2], sectors[2];	/* READs and WRITEs */
 	int policy, partno;
 };
@@ -90,12 +89,12 @@ struct hd_struct {
 #define GENHD_FL_SUPPRESS_PARTITION_INFO	32
 
 struct disk_stats {
-	unsigned long sectors[2];	/* READs and WRITEs */
-	unsigned long ios[2];
-	unsigned long merges[2];
-	unsigned long ticks[2];
-	unsigned long io_ticks;
-	unsigned long time_in_queue;
+	unsigned sectors[2];		/* READs and WRITEs */
+	unsigned ios[2];
+	unsigned merges[2];
+	unsigned ticks[2];
+	unsigned io_ticks;
+	unsigned time_in_queue;
 };
 	
 struct gendisk {
@@ -105,7 +104,6 @@ struct gendisk {
                                          * disks that can't be partitioned. */
 	char disk_name[32];		/* name of major driver */
 	struct hd_struct **part;	/* [indexed by minor] */
-	int part_uevent_suppress;
 	struct block_device_operations *fops;
 	struct request_queue *queue;
 	void *private_data;
@@ -116,8 +114,6 @@ struct gendisk {
 	int number;			/* more of the same */
 	struct device *driverfs_dev;
 	struct kobject kobj;
-	struct kobject *holder_dir;
-	struct kobject *slave_dir;
 
 	struct timer_rand_state *random;
 	int policy;
@@ -153,16 +149,22 @@ struct disk_attribute {
 ({									\
 	typeof(gendiskp->dkstats->field) res = 0;			\
 	int i;								\
-	for_each_possible_cpu(i)					\
+	for (i=0; i < NR_CPUS; i++) {					\
+		if (!cpu_possible(i))					\
+			continue;					\
 		res += per_cpu_ptr(gendiskp->dkstats, i)->field;	\
+	}								\
 	res;								\
 })
 
 static inline void disk_stat_set_all(struct gendisk *gendiskp, int value)	{
 	int i;
-	for_each_possible_cpu(i)
-		memset(per_cpu_ptr(gendiskp->dkstats, i), value,
-				sizeof (struct disk_stats));
+	for (i=0; i < NR_CPUS; i++) {
+		if (cpu_possible(i)) {
+			memset(per_cpu_ptr(gendiskp->dkstats, i), value,	
+					sizeof (struct disk_stats));
+		}
+	}
 }		
 				
 #else

@@ -33,7 +33,7 @@ cpumask_t cpu_initialized __cpuinitdata = CPU_MASK_NONE;
 struct x8664_pda *_cpu_pda[NR_CPUS] __read_mostly;
 struct x8664_pda boot_cpu_pda[NR_CPUS] __cacheline_aligned;
 
-struct desc_ptr idt_descr = { 256 * 16 - 1, (unsigned long) idt_table };
+struct desc_ptr idt_descr = { 256 * 16, (unsigned long) idt_table }; 
 
 char boot_cpu_stack[IRQSTACKSIZE] __attribute__((section(".bss.page_aligned")));
 
@@ -46,7 +46,7 @@ Control non executable mappings for 64bit processes.
 on	Enable(default)
 off	Disable
 */ 
-void __init nonx_setup(const char *str)
+int __init nonx_setup(char *str)
 {
 	if (!strncmp(str, "on", 2)) {
                 __supported_pte_mask |= _PAGE_NX; 
@@ -55,7 +55,28 @@ void __init nonx_setup(const char *str)
 		do_not_nx = 1;
 		__supported_pte_mask &= ~_PAGE_NX;
         }
+	return 0;
+} 
+__setup("noexec=", nonx_setup);	/* parsed early actually */
+
+int force_personality32 = READ_IMPLIES_EXEC;
+
+/* noexec32=on|off
+Control non executable heap for 32bit processes.
+To control the stack too use noexec=off
+
+on	PROT_READ does not imply PROT_EXEC for 32bit processes
+off	PROT_READ implies PROT_EXEC (default)
+*/
+static int __init nonx32_setup(char *str)
+{
+	if (!strcmp(str, "on"))
+		force_personality32 &= ~READ_IMPLIES_EXEC;
+	else if (!strcmp(str, "off"))
+		force_personality32 |= READ_IMPLIES_EXEC;
+	return 0;
 }
+__setup("noexec32=", nonx32_setup);
 
 /*
  * Great future plan:
@@ -157,6 +178,8 @@ void __cpuinit check_efer(void)
         }       
 }
 
+unsigned long kernel_eflags;
+
 /*
  * cpu_init() initializes state that is per-CPU. Some data is already
  * initialized (naturally) in the bootstrap process, such as the GDT
@@ -227,7 +250,7 @@ void __cpuinit cpu_init (void)
 		switch (v + 1) {
 #if DEBUG_STKSZ > EXCEPTION_STKSZ
 		case DEBUG_STACK:
-			cpu_pda(cpu)->debugstack = (unsigned long)estacks;
+			cpu_pda[cpu].debugstack = (unsigned long)estacks;
 			estacks += DEBUG_STKSZ;
 			break;
 #endif
@@ -260,12 +283,14 @@ void __cpuinit cpu_init (void)
 	 * Clear all 6 debug registers:
 	 */
 
-	set_debugreg(0UL, 0);
-	set_debugreg(0UL, 1);
-	set_debugreg(0UL, 2);
-	set_debugreg(0UL, 3);
-	set_debugreg(0UL, 6);
-	set_debugreg(0UL, 7);
+	set_debug(0UL, 0);
+	set_debug(0UL, 1);
+	set_debug(0UL, 2);
+	set_debug(0UL, 3);
+	set_debug(0UL, 6);
+	set_debug(0UL, 7);
 
 	fpu_init(); 
+
+	raw_local_save_flags(kernel_eflags);
 }

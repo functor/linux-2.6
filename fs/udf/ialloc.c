@@ -42,7 +42,7 @@ void udf_free_inode(struct inode * inode)
 
 	clear_inode(inode);
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	if (sbi->s_lvidbh) {
 		if (S_ISDIR(inode->i_mode))
 			UDF_SB_LVIDIU(sb)->numDirs =
@@ -53,7 +53,7 @@ void udf_free_inode(struct inode * inode)
 		
 		mark_buffer_dirty(sbi->s_lvidbh);
 	}
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 
 	udf_free_blocks(sb, NULL, UDF_I_LOCATION(inode), 0, 1);
 }
@@ -83,7 +83,7 @@ struct inode * udf_new_inode (struct inode *dir, int mode, int * err)
 		return NULL;
 	}
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	UDF_I_UNIQUE(inode) = 0;
 	UDF_I_LENEXTENTS(inode) = 0;
 	UDF_I_NEXT_ALLOC_BLOCK(inode) = 0;
@@ -148,7 +148,7 @@ struct inode * udf_new_inode (struct inode *dir, int mode, int * err)
 		UDF_I_CRTIME(inode) = current_fs_time(inode->i_sb);
 	insert_inode_hash(inode);
 	mark_inode_dirty(inode);
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 
 	if (DQUOT_ALLOC_INODE(inode))
 	{

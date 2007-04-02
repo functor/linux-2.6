@@ -20,10 +20,14 @@
 
 #include <asm/hardware/locomo.h>
 #include <asm/irq.h>
-#include <asm/mach/sharpsl_param.h>
-#include <asm/mach-types.h>
 
-#include "../../../arch/arm/mach-sa1100/generic.h"
+#ifdef CONFIG_SA1100_COLLIE
+#include <asm/arch/collie.h>
+#else
+#include <asm/arch/poodle.h>
+#endif
+
+extern void (*sa1100fb_lcd_power)(int on);
 
 static struct locomo_dev *locomolcd_dev;
 
@@ -78,7 +82,7 @@ static void locomolcd_off(int comadj)
 
 void locomolcd_power(int on)
 {
-	int comadj = sharpsl_param.comadj;
+	int comadj = 118;
 	unsigned long flags;
 
 	local_irq_save(flags);
@@ -89,12 +93,11 @@ void locomolcd_power(int on)
 	}
 
 	/* read comadj */
-	if (comadj == -1) {
-		if (machine_is_poodle())
-			comadj = 118;
-		if (machine_is_collie())
-			comadj = 128;
-	}
+#ifdef CONFIG_MACH_POODLE
+	comadj = 118;
+#else
+	comadj = 128;
+#endif
 
 	if (on)
 		locomolcd_on(comadj);

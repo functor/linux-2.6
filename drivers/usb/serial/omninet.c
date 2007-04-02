@@ -204,7 +204,7 @@ static void omninet_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	int i;
 	int result;
 
-	dbg("%s - port %d", __FUNCTION__, port->number);
+//	dbg("omninet_read_bulk_callback");
 
 	if (urb->status) {
 		dbg("%s - nonzero read bulk status received: %d", __FUNCTION__, urb->status);
@@ -250,21 +250,21 @@ static int omninet_write (struct usb_serial_port *port, const unsigned char *buf
 
 	int			result;
 
-	dbg("%s - port %d", __FUNCTION__, port->number);
+//	dbg("omninet_write port %d", port->number);
 
 	if (count == 0) {
 		dbg("%s - write request of 0 bytes", __FUNCTION__);
 		return (0);
 	}
 
-	spin_lock(&wport->lock);
-	if (wport->write_urb_busy) {
-		spin_unlock(&wport->lock);
+	spin_lock(&port->lock);
+	if (port->write_urb_busy) {
+		spin_unlock(&port->lock);
 		dbg("%s - already writing", __FUNCTION__);
 		return 0;
 	}
-	wport->write_urb_busy = 1;
-	spin_unlock(&wport->lock);
+	port->write_urb_busy = 1;
+	spin_unlock(&port->lock);
 
 	count = (count > OMNINET_BULKOUTSIZE) ? OMNINET_BULKOUTSIZE : count;
 
@@ -283,7 +283,7 @@ static int omninet_write (struct usb_serial_port *port, const unsigned char *buf
 	wport->write_urb->dev = serial->dev;
 	result = usb_submit_urb(wport->write_urb, GFP_ATOMIC);
 	if (result) {
-		wport->write_urb_busy = 0;
+		port->write_urb_busy = 0;
 		err("%s - failed submitting write urb, error %d", __FUNCTION__, result);
 	} else
 		result = count;
@@ -302,7 +302,7 @@ static int omninet_write_room (struct usb_serial_port *port)
 	if (wport->write_urb_busy)
 		room = wport->bulk_out_size - OMNINET_HEADERLEN;
 
-	dbg("%s - returns %d", __FUNCTION__, room);
+//	dbg("omninet_write_room returns %d", room);
 
 	return (room);
 }
@@ -312,7 +312,7 @@ static void omninet_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 /*	struct omninet_header	*header = (struct omninet_header  *) urb->transfer_buffer; */
 	struct usb_serial_port 	*port   = (struct usb_serial_port *) urb->context;
 
-	dbg("%s - port %0x\n", __FUNCTION__, port->number);
+//	dbg("omninet_write_bulk_callback, port %0x\n", port);
 
 	port->write_urb_busy = 0;
 	if (urb->status) {
@@ -321,6 +321,8 @@ static void omninet_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	}
 
 	schedule_work(&port->work);
+
+//	dbg("omninet_write_bulk_callback, tty %0x\n", tty);
 }
 
 

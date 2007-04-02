@@ -43,6 +43,7 @@ MODULE_AUTHOR("Holger Smolinski <Holger.Smolinski@de.ibm.com>");
 MODULE_DESCRIPTION("Linux on S/390 DASD device driver,"
 		   " Copyright 2000 IBM Corporation");
 MODULE_SUPPORTED_DEVICE("dasd");
+MODULE_PARM(dasd, "1-" __MODULE_STRING(256) "s");
 MODULE_LICENSE("GPL");
 
 /*
@@ -70,9 +71,10 @@ dasd_alloc_device(void)
 {
 	struct dasd_device *device;
 
-	device = kzalloc(sizeof (struct dasd_device), GFP_ATOMIC);
+	device = kmalloc(sizeof (struct dasd_device), GFP_ATOMIC);
 	if (device == NULL)
 		return ERR_PTR(-ENOMEM);
+	memset(device, 0, sizeof (struct dasd_device));
 	/* open_count = 0 means device online but not in use */
 	atomic_set(&device->open_count, -1);
 
@@ -149,8 +151,6 @@ dasd_state_new_to_known(struct dasd_device *device)
 static inline void
 dasd_state_known_to_new(struct dasd_device * device)
 {
-	/* Disable extended error reporting for this device. */
-	dasd_eer_disable(device);
 	/* Forget the discipline information. */
 	if (device->discipline)
 		module_put(device->discipline->owner);
@@ -313,11 +313,6 @@ dasd_increase_state(struct dasd_device *device)
 	    device->state == DASD_STATE_BASIC &&
 	    device->target >= DASD_STATE_READY)
 		rc = dasd_state_basic_to_ready(device);
-
-	if (!rc &&
-	    device->state == DASD_STATE_UNFMT &&
-	    device->target > DASD_STATE_UNFMT)
-		rc = -EPERM;
 
 	if (!rc &&
 	    device->state == DASD_STATE_READY &&
@@ -546,29 +541,33 @@ dasd_kmalloc_request(char *magic, int cplength, int datasize,
 	struct dasd_ccw_req *cqr;
 
 	/* Sanity checks */
-	BUG_ON( magic == NULL || datasize > PAGE_SIZE ||
-	     (cplength*sizeof(struct ccw1)) > PAGE_SIZE);
+	if ( magic == NULL || datasize > PAGE_SIZE ||
+	     (cplength*sizeof(struct ccw1)) > PAGE_SIZE)
+		BUG();
 
-	cqr = kzalloc(sizeof(struct dasd_ccw_req), GFP_ATOMIC);
+	cqr = kmalloc(sizeof(struct dasd_ccw_req), GFP_ATOMIC);
 	if (cqr == NULL)
 		return ERR_PTR(-ENOMEM);
+	memset(cqr, 0, sizeof(struct dasd_ccw_req));
 	cqr->cpaddr = NULL;
 	if (cplength > 0) {
-		cqr->cpaddr = kcalloc(cplength, sizeof(struct ccw1),
+		cqr->cpaddr = kmalloc(cplength*sizeof(struct ccw1),
 				      GFP_ATOMIC | GFP_DMA);
 		if (cqr->cpaddr == NULL) {
 			kfree(cqr);
 			return ERR_PTR(-ENOMEM);
 		}
+		memset(cqr->cpaddr, 0, cplength*sizeof(struct ccw1));
 	}
 	cqr->data = NULL;
 	if (datasize > 0) {
-		cqr->data = kzalloc(datasize, GFP_ATOMIC | GFP_DMA);
+		cqr->data = kmalloc(datasize, GFP_ATOMIC | GFP_DMA);
 		if (cqr->data == NULL) {
 			kfree(cqr->cpaddr);
 			kfree(cqr);
 			return ERR_PTR(-ENOMEM);
 		}
+		memset(cqr->data, 0, datasize);
 	}
 	strncpy((char *) &cqr->magic, magic, 4);
 	ASCEBC((char *) &cqr->magic, 4);
@@ -587,8 +586,9 @@ dasd_smalloc_request(char *magic, int cplength, int datasize,
 	int size;
 
 	/* Sanity checks */
-	BUG_ON( magic == NULL || datasize > PAGE_SIZE ||
-	     (cplength*sizeof(struct ccw1)) > PAGE_SIZE);
+	if ( magic == NULL || datasize > PAGE_SIZE ||
+	     (cplength*sizeof(struct ccw1)) > PAGE_SIZE)
+		BUG();
 
 	size = (sizeof(struct dasd_ccw_req) + 7L) & -8L;
 	if (cplength > 0)
@@ -892,9 +892,6 @@ dasd_handle_state_change_pending(struct dasd_device *device)
 	struct dasd_ccw_req *cqr;
 	struct list_head *l, *n;
 
-	/* First of all start sense subsystem status request. */
-	dasd_eer_snss(device);
-
 	device->stopped &= ~DASD_STOPPED_PENDING;
 
         /* restart all 'running' IO on queue */
@@ -1114,19 +1111,6 @@ restart:
 			}
 			goto restart;
 		}
-
-		/* First of all call extended error reporting. */
-		if (dasd_eer_enabled(device) &&
-		    cqr->status == DASD_CQR_FAILED) {
-			dasd_eer_write(device, cqr, DASD_EER_FATALERROR);
-
-			/* restart request  */
-			cqr->status = DASD_CQR_QUEUED;
-			cqr->retries = 255;
-			device->stopped |= DASD_STOPPED_QUIESCE;
-			goto restart;
-		}
-
 		/* Process finished ERP request. */
 		if (cqr->refers) {
 			__dasd_process_erp(device, cqr);
@@ -1262,28 +1246,24 @@ __dasd_start_head(struct dasd_device * device)
 	if (list_empty(&device->ccw_queue))
 		return;
 	cqr = list_entry(device->ccw_queue.next, struct dasd_ccw_req, list);
-	if (cqr->status != DASD_CQR_QUEUED)
-		return;
-	/* Non-temporary stop condition will trigger fail fast */
+        /* check FAILFAST */
 	if (device->stopped & ~DASD_STOPPED_PENDING &&
-	    test_bit(DASD_CQR_FLAGS_FAILFAST, &cqr->flags) &&
-	    (!dasd_eer_enabled(device))) {
+	    test_bit(DASD_CQR_FLAGS_FAILFAST, &cqr->flags)) {
 		cqr->status = DASD_CQR_FAILED;
 		dasd_schedule_bh(device);
-		return;
 	}
-	/* Don't try to start requests if device is stopped */
-	if (device->stopped)
-		return;
-
-	rc = device->discipline->start_IO(cqr);
-	if (rc == 0)
-		dasd_set_timer(device, cqr->expires);
-	else if (rc == -EACCES) {
-		dasd_schedule_bh(device);
-	} else
-		/* Hmpf, try again in 1/2 sec */
-		dasd_set_timer(device, 50);
+	if ((cqr->status == DASD_CQR_QUEUED) &&
+	    (!device->stopped)) {
+		/* try to start the first I/O that can be started */
+		rc = device->discipline->start_IO(cqr);
+		if (rc == 0)
+			dasd_set_timer(device, cqr->expires);
+		else if (rc == -EACCES) {
+			dasd_schedule_bh(device);
+		} else
+			/* Hmpf, try again in 1/2 sec */
+			dasd_set_timer(device, 50);
+	}
 }
 
 /*
@@ -1827,7 +1807,7 @@ dasd_exit(void)
 #ifdef CONFIG_PROC_FS
 	dasd_proc_exit();
 #endif
-	dasd_eer_exit();
+	dasd_ioctl_exit();
         if (dasd_page_cache != NULL) {
 		kmem_cache_destroy(dasd_page_cache);
 		dasd_page_cache = NULL;
@@ -1976,7 +1956,7 @@ int
 dasd_generic_set_offline (struct ccw_device *cdev)
 {
 	struct dasd_device *device;
-	int max_count, open_count;
+	int max_count;
 
 	device = dasd_device_from_cdev(cdev);
 	if (IS_ERR(device))
@@ -1993,16 +1973,10 @@ dasd_generic_set_offline (struct ccw_device *cdev)
 	 * in the other openers.
 	 */
 	max_count = device->bdev ? 0 : -1;
-	open_count = (int) atomic_read(&device->open_count);
-	if (open_count > max_count) {
-		if (open_count > 0)
-			printk (KERN_WARNING "Can't offline dasd device with "
-				"open count = %i.\n",
-				open_count);
-		else
-			printk (KERN_WARNING "%s",
-				"Can't offline dasd device due to internal "
-				"use\n");
+	if (atomic_read(&device->open_count) > max_count) {
+		printk (KERN_WARNING "Can't offline dasd device with open"
+			" count = %i.\n",
+			atomic_read(&device->open_count));
 		clear_bit(DASD_FLAG_OFFLINE, &device->flags);
 		dasd_put_device(device);
 		return -EBUSY;
@@ -2030,9 +2004,6 @@ dasd_generic_notify(struct ccw_device *cdev, int event)
 	switch (event) {
 	case CIO_GONE:
 	case CIO_NO_PATH:
-		/* First of all call extended error reporting. */
-		dasd_eer_write(device, NULL, DASD_EER_NOPATH);
-
 		if (device->state < DASD_STATE_BASIC)
 			break;
 		/* Device is active. We want to keep it. */
@@ -2090,7 +2061,6 @@ dasd_generic_auto_online (struct ccw_driver *dasd_discipline_driver)
 	put_driver(drv);
 }
 
-
 static int __init
 dasd_init(void)
 {
@@ -2123,7 +2093,7 @@ dasd_init(void)
 	rc = dasd_parse();
 	if (rc)
 		goto failed;
-	rc = dasd_eer_init();
+	rc = dasd_ioctl_init();
 	if (rc)
 		goto failed;
 #ifdef CONFIG_PROC_FS

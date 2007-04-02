@@ -24,7 +24,6 @@
 #include <linux/list.h>
 #include <linux/vmalloc.h>
 #include <linux/rtnetlink.h>
-#include <linux/mutex.h>
 #include <net/ip.h>
 #include <net/xfrm.h>
 #include <net/icmp.h>
@@ -37,7 +36,7 @@ struct ipcomp_tfms {
 	int users;
 };
 
-static DEFINE_MUTEX(ipcomp_resource_mutex);
+static DECLARE_MUTEX(ipcomp_resource_sem);
 static void **ipcomp_scratches;
 static int ipcomp_scratch_users;
 static LIST_HEAD(ipcomp_tfms_list);
@@ -81,10 +80,11 @@ out:
 	return err;
 }
 
-static int ipcomp_input(struct xfrm_state *x, struct sk_buff *skb)
+static int ipcomp_input(struct xfrm_state *x,
+                        struct xfrm_decap_state *decap, struct sk_buff *skb)
 {
 	u8 nexthdr;
-	int err = -ENOMEM;
+	int err = 0;
 	struct iphdr *iph;
 	union {
 		struct iphdr	iph;
@@ -92,8 +92,11 @@ static int ipcomp_input(struct xfrm_state *x, struct sk_buff *skb)
 	} tmp_iph;
 
 
-	if (skb_linearize_cow(skb))
+	if ((skb_is_nonlinear(skb) || skb_cloned(skb)) &&
+	    skb_linearize(skb, GFP_ATOMIC) != 0) {
+	    	err = -ENOMEM;
 	    	goto out;
+	}
 
 	skb->ip_summed = CHECKSUM_NONE;
 
@@ -168,8 +171,10 @@ static int ipcomp_output(struct xfrm_state *x, struct sk_buff *skb)
 		goto out_ok;
 	}
 
-	if (skb_linearize_cow(skb))
+	if ((skb_is_nonlinear(skb) || skb_cloned(skb)) &&
+	    skb_linearize(skb, GFP_ATOMIC) != 0) {
 		goto out_ok;
+	}
 	
 	err = ipcomp_compress(x, skb);
 	iph = skb->nh.iph;
@@ -205,7 +210,7 @@ static void ipcomp4_err(struct sk_buff *skb, u32 info)
 	    skb->h.icmph->code != ICMP_FRAG_NEEDED)
 		return;
 
-	spi = htonl(ntohs(ipch->cpi));
+	spi = ntohl(ntohs(ipch->cpi));
 	x = xfrm_state_lookup((xfrm_address_t *)&iph->daddr,
 	                      spi, IPPROTO_COMP, AF_INET);
 	if (!x)
@@ -248,7 +253,7 @@ error:
 }
 
 /*
- * Must be protected by xfrm_cfg_mutex.  State and tunnel user references are
+ * Must be protected by xfrm_cfg_sem.  State and tunnel user references are
  * always incremented on success.
  */
 static int ipcomp_tunnel_attach(struct xfrm_state *x)
@@ -285,8 +290,11 @@ static void ipcomp_free_scratches(void)
 	if (!scratches)
 		return;
 
-	for_each_possible_cpu(i)
-		vfree(*per_cpu_ptr(scratches, i));
+	for_each_cpu(i) {
+		void *scratch = *per_cpu_ptr(scratches, i);
+		if (scratch)
+			vfree(scratch);
+	}
 
 	free_percpu(scratches);
 }
@@ -305,7 +313,7 @@ static void **ipcomp_alloc_scratches(void)
 
 	ipcomp_scratches = scratches;
 
-	for_each_possible_cpu(i) {
+	for_each_cpu(i) {
 		void *scratch = vmalloc(IPCOMP_SCRATCH_SIZE);
 		if (!scratch)
 			return NULL;
@@ -336,7 +344,7 @@ static void ipcomp_free_tfms(struct crypto_tfm **tfms)
 	if (!tfms)
 		return;
 
-	for_each_possible_cpu(cpu) {
+	for_each_cpu(cpu) {
 		struct crypto_tfm *tfm = *per_cpu_ptr(tfms, cpu);
 		crypto_free_tfm(tfm);
 	}
@@ -376,7 +384,7 @@ static struct crypto_tfm **ipcomp_alloc_tfms(const char *alg_name)
 	if (!tfms)
 		goto error;
 
-	for_each_possible_cpu(cpu) {
+	for_each_cpu(cpu) {
 		struct crypto_tfm *tfm = crypto_alloc_tfm(alg_name, 0);
 		if (!tfm)
 			goto error;
@@ -403,9 +411,9 @@ static void ipcomp_destroy(struct xfrm_state *x)
 	if (!ipcd)
 		return;
 	xfrm_state_delete_tunnel(x);
-	mutex_lock(&ipcomp_resource_mutex);
+	down(&ipcomp_resource_sem);
 	ipcomp_free_data(ipcd);
-	mutex_unlock(&ipcomp_resource_mutex);
+	up(&ipcomp_resource_sem);
 	kfree(ipcd);
 }
 
@@ -432,14 +440,14 @@ static int ipcomp_init_state(struct xfrm_state *x)
 	if (x->props.mode)
 		x->props.header_len += sizeof(struct iphdr);
 
-	mutex_lock(&ipcomp_resource_mutex);
+	down(&ipcomp_resource_sem);
 	if (!ipcomp_alloc_scratches())
 		goto error;
 
 	ipcd->tfms = ipcomp_alloc_tfms(x->calg->alg_name);
 	if (!ipcd->tfms)
 		goto error;
-	mutex_unlock(&ipcomp_resource_mutex);
+	up(&ipcomp_resource_sem);
 
 	if (x->props.mode) {
 		err = ipcomp_tunnel_attach(x);
@@ -456,10 +464,10 @@ out:
 	return err;
 
 error_tunnel:
-	mutex_lock(&ipcomp_resource_mutex);
+	down(&ipcomp_resource_sem);
 error:
 	ipcomp_free_data(ipcd);
-	mutex_unlock(&ipcomp_resource_mutex);
+	up(&ipcomp_resource_sem);
 	kfree(ipcd);
 	goto out;
 }

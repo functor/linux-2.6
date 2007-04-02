@@ -98,10 +98,9 @@ struct inode_operations jfs_file_inode_operations = {
 	.setattr	= jfs_setattr,
 	.permission	= jfs_permission,
 #endif
-	.sync_flags	= jfs_sync_flags,
 };
 
-const struct file_operations jfs_file_operations = {
+struct file_operations jfs_file_operations = {
 	.open		= jfs_open,
 	.llseek		= generic_file_llseek,
 	.write		= generic_file_write,
@@ -114,5 +113,4 @@ const struct file_operations jfs_file_operations = {
  	.sendfile	= generic_file_sendfile,
 	.fsync		= jfs_fsync,
 	.release	= jfs_release,
-	.ioctl		= jfs_ioctl,
 };

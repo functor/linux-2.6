@@ -39,7 +39,6 @@
 #include <linux/completion.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
-#include <linux/kthread.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_device.h>
 #include <asm/semaphore.h>
@@ -767,9 +766,9 @@ void aac_printf(struct aac_dev *dev, u32 val)
 		if (cp[length] != 0)
 			cp[length] = 0;
 		if (level == LOG_AAC_HIGH_ERROR)
-			printk(KERN_WARNING "%s:%s", dev->name, cp);
+			printk(KERN_WARNING "aacraid:%s", cp);
 		else
-			printk(KERN_INFO "%s:%s", dev->name, cp);
+			printk(KERN_INFO "aacraid:%s", cp);
 	}
 	memset(cp, 0,  256);
 }
@@ -784,7 +783,6 @@ void aac_printf(struct aac_dev *dev, u32 val)
  *	dispatches it to the appropriate routine for handling.
  */
 
-#define AIF_SNIFF_TIMEOUT	(30*HZ)
 static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 {
 	struct hw_fib * hw_fib = fibptr->hw_fib;
@@ -838,7 +836,6 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 				if (device) {
 					dev->fsa_dev[container].config_needed = CHANGE;
 					dev->fsa_dev[container].config_waiting_on = AifEnConfigChange;
-					dev->fsa_dev[container].config_waiting_stamp = jiffies;
 					scsi_device_put(device);
 				}
 			}
@@ -851,15 +848,13 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 		if (container != (u32)-1) {
 			if (container >= dev->maximum_num_containers)
 				break;
-			if ((dev->fsa_dev[container].config_waiting_on ==
-			    le32_to_cpu(*(u32 *)aifcmd->data)) &&
-			 time_before(jiffies, dev->fsa_dev[container].config_waiting_stamp + AIF_SNIFF_TIMEOUT))
+			if (dev->fsa_dev[container].config_waiting_on ==
+			    le32_to_cpu(*(u32 *)aifcmd->data))
 				dev->fsa_dev[container].config_waiting_on = 0;
 		} else for (container = 0;
 		    container < dev->maximum_num_containers; ++container) {
-			if ((dev->fsa_dev[container].config_waiting_on ==
-			    le32_to_cpu(*(u32 *)aifcmd->data)) &&
-			 time_before(jiffies, dev->fsa_dev[container].config_waiting_stamp + AIF_SNIFF_TIMEOUT))
+			if (dev->fsa_dev[container].config_waiting_on ==
+			    le32_to_cpu(*(u32 *)aifcmd->data))
 				dev->fsa_dev[container].config_waiting_on = 0;
 		}
 		break;
@@ -876,7 +871,6 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 			dev->fsa_dev[container].config_needed = ADD;
 			dev->fsa_dev[container].config_waiting_on =
 				AifEnConfigChange;
-			dev->fsa_dev[container].config_waiting_stamp = jiffies;
 			break;
 
 		/*
@@ -889,7 +883,6 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 			dev->fsa_dev[container].config_needed = DELETE;
 			dev->fsa_dev[container].config_waiting_on =
 				AifEnConfigChange;
-			dev->fsa_dev[container].config_waiting_stamp = jiffies;
 			break;
 
 		/*
@@ -900,13 +893,11 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 			container = le32_to_cpu(((u32 *)aifcmd->data)[1]);
 			if (container >= dev->maximum_num_containers)
 				break;
-			if (dev->fsa_dev[container].config_waiting_on &&
-			 time_before(jiffies, dev->fsa_dev[container].config_waiting_stamp + AIF_SNIFF_TIMEOUT))
+			if (dev->fsa_dev[container].config_waiting_on)
 				break;
 			dev->fsa_dev[container].config_needed = CHANGE;
 			dev->fsa_dev[container].config_waiting_on =
 				AifEnConfigChange;
-			dev->fsa_dev[container].config_waiting_stamp = jiffies;
 			break;
 
 		case AifEnConfigChange:
@@ -921,15 +912,13 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 		if (container != (u32)-1) {
 			if (container >= dev->maximum_num_containers)
 				break;
-			if ((dev->fsa_dev[container].config_waiting_on ==
-			    le32_to_cpu(*(u32 *)aifcmd->data)) &&
-			 time_before(jiffies, dev->fsa_dev[container].config_waiting_stamp + AIF_SNIFF_TIMEOUT))
+			if (dev->fsa_dev[container].config_waiting_on ==
+			    le32_to_cpu(*(u32 *)aifcmd->data))
 				dev->fsa_dev[container].config_waiting_on = 0;
 		} else for (container = 0;
 		    container < dev->maximum_num_containers; ++container) {
-			if ((dev->fsa_dev[container].config_waiting_on ==
-			    le32_to_cpu(*(u32 *)aifcmd->data)) &&
-			 time_before(jiffies, dev->fsa_dev[container].config_waiting_stamp + AIF_SNIFF_TIMEOUT))
+			if (dev->fsa_dev[container].config_waiting_on ==
+			    le32_to_cpu(*(u32 *)aifcmd->data))
 				dev->fsa_dev[container].config_waiting_on = 0;
 		}
 		break;
@@ -956,8 +945,6 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 				dev->fsa_dev[container].config_waiting_on =
 					AifEnContainerChange;
 				dev->fsa_dev[container].config_needed = ADD;
-				dev->fsa_dev[container].config_waiting_stamp =
-					jiffies;
 			}
 		}
 		if ((((u32 *)aifcmd->data)[1] == cpu_to_le32(AifJobCtrZero))
@@ -973,8 +960,6 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 				dev->fsa_dev[container].config_waiting_on =
 					AifEnContainerChange;
 				dev->fsa_dev[container].config_needed = DELETE;
-				dev->fsa_dev[container].config_waiting_stamp =
-					jiffies;
 			}
 		}
 		break;
@@ -983,9 +968,8 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 	device_config_needed = NOTHING;
 	for (container = 0; container < dev->maximum_num_containers;
 	    ++container) {
-		if ((dev->fsa_dev[container].config_waiting_on == 0) &&
-			(dev->fsa_dev[container].config_needed != NOTHING) &&
-			time_before(jiffies, dev->fsa_dev[container].config_waiting_stamp + AIF_SNIFF_TIMEOUT)) {
+		if ((dev->fsa_dev[container].config_waiting_on == 0)
+		 && (dev->fsa_dev[container].config_needed != NOTHING)) {
 			device_config_needed =
 				dev->fsa_dev[container].config_needed;
 			dev->fsa_dev[container].config_needed = NOTHING;
@@ -1061,9 +1045,8 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
  *	more FIBs.
  */
  
-int aac_command_thread(void *data)
+int aac_command_thread(struct aac_dev * dev)
 {
-	struct aac_dev *dev = data;
 	struct hw_fib *hw_fib, *hw_newfib;
 	struct fib *fib, *newfib;
 	struct aac_fib_context *fibctx;
@@ -1075,7 +1058,12 @@ int aac_command_thread(void *data)
 	 */
 	if (dev->aif_thread)
 		return -EINVAL;
-
+	/*
+	 *	Set up the name that will appear in 'ps'
+	 *	stored in  task_struct.comm[16].
+	 */
+	daemonize("aacraid");
+	allow_signal(SIGKILL);
 	/*
 	 *	Let the DPC know it has a place to send the AIF's to.
 	 */
@@ -1278,12 +1266,13 @@ int aac_command_thread(void *data)
 		spin_unlock_irqrestore(dev->queues->queue[HostNormCmdQueue].lock, flags);
 		schedule();
 
-		if (kthread_should_stop())
+		if(signal_pending(current))
 			break;
 		set_current_state(TASK_INTERRUPTIBLE);
 	}
 	if (dev->queues)
 		remove_wait_queue(&dev->queues->queue[HostNormCmdQueue].cmdready, &wait);
 	dev->aif_thread = 0;
+	complete_and_exit(&dev->aif_completion, 0);
 	return 0;
 }

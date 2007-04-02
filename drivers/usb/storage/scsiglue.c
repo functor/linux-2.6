@@ -47,7 +47,6 @@
 
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
@@ -272,9 +271,9 @@ static int device_reset(struct scsi_cmnd *srb)
 	US_DEBUGP("%s called\n", __FUNCTION__);
 
 	/* lock the device pointers and do the reset */
-	mutex_lock(&(us->dev_mutex));
+	down(&(us->dev_semaphore));
 	result = us->transport_reset(us);
-	mutex_unlock(&us->dev_mutex);
+	up(&(us->dev_semaphore));
 
 	return result < 0 ? FAILED : SUCCESS;
 }
@@ -287,9 +286,9 @@ static int bus_reset(struct scsi_cmnd *srb)
 
 	US_DEBUGP("%s called\n", __FUNCTION__);
 
-	mutex_lock(&(us->dev_mutex));
+	down(&(us->dev_semaphore));
 	result = usb_stor_port_reset(us);
-	mutex_unlock(&us->dev_mutex);
+	up(&(us->dev_semaphore));
 
 	return result < 0 ? FAILED : SUCCESS;
 }

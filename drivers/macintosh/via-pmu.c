@@ -161,9 +161,7 @@ static int drop_interrupts;
 #if defined(CONFIG_PM) && defined(CONFIG_PPC32)
 static int option_lid_wakeup = 1;
 #endif /* CONFIG_PM && CONFIG_PPC32 */
-#if (defined(CONFIG_PM)&&defined(CONFIG_PPC32))||defined(CONFIG_PMAC_BACKLIGHT)
 static int sleep_in_progress;
-#endif
 static unsigned long async_req_locks;
 static unsigned int pmu_irq_stats[11];
 
@@ -187,7 +185,7 @@ extern int disable_kernel_backlight;
 
 int __fake_sleep;
 int asleep;
-BLOCKING_NOTIFIER_HEAD(sleep_notifier_list);
+struct notifier_block *sleep_notifier_list;
 
 #ifdef CONFIG_ADB
 static int adb_dev_map = 0;
@@ -2203,7 +2201,8 @@ pmac_wakeup_devices(void)
 #define	GRACKLE_NAP	(1<<4)
 #define	GRACKLE_SLEEP	(1<<3)
 
-static int powerbook_sleep_grackle(void)
+int
+powerbook_sleep_grackle(void)
 {
 	unsigned long save_l2cr;
 	unsigned short pmcr1;

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/chestnut.c
+ *
  * Board setup routines for IBM Chestnut
  *
  * Author: <source@mvista.com>

@@ -539,7 +539,8 @@ rx_status_loop:
 		unsigned buflen;
 
 		skb = cp->rx_skb[rx_tail].skb;
-		BUG_ON(!skb);
+		if (!skb)
+			BUG();
 
 		desc = &cp->rx_ring[rx_tail];
 		status = le32_to_cpu(desc->opts1);
@@ -722,7 +723,8 @@ static void cp_tx (struct cp_private *cp)
 			break;
 
 		skb = cp->tx_skb[tx_tail].skb;
-		BUG_ON(!skb);
+		if (!skb)
+			BUG();
 
 		pci_unmap_single(cp->pdev, cp->tx_skb[tx_tail].mapping,
 				 cp->tx_skb[tx_tail].len, PCI_DMA_TODEVICE);
@@ -792,7 +794,7 @@ static int cp_start_xmit (struct sk_buff *skb, struct net_device *dev)
 	entry = cp->tx_head;
 	eor = (entry == (CP_TX_RING_SIZE - 1)) ? RingEnd : 0;
 	if (dev->features & NETIF_F_TSO)
-		mss = skb_shinfo(skb)->gso_size;
+		mss = skb_shinfo(skb)->tso_size;
 
 	if (skb_shinfo(skb)->nr_frags == 0) {
 		struct cp_desc *txd = &cp->tx_ring[entry];
@@ -1274,7 +1276,7 @@ static int cp_change_mtu(struct net_device *dev, int new_mtu)
 }
 #endif /* BROKEN */
 
-static const char mii_2_8139_map[8] = {
+static char mii_2_8139_map[8] = {
 	BasicModeCtrl,
 	BasicModeStatus,
 	0,
@@ -1548,7 +1550,8 @@ static void cp_get_ethtool_stats (struct net_device *dev,
 	tmp_stats[i++] = le16_to_cpu(nic_stats->tx_abort);
 	tmp_stats[i++] = le16_to_cpu(nic_stats->tx_underrun);
 	tmp_stats[i++] = cp->cp_stats.rx_frags;
-	BUG_ON(i != CP_NUM_STATS);
+	if (i != CP_NUM_STATS)
+		BUG();
 
 	pci_free_consistent(cp->pdev, sizeof(*nic_stats), nic_stats, dma);
 }
@@ -1853,7 +1856,8 @@ static void cp_remove_one (struct pci_dev *pdev)
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct cp_private *cp = netdev_priv(dev);
 
-	BUG_ON(!dev);
+	if (!dev)
+		BUG();
 	unregister_netdev(dev);
 	iounmap(cp->regs);
 	if (cp->wol_enabled) pci_set_power_state (pdev, PCI_D0);

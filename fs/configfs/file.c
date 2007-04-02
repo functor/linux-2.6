@@ -322,7 +322,7 @@ static int configfs_release(struct inode * inode, struct file * filp)
 	return 0;
 }
 
-const struct file_operations configfs_file_operations = {
+struct file_operations configfs_file_operations = {
 	.read		= configfs_read_file,
 	.write		= configfs_write_file,
 	.llseek		= generic_file_llseek,

@@ -101,6 +101,8 @@ struct tty_driver *serial_driver;
 
 #define RS_ISR_PASS_LIMIT 256
 
+#define _INLINE_ inline
+
 static void change_speed(struct m68k_serial *info);
 
 /*
@@ -260,7 +262,7 @@ static void batten_down_hatches(void)
 	/* Drop into the debugger */
 }
 
-static void status_handle(struct m68k_serial *info, unsigned short status)
+static _INLINE_ void status_handle(struct m68k_serial *info, unsigned short status)
 {
 #if 0
 	if(status & DCD) {
@@ -287,8 +289,7 @@ static void status_handle(struct m68k_serial *info, unsigned short status)
 	return;
 }
 
-static void receive_chars(struct m68k_serial *info, struct pt_regs *regs,
-			  unsigned short rx)
+static _INLINE_ void receive_chars(struct m68k_serial *info, struct pt_regs *regs, unsigned short rx)
 {
 	struct tty_struct *tty = info->tty;
 	m68328_uart *uart = &uart_addr[info->line];
@@ -358,7 +359,7 @@ clear_and_exit:
 	return;
 }
 
-static void transmit_chars(struct m68k_serial *info)
+static _INLINE_ void transmit_chars(struct m68k_serial *info)
 {
 	m68328_uart *uart = &uart_addr[info->line];
 

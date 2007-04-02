@@ -48,9 +48,12 @@
 #include <linux/coda_psdev.h>
 #include <linux/coda_proc.h>
 
-#include "coda_int.h"
-
 #define upc_free(r) kfree(r)
+
+/* 
+ * Coda stuff
+ */
+extern struct file_system_type coda_fs_type;
 
 /* statistics */
 int           coda_hard;         /* allows signals during upcalls */
@@ -342,7 +345,7 @@ static int coda_psdev_release(struct inode * inode, struct file * file)
 }
 
 
-static const struct file_operations coda_psdev_fops = {
+static struct file_operations coda_psdev_fops = {
 	.owner		= THIS_MODULE,
 	.read		= coda_psdev_read,
 	.write		= coda_psdev_write,
@@ -391,6 +394,8 @@ out:
 MODULE_AUTHOR("Peter J. Braam <braam@cs.cmu.edu>");
 MODULE_LICENSE("GPL");
 
+extern int coda_init_inodecache(void);
+extern void coda_destroy_inodecache(void);
 static int __init init_coda(void)
 {
 	int status;

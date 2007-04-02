@@ -1584,6 +1584,7 @@ u32 secure_ipv6_port_ephemeral(const __u32 *saddr, const __u32 *daddr, __u16 dpo
 
 	return twothirdsMD4Transform(daddr, hash);
 }
+EXPORT_SYMBOL(secure_ipv6_port_ephemeral);
 #endif
 
 #if defined(CONFIG_IP_DCCP) || defined(CONFIG_IP_DCCP_MODULE)
@@ -1631,18 +1632,13 @@ EXPORT_SYMBOL(secure_dccp_sequence_number);
  */
 unsigned int get_random_int(void)
 {
-	unsigned int val = 0;
-
-#ifdef CONFIG_X86_HAS_TSC
-	rdtscl(val);
-#endif
 	/*
 	 * Use IP's RNG. It suits our purpose perfectly: it re-keys itself
 	 * every second, from the entropy pool (and thus creates a limited
 	 * drain on it), and uses halfMD4Transform within the second. We
 	 * also mix it with jiffies and the PID:
 	 */
-	return secure_ip_id(current->pid + jiffies + (int)val);
+	return secure_ip_id(current->pid + jiffies);
 }
 
 /*

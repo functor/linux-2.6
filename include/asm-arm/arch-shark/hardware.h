@@ -17,6 +17,11 @@
  */
 #define IO_BASE			0xe0000000
 
+/*
+ * RAM definitions
+ */
+#define FLUSH_BASE_PHYS		0x80000000
+
 #else
 
 #define IO_BASE			0
@@ -28,6 +33,7 @@
 #define ROMCARD_SIZE		0x08000000
 #define ROMCARD_START		0x10000000
 
+#define FLUSH_BASE		0xdf000000
 #define PCIO_BASE		0xe0000000
 
 

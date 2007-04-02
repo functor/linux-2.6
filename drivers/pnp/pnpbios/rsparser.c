@@ -448,7 +448,11 @@ pnpbios_parse_resource_option_data(unsigned char * p, unsigned char * end, struc
 			break;
 
 		case SMALL_TAG_END:
-        		return p + 2;
+			if (option_independent != option)
+				printk(KERN_WARNING "PnPBIOS: Missing SMALL_TAG_ENDDEP tag\n");
+			p = p + 2;
+        		return (unsigned char *)p;
+			break;
 
 		default: /* an unkown tag */
 			len_err:

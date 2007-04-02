@@ -60,7 +60,7 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	if (dee.read_only)
 		result->i_mode &= ~0222;
 
-	mutex_lock(&hpfs_i(dir)->i_mutex);
+	down(&hpfs_i(dir)->i_sem);
 	r = hpfs_add_dirent(dir, (char *)name, len, &dee, 0);
 	if (r == 1)
 		goto bail3;
@@ -101,11 +101,11 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 		hpfs_write_inode_nolock(result);
 	}
 	d_instantiate(dentry, result);
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	unlock_kernel();
 	return 0;
 bail3:
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	iput(result);
 bail2:
 	hpfs_brelse4(&qbh0);
@@ -168,7 +168,7 @@ static int hpfs_create(struct inode *dir, struct dentry *dentry, int mode, struc
 	result->i_data.a_ops = &hpfs_aops;
 	hpfs_i(result)->mmu_private = 0;
 
-	mutex_lock(&hpfs_i(dir)->i_mutex);
+	down(&hpfs_i(dir)->i_sem);
 	r = hpfs_add_dirent(dir, (char *)name, len, &dee, 0);
 	if (r == 1)
 		goto bail2;
@@ -193,12 +193,12 @@ static int hpfs_create(struct inode *dir, struct dentry *dentry, int mode, struc
 		hpfs_write_inode_nolock(result);
 	}
 	d_instantiate(dentry, result);
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	unlock_kernel();
 	return 0;
 
 bail2:
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	iput(result);
 bail1:
 	brelse(bh);
@@ -254,7 +254,7 @@ static int hpfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t 
 	result->i_blocks = 1;
 	init_special_inode(result, mode, rdev);
 
-	mutex_lock(&hpfs_i(dir)->i_mutex);
+	down(&hpfs_i(dir)->i_sem);
 	r = hpfs_add_dirent(dir, (char *)name, len, &dee, 0);
 	if (r == 1)
 		goto bail2;
@@ -271,12 +271,12 @@ static int hpfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t 
 
 	hpfs_write_inode_nolock(result);
 	d_instantiate(dentry, result);
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	brelse(bh);
 	unlock_kernel();
 	return 0;
 bail2:
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	iput(result);
 bail1:
 	brelse(bh);
@@ -333,7 +333,7 @@ static int hpfs_symlink(struct inode *dir, struct dentry *dentry, const char *sy
 	result->i_op = &page_symlink_inode_operations;
 	result->i_data.a_ops = &hpfs_symlink_aops;
 
-	mutex_lock(&hpfs_i(dir)->i_mutex);
+	down(&hpfs_i(dir)->i_sem);
 	r = hpfs_add_dirent(dir, (char *)name, len, &dee, 0);
 	if (r == 1)
 		goto bail2;
@@ -352,11 +352,11 @@ static int hpfs_symlink(struct inode *dir, struct dentry *dentry, const char *sy
 
 	hpfs_write_inode_nolock(result);
 	d_instantiate(dentry, result);
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	unlock_kernel();
 	return 0;
 bail2:
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
+	up(&hpfs_i(dir)->i_sem);
 	iput(result);
 bail1:
 	brelse(bh);
@@ -382,8 +382,8 @@ static int hpfs_unlink(struct inode *dir, struct dentry *dentry)
 	lock_kernel();
 	hpfs_adjust_length((char *)name, &len);
 again:
-	mutex_lock(&hpfs_i(inode)->i_parent_mutex);
-	mutex_lock(&hpfs_i(dir)->i_mutex);
+	down(&hpfs_i(inode)->i_parent);
+	down(&hpfs_i(dir)->i_sem);
 	err = -ENOENT;
 	de = map_dirent(dir, hpfs_i(dir)->i_dno, (char *)name, len, &dno, &qbh);
 	if (!de)
@@ -410,8 +410,8 @@ again:
 		if (rep++)
 			break;
 
-		mutex_unlock(&hpfs_i(dir)->i_mutex);
-		mutex_unlock(&hpfs_i(inode)->i_parent_mutex);
+		up(&hpfs_i(dir)->i_sem);
+		up(&hpfs_i(inode)->i_parent);
 		d_drop(dentry);
 		spin_lock(&dentry->d_lock);
 		if (atomic_read(&dentry->d_count) > 1 ||
@@ -442,8 +442,8 @@ again:
 out1:
 	hpfs_brelse4(&qbh);
 out:
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
-	mutex_unlock(&hpfs_i(inode)->i_parent_mutex);
+	up(&hpfs_i(dir)->i_sem);
+	up(&hpfs_i(inode)->i_parent);
 	unlock_kernel();
 	return err;
 }
@@ -463,8 +463,8 @@ static int hpfs_rmdir(struct inode *dir, struct dentry *dentry)
 
 	hpfs_adjust_length((char *)name, &len);
 	lock_kernel();
-	mutex_lock(&hpfs_i(inode)->i_parent_mutex);
-	mutex_lock(&hpfs_i(dir)->i_mutex);
+	down(&hpfs_i(inode)->i_parent);
+	down(&hpfs_i(dir)->i_sem);
 	err = -ENOENT;
 	de = map_dirent(dir, hpfs_i(dir)->i_dno, (char *)name, len, &dno, &qbh);
 	if (!de)
@@ -502,8 +502,8 @@ static int hpfs_rmdir(struct inode *dir, struct dentry *dentry)
 out1:
 	hpfs_brelse4(&qbh);
 out:
-	mutex_unlock(&hpfs_i(dir)->i_mutex);
-	mutex_unlock(&hpfs_i(inode)->i_parent_mutex);
+	up(&hpfs_i(dir)->i_sem);
+	up(&hpfs_i(inode)->i_parent);
 	unlock_kernel();
 	return err;
 }
@@ -565,12 +565,12 @@ static int hpfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	lock_kernel();
 	/* order doesn't matter, due to VFS exclusion */
-	mutex_lock(&hpfs_i(i)->i_parent_mutex);
+	down(&hpfs_i(i)->i_parent);
 	if (new_inode)
-		mutex_lock(&hpfs_i(new_inode)->i_parent_mutex);
-	mutex_lock(&hpfs_i(old_dir)->i_mutex);
+		down(&hpfs_i(new_inode)->i_parent);
+	down(&hpfs_i(old_dir)->i_sem);
 	if (new_dir != old_dir)
-		mutex_lock(&hpfs_i(new_dir)->i_mutex);
+		down(&hpfs_i(new_dir)->i_sem);
 	
 	/* Erm? Moving over the empty non-busy directory is perfectly legal */
 	if (new_inode && S_ISDIR(new_inode->i_mode)) {
@@ -650,11 +650,11 @@ static int hpfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	hpfs_decide_conv(i, (char *)new_name, new_len);
 end1:
 	if (old_dir != new_dir)
-		mutex_unlock(&hpfs_i(new_dir)->i_mutex);
-	mutex_unlock(&hpfs_i(old_dir)->i_mutex);
-	mutex_unlock(&hpfs_i(i)->i_parent_mutex);
+		up(&hpfs_i(new_dir)->i_sem);
+	up(&hpfs_i(old_dir)->i_sem);
+	up(&hpfs_i(i)->i_parent);
 	if (new_inode)
-		mutex_unlock(&hpfs_i(new_inode)->i_parent_mutex);
+		up(&hpfs_i(new_inode)->i_parent);
 	unlock_kernel();
 	return err;
 }

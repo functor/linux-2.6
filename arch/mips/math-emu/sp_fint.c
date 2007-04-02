@@ -29,9 +29,7 @@
 
 ieee754sp ieee754sp_fint(int x)
 {
-	unsigned xm;
-	int xe;
-	int xs;
+	COMPXSP;
 
 	CLEARCX;
 

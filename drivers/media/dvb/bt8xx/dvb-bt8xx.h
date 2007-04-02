@@ -26,7 +26,6 @@
 #define DVB_BT8XX_H
 
 #include <linux/i2c.h>
-#include <linux/mutex.h>
 #include "dvbdev.h"
 #include "dvb_net.h"
 #include "bttv.h"
@@ -37,10 +36,9 @@
 #include "cx24110.h"
 #include "or51211.h"
 #include "lgdt330x.h"
-#include "zl10353.h"
 
 struct dvb_bt8xx_card {
-	struct mutex lock;
+	struct semaphore lock;
 	int nfeeds;
 	char card_name[32];
 	struct dvb_adapter dvb_adapter;

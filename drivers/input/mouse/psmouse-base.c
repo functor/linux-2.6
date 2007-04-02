@@ -20,8 +20,6 @@
 #include <linux/serio.h>
 #include <linux/init.h>
 #include <linux/libps2.h>
-#include <linux/mutex.h>
-
 #include "psmouse.h"
 #include "synaptics.h"
 #include "logips2pp.h"
@@ -100,13 +98,13 @@ __obsolete_setup("psmouse_resetafter=");
 __obsolete_setup("psmouse_rate=");
 
 /*
- * psmouse_mutex protects all operations changing state of mouse
+ * psmouse_sem protects all operations changing state of mouse
  * (connecting, disconnecting, changing rate or resolution via
  * sysfs). We could use a per-device semaphore but since there
  * rarely more than one PS/2 mouse connected and since semaphore
  * is taken in "slow" paths it is not worth it.
  */
-static DEFINE_MUTEX(psmouse_mutex);
+static DECLARE_MUTEX(psmouse_sem);
 
 static struct workqueue_struct *kpsmoused_wq;
 
@@ -872,7 +870,7 @@ static void psmouse_resync(void *p)
 	int failed = 0, enabled = 0;
 	int i;
 
-	mutex_lock(&psmouse_mutex);
+	down(&psmouse_sem);
 
 	if (psmouse->state != PSMOUSE_RESYNCING)
 		goto out;
@@ -952,7 +950,7 @@ static void psmouse_resync(void *p)
 	if (parent)
 		psmouse_activate(parent);
  out:
-	mutex_unlock(&psmouse_mutex);
+	up(&psmouse_sem);
 }
 
 /*
@@ -978,14 +976,14 @@ static void psmouse_disconnect(struct serio *serio)
 
 	sysfs_remove_group(&serio->dev.kobj, &psmouse_attribute_group);
 
-	mutex_lock(&psmouse_mutex);
+	down(&psmouse_sem);
 
 	psmouse_set_state(psmouse, PSMOUSE_CMD_MODE);
 
 	/* make sure we don't have a resync in progress */
-	mutex_unlock(&psmouse_mutex);
+	up(&psmouse_sem);
 	flush_workqueue(kpsmoused_wq);
-	mutex_lock(&psmouse_mutex);
+	down(&psmouse_sem);
 
 	if (serio->parent && serio->id.type == SERIO_PS_PSTHRU) {
 		parent = serio_get_drvdata(serio->parent);
@@ -1008,7 +1006,7 @@ static void psmouse_disconnect(struct serio *serio)
 	if (parent)
 		psmouse_activate(parent);
 
-	mutex_unlock(&psmouse_mutex);
+	up(&psmouse_sem);
 }
 
 static int psmouse_switch_protocol(struct psmouse *psmouse, struct psmouse_protocol *proto)
@@ -1080,7 +1078,7 @@ static int psmouse_connect(struct serio *serio, struct serio_driver *drv)
 	struct input_dev *input_dev;
 	int retval = -ENOMEM;
 
-	mutex_lock(&psmouse_mutex);
+	down(&psmouse_sem);
 
 	/*
 	 * If this is a pass-through port deactivate parent so the device
@@ -1148,7 +1146,7 @@ out:
 	if (parent)
 		psmouse_activate(parent);
 
-	mutex_unlock(&psmouse_mutex);
+	up(&psmouse_sem);
 	return retval;
 }
 
@@ -1165,7 +1163,7 @@ static int psmouse_reconnect(struct serio *serio)
 		return -1;
 	}
 
-	mutex_lock(&psmouse_mutex);
+	down(&psmouse_sem);
 
 	if (serio->parent && serio->id.type == SERIO_PS_PSTHRU) {
 		parent = serio_get_drvdata(serio->parent);
@@ -1199,7 +1197,7 @@ out:
 	if (parent)
 		psmouse_activate(parent);
 
-	mutex_unlock(&psmouse_mutex);
+	up(&psmouse_sem);
 	return rc;
 }
 
@@ -1277,7 +1275,7 @@ ssize_t psmouse_attr_set_helper(struct device *dev, struct device_attribute *dev
 		goto out_unpin;
 	}
 
-	retval = mutex_lock_interruptible(&psmouse_mutex);
+	retval = down_interruptible(&psmouse_sem);
 	if (retval)
 		goto out_unpin;
 
@@ -1285,7 +1283,7 @@ ssize_t psmouse_attr_set_helper(struct device *dev, struct device_attribute *dev
 
 	if (psmouse->state == PSMOUSE_IGNORE) {
 		retval = -ENODEV;
-		goto out_unlock;
+		goto out_up;
 	}
 
 	if (serio->parent && serio->id.type == SERIO_PS_PSTHRU) {
@@ -1303,8 +1301,8 @@ ssize_t psmouse_attr_set_helper(struct device *dev, struct device_attribute *dev
 	if (parent)
 		psmouse_activate(parent);
 
- out_unlock:
-	mutex_unlock(&psmouse_mutex);
+ out_up:
+	up(&psmouse_sem);
  out_unpin:
 	serio_unpin_driver(serio);
 	return retval;
@@ -1361,11 +1359,11 @@ static ssize_t psmouse_attr_set_protocol(struct psmouse *psmouse, void *data, co
 			return -EIO;
 		}
 
-		mutex_unlock(&psmouse_mutex);
+		up(&psmouse_sem);
 		serio_unpin_driver(serio);
 		serio_unregister_child_port(serio);
 		serio_pin_driver_uninterruptible(serio);
-		mutex_lock(&psmouse_mutex);
+		down(&psmouse_sem);
 
 		if (serio->drv != &psmouse_drv) {
 			input_free_device(new_dev);

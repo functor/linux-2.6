@@ -80,29 +80,6 @@ extern int proc_unknown_nmi_panic(ctl_table *, int, struct file *,
 				  void __user *, size_t *, loff_t *);
 #endif
 
-extern unsigned int vdso_enabled, vdso_populate;
-
-int exec_shield = (1<<3) | (1<<0);
-/* exec_shield is a bitmask:
-          0: off; vdso at STACK_TOP, 1 page below TASK_SIZE
-   (1<<0) 1: on [also on if !=0]
-   (1<<1) 2: noexecstack by default
-   (1<<2) 4: vdso just below .text of main (unless too low)
-   (1<<3) 8: vdso just below .text of PT_INTERP (unless too low)
-Yes, vdso placement is overloaded here; but exec_shield off
-is a strong incentive to place vdso at STACK_TOP, so the bit
-for vdso just below .text comes along for the ride.
-*/
-
-static int __init setup_exec_shield(char *str)
-{
-        get_option (&str, &exec_shield);
-
-        return 1;
-}
-
-__setup("exec-shield=", setup_exec_shield);
-
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
 static int minolduid;
@@ -313,40 +290,6 @@ static ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	},
-	{
-		.ctl_name	= KERN_EXEC_SHIELD,
-		.procname	= "exec-shield",
-		.data		= &exec_shield,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-	{
-		.ctl_name	= KERN_PRINT_FATAL,
-		.procname	= "print-fatal-signals",
-		.data		= &print_fatal_signals,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-#ifdef __i386__
-	{
-		.ctl_name	= KERN_VDSO,
-		.procname	= "vdso",
-		.data		= &vdso_enabled,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-	{
-		.ctl_name	= KERN_VDSO,
-		.procname	= "vdso_populate",
-		.data		= &vdso_populate,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-#endif
 	{
 		.ctl_name	= KERN_CORE_USES_PID,
 		.procname	= "core_uses_pid",
@@ -815,18 +758,18 @@ static ctl_table vm_table[] = {
 	{
 		.ctl_name	= VM_DIRTY_WB_CS,
 		.procname	= "dirty_writeback_centisecs",
-		.data		= &dirty_writeback_interval,
-		.maxlen		= sizeof(dirty_writeback_interval),
+		.data		= &dirty_writeback_centisecs,
+		.maxlen		= sizeof(dirty_writeback_centisecs),
 		.mode		= 0644,
 		.proc_handler	= &dirty_writeback_centisecs_handler,
 	},
 	{
 		.ctl_name	= VM_DIRTY_EXPIRE_CS,
 		.procname	= "dirty_expire_centisecs",
-		.data		= &dirty_expire_interval,
-		.maxlen		= sizeof(dirty_expire_interval),
+		.data		= &dirty_expire_centisecs,
+		.maxlen		= sizeof(dirty_expire_centisecs),
 		.mode		= 0644,
-		.proc_handler	= &proc_dointvec_userhz_jiffies,
+		.proc_handler	= &proc_dointvec,
 	},
 	{
 		.ctl_name	= VM_NR_PDFLUSH_THREADS,
@@ -921,8 +864,9 @@ static ctl_table vm_table[] = {
 		.data		= &laptop_mode,
 		.maxlen		= sizeof(laptop_mode),
 		.mode		= 0644,
-		.proc_handler	= &proc_dointvec_jiffies,
-		.strategy	= &sysctl_jiffies,
+		.proc_handler	= &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
 	},
 	{
 		.ctl_name	= VM_BLOCK_DUMP,
@@ -2130,8 +2074,6 @@ static int do_proc_dointvec_jiffies_conv(int *negp, unsigned long *lvalp,
 					 int write, void *data)
 {
 	if (write) {
-		if (*lvalp > LONG_MAX / HZ)
-			return 1;
 		*valp = *negp ? -(*lvalp*HZ) : (*lvalp*HZ);
 	} else {
 		int val = *valp;
@@ -2153,8 +2095,6 @@ static int do_proc_dointvec_userhz_jiffies_conv(int *negp, unsigned long *lvalp,
 						int write, void *data)
 {
 	if (write) {
-		if (USER_HZ < HZ && *lvalp > (LONG_MAX / HZ) * USER_HZ)
-			return 1;
 		*valp = clock_t_to_jiffies(*negp ? -*lvalp : *lvalp);
 	} else {
 		int val = *valp;

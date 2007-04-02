@@ -19,13 +19,11 @@
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/blktrans.h>
-#include <linux/mutex.h>
-
 
 static struct mtdblk_dev {
 	struct mtd_info *mtd;
 	int count;
-	struct mutex cache_mutex;
+	struct semaphore cache_sem;
 	unsigned char *cache_data;
 	unsigned long cache_offset;
 	unsigned int cache_size;
@@ -286,7 +284,7 @@ static int mtdblock_open(struct mtd_blktrans_dev *mbd)
 	mtdblk->count = 1;
 	mtdblk->mtd = mtd;
 
-	mutex_init(&mtdblk->cache_mutex);
+	init_MUTEX (&mtdblk->cache_sem);
 	mtdblk->cache_state = STATE_EMPTY;
 	if ((mtdblk->mtd->flags & MTD_CAP_RAM) != MTD_CAP_RAM &&
 	    mtdblk->mtd->erasesize) {
@@ -308,9 +306,9 @@ static int mtdblock_release(struct mtd_blktrans_dev *mbd)
 
    	DEBUG(MTD_DEBUG_LEVEL1, "mtdblock_release\n");
 
-	mutex_lock(&mtdblk->cache_mutex);
+	down(&mtdblk->cache_sem);
 	write_cached_data(mtdblk);
-	mutex_unlock(&mtdblk->cache_mutex);
+	up(&mtdblk->cache_sem);
 
 	if (!--mtdblk->count) {
 		/* It was the last usage. Free the device */
@@ -329,9 +327,9 @@ static int mtdblock_flush(struct mtd_blktrans_dev *dev)
 {
 	struct mtdblk_dev *mtdblk = mtdblks[dev->devnum];
 
-	mutex_lock(&mtdblk->cache_mutex);
+	down(&mtdblk->cache_sem);
 	write_cached_data(mtdblk);
-	mutex_unlock(&mtdblk->cache_mutex);
+	up(&mtdblk->cache_sem);
 
 	if (mtdblk->mtd->sync)
 		mtdblk->mtd->sync(mtdblk->mtd);

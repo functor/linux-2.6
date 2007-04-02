@@ -47,7 +47,7 @@ static unsigned int kmsg_poll(struct file *file, poll_table *wait)
 }
 
 
-const struct file_operations proc_kmsg_operations = {
+struct file_operations proc_kmsg_operations = {
 	.read		= kmsg_read,
 	.poll		= kmsg_poll,
 	.open		= kmsg_open,

@@ -109,7 +109,7 @@
 #define __NR_syslog			1117
 #define __NR_setitimer			1118
 #define __NR_getitimer			1119
-#define __NR_tux			1120 /* was __NR_old_stat */
+/* 1120 was __NR_old_stat */
 /* 1121 was __NR_old_lstat */
 /* 1122 was __NR_old_fstat */
 #define __NR_vhangup			1123
@@ -285,18 +285,12 @@
 #define __NR_faccessat			1293
 /* 1294, 1295 reserved for pselect/ppoll */
 #define __NR_unshare			1296
-#define __NR_splice			1297
-#define __NR_set_robust_list		1298
-#define __NR_get_robust_list		1299
-#define __NR_sync_file_range		1300
-#define __NR_tee			1301
-#define __NR_vmsplice			1302
 
 #ifdef __KERNEL__
 
 #include <linux/config.h>
 
-#define NR_syscalls			279 /* length of syscall table */
+#define NR_syscalls			273 /* length of syscall table */
 
 #define __ARCH_WANT_SYS_RT_SIGACTION
 

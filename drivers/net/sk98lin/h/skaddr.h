@@ -236,6 +236,18 @@ extern	int	SkAddrMcClear(
 	SK_U32	PortNumber,
 	int	Flags);
 
+extern	int	SkAddrXmacMcClear(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	SK_U32	PortNumber,
+	int	Flags);
+
+extern	int	SkAddrGmacMcClear(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	SK_U32	PortNumber,
+	int	Flags);
+
 extern	int	SkAddrMcAdd(
 	SK_AC		*pAC,
 	SK_IOC		IoC,
@@ -243,7 +255,31 @@ extern	int	SkAddrMcAdd(
 	SK_MAC_ADDR	*pMc,
 	int		Flags);
 
+extern	int	SkAddrXmacMcAdd(
+	SK_AC		*pAC,
+	SK_IOC		IoC,
+	SK_U32		PortNumber,
+	SK_MAC_ADDR	*pMc,
+	int		Flags);
+
+extern	int	SkAddrGmacMcAdd(
+	SK_AC		*pAC,
+	SK_IOC		IoC,
+	SK_U32		PortNumber,
+	SK_MAC_ADDR	*pMc,
+	int		Flags);
+
 extern	int	SkAddrMcUpdate(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	SK_U32	PortNumber);
+
+extern	int	SkAddrXmacMcUpdate(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	SK_U32	PortNumber);
+
+extern	int	SkAddrGmacMcUpdate(
 	SK_AC	*pAC,
 	SK_IOC	IoC,
 	SK_U32	PortNumber);
@@ -260,6 +296,18 @@ extern	int	SkAddrPromiscuousChange(
 	SK_IOC	IoC,
 	SK_U32	PortNumber,
 	int	NewPromMode);
+
+extern	int	SkAddrXmacPromiscuousChange(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	SK_U32	PortNumber,
+	int	NewPromMode);
+
+extern	int	SkAddrGmacPromiscuousChange(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	SK_U32	PortNumber,
+	int	NewPromMode);	
 
 #ifndef SK_SLIM
 extern	int	SkAddrSwap(

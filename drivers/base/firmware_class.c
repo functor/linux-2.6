@@ -32,7 +32,7 @@ enum {
 	FW_STATUS_READY_NOHOTPLUG,
 };
 
-static int loading_timeout = 60;	/* In seconds */
+static int loading_timeout = 10;	/* In seconds */
 
 /* fw_lock could be moved to 'struct firmware_priv' but since it is just
  * guarding for corner cases a global lock should be OK */
@@ -86,9 +86,18 @@ firmware_timeout_store(struct class *class, const char *buf, size_t count)
 static CLASS_ATTR(timeout, 0644, firmware_timeout_show, firmware_timeout_store);
 
 static void  fw_class_dev_release(struct class_device *class_dev);
+int firmware_class_uevent(struct class_device *dev, char **envp,
+			   int num_envp, char *buffer, int buffer_size);
 
-static int firmware_class_uevent(struct class_device *class_dev, char **envp,
-				 int num_envp, char *buffer, int buffer_size)
+static struct class firmware_class = {
+	.name		= "firmware",
+	.uevent	= firmware_class_uevent,
+	.release	= fw_class_dev_release,
+};
+
+int
+firmware_class_uevent(struct class_device *class_dev, char **envp,
+		       int num_envp, char *buffer, int buffer_size)
 {
 	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
 	int i = 0, len = 0;
@@ -106,12 +115,6 @@ static int firmware_class_uevent(struct class_device *class_dev, char **envp,
 
 	return 0;
 }
-
-static struct class firmware_class = {
-	.name		= "firmware",
-	.uevent		= firmware_class_uevent,
-	.release	= fw_class_dev_release,
-};
 
 static ssize_t
 firmware_loading_show(struct class_device *class_dev, char *buf)
@@ -490,6 +493,25 @@ release_firmware(const struct firmware *fw)
 	}
 }
 
+/**
+ * register_firmware: - provide a firmware image for later usage
+ * @name: name of firmware image file
+ * @data: buffer pointer for the firmware image
+ * @size: size of the data buffer area
+ *
+ *	Make sure that @data will be available by requesting firmware @name.
+ *
+ *	Note: This will not be possible until some kind of persistence
+ *	is available.
+ **/
+void
+register_firmware(const char *name, const u8 *data, size_t size)
+{
+	/* This is meaningless without firmware caching, so until we
+	 * decide if firmware caching is reasonable just leave it as a
+	 * noop */
+}
+
 /* Async support */
 struct firmware_work {
 	struct work_struct work;
@@ -608,3 +630,4 @@ module_exit(firmware_class_exit);
 EXPORT_SYMBOL(release_firmware);
 EXPORT_SYMBOL(request_firmware);
 EXPORT_SYMBOL(request_firmware_nowait);
+EXPORT_SYMBOL(register_firmware);

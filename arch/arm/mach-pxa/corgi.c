@@ -32,6 +32,7 @@
 #include <asm/mach/irq.h>
 
 #include <asm/arch/pxa-regs.h>
+#include <asm/arch/irq.h>
 #include <asm/arch/irda.h>
 #include <asm/arch/mmc.h>
 #include <asm/arch/udc.h>
@@ -141,8 +142,6 @@ struct corgissp_machinfo corgi_ssp_machinfo = {
  */
 static struct corgibl_machinfo corgi_bl_machinfo = {
 	.max_intensity = 0x2f,
-	.default_intensity = 0x1f,
-	.limit_mask = 0x0b,
 	.set_bl_intensity = corgi_bl_set_intensity,
 };
 
@@ -164,14 +163,6 @@ static struct platform_device corgikbd_device = {
 	.id		= -1,
 };
 
-
-/*
- * Corgi LEDs
- */
-static struct platform_device corgiled_device = {
-	.name		= "corgi-led",
-	.id		= -1,
-};
 
 /*
  * Corgi Touch Screen Device
@@ -307,7 +298,6 @@ static struct platform_device *devices[] __initdata = {
 	&corgikbd_device,
 	&corgibl_device,
 	&corgits_device,
-	&corgiled_device,
 };
 
 static void __init corgi_init(void)

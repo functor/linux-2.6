@@ -46,9 +46,9 @@ __cacheline_aligned_in_smp DEFINE_SPINLOCK(vfsmount_lock);
 
 static int event;
 
-static struct list_head *mount_hashtable __read_mostly;
+static struct list_head *mount_hashtable;
 static int hash_mask __read_mostly, hash_bits __read_mostly;
-static kmem_cache_t *mnt_cache __read_mostly;
+static kmem_cache_t *mnt_cache;
 static struct rw_semaphore namespace_sem;
 
 /* /sys/fs */
@@ -445,54 +445,6 @@ struct seq_operations mounts_op = {
 	.show	= show_vfsmnt
 };
 
-static int show_vfsstat(struct seq_file *m, void *v)
-{
-	struct vfsmount *mnt = v;
-	int err = 0;
-
-	if (vx_flags(VXF_HIDE_MOUNT, 0))
-		return 0;
-	if (!mnt_is_reachable(mnt) && !vx_check(0, VX_WATCH))
-		return 0;
-
-	if (!vx_check(0, VX_ADMIN|VX_WATCH) &&
-		mnt == current->fs->rootmnt) {
-		seq_puts(m, "device /dev/root mounted on / ");
-	} else {
-		/* device */
-		if (mnt->mnt_devname) {
-			seq_puts(m, "device ");
-			mangle(m, mnt->mnt_devname);
-		} else
-			seq_puts(m, "no device");
-
-		/* mount point */
-		seq_puts(m, " mounted on ");
-		seq_path(m, mnt, mnt->mnt_root, " \t\n\\");
-		seq_putc(m, ' ');
-	}
-
-	/* file system type */
-	seq_puts(m, "with fstype ");
-	mangle(m, mnt->mnt_sb->s_type->name);
-
-	/* optional statistics */
-	if (mnt->mnt_sb->s_op->show_stats) {
-		seq_putc(m, ' ');
-		err = mnt->mnt_sb->s_op->show_stats(m, mnt);
-	}
-
-	seq_putc(m, '\n');
-	return err;
-}
-
-struct seq_operations mountstats_op = {
-	.start	= m_start,
-	.next	= m_next,
-	.stop	= m_stop,
-	.show	= show_vfsstat,
-};
-
 /**
  * may_umount_tree - check if a mount tree is busy
  * @mnt: root of mount tree
@@ -515,9 +467,9 @@ int may_umount_tree(struct vfsmount *mnt)
 	spin_unlock(&vfsmount_lock);
 
 	if (actual_refs > minimum_refs)
-		return 0;
+		return -EBUSY;
 
-	return 1;
+	return 0;
 }
 
 EXPORT_SYMBOL(may_umount_tree);
@@ -537,10 +489,10 @@ EXPORT_SYMBOL(may_umount_tree);
  */
 int may_umount(struct vfsmount *mnt)
 {
-	int ret = 1;
+	int ret = 0;
 	spin_lock(&vfsmount_lock);
 	if (propagate_mount_busy(mnt, 2))
-		ret = 0;
+		ret = -EBUSY;
 	spin_unlock(&vfsmount_lock);
 	return ret;
 }
@@ -1606,8 +1558,6 @@ void set_fs_root(struct fs_struct *fs, struct vfsmount *mnt,
 		mntput(old_rootmnt);
 	}
 }
-
-EXPORT_SYMBOL_GPL(set_fs_root);
 
 /*
  * Replace the fs->{pwdmnt,pwd} with {mnt,dentry}. Put the old values.

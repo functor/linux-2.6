@@ -22,7 +22,6 @@
  */
 
 #include <linux/errno.h>
-#include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
@@ -1278,18 +1277,18 @@ unm_done:
 		
 		tni = locked_nis[nr_locked_nis];
 		/* Get the base inode. */
-		mutex_lock(&tni->extent_lock);
+		down(&tni->extent_lock);
 		if (tni->nr_extents >= 0)
 			base_tni = tni;
 		else {
 			base_tni = tni->ext.base_ntfs_ino;
 			BUG_ON(!base_tni);
 		}
-		mutex_unlock(&tni->extent_lock);
+		up(&tni->extent_lock);
 		ntfs_debug("Unlocking %s inode 0x%lx.",
 				tni == base_tni ? "base" : "extent",
 				tni->mft_no);
-		mutex_unlock(&tni->mrec_lock);
+		up(&tni->mrec_lock);
 		atomic_dec(&tni->count);
 		iput(VFS_I(base_tni));
 	}
@@ -1530,6 +1529,7 @@ err_out:
 				"error %i.", err);
 		SetPageError(page);
 		NVolSetErrors(ni->vol);
+		make_bad_inode(vi);
 	}
 	unlock_page(page);
 	if (ctx)
@@ -1551,9 +1551,6 @@ struct address_space_operations ntfs_aops = {
 #ifdef NTFS_RW
 	.writepage	= ntfs_writepage,	/* Write dirty page to disk. */
 #endif /* NTFS_RW */
-	.migratepage	= buffer_migrate_page,	/* Move a page cache page from
-						   one physical page to an
-						   other. */
 };
 
 /**
@@ -1570,9 +1567,6 @@ struct address_space_operations ntfs_mst_aops = {
 						   without touching the buffers
 						   belonging to the page. */
 #endif /* NTFS_RW */
-	.migratepage	= buffer_migrate_page,	/* Move a page cache page from
-						   one physical page to an
-						   other. */
 };
 
 #ifdef NTFS_RW

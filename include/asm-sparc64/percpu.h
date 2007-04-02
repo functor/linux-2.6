@@ -26,9 +26,10 @@ register unsigned long __local_per_cpu_offset asm("g5");
 #define percpu_modcopy(pcpudst, src, size)			\
 do {								\
 	unsigned int __i;					\
-	for_each_possible_cpu(__i)				\
-		memcpy((pcpudst)+__per_cpu_offset(__i),		\
-		       (src), (size));				\
+	for (__i = 0; __i < NR_CPUS; __i++)			\
+		if (cpu_possible(__i))				\
+			memcpy((pcpudst)+__per_cpu_offset(__i),	\
+			       (src), (size));			\
 } while (0)
 #else /* ! SMP */
 

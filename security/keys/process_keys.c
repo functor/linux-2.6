@@ -16,12 +16,11 @@
 #include <linux/keyctl.h>
 #include <linux/fs.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 #include <asm/uaccess.h>
 #include "internal.h"
 
 /* session keyring create vs join semaphore */
-static DEFINE_MUTEX(key_session_mutex);
+static DECLARE_MUTEX(key_session_sem);
 
 /* the root user's tracking struct */
 struct key_user root_key_user = {
@@ -168,11 +167,10 @@ error:
  */
 int install_process_keyring(struct task_struct *tsk)
 {
+	unsigned long flags;
 	struct key *keyring;
 	char buf[20];
 	int ret;
-
-	might_sleep();
 
 	if (!tsk->signal->process_keyring) {
 		sprintf(buf, "_pid.%u", tsk->tgid);
@@ -184,12 +182,12 @@ int install_process_keyring(struct task_struct *tsk)
 		}
 
 		/* attach keyring */
-		spin_lock_irq(&tsk->sighand->siglock);
+		spin_lock_irqsave(&tsk->sighand->siglock, flags);
 		if (!tsk->signal->process_keyring) {
 			tsk->signal->process_keyring = keyring;
 			keyring = NULL;
 		}
-		spin_unlock_irq(&tsk->sighand->siglock);
+		spin_unlock_irqrestore(&tsk->sighand->siglock, flags);
 
 		key_put(keyring);
 	}
@@ -208,37 +206,38 @@ error:
 static int install_session_keyring(struct task_struct *tsk,
 				   struct key *keyring)
 {
+	unsigned long flags;
 	struct key *old;
 	char buf[20];
-
-	might_sleep();
+	int ret;
 
 	/* create an empty session keyring */
 	if (!keyring) {
 		sprintf(buf, "_ses.%u", tsk->tgid);
 
 		keyring = keyring_alloc(buf, tsk->uid, tsk->gid, 1, NULL);
-		if (IS_ERR(keyring))
-			return PTR_ERR(keyring);
+		if (IS_ERR(keyring)) {
+			ret = PTR_ERR(keyring);
+			goto error;
+		}
 	}
 	else {
 		atomic_inc(&keyring->usage);
 	}
 
 	/* install the keyring */
-	spin_lock_irq(&tsk->sighand->siglock);
-	old = tsk->signal->session_keyring;
+	spin_lock_irqsave(&tsk->sighand->siglock, flags);
+	old = rcu_dereference(tsk->signal->session_keyring);
 	rcu_assign_pointer(tsk->signal->session_keyring, keyring);
-	spin_unlock_irq(&tsk->sighand->siglock);
+	spin_unlock_irqrestore(&tsk->sighand->siglock, flags);
 
-	/* we're using RCU on the pointer, but there's no point synchronising
-	 * on it if it didn't previously point to anything */
-	if (old) {
-		synchronize_rcu();
-		key_put(old);
-	}
+	ret = 0;
 
-	return 0;
+	/* we're using RCU on the pointer */
+	synchronize_rcu();
+	key_put(old);
+error:
+	return ret;
 
 } /* end install_session_keyring() */
 
@@ -311,6 +310,7 @@ void exit_keys(struct task_struct *tsk)
  */
 int exec_keys(struct task_struct *tsk)
 {
+	unsigned long flags;
 	struct key *old;
 
 	/* newly exec'd tasks don't get a thread keyring */
@@ -322,10 +322,10 @@ int exec_keys(struct task_struct *tsk)
 	key_put(old);
 
 	/* discard the process keyring from a newly exec'd task */
-	spin_lock_irq(&tsk->sighand->siglock);
+	spin_lock_irqsave(&tsk->sighand->siglock, flags);
 	old = tsk->signal->process_keyring;
 	tsk->signal->process_keyring = NULL;
-	spin_unlock_irq(&tsk->sighand->siglock);
+	spin_unlock_irqrestore(&tsk->sighand->siglock, flags);
 
 	key_put(old);
 
@@ -711,7 +711,7 @@ long join_session_keyring(const char *name)
 	}
 
 	/* allow the user to join or create a named keyring */
-	mutex_lock(&key_session_mutex);
+	down(&key_session_sem);
 
 	/* look for an existing keyring of this name */
 	keyring = find_keyring_by_name(name, 0);
@@ -737,7 +737,7 @@ long join_session_keyring(const char *name)
 	key_put(keyring);
 
 error2:
-	mutex_unlock(&key_session_mutex);
+	up(&key_session_sem);
 error:
 	return ret;
 

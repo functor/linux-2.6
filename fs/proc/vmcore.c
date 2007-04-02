@@ -172,7 +172,7 @@ static int open_vmcore(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-const struct file_operations proc_vmcore_operations = {
+struct file_operations proc_vmcore_operations = {
 	.read		= read_vmcore,
 	.open		= open_vmcore,
 };

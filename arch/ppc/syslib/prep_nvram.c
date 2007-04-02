@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/kernel/prep_nvram.c
+ *
  * Copyright (C) 1998  Corey Minyard
  *
  * This reads the NvRAM on PReP compliant machines (generally from IBM or

@@ -959,7 +959,7 @@ static int vlsi_hard_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			    ||  (now.tv_sec==ready.tv_sec && now.tv_usec>=ready.tv_usec))
 			    	break;
 			udelay(100);
-			/* must not sleep here - called under netif_tx_lock! */
+			/* must not sleep here - we are called under xmit_lock! */
 		}
 	}
 
@@ -1887,7 +1887,7 @@ static int __init vlsi_mod_init(void)
 		vlsi_proc_root->owner = THIS_MODULE;
 	}
 
-	ret = pci_register_driver(&vlsi_irda_driver);
+	ret = pci_module_init(&vlsi_irda_driver);
 
 	if (ret && vlsi_proc_root)
 		remove_proc_entry(PROC_DIR, NULL);

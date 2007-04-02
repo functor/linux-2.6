@@ -30,7 +30,6 @@
 /* clock device associated with the hcd */
 
 static struct clk *clk;
-static struct clk *usb_clk;
 
 /* forward definitions */
 
@@ -38,7 +37,7 @@ static void s3c2410_hcd_oc(struct s3c2410_hcd_info *info, int port_oc);
 
 /* conversion functions */
 
-static struct s3c2410_hcd_info *to_s3c2410_info(struct usb_hcd *hcd)
+struct s3c2410_hcd_info *to_s3c2410_info(struct usb_hcd *hcd)
 {
 	return hcd->self.controller->platform_data;
 }
@@ -48,10 +47,6 @@ static void s3c2410_start_hc(struct platform_device *dev, struct usb_hcd *hcd)
 	struct s3c2410_hcd_info *info = dev->dev.platform_data;
 
 	dev_dbg(&dev->dev, "s3c2410_start_hc:\n");
-
-	clk_enable(usb_clk);
-	mdelay(2);			/* let the bus clock stabilise */
-
 	clk_enable(clk);
 
 	if (info != NULL) {
@@ -80,7 +75,6 @@ static void s3c2410_stop_hc(struct platform_device *dev)
 	}
 
 	clk_disable(clk);
-	clk_disable(usb_clk);
 }
 
 /* ohci_s3c2410_hub_status_data
@@ -164,7 +158,7 @@ static int ohci_s3c2410_hub_control (
 		"s3c2410_hub_control(%p,0x%04x,0x%04x,0x%04x,%p,%04x)\n",
 		hcd, typeReq, wValue, wIndex, buf, wLength);
 
-	/* if we are only an humble host without any special capabilities
+	/* if we are only an humble host without any special capabilites
 	 * process the request straight away and exit */
 
 	if (info == NULL) {
@@ -322,8 +316,7 @@ static void s3c2410_hcd_oc(struct s3c2410_hcd_info *info, int port_oc)
  *
 */
 
-static void
-usb_hcd_s3c2410_remove (struct usb_hcd *hcd, struct platform_device *dev)
+void usb_hcd_s3c2410_remove (struct usb_hcd *hcd, struct platform_device *dev)
 {
 	usb_remove_hcd(hcd);
 	s3c2410_stop_hc(dev);
@@ -341,8 +334,8 @@ usb_hcd_s3c2410_remove (struct usb_hcd *hcd, struct platform_device *dev)
  * through the hotplug entry's driver_data.
  *
  */
-static int usb_hcd_s3c2410_probe (const struct hc_driver *driver,
-				  struct platform_device *dev)
+int usb_hcd_s3c2410_probe (const struct hc_driver *driver,
+			   struct platform_device *dev)
 {
 	struct usb_hcd *hcd = NULL;
 	int retval;
@@ -360,21 +353,14 @@ static int usb_hcd_s3c2410_probe (const struct hc_driver *driver,
 	if (!request_mem_region(hcd->rsrc_start, hcd->rsrc_len, hcd_name)) {
 		dev_err(&dev->dev, "request_mem_region failed");
 		retval = -EBUSY;
-		goto err_put;
+		goto err0;
 	}
 
-	clk = clk_get(&dev->dev, "usb-host");
+	clk = clk_get(NULL, "usb-host");
 	if (IS_ERR(clk)) {
 		dev_err(&dev->dev, "cannot get usb-host clock\n");
 		retval = -ENOENT;
-		goto err_mem;
-	}
-
-	usb_clk = clk_get(&dev->dev, "upll");
-	if (IS_ERR(usb_clk)) {
-		dev_err(&dev->dev, "cannot get usb-host clock\n");
-		retval = -ENOENT;
-		goto err_clk;
+		goto err1;
 	}
 
 	s3c2410_start_hc(dev, hcd);
@@ -383,29 +369,26 @@ static int usb_hcd_s3c2410_probe (const struct hc_driver *driver,
 	if (!hcd->regs) {
 		dev_err(&dev->dev, "ioremap failed\n");
 		retval = -ENOMEM;
-		goto err_ioremap;
+		goto err2;
 	}
 
 	ohci_hcd_init(hcd_to_ohci(hcd));
 
 	retval = usb_add_hcd(hcd, dev->resource[1].start, SA_INTERRUPT);
 	if (retval != 0)
-		goto err_ioremap;
+		goto err2;
 
 	return 0;
 
- err_ioremap:
+ err2:
 	s3c2410_stop_hc(dev);
 	iounmap(hcd->regs);
-	clk_put(usb_clk);
-
- err_clk:
 	clk_put(clk);
 
- err_mem:
+ err1:
 	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 
- err_put:
+ err0:
 	usb_put_hcd(hcd);
 	return retval;
 }

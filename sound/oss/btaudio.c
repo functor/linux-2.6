@@ -32,8 +32,6 @@
 #include <linux/soundcard.h>
 #include <linux/slab.h>
 #include <linux/kdev_t.h>
-#include <linux/mutex.h>
-
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
@@ -110,7 +108,7 @@ struct btaudio {
 
 	/* locking */
 	int            users;
-	struct mutex lock;
+	struct semaphore lock;
 
 	/* risc instructions */
 	unsigned int   risc_size;
@@ -442,7 +440,7 @@ static struct file_operations btaudio_mixer_fops = {
 static int btaudio_dsp_open(struct inode *inode, struct file *file,
 			    struct btaudio *bta, int analog)
 {
-	mutex_lock(&bta->lock);
+	down(&bta->lock);
 	if (bta->users)
 		goto busy;
 	bta->users++;
@@ -454,11 +452,11 @@ static int btaudio_dsp_open(struct inode *inode, struct file *file,
 	bta->read_count = 0;
 	bta->sampleshift = 0;
 
-	mutex_unlock(&bta->lock);
+	up(&bta->lock);
 	return 0;
 
  busy:
-	mutex_unlock(&bta->lock);
+	up(&bta->lock);
 	return -EBUSY;
 }
 
@@ -498,11 +496,11 @@ static int btaudio_dsp_release(struct inode *inode, struct file *file)
 {
 	struct btaudio *bta = file->private_data;
 
-	mutex_lock(&bta->lock);
+	down(&bta->lock);
 	if (bta->recording)
 		stop_recording(bta);
 	bta->users--;
-	mutex_unlock(&bta->lock);
+	up(&bta->lock);
 	return 0;
 }
 
@@ -515,7 +513,7 @@ static ssize_t btaudio_dsp_read(struct file *file, char __user *buffer,
 	DECLARE_WAITQUEUE(wait, current);
 
 	add_wait_queue(&bta->readq, &wait);
-	mutex_lock(&bta->lock);
+	down(&bta->lock);
 	while (swcount > 0) {
 		if (0 == bta->read_count) {
 			if (!bta->recording) {
@@ -530,10 +528,10 @@ static ssize_t btaudio_dsp_read(struct file *file, char __user *buffer,
 					ret = -EAGAIN;
 				break;
 			}
-			mutex_unlock(&bta->lock);
+			up(&bta->lock);
 			current->state = TASK_INTERRUPTIBLE;
 			schedule();
-			mutex_lock(&bta->lock);
+			down(&bta->lock);
 			if(signal_pending(current)) {
 				if (0 == ret)
 					ret = -EINTR;
@@ -606,7 +604,7 @@ static ssize_t btaudio_dsp_read(struct file *file, char __user *buffer,
 		if (bta->read_offset == bta->buf_size)
 			bta->read_offset = 0;
 	}
-	mutex_unlock(&bta->lock);
+	up(&bta->lock);
 	remove_wait_queue(&bta->readq, &wait);
 	current->state = TASK_RUNNING;
 	return ret;
@@ -653,10 +651,10 @@ static int btaudio_dsp_ioctl(struct inode *inode, struct file *file,
 			bta->decimation  = 0;
 		}
 		if (bta->recording) {
-			mutex_lock(&bta->lock);
+			down(&bta->lock);
 			stop_recording(bta);
 			start_recording(bta);
-			mutex_unlock(&bta->lock);
+			up(&bta->lock);
 		}
 		/* fall through */
         case SOUND_PCM_READ_RATE:
@@ -718,10 +716,10 @@ static int btaudio_dsp_ioctl(struct inode *inode, struct file *file,
 			else
 				bta->bits = 16;
 			if (bta->recording) {
-				mutex_lock(&bta->lock);
+				down(&bta->lock);
 				stop_recording(bta);
 				start_recording(bta);
-				mutex_unlock(&bta->lock);
+				up(&bta->lock);
 			}
 		}
 		if (debug)
@@ -738,9 +736,9 @@ static int btaudio_dsp_ioctl(struct inode *inode, struct file *file,
 
         case SNDCTL_DSP_RESET:
 		if (bta->recording) {
-			mutex_lock(&bta->lock);
+			down(&bta->lock);
 			stop_recording(bta);
-			mutex_unlock(&bta->lock);
+			up(&bta->lock);
 		}
 		return 0;
         case SNDCTL_DSP_GETBLKSIZE:
@@ -943,7 +941,7 @@ static int __devinit btaudio_probe(struct pci_dev *pci_dev,
 	if (rate)
 		bta->rate = rate;
 	
-	mutex_init(&bta->lock);
+	init_MUTEX(&bta->lock);
         init_waitqueue_head(&bta->readq);
 
 	if (-1 != latency) {

@@ -3,7 +3,6 @@
 
 #include <linux/config.h>
 #include <asm/fixmap.h>
-#include <asm/desc.h>
 #include <linux/threads.h>
 #include <linux/mm.h>		/* for struct page */
 

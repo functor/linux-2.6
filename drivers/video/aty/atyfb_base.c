@@ -75,7 +75,6 @@
 #include "ati_ids.h"
 
 #ifdef __powerpc__
-#include <asm/machdep.h>
 #include <asm/prom.h>
 #include "../macmodes.h"
 #endif
@@ -435,7 +434,7 @@ static int __devinit correct_chipset(struct atyfb_par *par)
 	const char *name;
 	int i;
 
-	for (i = ARRAY_SIZE(aty_chips) - 1; i >= 0; i--)
+	for (i = sizeof(aty_chips) / sizeof(*aty_chips) - 1; i >= 0; i--)
 		if (par->pci_id == aty_chips[i].pci_id)
 			break;
 
@@ -2169,10 +2168,10 @@ static void __init aty_calc_mem_refresh(struct atyfb_par *par, int xclk)
 
 	if (IS_XL(par->pci_id) || IS_MOBILITY(par->pci_id)) {
 		refresh_tbl = ragexl_tbl;
-		size = ARRAY_SIZE(ragexl_tbl);
+		size = sizeof(ragexl_tbl)/sizeof(int);
 	} else {
 		refresh_tbl = ragepro_tbl;
-		size = ARRAY_SIZE(ragepro_tbl);
+		size = sizeof(ragepro_tbl)/sizeof(int);
 	}
 
 	for (i=0; i < size; i++) {
@@ -2299,10 +2298,6 @@ static int __init aty_init(struct fb_info *info, const char *name)
 		case CLK_ATI18818_1:
 			par->pll_ops = &aty_pll_ati18818_1;
 			break;
-		case CLK_IBMRGB514:
-			par->pll_ops = &aty_pll_ibm514;
-			break;
-#if 0 /* dead code */
 		case CLK_STG1703:
 			par->pll_ops = &aty_pll_stg1703;
 			break;
@@ -2312,7 +2307,9 @@ static int __init aty_init(struct fb_info *info, const char *name)
 		case CLK_ATT20C408:
 			par->pll_ops = &aty_pll_att20c408;
 			break;
-#endif
+		case CLK_IBMRGB514:
+			par->pll_ops = &aty_pll_ibm514;
+			break;
 		default:
 			PRINTKI("aty_init: CLK type not implemented yet!");
 			par->pll_ops = &aty_pll_unsupported;
@@ -2519,7 +2516,7 @@ static int __init aty_init(struct fb_info *info, const char *name)
 
 	memset(&var, 0, sizeof(var));
 #ifdef CONFIG_PPC
-	if (machine_is(powermac)) {
+	if (_machine == _MACH_Pmac) {
 		/*
 		 *  FIXME: The NVRAM stuff should be put in a Mac-specific file, as it
 		 *         applies to all Mac video cards
@@ -2674,7 +2671,7 @@ static int atyfb_blank(int blank, struct fb_info *info)
 		return 0;
 
 #ifdef CONFIG_PMAC_BACKLIGHT
-	if (machine_is(powermac) && blank > FB_BLANK_NORMAL)
+	if ((_machine == _MACH_Pmac) && blank > FB_BLANK_NORMAL)
 		set_backlight_enable(0);
 #elif defined(CONFIG_FB_ATY_GENERIC_LCD)
 	if (par->lcd_table && blank > FB_BLANK_NORMAL &&
@@ -2706,7 +2703,7 @@ static int atyfb_blank(int blank, struct fb_info *info)
 	aty_st_le32(CRTC_GEN_CNTL, gen_cntl, par);
 
 #ifdef CONFIG_PMAC_BACKLIGHT
-	if (machine_is(powermac) && blank <= FB_BLANK_NORMAL)
+	if ((_machine == _MACH_Pmac) && blank <= FB_BLANK_NORMAL)
 		set_backlight_enable(1);
 #elif defined(CONFIG_FB_ATY_GENERIC_LCD)
 	if (par->lcd_table && blank <= FB_BLANK_NORMAL &&
@@ -3400,7 +3397,7 @@ static int __devinit atyfb_pci_probe(struct pci_dev *pdev, const struct pci_devi
 	struct atyfb_par *par;
 	int i, rc = -ENOMEM;
 
-	for (i = ARRAY_SIZE(aty_chips) - 1; i >= 0; i--)
+	for (i = sizeof(aty_chips) / sizeof(*aty_chips) - 1; i >= 0; i--)
 		if (pdev->device == aty_chips[i].pci_id)
 			break;
 

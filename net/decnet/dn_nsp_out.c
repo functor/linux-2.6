@@ -287,26 +287,26 @@ int dn_nsp_xmit_timeout(struct sock *sk)
 	return 0;
 }
 
-static inline __le16 *dn_mk_common_header(struct dn_scp *scp, struct sk_buff *skb, unsigned char msgflag, int len)
+static inline unsigned char *dn_mk_common_header(struct dn_scp *scp, struct sk_buff *skb, unsigned char msgflag, int len)
 {
 	unsigned char *ptr = skb_push(skb, len);
 
 	BUG_ON(len < 5);
 
 	*ptr++ = msgflag;
-	*((__le16 *)ptr) = scp->addrrem;
+	*((unsigned short *)ptr) = scp->addrrem;
 	ptr += 2;
-	*((__le16 *)ptr) = scp->addrloc;
+	*((unsigned short *)ptr) = scp->addrloc;
 	ptr += 2;
-	return (__le16 __force *)ptr;
+	return ptr;
 }
 
-static __le16 *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, unsigned char msgflag, int hlen, int other)
+static unsigned short *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, unsigned char msgflag, int hlen, int other)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	unsigned short acknum = scp->numdat_rcv & 0x0FFF;
 	unsigned short ackcrs = scp->numoth_rcv & 0x0FFF;
-	__le16 *ptr;
+	unsigned short *ptr;
 
 	BUG_ON(hlen < 9);
 
@@ -325,7 +325,7 @@ static __le16 *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, unsigned c
 	/* Set "cross subchannel" bit in ackcrs */
 	ackcrs |= 0x2000;
 
-	ptr = (__le16 *)dn_mk_common_header(scp, skb, msgflag, hlen);
+	ptr = (unsigned short *)dn_mk_common_header(scp, skb, msgflag, hlen);
 
 	*ptr++ = dn_htons(acknum);
 	*ptr++ = dn_htons(ackcrs);
@@ -333,11 +333,11 @@ static __le16 *dn_mk_ack_header(struct sock *sk, struct sk_buff *skb, unsigned c
 	return ptr;
 }
 
-static __le16 *dn_nsp_mk_data_header(struct sock *sk, struct sk_buff *skb, int oth)
+static unsigned short *dn_nsp_mk_data_header(struct sock *sk, struct sk_buff *skb, int oth)
 {
 	struct dn_scp *scp = DN_SK(sk);
 	struct dn_skb_cb *cb = DN_SKB_CB(skb);
-	__le16 *ptr = dn_mk_ack_header(sk, skb, cb->nsp_flags, 11, oth);
+	unsigned short *ptr = dn_mk_ack_header(sk, skb, cb->nsp_flags, 11, oth);
 
 	if (unlikely(oth)) {
 		cb->segnum = scp->numoth;
@@ -524,9 +524,9 @@ void dn_send_conn_conf(struct sock *sk, gfp_t gfp)
 	struct dn_scp *scp = DN_SK(sk);
 	struct sk_buff *skb = NULL;
         struct nsp_conn_init_msg *msg;
-	__u8 len = (__u8)dn_ntohs(scp->conndata_out.opt_optl);
+	unsigned char len = scp->conndata_out.opt_optl;
 
-	if ((skb = dn_alloc_skb(sk, 50 + dn_ntohs(scp->conndata_out.opt_optl), gfp)) == NULL)
+	if ((skb = dn_alloc_skb(sk, 50 + scp->conndata_out.opt_optl, gfp)) == NULL)
 		return;
 
         msg = (struct nsp_conn_init_msg *)skb_put(skb, sizeof(*msg));
@@ -553,7 +553,7 @@ void dn_send_conn_conf(struct sock *sk, gfp_t gfp)
 static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg, 
 			unsigned short reason, gfp_t gfp,
 			struct dst_entry *dst,
-			int ddl, unsigned char *dd, __le16 rem, __le16 loc)
+			int ddl, unsigned char *dd, __u16 rem, __u16 loc)
 {
 	struct sk_buff *skb = NULL;
 	int size = 7 + ddl + ((msgflg == NSP_DISCINIT) ? 1 : 0);
@@ -561,7 +561,7 @@ static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg,
 
 	if ((dst == NULL) || (rem == 0)) {
 		if (net_ratelimit())
-			printk(KERN_DEBUG "DECnet: dn_nsp_do_disc: BUG! Please report this to SteveW@ACM.org rem=%u dst=%p\n", dn_ntohs(rem), dst);
+			printk(KERN_DEBUG "DECnet: dn_nsp_do_disc: BUG! Please report this to SteveW@ACM.org rem=%u dst=%p\n", (unsigned)rem, dst);
 		return;
 	}
 
@@ -570,11 +570,11 @@ static __inline__ void dn_nsp_do_disc(struct sock *sk, unsigned char msgflg,
 
 	msg = skb_put(skb, size);
 	*msg++ = msgflg;
-	*(__le16 *)msg = rem;
+	*(__u16 *)msg = rem;
 	msg += 2;
-	*(__le16 *)msg = loc;
+	*(__u16 *)msg = loc;
 	msg += 2;
-	*(__le16 *)msg = dn_htons(reason);
+	*(__u16 *)msg = dn_htons(reason);
 	msg += 2;
 	if (msgflg == NSP_DISCINIT)
 		*msg++ = ddl;
@@ -600,10 +600,10 @@ void dn_nsp_send_disc(struct sock *sk, unsigned char msgflg,
 	int ddl = 0;
 
 	if (msgflg == NSP_DISCINIT)
-		ddl = dn_ntohs(scp->discdata_out.opt_optl);
+		ddl = scp->discdata_out.opt_optl;
 
 	if (reason == 0)
-		reason = dn_ntohs(scp->discdata_out.opt_status);
+		reason = scp->discdata_out.opt_status;
 
 	dn_nsp_do_disc(sk, msgflg, reason, gfp, sk->sk_dst_cache, ddl, 
 		scp->discdata_out.opt_data, scp->addrrem, scp->addrloc);
@@ -708,7 +708,7 @@ void dn_nsp_send_conninit(struct sock *sk, unsigned char msgflg)
 	if (aux > 0)
 	memcpy(skb_put(skb, aux), scp->accessdata.acc_acc, aux);
 
-	aux = (__u8)dn_ntohs(scp->conndata_out.opt_optl);
+	aux = scp->conndata_out.opt_optl;
 	*skb_put(skb, 1) = aux;
 	if (aux > 0)
 	memcpy(skb_put(skb,aux), scp->conndata_out.opt_data, aux);

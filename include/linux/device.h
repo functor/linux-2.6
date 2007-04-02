@@ -200,7 +200,6 @@ extern int class_device_create_file(struct class_device *,
  * @node: for internal use by the driver core only.
  * @kobj: for internal use by the driver core only.
  * @devt_attr: for internal use by the driver core only.
- * @groups: optional additional groups to be created
  * @dev: if set, a symlink to the struct device is created in the sysfs
  * directory for this struct class device.
  * @class_data: pointer to whatever you want to store here for this struct
@@ -229,7 +228,6 @@ struct class_device {
 	struct device		* dev;		/* not necessary, but nice to have */
 	void			* class_data;	/* class-specific data */
 	struct class_device	*parent;	/* parent of this child device, if there is one */
-	struct attribute_group  ** groups;	/* optional groups */
 
 	void	(*release)(struct class_device *dev);
 	int	(*uevent)(struct class_device *dev, char **envp,
@@ -380,7 +378,6 @@ extern void device_bind_driver(struct device * dev);
 extern void device_release_driver(struct device * dev);
 extern int  device_attach(struct device * dev);
 extern void driver_attach(struct device_driver * drv);
-extern void device_reprobe(struct device *dev);
 
 
 /*
@@ -402,7 +399,7 @@ extern struct device * get_device(struct device * dev);
 extern void put_device(struct device * dev);
 
 
-/* drivers/base/power/shutdown.c */
+/* drivers/base/power.c */
 extern void device_shutdown(void);
 
 
@@ -427,8 +424,6 @@ extern void firmware_unregister(struct subsystem *);
 	dev_printk(KERN_INFO , dev , format , ## arg)
 #define dev_warn(dev, format, arg...)		\
 	dev_printk(KERN_WARNING , dev , format , ## arg)
-#define dev_notice(dev, format, arg...)		\
-	dev_printk(KERN_NOTICE , dev , format , ## arg)
 
 /* Create alias, so I can be autoloaded. */
 #define MODULE_ALIAS_CHARDEV(major,minor) \

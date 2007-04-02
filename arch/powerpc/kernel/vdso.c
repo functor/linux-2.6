@@ -1,4 +1,6 @@
 /*
+ *  linux/arch/ppc64/kernel/vdso.c
+ *
  *    Copyright (C) 2004 Benjamin Herrenschmidt, IBM Corp.
  *			 <benh@kernel.crashing.org>
  *
@@ -34,7 +36,6 @@
 #include <asm/machdep.h>
 #include <asm/cputable.h>
 #include <asm/sections.h>
-#include <asm/firmware.h>
 #include <asm/vdso.h>
 #include <asm/vdso_datapage.h>
 
@@ -218,8 +219,7 @@ static struct vm_operations_struct vdso_vmops = {
  * vDSO and insert it into the mm struct tree
  */
 int arch_setup_additional_pages(struct linux_binprm *bprm,
-				int executable_stack, unsigned long start_code,
-				unsigned long interp_map_address)
+				int executable_stack)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
@@ -670,13 +670,7 @@ void __init vdso_init(void)
 	vdso_data->version.major = SYSTEMCFG_MAJOR;
 	vdso_data->version.minor = SYSTEMCFG_MINOR;
 	vdso_data->processor = mfspr(SPRN_PVR);
-	/*
-	 * Fake the old platform number for pSeries and iSeries and add
-	 * in LPAR bit if necessary
-	 */
-	vdso_data->platform = machine_is(iseries) ? 0x200 : 0x100;
-	if (firmware_has_feature(FW_FEATURE_LPAR))
-		vdso_data->platform |= 1;
+	vdso_data->platform = _machine;
 	vdso_data->physicalMemorySize = lmb_phys_mem_size();
 	vdso_data->dcache_size = ppc64_caches.dsize;
 	vdso_data->dcache_line_size = ppc64_caches.dline_size;

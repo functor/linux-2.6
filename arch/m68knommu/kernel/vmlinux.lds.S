@@ -269,11 +269,6 @@ SECTIONS {
 		*(__ksymtab_gpl)
 		__stop___ksymtab_gpl = .;
 
-		/* Kernel symbol table: GPL-future symbols */
-		__start___ksymtab_gpl_future = .;
-		*(__ksymtab_gpl_future)
-		__stop___ksymtab_gpl_future = .;
-
 		/* Kernel symbol table: Normal symbols */
 		__start___kcrctab = .;
 		*(__kcrctab)
@@ -283,11 +278,6 @@ SECTIONS {
 		__start___kcrctab_gpl = .;
 		*(__kcrctab_gpl)
 		__stop___kcrctab_gpl = .;
-
-		/* Kernel symbol table: GPL-future symbols */
-		__start___kcrctab_gpl_future = .;
-		*(__kcrctab_gpl_future)
-		__stop___kcrctab_gpl_future = .;
 
 		/* Kernel symbol table: strings */
 		*(__ksymtab_strings)

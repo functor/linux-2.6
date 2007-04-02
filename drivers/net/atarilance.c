@@ -78,7 +78,7 @@ static int lance_debug = LANCE_DEBUG;
 #else
 static int lance_debug = 1;
 #endif
-module_param(lance_debug, int, 0);
+MODULE_PARM(lance_debug, "i");
 MODULE_PARM_DESC(lance_debug, "atarilance debug level (0-3)");
 MODULE_LICENSE("GPL");
 

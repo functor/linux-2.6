@@ -22,7 +22,6 @@
  *
  */
 #include <linux/config.h>
-#include <linux/mutex.h>
 
 /*
  *  Direct registers
@@ -280,7 +279,7 @@ struct ymf_unit {
 
 	/* soundcore stuff */
 	int dev_audio;
-	struct mutex open_mutex;
+	struct semaphore open_sem;
 
 	struct list_head ymf_devs;
 	struct list_head states;	/* List of states for this unit */

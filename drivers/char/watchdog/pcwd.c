@@ -66,13 +66,15 @@
 #include <linux/fs.h>		/* For file operations */
 #include <linux/ioport.h>	/* For io-port access */
 #include <linux/spinlock.h>	/* For spin_lock/spin_unlock/... */
+#include <linux/sched.h>	/* TASK_INTERRUPTIBLE, set_current_state() and friends */
+#include <linux/slab.h>		/* For kmalloc */
 
 #include <asm/uaccess.h>	/* For copy_to_user/put_user/... */
 #include <asm/io.h>		/* For inb/outb/... */
 
 /* Module and version information */
-#define WATCHDOG_VERSION "1.17"
-#define WATCHDOG_DATE "12 Feb 2006"
+#define WATCHDOG_VERSION "1.16"
+#define WATCHDOG_DATE "03 Jan 2006"
 #define WATCHDOG_DRIVER_NAME "ISA-PC Watchdog"
 #define WATCHDOG_NAME "pcwd"
 #define PFX WATCHDOG_NAME ": "
@@ -94,19 +96,15 @@
  * PCI-PC Watchdog card.
 */
 /* Port 1 : Control Status #1 for the PC Watchdog card, revision A. */
-#define WD_WDRST		0x01	/* Previously reset state */
-#define WD_T110			0x02	/* Temperature overheat sense */
-#define WD_HRTBT		0x04	/* Heartbeat sense */
-#define WD_RLY2			0x08	/* External relay triggered */
-#define WD_SRLY2		0x80	/* Software external relay triggered */
+#define WD_WDRST                0x01	/* Previously reset state */
+#define WD_T110                 0x02	/* Temperature overheat sense */
+#define WD_HRTBT                0x04	/* Heartbeat sense */
+#define WD_RLY2                 0x08	/* External relay triggered */
+#define WD_SRLY2                0x80	/* Software external relay triggered */
 /* Port 1 : Control Status #1 for the PC Watchdog card, revision C. */
-#define WD_REVC_WTRP		0x01	/* Watchdog Trip status */
-#define WD_REVC_HRBT		0x02	/* Watchdog Heartbeat */
-#define WD_REVC_TTRP		0x04	/* Temperature Trip status */
-#define WD_REVC_RL2A		0x08	/* Relay 2 activated by on-board processor */
-#define WD_REVC_RL1A		0x10	/* Relay 1 active */
-#define WD_REVC_R2DS		0x40	/* Relay 2 disable */
-#define WD_REVC_RLY2		0x80	/* Relay 2 activated? */
+#define WD_REVC_WTRP            0x01	/* Watchdog Trip status */
+#define WD_REVC_HRBT            0x02	/* Watchdog Heartbeat */
+#define WD_REVC_TTRP            0x04	/* Temperature Trip status */
 /* Port 2 : Control Status #2 */
 #define WD_WDIS			0x10	/* Watchdog Disabled */
 #define WD_ENTP			0x20	/* Watchdog Enable Temperature Trip */
@@ -124,14 +122,9 @@
 #define CMD_ISA_VERSION_HUNDRETH	0x03
 #define CMD_ISA_VERSION_MINOR		0x04
 #define CMD_ISA_SWITCH_SETTINGS		0x05
-#define CMD_ISA_RESET_PC		0x06
-#define CMD_ISA_ARM_0			0x07
-#define CMD_ISA_ARM_30			0x08
-#define CMD_ISA_ARM_60			0x09
 #define CMD_ISA_DELAY_TIME_2SECS	0x0A
 #define CMD_ISA_DELAY_TIME_4SECS	0x0B
 #define CMD_ISA_DELAY_TIME_8SECS	0x0C
-#define CMD_ISA_RESET_RELAYS		0x0D
 
 /*
  * We are using an kernel timer to do the pinging of the watchdog
@@ -149,7 +142,6 @@ static atomic_t open_allowed = ATOMIC_INIT(1);
 static char expect_close;
 static int temp_panic;
 static struct {				/* this is private data for each ISA-PC watchdog card */
-	char fw_ver_str[6];		/* The cards firmware version */
 	int revision;			/* The card's revision */
 	int supports_temp;		/* Wether or not the card has a temperature device */
 	int command_mode;		/* Wether or not the card is in command mode */
@@ -161,13 +153,6 @@ static struct {				/* this is private data for each ISA-PC watchdog card */
 } pcwd_private;
 
 /* module parameters */
-#define QUIET	0	/* Default */
-#define VERBOSE	1	/* Verbose */
-#define DEBUG	2	/* print fancy stuff too */
-static int debug = QUIET;
-module_param(debug, int, 0);
-MODULE_PARM_DESC(debug, "Debug level: 0=Quiet, 1=Verbose, 2=Debug (default=0)");
-
 #define WATCHDOG_HEARTBEAT 60		/* 60 sec default heartbeat */
 static int heartbeat = WATCHDOG_HEARTBEAT;
 module_param(heartbeat, int, 0);
@@ -187,10 +172,6 @@ static int send_isa_command(int cmd)
 	int control_status;
 	int port0, last_port0;	/* Double read for stabilising */
 
-	if (debug >= DEBUG)
-		printk(KERN_DEBUG PFX "sending following data cmd=0x%02x\n",
-			cmd);
-
 	/* The WCMD bit must be 1 and the command is only 4 bits in size */
 	control_status = (cmd & 0x0F) | WD_WCMD;
 	outb_p(control_status, pcwd_private.io_addr + 2);
@@ -206,10 +187,6 @@ static int send_isa_command(int cmd)
 
 		udelay (250);
 	}
-
-	if (debug >= DEBUG)
-		printk(KERN_DEBUG PFX "received following data for cmd=0x%02x: port0=0x%02x last_port0=0x%02x\n",
-			cmd, port0, last_port0);
 
 	return port0;
 }
@@ -237,10 +214,6 @@ static int set_command_mode(void)
 	spin_unlock(&pcwd_private.io_lock);
 	pcwd_private.command_mode = found;
 
-	if (debug >= DEBUG)
-		printk(KERN_DEBUG PFX "command_mode=%d\n",
-				pcwd_private.command_mode);
-
 	return(found);
 }
 
@@ -253,10 +226,6 @@ static void unset_command_mode(void)
 	spin_unlock(&pcwd_private.io_lock);
 
 	pcwd_private.command_mode = 0;
-
-	if (debug >= DEBUG)
-		printk(KERN_DEBUG PFX "command_mode=%d\n",
-				pcwd_private.command_mode);
 }
 
 static inline void pcwd_check_temperature_support(void)
@@ -265,22 +234,27 @@ static inline void pcwd_check_temperature_support(void)
 		pcwd_private.supports_temp = 1;
 }
 
-static inline void pcwd_get_firmware(void)
+static inline char *get_firmware(void)
 {
 	int one, ten, hund, minor;
+	char *ret;
 
-	strcpy(pcwd_private.fw_ver_str, "ERROR");
+	ret = kmalloc(6, GFP_KERNEL);
+	if(ret == NULL)
+		return NULL;
 
 	if (set_command_mode()) {
 		one = send_isa_command(CMD_ISA_VERSION_INTEGER);
 		ten = send_isa_command(CMD_ISA_VERSION_TENTH);
 		hund = send_isa_command(CMD_ISA_VERSION_HUNDRETH);
 		minor = send_isa_command(CMD_ISA_VERSION_MINOR);
-		sprintf(pcwd_private.fw_ver_str, "%c.%c%c%c", one, ten, hund, minor);
+		sprintf(ret, "%c.%c%c%c", one, ten, hund, minor);
 	}
-	unset_command_mode();
+	else
+		sprintf(ret, "ERROR");
 
-	return;
+	unset_command_mode();
+	return(ret);
 }
 
 static inline int pcwd_get_option_switches(void)
@@ -298,15 +272,17 @@ static inline int pcwd_get_option_switches(void)
 
 static void pcwd_show_card_info(void)
 {
+	char *firmware;
 	int option_switches;
 
 	/* Get some extra info from the hardware (in command/debug/diag mode) */
 	if (pcwd_private.revision == PCWD_REVISION_A)
 		printk(KERN_INFO PFX "ISA-PC Watchdog (REV.A) detected at port 0x%04x\n", pcwd_private.io_addr);
 	else if (pcwd_private.revision == PCWD_REVISION_C) {
-		pcwd_get_firmware();
+		firmware = get_firmware();
 		printk(KERN_INFO PFX "ISA-PC Watchdog (REV.C) detected at port 0x%04x (Firmware version: %s)\n",
-			pcwd_private.io_addr, pcwd_private.fw_ver_str);
+			pcwd_private.io_addr, firmware);
+		kfree(firmware);
 		option_switches = pcwd_get_option_switches();
 		printk(KERN_INFO PFX "Option switches (0x%02x): Temperature Reset Enable=%s, Power On Delay=%s\n",
 			option_switches,
@@ -386,10 +362,6 @@ static int pcwd_start(void)
 			return -EIO;
 		}
 	}
-
-	if (debug >= VERBOSE)
-		printk(KERN_DEBUG PFX "Watchdog started\n");
-
 	return 0;
 }
 
@@ -414,10 +386,6 @@ static int pcwd_stop(void)
 			return -EIO;
 		}
 	}
-
-	if (debug >= VERBOSE)
-		printk(KERN_DEBUG PFX "Watchdog stopped\n");
-
 	return 0;
 }
 
@@ -425,10 +393,6 @@ static int pcwd_keepalive(void)
 {
 	/* user land ping */
 	pcwd_private.next_heartbeat = jiffies + (heartbeat * HZ);
-
-	if (debug >= DEBUG)
-		printk(KERN_DEBUG PFX "Watchdog keepalive signal send\n");
-
 	return 0;
 }
 
@@ -438,17 +402,12 @@ static int pcwd_set_heartbeat(int t)
 		return -EINVAL;
 
 	heartbeat = t;
-
-	if (debug >= VERBOSE)
-		printk(KERN_DEBUG PFX "New heartbeat: %d\n",
-		       heartbeat);
-
 	return 0;
 }
 
 static int pcwd_get_status(int *status)
 {
-	int control_status;
+	int card_status;
 
 	*status=0;
 	spin_lock(&pcwd_private.io_lock);
@@ -456,39 +415,37 @@ static int pcwd_get_status(int *status)
 		/* Rev A cards return status information from
 		 * the base register, which is used for the
 		 * temperature in other cards. */
-		control_status = inb(pcwd_private.io_addr);
+		card_status = inb(pcwd_private.io_addr);
 	else {
 		/* Rev C cards return card status in the base
 		 * address + 1 register. And use different bits
 		 * to indicate a card initiated reset, and an
 		 * over-temperature condition. And the reboot
 		 * status can be reset. */
-		control_status = inb(pcwd_private.io_addr + 1);
+		card_status = inb(pcwd_private.io_addr + 1);
 	}
 	spin_unlock(&pcwd_private.io_lock);
 
 	if (pcwd_private.revision == PCWD_REVISION_A) {
-		if (control_status & WD_WDRST)
+		if (card_status & WD_WDRST)
 			*status |= WDIOF_CARDRESET;
 
-		if (control_status & WD_T110) {
+		if (card_status & WD_T110) {
 			*status |= WDIOF_OVERHEAT;
 			if (temp_panic) {
 				printk (KERN_INFO PFX "Temperature overheat trip!\n");
 				kernel_power_off();
-				/* or should we just do a: panic(PFX "Temperature overheat trip!\n"); */
 			}
 		}
 	} else {
-		if (control_status & WD_REVC_WTRP)
+		if (card_status & WD_REVC_WTRP)
 			*status |= WDIOF_CARDRESET;
 
-		if (control_status & WD_REVC_TTRP) {
+		if (card_status & WD_REVC_TTRP) {
 			*status |= WDIOF_OVERHEAT;
 			if (temp_panic) {
 				printk (KERN_INFO PFX "Temperature overheat trip!\n");
 				kernel_power_off();
-				/* or should we just do a: panic(PFX "Temperature overheat trip!\n"); */
 			}
 		}
 	}
@@ -498,25 +455,9 @@ static int pcwd_get_status(int *status)
 
 static int pcwd_clear_status(void)
 {
-	int control_status;
-
 	if (pcwd_private.revision == PCWD_REVISION_C) {
 		spin_lock(&pcwd_private.io_lock);
-
-		if (debug >= VERBOSE)
-			printk(KERN_INFO PFX "clearing watchdog trip status\n");
-
-		control_status = inb_p(pcwd_private.io_addr + 1);
-
-		if (debug >= DEBUG) {
-			printk(KERN_DEBUG PFX "status was: 0x%02x\n", control_status);
-			printk(KERN_DEBUG PFX "sending: 0x%02x\n",
-				(control_status & WD_REVC_R2DS));
-		}
-
-		/* clear reset status & Keep Relay 2 disable state as it is */
-		outb_p((control_status & WD_REVC_R2DS), pcwd_private.io_addr + 1);
-
+		outb_p(0x00, pcwd_private.io_addr + 1); /* clear reset status */
 		spin_unlock(&pcwd_private.io_lock);
 	}
 	return 0;
@@ -539,11 +480,6 @@ static int pcwd_get_temperature(int *temperature)
 	spin_lock(&pcwd_private.io_lock);
 	*temperature = ((inb(pcwd_private.io_addr)) * 9 / 5) + 32;
 	spin_unlock(&pcwd_private.io_lock);
-
-	if (debug >= DEBUG) {
-		printk(KERN_DEBUG PFX "temperature is: %d F\n",
-			*temperature);
-	}
 
 	return 0;
 }
@@ -663,8 +599,6 @@ static ssize_t pcwd_write(struct file *file, const char __user *buf, size_t len,
 static int pcwd_open(struct inode *inode, struct file *file)
 {
 	if (!atomic_dec_and_test(&open_allowed) ) {
-		if (debug >= VERBOSE)
-			printk(KERN_ERR PFX "Attempt to open already opened device.\n");
 		atomic_inc( &open_allowed );
 		return -EBUSY;
 	}
@@ -988,8 +922,7 @@ static void __exit pcwd_cleanup_module(void)
 {
 	if (pcwd_private.io_addr)
 		pcwatchdog_exit();
-
-	printk(KERN_INFO PFX "Watchdog Module Unloaded.\n");
+	return;
 }
 
 module_init(pcwd_init_module);

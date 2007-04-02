@@ -711,12 +711,6 @@ void __init at91_register_uart(int idx, int port)
 }
 
 #ifdef CONFIG_SERIAL_AT91_CONSOLE
-static void at91_console_putchar(struct uart_port *port, int ch)
-{
-	while (!(UART_GET_CSR(port) & AT91_US_TXRDY))
-		barrier();
-	UART_PUT_CHAR(port, ch);
-}
 
 /*
  * Interrupts are disabled on entering
@@ -724,7 +718,7 @@ static void at91_console_putchar(struct uart_port *port, int ch)
 static void at91_console_write(struct console *co, const char *s, u_int count)
 {
 	struct uart_port *port = at91_ports + co->index;
-	unsigned int status, imr;
+	unsigned int status, i, imr;
 
 	/*
 	 *	First, save IMR and then disable interrupts
@@ -732,7 +726,21 @@ static void at91_console_write(struct console *co, const char *s, u_int count)
 	imr = UART_GET_IMR(port);	/* get interrupt mask */
 	UART_PUT_IDR(port, AT91_US_RXRDY | AT91_US_TXRDY);
 
-	uart_console_write(port, s, count, at91_console_putchar);
+	/*
+	 *	Now, do each character
+	 */
+	for (i = 0; i < count; i++) {
+		do {
+			status = UART_GET_CSR(port);
+		} while (!(status & AT91_US_TXRDY));
+		UART_PUT_CHAR(port, s[i]);
+		if (s[i] == '\n') {
+			do {
+				status = UART_GET_CSR(port);
+			} while (!(status & AT91_US_TXRDY));
+			UART_PUT_CHAR(port, '\r');
+		}
+	}
 
 	/*
 	 *	Finally, wait for transmitter to become empty

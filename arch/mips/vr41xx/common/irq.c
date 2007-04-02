@@ -59,7 +59,7 @@ int cascade_irq(unsigned int irq, int (*get_irq)(unsigned int, struct pt_regs *)
 
 EXPORT_SYMBOL_GPL(cascade_irq);
 
-static void irq_dispatch(unsigned int irq, struct pt_regs *regs)
+asmlinkage void irq_dispatch(unsigned int irq, struct pt_regs *regs)
 {
 	irq_cascade_t *cascade;
 	irq_desc_t *desc;
@@ -84,32 +84,11 @@ static void irq_dispatch(unsigned int irq, struct pt_regs *regs)
 		do_IRQ(irq, regs);
 }
 
-asmlinkage void plat_irq_dispatch(struct pt_regs *regs)
-{
-	unsigned int pending = read_c0_cause() & read_c0_status() & ST0_IM;
-
-	if (pending & CAUSEF_IP7)
-		do_IRQ(7, regs);
-	else if (pending & 0x7800) {
-		if (pending & CAUSEF_IP3)
-			irq_dispatch(3, regs);
-		else if (pending & CAUSEF_IP4)
-			irq_dispatch(4, regs);
-		else if (pending & CAUSEF_IP5)
-			irq_dispatch(5, regs);
-		else if (pending & CAUSEF_IP6)
-			irq_dispatch(6, regs);
-	} else if (pending & CAUSEF_IP2)
-		irq_dispatch(2, regs);
-	else if (pending & CAUSEF_IP0)
-		do_IRQ(0, regs);
-	else if (pending & CAUSEF_IP1)
-		do_IRQ(1, regs);
-	else
-		spurious_interrupt(regs);
-}
+extern asmlinkage void vr41xx_handle_interrupt(void);
 
 void __init arch_init_irq(void)
 {
 	mips_cpu_irq_init(MIPS_CPU_IRQ_BASE);
+
+	set_except_vector(0, vr41xx_handle_interrupt);
 }

@@ -362,7 +362,6 @@ size_t strspn(const char *s, const char *accept)
 EXPORT_SYMBOL(strspn);
 #endif
 
-#ifndef __HAVE_ARCH_STRCSPN
 /**
  * strcspn - Calculate the length of the initial substring of @s which does
  * 	not contain letters in @reject
@@ -385,7 +384,6 @@ size_t strcspn(const char *s, const char *reject)
 	return count;
 }
 EXPORT_SYMBOL(strcspn);
-#endif
 
 #ifndef __HAVE_ARCH_STRPBRK
 /**
@@ -470,7 +468,7 @@ EXPORT_SYMBOL(memset);
 void *memcpy(void *dest, const void *src, size_t count)
 {
 	char *tmp = dest;
-	const char *s = src;
+	char *s = src;
 
 	while (count--)
 		*tmp++ = *s++;

@@ -31,22 +31,21 @@
  *
  * This does not append a newline
  */
-static void putc(int c)
+static void putstr(const char *s)
 {
 	void __iomem *sys = (void __iomem *) AT91_BASE_SYS;	/* physical address */
 
-	while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXRDY))
-		barrier();
-	__raw_writel(c, sys + AT91_DBGU_THR);
-}
-
-static inline void flush(void)
-{
-	void __iomem *sys = (void __iomem *) AT91_BASE_SYS;	/* physical address */
-
+	while (*s) {
+		while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXRDY)) { barrier(); }
+		__raw_writel(*s, sys + AT91_DBGU_THR);
+		if (*s == '\n')	{
+			while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXRDY)) { barrier(); }
+			__raw_writel('\r', sys + AT91_DBGU_THR);
+		}
+		s++;
+	}
 	/* wait for transmission to complete */
-	while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXEMPTY))
-		barrier();
+	while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXEMPTY)) { barrier(); }
 }
 
 #define arch_decomp_setup()

@@ -58,7 +58,6 @@ TODO:
 #include <linux/interrupt.h>
 #include <linux/poll.h>
 #include <linux/wait.h>
-#include <linux/mutex.h>
 
 #include <asm/dma.h>
 #include <asm/page.h>
@@ -327,7 +326,7 @@ typedef struct _rme96xx_info {
 
 		/* waiting and locking */
 		wait_queue_head_t wait;
-		struct mutex  open_mutex;
+		struct semaphore  open_sem;
 		wait_queue_head_t open_wait;
 
 	} dma[RME96xx_MAX_DEVS]; 
@@ -843,7 +842,7 @@ static void busmaster_free(void* ptr,int size) {
 
 static int rme96xx_dmabuf_init(rme96xx_info * s,struct dmabuf* dma,int ioffset,int ooffset) {
 
-	mutex_init(&dma->open_mutex);
+	init_MUTEX(&dma->open_sem);
 	init_waitqueue_head(&dma->open_wait);
 	init_waitqueue_head(&dma->wait);
 	dma->s = s; 
@@ -1470,21 +1469,21 @@ static int rme96xx_open(struct inode *in, struct file *f)
 	dma = &s->dma[devnum];
 	f->private_data = dma;
 	/* wait for device to become free */
-	mutex_lock(&dma->open_mutex);
+	down(&dma->open_sem);
 	while (dma->open_mode & f->f_mode) {
 		if (f->f_flags & O_NONBLOCK) {
-			mutex_unlock(&dma->open_mutex);
+			up(&dma->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&dma->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&dma->open_mutex);
+		up(&dma->open_sem);
 		schedule();
 		remove_wait_queue(&dma->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&dma->open_mutex);
+		down(&dma->open_sem);
 	}
 
 	COMM                ("hardware open")
@@ -1493,7 +1492,7 @@ static int rme96xx_open(struct inode *in, struct file *f)
 
 	dma->open_mode |= (f->f_mode & (FMODE_READ | FMODE_WRITE));
 	dma->opened = 1;
-	mutex_unlock(&dma->open_mutex);
+	up(&dma->open_sem);
 
 	DBG(printk("device num %d open finished\n",devnum));
 	return 0;
@@ -1525,7 +1524,7 @@ static int rme96xx_release(struct inode *in, struct file *file)
 	}
 
 	wake_up(&dma->open_wait);
-	mutex_unlock(&dma->open_mutex);
+	up(&dma->open_sem);
 
 	return 0;
 }

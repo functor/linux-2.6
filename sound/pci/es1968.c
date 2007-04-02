@@ -100,12 +100,9 @@
 #include <linux/interrupt.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/gameport.h>
 #include <linux/moduleparam.h>
-#include <linux/mutex.h>
-
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/mpu401.h>
@@ -572,7 +569,7 @@ struct es1968 {
 	u16 maestro_map[32];
 	int bobclient;		/* active timer instancs */
 	int bob_freq;		/* timer frequency */
-	struct mutex memory_mutex;	/* memory lock */
+	struct semaphore memory_mutex;	/* memory lock */
 
 	/* APU states */
 	unsigned char apu[NR_APUS];
@@ -592,7 +589,7 @@ struct es1968 {
 
 static irqreturn_t snd_es1968_interrupt(int irq, void *dev_id, struct pt_regs *regs);
 
-static struct pci_device_id snd_es1968_ids[] __devinitdata = {
+static struct pci_device_id snd_es1968_ids[] = {
 	/* Maestro 1 */
         { 0x1285, 0x0100, PCI_ANY_ID, PCI_ANY_ID, PCI_CLASS_MULTIMEDIA_AUDIO << 8, 0xffff00, TYPE_MAESTRO },
 	/* Maestro 2 */
@@ -1359,13 +1356,13 @@ static int calc_available_memory_size(struct es1968 *chip)
 	struct list_head *p;
 	int max_size = 0;
 	
-	mutex_lock(&chip->memory_mutex);
+	down(&chip->memory_mutex);
 	list_for_each(p, &chip->buf_list) {
 		struct esm_memory *buf = list_entry(p, struct esm_memory, list);
 		if (buf->empty && buf->buf.bytes > max_size)
 			max_size = buf->buf.bytes;
 	}
-	mutex_unlock(&chip->memory_mutex);
+	up(&chip->memory_mutex);
 	if (max_size >= 128*1024)
 		max_size = 127*1024;
 	return max_size;
@@ -1378,20 +1375,20 @@ static struct esm_memory *snd_es1968_new_memory(struct es1968 *chip, int size)
 	struct list_head *p;
 	
 	size = ((size + ESM_MEM_ALIGN - 1) / ESM_MEM_ALIGN) * ESM_MEM_ALIGN;
-	mutex_lock(&chip->memory_mutex);
+	down(&chip->memory_mutex);
 	list_for_each(p, &chip->buf_list) {
 		buf = list_entry(p, struct esm_memory, list);
 		if (buf->empty && buf->buf.bytes >= size)
 			goto __found;
 	}
-	mutex_unlock(&chip->memory_mutex);
+	up(&chip->memory_mutex);
 	return NULL;
 
 __found:
 	if (buf->buf.bytes > size) {
 		struct esm_memory *chunk = kmalloc(sizeof(*chunk), GFP_KERNEL);
 		if (chunk == NULL) {
-			mutex_unlock(&chip->memory_mutex);
+			up(&chip->memory_mutex);
 			return NULL;
 		}
 		chunk->buf = buf->buf;
@@ -1403,7 +1400,7 @@ __found:
 		list_add(&chunk->list, &buf->list);
 	}
 	buf->empty = 0;
-	mutex_unlock(&chip->memory_mutex);
+	up(&chip->memory_mutex);
 	return buf;
 }
 
@@ -1412,7 +1409,7 @@ static void snd_es1968_free_memory(struct es1968 *chip, struct esm_memory *buf)
 {
 	struct esm_memory *chunk;
 
-	mutex_lock(&chip->memory_mutex);
+	down(&chip->memory_mutex);
 	buf->empty = 1;
 	if (buf->list.prev != &chip->buf_list) {
 		chunk = list_entry(buf->list.prev, struct esm_memory, list);
@@ -1431,7 +1428,7 @@ static void snd_es1968_free_memory(struct es1968 *chip, struct esm_memory *buf)
 			kfree(chunk);
 		}
 	}
-	mutex_unlock(&chip->memory_mutex);
+	up(&chip->memory_mutex);
 }
 
 static void snd_es1968_free_dmabuf(struct es1968 *chip)
@@ -2562,8 +2559,8 @@ static int __devinit snd_es1968_create(struct snd_card *card,
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
 	/* check, if we can restrict PCI DMA transfers to 28 bits */
-	if (pci_set_dma_mask(pci, DMA_28BIT_MASK) < 0 ||
-	    pci_set_consistent_dma_mask(pci, DMA_28BIT_MASK) < 0) {
+	if (pci_set_dma_mask(pci, 0x0fffffff) < 0 ||
+	    pci_set_consistent_dma_mask(pci, 0x0fffffff) < 0) {
 		snd_printk(KERN_ERR "architecture does not support 28bit PCI busmaster DMA\n");
 		pci_disable_device(pci);
 		return -ENXIO;
@@ -2582,7 +2579,7 @@ static int __devinit snd_es1968_create(struct snd_card *card,
 	INIT_LIST_HEAD(&chip->buf_list);
 	INIT_LIST_HEAD(&chip->substream_list);
 	spin_lock_init(&chip->ac97_lock);
-	mutex_init(&chip->memory_mutex);
+	init_MUTEX(&chip->memory_mutex);
 	tasklet_init(&chip->hwvol_tq, es1968_update_hw_volume, (unsigned long)chip);
 	chip->card = card;
 	chip->pci = pci;

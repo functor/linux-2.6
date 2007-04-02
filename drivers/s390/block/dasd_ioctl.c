@@ -16,7 +16,6 @@
 #include <linux/blkpg.h>
 
 #include <asm/ccwdev.h>
-#include <asm/cmb.h>
 #include <asm/uaccess.h>
 
 /* This is ugly... */
@@ -24,12 +23,116 @@
 
 #include "dasd_int.h"
 
+/*
+ * SECTION: ioctl functions.
+ */
+static struct list_head dasd_ioctl_list = LIST_HEAD_INIT(dasd_ioctl_list);
+
+/*
+ * Find the ioctl with number no.
+ */
+static struct dasd_ioctl *
+dasd_find_ioctl(int no)
+{
+	struct dasd_ioctl *ioctl;
+
+	list_for_each_entry (ioctl, &dasd_ioctl_list, list)
+		if (ioctl->no == no)
+			return ioctl;
+	return NULL;
+}
+
+/*
+ * Register ioctl with number no.
+ */
+int
+dasd_ioctl_no_register(struct module *owner, int no, dasd_ioctl_fn_t handler)
+{
+	struct dasd_ioctl *new;
+	if (dasd_find_ioctl(no))
+		return -EBUSY;
+	new = kmalloc(sizeof (struct dasd_ioctl), GFP_KERNEL);
+	if (new == NULL)
+		return -ENOMEM;
+	new->owner = owner;
+	new->no = no;
+	new->handler = handler;
+	list_add(&new->list, &dasd_ioctl_list);
+	return 0;
+}
+
+/*
+ * Deregister ioctl with number no.
+ */
+int
+dasd_ioctl_no_unregister(struct module *owner, int no, dasd_ioctl_fn_t handler)
+{
+	struct dasd_ioctl *old = dasd_find_ioctl(no);
+	if (old == NULL)
+		return -ENOENT;
+	if (old->no != no || old->handler != handler || owner != old->owner)
+		return -EINVAL;
+	list_del(&old->list);
+	kfree(old);
+	return 0;
+}
+
+int
+dasd_ioctl(struct inode *inp, struct file *filp,
+	   unsigned int no, unsigned long data)
+{
+	struct block_device *bdev = inp->i_bdev;
+	struct dasd_device *device = bdev->bd_disk->private_data;
+	struct dasd_ioctl *ioctl;
+	const char *dir;
+	int rc;
+
+	if ((_IOC_DIR(no) != _IOC_NONE) && (data == 0)) {
+		PRINT_DEBUG("empty data ptr");
+		return -EINVAL;
+	}
+	dir = _IOC_DIR (no) == _IOC_NONE ? "0" :
+		_IOC_DIR (no) == _IOC_READ ? "r" :
+		_IOC_DIR (no) == _IOC_WRITE ? "w" : 
+		_IOC_DIR (no) == (_IOC_READ | _IOC_WRITE) ? "rw" : "u";
+	DBF_DEV_EVENT(DBF_DEBUG, device,
+		      "ioctl 0x%08x %s'0x%x'%d(%d) with data %8lx", no,
+		      dir, _IOC_TYPE(no), _IOC_NR(no), _IOC_SIZE(no), data);
+	/* Search for ioctl no in the ioctl list. */
+	list_for_each_entry(ioctl, &dasd_ioctl_list, list) {
+		if (ioctl->no == no) {
+			/* Found a matching ioctl. Call it. */
+			if (!try_module_get(ioctl->owner))
+				continue;
+			rc = ioctl->handler(bdev, no, data);
+			module_put(ioctl->owner);
+			return rc;
+		}
+	}
+	/* No ioctl with number no. */
+	DBF_DEV_EVENT(DBF_INFO, device,
+		      "unknown ioctl 0x%08x=%s'0x%x'%d(%d) data %8lx", no,
+		      dir, _IOC_TYPE(no), _IOC_NR(no), _IOC_SIZE(no), data);
+	return -EINVAL;
+}
+
+long
+dasd_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	int rval;
+
+	lock_kernel();
+	rval = dasd_ioctl(filp->f_dentry->d_inode, filp, cmd, arg);
+	unlock_kernel();
+
+	return (rval == -EINVAL) ? -ENOIOCTLCMD : rval;
+}
 
 static int
-dasd_ioctl_api_version(void __user *argp)
+dasd_ioctl_api_version(struct block_device *bdev, int no, long args)
 {
 	int ver = DASD_API_VERSION;
-	return put_user(ver, (int __user *)argp);
+	return put_user(ver, (int __user *) args);
 }
 
 /*
@@ -37,18 +140,20 @@ dasd_ioctl_api_version(void __user *argp)
  * used by dasdfmt after BIODASDDISABLE to retrigger blocksize detection
  */
 static int
-dasd_ioctl_enable(struct block_device *bdev)
+dasd_ioctl_enable(struct block_device *bdev, int no, long args)
 {
-	struct dasd_device *device = bdev->bd_disk->private_data;
+	struct dasd_device *device;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
 	dasd_enable_device(device);
 	/* Formatting the dasd device can change the capacity. */
-	mutex_lock(&bdev->bd_mutex);
+	down(&bdev->bd_sem);
 	i_size_write(bdev->bd_inode, (loff_t)get_capacity(device->gdp) << 9);
-	mutex_unlock(&bdev->bd_mutex);
+	up(&bdev->bd_sem);
 	return 0;
 }
 
@@ -57,13 +162,15 @@ dasd_ioctl_enable(struct block_device *bdev)
  * Used by dasdfmt. Disable I/O operations but allow ioctls.
  */
 static int
-dasd_ioctl_disable(struct block_device *bdev)
+dasd_ioctl_disable(struct block_device *bdev, int no, long args)
 {
-	struct dasd_device *device = bdev->bd_disk->private_data;
+	struct dasd_device *device;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
 	/*
 	 * Man this is sick. We don't do a real disable but only downgrade
 	 * the device to DASD_STATE_BASIC. The reason is that dasdfmt uses
@@ -77,9 +184,9 @@ dasd_ioctl_disable(struct block_device *bdev)
 	 * Set i_size to zero, since read, write, etc. check against this
 	 * value.
 	 */
-	mutex_lock(&bdev->bd_mutex);
+	down(&bdev->bd_sem);
 	i_size_write(bdev->bd_inode, 0);
-	mutex_unlock(&bdev->bd_mutex);
+	up(&bdev->bd_sem);
 	return 0;
 }
 
@@ -87,12 +194,17 @@ dasd_ioctl_disable(struct block_device *bdev)
  * Quiesce device.
  */
 static int
-dasd_ioctl_quiesce(struct dasd_device *device)
+dasd_ioctl_quiesce(struct block_device *bdev, int no, long args)
 {
+	struct dasd_device *device;
 	unsigned long flags;
 	
 	if (!capable (CAP_SYS_ADMIN))
 		return -EACCES;
+	
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
 	
 	DEV_MESSAGE (KERN_DEBUG, device, "%s",
 		     "Quiesce IO on device");
@@ -107,12 +219,17 @@ dasd_ioctl_quiesce(struct dasd_device *device)
  * Quiesce device.
  */
 static int
-dasd_ioctl_resume(struct dasd_device *device)
+dasd_ioctl_resume(struct block_device *bdev, int no, long args)
 {
+	struct dasd_device *device;
 	unsigned long flags;
 	
 	if (!capable (CAP_SYS_ADMIN)) 
 		return -EACCES;
+
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
 
 	DEV_MESSAGE (KERN_DEBUG, device, "%s",
 		     "resume IO on device");
@@ -185,19 +302,25 @@ dasd_format(struct dasd_device * device, struct format_data_t * fdata)
  * Format device.
  */
 static int
-dasd_ioctl_format(struct block_device *bdev, void __user *argp)
+dasd_ioctl_format(struct block_device *bdev, int no, long args)
 {
-	struct dasd_device *device = bdev->bd_disk->private_data;
+	struct dasd_device *device;
 	struct format_data_t fdata;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-	if (!argp)
+	if (!args)
 		return -EINVAL;
+	/* fdata == NULL is no longer a valid arg to dasd_format ! */
+	device = bdev->bd_disk->private_data;
+
+	if (device == NULL)
+		return -ENODEV;
 
 	if (device->features & DASD_FEATURE_READONLY)
 		return -EROFS;
-	if (copy_from_user(&fdata, argp, sizeof(struct format_data_t)))
+	if (copy_from_user(&fdata, (void __user *) args,
+			   sizeof (struct format_data_t)))
 		return -EFAULT;
 	if (bdev != bdev->bd_contains) {
 		DEV_MESSAGE(KERN_WARNING, device, "%s",
@@ -212,8 +335,17 @@ dasd_ioctl_format(struct block_device *bdev, void __user *argp)
  * Reset device profile information
  */
 static int
-dasd_ioctl_reset_profile(struct dasd_device *device)
+dasd_ioctl_reset_profile(struct block_device *bdev, int no, long args)
 {
+	struct dasd_device *device;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
+
 	memset(&device->profile, 0, sizeof (struct dasd_profile_info_t));
 	return 0;
 }
@@ -222,24 +354,31 @@ dasd_ioctl_reset_profile(struct dasd_device *device)
  * Return device profile information
  */
 static int
-dasd_ioctl_read_profile(struct dasd_device *device, void __user *argp)
+dasd_ioctl_read_profile(struct block_device *bdev, int no, long args)
 {
+	struct dasd_device *device;
+
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
+
 	if (dasd_profile_level == DASD_PROFILE_OFF)
 		return -EIO;
-	if (copy_to_user(argp, &device->profile,
+
+	if (copy_to_user((long __user *) args, (long *) &device->profile,
 			 sizeof (struct dasd_profile_info_t)))
 		return -EFAULT;
 	return 0;
 }
 #else
 static int
-dasd_ioctl_reset_profile(struct dasd_device *device)
+dasd_ioctl_reset_profile(struct block_device *bdev, int no, long args)
 {
 	return -ENOSYS;
 }
 
 static int
-dasd_ioctl_read_profile(struct dasd_device *device, void __user *argp)
+dasd_ioctl_read_profile(struct block_device *bdev, int no, long args)
 {
 	return -ENOSYS;
 }
@@ -249,18 +388,22 @@ dasd_ioctl_read_profile(struct dasd_device *device, void __user *argp)
  * Return dasd information. Used for BIODASDINFO and BIODASDINFO2.
  */
 static int
-dasd_ioctl_information(struct dasd_device *device,
-		unsigned int cmd, void __user *argp)
+dasd_ioctl_information(struct block_device *bdev, int no, long args)
 {
+	struct dasd_device *device;
 	struct dasd_information2_t *dasd_info;
 	unsigned long flags;
 	int rc;
 	struct ccw_device *cdev;
 
+	device = bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
+
 	if (!device->discipline->fill_info)
 		return -EINVAL;
 
-	dasd_info = kzalloc(sizeof(struct dasd_information2_t), GFP_KERNEL);
+	dasd_info = kmalloc(sizeof(struct dasd_information2_t), GFP_KERNEL);
 	if (dasd_info == NULL)
 		return -ENOMEM;
 
@@ -303,7 +446,8 @@ dasd_ioctl_information(struct dasd_device *device,
 		memcpy(dasd_info->type, device->discipline->name, 4);
 	else
 		memcpy(dasd_info->type, "none", 4);
-
+	dasd_info->req_queue_len = 0;
+	dasd_info->chanq_len = 0;
 	if (device->request_queue->request_fn) {
 		struct list_head *l;
 #ifdef DASD_EXTENDED_PROFILING
@@ -323,8 +467,8 @@ dasd_ioctl_information(struct dasd_device *device,
 	}
 
 	rc = 0;
-	if (copy_to_user(argp, dasd_info,
-			 ((cmd == (unsigned int) BIODASDINFO2) ?
+	if (copy_to_user((long __user *) args, (long *) dasd_info,
+			 ((no == (unsigned int) BIODASDINFO2) ?
 			  sizeof (struct dasd_information2_t) :
 			  sizeof (struct dasd_information_t))))
 		rc = -EFAULT;
@@ -336,103 +480,69 @@ dasd_ioctl_information(struct dasd_device *device,
  * Set read only
  */
 static int
-dasd_ioctl_set_ro(struct block_device *bdev, void __user *argp)
+dasd_ioctl_set_ro(struct block_device *bdev, int no, long args)
 {
-	struct dasd_device *device =  bdev->bd_disk->private_data;
-	int intval;
+	struct dasd_device *device;
+	int intval, rc;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 	if (bdev != bdev->bd_contains)
 		// ro setting is not allowed for partitions
 		return -EINVAL;
-	if (get_user(intval, (int *)argp))
+	if (get_user(intval, (int __user *) args))
 		return -EFAULT;
+	device =  bdev->bd_disk->private_data;
+	if (device == NULL)
+		return -ENODEV;
 
 	set_disk_ro(bdev->bd_disk, intval);
-	return dasd_set_feature(device->cdev, DASD_FEATURE_READONLY, intval);
+	rc = dasd_set_feature(device->cdev, DASD_FEATURE_READONLY, intval);
+
+	return rc;
 }
 
-static int
-dasd_ioctl_readall_cmb(struct dasd_device *device, unsigned int cmd,
-		unsigned long arg)
+/*
+ * List of static ioctls.
+ */
+static struct { int no; dasd_ioctl_fn_t fn; } dasd_ioctls[] =
 {
-	struct cmbdata __user *argp = (void __user *) arg;
-	size_t size = _IOC_SIZE(cmd);
-	struct cmbdata data;
-	int ret;
-
-	ret = cmf_readall(device->cdev, &data);
-	if (!ret && copy_to_user(argp, &data, min(size, sizeof(*argp))))
-		return -EFAULT;
-	return ret;
-}
+	{ BIODASDDISABLE, dasd_ioctl_disable },
+	{ BIODASDENABLE, dasd_ioctl_enable },
+	{ BIODASDQUIESCE, dasd_ioctl_quiesce },
+	{ BIODASDRESUME, dasd_ioctl_resume },
+	{ BIODASDFMT, dasd_ioctl_format },
+	{ BIODASDINFO, dasd_ioctl_information },
+	{ BIODASDINFO2, dasd_ioctl_information },
+	{ BIODASDPRRD, dasd_ioctl_read_profile },
+	{ BIODASDPRRST, dasd_ioctl_reset_profile },
+	{ BLKROSET, dasd_ioctl_set_ro },
+	{ DASDAPIVER, dasd_ioctl_api_version },
+	{ -1, NULL }
+};
 
 int
-dasd_ioctl(struct inode *inode, struct file *file,
-	   unsigned int cmd, unsigned long arg)
+dasd_ioctl_init(void)
 {
-	struct block_device *bdev = inode->i_bdev;
-	struct dasd_device *device = bdev->bd_disk->private_data;
-	void __user *argp = (void __user *)arg;
+	int i;
 
-	if (!device)
-                return -ENODEV;
+	for (i = 0; dasd_ioctls[i].no != -1; i++)
+		dasd_ioctl_no_register(NULL, dasd_ioctls[i].no,
+				       dasd_ioctls[i].fn);
+	return 0;
 
-	if ((_IOC_DIR(cmd) != _IOC_NONE) && !arg) {
-		PRINT_DEBUG("empty data ptr");
-		return -EINVAL;
-	}
-
-	switch (cmd) {
-	case BIODASDDISABLE:
-		return dasd_ioctl_disable(bdev);
-	case BIODASDENABLE:
-		return dasd_ioctl_enable(bdev);
-	case BIODASDQUIESCE:
-		return dasd_ioctl_quiesce(device);
-	case BIODASDRESUME:
-		return dasd_ioctl_resume(device);
-	case BIODASDFMT:
-		return dasd_ioctl_format(bdev, argp);
-	case BIODASDINFO:
-		return dasd_ioctl_information(device, cmd, argp);
-	case BIODASDINFO2:
-		return dasd_ioctl_information(device, cmd, argp);
-	case BIODASDPRRD:
-		return dasd_ioctl_read_profile(device, argp);
-	case BIODASDPRRST:
-		return dasd_ioctl_reset_profile(device);
-	case BLKROSET:
-		return dasd_ioctl_set_ro(bdev, argp);
-	case DASDAPIVER:
-		return dasd_ioctl_api_version(argp);
-	case BIODASDCMFENABLE:
-		return enable_cmf(device->cdev);
-	case BIODASDCMFDISABLE:
-		return disable_cmf(device->cdev);
-	case BIODASDREADALLCMB:
-		return dasd_ioctl_readall_cmb(device, cmd, arg);
-	default:
-		/* if the discipline has an ioctl method try it. */
-		if (device->discipline->ioctl) {
-			int rval = device->discipline->ioctl(device, cmd, argp);
-			if (rval != -ENOIOCTLCMD)
-				return rval;
-		}
-
-		return -EINVAL;
-	}
 }
 
-long
-dasd_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+void
+dasd_ioctl_exit(void)
 {
-	int rval;
+	int i;
 
-	lock_kernel();
-	rval = dasd_ioctl(filp->f_dentry->d_inode, filp, cmd, arg);
-	unlock_kernel();
+	for (i = 0; dasd_ioctls[i].no != -1; i++)
+		dasd_ioctl_no_unregister(NULL, dasd_ioctls[i].no,
+					 dasd_ioctls[i].fn);
 
-	return (rval == -EINVAL) ? -ENOIOCTLCMD : rval;
 }
+
+EXPORT_SYMBOL(dasd_ioctl_no_register);
+EXPORT_SYMBOL(dasd_ioctl_no_unregister);

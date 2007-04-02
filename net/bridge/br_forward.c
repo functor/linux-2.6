@@ -16,7 +16,6 @@
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
-#include <linux/if_vlan.h>
 #include <linux/netfilter_bridge.h>
 #include "br_private.h"
 
@@ -30,15 +29,10 @@ static inline int should_deliver(const struct net_bridge_port *p,
 	return 1;
 }
 
-static inline unsigned packet_length(const struct sk_buff *skb)
-{
-	return skb->len - (skb->protocol == htons(ETH_P_8021Q) ? VLAN_HLEN : 0);
-}
-
 int br_dev_queue_push_xmit(struct sk_buff *skb)
 {
 	/* drop mtu oversized packets except tso */
-	if (skb->len > skb->dev->mtu && !skb_is_gso(skb))
+	if (skb->len > skb->dev->mtu && !skb_shinfo(skb)->tso_size)
 		kfree_skb(skb);
 	else {
 #ifdef CONFIG_BRIDGE_NETFILTER

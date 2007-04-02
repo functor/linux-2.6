@@ -25,10 +25,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
-#include <linux/dma-mapping.h>
 #include <linux/moduleparam.h>
-#include <linux/mutex.h>
-
 #include <sound/core.h>
 #include <sound/initval.h>
 #include <sound/info.h>
@@ -61,7 +58,7 @@ MODULE_PARM_DESC(enable, "Enable Digigram " CARD_NAME " soundcard.");
 /*
  */
 
-static struct pci_device_id snd_mixart_ids[] __devinitdata = {
+static struct pci_device_id snd_mixart_ids[] = {
 	{ 0x1057, 0x0003, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0, }, /* MC8240 */
 	{ 0, }
 };
@@ -592,7 +589,7 @@ static int snd_mixart_hw_params(struct snd_pcm_substream *subs,
 	/*  set up format for the stream */
 	format = params_format(hw);
 
-	mutex_lock(&mgr->setup_mutex);
+	down(&mgr->setup_mutex);
 
 	/* update the stream levels */
 	if( stream->pcm_number <= MIXART_PCM_DIGITAL ) {
@@ -631,7 +628,7 @@ static int snd_mixart_hw_params(struct snd_pcm_substream *subs,
 				bufferinfo[i].available_length,
 				subs->number);
 	}
-	mutex_unlock(&mgr->setup_mutex);
+	up(&mgr->setup_mutex);
 
 	return err;
 }
@@ -703,7 +700,7 @@ static int snd_mixart_playback_open(struct snd_pcm_substream *subs)
 	int err = 0;
 	int pcm_number;
 
-	mutex_lock(&mgr->setup_mutex);
+	down(&mgr->setup_mutex);
 
 	if ( pcm == chip->pcm ) {
 		pcm_number = MIXART_PCM_ANALOG;
@@ -761,7 +758,7 @@ static int snd_mixart_playback_open(struct snd_pcm_substream *subs)
 	}
 
  _exit_open:
-	mutex_unlock(&mgr->setup_mutex);
+	up(&mgr->setup_mutex);
 
 	return err;
 }
@@ -778,7 +775,7 @@ static int snd_mixart_capture_open(struct snd_pcm_substream *subs)
 	int err = 0;
 	int pcm_number;
 
-	mutex_lock(&mgr->setup_mutex);
+	down(&mgr->setup_mutex);
 
 	if ( pcm == chip->pcm ) {
 		pcm_number = MIXART_PCM_ANALOG;
@@ -839,7 +836,7 @@ static int snd_mixart_capture_open(struct snd_pcm_substream *subs)
 	}
 
  _exit_open:
-	mutex_unlock(&mgr->setup_mutex);
+	up(&mgr->setup_mutex);
 
 	return err;
 }
@@ -852,7 +849,7 @@ static int snd_mixart_close(struct snd_pcm_substream *subs)
 	struct mixart_mgr *mgr = chip->mgr;
 	struct mixart_stream *stream = subs->runtime->private_data;
 
-	mutex_lock(&mgr->setup_mutex);
+	down(&mgr->setup_mutex);
 
 	snd_printdd("snd_mixart_close C%d/P%d/Sub%d\n", chip->chip_idx, stream->pcm_number, subs->number);
 
@@ -871,7 +868,7 @@ static int snd_mixart_close(struct snd_pcm_substream *subs)
 	stream->status    = MIXART_STREAM_STATUS_FREE;
 	stream->substream = NULL;
 
-	mutex_unlock(&mgr->setup_mutex);
+	up(&mgr->setup_mutex);
 	return 0;
 }
 
@@ -1291,7 +1288,7 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 	pci_set_master(pci);
 
 	/* check if we can restrict PCI DMA transfers to 32 bits */
-	if (pci_set_dma_mask(pci, DMA_32BIT_MASK) < 0) {
+	if (pci_set_dma_mask(pci, 0xffffffff) < 0) {
 		snd_printk(KERN_ERR "architecture does not support 32bit PCI busmaster DMA\n");
 		pci_disable_device(pci);
 		return -ENXIO;
@@ -1338,12 +1335,12 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 	mgr->msg_fifo_writeptr = 0;
 
 	spin_lock_init(&mgr->msg_lock);
-	mutex_init(&mgr->msg_mutex);
+	init_MUTEX(&mgr->msg_mutex);
 	init_waitqueue_head(&mgr->msg_sleep);
 	atomic_set(&mgr->msg_processed, 0);
 
 	/* init setup mutex*/
-	mutex_init(&mgr->setup_mutex);
+	init_MUTEX(&mgr->setup_mutex);
 
 	/* init message taslket */
 	tasklet_init(&mgr->msg_taskq, snd_mixart_msg_tasklet, (unsigned long) mgr);

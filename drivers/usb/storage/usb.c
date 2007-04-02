@@ -55,7 +55,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/kthread.h>
-#include <linux/mutex.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
@@ -189,7 +188,7 @@ static int storage_suspend(struct usb_interface *iface, pm_message_t message)
 	struct us_data *us = usb_get_intfdata(iface);
 
 	/* Wait until no command is running */
-	mutex_lock(&us->dev_mutex);
+	down(&us->dev_semaphore);
 
 	US_DEBUGP("%s\n", __FUNCTION__);
 	if (us->suspend_resume_hook)
@@ -199,7 +198,7 @@ static int storage_suspend(struct usb_interface *iface, pm_message_t message)
 	/* When runtime PM is working, we'll set a flag to indicate
 	 * whether we should autoresume when a SCSI request arrives. */
 
-	mutex_unlock(&us->dev_mutex);
+	up(&us->dev_semaphore);
 	return 0;
 }
 
@@ -207,14 +206,14 @@ static int storage_resume(struct usb_interface *iface)
 {
 	struct us_data *us = usb_get_intfdata(iface);
 
-	mutex_lock(&us->dev_mutex);
+	down(&us->dev_semaphore);
 
 	US_DEBUGP("%s\n", __FUNCTION__);
 	if (us->suspend_resume_hook)
 		(us->suspend_resume_hook)(us, US_RESUME);
 	iface->dev.power.power_state.event = PM_EVENT_ON;
 
-	mutex_unlock(&us->dev_mutex);
+	up(&us->dev_semaphore);
 	return 0;
 }
 
@@ -277,12 +276,12 @@ static int usb_stor_control_thread(void * __us)
 		US_DEBUGP("*** thread awakened.\n");
 
 		/* lock the device pointers */
-		mutex_lock(&(us->dev_mutex));
+		down(&(us->dev_semaphore));
 
 		/* if the device has disconnected, we are free to exit */
 		if (test_bit(US_FLIDX_DISCONNECTING, &us->flags)) {
 			US_DEBUGP("-- exiting\n");
-			mutex_unlock(&us->dev_mutex);
+			up(&(us->dev_semaphore));
 			break;
 		}
 
@@ -371,7 +370,7 @@ SkipForAbort:
 		scsi_unlock(host);
 
 		/* unlock the device pointers */
-		mutex_unlock(&us->dev_mutex);
+		up(&(us->dev_semaphore));
 	} /* for (;;) */
 
 	scsi_host_put(host);
@@ -593,15 +592,6 @@ static int get_transport(struct us_data *us)
 		break;
 #endif
 
-#ifdef CONFIG_USB_STORAGE_ALAUDA
-	case US_PR_ALAUDA:
-		us->transport_name  = "Alauda Control/Bulk";
-		us->transport = alauda_transport;
-		us->transport_reset = usb_stor_Bulk_reset;
-		us->max_lun = 1;
-		break;
-#endif
-
 	default:
 		return -EIO;
 	}
@@ -654,6 +644,15 @@ static int get_protocol(struct us_data *us)
 	case US_SC_ISD200:
 		us->protocol_name = "ISD200 ATA/ATAPI";
 		us->proto_handler = isd200_ata_command;
+		break;
+#endif
+
+#ifdef CONFIG_USB_STORAGE_ALAUDA
+	case US_PR_ALAUDA:
+		us->transport_name  = "Alauda Control/Bulk";
+		us->transport = alauda_transport;
+		us->transport_reset = usb_stor_Bulk_reset;
+		us->max_lun = 1;
 		break;
 #endif
 
@@ -816,8 +815,8 @@ static void quiesce_and_remove_host(struct us_data *us)
 	 * The thread will exit when it sees the DISCONNECTING flag. */
 
 	/* Wait for the current command to finish, then remove the host */
-	mutex_lock(&us->dev_mutex);
-	mutex_unlock(&us->dev_mutex);
+	down(&us->dev_semaphore);
+	up(&us->dev_semaphore);
 
 	/* queuecommand won't accept any new commands and the control
 	 * thread won't execute a previously-queued command.  If there
@@ -871,9 +870,9 @@ retry:
 		/* For bulk-only devices, determine the max LUN value */
 		if (us->protocol == US_PR_BULK &&
 				!(us->flags & US_FL_SINGLE_LUN)) {
-			mutex_lock(&us->dev_mutex);
+			down(&us->dev_semaphore);
 			us->max_lun = usb_stor_Bulk_max_lun(us);
-			mutex_unlock(&us->dev_mutex);
+			up(&us->dev_semaphore);
 		}
 		scsi_scan_host(us_to_host(us));
 		printk(KERN_DEBUG "usb-storage: device scan complete\n");
@@ -913,7 +912,7 @@ static int storage_probe(struct usb_interface *intf,
 
 	us = host_to_us(host);
 	memset(us, 0, sizeof(struct us_data));
-	mutex_init(&(us->dev_mutex));
+	init_MUTEX(&(us->dev_semaphore));
 	init_MUTEX_LOCKED(&(us->sema));
 	init_completion(&(us->notify));
 	init_waitqueue_head(&us->delay_wait);

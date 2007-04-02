@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/prpmc750_setup.c
+ *
  * Board setup routines for Motorola PrPMC750
  *
  * Author: Matt Porter <mporter@mvista.com>

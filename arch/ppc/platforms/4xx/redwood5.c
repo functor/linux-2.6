@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/redwood5.c
+ *
  * Support for the IBM redwood5 eval board file
  *
  * Author: Armin Kuster <akuster@mvista.com>

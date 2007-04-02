@@ -20,7 +20,6 @@
 #include <linux/config.h>
 #include <linux/threads.h>
 #include <asm/percpu.h>
-#include <linux/cpumask.h>
 
 /* flag for disabling the tsc */
 extern int tsc_disable;
@@ -68,9 +67,6 @@ struct cpuinfo_x86 {
 	char	pad0;
 	int	x86_power;
 	unsigned long loops_per_jiffy;
-#ifdef CONFIG_SMP
-	cpumask_t llc_shared_map;	/* cpus sharing the last level cache */
-#endif
 	unsigned char x86_max_cores;	/* cpuid returned max cores value */
 	unsigned char booted_cores;	/* number of cores as seen by OS */
 	unsigned char apicid;
@@ -107,7 +103,6 @@ extern struct cpuinfo_x86 cpu_data[];
 
 extern	int phys_proc_id[NR_CPUS];
 extern	int cpu_core_id[NR_CPUS];
-extern	int cpu_llc_id[NR_CPUS];
 extern char ignore_fpu_irq;
 
 extern void identify_cpu(struct cpuinfo_x86 *);
@@ -321,17 +316,15 @@ extern unsigned int mca_pentium_flag;
 extern int bootloader_type;
 
 /*
- * User space process size: 3GB (default).
+ * User space process size: (3GB default).
  */
-#define TASK_SIZE	(PAGE_OFFSET)
+#define __TASK_SIZE		(__PAGE_OFFSET)
+#define TASK_SIZE		((unsigned long)__TASK_SIZE)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
-#define TASK_UNMAPPED_BASE	PAGE_ALIGN(TASK_SIZE/3)
-
-#define __HAVE_ARCH_ALIGN_STACK
-extern unsigned long arch_align_stack(unsigned long sp);
+#define TASK_UNMAPPED_BASE	(PAGE_ALIGN(TASK_SIZE / 3))
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
@@ -513,9 +506,6 @@ static inline void load_esp0(struct tss_struct *tss, struct thread_struct *threa
 	regs->xcs = __USER_CS;					\
 	regs->eip = new_eip;					\
 	regs->esp = new_esp;					\
-	preempt_disable();					\
-	load_user_cs_desc(smp_processor_id(), current->mm);	\
-	preempt_enable();					\
 } while (0)
 
 /*
@@ -627,6 +617,8 @@ struct extended_sigtable {
 	unsigned int reserved[3];
 	struct extended_signature sigs[0];
 };
+/* '6' because it used to be for P6 only (but now covers Pentium 4 as well) */
+#define MICROCODE_IOCFREE	_IO('6',0)
 
 /* REP NOP (PAUSE) is a good thing to insert into busy-wait loops. */
 static inline void rep_nop(void)

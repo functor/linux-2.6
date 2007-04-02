@@ -49,7 +49,7 @@ extern int ncp_symlink(struct inode *, struct dentry *, const char *);
 #define ncp_symlink NULL
 #endif
 		      
-const struct file_operations ncp_dir_operations =
+struct file_operations ncp_dir_operations =
 {
 	.read		= generic_read_dir,
 	.readdir	= ncp_readdir,

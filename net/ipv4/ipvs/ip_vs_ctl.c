@@ -34,7 +34,6 @@
 
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
-#include <linux/mutex.h>
 
 #include <net/ip.h>
 #include <net/route.h>
@@ -45,7 +44,7 @@
 #include <net/ip_vs.h>
 
 /* semaphore for IPVS sockopts. And, [gs]etsockopt may sleep. */
-static DEFINE_MUTEX(__ip_vs_mutex);
+static DECLARE_MUTEX(__ip_vs_mutex);
 
 /* lock for service table */
 static DEFINE_RWLOCK(__ip_vs_svc_lock);
@@ -1951,7 +1950,7 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 	/* increase the module use count */
 	ip_vs_use_count_inc();
 
-	if (mutex_lock_interruptible(&__ip_vs_mutex)) {
+	if (down_interruptible(&__ip_vs_mutex)) {
 		ret = -ERESTARTSYS;
 		goto out_dec;
 	}
@@ -2042,7 +2041,7 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		ip_vs_service_put(svc);
 
   out_unlock:
-	mutex_unlock(&__ip_vs_mutex);
+	up(&__ip_vs_mutex);
   out_dec:
 	/* decrease the module use count */
 	ip_vs_use_count_dec();
@@ -2212,7 +2211,7 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	if (copy_from_user(arg, user, get_arglen[GET_CMDID(cmd)]) != 0)
 		return -EFAULT;
 
-	if (mutex_lock_interruptible(&__ip_vs_mutex))
+	if (down_interruptible(&__ip_vs_mutex))
 		return -ERESTARTSYS;
 
 	switch (cmd) {
@@ -2331,7 +2330,7 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	}
 
   out:
-	mutex_unlock(&__ip_vs_mutex);
+	up(&__ip_vs_mutex);
 	return ret;
 }
 

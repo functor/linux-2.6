@@ -141,21 +141,19 @@ static unsigned int ipv4_conntrack_help(unsigned int hooknum,
 {
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
-	struct nf_conn_help *help;
 
 	/* This is where we call the helper: as the packet goes out. */
 	ct = nf_ct_get(*pskb, &ctinfo);
-	if (!ct)
-		return NF_ACCEPT;
-
-	help = nfct_help(ct);
-	if (!help || !help->helper)
-		return NF_ACCEPT;
-
-	return help->helper->help(pskb,
-			       (*pskb)->nh.raw - (*pskb)->data
-					       + (*pskb)->nh.iph->ihl*4,
-			       ct, ctinfo);
+	if (ct && ct->helper) {
+		unsigned int ret;
+		ret = ct->helper->help(pskb,
+				       (*pskb)->nh.raw - (*pskb)->data
+						       + (*pskb)->nh.iph->ihl*4,
+				       ct, ctinfo);
+		if (ret != NF_ACCEPT)
+			return ret;
+	}
+	return NF_ACCEPT;
 }
 
 static unsigned int ipv4_conntrack_defrag(unsigned int hooknum,
@@ -210,63 +208,71 @@ static unsigned int ipv4_conntrack_local(unsigned int hooknum,
 
 /* Connection tracking may drop packets, but never alters them, so
    make it the first hook. */
-static struct nf_hook_ops ipv4_conntrack_ops[] = {
-	{
-		.hook		= ipv4_conntrack_defrag,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_PRE_ROUTING,
-		.priority	= NF_IP_PRI_CONNTRACK_DEFRAG,
-	},
-	{
-		.hook		= ipv4_conntrack_in,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_PRE_ROUTING,
-		.priority	= NF_IP_PRI_CONNTRACK,
-	},
-	{
-		.hook           = ipv4_conntrack_defrag,
-		.owner          = THIS_MODULE,
-		.pf             = PF_INET,
-		.hooknum        = NF_IP_LOCAL_OUT,
-		.priority       = NF_IP_PRI_CONNTRACK_DEFRAG,
-	},
-	{
-		.hook		= ipv4_conntrack_local,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_LOCAL_OUT,
-		.priority	= NF_IP_PRI_CONNTRACK,
-	},
-	{
-		.hook		= ipv4_conntrack_help,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_POST_ROUTING,
-		.priority	= NF_IP_PRI_CONNTRACK_HELPER,
-	},
-	{
-		.hook		= ipv4_conntrack_help,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_LOCAL_IN,
-		.priority	= NF_IP_PRI_CONNTRACK_HELPER,
-	},
-	{
-		.hook		= ipv4_confirm,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_POST_ROUTING,
-		.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
-	},
-	{
-		.hook		= ipv4_confirm,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_LOCAL_IN,
-		.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
-	},
+static struct nf_hook_ops ipv4_conntrack_defrag_ops = {
+	.hook		= ipv4_conntrack_defrag,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_PRE_ROUTING,
+	.priority	= NF_IP_PRI_CONNTRACK_DEFRAG,
+};
+
+static struct nf_hook_ops ipv4_conntrack_in_ops = {
+	.hook		= ipv4_conntrack_in,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_PRE_ROUTING,
+	.priority	= NF_IP_PRI_CONNTRACK,
+};
+
+static struct nf_hook_ops ipv4_conntrack_defrag_local_out_ops = {
+	.hook           = ipv4_conntrack_defrag,
+	.owner          = THIS_MODULE,
+	.pf             = PF_INET,
+	.hooknum        = NF_IP_LOCAL_OUT,
+	.priority       = NF_IP_PRI_CONNTRACK_DEFRAG,
+};
+
+static struct nf_hook_ops ipv4_conntrack_local_out_ops = {
+	.hook		= ipv4_conntrack_local,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_LOCAL_OUT,
+	.priority	= NF_IP_PRI_CONNTRACK,
+};
+
+/* helpers */
+static struct nf_hook_ops ipv4_conntrack_helper_out_ops = {
+	.hook		= ipv4_conntrack_help,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_POST_ROUTING,
+	.priority	= NF_IP_PRI_CONNTRACK_HELPER,
+};
+
+static struct nf_hook_ops ipv4_conntrack_helper_in_ops = {
+	.hook		= ipv4_conntrack_help,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_LOCAL_IN,
+	.priority	= NF_IP_PRI_CONNTRACK_HELPER,
+};
+
+
+/* Refragmenter; last chance. */
+static struct nf_hook_ops ipv4_conntrack_out_ops = {
+	.hook		= ipv4_confirm,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_POST_ROUTING,
+	.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
+};
+
+static struct nf_hook_ops ipv4_conntrack_local_in_ops = {
+	.hook		= ipv4_confirm,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_LOCAL_IN,
+	.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
 };
 
 #ifdef CONFIG_SYSCTL
@@ -433,20 +439,16 @@ struct nf_conntrack_l3proto nf_conntrack_l3proto_ipv4 = {
 extern struct nf_conntrack_protocol nf_conntrack_protocol_tcp4;
 extern struct nf_conntrack_protocol nf_conntrack_protocol_udp4;
 extern struct nf_conntrack_protocol nf_conntrack_protocol_icmp;
-
-MODULE_ALIAS("nf_conntrack-" __stringify(AF_INET));
-MODULE_LICENSE("GPL");
-
-static int __init nf_conntrack_l3proto_ipv4_init(void)
+static int init_or_cleanup(int init)
 {
 	int ret = 0;
 
-	need_conntrack();
+	if (!init) goto cleanup;
 
 	ret = nf_register_sockopt(&so_getorigdst);
 	if (ret < 0) {
 		printk(KERN_ERR "Unable to register netfilter socket option\n");
-		return ret;
+		goto cleanup_nothing;
 	}
 
 	ret = nf_conntrack_protocol_register(&nf_conntrack_protocol_tcp4);
@@ -473,26 +475,84 @@ static int __init nf_conntrack_l3proto_ipv4_init(void)
 		goto cleanup_icmp;
 	}
 
-	ret = nf_register_hooks(ipv4_conntrack_ops,
-				ARRAY_SIZE(ipv4_conntrack_ops));
+	ret = nf_register_hook(&ipv4_conntrack_defrag_ops);
 	if (ret < 0) {
-		printk("nf_conntrack_ipv4: can't register hooks.\n");
+		printk("nf_conntrack_ipv4: can't register pre-routing defrag hook.\n");
 		goto cleanup_ipv4;
 	}
+	ret = nf_register_hook(&ipv4_conntrack_defrag_local_out_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register local_out defrag hook.\n");
+		goto cleanup_defragops;
+	}
+
+	ret = nf_register_hook(&ipv4_conntrack_in_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register pre-routing hook.\n");
+		goto cleanup_defraglocalops;
+	}
+
+	ret = nf_register_hook(&ipv4_conntrack_local_out_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register local out hook.\n");
+		goto cleanup_inops;
+	}
+
+	ret = nf_register_hook(&ipv4_conntrack_helper_in_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register local helper hook.\n");
+		goto cleanup_inandlocalops;
+	}
+
+	ret = nf_register_hook(&ipv4_conntrack_helper_out_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register postrouting helper hook.\n");
+		goto cleanup_helperinops;
+	}
+
+	ret = nf_register_hook(&ipv4_conntrack_out_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register post-routing hook.\n");
+		goto cleanup_helperoutops;
+	}
+
+	ret = nf_register_hook(&ipv4_conntrack_local_in_ops);
+	if (ret < 0) {
+		printk("nf_conntrack_ipv4: can't register local in hook.\n");
+		goto cleanup_inoutandlocalops;
+	}
+
 #ifdef CONFIG_SYSCTL
 	nf_ct_ipv4_sysctl_header = register_sysctl_table(nf_ct_net_table, 0);
 	if (nf_ct_ipv4_sysctl_header == NULL) {
 		printk("nf_conntrack: can't register to sysctl.\n");
 		ret = -ENOMEM;
-		goto cleanup_hooks;
+		goto cleanup_localinops;
 	}
 #endif
 	return ret;
 
+ cleanup:
+	synchronize_net();
 #ifdef CONFIG_SYSCTL
- cleanup_hooks:
-	nf_unregister_hooks(ipv4_conntrack_ops, ARRAY_SIZE(ipv4_conntrack_ops));
+ 	unregister_sysctl_table(nf_ct_ipv4_sysctl_header);
+ cleanup_localinops:
 #endif
+	nf_unregister_hook(&ipv4_conntrack_local_in_ops);
+ cleanup_inoutandlocalops:
+	nf_unregister_hook(&ipv4_conntrack_out_ops);
+ cleanup_helperoutops:
+	nf_unregister_hook(&ipv4_conntrack_helper_out_ops);
+ cleanup_helperinops:
+	nf_unregister_hook(&ipv4_conntrack_helper_in_ops);
+ cleanup_inandlocalops:
+	nf_unregister_hook(&ipv4_conntrack_local_out_ops);
+ cleanup_inops:
+	nf_unregister_hook(&ipv4_conntrack_in_ops);
+ cleanup_defraglocalops:
+	nf_unregister_hook(&ipv4_conntrack_defrag_local_out_ops);
+ cleanup_defragops:
+	nf_unregister_hook(&ipv4_conntrack_defrag_ops);
  cleanup_ipv4:
 	nf_conntrack_l3proto_unregister(&nf_conntrack_l3proto_ipv4);
  cleanup_icmp:
@@ -503,24 +563,24 @@ static int __init nf_conntrack_l3proto_ipv4_init(void)
 	nf_conntrack_protocol_unregister(&nf_conntrack_protocol_tcp4);
  cleanup_sockopt:
 	nf_unregister_sockopt(&so_getorigdst);
+ cleanup_nothing:
 	return ret;
 }
 
-static void __exit nf_conntrack_l3proto_ipv4_fini(void)
+MODULE_LICENSE("GPL");
+
+static int __init init(void)
 {
-	synchronize_net();
-#ifdef CONFIG_SYSCTL
- 	unregister_sysctl_table(nf_ct_ipv4_sysctl_header);
-#endif
-	nf_unregister_hooks(ipv4_conntrack_ops, ARRAY_SIZE(ipv4_conntrack_ops));
-	nf_conntrack_l3proto_unregister(&nf_conntrack_l3proto_ipv4);
-	nf_conntrack_protocol_unregister(&nf_conntrack_protocol_icmp);
-	nf_conntrack_protocol_unregister(&nf_conntrack_protocol_udp4);
-	nf_conntrack_protocol_unregister(&nf_conntrack_protocol_tcp4);
-	nf_unregister_sockopt(&so_getorigdst);
+	need_conntrack();
+	return init_or_cleanup(1);
 }
 
-module_init(nf_conntrack_l3proto_ipv4_init);
-module_exit(nf_conntrack_l3proto_ipv4_fini);
+static void __exit fini(void)
+{
+	init_or_cleanup(0);
+}
+
+module_init(init);
+module_exit(fini);
 
 EXPORT_SYMBOL(nf_ct_ipv4_gather_frags);

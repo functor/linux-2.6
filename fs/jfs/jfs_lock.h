@@ -20,7 +20,6 @@
 #define _H_JFS_LOCK
 
 #include <linux/spinlock.h>
-#include <linux/mutex.h>
 #include <linux/sched.h>
 
 /*

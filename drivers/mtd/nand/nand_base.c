@@ -80,7 +80,6 @@
 #include <linux/mtd/compatmac.h>
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
-#include <linux/leds.h>
 #include <asm/io.h>
 
 #ifdef CONFIG_MTD_PARTITIONS
@@ -516,8 +515,6 @@ static int nand_block_checkbad (struct mtd_info *mtd, loff_t ofs, int getchip, i
 	return nand_isbad_bbt (mtd, ofs, allowbbt);
 }
 
-DEFINE_LED_TRIGGER(nand_led_trigger);
-
 /*
  * Wait for the ready pin, after a command
  * The timeout is catched later.
@@ -527,14 +524,12 @@ static void nand_wait_ready(struct mtd_info *mtd)
 	struct nand_chip *this = mtd->priv;
 	unsigned long	timeo = jiffies + 2;
 
-	led_trigger_event(nand_led_trigger, LED_FULL);
 	/* wait until command is processed or timeout occures */
 	do {
 		if (this->dev_ready(mtd))
-			break;
+			return;
 		touch_softlockup_watchdog();
 	} while (time_before(jiffies, timeo));
-	led_trigger_event(nand_led_trigger, LED_OFF);
 }
 
 /**
@@ -822,8 +817,6 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *this, int state)
 	else
 		 timeo += (HZ * 20) / 1000;
 
-	led_trigger_event(nand_led_trigger, LED_FULL);
-
 	/* Apply this short delay always to ensure that we do wait tWB in
 	 * any case on any machine. */
 	ndelay (100);
@@ -847,8 +840,6 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *this, int state)
 		}
 		cond_resched();
 	}
-	led_trigger_event(nand_led_trigger, LED_OFF);
-
 	status = (int) this->read_byte(mtd);
 	return status;
 }
@@ -2732,21 +2723,6 @@ void nand_release (struct mtd_info *mtd)
 
 EXPORT_SYMBOL_GPL (nand_scan);
 EXPORT_SYMBOL_GPL (nand_release);
-
-
-static int __init nand_base_init(void)
-{
-	led_trigger_register_simple("nand-disk", &nand_led_trigger);
-	return 0;
-}
-
-static void __exit nand_base_exit(void)
-{
-	led_trigger_unregister_simple(nand_led_trigger);
-}
-
-module_init(nand_base_init);
-module_exit(nand_base_exit);
 
 MODULE_LICENSE ("GPL");
 MODULE_AUTHOR ("Steven J. Hill <sjhill@realitydiluted.com>, Thomas Gleixner <tglx@linutronix.de>");

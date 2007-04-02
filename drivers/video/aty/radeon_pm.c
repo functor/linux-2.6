@@ -20,30 +20,12 @@
 #include <linux/agp_backend.h>
 
 #ifdef CONFIG_PPC_PMAC
-#include <asm/machdep.h>
+#include <asm/processor.h>
 #include <asm/prom.h>
 #include <asm/pmac_feature.h>
 #endif
 
-/* For detecting supported PC laptops */
-#ifdef CONFIG_X86
-#include <linux/dmi.h>
-#endif
-
 #include "ati_ids.h"
-
-#ifdef CONFIG_X86
-/* This array holds a list of supported PC laptops.
- * Currently only few IBM models are tested.
- * If you want to experiment, use dmidecode to find out
- * vendor and product codes for Your laptop.
- */
-static struct dmi_system_id __devinitdata radeonfb_dmi_table[] = {
-#include "radeon_pm_whitelist.h"
-};
-
-extern int radeon_force_sleep;
-#endif
 
 static void radeon_pm_disable_dynamic_mode(struct radeonfb_info *rinfo)
 {
@@ -870,14 +852,7 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 	/* because both INPLL and OUTPLL take the same lock, that's why. */
 	tmp = INPLL( pllMCLK_MISC) | MCLK_MISC__EN_MCLK_TRISTATE_IN_SUSPEND;
 	OUTPLL( pllMCLK_MISC, tmp);
-
-	/* BUS_CNTL1__MOBILE_PLATORM_SEL setting is northbridge chipset
-	 * and radeon chip dependent. Thus we only enable it on Mac for
-	 * now (until we get more info on how to compute the correct
-	 * value for various X86 bridges).
-	 */
-
-#ifdef CONFIG_PPC_PMAC
+	
 	/* AGP PLL control */
 	if (rinfo->family <= CHIP_FAMILY_RV280) {
 		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1) |  BUS_CNTL1__AGPCLK_VALID);
@@ -889,7 +864,6 @@ static void radeon_pm_setup_for_suspend(struct radeonfb_info *rinfo)
 		OUTREG(BUS_CNTL1, INREG(BUS_CNTL1));
 		OUTREG(BUS_CNTL1, (INREG(BUS_CNTL1) & ~0x4000) | 0x8000);
 	}
-#endif
 
 	OUTREG(CRTC_OFFSET_CNTL, (INREG(CRTC_OFFSET_CNTL)
 				  & ~CRTC_OFFSET_CNTL__CRTC_STEREO_SYNC_OUT_EN));
@@ -2106,7 +2080,7 @@ static void radeon_reinitialize_M9P(struct radeonfb_info *rinfo)
 	OUTREG(0x2ec, 0x6332a3f0);
 	mdelay(17);
 
-	OUTPLL(pllPPLL_REF_DIV, rinfo->pll.ref_div);
+	OUTPLL(pllPPLL_REF_DIV, rinfo->pll.ref_div);;
 	OUTPLL(pllPPLL_DIV_0, rinfo->save_regs[92]);
 
 	mdelay(40);
@@ -2771,7 +2745,7 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 		rinfo->pm_mode |= radeon_pm_off;
 	}
 #if defined(CONFIG_PPC_PMAC)
-	if (machine_is(powermac) && rinfo->of_node) {
+	if (_machine == _MACH_Pmac && rinfo->of_node) {
 		if (rinfo->is_mobility && rinfo->pm_reg &&
 		    rinfo->family <= CHIP_FAMILY_RV250)
 			rinfo->pm_mode |= radeon_pm_d2;
@@ -2816,29 +2790,6 @@ void radeonfb_pm_init(struct radeonfb_info *rinfo, int dynclk)
 	}
 #endif /* defined(CONFIG_PPC_PMAC) */
 #endif /* defined(CONFIG_PM) */
-
-/* The PM code also works on some PC laptops.
- * Only a few models are actually tested so Your mileage may vary.
- * We can do D2 on at least M7 and M9 on some IBM ThinkPad T41 models.
- */
-#if defined(CONFIG_PM) && defined(CONFIG_X86)
-	if (radeon_force_sleep || dmi_check_system(radeonfb_dmi_table)) {
-		if (radeon_force_sleep)
-			printk("radeonfb: forcefully enabling sleep mode\n");
-		else
-			printk("radeonfb: enabling sleep mode\n");
-
-		if (rinfo->is_mobility && rinfo->pm_reg &&
-		    rinfo->family <= CHIP_FAMILY_RV250)
-			rinfo->pm_mode |= radeon_pm_d2;
-
-		/* Power down TV DAC, that saves a significant amount of power,
-		 * we'll have something better once we actually have some TVOut
-		 * support
-		 */
-		OUTREG(TV_DAC_CNTL, INREG(TV_DAC_CNTL) | 0x07000000);
-	}
-#endif /* defined(CONFIG_PM) && defined(CONFIG_X86) */
 }
 
 void radeonfb_pm_exit(struct radeonfb_info *rinfo)

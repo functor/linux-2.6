@@ -76,6 +76,7 @@ EXPORT_SYMBOL(strncpy);
 EXPORT_SYMBOL(strnlen);
 EXPORT_SYMBOL(strncat);
 EXPORT_SYMBOL(strstr);
+EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strchr);
 EXPORT_SYMBOL(strrchr);
 EXPORT_SYMBOL(memcmp);
@@ -182,6 +183,7 @@ EXPORT_SYMBOL(smp_num_cpus);
 EXPORT_SYMBOL(smp_call_function);
 EXPORT_SYMBOL(smp_call_function_on_cpu);
 EXPORT_SYMBOL(_atomic_dec_and_lock);
+EXPORT_SYMBOL(cpu_present_mask);
 #endif /* CONFIG_SMP */
 
 /*
@@ -213,6 +215,8 @@ EXPORT_SYMBOL(__remqu);
 EXPORT_SYMBOL(memcpy);
 EXPORT_SYMBOL(memset);
 EXPORT_SYMBOL(memchr);
+
+EXPORT_SYMBOL(get_wchan);
 
 #ifdef CONFIG_ALPHA_IRONGATE
 EXPORT_SYMBOL(irongate_ioremap);

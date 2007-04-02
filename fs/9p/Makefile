@@ -1,9 +1,10 @@
-obj-$(CONFIG_9P_FS) := 9p.o
+obj-$(CONFIG_9P_FS) := 9p2000.o
 
-9p-objs := \
+9p2000-objs := \
 	trans_fd.o \
+	trans_sock.o \
 	mux.o \
-	fcall.o \
+	9p.o \
 	conv.o \
 	vfs_super.o \
 	vfs_inode.o \
@@ -13,6 +14,5 @@ obj-$(CONFIG_9P_FS) := 9p.o
 	vfs_dentry.o \
 	error.o \
 	v9fs.o \
-	fid.o \
-	fcprint.o
+	fid.o
 

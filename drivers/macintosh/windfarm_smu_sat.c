@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/i2c.h>
+#include <linux/i2c-dev.h>
 #include <asm/semaphore.h>
 #include <asm/prom.h>
 #include <asm/smu.h>

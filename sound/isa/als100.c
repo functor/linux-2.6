@@ -199,7 +199,7 @@ static int __devinit snd_card_als100_pnp(int dev, struct snd_card_als100 *acard,
 	return 0;
 }
 
-static int __devinit snd_card_als100_probe(int dev,
+static int __init snd_card_als100_probe(int dev,
 					struct pnp_card_link *pcard,
 					const struct pnp_card_device_id *pid)
 {
@@ -281,8 +281,6 @@ static int __devinit snd_card_als100_probe(int dev,
 	return 0;
 }
 
-static unsigned int __devinitdata als100_devices;
-
 static int __devinit snd_als100_pnp_detect(struct pnp_card_link *card,
 					   const struct pnp_card_device_id *id)
 {
@@ -296,7 +294,6 @@ static int __devinit snd_als100_pnp_detect(struct pnp_card_link *card,
 		if (res < 0)
 			return res;
 		dev++;
-		als100_devices++;
 		return 0;
 	}
 	return -ENODEV;
@@ -348,13 +345,10 @@ static struct pnp_card_driver als100_pnpc_driver = {
 
 static int __init alsa_card_als100_init(void)
 {
-	int err;
+	int cards;
 
-	err = pnp_register_card_driver(&als100_pnpc_driver);
-	if (err)
-		return err;
-
-	if (!als100_devices) {
+	cards = pnp_register_card_driver(&als100_pnpc_driver);
+	if (cards <= 0) {
 		pnp_unregister_card_driver(&als100_pnpc_driver);
 #ifdef MODULE
 		snd_printk(KERN_ERR "no ALS100 based soundcards found\n");

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/redwood6.h
+ *
  * Macros, definitions, and data structures specific to the IBM PowerPC
  * STBx25xx "Redwood6" evaluation board.
  *

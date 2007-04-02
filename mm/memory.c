@@ -87,7 +87,7 @@ int randomize_va_space __read_mostly = 1;
 static int __init disable_randmaps(char *s)
 {
 	randomize_va_space = 0;
-	return 1;
+	return 0;
 }
 __setup("norandmaps", disable_randmaps);
 
@@ -277,7 +277,7 @@ void free_pgtables(struct mmu_gather **tlb, struct vm_area_struct *vma,
 		anon_vma_unlink(vma);
 		unlink_file_vma(vma);
 
-		if (is_vm_hugetlb_page(vma)) {
+		if (is_hugepage_only_range(vma->vm_mm, addr, HPAGE_SIZE)) {
 			hugetlb_free_pgd_range(tlb, addr, vma->vm_end,
 				floor, next? next->vm_start: ceiling);
 		} else {
@@ -285,7 +285,8 @@ void free_pgtables(struct mmu_gather **tlb, struct vm_area_struct *vma,
 			 * Optimization: gather nearby vmas into one call down
 			 */
 			while (next && next->vm_start <= vma->vm_end + PMD_SIZE
-			       && !is_vm_hugetlb_page(next)) {
+			  && !is_hugepage_only_range(vma->vm_mm, next->vm_start,
+							HPAGE_SIZE)) {
 				vma = next;
 				next = vma->vm_next;
 				anon_vma_unlink(vma);
@@ -387,7 +388,7 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr, pte_
 {
 	unsigned long pfn = pte_pfn(pte);
 
-	if (unlikely(vma->vm_flags & VM_PFNMAP)) {
+	if (vma->vm_flags & VM_PFNMAP) {
 		unsigned long off = (addr - vma->vm_start) >> PAGE_SHIFT;
 		if (pfn == vma->vm_pgoff + off)
 			return NULL;
@@ -400,10 +401,11 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr, pte_
 	 * we should just do "return pfn_to_page(pfn)", but
 	 * in the meantime we check that we get a valid pfn,
 	 * and that the resulting page looks ok.
+	 *
+	 * Remove this test eventually!
 	 */
 	if (unlikely(!pfn_valid(pfn))) {
-		if (!(vma->vm_flags & VM_RESERVED))
-			print_bad_pte(vma, pte, addr);
+		print_bad_pte(vma, pte, addr);
 		return NULL;
 	}
 
@@ -1018,26 +1020,6 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			continue;
 		}
 
-#ifdef CONFIG_XEN
-		if (vma && (vma->vm_flags & VM_FOREIGN)) {
-			struct page **map = vma->vm_private_data;
-			int offset = (start - vma->vm_start) >> PAGE_SHIFT;
-			if (map[offset] != NULL) {
-			        if (pages) {
-			                struct page *page = map[offset];
-					
-					pages[i] = page;
-					get_page(page);
-				}
-				if (vmas)
-					vmas[i] = vma;
-				i++;
-				start += PAGE_SIZE;
-				len--;
-				continue;
-			}
-		}
-#endif
 		if (!vma || (vma->vm_flags & (VM_IO | VM_PFNMAP))
 				|| !(vm_flags & vma->vm_flags))
 			return i ? : -EFAULT;
@@ -1092,8 +1074,6 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			}
 			if (pages) {
 				pages[i] = page;
-
-				flush_anon_page(page, start);
 				flush_dcache_page(page);
 			}
 			if (vmas)
@@ -1241,7 +1221,9 @@ out:
  * The page has to be a nice clean _individual_ kernel allocation.
  * If you allocate a compound page, you need to have marked it as
  * such (__GFP_COMP), or manually just split the page up yourself
- * (see split_page()).
+ * (which is mainly an issue of doing "set_page_count(page, 1)" for
+ * each sub-page, and then freeing them one by one when you free
+ * them rather than freeing it as a compound page).
  *
  * NOTE! Traditionally this was done with "remap_pfn_range()" which
  * took an arbitrary page protection parameter. This doesn't allow
@@ -1377,102 +1359,6 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 }
 EXPORT_SYMBOL(remap_pfn_range);
 
-#ifdef CONFIG_XEN
-static inline int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
-				     unsigned long addr, unsigned long end,
-				     pte_fn_t fn, void *data)
-{
-	pte_t *pte;
-	int err;
-	struct page *pmd_page;
-	spinlock_t *ptl;
-
-	pte = (mm == &init_mm) ?
-		pte_alloc_kernel(pmd, addr) :
-		pte_alloc_map_lock(mm, pmd, addr, &ptl);
-	if (!pte)
-		return -ENOMEM;
-
-	BUG_ON(pmd_huge(*pmd));
-
-	pmd_page = pmd_page(*pmd);
-
-	do {
-		err = fn(pte, pmd_page, addr, data);
-		if (err)
-			break;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
-
-	if (mm != &init_mm)
-		pte_unmap_unlock(pte-1, ptl);
-	return err;
-}
-
-static inline int apply_to_pmd_range(struct mm_struct *mm, pud_t *pud,
-				     unsigned long addr, unsigned long end,
-				     pte_fn_t fn, void *data)
-{
-	pmd_t *pmd;
-	unsigned long next;
-	int err;
-
-	pmd = pmd_alloc(mm, pud, addr);
-	if (!pmd)
-		return -ENOMEM;
-	do {
-		next = pmd_addr_end(addr, end);
-		err = apply_to_pte_range(mm, pmd, addr, next, fn, data);
-		if (err)
-			break;
-	} while (pmd++, addr = next, addr != end);
-	return err;
-}
-
-static inline int apply_to_pud_range(struct mm_struct *mm, pgd_t *pgd,
-				     unsigned long addr, unsigned long end,
-				     pte_fn_t fn, void *data)
-{
-	pud_t *pud;
-	unsigned long next;
-	int err;
-
-	pud = pud_alloc(mm, pgd, addr);
-	if (!pud)
-		return -ENOMEM;
-	do {
-		next = pud_addr_end(addr, end);
-		err = apply_to_pmd_range(mm, pud, addr, next, fn, data);
-		if (err)
-			break;
-	} while (pud++, addr = next, addr != end);
-	return err;
-}
-
-/*
- * Scan a region of virtual memory, filling in page tables as necessary
- * and calling a provided function on each leaf page table.
- */
-int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
-			unsigned long size, pte_fn_t fn, void *data)
-{
-	pgd_t *pgd;
-	unsigned long next;
-	unsigned long end = addr + size;
-	int err;
-
-	BUG_ON(addr >= end);
-	pgd = pgd_offset(mm, addr);
-	do {
-		next = pgd_addr_end(addr, end);
-		err = apply_to_pud_range(mm, pgd, addr, next, fn, data);
-		if (err)
-			break;
-	} while (pgd++, addr = next, addr != end);
-	return err;
-}
-EXPORT_SYMBOL_GPL(apply_to_page_range);
-#endif
-
 /*
  * handle_pte_fault chooses page fault handler according to an entry
  * which was read non-atomically.  Before making any commitment, on
@@ -1532,6 +1418,7 @@ static inline void cow_user_page(struct page *dst, struct page *src, unsigned lo
 		if (__copy_from_user_inatomic(kaddr, uaddr, PAGE_SIZE))
 			memset(kaddr, 0, PAGE_SIZE);
 		kunmap_atomic(kaddr, KM_USER0);
+		flush_dcache_page(dst);
 		return;
 		
 	}
@@ -2480,8 +2367,10 @@ int make_pages_present(unsigned long addr, unsigned long end)
 	if (!vma)
 		return -1;
 	write = (vma->vm_flags & VM_WRITE) != 0;
-	BUG_ON(addr >= end);
-	BUG_ON(end > vma->vm_end);
+	if (addr >= end)
+		BUG();
+	if (end > vma->vm_end)
+		BUG();
 	len = (end+PAGE_SIZE-1)/PAGE_SIZE-addr/PAGE_SIZE;
 	ret = get_user_pages(current, current->mm, addr,
 			len, write, 0, NULL, NULL);

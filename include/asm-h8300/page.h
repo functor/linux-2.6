@@ -71,18 +71,16 @@ extern unsigned long memory_end;
 #define page_to_virt(page)	((((page) - mem_map) << PAGE_SHIFT) + PAGE_OFFSET)
 #define pfn_valid(page)	        (page < max_mapnr)
 
-#define ARCH_PFN_OFFSET		(PAGE_OFFSET >> PAGE_SHIFT)
+#define pfn_to_page(pfn)	virt_to_page(pfn_to_virt(pfn))
+#define page_to_pfn(page)	virt_to_pfn(page_to_virt(page))
 
 #define	virt_addr_valid(kaddr)	(((void *)(kaddr) >= (void *)PAGE_OFFSET) && \
 				((void *)(kaddr) < (void *)memory_end))
 
 #endif /* __ASSEMBLY__ */
 
-#define devmem_is_allowed(x) 1
-
 #endif /* __KERNEL__ */
 
-#include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
 
 #endif /* _H8300_PAGE_H */

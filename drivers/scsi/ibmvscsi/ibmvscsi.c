@@ -168,7 +168,7 @@ static void release_event_pool(struct event_pool *pool,
 			++in_use;
 		if (pool->events[i].ext_list) {
 			dma_free_coherent(hostdata->dev,
-				  SG_ALL * sizeof(struct srp_direct_buf),
+				  SG_ALL * sizeof(struct memory_descriptor),
 				  pool->events[i].ext_list,
 				  pool->events[i].ext_list_token);
 		}
@@ -284,37 +284,40 @@ static void set_srp_direction(struct scsi_cmnd *cmd,
 			      struct srp_cmd *srp_cmd, 
 			      int numbuf)
 {
-	u8 fmt;
-
 	if (numbuf == 0)
 		return;
 	
-	if (numbuf == 1)
-		fmt = SRP_DATA_DESC_DIRECT;
-	else {
-		fmt = SRP_DATA_DESC_INDIRECT;
-		numbuf = min(numbuf, MAX_INDIRECT_BUFS);
-
+	if (numbuf == 1) {
 		if (cmd->sc_data_direction == DMA_TO_DEVICE)
-			srp_cmd->data_out_desc_cnt = numbuf;
-		else
-			srp_cmd->data_in_desc_cnt = numbuf;
+			srp_cmd->data_out_format = SRP_DIRECT_BUFFER;
+		else 
+			srp_cmd->data_in_format = SRP_DIRECT_BUFFER;
+	} else {
+		if (cmd->sc_data_direction == DMA_TO_DEVICE) {
+			srp_cmd->data_out_format = SRP_INDIRECT_BUFFER;
+			srp_cmd->data_out_count =
+				numbuf < MAX_INDIRECT_BUFS ?
+					numbuf: MAX_INDIRECT_BUFS;
+		} else {
+			srp_cmd->data_in_format = SRP_INDIRECT_BUFFER;
+			srp_cmd->data_in_count =
+				numbuf < MAX_INDIRECT_BUFS ?
+					numbuf: MAX_INDIRECT_BUFS;
+		}
 	}
-
-	if (cmd->sc_data_direction == DMA_TO_DEVICE)
-		srp_cmd->buf_fmt = fmt << 4;
-	else
-		srp_cmd->buf_fmt = fmt;
 }
 
-static void unmap_sg_list(int num_entries,
+static void unmap_sg_list(int num_entries, 
 		struct device *dev,
-		struct srp_direct_buf *md)
-{
+		struct memory_descriptor *md)
+{ 
 	int i;
 
-	for (i = 0; i < num_entries; ++i)
-		dma_unmap_single(dev, md[i].va, md[i].len, DMA_BIDIRECTIONAL);
+	for (i = 0; i < num_entries; ++i) {
+		dma_unmap_single(dev,
+			md[i].virtual_address,
+			md[i].length, DMA_BIDIRECTIONAL);
+	}
 }
 
 /**
@@ -327,26 +330,23 @@ static void unmap_cmd_data(struct srp_cmd *cmd,
 			   struct srp_event_struct *evt_struct,
 			   struct device *dev)
 {
-	u8 out_fmt, in_fmt;
-
-	out_fmt = cmd->buf_fmt >> 4;
-	in_fmt = cmd->buf_fmt & ((1U << 4) - 1);
-
-	if (out_fmt == SRP_NO_DATA_DESC && in_fmt == SRP_NO_DATA_DESC)
+	if ((cmd->data_out_format == SRP_NO_BUFFER) &&
+	    (cmd->data_in_format == SRP_NO_BUFFER))
 		return;
-	else if (out_fmt == SRP_DATA_DESC_DIRECT ||
-		 in_fmt == SRP_DATA_DESC_DIRECT) {
-		struct srp_direct_buf *data =
-			(struct srp_direct_buf *) cmd->add_data;
-		dma_unmap_single(dev, data->va, data->len, DMA_BIDIRECTIONAL);
+	else if ((cmd->data_out_format == SRP_DIRECT_BUFFER) ||
+		 (cmd->data_in_format == SRP_DIRECT_BUFFER)) {
+		struct memory_descriptor *data =
+			(struct memory_descriptor *)cmd->additional_data;
+		dma_unmap_single(dev, data->virtual_address, data->length,
+				 DMA_BIDIRECTIONAL);
 	} else {
-		struct srp_indirect_buf *indirect =
-			(struct srp_indirect_buf *) cmd->add_data;
-		int num_mapped = indirect->table_desc.len /
-			sizeof(struct srp_direct_buf);
+		struct indirect_descriptor *indirect =
+			(struct indirect_descriptor *)cmd->additional_data;
+		int num_mapped = indirect->head.length / 
+			sizeof(indirect->list[0]);
 
 		if (num_mapped <= MAX_INDIRECT_BUFS) {
-			unmap_sg_list(num_mapped, dev, &indirect->desc_list[0]);
+			unmap_sg_list(num_mapped, dev, &indirect->list[0]);
 			return;
 		}
 
@@ -356,17 +356,17 @@ static void unmap_cmd_data(struct srp_cmd *cmd,
 
 static int map_sg_list(int num_entries, 
 		       struct scatterlist *sg,
-		       struct srp_direct_buf *md)
+		       struct memory_descriptor *md)
 {
 	int i;
 	u64 total_length = 0;
 
 	for (i = 0; i < num_entries; ++i) {
-		struct srp_direct_buf *descr = md + i;
+		struct memory_descriptor *descr = md + i;
 		struct scatterlist *sg_entry = &sg[i];
-		descr->va = sg_dma_address(sg_entry);
-		descr->len = sg_dma_len(sg_entry);
-		descr->key = 0;
+		descr->virtual_address = sg_dma_address(sg_entry);
+		descr->length = sg_dma_len(sg_entry);
+		descr->memory_handle = 0;
 		total_length += sg_dma_len(sg_entry);
  	}
 	return total_length;
@@ -389,10 +389,10 @@ static int map_sg_data(struct scsi_cmnd *cmd,
 	int sg_mapped;
 	u64 total_length = 0;
 	struct scatterlist *sg = cmd->request_buffer;
-	struct srp_direct_buf *data =
-		(struct srp_direct_buf *) srp_cmd->add_data;
-	struct srp_indirect_buf *indirect =
-		(struct srp_indirect_buf *) data;
+	struct memory_descriptor *data =
+	    (struct memory_descriptor *)srp_cmd->additional_data;
+	struct indirect_descriptor *indirect =
+	    (struct indirect_descriptor *)data;
 
 	sg_mapped = dma_map_sg(dev, sg, cmd->use_sg, DMA_BIDIRECTIONAL);
 
@@ -403,9 +403,9 @@ static int map_sg_data(struct scsi_cmnd *cmd,
 
 	/* special case; we can use a single direct descriptor */
 	if (sg_mapped == 1) {
-		data->va = sg_dma_address(&sg[0]);
-		data->len = sg_dma_len(&sg[0]);
-		data->key = 0;
+		data->virtual_address = sg_dma_address(&sg[0]);
+		data->length = sg_dma_len(&sg[0]);
+		data->memory_handle = 0;
 		return 1;
 	}
 
@@ -416,26 +416,25 @@ static int map_sg_data(struct scsi_cmnd *cmd,
 		return 0;
 	}
 
-	indirect->table_desc.va = 0;
-	indirect->table_desc.len = sg_mapped * sizeof(struct srp_direct_buf);
-	indirect->table_desc.key = 0;
+	indirect->head.virtual_address = 0;
+	indirect->head.length = sg_mapped * sizeof(indirect->list[0]);
+	indirect->head.memory_handle = 0;
 
 	if (sg_mapped <= MAX_INDIRECT_BUFS) {
-		total_length = map_sg_list(sg_mapped, sg,
-					   &indirect->desc_list[0]);
-		indirect->len = total_length;
+		total_length = map_sg_list(sg_mapped, sg, &indirect->list[0]);
+		indirect->total_length = total_length;
 		return 1;
 	}
 
 	/* get indirect table */
 	if (!evt_struct->ext_list) {
-		evt_struct->ext_list = (struct srp_direct_buf *)
+		evt_struct->ext_list =(struct memory_descriptor*)
 			dma_alloc_coherent(dev, 
-					   SG_ALL * sizeof(struct srp_direct_buf),
-					   &evt_struct->ext_list_token, 0);
+				SG_ALL * sizeof(struct memory_descriptor),
+				&evt_struct->ext_list_token, 0);
 		if (!evt_struct->ext_list) {
-			printk(KERN_ERR
-			       "ibmvscsi: Can't allocate memory for indirect table\n");
+		    printk(KERN_ERR
+		   	"ibmvscsi: Can't allocate memory for indirect table\n");
 			return 0;
 			
 		}
@@ -443,11 +442,11 @@ static int map_sg_data(struct scsi_cmnd *cmd,
 
 	total_length = map_sg_list(sg_mapped, sg, evt_struct->ext_list);	
 
-	indirect->len = total_length;
-	indirect->table_desc.va = evt_struct->ext_list_token;
-	indirect->table_desc.len = sg_mapped * sizeof(indirect->desc_list[0]);
-	memcpy(indirect->desc_list, evt_struct->ext_list,
-	       MAX_INDIRECT_BUFS * sizeof(struct srp_direct_buf));
+	indirect->total_length = total_length;
+	indirect->head.virtual_address = evt_struct->ext_list_token;
+	indirect->head.length = sg_mapped * sizeof(indirect->list[0]);
+	memcpy(indirect->list, evt_struct->ext_list,
+		MAX_INDIRECT_BUFS * sizeof(struct memory_descriptor));
 	
  	return 1;
 }
@@ -464,20 +463,20 @@ static int map_sg_data(struct scsi_cmnd *cmd,
 static int map_single_data(struct scsi_cmnd *cmd,
 			   struct srp_cmd *srp_cmd, struct device *dev)
 {
-	struct srp_direct_buf *data =
-		(struct srp_direct_buf *) srp_cmd->add_data;
+	struct memory_descriptor *data =
+	    (struct memory_descriptor *)srp_cmd->additional_data;
 
-	data->va =
+	data->virtual_address =
 		dma_map_single(dev, cmd->request_buffer,
 			       cmd->request_bufflen,
 			       DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(data->va)) {
+	if (dma_mapping_error(data->virtual_address)) {
 		printk(KERN_ERR
 		       "ibmvscsi: Unable to map request_buffer for command!\n");
 		return 0;
 	}
-	data->len = cmd->request_bufflen;
-	data->key = 0;
+	data->length = cmd->request_bufflen;
+	data->memory_handle = 0;
 
 	set_srp_direction(cmd, srp_cmd, 1);
 
@@ -549,7 +548,7 @@ static int ibmvscsi_send_srp_event(struct srp_event_struct *evt_struct,
 
 	/* Copy the IU into the transfer area */
 	*evt_struct->xfer_iu = evt_struct->iu;
-	evt_struct->xfer_iu->srp.rsp.tag = (u64)evt_struct;
+	evt_struct->xfer_iu->srp.generic.tag = (u64)evt_struct;
 
 	/* Add this to the sent list.  We need to do this 
 	 * before we actually send 
@@ -587,27 +586,27 @@ static void handle_cmd_rsp(struct srp_event_struct *evt_struct)
 	struct srp_rsp *rsp = &evt_struct->xfer_iu->srp.rsp;
 	struct scsi_cmnd *cmnd = evt_struct->cmnd;
 
-	if (unlikely(rsp->opcode != SRP_RSP)) {
+	if (unlikely(rsp->type != SRP_RSP_TYPE)) {
 		if (printk_ratelimit())
 			printk(KERN_WARNING 
 			       "ibmvscsi: bad SRP RSP type %d\n",
-			       rsp->opcode);
+			       rsp->type);
 	}
 	
 	if (cmnd) {
 		cmnd->result = rsp->status;
 		if (((cmnd->result >> 1) & 0x1f) == CHECK_CONDITION)
 			memcpy(cmnd->sense_buffer,
-			       rsp->data,
-			       rsp->sense_data_len);
+			       rsp->sense_and_response_data,
+			       rsp->sense_data_list_length);
 		unmap_cmd_data(&evt_struct->iu.srp.cmd, 
 			       evt_struct, 
 			       evt_struct->hostdata->dev);
 
-		if (rsp->flags & SRP_RSP_FLAG_DOOVER)
-			cmnd->resid = rsp->data_out_res_cnt;
-		else if (rsp->flags & SRP_RSP_FLAG_DIOVER)
-			cmnd->resid = rsp->data_in_res_cnt;
+		if (rsp->doover)
+			cmnd->resid = rsp->data_out_residual_count;
+		else if (rsp->diover)
+			cmnd->resid = rsp->data_in_residual_count;
 	}
 
 	if (evt_struct->cmnd_done)
@@ -634,11 +633,10 @@ static int ibmvscsi_queuecommand(struct scsi_cmnd *cmnd,
 {
 	struct srp_cmd *srp_cmd;
 	struct srp_event_struct *evt_struct;
-	struct srp_indirect_buf *indirect;
+	struct indirect_descriptor *indirect;
 	struct ibmvscsi_host_data *hostdata =
 		(struct ibmvscsi_host_data *)&cmnd->device->host->hostdata;
 	u16 lun = lun_from_dev(cmnd->device);
-	u8 out_fmt, in_fmt;
 
 	evt_struct = get_event_struct(&hostdata->pool);
 	if (!evt_struct)
@@ -646,8 +644,8 @@ static int ibmvscsi_queuecommand(struct scsi_cmnd *cmnd,
 
 	/* Set up the actual SRP IU */
 	srp_cmd = &evt_struct->iu.srp.cmd;
-	memset(srp_cmd, 0x00, SRP_MAX_IU_LEN);
-	srp_cmd->opcode = SRP_CMD;
+	memset(srp_cmd, 0x00, sizeof(*srp_cmd));
+	srp_cmd->type = SRP_CMD_TYPE;
 	memcpy(srp_cmd->cdb, cmnd->cmnd, sizeof(cmnd->cmnd));
 	srp_cmd->lun = ((u64) lun) << 48;
 
@@ -666,15 +664,13 @@ static int ibmvscsi_queuecommand(struct scsi_cmnd *cmnd,
 	evt_struct->cmnd_done = done;
 
 	/* Fix up dma address of the buffer itself */
-	indirect = (struct srp_indirect_buf *) srp_cmd->add_data;
-	out_fmt = srp_cmd->buf_fmt >> 4;
-	in_fmt = srp_cmd->buf_fmt & ((1U << 4) - 1);
-	if ((in_fmt == SRP_DATA_DESC_INDIRECT ||
-	     out_fmt == SRP_DATA_DESC_INDIRECT) &&
-	    indirect->table_desc.va == 0) {
-		indirect->table_desc.va = evt_struct->crq.IU_data_ptr +
-			offsetof(struct srp_cmd, add_data) +
-			offsetof(struct srp_indirect_buf, desc_list);
+	indirect = (struct indirect_descriptor *)srp_cmd->additional_data;
+	if (((srp_cmd->data_out_format == SRP_INDIRECT_BUFFER) ||
+	    (srp_cmd->data_in_format == SRP_INDIRECT_BUFFER)) &&
+	    (indirect->head.virtual_address == 0)) {
+		indirect->head.virtual_address = evt_struct->crq.IU_data_ptr +
+		    offsetof(struct srp_cmd, additional_data) +
+		    offsetof(struct indirect_descriptor, list);
 	}
 
 	return ibmvscsi_send_srp_event(evt_struct, hostdata);
@@ -739,8 +735,7 @@ static void send_mad_adapter_info(struct ibmvscsi_host_data *hostdata)
 {
 	struct viosrp_adapter_info *req;
 	struct srp_event_struct *evt_struct;
-	dma_addr_t addr;
-
+	
 	evt_struct = get_event_struct(&hostdata->pool);
 	if (!evt_struct) {
 		printk(KERN_ERR "ibmvscsi: couldn't allocate an event "
@@ -758,10 +753,10 @@ static void send_mad_adapter_info(struct ibmvscsi_host_data *hostdata)
 	
 	req->common.type = VIOSRP_ADAPTER_INFO_TYPE;
 	req->common.length = sizeof(hostdata->madapter_info);
-	req->buffer = addr = dma_map_single(hostdata->dev,
-					    &hostdata->madapter_info,
-					    sizeof(hostdata->madapter_info),
-					    DMA_BIDIRECTIONAL);
+	req->buffer = dma_map_single(hostdata->dev,
+				     &hostdata->madapter_info,
+				     sizeof(hostdata->madapter_info),
+				     DMA_BIDIRECTIONAL);
 
 	if (dma_mapping_error(req->buffer)) {
 		printk(KERN_ERR
@@ -771,13 +766,8 @@ static void send_mad_adapter_info(struct ibmvscsi_host_data *hostdata)
 		return;
 	}
 	
-	if (ibmvscsi_send_srp_event(evt_struct, hostdata)) {
+	if (ibmvscsi_send_srp_event(evt_struct, hostdata))
 		printk(KERN_ERR "ibmvscsi: couldn't send ADAPTER_INFO_REQ!\n");
-		dma_unmap_single(hostdata->dev,
-				 addr,
-				 sizeof(hostdata->madapter_info),
-				 DMA_BIDIRECTIONAL);
-	}
 };
 
 /**
@@ -790,10 +780,10 @@ static void send_mad_adapter_info(struct ibmvscsi_host_data *hostdata)
 static void login_rsp(struct srp_event_struct *evt_struct)
 {
 	struct ibmvscsi_host_data *hostdata = evt_struct->hostdata;
-	switch (evt_struct->xfer_iu->srp.login_rsp.opcode) {
-	case SRP_LOGIN_RSP:	/* it worked! */
+	switch (evt_struct->xfer_iu->srp.generic.type) {
+	case SRP_LOGIN_RSP_TYPE:	/* it worked! */
 		break;
-	case SRP_LOGIN_REJ:	/* refused! */
+	case SRP_LOGIN_REJ_TYPE:	/* refused! */
 		printk(KERN_INFO "ibmvscsi: SRP_LOGIN_REJ reason %u\n",
 		       evt_struct->xfer_iu->srp.login_rej.reason);
 		/* Login failed.  */
@@ -802,7 +792,7 @@ static void login_rsp(struct srp_event_struct *evt_struct)
 	default:
 		printk(KERN_ERR
 		       "ibmvscsi: Invalid login response typecode 0x%02x!\n",
-		       evt_struct->xfer_iu->srp.login_rsp.opcode);
+		       evt_struct->xfer_iu->srp.generic.type);
 		/* Login failed.  */
 		atomic_set(&hostdata->request_limit, -1);
 		return;
@@ -810,17 +800,17 @@ static void login_rsp(struct srp_event_struct *evt_struct)
 
 	printk(KERN_INFO "ibmvscsi: SRP_LOGIN succeeded\n");
 
-	if (evt_struct->xfer_iu->srp.login_rsp.req_lim_delta >
+	if (evt_struct->xfer_iu->srp.login_rsp.request_limit_delta >
 	    (max_requests - 2))
-		evt_struct->xfer_iu->srp.login_rsp.req_lim_delta =
+		evt_struct->xfer_iu->srp.login_rsp.request_limit_delta =
 		    max_requests - 2;
 
 	/* Now we know what the real request-limit is */
 	atomic_set(&hostdata->request_limit,
-		   evt_struct->xfer_iu->srp.login_rsp.req_lim_delta);
+		   evt_struct->xfer_iu->srp.login_rsp.request_limit_delta);
 
 	hostdata->host->can_queue =
-	    evt_struct->xfer_iu->srp.login_rsp.req_lim_delta - 2;
+	    evt_struct->xfer_iu->srp.login_rsp.request_limit_delta - 2;
 
 	if (hostdata->host->can_queue < 1) {
 		printk(KERN_ERR "ibmvscsi: Invalid request_limit_delta\n");
@@ -859,19 +849,18 @@ static int send_srp_login(struct ibmvscsi_host_data *hostdata)
 
 	login = &evt_struct->iu.srp.login_req;
 	memset(login, 0x00, sizeof(struct srp_login_req));
-	login->opcode = SRP_LOGIN_REQ;
-	login->req_it_iu_len = sizeof(union srp_iu);
-	login->req_buf_fmt = SRP_BUF_FORMAT_DIRECT | SRP_BUF_FORMAT_INDIRECT;
+	login->type = SRP_LOGIN_REQ_TYPE;
+	login->max_requested_initiator_to_target_iulen = sizeof(union srp_iu);
+	login->required_buffer_formats = 0x0006;
 	
-	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	/* Start out with a request limit of 1, since this is negotiated in
 	 * the login request we are just sending
 	 */
 	atomic_set(&hostdata->request_limit, 1);
 
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	rc = ibmvscsi_send_srp_event(evt_struct, hostdata);
 	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
-	printk("ibmvscsic: sent SRP login\n");
 	return rc;
 };
 
@@ -939,13 +928,13 @@ static int ibmvscsi_eh_abort_handler(struct scsi_cmnd *cmd)
 	
 	/* Set up an abort SRP command */
 	memset(tsk_mgmt, 0x00, sizeof(*tsk_mgmt));
-	tsk_mgmt->opcode = SRP_TSK_MGMT;
+	tsk_mgmt->type = SRP_TSK_MGMT_TYPE;
 	tsk_mgmt->lun = ((u64) lun) << 48;
-	tsk_mgmt->tsk_mgmt_func = SRP_TSK_ABORT_TASK;
-	tsk_mgmt->task_tag = (u64) found_evt;
+	tsk_mgmt->task_mgmt_flags = 0x01;	/* ABORT TASK */
+	tsk_mgmt->managed_task_tag = (u64) found_evt;
 
 	printk(KERN_INFO "ibmvscsi: aborting command. lun 0x%lx, tag 0x%lx\n",
-	       tsk_mgmt->lun, tsk_mgmt->task_tag);
+	       tsk_mgmt->lun, tsk_mgmt->managed_task_tag);
 
 	evt->sync_srp = &srp_rsp;
 	init_completion(&evt->comp);
@@ -959,25 +948,25 @@ static int ibmvscsi_eh_abort_handler(struct scsi_cmnd *cmd)
 	wait_for_completion(&evt->comp);
 
 	/* make sure we got a good response */
-	if (unlikely(srp_rsp.srp.rsp.opcode != SRP_RSP)) {
+	if (unlikely(srp_rsp.srp.generic.type != SRP_RSP_TYPE)) {
 		if (printk_ratelimit())
 			printk(KERN_WARNING 
 			       "ibmvscsi: abort bad SRP RSP type %d\n",
-			       srp_rsp.srp.rsp.opcode);
+			       srp_rsp.srp.generic.type);
 		return FAILED;
 	}
 
-	if (srp_rsp.srp.rsp.flags & SRP_RSP_FLAG_RSPVALID)
-		rsp_rc = *((int *)srp_rsp.srp.rsp.data);
+	if (srp_rsp.srp.rsp.rspvalid)
+		rsp_rc = *((int *)srp_rsp.srp.rsp.sense_and_response_data);
 	else
 		rsp_rc = srp_rsp.srp.rsp.status;
 
 	if (rsp_rc) {
 		if (printk_ratelimit())
 			printk(KERN_WARNING 
-			       "ibmvscsi: abort code %d for task tag 0x%lx\n",
+		       "ibmvscsi: abort code %d for task tag 0x%lx\n",
 			       rsp_rc,
-			       tsk_mgmt->task_tag);
+			       tsk_mgmt->managed_task_tag);
 		return FAILED;
 	}
 
@@ -998,13 +987,13 @@ static int ibmvscsi_eh_abort_handler(struct scsi_cmnd *cmd)
 		spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 		printk(KERN_INFO
 		       "ibmvscsi: aborted task tag 0x%lx completed\n",
-		       tsk_mgmt->task_tag);
+		       tsk_mgmt->managed_task_tag);
 		return SUCCESS;
 	}
 
 	printk(KERN_INFO
 	       "ibmvscsi: successfully aborted task tag 0x%lx\n",
-	       tsk_mgmt->task_tag);
+	       tsk_mgmt->managed_task_tag);
 
 	cmd->result = (DID_ABORT << 16);
 	list_del(&found_evt->list);
@@ -1051,9 +1040,9 @@ static int ibmvscsi_eh_device_reset_handler(struct scsi_cmnd *cmd)
 
 	/* Set up a lun reset SRP command */
 	memset(tsk_mgmt, 0x00, sizeof(*tsk_mgmt));
-	tsk_mgmt->opcode = SRP_TSK_MGMT;
+	tsk_mgmt->type = SRP_TSK_MGMT_TYPE;
 	tsk_mgmt->lun = ((u64) lun) << 48;
-	tsk_mgmt->tsk_mgmt_func = SRP_TSK_LUN_RESET;
+	tsk_mgmt->task_mgmt_flags = 0x08;	/* LUN RESET */
 
 	printk(KERN_INFO "ibmvscsi: resetting device. lun 0x%lx\n",
 	       tsk_mgmt->lun);
@@ -1070,16 +1059,16 @@ static int ibmvscsi_eh_device_reset_handler(struct scsi_cmnd *cmd)
 	wait_for_completion(&evt->comp);
 
 	/* make sure we got a good response */
-	if (unlikely(srp_rsp.srp.rsp.opcode != SRP_RSP)) {
+	if (unlikely(srp_rsp.srp.generic.type != SRP_RSP_TYPE)) {
 		if (printk_ratelimit())
 			printk(KERN_WARNING 
 			       "ibmvscsi: reset bad SRP RSP type %d\n",
-			       srp_rsp.srp.rsp.opcode);
+			       srp_rsp.srp.generic.type);
 		return FAILED;
 	}
 
-	if (srp_rsp.srp.rsp.flags & SRP_RSP_FLAG_RSPVALID)
-		rsp_rc = *((int *)srp_rsp.srp.rsp.data);
+	if (srp_rsp.srp.rsp.rspvalid)
+		rsp_rc = *((int *)srp_rsp.srp.rsp.sense_and_response_data);
 	else
 		rsp_rc = srp_rsp.srp.rsp.status;
 
@@ -1087,7 +1076,8 @@ static int ibmvscsi_eh_device_reset_handler(struct scsi_cmnd *cmd)
 		if (printk_ratelimit())
 			printk(KERN_WARNING 
 			       "ibmvscsi: reset code %d for task tag 0x%lx\n",
-			       rsp_rc, tsk_mgmt->task_tag);
+		       rsp_rc,
+			       tsk_mgmt->managed_task_tag);
 		return FAILED;
 	}
 
@@ -1189,7 +1179,6 @@ void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 			/* We need to re-setup the interpartition connection */
 			printk(KERN_INFO
 			       "ibmvscsi: Re-enabling adapter!\n");
-			atomic_set(&hostdata->request_limit, -1);
 			purge_requests(hostdata, DID_REQUEUE);
 			if (ibmvscsi_reenable_crq_queue(&hostdata->queue,
 							hostdata) == 0)
@@ -1237,7 +1226,7 @@ void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 	}
 
 	if (crq->format == VIOSRP_SRP_FORMAT)
-		atomic_add(evt_struct->xfer_iu->srp.rsp.req_lim_delta,
+		atomic_add(evt_struct->xfer_iu->srp.rsp.request_limit_delta,
 			   &hostdata->request_limit);
 
 	if (evt_struct->done)
@@ -1265,7 +1254,6 @@ static int ibmvscsi_do_host_config(struct ibmvscsi_host_data *hostdata,
 {
 	struct viosrp_host_config *host_config;
 	struct srp_event_struct *evt_struct;
-	dma_addr_t addr;
 	int rc;
 
 	evt_struct = get_event_struct(&hostdata->pool);
@@ -1286,9 +1274,8 @@ static int ibmvscsi_do_host_config(struct ibmvscsi_host_data *hostdata,
 	memset(host_config, 0x00, sizeof(*host_config));
 	host_config->common.type = VIOSRP_HOST_CONFIG_TYPE;
 	host_config->common.length = length;
-	host_config->buffer = addr = dma_map_single(hostdata->dev, buffer,
-						    length,
-						    DMA_BIDIRECTIONAL);
+	host_config->buffer = dma_map_single(hostdata->dev, buffer, length,
+					    DMA_BIDIRECTIONAL);
 
 	if (dma_mapping_error(host_config->buffer)) {
 		printk(KERN_ERR
@@ -1299,9 +1286,11 @@ static int ibmvscsi_do_host_config(struct ibmvscsi_host_data *hostdata,
 
 	init_completion(&evt_struct->comp);
 	rc = ibmvscsi_send_srp_event(evt_struct, hostdata);
-	if (rc == 0)
+	if (rc == 0) {
 		wait_for_completion(&evt_struct->comp);
-	dma_unmap_single(hostdata->dev, addr, length, DMA_BIDIRECTIONAL);
+		dma_unmap_single(hostdata->dev, host_config->buffer,
+				 length, DMA_BIDIRECTIONAL);
+	}
 
 	return rc;
 }

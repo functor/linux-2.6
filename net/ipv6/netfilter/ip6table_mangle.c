@@ -228,7 +228,7 @@ static struct nf_hook_ops ip6t_ops[] = {
 	},
 };
 
-static int __init ip6table_mangle_init(void)
+static int __init init(void)
 {
 	int ret;
 
@@ -238,22 +238,51 @@ static int __init ip6table_mangle_init(void)
 		return ret;
 
 	/* Register hooks */
-	ret = nf_register_hooks(ip6t_ops, ARRAY_SIZE(ip6t_ops));
+	ret = nf_register_hook(&ip6t_ops[0]);
 	if (ret < 0)
 		goto cleanup_table;
 
+	ret = nf_register_hook(&ip6t_ops[1]);
+	if (ret < 0)
+		goto cleanup_hook0;
+
+	ret = nf_register_hook(&ip6t_ops[2]);
+	if (ret < 0)
+		goto cleanup_hook1;
+
+	ret = nf_register_hook(&ip6t_ops[3]);
+	if (ret < 0)
+		goto cleanup_hook2;
+
+	ret = nf_register_hook(&ip6t_ops[4]);
+	if (ret < 0)
+		goto cleanup_hook3;
+
 	return ret;
 
+ cleanup_hook3:
+        nf_unregister_hook(&ip6t_ops[3]);
+ cleanup_hook2:
+	nf_unregister_hook(&ip6t_ops[2]);
+ cleanup_hook1:
+	nf_unregister_hook(&ip6t_ops[1]);
+ cleanup_hook0:
+	nf_unregister_hook(&ip6t_ops[0]);
  cleanup_table:
 	ip6t_unregister_table(&packet_mangler);
+
 	return ret;
 }
 
-static void __exit ip6table_mangle_fini(void)
+static void __exit fini(void)
 {
-	nf_unregister_hooks(ip6t_ops, ARRAY_SIZE(ip6t_ops));
+	unsigned int i;
+
+	for (i = 0; i < sizeof(ip6t_ops)/sizeof(struct nf_hook_ops); i++)
+		nf_unregister_hook(&ip6t_ops[i]);
+
 	ip6t_unregister_table(&packet_mangler);
 }
 
-module_init(ip6table_mangle_init);
-module_exit(ip6table_mangle_fini);
+module_init(init);
+module_exit(fini);

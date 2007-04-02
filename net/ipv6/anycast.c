@@ -308,7 +308,7 @@ int ipv6_dev_ac_inc(struct net_device *dev, struct in6_addr *addr)
 	 *	not found: create a new one.
 	 */
 
-	aca = kzalloc(sizeof(struct ifacaddr6), GFP_ATOMIC);
+	aca = kmalloc(sizeof(struct ifacaddr6), GFP_ATOMIC);
 
 	if (aca == NULL) {
 		err = -ENOMEM;
@@ -321,6 +321,8 @@ int ipv6_dev_ac_inc(struct net_device *dev, struct in6_addr *addr)
 		err = PTR_ERR(rt);
 		goto out;
 	}
+
+	memset(aca, 0, sizeof(struct ifacaddr6));
 
 	ipv6_addr_copy(&aca->aca_addr, addr);
 	aca->aca_idev = idev;
@@ -548,7 +550,7 @@ static int ac6_seq_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
 	int rc = -ENOMEM;
-	struct ac6_iter_state *s = kzalloc(sizeof(*s), GFP_KERNEL);
+	struct ac6_iter_state *s = kmalloc(sizeof(*s), GFP_KERNEL);
 
 	if (!s)
 		goto out;
@@ -559,6 +561,7 @@ static int ac6_seq_open(struct inode *inode, struct file *file)
 
 	seq = file->private_data;
 	seq->private = s;
+	memset(s, 0, sizeof(*s));
 out:
 	return rc;
 out_kfree:

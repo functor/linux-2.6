@@ -142,14 +142,12 @@ static void jsm_tty_send_xchar(struct uart_port *port, char ch)
 {
 	unsigned long lock_flags;
 	struct jsm_channel *channel = (struct jsm_channel *)port;
-	struct termios *termios;
 
 	spin_lock_irqsave(&port->lock, lock_flags);
-	termios = port->info->tty->termios;
-	if (ch == termios->c_cc[VSTART])
+	if (ch == port->info->tty->termios->c_cc[VSTART])
 		channel->ch_bd->bd_ops->send_start_character(channel);
 
-	if (ch == termios->c_cc[VSTOP])
+	if (ch == port->info->tty->termios->c_cc[VSTOP])
 		channel->ch_bd->bd_ops->send_stop_character(channel);
 	spin_unlock_irqrestore(&port->lock, lock_flags);
 }
@@ -180,7 +178,6 @@ static int jsm_tty_open(struct uart_port *port)
 	struct jsm_board *brd;
 	int rc = 0;
 	struct jsm_channel *channel = (struct jsm_channel *)port;
-	struct termios *termios;
 
 	/* Get board pointer from our array of majors we have allocated */
 	brd = channel->ch_bd;
@@ -242,13 +239,12 @@ static int jsm_tty_open(struct uart_port *port)
 	channel->ch_cached_lsr = 0;
 	channel->ch_stops_sent = 0;
 
-	termios = port->info->tty->termios;
-	channel->ch_c_cflag	= termios->c_cflag;
-	channel->ch_c_iflag	= termios->c_iflag;
-	channel->ch_c_oflag	= termios->c_oflag;
-	channel->ch_c_lflag	= termios->c_lflag;
-	channel->ch_startc	= termios->c_cc[VSTART];
-	channel->ch_stopc	= termios->c_cc[VSTOP];
+	channel->ch_c_cflag	= port->info->tty->termios->c_cflag;
+	channel->ch_c_iflag	= port->info->tty->termios->c_iflag;
+	channel->ch_c_oflag	= port->info->tty->termios->c_oflag;
+	channel->ch_c_lflag	= port->info->tty->termios->c_lflag;
+	channel->ch_startc = port->info->tty->termios->c_cc[VSTART];
+	channel->ch_stopc = port->info->tty->termios->c_cc[VSTOP];
 
 	/* Tell UART to init itself */
 	brd->bd_ops->uart_init(channel);
@@ -788,7 +784,6 @@ static void jsm_carrier(struct jsm_channel *ch)
 
 void jsm_check_queue_flow_control(struct jsm_channel *ch)
 {
-	struct board_ops *bd_ops = ch->ch_bd->bd_ops;
 	int qleft = 0;
 
 	/* Store how much space we have left in the queue */
@@ -814,7 +809,7 @@ void jsm_check_queue_flow_control(struct jsm_channel *ch)
 		/* HWFLOW */
 		if (ch->ch_c_cflag & CRTSCTS) {
 			if(!(ch->ch_flags & CH_RECEIVER_OFF)) {
-				bd_ops->disable_receiver(ch);
+				ch->ch_bd->bd_ops->disable_receiver(ch);
 				ch->ch_flags |= (CH_RECEIVER_OFF);
 				jsm_printk(READ, INFO, &ch->ch_bd->pci_dev,
 					"Internal queue hit hilevel mark (%d)! Turning off interrupts.\n",
@@ -824,7 +819,7 @@ void jsm_check_queue_flow_control(struct jsm_channel *ch)
 		/* SWFLOW */
 		else if (ch->ch_c_iflag & IXOFF) {
 			if (ch->ch_stops_sent <= MAX_STOPS_SENT) {
-				bd_ops->send_stop_character(ch);
+				ch->ch_bd->bd_ops->send_stop_character(ch);
 				ch->ch_stops_sent++;
 				jsm_printk(READ, INFO, &ch->ch_bd->pci_dev,
 					"Sending stop char! Times sent: %x\n", ch->ch_stops_sent);
@@ -851,7 +846,7 @@ void jsm_check_queue_flow_control(struct jsm_channel *ch)
 		/* HWFLOW */
 		if (ch->ch_c_cflag & CRTSCTS) {
 			if (ch->ch_flags & CH_RECEIVER_OFF) {
-				bd_ops->enable_receiver(ch);
+				ch->ch_bd->bd_ops->enable_receiver(ch);
 				ch->ch_flags &= ~(CH_RECEIVER_OFF);
 				jsm_printk(READ, INFO, &ch->ch_bd->pci_dev,
 					"Internal queue hit lowlevel mark (%d)! Turning on interrupts.\n",
@@ -861,7 +856,7 @@ void jsm_check_queue_flow_control(struct jsm_channel *ch)
 		/* SWFLOW */
 		else if (ch->ch_c_iflag & IXOFF && ch->ch_stops_sent) {
 			ch->ch_stops_sent = 0;
-			bd_ops->send_start_character(ch);
+			ch->ch_bd->bd_ops->send_start_character(ch);
 			jsm_printk(READ, INFO, &ch->ch_bd->pci_dev, "Sending start char!\n");
 		}
 	}

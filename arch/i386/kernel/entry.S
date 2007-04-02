@@ -128,6 +128,8 @@ ENTRY(ret_from_fork)
 	call schedule_tail
 	GET_THREAD_INFO(%ebp)
 	popl %eax
+	pushl $0x0202			# Reset kernel eflags
+	popfl
 	jmp syscall_exit
 
 /*
@@ -177,19 +179,15 @@ need_resched:
 
 	# sysenter call handler stub
 ENTRY(sysenter_entry)
-	movl SYSENTER_stack_esp0(%esp),%esp
+	movl TSS_sysenter_esp0(%esp),%esp
 sysenter_past_esp:
 	sti
 	pushl $(__USER_DS)
 	pushl %ebp
 	pushfl
 	pushl $(__USER_CS)
-	/*
-	 * Push current_thread_info()->sysenter_return to the stack.
-	 * A tiny bit of offset fixup is necessary - 4*4 means the 4 words
-	 * pushed above; +8 corresponds to copy_thread's esp0 setting.
-	 */
-	pushl (TI_sysenter_return-THREAD_SIZE+8+4*4)(%esp)
+	pushl $SYSENTER_RETURN
+
 /*
  * Load the potential sixth argument from user stack.
  * Careful about security.
@@ -230,10 +228,6 @@ ENTRY(system_call)
 	pushl %eax			# save orig_eax
 	SAVE_ALL
 	GET_THREAD_INFO(%ebp)
-	testl $TF_MASK,EFLAGS(%esp)
-	jz no_singlestep
-	orl $_TIF_SINGLESTEP,TI_flags(%ebp)
-no_singlestep:
 					# system call tracing in operation / emulation
 	/* Note, _TIF_SECCOMP is bit number 8, and so it needs testw and not testb */
 	testw $(_TIF_SYSCALL_EMU|_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT),TI_flags(%ebp)
@@ -414,7 +408,7 @@ vector=0
 ENTRY(irq_entries_start)
 .rept NR_IRQS
 	ALIGN
-1:	pushl $~(vector)
+1:	pushl $vector-256
 	jmp common_interrupt
 .data
 	.long 1b
@@ -431,7 +425,7 @@ common_interrupt:
 
 #define BUILD_INTERRUPT(name, nr)	\
 ENTRY(name)				\
-	pushl $~(nr);			\
+	pushl $nr-256;			\
 	SAVE_ALL			\
 	movl %esp,%eax;			\
 	call smp_/**/name;		\
@@ -500,7 +494,7 @@ device_not_available_emulate:
  * that sets up the real kernel stack. Check here, since we can't
  * allow the wrong stack to be used.
  *
- * "SYSENTER_stack_esp0+12" is because the NMI/debug handler will have
+ * "TSS_sysenter_esp0+12" is because the NMI/debug handler will have
  * already pushed 3 words if it hits on the sysenter instruction:
  * eflags, cs and eip.
  *
@@ -512,7 +506,7 @@ device_not_available_emulate:
 	cmpw $__KERNEL_CS,4(%esp);		\
 	jne ok;					\
 label:						\
-	movl SYSENTER_stack_esp0+offset(%esp),%esp;	\
+	movl TSS_sysenter_esp0+offset(%esp),%esp;	\
 	pushfl;					\
 	pushl $__KERNEL_CS;			\
 	pushl $sysenter_past_esp

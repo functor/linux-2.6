@@ -156,10 +156,12 @@ acpi_status acpi_os_get_root_pointer(u32 flags, struct acpi_pointer *addr)
 {
 	if (efi_enabled) {
 		addr->pointer_type = ACPI_PHYSICAL_POINTER;
-		if (efi.acpi20 != EFI_INVALID_TABLE_ADDR)
-			addr->pointer.physical = efi.acpi20;
-		else if (efi.acpi != EFI_INVALID_TABLE_ADDR)
-			addr->pointer.physical = efi.acpi;
+		if (efi.acpi20)
+			addr->pointer.physical =
+			    (acpi_physical_address) virt_to_phys(efi.acpi20);
+		else if (efi.acpi)
+			addr->pointer.physical =
+			    (acpi_physical_address) virt_to_phys(efi.acpi);
 		else {
 			printk(KERN_ERR PREFIX
 			       "System description tables not found\n");
@@ -180,14 +182,22 @@ acpi_status
 acpi_os_map_memory(acpi_physical_address phys, acpi_size size,
 		   void __iomem ** virt)
 {
-	if (phys > ULONG_MAX) {
-		printk(KERN_ERR PREFIX "Cannot map memory that high\n");
-		return AE_BAD_PARAMETER;
+	if (efi_enabled) {
+		if (EFI_MEMORY_WB & efi_mem_attributes(phys)) {
+			*virt = (void __iomem *)phys_to_virt(phys);
+		} else {
+			*virt = ioremap(phys, size);
+		}
+	} else {
+		if (phys > ULONG_MAX) {
+			printk(KERN_ERR PREFIX "Cannot map memory that high\n");
+			return AE_BAD_PARAMETER;
+		}
+		/*
+		 * ioremap checks to ensure this is in reserved space
+		 */
+		*virt = ioremap((unsigned long)phys, size);
 	}
-	/*
-	 * ioremap checks to ensure this is in reserved space
-	 */
-	*virt = ioremap((unsigned long)phys, size);
 
 	if (!*virt)
 		return AE_NO_MEMORY;
@@ -399,8 +409,18 @@ acpi_os_read_memory(acpi_physical_address phys_addr, u32 * value, u32 width)
 {
 	u32 dummy;
 	void __iomem *virt_addr;
+	int iomem = 0;
 
-	virt_addr = ioremap(phys_addr, width);
+	if (efi_enabled) {
+		if (EFI_MEMORY_WB & efi_mem_attributes(phys_addr)) {
+			/* HACK ALERT! We can use readb/w/l on real memory too.. */
+			virt_addr = (void __iomem *)phys_to_virt(phys_addr);
+		} else {
+			iomem = 1;
+			virt_addr = ioremap(phys_addr, width);
+		}
+	} else
+		virt_addr = (void __iomem *)phys_to_virt(phys_addr);
 	if (!value)
 		value = &dummy;
 
@@ -418,7 +438,10 @@ acpi_os_read_memory(acpi_physical_address phys_addr, u32 * value, u32 width)
 		BUG();
 	}
 
-	iounmap(virt_addr);
+	if (efi_enabled) {
+		if (iomem)
+			iounmap(virt_addr);
+	}
 
 	return AE_OK;
 }
@@ -427,8 +450,18 @@ acpi_status
 acpi_os_write_memory(acpi_physical_address phys_addr, u32 value, u32 width)
 {
 	void __iomem *virt_addr;
+	int iomem = 0;
 
-	virt_addr = ioremap(phys_addr, width);
+	if (efi_enabled) {
+		if (EFI_MEMORY_WB & efi_mem_attributes(phys_addr)) {
+			/* HACK ALERT! We can use writeb/w/l on real memory too */
+			virt_addr = (void __iomem *)phys_to_virt(phys_addr);
+		} else {
+			iomem = 1;
+			virt_addr = ioremap(phys_addr, width);
+		}
+	} else
+		virt_addr = (void __iomem *)phys_to_virt(phys_addr);
 
 	switch (width) {
 	case 8:
@@ -444,7 +477,8 @@ acpi_os_write_memory(acpi_physical_address phys_addr, u32 value, u32 width)
 		BUG();
 	}
 
-	iounmap(virt_addr);
+	if (iomem)
+		iounmap(virt_addr);
 
 	return AE_OK;
 }
@@ -769,7 +803,7 @@ acpi_status acpi_os_wait_semaphore(acpi_handle handle, u32 units, u16 timeout)
 	ACPI_DEBUG_PRINT((ACPI_DB_MUTEX, "Waiting for semaphore[%p|%d|%d]\n",
 			  handle, units, timeout));
 
-	if (in_atomic() || acpi_in_resume)
+	if (in_atomic())
 		timeout = 0;
 
 	switch (timeout) {
@@ -898,7 +932,7 @@ u8 acpi_os_writable(void *ptr, acpi_size len)
 
 u32 acpi_os_get_thread_id(void)
 {
-	if (!in_atomic() && !acpi_in_resume)
+	if (!in_atomic())
 		return current->pid;
 
 	return 0;
@@ -1141,12 +1175,7 @@ acpi_status acpi_os_release_object(acpi_cache_t * cache, void *object)
 
 void *acpi_os_acquire_object(acpi_cache_t * cache)
 {
-	void *object;
-
-	if (acpi_in_resume)
-		object = kmem_cache_alloc(cache, GFP_ATOMIC);
-	else
-		object = kmem_cache_alloc(cache, GFP_KERNEL);
+	void *object = kmem_cache_alloc(cache, GFP_KERNEL);
 	WARN_ON(!object);
 	return object;
 }

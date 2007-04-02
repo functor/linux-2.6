@@ -42,7 +42,6 @@
 #include <linux/completion.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include <linux/mutex.h>
 
 
 #ifdef CONFIG_USB_DEBUG
@@ -144,7 +143,7 @@ struct usb_pcwd_private {
 static struct usb_pcwd_private *usb_pcwd_device;
 
 /* prevent races between open() and disconnect() */
-static DEFINE_MUTEX(disconnect_mutex);
+static DECLARE_MUTEX (disconnect_sem);
 
 /* local function prototypes */
 static int usb_pcwd_probe	(struct usb_interface *interface, const struct usb_device_id *id);
@@ -705,8 +704,7 @@ err_out_misc_deregister:
 err_out_unregister_reboot:
 	unregister_reboot_notifier(&usb_pcwd_notifier);
 error:
-	if (usb_pcwd)
-		usb_pcwd_delete(usb_pcwd);
+	usb_pcwd_delete (usb_pcwd);
 	usb_pcwd_device = NULL;
 	return retval;
 }
@@ -725,7 +723,7 @@ static void usb_pcwd_disconnect(struct usb_interface *interface)
 	struct usb_pcwd_private *usb_pcwd;
 
 	/* prevent races with open() */
-	mutex_lock(&disconnect_mutex);
+	down (&disconnect_sem);
 
 	usb_pcwd = usb_get_intfdata (interface);
 	usb_set_intfdata (interface, NULL);
@@ -751,7 +749,7 @@ static void usb_pcwd_disconnect(struct usb_interface *interface)
 
 	cards_found--;
 
-	mutex_unlock(&disconnect_mutex);
+	up (&disconnect_sem);
 
 	printk(KERN_INFO PFX "USB PC Watchdog disconnected\n");
 }

@@ -294,7 +294,7 @@ xfs_attr_set_int(xfs_inode_t *dp, const char *name, int namelen,
 	xfs_trans_ihold(args.trans, dp);
 
 	/*
-	 * If the attribute list is non-existent or a shortform list,
+	 * If the attribute list is non-existant or a shortform list,
 	 * upgrade it to a single-leaf-block attribute list.
 	 */
 	if ((dp->i_d.di_aformat == XFS_DINODE_FMT_LOCAL) ||
@@ -1127,7 +1127,8 @@ xfs_attr_leaf_list(xfs_attr_list_context_t *context)
 		return(error);
 	ASSERT(bp != NULL);
 	leaf = bp->data;
-	if (unlikely(be16_to_cpu(leaf->hdr.info.magic) != XFS_ATTR_LEAF_MAGIC)) {
+	if (unlikely(INT_GET(leaf->hdr.info.magic, ARCH_CONVERT)
+						!= XFS_ATTR_LEAF_MAGIC)) {
 		XFS_CORRUPTION_ERROR("xfs_attr_leaf_list", XFS_ERRLEVEL_LOW,
 				     context->dp->i_mount, leaf);
 		xfs_da_brelse(NULL, bp);
@@ -1540,8 +1541,8 @@ xfs_attr_node_removename(xfs_da_args_t *args)
 						     XFS_ATTR_FORK);
 		if (error)
 			goto out;
-		ASSERT(be16_to_cpu(((xfs_attr_leafblock_t *)
-				      bp->data)->hdr.info.magic)
+		ASSERT(INT_GET(((xfs_attr_leafblock_t *)
+				      bp->data)->hdr.info.magic, ARCH_CONVERT)
 						       == XFS_ATTR_LEAF_MAGIC);
 
 		if ((forkoff = xfs_attr_shortform_allfit(bp, dp))) {
@@ -1584,7 +1585,7 @@ out:
  * Fill in the disk block numbers in the state structure for the buffers
  * that are attached to the state structure.
  * This is done so that we can quickly reattach ourselves to those buffers
- * after some set of transaction commits have released these buffers.
+ * after some set of transaction commit's has released these buffers.
  */
 STATIC int
 xfs_attr_fillstate(xfs_da_state_t *state)
@@ -1631,7 +1632,7 @@ xfs_attr_fillstate(xfs_da_state_t *state)
 /*
  * Reattach the buffers to the state structure based on the disk block
  * numbers stored in the state structure.
- * This is done after some set of transaction commits have released those
+ * This is done after some set of transaction commit's has released those
  * buffers from our grip.
  */
 STATIC int
@@ -1762,7 +1763,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 			return(error);
 		if (bp) {
 			node = bp->data;
-			switch (be16_to_cpu(node->hdr.info.magic)) {
+			switch (INT_GET(node->hdr.info.magic, ARCH_CONVERT)) {
 			case XFS_DA_NODE_MAGIC:
 				xfs_attr_trace_l_cn("wrong blk", context, node);
 				xfs_da_brelse(NULL, bp);
@@ -1770,14 +1771,18 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				break;
 			case XFS_ATTR_LEAF_MAGIC:
 				leaf = bp->data;
-				if (cursor->hashval > be32_to_cpu(leaf->entries[
-				    be16_to_cpu(leaf->hdr.count)-1].hashval)) {
+				if (cursor->hashval >
+				    INT_GET(leaf->entries[
+					 INT_GET(leaf->hdr.count,
+						ARCH_CONVERT)-1].hashval,
+							ARCH_CONVERT)) {
 					xfs_attr_trace_l_cl("wrong blk",
 							   context, leaf);
 					xfs_da_brelse(NULL, bp);
 					bp = NULL;
 				} else if (cursor->hashval <=
-					     be32_to_cpu(leaf->entries[0].hashval)) {
+					     INT_GET(leaf->entries[0].hashval,
+							ARCH_CONVERT)) {
 					xfs_attr_trace_l_cl("maybe wrong blk",
 							   context, leaf);
 					xfs_da_brelse(NULL, bp);
@@ -1812,10 +1817,10 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				return(XFS_ERROR(EFSCORRUPTED));
 			}
 			node = bp->data;
-			if (be16_to_cpu(node->hdr.info.magic)
+			if (INT_GET(node->hdr.info.magic, ARCH_CONVERT)
 							== XFS_ATTR_LEAF_MAGIC)
 				break;
-			if (unlikely(be16_to_cpu(node->hdr.info.magic)
+			if (unlikely(INT_GET(node->hdr.info.magic, ARCH_CONVERT)
 							!= XFS_DA_NODE_MAGIC)) {
 				XFS_CORRUPTION_ERROR("xfs_attr_node_list(3)",
 						     XFS_ERRLEVEL_LOW,
@@ -1825,17 +1830,19 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				return(XFS_ERROR(EFSCORRUPTED));
 			}
 			btree = node->btree;
-			for (i = 0; i < be16_to_cpu(node->hdr.count);
+			for (i = 0;
+				i < INT_GET(node->hdr.count, ARCH_CONVERT);
 								btree++, i++) {
 				if (cursor->hashval
-						<= be32_to_cpu(btree->hashval)) {
-					cursor->blkno = be32_to_cpu(btree->before);
+						<= INT_GET(btree->hashval,
+							    ARCH_CONVERT)) {
+					cursor->blkno = INT_GET(btree->before, ARCH_CONVERT);
 					xfs_attr_trace_l_cb("descending",
 							    context, btree);
 					break;
 				}
 			}
-			if (i == be16_to_cpu(node->hdr.count)) {
+			if (i == INT_GET(node->hdr.count, ARCH_CONVERT)) {
 				xfs_da_brelse(NULL, bp);
 				return(0);
 			}
@@ -1851,7 +1858,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 	 */
 	for (;;) {
 		leaf = bp->data;
-		if (unlikely(be16_to_cpu(leaf->hdr.info.magic)
+		if (unlikely(INT_GET(leaf->hdr.info.magic, ARCH_CONVERT)
 						!= XFS_ATTR_LEAF_MAGIC)) {
 			XFS_CORRUPTION_ERROR("xfs_attr_node_list(4)",
 					     XFS_ERRLEVEL_LOW,
@@ -1862,7 +1869,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 		error = xfs_attr_leaf_list_int(bp, context);
 		if (error || !leaf->hdr.info.forw)
 			break;	/* not really an error, buffer full or EOF */
-		cursor->blkno = be32_to_cpu(leaf->hdr.info.forw);
+		cursor->blkno = INT_GET(leaf->hdr.info.forw, ARCH_CONVERT);
 		xfs_da_brelse(NULL, bp);
 		error = xfs_da_read_buf(NULL, context->dp, cursor->blkno, -1,
 					      &bp, XFS_ATTR_FORK);
@@ -2225,10 +2232,9 @@ xfs_attr_trace_l_cn(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)be16_to_cpu(node->hdr.count),
-		(__psunsigned_t)be32_to_cpu(node->btree[0].hashval),
-		(__psunsigned_t)be32_to_cpu(node->btree[
-				    be16_to_cpu(node->hdr.count)-1].hashval));
+		(__psunsigned_t)INT_GET(node->hdr.count, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(node->btree[0].hashval, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(node->btree[INT_GET(node->hdr.count, ARCH_CONVERT)-1].hashval, ARCH_CONVERT));
 }
 
 /*
@@ -2255,8 +2261,8 @@ xfs_attr_trace_l_cb(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)be32_to_cpu(btree->hashval),
-		(__psunsigned_t)be32_to_cpu(btree->before),
+		(__psunsigned_t)INT_GET(btree->hashval, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(btree->before, ARCH_CONVERT),
 		(__psunsigned_t)NULL);
 }
 
@@ -2284,10 +2290,9 @@ xfs_attr_trace_l_cl(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)be16_to_cpu(leaf->hdr.count),
-		(__psunsigned_t)be32_to_cpu(leaf->entries[0].hashval),
-		(__psunsigned_t)be32_to_cpu(leaf->entries[
-				be16_to_cpu(leaf->hdr.count)-1].hashval));
+		(__psunsigned_t)INT_GET(leaf->hdr.count, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(leaf->entries[0].hashval, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(leaf->entries[INT_GET(leaf->hdr.count, ARCH_CONVERT)-1].hashval, ARCH_CONVERT));
 }
 
 /*
@@ -2517,7 +2522,7 @@ attr_user_capable(
 	struct vnode	*vp,
 	cred_t		*cred)
 {
-	struct inode	*inode = vn_to_inode(vp);
+	struct inode	*inode = LINVFS_GET_IP(vp);
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
@@ -2535,7 +2540,7 @@ attr_trusted_capable(
 	struct vnode	*vp,
 	cred_t		*cred)
 {
-	struct inode	*inode = vn_to_inode(vp);
+	struct inode	*inode = LINVFS_GET_IP(vp);
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;

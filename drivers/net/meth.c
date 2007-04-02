@@ -62,7 +62,7 @@ MODULE_DESCRIPTION("SGI O2 Builtin Fast Ethernet driver");
 
 #ifdef HAVE_TX_TIMEOUT
 static int timeout = TX_TIMEOUT;
-module_param(timeout, int, 0);
+MODULE_PARM(timeout, "i");
 #endif
 
 /*

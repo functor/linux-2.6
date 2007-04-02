@@ -369,6 +369,8 @@ static ssize_t slm_read( struct file *file, char *buf, size_t count,
 	int length;
 	int end;
 
+	if (count < 0)
+		return( -EINVAL );
 	if (!(page = __get_free_page( GFP_KERNEL )))
 		return( -ENOMEM );
 	

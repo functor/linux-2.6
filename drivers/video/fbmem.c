@@ -55,7 +55,7 @@
 
 #define FBPIXMAPSIZE	(1024 * 8)
 
-static BLOCKING_NOTIFIER_HEAD(fb_notifier_list);
+static struct notifier_block *fb_notifier_list;
 struct fb_info *registered_fb[FB_MAX];
 int num_registered_fb;
 
@@ -435,11 +435,6 @@ int fb_prepare_logo(struct fb_info *info, int rotate)
 			depth = info->var.green.length;
 	}
 
-	if (info->fix.visual == FB_VISUAL_STATIC_PSEUDOCOLOR) {
-		/* assume console colormap */
-		depth = 4;
-	}
-
 	if (depth >= 8) {
 		switch (info->fix.visual) {
 		case FB_VISUAL_TRUECOLOR:
@@ -559,7 +554,8 @@ static int fbmem_read_proc(char *buf, char **start, off_t offset,
 	int clen;
 
 	clen = 0;
-	for (fi = registered_fb; fi < &registered_fb[FB_MAX] && len < 4000; fi++)
+	for (fi = registered_fb; fi < &registered_fb[FB_MAX] && clen < 4000;
+	     fi++)
 		if (*fi)
 			clen += sprintf(buf + clen, "%d %s\n",
 				        (*fi)->node,
@@ -795,7 +791,7 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 
 		    event.info = info;
 		    event.data = &mode1;
-		    ret = blocking_notifier_call_chain(&fb_notifier_list,
+		    ret = notifier_call_chain(&fb_notifier_list,
 					      FB_EVENT_MODE_DELETE, &event);
 		}
 
@@ -841,8 +837,8 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 
 				info->flags &= ~FBINFO_MISC_USEREVENT;
 				event.info = info;
-				blocking_notifier_call_chain(&fb_notifier_list,
-						evnt, &event);
+				notifier_call_chain(&fb_notifier_list, evnt,
+						    &event);
 			}
 		}
 	}
@@ -865,8 +861,7 @@ fb_blank(struct fb_info *info, int blank)
 
 		event.info = info;
 		event.data = &blank;
-		blocking_notifier_call_chain(&fb_notifier_list,
-				FB_EVENT_BLANK, &event);
+		notifier_call_chain(&fb_notifier_list, FB_EVENT_BLANK, &event);
 	}
 
  	return ret;
@@ -937,7 +932,7 @@ fb_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		con2fb.framebuffer = -1;
 		event.info = info;
 		event.data = &con2fb;
-		blocking_notifier_call_chain(&fb_notifier_list,
+		notifier_call_chain(&fb_notifier_list,
 				    FB_EVENT_GET_CONSOLE_MAP, &event);
 		return copy_to_user(argp, &con2fb,
 				    sizeof(con2fb)) ? -EFAULT : 0;
@@ -956,7 +951,7 @@ fb_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		    return -EINVAL;
 		event.info = info;
 		event.data = &con2fb;
-		return blocking_notifier_call_chain(&fb_notifier_list,
+		return notifier_call_chain(&fb_notifier_list,
 					   FB_EVENT_SET_CONSOLE_MAP,
 					   &event);
 	case FBIOBLANK:
@@ -1181,6 +1176,11 @@ fb_mmap(struct file *file, struct vm_area_struct * vma)
 	vma->vm_pgoff = off >> PAGE_SHIFT;
 	/* This is an IO map - tell maydump to skip this VMA */
 	vma->vm_flags |= VM_IO | VM_RESERVED;
+#if defined(__sparc_v9__)
+	if (io_remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
+				vma->vm_end - vma->vm_start, vma->vm_page_prot))
+		return -EAGAIN;
+#else
 #if defined(__mc68000__)
 #if defined(CONFIG_SUN3)
 	pgprot_val(vma->vm_page_prot) |= SUN3_PAGE_NOCACHE;
@@ -1202,7 +1202,7 @@ fb_mmap(struct file *file, struct vm_area_struct * vma)
 #elif defined(__i386__) || defined(__x86_64__)
 	if (boot_cpu_data.x86 > 3)
 		pgprot_val(vma->vm_page_prot) |= _PAGE_PCD;
-#elif defined(__mips__) || defined(__sparc_v9__)
+#elif defined(__mips__)
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 #elif defined(__hppa__)
 	pgprot_val(vma->vm_page_prot) |= _PAGE_NO_CACHE;
@@ -1219,6 +1219,7 @@ fb_mmap(struct file *file, struct vm_area_struct * vma)
 	if (io_remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
 			     vma->vm_end - vma->vm_start, vma->vm_page_prot))
 		return -EAGAIN;
+#endif /* !__sparc_v9__ */
 	return 0;
 #endif /* !sparc32 */
 }
@@ -1336,7 +1337,7 @@ register_framebuffer(struct fb_info *fb_info)
 	devfs_mk_cdev(MKDEV(FB_MAJOR, i),
 			S_IFCHR | S_IRUGO | S_IWUGO, "fb/%d", i);
 	event.info = fb_info;
-	blocking_notifier_call_chain(&fb_notifier_list,
+	notifier_call_chain(&fb_notifier_list,
 			    FB_EVENT_FB_REGISTERED, &event);
 	return 0;
 }
@@ -1378,7 +1379,7 @@ unregister_framebuffer(struct fb_info *fb_info)
  */
 int fb_register_client(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_register(&fb_notifier_list, nb);
+	return notifier_chain_register(&fb_notifier_list, nb);
 }
 
 /**
@@ -1387,7 +1388,7 @@ int fb_register_client(struct notifier_block *nb)
  */
 int fb_unregister_client(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_unregister(&fb_notifier_list, nb);
+	return notifier_chain_unregister(&fb_notifier_list, nb);
 }
 
 /**
@@ -1405,13 +1406,11 @@ void fb_set_suspend(struct fb_info *info, int state)
 
 	event.info = info;
 	if (state) {
-		blocking_notifier_call_chain(&fb_notifier_list,
-				FB_EVENT_SUSPEND, &event);
+		notifier_call_chain(&fb_notifier_list, FB_EVENT_SUSPEND, &event);
 		info->state = FBINFO_STATE_SUSPENDED;
 	} else {
 		info->state = FBINFO_STATE_RUNNING;
-		blocking_notifier_call_chain(&fb_notifier_list,
-				FB_EVENT_RESUME, &event);
+		notifier_call_chain(&fb_notifier_list, FB_EVENT_RESUME, &event);
 	}
 }
 
@@ -1483,7 +1482,7 @@ int fb_new_modelist(struct fb_info *info)
 
 	if (!list_empty(&info->modelist)) {
 		event.info = info;
-		err = blocking_notifier_call_chain(&fb_notifier_list,
+		err = notifier_call_chain(&fb_notifier_list,
 					   FB_EVENT_NEW_MODELIST,
 					   &event);
 	}
@@ -1509,7 +1508,7 @@ int fb_con_duit(struct fb_info *info, int event, void *data)
 	evnt.info = info;
 	evnt.data = data;
 
-	return blocking_notifier_call_chain(&fb_notifier_list, event, &evnt);
+	return notifier_call_chain(&fb_notifier_list, event, &evnt);
 }
 EXPORT_SYMBOL(fb_con_duit);
 
@@ -1599,7 +1598,7 @@ static int __init video_setup(char *options)
 		}
 	}
 
-	return 1;
+	return 0;
 }
 __setup("video=", video_setup);
 #endif

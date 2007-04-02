@@ -34,7 +34,7 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #include "ptrace.h"
 
@@ -208,19 +208,19 @@ void die_if_kernel(const char *str, struct pt_regs *regs, int err)
     	die(str, regs, err);
 }
 
-static DEFINE_MUTEX(undef_mutex);
+static DECLARE_MUTEX(undef_sem);
 static int (*undef_hook)(struct pt_regs *);
 
 int request_undef_hook(int (*fn)(struct pt_regs *))
 {
 	int ret = -EBUSY;
 
-	mutex_lock(&undef_mutex);
+	down(&undef_sem);
 	if (undef_hook == NULL) {
 		undef_hook = fn;
 		ret = 0;
 	}
-	mutex_unlock(&undef_mutex);
+	up(&undef_sem);
 
 	return ret;
 }
@@ -229,12 +229,12 @@ int release_undef_hook(int (*fn)(struct pt_regs *))
 {
 	int ret = -EINVAL;
 
-	mutex_lock(&undef_mutex);
+	down(&undef_sem);
 	if (undef_hook == fn) {
 		undef_hook = NULL;
 		ret = 0;
 	}
-	mutex_unlock(&undef_mutex);
+	up(&undef_sem);
 
 	return ret;
 }

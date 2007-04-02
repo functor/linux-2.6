@@ -70,7 +70,7 @@ struct kstat {
 	struct timespec	mtime;
 	struct timespec	ctime;
 	unsigned long	blksize;
-	unsigned long long	blocks;
+	unsigned long	blocks;
 };
 
 #endif

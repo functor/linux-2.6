@@ -40,11 +40,15 @@ extern ctxd_t *srmmu_ctx_table_phys;
 extern void calibrate_delay(void);
 
 extern volatile int smp_processors_ready;
+extern int smp_num_cpus;
 extern volatile unsigned long cpu_callin_map[NR_CPUS];
 extern unsigned char boot_cpu_id;
-
-extern cpumask_t smp_commenced_mask;
-
+extern int smp_activated;
+extern volatile int __cpu_number_map[NR_CPUS];
+extern volatile int __cpu_logical_map[NR_CPUS];
+extern volatile unsigned long ipi_count;
+extern volatile int smp_process_available;
+extern volatile int smp_commenced;
 extern int __smp4m_processor_id(void);
 
 /*#define SMP_DEBUG*/
@@ -73,6 +77,8 @@ void __init smp4m_callin(void)
 	local_flush_cache_all();
 	local_flush_tlb_all();
 
+	set_irq_udt(boot_cpu_id);
+
 	/* Get our local ticker going. */
 	smp_setup_percpu_timer();
 
@@ -89,9 +95,8 @@ void __init smp4m_callin(void)
 	 * to call the scheduler code.
 	 */
 	/* Allow master to continue. */
-	swap(&cpu_callin_map[cpuid], 1);
+	swap((unsigned long *)&cpu_callin_map[cpuid], 1);
 
-	/* XXX: What's up with all the flushes? */
 	local_flush_cache_all();
 	local_flush_tlb_all();
 	
@@ -106,14 +111,13 @@ void __init smp4m_callin(void)
 	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;
 
-	while (!cpu_isset(cpuid, smp_commenced_mask))
-		mb();
+	while(!smp_commenced)
+		barrier();
+
+	local_flush_cache_all();
+	local_flush_tlb_all();
 
 	local_irq_enable();
-
-	cpu_set(cpuid, cpu_online_map);
-	/* last one in gets all the interrupts (for testing) */
-	set_irq_udt(boot_cpu_id);
 }
 
 extern void init_IRQ(void);
@@ -130,92 +134,120 @@ extern unsigned long trapbase_cpu3[];
 
 void __init smp4m_boot_cpus(void)
 {
+	int cpucount = 0;
+	int i, mid;
+
+	printk("Entering SMP Mode...\n");
+
+	local_irq_enable();
+	cpus_clear(cpu_present_map);
+
+	for (i = 0; !cpu_find_by_instance(i, NULL, &mid); i++)
+		cpu_set(mid, cpu_present_map);
+
+	for(i=0; i < NR_CPUS; i++) {
+		__cpu_number_map[i] = -1;
+		__cpu_logical_map[i] = -1;
+	}
+
+	__cpu_number_map[boot_cpu_id] = 0;
+	__cpu_logical_map[0] = boot_cpu_id;
+	current_thread_info()->cpu = boot_cpu_id;
+
+	smp_store_cpu_info(boot_cpu_id);
+	set_irq_udt(boot_cpu_id);
 	smp_setup_percpu_timer();
 	local_flush_cache_all();
-}
+	if(cpu_find_by_instance(1, NULL, NULL))
+		return;  /* Not an MP box. */
+	for(i = 0; i < NR_CPUS; i++) {
+		if(i == boot_cpu_id)
+			continue;
 
-int smp4m_boot_one_cpu(int i)
-{
-	extern unsigned long sun4m_cpu_startup;
-	unsigned long *entry = &sun4m_cpu_startup;
-	struct task_struct *p;
-	int timeout;
-	int cpu_node;
+		if (cpu_isset(i, cpu_present_map)) {
+			extern unsigned long sun4m_cpu_startup;
+			unsigned long *entry = &sun4m_cpu_startup;
+			struct task_struct *p;
+			int timeout;
 
-	cpu_find_by_mid(i, &cpu_node);
+			/* Cook up an idler for this guy. */
+			p = fork_idle(i);
+			cpucount++;
+			current_set[i] = task_thread_info(p);
+			/* See trampoline.S for details... */
+			entry += ((i-1) * 3);
 
-	/* Cook up an idler for this guy. */
-	p = fork_idle(i);
-	current_set[i] = task_thread_info(p);
-	/* See trampoline.S for details... */
-	entry += ((i-1) * 3);
+			/*
+			 * Initialize the contexts table
+			 * Since the call to prom_startcpu() trashes the structure,
+			 * we need to re-initialize it for each cpu
+			 */
+			smp_penguin_ctable.which_io = 0;
+			smp_penguin_ctable.phys_addr = (unsigned int) srmmu_ctx_table_phys;
+			smp_penguin_ctable.reg_size = 0;
 
-	/*
-	 * Initialize the contexts table
-	 * Since the call to prom_startcpu() trashes the structure,
-	 * we need to re-initialize it for each cpu
-	 */
-	smp_penguin_ctable.which_io = 0;
-	smp_penguin_ctable.phys_addr = (unsigned int) srmmu_ctx_table_phys;
-	smp_penguin_ctable.reg_size = 0;
+			/* whirrr, whirrr, whirrrrrrrrr... */
+			printk("Starting CPU %d at %p\n", i, entry);
+			local_flush_cache_all();
+			prom_startcpu(cpu_data(i).prom_node,
+				      &smp_penguin_ctable, 0, (char *)entry);
 
-	/* whirrr, whirrr, whirrrrrrrrr... */
-	printk("Starting CPU %d at %p\n", i, entry);
-	local_flush_cache_all();
-	prom_startcpu(cpu_node,
-		      &smp_penguin_ctable, 0, (char *)entry);
-
-	/* wheee... it's going... */
-	for(timeout = 0; timeout < 10000; timeout++) {
-		if(cpu_callin_map[i])
-			break;
-		udelay(200);
-	}
-
-	if (!(cpu_callin_map[i])) {
-		printk("Processor %d is stuck.\n", i);
-		return -ENODEV;
-	}
-
-	local_flush_cache_all();
-	return 0;
-}
-
-void __init smp4m_smp_done(void)
-{
-	int i, first;
-	int *prev;
-
-	/* setup cpu list for irq rotation */
-	first = 0;
-	prev = &first;
-	for (i = 0; i < NR_CPUS; i++) {
-		if (cpu_online(i)) {
-			*prev = i;
-			prev = &cpu_data(i).next;
+			/* wheee... it's going... */
+			for(timeout = 0; timeout < 10000; timeout++) {
+				if(cpu_callin_map[i])
+					break;
+				udelay(200);
+			}
+			if(cpu_callin_map[i]) {
+				/* Another "Red Snapper". */
+				__cpu_number_map[i] = i;
+				__cpu_logical_map[i] = i;
+			} else {
+				cpucount--;
+				printk("Processor %d is stuck.\n", i);
+			}
+		}
+		if(!(cpu_callin_map[i])) {
+			cpu_clear(i, cpu_present_map);
+			__cpu_number_map[i] = -1;
 		}
 	}
-	*prev = first;
 	local_flush_cache_all();
+	if(cpucount == 0) {
+		printk("Error: only one Processor found.\n");
+		cpu_present_map = cpumask_of_cpu(smp_processor_id());
+	} else {
+		unsigned long bogosum = 0;
+		for(i = 0; i < NR_CPUS; i++) {
+			if (cpu_isset(i, cpu_present_map))
+				bogosum += cpu_data(i).udelay_val;
+		}
+		printk("Total of %d Processors activated (%lu.%02lu BogoMIPS).\n",
+		       cpucount + 1,
+		       bogosum/(500000/HZ),
+		       (bogosum/(5000/HZ))%100);
+		smp_activated = 1;
+		smp_num_cpus = cpucount + 1;
+	}
 
 	/* Free unneeded trap tables */
-	if (!cpu_isset(1, cpu_present_map)) {
+	if (!cpu_isset(i, cpu_present_map)) {
 		ClearPageReserved(virt_to_page(trapbase_cpu1));
-		init_page_count(virt_to_page(trapbase_cpu1));
+		set_page_count(virt_to_page(trapbase_cpu1), 1);
 		free_page((unsigned long)trapbase_cpu1);
 		totalram_pages++;
 		num_physpages++;
 	}
 	if (!cpu_isset(2, cpu_present_map)) {
 		ClearPageReserved(virt_to_page(trapbase_cpu2));
-		init_page_count(virt_to_page(trapbase_cpu2));
+		set_page_count(virt_to_page(trapbase_cpu2), 1);
 		free_page((unsigned long)trapbase_cpu2);
 		totalram_pages++;
 		num_physpages++;
 	}
 	if (!cpu_isset(3, cpu_present_map)) {
 		ClearPageReserved(virt_to_page(trapbase_cpu3));
-		init_page_count(virt_to_page(trapbase_cpu3));
+		set_page_count(virt_to_page(trapbase_cpu3), 1);
 		free_page((unsigned long)trapbase_cpu3);
 		totalram_pages++;
 		num_physpages++;
@@ -233,9 +265,6 @@ void __init smp4m_smp_done(void)
  */
 void smp4m_irq_rotate(int cpu)
 {
-	int next = cpu_data(cpu).next;
-	if (next != cpu)
-		set_irq_udt(next);
 }
 
 /* Cross calls, in order to work efficiently and atomically do all
@@ -262,7 +291,7 @@ void smp4m_message_pass(int target, int msg, unsigned long data, int wait)
 
 	smp_cpu_in_msg[me]++;
 	if(target == MSG_ALL_BUT_SELF || target == MSG_ALL) {
-		mask = cpu_online_map;
+		mask = cpu_present_map;
 		if(target == MSG_ALL_BUT_SELF)
 			cpu_clear(me, mask);
 		for(i = 0; i < 4; i++) {
@@ -287,8 +316,8 @@ static struct smp_funcall {
 	unsigned long arg3;
 	unsigned long arg4;
 	unsigned long arg5;
-	unsigned long processors_in[SUN4M_NCPUS];  /* Set when ipi entered. */
-	unsigned long processors_out[SUN4M_NCPUS]; /* Set when ipi exited. */
+	unsigned long processors_in[NR_CPUS];  /* Set when ipi entered. */
+	unsigned long processors_out[NR_CPUS]; /* Set when ipi exited. */
 } ccall_info;
 
 static DEFINE_SPINLOCK(cross_call_lock);
@@ -297,7 +326,8 @@ static DEFINE_SPINLOCK(cross_call_lock);
 void smp4m_cross_call(smpfunc_t func, unsigned long arg1, unsigned long arg2,
 		    unsigned long arg3, unsigned long arg4, unsigned long arg5)
 {
-		register int ncpus = SUN4M_NCPUS;
+	if(smp_processors_ready) {
+		register int ncpus = smp_num_cpus;
 		unsigned long flags;
 
 		spin_lock_irqsave(&cross_call_lock, flags);
@@ -312,7 +342,7 @@ void smp4m_cross_call(smpfunc_t func, unsigned long arg1, unsigned long arg2,
 
 		/* Init receive/complete mapping, plus fire the IPI's off. */
 		{
-			cpumask_t mask = cpu_online_map;
+			cpumask_t mask = cpu_present_map;
 			register int i;
 
 			cpu_clear(smp_processor_id(), mask);
@@ -345,6 +375,7 @@ void smp4m_cross_call(smpfunc_t func, unsigned long arg1, unsigned long arg2,
 		}
 
 		spin_unlock_irqrestore(&cross_call_lock, flags);
+	}
 }
 
 /* Running cross calls. */

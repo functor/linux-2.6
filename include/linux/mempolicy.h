@@ -148,7 +148,6 @@ extern void mpol_rebind_policy(struct mempolicy *pol, const nodemask_t *new);
 extern void mpol_rebind_task(struct task_struct *tsk,
 					const nodemask_t *new);
 extern void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new);
-extern void mpol_fix_fork_child_flag(struct task_struct *p);
 #define set_cpuset_being_rebound(x) (cpuset_being_rebound = (x))
 
 #ifdef CONFIG_CPUSET
@@ -247,10 +246,6 @@ static inline void mpol_rebind_task(struct task_struct *tsk,
 }
 
 static inline void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new)
-{
-}
-
-static inline void mpol_fix_fork_child_flag(struct task_struct *p)
 {
 }
 

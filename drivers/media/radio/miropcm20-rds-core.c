@@ -18,15 +18,14 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
-
+#include <asm/semaphore.h>
 #include <asm/io.h>
 #include "../../../sound/oss/aci.h"
 #include "miropcm20-rds-core.h"
 
 #define DEBUG 0
 
-static struct mutex aci_rds_mutex;
+static struct semaphore aci_rds_sem;
 
 #define RDS_DATASHIFT          2   /* Bit 2 */
 #define RDS_DATAMASK        (1 << RDS_DATASHIFT)
@@ -182,7 +181,7 @@ int aci_rds_cmd(unsigned char cmd, unsigned char databuffer[], int datasize)
 {
 	int ret;
 
-	if (mutex_lock_interruptible(&aci_rds_mutex))
+	if (down_interruptible(&aci_rds_sem))
 		return -EINTR;
 
 	rds_write(cmd);
@@ -193,7 +192,7 @@ int aci_rds_cmd(unsigned char cmd, unsigned char databuffer[], int datasize)
 	else
 		ret = 0;
 
-	mutex_unlock(&aci_rds_mutex);
+	up(&aci_rds_sem);
 	
 	return ret;
 }
@@ -201,7 +200,7 @@ EXPORT_SYMBOL(aci_rds_cmd);
 
 int __init attach_aci_rds(void)
 {
-	mutex_init(&aci_rds_mutex);
+	init_MUTEX(&aci_rds_sem);
 	return 0;
 }
 

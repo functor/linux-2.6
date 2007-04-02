@@ -943,8 +943,7 @@ static ssize_t pt_write(struct file *filp, const char __user *buf, size_t count,
 
 static int __init pt_init(void)
 {
-	int unit;
-	int err;
+	int unit, err = 0;
 
 	if (disable) {
 		err = -1;
@@ -956,15 +955,14 @@ static int __init pt_init(void)
 		goto out;
 	}
 
-	err = register_chrdev(major, name, &pt_fops);
-	if (err < 0) {
+	if (register_chrdev(major, name, &pt_fops)) {
 		printk("pt_init: unable to get major number %d\n", major);
 		for (unit = 0; unit < PT_UNITS; unit++)
 			if (pt[unit].present)
 				pi_release(pt[unit].pi);
+		err = -1;
 		goto out;
 	}
-	major = err;
 	pt_class = class_create(THIS_MODULE, "pt");
 	if (IS_ERR(pt_class)) {
 		err = PTR_ERR(pt_class);

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc64/kernel/rtas_pci.c
+ *
  * Copyright (C) 2001 Dave Engebretsen, IBM Corporation
  * Copyright (C) 2003 Anton Blanchard <anton@au.ibm.com>, IBM
  *

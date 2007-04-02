@@ -321,9 +321,8 @@ static void __init offb_init_nodriver(struct device_node *dp)
 	int *pp, i;
 	unsigned int len;
 	int width = 640, height = 480, depth = 8, pitch;
-	unsigned  flags, rsize, *up, addr_prop = 0;
-	unsigned long max_size = 0;
-	u64 rstart, address = OF_BAD_ADDR;
+	unsigned int flags, rsize, *up;
+	u64 address = OF_BAD_ADDR;
 	u32 *addrp;
 	u64 asize;
 
@@ -344,57 +343,69 @@ static void __init offb_init_nodriver(struct device_node *dp)
 	} else
 		pitch = width;
 
-	rsize = (unsigned long)pitch * (unsigned long)height *
-		(unsigned long)(depth / 8);
+       rsize = (unsigned long)pitch * (unsigned long)height *
+               (unsigned long)(depth / 8);
 
-	/* Ok, now we try to figure out the address of the framebuffer.
-	 *
-	 * Unfortunately, Open Firmware doesn't provide a standard way to do
-	 * so. All we can do is a dodgy heuristic that happens to work in
-	 * practice. On most machines, the "address" property contains what
-	 * we need, though not on Matrox cards found in IBM machines. What I've
-	 * found that appears to give good results is to go through the PCI
-	 * ranges and pick one that is both big enough and if possible encloses
-	 * the "address" property. If none match, we pick the biggest
-	 */
-	up = (unsigned int *) get_property(dp, "address", &len);
-	if (up && len == sizeof(unsigned int))
-		addr_prop = *up;
+       /* Try to match device to a PCI device in order to get a properly
+	* translated address rather then trying to decode the open firmware
+	* stuff in various incorrect ways
+	*/
+#ifdef CONFIG_PCI
+       /* First try to locate the PCI device if any */
+       {
+               struct pci_dev *pdev = NULL;
 
-	for (i = 0; (addrp = of_get_address(dp, i, &asize, &flags))
-		     != NULL; i++) {
-		int match_addrp = 0;
+	       for_each_pci_dev(pdev) {
+                       if (dp == pci_device_to_OF_node(pdev))
+                               break;
+	       }
+               if (pdev) {
+                       for (i = 0; i < 6 && address == OF_BAD_ADDR; i++) {
+                               if ((pci_resource_flags(pdev, i) &
+				    IORESOURCE_MEM) &&
+				   (pci_resource_len(pdev, i) >= rsize))
+                                       address = pci_resource_start(pdev, i);
+                       }
+		       pci_dev_put(pdev);
+               }
+        }
+#endif /* CONFIG_PCI */
 
-		if (!(flags & IORESOURCE_MEM))
-			continue;
-		if (asize < rsize)
-			continue;
-		rstart = of_translate_address(dp, addrp);
-		if (rstart == OF_BAD_ADDR)
-			continue;
-		if (addr_prop && (rstart <= addr_prop) &&
-		    ((rstart + rsize) > addr_prop))
-			match_addrp = 1;
-		if (match_addrp) {
-			address = addr_prop;
-			break;
+       /* This one is dodgy, we may drop it ... */
+       if (address == OF_BAD_ADDR &&
+	   (up = (unsigned *) get_property(dp, "address", &len)) != NULL &&
+	   len == sizeof(unsigned int))
+	       address = (u64) * up;
+
+       if (address == OF_BAD_ADDR) {
+	       for (i = 0; (addrp = of_get_address(dp, i, &asize, &flags))
+			    != NULL; i++) {
+		       if (!(flags & IORESOURCE_MEM))
+			       continue;
+		       if (asize >= pitch * height * depth / 8)
+			       break;
+	       }
+		if (addrp == NULL) {
+			printk(KERN_ERR
+			       "no framebuffer address found for %s\n",
+			       dp->full_name);
+			return;
 		}
-		if (rsize > max_size) {
-			max_size = rsize;
-			address = OF_BAD_ADDR;
+		address = of_translate_address(dp, addrp);
+		if (address == OF_BAD_ADDR) {
+			printk(KERN_ERR
+			       "can't translate framebuffer address for %s\n",
+			       dp->full_name);
+			return;
 		}
-		if (address == OF_BAD_ADDR)
-			address = rstart;
-	}
-	if (address == OF_BAD_ADDR && addr_prop)
-		address = (u_long)addr_prop;
-	if (address != OF_BAD_ADDR) {
+
 		/* kludge for valkyrie */
 		if (strcmp(dp->name, "valkyrie") == 0)
 			address += 0x1000;
-		offb_init_fb(dp->name, dp->full_name, width, height, depth,
-			     pitch, address, dp);
 	}
+	offb_init_fb(dp->name, dp->full_name, width, height, depth,
+		     pitch, address, dp);
+
 }
 
 static void __init offb_init_fb(const char *name, const char *full_name,

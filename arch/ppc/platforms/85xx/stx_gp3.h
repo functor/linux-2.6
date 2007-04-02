@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/stx8560_gp3.h
+ *
  * STx GP3 board definitions
  *
  * Dan Malek (dan@embeddededge.com)

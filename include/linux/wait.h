@@ -115,7 +115,7 @@ static inline int waitqueue_active(wait_queue_head_t *q)
 
 extern void FASTCALL(add_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
 extern void FASTCALL(add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t * wait));
-extern int FASTCALL(remove_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
+extern void FASTCALL(remove_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
 
 static inline void __add_wait_queue(wait_queue_head_t *head, wait_queue_t *new)
 {
@@ -365,10 +365,10 @@ static inline void remove_wait_queue_locked(wait_queue_head_t *q,
  * They are racy.  DO NOT use them, use the wait_event* interfaces above.  
  * We plan to remove these interfaces during 2.7.
  */
-extern void __deprecated FASTCALL(sleep_on(wait_queue_head_t *q));
-extern long __deprecated FASTCALL(sleep_on_timeout(wait_queue_head_t *q,
+extern void FASTCALL(sleep_on(wait_queue_head_t *q));
+extern long FASTCALL(sleep_on_timeout(wait_queue_head_t *q,
 				      signed long timeout));
-extern void __deprecated FASTCALL(interruptible_sleep_on(wait_queue_head_t *q));
+extern void FASTCALL(interruptible_sleep_on(wait_queue_head_t *q));
 extern long FASTCALL(interruptible_sleep_on_timeout(wait_queue_head_t *q,
 						    signed long timeout));
 

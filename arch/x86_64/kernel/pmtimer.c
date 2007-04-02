@@ -60,9 +60,7 @@ int pmtimer_mark_offset(void)
 	delta = cyc2us((tick - last_pmtmr_tick) & ACPI_PM_MASK);
 
 	last_pmtmr_tick = tick;
-#ifndef CONFIG_XEN
 	monotonic_base += delta * NSEC_PER_USEC;
-#endif
 
 	delta += offset_delay;
 
@@ -70,7 +68,7 @@ int pmtimer_mark_offset(void)
 	offset_delay = delta % (USEC_PER_SEC / HZ);
 
 	rdtscll(tsc);
-	vxtime.last_tsc = tsc - offset_delay * (u64)cpu_khz / 1000;
+	vxtime.last_tsc = tsc - offset_delay * cpu_khz;
 
 	/* don't calculate delay for first run,
 	   or if we've got less then a tick */
@@ -88,7 +86,7 @@ static unsigned pmtimer_wait_tick(void)
 	for (a = b = inl(pmtmr_ioport) & ACPI_PM_MASK;
 	     a == b;
 	     b = inl(pmtmr_ioport) & ACPI_PM_MASK)
-		cpu_relax();
+		;
 	return b;
 }
 
@@ -99,7 +97,6 @@ void pmtimer_wait(unsigned us)
 	a = pmtimer_wait_tick();
 	do {
 		b = inl(pmtmr_ioport);
-		cpu_relax();
 	} while (cyc2us(b - a) < us);
 }
 
@@ -123,7 +120,7 @@ unsigned int do_gettimeoffset_pm(void)
 static int __init nopmtimer_setup(char *s)
 {
 	pmtmr_ioport = 0;
-	return 1;
+	return 0;
 }
 
 __setup("nopmtimer", nopmtimer_setup);

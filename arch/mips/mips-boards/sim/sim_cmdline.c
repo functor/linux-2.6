@@ -26,10 +26,8 @@ char * __init prom_getcmdline(void)
 	return arcs_cmdline;
 }
 
+
 void  __init prom_init_cmdline(void)
 {
-	char *cp;
-	cp = arcs_cmdline;
-	/* Get boot line from environment? */
-	*cp = '\0';
+    /* nothing to do */
 }

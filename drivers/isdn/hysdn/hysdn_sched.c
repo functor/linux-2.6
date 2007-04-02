@@ -30,8 +30,7 @@
 /* to keep the data until later.                                             */
 /*****************************************************************************/
 int
-hysdn_sched_rx(hysdn_card *card, unsigned char *buf, unsigned short len,
-			unsigned short chan)
+hysdn_sched_rx(hysdn_card * card, uchar * buf, word len, word chan)
 {
 
 	switch (chan) {
@@ -73,9 +72,7 @@ hysdn_sched_rx(hysdn_card *card, unsigned char *buf, unsigned short len,
 /* sending.                                                                  */
 /*****************************************************************************/
 int
-hysdn_sched_tx(hysdn_card *card, unsigned char *buf,
-		unsigned short volatile *len, unsigned short volatile *chan,
-		unsigned short maxlen)
+hysdn_sched_tx(hysdn_card * card, uchar * buf, word volatile *len, word volatile *chan, word maxlen)
 {
 	struct sk_buff *skb;
 
@@ -148,10 +145,10 @@ hysdn_sched_tx(hysdn_card *card, unsigned char *buf,
 /* are to be sent and this happens very seldom.                              */
 /*****************************************************************************/
 int
-hysdn_tx_cfgline(hysdn_card *card, unsigned char *line, unsigned short chan)
+hysdn_tx_cfgline(hysdn_card * card, uchar * line, word chan)
 {
 	int cnt = 50;		/* timeout intervalls */
-	unsigned long flags;
+	ulong flags;
 
 	if (card->debug_flags & LOG_SCHED_ASYN)
 		hysdn_addlog(card, "async tx-cfg chan=%d len=%d", chan, strlen(line) + 1);

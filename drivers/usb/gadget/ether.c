@@ -182,37 +182,33 @@ struct eth_dev {
  * parameters are in UTF-8 (superset of ASCII's 7 bit characters).
  */
 
-static ushort idVendor;
+static ushort __initdata idVendor;
 module_param(idVendor, ushort, S_IRUGO);
 MODULE_PARM_DESC(idVendor, "USB Vendor ID");
 
-static ushort idProduct;
+static ushort __initdata idProduct;
 module_param(idProduct, ushort, S_IRUGO);
 MODULE_PARM_DESC(idProduct, "USB Product ID");
 
-static ushort bcdDevice;
+static ushort __initdata bcdDevice;
 module_param(bcdDevice, ushort, S_IRUGO);
 MODULE_PARM_DESC(bcdDevice, "USB Device version (BCD)");
 
-static char *iManufacturer;
+static char *__initdata iManufacturer;
 module_param(iManufacturer, charp, S_IRUGO);
 MODULE_PARM_DESC(iManufacturer, "USB Manufacturer string");
 
-static char *iProduct;
+static char *__initdata iProduct;
 module_param(iProduct, charp, S_IRUGO);
 MODULE_PARM_DESC(iProduct, "USB Product string");
 
-static char *iSerialNumber;
-module_param(iSerialNumber, charp, S_IRUGO);
-MODULE_PARM_DESC(iSerialNumber, "SerialNumber");
-
 /* initial value, changed by "ifconfig usb0 hw ether xx:xx:xx:xx:xx:xx" */
-static char *dev_addr;
+static char *__initdata dev_addr;
 module_param(dev_addr, charp, S_IRUGO);
 MODULE_PARM_DESC(dev_addr, "Device Ethernet Address");
 
 /* this address is invisible to ifconfig */
-static char *host_addr;
+static char *__initdata host_addr;
 module_param(host_addr, charp, S_IRUGO);
 MODULE_PARM_DESC(host_addr, "Host Ethernet Address");
 
@@ -254,14 +250,6 @@ MODULE_PARM_DESC(host_addr, "Host Ethernet Address");
 #endif
 
 #ifdef CONFIG_USB_GADGET_AT91
-#define DEV_CONFIG_CDC
-#endif
-
-#ifdef CONFIG_USB_GADGET_MUSBHSFC
-#define DEV_CONFIG_CDC
-#endif
-
-#ifdef CONFIG_USB_GADGET_MUSBHDRC
 #define DEV_CONFIG_CDC
 #endif
 
@@ -407,7 +395,6 @@ static inline int BITRATE(struct usb_gadget *g)
 #define STRING_CDC			7
 #define STRING_SUBSET			8
 #define STRING_RNDIS			9
-#define STRING_SERIALNUMBER		10
 
 /* holds our biggest descriptor (or RNDIS response) */
 #define USB_BUFSIZ	256
@@ -875,7 +862,6 @@ static inline void __init hs_subset_descriptors(void)
 
 static char				manufacturer [50];
 static char				product_desc [40] = DRIVER_DESC;
-static char				serial_number [20];
 
 #ifdef	DEV_CONFIG_CDC
 /* address that the host will use ... usually assigned at random */
@@ -886,7 +872,6 @@ static char				ethaddr [2 * ETH_ALEN + 1];
 static struct usb_string		strings [] = {
 	{ STRING_MANUFACTURER,	manufacturer, },
 	{ STRING_PRODUCT,	product_desc, },
-	{ STRING_SERIALNUMBER,	serial_number, },
 	{ STRING_DATA,		"Ethernet Data", },
 #ifdef	DEV_CONFIG_CDC
 	{ STRING_CDC,		"CDC Ethernet", },
@@ -1564,8 +1549,7 @@ static int eth_change_mtu (struct net_device *net, int new_mtu)
 {
 	struct eth_dev	*dev = netdev_priv(net);
 
-	if (dev->rndis)
-		return -EBUSY;
+	// FIXME if rndis, don't change while link's live
 
 	if (new_mtu <= ETH_HLEN || new_mtu > ETH_FRAME_LEN)
 		return -ERANGE;
@@ -2132,7 +2116,7 @@ eth_req_free (struct usb_ep *ep, struct usb_request *req)
 }
 
 
-static void __exit
+static void
 eth_unbind (struct usb_gadget *gadget)
 {
 	struct eth_dev		*dev = get_gadget_data (gadget);
@@ -2169,7 +2153,7 @@ static u8 __init nibble (unsigned char c)
 	return 0;
 }
 
-static int __init get_ether_addr(const char *str, u8 *dev_addr)
+static void __init get_ether_addr (const char *str, u8 *dev_addr)
 {
 	if (str) {
 		unsigned	i;
@@ -2184,10 +2168,9 @@ static int __init get_ether_addr(const char *str, u8 *dev_addr)
 			dev_addr [i] = num;
 		}
 		if (is_valid_ether_addr (dev_addr))
-			return 0;
+			return;
 	}
 	random_ether_addr(dev_addr);
-	return 1;
 }
 
 static int __init
@@ -2285,10 +2268,6 @@ eth_bind (struct usb_gadget *gadget)
 		strlcpy (manufacturer, iManufacturer, sizeof manufacturer);
 	if (iProduct)
 		strlcpy (product_desc, iProduct, sizeof product_desc);
-	if (iSerialNumber) {
-		device_desc.iSerialNumber = STRING_SERIALNUMBER,
-		strlcpy(serial_number, iSerialNumber, sizeof serial_number);
-	}
 
 	/* all we really need is bulk IN/OUT */
 	usb_ep_autoconfig_reset (gadget);
@@ -2338,9 +2317,6 @@ autoconf_fail:
 		hs_subset_descriptors();
 	}
 
-	device_desc.bMaxPacketSize0 = gadget->ep0->maxpacket;
-	usb_gadget_set_selfpowered (gadget);
-
 	/* For now RNDIS is always a second config */
 	if (rndis)
 		device_desc.bNumConfigurations = 2;
@@ -2363,6 +2339,9 @@ autoconf_fail:
 				fs_status_desc.bEndpointAddress;
 #endif
 #endif	/* DUALSPEED */
+
+	device_desc.bMaxPacketSize0 = gadget->ep0->maxpacket;
+	usb_gadget_set_selfpowered (gadget);
 
 	if (gadget->is_otg) {
 		otg_descriptor.bmAttributes |= USB_OTG_HNP,
@@ -2398,13 +2377,9 @@ autoconf_fail:
 	 * The host side address is used with CDC and RNDIS, and commonly
 	 * ends up in a persistent config database.
 	 */
-	if (get_ether_addr(dev_addr, net->dev_addr))
-		dev_warn(&gadget->dev,
-			"using random %s ethernet address\n", "self");
+	get_ether_addr(dev_addr, net->dev_addr);
 	if (cdc || rndis) {
-		if (get_ether_addr(host_addr, dev->host_mac))
-			dev_warn(&gadget->dev,
-				"using random %s ethernet address\n", "host");
+		get_ether_addr(host_addr, dev->host_mac);
 #ifdef	DEV_CONFIG_CDC
 		snprintf (ethaddr, sizeof ethaddr, "%02X%02X%02X%02X%02X%02X",
 			dev->host_mac [0], dev->host_mac [1],
@@ -2548,7 +2523,7 @@ static struct usb_gadget_driver eth_driver = {
 
 	.function	= (char *) driver_desc,
 	.bind		= eth_bind,
-	.unbind		= __exit_p(eth_unbind),
+	.unbind		= eth_unbind,
 
 	.setup		= eth_setup,
 	.disconnect	= eth_disconnect,

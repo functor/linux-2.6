@@ -369,6 +369,14 @@ struct ext2_dir_entry_2 * ext2_find_entry (struct inode * dir,
 		}
 		if (++n >= npages)
 			n = 0;
+		/* next page is past the blocks we've got */
+		if (unlikely(n > (dir->i_blocks >> (PAGE_CACHE_SHIFT - 9)))) {
+			ext2_error(dir->i_sb, __FUNCTION__,
+				"dir %lu size %lld exceeds block count %llu",
+				dir->i_ino, dir->i_size,
+				(unsigned long long)dir->i_blocks);
+				goto out;
+		}
 	} while (n != start);
 out:
 	return NULL;
@@ -416,7 +424,8 @@ void ext2_set_link(struct inode *dir, struct ext2_dir_entry_2 *de,
 
 	lock_page(page);
 	err = page->mapping->a_ops->prepare_write(NULL, page, from, to);
-	BUG_ON(err);
+	if (err)
+		BUG();
 	de->inode = cpu_to_le32(inode->i_ino);
 	ext2_set_de_type (de, inode);
 	err = ext2_commit_chunk(page, from, to);
@@ -553,7 +562,8 @@ int ext2_delete_entry (struct ext2_dir_entry_2 * dir, struct page * page )
 		from = (char*)pde - (char*)page_address(page);
 	lock_page(page);
 	err = mapping->a_ops->prepare_write(NULL, page, from, to);
-	BUG_ON(err);
+	if (err)
+		BUG();
 	if (pde)
 		pde->rec_len = cpu_to_le16(to-from);
 	dir->inode = 0;
@@ -658,7 +668,7 @@ not_empty:
 	return 0;
 }
 
-const struct file_operations ext2_dir_operations = {
+struct file_operations ext2_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
 	.readdir	= ext2_readdir,

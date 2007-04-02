@@ -56,7 +56,7 @@
 typedef struct _i2o_proc_entry_t {
 	char *name;		/* entry name */
 	mode_t mode;		/* mode */
-	const struct file_operations *fops;	/* open function */
+	struct file_operations *fops;	/* open function */
 } i2o_proc_entry;
 
 /* global I2O /proc/i2o entry */

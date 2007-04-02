@@ -433,6 +433,7 @@ struct aac_dev *aac_init_adapter(struct aac_dev *dev)
 	}
 		
 	INIT_LIST_HEAD(&dev->fib_list);
+	init_completion(&dev->aif_completion);
 
 	return dev;
 }

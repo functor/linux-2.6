@@ -34,8 +34,6 @@
  *
  * $Id: cm.c 2821 2005-07-08 17:07:28Z sean.hefty $
  */
-
-#include <linux/completion.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
 #include <linux/idr.h>
@@ -123,8 +121,8 @@ struct cm_id_private {
 
 	struct rb_node service_node;
 	struct rb_node sidr_id_node;
-	spinlock_t lock;	/* Do not acquire inside cm.lock */
-	struct completion comp;
+	spinlock_t lock;
+	wait_queue_head_t wait;
 	atomic_t refcount;
 
 	struct ib_mad_send_buf *msg;
@@ -161,7 +159,7 @@ static void cm_work_handler(void *data);
 static inline void cm_deref_id(struct cm_id_private *cm_id_priv)
 {
 	if (atomic_dec_and_test(&cm_id_priv->refcount))
-		complete(&cm_id_priv->comp);
+		wake_up(&cm_id_priv->wait);
 }
 
 static int cm_alloc_msg(struct cm_id_private *cm_id_priv,
@@ -561,7 +559,7 @@ struct ib_cm_id *ib_create_cm_id(struct ib_device *device,
 		goto error;
 
 	spin_lock_init(&cm_id_priv->lock);
-	init_completion(&cm_id_priv->comp);
+	init_waitqueue_head(&cm_id_priv->wait);
 	INIT_LIST_HEAD(&cm_id_priv->work_list);
 	atomic_set(&cm_id_priv->work_count, -1);
 	atomic_set(&cm_id_priv->refcount, 1);
@@ -726,8 +724,8 @@ retest:
 	}
 
 	cm_free_id(cm_id->local_id);
-	cm_deref_id(cm_id_priv);
-	wait_for_completion(&cm_id_priv->comp);
+	atomic_dec(&cm_id_priv->refcount);
+	wait_event(cm_id_priv->wait, !atomic_read(&cm_id_priv->refcount));
 	while ((work = cm_dequeue_work(cm_id_priv)) != NULL)
 		cm_free_work(work);
 	if (cm_id_priv->private_data && cm_id_priv->private_data_len)
@@ -1549,6 +1547,28 @@ static int cm_rep_handler(struct cm_work *work)
 		return -EINVAL;
 	}
 
+	cm_id_priv->timewait_info->work.remote_id = rep_msg->local_comm_id;
+	cm_id_priv->timewait_info->remote_ca_guid = rep_msg->local_ca_guid;
+	cm_id_priv->timewait_info->remote_qpn = cm_rep_get_local_qpn(rep_msg);
+
+	spin_lock_irqsave(&cm.lock, flags);
+	/* Check for duplicate REP. */
+	if (cm_insert_remote_id(cm_id_priv->timewait_info)) {
+		spin_unlock_irqrestore(&cm.lock, flags);
+		ret = -EINVAL;
+		goto error;
+	}
+	/* Check for a stale connection. */
+	if (cm_insert_remote_qpn(cm_id_priv->timewait_info)) {
+		spin_unlock_irqrestore(&cm.lock, flags);
+		cm_issue_rej(work->port, work->mad_recv_wc,
+			     IB_CM_REJ_STALE_CONN, CM_MSG_RESPONSE_REP,
+			     NULL, 0);
+		ret = -EINVAL;
+		goto error;
+	}
+	spin_unlock_irqrestore(&cm.lock, flags);
+
 	cm_format_rep_event(work);
 
 	spin_lock_irqsave(&cm_id_priv->lock, flags);
@@ -1561,34 +1581,6 @@ static int cm_rep_handler(struct cm_work *work)
 		ret = -EINVAL;
 		goto error;
 	}
-
-	cm_id_priv->timewait_info->work.remote_id = rep_msg->local_comm_id;
-	cm_id_priv->timewait_info->remote_ca_guid = rep_msg->local_ca_guid;
-	cm_id_priv->timewait_info->remote_qpn = cm_rep_get_local_qpn(rep_msg);
-
-	spin_lock(&cm.lock);
-	/* Check for duplicate REP. */
-	if (cm_insert_remote_id(cm_id_priv->timewait_info)) {
-		spin_unlock(&cm.lock);
-		spin_unlock_irqrestore(&cm_id_priv->lock, flags);
-		ret = -EINVAL;
-		goto error;
-	}
-	/* Check for a stale connection. */
-	if (cm_insert_remote_qpn(cm_id_priv->timewait_info)) {
-		rb_erase(&cm_id_priv->timewait_info->remote_id_node,
-			 &cm.remote_id_table);
-		cm_id_priv->timewait_info->inserted_remote_id = 0;
-		spin_unlock(&cm.lock);
-		spin_unlock_irqrestore(&cm_id_priv->lock, flags);
-		cm_issue_rej(work->port, work->mad_recv_wc,
-			     IB_CM_REJ_STALE_CONN, CM_MSG_RESPONSE_REP,
-			     NULL, 0);
-		ret = -EINVAL;
-		goto error;
-	}
-	spin_unlock(&cm.lock);
-
 	cm_id_priv->id.state = IB_CM_REP_RCVD;
 	cm_id_priv->id.remote_id = rep_msg->local_comm_id;
 	cm_id_priv->remote_qpn = cm_rep_get_local_qpn(rep_msg);
@@ -1611,7 +1603,7 @@ static int cm_rep_handler(struct cm_work *work)
 		cm_deref_id(cm_id_priv);
 	return 0;
 
-error:
+error:	cm_cleanup_timewait(cm_id_priv->timewait_info);
 	cm_deref_id(cm_id_priv);
 	return ret;
 }

@@ -71,17 +71,17 @@
 
 struct dn_naddr 
 {
-	__le16		a_len;
-	__u8 a_addr[DN_MAXADDL]; /* Two bytes little endian */
+	unsigned short		a_len;
+	unsigned char a_addr[DN_MAXADDL];
 };
 
 struct sockaddr_dn
 {
-	__u16		sdn_family;
-	__u8		sdn_flags;
-	__u8		sdn_objnum;
-	__le16		sdn_objnamel;
-	__u8		sdn_objname[DN_MAXOBJL];
+	unsigned short		sdn_family;
+	unsigned char		sdn_flags;
+	unsigned char		sdn_objnum;
+	unsigned short		sdn_objnamel;
+	unsigned char		sdn_objname[DN_MAXOBJL];
 	struct   dn_naddr	sdn_add;
 };
 #define sdn_nodeaddrl   sdn_add.a_len   /* Node address length  */
@@ -93,38 +93,38 @@ struct sockaddr_dn
  * DECnet set/get DSO_CONDATA, DSO_DISDATA (optional data) structure
  */
 struct optdata_dn {
-        __le16  opt_status;     /* Extended status return */
+        unsigned short  opt_status;     /* Extended status return */
 #define opt_sts opt_status
-        __le16  opt_optl;       /* Length of user data    */
-        __u8   opt_data[16];   /* User data              */
+        unsigned short  opt_optl;       /* Length of user data    */
+        unsigned char   opt_data[16];   /* User data              */
 };
 
 struct accessdata_dn
 {
-	__u8		acc_accl;
-	__u8		acc_acc[DN_MAXACCL];
-	__u8 		acc_passl;
-	__u8		acc_pass[DN_MAXACCL];
-	__u8 		acc_userl;
-	__u8		acc_user[DN_MAXACCL];
+	unsigned char		acc_accl;
+	unsigned char		acc_acc[DN_MAXACCL];
+	unsigned char 		acc_passl;
+	unsigned char		acc_pass[DN_MAXACCL];
+	unsigned char 		acc_userl;
+	unsigned char		acc_user[DN_MAXACCL];
 };
 
 /*
  * DECnet logical link information structure
  */
 struct linkinfo_dn {
-        __le16  idn_segsize;    /* Segment size for link */
-        __u8   idn_linkstate;  /* Logical link state    */
+        unsigned short  idn_segsize;    /* Segment size for link */
+        unsigned char   idn_linkstate;  /* Logical link state    */
 };
 
 /*
  * Ethernet address format (for DECnet)
  */
 union etheraddress {
-        __u8 dne_addr[6];             /* Full ethernet address */
+        unsigned char dne_addr[6];             /* Full ethernet address */
   struct {
-                __u8 dne_hiord[4];    /* DECnet HIORD prefix   */
-                __u8 dne_nodeaddr[2]; /* DECnet node address   */
+                unsigned char dne_hiord[4];    /* DECnet HIORD prefix   */
+                unsigned char dne_nodeaddr[2]; /* DECnet node address   */
   } dne_remote;
 };
 
@@ -133,7 +133,7 @@ union etheraddress {
  * DECnet physical socket address format
  */
 struct dn_addr {
-        __le16 dna_family;      /* AF_DECnet               */
+        unsigned short dna_family;      /* AF_DECnet               */
         union etheraddress dna_netaddr; /* DECnet ethernet address */
 };
 

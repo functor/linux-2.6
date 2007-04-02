@@ -27,8 +27,6 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
-
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/control.h>
@@ -57,12 +55,12 @@ static int ac97_update_bits_page(struct snd_ac97 *ac97, unsigned short reg, unsi
 	unsigned short page_save;
 	int ret;
 
-	mutex_lock(&ac97->page_mutex);
+	down(&ac97->page_mutex);
 	page_save = snd_ac97_read(ac97, AC97_INT_PAGING) & AC97_PAGE_MASK;
 	snd_ac97_update_bits(ac97, AC97_INT_PAGING, AC97_PAGE_MASK, page);
 	ret = snd_ac97_update_bits(ac97, reg, mask, value);
 	snd_ac97_update_bits(ac97, AC97_INT_PAGING, AC97_PAGE_MASK, page_save);
-	mutex_unlock(&ac97->page_mutex); /* unlock paging */
+	up(&ac97->page_mutex); /* unlock paging */
 	return ret;
 }
 
@@ -899,12 +897,12 @@ static int snd_ac97_stac9708_put_bias(struct snd_kcontrol *kcontrol, struct snd_
 	struct snd_ac97 *ac97 = snd_kcontrol_chip(kcontrol);
 	int err;
 
-	mutex_lock(&ac97->page_mutex);
+	down(&ac97->page_mutex);
 	snd_ac97_write(ac97, AC97_SIGMATEL_BIAS1, 0xabba);
 	err = snd_ac97_update_bits(ac97, AC97_SIGMATEL_BIAS2, 0x0010,
 				   (ucontrol->value.integer.value[0] & 1) << 4);
 	snd_ac97_write(ac97, AC97_SIGMATEL_BIAS1, 0);
-	mutex_unlock(&ac97->page_mutex);
+	up(&ac97->page_mutex);
 	return err;
 }
 
@@ -2823,35 +2821,5 @@ int mpatch_si3036(struct snd_ac97 * ac97)
 	ac97->build_ops = &patch_si3036_ops;
 	snd_ac97_write_cache(ac97, 0x5c, 0xf210 );
 	snd_ac97_write_cache(ac97, 0x68, 0);
-	return 0;
-}
-
-/*
- * LM 4550 Codec
- *
- * We use a static resolution table since LM4550 codec cannot be
- * properly autoprobed to determine the resolution via
- * check_volume_resolution().
- */
-
-static struct snd_ac97_res_table lm4550_restbl[] = {
-	{ AC97_MASTER, 0x1f1f },
-	{ AC97_HEADPHONE, 0x1f1f },
-	{ AC97_MASTER_MONO, 0x001f },
-	{ AC97_PC_BEEP, 0x001f },	/* LSB is ignored */
-	{ AC97_PHONE, 0x001f },
-	{ AC97_MIC, 0x001f },
-	{ AC97_LINE, 0x1f1f },
-	{ AC97_CD, 0x1f1f },
-	{ AC97_VIDEO, 0x1f1f },
-	{ AC97_AUX, 0x1f1f },
-	{ AC97_PCM, 0x1f1f },
-	{ AC97_REC_GAIN, 0x0f0f },
-	{ } /* terminator */
-};
-
-int patch_lm4550(struct snd_ac97 *ac97)
-{
-	ac97->res_table = lm4550_restbl;
 	return 0;
 }

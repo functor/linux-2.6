@@ -2,9 +2,9 @@
  * protocol helpers and general trouble making from userspace.
  *
  * (C) 2001 by Jay Schulist <jschlst@samba.org>
- * (C) 2002-2006 by Harald Welte <laforge@gnumonks.org>
+ * (C) 2002-2005 by Harald Welte <laforge@gnumonks.org>
  * (C) 2003 by Patrick Mchardy <kaber@trash.net>
- * (C) 2005-2006 by Pablo Neira Ayuso <pablo@eurodev.net>
+ * (C) 2005 by Pablo Neira Ayuso <pablo@eurodev.net>
  *
  * I've reworked this stuff to use attributes instead of conntrack 
  * structures. 5.44 am. I need more tea. --pablo 05/07/11.
@@ -44,7 +44,7 @@
 
 MODULE_LICENSE("GPL");
 
-static char __initdata version[] = "0.93";
+static char __initdata version[] = "0.92";
 
 #if 0
 #define DEBUGP printk
@@ -55,18 +55,20 @@ static char __initdata version[] = "0.93";
 
 static inline int
 ctnetlink_dump_tuples_proto(struct sk_buff *skb, 
-			    const struct nf_conntrack_tuple *tuple,
-			    struct nf_conntrack_protocol *proto)
+			    const struct nf_conntrack_tuple *tuple)
 {
+	struct nf_conntrack_protocol *proto;
 	int ret = 0;
-	struct nfattr *nest_parms = NFA_NEST(skb, CTA_TUPLE_PROTO);
 
 	NFA_PUT(skb, CTA_PROTO_NUM, sizeof(u_int8_t), &tuple->dst.protonum);
 
+	/* If no protocol helper is found, this function will return the
+	 * generic protocol helper, so proto won't *ever* be NULL */
+	proto = nf_ct_proto_find_get(tuple->src.l3num, tuple->dst.protonum);
 	if (likely(proto->tuple_to_nfattr))
 		ret = proto->tuple_to_nfattr(skb, tuple);
 	
-	NFA_NEST_END(skb, nest_parms);
+	nf_ct_proto_put(proto);
 
 	return ret;
 
@@ -75,44 +77,33 @@ nfattr_failure:
 }
 
 static inline int
-ctnetlink_dump_tuples_ip(struct sk_buff *skb,
-			 const struct nf_conntrack_tuple *tuple,
-			 struct nf_conntrack_l3proto *l3proto)
-{
-	int ret = 0;
-	struct nfattr *nest_parms = NFA_NEST(skb, CTA_TUPLE_IP);
-
-	if (likely(l3proto->tuple_to_nfattr))
-		ret = l3proto->tuple_to_nfattr(skb, tuple);
-
-	NFA_NEST_END(skb, nest_parms);
-
-	return ret;
-
-nfattr_failure:
-	return -1;
-}
-
-static inline int
-ctnetlink_dump_tuples(struct sk_buff *skb,
+ctnetlink_dump_tuples(struct sk_buff *skb, 
 		      const struct nf_conntrack_tuple *tuple)
 {
-	int ret;
+	struct nfattr *nest_parms;
 	struct nf_conntrack_l3proto *l3proto;
-	struct nf_conntrack_protocol *proto;
-
+	int ret = 0;
+	
 	l3proto = nf_ct_l3proto_find_get(tuple->src.l3num);
-	ret = ctnetlink_dump_tuples_ip(skb, tuple, l3proto);
+	
+	nest_parms = NFA_NEST(skb, CTA_TUPLE_IP);
+	if (likely(l3proto->tuple_to_nfattr))
+		ret = l3proto->tuple_to_nfattr(skb, tuple);
+	NFA_NEST_END(skb, nest_parms);
+
 	nf_ct_l3proto_put(l3proto);
 
 	if (unlikely(ret < 0))
 		return ret;
 
-	proto = nf_ct_proto_find_get(tuple->src.l3num, tuple->dst.protonum);
-	ret = ctnetlink_dump_tuples_proto(skb, tuple, proto);
-	nf_ct_proto_put(proto);
+	nest_parms = NFA_NEST(skb, CTA_TUPLE_PROTO);
+	ret = ctnetlink_dump_tuples_proto(skb, tuple);
+	NFA_NEST_END(skb, nest_parms);
 
 	return ret;
+
+nfattr_failure:
+	return -1;
 }
 
 static inline int
@@ -174,16 +165,15 @@ static inline int
 ctnetlink_dump_helpinfo(struct sk_buff *skb, const struct nf_conn *ct)
 {
 	struct nfattr *nest_helper;
-	const struct nf_conn_help *help = nfct_help(ct);
 
-	if (!help || !help->helper)
+	if (!ct->helper)
 		return 0;
 		
 	nest_helper = NFA_NEST(skb, CTA_HELP);
-	NFA_PUT(skb, CTA_HELP_NAME, strlen(help->helper->name), help->helper->name);
+	NFA_PUT(skb, CTA_HELP_NAME, strlen(ct->helper->name), ct->helper->name);
 
-	if (help->helper->to_nfattr)
-		help->helper->to_nfattr(skb, ct);
+	if (ct->helper->to_nfattr)
+		ct->helper->to_nfattr(skb, ct);
 
 	NFA_NEST_END(skb, nest_helper);
 
@@ -347,10 +337,9 @@ static int ctnetlink_conntrack_event(struct notifier_block *this,
 		group = NFNLGRP_CONNTRACK_UPDATE;
 	} else
 		return NOTIFY_DONE;
-
-	if (!nfnetlink_has_listeners(group))
-		return NOTIFY_DONE;
-
+	
+  /* FIXME: Check if there are any listeners before, don't hurt performance */
+	
 	skb = alloc_skb(NLMSG_GOODSIZE, GFP_ATOMIC);
 	if (!skb)
 		return NOTIFY_DONE;
@@ -914,16 +903,10 @@ static inline int
 ctnetlink_change_helper(struct nf_conn *ct, struct nfattr *cda[])
 {
 	struct nf_conntrack_helper *helper;
-	struct nf_conn_help *help = nfct_help(ct);
 	char *helpname;
 	int err;
 
 	DEBUGP("entered %s\n", __FUNCTION__);
-
-	if (!help) {
-		/* FIXME: we need to reallocate and rehash */
-		return -EBUSY;
-	}
 
 	/* don't change helper of sibling connections */
 	if (ct->master)
@@ -941,18 +924,18 @@ ctnetlink_change_helper(struct nf_conn *ct, struct nfattr *cda[])
 			return -EINVAL;
 	}
 
-	if (help->helper) {
+	if (ct->helper) {
 		if (!helper) {
 			/* we had a helper before ... */
 			nf_ct_remove_expectations(ct);
-			help->helper = NULL;
+			ct->helper = NULL;
 		} else {
 			/* need to zero data of old helper */
-			memset(&help->help, 0, sizeof(help->help));
+			memset(&ct->help, 0, sizeof(ct->help));
 		}
 	}
 	
-	help->helper = helper;
+	ct->helper = helper;
 
 	return 0;
 }
@@ -1022,7 +1005,7 @@ ctnetlink_change_conntrack(struct nf_conn *ct, struct nfattr *cda[])
 			return err;
 	}
 
-#if defined(CONFIG_NF_CONNTRACK_MARK)
+#if defined(CONFIG_IP_NF_CONNTRACK_MARK)
 	if (cda[CTA_MARK-1])
 		ct->mark = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_MARK-1]));
 #endif
@@ -1062,13 +1045,18 @@ ctnetlink_create_conntrack(struct nfattr *cda[],
 			return err;
 	}
 
-#if defined(CONFIG_NF_CONNTRACK_MARK)
+#if defined(CONFIG_IP_NF_CONNTRACK_MARK)
 	if (cda[CTA_MARK-1])
 		ct->mark = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_MARK-1]));
 #endif
 
+	ct->helper = nf_ct_helper_find_get(rtuple);
+
 	add_timer(&ct->timeout);
 	nf_conntrack_hash_insert(ct);
+
+	if (ct->helper)
+		nf_ct_helper_put(ct->helper);
 
 	DEBUGP("conntrack with id %u inserted\n", ct->id);
 	return 0;
@@ -1162,37 +1150,6 @@ nfattr_failure:
 }			
 
 static inline int
-ctnetlink_exp_dump_mask(struct sk_buff *skb,
-			const struct nf_conntrack_tuple *tuple,
-			const struct nf_conntrack_tuple *mask)
-{
-	int ret;
-	struct nf_conntrack_l3proto *l3proto;
-	struct nf_conntrack_protocol *proto;
-	struct nfattr *nest_parms = NFA_NEST(skb, CTA_EXPECT_MASK);
-
-	l3proto = nf_ct_l3proto_find_get(tuple->src.l3num);
-	ret = ctnetlink_dump_tuples_ip(skb, mask, l3proto);
-	nf_ct_l3proto_put(l3proto);
-
-	if (unlikely(ret < 0))
-		goto nfattr_failure;
-
-	proto = nf_ct_proto_find_get(tuple->src.l3num, tuple->dst.protonum);
-	ret = ctnetlink_dump_tuples_proto(skb, mask, proto);
-	nf_ct_proto_put(proto);
-	if (unlikely(ret < 0))
-		goto nfattr_failure;
-
-	NFA_NEST_END(skb, nest_parms);
-
-	return 0;
-
-nfattr_failure:
-	return -1;
-}
-
-static inline int
 ctnetlink_exp_dump_expect(struct sk_buff *skb,
                           const struct nf_conntrack_expect *exp)
 {
@@ -1202,7 +1159,7 @@ ctnetlink_exp_dump_expect(struct sk_buff *skb,
 
 	if (ctnetlink_exp_dump_tuple(skb, &exp->tuple, CTA_EXPECT_TUPLE) < 0)
 		goto nfattr_failure;
-	if (ctnetlink_exp_dump_mask(skb, &exp->tuple, &exp->mask) < 0)
+	if (ctnetlink_exp_dump_tuple(skb, &exp->mask, CTA_EXPECT_MASK) < 0)
 		goto nfattr_failure;
 	if (ctnetlink_exp_dump_tuple(skb,
 				 &master->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
@@ -1460,8 +1417,7 @@ ctnetlink_del_expect(struct sock *ctnl, struct sk_buff *skb,
 		}
 		list_for_each_entry_safe(exp, tmp, &nf_conntrack_expect_list,
 					 list) {
-			struct nf_conn_help *m_help = nfct_help(exp->master);
-			if (m_help->helper == h
+			if (exp->master->helper == h 
 			    && del_timer(&exp->timeout)) {
 				nf_ct_unlink_expect(exp);
 				nf_conntrack_expect_put(exp);
@@ -1496,7 +1452,6 @@ ctnetlink_create_expect(struct nfattr *cda[], u_int8_t u3)
 	struct nf_conntrack_tuple_hash *h = NULL;
 	struct nf_conntrack_expect *exp;
 	struct nf_conn *ct;
-	struct nf_conn_help *help;
 	int err = 0;
 
 	DEBUGP("entered %s\n", __FUNCTION__);
@@ -1517,9 +1472,8 @@ ctnetlink_create_expect(struct nfattr *cda[], u_int8_t u3)
 	if (!h)
 		return -ENOENT;
 	ct = nf_ct_tuplehash_to_ctrack(h);
-	help = nfct_help(ct);
 
-	if (!help || !help->helper) {
+	if (!ct->helper) {
 		/* such conntrack hasn't got any helper, abort */
 		err = -EINVAL;
 		goto out;

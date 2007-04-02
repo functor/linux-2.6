@@ -1,7 +1,6 @@
 /*
  * arch/mips/dec/decstation.c
  */
-#include <asm/sections.h>
 
 #define RELOC
 #define INITRD
@@ -25,7 +24,7 @@
 #define INITRD_START (*(unsigned long *) (PARAM+0x218))
 #define INITRD_SIZE (*(unsigned long *) (PARAM+0x21c))
 
-extern int _ftext;			/* begin and end of kernel image */
+extern int _ftext, _end;		/* begin and end of kernel image */
 extern void kernel_entry(int, char **, unsigned long, int *);
 
 void * memcpy(void * dest, const void *src, unsigned int count)

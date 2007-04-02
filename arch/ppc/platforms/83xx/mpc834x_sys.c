@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/83xx/mpc834x_sys.c
+ *
  * MPC834x SYS board specific routines
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

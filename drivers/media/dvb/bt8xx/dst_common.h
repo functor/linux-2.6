@@ -25,7 +25,6 @@
 #include <linux/smp_lock.h>
 #include <linux/dvb/frontend.h>
 #include <linux/device.h>
-#include <linux/mutex.h>
 #include "bt878.h"
 
 #include "dst_ca.h"
@@ -122,7 +121,7 @@ struct dst_state {
 	u8 vendor[8];
 	u8 board_info[8];
 
-	struct mutex dst_mutex;
+	struct semaphore dst_mutex;
 };
 
 struct dst_types {

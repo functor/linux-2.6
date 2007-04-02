@@ -878,9 +878,12 @@ static int acpi_processor_power_verify(struct acpi_processor *pr)
 	unsigned int working = 0;
 
 #ifdef ARCH_APICTIMER_STOPS_ON_C3
-	int timer_broadcast = 0;
+	struct cpuinfo_x86 *c = cpu_data + pr->id;
 	cpumask_t mask = cpumask_of_cpu(pr->id);
-	on_each_cpu(switch_ipi_to_APIC_timer, &mask, 1, 1);
+
+	if (c->x86_vendor == X86_VENDOR_INTEL) {
+		on_each_cpu(switch_ipi_to_APIC_timer, &mask, 1, 1);
+	}
 #endif
 
 	for (i = 1; i < ACPI_PROCESSOR_MAX_POWER; i++) {
@@ -893,20 +896,15 @@ static int acpi_processor_power_verify(struct acpi_processor *pr)
 
 		case ACPI_STATE_C2:
 			acpi_processor_power_verify_c2(cx);
-#ifdef ARCH_APICTIMER_STOPS_ON_C3
-			/* Some AMD systems fake C3 as C2, but still
-			   have timer troubles */
-			if (cx->valid && 
-				boot_cpu_data.x86_vendor == X86_VENDOR_AMD)
-				timer_broadcast++;
-#endif
 			break;
 
 		case ACPI_STATE_C3:
 			acpi_processor_power_verify_c3(pr, cx);
 #ifdef ARCH_APICTIMER_STOPS_ON_C3
-			if (cx->valid)
-				timer_broadcast++;
+			if (cx->valid && c->x86_vendor == X86_VENDOR_INTEL) {
+				on_each_cpu(switch_APIC_timer_to_ipi,
+						&mask, 1, 1);
+			}
 #endif
 			break;
 		}
@@ -914,11 +912,6 @@ static int acpi_processor_power_verify(struct acpi_processor *pr)
 		if (cx->valid)
 			working++;
 	}
-
-#ifdef ARCH_APICTIMER_STOPS_ON_C3
-	if (timer_broadcast)
-		on_each_cpu(switch_APIC_timer_to_ipi, &mask, 1, 1);
-#endif
 
 	return (working);
 }

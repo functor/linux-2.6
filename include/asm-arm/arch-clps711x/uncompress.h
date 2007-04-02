@@ -25,6 +25,7 @@
 #undef CLPS7111_BASE
 #define CLPS7111_BASE CLPS7111_PHYS_BASE
 
+#define barrier()		__asm__ __volatile__("": : :"memory")
 #define __raw_readl(p)		(*(unsigned long *)(p))
 #define __raw_writel(v,p)	(*(unsigned long *)(p) = (v))
 
@@ -39,15 +40,21 @@
 /*
  * This does not append a newline
  */
-static inline void putc(int c)
+static void putstr(const char *s)
 {
-	while (clps_readl(SYSFLGx) & SYSFLG_UTXFF)
-		barrier();
-	clps_writel(c, UARTDRx);
-}
+	char c;
 
-static inline void flush(void)
-{
+	while ((c = *s++) != '\0') {
+		while (clps_readl(SYSFLGx) & SYSFLG_UTXFF)
+			barrier();
+		clps_writel(c, UARTDRx);
+
+		if (c == '\n') {
+			while (clps_readl(SYSFLGx) & SYSFLG_UTXFF)
+				barrier();
+			clps_writel('\r', UARTDRx);
+		}
+	}
 	while (clps_readl(SYSFLGx) & SYSFLG_UBUSY)
 		barrier();
 }

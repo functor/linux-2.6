@@ -8,8 +8,9 @@
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -127,13 +128,12 @@ static struct super_block *v9fs_get_sb(struct file_system_type
 
 	if ((newfid = v9fs_session_init(v9ses, dev_name, data)) < 0) {
 		dprintk(DEBUG_ERROR, "problem initiating session\n");
-		sb = ERR_PTR(newfid);
-		goto out_free_session;
+		kfree(v9ses);
+		return ERR_PTR(newfid);
 	}
 
 	sb = sget(fs_type, NULL, v9fs_set_super, v9ses);
-	if (IS_ERR(sb))
-		goto out_close_session;
+
 	v9fs_fill_super(sb, v9ses, flags);
 
 	inode = v9fs_get_inode(sb, S_IFDIR | mode);
@@ -184,12 +184,6 @@ static struct super_block *v9fs_get_sb(struct file_system_type
 		goto put_back_sb;
 	}
 
-	return sb;
-
-out_close_session:
-	v9fs_session_close(v9ses);
-out_free_session:
-	kfree(v9ses);
 	return sb;
 
 put_back_sb:
@@ -268,7 +262,7 @@ static struct super_operations v9fs_super_ops = {
 };
 
 struct file_system_type v9fs_fs_type = {
-	.name = "9p",
+	.name = "9P",
 	.get_sb = v9fs_get_sb,
 	.kill_sb = v9fs_kill_super,
 	.owner = THIS_MODULE,

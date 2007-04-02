@@ -39,7 +39,6 @@
 MODULE_DESCRIPTION("device driver for scsi media changer devices");
 MODULE_AUTHOR("Gerd Knorr <kraxel@bytesex.org>");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_CHARDEV_MAJOR(SCSI_CHANGER_MAJOR);
 
 static int init = 1;
 module_param(init, int, 0444);

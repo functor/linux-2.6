@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/simple/openbios.c
+ *
  * Copyright (c) 2005 DENX Software Engineering
  * Stefan Roese <sr@denx.de>
  *

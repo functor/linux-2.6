@@ -22,7 +22,6 @@
 #include <linux/usb.h>
 #include <linux/usbdevice_fs.h>
 #include <linux/kthread.h>
-#include <linux/mutex.h>
 
 #include <asm/semaphore.h>
 #include <asm/uaccess.h>
@@ -836,13 +835,6 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	desc = intf->cur_altsetting;
 	hdev = interface_to_usbdev(intf);
 
-#ifdef	CONFIG_USB_OTG_BLACKLIST_HUB
-	if (hdev->parent) {
-		dev_warn(&intf->dev, "ignoring external hub\n");
-		return -ENODEV;
-	}
-#endif
-
 	/* Some hubs have a subclass of 1, which AFAICT according to the */
 	/*  specs is not defined, but it works */
 	if ((desc->desc.bInterfaceSubClass != 0) &&
@@ -1013,22 +1005,17 @@ void usb_set_device_state(struct usb_device *udev,
 		;	/* do nothing */
 	else if (new_state != USB_STATE_NOTATTACHED) {
 		udev->state = new_state;
-
-		/* root hub wakeup capabilities are managed out-of-band
-		 * and may involve silicon errata ... ignore them here.
-		 */
-		if (udev->parent) {
-			if (new_state == USB_STATE_CONFIGURED)
-				device_init_wakeup(&udev->dev,
-					(udev->actconfig->desc.bmAttributes
-					 & USB_CONFIG_ATT_WAKEUP));
-			else if (new_state != USB_STATE_SUSPENDED)
-				device_init_wakeup(&udev->dev, 0);
-		}
+		if (new_state == USB_STATE_CONFIGURED)
+			device_init_wakeup(&udev->dev,
+				(udev->actconfig->desc.bmAttributes
+				 & USB_CONFIG_ATT_WAKEUP));
+		else if (new_state != USB_STATE_SUSPENDED)
+			device_init_wakeup(&udev->dev, 0);
 	} else
 		recursively_mark_NOTATTACHED(udev);
 	spin_unlock_irqrestore(&device_state_lock, flags);
 }
+EXPORT_SYMBOL(usb_set_device_state);
 
 
 #ifdef CONFIG_PM
@@ -1168,18 +1155,25 @@ static inline const char *plural(int n)
 static int choose_configuration(struct usb_device *udev)
 {
 	int i;
+	u16 devstatus;
+	int bus_powered;
 	int num_configs;
 	struct usb_host_config *c, *best;
+
+	/* If this fails, assume the device is bus-powered */
+	devstatus = 0;
+	usb_get_status(udev, USB_RECIP_DEVICE, 0, &devstatus);
+	le16_to_cpus(&devstatus);
+	bus_powered = ((devstatus & (1 << USB_DEVICE_SELF_POWERED)) == 0);
+	dev_dbg(&udev->dev, "device is %s-powered\n",
+			bus_powered ? "bus" : "self");
 
 	best = NULL;
 	c = udev->config;
 	num_configs = udev->descriptor.bNumConfigurations;
 	for (i = 0; i < num_configs; (i++, c++)) {
-		struct usb_interface_descriptor	*desc = NULL;
-
-		/* It's possible that a config has no interfaces! */
-		if (c->desc.bNumInterfaces > 0)
-			desc = &c->intf_cache[0]->altsetting->desc;
+		struct usb_interface_descriptor	*desc =
+				&c->intf_cache[0]->altsetting->desc;
 
 		/*
 		 * HP's USB bus-powered keyboard has only one configuration
@@ -1187,19 +1181,6 @@ static int choose_configuration(struct usb_device *udev)
 		 * similar errors in their descriptors.  If the next test
 		 * were allowed to execute, such configurations would always
 		 * be rejected and the devices would not work as expected.
-		 * In the meantime, we run the risk of selecting a config
-		 * that requires external power at a time when that power
-		 * isn't available.  It seems to be the lesser of two evils.
-		 *
-		 * Bugzilla #6448 reports a device that appears to crash
-		 * when it receives a GET_DEVICE_STATUS request!  We don't
-		 * have any other way to tell whether a device is self-powered,
-		 * but since we don't use that information anywhere but here,
-		 * the call has been removed.
-		 *
-		 * Maybe the GET_DEVICE_STATUS call and the test below can
-		 * be reinstated when device firmwares become more reliable.
-		 * Don't hold your breath.
 		 */
 #if 0
 		/* Rule out self-powered configs for a bus-powered device */
@@ -1227,8 +1208,7 @@ static int choose_configuration(struct usb_device *udev)
 		/* If the first config's first interface is COMM/2/0xff
 		 * (MSFT RNDIS), rule it out unless Linux has host-side
 		 * RNDIS support. */
-		if (i == 0 && desc
-				&& desc->bInterfaceClass == USB_CLASS_COMM
+		if (i == 0 && desc->bInterfaceClass == USB_CLASS_COMM
 				&& desc->bInterfaceSubClass == 2
 				&& desc->bInterfaceProtocol == 0xff) {
 #ifndef CONFIG_USB_NET_RNDIS
@@ -1244,8 +1224,8 @@ static int choose_configuration(struct usb_device *udev)
 		 * than a vendor-specific driver. */
 		else if (udev->descriptor.bDeviceClass !=
 						USB_CLASS_VENDOR_SPEC &&
-				(!desc || desc->bInterfaceClass !=
-						USB_CLASS_VENDOR_SPEC)) {
+				desc->bInterfaceClass !=
+						USB_CLASS_VENDOR_SPEC) {
 			best = c;
 			break;
 		}
@@ -1896,18 +1876,18 @@ int usb_resume_device(struct usb_device *udev)
 	if (udev->state == USB_STATE_NOTATTACHED)
 		return -ENODEV;
 
+#ifdef	CONFIG_USB_SUSPEND
 	/* selective resume of one downstream hub-to-device port */
 	if (udev->parent) {
-#ifdef	CONFIG_USB_SUSPEND
 		if (udev->state == USB_STATE_SUSPENDED) {
 			// NOTE swsusp may bork us, device state being wrong...
 			// NOTE this fails if parent is also suspended...
 			status = hub_port_resume(hdev_to_hub(udev->parent),
 					udev->portnum, udev);
 		} else
-#endif
 			status = 0;
 	} else
+#endif
 		status = finish_device_resume(udev);
 	if (status < 0)
 		dev_dbg(&udev->dev, "can't resume, status %d\n",
@@ -2182,7 +2162,7 @@ static int
 hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 		int retry_counter)
 {
-	static DEFINE_MUTEX(usb_address0_mutex);
+	static DECLARE_MUTEX(usb_address0_sem);
 
 	struct usb_device	*hdev = hub->hdev;
 	int			i, j, retval;
@@ -2203,7 +2183,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	if (oldspeed == USB_SPEED_LOW)
 		delay = HUB_LONG_RESET_TIME;
 
-	mutex_lock(&usb_address0_mutex);
+	down(&usb_address0_sem);
 
 	/* Reset the device; full speed may morph to high speed */
 	retval = hub_port_reset(hub, port1, udev, delay);
@@ -2401,7 +2381,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 fail:
 	if (retval)
 		hub_port_disable(hub, port1, 0);
-	mutex_unlock(&usb_address0_mutex);
+	up(&usb_address0_sem);
 	return retval;
 }
 
@@ -3037,7 +3017,7 @@ int usb_reset_device(struct usb_device *udev)
 	parent_hub = hdev_to_hub(parent_hdev);
 
 	/* If we're resetting an active hub, take some special actions */
-	if (udev->actconfig && udev->actconfig->desc.bNumInterfaces > 0 &&
+	if (udev->actconfig &&
 			udev->actconfig->interface[0]->dev.driver ==
 				&hub_driver.driver &&
 			(hub = hdev_to_hub(udev)) != NULL) {

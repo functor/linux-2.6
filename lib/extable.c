@@ -1,4 +1,5 @@
 /*
+ * lib/extable.c
  * Derived from arch/ppc/mm/extable.c and arch/i386/mm/extable.c.
  *
  * Copyright (C) 2004 Paul Mackerras, IBM Corp.

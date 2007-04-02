@@ -11,7 +11,6 @@
 
 #include <asm/io.h>
 #include <linux/list.h>
-#include <linux/mutex.h>
 #include <linux/device.h>
 #include <linux/timer.h>
 
@@ -41,7 +40,7 @@ struct gameport {
 	struct gameport *parent, *child;
 
 	struct gameport_driver *drv;
-	struct mutex drv_mutex;		/* protects serio->drv so attributes can pin driver */
+	struct semaphore drv_sem;	/* protects serio->drv so attributes can pin driver */
 
 	struct device dev;
 	unsigned int registered;	/* port has been fully registered with driver core */
@@ -120,7 +119,7 @@ static inline void gameport_set_name(struct gameport *gameport, const char *name
 }
 
 /*
- * Use the following functions to manipulate gameport's per-port
+ * Use the following fucntions to manipulate gameport's per-port
  * driver-specific data.
  */
 static inline void *gameport_get_drvdata(struct gameport *gameport)
@@ -134,16 +133,16 @@ static inline void gameport_set_drvdata(struct gameport *gameport, void *data)
 }
 
 /*
- * Use the following functions to pin gameport's driver in process context
+ * Use the following fucntions to pin gameport's driver in process context
  */
 static inline int gameport_pin_driver(struct gameport *gameport)
 {
-	return mutex_lock_interruptible(&gameport->drv_mutex);
+	return down_interruptible(&gameport->drv_sem);
 }
 
 static inline void gameport_unpin_driver(struct gameport *gameport)
 {
-	mutex_unlock(&gameport->drv_mutex);
+	up(&gameport->drv_sem);
 }
 
 void __gameport_register_driver(struct gameport_driver *drv, struct module *owner);

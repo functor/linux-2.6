@@ -43,7 +43,6 @@
 #include <linux/interrupt.h>
 
 #include <linux/proc_fs.h>
-#include <linux/mutex.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -186,7 +185,7 @@ struct forte_chip {
 	unsigned long		iobase;
 	int			irq;
 
-	struct mutex		open_mutex; 	/* Device access */
+	struct semaphore	open_sem; 	/* Device access */
 	spinlock_t		lock;		/* State */
 
 	spinlock_t		ac97_lock;
@@ -1243,13 +1242,13 @@ forte_dsp_open (struct inode *inode, struct file *file)
 	struct forte_chip *chip = forte; /* FIXME: HACK FROM HELL! */
 
 	if (file->f_flags & O_NONBLOCK) {
-		if (!mutex_trylock(&chip->open_mutex)) {
+		if (down_trylock (&chip->open_sem)) {
 			DPRINTK ("%s: returning -EAGAIN\n", __FUNCTION__);
 			return -EAGAIN;
 		}
 	}
 	else {
-		if (mutex_lock_interruptible(&chip->open_mutex)) {
+		if (down_interruptible (&chip->open_sem)) {
 			DPRINTK ("%s: returning -ERESTARTSYS\n", __FUNCTION__);
 			return -ERESTARTSYS;
 		}
@@ -1303,7 +1302,7 @@ forte_dsp_release (struct inode *inode, struct file *file)
 		spin_unlock_irq (&chip->lock);
 	}
 
-	mutex_unlock(&chip->open_mutex);
+	up (&chip->open_sem);
 
 	return ret;
 }
@@ -2012,7 +2011,7 @@ forte_probe (struct pci_dev *pci_dev, const struct pci_device_id *pci_id)
 	memset (chip, 0, sizeof (struct forte_chip));
 	chip->pci_dev = pci_dev;
 
-	mutex_init(&chip->open_mutex);
+	init_MUTEX(&chip->open_sem);
 	spin_lock_init (&chip->lock);
 	spin_lock_init (&chip->ac97_lock);
 

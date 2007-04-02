@@ -2412,7 +2412,8 @@ static int ibmmca_proc_info(struct Scsi_Host *shpnt, char *buffer, char **start,
 	spin_lock_irqsave(hosts[i]->host_lock, flags);	/* Check it */
 	host_index = i;
 	if (!shpnt) {
-		len += sprintf(buffer + len, "\nIBM MCA SCSI: Can't find adapter");
+		len += sprintf(buffer + len, "\nIBM MCA SCSI: Can't find adapter for host number %d\n",
+				shpnt->host_no);
 		return len;
 	}
 	max_pun = subsystem_maxid(host_index);
@@ -2488,7 +2489,7 @@ static int option_setup(char *str)
 	}
 	ints[0] = i - 1;
 	internal_ibmmca_scsi_setup(cur, ints);
-	return 1;
+	return 0;
 }
 
 __setup("ibmmcascsi=", option_setup);

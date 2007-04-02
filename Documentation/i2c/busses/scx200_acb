@@ -6,10 +6,9 @@ Module Parameters
 -----------------
 
 * base: int
-  Base addresses for the ACCESS.bus controllers on SCx200 and SC1100 devices
+  Base addresses for the ACCESS.bus controllers
 
 Description
 -----------
 
-Enable the use of the ACCESS.bus controller on the Geode SCx200 and
-SC1100 processors and the CS5535 and CS5536 Geode companion devices.
+Enable the use of the ACCESS.bus controllers of a SCx200 processor.

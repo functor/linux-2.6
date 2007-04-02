@@ -450,6 +450,7 @@ int_msg:
 
 .globl boot_gdt_descr
 .globl idt_descr
+.globl cpu_gdt_descr
 
 	ALIGN
 # early boot GDT descriptor (must use 1:1 address mapping)
@@ -469,6 +470,8 @@ cpu_gdt_descr:
 	.word GDT_ENTRIES*8-1
 	.long cpu_gdt_table
 
+	.fill NR_CPUS-1,8,0		# space for the other GDT descriptors
+
 /*
  * The boot_gdt_table must mirror the equivalent in setup.S and is
  * used only for booting.
@@ -482,7 +485,7 @@ ENTRY(boot_gdt_table)
 /*
  * The Global Descriptor Table contains 28 quadwords, per-CPU.
  */
-	.align L1_CACHE_BYTES
+	.align PAGE_SIZE_asm
 ENTRY(cpu_gdt_table)
 	.quad 0x0000000000000000	/* NULL descriptor */
 	.quad 0x0000000000000000	/* 0x0b reserved */

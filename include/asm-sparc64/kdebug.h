@@ -15,9 +15,12 @@ struct die_args {
 	int signr;
 };
 
-extern int register_die_notifier(struct notifier_block *);
-extern int unregister_die_notifier(struct notifier_block *);
-extern struct atomic_notifier_head sparc64die_chain;
+/* Note - you should never unregister because that can race with NMIs.
+ * If you really want to do it first unregister - then synchronize_sched
+ * - then free.
+ */
+int register_die_notifier(struct notifier_block *nb);
+extern struct notifier_block *sparc64die_chain;
 
 extern void bad_trap(struct pt_regs *, long);
 
@@ -43,7 +46,7 @@ static inline int notify_die(enum die_val val,char *str, struct pt_regs *regs,
 				 .trapnr	= trap,
 				 .signr		= sig };
 
-	return atomic_notifier_call_chain(&sparc64die_chain, val, &args);
+	return notifier_call_chain(&sparc64die_chain, val, &args);
 }
 
 #endif

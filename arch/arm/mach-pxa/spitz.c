@@ -33,6 +33,7 @@
 #include <asm/mach/irq.h>
 
 #include <asm/arch/pxa-regs.h>
+#include <asm/arch/irq.h>
 #include <asm/arch/irda.h>
 #include <asm/arch/mmc.h>
 #include <asm/arch/ohci.h>
@@ -220,8 +221,6 @@ struct corgissp_machinfo spitz_ssp_machinfo = {
  * Spitz Backlight Device
  */
 static struct corgibl_machinfo spitz_bl_machinfo = {
-	.default_intensity = 0x1f,
-	.limit_mask = 0x0b,
 	.max_intensity = 0x2f,
 };
 
@@ -242,14 +241,6 @@ static struct platform_device spitzkbd_device = {
 	.id		= -1,
 };
 
-
-/*
- * Spitz LEDs
- */
-static struct platform_device spitzled_device = {
-	.name		= "spitz-led",
-	.id		= -1,
-};
 
 /*
  * Spitz Touch Screen Device
@@ -371,7 +362,6 @@ static int spitz_ohci_init(struct device *dev)
 static struct pxaohci_platform_data spitz_ohci_platform_data = {
 	.port_mode	= PMM_NPS_MODE,
 	.init		= spitz_ohci_init,
-	.power_budget	= 150,
 };
 
 
@@ -429,7 +419,6 @@ static struct platform_device *devices[] __initdata = {
 	&spitzkbd_device,
 	&spitzts_device,
 	&spitzbl_device,
-	&spitzled_device,
 };
 
 static void __init common_init(void)
@@ -478,8 +467,6 @@ struct platform_device akitaioexp_device = {
 	.name		= "akita-ioexp",
 	.id		= -1,
 };
-
-EXPORT_SYMBOL_GPL(akitaioexp_device);
 
 static void __init akita_init(void)
 {

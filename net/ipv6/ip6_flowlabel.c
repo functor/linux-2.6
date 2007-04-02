@@ -287,9 +287,10 @@ fl_create(struct in6_flowlabel_req *freq, char __user *optval, int optlen, int *
 	int err;
 
 	err = -ENOMEM;
-	fl = kzalloc(sizeof(*fl), GFP_KERNEL);
+	fl = kmalloc(sizeof(*fl), GFP_KERNEL);
 	if (fl == NULL)
 		goto done;
+	memset(fl, 0, sizeof(*fl));
 
 	olen = optlen - CMSG_ALIGN(sizeof(*freq));
 	if (olen > 0) {
@@ -588,6 +589,8 @@ static struct ip6_flowlabel *ip6fl_get_next(struct seq_file *seq, struct ip6_flo
 	while (!fl) {
 		if (++state->bucket <= FL_HASH_MASK)
 			fl = fl_ht[state->bucket];
+		else
+			break;
 	}
 	return fl;
 }
@@ -662,7 +665,7 @@ static int ip6fl_seq_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
 	int rc = -ENOMEM;
-	struct ip6fl_iter_state *s = kzalloc(sizeof(*s), GFP_KERNEL);
+	struct ip6fl_iter_state *s = kmalloc(sizeof(*s), GFP_KERNEL);
 
 	if (!s)
 		goto out;
@@ -673,6 +676,7 @@ static int ip6fl_seq_open(struct inode *inode, struct file *file)
 
 	seq = file->private_data;
 	seq->private = s;
+	memset(s, 0, sizeof(*s));
 out:
 	return rc;
 out_kfree:

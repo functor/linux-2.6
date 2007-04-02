@@ -109,7 +109,7 @@ static int iic_ite_getclock(void *data)
 static void iic_ite_waitforpin(void) {
    DEFINE_WAIT(wait);
    int timeout = 2;
-   long flags;
+   unsigned long flags;
 
    /* If interrupts are enabled (which they are), then put the process to
     * sleep.  This process will be awakened by two events -- either the
@@ -200,7 +200,9 @@ static struct i2c_adapter iic_ite_ops = {
 	.owner		= THIS_MODULE,
 	.id		= I2C_HW_I_IIC,
 	.algo_data	= &iic_ite_data,
-	.name		= "ITE IIC adapter",
+	.dev		= {
+		.name	= "ITE IIC adapter",
+	},
 };
 
 /* Called when the module is loaded.  This function starts the

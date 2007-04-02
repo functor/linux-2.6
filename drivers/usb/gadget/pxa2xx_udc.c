@@ -335,10 +335,11 @@ pxa2xx_ep_alloc_request (struct usb_ep *_ep, gfp_t gfp_flags)
 {
 	struct pxa2xx_request *req;
 
-	req = kzalloc(sizeof(*req), gfp_flags);
+	req = kmalloc (sizeof *req, gfp_flags);
 	if (!req)
 		return NULL;
 
+	memset (req, 0, sizeof *req);
 	INIT_LIST_HEAD (&req->queue);
 	return &req->req;
 }

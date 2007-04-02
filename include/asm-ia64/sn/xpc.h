@@ -686,7 +686,6 @@ extern struct xpc_vars_part *xpc_vars_part;
 extern struct xpc_partition xpc_partitions[XP_MAX_PARTITIONS + 1];
 extern char *xpc_remote_copy_buffer;
 extern void *xpc_remote_copy_buffer_base;
-extern void *xpc_kmalloc_cacheline_aligned(size_t, gfp_t, void **);
 extern struct xpc_rsvd_page *xpc_rsvd_page_init(void);
 extern void xpc_allow_IPI_ops(void);
 extern void xpc_restrict_IPI_ops(void);
@@ -1227,6 +1226,28 @@ xpc_map_bte_errors(bte_result_t error)
 	}
 }
 
+
+
+static inline void *
+xpc_kmalloc_cacheline_aligned(size_t size, gfp_t flags, void **base)
+{
+	/* see if kmalloc will give us cachline aligned memory by default */
+	*base = kmalloc(size, flags);
+	if (*base == NULL) {
+		return NULL;
+	}
+	if ((u64) *base == L1_CACHE_ALIGN((u64) *base)) {
+		return *base;
+	}
+	kfree(*base);
+
+	/* nope, we'll have to do it ourselves */
+	*base = kmalloc(size + L1_CACHE_BYTES, flags);
+	if (*base == NULL) {
+		return NULL;
+	}
+	return (void *) L1_CACHE_ALIGN((u64) *base);
+}
 
 
 /*

@@ -15,7 +15,7 @@
 #define __MTD_DOC2000_H__
 
 #include <linux/mtd/mtd.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #define DoC_Sig1 0
 #define DoC_Sig2 1
@@ -187,7 +187,7 @@ struct DiskOnChip {
 	int numchips;
 	struct Nand *chips;
 	struct mtd_info *nextdoc;
-	struct mutex lock;
+	struct semaphore lock;
 };
 
 int doc_decode_ecc(unsigned char sector[512], unsigned char ecc1[6]);

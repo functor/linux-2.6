@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/mpc85xx_devices.c
+ *
  * MPC85xx Device descriptions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

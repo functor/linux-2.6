@@ -61,7 +61,7 @@ struct irqdesc {
 	struct irqchip	*chip;
 	struct irqaction *action;
 	struct list_head pend;
-	void __iomem	*base;
+	void		*chipdata;
 	void		*data;
 	unsigned int	disable_depth;
 
@@ -74,7 +74,6 @@ struct irqdesc {
 	unsigned int	noautoenable : 1;	/* don't automatically enable IRQ */
 	unsigned int	unused   :25;
 
-	unsigned int	irqs_unhandled;
 	struct proc_dir_entry *procdir;
 
 #ifdef CONFIG_SMP
@@ -114,8 +113,8 @@ void __set_irq_handler(unsigned int irq, irq_handler_t, int);
 #define set_irq_handler(irq,handler)		__set_irq_handler(irq,handler,0)
 #define set_irq_chained_handler(irq,handler)	__set_irq_handler(irq,handler,1)
 #define set_irq_data(irq,d)			do { irq_desc[irq].data = d; } while (0)
-#define set_irq_chipdata(irq,d)			do { irq_desc[irq].base = d; } while (0)
-#define get_irq_chipdata(irq)			(irq_desc[irq].base)
+#define set_irq_chipdata(irq,d)			do { irq_desc[irq].chipdata = d; } while (0)
+#define get_irq_chipdata(irq)			(irq_desc[irq].chipdata)
 
 void set_irq_chip(unsigned int irq, struct irqchip *);
 void set_irq_flags(unsigned int irq, unsigned int flags);

@@ -38,7 +38,6 @@ enum {
 #ifdef __KERNEL__
 
 #include <linux/wait.h>
-#include <linux/mutex.h>
 
 /* values for flags field */
 #define NBD_READ_ONLY 0x0001
@@ -58,7 +57,7 @@ struct nbd_device {
 	struct request *active_req;
 	wait_queue_head_t active_wq;
 
-	struct mutex tx_lock;
+	struct semaphore tx_lock;
 	struct gendisk *disk;
 	int blksize;
 	u64 bytesize;

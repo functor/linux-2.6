@@ -110,11 +110,8 @@ extern void prefill_possible_map(void);
 extern int additional_cpus;
 
 #ifdef CONFIG_ACPI_NUMA
-#if MAX_NUMNODES > 256
-#define MAX_PXM_DOMAINS MAX_NUMNODES
-#else
+/* Proximity bitmap length; _PXM is at most 255 (8 bit)*/
 #define MAX_PXM_DOMAINS (256)
-#endif
 extern int __devinitdata pxm_to_nid_map[MAX_PXM_DOMAINS];
 extern int __initdata nid_to_pxm_map[MAX_NUMNODES];
 #endif

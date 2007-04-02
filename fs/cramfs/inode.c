@@ -22,17 +22,16 @@
 #include <linux/cramfs_fs_sb.h>
 #include <linux/buffer_head.h>
 #include <linux/vfs.h>
-#include <linux/mutex.h>
 #include <asm/semaphore.h>
 
 #include <asm/uaccess.h>
 
 static struct super_operations cramfs_ops;
 static struct inode_operations cramfs_dir_inode_operations;
-static const struct file_operations cramfs_directory_operations;
+static struct file_operations cramfs_directory_operations;
 static struct address_space_operations cramfs_aops;
 
-static DEFINE_MUTEX(read_mutex);
+static DECLARE_MUTEX(read_mutex);
 
 
 /* These two macros may change in future, to provide better st_ino
@@ -251,20 +250,20 @@ static int cramfs_fill_super(struct super_block *sb, void *data, int silent)
 	memset(sbi, 0, sizeof(struct cramfs_sb_info));
 
 	/* Invalidate the read buffers on mount: think disk change.. */
-	mutex_lock(&read_mutex);
+	down(&read_mutex);
 	for (i = 0; i < READ_BUFFERS; i++)
 		buffer_blocknr[i] = -1;
 
 	/* Read the first block and get the superblock from it */
 	memcpy(&super, cramfs_read(sb, 0, sizeof(super)), sizeof(super));
-	mutex_unlock(&read_mutex);
+	up(&read_mutex);
 
 	/* Do sanity checks on the superblock */
 	if (super.magic != CRAMFS_MAGIC) {
 		/* check at 512 byte offset */
-		mutex_lock(&read_mutex);
+		down(&read_mutex);
 		memcpy(&super, cramfs_read(sb, 512, sizeof(super)), sizeof(super));
-		mutex_unlock(&read_mutex);
+		up(&read_mutex);
 		if (super.magic != CRAMFS_MAGIC) {
 			if (!silent)
 				printk(KERN_ERR "cramfs: wrong magic\n");
@@ -367,7 +366,7 @@ static int cramfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		mode_t mode;
 		int namelen, error;
 
-		mutex_lock(&read_mutex);
+		down(&read_mutex);
 		de = cramfs_read(sb, OFFSET(inode) + offset, sizeof(*de)+256);
 		name = (char *)(de+1);
 
@@ -380,7 +379,7 @@ static int cramfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		memcpy(buf, name, namelen);
 		ino = CRAMINO(de);
 		mode = de->mode;
-		mutex_unlock(&read_mutex);
+		up(&read_mutex);
 		nextoffset = offset + sizeof(*de) + namelen;
 		for (;;) {
 			if (!namelen) {
@@ -411,7 +410,7 @@ static struct dentry * cramfs_lookup(struct inode *dir, struct dentry *dentry, s
 	unsigned int offset = 0;
 	int sorted;
 
-	mutex_lock(&read_mutex);
+	down(&read_mutex);
 	sorted = CRAMFS_SB(dir->i_sb)->flags & CRAMFS_FLAG_SORTED_DIRS;
 	while (offset < dir->i_size) {
 		struct cramfs_inode *de;
@@ -434,7 +433,7 @@ static struct dentry * cramfs_lookup(struct inode *dir, struct dentry *dentry, s
 
 		for (;;) {
 			if (!namelen) {
-				mutex_unlock(&read_mutex);
+				up(&read_mutex);
 				return ERR_PTR(-EIO);
 			}
 			if (name[namelen-1])
@@ -448,7 +447,7 @@ static struct dentry * cramfs_lookup(struct inode *dir, struct dentry *dentry, s
 			continue;
 		if (!retval) {
 			struct cramfs_inode entry = *de;
-			mutex_unlock(&read_mutex);
+			up(&read_mutex);
 			d_add(dentry, get_cramfs_inode(dir->i_sb, &entry));
 			return NULL;
 		}
@@ -456,7 +455,7 @@ static struct dentry * cramfs_lookup(struct inode *dir, struct dentry *dentry, s
 		if (sorted)
 			break;
 	}
-	mutex_unlock(&read_mutex);
+	up(&read_mutex);
 	d_add(dentry, NULL);
 	return NULL;
 }
@@ -475,21 +474,23 @@ static int cramfs_readpage(struct file *file, struct page * page)
 		u32 start_offset, compr_len;
 
 		start_offset = OFFSET(inode) + maxblock*4;
-		mutex_lock(&read_mutex);
+		down(&read_mutex);
 		if (page->index)
 			start_offset = *(u32 *) cramfs_read(sb, blkptr_offset-4, 4);
 		compr_len = (*(u32 *) cramfs_read(sb, blkptr_offset, 4) - start_offset);
-		mutex_unlock(&read_mutex);
+		up(&read_mutex);
 		pgdata = kmap(page);
 		if (compr_len == 0)
 			; /* hole */
+		else if (compr_len > (PAGE_CACHE_SIZE << 1))
+			printk(KERN_ERR "cramfs: bad compressed blocksize %u\n", compr_len);
 		else {
-			mutex_lock(&read_mutex);
+			down(&read_mutex);
 			bytes_filled = cramfs_uncompress_block(pgdata,
 				 PAGE_CACHE_SIZE,
 				 cramfs_read(sb, start_offset, compr_len),
 				 compr_len);
-			mutex_unlock(&read_mutex);
+			up(&read_mutex);
 		}
 	} else
 		pgdata = kmap(page);
@@ -512,7 +513,7 @@ static struct address_space_operations cramfs_aops = {
 /*
  * A directory can only readdir
  */
-static const struct file_operations cramfs_directory_operations = {
+static struct file_operations cramfs_directory_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
 	.readdir	= cramfs_readdir,

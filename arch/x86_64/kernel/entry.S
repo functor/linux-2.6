@@ -136,6 +136,10 @@
 /* rdi:	prev */	
 ENTRY(ret_from_fork)
 	CFI_DEFAULT_STACK
+	push kernel_eflags(%rip)
+	CFI_ADJUST_CFA_OFFSET 4
+	popf				# reset kernel eflags
+	CFI_ADJUST_CFA_OFFSET -4
 	call schedule_tail
 	GET_THREAD_INFO(%rcx)
 	testl $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT),threadinfo_flags(%rcx)
@@ -540,7 +544,7 @@ iret_label:
 	/* force a signal here? this matches i386 behaviour */
 	/* running with kernel gs */
 bad_iret:
-	movq $11,%rdi	/* SIGSEGV */
+	movq $-9999,%rdi	/* better code? */
 	sti
 	jmp do_exit			
 	.previous	
@@ -596,7 +600,7 @@ retint_kernel:
  */		
 	.macro apicinterrupt num,func
 	INTR_FRAME
-	pushq $~(\num)
+	pushq $\num-256
 	CFI_ADJUST_CFA_OFFSET 8
 	interrupt \func
 	jmp ret_from_intr

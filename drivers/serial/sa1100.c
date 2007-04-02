@@ -689,14 +689,6 @@ void __init sa1100_register_uart(int idx, int port)
 
 
 #ifdef CONFIG_SERIAL_SA1100_CONSOLE
-static void sa1100_console_putchar(struct uart_port *port, int ch)
-{
-	struct sa1100_port *sport = (struct sa1100_port *)port;
-
-	while (!(UART_GET_UTSR1(sport) & UTSR1_TNF))
-		barrier();
-	UART_PUT_CHAR(sport, ch);
-}
 
 /*
  * Interrupts are disabled on entering
@@ -705,7 +697,7 @@ static void
 sa1100_console_write(struct console *co, const char *s, unsigned int count)
 {
 	struct sa1100_port *sport = &sa1100_ports[co->index];
-	unsigned int old_utcr3, status;
+	unsigned int old_utcr3, status, i;
 
 	/*
 	 *	First, save UTCR3 and then disable interrupts
@@ -714,7 +706,21 @@ sa1100_console_write(struct console *co, const char *s, unsigned int count)
 	UART_PUT_UTCR3(sport, (old_utcr3 & ~(UTCR3_RIE | UTCR3_TIE)) |
 				UTCR3_TXE);
 
-	uart_console_write(&sport->port, s, count, sa1100_console_putchar);
+	/*
+	 *	Now, do each character
+	 */
+	for (i = 0; i < count; i++) {
+		do {
+			status = UART_GET_UTSR1(sport);
+		} while (!(status & UTSR1_TNF));
+		UART_PUT_CHAR(sport, s[i]);
+		if (s[i] == '\n') {
+			do {
+				status = UART_GET_UTSR1(sport);
+			} while (!(status & UTSR1_TNF));
+			UART_PUT_CHAR(sport, '\r');
+		}
+	}
 
 	/*
 	 *	Finally, wait for transmitter to become empty

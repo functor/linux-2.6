@@ -4,7 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/string.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 struct seq_operations;
 struct file;
@@ -19,7 +19,7 @@ struct seq_file {
 	size_t count;
 	loff_t index;
 	loff_t version;
-	struct mutex lock;
+	struct semaphore sem;
 	struct seq_operations *op;
 	void *private;
 };

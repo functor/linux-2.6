@@ -164,7 +164,7 @@ sys_pipe (void)
 	return retval;
 }
 
-int ia64_map_check_rgn(unsigned long addr, unsigned long len,
+int ia64_mmap_check(unsigned long addr, unsigned long len,
 		unsigned long flags)
 {
 	unsigned long roff;

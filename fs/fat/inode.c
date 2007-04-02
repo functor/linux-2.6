@@ -101,11 +101,11 @@ static int __fat_get_blocks(struct inode *inode, sector_t iblock,
 }
 
 static int fat_get_blocks(struct inode *inode, sector_t iblock,
+			  unsigned long max_blocks,
 			  struct buffer_head *bh_result, int create)
 {
 	struct super_block *sb = inode->i_sb;
 	int err;
-	unsigned long max_blocks = bh_result->b_size >> inode->i_blkbits;
 
 	err = __fat_get_blocks(inode, iblock, &max_blocks, bh_result, create);
 	if (err)
@@ -518,8 +518,7 @@ static int __init fat_init_inodecache(void)
 {
 	fat_inode_cachep = kmem_cache_create("fat_inode_cache",
 					     sizeof(struct msdos_inode_info),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (fat_inode_cachep == NULL)
 		return -ENOMEM;
@@ -953,8 +952,7 @@ static int parse_options(char *options, int is_vfat, int silent, int *debug,
 		opts->shortname = 0;
 	opts->name_check = 'n';
 	opts->quiet = opts->showexec = opts->sys_immutable = opts->dotsOK =  0;
-	opts->utf8 = 1;
-	opts->unicode_xlate = 0;
+	opts->utf8 = opts->unicode_xlate = 0;
 	opts->numtail = 1;
 	opts->nocase = 0;
 	*debug = 0;
@@ -1103,7 +1101,7 @@ static int parse_options(char *options, int is_vfat, int silent, int *debug,
 			return -EINVAL;
 		}
 	}
-	/* UTF-8 doesn't provide FAT semantics */
+	/* UTF8 doesn't provide FAT semantics */
 	if (!strcmp(opts->iocharset, "utf8")) {
 		printk(KERN_ERR "FAT: utf8 is not a recommended IO charset"
 		       " for FAT filesystems, filesystem will be case sensitive!\n");
@@ -1435,6 +1433,9 @@ out_fail:
 }
 
 EXPORT_SYMBOL_GPL(fat_fill_super);
+
+int __init fat_cache_init(void);
+void fat_cache_destroy(void);
 
 static int __init init_fat_fs(void)
 {

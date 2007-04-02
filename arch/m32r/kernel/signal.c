@@ -118,8 +118,6 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc,
 #elif defined(CONFIG_ISA_M32R2) || defined(CONFIG_ISA_M32R)
 	COPY(acch);
 	COPY(accl);
-	COPY(dummy_acc1h);
-	COPY(dummy_acc1l);
 #else
 #error unknown isa configuration
 #endif
@@ -205,8 +203,6 @@ setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs,
 #elif defined(CONFIG_ISA_M32R2) || defined(CONFIG_ISA_M32R)
 	COPY(acch);
 	COPY(accl);
-	COPY(dummy_acc1h);
-	COPY(dummy_acc1l);
 #else
 #error unknown isa configuration
 #endif

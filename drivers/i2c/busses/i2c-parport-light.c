@@ -121,14 +121,9 @@ static struct i2c_adapter parport_adapter = {
 
 static int __init i2c_parport_init(void)
 {
-	if (type < 0) {
-		printk(KERN_WARNING "i2c-parport: adapter type unspecified\n");
-		return -ENODEV;
-	}
-
-	if (type >= ARRAY_SIZE(adapter_parm)) {
+	if (type < 0 || type >= ARRAY_SIZE(adapter_parm)) {
 		printk(KERN_WARNING "i2c-parport: invalid type (%d)\n", type);
-		return -ENODEV;
+		type = 0;
 	}
 
 	if (base == 0) {

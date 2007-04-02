@@ -31,13 +31,14 @@
  */
 void __ptrace_link(task_t *child, task_t *new_parent)
 {
-	BUG_ON(!list_empty(&child->ptrace_list));
+	if (!list_empty(&child->ptrace_list))
+		BUG();
 	if (child->parent == new_parent)
 		return;
 	list_add(&child->ptrace_list, &child->parent->ptrace_children);
-	remove_parent(child);
+	REMOVE_LINKS(child);
 	child->parent = new_parent;
-	add_parent(child);
+	SET_LINKS(child);
 }
  
 /*
@@ -73,9 +74,9 @@ void __ptrace_unlink(task_t *child)
 	child->ptrace = 0;
 	if (!list_empty(&child->ptrace_list)) {
 		list_del_init(&child->ptrace_list);
-		remove_parent(child);
+		REMOVE_LINKS(child);
 		child->parent = child->real_parent;
-		add_parent(child);
+		SET_LINKS(child);
 	}
 
 	if (child->state == TASK_TRACED)
@@ -115,7 +116,7 @@ int ptrace_check_attach(struct task_struct *child, int kill)
 	return ret;
 }
 
-int __ptrace_may_attach(struct task_struct *task)
+static int may_attach(struct task_struct *task)
 {
 	if (!task->mm)
 		return -EPERM;
@@ -137,7 +138,7 @@ int ptrace_may_attach(struct task_struct *task)
 {
 	int err;
 	task_lock(task);
-	err = __ptrace_may_attach(task);
+	err = may_attach(task);
 	task_unlock(task);
 	return !err;
 }
@@ -176,7 +177,7 @@ repeat:
 	/* the same process cannot be attached many times */
 	if (task->ptrace & PT_PTRACED)
 		goto bad;
-	retval = __ptrace_may_attach(task);
+	retval = may_attach(task);
 	if (retval)
 		goto bad;
 

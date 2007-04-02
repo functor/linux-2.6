@@ -412,8 +412,9 @@ static int mousedev_open(struct inode * inode, struct file * file)
 	if (i >= MOUSEDEV_MINORS || !mousedev_table[i])
 		return -ENODEV;
 
-	if (!(list = kzalloc(sizeof(struct mousedev_list), GFP_KERNEL)))
+	if (!(list = kmalloc(sizeof(struct mousedev_list), GFP_KERNEL)))
 		return -ENOMEM;
+	memset(list, 0, sizeof(struct mousedev_list));
 
 	spin_lock_init(&list->packet_lock);
 	list->pos_x = xres / 2;
@@ -625,8 +626,9 @@ static struct input_handle *mousedev_connect(struct input_handler *handler, stru
 		return NULL;
 	}
 
-	if (!(mousedev = kzalloc(sizeof(struct mousedev), GFP_KERNEL)))
+	if (!(mousedev = kmalloc(sizeof(struct mousedev), GFP_KERNEL)))
 		return NULL;
+	memset(mousedev, 0, sizeof(struct mousedev));
 
 	INIT_LIST_HEAD(&mousedev->list);
 	init_waitqueue_head(&mousedev->wait);

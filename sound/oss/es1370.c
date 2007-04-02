@@ -157,7 +157,6 @@
 #include <linux/gameport.h>
 #include <linux/wait.h>
 #include <linux/dma-mapping.h>
-#include <linux/mutex.h>
 
 #include <asm/io.h>
 #include <asm/page.h>
@@ -347,7 +346,7 @@ struct es1370_state {
 	unsigned sctrl;
 
 	spinlock_t lock;
-	struct mutex open_mutex;
+	struct semaphore open_sem;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 
@@ -394,7 +393,7 @@ struct es1370_state {
 	struct gameport *gameport;
 #endif
 
-	struct mutex mutex;
+	struct semaphore sem;
 };
 
 /* --------------------------------------------------------------------- */
@@ -1160,7 +1159,7 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 		return -ENXIO;
 	if (!access_ok(VERIFY_WRITE, buffer, count))
 		return -EFAULT;
-	mutex_lock(&s->mutex);
+	down(&s->sem);	
 	if (!s->dma_adc.ready && (ret = prog_dmabuf_adc(s)))
 		goto out;
         
@@ -1184,14 +1183,14 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 					ret = -EAGAIN;
 				goto out;
 			}
-			mutex_unlock(&s->mutex);
+			up(&s->sem);
 			schedule();
 			if (signal_pending(current)) {
 				if (!ret)
 					ret = -ERESTARTSYS;
 				goto out;
 			}
-			mutex_lock(&s->mutex);
+			down(&s->sem);
 			if (s->dma_adc.mapped)
 			{
 				ret = -ENXIO;
@@ -1216,7 +1215,7 @@ static ssize_t es1370_read(struct file *file, char __user *buffer, size_t count,
 			start_adc(s);
 	}
 out:
-	mutex_unlock(&s->mutex);
+	up(&s->sem);
         remove_wait_queue(&s->dma_adc.wait, &wait);
 	set_current_state(TASK_RUNNING);
 	return ret;
@@ -1236,7 +1235,7 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 		return -ENXIO;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
-	mutex_lock(&s->mutex);
+	down(&s->sem);	
 	if (!s->dma_dac2.ready && (ret = prog_dmabuf_dac2(s)))
 		goto out;
 	ret = 0;
@@ -1264,14 +1263,14 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 					ret = -EAGAIN;
 				goto out;
 			}
-			mutex_unlock(&s->mutex);
+			up(&s->sem);
 			schedule();
 			if (signal_pending(current)) {
 				if (!ret)
 					ret = -ERESTARTSYS;
 				goto out;	
 			}
-			mutex_lock(&s->mutex);
+			down(&s->sem);
 			if (s->dma_dac2.mapped)
 			{
 			ret = -ENXIO;
@@ -1297,7 +1296,7 @@ static ssize_t es1370_write(struct file *file, const char __user *buffer, size_t
 			start_dac2(s);
 	}
 out:
-	mutex_unlock(&s->mutex);
+	up(&s->sem);
         remove_wait_queue(&s->dma_dac2.wait, &wait);
 	set_current_state(TASK_RUNNING);
 	return ret;
@@ -1349,7 +1348,7 @@ static int es1370_mmap(struct file *file, struct vm_area_struct *vma)
 
 	VALIDATE_STATE(s);
 	lock_kernel();
-	mutex_lock(&s->mutex);
+	down(&s->sem);
 	if (vma->vm_flags & VM_WRITE) {
 		if ((ret = prog_dmabuf_dac2(s)) != 0) {
 			goto out;
@@ -1381,7 +1380,7 @@ static int es1370_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 	db->mapped = 1;
 out:
-	mutex_unlock(&s->mutex);
+	up(&s->sem);
 	unlock_kernel();
 	return ret;
 }
@@ -1753,21 +1752,21 @@ static int es1370_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & file->f_mode) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_READ|FMODE_WRITE)))
@@ -1794,8 +1793,8 @@ static int es1370_open(struct inode *inode, struct file *file)
 	outl(s->ctrl, s->io+ES1370_REG_CONTROL);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	mutex_unlock(&s->open_mutex);
-	mutex_init(&s->mutex);
+	up(&s->open_sem);
+	init_MUTEX(&s->sem);
 	return nonseekable_open(inode, file);
 }
 
@@ -1807,7 +1806,7 @@ static int es1370_release(struct inode *inode, struct file *file)
 	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac2(s, file->f_flags & O_NONBLOCK);
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac2(s);
 		synchronize_irq(s->irq);
@@ -1819,7 +1818,7 @@ static int es1370_release(struct inode *inode, struct file *file)
 	}
 	s->open_mode &= ~(file->f_mode & (FMODE_READ|FMODE_WRITE));
 	wake_up(&s->open_wait);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	unlock_kernel();
 	return 0;
 }
@@ -2199,21 +2198,21 @@ static int es1370_open_dac(struct inode *inode, struct file *file)
 		return -EINVAL;
        	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & FMODE_DAC) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 	s->dma_dac1.ossfragshift = s->dma_dac1.ossmaxfrags = s->dma_dac1.subdivision = 0;
 	s->dma_dac1.enabled = 1;
@@ -2228,7 +2227,7 @@ static int es1370_open_dac(struct inode *inode, struct file *file)
 	outl(s->ctrl, s->io+ES1370_REG_CONTROL);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= FMODE_DAC;
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	return nonseekable_open(inode, file);
 }
 
@@ -2239,12 +2238,12 @@ static int es1370_release_dac(struct inode *inode, struct file *file)
 	VALIDATE_STATE(s);
 	lock_kernel();
 	drain_dac1(s, file->f_flags & O_NONBLOCK);
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	stop_dac1(s);
 	dealloc_dmabuf(s, &s->dma_dac1);
 	s->open_mode &= ~FMODE_DAC;
 	wake_up(&s->open_wait);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	unlock_kernel();
 	return 0;
 }
@@ -2431,21 +2430,21 @@ static int es1370_midi_open(struct inode *inode, struct file *file)
        	VALIDATE_STATE(s);
 	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & (file->f_mode << FMODE_MIDI_SHIFT)) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -2466,7 +2465,7 @@ static int es1370_midi_open(struct inode *inode, struct file *file)
 	es1370_handle_midi(s);
 	spin_unlock_irqrestore(&s->lock, flags);
 	s->open_mode |= (file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ | FMODE_MIDI_WRITE);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	return nonseekable_open(inode, file);
 }
 
@@ -2500,7 +2499,7 @@ static int es1370_midi_release(struct inode *inode, struct file *file)
 		remove_wait_queue(&s->midi.owait, &wait);
 		set_current_state(TASK_RUNNING);
 	}
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	s->open_mode &= ~((file->f_mode << FMODE_MIDI_SHIFT) & (FMODE_MIDI_READ|FMODE_MIDI_WRITE));
 	spin_lock_irqsave(&s->lock, flags);
 	if (!(s->open_mode & (FMODE_MIDI_READ | FMODE_MIDI_WRITE))) {
@@ -2509,7 +2508,7 @@ static int es1370_midi_release(struct inode *inode, struct file *file)
 	}
 	spin_unlock_irqrestore(&s->lock, flags);
 	wake_up(&s->open_wait);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	unlock_kernel();
 	return 0;
 }
@@ -2639,7 +2638,7 @@ static int __devinit es1370_probe(struct pci_dev *pcidev, const struct pci_devic
 	init_waitqueue_head(&s->open_wait);
 	init_waitqueue_head(&s->midi.iwait);
 	init_waitqueue_head(&s->midi.owait);
-	mutex_init(&s->open_mutex);
+	init_MUTEX(&s->open_sem);
 	spin_lock_init(&s->lock);
 	s->magic = ES1370_MAGIC;
 	s->dev = pcidev;

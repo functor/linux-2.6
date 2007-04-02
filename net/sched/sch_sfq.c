@@ -232,7 +232,6 @@ static unsigned int sfq_drop(struct Qdisc *sch)
 		sfq_dec(q, x);
 		sch->q.qlen--;
 		sch->qstats.drops++;
-		sch->qstats.backlog -= len;
 		return len;
 	}
 
@@ -249,7 +248,6 @@ static unsigned int sfq_drop(struct Qdisc *sch)
 		sch->q.qlen--;
 		q->ht[q->hash[d]] = SFQ_DEPTH;
 		sch->qstats.drops++;
-		sch->qstats.backlog -= len;
 		return len;
 	}
 
@@ -268,7 +266,6 @@ sfq_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 		q->ht[hash] = x = q->dep[SFQ_DEPTH].next;
 		q->hash[x] = hash;
 	}
-	sch->qstats.backlog += skb->len;
 	__skb_queue_tail(&q->qs[x], skb);
 	sfq_inc(q, x);
 	if (q->qs[x].qlen == 1) {		/* The flow is new */
@@ -304,7 +301,6 @@ sfq_requeue(struct sk_buff *skb, struct Qdisc* sch)
 		q->ht[hash] = x = q->dep[SFQ_DEPTH].next;
 		q->hash[x] = hash;
 	}
-	sch->qstats.backlog += skb->len;
 	__skb_queue_head(&q->qs[x], skb);
 	sfq_inc(q, x);
 	if (q->qs[x].qlen == 1) {		/* The flow is new */
@@ -348,7 +344,6 @@ sfq_dequeue(struct Qdisc* sch)
 	skb = __skb_dequeue(&q->qs[a]);
 	sfq_dec(q, a);
 	sch->q.qlen--;
-	sch->qstats.backlog -= skb->len;
 
 	/* Is the slot empty? */
 	if (q->qs[a].qlen == 0) {

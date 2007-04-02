@@ -239,17 +239,17 @@ static int atari_read_overruns = 0;
 #endif
 
 static int setup_can_queue = -1;
-module_param(setup_can_queue, int, 0);
+MODULE_PARM(setup_can_queue, "i");
 static int setup_cmd_per_lun = -1;
-module_param(setup_cmd_per_lun, int, 0);
+MODULE_PARM(setup_cmd_per_lun, "i");
 static int setup_sg_tablesize = -1;
-module_param(setup_sg_tablesize, int, 0);
+MODULE_PARM(setup_sg_tablesize, "i");
 #ifdef SUPPORT_TAGS
 static int setup_use_tagged_queuing = -1;
-module_param(setup_use_tagged_queuing, int, 0);
+MODULE_PARM(setup_use_tagged_queuing, "i");
 #endif
 static int setup_hostid = -1;
-module_param(setup_hostid, int, 0);
+MODULE_PARM(setup_hostid, "i");
 
 
 #if defined(CONFIG_TT_DMA_EMUL)

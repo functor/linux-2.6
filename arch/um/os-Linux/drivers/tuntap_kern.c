@@ -87,7 +87,18 @@ static struct transport tuntap_transport = {
 static int register_tuntap(void)
 {
 	register_transport(&tuntap_transport);
-	return 0;
+	return(1);
 }
 
 __initcall(register_tuntap);
+
+/*
+ * Overrides for Emacs so that we follow Linus's tabbing style.
+ * Emacs will notice this stuff at the end of the file and automatically
+ * adjust the settings for this buffer only.  This must remain at the end
+ * of the file.
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-file-style: "linux"
+ * End:
+ */

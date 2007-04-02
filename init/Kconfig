@@ -231,17 +231,6 @@ config CPUSETS
 
 	  Say N if unsure.
 
-config RELAY
-	bool "Kernel->user space relay support (formerly relayfs)"
-	help
-	  This option enables support for relay interface support in
-	  certain file systems (such as debugfs).
-	  It is designed to provide an efficient mechanism for tools and
-	  facilities to relay large amounts of data from kernel space to
-	  user space.
-
-	  If unsure, say N.
-
 source "usr/Kconfig"
 
 config UID16
@@ -382,6 +371,43 @@ config SHMEM
 	  option replaces shmem and tmpfs with the much simpler ramfs code,
 	  which may be appropriate on small systems without swap.
 
+config CC_ALIGN_FUNCTIONS
+	int "Function alignment" if EMBEDDED
+	default 0
+	help
+	  Align the start of functions to the next power-of-two greater than n,
+	  skipping up to n bytes.  For instance, 32 aligns functions
+	  to the next 32-byte boundary, but 24 would align to the next
+	  32-byte boundary only if this can be done by skipping 23 bytes or less.
+	  Zero means use compiler's default.
+
+config CC_ALIGN_LABELS
+	int "Label alignment" if EMBEDDED
+	default 0
+	help
+	  Align all branch targets to a power-of-two boundary, skipping
+	  up to n bytes like ALIGN_FUNCTIONS.  This option can easily
+	  make code slower, because it must insert dummy operations for
+	  when the branch target is reached in the usual flow of the code.
+	  Zero means use compiler's default.
+
+config CC_ALIGN_LOOPS
+	int "Loop alignment" if EMBEDDED
+	default 0
+	help
+	  Align loops to a power-of-two boundary, skipping up to n bytes.
+	  Zero means use compiler's default.
+
+config CC_ALIGN_JUMPS
+	int "Jump alignment" if EMBEDDED
+	default 0
+	help
+	  Align branch targets to a power-of-two boundary, for branch
+	  targets where the targets can only be reached by jumping,
+	  skipping up to n bytes like ALIGN_FUNCTIONS.  In this case,
+	  no dummy operations need be executed.
+	  Zero means use compiler's default.
+
 config SLAB
 	default y
 	bool "Use full SLAB allocator" if EMBEDDED
@@ -450,6 +476,15 @@ config MODULE_FORCE_UNLOAD
 	  rmmod).  This is mainly for kernel developers and desperate users.
 	  If unsure, say N.
 
+config OBSOLETE_MODPARM
+	bool
+	default y
+	depends on MODULES
+	help
+	  You need this option to use module parameters on modules which
+	  have not been converted to the new module parameter system yet.
+	  If unsure, say Y.
+
 config MODVERSIONS
 	bool "Module versioning support"
 	depends on MODULES
@@ -472,22 +507,6 @@ config MODULE_SRCVERSION_ALL
 	  others sometimes change the module source without updating
 	  the version).  With this option, such a "srcversion" field
 	  will be created for all modules.  If unsure, say N.
-
-config MODULE_SIG
-	bool "Module signature verification (EXPERIMENTAL)"
-	depends on MODULES && EXPERIMENTAL
-	select CRYPTO
-	select CRYPTO_SHA1
-	select CRYPTO_SIGNATURE
-	help
-	  Check modules for valid signatures upon load.
-
-config MODULE_SIG_FORCE
-	bool "Required modules to be validly signed (EXPERIMENTAL)"
-	depends on MODULE_SIG
-	help
-	  Reject unsigned modules or signed modules for which we don't have a
-	  key.
 
 config KMOD
 	bool "Automatic kernel module loading"

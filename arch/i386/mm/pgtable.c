@@ -13,7 +13,6 @@
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/spinlock.h>
-#include <linux/module.h>
 
 #include <asm/system.h>
 #include <asm/pgtable.h>
@@ -37,7 +36,7 @@ void show_mem(void)
 	printk(KERN_INFO "Mem-info:\n");
 	show_free_areas();
 	printk(KERN_INFO "Free swap:       %6ldkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
-	for_each_online_pgdat(pgdat) {
+	for_each_pgdat(pgdat) {
 		pgdat_resize_lock(pgdat, &flags);
 		for (i = 0; i < pgdat->node_spanned_pages; ++i) {
 			page = pgdat_page_nr(pgdat, i);
@@ -139,10 +138,6 @@ void set_pmd_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 	__flush_tlb_one(vaddr);
 }
 
-static int nr_fixmaps = 0;
-unsigned long __FIXADDR_TOP = 0xfffff000;
-EXPORT_SYMBOL(__FIXADDR_TOP);
-
 void __set_fixmap (enum fixed_addresses idx, unsigned long phys, pgprot_t flags)
 {
 	unsigned long address = __fix_to_virt(idx);
@@ -152,13 +147,6 @@ void __set_fixmap (enum fixed_addresses idx, unsigned long phys, pgprot_t flags)
 		return;
 	}
 	set_pte_pfn(address, phys >> PAGE_SHIFT, flags);
-	nr_fixmaps++;
-}
-
-void set_fixaddr_top(unsigned long top)
-{
-	BUG_ON(nr_fixmaps > 0);
-	__FIXADDR_TOP = top - PAGE_SIZE;
 }
 
 pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)

@@ -32,8 +32,9 @@ dasd_alloc_erp_request(char *magic, int cplength, int datasize,
 	int size;
 
 	/* Sanity checks */
-	BUG_ON( magic == NULL || datasize > PAGE_SIZE ||
-	     (cplength*sizeof(struct ccw1)) > PAGE_SIZE);
+	if ( magic == NULL || datasize > PAGE_SIZE ||
+	     (cplength*sizeof(struct ccw1)) > PAGE_SIZE)
+		BUG();
 
 	size = (sizeof(struct dasd_ccw_req) + 7L) & -8L;
 	if (cplength > 0)
@@ -124,7 +125,8 @@ dasd_default_erp_postaction(struct dasd_ccw_req * cqr)
 	struct dasd_device *device;
 	int success;
 
-	BUG_ON(cqr->refers == NULL || cqr->function == NULL);
+	if (cqr->refers == NULL || cqr->function == NULL)
+		BUG();
 
 	device = cqr->device;
 	success = cqr->status == DASD_CQR_DONE;

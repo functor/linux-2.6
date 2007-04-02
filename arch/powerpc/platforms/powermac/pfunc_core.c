@@ -11,7 +11,6 @@
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 
 #include <asm/semaphore.h>
 #include <asm/prom.h>
@@ -547,7 +546,6 @@ struct pmf_device {
 
 static LIST_HEAD(pmf_devices);
 static spinlock_t pmf_lock = SPIN_LOCK_UNLOCKED;
-static DEFINE_MUTEX(pmf_irq_mutex);
 
 static void pmf_release_device(struct kref *kref)
 {
@@ -866,17 +864,15 @@ int pmf_register_irq_client(struct device_node *target,
 
 	spin_lock_irqsave(&pmf_lock, flags);
 	func = __pmf_find_function(target, name, PMF_FLAGS_INT_GEN);
-	if (func)
-		func = pmf_get_function(func);
-	spin_unlock_irqrestore(&pmf_lock, flags);
-	if (func == NULL)
+	if (func == NULL) {
+		spin_unlock_irqrestore(&pmf_lock, flags);
 		return -ENODEV;
-	mutex_lock(&pmf_irq_mutex);
+	}
 	if (list_empty(&func->irq_clients))
 		func->dev->handlers->irq_enable(func);
 	list_add(&client->link, &func->irq_clients);
 	client->func = func;
-	mutex_unlock(&pmf_irq_mutex);
+	spin_unlock_irqrestore(&pmf_lock, flags);
 
 	return 0;
 }
@@ -885,16 +881,16 @@ EXPORT_SYMBOL_GPL(pmf_register_irq_client);
 void pmf_unregister_irq_client(struct pmf_irq_client *client)
 {
 	struct pmf_function *func = client->func;
+	unsigned long flags;
 
 	BUG_ON(func == NULL);
 
-	mutex_lock(&pmf_irq_mutex);
+	spin_lock_irqsave(&pmf_lock, flags);
 	client->func = NULL;
 	list_del(&client->link);
 	if (list_empty(&func->irq_clients))
 		func->dev->handlers->irq_disable(func);
-	mutex_unlock(&pmf_irq_mutex);
-	pmf_put_function(func);
+	spin_unlock_irqrestore(&pmf_lock, flags);
 }
 EXPORT_SYMBOL_GPL(pmf_unregister_irq_client);
 

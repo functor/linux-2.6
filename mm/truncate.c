@@ -253,8 +253,6 @@ unlock:
 	return ret;
 }
 
-EXPORT_SYMBOL_GPL(invalidate_mapping_pages);
-
 unsigned long invalidate_inode_pages(struct address_space *mapping)
 {
 	return invalidate_mapping_pages(mapping, 0, ~0UL);

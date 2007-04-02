@@ -38,6 +38,7 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 #include <linux/random.h>
+#include <linux/kprobes.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -294,7 +295,7 @@ void show_regs(struct pt_regs * regs)
 	printk("EIP: %04x:[<%08lx>] CPU: %d\n",0xffff & regs->xcs,regs->eip, smp_processor_id());
 	print_symbol("EIP is at %s\n", regs->eip);
 
-	if (user_mode_vm(regs))
+	if (user_mode(regs))
 		printk(" ESP: %04x:%08lx",0xffff & regs->xss,regs->esp);
 	printk(" EFLAGS: %08lx    %s  (%s %.*s)\n",
 	       regs->eflags, print_tainted(), system_utsname.release,
@@ -362,6 +363,13 @@ void exit_thread(void)
 {
 	struct task_struct *tsk = current;
 	struct thread_struct *t = &tsk->thread;
+
+	/*
+	 * Remove function-return probe instances associated with this task
+	 * and put them back on the free list. Do not insert an exit probe for
+	 * this function, it will be disabled by kprobe_flush_task if you do.
+	 */
+	kprobe_flush_task(tsk);
 
 	/* The process may have allocated an io port bitmap... nuke it. */
 	if (unlikely(NULL != t->io_bitmap_ptr)) {
@@ -630,8 +638,6 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
 
 	__unlazy_fpu(prev_p);
-	if (next_p->mm)
-		load_user_cs_desc(cpu, next_p->mm);
 
 	/*
 	 * Reload esp0.
@@ -783,6 +789,7 @@ unsigned long get_wchan(struct task_struct *p)
 	} while (count++ < 16);
 	return 0;
 }
+EXPORT_SYMBOL(get_wchan);
 
 /*
  * sys_alloc_thread_area: get a yet unused TLS descriptor index.
@@ -904,60 +911,3 @@ unsigned long arch_align_stack(unsigned long sp)
 		sp -= get_random_int() % 8192;
 	return sp & ~0xf;
 }
-
-void arch_add_exec_range(struct mm_struct *mm, unsigned long limit)
-{
-	if (limit > mm->context.exec_limit) {
-		mm->context.exec_limit = limit;
-		set_user_cs(&mm->context.user_cs, limit);
-		if (mm == current->mm) {
-			preempt_disable();
-			load_user_cs_desc(smp_processor_id(), mm);
-			preempt_enable();
-		}
-	}
-}
-
-void arch_remove_exec_range(struct mm_struct *mm, unsigned long old_end)
-{
-	struct vm_area_struct *vma;
-	unsigned long limit = PAGE_SIZE;
-
-	if (old_end == mm->context.exec_limit) {
-		for (vma = mm->mmap; vma; vma = vma->vm_next)
-			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
-				limit = vma->vm_end;
-
-		mm->context.exec_limit = limit;
-		set_user_cs(&mm->context.user_cs, limit);
-		if (mm == current->mm) {
-			preempt_disable();
-			load_user_cs_desc(smp_processor_id(), mm);
-			preempt_enable();
-		}
-	}
-}
-
-void arch_flush_exec_range(struct mm_struct *mm)
-{
-	mm->context.exec_limit = 0;
-	set_user_cs(&mm->context.user_cs, 0);
-}
-
-/*
- * Generate random brk address between 128MB and 196MB. (if the layout
- * allows it.)
- */
-void randomize_brk(unsigned long old_brk)
-{
-	unsigned long new_brk, range_start, range_end;
-
-	range_start = 0x08000000;
-	if (current->mm->brk >= range_start)
-		range_start = current->mm->brk;
-	range_end = range_start + 0x02000000;
-	new_brk = randomize_range(range_start, range_end, 0);
-	if (new_brk)
-		current->mm->brk = new_brk;
-}
-

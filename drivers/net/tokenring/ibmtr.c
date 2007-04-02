@@ -140,7 +140,7 @@ in the event that chatty debug messages are desired - jjs 12/30/98 */
 
 /* version and credits */
 #ifndef PCMCIA
-static char version[] __initdata =
+static char version[] __devinitdata =
     "\nibmtr.c: v1.3.57   8/ 7/94 Peter De Schrijver and Mark Swanson\n"
     "         v2.1.125 10/20/98 Paul Norton    <pnorton@ieee.org>\n"
     "         v2.2.0   12/30/98 Joel Sloan     <jjs@c-me.com>\n"
@@ -216,7 +216,7 @@ static int __devinitdata turbo_irq[IBMTR_MAX_ADAPTERS] = {0};
 static int __devinitdata turbo_searched = 0;
 
 #ifndef PCMCIA
-static __u32 ibmtr_mem_base __initdata = 0xd0000;
+static __u32 ibmtr_mem_base __devinitdata = 0xd0000;
 #endif
 
 static void __devinit PrtChanID(char *pcid, short stride)
@@ -845,8 +845,6 @@ static int tok_init_card(struct net_device *dev)
 	struct tok_info *ti;
 	short PIOaddr;
 	unsigned long i;
-	wait_queue_t __wait;
-	init_waitqueue_entry(&__wait, current);
 
 	PIOaddr = dev->base_addr;
 	ti = (struct tok_info *) dev->priv;
@@ -858,18 +856,13 @@ static int tok_init_card(struct net_device *dev)
 
 	schedule_timeout_uninterruptible(TR_RST_TIME); /* wait 50ms */
 
-	add_wait_queue(&ti->wait_for_reset, &__wait);
-	set_current_state(TASK_UNINTERRUPTIBLE);
 	outb(0, PIOaddr + ADAPTRESETREL);
 #ifdef ENABLE_PAGING
 	if (ti->page_mask)
 		writeb(SRPR_ENABLE_PAGING,ti->mmio+ACA_OFFSET+ACA_RW+SRPR_EVEN);
 #endif
 	writeb(INT_ENABLE, ti->mmio + ACA_OFFSET + ACA_SET + ISRP_EVEN);
-	#warning pci posting bug
-	i = schedule_timeout(4 * HZ);
-	current->state = TASK_RUNNING;
-	remove_wait_queue(&ti->wait_for_reset, &__wait);
+	i = sleep_on_timeout(&ti->wait_for_reset, 4 * HZ);
 	return i? 0 : -EAGAIN;
 }
 

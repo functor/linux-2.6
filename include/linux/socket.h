@@ -150,7 +150,6 @@ __KINLINE struct cmsghdr * cmsg_nxthdr (struct msghdr *__msg, struct cmsghdr *__
 
 #define	SCM_RIGHTS	0x01		/* rw: access rights (array of int) */
 #define SCM_CREDENTIALS 0x02		/* rw: struct ucred		*/
-#define SCM_SECURITY	0x03		/* rw: security label		*/
 
 struct ucred {
 	__u32	pid;
@@ -306,10 +305,6 @@ extern int memcpy_toiovec(struct iovec *v, unsigned char *kdata, int len);
 extern int move_addr_to_user(void *kaddr, int klen, void __user *uaddr, int __user *ulen);
 extern int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
-
-struct socket;
-extern int sock_map_fd(struct socket *sock);
-extern struct socket *sockfd_lookup(int fd, int *err);
 
 #endif
 #endif /* not kernel and not glibc */

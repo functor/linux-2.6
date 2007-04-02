@@ -29,10 +29,7 @@
 #include <linux/blkdev.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/cpuset.h>
 #include "filemap.h"
-#include "internal.h"
-
 /*
  * FIXME: remove all knowledge of the buffer layer from the core VM
  */
@@ -175,7 +172,7 @@ static int sync_page(void *word)
  * dirty pages that lie within the byte offsets <start, end>
  * @mapping:	address space structure to write
  * @start:	offset in bytes where the range starts
- * @end:	offset in bytes where the range ends (inclusive)
+ * @end:	offset in bytes where the range ends
  * @sync_mode:	enable synchronous operation
  *
  * If sync_mode is WB_SYNC_ALL then this is a "data integrity" operation, as
@@ -183,8 +180,8 @@ static int sync_page(void *word)
  * these two operations is that if a dirty page/buffer is encountered, it must
  * be waited upon, and not just skipped over.
  */
-int __filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
-				loff_t end, int sync_mode)
+static int __filemap_fdatawrite_range(struct address_space *mapping,
+	loff_t start, loff_t end, int sync_mode)
 {
 	int ret;
 	struct writeback_control wbc = {
@@ -213,8 +210,8 @@ int filemap_fdatawrite(struct address_space *mapping)
 }
 EXPORT_SYMBOL(filemap_fdatawrite);
 
-static int filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
-				loff_t end)
+static int filemap_fdatawrite_range(struct address_space *mapping,
+	loff_t start, loff_t end)
 {
 	return __filemap_fdatawrite_range(mapping, start, end, WB_SYNC_ALL);
 }
@@ -233,7 +230,7 @@ EXPORT_SYMBOL(filemap_flush);
  * Wait for writeback to complete against pages indexed by start->end
  * inclusive
  */
-int wait_on_page_writeback_range(struct address_space *mapping,
+static int wait_on_page_writeback_range(struct address_space *mapping,
 				pgoff_t start, pgoff_t end)
 {
 	struct pagevec pvec;
@@ -368,12 +365,6 @@ int filemap_write_and_wait(struct address_space *mapping)
 }
 EXPORT_SYMBOL(filemap_write_and_wait);
 
-/*
- * Write out and wait upon file offsets lstart->lend, inclusive.
- *
- * Note that `lend' is inclusive (describes the last byte to be written) so
- * that this function can be used to write to the very end-of-file (end = -1).
- */
 int filemap_write_and_wait_range(struct address_space *mapping,
 				 loff_t lstart, loff_t lend)
 {
@@ -433,28 +424,6 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 		lru_cache_add(page);
 	return ret;
 }
-
-#ifdef CONFIG_NUMA
-struct page *page_cache_alloc(struct address_space *x)
-{
-	if (cpuset_do_page_mem_spread()) {
-		int n = cpuset_mem_spread_node();
-		return alloc_pages_node(n, mapping_gfp_mask(x), 0);
-	}
-	return alloc_pages(mapping_gfp_mask(x), 0);
-}
-EXPORT_SYMBOL(page_cache_alloc);
-
-struct page *page_cache_alloc_cold(struct address_space *x)
-{
-	if (cpuset_do_page_mem_spread()) {
-		int n = cpuset_mem_spread_node();
-		return alloc_pages_node(n, mapping_gfp_mask(x)|__GFP_COLD, 0);
-	}
-	return alloc_pages(mapping_gfp_mask(x)|__GFP_COLD, 0);
-}
-EXPORT_SYMBOL(page_cache_alloc_cold);
-#endif
 
 /*
  * In order to wait for pages to become available there must be
@@ -697,38 +666,6 @@ unsigned find_get_pages(struct address_space *mapping, pgoff_t start,
 	return ret;
 }
 
-/**
- * find_get_pages_contig - gang contiguous pagecache lookup
- * @mapping:	The address_space to search
- * @index:	The starting page index
- * @nr_pages:	The maximum number of pages
- * @pages:	Where the resulting pages are placed
- *
- * find_get_pages_contig() works exactly like find_get_pages(), except
- * that the returned number of pages are guaranteed to be contiguous.
- *
- * find_get_pages_contig() returns the number of pages which were found.
- */
-unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t index,
-			       unsigned int nr_pages, struct page **pages)
-{
-	unsigned int i;
-	unsigned int ret;
-
-	read_lock_irq(&mapping->tree_lock);
-	ret = radix_tree_gang_lookup(&mapping->page_tree,
-				(void **)pages, index, nr_pages);
-	for (i = 0; i < ret; i++) {
-		if (pages[i]->mapping == NULL || pages[i]->index != index)
-			break;
-
-		page_cache_get(pages[i]);
-		index++;
-	}
-	read_unlock_irq(&mapping->tree_lock);
-	return i;
-}
-
 /*
  * Like find_get_pages, except we only return pages which are tagged with
  * `tag'.   We update *index to index the next page for the traversal.
@@ -798,8 +735,7 @@ void do_generic_mapping_read(struct address_space *mapping,
 			     struct file *filp,
 			     loff_t *ppos,
 			     read_descriptor_t *desc,
-			     read_actor_t actor,
-			     int nonblock)
+			     read_actor_t actor)
 {
 	struct inode *inode = mapping->host;
 	unsigned long index;
@@ -849,21 +785,11 @@ void do_generic_mapping_read(struct address_space *mapping,
 find_page:
 		page = find_get_page(mapping, index);
 		if (unlikely(page == NULL)) {
-			if (nonblock) {
-				desc->error = -EWOULDBLOCKIO;
-				break;
-			}
 			handle_ra_miss(mapping, &ra, index);
 			goto no_cached_page;
 		}
-		if (!PageUptodate(page)) {
-			if (nonblock) {
-				page_cache_release(page);
-				desc->error = -EWOULDBLOCKIO;
-				break;
-			}
+		if (!PageUptodate(page))
 			goto page_not_up_to_date;
-		}
 page_ok:
 
 		/* If users can be writing to this page using arbitrary
@@ -1124,7 +1050,7 @@ __generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			if (desc.count == 0)
 				continue;
 			desc.error = 0;
-			do_generic_file_read(filp,ppos,&desc,file_read_actor,0);
+			do_generic_file_read(filp,ppos,&desc,file_read_actor);
 			retval += desc.written;
 			if (desc.error) {
 				retval = retval ?: desc.error;
@@ -1198,7 +1124,7 @@ ssize_t generic_file_sendfile(struct file *in_file, loff_t *ppos,
 	desc.arg.data = target;
 	desc.error = 0;
 
-	do_generic_file_read(in_file, ppos, &desc, actor, 0);
+	do_generic_file_read(in_file, ppos, &desc, actor);
 	if (desc.written)
 		return desc.written;
 	return desc.error;
@@ -2015,21 +1941,14 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 	do {
 		unsigned long index;
 		unsigned long offset;
+		unsigned long maxlen;
 		size_t copied;
 
 		offset = (pos & (PAGE_CACHE_SIZE -1)); /* Within page */
 		index = pos >> PAGE_CACHE_SHIFT;
 		bytes = PAGE_CACHE_SIZE - offset;
-
-		/* Limit the size of the copy to the caller's write size */
-		bytes = min(bytes, count);
-
-		/*
-		 * Limit the size of the copy to that of the current segment,
-		 * because fault_in_pages_readable() doesn't know how to walk
-		 * segments.
-		 */
-		bytes = min(bytes, cur_iov->iov_len - iov_base);
+		if (bytes > count)
+			bytes = count;
 
 		/*
 		 * Bring in the user page that we will copy from _first_.
@@ -2037,18 +1956,15 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 		 * same page as we're writing to, without it being marked
 		 * up-to-date.
 		 */
-		fault_in_pages_readable(buf, bytes);
+		maxlen = cur_iov->iov_len - iov_base;
+		if (maxlen > bytes)
+			maxlen = bytes;
+		fault_in_pages_readable(buf, maxlen);
 
 		page = __grab_cache_page(mapping,index,&cached_page,&lru_pvec);
 		if (!page) {
 			status = -ENOMEM;
 			break;
-		}
-
-		if (unlikely(bytes == 0)) {
-			status = 0;
-			copied = 0;
-			goto zero_length_segment;
 		}
 
 		status = a_ops->prepare_write(file, page, offset, offset+bytes);
@@ -2080,8 +1996,7 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 			page_cache_release(page);
 			continue;
 		}
-zero_length_segment:
-		if (likely(copied >= 0)) {
+		if (likely(copied > 0)) {
 			if (!status)
 				status = copied;
 

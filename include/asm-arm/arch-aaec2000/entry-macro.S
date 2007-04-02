@@ -10,7 +10,6 @@
  *  published by the Free Software Foundation.
  *
  */
-#include <asm/arch/irqs.h>
 
 		.macro	disable_fiq
 		.endm

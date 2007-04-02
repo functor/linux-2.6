@@ -37,6 +37,8 @@ static int xfrm4_parse_spi(struct sk_buff *skb, u8 nexthdr, u32 *spi, u32 *seq)
 {
 	switch (nexthdr) {
 	case IPPROTO_IPIP:
+		if (!pskb_may_pull(skb, sizeof(struct iphdr)))
+			return -EINVAL;
 		*spi = skb->nh.iph->saddr;
 		*seq = 0;
 		return 0;
@@ -66,7 +68,7 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 {
 	int err;
 	u32 spi, seq;
-	struct xfrm_state *xfrm_vec[XFRM_MAX_DEPTH];
+	struct sec_decap_state xfrm_vec[XFRM_MAX_DEPTH];
 	struct xfrm_state *x;
 	int xfrm_nr = 0;
 	int decaps = 0;
@@ -88,16 +90,14 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 		if (unlikely(x->km.state != XFRM_STATE_VALID))
 			goto drop_unlock;
 
-		if ((x->encap ? x->encap->encap_type : 0) != encap_type)
-			goto drop_unlock;
-
 		if (x->props.replay_window && xfrm_replay_check(x, seq))
 			goto drop_unlock;
 
 		if (xfrm_state_check_expire(x))
 			goto drop_unlock;
 
-		if (x->type->input(x, skb))
+		xfrm_vec[xfrm_nr].decap.decap_type = encap_type;
+		if (x->type->input(x, &(xfrm_vec[xfrm_nr].decap), skb))
 			goto drop_unlock;
 
 		/* only the first xfrm gets the encap type */
@@ -111,7 +111,7 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 
 		spin_unlock(&x->lock);
 
-		xfrm_vec[xfrm_nr++] = x;
+		xfrm_vec[xfrm_nr++].xvec = x;
 
 		iph = skb->nh.iph;
 
@@ -153,8 +153,7 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 	if (xfrm_nr + skb->sp->len > XFRM_MAX_DEPTH)
 		goto drop;
 
-	memcpy(skb->sp->xvec + skb->sp->len, xfrm_vec,
-	       xfrm_nr * sizeof(xfrm_vec[0]));
+	memcpy(skb->sp->x+skb->sp->len, xfrm_vec, xfrm_nr*sizeof(struct sec_decap_state));
 	skb->sp->len += xfrm_nr;
 
 	nf_reset(skb);
@@ -185,7 +184,7 @@ drop_unlock:
 	xfrm_state_put(x);
 drop:
 	while (--xfrm_nr >= 0)
-		xfrm_state_put(xfrm_vec[xfrm_nr]);
+		xfrm_state_put(xfrm_vec[xfrm_nr].xvec);
 
 	kfree_skb(skb);
 	return 0;

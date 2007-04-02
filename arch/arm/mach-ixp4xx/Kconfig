@@ -11,7 +11,6 @@ comment "IXP4xx Platforms"
 config MACH_NSLU2
 	bool
 	prompt "Linksys NSLU2"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support Linksys's
 	  NSLU2 NAS device. For more information on this platform,
@@ -19,7 +18,6 @@ config MACH_NSLU2
 
 config ARCH_AVILA
 	bool "Avila"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support the Gateworks
 	  Avila Network Platform. For more information on this platform,
@@ -27,7 +25,6 @@ config ARCH_AVILA
 
 config ARCH_ADI_COYOTE
 	bool "Coyote"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support the ADI 
 	  Engineering Coyote Gateway Reference Platform. For more
@@ -35,7 +32,6 @@ config ARCH_ADI_COYOTE
 
 config ARCH_IXDP425
 	bool "IXDP425"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support Intel's 
 	  IXDP425 Development Platform (Also known as Richfield).  
@@ -43,7 +39,6 @@ config ARCH_IXDP425
 
 config MACH_IXDPG425
 	bool "IXDPG425"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support Intel's
 	  IXDPG425 Development Platform (Also known as Montajade).
@@ -51,7 +46,6 @@ config MACH_IXDPG425
 
 config MACH_IXDP465
 	bool "IXDP465"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support Intel's
 	  IXDP465 Development Platform (Also known as BMP).
@@ -78,7 +72,6 @@ config ARCH_PRPMC1100
 config MACH_NAS100D
 	bool
 	prompt "NAS100D"
-	select PCI
 	help
 	  Say 'Y' here if you want your kernel to support Iomega's
 	  NAS 100d device. For more information on this platform,
@@ -103,7 +96,6 @@ config CPU_IXP46X
 config MACH_GTWX5715
 	bool "Gemtek WX5715 (Linksys WRV54G)"
 	depends on ARCH_IXP4XX
-	select PCI
 	help
 		This board is currently inside the Linksys WRV54G Gateways.
 
@@ -118,16 +110,11 @@ config MACH_GTWX5715
 		"High Speed" UART is n/c (as far as I can tell)
 		20 Pin ARM/Xscale JTAG interface on J2
 
-comment "IXP4xx Options"
 
-config DMABOUNCE
-	bool
-	default y
-	depends on PCI
+comment "IXP4xx Options"
 
 config IXP4XX_INDIRECT_PCI
 	bool "Use indirect PCI memory access"
-	depends on PCI
 	help
           IXP4xx provides two methods of accessing PCI memory space:
 
@@ -141,7 +128,7 @@ config IXP4XX_INDIRECT_PCI
           2) If > 64MB of memory space is required, the IXP4xx can be 
 	     configured to use indirect registers to access PCI This allows 
 	     for up to 128MB (0x48000000 to 0x4fffffff) of memory on the bus. 
-	     The disadvantage of this is that every PCI access requires 
+	     The disadvantadge of this is that every PCI access requires 
 	     three local register accesses plus a spinlock, but in some 
 	     cases the performance hit is acceptable. In addition, you cannot 
 	     mmap() PCI devices in this case due to the indirect nature

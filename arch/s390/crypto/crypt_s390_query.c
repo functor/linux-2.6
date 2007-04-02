@@ -55,7 +55,7 @@ static void query_available_functions(void)
 	printk(KERN_INFO "KMC_AES_256: %d\n",
 		crypt_s390_func_available(KMC_AES_256_ENCRYPT));
 
-	/* query available KIMD functions */
+	/* query available KIMD fucntions */
 	printk(KERN_INFO "KIMD_QUERY: %d\n",
 		crypt_s390_func_available(KIMD_QUERY));
 	printk(KERN_INFO "KIMD_SHA_1: %d\n",

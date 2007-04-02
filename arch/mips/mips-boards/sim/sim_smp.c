@@ -44,6 +44,8 @@
 void core_send_ipi(int cpu, unsigned int action)
 {
 #ifdef CONFIG_MIPS_MT_SMTC
+	void smtc_send_ipi(int, int, unsigned int);
+
 	smtc_send_ipi(cpu, LINUX_SMP_IPI, action);
 #endif /* CONFIG_MIPS_MT_SMTC */
 /* "CPU" may be TC of same VPE, VPE of same CPU, or different CPU */
@@ -57,7 +59,14 @@ void core_send_ipi(int cpu, unsigned int action)
 void __init prom_build_cpu_map(void)
 {
 #ifdef CONFIG_MIPS_MT_SMTC
+	extern int mipsmt_build_cpu_map(int startslot);
 	int nextslot;
+
+	cpus_clear(phys_cpu_present_map);
+
+	/* Register the boot CPU */
+
+	smp_prepare_boot_cpu();
 
 	/*
 	 * As of November, 2004, MIPSsim only simulates one core
@@ -78,6 +87,8 @@ void __init prom_build_cpu_map(void)
 void prom_boot_secondary(int cpu, struct task_struct *idle)
 {
 #ifdef CONFIG_MIPS_MT_SMTC
+	extern void smtc_boot_secondary(int cpu, struct task_struct *t);
+
 	smtc_boot_secondary(cpu, idle);
 #endif /* CONFIG_MIPS_MT_SMTC */
 }
@@ -102,8 +113,9 @@ void prom_init_secondary(void)
 void prom_prepare_cpus(unsigned int max_cpus)
 {
 #ifdef CONFIG_MIPS_MT_SMTC
+	void mipsmt_prepare_cpus(int c);
 	/*
-	 * As noted above, we can assume a single CPU for now
+ 	 * As noted above, we can assume a single CPU for now
 	 * but it may be multithreaded.
 	 */
 
@@ -120,6 +132,8 @@ void prom_prepare_cpus(unsigned int max_cpus)
 void prom_smp_finish(void)
 {
 #ifdef CONFIG_MIPS_MT_SMTC
+	void smtc_smp_finish(void);
+
 	smtc_smp_finish();
 #endif /* CONFIG_MIPS_MT_SMTC */
 }

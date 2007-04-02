@@ -36,8 +36,6 @@
 
 #include <asm/uaccess.h>
 
-int nfsd_port = 2049;
-unsigned int nfsd_portbits = 0;
 unsigned int nfsd_versbits = ~0;
 
 /*
@@ -56,7 +54,6 @@ enum {
 	NFSD_Fh,
 	NFSD_Threads,
 	NFSD_Versions,
-	NFSD_Ports,
 	/*
 	 * The below MUST come last.  Otherwise we leave a hole in nfsd_files[]
 	 * with !CONFIG_NFSD_V4 and simple_fill_super() goes oops
@@ -80,7 +77,6 @@ static ssize_t write_getfs(struct file *file, char *buf, size_t size);
 static ssize_t write_filehandle(struct file *file, char *buf, size_t size);
 static ssize_t write_threads(struct file *file, char *buf, size_t size);
 static ssize_t write_versions(struct file *file, char *buf, size_t size);
-static ssize_t write_ports(struct file *file, char *buf, size_t size);
 #ifdef CONFIG_NFSD_V4
 static ssize_t write_leasetime(struct file *file, char *buf, size_t size);
 static ssize_t write_recoverydir(struct file *file, char *buf, size_t size);
@@ -97,7 +93,6 @@ static ssize_t (*write_op[])(struct file *, char *, size_t) = {
 	[NFSD_Fh] = write_filehandle,
 	[NFSD_Threads] = write_threads,
 	[NFSD_Versions] = write_versions,
-	[NFSD_Ports] = write_ports,
 #ifdef CONFIG_NFSD_V4
 	[NFSD_Leasetime] = write_leasetime,
 	[NFSD_RecoveryDir] = write_recoverydir,
@@ -110,7 +105,7 @@ static ssize_t nfsctl_transaction_write(struct file *file, const char __user *bu
 	char *data;
 	ssize_t rv;
 
-	if (ino >= ARRAY_SIZE(write_op) || !write_op[ino])
+	if (ino >= sizeof(write_op)/sizeof(write_op[0]) || !write_op[ino])
 		return -EINVAL;
 
 	data = simple_transaction_get(file, buf, size);
@@ -139,7 +134,7 @@ static ssize_t nfsctl_transaction_read(struct file *file, char __user *buf, size
 	return simple_transaction_read(file, buf, size, pos);
 }
 
-static const struct file_operations transaction_ops = {
+static struct file_operations transaction_ops = {
 	.write		= nfsctl_transaction_write,
 	.read		= nfsctl_transaction_read,
 	.release	= simple_transaction_release,
@@ -151,7 +146,7 @@ static int exports_open(struct inode *inode, struct file *file)
 	return seq_open(file, &nfs_exports_op);
 }
 
-static const struct file_operations exports_operations = {
+static struct file_operations exports_operations = {
 	.open		= exports_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
@@ -363,60 +358,7 @@ static ssize_t write_threads(struct file *file, char *buf, size_t size)
 	sprintf(buf, "%d\n", nfsd_nrthreads());
 	return strlen(buf);
 }
-static ssize_t write_ports(struct file *file, char *buf, size_t size)
-{
-	/*
-	 * Format:
-	 *   family proto proto address port
-	 */
-	char *mesg = buf;
-	char *family, *udp, *tcp, *addr; 
-	int len, port = 0;
-	ssize_t tlen = 0;
 
-	if (buf[size-1] != '\n')
-		return -EINVAL;
-	buf[size-1] = 0;
-
-	family = mesg;
-	len = qword_get(&mesg, family, size);
-	if (len <= 0) return -EINVAL;
-
-	tlen += len;
-	udp = family+len+1;
-	len = qword_get(&mesg, udp, size);
-	if (len <= 0) return -EINVAL;
-
-	tlen += len;
-	tcp = udp+len+1;
-	len = qword_get(&mesg, tcp, size);
-	if (len <= 0) return -EINVAL;
-
-	tlen += len;
-	addr = tcp+len+1;
-	len = qword_get(&mesg, addr, size);
-	if (len <= 0) return -EINVAL;
-
-	len = get_int(&mesg, &port);
-	if (len)
-		return len;
-
-	tlen += sizeof(port);
-	if (port)
-		nfsd_port = port;
-
-	if (strcmp(tcp, "tcp") == 0 || strcmp(tcp, "TCP") == 0)
-		NFSCTL_TCPSET(nfsd_portbits);
-	else
-		NFSCTL_TCPUNSET(nfsd_portbits);
-
-	if (strcmp(udp, "udp") == 0 || strcmp(udp, "UDP") == 0)
-		NFSCTL_UDPSET(nfsd_portbits);
-	else
-		NFSCTL_UDPUNSET(nfsd_portbits);
-
-	return tlen;
-}
 static ssize_t write_versions(struct file *file, char *buf, size_t size)
 {
 	/*
@@ -543,7 +485,6 @@ static int nfsd_fill_super(struct super_block * sb, void * data, int silent)
 		[NFSD_Fh] = {"filehandle", &transaction_ops, S_IWUSR|S_IRUSR},
 		[NFSD_Threads] = {"threads", &transaction_ops, S_IWUSR|S_IRUSR},
 		[NFSD_Versions] = {"versions", &transaction_ops, S_IWUSR|S_IRUSR},
-		[NFSD_Ports] = {"ports", &transaction_ops, S_IWUSR|S_IRUSR},
 #ifdef CONFIG_NFSD_V4
 		[NFSD_Leasetime] = {"nfsv4leasetime", &transaction_ops, S_IWUSR|S_IRUSR},
 		[NFSD_RecoveryDir] = {"nfsv4recoverydir", &transaction_ops, S_IWUSR|S_IRUSR},

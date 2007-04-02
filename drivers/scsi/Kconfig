@@ -379,14 +379,6 @@ config SCSI_AHA1740
 config SCSI_AACRAID
 	tristate "Adaptec AACRAID support"
 	depends on SCSI && PCI
-	help
-	  This driver supports a variety of Dell, HP, Adaptec, IBM and
-	  ICP storage products. For a list of supported products, refer
-	  to <file:Documentation/scsi/aacraid.txt>.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called aacraid.
-
 
 source "drivers/scsi/aic7xxx/Kconfig.aic7xxx"
 
@@ -532,6 +524,16 @@ config SCSI_PDC_ADMA
 
 	  If unsure, say N.
 
+config SCSI_HPTIOP
+	tristate "HighPoint RocketRAID 3xxx Controller support"
+	depends on SCSI && PCI
+	help
+	  This option enables support for HighPoint RocketRAID 3xxx
+	  controllers.
+
+	  To compile this driver as a module, choose M here; the module
+	  will be called hptiop. If unsure, say N.
+
 config SCSI_SATA_QSTOR
 	tristate "Pacific Digital SATA QStor support"
 	depends on SCSI_SATA && PCI
@@ -597,10 +599,10 @@ config SCSI_SATA_VIA
 	  If unsure, say N.
 
 config SCSI_SATA_VITESSE
-	tristate "VITESSE VSC-7174 / INTEL 31244 SATA support"
+	tristate "VITESSE VSC-7174 SATA support"
 	depends on SCSI_SATA && PCI
 	help
-	  This option enables support for Vitesse VSC7174 and Intel 31244 Serial ATA.
+	  This option enables support for Vitesse VSC7174 Serial ATA.
 
 	  If unsure, say N.
 
@@ -1081,7 +1083,7 @@ config SCSI_SYM53C8XX_DMA_ADDRESSING_MODE
 	  memory using PCI DAC cycles.
 
 config SCSI_SYM53C8XX_DEFAULT_TAGS
-	int "Default tagged command queue depth"
+	int "default tagged command queue depth"
 	depends on SCSI_SYM53C8XX_2
 	default "16"
 	help
@@ -1092,7 +1094,7 @@ config SCSI_SYM53C8XX_DEFAULT_TAGS
 	  exceed CONFIG_SCSI_SYM53C8XX_MAX_TAGS.
 
 config SCSI_SYM53C8XX_MAX_TAGS
-	int "Maximum number of queued commands"
+	int "maximum number of queued commands"
 	depends on SCSI_SYM53C8XX_2
 	default "64"
 	help
@@ -1101,14 +1103,13 @@ config SCSI_SYM53C8XX_MAX_TAGS
 	  possible. The driver supports up to 256 queued commands per device.
 	  This value is used as a compiled-in hard limit.
 
-config SCSI_SYM53C8XX_MMIO
-	bool "Use memory mapped IO"
+config SCSI_SYM53C8XX_IOMAPPED
+	bool "use port IO"
 	depends on SCSI_SYM53C8XX_2
-	default y
 	help
-	  Memory mapped IO is faster than Port IO.  Most people should
-	  answer Y here, but some machines may have problems.  If you have
-	  to answer N here, please report the problem to the maintainer.
+	  If you say Y here, the driver will use port IO to access
+	  the card.  This is significantly slower then using memory
+	  mapped IO.  Most people should answer N.
 
 config SCSI_IPR
 	tristate "IBM Power Linux RAID adapter support"
@@ -1311,6 +1312,15 @@ config SCSI_QLOGIC_FAS
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called qlogicfas.
+
+config SCSI_QLOGIC_FC
+	tristate "Qlogic ISP FC SCSI support"
+	depends on PCI && SCSI
+	help
+	  This is a driver for the QLogic ISP2100 SCSI-FCP host adapter.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called qlogicfc.
 
 config SCSI_QLOGIC_FC_FIRMWARE
 	bool "Include loadable firmware in driver"

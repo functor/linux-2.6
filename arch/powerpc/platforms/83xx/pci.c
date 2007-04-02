@@ -36,16 +36,7 @@
 
 int mpc83xx_pci2_busno;
 
-int mpc83xx_exclude_device(u_char bus, u_char devfn)
-{
-	if (bus == 0 && PCI_SLOT(devfn) == 0)
-		return PCIBIOS_DEVICE_NOT_FOUND;
-	if (mpc83xx_pci2_busno)
-		if (bus == (mpc83xx_pci2_busno) && PCI_SLOT(devfn) == 0)
-			return PCIBIOS_DEVICE_NOT_FOUND;
-	return PCIBIOS_SUCCESSFUL;
-}
-
+#ifdef CONFIG_PCI
 int __init add_bridge(struct device_node *dev)
 {
 	int len;
@@ -61,7 +52,7 @@ int __init add_bridge(struct device_node *dev)
 	has_address = (of_address_to_resource(dev, 0, &rsrc) == 0);
 
 	/* Get bus range if any */
-	bus_range = (int *)get_property(dev, "bus-range", &len);
+	bus_range = (int *) get_property(dev, "bus-range", &len);
 	if (bus_range == NULL || len < 2 * sizeof(int)) {
 		printk(KERN_WARNING "Can't get bus-range for %s, assume"
 		       " bus 0\n", dev->full_name);
@@ -83,7 +74,7 @@ int __init add_bridge(struct device_node *dev)
 	if ((rsrc.start & 0xfffff) == 0x8500) {
 		setup_indirect_pci(hose, immr + 0x8300, immr + 0x8304);
 	}
-	/* PCI 2 */
+	/* PCI 2*/
 	if ((rsrc.start & 0xfffff) == 0x8600) {
 		setup_indirect_pci(hose, immr + 0x8380, immr + 0x8384);
 		primary = 0;
@@ -93,10 +84,10 @@ int __init add_bridge(struct device_node *dev)
 
 	printk(KERN_INFO "Found MPC83xx PCI host bridge at 0x%08lx. "
 	       "Firmware bus number: %d->%d\n",
-	       rsrc.start, hose->first_busno, hose->last_busno);
+		rsrc.start, hose->first_busno, hose->last_busno);
 
 	DBG(" ->Hose at 0x%p, cfg_addr=0x%p,cfg_data=0x%p\n",
-	    hose, hose->cfg_addr, hose->cfg_data);
+		hose, hose->cfg_addr, hose->cfg_data);
 
 	/* Interpret the "ranges" property */
 	/* This also maps the I/O region and sets isa_io/mem_base */
@@ -104,3 +95,5 @@ int __init add_bridge(struct device_node *dev)
 
 	return 0;
 }
+
+#endif

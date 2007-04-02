@@ -73,23 +73,23 @@ DEFINE_RWLOCK(hci_cb_list_lock);
 struct hci_proto *hci_proto[HCI_MAX_PROTO];
 
 /* HCI notifiers list */
-static ATOMIC_NOTIFIER_HEAD(hci_notifier);
+static struct notifier_block *hci_notifier;
 
 /* ---- HCI notifications ---- */
 
 int hci_register_notifier(struct notifier_block *nb)
 {
-	return atomic_notifier_chain_register(&hci_notifier, nb);
+	return notifier_chain_register(&hci_notifier, nb);
 }
 
 int hci_unregister_notifier(struct notifier_block *nb)
 {
-	return atomic_notifier_chain_unregister(&hci_notifier, nb);
+	return notifier_chain_unregister(&hci_notifier, nb);
 }
 
 static void hci_notify(struct hci_dev *hdev, int event)
 {
-	atomic_notifier_call_chain(&hci_notifier, event, hdev);
+	notifier_call_chain(&hci_notifier, event, hdev);
 }
 
 /* ---- HCI requests ---- */

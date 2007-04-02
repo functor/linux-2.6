@@ -96,8 +96,6 @@ typedef unsigned long pgprot_t;
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#define devmem_is_allowed(x) 1
-
 #endif /* __KERNEL__ */
 
 #include <asm-generic/page.h>

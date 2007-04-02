@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/luan.h
+ *
  * Luan board definitions
  *
  * Matt Porter <mporter@kernel.crashing.org>

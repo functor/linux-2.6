@@ -57,10 +57,8 @@ struct vm_area_struct;
 			__GFP_NOFAIL|__GFP_NORETRY|__GFP_NO_GROW|__GFP_COMP| \
 			__GFP_NOMEMALLOC|__GFP_HARDWALL)
 
-/* This equals 0, but use constants in case they ever change */
-#define GFP_NOWAIT	(GFP_ATOMIC & ~__GFP_HIGH)
 /* GFP_ATOMIC means both !wait (__GFP_WAIT not set) and use emergency pool */
-#define GFP_ATOMIC	(__GFP_HIGH | __GFP_NOWARN)
+#define GFP_ATOMIC	(__GFP_HIGH)
 #define GFP_NOIO	(__GFP_WAIT)
 #define GFP_NOFS	(__GFP_WAIT | __GFP_IO)
 #define GFP_KERNEL	(__GFP_WAIT | __GFP_IO | __GFP_FS)
@@ -100,11 +98,7 @@ static inline int gfp_zone(gfp_t gfp)
  */
 
 #ifndef HAVE_ARCH_FREE_PAGE
-/*
- * If arch_free_page returns non-zero then the generic free_page code can
- * immediately bail: the arch-specific function has done all the work.
- */
-static inline int arch_free_page(struct page *page, int order) { return 0; }
+static inline void arch_free_page(struct page *page, int order) { }
 #endif
 
 extern struct page *

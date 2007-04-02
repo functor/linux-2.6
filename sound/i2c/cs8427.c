@@ -291,13 +291,11 @@ static void snd_cs8427_reset(struct snd_i2c_device *cs8427)
 {
 	struct cs8427 *chip;
 	unsigned long end_time;
-	int data, aes3input = 0;
+	int data;
 
 	snd_assert(cs8427, return);
 	chip = cs8427->private_data;
 	snd_i2c_lock(cs8427->bus);
-	if ((chip->regmap[CS8427_REG_CLOCKSOURCE] & CS8427_RXDAES3INPUT) == CS8427_RXDAES3INPUT)  /* AES3 bit is set */
-		aes3input = 1;
 	chip->regmap[CS8427_REG_CLOCKSOURCE] &= ~(CS8427_RUN | CS8427_RXDMASK);
 	snd_cs8427_reg_write(cs8427, CS8427_REG_CLOCKSOURCE,
 			     chip->regmap[CS8427_REG_CLOCKSOURCE]);
@@ -318,8 +316,7 @@ static void snd_cs8427_reset(struct snd_i2c_device *cs8427)
 	}
 	snd_i2c_lock(cs8427->bus);
 	chip->regmap[CS8427_REG_CLOCKSOURCE] &= ~CS8427_RXDMASK;
-	if (aes3input)
-		chip->regmap[CS8427_REG_CLOCKSOURCE] |= CS8427_RXDAES3INPUT;
+	chip->regmap[CS8427_REG_CLOCKSOURCE] |= CS8427_RXDAES3INPUT;
 	snd_cs8427_reg_write(cs8427, CS8427_REG_CLOCKSOURCE,
 			     chip->regmap[CS8427_REG_CLOCKSOURCE]);
 	snd_i2c_unlock(cs8427->bus);

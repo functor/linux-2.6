@@ -25,7 +25,6 @@
 #include <linux/highmem.h>
 #include <linux/swap.h>
 #include <linux/proc_fs.h>
-#include <linux/pfn.h>
 
 #include <asm/bootinfo.h>
 #include <asm/cachectl.h>
@@ -55,8 +54,7 @@ unsigned long empty_zero_page, zero_page_mask;
  */
 unsigned long setup_zero_pages(void)
 {
-	unsigned int order;
-	unsigned long size;
+	unsigned long order, size;
 	struct page *page;
 
 	if (cpu_has_vce)
@@ -69,9 +67,9 @@ unsigned long setup_zero_pages(void)
 		panic("Oh boy, that early out of memory?");
 
 	page = virt_to_page(empty_zero_page);
-	split_page(page, order);
 	while (page < virt_to_page(empty_zero_page + (PAGE_SIZE << order))) {
 		SetPageReserved(page);
+		set_page_count(page, 1);
 		page++;
 	}
 
@@ -178,6 +176,9 @@ void __init paging_init(void)
 	free_area_init(zones_size);
 }
 
+#define PFN_UP(x)	(((x) + PAGE_SIZE - 1) >> PAGE_SHIFT)
+#define PFN_DOWN(x)	((x) >> PAGE_SHIFT)
+
 static inline int page_is_ram(unsigned long pagenr)
 {
 	int i;
@@ -227,7 +228,7 @@ void __init mem_init(void)
 	for (tmp = 0; tmp < max_low_pfn; tmp++)
 		if (page_is_ram(tmp)) {
 			ram++;
-			if (PageReserved(pfn_to_page(tmp)))
+			if (PageReserved(mem_map+tmp))
 				reservedpages++;
 		}
 
@@ -243,7 +244,7 @@ void __init mem_init(void)
 #ifdef CONFIG_LIMITED_DMA
 		set_page_address(page, lowmem_page_address(page));
 #endif
-		init_page_count(page);
+		set_page_count(page, 1);
 		__free_page(page);
 		totalhigh_pages++;
 	}
@@ -276,20 +277,6 @@ void __init mem_init(void)
 }
 #endif /* !CONFIG_NEED_MULTIPLE_NODES */
 
-void free_init_pages(char *what, unsigned long begin, unsigned long end)
-{
-	unsigned long addr;
-
-	for (addr = begin; addr < end; addr += PAGE_SIZE) {
-		ClearPageReserved(virt_to_page(addr));
-		init_page_count(virt_to_page(addr));
-		memset((void *)addr, 0xcc, PAGE_SIZE);
-		free_page(addr);
-		totalram_pages++;
-	}
-	printk(KERN_INFO "Freeing %s: %ldk freed\n", what, (end - begin) >> 10);
-}
-
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
@@ -298,7 +285,16 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 	start = (unsigned long)phys_to_virt(CPHYSADDR(start));
 	end = (unsigned long)phys_to_virt(CPHYSADDR(end));
 #endif
-	free_init_pages("initrd memory", start, end);
+	if (start < end)
+		printk(KERN_INFO "Freeing initrd memory: %ldk freed\n",
+		       (end - start) >> 10);
+
+	for (; start < end; start += PAGE_SIZE) {
+		ClearPageReserved(virt_to_page(start));
+		set_page_count(virt_to_page(start), 1);
+		free_page(start);
+		totalram_pages++;
+	}
 }
 #endif
 
@@ -306,17 +302,24 @@ extern unsigned long prom_free_prom_memory(void);
 
 void free_initmem(void)
 {
-	unsigned long start, end, freed;
+	unsigned long addr, page, freed;
 
 	freed = prom_free_prom_memory();
-	if (freed)
-		printk(KERN_INFO "Freeing firmware memory: %ldk freed\n",freed);
 
-	start = (unsigned long)(&__init_begin);
-	end = (unsigned long)(&__init_end);
+	addr = (unsigned long) &__init_begin;
+	while (addr < (unsigned long) &__init_end) {
 #ifdef CONFIG_64BIT
-	start = PAGE_OFFSET | CPHYSADDR(start);
-	end = PAGE_OFFSET | CPHYSADDR(end);
+		page = PAGE_OFFSET | CPHYSADDR(addr);
+#else
+		page = addr;
 #endif
-	free_init_pages("unused kernel memory", start, end);
+		ClearPageReserved(virt_to_page(page));
+		set_page_count(virt_to_page(page), 1);
+		free_page(page);
+		totalram_pages++;
+		freed += PAGE_SIZE;
+		addr += PAGE_SIZE;
+	}
+	printk(KERN_INFO "Freeing unused kernel memory: %ldk freed\n",
+	       freed >> 10);
 }

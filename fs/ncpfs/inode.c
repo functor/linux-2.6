@@ -63,7 +63,7 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 
 	if ((flags & (SLAB_CTOR_VERIFY|SLAB_CTOR_CONSTRUCTOR)) ==
 	    SLAB_CTOR_CONSTRUCTOR) {
-		mutex_init(&ei->open_mutex);
+		init_MUTEX(&ei->open_sem);
 		inode_init_once(&ei->vfs_inode);
 	}
 }
@@ -72,8 +72,7 @@ static int init_inodecache(void)
 {
 	ncp_inode_cachep = kmem_cache_create("ncp_inode_cache",
 					     sizeof(struct ncp_inode_info),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (ncp_inode_cachep == NULL)
 		return -ENOMEM;
@@ -521,7 +520,7 @@ static int ncp_fill_super(struct super_block *sb, void *raw_data, int silent)
 	}
 
 /*	server->lock = 0;	*/
-	mutex_init(&server->mutex);
+	init_MUTEX(&server->sem);
 	server->packet = NULL;
 /*	server->buffer_size = 0;	*/
 /*	server->conn_status = 0;	*/
@@ -558,7 +557,7 @@ static int ncp_fill_super(struct super_block *sb, void *raw_data, int silent)
 	server->dentry_ttl = 0;	/* no caching */
 
 	INIT_LIST_HEAD(&server->tx.requests);
-	mutex_init(&server->rcv.creq_mutex);
+	init_MUTEX(&server->rcv.creq_sem);
 	server->tx.creq		= NULL;
 	server->rcv.creq	= NULL;
 	server->data_ready	= sock->sk->sk_data_ready;

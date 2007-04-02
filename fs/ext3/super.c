@@ -472,7 +472,7 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 #ifdef CONFIG_EXT3_FS_XATTR
 		init_rwsem(&ei->xattr_sem);
 #endif
-		mutex_init(&ei->truncate_mutex);
+		init_MUTEX(&ei->truncate_sem);
 		inode_init_once(&ei->vfs_inode);
 	}
 }
@@ -481,8 +481,7 @@ static int init_inodecache(void)
 {
 	ext3_inode_cachep = kmem_cache_create("ext3_inode_cache",
 					     sizeof(struct ext3_inode_info),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (ext3_inode_cachep == NULL)
 		return -ENOMEM;
@@ -1727,6 +1726,12 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 	}
 
 	if (test_opt(sb, NOBH)) {
+		if (sb->s_blocksize_bits != PAGE_CACHE_SHIFT) {
+			printk(KERN_WARNING "EXT3-fs: Ignoring nobh option "
+				"since filesystem blocksize doesn't match "
+				"pagesize\n");
+			clear_opt(sbi->s_mount_opt, NOBH);
+		}
 		if (!(test_opt(sb, DATA_FLAGS) == EXT3_MOUNT_WRITEBACK_DATA)) {
 			printk(KERN_WARNING "EXT3-fs: Ignoring nobh option - "
 				"its supported only with writeback mode\n");
@@ -2375,8 +2380,7 @@ restore_opts:
 
 static int ext3_statfs (struct super_block * sb, struct kstatfs * buf)
 {
-	struct ext3_sb_info *sbi = EXT3_SB(sb);
-	struct ext3_super_block *es = sbi->s_es;
+	struct ext3_super_block *es = EXT3_SB(sb)->s_es;
 	unsigned long overhead;
 	int i;
 
@@ -2418,12 +2422,12 @@ static int ext3_statfs (struct super_block * sb, struct kstatfs * buf)
 	buf->f_type = EXT3_SUPER_MAGIC;
 	buf->f_bsize = sb->s_blocksize;
 	buf->f_blocks = le32_to_cpu(es->s_blocks_count) - overhead;
-	buf->f_bfree = percpu_counter_sum(&sbi->s_freeblocks_counter);
+	buf->f_bfree = ext3_count_free_blocks (sb);
 	buf->f_bavail = buf->f_bfree - le32_to_cpu(es->s_r_blocks_count);
 	if (buf->f_bfree < le32_to_cpu(es->s_r_blocks_count))
 		buf->f_bavail = 0;
 	buf->f_files = le32_to_cpu(es->s_inodes_count);
-	buf->f_ffree = percpu_counter_sum(&sbi->s_freeinodes_counter);
+	buf->f_ffree = ext3_count_free_inodes (sb);
 	buf->f_namelen = EXT3_NAME_LEN;
 	return 0;
 }
@@ -2433,8 +2437,8 @@ static int ext3_statfs (struct super_block * sb, struct kstatfs * buf)
  * Process 1                         Process 2
  * ext3_create()                     quota_sync()
  *   journal_start()                   write_dquot()
- *   DQUOT_INIT()                        down(dqio_mutex)
- *     down(dqio_mutex)                    journal_start()
+ *   DQUOT_INIT()                        down(dqio_sem)
+ *     down(dqio_sem)                    journal_start()
  *
  */
 

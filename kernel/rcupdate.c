@@ -47,16 +47,15 @@
 #include <linux/notifier.h>
 #include <linux/rcupdate.h>
 #include <linux/cpu.h>
-#include <linux/mutex.h>
 
 /* Definition for rcupdate control block. */
-static struct rcu_ctrlblk rcu_ctrlblk = {
+struct rcu_ctrlblk rcu_ctrlblk = {
 	.cur = -300,
 	.completed = -300,
 	.lock = SPIN_LOCK_UNLOCKED,
 	.cpumask = CPU_MASK_NONE,
 };
-static struct rcu_ctrlblk rcu_bh_ctrlblk = {
+struct rcu_ctrlblk rcu_bh_ctrlblk = {
 	.cur = -300,
 	.completed = -300,
 	.lock = SPIN_LOCK_UNLOCKED,
@@ -76,7 +75,7 @@ static int rsinterval = 1000;
 #endif
 
 static atomic_t rcu_barrier_cpu_count;
-static DEFINE_MUTEX(rcu_barrier_mutex);
+static struct semaphore rcu_barrier_sema;
 static struct completion rcu_barrier_completion;
 
 #ifdef CONFIG_SMP
@@ -208,13 +207,13 @@ static void rcu_barrier_func(void *notused)
 void rcu_barrier(void)
 {
 	BUG_ON(in_interrupt());
-	/* Take cpucontrol mutex to protect against CPU hotplug */
-	mutex_lock(&rcu_barrier_mutex);
+	/* Take cpucontrol semaphore to protect against CPU hotplug */
+	down(&rcu_barrier_sema);
 	init_completion(&rcu_barrier_completion);
 	atomic_set(&rcu_barrier_cpu_count, 0);
 	on_each_cpu(rcu_barrier_func, NULL, 0, 1);
 	wait_for_completion(&rcu_barrier_completion);
-	mutex_unlock(&rcu_barrier_mutex);
+	up(&rcu_barrier_sema);
 }
 EXPORT_SYMBOL_GPL(rcu_barrier);
 
@@ -416,8 +415,8 @@ static void __rcu_process_callbacks(struct rcu_ctrlblk *rcp,
 		rdp->curtail = &rdp->curlist;
 	}
 
+	local_irq_disable();
 	if (rdp->nxtlist && !rdp->curlist) {
-		local_irq_disable();
 		rdp->curlist = rdp->nxtlist;
 		rdp->curtail = rdp->nxttail;
 		rdp->nxtlist = NULL;
@@ -442,8 +441,9 @@ static void __rcu_process_callbacks(struct rcu_ctrlblk *rcp,
 			rcu_start_batch(rcp);
 			spin_unlock(&rcp->lock);
 		}
+	} else {
+		local_irq_enable();
 	}
-
 	rcu_check_quiescent_state(rcp, rdp);
 	if (rdp->donelist)
 		rcu_do_batch(rdp);
@@ -479,29 +479,10 @@ static int __rcu_pending(struct rcu_ctrlblk *rcp, struct rcu_data *rdp)
 	return 0;
 }
 
-/*
- * Check to see if there is any immediate RCU-related work to be done
- * by the current CPU, returning 1 if so.  This function is part of the
- * RCU implementation; it is -not- an exported member of the RCU API.
- */
 int rcu_pending(int cpu)
 {
 	return __rcu_pending(&rcu_ctrlblk, &per_cpu(rcu_data, cpu)) ||
 		__rcu_pending(&rcu_bh_ctrlblk, &per_cpu(rcu_bh_data, cpu));
-}
-
-/*
- * Check to see if any future RCU-related work will need to be done
- * by the current CPU, even if none need be done immediately, returning
- * 1 if so.  This function is part of the RCU implementation; it is -not-
- * an exported member of the RCU API.
- */
-int rcu_needs_cpu(int cpu)
-{
-	struct rcu_data *rdp = &per_cpu(rcu_data, cpu);
-	struct rcu_data *rdp_bh = &per_cpu(rcu_bh_data, cpu);
-
-	return (!!rdp->curlist || !!rdp_bh->curlist || rcu_pending(cpu));
 }
 
 void rcu_check_callbacks(int cpu, int user)
@@ -539,7 +520,7 @@ static void __devinit rcu_online_cpu(int cpu)
 	tasklet_init(&per_cpu(rcu_tasklet, cpu), rcu_process_callbacks, 0UL);
 }
 
-static int rcu_cpu_notify(struct notifier_block *self,
+static int __devinit rcu_cpu_notify(struct notifier_block *self, 
 				unsigned long action, void *hcpu)
 {
 	long cpu = (long)hcpu;
@@ -556,7 +537,7 @@ static int rcu_cpu_notify(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block rcu_nb = {
+static struct notifier_block __devinitdata rcu_nb = {
 	.notifier_call	= rcu_cpu_notify,
 };
 
@@ -568,6 +549,7 @@ static struct notifier_block rcu_nb = {
  */
 void __init rcu_init(void)
 {
+	sema_init(&rcu_barrier_sema, 1);
 	rcu_cpu_notify(&rcu_nb, CPU_UP_PREPARE,
 			(void *)(long)smp_processor_id());
 	/* Register notifier for non-boot CPUs */
@@ -627,7 +609,7 @@ module_param(qlowmark, int, 0);
 module_param(rsinterval, int, 0);
 #endif
 EXPORT_SYMBOL_GPL(rcu_batches_completed);
-EXPORT_SYMBOL_GPL_FUTURE(call_rcu);	/* WARNING: GPL-only in April 2006. */
-EXPORT_SYMBOL_GPL_FUTURE(call_rcu_bh);	/* WARNING: GPL-only in April 2006. */
+EXPORT_SYMBOL(call_rcu);  /* WARNING: GPL-only in April 2006. */
+EXPORT_SYMBOL(call_rcu_bh);  /* WARNING: GPL-only in April 2006. */
 EXPORT_SYMBOL_GPL(synchronize_rcu);
-EXPORT_SYMBOL_GPL_FUTURE(synchronize_kernel); /* WARNING: GPL-only in April 2006. */
+EXPORT_SYMBOL(synchronize_kernel);  /* WARNING: GPL-only in April 2006. */

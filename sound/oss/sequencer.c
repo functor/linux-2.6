@@ -709,11 +709,11 @@ static void seq_local_event(unsigned char *event_rec)
 
 static void seq_sysex_message(unsigned char *event_rec)
 {
-	unsigned int dev = event_rec[1];
+	int dev = event_rec[1];
 	int i, l = 0;
 	unsigned char  *buf = &event_rec[2];
 
-	if (dev > max_synthdev)
+	if ((int) dev > max_synthdev)
 		return;
 	if (!(synth_open_mask & (1 << dev)))
 		return;
@@ -1671,7 +1671,14 @@ void sequencer_init(void)
 
 void sequencer_unload(void)
 {
-	vfree(queue);
-	vfree(iqueue);
-	queue = iqueue = NULL;
+	if(queue)
+	{
+		vfree(queue);
+		queue=NULL;
+	}
+	if(iqueue)
+	{
+		vfree(iqueue);
+		iqueue=NULL;
+	}
 }

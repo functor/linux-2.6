@@ -360,8 +360,6 @@ static int __initdata synthio	= -1;
 static int __initdata synthirq	= -1;
 static int __initdata isapnp	= 1;
 
-static unsigned int cs4232_devices;
-
 MODULE_DESCRIPTION("CS4232 based soundcard driver"); 
 MODULE_AUTHOR("Hannu Savolainen, Paul Barton-Davis"); 
 MODULE_LICENSE("GPL");
@@ -423,7 +421,6 @@ static int cs4232_pnp_probe(struct pnp_dev *dev, const struct pnp_device_id *dev
 		return -ENODEV;
 	}
 	pnp_set_drvdata(dev,isapnpcfg);
-	cs4232_devices++;
 	return 0;
 }
 
@@ -458,11 +455,10 @@ static int __init init_cs4232(void)
 #endif
 	cfg.irq = -1;
 
-	if (isapnp) {
-		pnp_register_driver(&cs4232_driver);
-		if (cs4232_devices)
-			return 0;
-	}
+	if (isapnp &&
+	    (pnp_register_driver(&cs4232_driver) > 0)
+	)
+		return 0;
 
 	if(io==-1||irq==-1||dma==-1)
 	{
@@ -507,8 +503,7 @@ static int __init setup_cs4232(char *str)
 	int ints[7];
 
 	/* If we have isapnp cards, no need for options */
-	pnp_register_driver(&cs4232_driver);
-	if (cs4232_devices)
+	if (pnp_register_driver(&cs4232_driver) > 0)
 		return 1;
 	
 	str = get_options(str, ARRAY_SIZE(ints), ints);

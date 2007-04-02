@@ -4939,13 +4939,15 @@ abort_locked:
 	if (likely(ctx)) {
 		DPRINT(("context unlocked\n"));
 		UNPROTECT_CTX(ctx, flags);
-		fput(file);
 	}
 
 	/* copy argument back to user, if needed */
 	if (call_made && PFM_CMD_RW_ARG(cmd) && copy_to_user(arg, args_k, base_sz*count)) ret = -EFAULT;
 
 error_args:
+	if (file)
+		fput(file);
+
 	kfree(args_k);
 
 	DPRINT(("cmd=%s ret=%ld\n", PFM_CMD_NAME(cmd), ret));
@@ -6724,7 +6726,6 @@ __initcall(pfm_init);
 void
 pfm_init_percpu (void)
 {
-	static int first_time=1;
 	/*
 	 * make sure no measurement is active
 	 * (may inherit programmed PMCs from EFI).
@@ -6737,10 +6738,8 @@ pfm_init_percpu (void)
 	 */
 	pfm_unfreeze_pmu();
 
-	if (first_time) {
+	if (smp_processor_id() == 0)
 		register_percpu_irq(IA64_PERFMON_VECTOR, &perfmon_irqaction);
-		first_time=0;
-	}
 
 	ia64_setreg(_IA64_REG_CR_PMV, IA64_PERFMON_VECTOR);
 	ia64_srlz_d();

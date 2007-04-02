@@ -11,7 +11,6 @@
 #include <linux/string.h>
 #include <linux/time.h>
 #include <linux/in.h>
-#include <linux/mutex.h>
 #include <linux/sunrpc/svc.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/nfsd/nfsfh.h>
@@ -29,7 +28,7 @@
 #define FILE_HASH_BITS		5
 #define FILE_NRHASH		(1<<FILE_HASH_BITS)
 static struct nlm_file *	nlm_files[FILE_NRHASH];
-static DEFINE_MUTEX(nlm_file_mutex);
+static DECLARE_MUTEX(nlm_file_sema);
 
 #ifdef NFSD_DEBUG
 static inline void nlm_debug_print_fh(char *msg, struct nfs_fh *f)
@@ -92,7 +91,7 @@ nlm_lookup_file(struct svc_rqst *rqstp, struct nlm_file **result,
 	hash = file_hash(f);
 
 	/* Lock file table */
-	mutex_lock(&nlm_file_mutex);
+	down(&nlm_file_sema);
 
 	for (file = nlm_files[hash]; file; file = file->f_next)
 		if (!nfs_compare_fh(&file->f_handle, f))
@@ -131,7 +130,7 @@ found:
 	nfserr = 0;
 
 out_unlock:
-	mutex_unlock(&nlm_file_mutex);
+	up(&nlm_file_sema);
 	return nfserr;
 
 out_free:
@@ -183,7 +182,7 @@ nlm_traverse_locks(struct nlm_host *host, struct nlm_file *file, int action)
 again:
 	file->f_locks = 0;
 	for (fl = inode->i_flock; fl; fl = fl->fl_next) {
-		if (fl->fl_lmops != &nlmsvc_lock_operations)
+		if (!(fl->fl_flags & FL_LOCKD))
 			continue;
 
 		/* update current lock count */
@@ -225,8 +224,9 @@ nlm_inspect_file(struct nlm_host *host, struct nlm_file *file, int action)
 		if (file->f_count || file->f_blocks || file->f_shares)
 			return 1;
 	} else {
-		nlmsvc_traverse_blocks(host, file, action);
-		nlmsvc_traverse_shares(host, file, action);
+		if (nlmsvc_traverse_blocks(host, file, action)
+		 || nlmsvc_traverse_shares(host, file, action))
+			return 1;
 	}
 	return nlm_traverse_locks(host, file, action);
 }
@@ -240,14 +240,14 @@ nlm_traverse_files(struct nlm_host *host, int action)
 	struct nlm_file	*file, **fp;
 	int		i;
 
-	mutex_lock(&nlm_file_mutex);
+	down(&nlm_file_sema);
 	for (i = 0; i < FILE_NRHASH; i++) {
 		fp = nlm_files + i;
 		while ((file = *fp) != NULL) {
 			/* Traverse locks, blocks and shares of this file
 			 * and update file->f_locks count */
 			if (nlm_inspect_file(host, file, action)) {
-				mutex_unlock(&nlm_file_mutex);
+				up(&nlm_file_sema);
 				return 1;
 			}
 
@@ -262,7 +262,7 @@ nlm_traverse_files(struct nlm_host *host, int action)
 			}
 		}
 	}
-	mutex_unlock(&nlm_file_mutex);
+	up(&nlm_file_sema);
 	return 0;
 }
 
@@ -282,7 +282,7 @@ nlm_release_file(struct nlm_file *file)
 				file, file->f_count);
 
 	/* Lock file table */
-	mutex_lock(&nlm_file_mutex);
+	down(&nlm_file_sema);
 
 	/* If there are no more locks etc, delete the file */
 	if(--file->f_count == 0) {
@@ -290,7 +290,7 @@ nlm_release_file(struct nlm_file *file)
 			nlm_delete_file(file);
 	}
 
-	mutex_unlock(&nlm_file_mutex);
+	up(&nlm_file_sema);
 }
 
 /*

@@ -21,7 +21,7 @@
 #include <media/saa7146.h>
 
 LIST_HEAD(saa7146_devices);
-DEFINE_MUTEX(saa7146_devices_lock);
+DECLARE_MUTEX(saa7146_devices_lock);
 
 static int saa7146_num;
 
@@ -116,7 +116,8 @@ static struct scatterlist* vmalloc_to_sg(unsigned char *virt, int nr_pages)
 		pg = vmalloc_to_page(virt);
 		if (NULL == pg)
 			goto err;
-		BUG_ON(PageHighMem(pg));
+		if (PageHighMem(pg))
+			BUG();
 		sglist[i].page   = pg;
 		sglist[i].length = PAGE_SIZE;
 	}
@@ -401,11 +402,11 @@ static int saa7146_init_one(struct pci_dev *pci, const struct pci_device_id *ent
 
 	pci_set_drvdata(pci, dev);
 
-	mutex_init(&dev->lock);
+	init_MUTEX(&dev->lock);
 	spin_lock_init(&dev->int_slock);
 	spin_lock_init(&dev->slock);
 
-	mutex_init(&dev->i2c_lock);
+	init_MUTEX(&dev->i2c_lock);
 
 	dev->module = THIS_MODULE;
 	init_waitqueue_head(&dev->i2c_wq);

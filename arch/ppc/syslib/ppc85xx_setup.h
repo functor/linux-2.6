@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/ppc85xx_setup.h
+ *
  * MPC85XX common board definitions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

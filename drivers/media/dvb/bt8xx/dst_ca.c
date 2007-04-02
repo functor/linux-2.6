@@ -81,7 +81,7 @@ static int dst_ci_command(struct dst_state* state, u8 * data, u8 *ca_string, u8 
 {
 	u8 reply;
 
-	mutex_lock(&state->dst_mutex);
+	down(&state->dst_mutex);
 	dst_comm_init(state);
 	msleep(65);
 
@@ -110,11 +110,11 @@ static int dst_ci_command(struct dst_state* state, u8 * data, u8 *ca_string, u8 
 			goto error;
 		}
 	}
-	mutex_unlock(&state->dst_mutex);
+	up(&state->dst_mutex);
 	return 0;
 
 error:
-	mutex_unlock(&state->dst_mutex);
+	up(&state->dst_mutex);
 	return -EIO;
 }
 

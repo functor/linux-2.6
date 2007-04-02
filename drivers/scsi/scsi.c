@@ -48,6 +48,7 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/completion.h>
+#include <linux/devfs_fs_kernel.h>
 #include <linux/unistd.h>
 #include <linux/spinlock.h>
 #include <linux/kmod.h>
@@ -135,8 +136,9 @@ struct scsi_request *scsi_allocate_request(struct scsi_device *sdev,
 	const int size = offset + sizeof(struct request);
 	struct scsi_request *sreq;
   
-	sreq = kzalloc(size, gfp_mask);
+	sreq = kmalloc(size, gfp_mask);
 	if (likely(sreq != NULL)) {
+		memset(sreq, 0, size);
 		sreq->sr_request = (struct request *)(((char *)sreq) + offset);
 		sreq->sr_device = sdev;
 		sreq->sr_host = sdev->host;
@@ -565,8 +567,7 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	/* 
 	 * If SCSI-2 or lower, store the LUN value in cmnd.
 	 */
-	if (cmd->device->scsi_level <= SCSI_2 &&
-	    cmd->device->scsi_level != SCSI_UNKNOWN) {
+	if (cmd->device->scsi_level <= SCSI_2) {
 		cmd->cmnd[1] = (cmd->cmnd[1] & 0x1f) |
 			       (cmd->device->lun << 5 & 0xe0);
 	}
@@ -1244,9 +1245,10 @@ static int __init init_scsi(void)
 	if (error)
 		goto cleanup_sysctl;
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		INIT_LIST_HEAD(&per_cpu(scsi_done_q, i));
 
+	devfs_mk_dir("scsi");
 	printk(KERN_NOTICE "SCSI subsystem initialized\n");
 	return 0;
 
@@ -1271,6 +1273,7 @@ static void __exit exit_scsi(void)
 	scsi_exit_sysctl();
 	scsi_exit_hosts();
 	scsi_exit_devinfo();
+	devfs_remove("scsi");
 	scsi_exit_procfs();
 	scsi_exit_queue();
 }

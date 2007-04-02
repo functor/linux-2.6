@@ -20,7 +20,7 @@
 
 static int sysv_readdir(struct file *, void *, filldir_t);
 
-const struct file_operations sysv_dir_operations = {
+struct file_operations sysv_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= sysv_readdir,
 	.fsync		= sysv_sync_file,
@@ -253,7 +253,8 @@ int sysv_delete_entry(struct sysv_dir_entry *de, struct page *page)
 
 	lock_page(page);
 	err = mapping->a_ops->prepare_write(NULL, page, from, to);
-	BUG_ON(err);
+	if (err)
+		BUG();
 	de->inode = 0;
 	err = dir_commit_chunk(page, from, to);
 	dir_put_page(page);
@@ -352,7 +353,8 @@ void sysv_set_link(struct sysv_dir_entry *de, struct page *page,
 
 	lock_page(page);
 	err = page->mapping->a_ops->prepare_write(NULL, page, from, to);
-	BUG_ON(err);
+	if (err)
+		BUG();
 	de->inode = cpu_to_fs16(SYSV_SB(inode->i_sb), inode->i_ino);
 	err = dir_commit_chunk(page, from, to);
 	dir_put_page(page);

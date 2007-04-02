@@ -344,7 +344,7 @@ bt878_device_control(struct bt878 *bt, unsigned int cmd, union dst_gpio_packet *
 	int retval;
 
 	retval = 0;
-	if (mutex_lock_interruptible(&bt->gpio_lock))
+	if (down_interruptible (&bt->gpio_lock))
 		return -ERESTARTSYS;
 	/* special gpio signal */
 	switch (cmd) {
@@ -375,7 +375,7 @@ bt878_device_control(struct bt878 *bt, unsigned int cmd, union dst_gpio_packet *
 		retval = -EINVAL;
 		break;
 	}
-	mutex_unlock(&bt->gpio_lock);
+	up(&bt->gpio_lock);
 	return retval;
 }
 

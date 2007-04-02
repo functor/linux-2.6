@@ -44,13 +44,12 @@
 #include <linux/module.h>
 #include <linux/rslib.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
 #include <asm/semaphore.h>
 
 /* This list holds all currently allocated rs control structures */
 static LIST_HEAD (rslist);
 /* Protection for the list */
-static DEFINE_MUTEX(rslistlock);
+static DECLARE_MUTEX(rslistlock);
 
 /**
  * rs_init - Initialize a Reed-Solomon codec
@@ -162,7 +161,7 @@ errrs:
  */
 void free_rs(struct rs_control *rs)
 {
-	mutex_lock(&rslistlock);
+	down(&rslistlock);
 	rs->users--;
 	if(!rs->users) {
 		list_del(&rs->list);
@@ -171,7 +170,7 @@ void free_rs(struct rs_control *rs)
 		kfree(rs->genpoly);
 		kfree(rs);
 	}
-	mutex_unlock(&rslistlock);
+	up(&rslistlock);
 }
 
 /**
@@ -202,7 +201,7 @@ struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim,
 	if (nroots < 0 || nroots >= (1<<symsize))
 		return NULL;
 
-	mutex_lock(&rslistlock);
+	down(&rslistlock);
 
 	/* Walk through the list and look for a matching entry */
 	list_for_each(tmp, &rslist) {
@@ -229,7 +228,7 @@ struct rs_control *init_rs(int symsize, int gfpoly, int fcr, int prim,
 		list_add(&rs->list, &rslist);
 	}
 out:
-	mutex_unlock(&rslistlock);
+	up(&rslistlock);
 	return rs;
 }
 

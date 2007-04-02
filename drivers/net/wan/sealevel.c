@@ -23,7 +23,6 @@
 #include <linux/init.h>
 #include <net/arp.h>
 
-#include <asm/irq.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/byteorder.h>

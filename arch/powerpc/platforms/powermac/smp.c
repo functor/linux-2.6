@@ -191,7 +191,9 @@ static void smp_psurge_message_pass(int target, int msg)
 	if (num_online_cpus() < 2)
 		return;
 
-	for_each_online_cpu(i) {
+	for (i = 0; i < NR_CPUS; i++) {
+		if (!cpu_online(i))
+			continue;
 		if (target == MSG_ALL
 		    || (target == MSG_ALL_BUT_SELF && i != smp_processor_id())
 		    || target == i) {

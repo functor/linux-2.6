@@ -38,7 +38,8 @@ xfs_stats_clear_proc_handler(
 
 	if (!ret && write && *valp) {
 		printk("XFS Clearing xfsstats\n");
-		for_each_cpu(c) {
+		for (c = 0; c < NR_CPUS; c++) {
+			if (!cpu_possible(c)) continue;
 			preempt_disable();
 			/* save vn_active, it's a universal truth! */
 			vn_active = per_cpu(xfsstats, c).vn_active;

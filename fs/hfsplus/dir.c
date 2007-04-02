@@ -483,7 +483,7 @@ struct inode_operations hfsplus_dir_inode_operations = {
 	.rename		= hfsplus_rename,
 };
 
-const struct file_operations hfsplus_dir_operations = {
+struct file_operations hfsplus_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= hfsplus_readdir,
 	.ioctl          = hfsplus_ioctl,

@@ -42,21 +42,24 @@
 static inline void
 vxfs_get_fshead(struct vxfs_oltfshead *fshp, struct vxfs_sb_info *infp)
 {
-	BUG_ON(infp->vsi_fshino);
+	if (infp->vsi_fshino)
+		BUG();
 	infp->vsi_fshino = fshp->olt_fsino[0];
 }
 
 static inline void
 vxfs_get_ilist(struct vxfs_oltilist *ilistp, struct vxfs_sb_info *infp)
 {
-	BUG_ON(infp->vsi_iext);
+	if (infp->vsi_iext)
+		BUG();
 	infp->vsi_iext = ilistp->olt_iext[0]; 
 }
 
 static inline u_long
 vxfs_oblock(struct super_block *sbp, daddr_t block, u_long bsize)
 {
-	BUG_ON(sbp->s_blocksize % bsize);
+	if (sbp->s_blocksize % bsize)
+		BUG();
 	return (block * (sbp->s_blocksize / bsize));
 }
 

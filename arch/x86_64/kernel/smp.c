@@ -75,7 +75,7 @@ static inline void leave_mm(int cpu)
 {
 	if (read_pda(mmu_state) == TLBSTATE_OK)
 		BUG();
-	cpu_clear(cpu, read_pda(active_mm)->cpu_vm_mask);
+	clear_bit(cpu, &read_pda(active_mm)->cpu_vm_mask);
 	load_cr3(swapper_pg_dir);
 }
 
@@ -85,7 +85,7 @@ static inline void leave_mm(int cpu)
  * [cpu0: the cpu that switches]
  * 1) switch_mm() either 1a) or 1b)
  * 1a) thread switch to a different mm
- * 1a1) cpu_clear(cpu, old_mm->cpu_vm_mask);
+ * 1a1) clear_bit(cpu, &old_mm->cpu_vm_mask);
  * 	Stop ipi delivery for the old mm. This is not synchronized with
  * 	the other cpus, but smp_invalidate_interrupt ignore flush ipis
  * 	for the wrong mm, and in the worst case we perform a superfluous
@@ -95,7 +95,7 @@ static inline void leave_mm(int cpu)
  *	was in lazy tlb mode.
  * 1a3) update cpu active_mm
  * 	Now cpu0 accepts tlb flushes for the new mm.
- * 1a4) cpu_set(cpu, new_mm->cpu_vm_mask);
+ * 1a4) set_bit(cpu, &new_mm->cpu_vm_mask);
  * 	Now the other cpus will send tlb flush ipis.
  * 1a4) change cr3.
  * 1b) thread switch without mm change
@@ -135,10 +135,10 @@ asmlinkage void smp_invalidate_interrupt(struct pt_regs *regs)
 
 	cpu = smp_processor_id();
 	/*
-	 * orig_rax contains the negated interrupt vector.
+	 * orig_rax contains the interrupt vector - 256.
 	 * Use that to determine where the sender put the data.
 	 */
-	sender = ~regs->orig_rax - INVALIDATE_TLB_VECTOR_START;
+	sender = regs->orig_rax + 256 - INVALIDATE_TLB_VECTOR_START;
 	f = &per_cpu(flush_state, sender);
 
 	if (!cpu_isset(cpu, f->flush_cpumask))

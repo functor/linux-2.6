@@ -166,9 +166,6 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_NONLINEAR	0x00800000	/* Is non-linear (remap_file_pages) */
 #define VM_MAPPED_COPY	0x01000000	/* T if mapped copy of data (nommu mmap) */
 #define VM_INSERTPAGE	0x02000000	/* The vma has had "vm_insert_page()" done on it */
-#ifdef CONFIG_XEN
-#define VM_FOREIGN	0x04000000	/* Has pages belonging to another VM */
-#endif
 
 #ifndef VM_STACK_DEFAULT_FLAGS		/* arch can override this */
 #define VM_STACK_DEFAULT_FLAGS VM_DATA_DEFAULT_FLAGS
@@ -288,34 +285,43 @@ struct page {
  *
  * Also, many kernel routines increase the page count before a critical
  * routine so they can be sure the page doesn't go away from under them.
+ *
+ * Since 2.6.6 (approx), a free page has ->_count = -1.  This is so that we
+ * can use atomic_add_negative(-1, page->_count) to detect when the page
+ * becomes free and so that we can also use atomic_inc_and_test to atomically
+ * detect when we just tried to grab a ref on a page which some other CPU has
+ * already deemed to be freeable.
+ *
+ * NO code should make assumptions about this internal detail!  Use the provided
+ * macros which retain the old rules: page_count(page) == 0 is a free page.
  */
 
 /*
  * Drop a ref, return true if the logical refcount fell to zero (the page has
  * no users)
  */
-static inline int put_page_testzero(struct page *page)
-{
-	BUG_ON(atomic_read(&page->_count) == 0);
-	return atomic_dec_and_test(&page->_count);
-}
+#define put_page_testzero(p)				\
+	({						\
+		BUG_ON(atomic_read(&(p)->_count) == -1);\
+		atomic_add_negative(-1, &(p)->_count);	\
+	})
 
 /*
- * Try to grab a ref unless the page has a refcount of zero, return false if
- * that is the case.
+ * Grab a ref, return true if the page previously had a logical refcount of
+ * zero.  ie: returns true if we just grabbed an already-deemed-to-be-free page
  */
-static inline int get_page_unless_zero(struct page *page)
-{
-	return atomic_inc_not_zero(&page->_count);
-}
+#define get_page_testone(p)	atomic_inc_and_test(&(p)->_count)
+
+#define set_page_count(p,v) 	atomic_set(&(p)->_count, (v) - 1)
+#define __put_page(p)		atomic_dec(&(p)->_count)
 
 extern void FASTCALL(__page_cache_release(struct page *));
 
 static inline int page_count(struct page *page)
 {
-	if (unlikely(PageCompound(page)))
+	if (PageCompound(page))
 		page = (struct page *)page_private(page);
-	return atomic_read(&page->_count);
+	return atomic_read(&page->_count) + 1;
 }
 
 static inline void get_page(struct page *page)
@@ -325,18 +331,7 @@ static inline void get_page(struct page *page)
 	atomic_inc(&page->_count);
 }
 
-/*
- * Setup the page count before being freed into the page allocator for
- * the first time (boot or memory hotplug)
- */
-static inline void init_page_count(struct page *page)
-{
-	atomic_set(&page->_count, 1);
-}
-
 void put_page(struct page *page);
-
-void split_page(struct page *page, unsigned int order);
 
 /*
  * Multiple processes may "see" the same page. E.g. for untouched
@@ -920,19 +915,7 @@ extern struct vm_area_struct *copy_vma(struct vm_area_struct **,
 extern void exit_mmap(struct mm_struct *);
 extern int may_expand_vm(struct mm_struct *mm, unsigned long npages);
 
-extern unsigned long get_unmapped_area_prot(struct file *, unsigned long, unsigned long, unsigned long, unsigned long, int);
-
-
-static inline unsigned long get_unmapped_area(struct file * file, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags)
-{
-	return get_unmapped_area_prot(file, addr, len, pgoff, flags, 0);
-}
-
-extern int install_special_mapping(struct mm_struct *mm,
-				   unsigned long addr, unsigned long len,
-				   unsigned long vm_flags, pgprot_t pgprot,
-				   struct page **pages);
+extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 
 extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -984,7 +967,7 @@ unsigned long page_cache_readahead(struct address_space *mapping,
 			  struct file *filp,
 			  pgoff_t offset,
 			  unsigned long size);
-void handle_ra_miss(struct address_space *mapping,
+void handle_ra_miss(struct address_space *mapping, 
 		    struct file_ra_state *ra, pgoff_t offset);
 unsigned long max_sane_readahead(unsigned long nr);
 
@@ -1029,13 +1012,6 @@ struct page *follow_page(struct vm_area_struct *, unsigned long address,
 #define FOLL_GET	0x04	/* do get_page on page */
 #define FOLL_ANON	0x08	/* give ZERO_PAGE if no pgtable */
 
-#ifdef CONFIG_XEN
-typedef int (*pte_fn_t)(pte_t *pte, struct page *pmd_page, unsigned long addr,
-			void *data);
-extern int apply_to_page_range(struct mm_struct *mm, unsigned long address,
-			       unsigned long size, pte_fn_t fn, void *data);
-#endif
-
 #ifdef CONFIG_PROC_FS
 void vm_stat_account(struct mm_struct *, unsigned long, struct file *, long);
 #else
@@ -1069,7 +1045,7 @@ int in_gate_area_no_task(unsigned long addr);
 
 int drop_caches_sysctl_handler(struct ctl_table *, int, struct file *,
 					void __user *, size_t *, loff_t *);
-unsigned long shrink_slab(unsigned long scanned, gfp_t gfp_mask,
+int shrink_slab(unsigned long scanned, gfp_t gfp_mask,
 			unsigned long lru_pages);
 void drop_pagecache(void);
 void drop_slab(void);

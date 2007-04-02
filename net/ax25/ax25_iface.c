@@ -12,7 +12,6 @@
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/timer.h>
@@ -75,8 +74,6 @@ int ax25_protocol_register(unsigned int pid,
 	return 1;
 }
 
-EXPORT_SYMBOL(ax25_protocol_register);
-
 void ax25_protocol_release(unsigned int pid)
 {
 	struct protocol_struct *s, *protocol;
@@ -109,8 +106,6 @@ void ax25_protocol_release(unsigned int pid)
 	write_unlock(&protocol_list_lock);
 }
 
-EXPORT_SYMBOL(ax25_protocol_release);
-
 int ax25_linkfail_register(void (*func)(ax25_cb *, int))
 {
 	struct linkfail_struct *linkfail;
@@ -127,8 +122,6 @@ int ax25_linkfail_register(void (*func)(ax25_cb *, int))
 
 	return 1;
 }
-
-EXPORT_SYMBOL(ax25_linkfail_register);
 
 void ax25_linkfail_release(void (*func)(ax25_cb *, int))
 {
@@ -162,8 +155,6 @@ void ax25_linkfail_release(void (*func)(ax25_cb *, int))
 	spin_unlock_bh(&linkfail_lock);
 }
 
-EXPORT_SYMBOL(ax25_linkfail_release);
-
 int ax25_listen_register(ax25_address *callsign, struct net_device *dev)
 {
 	struct listen_struct *listen;
@@ -184,8 +175,6 @@ int ax25_listen_register(ax25_address *callsign, struct net_device *dev)
 
 	return 1;
 }
-
-EXPORT_SYMBOL(ax25_listen_register);
 
 void ax25_listen_release(ax25_address *callsign, struct net_device *dev)
 {
@@ -218,8 +207,6 @@ void ax25_listen_release(ax25_address *callsign, struct net_device *dev)
 	}
 	spin_unlock_bh(&listen_lock);
 }
-
-EXPORT_SYMBOL(ax25_listen_release);
 
 int (*ax25_protocol_function(unsigned int pid))(struct sk_buff *, ax25_cb *)
 {

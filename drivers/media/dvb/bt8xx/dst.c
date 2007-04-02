@@ -910,7 +910,7 @@ static int dst_get_device_id(struct dst_state *state)
 
 static int dst_probe(struct dst_state *state)
 {
-	mutex_init(&state->dst_mutex);
+	sema_init(&state->dst_mutex, 1);
 	if ((rdc_8820_reset(state)) < 0) {
 		dprintk(verbose, DST_ERROR, 1, "RDC 8820 RESET Failed.");
 		return -1;
@@ -962,7 +962,7 @@ int dst_command(struct dst_state *state, u8 *data, u8 len)
 {
 	u8 reply;
 
-	mutex_lock(&state->dst_mutex);
+	down(&state->dst_mutex);
 	if ((dst_comm_init(state)) < 0) {
 		dprintk(verbose, DST_NOTICE, 1, "DST Communication Initialization Failed.");
 		goto error;
@@ -1013,11 +1013,11 @@ int dst_command(struct dst_state *state, u8 *data, u8 len)
 		dprintk(verbose, DST_INFO, 1, "checksum failure");
 		goto error;
 	}
-	mutex_unlock(&state->dst_mutex);
+	up(&state->dst_mutex);
 	return 0;
 
 error:
-	mutex_unlock(&state->dst_mutex);
+	up(&state->dst_mutex);
 	return -EIO;
 
 }
@@ -1128,7 +1128,7 @@ static int dst_write_tuna(struct dvb_frontend *fe)
 			dst_set_voltage(fe, SEC_VOLTAGE_13);
 	}
 	state->diseq_flags &= ~(HAS_LOCK | ATTEMPT_TUNE);
-	mutex_lock(&state->dst_mutex);
+	down(&state->dst_mutex);
 	if ((dst_comm_init(state)) < 0) {
 		dprintk(verbose, DST_DEBUG, 1, "DST Communication initialization failed.");
 		goto error;
@@ -1160,11 +1160,11 @@ static int dst_write_tuna(struct dvb_frontend *fe)
 	state->diseq_flags |= ATTEMPT_TUNE;
 	retval = dst_get_tuna(state);
 werr:
-	mutex_unlock(&state->dst_mutex);
+	up(&state->dst_mutex);
 	return retval;
 
 error:
-	mutex_unlock(&state->dst_mutex);
+	up(&state->dst_mutex);
 	return -EIO;
 }
 

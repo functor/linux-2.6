@@ -18,7 +18,6 @@
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/jiffies.h>
 #include <linux/timer.h>
 #include <linux/string.h>
@@ -137,8 +136,6 @@ unsigned long ax25_display_timer(struct timer_list *timer)
 
 	return timer->expires - jiffies;
 }
-
-EXPORT_SYMBOL(ax25_display_timer);
 
 static void ax25_heartbeat_expiry(unsigned long param)
 {

@@ -60,9 +60,6 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 /* Minimal RCV_MSS. */
 #define TCP_MIN_RCVMSS		536U
 
-/* The least MTU to use for probing */
-#define TCP_BASE_MSS		512
-
 /* After receiving this amount of duplicate ACKs fast retransmit starts. */
 #define TCP_FASTRETRANS_THRESH 3
 
@@ -222,9 +219,6 @@ extern int sysctl_tcp_nometrics_save;
 extern int sysctl_tcp_moderate_rcvbuf;
 extern int sysctl_tcp_tso_win_divisor;
 extern int sysctl_tcp_abc;
-extern int sysctl_tcp_mtu_probing;
-extern int sysctl_tcp_base_mss;
-extern int sysctl_tcp_workaround_signed_windows;
 
 extern atomic_t tcp_memory_allocated;
 extern atomic_t tcp_sockets_allocated;
@@ -268,8 +262,6 @@ extern void			tcp_v4_err(struct sk_buff *skb, u32);
 extern void			tcp_shutdown (struct sock *sk, int how);
 
 extern int			tcp_v4_rcv(struct sk_buff *skb);
-
-extern struct sock *		tcp_v4_lookup_listener(u32 daddr, unsigned short hnum, int dif);
 
 extern int			tcp_v4_remember_stamp(struct sock *sk);
 
@@ -355,12 +347,6 @@ extern int			tcp_getsockopt(struct sock *sk, int level,
 extern int			tcp_setsockopt(struct sock *sk, int level, 
 					       int optname, char __user *optval, 
 					       int optlen);
-extern int			compat_tcp_getsockopt(struct sock *sk,
-					int level, int optname,
-					char __user *optval, int __user *optlen);
-extern int			compat_tcp_setsockopt(struct sock *sk,
-					int level, int optname,
-					char __user *optval, int optlen);
 extern void			tcp_set_keepalive(struct sock *sk, int val);
 extern int			tcp_recvmsg(struct kiocb *iocb, struct sock *sk,
 					    struct msghdr *msg,
@@ -407,6 +393,9 @@ extern int			tcp_disconnect(struct sock *sk, int flags);
 
 extern void			tcp_unhash(struct sock *sk);
 
+extern int			tcp_v4_hash_connecting(struct sock *sk);
+
+
 /* From syncookies.c */
 extern struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb, 
 				    struct ip_options *opt);
@@ -433,7 +422,6 @@ extern int  tcp_send_synack(struct sock *);
 extern void tcp_push_one(struct sock *, unsigned int mss_now);
 extern void tcp_send_ack(struct sock *sk);
 extern void tcp_send_delayed_ack(struct sock *sk);
-extern void cleanup_rbuf(struct sock *sk, int copied);
 
 /* tcp_input.c */
 extern void tcp_cwnd_application_limited(struct sock *sk);
@@ -458,10 +446,6 @@ extern int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 			 sk_read_actor_t recv_actor);
 
 extern void tcp_initialize_rcv_mss(struct sock *sk);
-
-extern int tcp_mtu_to_mss(struct sock *sk, int pmtu);
-extern int tcp_mss_to_mtu(struct sock *sk, int mss);
-extern void tcp_mtup_init(struct sock *sk);
 
 static inline void __tcp_fast_path_on(struct tcp_sock *tp, u32 snd_wnd)
 {
@@ -568,13 +552,13 @@ struct tcp_skb_cb {
  */
 static inline int tcp_skb_pcount(const struct sk_buff *skb)
 {
-	return skb_shinfo(skb)->gso_segs;
+	return skb_shinfo(skb)->tso_segs;
 }
 
 /* This is valid iff tcp_skb_pcount() > 1. */
 static inline int tcp_skb_mss(const struct sk_buff *skb)
 {
-	return skb_shinfo(skb)->gso_size;
+	return skb_shinfo(skb)->tso_size;
 }
 
 static inline void tcp_dec_pcount_approx(__u32 *count,
@@ -1078,9 +1062,6 @@ extern void tcp_proc_unregister(struct tcp_seq_afinfo *afinfo);
 extern struct request_sock_ops tcp_request_sock_ops;
 
 extern int tcp_v4_destroy_sock(struct sock *sk);
-
-extern int tcp_v4_gso_send_check(struct sk_buff *skb);
-extern struct sk_buff *tcp_tso_segment(struct sk_buff *skb, int features);
 
 #ifdef CONFIG_PROC_FS
 extern int  tcp4_proc_init(void);

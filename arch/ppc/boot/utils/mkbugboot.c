@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/utils/mkbugboot.c
+ *
  * Makes a Motorola PPCBUG ROM bootable image which can be flashed
  * into one of the FLASH banks on a Motorola PowerPlus board.
  *

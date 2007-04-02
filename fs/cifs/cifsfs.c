@@ -33,7 +33,6 @@
 #include <linux/vfs.h>
 #include <linux/mempool.h>
 #include <linux/delay.h>
-#include <linux/kthread.h>
 #include "cifsfs.h"
 #include "cifspdu.h"
 #define DECLARE_GLOBALS_HERE
@@ -76,6 +75,9 @@ unsigned int cifs_max_pending = CIFS_MAX_REQ;
 module_param(cifs_max_pending, int, 0);
 MODULE_PARM_DESC(cifs_max_pending,"Simultaneous requests to server. Default: 50 Range: 2 to 256");
 
+static DECLARE_COMPLETION(cifs_oplock_exited);
+static DECLARE_COMPLETION(cifs_dnotify_exited);
+
 extern mempool_t *cifs_sm_req_poolp;
 extern mempool_t *cifs_req_poolp;
 extern mempool_t *cifs_mid_poolp;
@@ -91,10 +93,13 @@ cifs_read_super(struct super_block *sb, void *data,
 	int rc = 0;
 
 	sb->s_flags |= MS_NODIRATIME; /* and probably even noatime */
-	sb->s_fs_info = kzalloc(sizeof(struct cifs_sb_info),GFP_KERNEL);
+	sb->s_fs_info = kmalloc(sizeof(struct cifs_sb_info),GFP_KERNEL);
 	cifs_sb = CIFS_SB(sb);
 	if(cifs_sb == NULL)
 		return -ENOMEM;
+	else
+		memset(cifs_sb,0,sizeof(struct cifs_sb_info));
+	
 
 	rc = cifs_mount(sb, cifs_sb, data, devname);
 
@@ -474,7 +479,7 @@ cifs_get_sb(struct file_system_type *fs_type,
 
 	sb->s_flags = flags;
 
-	rc = cifs_read_super(sb, data, dev_name, flags & MS_SILENT ? 1 : 0);
+	rc = cifs_read_super(sb, data, dev_name, flags & MS_VERBOSE ? 1 : 0);
 	if (rc) {
 		up_write(&sb->s_umount);
 		deactivate_super(sb);
@@ -578,7 +583,7 @@ struct inode_operations cifs_symlink_inode_ops = {
 #endif 
 };
 
-const struct file_operations cifs_file_ops = {
+struct file_operations cifs_file_ops = {
 	.read = do_sync_read,
 	.write = do_sync_write,
 	.readv = generic_file_readv,
@@ -602,7 +607,7 @@ const struct file_operations cifs_file_ops = {
 #endif /* CONFIG_CIFS_EXPERIMENTAL */
 };
 
-const struct file_operations cifs_file_direct_ops = {
+struct file_operations cifs_file_direct_ops = {
 	/* no mmap, no aio, no readv - 
 	   BB reevaluate whether they can be done with directio, no cache */
 	.read = cifs_user_read,
@@ -621,7 +626,7 @@ const struct file_operations cifs_file_direct_ops = {
 	.dir_notify = cifs_dir_notify,
 #endif /* CONFIG_CIFS_EXPERIMENTAL */
 };
-const struct file_operations cifs_file_nobrl_ops = {
+struct file_operations cifs_file_nobrl_ops = {
 	.read = do_sync_read,
 	.write = do_sync_write,
 	.readv = generic_file_readv,
@@ -644,7 +649,7 @@ const struct file_operations cifs_file_nobrl_ops = {
 #endif /* CONFIG_CIFS_EXPERIMENTAL */
 };
 
-const struct file_operations cifs_file_direct_nobrl_ops = {
+struct file_operations cifs_file_direct_nobrl_ops = {
 	/* no mmap, no aio, no readv - 
 	   BB reevaluate whether they can be done with directio, no cache */
 	.read = cifs_user_read,
@@ -663,7 +668,7 @@ const struct file_operations cifs_file_direct_nobrl_ops = {
 #endif /* CONFIG_CIFS_EXPERIMENTAL */
 };
 
-const struct file_operations cifs_dir_ops = {
+struct file_operations cifs_dir_ops = {
 	.readdir = cifs_readdir,
 	.release = cifs_closedir,
 	.read    = generic_read_dir,
@@ -690,8 +695,7 @@ cifs_init_inodecache(void)
 {
 	cifs_inode_cachep = kmem_cache_create("cifs_inode_cache",
 					      sizeof (struct cifsInodeInfo),
-					      0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					      0, SLAB_RECLAIM_ACCOUNT,
 					      cifs_init_once, NULL);
 	if (cifs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -733,8 +737,10 @@ cifs_init_request_bufs(void)
 		cERROR(1,("cifs_min_rcv set to maximum (64)"));
 	}
 
-	cifs_req_poolp = mempool_create_slab_pool(cifs_min_rcv,
-						  cifs_req_cachep);
+	cifs_req_poolp = mempool_create(cifs_min_rcv,
+					mempool_alloc_slab,
+					mempool_free_slab,
+					cifs_req_cachep);
 
 	if(cifs_req_poolp == NULL) {
 		kmem_cache_destroy(cifs_req_cachep);
@@ -764,8 +770,10 @@ cifs_init_request_bufs(void)
 		cFYI(1,("cifs_min_small set to maximum (256)"));
 	}
 
-	cifs_sm_req_poolp = mempool_create_slab_pool(cifs_min_small,
-						     cifs_sm_req_cachep);
+	cifs_sm_req_poolp = mempool_create(cifs_min_small,
+				mempool_alloc_slab,
+				mempool_free_slab,
+				cifs_sm_req_cachep);
 
 	if(cifs_sm_req_poolp == NULL) {
 		mempool_destroy(cifs_req_poolp);
@@ -799,8 +807,10 @@ cifs_init_mids(void)
 	if (cifs_mid_cachep == NULL)
 		return -ENOMEM;
 
-	/* 3 is a reasonable minimum number of simultaneous operations */
-	cifs_mid_poolp = mempool_create_slab_pool(3, cifs_mid_cachep);
+	cifs_mid_poolp = mempool_create(3 /* a reasonable min simultan opers */,
+					mempool_alloc_slab,
+					mempool_free_slab,
+					cifs_mid_cachep);
 	if(cifs_mid_poolp == NULL) {
 		kmem_cache_destroy(cifs_mid_cachep);
 		return -ENOMEM;
@@ -839,6 +849,10 @@ static int cifs_oplock_thread(void * dummyarg)
 	__u16  netfid;
 	int rc;
 
+	daemonize("cifsoplockd");
+	allow_signal(SIGTERM);
+
+	oplockThread = current;
 	do {
 		if (try_to_freeze()) 
 			continue;
@@ -894,9 +908,9 @@ static int cifs_oplock_thread(void * dummyarg)
 			set_current_state(TASK_INTERRUPTIBLE);
 			schedule_timeout(1);  /* yield in case q were corrupt */
 		}
-	} while (!kthread_should_stop());
-
-	return 0;
+	} while(!signal_pending(current));
+	oplockThread = NULL;
+	complete_and_exit (&cifs_oplock_exited, 0);
 }
 
 static int cifs_dnotify_thread(void * dummyarg)
@@ -904,6 +918,10 @@ static int cifs_dnotify_thread(void * dummyarg)
 	struct list_head *tmp;
 	struct cifsSesInfo *ses;
 
+	daemonize("cifsdnotifyd");
+	allow_signal(SIGTERM);
+
+	dnotifyThread = current;
 	do {
 		if(try_to_freeze())
 			continue;
@@ -921,9 +939,8 @@ static int cifs_dnotify_thread(void * dummyarg)
 				wake_up_all(&ses->server->response_q);
 		}
 		read_unlock(&GlobalSMBSeslock);
-	} while (!kthread_should_stop());
-
-	return 0;
+	} while(!signal_pending(current));
+	complete_and_exit (&cifs_dnotify_exited, 0);
 }
 
 static int __init
@@ -973,48 +990,32 @@ init_cifs(void)
 	}
 
 	rc = cifs_init_inodecache();
-	if (rc)
-		goto out_clean_proc;
-
-	rc = cifs_init_mids();
-	if (rc)
-		goto out_destroy_inodecache;
-
-	rc = cifs_init_request_bufs();
-	if (rc)
-		goto out_destroy_mids;
-
-	rc = register_filesystem(&cifs_fs_type);
-	if (rc)
-		goto out_destroy_request_bufs;
-
-	oplockThread = kthread_run(cifs_oplock_thread, NULL, "cifsoplockd");
-	if (IS_ERR(oplockThread)) {
-		rc = PTR_ERR(oplockThread);
-		cERROR(1,("error %d create oplock thread", rc));
-		goto out_unregister_filesystem;
+	if (!rc) {
+		rc = cifs_init_mids();
+		if (!rc) {
+			rc = cifs_init_request_bufs();
+			if (!rc) {
+				rc = register_filesystem(&cifs_fs_type);
+				if (!rc) {                
+					rc = (int)kernel_thread(cifs_oplock_thread, NULL, 
+						CLONE_FS | CLONE_FILES | CLONE_VM);
+					if(rc > 0) {
+						rc = (int)kernel_thread(cifs_dnotify_thread, NULL,
+							CLONE_FS | CLONE_FILES | CLONE_VM);
+						if(rc > 0)
+							return 0;
+						else
+							cERROR(1,("error %d create dnotify thread", rc));
+					} else {
+						cERROR(1,("error %d create oplock thread",rc));
+					}
+				}
+				cifs_destroy_request_bufs();
+			}
+			cifs_destroy_mids();
+		}
+		cifs_destroy_inodecache();
 	}
-
-	dnotifyThread = kthread_run(cifs_dnotify_thread, NULL, "cifsdnotifyd");
-	if (IS_ERR(dnotifyThread)) {
-		rc = PTR_ERR(dnotifyThread);
-		cERROR(1,("error %d create dnotify thread", rc));
-		goto out_stop_oplock_thread;
-	}
-
-	return 0;
-
- out_stop_oplock_thread:
-	kthread_stop(oplockThread);
- out_unregister_filesystem:
-	unregister_filesystem(&cifs_fs_type);
- out_destroy_request_bufs:
-	cifs_destroy_request_bufs();
- out_destroy_mids:
-	cifs_destroy_mids();
- out_destroy_inodecache:
-	cifs_destroy_inodecache();
- out_clean_proc:
 #ifdef CONFIG_PROC_FS
 	cifs_proc_clean();
 #endif
@@ -1032,8 +1033,14 @@ exit_cifs(void)
 	cifs_destroy_inodecache();
 	cifs_destroy_mids();
 	cifs_destroy_request_bufs();
-	kthread_stop(oplockThread);
-	kthread_stop(dnotifyThread);
+	if(oplockThread) {
+		send_sig(SIGTERM, oplockThread, 1);
+		wait_for_completion(&cifs_oplock_exited);
+	}
+	if(dnotifyThread) {
+		send_sig(SIGTERM, dnotifyThread, 1);
+		wait_for_completion(&cifs_dnotify_exited);
+	}
 }
 
 MODULE_AUTHOR("Steve French <sfrench@us.ibm.com>");

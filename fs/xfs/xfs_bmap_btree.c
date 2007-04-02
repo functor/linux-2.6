@@ -2754,7 +2754,7 @@ xfs_bmbt_update(
 }
 
 /*
- * Check extent records, which have just been read, for
+ * Check an extent list, which has just been read, for
  * any bit in the extent flag field. ASSERT on debug
  * kernels, as this condition should not occur.
  * Return an error condition (1) if any flags found,
@@ -2763,14 +2763,10 @@ xfs_bmbt_update(
 
 int
 xfs_check_nostate_extents(
-	xfs_ifork_t		*ifp,
-	xfs_extnum_t		idx,
+	xfs_bmbt_rec_t		*ep,
 	xfs_extnum_t		num)
 {
-	xfs_bmbt_rec_t		*ep;
-
-	for (; num > 0; num--, idx++) {
-		ep = xfs_iext_get_ext(ifp, idx);
+	for (; num > 0; num--, ep++) {
 		if ((ep->l0 >>
 		     (64 - BMBT_EXNTFLAG_BITLEN)) != 0) {
 			ASSERT(0);

@@ -16,7 +16,7 @@
 #include <linux/etherdevice.h>
 #include <linux/init.h>
 #include <linux/moduleparam.h>
-#include <asm/hardware/uengine.h>
+#include <asm/arch/uengine.h>
 #include <asm/mach-types.h>
 #include <asm/io.h>
 #include "ixp2400_rx.ucode"
@@ -299,7 +299,10 @@ int ixpdev_init(int __nds_count, struct net_device **__nds,
 	int i;
 	int err;
 
-	BUILD_BUG_ON(RX_BUF_COUNT > 192 || TX_BUF_COUNT > 192);
+	if (RX_BUF_COUNT > 192 || TX_BUF_COUNT > 192) {
+		static void __too_many_rx_or_tx_buffers(void);
+		__too_many_rx_or_tx_buffers();
+	}
 
 	printk(KERN_INFO "IXP2000 MSF ethernet driver %s\n", DRV_MODULE_VERSION);
 

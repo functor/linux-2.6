@@ -87,7 +87,6 @@ static void write_msg(struct console *con, const char *msg, unsigned int len)
 }
 
 static struct console netconsole = {
-	.name = "netcon",
 	.flags = CON_ENABLED | CON_PRINTBUFFER,
 	.write = write_msg
 };
@@ -95,7 +94,7 @@ static struct console netconsole = {
 static int option_setup(char *opt)
 {
 	configured = !netpoll_parse_options(&np, opt);
-	return 1;
+	return 0;
 }
 
 __setup("netconsole=", option_setup);
@@ -107,7 +106,7 @@ static int init_netconsole(void)
 
 	if(!configured) {
 		printk("netconsole: not configured, aborting\n");
-		return 0;
+		return -EINVAL;
 	}
 
 	if(netpoll_setup(&np))

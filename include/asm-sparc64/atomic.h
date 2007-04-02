@@ -78,15 +78,9 @@ extern int atomic64_sub_ret(int, atomic64_t *);
 ({								\
 	int c, old;						\
 	c = atomic_read(v);					\
-	for (;;) {						\
-		if (unlikely(c == (u)))				\
-			break;					\
-		old = atomic_cmpxchg((v), c, c + (a));		\
-		if (likely(old == c))				\
-			break;					\
+	while (c != (u) && (old = atomic_cmpxchg((v), c, c + (a))) != c) \
 		c = old;					\
-	}							\
-	likely(c != (u));					\
+	c != (u);						\
 })
 #define atomic_inc_not_zero(v) atomic_add_unless((v), 1, 0)
 

@@ -389,7 +389,7 @@ MODULE_SUPPORTED_DEVICE("{{RME Hammerfall-DSP},"
 
 /* use hotplug firmeare loader? */
 #if defined(CONFIG_FW_LOADER) || defined(CONFIG_FW_LOADER_MODULE)
-#if !defined(HDSP_USE_HWDEP_LOADER) && !defined(CONFIG_SND_HDSP)
+#ifndef HDSP_USE_HWDEP_LOADER
 #define HDSP_FW_LOADER
 #endif
 #endif
@@ -568,7 +568,7 @@ static void snd_hammerfall_free_buffer(struct snd_dma_buffer *dmab, struct pci_d
 }
 
 
-static struct pci_device_id snd_hdsp_ids[] __devinitdata = {
+static struct pci_device_id snd_hdsp_ids[] = {
 	{
 		.vendor = PCI_VENDOR_ID_XILINX,
 		.device = PCI_DEVICE_ID_XILINX_HAMMERFALL_DSP, 

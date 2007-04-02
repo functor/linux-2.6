@@ -186,8 +186,7 @@ static int ramdisk_writepages(struct address_space *mapping,
  */
 static int ramdisk_set_page_dirty(struct page *page)
 {
-	if (!TestSetPageDirty(page))
-		return 1;
+	SetPageDirty(page);
 	return 0;
 }
 
@@ -311,12 +310,12 @@ static int rd_ioctl(struct inode *inode, struct file *file,
 	 * cache
 	 */
 	error = -EBUSY;
-	mutex_lock(&bdev->bd_mutex);
+	down(&bdev->bd_sem);
 	if (bdev->bd_openers <= 2) {
 		truncate_inode_pages(bdev->bd_inode->i_mapping, 0);
 		error = 0;
 	}
-	mutex_unlock(&bdev->bd_mutex);
+	up(&bdev->bd_sem);
 	return error;
 }
 

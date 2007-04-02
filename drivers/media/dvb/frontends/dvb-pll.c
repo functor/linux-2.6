@@ -235,8 +235,8 @@ struct dvb_pll_desc dvb_pll_tdvs_tua6034 = {
 	.max   = 863000000,
 	.count = 3,
 	.entries = {
-		{  165000000, 44000000, 62500, 0xce, 0x01 },
-		{  450000000, 44000000, 62500, 0xce, 0x02 },
+		{  160000000, 44000000, 62500, 0xce, 0x01 },
+		{  455000000, 44000000, 62500, 0xce, 0x02 },
 		{  999999999, 44000000, 62500, 0xce, 0x04 },
 	},
 };
@@ -404,21 +404,6 @@ struct dvb_pll_desc dvb_pll_philips_td1316 = {
 };
 EXPORT_SYMBOL(dvb_pll_philips_td1316);
 
-/* FE6600 used on DViCO Hybrid */
-struct dvb_pll_desc dvb_pll_thomson_fe6600 = {
-	.name = "Thomson FE6600",
-	.min =  44250000,
-	.max = 858000000,
-	.count = 4,
-	.entries = {
-		{ 250000000, 36213333, 166667, 0xb4, 0x12 },
-		{ 455000000, 36213333, 166667, 0xfe, 0x11 },
-		{ 775500000, 36213333, 166667, 0xbc, 0x18 },
-		{ 999999999, 36213333, 166667, 0xf4, 0x18 },
-	}
-};
-EXPORT_SYMBOL(dvb_pll_thomson_fe6600);
-
 /* ----------------------------------------------------------- */
 /* code                                                        */
 
@@ -448,8 +433,8 @@ int dvb_pll_configure(struct dvb_pll_desc *desc, u8 *buf,
 	div = (freq + desc->entries[i].offset) / desc->entries[i].stepsize;
 	buf[0] = div >> 8;
 	buf[1] = div & 0xff;
-	buf[2] = desc->entries[i].config;
-	buf[3] = desc->entries[i].cb;
+	buf[2] = desc->entries[i].cb1;
+	buf[3] = desc->entries[i].cb2;
 
 	if (desc->setbw)
 		desc->setbw(buf, freq, bandwidth);

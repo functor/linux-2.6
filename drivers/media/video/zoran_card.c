@@ -4,7 +4,7 @@
  * Media Labs LML33/LML33R10.
  *
  * This part handles card-specific data and detection
- *
+ * 
  * Copyright (C) 2000 Serguei Miridonov <mirsev@cicese.mx>
  *
  * Currently maintained by:
@@ -47,7 +47,6 @@
 #include <linux/interrupt.h>
 #include <linux/video_decoder.h>
 #include <linux/video_encoder.h>
-#include <linux/mutex.h>
 
 #include <asm/io.h>
 
@@ -674,7 +673,7 @@ zoran_i2c_client_register (struct i2c_client *client)
 		KERN_DEBUG "%s: i2c_client_register() - driver id = %d\n",
 		ZR_DEVNAME(zr), client->driver->id);
 
-	mutex_lock(&zr->resource_lock);
+	down(&zr->resource_lock);
 
 	if (zr->user > 0) {
 		/* we're already busy, so we keep a reference to
@@ -695,7 +694,7 @@ zoran_i2c_client_register (struct i2c_client *client)
 	}
 
 clientreg_unlock_and_return:
-	mutex_unlock(&zr->resource_lock);
+	up(&zr->resource_lock);
 
 	return res;
 }
@@ -708,7 +707,7 @@ zoran_i2c_client_unregister (struct i2c_client *client)
 
 	dprintk(2, KERN_DEBUG "%s: i2c_client_unregister()\n", ZR_DEVNAME(zr));
 
-	mutex_lock(&zr->resource_lock);
+	down(&zr->resource_lock);
 
 	if (zr->user > 0) {
 		res = -EBUSY;
@@ -723,7 +722,7 @@ zoran_i2c_client_unregister (struct i2c_client *client)
 		snprintf(ZR_DEVNAME(zr), sizeof(ZR_DEVNAME(zr)), "MJPEG[%d]", zr->id);
 	}
 clientunreg_unlock_and_return:
-	mutex_unlock(&zr->resource_lock);
+	up(&zr->resource_lock);
 	return res;
 }
 
@@ -996,7 +995,10 @@ test_interrupts (struct zoran *zr)
 static int __devinit
 zr36057_init (struct zoran *zr)
 {
-	int j, err;
+	u32 *mem;
+	void *vdev;
+	unsigned mem_needed;
+	int j;
 	int two = 2;
 	int zero = 0;
 
@@ -1047,16 +1049,19 @@ zr36057_init (struct zoran *zr)
 
 	/* allocate memory *before* doing anything to the hardware
 	 * in case allocation fails */
-	zr->stat_com = kzalloc(BUZ_NUM_STAT_COM * 4, GFP_KERNEL);
-	zr->video_dev = kmalloc(sizeof(struct video_device), GFP_KERNEL);
-	if (!zr->stat_com || !zr->video_dev) {
+	mem_needed = BUZ_NUM_STAT_COM * 4;
+	mem = kzalloc(mem_needed, GFP_KERNEL);
+	vdev = (void *) kmalloc(sizeof(struct video_device), GFP_KERNEL);
+	if (!mem || !vdev) {
 		dprintk(1,
 			KERN_ERR
 			"%s: zr36057_init() - kmalloc (STAT_COM) failed\n",
 			ZR_DEVNAME(zr));
-		err = -ENOMEM;
-		goto exit_free;
+		kfree(vdev);
+		kfree(mem);
+		return -ENOMEM;
 	}
+	zr->stat_com = mem;
 	for (j = 0; j < BUZ_NUM_STAT_COM; j++) {
 		zr->stat_com[j] = 1;	/* mark as unavailable to zr36057 */
 	}
@@ -1064,11 +1069,16 @@ zr36057_init (struct zoran *zr)
 	/*
 	 *   Now add the template and register the device unit.
 	 */
+	zr->video_dev = vdev;
 	memcpy(zr->video_dev, &zoran_template, sizeof(zoran_template));
 	strcpy(zr->video_dev->name, ZR_DEVNAME(zr));
-	err = video_register_device(zr->video_dev, VFL_TYPE_GRABBER, video_nr);
-	if (err < 0)
-		goto exit_unregister;
+	if (video_register_device(zr->video_dev, VFL_TYPE_GRABBER,
+				  video_nr) < 0) {
+		zoran_unregister_i2c(zr);
+		kfree((void *) zr->stat_com);
+		kfree(vdev);
+		return -1;
+	}
 
 	zoran_init_hardware(zr);
 	if (*zr_debug > 2)
@@ -1082,13 +1092,6 @@ zr36057_init (struct zoran *zr)
 	zr->zoran_proc = NULL;
 	zr->initialized = 1;
 	return 0;
-
-exit_unregister:
-	zoran_unregister_i2c(zr);
-exit_free:
-	kfree(zr->stat_com);
-	kfree(zr->video_dev);
-	return err;
 }
 
 static void
@@ -1118,7 +1121,7 @@ zoran_release (struct zoran *zr)
 	btwrite(0, ZR36057_SPGPPCR);
 	free_irq(zr->pci_dev->irq, zr);
 	/* unmap and free memory */
-	kfree(zr->stat_com);
+	kfree((void *) zr->stat_com);
 	zoran_proc_cleanup(zr);
 	iounmap(zr->zr36057_mem);
 	pci_disable_device(zr->pci_dev);
@@ -1203,7 +1206,7 @@ find_zr36057 (void)
 		zr->id = zoran_num;
 		snprintf(ZR_DEVNAME(zr), sizeof(ZR_DEVNAME(zr)), "MJPEG[%u]", zr->id);
 		spin_lock_init(&zr->spinlock);
-		mutex_init(&zr->resource_lock);
+		init_MUTEX(&zr->resource_lock);
 		if (pci_enable_device(dev))
 			continue;
 		zr->zr36057_adr = pci_resource_start(zr->pci_dev, 0);

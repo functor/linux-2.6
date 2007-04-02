@@ -142,9 +142,6 @@ static inline void __raw_write_unlock(raw_rwlock_t *rw)
 	: "cc");
 }
 
-/* write_can_lock - would write_trylock() succeed? */
-#define __raw_write_can_lock(x)		((x)->lock == 0x80000000)
-
 /*
  * Read locks are a bit more hairy:
  *  - Exclusively load the lock value.
@@ -200,8 +197,5 @@ static inline void __raw_read_unlock(raw_rwlock_t *rw)
 }
 
 #define __raw_read_trylock(lock) generic__raw_read_trylock(lock)
-
-/* read_can_lock - would read_trylock() succeed? */
-#define __raw_read_can_lock(x)		((x)->lock < 0x80000000)
 
 #endif /* __ASM_SPINLOCK_H */

@@ -4,10 +4,9 @@
 #include <linux/kernel.h>
 
 #ifdef CONFIG_BUG
-
 #define BUG() do { \
-	printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); \
-	__builtin_trap(); \
+        printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); \
+        __asm__ __volatile__(".long 0"); \
 } while (0)
 
 #define HAVE_ARCH_BUG

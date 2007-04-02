@@ -53,7 +53,6 @@ struct rpc_timeout {
 
 struct rpc_task;
 struct rpc_xprt;
-struct seq_file;
 
 /*
  * This describes a complete RPC request
@@ -115,7 +114,6 @@ struct rpc_xprt_ops {
 	void		(*release_request)(struct rpc_task *task);
 	void		(*close)(struct rpc_xprt *xprt);
 	void		(*destroy)(struct rpc_xprt *xprt);
-	void		(*print_stats)(struct rpc_xprt *xprt, struct seq_file *seq);
 };
 
 struct rpc_xprt {
@@ -189,18 +187,6 @@ struct rpc_xprt {
 
 	struct list_head	recv;
 
-	struct {
-		unsigned long		bind_count,	/* total number of binds */
-					connect_count,	/* total number of connects */
-					connect_start,	/* connect start timestamp */
-					connect_time,	/* jiffies waiting for connect */
-					sends,		/* how many complete requests */
-					recvs,		/* how many complete requests */
-					bad_xids;	/* lookup_rqst didn't find XID */
-
-		unsigned long long	req_u,		/* average requests on the wire */
-					bklog_u;	/* backlog queue utilization */
-	} stat;
 
 	void			(*old_data_ready)(struct sock *, int);
 	void			(*old_state_change)(struct sock *);

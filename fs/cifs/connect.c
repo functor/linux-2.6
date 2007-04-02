@@ -1,7 +1,7 @@
 /*
  *   fs/cifs/connect.c
  *
- *   Copyright (C) International Business Machines  Corp., 2002,2006
+ *   Copyright (C) International Business Machines  Corp., 2002,2005
  *   Author(s): Steve French (sfrench@us.ibm.com)
  *
  *   This library is free software; you can redistribute it and/or modify
@@ -188,6 +188,7 @@ cifs_reconnect(struct TCP_Server_Info *server)
 
 	while ((server->tcpStatus != CifsExiting) && (server->tcpStatus != CifsGood))
 	{
+		try_to_freeze();
 		if(server->protocolType == IPV6) {
 			rc = ipv6_connect(&server->addr.sockAddr6,&server->ssocket);
 		} else {
@@ -564,7 +565,7 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 	
 
 		dump_smb(smb_buffer, length);
-		if (checkSMB(smb_buffer, smb_buffer->Mid, total_read+4)) {
+		if (checkSMB (smb_buffer, smb_buffer->Mid, total_read+4)) {
 			cifs_dump_mem("Bad SMB: ", smb_buffer, 48);
 			continue;
 		}
@@ -1476,14 +1477,6 @@ ipv4_connect(struct sockaddr_in *psin_server, struct socket **csocket,
 			rc = smb_send(*csocket, smb_buf, 0x44,
 				(struct sockaddr *)psin_server);
 			kfree(ses_init_buf);
-			msleep(1); /* RFC1001 layer in at least one server 
-				      requires very short break before negprot
-				      presumably because not expecting negprot
-				      to follow so fast.  This is a simple
-				      solution that works without 
-				      complicating the code and causes no
-				      significant slowing down on mount
-				      for everyone else */
 		}
 		/* else the negprot may still work without this 
 		even though malloc failed */
@@ -1928,34 +1921,27 @@ cifs_mount(struct super_block *sb, struct cifs_sb_info *cifs_sb,
 		cifs_sb->tcon = tcon;
 		tcon->ses = pSesInfo;
 
-		/* do not care if following two calls succeed - informational */
+		/* do not care if following two calls succeed - informational only */
 		CIFSSMBQFSDeviceInfo(xid, tcon);
 		CIFSSMBQFSAttributeInfo(xid, tcon);
-
 		if (tcon->ses->capabilities & CAP_UNIX) {
 			if(!CIFSSMBQFSUnixInfo(xid, tcon)) {
-				__u64 cap = 
-				       le64_to_cpu(tcon->fsUnixInfo.Capability);
-				cap &= CIFS_UNIX_CAP_MASK;
-				if(volume_info.no_psx_acl)
-					cap &= ~CIFS_UNIX_POSIX_ACL_CAP;
-				else if(CIFS_UNIX_POSIX_ACL_CAP & cap) {
-					cFYI(1,("negotiated posix acl support"));
-					sb->s_flags |= MS_POSIXACL;
+				if(!volume_info.no_psx_acl) {
+					if(CIFS_UNIX_POSIX_ACL_CAP & 
+					   le64_to_cpu(tcon->fsUnixInfo.Capability))
+						cFYI(1,("server negotiated posix acl support"));
+						sb->s_flags |= MS_POSIXACL;
 				}
 
-				if(volume_info.posix_paths == 0)
-					cap &= ~CIFS_UNIX_POSIX_PATHNAMES_CAP;
-				else if(cap & CIFS_UNIX_POSIX_PATHNAMES_CAP) {
-					cFYI(1,("negotiate posix pathnames"));
-					cifs_sb->mnt_cifs_flags |= 
-						CIFS_MOUNT_POSIX_PATHS;
-				}
-					
-				cFYI(1,("Negotiate caps 0x%x",(int)cap));
-
-				if (CIFSSMBSetFSUnixInfo(xid, tcon, cap)) {
-					cFYI(1,("setting capabilities failed"));
+				/* Try and negotiate POSIX pathnames if we can. */
+				if (volume_info.posix_paths && (CIFS_UNIX_POSIX_PATHNAMES_CAP &
+				    le64_to_cpu(tcon->fsUnixInfo.Capability))) {
+					if (!CIFSSMBSetFSUnixInfo(xid, tcon, CIFS_UNIX_POSIX_PATHNAMES_CAP))  {
+						cFYI(1,("negotiated posix pathnames support"));
+						cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_POSIX_PATHS;
+					} else {
+						cFYI(1,("posix pathnames support requested but not supported"));
+					}
 				}
 			}
 		}
@@ -2148,8 +2134,6 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 /* We look for obvious messed up bcc or strings in response so we do not go off
    the end since (at least) WIN2K and Windows XP have a major bug in not null
    terminating last Unicode string in response  */
-				if(ses->serverOS)
-					kfree(ses->serverOS);
 				ses->serverOS = kzalloc(2 * (len + 1), GFP_KERNEL);
 				if(ses->serverOS == NULL)
 					goto sesssetup_nomem;
@@ -2162,8 +2146,6 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 				if (remaining_words > 0) {
 					len = UniStrnlen((wchar_t *)bcc_ptr,
 							 remaining_words-1);
-					if(ses->serverNOS)
-						kfree(ses->serverNOS);
 					ses->serverNOS = kzalloc(2 * (len + 1),GFP_KERNEL);
 					if(ses->serverNOS == NULL)
 						goto sesssetup_nomem;
@@ -2181,8 +2163,6 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 					if (remaining_words > 0) {
 						len = UniStrnlen((wchar_t *) bcc_ptr, remaining_words);
           /* last string is not always null terminated (for e.g. for Windows XP & 2000) */
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
 						ses->serverDomain =
 						    kzalloc(2*(len+1),GFP_KERNEL);
 						if(ses->serverDomain == NULL)
@@ -2193,22 +2173,15 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						ses->serverDomain[2*len] = 0;
 						ses->serverDomain[1+(2*len)] = 0;
 					} /* else no more room so create dummy domain string */
-					else {
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
+					else
 						ses->serverDomain = 
 							kzalloc(2, GFP_KERNEL);
-					}
 				} else {	/* no room so create dummy domain and NOS string */
 					/* if these kcallocs fail not much we
 					   can do, but better to not fail the
 					   sesssetup itself */
-					if(ses->serverDomain)
-						kfree(ses->serverDomain);
 					ses->serverDomain =
 					    kzalloc(2, GFP_KERNEL);
-					if(ses->serverNOS)
-						kfree(ses->serverNOS);
 					ses->serverNOS =
 					    kzalloc(2, GFP_KERNEL);
 				}
@@ -2217,8 +2190,6 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 				if (((long) bcc_ptr + len) - (long)
 				    pByteArea(smb_buffer_response)
 					    <= BCC(smb_buffer_response)) {
-					if(ses->serverOS)
-						kfree(ses->serverOS);
 					ses->serverOS = kzalloc(len + 1,GFP_KERNEL);
 					if(ses->serverOS == NULL)
 						goto sesssetup_nomem;
@@ -2229,8 +2200,6 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 					bcc_ptr++;
 
 					len = strnlen(bcc_ptr, 1024);
-					if(ses->serverNOS)
-						kfree(ses->serverNOS);
 					ses->serverNOS = kzalloc(len + 1,GFP_KERNEL);
 					if(ses->serverNOS == NULL)
 						goto sesssetup_nomem;
@@ -2240,8 +2209,6 @@ CIFSSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 					bcc_ptr++;
 
 					len = strnlen(bcc_ptr, 1024);
-					if(ses->serverDomain)
-						kfree(ses->serverDomain);
 					ses->serverDomain = kzalloc(len + 1,GFP_KERNEL);
 					if(ses->serverDomain == NULL)
 						goto sesssetup_nomem;
@@ -2312,8 +2279,6 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 	smb_buffer->Mid = GetNextMid(ses->server);
 	pSMB->req.hdr.Flags2 |= SMBFLG2_EXT_SEC;
 	pSMB->req.AndXCommand = 0xFF;
-	if(ses->server->maxBuf > 64*1024)
-		ses->server->maxBuf = (64*1023);
 	pSMB->req.MaxBufferSize = cpu_to_le16(ses->server->maxBuf);
 	pSMB->req.MaxMpxCount = cpu_to_le16(ses->server->maxReq);
 
@@ -2446,8 +2411,6 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 /* We look for obvious messed up bcc or strings in response so we do not go off
    the end since (at least) WIN2K and Windows XP have a major bug in not null
    terminating last Unicode string in response  */
-					if(ses->serverOS)
-						kfree(ses->serverOS);
 					ses->serverOS =
 					    kzalloc(2 * (len + 1), GFP_KERNEL);
 					cifs_strfromUCS_le(ses->serverOS,
@@ -2462,8 +2425,6 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						len = UniStrnlen((wchar_t *)bcc_ptr,
 								 remaining_words
 								 - 1);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS =
 						    kzalloc(2 * (len + 1),
 							    GFP_KERNEL);
@@ -2477,9 +2438,7 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						remaining_words -= len + 1;
 						if (remaining_words > 0) {
 							len = UniStrnlen((wchar_t *) bcc_ptr, remaining_words);	
-                     /* last string not null terminated (e.g.Windows XP/2000) */
-							if(ses->serverDomain)
-								kfree(ses->serverDomain);
+                            /* last string is not always null terminated (for e.g. for Windows XP & 2000) */
 							ses->serverDomain = kzalloc(2*(len+1),GFP_KERNEL);
 							cifs_strfromUCS_le(ses->serverDomain,
 							     (__le16 *)bcc_ptr, 
@@ -2488,18 +2447,11 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 							ses->serverDomain[2*len] = 0;
 							ses->serverDomain[1+(2*len)] = 0;
 						} /* else no more room so create dummy domain string */
-						else {
-							if(ses->serverDomain)
-								kfree(ses->serverDomain);
+						else
 							ses->serverDomain =
 							    kzalloc(2,GFP_KERNEL);
-						}
-					} else {/* no room use dummy domain&NOS */
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
+					} else {	/* no room so create dummy domain and NOS string */
 						ses->serverDomain = kzalloc(2, GFP_KERNEL);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS = kzalloc(2, GFP_KERNEL);
 					}
 				} else {	/* ASCII */
@@ -2508,8 +2460,6 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 					if (((long) bcc_ptr + len) - (long)
 					    pByteArea(smb_buffer_response)
 					    <= BCC(smb_buffer_response)) {
-						if(ses->serverOS)
-							kfree(ses->serverOS);
 						ses->serverOS = kzalloc(len + 1, GFP_KERNEL);
 						strncpy(ses->serverOS, bcc_ptr, len);
 
@@ -2518,8 +2468,6 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						bcc_ptr++;
 
 						len = strnlen(bcc_ptr, 1024);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS = kzalloc(len + 1,GFP_KERNEL);
 						strncpy(ses->serverNOS, bcc_ptr, len);
 						bcc_ptr += len;
@@ -2527,8 +2475,6 @@ CIFSSpnegoSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						bcc_ptr++;
 
 						len = strnlen(bcc_ptr, 1024);
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
 						ses->serverDomain = kzalloc(len + 1, GFP_KERNEL);
 						strncpy(ses->serverDomain, bcc_ptr, len);
 						bcc_ptr += len;
@@ -2580,7 +2526,7 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 	__u32 negotiate_flags, capabilities;
 	__u16 count;
 
-	cFYI(1, ("In NTLMSSP sesssetup (negotiate)"));
+	cFYI(1, ("In NTLMSSP sesssetup (negotiate) "));
 	if(ses == NULL)
 		return -EINVAL;
 	domain = ses->domainName;
@@ -2630,8 +2576,7 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 	SecurityBlob->MessageType = NtLmNegotiate;
 	negotiate_flags =
 	    NTLMSSP_NEGOTIATE_UNICODE | NTLMSSP_NEGOTIATE_OEM |
-	    NTLMSSP_REQUEST_TARGET | NTLMSSP_NEGOTIATE_NTLM |
-	    NTLMSSP_NEGOTIATE_56 |
+	    NTLMSSP_REQUEST_TARGET | NTLMSSP_NEGOTIATE_NTLM | 0x80000000 |
 	    /* NTLMSSP_NEGOTIATE_ALWAYS_SIGN | */ NTLMSSP_NEGOTIATE_128;
 	if(sign_CIFS_PDUs)
 		negotiate_flags |= NTLMSSP_NEGOTIATE_SIGN;
@@ -2644,11 +2589,26 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 	SecurityBlob->WorkstationName.Length = 0;
 	SecurityBlob->WorkstationName.MaximumLength = 0;
 
-	/* Domain not sent on first Sesssetup in NTLMSSP, instead it is sent
-	along with username on auth request (ie the response to challenge) */
-	SecurityBlob->DomainName.Buffer = 0;
-	SecurityBlob->DomainName.Length = 0;
-	SecurityBlob->DomainName.MaximumLength = 0;
+	if (domain == NULL) {
+		SecurityBlob->DomainName.Buffer = 0;
+		SecurityBlob->DomainName.Length = 0;
+		SecurityBlob->DomainName.MaximumLength = 0;
+	} else {
+		__u16 len;
+		negotiate_flags |= NTLMSSP_NEGOTIATE_DOMAIN_SUPPLIED;
+		strncpy(bcc_ptr, domain, 63);
+		len = strnlen(domain, 64);
+		SecurityBlob->DomainName.MaximumLength =
+		    cpu_to_le16(len);
+		SecurityBlob->DomainName.Buffer =
+		    cpu_to_le32((long) &SecurityBlob->
+				DomainString -
+				(long) &SecurityBlob->Signature);
+		bcc_ptr += len;
+		SecurityBlobLength += len;
+		SecurityBlob->DomainName.Length =
+		    cpu_to_le16(len);
+	}
 	if (ses->capabilities & CAP_UNICODE) {
 		if ((long) bcc_ptr % 2) {
 			*bcc_ptr = 0;
@@ -2718,7 +2678,7 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 			      SecurityBlob2->MessageType));
 		} else if (ses) {
 			ses->Suid = smb_buffer_response->Uid; /* UID left in le format */ 
-			cFYI(1, ("UID = %d", ses->Suid));
+			cFYI(1, ("UID = %d ", ses->Suid));
 			if ((pSMBr->resp.hdr.WordCount == 3)
 			    || ((pSMBr->resp.hdr.WordCount == 4)
 				&& (blob_len <
@@ -2726,17 +2686,17 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 
 				if (pSMBr->resp.hdr.WordCount == 4) {
 					bcc_ptr += blob_len;
-					cFYI(1, ("Security Blob Length %d",
+					cFYI(1,
+					     ("Security Blob Length %d ",
 					      blob_len));
 				}
 
-				cFYI(1, ("NTLMSSP Challenge rcvd"));
+				cFYI(1, ("NTLMSSP Challenge rcvd "));
 
 				memcpy(ses->server->cryptKey,
 				       SecurityBlob2->Challenge,
 				       CIFS_CRYPTO_KEY_SIZE);
-				if(SecurityBlob2->NegotiateFlags & 
-					cpu_to_le32(NTLMSSP_NEGOTIATE_NTLMV2))
+				if(SecurityBlob2->NegotiateFlags & cpu_to_le32(NTLMSSP_NEGOTIATE_NTLMV2))
 					*pNTLMv2_flag = TRUE;
 
 				if((SecurityBlob2->NegotiateFlags & 
@@ -2766,8 +2726,6 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 /* We look for obvious messed up bcc or strings in response so we do not go off
    the end since (at least) WIN2K and Windows XP have a major bug in not null
    terminating last Unicode string in response  */
-					if(ses->serverOS)
-						kfree(ses->serverOS);
 					ses->serverOS =
 					    kzalloc(2 * (len + 1), GFP_KERNEL);
 					cifs_strfromUCS_le(ses->serverOS,
@@ -2783,8 +2741,6 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 								 bcc_ptr,
 								 remaining_words
 								 - 1);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS =
 						    kzalloc(2 * (len + 1),
 							    GFP_KERNEL);
@@ -2802,8 +2758,6 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 						if (remaining_words > 0) {
 							len = UniStrnlen((wchar_t *) bcc_ptr, remaining_words);	
            /* last string is not always null terminated (for e.g. for Windows XP & 2000) */
-							if(ses->serverDomain)
-								kfree(ses->serverDomain);
 							ses->serverDomain =
 							    kzalloc(2 *
 								    (len +
@@ -2821,20 +2775,13 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 								[1 + (2 * len)]
 							    = 0;
 						} /* else no more room so create dummy domain string */
-						else {
-							if(ses->serverDomain)
-								kfree(ses->serverDomain);
+						else
 							ses->serverDomain =
 							    kzalloc(2,
 								    GFP_KERNEL);
-						}
 					} else {	/* no room so create dummy domain and NOS string */
-						if(ses->serverDomain);
-							kfree(ses->serverDomain);
 						ses->serverDomain =
 						    kzalloc(2, GFP_KERNEL);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS =
 						    kzalloc(2, GFP_KERNEL);
 					}
@@ -2843,8 +2790,6 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 					if (((long) bcc_ptr + len) - (long)
 					    pByteArea(smb_buffer_response)
 					    <= BCC(smb_buffer_response)) {
-						if(ses->serverOS)
-							kfree(ses->serverOS);
 						ses->serverOS =
 						    kzalloc(len + 1,
 							    GFP_KERNEL);
@@ -2856,8 +2801,6 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 						bcc_ptr++;
 
 						len = strnlen(bcc_ptr, 1024);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS =
 						    kzalloc(len + 1,
 							    GFP_KERNEL);
@@ -2867,8 +2810,6 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 						bcc_ptr++;
 
 						len = strnlen(bcc_ptr, 1024);
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
 						ses->serverDomain =
 						    kzalloc(len + 1,
 							    GFP_KERNEL);
@@ -2878,7 +2819,7 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 						bcc_ptr++;
 					} else
 						cFYI(1,
-						     ("Variable field of length %d extends beyond end of smb",
+						     ("Variable field of length %d extends beyond end of smb ",
 						      len));
 				}
 			} else {
@@ -2890,7 +2831,7 @@ CIFSNTLMSSPNegotiateSessSetup(unsigned int xid,
 		}
 	} else {
 		cERROR(1,
-		       (" Invalid Word count %d:",
+		       (" Invalid Word count %d: ",
 			smb_buffer_response->WordCount));
 		rc = -EIO;
 	}
@@ -3173,8 +3114,6 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 /* We look for obvious messed up bcc or strings in response so we do not go off
   the end since (at least) WIN2K and Windows XP have a major bug in not null
   terminating last Unicode string in response  */
-					if(ses->serverOS)
-						kfree(ses->serverOS);
 					ses->serverOS =
 					    kzalloc(2 * (len + 1), GFP_KERNEL);
 					cifs_strfromUCS_le(ses->serverOS,
@@ -3190,8 +3129,6 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 								 bcc_ptr,
 								 remaining_words
 								 - 1);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS =
 						    kzalloc(2 * (len + 1),
 							    GFP_KERNEL);
@@ -3208,8 +3145,6 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						if (remaining_words > 0) {
 							len = UniStrnlen((wchar_t *) bcc_ptr, remaining_words);	
      /* last string not always null terminated (e.g. for Windows XP & 2000) */
-							if(ses->serverDomain)
-								kfree(ses->serverDomain);
 							ses->serverDomain =
 							    kzalloc(2 *
 								    (len +
@@ -3235,17 +3170,10 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 									  len)]
 							    = 0;
 						} /* else no more room so create dummy domain string */
-						else {
-							if(ses->serverDomain)
-								kfree(ses->serverDomain);
+						else
 							ses->serverDomain = kzalloc(2,GFP_KERNEL);
-						}
 					} else {  /* no room so create dummy domain and NOS string */
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
 						ses->serverDomain = kzalloc(2, GFP_KERNEL);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS = kzalloc(2, GFP_KERNEL);
 					}
 				} else {	/* ASCII */
@@ -3253,8 +3181,6 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 					if (((long) bcc_ptr + len) - 
                         (long) pByteArea(smb_buffer_response) 
                             <= BCC(smb_buffer_response)) {
-						if(ses->serverOS)
-							kfree(ses->serverOS);
 						ses->serverOS = kzalloc(len + 1,GFP_KERNEL);
 						strncpy(ses->serverOS,bcc_ptr, len);
 
@@ -3263,8 +3189,6 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						bcc_ptr++;
 
 						len = strnlen(bcc_ptr, 1024);
-						if(ses->serverNOS)
-							kfree(ses->serverNOS);
 						ses->serverNOS = kzalloc(len+1,GFP_KERNEL);
 						strncpy(ses->serverNOS, bcc_ptr, len);	
 						bcc_ptr += len;
@@ -3272,8 +3196,6 @@ CIFSNTLMSSPAuthSessSetup(unsigned int xid, struct cifsSesInfo *ses,
 						bcc_ptr++;
 
 						len = strnlen(bcc_ptr, 1024);
-						if(ses->serverDomain)
-							kfree(ses->serverDomain);
 						ses->serverDomain = kzalloc(len+1,GFP_KERNEL);
 						strncpy(ses->serverDomain, bcc_ptr, len);
 						bcc_ptr += len;
@@ -3358,8 +3280,7 @@ CIFSTCon(unsigned int xid, struct cifsSesInfo *ses,
 		bcc_ptr++; /* align */
 	}
 
-	if(ses->server->secMode & 
-			(SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED))
+	if(ses->server->secMode & (SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED))
 		smb_buffer->Flags2 |= SMBFLG2_SECURITY_SIGNATURE;
 
 	if (ses->capabilities & CAP_STATUS32) {
@@ -3371,10 +3292,8 @@ CIFSTCon(unsigned int xid, struct cifsSesInfo *ses,
 	if (ses->capabilities & CAP_UNICODE) {
 		smb_buffer->Flags2 |= SMBFLG2_UNICODE;
 		length =
-		    cifs_strtoUCS((__le16 *) bcc_ptr, tree, 
-			6 /* max utf8 char length in bytes */ * 
-			(/* server len*/ + 256 /* share len */), nls_codepage);
-		bcc_ptr += 2 * length;	/* convert num 16 bit words to bytes */
+		    cifs_strtoUCS((__le16 *) bcc_ptr, tree, 100, nls_codepage);
+		bcc_ptr += 2 * length;	/* convert num of 16 bit words to bytes */
 		bcc_ptr += 2;	/* skip trailing null */
 	} else {		/* ASCII */
 		strcpy(bcc_ptr, tree);
@@ -3526,16 +3445,10 @@ int cifs_setup_session(unsigned int xid, struct cifsSesInfo *pSesInfo,
 			pSesInfo->server->secMode,
 			pSesInfo->server->capabilities,
 			pSesInfo->server->timeZone));
-#ifdef CONFIG_CIFS_EXPERIMENTAL
-		if(experimEnabled > 1)
-			rc = CIFS_SessSetup(xid, pSesInfo, CIFS_NTLM /* type */,
-					    &ntlmv2_flag, nls_info);	
-		else
-#endif
 		if (extended_security
 				&& (pSesInfo->capabilities & CAP_EXTENDED_SECURITY)
 				&& (pSesInfo->server->secType == NTLMSSP)) {
-			cFYI(1, ("New style sesssetup"));
+			cFYI(1, ("New style sesssetup "));
 			rc = CIFSSpnegoSessSetup(xid, pSesInfo,
 				NULL /* security blob */, 
 				0 /* blob length */,
@@ -3543,7 +3456,7 @@ int cifs_setup_session(unsigned int xid, struct cifsSesInfo *pSesInfo,
 		} else if (extended_security
 			   && (pSesInfo->capabilities & CAP_EXTENDED_SECURITY)
 			   && (pSesInfo->server->secType == RawNTLMSSP)) {
-			cFYI(1, ("NTLMSSP sesssetup"));
+			cFYI(1, ("NTLMSSP sesssetup "));
 			rc = CIFSNTLMSSPNegotiateSessSetup(xid,
 						pSesInfo,
 						&ntlmv2_flag,

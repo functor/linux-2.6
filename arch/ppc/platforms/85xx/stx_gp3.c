@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/stx_gp3.c
+ *
  * STx GP3 board specific routines
  *
  * Dan Malek <dan@embeddededge.com>

@@ -128,14 +128,14 @@ struct subprocess_info {
 /*
  * This is the task which runs the usermode application
  */
-int
-__exec_usermodehelper(char *path, char **argv, char **envp, struct key *ring)
+static int ____call_usermodehelper(void *data)
 {
+	struct subprocess_info *sub_info = data;
 	struct key *new_session, *old_session;
 	int retval;
 
 	/* Unblock all signals and set the session keyring. */
-	new_session = key_get(ring);
+	new_session = key_get(sub_info->ring);
 	flush_signals(current);
 	spin_lock_irq(&current->sighand->siglock);
 	old_session = __install_session_keyring(current, new_session);
@@ -146,28 +146,12 @@ __exec_usermodehelper(char *path, char **argv, char **envp, struct key *ring)
 
 	key_put(old_session);
 
-	retval = -EPERM;
-	if (current->fs->root)
-		retval = execve(path, argv, envp);
-
-	return retval;
-}
-
-EXPORT_SYMBOL_GPL(__exec_usermodehelper);
-
-/*
- * This is the task which runs the usermode application
- */
-static int ____call_usermodehelper(void *data)
-{
-	struct subprocess_info *sub_info = data;
-	int retval;
-
 	/* We can run anywhere, unlike our parent keventd(). */
 	set_cpus_allowed(current, CPU_MASK_ALL);
 
-	retval = __exec_usermodehelper(sub_info->path,
-			sub_info->argv, sub_info->envp, sub_info->ring);
+	retval = -EPERM;
+	if (current->fs->root)
+		retval = execve(sub_info->path, sub_info->argv,sub_info->envp);
 
 	/* Exec failed? */
 	sub_info->retval = retval;
@@ -186,7 +170,7 @@ static int wait_for_helper(void *data)
 	sa.sa.sa_handler = SIG_IGN;
 	sa.sa.sa_flags = 0;
 	siginitset(&sa.sa.sa_mask, sigmask(SIGCHLD));
-	do_sigaction(SIGCHLD, &sa, NULL);
+	do_sigaction(SIGCHLD, &sa, (struct k_sigaction *)0);
 	allow_signal(SIGCHLD);
 
 	pid = kernel_thread(____call_usermodehelper, sub_info, SIGCHLD);
@@ -213,12 +197,13 @@ static int wait_for_helper(void *data)
 static void __call_usermodehelper(void *data)
 {
 	struct subprocess_info *sub_info = data;
+	int wait = sub_info->wait;
 	pid_t pid;
 
 	/* CLONE_VFORK: wait until the usermode helper has execve'd
 	 * successfully We need the data structures to stay around
 	 * until that is done.  */
-	if (sub_info->wait)
+	if (wait)
 		pid = kernel_thread(wait_for_helper, sub_info,
 				    CLONE_FS | CLONE_FILES | SIGCHLD);
 	else
@@ -228,7 +213,7 @@ static void __call_usermodehelper(void *data)
 	if (pid < 0) {
 		sub_info->retval = pid;
 		complete(sub_info->complete);
-	} else if (!sub_info->wait)
+	} else if (!wait)
 		complete(sub_info->complete);
 }
 

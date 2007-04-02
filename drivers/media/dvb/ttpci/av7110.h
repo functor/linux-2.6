@@ -16,7 +16,6 @@
 #include <linux/dvb/ca.h>
 #include <linux/dvb/osd.h>
 #include <linux/dvb/net.h>
-#include <linux/mutex.h>
 
 #include "dvbdev.h"
 #include "demux.h"
@@ -128,7 +127,7 @@ struct av7110 {
 	/* DEBI and polled command interface */
 
 	spinlock_t		debilock;
-	struct mutex		dcomlock;
+	struct semaphore	dcomlock;
 	volatile int		debitype;
 	volatile int		debilen;
 
@@ -147,7 +146,7 @@ struct av7110 {
 
 	int			osdwin;      /* currently active window */
 	u16			osdbpp[8];
-	struct mutex		osd_mutex;
+	struct semaphore	osd_sema;
 
 	/* CA */
 
@@ -173,7 +172,7 @@ struct av7110 {
 	struct tasklet_struct   vpe_tasklet;
 
 	int			fe_synced;
-	struct mutex		pid_mutex;
+	struct semaphore	pid_mutex;
 
 	int			video_blank;
 	struct video_status	videostate;

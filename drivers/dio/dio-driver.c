@@ -71,17 +71,22 @@ static int dio_device_probe(struct device *dev)
 	 *  @drv: the driver structure to register
 	 *
 	 *  Adds the driver structure to the list of registered drivers
-	 *  Returns zero or a negative error value.
+	 *  Returns the number of DIO devices which were claimed by the driver
+	 *  during registration.  The driver remains registered even if the
+	 *  return value is zero.
 	 */
 
 int dio_register_driver(struct dio_driver *drv)
 {
+	int count = 0;
+
 	/* initialize common driver fields */
 	drv->driver.name = drv->name;
 	drv->driver.bus = &dio_bus_type;
 
 	/* register with core */
-	return driver_register(&drv->driver);
+	count = driver_register(&drv->driver);
+	return count ? count : 1;
 }
 
 

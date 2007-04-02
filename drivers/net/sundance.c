@@ -106,7 +106,7 @@
 static int debug = 1;			/* 1 normal messages, 0 quiet .. 7 verbose. */
 /* Maximum number of multicast addresses to filter (vs. rx-all-multicast).
    Typical is a 64 element hash table based on the Ethernet CRC.  */
-static const int multicast_filter_limit = 32;
+static int multicast_filter_limit = 32;
 
 /* Set the copy breakpoint for the copy-only-tiny-frames scheme.
    Setting to > 1518 effectively disables this feature.
@@ -287,7 +287,6 @@ static struct pci_device_id sundance_pci_tbl[] = {
 	{0x1186, 0x1002, 0x1186, 0x1040, 0, 0, 3},
 	{0x1186, 0x1002, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 4},
 	{0x13F0, 0x0201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 5},
-	{0x13F0, 0x0200, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 6},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, sundance_pci_tbl);
@@ -299,14 +298,13 @@ enum {
 struct pci_id_info {
         const char *name;
 };
-static const struct pci_id_info pci_id_tbl[] = {
+static struct pci_id_info pci_id_tbl[] = {
 	{"D-Link DFE-550TX FAST Ethernet Adapter"},
 	{"D-Link DFE-550FX 100Mbps Fiber-optics Adapter"},
 	{"D-Link DFE-580TX 4 port Server Adapter"},
 	{"D-Link DFE-530TXS FAST Ethernet Adapter"},
 	{"D-Link DL10050-based FAST Ethernet Adapter"},
-	{"IC Plus IP100 Fast Ethernet Adapter"},
-	{"IC Plus IP100A Fast Ethernet Adapter" },
+	{"Sundance Technology Alta"},
 	{NULL,},			/* 0 terminated list. */
 };
 
@@ -635,13 +633,9 @@ static int __devinit sundance_probe1 (struct pci_dev *pdev,
 
 	np->phys[0] = 1;		/* Default setting */
 	np->mii_preamble_required++;
-	/*
-	 * It seems some phys doesn't deal well with address 0 being accessed
-	 * first, so leave address zero to the end of the loop (32 & 31).
-	 */
 	for (phy = 1; phy <= 32 && phy_idx < MII_CNT; phy++) {
+		int mii_status = mdio_read(dev, phy, MII_BMSR);
 		int phyx = phy & 0x1f;
-		int mii_status = mdio_read(dev, phyx, MII_BMSR);
 		if (mii_status != 0xffff  &&  mii_status != 0x0000) {
 			np->phys[phy_idx++] = phyx;
 			np->mii_if.advertising = mdio_read(dev, phyx, MII_ADVERTISE);

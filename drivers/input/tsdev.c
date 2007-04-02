@@ -157,8 +157,9 @@ static int tsdev_open(struct inode *inode, struct file *file)
 	if (i >= TSDEV_MINORS || !tsdev_table[i & TSDEV_MINOR_MASK])
 		return -ENODEV;
 
-	if (!(list = kzalloc(sizeof(struct tsdev_list), GFP_KERNEL)))
+	if (!(list = kmalloc(sizeof(struct tsdev_list), GFP_KERNEL)))
 		return -ENOMEM;
+	memset(list, 0, sizeof(struct tsdev_list));
 
 	list->raw = (i >= TSDEV_MINORS/2) ? 1 : 0;
 
@@ -378,8 +379,9 @@ static struct input_handle *tsdev_connect(struct input_handler *handler,
 		return NULL;
 	}
 
-	if (!(tsdev = kzalloc(sizeof(struct tsdev), GFP_KERNEL)))
+	if (!(tsdev = kmalloc(sizeof(struct tsdev), GFP_KERNEL)))
 		return NULL;
+	memset(tsdev, 0, sizeof(struct tsdev));
 
 	INIT_LIST_HEAD(&tsdev->list);
 	init_waitqueue_head(&tsdev->wait);

@@ -148,6 +148,7 @@ static struct tty_driver	*stl_serial;
  *	is already swapping a shared buffer won't make things any worse.
  */
 static char			*stl_tmpwritebuf;
+static DECLARE_MUTEX(stl_tmpwritesem);
 
 /*
  *	Define a local default termios struct. All ports will be created
@@ -504,6 +505,7 @@ static int	stl_echmcaintr(stlbrd_t *brdp);
 static int	stl_echpciintr(stlbrd_t *brdp);
 static int	stl_echpci64intr(stlbrd_t *brdp);
 static void	stl_offintr(void *private);
+static void	*stl_memalloc(int len);
 static stlbrd_t *stl_allocbrd(void);
 static stlport_t *stl_getport(int brdnr, int panelnr, int portnr);
 
@@ -939,6 +941,17 @@ static int stl_parsebrd(stlconf_t *confp, char **argp)
 /*****************************************************************************/
 
 /*
+ *	Local driver kernel memory allocation routine.
+ */
+
+static void *stl_memalloc(int len)
+{
+	return (void *) kmalloc(len, GFP_KERNEL);
+}
+
+/*****************************************************************************/
+
+/*
  *	Allocate a new board structure. Fill out the basic info in it.
  */
 
@@ -946,13 +959,14 @@ static stlbrd_t *stl_allocbrd(void)
 {
 	stlbrd_t	*brdp;
 
-	brdp = kzalloc(sizeof(stlbrd_t), GFP_KERNEL);
-	if (!brdp) {
+	brdp = (stlbrd_t *) stl_memalloc(sizeof(stlbrd_t));
+	if (brdp == (stlbrd_t *) NULL) {
 		printk("STALLION: failed to allocate memory (size=%d)\n",
 			sizeof(stlbrd_t));
-		return NULL;
+		return (stlbrd_t *) NULL;
 	}
 
+	memset(brdp, 0, sizeof(stlbrd_t));
 	brdp->magic = STL_BOARDMAGIC;
 	return brdp;
 }
@@ -1004,9 +1018,9 @@ static int stl_open(struct tty_struct *tty, struct file *filp)
 	portp->refcount++;
 
 	if ((portp->flags & ASYNC_INITIALIZED) == 0) {
-		if (!portp->tx.buf) {
-			portp->tx.buf = kmalloc(STL_TXBUFSIZE, GFP_KERNEL);
-			if (!portp->tx.buf)
+		if (portp->tx.buf == (char *) NULL) {
+			portp->tx.buf = (char *) stl_memalloc(STL_TXBUFSIZE);
+			if (portp->tx.buf == (char *) NULL)
 				return -ENOMEM;
 			portp->tx.head = portp->tx.buf;
 			portp->tx.tail = portp->tx.buf;
@@ -2165,12 +2179,13 @@ static int __init stl_initports(stlbrd_t *brdp, stlpanel_t *panelp)
  *	each ports data structures.
  */
 	for (i = 0; (i < panelp->nrports); i++) {
-		portp = kzalloc(sizeof(stlport_t), GFP_KERNEL);
-		if (!portp) {
+		portp = (stlport_t *) stl_memalloc(sizeof(stlport_t));
+		if (portp == (stlport_t *) NULL) {
 			printk("STALLION: failed to allocate memory "
 				"(size=%d)\n", sizeof(stlport_t));
 			break;
 		}
+		memset(portp, 0, sizeof(stlport_t));
 
 		portp->magic = STL_PORTMAGIC;
 		portp->portnr = i;
@@ -2301,12 +2316,13 @@ static inline int stl_initeio(stlbrd_t *brdp)
  *	can complete the setup.
  */
 
-	panelp = kzalloc(sizeof(stlpanel_t), GFP_KERNEL);
-	if (!panelp) {
+	panelp = (stlpanel_t *) stl_memalloc(sizeof(stlpanel_t));
+	if (panelp == (stlpanel_t *) NULL) {
 		printk(KERN_WARNING "STALLION: failed to allocate memory "
 			"(size=%d)\n", sizeof(stlpanel_t));
-		return -ENOMEM;
+		return(-ENOMEM);
 	}
+	memset(panelp, 0, sizeof(stlpanel_t));
 
 	panelp->magic = STL_PANELMAGIC;
 	panelp->brdnr = brdp->brdnr;
@@ -2475,12 +2491,13 @@ static inline int stl_initech(stlbrd_t *brdp)
 		status = inb(ioaddr + ECH_PNLSTATUS);
 		if ((status & ECH_PNLIDMASK) != nxtid)
 			break;
-		panelp = kzalloc(sizeof(stlpanel_t), GFP_KERNEL);
-		if (!panelp) {
+		panelp = (stlpanel_t *) stl_memalloc(sizeof(stlpanel_t));
+		if (panelp == (stlpanel_t *) NULL) {
 			printk("STALLION: failed to allocate memory "
 				"(size=%d)\n", sizeof(stlpanel_t));
 			break;
 		}
+		memset(panelp, 0, sizeof(stlpanel_t));
 		panelp->magic = STL_PANELMAGIC;
 		panelp->brdnr = brdp->brdnr;
 		panelp->panelnr = panelnr;
@@ -3058,8 +3075,8 @@ static int __init stl_init(void)
 /*
  *	Allocate a temporary write buffer.
  */
-	stl_tmpwritebuf = kmalloc(STL_TXBUFSIZE, GFP_KERNEL);
-	if (!stl_tmpwritebuf)
+	stl_tmpwritebuf = (char *) stl_memalloc(STL_TXBUFSIZE);
+	if (stl_tmpwritebuf == (char *) NULL)
 		printk("STALLION: failed to allocate memory (size=%d)\n",
 			STL_TXBUFSIZE);
 

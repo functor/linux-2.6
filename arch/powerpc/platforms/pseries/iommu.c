@@ -1,4 +1,6 @@
 /*
+ * arch/ppc64/kernel/pSeries_iommu.c
+ *
  * Copyright (C) 2001 Mike Corrigan & Dave Engebretsen, IBM Corporation
  *
  * Rewrite, cleanup: 
@@ -580,7 +582,7 @@ void iommu_init_early_pSeries(void)
 		return;
 	}
 
-	if (firmware_has_feature(FW_FEATURE_LPAR)) {
+	if (platform_is_lpar()) {
 		if (firmware_has_feature(FW_FEATURE_MULTITCE)) {
 			ppc_md.tce_build = tce_buildmulti_pSeriesLP;
 			ppc_md.tce_free	 = tce_freemulti_pSeriesLP;

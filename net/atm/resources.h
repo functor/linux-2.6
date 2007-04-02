@@ -8,11 +8,10 @@
 
 #include <linux/config.h>
 #include <linux/atmdev.h>
-#include <linux/mutex.h>
 
 
 extern struct list_head atm_devs;
-extern struct mutex atm_dev_mutex;
+extern struct semaphore atm_dev_mutex;
 
 int atm_dev_ioctl(unsigned int cmd, void __user *arg);
 

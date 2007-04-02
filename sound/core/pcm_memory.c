@@ -100,10 +100,8 @@ static void snd_pcm_lib_preallocate_dma_free(struct snd_pcm_substream *substream
 int snd_pcm_lib_preallocate_free(struct snd_pcm_substream *substream)
 {
 	snd_pcm_lib_preallocate_dma_free(substream);
-#ifdef CONFIG_SND_VERBOSE_PROCFS
 	snd_info_unregister(substream->proc_prealloc_entry);
 	substream->proc_prealloc_entry = NULL;
-#endif
 	return 0;
 }
 
@@ -126,7 +124,7 @@ int snd_pcm_lib_preallocate_free_for_all(struct snd_pcm *pcm)
 	return 0;
 }
 
-#ifdef CONFIG_SND_VERBOSE_PROCFS
+#ifdef CONFIG_PROC_FS
 /*
  * read callback for prealloc proc file
  *
@@ -205,9 +203,9 @@ static inline void preallocate_info_init(struct snd_pcm_substream *substream)
 	substream->proc_prealloc_entry = entry;
 }
 
-#else /* !CONFIG_SND_VERBOSE_PROCFS */
+#else /* !CONFIG_PROC_FS */
 #define preallocate_info_init(s)
-#endif /* CONFIG_SND_VERBOSE_PROCFS */
+#endif
 
 /*
  * pre-allocate the buffer and create a proc file for the substream

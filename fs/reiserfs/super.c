@@ -521,8 +521,7 @@ static int init_inodecache(void)
 	reiserfs_inode_cachep = kmem_cache_create("reiser_inode_cache",
 						  sizeof(struct
 							 reiserfs_inode_info),
-						  0, (SLAB_RECLAIM_ACCOUNT|
-							SLAB_MEM_SPREAD),
+						  0, SLAB_RECLAIM_ACCOUNT,
 						  init_once, NULL);
 	if (reiserfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -685,14 +684,14 @@ static const arg_desc_t logging_mode[] = {
 	 (1 << REISERFS_DATA_ORDERED | 1 << REISERFS_DATA_WRITEBACK)},
 	{"writeback", 1 << REISERFS_DATA_WRITEBACK,
 	 (1 << REISERFS_DATA_ORDERED | 1 << REISERFS_DATA_LOG)},
-	{.value = NULL}
+	{NULL, 0}
 };
 
 /* possible values for -o barrier= */
 static const arg_desc_t barrier_mode[] = {
 	{"none", 1 << REISERFS_BARRIER_NONE, 1 << REISERFS_BARRIER_FLUSH},
 	{"flush", 1 << REISERFS_BARRIER_FLUSH, 1 << REISERFS_BARRIER_NONE},
-	{.value = NULL}
+	{NULL, 0}
 };
 
 /* possible values for "-o block-allocator=" and bits which are to be set in
@@ -893,7 +892,7 @@ static int reiserfs_parse_options(struct super_block *s, char *options,	/* strin
 		{"acl",.setmask = 1 << REISERFS_UNSUPPORTED_OPT},
 		{"noacl",.clrmask = 1 << REISERFS_UNSUPPORTED_OPT},
 #endif
-		{.option_name = "nolog"},
+		{"nolog",},	/* This is unsupported */
 		{"replayonly",.setmask = 1 << REPLAYONLY},
 		{"block-allocator",.arg_required = 'a',.values = balloc},
 		{"data",.arg_required = 'd',.values = logging_mode},
@@ -911,7 +910,7 @@ static int reiserfs_parse_options(struct super_block *s, char *options,	/* strin
 		{"grpjquota",.arg_required =
 		 'g' | (1 << REISERFS_OPT_ALLOWEMPTY),.values = NULL},
 		{"jqfmt",.arg_required = 'f',.values = NULL},
-		{.option_name = NULL}
+		{NULL,}
 	};
 
 	*blocks = 0;

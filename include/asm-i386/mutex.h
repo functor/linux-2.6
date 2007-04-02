@@ -9,8 +9,6 @@
 #ifndef _ASM_MUTEX_H
 #define _ASM_MUTEX_H
 
-#include "asm/alternative.h"
-
 /**
  *  __mutex_fastpath_lock - try to take the lock by moving the count
  *                          from 1 to a 0 value
@@ -29,7 +27,7 @@ do {									\
 	typecheck_fn(fastcall void (*)(atomic_t *), fail_fn);		\
 									\
 	__asm__ __volatile__(						\
-		LOCK_PREFIX "   decl (%%eax)	\n"			\
+		LOCK	"   decl (%%eax)	\n"			\
 			"   js 2f		\n"			\
 			"1:			\n"			\
 									\
@@ -85,7 +83,7 @@ do {									\
 	typecheck_fn(fastcall void (*)(atomic_t *), fail_fn);		\
 									\
 	__asm__ __volatile__(						\
-		LOCK_PREFIX "   incl (%%eax)	\n"			\
+		LOCK	"   incl (%%eax)	\n"			\
 			"   jle 2f		\n"			\
 			"1:			\n"			\
 									\

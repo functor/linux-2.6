@@ -38,7 +38,6 @@
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
-#include <linux/scatterlist.h>
 
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_cmnd.h>
@@ -95,13 +94,9 @@ struct srp_request {
 	struct scsi_cmnd       *scmnd;
 	struct srp_iu	       *cmd;
 	struct srp_iu	       *tsk_mgmt;
-	/*
-	 * Fake scatterlist used when scmnd->use_sg==0.  Can be killed
-	 * when the SCSI midlayer no longer generates non-SG commands.
-	 */
-	struct scatterlist	fake_sg;
+	DECLARE_PCI_UNMAP_ADDR(direct_mapping)
 	struct completion	done;
-	short			index;
+	short			next;
 	u8			cmd_done;
 	u8			tsk_status;
 };
@@ -133,7 +128,7 @@ struct srp_target_port {
 	unsigned		tx_tail;
 	struct srp_iu	       *tx_ring[SRP_SQ_SIZE + 1];
 
-	struct list_head	free_reqs;
+	int			req_head;
 	struct list_head	req_queue;
 	struct srp_request	req_ring[SRP_SQ_SIZE];
 

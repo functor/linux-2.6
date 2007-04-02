@@ -2651,8 +2651,6 @@ static int pfkey_send_notify(struct xfrm_state *x, struct km_event *c)
 		return key_notify_sa(x, c);
 	case XFRM_MSG_FLUSHSA:
 		return key_notify_sa_flush(c);
-	case XFRM_MSG_NEWAE: /* not yet supported */
-		break;
 	default:
 		printk("pfkey: Unknown SA event %d\n", c->event);
 		break;
@@ -3080,9 +3078,9 @@ static int pfkey_sendmsg(struct kiocb *kiocb,
 	if (!hdr)
 		goto out;
 
-	mutex_lock(&xfrm_cfg_mutex);
+	down(&xfrm_cfg_sem);
 	err = pfkey_process(sk, skb, hdr);
-	mutex_unlock(&xfrm_cfg_mutex);
+	up(&xfrm_cfg_sem);
 
 out:
 	if (err && hdr && pfkey_error(hdr, err, sk) == 0)

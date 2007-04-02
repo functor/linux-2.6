@@ -13,7 +13,9 @@
 #define SMP_CACHE_BYTES L1_CACHE_BYTES
 #endif
 
-#ifndef __read_mostly
+#if defined(CONFIG_X86) || defined(CONFIG_SPARC64) || defined(CONFIG_IA64) || defined(CONFIG_PARISC)
+#define __read_mostly __attribute__((__section__(".data.read_mostly")))
+#else
 #define __read_mostly
 #endif
 

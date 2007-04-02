@@ -46,7 +46,6 @@
 #include <linux/rwsem.h>
 #include <linux/stddef.h>
 #include <linux/device.h>
-#include <linux/mutex.h>
 #include <net/slhc_vj.h>
 #include <asm/atomic.h>
 
@@ -199,11 +198,11 @@ static unsigned int cardmap_find_first_free(struct cardmap *map);
 static void cardmap_destroy(struct cardmap **map);
 
 /*
- * all_ppp_mutex protects the all_ppp_units mapping.
+ * all_ppp_sem protects the all_ppp_units mapping.
  * It also ensures that finding a ppp unit in the all_ppp_units map
  * and updating its file.refcnt field is atomic.
  */
-static DEFINE_MUTEX(all_ppp_mutex);
+static DECLARE_MUTEX(all_ppp_sem);
 static struct cardmap *all_ppp_units;
 static atomic_t ppp_unit_count = ATOMIC_INIT(0);
 
@@ -805,7 +804,7 @@ static int ppp_unattached_ioctl(struct ppp_file *pf, struct file *file,
 		/* Attach to an existing ppp unit */
 		if (get_user(unit, p))
 			break;
-		mutex_lock(&all_ppp_mutex);
+		down(&all_ppp_sem);
 		err = -ENXIO;
 		ppp = ppp_find_unit(unit);
 		if (ppp != 0) {
@@ -813,7 +812,7 @@ static int ppp_unattached_ioctl(struct ppp_file *pf, struct file *file,
 			file->private_data = &ppp->file;
 			err = 0;
 		}
-		mutex_unlock(&all_ppp_mutex);
+		up(&all_ppp_sem);
 		break;
 
 	case PPPIOCATTCHAN:
@@ -1692,8 +1691,8 @@ ppp_receive_nonmp_frame(struct ppp *ppp, struct sk_buff *skb)
 		    || ppp->npmode[npi] != NPMODE_PASS) {
 			kfree_skb(skb);
 		} else {
-			/* chop off protocol */
-			skb_pull_rcsum(skb, 2);
+			skb_pull(skb, 2);	/* chop off protocol */
+			skb_postpull_rcsum(skb, skb->data - 2, 2);
 			skb->dev = ppp->dev;
 			skb->protocol = htons(npindex_to_ethertype[npi]);
 			skb->mac.raw = skb->data;
@@ -2447,7 +2446,7 @@ ppp_create_interface(int unit, int *retp)
 	dev->do_ioctl = ppp_net_ioctl;
 
 	ret = -EEXIST;
-	mutex_lock(&all_ppp_mutex);
+	down(&all_ppp_sem);
 	if (unit < 0)
 		unit = cardmap_find_first_free(all_ppp_units);
 	else if (cardmap_get(all_ppp_units, unit) != NULL)
@@ -2466,12 +2465,12 @@ ppp_create_interface(int unit, int *retp)
 
 	atomic_inc(&ppp_unit_count);
 	cardmap_set(&all_ppp_units, unit, ppp);
-	mutex_unlock(&all_ppp_mutex);
+	up(&all_ppp_sem);
 	*retp = 0;
 	return ppp;
 
 out2:
-	mutex_unlock(&all_ppp_mutex);
+	up(&all_ppp_sem);
 	free_netdev(dev);
 out1:
 	kfree(ppp);
@@ -2501,7 +2500,7 @@ static void ppp_shutdown_interface(struct ppp *ppp)
 {
 	struct net_device *dev;
 
-	mutex_lock(&all_ppp_mutex);
+	down(&all_ppp_sem);
 	ppp_lock(ppp);
 	dev = ppp->dev;
 	ppp->dev = NULL;
@@ -2515,7 +2514,7 @@ static void ppp_shutdown_interface(struct ppp *ppp)
 	ppp->file.dead = 1;
 	ppp->owner = NULL;
 	wake_up_interruptible(&ppp->file.rwait);
-	mutex_unlock(&all_ppp_mutex);
+	up(&all_ppp_sem);
 }
 
 /*
@@ -2557,7 +2556,7 @@ static void ppp_destroy_interface(struct ppp *ppp)
 
 /*
  * Locate an existing ppp unit.
- * The caller should have locked the all_ppp_mutex.
+ * The caller should have locked the all_ppp_sem.
  */
 static struct ppp *
 ppp_find_unit(int unit)
@@ -2602,7 +2601,7 @@ ppp_connect_channel(struct channel *pch, int unit)
 	int ret = -ENXIO;
 	int hdrlen;
 
-	mutex_lock(&all_ppp_mutex);
+	down(&all_ppp_sem);
 	ppp = ppp_find_unit(unit);
 	if (ppp == 0)
 		goto out;
@@ -2627,7 +2626,7 @@ ppp_connect_channel(struct channel *pch, int unit)
  outl:
 	write_unlock_bh(&pch->upl);
  out:
-	mutex_unlock(&all_ppp_mutex);
+	up(&all_ppp_sem);
 	return ret;
 }
 

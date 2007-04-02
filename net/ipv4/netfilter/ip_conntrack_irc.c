@@ -242,9 +242,9 @@ static int help(struct sk_buff **pskb,
 static struct ip_conntrack_helper irc_helpers[MAX_PORTS];
 static char irc_names[MAX_PORTS][sizeof("irc-65535")];
 
-static void ip_conntrack_irc_fini(void);
+static void fini(void);
 
-static int __init ip_conntrack_irc_init(void)
+static int __init init(void)
 {
 	int i, ret;
 	struct ip_conntrack_helper *hlpr;
@@ -288,7 +288,7 @@ static int __init ip_conntrack_irc_init(void)
 		if (ret) {
 			printk("ip_conntrack_irc: ERROR registering port %d\n",
 				ports[i]);
-			ip_conntrack_irc_fini();
+			fini();
 			return -EBUSY;
 		}
 	}
@@ -297,7 +297,7 @@ static int __init ip_conntrack_irc_init(void)
 
 /* This function is intentionally _NOT_ defined as __exit, because 
  * it is needed by the init function */
-static void ip_conntrack_irc_fini(void)
+static void fini(void)
 {
 	int i;
 	for (i = 0; i < ports_c; i++) {
@@ -308,5 +308,5 @@ static void ip_conntrack_irc_fini(void)
 	kfree(irc_buffer);
 }
 
-module_init(ip_conntrack_irc_init);
-module_exit(ip_conntrack_irc_fini);
+module_init(init);
+module_exit(fini);

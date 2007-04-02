@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/kernel/ipic.h
+ *
  * IPIC private definitions and structure.
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

@@ -674,12 +674,11 @@ static void dz_reset(struct dz_port *dport)
 }
 
 #ifdef CONFIG_SERIAL_DZ_CONSOLE
-static void dz_console_putchar(struct uart_port *port, int ch)
+static void dz_console_put_char(struct dz_port *dport, unsigned char ch)
 {
-	struct dz_port *dport = (struct dz_port *)uport;
 	unsigned long flags;
 	int loops = 2500;
-	unsigned short tmp = (unsigned char)ch;
+	unsigned short tmp = ch;
 	/* this code sends stuff out to serial device - spinning its
 	   wheels and waiting. */
 
@@ -695,7 +694,6 @@ static void dz_console_putchar(struct uart_port *port, int ch)
 
 	spin_unlock_irqrestore(&dport->port.lock, flags);
 }
-
 /*
  * -------------------------------------------------------------------
  * dz_console_print ()
@@ -712,7 +710,11 @@ static void dz_console_print(struct console *cons,
 #ifdef DEBUG_DZ
 	prom_printf((char *) str);
 #endif
-	uart_console_write(&dport->port, str, count, dz_console_putchar);
+	while (count--) {
+		if (*str == '\n')
+			dz_console_put_char(dport, '\r');
+		dz_console_put_char(dport, *str++);
+	}
 }
 
 static int __init dz_console_setup(struct console *co, char *options)

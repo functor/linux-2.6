@@ -19,9 +19,8 @@ MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
 MODULE_DESCRIPTION("iptables DSCP matching module");
 MODULE_LICENSE("GPL");
 
-static int match(const struct sk_buff *skb,
-		 const struct net_device *in, const struct net_device *out,
-		 const struct xt_match *match, const void *matchinfo,
+static int match(const struct sk_buff *skb, const struct net_device *in,
+		 const struct net_device *out, const void *matchinfo,
 		 int offset, unsigned int protoff, int *hotdrop)
 {
 	const struct ipt_dscp_info *info = matchinfo;
@@ -32,23 +31,33 @@ static int match(const struct sk_buff *skb,
 	return ((iph->tos&IPT_DSCP_MASK) == sh_dscp) ^ info->invert;
 }
 
+static int checkentry(const char *tablename, const void *ip,
+		      void *matchinfo, unsigned int matchsize,
+		      unsigned int hook_mask)
+{
+	if (matchsize != IPT_ALIGN(sizeof(struct ipt_dscp_info)))
+		return 0;
+
+	return 1;
+}
+
 static struct ipt_match dscp_match = {
 	.name		= "dscp",
-	.match		= match,
-	.matchsize	= sizeof(struct ipt_dscp_info),
+	.match		= &match,
+	.checkentry	= &checkentry,
 	.me		= THIS_MODULE,
 };
 
-static int __init ipt_dscp_init(void)
+static int __init init(void)
 {
 	return ipt_register_match(&dscp_match);
 }
 
-static void __exit ipt_dscp_fini(void)
+static void __exit fini(void)
 {
 	ipt_unregister_match(&dscp_match);
 
 }
 
-module_init(ipt_dscp_init);
-module_exit(ipt_dscp_fini);
+module_init(init);
+module_exit(fini);

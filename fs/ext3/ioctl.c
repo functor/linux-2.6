@@ -51,7 +51,6 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		if (!S_ISDIR(inode->i_mode))
 			flags &= ~EXT3_DIRSYNC_FL;
 
-		mutex_lock(&inode->i_mutex);
 		oldflags = ei->i_flags;
 
 		/* The JOURNAL_DATA flag is modifiable only by root */
@@ -66,10 +65,8 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		if ((oldflags & EXT3_IMMUTABLE_FL) ||
 			((flags ^ oldflags) & (EXT3_APPEND_FL |
 			EXT3_IMMUTABLE_FL | EXT3_IUNLINK_FL))) {
-			if (!capable(CAP_LINUX_IMMUTABLE)) {
-				mutex_unlock(&inode->i_mutex);
+			if (!capable(CAP_LINUX_IMMUTABLE))
 				return -EPERM;
-			}
 		}
 
 		/*
@@ -77,18 +74,14 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		 * the relevant capability.
 		 */
 		if ((jflag ^ oldflags) & (EXT3_JOURNAL_DATA_FL)) {
-			if (!capable(CAP_SYS_RESOURCE)) {
-				mutex_unlock(&inode->i_mutex);
+			if (!capable(CAP_SYS_RESOURCE))
 				return -EPERM;
-			}
 		}
 
 
 		handle = ext3_journal_start(inode, 1);
-		if (IS_ERR(handle)) {
-			mutex_unlock(&inode->i_mutex);
+		if (IS_ERR(handle))
 			return PTR_ERR(handle);
-		}
 		if (IS_SYNC(inode))
 			handle->h_sync = 1;
 		err = ext3_reserve_inode_write(handle, inode, &iloc);
@@ -105,14 +98,11 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		err = ext3_mark_iloc_dirty(handle, inode, &iloc);
 flags_err:
 		ext3_journal_stop(handle);
-		if (err) {
-			mutex_unlock(&inode->i_mutex);
+		if (err)
 			return err;
-		}
 
 		if ((jflag ^ oldflags) & (EXT3_JOURNAL_DATA_FL))
 			err = ext3_change_inode_journal_flag(inode, jflag);
-		mutex_unlock(&inode->i_mutex);
 		return err;
 	}
 	case EXT3_IOC_GETVERSION:
@@ -199,7 +189,7 @@ flags_err:
 		 * need to allocate reservation structure for this inode
 		 * before set the window size
 		 */
-		mutex_lock(&ei->truncate_mutex);
+		down(&ei->truncate_sem);
 		if (!ei->i_block_alloc_info)
 			ext3_init_block_alloc_info(inode);
 
@@ -207,7 +197,7 @@ flags_err:
 			struct ext3_reserve_window_node *rsv = &ei->i_block_alloc_info->rsv_window_node;
 			rsv->rsv_goal_size = rsv_window_size;
 		}
-		mutex_unlock(&ei->truncate_mutex);
+		up(&ei->truncate_sem);
 		return 0;
 	}
 	case EXT3_IOC_GROUP_EXTEND: {

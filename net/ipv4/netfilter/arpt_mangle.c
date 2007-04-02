@@ -8,10 +8,9 @@ MODULE_AUTHOR("Bart De Schuymer <bdschuym@pandora.be>");
 MODULE_DESCRIPTION("arptables arp payload mangle target");
 
 static unsigned int
-target(struct sk_buff **pskb,
-       const struct net_device *in, const struct net_device *out,
-       unsigned int hooknum, const struct xt_target *target,
-       const void *targinfo, void *userinfo)
+target(struct sk_buff **pskb, const struct net_device *in,
+   const struct net_device *out, unsigned int hooknum, const void *targinfo,
+   void *userinfo)
 {
 	const struct arpt_mangle *mangle = targinfo;
 	struct arphdr *arp;
@@ -66,8 +65,8 @@ target(struct sk_buff **pskb,
 }
 
 static int
-checkentry(const char *tablename, const void *e, const struct xt_target *target,
-           void *targinfo, unsigned int targinfosize, unsigned int hook_mask)
+checkentry(const char *tablename, const void *e, void *targinfo,
+   unsigned int targinfosize, unsigned int hook_mask)
 {
 	const struct arpt_mangle *mangle = targinfo;
 
@@ -81,15 +80,15 @@ checkentry(const char *tablename, const void *e, const struct xt_target *target,
 	return 1;
 }
 
-static struct arpt_target arpt_mangle_reg = {
-	.name		= "mangle",
-	.target		= target,
-	.targetsize	= sizeof(struct arpt_mangle),
-	.checkentry	= checkentry,
-	.me		= THIS_MODULE,
+static struct arpt_target arpt_mangle_reg
+= {
+        .name		= "mangle",
+        .target		= target,
+        .checkentry	= checkentry,
+        .me		= THIS_MODULE,
 };
 
-static int __init arpt_mangle_init(void)
+static int __init init(void)
 {
 	if (arpt_register_target(&arpt_mangle_reg))
 		return -EINVAL;
@@ -97,10 +96,10 @@ static int __init arpt_mangle_init(void)
 	return 0;
 }
 
-static void __exit arpt_mangle_fini(void)
+static void __exit fini(void)
 {
 	arpt_unregister_target(&arpt_mangle_reg);
 }
 
-module_init(arpt_mangle_init);
-module_exit(arpt_mangle_fini);
+module_init(init);
+module_exit(fini);

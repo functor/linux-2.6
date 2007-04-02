@@ -21,6 +21,13 @@ static mutex_t	uuid_monitor;
 static int	uuid_table_size;
 static uuid_t	*uuid_table;
 
+void
+uuid_init(void)
+{
+	mutex_init(&uuid_monitor);
+}
+
+
 /* IRIX interpretation of an uuid_t */
 typedef struct {
 	__be32	uu_timelow;
@@ -43,7 +50,7 @@ uuid_getnodeuniq(uuid_t *uuid, int fsid [2])
 
 	fsid[0] = (be16_to_cpu(uup->uu_clockseq) << 16) |
 		   be16_to_cpu(uup->uu_timemid);
-	fsid[1] = be32_to_cpu(uup->uu_timelow);
+	fsid[1] = be16_to_cpu(uup->uu_timelow);
 }
 
 void
@@ -131,10 +138,4 @@ uuid_table_remove(uuid_t *uuid)
 	}
 	ASSERT(i < uuid_table_size);
 	mutex_unlock(&uuid_monitor);
-}
-
-void
-uuid_init(void)
-{
-	mutex_init(&uuid_monitor);
 }

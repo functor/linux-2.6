@@ -33,7 +33,7 @@ struct address_space_operations ramfs_aops = {
 	.commit_write		= simple_commit_write
 };
 
-const struct file_operations ramfs_file_operations = {
+struct file_operations ramfs_file_operations = {
 	.mmap			= ramfs_nommu_mmap,
 	.get_unmapped_area	= ramfs_nommu_get_unmapped_area,
 	.read			= generic_file_read,
@@ -87,7 +87,8 @@ static int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 	xpages = 1UL << order;
 	npages = (newsize + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
-	split_page(pages, order);
+	for (loop = 0; loop < npages; loop++)
+		set_page_count(pages + loop, 1);
 
 	/* trim off any pages we don't actually require */
 	for (loop = npages; loop < xpages; loop++)

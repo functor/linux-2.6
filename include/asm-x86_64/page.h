@@ -123,6 +123,8 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 #define __boot_va(x)		__va(x)
 #define __boot_pa(x)		__pa(x)
 #ifdef CONFIG_FLATMEM
+#define pfn_to_page(pfn)	(mem_map + (pfn))
+#define page_to_pfn(page)	((unsigned long)((page) - mem_map))
 #define pfn_valid(pfn)		((pfn) < end_pfn)
 #endif
 
@@ -136,13 +138,8 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 #define __HAVE_ARCH_GATE_AREA 1	
 
-#ifndef __ASSEMBLY__
-extern int devmem_is_allowed(unsigned long pagenr);
-#endif
-
 #endif /* __KERNEL__ */
 
-#include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
 
 #endif /* _X86_64_PAGE_H */

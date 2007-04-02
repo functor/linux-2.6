@@ -118,8 +118,7 @@ static inline int llc_fixup_skb(struct sk_buff *skb)
 		u16 pdulen = eth_hdr(skb)->h_proto,
 		    data_size = ntohs(pdulen) - llc_len;
 
-		if (unlikely(pskb_trim_rcsum(skb, data_size)))
-			return 0;
+		skb_trim(skb, data_size);
 	}
 	return 1;
 }

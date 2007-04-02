@@ -572,10 +572,9 @@ static void source_sink_complete (struct usb_ep *ep, struct usb_request *req)
 	switch (status) {
 
 	case 0: 			/* normal completion? */
-		if (ep == dev->out_ep) {
+		if (ep == dev->out_ep)
 			check_read_data (dev, ep, req);
-			memset (req->buf, 0x55, req->length);
-		} else
+		else
 			reinit_write_data (dev, ep, req);
 		break;
 
@@ -627,8 +626,6 @@ source_sink_start_ep (struct usb_ep *ep, gfp_t gfp_flags)
 
 	if (strcmp (ep->name, EP_IN_NAME) == 0)
 		reinit_write_data (ep->driver_data, ep, req);
-	else
-		memset (req->buf, 0x55, req->length);
 
 	status = usb_ep_queue (ep, req, gfp_flags);
 	if (status) {
@@ -1122,7 +1119,7 @@ zero_autoresume (unsigned long _dev)
 
 /*-------------------------------------------------------------------------*/
 
-static void __exit
+static void
 zero_unbind (struct usb_gadget *gadget)
 {
 	struct zero_dev		*dev = get_gadget_data (gadget);
@@ -1139,7 +1136,7 @@ zero_unbind (struct usb_gadget *gadget)
 	set_gadget_data (gadget, NULL);
 }
 
-static int __init
+static int
 zero_bind (struct usb_gadget *gadget)
 {
 	struct zero_dev		*dev;
@@ -1191,9 +1188,10 @@ autoconf_fail:
 
 
 	/* ok, we made sense of the hardware ... */
-	dev = kzalloc(sizeof(*dev), SLAB_KERNEL);
+	dev = kmalloc (sizeof *dev, SLAB_KERNEL);
 	if (!dev)
 		return -ENOMEM;
+	memset (dev, 0, sizeof *dev);
 	spin_lock_init (&dev->lock);
 	dev->gadget = gadget;
 	set_gadget_data (gadget, dev);
@@ -1219,6 +1217,12 @@ autoconf_fail:
 	hs_source_desc.bEndpointAddress = fs_source_desc.bEndpointAddress;
 	hs_sink_desc.bEndpointAddress = fs_sink_desc.bEndpointAddress;
 #endif
+
+	if (gadget->is_otg) {
+		otg_descriptor.bmAttributes |= USB_OTG_HNP,
+		source_sink_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+		loopback_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+	}
 
 	if (gadget->is_otg) {
 		otg_descriptor.bmAttributes |= USB_OTG_HNP,
@@ -1290,7 +1294,7 @@ static struct usb_gadget_driver zero_driver = {
 #endif
 	.function	= (char *) longname,
 	.bind		= zero_bind,
-	.unbind		= __exit_p(zero_unbind),
+	.unbind		= zero_unbind,
 
 	.setup		= zero_setup,
 	.disconnect	= zero_disconnect,

@@ -20,8 +20,7 @@
  *
  */
 
-#include <linux/mutex.h>
-
+#include <asm/semaphore.h>
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -116,7 +115,7 @@ struct ttusb_dec {
 	unsigned int			out_pipe;
 	unsigned int			irq_pipe;
 	enum ttusb_dec_interface	interface;
-	struct mutex			usb_mutex;
+	struct semaphore		usb_sem;
 
 	void			*irq_buffer;
 	struct urb		*irq_urb;
@@ -125,7 +124,7 @@ struct ttusb_dec {
 	dma_addr_t		iso_dma_handle;
 	struct urb		*iso_urb[ISO_BUF_COUNT];
 	int			iso_stream_count;
-	struct mutex		iso_mutex;
+	struct semaphore	iso_sem;
 
 	u8				packet[MAX_PVA_LENGTH + 4];
 	enum ttusb_dec_packet_type	packet_type;
@@ -274,9 +273,9 @@ static int ttusb_dec_send_command(struct ttusb_dec *dec, const u8 command,
 	if (!b)
 		return -ENOMEM;
 
-	if ((result = mutex_lock_interruptible(&dec->usb_mutex))) {
+	if ((result = down_interruptible(&dec->usb_sem))) {
 		kfree(b);
-		printk("%s: Failed to lock usb mutex.\n", __FUNCTION__);
+		printk("%s: Failed to down usb semaphore.\n", __FUNCTION__);
 		return result;
 	}
 
@@ -301,7 +300,7 @@ static int ttusb_dec_send_command(struct ttusb_dec *dec, const u8 command,
 	if (result) {
 		printk("%s: command bulk message failed: error %d\n",
 		       __FUNCTION__, result);
-		mutex_unlock(&dec->usb_mutex);
+		up(&dec->usb_sem);
 		kfree(b);
 		return result;
 	}
@@ -312,7 +311,7 @@ static int ttusb_dec_send_command(struct ttusb_dec *dec, const u8 command,
 	if (result) {
 		printk("%s: result bulk message failed: error %d\n",
 		       __FUNCTION__, result);
-		mutex_unlock(&dec->usb_mutex);
+		up(&dec->usb_sem);
 		kfree(b);
 		return result;
 	} else {
@@ -328,7 +327,7 @@ static int ttusb_dec_send_command(struct ttusb_dec *dec, const u8 command,
 		if (cmd_result && b[3] > 0)
 			memcpy(cmd_result, &b[4], b[3]);
 
-		mutex_unlock(&dec->usb_mutex);
+		up(&dec->usb_sem);
 
 		kfree(b);
 		return 0;
@@ -836,7 +835,7 @@ static void ttusb_dec_stop_iso_xfer(struct ttusb_dec *dec)
 
 	dprintk("%s\n", __FUNCTION__);
 
-	if (mutex_lock_interruptible(&dec->iso_mutex))
+	if (down_interruptible(&dec->iso_sem))
 		return;
 
 	dec->iso_stream_count--;
@@ -846,7 +845,7 @@ static void ttusb_dec_stop_iso_xfer(struct ttusb_dec *dec)
 			usb_kill_urb(dec->iso_urb[i]);
 	}
 
-	mutex_unlock(&dec->iso_mutex);
+	up(&dec->iso_sem);
 }
 
 /* Setting the interface of the DEC tends to take down the USB communications
@@ -891,7 +890,7 @@ static int ttusb_dec_start_iso_xfer(struct ttusb_dec *dec)
 
 	dprintk("%s\n", __FUNCTION__);
 
-	if (mutex_lock_interruptible(&dec->iso_mutex))
+	if (down_interruptible(&dec->iso_sem))
 		return -EAGAIN;
 
 	if (!dec->iso_stream_count) {
@@ -912,7 +911,7 @@ static int ttusb_dec_start_iso_xfer(struct ttusb_dec *dec)
 					i--;
 				}
 
-				mutex_unlock(&dec->iso_mutex);
+				up(&dec->iso_sem);
 				return result;
 			}
 		}
@@ -920,7 +919,7 @@ static int ttusb_dec_start_iso_xfer(struct ttusb_dec *dec)
 
 	dec->iso_stream_count++;
 
-	mutex_unlock(&dec->iso_mutex);
+	up(&dec->iso_sem);
 
 	return 0;
 }
@@ -1230,8 +1229,8 @@ static int ttusb_dec_init_usb(struct ttusb_dec *dec)
 {
 	dprintk("%s\n", __FUNCTION__);
 
-	mutex_init(&dec->usb_mutex);
-	mutex_init(&dec->iso_mutex);
+	sema_init(&dec->usb_sem, 1);
+	sema_init(&dec->iso_sem, 1);
 
 	dec->command_pipe = usb_sndbulkpipe(dec->udev, COMMAND_PIPE);
 	dec->result_pipe = usb_rcvbulkpipe(dec->udev, RESULT_PIPE);

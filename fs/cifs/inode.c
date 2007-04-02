@@ -163,9 +163,9 @@ int cifs_get_inode_info_unix(struct inode **pinode,
 
 		if (num_of_bytes < end_of_file)
 			cFYI(1, ("allocation size less than end of file"));
-		cFYI(1, ("Size %ld and blocks %llu",
-			(unsigned long) inode->i_size,
-			(unsigned long long)inode->i_blocks));
+		cFYI(1,
+		     ("Size %ld and blocks %ld",
+		      (unsigned long) inode->i_size, inode->i_blocks));
 		if (S_ISREG(inode->i_mode)) {
 			cFYI(1, ("File inode"));
 			inode->i_op = &cifs_file_inode_ops;
@@ -577,9 +577,9 @@ int cifs_unlink(struct inode *inode, struct dentry *direntry)
 
 	/* Unlink can be called from rename so we can not grab the sem here
 	   since we deadlock otherwise */
-/*	mutex_lock(&direntry->d_sb->s_vfs_rename_mutex);*/
+/*	down(&direntry->d_sb->s_vfs_rename_sem);*/
 	full_path = build_path_from_dentry(direntry);
-/*	mutex_unlock(&direntry->d_sb->s_vfs_rename_mutex);*/
+/*	up(&direntry->d_sb->s_vfs_rename_sem);*/
 	if (full_path == NULL) {
 		FreeXid(xid);
 		return -ENOMEM;
@@ -612,8 +612,9 @@ int cifs_unlink(struct inode *inode, struct dentry *direntry)
 		}
 	} else if (rc == -EACCES) {
 		/* try only if r/o attribute set in local lookup data? */
-		pinfo_buf = kzalloc(sizeof(FILE_BASIC_INFO), GFP_KERNEL);
+		pinfo_buf = kmalloc(sizeof(FILE_BASIC_INFO), GFP_KERNEL);
 		if (pinfo_buf) {
+			memset(pinfo_buf, 0, sizeof(FILE_BASIC_INFO));
 			/* ATTRS set to normal clears r/o bit */
 			pinfo_buf->Attributes = cpu_to_le32(ATTR_NORMAL);
 			if (!(pTcon->ses->flags & CIFS_SES_NT4))
@@ -722,7 +723,9 @@ int cifs_mkdir(struct inode *inode, struct dentry *direntry, int mode)
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 
+	down(&inode->i_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
+	up(&inode->i_sb->s_vfs_rename_sem);
 	if (full_path == NULL) {
 		FreeXid(xid);
 		return -ENOMEM;
@@ -805,7 +808,9 @@ int cifs_rmdir(struct inode *inode, struct dentry *direntry)
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 
+	down(&inode->i_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
+	up(&inode->i_sb->s_vfs_rename_sem);
 	if (full_path == NULL) {
 		FreeXid(xid);
 		return -ENOMEM;
@@ -878,10 +883,14 @@ int cifs_rename(struct inode *source_inode, struct dentry *source_direntry,
 			kmalloc(2 * sizeof(FILE_UNIX_BASIC_INFO), GFP_KERNEL);
 		if (info_buf_source != NULL) {
 			info_buf_target = info_buf_source + 1;
-			rc = CIFSSMBUnixQPathInfo(xid, pTcon, fromName,
-				info_buf_source, cifs_sb_source->local_nls, 
-				cifs_sb_source->mnt_cifs_flags &
-					CIFS_MOUNT_MAP_SPECIAL_CHR);
+			if (pTcon->ses->capabilities & CAP_UNIX)
+				rc = CIFSSMBUnixQPathInfo(xid, pTcon, fromName,
+					info_buf_source, 
+					cifs_sb_source->local_nls,
+					cifs_sb_source->mnt_cifs_flags &
+						CIFS_MOUNT_MAP_SPECIAL_CHR);
+			/* else rc is still EEXIST so will fall through to
+			   unlink the target and retry rename */
 			if (rc == 0) {
 				rc = CIFSSMBUnixQPathInfo(xid, pTcon, toName,
 						info_buf_target,
@@ -930,7 +939,7 @@ int cifs_rename(struct inode *source_inode, struct dentry *source_direntry,
 				 cifs_sb_source->mnt_cifs_flags & 
 					CIFS_MOUNT_MAP_SPECIAL_CHR);
 		if (rc==0) {
-			CIFSSMBRenameOpenFile(xid, pTcon, netfid, toName,
+			rc = CIFSSMBRenameOpenFile(xid, pTcon, netfid, toName,
 					      cifs_sb_source->local_nls, 
 					      cifs_sb_source->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
@@ -1137,7 +1146,9 @@ int cifs_setattr(struct dentry *direntry, struct iattr *attrs)
 			rc = 0;
 	}
 		
+	down(&direntry->d_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
+	up(&direntry->d_sb->s_vfs_rename_sem);
 	if (full_path == NULL) {
 		FreeXid(xid);
 		return -ENOMEM;
@@ -1165,7 +1176,7 @@ int cifs_setattr(struct dentry *direntry, struct iattr *attrs)
 						nfid, npid, FALSE);
 			atomic_dec(&open_file->wrtPending);
 			cFYI(1,("SetFSize for attrs rc = %d", rc));
-			if((rc == -EINVAL) || (rc == -EOPNOTSUPP)) {
+			if(rc == -EINVAL) {
 				int bytes_written;
 				rc = CIFSSMBWrite(xid, pTcon,
 						  nfid, 0, attrs->ia_size,
@@ -1187,7 +1198,7 @@ int cifs_setattr(struct dentry *direntry, struct iattr *attrs)
 					   cifs_sb->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
 			cFYI(1, ("SetEOF by path (setattrs) rc = %d", rc));
-			if((rc == -EINVAL) || (rc == -EOPNOTSUPP)) {
+			if(rc == -EINVAL) {
 				__u16 netfid;
 				int oplock = FALSE;
 

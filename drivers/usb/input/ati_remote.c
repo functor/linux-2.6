@@ -159,6 +159,8 @@ static const char accel[] = { 1, 2, 4, 6, 9, 13, 20 };
  */
 #define FILTER_TIME (HZ / 20)
 
+static DECLARE_MUTEX(disconnect_sem);
+
 struct ati_remote {
 	struct input_dev *idev;
 	struct usb_device *udev;
@@ -624,7 +626,7 @@ static void ati_remote_free_buffers(struct ati_remote *ati_remote)
 
 	if (ati_remote->outbuf)
 		usb_buffer_free(ati_remote->udev, DATA_BUFSIZE,
-				ati_remote->inbuf, ati_remote->outbuf_dma);
+				ati_remote->outbuf, ati_remote->outbuf_dma);
 }
 
 static void ati_remote_input_init(struct ati_remote *ati_remote)

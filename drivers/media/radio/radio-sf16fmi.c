@@ -24,7 +24,7 @@
 #include <linux/isapnp.h>
 #include <asm/io.h>		/* outb, outb_p			*/
 #include <asm/uaccess.h>	/* copy to/from user		*/
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 struct fmi_device
 {
@@ -37,7 +37,7 @@ struct fmi_device
 static int io = -1; 
 static int radio_nr = -1;
 static struct pnp_dev *dev = NULL;
-static struct mutex lock;
+static struct semaphore lock;
 
 /* freq is in 1/16 kHz to internal number, hw precision is 50 kHz */
 /* It is only useful to give freq in intervall of 800 (=0.05Mhz),
@@ -68,16 +68,16 @@ static void outbits(int bits, unsigned int data, int port)
 
 static inline void fmi_mute(int port)
 {
-	mutex_lock(&lock);
+	down(&lock);
 	outb(0x00, port);
-	mutex_unlock(&lock);
+	up(&lock);
 }
 
 static inline void fmi_unmute(int port)
 {
-	mutex_lock(&lock);
+	down(&lock);
 	outb(0x08, port);
-	mutex_unlock(&lock);
+	up(&lock);
 }
 
 static inline int fmi_setfreq(struct fmi_device *dev)
@@ -85,12 +85,12 @@ static inline int fmi_setfreq(struct fmi_device *dev)
 	int myport = dev->port;
 	unsigned long freq = dev->curfreq;
 
-	mutex_lock(&lock);
+	down(&lock);
 
 	outbits(16, RSF16_ENCODE(freq), myport);
 	outbits(8, 0xC0, myport);
 	msleep(143);		/* was schedule_timeout(HZ/7) */
-	mutex_unlock(&lock);
+	up(&lock);
 	if (dev->curvol) fmi_unmute(myport);
 	return 0;
 }
@@ -102,7 +102,7 @@ static inline int fmi_getsigstr(struct fmi_device *dev)
 	int myport = dev->port;
 
 	
-	mutex_lock(&lock);
+	down(&lock);
 	val = dev->curvol ? 0x08 : 0x00;	/* unmute/mute */
 	outb(val, myport);
 	outb(val | 0x10, myport);
@@ -110,7 +110,7 @@ static inline int fmi_getsigstr(struct fmi_device *dev)
 	res = (int)inb(myport+1);
 	outb(val, myport);
 	
-	mutex_unlock(&lock);
+	up(&lock);
 	return (res & 2) ? 0 : 0xFFFF;
 }
 
@@ -296,7 +296,7 @@ static int __init fmi_init(void)
 	fmi_unit.flags = VIDEO_TUNER_LOW;
 	fmi_radio.priv = &fmi_unit;
 	
-	mutex_init(&lock);
+	init_MUTEX(&lock);
 	
 	if (video_register_device(&fmi_radio, VFL_TYPE_RADIO, radio_nr) == -1) {
 		release_region(io, 2);

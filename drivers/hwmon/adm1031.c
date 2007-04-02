@@ -28,7 +28,6 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /* Following macros takes channel parameter starting from 0 to 2 */
 #define ADM1031_REG_FAN_SPEED(nr)	(0x08 + (nr))
@@ -71,7 +70,7 @@ typedef u8 auto_chan_table_t[8][2];
 struct adm1031_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	int chip_type;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
@@ -263,10 +262,10 @@ set_fan_auto_channel(struct device *dev, const char *buf, size_t count, int nr)
 
 	old_fan_mode = data->conf1;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	
 	if ((ret = get_fan_auto_nearest(data, nr, val, data->conf1, &reg))) {
-		mutex_unlock(&data->update_lock);
+		up(&data->update_lock);
 		return ret;
 	}
 	if (((data->conf1 = FAN_CHAN_TO_REG(reg, data->conf1)) & ADM1031_CONF1_AUTO_MODE) ^ 
@@ -289,7 +288,7 @@ set_fan_auto_channel(struct device *dev, const char *buf, size_t count, int nr)
 	}
 	data->conf1 = FAN_CHAN_TO_REG(reg, data->conf1);
 	adm1031_write_value(client, ADM1031_REG_CONF1, data->conf1);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -330,11 +329,11 @@ set_auto_temp_min(struct device *dev, const char *buf, size_t count, int nr)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->auto_temp[nr] = AUTO_TEMP_MIN_TO_REG(val, data->auto_temp[nr]);
 	adm1031_write_value(client, ADM1031_REG_AUTO_TEMP(nr),
 			    data->auto_temp[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 static ssize_t show_auto_temp_max(struct device *dev, char *buf, int nr)
@@ -350,11 +349,11 @@ set_auto_temp_max(struct device *dev, const char *buf, size_t count, int nr)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_max[nr] = AUTO_TEMP_MAX_TO_REG(val, data->auto_temp[nr], data->pwm[nr]);
 	adm1031_write_value(client, ADM1031_REG_AUTO_TEMP(nr),
 			    data->temp_max[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -406,11 +405,11 @@ set_pwm(struct device *dev, const char *buf, size_t count, int nr)
 	int val = simple_strtol(buf, NULL, 10);
 	int reg;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	if ((data->conf1 & ADM1031_CONF1_AUTO_MODE) && 
 	    (((val>>4) & 0xf) != 5)) {
 		/* In automatic mode, the only PWM accepted is 33% */
-		mutex_unlock(&data->update_lock);
+		up(&data->update_lock);
 		return -EINVAL;
 	}
 	data->pwm[nr] = PWM_TO_REG(val);
@@ -418,7 +417,7 @@ set_pwm(struct device *dev, const char *buf, size_t count, int nr)
 	adm1031_write_value(client, ADM1031_REG_PWM,
 			    nr ? ((data->pwm[nr] << 4) & 0xf0) | (reg & 0xf)
 			    : (data->pwm[nr] & 0xf) | (reg & 0xf0));
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -512,7 +511,7 @@ set_fan_min(struct device *dev, const char *buf, size_t count, int nr)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	if (val) {
 		data->fan_min[nr] = 
 			FAN_TO_REG(val, FAN_DIV_FROM_REG(data->fan_div[nr]));
@@ -520,7 +519,7 @@ set_fan_min(struct device *dev, const char *buf, size_t count, int nr)
 		data->fan_min[nr] = 0xff;
 	}
 	adm1031_write_value(client, ADM1031_REG_FAN_MIN(nr), data->fan_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 static ssize_t
@@ -541,7 +540,7 @@ set_fan_div(struct device *dev, const char *buf, size_t count, int nr)
 	if (tmp == 0xff)
 		return -EINVAL;
 	
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	old_div = FAN_DIV_FROM_REG(data->fan_div[nr]);
 	data->fan_div[nr] = (tmp & 0xC0) | (0x3f & data->fan_div[nr]);
 	new_min = data->fan_min[nr] * old_div / 
@@ -554,7 +553,7 @@ set_fan_div(struct device *dev, const char *buf, size_t count, int nr)
 			    data->fan_div[nr]);
 	adm1031_write_value(client, ADM1031_REG_FAN_MIN(nr), 
 			    data->fan_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -628,11 +627,11 @@ set_temp_min(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtol(buf, NULL, 10);
 	val = SENSORS_LIMIT(val, -55000, nr == 0 ? 127750 : 127875);
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_min[nr] = TEMP_TO_REG(val);
 	adm1031_write_value(client, ADM1031_REG_TEMP_MIN(nr),
 			    data->temp_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 static ssize_t
@@ -644,11 +643,11 @@ set_temp_max(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtol(buf, NULL, 10);
 	val = SENSORS_LIMIT(val, -55000, nr == 0 ? 127750 : 127875);
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_max[nr] = TEMP_TO_REG(val);
 	adm1031_write_value(client, ADM1031_REG_TEMP_MAX(nr),
 			    data->temp_max[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 static ssize_t
@@ -660,11 +659,11 @@ set_temp_crit(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtol(buf, NULL, 10);
 	val = SENSORS_LIMIT(val, -55000, nr == 0 ? 127750 : 127875);
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_crit[nr] = TEMP_TO_REG(val);
 	adm1031_write_value(client, ADM1031_REG_TEMP_CRIT(nr),
 			    data->temp_crit[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -779,7 +778,7 @@ static int adm1031_detect(struct i2c_adapter *adapter, int address, int kind)
 
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->valid = 0;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -892,7 +891,7 @@ static struct adm1031_data *adm1031_update_device(struct device *dev)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int chan;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
@@ -966,7 +965,7 @@ static struct adm1031_data *adm1031_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return data;
 }

@@ -251,8 +251,7 @@ static int __init power_init(void)
 	}
 
 	/* Register a call for panic conditions. */
-	atomic_notifier_chain_register(&panic_notifier_list,
-			&parisc_panic_block);
+	notifier_chain_register(&panic_notifier_list, &parisc_panic_block);
 
 	tasklet_enable(&power_tasklet);
 
@@ -265,8 +264,7 @@ static void __exit power_exit(void)
 		return;
 
 	tasklet_disable(&power_tasklet);
-	atomic_notifier_chain_unregister(&panic_notifier_list,
-			&parisc_panic_block);
+	notifier_chain_unregister(&panic_notifier_list, &parisc_panic_block);
 	power_tasklet.func = NULL;
 	pdc_soft_power_button(0);
 }

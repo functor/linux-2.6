@@ -72,14 +72,15 @@ int dirty_background_ratio = 10;
 int vm_dirty_ratio = 40;
 
 /*
- * The interval between `kupdate'-style writebacks, in jiffies
+ * The interval between `kupdate'-style writebacks, in centiseconds
+ * (hundredths of a second)
  */
-int dirty_writeback_interval = 5 * HZ;
+int dirty_writeback_centisecs = 5 * 100;
 
 /*
- * The longest number of jiffies for which data is allowed to remain dirty
+ * The longest number of centiseconds for which data is allowed to remain dirty
  */
-int dirty_expire_interval = 30 * HZ;
+int dirty_expire_centisecs = 30 * 100;
 
 /*
  * Flag that makes the machine dump writes/reads and block dirtyings.
@@ -87,8 +88,7 @@ int dirty_expire_interval = 30 * HZ;
 int block_dump;
 
 /*
- * Flag that puts the machine in "laptop mode". Doubles as a timeout in jiffies:
- * a full sync is triggered after this time elapses without any disk activity.
+ * Flag that puts the machine in "laptop mode".
  */
 int laptop_mode;
 
@@ -255,9 +255,8 @@ static void balance_dirty_pages(struct address_space *mapping)
 }
 
 /**
- * balance_dirty_pages_ratelimited_nr - balance dirty memory state
+ * balance_dirty_pages_ratelimited - balance dirty memory state
  * @mapping: address_space which was dirtied
- * @nr_pages_dirtied: number of pages which the caller has just dirtied
  *
  * Processes which are dirtying memory should call in here once for each page
  * which was newly dirtied.  The function will periodically check the system's
@@ -268,12 +267,10 @@ static void balance_dirty_pages(struct address_space *mapping)
  * limit we decrease the ratelimiting by a lot, to prevent individual processes
  * from overshooting the limit by (ratelimit_pages) each.
  */
-void balance_dirty_pages_ratelimited_nr(struct address_space *mapping,
-					unsigned long nr_pages_dirtied)
+void balance_dirty_pages_ratelimited(struct address_space *mapping)
 {
-	static DEFINE_PER_CPU(unsigned long, ratelimits) = 0;
-	unsigned long ratelimit;
-	unsigned long *p;
+	static DEFINE_PER_CPU(int, ratelimits) = 0;
+	long ratelimit;
 
 	ratelimit = ratelimit_pages;
 	if (dirty_exceeded)
@@ -283,18 +280,15 @@ void balance_dirty_pages_ratelimited_nr(struct address_space *mapping,
 	 * Check the rate limiting. Also, we do not want to throttle real-time
 	 * tasks in balance_dirty_pages(). Period.
 	 */
-	preempt_disable();
-	p =  &__get_cpu_var(ratelimits);
-	*p += nr_pages_dirtied;
-	if (unlikely(*p >= ratelimit)) {
-		*p = 0;
-		preempt_enable();
+	if (get_cpu_var(ratelimits)++ >= ratelimit) {
+		__get_cpu_var(ratelimits) = 0;
+		put_cpu_var(ratelimits);
 		balance_dirty_pages(mapping);
 		return;
 	}
-	preempt_enable();
+	put_cpu_var(ratelimits);
 }
-EXPORT_SYMBOL(balance_dirty_pages_ratelimited_nr);
+EXPORT_SYMBOL(balance_dirty_pages_ratelimited);
 
 void throttle_vm_writeout(void)
 {
@@ -386,8 +380,8 @@ static DEFINE_TIMER(laptop_mode_wb_timer, laptop_timer_fn, 0, 0);
  * just walks the superblock inode list, writing back any inodes which are
  * older than a specific point in time.
  *
- * Try to run once per dirty_writeback_interval.  But if a writeback event
- * takes longer than a dirty_writeback_interval interval, then leave a
+ * Try to run once per dirty_writeback_centisecs.  But if a writeback event
+ * takes longer than a dirty_writeback_centisecs interval, then leave a
  * one-second gap.
  *
  * older_than_this takes precedence over nr_to_write.  So we'll only write back
@@ -412,9 +406,9 @@ static void wb_kupdate(unsigned long arg)
 	sync_supers();
 
 	get_writeback_state(&wbs);
-	oldest_jif = jiffies - dirty_expire_interval;
+	oldest_jif = jiffies - (dirty_expire_centisecs * HZ) / 100;
 	start_jif = jiffies;
-	next_jif = start_jif + dirty_writeback_interval;
+	next_jif = start_jif + (dirty_writeback_centisecs * HZ) / 100;
 	nr_to_write = wbs.nr_dirty + wbs.nr_unstable +
 			(inodes_stat.nr_inodes - inodes_stat.nr_unused);
 	while (nr_to_write > 0) {
@@ -431,7 +425,7 @@ static void wb_kupdate(unsigned long arg)
 	}
 	if (time_before(next_jif, jiffies + HZ))
 		next_jif = jiffies + HZ;
-	if (dirty_writeback_interval)
+	if (dirty_writeback_centisecs)
 		mod_timer(&wb_timer, next_jif);
 }
 
@@ -441,11 +435,11 @@ static void wb_kupdate(unsigned long arg)
 int dirty_writeback_centisecs_handler(ctl_table *table, int write,
 		struct file *file, void __user *buffer, size_t *length, loff_t *ppos)
 {
-	proc_dointvec_userhz_jiffies(table, write, file, buffer, length, ppos);
-	if (dirty_writeback_interval) {
+	proc_dointvec(table, write, file, buffer, length, ppos);
+	if (dirty_writeback_centisecs) {
 		mod_timer(&wb_timer,
-			jiffies + dirty_writeback_interval);
-		} else {
+			jiffies + (dirty_writeback_centisecs * HZ) / 100);
+	} else {
 		del_timer(&wb_timer);
 	}
 	return 0;
@@ -474,7 +468,7 @@ static void laptop_timer_fn(unsigned long unused)
  */
 void laptop_io_completion(void)
 {
-	mod_timer(&laptop_mode_wb_timer, jiffies + laptop_mode);
+	mod_timer(&laptop_mode_wb_timer, jiffies + laptop_mode * HZ);
 }
 
 /*
@@ -550,7 +544,7 @@ void __init page_writeback_init(void)
 		if (vm_dirty_ratio <= 0)
 			vm_dirty_ratio = 1;
 	}
-	mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
+	mod_timer(&wb_timer, jiffies + (dirty_writeback_centisecs * HZ) / 100);
 	set_ratelimit();
 	register_cpu_notifier(&ratelimit_nb);
 }
@@ -627,6 +621,8 @@ EXPORT_SYMBOL(write_one_page);
  */
 int __set_page_dirty_nobuffers(struct page *page)
 {
+	int ret = 0;
+
 	if (!TestSetPageDirty(page)) {
 		struct address_space *mapping = page_mapping(page);
 		struct address_space *mapping2;
@@ -648,9 +644,8 @@ int __set_page_dirty_nobuffers(struct page *page)
 							I_DIRTY_PAGES);
 			}
 		}
-		return 1;
 	}
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(__set_page_dirty_nobuffers);
 
@@ -680,10 +675,8 @@ int fastcall set_page_dirty(struct page *page)
 			return (*spd)(page);
 		return __set_page_dirty_buffers(page);
 	}
-	if (!PageDirty(page)) {
-		if (!TestSetPageDirty(page))
-			return 1;
-	}
+	if (!PageDirty(page))
+		SetPageDirty(page);
 	return 0;
 }
 EXPORT_SYMBOL(set_page_dirty);

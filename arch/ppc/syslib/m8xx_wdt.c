@@ -41,7 +41,8 @@ static irqreturn_t m8xx_wdt_interrupt(int irq, void *dev, struct pt_regs *regs)
 
 	m8xx_wdt_reset();
 
-	setbits16(&imap->im_sit.sit_piscr, PISCR_PS);
+	out_be16(&imap->im_sit.sit_piscr, in_be16(&imap->im_sit.sit_piscr) | PISCR_PS);	/* clear irq */
+
 	return IRQ_HANDLED;
 }
 

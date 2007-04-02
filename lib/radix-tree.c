@@ -37,6 +37,7 @@
 #else
 #define RADIX_TREE_MAP_SHIFT	3	/* For more stressful testing */
 #endif
+#define RADIX_TREE_TAGS		2
 
 #define RADIX_TREE_MAP_SIZE	(1UL << RADIX_TREE_MAP_SHIFT)
 #define RADIX_TREE_MAP_MASK	(RADIX_TREE_MAP_SIZE-1)
@@ -47,7 +48,7 @@
 struct radix_tree_node {
 	unsigned int	count;
 	void		*slots[RADIX_TREE_MAP_SIZE];
-	unsigned long	tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
+	unsigned long	tags[RADIX_TREE_TAGS][RADIX_TREE_TAG_LONGS];
 };
 
 struct radix_tree_path {
@@ -134,20 +135,17 @@ out:
 	return ret;
 }
 
-static inline void tag_set(struct radix_tree_node *node, unsigned int tag,
-		int offset)
+static inline void tag_set(struct radix_tree_node *node, int tag, int offset)
 {
 	__set_bit(offset, node->tags[tag]);
 }
 
-static inline void tag_clear(struct radix_tree_node *node, unsigned int tag,
-		int offset)
+static inline void tag_clear(struct radix_tree_node *node, int tag, int offset)
 {
 	__clear_bit(offset, node->tags[tag]);
 }
 
-static inline int tag_get(struct radix_tree_node *node, unsigned int tag,
-		int offset)
+static inline int tag_get(struct radix_tree_node *node, int tag, int offset)
 {
 	return test_bit(offset, node->tags[tag]);
 }
@@ -156,7 +154,7 @@ static inline int tag_get(struct radix_tree_node *node, unsigned int tag,
  * Returns 1 if any slot in the node has this tag set.
  * Otherwise returns 0.
  */
-static inline int any_tag_set(struct radix_tree_node *node, unsigned int tag)
+static inline int any_tag_set(struct radix_tree_node *node, int tag)
 {
 	int idx;
 	for (idx = 0; idx < RADIX_TREE_TAG_LONGS; idx++) {
@@ -182,7 +180,7 @@ static int radix_tree_extend(struct radix_tree_root *root, unsigned long index)
 {
 	struct radix_tree_node *node;
 	unsigned int height;
-	char tags[RADIX_TREE_MAX_TAGS];
+	char tags[RADIX_TREE_TAGS];
 	int tag;
 
 	/* Figure out what the height should be.  */
@@ -199,7 +197,7 @@ static int radix_tree_extend(struct radix_tree_root *root, unsigned long index)
 	 * Prepare the tag status of the top-level node for propagation
 	 * into the newly-pushed top-level node(s)
 	 */
-	for (tag = 0; tag < RADIX_TREE_MAX_TAGS; tag++) {
+	for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
 		tags[tag] = 0;
 		if (any_tag_set(root->rnode, tag))
 			tags[tag] = 1;
@@ -213,7 +211,7 @@ static int radix_tree_extend(struct radix_tree_root *root, unsigned long index)
 		node->slots[0] = root->rnode;
 
 		/* Propagate the aggregated tag info into the new root */
-		for (tag = 0; tag < RADIX_TREE_MAX_TAGS; tag++) {
+		for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
 			if (tags[tag])
 				tag_set(node, tag, 0);
 		}
@@ -351,15 +349,14 @@ EXPORT_SYMBOL(radix_tree_lookup);
  *	@index:		index key
  *	@tag: 		tag index
  *
- *	Set the search tag (which must be < RADIX_TREE_MAX_TAGS)
- *	corresponding to @index in the radix tree.  From
+ *	Set the search tag corresponging to @index in the radix tree.  From
  *	the root all the way down to the leaf node.
  *
  *	Returns the address of the tagged item.   Setting a tag on a not-present
  *	item is a bug.
  */
 void *radix_tree_tag_set(struct radix_tree_root *root,
-			unsigned long index, unsigned int tag)
+			unsigned long index, int tag)
 {
 	unsigned int height, shift;
 	struct radix_tree_node *slot;
@@ -393,8 +390,7 @@ EXPORT_SYMBOL(radix_tree_tag_set);
  *	@index:		index key
  *	@tag: 		tag index
  *
- *	Clear the search tag (which must be < RADIX_TREE_MAX_TAGS)
- *	corresponding to @index in the radix tree.  If
+ *	Clear the search tag corresponging to @index in the radix tree.  If
  *	this causes the leaf node to have no tags set then clear the tag in the
  *	next-to-leaf node, etc.
  *
@@ -402,7 +398,7 @@ EXPORT_SYMBOL(radix_tree_tag_set);
  *	has the same return value and semantics as radix_tree_lookup().
  */
 void *radix_tree_tag_clear(struct radix_tree_root *root,
-			unsigned long index, unsigned int tag)
+			unsigned long index, int tag)
 {
 	struct radix_tree_path path[RADIX_TREE_MAX_PATH], *pathp = path;
 	struct radix_tree_node *slot;
@@ -454,7 +450,7 @@ EXPORT_SYMBOL(radix_tree_tag_clear);
  * radix_tree_tag_get - get a tag on a radix tree node
  * @root:		radix tree root
  * @index:		index key
- * @tag: 		tag index (< RADIX_TREE_MAX_TAGS)
+ * @tag: 		tag index
  *
  * Return values:
  *
@@ -463,7 +459,7 @@ EXPORT_SYMBOL(radix_tree_tag_clear);
  * -1: tag present, unset
  */
 int radix_tree_tag_get(struct radix_tree_root *root,
-			unsigned long index, unsigned int tag)
+			unsigned long index, int tag)
 {
 	unsigned int height, shift;
 	struct radix_tree_node *slot;
@@ -596,7 +592,7 @@ EXPORT_SYMBOL(radix_tree_gang_lookup);
  */
 static unsigned int
 __lookup_tag(struct radix_tree_root *root, void **results, unsigned long index,
-	unsigned int max_items, unsigned long *next_index, unsigned int tag)
+	unsigned int max_items, unsigned long *next_index, int tag)
 {
 	unsigned int nr_found = 0;
 	unsigned int shift;
@@ -650,7 +646,7 @@ out:
  *	@results:	where the results of the lookup are placed
  *	@first_index:	start the lookup from this key
  *	@max_items:	place up to this many items at *results
- *	@tag:		the tag index (< RADIX_TREE_MAX_TAGS)
+ *	@tag:		the tag index
  *
  *	Performs an index-ascending scan of the tree for present items which
  *	have the tag indexed by @tag set.  Places the items at *@results and
@@ -658,8 +654,7 @@ out:
  */
 unsigned int
 radix_tree_gang_lookup_tag(struct radix_tree_root *root, void **results,
-		unsigned long first_index, unsigned int max_items,
-		unsigned int tag)
+		unsigned long first_index, unsigned int max_items, int tag)
 {
 	const unsigned long max_index = radix_tree_maxindex(root->height);
 	unsigned long cur_index = first_index;
@@ -721,7 +716,7 @@ void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
 	struct radix_tree_node *slot;
 	unsigned int height, shift;
 	void *ret = NULL;
-	char tags[RADIX_TREE_MAX_TAGS];
+	char tags[RADIX_TREE_TAGS];
 	int nr_cleared_tags;
 	int tag;
 	int offset;
@@ -756,7 +751,7 @@ void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
 	 * Clear all tags associated with the just-deleted item
 	 */
 	nr_cleared_tags = 0;
-	for (tag = 0; tag < RADIX_TREE_MAX_TAGS; tag++) {
+	for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
 		tags[tag] = 1;
 		if (tag_get(pathp->node, tag, pathp->offset)) {
 			tag_clear(pathp->node, tag, pathp->offset);
@@ -768,7 +763,7 @@ void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
 	}
 
 	for (pathp--; nr_cleared_tags && pathp->node; pathp--) {
-		for (tag = 0; tag < RADIX_TREE_MAX_TAGS; tag++) {
+		for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
 			if (tags[tag])
 				continue;
 
@@ -806,7 +801,7 @@ EXPORT_SYMBOL(radix_tree_delete);
  *	@root:		radix tree root
  *	@tag:		tag to test
  */
-int radix_tree_tagged(struct radix_tree_root *root, unsigned int tag)
+int radix_tree_tagged(struct radix_tree_root *root, int tag)
 {
   	struct radix_tree_node *rnode;
   	rnode = root->rnode;

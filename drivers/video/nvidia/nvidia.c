@@ -21,7 +21,6 @@
 #include <linux/fb.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/console.h>
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
@@ -30,8 +29,10 @@
 #include <asm/pci-bridge.h>
 #endif
 #ifdef CONFIG_PMAC_BACKLIGHT
-#include <asm/machdep.h>
 #include <asm/backlight.h>
+#endif
+#ifdef CONFIG_BOOTX_TEXT
+#include <asm/btext.h>
 #endif
 
 #include "nv_local.h"
@@ -619,30 +620,6 @@ static int nvidia_panel_tweak(struct nvidia_par *par,
    return tweak;
 }
 
-static void nvidia_vga_protect(struct nvidia_par *par, int on)
-{
-	unsigned char tmp;
-
-	if (on) {
-		/*
-		 * Turn off screen and disable sequencer.
-		 */
-		tmp = NVReadSeq(par, 0x01);
-
-		NVWriteSeq(par, 0x00, 0x01);		/* Synchronous Reset */
-		NVWriteSeq(par, 0x01, tmp | 0x20);	/* disable the display */
-	} else {
-		/*
-		 * Reenable sequencer, then turn on screen.
-		 */
-
-		tmp = NVReadSeq(par, 0x01);
-
-		NVWriteSeq(par, 0x01, tmp & ~0x20);	/* reenable display */
-		NVWriteSeq(par, 0x00, 0x03);		/* End Reset */
-	}
-}
-
 static void nvidia_save_vga(struct nvidia_par *par,
 			    struct _riva_hw_state *state)
 {
@@ -671,9 +648,9 @@ static void nvidia_save_vga(struct nvidia_par *par,
 
 #undef DUMP_REG
 
-static void nvidia_write_regs(struct nvidia_par *par,
-			      struct _riva_hw_state *state)
+static void nvidia_write_regs(struct nvidia_par *par)
 {
+	struct _riva_hw_state *state = &par->ModeReg;
 	int i;
 
 	NVTRACE_ENTER();
@@ -721,6 +698,32 @@ static void nvidia_write_regs(struct nvidia_par *par,
 
 	NVTRACE_LEAVE();
 }
+
+static void nvidia_vga_protect(struct nvidia_par *par, int on)
+{
+	unsigned char tmp;
+
+	if (on) {
+		/*
+		 * Turn off screen and disable sequencer.
+		 */
+		tmp = NVReadSeq(par, 0x01);
+
+		NVWriteSeq(par, 0x00, 0x01);		/* Synchronous Reset */
+		NVWriteSeq(par, 0x01, tmp | 0x20);	/* disable the display */
+	} else {
+		/*
+		 * Reenable sequencer, then turn on screen.
+		 */
+
+		tmp = NVReadSeq(par, 0x01);
+
+		NVWriteSeq(par, 0x01, tmp & ~0x20);	/* reenable display */
+		NVWriteSeq(par, 0x00, 0x03);		/* End Reset */
+	}
+}
+
+
 
 static int nvidia_calc_regs(struct fb_info *info)
 {
@@ -1070,8 +1073,7 @@ static int nvidiafb_set_par(struct fb_info *info)
 
 	nvidia_vga_protect(par, 1);
 
-	nvidia_write_regs(par, &par->ModeReg);
-	NVSetStartAddress(par, 0);
+	nvidia_write_regs(par);
 
 #if defined (__BIG_ENDIAN)
 	/* turn on LFB swapping */
@@ -1107,6 +1109,13 @@ static int nvidiafb_set_par(struct fb_info *info)
 	par->cursor_reset = 1;
 
 	nvidia_vga_protect(par, 0);
+
+#ifdef CONFIG_BOOTX_TEXT
+	/* Update debug text engine */
+	btext_update_display(info->fix.smem_start,
+			     info->var.xres, info->var.yres,
+			     info->var.bits_per_pixel, info->fix.line_length);
+#endif
 
 	NVTRACE_LEAVE();
 	return 0;
@@ -1356,7 +1365,7 @@ static int nvidiafb_blank(int blank, struct fb_info *info)
 	NVWriteCrtc(par, 0x1a, vesa);
 
 #ifdef CONFIG_PMAC_BACKLIGHT
-	if (par->FlatPanel && machine_is(powermac)) {
+	if (par->FlatPanel && _machine == _MACH_Pmac) {
 		set_backlight_enable(!blank);
 	}
 #endif
@@ -1379,57 +1388,6 @@ static struct fb_ops nvidia_fb_ops = {
 	.fb_cursor      = nvidiafb_cursor,
 	.fb_sync        = nvidiafb_sync,
 };
-
-#ifdef CONFIG_PM
-static int nvidiafb_suspend(struct pci_dev *dev, pm_message_t state)
-{
-	struct fb_info *info = pci_get_drvdata(dev);
-	struct nvidia_par *par = info->par;
-
-	acquire_console_sem();
-	par->pm_state = state.event;
-
-	if (state.event == PM_EVENT_FREEZE) {
-		dev->dev.power.power_state = state;
-	} else {
-		fb_set_suspend(info, 1);
-		nvidiafb_blank(FB_BLANK_POWERDOWN, info);
-		nvidia_write_regs(par, &par->SavedReg);
-		pci_save_state(dev);
-		pci_disable_device(dev);
-		pci_set_power_state(dev, pci_choose_state(dev, state));
-	}
-
-	release_console_sem();
-	return 0;
-}
-
-static int nvidiafb_resume(struct pci_dev *dev)
-{
-	struct fb_info *info = pci_get_drvdata(dev);
-	struct nvidia_par *par = info->par;
-
-	acquire_console_sem();
-	pci_set_power_state(dev, PCI_D0);
-
-	if (par->pm_state != PM_EVENT_FREEZE) {
-		pci_restore_state(dev);
-		pci_enable_device(dev);
-		pci_set_master(dev);
-	}
-
-	par->pm_state = PM_EVENT_ON;
-	nvidiafb_set_par(info);
-	fb_set_suspend (info, 0);
-	nvidiafb_blank(FB_BLANK_UNBLANK, info);
-
-	release_console_sem();
-	return 0;
-}
-#else
-#define nvidiafb_suspend NULL
-#define nvidiafb_resume NULL
-#endif
 
 static int __devinit nvidia_set_fbinfo(struct fb_info *info)
 {
@@ -1576,19 +1534,20 @@ static u32 __devinit nvidia_get_arch(struct fb_info *info)
 	case 0x0340:		/* GeForceFX 5700 */
 		arch = NV_ARCH_30;
 		break;
-	case 0x0040:
-	case 0x00C0:
-	case 0x0120:
+	case 0x0040:		/* GeForce 6800 */
+	case 0x00C0:		/* GeForce 6800 */
+	case 0x0120:		/* GeForce 6800 */
 	case 0x0130:
-	case 0x0140:
-	case 0x0160:
-	case 0x01D0:
-	case 0x0090:
-	case 0x0210:
-	case 0x0220:
+	case 0x0140:		/* GeForce 6600 */
+	case 0x0160:		/* GeForce 6200 */
+	case 0x01D0:		/* GeForce 7200, 7300, 7400 */
+	case 0x0090:		/* GeForce 7800 */
+	case 0x0210:		/* GeForce 6800 */
+	case 0x0220:		/* GeForce 6200 */
 	case 0x0230:
-	case 0x0290:
-	case 0x0390:
+	case 0x0240:		/* GeForce 6100 */
+	case 0x0290:		/* GeForce 7900 */
+	case 0x0390:		/* GeForce 7600 */
 		arch = NV_ARCH_40;
 		break;
 	case 0x0020:		/* TNT, TNT2 */
@@ -1742,7 +1701,7 @@ static int __devinit nvidiafb_probe(struct pci_dev *pd,
 	       info->fix.id,
 	       par->FbMapSize / (1024 * 1024), info->fix.smem_start);
 #ifdef CONFIG_PMAC_BACKLIGHT
-	if (par->FlatPanel && machine_is(powermac))
+	if (par->FlatPanel && _machine == _MACH_Pmac)
 		register_backlight_controller(&nvidia_backlight_controller,
 					      par, "mnca");
 #endif
@@ -1774,6 +1733,8 @@ static void __exit nvidiafb_remove(struct pci_dev *pd)
 	struct nvidia_par *par = info->par;
 
 	NVTRACE_ENTER();
+	if (!info)
+		return;
 
 	unregister_framebuffer(info);
 #ifdef CONFIG_MTRR
@@ -1850,10 +1811,8 @@ static int __devinit nvidiafb_setup(char *options)
 static struct pci_driver nvidiafb_driver = {
 	.name = "nvidiafb",
 	.id_table = nvidiafb_pci_tbl,
-	.probe    = nvidiafb_probe,
-	.suspend  = nvidiafb_suspend,
-	.resume   = nvidiafb_resume,
-	.remove   = __exit_p(nvidiafb_remove),
+	.probe = nvidiafb_probe,
+	.remove = __exit_p(nvidiafb_remove),
 };
 
 /* ------------------------------------------------------------------------- *

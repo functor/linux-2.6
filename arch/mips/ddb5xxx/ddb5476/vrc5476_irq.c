@@ -77,9 +77,11 @@ vrc5476_irq_init(u32 base)
 }
 
 
-void
+asmlinkage void
 vrc5476_irq_dispatch(struct pt_regs *regs)
 {
+	extern void spurious_interrupt(void);
+
 	u32 mask;
 	int nile4_irq;
 
@@ -105,5 +107,5 @@ vrc5476_irq_dispatch(struct pt_regs *regs)
 			return;
 		}
 	}
-	spurious_interrupt(regs);
+	spurious_interrupt();
 }

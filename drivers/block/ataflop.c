@@ -271,7 +271,7 @@ unsigned char *DMABuffer;			  /* buffer for writes */
 static unsigned long PhysDMABuffer;   /* physical address */
 
 static int UseTrackbuffer = -1;		  /* Do track buffering? */
-module_param(UseTrackbuffer, int, 0);
+MODULE_PARM(UseTrackbuffer, "i");
 
 unsigned char *TrackBuffer;			  /* buffer for reads */
 static unsigned long PhysTrackBuffer; /* physical address */
@@ -296,7 +296,7 @@ static int MotorOn = 0, MotorOffTrys;
 static int IsFormatting = 0, FormatError;
 
 static int UserSteprate[FD_MAX_UNITS] = { -1, -1 };
-module_param_array(UserSteprate, int, NULL, 0);
+MODULE_PARM(UserSteprate, "1-" __MODULE_STRING(FD_MAX_UNITS) "i");
 
 /* Synchronization of FDC access. */
 static volatile int fdc_busy = 0;

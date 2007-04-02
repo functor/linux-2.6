@@ -664,7 +664,7 @@ static struct mtd_info *amd_flash_probe(struct map_info *map)
 	printk("%s: Probing for AMD compatible flash...\n", map->name);
 
 	if ((table_pos[0] = probe_new_chip(mtd, 0, NULL, &temp, table,
-					   ARRAY_SIZE(table)))
+					   sizeof(table)/sizeof(table[0])))
 	    == -1) {
 		printk(KERN_WARNING
 		       "%s: Found no AMD compatible device at location zero\n",
@@ -696,7 +696,7 @@ static struct mtd_info *amd_flash_probe(struct map_info *map)
 	     base += (1 << temp.chipshift)) {
 	     	int numchips = temp.numchips;
 		table_pos[numchips] = probe_new_chip(mtd, base, chips,
-			&temp, table, ARRAY_SIZE(table));
+			&temp, table, sizeof(table)/sizeof(table[0]));
 	}
 
 	mtd->eraseregions = kmalloc(sizeof(struct mtd_erase_region_info) *

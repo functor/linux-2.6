@@ -40,7 +40,6 @@
 
 /* FIXME: this is just for IP_NF_ASSERRT */
 #include <linux/netfilter_ipv4/ip_conntrack.h>
-#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
@@ -93,7 +92,7 @@ struct ipt_hashlimit_htable {
 };
 
 static DEFINE_SPINLOCK(hashlimit_lock);	/* protects htables list */
-static DEFINE_MUTEX(hlimit_mutex);	/* additional checkentry protection */
+static DECLARE_MUTEX(hlimit_mutex);	/* additional checkentry protection */
 static HLIST_HEAD(hashlimit_htables);
 static kmem_cache_t *hashlimit_cachep __read_mostly;
 
@@ -428,7 +427,6 @@ static int
 hashlimit_match(const struct sk_buff *skb,
 		const struct net_device *in,
 		const struct net_device *out,
-		const struct xt_match *match,
 		const void *matchinfo,
 		int offset,
 		unsigned int protoff,
@@ -508,12 +506,14 @@ hashlimit_match(const struct sk_buff *skb,
 static int
 hashlimit_checkentry(const char *tablename,
 		     const void *inf,
-		     const struct xt_match *match,
 		     void *matchinfo,
 		     unsigned int matchsize,
 		     unsigned int hook_mask)
 {
 	struct ipt_hashlimit_info *r = matchinfo;
+
+	if (matchsize != IPT_ALIGN(sizeof(struct ipt_hashlimit_info)))
+		return 0;
 
 	/* Check for overflow. */
 	if (r->cfg.burst == 0
@@ -543,13 +543,13 @@ hashlimit_checkentry(const char *tablename,
 	 * call vmalloc, and that can sleep.  And we cannot just re-search
 	 * the list of htable's in htable_create(), since then we would
 	 * create duplicate proc files. -HW */
-	mutex_lock(&hlimit_mutex);
+	down(&hlimit_mutex);
 	r->hinfo = htable_find_get(r->name);
 	if (!r->hinfo && (htable_create(r) != 0)) {
-		mutex_unlock(&hlimit_mutex);
+		up(&hlimit_mutex);
 		return 0;
 	}
-	mutex_unlock(&hlimit_mutex);
+	up(&hlimit_mutex);
 
 	/* Ugly hack: For SMP, we only want to use one set */
 	r->u.master = r;
@@ -558,21 +558,19 @@ hashlimit_checkentry(const char *tablename,
 }
 
 static void
-hashlimit_destroy(const struct xt_match *match, void *matchinfo,
-		  unsigned int matchsize)
+hashlimit_destroy(void *matchinfo, unsigned int matchsize)
 {
 	struct ipt_hashlimit_info *r = (struct ipt_hashlimit_info *) matchinfo;
 
 	htable_put(r->hinfo);
 }
 
-static struct ipt_match ipt_hashlimit = {
-	.name		= "hashlimit",
-	.match		= hashlimit_match,
-	.matchsize	= sizeof(struct ipt_hashlimit_info),
-	.checkentry	= hashlimit_checkentry,
-	.destroy	= hashlimit_destroy,
-	.me		= THIS_MODULE
+static struct ipt_match ipt_hashlimit = { 
+	.name = "hashlimit", 
+	.match = hashlimit_match, 
+	.checkentry = hashlimit_checkentry, 
+	.destroy = hashlimit_destroy,
+	.me = THIS_MODULE 
 };
 
 /* PROC stuff */
@@ -719,15 +717,15 @@ cleanup_nothing:
 	
 }
 
-static int __init ipt_hashlimit_init(void)
+static int __init init(void)
 {
 	return init_or_fini(0);
 }
 
-static void __exit ipt_hashlimit_fini(void)
+static void __exit fini(void)
 {
 	init_or_fini(1);
 }
 
-module_init(ipt_hashlimit_init);
-module_exit(ipt_hashlimit_fini);
+module_init(init);
+module_exit(fini);

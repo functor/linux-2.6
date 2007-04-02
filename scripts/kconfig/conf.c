@@ -5,7 +5,6 @@
 
 #include <ctype.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -21,7 +20,6 @@ enum {
 	ask_all,
 	ask_new,
 	ask_silent,
-	dont_ask,
 	set_default,
 	set_yes,
 	set_mod,
@@ -37,8 +35,6 @@ static char line[128];
 static struct menu *rootEntry;
 
 static char nohelp_text[] = N_("Sorry, no help available for this option yet.\n");
-
-static int return_value = 0;
 
 static void strip(char *str)
 {
@@ -65,6 +61,20 @@ static void check_stdin(void)
 		printf(_("Run 'make oldconfig' to update configuration.\n\n"));
 		exit(1);
 	}
+}
+
+static char *fgets_check_stream(char *s, int size, FILE *stream)
+{
+	char *ret = fgets(s, size, stream);
+
+	if (ret == NULL && feof(stream)) {
+		printf(_("aborted!\n\n"));
+		printf(_("Console input is closed. "));
+		printf(_("Run 'make oldconfig' to update configuration.\n\n"));
+		exit(1);
+	}
+
+	return ret;
 }
 
 static void conf_askvalue(struct symbol *sym, const char *def)
@@ -104,13 +114,7 @@ static void conf_askvalue(struct symbol *sym, const char *def)
 		check_stdin();
 	case ask_all:
 		fflush(stdout);
-		fgets(line, 128, stdin);
-		return;
-	case dont_ask:
-		if (!sym_has_value(sym)) {
-			fprintf(stderr,"CONFIG_%s\n",sym->name);
-			return_value++;
-		}
+		fgets_check_stream(line, 128, stdin);
 		return;
 	case set_default:
 		printf("%s\n", def);
@@ -324,7 +328,8 @@ static int conf_choice(struct menu *menu)
 		printf("%*s%s\n", indent - 1, "", menu_get_prompt(menu));
 		def_sym = sym_get_choice_value(sym);
 		cnt = def = 0;
-		line[0] = 0;
+		line[0] = '0';
+		line[1] = 0;
 		for (child = menu->list; child; child = child->next) {
 			if (!menu_is_visible(child))
 				continue;
@@ -355,10 +360,6 @@ static int conf_choice(struct menu *menu)
 			printf("?");
 		printf("]: ");
 		switch (input_mode) {
-		case dont_ask:
-			cnt = def;
-			printf("%d\n", cnt);
-			break;
 		case ask_new:
 		case ask_silent:
 			if (!is_new) {
@@ -369,7 +370,7 @@ static int conf_choice(struct menu *menu)
 			check_stdin();
 		case ask_all:
 			fflush(stdout);
-			fgets(line, 128, stdin);
+			fgets_check_stream(line, 128, stdin);
 			strip(line);
 			if (line[0] == '?') {
 				printf("\n%s\n", menu->sym->help ?
@@ -495,10 +496,7 @@ static void check_conf(struct menu *menu)
 			if (!conf_cnt++)
 				printf(_("*\n* Restart config...\n*\n"));
 			rootEntry = menu_get_parent_menu(menu);
-			if (input_mode == dont_ask)
-				fprintf(stderr,"CONFIG_%s\n",sym->name);
-			else
-				conf(rootEntry);
+			conf(rootEntry);
 		}
 	}
 
@@ -516,9 +514,6 @@ int main(int ac, char **av)
 		switch (av[i++][1]) {
 		case 'o':
 			input_mode = ask_new;
-			break;
-		case 'b':
-			input_mode = dont_ask;
 			break;
 		case 's':
 			input_mode = ask_silent;
@@ -551,7 +546,7 @@ int main(int ac, char **av)
 			break;
 		case 'h':
 		case '?':
-			fprintf(stderr, "See README for usage info\n");
+			printf("%s [-o|-s] config\n", av[0]);
 			exit(0);
 		}
 	}
@@ -584,7 +579,6 @@ int main(int ac, char **av)
 		}
 	case ask_all:
 	case ask_new:
-	case dont_ask:
 		conf_read(NULL);
 		break;
 	case set_no:
@@ -623,10 +617,10 @@ int main(int ac, char **av)
 	do {
 		conf_cnt = 0;
 		check_conf(&rootmenu);
-	} while ((conf_cnt) && (input_mode != dont_ask));
+	} while (conf_cnt);
 	if (conf_write(NULL)) {
 		fprintf(stderr, _("\n*** Error during writing of the kernel configuration.\n\n"));
 		return 1;
 	}
-	return return_value;
+	return 0;
 }

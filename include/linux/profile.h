@@ -14,7 +14,6 @@
 
 struct proc_dir_entry;
 struct pt_regs;
-struct notifier_block;
 
 /* init basic kernel profiler */
 void __init profile_init(void);
@@ -33,6 +32,7 @@ enum profile_type {
 
 #ifdef CONFIG_PROFILING
 
+struct notifier_block;
 struct task_struct;
 struct mm_struct;
 

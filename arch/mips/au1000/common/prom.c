@@ -1,9 +1,10 @@
 /*
  *
  * BRIEF MODULE DESCRIPTION
- *    PROM library initialisation code, assuming YAMON is the boot loader.
+ *    PROM library initialisation code, assuming a version of
+ *    pmon is the boot code.
  *
- * Copyright 2000, 2001, 2006 MontaVista Software Inc.
+ * Copyright 2000,2001 MontaVista Software Inc.
  * Author: MontaVista Software, Inc.
  *         	ppopov@mvista.com or source@mvista.com
  *
@@ -48,9 +49,9 @@ extern char **prom_argv, **prom_envp;
 
 typedef struct
 {
-	char *name;
-	char *val;
-} t_env_var;
+    char *name;
+/*    char *val; */
+}t_env_var;
 
 
 char * prom_getcmdline(void)
@@ -84,16 +85,21 @@ char *prom_getenv(char *envname)
 {
 	/*
 	 * Return a pointer to the given environment variable.
+	 * Environment variables are stored in the form of "memsize=64".
 	 */
 
 	t_env_var *env = (t_env_var *)prom_envp;
+	int i;
 
-	while (env->name) {
-		if (strcmp(envname, env->name) == 0)
-			return env->val;
+	i = strlen(envname);
+
+	while(env->name) {
+		if(strncmp(envname, env->name, i) == 0) {
+			return(env->name + strlen(envname) + 1);
+		}
 		env++;
 	}
-	return NULL;
+	return(NULL);
 }
 
 inline unsigned char str2hexnum(unsigned char c)

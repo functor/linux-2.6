@@ -179,30 +179,37 @@ static struct nf_hook_ops arpt_ops[] = {
 	},
 };
 
-static int __init arptable_filter_init(void)
+static int __init init(void)
 {
-	int ret;
+	int ret, i;
 
 	/* Register table */
 	ret = arpt_register_table(&packet_filter, &initial_table.repl);
 	if (ret < 0)
 		return ret;
 
-	ret = nf_register_hooks(arpt_ops, ARRAY_SIZE(arpt_ops));
-	if (ret < 0)
-		goto cleanup_table;
+	for (i = 0; i < ARRAY_SIZE(arpt_ops); i++)
+		if ((ret = nf_register_hook(&arpt_ops[i])) < 0)
+			goto cleanup_hooks;
 	return ret;
 
-cleanup_table:
+cleanup_hooks:
+	while (--i >= 0)
+		nf_unregister_hook(&arpt_ops[i]);
+
 	arpt_unregister_table(&packet_filter);
 	return ret;
 }
 
-static void __exit arptable_filter_fini(void)
+static void __exit fini(void)
 {
-	nf_unregister_hooks(arpt_ops, ARRAY_SIZE(arpt_ops));
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(arpt_ops); i++)
+		nf_unregister_hook(&arpt_ops[i]);
+
 	arpt_unregister_table(&packet_filter);
 }
 
-module_init(arptable_filter_init);
-module_exit(arptable_filter_fini);
+module_init(init);
+module_exit(fini);

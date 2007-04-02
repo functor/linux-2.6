@@ -98,9 +98,10 @@ static int snd_pcm_alloc_vmalloc_buffer(struct snd_pcm_substream *subs, size_t s
 static int snd_pcm_free_vmalloc_buffer(struct snd_pcm_substream *subs)
 {
 	struct snd_pcm_runtime *runtime = subs->runtime;
-
-	vfree(runtime->dma_area);
-	runtime->dma_area = NULL;
+	if (runtime->dma_area) {
+		vfree(runtime->dma_area);
+		runtime->dma_area = NULL;
+	}
 	return 0;
 }
 
@@ -1253,13 +1254,9 @@ static int vx_init_audio_io(struct vx_core *chip)
 
 	/* allocate pipes */
 	chip->playback_pipes = kmalloc(sizeof(struct vx_pipe *) * chip->audio_outs, GFP_KERNEL);
-	if (!chip->playback_pipes)
-		return -ENOMEM;
 	chip->capture_pipes = kmalloc(sizeof(struct vx_pipe *) * chip->audio_ins, GFP_KERNEL);
-	if (!chip->capture_pipes) {
-		kfree(chip->playback_pipes);
+	if (! chip->playback_pipes || ! chip->capture_pipes)
 		return -ENOMEM;
-	}
 
 	memset(chip->playback_pipes, 0, sizeof(struct vx_pipe *) * chip->audio_outs);
 	memset(chip->capture_pipes, 0, sizeof(struct vx_pipe *) * chip->audio_ins);

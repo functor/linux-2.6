@@ -2137,9 +2137,10 @@ static int etrax_usb_submit_bulk_urb(struct urb *urb)
 	urb->status = -EINPROGRESS;
 
 	/* Setup the hcpriv data. */
-	urb_priv = kzalloc(sizeof(etrax_urb_priv_t), KMALLOC_FLAG);
+	urb_priv = kmalloc(sizeof(etrax_urb_priv_t), KMALLOC_FLAG);
 	assert(urb_priv != NULL);
 	/* This sets rx_offset to 0. */
+	memset(urb_priv, 0, sizeof(etrax_urb_priv_t));
 	urb_priv->urb_state = NOT_STARTED;
 	urb->hcpriv = urb_priv;
 
@@ -2474,9 +2475,10 @@ static int etrax_usb_submit_ctrl_urb(struct urb *urb)
 	urb->status = -EINPROGRESS;
 
 	/* Setup the hcpriv data. */
-	urb_priv = kzalloc(sizeof(etrax_urb_priv_t), KMALLOC_FLAG);
+	urb_priv = kmalloc(sizeof(etrax_urb_priv_t), KMALLOC_FLAG);
 	assert(urb_priv != NULL);
 	/* This sets rx_offset to 0. */
+	memset(urb_priv, 0, sizeof(etrax_urb_priv_t));
 	urb_priv->urb_state = NOT_STARTED;
 	urb->hcpriv = urb_priv;
 
@@ -2765,8 +2767,9 @@ static void etrax_usb_add_to_intr_sb_list(struct urb *urb, int epid)
 	maxlen = usb_maxpacket(urb->dev, urb->pipe, usb_pipeout(urb->pipe));
 	interval = urb->interval;
 
-	urb_priv = kzalloc(sizeof(etrax_urb_priv_t), KMALLOC_FLAG);
+	urb_priv = kmalloc(sizeof(etrax_urb_priv_t), KMALLOC_FLAG);
 	assert(urb_priv != NULL);
+	memset(urb_priv, 0, sizeof(etrax_urb_priv_t));
 	urb->hcpriv = urb_priv;
 
 	first_ep = &TxIntrEPList[0];
@@ -2994,8 +2997,9 @@ static void etrax_usb_add_to_isoc_sb_list(struct urb *urb, int epid)
 
 	prev_sb_desc = next_sb_desc = temp_sb_desc = NULL;
 
-	urb_priv = kzalloc(sizeof(etrax_urb_priv_t), GFP_ATOMIC);
+	urb_priv = kmalloc(sizeof(etrax_urb_priv_t), GFP_ATOMIC);
 	assert(urb_priv != NULL);
+	memset(urb_priv, 0, sizeof(etrax_urb_priv_t));
 
 	urb->hcpriv = urb_priv;
 	urb_priv->epid = epid;

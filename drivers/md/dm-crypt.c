@@ -94,6 +94,20 @@ struct crypt_config {
 static kmem_cache_t *_crypt_io_pool;
 
 /*
+ * Mempool alloc and free functions for the page
+ */
+static void *mempool_alloc_page(gfp_t gfp_mask, void *data)
+{
+	return alloc_page(gfp_mask);
+}
+
+static void mempool_free_page(void *page, void *data)
+{
+	__free_page(page);
+}
+
+
+/*
  * Different IV generation algorithms:
  *
  * plain: the initial vector is the 32-bit low-endian version of the sector
@@ -518,7 +532,6 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	char *ivopts;
 	unsigned int crypto_flags;
 	unsigned int key_size;
-	unsigned long long tmpll;
 
 	if (argc != 5) {
 		ti->error = PFX "Not enough arguments";
@@ -617,13 +630,15 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		}
 	}
 
-	cc->io_pool = mempool_create_slab_pool(MIN_IOS, _crypt_io_pool);
+	cc->io_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
+				     mempool_free_slab, _crypt_io_pool);
 	if (!cc->io_pool) {
 		ti->error = PFX "Cannot allocate crypt io mempool";
 		goto bad3;
 	}
 
-	cc->page_pool = mempool_create_page_pool(MIN_POOL_PAGES, 0);
+	cc->page_pool = mempool_create(MIN_POOL_PAGES, mempool_alloc_page,
+				       mempool_free_page, NULL);
 	if (!cc->page_pool) {
 		ti->error = PFX "Cannot allocate page mempool";
 		goto bad4;
@@ -634,17 +649,15 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad5;
 	}
 
-	if (sscanf(argv[2], "%llu", &tmpll) != 1) {
+	if (sscanf(argv[2], SECTOR_FORMAT, &cc->iv_offset) != 1) {
 		ti->error = PFX "Invalid iv_offset sector";
 		goto bad5;
 	}
-	cc->iv_offset = tmpll;
 
-	if (sscanf(argv[4], "%llu", &tmpll) != 1) {
+	if (sscanf(argv[4], SECTOR_FORMAT, &cc->start) != 1) {
 		ti->error = PFX "Invalid device sector";
 		goto bad5;
 	}
-	cc->start = tmpll;
 
 	if (dm_get_device(ti, argv[3], cc->start, ti->len,
 	                  dm_table_get_mode(ti->table), &cc->dev)) {
@@ -717,13 +730,15 @@ static int crypt_endio(struct bio *bio, unsigned int done, int error)
 	if (bio->bi_size)
 		return 1;
 
+	if (!bio_flagged(bio, BIO_UPTODATE) && !error)
+		error = -EIO;
+
 	bio_put(bio);
 
 	/*
 	 * successful reads are decrypted by the worker thread
 	 */
-	if ((bio_data_dir(bio) == READ)
-	    && bio_flagged(bio, BIO_UPTODATE)) {
+	if (bio_data_dir(io->bio) == READ && !error) {
 		kcryptd_queue_io(io);
 		return 0;
 	}
@@ -888,8 +903,8 @@ static int crypt_status(struct dm_target *ti, status_type_t type,
 			result[sz++] = '-';
 		}
 
-		DMEMIT(" %llu %s %llu", (unsigned long long)cc->iv_offset,
-				cc->dev->name, (unsigned long long)cc->start);
+		DMEMIT(" " SECTOR_FORMAT " %s " SECTOR_FORMAT,
+		       cc->iv_offset, cc->dev->name, cc->start);
 		break;
 	}
 	return 0;

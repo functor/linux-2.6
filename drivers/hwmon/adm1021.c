@@ -26,7 +26,6 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 
 /* Addresses to scan */
@@ -93,7 +92,7 @@ struct adm1021_data {
 	struct class_device *class_dev;
 	enum chips type;
 
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -163,10 +162,10 @@ static ssize_t set_##value(struct device *dev, struct device_attribute *attr, co
 	struct adm1021_data *data = i2c_get_clientdata(client);	\
 	int temp = simple_strtoul(buf, NULL, 10);		\
 								\
-	mutex_lock(&data->update_lock);				\
+	down(&data->update_lock);				\
 	data->value = TEMP_TO_REG(temp);			\
 	adm1021_write_value(client, reg, data->value);		\
-	mutex_unlock(&data->update_lock);			\
+	up(&data->update_lock);					\
 	return count;						\
 }
 set(temp_max, ADM1021_REG_TOS_W);
@@ -276,7 +275,7 @@ static int adm1021_detect(struct i2c_adapter *adapter, int address, int kind)
 	strlcpy(new_client->name, type_name, I2C_NAME_SIZE);
 	data->type = kind;
 	data->valid = 0;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -352,7 +351,7 @@ static struct adm1021_data *adm1021_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct adm1021_data *data = i2c_get_clientdata(client);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
@@ -376,7 +375,7 @@ static struct adm1021_data *adm1021_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return data;
 }

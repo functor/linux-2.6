@@ -15,7 +15,6 @@
 #include <linux/buffer_head.h>
 #include <linux/backing-dev.h>
 #include <linux/pagevec.h>
-#include <linux/migrate.h>
 
 #include <asm/pgtable.h>
 
@@ -148,7 +147,8 @@ int add_to_swap(struct page * page, gfp_t gfp_mask)
 	swp_entry_t entry;
 	int err;
 
-	BUG_ON(!PageLocked(page));
+	if (!PageLocked(page))
+		BUG();
 
 	for (;;) {
 		entry = get_swap_page();

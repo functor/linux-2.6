@@ -25,7 +25,7 @@
 #include <asm/processor.h>
 #include <asm/smp.h>
 
-u16 cpu_to_node_map[NR_CPUS] __cacheline_aligned;
+u8 cpu_to_node_map[NR_CPUS] __cacheline_aligned;
 EXPORT_SYMBOL(cpu_to_node_map);
 
 cpumask_t node_to_cpu_mask[MAX_NUMNODES] __cacheline_aligned;

@@ -72,7 +72,7 @@ static struct svc_version *	nfsd_acl_version[] = {
 };
 
 #define NFSD_ACL_MINVERS            2
-#define NFSD_ACL_NRVERS		ARRAY_SIZE(nfsd_acl_version)
+#define NFSD_ACL_NRVERS		(sizeof(nfsd_acl_version)/sizeof(nfsd_acl_version[0]))
 static struct svc_version *nfsd_acl_versions[NFSD_ACL_NRVERS];
 
 static struct svc_program	nfsd_acl_program = {
@@ -90,8 +90,6 @@ static struct svc_stat	nfsd_acl_svcstats = {
 };
 #endif /* defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL) */
 
-extern struct svc_version nfsd_version2, nfsd_version3, nfsd_version4;
-
 static struct svc_version *	nfsd_version[] = {
 	[2] = &nfsd_version2,
 #if defined(CONFIG_NFSD_V3)
@@ -103,7 +101,7 @@ static struct svc_version *	nfsd_version[] = {
 };
 
 #define NFSD_MINVERS    	2
-#define NFSD_NRVERS		ARRAY_SIZE(nfsd_version)
+#define NFSD_NRVERS		(sizeof(nfsd_version)/sizeof(nfsd_version[0]))
 static struct svc_version *nfsd_versions[NFSD_NRVERS];
 
 struct svc_program		nfsd_program = {
@@ -141,8 +139,8 @@ nfsd_svc(unsigned short port, int nrservs)
 	struct list_head *victim;
 	
 	lock_kernel();
-	dprintk("nfsd: creating service: port %d vers 0x%x proto 0x%x\n",
-		nfsd_port, nfsd_versbits, nfsd_portbits);
+	dprintk("nfsd: creating service: vers 0x%x\n",
+		nfsd_versbits);
 	error = -EINVAL;
 	if (nrservs <= 0)
 		nrservs = 0;
@@ -203,15 +201,11 @@ nfsd_svc(unsigned short port, int nrservs)
 		nfsd_serv = svc_create(&nfsd_program, NFSD_BUFSIZE);
 		if (nfsd_serv == NULL)
 			goto out;
-		if (NFSCTL_UDPISSET(nfsd_portbits))
-			port = nfsd_port;
 		error = svc_makesock(nfsd_serv, IPPROTO_UDP, port);
 		if (error < 0)
 			goto failure;
 
 #ifdef CONFIG_NFSD_TCP
-		if (NFSCTL_TCPISSET(nfsd_portbits))
-			port = nfsd_port;
 		error = svc_makesock(nfsd_serv, IPPROTO_TCP, port);
 		if (error < 0)
 			goto failure;

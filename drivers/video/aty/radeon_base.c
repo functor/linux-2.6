@@ -272,9 +272,6 @@ static int force_measure_pll = 0;
 #ifdef CONFIG_MTRR
 static int nomtrr = 0;
 #endif
-#if defined(CONFIG_PM) && defined(CONFIG_X86)
-int radeon_force_sleep = 0;
-#endif
 
 /*
  * prototypes
@@ -1070,7 +1067,7 @@ static int radeon_setcolreg (unsigned regno, unsigned red, unsigned green,
 
 
 	if (regno > 255)
-		return -EINVAL;
+		return 1;
 
 	red >>= 8;
 	green >>= 8;
@@ -1089,9 +1086,9 @@ static int radeon_setcolreg (unsigned regno, unsigned red, unsigned green,
 			pindex = regno * 8;
 
 			if (rinfo->depth == 16 && regno > 63)
-				return -EINVAL;
+				return 1;
 			if (rinfo->depth == 15 && regno > 31)
-				return -EINVAL;
+				return 1;
 
 			/* For 565, the green component is mixed one order
 			 * below
@@ -2268,7 +2265,7 @@ static struct bin_attribute edid2_attr = {
 };
 
 
-static int __devinit radeonfb_pci_register (struct pci_dev *pdev,
+static int radeonfb_pci_register (struct pci_dev *pdev,
 				  const struct pci_device_id *ent)
 {
 	struct fb_info *info;
@@ -2618,10 +2615,6 @@ static int __init radeonfb_setup (char *options)
 			force_measure_pll = 1;
 		} else if (!strncmp(this_opt, "ignore_edid", 11)) {
 			ignore_edid = 1;
-#if defined(CONFIG_PM) && defined(CONFIG_X86)
-		} else if (!strncmp(this_opt, "force_sleep", 11)) {
-			radeon_force_sleep = 1;
-#endif
 		} else
 			mode_option = this_opt;
 	}
@@ -2677,7 +2670,3 @@ module_param(panel_yres, int, 0);
 MODULE_PARM_DESC(panel_yres, "int: set panel yres");
 module_param(mode_option, charp, 0);
 MODULE_PARM_DESC(mode_option, "Specify resolution as \"<xres>x<yres>[-<bpp>][@<refresh>]\" ");
-#if defined(CONFIG_PM) && defined(CONFIG_X86)
-module_param(radeon_force_sleep, int, 0);
-MODULE_PARM_DESC(radeon_force_sleep, "bool: force ACPI sleep mode on untested machines");
-#endif

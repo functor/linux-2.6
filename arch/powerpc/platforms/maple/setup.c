@@ -259,10 +259,9 @@ static void __init maple_progress(char *s, unsigned short hex)
 /*
  * Called very early, MMU is off, device-tree isn't unflattened
  */
-static int __init maple_probe(void)
+static int __init maple_probe(int platform)
 {
-	unsigned long root = of_get_flat_dt_root();
-	if (!of_flat_dt_is_compatible(root, "Momentum,Maple"))
+	if (platform != PLATFORM_MAPLE)
 		return 0;
 	/*
 	 * On U3, the DART (iommu) must be allocated now since it
@@ -275,8 +274,7 @@ static int __init maple_probe(void)
 	return 1;
 }
 
-define_machine(maple_md) {
-	.name			= "Maple",
+struct machdep_calls __initdata maple_md = {
 	.probe			= maple_probe,
 	.setup_arch		= maple_setup_arch,
 	.init_early		= maple_init_early,
@@ -292,7 +290,7 @@ define_machine(maple_md) {
        	.get_rtc_time		= maple_get_rtc_time,
       	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= maple_progress,
-	.power_save		= power4_idle,
+	.idle_loop		= native_idle,
 #ifdef CONFIG_KEXEC
 	.machine_kexec		= default_machine_kexec,
 	.machine_kexec_prepare	= default_machine_kexec_prepare,

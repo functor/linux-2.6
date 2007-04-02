@@ -161,7 +161,9 @@ static void __init bootx_dt_add_prop(char *name, void *data, int size,
 static void __init bootx_add_chosen_props(unsigned long base,
 					  unsigned long *mem_end)
 {
-	u32 val;
+	u32 val = _MACH_Pmac;
+
+	bootx_dt_add_prop("linux,platform", &val, 4, mem_end);
 
 	if (bootx_info->kernelParamsOffset) {
 		char *args = (char *)((unsigned long)bootx_info) +
@@ -491,7 +493,7 @@ void __init bootx_init(unsigned long r3, unsigned long r4)
 		    && (strcmp(model, "iMac,1") == 0
 			|| strcmp(model, "PowerMac1,1") == 0)) {
 			bootx_printf("iMac,1 detected, shutting down USB \n");
-			out_le32((unsigned __iomem *)0x80880008, 1);	/* XXX */
+			out_le32((unsigned *)0x80880008, 1);	/* XXX */
 		}
 	}
 

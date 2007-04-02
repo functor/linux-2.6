@@ -142,12 +142,6 @@ static struct irqaction s3c2410_timer_irq = {
 	.handler	= s3c2410_timer_interrupt,
 };
 
-#define use_tclk1_12() ( \
-	machine_is_bast()	|| \
-	machine_is_vr1000()	|| \
-	machine_is_anubis()	|| \
-	machine_is_osiris() )
-
 /*
  * Set up timer interrupt, and return the current time in seconds.
  *
@@ -171,7 +165,7 @@ static void s3c2410_timer_setup (void)
 
 	/* configure the system for whichever machine is in use */
 
-	if (use_tclk1_12()) {
+	if (machine_is_bast() || machine_is_vr1000() || machine_is_anubis()) {
 		/* timer is at 12MHz, scaler is 1 */
 		timer_usec_ticks = timer_mask_usec_ticks(1, 12000000);
 		tcnt = 12000000 / HZ;

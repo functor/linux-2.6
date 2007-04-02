@@ -97,7 +97,7 @@ static int video_open(struct inode *inode, struct file *file)
 	unsigned int minor = iminor(inode);
 	int err = 0;
 	struct video_device *vfl;
-	const struct file_operations *old_fops;
+	struct file_operations *old_fops;
 
 	if(minor>=VIDEO_NUM_DEVICES)
 		return -ENODEV;
@@ -224,13 +224,13 @@ int video_exclusive_open(struct inode *inode, struct file *file)
 	struct  video_device *vfl = video_devdata(file);
 	int retval = 0;
 
-	mutex_lock(&vfl->lock);
+	down(&vfl->lock);
 	if (vfl->users) {
 		retval = -EBUSY;
 	} else {
 		vfl->users++;
 	}
-	mutex_unlock(&vfl->lock);
+	up(&vfl->lock);
 	return retval;
 }
 
@@ -279,23 +279,23 @@ int video_register_device(struct video_device *vfd, int type, int nr)
 	switch(type)
 	{
 		case VFL_TYPE_GRABBER:
-			base=MINOR_VFL_TYPE_GRABBER_MIN;
-			end=MINOR_VFL_TYPE_GRABBER_MAX+1;
+			base=0;
+			end=64;
 			name_base = "video";
 			break;
 		case VFL_TYPE_VTX:
-			base=MINOR_VFL_TYPE_VTX_MIN;
-			end=MINOR_VFL_TYPE_VTX_MAX+1;
+			base=192;
+			end=224;
 			name_base = "vtx";
 			break;
 		case VFL_TYPE_VBI:
-			base=MINOR_VFL_TYPE_VBI_MIN;
-			end=MINOR_VFL_TYPE_VBI_MAX+1;
+			base=224;
+			end=256;
 			name_base = "vbi";
 			break;
 		case VFL_TYPE_RADIO:
-			base=MINOR_VFL_TYPE_RADIO_MIN;
-			end=MINOR_VFL_TYPE_RADIO_MAX+1;
+			base=64;
+			end=128;
 			name_base = "radio";
 			break;
 		default:
@@ -328,7 +328,7 @@ int video_register_device(struct video_device *vfd, int type, int nr)
 	sprintf(vfd->devfs_name, "v4l/%s%d", name_base, i - base);
 	devfs_mk_cdev(MKDEV(VIDEO_MAJOR, vfd->minor),
 			S_IFCHR | S_IRUSR | S_IWUSR, vfd->devfs_name);
-	mutex_init(&vfd->lock);
+	init_MUTEX(&vfd->lock);
 
 	/* sysfs class */
 	memset(&vfd->class_dev, 0x00, sizeof(vfd->class_dev));

@@ -74,19 +74,19 @@ EXPORT_SYMBOL(__debugger_dabr_match);
 EXPORT_SYMBOL(__debugger_fault_handler);
 #endif
 
-ATOMIC_NOTIFIER_HEAD(powerpc_die_chain);
+struct notifier_block *powerpc_die_chain;
+static DEFINE_SPINLOCK(die_notifier_lock);
 
 int register_die_notifier(struct notifier_block *nb)
 {
-	return atomic_notifier_chain_register(&powerpc_die_chain, nb);
-}
-EXPORT_SYMBOL(register_die_notifier);
+	int err = 0;
+	unsigned long flags;
 
-int unregister_die_notifier(struct notifier_block *nb)
-{
-	return atomic_notifier_chain_unregister(&powerpc_die_chain, nb);
+	spin_lock_irqsave(&die_notifier_lock, flags);
+	err = notifier_chain_register(&powerpc_die_chain, nb);
+	spin_unlock_irqrestore(&die_notifier_lock, flags);
+	return err;
 }
-EXPORT_SYMBOL(unregister_die_notifier);
 
 /*
  * Trap & Exception support
@@ -97,6 +97,7 @@ static DEFINE_SPINLOCK(die_lock);
 int die(const char *str, struct pt_regs *regs, long err)
 {
 	static int die_counter, crash_dump_start = 0;
+	int nl = 0;
 
 	if (debugger(regs))
 		return 1;
@@ -105,7 +106,7 @@ int die(const char *str, struct pt_regs *regs, long err)
 	spin_lock_irq(&die_lock);
 	bust_spinlocks(1);
 #ifdef CONFIG_PMAC_BACKLIGHT
-	if (machine_is(powermac)) {
+	if (_machine == _MACH_Pmac) {
 		set_backlight_enable(1);
 		set_backlight_level(BACKLIGHT_MAX);
 	}
@@ -113,18 +114,46 @@ int die(const char *str, struct pt_regs *regs, long err)
 	printk("Oops: %s, sig: %ld [#%d]\n", str, err, ++die_counter);
 #ifdef CONFIG_PREEMPT
 	printk("PREEMPT ");
+	nl = 1;
 #endif
 #ifdef CONFIG_SMP
 	printk("SMP NR_CPUS=%d ", NR_CPUS);
+	nl = 1;
 #endif
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	printk("DEBUG_PAGEALLOC ");
+	nl = 1;
 #endif
 #ifdef CONFIG_NUMA
 	printk("NUMA ");
+	nl = 1;
 #endif
-	printk("%s\n", ppc_md.name ? "" : ppc_md.name);
-
+#ifdef CONFIG_PPC64
+	switch (_machine) {
+	case PLATFORM_PSERIES:
+		printk("PSERIES ");
+		nl = 1;
+		break;
+	case PLATFORM_PSERIES_LPAR:
+		printk("PSERIES LPAR ");
+		nl = 1;
+		break;
+	case PLATFORM_ISERIES_LPAR:
+		printk("ISERIES LPAR ");
+		nl = 1;
+		break;
+	case PLATFORM_POWERMAC:
+		printk("POWERMAC ");
+		nl = 1;
+		break;
+	case PLATFORM_CELL:
+		printk("CELL ");
+		nl = 1;
+		break;
+	}
+#endif
+	if (nl)
+		printk("\n");
 	print_modules();
 	show_regs(regs);
 	bust_spinlocks(0);
@@ -228,7 +257,7 @@ void system_reset_exception(struct pt_regs *regs)
  */
 static inline int check_io_access(struct pt_regs *regs)
 {
-#if defined(CONFIG_PPC_PMAC) && defined(CONFIG_PPC32)
+#ifdef CONFIG_PPC_PMAC
 	unsigned long msr = regs->msr;
 	const struct exception_table_entry *entry;
 	unsigned int *nip = (unsigned int *)regs->nip;
@@ -261,7 +290,7 @@ static inline int check_io_access(struct pt_regs *regs)
 			return 1;
 		}
 	}
-#endif /* CONFIG_PPC_PMAC && CONFIG_PPC32 */
+#endif /* CONFIG_PPC_PMAC */
 	return 0;
 }
 
@@ -308,8 +337,8 @@ platform_machine_check(struct pt_regs *regs)
 
 void machine_check_exception(struct pt_regs *regs)
 {
+#ifdef CONFIG_PPC64
 	int recover = 0;
-	unsigned long reason = get_mc_reason(regs);
 
 	/* See if any machine dependent calls */
 	if (ppc_md.machine_check_exception)
@@ -317,6 +346,8 @@ void machine_check_exception(struct pt_regs *regs)
 
 	if (recover)
 		return;
+#else
+	unsigned long reason = get_mc_reason(regs);
 
 	if (user_mode(regs)) {
 		regs->msr |= MSR_RI;
@@ -460,6 +491,7 @@ void machine_check_exception(struct pt_regs *regs)
 	 * additional info, e.g. bus error registers.
 	 */
 	platform_machine_check(regs);
+#endif /* CONFIG_PPC64 */
 
 	if (debugger_fault_handler(regs))
 		return;
@@ -805,7 +837,7 @@ void __kprobes program_check_exception(struct pt_regs *regs)
 
 void alignment_exception(struct pt_regs *regs)
 {
-	int fixed;
+	int sig, code, fixed;
 
 	fixed = fix_alignment(regs);
 
@@ -817,14 +849,16 @@ void alignment_exception(struct pt_regs *regs)
 
 	/* Operand address was bad */
 	if (fixed == -EFAULT) {
-		if (user_mode(regs))
-			_exception(SIGSEGV, regs, SEGV_ACCERR, regs->dar);
-		else
-			/* Search exception table */
-			bad_page_fault(regs, regs->dar, SIGSEGV);
-		return;
+		sig = SIGSEGV;
+		code = SEGV_ACCERR;
+	} else {
+		sig = SIGBUS;
+		code = BUS_ADRALN;
 	}
-	_exception(SIGBUS, regs, BUS_ADRALN, regs->dar);
+	if (user_mode(regs))
+		_exception(sig, regs, code, regs->dar);
+	else
+		bad_page_fault(regs, regs->dar, sig);
 }
 
 void StackOverflow(struct pt_regs *regs)

@@ -32,8 +32,6 @@
  *
  * $Id: ucm.c 2594 2005-06-13 19:46:02Z libor $
  */
-
-#include <linux/completion.h>
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/module.h>
@@ -74,7 +72,7 @@ struct ib_ucm_file {
 
 struct ib_ucm_context {
 	int                 id;
-	struct completion   comp;
+	wait_queue_head_t   wait;
 	atomic_t            ref;
 	int		    events_reported;
 
@@ -140,7 +138,7 @@ static struct ib_ucm_context *ib_ucm_ctx_get(struct ib_ucm_file *file, int id)
 static void ib_ucm_ctx_put(struct ib_ucm_context *ctx)
 {
 	if (atomic_dec_and_test(&ctx->ref))
-		complete(&ctx->comp);
+		wake_up(&ctx->wait);
 }
 
 static inline int ib_ucm_new_cm_id(int event)
@@ -180,7 +178,7 @@ static struct ib_ucm_context *ib_ucm_ctx_alloc(struct ib_ucm_file *file)
 		return NULL;
 
 	atomic_set(&ctx->ref, 1);
-	init_completion(&ctx->comp);
+	init_waitqueue_head(&ctx->wait);
 	ctx->file = file;
 	INIT_LIST_HEAD(&ctx->events);
 
@@ -588,8 +586,8 @@ static ssize_t ib_ucm_destroy_id(struct ib_ucm_file *file,
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
-	ib_ucm_ctx_put(ctx);
-	wait_for_completion(&ctx->comp);
+	atomic_dec(&ctx->ref);
+	wait_event(ctx->wait, !atomic_read(&ctx->ref));
 
 	/* No new events will be generated after destroying the cm_id. */
 	ib_destroy_cm_id(ctx->cm_id);

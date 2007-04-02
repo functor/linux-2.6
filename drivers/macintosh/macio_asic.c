@@ -550,12 +550,15 @@ static void macio_pci_add_devices(struct macio_chip *chip)
  */
 int macio_register_driver(struct macio_driver *drv)
 {
+	int count = 0;
+
 	/* initialize common driver fields */
 	drv->driver.name = drv->name;
 	drv->driver.bus = &macio_bus_type;
 
 	/* register with core */
-	return driver_register(&drv->driver);
+	count = driver_register(&drv->driver);
+	return count ? count : 1;
 }
 
 /**

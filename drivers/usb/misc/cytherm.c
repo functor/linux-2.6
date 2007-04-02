@@ -351,11 +351,12 @@ static int cytherm_probe(struct usb_interface *interface,
 	struct usb_cytherm *dev = NULL;
 	int retval = -ENOMEM;
 
-	dev = kzalloc (sizeof(struct usb_cytherm), GFP_KERNEL);
+	dev = kmalloc (sizeof(struct usb_cytherm), GFP_KERNEL);
 	if (dev == NULL) {
 		dev_err (&interface->dev, "Out of memory\n");
 		goto error;
 	}
+	memset (dev, 0x00, sizeof (*dev));
 
 	dev->udev = usb_get_dev(udev);
 

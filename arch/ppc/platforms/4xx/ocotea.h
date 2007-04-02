@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/ocotea.h
+ *
  * Ocotea board definitions
  *
  * Matt Porter <mporter@kernel.crashing.org>

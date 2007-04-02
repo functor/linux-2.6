@@ -101,22 +101,22 @@ ipt_hook(unsigned int hook,
 /* 'raw' is the very first table. */
 static struct nf_hook_ops ipt_ops[] = {
 	{
-		.hook = ipt_hook,
-		.pf = PF_INET,
-		.hooknum = NF_IP_PRE_ROUTING,
-		.priority = NF_IP_PRI_RAW,
-		.owner = THIS_MODULE,
+	  .hook = ipt_hook, 
+	  .pf = PF_INET, 
+	  .hooknum = NF_IP_PRE_ROUTING, 
+	  .priority = NF_IP_PRI_RAW,
+	  .owner = THIS_MODULE,
 	},
 	{
-		.hook = ipt_hook,
-		.pf = PF_INET,
-		.hooknum = NF_IP_LOCAL_OUT,
-		.priority = NF_IP_PRI_RAW,
-		.owner = THIS_MODULE,
+	  .hook = ipt_hook, 
+	  .pf = PF_INET, 
+	  .hooknum = NF_IP_LOCAL_OUT, 
+	  .priority = NF_IP_PRI_RAW,
+	  .owner = THIS_MODULE,
 	},
 };
 
-static int __init iptable_raw_init(void)
+static int __init init(void)
 {
 	int ret;
 
@@ -126,23 +126,34 @@ static int __init iptable_raw_init(void)
 		return ret;
 
 	/* Register hooks */
-	ret = nf_register_hooks(ipt_ops, ARRAY_SIZE(ipt_ops));
+	ret = nf_register_hook(&ipt_ops[0]);
 	if (ret < 0)
 		goto cleanup_table;
 
+	ret = nf_register_hook(&ipt_ops[1]);
+	if (ret < 0)
+		goto cleanup_hook0;
+
 	return ret;
 
+ cleanup_hook0:
+	nf_unregister_hook(&ipt_ops[0]);
  cleanup_table:
 	ipt_unregister_table(&packet_raw);
+
 	return ret;
 }
 
-static void __exit iptable_raw_fini(void)
+static void __exit fini(void)
 {
-	nf_unregister_hooks(ipt_ops, ARRAY_SIZE(ipt_ops));
+	unsigned int i;
+
+	for (i = 0; i < sizeof(ipt_ops)/sizeof(struct nf_hook_ops); i++)
+		nf_unregister_hook(&ipt_ops[i]);
+
 	ipt_unregister_table(&packet_raw);
 }
 
-module_init(iptable_raw_init);
-module_exit(iptable_raw_fini);
+module_init(init);
+module_exit(fini);
 MODULE_LICENSE("GPL");

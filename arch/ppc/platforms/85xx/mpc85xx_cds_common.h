@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/mpc85xx_cds_common.h
+ *
  * MPC85xx CDS board definitions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

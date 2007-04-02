@@ -724,7 +724,7 @@ static int isp116x_urb_enqueue(struct usb_hcd *hcd,
 		ep = hep->hcpriv;
 	else {
 		INIT_LIST_HEAD(&ep->schedule);
-		ep->udev = udev;
+		ep->udev = usb_get_dev(udev);
 		ep->epnum = epnum;
 		ep->maxpacket = usb_maxpacket(udev, urb->pipe, is_out);
 		usb_settoggle(udev, epnum, is_out, 0);
@@ -891,6 +891,7 @@ static void isp116x_endpoint_disable(struct usb_hcd *hcd,
 	if (!list_empty(&hep->urb_list))
 		WARN("ep %p not empty?\n", ep);
 
+	usb_put_dev(ep->udev);
 	kfree(ep);
 	hep->hcpriv = NULL;
 }
@@ -1552,7 +1553,7 @@ static struct hc_driver isp116x_hc_driver = {
 
 /*----------------------------------------------------------------*/
 
-static int isp116x_remove(struct platform_device *pdev)
+static int __init_or_module isp116x_remove(struct platform_device *pdev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
 	struct isp116x *isp116x;

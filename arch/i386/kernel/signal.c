@@ -123,8 +123,7 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *peax
 	  err |= __get_user(tmp, &sc->seg);				\
 	  loadsegment(seg,tmp); }
 
-#define	FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_RF |		 \
-			 X86_EFLAGS_OF | X86_EFLAGS_DF |		 \
+#define	FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_OF | X86_EFLAGS_DF | \
 			 X86_EFLAGS_TF | X86_EFLAGS_SF | X86_EFLAGS_ZF | \
 			 X86_EFLAGS_AF | X86_EFLAGS_PF | X86_EFLAGS_CF)
 
@@ -351,7 +350,7 @@ static int setup_frame(int sig, struct k_sigaction *ka,
 			goto give_sigsegv;
 	}
 
-	restorer = current->mm->context.vdso + (long)&__kernel_sigreturn;
+	restorer = &__kernel_sigreturn;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 
@@ -447,7 +446,7 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		goto give_sigsegv;
 
 	/* Set up to return from userspace.  */
-	restorer = current->mm->context.vdso + (long)&__kernel_rt_sigreturn;
+	restorer = &__kernel_rt_sigreturn;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 	err |= __put_user(restorer, &frame->pretcode);
@@ -583,6 +582,9 @@ static void fastcall do_signal(struct pt_regs *regs)
 	if (!user_mode(regs))
 		return;
 
+	if (try_to_freeze())
+		goto no_signal;
+
 	if (test_thread_flag(TIF_RESTORE_SIGMASK))
 		oldset = &current->saved_sigmask;
 	else
@@ -611,6 +613,7 @@ static void fastcall do_signal(struct pt_regs *regs)
 		return;
 	}
 
+no_signal:
 	/* Did we come from a system call? */
 	if (regs->orig_eax >= 0) {
 		/* Restart the system call - no handlers present */

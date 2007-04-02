@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/mpc85xx_ads_common.h
+ *
  * MPC85XX ADS common board definitions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>

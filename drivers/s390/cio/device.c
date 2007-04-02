@@ -826,15 +826,17 @@ io_subchannel_probe (struct subchannel *sch)
 			get_device(&cdev->dev);
 		return 0;
 	}
-	cdev = kzalloc (sizeof(*cdev), GFP_KERNEL);
+	cdev  = kmalloc (sizeof(*cdev), GFP_KERNEL);
 	if (!cdev)
 		return -ENOMEM;
-	cdev->private = kzalloc(sizeof(struct ccw_device_private),
+	memset(cdev, 0, sizeof(struct ccw_device));
+	cdev->private = kmalloc(sizeof(struct ccw_device_private), 
 				GFP_KERNEL | GFP_DMA);
 	if (!cdev->private) {
 		kfree(cdev);
 		return -ENOMEM;
 	}
+	memset(cdev->private, 0, sizeof(struct ccw_device_private));
 	atomic_set(&cdev->private->onoff, 0);
 	cdev->dev = (struct device) {
 		.parent = &sch->dev,

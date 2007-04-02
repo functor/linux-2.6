@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/yucca.h
+ *
  * Yucca board definitions
  *
  * Roland Dreier <rolandd@cisco.com> (based on luan.h by Matt Porter)

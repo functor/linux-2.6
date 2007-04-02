@@ -170,7 +170,6 @@ static int print_unex = 1;
 #include <linux/mm.h>
 #include <linux/bio.h>
 #include <linux/string.h>
-#include <linux/jiffies.h>
 #include <linux/fcntl.h>
 #include <linux/delay.h>
 #include <linux/mc146818rtc.h>	/* CMOS defines */
@@ -180,7 +179,6 @@ static int print_unex = 1;
 #include <linux/devfs_fs_kernel.h>
 #include <linux/platform_device.h>
 #include <linux/buffer_head.h>	/* for invalidate_buffers() */
-#include <linux/mutex.h>
 
 /*
  * PS/2 floppies have much slower step rates than regular floppies.
@@ -250,18 +248,6 @@ static int irqdma_allocated;
 #include <linux/blkpg.h>
 #include <linux/cdrom.h>	/* for the compatibility eject ioctl */
 #include <linux/completion.h>
-
-/*
- * Interrupt freeing also means /proc VFS work - dont do it
- * from interrupt context. We push this work into keventd:
- */
-static void fd_free_irq_fn(void *data)
-{
-	fd_free_irq();
-}
-
-static DECLARE_WORK(fd_free_irq_work, fd_free_irq_fn, NULL);
-
 
 static struct request *current_req;
 static struct request_queue *floppy_queue;
@@ -427,7 +413,7 @@ static struct floppy_write_errors write_errors[N_DRIVE];
 static struct timer_list motor_off_timer[N_DRIVE];
 static struct gendisk *disks[N_DRIVE];
 static struct block_device *opened_bdev[N_DRIVE];
-static DEFINE_MUTEX(open_lock);
+static DECLARE_MUTEX(open_lock);
 static struct floppy_raw_cmd *raw_cmd, default_raw_cmd;
 
 /*
@@ -748,7 +734,7 @@ static int disk_change(int drive)
 {
 	int fdc = FDC(drive);
 #ifdef FLOPPY_SANITY_CHECK
-	if (time_before(jiffies, UDRS->select_date + UDP->select_delay))
+	if (jiffies - UDRS->select_date < UDP->select_delay)
 		DPRINT("WARNING disk change called early\n");
 	if (!(FDCS->dor & (0x10 << UNIT(drive))) ||
 	    (FDCS->dor & 3) != UNIT(drive) || fdc != FDC(drive)) {
@@ -1076,7 +1062,7 @@ static int fd_wait_for_completion(unsigned long delay, timeout_fn function)
 		return 1;
 	}
 
-	if (time_before(jiffies, delay)) {
+	if ((signed)(jiffies - delay) < 0) {
 		del_timer(&fd_timer);
 		fd_timer.function = function;
 		fd_timer.expires = delay;
@@ -1536,7 +1522,7 @@ static void setup_rw_floppy(void)
 		 * again just before spinup completion. Beware that
 		 * after scandrives, we must again wait for selection.
 		 */
-		if (time_after(ready_date, jiffies + DP->select_delay)) {
+		if ((signed)(ready_date - jiffies) > DP->select_delay) {
 			ready_date -= DP->select_delay;
 			function = (timeout_fn) floppy_start;
 		} else
@@ -3347,7 +3333,7 @@ static inline int set_geometry(unsigned int cmd, struct floppy_struct *g,
 	if (type) {
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		mutex_lock(&open_lock);
+		down(&open_lock);
 		LOCK_FDC(drive, 1);
 		floppy_type[type] = *g;
 		floppy_type[type].name = "user format";
@@ -3361,7 +3347,7 @@ static inline int set_geometry(unsigned int cmd, struct floppy_struct *g,
 				continue;
 			__invalidate_device(bdev);
 		}
-		mutex_unlock(&open_lock);
+		up(&open_lock);
 	} else {
 		int oldStretch;
 		LOCK_FDC(drive, 1);
@@ -3688,7 +3674,7 @@ static int floppy_release(struct inode *inode, struct file *filp)
 {
 	int drive = (long)inode->i_bdev->bd_disk->private_data;
 
-	mutex_lock(&open_lock);
+	down(&open_lock);
 	if (UDRS->fd_ref < 0)
 		UDRS->fd_ref = 0;
 	else if (!UDRS->fd_ref--) {
@@ -3698,7 +3684,7 @@ static int floppy_release(struct inode *inode, struct file *filp)
 	if (!UDRS->fd_ref)
 		opened_bdev[drive] = NULL;
 	floppy_release_irq_and_dma();
-	mutex_unlock(&open_lock);
+	up(&open_lock);
 	return 0;
 }
 
@@ -3716,7 +3702,7 @@ static int floppy_open(struct inode *inode, struct file *filp)
 	char *tmp;
 
 	filp->private_data = (void *)0;
-	mutex_lock(&open_lock);
+	down(&open_lock);
 	old_dev = UDRS->fd_device;
 	if (opened_bdev[drive] && opened_bdev[drive] != inode->i_bdev)
 		goto out2;
@@ -3799,7 +3785,7 @@ static int floppy_open(struct inode *inode, struct file *filp)
 		if ((filp->f_mode & 2) && !(UTESTF(FD_DISK_WRITABLE)))
 			goto out;
 	}
-	mutex_unlock(&open_lock);
+	up(&open_lock);
 	return 0;
 out:
 	if (UDRS->fd_ref < 0)
@@ -3810,7 +3796,7 @@ out:
 		opened_bdev[drive] = NULL;
 	floppy_release_irq_and_dma();
 out2:
-	mutex_unlock(&open_lock);
+	up(&open_lock);
 	return res;
 }
 
@@ -3824,7 +3810,7 @@ static int check_floppy_change(struct gendisk *disk)
 	if (UTESTF(FD_DISK_CHANGED) || UTESTF(FD_VERIFY))
 		return 1;
 
-	if (time_after(jiffies, UDRS->last_checked + UDP->checkfreq)) {
+	if (UDP->checkfreq < (int)(jiffies - UDRS->last_checked)) {
 		if (floppy_grab_irq_and_dma()) {
 			return 1;
 		}
@@ -4301,7 +4287,7 @@ static int __init floppy_init(void)
 	}
 
 	use_virtual_dma = can_use_virtual_dma & 1;
-#if defined(CONFIG_PPC_MERGE)
+#if defined(CONFIG_PPC64)
 	if (check_legacy_ioport(FDC1)) {
 		del_timer(&fd_timeout);
 		err = -ENODEV;
@@ -4446,13 +4432,6 @@ static int floppy_grab_irq_and_dma(void)
 		return 0;
 	}
 	spin_unlock_irqrestore(&floppy_usage_lock, flags);
-
-	/*
-	 * We might have scheduled a free_irq(), wait it to
-	 * drain first:
-	 */
-	flush_scheduled_work();
-
 	if (fd_request_irq()) {
 		DPRINT("Unable to grab IRQ%d for the floppy driver\n",
 		       FLOPPY_IRQ);
@@ -4542,7 +4521,7 @@ static void floppy_release_irq_and_dma(void)
 	if (irqdma_allocated) {
 		fd_disable_dma();
 		fd_free_dma();
-		schedule_work(&fd_free_irq_work);
+		fd_free_irq();
 		irqdma_allocated = 0;
 	}
 	set_dor(0, ~0, 8);
@@ -4614,7 +4593,7 @@ static void __init parse_floppy_cfg_string(char *cfg)
 	}
 }
 
-int __init init_module(void)
+int init_module(void)
 {
 	if (floppy)
 		parse_floppy_cfg_string(floppy);
@@ -4652,8 +4631,6 @@ void cleanup_module(void)
 
 	/* eject disk, if any */
 	fd_eject(0);
-
-	flush_scheduled_work();		/* fd_free_irq() might be pending */
 
 	wait_for_completion(&device_release);
 }

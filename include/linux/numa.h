@@ -3,9 +3,11 @@
 
 #include <linux/config.h>
 
-#ifdef CONFIG_NODES_SHIFT
-#define NODES_SHIFT     CONFIG_NODES_SHIFT
-#else
+#ifndef CONFIG_FLATMEM
+#include <asm/numnodes.h>
+#endif
+
+#ifndef NODES_SHIFT
 #define NODES_SHIFT     0
 #endif
 

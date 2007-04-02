@@ -171,9 +171,9 @@ static inline void __ncp_abort_request(struct ncp_server *server, struct ncp_req
 
 static inline void ncp_abort_request(struct ncp_server *server, struct ncp_request_reply *req, int err)
 {
-	mutex_lock(&server->rcv.creq_mutex);
+	down(&server->rcv.creq_sem);
 	__ncp_abort_request(server, req, err);
-	mutex_unlock(&server->rcv.creq_mutex);
+	up(&server->rcv.creq_sem);
 }
 
 static inline void __ncptcp_abort(struct ncp_server *server)
@@ -303,20 +303,20 @@ static inline void __ncp_start_request(struct ncp_server *server, struct ncp_req
 
 static int ncp_add_request(struct ncp_server *server, struct ncp_request_reply *req)
 {
-	mutex_lock(&server->rcv.creq_mutex);
+	down(&server->rcv.creq_sem);
 	if (!ncp_conn_valid(server)) {
-		mutex_unlock(&server->rcv.creq_mutex);
+		up(&server->rcv.creq_sem);
 		printk(KERN_ERR "ncpfs: tcp: Server died\n");
 		return -EIO;
 	}
 	if (server->tx.creq || server->rcv.creq) {
 		req->status = RQ_QUEUED;
 		list_add_tail(&req->req, &server->tx.requests);
-		mutex_unlock(&server->rcv.creq_mutex);
+		up(&server->rcv.creq_sem);
 		return 0;
 	}
 	__ncp_start_request(server, req);
-	mutex_unlock(&server->rcv.creq_mutex);
+	up(&server->rcv.creq_sem);
 	return 0;
 }
 
@@ -400,7 +400,7 @@ void ncpdgram_rcv_proc(void *s)
 				info_server(server, 0, server->unexpected_packet.data, result);
 				continue;
 			}
-			mutex_lock(&server->rcv.creq_mutex);
+			down(&server->rcv.creq_sem);		
 			req = server->rcv.creq;
 			if (req && (req->tx_type == NCP_ALLOC_SLOT_REQUEST || (server->sequence == reply.sequence && 
 					server->connection == get_conn_number(&reply)))) {
@@ -430,11 +430,11 @@ void ncpdgram_rcv_proc(void *s)
 				     	server->rcv.creq = NULL;
 					ncp_finish_request(req, result);
 					__ncp_next_request(server);
-					mutex_unlock(&server->rcv.creq_mutex);
+					up(&server->rcv.creq_sem);
 					continue;
 				}
 			}
-			mutex_unlock(&server->rcv.creq_mutex);
+			up(&server->rcv.creq_sem);
 		}
 drop:;		
 		_recv(sock, &reply, sizeof(reply), MSG_DONTWAIT);
@@ -472,9 +472,9 @@ static void __ncpdgram_timeout_proc(struct ncp_server *server)
 void ncpdgram_timeout_proc(void *s)
 {
 	struct ncp_server *server = s;
-	mutex_lock(&server->rcv.creq_mutex);
+	down(&server->rcv.creq_sem);
 	__ncpdgram_timeout_proc(server);
-	mutex_unlock(&server->rcv.creq_mutex);
+	up(&server->rcv.creq_sem);
 }
 
 static inline void ncp_init_req(struct ncp_request_reply* req)
@@ -657,18 +657,18 @@ void ncp_tcp_rcv_proc(void *s)
 {
 	struct ncp_server *server = s;
 
-	mutex_lock(&server->rcv.creq_mutex);
+	down(&server->rcv.creq_sem);
 	__ncptcp_rcv_proc(server);
-	mutex_unlock(&server->rcv.creq_mutex);
+	up(&server->rcv.creq_sem);
 }
 
 void ncp_tcp_tx_proc(void *s)
 {
 	struct ncp_server *server = s;
 	
-	mutex_lock(&server->rcv.creq_mutex);
+	down(&server->rcv.creq_sem);
 	__ncptcp_try_send(server);
-	mutex_unlock(&server->rcv.creq_mutex);
+	up(&server->rcv.creq_sem);
 }
 
 static int do_ncp_rpc_call(struct ncp_server *server, int size,
@@ -833,7 +833,7 @@ int ncp_disconnect(struct ncp_server *server)
 
 void ncp_lock_server(struct ncp_server *server)
 {
-	mutex_lock(&server->mutex);
+	down(&server->sem);
 	if (server->lock)
 		printk(KERN_WARNING "ncp_lock_server: was locked!\n");
 	server->lock = 1;
@@ -846,5 +846,5 @@ void ncp_unlock_server(struct ncp_server *server)
 		return;
 	}
 	server->lock = 0;
-	mutex_unlock(&server->mutex);
+	up(&server->sem);
 }

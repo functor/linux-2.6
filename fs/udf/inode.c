@@ -312,10 +312,12 @@ static int udf_get_block(struct inode *inode, sector_t block, struct buffer_head
 	err = 0;
 
 	bh = inode_getblk(inode, block, &err, &phys, &new);
-	BUG_ON(bh);
+	if (bh)
+		BUG();
 	if (err)
 		goto abort;
-	BUG_ON(!phys);
+	if (!phys)
+		BUG();
 
 	if (new)
 		set_buffer_new(bh_result);
@@ -1339,11 +1341,13 @@ udf_update_inode(struct inode *inode, int do_sync)
 
 	if (UDF_QUERY_FLAG(inode->i_sb, UDF_FLAG_UID_FORGET))
 		fe->uid = cpu_to_le32(-1);
-	else fe->uid = cpu_to_le32(inode->i_uid);
+	else if (inode->i_uid != UDF_SB(inode->i_sb)->s_uid)
+		fe->uid = cpu_to_le32(inode->i_uid);
 
 	if (UDF_QUERY_FLAG(inode->i_sb, UDF_FLAG_GID_FORGET))
 		fe->gid = cpu_to_le32(-1);
-	else fe->gid = cpu_to_le32(inode->i_gid);
+	else if (inode->i_gid != UDF_SB(inode->i_sb)->s_gid)
+		fe->gid = cpu_to_le32(inode->i_gid);
 
 	udfperms =	((inode->i_mode & S_IRWXO)     ) |
 			((inode->i_mode & S_IRWXG) << 2) |

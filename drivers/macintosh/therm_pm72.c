@@ -104,6 +104,7 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/sched.h>
+#include <linux/i2c.h>
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
@@ -112,6 +113,7 @@
 #include <linux/reboot.h>
 #include <linux/kmod.h>
 #include <linux/i2c.h>
+#include <linux/i2c-dev.h>
 #include <asm/prom.h>
 #include <asm/machdep.h>
 #include <asm/io.h>

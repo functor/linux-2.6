@@ -21,7 +21,6 @@
 #include <linux/string.h>
 #include <linux/clk.h>
 #include <linux/mutex.h>
-#include <linux/platform_device.h>
 
 #include <asm/io.h>
 #include <asm/semaphore.h>
@@ -38,38 +37,17 @@ static struct clk_functions *arch_clock;
  * Standard clock functions defined in include/linux/clk.h
  *-------------------------------------------------------------------------*/
 
-/*
- * Returns a clock. Note that we first try to use device id on the bus
- * and clock name. If this fails, we try to use clock name only.
- */
 struct clk * clk_get(struct device *dev, const char *id)
 {
 	struct clk *p, *clk = ERR_PTR(-ENOENT);
-	int idno;
-
-	if (dev == NULL || dev->bus != &platform_bus_type)
-		idno = -1;
-	else
-		idno = to_platform_device(dev)->id;
 
 	mutex_lock(&clocks_mutex);
-
-	list_for_each_entry(p, &clocks, node) {
-		if (p->id == idno &&
-		    strcmp(id, p->name) == 0 && try_module_get(p->owner)) {
-			clk = p;
-			goto found;
-		}
-	}
-
 	list_for_each_entry(p, &clocks, node) {
 		if (strcmp(id, p->name) == 0 && try_module_get(p->owner)) {
 			clk = p;
 			break;
 		}
 	}
-
-found:
 	mutex_unlock(&clocks_mutex);
 
 	return clk;
@@ -80,9 +58,6 @@ int clk_enable(struct clk *clk)
 {
 	unsigned long flags;
 	int ret = 0;
-
-	if (clk == NULL || IS_ERR(clk))
-		return -EINVAL;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_enable)
@@ -97,9 +72,6 @@ void clk_disable(struct clk *clk)
 {
 	unsigned long flags;
 
-	if (clk == NULL || IS_ERR(clk))
-		return;
-
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_disable)
 		arch_clock->clk_disable(clk);
@@ -111,9 +83,6 @@ int clk_get_usecount(struct clk *clk)
 {
 	unsigned long flags;
 	int ret = 0;
-
-	if (clk == NULL || IS_ERR(clk))
-		return 0;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	ret = clk->usecount;
@@ -127,9 +96,6 @@ unsigned long clk_get_rate(struct clk *clk)
 {
 	unsigned long flags;
 	unsigned long ret = 0;
-
-	if (clk == NULL || IS_ERR(clk))
-		return 0;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	ret = clk->rate;
@@ -155,9 +121,6 @@ long clk_round_rate(struct clk *clk, unsigned long rate)
 	unsigned long flags;
 	long ret = 0;
 
-	if (clk == NULL || IS_ERR(clk))
-		return ret;
-
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_round_rate)
 		ret = arch_clock->clk_round_rate(clk, rate);
@@ -170,10 +133,7 @@ EXPORT_SYMBOL(clk_round_rate);
 int clk_set_rate(struct clk *clk, unsigned long rate)
 {
 	unsigned long flags;
-	int ret = -EINVAL;
-
-	if (clk == NULL || IS_ERR(clk))
-		return ret;
+	int ret = 0;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_set_rate)
@@ -187,10 +147,7 @@ EXPORT_SYMBOL(clk_set_rate);
 int clk_set_parent(struct clk *clk, struct clk *parent)
 {
 	unsigned long flags;
-	int ret = -EINVAL;
-
-	if (clk == NULL || IS_ERR(clk) || parent == NULL || IS_ERR(parent))
-		return ret;
+	int ret = 0;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_set_parent)
@@ -205,9 +162,6 @@ struct clk *clk_get_parent(struct clk *clk)
 {
 	unsigned long flags;
 	struct clk * ret = NULL;
-
-	if (clk == NULL || IS_ERR(clk))
-		return ret;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_get_parent)
@@ -245,9 +199,6 @@ __setup("mpurate=", omap_clk_setup);
 /* Used for clocks that always have same value as the parent clock */
 void followparent_recalc(struct clk *clk)
 {
-	if (clk == NULL || IS_ERR(clk))
-		return;
-
 	clk->rate = clk->parent->rate;
 }
 
@@ -255,9 +206,6 @@ void followparent_recalc(struct clk *clk)
 void propagate_rate(struct clk * tclk)
 {
 	struct clk *clkp;
-
-	if (tclk == NULL || IS_ERR(tclk))
-		return;
 
 	list_for_each_entry(clkp, &clocks, node) {
 		if (likely(clkp->parent != tclk))
@@ -269,9 +217,6 @@ void propagate_rate(struct clk * tclk)
 
 int clk_register(struct clk *clk)
 {
-	if (clk == NULL || IS_ERR(clk))
-		return -EINVAL;
-
 	mutex_lock(&clocks_mutex);
 	list_add(&clk->node, &clocks);
 	if (clk->init)
@@ -284,9 +229,6 @@ EXPORT_SYMBOL(clk_register);
 
 void clk_unregister(struct clk *clk)
 {
-	if (clk == NULL || IS_ERR(clk))
-		return;
-
 	mutex_lock(&clocks_mutex);
 	list_del(&clk->node);
 	mutex_unlock(&clocks_mutex);
@@ -296,9 +238,6 @@ EXPORT_SYMBOL(clk_unregister);
 void clk_deny_idle(struct clk *clk)
 {
 	unsigned long flags;
-
-	if (clk == NULL || IS_ERR(clk))
-		return;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_deny_idle)
@@ -310,9 +249,6 @@ EXPORT_SYMBOL(clk_deny_idle);
 void clk_allow_idle(struct clk *clk)
 {
 	unsigned long flags;
-
-	if (clk == NULL || IS_ERR(clk))
-		return;
 
 	spin_lock_irqsave(&clockfw_lock, flags);
 	if (arch_clock->clk_allow_idle)

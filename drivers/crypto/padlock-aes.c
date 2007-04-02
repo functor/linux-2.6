@@ -284,11 +284,7 @@ aes_hw_extkey_available(uint8_t key_len)
 
 static inline struct aes_ctx *aes_ctx(void *ctx)
 {
-	unsigned long align = PADLOCK_ALIGNMENT;
-
-	if (align <= crypto_tfm_ctx_alignment())
-		align = 1;
-	return (struct aes_ctx *)ALIGN((unsigned long)ctx, align);
+	return (struct aes_ctx *)ALIGN((unsigned long)ctx, PADLOCK_ALIGNMENT);
 }
 
 static int

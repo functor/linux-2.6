@@ -19,6 +19,7 @@
 
 #ifdef __KERNEL__
 #include <sound/driver.h>
+#include <linux/init.h>
 #include <linux/pci.h>
 #include <asm/io.h>
 #include <sound/core.h>
@@ -38,8 +39,8 @@
 #include "au88x0_wt.h"
 #endif
 
-#define	hwread(x,y) readl((x)+(y))
-#define	hwwrite(x,y,z) writel((z),(x)+(y))
+#define	hwread(x,y) readl((x)+((y)>>2))
+#define	hwwrite(x,y,z) writel((z),(x)+((y)>>2))
 
 /* Vortex MPU401 defines. */
 #define	MIDI_CLOCK_DIV		0x61
@@ -112,7 +113,7 @@ typedef struct {
 	//int this_08;          /* Still unknown */
 	int fifo_enabled;	/* this_24 */
 	int fifo_status;	/* this_1c */
-	u32 dma_ctrl;		/* this_78 (ADB), this_7c (WT) */
+	int dma_ctrl;		/* this_78 (ADB), this_7c (WT) */
 	int dma_unknown;	/* this_74 (ADB), this_78 (WT). WDM: +8 */
 	int cfg0;
 	int cfg1;
@@ -177,7 +178,7 @@ struct snd_vortex {
 
 	/* PCI hardware resources */
 	unsigned long io;
-	void __iomem *mmio;
+	unsigned long __iomem *mmio;
 	unsigned int irq;
 	spinlock_t lock;
 
@@ -200,14 +201,14 @@ static void vortex_adbdma_setbuffers(vortex_t * vortex, int adbdma,
 				     int count);
 static void vortex_adbdma_setmode(vortex_t * vortex, int adbdma, int ie,
 				  int dir, int fmt, int d,
-				  u32 offset);
+				  unsigned long offset);
 static void vortex_adbdma_setstartbuffer(vortex_t * vortex, int adbdma, int sb);
 #ifndef CHIP_AU8810
 static void vortex_wtdma_setbuffers(vortex_t * vortex, int wtdma,
 				    struct snd_sg_buf * sgbuf, int size,
 				    int count);
 static void vortex_wtdma_setmode(vortex_t * vortex, int wtdma, int ie, int fmt, int d,	/*int e, */
-				 u32 offset);
+				 unsigned long offset);
 static void vortex_wtdma_setstartbuffer(vortex_t * vortex, int wtdma, int sb);
 #endif
 
@@ -276,14 +277,14 @@ static void vortex_Vort3D_InitializeSource(a3dsrc_t * a, int en);
 #endif
 
 /* Driver stuff. */
-static int vortex_gameport_register(vortex_t * card);
+static int __devinit vortex_gameport_register(vortex_t * card);
 static void vortex_gameport_unregister(vortex_t * card);
 #ifndef CHIP_AU8820
-static int vortex_eq_init(vortex_t * vortex);
-static int vortex_eq_free(vortex_t * vortex);
+static int __devinit vortex_eq_init(vortex_t * vortex);
+static int __devexit vortex_eq_free(vortex_t * vortex);
 #endif
 /* ALSA stuff. */
-static int snd_vortex_new_pcm(vortex_t * vortex, int idx, int nr);
-static int snd_vortex_mixer(vortex_t * vortex);
-static int snd_vortex_midi(vortex_t * vortex);
+static int __devinit snd_vortex_new_pcm(vortex_t * vortex, int idx, int nr);
+static int __devinit snd_vortex_mixer(vortex_t * vortex);
+static int __devinit snd_vortex_midi(vortex_t * vortex);
 #endif

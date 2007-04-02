@@ -4,7 +4,6 @@
 #include <asm/processor.h>
 #include <asm/msr.h>
 #include <asm/e820.h>
-#include <asm/mtrr.h>
 #include "cpu.h"
 
 #ifdef CONFIG_X86_OOSTORE

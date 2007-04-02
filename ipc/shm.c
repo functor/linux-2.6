@@ -13,8 +13,6 @@
  * Shared /dev/zero support, Kanoj Sarcar <kanoj@sgi.com>
  * Move the mm functionality over to mm/shmem.c, Christoph Rohland <cr@sap.com>
  *
- * support for audit of ipc object properties and permission changes
- * Dustin Kirkland <dustin.kirkland@us.ibm.com>
  */
 
 #include <linux/config.h>
@@ -32,8 +30,6 @@
 #include <linux/capability.h>
 #include <linux/ptrace.h>
 #include <linux/seq_file.h>
-#include <linux/mutex.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
 
@@ -96,8 +92,8 @@ static inline int shm_addid(struct shmid_kernel *shp)
 static inline void shm_inc (int id) {
 	struct shmid_kernel *shp;
 
-	shp = shm_lock(id);
-	BUG_ON(!shp);
+	if(!(shp = shm_lock(id)))
+		BUG();
 	shp->shm_atim = get_seconds();
 	shp->shm_lprid = current->tgid;
 	shp->shm_nattch++;
@@ -115,7 +111,7 @@ static void shm_open (struct vm_area_struct *shmd)
  *
  * @shp: struct to free
  *
- * It has to be called with shp and shm_ids.mutex locked,
+ * It has to be called with shp and shm_ids.sem locked,
  * but returns with shp unlocked and freed.
  */
 static void shm_destroy (struct shmid_kernel *shp)
@@ -151,10 +147,10 @@ static void shm_close (struct vm_area_struct *shmd)
 	int id = file->f_dentry->d_inode->i_ino;
 	struct shmid_kernel *shp;
 
-	mutex_lock(&shm_ids.mutex);
+	down (&shm_ids.sem);
 	/* remove from the list of attaches of the shm segment */
-	shp = shm_lock(id);
-	BUG_ON(!shp);
+	if(!(shp = shm_lock(id)))
+		BUG();
 	shp->shm_lprid = current->tgid;
 	shp->shm_dtim = get_seconds();
 	shp->shm_nattch--;
@@ -163,7 +159,7 @@ static void shm_close (struct vm_area_struct *shmd)
 		shm_destroy (shp);
 	else
 		shm_unlock(shp);
-	mutex_unlock(&shm_ids.mutex);
+	up (&shm_ids.sem);
 }
 
 static int shm_mmap(struct file * file, struct vm_area_struct * vma)
@@ -288,7 +284,7 @@ asmlinkage long sys_shmget (key_t key, size_t size, int shmflg)
 	struct shmid_kernel *shp;
 	int err, id = 0;
 
-	mutex_lock(&shm_ids.mutex);
+	down(&shm_ids.sem);
 	if (key == IPC_PRIVATE) {
 		err = newseg(key, shmflg, size);
 	} else if ((id = ipc_findkey(&shm_ids, key)) == -1) {
@@ -300,7 +296,8 @@ asmlinkage long sys_shmget (key_t key, size_t size, int shmflg)
 		err = -EEXIST;
 	} else {
 		shp = shm_lock(id);
-		BUG_ON(shp==NULL);
+		if(shp==NULL)
+			BUG();
 		if (shp->shm_segsz < size)
 			err = -EINVAL;
 		else if (ipcperms(&shp->shm_perm, shmflg))
@@ -313,7 +310,7 @@ asmlinkage long sys_shmget (key_t key, size_t size, int shmflg)
 		}
 		shm_unlock(shp);
 	}
-	mutex_unlock(&shm_ids.mutex);
+	up(&shm_ids.sem);
 
 	return err;
 }
@@ -484,14 +481,14 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 			return err;
 
 		memset(&shm_info,0,sizeof(shm_info));
-		mutex_lock(&shm_ids.mutex);
+		down(&shm_ids.sem);
 		shm_info.used_ids = shm_ids.in_use;
 		shm_get_stat (&shm_info.shm_rss, &shm_info.shm_swp);
 		shm_info.shm_tot = shm_tot;
 		shm_info.swap_attempts = 0;
 		shm_info.swap_successes = 0;
 		err = shm_ids.max_id;
-		mutex_unlock(&shm_ids.mutex);
+		up(&shm_ids.sem);
 		if(copy_to_user (buf, &shm_info, sizeof(shm_info))) {
 			err = -EFAULT;
 			goto out;
@@ -557,10 +554,6 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 		if(err)
 			goto out_unlock;
 
-		err = audit_ipc_obj(&(shp->shm_perm));
-		if (err)
-			goto out_unlock;
-
 		if (!capable(CAP_IPC_LOCK)) {
 			err = -EPERM;
 			if (current->euid != shp->shm_perm.uid &&
@@ -604,17 +597,13 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 		 *	Instead we set a destroyed flag, and then blow
 		 *	the name away when the usage hits zero.
 		 */
-		mutex_lock(&shm_ids.mutex);
+		down(&shm_ids.sem);
 		shp = shm_lock(shmid);
 		err = -EINVAL;
 		if (shp == NULL) 
 			goto out_up;
 		err = shm_checkid(shp, shmid);
 		if(err)
-			goto out_unlock_up;
-
-		err = audit_ipc_obj(&(shp->shm_perm));
-		if (err)
 			goto out_unlock_up;
 
 		if (current->euid != shp->shm_perm.uid &&
@@ -635,7 +624,7 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 			shm_unlock(shp);
 		} else
 			shm_destroy (shp);
-		mutex_unlock(&shm_ids.mutex);
+		up(&shm_ids.sem);
 		goto out;
 	}
 
@@ -645,19 +634,15 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 			err = -EFAULT;
 			goto out;
 		}
-		mutex_lock(&shm_ids.mutex);
+		if ((err = audit_ipc_perms(0, setbuf.uid, setbuf.gid, setbuf.mode)))
+			return err;
+		down(&shm_ids.sem);
 		shp = shm_lock(shmid);
 		err=-EINVAL;
 		if(shp==NULL)
 			goto out_up;
 		err = shm_checkid(shp,shmid);
 		if(err)
-			goto out_unlock_up;
-		err = audit_ipc_obj(&(shp->shm_perm));
-		if (err)
-			goto out_unlock_up;
-		err = audit_ipc_set_perm(0, setbuf.uid, setbuf.gid, setbuf.mode, &(shp->shm_perm));
-		if (err)
 			goto out_unlock_up;
 		err=-EPERM;
 		if (current->euid != shp->shm_perm.uid &&
@@ -687,7 +672,7 @@ asmlinkage long sys_shmctl (int shmid, int cmd, struct shmid_ds __user *buf)
 out_unlock_up:
 	shm_unlock(shp);
 out_up:
-	mutex_unlock(&shm_ids.mutex);
+	up(&shm_ids.sem);
 	goto out;
 out_unlock:
 	shm_unlock(shp);
@@ -800,16 +785,16 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 invalid:
 	up_write(&current->mm->mmap_sem);
 
-	mutex_lock(&shm_ids.mutex);
-	shp = shm_lock(shmid);
-	BUG_ON(!shp);
+	down (&shm_ids.sem);
+	if(!(shp = shm_lock(shmid)))
+		BUG();
 	shp->shm_nattch--;
 	if(shp->shm_nattch == 0 &&
 	   shp->shm_perm.mode & SHM_DEST)
 		shm_destroy (shp);
 	else
 		shm_unlock(shp);
-	mutex_unlock(&shm_ids.mutex);
+	up (&shm_ids.sem);
 
 	*raddr = (unsigned long) user_addr;
 	err = 0;
@@ -842,9 +827,6 @@ asmlinkage long sys_shmdt(char __user *shmaddr)
 	unsigned long addr = (unsigned long)shmaddr;
 	loff_t size = 0;
 	int retval = -EINVAL;
-
-	if (addr & ~PAGE_MASK)
-		return retval;
 
 	down_write(&mm->mmap_sem);
 

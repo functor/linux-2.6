@@ -884,8 +884,7 @@ static void irlap_change_speed(struct irlap_cb *self, __u32 speed, int now)
 	if (now) {
 		/* Send down empty frame to trigger speed change */
 		skb = dev_alloc_skb(0);
-		if (skb)
-			irlap_queue_xmit(self, skb);
+		irlap_queue_xmit(self, skb);
 	}
 }
 

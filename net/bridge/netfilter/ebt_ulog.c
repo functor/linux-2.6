@@ -287,7 +287,7 @@ static struct nf_logger ebt_ulog_logger = {
 	.me		= THIS_MODULE,
 };
 
-static int __init ebt_ulog_init(void)
+static int __init init(void)
 {
 	int i, ret = 0;
 
@@ -322,7 +322,7 @@ static int __init ebt_ulog_init(void)
 	return ret;
 }
 
-static void __exit ebt_ulog_fini(void)
+static void __exit fini(void)
 {
 	ebt_ulog_buff_t *ub;
 	int i;
@@ -343,8 +343,8 @@ static void __exit ebt_ulog_fini(void)
 	sock_release(ebtulognl->sk_socket);
 }
 
-module_init(ebt_ulog_init);
-module_exit(ebt_ulog_fini);
+module_init(init);
+module_exit(fini);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Bart De Schuymer <bdschuym@pandora.be>");
 MODULE_DESCRIPTION("ebtables userspace logging module for bridged Ethernet"

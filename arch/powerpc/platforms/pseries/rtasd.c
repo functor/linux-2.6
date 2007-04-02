@@ -27,7 +27,6 @@
 #include <asm/prom.h>
 #include <asm/nvram.h>
 #include <asm/atomic.h>
-#include <asm/machdep.h>
 
 #if 0
 #define DEBUG(A...)	printk(KERN_ERR A)
@@ -482,13 +481,13 @@ static int __init rtas_init(void)
 {
 	struct proc_dir_entry *entry;
 
-	if (!machine_is(pseries))
+	if (!platform_is_pseries())
 		return 0;
 
 	/* No RTAS */
 	if (rtas_token("event-scan") == RTAS_UNKNOWN_SERVICE) {
 		printk(KERN_INFO "rtasd: no event-scan on system\n");
-		return -ENODEV;
+		return 1;
 	}
 
 	entry = create_proc_entry("ppc64/rtas/error_log", S_IRUSR, NULL);

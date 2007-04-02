@@ -24,41 +24,35 @@
 LDFLAGS		:= -m elf_x86_64
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 LDFLAGS_vmlinux :=
+
 CHECKFLAGS      += -D__x86_64__ -m64
 
-cflags-y	:=
 cflags-$(CONFIG_MK8) += $(call cc-option,-march=k8)
 cflags-$(CONFIG_MPSC) += $(call cc-option,-march=nocona)
-cflags-$(CONFIG_GENERIC_CPU) += $(call cc-option,-mtune=generic)
+CFLAGS += $(cflags-y)
 
-cppflags-$(CONFIG_XEN) += \
-	-D__XEN_INTERFACE_VERSION__=$(CONFIG_XEN_INTERFACE_VERSION)
-CPPFLAGS += $(cppflags-y)
-
-cflags-y += -m64
-cflags-y += -mno-red-zone
-cflags-y += -mcmodel=kernel
-cflags-y += -pipe
-cflags-$(CONFIG_REORDER) += -ffunction-sections
+CFLAGS += -m64
+CFLAGS += -mno-red-zone
+CFLAGS += -mcmodel=kernel
+CFLAGS += -pipe
 # this makes reading assembly source easier, but produces worse code
 # actually it makes the kernel smaller too.
-cflags-y += -fno-reorder-blocks
-cflags-y += -Wno-sign-compare
+CFLAGS += -fno-reorder-blocks	
+CFLAGS += -Wno-sign-compare
 ifneq ($(CONFIG_UNWIND_INFO),y)
-cflags-y += -fno-asynchronous-unwind-tables
+CFLAGS += -fno-asynchronous-unwind-tables
 endif
 ifneq ($(CONFIG_DEBUG_INFO),y)
 # -fweb shrinks the kernel a bit, but the difference is very small
 # it also messes up debugging, so don't use it for now.
-#cflags-y += $(call cc-option,-fweb)
+#CFLAGS += $(call cc-option,-fweb)
 endif
 # -funit-at-a-time shrinks the kernel .text considerably
 # unfortunately it makes reading oopses harder.
-cflags-y += $(call cc-option,-funit-at-a-time)
+CFLAGS += $(call cc-option,-funit-at-a-time)
 # prevent gcc from generating any FP code by mistake
-cflags-y += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
+CFLAGS += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
 
-CFLAGS += $(cflags-y)
 AFLAGS += -m64
 
 head-y := arch/x86_64/kernel/head.o arch/x86_64/kernel/head64.o arch/x86_64/kernel/init_task.o
@@ -73,24 +67,9 @@ drivers-$(CONFIG_OPROFILE)		+= arch/x86_64/oprofile/
 
 boot := arch/x86_64/boot
 
-PHONY += bzImage bzlilo install archmrproper \
-	 fdimage fdimage144 fdimage288 isoimage archclean
+.PHONY: bzImage bzlilo install archmrproper \
+	fdimage fdimage144 fdimage288 archclean
 
-ifdef CONFIG_XEN
-CPPFLAGS := -Iinclude$(if $(KBUILD_SRC),2)/asm/mach-xen $(CPPFLAGS)
-head-y := arch/x86_64/kernel/head-xen.o arch/x86_64/kernel/head64-xen.o arch/x86_64/kernel/init_task.o
-LDFLAGS_vmlinux := -e _start
-boot := arch/i386/boot-xen
-.PHONY: vmlinuz
-#Default target when executing "make"
-all: vmlinuz
-
-vmlinuz: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) $@
-
-install:
-	$(Q)$(MAKE) $(build)=$(boot) XENGUEST=$(XENGUEST) $@
-else
 #Default target when executing "make"
 all: bzImage
 
@@ -106,12 +85,11 @@ bzlilo: vmlinux
 bzdisk: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) zdisk
 
-fdimage fdimage144 fdimage288 isoimage: vmlinux
+fdimage fdimage144 fdimage288: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) $@
 
 install:
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) $@ 
-endif
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
@@ -119,16 +97,11 @@ archclean:
 define archhelp
   echo  '* bzImage	- Compressed kernel image (arch/$(ARCH)/boot/bzImage)'
   echo  '  install	- Install kernel using'
-  echo  '		   (your) ~/bin/installkernel or'
-  echo  '		   (distribution) /sbin/installkernel or'
-  echo  '		   install to $$(INSTALL_PATH) and run lilo'
-  echo  '  bzdisk       - Create a boot floppy in /dev/fd0'
-  echo  '  fdimage      - Create a boot floppy image'
-  echo  '  isoimage     - Create a boot CD-ROM image'
+  echo  '                  (your) ~/bin/installkernel or'
+  echo  '                  (distribution) /sbin/installkernel or'
+  echo  '        	  install to $$(INSTALL_PATH) and run lilo'
 endef
 
-CLEAN_FILES += arch/$(ARCH)/boot/fdimage \
-	       arch/$(ARCH)/boot/image.iso \
-	       arch/$(ARCH)/boot/mtools.conf
+CLEAN_FILES += arch/$(ARCH)/boot/fdimage arch/$(ARCH)/boot/mtools.conf
 
 

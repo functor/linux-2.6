@@ -135,11 +135,10 @@ static void hstcp_cong_avoid(struct sock *sk, u32 adk, u32 rtt,
 
 		/* Do additive increase */
 		if (tp->snd_cwnd < tp->snd_cwnd_clamp) {
-			/* cwnd = cwnd + a(w) / cwnd */
-			tp->snd_cwnd_cnt += ca->ai + 1;
+			tp->snd_cwnd_cnt += ca->ai;
 			if (tp->snd_cwnd_cnt >= tp->snd_cwnd) {
-				tp->snd_cwnd_cnt -= tp->snd_cwnd;
 				tp->snd_cwnd++;
+				tp->snd_cwnd_cnt -= tp->snd_cwnd;
 			}
 		}
 	}

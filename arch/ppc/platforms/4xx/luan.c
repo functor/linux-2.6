@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/luan.c
+ *
  * Luan board specific routines
  *
  * Matt Porter <mporter@kernel.crashing.org>

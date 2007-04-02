@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/bamboo.h
+ *
  * Bamboo board definitions
  *
  * Wade Farnsworth <wfarnsworth@mvista.com>

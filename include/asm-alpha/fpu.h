@@ -130,7 +130,7 @@ rdfpcr(void)
 {
 	unsigned long tmp, ret;
 
-#if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
+#if defined(__alpha_cix__) || defined(__alpha_fix__)
 	__asm__ __volatile__ (
 		"ftoit $f0,%0\n\t"
 		"mf_fpcr $f0\n\t"
@@ -154,7 +154,7 @@ wrfpcr(unsigned long val)
 {
 	unsigned long tmp;
 
-#if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
+#if defined(__alpha_cix__) || defined(__alpha_fix__)
 	__asm__ __volatile__ (
 		"ftoit $f0,%0\n\t"
 		"itoft %1,$f0\n\t"

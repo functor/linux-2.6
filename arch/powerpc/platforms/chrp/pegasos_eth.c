@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/platforms/chrp_pegasos_eth.c
+ *
  *  Copyright (C) 2005 Sven Luther <sl@bplan-gmbh.de>
  *  Thanks to :
  *	Dale Farnsworth <dale@farnsworth.org>

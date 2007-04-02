@@ -368,9 +368,10 @@ fs3270_alloc_view(void)
 {
 	struct fs3270 *fp;
 
-	fp = kzalloc(sizeof(struct fs3270),GFP_KERNEL);
+	fp = (struct fs3270 *) kmalloc(sizeof(struct fs3270),GFP_KERNEL);
 	if (!fp)
 		return ERR_PTR(-ENOMEM);
+	memset(fp, 0, sizeof(struct fs3270));
 	fp->init = raw3270_request_alloc(0);
 	if (IS_ERR(fp->init)) {
 		kfree(fp);

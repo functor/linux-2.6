@@ -37,19 +37,20 @@ tape_std_assign_timeout(unsigned long data)
 {
 	struct tape_request *	request;
 	struct tape_device *	device;
-	int rc;
 
 	request = (struct tape_request *) data;
 	if ((device = request->device) == NULL)
 		BUG();
 
-	DBF_EVENT(3, "%08x: Assignment timeout. Device busy.\n",
+	spin_lock_irq(get_ccwdev_lock(device->cdev));
+	if (request->callback != NULL) {
+		DBF_EVENT(3, "%08x: Assignment timeout. Device busy.\n",
 			device->cdev_id);
-	rc = tape_cancel_io(device, request);
-	if(rc)
-		PRINT_ERR("(%s): Assign timeout: Cancel failed with rc = %i\n",
-			device->cdev->dev.bus_id, rc);
-
+		PRINT_ERR("%s: Assignment timeout. Device busy.\n",
+			device->cdev->dev.bus_id);
+		ccw_device_clear(device->cdev, (long) request);
+	}
+	spin_unlock_irq(get_ccwdev_lock(device->cdev));
 }
 
 int

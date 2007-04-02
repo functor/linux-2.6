@@ -956,13 +956,13 @@ int jfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 	}
 
 	tid = txBegin(inode->i_sb, 0);
-	mutex_lock(&ji->commit_mutex);
+	down(&ji->commit_sem);
 	rc = __jfs_setxattr(tid, dentry->d_inode, name, value, value_len,
 			    flags);
 	if (!rc)
 		rc = txCommit(tid, 1, &inode, 0);
 	txEnd(tid);
-	mutex_unlock(&ji->commit_mutex);
+	up(&ji->commit_sem);
 
 	return rc;
 }
@@ -1115,12 +1115,12 @@ int jfs_removexattr(struct dentry *dentry, const char *name)
 		return rc;
 
 	tid = txBegin(inode->i_sb, 0);
-	mutex_lock(&ji->commit_mutex);
+	down(&ji->commit_sem);
 	rc = __jfs_setxattr(tid, dentry->d_inode, name, NULL, 0, XATTR_REPLACE);
 	if (!rc)
 		rc = txCommit(tid, 1, &inode, 0);
 	txEnd(tid);
-	mutex_unlock(&ji->commit_mutex);
+	up(&ji->commit_sem);
 
 	return rc;
 }

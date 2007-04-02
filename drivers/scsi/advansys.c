@@ -896,6 +896,14 @@ typedef unsigned char uchar;
 #define  ASC_DVCLIB_CALL_FAILED   (0)
 #define  ASC_DVCLIB_CALL_ERROR    (-1)
 
+#define PCI_VENDOR_ID_ASP		0x10cd
+#define PCI_DEVICE_ID_ASP_1200A		0x1100
+#define PCI_DEVICE_ID_ASP_ABP940	0x1200
+#define PCI_DEVICE_ID_ASP_ABP940U	0x1300
+#define PCI_DEVICE_ID_ASP_ABP940UW	0x2300
+#define PCI_DEVICE_ID_38C0800_REV1	0x2500
+#define PCI_DEVICE_ID_38C1600_REV1	0x2700
+
 /*
  * Enable CC_VERY_LONG_SG_LIST to support up to 64K element SG lists.
  * The SRB structure will have to be changed and the ASC_SRB2SCSIQ()
@@ -17297,7 +17305,7 @@ AdvWaitEEPCmd(AdvPortAddr iop_base)
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void
+void __init
 AdvSet3550EEPConfig(AdvPortAddr iop_base, ADVEEP_3550_CONFIG *cfg_buf)
 {
     ushort *wbuf;
@@ -17364,7 +17372,7 @@ AdvSet3550EEPConfig(AdvPortAddr iop_base, ADVEEP_3550_CONFIG *cfg_buf)
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void
+void __init
 AdvSet38C0800EEPConfig(AdvPortAddr iop_base,
                        ADVEEP_38C0800_CONFIG *cfg_buf)
 {
@@ -17432,7 +17440,7 @@ AdvSet38C0800EEPConfig(AdvPortAddr iop_base,
 /*
  * Write the EEPROM from 'cfg_buf'.
  */
-void
+void __init
 AdvSet38C1600EEPConfig(AdvPortAddr iop_base,
                        ADVEEP_38C1600_CONFIG *cfg_buf)
 {

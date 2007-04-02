@@ -41,8 +41,8 @@ hysdn_card *card_root = NULL;	/* pointer to first card */
 /* the last entry contains all 0              */
 /**********************************************/
 static struct {
-	unsigned short subid;		/* PCI sub id */
-	unsigned char cardtyp;		/* card type assigned */
+	word subid;		/* PCI sub id */
+	uchar cardtyp;		/* card type assigned */
 } pci_subid_map[] = {
 
 	{

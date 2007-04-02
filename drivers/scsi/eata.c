@@ -490,7 +490,6 @@
 #include <linux/init.h>
 #include <linux/ctype.h>
 #include <linux/spinlock.h>
-#include <linux/dma-mapping.h>
 #include <asm/byteorder.h>
 #include <asm/dma.h>
 #include <asm/io.h>
@@ -1427,7 +1426,7 @@ static int port_detect(unsigned long port_base, unsigned int j,
 
 	if (ha->pdev) {
 		pci_set_master(ha->pdev);
-		if (pci_set_dma_mask(ha->pdev, DMA_32BIT_MASK))
+		if (pci_set_dma_mask(ha->pdev, 0xffffffff))
 			printk("%s: warning, pci_set_dma_mask failed.\n",
 			       ha->board_name);
 	}

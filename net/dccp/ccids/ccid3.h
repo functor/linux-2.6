@@ -41,7 +41,6 @@
 #include <linux/time.h>
 #include <linux/types.h>
 #include <linux/tfrc.h>
-#include "../ccid.h"
 
 #define TFRC_MIN_PACKET_SIZE	   16
 #define TFRC_STD_PACKET_SIZE	  256
@@ -136,12 +135,12 @@ struct ccid3_hc_rx_sock {
 
 static inline struct ccid3_hc_tx_sock *ccid3_hc_tx_sk(const struct sock *sk)
 {
-    return ccid_priv(dccp_sk(sk)->dccps_hc_tx_ccid);
+    return dccp_sk(sk)->dccps_hc_tx_ccid_private;
 }
 
 static inline struct ccid3_hc_rx_sock *ccid3_hc_rx_sk(const struct sock *sk)
 {
-    return ccid_priv(dccp_sk(sk)->dccps_hc_rx_ccid);
+    return dccp_sk(sk)->dccps_hc_rx_ccid_private;
 }
 
 #endif /* _DCCP_CCID3_H_ */

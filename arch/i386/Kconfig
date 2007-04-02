@@ -37,10 +37,6 @@ config GENERIC_IOMAP
 	bool
 	default y
 
-config GENERIC_HWEIGHT
-	bool
-	default y
-
 config ARCH_MAY_HAVE_PC_FDC
 	bool
 	default y
@@ -53,35 +49,6 @@ source "init/Kconfig"
 
 menu "Processor type and features"
 
-config SMP
-	bool "Symmetric multi-processing support"
-	---help---
-	  This enables support for systems with more than one CPU. If you have
-	  a system with only one CPU, like most personal computers, say N. If
-	  you have a system with more than one CPU, say Y.
-
-	  If you say N here, the kernel will run on single and multiprocessor
-	  machines, but will use only one CPU of a multiprocessor machine. If
-	  you say Y here, the kernel will run on many, but not all,
-	  singleprocessor machines. On a singleprocessor machine, the kernel
-	  will run faster if you say N here.
-
-	  Note that if you say Y here and choose architecture "586" or
-	  "Pentium" under "Processor family", the kernel will not work on 486
-	  architectures. Similarly, multiprocessor kernels for the "PPro"
-	  architecture may not work on all Pentium based boards.
-
-	  People using multiprocessor machines who say Y here should also say
-	  Y to "Enhanced Real Time Clock Support", below. The "Advanced Power
-	  Management" code will be disabled if you say Y here.
-
-	  See also the <file:Documentation/smp.txt>,
-	  <file:Documentation/i386/IO-APIC.txt>,
-	  <file:Documentation/nmi_watchdog.txt> and the SMP-HOWTO available at
-	  <http://www.tldp.org/docs.html#howto>.
-
-	  If you don't know what to do here, say N.
-
 choice
 	prompt "Subarchitecture Type"
 	default X86_PC
@@ -90,15 +57,6 @@ config X86_PC
 	bool "PC-compatible"
 	help
 	  Choose this option if your computer is a standard PC or compatible.
-
-config X86_XEN
-	bool "Xen-compatible"
-	select X86_UP_APIC if !SMP && XEN_PRIVILEGED_GUEST
-	select X86_UP_IOAPIC if !SMP && XEN_PRIVILEGED_GUEST
-	select SWIOTLB
-	help
-	  Choose this option if you plan to run this kernel on top of the
-	  Xen Hypervisor.
 
 config X86_ELAN
 	bool "AMD Elan"
@@ -122,7 +80,6 @@ config X86_VOYAGER
 
 config X86_NUMAQ
 	bool "NUMAQ (IBM/Sequent)"
-	select SMP
 	select NUMA
 	help
 	  This option is used for getting Linux to run on a (IBM/Sequent) NUMA
@@ -202,7 +159,6 @@ source "arch/i386/Kconfig.cpu"
 
 config HPET_TIMER
 	bool "HPET Timer Support"
-	depends on !X86_XEN
 	help
 	  This enables the use of the HPET for the kernel's internal timer.
 	  HPET is the next generation timer replacing legacy 8254s.
@@ -216,6 +172,35 @@ config HPET_EMULATE_RTC
 	bool
 	depends on HPET_TIMER && RTC=y
 	default y
+
+config SMP
+	bool "Symmetric multi-processing support"
+	---help---
+	  This enables support for systems with more than one CPU. If you have
+	  a system with only one CPU, like most personal computers, say N. If
+	  you have a system with more than one CPU, say Y.
+
+	  If you say N here, the kernel will run on single and multiprocessor
+	  machines, but will use only one CPU of a multiprocessor machine. If
+	  you say Y here, the kernel will run on many, but not all,
+	  singleprocessor machines. On a singleprocessor machine, the kernel
+	  will run faster if you say N here.
+
+	  Note that if you say Y here and choose architecture "586" or
+	  "Pentium" under "Processor family", the kernel will not work on 486
+	  architectures. Similarly, multiprocessor kernels for the "PPro"
+	  architecture may not work on all Pentium based boards.
+
+	  People using multiprocessor machines who say Y here should also say
+	  Y to "Enhanced Real Time Clock Support", below. The "Advanced Power
+	  Management" code will be disabled if you say Y here.
+
+	  See also the <file:Documentation/smp.txt>,
+	  <file:Documentation/i386/IO-APIC.txt>,
+	  <file:Documentation/nmi_watchdog.txt> and the SMP-HOWTO available at
+	  <http://www.tldp.org/docs.html#howto>.
+
+	  If you don't know what to do here, say N.
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-255)"
@@ -233,7 +218,7 @@ config NR_CPUS
 
 config SCHED_SMT
 	bool "SMT (Hyperthreading) scheduler support"
-	depends on SMP && !X86_XEN
+	depends on SMP
 	default off
 	help
 	  SMT scheduler support improves the CPU scheduler's decision making
@@ -241,20 +226,11 @@ config SCHED_SMT
 	  cost of slightly increased overhead in some places. If unsure say
 	  N here.
 
-config SCHED_MC
-	bool "Multi-core scheduler support"
-	depends on SMP && !X86_XEN
-	default y
-	help
-	  Multi-core scheduler support improves the CPU scheduler's decision
-	  making when dealing with multi-core CPU chips at a cost of slightly
-	  increased overhead in some places. If unsure say N here.
-
 source "kernel/Kconfig.preempt"
 
 config X86_UP_APIC
 	bool "Local APIC support on uniprocessors"
-	depends on !SMP && !(X86_VISWS || X86_VOYAGER || XEN_UNPRIVILEGED_GUEST)
+	depends on !SMP && !(X86_VISWS || X86_VOYAGER)
 	help
 	  A local APIC (Advanced Programmable Interrupt Controller) is an
 	  integrated interrupt controller in the CPU. If you have a single-CPU
@@ -279,12 +255,12 @@ config X86_UP_IOAPIC
 
 config X86_LOCAL_APIC
 	bool
-	depends on X86_UP_APIC || ((X86_VISWS || SMP) && !(X86_VOYAGER || XEN_UNPRIVILEGED_GUEST))
+	depends on X86_UP_APIC || ((X86_VISWS || SMP) && !X86_VOYAGER)
 	default y
 
 config X86_IO_APIC
 	bool
-	depends on X86_UP_IOAPIC || (SMP && !(X86_VISWS || X86_VOYAGER || XEN_UNPRIVILEGED_GUEST))
+	depends on X86_UP_IOAPIC || (SMP && !(X86_VISWS || X86_VOYAGER))
 	default y
 
 config X86_VISWS_APIC
@@ -292,14 +268,9 @@ config X86_VISWS_APIC
 	depends on X86_VISWS
 	default y
 
-config X86_TSC
-	bool
-	depends on (MWINCHIP3D || MWINCHIP2 || MCRUSOE || MEFFICEON || MCYRIXIII || MK7 || MK6 || MPENTIUM4 || MPENTIUMM || MPENTIUMIII || MPENTIUMII || M686 || M586MMX || M586TSC || MK8 || MVIAC3_2 || MGEODEGX1) && !X86_NUMAQ && !X86_XEN
-	default y
-
 config X86_MCE
 	bool "Machine Check Exception"
-	depends on !(X86_VOYAGER || X86_XEN)
+	depends on !X86_VOYAGER
 	---help---
 	  Machine Check Exception support allows the processor to notify the
 	  kernel if it detects a problem (e.g. overheating, component failure).
@@ -389,7 +360,6 @@ config X86_REBOOTFIXUPS
 
 config MICROCODE
 	tristate "/dev/cpu/microcode - Intel IA32 CPU microcode support"
-	depends on !XEN_UNPRIVILEGED_GUEST
 	---help---
 	  If you say Y here and also to "/dev file system support" in the
 	  'File systems' section, you will be able to update the microcode on
@@ -407,7 +377,6 @@ config MICROCODE
 
 config X86_MSR
 	tristate "/dev/cpu/*/msr - Model-specific register support"
-	depends on !X86_XEN
 	help
 	  This device gives privileged processes access to the x86
 	  Model-Specific Registers (MSRs).  It is a character device with
@@ -423,10 +392,6 @@ config X86_CPUID
 	  with major 203 and minors 0 to 31 for /dev/cpu/0/cpuid to
 	  /dev/cpu/31/cpuid.
 
-config SWIOTLB
-	bool
-	default n
-
 source "drivers/firmware/Kconfig"
 
 choice
@@ -435,7 +400,6 @@ choice
 
 config NOHIGHMEM
 	bool "off"
-	depends on !X86_NUMAQ
 	---help---
 	  Linux can use up to 64 Gigabytes of physical memory on x86 systems.
 	  However, the address space of 32-bit x86 processors is only 4
@@ -472,7 +436,6 @@ config NOHIGHMEM
 
 config HIGHMEM4G
 	bool "4GB"
-	depends on !X86_NUMAQ
 	help
 	  Select this if you have a 32-bit processor and between 1 and 4
 	  gigabytes of physical RAM.
@@ -488,7 +451,7 @@ endchoice
 
 choice
 	depends on EXPERIMENTAL && !X86_PAE
-	prompt "Memory split" if EMBEDDED
+	prompt "Memory split"
 	default VMSPLIT_3G
 	help
 	  Select the desired split between kernel and user memory.
@@ -503,23 +466,43 @@ choice
 	  will also likely make your kernel incompatible with binary-only
 	  kernel modules.
 
-	  If you are not absolutely sure what you are doing, leave this
-	  option alone!
-
 	config VMSPLIT_3G
-		bool "3G/1G user/kernel split"
-	config VMSPLIT_3G_OPT
-		bool "3G/1G user/kernel split (for full 1G low memory)"
+		bool "3G/1G user/kernel split (Default)"
+		help
+		  This is the default split of 3GB userspace to 1GB kernel
+		  space, which will result in about 860MB of lowmem.
+
+	config VMSPLIT_25G
+		bool "2.5G/1.5G user/kernel split"
+		help
+		  This split provides 2.5GB userspace and 1.5GB kernel
+		  space, which will result in about 1370MB of lowmem.
+
 	config VMSPLIT_2G
 		bool "2G/2G user/kernel split"
+		help
+		  This split provides 2GB userspace and 2GB kernel
+		  space, which will result in about 1880MB of lowmem.
+
+	config VMSPLIT_15G
+		bool "1.5G/2.5G user/kernel split"
+		help
+		  This split provides 1.5GB userspace and 2.5GB kernel
+		  space, which will result in about 2390MB of lowmem.
+
 	config VMSPLIT_1G
 		bool "1G/3G user/kernel split"
+		help
+		  This split provides 1GB userspace and 3GB kernel
+		  space, which will result in about 2900MB of lowmem.
+
 endchoice
 
 config PAGE_OFFSET
 	hex
-	default 0xB0000000 if VMSPLIT_3G_OPT
-	default 0x78000000 if VMSPLIT_2G
+	default 0xA0000000 if VMSPLIT_25G
+	default 0x80000000 if VMSPLIT_2G
+	default 0x60000000 if VMSPLIT_15G
 	default 0x40000000 if VMSPLIT_1G
 	default 0xC0000000
 
@@ -540,14 +523,12 @@ config NUMA
 	default n if X86_PC
 	default y if (X86_NUMAQ || X86_SUMMIT)
 
+# Need comments to help the hapless user trying to turn on NUMA support
+comment "NUMA (NUMA-Q) requires SMP, 64GB highmem support"
+	depends on X86_NUMAQ && (!HIGHMEM64G || !SMP)
+
 comment "NUMA (Summit) requires SMP, 64GB highmem support, ACPI"
 	depends on X86_SUMMIT && (!HIGHMEM64G || !ACPI)
-
-config NODES_SHIFT
-	int
-	default "4" if X86_NUMAQ
-	default "3"
-	depends on NEED_MULTIPLE_NODES
 
 config HAVE_ARCH_BOOTMEM_NODE
 	bool
@@ -599,7 +580,7 @@ config HAVE_ARCH_EARLY_PFN_TO_NID
 
 config HIGHPTE
 	bool "Allocate 3rd-level pagetables from highmem"
-	depends on (HIGHMEM4G || HIGHMEM64G) && !X86_XEN
+	depends on HIGHMEM4G || HIGHMEM64G
 	help
 	  The VM uses one page table entry for each page of physical memory.
 	  For systems with a lot of RAM, this can be wasteful of precious
@@ -608,7 +589,6 @@ config HIGHPTE
 
 config MATH_EMULATION
 	bool "Math emulation"
-	depends on !X86_XEN
 	---help---
 	  Linux can emulate a math coprocessor (used for floating point
 	  operations) if you don't have one. 486DX and Pentium processors have
@@ -634,8 +614,6 @@ config MATH_EMULATION
 
 config MTRR
 	bool "MTRR (Memory Type Range Register) support"
-	depends on !XEN_UNPRIVILEGED_GUEST
-	default y if X86_XEN
 	---help---
 	  On Intel P6 family processors (Pentium Pro, Pentium II and later)
 	  the Memory Type Range Registers (MTRRs) may be used to control
@@ -670,7 +648,7 @@ config MTRR
 
 config EFI
 	bool "Boot from EFI support (EXPERIMENTAL)"
-	depends on ACPI && !X86_XEN
+	depends on ACPI
 	default n
 	---help---
 	This enables the the kernel to boot on EFI platforms using
@@ -688,7 +666,7 @@ config EFI
 
 config IRQBALANCE
  	bool "Enable kernel irq balancing"
-	depends on SMP && X86_IO_APIC && !X86_XEN
+	depends on SMP && X86_IO_APIC
 	default y
 	help
  	  The default yes will allow the kernel to do irq load balancing.
@@ -702,18 +680,13 @@ config BOOT_IOREMAP
 	default y
 
 config REGPARM
-	bool "Use register arguments"
-	default y
+	bool "Use register arguments (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	default n
 	help
-	Compile the kernel with -mregparm=3. This instructs gcc to use
-	a more efficient function call ABI which passes the first three
-	arguments of a function call via registers, which results in denser
-	and faster code.
-
-	If this option is disabled, then the default ABI of passing
-	arguments via the stack is used.
-
-	If unsure, say Y.
+	Compile the kernel with -mregparm=3. This uses a different ABI
+	and passes the first three arguments of a function call in registers.
+	This will probably break binary only modules.
 
 config SECCOMP
 	bool "Enable seccomp to safely compute untrusted bytecode"
@@ -736,7 +709,7 @@ source kernel/Kconfig.hz
 
 config KEXEC
 	bool "kexec system call (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && !X86_XEN
+	depends on EXPERIMENTAL
 	help
 	  kexec is a system call that implements the ability to shutdown your
 	  current kernel, and to start another kernel.  It is like a reboot
@@ -759,7 +732,7 @@ config CRASH_DUMP
 	  Generate crash dump after being started by kexec.
 
 config PHYSICAL_START
-	hex "Physical address where the kernel is loaded"
+	hex "Physical address where the kernel is loaded" if (EMBEDDED || CRASH_DUMP)
 
 	default "0x1000000" if CRASH_DUMP
 	default "0x100000"
@@ -782,10 +755,19 @@ config HOTPLUG_CPU
 	bool "Support for hot-pluggable CPUs (EXPERIMENTAL)"
 	depends on SMP && HOTPLUG && EXPERIMENTAL && !X86_VOYAGER
 	---help---
-	  Say Y here to experiment with turning CPUs off and on, and to
-	  enable suspend on SMP systems. CPUs can be controlled through
-	  /sys/devices/system/cpu.
+	  Say Y here to experiment with turning CPUs off and on.  CPUs
+	  can be controlled through /sys/devices/system/cpu.
 
+	  Say N.
+
+config DOUBLEFAULT
+	default y
+	bool "Enable doublefault exception handler" if EMBEDDED
+	help
+          This option allows trapping of rare doublefault exceptions that
+          would otherwise cause a system to silently reboot. Disabling this
+          option saves about 4k and might cause you much additional grey
+          hair.
 
 endmenu
 
@@ -794,20 +776,18 @@ config ARCH_ENABLE_MEMORY_HOTPLUG
 	depends on HIGHMEM
 
 menu "Power management options (ACPI, APM)"
-	depends on !(X86_VOYAGER || XEN_UNPRIVILEGED_GUEST)
+	depends on !X86_VOYAGER
 
-if !X86_XEN
 source kernel/power/Kconfig
-endif
 
 source "drivers/acpi/Kconfig"
 
 menu "APM (Advanced Power Management) BIOS Support"
-depends on PM && !(X86_VISWS || X86_XEN)
+depends on PM && !X86_VISWS
 
 config APM
 	tristate "APM (Advanced Power Management) BIOS support"
-	depends on PM && PM_LEGACY
+	depends on PM
 	---help---
 	  APM is a BIOS specification for saving power using several different
 	  techniques. This is mostly useful for battery powered laptops with
@@ -992,20 +972,12 @@ choice
 
 config PCI_GOBIOS
 	bool "BIOS"
-	depends on !X86_XEN
 
 config PCI_GOMMCONFIG
 	bool "MMConfig"
 
 config PCI_GODIRECT
 	bool "Direct"
-
-config PCI_GOXEN_FE
-	bool "Xen PCI Frontend"
-	depends on X86_XEN
-	help
-	  The PCI device frontend driver allows the kernel to import arbitrary
-	  PCI devices from a PCI backend to support PCI driver domains.
 
 config PCI_GOANY
 	bool "Any"
@@ -1014,7 +986,7 @@ endchoice
 
 config PCI_BIOS
 	bool
-	depends on !(X86_VISWS || X86_XEN) && PCI && (PCI_GOBIOS || PCI_GOANY)
+	depends on !X86_VISWS && PCI && (PCI_GOBIOS || PCI_GOANY)
 	default y
 
 config PCI_DIRECT
@@ -1027,18 +999,6 @@ config PCI_MMCONFIG
 	depends on PCI && ACPI && (PCI_GOMMCONFIG || PCI_GOANY)
 	default y
 
-config XEN_PCIDEV_FRONTEND
-	bool
-	depends on PCI && X86_XEN && (PCI_GOXEN_FE || PCI_GOANY)
-	default y
-
-config XEN_PCIDEV_FE_DEBUG
-	bool "Xen PCI Frontend Debugging"
-	depends on XEN_PCIDEV_FRONTEND
-	default n
-	help
-	  Enables some debug statements within the PCI Frontend.
-
 source "drivers/pci/pcie/Kconfig"
 
 source "drivers/pci/Kconfig"
@@ -1049,7 +1009,7 @@ config ISA_DMA_API
 
 config ISA
 	bool "ISA support"
-	depends on !(X86_VOYAGER || X86_VISWS || X86_XEN)
+	depends on !(X86_VOYAGER || X86_VISWS)
 	help
 	  Find out whether you have ISA slots on your motherboard.  ISA is the
 	  name of a bus system, i.e. the way the CPU talks to the other stuff
@@ -1076,7 +1036,7 @@ config EISA
 source "drivers/eisa/Kconfig"
 
 config MCA
-	bool "MCA support" if !(X86_VISWS || X86_VOYAGER || X86_XEN)
+	bool "MCA support" if !(X86_VISWS || X86_VOYAGER)
 	default y if X86_VOYAGER
 	help
 	  MicroChannel Architecture is found in some IBM PS/2 machines and
@@ -1140,8 +1100,6 @@ source "security/Kconfig"
 
 source "crypto/Kconfig"
 
-source "drivers/xen/Kconfig"
-
 source "lib/Kconfig"
 
 #
@@ -1167,7 +1125,7 @@ config X86_SMP
 
 config X86_HT
 	bool
-	depends on SMP && !(X86_VISWS || X86_VOYAGER || X86_XEN)
+	depends on SMP && !(X86_VISWS || X86_VOYAGER)
 	default y
 
 config X86_BIOS_REBOOT
@@ -1178,16 +1136,6 @@ config X86_BIOS_REBOOT
 config X86_TRAMPOLINE
 	bool
 	depends on X86_SMP || (X86_VOYAGER && SMP)
-	default y
-
-config X86_NO_TSS
-	bool
-	depends on X86_XEN
-	default y
-
-config X86_NO_IDT
-	bool
-	depends on X86_XEN
 	default y
 
 config KTIME_SCALAR

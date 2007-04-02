@@ -38,7 +38,6 @@
 #include <linux/init.h>
 #include <linux/parport.h>
 #include <linux/input.h>
-#include <linux/mutex.h>
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
 MODULE_DESCRIPTION("Atari, Amstrad, Commodore, Amiga, Sega, etc. joystick driver");
@@ -112,7 +111,7 @@ struct db9 {
 	struct pardevice *pd;
 	int mode;
 	int used;
-	struct mutex mutex;
+	struct semaphore sem;
 	char phys[DB9_MAX_DEVICES][32];
 };
 
@@ -526,7 +525,7 @@ static int db9_open(struct input_dev *dev)
 	struct parport *port = db9->pd->port;
 	int err;
 
-	err = mutex_lock_interruptible(&db9->mutex);
+	err = down_interruptible(&db9->sem);
 	if (err)
 		return err;
 
@@ -540,7 +539,7 @@ static int db9_open(struct input_dev *dev)
 		mod_timer(&db9->timer, jiffies + DB9_REFRESH_TIME);
 	}
 
-	mutex_unlock(&db9->mutex);
+	up(&db9->sem);
 	return 0;
 }
 
@@ -549,14 +548,14 @@ static void db9_close(struct input_dev *dev)
 	struct db9 *db9 = dev->private;
 	struct parport *port = db9->pd->port;
 
-	mutex_lock(&db9->mutex);
+	down(&db9->sem);
 	if (!--db9->used) {
 		del_timer_sync(&db9->timer);
 		parport_write_control(port, 0x00);
 		parport_data_forward(port);
 		parport_release(db9->pd);
 	}
-	mutex_unlock(&db9->mutex);
+	up(&db9->sem);
 }
 
 static struct db9 __init *db9_probe(int parport, int mode)
@@ -604,7 +603,7 @@ static struct db9 __init *db9_probe(int parport, int mode)
 		goto err_unreg_pardev;
 	}
 
-	mutex_init(&db9->mutex);
+	init_MUTEX(&db9->sem);
 	db9->pd = pd;
 	db9->mode = mode;
 	init_timer(&db9->timer);

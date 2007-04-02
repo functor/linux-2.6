@@ -148,7 +148,6 @@ struct termios {
 #define HUPCL	00040000
 
 #define CLOCAL	00100000
-#define CMSPAR	  010000000000		/* mark or space (stick) parity */
 #define CRTSCTS	  020000000000		/* flow control */
 
 /* c_lflag bits */

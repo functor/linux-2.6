@@ -192,7 +192,6 @@ query_segment_type (struct dcss_segment *seg)
 	diag_cc = dcss_diag (DCSS_SEGEXT, qin, &dummy, &vmrc);
 
 	if (diag_cc > 1) {
-		PRINT_WARN ("segment_type: diag returned error %ld\n", vmrc);
 		rc = dcss_diag_translate_rc (vmrc);
 		goto out_free;
 	}
@@ -554,7 +553,7 @@ segment_save(char *name)
 	int endpfn = 0;
 	char cmd1[160];
 	char cmd2[80];
-	int i, response;
+	int i;
 
 	if (!MACHINE_IS_VM)
 		return;
@@ -577,20 +576,8 @@ segment_save(char *name)
 			segtype_string[seg->range[i].start & 0xff]);
 	}
 	sprintf(cmd2, "SAVESEG %s", name);
-	response = 0;
-	cpcmd(cmd1, NULL, 0, &response);
-	if (response) {
-		PRINT_ERR("segment_save: DEFSEG failed with response code %i\n",
-			  response);
-		goto out;
-	}
-	cpcmd(cmd2, NULL, 0, &response);
-	if (response) {
-		PRINT_ERR("segment_save: SAVESEG failed with response code %i\n",
-			  response);
-		goto out;
-	}
-out:
+	cpcmd(cmd1, NULL, 0, NULL);
+	cpcmd(cmd2, NULL, 0, NULL);
 	spin_unlock(&dcss_lock);
 }
 

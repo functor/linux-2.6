@@ -32,7 +32,7 @@
 #include <asm/uaccess.h>
 
 
-#include <media/rds.h>
+#include "rds.h"
 
 /* Addresses to scan */
 static unsigned short normal_i2c[] = {

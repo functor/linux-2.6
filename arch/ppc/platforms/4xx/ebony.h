@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/ebony.h
+ *
  * Ebony board definitions
  *
  * Matt Porter <mporter@mvista.com>

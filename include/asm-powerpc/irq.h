@@ -54,13 +54,6 @@
  */
 extern unsigned int virt_irq_to_real_map[NR_IRQS];
 
-/* The maximum virtual IRQ number that we support.  This
- * can be set by the platform and will be reduced by the
- * value of __irq_offset_value.  It defaults to and is
- * capped by (NR_IRQS - 1).
- */
-extern unsigned int virt_irq_max;
-
 /* Create a mapping for a real_irq if it doesn't already exist.
  * Return the virtual irq as a convenience.
  */
@@ -486,10 +479,6 @@ extern int distribute_irqs;
 struct irqaction;
 struct pt_regs;
 
-#define __ARCH_HAS_DO_SOFTIRQ
-
-extern void __do_softirq(void);
-
 #ifdef CONFIG_IRQSTACKS
 /*
  * Per-cpu stacks for handling hard and soft interrupts.
@@ -501,6 +490,8 @@ extern void irq_ctx_init(void);
 extern void call_do_softirq(struct thread_info *tp);
 extern int call___do_IRQ(int irq, struct pt_regs *regs,
 		struct thread_info *tp);
+
+#define __ARCH_HAS_DO_SOFTIRQ
 
 #else
 #define irq_ctx_init()

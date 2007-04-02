@@ -991,6 +991,7 @@ static int acpi_ec_poll_add(struct acpi_device *device)
 	int result = 0;
 	acpi_status status = AE_OK;
 	union acpi_ec *ec = NULL;
+	unsigned long uid;
 
 	ACPI_FUNCTION_TRACE("acpi_ec_add");
 
@@ -1013,9 +1014,10 @@ static int acpi_ec_poll_add(struct acpi_device *device)
 	acpi_evaluate_integer(ec->common.handle, "_GLK", NULL,
 			      &ec->common.global_lock);
 
-	/* XXX we doesn't test uids, because on some boxes ecdt uid = 0, see:
-	   http://bugzilla.kernel.org/show_bug.cgi?id=6111 */
-	if (ec_ecdt) {
+	/* If our UID matches the UID for the ECDT-enumerated EC,
+	   we now have the *real* EC info, so kill the makeshift one. */
+	acpi_evaluate_integer(ec->common.handle, "_UID", NULL, &uid);
+	if (ec_ecdt && ec_ecdt->common.uid == uid) {
 		acpi_remove_address_space_handler(ACPI_ROOT_OBJECT,
 						  ACPI_ADR_SPACE_EC,
 						  &acpi_ec_space_handler);
@@ -1060,6 +1062,7 @@ static int acpi_ec_intr_add(struct acpi_device *device)
 	int result = 0;
 	acpi_status status = AE_OK;
 	union acpi_ec *ec = NULL;
+	unsigned long uid;
 
 	ACPI_FUNCTION_TRACE("acpi_ec_add");
 
@@ -1085,9 +1088,10 @@ static int acpi_ec_intr_add(struct acpi_device *device)
 	acpi_evaluate_integer(ec->common.handle, "_GLK", NULL,
 			      &ec->common.global_lock);
 
-	/* XXX we doesn't test uids, because on some boxes ecdt uid = 0, see:
-	   http://bugzilla.kernel.org/show_bug.cgi?id=6111 */
-	if (ec_ecdt) {
+	/* If our UID matches the UID for the ECDT-enumerated EC,
+	   we now have the *real* EC info, so kill the makeshift one. */
+	acpi_evaluate_integer(ec->common.handle, "_UID", NULL, &uid);
+	if (ec_ecdt && ec_ecdt->common.uid == uid) {
 		acpi_remove_address_space_handler(ACPI_ROOT_OBJECT,
 						  ACPI_ADR_SPACE_EC,
 						  &acpi_ec_space_handler);
@@ -1568,7 +1572,7 @@ static void __exit acpi_ec_exit(void)
 static int __init acpi_fake_ecdt_setup(char *str)
 {
 	acpi_fake_ecdt_enabled = 1;
-	return 1;
+	return 0;
 }
 
 __setup("acpi_fake_ecdt", acpi_fake_ecdt_setup);
@@ -1587,7 +1591,7 @@ static int __init acpi_ec_set_intr_mode(char *str)
 		acpi_ec_driver.ops.add = acpi_ec_poll_add;
 	}
 	printk(KERN_INFO PREFIX "EC %s mode.\n", intr ? "interrupt" : "polling");
-	return 1;
+	return 0;
 }
 
 __setup("ec_intr=", acpi_ec_set_intr_mode);

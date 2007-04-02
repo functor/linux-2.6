@@ -81,12 +81,20 @@ void uml_idle_timer(void)
 	set_interval(ITIMER_REAL);
 }
 
+extern void ktime_get_ts(struct timespec *ts);
+#define do_posix_clock_monotonic_gettime(ts) ktime_get_ts(ts)
+
 void time_init(void)
 {
+	struct timespec now;
+
 	if(signal(SIGVTALRM, boot_timer_handler) == SIG_ERR)
 		panic("Couldn't set SIGVTALRM handler");
 	set_interval(ITIMER_VIRTUAL);
-	time_init_kern();
+
+	do_posix_clock_monotonic_gettime(&now);
+	wall_to_monotonic.tv_sec = -now.tv_sec;
+	wall_to_monotonic.tv_nsec = -now.tv_nsec;
 }
 
 unsigned long long os_nsecs(void)

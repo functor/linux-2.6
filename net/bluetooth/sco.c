@@ -255,7 +255,7 @@ static inline int sco_send_frame(struct sock *sk, struct msghdr *msg, int len)
 	}
 
 	if ((err = hci_send_sco(conn->hcon, skb)) < 0)
-		return err;
+		goto fail;
 
 	return count;
 

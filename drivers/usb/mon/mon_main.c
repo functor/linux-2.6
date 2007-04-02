@@ -12,7 +12,6 @@
 #include <linux/debugfs.h>
 #include <linux/smp_lock.h>
 #include <linux/notifier.h>
-#include <linux/mutex.h>
 
 #include "usb_mon.h"
 #include "../core/hcd.h"
@@ -24,7 +23,7 @@ static void mon_dissolve(struct mon_bus *mbus, struct usb_bus *ubus);
 static void mon_bus_drop(struct kref *r);
 static void mon_bus_init(struct dentry *mondir, struct usb_bus *ubus);
 
-DEFINE_MUTEX(mon_lock);
+DECLARE_MUTEX(mon_lock);
 
 static struct dentry *mon_dir;		/* /dbg/usbmon */
 static LIST_HEAD(mon_buses);		/* All buses we know: struct mon_bus */
@@ -197,14 +196,14 @@ static void mon_bus_remove(struct usb_bus *ubus)
 {
 	struct mon_bus *mbus = ubus->mon_bus;
 
-	mutex_lock(&mon_lock);
+	down(&mon_lock);
 	list_del(&mbus->bus_link);
 	debugfs_remove(mbus->dent_t);
 	debugfs_remove(mbus->dent_s);
 
 	mon_dissolve(mbus, ubus);
 	kref_put(&mbus->ref, mon_bus_drop);
-	mutex_unlock(&mon_lock);
+	up(&mon_lock);
 }
 
 static int mon_notify(struct notifier_block *self, unsigned long action,
@@ -277,8 +276,9 @@ static void mon_bus_init(struct dentry *mondir, struct usb_bus *ubus)
 	char name[NAMESZ];
 	int rc;
 
-	if ((mbus = kzalloc(sizeof(struct mon_bus), GFP_KERNEL)) == NULL)
+	if ((mbus = kmalloc(sizeof(struct mon_bus), GFP_KERNEL)) == NULL)
 		goto err_alloc;
+	memset(mbus, 0, sizeof(struct mon_bus));
 	kref_init(&mbus->ref);
 	spin_lock_init(&mbus->lock);
 	INIT_LIST_HEAD(&mbus->r_list);
@@ -307,9 +307,9 @@ static void mon_bus_init(struct dentry *mondir, struct usb_bus *ubus)
 		goto err_create_s;
 	mbus->dent_s = d;
 
-	mutex_lock(&mon_lock);
+	down(&mon_lock);
 	list_add_tail(&mbus->bus_link, &mon_buses);
-	mutex_unlock(&mon_lock);
+	up(&mon_lock);
 	return;
 
 err_create_s:
@@ -347,11 +347,11 @@ static int __init mon_init(void)
 
 	usb_register_notify(&mon_nb);
 
-	mutex_lock(&usb_bus_list_lock);
+	down(&usb_bus_list_lock);
 	list_for_each_entry (ubus, &usb_bus_list, bus_list) {
 		mon_bus_init(mondir, ubus);
 	}
-	mutex_unlock(&usb_bus_list_lock);
+	up(&usb_bus_list_lock);
 	return 0;
 }
 
@@ -363,7 +363,7 @@ static void __exit mon_exit(void)
 	usb_unregister_notify(&mon_nb);
 	usb_mon_deregister();
 
-	mutex_lock(&mon_lock);
+	down(&mon_lock);
 	while (!list_empty(&mon_buses)) {
 		p = mon_buses.next;
 		mbus = list_entry(p, struct mon_bus, bus_link);
@@ -387,7 +387,7 @@ static void __exit mon_exit(void)
 		mon_dissolve(mbus, mbus->u_bus);
 		kref_put(&mbus->ref, mon_bus_drop);
 	}
-	mutex_unlock(&mon_lock);
+	up(&mon_lock);
 
 	debugfs_remove(mon_dir);
 }

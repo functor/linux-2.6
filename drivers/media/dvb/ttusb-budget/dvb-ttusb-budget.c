@@ -19,7 +19,7 @@
 #include <linux/time.h>
 #include <linux/errno.h>
 #include <linux/jiffies.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #include "dvb_frontend.h"
 #include "dmxdev.h"
@@ -34,6 +34,7 @@
 #include <linux/dvb/frontend.h>
 #include <linux/dvb/dmx.h>
 #include <linux/pci.h>
+
 
 /*
   TTUSB_HWSECTIONS:
@@ -82,8 +83,8 @@ struct ttusb {
 	struct dvb_net dvbnet;
 
 	/* and one for USB access. */
-	struct mutex semi2c;
-	struct mutex semusb;
+	struct semaphore semi2c;
+	struct semaphore semusb;
 
 	struct dvb_adapter adapter;
 	struct usb_device *dev;
@@ -149,7 +150,7 @@ static int ttusb_cmd(struct ttusb *ttusb,
 	printk("\n");
 #endif
 
-	if (mutex_lock_interruptible(&ttusb->semusb) < 0)
+	if (down_interruptible(&ttusb->semusb) < 0)
 		return -EAGAIN;
 
 	err = usb_bulk_msg(ttusb->dev, ttusb->bulk_out_pipe,
@@ -157,13 +158,13 @@ static int ttusb_cmd(struct ttusb *ttusb,
 	if (err != 0) {
 		dprintk("%s: usb_bulk_msg(send) failed, err == %i!\n",
 			__FUNCTION__, err);
-		mutex_unlock(&ttusb->semusb);
+		up(&ttusb->semusb);
 		return err;
 	}
 	if (actual_len != len) {
 		dprintk("%s: only wrote %d of %d bytes\n", __FUNCTION__,
 			actual_len, len);
-		mutex_unlock(&ttusb->semusb);
+		up(&ttusb->semusb);
 		return -1;
 	}
 
@@ -173,7 +174,7 @@ static int ttusb_cmd(struct ttusb *ttusb,
 	if (err != 0) {
 		printk("%s: failed, receive error %d\n", __FUNCTION__,
 		       err);
-		mutex_unlock(&ttusb->semusb);
+		up(&ttusb->semusb);
 		return err;
 	}
 #if DEBUG >= 3
@@ -184,14 +185,14 @@ static int ttusb_cmd(struct ttusb *ttusb,
 	printk("\n");
 #endif
 	if (!needresult)
-		mutex_unlock(&ttusb->semusb);
+		up(&ttusb->semusb);
 	return 0;
 }
 
 static int ttusb_result(struct ttusb *ttusb, u8 * data, int len)
 {
 	memcpy(data, ttusb->last_result, len);
-	mutex_unlock(&ttusb->semusb);
+	up(&ttusb->semusb);
 	return 0;
 }
 
@@ -249,7 +250,7 @@ static int master_xfer(struct i2c_adapter* adapter, struct i2c_msg *msg, int num
 	int i = 0;
 	int inc;
 
-	if (mutex_lock_interruptible(&ttusb->semi2c) < 0)
+	if (down_interruptible(&ttusb->semi2c) < 0)
 		return -EAGAIN;
 
 	while (i < num) {
@@ -283,7 +284,7 @@ static int master_xfer(struct i2c_adapter* adapter, struct i2c_msg *msg, int num
 		i += inc;
 	}
 
-	mutex_unlock(&ttusb->semi2c);
+	up(&ttusb->semi2c);
 	return i;
 }
 
@@ -688,7 +689,8 @@ static void ttusb_process_frame(struct ttusb *ttusb, u8 * data, int len)
 				memcpy(ttusb->muxpack + ttusb->muxpack_ptr,
 				       data, avail);
 				ttusb->muxpack_ptr += avail;
-				BUG_ON(ttusb->muxpack_ptr > 264);
+				if (ttusb->muxpack_ptr > 264)
+					BUG();
 				data += avail;
 				len -= avail;
 				/* determine length */
@@ -1493,11 +1495,8 @@ static int ttusb_probe(struct usb_interface *intf, const struct usb_device_id *i
 	ttusb->dev = udev;
 	ttusb->c = 0;
 	ttusb->mux_state = 0;
-	mutex_init(&ttusb->semi2c);
-
-	mutex_lock(&ttusb->semi2c);
-
-	mutex_init(&ttusb->semusb);
+	sema_init(&ttusb->semi2c, 0);
+	sema_init(&ttusb->semusb, 1);
 
 	ttusb_setup_interfaces(ttusb);
 
@@ -1505,13 +1504,9 @@ static int ttusb_probe(struct usb_interface *intf, const struct usb_device_id *i
 	if (ttusb_init_controller(ttusb))
 		printk("ttusb_init_controller: error\n");
 
-	mutex_unlock(&ttusb->semi2c);
+	up(&ttusb->semi2c);
 
-	if ((result = dvb_register_adapter(&ttusb->adapter, "Technotrend/Hauppauge Nova-USB", THIS_MODULE)) < 0) {
-		ttusb_free_iso_urbs(ttusb);
-		kfree(ttusb);
-		return result;
-	}
+	dvb_register_adapter(&ttusb->adapter, "Technotrend/Hauppauge Nova-USB", THIS_MODULE);
 	ttusb->adapter.priv = ttusb;
 
 	/* i2c */

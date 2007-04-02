@@ -134,10 +134,9 @@ struct skb_frag_struct {
 struct skb_shared_info {
 	atomic_t	dataref;
 	unsigned short	nr_frags;
-	unsigned short	gso_size;
-	/* Warning: this field is not always filled in (UFO)! */
-	unsigned short	gso_segs;
-	unsigned short  gso_type;
+	unsigned short	tso_size;
+	unsigned short	tso_segs;
+	unsigned short  ufo_size;
 	unsigned int    ip6_frag_id;
 	struct sk_buff	*frag_list;
 	skb_frag_t	frags[MAX_SKB_FRAGS];
@@ -169,14 +168,6 @@ enum {
 	SKB_FCLONE_CLONE,
 };
 
-enum {
-	SKB_GSO_TCPV4 = 1 << 0,
-	SKB_GSO_UDPV4 = 1 << 1,
-
-	/* This indicates the skb is from an untrusted source. */
-	SKB_GSO_DODGY = 1 << 2,
-};
-
 /** 
  *	struct sk_buff - socket buffer
  *	@next: Next buffer in list
@@ -198,8 +189,6 @@ enum {
  *	@local_df: allow local fragmentation
  *	@cloned: Head may be cloned (check refcnt to be sure)
  *	@nohdr: Payload reference only, must not modify header
- *	@proto_data_valid: Protocol data validated since arriving at localhost
- *	@proto_csum_blank: Protocol csum must be added before leaving localhost
  *	@pkt_type: Packet class
  *	@fclone: skbuff clone status
  *	@ip_summed: Driver fed us an IP checksum
@@ -276,17 +265,12 @@ struct sk_buff {
 				nfctinfo:3;
 	__u8			pkt_type:3,
 				fclone:2,
-#ifndef CONFIG_XEN
 				ipvs_property:1;
-#else
-				ipvs_property:1,
-				proto_data_valid:1,
-				proto_csum_blank:1;
-#endif
 	__be16			protocol;
 
 	void			(*destructor)(struct sk_buff *skb);
 #ifdef CONFIG_NETFILTER
+	__u32			nfmark;
 	struct nf_conntrack	*nfct;
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct sk_buff		*nfct_reasm;
@@ -294,7 +278,6 @@ struct sk_buff {
 #ifdef CONFIG_BRIDGE_NETFILTER
 	struct nf_bridge_info	*nf_bridge;
 #endif
-	__u32			nfmark;
 #endif /* CONFIG_NETFILTER */
 #ifdef CONFIG_NET_SCHED
 	__u16			tc_index;	/* traffic control index */
@@ -323,7 +306,6 @@ struct sk_buff {
 
 #include <asm/system.h>
 
-extern void kfree_skb(struct sk_buff *skb);
 extern void	       __kfree_skb(struct sk_buff *skb);
 extern struct sk_buff *__alloc_skb(unsigned int size,
 				   gfp_t priority, int fclone);
@@ -341,8 +323,7 @@ static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 
 extern struct sk_buff *alloc_skb_from_cache(kmem_cache_t *cp,
 					    unsigned int size,
-					    gfp_t priority,
-					    int fclone);
+					    gfp_t priority);
 extern void	       kfree_skbmem(struct sk_buff *skb);
 extern struct sk_buff *skb_clone(struct sk_buff *skb,
 				 gfp_t priority);
@@ -364,13 +345,6 @@ extern void	      skb_over_panic(struct sk_buff *skb, int len,
 				     void *here);
 extern void	      skb_under_panic(struct sk_buff *skb, int len,
 				      void *here);
-extern void	      skb_truesize_bug(struct sk_buff *skb);
-
-static inline void skb_truesize_check(struct sk_buff *skb)
-{
-	if (unlikely((int)skb->truesize < sizeof(struct sk_buff) + skb->len))
-		skb_truesize_bug(skb);
-}
 
 extern int skb_append_datato_frags(struct sock *sk, struct sk_buff *skb,
 			int getfrag(void *from, char *to, int offset,
@@ -430,6 +404,22 @@ static inline struct sk_buff *skb_get(struct sk_buff *skb)
  * If users == 1, we are the only owner and are can avoid redundant
  * atomic change.
  */
+
+/**
+ *	kfree_skb - free an sk_buff
+ *	@skb: buffer to free
+ *
+ *	Drop a reference to the buffer and free it if the usage count has
+ *	hit zero.
+ */
+static inline void kfree_skb(struct sk_buff *skb)
+{
+	if (likely(atomic_read(&skb->users) == 1))
+		smp_rmb();
+	else if (likely(!atomic_dec_and_test(&skb->users)))
+		return;
+	__kfree_skb(skb);
+}
 
 /**
  *	skb_cloned - is the buffer a clone
@@ -968,25 +958,6 @@ static inline void skb_reserve(struct sk_buff *skb, int len)
 #define NET_IP_ALIGN	2
 #endif
 
-/*
- * The networking layer reserves some headroom in skb data (via
- * dev_alloc_skb). This is used to avoid having to reallocate skb data when
- * the header has to grow. In the default case, if the header has to grow
- * 16 bytes or less we avoid the reallocation.
- *
- * Unfortunately this headroom changes the DMA alignment of the resulting
- * network packet. As for NET_IP_ALIGN, this unaligned DMA is expensive
- * on some architectures. An architecture can override this value,
- * perhaps setting it to a cacheline in size (since that will maintain
- * cacheline alignment of the DMA). It must be a power of 2.
- *
- * Various parts of the networking layer expect at least 16 bytes of
- * headroom, you should not reduce this.
- */
-#ifndef NET_SKB_PAD
-#define NET_SKB_PAD	16
-#endif
-
 extern int ___pskb_trim(struct sk_buff *skb, unsigned int len);
 
 static inline void __skb_trim(struct sk_buff *skb, unsigned int len)
@@ -1026,21 +997,6 @@ static inline int __pskb_trim(struct sk_buff *skb, unsigned int len)
 static inline int pskb_trim(struct sk_buff *skb, unsigned int len)
 {
 	return (len < skb->len) ? __pskb_trim(skb, len) : 0;
-}
-
-/**
- *	pskb_trim_unique - remove end from a paged unique (not cloned) buffer
- *	@skb: buffer to alter
- *	@len: new length
- *
- *	This is identical to pskb_trim except that the caller knows that
- *	the skb is not cloned so we should never get an error due to out-
- *	of-memory.
- */
-static inline void pskb_trim_unique(struct sk_buff *skb, unsigned int len)
-{
-	int err = pskb_trim(skb, len);
-	BUG_ON(err);
 }
 
 /**
@@ -1091,13 +1047,13 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
 static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 					      gfp_t gfp_mask)
 {
-	struct sk_buff *skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
+	struct sk_buff *skb = alloc_skb(length + 16, gfp_mask);
 	if (likely(skb))
-		skb_reserve(skb, NET_SKB_PAD);
+		skb_reserve(skb, 16);
 	return skb;
 }
 #else
-extern struct sk_buff *__dev_alloc_skb(unsigned int length, gfp_t gfp_mask);
+extern struct sk_buff *__dev_alloc_skb(unsigned int length, int gfp_mask);
 #endif
 
 /**
@@ -1131,15 +1087,13 @@ static inline struct sk_buff *dev_alloc_skb(unsigned int length)
  */
 static inline int skb_cow(struct sk_buff *skb, unsigned int headroom)
 {
-	int delta = (headroom > NET_SKB_PAD ? headroom : NET_SKB_PAD) -
-			skb_headroom(skb);
+	int delta = (headroom > 16 ? headroom : 16) - skb_headroom(skb);
 
 	if (delta < 0)
 		delta = 0;
 
 	if (delta || skb_cloned(skb))
-		return pskb_expand_head(skb, (delta + (NET_SKB_PAD-1)) &
-				~(NET_SKB_PAD-1), 0, GFP_ATOMIC);
+		return pskb_expand_head(skb, (delta + 15) & ~15, 0, GFP_ATOMIC);
 	return 0;
 }
 
@@ -1196,34 +1150,18 @@ static inline int skb_can_coalesce(struct sk_buff *skb, int i,
 	return 0;
 }
 
-static inline int __skb_linearize(struct sk_buff *skb)
-{
-	return __pskb_pull_tail(skb, skb->data_len) ? 0 : -ENOMEM;
-}
-
 /**
  *	skb_linearize - convert paged skb to linear one
  *	@skb: buffer to linarize
+ *	@gfp: allocation mode
  *
  *	If there is no free memory -ENOMEM is returned, otherwise zero
  *	is returned and the old skb data released.
  */
-static inline int skb_linearize(struct sk_buff *skb)
+extern int __skb_linearize(struct sk_buff *skb, gfp_t gfp);
+static inline int skb_linearize(struct sk_buff *skb, gfp_t gfp)
 {
-	return skb_is_nonlinear(skb) ? __skb_linearize(skb) : 0;
-}
-
-/**
- *	skb_linearize_cow - make sure skb is linear and writable
- *	@skb: buffer to process
- *
- *	If there is no free memory -ENOMEM is returned, otherwise zero
- *	is returned and the old skb data released.
- */
-static inline int skb_linearize_cow(struct sk_buff *skb)
-{
-	return skb_is_nonlinear(skb) || skb_cloned(skb) ?
-	       __skb_linearize(skb) : 0;
+	return __skb_linearize(skb, gfp);
 }
 
 /**
@@ -1238,13 +1176,11 @@ static inline int skb_linearize_cow(struct sk_buff *skb)
  */
 
 static inline void skb_postpull_rcsum(struct sk_buff *skb,
-				      const void *start, unsigned int len)
+					 const void *start, int len)
 {
 	if (skb->ip_summed == CHECKSUM_HW)
 		skb->csum = csum_sub(skb->csum, csum_partial(start, len, 0));
 }
-
-unsigned char *skb_pull_rcsum(struct sk_buff *skb, unsigned int len);
 
 /**
  *	pskb_trim_rcsum - trim received skb and update checksum
@@ -1320,7 +1256,6 @@ extern void	       skb_split(struct sk_buff *skb,
 				 struct sk_buff *skb1, const u32 len);
 
 extern void	       skb_release_data(struct sk_buff *skb);
-extern struct sk_buff *skb_segment(struct sk_buff *skb, int features);
 
 static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
 				       int len, void *buffer)
@@ -1395,8 +1330,6 @@ static inline unsigned int skb_checksum_complete(struct sk_buff *skb)
 		__skb_checksum_complete(skb);
 }
 
-struct tux_req_struct;
-
 #ifdef CONFIG_NETFILTER
 static inline void nf_conntrack_put(struct nf_conntrack *nfct)
 {
@@ -1420,6 +1353,16 @@ static inline void nf_conntrack_put_reasm(struct sk_buff *skb)
 		kfree_skb(skb);
 }
 #endif
+static inline void nf_reset(struct sk_buff *skb)
+{
+	nf_conntrack_put(skb->nfct);
+	skb->nfct = NULL;
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+	nf_conntrack_put_reasm(skb->nfct_reasm);
+	skb->nfct_reasm = NULL;
+#endif
+}
+
 #ifdef CONFIG_BRIDGE_NETFILTER
 static inline void nf_bridge_put(struct nf_bridge_info *nf_bridge)
 {
@@ -1432,28 +1375,9 @@ static inline void nf_bridge_get(struct nf_bridge_info *nf_bridge)
 		atomic_inc(&nf_bridge->use);
 }
 #endif /* CONFIG_BRIDGE_NETFILTER */
-static inline void nf_reset(struct sk_buff *skb)
-{
-	nf_conntrack_put(skb->nfct);
-	skb->nfct = NULL;
-#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
-	nf_conntrack_put_reasm(skb->nfct_reasm);
-	skb->nfct_reasm = NULL;
-#endif
-#ifdef CONFIG_BRIDGE_NETFILTER
-	nf_bridge_put(skb->nf_bridge);
-	skb->nf_bridge = NULL;
-#endif
-}
-
 #else /* CONFIG_NETFILTER */
 static inline void nf_reset(struct sk_buff *skb) {}
 #endif /* CONFIG_NETFILTER */
-
-static inline int skb_is_gso(const struct sk_buff *skb)
-{
-	return skb_shinfo(skb)->gso_size;
-}
 
 #endif	/* __KERNEL__ */
 #endif	/* _LINUX_SKBUFF_H */

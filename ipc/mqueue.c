@@ -25,11 +25,8 @@
 #include <linux/netlink.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
-#include <linux/mutex.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
-
 #include <net/sock.h>
 #include "util.h"
 
@@ -56,6 +53,7 @@
 #define HARD_MSGMAX 	(131072/sizeof(void*))
 #define DFLT_MSGSIZEMAX 8192	/* max message size */
 
+#define NOTIFY_COOKIE_LEN	32
 
 struct ext_wait_queue {		/* queue of sleeping tasks */
 	struct task_struct *task;
@@ -772,7 +770,7 @@ out_unlock:
  * The receiver accepts the message and returns without grabbing the queue
  * spinlock. Therefore an intermediate STATE_PENDING state and memory barriers
  * are necessary. The same algorithm is used for sysv semaphores, see
- * ipc/sem.c for more details.
+ * ipc/sem.c fore more details.
  *
  * The same algorithm is used for senders.
  */

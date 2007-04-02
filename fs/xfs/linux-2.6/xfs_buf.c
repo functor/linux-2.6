@@ -29,7 +29,6 @@
 #include <linux/blkdev.h>
 #include <linux/hash.h>
 #include <linux/kthread.h>
-#include <linux/migrate.h>
 #include "xfs_linux.h"
 
 STATIC kmem_zone_t *xfs_buf_zone;
@@ -182,7 +181,7 @@ free_address(
 {
 	a_list_t	*aentry;
 
-	aentry = kmalloc(sizeof(a_list_t), GFP_NOWAIT);
+	aentry = kmalloc(sizeof(a_list_t), GFP_ATOMIC & ~__GFP_HIGH);
 	if (likely(aentry)) {
 		spin_lock(&as_lock);
 		aentry->next = as_free_head;
@@ -1806,12 +1805,13 @@ xfs_flush_buftarg(
 int __init
 xfs_buf_init(void)
 {
+	int		error = -ENOMEM;
+
 #ifdef XFS_BUF_TRACE
 	xfs_buf_trace_buf = ktrace_alloc(XFS_BUF_TRACE_SIZE, KM_SLEEP);
 #endif
 
-	xfs_buf_zone = kmem_zone_init_flags(sizeof(xfs_buf_t), "xfs_buf",
-						KM_ZONE_HWALIGN, NULL);
+	xfs_buf_zone = kmem_zone_init(sizeof(xfs_buf_t), "xfs_buf");
 	if (!xfs_buf_zone)
 		goto out_free_trace_buf;
 
@@ -1839,7 +1839,7 @@ xfs_buf_init(void)
 #ifdef XFS_BUF_TRACE
 	ktrace_free(xfs_buf_trace_buf);
 #endif
-	return -ENOMEM;
+	return error;
 }
 
 void

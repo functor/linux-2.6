@@ -850,7 +850,7 @@ static void init_rxtx_rings(struct net_device *dev)
 			break;
 		skb->dev = dev;			/* Mark as being used by this device. */
 		np->rx_addr[i] = pci_map_single(np->pci_dev,skb->data,
-					np->rx_buf_sz,PCI_DMA_FROMDEVICE);
+					skb->len,PCI_DMA_FROMDEVICE);
 
 		np->rx_ring[i].buffer1 = np->rx_addr[i];
 		np->rx_ring[i].status = DescOwn;
@@ -1316,7 +1316,7 @@ static int netdev_rx(struct net_device *dev)
 			skb->dev = dev;			/* Mark as being used by this device. */
 			np->rx_addr[entry] = pci_map_single(np->pci_dev,
 							skb->data,
-							np->rx_buf_sz, PCI_DMA_FROMDEVICE);
+							skb->len, PCI_DMA_FROMDEVICE);
 			np->rx_ring[entry].buffer1 = np->rx_addr[entry];
 		}
 		wmb();
@@ -1605,11 +1605,11 @@ static void __devexit w840_remove1 (struct pci_dev *pdev)
  * - get_stats:
  * 	spin_lock_irq(np->lock), doesn't touch hw if not present
  * - hard_start_xmit:
- * 	synchronize_irq + netif_tx_disable;
+ * 	netif_stop_queue + spin_unlock_wait(&dev->xmit_lock);
  * - tx_timeout:
- * 	netif_device_detach + netif_tx_disable;
+ * 	netif_device_detach + spin_unlock_wait(&dev->xmit_lock);
  * - set_multicast_list
- * 	netif_device_detach + netif_tx_disable;
+ * 	netif_device_detach + spin_unlock_wait(&dev->xmit_lock);
  * - interrupt handler
  * 	doesn't touch hw if not present, synchronize_irq waits for
  * 	running instances of the interrupt handler.
@@ -1635,16 +1635,17 @@ static int w840_suspend (struct pci_dev *pdev, pm_message_t state)
 		netif_device_detach(dev);
 		update_csr6(dev, 0);
 		iowrite32(0, ioaddr + IntrEnable);
+		netif_stop_queue(dev);
 		spin_unlock_irq(&np->lock);
 
+		spin_unlock_wait(&dev->xmit_lock);
 		synchronize_irq(dev->irq);
-		netif_tx_disable(dev);
 	
 		np->stats.rx_missed_errors += ioread32(ioaddr + RxMissed) & 0xffff;
 
 		/* no more hardware accesses behind this line. */
 
-		BUG_ON(np->csr6);
+		if (np->csr6) BUG();
 		if (ioread32(ioaddr + IntrEnable)) BUG();
 
 		/* pci_power_off(pdev, -1); */

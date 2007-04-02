@@ -75,11 +75,12 @@ byte(const u32 x, const unsigned n)
 
 struct aes_ctx {
 	int key_length;
-	u32 buf[120];
+	u32 E[60];
+	u32 D[60];
 };
 
-#define E_KEY (&ctx->buf[0])
-#define D_KEY (&ctx->buf[60])
+#define E_KEY ctx->E
+#define D_KEY ctx->D
 
 static u8 pow_tab[256] __initdata;
 static u8 log_tab[256] __initdata;

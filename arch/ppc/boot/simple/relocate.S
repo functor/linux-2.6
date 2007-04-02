@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/simple/relocate.S
+ *
  * This is the common part of the loader relocation and initialization
  * process.  All of the board/processor specific initialization is
  * done before we get here.
@@ -194,7 +196,7 @@ start_ldr:
 	/*
 	 * Start at the begining.
 	 */
-#ifdef CONFIG_PPC_PREP
+#ifdef CONFIG_PPC_MULTIPLATFORM
 	li	r9,0xc
 	mtlr	r9
 	/* tell kernel we're prep, by putting 0xdeadc0de at KERNELLOAD,

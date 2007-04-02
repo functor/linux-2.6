@@ -92,6 +92,18 @@ mac_addr(char addr[6])
 	return __be64_to_cpu(n);
 }
 
+static struct sk_buff *
+skb_check(struct sk_buff *skb)
+{
+	if (skb_is_nonlinear(skb))
+	if ((skb = skb_share_check(skb, GFP_ATOMIC)))
+	if (skb_linearize(skb, GFP_ATOMIC) < 0) {
+		dev_kfree_skb(skb);
+		return NULL;
+	}
+	return skb;
+}
+
 void
 aoenet_xmit(struct sk_buff *sl)
 {
@@ -113,13 +125,14 @@ aoenet_rcv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, 
 	struct aoe_hdr *h;
 	u32 n;
 
-	skb = skb_share_check(skb, GFP_ATOMIC);
-	if (skb == NULL)
+	skb = skb_check(skb);
+	if (!skb)
 		return 0;
-	if (skb_linearize(skb))
-		goto exit;
+
 	if (!is_aoe_netif(ifp))
 		goto exit;
+
+	//skb->len += ETH_HLEN;	/* (1) */
 	skb_push(skb, ETH_HLEN);	/* (1) */
 
 	h = (struct aoe_hdr *) skb->mac.raw;

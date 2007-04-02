@@ -864,8 +864,9 @@ iso_sched_alloc (unsigned packets, gfp_t mem_flags)
 	int			size = sizeof *iso_sched;
 
 	size += packets * sizeof (struct ehci_iso_packet);
-	iso_sched = kzalloc(size, mem_flags);
+	iso_sched = kmalloc (size, mem_flags);
 	if (likely (iso_sched != NULL)) {
+		memset(iso_sched, 0, size);
 		INIT_LIST_HEAD (&iso_sched->td_list);
 	}
 	return iso_sched;
@@ -1398,7 +1399,7 @@ itd_complete (
 	 */
 
 	/* give urb back to the driver ... can be out-of-order */
-	dev = urb->dev;
+	dev = usb_get_dev (urb->dev);
 	ehci_urb_done (ehci, urb, regs);
 	urb = NULL;
 
@@ -1417,6 +1418,7 @@ itd_complete (
 			(stream->bEndpointAddress & USB_DIR_IN) ? "in" : "out");
 	}
 	iso_stream_put (ehci, stream);
+	usb_put_dev (dev);
 
 	return 1;
 }
@@ -1763,7 +1765,7 @@ sitd_complete (
 	 */
 
 	/* give urb back to the driver */
-	dev = urb->dev;
+	dev = usb_get_dev (urb->dev);
 	ehci_urb_done (ehci, urb, regs);
 	urb = NULL;
 
@@ -1782,6 +1784,7 @@ sitd_complete (
 			(stream->bEndpointAddress & USB_DIR_IN) ? "in" : "out");
 	}
 	iso_stream_put (ehci, stream);
+	usb_put_dev (dev);
 
 	return 1;
 }

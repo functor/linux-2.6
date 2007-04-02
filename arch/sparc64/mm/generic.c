@@ -15,6 +15,15 @@
 #include <asm/page.h>
 #include <asm/tlbflush.h>
 
+static inline pte_t mk_pte_io(unsigned long page, pgprot_t prot, int space)
+{
+	pte_t pte;
+	pte_val(pte) = (((page) | pgprot_val(prot) | _PAGE_E) &
+			~(unsigned long)_PAGE_CACHE);
+	pte_val(pte) |= (((unsigned long)space) << 32);
+	return pte;
+}
+
 /* Remap IO memory, the same way as remap_pfn_range(), but use
  * the obio memory space.
  *
@@ -39,29 +48,24 @@ static inline void io_remap_pte_range(struct mm_struct *mm, pte_t * pte,
 		pte_t entry;
 		unsigned long curend = address + PAGE_SIZE;
 		
-		entry = mk_pte_io(offset, prot, space, PAGE_SIZE);
+		entry = mk_pte_io(offset, prot, space);
 		if (!(address & 0xffff)) {
-			if (PAGE_SIZE < (4 * 1024 * 1024) &&
-			    !(address & 0x3fffff) &&
-			    !(offset & 0x3ffffe) &&
-			    end >= address + 0x400000) {
-				entry = mk_pte_io(offset, prot, space,
-						  4 * 1024 * 1024);
+			if (!(address & 0x3fffff) && !(offset & 0x3ffffe) && end >= address + 0x400000) {
+				entry = mk_pte_io(offset,
+						  __pgprot(pgprot_val (prot) | _PAGE_SZ4MB),
+						  space);
 				curend = address + 0x400000;
 				offset += 0x400000;
-			} else if (PAGE_SIZE < (512 * 1024) &&
-				   !(address & 0x7ffff) &&
-				   !(offset & 0x7fffe) &&
-				   end >= address + 0x80000) {
-				entry = mk_pte_io(offset, prot, space,
-						  512 * 1024 * 1024);
+			} else if (!(address & 0x7ffff) && !(offset & 0x7fffe) && end >= address + 0x80000) {
+				entry = mk_pte_io(offset,
+						  __pgprot(pgprot_val (prot) | _PAGE_SZ512K),
+						  space);
 				curend = address + 0x80000;
 				offset += 0x80000;
-			} else if (PAGE_SIZE < (64 * 1024) &&
-				   !(offset & 0xfffe) &&
-				   end >= address + 0x10000) {
-				entry = mk_pte_io(offset, prot, space,
-						  64 * 1024);
+			} else if (!(offset & 0xfffe) && end >= address + 0x10000) {
+				entry = mk_pte_io(offset,
+						  __pgprot(pgprot_val (prot) | _PAGE_SZ64K),
+						  space);
 				curend = address + 0x10000;
 				offset += 0x10000;
 			} else
@@ -69,8 +73,6 @@ static inline void io_remap_pte_range(struct mm_struct *mm, pte_t * pte,
 		} else
 			offset += PAGE_SIZE;
 
-		if (pte_write(entry))
-			entry = pte_mkdirty(entry);
 		do {
 			BUG_ON(!pte_none(*pte));
 			set_pte_at(mm, address, pte, entry);
@@ -142,6 +144,7 @@ int io_remap_pfn_range(struct vm_area_struct *vma, unsigned long from,
 	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP;
 	vma->vm_pgoff = phys_base >> PAGE_SHIFT;
 
+	prot = __pgprot(pg_iobits);
 	offset -= from;
 	dir = pgd_offset(mm, from);
 	flush_cache_range(vma, beg, end);

@@ -29,7 +29,6 @@
 #include <asm/lsu.h>
 #include <asm/sections.h>
 #include <asm/kdebug.h>
-#include <asm/mmu_context.h>
 
 /*
  * To debug kernel to catch accesses to certain virtual/physical addresses.
@@ -92,13 +91,12 @@ static void __kprobes unhandled_fault(unsigned long address,
 	die_if_kernel("Oops", regs);
 }
 
-static void bad_kernel_pc(struct pt_regs *regs, unsigned long vaddr)
+static void bad_kernel_pc(struct pt_regs *regs)
 {
 	unsigned long *ksp;
 
 	printk(KERN_CRIT "OOPS: Bogus kernel PC [%016lx] in fault handler\n",
 	       regs->tpc);
-	printk(KERN_CRIT "OOPS: Fault was to vaddr[%lx]\n", vaddr);
 	__asm__("mov %%sp, %0" : "=r" (ksp));
 	show_stack(current, ksp);
 	unhandled_fault(regs->tpc, current, regs);
@@ -139,7 +137,7 @@ static unsigned int get_user_insn(unsigned long tpc)
 	if (!pte_present(pte))
 		goto out;
 
-	pa  = (pte_pfn(pte) << PAGE_SHIFT);
+	pa  = (pte_val(pte) & _PAGE_PADDR);
 	pa += (tpc & ~PAGE_MASK);
 
 	/* Use phys bypass so we don't pollute dtlb/dcache. */
@@ -259,7 +257,7 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 	struct vm_area_struct *vma;
 	unsigned int insn = 0;
 	int si_code, fault_code;
-	unsigned long address, mm_rss;
+	unsigned long address;
 
 	fault_code = get_thread_fault_code();
 
@@ -282,7 +280,7 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 		    (tpc >= MODULES_VADDR && tpc < MODULES_END)) {
 			/* Valid, no problems... */
 		} else {
-			bad_kernel_pc(regs, address);
+			bad_kernel_pc(regs);
 			return;
 		}
 	}
@@ -327,12 +325,8 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 		insn = get_fault_insn(regs, 0);
 		if (!insn)
 			goto continue_fault;
-		/* All loads, stores and atomics have bits 30 and 31 both set
-		 * in the instruction.  Bit 21 is set in all stores, but we
-		 * have to avoid prefetches which also have bit 21 set.
-		 */
 		if ((insn & 0xc0200000) == 0xc0200000 &&
-		    (insn & 0x01780000) != 0x01680000) {
+		    (insn & 0x1780000) != 0x1680000) {
 			/* Don't bother updating thread struct value,
 			 * because update_mmu_cache only cares which tlb
 			 * the access came from.
@@ -412,20 +406,6 @@ good_area:
 	}
 
 	up_read(&mm->mmap_sem);
-
-	mm_rss = get_mm_rss(mm);
-#ifdef CONFIG_HUGETLB_PAGE
-	mm_rss -= (mm->context.huge_pte_count * (HPAGE_SIZE / PAGE_SIZE));
-#endif
-	if (unlikely(mm_rss >
-		     mm->context.tsb_block[MM_TSB_BASE].tsb_rss_limit))
-		tsb_grow(mm, MM_TSB_BASE, mm_rss);
-#ifdef CONFIG_HUGETLB_PAGE
-	mm_rss = mm->context.huge_pte_count;
-	if (unlikely(mm_rss >
-		     mm->context.tsb_block[MM_TSB_HUGE].tsb_rss_limit))
-		tsb_grow(mm, MM_TSB_HUGE, mm_rss);
-#endif
 	return;
 
 	/*

@@ -154,7 +154,7 @@ static inline void inet_twsk_add_bind_node(struct inet_timewait_sock *tw,
 
 static inline int inet_twsk_dead_hashed(const struct inet_timewait_sock *tw)
 {
-	return !hlist_unhashed(&tw->tw_death_node);
+	return tw->tw_death_node.pprev != NULL;
 }
 
 static inline void inet_twsk_dead_node_init(struct inet_timewait_sock *tw)

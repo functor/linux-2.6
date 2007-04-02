@@ -13,9 +13,6 @@
  * mostly rewritten, threaded and wake-one semantics added
  * MSGMAX limit removed, sysctl's added
  * (c) 1999 Manfred Spraul <manfred@colorfullife.com>
- *
- * support for audit of ipc object properties and permission changes
- * Dustin Kirkland <dustin.kirkland@us.ibm.com>
  */
 
 #include <linux/capability.h>
@@ -31,9 +28,6 @@
 #include <linux/syscalls.h>
 #include <linux/audit.h>
 #include <linux/seq_file.h>
-#include <linux/mutex.h>
-#include <linux/vs_base.h>
-
 #include <asm/current.h>
 #include <asm/uaccess.h>
 #include "util.h"
@@ -186,8 +180,8 @@ static void expunge_all(struct msg_queue* msq, int res)
  * removes the message queue from message queue ID 
  * array, and cleans up all the messages associated with this queue.
  *
- * msg_ids.mutex and the spinlock for this message queue is hold
- * before freeque() is called. msg_ids.mutex remains locked on exit.
+ * msg_ids.sem and the spinlock for this message queue is hold
+ * before freeque() is called. msg_ids.sem remains locked on exit.
  */
 static void freeque (struct msg_queue *msq, int id)
 {
@@ -215,7 +209,7 @@ asmlinkage long sys_msgget (key_t key, int msgflg)
 	int id, ret = -EPERM;
 	struct msg_queue *msq;
 	
-	mutex_lock(&msg_ids.mutex);
+	down(&msg_ids.sem);
 	if (key == IPC_PRIVATE) 
 		ret = newque(key, msgflg);
 	else if ((id = ipc_findkey(&msg_ids, key)) == -1) { /* key not used */
@@ -227,7 +221,8 @@ asmlinkage long sys_msgget (key_t key, int msgflg)
 		ret = -EEXIST;
 	} else {
 		msq = msg_lock(id);
-		BUG_ON(msq==NULL);
+		if(msq==NULL)
+			BUG();
 		if (ipcperms(&msq->q_perm, msgflg))
 			ret = -EACCES;
 		else {
@@ -238,7 +233,7 @@ asmlinkage long sys_msgget (key_t key, int msgflg)
 		}
 		msg_unlock(msq);
 	}
-	mutex_unlock(&msg_ids.mutex);
+	up(&msg_ids.sem);
 	return ret;
 }
 
@@ -368,7 +363,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 		msginfo.msgmnb = msg_ctlmnb;
 		msginfo.msgssz = MSGSSZ;
 		msginfo.msgseg = MSGSEG;
-		mutex_lock(&msg_ids.mutex);
+		down(&msg_ids.sem);
 		if (cmd == MSG_INFO) {
 			msginfo.msgpool = msg_ids.in_use;
 			msginfo.msgmap = atomic_read(&msg_hdrs);
@@ -379,7 +374,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 			msginfo.msgtql = MSGTQL;
 		}
 		max_id = msg_ids.max_id;
-		mutex_unlock(&msg_ids.mutex);
+		up(&msg_ids.sem);
 		if (copy_to_user (buf, &msginfo, sizeof(struct msginfo)))
 			return -EFAULT;
 		return (max_id < 0) ? 0: max_id;
@@ -435,6 +430,8 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 			return -EFAULT;
 		if (copy_msqid_from_user (&setbuf, buf, version))
 			return -EFAULT;
+		if ((err = audit_ipc_perms(setbuf.qbytes, setbuf.uid, setbuf.gid, setbuf.mode)))
+			return err;
 		break;
 	case IPC_RMID:
 		break;
@@ -442,7 +439,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 		return  -EINVAL;
 	}
 
-	mutex_lock(&msg_ids.mutex);
+	down(&msg_ids.sem);
 	msq = msg_lock(msqid);
 	err=-EINVAL;
 	if (msq == NULL)
@@ -452,11 +449,6 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 	if (msg_checkid(msq,msqid))
 		goto out_unlock_up;
 	ipcp = &msq->q_perm;
-
-	err = audit_ipc_obj(ipcp);
-	if (err)
-		goto out_unlock_up;
-
 	err = -EPERM;
 	if (current->euid != ipcp->cuid && 
 	    current->euid != ipcp->uid && !capable(CAP_SYS_ADMIN))
@@ -470,10 +462,6 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 	switch (cmd) {
 	case IPC_SET:
 	{
-		err = audit_ipc_set_perm(setbuf.qbytes, setbuf.uid, setbuf.gid, setbuf.mode, ipcp);
-		if (err)
-			goto out_unlock_up;
-
 		err = -EPERM;
 		if (setbuf.qbytes > msg_ctlmnb && !capable(CAP_SYS_RESOURCE))
 			goto out_unlock_up;
@@ -502,7 +490,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds __user *buf)
 	}
 	err = 0;
 out_up:
-	mutex_unlock(&msg_ids.mutex);
+	up(&msg_ids.sem);
 	return err;
 out_unlock_up:
 	msg_unlock(msq);

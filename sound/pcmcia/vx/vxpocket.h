@@ -42,7 +42,7 @@ struct snd_vxpocket {
 	int index;	/* card index */
 
 	/* pcmcia stuff */
-	struct pcmcia_device	*p_dev;
+	dev_link_t link;
 	dev_node_t node;
 };
 

@@ -57,12 +57,15 @@
 #include <asm/uaccess.h>
 
 #include "linux_compat.h"
+#include "typdef.h"
 #include "pkt.h"
 #include "daemon.h"
 #include "rio.h"
 #include "riospace.h"
+#include "top.h"
 #include "cmdpkt.h"
 #include "map.h"
+#include "riotypes.h"
 #include "rup.h"
 #include "port.h"
 #include "riodrvr.h"
@@ -75,13 +78,17 @@
 #include "unixrup.h"
 #include "board.h"
 #include "host.h"
+#include "error.h"
 #include "phb.h"
 #include "link.h"
 #include "cmdblk.h"
 #include "route.h"
+#include "control.h"
 #include "cirrus.h"
 #include "rioioctl.h"
 #include "param.h"
+#include "list.h"
+#include "sam.h"
 #include "protsts.h"
 #include "rioboard.h"
 
@@ -290,7 +297,7 @@ static void my_hd(void *ad, int len)
 	unsigned char *addr = ad;
 
 	for (i = 0; i < len; i += 16) {
-		rio_dprintk(RIO_DEBUG_PARAM, "%08lx ", (unsigned long) addr + i);
+		rio_dprintk(RIO_DEBUG_PARAM, "%08x ", (int) addr + i);
 		for (j = 0; j < 16; j++) {
 			rio_dprintk(RIO_DEBUG_PARAM, "%02x %s", addr[j + i], (j == 7) ? " " : "");
 		}
@@ -333,19 +340,34 @@ int RIODelay_ni(struct Port *PortP, int njiffies)
 	return !RIO_FAIL;
 }
 
-void rio_copy_to_card(void *to, void *from, int len)
-{
-	rio_memcpy_toio(NULL, to, from, len);
-}
 
 int rio_minor(struct tty_struct *tty)
 {
 	return tty->index + (tty->driver == rio_driver) ? 0 : 256;
 }
 
+
+int rio_ismodem(struct tty_struct *tty)
+{
+	return 1;
+}
+
+
 static int rio_set_real_termios(void *ptr)
 {
-	return RIOParam((struct Port *) ptr, CONFIG, 1, 1);
+	int rv, modem;
+	struct tty_struct *tty;
+	func_enter();
+
+	tty = ((struct Port *) ptr)->gs.tty;
+
+	modem = rio_ismodem(tty);
+
+	rv = RIOParam((struct Port *) ptr, CONFIG, modem, 1);
+
+	func_exit();
+
+	return rv;
 }
 
 
@@ -357,7 +379,7 @@ static void rio_reset_interrupt(struct Host *HostP)
 	case RIO_AT:
 	case RIO_MCA:
 	case RIO_PCI:
-		writeb(0xFF, &HostP->ResetInt);
+		WBYTE(HostP->ResetInt, 0xff);
 	}
 
 	func_exit();
@@ -375,6 +397,9 @@ static irqreturn_t rio_interrupt(int irq, void *ptr, struct pt_regs *regs)
 	/* AAargh! The order in which to do these things is essential and
 	   not trivial.
 
+	   - Rate limit goes before "recursive". Otherwise a series of
+	   recursive calls will hang the machine in the interrupt routine.
+
 	   - hardware twiddling goes before "recursive". Otherwise when we
 	   poll the card, and a recursive interrupt happens, we won't
 	   ack the card, so it might keep on interrupting us. (especially
@@ -389,6 +414,26 @@ static irqreturn_t rio_interrupt(int irq, void *ptr, struct pt_regs *regs)
 	   - The initialized test goes before recursive.
 	 */
 
+
+
+#ifdef IRQ_RATE_LIMIT
+	/* Aaargh! I'm ashamed. This costs more lines-of-code than the
+	   actual interrupt routine!. (Well, used to when I wrote that comment) */
+	{
+		static int lastjif;
+		static int nintr = 0;
+
+		if (lastjif == jiffies) {
+			if (++nintr > IRQ_RATE_LIMIT) {
+				free_irq(HostP->Ivec, ptr);
+				printk(KERN_ERR "rio: Too many interrupts. Turning off interrupt %d.\n", HostP->Ivec);
+			}
+		} else {
+			lastjif = jiffies;
+			nintr = 0;
+		}
+	}
+#endif
 	rio_dprintk(RIO_DEBUG_IFLOW, "rio: We've have noticed the interrupt\n");
 	if (HostP->Ivec == irq) {
 		/* Tell the card we've noticed the interrupt. */
@@ -399,13 +444,13 @@ static irqreturn_t rio_interrupt(int irq, void *ptr, struct pt_regs *regs)
 		return IRQ_HANDLED;
 
 	if (test_and_set_bit(RIO_BOARD_INTR_LOCK, &HostP->locks)) {
-		printk(KERN_ERR "Recursive interrupt! (host %p/irq%d)\n", ptr, HostP->Ivec);
+		printk(KERN_ERR "Recursive interrupt! (host %d/irq%d)\n", (int) ptr, HostP->Ivec);
 		return IRQ_HANDLED;
 	}
 
 	RIOServiceHost(p, HostP, irq);
 
-	rio_dprintk(RIO_DEBUG_IFLOW, "riointr() doing host %p type %d\n", ptr, HostP->Type);
+	rio_dprintk(RIO_DEBUG_IFLOW, "riointr() doing host %d type %d\n", (int) ptr, HostP->Type);
 
 	clear_bit(RIO_BOARD_INTR_LOCK, &HostP->locks);
 	rio_dprintk(RIO_DEBUG_IFLOW, "rio: exit rio_interrupt (%d/%d)\n", irq, HostP->Ivec);
@@ -828,7 +873,7 @@ static int rio_init_datastructures(void)
 #define HOST_SZ sizeof(struct Host)
 #define PORT_SZ sizeof(struct Port *)
 #define TMIO_SZ sizeof(struct termios *)
-	rio_dprintk(RIO_DEBUG_INIT, "getting : %Zd %Zd %Zd %Zd %Zd bytes\n", RI_SZ, RIO_HOSTS * HOST_SZ, RIO_PORTS * PORT_SZ, RIO_PORTS * TMIO_SZ, RIO_PORTS * TMIO_SZ);
+	rio_dprintk(RIO_DEBUG_INIT, "getting : %d %d %d %d %d bytes\n", RI_SZ, RIO_HOSTS * HOST_SZ, RIO_PORTS * PORT_SZ, RIO_PORTS * TMIO_SZ, RIO_PORTS * TMIO_SZ);
 
 	if (!(p = ckmalloc(RI_SZ)))
 		goto free0;
@@ -918,21 +963,22 @@ static void __exit rio_release_drivers(void)
 
 static void fix_rio_pci(struct pci_dev *pdev)
 {
-	unsigned long hwbase;
-	unsigned char *rebase;
+	unsigned int hwbase;
+	unsigned long rebase;
 	unsigned int t;
 
 #define CNTRL_REG_OFFSET        0x50
 #define CNTRL_REG_GOODVALUE     0x18260000
 
-	hwbase = pci_resource_start(pdev, 0);
-	rebase = ioremap(hwbase, 0x80);
+	pci_read_config_dword(pdev, PCI_BASE_ADDRESS_0, &hwbase);
+	hwbase &= PCI_BASE_ADDRESS_MEM_MASK;
+	rebase = (ulong) ioremap(hwbase, 0x80);
 	t = readl(rebase + CNTRL_REG_OFFSET);
 	if (t != CNTRL_REG_GOODVALUE) {
 		printk(KERN_DEBUG "rio: performing cntrl reg fix: %08x -> %08x\n", t, CNTRL_REG_GOODVALUE);
 		writel(CNTRL_REG_GOODVALUE, rebase + CNTRL_REG_OFFSET);
 	}
-	iounmap(rebase);
+	iounmap((char *) rebase);
 }
 #endif
 
@@ -948,6 +994,7 @@ static int __init rio_init(void)
 
 #ifdef CONFIG_PCI
 	struct pci_dev *pdev = NULL;
+	unsigned int tint;
 	unsigned short tshort;
 #endif
 
@@ -972,8 +1019,6 @@ static int __init rio_init(void)
 #ifdef CONFIG_PCI
 	/* First look for the JET devices: */
 	while ((pdev = pci_get_device(PCI_VENDOR_ID_SPECIALIX, PCI_DEVICE_ID_SPECIALIX_SX_XIO_IO8, pdev))) {
-		u32 tint;
-
 		if (pci_enable_device(pdev))
 			continue;
 
@@ -984,6 +1029,7 @@ static int __init rio_init(void)
 		   Also, reading a non-aligned dword doesn't work. So we read the
 		   whole dword at 0x2c and extract the word at 0x2e (SUBSYSTEM_ID)
 		   ourselves */
+		/* I don't know why the define doesn't work, constant 0x2c does --REW */
 		pci_read_config_dword(pdev, 0x2c, &tint);
 		tshort = (tint >> 16) & 0xffff;
 		rio_dprintk(RIO_DEBUG_PROBE, "Got a specialix card: %x.\n", tint);
@@ -993,31 +1039,33 @@ static int __init rio_init(void)
 		}
 		rio_dprintk(RIO_DEBUG_PROBE, "cp1\n");
 
+		pci_read_config_dword(pdev, PCI_BASE_ADDRESS_2, &tint);
+
 		hp = &p->RIOHosts[p->RIONumHosts];
-		hp->PaddrP = pci_resource_start(pdev, 2);
+		hp->PaddrP = tint & PCI_BASE_ADDRESS_MEM_MASK;
 		hp->Ivec = pdev->irq;
 		if (((1 << hp->Ivec) & rio_irqmask) == 0)
 			hp->Ivec = 0;
 		hp->Caddr = ioremap(p->RIOHosts[p->RIONumHosts].PaddrP, RIO_WINDOW_LEN);
 		hp->CardP = (struct DpRam *) hp->Caddr;
 		hp->Type = RIO_PCI;
-		hp->Copy = rio_copy_to_card;
+		hp->Copy = rio_pcicopy;
 		hp->Mode = RIO_PCI_BOOT_FROM_RAM;
 		spin_lock_init(&hp->HostLock);
 		rio_reset_interrupt(hp);
 		rio_start_card_running(hp);
 
 		rio_dprintk(RIO_DEBUG_PROBE, "Going to test it (%p/%p).\n", (void *) p->RIOHosts[p->RIONumHosts].PaddrP, p->RIOHosts[p->RIONumHosts].Caddr);
-		if (RIOBoardTest(p->RIOHosts[p->RIONumHosts].PaddrP, p->RIOHosts[p->RIONumHosts].Caddr, RIO_PCI, 0) == 0) {
+		if (RIOBoardTest(p->RIOHosts[p->RIONumHosts].PaddrP, p->RIOHosts[p->RIONumHosts].Caddr, RIO_PCI, 0) == RIO_SUCCESS) {
 			rio_dprintk(RIO_DEBUG_INIT, "Done RIOBoardTest\n");
-			writeb(0xFF, &p->RIOHosts[p->RIONumHosts].ResetInt);
+			WBYTE(p->RIOHosts[p->RIONumHosts].ResetInt, 0xff);
 			p->RIOHosts[p->RIONumHosts].UniqueNum =
-			    ((readb(&p->RIOHosts[p->RIONumHosts].Unique[0]) & 0xFF) << 0) |
-			    ((readb(&p->RIOHosts[p->RIONumHosts].Unique[1]) & 0xFF) << 8) | ((readb(&p->RIOHosts[p->RIONumHosts].Unique[2]) & 0xFF) << 16) | ((readb(&p->RIOHosts[p->RIONumHosts].Unique[3]) & 0xFF) << 24);
+			    ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[0]) & 0xFF) << 0) |
+			    ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[1]) & 0xFF) << 8) | ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[2]) & 0xFF) << 16) | ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[3]) & 0xFF) << 24);
 			rio_dprintk(RIO_DEBUG_PROBE, "Hmm Tested ok, uniqid = %x.\n", p->RIOHosts[p->RIONumHosts].UniqueNum);
 
 			fix_rio_pci(pdev);
-			p->RIOLastPCISearch = 0;
+			p->RIOLastPCISearch = RIO_SUCCESS;
 			p->RIONumHosts++;
 			found++;
 		} else {
@@ -1040,8 +1088,10 @@ static int __init rio_init(void)
 			continue;
 
 #ifdef CONFIG_RIO_OLDPCI
+		pci_read_config_dword(pdev, PCI_BASE_ADDRESS_0, &tint);
+
 		hp = &p->RIOHosts[p->RIONumHosts];
-		hp->PaddrP = pci_resource_start(pdev, 0);
+		hp->PaddrP = tint & PCI_BASE_ADDRESS_MEM_MASK;
 		hp->Ivec = pdev->irq;
 		if (((1 << hp->Ivec) & rio_irqmask) == 0)
 			hp->Ivec = 0;
@@ -1049,7 +1099,7 @@ static int __init rio_init(void)
 		hp->Caddr = ioremap(p->RIOHosts[p->RIONumHosts].PaddrP, RIO_WINDOW_LEN);
 		hp->CardP = (struct DpRam *) hp->Caddr;
 		hp->Type = RIO_PCI;
-		hp->Copy = rio_copy_to_card;
+		hp->Copy = rio_pcicopy;
 		hp->Mode = RIO_PCI_BOOT_FROM_RAM;
 		spin_lock_init(&hp->HostLock);
 
@@ -1059,14 +1109,14 @@ static int __init rio_init(void)
 		rio_reset_interrupt(hp);
 		rio_start_card_running(hp);
 		rio_dprintk(RIO_DEBUG_PROBE, "Going to test it (%p/%p).\n", (void *) p->RIOHosts[p->RIONumHosts].PaddrP, p->RIOHosts[p->RIONumHosts].Caddr);
-		if (RIOBoardTest(p->RIOHosts[p->RIONumHosts].PaddrP, p->RIOHosts[p->RIONumHosts].Caddr, RIO_PCI, 0) == 0) {
-			writeb(0xFF, &p->RIOHosts[p->RIONumHosts].ResetInt);
+		if (RIOBoardTest(p->RIOHosts[p->RIONumHosts].PaddrP, p->RIOHosts[p->RIONumHosts].Caddr, RIO_PCI, 0) == RIO_SUCCESS) {
+			WBYTE(p->RIOHosts[p->RIONumHosts].ResetInt, 0xff);
 			p->RIOHosts[p->RIONumHosts].UniqueNum =
-			    ((readb(&p->RIOHosts[p->RIONumHosts].Unique[0]) & 0xFF) << 0) |
-			    ((readb(&p->RIOHosts[p->RIONumHosts].Unique[1]) & 0xFF) << 8) | ((readb(&p->RIOHosts[p->RIONumHosts].Unique[2]) & 0xFF) << 16) | ((readb(&p->RIOHosts[p->RIONumHosts].Unique[3]) & 0xFF) << 24);
+			    ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[0]) & 0xFF) << 0) |
+			    ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[1]) & 0xFF) << 8) | ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[2]) & 0xFF) << 16) | ((RBYTE(p->RIOHosts[p->RIONumHosts].Unique[3]) & 0xFF) << 24);
 			rio_dprintk(RIO_DEBUG_PROBE, "Hmm Tested ok, uniqid = %x.\n", p->RIOHosts[p->RIONumHosts].UniqueNum);
 
-			p->RIOLastPCISearch = 0;
+			p->RIOLastPCISearch = RIO_SUCCESS;
 			p->RIONumHosts++;
 			found++;
 		} else {
@@ -1087,8 +1137,8 @@ static int __init rio_init(void)
 		hp->Caddr = ioremap(p->RIOHosts[p->RIONumHosts].PaddrP, RIO_WINDOW_LEN);
 		hp->CardP = (struct DpRam *) hp->Caddr;
 		hp->Type = RIO_AT;
-		hp->Copy = rio_copy_to_card;	/* AT card PCI???? - PVDL
-                                         * -- YES! this is now a normal copy. Only the
+		hp->Copy = rio_pcicopy;	/* AT card PCI???? - PVDL
+					 * -- YES! this is now a normal copy. Only the
 					 * old PCI card uses the special PCI copy.
 					 * Moreover, the ISA card will work with the
 					 * special PCI copy anyway. -- REW */
@@ -1100,7 +1150,7 @@ static int __init rio_init(void)
 		okboard = 0;
 		if ((strncmp(vpdp->identifier, RIO_ISA_IDENT, 16) == 0) || (strncmp(vpdp->identifier, RIO_ISA2_IDENT, 16) == 0) || (strncmp(vpdp->identifier, RIO_ISA3_IDENT, 16) == 0)) {
 			/* Board is present... */
-			if (RIOBoardTest(hp->PaddrP, hp->Caddr, RIO_AT, 0) == 0) {
+			if (RIOBoardTest(hp->PaddrP, hp->Caddr, RIO_AT, 0) == RIO_SUCCESS) {
 				/* ... and feeling fine!!!! */
 				rio_dprintk(RIO_DEBUG_PROBE, "Hmm Tested ok, uniqid = %x.\n", p->RIOHosts[p->RIONumHosts].UniqueNum);
 				if (RIOAssignAT(p, hp->PaddrP, hp->Caddr, 0)) {
@@ -1136,7 +1186,7 @@ static int __init rio_init(void)
 				rio_dprintk(RIO_DEBUG_INIT, "Enabling interrupts on rio card.\n");
 				hp->Mode |= RIO_PCI_INT_ENABLE;
 			} else
-				hp->Mode &= !RIO_PCI_INT_ENABLE;
+				hp->Mode &= ~RIO_PCI_INT_ENABLE;
 			rio_dprintk(RIO_DEBUG_INIT, "New Mode: %x\n", hp->Mode);
 			rio_start_card_running(hp);
 		}
@@ -1202,3 +1252,24 @@ static void __exit rio_exit(void)
 
 module_init(rio_init);
 module_exit(rio_exit);
+
+/*
+ * Anybody who knows why this doesn't work for me, please tell me -- REW.
+ * Snatched from scsi.c (fixed one spelling error):
+ * Overrides for Emacs so that we follow Linus' tabbing style.
+ * Emacs will notice this stuff at the end of the file and automatically
+ * adjust the settings for this buffer only.  This must remain at the end
+ * of the file.
+ * ---------------------------------------------------------------------------
+ * Local Variables:
+ * c-indent-level: 4
+ * c-brace-imaginary-offset: 0
+ * c-brace-offset: -4
+ * c-argdecl-indent: 4
+ * c-label-offset: -4
+ * c-continued-statement-offset: 4
+ * c-continued-brace-offset: 0
+ * indent-tabs-mode: nil
+ * tab-width: 8
+ * End:
+ */

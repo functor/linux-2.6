@@ -62,7 +62,6 @@
 #include <linux/uio.h>
 #include <asm/uaccess.h>
 #include <linux/crc32.h>
-#include <linux/mutex.h>
 
 #include "dvb_demux.h"
 #include "dvb_net.h"
@@ -152,7 +151,8 @@ struct dvb_net_priv {
 	unsigned char ule_bridged;		/* Whether the ULE_BRIDGED extension header was found. */
 	int ule_sndu_remain;			/* Nr. of bytes still required for current ULE SNDU. */
 	unsigned long ts_count;			/* Current ts cell counter. */
-	struct mutex mutex;
+
+	struct semaphore mutex;
 };
 
 
@@ -492,7 +492,8 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 				} else
 					priv->ule_dbit = 0;
 
-				if (priv->ule_sndu_len > 32763) {
+				if (priv->ule_sndu_len > 32763 ||
+				    priv->ule_sndu_len < ((priv->ule_dbit) ? 4 : 4 + ETH_ALEN)) {
 					printk(KERN_WARNING "%lu: Invalid ULE SNDU length %u. "
 					       "Resyncing.\n", priv->ts_count, priv->ule_sndu_len);
 					priv->ule_sndu_len = 0;
@@ -889,7 +890,7 @@ static int dvb_net_feed_start(struct net_device *dev)
 	unsigned char *mac = (unsigned char *) dev->dev_addr;
 
 	dprintk("%s: rx_mode %i\n", __FUNCTION__, priv->rx_mode);
-	mutex_lock(&priv->mutex);
+	down(&priv->mutex);
 	if (priv->tsfeed || priv->secfeed || priv->secfilter || priv->multi_secfilter[0])
 		printk("%s: BUG %d\n", __FUNCTION__, __LINE__);
 
@@ -974,7 +975,7 @@ static int dvb_net_feed_start(struct net_device *dev)
 		ret = -EINVAL;
 
 error:
-	mutex_unlock(&priv->mutex);
+	up(&priv->mutex);
 	return ret;
 }
 
@@ -984,7 +985,7 @@ static int dvb_net_feed_stop(struct net_device *dev)
 	int i, ret = 0;
 
 	dprintk("%s\n", __FUNCTION__);
-	mutex_lock(&priv->mutex);
+	down(&priv->mutex);
 	if (priv->feedtype == DVB_NET_FEEDTYPE_MPE) {
 		if (priv->secfeed) {
 			if (priv->secfeed->is_filtering) {
@@ -1026,7 +1027,7 @@ static int dvb_net_feed_stop(struct net_device *dev)
 			printk("%s: no ts feed to stop\n", dev->name);
 	} else
 		ret = -EINVAL;
-	mutex_unlock(&priv->mutex);
+	up(&priv->mutex);
 	return ret;
 }
 
@@ -1052,7 +1053,7 @@ static void wq_set_multicast_list (void *data)
 
 	dvb_net_feed_stop(dev);
 	priv->rx_mode = RX_MODE_UNI;
-	netif_tx_lock_bh(dev);
+	spin_lock_bh(&dev->xmit_lock);
 
 	if (dev->flags & IFF_PROMISC) {
 		dprintk("%s: promiscuous mode\n", dev->name);
@@ -1077,7 +1078,7 @@ static void wq_set_multicast_list (void *data)
 		}
 	}
 
-	netif_tx_unlock_bh(dev);
+	spin_unlock_bh(&dev->xmit_lock);
 	dvb_net_feed_start(dev);
 }
 
@@ -1208,7 +1209,7 @@ static int dvb_net_add_if(struct dvb_net *dvbnet, u16 pid, u8 feedtype)
 
 	INIT_WORK(&priv->set_multicast_list_wq, wq_set_multicast_list, net);
 	INIT_WORK(&priv->restart_net_feed_wq, wq_restart_net_feed, net);
-	mutex_init(&priv->mutex);
+	init_MUTEX(&priv->mutex);
 
 	net->base_addr = pid;
 

@@ -371,6 +371,7 @@ out_nfserr:
 static ssize_t nfsd_getxattr(struct dentry *dentry, char *key, void **buf)
 {
 	ssize_t buflen;
+	int error;
 
 	buflen = vfs_getxattr(dentry, key, NULL, 0);
 	if (buflen <= 0)
@@ -380,7 +381,10 @@ static ssize_t nfsd_getxattr(struct dentry *dentry, char *key, void **buf)
 	if (!*buf)
 		return -ENOMEM;
 
-	return vfs_getxattr(dentry, key, *buf, buflen);
+	error = vfs_getxattr(dentry, key, *buf, buflen);
+	if (error < 0)
+		return error;
+	return buflen;
 }
 #endif
 
@@ -702,7 +706,7 @@ nfsd_close(struct file *filp)
  * after it.
  */
 static inline int nfsd_dosync(struct file *filp, struct dentry *dp,
-			      const struct file_operations *fop)
+			      struct file_operations *fop)
 {
 	struct inode *inode = dp->d_inode;
 	int (*fsync) (struct file *, struct dentry *, int);
@@ -1925,10 +1929,11 @@ nfsd_set_posix_acl(struct svc_fh *fhp, int type, struct posix_acl *acl)
 		value = kmalloc(size, GFP_KERNEL);
 		if (!value)
 			return -ENOMEM;
-		error = posix_acl_to_xattr(acl, value, size);
-		if (error < 0)
+		size = posix_acl_to_xattr(acl, value, size);
+		if (size < 0) {
+			error = size;
 			goto getout;
-		size = error;
+		}
 	} else
 		size = 0;
 

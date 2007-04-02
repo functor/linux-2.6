@@ -46,7 +46,6 @@ static const char version[] =
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/bitops.h>
-#include <linux/jiffies.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -700,7 +699,7 @@ static void hardware_send_packet(struct net_device * dev, char *buf, int length)
 	int ioaddr = dev->base_addr;
 	int status = inw(SEEQ_STATUS);
 	int transmit_ptr = 0;
-	unsigned long tmp;
+	int tmp;
 
 	if (net_debug>4) {
 		printk("%s: send 0x%04x\n",dev->name,length);
@@ -725,7 +724,7 @@ static void hardware_send_packet(struct net_device * dev, char *buf, int length)
 	
 	/* drain FIFO */
 	tmp = jiffies;
-	while ( (((status=inw(SEEQ_STATUS)) & SEEQSTAT_FIFO_EMPTY) == 0) && time_before(jiffies, tmp + HZ))
+	while ( (((status=inw(SEEQ_STATUS)) & SEEQSTAT_FIFO_EMPTY) == 0) && (jiffies - tmp < HZ))
 		mb();
 	
 	/* doit ! */

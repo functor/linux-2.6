@@ -64,6 +64,9 @@ typedef union {
 
 #if (BITS_PER_LONG == 64) || defined(CONFIG_KTIME_SCALAR)
 
+/* Define a ktime_t variable and initialize it to zero: */
+#define DEFINE_KTIME(kt)		ktime_t kt = { .tv64 = 0 }
+
 /**
  * ktime_set - Set a ktime_t variable from a seconds/nanoseconds value
  *
@@ -110,6 +113,9 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
 /* Map the ktime_t to timeval conversion to ns_to_timeval function */
 #define ktime_to_timeval(kt)		ns_to_timeval((kt).tv64)
 
+/* Map the ktime_t to clock_t conversion to the inline in jiffies.h: */
+#define ktime_to_clock_t(kt)		nsec_to_clock_t((kt).tv64)
+
 /* Convert ktime_t to nanoseconds - NOP in the scalar storage format: */
 #define ktime_to_ns(kt)			((kt).tv64)
 
@@ -129,6 +135,9 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
  *
  *   tv.sec < 0 and 0 >= tv.nsec < NSEC_PER_SEC
  */
+
+/* Define a ktime_t variable and initialize it to zero: */
+#define DEFINE_KTIME(kt)		ktime_t kt = { .tv64 = 0 }
 
 /* Set a ktime_t variable to a value in sec/nsec representation: */
 static inline ktime_t ktime_set(const long secs, const unsigned long nsecs)
@@ -243,6 +252,17 @@ static inline struct timeval ktime_to_timeval(const ktime_t kt)
 	return (struct timeval) {
 		.tv_sec = (time_t) kt.tv.sec,
 		.tv_usec = (suseconds_t) (kt.tv.nsec / NSEC_PER_USEC) };
+}
+
+/**
+ * ktime_to_clock_t - convert a ktime_t variable to clock_t format
+ * @kt:		the ktime_t variable to convert
+ *
+ * Returns a clock_t variable with the converted value
+ */
+static inline clock_t ktime_to_clock_t(const ktime_t kt)
+{
+	return nsec_to_clock_t( (u64) kt.tv.sec * NSEC_PER_SEC + kt.tv.nsec);
 }
 
 /**

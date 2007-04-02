@@ -127,7 +127,7 @@ asmlinkage void IRQ_NAME(nr); \
 __asm__( \
 "\n.p2align\n" \
 "IRQ" #nr "_interrupt:\n\t" \
-	"push $~(" #nr ") ; " \
+	"push $" #nr "-256 ; " \
 	"jmp common_interrupt");
 
 #if defined(CONFIG_X86_IO_APIC)

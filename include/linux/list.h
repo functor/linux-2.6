@@ -5,9 +5,7 @@
 
 #include <linux/stddef.h>
 #include <linux/prefetch.h>
-#include <linux/kernel.h>
 #include <asm/system.h>
-#include <asm/bug.h>
 
 /*
  * These are non-NULL pointers that will result in page faults
@@ -52,16 +50,6 @@ static inline void __list_add(struct list_head *new,
 			      struct list_head *prev,
 			      struct list_head *next)
 {
-	if (next->prev != prev) {
-		printk("List corruption. next->prev should be %p, but was %p\n",
-				prev, next->prev);
-		BUG();
-	}
-	if (prev->next != next) {
-		printk("List corruption. prev->next should be %p, but was %p\n",
-				next, prev->next);
-		BUG();
-	}
 	next->prev = new;
 	new->next = next;
 	new->prev = prev;
@@ -174,16 +162,6 @@ static inline void __list_del(struct list_head * prev, struct list_head * next)
  */
 static inline void list_del(struct list_head *entry)
 {
-	if (entry->prev->next != entry) {
-		printk("List corruption. prev->next should be %p, but was %p\n",
-				entry, entry->prev->next);
-		BUG();
-	}
-	if (entry->next->prev != entry) {
-		printk("List corruption. next->prev should be %p, but was %p\n",
-				entry, entry->next->prev);
-		BUG();
-	}
 	__list_del(entry->prev, entry->next);
 	entry->next = LIST_POISON1;
 	entry->prev = LIST_POISON2;
@@ -433,17 +411,6 @@ static inline void list_splice_init(struct list_head *list,
 	     pos = list_entry(pos->member.next, typeof(*pos), member))
 
 /**
- * list_for_each_entry_from -	iterate over list of given type
- *			continuing from existing point
- * @pos:	the type * to use as a loop counter.
- * @head:	the head for your list.
- * @member:	the name of the list_struct within the struct.
- */
-#define list_for_each_entry_from(pos, head, member) 			\
-	for (; prefetch(pos->member.next), &pos->member != (head);	\
-	     pos = list_entry(pos->member.next, typeof(*pos), member))
-
-/**
  * list_for_each_entry_safe - iterate over list of given type safe against removal of list entry
  * @pos:	the type * to use as a loop counter.
  * @n:		another type * to use as temporary storage
@@ -467,19 +434,6 @@ static inline void list_splice_init(struct list_head *list,
 #define list_for_each_entry_safe_continue(pos, n, head, member) 		\
 	for (pos = list_entry(pos->member.next, typeof(*pos), member), 		\
 		n = list_entry(pos->member.next, typeof(*pos), member);		\
-	     &pos->member != (head);						\
-	     pos = n, n = list_entry(n->member.next, typeof(*n), member))
-
-/**
- * list_for_each_entry_safe_from - iterate over list of given type
- *			from existing point safe against removal of list entry
- * @pos:	the type * to use as a loop counter.
- * @n:		another type * to use as temporary storage
- * @head:	the head for your list.
- * @member:	the name of the list_struct within the struct.
- */
-#define list_for_each_entry_safe_from(pos, n, head, member) 			\
-	for (n = list_entry(pos->member.next, typeof(*pos), member);		\
 	     &pos->member != (head);						\
 	     pos = n, n = list_entry(n->member.next, typeof(*n), member))
 
@@ -641,7 +595,7 @@ static inline void hlist_del_rcu(struct hlist_node *n)
 
 static inline void hlist_del_init(struct hlist_node *n)
 {
-	if (!hlist_unhashed(n)) {
+	if (n->pprev)  {
 		__hlist_del(n);
 		INIT_HLIST_NODE(n);
 	}

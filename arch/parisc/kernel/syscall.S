@@ -55,7 +55,7 @@
 	 * pointers.
 	 */
 
-	.align ASM_PAGE_SIZE
+	.align 4096
 linux_gateway_page:
 
         /* ADDRESS 0x00 to 0xb0 = 176 bytes / 4 bytes per insn = 44 insns */
@@ -632,7 +632,7 @@ cas_action:
 end_compare_and_swap:
 
 	/* Make sure nothing else is placed on this page */
-	.align ASM_PAGE_SIZE
+	.align 4096
 	.export end_linux_gateway_page
 end_linux_gateway_page:
 
@@ -652,7 +652,7 @@ end_linux_gateway_page:
 
 	.section .rodata,"a"
 
-	.align ASM_PAGE_SIZE
+	.align 4096
 	/* Light-weight-syscall table */
 	/* Start of lws table. */
 	.export lws_table
@@ -662,14 +662,14 @@ lws_table:
 	LWS_ENTRY(compare_and_swap64)	/* 1 - ELF64 Atomic compare and swap */
 	/* End of lws table */
 
-	.align ASM_PAGE_SIZE
+	.align 4096
 	.export sys_call_table
 .Lsys_call_table:
 sys_call_table:
 #include "syscall_table.S"
 
 #ifdef CONFIG_64BIT
-	.align ASM_PAGE_SIZE
+	.align 4096
 	.export sys_call_table64
 .Lsys_call_table64:
 sys_call_table64:

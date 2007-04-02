@@ -21,9 +21,6 @@
  * instruction clobbers %esp, the user's %esp won't even survive entry
  * into the kernel. We store %esp in %ebp. Code in entry.S must fetch
  * arg6 from the stack.
- *
- * You can not use this vsyscall for the clone() syscall because the
- * three dwords on the parent stack do not get copied to the child.
  */
 	.text
 	.globl __kernel_vsyscall
@@ -42,11 +39,11 @@ __kernel_vsyscall:
 	/* 7: align return point with nop's to make disassembly easier */
 	.space 7,0x90
 
-	/* 14: System call restart point is here! (SYSENTER_RETURN_OFFSET-2) */
+	/* 14: System call restart point is here! (SYSENTER_RETURN - 2) */
 	jmp .Lenter_kernel
 	/* 16: System call normal return point is here! */
-	.globl SYSENTER_RETURN_OFFSET	/* Symbol used by sysenter.c  */
-SYSENTER_RETURN_OFFSET:
+	.globl SYSENTER_RETURN	/* Symbol used by entry.S.  */
+SYSENTER_RETURN:
 	pop %ebp
 .Lpop_ebp:
 	pop %edx

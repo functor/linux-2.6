@@ -47,7 +47,7 @@ static long arch_prctl_tt(int code, unsigned long addr)
 	case ARCH_GET_GS:
 		ret = arch_prctl(code, (unsigned long) &tmp);
 		if(!ret)
-			ret = put_user(tmp, (long __user *)addr);
+			ret = put_user(tmp, &addr);
 		break;
 	default:
 		ret = -EINVAL;

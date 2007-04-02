@@ -257,8 +257,6 @@
 #include <linux/fs.h>
 #include <linux/random.h>
 #include <linux/bootmem.h>
-#include <linux/cache.h>
-#include <linux/err.h>
 #include <linux/in.h>
 
 #include <net/icmp.h>
@@ -278,9 +276,9 @@ atomic_t tcp_orphan_count = ATOMIC_INIT(0);
 
 EXPORT_SYMBOL_GPL(tcp_orphan_count);
 
-int sysctl_tcp_mem[3] __read_mostly;
-int sysctl_tcp_wmem[3] __read_mostly;
-int sysctl_tcp_rmem[3] __read_mostly;
+int sysctl_tcp_mem[3];
+int sysctl_tcp_wmem[3] = { 4 * 1024, 16 * 1024, 128 * 1024 };
+int sysctl_tcp_rmem[3] = { 4 * 1024, 87380, 87380 * 2 };
 
 EXPORT_SYMBOL(sysctl_tcp_mem);
 EXPORT_SYMBOL(sysctl_tcp_rmem);
@@ -368,7 +366,7 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	if (sk->sk_shutdown == SHUTDOWN_MASK || sk->sk_state == TCP_CLOSE)
 		mask |= POLLHUP;
 	if (sk->sk_shutdown & RCV_SHUTDOWN)
-		mask |= POLLIN | POLLRDNORM | POLLRDHUP;
+		mask |= POLLIN | POLLRDNORM;
 
 	/* Connected? */
 	if ((1 << sk->sk_state) & ~(TCPF_SYN_SENT | TCPF_SYN_RECV)) {
@@ -573,7 +571,7 @@ new_segment:
 		skb->ip_summed = CHECKSUM_HW;
 		tp->write_seq += copy;
 		TCP_SKB_CB(skb)->end_seq += copy;
-		skb_shinfo(skb)->gso_segs = 0;
+		skb_shinfo(skb)->tso_segs = 0;
 
 		if (!copied)
 			TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
@@ -624,9 +622,13 @@ ssize_t tcp_sendpage(struct socket *sock, struct page *page, int offset,
 	ssize_t res;
 	struct sock *sk = sock->sk;
 
+#define TCP_ZC_CSUM_FLAGS (NETIF_F_IP_CSUM | NETIF_F_NO_CSUM | NETIF_F_HW_CSUM)
+
 	if (!(sk->sk_route_caps & NETIF_F_SG) ||
-	    !(sk->sk_route_caps & NETIF_F_ALL_CSUM))
+	    !(sk->sk_route_caps & TCP_ZC_CSUM_FLAGS))
 		return sock_no_sendpage(sock, page, offset, size, flags);
+
+#undef TCP_ZC_CSUM_FLAGS
 
 	lock_sock(sk);
 	TCP_CHECK_TIMER(sk);
@@ -724,7 +726,9 @@ new_segment:
 				/*
 				 * Check whether we can use HW checksum.
 				 */
-				if (sk->sk_route_caps & NETIF_F_ALL_CSUM)
+				if (sk->sk_route_caps &
+				    (NETIF_F_IP_CSUM | NETIF_F_NO_CSUM |
+				     NETIF_F_HW_CSUM))
 					skb->ip_summed = CHECKSUM_HW;
 
 				skb_entail(sk, tp, skb);
@@ -820,7 +824,7 @@ new_segment:
 
 			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
-			skb_shinfo(skb)->gso_segs = 0;
+			skb_shinfo(skb)->tso_segs = 0;
 
 			from += copy;
 			copied += copy;
@@ -933,7 +937,7 @@ static int tcp_recv_urg(struct sock *sk, long timeo,
  * calculation of whether or not we must ACK for the sake of
  * a window update.
  */
-void cleanup_rbuf(struct sock *sk, int copied)
+static void cleanup_rbuf(struct sock *sk, int copied)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	int time_to_ack = 0;
@@ -1464,7 +1468,6 @@ void tcp_close(struct sock *sk, long timeout)
 {
 	struct sk_buff *skb;
 	int data_was_unread = 0;
-	int state;
 
 	lock_sock(sk);
 	sk->sk_shutdown = SHUTDOWN_MASK;
@@ -1541,11 +1544,6 @@ void tcp_close(struct sock *sk, long timeout)
 	sk_stream_wait_close(sk, timeout);
 
 adjudge_to_death:
-	state = sk->sk_state;
-	sock_hold(sk);
-	sock_orphan(sk);
-	atomic_inc(sk->sk_prot->orphan_count);
-
 	/* It is the last release_sock in its life. It will remove backlog. */
 	release_sock(sk);
 
@@ -1557,9 +1555,8 @@ adjudge_to_death:
 	bh_lock_sock(sk);
 	BUG_TRAP(!sock_owned_by_user(sk));
 
-	/* Have we already been destroyed by a softirq or backlog? */
-	if (state != TCP_CLOSE && sk->sk_state == TCP_CLOSE)
-		goto out;
+	sock_hold(sk);
+	sock_orphan(sk);
 
 	/*	This is a (useful) BSD violating of the RFC. There is a
 	 *	problem with TCP as specified in that the other end could
@@ -1587,6 +1584,7 @@ adjudge_to_death:
 			if (tmo > TCP_TIMEWAIT_LEN) {
 				inet_csk_reset_keepalive_timer(sk, tcp_fin_time(sk));
 			} else {
+				atomic_inc(sk->sk_prot->orphan_count);
 				tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
 				goto out;
 			}
@@ -1605,6 +1603,7 @@ adjudge_to_death:
 			NET_INC_STATS_BH(LINUX_MIB_TCPABORTONMEMORY);
 		}
 	}
+	atomic_inc(sk->sk_prot->orphan_count);
 
 	if (sk->sk_state == TCP_CLOSE)
 		inet_csk_destroy_sock(sk);
@@ -1689,13 +1688,17 @@ int tcp_disconnect(struct sock *sk, int flags)
 /*
  *	Socket option code for TCP.
  */
-static int do_tcp_setsockopt(struct sock *sk, int level,
-		int optname, char __user *optval, int optlen)
+int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
+		   int optlen)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int val;
 	int err = 0;
+
+	if (level != SOL_TCP)
+		return icsk->icsk_af_ops->setsockopt(sk, level, optname,
+						     optval, optlen);
 
 	/* This is a string value all the others are int's */
 	if (optname == TCP_CONGESTION) {
@@ -1869,30 +1872,6 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 	return err;
 }
 
-int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
-		   int optlen)
-{
-	struct inet_connection_sock *icsk = inet_csk(sk);
-
-	if (level != SOL_TCP)
-		return icsk->icsk_af_ops->setsockopt(sk, level, optname,
-						     optval, optlen);
-	return do_tcp_setsockopt(sk, level, optname, optval, optlen);
-}
-
-#ifdef CONFIG_COMPAT
-int compat_tcp_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, int optlen)
-{
-	if (level != SOL_TCP)
-		return inet_csk_compat_setsockopt(sk, level, optname,
-						  optval, optlen);
-	return do_tcp_setsockopt(sk, level, optname, optval, optlen);
-}
-
-EXPORT_SYMBOL(compat_tcp_setsockopt);
-#endif
-
 /* Return information about state of tcp endpoint in API format. */
 void tcp_get_info(struct sock *sk, struct tcp_info *info)
 {
@@ -1953,12 +1932,16 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 
 EXPORT_SYMBOL_GPL(tcp_get_info);
 
-static int do_tcp_getsockopt(struct sock *sk, int level,
-		int optname, char __user *optval, int __user *optlen)
+int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
+		   int __user *optlen)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
 	int val, len;
+
+	if (level != SOL_TCP)
+		return icsk->icsk_af_ops->getsockopt(sk, level, optname,
+						     optval, optlen);
 
 	if (get_user(len, optlen))
 		return -EFAULT;
@@ -2043,100 +2026,6 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 	return 0;
 }
 
-int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
-		   int __user *optlen)
-{
-	struct inet_connection_sock *icsk = inet_csk(sk);
-
-	if (level != SOL_TCP)
-		return icsk->icsk_af_ops->getsockopt(sk, level, optname,
-						     optval, optlen);
-	return do_tcp_getsockopt(sk, level, optname, optval, optlen);
-}
-
-#ifdef CONFIG_COMPAT
-int compat_tcp_getsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, int __user *optlen)
-{
-	if (level != SOL_TCP)
-		return inet_csk_compat_getsockopt(sk, level, optname,
-						  optval, optlen);
-	return do_tcp_getsockopt(sk, level, optname, optval, optlen);
-}
-
-EXPORT_SYMBOL(compat_tcp_getsockopt);
-#endif
-
-struct sk_buff *tcp_tso_segment(struct sk_buff *skb, int features)
-{
-	struct sk_buff *segs = ERR_PTR(-EINVAL);
-	struct tcphdr *th;
-	unsigned thlen;
-	unsigned int seq;
-	unsigned int delta;
-	unsigned int oldlen;
-	unsigned int len;
-
-	if (!pskb_may_pull(skb, sizeof(*th)))
-		goto out;
-
-	th = skb->h.th;
-	thlen = th->doff * 4;
-	if (thlen < sizeof(*th))
-		goto out;
-
-	if (!pskb_may_pull(skb, thlen))
-		goto out;
-
-	oldlen = (u16)~skb->len;
-	__skb_pull(skb, thlen);
-
-	if (skb_gso_ok(skb, features | NETIF_F_GSO_ROBUST)) {
-		/* Packet is from an untrusted source, reset gso_segs. */
-		int mss = skb_shinfo(skb)->gso_size;
-
-		skb_shinfo(skb)->gso_segs = (skb->len + mss - 1) / mss;
-
-		segs = NULL;
-		goto out;
-	}
-
-	segs = skb_segment(skb, features);
-	if (IS_ERR(segs))
-		goto out;
-
-	len = skb_shinfo(skb)->gso_size;
-	delta = htonl(oldlen + (thlen + len));
-
-	skb = segs;
-	th = skb->h.th;
-	seq = ntohl(th->seq);
-
-	do {
-		th->fin = th->psh = 0;
-
-		th->check = ~csum_fold(th->check + delta);
-		if (skb->ip_summed != CHECKSUM_HW)
-			th->check = csum_fold(csum_partial(skb->h.raw, thlen,
-							   skb->csum));
-
-		seq += len;
-		skb = skb->next;
-		th = skb->h.th;
-
-		th->seq = htonl(seq);
-		th->cwr = 0;
-	} while (skb->next);
-
-	delta = htonl(oldlen + (skb->tail - skb->h.raw) + skb->data_len);
-	th->check = ~csum_fold(th->check + delta);
-	if (skb->ip_summed != CHECKSUM_HW)
-		th->check = csum_fold(csum_partial(skb->h.raw, thlen,
-						   skb->csum));
-
-out:
-	return segs;
-}
 
 extern void __skb_cb_too_small_for_tcp(int, int);
 extern struct tcp_congestion_ops tcp_reno;
@@ -2154,8 +2043,7 @@ __setup("thash_entries=", set_thash_entries);
 void __init tcp_init(void)
 {
 	struct sk_buff *skb = NULL;
-	unsigned long limit;
-	int order, i, max_share;
+	int order, i;
 
 	if (sizeof(struct tcp_skb_cb) > sizeof(skb->cb))
 		__skb_cb_too_small_for_tcp(sizeof(struct tcp_skb_cb),
@@ -2179,7 +2067,7 @@ void __init tcp_init(void)
 					thash_entries,
 					(num_physpages >= 128 * 1024) ?
 					13 : 15,
-					HASH_HIGHMEM,
+					0,
 					&tcp_hashinfo.ehash_size,
 					NULL,
 					0);
@@ -2195,7 +2083,7 @@ void __init tcp_init(void)
 					tcp_hashinfo.ehash_size,
 					(num_physpages >= 128 * 1024) ?
 					13 : 15,
-					HASH_HIGHMEM,
+					0,
 					&tcp_hashinfo.bhash_size,
 					NULL,
 					64 * 1024);
@@ -2229,16 +2117,12 @@ void __init tcp_init(void)
 	sysctl_tcp_mem[1] = 1024 << order;
 	sysctl_tcp_mem[2] = 1536 << order;
 
-	limit = ((unsigned long)sysctl_tcp_mem[1]) << (PAGE_SHIFT - 7);
-	max_share = min(4UL*1024*1024, limit);
-
-	sysctl_tcp_wmem[0] = SK_STREAM_MEM_QUANTUM;
-	sysctl_tcp_wmem[1] = 16*1024;
-	sysctl_tcp_wmem[2] = max(64*1024, max_share);
-
-	sysctl_tcp_rmem[0] = SK_STREAM_MEM_QUANTUM;
-	sysctl_tcp_rmem[1] = 87380;
-	sysctl_tcp_rmem[2] = max(87380, max_share);
+	if (order < 3) {
+		sysctl_tcp_wmem[2] = 64 * 1024;
+		sysctl_tcp_rmem[0] = PAGE_SIZE;
+		sysctl_tcp_rmem[1] = 43689;
+		sysctl_tcp_rmem[2] = 2 * 43689;
+	}
 
 	printk(KERN_INFO "TCP: Hash tables configured "
 	       "(established %d bind %d)\n",
@@ -2259,4 +2143,3 @@ EXPORT_SYMBOL(tcp_sendpage);
 EXPORT_SYMBOL(tcp_setsockopt);
 EXPORT_SYMBOL(tcp_shutdown);
 EXPORT_SYMBOL(tcp_statistics);
-EXPORT_SYMBOL_GPL(cleanup_rbuf);

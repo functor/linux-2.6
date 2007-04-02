@@ -37,6 +37,12 @@
 
 #include "pxamci.h"
 
+#ifdef CONFIG_MMC_DEBUG
+#define DBG(x...)	printk(KERN_DEBUG x)
+#else
+#define DBG(x...)	do { } while (0)
+#endif
+
 #define DRIVER_NAME	"pxa2xx-mci"
 
 #define NR_SG	1
@@ -64,6 +70,11 @@ struct pxamci_host {
 
 	unsigned int		dma_dir;
 };
+
+static inline unsigned int ns_to_clocks(unsigned int ns)
+{
+	return (ns * (CLOCKRATE / 1000000) + 999) / 1000;
+}
 
 static void pxamci_stop_clock(struct pxamci_host *host)
 {
@@ -108,7 +119,6 @@ static void pxamci_disable_irq(struct pxamci_host *host, unsigned int mask)
 static void pxamci_setup_data(struct pxamci_host *host, struct mmc_data *data)
 {
 	unsigned int nob = data->blocks;
-	unsigned long long clks;
 	unsigned int timeout;
 	u32 dcmd;
 	int i;
@@ -119,11 +129,9 @@ static void pxamci_setup_data(struct pxamci_host *host, struct mmc_data *data)
 		nob = 0xffff;
 
 	writel(nob, host->base + MMC_NOB);
-	writel(data->blksz, host->base + MMC_BLKLEN);
+	writel(1 << data->blksz_bits, host->base + MMC_BLKLEN);
 
-	clks = (unsigned long long)data->timeout_ns * CLOCKRATE;
-	do_div(clks, 1000000000UL);
-	timeout = (unsigned int)clks + (data->timeout_clks << host->clkrt);
+	timeout = ns_to_clocks(data->timeout_ns) + data->timeout_clks;
 	writel((timeout + 255) / 256, host->base + MMC_RDTO);
 
 	if (data->flags & MMC_DATA_READ) {
@@ -198,6 +206,7 @@ static void pxamci_start_cmd(struct pxamci_host *host, struct mmc_command *cmd, 
 
 static void pxamci_finish_request(struct pxamci_host *host, struct mmc_request *mrq)
 {
+	DBG("PXAMCI: request done\n");
 	host->mrq = NULL;
 	host->cmd = NULL;
 	host->data = NULL;
@@ -243,7 +252,7 @@ static int pxamci_cmd_done(struct pxamci_host *host, unsigned int stat)
 			if ((cmd->resp[0] & 0x80000000) == 0)
 				cmd->error = MMC_ERR_BADCRC;
 		} else {
-			pr_debug("ignoring CRC from command %d - *risky*\n",cmd->opcode);
+			DBG("ignoring CRC from command %d - *risky*\n",cmd->opcode);
 		}
 #else
 		cmd->error = MMC_ERR_BADCRC;
@@ -283,14 +292,14 @@ static int pxamci_data_done(struct pxamci_host *host, unsigned int stat)
 	 * data blocks as being in error.
 	 */
 	if (data->error == MMC_ERR_NONE)
-		data->bytes_xfered = data->blocks * data->blksz;
+		data->bytes_xfered = data->blocks << data->blksz_bits;
 	else
 		data->bytes_xfered = 0;
 
 	pxamci_disable_irq(host, DATA_TRAN_DONE);
 
 	host->data = NULL;
-	if (host->mrq->stop) {
+	if (host->mrq->stop && data->error == MMC_ERR_NONE) {
 		pxamci_stop_clock(host);
 		pxamci_start_cmd(host, host->mrq->stop, 0);
 	} else {
@@ -308,10 +317,12 @@ static irqreturn_t pxamci_irq(int irq, void *devid, struct pt_regs *regs)
 
 	ireg = readl(host->base + MMC_I_REG);
 
+	DBG("PXAMCI: irq %08x\n", ireg);
+
 	if (ireg) {
 		unsigned stat = readl(host->base + MMC_STAT);
 
-		pr_debug("PXAMCI: irq %08x stat %08x\n", ireg, stat);
+		DBG("PXAMCI: stat %08x\n", stat);
 
 		if (ireg & END_CMD_RES)
 			handled |= pxamci_cmd_done(host, stat);
@@ -365,6 +376,10 @@ static void pxamci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 {
 	struct pxamci_host *host = mmc_priv(mmc);
 
+	DBG("pxamci_set_ios: clock %u power %u vdd %u.%02u\n",
+	    ios->clock, ios->power_mode, ios->vdd / 100,
+	    ios->vdd % 100);
+
 	if (ios->clock) {
 		unsigned int clk = CLOCKRATE / ios->clock;
 		if (CLOCKRATE / clk > ios->clock)
@@ -390,8 +405,8 @@ static void pxamci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			host->cmdat |= CMDAT_INIT;
 	}
 
-	pr_debug("PXAMCI: clkrt = %x cmdat = %x\n",
-		 host->clkrt, host->cmdat);
+	DBG("pxamci_set_ios: clkrt = %x cmdat = %x\n",
+	    host->clkrt, host->cmdat);
 }
 
 static struct mmc_host_ops pxamci_ops = {
@@ -423,7 +438,7 @@ static int pxamci_probe(struct platform_device *pdev)
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (!r || irq < 0)
+	if (!r || irq == NO_IRQ)
 		return -ENXIO;
 
 	r = request_mem_region(r->start, SZ_4K, DRIVER_NAME);

@@ -81,9 +81,16 @@ static inline int smp_call_function(void (*func)(void *info), void *info, int no
 	return 0;
 }
 
+extern __volatile__ int __cpu_number_map[NR_CPUS];
+extern __volatile__ int __cpu_logical_map[NR_CPUS];
+
 static inline int cpu_logical_map(int cpu)
 {
-	return cpu;
+	return __cpu_logical_map[cpu];
+}
+static inline int cpu_number_map(int cpu)
+{
+	return __cpu_number_map[cpu];
 }
 
 static inline int hard_smp4m_processor_id(void)

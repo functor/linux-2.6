@@ -49,8 +49,6 @@
 #include <linux/syscalls.h>
 #include <linux/times.h>
 #include <linux/acct.h>
-#include <linux/kprobes.h>
-
 #include <asm/tlb.h>
 #include <asm/unistd.h>
 
@@ -149,8 +147,7 @@
 	(v1) * (v2_max) / (v1_max)
 
 #define DELTA(p) \
-	(SCALE(TASK_NICE(p) + 20, 40, MAX_BONUS) - 20 * MAX_BONUS / 40 + \
-		INTERACTIVE_DELTA)
+	(SCALE(TASK_NICE(p), 40, MAX_BONUS) + INTERACTIVE_DELTA)
 
 #define TASK_INTERACTIVE(p) \
 	((p)->prio <= (p)->static_prio - DELTA(p))
@@ -685,13 +682,9 @@ static int effective_prio(task_t *p)
 /*
  * __activate_task - move a task to the runqueue.
  */
-static void __activate_task(task_t *p, runqueue_t *rq)
+static inline void __activate_task(task_t *p, runqueue_t *rq)
 {
-	prio_array_t *target = rq->active;
-
-	if (batch_task(p))
-		target = rq->expired;
-	enqueue_task(p, target);
+	enqueue_task(p, rq->active);
 	rq->nr_running++;
 }
 
@@ -710,7 +703,7 @@ static int recalc_task_prio(task_t *p, unsigned long long now)
 	unsigned long long __sleep_time = now - p->timestamp;
 	unsigned long sleep_time;
 
-	if (batch_task(p))
+	if (unlikely(p->policy == SCHED_BATCH))
 		sleep_time = 0;
 	else {
 		if (__sleep_time > NS_MAX_SLEEP_AVG)
@@ -722,25 +715,27 @@ static int recalc_task_prio(task_t *p, unsigned long long now)
 	if (likely(sleep_time > 0)) {
 		/*
 		 * User tasks that sleep a long time are categorised as
-		 * idle. They will only have their sleep_avg increased to a
-		 * level that makes them just interactive priority to stay
-		 * active yet prevent them suddenly becoming cpu hogs and
-		 * starving other processes.
+		 * idle and will get just interactive status to stay active &
+		 * prevent them suddenly becoming cpu hogs and starving
+		 * other processes.
 		 */
-		if (p->mm && sleep_time > INTERACTIVE_SLEEP(p)) {
-				unsigned long ceiling;
-
-				ceiling = JIFFIES_TO_NS(MAX_SLEEP_AVG -
-					DEF_TIMESLICE);
-				if (p->sleep_avg < ceiling)
-					p->sleep_avg = ceiling;
+		if (p->mm && p->activated != -1 &&
+			sleep_time > INTERACTIVE_SLEEP(p)) {
+				p->sleep_avg = JIFFIES_TO_NS(MAX_SLEEP_AVG -
+						DEF_TIMESLICE);
 		} else {
+			/*
+			 * The lower the sleep avg a task has the more
+			 * rapidly it will rise with sleep time.
+			 */
+			sleep_time *= (MAX_BONUS - CURRENT_BONUS(p)) ? : 1;
+
 			/*
 			 * Tasks waking from uninterruptible sleep are
 			 * limited in their sleep_avg rise as they
 			 * are likely to be waiting on I/O
 			 */
-			if (p->sleep_type == SLEEP_NONINTERACTIVE && p->mm) {
+			if (p->activated == -1 && p->mm) {
 				if (p->sleep_avg >= INTERACTIVE_SLEEP(p))
 					sleep_time = 0;
 				else if (p->sleep_avg + sleep_time >=
@@ -795,7 +790,7 @@ static void activate_task(task_t *p, runqueue_t *rq, int local)
 	 * This checks to make sure it's not an uninterruptible task
 	 * that is now waking up.
 	 */
-	if (p->sleep_type == SLEEP_NORMAL) {
+	if (!p->activated) {
 		/*
 		 * Tasks which were woken up by interrupts (ie. hw events)
 		 * are most likely of interactive nature. So we give them
@@ -804,13 +799,13 @@ static void activate_task(task_t *p, runqueue_t *rq, int local)
 		 * on a CPU, first time around:
 		 */
 		if (in_interrupt())
-			p->sleep_type = SLEEP_INTERRUPTED;
+			p->activated = 2;
 		else {
 			/*
 			 * Normal first-time wakeups get a credit too for
 			 * on-runqueue time, but it will be weighted down:
 			 */
-			p->sleep_type = SLEEP_INTERACTIVE;
+			p->activated = 1;
 		}
 	}
 	p->timestamp = now;
@@ -1358,24 +1353,29 @@ out_activate:
 #endif /* CONFIG_SMP */
 	if (old_state == TASK_UNINTERRUPTIBLE) {
 		rq->nr_uninterruptible--;
-		vx_uninterruptible_dec(p);
 		/*
 		 * Tasks on involuntary sleep don't earn
 		 * sleep_avg beyond just interactive state.
 		 */
-		p->sleep_type = SLEEP_NONINTERACTIVE;
-	} else
+		p->activated = -1;
+	}
 
 	/*
 	 * Tasks that have marked their sleep as noninteractive get
-	 * woken up with their sleep average not weighted in an
-	 * interactive way.
+	 * woken up without updating their sleep average. (i.e. their
+	 * sleep is handled in a priority-neutral manner, no priority
+	 * boost and no penalty.)
 	 */
-		if (old_state & TASK_NONINTERACTIVE)
-			p->sleep_type = SLEEP_NONINTERACTIVE;
+	if (old_state & TASK_NONINTERACTIVE) {
+		vx_activate_task(p);
+		__activate_task(p, rq);
+	} else
+		activate_task(p, rq, cpu == this_cpu);
 
+	/* this is to get the accounting behind the load update */
+	if (old_state & TASK_UNINTERRUPTIBLE)
+		vx_uninterruptible_dec(p);
 
-	activate_task(p, rq, cpu == this_cpu);
 	/*
 	 * Sync wakeups (i.e. those types of wakeups where the waker
 	 * has indicated that it will leave the CPU in short order)
@@ -1641,14 +1641,8 @@ static inline void finish_task_switch(runqueue_t *rq, task_t *prev)
 	finish_lock_switch(rq, prev);
 	if (mm)
 		mmdrop(mm);
-	if (unlikely(prev_task_flags & PF_DEAD)) {
-		/*
-		 * Remove function-return probe instances associated with this
-		 * task and put them back on the free list.
-	 	 */
-		kprobe_flush_task(prev);
+	if (unlikely(prev_task_flags & PF_DEAD))
 		put_task_struct(prev);
-	}
 }
 
 /**
@@ -1718,7 +1712,7 @@ unsigned long nr_uninterruptible(void)
 {
 	unsigned long i, sum = 0;
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		sum += cpu_rq(i)->nr_uninterruptible;
 
 	/*
@@ -1735,7 +1729,7 @@ unsigned long long nr_context_switches(void)
 {
 	unsigned long long i, sum = 0;
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		sum += cpu_rq(i)->nr_switches;
 
 	return sum;
@@ -1745,25 +1739,10 @@ unsigned long nr_iowait(void)
 {
 	unsigned long i, sum = 0;
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		sum += atomic_read(&cpu_rq(i)->nr_iowait);
 
 	return sum;
-}
-
-unsigned long nr_active(void)
-{
-	unsigned long i, running = 0, uninterruptible = 0;
-
-	for_each_online_cpu(i) {
-		running += cpu_rq(i)->nr_running;
-		uninterruptible += cpu_rq(i)->nr_uninterruptible;
-	}
-
-	if (unlikely((long)uninterruptible < 0))
-		uninterruptible = 0;
-
-	return running + uninterruptible;
 }
 
 #ifdef CONFIG_SMP
@@ -2034,7 +2013,8 @@ out:
  */
 static struct sched_group *
 find_busiest_group(struct sched_domain *sd, int this_cpu,
-		   unsigned long *imbalance, enum idle_type idle, int *sd_idle)
+		   unsigned long *imbalance, enum idle_type idle, int *sd_idle,
+		   cpumask_t *cpus)
 {
 	struct sched_group *busiest = NULL, *this = NULL, *group = sd->groups;
 	unsigned long max_load, avg_load, total_load, this_load, total_pwr;
@@ -2060,6 +2040,9 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 		avg_load = 0;
 
 		for_each_cpu_mask(i, group->cpumask) {
+			if (!cpu_isset(i, *cpus))
+				continue;
+
 			if (*sd_idle && !idle_cpu(i))
 				*sd_idle = 0;
 
@@ -2173,13 +2156,16 @@ out_balanced:
  * find_busiest_queue - find the busiest runqueue among the cpus in group.
  */
 static runqueue_t *find_busiest_queue(struct sched_group *group,
-	enum idle_type idle)
+	enum idle_type idle, cpumask_t *cpus)
 {
 	unsigned long load, max_load = 0;
 	runqueue_t *busiest = NULL;
 	int i;
 
 	for_each_cpu_mask(i, group->cpumask) {
+		if (!cpu_isset(i, *cpus))
+			continue;
+
 		load = source_load(i, 0);
 
 		if (load > max_load) {
@@ -2212,19 +2198,22 @@ static int load_balance(int this_cpu, runqueue_t *this_rq,
 	int nr_moved, all_pinned = 0;
 	int active_balance = 0;
 	int sd_idle = 0;
+	cpumask_t cpus = CPU_MASK_ALL;
 
 	if (idle != NOT_IDLE && sd->flags & SD_SHARE_CPUPOWER)
 		sd_idle = 1;
 
 	schedstat_inc(sd, lb_cnt[idle]);
 
-	group = find_busiest_group(sd, this_cpu, &imbalance, idle, &sd_idle);
+redo:
+	group = find_busiest_group(sd, this_cpu, &imbalance, idle,
+			&sd_idle, &cpus);
 	if (!group) {
 		schedstat_inc(sd, lb_nobusyg[idle]);
 		goto out_balanced;
 	}
 
-	busiest = find_busiest_queue(group, idle);
+	busiest = find_busiest_queue(group, idle, &cpus);
 	if (!busiest) {
 		schedstat_inc(sd, lb_nobusyq[idle]);
 		goto out_balanced;
@@ -2248,8 +2237,12 @@ static int load_balance(int this_cpu, runqueue_t *this_rq,
 		double_rq_unlock(this_rq, busiest);
 
 		/* All tasks on this runqueue were pinned by CPU affinity */
-		if (unlikely(all_pinned))
+		if (unlikely(all_pinned)) {
+			cpu_clear(busiest->cpu, cpus);
+			if (!cpus_empty(cpus))
+				goto redo;
 			goto out_balanced;
+		}
 	}
 
 	if (!nr_moved) {
@@ -2336,18 +2329,21 @@ static int load_balance_newidle(int this_cpu, runqueue_t *this_rq,
 	unsigned long imbalance;
 	int nr_moved = 0;
 	int sd_idle = 0;
+	cpumask_t cpus = CPU_MASK_ALL;
 
 	if (sd->flags & SD_SHARE_CPUPOWER)
 		sd_idle = 1;
 
 	schedstat_inc(sd, lb_cnt[NEWLY_IDLE]);
-	group = find_busiest_group(sd, this_cpu, &imbalance, NEWLY_IDLE, &sd_idle);
+redo:
+	group = find_busiest_group(sd, this_cpu, &imbalance, NEWLY_IDLE,
+			&sd_idle, &cpus);
 	if (!group) {
 		schedstat_inc(sd, lb_nobusyg[NEWLY_IDLE]);
 		goto out_balanced;
 	}
 
-	busiest = find_busiest_queue(group, NEWLY_IDLE);
+	busiest = find_busiest_queue(group, NEWLY_IDLE, &cpus);
 	if (!busiest) {
 		schedstat_inc(sd, lb_nobusyq[NEWLY_IDLE]);
 		goto out_balanced;
@@ -2364,6 +2360,12 @@ static int load_balance_newidle(int this_cpu, runqueue_t *this_rq,
 		nr_moved = move_tasks(this_rq, this_cpu, busiest,
 					imbalance, sd, NEWLY_IDLE, NULL);
 		spin_unlock(&busiest->lock);
+
+		if (!nr_moved) {
+			cpu_clear(busiest->cpu, cpus);
+			if (!cpus_empty(cpus))
+				goto redo;
+		}
 	}
 
 	if (!nr_moved) {
@@ -2981,12 +2983,6 @@ EXPORT_SYMBOL(sub_preempt_count);
 
 #endif
 
-static inline int interactive_sleep(enum sleep_type sleep_type)
-{
-	return (sleep_type == SLEEP_INTERACTIVE ||
-		sleep_type == SLEEP_INTERRUPTED);
-}
-
 /*
  * schedule() is the main scheduler function.
  */
@@ -3014,11 +3010,13 @@ asmlinkage void __sched schedule(void)
 	 * schedule() atomically, we ignore that path for now.
 	 * Otherwise, whine if we are scheduling when we should not be.
 	 */
-	if (unlikely(in_atomic() && !current->exit_state)) {
-		printk(KERN_ERR "BUG: scheduling while atomic: "
-			"%s/0x%08x/%d\n",
-			current->comm, preempt_count(), current->pid);
-		dump_stack();
+	if (likely(!current->exit_state)) {
+		if (unlikely(in_atomic())) {
+			printk(KERN_ERR "scheduling while atomic: "
+				"%s/0x%08x/%d\n",
+				current->comm, preempt_count(), current->pid);
+			dump_stack();
+		}
 	}
 	profile_hit(SCHED_PROFILING, __builtin_return_address(0));
 
@@ -3192,12 +3190,12 @@ go_idle:
 	if (vx_info_flags(vxi, VXF_SCHED_PRIO, 0))
 		vx_tokens_recalc(vxi);
 
-	if (!rt_task(next) && interactive_sleep(next->sleep_type)) {
+	if (!rt_task(next) && next->activated > 0) {
 		unsigned long long delta = now - next->timestamp;
 		if (unlikely((long long)(now - next->timestamp) < 0))
 			delta = 0;
 
-		if (next->sleep_type == SLEEP_INTERACTIVE)
+		if (next->activated == 1)
 			delta = delta * (ON_RUNQUEUE_WEIGHT * 128 / 100) / 128;
 
 		array = next->array;
@@ -3207,9 +3205,10 @@ go_idle:
 			dequeue_task(next, array);
 			next->prio = new_prio;
 			enqueue_task(next, array);
-		}
+		} else
+			requeue_task(next, array);
 	}
-	next->sleep_type = SLEEP_NORMAL;
+	next->activated = 0;
 switch_tasks:
 #if defined(CONFIG_VSERVER_HARDCPU) && defined(CONFIG_VSERVER_ACB_SCHED)
 	if (next == rq->idle && !list_empty(&rq->hold_queue)) {
@@ -3608,20 +3607,9 @@ EXPORT_SYMBOL(wait_for_completion_interruptible_timeout);
 	__remove_wait_queue(q, &wait);			\
 	spin_unlock_irqrestore(&q->lock, flags);
 
-#define SLEEP_ON_BKLCHECK				\
-	if (unlikely(!kernel_locked()) &&		\
-	    sleep_on_bkl_warnings < 10) {		\
-		sleep_on_bkl_warnings++;		\
-		WARN_ON(1);				\
-	}
-
-static int sleep_on_bkl_warnings;
-
 void fastcall __sched interruptible_sleep_on(wait_queue_head_t *q)
 {
 	SLEEP_ON_VAR
-
-	SLEEP_ON_BKLCHECK
 
 	current->state = TASK_INTERRUPTIBLE;
 
@@ -3637,8 +3625,6 @@ interruptible_sleep_on_timeout(wait_queue_head_t *q, long timeout)
 {
 	SLEEP_ON_VAR
 
-	SLEEP_ON_BKLCHECK
-
 	current->state = TASK_INTERRUPTIBLE;
 
 	SLEEP_ON_HEAD
@@ -3650,11 +3636,22 @@ interruptible_sleep_on_timeout(wait_queue_head_t *q, long timeout)
 
 EXPORT_SYMBOL(interruptible_sleep_on_timeout);
 
-long fastcall __sched sleep_on_timeout(wait_queue_head_t *q, long timeout)
+void fastcall __sched sleep_on(wait_queue_head_t *q)
 {
 	SLEEP_ON_VAR
 
-	SLEEP_ON_BKLCHECK
+	current->state = TASK_UNINTERRUPTIBLE;
+
+	SLEEP_ON_HEAD
+	schedule();
+	SLEEP_ON_TAIL
+}
+
+EXPORT_SYMBOL(sleep_on);
+
+long fastcall __sched sleep_on_timeout(wait_queue_head_t *q, long timeout)
+{
+	SLEEP_ON_VAR
 
 	current->state = TASK_UNINTERRUPTIBLE;
 
@@ -4239,22 +4236,17 @@ asmlinkage long sys_sched_yield(void)
 	return 0;
 }
 
-static inline int __resched_legal(int expected_preempt_count)
-{
-	if (unlikely(preempt_count() != expected_preempt_count))
-		return 0;
-	if (unlikely(system_state != SYSTEM_RUNNING))
-		return 0;
-	return 1;
-}
-
-static void __cond_resched(void)
+static inline void __cond_resched(void)
 {
 	/*
 	 * The BKS might be reacquired before we have dropped
 	 * PREEMPT_ACTIVE, which could trigger a second
 	 * cond_resched() call.
 	 */
+	if (unlikely(preempt_count()))
+		return;
+	if (unlikely(system_state != SYSTEM_RUNNING))
+		return;
 	do {
 		add_preempt_count(PREEMPT_ACTIVE);
 		schedule();
@@ -4264,12 +4256,13 @@ static void __cond_resched(void)
 
 int __sched cond_resched(void)
 {
-	if (need_resched() && __resched_legal(0)) {
+	if (need_resched()) {
 		__cond_resched();
 		return 1;
 	}
 	return 0;
 }
+
 EXPORT_SYMBOL(cond_resched);
 
 /*
@@ -4290,7 +4283,7 @@ int cond_resched_lock(spinlock_t *lock)
 		ret = 1;
 		spin_lock(lock);
 	}
-	if (need_resched() && __resched_legal(1)) {
+	if (need_resched()) {
 		_raw_spin_unlock(lock);
 		preempt_enable_no_resched();
 		__cond_resched();
@@ -4299,13 +4292,14 @@ int cond_resched_lock(spinlock_t *lock)
 	}
 	return ret;
 }
+
 EXPORT_SYMBOL(cond_resched_lock);
 
 int __sched cond_resched_softirq(void)
 {
 	BUG_ON(!in_softirq());
 
-	if (need_resched() && __resched_legal(0)) {
+	if (need_resched()) {
 		__local_bh_enable();
 		__cond_resched();
 		local_bh_disable();
@@ -4313,7 +4307,9 @@ int __sched cond_resched_softirq(void)
 	}
 	return 0;
 }
+
 EXPORT_SYMBOL(cond_resched_softirq);
+
 
 /**
  * yield - yield the current processor to other threads.
@@ -4984,7 +4980,7 @@ static int migration_call(struct notifier_block *nfb, unsigned long action,
 /* Register at highest priority so that task migration (migrate_all_tasks)
  * happens before everything else.
  */
-static struct notifier_block migration_notifier = {
+static struct notifier_block __devinitdata migration_notifier = {
 	.notifier_call = migration_call,
 	.priority = 10
 };
@@ -5686,15 +5682,13 @@ static void calibrate_migration_costs(const cpumask_t *cpu_map)
 #endif
 		);
 	if (system_state == SYSTEM_BOOTING) {
-		if (num_online_cpus() > 1) {
-			printk("migration_cost=");
-			for (distance = 0; distance <= max_distance; distance++) {
-				if (distance)
-					printk(",");
-				printk("%ld", (long)migration_cost[distance] / 1000);
-			}
-			printk("\n");
+		printk("migration_cost=");
+		for (distance = 0; distance <= max_distance; distance++) {
+			if (distance)
+				printk(",");
+			printk("%ld", (long)migration_cost[distance] / 1000);
 		}
+		printk("\n");
 	}
 	j1 = jiffies;
 	if (migration_debug)
@@ -5800,31 +5794,11 @@ static int cpu_to_cpu_group(int cpu)
 }
 #endif
 
-#ifdef CONFIG_SCHED_MC
-static DEFINE_PER_CPU(struct sched_domain, core_domains);
-static struct sched_group sched_group_core[NR_CPUS];
-#endif
-
-#if defined(CONFIG_SCHED_MC) && defined(CONFIG_SCHED_SMT)
-static int cpu_to_core_group(int cpu)
-{
-	return first_cpu(cpu_sibling_map[cpu]);
-}
-#elif defined(CONFIG_SCHED_MC)
-static int cpu_to_core_group(int cpu)
-{
-	return cpu;
-}
-#endif
-
 static DEFINE_PER_CPU(struct sched_domain, phys_domains);
 static struct sched_group sched_group_phys[NR_CPUS];
 static int cpu_to_phys_group(int cpu)
 {
-#if defined(CONFIG_SCHED_MC)
-	cpumask_t mask = cpu_coregroup_map(cpu);
-	return first_cpu(mask);
-#elif defined(CONFIG_SCHED_SMT)
+#ifdef CONFIG_SCHED_SMT
 	return first_cpu(cpu_sibling_map[cpu]);
 #else
 	return cpu;
@@ -5846,32 +5820,6 @@ static struct sched_group *sched_group_allnodes_bycpu[NR_CPUS];
 static int cpu_to_allnodes_group(int cpu)
 {
 	return cpu_to_node(cpu);
-}
-static void init_numa_sched_groups_power(struct sched_group *group_head)
-{
-	struct sched_group *sg = group_head;
-	int j;
-
-	if (!sg)
-		return;
-next_sg:
-	for_each_cpu_mask(j, sg->cpumask) {
-		struct sched_domain *sd;
-
-		sd = &per_cpu(phys_domains, j);
-		if (j != first_cpu(sd->groups->cpumask)) {
-			/*
-			 * Only add "power" once for each
-			 * physical package.
-			 */
-			continue;
-		}
-
-		sg->cpu_power += sd->groups->cpu_power;
-	}
-	sg = sg->next;
-	if (sg != group_head)
-		goto next_sg;
 }
 #endif
 
@@ -5948,17 +5896,6 @@ void build_sched_domains(const cpumask_t *cpu_map)
 		sd->parent = p;
 		sd->groups = &sched_group_phys[group];
 
-#ifdef CONFIG_SCHED_MC
-		p = sd;
-		sd = &per_cpu(core_domains, i);
-		group = cpu_to_core_group(i);
-		*sd = SD_MC_INIT;
-		sd->span = cpu_coregroup_map(i);
-		cpus_and(sd->span, sd->span, *cpu_map);
-		sd->parent = p;
-		sd->groups = &sched_group_core[group];
-#endif
-
 #ifdef CONFIG_SCHED_SMT
 		p = sd;
 		sd = &per_cpu(cpu_domains, i);
@@ -5983,19 +5920,6 @@ void build_sched_domains(const cpumask_t *cpu_map)
 						&cpu_to_cpu_group);
 	}
 #endif
-
-#ifdef CONFIG_SCHED_MC
-	/* Set up multi-core groups */
-	for_each_cpu_mask(i, *cpu_map) {
-		cpumask_t this_core_map = cpu_coregroup_map(i);
-		cpus_and(this_core_map, this_core_map, *cpu_map);
-		if (i != first_cpu(this_core_map))
-			continue;
-		init_sched_build_groups(sched_group_core, this_core_map,
-					&cpu_to_core_group);
-	}
-#endif
-
 
 	/* Set up physical groups */
 	for (i = 0; i < MAX_NUMNODES; i++) {
@@ -6093,38 +6017,51 @@ void build_sched_domains(const cpumask_t *cpu_map)
 		power = SCHED_LOAD_SCALE;
 		sd->groups->cpu_power = power;
 #endif
-#ifdef CONFIG_SCHED_MC
-		sd = &per_cpu(core_domains, i);
-		power = SCHED_LOAD_SCALE + (cpus_weight(sd->groups->cpumask)-1)
-					    * SCHED_LOAD_SCALE / 10;
-		sd->groups->cpu_power = power;
 
-		sd = &per_cpu(phys_domains, i);
-
- 		/*
- 		 * This has to be < 2 * SCHED_LOAD_SCALE
- 		 * Lets keep it SCHED_LOAD_SCALE, so that
- 		 * while calculating NUMA group's cpu_power
- 		 * we can simply do
- 		 *  numa_group->cpu_power += phys_group->cpu_power;
- 		 *
- 		 * See "only add power once for each physical pkg"
- 		 * comment below
- 		 */
- 		sd->groups->cpu_power = SCHED_LOAD_SCALE;
-#else
 		sd = &per_cpu(phys_domains, i);
 		power = SCHED_LOAD_SCALE + SCHED_LOAD_SCALE *
 				(cpus_weight(sd->groups->cpumask)-1) / 10;
 		sd->groups->cpu_power = power;
+
+#ifdef CONFIG_NUMA
+		sd = &per_cpu(allnodes_domains, i);
+		if (sd->groups) {
+			power = SCHED_LOAD_SCALE + SCHED_LOAD_SCALE *
+				(cpus_weight(sd->groups->cpumask)-1) / 10;
+			sd->groups->cpu_power = power;
+		}
 #endif
 	}
 
 #ifdef CONFIG_NUMA
-	for (i = 0; i < MAX_NUMNODES; i++)
-		init_numa_sched_groups_power(sched_group_nodes[i]);
+	for (i = 0; i < MAX_NUMNODES; i++) {
+		struct sched_group *sg = sched_group_nodes[i];
+		int j;
 
-	init_numa_sched_groups_power(sched_group_allnodes);
+		if (sg == NULL)
+			continue;
+next_sg:
+		for_each_cpu_mask(j, sg->cpumask) {
+			struct sched_domain *sd;
+			int power;
+
+			sd = &per_cpu(phys_domains, j);
+			if (j != first_cpu(sd->groups->cpumask)) {
+				/*
+				 * Only add "power" once for each
+				 * physical package.
+				 */
+				continue;
+			}
+			power = SCHED_LOAD_SCALE + SCHED_LOAD_SCALE *
+				(cpus_weight(sd->groups->cpumask)-1) / 10;
+
+			sg->cpu_power += power;
+		}
+		sg = sg->next;
+		if (sg != sched_group_nodes[i])
+			goto next_sg;
+	}
 #endif
 
 	/* Attach the domains */
@@ -6132,8 +6069,6 @@ void build_sched_domains(const cpumask_t *cpu_map)
 		struct sched_domain *sd;
 #ifdef CONFIG_SCHED_SMT
 		sd = &per_cpu(cpu_domains, i);
-#elif defined(CONFIG_SCHED_MC)
-		sd = &per_cpu(core_domains, i);
 #else
 		sd = &per_cpu(phys_domains, i);
 #endif
@@ -6306,7 +6241,7 @@ void __init sched_init(void)
 	runqueue_t *rq;
 	int i, j, k;
 
-	for_each_possible_cpu(i) {
+	for_each_cpu(i) {
 		prio_array_t *array;
 
 		rq = cpu_rq(i);
@@ -6322,6 +6257,7 @@ void __init sched_init(void)
 			rq->cpu_load[j] = 0;
 		rq->active_balance = 0;
 		rq->push_cpu = 0;
+		rq->cpu = i;
 		rq->migration_thread = NULL;
 		INIT_LIST_HEAD(&rq->migration_queue);
 		rq->cpu = i;
@@ -6368,7 +6304,7 @@ void __might_sleep(char *file, int line)
 		if (time_before(jiffies, prev_jiffy + HZ) && prev_jiffy)
 			return;
 		prev_jiffy = jiffies;
-		printk(KERN_ERR "BUG: sleeping function called from invalid"
+		printk(KERN_ERR "Debug: sleeping function called from invalid"
 				" context at %s:%d\n", file, line);
 		printk("in_atomic():%d, irqs_disabled():%d\n",
 			in_atomic(), irqs_disabled());

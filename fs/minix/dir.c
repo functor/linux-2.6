@@ -14,7 +14,7 @@ typedef struct minix_dir_entry minix_dirent;
 
 static int minix_readdir(struct file *, void *, filldir_t);
 
-const struct file_operations minix_dir_operations = {
+struct file_operations minix_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= minix_readdir,
 	.fsync		= minix_sync_file,

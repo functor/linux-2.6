@@ -39,12 +39,9 @@
 #define nlm_deadlock	nlm_lck_denied
 #endif
 
-static void nlmsvc_release_block(struct nlm_block *block);
 static void	nlmsvc_insert_block(struct nlm_block *block, unsigned long);
 static int	nlmsvc_remove_block(struct nlm_block *block);
 
-static int nlmsvc_setgrantargs(struct nlm_rqst *call, struct nlm_lock *lock);
-static void nlmsvc_freegrantargs(struct nlm_rqst *call);
 static const struct rpc_call_ops nlmsvc_grant_ops;
 
 /*
@@ -61,7 +58,6 @@ nlmsvc_insert_block(struct nlm_block *block, unsigned long when)
 	struct nlm_block **bp, *b;
 
 	dprintk("lockd: nlmsvc_insert_block(%p, %ld)\n", block, when);
-	kref_get(&block->b_count);
 	if (block->b_queued)
 		nlmsvc_remove_block(block);
 	bp = &nlm_blocked;
@@ -94,7 +90,6 @@ nlmsvc_remove_block(struct nlm_block *block)
 		if (b == block) {
 			*bp = block->b_next;
 			block->b_queued = 0;
-			nlmsvc_release_block(block);
 			return 1;
 		}
 	}
@@ -103,10 +98,11 @@ nlmsvc_remove_block(struct nlm_block *block)
 }
 
 /*
- * Find a block for a given lock
+ * Find a block for a given lock and optionally remove it from
+ * the list.
  */
 static struct nlm_block *
-nlmsvc_lookup_block(struct nlm_file *file, struct nlm_lock *lock)
+nlmsvc_lookup_block(struct nlm_file *file, struct nlm_lock *lock, int remove)
 {
 	struct nlm_block	**head, *block;
 	struct file_lock	*fl;
@@ -116,14 +112,17 @@ nlmsvc_lookup_block(struct nlm_file *file, struct nlm_lock *lock)
 				(long long)lock->fl.fl_start,
 				(long long)lock->fl.fl_end, lock->fl.fl_type);
 	for (head = &nlm_blocked; (block = *head) != 0; head = &block->b_next) {
-		fl = &block->b_call->a_args.lock.fl;
+		fl = &block->b_call.a_args.lock.fl;
 		dprintk("lockd: check f=%p pd=%d %Ld-%Ld ty=%d cookie=%s\n",
 				block->b_file, fl->fl_pid,
 				(long long)fl->fl_start,
 				(long long)fl->fl_end, fl->fl_type,
-				nlmdbg_cookie2a(&block->b_call->a_args.cookie));
+				nlmdbg_cookie2a(&block->b_call.a_args.cookie));
 		if (block->b_file == file && nlm_compare_locks(fl, &lock->fl)) {
-			kref_get(&block->b_count);
+			if (remove) {
+				*head = block->b_next;
+				block->b_queued = 0;
+			}
 			return block;
 		}
 	}
@@ -151,13 +150,11 @@ nlmsvc_find_block(struct nlm_cookie *cookie,  struct sockaddr_in *sin)
 	for (block = nlm_blocked; block; block = block->b_next) {
 		dprintk("cookie: head of blocked queue %p, block %p\n", 
 			nlm_blocked, block);
-		if (nlm_cookie_match(&block->b_call->a_args.cookie,cookie)
+		if (nlm_cookie_match(&block->b_call.a_args.cookie,cookie)
 				&& nlm_cmp_addr(sin, &block->b_host->h_addr))
 			break;
 	}
 
-	if (block != NULL)
-		kref_get(&block->b_count);
 	return block;
 }
 
@@ -177,30 +174,27 @@ nlmsvc_create_block(struct svc_rqst *rqstp, struct nlm_file *file,
 {
 	struct nlm_block	*block;
 	struct nlm_host		*host;
-	struct nlm_rqst		*call = NULL;
+	struct nlm_rqst		*call;
 
 	/* Create host handle for callback */
-	host = nlmsvc_lookup_host(rqstp);
+	host = nlmclnt_lookup_host(&rqstp->rq_addr,
+				rqstp->rq_prot, rqstp->rq_vers);
 	if (host == NULL)
 		return NULL;
 
-	call = nlm_alloc_call(host);
-	if (call == NULL)
-		return NULL;
-
 	/* Allocate memory for block, and initialize arguments */
-	block = kzalloc(sizeof(*block), GFP_KERNEL);
-	if (block == NULL)
+	if (!(block = (struct nlm_block *) kmalloc(sizeof(*block), GFP_KERNEL)))
 		goto failed;
-	kref_init(&block->b_count);
+	memset(block, 0, sizeof(*block));
+	locks_init_lock(&block->b_call.a_args.lock.fl);
+	locks_init_lock(&block->b_call.a_res.lock.fl);
 
-	if (!nlmsvc_setgrantargs(call, lock))
+	if (!nlmclnt_setgrantargs(&block->b_call, lock))
 		goto failed_free;
 
 	/* Set notifier function for VFS, and init args */
-	call->a_args.lock.fl.fl_flags |= FL_SLEEP;
-	call->a_args.lock.fl.fl_lmops = &nlmsvc_lock_operations;
-	call->a_args.cookie = *cookie;	/* see above */
+	block->b_call.a_args.lock.fl.fl_lmops = &nlmsvc_lock_operations;
+	block->b_call.a_args.cookie = *cookie;	/* see above */
 
 	dprintk("lockd: created block %p...\n", block);
 
@@ -208,23 +202,22 @@ nlmsvc_create_block(struct svc_rqst *rqstp, struct nlm_file *file,
 	block->b_daemon = rqstp->rq_server;
 	block->b_host   = host;
 	block->b_file   = file;
-	file->f_count++;
 
 	/* Add to file's list of blocks */
 	block->b_fnext  = file->f_blocks;
 	file->f_blocks  = block;
 
 	/* Set up RPC arguments for callback */
-	block->b_call = call;
+	call = &block->b_call;
+	call->a_host    = host;
 	call->a_flags   = RPC_TASK_ASYNC;
-	call->a_block = block;
 
 	return block;
 
 failed_free:
 	kfree(block);
 failed:
-	nlm_release_call(call);
+	nlm_release_host(host);
 	return NULL;
 }
 
@@ -234,26 +227,29 @@ failed:
  * It is the caller's responsibility to check whether the file
  * can be closed hereafter.
  */
-static int nlmsvc_unlink_block(struct nlm_block *block)
+static int
+nlmsvc_delete_block(struct nlm_block *block, int unlock)
 {
-	int status;
-	dprintk("lockd: unlinking block %p...\n", block);
-
-	/* Remove block from list */
-	status = posix_unblock_lock(block->b_file->f_file, &block->b_call->a_args.lock.fl);
-	nlmsvc_remove_block(block);
-	return status;
-}
-
-static void nlmsvc_free_block(struct kref *kref)
-{
-	struct nlm_block *block = container_of(kref, struct nlm_block, b_count);
+	struct file_lock	*fl = &block->b_call.a_args.lock.fl;
 	struct nlm_file		*file = block->b_file;
 	struct nlm_block	**bp;
+	int status = 0;
 
-	dprintk("lockd: freeing block %p...\n", block);
+	dprintk("lockd: deleting block %p...\n", block);
 
-	down(&file->f_sema);
+	/* Remove block from list */
+	nlmsvc_remove_block(block);
+	if (unlock)
+		status = posix_unblock_lock(file->f_file, fl);
+
+	/* If the block is in the middle of a GRANT callback,
+	 * don't kill it yet. */
+	if (block->b_incall) {
+		nlmsvc_insert_block(block, NLM_NEVER);
+		block->b_done = 1;
+		return status;
+	}
+
 	/* Remove block from file's list of blocks */
 	for (bp = &file->f_blocks; *bp; bp = &(*bp)->b_fnext) {
 		if (*bp == block) {
@@ -261,93 +257,36 @@ static void nlmsvc_free_block(struct kref *kref)
 			break;
 		}
 	}
-	up(&file->f_sema);
 
-	nlmsvc_freegrantargs(block->b_call);
-	nlm_release_call(block->b_call);
-	nlm_release_file(block->b_file);
+	if (block->b_host)
+		nlm_release_host(block->b_host);
+	nlmclnt_freegrantargs(&block->b_call);
 	kfree(block);
-}
-
-static void nlmsvc_release_block(struct nlm_block *block)
-{
-	if (block != NULL)
-		kref_put(&block->b_count, nlmsvc_free_block);
-}
-
-static void nlmsvc_act_mark(struct nlm_host *host, struct nlm_file *file)
-{
-	struct nlm_block *block;
-
-	down(&file->f_sema);
-	for (block = file->f_blocks; block != NULL; block = block->b_fnext)
-		block->b_host->h_inuse = 1;
-	up(&file->f_sema);
-}
-
-static void nlmsvc_act_unlock(struct nlm_host *host, struct nlm_file *file)
-{
-	struct nlm_block *block;
-
-restart:
-	down(&file->f_sema);
-	for (block = file->f_blocks; block != NULL; block = block->b_fnext) {
-		if (host != NULL && host != block->b_host)
-			continue;
-		if (!block->b_queued)
-			continue;
-		kref_get(&block->b_count);
-		up(&file->f_sema);
-		nlmsvc_unlink_block(block);
-		nlmsvc_release_block(block);
-		goto restart;
-	}
-	up(&file->f_sema);
+	return status;
 }
 
 /*
  * Loop over all blocks and perform the action specified.
  * (NLM_ACT_CHECK handled by nlmsvc_inspect_file).
  */
-void
+int
 nlmsvc_traverse_blocks(struct nlm_host *host, struct nlm_file *file, int action)
 {
-	if (action == NLM_ACT_MARK)
-		nlmsvc_act_mark(host, file);
-	else
-		nlmsvc_act_unlock(host, file);
-}
+	struct nlm_block	*block, *next;
+	/* XXX: Will everything get cleaned up if we don't unlock here? */
 
-/*
- * Initialize arguments for GRANTED call. The nlm_rqst structure
- * has been cleared already.
- */
-static int nlmsvc_setgrantargs(struct nlm_rqst *call, struct nlm_lock *lock)
-{
-	locks_copy_lock(&call->a_args.lock.fl, &lock->fl);
-	memcpy(&call->a_args.lock.fh, &lock->fh, sizeof(call->a_args.lock.fh));
-	call->a_args.lock.caller = system_utsname.nodename;
-	call->a_args.lock.oh.len = lock->oh.len;
-
-	/* set default data area */
-	call->a_args.lock.oh.data = call->a_owner;
-	call->a_args.lock.svid = lock->fl.fl_pid;
-
-	if (lock->oh.len > NLMCLNT_OHSIZE) {
-		void *data = kmalloc(lock->oh.len, GFP_KERNEL);
-		if (!data)
-			return 0;
-		call->a_args.lock.oh.data = (u8 *) data;
+	down(&file->f_sema);
+	for (block = file->f_blocks; block; block = next) {
+		next = block->b_fnext;
+		if (action == NLM_ACT_MARK)
+			block->b_host->h_inuse = 1;
+		else if (action == NLM_ACT_UNLOCK) {
+			if (host == NULL || host == block->b_host)
+				nlmsvc_delete_block(block, 1);
+		}
 	}
-
-	memcpy(call->a_args.lock.oh.data, lock->oh.data, lock->oh.len);
-	return 1;
-}
-
-static void nlmsvc_freegrantargs(struct nlm_rqst *call)
-{
-	if (call->a_args.lock.oh.data != call->a_owner)
-		kfree(call->a_args.lock.oh.data);
+	up(&file->f_sema);
+	return 0;
 }
 
 /*
@@ -358,9 +297,9 @@ u32
 nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 			struct nlm_lock *lock, int wait, struct nlm_cookie *cookie)
 {
-	struct nlm_block	*block, *newblock = NULL;
+	struct file_lock	*conflock;
+	struct nlm_block	*block;
 	int			error;
-	u32			ret;
 
 	dprintk("lockd: nlmsvc_lock(%s/%ld, ty=%d, pi=%d, %Ld-%Ld, bl=%d)\n",
 				file->f_file->f_dentry->d_inode->i_sb->s_id,
@@ -371,65 +310,69 @@ nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 				wait);
 
 
-	lock->fl.fl_flags &= ~FL_SLEEP;
+	/* Get existing block (in case client is busy-waiting) */
+	block = nlmsvc_lookup_block(file, lock, 0);
+
+	lock->fl.fl_flags |= FL_LOCKD;
+
 again:
 	/* Lock file against concurrent access */
 	down(&file->f_sema);
-	/* Get existing block (in case client is busy-waiting) */
-	block = nlmsvc_lookup_block(file, lock);
-	if (block == NULL) {
-		if (newblock != NULL)
-			lock = &newblock->b_call->a_args.lock;
-	} else
-		lock = &block->b_call->a_args.lock;
 
-	error = posix_lock_file(file->f_file, &lock->fl);
-	lock->fl.fl_flags &= ~FL_SLEEP;
+	if (!(conflock = posix_test_lock(file->f_file, &lock->fl))) {
+		error = posix_lock_file(file->f_file, &lock->fl);
 
-	dprintk("lockd: posix_lock_file returned %d\n", error);
+		if (block)
+			nlmsvc_delete_block(block, 0);
+		up(&file->f_sema);
 
-	switch(error) {
+		dprintk("lockd: posix_lock_file returned %d\n", -error);
+		switch(-error) {
 		case 0:
-			ret = nlm_granted;
-			goto out;
-		case -EAGAIN:
-			break;
-		case -EDEADLK:
-			ret = nlm_deadlock;
-			goto out;
+			return nlm_granted;
+		case EDEADLK:
+			return nlm_deadlock;
+		case EAGAIN:
+			return nlm_lck_denied;
 		default:			/* includes ENOLCK */
-			ret = nlm_lck_denied_nolocks;
-			goto out;
+			return nlm_lck_denied_nolocks;
+		}
 	}
 
-	ret = nlm_lck_denied;
-	if (!wait)
-		goto out;
+	if (!wait) {
+		up(&file->f_sema);
+		return nlm_lck_denied;
+	}
 
-	ret = nlm_lck_blocked;
-	if (block != NULL)
-		goto out;
+	if (posix_locks_deadlock(&lock->fl, conflock)) {
+		up(&file->f_sema);
+		return nlm_deadlock;
+	}
 
 	/* If we don't have a block, create and initialize it. Then
 	 * retry because we may have slept in kmalloc. */
 	/* We have to release f_sema as nlmsvc_create_block may try to
 	 * to claim it while doing host garbage collection */
-	if (newblock == NULL) {
+	if (block == NULL) {
 		up(&file->f_sema);
 		dprintk("lockd: blocking on this lock (allocating).\n");
-		if (!(newblock = nlmsvc_create_block(rqstp, file, lock, cookie)))
+		if (!(block = nlmsvc_create_block(rqstp, file, lock, cookie)))
 			return nlm_lck_denied_nolocks;
 		goto again;
 	}
 
 	/* Append to list of blocked */
-	nlmsvc_insert_block(newblock, NLM_NEVER);
-out:
+	nlmsvc_insert_block(block, NLM_NEVER);
+
+	if (list_empty(&block->b_call.a_args.lock.fl.fl_block)) {
+		/* Now add block to block list of the conflicting lock
+		   if we haven't done so. */
+		dprintk("lockd: blocking on this lock.\n");
+		posix_block_lock(conflock, &block->b_call.a_args.lock.fl);
+	}
+
 	up(&file->f_sema);
-	nlmsvc_release_block(newblock);
-	nlmsvc_release_block(block);
-	dprintk("lockd: nlmsvc_lock returned %u\n", ret);
-	return ret;
+	return nlm_lck_blocked;
 }
 
 /*
@@ -439,6 +382,8 @@ u32
 nlmsvc_testlock(struct nlm_file *file, struct nlm_lock *lock,
 				       struct nlm_lock *conflock)
 {
+	struct file_lock	*fl;
+
 	dprintk("lockd: nlmsvc_testlock(%s/%ld, ty=%d, %Ld-%Ld)\n",
 				file->f_file->f_dentry->d_inode->i_sb->s_id,
 				file->f_file->f_dentry->d_inode->i_ino,
@@ -446,14 +391,13 @@ nlmsvc_testlock(struct nlm_file *file, struct nlm_lock *lock,
 				(long long)lock->fl.fl_start,
 				(long long)lock->fl.fl_end);
 
-	if (posix_test_lock(file->f_file, &lock->fl, &conflock->fl)) {
+	if ((fl = posix_test_lock(file->f_file, &lock->fl)) != NULL) {
 		dprintk("lockd: conflicting lock(ty=%d, %Ld-%Ld)\n",
-				conflock->fl.fl_type,
-				(long long)conflock->fl.fl_start,
-				(long long)conflock->fl.fl_end);
+				fl->fl_type, (long long)fl->fl_start,
+				(long long)fl->fl_end);
 		conflock->caller = "somehost";	/* FIXME */
 		conflock->oh.len = 0;		/* don't return OH info */
-		conflock->svid = conflock->fl.fl_pid;
+		conflock->fl = *fl;
 		return nlm_lck_denied;
 	}
 
@@ -509,12 +453,9 @@ nlmsvc_cancel_blocked(struct nlm_file *file, struct nlm_lock *lock)
 				(long long)lock->fl.fl_end);
 
 	down(&file->f_sema);
-	block = nlmsvc_lookup_block(file, lock);
+	if ((block = nlmsvc_lookup_block(file, lock, 1)) != NULL)
+		status = nlmsvc_delete_block(block, 1);
 	up(&file->f_sema);
-	if (block != NULL) {
-		status = nlmsvc_unlink_block(block);
-		nlmsvc_release_block(block);
-	}
 	return status ? nlm_lck_denied : nlm_granted;
 }
 
@@ -532,7 +473,7 @@ nlmsvc_notify_blocked(struct file_lock *fl)
 
 	dprintk("lockd: VFS unblock notification for block %p\n", fl);
 	for (bp = &nlm_blocked; (block = *bp) != 0; bp = &block->b_next) {
-		if (nlm_compare_locks(&block->b_call->a_args.lock.fl, fl)) {
+		if (nlm_compare_locks(&block->b_call.a_args.lock.fl, fl)) {
 			nlmsvc_insert_block(block, 0);
 			svc_wake_up(block->b_daemon);
 			return;
@@ -567,13 +508,17 @@ static void
 nlmsvc_grant_blocked(struct nlm_block *block)
 {
 	struct nlm_file		*file = block->b_file;
-	struct nlm_lock		*lock = &block->b_call->a_args.lock;
+	struct nlm_lock		*lock = &block->b_call.a_args.lock;
+	struct file_lock	*conflock;
 	int			error;
 
 	dprintk("lockd: grant blocked lock %p\n", block);
 
+	/* First thing is lock the file */
+	down(&file->f_sema);
+
 	/* Unlink block request from list */
-	nlmsvc_unlink_block(block);
+	nlmsvc_remove_block(block);
 
 	/* If b_granted is true this means we've been here before.
 	 * Just retry the grant callback, possibly refreshing the RPC
@@ -584,21 +529,24 @@ nlmsvc_grant_blocked(struct nlm_block *block)
 	}
 
 	/* Try the lock operation again */
-	lock->fl.fl_flags |= FL_SLEEP;
-	error = posix_lock_file(file->f_file, &lock->fl);
-	lock->fl.fl_flags &= ~FL_SLEEP;
-
-	switch (error) {
-	case 0:
-		break;
-	case -EAGAIN:
+	if ((conflock = posix_test_lock(file->f_file, &lock->fl)) != NULL) {
+		/* Bummer, we blocked again */
 		dprintk("lockd: lock still blocked\n");
 		nlmsvc_insert_block(block, NLM_NEVER);
+		posix_block_lock(conflock, &lock->fl);
+		up(&file->f_sema);
 		return;
-	default:
+	}
+
+	/* Alright, no conflicting lock. Now lock it for real. If the
+	 * following yields an error, this is most probably due to low
+	 * memory. Retry the lock in a few seconds.
+	 */
+	if ((error = posix_lock_file(file->f_file, &lock->fl)) < 0) {
 		printk(KERN_WARNING "lockd: unexpected error %d in %s!\n",
 				-error, __FUNCTION__);
 		nlmsvc_insert_block(block, 10 * HZ);
+		up(&file->f_sema);
 		return;
 	}
 
@@ -606,15 +554,17 @@ callback:
 	/* Lock was granted by VFS. */
 	dprintk("lockd: GRANTing blocked lock.\n");
 	block->b_granted = 1;
+	block->b_incall  = 1;
 
 	/* Schedule next grant callback in 30 seconds */
 	nlmsvc_insert_block(block, 30 * HZ);
 
 	/* Call the client */
-	kref_get(&block->b_count);
-	if (nlm_async_call(block->b_call, NLMPROC_GRANTED_MSG,
+	nlm_get_host(block->b_call.a_host);
+	if (nlmsvc_async_call(&block->b_call, NLMPROC_GRANTED_MSG,
 						&nlmsvc_grant_ops) < 0)
-		nlmsvc_release_block(block);
+		nlm_release_host(block->b_call.a_host);
+	up(&file->f_sema);
 }
 
 /*
@@ -628,10 +578,20 @@ callback:
 static void nlmsvc_grant_callback(struct rpc_task *task, void *data)
 {
 	struct nlm_rqst		*call = data;
-	struct nlm_block	*block = call->a_block;
+	struct nlm_block	*block;
 	unsigned long		timeout;
+	struct sockaddr_in	*peer_addr = RPC_PEERADDR(task->tk_client);
 
 	dprintk("lockd: GRANT_MSG RPC callback\n");
+	dprintk("callback: looking for cookie %s, host (%u.%u.%u.%u)\n",
+		nlmdbg_cookie2a(&call->a_args.cookie),
+		NIPQUAD(peer_addr->sin_addr.s_addr));
+	if (!(block = nlmsvc_find_block(&call->a_args.cookie, peer_addr))) {
+		dprintk("lockd: no block for cookie %s, host (%u.%u.%u.%u)\n",
+			nlmdbg_cookie2a(&call->a_args.cookie),
+			NIPQUAD(peer_addr->sin_addr.s_addr));
+		return;
+	}
 
 	/* Technically, we should down the file semaphore here. Since we
 	 * move the block towards the head of the queue only, no harm
@@ -648,18 +608,13 @@ static void nlmsvc_grant_callback(struct rpc_task *task, void *data)
 	}
 	nlmsvc_insert_block(block, timeout);
 	svc_wake_up(block->b_daemon);
-}
+	block->b_incall = 0;
 
-static void nlmsvc_grant_release(void *data)
-{
-	struct nlm_rqst		*call = data;
-
-	nlmsvc_release_block(call->a_block);
+	nlm_release_host(call->a_host);
 }
 
 static const struct rpc_call_ops nlmsvc_grant_ops = {
 	.rpc_call_done = nlmsvc_grant_callback,
-	.rpc_release = nlmsvc_grant_release,
 };
 
 /*
@@ -679,17 +634,25 @@ nlmsvc_grant_reply(struct svc_rqst *rqstp, struct nlm_cookie *cookie, u32 status
 		return;
 	file = block->b_file;
 
+	file->f_count++;
+	down(&file->f_sema);
+	block = nlmsvc_find_block(cookie, &rqstp->rq_addr);
 	if (block) {
 		if (status == NLM_LCK_DENIED_GRACE_PERIOD) {
 			/* Try again in a couple of seconds */
 			nlmsvc_insert_block(block, 10 * HZ);
+			up(&file->f_sema);
 		} else {
 			/* Lock is now held by client, or has been rejected.
 			 * In both cases, the block should be removed. */
-			nlmsvc_unlink_block(block);
+			up(&file->f_sema);
+			if (status == NLM_LCK_GRANTED)
+				nlmsvc_delete_block(block, 0);
+			else
+				nlmsvc_delete_block(block, 1);
 		}
 	}
-	nlmsvc_release_block(block);
+	nlm_release_file(file);
 }
 
 /*
@@ -712,12 +675,10 @@ nlmsvc_retry_blocked(void)
 			break;
 		dprintk("nlmsvc_retry_blocked(%p, when=%ld, done=%d)\n",
 			block, block->b_when, block->b_done);
-		kref_get(&block->b_count);
 		if (block->b_done)
-			nlmsvc_unlink_block(block);
+			nlmsvc_delete_block(block, 0);
 		else
 			nlmsvc_grant_blocked(block);
-		nlmsvc_release_block(block);
 	}
 
 	if ((block = nlm_blocked) && block->b_when != NLM_NEVER)

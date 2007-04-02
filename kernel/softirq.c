@@ -16,7 +16,6 @@
 #include <linux/cpu.h>
 #include <linux/kthread.h>
 #include <linux/rcupdate.h>
-#include <linux/smp.h>
 
 #include <asm/irq.h>
 /*
@@ -446,7 +445,7 @@ static void takeover_tasklets(unsigned int cpu)
 }
 #endif /* CONFIG_HOTPLUG_CPU */
 
-static int cpu_callback(struct notifier_block *nfb,
+static int __devinit cpu_callback(struct notifier_block *nfb,
 				  unsigned long action,
 				  void *hcpu)
 {
@@ -455,8 +454,6 @@ static int cpu_callback(struct notifier_block *nfb,
 
 	switch (action) {
 	case CPU_UP_PREPARE:
-		BUG_ON(per_cpu(tasklet_vec, hotcpu).list);
-		BUG_ON(per_cpu(tasklet_hi_vec, hotcpu).list);
 		p = kthread_create(ksoftirqd, hcpu, "ksoftirqd/%d", hotcpu);
 		if (IS_ERR(p)) {
 			printk("ksoftirqd for %i failed\n", hotcpu);
@@ -484,7 +481,7 @@ static int cpu_callback(struct notifier_block *nfb,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block cpu_nfb = {
+static struct notifier_block __devinitdata cpu_nfb = {
 	.notifier_call = cpu_callback
 };
 
@@ -496,22 +493,3 @@ __init int spawn_ksoftirqd(void)
 	register_cpu_notifier(&cpu_nfb);
 	return 0;
 }
-
-#ifdef CONFIG_SMP
-/*
- * Call a function on all processors
- */
-int on_each_cpu(void (*func) (void *info), void *info, int retry, int wait)
-{
-	int ret = 0;
-
-	preempt_disable();
-	ret = smp_call_function(func, info, retry, wait);
-	local_irq_disable();
-	func(info);
-	local_irq_enable();
-	preempt_enable();
-	return ret;
-}
-EXPORT_SYMBOL(on_each_cpu);
-#endif

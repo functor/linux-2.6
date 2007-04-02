@@ -26,7 +26,6 @@
  */
 
 	.text
-	.section .bootstrap.text
 	.code32
 	.globl startup_32
 /* %bx:	 1 if coming from smp trampoline on secondary cpu */ 
@@ -193,8 +192,7 @@ startup_64:
 	movq	initial_code(%rip),%rax
 	jmp	*%rax
 
-	/* SMP bootup changes these two */
-	.align	8
+	/* SMP bootup changes these two */	
 	.globl	initial_code
 initial_code:
 	.quad	x86_64_start_kernel
@@ -239,7 +237,7 @@ ENTRY(no_long_mode)
 .org 0xf00
 	.globl pGDT32
 pGDT32:
-	.word	gdt_end-cpu_gdt_table-1
+	.word	gdt_end-cpu_gdt_table
 	.long	cpu_gdt_table-__START_KERNEL_map
 
 .org 0xf10	
@@ -295,6 +293,8 @@ NEXT_PAGE(level2_kernel_pgt)
 	/* Module mapping starts here */
 	.fill	492,8,0
 
+NEXT_PAGE(empty_zero_page)
+
 NEXT_PAGE(level3_physmem_pgt)
 	.quad	phys_level2_kernel_pgt | 0x007	/* so that __va works even before pagetable_init */
 	.fill	511,8,0
@@ -337,7 +337,7 @@ ENTRY(boot_level4_pgt)
 	.align 16
 	.globl cpu_gdt_descr
 cpu_gdt_descr:
-	.word	gdt_end-cpu_gdt_table-1
+	.word	gdt_end-cpu_gdt_table
 gdt:
 	.quad	cpu_gdt_table
 #ifdef CONFIG_SMP
@@ -352,8 +352,7 @@ gdt:
  * Also sysret mandates a special GDT layout 
  */
 		 		
-	.section .data.page_aligned, "aw"
-	.align PAGE_SIZE
+.align PAGE_SIZE
 
 /* The TLS descriptors are currently at a different place compared to i386.
    Hopefully nobody expects them at a fixed place (Wine?) */
@@ -379,12 +378,9 @@ gdt_end:
 	/* zero the remaining page */
 	.fill PAGE_SIZE / 8 - GDT_ENTRIES,8,0
 
-	.section .bss, "aw", @nobits
-	.align L1_CACHE_BYTES
-ENTRY(idt_table)
-	.skip 256 * 16
+ENTRY(idt_table)	
+	.rept   256
+	.quad   0
+	.quad 	0
+	.endr
 
-	.section .bss.page_aligned, "aw", @nobits
-	.align PAGE_SIZE
-ENTRY(empty_zero_page)
-	.skip PAGE_SIZE

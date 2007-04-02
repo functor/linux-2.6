@@ -824,6 +824,8 @@ static void apm_do_busy(void)
 
 static void (*original_pm_idle)(void);
 
+extern void default_idle(void);
+
 /**
  * apm_cpu_idle		-	cpu idling for APM capable Linux
  *

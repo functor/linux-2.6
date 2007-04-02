@@ -37,7 +37,6 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
-#include <linux/mutex.h>
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>");
 MODULE_DESCRIPTION("TurboGraFX parallel port interface driver");
@@ -87,7 +86,7 @@ static struct tgfx {
 	char phys[TGFX_MAX_DEVICES][32];
 	int sticks;
 	int used;
-	struct mutex sem;
+	struct semaphore sem;
 } *tgfx_base[TGFX_MAX_PORTS];
 
 /*
@@ -129,7 +128,7 @@ static int tgfx_open(struct input_dev *dev)
 	struct tgfx *tgfx = dev->private;
 	int err;
 
-	err = mutex_lock_interruptible(&tgfx->sem);
+	err = down_interruptible(&tgfx->sem);
 	if (err)
 		return err;
 
@@ -139,7 +138,7 @@ static int tgfx_open(struct input_dev *dev)
 		mod_timer(&tgfx->timer, jiffies + TGFX_REFRESH_TIME);
 	}
 
-	mutex_unlock(&tgfx->sem);
+	up(&tgfx->sem);
 	return 0;
 }
 
@@ -147,13 +146,13 @@ static void tgfx_close(struct input_dev *dev)
 {
 	struct tgfx *tgfx = dev->private;
 
-	mutex_lock(&tgfx->sem);
+	down(&tgfx->sem);
 	if (!--tgfx->used) {
 		del_timer_sync(&tgfx->timer);
 		parport_write_control(tgfx->pd->port, 0x00);
 		parport_release(tgfx->pd);
 	}
-	mutex_unlock(&tgfx->sem);
+	up(&tgfx->sem);
 }
 
 
@@ -192,7 +191,7 @@ static struct tgfx __init *tgfx_probe(int parport, int *n_buttons, int n_devs)
 		goto err_unreg_pardev;
 	}
 
-	mutex_init(&tgfx->sem);
+	init_MUTEX(&tgfx->sem);
 	tgfx->pd = pd;
 	init_timer(&tgfx->timer);
 	tgfx->timer.data = (long) tgfx;

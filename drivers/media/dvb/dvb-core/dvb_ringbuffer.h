@@ -35,7 +35,6 @@ struct dvb_ringbuffer {
 	ssize_t           size;
 	ssize_t           pread;
 	ssize_t           pwrite;
-	int               error;
 
 	wait_queue_head_t queue;
 	spinlock_t        lock;

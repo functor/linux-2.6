@@ -75,8 +75,9 @@ int show_interrupts(struct seq_file *p, void *v)
 	switch (i) {
 	case 0:
 		seq_printf(p, "           ");
-		for_each_online_cpu(j)
-			seq_printf(p, "CPU%d       ",j);
+		for (j = 0; j < NR_CPUS; j++)
+			if (cpu_online(j))
+				seq_printf(p, "CPU%d       ",j);
 
 		seq_putc(p, '\n');
 		break;
@@ -99,8 +100,9 @@ int show_interrupts(struct seq_file *p, void *v)
 #ifndef CONFIG_SMP
 		seq_printf(p, "%10u ", kstat_irqs(i));
 #else
-		for_each_online_cpu(j)
-			seq_printf(p, "%10u ", kstat_cpu(j).irqs[i - 1]);
+		for (j = 0; j < NR_CPUS; j++)
+			if (cpu_online(j))
+				seq_printf(p, "%10u ", kstat_cpu(j).irqs[i - 1]);
 #endif
 
 		level = group->sources[ix]->level - frv_irq_levels;

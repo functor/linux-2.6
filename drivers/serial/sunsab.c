@@ -861,9 +861,8 @@ static int num_channels;
 
 #ifdef CONFIG_SERIAL_SUNSAB_CONSOLE
 
-static void sunsab_console_putchar(struct uart_port *port, int c)
+static __inline__ void sunsab_console_putchar(struct uart_sunsab_port *up, char c)
 {
-	struct uart_sunsab_port *up = (struct uart_sunsab_port *)port;
 	unsigned long flags;
 
 	spin_lock_irqsave(&up->port.lock, flags);
@@ -877,8 +876,13 @@ static void sunsab_console_putchar(struct uart_port *port, int c)
 static void sunsab_console_write(struct console *con, const char *s, unsigned n)
 {
 	struct uart_sunsab_port *up = &sunsab_ports[con->index];
+	int i;
 
-	uart_console_write(&up->port, s, n, sunsab_console_putchar);
+	for (i = 0; i < n; i++) {
+		if (*s == '\n')
+			sunsab_console_putchar(up, '\r');
+		sunsab_console_putchar(up, *s++);
+	}
 	sunsab_tec_wait(up);
 }
 
@@ -951,13 +955,14 @@ static struct console sunsab_console = {
 	.index	=	-1,
 	.data	=	&sunsab_reg,
 };
+#define SUNSAB_CONSOLE	(&sunsab_console)
 
-static inline struct console *SUNSAB_CONSOLE(void)
+static void __init sunsab_console_init(void)
 {
 	int i;
 
 	if (con_is_present())
-		return NULL;
+		return;
 
 	for (i = 0; i < num_channels; i++) {
 		int this_minor = sunsab_reg.minor + i;
@@ -966,14 +971,13 @@ static inline struct console *SUNSAB_CONSOLE(void)
 			break;
 	}
 	if (i == num_channels)
-		return NULL;
+		return;
 
 	sunsab_console.index = i;
-
-	return &sunsab_console;
+	register_console(&sunsab_console);
 }
 #else
-#define SUNSAB_CONSOLE()	(NULL)
+#define SUNSAB_CONSOLE		(NULL)
 #define sunsab_console_init()	do { } while (0)
 #endif
 
@@ -1120,6 +1124,7 @@ static int __init sunsab_init(void)
 
 	sunsab_reg.minor = sunserial_current_minor;
 	sunsab_reg.nr = num_channels;
+	sunsab_reg.cons = SUNSAB_CONSOLE;
 
 	ret = uart_register_driver(&sunsab_reg);
 	if (ret < 0) {
@@ -1138,12 +1143,10 @@ static int __init sunsab_init(void)
 		return ret;
 	}
 
-	sunsab_reg.tty_driver->name_base = sunsab_reg.minor - 64;
-
-	sunsab_reg.cons = SUNSAB_CONSOLE();
-
 	sunserial_current_minor += num_channels;
 	
+	sunsab_console_init();
+
 	for (i = 0; i < num_channels; i++) {
 		struct uart_sunsab_port *up = &sunsab_ports[i];
 

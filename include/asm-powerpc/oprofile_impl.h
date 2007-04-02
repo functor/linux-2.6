@@ -17,6 +17,9 @@
 
 /* Per-counter configuration as set via oprofilefs.  */
 struct op_counter_config {
+#ifdef __powerpc64__
+	unsigned long valid;
+#endif
 	unsigned long enabled;
 	unsigned long event;
 	unsigned long count;
@@ -35,6 +38,9 @@ struct op_system_config {
 #endif
 	unsigned long enable_kernel;
 	unsigned long enable_user;
+#ifdef CONFIG_PPC64
+	unsigned long backtrace_spinlocks;
+#endif
 };
 
 /* Per-arch configuration */
@@ -50,12 +56,17 @@ struct op_powerpc_model {
 	int num_counters;
 };
 
+#ifdef CONFIG_FSL_BOOKE
 extern struct op_powerpc_model op_model_fsl_booke;
+#else /* Otherwise, it's classic */
+
+#ifdef CONFIG_PPC64
 extern struct op_powerpc_model op_model_rs64;
 extern struct op_powerpc_model op_model_power4;
-extern struct op_powerpc_model op_model_7450;
 
-#ifndef CONFIG_FSL_BOOKE
+#else /* Otherwise, CONFIG_PPC32 */
+extern struct op_powerpc_model op_model_7450;
+#endif
 
 /* All the classic PPC parts use these */
 static inline unsigned int ctr_read(unsigned int i)
@@ -122,8 +133,6 @@ static inline void ctr_write(unsigned int i, unsigned int val)
 	}
 }
 #endif /* !CONFIG_FSL_BOOKE */
-
-extern void op_powerpc_backtrace(struct pt_regs * const regs, unsigned int depth);
 
 #endif /* __KERNEL__ */
 #endif /* _ASM_POWERPC_OPROFILE_IMPL_H */

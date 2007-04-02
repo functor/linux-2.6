@@ -47,26 +47,15 @@
 unsigned long badness(struct task_struct *p, unsigned long uptime)
 {
 	unsigned long points, cpu_time, run_time, s;
-	struct mm_struct *mm;
-	struct task_struct *child;
+	struct list_head *tsk;
 
-	task_lock(p);
-	mm = p->mm;
-	if (!mm) {
-		task_unlock(p);
+	if (!p->mm)
 		return 0;
-	}
 
 	/*
 	 * The memory size of the process is the basis for the badness.
 	 */
-	points = mm->total_vm;
-
-	/*
-	 * After this unlock we can no longer dereference local variable `mm'
-	 */
-	task_unlock(p);
-
+	points = p->mm->total_vm;
 	/* FIXME: add vserver badness ;) */
 
 	/*
@@ -77,11 +66,11 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
 	 * child is eating the vast majority of memory, adding only half
 	 * to the parents will make the child our kill candidate of choice.
 	 */
-	list_for_each_entry(child, &p->children, sibling) {
-		task_lock(child);
-		if (child->mm != mm && child->mm)
-			points += child->mm->total_vm/2 + 1;
-		task_unlock(child);
+	list_for_each(tsk, &p->children) {
+		struct task_struct *chld;
+		chld = list_entry(tsk, struct task_struct, sibling);
+		if (chld->mm != p->mm && chld->mm)
+			points += chld->mm->total_vm/2 + 1;
 	}
 
 	/*
@@ -262,24 +251,17 @@ static void __oom_kill_task(task_t *p, const char *message)
 	force_sig(SIGKILL, p);
 }
 
-static int oom_kill_task(task_t *p, const char *message)
+static struct mm_struct *oom_kill_task(task_t *p, const char *message)
 {
-	struct mm_struct *mm;
+	struct mm_struct *mm = get_task_mm(p);
 	task_t * g, * q;
 
-	mm = p->mm;
-
-	/* WARNING: mm may not be dereferenced since we did not obtain its
-	 * value from get_task_mm(p).  This is OK since all we need to do is
-	 * compare mm to q->mm below.
-	 *
-	 * Furthermore, even if mm contains a non-NULL value, p->mm may
-	 * change to NULL at any time since we do not hold task_lock(p).
-	 * However, this is of no concern to us.
-	 */
-
-	if (mm == NULL || mm == &init_mm)
-		return 1;
+	if (!mm)
+		return NULL;
+	if (mm == &init_mm) {
+		mmput(mm);
+		return NULL;
+	}
 
 	__oom_kill_task(p, message);
 	/*
@@ -291,12 +273,13 @@ static int oom_kill_task(task_t *p, const char *message)
 			__oom_kill_task(q, message);
 	while_each_thread(g, q);
 
-	return 0;
+	return mm;
 }
 
-static int oom_kill_process(struct task_struct *p, unsigned long points,
-		const char *message)
+static struct mm_struct *oom_kill_process(struct task_struct *p,
+				unsigned long points, const char *message)
 {
+ 	struct mm_struct *mm;
 	struct task_struct *c;
 	struct list_head *tsk;
 
@@ -307,8 +290,9 @@ static int oom_kill_process(struct task_struct *p, unsigned long points,
 		c = list_entry(tsk, struct task_struct, sibling);
 		if (c->mm == p->mm)
 			continue;
-		if (!oom_kill_task(c, message))
-			return 0;
+		mm = oom_kill_task(c, message);
+		if (mm)
+			return mm;
 	}
 	return oom_kill_task(p, message);
 }
@@ -323,6 +307,7 @@ static int oom_kill_process(struct task_struct *p, unsigned long points,
  */
 void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask, int order)
 {
+	struct mm_struct *mm = NULL;
 	task_t *p;
 	unsigned long points = 0;
 
@@ -342,12 +327,12 @@ void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask, int order)
 	 */
 	switch (constrained_alloc(zonelist, gfp_mask)) {
 	case CONSTRAINT_MEMORY_POLICY:
-		oom_kill_process(current, points,
+		mm = oom_kill_process(current, points,
 				"No available memory (MPOL_BIND)");
 		break;
 
 	case CONSTRAINT_CPUSET:
-		oom_kill_process(current, points,
+		mm = oom_kill_process(current, points,
 				"No available memory in cpuset");
 		break;
 
@@ -369,7 +354,8 @@ retry:
 			panic("Out of memory and no killable processes...\n");
 		}
 
-		if (oom_kill_process(p, points, "Out of memory"))
+		mm = oom_kill_process(p, points, "Out of memory");
+		if (!mm)
 			goto retry;
 
 		break;
@@ -378,6 +364,8 @@ retry:
 out:
 	read_unlock(&tasklist_lock);
 	cpuset_unlock();
+	if (mm)
+		mmput(mm);
 
 	/*
 	 * Give "p" a good chance of killing itself before we

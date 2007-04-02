@@ -571,7 +571,7 @@ static struct sock * unix_create1(struct socket *sock)
 	u->mnt	  = NULL;
 	spin_lock_init(&u->lock);
 	atomic_set(&u->inflight, sock ? 0 : -1);
-	mutex_init(&u->readlock); /* single task reading lock */
+	init_MUTEX(&u->readsem); /* single task reading lock */
 	init_waitqueue_head(&u->peer_wait);
 	unix_insert_socket(unix_sockets_unbound, sk);
 out:
@@ -628,7 +628,7 @@ static int unix_autobind(struct socket *sock)
 	struct unix_address * addr;
 	int err;
 
-	mutex_lock(&u->readlock);
+	down(&u->readsem);
 
 	err = 0;
 	if (u->addr)
@@ -666,7 +666,7 @@ retry:
 	spin_unlock(&unix_table_lock);
 	err = 0;
 
-out:	mutex_unlock(&u->readlock);
+out:	up(&u->readsem);
 	return err;
 }
 
@@ -749,7 +749,7 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		goto out;
 	addr_len = err;
 
-	mutex_lock(&u->readlock);
+	down(&u->readsem);
 
 	err = -EINVAL;
 	if (u->addr)
@@ -821,7 +821,7 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 out_unlock:
 	spin_unlock(&unix_table_lock);
 out_up:
-	mutex_unlock(&u->readlock);
+	up(&u->readsem);
 out:
 	return err;
 
@@ -1432,15 +1432,15 @@ static int unix_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
 	while(sent < len)
 	{
 		/*
-		 *	Optimisation for the fact that under 0.01% of X
-		 *	messages typically need breaking up.
+		 *	Optimisation for the fact that under 0.01% of X messages typically
+		 *	need breaking up.
 		 */
 
-		size = len-sent;
+		size=len-sent;
 
 		/* Keep two messages in the pipe so it schedules better */
-		if (size > ((sk->sk_sndbuf >> 1) - 64))
-			size = (sk->sk_sndbuf >> 1) - 64;
+		if (size > sk->sk_sndbuf / 2 - 64)
+			size = sk->sk_sndbuf / 2 - 64;
 
 		if (size > SKB_MAX_ALLOC)
 			size = SKB_MAX_ALLOC;
@@ -1550,7 +1550,7 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 	msg->msg_namelen = 0;
 
-	mutex_lock(&u->readlock);
+	down(&u->readsem);
 
 	skb = skb_recv_datagram(sk, flags, noblock, &err);
 	if (!skb)
@@ -1605,7 +1605,7 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 out_free:
 	skb_free_datagram(sk,skb);
 out_unlock:
-	mutex_unlock(&u->readlock);
+	up(&u->readsem);
 out:
 	return err;
 }
@@ -1681,7 +1681,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 		memset(&tmp_scm, 0, sizeof(tmp_scm));
 	}
 
-	mutex_lock(&u->readlock);
+	down(&u->readsem);
 
 	do
 	{
@@ -1705,7 +1705,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 			err = -EAGAIN;
 			if (!timeo)
 				break;
-			mutex_unlock(&u->readlock);
+			up(&u->readsem);
 
 			timeo = unix_stream_data_wait(sk, timeo);
 
@@ -1713,7 +1713,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 				err = sock_intr_errno(timeo);
 				goto out;
 			}
-			mutex_lock(&u->readlock);
+			down(&u->readsem);
 			continue;
 		}
 
@@ -1779,7 +1779,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 		}
 	} while (size);
 
-	mutex_unlock(&u->readlock);
+	up(&u->readsem);
 	scm_recv(sock, msg, siocb->scm, flags);
 out:
 	return copied ? : err;
@@ -1883,8 +1883,6 @@ static unsigned int unix_poll(struct file * file, struct socket *sock, poll_tabl
 		mask |= POLLERR;
 	if (sk->sk_shutdown == SHUTDOWN_MASK)
 		mask |= POLLHUP;
-	if (sk->sk_shutdown & RCV_SHUTDOWN)
-		mask |= POLLRDHUP;
 
 	/* readable? */
 	if (!skb_queue_empty(&sk->sk_receive_queue) ||

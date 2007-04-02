@@ -67,37 +67,36 @@ extern __attribute__((pure)) struct param_struct *params(void);
 /*
  * This does not append a newline
  */
-static void putc(int c)
+static void putstr(const char *s)
 {
 	extern void ll_write_char(char *, char c, char white);
 	int x,y;
+	unsigned char c;
 	char *ptr;
 
 	x = params->video_x;
 	y = params->video_y;
 
-	if (c == '\n') {
-		if (++y >= video_num_lines)
-			y--;
-	} else if (c == '\r') {
-		x = 0;
-	} else {
-		ptr = VIDMEM + ((y*video_num_columns*params->bytes_per_char_v+x)*bytes_per_char_h);
-		ll_write_char(ptr, c, white);
-		if (++x >= video_num_columns) {
+	while ( ( c = *(unsigned char *)s++ ) != '\0' ) {
+		if ( c == '\n' ) {
 			x = 0;
 			if ( ++y >= video_num_lines ) {
 				y--;
+			}
+		} else {
+			ptr = VIDMEM + ((y*video_num_columns*params->bytes_per_char_v+x)*bytes_per_char_h);
+			ll_write_char(ptr, c, white);
+			if ( ++x >= video_num_columns ) {
+				x = 0;
+				if ( ++y >= video_num_lines ) {
+					y--;
+				}
 			}
 		}
 	}
 
 	params->video_x = x;
 	params->video_y = y;
-}
-
-static inline void flush(void)
-{
 }
 
 static void error(char *x);

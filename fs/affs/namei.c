@@ -416,9 +416,10 @@ affs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			return retval;
 	}
 
+	retval = -EIO;
 	bh = affs_bread(sb, old_dentry->d_inode->i_ino);
 	if (!bh)
-		return -EIO;
+		goto done;
 
 	/* Remove header from its parent directory. */
 	affs_lock_dir(old_dir);

@@ -4,7 +4,5 @@
  * autoconf.h is now included via -imacros on the commandline
  */
 #include <linux/autoconf.h>
-#if !defined (__KERNEL__) && !defined(__KERNGLUE__)
-#error including kernel header in userspace; use the glibc headers instead!
-#endif
+
 #endif

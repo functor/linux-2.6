@@ -587,8 +587,7 @@ int __init acpi_table_init(void)
 		return -ENODEV;
 	}
 
-	rsdp = (struct acpi_table_rsdp *)__acpi_map_table(rsdp_phys,
-		sizeof(struct acpi_table_rsdp));
+	rsdp = (struct acpi_table_rsdp *)__va(rsdp_phys);
 	if (!rsdp) {
 		printk(KERN_WARNING PREFIX "Unable to map RSDP\n");
 		return -ENODEV;

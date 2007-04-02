@@ -6,8 +6,8 @@ extra-y := head.o init_task.o vmlinux.lds
 
 obj-y	:= process.o semaphore.o signal.o entry.o traps.o irq.o \
 		ptrace.o time.o ioport.o ldt.o setup.o i8259.o sys_i386.o \
-		pci-dma.o i386_ksyms.o i387.o bootflag.o \
-		quirks.o i8237.o topology.o alternative.o
+		pci-dma.o i386_ksyms.o i387.o dmi_scan.o bootflag.o \
+		quirks.o i8237.o topology.o
 
 obj-y				+= cpu/
 obj-y				+= timers/
@@ -42,12 +42,6 @@ EXTRA_AFLAGS   := -traditional
 
 obj-$(CONFIG_SCx200)		+= scx200.o
 
-ifdef CONFIG_XEN
-vsyscall_note := vsyscall-note-xen.o
-else
-vsyscall_note := vsyscall-note.o
-endif
-
 # vsyscall.o contains the vsyscall DSO images as __initdata.
 # We must build both images before we can assemble it.
 # Note: kbuild does not track this dependency due to usage of .incbin
@@ -68,7 +62,7 @@ SYSCFLAGS_vsyscall-int80.so	= $(vsyscall-flags)
 
 $(obj)/vsyscall-int80.so $(obj)/vsyscall-sysenter.so: \
 $(obj)/vsyscall-%.so: $(src)/vsyscall.lds \
-		      $(obj)/vsyscall-%.o $(obj)/$(vsyscall_note) FORCE
+		      $(obj)/vsyscall-%.o $(obj)/vsyscall-note.o FORCE
 	$(call if_changed,syscall)
 
 # We also create a special relocatable object that should mirror the symbol
@@ -80,17 +74,5 @@ $(obj)/built-in.o: ld_flags += -R $(obj)/vsyscall-syms.o
 
 SYSCFLAGS_vsyscall-syms.o = -r
 $(obj)/vsyscall-syms.o: $(src)/vsyscall.lds \
-			$(obj)/vsyscall-sysenter.o $(obj)/$(vsyscall_note) FORCE
+			$(obj)/vsyscall-sysenter.o $(obj)/vsyscall-note.o FORCE
 	$(call if_changed,syscall)
-
-ifdef CONFIG_XEN
-include $(srctree)/scripts/Makefile.xen
-
-obj-y += fixup.o
-microcode-$(subst m,y,$(CONFIG_MICROCODE)) := microcode-xen.o
-n-obj-xen := i8259.o timers/ reboot.o smpboot.o trampoline.o
-
-obj-y := $(call filterxen, $(obj-y), $(n-obj-xen))
-obj-y := $(call cherrypickxen, $(obj-y))
-extra-y := $(call cherrypickxen, $(extra-y))
-endif

@@ -249,9 +249,9 @@ static u8 sil24_check_status(struct ata_port *ap);
 static u32 sil24_scr_read(struct ata_port *ap, unsigned sc_reg);
 static void sil24_scr_write(struct ata_port *ap, unsigned sc_reg, u32 val);
 static void sil24_tf_read(struct ata_port *ap, struct ata_taskfile *tf);
-static int sil24_probe_reset(struct ata_port *ap, unsigned int *classes);
+static void sil24_phy_reset(struct ata_port *ap);
 static void sil24_qc_prep(struct ata_queued_cmd *qc);
-static unsigned int sil24_qc_issue(struct ata_queued_cmd *qc);
+static int sil24_qc_issue(struct ata_queued_cmd *qc);
 static void sil24_irq_clear(struct ata_port *ap);
 static void sil24_eng_timeout(struct ata_port *ap);
 static irqreturn_t sil24_interrupt(int irq, void *dev_instance, struct pt_regs *regs);
@@ -281,9 +281,11 @@ static struct scsi_host_template sil24_sht = {
 	.name			= DRV_NAME,
 	.ioctl			= ata_scsi_ioctl,
 	.queuecommand		= ata_scsi_queuecmd,
+	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
 	.this_id		= ATA_SHT_THIS_ID,
 	.sg_tablesize		= LIBATA_MAX_PRD,
+	.max_sectors		= ATA_MAX_SECTORS,
 	.cmd_per_lun		= ATA_SHT_CMD_PER_LUN,
 	.emulated		= ATA_SHT_EMULATED,
 	.use_clustering		= ATA_SHT_USE_CLUSTERING,
@@ -304,7 +306,7 @@ static const struct ata_port_operations sil24_ops = {
 
 	.tf_read		= sil24_tf_read,
 
-	.probe_reset		= sil24_probe_reset,
+	.phy_reset		= sil24_phy_reset,
 
 	.qc_prep		= sil24_qc_prep,
 	.qc_issue		= sil24_qc_issue,
@@ -334,19 +336,19 @@ static struct ata_port_info sil24_port_info[] = {
 	{
 		.sht		= &sil24_sht,
 		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
-				  ATA_FLAG_MMIO | ATA_FLAG_PIO_DMA |
-				  SIL24_NPORTS2FLAG(4),
+				  ATA_FLAG_SRST | ATA_FLAG_MMIO |
+				  ATA_FLAG_PIO_DMA | SIL24_NPORTS2FLAG(4),
 		.pio_mask	= 0x1f,			/* pio0-4 */
 		.mwdma_mask	= 0x07,			/* mwdma0-2 */
 		.udma_mask	= 0x3f,			/* udma0-5 */
 		.port_ops	= &sil24_ops,
 	},
-	/* sil_3132 */
+	/* sil_3132 */ 
 	{
 		.sht		= &sil24_sht,
 		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
-				  ATA_FLAG_MMIO | ATA_FLAG_PIO_DMA |
-				  SIL24_NPORTS2FLAG(2),
+				  ATA_FLAG_SRST | ATA_FLAG_MMIO |
+				  ATA_FLAG_PIO_DMA | SIL24_NPORTS2FLAG(2),
 		.pio_mask	= 0x1f,			/* pio0-4 */
 		.mwdma_mask	= 0x07,			/* mwdma0-2 */
 		.udma_mask	= 0x3f,			/* udma0-5 */
@@ -356,8 +358,8 @@ static struct ata_port_info sil24_port_info[] = {
 	{
 		.sht		= &sil24_sht,
 		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
-				  ATA_FLAG_MMIO | ATA_FLAG_PIO_DMA |
-				  SIL24_NPORTS2FLAG(1),
+				  ATA_FLAG_SRST | ATA_FLAG_MMIO |
+				  ATA_FLAG_PIO_DMA | SIL24_NPORTS2FLAG(1),
 		.pio_mask	= 0x1f,			/* pio0-4 */
 		.mwdma_mask	= 0x07,			/* mwdma0-2 */
 		.udma_mask	= 0x3f,			/* udma0-5 */
@@ -369,7 +371,7 @@ static void sil24_dev_config(struct ata_port *ap, struct ata_device *dev)
 {
 	void __iomem *port = (void __iomem *)ap->ioaddr.cmd_addr;
 
-	if (dev->cdb_len == 16)
+	if (ap->cdb_len == 16)
 		writel(PORT_CS_CDB16, port + PORT_CTRL_STAT);
 	else
 		writel(PORT_CS_CDB16, port + PORT_CTRL_CLR);
@@ -426,23 +428,14 @@ static void sil24_tf_read(struct ata_port *ap, struct ata_taskfile *tf)
 	*tf = pp->tf;
 }
 
-static int sil24_softreset(struct ata_port *ap, int verbose,
-			   unsigned int *class)
+static int sil24_issue_SRST(struct ata_port *ap)
 {
 	void __iomem *port = (void __iomem *)ap->ioaddr.cmd_addr;
 	struct sil24_port_priv *pp = ap->private_data;
 	struct sil24_prb *prb = &pp->cmd_block[0].ata.prb;
 	dma_addr_t paddr = pp->cmd_block_dma;
-	unsigned long timeout = jiffies + ATA_TMOUT_BOOT * HZ;
 	u32 irq_enable, irq_stat;
-
-	DPRINTK("ENTER\n");
-
-	if (!sata_dev_present(ap)) {
-		DPRINTK("PHY reports no device\n");
-		*class = ATA_DEV_NONE;
-		goto out;
-	}
+	int cnt;
 
 	/* temporarily turn off IRQs during SRST */
 	irq_enable = readl(port + PORT_IRQ_ENABLE_SET);
@@ -454,12 +447,12 @@ static int sil24_softreset(struct ata_port *ap, int verbose,
 	 */
 	msleep(10);
 
-	prb->ctrl = cpu_to_le16(PRB_CTRL_SRST);
+	prb->ctrl = PRB_CTRL_SRST;
 	prb->fis[1] = 0; /* no PM yet */
 
 	writel((u32)paddr, port + PORT_CMD_ACTIVATE);
 
-	do {
+	for (cnt = 0; cnt < 100; cnt++) {
 		irq_stat = readl(port + PORT_IRQ_STAT);
 		writel(irq_stat, port + PORT_IRQ_STAT);		/* clear irq */
 
@@ -467,42 +460,36 @@ static int sil24_softreset(struct ata_port *ap, int verbose,
 		if (irq_stat & (PORT_IRQ_COMPLETE | PORT_IRQ_ERROR))
 			break;
 
-		msleep(100);
-	} while (time_before(jiffies, timeout));
+		msleep(1);
+	}
 
 	/* restore IRQs */
 	writel(irq_enable, port + PORT_IRQ_ENABLE_SET);
 
-	if (!(irq_stat & PORT_IRQ_COMPLETE)) {
-		DPRINTK("EXIT, srst failed\n");
-		return -EIO;
-	}
+	if (!(irq_stat & PORT_IRQ_COMPLETE))
+		return -1;
 
+	/* update TF */
 	sil24_update_tf(ap);
-	*class = ata_dev_classify(&pp->tf);
-
-	if (*class == ATA_DEV_UNKNOWN)
-		*class = ATA_DEV_NONE;
-
- out:
-	DPRINTK("EXIT, class=%u\n", *class);
 	return 0;
 }
 
-static int sil24_hardreset(struct ata_port *ap, int verbose,
-			   unsigned int *class)
+static void sil24_phy_reset(struct ata_port *ap)
 {
-	unsigned int dummy_class;
+	struct sil24_port_priv *pp = ap->private_data;
 
-	/* sil24 doesn't report device signature after hard reset */
-	return sata_std_hardreset(ap, verbose, &dummy_class);
-}
+	__sata_phy_reset(ap);
+	if (ap->flags & ATA_FLAG_PORT_DISABLED)
+		return;
 
-static int sil24_probe_reset(struct ata_port *ap, unsigned int *classes)
-{
-	return ata_drive_probe_reset(ap, ata_std_probeinit,
-				     sil24_softreset, sil24_hardreset,
-				     ata_std_postreset, classes);
+	if (sil24_issue_SRST(ap) < 0) {
+		printk(KERN_ERR DRV_NAME
+		       " ata%u: SRST failed, disabling port\n", ap->id);
+		ap->ops->port_disable(ap);
+		return;
+	}
+
+	ap->device->class = ata_dev_classify(&pp->tf);
 }
 
 static inline void sil24_fill_sg(struct ata_queued_cmd *qc,
@@ -547,13 +534,13 @@ static void sil24_qc_prep(struct ata_queued_cmd *qc)
 		prb = &cb->atapi.prb;
 		sge = cb->atapi.sge;
 		memset(cb->atapi.cdb, 0, 32);
-		memcpy(cb->atapi.cdb, qc->cdb, qc->dev->cdb_len);
+		memcpy(cb->atapi.cdb, qc->cdb, ap->cdb_len);
 
 		if (qc->tf.protocol != ATA_PROT_ATAPI_NODATA) {
 			if (qc->tf.flags & ATA_TFLAG_WRITE)
-				prb->ctrl = cpu_to_le16(PRB_CTRL_PACKET_WRITE);
+				prb->ctrl = PRB_CTRL_PACKET_WRITE;
 			else
-				prb->ctrl = cpu_to_le16(PRB_CTRL_PACKET_READ);
+				prb->ctrl = PRB_CTRL_PACKET_READ;
 		} else
 			prb->ctrl = 0;
 
@@ -571,7 +558,7 @@ static void sil24_qc_prep(struct ata_queued_cmd *qc)
 		sil24_fill_sg(qc, sge);
 }
 
-static unsigned int sil24_qc_issue(struct ata_queued_cmd *qc)
+static int sil24_qc_issue(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 	void __iomem *port = (void __iomem *)ap->ioaddr.cmd_addr;
@@ -652,10 +639,23 @@ static void sil24_eng_timeout(struct ata_port *ap)
 	struct ata_queued_cmd *qc;
 
 	qc = ata_qc_from_tag(ap, ap->active_tag);
+	if (!qc) {
+		printk(KERN_ERR "ata%u: BUG: timeout without command\n",
+		       ap->id);
+		return;
+	}
 
+	/*
+	 * hack alert!  We cannot use the supplied completion
+	 * function from inside the ->eh_strategy_handler() thread.
+	 * libata is the only user of ->eh_strategy_handler() in
+	 * any kernel, so the default scsi_done() assumes it is
+	 * not being called from the SCSI EH.
+	 */
 	printk(KERN_ERR "ata%u: command timeout\n", ap->id);
-	qc->err_mask |= AC_ERR_TIMEOUT;
-	ata_eh_qc_complete(qc);
+	qc->scsidone = scsi_finish_command;
+	qc->err_mask |= AC_ERR_OTHER;
+	ata_qc_complete(qc);
 
 	sil24_reset_controller(ap);
 }
@@ -841,10 +841,9 @@ static void sil24_port_stop(struct ata_port *ap)
 static void sil24_host_stop(struct ata_host_set *host_set)
 {
 	struct sil24_host_priv *hpriv = host_set->private_data;
-	struct pci_dev *pdev = to_pci_dev(host_set->dev);
 
-	pci_iounmap(pdev, hpriv->host_base);
-	pci_iounmap(pdev, hpriv->port_base);
+	iounmap(hpriv->host_base);
+	iounmap(hpriv->port_base);
 	kfree(hpriv);
 }
 
@@ -871,30 +870,32 @@ static int sil24_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto out_disable;
 
 	rc = -ENOMEM;
-	/* map mmio registers */
-	host_base = pci_iomap(pdev, 0, 0);
+	/* ioremap mmio registers */
+	host_base = ioremap(pci_resource_start(pdev, 0),
+			    pci_resource_len(pdev, 0));
 	if (!host_base)
 		goto out_free;
-	port_base = pci_iomap(pdev, 2, 0);
+	port_base = ioremap(pci_resource_start(pdev, 2),
+			    pci_resource_len(pdev, 2));
 	if (!port_base)
 		goto out_free;
 
 	/* allocate & init probe_ent and hpriv */
-	probe_ent = kzalloc(sizeof(*probe_ent), GFP_KERNEL);
+	probe_ent = kmalloc(sizeof(*probe_ent), GFP_KERNEL);
 	if (!probe_ent)
 		goto out_free;
 
-	hpriv = kzalloc(sizeof(*hpriv), GFP_KERNEL);
+	hpriv = kmalloc(sizeof(*hpriv), GFP_KERNEL);
 	if (!hpriv)
 		goto out_free;
 
+	memset(probe_ent, 0, sizeof(*probe_ent));
 	probe_ent->dev = pci_dev_to_dev(pdev);
 	INIT_LIST_HEAD(&probe_ent->node);
 
 	probe_ent->sht		= pinfo->sht;
 	probe_ent->host_flags	= pinfo->host_flags;
 	probe_ent->pio_mask	= pinfo->pio_mask;
-	probe_ent->mwdma_mask	= pinfo->mwdma_mask;
 	probe_ent->udma_mask	= pinfo->udma_mask;
 	probe_ent->port_ops	= pinfo->port_ops;
 	probe_ent->n_ports	= SIL24_FLAG2NPORTS(pinfo->host_flags);
@@ -904,6 +905,7 @@ static int sil24_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	probe_ent->mmio_base = port_base;
 	probe_ent->private_data = hpriv;
 
+	memset(hpriv, 0, sizeof(*hpriv));
 	hpriv->host_base = host_base;
 	hpriv->port_base = port_base;
 
@@ -1007,9 +1009,9 @@ static int sil24_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
  out_free:
 	if (host_base)
-		pci_iounmap(pdev, host_base);
+		iounmap(host_base);
 	if (port_base)
-		pci_iounmap(pdev, port_base);
+		iounmap(port_base);
 	kfree(probe_ent);
 	kfree(hpriv);
 	pci_release_regions(pdev);

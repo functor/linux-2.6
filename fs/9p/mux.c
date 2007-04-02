@@ -7,8 +7,9 @@
  *  Copyright (C) 2004-2005 by Latchesar Ionkov <lucho@ionkov.net>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -30,7 +31,6 @@
 #include <linux/poll.h>
 #include <linux/kthread.h>
 #include <linux/idr.h>
-#include <linux/mutex.h>
 
 #include "debug.h"
 #include "v9fs.h"
@@ -50,23 +50,15 @@ enum {
 	Wpending = 8,		/* can write */
 };
 
-enum {
-	None,
-	Flushing,
-	Flushed,
-};
-
 struct v9fs_mux_poll_task;
 
 struct v9fs_req {
-	spinlock_t lock;
 	int tag;
 	struct v9fs_fcall *tcall;
 	struct v9fs_fcall *rcall;
 	int err;
 	v9fs_mux_req_callback cb;
 	void *cba;
-	int flush;
 	struct list_head req_list;
 };
 
@@ -77,7 +69,7 @@ struct v9fs_mux_data {
 	int msize;
 	unsigned char *extended;
 	struct v9fs_transport *trans;
-	struct v9fs_idpool tagpool;
+	struct v9fs_idpool tidpool;
 	int err;
 	wait_queue_head_t equeue;
 	struct list_head req_list;
@@ -104,8 +96,8 @@ struct v9fs_mux_poll_task {
 
 struct v9fs_mux_rpc {
 	struct v9fs_mux_data *m;
+	struct v9fs_req *req;
 	int err;
-	struct v9fs_fcall *tcall;
 	struct v9fs_fcall *rcall;
 	wait_queue_head_t wqueue;
 };
@@ -118,7 +110,7 @@ static void v9fs_pollwait(struct file *filp, wait_queue_head_t * wait_address,
 static u16 v9fs_mux_get_tag(struct v9fs_mux_data *);
 static void v9fs_mux_put_tag(struct v9fs_mux_data *, u16);
 
-static DEFINE_MUTEX(v9fs_mux_task_lock);
+static DECLARE_MUTEX(v9fs_mux_task_lock);
 static struct workqueue_struct *v9fs_mux_wq;
 
 static int v9fs_mux_num;
@@ -150,7 +142,7 @@ void v9fs_mux_global_exit(void)
  *
  * The current implementation returns sqrt of the number of mounts.
  */
-static int v9fs_mux_calc_poll_procs(int muxnum)
+inline int v9fs_mux_calc_poll_procs(int muxnum)
 {
 	int n;
 
@@ -174,7 +166,7 @@ static int v9fs_mux_poll_start(struct v9fs_mux_data *m)
 
 	dprintk(DEBUG_MUX, "mux %p muxnum %d procnum %d\n", m, v9fs_mux_num,
 		v9fs_mux_poll_task_num);
-	mutex_lock(&v9fs_mux_task_lock);
+	up(&v9fs_mux_task_lock);
 
 	n = v9fs_mux_calc_poll_procs(v9fs_mux_num + 1);
 	if (n > v9fs_mux_poll_task_num) {
@@ -233,7 +225,7 @@ static int v9fs_mux_poll_start(struct v9fs_mux_data *m)
 	}
 
 	v9fs_mux_num++;
-	mutex_unlock(&v9fs_mux_task_lock);
+	down(&v9fs_mux_task_lock);
 
 	return 0;
 }
@@ -243,7 +235,7 @@ static void v9fs_mux_poll_stop(struct v9fs_mux_data *m)
 	int i;
 	struct v9fs_mux_poll_task *vpt;
 
-	mutex_lock(&v9fs_mux_task_lock);
+	up(&v9fs_mux_task_lock);
 	vpt = m->poll_task;
 	list_del(&m->mux_list);
 	for(i = 0; i < ARRAY_SIZE(m->poll_waddr); i++) {
@@ -260,7 +252,7 @@ static void v9fs_mux_poll_stop(struct v9fs_mux_data *m)
 		v9fs_mux_poll_task_num--;
 	}
 	v9fs_mux_num--;
-	mutex_unlock(&v9fs_mux_task_lock);
+	down(&v9fs_mux_task_lock);
 }
 
 /**
@@ -287,8 +279,8 @@ struct v9fs_mux_data *v9fs_mux_init(struct v9fs_transport *trans, int msize,
 	m->msize = msize;
 	m->extended = extended;
 	m->trans = trans;
-	idr_init(&m->tagpool.pool);
-	init_MUTEX(&m->tagpool.lock);
+	idr_init(&m->tidpool.pool);
+	init_MUTEX(&m->tidpool.lock);
 	m->err = 0;
 	init_waitqueue_head(&m->equeue);
 	INIT_LIST_HEAD(&m->req_list);
@@ -391,7 +383,7 @@ v9fs_pollwait(struct file *filp, wait_queue_head_t * wait_address,
 /**
  * v9fs_poll_mux - polls a mux and schedules read or write works if necessary
  */
-static void v9fs_poll_mux(struct v9fs_mux_data *m)
+static inline void v9fs_poll_mux(struct v9fs_mux_data *m)
 {
 	int n;
 
@@ -532,9 +524,10 @@ again:
 
 static void process_request(struct v9fs_mux_data *m, struct v9fs_req *req)
 {
-	int ecode;
+	int ecode, tag;
 	struct v9fs_str *ename;
 
+	tag = req->tag;
 	if (!req->err && req->rcall->id == RERROR) {
 		ecode = req->rcall->params.rerror.errno;
 		ename = &req->rcall->params.rerror.error;
@@ -560,6 +553,23 @@ static void process_request(struct v9fs_mux_data *m, struct v9fs_req *req)
 		if (!req->err)
 			req->err = -EIO;
 	}
+
+	if (req->err == ERREQFLUSH)
+		return;
+
+	if (req->cb) {
+		dprintk(DEBUG_MUX, "calling callback tcall %p rcall %p\n",
+			req->tcall, req->rcall);
+
+		(*req->cb) (req->cba, req->tcall, req->rcall, req->err);
+		req->cb = NULL;
+	} else
+		kfree(req->rcall);
+
+	v9fs_mux_put_tag(m, tag);
+
+	wake_up(&m->equeue);
+	kfree(req);
 }
 
 /**
@@ -624,14 +634,6 @@ static void v9fs_read_work(void *a)
 			goto error;
 		}
 
-		if ((v9fs_debug_level&DEBUG_FCALL) == DEBUG_FCALL) {
-			char buf[150];
-
-			v9fs_printfcall(buf, sizeof(buf), m->rcall,
-				*m->extended);
-			printk(KERN_NOTICE ">>> %p %s\n", m, buf);
-		}
-
 		rcall = m->rcall;
 		rbuf = m->rbuf;
 		if (m->rpos > n) {
@@ -659,26 +661,17 @@ static void v9fs_read_work(void *a)
 		list_for_each_entry_safe(rreq, rptr, &m->req_list, req_list) {
 			if (rreq->tag == rcall->tag) {
 				req = rreq;
-				if (req->flush != Flushing)
-					list_del(&req->req_list);
+				req->rcall = rcall;
+				list_del(&req->req_list);
+				spin_unlock(&m->lock);
+				process_request(m, req);
 				break;
 			}
+
 		}
-		spin_unlock(&m->lock);
 
-		if (req) {
-			req->rcall = rcall;
-			process_request(m, req);
-
-			if (req->flush != Flushing) {
-				if (req->cb)
-					(*req->cb) (req, req->cba);
-				else
-					kfree(req->rcall);
-
-				wake_up(&m->equeue);
-			}
-		} else {
+		if (!req) {
+			spin_unlock(&m->lock);
 			if (err >= 0 && rcall->id != RFLUSH)
 				dprintk(DEBUG_ERROR,
 					"unexpected response mux %p id %d tag %d\n",
@@ -745,21 +738,13 @@ static struct v9fs_req *v9fs_send_request(struct v9fs_mux_data *m,
 		return ERR_PTR(-ENOMEM);
 
 	v9fs_set_tag(tc, n);
-	if ((v9fs_debug_level&DEBUG_FCALL) == DEBUG_FCALL) {
-		char buf[150];
 
-		v9fs_printfcall(buf, sizeof(buf), tc, *m->extended);
-		printk(KERN_NOTICE "<<< %p %s\n", m, buf);
-	}
-
-	spin_lock_init(&req->lock);
 	req->tag = n;
 	req->tcall = tc;
 	req->rcall = NULL;
 	req->err = 0;
 	req->cb = cb;
 	req->cba = cba;
-	req->flush = None;
 
 	spin_lock(&m->lock);
 	list_add_tail(&req->req_list, &m->unsent_req_list);
@@ -776,108 +761,73 @@ static struct v9fs_req *v9fs_send_request(struct v9fs_mux_data *m,
 	return req;
 }
 
-static void v9fs_mux_free_request(struct v9fs_mux_data *m, struct v9fs_req *req)
-{
-	v9fs_mux_put_tag(m, req->tag);
-	kfree(req);
-}
-
-static void v9fs_mux_flush_cb(struct v9fs_req *freq, void *a)
+static inline void
+v9fs_mux_flush_cb(void *a, struct v9fs_fcall *tc, struct v9fs_fcall *rc,
+		  int err)
 {
 	v9fs_mux_req_callback cb;
 	int tag;
 	struct v9fs_mux_data *m;
-	struct v9fs_req *req, *rreq, *rptr;
+	struct v9fs_req *req, *rptr;
 
 	m = a;
-	dprintk(DEBUG_MUX, "mux %p tc %p rc %p err %d oldtag %d\n", m,
-		freq->tcall, freq->rcall, freq->err,
-		freq->tcall->params.tflush.oldtag);
+	dprintk(DEBUG_MUX, "mux %p tc %p rc %p err %d oldtag %d\n", m, tc,
+		rc, err, tc->params.tflush.oldtag);
 
 	spin_lock(&m->lock);
 	cb = NULL;
-	tag = freq->tcall->params.tflush.oldtag;
-	req = NULL;
-	list_for_each_entry_safe(rreq, rptr, &m->req_list, req_list) {
-		if (rreq->tag == tag) {
-			req = rreq;
+	tag = tc->params.tflush.oldtag;
+	list_for_each_entry_safe(req, rptr, &m->req_list, req_list) {
+		if (req->tag == tag) {
 			list_del(&req->req_list);
+			if (req->cb) {
+				cb = req->cb;
+				req->cb = NULL;
+				spin_unlock(&m->lock);
+				(*cb) (req->cba, req->tcall, req->rcall,
+				       req->err);
+			}
+			kfree(req);
+			wake_up(&m->equeue);
 			break;
 		}
 	}
-	spin_unlock(&m->lock);
 
-	if (req) {
-		spin_lock(&req->lock);
-		req->flush = Flushed;
-		spin_unlock(&req->lock);
+	if (!cb)
+		spin_unlock(&m->lock);
 
-		if (req->cb)
-			(*req->cb) (req, req->cba);
-		else
-			kfree(req->rcall);
-
-		wake_up(&m->equeue);
-	}
-
-	kfree(freq->tcall);
-	kfree(freq->rcall);
-	v9fs_mux_free_request(m, freq);
-}
-
-static int
-v9fs_mux_flush_request(struct v9fs_mux_data *m, struct v9fs_req *req)
-{
-	struct v9fs_fcall *fc;
-	struct v9fs_req *rreq, *rptr;
-
-	dprintk(DEBUG_MUX, "mux %p req %p tag %d\n", m, req, req->tag);
-
-	/* if a response was received for a request, do nothing */
-	spin_lock(&req->lock);
-	if (req->rcall || req->err) {
-		spin_unlock(&req->lock);
-		dprintk(DEBUG_MUX, "mux %p req %p response already received\n", m, req);
-		return 0;
-	}
-
-	req->flush = Flushing;
-	spin_unlock(&req->lock);
-
-	spin_lock(&m->lock);
-	/* if the request is not sent yet, just remove it from the list */
-	list_for_each_entry_safe(rreq, rptr, &m->unsent_req_list, req_list) {
-		if (rreq->tag == req->tag) {
-			dprintk(DEBUG_MUX, "mux %p req %p request is not sent yet\n", m, req);
-			list_del(&rreq->req_list);
-			req->flush = Flushed;
-			spin_unlock(&m->lock);
-			if (req->cb)
-				(*req->cb) (req, req->cba);
-			return 0;
-		}
-	}
-	spin_unlock(&m->lock);
-
-	clear_thread_flag(TIF_SIGPENDING);
-	fc = v9fs_create_tflush(req->tag);
-	v9fs_send_request(m, fc, v9fs_mux_flush_cb, m);
-	return 1;
+	v9fs_mux_put_tag(m, tag);
+	kfree(tc);
+	kfree(rc);
 }
 
 static void
-v9fs_mux_rpc_cb(struct v9fs_req *req, void *a)
+v9fs_mux_flush_request(struct v9fs_mux_data *m, struct v9fs_req *req)
+{
+	struct v9fs_fcall *fc;
+
+	dprintk(DEBUG_MUX, "mux %p req %p tag %d\n", m, req, req->tag);
+
+	fc = v9fs_create_tflush(req->tag);
+	v9fs_send_request(m, fc, v9fs_mux_flush_cb, m);
+}
+
+static void
+v9fs_mux_rpc_cb(void *a, struct v9fs_fcall *tc, struct v9fs_fcall *rc, int err)
 {
 	struct v9fs_mux_rpc *r;
 
-	dprintk(DEBUG_MUX, "req %p r %p\n", req, a);
+	if (err == ERREQFLUSH) {
+		kfree(rc);
+		dprintk(DEBUG_MUX, "err req flush\n");
+		return;
+	}
+
 	r = a;
-	r->rcall = req->rcall;
-	r->err = req->err;
-
-	if (req->flush!=None && !req->err)
-		r->err = -ERESTARTSYS;
-
+	dprintk(DEBUG_MUX, "mux %p req %p tc %p rc %p err %d\n", r->m, r->req,
+		tc, rc, err);
+	r->rcall = rc;
+	r->err = err;
 	wake_up(&r->wqueue);
 }
 
@@ -892,13 +842,12 @@ int
 v9fs_mux_rpc(struct v9fs_mux_data *m, struct v9fs_fcall *tc,
 	     struct v9fs_fcall **rc)
 {
-	int err, sigpending;
+	int err;
 	unsigned long flags;
 	struct v9fs_req *req;
 	struct v9fs_mux_rpc r;
 
 	r.err = 0;
-	r.tcall = tc;
 	r.rcall = NULL;
 	r.m = m;
 	init_waitqueue_head(&r.wqueue);
@@ -906,55 +855,52 @@ v9fs_mux_rpc(struct v9fs_mux_data *m, struct v9fs_fcall *tc,
 	if (rc)
 		*rc = NULL;
 
-	sigpending = 0;
-	if (signal_pending(current)) {
-		sigpending = 1;
-		clear_thread_flag(TIF_SIGPENDING);
-	}
-
 	req = v9fs_send_request(m, tc, v9fs_mux_rpc_cb, &r);
 	if (IS_ERR(req)) {
 		err = PTR_ERR(req);
 		dprintk(DEBUG_MUX, "error %d\n", err);
-		return err;
+		return PTR_ERR(req);
 	}
 
+	r.req = req;
+	dprintk(DEBUG_MUX, "mux %p tc %p tag %d rpc %p req %p\n", m, tc,
+		req->tag, &r, req);
 	err = wait_event_interruptible(r.wqueue, r.rcall != NULL || r.err < 0);
 	if (r.err < 0)
 		err = r.err;
 
 	if (err == -ERESTARTSYS && m->trans->status == Connected && m->err == 0) {
-		if (v9fs_mux_flush_request(m, req)) {
-			/* wait until we get response of the flush message */
-			do {
-				clear_thread_flag(TIF_SIGPENDING);
-				err = wait_event_interruptible(r.wqueue,
-					r.rcall || r.err);
-			} while (!r.rcall && !r.err && err==-ERESTARTSYS &&
-				m->trans->status==Connected && !m->err);
-		}
-		sigpending = 1;
-	}
+		spin_lock(&m->lock);
+		req->tcall = NULL;
+		req->err = ERREQFLUSH;
+		spin_unlock(&m->lock);
 
-	if (sigpending) {
+		clear_thread_flag(TIF_SIGPENDING);
+		v9fs_mux_flush_request(m, req);
 		spin_lock_irqsave(&current->sighand->siglock, flags);
 		recalc_sigpending();
 		spin_unlock_irqrestore(&current->sighand->siglock, flags);
 	}
 
-	if (rc)
-		*rc = r.rcall;
-	else
-		kfree(r.rcall);
+	if (!err) {
+		if (r.rcall)
+			dprintk(DEBUG_MUX, "got response id %d tag %d\n",
+				r.rcall->id, r.rcall->tag);
 
-	v9fs_mux_free_request(m, req);
-	if (err > 0)
-		err = -EIO;
+		if (rc)
+			*rc = r.rcall;
+		else
+			kfree(r.rcall);
+	} else {
+		kfree(r.rcall);
+		dprintk(DEBUG_MUX, "got error %d\n", err);
+		if (err > 0)
+			err = -EIO;
+	}
 
 	return err;
 }
 
-#if 0
 /**
  * v9fs_mux_rpcnb - sends 9P request without waiting for response.
  * @m: mux data
@@ -978,7 +924,6 @@ int v9fs_mux_rpcnb(struct v9fs_mux_data *m, struct v9fs_fcall *tc,
 	dprintk(DEBUG_MUX, "mux %p tc %p tag %d\n", m, tc, req->tag);
 	return 0;
 }
-#endif  /*  0  */
 
 /**
  * v9fs_mux_cancel - cancel all pending requests with error
@@ -990,13 +935,10 @@ void v9fs_mux_cancel(struct v9fs_mux_data *m, int err)
 	struct v9fs_req *req, *rtmp;
 	LIST_HEAD(cancel_list);
 
-	dprintk(DEBUG_ERROR, "mux %p err %d\n", m, err);
+	dprintk(DEBUG_MUX, "mux %p err %d\n", m, err);
 	m->err = err;
 	spin_lock(&m->lock);
 	list_for_each_entry_safe(req, rtmp, &m->req_list, req_list) {
-		list_move(&req->req_list, &cancel_list);
-	}
-	list_for_each_entry_safe(req, rtmp, &m->unsent_req_list, req_list) {
 		list_move(&req->req_list, &cancel_list);
 	}
 	spin_unlock(&m->lock);
@@ -1007,9 +949,11 @@ void v9fs_mux_cancel(struct v9fs_mux_data *m, int err)
 			req->err = err;
 
 		if (req->cb)
-			(*req->cb) (req, req->cba);
+			(*req->cb) (req->cba, req->tcall, req->rcall, req->err);
 		else
 			kfree(req->rcall);
+
+		kfree(req);
 	}
 
 	wake_up(&m->equeue);
@@ -1019,7 +963,7 @@ static u16 v9fs_mux_get_tag(struct v9fs_mux_data *m)
 {
 	int tag;
 
-	tag = v9fs_get_idpool(&m->tagpool);
+	tag = v9fs_get_idpool(&m->tidpool);
 	if (tag < 0)
 		return V9FS_NOTAG;
 	else
@@ -1028,6 +972,6 @@ static u16 v9fs_mux_get_tag(struct v9fs_mux_data *m)
 
 static void v9fs_mux_put_tag(struct v9fs_mux_data *m, u16 tag)
 {
-	if (tag != V9FS_NOTAG && v9fs_check_idpool(tag, &m->tagpool))
-		v9fs_put_idpool(tag, &m->tagpool);
+	if (tag != V9FS_NOTAG && v9fs_check_idpool(tag, &m->tidpool))
+		v9fs_put_idpool(tag, &m->tidpool);
 }

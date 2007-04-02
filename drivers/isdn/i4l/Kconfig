@@ -139,4 +139,3 @@ source "drivers/isdn/hysdn/Kconfig"
 
 endmenu
 
-source "drivers/isdn/gigaset/Kconfig"

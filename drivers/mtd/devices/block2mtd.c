@@ -18,7 +18,6 @@
 #include <linux/init.h>
 #include <linux/mtd/mtd.h>
 #include <linux/buffer_head.h>
-#include <linux/mutex.h>
 
 #define VERSION "$Revision: 1.30 $"
 
@@ -32,7 +31,7 @@ struct block2mtd_dev {
 	struct list_head list;
 	struct block_device *blkdev;
 	struct mtd_info mtd;
-	struct mutex write_mutex;
+	struct semaphore write_mutex;
 };
 
 
@@ -135,9 +134,9 @@ static int block2mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 	int err;
 
 	instr->state = MTD_ERASING;
-	mutex_lock(&dev->write_mutex);
+	down(&dev->write_mutex);
 	err = _block2mtd_erase(dev, from, len);
-	mutex_unlock(&dev->write_mutex);
+	up(&dev->write_mutex);
 	if (err) {
 		ERROR("erase failed err = %d", err);
 		instr->state = MTD_ERASE_FAILED;
@@ -250,9 +249,9 @@ static int block2mtd_write(struct mtd_info *mtd, loff_t to, size_t len,
 	if (to + len > mtd->size)
 		len = mtd->size - to;
 
-	mutex_lock(&dev->write_mutex);
+	down(&dev->write_mutex);
 	err = _block2mtd_write(dev, buf, to, len, retlen);
-	mutex_unlock(&dev->write_mutex);
+	up(&dev->write_mutex);
 	if (err > 0)
 		err = 0;
 	return err;
@@ -311,7 +310,7 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size)
 		goto devinit_err;
 	}
 
-	mutex_init(&dev->write_mutex);
+	init_MUTEX(&dev->write_mutex);
 
 	/* Setup the MTD structure */
 	/* make the name contain the block device in */

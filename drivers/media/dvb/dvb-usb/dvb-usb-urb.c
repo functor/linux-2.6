@@ -21,7 +21,7 @@ int dvb_usb_generic_rw(struct dvb_usb_device *d, u8 *wbuf, u16 wlen, u8 *rbuf,
 	if (wbuf == NULL || wlen == 0)
 		return -EINVAL;
 
-	if ((ret = mutex_lock_interruptible(&d->usb_mutex)))
+	if ((ret = down_interruptible(&d->usb_sem)))
 		return ret;
 
 	deb_xfer(">>> ");
@@ -53,7 +53,7 @@ int dvb_usb_generic_rw(struct dvb_usb_device *d, u8 *wbuf, u16 wlen, u8 *rbuf,
 		}
 	}
 
-	mutex_unlock(&d->usb_mutex);
+	up(&d->usb_sem);
 	return ret;
 }
 EXPORT_SYMBOL(dvb_usb_generic_rw);

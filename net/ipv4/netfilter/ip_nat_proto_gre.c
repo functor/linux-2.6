@@ -49,15 +49,15 @@ gre_in_range(const struct ip_conntrack_tuple *tuple,
 	     const union ip_conntrack_manip_proto *min,
 	     const union ip_conntrack_manip_proto *max)
 {
-	__be16 key;
+	u_int32_t key;
 
 	if (maniptype == IP_NAT_MANIP_SRC)
 		key = tuple->src.u.gre.key;
 	else
 		key = tuple->dst.u.gre.key;
 
-	return ntohs(key) >= ntohs(min->gre.key)
-		&& ntohs(key) <= ntohs(max->gre.key);
+	return ntohl(key) >= ntohl(min->gre.key)
+		&& ntohl(key) <= ntohl(max->gre.key);
 }
 
 /* generate unique tuple ... */
@@ -81,14 +81,14 @@ gre_unique_tuple(struct ip_conntrack_tuple *tuple,
 		min = 1;
 		range_size = 0xffff;
 	} else {
-		min = ntohs(range->min.gre.key);
-		range_size = ntohs(range->max.gre.key) - min + 1;
+		min = ntohl(range->min.gre.key);
+		range_size = ntohl(range->max.gre.key) - min + 1;
 	}
 
 	DEBUGP("min = %u, range_size = %u\n", min, range_size); 
 
 	for (i = 0; i < range_size; i++, key++) {
-		*keyptr = htons(min + key % range_size);
+		*keyptr = htonl(min + key % range_size);
 		if (!ip_nat_used_tuple(tuple, conntrack))
 			return 1;
 	}

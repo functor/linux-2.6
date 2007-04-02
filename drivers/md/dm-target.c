@@ -78,7 +78,8 @@ void dm_put_target_type(struct target_type *t)
 	if (--ti->use == 0)
 		module_put(ti->tt.module);
 
-	BUG_ON(ti->use < 0);
+	if (ti->use < 0)
+		BUG();
 	up_read(&_lock);
 
 	return;

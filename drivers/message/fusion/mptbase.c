@@ -77,7 +77,6 @@
 MODULE_AUTHOR(MODULEAUTHOR);
 MODULE_DESCRIPTION(my_NAME);
 MODULE_LICENSE("GPL");
-MODULE_VERSION(MPT_LINUX_VERSION_COMMON);
 
 /*
  *  cmd line parameters
@@ -181,7 +180,6 @@ static void	mpt_sp_ioc_info(MPT_ADAPTER *ioc, u32 ioc_status, MPT_FRAME_HDR *mf)
 static void	mpt_fc_log_info(MPT_ADAPTER *ioc, u32 log_info);
 static void	mpt_spi_log_info(MPT_ADAPTER *ioc, u32 log_info);
 static void	mpt_sas_log_info(MPT_ADAPTER *ioc, u32 log_info);
-static int	mpt_read_ioc_pg_3(MPT_ADAPTER *ioc);
 
 /* module entry point */
 static int  __init    fusion_init  (void);
@@ -430,7 +428,7 @@ mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 		results = ProcessEventNotification(ioc, pEvReply, &evHandlers);
 		if (results != evHandlers) {
 			/* CHECKME! Any special handling needed here? */
-			devtverboseprintk((MYIOC_s_WARN_FMT "Called %d event handlers, sum results = %d\n",
+			devtprintk((MYIOC_s_WARN_FMT "Called %d event handlers, sum results = %d\n",
 					ioc->name, evHandlers, results));
 		}
 
@@ -440,10 +438,10 @@ mpt_base_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 		 */
 		if (pEvReply->MsgFlags & MPI_MSGFLAGS_CONTINUATION_REPLY) {
 			freereq = 0;
-			devtverboseprintk((MYIOC_s_WARN_FMT "EVENT_NOTIFICATION reply %p does not return Request frame\n",
+			devtprintk((MYIOC_s_WARN_FMT "EVENT_NOTIFICATION reply %p does not return Request frame\n",
 				ioc->name, pEvReply));
 		} else {
-			devtverboseprintk((MYIOC_s_WARN_FMT "EVENT_NOTIFICATION reply %p returns Request frame\n",
+			devtprintk((MYIOC_s_WARN_FMT "EVENT_NOTIFICATION reply %p returns Request frame\n",
 				ioc->name, pEvReply));
 		}
 
@@ -1122,6 +1120,65 @@ mpt_verify_adapter(int iocid, MPT_ADAPTER **iocpp)
 	return -1;
 }
 
+int
+mpt_alt_ioc_wait(MPT_ADAPTER *ioc)
+{
+	int loop_count = 30 * 4;  /* Wait 30 seconds */
+	int status = -1; /* -1 means failed to get board READY */
+
+	do {
+		spin_lock(&ioc->initializing_hba_lock);
+		if (ioc->initializing_hba_lock_flag == 0) {
+			ioc->initializing_hba_lock_flag=1;
+			spin_unlock(&ioc->initializing_hba_lock);
+			status = 0;
+			break;
+		}
+		spin_unlock(&ioc->initializing_hba_lock);
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(HZ/4);
+	} while (--loop_count);
+
+	return status;
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/*
+ *	mpt_bringup_adapter - This is a wrapper function for mpt_do_ioc_recovery
+ *	@ioc: Pointer to MPT adapter structure
+ *	@sleepFlag: Use schedule if CAN_SLEEP else use udelay.
+ *
+ *	This routine performs all the steps necessary to bring the IOC
+ *	to a OPERATIONAL state.
+ *
+ *      Special Note: This function was added with spin lock's so as to allow
+ *      the dv(domain validation) work thread to succeed on the other channel
+ *      that maybe occuring at the same time when this function is called.
+ *      Without this lock, the dv would fail when message frames were
+ *      requested during hba bringup on the alternate ioc.
+ */
+static int
+mpt_bringup_adapter(MPT_ADAPTER *ioc, int sleepFlag)
+{
+	int r;
+
+	if(ioc->alt_ioc) {
+		if((r=mpt_alt_ioc_wait(ioc->alt_ioc)!=0))
+			return r;
+	}
+
+	r = mpt_do_ioc_recovery(ioc, MPT_HOSTEVENT_IOC_BRINGUP,
+	    CAN_SLEEP);
+
+	if(ioc->alt_ioc) {
+		spin_lock(&ioc->alt_ioc->initializing_hba_lock);
+		ioc->alt_ioc->initializing_hba_lock_flag=0;
+		spin_unlock(&ioc->alt_ioc->initializing_hba_lock);
+	}
+
+return r;
+}
+
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
  *	mpt_attach - Install a PCI intelligent MPT adapter.
@@ -1190,6 +1247,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	ioc->diagPending = 0;
 	spin_lock_init(&ioc->diagLock);
 	spin_lock_init(&ioc->fc_rescan_work_lock);
+	spin_lock_init(&ioc->fc_rport_lock);
 	spin_lock_init(&ioc->initializing_hba_lock);
 
 	/* Initialize the event logging.
@@ -1424,8 +1482,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	 */
 	mpt_detect_bound_ports(ioc, pdev);
 
-	if ((r = mpt_do_ioc_recovery(ioc, MPT_HOSTEVENT_IOC_BRINGUP,
-	    CAN_SLEEP)) != 0){
+	if ((r = mpt_bringup_adapter(ioc, CAN_SLEEP)) != 0){
 		printk(KERN_WARNING MYNAM
 		  ": WARNING - %s did not initialize properly! (%d)\n",
 		  ioc->name, r);
@@ -1572,6 +1629,7 @@ mpt_resume(struct pci_dev *pdev)
 	MPT_ADAPTER *ioc = pci_get_drvdata(pdev);
 	u32 device_state = pdev->current_state;
 	int recovery_state;
+	int ii;
 
 	printk(MYIOC_s_INFO_FMT
 	"pci-resume: pdev=0x%p, slot=%s, Previous operating state [D%d]\n",
@@ -1584,6 +1642,14 @@ mpt_resume(struct pci_dev *pdev)
 	/* enable interrupts */
 	CHIPREG_WRITE32(&ioc->chip->IntMask, MPI_HIM_DIM);
 	ioc->active = 1;
+
+	/* F/W not running */
+	if(!CHIPREG_READ32(&ioc->chip->Doorbell)) {
+		/* enable domain validation flags */
+		for (ii=0; ii < MPT_MAX_SCSI_DEVICES; ii++) {
+			ioc->spi_data.dvStatus[ii] |= MPT_SCSICFG_NEED_DV;
+		}
+	}
 
 	printk(MYIOC_s_INFO_FMT
 		"pci-resume: ioc-state=0x%x,doorbell=0x%x\n",
@@ -1605,21 +1671,6 @@ mpt_resume(struct pci_dev *pdev)
 	return 0;
 }
 #endif
-
-static int
-mpt_signal_reset(int index, MPT_ADAPTER *ioc, int reset_phase)
-{
-	if ((MptDriverClass[index] == MPTSPI_DRIVER &&
-	     ioc->bus_type != SPI) ||
-	    (MptDriverClass[index] == MPTFC_DRIVER &&
-	     ioc->bus_type != FC) ||
-	    (MptDriverClass[index] == MPTSAS_DRIVER &&
-	     ioc->bus_type != SAS))
-		/* make sure we only call the relevant reset handler
-		 * for the bus */
-		return 0;
-	return (MptResetHandlers[index])(ioc, reset_phase);
-}
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -1901,14 +1952,14 @@ mpt_do_ioc_recovery(MPT_ADAPTER *ioc, u32 reason, int sleepFlag)
 			if ((ret == 0) && MptResetHandlers[ii]) {
 				dprintk((MYIOC_s_INFO_FMT "Calling IOC post_reset handler #%d\n",
 						ioc->name, ii));
-				rc += mpt_signal_reset(ii, ioc, MPT_IOC_POST_RESET);
+				rc += (*(MptResetHandlers[ii]))(ioc, MPT_IOC_POST_RESET);
 				handlers++;
 			}
 
 			if (alt_ioc_ready && MptResetHandlers[ii]) {
 				drsprintk((MYIOC_s_INFO_FMT "Calling alt-%s post_reset handler #%d\n",
 						ioc->name, ioc->alt_ioc->name, ii));
-				rc += mpt_signal_reset(ii, ioc->alt_ioc, MPT_IOC_POST_RESET);
+				rc += (*(MptResetHandlers[ii]))(ioc->alt_ioc, MPT_IOC_POST_RESET);
 				handlers++;
 			}
 		}
@@ -3283,11 +3334,11 @@ mpt_diag_reset(MPT_ADAPTER *ioc, int ignore, int sleepFlag)
 				if (MptResetHandlers[ii]) {
 					dprintk((MYIOC_s_INFO_FMT "Calling IOC pre_reset handler #%d\n",
 							ioc->name, ii));
-					r += mpt_signal_reset(ii, ioc, MPT_IOC_PRE_RESET);
+					r += (*(MptResetHandlers[ii]))(ioc, MPT_IOC_PRE_RESET);
 					if (ioc->alt_ioc) {
 						dprintk((MYIOC_s_INFO_FMT "Calling alt-%s pre_reset handler #%d\n",
 								ioc->name, ioc->alt_ioc->name, ii));
-						r += mpt_signal_reset(ii, ioc->alt_ioc, MPT_IOC_PRE_RESET);
+						r += (*(MptResetHandlers[ii]))(ioc->alt_ioc, MPT_IOC_PRE_RESET);
 					}
 				}
 			}
@@ -4887,7 +4938,7 @@ done_and_free:
 	return rc;
 }
 
-static int
+int
 mpt_read_ioc_pg_3(MPT_ADAPTER *ioc)
 {
 	IOCPage3_t		*pIoc3;
@@ -5095,13 +5146,13 @@ SendEventNotification(MPT_ADAPTER *ioc, u8 EvSwitch)
 
 	evnp = (EventNotification_t *) mpt_get_msg_frame(mpt_base_index, ioc);
 	if (evnp == NULL) {
-		devtverboseprintk((MYIOC_s_WARN_FMT "Unable to allocate event request frame!\n",
+		devtprintk((MYIOC_s_WARN_FMT "Unable to allocate event request frame!\n",
 				ioc->name));
 		return 0;
 	}
 	memset(evnp, 0, sizeof(*evnp));
 
-	devtverboseprintk((MYIOC_s_INFO_FMT "Sending EventNotification (%d) request %p\n", ioc->name, EvSwitch, evnp));
+	devtprintk((MYIOC_s_INFO_FMT "Sending EventNotification (%d) request %p\n", ioc->name, EvSwitch, evnp));
 
 	evnp->Function = MPI_FUNCTION_EVENT_NOTIFICATION;
 	evnp->ChainOffset = 0;
@@ -5722,11 +5773,11 @@ mpt_HardResetHandler(MPT_ADAPTER *ioc, int sleepFlag)
 			if (MptResetHandlers[ii]) {
 				dtmprintk((MYIOC_s_INFO_FMT "Calling IOC reset_setup handler #%d\n",
 						ioc->name, ii));
-				r += mpt_signal_reset(ii, ioc, MPT_IOC_SETUP_RESET);
+				r += (*(MptResetHandlers[ii]))(ioc, MPT_IOC_SETUP_RESET);
 				if (ioc->alt_ioc) {
 					dtmprintk((MYIOC_s_INFO_FMT "Calling alt-%s setup reset handler #%d\n",
 							ioc->name, ioc->alt_ioc->name, ii));
-					r += mpt_signal_reset(ii, ioc->alt_ioc, MPT_IOC_SETUP_RESET);
+					r += (*(MptResetHandlers[ii]))(ioc->alt_ioc, MPT_IOC_SETUP_RESET);
 				}
 			}
 		}
@@ -5751,13 +5802,11 @@ mpt_HardResetHandler(MPT_ADAPTER *ioc, int sleepFlag)
 	return rc;
 }
 
-# define EVENT_DESCR_STR_SZ		100
-
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 static void
 EventDescriptionStr(u8 event, u32 evData0, char *evStr)
 {
-	char *ds = NULL;
+	char *ds;
 
 	switch(event) {
 	case MPI_EVENT_NONE:
@@ -5794,9 +5843,9 @@ EventDescriptionStr(u8 event, u32 evData0, char *evStr)
 		if (evData0 == MPI_EVENT_LOOP_STATE_CHANGE_LIP)
 			ds = "Loop State(LIP) Change";
 		else if (evData0 == MPI_EVENT_LOOP_STATE_CHANGE_LPE)
-			ds = "Loop State(LPE) Change";		/* ??? */
+			ds = "Loop State(LPE) Change";			/* ??? */
 		else
-			ds = "Loop State(LPB) Change";		/* ??? */
+			ds = "Loop State(LPB) Change";			/* ??? */
 		break;
 	case MPI_EVENT_LOGOUT:
 		ds = "Logout";
@@ -5858,31 +5907,23 @@ EventDescriptionStr(u8 event, u32 evData0, char *evStr)
 		break;
 	case MPI_EVENT_SAS_DEVICE_STATUS_CHANGE:
 	{
-		u8 id = (u8)(evData0);
 		u8 ReasonCode = (u8)(evData0 >> 16);
 		switch (ReasonCode) {
 		case MPI_EVENT_SAS_DEV_STAT_RC_ADDED:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			    "SAS Device Status Change: Added: id=%d", id);
+			ds = "SAS Device Status Change: Added";
 			break;
 		case MPI_EVENT_SAS_DEV_STAT_RC_NOT_RESPONDING:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			    "SAS Device Status Change: Deleted: id=%d", id);
+			ds = "SAS Device Status Change: Deleted";
 			break;
 		case MPI_EVENT_SAS_DEV_STAT_RC_SMART_DATA:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			    "SAS Device Status Change: SMART Data: id=%d",
-			    id);
+			ds = "SAS Device Status Change: SMART Data";
 			break;
 		case MPI_EVENT_SAS_DEV_STAT_RC_NO_PERSIST_ADDED:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			    "SAS Device Status Change: No Persistancy "
-			    "Added: id=%d", id);
+			ds = "SAS Device Status Change: No Persistancy Added";
 			break;
 		default:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			    "SAS Device Status Change: Unknown: id=%d", id);
-			break;
+			ds = "SAS Device Status Change: Unknown";
+		break;
 		}
 		break;
 	}
@@ -5899,100 +5940,10 @@ EventDescriptionStr(u8 event, u32 evData0, char *evStr)
 		ds = "Persistent Table Full";
 		break;
 	case MPI_EVENT_SAS_PHY_LINK_STATUS:
-	{
-		u8 LinkRates = (u8)(evData0 >> 8);
-		u8 PhyNumber = (u8)(evData0);
-		LinkRates = (LinkRates & MPI_EVENT_SAS_PLS_LR_CURRENT_MASK) >>
-			MPI_EVENT_SAS_PLS_LR_CURRENT_SHIFT;
-		switch (LinkRates) {
-		case MPI_EVENT_SAS_PLS_LR_RATE_UNKNOWN:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d:"
-			   " Rate Unknown",PhyNumber);
-			break;
-		case MPI_EVENT_SAS_PLS_LR_RATE_PHY_DISABLED:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d:"
-			   " Phy Disabled",PhyNumber);
-			break;
-		case MPI_EVENT_SAS_PLS_LR_RATE_FAILED_SPEED_NEGOTIATION:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d:"
-			   " Failed Speed Nego",PhyNumber);
-			break;
-		case MPI_EVENT_SAS_PLS_LR_RATE_SATA_OOB_COMPLETE:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d:"
-			   " Sata OOB Completed",PhyNumber);
-			break;
-		case MPI_EVENT_SAS_PLS_LR_RATE_1_5:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d:"
-			   " Rate 1.5 Gbps",PhyNumber);
-			break;
-		case MPI_EVENT_SAS_PLS_LR_RATE_3_0:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d:"
-			   " Rate 3.0 Gpbs",PhyNumber);
-			break;
-		default:
-			snprintf(evStr, EVENT_DESCR_STR_SZ,
-			   "SAS PHY Link Status: Phy=%d", PhyNumber);
-			break;
-		}
+		ds = "SAS PHY Link Status";
 		break;
-	}
 	case MPI_EVENT_SAS_DISCOVERY_ERROR:
 		ds = "SAS Discovery Error";
-		break;
-	case MPI_EVENT_IR_RESYNC_UPDATE:
-	{
-		u8 resync_complete = (u8)(evData0 >> 16);
-		snprintf(evStr, EVENT_DESCR_STR_SZ,
-		    "IR Resync Update: Complete = %d:",resync_complete);
-		break;
-	}
-	case MPI_EVENT_IR2:
-	{
-		u8 ReasonCode = (u8)(evData0 >> 16);
-		switch (ReasonCode) {
-		case MPI_EVENT_IR2_RC_LD_STATE_CHANGED:
-			ds = "IR2: LD State Changed";
-			break;
-		case MPI_EVENT_IR2_RC_PD_STATE_CHANGED:
-			ds = "IR2: PD State Changed";
-			break;
-		case MPI_EVENT_IR2_RC_BAD_BLOCK_TABLE_FULL:
-			ds = "IR2: Bad Block Table Full";
-			break;
-		case MPI_EVENT_IR2_RC_PD_INSERTED:
-			ds = "IR2: PD Inserted";
-			break;
-		case MPI_EVENT_IR2_RC_PD_REMOVED:
-			ds = "IR2: PD Removed";
-			break;
-		case MPI_EVENT_IR2_RC_FOREIGN_CFG_DETECTED:
-			ds = "IR2: Foreign CFG Detected";
-			break;
-		case MPI_EVENT_IR2_RC_REBUILD_MEDIUM_ERROR:
-			ds = "IR2: Rebuild Medium Error";
-			break;
-		default:
-			ds = "IR2";
-		break;
-		}
-		break;
-	}
-	case MPI_EVENT_SAS_DISCOVERY:
-	{
-		if (evData0)
-			ds = "SAS Discovery: Start";
-		else
-			ds = "SAS Discovery: Stop";
-		break;
-	}
-	case MPI_EVENT_LOG_ENTRY_ADDED:
-		ds = "SAS Log Entry Added";
 		break;
 
 	/*
@@ -6002,8 +5953,7 @@ EventDescriptionStr(u8 event, u32 evData0, char *evStr)
 		ds = "Unknown";
 		break;
 	}
-	if (ds)
-		strncpy(evStr, ds, EVENT_DESCR_STR_SZ);
+	strcpy(evStr,ds);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -6025,7 +5975,7 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	int ii;
 	int r = 0;
 	int handlers = 0;
-	char evStr[EVENT_DESCR_STR_SZ];
+	char evStr[100];
 	u8 event;
 
 	/*
@@ -6039,12 +5989,12 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	}
 
 	EventDescriptionStr(event, evData0, evStr);
-	devtprintk((MYIOC_s_INFO_FMT "MPT event:(%02Xh) : %s\n",
+	devtprintk((MYIOC_s_INFO_FMT "MPT event (%s=%02Xh) detected!\n",
 			ioc->name,
-			event,
-			evStr));
+			evStr,
+			event));
 
-#if defined(MPT_DEBUG) || defined(MPT_DEBUG_VERBOSE_EVENTS)
+#if defined(MPT_DEBUG) || defined(MPT_DEBUG_EVENTS)
 	printk(KERN_INFO MYNAM ": Event data:\n" KERN_INFO);
 	for (ii = 0; ii < evDataLen; ii++)
 		printk(" %08x", le32_to_cpu(pEventReply->Data[ii]));
@@ -6103,7 +6053,7 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	 */
 	for (ii=MPT_MAX_PROTOCOL_DRIVERS-1; ii; ii--) {
 		if (MptEvHandlers[ii]) {
-			devtverboseprintk((MYIOC_s_INFO_FMT "Routing Event to event handler #%d\n",
+			devtprintk((MYIOC_s_INFO_FMT "Routing Event to event handler #%d\n",
 					ioc->name, ii));
 			r += (*(MptEvHandlers[ii]))(ioc, pEventReply);
 			handlers++;
@@ -6115,10 +6065,10 @@ ProcessEventNotification(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply
 	 *  If needed, send (a single) EventAck.
 	 */
 	if (pEventReply->AckRequired == MPI_EVENT_NOTIFICATION_ACK_REQUIRED) {
-		devtverboseprintk((MYIOC_s_WARN_FMT
+		devtprintk((MYIOC_s_WARN_FMT
 			"EventAck required\n",ioc->name));
 		if ((ii = SendEventAck(ioc, pEventReply)) != 0) {
-			devtverboseprintk((MYIOC_s_WARN_FMT "SendEventAck returned %d\n",
+			devtprintk((MYIOC_s_WARN_FMT "SendEventAck returned %d\n",
 					ioc->name, ii));
 		}
 	}
@@ -6255,8 +6205,8 @@ mpt_spi_log_info(MPT_ADAPTER *ioc, u32 log_info)
 		"Abort",					/* 12h */
 		"IO Not Yet Executed",				/* 13h */
 		"IO Executed",					/* 14h */
-		"Persistant Reservation Out Not Affiliation Owner", /* 15h */
-		"Open Transmit DMA Abort",			/* 16h */
+		NULL,						/* 15h */
+		NULL,						/* 16h */
 		NULL,						/* 17h */
 		NULL,						/* 18h */
 		NULL,						/* 19h */
@@ -6481,9 +6431,11 @@ EXPORT_SYMBOL(mpt_stm_index);
 EXPORT_SYMBOL(mpt_HardResetHandler);
 EXPORT_SYMBOL(mpt_config);
 EXPORT_SYMBOL(mpt_findImVolumes);
+EXPORT_SYMBOL(mpt_read_ioc_pg_3);
 EXPORT_SYMBOL(mpt_alloc_fw_memory);
 EXPORT_SYMBOL(mpt_free_fw_memory);
 EXPORT_SYMBOL(mptbase_sas_persist_operation);
+EXPORT_SYMBOL(mpt_alt_ioc_wait);
 EXPORT_SYMBOL(mptbase_GetFcPortPage0);
 
 

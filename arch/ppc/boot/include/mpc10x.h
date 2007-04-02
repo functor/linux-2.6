@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/include/mpc10.h
+ *
  * Common defines for the Motorola SPS MPC106/8240/107 Host bridge/Mem
  * ctrl/EPIC/etc.
  *

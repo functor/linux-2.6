@@ -7,16 +7,6 @@
  *
  * Copyright (C) 2004,2005 by Thiemo Seufer
  * Copyright (C) 2005  Maciej W. Rozycki
- * Copyright (C) 2006  Ralf Baechle (ralf@linux-mips.org)
- *
- * ... and the days got worse and worse and now you see
- * I've gone completly out of my mind.
- *
- * They're coming to take me a away haha
- * they're coming to take me a away hoho hihi haha
- * to the funny farm where code is beautiful all the time ...
- *
- * (Condolences to Napoleon XIV)
  */
 
 #include <stdarg.h>
@@ -78,7 +68,6 @@ enum fields
 	BIMM = 0x040,
 	JIMM = 0x080,
 	FUNC = 0x100,
-	SET = 0x200
 };
 
 #define OP_MASK		0x2f
@@ -97,8 +86,6 @@ enum fields
 #define JIMM_SH		0
 #define FUNC_MASK	0x2f
 #define FUNC_SH		0
-#define SET_MASK	0x7
-#define SET_SH		0
 
 enum opcode {
 	insn_invalid,
@@ -142,8 +129,8 @@ static __initdata struct insn insn_table[] = {
 	{ insn_bne, M(bne_op,0,0,0,0,0), RS | RT | BIMM },
 	{ insn_daddiu, M(daddiu_op,0,0,0,0,0), RS | RT | SIMM },
 	{ insn_daddu, M(spec_op,0,0,0,0,daddu_op), RS | RT | RD },
-	{ insn_dmfc0, M(cop0_op,dmfc_op,0,0,0,0), RT | RD | SET},
-	{ insn_dmtc0, M(cop0_op,dmtc_op,0,0,0,0), RT | RD | SET},
+	{ insn_dmfc0, M(cop0_op,dmfc_op,0,0,0,0), RT | RD },
+	{ insn_dmtc0, M(cop0_op,dmtc_op,0,0,0,0), RT | RD },
 	{ insn_dsll, M(spec_op,0,0,0,0,dsll_op), RT | RD | RE },
 	{ insn_dsll32, M(spec_op,0,0,0,0,dsll32_op), RT | RD | RE },
 	{ insn_dsra, M(spec_op,0,0,0,0,dsra_op), RT | RD | RE },
@@ -158,8 +145,8 @@ static __initdata struct insn insn_table[] = {
 	{ insn_lld, M(lld_op,0,0,0,0,0), RS | RT | SIMM },
 	{ insn_lui, M(lui_op,0,0,0,0,0), RT | SIMM },
 	{ insn_lw, M(lw_op,0,0,0,0,0), RS | RT | SIMM },
-	{ insn_mfc0, M(cop0_op,mfc_op,0,0,0,0), RT | RD | SET},
-	{ insn_mtc0, M(cop0_op,mtc_op,0,0,0,0), RT | RD | SET},
+	{ insn_mfc0, M(cop0_op,mfc_op,0,0,0,0), RT | RD },
+	{ insn_mtc0, M(cop0_op,mtc_op,0,0,0,0), RT | RD },
 	{ insn_ori, M(ori_op,0,0,0,0,0), RS | RT | UIMM },
 	{ insn_rfe, M(cop0_op,cop_op,0,0,0,rfe_op), 0 },
 	{ insn_sc, M(sc_op,0,0,0,0,0), RS | RT | SIMM },
@@ -255,14 +242,6 @@ static __init u32 build_func(u32 arg)
 	return arg & FUNC_MASK;
 }
 
-static __init u32 build_set(u32 arg)
-{
-	if (arg & ~SET_MASK)
-		printk(KERN_WARNING "TLB synthesizer field overflow\n");
-
-	return arg & SET_MASK;
-}
-
 /*
  * The order of opcode arguments is implicitly left to right,
  * starting with RS and ending with FUNC or IMM.
@@ -294,7 +273,6 @@ static void __init build_insn(u32 **buf, enum opcode opc, ...)
 	if (ip->fields & BIMM) op |= build_bimm(va_arg(ap, s32));
 	if (ip->fields & JIMM) op |= build_jimm(va_arg(ap, u32));
 	if (ip->fields & FUNC) op |= build_func(va_arg(ap, u32));
-	if (ip->fields & SET) op |= build_set(va_arg(ap, u32));
 	va_end(ap);
 
 	**buf = op;
@@ -380,8 +358,8 @@ I_u1s2(_bgezl);
 I_u1s2(_bltz);
 I_u1s2(_bltzl);
 I_u1u2s3(_bne);
-I_u1u2u3(_dmfc0);
-I_u1u2u3(_dmtc0);
+I_u1u2(_dmfc0);
+I_u1u2(_dmtc0);
 I_u2u1s3(_daddiu);
 I_u3u1u2(_daddu);
 I_u2u1u3(_dsll);
@@ -398,8 +376,8 @@ I_u2s3u1(_ll);
 I_u2s3u1(_lld);
 I_u1s2(_lui);
 I_u2s3u1(_lw);
-I_u1u2u3(_mfc0);
-I_u1u2u3(_mtc0);
+I_u1u2(_mfc0);
+I_u1u2(_mtc0);
 I_u2u1u3(_ori);
 I_0(_rfe);
 I_u2s3u1(_sc);
@@ -473,8 +451,8 @@ L_LA(_r3000_write_probe_fail)
 # define i_SLL(buf, rs, rt, sh) i_dsll(buf, rs, rt, sh)
 # define i_SRA(buf, rs, rt, sh) i_dsra(buf, rs, rt, sh)
 # define i_SRL(buf, rs, rt, sh) i_dsrl(buf, rs, rt, sh)
-# define i_MFC0(buf, rt, rd...) i_dmfc0(buf, rt, rd)
-# define i_MTC0(buf, rt, rd...) i_dmtc0(buf, rt, rd)
+# define i_MFC0(buf, rt, rd) i_dmfc0(buf, rt, rd)
+# define i_MTC0(buf, rt, rd) i_dmtc0(buf, rt, rd)
 # define i_ADDIU(buf, rs, rt, val) i_daddiu(buf, rs, rt, val)
 # define i_ADDU(buf, rs, rt, rd) i_daddu(buf, rs, rt, rd)
 # define i_SUBU(buf, rs, rt, rd) i_dsubu(buf, rs, rt, rd)
@@ -486,8 +464,8 @@ L_LA(_r3000_write_probe_fail)
 # define i_SLL(buf, rs, rt, sh) i_sll(buf, rs, rt, sh)
 # define i_SRA(buf, rs, rt, sh) i_sra(buf, rs, rt, sh)
 # define i_SRL(buf, rs, rt, sh) i_srl(buf, rs, rt, sh)
-# define i_MFC0(buf, rt, rd...) i_mfc0(buf, rt, rd)
-# define i_MTC0(buf, rt, rd...) i_mtc0(buf, rt, rd)
+# define i_MFC0(buf, rt, rd) i_mfc0(buf, rt, rd)
+# define i_MTC0(buf, rt, rd) i_mtc0(buf, rt, rd)
 # define i_ADDIU(buf, rs, rt, val) i_addiu(buf, rs, rt, val)
 # define i_ADDU(buf, rs, rt, rd) i_addu(buf, rs, rt, rd)
 # define i_SUBU(buf, rs, rt, rd) i_subu(buf, rs, rt, rd)
@@ -692,15 +670,14 @@ static void __init il_bgezl(u32 **p, struct reloc **r, unsigned int reg,
 #define K1		27
 
 /* Some CP0 registers */
-#define C0_INDEX	0, 0
-#define C0_ENTRYLO0	2, 0
-#define C0_TCBIND	2, 2
-#define C0_ENTRYLO1	3, 0
-#define C0_CONTEXT	4, 0
-#define C0_BADVADDR	8, 0
-#define C0_ENTRYHI	10, 0
-#define C0_EPC		14, 0
-#define C0_XCONTEXT	20, 0
+#define C0_INDEX	0
+#define C0_ENTRYLO0	2
+#define C0_ENTRYLO1	3
+#define C0_CONTEXT	4
+#define C0_BADVADDR	8
+#define C0_ENTRYHI	10
+#define C0_EPC		14
+#define C0_XCONTEXT	20
 
 #ifdef CONFIG_64BIT
 # define GET_CONTEXT(buf, reg) i_MFC0(buf, reg, C0_XCONTEXT)
@@ -765,7 +742,7 @@ static void __init build_r3000_tlb_refill_handler(void)
 	}
 #endif
 
-	memcpy((void *)ebase, tlb_handler, 0x80);
+	memcpy((void *)CAC_BASE, tlb_handler, 0x80);
 }
 
 /*
@@ -875,7 +852,6 @@ static __init void build_tlb_write_entry(u32 **p, struct label **l,
 
 	case CPU_R10000:
 	case CPU_R12000:
-	case CPU_R14000:
 	case CPU_4KC:
 	case CPU_SB1:
 	case CPU_SB1A:
@@ -907,7 +883,6 @@ static __init void build_tlb_write_entry(u32 **p, struct label **l,
 	case CPU_4KEC:
 	case CPU_24K:
 	case CPU_34K:
-	case CPU_74K:
 		i_ehb(p);
 		tlbw(p);
 		break;
@@ -976,24 +951,29 @@ build_get_pmde64(u32 **p, struct label **l, struct reloc **r,
 	/* No i_nop needed here, since the next insn doesn't touch TMP. */
 
 #ifdef CONFIG_SMP
-# ifdef  CONFIG_MIPS_MT_SMTC
-	/*
-	 * SMTC uses TCBind value as "CPU" index
-	 */
-	i_mfc0(p, ptr, C0_TCBIND);
-	i_dsrl(p, ptr, ptr, 19);
-# else
+# ifdef CONFIG_BUILD_ELF64
 	/*
 	 * 64 bit SMP running in XKPHYS has smp_processor_id() << 3
 	 * stored in CONTEXT.
 	 */
 	i_dmfc0(p, ptr, C0_CONTEXT);
 	i_dsrl(p, ptr, ptr, 23);
-#endif
 	i_LA_mostly(p, tmp, pgdc);
 	i_daddu(p, ptr, ptr, tmp);
 	i_dmfc0(p, tmp, C0_BADVADDR);
 	i_ld(p, ptr, rel_lo(pgdc), ptr);
+# else
+	/*
+	 * 64 bit SMP running in compat space has the lower part of
+	 * &pgd_current[smp_processor_id()] stored in CONTEXT.
+	 */
+	if (!in_compat_space_p(pgdc))
+		panic("Invalid page directory address!");
+
+	i_dmfc0(p, ptr, C0_CONTEXT);
+	i_dsra(p, ptr, ptr, 23);
+	i_ld(p, ptr, 0, ptr);
+# endif
 #else
 	i_LA_mostly(p, ptr, pgdc);
 	i_ld(p, ptr, rel_lo(pgdc), ptr);
@@ -1047,21 +1027,9 @@ build_get_pgde32(u32 **p, unsigned int tmp, unsigned int ptr)
 
 	/* 32 bit SMP has smp_processor_id() stored in CONTEXT. */
 #ifdef CONFIG_SMP
-#ifdef  CONFIG_MIPS_MT_SMTC
-	/*
-	 * SMTC uses TCBind value as "CPU" index
-	 */
-	i_mfc0(p, ptr, C0_TCBIND);
-	i_LA_mostly(p, tmp, pgdc);
-	i_srl(p, ptr, ptr, 19);
-#else
-	/*
-	 * smp_processor_id() << 3 is stored in CONTEXT.
-         */
 	i_mfc0(p, ptr, C0_CONTEXT);
 	i_LA_mostly(p, tmp, pgdc);
 	i_srl(p, ptr, ptr, 23);
-#endif
 	i_addu(p, ptr, tmp, ptr);
 #else
 	i_LA_mostly(p, ptr, pgdc);
@@ -1292,7 +1260,7 @@ static void __init build_r4000_tlb_refill_handler(void)
 	}
 #endif
 
-	memcpy((void *)ebase, final_handler, 0x100);
+	memcpy((void *)CAC_BASE, final_handler, 0x100);
 }
 
 /*

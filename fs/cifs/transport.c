@@ -309,16 +309,17 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 	
 	*pRespBufType = CIFS_NO_BUFFER;  /* no response buf yet */
 
-	if ((ses == NULL) || (ses->server == NULL)) {
-		cifs_small_buf_release(in_buf);
-		cERROR(1,("Null session"));
+	if (ses == NULL) {
+		cERROR(1,("Null smb session"));
+		return -EIO;
+	}
+	if(ses->server == NULL) {
+		cERROR(1,("Null tcp session"));
 		return -EIO;
 	}
 
-	if(ses->server->tcpStatus == CifsExiting) {
-		cifs_small_buf_release(in_buf);
+	if(ses->server->tcpStatus == CifsExiting)
 		return -ENOENT;
-	}
 
 	/* Ensure that we do not send more than 50 overlapping requests 
 	   to the same server. We may make this configurable later or
@@ -345,7 +346,6 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 			} else {
 				if(ses->server->tcpStatus == CifsExiting) {
 					spin_unlock(&GlobalMid_Lock);
-					cifs_small_buf_release(in_buf);
 					return -ENOENT;
 				}
 
@@ -385,7 +385,6 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 	midQ = AllocMidQEntry(in_buf, ses);
 	if (midQ == NULL) {
 		up(&ses->server->tcpSem);
-		cifs_small_buf_release(in_buf);
 		/* If not lock req, update # of requests on wire to server */
 		if(long_op < 3) {
 			atomic_dec(&ses->server->inFlight); 
@@ -409,18 +408,14 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 	if(rc < 0) {
 		DeleteMidQEntry(midQ);
 		up(&ses->server->tcpSem);
-		cifs_small_buf_release(in_buf);
 		/* If not lock req, update # of requests on wire to server */
 		if(long_op < 3) {
 			atomic_dec(&ses->server->inFlight); 
 			wake_up(&ses->server->request_q);
 		}
 		return rc;
-	} else {
+	} else
 		up(&ses->server->tcpSem);
-		cifs_small_buf_release(in_buf);
-	}
-
 	if (long_op == -1)
 		goto cifs_no_response_exit2;
 	else if (long_op == 2) /* writes past end of file can take loong time */
@@ -548,7 +543,6 @@ cifs_no_response_exit2:
 
 out_unlock2:
 	up(&ses->server->tcpSem);
-	cifs_small_buf_release(in_buf);
 	/* If not lock req, update # of requests on wire to server */
 	if(long_op < 3) {
 		atomic_dec(&ses->server->inFlight); 

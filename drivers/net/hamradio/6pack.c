@@ -308,9 +308,9 @@ static int sp_set_mac_address(struct net_device *dev, void *addr)
 {
 	struct sockaddr_ax25 *sa = addr;
 
-	netif_tx_lock_bh(dev);
+	spin_lock_irq(&dev->xmit_lock);
 	memcpy(dev->dev_addr, &sa->sax25_call, AX25_ADDR_LEN);
-	netif_tx_unlock_bh(dev);
+	spin_unlock_irq(&dev->xmit_lock);
 
 	return 0;
 }
@@ -767,9 +767,9 @@ static int sixpack_ioctl(struct tty_struct *tty, struct file *file,
 			break;
 		}
 
-		netif_tx_lock_bh(dev);
+		spin_lock_irq(&dev->xmit_lock);
 		memcpy(dev->dev_addr, &addr, AX25_ADDR_LEN);
-		netif_tx_unlock_bh(dev);
+		spin_unlock_irq(&dev->xmit_lock);
 
 		err = 0;
 		break;
@@ -915,7 +915,7 @@ static void decode_prio_command(struct sixpack *sp, unsigned char cmd)
 					printk(KERN_DEBUG "6pack: protocol violation\n");
 				else
 					sp->status = 0;
-				cmd &= !SIXP_RX_DCD_MASK;
+				cmd &= ~SIXP_RX_DCD_MASK;
 		}
 		sp->status = cmd & SIXP_PRIO_DATA_MASK;
 	} else { /* output watchdog char if idle */

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/sycamore.h
+ *
  * Sycamore board definitions
  *
  * Copyright (c) 2005 DENX Software Engineering

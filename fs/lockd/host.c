@@ -16,7 +16,6 @@
 #include <linux/sunrpc/svc.h>
 #include <linux/lockd/lockd.h>
 #include <linux/lockd/sm_inter.h>
-#include <linux/mutex.h>
 
 
 #define NLMDBG_FACILITY		NLMDBG_HOSTCACHE
@@ -31,7 +30,7 @@
 static struct nlm_host *	nlm_hosts[NLM_HOST_NRHASH];
 static unsigned long		next_gc;
 static int			nrhosts;
-static DEFINE_MUTEX(nlm_host_mutex);
+static DECLARE_MUTEX(nlm_host_sema);
 
 
 static void			nlm_gc_hosts(void);
@@ -72,7 +71,7 @@ nlm_lookup_host(int server, struct sockaddr_in *sin,
 	hash = NLM_ADDRHASH(sin->sin_addr.s_addr);
 
 	/* Lock hash table */
-	mutex_lock(&nlm_host_mutex);
+	down(&nlm_host_sema);
 
 	if (time_after_eq(jiffies, next_gc))
 		nlm_gc_hosts();
@@ -92,7 +91,7 @@ nlm_lookup_host(int server, struct sockaddr_in *sin,
 				nlm_hosts[hash] = host;
 			}
 			nlm_get_host(host);
-			mutex_unlock(&nlm_host_mutex);
+			up(&nlm_host_sema);
 			return host;
 		}
 	}
@@ -124,14 +123,12 @@ nlm_lookup_host(int server, struct sockaddr_in *sin,
 	nlm_hosts[hash]    = host;
 	INIT_LIST_HEAD(&host->h_lockowners);
 	spin_lock_init(&host->h_lock);
-	INIT_LIST_HEAD(&host->h_granted);
-	INIT_LIST_HEAD(&host->h_reclaim);
 
 	if (++nrhosts > NLM_HOST_MAX)
 		next_gc = 0;
 
 nohost:
-	mutex_unlock(&nlm_host_mutex);
+	up(&nlm_host_sema);
 	return host;
 }
 
@@ -142,19 +139,19 @@ nlm_find_client(void)
 	 * and return it
 	 */
 	int hash;
-	mutex_lock(&nlm_host_mutex);
+	down(&nlm_host_sema);
 	for (hash = 0 ; hash < NLM_HOST_NRHASH; hash++) {
 		struct nlm_host *host, **hp;
 		for (hp = &nlm_hosts[hash]; (host = *hp) != 0; hp = &host->h_next) {
 			if (host->h_server &&
 			    host->h_killed == 0) {
 				nlm_get_host(host);
-				mutex_unlock(&nlm_host_mutex);
+				up(&nlm_host_sema);
 				return host;
 			}
 		}
 	}
-	mutex_unlock(&nlm_host_mutex);
+	up(&nlm_host_sema);
 	return NULL;
 }
 
@@ -194,12 +191,11 @@ nlm_bind_host(struct nlm_host *host)
 		xprt->resvport = 1;	/* NLM requires a reserved port */
 
 		/* Existing NLM servers accept AUTH_UNIX only */
-		clnt = rpc_new_client(xprt, host->h_name, &nlm_program,
+		clnt = rpc_create_client(xprt, host->h_name, &nlm_program,
 					host->h_version, RPC_AUTH_UNIX);
 		if (IS_ERR(clnt))
 			goto forgetit;
 		clnt->cl_autobind = 1;	/* turn on pmap queries */
-		clnt->cl_softrtry = 1; /* All queries are soft */
 
 		host->h_rpcclnt = clnt;
 	}
@@ -246,12 +242,8 @@ void nlm_release_host(struct nlm_host *host)
 {
 	if (host != NULL) {
 		dprintk("lockd: release host %s\n", host->h_name);
+		atomic_dec(&host->h_count);
 		BUG_ON(atomic_read(&host->h_count) < 0);
-		if (atomic_dec_and_test(&host->h_count)) {
-			BUG_ON(!list_empty(&host->h_lockowners));
-			BUG_ON(!list_empty(&host->h_granted));
-			BUG_ON(!list_empty(&host->h_reclaim));
-		}
 	}
 }
 
@@ -266,7 +258,7 @@ nlm_shutdown_hosts(void)
 	int		i;
 
 	dprintk("lockd: shutting down host module\n");
-	mutex_lock(&nlm_host_mutex);
+	down(&nlm_host_sema);
 
 	/* First, make all hosts eligible for gc */
 	dprintk("lockd: nuking all hosts...\n");
@@ -277,7 +269,7 @@ nlm_shutdown_hosts(void)
 
 	/* Then, perform a garbage collection pass */
 	nlm_gc_hosts();
-	mutex_unlock(&nlm_host_mutex);
+	up(&nlm_host_sema);
 
 	/* complain if any hosts are left */
 	if (nrhosts) {
@@ -339,6 +331,7 @@ nlm_gc_hosts(void)
 					rpc_destroy_client(host->h_rpcclnt);
 				}
 			}
+			BUG_ON(!list_empty(&host->h_lockowners));
 			kfree(host);
 			nrhosts--;
 		}

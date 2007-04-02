@@ -107,7 +107,6 @@ enum pid_directory_inos {
 	PROC_TGID_MAPS,
 	PROC_TGID_NUMA_MAPS,
 	PROC_TGID_MOUNTS,
-	PROC_TGID_MOUNTSTATS,
 	PROC_TGID_WCHAN,
 #ifdef CONFIG_MMU
 	PROC_TGID_SMAPS,
@@ -150,7 +149,6 @@ enum pid_directory_inos {
 	PROC_TID_MAPS,
 	PROC_TID_NUMA_MAPS,
 	PROC_TID_MOUNTS,
-	PROC_TID_MOUNTSTATS,
 	PROC_TID_WCHAN,
 #ifdef CONFIG_MMU
 	PROC_TID_SMAPS,
@@ -198,7 +196,7 @@ static struct pid_entry tgid_base_stuff[] = {
 	E(PROC_TGID_CMDLINE,   "cmdline", S_IFREG|S_IRUGO),
 	E(PROC_TGID_STAT,      "stat",    S_IFREG|S_IRUGO),
 	E(PROC_TGID_STATM,     "statm",   S_IFREG|S_IRUGO),
-	E(PROC_TGID_MAPS,      "maps",    S_IFREG|S_IRUSR),
+	E(PROC_TGID_MAPS,      "maps",    S_IFREG|S_IRUGO),
 #ifdef CONFIG_NUMA
 	E(PROC_TGID_NUMA_MAPS, "numa_maps", S_IFREG|S_IRUGO),
 #endif
@@ -210,9 +208,8 @@ static struct pid_entry tgid_base_stuff[] = {
 	E(PROC_TGID_ROOT,      "root",    S_IFLNK|S_IRWXUGO),
 	E(PROC_TGID_EXE,       "exe",     S_IFLNK|S_IRWXUGO),
 	E(PROC_TGID_MOUNTS,    "mounts",  S_IFREG|S_IRUGO),
-	E(PROC_TGID_MOUNTSTATS, "mountstats", S_IFREG|S_IRUSR),
 #ifdef CONFIG_MMU
-	E(PROC_TGID_SMAPS,     "smaps",   S_IFREG|S_IRUSR),
+	E(PROC_TGID_SMAPS,     "smaps",   S_IFREG|S_IRUGO),
 #endif
 #ifdef CONFIG_SECURITY
 	E(PROC_TGID_ATTR,      "attr",    S_IFDIR|S_IRUGO|S_IXUGO),
@@ -243,7 +240,7 @@ static struct pid_entry tid_base_stuff[] = {
 	E(PROC_TID_CMDLINE,    "cmdline", S_IFREG|S_IRUGO),
 	E(PROC_TID_STAT,       "stat",    S_IFREG|S_IRUGO),
 	E(PROC_TID_STATM,      "statm",   S_IFREG|S_IRUGO),
-	E(PROC_TID_MAPS,       "maps",    S_IFREG|S_IRUSR),
+	E(PROC_TID_MAPS,       "maps",    S_IFREG|S_IRUGO),
 #ifdef CONFIG_NUMA
 	E(PROC_TID_NUMA_MAPS,  "numa_maps",    S_IFREG|S_IRUGO),
 #endif
@@ -256,7 +253,7 @@ static struct pid_entry tid_base_stuff[] = {
 	E(PROC_TID_EXE,        "exe",     S_IFLNK|S_IRWXUGO),
 	E(PROC_TID_MOUNTS,     "mounts",  S_IFREG|S_IRUGO),
 #ifdef CONFIG_MMU
-	E(PROC_TID_SMAPS,      "smaps",   S_IFREG|S_IRUSR),
+	E(PROC_TID_SMAPS,      "smaps",   S_IFREG|S_IRUGO),
 #endif
 #ifdef CONFIG_SECURITY
 	E(PROC_TID_ATTR,       "attr",    S_IFDIR|S_IRUGO|S_IXUGO),
@@ -423,26 +420,6 @@ static int proc_task_root_link(struct inode *inode, struct dentry **dentry,
 	 (task->state == TASK_STOPPED || task->state == TASK_TRACED) && \
 	 security_ptrace(current,task) == 0))
 
-struct mm_struct *mm_for_maps(struct task_struct *task)
-{
-	struct mm_struct *mm = get_task_mm(task);
-	if (!mm)
-		return NULL;
-	down_read(&mm->mmap_sem);
-	task_lock(task);
-	if (task->mm != mm)
-		goto out;
-	if (task->mm != current->mm && __ptrace_may_attach(task))
-		goto out;
-	task_unlock(task);
-	return mm;
-out:
-	task_unlock(task);
-	up_read(&mm->mmap_sem);
-	mmput(mm);
-	return NULL;
-}
-
 static int proc_pid_environ(struct task_struct *task, char * buffer)
 {
 	int res = 0;
@@ -569,8 +546,6 @@ static int proc_oom_score(struct task_struct *task, char *buffer)
 
 /* If the process being read is separated by chroot from the reading process,
  * don't let the reader access the threads.
- *
- * note: this does dput(root) and mntput(vfsmnt) on exit.
  */
 static int proc_check_chroot(struct dentry *root, struct vfsmount *vfsmnt)
 {
@@ -797,38 +772,6 @@ static struct file_operations proc_mounts_operations = {
 	.llseek		= seq_lseek,
 	.release	= mounts_release,
 	.poll		= mounts_poll,
-};
-
-extern struct seq_operations mountstats_op;
-static int mountstats_open(struct inode *inode, struct file *file)
-{
-	struct task_struct *task = proc_task(inode);
-	int ret = seq_open(file, &mountstats_op);
-
-	if (!ret) {
-		struct seq_file *m = file->private_data;
-		struct namespace *namespace;
-		task_lock(task);
-		namespace = task->namespace;
-		if (namespace)
-			get_namespace(namespace);
-		task_unlock(task);
-
-		if (namespace)
-			m->private = namespace;
-		else {
-			seq_release(inode, file);
-			ret = -EINVAL;
-		}
-	}
-	return ret;
-}
-
-static struct file_operations proc_mountstats_operations = {
-	.open		= mountstats_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= mounts_release,
 };
 
 #define PROC_BLOCK_SIZE	(3*1024)		/* 4K page size but our output routines use some slack for overruns */
@@ -1758,6 +1701,17 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 	if (!p->name)
 		goto out;
 
+	switch (p->type) {
+	case PROC_TID_VX_INFO:
+	case PROC_TGID_VX_INFO:
+	case PROC_TID_IP_INFO:
+	case PROC_TGID_IP_INFO:
+		if (task_vx_flags(task, VXF_INFO_HIDE, 0))
+			goto out;
+	default:
+		break;
+	}
+
 	error = -EINVAL;
 	inode = proc_pid_make_inode(dir->i_sb, task, p->type);
 	if (!inode)
@@ -1860,10 +1814,6 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 			inode->i_fop = &proc_smaps_operations;
 			break;
 #endif
-		case PROC_TID_MOUNTSTATS:
-		case PROC_TGID_MOUNTSTATS:
-			inode->i_fop = &proc_mountstats_operations;
-			break;
 #ifdef CONFIG_SECURITY
 		case PROC_TID_ATTR:
 			inode->i_nlink = 2;
@@ -1923,15 +1873,11 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 #endif
 		case PROC_TID_VX_INFO:
 		case PROC_TGID_VX_INFO:
-			if (task_vx_flags(task, VXF_INFO_HIDE, 0))
-				goto out_noent;
 			inode->i_fop = &proc_info_file_operations;
 			ei->op.proc_read = proc_pid_vx_info;
 			break;
 		case PROC_TID_IP_INFO:
 		case PROC_TGID_IP_INFO:
-			if (task_vx_flags(task, VXF_INFO_HIDE, 0))
-				goto out_noent;
 			inode->i_fop = &proc_info_file_operations;
 			ei->op.proc_read = proc_pid_nx_info;
 			break;
@@ -1944,8 +1890,6 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 	d_add(dentry, inode);
 	return NULL;
 
-out_noent:
-	error=-ENOENT;
 out_put:
 	iput(inode);
 out:

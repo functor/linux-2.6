@@ -386,9 +386,7 @@ int __init hpfb_init(void)
 	if (fb_get_options("hpfb", NULL))
 		return -ENODEV;
 
-	err = dio_register_driver(&hpfb_driver);
-	if (err)
-		return err;
+	dio_module_init(&hpfb_driver);
 
 	fs = get_fs();
 	set_fs(KERNEL_DS);

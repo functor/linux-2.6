@@ -1474,7 +1474,7 @@ static void reset_terminal(struct vc_data *vc, int do_clear)
 	vc->vc_charset		= 0;
 	vc->vc_need_wrap	= 0;
 	vc->vc_report_mouse	= 0;
-	vc->vc_utf		= 1;
+	vc->vc_utf		= 0;
 	vc->vc_utf_count	= 0;
 
 	vc->vc_disp_ctrl	= 0;
@@ -2328,10 +2328,6 @@ int tioclinux(struct tty_struct *tty, unsigned long arg)
 		case TIOCL_SETVESABLANK:
 			set_vesa_blanking(p);
 			break;
-		case TIOCL_GETKMSGREDIRECT:
-			data = kmsg_redirect;
-			ret = __put_user(data, p);
-			break;
 		case TIOCL_SETKMSGREDIRECT:
 			if (!capable(CAP_SYS_ADMIN)) {
 				ret = -EPERM;
@@ -2493,7 +2489,7 @@ static int con_open(struct tty_struct *tty, struct file *filp)
 }
 
 /*
- * We take tty_mutex in here to prevent another thread from coming in via init_dev
+ * We take tty_sem in here to prevent another thread from coming in via init_dev
  * and taking a ref against the tty while we're in the process of forgetting
  * about it and cleaning things up.
  *
@@ -2501,7 +2497,7 @@ static int con_open(struct tty_struct *tty, struct file *filp)
  */
 static void con_close(struct tty_struct *tty, struct file *filp)
 {
-	mutex_lock(&tty_mutex);
+	down(&tty_sem);
 	acquire_console_sem();
 	if (tty && tty->count == 1) {
 		struct vc_data *vc = tty->driver_data;
@@ -2511,15 +2507,15 @@ static void con_close(struct tty_struct *tty, struct file *filp)
 		tty->driver_data = NULL;
 		release_console_sem();
 		vcs_remove_devfs(tty);
-		mutex_unlock(&tty_mutex);
+		up(&tty_sem);
 		/*
-		 * tty_mutex is released, but we still hold BKL, so there is
+		 * tty_sem is released, but we still hold BKL, so there is
 		 * still exclusion against init_dev()
 		 */
 		return;
 	}
 	release_console_sem();
-	mutex_unlock(&tty_mutex);
+	up(&tty_sem);
 }
 
 static void vc_init(struct vc_data *vc, unsigned int rows,
@@ -2873,9 +2869,9 @@ void unblank_screen(void)
 }
 
 /*
- * We defer the timer blanking to work queue so it can take the console mutex
+ * We defer the timer blanking to work queue so it can take the console semaphore
  * (console operations can still happen at irq time, but only from printk which
- * has the console mutex. Not perfect yet, but better than no locking
+ * has the console semaphore. Not perfect yet, but better than no locking
  */
 static void blank_screen_t(unsigned long dummy)
 {

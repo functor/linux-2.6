@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/sbc8560.c
+ * 
  * Wind River SBC8560 board specific routines
  * 
  * Maintainer: Kumar Gala

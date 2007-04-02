@@ -643,8 +643,7 @@ static ssize_t pg_read(struct file *filp, char __user *buf, size_t count, loff_t
 
 static int __init pg_init(void)
 {
-	int unit;
-	int err;
+	int unit, err = 0;
 
 	if (disable){
 		err = -1;
@@ -658,17 +657,16 @@ static int __init pg_init(void)
 		goto out;
 	}
 
-	err = register_chrdev(major, name, &pg_fops);
-	if (err < 0) {
+	if (register_chrdev(major, name, &pg_fops)) {
 		printk("pg_init: unable to get major number %d\n", major);
 		for (unit = 0; unit < PG_UNITS; unit++) {
 			struct pg *dev = &devices[unit];
 			if (dev->present)
 				pi_release(dev->pi);
 		}
+		err = -1;
 		goto out;
 	}
-	major = err;	/* In case the user specified `major=0' (dynamic) */
 	pg_class = class_create(THIS_MODULE, "pg");
 	if (IS_ERR(pg_class)) {
 		err = PTR_ERR(pg_class);

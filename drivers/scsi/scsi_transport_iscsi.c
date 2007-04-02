@@ -1117,9 +1117,10 @@ iscsi_register_transport(struct iscsi_transport *tt)
 	if (priv)
 		return NULL;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return NULL;
+	memset(priv, 0, sizeof(*priv));
 	INIT_LIST_HEAD(&priv->list);
 	priv->iscsi_transport = tt;
 

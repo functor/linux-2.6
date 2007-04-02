@@ -41,26 +41,12 @@ static inline void pcibios_penalize_isa_irq(int irq, int active)
 
 struct pci_dev;
 
-struct pci_iommu_ops {
-	void *(*alloc_consistent)(struct pci_dev *, size_t, dma_addr_t *, gfp_t);
-	void (*free_consistent)(struct pci_dev *, size_t, void *, dma_addr_t);
-	dma_addr_t (*map_single)(struct pci_dev *, void *, size_t, int);
-	void (*unmap_single)(struct pci_dev *, dma_addr_t, size_t, int);
-	int (*map_sg)(struct pci_dev *, struct scatterlist *, int, int);
-	void (*unmap_sg)(struct pci_dev *, struct scatterlist *, int, int);
-	void (*dma_sync_single_for_cpu)(struct pci_dev *, dma_addr_t, size_t, int);
-	void (*dma_sync_sg_for_cpu)(struct pci_dev *, struct scatterlist *, int, int);
-};
-
-extern struct pci_iommu_ops *pci_iommu_ops;
-
 /* Allocate and map kernel buffer using consistent mode DMA for a device.
  * hwdev should be valid struct pci_dev pointer for PCI devices.
  */
-static inline void *pci_alloc_consistent(struct pci_dev *hwdev, size_t size, dma_addr_t *dma_handle)
-{
-	return pci_iommu_ops->alloc_consistent(hwdev, size, dma_handle, GFP_ATOMIC);
-}
+extern void *__pci_alloc_consistent(struct pci_dev *hwdev, size_t size, dma_addr_t *dma_handle, gfp_t gfp);
+#define pci_alloc_consistent(DEV,SZ,HANDLE) \
+	__pci_alloc_consistent(DEV,SZ,HANDLE,GFP_ATOMIC)
 
 /* Free and unmap a consistent DMA buffer.
  * cpu_addr is what was returned from pci_alloc_consistent,
@@ -70,10 +56,7 @@ static inline void *pci_alloc_consistent(struct pci_dev *hwdev, size_t size, dma
  * References to the memory and mappings associated with cpu_addr/dma_addr
  * past this call are illegal.
  */
-static inline void pci_free_consistent(struct pci_dev *hwdev, size_t size, void *vaddr, dma_addr_t dma_handle)
-{
-	return pci_iommu_ops->free_consistent(hwdev, size, vaddr, dma_handle);
-}
+extern void pci_free_consistent(struct pci_dev *hwdev, size_t size, void *vaddr, dma_addr_t dma_handle);
 
 /* Map a single buffer of the indicated size for DMA in streaming mode.
  * The 32-bit bus address to use is returned.
@@ -81,10 +64,7 @@ static inline void pci_free_consistent(struct pci_dev *hwdev, size_t size, void 
  * Once the device is given the dma address, the device owns this memory
  * until either pci_unmap_single or pci_dma_sync_single_for_cpu is performed.
  */
-static inline dma_addr_t pci_map_single(struct pci_dev *hwdev, void *ptr, size_t size, int direction)
-{
-	return pci_iommu_ops->map_single(hwdev, ptr, size, direction);
-}
+extern dma_addr_t pci_map_single(struct pci_dev *hwdev, void *ptr, size_t size, int direction);
 
 /* Unmap a single streaming mode DMA translation.  The dma_addr and size
  * must match what was provided for in a previous pci_map_single call.  All
@@ -93,10 +73,7 @@ static inline dma_addr_t pci_map_single(struct pci_dev *hwdev, void *ptr, size_t
  * After this call, reads by the cpu to the buffer are guaranteed to see
  * whatever the device wrote there.
  */
-static inline void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr, size_t size, int direction)
-{
-	pci_iommu_ops->unmap_single(hwdev, dma_addr, size, direction);
-}
+extern void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr, size_t size, int direction);
 
 /* No highmem on sparc64, plus we have an IOMMU, so mapping pages is easy. */
 #define pci_map_page(dev, page, off, size, dir) \
@@ -132,19 +109,15 @@ static inline void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr, 
  * Device ownership issues as mentioned above for pci_map_single are
  * the same here.
  */
-static inline int pci_map_sg(struct pci_dev *hwdev, struct scatterlist *sg, int nents, int direction)
-{
-	return pci_iommu_ops->map_sg(hwdev, sg, nents, direction);
-}
+extern int pci_map_sg(struct pci_dev *hwdev, struct scatterlist *sg,
+		      int nents, int direction);
 
 /* Unmap a set of streaming mode DMA translations.
  * Again, cpu read rules concerning calls here are the same as for
  * pci_unmap_single() above.
  */
-static inline void pci_unmap_sg(struct pci_dev *hwdev, struct scatterlist *sg, int nhwents, int direction)
-{
-	pci_iommu_ops->unmap_sg(hwdev, sg, nhwents, direction);
-}
+extern void pci_unmap_sg(struct pci_dev *hwdev, struct scatterlist *sg,
+			 int nhwents, int direction);
 
 /* Make physical memory consistent for a single
  * streaming mode DMA translation after a transfer.
@@ -156,10 +129,8 @@ static inline void pci_unmap_sg(struct pci_dev *hwdev, struct scatterlist *sg, i
  * must first perform a pci_dma_sync_for_device, and then the
  * device again owns the buffer.
  */
-static inline void pci_dma_sync_single_for_cpu(struct pci_dev *hwdev, dma_addr_t dma_handle, size_t size, int direction)
-{
-	pci_iommu_ops->dma_sync_single_for_cpu(hwdev, dma_handle, size, direction);
-}
+extern void pci_dma_sync_single_for_cpu(struct pci_dev *hwdev, dma_addr_t dma_handle,
+					size_t size, int direction);
 
 static inline void
 pci_dma_sync_single_for_device(struct pci_dev *hwdev, dma_addr_t dma_handle,
@@ -175,10 +146,7 @@ pci_dma_sync_single_for_device(struct pci_dev *hwdev, dma_addr_t dma_handle,
  * The same as pci_dma_sync_single_* but for a scatter-gather list,
  * same rules and usage.
  */
-static inline void pci_dma_sync_sg_for_cpu(struct pci_dev *hwdev, struct scatterlist *sg, int nelems, int direction)
-{
-	pci_iommu_ops->dma_sync_sg_for_cpu(hwdev, sg, nelems, direction);
-}
+extern void pci_dma_sync_sg_for_cpu(struct pci_dev *hwdev, struct scatterlist *sg, int nelems, int direction);
 
 static inline void
 pci_dma_sync_sg_for_device(struct pci_dev *hwdev, struct scatterlist *sg,

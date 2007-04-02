@@ -31,7 +31,7 @@
 #include <linux/ioc4.h>
 #include <linux/mmtimer.h>
 #include <linux/rtc.h>
-#include <linux/mutex.h>
+#include <linux/rwsem.h>
 #include <asm/sn/addrs.h>
 #include <asm/sn/clksupport.h>
 #include <asm/sn/shub_mmr.h>
@@ -54,10 +54,11 @@
  * Submodule management *
  ************************/
 
-static DEFINE_MUTEX(ioc4_mutex);
-
 static LIST_HEAD(ioc4_devices);
+static DECLARE_RWSEM(ioc4_devices_rwsem);
+
 static LIST_HEAD(ioc4_submodules);
+static DECLARE_RWSEM(ioc4_submodules_rwsem);
 
 /* Register an IOC4 submodule */
 int
@@ -65,13 +66,15 @@ ioc4_register_submodule(struct ioc4_submodule *is)
 {
 	struct ioc4_driver_data *idd;
 
-	mutex_lock(&ioc4_mutex);
+	down_write(&ioc4_submodules_rwsem);
 	list_add(&is->is_list, &ioc4_submodules);
+	up_write(&ioc4_submodules_rwsem);
 
 	/* Initialize submodule for each IOC4 */
 	if (!is->is_probe)
-		goto out;
+		return 0;
 
+	down_read(&ioc4_devices_rwsem);
 	list_for_each_entry(idd, &ioc4_devices, idd_list) {
 		if (is->is_probe(idd)) {
 			printk(KERN_WARNING
@@ -81,8 +84,8 @@ ioc4_register_submodule(struct ioc4_submodule *is)
 			       pci_name(idd->idd_pdev));
 		}
 	}
- out:
-	mutex_unlock(&ioc4_mutex);
+	up_read(&ioc4_devices_rwsem);
+
 	return 0;
 }
 
@@ -92,13 +95,15 @@ ioc4_unregister_submodule(struct ioc4_submodule *is)
 {
 	struct ioc4_driver_data *idd;
 
-	mutex_lock(&ioc4_mutex);
+	down_write(&ioc4_submodules_rwsem);
 	list_del(&is->is_list);
+	up_write(&ioc4_submodules_rwsem);
 
 	/* Remove submodule for each IOC4 */
 	if (!is->is_remove)
-		goto out;
+		return;
 
+	down_read(&ioc4_devices_rwsem);
 	list_for_each_entry(idd, &ioc4_devices, idd_list) {
 		if (is->is_remove(idd)) {
 			printk(KERN_WARNING
@@ -108,8 +113,7 @@ ioc4_unregister_submodule(struct ioc4_submodule *is)
 			       pci_name(idd->idd_pdev));
 		}
 	}
- out:
-	mutex_unlock(&ioc4_mutex);
+	up_read(&ioc4_devices_rwsem);
 }
 
 /*********************
@@ -308,11 +312,12 @@ ioc4_probe(struct pci_dev *pdev, const struct pci_device_id *pci_id)
 	/* Track PCI-device specific data */
 	idd->idd_serial_data = NULL;
 	pci_set_drvdata(idd->idd_pdev, idd);
-
-	mutex_lock(&ioc4_mutex);
+	down_write(&ioc4_devices_rwsem);
 	list_add_tail(&idd->idd_list, &ioc4_devices);
+	up_write(&ioc4_devices_rwsem);
 
 	/* Add this IOC4 to all submodules */
+	down_read(&ioc4_submodules_rwsem);
 	list_for_each_entry(is, &ioc4_submodules, is_list) {
 		if (is->is_probe && is->is_probe(idd)) {
 			printk(KERN_WARNING
@@ -322,7 +327,7 @@ ioc4_probe(struct pci_dev *pdev, const struct pci_device_id *pci_id)
 			       pci_name(idd->idd_pdev));
 		}
 	}
-	mutex_unlock(&ioc4_mutex);
+	up_read(&ioc4_submodules_rwsem);
 
 	return 0;
 
@@ -346,7 +351,7 @@ ioc4_remove(struct pci_dev *pdev)
 	idd = pci_get_drvdata(pdev);
 
 	/* Remove this IOC4 from all submodules */
-	mutex_lock(&ioc4_mutex);
+	down_read(&ioc4_submodules_rwsem);
 	list_for_each_entry(is, &ioc4_submodules, is_list) {
 		if (is->is_remove && is->is_remove(idd)) {
 			printk(KERN_WARNING
@@ -356,7 +361,7 @@ ioc4_remove(struct pci_dev *pdev)
 			       pci_name(idd->idd_pdev));
 		}
 	}
-	mutex_unlock(&ioc4_mutex);
+	up_read(&ioc4_submodules_rwsem);
 
 	/* Release resources */
 	iounmap(idd->idd_misc_regs);
@@ -372,9 +377,9 @@ ioc4_remove(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 
 	/* Remove and free driver data */
-	mutex_lock(&ioc4_mutex);
+	down_write(&ioc4_devices_rwsem);
 	list_del(&idd->idd_list);
-	mutex_unlock(&ioc4_mutex);
+	up_write(&ioc4_devices_rwsem);
 	kfree(idd);
 }
 

@@ -210,7 +210,8 @@ int i810_probe_i2c_connector(struct fb_info *info, u8 **out_edid, int conn)
 		}
 	}
 
-	*out_edid = edid;
+        if (out_edid)
+                *out_edid = edid;
 
         return (edid) ? 0 : 1;
 }

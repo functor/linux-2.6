@@ -19,7 +19,6 @@
 #include <asm/mach/irq.h>
 #include <asm/arch/irqs.h>
 
-#include "common.h"
 
 static void lh7a40x_ack_cpld_irq (u32 irq)
 {

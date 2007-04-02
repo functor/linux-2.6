@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright(c) 2003 - 2006 Intel Corporation. All rights reserved.
+  Copyright(c) 2003 - 2004 Intel Corporation. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms of version 2 of the GNU General Public License as
@@ -41,12 +41,7 @@
 
 #include <net/ieee80211.h>
 
-#ifdef CONFIG_IPW2100_MONITOR
-#include <net/ieee80211_radiotap.h>
-#endif
-
 #include <linux/workqueue.h>
-#include <linux/mutex.h>
 
 struct ipw2100_priv;
 struct ipw2100_tx_packet;
@@ -397,10 +392,8 @@ struct ipw2100_notification {
 #define IPW_WEP104_CIPHER (1<<5)
 #define IPW_CKIP_CIPHER   (1<<6)
 
-#define	IPW_AUTH_OPEN     	0
-#define	IPW_AUTH_SHARED   	1
-#define IPW_AUTH_LEAP	  	2
-#define IPW_AUTH_LEAP_CISCO_ID	0x80
+#define	IPW_AUTH_OPEN     0
+#define	IPW_AUTH_SHARED   1
 
 struct statistic {
 	int value;
@@ -595,8 +588,8 @@ struct ipw2100_priv {
 	int inta_other;
 
 	spinlock_t low_lock;
-	struct mutex action_mutex;
-	struct mutex adapter_mutex;
+	struct semaphore action_sem;
+	struct semaphore adapter_sem;
 
 	wait_queue_head_t wait_command_queue;
 };

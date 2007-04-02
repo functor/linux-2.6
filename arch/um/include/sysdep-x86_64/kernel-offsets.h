@@ -4,7 +4,6 @@
 #include <linux/time.h>
 #include <linux/elf.h>
 #include <asm/page.h>
-#include <asm/mman.h>
 
 #define DEFINE(sym, val) \
 	asm volatile("\n->" #sym " %0 " #val : : "i" (val))
@@ -19,7 +18,6 @@
 
 void foo(void)
 {
-	DEFINE(KERNEL_MADV_REMOVE, MADV_REMOVE);
 #ifdef CONFIG_MODE_TT
 	OFFSET(HOST_TASK_EXTERN_PID, task_struct, thread.mode.tt.extern_pid);
 #endif

@@ -536,7 +536,7 @@ struct saa7134_board saa7134_boards[] = {
 		.radio = {
 			.name = name_radio,
 			.amux = LINE2,
-		},
+	},
 	},
 	[SAA7134_BOARD_MD7134] = {
 		.name           = "Medion 7134",
@@ -2028,7 +2028,7 @@ struct saa7134_board saa7134_boards[] = {
 	[SAA7134_BOARD_FLYTV_DIGIMATRIX] = {
 		.name		= "FlyTV mini Asus Digimatrix",
 		.audio_clock	= 0x00200000,
-		.tuner_type	= TUNER_LG_TALN,
+		.tuner_type	= TUNER_LG_NTSC_TALN_MINI,
 		.radio_type     = UNSET,
 		.tuner_addr	= ADDR_UNSET,
 		.radio_addr	= ADDR_UNSET,
@@ -2624,7 +2624,6 @@ struct saa7134_board saa7134_boards[] = {
 		.tuner_addr	= ADDR_UNSET,
 		.radio_addr	= ADDR_UNSET,
 		.gpiomask	= 0x00200000,
-		.mpeg           = SAA7134_MPEG_DVB,
 		.inputs         = {{
 			.name = name_tv,	/* Analog broadcast/cable TV */
 			.vmux = 1,
@@ -2763,7 +2762,7 @@ struct saa7134_board saa7134_boards[] = {
 		   but only one of them is currently working. */
 		.name		= "AVerMedia A169 B",
 		.audio_clock    = 0x02187de7,
-		.tuner_type	= TUNER_LG_TALN,
+		.tuner_type	= TUNER_LG_NTSC_TALN_MINI,
 		.radio_type     = UNSET,
 		.tuner_addr	= ADDR_UNSET,
 		.radio_addr	= ADDR_UNSET,
@@ -2775,7 +2774,7 @@ struct saa7134_board saa7134_boards[] = {
 		/* Rickard Osser <ricky@osser.se> */
 		.name		= "AVerMedia A169 B1",
 		.audio_clock    = 0x02187de7,
-		.tuner_type	= TUNER_LG_TALN,
+		.tuner_type	= TUNER_LG_NTSC_TALN_MINI,
 		.radio_type     = UNSET,
 		.tuner_addr	= ADDR_UNSET,
 		.radio_addr	= ADDR_UNSET,
@@ -3491,20 +3490,18 @@ int saa7134_board_init1(struct saa7134_dev *dev)
 	case SAA7134_BOARD_KWORLD_TERMINATOR:
 	case SAA7134_BOARD_SEDNA_PC_TV_CARDBUS:
 	case SAA7134_BOARD_FLYDVBT_LR301:
-	case SAA7134_BOARD_FLYDVBTDUO:
 		dev->has_remote = SAA7134_REMOTE_GPIO;
 		break;
 	case SAA7134_BOARD_MD5044:
 		printk("%s: seems there are two different versions of the MD5044\n"
-		       "%s: (with the same ID) out there.  If sound doesn't work for\n"
-		       "%s: you try the audio_clock_override=0x200000 insmod option.\n",
-		       dev->name,dev->name,dev->name);
+		"%s: (with the same ID) out there.  If sound doesn't work for\n"
+		"%s: you try the audio_clock_override=0x200000 insmod option.\n",
+		dev->name,dev->name,dev->name);
 		break;
 	case SAA7134_BOARD_CINERGY400_CARDBUS:
 		/* power-up tuner chip */
 		saa_andorl(SAA7134_GPIO_GPMODE0 >> 2,   0x00040000, 0x00040000);
 		saa_andorl(SAA7134_GPIO_GPSTATUS0 >> 2, 0x00040000, 0x00000000);
-		break;
 	case SAA7134_BOARD_PINNACLE_300I_DVBT_PAL:
 		/* this turns the remote control chip off to work around a bug in it */
 		saa_writeb(SAA7134_GPIO_GPMODE1, 0x80);
@@ -3685,13 +3682,6 @@ int saa7134_board_init2(struct saa7134_dev *dev)
 		i2c_transfer(&dev->i2c_adap, &msg, 1);
 		}
 		break;
-	case SAA7134_BOARD_FLYDVB_TRIO:
-		{
-		u8 data[] = { 0x3c, 0x33, 0x62};
-		struct i2c_msg msg = {.addr=0x09, .flags=0, .buf=data, .len = sizeof(data)};
-		i2c_transfer(&dev->i2c_adap, &msg, 1);
-		}
-		break;
 	case SAA7134_BOARD_ADS_DUO_CARDBUS_PTV331:
 	case SAA7134_BOARD_FLYDVBT_HYBRID_CARDBUS:
 		/* make the tda10046 find its eeprom */
@@ -3705,7 +3695,7 @@ int saa7134_board_init2(struct saa7134_dev *dev)
 		{
 			/* enable tuner */
 			int i;
-			static const u8 buffer [] = { 0x10,0x12,0x13,0x04,0x16,0x00,0x14,0x04,0x017,0x00 };
+			u8 buffer [] = { 0x10,0x12,0x13,0x04,0x16,0x00,0x14,0x04,0x017,0x00 };
 			dev->i2c_client.addr = 0x0a;
 			for (i = 0; i < 5; i++)
 				if (2 != i2c_master_send(&dev->i2c_client,&buffer[i*2],2))

@@ -574,7 +574,8 @@ static int create_elf_fdpic_tables(struct linux_binprm *bprm,
 	csp -= sizeof(unsigned long);
 	__put_user(bprm->argc, (unsigned long *) csp);
 
-	BUG_ON(csp != sp);
+	if (csp != sp)
+		BUG();
 
 	/* fill in the argv[] array */
 #ifdef CONFIG_MMU

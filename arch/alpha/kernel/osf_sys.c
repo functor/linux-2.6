@@ -617,7 +617,7 @@ osf_sysinfo(int command, char __user *buf, long count)
 	long len, err = -EINVAL;
 
 	offset = command-1;
-	if (offset >= 9) {
+	if (offset >= sizeof(sysinfo_table)/sizeof(char *)) {
 		/* Digital UNIX has a few unpublished interfaces here */
 		printk("sysinfo(%d)", command);
 		goto out;
@@ -826,6 +826,7 @@ osf_setsysinfo(unsigned long op, void __user *buffer, unsigned long nbytes,
    affects all sorts of things, like timeval and itimerval.  */
 
 extern struct timezone sys_tz;
+extern int do_adjtimex(struct timex *);
 
 struct timeval32
 {

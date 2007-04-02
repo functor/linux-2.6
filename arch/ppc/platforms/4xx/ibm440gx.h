@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/ibm440gx.h
+ *
  * PPC440GX definitions
  *
  * Matt Porter <mporter@mvista.com>

@@ -306,6 +306,8 @@ static int __init rdinit_setup(char *str)
 }
 __setup("rdinit=", rdinit_setup);
 
+extern void setup_arch(char **);
+
 #ifndef CONFIG_SMP
 
 #ifdef CONFIG_X86_LOCAL_APIC
@@ -323,7 +325,7 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
 #else
 
 #ifdef __GENERIC_PER_CPU
-unsigned long __per_cpu_offset[NR_CPUS] __read_mostly;
+unsigned long __per_cpu_offset[NR_CPUS];
 
 EXPORT_SYMBOL(__per_cpu_offset);
 
@@ -331,7 +333,6 @@ static void __init setup_per_cpu_areas(void)
 {
 	unsigned long size, i;
 	char *ptr;
-	unsigned long nr_possible_cpus = num_possible_cpus();
 
 	/* Copy section for each CPU (we discard the original) */
 	size = ALIGN(__per_cpu_end - __per_cpu_start, SMP_CACHE_BYTES);
@@ -339,12 +340,12 @@ static void __init setup_per_cpu_areas(void)
 	if (size < PERCPU_ENOUGH_ROOM)
 		size = PERCPU_ENOUGH_ROOM;
 #endif
-	ptr = alloc_bootmem(size * nr_possible_cpus);
 
-	for_each_possible_cpu(i) {
+	ptr = alloc_bootmem(size * NR_CPUS);
+
+	for (i = 0; i < NR_CPUS; i++, ptr += size) {
 		__per_cpu_offset[i] = ptr - __per_cpu_start;
 		memcpy(ptr, __per_cpu_start, __per_cpu_end - __per_cpu_start);
-		ptr += size;
 	}
 }
 #endif /* !__GENERIC_PER_CPU */
@@ -437,15 +438,6 @@ void __init parse_early_param(void)
  *	Activate the first processor.
  */
 
-static void __init boot_cpu_init(void)
-{
-	int cpu = smp_processor_id();
-	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
-	cpu_set(cpu, cpu_online_map);
-	cpu_set(cpu, cpu_present_map);
-	cpu_set(cpu, cpu_possible_map);
-}
-
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
@@ -455,13 +447,17 @@ asmlinkage void __init start_kernel(void)
  * enable them
  */
 	lock_kernel();
-	boot_cpu_init();
 	page_address_init();
 	printk(KERN_NOTICE);
 	printk(linux_banner);
 	setup_arch(&command_line);
 	setup_per_cpu_areas();
-	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+
+	/*
+	 * Mark the boot cpu "online" so that it can call console drivers in
+	 * printk() and can access its per-cpu storage.
+	 */
+	smp_prepare_boot_cpu();
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -559,31 +555,6 @@ static int __init initcall_debug_setup(char *str)
 }
 __setup("initcall_debug", initcall_debug_setup);
 
-#ifdef CONFIG_BOOT_DELAY
-
-unsigned int boot_delay = 0; /* msecs delay after each printk during bootup */
-extern long preset_lpj;
-unsigned long long printk_delay_msec = 0; /* per msec, based on boot_delay */
-
-static int __init boot_delay_setup(char *str)
-{
-	unsigned long lpj = preset_lpj ? preset_lpj : 1000000; /* some guess */
-	unsigned long long loops_per_msec = lpj / 1000 * CONFIG_HZ;
-
-	get_option(&str, &boot_delay);
-	if (boot_delay > 10 * 1000)
-		boot_delay = 0;
-
-	printk_delay_msec = loops_per_msec;
-	printk("boot_delay: %u, preset_lpj: %ld, lpj: %lu, CONFIG_HZ: %d, printk_delay_msec: %llu\n",
-		boot_delay, preset_lpj, lpj, CONFIG_HZ, printk_delay_msec);
-
-	return 1;
-}
-__setup("boot_delay=", boot_delay_setup);
-
-#endif
-
 struct task_struct *child_reaper = &init_task;
 
 extern initcall_t __initcall_start[], __initcall_end[];
@@ -594,23 +565,17 @@ static void __init do_initcalls(void)
 	int count = preempt_count();
 
 	for (call = __initcall_start; call < __initcall_end; call++) {
-		char *msg = NULL;
-		char msgbuf[40];
-		int result;
+		char *msg;
 
 		if (initcall_debug) {
-			printk("Calling initcall 0x%p", *call);
-			print_fn_descriptor_symbol(": %s()",
-					(unsigned long) *call);
+			printk(KERN_DEBUG "Calling initcall 0x%p", *call);
+			print_fn_descriptor_symbol(": %s()", (unsigned long) *call);
 			printk("\n");
 		}
 
-		result = (*call)();
+		(*call)();
 
-		if (result && result != -ENODEV && initcall_debug) {
-			sprintf(msgbuf, "error code %d", result);
-			msg = msgbuf;
-		}
+		msg = NULL;
 		if (preempt_count() != count) {
 			msg = "preemption imbalance";
 			preempt_count() = count;
@@ -620,10 +585,8 @@ static void __init do_initcalls(void)
 			local_irq_enable();
 		}
 		if (msg) {
-			printk(KERN_WARNING "initcall at 0x%p", *call);
-			print_fn_descriptor_symbol(": %s()",
-					(unsigned long) *call);
-			printk(": returned with %s\n", msg);
+			printk(KERN_WARNING "error in initcall at 0x%p: "
+				"returned with %s\n", *call, msg);
 		}
 	}
 
@@ -652,15 +615,6 @@ static void __init do_basic_setup(void)
 	do_initcalls();
 }
 
-static int __initdata nosoftlockup;
-
-static int __init nosoftlockup_setup(char *str)
-{
-	nosoftlockup = 1;
-	return 1;
-}
-__setup("nosoftlockup", nosoftlockup_setup);
-
 static void do_pre_smp_initcalls(void)
 {
 	extern int spawn_ksoftirqd(void);
@@ -670,14 +624,31 @@ static void do_pre_smp_initcalls(void)
 	migration_init();
 #endif
 	spawn_ksoftirqd();
-	if (!nosoftlockup)
-		spawn_softlockup_task();
+	spawn_softlockup_task();
 }
 
 static void run_init_process(char *init_filename)
 {
 	argv_init[0] = init_filename;
 	execve(init_filename, argv_init, envp_init);
+}
+
+static inline void fixup_cpu_present_map(void)
+{
+#ifdef CONFIG_SMP
+	int i;
+
+	/*
+	 * If arch is not hotplug ready and did not populate
+	 * cpu_present_map, just make cpu_present_map same as cpu_possible_map
+	 * for other cpu bringup code to function as normal. e.g smp_init() etc.
+	 */
+	if (cpus_empty(cpu_present_map)) {
+		for_each_cpu(i) {
+			cpu_set(i, cpu_present_map);
+		}
+	}
+#endif
 }
 
 static int init(void * unused)
@@ -701,6 +672,7 @@ static int init(void * unused)
 
 	do_pre_smp_initcalls();
 
+	fixup_cpu_present_map();
 	smp_init();
 	sched_init_smp();
 

@@ -57,11 +57,13 @@
 
 #include <asm/tlbflush.h>
 
-struct kmem_cache *anon_vma_cachep;
+//#define RMAP_DEBUG /* can be enabled only for debugging */
+
+kmem_cache_t *anon_vma_cachep;
 
 static inline void validate_anon_vma(struct vm_area_struct *find_vma)
 {
-#ifdef CONFIG_DEBUG_VM
+#ifdef RMAP_DEBUG
 	struct anon_vma *anon_vma = find_vma->anon_vma;
 	struct vm_area_struct *vma;
 	unsigned int mapcount = 0;
@@ -165,8 +167,7 @@ void anon_vma_unlink(struct vm_area_struct *vma)
 		anon_vma_free(anon_vma);
 }
 
-static void anon_vma_ctor(void *data, struct kmem_cache *cachep,
-			  unsigned long flags)
+static void anon_vma_ctor(void *data, kmem_cache_t *cachep, unsigned long flags)
 {
 	if ((flags & (SLAB_CTOR_VERIFY|SLAB_CTOR_CONSTRUCTOR)) ==
 						SLAB_CTOR_CONSTRUCTOR) {
@@ -550,14 +551,13 @@ void page_add_file_rmap(struct page *page)
 void page_remove_rmap(struct page *page)
 {
 	if (atomic_add_negative(-1, &page->_mapcount)) {
-#ifdef CONFIG_DEBUG_VM
-		if (unlikely(page_mapcount(page) < 0)) {
+		if (page_mapcount(page) < 0) {
 			printk (KERN_EMERG "Eeek! page_mapcount(page) went negative! (%d)\n", page_mapcount(page));
 			printk (KERN_EMERG "  page->flags = %lx\n", page->flags);
 			printk (KERN_EMERG "  page->count = %x\n", page_count(page));
 			printk (KERN_EMERG "  page->mapping = %p\n", page->mapping);
 		}
-#endif
+
 		BUG_ON(page_mapcount(page) < 0);
 		/*
 		 * It would be tidy to reset the PageAnon mapping here,

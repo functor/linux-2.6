@@ -38,7 +38,6 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
-#include <linux/mutex.h>
 
 extern struct i2c_adapter amd756_smbus;
 
@@ -46,7 +45,7 @@ static struct i2c_adapter *s4882_adapter;
 static struct i2c_algorithm *s4882_algo;
 
 /* Wrapper access functions for multiplexed SMBus */
-static DEFINE_MUTEX(amd756_lock);
+static struct semaphore amd756_lock;
 
 static s32 amd756_access_virt0(struct i2c_adapter * adap, u16 addr,
 			       unsigned short flags, char read_write,
@@ -60,12 +59,12 @@ static s32 amd756_access_virt0(struct i2c_adapter * adap, u16 addr,
 	 || addr == 0x18)
 		return -1;
 
-	mutex_lock(&amd756_lock);
+	down(&amd756_lock);
 
 	error = amd756_smbus.algo->smbus_xfer(adap, addr, flags, read_write,
 					      command, size, data);
 
-	mutex_unlock(&amd756_lock);
+	up(&amd756_lock);
 
 	return error;
 }
@@ -88,7 +87,7 @@ static inline s32 amd756_access_channel(struct i2c_adapter * adap, u16 addr,
 	if (addr != 0x4c && (addr & 0xfc) != 0x50 && (addr & 0xfc) != 0x30)
 		return -1;
 
-	mutex_lock(&amd756_lock);
+	down(&amd756_lock);
 
 	if (last_channels != channels) {
 		union i2c_smbus_data mplxdata;
@@ -106,7 +105,7 @@ static inline s32 amd756_access_channel(struct i2c_adapter * adap, u16 addr,
 					      command, size, data);
 
 UNLOCK:
-	mutex_unlock(&amd756_lock);
+	up(&amd756_lock);
 	return error;
 }
 
@@ -167,6 +166,8 @@ static int __init amd756_s4882_init(void)
 	}
 
 	printk(KERN_INFO "Enabling SMBus multiplexing for Tyan S4882\n");
+	init_MUTEX(&amd756_lock);
+
 	/* Define the 5 virtual adapters and algorithms structures */
 	if (!(s4882_adapter = kzalloc(5 * sizeof(struct i2c_adapter),
 				      GFP_KERNEL))) {

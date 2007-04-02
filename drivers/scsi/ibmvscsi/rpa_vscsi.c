@@ -34,6 +34,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include "ibmvscsi.h"
+#include "srp.h"
 
 static char partition_name[97] = "UNKNOWN";
 static unsigned int partition_number = -1;
@@ -79,7 +80,7 @@ void ibmvscsi_release_crq_queue(struct crq_queue *queue,
 	tasklet_kill(&hostdata->srp_task);
 	do {
 		rc = plpar_hcall_norets(H_FREE_CRQ, vdev->unit_address);
-	} while ((rc == H_BUSY) || (H_IS_LONG_BUSY(rc)));
+	} while ((rc == H_Busy) || (H_isLongBusy(rc)));
 	dma_unmap_single(hostdata->dev,
 			 queue->msg_token,
 			 queue->size * sizeof(*queue->msgs), DMA_BIDIRECTIONAL);
@@ -229,7 +230,7 @@ int ibmvscsi_init_crq_queue(struct crq_queue *queue,
 	rc = plpar_hcall_norets(H_REG_CRQ,
 				vdev->unit_address,
 				queue->msg_token, PAGE_SIZE);
-	if (rc == H_RESOURCE)
+	if (rc == H_Resource) 
 		/* maybe kexecing and resource is busy. try a reset */
 		rc = ibmvscsi_reset_crq_queue(queue,
 					      hostdata);
@@ -268,7 +269,7 @@ int ibmvscsi_init_crq_queue(struct crq_queue *queue,
       req_irq_failed:
 	do {
 		rc = plpar_hcall_norets(H_FREE_CRQ, vdev->unit_address);
-	} while ((rc == H_BUSY) || (H_IS_LONG_BUSY(rc)));
+	} while ((rc == H_Busy) || (H_isLongBusy(rc)));
       reg_crq_failed:
 	dma_unmap_single(hostdata->dev,
 			 queue->msg_token,
@@ -294,7 +295,7 @@ int ibmvscsi_reenable_crq_queue(struct crq_queue *queue,
 	/* Re-enable the CRQ */
 	do {
 		rc = plpar_hcall_norets(H_ENABLE_CRQ, vdev->unit_address);
-	} while ((rc == H_IN_PROGRESS) || (rc == H_BUSY) || (H_IS_LONG_BUSY(rc)));
+	} while ((rc == H_InProgress) || (rc == H_Busy) || (H_isLongBusy(rc)));
 
 	if (rc)
 		printk(KERN_ERR "ibmvscsi: Error %d enabling adapter\n", rc);
@@ -316,7 +317,7 @@ int ibmvscsi_reset_crq_queue(struct crq_queue *queue,
 	/* Close the CRQ */
 	do {
 		rc = plpar_hcall_norets(H_FREE_CRQ, vdev->unit_address);
-	} while ((rc == H_BUSY) || (H_IS_LONG_BUSY(rc)));
+	} while ((rc == H_Busy) || (H_isLongBusy(rc)));
 
 	/* Clean out the queue */
 	memset(queue->msgs, 0x00, PAGE_SIZE);

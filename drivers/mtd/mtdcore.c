@@ -19,13 +19,15 @@
 #include <linux/ioctl.h>
 #include <linux/init.h>
 #include <linux/mtd/compatmac.h>
+#ifdef CONFIG_PROC_FS
 #include <linux/proc_fs.h>
+#endif
 
 #include <linux/mtd/mtd.h>
 
 /* These are exported solely for the purpose of mtd_blkdevs.c. You
    should not use them for _anything_ else */
-DEFINE_MUTEX(mtd_table_mutex);
+DECLARE_MUTEX(mtd_table_mutex);
 struct mtd_info *mtd_table[MAX_MTD_DEVICES];
 
 EXPORT_SYMBOL_GPL(mtd_table_mutex);
@@ -47,7 +49,7 @@ int add_mtd_device(struct mtd_info *mtd)
 {
 	int i;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 
 	for (i=0; i < MAX_MTD_DEVICES; i++)
 		if (!mtd_table[i]) {
@@ -65,7 +67,7 @@ int add_mtd_device(struct mtd_info *mtd)
 				not->add(mtd);
 			}
 
-			mutex_unlock(&mtd_table_mutex);
+			up(&mtd_table_mutex);
 			/* We _know_ we aren't being removed, because
 			   our caller is still holding us here. So none
 			   of this try_ nonsense, and no bitching about it
@@ -74,7 +76,7 @@ int add_mtd_device(struct mtd_info *mtd)
 			return 0;
 		}
 
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
 	return 1;
 }
 
@@ -92,7 +94,7 @@ int del_mtd_device (struct mtd_info *mtd)
 {
 	int ret;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 
 	if (mtd_table[mtd->index] != mtd) {
 		ret = -ENODEV;
@@ -116,7 +118,7 @@ int del_mtd_device (struct mtd_info *mtd)
 		ret = 0;
 	}
 
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
 	return ret;
 }
 
@@ -133,7 +135,7 @@ void register_mtd_user (struct mtd_notifier *new)
 {
 	int i;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 
 	list_add(&new->list, &mtd_notifiers);
 
@@ -143,7 +145,7 @@ void register_mtd_user (struct mtd_notifier *new)
 		if (mtd_table[i])
 			new->add(mtd_table[i]);
 
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
 }
 
 /**
@@ -160,7 +162,7 @@ int unregister_mtd_user (struct mtd_notifier *old)
 {
 	int i;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 
 	module_put(THIS_MODULE);
 
@@ -169,7 +171,7 @@ int unregister_mtd_user (struct mtd_notifier *old)
 			old->remove(mtd_table[i]);
 
 	list_del(&old->list);
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
 	return 0;
 }
 
@@ -191,7 +193,7 @@ struct mtd_info *get_mtd_device(struct mtd_info *mtd, int num)
 	struct mtd_info *ret = NULL;
 	int i;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 
 	if (num == -1) {
 		for (i=0; i< MAX_MTD_DEVICES; i++)
@@ -209,7 +211,7 @@ struct mtd_info *get_mtd_device(struct mtd_info *mtd, int num)
 	if (ret)
 		ret->usecount++;
 
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
 	return ret;
 }
 
@@ -217,9 +219,9 @@ void put_mtd_device(struct mtd_info *mtd)
 {
 	int c;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 	c = --mtd->usecount;
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
 	BUG_ON(c < 0);
 
 	module_put(mtd->owner);
@@ -294,11 +296,10 @@ EXPORT_SYMBOL(unregister_mtd_user);
 EXPORT_SYMBOL(default_mtd_writev);
 EXPORT_SYMBOL(default_mtd_readv);
 
-#ifdef CONFIG_PROC_FS
-
 /*====================================================================*/
 /* Support for /proc/mtd */
 
+#ifdef CONFIG_PROC_FS
 static struct proc_dir_entry *proc_mtd;
 
 static inline int mtd_proc_info (char *buf, int i)
@@ -318,7 +319,7 @@ static int mtd_read_proc (char *page, char **start, off_t off, int count,
 	int len, l, i;
         off_t   begin = 0;
 
-	mutex_lock(&mtd_table_mutex);
+	down(&mtd_table_mutex);
 
 	len = sprintf(page, "dev:    size   erasesize  name\n");
         for (i=0; i< MAX_MTD_DEVICES; i++) {
@@ -336,33 +337,37 @@ static int mtd_read_proc (char *page, char **start, off_t off, int count,
         *eof = 1;
 
 done:
-	mutex_unlock(&mtd_table_mutex);
+	up(&mtd_table_mutex);
         if (off >= len+begin)
                 return 0;
         *start = page + (off-begin);
         return ((count < begin+len-off) ? count : begin+len-off);
 }
 
+#endif /* CONFIG_PROC_FS */
+
 /*====================================================================*/
 /* Init code */
 
 static int __init init_mtd(void)
 {
+#ifdef CONFIG_PROC_FS
 	if ((proc_mtd = create_proc_entry( "mtd", 0, NULL )))
 		proc_mtd->read_proc = mtd_read_proc;
+#endif
 	return 0;
 }
 
 static void __exit cleanup_mtd(void)
 {
+#ifdef CONFIG_PROC_FS
         if (proc_mtd)
 		remove_proc_entry( "mtd", NULL);
+#endif
 }
 
 module_init(init_mtd);
 module_exit(cleanup_mtd);
-
-#endif /* CONFIG_PROC_FS */
 
 
 MODULE_LICENSE("GPL");

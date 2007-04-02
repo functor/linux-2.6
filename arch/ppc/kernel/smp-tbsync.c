@@ -126,7 +126,8 @@ smp_generic_give_timebase( void )
 	printk("Synchronizing timebase\n");
 
 	/* if this fails then this kernel won't work anyway... */
-	tbsync = kzalloc( sizeof(*tbsync), GFP_KERNEL );
+	tbsync = kmalloc( sizeof(*tbsync), GFP_KERNEL );
+	memset( tbsync, 0, sizeof(*tbsync) );
 	mb();
 	running = 1;
 

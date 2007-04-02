@@ -204,8 +204,6 @@ static u8 piix_dma_2_pio (u8 xfer_rate) {
 	}
 }
 
-static spinlock_t tune_lock = SPIN_LOCK_UNLOCKED;
-
 /**
  *	piix_tune_drive		-	tune a drive attached to a PIIX
  *	@drive: drive to tune
@@ -232,12 +230,7 @@ static void piix_tune_drive (ide_drive_t *drive, u8 pio)
 			    { 2, 3 }, };
 
 	pio = ide_get_best_pio_mode(drive, pio, 5, NULL);
-	
-	/* Master v slave is synchronized above us but the slave register is
-	   shared by the two hwifs so the corner case of two slave timeouts in
-	   parallel must be locked */
-	   
-	spin_lock_irqsave(&tune_lock, flags);
+	spin_lock_irqsave(&ide_lock, flags);
 	pci_read_config_word(dev, master_port, &master_data);
 	if (is_slave) {
 		master_data = master_data | 0x4000;
@@ -257,7 +250,7 @@ static void piix_tune_drive (ide_drive_t *drive, u8 pio)
 	pci_write_config_word(dev, master_port, master_data);
 	if (is_slave)
 		pci_write_config_byte(dev, slave_port, slave_data);
-	spin_unlock_irqrestore(&tune_lock, flags);
+	spin_unlock_irqrestore(&ide_lock, flags);
 }
 
 /**

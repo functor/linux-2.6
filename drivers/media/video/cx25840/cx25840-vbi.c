@@ -19,9 +19,8 @@
 #include <linux/videodev2.h>
 #include <linux/i2c.h>
 #include <media/v4l2-common.h>
-#include <media/cx25840.h>
 
-#include "cx25840-core.h"
+#include "cx25840.h"
 
 static int odd_parity(u8 c)
 {

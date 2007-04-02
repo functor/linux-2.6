@@ -43,7 +43,7 @@ static int prepare_tx(struct net_device *dev, struct archdr *pkt, int length,
 		      int bufnum);
 
 
-static struct ArcProto rfc1051_proto =
+struct ArcProto rfc1051_proto =
 {
 	.suffix		= 's',
 	.mtu		= XMTU - RFC1051_HDR_SIZE,

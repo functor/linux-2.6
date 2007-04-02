@@ -139,9 +139,6 @@ struct pci_pbm_info {
 	/* Opaque 32-bit system bus Port ID. */
 	u32				portid;
 
-	/* Opaque 32-bit handle used for hypervisor calls.  */
-	u32				devhandle;
-
 	/* Chipset version information. */
 	int				chip_type;
 #define PBM_CHIP_TYPE_SABRE		1

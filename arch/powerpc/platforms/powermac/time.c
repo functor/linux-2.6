@@ -336,10 +336,10 @@ static struct pmu_sleep_notifier time_sleep_notifier = {
  */
 void __init pmac_calibrate_decr(void)
 {
-#if defined(CONFIG_PM) && defined(CONFIG_ADB_PMU)
+#ifdef CONFIG_PM
 	/* XXX why here? */
 	pmu_register_sleep_notifier(&time_sleep_notifier);
-#endif
+#endif /* CONFIG_PM */
 
 	generic_calibrate_decr();
 

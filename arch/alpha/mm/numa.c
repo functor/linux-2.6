@@ -13,7 +13,6 @@
 #include <linux/bootmem.h>
 #include <linux/swap.h>
 #include <linux/initrd.h>
-#include <linux/pfn.h>
 
 #include <asm/hwrpb.h>
 #include <asm/pgalloc.h>
@@ -28,6 +27,9 @@ bootmem_data_t node_bdata[MAX_NUMNODES];
 #define DBGDCONT(args...)
 #endif
 
+#define PFN_UP(x)       (((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
+#define PFN_DOWN(x)     ((x) >> PAGE_SHIFT)
+#define PFN_PHYS(x)     ((x) << PAGE_SHIFT)
 #define for_each_mem_cluster(memdesc, cluster, i)		\
 	for ((cluster) = (memdesc)->cluster, (i) = 0;		\
 	     (i) < (memdesc)->numclusters; (i)++, (cluster)++)

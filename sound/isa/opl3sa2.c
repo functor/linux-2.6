@@ -95,7 +95,6 @@ static struct platform_device *platform_devices[SNDRV_CARDS];
 static int pnp_registered;
 static int pnpc_registered;
 #endif
-static unsigned int snd_opl3sa2_devices;
 
 /* control ports */
 #define OPL3SA2_PM_CTRL		0x01
@@ -761,7 +760,6 @@ static int __devinit snd_opl3sa2_pnp_detect(struct pnp_dev *pdev,
 	}
 	pnp_set_drvdata(pdev, card);
 	dev++;
-	snd_opl3sa2_devices++;
 	return 0;
 }
 
@@ -828,7 +826,6 @@ static int __devinit snd_opl3sa2_pnp_cdetect(struct pnp_card_link *pcard,
 	}
 	pnp_set_card_drvdata(pcard, card);
 	dev++;
-	snd_opl3sa2_devices++;
 	return 0;
 }
 
@@ -947,48 +944,52 @@ static void __init_or_module snd_opl3sa2_unregister_all(void)
 
 static int __init alsa_card_opl3sa2_init(void)
 {
-	int i, err;
+	int i, err, cards = 0;
 
 	if ((err = platform_driver_register(&snd_opl3sa2_nonpnp_driver)) < 0)
 		return err;
 
-	for (i = 0; i < SNDRV_CARDS; i++) {
+	for (i = 0; i < SNDRV_CARDS && enable[i]; i++) {
 		struct platform_device *device;
-		if (! enable[i])
-			continue;
 #ifdef CONFIG_PNP
 		if (isapnp[i])
 			continue;
 #endif
 		device = platform_device_register_simple(OPL3SA2_DRIVER,
 							 i, NULL, 0);
-		if (IS_ERR(device))
-			continue;
-		if (!platform_get_drvdata(device)) {
-			platform_device_unregister(device);
-			continue;
+		if (IS_ERR(device)) {
+			err = PTR_ERR(device);
+			goto errout;
 		}
 		platform_devices[i] = device;
-		snd_opl3sa2_devices++;
+		cards++;
 	}
 
 #ifdef CONFIG_PNP
 	err = pnp_register_driver(&opl3sa2_pnp_driver);
-	if (!err)
+	if (err >= 0) {
 		pnp_registered = 1;
+		cards += err;
+	}
 	err = pnp_register_card_driver(&opl3sa2_pnpc_driver);
-	if (!err)
+	if (err >= 0) {
 		pnpc_registered = 1;
+		cards += err;
+	}
 #endif
 
-	if (!snd_opl3sa2_devices) {
+	if (!cards) {
 #ifdef MODULE
 		snd_printk(KERN_ERR "Yamaha OPL3-SA soundcard not found or device busy\n");
 #endif
-		snd_opl3sa2_unregister_all();
-		return -ENODEV;
+		err = -ENODEV;
+		goto errout;
 	}
 	return 0;
+
+ errout:
+	snd_opl3sa2_unregister_all();
+	return err;
 }
 
 static void __exit alsa_card_opl3sa2_exit(void)

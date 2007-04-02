@@ -390,7 +390,7 @@ static struct iw_statistics *orinoco_get_wireless_stats(struct net_device *dev)
 		}
 	} else {
 		struct {
-			__le16 qual, signal, noise, unused;
+			__le16 qual, signal, noise;
 		} __attribute__ ((packed)) cq;
 
 		err = HERMES_READ_RECORD(hw, USER_BAP,
@@ -812,6 +812,7 @@ static void orinoco_rx_monitor(struct net_device *dev, u16 rxfid,
 	if (datalen > IEEE80211_DATA_LEN + 12) {
 		printk(KERN_DEBUG "%s: oversized monitor frame, "
 		       "data length = %d\n", dev->name, datalen);
+		err = -EIO;
 		stats->rx_length_errors++;
 		goto update_stats;
 	}
@@ -820,7 +821,8 @@ static void orinoco_rx_monitor(struct net_device *dev, u16 rxfid,
 	if (!skb) {
 		printk(KERN_WARNING "%s: Cannot allocate skb for monitor frame\n",
 		       dev->name);
-		goto update_stats;
+		err = -ENOMEM;
+		goto drop;
 	}
 
 	/* Copy the 802.11 header to the skb */
@@ -1833,9 +1835,7 @@ static int __orinoco_program_rids(struct net_device *dev)
 	/* Set promiscuity / multicast*/
 	priv->promiscuous = 0;
 	priv->mc_count = 0;
-
-	/* FIXME: what about netif_tx_lock */
-	__orinoco_set_multicast_list(dev);
+	__orinoco_set_multicast_list(dev); /* FIXME: what about the xmit_lock */
 
 	return 0;
 }
@@ -3858,7 +3858,7 @@ static int orinoco_ioctl_setscan(struct net_device *dev,
 	unsigned long flags;
 
 	/* Note : you may have realised that, as this is a SET operation,
-	 * this is privileged and therefore a normal user can't
+	 * this is priviledged and therefore a normal user can't
 	 * perform scanning.
 	 * This is not an error, while the device perform scanning,
 	 * traffic doesn't flow, so it's a perfect DoS...

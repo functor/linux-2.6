@@ -452,7 +452,6 @@ static struct cpufreq_driver acpi_cpufreq_driver = {
 	.name		= "acpi-cpufreq",
 	.owner		= THIS_MODULE,
 	.attr           = acpi_cpufreq_attr,
-	.flags		= CPUFREQ_STICKY,
 };
 
 

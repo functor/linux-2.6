@@ -19,7 +19,7 @@ struct ncp_inode_info {
 	__le32	DosDirNum;
 	__u8	volNumber;
 	__le32	nwattr;
-	struct mutex open_mutex;
+	struct semaphore open_sem;
 	atomic_t	opened;
 	int	access;
 	int	flags;

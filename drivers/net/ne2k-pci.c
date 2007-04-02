@@ -645,7 +645,9 @@ static void __devexit ne2k_pci_remove_one (struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 
-	BUG_ON(!dev);
+	if (!dev)
+		BUG();
+
 	unregister_netdev(dev);
 	release_region(dev->base_addr, NE_IO_EXTENT);
 	free_netdev(dev);

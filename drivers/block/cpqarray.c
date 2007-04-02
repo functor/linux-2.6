@@ -52,7 +52,6 @@
 /* Original author Chris Frantz - Compaq Computer Corporation */
 MODULE_AUTHOR("Compaq Computer Corporation");
 MODULE_DESCRIPTION("Driver for Compaq Smart2 Array Controllers version 2.6.0");
-MODULE_VERSION("2.6.0");
 MODULE_LICENSE("GPL");
 
 #include "cpqarray.h"
@@ -907,7 +906,8 @@ queue_next:
 	if (!creq)
 		goto startio;
 
-	BUG_ON(creq->nr_phys_segments > SG_MAX);
+	if (creq->nr_phys_segments > SG_MAX)
+		BUG();
 
 	if ((c = cmd_alloc(h,1)) == NULL)
 		goto startio;
@@ -1004,6 +1004,7 @@ static inline void complete_buffers(struct bio *bio, int ok)
  */
 static inline void complete_command(cmdlist_t *cmd, int timeout)
 {
+	struct request *rq = cmd->rq;
 	int ok=1;
 	int i, ddir;
 
@@ -1035,10 +1036,16 @@ static inline void complete_command(cmdlist_t *cmd, int timeout)
                 pci_unmap_page(hba[cmd->ctlr]->pci_dev, cmd->req.sg[i].addr,
 				cmd->req.sg[i].size, ddir);
 
-	complete_buffers(cmd->rq->bio, ok);
+	complete_buffers(rq->bio, ok);
 
-        DBGPX(printk("Done with %p\n", cmd->rq););
-	end_that_request_last(cmd->rq, ok ? 1 : -EIO);
+	if (blk_fs_request(rq)) {
+		const int rw = rq_data_dir(rq);
+ 
+		disk_stat_add(rq->rq_disk, sectors[rw], rq->nr_sectors);
+	}
+
+	DBGPX(printk("Done with %p\n", rq););
+	end_that_request_last(rq, ok ? 1 : -EIO);
 }
 
 /*

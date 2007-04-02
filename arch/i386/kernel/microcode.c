@@ -81,7 +81,6 @@
 #include <linux/miscdevice.h>
 #include <linux/spinlock.h>
 #include <linux/mm.h>
-#include <linux/mutex.h>
 
 #include <asm/msr.h>
 #include <asm/uaccess.h>
@@ -115,7 +114,7 @@ MODULE_LICENSE("GPL");
 static DEFINE_SPINLOCK(microcode_update_lock);
 
 /* no concurrent ->write()s are allowed on /dev/cpu/microcode */
-static DEFINE_MUTEX(microcode_mutex);
+static DECLARE_MUTEX(microcode_sem);
 
 static void __user *user_buffer;	/* user area microcode data buffer */
 static unsigned int user_buffer_size;	/* it's size */
@@ -203,6 +202,8 @@ static inline void mark_microcode_update (int cpu_num, microcode_header_t *mc_he
 	} else if (mc_header->rev == uci->rev) {
 		/* notify the caller of success on this cpu */
 		uci->err = MC_SUCCESS;
+		printk(KERN_ERR "microcode: CPU%d already at revision"
+			" 0x%x (current=0x%x)\n", cpu_num, mc_header->rev, uci->rev);
 		goto out;
 	}
 
@@ -368,6 +369,7 @@ static void do_update_one (void * unused)
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu_num;
 
 	if (uci->mc == NULL) {
+		printk(KERN_INFO "microcode: No new microcode data for CPU%d\n", cpu_num);
 		return;
 	}
 
@@ -445,7 +447,7 @@ static ssize_t microcode_write (struct file *file, const char __user *buf, size_
 		return -EINVAL;
 	}
 
-	mutex_lock(&microcode_mutex);
+	down(&microcode_sem);
 
 	user_buffer = (void __user *) buf;
 	user_buffer_size = (int) len;
@@ -454,14 +456,31 @@ static ssize_t microcode_write (struct file *file, const char __user *buf, size_
 	if (!ret)
 		ret = (ssize_t)len;
 
-	mutex_unlock(&microcode_mutex);
+	up(&microcode_sem);
 
 	return ret;
+}
+
+static int microcode_ioctl (struct inode *inode, struct file *file, 
+		unsigned int cmd, unsigned long arg)
+{
+	switch (cmd) {
+		/* 
+		 *  XXX: will be removed after microcode_ctl 
+		 *  is updated to ignore failure of this ioctl()
+		 */
+		case MICROCODE_IOCFREE:
+			return 0;
+		default:
+			return -EINVAL;
+	}
+	return -EINVAL;
 }
 
 static struct file_operations microcode_fops = {
 	.owner		= THIS_MODULE,
 	.write		= microcode_write,
+	.ioctl		= microcode_ioctl,
 	.open		= microcode_open,
 };
 
@@ -492,6 +511,7 @@ static int __init microcode_init (void)
 static void __exit microcode_exit (void)
 {
 	misc_deregister(&microcode_dev);
+	printk(KERN_INFO "IA-32 Microcode Update Driver v" MICROCODE_VERSION " unregistered\n");
 }
 
 module_init(microcode_init)

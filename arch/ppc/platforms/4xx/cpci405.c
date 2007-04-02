@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/cpci405.c
+ *
  * Board setup routines for the esd CPCI-405 cPCI Board.
  *
  * Author: Stefan Roese

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibmstbx25.h
+ *
  * Author: Armin Kuster <akuster@mvista.com>
  *
  * 2002 (c) MontaVista, Software, Inc.  This file is licensed under

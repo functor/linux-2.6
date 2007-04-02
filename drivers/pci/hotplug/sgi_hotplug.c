@@ -3,7 +3,7 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 2005-2006 Silicon Graphics, Inc. All rights reserved.
+ * Copyright (C) 2005 Silicon Graphics, Inc. All rights reserved.
  *
  * This work was based on the 2.4/2.6 kernel development by Dick Reigner.
  * Work to add BIOS PROM support was completed by Mike Habeck.
@@ -15,7 +15,6 @@
 #include <linux/pci.h>
 #include <linux/proc_fs.h>
 #include <linux/types.h>
-#include <linux/mutex.h>
 
 #include <asm/sn/addrs.h>
 #include <asm/sn/l1.h>
@@ -82,7 +81,7 @@ static struct hotplug_slot_ops sn_hotplug_slot_ops = {
 	.get_power_status       = get_power_status,
 };
 
-static DEFINE_MUTEX(sn_hotplug_mutex);
+static DECLARE_MUTEX(sn_hotplug_sem);
 
 static ssize_t path_show (struct hotplug_slot *bss_hotplug_slot,
 	       		  char *buf)
@@ -231,13 +230,6 @@ static void sn_bus_free_data(struct pci_dev *dev)
 		list_for_each_entry(child, &subordinate_bus->devices, bus_list)
 			sn_bus_free_data(child);
 	}
-	/*
-	 * Some drivers may use dma accesses during the
-	 * driver remove function. We release the sysdata
-	 * areas after the driver remove functions have
-	 * been called.
-	 */
-	sn_bus_store_sysdata(dev);
 	sn_pci_unfixup_slot(dev);
 }
 
@@ -347,7 +339,7 @@ static int enable_slot(struct hotplug_slot *bss_hotplug_slot)
 	int rc;
 
 	/* Serialize the Linux PCI infrastructure */
-	mutex_lock(&sn_hotplug_mutex);
+	down(&sn_hotplug_sem);
 
 	/*
 	 * Power-on and initialize the slot in the SN
@@ -355,7 +347,7 @@ static int enable_slot(struct hotplug_slot *bss_hotplug_slot)
 	 */
 	rc = sn_slot_enable(bss_hotplug_slot, slot->device_num);
 	if (rc) {
-		mutex_unlock(&sn_hotplug_mutex);
+		up(&sn_hotplug_sem);
 		return rc;
 	}
 
@@ -363,7 +355,7 @@ static int enable_slot(struct hotplug_slot *bss_hotplug_slot)
 				  PCI_DEVFN(slot->device_num + 1, 0));
 	if (!num_funcs) {
 		dev_dbg(slot->pci_bus->self, "no device in slot\n");
-		mutex_unlock(&sn_hotplug_mutex);
+		up(&sn_hotplug_sem);
 		return -ENODEV;
 	}
 
@@ -403,7 +395,7 @@ static int enable_slot(struct hotplug_slot *bss_hotplug_slot)
 	if (new_ppb)
 		pci_bus_add_devices(new_bus);
 
-	mutex_unlock(&sn_hotplug_mutex);
+	up(&sn_hotplug_sem);
 
 	if (rc == 0)
 		dev_dbg(slot->pci_bus->self,
@@ -423,7 +415,7 @@ static int disable_slot(struct hotplug_slot *bss_hotplug_slot)
 	int rc;
 
 	/* Acquire update access to the bus */
-	mutex_lock(&sn_hotplug_mutex);
+	down(&sn_hotplug_sem);
 
 	/* is it okay to bring this slot down? */
 	rc = sn_slot_disable(bss_hotplug_slot, slot->device_num,
@@ -437,6 +429,13 @@ static int disable_slot(struct hotplug_slot *bss_hotplug_slot)
 				   PCI_DEVFN(slot->device_num + 1,
 				   	     PCI_FUNC(func)));
 		if (dev) {
+			/*
+			 * Some drivers may use dma accesses during the
+			 * driver remove function. We release the sysdata
+			 * areas after the driver remove functions have
+			 * been called.
+			 */
+			sn_bus_store_sysdata(dev);
 			sn_bus_free_data(dev);
 			pci_remove_bus_device(dev);
 			pci_dev_put(dev);
@@ -451,7 +450,7 @@ static int disable_slot(struct hotplug_slot *bss_hotplug_slot)
 			     PCI_REQ_SLOT_DISABLE);
  leaving:
 	/* Release the bus lock */
-	mutex_unlock(&sn_hotplug_mutex);
+	up(&sn_hotplug_sem);
 
 	return rc;
 }
@@ -463,9 +462,9 @@ static inline int get_power_status(struct hotplug_slot *bss_hotplug_slot,
 	struct pcibus_info *pcibus_info;
 
 	pcibus_info = SN_PCIBUS_BUSSOFT_INFO(slot->pci_bus);
-	mutex_lock(&sn_hotplug_mutex);
+	down(&sn_hotplug_sem);
 	*value = pcibus_info->pbi_enabled_devices & (1 << slot->device_num);
-	mutex_unlock(&sn_hotplug_mutex);
+	up(&sn_hotplug_sem);
 	return 0;
 }
 

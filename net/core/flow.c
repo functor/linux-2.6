@@ -20,7 +20,6 @@
 #include <linux/notifier.h>
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
-#include <linux/mutex.h>
 #include <net/flow.h>
 #include <asm/atomic.h>
 #include <asm/semaphore.h>
@@ -79,7 +78,7 @@ static void flow_cache_new_hashrnd(unsigned long arg)
 {
 	int i;
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		flow_hash_rnd_recalc(i) = 1;
 
 	flow_hash_rnd_timer.expires = jiffies + FLOW_HASH_RND_PERIOD;
@@ -288,11 +287,11 @@ static void flow_cache_flush_per_cpu(void *data)
 void flow_cache_flush(void)
 {
 	struct flow_flush_info info;
-	static DEFINE_MUTEX(flow_flush_sem);
+	static DECLARE_MUTEX(flow_flush_sem);
 
 	/* Don't want cpus going down or up during this. */
 	lock_cpu_hotplug();
-	mutex_lock(&flow_flush_sem);
+	down(&flow_flush_sem);
 	atomic_set(&info.cpuleft, num_online_cpus());
 	init_completion(&info.completion);
 
@@ -302,7 +301,7 @@ void flow_cache_flush(void)
 	local_bh_enable();
 
 	wait_for_completion(&info.completion);
-	mutex_unlock(&flow_flush_sem);
+	up(&flow_flush_sem);
 	unlock_cpu_hotplug();
 }
 
@@ -318,9 +317,11 @@ static void __devinit flow_cache_cpu_prepare(int cpu)
 		/* NOTHING */;
 
 	flow_table(cpu) = (struct flow_cache_entry **)
-		__get_free_pages(GFP_KERNEL|__GFP_ZERO, order);
+		__get_free_pages(GFP_KERNEL, order);
 	if (!flow_table(cpu))
 		panic("NET: failed to allocate flow cache order %lu\n", order);
+
+	memset(flow_table(cpu), 0, PAGE_SIZE << order);
 
 	flow_hash_rnd_recalc(cpu) = 1;
 	flow_count(cpu) = 0;
@@ -361,7 +362,7 @@ static int __init flow_cache_init(void)
 	flow_hash_rnd_timer.expires = jiffies + FLOW_HASH_RND_PERIOD;
 	add_timer(&flow_hash_rnd_timer);
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		flow_cache_cpu_prepare(i);
 
 	hotcpu_notifier(flow_cache_cpu, 0);

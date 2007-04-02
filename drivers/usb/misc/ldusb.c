@@ -33,7 +33,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 
 #include <asm/uaccess.h>
 #include <linux/input.h>
@@ -173,7 +172,7 @@ struct ld_usb {
 };
 
 /* prevent races between open() and disconnect() */
-static DEFINE_MUTEX(disconnect_mutex);
+static DECLARE_MUTEX(disconnect_sem);
 
 static struct usb_driver ld_usb_driver;
 
@@ -294,7 +293,7 @@ static int ld_usb_open(struct inode *inode, struct file *file)
 	nonseekable_open(inode, file);
 	subminor = iminor(inode);
 
-	mutex_lock(&disconnect_mutex);
+	down(&disconnect_sem);
 
 	interface = usb_find_interface(&ld_usb_driver, subminor);
 
@@ -356,7 +355,7 @@ unlock_exit:
 	up(&dev->sem);
 
 unlock_disconnect_exit:
-	mutex_unlock(&disconnect_mutex);
+	up(&disconnect_sem);
 
 	return retval;
 }
@@ -627,11 +626,12 @@ static int ld_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 
 	/* allocate memory for our device state and intialize it */
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
 	if (dev == NULL) {
 		dev_err(&intf->dev, "Out of memory\n");
 		goto exit;
 	}
+	memset(dev, 0x00, sizeof(*dev));
 	init_MUTEX(&dev->sem);
 	dev->intf = intf;
 	init_waitqueue_head(&dev->read_wait);
@@ -741,7 +741,7 @@ static void ld_usb_disconnect(struct usb_interface *intf)
 	struct ld_usb *dev;
 	int minor;
 
-	mutex_lock(&disconnect_mutex);
+	down(&disconnect_sem);
 
 	dev = usb_get_intfdata(intf);
 	usb_set_intfdata(intf, NULL);
@@ -762,7 +762,7 @@ static void ld_usb_disconnect(struct usb_interface *intf)
 		up(&dev->sem);
 	}
 
-	mutex_unlock(&disconnect_mutex);
+	up(&disconnect_sem);
 
 	dev_info(&intf->dev, "LD USB Device #%d now disconnected\n",
 		 (minor - USB_LD_MINOR_BASE));

@@ -18,8 +18,6 @@
 #include <linux/sunrpc/svc.h>
 #include <linux/lockd/lockd.h>
 #include <linux/lockd/sm_inter.h>
-#include <linux/vs_base.h>
-#include <linux/vs_cvirt.h>
 
 #define NLMDBG_FACILITY		NLMDBG_CLIENT
 #define NLMCLNT_GRACE_WAIT	(5*HZ)
@@ -132,20 +130,61 @@ static void nlmclnt_setlockargs(struct nlm_rqst *req, struct file_lock *fl)
 	nlmclnt_next_cookie(&argp->cookie);
 	argp->state   = nsm_local_state;
 	memcpy(&lock->fh, NFS_FH(fl->fl_file->f_dentry->d_inode), sizeof(struct nfs_fh));
-	lock->caller  = vx_new_uts(nodename);
+	lock->caller  = system_utsname.nodename;
 	lock->oh.data = req->a_owner;
-	lock->oh.len  = snprintf(req->a_owner, sizeof(req->a_owner), "%u@%s",
-				(unsigned int)fl->fl_u.nfs_fl.owner->pid,
-				vx_new_uts(nodename));
-	lock->svid = fl->fl_u.nfs_fl.owner->pid;
-	lock->fl.fl_start = fl->fl_start;
-	lock->fl.fl_end = fl->fl_end;
-	lock->fl.fl_type = fl->fl_type;
+	lock->oh.len  = sprintf(req->a_owner, "%d@%s",
+				current->pid, system_utsname.nodename);
+	locks_copy_lock(&lock->fl, fl);
 }
 
 static void nlmclnt_release_lockargs(struct nlm_rqst *req)
 {
-	BUG_ON(req->a_args.lock.fl.fl_ops != NULL);
+	struct file_lock *fl = &req->a_args.lock.fl;
+
+	if (fl->fl_ops && fl->fl_ops->fl_release_private)
+		fl->fl_ops->fl_release_private(fl);
+}
+
+/*
+ * Initialize arguments for GRANTED call. The nlm_rqst structure
+ * has been cleared already.
+ */
+int
+nlmclnt_setgrantargs(struct nlm_rqst *call, struct nlm_lock *lock)
+{
+	locks_copy_lock(&call->a_args.lock.fl, &lock->fl);
+	memcpy(&call->a_args.lock.fh, &lock->fh, sizeof(call->a_args.lock.fh));
+	call->a_args.lock.caller = system_utsname.nodename;
+	call->a_args.lock.oh.len = lock->oh.len;
+
+	/* set default data area */
+	call->a_args.lock.oh.data = call->a_owner;
+
+	if (lock->oh.len > NLMCLNT_OHSIZE) {
+		void *data = kmalloc(lock->oh.len, GFP_KERNEL);
+		if (!data) {
+			nlmclnt_freegrantargs(call);
+			return 0;
+		}
+		call->a_args.lock.oh.data = (u8 *) data;
+	}
+
+	memcpy(call->a_args.lock.oh.data, lock->oh.data, lock->oh.len);
+	return 1;
+}
+
+void
+nlmclnt_freegrantargs(struct nlm_rqst *call)
+{
+	struct file_lock *fl = &call->a_args.lock.fl;
+	/*
+	 * Check whether we allocated memory for the owner.
+	 */
+	if (call->a_args.lock.oh.data != (u8 *) call->a_owner) {
+		kfree(call->a_args.lock.oh.data);
+	}
+	if (fl->fl_ops && fl->fl_ops->fl_release_private)
+		fl->fl_ops->fl_release_private(fl);
 }
 
 /*
@@ -154,8 +193,9 @@ static void nlmclnt_release_lockargs(struct nlm_rqst *req)
 int
 nlmclnt_proc(struct inode *inode, int cmd, struct file_lock *fl)
 {
+	struct nfs_server	*nfssrv = NFS_SERVER(inode);
 	struct nlm_host		*host;
-	struct nlm_rqst		*call;
+	struct nlm_rqst		reqst, *call = &reqst;
 	sigset_t		oldset;
 	unsigned long		flags;
 	int			status, proto, vers;
@@ -169,17 +209,23 @@ nlmclnt_proc(struct inode *inode, int cmd, struct file_lock *fl)
 	/* Retrieve transport protocol from NFS client */
 	proto = NFS_CLIENT(inode)->cl_xprt->prot;
 
-	host = nlmclnt_lookup_host(NFS_ADDR(inode), proto, vers);
-	if (host == NULL)
+	if (!(host = nlmclnt_lookup_host(NFS_ADDR(inode), proto, vers)))
 		return -ENOLCK;
 
-	call = nlm_alloc_call(host);
-	if (call == NULL)
-		return -ENOMEM;
+	/* Create RPC client handle if not there, and copy soft
+	 * and intr flags from NFS client. */
+	if (host->h_rpcclnt == NULL) {
+		struct rpc_clnt	*clnt;
 
-	nlmclnt_locks_init_private(fl, host);
-	/* Set up the argument struct */
-	nlmclnt_setlockargs(call, fl);
+		/* Bind an rpc client to this host handle (does not
+		 * perform a portmapper lookup) */
+		if (!(clnt = nlm_bind_host(host))) {
+			status = -ENOLCK;
+			goto done;
+		}
+		clnt->cl_softrtry = nfssrv->client->cl_softrtry;
+		clnt->cl_intr = nfssrv->client->cl_intr;
+	}
 
 	/* Keep the old signal mask */
 	spin_lock_irqsave(&current->sighand->siglock, flags);
@@ -192,10 +238,26 @@ nlmclnt_proc(struct inode *inode, int cmd, struct file_lock *fl)
 	    && (current->flags & PF_EXITING)) {
 		sigfillset(&current->blocked);	/* Mask all signals */
 		recalc_sigpending();
+		spin_unlock_irqrestore(&current->sighand->siglock, flags);
 
+		call = nlmclnt_alloc_call();
+		if (!call) {
+			status = -ENOMEM;
+			goto out_restore;
+		}
 		call->a_flags = RPC_TASK_ASYNC;
+	} else {
+		spin_unlock_irqrestore(&current->sighand->siglock, flags);
+		memset(call, 0, sizeof(*call));
+		locks_init_lock(&call->a_args.lock.fl);
+		locks_init_lock(&call->a_res.lock.fl);
 	}
-	spin_unlock_irqrestore(&current->sighand->siglock, flags);
+	call->a_host = host;
+
+	nlmclnt_locks_init_private(fl, host);
+
+	/* Set up the argument struct */
+	nlmclnt_setlockargs(call, fl);
 
 	if (IS_SETLK(cmd) || IS_SETLKW(cmd)) {
 		if (fl->fl_type != F_UNLCK) {
@@ -208,56 +270,39 @@ nlmclnt_proc(struct inode *inode, int cmd, struct file_lock *fl)
 	else
 		status = -EINVAL;
 
-	fl->fl_ops->fl_release_private(fl);
-	fl->fl_ops = NULL;
-
+ out_restore:
 	spin_lock_irqsave(&current->sighand->siglock, flags);
 	current->blocked = oldset;
 	recalc_sigpending();
 	spin_unlock_irqrestore(&current->sighand->siglock, flags);
 
+done:
 	dprintk("lockd: clnt proc returns %d\n", status);
+	nlm_release_host(host);
 	return status;
 }
 EXPORT_SYMBOL(nlmclnt_proc);
 
 /*
  * Allocate an NLM RPC call struct
- *
- * Note: the caller must hold a reference to host. In case of failure,
- * this reference will be released.
  */
-struct nlm_rqst *nlm_alloc_call(struct nlm_host *host)
+struct nlm_rqst *
+nlmclnt_alloc_call(void)
 {
 	struct nlm_rqst	*call;
 
-	for(;;) {
-		call = kzalloc(sizeof(*call), GFP_KERNEL);
-		if (call != NULL) {
+	while (!signalled()) {
+		call = (struct nlm_rqst *) kmalloc(sizeof(struct nlm_rqst), GFP_KERNEL);
+		if (call) {
+			memset(call, 0, sizeof(*call));
 			locks_init_lock(&call->a_args.lock.fl);
 			locks_init_lock(&call->a_res.lock.fl);
-			call->a_host = host;
 			return call;
 		}
-		if (signalled())
-			break;
-		printk("nlm_alloc_call: failed, waiting for memory\n");
+		printk("nlmclnt_alloc_call: failed, waiting for memory\n");
 		schedule_timeout_interruptible(5*HZ);
 	}
-	nlm_release_host(host);
 	return NULL;
-}
-
-void nlm_release_call(struct nlm_rqst *call)
-{
-	nlm_release_host(call->a_host);
-	nlmclnt_release_lockargs(call);
-	kfree(call);
-}
-
-static void nlmclnt_rpc_release(void *data)
-{
-	return nlm_release_call(data);
 }
 
 static int nlm_wait_on_grace(wait_queue_head_t *queue)
@@ -356,45 +401,57 @@ in_grace_period:
 /*
  * Generic NLM call, async version.
  */
-static int __nlm_async_call(struct nlm_rqst *req, u32 proc, struct rpc_message *msg, const struct rpc_call_ops *tk_ops)
+int nlmsvc_async_call(struct nlm_rqst *req, u32 proc, const struct rpc_call_ops *tk_ops)
 {
 	struct nlm_host	*host = req->a_host;
 	struct rpc_clnt	*clnt;
-	int status = -ENOLCK;
+	struct rpc_message msg = {
+		.rpc_argp	= &req->a_args,
+		.rpc_resp	= &req->a_res,
+	};
+	int		status;
 
 	dprintk("lockd: call procedure %d on %s (async)\n",
 			(int)proc, host->h_name);
 
 	/* If we have no RPC client yet, create one. */
-	clnt = nlm_bind_host(host);
-	if (clnt == NULL)
-		goto out_err;
-	msg->rpc_proc = &clnt->cl_procinfo[proc];
+	if ((clnt = nlm_bind_host(host)) == NULL)
+		return -ENOLCK;
+	msg.rpc_proc = &clnt->cl_procinfo[proc];
 
         /* bootstrap and kick off the async RPC call */
-        status = rpc_call_async(clnt, msg, RPC_TASK_ASYNC, tk_ops, req);
-	if (status == 0)
-		return 0;
-out_err:
-	nlm_release_call(req);
+        status = rpc_call_async(clnt, &msg, RPC_TASK_ASYNC, tk_ops, req);
+
 	return status;
 }
 
-int nlm_async_call(struct nlm_rqst *req, u32 proc, const struct rpc_call_ops *tk_ops)
+static int nlmclnt_async_call(struct nlm_rqst *req, u32 proc, const struct rpc_call_ops *tk_ops)
 {
+	struct nlm_host	*host = req->a_host;
+	struct rpc_clnt	*clnt;
+	struct nlm_args	*argp = &req->a_args;
+	struct nlm_res	*resp = &req->a_res;
 	struct rpc_message msg = {
-		.rpc_argp	= &req->a_args,
-		.rpc_resp	= &req->a_res,
+		.rpc_argp	= argp,
+		.rpc_resp	= resp,
 	};
-	return __nlm_async_call(req, proc, &msg, tk_ops);
-}
+	int		status;
 
-int nlm_async_reply(struct nlm_rqst *req, u32 proc, const struct rpc_call_ops *tk_ops)
-{
-	struct rpc_message msg = {
-		.rpc_argp	= &req->a_res,
-	};
-	return __nlm_async_call(req, proc, &msg, tk_ops);
+	dprintk("lockd: call procedure %d on %s (async)\n",
+			(int)proc, host->h_name);
+
+	/* If we have no RPC client yet, create one. */
+	if ((clnt = nlm_bind_host(host)) == NULL)
+		return -ENOLCK;
+	msg.rpc_proc = &clnt->cl_procinfo[proc];
+
+	/* Increment host refcount */
+	nlm_get_host(host);
+        /* bootstrap and kick off the async RPC call */
+        status = rpc_call_async(clnt, &msg, RPC_TASK_ASYNC, tk_ops, req);
+	if (status < 0)
+		nlm_release_host(host);
+	return status;
 }
 
 /*
@@ -406,41 +463,36 @@ nlmclnt_test(struct nlm_rqst *req, struct file_lock *fl)
 	int	status;
 
 	status = nlmclnt_call(req, NLMPROC_TEST);
+	nlmclnt_release_lockargs(req);
 	if (status < 0)
-		goto out;
+		return status;
 
-	switch (req->a_res.status) {
-		case NLM_LCK_GRANTED:
-			fl->fl_type = F_UNLCK;
-			break;
-		case NLM_LCK_DENIED:
-			/*
-			 * Report the conflicting lock back to the application.
-			 */
-			fl->fl_start = req->a_res.lock.fl.fl_start;
-			fl->fl_end = req->a_res.lock.fl.fl_start;
-			fl->fl_type = req->a_res.lock.fl.fl_type;
-			fl->fl_pid = 0;
-			break;
-		default:
-			status = nlm_stat_to_errno(req->a_res.status);
+	status = req->a_res.status;
+	if (status == NLM_LCK_GRANTED) {
+		fl->fl_type = F_UNLCK;
+	} if (status == NLM_LCK_DENIED) {
+		/*
+		 * Report the conflicting lock back to the application.
+		 */
+		locks_copy_lock(fl, &req->a_res.lock.fl);
+		fl->fl_pid = 0;
+	} else {
+		return nlm_stat_to_errno(req->a_res.status);
 	}
-out:
-	nlm_release_call(req);
-	return status;
+
+	return 0;
 }
 
 static void nlmclnt_locks_copy_lock(struct file_lock *new, struct file_lock *fl)
 {
-	new->fl_u.nfs_fl.state = fl->fl_u.nfs_fl.state;
-	new->fl_u.nfs_fl.owner = nlm_get_lockowner(fl->fl_u.nfs_fl.owner);
-	list_add_tail(&new->fl_u.nfs_fl.list, &fl->fl_u.nfs_fl.owner->host->h_granted);
+	memcpy(&new->fl_u.nfs_fl, &fl->fl_u.nfs_fl, sizeof(new->fl_u.nfs_fl));
+	nlm_get_lockowner(new->fl_u.nfs_fl.owner);
 }
 
 static void nlmclnt_locks_release_private(struct file_lock *fl)
 {
-	list_del(&fl->fl_u.nfs_fl.list);
 	nlm_put_lockowner(fl->fl_u.nfs_fl.owner);
+	fl->fl_ops = NULL;
 }
 
 static struct file_lock_operations nlmclnt_lock_ops = {
@@ -452,8 +504,8 @@ static void nlmclnt_locks_init_private(struct file_lock *fl, struct nlm_host *ho
 {
 	BUG_ON(fl->fl_ops != NULL);
 	fl->fl_u.nfs_fl.state = 0;
+	fl->fl_u.nfs_fl.flags = 0;
 	fl->fl_u.nfs_fl.owner = nlm_find_lockowner(host, fl->fl_owner);
-	INIT_LIST_HEAD(&fl->fl_u.nfs_fl.list);
 	fl->fl_ops = &nlmclnt_lock_ops;
 }
 
@@ -500,52 +552,57 @@ nlmclnt_lock(struct nlm_rqst *req, struct file_lock *fl)
 {
 	struct nlm_host	*host = req->a_host;
 	struct nlm_res	*resp = &req->a_res;
-	struct nlm_wait *block = NULL;
-	int status = -ENOLCK;
+	long timeout;
+	int status;
 
 	if (!host->h_monitored && nsm_monitor(host) < 0) {
 		printk(KERN_NOTICE "lockd: failed to monitor %s\n",
 					host->h_name);
+		status = -ENOLCK;
 		goto out;
 	}
 
-	block = nlmclnt_prepare_block(host, fl);
+	if (req->a_args.block) {
+		status = nlmclnt_prepare_block(req, host, fl);
+		if (status < 0)
+			goto out;
+	}
 	for(;;) {
 		status = nlmclnt_call(req, NLMPROC_LOCK);
 		if (status < 0)
 			goto out_unblock;
-		if (!req->a_args.block)
+		if (resp->status != NLM_LCK_BLOCKED)
 			break;
+		/* Wait on an NLM blocking lock */
+		timeout = nlmclnt_block(req, NLMCLNT_POLL_TIMEOUT);
 		/* Did a reclaimer thread notify us of a server reboot? */
 		if (resp->status ==  NLM_LCK_DENIED_GRACE_PERIOD)
 			continue;
 		if (resp->status != NLM_LCK_BLOCKED)
 			break;
-		/* Wait on an NLM blocking lock */
-		status = nlmclnt_block(block, req, NLMCLNT_POLL_TIMEOUT);
-		/* if we were interrupted. Send a CANCEL request to the server
+		if (timeout >= 0)
+			continue;
+		/* We were interrupted. Send a CANCEL request to the server
 		 * and exit
 		 */
-		if (status < 0)
-			goto out_unblock;
-		if (resp->status != NLM_LCK_BLOCKED)
-			break;
+		status = (int)timeout;
+		goto out_unblock;
 	}
 
 	if (resp->status == NLM_LCK_GRANTED) {
 		fl->fl_u.nfs_fl.state = host->h_state;
+		fl->fl_u.nfs_fl.flags |= NFS_LCK_GRANTED;
 		fl->fl_flags |= FL_SLEEP;
-		/* Ensure the resulting lock will get added to granted list */
 		do_vfs_lock(fl);
 	}
 	status = nlm_stat_to_errno(resp->status);
 out_unblock:
-	nlmclnt_finish_block(block);
+	nlmclnt_finish_block(req);
 	/* Cancel the blocked request if it is still pending */
 	if (resp->status == NLM_LCK_BLOCKED)
 		nlmclnt_cancel(host, req->a_args.block, fl);
 out:
-	nlm_release_call(req);
+	nlmclnt_release_lockargs(req);
 	return status;
 }
 
@@ -601,6 +658,10 @@ nlmclnt_unlock(struct nlm_rqst *req, struct file_lock *fl)
 	struct nlm_res	*resp = &req->a_res;
 	int		status;
 
+	/* Clean the GRANTED flag now so the lock doesn't get
+	 * reclaimed while we're stuck in the unlock call. */
+	fl->fl_u.nfs_fl.flags &= ~NFS_LCK_GRANTED;
+
 	/*
 	 * Note: the server is supposed to either grant us the unlock
 	 * request, or to deny it with NLM_LCK_DENIED_GRACE_PERIOD. In either
@@ -608,24 +669,32 @@ nlmclnt_unlock(struct nlm_rqst *req, struct file_lock *fl)
 	 */
 	do_vfs_lock(fl);
 
-	if (req->a_flags & RPC_TASK_ASYNC)
-		return nlm_async_call(req, NLMPROC_UNLOCK, &nlmclnt_unlock_ops);
+	if (req->a_flags & RPC_TASK_ASYNC) {
+		status = nlmclnt_async_call(req, NLMPROC_UNLOCK,
+					&nlmclnt_unlock_ops);
+		/* Hrmf... Do the unlock early since locks_remove_posix()
+		 * really expects us to free the lock synchronously */
+		if (status < 0) {
+			nlmclnt_release_lockargs(req);
+			kfree(req);
+		}
+		return status;
+	}
 
 	status = nlmclnt_call(req, NLMPROC_UNLOCK);
+	nlmclnt_release_lockargs(req);
 	if (status < 0)
-		goto out;
+		return status;
 
-	status = 0;
 	if (resp->status == NLM_LCK_GRANTED)
-		goto out;
+		return 0;
 
 	if (resp->status != NLM_LCK_DENIED_NOLOCKS)
 		printk("lockd: unexpected unlock status: %d\n", resp->status);
+
 	/* What to do now? I'm out of my depth... */
-	status = -ENOLCK;
-out:
-	nlm_release_call(req);
-	return status;
+
+	return -ENOLCK;
 }
 
 static void nlmclnt_unlock_callback(struct rpc_task *task, void *data)
@@ -647,6 +716,9 @@ static void nlmclnt_unlock_callback(struct rpc_task *task, void *data)
 	if (status != NLM_LCK_GRANTED)
 		printk(KERN_WARNING "lockd: unexpected unlock status: %d\n", status);
 die:
+	nlm_release_host(req->a_host);
+	nlmclnt_release_lockargs(req);
+	kfree(req);
 	return;
  retry_rebind:
 	nlm_rebind_host(req->a_host);
@@ -656,7 +728,6 @@ die:
 
 static const struct rpc_call_ops nlmclnt_unlock_ops = {
 	.rpc_call_done = nlmclnt_unlock_callback,
-	.rpc_release = nlmclnt_rpc_release,
 };
 
 /*
@@ -678,15 +749,20 @@ static int nlmclnt_cancel(struct nlm_host *host, int block, struct file_lock *fl
 	recalc_sigpending();
 	spin_unlock_irqrestore(&current->sighand->siglock, flags);
 
-	req = nlm_alloc_call(nlm_get_host(host));
+	req = nlmclnt_alloc_call();
 	if (!req)
 		return -ENOMEM;
+	req->a_host  = host;
 	req->a_flags = RPC_TASK_ASYNC;
 
 	nlmclnt_setlockargs(req, fl);
 	req->a_args.block = block;
 
-	status = nlm_async_call(req, NLMPROC_CANCEL, &nlmclnt_cancel_ops);
+	status = nlmclnt_async_call(req, NLMPROC_CANCEL, &nlmclnt_cancel_ops);
+	if (status < 0) {
+		nlmclnt_release_lockargs(req);
+		kfree(req);
+	}
 
 	spin_lock_irqsave(&current->sighand->siglock, flags);
 	current->blocked = oldset;
@@ -715,7 +791,6 @@ static void nlmclnt_cancel_callback(struct rpc_task *task, void *data)
 	switch (req->a_res.status) {
 	case NLM_LCK_GRANTED:
 	case NLM_LCK_DENIED_GRACE_PERIOD:
-	case NLM_LCK_DENIED:
 		/* Everything's good */
 		break;
 	case NLM_LCK_DENIED_NOLOCKS:
@@ -727,6 +802,9 @@ static void nlmclnt_cancel_callback(struct rpc_task *task, void *data)
 	}
 
 die:
+	nlm_release_host(req->a_host);
+	nlmclnt_release_lockargs(req);
+	kfree(req);
 	return;
 
 retry_cancel:
@@ -740,7 +818,6 @@ retry_cancel:
 
 static const struct rpc_call_ops nlmclnt_cancel_ops = {
 	.rpc_call_done = nlmclnt_cancel_callback,
-	.rpc_release = nlmclnt_rpc_release,
 };
 
 /*

@@ -19,7 +19,6 @@
 #include <linux/uio.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
-#include <linux/mutex.h>
 
 #include <asm/uaccess.h>
 
@@ -30,7 +29,7 @@ struct raw_device_data {
 
 static struct class *raw_class;
 static struct raw_device_data raw_devices[MAX_RAW_MINORS];
-static DEFINE_MUTEX(raw_mutex);
+static DECLARE_MUTEX(raw_mutex);
 static struct file_operations raw_ctl_fops;	     /* forward declaration */
 
 /*
@@ -54,7 +53,7 @@ static int raw_open(struct inode *inode, struct file *filp)
 		return 0;
 	}
 
-	mutex_lock(&raw_mutex);
+	down(&raw_mutex);
 
 	/*
 	 * All we need to do on open is check that the device is bound.
@@ -79,7 +78,7 @@ static int raw_open(struct inode *inode, struct file *filp)
 		filp->f_dentry->d_inode->i_mapping =
 			bdev->bd_inode->i_mapping;
 	filp->private_data = bdev;
-	mutex_unlock(&raw_mutex);
+	up(&raw_mutex);
 	return 0;
 
 out2:
@@ -87,7 +86,7 @@ out2:
 out1:
 	blkdev_put(bdev);
 out:
-	mutex_unlock(&raw_mutex);
+	up(&raw_mutex);
 	return err;
 }
 
@@ -100,14 +99,14 @@ static int raw_release(struct inode *inode, struct file *filp)
 	const int minor= iminor(inode);
 	struct block_device *bdev;
 
-	mutex_lock(&raw_mutex);
+	down(&raw_mutex);
 	bdev = raw_devices[minor].binding;
 	if (--raw_devices[minor].inuse == 0) {
 		/* Here  inode->i_mapping == bdev->bd_inode->i_mapping  */
 		inode->i_mapping = &inode->i_data;
 		inode->i_mapping->backing_dev_info = &default_backing_dev_info;
 	}
-	mutex_unlock(&raw_mutex);
+	up(&raw_mutex);
 
 	bd_release(bdev);
 	blkdev_put(bdev);
@@ -188,9 +187,9 @@ static int raw_ctl_ioctl(struct inode *inode, struct file *filp,
 				goto out;
 			}
 
-			mutex_lock(&raw_mutex);
+			down(&raw_mutex);
 			if (rawdev->inuse) {
-				mutex_unlock(&raw_mutex);
+				up(&raw_mutex);
 				err = -EBUSY;
 				goto out;
 			}
@@ -212,11 +211,11 @@ static int raw_ctl_ioctl(struct inode *inode, struct file *filp,
 					bind_device(&rq);
 				}
 			}
-			mutex_unlock(&raw_mutex);
+			up(&raw_mutex);
 		} else {
 			struct block_device *bdev;
 
-			mutex_lock(&raw_mutex);
+			down(&raw_mutex);
 			bdev = rawdev->binding;
 			if (bdev) {
 				rq.block_major = MAJOR(bdev->bd_dev);
@@ -224,7 +223,7 @@ static int raw_ctl_ioctl(struct inode *inode, struct file *filp,
 			} else {
 				rq.block_major = rq.block_minor = 0;
 			}
-			mutex_unlock(&raw_mutex);
+			up(&raw_mutex);
 			if (copy_to_user((void __user *)arg, &rq, sizeof(rq))) {
 				err = -EFAULT;
 				goto out;

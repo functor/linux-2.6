@@ -33,7 +33,7 @@ dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle,
 {
 	BUG_ON(dev->bus != &pci_bus_type);
 
-	return pci_iommu_ops->alloc_consistent(to_pci_dev(dev), size, dma_handle, flag);
+	return __pci_alloc_consistent(to_pci_dev(dev), size, dma_handle, flag);
 }
 
 static inline void

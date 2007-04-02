@@ -37,8 +37,7 @@
 #include <linux/sched.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
-#include <linux/mutex.h>
-
+#include <asm/semaphore.h>
 #include <linux/pci.h>
 #include <linux/videodev.h>
 
@@ -102,7 +101,7 @@ static struct radio_device
 		
 	unsigned long freq;
 	
-	struct mutex lock;
+	struct  semaphore lock;
 } radio_unit = {0, 0, 0, 0, };
 
 
@@ -268,9 +267,9 @@ static int radio_ioctl(struct inode *inode, struct file *file,
 	struct radio_device *card=dev->priv;
 	int ret;
 	
-	mutex_lock(&card->lock);
+	down(&card->lock);
 	ret = video_usercopy(inode, file, cmd, arg, radio_function);
-	mutex_unlock(&card->lock);
+	up(&card->lock);
 	return ret;
 }
 
@@ -291,7 +290,7 @@ static int __devinit maxiradio_init_one(struct pci_dev *pdev, const struct pci_d
 	        goto err_out_free_region;
 
 	radio_unit.io = pci_resource_start(pdev, 0);
-	mutex_init(&radio_unit.lock);
+	init_MUTEX(&radio_unit.lock);
 	maxiradio_radio.priv = &radio_unit;
 
 	if(video_register_device(&maxiradio_radio, VFL_TYPE_RADIO, radio_nr)==-1) {

@@ -12,9 +12,7 @@
 #define POLLWRNORM	(1 << 8)
 #define POLLWRBAND	(1 << 9)
 #define POLLMSG		(1 << 10)
-#define POLLREMOVE	(1 << 12)
-#define POLLRDHUP       (1 << 13)
-
+#define POLLREMOVE	(1 << 11)
 
 struct pollfd {
 	int fd;

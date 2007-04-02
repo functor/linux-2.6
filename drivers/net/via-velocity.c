@@ -1905,13 +1905,6 @@ static int velocity_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	int pktlen = skb->len;
 
-#ifdef VELOCITY_ZERO_COPY_SUPPORT
-	if (skb_shinfo(skb)->nr_frags > 6 && __skb_linearize(skb)) {
-		kfree_skb(skb);
-		return 0;
-	}
-#endif
-
 	spin_lock_irqsave(&vptr->lock, flags);
 
 	index = vptr->td_curr[qnum];
@@ -1927,6 +1920,8 @@ static int velocity_xmit(struct sk_buff *skb, struct net_device *dev)
 	 */
 	if (pktlen < ETH_ZLEN) {
 		/* Cannot occur until ZC support */
+		if(skb_linearize(skb, GFP_ATOMIC))
+			return 0; 
 		pktlen = ETH_ZLEN;
 		memcpy(tdinfo->buf, skb->data, skb->len);
 		memset(tdinfo->buf + skb->len, 0, ETH_ZLEN - skb->len);
@@ -1944,6 +1939,7 @@ static int velocity_xmit(struct sk_buff *skb, struct net_device *dev)
 		int nfrags = skb_shinfo(skb)->nr_frags;
 		tdinfo->skb = skb;
 		if (nfrags > 6) {
+			skb_linearize(skb, GFP_ATOMIC);
 			memcpy(tdinfo->buf, skb->data, skb->len);
 			tdinfo->skb_dma[0] = tdinfo->buf_dma;
 			td_ptr->tdesc0.pktsize = 
@@ -2746,7 +2742,7 @@ static u32 check_connection_type(struct mac_regs __iomem * regs)
 
 	if (PHYSR0 & PHYSR0_SPDG)
 		status |= VELOCITY_SPEED_1000;
-	if (PHYSR0 & PHYSR0_SPD10)
+	else if (PHYSR0 & PHYSR0_SPD10)
 		status |= VELOCITY_SPEED_10;
 	else
 		status |= VELOCITY_SPEED_100;
@@ -2855,8 +2851,17 @@ static int velocity_get_settings(struct net_device *dev, struct ethtool_cmd *cmd
 	u32 status;
 	status = check_connection_type(vptr->mac_regs);
 
-	cmd->supported = SUPPORTED_TP | SUPPORTED_Autoneg | SUPPORTED_10baseT_Half | SUPPORTED_10baseT_Full | SUPPORTED_100baseT_Half | SUPPORTED_100baseT_Full | SUPPORTED_1000baseT_Half | SUPPORTED_1000baseT_Full;
-	if (status & VELOCITY_SPEED_100)
+	cmd->supported = SUPPORTED_TP |
+			SUPPORTED_Autoneg |
+			SUPPORTED_10baseT_Half |
+			SUPPORTED_10baseT_Full |
+			SUPPORTED_100baseT_Half |
+			SUPPORTED_100baseT_Full |
+			SUPPORTED_1000baseT_Half |
+			SUPPORTED_1000baseT_Full;
+	if (status & VELOCITY_SPEED_1000)
+		cmd->speed = SPEED_1000;
+	else if (status & VELOCITY_SPEED_100)
 		cmd->speed = SPEED_100;
 	else
 		cmd->speed = SPEED_10;
@@ -2900,7 +2905,7 @@ static u32 velocity_get_link(struct net_device *dev)
 {
 	struct velocity_info *vptr = dev->priv;
 	struct mac_regs __iomem * regs = vptr->mac_regs;
-	return BYTE_REG_BITS_IS_ON(PHYSR0_LINKGD, &regs->PHYSR0)  ? 0 : 1;
+	return BYTE_REG_BITS_IS_ON(PHYSR0_LINKGD, &regs->PHYSR0) ? 1 : 0;
 }
 
 static void velocity_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)

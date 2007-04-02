@@ -190,10 +190,6 @@ struct posix_acl *nfs3_proc_getacl(struct inode *inode, int type)
 	struct nfs3_getaclres res = {
 		.fattr =	&fattr,
 	};
-	struct rpc_message msg = {
-		.rpc_argp	= &args,
-		.rpc_resp	= &res,
-	};
 	struct posix_acl *acl;
 	int status, count;
 
@@ -222,8 +218,8 @@ struct posix_acl *nfs3_proc_getacl(struct inode *inode, int type)
 		return NULL;
 
 	dprintk("NFS call getacl\n");
-	msg.rpc_proc = &server->client_acl->cl_procinfo[ACLPROC3_GETACL];
-	status = rpc_call_sync(server->client_acl, &msg, 0);
+	status = rpc_call(server->client_acl, ACLPROC3_GETACL,
+			  &args, &res, 0);
 	dprintk("NFS reply getacl: %d\n", status);
 
 	/* pages may have been allocated at the xdr layer. */
@@ -290,10 +286,6 @@ static int nfs3_proc_setacls(struct inode *inode, struct posix_acl *acl,
 		.acl_access = acl,
 		.pages = pages,
 	};
-	struct rpc_message msg = {
-		.rpc_argp	= &args,
-		.rpc_resp	= &fattr,
-	};
 	int status, count;
 
 	status = -EOPNOTSUPP;
@@ -314,8 +306,8 @@ static int nfs3_proc_setacls(struct inode *inode, struct posix_acl *acl,
 
 	dprintk("NFS call setacl\n");
 	nfs_begin_data_update(inode);
-	msg.rpc_proc = &server->client_acl->cl_procinfo[ACLPROC3_SETACL];
-	status = rpc_call_sync(server->client_acl, &msg, 0);
+	status = rpc_call(server->client_acl, ACLPROC3_SETACL,
+			  &args, &fattr, 0);
 	spin_lock(&inode->i_lock);
 	NFS_I(inode)->cache_validity |= NFS_INO_INVALID_ACCESS;
 	spin_unlock(&inode->i_lock);

@@ -284,8 +284,6 @@ do {									\
 #define instruction_hazard() do { } while (0)
 #endif
 
-extern void mips_ihb(void);
-
 #endif /* __ASSEMBLY__ */
 
 #endif /* _ASM_HAZARDS_H */

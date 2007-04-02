@@ -92,7 +92,7 @@ static inline void *tipc_ref_lock(u32 ref)
 			return r->object;
 		spin_unlock_bh(&r->lock);
 	}
-	return NULL;
+	return 0;
 }
 
 /**
@@ -125,7 +125,7 @@ static inline void *tipc_ref_deref(u32 ref)
 		if (likely(r->data.reference == ref))
 			return r->object;
 	}
-	return NULL;
+	return 0;
 }
 
 #endif

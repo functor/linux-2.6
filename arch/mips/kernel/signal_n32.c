@@ -87,8 +87,7 @@ save_static_function(sysn32_rt_sigsuspend);
 __attribute_used__ noinline static int
 _sysn32_rt_sigsuspend(nabi_no_regargs struct pt_regs regs)
 {
-	compat_sigset_t __user *unewset;
-	compat_sigset_t uset;
+	compat_sigset_t __user *unewset, uset;
 	size_t sigsetsize;
 	sigset_t newset;
 
@@ -142,7 +141,7 @@ _sysn32_rt_sigreturn(nabi_no_regargs struct pt_regs regs)
 	/* The ucontext contains a stack32_t, so we must convert!  */
 	if (__get_user(sp, &frame->rs_uc.uc_stack.ss_sp))
 		goto badframe;
-	st.ss_sp = (void __user *)(long) sp;
+	st.ss_sp = (void *)(long) sp;
 	if (__get_user(st.ss_size, &frame->rs_uc.uc_stack.ss_size))
 		goto badframe;
 	if (__get_user(st.ss_flags, &frame->rs_uc.uc_stack.ss_flags))

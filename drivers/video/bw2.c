@@ -327,7 +327,8 @@ static void bw2_init_one(struct sbus_dev *sdev)
 	} else
 #else
 	{
-		BUG_ON(!sdev);
+		if (!sdev)
+			BUG();
 		all->par.physbase = sdev->reg_addrs[0].phys_addr;
 		resp = &sdev->resource[0];
 		sbusfb_fill_var(&all->info.var, (sdev ? sdev->prom_node : 0), 1);

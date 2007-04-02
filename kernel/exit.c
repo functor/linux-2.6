@@ -29,13 +29,8 @@
 #include <linux/cpuset.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
-#include <linux/posix-timers.h>
 #include <linux/cn_proc.h>
 #include <linux/mutex.h>
-#include <linux/futex.h>
-#include <linux/compat.h>
-#include <linux/pipe_fs_i.h>
-#include <linux/audit.h> /* for audit_free() */
 #include <linux/vs_limit.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
@@ -57,85 +52,15 @@ static void __unhash_process(struct task_struct *p)
 {
 	nr_threads--;
 	detach_pid(p, PIDTYPE_PID);
+	detach_pid(p, PIDTYPE_TGID);
 	if (thread_group_leader(p)) {
 		detach_pid(p, PIDTYPE_PGID);
 		detach_pid(p, PIDTYPE_SID);
-
-		list_del_rcu(&p->tasks);
-		__get_cpu_var(process_counts)--;
-	}
-	list_del_rcu(&p->thread_group);
-	remove_parent(p);
-}
-
-/*
- * This function expects the tasklist_lock write-locked.
- */
-static void __exit_signal(struct task_struct *tsk)
-{
-	struct signal_struct *sig = tsk->signal;
-	struct sighand_struct *sighand;
-
-	BUG_ON(!sig);
-	BUG_ON(!atomic_read(&sig->count));
-
-	rcu_read_lock();
-	sighand = rcu_dereference(tsk->sighand);
-	spin_lock(&sighand->siglock);
-
-	posix_cpu_timers_exit(tsk);
-	if (atomic_dec_and_test(&sig->count))
-		posix_cpu_timers_exit_group(tsk);
-	else {
-		/*
-		 * If there is any task waiting for the group exit
-		 * then notify it:
-		 */
-		if (sig->group_exit_task && atomic_read(&sig->count) == sig->notify_count) {
-			wake_up_process(sig->group_exit_task);
-			sig->group_exit_task = NULL;
-		}
-		if (tsk == sig->curr_target)
-			sig->curr_target = next_thread(tsk);
-		/*
-		 * Accumulate here the counters for all threads but the
-		 * group leader as they die, so they can be added into
-		 * the process-wide totals when those are taken.
-		 * The group leader stays around as a zombie as long
-		 * as there are other threads.  When it gets reaped,
-		 * the exit.c code will add its counts into these totals.
-		 * We won't ever get here for the group leader, since it
-		 * will have been the last reference on the signal_struct.
-		 */
-		sig->utime = cputime_add(sig->utime, tsk->utime);
-		sig->stime = cputime_add(sig->stime, tsk->stime);
-		sig->min_flt += tsk->min_flt;
-		sig->maj_flt += tsk->maj_flt;
-		sig->nvcsw += tsk->nvcsw;
-		sig->nivcsw += tsk->nivcsw;
-		sig->sched_time += tsk->sched_time;
-		sig = NULL; /* Marker for below. */
+		if (p->pid)
+			__get_cpu_var(process_counts)--;
 	}
 
-	__unhash_process(tsk);
-
-	tsk->signal = NULL;
-	tsk->sighand = NULL;
-	spin_unlock(&sighand->siglock);
-	rcu_read_unlock();
-
-	__cleanup_sighand(sighand);
-	clear_tsk_thread_flag(tsk,TIF_SIGPENDING);
-	flush_sigqueue(&tsk->pending);
-	if (sig) {
-		flush_sigqueue(&sig->shared_pending);
-		__cleanup_signal(sig);
-	}
-}
-
-static void delayed_put_task_struct(struct rcu_head *rhp)
-{
-	put_task_struct(container_of(rhp, struct task_struct, rcu));
+	REMOVE_LINKS(p);
 }
 
 void release_task(struct task_struct * p)
@@ -144,14 +69,21 @@ void release_task(struct task_struct * p)
 	task_t *leader;
 	struct dentry *proc_dentry;
 
-repeat:
+repeat: 
 	atomic_dec(&p->user->processes);
 	spin_lock(&p->proc_lock);
 	proc_dentry = proc_pid_unhash(p);
 	write_lock_irq(&tasklist_lock);
-	ptrace_unlink(p);
+	if (unlikely(p->ptrace))
+		__ptrace_unlink(p);
 	BUG_ON(!list_empty(&p->ptrace_list) || !list_empty(&p->ptrace_children));
 	__exit_signal(p);
+	/*
+	 * Note that the fastpath in sys_times depends on __exit_signal having
+	 * updated the counters before a task is removed from the tasklist of
+	 * the process by __unhash_process.
+	 */
+	__unhash_process(p);
 
 	/*
 	 * If we are the last non-leader member of the thread
@@ -179,11 +111,26 @@ repeat:
 	spin_unlock(&p->proc_lock);
 	proc_pid_flush(proc_dentry);
 	release_thread(p);
-	call_rcu(&p->rcu, delayed_put_task_struct);
+	put_task_struct(p);
 
 	p = leader;
 	if (unlikely(zap_leader))
 		goto repeat;
+}
+
+/* we are using it only for SMP init */
+
+void unhash_process(struct task_struct *p)
+{
+	struct dentry *proc_dentry;
+
+	spin_lock(&p->proc_lock);
+	proc_dentry = proc_pid_unhash(p);
+	write_lock_irq(&tasklist_lock);
+	__unhash_process(p);
+	write_unlock_irq(&tasklist_lock);
+	spin_unlock(&p->proc_lock);
+	proc_pid_flush(proc_dentry);
 }
 
 /*
@@ -293,10 +240,10 @@ static void reparent_to_init(void)
 
 	ptrace_unlink(current);
 	/* Reparent to init */
-	remove_parent(current);
+	REMOVE_LINKS(current);
 	current->parent = child_reaper;
 	current->real_parent = child_reaper;
-	add_parent(current);
+	SET_LINKS(current);
 
 	/* Set the exit signal to SIGCHLD so we signal init on exit */
 	current->exit_signal = SIGCHLD;
@@ -402,9 +349,9 @@ void daemonize(const char *name, ...)
 	exit_mm(current);
 
 	set_special_pids(1, 1);
-	mutex_lock(&tty_mutex);
+	down(&tty_sem);
 	current->signal->tty = NULL;
-	mutex_unlock(&tty_mutex);
+	up(&tty_sem);
 
 	/* Block and flush all signals */
 	sigfillset(&blocked);
@@ -457,7 +404,6 @@ static void close_files(struct files_struct * files)
 			}
 			i++;
 			set >>= 1;
-			cond_resched();
 		}
 	}
 }
@@ -606,7 +552,7 @@ static inline void choose_new_parent(task_t *p, task_t *reaper)
 	 * Make sure we're not reparenting to ourselves and that
 	 * the parent is not a zombie.
 	 */
-	BUG_ON(p == reaper || reaper->exit_state);
+	BUG_ON(p == reaper || reaper->exit_state >= EXIT_ZOMBIE);
 	p->real_parent = reaper;
 }
 
@@ -631,9 +577,9 @@ static void reparent_thread(task_t *p, task_t *father, int traced)
 		 * anyway, so let go of it.
 		 */
 		p->ptrace = 0;
-		remove_parent(p);
+		list_del_init(&p->sibling);
 		p->parent = p->real_parent;
-		add_parent(p);
+		list_add_tail(&p->sibling, &p->parent->children);
 
 		/* If we'd notified the old parent about this child's death,
 		 * also notify the new parent.
@@ -728,6 +674,7 @@ static void forget_original_parent(struct task_struct * father,
 	}
 	list_for_each_safe(_p, _n, &father->ptrace_children) {
 		p = list_entry(_p,struct task_struct,ptrace_list);
+
 		choose_new_parent(p, reaper);
 		reparent_thread(p, father, 1);
 	}
@@ -869,8 +816,10 @@ fastcall NORET_TYPE void do_exit(long code)
 		panic("Aiee, killing interrupt handler!");
 	if (unlikely(!tsk->pid))
 		panic("Attempted to kill the idle task!");
-	if (unlikely(tsk == child_reaper))
+	if (unlikely(tsk->pid == 1))
 		panic("Attempted to kill init!");
+	if (tsk->io_context)
+		exit_io_context();
 
 	if (unlikely(current->ptrace & PT_TRACE_EXIT)) {
 		current->ptrace_message = code;
@@ -884,8 +833,6 @@ fastcall NORET_TYPE void do_exit(long code)
 	if (unlikely(tsk->flags & PF_EXITING)) {
 		printk(KERN_ALERT
 			"Fixing recursive fault but reboot is needed!\n");
-		if (tsk->io_context)
-			exit_io_context();
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule();
 	}
@@ -907,30 +854,13 @@ fastcall NORET_TYPE void do_exit(long code)
  		hrtimer_cancel(&tsk->signal->real_timer);
 		exit_itimers(tsk->signal);
 		acct_process(code);
-		if (current->tux_info) {
-#ifdef CONFIG_TUX_DEBUG
-			printk("Possibly unexpected TUX-thread exit(%ld) at %p?\n",
-				code, __builtin_return_address(0));
-#endif
-			current->tux_exit();
-		}
 	}
-	if (unlikely(tsk->robust_list))
-		exit_robust_list(tsk);
-#if defined(CONFIG_FUTEX) && defined(CONFIG_COMPAT)
-	if (unlikely(tsk->compat_robust_list))
-		compat_exit_robust_list(tsk);
-#endif
-	if (unlikely(tsk->audit_context))
-		audit_free(tsk);
 	exit_mm(tsk);
 
 	exit_sem(tsk);
 	__exit_files(tsk);
 	__exit_fs(tsk);
 	exit_namespace(tsk);
-	exit_vx_info(tsk, code);
-	exit_nx_info(tsk);
 	exit_thread();
 	cpuset_exit(tsk);
 	exit_keys(tsk);
@@ -944,6 +874,8 @@ fastcall NORET_TYPE void do_exit(long code)
 
 	tsk->exit_code = code;
 	proc_exit_connector(tsk);
+	/* needs to stay before exit_notify() */
+	exit_vx_info_early(tsk, code);
 	exit_notify(tsk);
 #ifdef CONFIG_NUMA
 	mpol_free(tsk->mempolicy);
@@ -954,11 +886,9 @@ fastcall NORET_TYPE void do_exit(long code)
 	 */
 	mutex_debug_check_no_locks_held(tsk);
 
-	if (tsk->io_context)
-		exit_io_context();
-
-	if (tsk->splice_pipe)
-		__free_pipe_info(tsk->splice_pipe);
+	/* needs to stay after exit_notify() */
+	exit_vx_info(tsk, code);
+	exit_nx_info(tsk);
 
 	/* PF_DEAD causes final put_task_struct after we schedule. */
 	preempt_disable();
@@ -988,6 +918,13 @@ asmlinkage long sys_exit(int error_code)
 	do_exit((error_code&0xff)<<8);
 }
 
+task_t fastcall *next_thread(const task_t *p)
+{
+	return pid_task(p->pids[PIDTYPE_TGID].pid_list.next, PIDTYPE_TGID);
+}
+
+EXPORT_SYMBOL(next_thread);
+
 /*
  * Take down every thread in the group.  This is called by fatal signals
  * as well as by sys_exit_group (below).
@@ -1002,6 +939,7 @@ do_group_exit(int exit_code)
 	else if (!thread_group_empty(current)) {
 		struct signal_struct *const sig = current->signal;
 		struct sighand_struct *const sighand = current->sighand;
+		read_lock(&tasklist_lock);
 		spin_lock_irq(&sighand->siglock);
 		if (sig->flags & SIGNAL_GROUP_EXIT)
 			/* Another thread got here before we took the lock.  */
@@ -1011,6 +949,7 @@ do_group_exit(int exit_code)
 			zap_other_threads(current);
 		}
 		spin_unlock_irq(&sighand->siglock);
+		read_unlock(&tasklist_lock);
 	}
 
 	do_exit(exit_code);
@@ -1340,7 +1279,7 @@ bail_ref:
 
 	/* move to end of parent's list to avoid starvation */
 	remove_parent(p);
-	add_parent(p);
+	add_parent(p, p->parent);
 
 	write_unlock_irq(&tasklist_lock);
 

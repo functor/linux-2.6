@@ -12,7 +12,6 @@
 #include <linux/unistd.h>
 #include <linux/file.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <asm/semaphore.h>
 
 /*
@@ -42,7 +41,7 @@ struct kthread_stop_info
 
 /* Thread stopping is done by setthing this var: lock serializes
  * multiple kthread_stop calls. */
-static DEFINE_MUTEX(kthread_stop_lock);
+static DECLARE_MUTEX(kthread_stop_lock);
 static struct kthread_stop_info kthread_stop_info;
 
 int kthread_should_stop(void)
@@ -115,9 +114,7 @@ static void keventd_create_kthread(void *_create)
 		create->result = ERR_PTR(pid);
 	} else {
 		wait_for_completion(&create->started);
-		read_lock(&tasklist_lock);
 		create->result = find_task_by_real_pid(pid);
-		read_unlock(&tasklist_lock);
 	}
 	complete(&create->done);
 }
@@ -176,7 +173,7 @@ int kthread_stop_sem(struct task_struct *k, struct semaphore *s)
 {
 	int ret;
 
-	mutex_lock(&kthread_stop_lock);
+	down(&kthread_stop_lock);
 
 	/* It could exit after stop_info.k set, but before wake_up_process. */
 	get_task_struct(k);
@@ -197,7 +194,7 @@ int kthread_stop_sem(struct task_struct *k, struct semaphore *s)
 	wait_for_completion(&kthread_stop_info.done);
 	kthread_stop_info.k = NULL;
 	ret = kthread_stop_info.err;
-	mutex_unlock(&kthread_stop_lock);
+	up(&kthread_stop_lock);
 
 	return ret;
 }
