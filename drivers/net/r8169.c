@@ -113,11 +113,11 @@ static int media[MAX_UNITS] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 static int num_media = 0;
 
 /* Maximum events (Rx packets, etc.) to handle at each interrupt. */
-static const int max_interrupt_work = 20;
+static int max_interrupt_work = 20;
 
 /* Maximum number of multicast addresses to filter (vs. Rx-all-multicast).
    The RTL chips use a 64 element hash table based on the Ethernet CRC. */
-static const int multicast_filter_limit = 32;
+static int multicast_filter_limit = 32;
 
 /* MAC address length */
 #define MAC_ADDR_LEN	6
@@ -184,7 +184,6 @@ static const struct {
 
 static struct pci_device_id rtl8169_pci_tbl[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8169), },
-	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8129), },
 	{ PCI_DEVICE(PCI_VENDOR_ID_DLINK,	0x4300), },
 	{ PCI_DEVICE(0x16ec,			0x0116), },
 	{ PCI_VENDOR_ID_LINKSYS,		0x1032, PCI_ANY_ID, 0x0024, },
@@ -195,6 +194,7 @@ MODULE_DEVICE_TABLE(pci, rtl8169_pci_tbl);
 
 static int rx_copybreak = 200;
 static int use_dac;
+static int ignore_parity_err;
 static struct {
 	u32 msg_enable;
 } debug = { -1 };
@@ -257,10 +257,11 @@ enum RTL8169_register_content {
 	RxOK = 0x01,
 
 	/* RxStatusDesc */
-	RxRES = 0x00200000,
-	RxCRC = 0x00080000,
-	RxRUNT = 0x00100000,
-	RxRWT = 0x00400000,
+	RxFOVF	= (1 << 23),
+	RxRWT	= (1 << 22),
+	RxRES	= (1 << 21),
+	RxRUNT	= (1 << 20),
+	RxCRC	= (1 << 19),
 
 	/* ChipCmdBits */
 	CmdReset = 0x10,
@@ -461,6 +462,8 @@ module_param(use_dac, int, 0);
 MODULE_PARM_DESC(use_dac, "Enable PCI DAC. Unsafe on 32 bit PCI slot.");
 module_param_named(debug, debug.msg_enable, int, 0);
 MODULE_PARM_DESC(debug, "Debug verbosity level (0=none, ..., 16=all)");
+module_param_named(ignore_parity_err, ignore_parity_err, bool, 0);
+MODULE_PARM_DESC(ignore_parity_err, "Ignore PCI parity error as target. Default: false");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(RTL8169_VERSION);
 
@@ -1406,7 +1409,7 @@ rtl8169_init_board(struct pci_dev *pdev, struct net_device **dev_out,
 	dev = alloc_etherdev(sizeof (*tp));
 	if (dev == NULL) {
 		if (netif_msg_drv(&debug))
-			dev_err(&pdev->dev, "unable to alloc new ethernet\n");
+			printk(KERN_ERR PFX "unable to alloc new ethernet\n");
 		goto err_out;
 	}
 
@@ -1418,8 +1421,10 @@ rtl8169_init_board(struct pci_dev *pdev, struct net_device **dev_out,
 	/* enable device (incl. PCI PM wakeup and hotplug setup) */
 	rc = pci_enable_device(pdev);
 	if (rc < 0) {
-		if (netif_msg_probe(tp))
-			dev_err(&pdev->dev, "enable failure\n");
+		if (netif_msg_probe(tp)) {
+			printk(KERN_ERR PFX "%s: enable failure\n",
+			       pci_name(pdev));
+		}
 		goto err_out_free_dev;
 	}
 
@@ -1435,32 +1440,37 @@ rtl8169_init_board(struct pci_dev *pdev, struct net_device **dev_out,
 		pci_read_config_word(pdev, pm_cap + PCI_PM_CTRL, &pwr_command);
 		acpi_idle_state = pwr_command & PCI_PM_CTRL_STATE_MASK;
 	} else {
-		if (netif_msg_probe(tp))
-			dev_err(&pdev->dev,
+		if (netif_msg_probe(tp)) {
+			printk(KERN_ERR PFX
 			       "PowerManagement capability not found.\n");
+		}
 	}
 
 	/* make sure PCI base addr 1 is MMIO */
 	if (!(pci_resource_flags(pdev, 1) & IORESOURCE_MEM)) {
-		if (netif_msg_probe(tp))
-			dev_err(&pdev->dev,
+		if (netif_msg_probe(tp)) {
+			printk(KERN_ERR PFX
 			       "region #1 not an MMIO resource, aborting\n");
+		}
 		rc = -ENODEV;
 		goto err_out_mwi;
 	}
 	/* check for weird/broken PCI region reporting */
 	if (pci_resource_len(pdev, 1) < R8169_REGS_SIZE) {
-		if (netif_msg_probe(tp))
-			dev_err(&pdev->dev,
+		if (netif_msg_probe(tp)) {
+			printk(KERN_ERR PFX
 			       "Invalid PCI region size(s), aborting\n");
+		}
 		rc = -ENODEV;
 		goto err_out_mwi;
 	}
 
 	rc = pci_request_regions(pdev, MODULENAME);
 	if (rc < 0) {
-		if (netif_msg_probe(tp))
-			dev_err(&pdev->dev, "could not request regions.\n");
+		if (netif_msg_probe(tp)) {
+			printk(KERN_ERR PFX "%s: could not request regions.\n",
+			       pci_name(pdev));
+		}
 		goto err_out_mwi;
 	}
 
@@ -1473,9 +1483,10 @@ rtl8169_init_board(struct pci_dev *pdev, struct net_device **dev_out,
 	} else {
 		rc = pci_set_dma_mask(pdev, DMA_32BIT_MASK);
 		if (rc < 0) {
-			if (netif_msg_probe(tp))
-				dev_err(&pdev->dev,
+			if (netif_msg_probe(tp)) {
+				printk(KERN_ERR PFX
 				       "DMA configuration failed.\n");
+			}
 			goto err_out_free_res;
 		}
 	}
@@ -1486,7 +1497,7 @@ rtl8169_init_board(struct pci_dev *pdev, struct net_device **dev_out,
 	ioaddr = ioremap(pci_resource_start(pdev, 1), R8169_REGS_SIZE);
 	if (ioaddr == NULL) {
 		if (netif_msg_probe(tp))
-			dev_err(&pdev->dev, "cannot remap MMIO, aborting\n");
+			printk(KERN_ERR PFX "cannot remap MMIO, aborting\n");
 		rc = -EIO;
 		goto err_out_free_res;
 	}
@@ -1518,9 +1529,9 @@ rtl8169_init_board(struct pci_dev *pdev, struct net_device **dev_out,
 	if (i < 0) {
 		/* Unknown chip: assume array element #0, original RTL-8169 */
 		if (netif_msg_probe(tp)) {
-			dev_printk(KERN_DEBUG, &pdev->dev,
+			printk(KERN_DEBUG PFX "PCI device %s: "
 			       "unknown chip version, assuming %s\n",
-			       rtl_chip_info[0].name);
+			       pci_name(pdev), rtl_chip_info[0].name);
 		}
 		i++;
 	}
@@ -1718,7 +1729,7 @@ static int rtl8169_open(struct net_device *dev)
 	rtl8169_set_rxbufsize(tp, dev);
 
 	retval =
-	    request_irq(dev->irq, rtl8169_interrupt, IRQF_SHARED, dev->name, dev);
+	    request_irq(dev->irq, rtl8169_interrupt, SA_SHIRQ, dev->name, dev);
 	if (retval < 0)
 		goto out;
 
@@ -2164,7 +2175,7 @@ static int rtl8169_xmit_frags(struct rtl8169_private *tp, struct sk_buff *skb,
 static inline u32 rtl8169_tso_csum(struct sk_buff *skb, struct net_device *dev)
 {
 	if (dev->features & NETIF_F_TSO) {
-		u32 mss = skb_shinfo(skb)->gso_size;
+		u32 mss = skb_shinfo(skb)->tso_size;
 
 		if (mss)
 			return LargeSend | ((mss & MSSMask) << MSSShift);
@@ -2214,7 +2225,8 @@ static int rtl8169_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		len = skb->len;
 
 		if (unlikely(len < ETH_ZLEN)) {
-			if (skb_padto(skb, ETH_ZLEN))
+			skb = skb_padto(skb, ETH_ZLEN);
+			if (!skb)
 				goto err_update_stats;
 			len = ETH_ZLEN;
 		}
@@ -2280,12 +2292,17 @@ static void rtl8169_pcierr_interrupt(struct net_device *dev)
 	/*
 	 * The recovery sequence below admits a very elaborated explanation:
 	 * - it seems to work;
-	 * - I did not see what else could be done.
+	 * - I did not see what else could be done;
+	 * - it makes iop3xx happy.
 	 *
 	 * Feel free to adjust to your needs.
 	 */
-	pci_write_config_word(pdev, PCI_COMMAND,
-			      pci_cmd | PCI_COMMAND_SERR | PCI_COMMAND_PARITY);
+	if (ignore_parity_err)
+		pci_cmd &= ~PCI_COMMAND_PARITY;
+	else
+		pci_cmd |= PCI_COMMAND_SERR | PCI_COMMAND_PARITY;
+
+	pci_write_config_word(pdev, PCI_COMMAND, pci_cmd);
 
 	pci_write_config_word(pdev, PCI_STATUS,
 		pci_status & (PCI_STATUS_DETECTED_PARITY |
@@ -2299,10 +2316,11 @@ static void rtl8169_pcierr_interrupt(struct net_device *dev)
 		tp->cp_cmd &= ~PCIDAC;
 		RTL_W16(CPlusCmd, tp->cp_cmd);
 		dev->features &= ~NETIF_F_HIGHDMA;
-		rtl8169_schedule_work(dev, rtl8169_reinit_task);
 	}
 
 	rtl8169_hw_reset(ioaddr);
+
+	rtl8169_schedule_work(dev, rtl8169_reinit_task);
 }
 
 static void
@@ -2427,6 +2445,10 @@ rtl8169_rx_interrupt(struct net_device *dev, struct rtl8169_private *tp,
 				tp->stats.rx_length_errors++;
 			if (status & RxCRC)
 				tp->stats.rx_crc_errors++;
+			if (status & RxFOVF) {
+				rtl8169_schedule_work(dev, rtl8169_reset_task);
+				tp->stats.rx_fifo_errors++;
+			}
 			rtl8169_mark_to_asic(desc, tp->rx_buf_sz);
 		} else {
 			struct sk_buff *skb = tp->Rx_skbuff[entry];
@@ -2606,6 +2628,7 @@ static void rtl8169_down(struct net_device *dev)
 	struct rtl8169_private *tp = netdev_priv(dev);
 	void __iomem *ioaddr = tp->mmio_addr;
 	unsigned int poll_locked = 0;
+	unsigned int intrmask;
 
 	rtl8169_delete_timer(dev);
 
@@ -2644,8 +2667,11 @@ core_down:
 	 * 2) dev->change_mtu
 	 *    -> rtl8169_poll can not be issued again and re-enable the
 	 *       interruptions. Let's simply issue the IRQ down sequence again.
+	 *
+	 * No loop if hotpluged or major error (0xffff).
 	 */
-	if (RTL_R16(IntrMask))
+	intrmask = RTL_R16(IntrMask);
+	if (intrmask && (intrmask != 0xffff))
 		goto core_down;
 
 	rtl8169_tx_clear(tp);

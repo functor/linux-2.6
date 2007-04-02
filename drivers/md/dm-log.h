@@ -9,15 +9,6 @@
 
 #include "dm.h"
 
-/*
- * Values returned by get_failure_response()
- *   DMLOG_IOERR_IGNORE:  ignore device failures
- *   DMLOG_IOERR_BLOCK:     issue dm event, and do not complete
- *                 I/O until presuspend is recieved.
- */
-#define DMLOG_IOERR_IGNORE 0
-#define DMLOG_IOERR_BLOCK  1
-
 typedef sector_t region_t;
 
 struct dirty_log_type;
@@ -32,7 +23,6 @@ struct dirty_log_type {
 	const char *name;
 	struct module *module;
 	unsigned int use_count;
-	unsigned int flags;
 
 	int (*ctr)(struct dirty_log *log, struct dm_target *ti,
 		   unsigned int argc, char **argv);
@@ -42,8 +32,7 @@ struct dirty_log_type {
 	 * There are times when we don't want the log to touch
 	 * the disk.
 	 */
-	int (*presuspend)(struct dirty_log *log);
-	int (*postsuspend)(struct dirty_log *log);
+	int (*suspend)(struct dirty_log *log);
 	int (*resume)(struct dirty_log *log);
 
 	/*
@@ -101,12 +90,12 @@ struct dirty_log_type {
 	int (*get_resync_work)(struct dirty_log *log, region_t *region);
 
 	/*
-	 * This notifies the log that the resync status of a region
-	 * has changed.  It also clears the region from the recovering
-	 * list (if present).
+	 * This notifies the log that the resync of an area has
+	 * been completed.  The log should then mark this region
+	 * as CLEAN.
 	 */
-	void (*set_region_sync)(struct dirty_log *log,
-				region_t region, int in_sync);
+	void (*complete_resync_work)(struct dirty_log *log,
+				     region_t region, int success);
 
         /*
 	 * Returns the number of regions that are in sync.
@@ -118,24 +107,6 @@ struct dirty_log_type {
 	 */
 	int (*status)(struct dirty_log *log, status_type_t status_type,
 		      char *result, unsigned int maxlen);
-
-	/*
-	 * Return the code describing what to do in the event
-	 * of a device failure.
-	 */
-	int (*get_failure_response)(struct dirty_log *log);
-
-	/*
-	 * Returns: 0, 1
-	 *
-	 * This is necessary for cluster mirroring. It provides
-	 * a way to detect recovery on another node, so we
-	 * aren't writing concurrently.  This function is likely
-	 * to block (when a cluster log is used).
-	 */
-	int (*is_remote_recovering)(struct dirty_log *log, region_t region);
-
-	int (*reserved[5])(int a);
 };
 
 int dm_register_dirty_log_type(struct dirty_log_type *type);

@@ -59,20 +59,16 @@
 #define AES_EXTENDED_KEY_SIZE	64	/* in uint32_t units */
 #define AES_EXTENDED_KEY_SIZE_B	(AES_EXTENDED_KEY_SIZE * sizeof(uint32_t))
 
-/* Whenever making any changes to the following
- * structure *make sure* you keep E, d_data
- * and cword aligned on 16 Bytes boundaries!!! */
 struct aes_ctx {
+	uint32_t e_data[AES_EXTENDED_KEY_SIZE];
+	uint32_t d_data[AES_EXTENDED_KEY_SIZE];
 	struct {
 		struct cword encrypt;
 		struct cword decrypt;
 	} cword;
-	u32 *D;
+	uint32_t *E;
+	uint32_t *D;
 	int key_length;
-	u32 E[AES_EXTENDED_KEY_SIZE]
-		__attribute__ ((__aligned__(PADLOCK_ALIGNMENT)));
-	u32 d_data[AES_EXTENDED_KEY_SIZE]
-		__attribute__ ((__aligned__(PADLOCK_ALIGNMENT)));
 };
 
 /* ====== Key management routines ====== */
@@ -286,20 +282,15 @@ aes_hw_extkey_available(uint8_t key_len)
 	return 0;
 }
 
-static inline struct aes_ctx *aes_ctx(struct crypto_tfm *tfm)
+static inline struct aes_ctx *aes_ctx(void *ctx)
 {
-	unsigned long addr = (unsigned long)crypto_tfm_ctx(tfm);
-	unsigned long align = PADLOCK_ALIGNMENT;
-
-	if (align <= crypto_tfm_ctx_alignment())
-		align = 1;
-	return (struct aes_ctx *)ALIGN(addr, align);
+	return (struct aes_ctx *)ALIGN((unsigned long)ctx, PADLOCK_ALIGNMENT);
 }
 
-static int aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
-		       unsigned int key_len, u32 *flags)
+static int
+aes_set_key(void *ctx_arg, const uint8_t *in_key, unsigned int key_len, uint32_t *flags)
 {
-	struct aes_ctx *ctx = aes_ctx(tfm);
+	struct aes_ctx *ctx = aes_ctx(ctx_arg);
 	const __le32 *key = (const __le32 *)in_key;
 	uint32_t i, t, u, v, w;
 	uint32_t P[AES_EXTENDED_KEY_SIZE];
@@ -317,7 +308,8 @@ static int aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
 	 * itself we must supply the plain key for both encryption
 	 * and decryption.
 	 */
-	ctx->D = ctx->E;
+	ctx->E = ctx->e_data;
+	ctx->D = ctx->e_data;
 
 	E_KEY[0] = le32_to_cpu(key[0]);
 	E_KEY[1] = le32_to_cpu(key[1]);
@@ -418,22 +410,24 @@ static inline u8 *padlock_xcrypt_cbc(const u8 *input, u8 *output, void *key,
 	return iv;
 }
 
-static void aes_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
+static void
+aes_encrypt(void *ctx_arg, uint8_t *out, const uint8_t *in)
 {
-	struct aes_ctx *ctx = aes_ctx(tfm);
+	struct aes_ctx *ctx = aes_ctx(ctx_arg);
 	padlock_xcrypt_ecb(in, out, ctx->E, &ctx->cword.encrypt, 1);
 }
 
-static void aes_decrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
+static void
+aes_decrypt(void *ctx_arg, uint8_t *out, const uint8_t *in)
 {
-	struct aes_ctx *ctx = aes_ctx(tfm);
+	struct aes_ctx *ctx = aes_ctx(ctx_arg);
 	padlock_xcrypt_ecb(in, out, ctx->D, &ctx->cword.decrypt, 1);
 }
 
 static unsigned int aes_encrypt_ecb(const struct cipher_desc *desc, u8 *out,
 				    const u8 *in, unsigned int nbytes)
 {
-	struct aes_ctx *ctx = aes_ctx(desc->tfm);
+	struct aes_ctx *ctx = aes_ctx(crypto_tfm_ctx(desc->tfm));
 	padlock_xcrypt_ecb(in, out, ctx->E, &ctx->cword.encrypt,
 			   nbytes / AES_BLOCK_SIZE);
 	return nbytes & ~(AES_BLOCK_SIZE - 1);
@@ -442,7 +436,7 @@ static unsigned int aes_encrypt_ecb(const struct cipher_desc *desc, u8 *out,
 static unsigned int aes_decrypt_ecb(const struct cipher_desc *desc, u8 *out,
 				    const u8 *in, unsigned int nbytes)
 {
-	struct aes_ctx *ctx = aes_ctx(desc->tfm);
+	struct aes_ctx *ctx = aes_ctx(crypto_tfm_ctx(desc->tfm));
 	padlock_xcrypt_ecb(in, out, ctx->D, &ctx->cword.decrypt,
 			   nbytes / AES_BLOCK_SIZE);
 	return nbytes & ~(AES_BLOCK_SIZE - 1);
@@ -451,7 +445,7 @@ static unsigned int aes_decrypt_ecb(const struct cipher_desc *desc, u8 *out,
 static unsigned int aes_encrypt_cbc(const struct cipher_desc *desc, u8 *out,
 				    const u8 *in, unsigned int nbytes)
 {
-	struct aes_ctx *ctx = aes_ctx(desc->tfm);
+	struct aes_ctx *ctx = aes_ctx(crypto_tfm_ctx(desc->tfm));
 	u8 *iv;
 
 	iv = padlock_xcrypt_cbc(in, out, ctx->E, desc->info,
@@ -464,7 +458,7 @@ static unsigned int aes_encrypt_cbc(const struct cipher_desc *desc, u8 *out,
 static unsigned int aes_decrypt_cbc(const struct cipher_desc *desc, u8 *out,
 				    const u8 *in, unsigned int nbytes)
 {
-	struct aes_ctx *ctx = aes_ctx(desc->tfm);
+	struct aes_ctx *ctx = aes_ctx(crypto_tfm_ctx(desc->tfm));
 	padlock_xcrypt_cbc(in, out, ctx->D, desc->info, &ctx->cword.decrypt,
 			   nbytes / AES_BLOCK_SIZE);
 	return nbytes & ~(AES_BLOCK_SIZE - 1);

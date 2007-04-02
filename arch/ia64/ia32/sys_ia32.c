@@ -14,6 +14,7 @@
  * environment.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/sysctl.h>
@@ -24,6 +25,7 @@
 #include <linux/resource.h>
 #include <linux/times.h>
 #include <linux/utsname.h>
+#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -125,7 +127,6 @@ sys32_execve (char __user *name, compat_uptr_t __user *argv, compat_uptr_t __use
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 {
-	compat_ino_t ino;
 	int err;
 
 	if ((u64) stat->size > MAX_NON_LFS ||
@@ -133,15 +134,11 @@ int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 	    !old_valid_dev(stat->rdev))
 		return -EOVERFLOW;
 
-	ino = stat->ino;
-	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
-		return -EOVERFLOW;
-
 	if (clear_user(ubuf, sizeof(*ubuf)))
 		return -EFAULT;
 
 	err  = __put_user(old_encode_dev(stat->dev), &ubuf->st_dev);
-	err |= __put_user(ino, &ubuf->st_ino);
+	err |= __put_user(stat->ino, &ubuf->st_ino);
 	err |= __put_user(stat->mode, &ubuf->st_mode);
 	err |= __put_user(stat->nlink, &ubuf->st_nlink);
 	err |= __put_user(high2lowuid(stat->uid), &ubuf->st_uid);
@@ -1169,7 +1166,19 @@ put_tv32 (struct compat_timeval __user *o, struct timeval *i)
 asmlinkage unsigned long
 sys32_alarm (unsigned int seconds)
 {
-	return alarm_setitimer(seconds);
+	struct itimerval it_new, it_old;
+	unsigned int oldalarm;
+
+	it_new.it_interval.tv_sec = it_new.it_interval.tv_usec = 0;
+	it_new.it_value.tv_sec = seconds;
+	it_new.it_value.tv_usec = 0;
+	do_setitimer(ITIMER_REAL, &it_new, &it_old);
+	oldalarm = it_old.it_value.tv_sec;
+	/* ehhh.. We can't return 0 if we have an alarm pending.. */
+	/* And we'd better return too much than too little anyway */
+	if (it_old.it_value.tv_usec)
+		oldalarm++;
+	return oldalarm;
 }
 
 /* Translations due to time_t size differences.  Which affects all
@@ -1227,20 +1236,16 @@ struct readdir32_callback {
 };
 
 static int
-filldir32 (void *__buf, const char *name, int namlen, loff_t offset, u64 ino,
+filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
 	   unsigned int d_type)
 {
 	struct compat_dirent __user * dirent;
 	struct getdents32_callback * buf = (struct getdents32_callback *) __buf;
 	int reclen = ROUND_UP(offsetof(struct compat_dirent, d_name) + namlen + 1, 4);
-	u32 d_ino;
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
-		return -EOVERFLOW;
 	buf->error = -EFAULT;	/* only used if we fail.. */
 	dirent = buf->previous;
 	if (dirent)
@@ -1248,7 +1253,7 @@ filldir32 (void *__buf, const char *name, int namlen, loff_t offset, u64 ino,
 			return -EFAULT;
 	dirent = buf->current_dir;
 	buf->previous = dirent;
-	if (put_user(d_ino, &dirent->d_ino)
+	if (put_user(ino, &dirent->d_ino)
 	    || put_user(reclen, &dirent->d_reclen)
 	    || copy_to_user(dirent->d_name, name, namlen)
 	    || put_user(0, dirent->d_name + namlen))
@@ -1296,21 +1301,17 @@ out:
 }
 
 static int
-fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, u64 ino,
+fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, ino_t ino,
 	      unsigned int d_type)
 {
 	struct readdir32_callback * buf = (struct readdir32_callback *) __buf;
 	struct old_linux32_dirent __user * dirent;
-	u32 d_ino;
 
 	if (buf->count)
 		return -EINVAL;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
-		return -EOVERFLOW;
 	buf->count++;
 	dirent = buf->dirent;
-	if (put_user(d_ino, &dirent->d_ino)
+	if (put_user(ino, &dirent->d_ino)
 	    || put_user(offset, &dirent->d_offset)
 	    || put_user(namlen, &dirent->d_namlen)
 	    || copy_to_user(dirent->d_name, name, namlen)
@@ -2601,5 +2602,79 @@ sys32_setresgid(compat_gid_t rgid, compat_gid_t egid,
 	segid = (egid == (compat_gid_t)-1) ? ((gid_t)-1) : ((gid_t)egid);
 	ssgid = (sgid == (compat_gid_t)-1) ? ((gid_t)-1) : ((gid_t)sgid);
 	return sys_setresgid(srgid, segid, ssgid);
+}
+
+/* Handle adjtimex compatibility. */
+
+struct timex32 {
+	u32 modes;
+	s32 offset, freq, maxerror, esterror;
+	s32 status, constant, precision, tolerance;
+	struct compat_timeval time;
+	s32 tick;
+	s32 ppsfreq, jitter, shift, stabil;
+	s32 jitcnt, calcnt, errcnt, stbcnt;
+	s32  :32; s32  :32; s32  :32; s32  :32;
+	s32  :32; s32  :32; s32  :32; s32  :32;
+	s32  :32; s32  :32; s32  :32; s32  :32;
+};
+
+extern int do_adjtimex(struct timex *);
+
+asmlinkage long
+sys32_adjtimex(struct timex32 *utp)
+{
+	struct timex txc;
+	int ret;
+
+	memset(&txc, 0, sizeof(struct timex));
+
+	if(get_user(txc.modes, &utp->modes) ||
+	   __get_user(txc.offset, &utp->offset) ||
+	   __get_user(txc.freq, &utp->freq) ||
+	   __get_user(txc.maxerror, &utp->maxerror) ||
+	   __get_user(txc.esterror, &utp->esterror) ||
+	   __get_user(txc.status, &utp->status) ||
+	   __get_user(txc.constant, &utp->constant) ||
+	   __get_user(txc.precision, &utp->precision) ||
+	   __get_user(txc.tolerance, &utp->tolerance) ||
+	   __get_user(txc.time.tv_sec, &utp->time.tv_sec) ||
+	   __get_user(txc.time.tv_usec, &utp->time.tv_usec) ||
+	   __get_user(txc.tick, &utp->tick) ||
+	   __get_user(txc.ppsfreq, &utp->ppsfreq) ||
+	   __get_user(txc.jitter, &utp->jitter) ||
+	   __get_user(txc.shift, &utp->shift) ||
+	   __get_user(txc.stabil, &utp->stabil) ||
+	   __get_user(txc.jitcnt, &utp->jitcnt) ||
+	   __get_user(txc.calcnt, &utp->calcnt) ||
+	   __get_user(txc.errcnt, &utp->errcnt) ||
+	   __get_user(txc.stbcnt, &utp->stbcnt))
+		return -EFAULT;
+
+	ret = do_adjtimex(&txc);
+
+	if(put_user(txc.modes, &utp->modes) ||
+	   __put_user(txc.offset, &utp->offset) ||
+	   __put_user(txc.freq, &utp->freq) ||
+	   __put_user(txc.maxerror, &utp->maxerror) ||
+	   __put_user(txc.esterror, &utp->esterror) ||
+	   __put_user(txc.status, &utp->status) ||
+	   __put_user(txc.constant, &utp->constant) ||
+	   __put_user(txc.precision, &utp->precision) ||
+	   __put_user(txc.tolerance, &utp->tolerance) ||
+	   __put_user(txc.time.tv_sec, &utp->time.tv_sec) ||
+	   __put_user(txc.time.tv_usec, &utp->time.tv_usec) ||
+	   __put_user(txc.tick, &utp->tick) ||
+	   __put_user(txc.ppsfreq, &utp->ppsfreq) ||
+	   __put_user(txc.jitter, &utp->jitter) ||
+	   __put_user(txc.shift, &utp->shift) ||
+	   __put_user(txc.stabil, &utp->stabil) ||
+	   __put_user(txc.jitcnt, &utp->jitcnt) ||
+	   __put_user(txc.calcnt, &utp->calcnt) ||
+	   __put_user(txc.errcnt, &utp->errcnt) ||
+	   __put_user(txc.stbcnt, &utp->stbcnt))
+		ret = -EFAULT;
+
+	return ret;
 }
 #endif /* NOTYET */

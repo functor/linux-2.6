@@ -38,7 +38,8 @@
  *		as published by the Free Software Foundation; either version
  *		2 of the License, or (at your option) any later version.
  */
-
+ 
+#include <linux/config.h> 
 #include <linux/types.h>
 #include <asm/atomic.h>
 #include <asm/byteorder.h>
@@ -123,7 +124,7 @@ static inline int raw_addr_match (
 }
 
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
-			     __be32 raddr, __be32 laddr,
+			     unsigned long raddr, unsigned long laddr,
 			     int dif)
 {
 	struct hlist_node *node;
@@ -642,7 +643,6 @@ static int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (sin) {
 		sin->sin_family = AF_INET;
 		sin->sin_addr.s_addr = skb->nh.iph->saddr;
-		sin->sin_port = 0;
 		memset(&sin->sin_zero, 0, sizeof(sin->sin_zero));
 	}
 	if (inet->cmsg_flags)
@@ -694,9 +694,12 @@ static int raw_geticmpfilter(struct sock *sk, char __user *optval, int __user *o
 out:	return ret;
 }
 
-static int do_raw_setsockopt(struct sock *sk, int level, int optname,
+static int raw_setsockopt(struct sock *sk, int level, int optname, 
 			  char __user *optval, int optlen)
 {
+	if (level != SOL_RAW)
+		return ip_setsockopt(sk, level, optname, optval, optlen);
+
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
 			return -EOPNOTSUPP;
@@ -706,27 +709,12 @@ static int do_raw_setsockopt(struct sock *sk, int level, int optname,
 	return -ENOPROTOOPT;
 }
 
-static int raw_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, int optlen)
-{
-	if (level != SOL_RAW)
-		return ip_setsockopt(sk, level, optname, optval, optlen);
-	return do_raw_setsockopt(sk, level, optname, optval, optlen);
-}
-
-#ifdef CONFIG_COMPAT
-static int compat_raw_setsockopt(struct sock *sk, int level, int optname,
-				 char __user *optval, int optlen)
-{
-	if (level != SOL_RAW)
-		return compat_ip_setsockopt(sk, level, optname, optval, optlen);
-	return do_raw_setsockopt(sk, level, optname, optval, optlen);
-}
-#endif
-
-static int do_raw_getsockopt(struct sock *sk, int level, int optname,
+static int raw_getsockopt(struct sock *sk, int level, int optname, 
 			  char __user *optval, int __user *optlen)
 {
+	if (level != SOL_RAW)
+		return ip_getsockopt(sk, level, optname, optval, optlen);
+
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
 			return -EOPNOTSUPP;
@@ -735,24 +723,6 @@ static int do_raw_getsockopt(struct sock *sk, int level, int optname,
 	}
 	return -ENOPROTOOPT;
 }
-
-static int raw_getsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, int __user *optlen)
-{
-	if (level != SOL_RAW)
-		return ip_getsockopt(sk, level, optname, optval, optlen);
-	return do_raw_getsockopt(sk, level, optname, optval, optlen);
-}
-
-#ifdef CONFIG_COMPAT
-static int compat_raw_getsockopt(struct sock *sk, int level, int optname,
-				 char __user *optval, int __user *optlen)
-{
-	if (level != SOL_RAW)
-		return compat_ip_getsockopt(sk, level, optname, optval, optlen);
-	return do_raw_getsockopt(sk, level, optname, optval, optlen);
-}
-#endif
 
 static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 {
@@ -783,26 +753,22 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 }
 
 struct proto raw_prot = {
-	.name		   = "RAW",
-	.owner		   = THIS_MODULE,
-	.close		   = raw_close,
-	.connect	   = ip4_datagram_connect,
-	.disconnect	   = udp_disconnect,
-	.ioctl		   = raw_ioctl,
-	.init		   = raw_init,
-	.setsockopt	   = raw_setsockopt,
-	.getsockopt	   = raw_getsockopt,
-	.sendmsg	   = raw_sendmsg,
-	.recvmsg	   = raw_recvmsg,
-	.bind		   = raw_bind,
-	.backlog_rcv	   = raw_rcv_skb,
-	.hash		   = raw_v4_hash,
-	.unhash		   = raw_v4_unhash,
-	.obj_size	   = sizeof(struct raw_sock),
-#ifdef CONFIG_COMPAT
-	.compat_setsockopt = compat_raw_setsockopt,
-	.compat_getsockopt = compat_raw_getsockopt,
-#endif
+	.name =		"RAW",
+	.owner =	THIS_MODULE,
+	.close =	raw_close,
+	.connect =	ip4_datagram_connect,
+	.disconnect =	udp_disconnect,
+	.ioctl =	raw_ioctl,
+	.init =		raw_init,
+	.setsockopt =	raw_setsockopt,
+	.getsockopt =	raw_getsockopt,
+	.sendmsg =	raw_sendmsg,
+	.recvmsg =	raw_recvmsg,
+	.bind =		raw_bind,
+	.backlog_rcv =	raw_rcv_skb,
+	.hash =		raw_v4_hash,
+	.unhash =	raw_v4_unhash,
+	.obj_size =	sizeof(struct raw_sock),
 };
 
 #ifdef CONFIG_PROC_FS

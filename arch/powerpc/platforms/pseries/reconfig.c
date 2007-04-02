@@ -17,9 +17,8 @@
 #include <linux/proc_fs.h>
 
 #include <asm/prom.h>
-#include <asm/machdep.h>
-#include <asm/uaccess.h>
 #include <asm/pSeries_reconfig.h>
+#include <asm/uaccess.h>
 
 
 
@@ -95,16 +94,16 @@ static struct device_node *derive_parent(const char *path)
 	return parent;
 }
 
-static BLOCKING_NOTIFIER_HEAD(pSeries_reconfig_chain);
+static struct notifier_block *pSeries_reconfig_chain;
 
 int pSeries_reconfig_notifier_register(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_register(&pSeries_reconfig_chain, nb);
+	return notifier_chain_register(&pSeries_reconfig_chain, nb);
 }
 
 void pSeries_reconfig_notifier_unregister(struct notifier_block *nb)
 {
-	blocking_notifier_chain_unregister(&pSeries_reconfig_chain, nb);
+	notifier_chain_unregister(&pSeries_reconfig_chain, nb);
 }
 
 static int pSeries_reconfig_add_node(const char *path, struct property *proplist)
@@ -132,7 +131,7 @@ static int pSeries_reconfig_add_node(const char *path, struct property *proplist
 		goto out_err;
 	}
 
-	err = blocking_notifier_call_chain(&pSeries_reconfig_chain,
+	err = notifier_call_chain(&pSeries_reconfig_chain,
 				  PSERIES_RECONFIG_ADD, np);
 	if (err == NOTIFY_BAD) {
 		printk(KERN_ERR "Failed to add device node %s\n", path);
@@ -172,7 +171,7 @@ static int pSeries_reconfig_remove_node(struct device_node *np)
 
 	remove_node_proc_entries(np);
 
-	blocking_notifier_call_chain(&pSeries_reconfig_chain,
+	notifier_call_chain(&pSeries_reconfig_chain,
 			    PSERIES_RECONFIG_REMOVE, np);
 	of_detach_node(np);
 
@@ -509,7 +508,7 @@ static int proc_ppc64_create_ofdt(void)
 {
 	struct proc_dir_entry *ent;
 
-	if (!machine_is(pseries))
+	if (!platform_is_pseries())
 		return 0;
 
 	ent = create_proc_entry("ppc64/ofdt", S_IWUSR, NULL);

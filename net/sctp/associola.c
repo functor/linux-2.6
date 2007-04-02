@@ -441,8 +441,7 @@ void sctp_assoc_set_primary(struct sctp_association *asoc,
 	/* If the primary path is changing, assume that the
 	 * user wants to use this new path.
 	 */
-	if ((transport->state == SCTP_ACTIVE) ||
-	    (transport->state == SCTP_UNKNOWN))
+	if (transport->state != SCTP_INACTIVE)
 		asoc->peer.active_path = transport;
 
 	/*
@@ -533,11 +532,11 @@ struct sctp_transport *sctp_assoc_add_peer(struct sctp_association *asoc,
 	port = addr->v4.sin_port;
 
 	SCTP_DEBUG_PRINTK_IPADDR("sctp_assoc_add_peer:association %p addr: ",
-				 " port: %d state:%d\n",
+				 " port: %d state:%s\n",
 				 asoc,
 				 addr,
 				 addr->v4.sin_port,
-				 peer_state);
+				 peer_state == SCTP_UNKNOWN?"UNKNOWN":"ACTIVE");
 
 	/* Set the port if it has not been set yet.  */
 	if (0 == asoc->peer.port)
@@ -546,12 +545,9 @@ struct sctp_transport *sctp_assoc_add_peer(struct sctp_association *asoc,
 	/* Check to see if this is a duplicate. */
 	peer = sctp_assoc_lookup_paddr(asoc, addr);
 	if (peer) {
-		if (peer->state == SCTP_UNKNOWN) {
-			if (peer_state == SCTP_ACTIVE)
-				peer->state = SCTP_ACTIVE;
-			if (peer_state == SCTP_UNCONFIRMED)
-				peer->state = SCTP_UNCONFIRMED;
-		}
+		if (peer_state == SCTP_ACTIVE &&
+		    peer->state == SCTP_UNKNOWN)
+		     peer->state = SCTP_ACTIVE;
 		return peer;
 	}
 
@@ -743,8 +739,7 @@ void sctp_assoc_control_transport(struct sctp_association *asoc,
 	list_for_each(pos, &asoc->peer.transport_addr_list) {
 		t = list_entry(pos, struct sctp_transport, transports);
 
-		if ((t->state == SCTP_INACTIVE) ||
-		    (t->state == SCTP_UNCONFIRMED))
+		if (t->state == SCTP_INACTIVE)
 			continue;
 		if (!first || t->last_time_heard > first->last_time_heard) {
 			second = first;
@@ -764,8 +759,7 @@ void sctp_assoc_control_transport(struct sctp_association *asoc,
 	 * [If the primary is active but not most recent, bump the most
 	 * recently used transport.]
 	 */
-	if (((asoc->peer.primary_path->state == SCTP_ACTIVE) ||
-	     (asoc->peer.primary_path->state == SCTP_UNKNOWN)) &&
+	if (asoc->peer.primary_path->state != SCTP_INACTIVE &&
 	    first != asoc->peer.primary_path) {
 		second = first;
 		first = asoc->peer.primary_path;
@@ -1060,7 +1054,7 @@ void sctp_assoc_update(struct sctp_association *asoc,
 					   transports);
 			if (!sctp_assoc_lookup_paddr(asoc, &trans->ipaddr))
 				sctp_assoc_add_peer(asoc, &trans->ipaddr,
-						    GFP_ATOMIC, trans->state);
+						    GFP_ATOMIC, SCTP_ACTIVE);
 		}
 
 		asoc->ctsn_ack_point = asoc->next_tsn - 1;
@@ -1100,8 +1094,7 @@ void sctp_assoc_update_retran_path(struct sctp_association *asoc)
 
 		/* Try to find an active transport. */
 
-		if ((t->state == SCTP_ACTIVE) ||
-		    (t->state == SCTP_UNKNOWN)) {
+		if (t->state != SCTP_INACTIVE) {
 			break;
 		} else {
 			/* Keep track of the next transport in case

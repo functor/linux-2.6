@@ -62,12 +62,12 @@ void init_registers(int pid)
 	err = ptrace(PTRACE_GETREGS, pid, 0, exec_regs);
 	if(err)
 		panic("check_ptrace : PTRACE_GETREGS failed, errno = %d",
-		      errno);
+		      err);
 
 	err = ptrace(PTRACE_GETFPREGS, pid, 0, exec_fp_regs);
 	if(err)
 		panic("check_ptrace : PTRACE_GETFPREGS failed, errno = %d",
-		      errno);
+		      err);
 }
 
 void get_safe_registers(unsigned long *regs, unsigned long *fp_regs)

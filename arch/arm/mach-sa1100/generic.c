@@ -9,6 +9,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -323,11 +324,6 @@ void sa11x0_set_irda_data(struct irda_platform_data *irda)
 	sa11x0ir_device.dev.platform_data = irda;
 }
 
-static struct platform_device sa11x0rtc_device = {
-	.name		= "sa1100-rtc",
-	.id		= -1,
-};
-
 static struct platform_device *sa11x0_devices[] __initdata = {
 	&sa11x0udc_device,
 	&sa11x0uart1_device,
@@ -337,7 +333,6 @@ static struct platform_device *sa11x0_devices[] __initdata = {
 	&sa11x0pcmcia_device,
 	&sa11x0fb_device,
 	&sa11x0mtd_device,
-	&sa11x0rtc_device,
 };
 
 static int __init sa1100_init(void)

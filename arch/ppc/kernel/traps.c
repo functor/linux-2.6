@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/kernel/traps.c
+ *
  *  Copyright (C) 1995-1996  Gary Thomas (gdt@linuxppc.org)
  *
  *  This program is free software; you can redistribute it and/or
@@ -25,6 +27,7 @@
 #include <linux/user.h>
 #include <linux/a.out.h>
 #include <linux/interrupt.h>
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/prctl.h>

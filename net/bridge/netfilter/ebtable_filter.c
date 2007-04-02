@@ -91,7 +91,7 @@ static struct nf_hook_ops ebt_ops_filter[] = {
 	},
 };
 
-static int __init ebtable_filter_init(void)
+static int __init init(void)
 {
 	int i, j, ret;
 
@@ -109,7 +109,7 @@ cleanup:
 	return ret;
 }
 
-static void __exit ebtable_filter_fini(void)
+static void __exit fini(void)
 {
 	int i;
 
@@ -118,6 +118,6 @@ static void __exit ebtable_filter_fini(void)
 	ebt_unregister_table(&frame_filter);
 }
 
-module_init(ebtable_filter_init);
-module_exit(ebtable_filter_fini);
+module_init(init);
+module_exit(fini);
 MODULE_LICENSE("GPL");

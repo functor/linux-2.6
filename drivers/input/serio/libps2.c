@@ -84,7 +84,7 @@ void ps2_drain(struct ps2dev *ps2dev, int maxbytes, int timeout)
 		maxbytes = sizeof(ps2dev->cmdbuf);
 	}
 
-	mutex_lock(&ps2dev->cmd_mutex);
+	down(&ps2dev->cmd_sem);
 
 	serio_pause_rx(ps2dev->serio);
 	ps2dev->flags = PS2_FLAG_CMD;
@@ -94,7 +94,7 @@ void ps2_drain(struct ps2dev *ps2dev, int maxbytes, int timeout)
 	wait_event_timeout(ps2dev->wait,
 			   !(ps2dev->flags & PS2_FLAG_CMD),
 			   msecs_to_jiffies(timeout));
-	mutex_unlock(&ps2dev->cmd_mutex);
+	up(&ps2dev->cmd_sem);
 }
 
 /*
@@ -177,12 +177,7 @@ int ps2_command(struct ps2dev *ps2dev, unsigned char *param, int command)
 		return -1;
 	}
 
-	if (send && !param) {
-		WARN_ON(1);
-		return -1;
-	}
-
-	mutex_lock(&ps2dev->cmd_mutex);
+	down(&ps2dev->cmd_sem);
 
 	serio_pause_rx(ps2dev->serio);
 	ps2dev->flags = command == PS2_CMD_GETID ? PS2_FLAG_WAITID : 0;
@@ -234,7 +229,7 @@ int ps2_command(struct ps2dev *ps2dev, unsigned char *param, int command)
 	ps2dev->flags = 0;
 	serio_continue_rx(ps2dev->serio);
 
-	mutex_unlock(&ps2dev->cmd_mutex);
+	up(&ps2dev->cmd_sem);
 	return rc;
 }
 
@@ -280,17 +275,13 @@ int ps2_schedule_command(struct ps2dev *ps2dev, unsigned char *param, int comman
 	return 0;
 }
 
-static struct lock_class_key ps2_mutex_key;
-
 /*
  * ps2_init() initializes ps2dev structure
  */
 
 void ps2_init(struct ps2dev *ps2dev, struct serio *serio)
 {
-	mutex_init(&ps2dev->cmd_mutex);
-	lockdep_set_class_and_subclass(&ps2dev->cmd_mutex, &ps2_mutex_key,
-				       serio->depth);
+	init_MUTEX(&ps2dev->cmd_sem);
 	init_waitqueue_head(&ps2dev->wait);
 	ps2dev->serio = serio;
 }

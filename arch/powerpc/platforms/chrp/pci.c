@@ -2,6 +2,7 @@
  * CHRP pci routines.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
@@ -18,10 +19,9 @@
 #include <asm/machdep.h>
 #include <asm/sections.h>
 #include <asm/pci-bridge.h>
+#include <asm/open_pic.h>
 #include <asm/grackle.h>
 #include <asm/rtas.h>
-
-#include "chrp.h"
 
 /* LongTrail */
 void __iomem *gg2_pci_config_base;
@@ -141,7 +141,7 @@ hydra_init(void)
 	if (np == NULL || of_address_to_resource(np, 0, &r))
 		return 0;
 	Hydra = ioremap(r.start, r.end-r.start);
-	printk("Hydra Mac I/O at %llx\n", (unsigned long long)r.start);
+	printk("Hydra Mac I/O at %lx\n", r.start);
 	printk("Hydra Feature_Control was %x",
 	       in_le32(&Hydra->Feature_Control));
 	out_le32(&Hydra->Feature_Control, (HYDRA_FC_SCC_CELL_EN |
@@ -160,9 +160,15 @@ void __init
 chrp_pcibios_fixup(void)
 {
 	struct pci_dev *dev = NULL;
+	struct device_node *np;
 
-	for_each_pci_dev(dev)
-		pci_read_irq_line(dev);
+	/* PCI interrupts are controlled by the OpenPIC */
+	for_each_pci_dev(dev) {
+		np = pci_device_to_OF_node(dev);
+		if ((np != 0) && (np->n_intrs > 0) && (np->intrs[0].line != 0))
+			dev->irq = np->intrs[0].line;
+		pci_write_config_byte(dev, PCI_INTERRUPT_LINE, dev->irq);
+	}
 }
 
 #define PRG_CL_RESET_VALID 0x00010000
@@ -259,7 +265,7 @@ chrp_find_bridges(void)
 			       bus_range[0], bus_range[1]);
 		printk(" controlled by %s", dev->type);
 		if (!is_longtrail)
-			printk(" at %llx", (unsigned long long)r.start);
+			printk(" at %lx", r.start);
 		printk("\n");
 
 		hose = pcibios_alloc_controller();
@@ -308,6 +314,6 @@ chrp_find_bridges(void)
 	}
 
 	/* Do not fixup interrupts from OF tree on pegasos */
-	if (is_pegasos)
-		ppc_md.pcibios_fixup = NULL;
+	if (is_pegasos == 0)
+		ppc_md.pcibios_fixup = chrp_pcibios_fixup;
 }

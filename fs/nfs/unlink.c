@@ -163,9 +163,10 @@ nfs_async_unlink(struct dentry *dentry)
 	struct rpc_clnt	*clnt = NFS_CLIENT(dir->d_inode);
 	int		status = -ENOMEM;
 
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	data = kmalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
 		goto out;
+	memset(data, 0, sizeof(*data));
 
 	data->cred = rpcauth_lookupcred(clnt->cl_auth, 0);
 	if (IS_ERR(data->cred)) {

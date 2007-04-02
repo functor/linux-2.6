@@ -85,7 +85,7 @@ static int dma8[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 0,1,3 */
 static int dma16[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 5,6,7 */
 static int mic_agc[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 1};
 #ifdef CONFIG_SND_SB16_CSP
-static int csp[SNDRV_CARDS];
+static int csp[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 0};
 #endif
 #ifdef SNDRV_SBAWE_EMU8000
 static int seq_ports[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 4};
@@ -327,8 +327,7 @@ static int __devinit snd_card_sb16_pnp(int dev, struct snd_card_sb16 *acard,
 			goto __wt_error; 
 		} 
 		awe_port[dev] = pnp_port_start(pdev, 0);
-		snd_printdd("pnp SB16: wavetable port=0x%llx\n",
-				(unsigned long long)pnp_port_start(pdev, 0));
+		snd_printdd("pnp SB16: wavetable port=0x%lx\n", pnp_port_start(pdev, 0));
 	} else {
 __wt_error:
 		if (pdev) {
@@ -370,7 +369,7 @@ static struct snd_card *snd_sb16_card_new(int dev)
 	return card;
 }
 
-static int __devinit snd_sb16_probe(struct snd_card *card, int dev)
+static int __init snd_sb16_probe(struct snd_card *card, int dev)
 {
 	int xirq, xdma8, xdma16;
 	struct snd_sb *chip;
@@ -519,7 +518,7 @@ static int snd_sb16_resume(struct snd_card *card)
 }
 #endif
 
-static int __devinit snd_sb16_nonpnp_probe1(int dev, struct platform_device *devptr)
+static int __init snd_sb16_nonpnp_probe1(int dev, struct platform_device *devptr)
 {
 	struct snd_card_sb16 *acard;
 	struct snd_card *card;
@@ -549,7 +548,7 @@ static int __devinit snd_sb16_nonpnp_probe1(int dev, struct platform_device *dev
 }
 
 
-static int __devinit snd_sb16_nonpnp_probe(struct platform_device *pdev)
+static int __init snd_sb16_nonpnp_probe(struct platform_device *pdev)
 {
 	int dev = pdev->id;
 	int err;
@@ -630,7 +629,6 @@ static struct platform_driver snd_sb16_nonpnp_driver = {
 
 
 #ifdef CONFIG_PNP
-static unsigned int __devinitdata sb16_pnp_devices;
 
 static int __devinit snd_sb16_pnp_detect(struct pnp_card_link *pcard,
 					 const struct pnp_card_device_id *pid)
@@ -653,7 +651,6 @@ static int __devinit snd_sb16_pnp_detect(struct pnp_card_link *pcard,
 		}
 		pnp_set_card_drvdata(pcard, card);
 		dev++;
-		sb16_pnp_devices++;
 		return 0;
 	}
 
@@ -715,27 +712,25 @@ static int __init alsa_card_sb16_init(void)
 	if ((err = platform_driver_register(&snd_sb16_nonpnp_driver)) < 0)
 		return err;
 
-	for (i = 0; i < SNDRV_CARDS; i++) {
+	for (i = 0; i < SNDRV_CARDS && enable[i]; i++) {
 		struct platform_device *device;
-		if (! enable[i] || is_isapnp_selected(i))
+		if (is_isapnp_selected(i))
 			continue;
 		device = platform_device_register_simple(SND_SB16_DRIVER,
 							 i, NULL, 0);
-		if (IS_ERR(device))
-			continue;
-		if (!platform_get_drvdata(device)) {
-			platform_device_unregister(device);
-			continue;
+		if (IS_ERR(device)) {
+			err = PTR_ERR(device);
+			goto errout;
 		}
 		platform_devices[i] = device;
 		cards++;
 	}
 #ifdef CONFIG_PNP
 	/* PnP cards at last */
-	err = pnp_register_card_driver(&sb16_pnpc_driver);
-	if (!err) {
+	i = pnp_register_card_driver(&sb16_pnpc_driver);
+	if (i >= 0) {
 		pnp_registered = 1;
-		cards += sb16_pnp_devices;
+		cards += i;
 	}
 #endif
 
@@ -748,10 +743,14 @@ static int __init alsa_card_sb16_init(void)
 		snd_printk(KERN_ERR "In case, if you have AWE card, try snd-sbawe module\n");
 #endif
 #endif
-		snd_sb16_unregister_all();
-		return -ENODEV;
+		err = -ENODEV;
+		goto errout;
 	}
 	return 0;
+
+ errout:
+	snd_sb16_unregister_all();
+	return err;
 }
 
 static void __exit alsa_card_sb16_exit(void)

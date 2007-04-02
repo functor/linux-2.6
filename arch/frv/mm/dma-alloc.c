@@ -21,6 +21,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -114,7 +115,9 @@ void *consistent_alloc(gfp_t gfp, size_t size, dma_addr_t *dma_handle)
 	 */
 	if (order > 0) {
 		struct page *rpage = virt_to_page(page);
-		split_page(rpage, order);
+
+		for (i = 1; i < (1 << order); i++)
+			set_page_count(rpage + i, 1);
 	}
 
 	err = 0;

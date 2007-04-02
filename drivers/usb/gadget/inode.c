@@ -170,9 +170,10 @@ static struct dev_data *dev_new (void)
 {
 	struct dev_data		*dev;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kmalloc (sizeof *dev, GFP_KERNEL);
 	if (!dev)
 		return NULL;
+	memset (dev, 0, sizeof *dev);
 	dev->state = STATE_DEV_DISABLED;
 	atomic_set (&dev->count, 1);
 	spin_lock_init (&dev->lock);
@@ -342,7 +343,7 @@ fail:
 static ssize_t
 ep_io (struct ep_data *epdata, void *buf, unsigned len)
 {
-	DECLARE_COMPLETION_ONSTACK (done);
+	DECLARE_COMPLETION (done);
 	int value;
 
 	spin_lock_irq (&epdata->dev->lock);
@@ -528,7 +529,7 @@ struct kiocb_priv {
 	struct usb_request	*req;
 	struct ep_data		*epdata;
 	void			*buf;
-	char __user		*ubuf;		/* NULL for writes */
+	char __user		*ubuf;
 	unsigned		actual;
 };
 
@@ -566,6 +567,7 @@ static ssize_t ep_aio_read_retry(struct kiocb *iocb)
 		status = priv->actual;
 	kfree(priv->buf);
 	kfree(priv);
+	aio_put_req(iocb);
 	return status;
 }
 
@@ -579,8 +581,8 @@ static void ep_aio_complete(struct usb_ep *ep, struct usb_request *req)
 	spin_lock(&epdata->dev->lock);
 	priv->req = NULL;
 	priv->epdata = NULL;
-	if (priv->ubuf == NULL
-			|| unlikely(req->actual == 0)
+	if (NULL == iocb->ki_retry
+			|| unlikely(0 == req->actual)
 			|| unlikely(kiocbIsCancelled(iocb))) {
 		kfree(req->buf);
 		kfree(priv);
@@ -617,7 +619,7 @@ ep_aio_rwtail(
 	char __user	*ubuf
 )
 {
-	struct kiocb_priv	*priv;
+	struct kiocb_priv	*priv = (void *) &iocb->private;
 	struct usb_request	*req;
 	ssize_t			value;
 
@@ -669,7 +671,7 @@ fail:
 		kfree(priv);
 		put_ep(epdata);
 	} else
-		value = (ubuf ? -EIOCBRETRY : -EIOCBQUEUED);
+		value = -EIOCBQUEUED;
 	return value;
 }
 
@@ -809,7 +811,7 @@ ep_config (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 		if (value == 0)
 			data->state = STATE_EP_ENABLED;
 		break;
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 	case USB_SPEED_HIGH:
 		/* fails if caller didn't provide that descriptor... */
 		value = usb_ep_enable (ep, &data->hs_desc);
@@ -844,7 +846,7 @@ fail1:
 static int
 ep_open (struct inode *inode, struct file *fd)
 {
-	struct ep_data		*data = inode->i_private;
+	struct ep_data		*data = inode->u.generic_ip;
 	int			value = -EBUSY;
 
 	if (down_interruptible (&data->lock) != 0)
@@ -981,7 +983,7 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
 			/* assume that was SET_CONFIGURATION */
 			if (dev->current_config) {
 				unsigned power;
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 				if (dev->gadget->speed == USB_SPEED_HIGH)
 					power = dev->hs_config->bMaxPower;
 				else
@@ -1038,7 +1040,7 @@ scan:
 		/* ep0 can't deliver events when STATE_SETUP */
 		for (i = 0; i < n; i++) {
 			if (dev->event [i].type == GADGETFS_SETUP) {
-				len = i + 1;
+				len = n = i + 1;
 				len *= sizeof (struct usb_gadgetfs_event);
 				n = 0;
 				break;
@@ -1261,7 +1263,7 @@ static struct file_operations ep0_io_operations = {
  * Unrecognized ep0 requests may be handled in user space.
  */
 
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 static void make_qualifier (struct dev_data *dev)
 {
 	struct usb_qualifier_descriptor		qual;
@@ -1290,7 +1292,7 @@ static int
 config_buf (struct dev_data *dev, u8 type, unsigned index)
 {
 	int		len;
-#ifdef CONFIG_USB_GADGET_DUALSPEED
+#ifdef HIGHSPEED
 	int		hs;
 #endif
 
@@ -1298,7 +1300,7 @@ config_buf (struct dev_data *dev, u8 type, unsigned index)
 	if (index > 0)
 		return -EINVAL;
 
-#ifdef CONFIG_USB_GADGET_DUALSPEED
+#ifdef HIGHSPEED
 	hs = (dev->gadget->speed == USB_SPEED_HIGH);
 	if (type == USB_DT_OTHER_SPEED_CONFIG)
 		hs = !hs;
@@ -1334,12 +1336,12 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		dev->state = STATE_CONNECTED;
 		dev->dev->bMaxPacketSize0 = gadget->ep0->maxpacket;
 
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 		if (gadget->speed == USB_SPEED_HIGH && dev->hs_config == 0) {
 			ERROR (dev, "no high speed config??\n");
 			return -EINVAL;
 		}
-#endif	/* CONFIG_USB_GADGET_DUALSPEED */
+#endif	/* HIGHSPEED */
 
 		INFO (dev, "connected\n");
 		event = next_event (dev, GADGETFS_CONNECT);
@@ -1351,11 +1353,11 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			/* ... down_trylock (&data->lock) ... */
 			if (data->state != STATE_EP_DEFER_ENABLE)
 				continue;
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 			if (gadget->speed == USB_SPEED_HIGH)
 				value = usb_ep_enable (ep, &data->hs_desc);
 			else
-#endif	/* CONFIG_USB_GADGET_DUALSPEED */
+#endif	/* HIGHSPEED */
 				value = usb_ep_enable (ep, &data->desc);
 			if (value) {
 				ERROR (dev, "deferred %s enable --> %d\n",
@@ -1390,7 +1392,7 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			value = min (w_length, (u16) sizeof *dev->dev);
 			req->buf = dev->dev;
 			break;
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 		case USB_DT_DEVICE_QUALIFIER:
 			if (!dev->hs_config)
 				break;
@@ -1427,7 +1429,7 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			// user mode expected to disable endpoints
 		} else {
 			u8	config, power;
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 			if (gadget->speed == USB_SPEED_HIGH) {
 				config = dev->hs_config->bConfigurationValue;
 				power = dev->hs_config->bMaxPower;
@@ -1580,19 +1582,20 @@ restart:
 
 static struct inode *
 gadgetfs_create_file (struct super_block *sb, char const *name,
-		void *data, const struct file_operations *fops,
+		void *data, struct file_operations *fops,
 		struct dentry **dentry_p);
 
 static int activate_ep_files (struct dev_data *dev)
 {
 	struct usb_ep	*ep;
-	struct ep_data	*data;
 
 	gadget_for_each_ep (ep, dev->gadget) {
+		struct ep_data	*data;
 
-		data = kzalloc(sizeof(*data), GFP_KERNEL);
+		data = kmalloc (sizeof *data, GFP_KERNEL);
 		if (!data)
-			goto enomem0;
+			goto enomem;
+		memset (data, 0, sizeof data);
 		data->state = STATE_EP_DISABLED;
 		init_MUTEX (&data->lock);
 		init_waitqueue_head (&data->wait);
@@ -1607,23 +1610,20 @@ static int activate_ep_files (struct dev_data *dev)
 
 		data->req = usb_ep_alloc_request (ep, GFP_KERNEL);
 		if (!data->req)
-			goto enomem1;
+			goto enomem;
 
 		data->inode = gadgetfs_create_file (dev->sb, data->name,
 				data, &ep_config_operations,
 				&data->dentry);
-		if (!data->inode)
-			goto enomem2;
+		if (!data->inode) {
+			kfree (data);
+			goto enomem;
+		}
 		list_add_tail (&data->epfiles, &dev->epfiles);
 	}
 	return 0;
 
-enomem2:
-	usb_ep_free_request (ep, data->req);
-enomem1:
-	put_dev (dev);
-	kfree (data);
-enomem0:
+enomem:
 	DBG (dev, "%s enomem\n", __FUNCTION__);
 	destroy_ep_files (dev);
 	return -ENOMEM;
@@ -1730,7 +1730,7 @@ gadgetfs_suspend (struct usb_gadget *gadget)
 }
 
 static struct usb_gadget_driver gadgetfs_driver = {
-#ifdef	CONFIG_USB_GADGET_DUALSPEED
+#ifdef	HIGHSPEED
 	.speed		= USB_SPEED_HIGH,
 #else
 	.speed		= USB_SPEED_FULL,
@@ -1794,7 +1794,7 @@ static struct usb_gadget_driver probe_driver = {
  *
  * After initialization, the device stays active for as long as that
  * $CHIP file is open.  Events may then be read from that descriptor,
- * such as configuration notifications.  More complex drivers will handle
+ * such configuration notifications.  More complex drivers will handle
  * some control requests in user space.
  */
 
@@ -1909,7 +1909,7 @@ fail:
 static int
 dev_open (struct inode *inode, struct file *fd)
 {
-	struct dev_data		*dev = inode->i_private;
+	struct dev_data		*dev = inode->u.generic_ip;
 	int			value = -EBUSY;
 
 	if (dev->state == STATE_DEV_DISABLED) {
@@ -1957,7 +1957,7 @@ module_param (default_perm, uint, 0644);
 
 static struct inode *
 gadgetfs_make_inode (struct super_block *sb,
-		void *data, const struct file_operations *fops,
+		void *data, struct file_operations *fops,
 		int mode)
 {
 	struct inode *inode = new_inode (sb);
@@ -1966,10 +1966,11 @@ gadgetfs_make_inode (struct super_block *sb,
 		inode->i_mode = mode;
 		inode->i_uid = default_uid;
 		inode->i_gid = default_gid;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime
 				= CURRENT_TIME;
-		inode->i_private = data;
+		inode->u.generic_ip = data;
 		inode->i_fop = fops;
 	}
 	return inode;
@@ -1980,7 +1981,7 @@ gadgetfs_make_inode (struct super_block *sb,
  */
 static struct inode *
 gadgetfs_create_file (struct super_block *sb, char const *name,
-		void *data, const struct file_operations *fops,
+		void *data, struct file_operations *fops,
 		struct dentry **dentry_p)
 {
 	struct dentry	*dentry;
@@ -2033,10 +2034,12 @@ gadgetfs_fill_super (struct super_block *sb, void *opts, int silent)
 			NULL, &simple_dir_operations,
 			S_IFDIR | S_IRUGO | S_IXUGO);
 	if (!inode)
-		goto enomem0;
+		return -ENOMEM;
 	inode->i_op = &simple_dir_inode_operations;
-	if (!(d = d_alloc_root (inode)))
-		goto enomem1;
+	if (!(d = d_alloc_root (inode))) {
+		iput (inode);
+		return -ENOMEM;
+	}
 	sb->s_root = d;
 
 	/* the ep0 file is named after the controller we expect;
@@ -2044,36 +2047,29 @@ gadgetfs_fill_super (struct super_block *sb, void *opts, int silent)
 	 */
 	dev = dev_new ();
 	if (!dev)
-		goto enomem2;
+		return -ENOMEM;
 
 	dev->sb = sb;
-	if (!gadgetfs_create_file (sb, CHIP,
+	if (!(inode = gadgetfs_create_file (sb, CHIP,
 				dev, &dev_init_operations,
-				&dev->dentry))
-		goto enomem3;
+				&dev->dentry))) {
+		put_dev(dev);
+		return -ENOMEM;
+	}
 
 	/* other endpoint files are available after hardware setup,
 	 * from binding to a controller.
 	 */
 	the_device = dev;
 	return 0;
-
-enomem3:
-	put_dev (dev);
-enomem2:
-	dput (d);
-enomem1:
-	iput (inode);
-enomem0:
-	return -ENOMEM;
 }
 
 /* "mount -t gadgetfs path /dev/gadget" ends up here */
-static int
+static struct super_block *
 gadgetfs_get_sb (struct file_system_type *t, int flags,
-		const char *path, void *opts, struct vfsmount *mnt)
+		const char *path, void *opts)
 {
-	return get_sb_single (t, flags, opts, gadgetfs_fill_super, mnt);
+	return get_sb_single (t, flags, opts, gadgetfs_fill_super);
 }
 
 static void

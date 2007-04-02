@@ -26,7 +26,7 @@
 #include <linux/time.h>
 #include <linux/timer.h>
 #include <linux/spinlock.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #include "demux.h"
 
@@ -125,7 +125,7 @@ struct dvb_demux {
 	u8 tsbuf[204];
 	int tsbufp;
 
-	struct mutex mutex;
+	struct semaphore mutex;
 	spinlock_t lock;
 };
 

@@ -17,6 +17,7 @@ void hpfs_init_inode(struct inode *i)
 	i->i_gid = hpfs_sb(sb)->sb_gid;
 	i->i_mode = hpfs_sb(sb)->sb_mode;
 	hpfs_inode->i_conv = hpfs_sb(sb)->sb_conv;
+	i->i_blksize = 512;
 	i->i_size = -1;
 	i->i_blocks = -1;
 	
@@ -185,9 +186,9 @@ void hpfs_write_inode(struct inode *i)
 		kfree(hpfs_inode->i_rddir_off);
 		hpfs_inode->i_rddir_off = NULL;
 	}
-	mutex_lock(&hpfs_inode->i_parent_mutex);
+	down(&hpfs_inode->i_parent);
 	if (!i->i_nlink) {
-		mutex_unlock(&hpfs_inode->i_parent_mutex);
+		up(&hpfs_inode->i_parent);
 		return;
 	}
 	parent = iget_locked(i->i_sb, hpfs_inode->i_parent_dir);
@@ -198,14 +199,14 @@ void hpfs_write_inode(struct inode *i)
 			hpfs_read_inode(parent);
 			unlock_new_inode(parent);
 		}
-		mutex_lock(&hpfs_inode->i_mutex);
+		down(&hpfs_inode->i_sem);
 		hpfs_write_inode_nolock(i);
-		mutex_unlock(&hpfs_inode->i_mutex);
+		up(&hpfs_inode->i_sem);
 		iput(parent);
 	} else {
 		mark_inode_dirty(i);
 	}
-	mutex_unlock(&hpfs_inode->i_parent_mutex);
+	up(&hpfs_inode->i_parent);
 }
 
 void hpfs_write_inode_nolock(struct inode *i)

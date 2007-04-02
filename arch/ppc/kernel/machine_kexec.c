@@ -25,8 +25,8 @@ typedef NORET_TYPE void (*relocate_new_kernel_t)(
 				unsigned long reboot_code_buffer,
 				unsigned long start_address) ATTRIB_NORET;
 
-extern const unsigned char relocate_new_kernel[];
-extern const unsigned int relocate_new_kernel_size;
+const extern unsigned char relocate_new_kernel[];
+const extern unsigned int relocate_new_kernel_size;
 
 void machine_shutdown(void)
 {

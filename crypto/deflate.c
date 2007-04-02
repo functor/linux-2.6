@@ -73,11 +73,12 @@ static int deflate_decomp_init(struct deflate_ctx *ctx)
 	int ret = 0;
 	struct z_stream_s *stream = &ctx->decomp_stream;
 
-	stream->workspace = kzalloc(zlib_inflate_workspacesize(), GFP_KERNEL);
+	stream->workspace = kmalloc(zlib_inflate_workspacesize(), GFP_KERNEL);
 	if (!stream->workspace ) {
 		ret = -ENOMEM;
 		goto out;
 	}
+	memset(stream->workspace, 0, zlib_inflate_workspacesize());
 	ret = zlib_inflateInit2(stream, -DEFLATE_DEF_WINBITS);
 	if (ret != Z_OK) {
 		ret = -EINVAL;
@@ -102,9 +103,8 @@ static void deflate_decomp_exit(struct deflate_ctx *ctx)
 	kfree(ctx->decomp_stream.workspace);
 }
 
-static int deflate_init(struct crypto_tfm *tfm)
+static int deflate_init(void *ctx)
 {
-	struct deflate_ctx *ctx = crypto_tfm_ctx(tfm);
 	int ret;
 	
 	ret = deflate_comp_init(ctx);
@@ -117,19 +117,17 @@ out:
 	return ret;
 }
 
-static void deflate_exit(struct crypto_tfm *tfm)
+static void deflate_exit(void *ctx)
 {
-	struct deflate_ctx *ctx = crypto_tfm_ctx(tfm);
-
 	deflate_comp_exit(ctx);
 	deflate_decomp_exit(ctx);
 }
 
-static int deflate_compress(struct crypto_tfm *tfm, const u8 *src,
-			    unsigned int slen, u8 *dst, unsigned int *dlen)
+static int deflate_compress(void *ctx, const u8 *src, unsigned int slen,
+	                    u8 *dst, unsigned int *dlen)
 {
 	int ret = 0;
-	struct deflate_ctx *dctx = crypto_tfm_ctx(tfm);
+	struct deflate_ctx *dctx = ctx;
 	struct z_stream_s *stream = &dctx->comp_stream;
 
 	ret = zlib_deflateReset(stream);
@@ -154,12 +152,12 @@ out:
 	return ret;
 }
  
-static int deflate_decompress(struct crypto_tfm *tfm, const u8 *src,
-			      unsigned int slen, u8 *dst, unsigned int *dlen)
+static int deflate_decompress(void *ctx, const u8 *src, unsigned int slen,
+                              u8 *dst, unsigned int *dlen)
 {
 	
 	int ret = 0;
-	struct deflate_ctx *dctx = crypto_tfm_ctx(tfm);
+	struct deflate_ctx *dctx = ctx;
 	struct z_stream_s *stream = &dctx->decomp_stream;
 
 	ret = zlib_inflateReset(stream);
@@ -201,9 +199,9 @@ static struct crypto_alg alg = {
 	.cra_ctxsize		= sizeof(struct deflate_ctx),
 	.cra_module		= THIS_MODULE,
 	.cra_list		= LIST_HEAD_INIT(alg.cra_list),
-	.cra_init		= deflate_init,
-	.cra_exit		= deflate_exit,
 	.cra_u			= { .compress = {
+	.coa_init		= deflate_init,
+	.coa_exit		= deflate_exit,
 	.coa_compress 		= deflate_compress,
 	.coa_decompress  	= deflate_decompress } }
 };

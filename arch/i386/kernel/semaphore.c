@@ -12,6 +12,7 @@
  *
  * rw semaphores implemented November 1999 by Benjamin LaHaise <bcrl@kvack.org>
  */
+#include <linux/config.h>
 #include <asm/semaphore.h>
 
 /*
@@ -109,11 +110,11 @@ asm(
 ".align	4\n"
 ".globl	__write_lock_failed\n"
 "__write_lock_failed:\n\t"
-	LOCK_PREFIX "addl	$" RW_LOCK_BIAS_STR ",(%eax)\n"
+	LOCK "addl	$" RW_LOCK_BIAS_STR ",(%eax)\n"
 "1:	rep; nop\n\t"
 	"cmpl	$" RW_LOCK_BIAS_STR ",(%eax)\n\t"
 	"jne	1b\n\t"
-	LOCK_PREFIX "subl	$" RW_LOCK_BIAS_STR ",(%eax)\n\t"
+	LOCK "subl	$" RW_LOCK_BIAS_STR ",(%eax)\n\t"
 	"jnz	__write_lock_failed\n\t"
 	"ret"
 );
@@ -123,11 +124,11 @@ asm(
 ".align	4\n"
 ".globl	__read_lock_failed\n"
 "__read_lock_failed:\n\t"
-	LOCK_PREFIX "incl	(%eax)\n"
+	LOCK "incl	(%eax)\n"
 "1:	rep; nop\n\t"
 	"cmpl	$1,(%eax)\n\t"
 	"js	1b\n\t"
-	LOCK_PREFIX "decl	(%eax)\n\t"
+	LOCK "decl	(%eax)\n\t"
 	"js	__read_lock_failed\n\t"
 	"ret"
 );

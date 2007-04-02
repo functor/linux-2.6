@@ -2,6 +2,7 @@
 #ifndef _SPARC_PGALLOC_H
 #define _SPARC_PGALLOC_H
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 
@@ -64,9 +65,5 @@ BTFIXUPDEF_CALL(void, free_pte_fast, pte_t *)
 BTFIXUPDEF_CALL(void, pte_free, struct page *)
 #define pte_free(pte)		BTFIXUP_CALL(pte_free)(pte)
 #define __pte_free_tlb(tlb, pte)	pte_free(pte)
-
-#define arch_add_exec_range(mm, limit)		do { ; } while (0)
-#define arch_flush_exec_range(mm)		do { ; } while (0)
-#define arch_remove_exec_range(mm, limit)	do { ; } while (0)
 
 #endif /* _SPARC_PGALLOC_H */

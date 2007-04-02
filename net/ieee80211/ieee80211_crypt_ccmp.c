@@ -9,6 +9,7 @@
  * more details.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -76,9 +77,10 @@ static void *ieee80211_ccmp_init(int key_idx)
 {
 	struct ieee80211_ccmp_data *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_ATOMIC);
+	priv = kmalloc(sizeof(*priv), GFP_ATOMIC);
 	if (priv == NULL)
 		goto fail;
+	memset(priv, 0, sizeof(*priv));
 	priv->key_idx = key_idx;
 
 	priv->tfm = crypto_alloc_tfm("aes", 0);
@@ -188,8 +190,7 @@ static void ccmp_init_blocks(struct crypto_tfm *tfm,
 	ieee80211_ccmp_aes_encrypt(tfm, b0, s0);
 }
 
-static int ieee80211_ccmp_hdr(struct sk_buff *skb, int hdr_len,
-			      u8 *aeskey, int keylen, void *priv)
+static int ieee80211_ccmp_hdr(struct sk_buff *skb, int hdr_len, void *priv)
 {
 	struct ieee80211_ccmp_data *key = priv;
 	int i;
@@ -197,9 +198,6 @@ static int ieee80211_ccmp_hdr(struct sk_buff *skb, int hdr_len,
 
 	if (skb_headroom(skb) < CCMP_HDR_LEN || skb->len < hdr_len)
 		return -1;
-
-	if (aeskey != NULL && keylen >= CCMP_TK_LEN)
-		memcpy(aeskey, key->key, CCMP_TK_LEN);
 
 	pos = skb_push(skb, CCMP_HDR_LEN);
 	memmove(pos, pos + CCMP_HDR_LEN, hdr_len);
@@ -240,7 +238,7 @@ static int ieee80211_ccmp_encrypt(struct sk_buff *skb, int hdr_len, void *priv)
 		return -1;
 
 	data_len = skb->len - hdr_len;
-	len = ieee80211_ccmp_hdr(skb, hdr_len, NULL, 0, priv);
+	len = ieee80211_ccmp_hdr(skb, hdr_len, priv);
 	if (len < 0)
 		return -1;
 

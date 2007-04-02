@@ -41,11 +41,9 @@
 /* Trivial bitmap-based allocator */
 u32 mthca_alloc(struct mthca_alloc *alloc)
 {
-	unsigned long flags;
 	u32 obj;
 
-	spin_lock_irqsave(&alloc->lock, flags);
-
+	spin_lock(&alloc->lock);
 	obj = find_next_zero_bit(alloc->table, alloc->max, alloc->last);
 	if (obj >= alloc->max) {
 		alloc->top = (alloc->top + alloc->max) & alloc->mask;
@@ -58,24 +56,19 @@ u32 mthca_alloc(struct mthca_alloc *alloc)
 	} else
 		obj = -1;
 
-	spin_unlock_irqrestore(&alloc->lock, flags);
+	spin_unlock(&alloc->lock);
 
 	return obj;
 }
 
 void mthca_free(struct mthca_alloc *alloc, u32 obj)
 {
-	unsigned long flags;
-
 	obj &= alloc->max - 1;
-
-	spin_lock_irqsave(&alloc->lock, flags);
-
+	spin_lock(&alloc->lock);
 	clear_bit(obj, alloc->table);
 	alloc->last = min(alloc->last, obj);
 	alloc->top = (alloc->top + alloc->max) & alloc->mask;
-
-	spin_unlock_irqrestore(&alloc->lock, flags);
+	spin_unlock(&alloc->lock);
 }
 
 int mthca_alloc_init(struct mthca_alloc *alloc, u32 num, u32 mask,
@@ -115,15 +108,14 @@ void mthca_alloc_cleanup(struct mthca_alloc *alloc)
  * serialize access to the array.
  */
 
-#define MTHCA_ARRAY_MASK (PAGE_SIZE / sizeof (void *) - 1)
-
 void *mthca_array_get(struct mthca_array *array, int index)
 {
 	int p = (index * sizeof (void *)) >> PAGE_SHIFT;
 
-	if (array->page_list[p].page)
-		return array->page_list[p].page[index & MTHCA_ARRAY_MASK];
-	else
+	if (array->page_list[p].page) {
+		int i = index & (PAGE_SIZE / sizeof (void *) - 1);
+		return array->page_list[p].page[i];
+	} else
 		return NULL;
 }
 
@@ -138,7 +130,8 @@ int mthca_array_set(struct mthca_array *array, int index, void *value)
 	if (!array->page_list[p].page)
 		return -ENOMEM;
 
-	array->page_list[p].page[index & MTHCA_ARRAY_MASK] = value;
+	array->page_list[p].page[index & (PAGE_SIZE / sizeof (void *) - 1)] =
+		value;
 	++array->page_list[p].used;
 
 	return 0;
@@ -151,8 +144,7 @@ void mthca_array_clear(struct mthca_array *array, int index)
 	if (--array->page_list[p].used == 0) {
 		free_page((unsigned long) array->page_list[p].page);
 		array->page_list[p].page = NULL;
-	} else
-		array->page_list[p].page[index & MTHCA_ARRAY_MASK] = NULL;
+	}
 
 	if (array->page_list[p].used < 0)
 		pr_debug("Array %p index %d page %d with ref count %d < 0\n",

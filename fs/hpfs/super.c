@@ -135,9 +135,8 @@ static unsigned count_bitmaps(struct super_block *s)
 	return count;
 }
 
-static int hpfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+static int hpfs_statfs(struct super_block *s, struct kstatfs *buf)
 {
-	struct super_block *s = dentry->d_sb;
 	struct hpfs_sb_info *sbi = hpfs_sb(s);
 	lock_kernel();
 
@@ -182,8 +181,8 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 
 	if ((flags & (SLAB_CTOR_VERIFY|SLAB_CTOR_CONSTRUCTOR)) ==
 	    SLAB_CTOR_CONSTRUCTOR) {
-		mutex_init(&ei->i_mutex);
-		mutex_init(&ei->i_parent_mutex);
+		init_MUTEX(&ei->i_sem);
+		init_MUTEX(&ei->i_parent);
 		inode_init_once(&ei->vfs_inode);
 	}
 }
@@ -192,8 +191,7 @@ static int init_inodecache(void)
 {
 	hpfs_inode_cachep = kmem_cache_create("hpfs_inode_cache",
 					     sizeof(struct hpfs_inode_info),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (hpfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -663,11 +661,10 @@ bail0:
 	return -EINVAL;
 }
 
-static int hpfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *hpfs_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, hpfs_fill_super,
-			   mnt);
+	return get_sb_bdev(fs_type, flags, dev_name, data, hpfs_fill_super);
 }
 
 static struct file_system_type hpfs_fs_type = {

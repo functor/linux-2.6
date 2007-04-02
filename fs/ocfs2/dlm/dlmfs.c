@@ -116,7 +116,7 @@ static int dlmfs_file_open(struct inode *inode,
 	 * doesn't make sense for LVB writes. */
 	file->f_flags &= ~O_APPEND;
 
-	fp = kmalloc(sizeof(*fp), GFP_NOFS);
+	fp = kmalloc(sizeof(*fp), GFP_KERNEL);
 	if (!fp) {
 		status = -ENOMEM;
 		goto bail;
@@ -196,7 +196,7 @@ static ssize_t dlmfs_file_read(struct file *filp,
 	else
 		readlen = count - *ppos;
 
-	lvb_buf = kmalloc(readlen, GFP_NOFS);
+	lvb_buf = kmalloc(readlen, GFP_KERNEL);
 	if (!lvb_buf)
 		return -ENOMEM;
 
@@ -240,7 +240,7 @@ static ssize_t dlmfs_file_write(struct file *filp,
 	else
 		writelen = count - *ppos;
 
-	lvb_buf = kmalloc(writelen, GFP_NOFS);
+	lvb_buf = kmalloc(writelen, GFP_KERNEL);
 	if (!lvb_buf)
 		return -ENOMEM;
 
@@ -335,6 +335,7 @@ static struct inode *dlmfs_get_root_inode(struct super_block *sb)
 		inode->i_mode = mode;
 		inode->i_uid = current->fsuid;
 		inode->i_gid = current->fsgid;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_mapping->backing_dev_info = &dlmfs_backing_dev_info;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
@@ -361,6 +362,7 @@ static struct inode *dlmfs_get_inode(struct inode *parent,
 	inode->i_mode = mode;
 	inode->i_uid = current->fsuid;
 	inode->i_gid = current->fsgid;
+	inode->i_blksize = PAGE_CACHE_SIZE;
 	inode->i_blocks = 0;
 	inode->i_mapping->backing_dev_info = &dlmfs_backing_dev_info;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
@@ -572,10 +574,10 @@ static struct inode_operations dlmfs_file_inode_operations = {
 	.getattr	= simple_getattr,
 };
 
-static int dlmfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *dlmfs_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_nodev(fs_type, flags, data, dlmfs_fill_super, mnt);
+	return get_sb_nodev(fs_type, flags, data, dlmfs_fill_super);
 }
 
 static struct file_system_type dlmfs_fs_type = {
@@ -594,8 +596,7 @@ static int __init init_dlmfs_fs(void)
 
 	dlmfs_inode_cache = kmem_cache_create("dlmfs_inode_cache",
 				sizeof(struct dlmfs_inode_private),
-				0, (SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|
-					SLAB_MEM_SPREAD),
+				0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
 				dlmfs_init_once, NULL);
 	if (!dlmfs_inode_cache)
 		return -ENOMEM;

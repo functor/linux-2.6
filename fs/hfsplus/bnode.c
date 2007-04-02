@@ -440,7 +440,7 @@ static struct hfs_bnode *__hfs_bnode_create(struct hfs_btree *tree, u32 cnid)
 	block = off >> PAGE_CACHE_SHIFT;
 	node->page_offset = off & ~PAGE_CACHE_MASK;
 	for (i = 0; i < tree->pages_per_bnode; block++, i++) {
-		page = read_mapping_page(mapping, block, NULL);
+		page = read_cache_page(mapping, block, (filler_t *)mapping->a_ops->readpage, NULL);
 		if (IS_ERR(page))
 			goto fail;
 		if (PageError(page)) {
@@ -466,7 +466,8 @@ void hfs_bnode_unhash(struct hfs_bnode *node)
 	for (p = &node->tree->node_hash[hfs_bnode_hash(node->this)];
 	     *p && *p != node; p = &(*p)->next_hash)
 		;
-	BUG_ON(!*p);
+	if (!*p)
+		BUG();
 	*p = node->next_hash;
 	node->tree->node_hash_cnt--;
 }
@@ -621,7 +622,8 @@ void hfs_bnode_put(struct hfs_bnode *node)
 
 		dprint(DBG_BNODE_REFS, "put_node(%d:%d): %d\n",
 		       node->tree->cnid, node->this, atomic_read(&node->refcnt));
-		BUG_ON(!atomic_read(&node->refcnt));
+		if (!atomic_read(&node->refcnt))
+			BUG();
 		if (!atomic_dec_and_lock(&node->refcnt, &tree->hash_lock))
 			return;
 		for (i = 0; i < tree->pages_per_bnode; i++) {

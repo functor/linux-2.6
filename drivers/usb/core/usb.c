@@ -21,6 +21,7 @@
  * are evil.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/bitops.h>
@@ -32,7 +33,6 @@
 #include <linux/errno.h>
 #include <linux/smp_lock.h>
 #include <linux/usb.h>
-#include <linux/mutex.h>
 
 #include <asm/io.h>
 #include <asm/scatterlist.h>
@@ -639,7 +639,7 @@ struct usb_device *usb_find_device(u16 vendor_id, u16 product_id)
 	struct usb_bus *bus;
 	struct usb_device *dev = NULL;
 	
-	mutex_lock(&usb_bus_list_lock);
+	down(&usb_bus_list_lock);
 	for (buslist = usb_bus_list.next;
 	     buslist != &usb_bus_list; 
 	     buslist = buslist->next) {
@@ -653,7 +653,7 @@ struct usb_device *usb_find_device(u16 vendor_id, u16 product_id)
 			goto exit;
 	}
 exit:
-	mutex_unlock(&usb_bus_list_lock);
+	up(&usb_bus_list_lock);
 	return dev;
 }
 
@@ -990,8 +990,6 @@ void usb_buffer_unmap_sg (struct usb_device *dev, unsigned pipe,
 
 static int verify_suspended(struct device *dev, void *unused)
 {
-	if (dev->driver == NULL)
-		return 0;
 	return (dev->power.power_state.event == PM_EVENT_ON) ? -EBUSY : 0;
 }
 
@@ -1195,6 +1193,7 @@ EXPORT_SYMBOL(usb_disabled);
 EXPORT_SYMBOL_GPL(usb_get_intf);
 EXPORT_SYMBOL_GPL(usb_put_intf);
 
+EXPORT_SYMBOL(usb_alloc_dev);
 EXPORT_SYMBOL(usb_put_dev);
 EXPORT_SYMBOL(usb_get_dev);
 EXPORT_SYMBOL(usb_hub_tt_clear_buffer);
@@ -1208,7 +1207,7 @@ EXPORT_SYMBOL(usb_ifnum_to_if);
 EXPORT_SYMBOL(usb_altnum_to_altsetting);
 
 EXPORT_SYMBOL(usb_reset_device);
-EXPORT_SYMBOL(usb_reset_composite_device);
+EXPORT_SYMBOL(usb_disconnect);
 
 EXPORT_SYMBOL(__usb_get_extra_descriptor);
 

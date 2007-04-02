@@ -44,6 +44,7 @@
  * 	Thanks to info from Heath Robinson and Arieh Davidoff.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -55,7 +56,7 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
+#include "usb-serial.h"
 #include "ipaq.h"
 
 #define KP_RETRIES	100
@@ -70,8 +71,6 @@
 
 static __u16 product, vendor;
 static int debug;
-static int connect_retries = KP_RETRIES;
-static int initial_wait;
 
 /* Function prototypes for an ipaq */
 static int  ipaq_open (struct usb_serial_port *port, struct file *filp);
@@ -250,9 +249,6 @@ static struct usb_device_id ipaq_id_table [] = {
 	{ USB_DEVICE(0x04C5, 0x1058) }, /* FUJITSU USB Sync */
 	{ USB_DEVICE(0x04C5, 0x1079) }, /* FUJITSU USB Sync */
 	{ USB_DEVICE(0x04DA, 0x2500) }, /* Panasonic USB Sync */
-	{ USB_DEVICE(0x04DD, 0x9102) }, /* SHARP WS003SH USB Modem */
-	{ USB_DEVICE(0x04DD, 0x9121) }, /* SHARP WS004SH USB Modem */
-	{ USB_DEVICE(0x04DD, 0x9123) }, /* SHARP WS007SH USB Modem */
 	{ USB_DEVICE(0x04E8, 0x5F00) }, /* Samsung NEXiO USB Sync */
 	{ USB_DEVICE(0x04E8, 0x5F01) }, /* Samsung NEXiO USB Sync */
 	{ USB_DEVICE(0x04E8, 0x5F02) }, /* Samsung NEXiO USB Sync */
@@ -587,7 +583,7 @@ static int ipaq_open(struct usb_serial_port *port, struct file *filp)
 	struct ipaq_private	*priv;
 	struct ipaq_packet	*pkt;
 	int			i, result = 0;
-	int			retries = connect_retries;
+	int			retries = KP_RETRIES;
 
 	dbg("%s - port %d", __FUNCTION__, port->number);
 
@@ -651,12 +647,16 @@ static int ipaq_open(struct usb_serial_port *port, struct file *filp)
 	port->read_urb->transfer_buffer_length = URBDATA_SIZE;
 	port->bulk_out_size = port->write_urb->transfer_buffer_length = URBDATA_SIZE;
 	
-	msleep(1000*initial_wait);
 	/* Start reading from the device */
 	usb_fill_bulk_urb(port->read_urb, serial->dev, 
 		      usb_rcvbulkpipe(serial->dev, port->bulk_in_endpointAddress),
 		      port->read_urb->transfer_buffer, port->read_urb->transfer_buffer_length,
 		      ipaq_read_bulk_callback, port);
+	result = usb_submit_urb(port->read_urb, GFP_KERNEL);
+	if (result) {
+		err("%s - failed submitting read urb, error %d", __FUNCTION__, result);
+		goto error;
+	}
 
 	/*
 	 * Send out control message observed in win98 sniffs. Not sure what
@@ -671,14 +671,8 @@ static int ipaq_open(struct usb_serial_port *port, struct file *filp)
 				usb_sndctrlpipe(serial->dev, 0), 0x22, 0x21,
 				0x1, 0, NULL, 0, 100);
 		if (result == 0) {
-			result = usb_submit_urb(port->read_urb, GFP_KERNEL);
-			if (result) {
-				err("%s - failed submitting read urb, error %d", __FUNCTION__, result);
-				goto error;
-			}
 			return 0;
 		}
-		msleep(1000);
 	}
 	err("%s - failed doing control urb, error %d", __FUNCTION__, result);
 	goto error;
@@ -861,7 +855,6 @@ static void ipaq_write_bulk_callback(struct urb *urb, struct pt_regs *regs)
 	
 	if (urb->status) {
 		dbg("%s - nonzero write bulk status received: %d", __FUNCTION__, urb->status);
-		return;
 	}
 
 	spin_lock_irqsave(&write_list_lock, flags);
@@ -877,7 +870,7 @@ static void ipaq_write_bulk_callback(struct urb *urb, struct pt_regs *regs)
 		spin_unlock_irqrestore(&write_list_lock, flags);
 	}
 
-	usb_serial_port_softint(port);
+	schedule_work(&port->work);
 }
 
 static int ipaq_write_room(struct usb_serial_port *port)
@@ -974,9 +967,3 @@ MODULE_PARM_DESC(vendor, "User specified USB idVendor");
 
 module_param(product, ushort, 0);
 MODULE_PARM_DESC(product, "User specified USB idProduct");
-
-module_param(connect_retries, int, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(connect_retries, "Maximum number of connect retries (one second each)");
-
-module_param(initial_wait, int, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(initial_wait, "Time to wait before attempting a connection (in seconds)");

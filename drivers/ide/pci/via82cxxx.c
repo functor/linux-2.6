@@ -26,6 +26,7 @@
  * the Free Software Foundation.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/ioport.h>
@@ -440,7 +441,7 @@ static void __devinit init_hwif_via82cxxx(ide_hwif_t *hwif)
 
 
 #if defined(CONFIG_PPC_CHRP) && defined(CONFIG_PPC32)
-	if(machine_is(chrp) && _chrp_type == _CHRP_Pegasos) {
+	if(_machine == _MACH_chrp && _chrp_type == _CHRP_Pegasos) {
 		hwif->irq = hwif->channel ? 15 : 14;
 	}
 #endif

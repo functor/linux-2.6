@@ -91,6 +91,7 @@
 #include <linux/errno.h>
 #include <linux/timer.h>
 #include <linux/mm.h>
+#include <linux/config.h>
 #include <linux/inet.h>
 #include <linux/ipv6.h>
 #include <linux/netdevice.h>
@@ -615,7 +616,7 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				goto out;
 			if (daddr == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
 				daddr = fl.fl4_dst = nxi->ipv4[0];
-#ifdef CONFIG_VSERVER_REMAP_SADDR
+#ifdef VSERVER_REMAP_SADDR
 			if (saddr == IPI_LOOPBACK && !vx_check(0, VX_ADMIN))
 				saddr = fl.fl4_src = nxi->ipv4[0];
 #endif
@@ -1232,12 +1233,15 @@ static int udp_destroy_sock(struct sock *sk)
 /*
  *	Socket option code for UDP
  */
-static int do_udp_setsockopt(struct sock *sk, int level, int optname,
+static int udp_setsockopt(struct sock *sk, int level, int optname, 
 			  char __user *optval, int optlen)
 {
 	struct udp_sock *up = udp_sk(sk);
 	int val;
 	int err = 0;
+
+	if (level != SOL_UDP)
+		return ip_setsockopt(sk, level, optname, optval, optlen);
 
 	if(optlen<sizeof(int))
 		return -EINVAL;
@@ -1278,29 +1282,14 @@ static int do_udp_setsockopt(struct sock *sk, int level, int optname,
 	return err;
 }
 
-static int udp_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, int optlen)
-{
-	if (level != SOL_UDP)
-		return ip_setsockopt(sk, level, optname, optval, optlen);
-	return do_udp_setsockopt(sk, level, optname, optval, optlen);
-}
-
-#ifdef CONFIG_COMPAT
-static int compat_udp_setsockopt(struct sock *sk, int level, int optname,
-				 char __user *optval, int optlen)
-{
-	if (level != SOL_UDP)
-		return compat_ip_setsockopt(sk, level, optname, optval, optlen);
-	return do_udp_setsockopt(sk, level, optname, optval, optlen);
-}
-#endif
-
-static int do_udp_getsockopt(struct sock *sk, int level, int optname,
+static int udp_getsockopt(struct sock *sk, int level, int optname, 
 			  char __user *optval, int __user *optlen)
 {
 	struct udp_sock *up = udp_sk(sk);
 	int val, len;
+
+	if (level != SOL_UDP)
+		return ip_getsockopt(sk, level, optname, optval, optlen);
 
 	if(get_user(len,optlen))
 		return -EFAULT;
@@ -1330,23 +1319,6 @@ static int do_udp_getsockopt(struct sock *sk, int level, int optname,
   	return 0;
 }
 
-static int udp_getsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, int __user *optlen)
-{
-	if (level != SOL_UDP)
-		return ip_getsockopt(sk, level, optname, optval, optlen);
-	return do_udp_getsockopt(sk, level, optname, optval, optlen);
-}
-
-#ifdef CONFIG_COMPAT
-static int compat_udp_getsockopt(struct sock *sk, int level, int optname,
-				 char __user *optval, int __user *optlen)
-{
-	if (level != SOL_UDP)
-		return compat_ip_getsockopt(sk, level, optname, optval, optlen);
-	return do_udp_getsockopt(sk, level, optname, optval, optlen);
-}
-#endif
 /**
  * 	udp_poll - wait for a UDP event.
  *	@file - file struct
@@ -1395,27 +1367,23 @@ unsigned int udp_poll(struct file *file, struct socket *sock, poll_table *wait)
 }
 
 struct proto udp_prot = {
- 	.name		   = "UDP",
-	.owner		   = THIS_MODULE,
-	.close		   = udp_close,
-	.connect	   = ip4_datagram_connect,
-	.disconnect	   = udp_disconnect,
-	.ioctl		   = udp_ioctl,
-	.destroy	   = udp_destroy_sock,
-	.setsockopt	   = udp_setsockopt,
-	.getsockopt	   = udp_getsockopt,
-	.sendmsg	   = udp_sendmsg,
-	.recvmsg	   = udp_recvmsg,
-	.sendpage	   = udp_sendpage,
-	.backlog_rcv	   = udp_queue_rcv_skb,
-	.hash		   = udp_v4_hash,
-	.unhash		   = udp_v4_unhash,
-	.get_port	   = udp_v4_get_port,
-	.obj_size	   = sizeof(struct udp_sock),
-#ifdef CONFIG_COMPAT
-	.compat_setsockopt = compat_udp_setsockopt,
-	.compat_getsockopt = compat_udp_getsockopt,
-#endif
+ 	.name =		"UDP",
+	.owner =	THIS_MODULE,
+	.close =	udp_close,
+	.connect =	ip4_datagram_connect,
+	.disconnect =	udp_disconnect,
+	.ioctl =	udp_ioctl,
+	.destroy =	udp_destroy_sock,
+	.setsockopt =	udp_setsockopt,
+	.getsockopt =	udp_getsockopt,
+	.sendmsg =	udp_sendmsg,
+	.recvmsg =	udp_recvmsg,
+	.sendpage =	udp_sendpage,
+	.backlog_rcv =	udp_queue_rcv_skb,
+	.hash =		udp_v4_hash,
+	.unhash =	udp_v4_unhash,
+	.get_port =	udp_v4_get_port,
+	.obj_size =	sizeof(struct udp_sock),
 };
 
 /* ------------------------------------------------------------------------ */
@@ -1497,10 +1465,11 @@ static int udp_seq_open(struct inode *inode, struct file *file)
 	struct udp_seq_afinfo *afinfo = PDE(inode)->data;
 	struct seq_file *seq;
 	int rc = -ENOMEM;
-	struct udp_iter_state *s = kzalloc(sizeof(*s), GFP_KERNEL);
+	struct udp_iter_state *s = kmalloc(sizeof(*s), GFP_KERNEL);
 
 	if (!s)
 		goto out;
+	memset(s, 0, sizeof(*s));
 	s->family		= afinfo->family;
 	s->seq_ops.start	= udp_seq_start;
 	s->seq_ops.next		= udp_seq_next;

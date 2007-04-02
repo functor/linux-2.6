@@ -25,13 +25,9 @@
 #define BUFFER_SIZE	2048	/* buffer for the variables */
 #define NUM_ENVP	32	/* number of env pointers */
 
-#if defined(CONFIG_HOTPLUG)
-u64 uevent_seqnum;
-char uevent_helper[UEVENT_HELPER_PATH_LEN] = "/sbin/hotplug";
+#if defined(CONFIG_HOTPLUG) && defined(CONFIG_NET)
 static DEFINE_SPINLOCK(sequence_lock);
-#if defined(CONFIG_NET)
 static struct sock *uevent_sock;
-#endif
 
 static char *action_to_string(enum kobject_action action)
 {
@@ -157,7 +153,6 @@ void kobject_uevent(struct kobject *kobj, enum kobject_action action)
 	spin_unlock(&sequence_lock);
 	sprintf(seq_buff, "SEQNUM=%llu", (unsigned long long)seq);
 
-#if defined(CONFIG_NET)
 	/* send netlink message */
 	if (uevent_sock) {
 		struct sk_buff *skb;
@@ -182,7 +177,6 @@ void kobject_uevent(struct kobject *kobj, enum kobject_action action)
 			netlink_broadcast(uevent_sock, skb, 0, 1, GFP_KERNEL);
 		}
 	}
-#endif
 
 	/* call uevent_helper, usually only enabled during early boot */
 	if (uevent_helper[0]) {
@@ -253,7 +247,6 @@ int add_uevent_var(char **envp, int num_envp, int *cur_index,
 }
 EXPORT_SYMBOL_GPL(add_uevent_var);
 
-#if defined(CONFIG_NET)
 static int __init kobject_uevent_init(void)
 {
 	uevent_sock = netlink_kernel_create(NETLINK_KOBJECT_UEVENT, 1, NULL,
@@ -269,6 +262,5 @@ static int __init kobject_uevent_init(void)
 }
 
 postcore_initcall(kobject_uevent_init);
-#endif
 
 #endif /* CONFIG_HOTPLUG */

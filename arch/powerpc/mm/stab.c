@@ -12,6 +12,7 @@
  *      2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <asm/pgtable.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
@@ -199,6 +200,10 @@ void switch_stab(struct task_struct *tsk, struct mm_struct *mm)
 
 	__get_cpu_var(stab_cache_ptr) = 0;
 
+#ifdef CONFIG_PPC_64K_PAGES
+	get_paca()->pgdir = mm->pgd;
+#endif /* CONFIG_PPC_64K_PAGES */
+
 	/* Now preload some entries for the new task */
 	if (test_tsk_thread_flag(tsk, TIF_32BIT))
 		unmapped_base = TASK_UNMAPPED_BASE_USER32;
@@ -234,7 +239,7 @@ void stabs_alloc(void)
 	if (cpu_has_feature(CPU_FTR_SLB))
 		return;
 
-	for_each_possible_cpu(cpu) {
+	for_each_cpu(cpu) {
 		unsigned long newstab;
 
 		if (cpu == 0)
@@ -242,6 +247,10 @@ void stabs_alloc(void)
 
 		newstab = lmb_alloc_base(HW_PAGE_SIZE, HW_PAGE_SIZE,
 					 1<<SID_SHIFT);
+		if (! newstab)
+			panic("Unable to allocate segment table for CPU %d.\n",
+			      cpu);
+
 		newstab = (unsigned long)__va(newstab);
 
 		memset((void *)newstab, 0, HW_PAGE_SIZE);

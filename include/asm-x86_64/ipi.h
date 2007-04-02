@@ -49,7 +49,6 @@ static inline int __prepare_ICR2 (unsigned int mask)
 	return SET_APIC_DEST_FIELD(mask);
 }
 
-#ifndef CONFIG_XEN_UNPRIVILEGED_GUEST
 static inline void __send_IPI_shortcut(unsigned int shortcut, int vector, unsigned int dest)
 {
 	/*
@@ -114,6 +113,5 @@ static inline void send_IPI_mask_sequence(cpumask_t mask, int vector)
 	}
 	local_irq_restore(flags);
 }
-#endif /* CONFIG_XEN_UNPRIVILEGED_GUEST */
 
 #endif /* __ASM_IPI_H */

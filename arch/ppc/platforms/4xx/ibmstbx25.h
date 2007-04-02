@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibmstbx25.h
+ *
  * Author: Armin Kuster <akuster@mvista.com>
  *
  * 2002 (c) MontaVista, Software, Inc.  This file is licensed under
@@ -11,6 +13,7 @@
 #ifndef __ASM_IBMSTBX25_H__
 #define __ASM_IBMSTBX25_H__
 
+#include <linux/config.h>
 
 /* serial port defines */
 #define STBx25xx_IO_BASE	((uint)0xe0000000)

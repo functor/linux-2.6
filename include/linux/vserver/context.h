@@ -11,6 +11,7 @@
 
 /* context flags */
 
+#define VXF_INFO_LOCK		0x00000001
 #define VXF_INFO_SCHED		0x00000002
 #define VXF_INFO_NPROC		0x00000004
 #define VXF_INFO_PRIVATE	0x00000008
@@ -119,12 +120,6 @@ struct vx_info {
 	int exit_code;				/* last process exit code */
 
 	char vx_name[65];			/* vserver name */
-};
-
-
-struct vx_info_save {
-	struct vx_info *vxi;
-	xid_t xid;
 };
 
 

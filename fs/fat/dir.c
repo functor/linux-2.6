@@ -114,7 +114,7 @@ static inline int fat_get_entry(struct inode *dir, loff_t *pos,
 }
 
 /*
- * Convert Unicode 16 to UTF-8, translated Unicode, or ASCII.
+ * Convert Unicode 16 to UTF8, translated Unicode, or ASCII.
  * If uni_xlate is enabled and we can't get a 1:1 conversion, use a
  * colon as an escape character since it is normally invalid on the vfat
  * filesystem. The following four characters are the hexadecimal digits
@@ -647,7 +647,7 @@ static int fat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 }
 
 static int fat_ioctl_filldir(void *__buf, const char *name, int name_len,
-			     loff_t offset, u64 ino, unsigned int d_type)
+			     loff_t offset, ino_t ino, unsigned int d_type)
 {
 	struct fat_ioctl_filldir_callback *buf = __buf;
 	struct dirent __user *d1 = buf->dirent;
@@ -741,7 +741,7 @@ static int fat_dir_ioctl(struct inode * inode, struct file * filp,
 	return ret;
 }
 
-const struct file_operations fat_dir_operations = {
+struct file_operations fat_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= fat_readdir,
 	.ioctl		= fat_dir_ioctl,

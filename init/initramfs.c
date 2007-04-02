@@ -26,13 +26,10 @@ static void __init free(void *where)
 
 /* link hash */
 
-#define N_ALIGN(len) ((((len) + 1) & ~3) + 2)
-
 static __initdata struct hash {
 	int ino, minor, major;
-	mode_t mode;
 	struct hash *next;
-	char name[N_ALIGN(PATH_MAX)];
+	char *name;
 } *head[32];
 
 static inline int hash(int major, int minor, int ino)
@@ -42,8 +39,7 @@ static inline int hash(int major, int minor, int ino)
 	return tmp & 31;
 }
 
-static char __init *find_link(int major, int minor, int ino,
-			      mode_t mode, char *name)
+static char __init *find_link(int major, int minor, int ino, char *name)
 {
 	struct hash **p, *q;
 	for (p = head + hash(major, minor, ino); *p; p = &(*p)->next) {
@@ -53,18 +49,15 @@ static char __init *find_link(int major, int minor, int ino,
 			continue;
 		if ((*p)->major != major)
 			continue;
-		if (((*p)->mode ^ mode) & S_IFMT)
-			continue;
 		return (*p)->name;
 	}
 	q = (struct hash *)malloc(sizeof(struct hash));
 	if (!q)
 		panic("can't allocate link hash entry");
-	q->major = major;
-	q->minor = minor;
 	q->ino = ino;
-	q->mode = mode;
-	strcpy(q->name, name);
+	q->minor = minor;
+	q->major = major;
+	q->name = name;
 	q->next = NULL;
 	*p = q;
 	return NULL;
@@ -139,6 +132,8 @@ static inline void eat(unsigned n)
 	this_header += n;
 	count -= n;
 }
+
+#define N_ALIGN(len) ((((len) + 1) & ~3) + 2)
 
 static __initdata char *collected;
 static __initdata int remains;
@@ -234,23 +229,11 @@ static int __init do_reset(void)
 static int __init maybe_link(void)
 {
 	if (nlink >= 2) {
-		char *old = find_link(major, minor, ino, mode, collected);
+		char *old = find_link(major, minor, ino, collected);
 		if (old)
 			return (sys_link(old, collected) < 0) ? -1 : 1;
 	}
 	return 0;
-}
-
-static void __init clean_path(char *path, mode_t mode)
-{
-	struct stat st;
-
-	if (!sys_newlstat(path, &st) && (st.st_mode^mode) & S_IFMT) {
-		if (S_ISDIR(st.st_mode))
-			sys_rmdir(path);
-		else
-			sys_unlink(path);
-	}
 }
 
 static __initdata int wfd;
@@ -265,15 +248,9 @@ static int __init do_name(void)
 	}
 	if (dry_run)
 		return 0;
-	clean_path(collected, mode);
 	if (S_ISREG(mode)) {
-		int ml = maybe_link();
-		if (ml >= 0) {
-			int openflags = O_WRONLY|O_CREAT;
-			if (ml != 1)
-				openflags |= O_TRUNC;
-			wfd = sys_open(collected, openflags, mode);
-
+		if (maybe_link() >= 0) {
+			wfd = sys_open(collected, O_WRONLY|O_CREAT, mode);
 			if (wfd >= 0) {
 				sys_fchown(wfd, uid, gid);
 				sys_fchmod(wfd, mode);
@@ -314,7 +291,6 @@ static int __init do_copy(void)
 static int __init do_symlink(void)
 {
 	collected[N_ALIGN(name_len) + body_len] = '\0';
-	clean_path(collected, 0);
 	sys_symlink(collected + N_ALIGN(name_len), collected);
 	sys_lchown(collected, uid, gid);
 	state = SkipIt;
@@ -530,7 +506,6 @@ void __init populate_rootfs(void)
 		panic(err);
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start) {
-#ifdef CONFIG_BLK_DEV_RAM
 		int fd;
 		printk(KERN_INFO "checking if image is initramfs...");
 		err = unpack_to_rootfs((char *)initrd_start,
@@ -543,22 +518,13 @@ void __init populate_rootfs(void)
 			return;
 		}
 		printk("it isn't (%s); looks like an initrd\n", err);
-		fd = sys_open("/initrd.image", O_WRONLY|O_CREAT, 0700);
+		fd = sys_open("/initrd.image", O_WRONLY|O_CREAT, 700);
 		if (fd >= 0) {
 			sys_write(fd, (char *)initrd_start,
 					initrd_end - initrd_start);
 			sys_close(fd);
 			free_initrd();
 		}
-#else
-		printk(KERN_INFO "Unpacking initramfs...");
-		err = unpack_to_rootfs((char *)initrd_start,
-			initrd_end - initrd_start, 0);
-		if (err)
-			panic(err);
-		printk(" done\n");
-		free_initrd();
-#endif
 	}
 #endif
 }

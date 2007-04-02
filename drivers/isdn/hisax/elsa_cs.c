@@ -94,8 +94,8 @@ module_param(protocol, int, 0);
    handler.
 */
 
-static int elsa_cs_config(struct pcmcia_device *link);
-static void elsa_cs_release(struct pcmcia_device *link);
+static void elsa_cs_config(dev_link_t *link);
+static void elsa_cs_release(dev_link_t *link);
 
 /*
    The attach() and detach() entry points are used to create and destroy
@@ -111,7 +111,7 @@ static void elsa_cs_detach(struct pcmcia_device *p_dev);
    example, ethernet cards, modems).  In other cases, there may be
    many actual or logical devices (SCSI adapters, memory cards with
    multiple partitions).  The dev_node_t structures need to be kept
-   in a linked list starting at the 'dev' field of a struct pcmcia_device
+   in a linked list starting at the 'dev' field of a dev_link_t
    structure.  We allocate them in the card's private data structure,
    because they generally shouldn't be allocated dynamically.
    In this case, we also provide a flag to indicate if a device is
@@ -121,7 +121,7 @@ static void elsa_cs_detach(struct pcmcia_device *p_dev);
 */
 
 typedef struct local_info_t {
-	struct pcmcia_device	*p_dev;
+    dev_link_t          link;
     dev_node_t          node;
     int                 busy;
     int			cardnr;
@@ -139,8 +139,9 @@ typedef struct local_info_t {
 
 ======================================================================*/
 
-static int elsa_cs_probe(struct pcmcia_device *link)
+static int elsa_cs_attach(struct pcmcia_device *p_dev)
 {
+    dev_link_t *link;
     local_info_t *local;
 
     DEBUG(0, "elsa_cs_attach()\n");
@@ -149,11 +150,8 @@ static int elsa_cs_probe(struct pcmcia_device *link)
     local = kmalloc(sizeof(local_info_t), GFP_KERNEL);
     if (!local) return -ENOMEM;
     memset(local, 0, sizeof(local_info_t));
-
-    local->p_dev = link;
-    link->priv = local;
-
     local->cardnr = -1;
+    link = &local->link; link->priv = local;
 
     /* Interrupt setup */
     link->irq.Attributes = IRQ_TYPE_DYNAMIC_SHARING|IRQ_FIRST_SHARED;
@@ -172,9 +170,16 @@ static int elsa_cs_probe(struct pcmcia_device *link)
     link->io.IOAddrLines = 3;
 
     link->conf.Attributes = CONF_ENABLE_IRQ;
+    link->conf.Vcc = 50;
     link->conf.IntType = INT_MEMORY_AND_IO;
 
-    return elsa_cs_config(link);
+    link->handle = p_dev;
+    p_dev->instance = link;
+
+    link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
+    elsa_cs_config(link);
+
+    return 0;
 } /* elsa_cs_attach */
 
 /*======================================================================
@@ -186,16 +191,20 @@ static int elsa_cs_probe(struct pcmcia_device *link)
 
 ======================================================================*/
 
-static void elsa_cs_detach(struct pcmcia_device *link)
+static void elsa_cs_detach(struct pcmcia_device *p_dev)
 {
-	local_info_t *info = link->priv;
+    dev_link_t *link = dev_to_instance(p_dev);
+    local_info_t *info = link->priv;
 
-	DEBUG(0, "elsa_cs_detach(0x%p)\n", link);
+    DEBUG(0, "elsa_cs_detach(0x%p)\n", link);
 
-	info->busy = 1;
-	elsa_cs_release(link);
+    if (link->state & DEV_CONFIG) {
+	    info->busy = 1;
+	    elsa_cs_release(link);
+    }
 
-	kfree(info);
+    kfree(info);
+
 } /* elsa_cs_detach */
 
 /*======================================================================
@@ -205,7 +214,7 @@ static void elsa_cs_detach(struct pcmcia_device *link)
     device available to the system.
 
 ======================================================================*/
-static int get_tuple(struct pcmcia_device *handle, tuple_t *tuple,
+static int get_tuple(client_handle_t handle, tuple_t *tuple,
                      cisparse_t *parse)
 {
     int i = pcmcia_get_tuple_data(handle, tuple);
@@ -213,7 +222,7 @@ static int get_tuple(struct pcmcia_device *handle, tuple_t *tuple,
     return pcmcia_parse_tuple(handle, tuple, parse);
 }
 
-static int first_tuple(struct pcmcia_device *handle, tuple_t *tuple,
+static int first_tuple(client_handle_t handle, tuple_t *tuple,
                      cisparse_t *parse)
 {
     int i = pcmcia_get_first_tuple(handle, tuple);
@@ -221,7 +230,7 @@ static int first_tuple(struct pcmcia_device *handle, tuple_t *tuple,
     return get_tuple(handle, tuple, parse);
 }
 
-static int next_tuple(struct pcmcia_device *handle, tuple_t *tuple,
+static int next_tuple(client_handle_t handle, tuple_t *tuple,
                      cisparse_t *parse)
 {
     int i = pcmcia_get_next_tuple(handle, tuple);
@@ -229,8 +238,9 @@ static int next_tuple(struct pcmcia_device *handle, tuple_t *tuple,
     return get_tuple(handle, tuple, parse);
 }
 
-static int elsa_cs_config(struct pcmcia_device *link)
+static void elsa_cs_config(dev_link_t *link)
 {
+    client_handle_t handle;
     tuple_t tuple;
     cisparse_t parse;
     local_info_t *dev;
@@ -240,6 +250,7 @@ static int elsa_cs_config(struct pcmcia_device *link)
     IsdnCard_t icard;
 
     DEBUG(0, "elsa_config(0x%p)\n", link);
+    handle = link->handle;
     dev = link->priv;
 
     /*
@@ -251,7 +262,7 @@ static int elsa_cs_config(struct pcmcia_device *link)
     tuple.TupleDataMax = 255;
     tuple.TupleOffset = 0;
     tuple.Attributes = 0;
-    i = first_tuple(link, &tuple, &parse);
+    i = first_tuple(handle, &tuple, &parse);
     if (i != CS_SUCCESS) {
         last_fn = ParseTuple;
 	goto cs_failed;
@@ -259,29 +270,32 @@ static int elsa_cs_config(struct pcmcia_device *link)
     link->conf.ConfigBase = parse.config.base;
     link->conf.Present = parse.config.rmask[0];
 
+    /* Configure card */
+    link->state |= DEV_CONFIG;
+
     tuple.TupleData = (cisdata_t *)buf;
     tuple.TupleOffset = 0; tuple.TupleDataMax = 255;
     tuple.Attributes = 0;
     tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
-    i = first_tuple(link, &tuple, &parse);
+    i = first_tuple(handle, &tuple, &parse);
     while (i == CS_SUCCESS) {
         if ( (cf->io.nwin > 0) && cf->io.win[0].base) {
             printk(KERN_INFO "(elsa_cs: looks like the 96 model)\n");
             link->conf.ConfigIndex = cf->index;
             link->io.BasePort1 = cf->io.win[0].base;
-            i = pcmcia_request_io(link, &link->io);
+            i = pcmcia_request_io(link->handle, &link->io);
             if (i == CS_SUCCESS) break;
         } else {
           printk(KERN_INFO "(elsa_cs: looks like the 97 model)\n");
           link->conf.ConfigIndex = cf->index;
           for (i = 0, j = 0x2f0; j > 0x100; j -= 0x10) {
             link->io.BasePort1 = j;
-            i = pcmcia_request_io(link, &link->io);
+            i = pcmcia_request_io(link->handle, &link->io);
             if (i == CS_SUCCESS) break;
           }
           break;
         }
-        i = next_tuple(link, &tuple, &parse);
+        i = next_tuple(handle, &tuple, &parse);
     }
 
     if (i != CS_SUCCESS) {
@@ -289,14 +303,14 @@ static int elsa_cs_config(struct pcmcia_device *link)
 	goto cs_failed;
     }
 
-    i = pcmcia_request_irq(link, &link->irq);
+    i = pcmcia_request_irq(link->handle, &link->irq);
     if (i != CS_SUCCESS) {
         link->irq.AssignedIRQ = 0;
 	last_fn = RequestIRQ;
         goto cs_failed;
     }
 
-    i = pcmcia_request_configuration(link, &link->conf);
+    i = pcmcia_request_configuration(link->handle, &link->conf);
     if (i != CS_SUCCESS) {
       last_fn = RequestConfiguration;
       goto cs_failed;
@@ -307,11 +321,14 @@ static int elsa_cs_config(struct pcmcia_device *link)
     sprintf(dev->node.dev_name, "elsa");
     dev->node.major = dev->node.minor = 0x0;
 
-    link->dev_node = &dev->node;
+    link->dev = &dev->node;
 
     /* Finally, report what we've done */
-    printk(KERN_INFO "%s: index 0x%02x: ",
-           dev->node.dev_name, link->conf.ConfigIndex);
+    printk(KERN_INFO "%s: index 0x%02x: Vcc %d.%d",
+           dev->node.dev_name, link->conf.ConfigIndex,
+           link->conf.Vcc/10, link->conf.Vcc%10);
+    if (link->conf.Vpp1)
+        printk(", Vpp %d.%d", link->conf.Vpp1/10, link->conf.Vpp1%10);
     if (link->conf.Attributes & CONF_ENABLE_IRQ)
         printk(", irq %d", link->irq.AssignedIRQ);
     if (link->io.NumPorts1)
@@ -321,6 +338,8 @@ static int elsa_cs_config(struct pcmcia_device *link)
         printk(" & 0x%04x-0x%04x", link->io.BasePort2,
                link->io.BasePort2+link->io.NumPorts2-1);
     printk("\n");
+
+    link->state &= ~DEV_CONFIG_PENDING;
 
     icard.para[0] = link->irq.AssignedIRQ;
     icard.para[1] = link->io.BasePort1;
@@ -335,11 +354,10 @@ static int elsa_cs_config(struct pcmcia_device *link)
     } else
     	((local_info_t*)link->priv)->cardnr = i;
 
-    return 0;
+    return;
 cs_failed:
-    cs_error(link, last_fn, i);
+    cs_error(link->handle, last_fn, i);
     elsa_cs_release(link);
-    return -ENODEV;
 } /* elsa_cs_config */
 
 /*======================================================================
@@ -350,7 +368,7 @@ cs_failed:
 
 ======================================================================*/
 
-static void elsa_cs_release(struct pcmcia_device *link)
+static void elsa_cs_release(dev_link_t *link)
 {
     local_info_t *local = link->priv;
 
@@ -362,23 +380,39 @@ static void elsa_cs_release(struct pcmcia_device *link)
 	    HiSax_closecard(local->cardnr);
 	}
     }
+    /* Unlink the device chain */
+    link->dev = NULL;
 
-    pcmcia_disable_device(link);
+    /* Don't bother checking to see if these succeed or not */
+    if (link->win)
+        pcmcia_release_window(link->win);
+    pcmcia_release_configuration(link->handle);
+    pcmcia_release_io(link->handle, &link->io);
+    pcmcia_release_irq(link->handle, &link->irq);
+    link->state &= ~DEV_CONFIG;
 } /* elsa_cs_release */
 
-static int elsa_suspend(struct pcmcia_device *link)
+static int elsa_suspend(struct pcmcia_device *p_dev)
 {
+	dev_link_t *link = dev_to_instance(p_dev);
 	local_info_t *dev = link->priv;
 
+	link->state |= DEV_SUSPEND;
         dev->busy = 1;
+	if (link->state & DEV_CONFIG)
+		pcmcia_release_configuration(link->handle);
 
 	return 0;
 }
 
-static int elsa_resume(struct pcmcia_device *link)
+static int elsa_resume(struct pcmcia_device *p_dev)
 {
+	dev_link_t *link = dev_to_instance(p_dev);
 	local_info_t *dev = link->priv;
 
+	link->state &= ~DEV_SUSPEND;
+	if (link->state & DEV_CONFIG)
+		pcmcia_request_configuration(link->handle, &link->conf);
         dev->busy = 0;
 
 	return 0;
@@ -396,7 +430,7 @@ static struct pcmcia_driver elsa_cs_driver = {
 	.drv		= {
 		.name	= "elsa_cs",
 	},
-	.probe		= elsa_cs_probe,
+	.probe		= elsa_cs_attach,
 	.remove		= elsa_cs_detach,
 	.id_table	= elsa_ids,
 	.suspend	= elsa_suspend,

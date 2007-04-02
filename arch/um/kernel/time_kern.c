@@ -84,16 +84,6 @@ void timer_irq(union uml_pt_regs *regs)
 	}
 }
 
-
-void time_init_kern(void)
-{
-	long long nsecs;
-
-	nsecs = os_nsecs();
-	set_normalized_timespec(&wall_to_monotonic, -nsecs / BILLION,
-				-nsecs % BILLION);
-}
-
 void do_boot_timer_handler(struct sigcontext * sc)
 {
 	struct pt_regs regs;
@@ -219,4 +209,4 @@ int __init timer_init(void)
 	return(0);
 }
 
-arch_initcall(timer_init);
+__initcall(timer_init);

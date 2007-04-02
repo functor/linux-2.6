@@ -70,7 +70,7 @@ static int bfs_readdir(struct file * f, void * dirent, filldir_t filldir)
 	return 0;	
 }
 
-const struct file_operations bfs_dir_operations = {
+struct file_operations bfs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= bfs_readdir,
 	.fsync		= file_fsync,
@@ -102,7 +102,7 @@ static int bfs_create(struct inode * dir, struct dentry * dentry, int mode,
 	inode->i_uid = current->fsuid;
 	inode->i_gid = (dir->i_mode & S_ISGID) ? dir->i_gid : current->fsgid;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
-	inode->i_blocks = 0;
+	inode->i_blocks = inode->i_blksize = 0;
 	inode->i_op = &bfs_file_inops;
 	inode->i_fop = &bfs_file_operations;
 	inode->i_mapping->a_ops = &bfs_aops;

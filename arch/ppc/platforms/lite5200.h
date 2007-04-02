@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/lite5200.h
+ * 
  * Definitions for Freescale LITE5200 : MPC52xx Standard Development
  * Platform board support
  * 

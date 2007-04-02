@@ -52,14 +52,12 @@
 #include <linux/spinlock.h>
 #include <linux/smp_lock.h>
 #include <linux/ac97_codec.h>
-#include <linux/mutex.h>
-
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/hardirq.h>
+#include <asm/mach-au1x00/au1000.h>
 #include <asm/mach-au1x00/au1xxx_psc.h>
 #include <asm/mach-au1x00/au1xxx_dbdma.h>
-#include <asm/mach-au1x00/au1xxx.h>
 
 #undef OSS_DOCUMENTED_MIXER_SEMANTICS
 
@@ -79,7 +77,7 @@
  * 0 = no VRA, 1 = use VRA if codec supports it
  */
 static int      vra = 1;
-module_param(vra, bool, 0);
+MODULE_PARM(vra, "i");
 MODULE_PARM_DESC(vra, "if 1 use VRA if codec supports it");
 
 static struct au1550_state {
@@ -92,8 +90,8 @@ static struct au1550_state {
 	int             no_vra;		/* do not use VRA */
 
 	spinlock_t      lock;
-	struct mutex open_mutex;
-	struct mutex sem;
+	struct semaphore open_sem;
+	struct semaphore sem;
 	mode_t          open_mode;
 	wait_queue_head_t open_wait;
 
@@ -213,8 +211,7 @@ rdcodec(struct ac97_codec *codec, u8 addr)
 	}
 	if (i == POLL_COUNT) {
 		err("rdcodec: read poll expired!");
-		data = 0;
-		goto out;
+		return 0;
 	}
 
 	/* wait for command done?
@@ -227,8 +224,7 @@ rdcodec(struct ac97_codec *codec, u8 addr)
 	}
 	if (i == POLL_COUNT) {
 		err("rdcodec: read cmdwait expired!");
-		data = 0;
-		goto out;
+		return 0;
 	}
 
 	data = au_readl(PSC_AC97CDC) & 0xffff;
@@ -239,7 +235,6 @@ rdcodec(struct ac97_codec *codec, u8 addr)
 	au_writel(PSC_AC97EVNT_CD, PSC_AC97EVNT);
 	au_sync();
 
- out:
 	spin_unlock_irqrestore(&s->lock, flags);
 
 	return data;
@@ -1049,7 +1044,7 @@ au1550_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 
 	count *= db->cnt_factor;
 
-	mutex_lock(&s->sem);
+	down(&s->sem);
 	add_wait_queue(&db->wait, &wait);
 
 	while (count > 0) {
@@ -1069,14 +1064,14 @@ au1550_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 						ret = -EAGAIN;
 					goto out;
 				}
-				mutex_unlock(&s->sem);
+				up(&s->sem);
 				schedule();
 				if (signal_pending(current)) {
 					if (!ret)
 						ret = -ERESTARTSYS;
 					goto out2;
 				}
-				mutex_lock(&s->sem);
+				down(&s->sem);
 			}
 		} while (avail <= 0);
 
@@ -1104,7 +1099,7 @@ au1550_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 	}			/* while (count > 0) */
 
 out:
-	mutex_unlock(&s->sem);
+	up(&s->sem);
 out2:
 	remove_wait_queue(&db->wait, &wait);
 	set_current_state(TASK_RUNNING);
@@ -1130,7 +1125,7 @@ au1550_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
 
 	count *= db->cnt_factor;
 
-	mutex_lock(&s->sem);
+	down(&s->sem);
 	add_wait_queue(&db->wait, &wait);
 
 	while (count > 0) {
@@ -1148,14 +1143,14 @@ au1550_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
 						ret = -EAGAIN;
 					goto out;
 				}
-				mutex_unlock(&s->sem);
+				up(&s->sem);
 				schedule();
 				if (signal_pending(current)) {
 					if (!ret)
 						ret = -ERESTARTSYS;
 					goto out2;
 				}
-				mutex_lock(&s->sem);
+				down(&s->sem);
 			}
 		} while (avail <= 0);
 
@@ -1201,7 +1196,7 @@ au1550_write(struct file *file, const char *buffer, size_t count, loff_t * ppos)
 	}			/* while (count > 0) */
 
 out:
-	mutex_unlock(&s->sem);
+	up(&s->sem);
 out2:
 	remove_wait_queue(&db->wait, &wait);
 	set_current_state(TASK_RUNNING);
@@ -1258,7 +1253,7 @@ au1550_mmap(struct file *file, struct vm_area_struct *vma)
 	int ret = 0;
 
 	lock_kernel();
-	mutex_lock(&s->sem);
+	down(&s->sem);
 	if (vma->vm_flags & VM_WRITE)
 		db = &s->dma_dac;
 	else if (vma->vm_flags & VM_READ)
@@ -1284,7 +1279,7 @@ au1550_mmap(struct file *file, struct vm_area_struct *vma)
 	vma->vm_flags &= ~VM_IO;
 	db->mapped = 1;
 out:
-	mutex_unlock(&s->sem);
+	up(&s->sem);
 	unlock_kernel();
 	return ret;
 }
@@ -1795,21 +1790,21 @@ au1550_open(struct inode *inode, struct file *file)
 
 	file->private_data = s;
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & file->f_mode) {
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 
 	stop_dac(s);
@@ -1845,8 +1840,8 @@ au1550_open(struct inode *inode, struct file *file)
 	}
 
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	mutex_unlock(&s->open_mutex);
-	mutex_init(&s->sem);
+	up(&s->open_sem);
+	init_MUTEX(&s->sem);
 	return 0;
 }
 
@@ -1863,7 +1858,7 @@ au1550_release(struct inode *inode, struct file *file)
 		lock_kernel();
 	}
 
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac(s);
 		kfree(s->dma_dac.rawbuf);
@@ -1875,7 +1870,7 @@ au1550_release(struct inode *inode, struct file *file)
 		s->dma_adc.rawbuf = NULL;
 	}
 	s->open_mode &= ((~file->f_mode) & (FMODE_READ|FMODE_WRITE));
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	wake_up(&s->open_wait);
 	unlock_kernel();
 	return 0;
@@ -1895,8 +1890,6 @@ static /*const */ struct file_operations au1550_audio_fops = {
 
 MODULE_AUTHOR("Advanced Micro Devices (AMD), dan@embeddededge.com");
 MODULE_DESCRIPTION("Au1550 AC97 Audio Driver");
-MODULE_LICENSE("GPL");
-
 
 static int __devinit
 au1550_probe(void)
@@ -1909,7 +1902,7 @@ au1550_probe(void)
 	init_waitqueue_head(&s->dma_adc.wait);
 	init_waitqueue_head(&s->dma_dac.wait);
 	init_waitqueue_head(&s->open_wait);
-	mutex_init(&s->open_mutex);
+	init_MUTEX(&s->open_sem);
 	spin_lock_init(&s->lock);
 
 	s->codec = ac97_alloc_codec();

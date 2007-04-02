@@ -34,6 +34,7 @@
 #define IDESCSI_VERSION "0.92"
 
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
@@ -46,7 +47,6 @@
 #include <linux/ide.h>
 #include <linux/scatterlist.h>
 #include <linux/delay.h>
-#include <linux/mutex.h>
 
 #include <asm/io.h>
 #include <asm/bitops.h>
@@ -109,7 +109,7 @@ typedef struct ide_scsi_obj {
 	unsigned long log;			/* log flags */
 } idescsi_scsi_t;
 
-static DEFINE_MUTEX(idescsi_ref_mutex);
+static DECLARE_MUTEX(idescsi_ref_sem);
 
 #define ide_scsi_g(disk) \
 	container_of((disk)->private_data, struct ide_scsi_obj, driver)
@@ -118,19 +118,19 @@ static struct ide_scsi_obj *ide_scsi_get(struct gendisk *disk)
 {
 	struct ide_scsi_obj *scsi = NULL;
 
-	mutex_lock(&idescsi_ref_mutex);
+	down(&idescsi_ref_sem);
 	scsi = ide_scsi_g(disk);
 	if (scsi)
 		scsi_host_get(scsi->host);
-	mutex_unlock(&idescsi_ref_mutex);
+	up(&idescsi_ref_sem);
 	return scsi;
 }
 
 static void ide_scsi_put(struct ide_scsi_obj *scsi)
 {
-	mutex_lock(&idescsi_ref_mutex);
+	down(&idescsi_ref_sem);
 	scsi_host_put(scsi->host);
-	mutex_unlock(&idescsi_ref_mutex);
+	up(&idescsi_ref_sem);
 }
 
 static inline idescsi_scsi_t *scsihost_to_idescsi(struct Scsi_Host *host)
@@ -517,7 +517,7 @@ static ide_startstop_t idescsi_pc_intr (ide_drive_t *drive)
 		/* No more interrupts */
 		if (test_bit(IDESCSI_LOG_CMD, &scsi->log))
 			printk (KERN_INFO "Packet command completed, %d bytes transferred\n", pc->actually_transferred);
-		local_irq_enable_in_hardirq();
+		local_irq_enable();
 		if (status.b.check)
 			rq->errors++;
 		idescsi_end_request (drive, 1, 0);
@@ -599,7 +599,8 @@ static ide_startstop_t idescsi_transfer_pc(ide_drive_t *drive)
 				"issuing a packet command\n");
 		return ide_do_reset (drive);
 	}
-	BUG_ON(HWGROUP(drive)->handler != NULL);
+	if (HWGROUP(drive)->handler != NULL)
+		BUG();
 	/* Set the interrupt routine */
 	ide_set_handler(drive, &idescsi_pc_intr, get_timeout(pc), idescsi_expiry);
 	/* Send the actual packet */
@@ -689,7 +690,8 @@ static ide_startstop_t idescsi_issue_pc (ide_drive_t *drive, idescsi_pc_t *pc)
 		set_bit(PC_DMA_OK, &pc->flags);
 
 	if (test_bit(IDESCSI_DRQ_INTERRUPT, &scsi->flags)) {
-		BUG_ON(HWGROUP(drive)->handler != NULL);
+		if (HWGROUP(drive)->handler != NULL)
+			BUG();
 		ide_set_handler(drive, &idescsi_transfer_pc,
 				get_timeout(pc), idescsi_expiry);
 		/* Issue the packet command */

@@ -15,6 +15,7 @@
  *  use the PowerTweak utility (see http://powertweak.sourceforge.net).
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
@@ -22,17 +23,6 @@
 #include <linux/delay.h>
 #include <linux/acpi.h>
 #include "pci.h"
-
-/* The Mellanox Tavor device gives false positive parity errors
- * Mark this device with a broken_parity_status, to allow
- * PCI scanning code to "skip" this now blacklisted device.
- */
-static void __devinit quirk_mellanox_tavor(struct pci_dev *dev)
-{
-	dev->broken_parity_status = 1;	/* This device gives false positives */
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MELLANOX,PCI_DEVICE_ID_MELLANOX_TAVOR,quirk_mellanox_tavor);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MELLANOX,PCI_DEVICE_ID_MELLANOX_TAVOR_BRIDGE,quirk_mellanox_tavor);
 
 /* Deal with broken BIOS'es that neglect to enable passive release,
    which can cause problems in combination with the 82441FX/PPro MTRRs */
@@ -440,6 +430,12 @@ static void __devinit quirk_ich6_lpc_acpi(struct pci_dev *dev)
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH6_0, quirk_ich6_lpc_acpi );
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH6_1, quirk_ich6_lpc_acpi );
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH7_0, quirk_ich6_lpc_acpi );
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH7_1, quirk_ich6_lpc_acpi );
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH7_31, quirk_ich6_lpc_acpi );
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH8_0, quirk_ich6_lpc_acpi );
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH8_2, quirk_ich6_lpc_acpi );
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_ICH8_3, quirk_ich6_lpc_acpi );
 
 /*
  * VIA ACPI: One IO region pointed to by longword at
@@ -587,11 +583,8 @@ static void __init quirk_amd_8131_ioapic(struct pci_dev *dev)
 { 
         unsigned char revid, tmp;
         
-	if (dev->subordinate) {
-		printk(KERN_WARNING "PCI: MSI quirk detected. "
-		       "PCI_BUS_FLAGS_NO_MSI set for subordinate bus.\n");
-		dev->subordinate->bus_flags |= PCI_BUS_FLAGS_NO_MSI;
-	}
+	pci_msi_quirk = 1;
+	printk(KERN_WARNING "PCI: MSI quirk detected. pci_msi_quirk set.\n");
 
         if (nr_ioapics == 0) 
                 return;
@@ -663,14 +656,7 @@ static void quirk_via_irq(struct pci_dev *dev)
 		pci_write_config_byte(dev, PCI_INTERRUPT_LINE, new_irq);
 	}
 }
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C586_0, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C586_1, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C586_2, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C586_3, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_8235_USB_2, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C686, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C686_4, quirk_via_irq);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C686_5, quirk_via_irq);
+DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_VIA, PCI_ANY_ID, quirk_via_irq);
 
 /*
  * VIA VT82C598 has its device ID settable and many BIOSes
@@ -886,38 +872,6 @@ static void __init quirk_eisa_bridge(struct pci_dev *dev)
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_82375,	quirk_eisa_bridge );
 
-/*
- * On the MSI-K8T-Neo2Fir Board, the internal Soundcard is disabled
- * when a PCI-Soundcard is added. The BIOS only gives Options
- * "Disabled" and "AUTO". This Quirk Sets the corresponding
- * Register-Value to enable the Soundcard.
- *
- * FIXME: Presently this quirk will run on anything that has an 8237
- * which isn't correct, we need to check DMI tables or something in
- * order to make sure it only runs on the MSI-K8T-Neo2Fir.  Because it
- * runs everywhere at present we suppress the printk output in most
- * irrelevant cases.
- */
-static void __init k8t_sound_hostbridge(struct pci_dev *dev)
-{
-	unsigned char val;
-
-	pci_read_config_byte(dev, 0x50, &val);
-	if (val == 0x88 || val == 0xc8) {
-		/* Assume it's probably a MSI-K8T-Neo2Fir */
-		printk(KERN_INFO "PCI: MSI-K8T-Neo2Fir, attempting to turn soundcard ON\n");
-		pci_write_config_byte(dev, 0x50, val & (~0x40));
-
-		/* Verify the Change for Status output */
-		pci_read_config_byte(dev, 0x50, &val);
-		if (val & 0x40)
-			printk(KERN_INFO "PCI: MSI-K8T-Neo2Fir, soundcard still off\n");
-		else
-			printk(KERN_INFO "PCI: MSI-K8T-Neo2Fir, soundcard on\n");
-	}
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_8237, k8t_sound_hostbridge);
-
 #ifndef CONFIG_ACPI_SLEEP
 /*
  * On ASUS P4B boards, the SMBus PCI Device within the ICH2/4 southbridge
@@ -985,7 +939,6 @@ static void __init asus_hides_smbus_hostbridge(struct pci_dev *dev)
 		if (dev->device == PCI_DEVICE_ID_INTEL_82915GM_HB) {
 			switch (dev->subsystem_device) {
 			case 0x1882: /* M6V notebook */
-			case 0x1977: /* A6VA notebook */
 				asus_hides_smbus = 1;
 			}
 		}
@@ -1002,12 +955,6 @@ static void __init asus_hides_smbus_hostbridge(struct pci_dev *dev)
 			case 0x12bd: /* HP D530 */
 				asus_hides_smbus = 1;
 			}
-		if (dev->device == PCI_DEVICE_ID_INTEL_82915GM_HB) {
-			switch (dev->subsystem_device) {
-			case 0x099c: /* HP Compaq nx6110 */
-				asus_hides_smbus = 1;
-			}
-		}
 	} else if (unlikely(dev->subsystem_vendor == PCI_VENDOR_ID_TOSHIBA)) {
 		if (dev->device == PCI_DEVICE_ID_INTEL_82855GM_HB)
 			switch(dev->subsystem_device) {
@@ -1146,91 +1093,11 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_651,		quirk_sis_96x_
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_735,		quirk_sis_96x_compatible );
 
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_503,		quirk_sis_503 );
-/*
- * On ASUS A8V and A8V Deluxe boards, the onboard AC97 audio controller
- * and MC97 modem controller are disabled when a second PCI soundcard is
- * present. This patch, tweaking the VT8237 ISA bridge, enables them.
- * -- bjd
- */
-static void __init asus_hides_ac97_lpc(struct pci_dev *dev)
-{
-	u8 val;
-	int asus_hides_ac97 = 0;
-
-	if (likely(dev->subsystem_vendor == PCI_VENDOR_ID_ASUSTEK)) {
-		if (dev->device == PCI_DEVICE_ID_VIA_8237)
-			asus_hides_ac97 = 1;
-	}
-
-	if (!asus_hides_ac97)
-		return;
-
-	pci_read_config_byte(dev, 0x50, &val);
-	if (val & 0xc0) {
-		pci_write_config_byte(dev, 0x50, val & (~0xc0));
-		pci_read_config_byte(dev, 0x50, &val);
-		if (val & 0xc0)
-			printk(KERN_INFO "PCI: onboard AC97/MC97 devices continue to play 'hide and seek'! 0x%x\n", val);
-		else
-			printk(KERN_INFO "PCI: enabled onboard AC97/MC97 devices\n");
-	}
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_VIA,	PCI_DEVICE_ID_VIA_8237, asus_hides_ac97_lpc );
-
 
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_961,		quirk_sis_96x_smbus );
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_962,		quirk_sis_96x_smbus );
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_963,		quirk_sis_96x_smbus );
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_SI,	PCI_DEVICE_ID_SI_LPC,		quirk_sis_96x_smbus );
-
-#if defined(CONFIG_SCSI_SATA) || defined(CONFIG_SCSI_SATA_MODULE)
-
-/*
- *	If we are using libata we can drive this chip properly but must
- *	do this early on to make the additional device appear during
- *	the PCI scanning.
- */
-
-static void __devinit quirk_jmicron_dualfn(struct pci_dev *pdev)
-{
-	u32 conf;
-	u8 hdr;
-
-	/* Only poke fn 0 */
-	if (PCI_FUNC(pdev->devfn))
-		return;
-
-	switch(pdev->device) {
-		case PCI_DEVICE_ID_JMICRON_JMB365:
-		case PCI_DEVICE_ID_JMICRON_JMB366:
-			/* Redirect IDE second PATA port to the right spot */
-			pci_read_config_dword(pdev, 0x80, &conf);
-			conf |= (1 << 24);
-			/* Fall through */
-			pci_write_config_dword(pdev, 0x80, conf);
-		case PCI_DEVICE_ID_JMICRON_JMB361:
-		case PCI_DEVICE_ID_JMICRON_JMB363:
-			pci_read_config_dword(pdev, 0x40, &conf);
-			/* Enable dual function mode, AHCI on fn 0, IDE fn1 */
-			/* Set the class codes correctly and then direct IDE 0 */
-			conf &= ~0x000F0200;	/* Clear bit 9 and 16-19 */
-			conf |=  0x00C20002;	/* Set bit 1, 17, 22, 23 */
-			pci_write_config_dword(pdev, 0x40, conf);
-
-			/* Reconfigure so that the PCI scanner discovers the
-			   device is now multifunction */
-
-			pci_read_config_byte(pdev, PCI_HEADER_TYPE, &hdr);
-			pdev->hdr_type = hdr & 0x7f;
-			pdev->multifunction = !!(hdr & 0x80);
-
-			break;
-	}
-}
-
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_JMICRON, PCI_ANY_ID, quirk_jmicron_dualfn);
-
-#endif
 
 #ifdef CONFIG_X86_IO_APIC
 static void __init quirk_alder_ioapic(struct pci_dev *pdev)
@@ -1399,64 +1266,6 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_PXH_0,	quirk_pc
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_PXH_1,	quirk_pcie_pxh);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_PXHV,	quirk_pcie_pxh);
 
-/*
- * Some Intel PCI Express chipsets have trouble with downstream
- * device power management.
- */
-static void quirk_intel_pcie_pm(struct pci_dev * dev)
-{
-	pci_pm_d3_delay = 120;
-	dev->no_d1d2 = 1;
-}
-
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25e2, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25e3, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25e4, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25e5, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25e6, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25e7, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25f7, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25f8, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25f9, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x25fa, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2601, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2602, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2603, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2604, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2605, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2606, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2607, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2608, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x2609, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x260a, quirk_intel_pcie_pm);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL,	0x260b, quirk_intel_pcie_pm);
-
-/*
- * Fixup the cardbus bridges on the IBM Dock II docking station
- */
-static void __devinit quirk_ibm_dock2_cardbus(struct pci_dev *dev)
-{
-	u32 val;
-
-	/*
-	 * tie the 2 interrupt pins to INTA, and configure the
-	 * multifunction routing register to handle this.
-	 */
-	if ((dev->subsystem_vendor == PCI_VENDOR_ID_IBM) &&
-		(dev->subsystem_device == 0x0148)) {
-		printk(KERN_INFO "PCI: Found IBM Dock II Cardbus Bridge "
-			"applying quirk\n");
-		pci_read_config_dword(dev, 0x8c, &val);
-		val = ((val & 0xffffff00) | 0x1002);
-		pci_write_config_dword(dev, 0x8c, val);
-		pci_read_config_dword(dev, 0x80, &val);
-		val = ((val & 0x00ffff00) | 0x2864c077);
-		pci_write_config_dword(dev, 0x80, val);
-	}
-}
-
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_TI, PCI_DEVICE_ID_TI_1420,
-				quirk_ibm_dock2_cardbus);
 
 static void __devinit quirk_netmos(struct pci_dev *dev)
 {

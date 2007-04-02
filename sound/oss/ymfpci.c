@@ -1918,10 +1918,10 @@ static int ymf_open(struct inode *inode, struct file *file)
 	if (unit == NULL)
 		return -ENODEV;
 
-	mutex_lock(&unit->open_mutex);
+	down(&unit->open_sem);
 
 	if ((state = ymf_state_alloc(unit)) == NULL) {
-		mutex_unlock(&unit->open_mutex);
+		up(&unit->open_sem);
 		return -ENOMEM;
 	}
 	list_add_tail(&state->chain, &unit->states);
@@ -1956,7 +1956,7 @@ static int ymf_open(struct inode *inode, struct file *file)
 	ymfpci_writeb(unit, YDSXGR_TIMERCTRL,
 	    (YDSXGR_TIMERCTRL_TEN|YDSXGR_TIMERCTRL_TIEN));
 #endif
-	mutex_unlock(&unit->open_mutex);
+	up(&unit->open_sem);
 
 	return nonseekable_open(inode, file);
 
@@ -1974,7 +1974,7 @@ out_nodma:
 	list_del(&state->chain);
 	kfree(state);
 
-	mutex_unlock(&unit->open_mutex);
+	up(&unit->open_sem);
 	return err;
 }
 
@@ -1987,7 +1987,7 @@ static int ymf_release(struct inode *inode, struct file *file)
 	ymfpci_writeb(unit, YDSXGR_TIMERCTRL, 0);
 #endif
 
-	mutex_lock(&unit->open_mutex);
+	down(&unit->open_sem);
 
 	/*
 	 * XXX Solve the case of O_NONBLOCK close - don't deallocate here.
@@ -2004,7 +2004,7 @@ static int ymf_release(struct inode *inode, struct file *file)
 	file->private_data = NULL;	/* Can you tell I programmed Solaris */
 	kfree(state);
 
-	mutex_unlock(&unit->open_mutex);
+	up(&unit->open_sem);
 
 	return 0;
 }
@@ -2532,7 +2532,7 @@ static int __devinit ymf_probe_one(struct pci_dev *pcidev, const struct pci_devi
 	spin_lock_init(&codec->reg_lock);
 	spin_lock_init(&codec->voice_lock);
 	spin_lock_init(&codec->ac97_lock);
-	mutex_init(&codec->open_mutex);
+	init_MUTEX(&codec->open_sem);
 	INIT_LIST_HEAD(&codec->states);
 	codec->pci = pcidev;
 
@@ -2573,7 +2573,7 @@ static int __devinit ymf_probe_one(struct pci_dev *pcidev, const struct pci_devi
 		goto out_disable_dsp;
 	ymf_memload(codec);
 
-	if (request_irq(pcidev->irq, ymf_interrupt, IRQF_SHARED, "ymfpci", codec) != 0) {
+	if (request_irq(pcidev->irq, ymf_interrupt, SA_SHIRQ, "ymfpci", codec) != 0) {
 		printk(KERN_ERR "ymfpci: unable to request IRQ %d\n",
 		    pcidev->irq);
 		goto out_memfree;

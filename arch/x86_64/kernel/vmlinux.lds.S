@@ -6,6 +6,7 @@
 
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/page.h>
+#include <linux/config.h>
 
 #undef i386	/* in case the preprocessor is a 32bit one */
 
@@ -13,31 +14,19 @@ OUTPUT_FORMAT("elf64-x86-64", "elf64-x86-64", "elf64-x86-64")
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(phys_startup_64)
 jiffies_64 = jiffies;
-PHDRS {
-	text PT_LOAD FLAGS(5);	/* R_E */
-	data PT_LOAD FLAGS(7);	/* RWE */
-	user PT_LOAD FLAGS(7);	/* RWE */
-	note PT_NOTE FLAGS(4);	/* R__ */
-}
 SECTIONS
 {
   . = __START_KERNEL;
   phys_startup_64 = startup_64 - LOAD_OFFSET;
   _text = .;			/* Text and read-only data */
   .text :  AT(ADDR(.text) - LOAD_OFFSET) {
-	/* First the code that has to be first for bootstrapping */
-	*(.bootstrap.text)
-	/* Then all the functions that are "hot" in profiles, to group them
-           onto the same hugetlb entry */
-	#include "functionlist"
-	/* Then the rest */
 	*(.text)
 	SCHED_TEXT
 	LOCK_TEXT
 	KPROBES_TEXT
 	*(.fixup)
 	*(.gnu.warning)
-	} :text = 0x9090
+	} = 0x9090
   				/* out-of-line lock text */
   .text.lock : AT(ADDR(.text.lock) - LOAD_OFFSET) { *(.text.lock) }
 
@@ -50,29 +39,27 @@ SECTIONS
 
   RODATA
 
-#ifdef CONFIG_STACK_UNWIND
-  . = ALIGN(8);
-  .eh_frame : AT(ADDR(.eh_frame) - LOAD_OFFSET) {
-	__start_unwind = .;
-  	*(.eh_frame)
-	__end_unwind = .;
-  }
-#endif
-
 				/* Data */
   .data : AT(ADDR(.data) - LOAD_OFFSET) {
 	*(.data)
 	CONSTRUCTORS
-	} :data
+	}
 
   _edata = .;			/* End of data section */
+
+  __bss_start = .;		/* BSS */
+  .bss : AT(ADDR(.bss) - LOAD_OFFSET) {
+	*(.bss.page_aligned)	
+	*(.bss)
+	}
+  __bss_stop = .;
 
   . = ALIGN(PAGE_SIZE);
   . = ALIGN(CONFIG_X86_L1_CACHE_BYTES);
   .data.cacheline_aligned : AT(ADDR(.data.cacheline_aligned) - LOAD_OFFSET) {
 	*(.data.cacheline_aligned)
   }
-  . = ALIGN(CONFIG_X86_INTERNODE_CACHE_BYTES);
+  . = ALIGN(CONFIG_X86_L1_CACHE_BYTES);
   .data.read_mostly : AT(ADDR(.data.read_mostly) - LOAD_OFFSET) {
   	*(.data.read_mostly)
   }
@@ -88,7 +75,7 @@ SECTIONS
 #define VVIRT(x) (ADDR(x) - VVIRT_OFFSET)
 
   . = VSYSCALL_ADDR;
-  .vsyscall_0 :	 AT(VSYSCALL_PHYS_ADDR) { *(.vsyscall_0) } :user
+  .vsyscall_0 :	 AT(VSYSCALL_PHYS_ADDR) { *(.vsyscall_0) }
   __vsyscall_0 = VSYSCALL_VIRT_ADDR;
 
   . = ALIGN(CONFIG_X86_L1_CACHE_BYTES);
@@ -131,32 +118,12 @@ SECTIONS
   . = ALIGN(8192);		/* init_task */
   .data.init_task : AT(ADDR(.data.init_task) - LOAD_OFFSET) {
 	*(.data.init_task)
-  } :data
+  }
 
   . = ALIGN(4096);
   .data.page_aligned : AT(ADDR(.data.page_aligned) - LOAD_OFFSET) {
 	*(.data.page_aligned)
   }
-
-  /* might get freed after init */
-  . = ALIGN(4096);
-  __smp_alt_begin = .;
-  __smp_alt_instructions = .;
-  .smp_altinstructions : AT(ADDR(.smp_altinstructions) - LOAD_OFFSET) {
-	*(.smp_altinstructions)
-  }
-  __smp_alt_instructions_end = .;
-  . = ALIGN(8);
-  __smp_locks = .;
-  .smp_locks : AT(ADDR(.smp_locks) - LOAD_OFFSET) {
-	*(.smp_locks)
-  }
-  __smp_locks_end = .;
-  .smp_altinstr_replacement : AT(ADDR(.smp_altinstr_replacement) - LOAD_OFFSET) {
-	*(.smp_altinstr_replacement)
-  }
-  . = ALIGN(4096);
-  __smp_alt_end = .;
 
   . = ALIGN(4096);		/* Init code and data */
   __init_begin = .;
@@ -221,14 +188,6 @@ SECTIONS
   . = ALIGN(4096);
   __nosave_end = .;
 
-  __bss_start = .;		/* BSS */
-  . = ALIGN(4096);
-  .bss : AT(ADDR(.bss) - LOAD_OFFSET) {
-	*(.bss.page_aligned)
-	*(.bss)
-	}
-  __bss_stop = .;
-
   _end = . ;
 
   /* Sections to be discarded */
@@ -242,6 +201,4 @@ SECTIONS
   STABS_DEBUG
 
   DWARF_DEBUG
-
-  NOTES
 }

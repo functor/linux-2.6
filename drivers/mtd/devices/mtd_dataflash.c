@@ -9,6 +9,7 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
 */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -477,7 +478,6 @@ add_dataflash(struct spi_device *spi, char *name,
 	device->name = (pdata && pdata->name) ? pdata->name : priv->name;
 	device->size = nr_pages * pagesize;
 	device->erasesize = pagesize;
-	device->writesize = pagesize;
 	device->owner = THIS_MODULE;
 	device->type = MTD_DATAFLASH;
 	device->flags = MTD_CAP_NORFLASH;
@@ -536,7 +536,7 @@ static int __devinit dataflash_probe(struct spi_device *spi)
 	if (status <= 0 || status == 0xff) {
 		DEBUG(MTD_DEBUG_LEVEL1, "%s: status error %d\n",
 				spi->dev.bus_id, status);
-		if (status == 0xff)
+		if (status == 0 || status == 0xff)
 			status = -ENODEV;
 		return status;
 	}

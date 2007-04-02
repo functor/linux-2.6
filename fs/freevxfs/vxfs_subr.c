@@ -42,7 +42,7 @@
 static int		vxfs_readpage(struct file *, struct page *);
 static sector_t		vxfs_bmap(struct address_space *, sector_t);
 
-const struct address_space_operations vxfs_aops = {
+struct address_space_operations vxfs_aops = {
 	.readpage =		vxfs_readpage,
 	.bmap =			vxfs_bmap,
 	.sync_page =		block_sync_page,
@@ -71,14 +71,15 @@ vxfs_get_page(struct address_space *mapping, u_long n)
 {
 	struct page *			pp;
 
-	pp = read_mapping_page(mapping, n, NULL);
+	pp = read_cache_page(mapping, n,
+			(filler_t*)mapping->a_ops->readpage, NULL);
 
 	if (!IS_ERR(pp)) {
 		wait_on_page_locked(pp);
 		kmap(pp);
 		if (!PageUptodate(pp))
 			goto fail;
-		/** if (!PageFsMisc(pp)) **/
+		/** if (!PageChecked(pp)) **/
 			/** vxfs_check_page(pp); **/
 		if (PageError(pp))
 			goto fail;

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/luan.h
+ *
  * Luan board definitions
  *
  * Matt Porter <mporter@kernel.crashing.org>
@@ -16,6 +18,7 @@
 #ifndef __ASM_LUAN_H__
 #define __ASM_LUAN_H__
 
+#include <linux/config.h>
 #include <platforms/4xx/ibm440sp.h>
 
 /* F/W TLB mapping used in bootloader glue to reset EMAC */

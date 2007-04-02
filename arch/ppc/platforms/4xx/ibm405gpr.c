@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibm405gpr.c
+ *
  * Author: Armin Kuster <akuster@mvista.com>
  *
  * 2002 (c) MontaVista, Software, Inc.  This file is licensed under
@@ -7,6 +9,7 @@
  * or implied.
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/smp.h>
 #include <linux/threads.h>

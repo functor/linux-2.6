@@ -10,6 +10,7 @@
  *  Check put/get_user, cleanups - acme@conectiva.com.br - Jun 2001
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
@@ -96,7 +97,7 @@ do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm, struct kbd_str
 		if (!perm)
 			return -EPERM;
 		if (!i && v == K_NOSUCHMAP) {
-			/* deallocate map */
+			/* disallocate map */
 			key_map = key_maps[s];
 			if (s && key_map) {
 			    key_maps[s] = NULL;
@@ -819,20 +820,20 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		if (arg > MAX_NR_CONSOLES)
 			return -ENXIO;
 		if (arg == 0) {
-		    /* deallocate all unused consoles, but leave 0 */
+		    /* disallocate all unused consoles, but leave 0 */
 			acquire_console_sem();
 			for (i=1; i<MAX_NR_CONSOLES; i++)
 				if (! VT_BUSY(i))
-					vc_deallocate(i);
+					vc_disallocate(i);
 			release_console_sem();
 		} else {
-			/* deallocate a single console, if possible */
+			/* disallocate a single console, if possible */
 			arg--;
 			if (VT_BUSY(arg))
 				return -EBUSY;
 			if (arg) {			      /* leave 0 */
 				acquire_console_sem();
-				vc_deallocate(arg);
+				vc_disallocate(arg);
 				release_console_sem();
 			}
 		}
@@ -847,8 +848,11 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		if (get_user(ll, &vtsizes->v_rows) ||
 		    get_user(cc, &vtsizes->v_cols))
 			return -EFAULT;
-		for (i = 0; i < MAX_NR_CONSOLES; i++)
-			vc_lock_resize(vc_cons[i].d, cc, ll);
+		for (i = 0; i < MAX_NR_CONSOLES; i++) {
+			acquire_console_sem();
+			vc_resize(vc_cons[i].d, cc, ll);
+			release_console_sem();
+		}
 		return 0;
 	}
 
@@ -1008,8 +1012,6 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		   return -EPERM;
 		vt_dont_switch = 0;
 		return 0;
-	case VT_GETHIFONTMASK:
-		return put_user(vc->vc_hi_font_mask, (unsigned short __user *)arg);
 	default:
 		return -ENOIOCTLCMD;
 	}

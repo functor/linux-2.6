@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/poll.h>
@@ -337,16 +338,6 @@ isdn_command(isdn_ctrl *cmd)
 {
 	if (cmd->driver == -1) {
 		printk(KERN_WARNING "isdn_command command(%x) driver -1\n", cmd->command);
-		return(1);
-	}
-	if (!dev->drv[cmd->driver]) {
-		printk(KERN_WARNING "isdn_command command(%x) dev->drv[%d] NULL\n",
-			cmd->command, cmd->driver);
-		return(1);
-	}
-	if (!dev->drv[cmd->driver]->interface) {
-		printk(KERN_WARNING "isdn_command command(%x) dev->drv[%d]->interface NULL\n",
-			cmd->command, cmd->driver);
 		return(1);
 	}
 	if (cmd->command == ISDN_CMD_SETL2) {
@@ -942,7 +933,7 @@ isdn_readbchan_tty(int di, int channel, struct tty_struct *tty, int cisco_hack)
 			count_put = count_pull;
 			if(count_put > 1)
 				tty_insert_flip_string(tty, skb->data, count_put - 1);
-			last = skb->data[count_put - 1];
+			last = skb->data[count_put] - 1;
 			len -= count_put;
 #ifdef CONFIG_ISDN_AUDIO
 		}
@@ -1059,7 +1050,7 @@ isdn_info_update(void)
 static ssize_t
 isdn_read(struct file *file, char __user *buf, size_t count, loff_t * off)
 {
-	uint minor = iminor(file->f_dentry->d_inode);
+	uint minor = MINOR(file->f_dentry->d_inode->i_rdev);
 	int len = 0;
 	int drvidx;
 	int chidx;
@@ -1166,7 +1157,7 @@ isdn_read(struct file *file, char __user *buf, size_t count, loff_t * off)
 static ssize_t
 isdn_write(struct file *file, const char __user *buf, size_t count, loff_t * off)
 {
-	uint minor = iminor(file->f_dentry->d_inode);
+	uint minor = MINOR(file->f_dentry->d_inode->i_rdev);
 	int drvidx;
 	int chidx;
 	int retval;
@@ -1189,8 +1180,9 @@ isdn_write(struct file *file, const char __user *buf, size_t count, loff_t * off
 			goto out;
 		}
 		chidx = isdn_minor2chan(minor);
-		while ((retval = isdn_writebuf_stub(drvidx, chidx, buf, count)) == 0)
+		while (isdn_writebuf_stub(drvidx, chidx, buf, count) != count)
 			interruptible_sleep_on(&dev->drv[drvidx]->snd_waitq[chidx]);
+		retval = count;
 		goto out;
 	}
 	if (minor <= ISDN_MINOR_CTRLMAX) {
@@ -1228,7 +1220,7 @@ static unsigned int
 isdn_poll(struct file *file, poll_table * wait)
 {
 	unsigned int mask = 0;
-	unsigned int minor = iminor(file->f_dentry->d_inode);
+	unsigned int minor = MINOR(file->f_dentry->d_inode->i_rdev);
 	int drvidx = isdn_minor2drv(minor - ISDN_MINOR_CTRL);
 
 	lock_kernel();
@@ -1269,7 +1261,7 @@ isdn_poll(struct file *file, poll_table * wait)
 static int
 isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 {
-	uint minor = iminor(inode);
+	uint minor = MINOR(inode->i_rdev);
 	isdn_ctrl c;
 	int drvidx;
 	int chidx;
@@ -1720,7 +1712,7 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 static int
 isdn_open(struct inode *ino, struct file *filep)
 {
-	uint minor = iminor(ino);
+	uint minor = MINOR(ino->i_rdev);
 	int drvidx;
 	int chidx;
 	int retval = -ENODEV;
@@ -1782,7 +1774,7 @@ isdn_open(struct inode *ino, struct file *filep)
 static int
 isdn_close(struct inode *ino, struct file *filep)
 {
-	uint minor = iminor(ino);
+	uint minor = MINOR(ino->i_rdev);
 
 	lock_kernel();
 	if (minor == ISDN_MINOR_STATUS) {
@@ -1915,11 +1907,6 @@ isdn_free_channel(int di, int ch, int usage)
 {
 	int i;
 
-	if ((di < 0) || (ch < 0)) {
-		printk(KERN_WARNING "%s: called with invalid drv(%d) or channel(%d)\n",
-			__FUNCTION__, di, ch);
-		return;
-	}
 	for (i = 0; i < ISDN_MAX_CHANNELS; i++)
 		if (((!usage) || ((dev->usage[i] & ISDN_USAGE_MASK) == usage)) &&
 		    (dev->drvmap[i] == di) &&
@@ -1935,8 +1922,7 @@ isdn_free_channel(int di, int ch, int usage)
 			dev->v110[i] = NULL;
 // 20.10.99 JIM, try to reinitialize v110 !
 			isdn_info_update();
-			if (dev->drv[di])
-				skb_queue_purge(&dev->drv[di]->rpqueue[ch]);
+			skb_queue_purge(&dev->drv[di]->rpqueue[ch]);
 		}
 }
 
@@ -1968,10 +1954,9 @@ isdn_writebuf_stub(int drvidx, int chan, const u_char __user * buf, int len)
 	struct sk_buff *skb = alloc_skb(hl + len, GFP_ATOMIC);
 
 	if (!skb)
-		return -ENOMEM;
+		return 0;
 	skb_reserve(skb, hl);
-	if (copy_from_user(skb_put(skb, len), buf, len))
-		return -EFAULT;
+	copy_from_user(skb_put(skb, len), buf, len);
 	ret = dev->drv[drvidx]->interface->writebuf_skb(drvidx, chan, 1, skb);
 	if (ret <= 0)
 		dev_kfree_skb(skb);

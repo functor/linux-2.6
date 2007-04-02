@@ -53,7 +53,7 @@ config EXT2_FS_SECURITY
 
 config EXT2_FS_XIP
 	bool "Ext2 execute in place support"
-	depends on EXT2_FS && MMU
+	depends on EXT2_FS
 	help
 	  Execute in place can be used on memory-backed block devices. If you
 	  enable this option, you can select to mount block devices which are
@@ -326,7 +326,7 @@ source "fs/xfs/Kconfig"
 
 config OCFS2_FS
 	tristate "OCFS2 file system support (EXPERIMENTAL)"
-	depends on NET && SYSFS && EXPERIMENTAL
+	depends on NET && EXPERIMENTAL
 	select CONFIGFS_FS
 	select JBD
 	select CRC32
@@ -355,16 +355,6 @@ config OCFS2_FS
 	          - Distributed Caching (F_SETLEASE/F_GETLEASE/break_lease)
 	          - POSIX ACLs
 	          - readpages / writepages (not user visible)
-
-config OCFS2_DEBUG_MASKLOG
-	bool "OCFS2 logging support"
-	depends on OCFS2_FS
-	default y
-	help
-	  The ocfs2 filesystem has an extensive logging system.  The system
-	  allows selection of events to log via files in /sys/o2cb/logmask/.
-	  This option will enlarge your kernel, but it allows debugging of
-	  ocfs2 filesystem issues.
 
 config MINIX_FS
 	tristate "Minix fs support"
@@ -403,25 +393,13 @@ config INOTIFY
 	bool "Inotify file change notification support"
 	default y
 	---help---
-	  Say Y here to enable inotify support.  Inotify is a file change
-	  notification system and a replacement for dnotify.  Inotify fixes
-	  numerous shortcomings in dnotify and introduces several new features
-	  including multiple file events, one-shot support, and unmount
+	  Say Y here to enable inotify support and the associated system
+	  calls.  Inotify is a file change notification system and a
+	  replacement for dnotify.  Inotify fixes numerous shortcomings in
+	  dnotify and introduces several new features.  It allows monitoring
+	  of both files and directories via a single open fd.  Other features
+	  include multiple file events, one-shot support, and unmount
 	  notification.
-
-	  For more information, see Documentation/filesystems/inotify.txt
-
-	  If unsure, say Y.
-
-config INOTIFY_USER
-	bool "Inotify support for userspace"
-	depends on INOTIFY
-	default y
-	---help---
-	  Say Y here to enable inotify support for userspace, including the
-	  associated system calls.  Inotify allows monitoring of both files and
-	  directories via a single open fd.  Events are read from the file
-	  descriptor, which is also select()- and poll()-able.
 
 	  For more information, see Documentation/filesystems/inotify.txt
 
@@ -530,21 +508,6 @@ config FUSE_FS
 	  If you want to develop a userspace FS, or if you want to use
 	  a filesystem based on FUSE, answer Y or M.
 
-menu "Caches"
-
-config FSCACHE
-	tristate "General filesystem cache manager"
-	depends on EXPERIMENTAL
-	help
-	  This option enables a generic filesystem caching manager that can be
-	  used by various network and other filesystems to cache data
-	  locally. Different sorts of caches can be plugged in, depending on the
-	  resources available.
-
-	  See Documentation/filesystems/caching/fscache.txt for more information.
-
-endmenu
-
 menu "CD-ROM/DVD Filesystems"
 
 config ISO9660_FS
@@ -610,26 +573,6 @@ config UDF_NLS
 	bool
 	default y
 	depends on (UDF_FS=m && NLS) || (UDF_FS=y && NLS=y)
-
-config CACHEFILES
-	tristate "Filesystem caching on files"
-	depends on FSCACHE
-	help
-	  This permits use of a mounted filesystem as a cache for other
-	  filesystems - primarily networking filesystems - thus allowing fast
-	  local disk to enhance the speed of slower devices.
-
-	  See Documentation/filesystems/caching/cachefiles.txt for more
-	  information.
-
-config CACHEFILES_DEBUG
-	bool "Debug CacheFiles"
-	depends on CACHEFILES
-	help
-	  This permits debugging to be dynamically enabled in the filesystem
-	  caching on files module.  If this is set, the debugging output may be
-	  enabled by setting bits in /proc/sys/fs/cachefiles/debug or by
-	  including a debugging specifier in /etc/cachefilesd.conf.
 
 endmenu
 
@@ -821,8 +764,7 @@ endmenu
 menu "Pseudo filesystems"
 
 config PROC_FS
-	bool "/proc file system support" if EMBEDDED
-	default y
+	bool "/proc file system support"
 	help
 	  This is a virtual file system providing information about the status
 	  of the system. "Virtual" means that it doesn't take up any space on
@@ -857,7 +799,6 @@ config PROC_KCORE
 config PROC_VMCORE
         bool "/proc/vmcore support (EXPERIMENTAL)"
         depends on PROC_FS && EXPERIMENTAL && CRASH_DUMP
-	default y
         help
         Exports the dump image of crashed kernel in ELF format.
 
@@ -900,13 +841,6 @@ config TMPFS
 config HUGETLBFS
 	bool "HugeTLB file system support"
 	depends X86 || IA64 || PPC64 || SPARC64 || SUPERH || BROKEN
-	depends !XEN
-	help
-	  hugetlbfs is a filesystem backing for HugeTLB pages, based on
-	  ramfs. For architectures that support it, say Y here and read
-	  <file:Documentation/vm/hugetlbpage.txt> for details.
-
-	  If unsure, say N.
 
 config HUGETLB_PAGE
 	def_bool HUGETLBFS
@@ -925,9 +859,21 @@ config RAMFS
 	  To compile this as a module, choose M here: the module will be called
 	  ramfs.
 
+config RELAYFS_FS
+	tristate "Relayfs file system support"
+	---help---
+	  Relayfs is a high-speed data relay filesystem designed to provide
+	  an efficient mechanism for tools and facilities to relay large
+	  amounts of data from kernel space to user space.
+
+	  To compile this code as a module, choose M here: the module will be
+	  called relayfs.
+
+	  If unsure, say N.
+
 config CONFIGFS_FS
 	tristate "Userspace-driven configuration filesystem (EXPERIMENTAL)"
-	depends on SYSFS && EXPERIMENTAL
+	depends on EXPERIMENTAL
 	help
 	  configfs is a ram-based filesystem that provides the converse
 	  of sysfs's functionality. Where sysfs is a filesystem-based
@@ -1160,44 +1106,6 @@ config JFFS2_SUMMARY
 
 	  If unsure, say 'N'.
 
-config JFFS2_FS_XATTR
-	bool "JFFS2 XATTR support (EXPERIMENTAL)"
-	depends on JFFS2_FS && EXPERIMENTAL
-	default n
-	help
-	  Extended attributes are name:value pairs associated with inodes by
-	  the kernel or by users (see the attr(5) manual page, or visit
-	  <http://acl.bestbits.at/> for details).
-	  
-	  If unsure, say N.
-
-config JFFS2_FS_POSIX_ACL
-	bool "JFFS2 POSIX Access Control Lists"
-	depends on JFFS2_FS_XATTR
-	default y
-	select FS_POSIX_ACL
-	help
-	  Posix Access Control Lists (ACLs) support permissions for users and
-	  groups beyond the owner/group/world scheme.
-	  
-	  To learn more about Access Control Lists, visit the Posix ACLs for
-	  Linux website <http://acl.bestbits.at/>.
-	  
-	  If you don't know what Access Control Lists are, say N
-
-config JFFS2_FS_SECURITY
-	bool "JFFS2 Security Labels"
-	depends on JFFS2_FS_XATTR
-	default y
-	help
-	  Security labels support alternative access control models
-	  implemented by security modules like SELinux.  This option
-	  enables an extended attribute handler for file security
-	  labels in the jffs2 filesystem.
-	  
-	  If you are not using a security module that requires using
-	  extended attributes for file security labels, say N.
-
 config JFFS2_COMPRESSION_OPTIONS
 	bool "Advanced compression options for JFFS2"
 	depends on JFFS2_FS
@@ -1284,71 +1192,6 @@ config CRAMFS
 	  directory /) cannot be compiled as a module.
 
 	  If unsure, say N.
-
-config SQUASHFS
-       tristate "SquashFS 3.0 - Squashed file system support"
-       select ZLIB_INFLATE
-       help
-         Saying Y here includes support for SquashFS 3.0 (a Compressed Read-Only File
-         System).  Squashfs is a highly compressed read-only filesystem for Linux.
-         It uses zlib compression to compress both files, inodes and directories.
-         Inodes in the system are very small and all blocks are packed to minimise
-         data overhead. Block sizes greater than 4K are supported up to a maximum of 64K.
-         SquashFS 3.0 supports 64 bit filesystems and files (larger than 4GB), full
-         uid/gid information, hard links and timestamps.
-
-         Squashfs is intended for general read-only filesystem use, for archival
-         use (i.e. in cases where a .tar.gz file may be used), and in embedded
-         systems where low overhead is needed.  Further information and filesystem tools
-         are available from http://squashfs.sourceforge.net.
-
-         If you want to compile this as a module ( = code which can be
-         inserted in and removed from the running kernel whenever you want),
-         say M here and read <file:Documentation/modules.txt>.  The module
-         will be called squashfs.  Note that the root file system (the one
-         containing the directory /) cannot be compiled as a module.
-
-         If unsure, say N.
-
-config SQUASHFS_EMBEDDED
-
-       bool "Additional options for memory-constrained systems"
-       depends on SQUASHFS
-       default n
-       help
-         Saying Y here allows you to specify cache sizes and how Squashfs
-         allocates memory.  This is only intended for memory constrained
-         systems.
-
-         If unsure, say N.
-
-config SQUASHFS_FRAGMENT_CACHE_SIZE
-       int "Number of fragments cached" if SQUASHFS_EMBEDDED
-       depends on SQUASHFS
-       default "3"
-       help
-         By default SquashFS caches the last 3 fragments read from
-         the filesystem.  Increasing this amount may mean SquashFS
-         has to re-read fragments less often from disk, at the expense
-         of extra system memory.  Decreasing this amount will mean
-         SquashFS uses less memory at the expense of extra reads from disk.
-
-         Note there must be at least one cached fragment.  Anything
-         much more than three will probably not make much difference.
-
-config SQUASHFS_VMALLOC
-       bool "Use Vmalloc rather than Kmalloc" if SQUASHFS_EMBEDDED
-       depends on SQUASHFS
-       default n
-       help
-         By default SquashFS uses kmalloc to obtain fragment cache memory.
-         Kmalloc memory is the standard kernel allocator, but it can fail
-         on memory constrained systems.  Because of the way Vmalloc works,
-         Vmalloc can succeed when kmalloc fails.  Specifying this option
-         will make SquashFS always use Vmalloc to allocate the
-         fragment cache memory.
-
-         If unsure, say N.
 
 config VXFS_FS
 	tristate "FreeVxFS file system support (VERITAS VxFS(TM) compatible)"
@@ -1482,18 +1325,10 @@ config UFS_FS
 
 config UFS_FS_WRITE
 	bool "UFS file system write support (DANGEROUS)"
-	depends on UFS_FS && EXPERIMENTAL
+	depends on UFS_FS && EXPERIMENTAL && BROKEN
 	help
 	  Say Y here if you want to try writing to UFS partitions. This is
 	  experimental, so you should back up your UFS partitions beforehand.
-
-config UFS_DEBUG
-	bool "UFS debugging"
-	depends on UFS_FS
-	help
-	  If you are experiencing any problems with the UFS filesystem, say
-	  Y here.  This will result in _many_ additional debugging messages to be
-	  written to the system log.
 
 endmenu
 
@@ -1571,13 +1406,6 @@ config NFS_V4
 
 	  If unsure, say N.
 
-config NFS_FSCACHE
-	bool "Provide NFS client caching support (EXPERIMENTAL)"
-	depends on NFS_FS && FSCACHE && EXPERIMENTAL
-	help
-	  Say Y here if you want NFS data to be cached locally on disc through
-	  the general filesystem cache manager
-
 config NFS_DIRECTIO
 	bool "Allow direct I/O on NFS files (EXPERIMENTAL)"
 	depends on NFS_FS && EXPERIMENTAL
@@ -1608,12 +1436,7 @@ config NFSD
 	select LOCKD
 	select SUNRPC
 	select EXPORTFS
-	select NFSD_V2_ACL if NFSD_V3_ACL
-	select NFS_ACL_SUPPORT if NFSD_V2_ACL
-	select NFSD_TCP if NFSD_V4
-	select CRYPTO_MD5 if NFSD_V4
-	select CRYPTO if NFSD_V4
-	select FS_POSIX_ACL if NFSD_V4
+	select NFS_ACL_SUPPORT if NFSD_V3_ACL || NFSD_V2_ACL
 	help
 	  If you want your Linux box to act as an NFS *server*, so that other
 	  computers on your local network which support NFS can access certain
@@ -1651,6 +1474,7 @@ config NFSD_V3
 config NFSD_V3_ACL
 	bool "Provide server support for the NFSv3 ACL protocol extension"
 	depends on NFSD_V3
+	select NFSD_V2_ACL
 	help
 	  Implement the NFSv3 ACL protocol extension for manipulating POSIX
 	  Access Control Lists on exported file systems. NFS clients should
@@ -1660,6 +1484,10 @@ config NFSD_V3_ACL
 config NFSD_V4
 	bool "Provide NFSv4 server support (EXPERIMENTAL)"
 	depends on NFSD_V3 && EXPERIMENTAL
+	select NFSD_TCP
+	select CRYPTO_MD5
+	select CRYPTO
+	select FS_POSIX_ACL
 	help
 	  If you would like to include the NFSv4 server as well as the NFSv2
 	  and NFSv3 servers, say Y here.  This feature is experimental, and
@@ -1739,7 +1567,6 @@ config RPCSEC_GSS_SPKM3
 	select CRYPTO
 	select CRYPTO_MD5
 	select CRYPTO_DES
-	select CRYPTO_CAST5
 	help
 	  Provides for secure RPC calls by means of a gss-api
 	  mechanism based on the SPKM3 public-key mechanism.
@@ -1840,7 +1667,7 @@ config CIFS_STATS
 	  mounted by the cifs client to be displayed in /proc/fs/cifs/Stats
 
 config CIFS_STATS2
-	bool "Extended statistics"
+	bool "CIFS extended statistics"
 	depends on CIFS_STATS
 	help
 	  Enabling this option will allow more detailed statistics on SMB
@@ -1852,32 +1679,6 @@ config CIFS_STATS2
 
 	  Unless you are a developer or are doing network performance analysis
 	  or tuning, say N.
-
-config CIFS_WEAK_PW_HASH
-	bool "Support legacy servers which use weaker LANMAN security"
-	depends on CIFS
-	help
-	  Modern CIFS servers including Samba and most Windows versions
-	  (since 1997) support stronger NTLM (and even NTLMv2 and Kerberos)
-	  security mechanisms. These hash the password more securely
-	  than the mechanisms used in the older LANMAN version of the
-          SMB protocol needed to establish sessions with old SMB servers.
-
-	  Enabling this option allows the cifs module to mount to older
-	  LANMAN based servers such as OS/2 and Windows 95, but such
-	  mounts may be less secure than mounts using NTLM or more recent
-	  security mechanisms if you are on a public network.  Unless you
-	  have a need to access old SMB servers (and are on a private 
-	  network) you probably want to say N.  Even if this support
-	  is enabled in the kernel build, they will not be used
-	  automatically. At runtime LANMAN mounts are disabled but
-	  can be set to required (or optional) either in
-	  /proc/fs/cifs (see fs/cifs/README for more detail) or via an
-	  option on the mount command. This support is disabled by 
-	  default in order to reduce the possibility of a downgrade
-	  attack.
- 
-	  If unsure, say N.
 
 config CIFS_XATTR
         bool "CIFS extended attributes"
@@ -1907,17 +1708,6 @@ config CIFS_POSIX
 	  (such as Samba 3.10 and later) which can negotiate
 	  CIFS POSIX ACL support.  If unsure, say N.
 
-config CIFS_DEBUG2
-	bool "Enable additional CIFS debugging routines"
-	depends on CIFS
-	help
-	   Enabling this option adds a few more debugging routines
-	   to the cifs code which slightly increases the size of
-	   the cifs module and can cause additional logging of debug
-	   messages in some error paths, slowing performance. This
-	   option can be turned off unless you are debugging
-	   cifs problems.  If unsure, say N.
-	   
 config CIFS_EXPERIMENTAL
 	  bool "CIFS Experimental Features (EXPERIMENTAL)"
 	  depends on CIFS && EXPERIMENTAL
@@ -1933,7 +1723,7 @@ config CIFS_EXPERIMENTAL
 	    If unsure, say N.
 
 config CIFS_UPCALL
-	  bool "Kerberos/SPNEGO advanced session setup (EXPERIMENTAL)"
+	  bool "CIFS Kerberos/SPNEGO advanced session setup (EXPERIMENTAL)"
 	  depends on CIFS_EXPERIMENTAL
 	  select CONNECTOR
 	  help
@@ -2014,13 +1804,6 @@ config AFS_FS
 	  See <file:Documentation/filesystems/afs.txt> for more intormation.
 
 	  If unsure, say N.
-
-config AFS_FSCACHE
-	bool "Provide AFS client caching support"
-	depends on AFS_FS && FSCACHE && EXPERIMENTAL
-	help
-	  Say Y here if you want AFS data to be cached locally on through the
-	  generic filesystem cache manager
 
 config RXRPC
 	tristate

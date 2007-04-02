@@ -13,7 +13,6 @@ enum {
 	MINOR_ERR = 2,
 	MINOR_DISCOVER,
 	MINOR_INTERFACES,
-	MINOR_REVALIDATE,
 	MSGSZ = 2048,
 	NARGS = 10,
 	NMSG = 100,		/* message backlog to retain */
@@ -42,7 +41,6 @@ static struct aoe_chardev chardevs[] = {
 	{ MINOR_ERR, "err" },
 	{ MINOR_DISCOVER, "discover" },
 	{ MINOR_INTERFACES, "interfaces" },
-	{ MINOR_REVALIDATE, "revalidate" },
 };
 
 static int
@@ -61,39 +59,6 @@ interfaces(const char __user *str, size_t size)
 		       __FUNCTION__, "too many interfaces");
 		return -EINVAL;
 	}
-	return 0;
-}
-
-static int
-revalidate(const char __user *str, size_t size)
-{
-	int major, minor, n;
-	ulong flags;
-	struct aoedev *d;
-	char buf[16];
-
-	if (size >= sizeof buf)
-		return -EINVAL;
-	buf[sizeof buf - 1] = '\0';
-	if (copy_from_user(buf, str, size))
-		return -EFAULT;
-
-	/* should be e%d.%d format */
-	n = sscanf(buf, "e%d.%d", &major, &minor);
-	if (n != 2) {
-		printk(KERN_ERR "aoe: %s: invalid device specification\n",
-			__FUNCTION__);
-		return -EINVAL;
-	}
-	d = aoedev_by_aoeaddr(major, minor);
-	if (!d)
-		return -EINVAL;
-
-	spin_lock_irqsave(&d->lock, flags);
-	d->flags |= DEVFL_PAUSE;
-	spin_unlock_irqrestore(&d->lock, flags);
-	aoecmd_cfg(major, minor);
-
 	return 0;
 }
 
@@ -149,8 +114,6 @@ aoechr_write(struct file *filp, const char __user *buf, size_t cnt, loff_t *offp
 	case MINOR_INTERFACES:
 		ret = interfaces(buf, cnt);
 		break;
-	case MINOR_REVALIDATE:
-		ret = revalidate(buf, cnt);
 	}
 	if (ret == 0)
 		ret = cnt;
@@ -162,7 +125,7 @@ aoechr_open(struct inode *inode, struct file *filp)
 {
 	int n, i;
 
-	n = iminor(inode);
+	n = MINOR(inode->i_rdev);
 	filp->private_data = (void *) (unsigned long) n;
 
 	for (i = 0; i < ARRAY_SIZE(chardevs); ++i)

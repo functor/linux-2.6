@@ -288,9 +288,6 @@ int apply_relocate(Elf_Shdr *sechdrs, const char *strtab,
 		sym = (Elf_Sym *)sechdrs[symindex].sh_addr
 			+ ELF_MIPS_R_SYM(rel[i]);
 		if (!sym->st_value) {
-			/* Ignore unresolved weak symbol */
-			if (ELF_ST_BIND(sym->st_info) == STB_WEAK)
-				continue;
 			printk(KERN_WARNING "%s: Unknown symbol %s\n",
 			       me->name, strtab + sym->st_name);
 			return -ENOENT;
@@ -328,9 +325,6 @@ int apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
 		sym = (Elf_Sym *)sechdrs[symindex].sh_addr
 			+ ELF_MIPS_R_SYM(rel[i]);
 		if (!sym->st_value) {
-			/* Ignore unresolved weak symbol */
-			if (ELF_ST_BIND(sym->st_info) == STB_WEAK)
-				continue;
 			printk(KERN_WARNING "%s: Unknown symbol %s\n",
 			       me->name, strtab + sym->st_name);
 			return -ENOENT;

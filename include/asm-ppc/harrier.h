@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/kernel/harrier.h
+ *
  * Definitions for Motorola MCG Harrier North Bridge & Memory controller
  *
  * Author: Dale Farnsworth

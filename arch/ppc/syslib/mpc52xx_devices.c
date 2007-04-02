@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/mpc52xx_devices.c
+ *
  * Freescale MPC52xx device descriptions
  *
  *

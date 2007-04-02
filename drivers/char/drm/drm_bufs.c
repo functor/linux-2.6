@@ -386,6 +386,7 @@ int drm_rmmap_locked(drm_device_t *dev, drm_local_map_t *map)
 
 	return 0;
 }
+EXPORT_SYMBOL(drm_rmmap_locked);
 
 int drm_rmmap(drm_device_t *dev, drm_local_map_t *map)
 {
@@ -397,6 +398,7 @@ int drm_rmmap(drm_device_t *dev, drm_local_map_t *map)
 
 	return ret;
 }
+EXPORT_SYMBOL(drm_rmmap);
 
 /* The rmmap ioctl appears to be unnecessary.  All mappings are torn down on
  * the last close of the device, and this is necessary for cleanup when things
@@ -472,7 +474,8 @@ static void drm_cleanup_buf_error(drm_device_t * dev, drm_buf_entry_t * entry)
 	if (entry->seg_count) {
 		for (i = 0; i < entry->seg_count; i++) {
 			if (entry->seglist[i]) {
-				drm_pci_free(dev, entry->seglist[i]);
+				drm_free_pages(entry->seglist[i],
+					       entry->page_order, DRM_MEM_DMA);
 			}
 		}
 		drm_free(entry->seglist,
@@ -675,7 +678,7 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 	int total;
 	int page_order;
 	drm_buf_entry_t *entry;
-	drm_dma_handle_t *dmah;
+	unsigned long page;
 	drm_buf_t *buf;
 	int alignment;
 	unsigned long offset;
@@ -778,10 +781,8 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 	page_count = 0;
 
 	while (entry->buf_count < count) {
-		
-		dmah = drm_pci_alloc(dev, PAGE_SIZE << page_order, 0x1000, 0xfffffffful);
-		
-		if (!dmah) {
+		page = drm_alloc_pages(page_order, DRM_MEM_DMA);
+		if (!page) {
 			/* Set count correctly so we free the proper amount. */
 			entry->buf_count = count;
 			entry->seg_count = count;
@@ -793,13 +794,13 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 			atomic_dec(&dev->buf_alloc);
 			return -ENOMEM;
 		}
-		entry->seglist[entry->seg_count++] = dmah;
+		entry->seglist[entry->seg_count++] = page;
 		for (i = 0; i < (1 << page_order); i++) {
 			DRM_DEBUG("page %d @ 0x%08lx\n",
 				  dma->page_count + page_count,
-				  (unsigned long)dmah->vaddr + PAGE_SIZE * i);
+				  page + PAGE_SIZE * i);
 			temp_pagelist[dma->page_count + page_count++]
-				= (unsigned long)dmah->vaddr + PAGE_SIZE * i;
+			    = page + PAGE_SIZE * i;
 		}
 		for (offset = 0;
 		     offset + size <= total && entry->buf_count < count;
@@ -810,8 +811,7 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 			buf->order = order;
 			buf->used = 0;
 			buf->offset = (dma->byte_count + byte_count + offset);
-			buf->address = (void *)(dmah->vaddr + offset);
-			buf->bus_address = dmah->busaddr + offset;
+			buf->address = (void *)(page + offset);
 			buf->next = NULL;
 			buf->waiting = 0;
 			buf->pending = 0;
@@ -1051,7 +1051,7 @@ static int drm_addbufs_sg(drm_device_t * dev, drm_buf_desc_t * request)
 	return 0;
 }
 
-static int drm_addbufs_fb(drm_device_t * dev, drm_buf_desc_t * request)
+int drm_addbufs_fb(drm_device_t * dev, drm_buf_desc_t * request)
 {
 	drm_device_dma_t *dma = dev->dma;
 	drm_buf_entry_t *entry;
@@ -1210,6 +1210,7 @@ static int drm_addbufs_fb(drm_device_t * dev, drm_buf_desc_t * request)
 	atomic_dec(&dev->buf_alloc);
 	return 0;
 }
+EXPORT_SYMBOL(drm_addbufs_fb);
 
 
 /**

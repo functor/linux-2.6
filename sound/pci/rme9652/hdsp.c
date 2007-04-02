@@ -389,7 +389,7 @@ MODULE_SUPPORTED_DEVICE("{{RME Hammerfall-DSP},"
 
 /* use hotplug firmeare loader? */
 #if defined(CONFIG_FW_LOADER) || defined(CONFIG_FW_LOADER_MODULE)
-#if !defined(HDSP_USE_HWDEP_LOADER) && !defined(CONFIG_SND_HDSP)
+#ifndef HDSP_USE_HWDEP_LOADER
 #define HDSP_FW_LOADER
 #endif
 #endif
@@ -1356,7 +1356,7 @@ static struct snd_rawmidi_ops snd_hdsp_midi_input =
 	.trigger =	snd_hdsp_midi_input_trigger,
 };
 
-static int snd_hdsp_create_midi (struct snd_card *card, struct hdsp *hdsp, int id)
+static int __devinit snd_hdsp_create_midi (struct snd_card *card, struct hdsp *hdsp, int id)
 {
 	char buf[32];
 
@@ -3471,7 +3471,7 @@ static void __devinit snd_hdsp_proc_init(struct hdsp *hdsp)
 	struct snd_info_entry *entry;
 
 	if (! snd_card_proc_new(hdsp->card, "hdsp", &entry))
-		snd_info_set_text_ops(entry, hdsp, snd_hdsp_proc_read);
+		snd_info_set_text_ops(entry, hdsp, 1024, snd_hdsp_proc_read);
 }
 
 static void snd_hdsp_free_buffers(struct hdsp *hdsp)
@@ -4912,7 +4912,7 @@ static int __devinit snd_hdsp_create(struct snd_card *card,
 		return -EBUSY;
 	}
 
-	if (request_irq(pci->irq, snd_hdsp_interrupt, IRQF_DISABLED|IRQF_SHARED, "hdsp", (void *)hdsp)) {
+	if (request_irq(pci->irq, snd_hdsp_interrupt, SA_INTERRUPT|SA_SHIRQ, "hdsp", (void *)hdsp)) {
 		snd_printk(KERN_ERR "Hammerfall-DSP: unable to use IRQ %d\n", pci->irq);
 		return -EBUSY;
 	}

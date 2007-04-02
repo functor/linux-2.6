@@ -36,6 +36,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -53,37 +54,35 @@
 #endif /* CONFIG_PPC_OF */
 
 #define DRV_NAME	"sata_svw"
-#define DRV_VERSION	"2.0"
+#define DRV_VERSION	"1.07"
 
-enum {
-	/* Taskfile registers offsets */
-	K2_SATA_TF_CMD_OFFSET		= 0x00,
-	K2_SATA_TF_DATA_OFFSET		= 0x00,
-	K2_SATA_TF_ERROR_OFFSET		= 0x04,
-	K2_SATA_TF_NSECT_OFFSET		= 0x08,
-	K2_SATA_TF_LBAL_OFFSET		= 0x0c,
-	K2_SATA_TF_LBAM_OFFSET		= 0x10,
-	K2_SATA_TF_LBAH_OFFSET		= 0x14,
-	K2_SATA_TF_DEVICE_OFFSET	= 0x18,
-	K2_SATA_TF_CMDSTAT_OFFSET      	= 0x1c,
-	K2_SATA_TF_CTL_OFFSET		= 0x20,
+/* Taskfile registers offsets */
+#define K2_SATA_TF_CMD_OFFSET		0x00
+#define K2_SATA_TF_DATA_OFFSET		0x00
+#define K2_SATA_TF_ERROR_OFFSET		0x04
+#define K2_SATA_TF_NSECT_OFFSET		0x08
+#define K2_SATA_TF_LBAL_OFFSET		0x0c
+#define K2_SATA_TF_LBAM_OFFSET		0x10
+#define K2_SATA_TF_LBAH_OFFSET		0x14
+#define K2_SATA_TF_DEVICE_OFFSET	0x18
+#define K2_SATA_TF_CMDSTAT_OFFSET      	0x1c
+#define K2_SATA_TF_CTL_OFFSET		0x20
 
-	/* DMA base */
-	K2_SATA_DMA_CMD_OFFSET		= 0x30,
+/* DMA base */
+#define K2_SATA_DMA_CMD_OFFSET		0x30
 
-	/* SCRs base */
-	K2_SATA_SCR_STATUS_OFFSET	= 0x40,
-	K2_SATA_SCR_ERROR_OFFSET	= 0x44,
-	K2_SATA_SCR_CONTROL_OFFSET	= 0x48,
+/* SCRs base */
+#define K2_SATA_SCR_STATUS_OFFSET	0x40
+#define K2_SATA_SCR_ERROR_OFFSET	0x44
+#define K2_SATA_SCR_CONTROL_OFFSET	0x48
 
-	/* Others */
-	K2_SATA_SICR1_OFFSET		= 0x80,
-	K2_SATA_SICR2_OFFSET		= 0x84,
-	K2_SATA_SIM_OFFSET		= 0x88,
+/* Others */
+#define K2_SATA_SICR1_OFFSET		0x80
+#define K2_SATA_SICR2_OFFSET		0x84
+#define K2_SATA_SIM_OFFSET		0x88
 
-	/* Port stride */
-	K2_SATA_PORT_OFFSET		= 0x100,
-};
+/* Port stride */
+#define K2_SATA_PORT_OFFSET		0x100
 
 static u8 k2_stat_check_status(struct ata_port *ap);
 
@@ -256,7 +255,7 @@ static int k2_sata_proc_info(struct Scsi_Host *shost, char *page, char **start,
 	int len, index;
 
 	/* Find  the ata_port */
-	ap = ata_shost_to_port(shost);
+	ap = (struct ata_port *) &shost->hostdata[0];
 	if (ap == NULL)
 		return 0;
 
@@ -289,16 +288,17 @@ static struct scsi_host_template k2_sata_sht = {
 	.name			= DRV_NAME,
 	.ioctl			= ata_scsi_ioctl,
 	.queuecommand		= ata_scsi_queuecmd,
+	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
 	.this_id		= ATA_SHT_THIS_ID,
 	.sg_tablesize		= LIBATA_MAX_PRD,
+	.max_sectors		= ATA_MAX_SECTORS,
 	.cmd_per_lun		= ATA_SHT_CMD_PER_LUN,
 	.emulated		= ATA_SHT_EMULATED,
 	.use_clustering		= ATA_SHT_USE_CLUSTERING,
 	.proc_name		= DRV_NAME,
 	.dma_boundary		= ATA_DMA_BOUNDARY,
 	.slave_configure	= ata_scsi_slave_config,
-	.slave_destroy		= ata_scsi_slave_destroy,
 #ifdef CONFIG_PPC_OF
 	.proc_info		= k2_sata_proc_info,
 #endif
@@ -313,17 +313,14 @@ static const struct ata_port_operations k2_sata_ops = {
 	.check_status		= k2_stat_check_status,
 	.exec_command		= ata_exec_command,
 	.dev_select		= ata_std_dev_select,
+	.phy_reset		= sata_phy_reset,
 	.bmdma_setup		= k2_bmdma_setup_mmio,
 	.bmdma_start		= k2_bmdma_start_mmio,
 	.bmdma_stop		= ata_bmdma_stop,
 	.bmdma_status		= ata_bmdma_status,
 	.qc_prep		= ata_qc_prep,
 	.qc_issue		= ata_qc_issue_prot,
-	.data_xfer		= ata_mmio_data_xfer,
-	.freeze			= ata_bmdma_freeze,
-	.thaw			= ata_bmdma_thaw,
-	.error_handler		= ata_bmdma_error_handler,
-	.post_internal_cmd	= ata_bmdma_post_internal_cmd,
+	.eng_timeout		= ata_eng_timeout,
 	.irq_handler		= ata_interrupt,
 	.irq_clear		= ata_bmdma_irq_clear,
 	.scr_read		= k2_sata_scr_read,
@@ -423,12 +420,12 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	writel(0x0, mmio_base + K2_SATA_SIM_OFFSET);
 
 	probe_ent->sht = &k2_sata_sht;
-	probe_ent->host_flags = ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY |
-				ATA_FLAG_MMIO;
+	probe_ent->host_flags = ATA_FLAG_SATA | ATA_FLAG_SATA_RESET |
+				ATA_FLAG_NO_LEGACY | ATA_FLAG_MMIO;
 	probe_ent->port_ops = &k2_sata_ops;
 	probe_ent->n_ports = 4;
 	probe_ent->irq = pdev->irq;
-	probe_ent->irq_flags = IRQF_SHARED;
+	probe_ent->irq_flags = SA_SHIRQ;
 	probe_ent->mmio_base = mmio_base;
 
 	/* We don't care much about the PIO/UDMA masks, but the core won't like us

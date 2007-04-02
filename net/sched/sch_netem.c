@@ -13,6 +13,7 @@
  *		Catalin(ux aka Dino) BOIE <catab at umbrella dot ro>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/types.h>
@@ -148,8 +149,7 @@ static long tabledist(unsigned long mu, long sigma,
 static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct netem_sched_data *q = qdisc_priv(sch);
-	/* We don't fill cb now as skb_unshare() may invalidate it */
-	struct netem_skb_cb *cb;
+	struct netem_skb_cb *cb = (struct netem_skb_cb *)skb->cb;
 	struct sk_buff *skb2;
 	int ret;
 	int count = 1;
@@ -167,7 +167,7 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	if (count == 0) {
 		sch->qstats.drops++;
 		kfree_skb(skb);
-		return NET_XMIT_BYPASS;
+		return NET_XMIT_DROP;
 	}
 
 	/*
@@ -201,7 +201,6 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		skb->data[net_random() % skb_headlen(skb)] ^= 1<<(net_random() % 8);
 	}
 
-	cb = (struct netem_skb_cb *)skb->cb;
 	if (q->gap == 0 		/* not doing reordering */
 	    || q->counter < q->gap 	/* inside last reordering gap */
 	    || q->reorder < get_crandom(&q->reorder_cor)) {
@@ -253,9 +252,9 @@ static int netem_requeue(struct sk_buff *skb, struct Qdisc *sch)
 static unsigned int netem_drop(struct Qdisc* sch)
 {
 	struct netem_sched_data *q = qdisc_priv(sch);
-	unsigned int len = 0;
+	unsigned int len;
 
-	if (q->qdisc->ops->drop && (len = q->qdisc->ops->drop(q->qdisc)) != 0) {
+	if ((len = q->qdisc->ops->drop(q->qdisc)) != 0) {
 		sch->q.qlen--;
 		sch->qstats.drops++;
 	}

@@ -219,7 +219,7 @@ CONFIG_ACPI_BLACKLIST_YEAR=0
 CONFIG_ACPI_EC=y
 CONFIG_ACPI_POWER=y
 CONFIG_ACPI_SYSTEM=y
-# CONFIG_X86_PM_TIMER is not set
+CONFIG_X86_PM_TIMER=y
 # CONFIG_ACPI_CONTAINER is not set
 
 #
@@ -416,7 +416,7 @@ CONFIG_IP_NF_TARGET_LOG=y
 #
 CONFIG_STANDALONE=y
 CONFIG_PREVENT_FIRMWARE_BUILD=y
-# CONFIG_FW_LOADER is not set
+CONFIG_FW_LOADER=y
 
 #
 # Connector - unified userspace <-> kernelspace linker
@@ -447,7 +447,7 @@ CONFIG_PARPORT_1284=y
 #
 # Block devices
 #
-# CONFIG_BLK_DEV_FD is not set
+CONFIG_BLK_DEV_FD=y
 # CONFIG_PARIDE is not set
 # CONFIG_BLK_CPQ_DA is not set
 # CONFIG_BLK_CPQ_CISS_DA is not set
@@ -575,7 +575,22 @@ CONFIG_BLK_DEV_SD=y
 # CONFIG_MEGARAID_NEWGEN is not set
 # CONFIG_MEGARAID_LEGACY is not set
 # CONFIG_MEGARAID_SAS is not set
-# CONFIG_SCSI_SATA is not set
+CONFIG_SCSI_SATA=y
+# CONFIG_SCSI_SATA_AHCI is not set
+# CONFIG_SCSI_SATA_SVW is not set
+# CONFIG_SCSI_ATA_PIIX is not set
+# CONFIG_SCSI_SATA_MV is not set
+# CONFIG_SCSI_SATA_NV is not set
+# CONFIG_SCSI_PDC_ADMA is not set
+# CONFIG_SCSI_SATA_QSTOR is not set
+# CONFIG_SCSI_SATA_PROMISE is not set
+# CONFIG_SCSI_SATA_SX4 is not set
+# CONFIG_SCSI_SATA_SIL is not set
+# CONFIG_SCSI_SATA_SIL24 is not set
+# CONFIG_SCSI_SATA_SIS is not set
+# CONFIG_SCSI_SATA_ULI is not set
+CONFIG_SCSI_SATA_VIA=y
+# CONFIG_SCSI_SATA_VITESSE is not set
 # CONFIG_SCSI_BUSLOGIC is not set
 # CONFIG_SCSI_DMX3191D is not set
 # CONFIG_SCSI_EATA is not set
@@ -1011,6 +1026,11 @@ CONFIG_VIDEO_DEV=y
 # CONFIG_VIDEO_ZORAN is not set
 CONFIG_VIDEO_SAA7134=y
 # CONFIG_VIDEO_SAA7134_ALSA is not set
+CONFIG_VIDEO_SAA7134_DVB=y
+# CONFIG_VIDEO_SAA7134_DVB_ALL_FRONTENDS is not set
+# CONFIG_VIDEO_SAA7134_DVB_MT352 is not set
+CONFIG_VIDEO_SAA7134_DVB_TDA1004X=y
+# CONFIG_VIDEO_SAA7134_DVB_NXT200X is not set
 # CONFIG_VIDEO_MXB is not set
 # CONFIG_VIDEO_DPC is not set
 # CONFIG_VIDEO_HEXIUM_ORION is not set
@@ -1031,9 +1051,90 @@ CONFIG_VIDEO_SAA7134=y
 #
 # Digital Video Broadcasting Devices
 #
-# CONFIG_DVB is not set
+CONFIG_DVB=y
+CONFIG_DVB_CORE=y
+
+#
+# Supported SAA7146 based PCI Adapters
+#
+# CONFIG_DVB_AV7110 is not set
+# CONFIG_DVB_BUDGET is not set
+# CONFIG_DVB_BUDGET_CI is not set
+# CONFIG_DVB_BUDGET_AV is not set
+
+#
+# Supported USB Adapters
+#
+# CONFIG_DVB_USB is not set
+# CONFIG_DVB_TTUSB_BUDGET is not set
+# CONFIG_DVB_TTUSB_DEC is not set
+# CONFIG_DVB_CINERGYT2 is not set
+
+#
+# Supported FlexCopII (B2C2) Adapters
+#
+# CONFIG_DVB_B2C2_FLEXCOP is not set
+
+#
+# Supported BT878 Adapters
+#
+
+#
+# Supported Pluto2 Adapters
+#
+# CONFIG_DVB_PLUTO2 is not set
+
+#
+# Supported DVB Frontends
+#
+
+#
+# Customise DVB Frontends
+#
+
+#
+# DVB-S (satellite) frontends
+#
+# CONFIG_DVB_STV0299 is not set
+# CONFIG_DVB_CX24110 is not set
+# CONFIG_DVB_CX24123 is not set
+# CONFIG_DVB_TDA8083 is not set
+# CONFIG_DVB_MT312 is not set
+# CONFIG_DVB_VES1X93 is not set
+# CONFIG_DVB_S5H1420 is not set
+
+#
+# DVB-T (terrestrial) frontends
+#
+# CONFIG_DVB_SP8870 is not set
+# CONFIG_DVB_SP887X is not set
+# CONFIG_DVB_CX22700 is not set
+# CONFIG_DVB_CX22702 is not set
+# CONFIG_DVB_L64781 is not set
+CONFIG_DVB_TDA1004X=y
+# CONFIG_DVB_NXT6000 is not set
+# CONFIG_DVB_MT352 is not set
+# CONFIG_DVB_DIB3000MB is not set
+# CONFIG_DVB_DIB3000MC is not set
+
+#
+# DVB-C (cable) frontends
+#
+# CONFIG_DVB_VES1820 is not set
+# CONFIG_DVB_TDA10021 is not set
+# CONFIG_DVB_STV0297 is not set
+
+#
+# ATSC (North American/Korean Terresterial DTV) frontends
+#
+# CONFIG_DVB_NXT200X is not set
+# CONFIG_DVB_OR51211 is not set
+# CONFIG_DVB_OR51132 is not set
+# CONFIG_DVB_BCM3510 is not set
+# CONFIG_DVB_LGDT330X is not set
 CONFIG_VIDEO_TUNER=y
 CONFIG_VIDEO_BUF=y
+CONFIG_VIDEO_BUF_DVB=y
 CONFIG_VIDEO_IR=y
 
 #
@@ -1349,11 +1450,7 @@ CONFIG_USB_STORAGE=y
 # CONFIG_INFINIBAND is not set
 
 #
-# SN Devices
-#
-
-#
-# EDAC - error detection and reporting (RAS)
+# EDAC - error detection and reporting (RAS) (EXPERIMENTAL)
 #
 # CONFIG_EDAC is not set
 

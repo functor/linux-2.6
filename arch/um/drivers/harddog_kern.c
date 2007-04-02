@@ -35,6 +35,7 @@
  */
  
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
@@ -103,7 +104,7 @@ static int harddog_release(struct inode *inode, struct file *file)
 
 extern int ping_watchdog(int fd);
 
-static ssize_t harddog_write(struct file *file, const char __user *data, size_t len,
+static ssize_t harddog_write(struct file *file, const char *data, size_t len,
 			     loff_t *ppos)
 {
 	/*
@@ -117,7 +118,6 @@ static ssize_t harddog_write(struct file *file, const char __user *data, size_t 
 static int harddog_ioctl(struct inode *inode, struct file *file,
 			 unsigned int cmd, unsigned long arg)
 {
-	void __user *argp= (void __user *)arg;
 	static struct watchdog_info ident = {
 		WDIOC_SETTIMEOUT,
 		0,
@@ -127,12 +127,13 @@ static int harddog_ioctl(struct inode *inode, struct file *file,
 		default:
 			return -ENOTTY;
 		case WDIOC_GETSUPPORT:
-			if(copy_to_user(argp, &ident, sizeof(ident)))
+			if(copy_to_user((struct harddog_info *)arg, &ident,
+					sizeof(ident)))
 				return -EFAULT;
 			return 0;
 		case WDIOC_GETSTATUS:
 		case WDIOC_GETBOOTSTATUS:
-			return put_user(0,(int __user *)argp);
+			return put_user(0,(int *)arg);
 		case WDIOC_KEEPALIVE:
 			return(ping_watchdog(harddog_out_fd));
 	}

@@ -14,6 +14,7 @@
  * Louis Hamilton, Red Hat, Inc.
  * hamilton@redhat.com  [MIPS64 modifications]
  */
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <asm/io.h>
@@ -31,7 +32,7 @@ void momenco_jaguar_restart(char *command)
 #else
 	void *nvram = (void*) 0xfc807000;
 #endif
-	/* Ask the NVRAM/RTC/watchdog chip to assert reset in 1/16 second */
+ 	/* Ask the NVRAM/RTC/watchdog chip to assert reset in 1/16 second */
 	writeb(0x84, nvram + 0xff7);
 
 	/* wait for the watchdog to go off */

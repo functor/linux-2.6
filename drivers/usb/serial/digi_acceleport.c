@@ -233,6 +233,7 @@
 *  $Id: digi_acceleport.c,v 1.80.1.2 2000/11/02 05:45:08 root Exp $
 */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -246,7 +247,7 @@
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 #include <linux/wait.h>
-#include <linux/usb/serial.h>
+#include "usb-serial.h"
 
 /* Defines */
 

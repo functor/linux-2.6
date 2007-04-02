@@ -76,6 +76,7 @@ static void bfs_read_inode(struct inode * inode)
 	inode->i_size = BFS_FILESIZE(di);
 	inode->i_blocks = BFS_FILEBLOCKS(di);
         if (inode->i_size || inode->i_blocks) dprintf("Registered inode with %lld size, %ld blocks\n", inode->i_size, inode->i_blocks);
+	inode->i_blksize = PAGE_SIZE;
 	inode->i_atime.tv_sec =  le32_to_cpu(di->i_atime);
 	inode->i_mtime.tv_sec =  le32_to_cpu(di->i_mtime);
 	inode->i_ctime.tv_sec =  le32_to_cpu(di->i_ctime);
@@ -202,9 +203,8 @@ static void bfs_put_super(struct super_block *s)
 	s->s_fs_info = NULL;
 }
 
-static int bfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+static int bfs_statfs(struct super_block *s, struct kstatfs *buf)
 {
-	struct super_block *s = dentry->d_sb;
 	struct bfs_sb_info *info = BFS_SB(s);
 	u64 id = huge_encode_dev(s->s_bdev->bd_dev);
 	buf->f_type = BFS_MAGIC;
@@ -257,8 +257,7 @@ static int init_inodecache(void)
 {
 	bfs_inode_cachep = kmem_cache_create("bfs_inode_cache",
 					     sizeof(struct bfs_inode_info),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (bfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -410,10 +409,10 @@ out:
 	return -EINVAL;
 }
 
-static int bfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *bfs_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, bfs_fill_super, mnt);
+	return get_sb_bdev(fs_type, flags, dev_name, data, bfs_fill_super);
 }
 
 static struct file_system_type bfs_fs_type = {

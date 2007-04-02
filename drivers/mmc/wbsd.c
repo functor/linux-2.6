@@ -21,6 +21,7 @@
  * - On APIC systems the FIFO empty interrupt is sometimes lost.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -41,12 +42,17 @@
 #include "wbsd.h"
 
 #define DRIVER_NAME "wbsd"
-#define DRIVER_VERSION "1.6"
+#define DRIVER_VERSION "1.5"
 
+#ifdef CONFIG_MMC_DEBUG
 #define DBG(x...) \
-	pr_debug(DRIVER_NAME ": " x)
+	printk(KERN_DEBUG DRIVER_NAME ": " x)
 #define DBGF(f, x...) \
-	pr_debug(DRIVER_NAME " [%s()]: " f, __func__ , ##x)
+	printk(KERN_DEBUG DRIVER_NAME " [%s()]: " f, __func__ , ##x)
+#else
+#define DBG(x...)	do { } while (0)
+#define DBGF(x...)	do { } while (0)
+#endif
 
 /*
  * Device resources
@@ -661,14 +667,14 @@ static void wbsd_prepare_data(struct wbsd_host *host, struct mmc_data *data)
 	unsigned long dmaflags;
 
 	DBGF("blksz %04x blks %04x flags %08x\n",
-		data->blksz, data->blocks, data->flags);
+		1 << data->blksz_bits, data->blocks, data->flags);
 	DBGF("tsac %d ms nsac %d clk\n",
 		data->timeout_ns / 1000000, data->timeout_clks);
 
 	/*
 	 * Calculate size.
 	 */
-	host->size = data->blocks * data->blksz;
+	host->size = data->blocks << data->blksz_bits;
 
 	/*
 	 * Check timeout values for overflow.
@@ -695,12 +701,12 @@ static void wbsd_prepare_data(struct wbsd_host *host, struct mmc_data *data)
 	 * Two bytes are needed for each data line.
 	 */
 	if (host->bus_width == MMC_BUS_WIDTH_1) {
-		blksize = data->blksz + 2;
+		blksize = (1 << data->blksz_bits) + 2;
 
 		wbsd_write_index(host, WBSD_IDX_PBSMSB, (blksize >> 4) & 0xF0);
 		wbsd_write_index(host, WBSD_IDX_PBSLSB, blksize & 0xFF);
 	} else if (host->bus_width == MMC_BUS_WIDTH_4) {
-		blksize = data->blksz + 2 * 4;
+		blksize = (1 << data->blksz_bits) + 2 * 4;
 
 		wbsd_write_index(host, WBSD_IDX_PBSMSB,
 			((blksize >> 4) & 0xF0) | WBSD_DATA_WIDTH);
@@ -929,6 +935,10 @@ static void wbsd_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 {
 	struct wbsd_host *host = mmc_priv(mmc);
 	u8 clk, setup, pwr;
+
+	DBGF("clock %uHz busmode %u powermode %u cs %u Vdd %u width %u\n",
+		ios->clock, ios->bus_mode, ios->power_mode, ios->chip_select,
+		ios->vdd, ios->bus_width);
 
 	spin_lock_bh(&host->lock);
 
@@ -1439,13 +1449,13 @@ static int __devinit wbsd_scan(struct wbsd_host *host)
 
 static int __devinit wbsd_request_region(struct wbsd_host *host, int base)
 {
-	if (base & 0x7)
+	if (io & 0x7)
 		return -EINVAL;
 
 	if (!request_region(base, 8, DRIVER_NAME))
 		return -EIO;
 
-	host->base = base;
+	host->base = io;
 
 	return 0;
 }
@@ -1553,7 +1563,7 @@ static int __devinit wbsd_request_irq(struct wbsd_host *host, int irq)
 	 * Allocate interrupt.
 	 */
 
-	ret = request_irq(irq, wbsd_irq, IRQF_SHARED, DRIVER_NAME, host);
+	ret = request_irq(irq, wbsd_irq, SA_SHIRQ, DRIVER_NAME, host);
 	if (ret)
 		return ret;
 
@@ -1773,7 +1783,7 @@ static int __devinit wbsd_init(struct device *dev, int base, int irq, int dma,
 	/*
 	 * Request resources.
 	 */
-	ret = wbsd_request_resources(host, base, irq, dma);
+	ret = wbsd_request_resources(host, io, irq, dma);
 	if (ret) {
 		wbsd_release_resources(host);
 		wbsd_free_mmc(dev);
@@ -1861,7 +1871,6 @@ static void __devexit wbsd_shutdown(struct device *dev, int pnp)
 
 static int __devinit wbsd_probe(struct platform_device *dev)
 {
-	/* Use the module parameters for resources */
 	return wbsd_init(&dev->dev, io, irq, dma, 0);
 }
 

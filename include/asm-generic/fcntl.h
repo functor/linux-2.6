@@ -1,6 +1,7 @@
 #ifndef _ASM_GENERIC_FCNTL_H
 #define _ASM_GENERIC_FCNTL_H
 
+#include <linux/config.h>
 #include <linux/types.h>
 
 /* open/fcntl - O_SYNC is only implemented on blocks devices and on files
@@ -48,10 +49,6 @@
 #ifndef O_NOATIME
 #define O_NOATIME	01000000
 #endif
-#ifndef O_ATOMICLOOKUP
-#define O_ATOMICLOOKUP	02000000	/* do atomic file lookup */
-#endif
-
 #ifndef O_NDELAY
 #define O_NDELAY	O_NONBLOCK
 #endif

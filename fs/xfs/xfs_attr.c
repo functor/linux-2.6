@@ -27,6 +27,7 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
+#include "xfs_dir.h"
 #include "xfs_dir2.h"
 #include "xfs_dmapi.h"
 #include "xfs_mount.h"
@@ -34,6 +35,7 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
+#include "xfs_dir_sf.h"
 #include "xfs_dir2_sf.h"
 #include "xfs_attr_sf.h"
 #include "xfs_dinode.h"
@@ -292,7 +294,7 @@ xfs_attr_set_int(xfs_inode_t *dp, const char *name, int namelen,
 	xfs_trans_ihold(args.trans, dp);
 
 	/*
-	 * If the attribute list is non-existent or a shortform list,
+	 * If the attribute list is non-existant or a shortform list,
 	 * upgrade it to a single-leaf-block attribute list.
 	 */
 	if ((dp->i_d.di_aformat == XFS_DINODE_FMT_LOCAL) ||
@@ -1125,7 +1127,8 @@ xfs_attr_leaf_list(xfs_attr_list_context_t *context)
 		return(error);
 	ASSERT(bp != NULL);
 	leaf = bp->data;
-	if (unlikely(be16_to_cpu(leaf->hdr.info.magic) != XFS_ATTR_LEAF_MAGIC)) {
+	if (unlikely(INT_GET(leaf->hdr.info.magic, ARCH_CONVERT)
+						!= XFS_ATTR_LEAF_MAGIC)) {
 		XFS_CORRUPTION_ERROR("xfs_attr_leaf_list", XFS_ERRLEVEL_LOW,
 				     context->dp->i_mount, leaf);
 		xfs_da_brelse(NULL, bp);
@@ -1538,8 +1541,8 @@ xfs_attr_node_removename(xfs_da_args_t *args)
 						     XFS_ATTR_FORK);
 		if (error)
 			goto out;
-		ASSERT(be16_to_cpu(((xfs_attr_leafblock_t *)
-				      bp->data)->hdr.info.magic)
+		ASSERT(INT_GET(((xfs_attr_leafblock_t *)
+				      bp->data)->hdr.info.magic, ARCH_CONVERT)
 						       == XFS_ATTR_LEAF_MAGIC);
 
 		if ((forkoff = xfs_attr_shortform_allfit(bp, dp))) {
@@ -1582,7 +1585,7 @@ out:
  * Fill in the disk block numbers in the state structure for the buffers
  * that are attached to the state structure.
  * This is done so that we can quickly reattach ourselves to those buffers
- * after some set of transaction commits have released these buffers.
+ * after some set of transaction commit's has released these buffers.
  */
 STATIC int
 xfs_attr_fillstate(xfs_da_state_t *state)
@@ -1629,7 +1632,7 @@ xfs_attr_fillstate(xfs_da_state_t *state)
 /*
  * Reattach the buffers to the state structure based on the disk block
  * numbers stored in the state structure.
- * This is done after some set of transaction commits have released those
+ * This is done after some set of transaction commit's has released those
  * buffers from our grip.
  */
 STATIC int
@@ -1760,7 +1763,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 			return(error);
 		if (bp) {
 			node = bp->data;
-			switch (be16_to_cpu(node->hdr.info.magic)) {
+			switch (INT_GET(node->hdr.info.magic, ARCH_CONVERT)) {
 			case XFS_DA_NODE_MAGIC:
 				xfs_attr_trace_l_cn("wrong blk", context, node);
 				xfs_da_brelse(NULL, bp);
@@ -1768,14 +1771,18 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				break;
 			case XFS_ATTR_LEAF_MAGIC:
 				leaf = bp->data;
-				if (cursor->hashval > be32_to_cpu(leaf->entries[
-				    be16_to_cpu(leaf->hdr.count)-1].hashval)) {
+				if (cursor->hashval >
+				    INT_GET(leaf->entries[
+					 INT_GET(leaf->hdr.count,
+						ARCH_CONVERT)-1].hashval,
+							ARCH_CONVERT)) {
 					xfs_attr_trace_l_cl("wrong blk",
 							   context, leaf);
 					xfs_da_brelse(NULL, bp);
 					bp = NULL;
 				} else if (cursor->hashval <=
-					     be32_to_cpu(leaf->entries[0].hashval)) {
+					     INT_GET(leaf->entries[0].hashval,
+							ARCH_CONVERT)) {
 					xfs_attr_trace_l_cl("maybe wrong blk",
 							   context, leaf);
 					xfs_da_brelse(NULL, bp);
@@ -1810,10 +1817,10 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				return(XFS_ERROR(EFSCORRUPTED));
 			}
 			node = bp->data;
-			if (be16_to_cpu(node->hdr.info.magic)
+			if (INT_GET(node->hdr.info.magic, ARCH_CONVERT)
 							== XFS_ATTR_LEAF_MAGIC)
 				break;
-			if (unlikely(be16_to_cpu(node->hdr.info.magic)
+			if (unlikely(INT_GET(node->hdr.info.magic, ARCH_CONVERT)
 							!= XFS_DA_NODE_MAGIC)) {
 				XFS_CORRUPTION_ERROR("xfs_attr_node_list(3)",
 						     XFS_ERRLEVEL_LOW,
@@ -1823,17 +1830,19 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				return(XFS_ERROR(EFSCORRUPTED));
 			}
 			btree = node->btree;
-			for (i = 0; i < be16_to_cpu(node->hdr.count);
+			for (i = 0;
+				i < INT_GET(node->hdr.count, ARCH_CONVERT);
 								btree++, i++) {
 				if (cursor->hashval
-						<= be32_to_cpu(btree->hashval)) {
-					cursor->blkno = be32_to_cpu(btree->before);
+						<= INT_GET(btree->hashval,
+							    ARCH_CONVERT)) {
+					cursor->blkno = INT_GET(btree->before, ARCH_CONVERT);
 					xfs_attr_trace_l_cb("descending",
 							    context, btree);
 					break;
 				}
 			}
-			if (i == be16_to_cpu(node->hdr.count)) {
+			if (i == INT_GET(node->hdr.count, ARCH_CONVERT)) {
 				xfs_da_brelse(NULL, bp);
 				return(0);
 			}
@@ -1849,7 +1858,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 	 */
 	for (;;) {
 		leaf = bp->data;
-		if (unlikely(be16_to_cpu(leaf->hdr.info.magic)
+		if (unlikely(INT_GET(leaf->hdr.info.magic, ARCH_CONVERT)
 						!= XFS_ATTR_LEAF_MAGIC)) {
 			XFS_CORRUPTION_ERROR("xfs_attr_node_list(4)",
 					     XFS_ERRLEVEL_LOW,
@@ -1860,7 +1869,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 		error = xfs_attr_leaf_list_int(bp, context);
 		if (error || !leaf->hdr.info.forw)
 			break;	/* not really an error, buffer full or EOF */
-		cursor->blkno = be32_to_cpu(leaf->hdr.info.forw);
+		cursor->blkno = INT_GET(leaf->hdr.info.forw, ARCH_CONVERT);
 		xfs_da_brelse(NULL, bp);
 		error = xfs_da_read_buf(NULL, context->dp, cursor->blkno, -1,
 					      &bp, XFS_ATTR_FORK);
@@ -1908,7 +1917,7 @@ xfs_attr_rmtval_get(xfs_da_args_t *args)
 		error = xfs_bmapi(args->trans, args->dp, (xfs_fileoff_t)lblkno,
 				  args->rmtblkcnt,
 				  XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
-				  NULL, 0, map, &nmap, NULL, NULL);
+				  NULL, 0, map, &nmap, NULL);
 		if (error)
 			return(error);
 		ASSERT(nmap >= 1);
@@ -1986,7 +1995,7 @@ xfs_attr_rmtval_set(xfs_da_args_t *args)
 				  XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA |
 							XFS_BMAPI_WRITE,
 				  args->firstblock, args->total, &map, &nmap,
-				  args->flist, NULL);
+				  args->flist);
 		if (!error) {
 			error = xfs_bmap_finish(&args->trans, args->flist,
 						*args->firstblock, &committed);
@@ -2037,8 +2046,7 @@ xfs_attr_rmtval_set(xfs_da_args_t *args)
 		error = xfs_bmapi(NULL, dp, (xfs_fileoff_t)lblkno,
 				  args->rmtblkcnt,
 				  XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
-				  args->firstblock, 0, &map, &nmap,
-				  NULL, NULL);
+				  args->firstblock, 0, &map, &nmap, NULL);
 		if (error) {
 			return(error);
 		}
@@ -2103,7 +2111,7 @@ xfs_attr_rmtval_remove(xfs_da_args_t *args)
 					args->rmtblkcnt,
 					XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
 					args->firstblock, 0, &map, &nmap,
-					args->flist, NULL);
+					args->flist);
 		if (error) {
 			return(error);
 		}
@@ -2141,8 +2149,7 @@ xfs_attr_rmtval_remove(xfs_da_args_t *args)
 		XFS_BMAP_INIT(args->flist, args->firstblock);
 		error = xfs_bunmapi(args->trans, args->dp, lblkno, blkcnt,
 				    XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
-				    1, args->firstblock, args->flist,
-				    NULL, &done);
+				    1, args->firstblock, args->flist, &done);
 		if (!error) {
 			error = xfs_bmap_finish(&args->trans, args->flist,
 						*args->firstblock, &committed);
@@ -2225,10 +2232,9 @@ xfs_attr_trace_l_cn(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)be16_to_cpu(node->hdr.count),
-		(__psunsigned_t)be32_to_cpu(node->btree[0].hashval),
-		(__psunsigned_t)be32_to_cpu(node->btree[
-				    be16_to_cpu(node->hdr.count)-1].hashval));
+		(__psunsigned_t)INT_GET(node->hdr.count, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(node->btree[0].hashval, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(node->btree[INT_GET(node->hdr.count, ARCH_CONVERT)-1].hashval, ARCH_CONVERT));
 }
 
 /*
@@ -2255,8 +2261,8 @@ xfs_attr_trace_l_cb(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)be32_to_cpu(btree->hashval),
-		(__psunsigned_t)be32_to_cpu(btree->before),
+		(__psunsigned_t)INT_GET(btree->hashval, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(btree->before, ARCH_CONVERT),
 		(__psunsigned_t)NULL);
 }
 
@@ -2284,10 +2290,9 @@ xfs_attr_trace_l_cl(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)be16_to_cpu(leaf->hdr.count),
-		(__psunsigned_t)be32_to_cpu(leaf->entries[0].hashval),
-		(__psunsigned_t)be32_to_cpu(leaf->entries[
-				be16_to_cpu(leaf->hdr.count)-1].hashval));
+		(__psunsigned_t)INT_GET(leaf->hdr.count, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(leaf->entries[0].hashval, ARCH_CONVERT),
+		(__psunsigned_t)INT_GET(leaf->entries[INT_GET(leaf->hdr.count, ARCH_CONVERT)-1].hashval, ARCH_CONVERT));
 }
 
 /*
@@ -2322,56 +2327,56 @@ xfs_attr_trace_enter(int type, char *where,
 
 STATIC int
 posix_acl_access_set(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	vnode_t	*vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vset(vp, data, size, _ACL_TYPE_ACCESS);
 }
 
 STATIC int
 posix_acl_access_remove(
-	bhv_vnode_t *vp, char *name, int xflags)
+	struct vnode *vp, char *name, int xflags)
 {
 	return xfs_acl_vremove(vp, _ACL_TYPE_ACCESS);
 }
 
 STATIC int
 posix_acl_access_get(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vget(vp, data, size, _ACL_TYPE_ACCESS);
 }
 
 STATIC int
 posix_acl_access_exists(
-	bhv_vnode_t *vp)
+	vnode_t *vp)
 {
 	return xfs_acl_vhasacl_access(vp);
 }
 
 STATIC int
 posix_acl_default_set(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	vnode_t	*vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vset(vp, data, size, _ACL_TYPE_DEFAULT);
 }
 
 STATIC int
 posix_acl_default_get(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vget(vp, data, size, _ACL_TYPE_DEFAULT);
 }
 
 STATIC int
 posix_acl_default_remove(
-	bhv_vnode_t *vp, char *name, int xflags)
+	struct vnode *vp, char *name, int xflags)
 {
 	return xfs_acl_vremove(vp, _ACL_TYPE_DEFAULT);
 }
 
 STATIC int
 posix_acl_default_exists(
-	bhv_vnode_t *vp)
+	vnode_t *vp)
 {
 	return xfs_acl_vhasacl_default(vp);
 }
@@ -2404,18 +2409,21 @@ STATIC struct attrnames *attr_system_names[] =
 
 STATIC int
 attr_generic_set(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	struct vnode *vp, char *name, void *data, size_t size, int xflags)
 {
-	return -bhv_vop_attr_set(vp, name, data, size, xflags, NULL);
+	int 	error;
+
+	VOP_ATTR_SET(vp, name, data, size, xflags, NULL, error);
+	return -error;
 }
 
 STATIC int
 attr_generic_get(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	struct vnode *vp, char *name, void *data, size_t size, int xflags)
 {
 	int	error, asize = size;
 
-	error = bhv_vop_attr_get(vp, name, data, &asize, xflags, NULL);
+	VOP_ATTR_GET(vp, name, data, &asize, xflags, NULL, error);
 	if (!error)
 		return asize;
 	return -error;
@@ -2423,9 +2431,12 @@ attr_generic_get(
 
 STATIC int
 attr_generic_remove(
-	bhv_vnode_t *vp, char *name, int xflags)
+	struct vnode *vp, char *name, int xflags)
 {
-	return -bhv_vop_attr_remove(vp, name, xflags, NULL);
+	int	error;
+
+	VOP_ATTR_REMOVE(vp, name, xflags, NULL, error);
+	return -error;
 }
 
 STATIC int
@@ -2453,7 +2464,7 @@ attr_generic_listadd(
 
 STATIC int
 attr_system_list(
-	bhv_vnode_t		*vp,
+	struct vnode		*vp,
 	void			*data,
 	size_t			size,
 	ssize_t			*result)
@@ -2475,12 +2486,12 @@ attr_system_list(
 
 int
 attr_generic_list(
-	bhv_vnode_t *vp, void *data, size_t size, int xflags, ssize_t *result)
+	struct vnode *vp, void *data, size_t size, int xflags, ssize_t *result)
 {
 	attrlist_cursor_kern_t	cursor = { 0 };
 	int			error;
 
-	error = bhv_vop_attr_list(vp, data, size, xflags, &cursor, NULL);
+	VOP_ATTR_LIST(vp, data, size, xflags, &cursor, NULL, error);
 	if (error > 0)
 		return -error;
 	*result = -error;
@@ -2508,10 +2519,10 @@ attr_lookup_namespace(
  */
 STATIC int
 attr_user_capable(
-	bhv_vnode_t	*vp,
+	struct vnode	*vp,
 	cred_t		*cred)
 {
-	struct inode	*inode = vn_to_inode(vp);
+	struct inode	*inode = LINVFS_GET_IP(vp);
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
@@ -2526,10 +2537,10 @@ attr_user_capable(
 
 STATIC int
 attr_trusted_capable(
-	bhv_vnode_t	*vp,
+	struct vnode	*vp,
 	cred_t		*cred)
 {
-	struct inode	*inode = vn_to_inode(vp);
+	struct inode	*inode = LINVFS_GET_IP(vp);
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
@@ -2540,7 +2551,7 @@ attr_trusted_capable(
 
 STATIC int
 attr_secure_capable(
-	bhv_vnode_t	*vp,
+	struct vnode	*vp,
 	cred_t		*cred)
 {
 	return -ENOSECURITY;
@@ -2548,7 +2559,7 @@ attr_secure_capable(
 
 STATIC int
 attr_system_set(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	struct vnode *vp, char *name, void *data, size_t size, int xflags)
 {
 	attrnames_t	*namesp;
 	int		error;
@@ -2567,7 +2578,7 @@ attr_system_set(
 
 STATIC int
 attr_system_get(
-	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	struct vnode *vp, char *name, void *data, size_t size, int xflags)
 {
 	attrnames_t	*namesp;
 
@@ -2579,7 +2590,7 @@ attr_system_get(
 
 STATIC int
 attr_system_remove(
-	bhv_vnode_t *vp, char *name, int xflags)
+	struct vnode *vp, char *name, int xflags)
 {
 	attrnames_t	*namesp;
 

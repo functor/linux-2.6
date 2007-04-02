@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/bamboo.c
+ *
  * Bamboo board specific routines
  *
  * Wade Farnsworth <wfarnsworth@mvista.com>
@@ -10,6 +12,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>

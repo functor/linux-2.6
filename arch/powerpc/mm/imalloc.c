@@ -13,12 +13,12 @@
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 #include <asm/cacheflush.h>
 
 #include "mmu_decl.h"
 
-static DEFINE_MUTEX(imlist_mutex);
+static DECLARE_MUTEX(imlist_sem);
 struct vm_struct * imlist = NULL;
 
 static int get_free_im_addr(unsigned long size, unsigned long *im_addr)
@@ -257,7 +257,7 @@ struct vm_struct * im_get_free_area(unsigned long size)
 	struct vm_struct *area;
 	unsigned long addr;
 	
-	mutex_lock(&imlist_mutex);
+	down(&imlist_sem);
 	if (get_free_im_addr(size, &addr)) {
 		printk(KERN_ERR "%s() cannot obtain addr for size 0x%lx\n",
 				__FUNCTION__, size);
@@ -272,7 +272,7 @@ struct vm_struct * im_get_free_area(unsigned long size)
 			__FUNCTION__, addr, size);
 	}
 next_im_done:
-	mutex_unlock(&imlist_mutex);
+	up(&imlist_sem);
 	return area;
 }
 
@@ -281,9 +281,9 @@ struct vm_struct * im_get_area(unsigned long v_addr, unsigned long size,
 {
 	struct vm_struct *area;
 
-	mutex_lock(&imlist_mutex);
+	down(&imlist_sem);
 	area = __im_get_area(v_addr, size, criteria);
-	mutex_unlock(&imlist_mutex);
+	up(&imlist_sem);
 	return area;
 }
 
@@ -297,17 +297,17 @@ void im_free(void * addr)
 		printk(KERN_ERR "Trying to %s bad address (%p)\n", __FUNCTION__,			addr);
 		return;
 	}
-	mutex_lock(&imlist_mutex);
+	down(&imlist_sem);
 	for (p = &imlist ; (tmp = *p) ; p = &tmp->next) {
 		if (tmp->addr == addr) {
 			*p = tmp->next;
 			unmap_vm_area(tmp);
 			kfree(tmp);
-			mutex_unlock(&imlist_mutex);
+			up(&imlist_sem);
 			return;
 		}
 	}
-	mutex_unlock(&imlist_mutex);
+	up(&imlist_sem);
 	printk(KERN_ERR "Trying to %s nonexistent area (%p)\n", __FUNCTION__,
 			addr);
 }

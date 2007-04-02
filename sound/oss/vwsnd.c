@@ -94,7 +94,7 @@
  *	Open will block until the previous client has closed the
  *	device, unless O_NONBLOCK is specified.
  *
- *	The semaphore devc->io_mutex serializes PCM I/O syscalls.  This
+ *	The semaphore devc->io_sema serializes PCM I/O syscalls.  This
  *	is unnecessary in Linux 2.2, because the kernel lock
  *	serializes read, write, and ioctl globally, but it's there,
  *	ready for the brave, new post-kernel-lock world.
@@ -105,7 +105,7 @@
  *	area it owns and update its pointers.  See pcm_output() and
  *	pcm_input() for most of the gory stuff.
  *
- *	devc->mix_mutex serializes all mixer ioctls.  This is also
+ *	devc->mix_sema serializes all mixer ioctls.  This is also
  *	redundant because of the kernel lock.
  *
  *	The lowest level lock is lith->lithium_lock.  It is a
@@ -148,8 +148,7 @@
 #include <linux/smp_lock.h>
 #include <linux/wait.h>
 #include <linux/interrupt.h>
-#include <linux/mutex.h>
-
+#include <asm/semaphore.h>
 #include <asm/mach-visws/cobalt.h>
 
 #include "sound_config.h"
@@ -248,6 +247,27 @@ typedef struct lithium {
 } lithium_t;
 
 /*
+ * li_create initializes the lithium_t structure and sets up vm mappings
+ * to access the registers.
+ * Returns 0 on success, -errno on failure.
+ */
+
+static int __init li_create(lithium_t *lith, unsigned long baseaddr)
+{
+	static void li_destroy(lithium_t *);
+
+	spin_lock_init(&lith->lock);
+	lith->page0 = ioremap_nocache(baseaddr + LI_PAGE0_OFFSET, PAGE_SIZE);
+	lith->page1 = ioremap_nocache(baseaddr + LI_PAGE1_OFFSET, PAGE_SIZE);
+	lith->page2 = ioremap_nocache(baseaddr + LI_PAGE2_OFFSET, PAGE_SIZE);
+	if (!lith->page0 || !lith->page1 || !lith->page2) {
+		li_destroy(lith);
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+/*
  * li_destroy destroys the lithium_t structure and vm mappings.
  */
 
@@ -265,25 +285,6 @@ static void li_destroy(lithium_t *lith)
 		iounmap(lith->page2);
 		lith->page2 = NULL;
 	}
-}
-
-/*
- * li_create initializes the lithium_t structure and sets up vm mappings
- * to access the registers.
- * Returns 0 on success, -errno on failure.
- */
-
-static int __init li_create(lithium_t *lith, unsigned long baseaddr)
-{
-	spin_lock_init(&lith->lock);
-	lith->page0 = ioremap_nocache(baseaddr + LI_PAGE0_OFFSET, PAGE_SIZE);
-	lith->page1 = ioremap_nocache(baseaddr + LI_PAGE1_OFFSET, PAGE_SIZE);
-	lith->page2 = ioremap_nocache(baseaddr + LI_PAGE2_OFFSET, PAGE_SIZE);
-	if (!lith->page0 || !lith->page1 || !lith->page2) {
-		li_destroy(lith);
-		return -ENOMEM;
-	}
-	return 0;
 }
 
 /*
@@ -1446,11 +1447,11 @@ typedef enum vwsnd_port_flags {
  *
  *	port->lock protects: hwstate, flags, swb_[iu]_avail.
  *
- *	devc->io_mutex protects: swstate, sw_*, swb_[iu]_idx.
+ *	devc->io_sema protects: swstate, sw_*, swb_[iu]_idx.
  *
  *	everything else is only written by open/release or
  *	pcm_{setup,shutdown}(), which are serialized by a
- *	combination of devc->open_mutex and devc->io_mutex.
+ *	combination of devc->open_sema and devc->io_sema.
  */
 
 typedef struct vwsnd_port {
@@ -1506,9 +1507,9 @@ typedef struct vwsnd_dev {
 	int		audio_minor;	/* minor number of audio device */
 	int		mixer_minor;	/* minor number of mixer device */
 
-	struct mutex open_mutex;
-	struct mutex io_mutex;
-	struct mutex mix_mutex;
+	struct semaphore open_sema;
+	struct semaphore io_sema;
+	struct semaphore mix_sema;
 	mode_t		open_mode;
 	wait_queue_head_t open_wait;
 
@@ -1632,7 +1633,7 @@ static __inline__ unsigned int swb_inc_i(vwsnd_port_t *port, int inc)
  * mode-setting ioctls have been done, but before the first I/O is
  * done.
  *
- * Locking: called with devc->io_mutex held.
+ * Locking: called with devc->io_sema held.
  *
  * Returns 0 on success, -errno on failure.
  */
@@ -2318,9 +2319,9 @@ static ssize_t vwsnd_audio_read(struct file *file,
 	vwsnd_dev_t *devc = file->private_data;
 	ssize_t ret;
 
-	mutex_lock(&devc->io_mutex);
+	down(&devc->io_sema);
 	ret = vwsnd_audio_do_read(file, buffer, count, ppos);
-	mutex_unlock(&devc->io_mutex);
+	up(&devc->io_sema);
 	return ret;
 }
 
@@ -2393,9 +2394,9 @@ static ssize_t vwsnd_audio_write(struct file *file,
 	vwsnd_dev_t *devc = file->private_data;
 	ssize_t ret;
 
-	mutex_lock(&devc->io_mutex);
+	down(&devc->io_sema);
 	ret = vwsnd_audio_do_write(file, buffer, count, ppos);
-	mutex_unlock(&devc->io_mutex);
+	up(&devc->io_sema);
 	return ret;
 }
 
@@ -2890,9 +2891,9 @@ static int vwsnd_audio_ioctl(struct inode *inode,
 	vwsnd_dev_t *devc = (vwsnd_dev_t *) file->private_data;
 	int ret;
 
-	mutex_lock(&devc->io_mutex);
+	down(&devc->io_sema);
 	ret = vwsnd_audio_do_ioctl(inode, file, cmd, arg);
-	mutex_unlock(&devc->io_mutex);
+	up(&devc->io_sema);
 	return ret;
 }
 
@@ -2928,9 +2929,9 @@ static int vwsnd_audio_open(struct inode *inode, struct file *file)
 		return -ENODEV;
 	}
 
-	mutex_lock(&devc->open_mutex);
+	down(&devc->open_sema);
 	while (devc->open_mode & file->f_mode) {
-		mutex_unlock(&devc->open_mutex);
+		up(&devc->open_sema);
 		if (file->f_flags & O_NONBLOCK) {
 			DEC_USE_COUNT;
 			return -EBUSY;
@@ -2940,10 +2941,10 @@ static int vwsnd_audio_open(struct inode *inode, struct file *file)
 			DEC_USE_COUNT;
 			return -ERESTARTSYS;
 		}
-		mutex_lock(&devc->open_mutex);
+		down(&devc->open_sema);
 	}
 	devc->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
-	mutex_unlock(&devc->open_mutex);
+	up(&devc->open_sema);
 
 	/* get default sample format from minor number. */
 
@@ -2959,7 +2960,7 @@ static int vwsnd_audio_open(struct inode *inode, struct file *file)
 
 	/* Initialize vwsnd_ports. */
 
-	mutex_lock(&devc->io_mutex);
+	down(&devc->io_sema);
 	{
 		if (file->f_mode & FMODE_READ) {
 			devc->rport.swstate        = SW_INITIAL;
@@ -2986,7 +2987,7 @@ static int vwsnd_audio_open(struct inode *inode, struct file *file)
 			devc->wport.frag_count     = 0;
 		}
 	}
-	mutex_unlock(&devc->io_mutex);
+	up(&devc->io_sema);
 
 	file->private_data = devc;
 	DBGRV();
@@ -3004,7 +3005,7 @@ static int vwsnd_audio_release(struct inode *inode, struct file *file)
 	int err = 0;
 
 	lock_kernel();
-	mutex_lock(&devc->io_mutex);
+	down(&devc->io_sema);
 	{
 		DBGEV("(inode=0x%p, file=0x%p)\n", inode, file);
 
@@ -3021,13 +3022,13 @@ static int vwsnd_audio_release(struct inode *inode, struct file *file)
 		if (wport)
 			wport->swstate = SW_OFF;
 	}
-	mutex_unlock(&devc->io_mutex);
+	up(&devc->io_sema);
 
-	mutex_lock(&devc->open_mutex);
+	down(&devc->open_sema);
 	{
 		devc->open_mode &= ~file->f_mode;
 	}
-	mutex_unlock(&devc->open_mutex);
+	up(&devc->open_sema);
 	wake_up(&devc->open_wait);
 	DEC_USE_COUNT;
 	DBGR();
@@ -3212,7 +3213,7 @@ static int vwsnd_mixer_ioctl(struct inode *ioctl,
 
 	DBGEV("(devc=0x%p, cmd=0x%x, arg=0x%lx)\n", devc, cmd, arg);
 
-	mutex_lock(&devc->mix_mutex);
+	down(&devc->mix_sema);
 	{
 		if ((cmd & ~nrmask) == MIXER_READ(0))
 			retval = mixer_read_ioctl(devc, nr, (void __user *) arg);
@@ -3221,7 +3222,7 @@ static int vwsnd_mixer_ioctl(struct inode *ioctl,
 		else
 			retval = -EINVAL;
 	}
-	mutex_unlock(&devc->mix_mutex);
+	up(&devc->mix_sema);
 	return retval;
 }
 
@@ -3375,9 +3376,9 @@ static int __init attach_vwsnd(struct address_info *hw_config)
 
 	/* Initialize as much of *devc as possible */
 
-	mutex_init(&devc->open_mutex);
-	mutex_init(&devc->io_mutex);
-	mutex_init(&devc->mix_mutex);
+	init_MUTEX(&devc->open_sema);
+	init_MUTEX(&devc->io_sema);
+	init_MUTEX(&devc->mix_sema);
 	devc->open_mode = 0;
 	spin_lock_init(&devc->rport.lock);
 	init_waitqueue_head(&devc->rport.queue);

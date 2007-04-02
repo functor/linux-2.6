@@ -19,8 +19,6 @@
 
 extern volatile u8 *dec_rtc_base;
 
-#define ARCH_RTC_LOCATION
-
 #define RTC_PORT(x)	CPHYSADDR((long)dec_rtc_base)
 #define RTC_IO_EXTENT	dec_kn_slot_size
 #define RTC_IOMAPPED	0

@@ -6,7 +6,7 @@
  *  Copyright (C) 2002,2003 Andi Kleen <ak@suse.de>
  */
 
-#include <linux/module.h>
+#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -23,7 +23,6 @@
 #include <linux/bootmem.h>
 #include <linux/proc_fs.h>
 #include <linux/pci.h>
-#include <linux/poison.h>
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
 #include <linux/memory_hotplug.h>
@@ -42,6 +41,8 @@
 #include <asm/proto.h>
 #include <asm/smp.h>
 #include <asm/sections.h>
+#include <asm/dma-mapping.h>
+#include <asm/swiotlb.h>
 
 #ifndef Dprintk
 #define Dprintk(x...)
@@ -71,7 +72,7 @@ void show_mem(void)
 	show_free_areas();
 	printk(KERN_INFO "Free swap:       %6ldkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
 
-	for_each_online_pgdat(pgdat) {
+	for_each_pgdat(pgdat) {
                for (i = 0; i < pgdat->node_spanned_pages; ++i) {
 			page = pfn_to_page(pgdat->node_start_pfn + i);
 			total++;
@@ -89,9 +90,11 @@ void show_mem(void)
 	printk(KERN_INFO "%lu pages swap cached\n",cached);
 }
 
+/* References to section boundaries */
+
 int after_bootmem;
 
-static __init void *spp_getpage(void)
+static void *spp_getpage(void)
 { 
 	void *ptr;
 	if (after_bootmem)
@@ -105,7 +108,7 @@ static __init void *spp_getpage(void)
 	return ptr;
 } 
 
-static __init void set_pte_phys(unsigned long vaddr,
+static void set_pte_phys(unsigned long vaddr,
 			 unsigned long phys, pgprot_t prot)
 {
 	pgd_t *pgd;
@@ -154,8 +157,7 @@ static __init void set_pte_phys(unsigned long vaddr,
 }
 
 /* NOTE: this is meant to be run only at boot */
-void __init 
-__set_fixmap (enum fixed_addresses idx, unsigned long phys, pgprot_t prot)
+void __set_fixmap (enum fixed_addresses idx, unsigned long phys, pgprot_t prot)
 {
 	unsigned long address = __fix_to_virt(idx);
 
@@ -223,33 +225,6 @@ static __meminit void unmap_low_page(int i)
 	ti->allocated = 0; 
 } 
 
-/* Must run before zap_low_mappings */
-__init void *early_ioremap(unsigned long addr, unsigned long size)
-{
-	unsigned long map = round_down(addr, LARGE_PAGE_SIZE); 
-
-	/* actually usually some more */
-	if (size >= LARGE_PAGE_SIZE) { 
-		printk("SMBIOS area too long %lu\n", size);
-		return NULL;
-	}
-	set_pmd(temp_mappings[0].pmd,  __pmd(map | _KERNPG_TABLE | _PAGE_PSE));
-	map += LARGE_PAGE_SIZE;
-	set_pmd(temp_mappings[1].pmd,  __pmd(map | _KERNPG_TABLE | _PAGE_PSE));
-	__flush_tlb();
-	return temp_mappings[0].address + (addr & (LARGE_PAGE_SIZE-1));
-}
-
-/* To avoid virtual aliases later */
-__init void early_iounmap(void *addr, unsigned long size)
-{
-	if ((void *)round_down((unsigned long)addr, LARGE_PAGE_SIZE) != temp_mappings[0].address)
-		printk("early_iounmap: bad address %p\n", addr);
-	set_pmd(temp_mappings[0].pmd, __pmd(0));
-	set_pmd(temp_mappings[1].pmd, __pmd(0));
-	__flush_tlb();
-}
-
 static void __meminit
 phys_pmd_init(pmd_t *pmd, unsigned long address, unsigned long end)
 {
@@ -258,10 +233,9 @@ phys_pmd_init(pmd_t *pmd, unsigned long address, unsigned long end)
 	for (i = 0; i < PTRS_PER_PMD; pmd++, i++, address += PMD_SIZE) {
 		unsigned long entry;
 
-		if (address >= end) {
-			if (!after_bootmem)
-				for (; i < PTRS_PER_PMD; i++, pmd++)
-					set_pmd(pmd, __pmd(0));
+		if (address > end) {
+			for (; i < PTRS_PER_PMD; i++, pmd++)
+				set_pmd(pmd, __pmd(0));
 			break;
 		}
 		entry = _PAGE_NX|_PAGE_PSE|_KERNPG_TABLE|_PAGE_GLOBAL|address;
@@ -303,7 +277,7 @@ static void __meminit phys_pud_init(pud_t *pud, unsigned long address, unsigned 
 		if (paddr >= end)
 			break;
 
-		if (!after_bootmem && !e820_any_mapped(paddr, paddr+PUD_SIZE, 0)) {
+		if (!after_bootmem && !e820_mapped(paddr, paddr+PUD_SIZE, 0)) {
 			set_pud(pud, __pud(0)); 
 			continue;
 		} 
@@ -337,6 +311,9 @@ static void __init find_early_table_space(unsigned long end)
 
 	table_start >>= PAGE_SHIFT;
 	table_end = table_start;
+
+	early_printk("kernel direct mapping tables up to %lx @ %lx-%lx\n",
+		end, table_start << PAGE_SHIFT, table_end << PAGE_SHIFT);
 }
 
 /* Setup the direct mapping of the physical memory at PAGE_OFFSET.
@@ -367,7 +344,7 @@ void __meminit init_memory_mapping(unsigned long start, unsigned long end)
 		pud_t *pud;
 
 		if (after_bootmem)
-			pud = pud_offset(pgd, start & PGDIR_MASK);
+			pud = pud_offset_k(pgd, __PAGE_OFFSET);
 		else
 			pud = alloc_low_page(&map, &pud_phys);
 
@@ -500,61 +477,24 @@ void __init clear_kernel_mapping(unsigned long address, unsigned long size)
 	__flush_tlb_all();
 } 
 
-static inline int page_is_ram (unsigned long pagenr)
-{
-	int i;
-
-	for (i = 0; i < e820.nr_map; i++) {
-		unsigned long addr, end;
-
-		if (e820.map[i].type != E820_RAM)	/* not usable memory */
-			continue;
-		/*
-		 * !!!FIXME!!! Some BIOSen report areas as RAM that
-		 * are not. Notably the 640->1Mb area. We need a sanity
-		 * check here.
-		 */
-		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
-		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
-		if  ((pagenr >= addr) && (pagenr < end))
-			return 1;
-	}
-	return 0;
-}
-
 /*
  * Memory hotplug specific functions
+ * These are only for non-NUMA machines right now.
  */
+#ifdef CONFIG_MEMORY_HOTPLUG
+
 void online_page(struct page *page)
 {
 	ClearPageReserved(page);
-	init_page_count(page);
+	set_page_count(page, 1);
 	__free_page(page);
 	totalram_pages++;
 	num_physpages++;
 }
 
-#ifdef CONFIG_MEMORY_HOTPLUG
-/*
- * XXX: memory_add_physaddr_to_nid() is to find node id from physical address
- *	via probe interface of sysfs. If acpi notifies hot-add event, then it
- *	can tell node id by searching dsdt. But, probe interface doesn't have
- *	node id. So, return 0 as node id at this time.
- */
-#ifdef CONFIG_NUMA
-int memory_add_physaddr_to_nid(u64 start)
+int add_memory(u64 start, u64 size)
 {
-	return 0;
-}
-#endif
-
-/*
- * Memory is added always to NORMAL zone. This means you will never get
- * additional DMA/DMA32 memory.
- */
-int arch_add_memory(int nid, u64 start, u64 size)
-{
-	struct pglist_data *pgdat = NODE_DATA(nid);
+	struct pglist_data *pgdat = NODE_DATA(0);
 	struct zone *zone = pgdat->node_zones + MAX_NR_ZONES-2;
 	unsigned long start_pfn = start >> PAGE_SHIFT;
 	unsigned long nr_pages = size >> PAGE_SHIFT;
@@ -571,7 +511,7 @@ error:
 	printk("%s: Problem encountered in __add_pages!\n", __func__);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(arch_add_memory);
+EXPORT_SYMBOL_GPL(add_memory);
 
 int remove_memory(u64 start, u64 size)
 {
@@ -579,55 +519,7 @@ int remove_memory(u64 start, u64 size)
 }
 EXPORT_SYMBOL_GPL(remove_memory);
 
-#else /* CONFIG_MEMORY_HOTPLUG */
-/*
- * Memory Hotadd without sparsemem. The mem_maps have been allocated in advance,
- * just online the pages.
- */
-int __add_pages(struct zone *z, unsigned long start_pfn, unsigned long nr_pages)
-{
-	int err = -EIO;
-	unsigned long pfn;
-	unsigned long total = 0, mem = 0;
-	for (pfn = start_pfn; pfn < start_pfn + nr_pages; pfn++) {
-		if (pfn_valid(pfn)) {
-			online_page(pfn_to_page(pfn));
-			err = 0;
-			mem++;
-		}
-		total++;
-	}
-	if (!err) {
-		z->spanned_pages += total;
-		z->present_pages += mem;
-		z->zone_pgdat->node_spanned_pages += total;
-		z->zone_pgdat->node_present_pages += mem;
-	}
-	return err;
-}
-#endif /* CONFIG_MEMORY_HOTPLUG */
-
-/*
- * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
- * valid. The argument is a physical page number.
- *
- *
- * On x86-64, access has to be given to the first megabyte of ram because that area
- * contains bios code and data regions used by X and dosemu and similar apps.
- * Access has to be given to non-kernel-ram areas as well, these contain the PCI
- * mmio resources as well as potential bios/acpi data regions.
- */
-int devmem_is_allowed(unsigned long pagenr)
-{
-	if (pagenr <= 256)
-		return 1;
-	if (!page_is_ram(pagenr))
-		return 1;
-	return 0;
-}
-
-
-EXPORT_SYMBOL_GPL(page_is_ram);
+#endif
 
 static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel, kcore_modules,
 			 kcore_vsyscall;
@@ -636,7 +528,10 @@ void __init mem_init(void)
 {
 	long codesize, reservedpages, datasize, initsize;
 
-	pci_iommu_alloc();
+#ifdef CONFIG_SWIOTLB
+	pci_swiotlb_init();
+#endif
+	no_iommu_init();
 
 	/* How many end-of-memory variables you have, grandma! */
 	max_low_pfn = end_pfn;
@@ -690,44 +585,34 @@ void __init mem_init(void)
 #endif
 }
 
-void free_init_pages(char *what, unsigned long begin, unsigned long end)
+void free_initmem(void)
 {
 	unsigned long addr;
 
-	if (begin >= end)
-		return;
-
-	printk(KERN_INFO "Freeing %s: %ldk freed\n", what, (end - begin) >> 10);
-	for (addr = begin; addr < end; addr += PAGE_SIZE) {
+	addr = (unsigned long)(&__init_begin);
+	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
-		init_page_count(virt_to_page(addr));
-		memset((void *)(addr & ~(PAGE_SIZE-1)),
-			POISON_FREE_INITMEM, PAGE_SIZE);
+		set_page_count(virt_to_page(addr), 1);
+		memset((void *)(addr & ~(PAGE_SIZE-1)), 0xcc, PAGE_SIZE); 
 		free_page(addr);
 		totalram_pages++;
 	}
-}
-
-void free_initmem(void)
-{
-	memset(__initdata_begin, POISON_FREE_INITDATA,
-		__initdata_end - __initdata_begin);
-	free_init_pages("unused kernel memory",
-			(unsigned long)(&__init_begin),
-			(unsigned long)(&__init_end));
+	memset(__initdata_begin, 0xba, __initdata_end - __initdata_begin);
+	printk ("Freeing unused kernel memory: %luk freed\n", (__init_end - __init_begin) >> 10);
 }
 
 #ifdef CONFIG_DEBUG_RODATA
 
+extern char __start_rodata, __end_rodata;
 void mark_rodata_ro(void)
 {
-	unsigned long addr = (unsigned long)__start_rodata;
+	unsigned long addr = (unsigned long)&__start_rodata;
 
-	for (; addr < (unsigned long)__end_rodata; addr += PAGE_SIZE)
+	for (; addr < (unsigned long)&__end_rodata; addr += PAGE_SIZE)
 		change_page_attr_addr(addr, 1, PAGE_KERNEL_RO);
 
 	printk ("Write protecting the kernel read-only data: %luk\n",
-			(__end_rodata - __start_rodata) >> 10);
+			(&__end_rodata - &__start_rodata) >> 10);
 
 	/*
 	 * change_page_attr_addr() requires a global_flush_tlb() call after it.
@@ -742,7 +627,15 @@ void mark_rodata_ro(void)
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
-	free_init_pages("initrd memory", start, end);
+	if (start >= end)
+		return;
+	printk ("Freeing initrd memory: %ldk freed\n", (end - start) >> 10);
+	for (; start < end; start += PAGE_SIZE) {
+		ClearPageReserved(virt_to_page(start));
+		set_page_count(virt_to_page(start), 1);
+		free_page(start);
+		totalram_pages++;
+	}
 }
 #endif
 

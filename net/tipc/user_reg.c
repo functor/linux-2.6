@@ -65,9 +65,9 @@ struct tipc_user {
 #define MAX_USERID 64
 #define USER_LIST_SIZE ((MAX_USERID + 1) * sizeof(struct tipc_user))
 
-static struct tipc_user *users = NULL;
+static struct tipc_user *users = 0;
 static u32 next_free_user = MAX_USERID + 1;
-static DEFINE_SPINLOCK(reg_lock);
+static spinlock_t reg_lock = SPIN_LOCK_UNLOCKED;
 
 /**
  * reg_init - create TIPC user registry (but don't activate it)
@@ -82,8 +82,9 @@ static int reg_init(void)
 	
 	spin_lock_bh(&reg_lock);
 	if (!users) {
-		users = kzalloc(USER_LIST_SIZE, GFP_ATOMIC);
+		users = (struct tipc_user *)kmalloc(USER_LIST_SIZE, GFP_ATOMIC);
 		if (users) {
+			memset(users, 0, USER_LIST_SIZE);
 			for (i = 1; i <= MAX_USERID; i++) {
 				users[i].next = i - 1;
 			}
@@ -148,7 +149,7 @@ void tipc_reg_stop(void)
 			reg_callback(&users[id]);
 	}
 	kfree(users);
-	users = NULL;
+	users = 0;
 }
 
 /**

@@ -11,6 +11,7 @@
  *  Copyright (C) 1998-2000 Anton Blanchard (anton@samba.org)
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/ptrace.h>
@@ -153,11 +154,9 @@ void (*sparc_init_timers)(irqreturn_t (*)(int, void *,struct pt_regs *)) =
 struct irqaction static_irqaction[MAX_STATIC_ALLOC];
 int static_irq_count;
 
-struct {
-	struct irqaction *action;
-	int flags;
-} sparc_irq[NR_IRQS];
-#define SPARC_IRQ_INPROGRESS 1
+struct irqaction *irq_action[NR_IRQS] = {
+	[0 ... (NR_IRQS-1)] = NULL
+};
 
 /* Used to protect the IRQ action lists */
 DEFINE_SPINLOCK(irq_action_lock);
@@ -178,24 +177,25 @@ int show_interrupts(struct seq_file *p, void *v)
 	}
 	spin_lock_irqsave(&irq_action_lock, flags);
 	if (i < NR_IRQS) {
-		action = sparc_irq[i].action;
+	        action = *(i + irq_action);
 		if (!action) 
 			goto out_unlock;
 		seq_printf(p, "%3d: ", i);
 #ifndef CONFIG_SMP
 		seq_printf(p, "%10u ", kstat_irqs(i));
 #else
-		for_each_online_cpu(j) {
-			seq_printf(p, "%10u ",
-				    kstat_cpu(j).irqs[i]);
+		for (j = 0; j < NR_CPUS; j++) {
+			if (cpu_online(j))
+				seq_printf(p, "%10u ",
+				    kstat_cpu(cpu_logical_map(j)).irqs[i]);
 		}
 #endif
 		seq_printf(p, " %c %s",
-			(action->flags & IRQF_DISABLED) ? '+' : ' ',
+			(action->flags & SA_INTERRUPT) ? '+' : ' ',
 			action->name);
 		for (action=action->next; action; action = action->next) {
 			seq_printf(p, ",%s %s",
-				(action->flags & IRQF_DISABLED) ? " +" : "",
+				(action->flags & SA_INTERRUPT) ? " +" : "",
 				action->name);
 		}
 		seq_putc(p, '\n');
@@ -208,7 +208,7 @@ out_unlock:
 void free_irq(unsigned int irq, void *dev_id)
 {
 	struct irqaction * action;
-	struct irqaction **actionp;
+	struct irqaction * tmp = NULL;
         unsigned long flags;
 	unsigned int cpu_irq;
 	
@@ -226,8 +226,7 @@ void free_irq(unsigned int irq, void *dev_id)
 
 	spin_lock_irqsave(&irq_action_lock, flags);
 
-	actionp = &sparc_irq[cpu_irq].action;
-	action = *actionp;
+	action = *(cpu_irq + irq_action);
 
 	if (!action->handler) {
 		printk("Trying to free free IRQ%d\n",irq);
@@ -237,13 +236,13 @@ void free_irq(unsigned int irq, void *dev_id)
 		for (; action; action = action->next) {
 			if (action->dev_id == dev_id)
 				break;
-			actionp = &action->next;
+			tmp = action;
 		}
 		if (!action) {
 			printk("Trying to free free shared IRQ%d\n",irq);
 			goto out_unlock;
 		}
-	} else if (action->flags & IRQF_SHARED) {
+	} else if (action->flags & SA_SHIRQ) {
 		printk("Trying to free shared IRQ%d with NULL device ID\n", irq);
 		goto out_unlock;
 	}
@@ -256,8 +255,11 @@ void free_irq(unsigned int irq, void *dev_id)
 		       irq, action->name);
 		goto out_unlock;
 	}
-
-	*actionp = action->next;
+	
+	if (action && tmp)
+		tmp->next = action->next;
+	else
+		*(cpu_irq + irq_action) = action->next;
 
 	spin_unlock_irqrestore(&irq_action_lock, flags);
 
@@ -267,7 +269,7 @@ void free_irq(unsigned int irq, void *dev_id)
 
 	kfree(action);
 
-	if (!sparc_irq[cpu_irq].action)
+	if (!(*(cpu_irq + irq_action)))
 		disable_irq(irq);
 
 out_unlock:
@@ -286,11 +288,8 @@ EXPORT_SYMBOL(free_irq);
 #ifdef CONFIG_SMP
 void synchronize_irq(unsigned int irq)
 {
-	unsigned int cpu_irq;
-
-	cpu_irq = irq & (NR_IRQS - 1);
-	while (sparc_irq[cpu_irq].flags & SPARC_IRQ_INPROGRESS)
-		cpu_relax();
+	printk("synchronize_irq says: implement me!\n");
+	BUG();
 }
 #endif /* SMP */
 
@@ -301,7 +300,7 @@ void unexpected_irq(int irq, void *dev_id, struct pt_regs * regs)
 	unsigned int cpu_irq;
 	
 	cpu_irq = irq & (NR_IRQS - 1);
-	action = sparc_irq[cpu_irq].action;
+	action = *(cpu_irq + irq_action);
 
         printk("IO device interrupt, irq = %d\n", irq);
         printk("PC = %08lx NPC = %08lx FP=%08lx\n", regs->pc, 
@@ -329,11 +328,10 @@ void handler_irq(int irq, struct pt_regs * regs)
 	disable_pil_irq(irq);
 #ifdef CONFIG_SMP
 	/* Only rotate on lower priority IRQ's (scsi, ethernet, etc.). */
-	if((sparc_cpu_model==sun4m) && (irq < 10))
+	if(irq < 10)
 		smp4m_irq_rotate(cpu);
 #endif
-	action = sparc_irq[irq].action;
-	sparc_irq[irq].flags |= SPARC_IRQ_INPROGRESS;
+	action = *(irq + irq_action);
 	kstat_cpu(cpu).irqs[irq]++;
 	do {
 		if (!action || !action->handler)
@@ -341,7 +339,6 @@ void handler_irq(int irq, struct pt_regs * regs)
 		action->handler(irq, action->dev_id, regs);
 		action = action->next;
 	} while (action);
-	sparc_irq[irq].flags &= ~SPARC_IRQ_INPROGRESS;
 	enable_pil_irq(irq);
 	irq_exit();
 }
@@ -393,11 +390,11 @@ int request_fast_irq(unsigned int irq,
 
 	spin_lock_irqsave(&irq_action_lock, flags);
 
-	action = sparc_irq[cpu_irq].action;
+	action = *(cpu_irq + irq_action);
 	if(action) {
-		if(action->flags & IRQF_SHARED)
+		if(action->flags & SA_SHIRQ)
 			panic("Trying to register fast irq when already shared.\n");
-		if(irqflags & IRQF_SHARED)
+		if(irqflags & SA_SHIRQ)
 			panic("Trying to register fast irq as shared.\n");
 
 		/* Anyway, someone already owns it so cannot be made fast. */
@@ -456,7 +453,7 @@ int request_fast_irq(unsigned int irq,
 	action->dev_id = NULL;
 	action->next = NULL;
 
-	sparc_irq[cpu_irq].action = action;
+	*(cpu_irq + irq_action) = action;
 
 	enable_irq(irq);
 
@@ -471,7 +468,7 @@ int request_irq(unsigned int irq,
 		irqreturn_t (*handler)(int, void *, struct pt_regs *),
 		unsigned long irqflags, const char * devname, void *dev_id)
 {
-	struct irqaction * action, **actionp;
+	struct irqaction * action, *tmp = NULL;
 	unsigned long flags;
 	unsigned int cpu_irq;
 	int ret;
@@ -494,20 +491,20 @@ int request_irq(unsigned int irq,
 	    
 	spin_lock_irqsave(&irq_action_lock, flags);
 
-	actionp = &sparc_irq[cpu_irq].action;
-	action = *actionp;
+	action = *(cpu_irq + irq_action);
 	if (action) {
-		if (!(action->flags & IRQF_SHARED) || !(irqflags & IRQF_SHARED)) {
+		if ((action->flags & SA_SHIRQ) && (irqflags & SA_SHIRQ)) {
+			for (tmp = action; tmp->next; tmp = tmp->next);
+		} else {
 			ret = -EBUSY;
 			goto out_unlock;
 		}
-		if ((action->flags & IRQF_DISABLED) != (irqflags & IRQF_DISABLED)) {
+		if ((action->flags & SA_INTERRUPT) ^ (irqflags & SA_INTERRUPT)) {
 			printk("Attempt to mix fast and slow interrupts on IRQ%d denied\n", irq);
 			ret = -EBUSY;
 			goto out_unlock;
-		}
-		for ( ; action; action = *actionp)
-			actionp = &action->next;
+		}   
+		action = NULL;		/* Or else! */
 	}
 
 	/* If this is flagged as statically allocated then we use our
@@ -536,7 +533,10 @@ int request_irq(unsigned int irq,
 	action->next = NULL;
 	action->dev_id = dev_id;
 
-	*actionp = action;
+	if (tmp)
+		tmp->next = action;
+	else
+		*(cpu_irq + irq_action) = action;
 
 	enable_irq(irq);
 

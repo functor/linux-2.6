@@ -44,23 +44,19 @@
 
 struct _zone *tipc_zone_create(u32 addr)
 {
-	struct _zone *z_ptr;
+	struct _zone *z_ptr = 0;
 	u32 z_num;
 
-	if (!tipc_addr_domain_valid(addr)) {
-		err("Zone creation failed, invalid domain 0x%x\n", addr);
-		return NULL;
-	}
+	if (!tipc_addr_domain_valid(addr))
+		return 0;
 
-	z_ptr = kzalloc(sizeof(*z_ptr), GFP_ATOMIC);
-	if (!z_ptr) {
-		warn("Zone creation failed, insufficient memory\n");
-		return NULL;
+	z_ptr = (struct _zone *)kmalloc(sizeof(*z_ptr), GFP_ATOMIC);
+	if (z_ptr != NULL) {
+		memset(z_ptr, 0, sizeof(*z_ptr));
+		z_num = tipc_zone(addr);
+		z_ptr->addr = tipc_addr(z_num, 0, 0);
+		tipc_net.zones[z_num] = z_ptr;
 	}
-
-	z_num = tipc_zone(addr);
-	z_ptr->addr = tipc_addr(z_num, 0, 0);
-	tipc_net.zones[z_num] = z_ptr;
 	return z_ptr;
 }
 
@@ -118,10 +114,10 @@ struct node *tipc_zone_select_remote_node(struct _zone *z_ptr, u32 addr, u32 ref
 	u32 c_num;
 
 	if (!z_ptr)
-		return NULL;
+		return 0;
 	c_ptr = z_ptr->clusters[tipc_cluster(addr)];
 	if (!c_ptr)
-		return NULL;
+		return 0;
 	n_ptr = tipc_cltr_select_node(c_ptr, ref);
 	if (n_ptr)
 		return n_ptr;
@@ -130,12 +126,12 @@ struct node *tipc_zone_select_remote_node(struct _zone *z_ptr, u32 addr, u32 ref
 	for (c_num = 1; c_num <= tipc_max_clusters; c_num++) {
 		c_ptr = z_ptr->clusters[c_num];
 		if (!c_ptr)
-			return NULL;
+			return 0;
 		n_ptr = tipc_cltr_select_node(c_ptr, ref);
 		if (n_ptr)
 			return n_ptr;
 	}
-	return NULL;
+	return 0;
 }
 
 u32 tipc_zone_select_router(struct _zone *z_ptr, u32 addr, u32 ref)

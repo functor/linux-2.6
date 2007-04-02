@@ -21,6 +21,7 @@
  *		Mike McLagan	:	Routing by source
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
@@ -115,7 +116,6 @@ sr_failed:
 
 too_many_hops:
         /* Tell the sender its packet died... */
-        IP_INC_STATS_BH(IPSTATS_MIB_INHDRERRORS);
         icmp_send(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
 drop:
 	kfree_skb(skb);

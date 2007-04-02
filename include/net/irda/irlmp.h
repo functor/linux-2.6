@@ -29,6 +29,7 @@
 
 #include <asm/param.h>  /* for HZ */
 
+#include <linux/config.h>
 #include <linux/types.h>
 
 #include <net/irda/irda.h>
@@ -111,7 +112,7 @@ struct lsap_cb {
 
 	struct timer_list watchdog_timer;
 
-	LSAP_STATE      lsap_state;  /* Connection state */
+	IRLMP_STATE     lsap_state;  /* Connection state */
 	notify_t        notify;      /* Indication/Confirm entry points */
 	struct qos_info qos;         /* QoS for this connection */
 

@@ -7,6 +7,8 @@
  *  1997-11-28  Modified for POSIX.1b signals by Richard Henderson
  *  2000-06-20  Pentium III FXSR, SSE support by Gareth Hughes
  *  2000-2002   x86-64 support by Andi Kleen
+ * 
+ *  $Id: signal.c,v 1.18 2001/10/17 22:30:37 ak Exp $
  */
 
 #include <linux/sched.h>
@@ -36,6 +38,37 @@ int ia32_setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
                sigset_t *set, struct pt_regs * regs); 
 int ia32_setup_frame(int sig, struct k_sigaction *ka,
             sigset_t *set, struct pt_regs * regs); 
+
+asmlinkage long
+sys_rt_sigsuspend(sigset_t __user *unewset, size_t sigsetsize, struct pt_regs *regs)
+{
+	sigset_t saveset, newset;
+
+	/* XXX: Don't preclude handling different sized sigset_t's.  */
+	if (sigsetsize != sizeof(sigset_t))
+		return -EINVAL;
+
+	if (copy_from_user(&newset, unewset, sizeof(newset)))
+		return -EFAULT;
+	sigdelsetmask(&newset, ~_BLOCKABLE);
+
+	spin_lock_irq(&current->sighand->siglock);
+	saveset = current->blocked;
+	current->blocked = newset;
+	recalc_sigpending();
+	spin_unlock_irq(&current->sighand->siglock);
+#ifdef DEBUG_SIG
+	printk("rt_sigsuspend savset(%lx) newset(%lx) regs(%p) rip(%lx)\n",
+		saveset, newset, regs, regs->rip);
+#endif 
+	regs->rax = -EINTR;
+	while (1) {
+		current->state = TASK_INTERRUPTIBLE;
+		schedule();
+		if (do_signal(regs, &saveset))
+			return -EINTR;
+	}
+}
 
 asmlinkage long
 sys_sigaltstack(const stack_t __user *uss, stack_t __user *uoss,
@@ -206,6 +239,7 @@ get_stack(struct k_sigaction *ka, struct pt_regs *regs, unsigned long size)
 	rsp = regs->rsp - 128;
 
 	/* This is the X/Open sanctioned signal stack switching.  */
+	/* RED-PEN: redzone on that stack? */
 	if (ka->sa.sa_flags & SA_ONSTACK) {
 		if (sas_ss_flags(rsp) == 0)
 			rsp = current->sas_ss_sp + current->sas_ss_size;
@@ -310,11 +344,11 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		current->comm, current->pid, frame, regs->rip, frame->pretcode);
 #endif
 
-	return 0;
+	return 1;
 
 give_sigsegv:
 	force_sigsegv(sig, current);
-	return -EFAULT;
+	return 0;
 }
 
 /*
@@ -377,7 +411,7 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 #endif
 	ret = setup_rt_frame(sig, ka, info, oldset, regs);
 
-	if (ret == 0) {
+	if (ret) {
 		spin_lock_irq(&current->sighand->siglock);
 		sigorsets(&current->blocked,&current->blocked,&ka->sa.sa_mask);
 		if (!(ka->sa.sa_flags & SA_NODEFER))
@@ -394,12 +428,11 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
  * mistake.
  */
-static void do_signal(struct pt_regs *regs)
+int do_signal(struct pt_regs *regs, sigset_t *oldset)
 {
 	struct k_sigaction ka;
 	siginfo_t info;
 	int signr;
-	sigset_t *oldset;
 
 	/*
 	 * We want the common case to go fast, which
@@ -408,11 +441,12 @@ static void do_signal(struct pt_regs *regs)
 	 * if so.
 	 */
 	if (!user_mode(regs))
-		return;
+		return 1;
 
-	if (test_thread_flag(TIF_RESTORE_SIGMASK))
-		oldset = &current->saved_sigmask;
-	else
+	if (try_to_freeze())
+		goto no_signal;
+
+	if (!oldset)
 		oldset = &current->blocked;
 
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
@@ -426,46 +460,31 @@ static void do_signal(struct pt_regs *regs)
 			set_debugreg(current->thread.debugreg7, 7);
 
 		/* Whee!  Actually deliver the signal.  */
-		if (handle_signal(signr, &info, &ka, oldset, regs) == 0) {
-			/* a signal was successfully delivered; the saved
-			 * sigmask will have been stored in the signal frame,
-			 * and will be restored by sigreturn, so we can simply
-			 * clear the TIF_RESTORE_SIGMASK flag */
-			clear_thread_flag(TIF_RESTORE_SIGMASK);
-		}
-		return;
+		return handle_signal(signr, &info, &ka, oldset, regs);
 	}
 
+ no_signal:
 	/* Did we come from a system call? */
 	if ((long)regs->orig_rax >= 0) {
 		/* Restart the system call - no handlers present */
 		long res = regs->rax;
-		switch (res) {
-		case -ERESTARTNOHAND:
-		case -ERESTARTSYS:
-		case -ERESTARTNOINTR:
+		if (res == -ERESTARTNOHAND ||
+		    res == -ERESTARTSYS ||
+		    res == -ERESTARTNOINTR) {
 			regs->rax = regs->orig_rax;
 			regs->rip -= 2;
-			break;
-		case -ERESTART_RESTARTBLOCK:
+		}
+		if (regs->rax == (unsigned long)-ERESTART_RESTARTBLOCK) {
 			regs->rax = test_thread_flag(TIF_IA32) ?
 					__NR_ia32_restart_syscall :
 					__NR_restart_syscall;
 			regs->rip -= 2;
-			break;
 		}
 	}
-
-	/* if there's no signal to deliver, we just put the saved sigmask
-	   back. */
-	if (test_thread_flag(TIF_RESTORE_SIGMASK)) {
-		clear_thread_flag(TIF_RESTORE_SIGMASK);
-		sigprocmask(SIG_SETMASK, &current->saved_sigmask, NULL);
-	}
+	return 0;
 }
 
-void
-do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
+void do_notify_resume(struct pt_regs *regs, sigset_t *oldset, __u32 thread_info_flags)
 {
 #ifdef DEBUG_SIG
 	printk("do_notify_resume flags:%x rip:%lx rsp:%lx caller:%lx pending:%lx\n",
@@ -479,8 +498,8 @@ do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
 	}
 
 	/* deal with pending signal delivery */
-	if (thread_info_flags & (_TIF_SIGPENDING|_TIF_RESTORE_SIGMASK))
-		do_signal(regs);
+	if (thread_info_flags & _TIF_SIGPENDING)
+		do_signal(regs,oldset);
 }
 
 void signal_fault(struct pt_regs *regs, void __user *frame, char *where)

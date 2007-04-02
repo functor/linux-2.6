@@ -6,6 +6,7 @@
  * with information needed by the vt package
  */
 
+#include <linux/config.h>
 #include <linux/vt.h>
 #include <linux/kd.h>
 #include <linux/tty.h>
@@ -26,15 +27,13 @@
 
 extern void kd_mksound(unsigned int hz, unsigned int ticks);
 extern int kbd_rate(struct kbd_repeat *rep);
-extern int fg_console, last_console, want_console;
 
 /* console.c */
 
 int vc_allocate(unsigned int console);
 int vc_cons_allocated(unsigned int console);
 int vc_resize(struct vc_data *vc, unsigned int cols, unsigned int lines);
-int vc_lock_resize(struct vc_data *vc, unsigned int cols, unsigned int lines);
-void vc_deallocate(unsigned int console);
+void vc_disallocate(unsigned int console);
 void reset_palette(struct vc_data *vc);
 void do_blank_screen(int entering_gfx);
 void do_unblank_screen(int leaving_gfx);

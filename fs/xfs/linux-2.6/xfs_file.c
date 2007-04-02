@@ -21,6 +21,7 @@
 #include "xfs_inum.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
+#include "xfs_dir.h"
 #include "xfs_dir2.h"
 #include "xfs_trans.h"
 #include "xfs_dmapi.h"
@@ -31,6 +32,7 @@
 #include "xfs_alloc.h"
 #include "xfs_btree.h"
 #include "xfs_attr_sf.h"
+#include "xfs_dir_sf.h"
 #include "xfs_dir2_sf.h"
 #include "xfs_dinode.h"
 #include "xfs_inode.h"
@@ -41,13 +43,13 @@
 #include <linux/dcache.h>
 #include <linux/smp_lock.h>
 
-static struct vm_operations_struct xfs_file_vm_ops;
+static struct vm_operations_struct linvfs_file_vm_ops;
 #ifdef CONFIG_XFS_DMAPI
-static struct vm_operations_struct xfs_dmapi_file_vm_ops;
+static struct vm_operations_struct linvfs_dmapi_file_vm_ops;
 #endif
 
 STATIC inline ssize_t
-__xfs_file_read(
+__linvfs_read(
 	struct kiocb		*iocb,
 	char			__user *buf,
 	int			ioflags,
@@ -56,36 +58,41 @@ __xfs_file_read(
 {
 	struct iovec		iov = {buf, count};
 	struct file		*file = iocb->ki_filp;
-	bhv_vnode_t		*vp = vn_from_inode(file->f_dentry->d_inode);
+	vnode_t			*vp = LINVFS_GET_VP(file->f_dentry->d_inode);
+	ssize_t			rval;
 
 	BUG_ON(iocb->ki_pos != pos);
+
 	if (unlikely(file->f_flags & O_DIRECT))
 		ioflags |= IO_ISDIRECT;
-	return bhv_vop_read(vp, iocb, &iov, 1, &iocb->ki_pos, ioflags, NULL);
+	VOP_READ(vp, iocb, &iov, 1, &iocb->ki_pos, ioflags, NULL, rval);
+	return rval;
 }
 
+
 STATIC ssize_t
-xfs_file_aio_read(
+linvfs_aio_read(
 	struct kiocb		*iocb,
 	char			__user *buf,
 	size_t			count,
 	loff_t			pos)
 {
-	return __xfs_file_read(iocb, buf, IO_ISAIO, count, pos);
+	return __linvfs_read(iocb, buf, IO_ISAIO, count, pos);
 }
 
 STATIC ssize_t
-xfs_file_aio_read_invis(
+linvfs_aio_read_invis(
 	struct kiocb		*iocb,
 	char			__user *buf,
 	size_t			count,
 	loff_t			pos)
 {
-	return __xfs_file_read(iocb, buf, IO_ISAIO|IO_INVIS, count, pos);
+	return __linvfs_read(iocb, buf, IO_ISAIO|IO_INVIS, count, pos);
 }
+
 
 STATIC inline ssize_t
-__xfs_file_write(
+__linvfs_write(
 	struct kiocb	*iocb,
 	const char	__user *buf,
 	int		ioflags,
@@ -95,36 +102,41 @@ __xfs_file_write(
 	struct iovec	iov = {(void __user *)buf, count};
 	struct file	*file = iocb->ki_filp;
 	struct inode	*inode = file->f_mapping->host;
-	bhv_vnode_t	*vp = vn_from_inode(inode);
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	ssize_t		rval;
 
 	BUG_ON(iocb->ki_pos != pos);
 	if (unlikely(file->f_flags & O_DIRECT))
 		ioflags |= IO_ISDIRECT;
-	return bhv_vop_write(vp, iocb, &iov, 1, &iocb->ki_pos, ioflags, NULL);
+
+	VOP_WRITE(vp, iocb, &iov, 1, &iocb->ki_pos, ioflags, NULL, rval);
+	return rval;
 }
 
+
 STATIC ssize_t
-xfs_file_aio_write(
+linvfs_aio_write(
 	struct kiocb		*iocb,
 	const char		__user *buf,
 	size_t			count,
 	loff_t			pos)
 {
-	return __xfs_file_write(iocb, buf, IO_ISAIO, count, pos);
+	return __linvfs_write(iocb, buf, IO_ISAIO, count, pos);
 }
 
 STATIC ssize_t
-xfs_file_aio_write_invis(
+linvfs_aio_write_invis(
 	struct kiocb		*iocb,
 	const char		__user *buf,
 	size_t			count,
 	loff_t			pos)
 {
-	return __xfs_file_write(iocb, buf, IO_ISAIO|IO_INVIS, count, pos);
+	return __linvfs_write(iocb, buf, IO_ISAIO|IO_INVIS, count, pos);
 }
+
 
 STATIC inline ssize_t
-__xfs_file_readv(
+__linvfs_readv(
 	struct file		*file,
 	const struct iovec 	*iov,
 	int			ioflags,
@@ -132,8 +144,8 @@ __xfs_file_readv(
 	loff_t			*ppos)
 {
 	struct inode	*inode = file->f_mapping->host;
-	bhv_vnode_t	*vp = vn_from_inode(inode);
-	struct kiocb	kiocb;
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	struct		kiocb kiocb;
 	ssize_t		rval;
 
 	init_sync_kiocb(&kiocb, file);
@@ -141,35 +153,35 @@ __xfs_file_readv(
 
 	if (unlikely(file->f_flags & O_DIRECT))
 		ioflags |= IO_ISDIRECT;
-	rval = bhv_vop_read(vp, &kiocb, iov, nr_segs,
-				&kiocb.ki_pos, ioflags, NULL);
+	VOP_READ(vp, &kiocb, iov, nr_segs, &kiocb.ki_pos, ioflags, NULL, rval);
 
 	*ppos = kiocb.ki_pos;
 	return rval;
 }
 
 STATIC ssize_t
-xfs_file_readv(
+linvfs_readv(
 	struct file		*file,
 	const struct iovec 	*iov,
 	unsigned long		nr_segs,
 	loff_t			*ppos)
 {
-	return __xfs_file_readv(file, iov, 0, nr_segs, ppos);
+	return __linvfs_readv(file, iov, 0, nr_segs, ppos);
 }
 
 STATIC ssize_t
-xfs_file_readv_invis(
+linvfs_readv_invis(
 	struct file		*file,
 	const struct iovec 	*iov,
 	unsigned long		nr_segs,
 	loff_t			*ppos)
 {
-	return __xfs_file_readv(file, iov, IO_INVIS, nr_segs, ppos);
+	return __linvfs_readv(file, iov, IO_INVIS, nr_segs, ppos);
 }
 
+
 STATIC inline ssize_t
-__xfs_file_writev(
+__linvfs_writev(
 	struct file		*file,
 	const struct iovec 	*iov,
 	int			ioflags,
@@ -177,8 +189,8 @@ __xfs_file_writev(
 	loff_t			*ppos)
 {
 	struct inode	*inode = file->f_mapping->host;
-	bhv_vnode_t	*vp = vn_from_inode(inode);
-	struct kiocb	kiocb;
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	struct		kiocb kiocb;
 	ssize_t		rval;
 
 	init_sync_kiocb(&kiocb, file);
@@ -186,179 +198,139 @@ __xfs_file_writev(
 	if (unlikely(file->f_flags & O_DIRECT))
 		ioflags |= IO_ISDIRECT;
 
-	rval = bhv_vop_write(vp, &kiocb, iov, nr_segs,
-				 &kiocb.ki_pos, ioflags, NULL);
+	VOP_WRITE(vp, &kiocb, iov, nr_segs, &kiocb.ki_pos, ioflags, NULL, rval);
 
 	*ppos = kiocb.ki_pos;
 	return rval;
 }
 
+
 STATIC ssize_t
-xfs_file_writev(
+linvfs_writev(
 	struct file		*file,
 	const struct iovec 	*iov,
 	unsigned long		nr_segs,
 	loff_t			*ppos)
 {
-	return __xfs_file_writev(file, iov, 0, nr_segs, ppos);
+	return __linvfs_writev(file, iov, 0, nr_segs, ppos);
 }
 
 STATIC ssize_t
-xfs_file_writev_invis(
+linvfs_writev_invis(
 	struct file		*file,
 	const struct iovec 	*iov,
 	unsigned long		nr_segs,
 	loff_t			*ppos)
 {
-	return __xfs_file_writev(file, iov, IO_INVIS, nr_segs, ppos);
+	return __linvfs_writev(file, iov, IO_INVIS, nr_segs, ppos);
 }
 
 STATIC ssize_t
-xfs_file_sendfile(
+linvfs_sendfile(
 	struct file		*filp,
-	loff_t			*pos,
+	loff_t			*ppos,
 	size_t			count,
 	read_actor_t		actor,
 	void			*target)
 {
-	return bhv_vop_sendfile(vn_from_inode(filp->f_dentry->d_inode),
-				filp, pos, 0, count, actor, target, NULL);
+	vnode_t			*vp = LINVFS_GET_VP(filp->f_dentry->d_inode);
+	ssize_t			rval;
+
+	VOP_SENDFILE(vp, filp, ppos, 0, count, actor, target, NULL, rval);
+	return rval;
 }
 
-STATIC ssize_t
-xfs_file_sendfile_invis(
-	struct file		*filp,
-	loff_t			*pos,
-	size_t			count,
-	read_actor_t		actor,
-	void			*target)
-{
-	return bhv_vop_sendfile(vn_from_inode(filp->f_dentry->d_inode),
-				filp, pos, IO_INVIS, count, actor, target, NULL);
-}
-
-STATIC ssize_t
-xfs_file_splice_read(
-	struct file		*infilp,
-	loff_t			*ppos,
-	struct pipe_inode_info	*pipe,
-	size_t			len,
-	unsigned int		flags)
-{
-	return bhv_vop_splice_read(vn_from_inode(infilp->f_dentry->d_inode),
-				   infilp, ppos, pipe, len, flags, 0, NULL);
-}
-
-STATIC ssize_t
-xfs_file_splice_read_invis(
-	struct file		*infilp,
-	loff_t			*ppos,
-	struct pipe_inode_info	*pipe,
-	size_t			len,
-	unsigned int		flags)
-{
-	return bhv_vop_splice_read(vn_from_inode(infilp->f_dentry->d_inode),
-				   infilp, ppos, pipe, len, flags, IO_INVIS,
-				   NULL);
-}
-
-STATIC ssize_t
-xfs_file_splice_write(
-	struct pipe_inode_info	*pipe,
-	struct file		*outfilp,
-	loff_t			*ppos,
-	size_t			len,
-	unsigned int		flags)
-{
-	return bhv_vop_splice_write(vn_from_inode(outfilp->f_dentry->d_inode),
-				    pipe, outfilp, ppos, len, flags, 0, NULL);
-}
-
-STATIC ssize_t
-xfs_file_splice_write_invis(
-	struct pipe_inode_info	*pipe,
-	struct file		*outfilp,
-	loff_t			*ppos,
-	size_t			len,
-	unsigned int		flags)
-{
-	return bhv_vop_splice_write(vn_from_inode(outfilp->f_dentry->d_inode),
-				    pipe, outfilp, ppos, len, flags, IO_INVIS,
-				    NULL);
-}
 
 STATIC int
-xfs_file_open(
+linvfs_open(
 	struct inode	*inode,
 	struct file	*filp)
 {
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	int		error;
+
 	if (!(filp->f_flags & O_LARGEFILE) && i_size_read(inode) > MAX_NON_LFS)
 		return -EFBIG;
-	return -bhv_vop_open(vn_from_inode(inode), NULL);
+
+	ASSERT(vp);
+	VOP_OPEN(vp, NULL, error);
+	return -error;
 }
 
-STATIC int
-xfs_file_close(
-	struct file	*filp,
-	fl_owner_t	id)
-{
-	return -bhv_vop_close(vn_from_inode(filp->f_dentry->d_inode), 0,
-				file_count(filp) > 1 ? L_FALSE : L_TRUE, NULL);
-}
 
 STATIC int
-xfs_file_release(
+linvfs_release(
 	struct inode	*inode,
 	struct file	*filp)
 {
-	bhv_vnode_t	*vp = vn_from_inode(inode);
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	int		error = 0;
 
 	if (vp)
-		return -bhv_vop_release(vp);
-	return 0;
+		VOP_RELEASE(vp, error);
+	return -error;
 }
 
+
 STATIC int
-xfs_file_fsync(
+linvfs_fsync(
 	struct file	*filp,
 	struct dentry	*dentry,
 	int		datasync)
 {
-	bhv_vnode_t	*vp = vn_from_inode(dentry->d_inode);
+	struct inode	*inode = dentry->d_inode;
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	int		error;
 	int		flags = FSYNC_WAIT;
 
 	if (datasync)
 		flags |= FSYNC_DATA;
-	if (VN_TRUNC(vp))
-		VUNTRUNCATE(vp);
-	return -bhv_vop_fsync(vp, flags, NULL, (xfs_off_t)0, (xfs_off_t)-1);
+
+	ASSERT(vp);
+	VOP_FSYNC(vp, flags, NULL, (xfs_off_t)0, (xfs_off_t)-1, error);
+	return -error;
 }
 
+/*
+ * linvfs_readdir maps to VOP_READDIR().
+ * We need to build a uio, cred, ...
+ */
+
+#define nextdp(dp)      ((struct xfs_dirent *)((char *)(dp) + (dp)->d_reclen))
+
 #ifdef CONFIG_XFS_DMAPI
+
 STATIC struct page *
-xfs_vm_nopage(
+linvfs_filemap_nopage(
 	struct vm_area_struct	*area,
 	unsigned long		address,
 	int			*type)
 {
 	struct inode	*inode = area->vm_file->f_dentry->d_inode;
-	bhv_vnode_t	*vp = vn_from_inode(inode);
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	xfs_mount_t	*mp = XFS_VFSTOM(vp->v_vfsp);
+	int		error;
 
 	ASSERT_ALWAYS(vp->v_vfsp->vfs_flag & VFS_DMI);
-	if (XFS_SEND_MMAP(XFS_VFSTOM(vp->v_vfsp), area, 0))
+
+	error = XFS_SEND_MMAP(mp, area, 0);
+	if (error)
 		return NULL;
+
 	return filemap_nopage(area, address, type);
 }
+
 #endif /* CONFIG_XFS_DMAPI */
 
+
 STATIC int
-xfs_file_readdir(
+linvfs_readdir(
 	struct file	*filp,
 	void		*dirent,
 	filldir_t	filldir)
 {
 	int		error = 0;
-	bhv_vnode_t	*vp = vn_from_inode(filp->f_dentry->d_inode);
+	vnode_t		*vp;
 	uio_t		uio;
 	iovec_t		iov;
 	int		eof = 0;
@@ -367,6 +339,9 @@ xfs_file_readdir(
 	size_t		rlen = PAGE_CACHE_SIZE;
 	xfs_off_t	start_offset, curr_offset;
 	xfs_dirent_t	*dbp = NULL;
+
+	vp = LINVFS_GET_VP(filp->f_dentry->d_inode);
+	ASSERT(vp);
 
 	/* Try fairly hard to get memory */
 	do {
@@ -393,7 +368,7 @@ xfs_file_readdir(
 
 		start_offset = uio.uio_offset;
 
-		error = bhv_vop_readdir(vp, &uio, NULL, &eof);
+		VOP_READDIR(vp, &uio, NULL, &eof, error);
 		if ((uio.uio_offset == start_offset) || error) {
 			size = 0;
 			break;
@@ -412,7 +387,7 @@ xfs_file_readdir(
 			}
 			size -= dbp->d_reclen;
 			curr_offset = (loff_t)dbp->d_off /* & 0x7fffffff */;
-			dbp = (xfs_dirent_t *)((char *)dbp + dbp->d_reclen);
+			dbp = nextdp(dbp);
 		}
 	}
 done:
@@ -427,33 +402,43 @@ done:
 	return -error;
 }
 
+
 STATIC int
-xfs_file_mmap(
+linvfs_file_mmap(
 	struct file	*filp,
 	struct vm_area_struct *vma)
 {
-	vma->vm_ops = &xfs_file_vm_ops;
+	struct inode	*ip = filp->f_dentry->d_inode;
+	vnode_t		*vp = LINVFS_GET_VP(ip);
+	vattr_t		va = { .va_mask = XFS_AT_UPDATIME };
+	int		error;
+
+	vma->vm_ops = &linvfs_file_vm_ops;
 
 #ifdef CONFIG_XFS_DMAPI
-	if (vn_from_inode(filp->f_dentry->d_inode)->v_vfsp->vfs_flag & VFS_DMI)
-		vma->vm_ops = &xfs_dmapi_file_vm_ops;
+	if (vp->v_vfsp->vfs_flag & VFS_DMI) {
+		vma->vm_ops = &linvfs_dmapi_file_vm_ops;
+	}
 #endif /* CONFIG_XFS_DMAPI */
 
-	file_accessed(filp);
+	VOP_SETATTR(vp, &va, XFS_AT_UPDATIME, NULL, error);
+	if (!error)
+		vn_revalidate(vp);	/* update Linux inode flags */
 	return 0;
 }
 
+
 STATIC long
-xfs_file_ioctl(
+linvfs_ioctl(
 	struct file	*filp,
 	unsigned int	cmd,
-	unsigned long	p)
+	unsigned long	arg)
 {
 	int		error;
-	struct inode	*inode = filp->f_dentry->d_inode;
-	bhv_vnode_t	*vp = vn_from_inode(inode);
+	struct inode *inode = filp->f_dentry->d_inode;
+	vnode_t		*vp = LINVFS_GET_VP(inode);
 
-	error = bhv_vop_ioctl(vp, inode, filp, 0, cmd, (void __user *)p);
+	VOP_IOCTL(vp, inode, filp, 0, cmd, (void __user *)arg, error);
 	VMODIFY(vp);
 
 	/* NOTE:  some of the ioctl's return positive #'s as a
@@ -466,16 +451,17 @@ xfs_file_ioctl(
 }
 
 STATIC long
-xfs_file_ioctl_invis(
+linvfs_ioctl_invis(
 	struct file	*filp,
 	unsigned int	cmd,
-	unsigned long	p)
+	unsigned long	arg)
 {
 	int		error;
-	struct inode	*inode = filp->f_dentry->d_inode;
-	bhv_vnode_t	*vp = vn_from_inode(inode);
+	struct inode *inode = filp->f_dentry->d_inode;
+	vnode_t		*vp = LINVFS_GET_VP(inode);
 
-	error = bhv_vop_ioctl(vp, inode, filp, IO_INVIS, cmd, (void __user *)p);
+	ASSERT(vp);
+	VOP_IOCTL(vp, inode, filp, IO_INVIS, cmd, (void __user *)arg, error);
 	VMODIFY(vp);
 
 	/* NOTE:  some of the ioctl's return positive #'s as a
@@ -490,11 +476,11 @@ xfs_file_ioctl_invis(
 #ifdef CONFIG_XFS_DMAPI
 #ifdef HAVE_VMOP_MPROTECT
 STATIC int
-xfs_vm_mprotect(
+linvfs_mprotect(
 	struct vm_area_struct *vma,
 	unsigned int	newflags)
 {
-	bhv_vnode_t	*vp = vn_from_inode(vma->vm_file->f_dentry->d_inode);
+	vnode_t		*vp = LINVFS_GET_VP(vma->vm_file->f_dentry->d_inode);
 	int		error = 0;
 
 	if (vp->v_vfsp->vfs_flag & VFS_DMI) {
@@ -517,94 +503,93 @@ xfs_vm_mprotect(
  * it back online.
  */
 STATIC int
-xfs_file_open_exec(
+linvfs_open_exec(
 	struct inode	*inode)
 {
-	bhv_vnode_t	*vp = vn_from_inode(inode);
+	vnode_t		*vp = LINVFS_GET_VP(inode);
+	xfs_mount_t	*mp = XFS_VFSTOM(vp->v_vfsp);
+	int		error = 0;
+	xfs_inode_t	*ip;
 
-	if (unlikely(vp->v_vfsp->vfs_flag & VFS_DMI)) {
-		xfs_mount_t	*mp = XFS_VFSTOM(vp->v_vfsp);
-		xfs_inode_t	*ip = xfs_vtoi(vp);
-
-		if (!ip)
-			return -EINVAL;
-		if (DM_EVENT_ENABLED(vp->v_vfsp, ip, DM_EVENT_READ))
-			return -XFS_SEND_DATA(mp, DM_EVENT_READ, vp,
+	if (vp->v_vfsp->vfs_flag & VFS_DMI) {
+		ip = xfs_vtoi(vp);
+		if (!ip) {
+			error = -EINVAL;
+			goto open_exec_out;
+		}
+		if (DM_EVENT_ENABLED(vp->v_vfsp, ip, DM_EVENT_READ)) {
+			error = -XFS_SEND_DATA(mp, DM_EVENT_READ, vp,
 					       0, 0, 0, NULL);
+		}
 	}
-	return 0;
+open_exec_out:
+	return error;
 }
 #endif /* HAVE_FOP_OPEN_EXEC */
 
-const struct file_operations xfs_file_operations = {
+struct file_operations linvfs_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= do_sync_read,
 	.write		= do_sync_write,
-	.readv		= xfs_file_readv,
-	.writev		= xfs_file_writev,
-	.aio_read	= xfs_file_aio_read,
-	.aio_write	= xfs_file_aio_write,
-	.sendfile	= xfs_file_sendfile,
-	.splice_read	= xfs_file_splice_read,
-	.splice_write	= xfs_file_splice_write,
-	.unlocked_ioctl	= xfs_file_ioctl,
+	.readv		= linvfs_readv,
+	.writev		= linvfs_writev,
+	.aio_read	= linvfs_aio_read,
+	.aio_write	= linvfs_aio_write,
+	.sendfile	= linvfs_sendfile,
+	.unlocked_ioctl	= linvfs_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl	= xfs_file_compat_ioctl,
+	.compat_ioctl	= linvfs_compat_ioctl,
 #endif
-	.mmap		= xfs_file_mmap,
-	.open		= xfs_file_open,
-	.flush		= xfs_file_close,
-	.release	= xfs_file_release,
-	.fsync		= xfs_file_fsync,
+	.mmap		= linvfs_file_mmap,
+	.open		= linvfs_open,
+	.release	= linvfs_release,
+	.fsync		= linvfs_fsync,
 #ifdef HAVE_FOP_OPEN_EXEC
-	.open_exec	= xfs_file_open_exec,
+	.open_exec	= linvfs_open_exec,
 #endif
 };
 
-const struct file_operations xfs_invis_file_operations = {
+struct file_operations linvfs_invis_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= do_sync_read,
 	.write		= do_sync_write,
-	.readv		= xfs_file_readv_invis,
-	.writev		= xfs_file_writev_invis,
-	.aio_read	= xfs_file_aio_read_invis,
-	.aio_write	= xfs_file_aio_write_invis,
-	.sendfile	= xfs_file_sendfile_invis,
-	.splice_read	= xfs_file_splice_read_invis,
-	.splice_write	= xfs_file_splice_write_invis,
-	.unlocked_ioctl	= xfs_file_ioctl_invis,
+	.readv		= linvfs_readv_invis,
+	.writev		= linvfs_writev_invis,
+	.aio_read	= linvfs_aio_read_invis,
+	.aio_write	= linvfs_aio_write_invis,
+	.sendfile	= linvfs_sendfile,
+	.unlocked_ioctl	= linvfs_ioctl_invis,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl	= xfs_file_compat_invis_ioctl,
+	.compat_ioctl	= linvfs_compat_invis_ioctl,
 #endif
-	.mmap		= xfs_file_mmap,
-	.open		= xfs_file_open,
-	.flush		= xfs_file_close,
-	.release	= xfs_file_release,
-	.fsync		= xfs_file_fsync,
+	.mmap		= linvfs_file_mmap,
+	.open		= linvfs_open,
+	.release	= linvfs_release,
+	.fsync		= linvfs_fsync,
 };
 
 
-const struct file_operations xfs_dir_file_operations = {
+struct file_operations linvfs_dir_operations = {
 	.read		= generic_read_dir,
-	.readdir	= xfs_file_readdir,
-	.unlocked_ioctl	= xfs_file_ioctl,
+	.readdir	= linvfs_readdir,
+	.unlocked_ioctl	= linvfs_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl	= xfs_file_compat_ioctl,
+	.compat_ioctl	= linvfs_compat_ioctl,
 #endif
-	.fsync		= xfs_file_fsync,
+	.fsync		= linvfs_fsync,
 };
 
-static struct vm_operations_struct xfs_file_vm_ops = {
+static struct vm_operations_struct linvfs_file_vm_ops = {
 	.nopage		= filemap_nopage,
 	.populate	= filemap_populate,
 };
 
 #ifdef CONFIG_XFS_DMAPI
-static struct vm_operations_struct xfs_dmapi_file_vm_ops = {
-	.nopage		= xfs_vm_nopage,
+static struct vm_operations_struct linvfs_dmapi_file_vm_ops = {
+	.nopage		= linvfs_filemap_nopage,
 	.populate	= filemap_populate,
 #ifdef HAVE_VMOP_MPROTECT
-	.mprotect	= xfs_vm_mprotect,
+	.mprotect	= linvfs_mprotect,
 #endif
 };
 #endif /* CONFIG_XFS_DMAPI */

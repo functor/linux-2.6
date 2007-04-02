@@ -29,6 +29,7 @@
  *  with this program; if not, write  to the Free Software Foundation, Inc.,
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
+#include <linux/config.h>
 #include <linux/init.h>
 
 #include <linux/errno.h>
@@ -75,6 +76,8 @@ static int jmr3927_gen_iack(void)
 #endif
 }
 #endif
+
+extern asmlinkage void jmr3927_IRQ(void);
 
 #define irc_dlevel	0
 #define irc_elevel	1
@@ -259,7 +262,7 @@ void jmr3927_spurious(struct pt_regs *regs)
 	       regs->cp0_cause, regs->cp0_epc, regs->regs[31]);
 }
 
-asmlinkage void plat_irq_dispatch(struct pt_regs *regs)
+void jmr3927_irc_irqdispatch(struct pt_regs *regs)
 {
 	int irq;
 
@@ -395,6 +398,8 @@ void __init arch_init_irq(void)
 
 	jmr3927_irq_init(NR_ISA_IRQS);
 
+	set_except_vector(0, jmr3927_IRQ);
+
 	/* setup irq space */
 	add_tb_irq_space(&jmr3927_isac_irqspace);
 	add_tb_irq_space(&jmr3927_ioc_irqspace);
@@ -416,7 +421,7 @@ void __init arch_init_irq(void)
 	set_c0_status(ST0_IM);	/* IE bit is still 0. */
 }
 
-static struct irq_chip jmr3927_irq_controller = {
+static hw_irq_controller jmr3927_irq_controller = {
 	.typename = "jmr3927_irq",
 	.startup = jmr3927_irq_startup,
 	.shutdown = jmr3927_irq_shutdown,
@@ -434,7 +439,7 @@ void jmr3927_irq_init(u32 irq_base)
 		irq_desc[i].status = IRQ_DISABLED;
 		irq_desc[i].action = NULL;
 		irq_desc[i].depth = 1;
-		irq_desc[i].chip = &jmr3927_irq_controller;
+		irq_desc[i].handler = &jmr3927_irq_controller;
 	}
 
 	jmr3927_irq_base = irq_base;

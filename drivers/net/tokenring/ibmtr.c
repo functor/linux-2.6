@@ -845,8 +845,6 @@ static int tok_init_card(struct net_device *dev)
 	struct tok_info *ti;
 	short PIOaddr;
 	unsigned long i;
-	wait_queue_t __wait;
-	init_waitqueue_entry(&__wait, current);
 
 	PIOaddr = dev->base_addr;
 	ti = (struct tok_info *) dev->priv;
@@ -858,18 +856,13 @@ static int tok_init_card(struct net_device *dev)
 
 	schedule_timeout_uninterruptible(TR_RST_TIME); /* wait 50ms */
 
-	add_wait_queue(&ti->wait_for_reset, &__wait);
-	set_current_state(TASK_UNINTERRUPTIBLE);
 	outb(0, PIOaddr + ADAPTRESETREL);
 #ifdef ENABLE_PAGING
 	if (ti->page_mask)
 		writeb(SRPR_ENABLE_PAGING,ti->mmio+ACA_OFFSET+ACA_RW+SRPR_EVEN);
 #endif
 	writeb(INT_ENABLE, ti->mmio + ACA_OFFSET + ACA_SET + ISRP_EVEN);
-	#warning pci posting bug
-	i = schedule_timeout(4 * HZ);
-	current->state = TASK_RUNNING;
-	remove_wait_queue(&ti->wait_for_reset, &__wait);
+	i = sleep_on_timeout(&ti->wait_for_reset, 4 * HZ);
 	return i? 0 : -EAGAIN;
 }
 

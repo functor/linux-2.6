@@ -9,6 +9,7 @@
  * more details.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -39,9 +40,10 @@ static void *prism2_wep_init(int keyidx)
 {
 	struct prism2_wep_data *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_ATOMIC);
+	priv = kmalloc(sizeof(*priv), GFP_ATOMIC);
 	if (priv == NULL)
 		goto fail;
+	memset(priv, 0, sizeof(*priv));
 	priv->key_idx = keyidx;
 
 	priv->tfm = crypto_alloc_tfm("arc4", 0);
@@ -74,8 +76,7 @@ static void prism2_wep_deinit(void *priv)
 }
 
 /* Add WEP IV/key info to a frame that has at least 4 bytes of headroom */
-static int prism2_wep_build_iv(struct sk_buff *skb, int hdr_len,
-			       u8 *key, int keylen, void *priv)
+static int prism2_wep_build_iv(struct sk_buff *skb, int hdr_len, void *priv)
 {
 	struct prism2_wep_data *wep = priv;
 	u32 klen, len;
@@ -130,7 +131,7 @@ static int prism2_wep_encrypt(struct sk_buff *skb, int hdr_len, void *priv)
 		return -1;
 	
 	/* add the IV to the frame */
-	if (prism2_wep_build_iv(skb, hdr_len, NULL, 0, priv))
+	if (prism2_wep_build_iv(skb, hdr_len, priv))
 		return -1;
 	
 	/* Copy the IV into the first 3 bytes of the key */

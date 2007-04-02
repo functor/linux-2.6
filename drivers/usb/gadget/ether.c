@@ -23,6 +23,7 @@
 // #define DEBUG 1
 // #define VERBOSE
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
@@ -48,7 +49,7 @@
 #include <asm/unaligned.h>
 
 #include <linux/usb_ch9.h>
-#include <linux/usb/cdc.h>
+#include <linux/usb_cdc.h>
 #include <linux/usb_gadget.h>
 
 #include <linux/random.h>
@@ -100,9 +101,9 @@ static const char driver_desc [] = DRIVER_DESC;
 
 /* CDC and RNDIS support the same host-chosen outgoing packet filters. */
 #define	DEFAULT_FILTER	(USB_CDC_PACKET_TYPE_BROADCAST \
-			|USB_CDC_PACKET_TYPE_ALL_MULTICAST \
-			|USB_CDC_PACKET_TYPE_PROMISCUOUS \
-			|USB_CDC_PACKET_TYPE_DIRECTED)
+ 			|USB_CDC_PACKET_TYPE_ALL_MULTICAST \
+ 			|USB_CDC_PACKET_TYPE_PROMISCUOUS \
+ 			|USB_CDC_PACKET_TYPE_DIRECTED)
 
 
 /*-------------------------------------------------------------------------*/
@@ -117,8 +118,6 @@ struct eth_dev {
 	struct usb_ep		*in_ep, *out_ep, *status_ep;
 	const struct usb_endpoint_descriptor
 				*in, *out, *status;
-
-	spinlock_t		req_lock;
 	struct list_head	tx_reqs, rx_reqs;
 
 	struct net_device	*net;
@@ -183,37 +182,33 @@ struct eth_dev {
  * parameters are in UTF-8 (superset of ASCII's 7 bit characters).
  */
 
-static ushort idVendor;
+static ushort __initdata idVendor;
 module_param(idVendor, ushort, S_IRUGO);
 MODULE_PARM_DESC(idVendor, "USB Vendor ID");
 
-static ushort idProduct;
+static ushort __initdata idProduct;
 module_param(idProduct, ushort, S_IRUGO);
 MODULE_PARM_DESC(idProduct, "USB Product ID");
 
-static ushort bcdDevice;
+static ushort __initdata bcdDevice;
 module_param(bcdDevice, ushort, S_IRUGO);
 MODULE_PARM_DESC(bcdDevice, "USB Device version (BCD)");
 
-static char *iManufacturer;
+static char *__initdata iManufacturer;
 module_param(iManufacturer, charp, S_IRUGO);
 MODULE_PARM_DESC(iManufacturer, "USB Manufacturer string");
 
-static char *iProduct;
+static char *__initdata iProduct;
 module_param(iProduct, charp, S_IRUGO);
 MODULE_PARM_DESC(iProduct, "USB Product string");
 
-static char *iSerialNumber;
-module_param(iSerialNumber, charp, S_IRUGO);
-MODULE_PARM_DESC(iSerialNumber, "SerialNumber");
-
 /* initial value, changed by "ifconfig usb0 hw ether xx:xx:xx:xx:xx:xx" */
-static char *dev_addr;
+static char *__initdata dev_addr;
 module_param(dev_addr, charp, S_IRUGO);
 MODULE_PARM_DESC(dev_addr, "Device Ethernet Address");
 
 /* this address is invisible to ifconfig */
-static char *host_addr;
+static char *__initdata host_addr;
 module_param(host_addr, charp, S_IRUGO);
 MODULE_PARM_DESC(host_addr, "Host Ethernet Address");
 
@@ -255,14 +250,6 @@ MODULE_PARM_DESC(host_addr, "Host Ethernet Address");
 #endif
 
 #ifdef CONFIG_USB_GADGET_AT91
-#define DEV_CONFIG_CDC
-#endif
-
-#ifdef CONFIG_USB_GADGET_MUSBHSFC
-#define DEV_CONFIG_CDC
-#endif
-
-#ifdef CONFIG_USB_GADGET_MUSB_HDRC
 #define DEV_CONFIG_CDC
 #endif
 
@@ -319,7 +306,7 @@ static inline int rndis_active(struct eth_dev *dev)
 #define DEFAULT_QLEN	2	/* double buffering by default */
 
 /* peak bulk transfer bits-per-second */
-#define	HS_BPS		(13 * 512 * 8 * 1000 * 8)
+#define	HS_BPS 		(13 * 512 * 8 * 1000 * 8)
 #define	FS_BPS		(19 *  64 * 1 * 1000 * 8)
 
 #ifdef CONFIG_USB_GADGET_DUALSPEED
@@ -408,7 +395,6 @@ static inline int BITRATE(struct usb_gadget *g)
 #define STRING_CDC			7
 #define STRING_SUBSET			8
 #define STRING_RNDIS			9
-#define STRING_SERIALNUMBER		10
 
 /* holds our biggest descriptor (or RNDIS response) */
 #define USB_BUFSIZ	256
@@ -467,7 +453,7 @@ eth_config = {
 };
 
 #ifdef	CONFIG_USB_ETH_RNDIS
-static struct usb_config_descriptor
+static struct usb_config_descriptor 
 rndis_config = {
 	.bLength =              sizeof rndis_config,
 	.bDescriptorType =      USB_DT_CONFIG,
@@ -512,7 +498,7 @@ static const struct usb_interface_descriptor
 rndis_control_intf = {
 	.bLength =              sizeof rndis_control_intf,
 	.bDescriptorType =      USB_DT_INTERFACE,
-
+	  
 	.bInterfaceNumber =     0,
 	.bNumEndpoints =        1,
 	.bInterfaceClass =      USB_CLASS_COMM,
@@ -546,20 +532,20 @@ static const struct usb_cdc_union_desc union_desc = {
 #ifdef	CONFIG_USB_ETH_RNDIS
 
 static const struct usb_cdc_call_mgmt_descriptor call_mgmt_descriptor = {
-	.bLength =		sizeof call_mgmt_descriptor,
-	.bDescriptorType =	USB_DT_CS_INTERFACE,
-	.bDescriptorSubType =	USB_CDC_CALL_MANAGEMENT_TYPE,
+	.bLength =  		sizeof call_mgmt_descriptor,
+	.bDescriptorType = 	USB_DT_CS_INTERFACE,
+	.bDescriptorSubType = 	USB_CDC_CALL_MANAGEMENT_TYPE,
 
-	.bmCapabilities =	0x00,
-	.bDataInterface =	0x01,
+	.bmCapabilities = 	0x00,
+	.bDataInterface = 	0x01,
 };
 
 static const struct usb_cdc_acm_descriptor acm_descriptor = {
-	.bLength =		sizeof acm_descriptor,
-	.bDescriptorType =	USB_DT_CS_INTERFACE,
-	.bDescriptorSubType =	USB_CDC_ACM_TYPE,
+	.bLength =  		sizeof acm_descriptor,
+	.bDescriptorType = 	USB_DT_CS_INTERFACE,
+	.bDescriptorSubType = 	USB_CDC_ACM_TYPE,
 
-	.bmCapabilities =	0x00,
+	.bmCapabilities = 	0x00,
 };
 
 #endif
@@ -596,7 +582,7 @@ static const struct usb_cdc_ether_desc ether_desc = {
  * RNDIS requires the status endpoint, since it uses that encapsulation
  * mechanism for its funky RPC scheme.
  */
-
+ 
 #define LOG2_STATUS_INTERVAL_MSEC	5	/* 1 << 5 == 32 msec */
 #define STATUS_BYTECOUNT		16	/* 8 byte header + data */
 
@@ -876,7 +862,6 @@ static inline void __init hs_subset_descriptors(void)
 
 static char				manufacturer [50];
 static char				product_desc [40] = DRIVER_DESC;
-static char				serial_number [20];
 
 #ifdef	DEV_CONFIG_CDC
 /* address that the host will use ... usually assigned at random */
@@ -887,7 +872,6 @@ static char				ethaddr [2 * ETH_ALEN + 1];
 static struct usb_string		strings [] = {
 	{ STRING_MANUFACTURER,	manufacturer, },
 	{ STRING_PRODUCT,	product_desc, },
-	{ STRING_SERIALNUMBER,	serial_number, },
 	{ STRING_DATA,		"Ethernet Data", },
 #ifdef	DEV_CONFIG_CDC
 	{ STRING_CDC,		"CDC Ethernet", },
@@ -979,7 +963,7 @@ set_ether_config (struct eth_dev *dev, gfp_t gfp_flags)
 
 		result = usb_ep_enable (dev->status_ep, dev->status);
 		if (result != 0) {
-			DEBUG (dev, "enable %s --> %d\n",
+			DEBUG (dev, "enable %s --> %d\n", 
 				dev->status_ep->name, result);
 			goto done;
 		}
@@ -1003,15 +987,15 @@ set_ether_config (struct eth_dev *dev, gfp_t gfp_flags)
 	if (!cdc_active(dev)) {
 		result = usb_ep_enable (dev->in_ep, dev->in);
 		if (result != 0) {
-			DEBUG(dev, "enable %s --> %d\n",
+			DEBUG(dev, "enable %s --> %d\n", 
 				dev->in_ep->name, result);
 			goto done;
 		}
 
 		result = usb_ep_enable (dev->out_ep, dev->out);
 		if (result != 0) {
-			DEBUG (dev, "enable %s --> %d\n",
-				dev->out_ep->name, result);
+			DEBUG (dev, "enable %s --> %d\n", 
+				dev->in_ep->name, result);
 			goto done;
 		}
 	}
@@ -1068,31 +1052,21 @@ static void eth_reset_config (struct eth_dev *dev)
 	 */
 	if (dev->in) {
 		usb_ep_disable (dev->in_ep);
-		spin_lock(&dev->req_lock);
 		while (likely (!list_empty (&dev->tx_reqs))) {
 			req = container_of (dev->tx_reqs.next,
 						struct usb_request, list);
 			list_del (&req->list);
-
-			spin_unlock(&dev->req_lock);
 			usb_ep_free_request (dev->in_ep, req);
-			spin_lock(&dev->req_lock);
 		}
-		spin_unlock(&dev->req_lock);
 	}
 	if (dev->out) {
 		usb_ep_disable (dev->out_ep);
-		spin_lock(&dev->req_lock);
 		while (likely (!list_empty (&dev->rx_reqs))) {
 			req = container_of (dev->rx_reqs.next,
 						struct usb_request, list);
 			list_del (&req->list);
-
-			spin_unlock(&dev->req_lock);
 			usb_ep_free_request (dev->out_ep, req);
-			spin_lock(&dev->req_lock);
 		}
-		spin_unlock(&dev->req_lock);
 	}
 
 	if (dev->status) {
@@ -1155,7 +1129,7 @@ eth_set_config (struct eth_dev *dev, unsigned number, gfp_t gfp_flags)
 #ifdef CONFIG_USB_GADGET_DUALSPEED
 		case USB_SPEED_HIGH:	speed = "high"; break;
 #endif
-		default:		speed = "?"; break;
+		default: 		speed = "?"; break;
 		}
 
 		dev->config = number;
@@ -1217,7 +1191,7 @@ static void issue_start_status (struct eth_dev *dev)
 	struct usb_request		*req = dev->stat_req;
 	struct usb_cdc_notification	*event;
 	int				value;
-
+ 
 	DEBUG (dev, "%s, flush old status first\n", __FUNCTION__);
 
 	/* flush old status
@@ -1279,7 +1253,7 @@ static void rndis_command_complete (struct usb_ep *ep, struct usb_request *req)
 {
 	struct eth_dev          *dev = ep->driver_data;
 	int			status;
-
+	
 	/* received RNDIS command from USB_CDC_SEND_ENCAPSULATED_COMMAND */
 	spin_lock(&dev->lock);
 	status = rndis_msg_parser (dev->rndis_config, (u8 *) req->buf);
@@ -1483,7 +1457,7 @@ done_set_intf:
 
 #endif /* DEV_CONFIG_CDC */
 
-#ifdef CONFIG_USB_ETH_RNDIS
+#ifdef CONFIG_USB_ETH_RNDIS		
 	/* RNDIS uses the CDC command encapsulation mechanism to implement
 	 * an RPC scheme, with much getting/setting of attributes by OID.
 	 */
@@ -1500,7 +1474,7 @@ done_set_intf:
 		req->complete = rndis_command_complete;
 		/* later, rndis_control_ack () sends a notification */
 		break;
-
+		
 	case USB_CDC_GET_ENCAPSULATED_RESPONSE:
 		if ((USB_DIR_IN|USB_TYPE_CLASS|USB_RECIP_INTERFACE)
 					== ctrl->bRequestType
@@ -1575,8 +1549,7 @@ static int eth_change_mtu (struct net_device *net, int new_mtu)
 {
 	struct eth_dev	*dev = netdev_priv(net);
 
-	if (dev->rndis)
-		return -EBUSY;
+	// FIXME if rndis, don't change while link's live
 
 	if (new_mtu <= ETH_HLEN || new_mtu > ETH_FRAME_LEN)
 		return -ERANGE;
@@ -1652,7 +1625,7 @@ rx_submit (struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 		DEBUG (dev, "no rx skb\n");
 		goto enomem;
 	}
-
+	
 	/* Some platforms perform better when IP packets are aligned,
 	 * but on at least one, checksumming fails otherwise.  Note:
 	 * RNDIS headers involve variable numbers of LE32 values.
@@ -1671,9 +1644,9 @@ enomem:
 	if (retval) {
 		DEBUG (dev, "rx submit --> %d\n", retval);
 		dev_kfree_skb_any (skb);
-		spin_lock(&dev->req_lock);
+		spin_lock (&dev->lock);
 		list_add (&req->list, &dev->rx_reqs);
-		spin_unlock(&dev->req_lock);
+		spin_unlock (&dev->lock);
 	}
 	return retval;
 }
@@ -1731,7 +1704,7 @@ quiesce:
 	case -EOVERFLOW:
 		dev->stats.rx_over_errors++;
 		// FALLTHROUGH
-
+	    
 	default:
 		dev->stats.rx_errors++;
 		DEBUG (dev, "rx status %d\n", status);
@@ -1742,9 +1715,8 @@ quiesce:
 		dev_kfree_skb_any (skb);
 	if (!netif_running (dev->net)) {
 clean:
-		spin_lock(&dev->req_lock);
+		/* nobody reading rx_reqs, so no dev->lock */
 		list_add (&req->list, &dev->rx_reqs);
-		spin_unlock(&dev->req_lock);
 		req = NULL;
 	}
 	if (req)
@@ -1795,18 +1767,15 @@ static int alloc_requests (struct eth_dev *dev, unsigned n, gfp_t gfp_flags)
 {
 	int status;
 
-	spin_lock(&dev->req_lock);
 	status = prealloc (&dev->tx_reqs, dev->in_ep, n, gfp_flags);
 	if (status < 0)
 		goto fail;
 	status = prealloc (&dev->rx_reqs, dev->out_ep, n, gfp_flags);
 	if (status < 0)
 		goto fail;
-	goto done;
+	return 0;
 fail:
 	DEBUG (dev, "can't alloc requests\n");
-done:
-	spin_unlock(&dev->req_lock);
 	return status;
 }
 
@@ -1816,21 +1785,21 @@ static void rx_fill (struct eth_dev *dev, gfp_t gfp_flags)
 	unsigned long		flags;
 
 	/* fill unused rxq slots with some skb */
-	spin_lock_irqsave(&dev->req_lock, flags);
+	spin_lock_irqsave (&dev->lock, flags);
 	while (!list_empty (&dev->rx_reqs)) {
 		req = container_of (dev->rx_reqs.next,
 				struct usb_request, list);
 		list_del_init (&req->list);
-		spin_unlock_irqrestore(&dev->req_lock, flags);
+		spin_unlock_irqrestore (&dev->lock, flags);
 
 		if (rx_submit (dev, req, gfp_flags) < 0) {
 			defer_kevent (dev, WORK_RX_MEMORY);
 			return;
 		}
 
-		spin_lock_irqsave(&dev->req_lock, flags);
+		spin_lock_irqsave (&dev->lock, flags);
 	}
-	spin_unlock_irqrestore(&dev->req_lock, flags);
+	spin_unlock_irqrestore (&dev->lock, flags);
 }
 
 static void eth_work (void *_dev)
@@ -1864,9 +1833,9 @@ static void tx_complete (struct usb_ep *ep, struct usb_request *req)
 	}
 	dev->stats.tx_packets++;
 
-	spin_lock(&dev->req_lock);
+	spin_lock (&dev->lock);
 	list_add (&req->list, &dev->tx_reqs);
-	spin_unlock(&dev->req_lock);
+	spin_unlock (&dev->lock);
 	dev_kfree_skb_any (skb);
 
 	atomic_dec (&dev->tx_qlen);
@@ -1912,12 +1881,12 @@ static int eth_start_xmit (struct sk_buff *skb, struct net_device *net)
 		/* ignores USB_CDC_PACKET_TYPE_DIRECTED */
 	}
 
-	spin_lock_irqsave(&dev->req_lock, flags);
+	spin_lock_irqsave (&dev->lock, flags);
 	req = container_of (dev->tx_reqs.next, struct usb_request, list);
 	list_del (&req->list);
 	if (list_empty (&dev->tx_reqs))
 		netif_stop_queue (net);
-	spin_unlock_irqrestore(&dev->req_lock, flags);
+	spin_unlock_irqrestore (&dev->lock, flags);
 
 	/* no buffer copies needed, unless the network stack did it
 	 * or the hardware can't use skb buffers.
@@ -1930,7 +1899,7 @@ static int eth_start_xmit (struct sk_buff *skb, struct net_device *net)
 				sizeof (struct rndis_packet_msg_type));
 		if (!skb_rndis)
 			goto drop;
-
+	
 		dev_kfree_skb_any (skb);
 		skb = skb_rndis;
 		rndis_add_hdr (skb);
@@ -1971,11 +1940,11 @@ static int eth_start_xmit (struct sk_buff *skb, struct net_device *net)
 drop:
 		dev->stats.tx_dropped++;
 		dev_kfree_skb_any (skb);
-		spin_lock_irqsave(&dev->req_lock, flags);
+		spin_lock_irqsave (&dev->lock, flags);
 		if (list_empty (&dev->tx_reqs))
 			netif_start_queue (net);
 		list_add (&req->list, &dev->tx_reqs);
-		spin_unlock_irqrestore(&dev->req_lock, flags);
+		spin_unlock_irqrestore (&dev->lock, flags);
 	}
 	return 0;
 }
@@ -2016,7 +1985,7 @@ static int rndis_control_ack (struct net_device *net)
 	struct eth_dev          *dev = netdev_priv(net);
 	u32                     length;
 	struct usb_request      *resp = dev->stat_req;
-
+	
 	/* in case RNDIS calls this after disconnect */
 	if (!dev->status) {
 		DEBUG (dev, "status ENODEV\n");
@@ -2036,16 +2005,16 @@ static int rndis_control_ack (struct net_device *net)
 	resp->length = 8;
 	resp->complete = rndis_control_ack_complete;
 	resp->context = dev;
-
+	
 	*((__le32 *) resp->buf) = __constant_cpu_to_le32 (1);
 	*((__le32 *) resp->buf + 1) = __constant_cpu_to_le32 (0);
-
+	
 	length = usb_ep_queue (dev->status_ep, resp, GFP_ATOMIC);
 	if (length < 0) {
 		resp->status = 0;
 		rndis_control_ack_complete (dev->status_ep, resp);
 	}
-
+	
 	return 0;
 }
 
@@ -2062,7 +2031,7 @@ static void eth_start (struct eth_dev *dev, gfp_t gfp_flags)
 	/* fill the rx queue */
 	rx_fill (dev, gfp_flags);
 
-	/* and open the tx floodgates */
+	/* and open the tx floodgates */ 
 	atomic_set (&dev->tx_qlen, 0);
 	netif_wake_queue (dev->net);
 	if (rndis_active(dev)) {
@@ -2091,7 +2060,7 @@ static int eth_stop (struct net_device *net)
 	netif_stop_queue (net);
 
 	DEBUG (dev, "stop stats: rx/tx %ld/%ld, errs %ld/%ld\n",
-		dev->stats.rx_packets, dev->stats.tx_packets,
+		dev->stats.rx_packets, dev->stats.tx_packets, 
 		dev->stats.rx_errors, dev->stats.tx_errors
 		);
 
@@ -2110,7 +2079,7 @@ static int eth_stop (struct net_device *net)
 			usb_ep_enable (dev->status_ep, dev->status);
 		}
 	}
-
+	
 	if (rndis_active(dev)) {
 		rndis_set_param_medium (dev->rndis_config,
 					NDIS_MEDIUM_802_3, 0);
@@ -2147,7 +2116,7 @@ eth_req_free (struct usb_ep *ep, struct usb_request *req)
 }
 
 
-static void /* __init_or_exit */
+static void
 eth_unbind (struct usb_gadget *gadget)
 {
 	struct eth_dev		*dev = get_gadget_data (gadget);
@@ -2174,7 +2143,7 @@ eth_unbind (struct usb_gadget *gadget)
 	set_gadget_data (gadget, NULL);
 }
 
-static u8 __devinit nibble (unsigned char c)
+static u8 __init nibble (unsigned char c)
 {
 	if (likely (isdigit (c)))
 		return c - '0';
@@ -2184,7 +2153,7 @@ static u8 __devinit nibble (unsigned char c)
 	return 0;
 }
 
-static int __devinit get_ether_addr(const char *str, u8 *dev_addr)
+static void __init get_ether_addr (const char *str, u8 *dev_addr)
 {
 	if (str) {
 		unsigned	i;
@@ -2199,13 +2168,12 @@ static int __devinit get_ether_addr(const char *str, u8 *dev_addr)
 			dev_addr [i] = num;
 		}
 		if (is_valid_ether_addr (dev_addr))
-			return 0;
+			return;
 	}
 	random_ether_addr(dev_addr);
-	return 1;
 }
 
-static int __devinit
+static int __init
 eth_bind (struct usb_gadget *gadget)
 {
 	struct eth_dev		*dev;
@@ -2300,10 +2268,6 @@ eth_bind (struct usb_gadget *gadget)
 		strlcpy (manufacturer, iManufacturer, sizeof manufacturer);
 	if (iProduct)
 		strlcpy (product_desc, iProduct, sizeof product_desc);
-	if (iSerialNumber) {
-		device_desc.iSerialNumber = STRING_SERIALNUMBER,
-		strlcpy(serial_number, iSerialNumber, sizeof serial_number);
-	}
 
 	/* all we really need is bulk IN/OUT */
 	usb_ep_autoconfig_reset (gadget);
@@ -2316,7 +2280,7 @@ autoconf_fail:
 		return -ENODEV;
 	}
 	in_ep->driver_data = in_ep;	/* claim */
-
+	
 	out_ep = usb_ep_autoconfig (gadget, &fs_sink_desc);
 	if (!out_ep)
 		goto autoconf_fail;
@@ -2353,9 +2317,6 @@ autoconf_fail:
 		hs_subset_descriptors();
 	}
 
-	device_desc.bMaxPacketSize0 = gadget->ep0->maxpacket;
-	usb_gadget_set_selfpowered (gadget);
-
 	/* For now RNDIS is always a second config */
 	if (rndis)
 		device_desc.bNumConfigurations = 2;
@@ -2379,6 +2340,9 @@ autoconf_fail:
 #endif
 #endif	/* DUALSPEED */
 
+	device_desc.bMaxPacketSize0 = gadget->ep0->maxpacket;
+	usb_gadget_set_selfpowered (gadget);
+
 	if (gadget->is_otg) {
 		otg_descriptor.bmAttributes |= USB_OTG_HNP,
 		eth_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
@@ -2389,12 +2353,11 @@ autoconf_fail:
 #endif
 	}
 
-	net = alloc_etherdev (sizeof *dev);
-	if (!net)
+ 	net = alloc_etherdev (sizeof *dev);
+ 	if (!net)
 		return status;
 	dev = netdev_priv(net);
 	spin_lock_init (&dev->lock);
-	spin_lock_init (&dev->req_lock);
 	INIT_WORK (&dev->work, eth_work, dev);
 	INIT_LIST_HEAD (&dev->tx_reqs);
 	INIT_LIST_HEAD (&dev->rx_reqs);
@@ -2414,13 +2377,9 @@ autoconf_fail:
 	 * The host side address is used with CDC and RNDIS, and commonly
 	 * ends up in a persistent config database.
 	 */
-	if (get_ether_addr(dev_addr, net->dev_addr))
-		dev_warn(&gadget->dev,
-			"using random %s ethernet address\n", "self");
+	get_ether_addr(dev_addr, net->dev_addr);
 	if (cdc || rndis) {
-		if (get_ether_addr(host_addr, dev->host_mac))
-			dev_warn(&gadget->dev,
-				"using random %s ethernet address\n", "host");
+		get_ether_addr(host_addr, dev->host_mac);
 #ifdef	DEV_CONFIG_CDC
 		snprintf (ethaddr, sizeof ethaddr, "%02X%02X%02X%02X%02X%02X",
 			dev->host_mac [0], dev->host_mac [1],
@@ -2470,7 +2429,7 @@ autoconf_fail:
 	dev->gadget = gadget;
 	set_gadget_data (gadget, dev);
 	gadget->ep0->driver_data = dev;
-
+	
 	/* two kinds of host-initiated state changes:
 	 *  - iff DATA transfer is active, carrier is "on"
 	 *  - tx queueing enabled if open *and* carrier is "on"
@@ -2478,8 +2437,8 @@ autoconf_fail:
 	netif_stop_queue (dev->net);
 	netif_carrier_off (dev->net);
 
-	SET_NETDEV_DEV (dev->net, &gadget->dev);
-	status = register_netdev (dev->net);
+ 	SET_NETDEV_DEV (dev->net, &gadget->dev);
+ 	status = register_netdev (dev->net);
 	if (status < 0)
 		goto fail1;
 
@@ -2504,7 +2463,7 @@ autoconf_fail:
 		u32	vendorID = 0;
 
 		/* FIXME RNDIS vendor id == "vendor NIC code" == ? */
-
+		
 		dev->rndis_config = rndis_register (rndis_control_ack);
 		if (dev->rndis_config < 0) {
 fail0:
@@ -2512,7 +2471,7 @@ fail0:
 			status = -ENODEV;
 			goto fail;
 		}
-
+		
 		/* these set up a lot of the OIDs that RNDIS needs */
 		rndis_set_host_mac (dev->rndis_config, dev->host_mac);
 		if (rndis_set_param_dev (dev->rndis_config, dev->net,
@@ -2572,7 +2531,7 @@ static struct usb_gadget_driver eth_driver = {
 	.suspend	= eth_suspend,
 	.resume		= eth_resume,
 
-	.driver	= {
+	.driver 	= {
 		.name		= (char *) shortname,
 		.owner		= THIS_MODULE,
 	},

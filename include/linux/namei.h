@@ -11,7 +11,7 @@ struct open_intent {
 	struct file *file;
 };
 
-enum { MAX_NESTED_LINKS = 8 };
+enum { MAX_NESTED_LINKS = 5 };
 
 struct nameidata {
 	struct dentry	*dentry;
@@ -48,8 +48,6 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
 #define LOOKUP_PARENT		16
 #define LOOKUP_NOALT		32
 #define LOOKUP_REVAL		64
-#define LOOKUP_ATOMIC		128
-
 /*
  * Intent data
  */
@@ -77,6 +75,7 @@ extern struct file *nameidata_to_filp(struct nameidata *nd, int flags);
 extern void release_open_intent(struct nameidata *);
 
 extern struct dentry * lookup_one_len(const char *, struct dentry *, int);
+extern __deprecated_for_modules struct dentry * lookup_hash(struct nameidata *);
 
 extern int follow_down(struct vfsmount **, struct dentry **);
 extern int follow_up(struct vfsmount **, struct dentry **);

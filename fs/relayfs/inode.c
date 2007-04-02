@@ -1,8 +1,8 @@
 /*
  * VFS-related code for RelayFS, a high-speed data relay filesystem.
  *
- * Copyright (C) 2003 - Tom Zanussi <zanussi@us.ibm.com>, IBM Corp
- * Copyright (C) 2003 - Karim Yaghmour <karim@opersys.com>
+ * Copyright (C) 2003-2005 - Tom Zanussi <zanussi@us.ibm.com>, IBM Corp
+ * Copyright (C) 2003-2005 - Karim Yaghmour <karim@opersys.com>
  *
  * Based on ramfs, Copyright (C) 2002 - Linus Torvalds
  *
@@ -13,547 +13,498 @@
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/pagemap.h>
-#include <linux/highmem.h>
 #include <linux/init.h>
 #include <linux/string.h>
-#include <linux/smp_lock.h>
 #include <linux/backing-dev.h>
 #include <linux/namei.h>
 #include <linux/poll.h>
-#include <asm/uaccess.h>
-#include <asm/relay.h>
+#include <linux/relayfs_fs.h>
+#include "relay.h"
+#include "buffers.h"
 
-#define RELAYFS_MAGIC			0x26F82121
-
-static struct super_operations		relayfs_ops;
-static struct address_space_operations	relayfs_aops;
-static struct inode_operations		relayfs_file_inode_operations;
-static struct file_operations		relayfs_file_operations;
-static struct inode_operations		relayfs_dir_inode_operations;
+#define RELAYFS_MAGIC			0xF0B4A981
 
 static struct vfsmount *		relayfs_mount;
 static int				relayfs_mount_count;
 
 static struct backing_dev_info		relayfs_backing_dev_info = {
 	.ra_pages	= 0,	/* No readahead */
-	.memory_backed	= 1,	/* Does not contribute to dirty memory */
+	.capabilities	= BDI_CAP_NO_ACCT_DIRTY | BDI_CAP_NO_WRITEBACK,
 };
 
-static struct inode *
-relayfs_get_inode(struct super_block *sb, int mode, dev_t dev)
-{
-	struct inode * inode;
-	
-	inode = new_inode(sb);
-
-	if (inode) {
-		inode->i_mode = mode;
-		inode->i_uid = current->fsuid;
-		inode->i_gid = current->fsgid;
-		inode->i_blksize = PAGE_CACHE_SIZE;
-		inode->i_blocks = 0;
-		inode->i_mapping->a_ops = &relayfs_aops;
-		inode->i_mapping->backing_dev_info = &relayfs_backing_dev_info;
-		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-		switch (mode & S_IFMT) {
-		default:
-			init_special_inode(inode, mode, dev);
-			break;
-		case S_IFREG:
-			inode->i_op = &relayfs_file_inode_operations;
-			inode->i_fop = &relayfs_file_operations;
-			break;
-		case S_IFDIR:
-			inode->i_op = &relayfs_dir_inode_operations;
-			inode->i_fop = &simple_dir_operations;
-
-			/* directory inodes start off with i_nlink == 2 (for "." entry) */
-			inode->i_nlink++;
-			break;
-		case S_IFLNK:
-			inode->i_op = &page_symlink_inode_operations;
-			break;
-		}
-	}
-	return inode;
-}
-
-/*
- * File creation. Allocate an inode, and we're done..
- */
-/* SMP-safe */
-static int 
-relayfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
-{
-	struct inode * inode;
-	int error = -ENOSPC;
-
-	inode = relayfs_get_inode(dir->i_sb, mode, dev);
-
-	if (inode) {
-		d_instantiate(dentry, inode);
-		dget(dentry);	/* Extra count - pin the dentry in core */
-		error = 0;
-	}
-	return error;
-}
-
-static int 
-relayfs_mkdir(struct inode * dir, struct dentry * dentry, int mode)
-{
-	int retval;
-
-	retval = relayfs_mknod(dir, dentry, mode | S_IFDIR, 0);
-
-	if (!retval)
-		dir->i_nlink++;
-	return retval;
-}
-
-static int 
-relayfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd)
-{
-	return relayfs_mknod(dir, dentry, mode | S_IFREG, 0);
-}
-
-static int 
-relayfs_symlink(struct inode * dir, struct dentry *dentry, const char * symname)
+static struct inode *relayfs_get_inode(struct super_block *sb,
+				       int mode,
+ 				       struct file_operations *fops,
+				       void *data)
 {
 	struct inode *inode;
-	int error = -ENOSPC;
 
-	inode = relayfs_get_inode(dir->i_sb, S_IFLNK|S_IRWXUGO, 0);
+	inode = new_inode(sb);
+	if (!inode)
+		return NULL;
 
-	if (inode) {
-		int l = strlen(symname)+1;
-		error = page_symlink(inode, symname, l);
-		if (!error) {
-			d_instantiate(dentry, inode);
-			dget(dentry);
-		} else
-			iput(inode);
+	inode->i_mode = mode;
+	inode->i_uid = 0;
+	inode->i_gid = 0;
+	inode->i_blksize = PAGE_CACHE_SIZE;
+	inode->i_blocks = 0;
+	inode->i_mapping->backing_dev_info = &relayfs_backing_dev_info;
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	switch (mode & S_IFMT) {
+	case S_IFREG:
+		inode->i_fop = fops;
+		if (data)
+			inode->u.generic_ip = data;
+		break;
+	case S_IFDIR:
+		inode->i_op = &simple_dir_inode_operations;
+		inode->i_fop = &simple_dir_operations;
+
+		/* directory inodes start off with i_nlink == 2 (for "." entry) */
+		inode->i_nlink++;
+		break;
+	default:
+		break;
 	}
-	return error;
+
+	return inode;
 }
 
 /**
  *	relayfs_create_entry - create a relayfs directory or file
  *	@name: the name of the file to create
  *	@parent: parent directory
- *	@dentry: result dentry
- *	@entry_type: type of file to create (S_IFREG, S_IFDIR)
  *	@mode: mode
- *	@data: data to associate with the file
+ *	@fops: file operations to use for the file
+ *	@data: user-associated data for this file
+ *
+ *	Returns the new dentry, NULL on failure
  *
  *	Creates a file or directory with the specifed permissions.
  */
-static int 
-relayfs_create_entry(const char * name, struct dentry * parent, struct dentry **dentry, int entry_type, int mode, void * data)
+static struct dentry *relayfs_create_entry(const char *name,
+					   struct dentry *parent,
+					   int mode,
+					   struct file_operations *fops,
+					   void *data)
 {
-	struct qstr qname;
-	struct dentry * d;
-	
+	struct dentry *d;
+	struct inode *inode;
 	int error = 0;
+
+	BUG_ON(!name || !(S_ISREG(mode) || S_ISDIR(mode)));
 
 	error = simple_pin_fs("relayfs", &relayfs_mount, &relayfs_mount_count);
 	if (error) {
 		printk(KERN_ERR "Couldn't mount relayfs: errcode %d\n", error);
-		return error;
+		return NULL;
 	}
 
-	qname.name = name;
-	qname.len = strlen(name);
-	qname.hash = full_name_hash(name, qname.len);
+	if (!parent && relayfs_mount && relayfs_mount->mnt_sb)
+		parent = relayfs_mount->mnt_sb->s_root;
 
-	if (parent == NULL)
-		if (relayfs_mount && relayfs_mount->mnt_sb)
-			parent = relayfs_mount->mnt_sb->s_root;
-
-	if (parent == NULL) {
+	if (!parent) {
 		simple_release_fs(&relayfs_mount, &relayfs_mount_count);
- 		return -EINVAL;
+		return NULL;
 	}
 
 	parent = dget(parent);
-	down(&parent->d_inode->i_sem);
-	d = lookup_hash(&qname, parent);
+	mutex_lock(&parent->d_inode->i_mutex);
+	d = lookup_one_len(name, parent, strlen(name));
 	if (IS_ERR(d)) {
-		error = PTR_ERR(d);
+		d = NULL;
 		goto release_mount;
 	}
-	
+
 	if (d->d_inode) {
-		error = -EEXIST;
+		d = NULL;
 		goto release_mount;
 	}
 
-	if (entry_type == S_IFREG)
-		error = relayfs_create(parent->d_inode, d, entry_type | mode, NULL);
-	else
-		error = relayfs_mkdir(parent->d_inode, d, entry_type | mode);
-	if (error)
+	inode = relayfs_get_inode(parent->d_inode->i_sb, mode, fops, data);
+	if (!inode) {
+		d = NULL;
 		goto release_mount;
-
-	if ((entry_type == S_IFREG) && data) {
-		d->d_inode->u.generic_ip = data;
-		goto exit; /* don't release mount for regular files */
 	}
+
+	d_instantiate(d, inode);
+	dget(d);	/* Extra count - pin the dentry in core */
+
+	if (S_ISDIR(mode))
+		parent->d_inode->i_nlink++;
+
+	goto exit;
 
 release_mount:
 	simple_release_fs(&relayfs_mount, &relayfs_mount_count);
-exit:	
-	*dentry = d;
-	up(&parent->d_inode->i_sem);
-	dput(parent);
 
-	return error;
+exit:
+	mutex_unlock(&parent->d_inode->i_mutex);
+	dput(parent);
+	return d;
 }
 
 /**
  *	relayfs_create_file - create a file in the relay filesystem
  *	@name: the name of the file to create
  *	@parent: parent directory
- *	@dentry: result dentry
- *	@data: data to associate with the file
  *	@mode: mode, if not specied the default perms are used
+ *	@fops: file operations to use for the file
+ *	@data: user-associated data for this file
  *
- *	The file will be created user rw on behalf of current user.
+ *	Returns file dentry if successful, NULL otherwise.
+ *
+ *	The file will be created user r on behalf of current user.
  */
-int 
-relayfs_create_file(const char * name, struct dentry * parent, struct dentry **dentry, void * data, int mode)
+struct dentry *relayfs_create_file(const char *name,
+				   struct dentry *parent,
+				   int mode,
+				   struct file_operations *fops,
+				   void *data)
 {
+	BUG_ON(!fops);
+
 	if (!mode)
-		mode = S_IRUSR | S_IWUSR;
-	
-	return relayfs_create_entry(name, parent, dentry, S_IFREG,
-				    mode, data);
+		mode = S_IRUSR;
+	mode = (mode & S_IALLUGO) | S_IFREG;
+
+	return relayfs_create_entry(name, parent, mode, fops, data);
 }
 
 /**
  *	relayfs_create_dir - create a directory in the relay filesystem
  *	@name: the name of the directory to create
- *	@parent: parent directory
- *	@dentry: result dentry
+ *	@parent: parent directory, NULL if parent should be fs root
+ *
+ *	Returns directory dentry if successful, NULL otherwise.
  *
  *	The directory will be created world rwx on behalf of current user.
  */
-int 
-relayfs_create_dir(const char * name, struct dentry * parent, struct dentry **dentry)
+struct dentry *relayfs_create_dir(const char *name, struct dentry *parent)
 {
-	return relayfs_create_entry(name, parent, dentry, S_IFDIR,
-				    S_IRWXU | S_IRUGO | S_IXUGO, NULL);
+	int mode = S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO;
+	return relayfs_create_entry(name, parent, mode, NULL, NULL);
 }
 
 /**
- *	relayfs_remove_file - remove a file in the relay filesystem
- *	@dentry: file dentry
+ *	relayfs_remove - remove a file or directory in the relay filesystem
+ *	@dentry: file or directory dentry
  *
- *	Remove a file previously created by relayfs_create_file.
+ *	Returns 0 if successful, negative otherwise.
  */
-int 
-relayfs_remove_file(struct dentry *dentry)
+int relayfs_remove(struct dentry *dentry)
 {
 	struct dentry *parent;
-	int is_reg;
-	
+	int error = 0;
+
+	if (!dentry)
+		return -EINVAL;
 	parent = dentry->d_parent;
-	if (parent == NULL)
+	if (!parent)
 		return -EINVAL;
 
-	is_reg = S_ISREG(dentry->d_inode->i_mode);
-
 	parent = dget(parent);
-	down(&parent->d_inode->i_sem);
+	mutex_lock(&parent->d_inode->i_mutex);
 	if (dentry->d_inode) {
-		simple_unlink(parent->d_inode, dentry);
-		d_delete(dentry);
+		if (S_ISDIR(dentry->d_inode->i_mode))
+			error = simple_rmdir(parent->d_inode, dentry);
+		else
+			error = simple_unlink(parent->d_inode, dentry);
+		if (!error)
+			d_delete(dentry);
 	}
-	dput(dentry);
-	up(&parent->d_inode->i_sem);
+	if (!error)
+		dput(dentry);
+	mutex_unlock(&parent->d_inode->i_mutex);
 	dput(parent);
 
-	if(is_reg)
+	if (!error)
 		simple_release_fs(&relayfs_mount, &relayfs_mount_count);
+
+	return error;
+}
+
+/**
+ *	relayfs_remove_file - remove a file from relay filesystem
+ *	@dentry: directory dentry
+ *
+ *	Returns 0 if successful, negative otherwise.
+ */
+int relayfs_remove_file(struct dentry *dentry)
+{
+	return relayfs_remove(dentry);
+}
+
+/**
+ *	relayfs_remove_dir - remove a directory in the relay filesystem
+ *	@dentry: directory dentry
+ *
+ *	Returns 0 if successful, negative otherwise.
+ */
+int relayfs_remove_dir(struct dentry *dentry)
+{
+	return relayfs_remove(dentry);
+}
+
+/**
+ *	relay_file_open - open file op for relay files
+ *	@inode: the inode
+ *	@filp: the file
+ *
+ *	Increments the channel buffer refcount.
+ */
+static int relay_file_open(struct inode *inode, struct file *filp)
+{
+	struct rchan_buf *buf = inode->u.generic_ip;
+	kref_get(&buf->kref);
+	filp->private_data = buf;
 
 	return 0;
 }
 
 /**
- *	relayfs_open - open file op for relayfs files
- *	@inode: the inode
- *	@filp: the file
- *
- *	Associates the channel with the file, and increments the
- *	channel refcount.  Reads will be 'auto-consuming'.
- */
-int
-relayfs_open(struct inode *inode, struct file *filp)
-{
-	struct rchan *rchan;
-	struct rchan_reader *reader;
-	int retval = 0;
-
-	if (inode->u.generic_ip) {
-		rchan = (struct rchan *)inode->u.generic_ip;
-		if (rchan == NULL)
-			return -EACCES;
-		reader = __add_rchan_reader(rchan, filp, 1, 0);
-		if (reader == NULL)
-			return -ENOMEM;
-		filp->private_data = reader;
-		retval = rchan->callbacks->fileop_notify(rchan->id, filp,
-							 RELAY_FILE_OPEN);
-		if (retval == 0)
-			/* Inc relay channel refcount for file */
-			rchan_get(rchan->id);
-		else {
-			__remove_rchan_reader(reader);
-			retval = -EPERM;
-		}
-	}
-
-	return retval;
-}
-
-/**
- *	relayfs_mmap - mmap file op for relayfs files
+ *	relay_file_mmap - mmap file op for relay files
  *	@filp: the file
  *	@vma: the vma describing what to map
  *
- *	Calls upon relay_mmap_buffer to map the file into user space.
+ *	Calls upon relay_mmap_buf to map the file into user space.
  */
-int 
-relayfs_mmap(struct file *filp, struct vm_area_struct *vma)
+static int relay_file_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-	struct rchan *rchan;
-	
-	rchan = ((struct rchan_reader *)filp->private_data)->rchan;
-
-	return __relay_mmap_buffer(rchan, vma);
+	struct rchan_buf *buf = filp->private_data;
+	return relay_mmap_buf(buf, vma);
 }
 
 /**
- *	relayfs_file_read - read file op for relayfs files
- *	@filp: the file
- *	@buf: user buf to read into
- *	@count: bytes requested
- *	@offset: offset into file
- *
- *	Reads count bytes from the channel, or as much as is available within
- *	the sub-buffer currently being read.  Reads are 'auto-consuming'.
- *	See relay_read() for details.
- *
- *	Returns bytes read on success, 0 or -EAGAIN if nothing available,
- *	negative otherwise.
- */
-ssize_t 
-relayfs_file_read(struct file *filp, char * buf, size_t count, loff_t *offset)
-{
-	size_t read_count;
-	struct rchan_reader *reader;
-	u32 dummy; /* all VFS readers are auto-consuming */
-
-	if (offset != &filp->f_pos) /* pread, seeking not supported */
-		return -ESPIPE;
-
-	if (count == 0)
-		return 0;
-
-	reader = (struct rchan_reader *)filp->private_data;
-	read_count = relay_read(reader, buf, count,
-		filp->f_flags & (O_NDELAY | O_NONBLOCK) ? 0 : 1, &dummy);
-
-	return read_count;
-}
-
-/**
- *	relayfs_file_write - write file op for relayfs files
- *	@filp: the file
- *	@buf: user buf to write from
- *	@count: bytes to write
- *	@offset: offset into file
- *
- *	Reserves a slot in the relay buffer and writes count bytes
- *	into it.  The current limit for a single write is 2 pages
- *	worth.  The user_deliver() channel callback will be invoked on
- *	
- *	Returns bytes written on success, 0 or -EAGAIN if nothing available,
- *	negative otherwise.
- */
-ssize_t 
-relayfs_file_write(struct file *filp, const char *buf, size_t count, loff_t *offset)
-{
-	int write_count;
-	char * write_buf;
-	struct rchan *rchan;
-	int err = 0;
-	void *wrote_pos;
-	struct rchan_reader *reader;
-
-	reader = (struct rchan_reader *)filp->private_data;
-	if (reader == NULL)
-		return -EPERM;
-
-	rchan = reader->rchan;
-	if (rchan == NULL)
-		return -EPERM;
-
-	if (count == 0)
-		return 0;
-
-	/* Change this if need to write more than 2 pages at once */
-	if (count > 2 * PAGE_SIZE)
-		return -EINVAL;
-	
-	write_buf = (char *)__get_free_pages(GFP_KERNEL, 1);
-	if (write_buf == NULL)
-		return -ENOMEM;
-
-	if (copy_from_user(write_buf, buf, count))
-		return -EFAULT;
-
-	if (filp->f_flags & (O_NDELAY | O_NONBLOCK)) {
-		write_count = relay_write(rchan->id, write_buf, count, -1, &wrote_pos);
-		if (write_count == 0)
-			return -EAGAIN;
-	} else {
-		err = wait_event_interruptible(rchan->write_wait,
-	         (write_count = relay_write(rchan->id, write_buf, count, -1, &wrote_pos)));
-		if (err)
-			return err;
-	}
-	
-	free_pages((unsigned long)write_buf, 1);
-	
-        rchan->callbacks->user_deliver(rchan->id, wrote_pos, write_count);
-
-	return write_count;
-}
-
-/**
- *	relayfs_ioctl - ioctl file op for relayfs files
- *	@inode: the inode
- *	@filp: the file
- *	@cmd: the command
- *	@arg: command arg
- *
- *	Passes the specified cmd/arg to the kernel client.  arg may be a 
- *	pointer to user-space data, in which case the kernel client is 
- *	responsible for copying the data to/from user space appropriately.
- *	The kernel client is also responsible for returning a meaningful
- *	return value for ioctl calls.
- *	
- *	Returns result of relay channel callback, -EPERM if unsuccessful.
- */
-int
-relayfs_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
-{
-	struct rchan *rchan;
-	struct rchan_reader *reader;
-
-	reader = (struct rchan_reader *)filp->private_data;
-	if (reader == NULL)
-		return -EPERM;
-
-	rchan = reader->rchan;
-	if (rchan == NULL)
-		return -EPERM;
-
-	return rchan->callbacks->ioctl(rchan->id, cmd, arg);
-}
-
-/**
- *	relayfs_poll - poll file op for relayfs files
+ *	relay_file_poll - poll file op for relay files
  *	@filp: the file
  *	@wait: poll table
  *
  *	Poll implemention.
  */
-static unsigned int
-relayfs_poll(struct file *filp, poll_table *wait)
+static unsigned int relay_file_poll(struct file *filp, poll_table *wait)
 {
-	struct rchan_reader *reader;
 	unsigned int mask = 0;
-	
-	reader = (struct rchan_reader *)filp->private_data;
+	struct rchan_buf *buf = filp->private_data;
 
-	if (reader->rchan->finalized)
+	if (buf->finalized)
 		return POLLERR;
 
 	if (filp->f_mode & FMODE_READ) {
-		poll_wait(filp, &reader->rchan->read_wait, wait);
-		if (!rchan_empty(reader))
+		poll_wait(filp, &buf->read_wait, wait);
+		if (!relay_buf_empty(buf))
 			mask |= POLLIN | POLLRDNORM;
 	}
-	
-	if (filp->f_mode & FMODE_WRITE) {
-		poll_wait(filp, &reader->rchan->write_wait, wait);
-		if (!rchan_full(reader))
-			mask |= POLLOUT | POLLWRNORM;
-	}
-	
+
 	return mask;
 }
 
 /**
- *	relayfs_release - release file op for relayfs files
+ *	relay_file_release - release file op for relay files
  *	@inode: the inode
  *	@filp: the file
  *
  *	Decrements the channel refcount, as the filesystem is
  *	no longer using it.
  */
-int
-relayfs_release(struct inode *inode, struct file *filp)
+static int relay_file_release(struct inode *inode, struct file *filp)
 {
-	struct rchan_reader *reader;
-	struct rchan *rchan;
-
-	reader = (struct rchan_reader *)filp->private_data;
-	if (reader == NULL || reader->rchan == NULL)
-		return 0;
-	rchan = reader->rchan;
-	
-        rchan->callbacks->fileop_notify(reader->rchan->id, filp,
-					RELAY_FILE_CLOSE);
-	__remove_rchan_reader(reader);
-	/* The channel is no longer in use as far as this file is concerned */
-	rchan_put(rchan);
+	struct rchan_buf *buf = filp->private_data;
+	kref_put(&buf->kref, relay_remove_buf);
 
 	return 0;
 }
 
-static struct address_space_operations relayfs_aops = {
-	.readpage	= simple_readpage,
-	.prepare_write	= simple_prepare_write,
-	.commit_write	= simple_commit_write
-};
+/**
+ *	relay_file_read_consume - update the consumed count for the buffer
+ */
+static void relay_file_read_consume(struct rchan_buf *buf,
+				    size_t read_pos,
+				    size_t bytes_consumed)
+{
+	size_t subbuf_size = buf->chan->subbuf_size;
+	size_t n_subbufs = buf->chan->n_subbufs;
+	size_t read_subbuf;
 
-static struct file_operations relayfs_file_operations = {
-	.open		= relayfs_open,
-	.read		= relayfs_file_read,
-	.write		= relayfs_file_write,
-	.ioctl		= relayfs_ioctl,
-	.poll		= relayfs_poll,
-	.mmap		= relayfs_mmap,
-	.fsync		= simple_sync_file,
-	.release	= relayfs_release,
-};
+	if (buf->bytes_consumed + bytes_consumed > subbuf_size) {
+		relay_subbufs_consumed(buf->chan, buf->cpu, 1);
+		buf->bytes_consumed = 0;
+	}
 
-static struct inode_operations relayfs_file_inode_operations = {
-	.getattr	= simple_getattr,
-};
+	buf->bytes_consumed += bytes_consumed;
+	read_subbuf = read_pos / buf->chan->subbuf_size;
+	if (buf->bytes_consumed + buf->padding[read_subbuf] == subbuf_size) {
+		if ((read_subbuf == buf->subbufs_produced % n_subbufs) &&
+		    (buf->offset == subbuf_size))
+			return;
+		relay_subbufs_consumed(buf->chan, buf->cpu, 1);
+		buf->bytes_consumed = 0;
+	}
+}
 
-static struct inode_operations relayfs_dir_inode_operations = {
-	.create		= relayfs_create,
-	.lookup		= simple_lookup,
-	.link		= simple_link,
-	.unlink		= simple_unlink,
-	.symlink	= relayfs_symlink,
-	.mkdir		= relayfs_mkdir,
-	.rmdir		= simple_rmdir,
-	.mknod		= relayfs_mknod,
-	.rename		= simple_rename,
+/**
+ *	relay_file_read_avail - boolean, are there unconsumed bytes available?
+ */
+static int relay_file_read_avail(struct rchan_buf *buf, size_t read_pos)
+{
+	size_t bytes_produced, bytes_consumed, write_offset;
+	size_t subbuf_size = buf->chan->subbuf_size;
+	size_t n_subbufs = buf->chan->n_subbufs;
+	size_t produced = buf->subbufs_produced % n_subbufs;
+	size_t consumed = buf->subbufs_consumed % n_subbufs;
+
+	write_offset = buf->offset > subbuf_size ? subbuf_size : buf->offset;
+
+	if (consumed > produced) {
+		if ((produced > n_subbufs) &&
+		    (produced + n_subbufs - consumed <= n_subbufs))
+			produced += n_subbufs;
+	} else if (consumed == produced) {
+		if (buf->offset > subbuf_size) {
+			produced += n_subbufs;
+			if (buf->subbufs_produced == buf->subbufs_consumed)
+				consumed += n_subbufs;
+		}
+	}
+
+	if (buf->offset > subbuf_size)
+		bytes_produced = (produced - 1) * subbuf_size + write_offset;
+	else
+		bytes_produced = produced * subbuf_size + write_offset;
+	bytes_consumed = consumed * subbuf_size + buf->bytes_consumed;
+
+	if (bytes_produced == bytes_consumed)
+		return 0;
+
+	relay_file_read_consume(buf, read_pos, 0);
+
+	return 1;
+}
+
+/**
+ *	relay_file_read_subbuf_avail - return bytes available in sub-buffer
+ */
+static size_t relay_file_read_subbuf_avail(size_t read_pos,
+					   struct rchan_buf *buf)
+{
+	size_t padding, avail = 0;
+	size_t read_subbuf, read_offset, write_subbuf, write_offset;
+	size_t subbuf_size = buf->chan->subbuf_size;
+
+	write_subbuf = (buf->data - buf->start) / subbuf_size;
+	write_offset = buf->offset > subbuf_size ? subbuf_size : buf->offset;
+	read_subbuf = read_pos / subbuf_size;
+	read_offset = read_pos % subbuf_size;
+	padding = buf->padding[read_subbuf];
+
+	if (read_subbuf == write_subbuf) {
+		if (read_offset + padding < write_offset)
+			avail = write_offset - (read_offset + padding);
+	} else
+		avail = (subbuf_size - padding) - read_offset;
+
+	return avail;
+}
+
+/**
+ *	relay_file_read_start_pos - find the first available byte to read
+ *
+ *	If the read_pos is in the middle of padding, return the
+ *	position of the first actually available byte, otherwise
+ *	return the original value.
+ */
+static size_t relay_file_read_start_pos(size_t read_pos,
+					struct rchan_buf *buf)
+{
+	size_t read_subbuf, padding, padding_start, padding_end;
+	size_t subbuf_size = buf->chan->subbuf_size;
+	size_t n_subbufs = buf->chan->n_subbufs;
+
+	read_subbuf = read_pos / subbuf_size;
+	padding = buf->padding[read_subbuf];
+	padding_start = (read_subbuf + 1) * subbuf_size - padding;
+	padding_end = (read_subbuf + 1) * subbuf_size;
+	if (read_pos >= padding_start && read_pos < padding_end) {
+		read_subbuf = (read_subbuf + 1) % n_subbufs;
+		read_pos = read_subbuf * subbuf_size;
+	}
+
+	return read_pos;
+}
+
+/**
+ *	relay_file_read_end_pos - return the new read position
+ */
+static size_t relay_file_read_end_pos(struct rchan_buf *buf,
+				      size_t read_pos,
+				      size_t count)
+{
+	size_t read_subbuf, padding, end_pos;
+	size_t subbuf_size = buf->chan->subbuf_size;
+	size_t n_subbufs = buf->chan->n_subbufs;
+
+	read_subbuf = read_pos / subbuf_size;
+	padding = buf->padding[read_subbuf];
+	if (read_pos % subbuf_size + count + padding == subbuf_size)
+		end_pos = (read_subbuf + 1) * subbuf_size;
+	else
+		end_pos = read_pos + count;
+	if (end_pos >= subbuf_size * n_subbufs)
+		end_pos = 0;
+
+	return end_pos;
+}
+
+/**
+ *	relay_file_read - read file op for relay files
+ *	@filp: the file
+ *	@buffer: the userspace buffer
+ *	@count: number of bytes to read
+ *	@ppos: position to read from
+ *
+ *	Reads count bytes or the number of bytes available in the
+ *	current sub-buffer being read, whichever is smaller.
+ */
+static ssize_t relay_file_read(struct file *filp,
+			       char __user *buffer,
+			       size_t count,
+			       loff_t *ppos)
+{
+	struct rchan_buf *buf = filp->private_data;
+	struct inode *inode = filp->f_dentry->d_inode;
+	size_t read_start, avail;
+	ssize_t ret = 0;
+	void *from;
+
+	mutex_lock(&inode->i_mutex);
+	if(!relay_file_read_avail(buf, *ppos))
+		goto out;
+
+	read_start = relay_file_read_start_pos(*ppos, buf);
+	avail = relay_file_read_subbuf_avail(read_start, buf);
+	if (!avail)
+		goto out;
+
+	from = buf->start + read_start;
+	ret = count = min(count, avail);
+	if (copy_to_user(buffer, from, count)) {
+		ret = -EFAULT;
+		goto out;
+	}
+	relay_file_read_consume(buf, read_start, count);
+	*ppos = relay_file_read_end_pos(buf, read_start, count);
+out:
+	mutex_unlock(&inode->i_mutex);
+	return ret;
+}
+
+struct file_operations relay_file_operations = {
+	.open		= relay_file_open,
+	.poll		= relay_file_poll,
+	.mmap		= relay_file_mmap,
+	.read		= relay_file_read,
+	.llseek		= no_llseek,
+	.release	= relay_file_release,
 };
 
 static struct super_operations relayfs_ops = {
@@ -561,17 +512,17 @@ static struct super_operations relayfs_ops = {
 	.drop_inode	= generic_delete_inode,
 };
 
-static int 
-relayfs_fill_super(struct super_block * sb, void * data, int silent)
+static int relayfs_fill_super(struct super_block * sb, void * data, int silent)
 {
-	struct inode * inode;
-	struct dentry * root;
+	struct inode *inode;
+	struct dentry *root;
+	int mode = S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO;
 
 	sb->s_blocksize = PAGE_CACHE_SIZE;
 	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic = RELAYFS_MAGIC;
 	sb->s_op = &relayfs_ops;
-	inode = relayfs_get_inode(sb, S_IFDIR | 0755, 0);
+	inode = relayfs_get_inode(sb, mode, NULL, NULL);
 
 	if (!inode)
 		return -ENOMEM;
@@ -586,9 +537,9 @@ relayfs_fill_super(struct super_block * sb, void * data, int silent)
 	return 0;
 }
 
-static struct super_block *
-relayfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static struct super_block * relayfs_get_sb(struct file_system_type *fs_type,
+					   int flags, const char *dev_name,
+					   void *data)
 {
 	return get_sb_single(fs_type, flags, data, relayfs_fill_super);
 }
@@ -600,28 +551,29 @@ static struct file_system_type relayfs_fs_type = {
 	.kill_sb	= kill_litter_super,
 };
 
-static int __init 
-init_relayfs_fs(void)
+static int __init init_relayfs_fs(void)
 {
-	int err = register_filesystem(&relayfs_fs_type);
-#ifdef CONFIG_KLOG_CHANNEL
-	if (!err)
-		create_klog_channel();
-#endif
-	return err;
+	return register_filesystem(&relayfs_fs_type);
 }
 
-static void __exit 
-exit_relayfs_fs(void)
+static void __exit exit_relayfs_fs(void)
 {
-#ifdef CONFIG_KLOG_CHANNEL
-	remove_klog_channel();
-#endif
+
+
+
+
+
 	unregister_filesystem(&relayfs_fs_type);
 }
 
 module_init(init_relayfs_fs)
 module_exit(exit_relayfs_fs)
+
+EXPORT_SYMBOL_GPL(relay_file_operations);
+EXPORT_SYMBOL_GPL(relayfs_create_dir);
+EXPORT_SYMBOL_GPL(relayfs_remove_dir);
+EXPORT_SYMBOL_GPL(relayfs_create_file);
+EXPORT_SYMBOL_GPL(relayfs_remove_file);
 
 MODULE_AUTHOR("Tom Zanussi <zanussi@us.ibm.com> and Karim Yaghmour <karim@opersys.com>");
 MODULE_DESCRIPTION("Relay Filesystem");

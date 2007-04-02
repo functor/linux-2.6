@@ -45,15 +45,15 @@ static char *_daemon_h_sccs_ = "@(#)daemon.h	1.3";
 */
 
 struct Error {
-	unsigned int Error;
-	unsigned int Entry;
-	unsigned int Other;
+	uint Error;
+	uint Entry;
+	uint Other;
 };
 
 struct DownLoad {
-	char __user *DataP;
-	unsigned int Count;
-	unsigned int ProductCode;
+	char *DataP;
+	uint Count;
+	uint ProductCode;
 };
 
 /*
@@ -68,64 +68,69 @@ struct DownLoad {
 #endif
 
 struct PortSetup {
-	unsigned int From;		/* Set/Clear XP & IXANY Control from this port.... */
-	unsigned int To;		/* .... to this port */
-	unsigned int XpCps;		/* at this speed */
+	uint From;		/* Set/Clear XP & IXANY Control from this port.... */
+	uint To;		/* .... to this port */
+	uint XpCps;		/* at this speed */
 	char XpOn[MAX_XP_CTRL_LEN];	/* this is the start string */
 	char XpOff[MAX_XP_CTRL_LEN];	/* this is the stop string */
-	u8 IxAny;			/* enable/disable IXANY */
-	u8 IxOn;			/* enable/disable IXON */
-	u8 Lock;			/* lock port params */
-	u8 Store;			/* store params across closes */
-	u8 Drain;			/* close only when drained */
+	uchar IxAny;		/* enable/disable IXANY */
+	uchar IxOn;		/* enable/disable IXON */
+	uchar Lock;		/* lock port params */
+	uchar Store;		/* store params across closes */
+	uchar Drain;		/* close only when drained */
 };
 
 struct LpbReq {
-	unsigned int Host;
-	unsigned int Link;
-	struct LPB __user *LpbP;
+	uint Host;
+	uint Link;
+	struct LPB *LpbP;
 };
 
 struct RupReq {
-	unsigned int HostNum;
-	unsigned int RupNum;
-	struct RUP __user *RupP;
+	uint HostNum;
+	uint RupNum;
+	struct RUP *RupP;
 };
 
 struct PortReq {
-	unsigned int SysPort;
-	struct Port __user *PortP;
+	uint SysPort;
+	struct Port *PortP;
 };
 
 struct StreamInfo {
-	unsigned int SysPort;
+	uint SysPort;
+#if 0
+	queue_t RQueue;
+	queue_t WQueue;
+#else
 	int RQueue;
 	int WQueue;
+#endif
 };
 
 struct HostReq {
-	unsigned int HostNum;
-	struct Host __user *HostP;
+	uint HostNum;
+	struct Host *HostP;
 };
 
 struct HostDpRam {
-	unsigned int HostNum;
-	struct DpRam __user *DpRamP;
+	uint HostNum;
+	struct DpRam *DpRamP;
 };
 
 struct DebugCtrl {
-	unsigned int SysPort;
-	unsigned int Debug;
-	unsigned int Wait;
+	uint SysPort;
+	uint Debug;
+	uint Wait;
 };
 
 struct MapInfo {
-	unsigned int FirstPort;		/* 8 ports, starting from this (tty) number */
-	unsigned int RtaUnique;		/* reside on this RTA (unique number) */
+	uint FirstPort;		/* 8 ports, starting from this (tty) number */
+	uint RtaUnique;		/* reside on this RTA (unique number) */
 };
 
 struct MapIn {
-	unsigned int NumEntries;	/* How many port sets are we mapping? */
+	uint NumEntries;	/* How many port sets are we mapping? */
 	struct MapInfo *MapInfoP;	/* Pointer to (user space) info */
 };
 
@@ -142,13 +147,13 @@ struct SpecialRupCmd {
 };
 
 struct IdentifyRta {
-	unsigned long RtaUnique;
-	u8 ID;
+	ulong RtaUnique;
+	uchar ID;
 };
 
 struct KillNeighbour {
-	unsigned long UniqueNum;
-	u8 Link;
+	ulong UniqueNum;
+	uchar Link;
 };
 
 struct rioVersion {

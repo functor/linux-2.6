@@ -19,6 +19,7 @@
  * Sysfs file creation and management
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -81,7 +82,7 @@ static ssize_t gfar_set_bd_stash(struct class_device *cdev,
 	else
 		return count;
 
-	spin_lock_irqsave(&priv->rxlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 
 	/* Set the new stashing value */
 	priv->bd_stash_en = new_setting;
@@ -95,7 +96,7 @@ static ssize_t gfar_set_bd_stash(struct class_device *cdev,
 
 	gfar_write(&priv->regs->attr, temp);
 
-	spin_unlock_irqrestore(&priv->rxlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return count;
 }
@@ -117,7 +118,7 @@ static ssize_t gfar_set_rx_stash_size(struct class_device *cdev,
 	u32 temp;
 	unsigned long flags;
 
-	spin_lock_irqsave(&priv->rxlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 	if (length > priv->rx_buffer_size)
 		return count;
 
@@ -141,7 +142,7 @@ static ssize_t gfar_set_rx_stash_size(struct class_device *cdev,
 
 	gfar_write(&priv->regs->attr, temp);
 
-	spin_unlock_irqrestore(&priv->rxlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return count;
 }
@@ -165,7 +166,7 @@ static ssize_t gfar_set_rx_stash_index(struct class_device *cdev,
 	u32 temp;
 	unsigned long flags;
 
-	spin_lock_irqsave(&priv->rxlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 	if (index > priv->rx_stash_size)
 		return count;
 
@@ -179,7 +180,7 @@ static ssize_t gfar_set_rx_stash_index(struct class_device *cdev,
 	temp |= ATTRELI_EI(index);
 	gfar_write(&priv->regs->attreli, flags);
 
-	spin_unlock_irqrestore(&priv->rxlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return count;
 }
@@ -204,7 +205,7 @@ static ssize_t gfar_set_fifo_threshold(struct class_device *cdev,
 	if (length > GFAR_MAX_FIFO_THRESHOLD)
 		return count;
 
-	spin_lock_irqsave(&priv->txlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 
 	priv->fifo_threshold = length;
 
@@ -213,7 +214,7 @@ static ssize_t gfar_set_fifo_threshold(struct class_device *cdev,
 	temp |= length;
 	gfar_write(&priv->regs->fifo_tx_thr, temp);
 
-	spin_unlock_irqrestore(&priv->txlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return count;
 }
@@ -239,7 +240,7 @@ static ssize_t gfar_set_fifo_starve(struct class_device *cdev,
 	if (num > GFAR_MAX_FIFO_STARVE)
 		return count;
 
-	spin_lock_irqsave(&priv->txlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 
 	priv->fifo_starve = num;
 
@@ -248,7 +249,7 @@ static ssize_t gfar_set_fifo_starve(struct class_device *cdev,
 	temp |= num;
 	gfar_write(&priv->regs->fifo_tx_starve, temp);
 
-	spin_unlock_irqrestore(&priv->txlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return count;
 }
@@ -273,7 +274,7 @@ static ssize_t gfar_set_fifo_starve_off(struct class_device *cdev,
 	if (num > GFAR_MAX_FIFO_STARVE_OFF)
 		return count;
 
-	spin_lock_irqsave(&priv->txlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 
 	priv->fifo_starve_off = num;
 
@@ -282,7 +283,7 @@ static ssize_t gfar_set_fifo_starve_off(struct class_device *cdev,
 	temp |= num;
 	gfar_write(&priv->regs->fifo_tx_starve_shutoff, temp);
 
-	spin_unlock_irqrestore(&priv->txlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return count;
 }

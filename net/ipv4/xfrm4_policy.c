@@ -9,12 +9,15 @@
  */
 
 #include <linux/compiler.h>
+#include <linux/config.h>
 #include <linux/inetdevice.h>
 #include <net/xfrm.h>
 #include <net/ip.h>
 
 static struct dst_ops xfrm4_dst_ops;
 static struct xfrm_policy_afinfo xfrm4_policy_afinfo;
+
+static struct xfrm_type_map xfrm4_type_map = { .lock = RW_LOCK_UNLOCKED };
 
 static int xfrm4_dst_lookup(struct xfrm_dst **dst, struct flowi *fl)
 {
@@ -218,7 +221,7 @@ _decode_session4(struct sk_buff *skb, struct flowi *fl)
 			if (pskb_may_pull(skb, xprth + 4 - skb->data)) {
 				u16 *ipcomp_hdr = (u16 *)xprth;
 
-				fl->fl_ipsec_spi = htonl(ntohs(ipcomp_hdr[1]));
+				fl->fl_ipsec_spi = ntohl(ntohs(ipcomp_hdr[1]));
 			}
 			break;
 		default:
@@ -234,7 +237,9 @@ _decode_session4(struct sk_buff *skb, struct flowi *fl)
 
 static inline int xfrm4_garbage_collect(void)
 {
+	read_lock(&xfrm4_policy_afinfo.lock);
 	xfrm4_policy_afinfo.garbage_collect();
+	read_unlock(&xfrm4_policy_afinfo.lock);
 	return (atomic_read(&xfrm4_dst_ops.entries) > xfrm4_dst_ops.gc_thresh*2);
 }
 
@@ -296,6 +301,8 @@ static struct dst_ops xfrm4_dst_ops = {
 
 static struct xfrm_policy_afinfo xfrm4_policy_afinfo = {
 	.family = 		AF_INET,
+	.lock = 		RW_LOCK_UNLOCKED,
+	.type_map = 		&xfrm4_type_map,
 	.dst_ops =		&xfrm4_dst_ops,
 	.dst_lookup =		xfrm4_dst_lookup,
 	.find_bundle = 		__xfrm4_find_bundle,

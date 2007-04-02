@@ -5,6 +5,7 @@
  *
  * Copyright (C) 1994 - 2003 by Ralf Baechle
  */
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -29,7 +30,6 @@ void (*flush_icache_page)(struct vm_area_struct *vma, struct page *page);
 
 /* MIPS specific cache operations */
 void (*flush_cache_sigtramp)(unsigned long addr);
-void (*local_flush_data_cache_page)(void * addr);
 void (*flush_data_cache_page)(unsigned long addr);
 void (*flush_icache_all)(void);
 

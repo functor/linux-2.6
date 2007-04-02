@@ -195,18 +195,18 @@
      */
 
 int dmasound_catchRadius = 0;
-module_param(dmasound_catchRadius, int, 0);
+MODULE_PARM(dmasound_catchRadius, "i");
 
 static unsigned int numWriteBufs = DEFAULT_N_BUFFERS;
-module_param(numWriteBufs, int, 0);
+MODULE_PARM(numWriteBufs, "i");
 static unsigned int writeBufSize = DEFAULT_BUFF_SIZE ;	/* in bytes */
-module_param(writeBufSize, int, 0);
+MODULE_PARM(writeBufSize, "i");
 
 #ifdef HAS_RECORD
 static unsigned int numReadBufs = DEFAULT_N_BUFFERS;
-module_param(numReadBufs, int, 0);
+MODULE_PARM(numReadBufs, "i");
 static unsigned int readBufSize = DEFAULT_BUFF_SIZE;	/* in bytes */
-module_param(readBufSize, int, 0);
+MODULE_PARM(readBufSize, "i");
 #endif
 
 MODULE_LICENSE("GPL");

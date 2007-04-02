@@ -36,11 +36,13 @@
 
 #define CIRRUSFB_VERSION "2.0-pre2"
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/mm.h>
+#include <linux/tty.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/fb.h>
@@ -58,8 +60,8 @@
 #include <asm/amigahw.h>
 #endif
 #ifdef CONFIG_PPC_PREP
-#include <asm/machdep.h>
-#define isPReP (machine_is(prep))
+#include <asm/processor.h>
+#define isPReP (_machine == _MACH_prep)
 #else
 #define isPReP 0
 #endif
@@ -2225,6 +2227,7 @@ static void cirrusfb_pci_unmap (struct cirrusfb_info *cinfo)
 		release_region(0x3C0, 32);
 	pci_release_regions(pdev);
 	framebuffer_release(cinfo->info);
+	pci_disable_device(pdev);
 }
 #endif /* CONFIG_PCI */
 
@@ -2455,6 +2458,7 @@ err_release_regions:
 err_release_fb:
 	framebuffer_release(info);
 err_disable:
+	pci_disable_device(pdev);
 err_out:
 	return ret;
 }
@@ -2618,7 +2622,7 @@ static int __init cirrusfb_init(void)
 #endif
 
 #ifdef CONFIG_ZORRO
-	error |= zorro_register_driver(&cirrusfb_zorro_driver);
+	error |= zorro_module_init(&cirrusfb_zorro_driver);
 #endif
 #ifdef CONFIG_PCI
 	error |= pci_register_driver(&cirrusfb_pci_driver);

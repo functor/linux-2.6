@@ -15,11 +15,10 @@
 #define DC21285_BASE ((volatile unsigned int *)0x42000160)
 #define SER0_BASE    ((volatile unsigned char *)0x7c0003f8)
 
-static inline void putc(char c)
+static __inline__ void putc(char c)
 {
 	if (machine_is_netwinder()) {
-		while ((SER0_BASE[5] & 0x60) != 0x60)
-			barrier();
+		while ((SER0_BASE[5] & 0x60) != 0x60);
 		SER0_BASE[0] = c;
 	} else {
 		while (DC21285_BASE[6] & 8);
@@ -27,8 +26,17 @@ static inline void putc(char c)
 	}
 }
 
-static inline void flush(void)
+/*
+ * This does not append a newline
+ */
+static void putstr(const char *s)
 {
+	while (*s) {
+		putc(*s);
+		if (*s == '\n')
+			putc('\r');
+		s++;
+	}
 }
 
 /*

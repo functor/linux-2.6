@@ -9,10 +9,8 @@
  * the Free Software Foundation.
  */
 
-#ifdef __KERNEL__
 #include <asm/io.h>
 #include <linux/list.h>
-#include <linux/mutex.h>
 #include <linux/device.h>
 #include <linux/timer.h>
 
@@ -42,7 +40,7 @@ struct gameport {
 	struct gameport *parent, *child;
 
 	struct gameport_driver *drv;
-	struct mutex drv_mutex;		/* protects serio->drv so attributes can pin driver */
+	struct semaphore drv_sem;	/* protects serio->drv so attributes can pin driver */
 
 	struct device dev;
 	unsigned int registered;	/* port has been fully registered with driver core */
@@ -121,7 +119,7 @@ static inline void gameport_set_name(struct gameport *gameport, const char *name
 }
 
 /*
- * Use the following functions to manipulate gameport's per-port
+ * Use the following fucntions to manipulate gameport's per-port
  * driver-specific data.
  */
 static inline void *gameport_get_drvdata(struct gameport *gameport)
@@ -135,16 +133,16 @@ static inline void gameport_set_drvdata(struct gameport *gameport, void *data)
 }
 
 /*
- * Use the following functions to pin gameport's driver in process context
+ * Use the following fucntions to pin gameport's driver in process context
  */
 static inline int gameport_pin_driver(struct gameport *gameport)
 {
-	return mutex_lock_interruptible(&gameport->drv_mutex);
+	return down_interruptible(&gameport->drv_sem);
 }
 
 static inline void gameport_unpin_driver(struct gameport *gameport)
 {
-	mutex_unlock(&gameport->drv_mutex);
+	up(&gameport->drv_sem);
 }
 
 void __gameport_register_driver(struct gameport_driver *drv, struct module *owner);
@@ -154,8 +152,6 @@ static inline void gameport_register_driver(struct gameport_driver *drv)
 }
 
 void gameport_unregister_driver(struct gameport_driver *drv);
-
-#endif /* __KERNEL__ */
 
 #define GAMEPORT_MODE_DISABLED		0
 #define GAMEPORT_MODE_RAW		1
@@ -171,8 +167,6 @@ void gameport_unregister_driver(struct gameport_driver *drv);
 #define GAMEPORT_ID_VENDOR_THRUSTMASTER	0x0008
 #define GAMEPORT_ID_VENDOR_GRAVIS	0x0009
 #define GAMEPORT_ID_VENDOR_GUILLEMOT	0x000a
-
-#ifdef __KERNEL__
 
 static inline void gameport_trigger(struct gameport *gameport)
 {
@@ -224,5 +218,4 @@ static inline void gameport_set_poll_interval(struct gameport *gameport, unsigne
 void gameport_start_polling(struct gameport *gameport);
 void gameport_stop_polling(struct gameport *gameport);
 
-#endif /* __KERNEL__ */
 #endif

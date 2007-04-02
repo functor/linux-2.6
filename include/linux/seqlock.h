@@ -26,6 +26,7 @@
  * by Keith Owens and Andrea Arcangeli
  */
 
+#include <linux/config.h>
 #include <linux/spinlock.h>
 #include <linux/preempt.h>
 
@@ -38,17 +39,9 @@ typedef struct {
  * These macros triggered gcc-3.x compile-time problems.  We think these are
  * OK now.  Be cautious.
  */
-#define __SEQLOCK_UNLOCKED(lockname) \
-		 { 0, __SPIN_LOCK_UNLOCKED(lockname) }
+#define SEQLOCK_UNLOCKED { 0, SPIN_LOCK_UNLOCKED }
+#define seqlock_init(x)	do { *(x) = (seqlock_t) SEQLOCK_UNLOCKED; } while (0)
 
-#define SEQLOCK_UNLOCKED \
-		 __SEQLOCK_UNLOCKED(old_style_seqlock_init)
-
-#define seqlock_init(x) \
-		do { *(x) = (seqlock_t) __SEQLOCK_UNLOCKED(x); } while (0)
-
-#define DEFINE_SEQLOCK(x) \
-		seqlock_t x = __SEQLOCK_UNLOCKED(x)
 
 /* Lock out other writers and update the count.
  * Acts like a normal spin_lock/unlock.
@@ -80,7 +73,7 @@ static inline int write_tryseqlock(seqlock_t *sl)
 }
 
 /* Start of read calculation -- fetch last complete writer token */
-static __always_inline unsigned read_seqbegin(const seqlock_t *sl)
+static inline unsigned read_seqbegin(const seqlock_t *sl)
 {
 	unsigned ret = sl->sequence;
 	smp_rmb();
@@ -95,7 +88,7 @@ static __always_inline unsigned read_seqbegin(const seqlock_t *sl)
  *    
  * Using xor saves one conditional branch.
  */
-static __always_inline int read_seqretry(const seqlock_t *sl, unsigned iv)
+static inline int read_seqretry(const seqlock_t *sl, unsigned iv)
 {
 	smp_rmb();
 	return (iv & 1) | (sl->sequence ^ iv);

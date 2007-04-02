@@ -27,10 +27,10 @@
 #include <linux/hdreg.h>
 #include <linux/kdev_t.h>
 #include <linux/blkdev.h>
+#include <linux/devfs_fs_kernel.h>
 #include <linux/mutex.h>
 
 #include <linux/mmc/card.h>
-#include <linux/mmc/host.h>
 #include <linux/mmc/protocol.h>
 
 #include <asm/system.h>
@@ -172,14 +172,13 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 		brq.cmd.arg = req->sector << 9;
 		brq.cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
+		brq.data.timeout_ns = card->csd.tacc_ns * 10;
+		brq.data.timeout_clks = card->csd.tacc_clks * 10;
 		brq.data.blksz_bits = md->block_bits;
-		brq.data.blksz = 1 << md->block_bits;
 		brq.data.blocks = req->nr_sectors >> (md->block_bits - 9);
 		brq.stop.opcode = MMC_STOP_TRANSMISSION;
 		brq.stop.arg = 0;
 		brq.stop.flags = MMC_RSP_R1B | MMC_CMD_AC;
-
-		mmc_set_data_timeout(&brq.data, card, rq_data_dir(req) != READ);
 
 		if (rq_data_dir(req) == READ) {
 			brq.cmd.opcode = brq.data.blocks > 1 ? MMC_READ_MULTIPLE_BLOCK : MMC_READ_SINGLE_BLOCK;
@@ -362,6 +361,7 @@ static struct mmc_blk_data *mmc_blk_alloc(struct mmc_card *card)
 	 */
 
 	sprintf(md->disk->disk_name, "mmcblk%d", devidx);
+	sprintf(md->disk->devfs_name, "mmc/blk%d", devidx);
 
 	blk_queue_hardsect_size(md->queue.queue, 1 << md->block_bits);
 
@@ -507,6 +507,7 @@ static int __init mmc_blk_init(void)
 	if (major == 0)
 		major = res;
 
+	devfs_mk_dir("mmc");
 	return mmc_register_driver(&mmc_driver);
 
  out:
@@ -516,6 +517,7 @@ static int __init mmc_blk_init(void)
 static void __exit mmc_blk_exit(void)
 {
 	mmc_unregister_driver(&mmc_driver);
+	devfs_remove("mmc");
 	unregister_blkdev(major, "mmc");
 }
 

@@ -25,6 +25,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -251,11 +252,12 @@ servo_probe(struct usb_interface *interface, const struct usb_device_id *id)
 	struct usb_device *udev = interface_to_usbdev(interface);
 	struct phidget_servo *dev;
 
-	dev = kzalloc(sizeof (struct phidget_servo), GFP_KERNEL);
+	dev = kmalloc(sizeof (struct phidget_servo), GFP_KERNEL);
 	if (dev == NULL) {
 		dev_err(&interface->dev, "%s - out of memory\n", __FUNCTION__);
 		return -ENOMEM;
 	}
+	memset(dev, 0x00, sizeof (*dev));
 
 	dev->udev = usb_get_dev(udev);
 	dev->type = id->driver_info;

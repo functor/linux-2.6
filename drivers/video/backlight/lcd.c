@@ -31,15 +31,12 @@ static ssize_t lcd_show_power(struct class_device *cdev, char *buf)
 
 static ssize_t lcd_store_power(struct class_device *cdev, const char *buf, size_t count)
 {
-	int rc = -ENXIO;
+	int rc, power;
 	char *endp;
 	struct lcd_device *ld = to_lcd_device(cdev);
-	int power = simple_strtoul(buf, &endp, 0);
-	size_t size = endp - buf;
 
-	if (*endp && isspace(*endp))
-		size++;
-	if (size != count)
+	power = simple_strtoul(buf, &endp, 0);
+	if (*endp && !isspace(*endp))
 		return -EINVAL;
 
 	down(&ld->sem);
@@ -47,7 +44,8 @@ static ssize_t lcd_store_power(struct class_device *cdev, const char *buf, size_
 		pr_debug("lcd: set power to %d\n", power);
 		ld->props->set_power(ld, power);
 		rc = count;
-	}
+	} else
+		rc = -ENXIO;
 	up(&ld->sem);
 
 	return rc;
@@ -55,12 +53,14 @@ static ssize_t lcd_store_power(struct class_device *cdev, const char *buf, size_
 
 static ssize_t lcd_show_contrast(struct class_device *cdev, char *buf)
 {
-	int rc = -ENXIO;
+	int rc;
 	struct lcd_device *ld = to_lcd_device(cdev);
 
 	down(&ld->sem);
 	if (likely(ld->props && ld->props->get_contrast))
 		rc = sprintf(buf, "%d\n", ld->props->get_contrast(ld));
+	else
+		rc = -ENXIO;
 	up(&ld->sem);
 
 	return rc;
@@ -68,15 +68,12 @@ static ssize_t lcd_show_contrast(struct class_device *cdev, char *buf)
 
 static ssize_t lcd_store_contrast(struct class_device *cdev, const char *buf, size_t count)
 {
-	int rc = -ENXIO;
+	int rc, contrast;
 	char *endp;
 	struct lcd_device *ld = to_lcd_device(cdev);
-	int contrast = simple_strtoul(buf, &endp, 0);
-	size_t size = endp - buf;
 
-	if (*endp && isspace(*endp))
-		size++;
-	if (size != count)
+	contrast = simple_strtoul(buf, &endp, 0);
+	if (*endp && !isspace(*endp))
 		return -EINVAL;
 
 	down(&ld->sem);
@@ -84,7 +81,8 @@ static ssize_t lcd_store_contrast(struct class_device *cdev, const char *buf, si
 		pr_debug("lcd: set contrast to %d\n", contrast);
 		ld->props->set_contrast(ld, contrast);
 		rc = count;
-	}
+	} else
+		rc = -ENXIO;
 	up(&ld->sem);
 
 	return rc;
@@ -92,12 +90,14 @@ static ssize_t lcd_store_contrast(struct class_device *cdev, const char *buf, si
 
 static ssize_t lcd_show_max_contrast(struct class_device *cdev, char *buf)
 {
-	int rc = -ENXIO;
+	int rc;
 	struct lcd_device *ld = to_lcd_device(cdev);
 
 	down(&ld->sem);
 	if (likely(ld->props))
 		rc = sprintf(buf, "%d\n", ld->props->max_contrast);
+	else
+		rc = -ENXIO;
 	up(&ld->sem);
 
 	return rc;

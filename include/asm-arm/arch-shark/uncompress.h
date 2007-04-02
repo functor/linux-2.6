@@ -9,7 +9,7 @@
 
 #define SERIAL_BASE ((volatile unsigned char *)0x400003f8)
 
-static inline void putc(int c)
+static __inline__ void putc(char c)
 {
 	int t;
 
@@ -18,8 +18,17 @@ static inline void putc(int c)
 	while (t--);
 }
 
-static inline void flush(void)
+/*
+ * This does not append a newline
+ */
+static void putstr(const char *s)
 {
+	while (*s) {
+		putc(*s);
+		if (*s == '\n')
+			putc('\r');
+		s++;
+	}
 }
 
 #ifdef DEBUG

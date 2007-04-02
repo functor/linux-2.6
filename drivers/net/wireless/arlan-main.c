@@ -5,6 +5,7 @@
  * This module provides support for the Arlan 655 card made by Aironet
  */
 
+#include <linux/config.h>
 #include "arlan.h"
 
 #if BITS_PER_LONG != 32
@@ -1837,7 +1838,7 @@ struct net_device * __init arlan_probe(int unit)
 }
 
 #ifdef  MODULE
-int __init init_module(void)
+int init_module(void)
 {
 	int i = 0;
 
@@ -1859,7 +1860,7 @@ int __init init_module(void)
 }
 
 
-void __exit cleanup_module(void)
+void cleanup_module(void)
 {
 	int i = 0;
 	struct net_device *dev;

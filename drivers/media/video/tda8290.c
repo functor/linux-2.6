@@ -569,7 +569,7 @@ int tda8290_init(struct i2c_client *c)
 		strlcpy(c->name, "tda8290+75a", sizeof(c->name));
 		t->tda827x_ver = 2;
 	}
-	tuner_info("type set to %s\n", c->name);
+	tuner_info("tuner: type set to %s\n", c->name);
 
 	t->set_tv_freq    = set_tv_freq;
 	t->set_radio_freq = set_radio_freq;

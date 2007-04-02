@@ -39,6 +39,7 @@
 #define read_barrier_depends()  do { } while(0)
 
 #define set_mb(var, value)	do { var = value; mb(); } while (0)
+#define set_wmb(var, value)	do { var = value; wmb(); } while (0)
 
 #ifdef __KERNEL__
 #ifdef CONFIG_SMP
@@ -52,15 +53,6 @@
 #define smp_wmb()	barrier()
 #define smp_read_barrier_depends()	do { } while(0)
 #endif /* CONFIG_SMP */
-
-/*
- * This is a barrier which prevents following instructions from being
- * started until the value of the argument x is known.  For example, if
- * x is a variable loaded from memory, this prevents following
- * instructions from being executed until the load has been performed.
- */
-#define data_barrier(x)	\
-	asm volatile("twi 0,%0,0; isync" : : "r" (x) : "memory");
 
 struct task_struct;
 struct pt_regs;
@@ -179,8 +171,6 @@ extern u32 booke_wdt_period;
 
 /* EBCDIC -> ASCII conversion for [0-9A-Z] on iSeries */
 extern unsigned char e2a(unsigned char);
-extern unsigned char* strne2a(unsigned char *dest,
-		const unsigned char *src, size_t n);
 
 struct device_node;
 extern void note_scsi_host(struct device_node *, void *);
@@ -228,8 +218,8 @@ __xchg_u32(volatile void *p, unsigned long val)
 "	stwcx.	%3,0,%2 \n\
 	bne-	1b"
 	ISYNC_ON_SMP
-	: "=&r" (prev), "+m" (*(volatile unsigned int *)p)
-	: "r" (p), "r" (val)
+	: "=&r" (prev), "=m" (*(volatile unsigned int *)p)
+	: "r" (p), "r" (val), "m" (*(volatile unsigned int *)p)
 	: "cc", "memory");
 
 	return prev;
@@ -248,8 +238,8 @@ __xchg_u64(volatile void *p, unsigned long val)
 "	stdcx.	%3,0,%2 \n\
 	bne-	1b"
 	ISYNC_ON_SMP
-	: "=&r" (prev), "+m" (*(volatile unsigned long *)p)
-	: "r" (p), "r" (val)
+	: "=&r" (prev), "=m" (*(volatile unsigned long *)p)
+	: "r" (p), "r" (val), "m" (*(volatile unsigned long *)p)
 	: "cc", "memory");
 
 	return prev;
@@ -307,8 +297,8 @@ __cmpxchg_u32(volatile unsigned int *p, unsigned long old, unsigned long new)
 	ISYNC_ON_SMP
 	"\n\
 2:"
-	: "=&r" (prev), "+m" (*p)
-	: "r" (p), "r" (old), "r" (new)
+	: "=&r" (prev), "=m" (*p)
+	: "r" (p), "r" (old), "r" (new), "m" (*p)
 	: "cc", "memory");
 
 	return prev;
@@ -330,8 +320,8 @@ __cmpxchg_u64(volatile unsigned long *p, unsigned long old, unsigned long new)
 	ISYNC_ON_SMP
 	"\n\
 2:"
-	: "=&r" (prev), "+m" (*p)
-	: "r" (p), "r" (old), "r" (new)
+	: "=&r" (prev), "=m" (*p)
+	: "r" (p), "r" (old), "r" (new), "m" (*p)
 	: "cc", "memory");
 
 	return prev;
@@ -373,11 +363,8 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new,
  * powers of 2 writes until it reaches sufficient alignment).
  *
  * Based on this we disable the IP header alignment in network drivers.
- * We also modify NET_SKB_PAD to be a cacheline in size, thus maintaining
- * cacheline alignment of buffers.
  */
-#define NET_IP_ALIGN	0
-#define NET_SKB_PAD	L1_CACHE_BYTES
+#define NET_IP_ALIGN   0
 #endif
 
 #define arch_align_stack(x) (x)
@@ -436,10 +423,6 @@ static inline void create_function_call(unsigned long addr, void * func)
 #endif
 	create_branch(addr, func_addr, BRANCH_SET_LINK);
 }
-
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING
-extern void account_system_vtime(struct task_struct *);
-#endif
 
 #endif /* __KERNEL__ */
 #endif /* _ASM_POWERPC_SYSTEM_H */

@@ -7,6 +7,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -22,7 +23,6 @@
 #include <linux/initrd.h>
 #include <linux/bootmem.h>
 #include <linux/blkdev.h>
-#include <linux/pfn.h>
 
 #include <asm/segment.h>
 #include <asm/mach-types.h>
@@ -100,6 +100,12 @@ struct node_info {
 	unsigned int end;
 	int bootmap_pages;
 };
+
+#define PFN_DOWN(x)	((x) >> PAGE_SHIFT)
+#define PFN_UP(x)	(PAGE_ALIGN(x) >> PAGE_SHIFT)
+#define PFN_SIZE(x)	((x) >> PAGE_SHIFT)
+#define PFN_RANGE(s,e)	PFN_SIZE(PAGE_ALIGN((unsigned long)(e)) - \
+				(((unsigned long)(s)) & PAGE_MASK))
 
 /*
  * FIXME: We really want to avoid allocating the bootmap bitmap
@@ -318,7 +324,7 @@ static inline void free_area(unsigned long addr, unsigned long end, char *s)
 	for (; addr < end; addr += PAGE_SIZE) {
 		struct page *page = virt_to_page(addr);
 		ClearPageReserved(page);
-		init_page_count(page);
+		set_page_count(page, 1);
 		free_page(addr);
 		totalram_pages++;
 	}

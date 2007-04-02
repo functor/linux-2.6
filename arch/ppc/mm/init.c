@@ -18,6 +18,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -139,7 +140,7 @@ static void free_sec(unsigned long start, unsigned long end, const char *name)
 
 	while (start < end) {
 		ClearPageReserved(virt_to_page(start));
-		init_page_count(virt_to_page(start));
+		set_page_count(virt_to_page(start), 1);
 		free_page(start);
 		cnt++;
 		start += PAGE_SIZE;
@@ -171,7 +172,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 
 	for (; start < end; start += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(start));
-		init_page_count(virt_to_page(start));
+		set_page_count(virt_to_page(start), 1);
 		free_page(start);
 		totalram_pages++;
 	}
@@ -411,6 +412,14 @@ void __init mem_init(void)
 	}
 #endif /* CONFIG_BLK_DEV_INITRD */
 
+#ifdef CONFIG_PPC_OF
+	/* mark the RTAS pages as reserved */
+	if ( rtas_data )
+		for (addr = (ulong)__va(rtas_data);
+		     addr < PAGE_ALIGN((ulong)__va(rtas_data)+rtas_size) ;
+		     addr += PAGE_SIZE)
+			SetPageReserved(virt_to_page(addr));
+#endif
 	for (addr = PAGE_OFFSET; addr < (unsigned long)high_memory;
 	     addr += PAGE_SIZE) {
 		if (!PageReserved(virt_to_page(addr)))
@@ -432,7 +441,7 @@ void __init mem_init(void)
 			struct page *page = mem_map + pfn;
 
 			ClearPageReserved(page);
-			init_page_count(page);
+			set_page_count(page, 1);
 			__free_page(page);
 			totalhigh_pages++;
 		}
@@ -485,6 +494,11 @@ set_phys_avail(unsigned long total_memory)
 				  initrd_end - initrd_start, 1);
 	}
 #endif /* CONFIG_BLK_DEV_INITRD */
+#ifdef CONFIG_PPC_OF
+	/* remove the RTAS pages from the available memory */
+	if (rtas_data)
+		mem_pieces_remove(&phys_avail, rtas_data, rtas_size, 1);
+#endif
 }
 
 /* Mark some memory as reserved by removing it from phys_avail. */
@@ -582,7 +596,7 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 		mm = (address < TASK_SIZE)? vma->vm_mm: &init_mm;
 		pmd = pmd_offset(pgd_offset(mm, address), address);
 		if (!pmd_none(*pmd))
-			add_hash_page(mm->context.id, address, pmd_val(*pmd));
+			add_hash_page(mm->context, address, pmd_val(*pmd));
 	}
 #endif
 }

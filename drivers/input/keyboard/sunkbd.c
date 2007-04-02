@@ -226,7 +226,7 @@ static void sunkbd_reinit(void *data)
 static void sunkbd_enable(struct sunkbd *sunkbd, int enable)
 {
 	serio_pause_rx(sunkbd->serio);
-	sunkbd->enabled = 1;
+	sunkbd->enabled = enable;
 	serio_continue_rx(sunkbd->serio);
 }
 
@@ -263,7 +263,7 @@ static int sunkbd_connect(struct serio *serio, struct serio_driver *drv)
 		goto fail;
 	}
 
-	snprintf(sunkbd->name, sizeof(sunkbd->name), "Sun Type %d keyboard", sunkbd->type);
+	sprintf(sunkbd->name, "Sun Type %d keyboard", sunkbd->type);
 	memcpy(sunkbd->keycode, sunkbd_keycode, sizeof(sunkbd->keycode));
 
 	input_dev->name = sunkbd->name;

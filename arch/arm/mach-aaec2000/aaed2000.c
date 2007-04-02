@@ -79,12 +79,7 @@ static void __init aaed2000_init(void)
 }
 
 static struct map_desc aaed2000_io_desc[] __initdata = {
-	{
-		.virtual	= EXT_GPIO_VBASE,
-		.pfn            = __phys_to_pfn(EXT_GPIO_PBASE),
-		.length         = EXT_GPIO_LENGTH,
-		.type           = MT_DEVICE
-	},
+  { EXT_GPIO_VBASE, EXT_GPIO_PBASE, EXT_GPIO_LENGTH, MT_DEVICE }, /* Ext GPIO */
 };
 
 static void __init aaed2000_map_io(void)

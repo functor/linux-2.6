@@ -78,6 +78,8 @@
  *
  */
 
+/* make checkconfig does not verify included files... */
+#include <linux/config.h>
 
 #include "matroxfb_Ti3026.h"
 #include "matroxfb_misc.h"

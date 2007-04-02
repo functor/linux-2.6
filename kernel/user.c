@@ -105,19 +105,15 @@ void free_uid(struct user_struct *up)
 {
 	unsigned long flags;
 
-	if (!up)
-		return;
-
 	local_irq_save(flags);
-	if (atomic_dec_and_lock(&up->__count, &uidhash_lock)) {
+	if (up && atomic_dec_and_lock(&up->__count, &uidhash_lock)) {
 		uid_hash_remove(up);
-		spin_unlock_irqrestore(&uidhash_lock, flags);
 		key_put(up->uid_keyring);
 		key_put(up->session_keyring);
 		kmem_cache_free(uid_cachep, up);
-	} else {
-		local_irq_restore(flags);
+		spin_unlock(&uidhash_lock);
 	}
+	local_irq_restore(flags);
 }
 
 struct user_struct * alloc_uid(xid_t xid, uid_t uid)
@@ -141,7 +137,7 @@ struct user_struct * alloc_uid(xid_t xid, uid_t uid)
 		atomic_set(&new->processes, 0);
 		atomic_set(&new->files, 0);
 		atomic_set(&new->sigpending, 0);
-#ifdef CONFIG_INOTIFY_USER
+#ifdef CONFIG_INOTIFY
 		atomic_set(&new->inotify_watches, 0);
 		atomic_set(&new->inotify_devs, 0);
 #endif
@@ -149,7 +145,7 @@ struct user_struct * alloc_uid(xid_t xid, uid_t uid)
 		new->mq_bytes = 0;
 		new->locked_shm = 0;
 
-		if (alloc_uid_keyring(new, current) < 0) {
+		if (alloc_uid_keyring(new) < 0) {
 			kmem_cache_free(uid_cachep, new);
 			return NULL;
 		}

@@ -1,8 +1,6 @@
 #ifndef __ARCH_S390_ATOMIC__
 #define __ARCH_S390_ATOMIC__
 
-#include <linux/compiler.h>
-
 /*
  *  include/asm-s390/atomic.h
  *
@@ -91,15 +89,10 @@ static __inline__ int atomic_cmpxchg(atomic_t *v, int old, int new)
 static __inline__ int atomic_add_unless(atomic_t *v, int a, int u)
 {
 	int c, old;
+
 	c = atomic_read(v);
-	for (;;) {
-		if (unlikely(c == u))
-			break;
-		old = atomic_cmpxchg(v, c, c + a);
-		if (likely(old == c))
-			break;
+	while (c != u && (old = atomic_cmpxchg(v, c, c + a)) != c)
 		c = old;
-	}
 	return c != u;
 }
 
@@ -174,15 +167,10 @@ static __inline__ int atomic64_add_unless(atomic64_t *v,
 					  long long a, long long u)
 {
 	long long c, old;
+
 	c = atomic64_read(v);
-	for (;;) {
-		if (unlikely(c == u))
-			break;
-		old = atomic64_cmpxchg(v, c, c + a);
-		if (likely(old == c))
-			break;
+	while (c != u && (old = atomic64_cmpxchg(v, c, c + a)) != c)
 		c = old;
-	}
 	return c != u;
 }
 

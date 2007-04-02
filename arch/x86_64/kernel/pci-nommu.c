@@ -4,8 +4,6 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/string.h>
-#include <linux/dma-mapping.h>
-
 #include <asm/proto.h>
 #include <asm/processor.h>
 #include <asm/dma.h>
@@ -14,11 +12,9 @@ static int
 check_addr(char *name, struct device *hwdev, dma_addr_t bus, size_t size)
 {
         if (hwdev && bus + size > *hwdev->dma_mask) {
-		if (*hwdev->dma_mask >= DMA_32BIT_MASK)
-			printk(KERN_ERR
-			    "nommu_%s: overflow %Lx+%zu of device mask %Lx\n",
-				name, (long long)bus, size,
-				(long long)*hwdev->dma_mask);
+		printk(KERN_ERR
+		    "nommu_%s: overflow %Lx+%lu of device mask %Lx\n",
+	       name, (long long)bus, size, (long long)*hwdev->dma_mask);
 		return 0;
 	}
 	return 1;
@@ -92,7 +88,5 @@ void __init no_iommu_init(void)
 {
 	if (dma_ops)
 		return;
-
-	force_iommu = 0; /* no HW IOMMU */
 	dma_ops = &nommu_dma_ops;
 }

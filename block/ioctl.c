@@ -5,7 +5,6 @@
 #include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
 #include <linux/smp_lock.h>
-#include <linux/blktrace_api.h>
 #include <asm/uaccess.h>
 
 static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user *arg)
@@ -43,9 +42,9 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user 
 					return -EINVAL;
 			}
 			/* partition number in use? */
-			mutex_lock(&bdev->bd_mutex);
+			down(&bdev->bd_sem);
 			if (disk->part[part - 1]) {
-				mutex_unlock(&bdev->bd_mutex);
+				up(&bdev->bd_sem);
 				return -EBUSY;
 			}
 			/* overlap? */
@@ -56,13 +55,13 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user 
 					continue;
 				if (!(start+length <= s->start_sect ||
 				      start >= s->start_sect + s->nr_sects)) {
-					mutex_unlock(&bdev->bd_mutex);
+					up(&bdev->bd_sem);
 					return -EBUSY;
 				}
 			}
 			/* all seems OK */
 			add_partition(disk, part, start, length);
-			mutex_unlock(&bdev->bd_mutex);
+			up(&bdev->bd_sem);
 			return 0;
 		case BLKPG_DEL_PARTITION:
 			if (!disk->part[part-1])
@@ -72,9 +71,9 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user 
 			bdevp = bdget_disk(disk, part);
 			if (!bdevp)
 				return -ENOMEM;
-			mutex_lock(&bdevp->bd_mutex);
+			down(&bdevp->bd_sem);
 			if (bdevp->bd_openers) {
-				mutex_unlock(&bdevp->bd_mutex);
+				up(&bdevp->bd_sem);
 				bdput(bdevp);
 				return -EBUSY;
 			}
@@ -82,10 +81,10 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user 
 			fsync_bdev(bdevp);
 			invalidate_bdev(bdevp, 0);
 
-			mutex_lock(&bdev->bd_mutex);
+			down(&bdev->bd_sem);
 			delete_partition(disk, part);
-			mutex_unlock(&bdev->bd_mutex);
-			mutex_unlock(&bdevp->bd_mutex);
+			up(&bdev->bd_sem);
+			up(&bdevp->bd_sem);
 			bdput(bdevp);
 
 			return 0;
@@ -103,10 +102,10 @@ static int blkdev_reread_part(struct block_device *bdev)
 		return -EINVAL;
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-	if (!mutex_trylock(&bdev->bd_mutex))
+	if (down_trylock(&bdev->bd_sem))
 		return -EBUSY;
 	res = rescan_partitions(disk, bdev);
-	mutex_unlock(&bdev->bd_mutex);
+	up(&bdev->bd_sem);
 	return res;
 }
 
@@ -190,11 +189,6 @@ static int blkdev_locked_ioctl(struct file *file, struct block_device *bdev,
 		return put_ulong(arg, bdev->bd_inode->i_size >> 9);
 	case BLKGETSIZE64:
 		return put_u64(arg, bdev->bd_inode->i_size);
-	case BLKTRACESTART:
-	case BLKTRACESTOP:
-	case BLKTRACESETUP:
-	case BLKTRACETEARDOWN:
-		return blk_trace_ioctl(bdev, cmd, (char __user *) arg);
 	}
 	return -ENOIOCTLCMD;
 }

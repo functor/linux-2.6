@@ -66,6 +66,7 @@
  * by default, the selective clear mask is set up to process rx packets.  
  */
 
+#include <linux/config.h>
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -90,7 +91,6 @@
 #include <linux/mii.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
-#include <linux/mutex.h>
 
 #include <net/checksum.h>
 
@@ -191,15 +191,12 @@
 static char version[] __devinitdata =
 	DRV_MODULE_NAME ".c:v" DRV_MODULE_VERSION " (" DRV_MODULE_RELDATE ")\n";
 
-static int cassini_debug = -1;	/* -1 == use CAS_DEF_MSG_ENABLE as value */
-static int link_mode;
-
 MODULE_AUTHOR("Adrian Sun (asun@darksunrising.com)");
 MODULE_DESCRIPTION("Sun Cassini(+) ethernet driver");
 MODULE_LICENSE("GPL");
-module_param(cassini_debug, int, 0);
+MODULE_PARM(cassini_debug, "i");
 MODULE_PARM_DESC(cassini_debug, "Cassini bitmapped debugging message enable value");
-module_param(link_mode, int, 0);
+MODULE_PARM(link_mode, "i");
 MODULE_PARM_DESC(link_mode, "default link mode");
 
 /*
@@ -211,7 +208,7 @@ MODULE_PARM_DESC(link_mode, "default link mode");
  * Value in seconds, for user input.
  */
 static int linkdown_timeout = DEFAULT_LINKDOWN_TIMEOUT;
-module_param(linkdown_timeout, int, 0);
+MODULE_PARM(linkdown_timeout, "i");
 MODULE_PARM_DESC(linkdown_timeout,
 "min reset interval in sec. for PCS linkdown issue; disabled if not positive");
 
@@ -223,6 +220,8 @@ MODULE_PARM_DESC(linkdown_timeout,
 static int link_transition_timeout;
 
 
+static int cassini_debug = -1;	/* -1 == use CAS_DEF_MSG_ENABLE as value */
+static int link_mode;
 
 static u16 link_modes[] __devinitdata = {
 	BMCR_ANENABLE,			 /* 0 : autoneg */
@@ -2914,7 +2913,8 @@ static int cas_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	 */
 	static int ring; 
 
-	if (skb_padto(skb, cp->min_frame_size))
+	skb = skb_padto(skb, cp->min_frame_size);
+	if (!skb)
 		return 0;
 
 	/* XXX: we need some higher-level QoS hooks to steer packets to
@@ -3892,7 +3892,7 @@ static void cas_reset(struct cas *cp, int blkflag)
 	spin_unlock(&cp->stat_lock[N_TX_RINGS]);
 }
 
-/* Shut down the chip, must be called with pm_mutex held.  */
+/* Shut down the chip, must be called with pm_sem held.  */
 static void cas_shutdown(struct cas *cp)
 {
 	unsigned long flags;
@@ -4311,11 +4311,11 @@ static int cas_open(struct net_device *dev)
 	int hw_was_up, err;
 	unsigned long flags;
 
-	mutex_lock(&cp->pm_mutex);
+	down(&cp->pm_sem);
 
 	hw_was_up = cp->hw_running;
 
-	/* The power-management mutex protects the hw_running
+	/* The power-management semaphore protects the hw_running
 	 * etc. state so it is safe to do this bit without cp->lock
 	 */
 	if (!cp->hw_running) {
@@ -4349,7 +4349,7 @@ static int cas_open(struct net_device *dev)
 	 * mapping to expose them
 	 */
 	if (request_irq(cp->pdev->irq, cas_interrupt,
-			IRQF_SHARED, dev->name, (void *) dev)) {
+			SA_SHIRQ, dev->name, (void *) dev)) {
 		printk(KERN_ERR "%s: failed to request irq !\n", 
 		       cp->dev->name);
 		err = -EAGAIN;
@@ -4364,7 +4364,7 @@ static int cas_open(struct net_device *dev)
 	cas_unlock_all_restore(cp, flags);
 
 	netif_start_queue(dev);
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 	return 0;
 
 err_spare:
@@ -4372,7 +4372,7 @@ err_spare:
 	cas_free_rxds(cp);
 err_tx_tiny:
 	cas_tx_tiny_free(cp);
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 	return err;
 }
 
@@ -4382,7 +4382,7 @@ static int cas_close(struct net_device *dev)
 	struct cas *cp = netdev_priv(dev);
 
 	/* Make sure we don't get distracted by suspend/resume */
-	mutex_lock(&cp->pm_mutex);
+	down(&cp->pm_sem);
 
 	netif_stop_queue(dev);
 
@@ -4399,7 +4399,7 @@ static int cas_close(struct net_device *dev)
 	cas_spare_free(cp);
 	cas_free_rxds(cp);
 	cas_tx_tiny_free(cp);
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 	return 0;
 }
 
@@ -4834,10 +4834,10 @@ static int cas_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	unsigned long flags;
 	int rc = -EOPNOTSUPP;
 	
-	/* Hold the PM mutex while doing ioctl's or we may collide
+	/* Hold the PM semaphore while doing ioctl's or we may collide
 	 * with open/close and power management and oops.
 	 */
-	mutex_lock(&cp->pm_mutex);
+	down(&cp->pm_sem);
 	switch (cmd) {
 	case SIOCGMIIPHY:		/* Get address of MII PHY in use. */
 		data->phy_id = cp->phy_addr;
@@ -4867,7 +4867,7 @@ static int cas_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		break;
 	};
 
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 	return rc;
 }
 
@@ -4875,7 +4875,7 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 				  const struct pci_device_id *ent)
 {
 	static int cas_version_printed = 0;
-	unsigned long casreg_len;
+	unsigned long casreg_base, casreg_len;
 	struct net_device *dev;
 	struct cas *cp;
 	int i, err, pci_using_dac;
@@ -4887,12 +4887,13 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 
 	err = pci_enable_device(pdev);
 	if (err) {
-		dev_err(&pdev->dev, "Cannot enable PCI device, aborting.\n");
+		printk(KERN_ERR PFX "Cannot enable PCI device, "
+		       "aborting.\n");
 		return err;
 	}
 
 	if (!(pci_resource_flags(pdev, 0) & IORESOURCE_MEM)) {
-		dev_err(&pdev->dev, "Cannot find proper PCI device "
+		printk(KERN_ERR PFX "Cannot find proper PCI device "
 		       "base address, aborting.\n");
 		err = -ENODEV;
 		goto err_out_disable_pdev;
@@ -4900,7 +4901,7 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 
 	dev = alloc_etherdev(sizeof(*cp));
 	if (!dev) {
-		dev_err(&pdev->dev, "Etherdev alloc failed, aborting.\n");
+		printk(KERN_ERR PFX "Etherdev alloc failed, aborting.\n");
 		err = -ENOMEM;
 		goto err_out_disable_pdev;
 	}
@@ -4909,7 +4910,8 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 
 	err = pci_request_regions(pdev, dev->name);
 	if (err) {
-		dev_err(&pdev->dev, "Cannot obtain PCI resources, aborting.\n");
+		printk(KERN_ERR PFX "Cannot obtain PCI resources, "
+		       "aborting.\n");
 		goto err_out_free_netdev;
 	}
 	pci_set_master(pdev);
@@ -4939,7 +4941,7 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 		if (pci_write_config_byte(pdev, 
 					  PCI_CACHE_LINE_SIZE, 
 					  cas_cacheline_size)) {
-			dev_err(&pdev->dev, "Could not set PCI cache "
+			printk(KERN_ERR PFX "Could not set PCI cache "
 			       "line size\n");
 			goto err_write_cacheline;
 		}
@@ -4953,7 +4955,7 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 		err = pci_set_consistent_dma_mask(pdev,
 						  DMA_64BIT_MASK);
 		if (err < 0) {
-			dev_err(&pdev->dev, "Unable to obtain 64-bit DMA "
+			printk(KERN_ERR PFX "Unable to obtain 64-bit DMA "
 			       "for consistent allocations\n");
 			goto err_out_free_res;
 		}
@@ -4961,13 +4963,14 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 	} else {
 		err = pci_set_dma_mask(pdev, DMA_32BIT_MASK);
 		if (err) {
-			dev_err(&pdev->dev, "No usable DMA configuration, "
+			printk(KERN_ERR PFX "No usable DMA configuration, "
 			       "aborting.\n");
 			goto err_out_free_res;
 		}
 		pci_using_dac = 0;
 	}
 
+	casreg_base = pci_resource_start(pdev, 0);
 	casreg_len = pci_resource_len(pdev, 0);
 
 	cp = netdev_priv(dev);
@@ -4991,7 +4994,7 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 		spin_lock_init(&cp->tx_lock[i]);
 	}
 	spin_lock_init(&cp->stat_lock[N_TX_RINGS]);
-	mutex_init(&cp->pm_mutex);
+	init_MUTEX(&cp->pm_sem);
 
 	init_timer(&cp->link_timer);
 	cp->link_timer.function = cas_link_timer;
@@ -5019,9 +5022,10 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 	cp->timer_ticks = 0;
 
 	/* give us access to cassini registers */
-	cp->regs = pci_iomap(pdev, 0, casreg_len);
+	cp->regs = ioremap(casreg_base, casreg_len);
 	if (cp->regs == 0UL) {
-		dev_err(&pdev->dev, "Cannot map device registers, aborting.\n");
+		printk(KERN_ERR PFX "Cannot map device registers, "
+		       "aborting.\n");
 		goto err_out_free_res;
 	}
 	cp->casreg_len = casreg_len;
@@ -5037,7 +5041,8 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 		pci_alloc_consistent(pdev, sizeof(struct cas_init_block),
 				     &cp->block_dvma);
 	if (!cp->init_block) {
-		dev_err(&pdev->dev, "Cannot allocate init block, aborting.\n");
+		printk(KERN_ERR PFX "Cannot allocate init block, "
+		       "aborting.\n");
 		goto err_out_iounmap;
 	}
 
@@ -5081,7 +5086,8 @@ static int __devinit cas_init_one(struct pci_dev *pdev,
 		dev->features |= NETIF_F_HIGHDMA;
 
 	if (register_netdev(dev)) {
-		dev_err(&pdev->dev, "Cannot register net device, aborting.\n");
+		printk(KERN_ERR PFX "Cannot register net device, "
+		       "aborting.\n");
 		goto err_out_free_consistent;
 	}
 
@@ -5110,12 +5116,12 @@ err_out_free_consistent:
 			    cp->init_block, cp->block_dvma);
 
 err_out_iounmap:
-	mutex_lock(&cp->pm_mutex);
+	down(&cp->pm_sem);
 	if (cp->hw_running)
 		cas_shutdown(cp);
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 
-	pci_iounmap(pdev, cp->regs);
+	iounmap(cp->regs);
 
 
 err_out_free_res:
@@ -5146,11 +5152,11 @@ static void __devexit cas_remove_one(struct pci_dev *pdev)
 	cp = netdev_priv(dev);
 	unregister_netdev(dev);
 
-	mutex_lock(&cp->pm_mutex);
+	down(&cp->pm_sem);
 	flush_scheduled_work();
 	if (cp->hw_running)
 		cas_shutdown(cp);
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 
 #if 1
 	if (cp->orig_cacheline_size) {
@@ -5163,7 +5169,7 @@ static void __devexit cas_remove_one(struct pci_dev *pdev)
 #endif
 	pci_free_consistent(pdev, sizeof(struct cas_init_block),
 			    cp->init_block, cp->block_dvma);
-	pci_iounmap(pdev, cp->regs);
+	iounmap(cp->regs);
 	free_netdev(dev);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
@@ -5177,7 +5183,10 @@ static int cas_suspend(struct pci_dev *pdev, pm_message_t state)
 	struct cas *cp = netdev_priv(dev);
 	unsigned long flags;
 
-	mutex_lock(&cp->pm_mutex);
+	/* We hold the PM semaphore during entire driver
+	 * sleep time
+	 */
+	down(&cp->pm_sem);
 	
 	/* If the driver is opened, we stop the DMA */
 	if (cp->opened) {
@@ -5197,7 +5206,6 @@ static int cas_suspend(struct pci_dev *pdev, pm_message_t state)
 
 	if (cp->hw_running)
 		cas_shutdown(cp);
-	mutex_unlock(&cp->pm_mutex);
 
 	return 0;
 }
@@ -5209,7 +5217,6 @@ static int cas_resume(struct pci_dev *pdev)
 
 	printk(KERN_INFO "%s: resuming\n", dev->name);
 
-	mutex_lock(&cp->pm_mutex);
 	cas_hard_reset(cp);
 	if (cp->opened) {
 		unsigned long flags;
@@ -5222,7 +5229,7 @@ static int cas_resume(struct pci_dev *pdev)
 
 		netif_device_attach(dev);
 	}
-	mutex_unlock(&cp->pm_mutex);
+	up(&cp->pm_sem);
 	return 0;
 }
 #endif /* CONFIG_PM */

@@ -36,6 +36,7 @@
 
 #define DEBUG
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
@@ -477,9 +478,10 @@ dummy_alloc_request (struct usb_ep *_ep, gfp_t mem_flags)
 		return NULL;
 	ep = usb_ep_to_dummy_ep (_ep);
 
-	req = kzalloc(sizeof(*req), mem_flags);
+	req = kmalloc (sizeof *req, mem_flags);
 	if (!req)
 		return NULL;
+	memset (req, 0, sizeof *req);
 	INIT_LIST_HEAD (&req->queue);
 	return &req->req;
 }
@@ -609,8 +611,7 @@ static int dummy_dequeue (struct usb_ep *_ep, struct usb_request *_req)
 	if (!dum->driver)
 		return -ESHUTDOWN;
 
-	local_irq_save (flags);
-	spin_lock (&dum->lock);
+	spin_lock_irqsave (&dum->lock, flags);
 	list_for_each_entry (req, &ep->queue, queue) {
 		if (&req->req == _req) {
 			list_del_init (&req->queue);
@@ -619,7 +620,7 @@ static int dummy_dequeue (struct usb_ep *_ep, struct usb_request *_req)
 			break;
 		}
 	}
-	spin_unlock (&dum->lock);
+	spin_unlock_irqrestore (&dum->lock, flags);
 
 	if (retval == 0) {
 		dev_dbg (udc_dev(dum),
@@ -627,7 +628,6 @@ static int dummy_dequeue (struct usb_ep *_ep, struct usb_request *_req)
 				req, _ep->name, _req->length, _req->buf);
 		_req->complete (_ep, _req);
 	}
-	local_irq_restore (flags);
 	return retval;
 }
 

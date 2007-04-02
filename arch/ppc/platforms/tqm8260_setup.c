@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/tqm8260_setup.c
+ *
  * TQM8260 platform support
  *
  * Author: Allen Curtis <acurtis@onz.com>

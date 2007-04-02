@@ -10,6 +10,7 @@
  *
  */
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/proc_fs.h>
 #include <linux/jhash.h>
 #include <linux/bitops.h>
@@ -172,10 +173,11 @@ clusterip_config_init(struct ipt_clusterip_tgt_info *i, u_int32_t ip,
 	struct clusterip_config *c;
 	char buffer[16];
 
-	c = kzalloc(sizeof(*c), GFP_ATOMIC);
+	c = kmalloc(sizeof(*c), GFP_ATOMIC);
 	if (!c)
 		return NULL;
 
+	memset(c, 0, sizeof(*c));
 	c->dev = dev;
 	c->clusterip = ip;
 	memcpy(&c->clustermac, &i->clustermac, ETH_ALEN);
@@ -239,17 +241,25 @@ clusterip_hashfn(struct sk_buff *skb, struct clusterip_config *config)
 	struct iphdr *iph = skb->nh.iph;
 	unsigned long hashval;
 	u_int16_t sport, dport;
-	u_int16_t *ports;
+	struct tcphdr *th;
+	struct udphdr *uh;
+	struct icmphdr *ih;
 
 	switch (iph->protocol) {
 	case IPPROTO_TCP:
+		th = (void *)iph+iph->ihl*4;
+		sport = ntohs(th->source);
+		dport = ntohs(th->dest);
+		break;
 	case IPPROTO_UDP:
-	case IPPROTO_SCTP:
-	case IPPROTO_DCCP:
+		uh = (void *)iph+iph->ihl*4;
+		sport = ntohs(uh->source);
+		dport = ntohs(uh->dest);
+		break;
 	case IPPROTO_ICMP:
-		ports = (void *)iph+iph->ihl*4;
-		sport = ports[0];
-		dport = ports[1];
+		ih = (void *)iph+iph->ihl*4;
+		sport = ntohs(ih->un.echo.id);
+		dport = (ih->type<<8)|ih->code;
 		break;
 	default:
 		if (net_ratelimit()) {
@@ -301,7 +311,6 @@ target(struct sk_buff **pskb,
        const struct net_device *in,
        const struct net_device *out,
        unsigned int hooknum,
-       const struct xt_target *target,
        const void *targinfo,
        void *userinfo)
 {
@@ -371,7 +380,6 @@ target(struct sk_buff **pskb,
 static int
 checkentry(const char *tablename,
 	   const void *e_void,
-	   const struct xt_target *target,
            void *targinfo,
            unsigned int targinfosize,
            unsigned int hook_mask)
@@ -380,6 +388,13 @@ checkentry(const char *tablename,
 	const struct ipt_entry *e = e_void;
 
 	struct clusterip_config *config;
+
+	if (targinfosize != IPT_ALIGN(sizeof(struct ipt_clusterip_tgt_info))) {
+		printk(KERN_WARNING "CLUSTERIP: targinfosize %u != %Zu\n",
+		       targinfosize,
+		       IPT_ALIGN(sizeof(struct ipt_clusterip_tgt_info)));
+		return 0;
+	}
 
 	if (cipinfo->hash_mode != CLUSTERIP_HASHMODE_SIP &&
 	    cipinfo->hash_mode != CLUSTERIP_HASHMODE_SIP_SPT &&
@@ -450,10 +465,9 @@ checkentry(const char *tablename,
 }
 
 /* drop reference count of cluster config when rule is deleted */
-static void destroy(const struct xt_target *target, void *targinfo,
-		    unsigned int targinfosize)
+static void destroy(void *matchinfo, unsigned int matchinfosize)
 {
-	struct ipt_clusterip_tgt_info *cipinfo = targinfo;
+	struct ipt_clusterip_tgt_info *cipinfo = matchinfo;
 
 	/* if no more entries are referencing the config, remove it
 	 * from the list and destroy the proc entry */
@@ -462,13 +476,12 @@ static void destroy(const struct xt_target *target, void *targinfo,
 	clusterip_config_put(cipinfo->config);
 }
 
-static struct ipt_target clusterip_tgt = {
-	.name		= "CLUSTERIP",
-	.target		= target,
-	.targetsize	= sizeof(struct ipt_clusterip_tgt_info),
-	.checkentry	= checkentry,
-	.destroy	= destroy,
-	.me		= THIS_MODULE
+static struct ipt_target clusterip_tgt = { 
+	.name = "CLUSTERIP",
+	.target = &target, 
+	.checkentry = &checkentry, 
+	.destroy = &destroy,
+	.me = THIS_MODULE
 };
 
 
@@ -715,17 +728,22 @@ static struct file_operations clusterip_proc_fops = {
 
 #endif /* CONFIG_PROC_FS */
 
-static int __init ipt_clusterip_init(void)
+static int init_or_cleanup(int fini)
 {
 	int ret;
 
-	ret = ipt_register_target(&clusterip_tgt);
-	if (ret < 0)
-		return ret;
+	if (fini)
+		goto cleanup;
 
-	ret = nf_register_hook(&cip_arp_ops);
-	if (ret < 0)
+	if (ipt_register_target(&clusterip_tgt)) {
+		ret = -EINVAL;
+		goto cleanup_none;
+	}
+
+	if (nf_register_hook(&cip_arp_ops) < 0) {
+		ret = -EINVAL;
 		goto cleanup_target;
+	}
 
 #ifdef CONFIG_PROC_FS
 	clusterip_procdir = proc_mkdir("ipt_CLUSTERIP", proc_net);
@@ -738,25 +756,32 @@ static int __init ipt_clusterip_init(void)
 
 	printk(KERN_NOTICE "ClusterIP Version %s loaded successfully\n",
 		CLUSTERIP_VERSION);
+
 	return 0;
 
-cleanup_hook:
-	nf_unregister_hook(&cip_arp_ops);
-cleanup_target:
-	ipt_unregister_target(&clusterip_tgt);
-	return ret;
-}
-
-static void __exit ipt_clusterip_fini(void)
-{
+cleanup:
 	printk(KERN_NOTICE "ClusterIP Version %s unloading\n",
 		CLUSTERIP_VERSION);
 #ifdef CONFIG_PROC_FS
 	remove_proc_entry(clusterip_procdir->name, clusterip_procdir->parent);
 #endif
+cleanup_hook:
 	nf_unregister_hook(&cip_arp_ops);
+cleanup_target:
 	ipt_unregister_target(&clusterip_tgt);
+cleanup_none:
+	return -EINVAL;
 }
 
-module_init(ipt_clusterip_init);
-module_exit(ipt_clusterip_fini);
+static int __init init(void)
+{
+	return init_or_cleanup(0);
+}
+
+static void __exit fini(void)
+{
+	init_or_cleanup(1);
+}
+
+module_init(init);
+module_exit(fini);

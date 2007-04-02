@@ -26,7 +26,7 @@
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #if defined(CONFIG_SND_SEQUENCER) || defined(CONFIG_SND_SEQUENCER_MODULE)
 #include "seq_device.h"
@@ -46,7 +46,6 @@
 
 struct snd_rawmidi;
 struct snd_rawmidi_substream;
-struct snd_seq_port_info;
 
 struct snd_rawmidi_ops {
 	int (*open) (struct snd_rawmidi_substream * substream);
@@ -58,8 +57,6 @@ struct snd_rawmidi_ops {
 struct snd_rawmidi_global_ops {
 	int (*dev_register) (struct snd_rawmidi * rmidi);
 	int (*dev_unregister) (struct snd_rawmidi * rmidi);
-	void (*get_port_info)(struct snd_rawmidi *rmidi, int number,
-			      struct snd_seq_port_info *info);
 };
 
 struct snd_rawmidi_runtime {
@@ -133,7 +130,7 @@ struct snd_rawmidi {
 	void *private_data;
 	void (*private_free) (struct snd_rawmidi *rmidi);
 
-	struct mutex open_mutex;
+	struct semaphore open_mutex;
 	wait_queue_head_t open_wait;
 
 	struct snd_info_entry *dev;

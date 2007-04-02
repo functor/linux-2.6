@@ -14,6 +14,7 @@
  * */
 
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/kernel_stat.h>
 #include <linux/delay.h>
@@ -130,6 +131,7 @@ thread(void *unused)
 	init_timer(&wakeup_timer);
 
 	sigfillset(&current->blocked);
+	current->signal->tty = NULL;
 
 	printk(KERN_NOTICE "Voyager starting monitor thread\n");
 

@@ -27,8 +27,6 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
-
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/control.h>
@@ -208,7 +206,7 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
 		mask = AC97_SC_SPSR_MASK;
 	}
 
-	mutex_lock(&ac97->reg_mutex);
+	down(&ac97->reg_mutex);
 	old = snd_ac97_read(ac97, reg) & mask;
 	if (old != bits) {
 		snd_ac97_update_bits_nolock(ac97, AC97_EXTENDED_STATUS, AC97_EA_SPDIF, 0);
@@ -233,7 +231,7 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
 		ac97->spdif_status = sbits;
 	}
 	snd_ac97_update_bits_nolock(ac97, AC97_EXTENDED_STATUS, AC97_EA_SPDIF, AC97_EA_SPDIF);
-	mutex_unlock(&ac97->reg_mutex);
+	up(&ac97->reg_mutex);
 	return 0;
 }
 
@@ -316,8 +314,6 @@ int snd_ac97_set_rate(struct snd_ac97 *ac97, int reg, unsigned int rate)
 	}
 	return 0;
 }
-
-EXPORT_SYMBOL(snd_ac97_set_rate);
 
 static unsigned short get_pslots(struct snd_ac97 *ac97, unsigned char *rate_table, unsigned short *spdif_slots)
 {
@@ -552,8 +548,6 @@ int snd_ac97_pcm_assign(struct snd_ac97_bus *bus,
 	return 0;
 }
 
-EXPORT_SYMBOL(snd_ac97_pcm_assign);
-
 /**
  * snd_ac97_pcm_open - opens the given AC97 pcm
  * @pcm: the ac97 pcm instance
@@ -637,8 +631,6 @@ int snd_ac97_pcm_open(struct ac97_pcm *pcm, unsigned int rate,
 	return err;
 }
 
-EXPORT_SYMBOL(snd_ac97_pcm_open);
-
 /**
  * snd_ac97_pcm_close - closes the given AC97 pcm
  * @pcm: the ac97 pcm instance
@@ -663,8 +655,6 @@ int snd_ac97_pcm_close(struct ac97_pcm *pcm)
 	spin_unlock_irq(&pcm->bus->bus_lock);
 	return 0;
 }
-
-EXPORT_SYMBOL(snd_ac97_pcm_close);
 
 static int double_rate_hw_constraint_rate(struct snd_pcm_hw_params *params,
 					  struct snd_pcm_hw_rule *rule)
@@ -717,5 +707,3 @@ int snd_ac97_pcm_double_rate_rules(struct snd_pcm_runtime *runtime)
 				  SNDRV_PCM_HW_PARAM_RATE, -1);
 	return err;
 }
-
-EXPORT_SYMBOL(snd_ac97_pcm_double_rate_rules);

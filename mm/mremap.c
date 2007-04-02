@@ -98,7 +98,7 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
  	new_pte = pte_offset_map_nested(new_pmd, new_addr);
 	new_ptl = pte_lockptr(mm, new_pmd);
 	if (new_ptl != old_ptl)
-		spin_lock_nested(new_ptl, SINGLE_DEPTH_NESTING);
+		spin_lock(new_ptl);
 
 	for (; old_addr < old_end; old_pte++, old_addr += PAGE_SIZE,
 				   new_pte++, new_addr += PAGE_SIZE) {
@@ -391,8 +391,8 @@ unsigned long do_mremap(unsigned long addr,
 			if (vma->vm_flags & VM_MAYSHARE)
 				map_flags |= MAP_SHARED;
 
-			new_addr = get_unmapped_area_prot(vma->vm_file, 0, new_len,
-				vma->vm_pgoff, map_flags, vma->vm_flags & VM_EXEC);
+			new_addr = get_unmapped_area(vma->vm_file, 0, new_len,
+						vma->vm_pgoff, map_flags);
 			ret = new_addr;
 			if (new_addr & ~PAGE_MASK)
 				goto out;

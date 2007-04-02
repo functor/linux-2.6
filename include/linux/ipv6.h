@@ -1,6 +1,7 @@
 #ifndef _IPV6_H
 #define _IPV6_H
 
+#include <linux/config.h>
 #include <linux/in6.h>
 #include <asm/byteorder.h>
 
@@ -144,15 +145,6 @@ struct ipv6_devconf {
 	__s32		max_desync_factor;
 #endif
 	__s32		max_addresses;
-	__s32		accept_ra_defrtr;
-	__s32		accept_ra_pinfo;
-#ifdef CONFIG_IPV6_ROUTER_PREF
-	__s32		accept_ra_rtr_pref;
-	__s32		rtr_probe_interval;
-#ifdef CONFIG_IPV6_ROUTE_INFO
-	__s32		accept_ra_rt_info_max_plen;
-#endif
-#endif
 	void		*sysctl;
 };
 
@@ -175,11 +167,6 @@ enum {
 	DEVCONF_MAX_DESYNC_FACTOR,
 	DEVCONF_MAX_ADDRESSES,
 	DEVCONF_FORCE_MLD_VERSION,
-	DEVCONF_ACCEPT_RA_DEFRTR,
-	DEVCONF_ACCEPT_RA_PINFO,
-	DEVCONF_ACCEPT_RA_RTR_PREF,
-	DEVCONF_RTR_PROBE_INTERVAL,
-	DEVCONF_ACCEPT_RA_RT_INFO_MAX_PLEN,
 	DEVCONF_MAX
 };
 

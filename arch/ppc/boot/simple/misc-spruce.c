@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/spruce/misc.c
+ *
  * Misc. bootloader code for IBM Spruce reference platform
  *
  * Authors: Johnnie Peters <jpeters@mvista.com>
@@ -13,6 +15,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/config.h>
 #include <linux/pci.h>
 
 #include <asm/bootinfo.h>

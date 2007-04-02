@@ -464,6 +464,12 @@ typedef	struct s_GeInit {
 /*
  * public functions in skgeinit.c
  */
+extern void	SkGePollRxD(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port,
+	SK_BOOL	PollRxD);
+
 extern void	SkGePollTxD(
 	SK_AC	*pAC,
 	SK_IOC	IoC,
@@ -516,6 +522,10 @@ extern void	SkGeXmitLED(
 	int		Led,
 	int		Mode);
 
+extern void	SkGeInitRamIface(
+	SK_AC	*pAC,
+	SK_IOC	IoC);
+
 extern int	SkGeInitAssignRamToQueues(
 	SK_AC	*pAC,
 	int		ActivePort,
@@ -535,6 +545,11 @@ extern void	SkMacSoftRst(
 	int		Port);
 
 extern void	SkMacHardRst(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port);
+
+extern void	SkMacClearRst(
 	SK_AC	*pAC,
 	SK_IOC	IoC,
 	int		Port);
@@ -565,6 +580,11 @@ extern void	SkMacFlushTxFifo(
 	SK_IOC	IoC,
 	int		Port);
 
+extern void	SkMacFlushRxFifo(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port);
+
 extern void	SkMacIrq(
 	SK_AC	*pAC,
 	SK_IOC	IoC,
@@ -580,6 +600,12 @@ extern void	SkMacAutoNegLipaPhy(
 	SK_IOC	IoC,
 	int		Port,
 	SK_U16	IStatus);
+
+extern void  SkMacSetRxTxEn(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port,
+	int		Para);
 
 extern int  SkMacRxTxEnable(
 	SK_AC	*pAC,
@@ -632,6 +658,16 @@ extern void	SkXmClrExactAddr(
 	int		Port,
 	int		StartNum,
 	int		StopNum);
+
+extern void	SkXmInitDupMd(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port);
+
+extern void	SkXmInitPauseMd(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port);
 
 extern void	SkXmAutoNegLipaXmac(
 	SK_AC	*pAC,
@@ -693,6 +729,17 @@ extern int SkGmCableDiagStatus(
 	int		Port,
 	SK_BOOL	StartTest);
 
+extern int SkGmEnterLowPowerMode(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port,
+	SK_U8	Mode);
+
+extern int SkGmLeaveLowPowerMode(
+	SK_AC	*pAC,
+	SK_IOC	IoC,
+	int		Port);
+
 #ifdef SK_DIAG
 extern void	SkGePhyRead(
 	SK_AC	*pAC,
@@ -735,6 +782,7 @@ extern void	SkXmSendCont(
 /*
  * public functions in skgeinit.c
  */
+extern void	SkGePollRxD();
 extern void	SkGePollTxD();
 extern void	SkGeYellowLED();
 extern int	SkGeCfgSync();
@@ -744,6 +792,7 @@ extern int	SkGeInit();
 extern void	SkGeDeInit();
 extern int	SkGeInitPort();
 extern void	SkGeXmitLED();
+extern void	SkGeInitRamIface();
 extern int	SkGeInitAssignRamToQueues();
 
 /*
@@ -752,15 +801,18 @@ extern int	SkGeInitAssignRamToQueues();
 extern void SkMacRxTxDisable();
 extern void	SkMacSoftRst();
 extern void	SkMacHardRst();
+extern void	SkMacClearRst();
 extern void SkMacInitPhy();
 extern int  SkMacRxTxEnable();
 extern void SkMacPromiscMode();
 extern void SkMacHashing();
 extern void SkMacIrqDisable();
 extern void	SkMacFlushTxFifo();
+extern void	SkMacFlushRxFifo();
 extern void	SkMacIrq();
 extern int	SkMacAutoNegDone();
 extern void	SkMacAutoNegLipaPhy();
+extern void SkMacSetRxTxEn();
 extern void	SkXmInitMac();
 extern void	SkXmPhyRead();
 extern void	SkXmPhyWrite();
@@ -768,6 +820,8 @@ extern void	SkGmInitMac();
 extern void	SkGmPhyRead();
 extern void	SkGmPhyWrite();
 extern void	SkXmClrExactAddr();
+extern void	SkXmInitDupMd();
+extern void	SkXmInitPauseMd();
 extern void	SkXmAutoNegLipaXmac();
 extern int	SkXmUpdateStats();
 extern int	SkGmUpdateStats();
@@ -778,6 +832,8 @@ extern int	SkGmResetCounter();
 extern int	SkXmOverflowStatus();
 extern int	SkGmOverflowStatus();
 extern int	SkGmCableDiagStatus();
+extern int	SkGmEnterLowPowerMode();
+extern int	SkGmLeaveLowPowerMode();
 
 #ifdef SK_DIAG
 extern void	SkGePhyRead();

@@ -107,13 +107,7 @@ static int snd_ctl_elem_info_compat(struct snd_ctl_file *ctl,
 	 */
 	if (get_user(data->value.enumerated.item, &data32->value.enumerated.item))
 		goto error;
-
-	snd_power_lock(ctl->card);
-	err = snd_power_wait(ctl->card, SNDRV_CTL_POWER_D0);
-	if (err >= 0)
-		err = snd_ctl_elem_info(ctl, data);
-	snd_power_unlock(ctl->card);
-
+	err = snd_ctl_elem_info(ctl, data);
 	if (err < 0)
 		goto error;
 	/* restore info to 32bit */
@@ -292,14 +286,9 @@ static int snd_ctl_elem_read_user_compat(struct snd_card *card,
 
 	if ((err = copy_ctl_value_from_user(card, data, data32, &type, &count)) < 0)
 		goto error;
-
-	snd_power_lock(card);
-	err = snd_power_wait(card, SNDRV_CTL_POWER_D0);
-	if (err >= 0)
-		err = snd_ctl_elem_read(card, data);
-	snd_power_unlock(card);
-	if (err >= 0)
-		err = copy_ctl_value_to_user(data32, data, type, count);
+	if ((err = snd_ctl_elem_read(card, data)) < 0)
+		goto error;
+	err = copy_ctl_value_to_user(data32, data, type, count);
  error:
 	kfree(data);
 	return err;
@@ -309,23 +298,17 @@ static int snd_ctl_elem_write_user_compat(struct snd_ctl_file *file,
 					  struct snd_ctl_elem_value32 __user *data32)
 {
 	struct snd_ctl_elem_value *data;
-	struct snd_card *card = file->card;
 	int err, type, count;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (data == NULL)
 		return -ENOMEM;
 
-	if ((err = copy_ctl_value_from_user(card, data, data32, &type, &count)) < 0)
+	if ((err = copy_ctl_value_from_user(file->card, data, data32, &type, &count)) < 0)
 		goto error;
-
-	snd_power_lock(card);
-	err = snd_power_wait(card, SNDRV_CTL_POWER_D0);
-	if (err >= 0)
-		err = snd_ctl_elem_write(card, file, data);
-	snd_power_unlock(card);
-	if (err >= 0)
-		err = copy_ctl_value_to_user(data32, data, type, count);
+	if ((err = snd_ctl_elem_write(file->card, file, data)) < 0)
+		goto error;
+	err = copy_ctl_value_to_user(data32, data, type, count);
  error:
 	kfree(data);
 	return err;

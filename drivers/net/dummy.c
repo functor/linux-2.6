@@ -28,6 +28,7 @@
 			Alan Cox, 30th May 1994
 */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
@@ -132,7 +133,6 @@ static int __init dummy_init_module(void)
 	for (i = 0; i < numdummies && !err; i++)
 		err = dummy_init_one(i); 
 	if (err) { 
-		i--;
 		while (--i >= 0)
 			dummy_free_one(i);
 	}

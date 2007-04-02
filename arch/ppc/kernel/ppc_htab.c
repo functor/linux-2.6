@@ -10,6 +10,7 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
@@ -51,7 +52,7 @@ static int ppc_htab_open(struct inode *inode, struct file *file)
 	return single_open(file, ppc_htab_show, NULL);
 }
 
-const struct file_operations ppc_htab_operations = {
+struct file_operations ppc_htab_operations = {
 	.open		= ppc_htab_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
@@ -103,7 +104,7 @@ static char *pmc2_lookup(unsigned long mmcr0)
 static int ppc_htab_show(struct seq_file *m, void *v)
 {
 	unsigned long mmcr0 = 0, pmc1 = 0, pmc2 = 0;
-#if defined(CONFIG_PPC_STD_MMU)
+#if defined(CONFIG_PPC_STD_MMU) && !defined(CONFIG_PPC64BRIDGE)
 	unsigned int kptes = 0, uptes = 0;
 	PTE *ptr;
 #endif /* CONFIG_PPC_STD_MMU */
@@ -132,6 +133,7 @@ static int ppc_htab_show(struct seq_file *m, void *v)
 		return 0;
 	}
 
+#ifndef CONFIG_PPC64BRIDGE
 	for (ptr = Hash; ptr < Hash_end; ptr++) {
 		unsigned int mctx, vsid;
 
@@ -145,6 +147,7 @@ static int ppc_htab_show(struct seq_file *m, void *v)
 		else
 			uptes++;
 	}
+#endif
 
 	seq_printf(m,
 		      "PTE Hash Table Information\n"
@@ -152,16 +155,20 @@ static int ppc_htab_show(struct seq_file *m, void *v)
 		      "Buckets\t\t: %lu\n"
  		      "Address\t\t: %08lx\n"
 		      "Entries\t\t: %lu\n"
+#ifndef CONFIG_PPC64BRIDGE
 		      "User ptes\t: %u\n"
 		      "Kernel ptes\t: %u\n"
 		      "Percent full\t: %lu%%\n"
+#endif
                       , (unsigned long)(Hash_size>>10),
 		      (Hash_size/(sizeof(PTE)*8)),
 		      (unsigned long)Hash,
 		      Hash_size/sizeof(PTE)
+#ifndef CONFIG_PPC64BRIDGE
                       , uptes,
 		      kptes,
 		      ((kptes+uptes)*100) / (Hash_size/sizeof(PTE))
+#endif
 		);
 
 	seq_printf(m,

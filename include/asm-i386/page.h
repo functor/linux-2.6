@@ -12,6 +12,7 @@
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
+#include <linux/config.h>
 
 #ifdef CONFIG_X86_USE_3DNOW
 
@@ -96,8 +97,6 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 #ifndef __ASSEMBLY__
 
-struct vm_area_struct;
-
 /*
  * This much address space is reserved for vmalloc() and iomap()
  * as well as fixmap mappings.
@@ -108,32 +107,23 @@ extern int sysctl_legacy_va_layout;
 
 extern int page_is_ram(unsigned long pagenr);
 
-extern int devmem_is_allowed(unsigned long pagenr);
-
 #endif /* __ASSEMBLY__ */
 
-#ifdef __ASSEMBLY__
 #define __PAGE_OFFSET		CONFIG_PAGE_OFFSET
 #define __PHYSICAL_START	CONFIG_PHYSICAL_START
-#else
-#define __PAGE_OFFSET		((unsigned long)CONFIG_PAGE_OFFSET)
-#define __PHYSICAL_START	((unsigned long)CONFIG_PHYSICAL_START)
-#endif
 #define __KERNEL_START		(__PAGE_OFFSET + __PHYSICAL_START)
-
-/*
- * Under exec-shield we don't use the generic fixmap gate area.
- * The vDSO ("gate area") has a normal vma found the normal ways.
- */
-#define __HAVE_ARCH_GATE_AREA	1
+#define __MAXMEM		(-__PAGE_OFFSET-__VMALLOC_RESERVE)
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
+#define PHYSICAL_START		((unsigned long)__PHYSICAL_START)
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
-#define MAXMEM			(-__PAGE_OFFSET-__VMALLOC_RESERVE)
+#define MAXMEM			((unsigned long)__MAXMEM)
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
 #ifdef CONFIG_FLATMEM
+#define pfn_to_page(pfn)	(mem_map + (pfn))
+#define page_to_pfn(page)	((unsigned long)((page) - mem_map))
 #define pfn_valid(pfn)		((pfn) < max_mapnr)
 #endif /* CONFIG_FLATMEM */
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
@@ -145,10 +135,8 @@ extern int devmem_is_allowed(unsigned long pagenr);
 	((current->personality & READ_IMPLIES_EXEC) ? VM_EXEC : 0 ) | \
 		 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#include <asm-generic/memory_model.h>
-#include <asm-generic/page.h>
-
-#define __HAVE_ARCH_GATE_AREA 1
 #endif /* __KERNEL__ */
+
+#include <asm-generic/page.h>
 
 #endif /* _I386_PAGE_H */

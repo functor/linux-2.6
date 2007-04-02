@@ -41,16 +41,16 @@
 #include <linux/types.h>
 #include <linux/interrupt.h>
 #include <linux/workqueue.h>
-#include <linux/net.h>
+#include <linux/random.h>
 
 #include <linux/sunrpc/clnt.h>
-#include <linux/sunrpc/metrics.h>
 
 /*
  * Local variables
  */
 
 #ifdef RPC_DEBUG
+# undef  RPC_DEBUG_DATA
 # define RPCDBG_FACILITY	RPCDBG_XPRT
 #endif
 
@@ -548,7 +548,6 @@ void xprt_connect(struct rpc_task *task)
 
 		task->tk_timeout = xprt->connect_timeout;
 		rpc_sleep_on(&xprt->pending, task, xprt_connect_status, NULL);
-		xprt->stat.connect_start = jiffies;
 		xprt->ops->connect(task);
 	}
 	return;
@@ -559,8 +558,6 @@ static void xprt_connect_status(struct rpc_task *task)
 	struct rpc_xprt	*xprt = task->tk_xprt;
 
 	if (task->tk_status >= 0) {
-		xprt->stat.connect_count++;
-		xprt->stat.connect_time += (long)jiffies - xprt->stat.connect_start;
 		dprintk("RPC: %4d xprt_connect_status: connection established\n",
 				task->tk_pid);
 		return;
@@ -604,14 +601,16 @@ static void xprt_connect_status(struct rpc_task *task)
 struct rpc_rqst *xprt_lookup_rqst(struct rpc_xprt *xprt, u32 xid)
 {
 	struct list_head *pos;
+	struct rpc_rqst	*req = NULL;
 
 	list_for_each(pos, &xprt->recv) {
 		struct rpc_rqst *entry = list_entry(pos, struct rpc_rqst, rq_list);
-		if (entry->rq_xid == xid)
-			return entry;
+		if (entry->rq_xid == xid) {
+			req = entry;
+			break;
+		}
 	}
-	xprt->stat.bad_xids++;
-	return NULL;
+	return req;
 }
 
 /**
@@ -647,12 +646,7 @@ void xprt_complete_rqst(struct rpc_task *task, int copied)
 	dprintk("RPC: %5u xid %08x complete (%d bytes received)\n",
 			task->tk_pid, ntohl(req->rq_xid), copied);
 
-	task->tk_xprt->stat.recvs++;
-	task->tk_rtt = (long)jiffies - req->rq_xtime;
-
 	list_del_init(&req->rq_list);
-	/* Ensure all writes are done before we update req->rq_received */
-	smp_wmb();
 	req->rq_received = req->rq_private_buf.len = copied;
 	rpc_wake_up_task(task);
 }
@@ -707,9 +701,12 @@ out_unlock:
 	return err;
 }
 
-void xprt_end_transmit(struct rpc_task *task)
+void
+xprt_abort_transmit(struct rpc_task *task)
 {
-	xprt_release_write(task->tk_xprt, task);
+	struct rpc_xprt	*xprt = task->tk_xprt;
+
+	xprt_release_write(xprt, task);
 }
 
 /**
@@ -726,6 +723,7 @@ void xprt_transmit(struct rpc_task *task)
 
 	dprintk("RPC: %4d xprt_transmit(%u)\n", task->tk_pid, req->rq_slen);
 
+	smp_rmb();
 	if (!req->rq_received) {
 		if (list_empty(&req->rq_list)) {
 			spin_lock_bh(&xprt->transport_lock);
@@ -746,18 +744,13 @@ void xprt_transmit(struct rpc_task *task)
 	if (status == 0) {
 		dprintk("RPC: %4d xmit complete\n", task->tk_pid);
 		spin_lock_bh(&xprt->transport_lock);
-
 		xprt->ops->set_retrans_timeout(task);
-
-		xprt->stat.sends++;
-		xprt->stat.req_u += xprt->stat.sends - xprt->stat.recvs;
-		xprt->stat.bklog_u += xprt->backlog.qlen;
-
 		/* Don't race with disconnect */
 		if (!xprt_connected(xprt))
 			task->tk_status = -ENOTCONN;
 		else if (!req->rq_received)
 			rpc_sleep_on(&xprt->pending, task, NULL, xprt_timer);
+		xprt->ops->release_xprt(xprt, task);
 		spin_unlock_bh(&xprt->transport_lock);
 		return;
 	}
@@ -767,8 +760,18 @@ void xprt_transmit(struct rpc_task *task)
 	 *	 schedq, and being picked up by a parallel run of rpciod().
 	 */
 	task->tk_status = status;
-	if (status == -ECONNREFUSED)
+
+	switch (status) {
+	case -ECONNREFUSED:
 		rpc_sleep_on(&xprt->sending, task, NULL, NULL);
+	case -EAGAIN:
+	case -ENOTCONN:
+		return;
+	default:
+		break;
+	}
+	xprt_release_write(xprt, task);
+	return;
 }
 
 static inline void do_xprt_reserve(struct rpc_task *task)
@@ -815,7 +818,7 @@ static inline u32 xprt_alloc_xid(struct rpc_xprt *xprt)
 
 static inline void xprt_init_xid(struct rpc_xprt *xprt)
 {
-	xprt->xid = net_random();
+	get_random_bytes(&xprt->xid, sizeof(xprt->xid));
 }
 
 static void xprt_request_init(struct rpc_task *task, struct rpc_xprt *xprt)
@@ -845,7 +848,6 @@ void xprt_release(struct rpc_task *task)
 
 	if (!(req = task->tk_rqstp))
 		return;
-	rpc_count_iostats(task);
 	spin_lock_bh(&xprt->transport_lock);
 	xprt->ops->release_xprt(xprt, task);
 	if (xprt->ops->release_request)
@@ -893,8 +895,9 @@ static struct rpc_xprt *xprt_setup(int proto, struct sockaddr_in *ap, struct rpc
 	struct rpc_xprt	*xprt;
 	struct rpc_rqst	*req;
 
-	if ((xprt = kzalloc(sizeof(struct rpc_xprt), GFP_KERNEL)) == NULL)
+	if ((xprt = kmalloc(sizeof(struct rpc_xprt), GFP_KERNEL)) == NULL)
 		return ERR_PTR(-ENOMEM);
+	memset(xprt, 0, sizeof(*xprt)); /* Nnnngh! */
 
 	xprt->addr = *ap;
 

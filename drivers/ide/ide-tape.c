@@ -424,6 +424,7 @@
 
 #define IDETAPE_VERSION "1.19"
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -432,8 +433,8 @@
 #include <linux/timer.h>
 #include <linux/mm.h>
 #include <linux/interrupt.h>
-#include <linux/jiffies.h>
 #include <linux/major.h>
+#include <linux/devfs_fs_kernel.h>
 #include <linux/errno.h>
 #include <linux/genhd.h>
 #include <linux/slab.h>
@@ -442,7 +443,6 @@
 #include <linux/smp_lock.h>
 #include <linux/completion.h>
 #include <linux/bitops.h>
-#include <linux/mutex.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
@@ -1011,7 +1011,7 @@ typedef struct ide_tape_obj {
          int debug_level; 
 } idetape_tape_t;
 
-static DEFINE_MUTEX(idetape_ref_mutex);
+static DECLARE_MUTEX(idetape_ref_sem);
 
 static struct class *idetape_sysfs_class;
 
@@ -1024,11 +1024,11 @@ static struct ide_tape_obj *ide_tape_get(struct gendisk *disk)
 {
 	struct ide_tape_obj *tape = NULL;
 
-	mutex_lock(&idetape_ref_mutex);
+	down(&idetape_ref_sem);
 	tape = ide_tape_g(disk);
 	if (tape)
 		kref_get(&tape->kref);
-	mutex_unlock(&idetape_ref_mutex);
+	up(&idetape_ref_sem);
 	return tape;
 }
 
@@ -1036,9 +1036,9 @@ static void ide_tape_release(struct kref *);
 
 static void ide_tape_put(struct ide_tape_obj *tape)
 {
-	mutex_lock(&idetape_ref_mutex);
+	down(&idetape_ref_sem);
 	kref_put(&tape->kref, ide_tape_release);
-	mutex_unlock(&idetape_ref_mutex);
+	up(&idetape_ref_sem);
 }
 
 /*
@@ -1290,11 +1290,11 @@ static struct ide_tape_obj *ide_tape_chrdev_get(unsigned int i)
 {
 	struct ide_tape_obj *tape = NULL;
 
-	mutex_lock(&idetape_ref_mutex);
+	down(&idetape_ref_sem);
 	tape = idetape_devs[i];
 	if (tape)
 		kref_get(&tape->kref);
-	mutex_unlock(&idetape_ref_mutex);
+	up(&idetape_ref_sem);
 	return tape;
 }
 
@@ -2335,7 +2335,7 @@ static ide_startstop_t idetape_rw_callback (ide_drive_t *drive)
 	}
 	if (time_after(jiffies, tape->insert_time))
 		tape->insert_speed = tape->insert_size / 1024 * HZ / (jiffies - tape->insert_time);
-	if (time_after_eq(jiffies, tape->avg_time + HZ)) {
+	if (jiffies - tape->avg_time >= HZ) {
 		tape->avg_speed = tape->avg_size * HZ / (jiffies - tape->avg_time) / 1024;
 		tape->avg_size = 0;
 		tape->avg_time = jiffies;
@@ -2496,7 +2496,7 @@ static ide_startstop_t idetape_do_request(ide_drive_t *drive,
 			} else {
 				return ide_do_reset(drive);
 			}
-		} else if (time_after(jiffies, tape->dsc_polling_start + IDETAPE_DSC_MA_THRESHOLD))
+		} else if (jiffies - tape->dsc_polling_start > IDETAPE_DSC_MA_THRESHOLD)
 			tape->dsc_polling_frequency = IDETAPE_DSC_MA_SLOW;
 		idetape_postpone_request(drive);
 		return ide_stopped;
@@ -2644,23 +2644,21 @@ static idetape_stage_t *idetape_kmalloc_stage (idetape_tape_t *tape)
 	return __idetape_kmalloc_stage(tape, 0, 0);
 }
 
-static int idetape_copy_stage_from_user (idetape_tape_t *tape, idetape_stage_t *stage, const char __user *buf, int n)
+static void idetape_copy_stage_from_user (idetape_tape_t *tape, idetape_stage_t *stage, const char __user *buf, int n)
 {
 	struct idetape_bh *bh = tape->bh;
 	int count;
-	int ret = 0;
 
 	while (n) {
 #if IDETAPE_DEBUG_BUGS
 		if (bh == NULL) {
 			printk(KERN_ERR "ide-tape: bh == NULL in "
 				"idetape_copy_stage_from_user\n");
-			return 1;
+			return;
 		}
 #endif /* IDETAPE_DEBUG_BUGS */
 		count = min((unsigned int)(bh->b_size - atomic_read(&bh->b_count)), (unsigned int)n);
-		if (copy_from_user(bh->b_data + atomic_read(&bh->b_count), buf, count))
-			ret = 1;
+		copy_from_user(bh->b_data + atomic_read(&bh->b_count), buf, count);
 		n -= count;
 		atomic_add(count, &bh->b_count);
 		buf += count;
@@ -2671,26 +2669,23 @@ static int idetape_copy_stage_from_user (idetape_tape_t *tape, idetape_stage_t *
 		}
 	}
 	tape->bh = bh;
-	return ret;
 }
 
-static int idetape_copy_stage_to_user (idetape_tape_t *tape, char __user *buf, idetape_stage_t *stage, int n)
+static void idetape_copy_stage_to_user (idetape_tape_t *tape, char __user *buf, idetape_stage_t *stage, int n)
 {
 	struct idetape_bh *bh = tape->bh;
 	int count;
-	int ret = 0;
 
 	while (n) {
 #if IDETAPE_DEBUG_BUGS
 		if (bh == NULL) {
 			printk(KERN_ERR "ide-tape: bh == NULL in "
 				"idetape_copy_stage_to_user\n");
-			return 1;
+			return;
 		}
 #endif /* IDETAPE_DEBUG_BUGS */
 		count = min(tape->b_count, n);
-		if  (copy_to_user(buf, tape->b_data, count))
-			ret = 1;
+		copy_to_user(buf, tape->b_data, count);
 		n -= count;
 		tape->b_data += count;
 		tape->b_count -= count;
@@ -2703,7 +2698,6 @@ static int idetape_copy_stage_to_user (idetape_tape_t *tape, char __user *buf, i
 			}
 		}
 	}
-	return ret;
 }
 
 static void idetape_init_merge_stage (idetape_tape_t *tape)
@@ -2764,7 +2758,7 @@ static void idetape_add_stage_tail (ide_drive_t *drive,idetape_stage_t *stage)
  */
 static void idetape_wait_for_request (ide_drive_t *drive, struct request *rq)
 {
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	idetape_tape_t *tape = drive->driver_data;
 
 #if IDETAPE_DEBUG_BUGS
@@ -3723,7 +3717,6 @@ static ssize_t idetape_chrdev_read (struct file *file, char __user *buf,
 	struct ide_tape_obj *tape = ide_tape_f(file);
 	ide_drive_t *drive = tape->drive;
 	ssize_t bytes_read,temp, actually_read = 0, rc;
-	ssize_t ret = 0;
 
 #if IDETAPE_DEBUG_LOG
 	if (tape->debug_level >= 3)
@@ -3742,8 +3735,7 @@ static ssize_t idetape_chrdev_read (struct file *file, char __user *buf,
 		return (0);
 	if (tape->merge_stage_size) {
 		actually_read = min((unsigned int)(tape->merge_stage_size), (unsigned int)count);
-		if (idetape_copy_stage_to_user(tape, buf, tape->merge_stage, actually_read))
-			ret = -EFAULT;
+		idetape_copy_stage_to_user(tape, buf, tape->merge_stage, actually_read);
 		buf += actually_read;
 		tape->merge_stage_size -= actually_read;
 		count -= actually_read;
@@ -3752,8 +3744,7 @@ static ssize_t idetape_chrdev_read (struct file *file, char __user *buf,
 		bytes_read = idetape_add_chrdev_read_request(drive, tape->capabilities.ctl);
 		if (bytes_read <= 0)
 			goto finish;
-		if (idetape_copy_stage_to_user(tape, buf, tape->merge_stage, bytes_read))
-			ret = -EFAULT;
+		idetape_copy_stage_to_user(tape, buf, tape->merge_stage, bytes_read);
 		buf += bytes_read;
 		count -= bytes_read;
 		actually_read += bytes_read;
@@ -3763,8 +3754,7 @@ static ssize_t idetape_chrdev_read (struct file *file, char __user *buf,
 		if (bytes_read <= 0)
 			goto finish;
 		temp = min((unsigned long)count, (unsigned long)bytes_read);
-		if (idetape_copy_stage_to_user(tape, buf, tape->merge_stage, temp))
-			ret = -EFAULT;
+		idetape_copy_stage_to_user(tape, buf, tape->merge_stage, temp);
 		actually_read += temp;
 		tape->merge_stage_size = bytes_read-temp;
 	}
@@ -3777,8 +3767,7 @@ finish:
 		idetape_space_over_filemarks(drive, MTFSF, 1);
 		return 0;
 	}
-
-	return (ret) ? ret : actually_read;
+	return actually_read;
 }
 
 static ssize_t idetape_chrdev_write (struct file *file, const char __user *buf,
@@ -3786,8 +3775,7 @@ static ssize_t idetape_chrdev_write (struct file *file, const char __user *buf,
 {
 	struct ide_tape_obj *tape = ide_tape_f(file);
 	ide_drive_t *drive = tape->drive;
-	ssize_t actually_written = 0;
-	ssize_t ret = 0;
+	ssize_t retval, actually_written = 0;
 
 	/* The drive is write protected. */
 	if (tape->write_prot)
@@ -3823,7 +3811,7 @@ static ssize_t idetape_chrdev_write (struct file *file, const char __user *buf,
 		 *	some drives (Seagate STT3401A) will return an error.
 		 */
 		if (drive->dsc_overlap) {
-			ssize_t retval = idetape_queue_rw_tail(drive, REQ_IDETAPE_WRITE, 0, tape->merge_stage->bh);
+			retval = idetape_queue_rw_tail(drive, REQ_IDETAPE_WRITE, 0, tape->merge_stage->bh);
 			if (retval < 0) {
 				__idetape_kfree_stage(tape->merge_stage);
 				tape->merge_stage = NULL;
@@ -3844,14 +3832,12 @@ static ssize_t idetape_chrdev_write (struct file *file, const char __user *buf,
 		}
 #endif /* IDETAPE_DEBUG_BUGS */
 		actually_written = min((unsigned int)(tape->stage_size - tape->merge_stage_size), (unsigned int)count);
-		if (idetape_copy_stage_from_user(tape, tape->merge_stage, buf, actually_written))
-				ret = -EFAULT;
+		idetape_copy_stage_from_user(tape, tape->merge_stage, buf, actually_written);
 		buf += actually_written;
 		tape->merge_stage_size += actually_written;
 		count -= actually_written;
 
 		if (tape->merge_stage_size == tape->stage_size) {
-			ssize_t retval;
 			tape->merge_stage_size = 0;
 			retval = idetape_add_chrdev_write_request(drive, tape->capabilities.ctl);
 			if (retval <= 0)
@@ -3859,9 +3845,7 @@ static ssize_t idetape_chrdev_write (struct file *file, const char __user *buf,
 		}
 	}
 	while (count >= tape->stage_size) {
-		ssize_t retval;
-		if (idetape_copy_stage_from_user(tape, tape->merge_stage, buf, tape->stage_size))
-			ret = -EFAULT;
+		idetape_copy_stage_from_user(tape, tape->merge_stage, buf, tape->stage_size);
 		buf += tape->stage_size;
 		count -= tape->stage_size;
 		retval = idetape_add_chrdev_write_request(drive, tape->capabilities.ctl);
@@ -3871,11 +3855,10 @@ static ssize_t idetape_chrdev_write (struct file *file, const char __user *buf,
 	}
 	if (count) {
 		actually_written += count;
-		if (idetape_copy_stage_from_user(tape, tape->merge_stage, buf, count))
-			ret = -EFAULT;
+		idetape_copy_stage_from_user(tape, tape->merge_stage, buf, count);
 		tape->merge_stage_size += count;
 	}
-	return (ret) ? ret : actually_written;
+	return (actually_written);
 }
 
 static int idetape_write_filemark (ide_drive_t *drive)
@@ -4724,6 +4707,9 @@ static void ide_tape_release(struct kref *kref)
 			MKDEV(IDETAPE_MAJOR, tape->minor));
 	class_device_destroy(idetape_sysfs_class,
 			MKDEV(IDETAPE_MAJOR, tape->minor + 128));
+	devfs_remove("%s/mt", drive->devfs_name);
+	devfs_remove("%s/mtn", drive->devfs_name);
+	devfs_unregister_tape(g->number);
 	idetape_devs[tape->minor] = NULL;
 	g->private_data = NULL;
 	put_disk(g);
@@ -4884,11 +4870,11 @@ static int ide_tape_probe(ide_drive_t *drive)
 
 	drive->driver_data = tape;
 
-	mutex_lock(&idetape_ref_mutex);
+	down(&idetape_ref_sem);
 	for (minor = 0; idetape_devs[minor]; minor++)
 		;
 	idetape_devs[minor] = tape;
-	mutex_unlock(&idetape_ref_mutex);
+	up(&idetape_ref_sem);
 
 	idetape_setup(drive, tape, minor);
 
@@ -4897,6 +4883,14 @@ static int ide_tape_probe(ide_drive_t *drive)
 	class_device_create(idetape_sysfs_class, NULL,
 			MKDEV(IDETAPE_MAJOR, minor + 128), &drive->gendev, "n%s", tape->name);
 
+	devfs_mk_cdev(MKDEV(HWIF(drive)->major, minor),
+			S_IFCHR | S_IRUGO | S_IWUGO,
+			"%s/mt", drive->devfs_name);
+	devfs_mk_cdev(MKDEV(HWIF(drive)->major, minor + 128),
+			S_IFCHR | S_IRUGO | S_IWUGO,
+			"%s/mtn", drive->devfs_name);
+
+	g->number = devfs_register_tape(drive->devfs_name);
 	g->fops = &idetape_block_ops;
 	ide_register_region(g);
 

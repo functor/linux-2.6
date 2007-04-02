@@ -8,6 +8,7 @@
  *	-- Copyright (C) 2003 IBM Deutschland Entwicklung GmbH, IBM Corporation
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kdev_t.h>
@@ -437,7 +438,7 @@ tty3270_rcl_add(struct tty3270 *tp, char *input, int len)
 {
 	struct string *s;
 
-	tp->rcl_walk = NULL;
+	tp->rcl_walk = 0;
 	if (len <= 0)
 		return;
 	if (tp->rcl_nr >= tp->rcl_max) {
@@ -466,12 +467,12 @@ tty3270_rcl_backward(struct kbd_data *kbd)
 		else if (!list_empty(&tp->rcl_lines))
 			tp->rcl_walk = tp->rcl_lines.prev;
 		s = tp->rcl_walk ? 
-			list_entry(tp->rcl_walk, struct string, list) : NULL;
+			list_entry(tp->rcl_walk, struct string, list) : 0;
 		if (tp->rcl_walk) {
 			s = list_entry(tp->rcl_walk, struct string, list);
 			tty3270_update_prompt(tp, s->string, s->len);
 		} else
-			tty3270_update_prompt(tp, NULL, 0);
+			tty3270_update_prompt(tp, 0, 0);
 		tty3270_set_timer(tp, 1);
 	}
 	spin_unlock_bh(&tp->view.lock);
@@ -553,7 +554,7 @@ tty3270_read_tasklet(struct raw3270_request *rrq)
 	 * has to be emitted to the tty and for 0x6d the screen
 	 * needs to be redrawn.
 	 */
-	input = NULL;
+	input = 0;
 	len = 0;
 	if (tp->input->string[0] == 0x7d) {
 		/* Enter: write input to tty. */
@@ -567,7 +568,7 @@ tty3270_read_tasklet(struct raw3270_request *rrq)
 			tty3270_update_status(tp);
 		}
 		/* Clear input area. */
-		tty3270_update_prompt(tp, NULL, 0);
+		tty3270_update_prompt(tp, 0, 0);
 		tty3270_set_timer(tp, 1);
 	} else if (tp->input->string[0] == 0x6d) {
 		/* Display has been cleared. Redraw. */
@@ -690,14 +691,16 @@ tty3270_alloc_view(void)
 	struct tty3270 *tp;
 	int pages;
 
-	tp = kzalloc(sizeof(struct tty3270), GFP_KERNEL);
+	tp = kmalloc(sizeof(struct tty3270),GFP_KERNEL);
 	if (!tp)
 		goto out_err;
+	memset(tp, 0, sizeof(struct tty3270));
 	tp->freemem_pages =
 		kmalloc(sizeof(void *) * TTY3270_STRING_PAGES, GFP_KERNEL);
 	if (!tp->freemem_pages)
 		goto out_tp;
 	INIT_LIST_HEAD(&tp->freemem);
+	init_timer(&tp->timer);
 	for (pages = 0; pages < TTY3270_STRING_PAGES; pages++) {
 		tp->freemem_pages[pages] = (void *)
 			__get_free_pages(GFP_KERNEL|GFP_DMA, 0);
@@ -764,14 +767,16 @@ tty3270_alloc_screen(struct tty3270 *tp)
 	int lines;
 
 	size = sizeof(struct tty3270_line) * (tp->view.rows - 2);
-	tp->screen = kzalloc(size, GFP_KERNEL);
+	tp->screen = kmalloc(size, GFP_KERNEL);
 	if (!tp->screen)
 		goto out_err;
+	memset(tp->screen, 0, size);
 	for (lines = 0; lines < tp->view.rows - 2; lines++) {
 		size = sizeof(struct tty3270_cell) * tp->view.cols;
-		tp->screen[lines].cells = kzalloc(size, GFP_KERNEL);
+		tp->screen[lines].cells = kmalloc(size, GFP_KERNEL);
 		if (!tp->screen[lines].cells)
 			goto out_screen;
+		memset(tp->screen[lines].cells, 0, size);
 	}
 	return 0;
 out_screen:
@@ -807,8 +812,8 @@ tty3270_release(struct raw3270_view *view)
 	tp = (struct tty3270 *) view;
 	tty = tp->tty;
 	if (tty) {
-		tty->driver_data = NULL;
-		tp->tty = tp->kbd->tty = NULL;
+		tty->driver_data = 0;
+		tp->tty = tp->kbd->tty = 0;
 		tty_hangup(tty);
 		raw3270_put_view(&tp->view);
 	}
@@ -947,8 +952,8 @@ tty3270_close(struct tty_struct *tty, struct file * filp)
 		return;
 	tp = (struct tty3270 *) tty->driver_data;
 	if (tp) {
-		tty->driver_data = NULL;
-		tp->tty = tp->kbd->tty = NULL;
+		tty->driver_data = 0;
+		tp->tty = tp->kbd->tty = 0;
 		raw3270_put_view(&tp->view);
 	}
 }
@@ -1672,7 +1677,7 @@ tty3270_set_termios(struct tty_struct *tty, struct termios *old)
 		new = L_ECHO(tty) ? TF_INPUT: TF_INPUTN;
 		if (new != tp->inattr) {
 			tp->inattr = new;
-			tty3270_update_prompt(tp, NULL, 0);
+			tty3270_update_prompt(tp, 0, 0);
 			tty3270_set_timer(tp, 1);
 		}
 	}
@@ -1758,7 +1763,7 @@ void
 tty3270_notifier(int index, int active)
 {
 	if (active)
-		tty_register_device(tty3270_driver, index, NULL);
+		tty_register_device(tty3270_driver, index, 0);
 	else
 		tty_unregister_device(tty3270_driver, index);
 }
@@ -1783,6 +1788,7 @@ tty3270_init(void)
 	 * proc_entry, set_termios, flush_buffer, set_ldisc, write_proc
 	 */
 	driver->owner = THIS_MODULE;
+	driver->devfs_name = "ttyTUB/";
 	driver->driver_name = "ttyTUB";
 	driver->name = "ttyTUB";
 	driver->major = IBM_TTY3270_MAJOR;
@@ -1790,7 +1796,7 @@ tty3270_init(void)
 	driver->type = TTY_DRIVER_TYPE_SYSTEM;
 	driver->subtype = SYSTEM_TYPE_TTY;
 	driver->init_termios = tty_std_termios;
-	driver->flags = TTY_DRIVER_RESET_TERMIOS | TTY_DRIVER_DYNAMIC_DEV;
+	driver->flags = TTY_DRIVER_RESET_TERMIOS | TTY_DRIVER_NO_DEVFS;
 	tty_set_operations(driver, &tty3270_ops);
 	ret = tty_register_driver(driver);
 	if (ret) {
@@ -1817,7 +1823,7 @@ tty3270_exit(void)
 
 	raw3270_unregister_notifier(tty3270_notifier);
 	driver = tty3270_driver;
-	tty3270_driver = NULL;
+	tty3270_driver = 0;
 	tty_unregister_driver(driver);
 	tty3270_del_views();
 }

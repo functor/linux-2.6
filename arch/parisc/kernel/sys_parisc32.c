@@ -9,6 +9,7 @@
  * environment. Based heavily on sys_ia32.c and sys_sparc32.c.
  */
 
+#include <linux/config.h>
 #include <linux/compat.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -20,6 +21,7 @@
 #include <linux/times.h>
 #include <linux/utsname.h>
 #include <linux/time.h>
+#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -237,19 +239,14 @@ int sys32_settimeofday(struct compat_timeval __user *tv, struct timezone __user 
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *statbuf)
 {
-	compat_ino_t ino;
 	int err;
 
 	if (stat->size > MAX_NON_LFS || !new_valid_dev(stat->dev) ||
 	    !new_valid_dev(stat->rdev))
 		return -EOVERFLOW;
 
-	ino = stat->ino;
-	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
-		return -EOVERFLOW;
-
 	err  = put_user(new_encode_dev(stat->dev), &statbuf->st_dev);
-	err |= put_user(ino, &statbuf->st_ino);
+	err |= put_user(stat->ino, &statbuf->st_ino);
 	err |= put_user(stat->mode, &statbuf->st_mode);
 	err |= put_user(stat->nlink, &statbuf->st_nlink);
 	err |= put_user(0, &statbuf->st_reserved1);
@@ -317,20 +314,16 @@ filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
 	struct linux32_dirent __user * dirent;
 	struct getdents32_callback * buf = (struct getdents32_callback *) __buf;
 	int reclen = ROUND_UP(NAME_OFFSET(dirent) + namlen + 1, 4);
-	u32 d_ino;
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
-		return -EOVERFLOW;
 	dirent = buf->previous;
 	if (dirent)
 		put_user(offset, &dirent->d_off);
 	dirent = buf->current_dir;
 	buf->previous = dirent;
-	put_user(d_ino, &dirent->d_ino);
+	put_user(ino, &dirent->d_ino);
 	put_user(reclen, &dirent->d_reclen);
 	copy_to_user(dirent->d_name, name, namlen);
 	put_user(0, dirent->d_name + namlen);
@@ -380,16 +373,12 @@ fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, ino_t 
 {
 	struct readdir32_callback * buf = (struct readdir32_callback *) __buf;
 	struct old_linux32_dirent __user * dirent;
-	u32 d_ino;
 
 	if (buf->count)
 		return -EINVAL;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
-		return -EOVERFLOW;
 	buf->count++;
 	dirent = buf->dirent;
-	put_user(d_ino, &dirent->d_ino);
+	put_user(ino, &dirent->d_ino);
 	put_user(offset, &dirent->d_offset);
 	put_user(namlen, &dirent->d_namlen);
 	copy_to_user(dirent->d_name, name, namlen);
@@ -575,6 +564,63 @@ asmlinkage int sys32_sendfile64(int out_fd, int in_fd, compat_loff_t __user *off
 		return -EFAULT;
 		
 	return ret;
+}
+
+
+struct timex32 {
+	unsigned int modes;	/* mode selector */
+	int offset;		/* time offset (usec) */
+	int freq;		/* frequency offset (scaled ppm) */
+	int maxerror;		/* maximum error (usec) */
+	int esterror;		/* estimated error (usec) */
+	int status;		/* clock command/status */
+	int constant;		/* pll time constant */
+	int precision;		/* clock precision (usec) (read only) */
+	int tolerance;		/* clock frequency tolerance (ppm)
+				 * (read only)
+				 */
+	struct compat_timeval time;	/* (read only) */
+	int tick;		/* (modified) usecs between clock ticks */
+
+	int ppsfreq;           /* pps frequency (scaled ppm) (ro) */
+	int jitter;            /* pps jitter (us) (ro) */
+	int shift;              /* interval duration (s) (shift) (ro) */
+	int stabil;            /* pps stability (scaled ppm) (ro) */
+	int jitcnt;            /* jitter limit exceeded (ro) */
+	int calcnt;            /* calibration intervals (ro) */
+	int errcnt;            /* calibration errors (ro) */
+	int stbcnt;            /* stability limit exceeded (ro) */
+
+	int  :32; int  :32; int  :32; int  :32;
+	int  :32; int  :32; int  :32; int  :32;
+	int  :32; int  :32; int  :32; int  :32;
+};
+
+asmlinkage long sys32_adjtimex(struct timex32 __user *txc_p32)
+{
+	struct timex txc;
+	struct timex32 t32;
+	int ret;
+	extern int do_adjtimex(struct timex *txc);
+
+	if(copy_from_user(&t32, txc_p32, sizeof(struct timex32)))
+		return -EFAULT;
+#undef CP
+#define CP(x) txc.x = t32.x
+	CP(modes); CP(offset); CP(freq); CP(maxerror); CP(esterror);
+	CP(status); CP(constant); CP(precision); CP(tolerance);
+	CP(time.tv_sec); CP(time.tv_usec); CP(tick); CP(ppsfreq); CP(jitter);
+	CP(shift); CP(stabil); CP(jitcnt); CP(calcnt); CP(errcnt);
+	CP(stbcnt);
+	ret = do_adjtimex(&txc);
+#undef CP
+#define CP(x) t32.x = txc.x
+	CP(modes); CP(offset); CP(freq); CP(maxerror); CP(esterror);
+	CP(status); CP(constant); CP(precision); CP(tolerance);
+	CP(time.tv_sec); CP(time.tv_usec); CP(tick); CP(ppsfreq); CP(jitter);
+	CP(shift); CP(stabil); CP(jitcnt); CP(calcnt); CP(errcnt);
+	CP(stbcnt);
+	return copy_to_user(txc_p32, &t32, sizeof(struct timex32)) ? -EFAULT : ret;
 }
 
 

@@ -11,6 +11,7 @@
 #ifndef _XTENSA_SYSTEM_H
 #define _XTENSA_SYSTEM_H
 
+#include <linux/config.h>
 #include <linux/stringify.h>
 
 #include <asm/processor.h>
@@ -99,6 +100,7 @@ static inline void disable_coprocessor(int i)
 #endif
 
 #define set_mb(var, value)	do { var = value; mb(); } while (0)
+#define set_wmb(var, value)	do { var = value; wmb(); } while (0)
 
 #if !defined (__ASSEMBLY__)
 
@@ -108,6 +110,8 @@ static inline void disable_coprocessor(int i)
 extern void *_switch_to(void *last, void *next);
 
 #endif	/* __ASSEMBLY__ */
+
+#define prepare_to_switch()	do { } while(0)
 
 #define switch_to(prev,next,last)		\
 do {						\

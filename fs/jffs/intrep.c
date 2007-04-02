@@ -55,13 +55,14 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/jffs.h>
 #include <linux/fs.h>
 #include <linux/stat.h>
 #include <linux/pagemap.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 #include <asm/byteorder.h>
 #include <linux/smp_lock.h>
 #include <linux/time.h>
@@ -246,7 +247,7 @@ flash_safe_read(struct mtd_info *mtd, loff_t from,
 	D3(printk(KERN_NOTICE "flash_safe_read(%p, %08x, %p, %08x)\n",
 		  mtd, (unsigned int) from, buf, count));
 
-	res = mtd->read(mtd, from, count, &retlen, buf);
+	res = MTD_READ(mtd, from, count, &retlen, buf);
 	if (retlen != count) {
 		panic("Didn't read all bytes in flash_safe_read(). Returned %d\n", res);
 	}
@@ -261,7 +262,7 @@ flash_read_u32(struct mtd_info *mtd, loff_t from)
 	__u32 ret;
 	int res;
 
-	res = mtd->read(mtd, from, 4, &retlen, (unsigned char *)&ret);
+	res = MTD_READ(mtd, from, 4, &retlen, (unsigned char *)&ret);
 	if (retlen != 4) {
 		printk("Didn't read all bytes in flash_read_u32(). Returned %d\n", res);
 		return 0;
@@ -281,7 +282,7 @@ flash_safe_write(struct mtd_info *mtd, loff_t to,
 	D3(printk(KERN_NOTICE "flash_safe_write(%p, %08x, %p, %08x)\n",
 		  mtd, (unsigned int) to, buf, count));
 
-	res = mtd->write(mtd, to, count, &retlen, buf);
+	res = MTD_WRITE(mtd, to, count, &retlen, buf);
 	if (retlen != count) {
 		printk("Didn't write all bytes in flash_safe_write(). Returned %d\n", res);
 	}
@@ -299,9 +300,9 @@ flash_safe_writev(struct mtd_info *mtd, const struct kvec *vecs,
 
 	D3(printk(KERN_NOTICE "flash_safe_writev(%p, %08x, %p)\n",
 		  mtd, (unsigned int) to, vecs));
-
+	
 	if (mtd->writev) {
-		res = mtd->writev(mtd, vecs, iovec_cnt, to, &retlen);
+		res = MTD_WRITEV(mtd, vecs, iovec_cnt, to, &retlen);
 		return res ? res : retlen;
 	}
 	/* Not implemented writev. Repeatedly use write - on the not so
@@ -311,8 +312,7 @@ flash_safe_writev(struct mtd_info *mtd, const struct kvec *vecs,
 	retlen=0;
 
 	for (i=0; !res && i<iovec_cnt; i++) {
-		res = mtd->write(mtd, to, vecs[i].iov_len, &retlen_a,
-				 vecs[i].iov_base);
+		res = MTD_WRITE(mtd, to, vecs[i].iov_len, &retlen_a, vecs[i].iov_base);
 		if (retlen_a != vecs[i].iov_len) {
 			printk("Didn't write all bytes in flash_safe_writev(). Returned %d\n", res);
 			if (i != iovec_cnt-1)
@@ -393,7 +393,7 @@ flash_erase_region(struct mtd_info *mtd, loff_t start,
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	add_wait_queue(&wait_q, &wait);
 
-	if (mtd->erase(mtd, erase) < 0) {
+	if (MTD_ERASE(mtd, erase) < 0) {
 		set_current_state(TASK_RUNNING);
 		remove_wait_queue(&wait_q, &wait);
 		kfree(erase);
@@ -3416,7 +3416,7 @@ jffs_garbage_collect_thread(void *ptr)
 		D1(printk (KERN_NOTICE "jffs_garbage_collect_thread(): collecting.\n"));
 
 		D3(printk (KERN_NOTICE "g_c_thread(): down biglock\n"));
-		mutex_lock(&fmc->biglock);
+		down(&fmc->biglock);
 		
 		D1(printk("***jffs_garbage_collect_thread(): round #%u, "
 			  "fmc->dirty_size = %u\n", i++, fmc->dirty_size));
@@ -3447,6 +3447,6 @@ jffs_garbage_collect_thread(void *ptr)
 		
 	gc_end:
 		D3(printk (KERN_NOTICE "g_c_thread(): up biglock\n"));
-		mutex_unlock(&fmc->biglock);
+		up(&fmc->biglock);
 	} /* for (;;) */
 } /* jffs_garbage_collect_thread() */

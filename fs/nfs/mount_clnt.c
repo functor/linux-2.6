@@ -49,12 +49,9 @@ nfsroot_mount(struct sockaddr_in *addr, char *path, struct nfs_fh *fh,
 	struct mnt_fhstatus	result = {
 		.fh		= fh
 	};
-	struct rpc_message msg	= {
-		.rpc_argp	= path,
-		.rpc_resp	= &result,
-	};
 	char			hostname[32];
 	int			status;
+	int			call;
 
 	dprintk("NFS:      nfs_mount(%08x:%s)\n",
 			(unsigned)ntohl(addr->sin_addr.s_addr), path);
@@ -64,12 +61,8 @@ nfsroot_mount(struct sockaddr_in *addr, char *path, struct nfs_fh *fh,
 	if (IS_ERR(mnt_clnt))
 		return PTR_ERR(mnt_clnt);
 
-	if (version == NFS_MNT3_VERSION)
-		msg.rpc_proc = &mnt_clnt->cl_procinfo[MOUNTPROC3_MNT];
-	else
-		msg.rpc_proc = &mnt_clnt->cl_procinfo[MNTPROC_MNT];
-
-	status = rpc_call_sync(mnt_clnt, &msg, 0);
+	call = (version == NFS_MNT3_VERSION) ? MOUNTPROC3_MNT : MNTPROC_MNT;
+	status = rpc_call(mnt_clnt, call, path, &result, 0);
 	return status < 0? status : (result.status? -EACCES : 0);
 }
 
@@ -91,7 +84,6 @@ mnt_create(char *hostname, struct sockaddr_in *srvaddr, int version,
 		clnt->cl_softrtry = 1;
 		clnt->cl_oneshot  = 1;
 		clnt->cl_intr = 1;
-		clnt->cl_tagxid = 1;
 	}
 	return clnt;
 }
@@ -145,8 +137,6 @@ static struct rpc_procinfo	mnt_procedures[] = {
 	  .p_encode		= (kxdrproc_t) xdr_encode_dirpath,	
 	  .p_decode		= (kxdrproc_t) xdr_decode_fhstatus,
 	  .p_bufsiz		= MNT_dirpath_sz << 2,
-	  .p_statidx		= MNTPROC_MNT,
-	  .p_name		= "MOUNT",
 	},
 };
 
@@ -156,8 +146,6 @@ static struct rpc_procinfo mnt3_procedures[] = {
 	  .p_encode		= (kxdrproc_t) xdr_encode_dirpath,
 	  .p_decode		= (kxdrproc_t) xdr_decode_fhstatus3,
 	  .p_bufsiz		= MNT_dirpath_sz << 2,
-	  .p_statidx		= MOUNTPROC3_MNT,
-	  .p_name		= "MOUNT",
 	},
 };
 
@@ -186,7 +174,7 @@ static struct rpc_stat		mnt_stats;
 static struct rpc_program	mnt_program = {
 	.name		= "mount",
 	.number		= NFS_MNT_PROGRAM,
-	.nrvers		= ARRAY_SIZE(mnt_version),
+	.nrvers		= sizeof(mnt_version)/sizeof(mnt_version[0]),
 	.version	= mnt_version,
 	.stats		= &mnt_stats,
 };

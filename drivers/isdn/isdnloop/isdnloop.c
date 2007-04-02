@@ -9,6 +9,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -21,7 +22,7 @@ static char *isdnloop_id = "loop0";
 MODULE_DESCRIPTION("ISDN4Linux: Pseudo Driver that simulates an ISDN card");
 MODULE_AUTHOR("Fritz Elfert");
 MODULE_LICENSE("GPL");
-module_param(isdnloop_id, charp, 0);
+MODULE_PARM(isdnloop_id, "s");
 MODULE_PARM_DESC(isdnloop_id, "ID-String of first card");
 
 static int isdnloop_addcard(char *);
@@ -451,8 +452,7 @@ isdnloop_readstatus(u_char __user *buf, int len, isdnloop_card * card)
 	for (p = buf, count = 0; count < len; p++, count++) {
 		if (card->msg_buf_read == card->msg_buf_write)
 			return count;
-		if (put_user(*card->msg_buf_read++, p))
-			return -EFAULT;
+		put_user(*card->msg_buf_read++, p);
 		if (card->msg_buf_read > card->msg_buf_end)
 			card->msg_buf_read = card->msg_buf;
 	}

@@ -267,19 +267,19 @@ static struct fatent_operations fat32_ops = {
 
 static inline void lock_fat(struct msdos_sb_info *sbi)
 {
-	mutex_lock(&sbi->fat_lock);
+	down(&sbi->fat_lock);
 }
 
 static inline void unlock_fat(struct msdos_sb_info *sbi)
 {
-	mutex_unlock(&sbi->fat_lock);
+	up(&sbi->fat_lock);
 }
 
 void fat_ent_access_init(struct super_block *sb)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 
-	mutex_init(&sbi->fat_lock);
+	init_MUTEX(&sbi->fat_lock);
 
 	switch (sbi->fat_bits) {
 	case 32:

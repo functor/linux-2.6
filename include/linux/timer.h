@@ -1,11 +1,12 @@
 #ifndef _LINUX_TIMER_H
 #define _LINUX_TIMER_H
 
+#include <linux/config.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/stddef.h>
 
-struct tvec_t_base_s;
+struct timer_base_s;
 
 struct timer_list {
 	struct list_head entry;
@@ -14,16 +15,16 @@ struct timer_list {
 	void (*function)(unsigned long);
 	unsigned long data;
 
-	struct tvec_t_base_s *base;
+	struct timer_base_s *base;
 };
 
-extern struct tvec_t_base_s boot_tvec_bases;
+extern struct timer_base_s __init_timer_base;
 
 #define TIMER_INITIALIZER(_function, _expires, _data) {		\
 		.function = (_function),			\
 		.expires = (_expires),				\
 		.data = (_data),				\
-		.base = &boot_tvec_bases,			\
+		.base = &__init_timer_base,			\
 	}
 
 #define DEFINE_TIMER(_name, _function, _expires, _data)		\
@@ -68,13 +69,13 @@ extern unsigned long next_timer_interrupt(void);
  * @timer: the timer to be added
  *
  * The kernel will do a ->function(->data) callback from the
- * timer interrupt at the ->expires point in the future. The
+ * timer interrupt at the ->expired point in the future. The
  * current time is 'jiffies'.
  *
- * The timer's ->expires, ->function (and if the handler uses it, ->data)
+ * The timer's ->expired, ->function (and if the handler uses it, ->data)
  * fields must be set prior calling this function.
  *
- * Timers with an ->expires field in the past will be executed in the next
+ * Timers with an ->expired field in the past will be executed in the next
  * timer tick.
  */
 static inline void add_timer(struct timer_list *timer)
@@ -95,7 +96,6 @@ static inline void add_timer(struct timer_list *timer)
 
 extern void init_timers(void);
 extern void run_local_timers(void);
-struct hrtimer;
-extern int it_real_fn(struct hrtimer *);
+extern int it_real_fn(void *);
 
 #endif

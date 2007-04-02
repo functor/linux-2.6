@@ -25,8 +25,6 @@
 #include <linux/pci.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
-#include <linux/mutex.h>
-
 #include "bt848.h"
 #include "bttv.h"
 
@@ -110,7 +108,7 @@ struct cards {
 extern int bt878_num;
 
 struct bt878 {
-	struct mutex gpio_lock;
+	struct semaphore  gpio_lock;
 	unsigned int nr;
 	unsigned int bttv_nr;
 	struct i2c_adapter *adapter;

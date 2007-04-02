@@ -107,24 +107,11 @@ struct dentry {
 	struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	void *d_fsdata;			/* fs-specific data */
-	void *d_extra_attributes;	/* TUX-specific data */
 #ifdef CONFIG_PROFILING
 	struct dcookie_struct *d_cookie; /* cookie, if any */
 #endif
 	int d_mounted;
 	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */
-};
-
-/*
- * dentry->d_lock spinlock nesting subclasses:
- *
- * 0: normal
- * 1: nested
- */
-enum dentry_d_lock_class
-{
-	DENTRY_D_LOCK_NORMAL, /* implicitly used by plain spin_lock() APIs. */
-	DENTRY_D_LOCK_NESTED
 };
 
 struct dentry_operations {
@@ -175,8 +162,6 @@ d_iput:		no		no		no       yes
 #define DCACHE_REFERENCED	0x0008  /* Recently used, don't discard. */
 #define DCACHE_UNHASHED		0x0010	
 
-#define DCACHE_INOTIFY_PARENT_WATCHED	0x0020 /* Parent inode is watched */
-
 extern spinlock_t dcache_lock;
 
 /**
@@ -222,7 +207,6 @@ static inline int dname_external(struct dentry *dentry)
  */
 extern void d_instantiate(struct dentry *, struct inode *);
 extern struct dentry * d_instantiate_unique(struct dentry *, struct inode *);
-extern struct dentry * d_materialise_unique(struct dentry *, struct inode *);
 extern void d_delete(struct dentry *);
 
 /* allocate/de-allocate */
@@ -231,9 +215,8 @@ extern struct dentry * d_alloc_anon(struct inode *);
 extern struct dentry * d_splice_alias(struct inode *, struct dentry *);
 extern void shrink_dcache_sb(struct super_block *);
 extern void shrink_dcache_parent(struct dentry *);
-extern void shrink_dcache_for_umount(struct super_block *);
+extern void shrink_dcache_anon(struct hlist_head *);
 extern int d_invalidate(struct dentry *);
-extern void flush_dentry_attributes(void);
 
 /* only used at mount-time */
 extern struct dentry * d_alloc_root(struct inode *);
@@ -290,17 +273,12 @@ extern void d_move(struct dentry *, struct dentry *);
 /* appendix may either be NULL or be used for transname suffixes */
 extern struct dentry * d_lookup(struct dentry *, struct qstr *);
 extern struct dentry * __d_lookup(struct dentry *, struct qstr *);
-extern struct dentry * d_hash_and_lookup(struct dentry *, struct qstr *);
 
 /* validate "insecure" dentry pointer */
 extern int d_validate(struct dentry *, struct dentry *);
 
-char * __d_path( struct dentry *dentry, struct vfsmount *vfsmnt,
-		 struct dentry *root, struct vfsmount *rootmnt,
-		 char *buffer, int buflen);
-
 extern char * d_path(struct dentry *, struct vfsmount *, char *, int);
-
+  
 /* Allocation counts.. */
 
 /**

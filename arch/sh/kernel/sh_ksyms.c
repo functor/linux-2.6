@@ -1,3 +1,4 @@
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/smp.h>
 #include <linux/user.h>
@@ -36,6 +37,7 @@ EXPORT_SYMBOL(disable_irq_nosync);
 EXPORT_SYMBOL(irq_desc);
 EXPORT_SYMBOL(no_irq_type);
 
+EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strstr);
 EXPORT_SYMBOL(strlen);
 EXPORT_SYMBOL(strnlen);

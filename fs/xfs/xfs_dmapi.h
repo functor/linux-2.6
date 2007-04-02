@@ -189,6 +189,16 @@ typedef enum {
 #define AT_DELAY_FLAG(f) ((f&ATTR_NONBLOCK) ? DM_FLAGS_NDELAY : 0)
 
 
-extern struct bhv_module_vfsops xfs_dmops;
+extern struct bhv_vfsops xfs_dmops;
+
+#ifdef CONFIG_XFS_DMAPI
+void xfs_dm_init(struct file_system_type *);
+void xfs_dm_exit(struct file_system_type *);
+#define XFS_DM_INIT(fstype)	xfs_dm_init(fstype)
+#define XFS_DM_EXIT(fstype)	xfs_dm_exit(fstype)
+#else
+#define XFS_DM_INIT(fstype)
+#define XFS_DM_EXIT(fstype)
+#endif
 
 #endif  /* __XFS_DMAPI_H__ */

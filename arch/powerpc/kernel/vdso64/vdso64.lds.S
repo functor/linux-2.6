@@ -12,7 +12,6 @@ SECTIONS
 {
   . = VDSO64_LBASE + SIZEOF_HEADERS;
   .hash           : { *(.hash) }		:text
-  .gnu.hash       : { *(.gnu.hash) }
   .dynsym         : { *(.dynsym) }
   .dynstr         : { *(.dynstr) }
   .gnu.version    : { *(.gnu.version) }

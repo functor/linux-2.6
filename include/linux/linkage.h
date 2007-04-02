@@ -1,6 +1,7 @@
 #ifndef _LINUX_LINKAGE_H
 #define _LINUX_LINKAGE_H
 
+#include <linux/config.h>
 #include <asm/linkage.h>
 
 #ifdef __cplusplus
@@ -27,27 +28,17 @@
 #define ALIGN __ALIGN
 #define ALIGN_STR __ALIGN_STR
 
-#ifndef ENTRY
 #define ENTRY(name) \
   .globl name; \
   ALIGN; \
   name:
-#endif
 
 #define KPROBE_ENTRY(name) \
   .section .kprobes.text, "ax"; \
-  ENTRY(name)
+  .globl name; \
+  ALIGN; \
+  name:
 
-#ifndef END
-#define END(name) \
-  .size name, .-name
-#endif
-
-#ifndef ENDPROC
-#define ENDPROC(name) \
-  .type name, @function; \
-  END(name)
-#endif
 
 #endif
 

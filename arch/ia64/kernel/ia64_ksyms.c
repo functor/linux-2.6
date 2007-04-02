@@ -5,6 +5,7 @@
  * All other exports should be put directly after the definition.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/string.h>
@@ -42,12 +43,6 @@ EXPORT_SYMBOL(__do_clear_user);
 EXPORT_SYMBOL(__strlen_user);
 EXPORT_SYMBOL(__strncpy_from_user);
 EXPORT_SYMBOL(__strnlen_user);
-EXPORT_SYMBOL(copy_page);
-
-#define __KERNEL_SYSCALLS__
-#include <asm/unistd.h>
-EXPORT_SYMBOL_GPL(sys_execve);
-EXPORT_SYMBOL_GPL(clone);
 
 /* from arch/ia64/lib */
 extern void __divsi3(void);
@@ -68,7 +63,7 @@ EXPORT_SYMBOL(__udivdi3);
 EXPORT_SYMBOL(__moddi3);
 EXPORT_SYMBOL(__umoddi3);
 
-#if defined(CONFIG_MD_RAID456) || defined(CONFIG_MD_RAID456_MODULE)
+#if defined(CONFIG_MD_RAID5) || defined(CONFIG_MD_RAID5_MODULE)
 extern void xor_ia64_2(void);
 extern void xor_ia64_3(void);
 extern void xor_ia64_4(void);
@@ -90,9 +85,6 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
 
 #include <asm/unwind.h>
 EXPORT_SYMBOL(unw_init_running);
-
-#include <linux/efi.h>
-EXPORT_SYMBOL_GPL(efi_mem_type);
 
 #ifdef ASM_SUPPORTED
 # ifdef CONFIG_SMP

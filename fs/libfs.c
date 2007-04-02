@@ -7,8 +7,6 @@
 #include <linux/pagemap.h>
 #include <linux/mount.h>
 #include <linux/vfs.h>
-#include <linux/mutex.h>
-
 #include <asm/uaccess.h>
 
 int simple_getattr(struct vfsmount *mnt, struct dentry *dentry,
@@ -20,9 +18,9 @@ int simple_getattr(struct vfsmount *mnt, struct dentry *dentry,
 	return 0;
 }
 
-int simple_statfs(struct dentry *dentry, struct kstatfs *buf)
+int simple_statfs(struct super_block *sb, struct kstatfs *buf)
 {
-	buf->f_type = dentry->d_sb->s_magic;
+	buf->f_type = sb->s_magic;
 	buf->f_bsize = PAGE_CACHE_SIZE;
 	buf->f_namelen = NAME_MAX;
 	return 0;
@@ -150,9 +148,10 @@ static inline int do_dcache_readdir_filter(struct file * filp,
 			/* fallthrough */
 		default:
 			spin_lock(&dcache_lock);
-			if (filp->f_pos == 2)
-				list_move(q, &dentry->d_subdirs);
-
+			if (filp->f_pos == 2) {
+				list_del(q);
+				list_add(q, &dentry->d_subdirs);
+			}
 			for (p=q->next; p != &dentry->d_subdirs; p=p->next) {
 				struct dentry *next;
 				next = list_entry(p, struct dentry, d_u.d_child);
@@ -166,7 +165,8 @@ static inline int do_dcache_readdir_filter(struct file * filp,
 					return 0;
 				spin_lock(&dcache_lock);
 				/* next is still alive */
-				list_move(q, p);
+				list_del(q);
+				list_add(q, p);
 				p = q;
 				filp->f_pos++;
 			}
@@ -192,7 +192,7 @@ ssize_t generic_read_dir(struct file *filp, char __user *buf, size_t siz, loff_t
 	return -EISDIR;
 }
 
-const struct file_operations simple_dir_operations = {
+struct file_operations simple_dir_operations = {
 	.open		= dcache_dir_open,
 	.release	= dcache_dir_close,
 	.llseek		= dcache_dir_lseek,
@@ -209,9 +209,9 @@ struct inode_operations simple_dir_inode_operations = {
  * Common helper for pseudo-filesystems (sockfs, pipefs, bdev - stuff that
  * will never be mountable)
  */
-int get_sb_pseudo(struct file_system_type *fs_type, char *name,
-	struct super_operations *ops, unsigned long magic,
-	struct vfsmount *mnt)
+struct super_block *
+get_sb_pseudo(struct file_system_type *fs_type, char *name,
+	struct super_operations *ops, unsigned long magic)
 {
 	struct super_block *s = sget(fs_type, NULL, set_anon_super, NULL);
 	static struct super_operations default_ops = {.statfs = simple_statfs};
@@ -220,7 +220,7 @@ int get_sb_pseudo(struct file_system_type *fs_type, char *name,
 	struct qstr d_name = {.name = name, .len = strlen(name)};
 
 	if (IS_ERR(s))
-		return PTR_ERR(s);
+		return s;
 
 	s->s_flags = MS_NOUSER;
 	s->s_maxbytes = ~0ULL;
@@ -245,12 +245,12 @@ int get_sb_pseudo(struct file_system_type *fs_type, char *name,
 	d_instantiate(dentry, root);
 	s->s_root = dentry;
 	s->s_flags |= MS_ACTIVE;
-	return simple_set_mnt(mnt, s);
+	return s;
 
 Enomem:
 	up_write(&s->s_umount);
 	deactivate_super(s);
-	return -ENOMEM;
+	return ERR_PTR(-ENOMEM);
 }
 
 int simple_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
@@ -398,6 +398,7 @@ int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files
 		return -ENOMEM;
 	inode->i_mode = S_IFDIR | 0755;
 	inode->i_uid = inode->i_gid = 0;
+	inode->i_blksize = PAGE_CACHE_SIZE;
 	inode->i_blocks = 0;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	inode->i_op = &simple_dir_inode_operations;
@@ -419,6 +420,7 @@ int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files
 			goto out;
 		inode->i_mode = S_IFREG | files->mode;
 		inode->i_uid = inode->i_gid = 0;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		inode->i_fop = files->ops;
@@ -435,13 +437,13 @@ out:
 
 static DEFINE_SPINLOCK(pin_fs_lock);
 
-int simple_pin_fs(struct file_system_type *type, struct vfsmount **mount, int *count)
+int simple_pin_fs(char *name, struct vfsmount **mount, int *count)
 {
 	struct vfsmount *mnt = NULL;
 	spin_lock(&pin_fs_lock);
 	if (unlikely(!*mount)) {
 		spin_unlock(&pin_fs_lock);
-		mnt = vfs_kern_mount(type, 0, type->name, NULL);
+		mnt = do_kern_mount(name, 0, name, NULL);
 		if (IS_ERR(mnt))
 			return PTR_ERR(mnt);
 		spin_lock(&pin_fs_lock);
@@ -543,7 +545,7 @@ struct simple_attr {
 	char set_buf[24];
 	void *data;
 	const char *fmt;	/* format for read operation */
-	struct mutex mutex;	/* protects access to these buffers */
+	struct semaphore sem;	/* protects access to these buffers */
 };
 
 /* simple_attr_open is called by an actual attribute open file operation
@@ -560,9 +562,9 @@ int simple_attr_open(struct inode *inode, struct file *file,
 
 	attr->get = get;
 	attr->set = set;
-	attr->data = inode->i_private;
+	attr->data = inode->u.generic_ip;
 	attr->fmt = fmt;
-	mutex_init(&attr->mutex);
+	init_MUTEX(&attr->sem);
 
 	file->private_data = attr;
 
@@ -588,7 +590,7 @@ ssize_t simple_attr_read(struct file *file, char __user *buf,
 	if (!attr->get)
 		return -EACCES;
 
-	mutex_lock(&attr->mutex);
+	down(&attr->sem);
 	if (*ppos) /* continued read */
 		size = strlen(attr->get_buf);
 	else	  /* first read */
@@ -597,7 +599,7 @@ ssize_t simple_attr_read(struct file *file, char __user *buf,
 				 (unsigned long long)attr->get(attr->data));
 
 	ret = simple_read_from_buffer(buf, len, ppos, attr->get_buf, size);
-	mutex_unlock(&attr->mutex);
+	up(&attr->sem);
 	return ret;
 }
 
@@ -615,7 +617,7 @@ ssize_t simple_attr_write(struct file *file, const char __user *buf,
 	if (!attr->set)
 		return -EACCES;
 
-	mutex_lock(&attr->mutex);
+	down(&attr->sem);
 	ret = -EFAULT;
 	size = min(sizeof(attr->set_buf) - 1, len);
 	if (copy_from_user(attr->set_buf, buf, size))
@@ -626,7 +628,7 @@ ssize_t simple_attr_write(struct file *file, const char __user *buf,
 	val = simple_strtol(attr->set_buf, NULL, 0);
 	attr->set(attr->data, val);
 out:
-	mutex_unlock(&attr->mutex);
+	up(&attr->sem);
 	return ret;
 }
 

@@ -5,6 +5,7 @@
  *
  *  Bits taken from various places.
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
@@ -303,7 +304,7 @@ static inline int pdev_bad_for_parity(struct pci_dev *dev)
 static void __devinit
 pdev_fixup_device_resources(struct pci_sys_data *root, struct pci_dev *dev)
 {
-	resource_size_t offset;
+	unsigned long offset;
 	int i;
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
@@ -370,6 +371,17 @@ void __devinit pcibios_fixup_bus(struct pci_bus *bus)
 			features &= ~(PCI_COMMAND_SERR | PCI_COMMAND_PARITY);
 
 		switch (dev->class >> 8) {
+#if defined(CONFIG_ISA) || defined(CONFIG_EISA)
+		case PCI_CLASS_BRIDGE_ISA:
+		case PCI_CLASS_BRIDGE_EISA:
+			/*
+			 * If this device is an ISA bridge, set isa_bridge
+			 * to point at this device.  We will then go looking
+			 * for things like keyboard, etc.
+			 */
+			isa_bridge = dev;
+			break;
+#endif
 		case PCI_CLASS_BRIDGE_PCI:
 			pci_read_config_word(dev, PCI_BRIDGE_CONTROL, &status);
 			status |= PCI_BRIDGE_CTL_PARITY|PCI_BRIDGE_CTL_MASTER_ABORT;
@@ -528,9 +540,11 @@ static void __init pcibios_init_hw(struct hw_pci *hw)
 	int nr, busnr;
 
 	for (nr = busnr = 0; nr < hw->nr_controllers; nr++) {
-		sys = kzalloc(sizeof(struct pci_sys_data), GFP_KERNEL);
+		sys = kmalloc(sizeof(struct pci_sys_data), GFP_KERNEL);
 		if (!sys)
 			panic("PCI: unable to allocate sys data!");
+
+		memset(sys, 0, sizeof(struct pci_sys_data));
 
 		sys->hw      = hw;
 		sys->busnr   = busnr;
@@ -622,9 +636,9 @@ char * __init pcibios_setup(char *str)
  * which might be mirrored at 0x0100-0x03ff..
  */
 void pcibios_align_resource(void *data, struct resource *res,
-			    resource_size_t size, resource_size_t align)
+			    unsigned long size, unsigned long align)
 {
-	resource_size_t start = res->start;
+	unsigned long start = res->start;
 
 	if (res->flags & IORESOURCE_IO && start & 0x300)
 		start = (start + 0x3ff) & ~0x3ff;
@@ -690,6 +704,7 @@ int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
 	/*
 	 * Mark this as IO
 	 */
+	vma->vm_flags |= VM_SHM | VM_LOCKED | VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	if (remap_pfn_range(vma, vma->vm_start, phys,

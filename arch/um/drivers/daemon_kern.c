@@ -95,7 +95,18 @@ static struct transport daemon_transport = {
 static int register_daemon(void)
 {
 	register_transport(&daemon_transport);
-	return 0;
+	return(1);
 }
 
 __initcall(register_daemon);
+
+/*
+ * Overrides for Emacs so that we follow Linus's tabbing style.
+ * Emacs will notice this stuff at the end of the file and automatically
+ * adjust the settings for this buffer only.  This must remain at the end
+ * of the file.
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-file-style: "linux"
+ * End:
+ */

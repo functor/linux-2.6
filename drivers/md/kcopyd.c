@@ -12,6 +12,7 @@
 #include <asm/atomic.h>
 
 #include <linux/blkdev.h>
+#include <linux/config.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/list.h>
@@ -21,7 +22,6 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
-#include <linux/mutex.h>
 
 #include "kcopyd.h"
 
@@ -230,7 +230,8 @@ static int jobs_init(void)
 	if (!_job_cache)
 		return -ENOMEM;
 
-	_job_pool = mempool_create_slab_pool(MIN_JOBS, _job_cache);
+	_job_pool = mempool_create(MIN_JOBS, mempool_alloc_slab,
+				   mempool_free_slab, _job_cache);
 	if (!_job_pool) {
 		kmem_cache_destroy(_job_cache);
 		return -ENOMEM;
@@ -313,7 +314,7 @@ static void complete_io(unsigned long error, void *context)
 
 	if (error) {
 		if (job->rw == WRITE)
-			job->write_err |= error;
+			job->write_err &= error;
 		else
 			job->read_err = 1;
 
@@ -459,7 +460,7 @@ static void segment_complete(int read_err,
 		job->read_err = 1;
 
 	if (write_err)
-		job->write_err |= write_err;
+		job->write_err &= write_err;
 
 	/*
 	 * Only dispatch more work if there hasn't been an error.
@@ -581,68 +582,68 @@ int kcopyd_cancel(struct kcopyd_job *job, int block)
 /*-----------------------------------------------------------------
  * Unit setup
  *---------------------------------------------------------------*/
-static DEFINE_MUTEX(_client_lock);
+static DECLARE_MUTEX(_client_lock);
 static LIST_HEAD(_clients);
 
 static void client_add(struct kcopyd_client *kc)
 {
-	mutex_lock(&_client_lock);
+	down(&_client_lock);
 	list_add(&kc->list, &_clients);
-	mutex_unlock(&_client_lock);
+	up(&_client_lock);
 }
 
 static void client_del(struct kcopyd_client *kc)
 {
-	mutex_lock(&_client_lock);
+	down(&_client_lock);
 	list_del(&kc->list);
-	mutex_unlock(&_client_lock);
+	up(&_client_lock);
 }
 
-static DEFINE_MUTEX(kcopyd_init_lock);
+static DECLARE_MUTEX(kcopyd_init_lock);
 static int kcopyd_clients = 0;
 
 static int kcopyd_init(void)
 {
 	int r;
 
-	mutex_lock(&kcopyd_init_lock);
+	down(&kcopyd_init_lock);
 
 	if (kcopyd_clients) {
 		/* Already initialized. */
 		kcopyd_clients++;
-		mutex_unlock(&kcopyd_init_lock);
+		up(&kcopyd_init_lock);
 		return 0;
 	}
 
 	r = jobs_init();
 	if (r) {
-		mutex_unlock(&kcopyd_init_lock);
+		up(&kcopyd_init_lock);
 		return r;
 	}
 
 	_kcopyd_wq = create_singlethread_workqueue("kcopyd");
 	if (!_kcopyd_wq) {
 		jobs_exit();
-		mutex_unlock(&kcopyd_init_lock);
+		up(&kcopyd_init_lock);
 		return -ENOMEM;
 	}
 
 	kcopyd_clients++;
 	INIT_WORK(&_kcopyd_work, do_work, NULL);
-	mutex_unlock(&kcopyd_init_lock);
+	up(&kcopyd_init_lock);
 	return 0;
 }
 
 static void kcopyd_exit(void)
 {
-	mutex_lock(&kcopyd_init_lock);
+	down(&kcopyd_init_lock);
 	kcopyd_clients--;
 	if (!kcopyd_clients) {
 		jobs_exit();
 		destroy_workqueue(_kcopyd_wq);
 		_kcopyd_wq = NULL;
 	}
-	mutex_unlock(&kcopyd_init_lock);
+	up(&kcopyd_init_lock);
 }
 
 int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)

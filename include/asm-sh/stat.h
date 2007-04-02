@@ -60,7 +60,13 @@ struct stat64 {
 	long long	st_size;
 	unsigned long	st_blksize;
 
-	unsigned long long	st_blocks;	/* Number 512-byte blocks allocated. */
+#if defined(__BIG_ENDIAN__)
+	unsigned long	__pad4;		/* Future possible st_blocks hi bits */
+	unsigned long	st_blocks;	/* Number 512-byte blocks allocated. */
+#else /* Must be little */
+	unsigned long	st_blocks;	/* Number 512-byte blocks allocated. */
+	unsigned long	__pad4;		/* Future possible st_blocks hi bits */
+#endif
 
 	unsigned long	st_atime;
 	unsigned long	st_atime_nsec;

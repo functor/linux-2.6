@@ -8,7 +8,7 @@
 #include <net/ip.h>
 
 /* route_me_harder function, used by iptable_nat, iptable_mangle + ip_queue */
-int ip_route_me_harder(struct sk_buff **pskb, unsigned addr_type)
+int ip_route_me_harder(struct sk_buff **pskb)
 {
 	struct iphdr *iph = (*pskb)->nh.iph;
 	struct rtable *rt;
@@ -16,13 +16,10 @@ int ip_route_me_harder(struct sk_buff **pskb, unsigned addr_type)
 	struct dst_entry *odst;
 	unsigned int hh_len;
 
-	if (addr_type == RTN_UNSPEC)
-		addr_type = inet_addr_type(iph->saddr);
-
 	/* some non-standard hacks like ipt_REJECT.c:send_reset() can cause
 	 * packets with foreign saddr to appear on the NF_IP_LOCAL_OUT hook.
 	 */
-	if (addr_type == RTN_LOCAL) {
+	if (inet_addr_type(iph->saddr) == RTN_LOCAL) {
 		fl.nl_u.ip4_u.daddr = iph->daddr;
 		fl.nl_u.ip4_u.saddr = iph->saddr;
 		fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
@@ -136,7 +133,7 @@ struct ip_rt_info {
 	u_int8_t tos;
 };
 
-static void nf_ip_saveroute(const struct sk_buff *skb, struct nf_info *info)
+static void queue_save(const struct sk_buff *skb, struct nf_info *info)
 {
 	struct ip_rt_info *rt_info = nf_info_reroute(info);
 
@@ -149,7 +146,7 @@ static void nf_ip_saveroute(const struct sk_buff *skb, struct nf_info *info)
 	}
 }
 
-static int nf_ip_reroute(struct sk_buff **pskb, const struct nf_info *info)
+static int queue_reroute(struct sk_buff **pskb, const struct nf_info *info)
 {
 	const struct ip_rt_info *rt_info = nf_info_reroute(info);
 
@@ -159,60 +156,26 @@ static int nf_ip_reroute(struct sk_buff **pskb, const struct nf_info *info)
 		if (!(iph->tos == rt_info->tos
 		      && iph->daddr == rt_info->daddr
 		      && iph->saddr == rt_info->saddr))
-			return ip_route_me_harder(pskb, RTN_UNSPEC);
+			return ip_route_me_harder(pskb);
 	}
 	return 0;
 }
 
-unsigned int nf_ip_checksum(struct sk_buff *skb, unsigned int hook,
-			    unsigned int dataoff, u_int8_t protocol)
-{
-	struct iphdr *iph = skb->nh.iph;
-	unsigned int csum = 0;
-
-	switch (skb->ip_summed) {
-	case CHECKSUM_HW:
-		if (hook != NF_IP_PRE_ROUTING && hook != NF_IP_LOCAL_IN)
-			break;
-		if ((protocol == 0 && !(u16)csum_fold(skb->csum)) ||
-		    !csum_tcpudp_magic(iph->saddr, iph->daddr,
-			    	       skb->len - dataoff, protocol,
-				       skb->csum)) {
-			skb->ip_summed = CHECKSUM_UNNECESSARY;
-			break;
-		}
-		/* fall through */
-	case CHECKSUM_NONE:
-		if (protocol == 0)
-			skb->csum = 0;
-		else
-			skb->csum = csum_tcpudp_nofold(iph->saddr, iph->daddr,
-						       skb->len - dataoff,
-						       protocol, 0);
-		csum = __skb_checksum_complete(skb);
-	}
-	return csum;
-}
-
-EXPORT_SYMBOL(nf_ip_checksum);
-
-static struct nf_afinfo nf_ip_afinfo = {
-	.family		= AF_INET,
-	.checksum	= nf_ip_checksum,
-	.saveroute	= nf_ip_saveroute,
-	.reroute	= nf_ip_reroute,
-	.route_key_size	= sizeof(struct ip_rt_info),
+static struct nf_queue_rerouter ip_reroute = {
+	.rer_size	= sizeof(struct ip_rt_info),
+	.save		= queue_save,
+	.reroute	= queue_reroute,
 };
 
-static int ipv4_netfilter_init(void)
+static int init(void)
 {
-	return nf_register_afinfo(&nf_ip_afinfo);
+	return nf_register_queue_rerouter(PF_INET, &ip_reroute);
 }
 
-static void ipv4_netfilter_fini(void)
+static void fini(void)
 {
-	nf_unregister_afinfo(&nf_ip_afinfo);
+	nf_unregister_queue_rerouter(PF_INET);
 }
 
-module_init(ipv4_netfilter_init);
-module_exit(ipv4_netfilter_fini);
+module_init(init);
+module_exit(fini);

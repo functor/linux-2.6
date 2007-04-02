@@ -27,8 +27,6 @@
 #include <linux/coda_cache.h>
 #include <linux/coda_proc.h>
 
-#include "coda_int.h"
-
 /* dir inode-ops */
 static int coda_create(struct inode *dir, struct dentry *new, int mode, struct nameidata *nd);
 static struct dentry *coda_lookup(struct inode *dir, struct dentry *target, struct nameidata *nd);
@@ -52,6 +50,7 @@ static int coda_dentry_delete(struct dentry *);
 /* support routines */
 static int coda_venus_readdir(struct file *filp, filldir_t filldir,
 			      void *dirent, struct dentry *dir);
+int coda_fsync(struct file *, struct dentry *dentry, int datasync);
 
 /* same as fs/bad_inode.c */
 static int coda_return_EIO(void)
@@ -82,7 +81,7 @@ struct inode_operations coda_dir_inode_operations =
 	.setattr	= coda_setattr,
 };
 
-const struct file_operations coda_dir_operations = {
+struct file_operations coda_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
 	.readdir	= coda_readdir,

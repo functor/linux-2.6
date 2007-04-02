@@ -10,7 +10,7 @@
 
 static int efs_readdir(struct file *, void *, filldir_t);
 
-const struct file_operations efs_dir_operations = {
+struct file_operations efs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= efs_readdir,
 };

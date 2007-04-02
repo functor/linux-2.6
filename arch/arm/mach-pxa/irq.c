@@ -39,8 +39,7 @@ static void pxa_unmask_low_irq(unsigned int irq)
 	ICMR |= (1 << (irq + PXA_IRQ_SKIP));
 }
 
-static struct irq_chip pxa_internal_chip_low = {
-	.name		= "SC",
+static struct irqchip pxa_internal_chip_low = {
 	.ack		= pxa_mask_low_irq,
 	.mask		= pxa_mask_low_irq,
 	.unmask		= pxa_unmask_low_irq,
@@ -62,8 +61,7 @@ static void pxa_unmask_high_irq(unsigned int irq)
 	ICMR2 |= (1 << (irq - 32 + PXA_IRQ_SKIP));
 }
 
-static struct irq_chip pxa_internal_chip_high = {
-	.name		= "SC-hi",
+static struct irqchip pxa_internal_chip_high = {
 	.ack		= pxa_mask_high_irq,
 	.mask		= pxa_mask_high_irq,
 	.unmask		= pxa_unmask_high_irq,
@@ -90,8 +88,8 @@ static int pxa_gpio_irq_type(unsigned int irq, unsigned int type)
 
 	if (type == IRQT_PROBE) {
 	    /* Don't mess with enabled GPIOs using preconfigured edges or
-	       GPIOs set to alternate function or to output during probe */
-		if ((GPIO_IRQ_rising_edge[idx] | GPIO_IRQ_falling_edge[idx] | GPDR(gpio)) &
+	       GPIOs set to alternate function during probe */
+		if ((GPIO_IRQ_rising_edge[idx] | GPIO_IRQ_falling_edge[idx]) &
 		    GPIO_bit(gpio))
 			return 0;
 		if (GAFR(gpio) & (0x3 << (((gpio) & 0xf)*2)))
@@ -131,8 +129,7 @@ static void pxa_ack_low_gpio(unsigned int irq)
 	GEDR0 = (1 << (irq - IRQ_GPIO0));
 }
 
-static struct irq_chip pxa_low_gpio_chip = {
-	.name		= "GPIO-l",
+static struct irqchip pxa_low_gpio_chip = {
 	.ack		= pxa_ack_low_gpio,
 	.mask		= pxa_mask_low_irq,
 	.unmask		= pxa_unmask_low_irq,
@@ -240,8 +237,7 @@ static void pxa_unmask_muxed_gpio(unsigned int irq)
 	GFER(gpio) = GPIO_IRQ_falling_edge[idx] & GPIO_IRQ_mask[idx];
 }
 
-static struct irq_chip pxa_muxed_gpio_chip = {
-	.name		= "GPIO",
+static struct irqchip pxa_muxed_gpio_chip = {
 	.ack		= pxa_ack_muxed_gpio,
 	.mask		= pxa_mask_muxed_gpio,
 	.unmask		= pxa_unmask_muxed_gpio,

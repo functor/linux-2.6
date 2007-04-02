@@ -29,8 +29,6 @@
 #define MISC_MCELOG_MINOR 227
 #define NR_BANKS 6
 
-atomic_t mce_entry;
-
 static int mce_dont_init;
 
 /* 0: always panic, 1: panic if deadlock possible, 2: try to avoid panic,
@@ -141,7 +139,8 @@ static void mce_panic(char *msg, struct mce *backup, unsigned long start)
 
 static int mce_available(struct cpuinfo_x86 *c)
 {
-	return cpu_has(c, X86_FEATURE_MCE) && cpu_has(c, X86_FEATURE_MCA);
+	return test_bit(X86_FEATURE_MCE, &c->x86_capability) &&
+	       test_bit(X86_FEATURE_MCA, &c->x86_capability);
 }
 
 static inline void mce_get_rip(struct mce *m, struct pt_regs *regs)
@@ -174,12 +173,10 @@ void do_machine_check(struct pt_regs * regs, long error_code)
 	int i;
 	int panicm_found = 0;
 
-	atomic_inc(&mce_entry);
-
 	if (regs)
 		notify_die(DIE_NMI, "machine check", regs, error_code, 18, SIGKILL);
 	if (!banks)
-		goto out2;
+		return;
 
 	memset(&m, 0, sizeof(struct mce));
 	m.cpu = safe_smp_processor_id();
@@ -270,8 +267,6 @@ void do_machine_check(struct pt_regs * regs, long error_code)
  out:
 	/* Last thing done in the machine check exception to clear state. */
 	wrmsrl(MSR_IA32_MCG_STATUS, 0);
- out2:
-	atomic_dec(&mce_entry);
 }
 
 /*
@@ -507,7 +502,7 @@ static struct miscdevice mce_log_device = {
 static int __init mcheck_disable(char *str)
 {
 	mce_dont_init = 1;
-	return 1;
+	return 0;
 }
 
 /* mce=off disables machine check. Note you can reenable it later
@@ -527,7 +522,7 @@ static int __init mcheck_enable(char *str)
 		get_option(&str, &tolerant);
 	else
 		printk("mce= argument %s ignored. Please use /sys", str); 
-	return 1;
+	return 0;
 }
 
 __setup("nomce", mcheck_disable);
@@ -562,7 +557,7 @@ static struct sysdev_class mce_sysclass = {
 	set_kset_name("machinecheck"),
 };
 
-DEFINE_PER_CPU(struct sys_device, device_mce);
+static DEFINE_PER_CPU(struct sys_device, device_mce);
 
 /* Why are there no generic functions for this? */
 #define ACCESSOR(name, var, start) \
@@ -615,7 +610,7 @@ static __cpuinit int mce_create_device(unsigned int cpu)
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
-static void mce_remove_device(unsigned int cpu)
+static __cpuinit void mce_remove_device(unsigned int cpu)
 {
 	int i;
 
@@ -626,9 +621,10 @@ static void mce_remove_device(unsigned int cpu)
 	sysdev_remove_file(&per_cpu(device_mce,cpu), &attr_check_interval);
 	sysdev_unregister(&per_cpu(device_mce,cpu));
 }
+#endif
 
 /* Get notified when a cpu comes on/off. Be hotplug friendly. */
-static int
+static __cpuinit int
 mce_cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (unsigned long)hcpu;
@@ -637,9 +633,11 @@ mce_cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 	case CPU_ONLINE:
 		mce_create_device(cpu);
 		break;
+#ifdef CONFIG_HOTPLUG_CPU
 	case CPU_DEAD:
 		mce_remove_device(cpu);
 		break;
+#endif
 	}
 	return NOTIFY_OK;
 }
@@ -647,7 +645,6 @@ mce_cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 static struct notifier_block mce_cpu_notifier = {
 	.notifier_call = mce_cpu_callback,
 };
-#endif
 
 static __init int mce_init_device(void)
 {
@@ -662,7 +659,7 @@ static __init int mce_init_device(void)
 		mce_create_device(i);
 	}
 
-	register_hotcpu_notifier(&mce_cpu_notifier);
+	register_cpu_notifier(&mce_cpu_notifier);
 	misc_register(&mce_log_device);
 	return err;
 }

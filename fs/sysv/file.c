@@ -19,7 +19,7 @@
  * We have mostly NULLs here: the current defaults are OK for
  * the coh filesystem.
  */
-const struct file_operations sysv_file_operations = {
+struct file_operations sysv_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_file_read,
 	.write		= generic_file_write,

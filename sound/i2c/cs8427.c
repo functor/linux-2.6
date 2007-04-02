@@ -76,14 +76,11 @@ int snd_cs8427_reg_write(struct snd_i2c_device *device, unsigned char reg,
 	buf[0] = reg & 0x7f;
 	buf[1] = val;
 	if ((err = snd_i2c_sendbytes(device, buf, 2)) != 2) {
-		snd_printk(KERN_ERR "unable to send bytes 0x%02x:0x%02x "
-			   "to CS8427 (%i)\n", buf[0], buf[1], err);
+		snd_printk(KERN_ERR "unable to send bytes 0x%02x:0x%02x to CS8427 (%i)\n", buf[0], buf[1], err);
 		return err < 0 ? err : -EIO;
 	}
 	return 0;
 }
-
-EXPORT_SYMBOL(snd_cs8427_reg_write);
 
 static int snd_cs8427_reg_read(struct snd_i2c_device *device, unsigned char reg)
 {
@@ -91,13 +88,11 @@ static int snd_cs8427_reg_read(struct snd_i2c_device *device, unsigned char reg)
 	unsigned char buf;
 
 	if ((err = snd_i2c_sendbytes(device, &reg, 1)) != 1) {
-		snd_printk(KERN_ERR "unable to send register 0x%x byte "
-			   "to CS8427\n", reg);
+		snd_printk(KERN_ERR "unable to send register 0x%x byte to CS8427\n", reg);
 		return err < 0 ? err : -EIO;
 	}
 	if ((err = snd_i2c_readbytes(device, &buf, 1)) != 1) {
-		snd_printk(KERN_ERR "unable to read register 0x%x byte "
-			   "from CS8427\n", reg);
+		snd_printk(KERN_ERR "unable to read register 0x%x byte from CS8427\n", reg);
 		return err < 0 ? err : -EIO;
 	}
 	return buf;
@@ -126,8 +121,7 @@ static int snd_cs8427_send_corudata(struct snd_i2c_device *device,
 				    int count)
 {
 	struct cs8427 *chip = device->private_data;
-	char *hw_data = udata ?
-		chip->playback.hw_udata : chip->playback.hw_status;
+	char *hw_data = udata ? chip->playback.hw_udata : chip->playback.hw_status;
 	char data[32];
 	int err, idx;
 
@@ -140,11 +134,11 @@ static int snd_cs8427_send_corudata(struct snd_i2c_device *device,
 		memset(data, 0, sizeof(data));
 		if (memcmp(hw_data, data, count) == 0) {
 			chip->regmap[CS8427_REG_UDATABUF] &= ~CS8427_UBMMASK;
-			chip->regmap[CS8427_REG_UDATABUF] |= CS8427_UBMZEROS |
-				CS8427_EFTUI;
-			err = snd_cs8427_reg_write(device, CS8427_REG_UDATABUF,
-						   chip->regmap[CS8427_REG_UDATABUF]);
-			return err < 0 ? err : 0;
+			chip->regmap[CS8427_REG_UDATABUF] |= CS8427_UBMZEROS | CS8427_EFTUI;
+			if ((err = snd_cs8427_reg_write(device, CS8427_REG_UDATABUF,
+							chip->regmap[CS8427_REG_UDATABUF])) < 0)
+				return err;
+			return 0;
 		}
 	}
 	data[0] = CS8427_REG_AUTOINC | CS8427_REG_CORU_DATABUF;
@@ -167,32 +161,24 @@ int snd_cs8427_create(struct snd_i2c_bus *bus,
 {
 	static unsigned char initvals1[] = {
 	  CS8427_REG_CONTROL1 | CS8427_REG_AUTOINC,
-	  /* CS8427_REG_CONTROL1: RMCK to OMCK, valid PCM audio, disable mutes,
-	     TCBL=output */
+	  /* CS8427_REG_CONTROL1: RMCK to OMCK, valid PCM audio, disable mutes, TCBL=output */
 	  CS8427_SWCLK | CS8427_TCBLDIR,
-	  /* CS8427_REG_CONTROL2: hold last valid audio sample, RMCK=256*Fs,
-	     normal stereo operation */
+	  /* CS8427_REG_CONTROL2: hold last valid audio sample, RMCK=256*Fs, normal stereo operation */
 	  0x00,
-	  /* CS8427_REG_DATAFLOW: output drivers normal operation, Tx<=serial,
-	     Rx=>serial */
+	  /* CS8427_REG_DATAFLOW: output drivers normal operation, Tx<=serial, Rx=>serial */
 	  CS8427_TXDSERIAL | CS8427_SPDAES3RECEIVER,
-	  /* CS8427_REG_CLOCKSOURCE: Run off, CMCK=256*Fs,
-	     output time base = OMCK, input time base = recovered input clock,
-	     recovered input clock source is ILRCK changed to AES3INPUT
-	     (workaround, see snd_cs8427_reset) */
+	  /* CS8427_REG_CLOCKSOURCE: Run off, CMCK=256*Fs, output time base = OMCK, input time base =
+	     recovered input clock, recovered input clock source is ILRCK changed to AES3INPUT (workaround, see snd_cs8427_reset) */
 	  CS8427_RXDILRCK,
-	  /* CS8427_REG_SERIALINPUT: Serial audio input port data format = I2S,
-	     24-bit, 64*Fsi */
+	  /* CS8427_REG_SERIALINPUT: Serial audio input port data format = I2S, 24-bit, 64*Fsi */
 	  CS8427_SIDEL | CS8427_SILRPOL,
-	  /* CS8427_REG_SERIALOUTPUT: Serial audio output port data format
-	     = I2S, 24-bit, 64*Fsi */
+	  /* CS8427_REG_SERIALOUTPUT: Serial audio output port data format = I2S, 24-bit, 64*Fsi */
 	  CS8427_SODEL | CS8427_SOLRPOL,
 	};
 	static unsigned char initvals2[] = {
 	  CS8427_REG_RECVERRMASK | CS8427_REG_AUTOINC,
-	  /* CS8427_REG_RECVERRMASK: unmask the input PLL clock, V, confidence,
-	     biphase, parity status bits */
-	  /* CS8427_UNLOCK | CS8427_V | CS8427_CONF | CS8427_BIP | CS8427_PAR,*/
+	  /* CS8427_REG_RECVERRMASK: unmask the input PLL clock, V, confidence, biphase, parity status bits */
+	  /* CS8427_UNLOCK | CS8427_V | CS8427_CONF | CS8427_BIP | CS8427_PAR, */
 	  0xff, /* set everything */
 	  /* CS8427_REG_CSDATABUF:
 	     Registers 32-55 window to CS buffer
@@ -215,8 +201,7 @@ int snd_cs8427_create(struct snd_i2c_bus *bus,
 	struct snd_i2c_device *device;
 	unsigned char buf[24];
 
-	if ((err = snd_i2c_device_create(bus, "CS8427",
-					 CS8427_ADDR | (addr & 7),
+	if ((err = snd_i2c_device_create(bus, "CS8427", CS8427_ADDR | (addr & 7),
 					 &device)) < 0)
 		return err;
 	chip = device->private_data = kzalloc(sizeof(*chip), GFP_KERNEL);
@@ -227,8 +212,8 @@ int snd_cs8427_create(struct snd_i2c_bus *bus,
 	device->private_free = snd_cs8427_free;
 	
 	snd_i2c_lock(bus);
-	err = snd_cs8427_reg_read(device, CS8427_REG_ID_AND_VER);
-	if (err != CS8427_VER8427A) {
+	if ((err = snd_cs8427_reg_read(device, CS8427_REG_ID_AND_VER)) !=
+	    CS8427_VER8427A) {
 		snd_i2c_unlock(bus);
 		snd_printk(KERN_ERR "unable to find CS8427 signature "
 			   "(expected 0x%x, read 0x%x),\n",
@@ -237,8 +222,7 @@ int snd_cs8427_create(struct snd_i2c_bus *bus,
 		return -EFAULT;
 	}
 	/* turn off run bit while making changes to configuration */
-	err = snd_cs8427_reg_write(device, CS8427_REG_CLOCKSOURCE, 0x00);
-	if (err < 0)
+	if ((err = snd_cs8427_reg_write(device, CS8427_REG_CLOCKSOURCE, 0x00)) < 0)
 		goto __fail;
 	/* send initial values */
 	memcpy(chip->regmap + (initvals1[0] & 0x7f), initvals1 + 1, 6);
@@ -298,8 +282,6 @@ int snd_cs8427_create(struct snd_i2c_bus *bus,
       	return err < 0 ? err : -EIO;
 }
 
-EXPORT_SYMBOL(snd_cs8427_create);
-
 /*
  * Reset the chip using run bit, also lock PLL using ILRCK and
  * put back AES3INPUT. This workaround is described in latest
@@ -309,14 +291,11 @@ static void snd_cs8427_reset(struct snd_i2c_device *cs8427)
 {
 	struct cs8427 *chip;
 	unsigned long end_time;
-	int data, aes3input = 0;
+	int data;
 
 	snd_assert(cs8427, return);
 	chip = cs8427->private_data;
 	snd_i2c_lock(cs8427->bus);
-	if ((chip->regmap[CS8427_REG_CLOCKSOURCE] & CS8427_RXDAES3INPUT) ==
-	    CS8427_RXDAES3INPUT)  /* AES3 bit is set */
-		aes3input = 1;
 	chip->regmap[CS8427_REG_CLOCKSOURCE] &= ~(CS8427_RUN | CS8427_RXDMASK);
 	snd_cs8427_reg_write(cs8427, CS8427_REG_CLOCKSOURCE,
 			     chip->regmap[CS8427_REG_CLOCKSOURCE]);
@@ -337,8 +316,7 @@ static void snd_cs8427_reset(struct snd_i2c_device *cs8427)
 	}
 	snd_i2c_lock(cs8427->bus);
 	chip->regmap[CS8427_REG_CLOCKSOURCE] &= ~CS8427_RXDMASK;
-	if (aes3input)
-		chip->regmap[CS8427_REG_CLOCKSOURCE] |= CS8427_RXDAES3INPUT;
+	chip->regmap[CS8427_REG_CLOCKSOURCE] |= CS8427_RXDAES3INPUT;
 	snd_cs8427_reg_write(cs8427, CS8427_REG_CLOCKSOURCE,
 			     chip->regmap[CS8427_REG_CLOCKSOURCE]);
 	snd_i2c_unlock(cs8427->bus);
@@ -386,15 +364,12 @@ static int snd_cs8427_qsubcode_get(struct snd_kcontrol *kcontrol,
 
 	snd_i2c_lock(device->bus);
 	if ((err = snd_i2c_sendbytes(device, &reg, 1)) != 1) {
-		snd_printk(KERN_ERR "unable to send register 0x%x byte "
-			   "to CS8427\n", reg);
+		snd_printk(KERN_ERR "unable to send register 0x%x byte to CS8427\n", reg);
 		snd_i2c_unlock(device->bus);
 		return err < 0 ? err : -EIO;
 	}
-	err = snd_i2c_readbytes(device, ucontrol->value.bytes.data, 10);
-	if (err != 10) {
-		snd_printk(KERN_ERR "unable to read Q-subcode bytes "
-			   "from CS8427\n");
+	if ((err = snd_i2c_readbytes(device, ucontrol->value.bytes.data, 10)) != 10) {
+		snd_printk(KERN_ERR "unable to read Q-subcode bytes from CS8427\n");
 		snd_i2c_unlock(device->bus);
 		return err < 0 ? err : -EIO;
 	}
@@ -402,8 +377,7 @@ static int snd_cs8427_qsubcode_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int snd_cs8427_spdif_info(struct snd_kcontrol *kcontrol,
-				 struct snd_ctl_elem_info *uinfo)
+static int snd_cs8427_spdif_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
 {
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_IEC958;
 	uinfo->count = 1;
@@ -436,8 +410,7 @@ static int snd_cs8427_spdif_put(struct snd_kcontrol *kcontrol,
 	snd_i2c_lock(device->bus);
 	change = memcmp(ucontrol->value.iec958.status, status, 24) != 0;
 	memcpy(status, ucontrol->value.iec958.status, 24);
-	if (change && (kcontrol->private_value ?
-		       runtime != NULL : runtime == NULL)) {
+	if (change && (kcontrol->private_value ? runtime != NULL : runtime == NULL)) {
 		err = snd_cs8427_send_corudata(device, 0, status, 24);
 		if (err < 0)
 			change = err;
@@ -466,8 +439,7 @@ static struct snd_kcontrol_new snd_cs8427_iec958_controls[] = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 	.info =		snd_cs8427_in_status_info,
 	.name =		"IEC958 CS8427 Input Status",
-	.access =	(SNDRV_CTL_ELEM_ACCESS_READ |
-			 SNDRV_CTL_ELEM_ACCESS_VOLATILE),
+	.access =	SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 	.get =		snd_cs8427_in_status_get,
 	.private_value = 15,
 },
@@ -475,8 +447,7 @@ static struct snd_kcontrol_new snd_cs8427_iec958_controls[] = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 	.info =		snd_cs8427_in_status_info,
 	.name =		"IEC958 CS8427 Error Status",
-	.access =	(SNDRV_CTL_ELEM_ACCESS_READ |
-			 SNDRV_CTL_ELEM_ACCESS_VOLATILE),
+	.access =	SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 	.get =		snd_cs8427_in_status_get,
 	.private_value = 16,
 },
@@ -496,8 +467,7 @@ static struct snd_kcontrol_new snd_cs8427_iec958_controls[] = {
 	.private_value = 0
 },
 {
-	.access =	(SNDRV_CTL_ELEM_ACCESS_READWRITE |
-			 SNDRV_CTL_ELEM_ACCESS_INACTIVE),
+	.access =	SNDRV_CTL_ELEM_ACCESS_READWRITE | SNDRV_CTL_ELEM_ACCESS_INACTIVE,
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 	.name =		SNDRV_CTL_NAME_IEC958("",PLAYBACK,PCM_STREAM),
 	.info =		snd_cs8427_spdif_info,
@@ -509,8 +479,7 @@ static struct snd_kcontrol_new snd_cs8427_iec958_controls[] = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 	.info =		snd_cs8427_qsubcode_info,
 	.name =		"IEC958 Q-subcode Capture Default",
-	.access =	(SNDRV_CTL_ELEM_ACCESS_READ |
-			 SNDRV_CTL_ELEM_ACCESS_VOLATILE),
+	.access =	SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 	.get =		snd_cs8427_qsubcode_get
 }};
 
@@ -533,8 +502,7 @@ int snd_cs8427_iec958_build(struct snd_i2c_device *cs8427,
 		err = snd_ctl_add(cs8427->bus->card, kctl);
 		if (err < 0)
 			return err;
-		if (! strcmp(kctl->id.name,
-			     SNDRV_CTL_NAME_IEC958("",PLAYBACK,PCM_STREAM)))
+		if (!strcmp(kctl->id.name, SNDRV_CTL_NAME_IEC958("",PLAYBACK,PCM_STREAM)))
 			chip->playback.pcm_ctl = kctl;
 	}
 
@@ -544,8 +512,6 @@ int snd_cs8427_iec958_build(struct snd_i2c_device *cs8427,
 	return 0;
 }
 
-EXPORT_SYMBOL(snd_cs8427_iec958_build);
-
 int snd_cs8427_iec958_active(struct snd_i2c_device *cs8427, int active)
 {
 	struct cs8427 *chip;
@@ -553,16 +519,12 @@ int snd_cs8427_iec958_active(struct snd_i2c_device *cs8427, int active)
 	snd_assert(cs8427, return -ENXIO);
 	chip = cs8427->private_data;
 	if (active)
-		memcpy(chip->playback.pcm_status,
-		       chip->playback.def_status, 24);
+		memcpy(chip->playback.pcm_status, chip->playback.def_status, 24);
 	chip->playback.pcm_ctl->vd[0].access &= ~SNDRV_CTL_ELEM_ACCESS_INACTIVE;
-	snd_ctl_notify(cs8427->bus->card,
-		       SNDRV_CTL_EVENT_MASK_VALUE | SNDRV_CTL_EVENT_MASK_INFO,
-		       &chip->playback.pcm_ctl->id);
+	snd_ctl_notify(cs8427->bus->card, SNDRV_CTL_EVENT_MASK_VALUE |
+					  SNDRV_CTL_EVENT_MASK_INFO, &chip->playback.pcm_ctl->id);
 	return 0;
 }
-
-EXPORT_SYMBOL(snd_cs8427_iec958_active);
 
 int snd_cs8427_iec958_pcm(struct snd_i2c_device *cs8427, unsigned int rate)
 {
@@ -603,8 +565,6 @@ int snd_cs8427_iec958_pcm(struct snd_i2c_device *cs8427, unsigned int rate)
 	return err < 0 ? err : 0;
 }
 
-EXPORT_SYMBOL(snd_cs8427_iec958_pcm);
-
 static int __init alsa_cs8427_module_init(void)
 {
 	return 0;
@@ -616,3 +576,10 @@ static void __exit alsa_cs8427_module_exit(void)
 
 module_init(alsa_cs8427_module_init)
 module_exit(alsa_cs8427_module_exit)
+
+EXPORT_SYMBOL(snd_cs8427_create);
+EXPORT_SYMBOL(snd_cs8427_reset);
+EXPORT_SYMBOL(snd_cs8427_reg_write);
+EXPORT_SYMBOL(snd_cs8427_iec958_build);
+EXPORT_SYMBOL(snd_cs8427_iec958_active);
+EXPORT_SYMBOL(snd_cs8427_iec958_pcm);

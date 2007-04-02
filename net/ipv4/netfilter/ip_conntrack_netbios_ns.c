@@ -127,16 +127,16 @@ static struct ip_conntrack_helper helper = {
 	.help			= help,
 };
 
-static int __init ip_conntrack_netbios_ns_init(void)
+static int __init init(void)
 {
 	helper.timeout = timeout;
 	return ip_conntrack_helper_register(&helper);
 }
 
-static void __exit ip_conntrack_netbios_ns_fini(void)
+static void __exit fini(void)
 {
 	ip_conntrack_helper_unregister(&helper);
 }
 
-module_init(ip_conntrack_netbios_ns_init);
-module_exit(ip_conntrack_netbios_ns_fini);
+module_init(init);
+module_exit(fini);

@@ -1,10 +1,9 @@
+#include <linux/config.h>
 #ifdef CONFIG_PPC64
 #include <asm/page.h>
-#define PROVIDE32(x)	PROVIDE(__unused__##x)
 #else
 #define PAGE_SIZE	4096
 #define KERNELBASE	CONFIG_KERNEL_START
-#define PROVIDE32(x)	PROVIDE(x)
 #endif
 #include <asm-generic/vmlinux.lds.h>
 
@@ -19,42 +18,43 @@ jiffies = jiffies_64 + 4;
 #endif
 SECTIONS
 {
-	/* Sections to be discarded. */
-	/DISCARD/ : {
-	*(.exitcall.exit)
-	*(.exit.data)
-	}
+  /* Sections to be discarded. */
+  /DISCARD/ : {
+    *(.exitcall.exit)
+    *(.exit.data)
+  }
 
-	. = KERNELBASE;
+  . = KERNELBASE;
 
-/*
- * Text, read only data and other permanent read-only sections
- */
-
-	/* Text and gots */
-	.text : {
-		*(.text .text.*)
-		SCHED_TEXT
-		LOCK_TEXT
-		KPROBES_TEXT
-		*(.fixup)
-
+  /* Read-only sections, merged into text segment: */
+  .text : {
+    *(.text .text.*)
+    SCHED_TEXT
+    LOCK_TEXT
+    KPROBES_TEXT
+    *(.fixup)
 #ifdef CONFIG_PPC32
-		*(.got1)
-		__got2_start = .;
-		*(.got2)
-		__got2_end = .;
-#endif /* CONFIG_PPC32 */
+    *(.got1)
+    __got2_start = .;
+    *(.got2)
+    __got2_end = .;
+#else
+    . = ALIGN(PAGE_SIZE);
+    _etext = .;
+#endif
+  }
+#ifdef CONFIG_PPC32
+  _etext = .;
+  PROVIDE (etext = .);
 
-		. = ALIGN(PAGE_SIZE);
-		_etext = .;
-		PROVIDE32 (etext = .);
-	}
+  RODATA
+  .fini      : { *(.fini)    } =0
+  .ctors     : { *(.ctors)   }
+  .dtors     : { *(.dtors)   }
 
-	/* Read-only data */
-	RODATA
+  .fixup   : { *(.fixup) }
+#endif
 
-	/* Exception & bug tables */
 	__ex_table : {
 		__start___ex_table = .;
 		*(__ex_table)
@@ -67,177 +67,192 @@ SECTIONS
 		__stop___bug_table = .;
 	}
 
-/*
- * Init sections discarded at runtime
- */
-	. = ALIGN(PAGE_SIZE);
-	__init_begin = .;
-
-	.init.text : {
-		_sinittext = .;
-		*(.init.text)
-		_einittext = .;
-	}
-
-	/* .exit.text is discarded at runtime, not link time,
-	 * to deal with references from __bug_table
-	 */
-	.exit.text : { *(.exit.text) }
-
-	.init.data : {
-		*(.init.data);
-		__vtop_table_begin = .;
-		*(.vtop_fixup);
-		__vtop_table_end = .;
-		__ptov_table_begin = .;
-		*(.ptov_fixup);
-		__ptov_table_end = .;
-#ifdef CONFIG_PPC_ISERIES
-		__dt_strings_start = .;
-		*(.dt_strings);
-		__dt_strings_end = .;
-#endif
-	}
-
-	. = ALIGN(16);
-	.init.setup : {
-		__setup_start = .;
-		*(.init.setup)
-		__setup_end = .;
-	}
-
-	.initcall.init : {
-		__initcall_start = .;
-		*(.initcall1.init)
-		*(.initcall2.init)
-		*(.initcall3.init)
-		*(.initcall4.init)
-		*(.initcall5.init)
-		*(.initcall6.init)
-		*(.initcall7.init)
-		__initcall_end = .;
-		}
-
-	.con_initcall.init : {
-		__con_initcall_start = .;
-		*(.con_initcall.init)
-		__con_initcall_end = .;
-	}
-
-	SECURITY_INIT
-
-	. = ALIGN(8);
+#ifdef CONFIG_PPC64
 	__ftr_fixup : {
 		__start___ftr_fixup = .;
 		*(__ftr_fixup)
 		__stop___ftr_fixup = .;
 	}
 
-	. = ALIGN(PAGE_SIZE);
-	.init.ramfs : {
-		__initramfs_start = .;
-		*(.init.ramfs)
-		__initramfs_end = .;
-	}
-
-#ifdef CONFIG_PPC32
-	. = ALIGN(32);
-#else
-	. = ALIGN(128);
-#endif
-	.data.percpu : {
-		__per_cpu_start = .;
-		*(.data.percpu)
-		__per_cpu_end = .;
-	}
-
-	. = ALIGN(8);
-	.machine.desc : {
-		__machine_desc_start = . ;
-		*(.machine.desc)
-		__machine_desc_end = . ;
-	}
-
-	/* freed after init ends here */
-	. = ALIGN(PAGE_SIZE);
-	__init_end = .;
-
-/*
- * And now the various read/write data
- */
-
-	. = ALIGN(PAGE_SIZE);
-	_sdata = .;
-
-#ifdef CONFIG_PPC32
-	.data    :
-	{
-		*(.data)
-		*(.sdata)
-		*(.got.plt) *(.got)
-	}
-#else
-	.data : {
-		*(.data .data.rel* .toc1)
-		*(.branch_lt)
-	}
-
-	.opd : {
-		*(.opd)
-	}
-
-	.got : {
-		__toc_start = .;
-		*(.got)
-		*(.toc)
-	}
+  RODATA
 #endif
 
-	. = ALIGN(PAGE_SIZE);
-	_edata  =  .;
-	PROVIDE32 (edata = .);
-
-	/* The initial task and kernel stack */
 #ifdef CONFIG_PPC32
-	. = ALIGN(8192);
-#else
-	. = ALIGN(16384);
+  /* Read-write section, merged into data segment: */
+  . = ALIGN(PAGE_SIZE);
+  _sdata = .;
+  .data    :
+  {
+    *(.data)
+    *(.data1)
+    *(.sdata)
+    *(.sdata2)
+    *(.got.plt) *(.got)
+    *(.dynamic)
+    CONSTRUCTORS
+  }
+
+  . = ALIGN(PAGE_SIZE);
+  __nosave_begin = .;
+  .data_nosave : { *(.data.nosave) }
+  . = ALIGN(PAGE_SIZE);
+  __nosave_end = .;
+
+  . = ALIGN(32);
+  .data.cacheline_aligned : { *(.data.cacheline_aligned) }
+
+  _edata  =  .;
+  PROVIDE (edata = .);
+
+  . = ALIGN(8192);
+  .data.init_task : { *(.data.init_task) }
 #endif
-	.data.init_task : {
-		*(.data.init_task)
-	}
 
-	. = ALIGN(PAGE_SIZE);
-	.data.page_aligned : {
-		*(.data.page_aligned)
-	}
+  /* will be freed after init */
+  . = ALIGN(PAGE_SIZE);
+  __init_begin = .;
+  .init.text : {
+	_sinittext = .;
+	*(.init.text)
+	_einittext = .;
+  }
+#ifdef CONFIG_PPC32
+  /* .exit.text is discarded at runtime, not link time,
+     to deal with references from __bug_table */
+  .exit.text : { *(.exit.text) }
+#endif
+  .init.data : {
+    *(.init.data);
+    __vtop_table_begin = .;
+    *(.vtop_fixup);
+    __vtop_table_end = .;
+    __ptov_table_begin = .;
+    *(.ptov_fixup);
+    __ptov_table_end = .;
+  }
 
-	.data.cacheline_aligned : {
-		*(.data.cacheline_aligned)
-	}
+  . = ALIGN(16);
+  .init.setup : {
+    __setup_start = .;
+    *(.init.setup)
+    __setup_end = .;
+  }
 
-	. = ALIGN(PAGE_SIZE);
-	__data_nosave : {
-		__nosave_begin = .;
-		*(.data.nosave)
-		. = ALIGN(PAGE_SIZE);
-		__nosave_end = .;
-	}
+  .initcall.init : {
+	__initcall_start = .;
+	*(.initcall1.init)
+	*(.initcall2.init)
+	*(.initcall3.init)
+	*(.initcall4.init)
+	*(.initcall5.init)
+	*(.initcall6.init)
+	*(.initcall7.init)
+	__initcall_end = .;
+  }
 
-/*
- * And finally the bss
- */
+  .con_initcall.init : {
+    __con_initcall_start = .;
+    *(.con_initcall.init)
+    __con_initcall_end = .;
+  }
 
-	.bss : {
-		__bss_start = .;
-		*(.sbss) *(.scommon)
-		*(.dynbss)
-		*(.bss)
-		*(COMMON)
-		__bss_stop = .;
-	}
+  SECURITY_INIT
 
-	. = ALIGN(PAGE_SIZE);
-	_end = . ;
-	PROVIDE32 (end = .);
+#ifdef CONFIG_PPC32
+  __start___ftr_fixup = .;
+  __ftr_fixup : { *(__ftr_fixup) }
+  __stop___ftr_fixup = .;
+#else
+  . = ALIGN(PAGE_SIZE);
+  .init.ramfs : {
+    __initramfs_start = .;
+    *(.init.ramfs)
+    __initramfs_end = .;
+  }
+#endif
+
+#ifdef CONFIG_PPC32
+  . = ALIGN(32);
+#endif
+  .data.percpu : {
+    __per_cpu_start = .;
+    *(.data.percpu)
+    __per_cpu_end = .;
+  }
+
+ . = ALIGN(PAGE_SIZE);
+#ifdef CONFIG_PPC64
+ . = ALIGN(16384);
+ __init_end = .;
+ /* freed after init ends here */
+
+ /* Read/write sections */
+ . = ALIGN(PAGE_SIZE);
+ . = ALIGN(16384);
+ _sdata = .;
+ /* The initial task and kernel stack */
+ .data.init_task : {
+      *(.data.init_task)
+      }
+
+ . = ALIGN(PAGE_SIZE);
+ .data.page_aligned : {
+      *(.data.page_aligned)
+      }
+
+ .data.cacheline_aligned : {
+      *(.data.cacheline_aligned)
+      }
+
+ .data : {
+      *(.data .data.rel* .toc1)
+      *(.branch_lt)
+      }
+
+ .opd : {
+      *(.opd)
+      }
+
+ .got : {
+      __toc_start = .;
+      *(.got)
+      *(.toc)
+      . = ALIGN(PAGE_SIZE);
+      _edata = .;
+      }
+
+  . = ALIGN(PAGE_SIZE);
+#else
+  __initramfs_start = .;
+  .init.ramfs : {
+    *(.init.ramfs)
+  }
+  __initramfs_end = .;
+
+  . = ALIGN(4096);
+  __init_end = .;
+
+  . = ALIGN(4096);
+  _sextratext = .;
+  _eextratext = .;
+
+  __bss_start = .;
+#endif
+
+  .bss : {
+    __bss_start = .;
+   *(.sbss) *(.scommon)
+   *(.dynbss)
+   *(.bss)
+   *(COMMON)
+  __bss_stop = .;
+  }
+
+#ifdef CONFIG_PPC64
+  . = ALIGN(PAGE_SIZE);
+#endif
+  _end = . ;
+#ifdef CONFIG_PPC32
+  PROVIDE (end = .);
+#endif
 }

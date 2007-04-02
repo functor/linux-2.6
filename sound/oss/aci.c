@@ -56,8 +56,7 @@
 #include <linux/module.h> 
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
-
+#include <asm/semaphore.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include "sound_config.h"
@@ -80,7 +79,7 @@ static int aci_micpreamp=3; /* microphone preamp-level that can't be    *
 			 * checked with ACI versions prior to 0xb0	*/
 
 static int mixer_device;
-static struct mutex aci_mutex;
+static struct semaphore aci_sem;
 
 #ifdef MODULE
 static int reset;
@@ -213,7 +212,7 @@ int aci_rw_cmd(int write1, int write2, int write3)
 	int write[] = {write1, write2, write3};
 	int read = -EINTR, i;
 
-	if (mutex_lock_interruptible(&aci_mutex))
+	if (down_interruptible(&aci_sem))
 		goto out;
 
 	for (i=0; i<3; i++) {
@@ -228,7 +227,7 @@ int aci_rw_cmd(int write1, int write2, int write3)
 	}
 	
 	read = aci_rawread();
-out_up:	mutex_unlock(&aci_mutex);
+out_up:	up(&aci_sem);
 out:	return read;
 }
 
@@ -604,7 +603,7 @@ static int __init attach_aci(void)
 	char *boardname;
 	int i, rc = -EBUSY;
 
-	mutex_init(&aci_mutex);
+	init_MUTEX(&aci_sem);
 
 	outb(0xE3, 0xf8f); /* Write MAD16 password */
 	aci_port = (inb(0xf90) & 0x10) ?

@@ -18,6 +18,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -45,7 +46,6 @@
 #include <asm/prom.h>
 #include <asm/lmb.h>
 #include <asm/sections.h>
-#include <asm/rtas.h>
 #include <asm/vdso.h>
 
 #include "mmu_decl.h"
@@ -108,29 +108,24 @@ EXPORT_SYMBOL(phys_mem_access_prot);
 void online_page(struct page *page)
 {
 	ClearPageReserved(page);
-	init_page_count(page);
-	__free_page(page);
+	set_page_count(page, 0);
+	free_cold_page(page);
 	totalram_pages++;
 	num_physpages++;
 }
 
-#ifdef CONFIG_NUMA
-int memory_add_physaddr_to_nid(u64 start)
-{
-	return hot_add_scn_to_nid(start);
-}
-#endif
-
-int __devinit arch_add_memory(int nid, u64 start, u64 size)
+int __devinit add_memory(u64 start, u64 size)
 {
 	struct pglist_data *pgdata;
 	struct zone *zone;
+	int nid;
 	unsigned long start_pfn = start >> PAGE_SHIFT;
 	unsigned long nr_pages = size >> PAGE_SHIFT;
 
+	nid = hot_add_scn_to_nid(start);
 	pgdata = NODE_DATA(nid);
 
-	start = (unsigned long)__va(start);
+	start = __va(start);
 	create_section_mapping(start, start + size);
 
 	/* this should work for most non-highmem platforms */
@@ -200,7 +195,7 @@ void show_mem(void)
 	printk("Mem-info:\n");
 	show_free_areas();
 	printk("Free swap:       %6ldkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
-	for_each_online_pgdat(pgdat) {
+	for_each_pgdat(pgdat) {
 		unsigned long flags;
 		pgdat_resize_lock(pgdat, &flags);
 		for (i = 0; i < pgdat->node_spanned_pages; i++) {
@@ -254,6 +249,7 @@ void __init do_init_bootmem(void)
 	bootmap_pages = bootmem_bootmap_pages(total_pages);
 
 	start = lmb_alloc(bootmap_pages << PAGE_SHIFT, PAGE_SIZE);
+	BUG_ON(!start);
 
 	boot_mapsize = init_bootmem(start >> PAGE_SHIFT, total_pages);
 
@@ -304,9 +300,9 @@ void __init paging_init(void)
 	kmap_prot = PAGE_KERNEL;
 #endif /* CONFIG_HIGHMEM */
 
-	printk(KERN_DEBUG "Top of RAM: 0x%lx, Total RAM: 0x%lx\n",
+	printk(KERN_INFO "Top of RAM: 0x%lx, Total RAM: 0x%lx\n",
 	       top_of_ram, total_ram);
-	printk(KERN_DEBUG "Memory hole size: %ldMB\n",
+	printk(KERN_INFO "Memory hole size: %ldMB\n",
 	       (top_of_ram - total_ram) >> 20);
 	/*
 	 * All pages are DMA-able so we put them all in the DMA zone.
@@ -347,7 +343,7 @@ void __init mem_init(void)
 #ifdef CONFIG_NEED_MULTIPLE_NODES
         for_each_online_node(nid) {
 		if (NODE_DATA(nid)->node_spanned_pages != 0) {
-			printk("freeing bootmem node %d\n", nid);
+			printk("freeing bootmem node %x\n", nid);
 			totalram_pages +=
 				free_all_bootmem_node(NODE_DATA(nid));
 		}
@@ -356,20 +352,7 @@ void __init mem_init(void)
 	max_mapnr = max_pfn;
 	totalram_pages += free_all_bootmem();
 #endif
-
-#ifdef CONFIG_PPC_PSERIES
-	/* Mark the RTAS pages as PG_reserved so userspace can mmap them */
-	if (rtas_rmo_buf) {
-		unsigned long pfn, start_pfn, end_pfn;
-
-		start_pfn = rtas_rmo_buf >> PAGE_SHIFT;
-		end_pfn = (rtas_rmo_buf + RTAS_RMOBUF_MAX) >>  PAGE_SHIFT;
-		for (pfn = start_pfn; pfn < end_pfn; pfn++)
-			SetPageReserved(pfn_to_page(pfn));
-	}
-#endif
-
-	for_each_online_pgdat(pgdat) {
+	for_each_pgdat(pgdat) {
 		for (i = 0; i < pgdat->node_spanned_pages; i++) {
 			if (!pfn_valid(pgdat->node_start_pfn + i))
 				continue;
@@ -393,12 +376,12 @@ void __init mem_init(void)
 			struct page *page = pfn_to_page(pfn);
 
 			ClearPageReserved(page);
-			init_page_count(page);
+			set_page_count(page, 1);
 			__free_page(page);
 			totalhigh_pages++;
 		}
 		totalram_pages += totalhigh_pages;
-		printk(KERN_DEBUG "High memory: %luk\n",
+		printk(KERN_INFO "High memory: %luk\n",
 		       totalhigh_pages << (PAGE_SHIFT-10));
 	}
 #endif /* CONFIG_HIGHMEM */

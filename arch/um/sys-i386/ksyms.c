@@ -15,3 +15,7 @@ EXPORT_SYMBOL(__up_wakeup);
 
 /* Networking helper routines. */
 EXPORT_SYMBOL(csum_partial);
+
+/* delay core functions */
+EXPORT_SYMBOL(__const_udelay);
+EXPORT_SYMBOL(__udelay);

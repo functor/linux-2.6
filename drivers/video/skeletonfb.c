@@ -47,6 +47,7 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/mm.h>
+#include <linux/tty.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/fb.h>
@@ -904,6 +905,11 @@ static void __exit xxxfb_exit(void)
 	driver_unregister(&xxxfb_driver);
 }
 #endif
+
+MODULE_LICENSE("GPL");
+module_init(xxxfb_init);
+module_exit(xxxfb_exit);
+
 
     /*
      *  Setup

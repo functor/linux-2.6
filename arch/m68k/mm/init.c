@@ -7,6 +7,7 @@
  *  to motorola.c and sun3mmu.c
  */
 
+#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -136,7 +137,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 	int pages = 0;
 	for (; start < end; start += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(start));
-		init_page_count(virt_to_page(start));
+		set_page_count(virt_to_page(start), 1);
 		free_page(start);
 		totalram_pages++;
 		pages++;

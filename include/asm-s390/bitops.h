@@ -12,9 +12,7 @@
  *    Copyright (C) 1992, Linus Torvalds
  *
  */
-
-#ifdef __KERNEL__
-
+#include <linux/config.h>
 #include <linux/compiler.h>
 
 /*
@@ -52,6 +50,19 @@
  * of the form "flags |= (1 << bitnr)" are used INTERMIXED
  * with operation of the form "set_bit(bitnr, flags)".
  */
+
+/* set ALIGN_CS to 1 if the SMP safe bit operations should
+ * align the address to 4 byte boundary. It seems to work
+ * without the alignment. 
+ */
+#ifdef __KERNEL__
+#define ALIGN_CS 0
+#else
+#define ALIGN_CS 1
+#ifndef CONFIG_SMP
+#error "bitops won't work without CONFIG_SMP"
+#endif
+#endif
 
 /* bitmap tables from arch/S390/kernel/bitmap.S */
 extern const char _oi_bitmap[];
@@ -111,6 +122,10 @@ static inline void set_bit_cs(unsigned long nr, volatile unsigned long *ptr)
         unsigned long addr, old, new, mask;
 
 	addr = (unsigned long) ptr;
+#if ALIGN_CS == 1
+	nr += (addr & __BITOPS_ALIGN) << 3;    /* add alignment to bit number */
+	addr ^= addr & __BITOPS_ALIGN;	       /* align address to 8 */
+#endif
 	/* calculate address for CS */
 	addr += (nr ^ (nr & (__BITOPS_WORDSIZE - 1))) >> 3;
 	/* make OR mask */
@@ -127,6 +142,10 @@ static inline void clear_bit_cs(unsigned long nr, volatile unsigned long *ptr)
         unsigned long addr, old, new, mask;
 
 	addr = (unsigned long) ptr;
+#if ALIGN_CS == 1
+	nr += (addr & __BITOPS_ALIGN) << 3;    /* add alignment to bit number */
+	addr ^= addr & __BITOPS_ALIGN;	       /* align address to 8 */
+#endif
 	/* calculate address for CS */
 	addr += (nr ^ (nr & (__BITOPS_WORDSIZE - 1))) >> 3;
 	/* make AND mask */
@@ -143,6 +162,10 @@ static inline void change_bit_cs(unsigned long nr, volatile unsigned long *ptr)
         unsigned long addr, old, new, mask;
 
 	addr = (unsigned long) ptr;
+#if ALIGN_CS == 1
+	nr += (addr & __BITOPS_ALIGN) << 3;    /* add alignment to bit number */
+	addr ^= addr & __BITOPS_ALIGN;	       /* align address to 8 */
+#endif
 	/* calculate address for CS */
 	addr += (nr ^ (nr & (__BITOPS_WORDSIZE - 1))) >> 3;
 	/* make XOR mask */
@@ -160,6 +183,10 @@ test_and_set_bit_cs(unsigned long nr, volatile unsigned long *ptr)
         unsigned long addr, old, new, mask;
 
 	addr = (unsigned long) ptr;
+#if ALIGN_CS == 1
+	nr += (addr & __BITOPS_ALIGN) << 3;    /* add alignment to bit number */
+	addr ^= addr & __BITOPS_ALIGN;	       /* align address to 8 */
+#endif
 	/* calculate address for CS */
 	addr += (nr ^ (nr & (__BITOPS_WORDSIZE - 1))) >> 3;
 	/* make OR/test mask */
@@ -179,6 +206,10 @@ test_and_clear_bit_cs(unsigned long nr, volatile unsigned long *ptr)
         unsigned long addr, old, new, mask;
 
 	addr = (unsigned long) ptr;
+#if ALIGN_CS == 1
+	nr += (addr & __BITOPS_ALIGN) << 3;    /* add alignment to bit number */
+	addr ^= addr & __BITOPS_ALIGN;	       /* align address to 8 */
+#endif
 	/* calculate address for CS */
 	addr += (nr ^ (nr & (__BITOPS_WORDSIZE - 1))) >> 3;
 	/* make AND/test mask */
@@ -198,6 +229,10 @@ test_and_change_bit_cs(unsigned long nr, volatile unsigned long *ptr)
         unsigned long addr, old, new, mask;
 
 	addr = (unsigned long) ptr;
+#if ALIGN_CS == 1
+	nr += (addr & __BITOPS_ALIGN) << 3;  /* add alignment to bit number */
+	addr ^= addr & __BITOPS_ALIGN;	     /* align address to 8 */
+#endif
 	/* calculate address for CS */
 	addr += (nr ^ (nr & (__BITOPS_WORDSIZE - 1))) >> 3;
 	/* make XOR/test mask */
@@ -793,12 +828,37 @@ static inline int sched_find_first_bit(unsigned long *b)
 	return find_first_bit(b, 140);
 }
 
-#include <asm-generic/bitops/ffs.h>
+/*
+ * ffs: find first bit set. This is defined the same way as
+ * the libc and compiler builtin ffs routines, therefore
+ * differs in spirit from the above ffz (man ffs).
+ */
+#define ffs(x) generic_ffs(x)
 
-#include <asm-generic/bitops/fls.h>
-#include <asm-generic/bitops/fls64.h>
+/*
+ * fls: find last bit set.
+ */
+#define fls(x) generic_fls(x)
+#define fls64(x)   generic_fls64(x)
 
-#include <asm-generic/bitops/hweight.h>
+/*
+ * hweightN: returns the hamming weight (i.e. the number
+ * of bits set) of a N-bit word
+ */
+#define hweight64(x)						\
+({								\
+	unsigned long __x = (x);				\
+	unsigned int __w;					\
+	__w = generic_hweight32((unsigned int) __x);		\
+	__w += generic_hweight32((unsigned int) (__x>>32));	\
+	__w;							\
+})
+#define hweight32(x) generic_hweight32(x)
+#define hweight16(x) generic_hweight16(x)
+#define hweight8(x) generic_hweight8(x)
+
+
+#ifdef __KERNEL__
 
 /*
  * ATTENTION: intel byte ordering convention for ext2 and minix !!
@@ -811,11 +871,11 @@ static inline int sched_find_first_bit(unsigned long *b)
  */
 
 #define ext2_set_bit(nr, addr)       \
-	__test_and_set_bit((nr)^(__BITOPS_WORDSIZE - 8), (unsigned long *)addr)
+	test_and_set_bit((nr)^(__BITOPS_WORDSIZE - 8), (unsigned long *)addr)
 #define ext2_set_bit_atomic(lock, nr, addr)       \
 	test_and_set_bit((nr)^(__BITOPS_WORDSIZE - 8), (unsigned long *)addr)
 #define ext2_clear_bit(nr, addr)     \
-	__test_and_clear_bit((nr)^(__BITOPS_WORDSIZE - 8), (unsigned long *)addr)
+	test_and_clear_bit((nr)^(__BITOPS_WORDSIZE - 8), (unsigned long *)addr)
 #define ext2_clear_bit_atomic(lock, nr, addr)     \
 	test_and_clear_bit((nr)^(__BITOPS_WORDSIZE - 8), (unsigned long *)addr)
 #define ext2_test_bit(nr, addr)      \
@@ -951,7 +1011,18 @@ ext2_find_next_zero_bit(void *vaddr, unsigned long size, unsigned long offset)
 	return offset + ext2_find_first_zero_bit(p, size);
 }
 
-#include <asm-generic/bitops/minix.h>
+/* Bitmap functions for the minix filesystem.  */
+/* FIXME !!! */
+#define minix_test_and_set_bit(nr,addr) \
+	test_and_set_bit(nr,(unsigned long *)addr)
+#define minix_set_bit(nr,addr) \
+	set_bit(nr,(unsigned long *)addr)
+#define minix_test_and_clear_bit(nr,addr) \
+	test_and_clear_bit(nr,(unsigned long *)addr)
+#define minix_test_bit(nr,addr) \
+	test_bit(nr,(unsigned long *)addr)
+#define minix_find_first_zero_bit(addr,size) \
+	find_first_zero_bit(addr,size)
 
 #endif /* __KERNEL__ */
 

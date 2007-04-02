@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/platforms/gemini_setup.c
+ *
  *  Copyright (C) 1995 Linus Torvalds
  *  Adapted from 'alpha' version by Gary Thomas
  *  Modified by Cort Dougan (cort@cs.nmt.edu)
@@ -6,6 +8,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>

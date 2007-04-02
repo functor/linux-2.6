@@ -4,9 +4,6 @@ extern void usb_create_sysfs_dev_files (struct usb_device *dev);
 extern void usb_remove_sysfs_dev_files (struct usb_device *dev);
 extern void usb_create_sysfs_intf_files (struct usb_interface *intf);
 extern void usb_remove_sysfs_intf_files (struct usb_interface *intf);
-extern void usb_create_ep_files(struct device *parent, struct usb_host_endpoint *endpoint,
-				struct usb_device *udev);
-extern void usb_remove_ep_files(struct usb_host_endpoint *endpoint);
 
 extern void usb_disable_endpoint (struct usb_device *dev, unsigned int epaddr);
 extern void usb_disable_interface (struct usb_device *dev,
@@ -59,7 +56,6 @@ static inline int is_active(struct usb_interface *f)
 extern const char *usbcore_name;
 
 /* usbfs stuff */
-extern struct mutex usbfs_mutex;
 extern struct usb_driver usbfs_driver;
 extern struct file_operations usbfs_devices_fops;
 extern struct file_operations usbfs_device_file_operations;
@@ -81,7 +77,6 @@ struct dev_state {
 	uid_t disc_uid, disc_euid;
 	void __user *disccontext;
 	unsigned long ifclaimed;
-	u32 secid;
 };
 
 /* internal notify stuff */

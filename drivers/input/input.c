@@ -18,15 +18,27 @@
 #include <linux/random.h>
 #include <linux/major.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/interrupt.h>
 #include <linux/poll.h>
 #include <linux/device.h>
-#include <linux/mutex.h>
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
 MODULE_LICENSE("GPL");
+
+EXPORT_SYMBOL(input_allocate_device);
+EXPORT_SYMBOL(input_register_device);
+EXPORT_SYMBOL(input_unregister_device);
+EXPORT_SYMBOL(input_register_handler);
+EXPORT_SYMBOL(input_unregister_handler);
+EXPORT_SYMBOL(input_grab_device);
+EXPORT_SYMBOL(input_release_device);
+EXPORT_SYMBOL(input_open_device);
+EXPORT_SYMBOL(input_close_device);
+EXPORT_SYMBOL(input_accept_process);
+EXPORT_SYMBOL(input_flush_device);
+EXPORT_SYMBOL(input_event);
+EXPORT_SYMBOL_GPL(input_class);
 
 #define INPUT_DEVICES	256
 
@@ -35,16 +47,6 @@ static LIST_HEAD(input_handler_list);
 
 static struct input_handler *input_table[8];
 
-/**
- * input_event() - report new input event
- * @handle: device that generated the event
- * @type: type of the event
- * @code: event code
- * @value: value of the event
- *
- * This function should be used by drivers implementing various input devices
- * See also input_inject_event()
- */
 void input_event(struct input_dev *dev, unsigned int type, unsigned int code, int value)
 {
 	struct input_handle *handle;
@@ -59,13 +61,11 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 		case EV_SYN:
 			switch (code) {
 				case SYN_CONFIG:
-					if (dev->event)
-						dev->event(dev, type, code, value);
+					if (dev->event) dev->event(dev, type, code, value);
 					break;
 
 				case SYN_REPORT:
-					if (dev->sync)
-						return;
+					if (dev->sync) return;
 					dev->sync = 1;
 					break;
 			}
@@ -134,8 +134,7 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 			if (code > MSC_MAX || !test_bit(code, dev->mscbit))
 				return;
 
-			if (dev->event)
-				dev->event(dev, type, code, value);
+			if (dev->event) dev->event(dev, type, code, value);
 
 			break;
 
@@ -145,9 +144,7 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 				return;
 
 			change_bit(code, dev->led);
-
-			if (dev->event)
-				dev->event(dev, type, code, value);
+			if (dev->event) dev->event(dev, type, code, value);
 
 			break;
 
@@ -156,28 +153,21 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 			if (code > SND_MAX || !test_bit(code, dev->sndbit))
 				return;
 
-			if (!!test_bit(code, dev->snd) != !!value)
-				change_bit(code, dev->snd);
-
-			if (dev->event)
-				dev->event(dev, type, code, value);
+			if (dev->event) dev->event(dev, type, code, value);
 
 			break;
 
 		case EV_REP:
 
-			if (code > REP_MAX || value < 0 || dev->rep[code] == value)
-				return;
+			if (code > REP_MAX || value < 0 || dev->rep[code] == value) return;
 
 			dev->rep[code] = value;
-			if (dev->event)
-				dev->event(dev, type, code, value);
+			if (dev->event) dev->event(dev, type, code, value);
 
 			break;
 
 		case EV_FF:
-			if (dev->event)
-				dev->event(dev, type, code, value);
+			if (dev->event) dev->event(dev, type, code, value);
 			break;
 	}
 
@@ -191,24 +181,6 @@ void input_event(struct input_dev *dev, unsigned int type, unsigned int code, in
 			if (handle->open)
 				handle->handler->event(handle, type, code, value);
 }
-EXPORT_SYMBOL(input_event);
-
-/**
- * input_inject_event() - send input event from input handler
- * @handle: input handle to send event through
- * @type: type of the event
- * @code: event code
- * @value: value of the event
- *
- * Similar to input_event() but will ignore event if device is "grabbed" and handle
- * injecting event is not the one that owns the device.
- */
-void input_inject_event(struct input_handle *handle, unsigned int type, unsigned int code, int value)
-{
-	if (!handle->dev->grab || handle->dev->grab == handle)
-		input_event(handle->dev, type, code, value);
-}
-EXPORT_SYMBOL(input_inject_event);
 
 static void input_repeat_key(unsigned long data)
 {
@@ -224,6 +196,14 @@ static void input_repeat_key(unsigned long data)
 		mod_timer(&dev->timer, jiffies + msecs_to_jiffies(dev->rep[REP_PERIOD]));
 }
 
+int input_accept_process(struct input_handle *handle, struct file *file)
+{
+	if (handle->dev->accept)
+		return handle->dev->accept(handle->dev, file);
+
+	return 0;
+}
+
 int input_grab_device(struct input_handle *handle)
 {
 	if (handle->dev->grab)
@@ -232,28 +212,19 @@ int input_grab_device(struct input_handle *handle)
 	handle->dev->grab = handle;
 	return 0;
 }
-EXPORT_SYMBOL(input_grab_device);
 
 void input_release_device(struct input_handle *handle)
 {
-	struct input_dev *dev = handle->dev;
-
-	if (dev->grab == handle) {
-		dev->grab = NULL;
-
-		list_for_each_entry(handle, &dev->h_list, d_node)
-			if (handle->handler->start)
-				handle->handler->start(handle);
-	}
+	if (handle->dev->grab == handle)
+		handle->dev->grab = NULL;
 }
-EXPORT_SYMBOL(input_release_device);
 
 int input_open_device(struct input_handle *handle)
 {
 	struct input_dev *dev = handle->dev;
 	int err;
 
-	err = mutex_lock_interruptible(&dev->mutex);
+	err = down_interruptible(&dev->sem);
 	if (err)
 		return err;
 
@@ -265,11 +236,10 @@ int input_open_device(struct input_handle *handle)
 	if (err)
 		handle->open--;
 
-	mutex_unlock(&dev->mutex);
+	up(&dev->sem);
 
 	return err;
 }
-EXPORT_SYMBOL(input_open_device);
 
 int input_flush_device(struct input_handle* handle, struct file* file)
 {
@@ -278,7 +248,6 @@ int input_flush_device(struct input_handle* handle, struct file* file)
 
 	return 0;
 }
-EXPORT_SYMBOL(input_flush_device);
 
 void input_close_device(struct input_handle *handle)
 {
@@ -286,15 +255,14 @@ void input_close_device(struct input_handle *handle)
 
 	input_release_device(handle);
 
-	mutex_lock(&dev->mutex);
+	down(&dev->sem);
 
 	if (!--dev->users && dev->close)
 		dev->close(dev);
 	handle->open--;
 
-	mutex_unlock(&dev->mutex);
+	up(&dev->sem);
 }
-EXPORT_SYMBOL(input_close_device);
 
 static void input_link_handle(struct input_handle *handle)
 {
@@ -316,19 +284,19 @@ static struct input_device_id *input_match_device(struct input_device_id *id, st
 	for (; id->flags || id->driver_info; id++) {
 
 		if (id->flags & INPUT_DEVICE_ID_MATCH_BUS)
-			if (id->bustype != dev->id.bustype)
+			if (id->id.bustype != dev->id.bustype)
 				continue;
 
 		if (id->flags & INPUT_DEVICE_ID_MATCH_VENDOR)
-			if (id->vendor != dev->id.vendor)
+			if (id->id.vendor != dev->id.vendor)
 				continue;
 
 		if (id->flags & INPUT_DEVICE_ID_MATCH_PRODUCT)
-			if (id->product != dev->id.product)
+			if (id->id.product != dev->id.product)
 				continue;
 
 		if (id->flags & INPUT_DEVICE_ID_MATCH_VERSION)
-			if (id->version != dev->id.version)
+			if (id->id.version != dev->id.version)
 				continue;
 
 		MATCH_BIT(evbit,  EV_MAX);
@@ -347,6 +315,21 @@ static struct input_device_id *input_match_device(struct input_device_id *id, st
 	return NULL;
 }
 
+static int input_print_bitmap(char *buf, int buf_size, unsigned long *bitmap, int max)
+{
+	int i;
+	int len = 0;
+
+	for (i = NBITS(max) - 1; i > 0; i--)
+		if (bitmap[i])
+			break;
+
+	for (; i >= 0; i--)
+		len += snprintf(buf + len, max(buf_size - len, 0),
+				"%lx%s", bitmap[i], i > 0 ? " " : "");
+	return len;
+}
+
 #ifdef CONFIG_PROC_FS
 
 static struct proc_dir_entry *proc_bus_input_dir;
@@ -359,182 +342,124 @@ static inline void input_wakeup_procfs_readers(void)
 	wake_up(&input_devices_poll_wait);
 }
 
-static unsigned int input_proc_devices_poll(struct file *file, poll_table *wait)
+static unsigned int input_devices_poll(struct file *file, poll_table *wait)
 {
 	int state = input_devices_state;
-
 	poll_wait(file, &input_devices_poll_wait, wait);
 	if (state != input_devices_state)
 		return POLLIN | POLLRDNORM;
-
 	return 0;
 }
 
-static struct list_head *list_get_nth_element(struct list_head *list, loff_t *pos)
+#define SPRINTF_BIT(ev, bm)						\
+	do {								\
+		len += sprintf(buf + len, "B: %s=", #ev);		\
+		len += input_print_bitmap(buf + len, INT_MAX,		\
+					dev->bm##bit, ev##_MAX);	\
+		len += sprintf(buf + len, "\n");			\
+	} while (0)
+
+#define TEST_AND_SPRINTF_BIT(ev, bm)					\
+	do {								\
+		if (test_bit(EV_##ev, dev->evbit))			\
+			SPRINTF_BIT(ev, bm);				\
+	} while (0)
+
+static int input_devices_read(char *buf, char **start, off_t pos, int count, int *eof, void *data)
 {
-	struct list_head *node;
-	loff_t i = 0;
-
-	list_for_each(node, list)
-		if (i++ == *pos)
-			return node;
-
-	return NULL;
-}
-
-static struct list_head *list_get_next_element(struct list_head *list, struct list_head *element, loff_t *pos)
-{
-	if (element->next == list)
-		return NULL;
-
-	++(*pos);
-	return element->next;
-}
-
-static void *input_devices_seq_start(struct seq_file *seq, loff_t *pos)
-{
-	/* acquire lock here ... Yes, we do need locking, I knowi, I know... */
-
-	return list_get_nth_element(&input_dev_list, pos);
-}
-
-static void *input_devices_seq_next(struct seq_file *seq, void *v, loff_t *pos)
-{
-	return list_get_next_element(&input_dev_list, v, pos);
-}
-
-static void input_devices_seq_stop(struct seq_file *seq, void *v)
-{
-	/* release lock here */
-}
-
-static void input_seq_print_bitmap(struct seq_file *seq, const char *name,
-				   unsigned long *bitmap, int max)
-{
-	int i;
-
-	for (i = NBITS(max) - 1; i > 0; i--)
-		if (bitmap[i])
-			break;
-
-	seq_printf(seq, "B: %s=", name);
-	for (; i >= 0; i--)
-		seq_printf(seq, "%lx%s", bitmap[i], i > 0 ? " " : "");
-	seq_putc(seq, '\n');
-}
-
-static int input_devices_seq_show(struct seq_file *seq, void *v)
-{
-	struct input_dev *dev = container_of(v, struct input_dev, node);
-	const char *path = kobject_get_path(&dev->cdev.kobj, GFP_KERNEL);
+	struct input_dev *dev;
 	struct input_handle *handle;
+	const char *path;
 
-	seq_printf(seq, "I: Bus=%04x Vendor=%04x Product=%04x Version=%04x\n",
-		   dev->id.bustype, dev->id.vendor, dev->id.product, dev->id.version);
+	off_t at = 0;
+	int len, cnt = 0;
 
-	seq_printf(seq, "N: Name=\"%s\"\n", dev->name ? dev->name : "");
-	seq_printf(seq, "P: Phys=%s\n", dev->phys ? dev->phys : "");
-	seq_printf(seq, "S: Sysfs=%s\n", path ? path : "");
-	seq_printf(seq, "H: Handlers=");
+	list_for_each_entry(dev, &input_dev_list, node) {
 
-	list_for_each_entry(handle, &dev->h_list, d_node)
-		seq_printf(seq, "%s ", handle->name);
-	seq_putc(seq, '\n');
+		path = kobject_get_path(&dev->cdev.kobj, GFP_KERNEL);
 
-	input_seq_print_bitmap(seq, "EV", dev->evbit, EV_MAX);
-	if (test_bit(EV_KEY, dev->evbit))
-		input_seq_print_bitmap(seq, "KEY", dev->keybit, KEY_MAX);
-	if (test_bit(EV_REL, dev->evbit))
-		input_seq_print_bitmap(seq, "REL", dev->relbit, REL_MAX);
-	if (test_bit(EV_ABS, dev->evbit))
-		input_seq_print_bitmap(seq, "ABS", dev->absbit, ABS_MAX);
-	if (test_bit(EV_MSC, dev->evbit))
-		input_seq_print_bitmap(seq, "MSC", dev->mscbit, MSC_MAX);
-	if (test_bit(EV_LED, dev->evbit))
-		input_seq_print_bitmap(seq, "LED", dev->ledbit, LED_MAX);
-	if (test_bit(EV_SND, dev->evbit))
-		input_seq_print_bitmap(seq, "SND", dev->sndbit, SND_MAX);
-	if (test_bit(EV_FF, dev->evbit))
-		input_seq_print_bitmap(seq, "FF", dev->ffbit, FF_MAX);
-	if (test_bit(EV_SW, dev->evbit))
-		input_seq_print_bitmap(seq, "SW", dev->swbit, SW_MAX);
+		len = sprintf(buf, "I: Bus=%04x Vendor=%04x Product=%04x Version=%04x\n",
+			dev->id.bustype, dev->id.vendor, dev->id.product, dev->id.version);
 
-	seq_putc(seq, '\n');
+		len += sprintf(buf + len, "N: Name=\"%s\"\n", dev->name ? dev->name : "");
+		len += sprintf(buf + len, "P: Phys=%s\n", dev->phys ? dev->phys : "");
+		len += sprintf(buf + len, "S: Sysfs=%s\n", path ? path : "");
+		len += sprintf(buf + len, "H: Handlers=");
 
-	kfree(path);
-	return 0;
+		list_for_each_entry(handle, &dev->h_list, d_node)
+			len += sprintf(buf + len, "%s ", handle->name);
+
+		len += sprintf(buf + len, "\n");
+
+		SPRINTF_BIT(EV, ev);
+		TEST_AND_SPRINTF_BIT(KEY, key);
+		TEST_AND_SPRINTF_BIT(REL, rel);
+		TEST_AND_SPRINTF_BIT(ABS, abs);
+		TEST_AND_SPRINTF_BIT(MSC, msc);
+		TEST_AND_SPRINTF_BIT(LED, led);
+		TEST_AND_SPRINTF_BIT(SND, snd);
+		TEST_AND_SPRINTF_BIT(FF, ff);
+		TEST_AND_SPRINTF_BIT(SW, sw);
+
+		len += sprintf(buf + len, "\n");
+
+		at += len;
+
+		if (at >= pos) {
+			if (!*start) {
+				*start = buf + (pos - (at - len));
+				cnt = at - pos;
+			} else  cnt += len;
+			buf += len;
+			if (cnt >= count)
+				break;
+		}
+
+		kfree(path);
+	}
+
+	if (&dev->node == &input_dev_list)
+		*eof = 1;
+
+	return (count > cnt) ? cnt : count;
 }
 
-static struct seq_operations input_devices_seq_ops = {
-	.start	= input_devices_seq_start,
-	.next	= input_devices_seq_next,
-	.stop	= input_devices_seq_stop,
-	.show	= input_devices_seq_show,
-};
-
-static int input_proc_devices_open(struct inode *inode, struct file *file)
+static int input_handlers_read(char *buf, char **start, off_t pos, int count, int *eof, void *data)
 {
-	return seq_open(file, &input_devices_seq_ops);
+	struct input_handler *handler;
+
+	off_t at = 0;
+	int len = 0, cnt = 0;
+	int i = 0;
+
+	list_for_each_entry(handler, &input_handler_list, node) {
+
+		if (handler->fops)
+			len = sprintf(buf, "N: Number=%d Name=%s Minor=%d\n",
+				i++, handler->name, handler->minor);
+		else
+			len = sprintf(buf, "N: Number=%d Name=%s\n",
+				i++, handler->name);
+
+		at += len;
+
+		if (at >= pos) {
+			if (!*start) {
+				*start = buf + (pos - (at - len));
+				cnt = at - pos;
+			} else  cnt += len;
+			buf += len;
+			if (cnt >= count)
+				break;
+		}
+	}
+	if (&handler->node == &input_handler_list)
+		*eof = 1;
+
+	return (count > cnt) ? cnt : count;
 }
 
-static struct file_operations input_devices_fileops = {
-	.owner		= THIS_MODULE,
-	.open		= input_proc_devices_open,
-	.poll		= input_proc_devices_poll,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release,
-};
-
-static void *input_handlers_seq_start(struct seq_file *seq, loff_t *pos)
-{
-	/* acquire lock here ... Yes, we do need locking, I knowi, I know... */
-	seq->private = (void *)(unsigned long)*pos;
-	return list_get_nth_element(&input_handler_list, pos);
-}
-
-static void *input_handlers_seq_next(struct seq_file *seq, void *v, loff_t *pos)
-{
-	seq->private = (void *)(unsigned long)(*pos + 1);
-	return list_get_next_element(&input_handler_list, v, pos);
-}
-
-static void input_handlers_seq_stop(struct seq_file *seq, void *v)
-{
-	/* release lock here */
-}
-
-static int input_handlers_seq_show(struct seq_file *seq, void *v)
-{
-	struct input_handler *handler = container_of(v, struct input_handler, node);
-
-	seq_printf(seq, "N: Number=%ld Name=%s",
-		   (unsigned long)seq->private, handler->name);
-	if (handler->fops)
-		seq_printf(seq, " Minor=%d", handler->minor);
-	seq_putc(seq, '\n');
-
-	return 0;
-}
-static struct seq_operations input_handlers_seq_ops = {
-	.start	= input_handlers_seq_start,
-	.next	= input_handlers_seq_next,
-	.stop	= input_handlers_seq_stop,
-	.show	= input_handlers_seq_show,
-};
-
-static int input_proc_handlers_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &input_handlers_seq_ops);
-}
-
-static struct file_operations input_handlers_fileops = {
-	.owner		= THIS_MODULE,
-	.open		= input_proc_handlers_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release,
-};
+static struct file_operations input_fileops;
 
 static int __init input_proc_init(void)
 {
@@ -546,19 +471,20 @@ static int __init input_proc_init(void)
 
 	proc_bus_input_dir->owner = THIS_MODULE;
 
-	entry = create_proc_entry("devices", 0, proc_bus_input_dir);
+	entry = create_proc_read_entry("devices", 0, proc_bus_input_dir, input_devices_read, NULL);
 	if (!entry)
 		goto fail1;
 
 	entry->owner = THIS_MODULE;
-	entry->proc_fops = &input_devices_fileops;
+	input_fileops = *entry->proc_fops;
+	input_fileops.poll = input_devices_poll;
+	entry->proc_fops = &input_fileops;
 
-	entry = create_proc_entry("handlers", 0, proc_bus_input_dir);
+	entry = create_proc_read_entry("handlers", 0, proc_bus_input_dir, input_handlers_read, NULL);
 	if (!entry)
 		goto fail2;
 
 	entry->owner = THIS_MODULE;
-	entry->proc_fops = &input_handlers_fileops;
 
 	return 0;
 
@@ -586,14 +512,13 @@ static ssize_t input_dev_show_##name(struct class_device *dev, char *buf)	\
 	struct input_dev *input_dev = to_input_dev(dev);			\
 	int retval;								\
 										\
-	retval = mutex_lock_interruptible(&input_dev->mutex);			\
+	retval = down_interruptible(&input_dev->sem);				\
 	if (retval)								\
 		return retval;							\
 										\
-	retval = scnprintf(buf, PAGE_SIZE,					\
-			   "%s\n", input_dev->name ? input_dev->name : "");	\
+	retval = sprintf(buf, "%s\n", input_dev->name ? input_dev->name : "");	\
 										\
-	mutex_unlock(&input_dev->mutex);					\
+	up(&input_dev->sem);							\
 										\
 	return retval;								\
 }										\
@@ -603,51 +528,46 @@ INPUT_DEV_STRING_ATTR_SHOW(name);
 INPUT_DEV_STRING_ATTR_SHOW(phys);
 INPUT_DEV_STRING_ATTR_SHOW(uniq);
 
-static int input_print_modalias_bits(char *buf, int size,
-				     char name, unsigned long *bm,
-				     unsigned int min_bit, unsigned int max_bit)
+static int print_modalias_bits(char *buf, int size, char prefix, unsigned long *arr,
+			       unsigned int min, unsigned int max)
 {
-	int len = 0, i;
+	int len, i;
 
-	len += snprintf(buf, max(size, 0), "%c", name);
-	for (i = min_bit; i < max_bit; i++)
-		if (bm[LONG(i)] & BIT(i))
-			len += snprintf(buf + len, max(size - len, 0), "%X,", i);
+	len = snprintf(buf, size, "%c", prefix);
+	for (i = min; i < max; i++)
+		if (arr[LONG(i)] & BIT(i))
+			len += snprintf(buf + len, size - len, "%X,", i);
 	return len;
 }
 
-static int input_print_modalias(char *buf, int size, struct input_dev *id,
-				int add_cr)
+static int print_modalias(char *buf, int size, struct input_dev *id)
 {
 	int len;
 
-	len = snprintf(buf, max(size, 0),
-		       "input:b%04Xv%04Xp%04Xe%04X-",
-		       id->id.bustype, id->id.vendor,
-		       id->id.product, id->id.version);
+	len = snprintf(buf, size, "input:b%04Xv%04Xp%04Xe%04X-",
+		       id->id.bustype,
+		       id->id.vendor,
+		       id->id.product,
+		       id->id.version);
 
-	len += input_print_modalias_bits(buf + len, size - len,
-				'e', id->evbit, 0, EV_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'k', id->keybit, KEY_MIN_INTERESTING, KEY_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'r', id->relbit, 0, REL_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'a', id->absbit, 0, ABS_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'm', id->mscbit, 0, MSC_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'l', id->ledbit, 0, LED_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				's', id->sndbit, 0, SND_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'f', id->ffbit, 0, FF_MAX);
-	len += input_print_modalias_bits(buf + len, size - len,
-				'w', id->swbit, 0, SW_MAX);
-
-	if (add_cr)
-		len += snprintf(buf + len, max(size - len, 0), "\n");
-
+	len += print_modalias_bits(buf + len, size - len, 'e', id->evbit,
+				   0, EV_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'k', id->keybit,
+				   KEY_MIN_INTERESTING, KEY_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'r', id->relbit,
+				   0, REL_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'a', id->absbit,
+				   0, ABS_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'm', id->mscbit,
+				   0, MSC_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'l', id->ledbit,
+				   0, LED_MAX);
+	len += print_modalias_bits(buf + len, size - len, 's', id->sndbit,
+				   0, SND_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'f', id->ffbit,
+				   0, FF_MAX);
+	len += print_modalias_bits(buf + len, size - len, 'w', id->swbit,
+				   0, SW_MAX);
 	return len;
 }
 
@@ -656,9 +576,9 @@ static ssize_t input_dev_show_modalias(struct class_device *dev, char *buf)
 	struct input_dev *id = to_input_dev(dev);
 	ssize_t len;
 
-	len = input_print_modalias(buf, PAGE_SIZE, id, 1);
-
-	return min_t(int, len, PAGE_SIZE);
+	len = print_modalias(buf, PAGE_SIZE, id);
+	len += snprintf(buf + len, PAGE_SIZE-len, "\n");
+	return len;
 }
 static CLASS_DEVICE_ATTR(modalias, S_IRUGO, input_dev_show_modalias, NULL);
 
@@ -678,7 +598,7 @@ static struct attribute_group input_dev_attr_group = {
 static ssize_t input_dev_show_id_##name(struct class_device *dev, char *buf)	\
 {										\
 	struct input_dev *input_dev = to_input_dev(dev);			\
-	return scnprintf(buf, PAGE_SIZE, "%04x\n", input_dev->id.name);		\
+	return sprintf(buf, "%04x\n", input_dev->id.name);			\
 }										\
 static CLASS_DEVICE_ATTR(name, S_IRUGO, input_dev_show_id_##name, NULL);
 
@@ -700,33 +620,11 @@ static struct attribute_group input_dev_id_attr_group = {
 	.attrs	= input_dev_id_attrs,
 };
 
-static int input_print_bitmap(char *buf, int buf_size, unsigned long *bitmap,
-			      int max, int add_cr)
-{
-	int i;
-	int len = 0;
-
-	for (i = NBITS(max) - 1; i > 0; i--)
-		if (bitmap[i])
-			break;
-
-	for (; i >= 0; i--)
-		len += snprintf(buf + len, max(buf_size - len, 0),
-				"%lx%s", bitmap[i], i > 0 ? " " : "");
-
-	if (add_cr)
-		len += snprintf(buf + len, max(buf_size - len, 0), "\n");
-
-	return len;
-}
-
 #define INPUT_DEV_CAP_ATTR(ev, bm)						\
 static ssize_t input_dev_show_cap_##bm(struct class_device *dev, char *buf)	\
 {										\
 	struct input_dev *input_dev = to_input_dev(dev);			\
-	int len = input_print_bitmap(buf, PAGE_SIZE,				\
-				     input_dev->bm##bit, ev##_MAX, 1);		\
-	return min_t(int, len, PAGE_SIZE);					\
+	return input_print_bitmap(buf, PAGE_SIZE, input_dev->bm##bit, ev##_MAX);\
 }										\
 static CLASS_DEVICE_ATTR(bm, S_IRUGO, input_dev_show_cap_##bm, NULL);
 
@@ -771,8 +669,8 @@ static void input_dev_release(struct class_device *class_dev)
  * device bitfields.
  */
 static int input_add_uevent_bm_var(char **envp, int num_envp, int *cur_index,
-				   char *buffer, int buffer_size, int *cur_len,
-				   const char *name, unsigned long *bitmap, int max)
+				    char *buffer, int buffer_size, int *cur_len,
+				    const char *name, unsigned long *bitmap, int max)
 {
 	if (*cur_index >= num_envp - 1)
 		return -ENOMEM;
@@ -780,36 +678,12 @@ static int input_add_uevent_bm_var(char **envp, int num_envp, int *cur_index,
 	envp[*cur_index] = buffer + *cur_len;
 
 	*cur_len += snprintf(buffer + *cur_len, max(buffer_size - *cur_len, 0), name);
-	if (*cur_len >= buffer_size)
+	if (*cur_len > buffer_size)
 		return -ENOMEM;
 
 	*cur_len += input_print_bitmap(buffer + *cur_len,
 					max(buffer_size - *cur_len, 0),
-					bitmap, max, 0) + 1;
-	if (*cur_len > buffer_size)
-		return -ENOMEM;
-
-	(*cur_index)++;
-	return 0;
-}
-
-static int input_add_uevent_modalias_var(char **envp, int num_envp, int *cur_index,
-					 char *buffer, int buffer_size, int *cur_len,
-					 struct input_dev *dev)
-{
-	if (*cur_index >= num_envp - 1)
-		return -ENOMEM;
-
-	envp[*cur_index] = buffer + *cur_len;
-
-	*cur_len += snprintf(buffer + *cur_len, max(buffer_size - *cur_len, 0),
-			     "MODALIAS=");
-	if (*cur_len >= buffer_size)
-		return -ENOMEM;
-
-	*cur_len += input_print_modalias(buffer + *cur_len,
-					 max(buffer_size - *cur_len, 0),
-					 dev, 0) + 1;
+					bitmap, max) + 1;
 	if (*cur_len > buffer_size)
 		return -ENOMEM;
 
@@ -819,7 +693,7 @@ static int input_add_uevent_modalias_var(char **envp, int num_envp, int *cur_ind
 
 #define INPUT_ADD_HOTPLUG_VAR(fmt, val...)				\
 	do {								\
-		int err = add_uevent_var(envp, num_envp, &i,		\
+		int err = add_uevent_var(envp, num_envp, &i,	\
 					buffer, buffer_size, &len,	\
 					fmt, val);			\
 		if (err)						\
@@ -831,16 +705,6 @@ static int input_add_uevent_modalias_var(char **envp, int num_envp, int *cur_ind
 		int err = input_add_uevent_bm_var(envp, num_envp, &i,	\
 					buffer, buffer_size, &len,	\
 					name, bm, max);			\
-		if (err)						\
-			return err;					\
-	} while (0)
-
-#define INPUT_ADD_HOTPLUG_MODALIAS_VAR(dev)				\
-	do {								\
-		int err = input_add_uevent_modalias_var(envp,		\
-					num_envp, &i,			\
-					buffer, buffer_size, &len,	\
-					dev);				\
 		if (err)						\
 			return err;					\
 	} while (0)
@@ -880,7 +744,9 @@ static int input_dev_uevent(struct class_device *cdev, char **envp,
 	if (test_bit(EV_SW, dev->evbit))
 		INPUT_ADD_HOTPLUG_BM_VAR("SW=", dev->swbit, SW_MAX);
 
-	INPUT_ADD_HOTPLUG_MODALIAS_VAR(dev);
+	envp[i++] = buffer + len;
+	len += snprintf(buffer + len, buffer_size - len, "MODALIAS=");
+	len += print_modalias(buffer + len, buffer_size - len, dev) + 1;
 
 	envp[i] = NULL;
 	return 0;
@@ -891,7 +757,6 @@ struct class input_class = {
 	.release		= input_dev_release,
 	.uevent			= input_dev_uevent,
 };
-EXPORT_SYMBOL_GPL(input_class);
 
 struct input_dev *input_allocate_device(void)
 {
@@ -902,27 +767,12 @@ struct input_dev *input_allocate_device(void)
 		dev->dynalloc = 1;
 		dev->cdev.class = &input_class;
 		class_device_initialize(&dev->cdev);
-		mutex_init(&dev->mutex);
 		INIT_LIST_HEAD(&dev->h_list);
 		INIT_LIST_HEAD(&dev->node);
 	}
 
 	return dev;
 }
-EXPORT_SYMBOL(input_allocate_device);
-
-void input_free_device(struct input_dev *dev)
-{
-	if (dev) {
-
-		mutex_lock(&dev->mutex);
-		dev->name = dev->phys = dev->uniq = NULL;
-		mutex_unlock(&dev->mutex);
-
-		input_put_device(dev);
-	}
-}
-EXPORT_SYMBOL(input_free_device);
 
 int input_register_device(struct input_dev *dev)
 {
@@ -940,6 +790,7 @@ int input_register_device(struct input_dev *dev)
 		return -EINVAL;
 	}
 
+	init_MUTEX(&dev->sem);
 	set_bit(EV_SYN, dev->evbit);
 
 	/*
@@ -988,11 +839,8 @@ int input_register_device(struct input_dev *dev)
 	list_for_each_entry(handler, &input_handler_list, node)
 		if (!handler->blacklist || !input_match_device(handler->blacklist, dev))
 			if ((id = input_match_device(handler->id_table, dev)))
-				if ((handle = handler->connect(handler, dev, id))) {
+				if ((handle = handler->connect(handler, dev, id)))
 					input_link_handle(handle);
-					if (handler->start)
-						handler->start(handle);
-				}
 
 	input_wakeup_procfs_readers();
 
@@ -1003,14 +851,12 @@ int input_register_device(struct input_dev *dev)
  fail1:	class_device_del(&dev->cdev);
 	return error;
 }
-EXPORT_SYMBOL(input_register_device);
 
 void input_unregister_device(struct input_dev *dev)
 {
-	struct list_head *node, *next;
+	struct list_head * node, * next;
 
-	if (!dev)
-		return;
+	if (!dev) return;
 
 	del_timer_sync(&dev->timer);
 
@@ -1026,16 +872,10 @@ void input_unregister_device(struct input_dev *dev)
 	sysfs_remove_group(&dev->cdev.kobj, &input_dev_caps_attr_group);
 	sysfs_remove_group(&dev->cdev.kobj, &input_dev_id_attr_group);
 	sysfs_remove_group(&dev->cdev.kobj, &input_dev_attr_group);
-
-	mutex_lock(&dev->mutex);
-	dev->name = dev->phys = dev->uniq = NULL;
-	mutex_unlock(&dev->mutex);
-
 	class_device_unregister(&dev->cdev);
 
 	input_wakeup_procfs_readers();
 }
-EXPORT_SYMBOL(input_unregister_device);
 
 void input_register_handler(struct input_handler *handler)
 {
@@ -1043,8 +883,7 @@ void input_register_handler(struct input_handler *handler)
 	struct input_handle *handle;
 	struct input_device_id *id;
 
-	if (!handler)
-		return;
+	if (!handler) return;
 
 	INIT_LIST_HEAD(&handler->h_list);
 
@@ -1056,19 +895,15 @@ void input_register_handler(struct input_handler *handler)
 	list_for_each_entry(dev, &input_dev_list, node)
 		if (!handler->blacklist || !input_match_device(handler->blacklist, dev))
 			if ((id = input_match_device(handler->id_table, dev)))
-				if ((handle = handler->connect(handler, dev, id))) {
+				if ((handle = handler->connect(handler, dev, id)))
 					input_link_handle(handle);
-					if (handler->start)
-						handler->start(handle);
-				}
 
 	input_wakeup_procfs_readers();
 }
-EXPORT_SYMBOL(input_register_handler);
 
 void input_unregister_handler(struct input_handler *handler)
 {
-	struct list_head *node, *next;
+	struct list_head * node, * next;
 
 	list_for_each_safe(node, next, &handler->h_list) {
 		struct input_handle * handle = to_handle_h(node);
@@ -1084,12 +919,11 @@ void input_unregister_handler(struct input_handler *handler)
 
 	input_wakeup_procfs_readers();
 }
-EXPORT_SYMBOL(input_unregister_handler);
 
 static int input_open_file(struct inode *inode, struct file *file)
 {
 	struct input_handler *handler = input_table[iminor(inode) >> 5];
-	const struct file_operations *old_fops, *new_fops = NULL;
+	struct file_operations *old_fops, *new_fops = NULL;
 	int err;
 
 	/* No load-on-demand here? */

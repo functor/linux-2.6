@@ -21,6 +21,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
@@ -30,7 +31,7 @@
 #include <asm/uaccess.h>
 #include <linux/dma-mapping.h>
 #include <linux/moduleparam.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 #include <sound/memalloc.h>
 #ifdef CONFIG_SBUS
 #include <asm/sbus.h>
@@ -53,7 +54,7 @@ int snd_free_sgbuf_pages(struct snd_dma_buffer *dmab);
 /*
  */
 
-static DEFINE_MUTEX(list_mutex);
+static DECLARE_MUTEX(list_mutex);
 static LIST_HEAD(mem_list_head);
 
 /* buffer preservation list */
@@ -82,7 +83,7 @@ struct snd_mem_list {
  *  Hacks
  */
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__ppc__) || defined(__x86_64__)
 /*
  * A hack to allocate large buffers via dma_alloc_coherent()
  *
@@ -140,6 +141,10 @@ static void *snd_dma_hack_alloc_coherent(struct device *dev, size_t size,
 
 #endif /* arch */
 
+#if ! defined(__arm__)
+#define NEED_RESERVE_PAGES
+#endif
+
 /*
  *
  *  Generic memory allocators
@@ -156,6 +161,20 @@ static inline void inc_snd_pages(int order)
 static inline void dec_snd_pages(int order)
 {
 	snd_allocated_pages -= 1 << order;
+}
+
+static void mark_pages(struct page *page, int order)
+{
+	struct page *last_page = page + (1 << order);
+	while (page < last_page)
+		SetPageReserved(page++);
+}
+
+static void unmark_pages(struct page *page, int order)
+{
+	struct page *last_page = page + (1 << order);
+	while (page < last_page)
+		ClearPageReserved(page++);
 }
 
 /**
@@ -176,8 +195,10 @@ void *snd_malloc_pages(size_t size, gfp_t gfp_flags)
 	snd_assert(gfp_flags != 0, return NULL);
 	gfp_flags |= __GFP_COMP;	/* compound page lets parts be mapped */
 	pg = get_order(size);
-	if ((res = (void *) __get_free_pages(gfp_flags, pg)) != NULL)
+	if ((res = (void *) __get_free_pages(gfp_flags, pg)) != NULL) {
+		mark_pages(virt_to_page(res), pg);
 		inc_snd_pages(pg);
+	}
 	return res;
 }
 
@@ -196,6 +217,7 @@ void snd_free_pages(void *ptr, size_t size)
 		return;
 	pg = get_order(size);
 	dec_snd_pages(pg);
+	unmark_pages(virt_to_page(ptr), pg);
 	free_pages((unsigned long) ptr, pg);
 }
 
@@ -220,8 +242,12 @@ static void *snd_malloc_dev_pages(struct device *dev, size_t size, dma_addr_t *d
 		| __GFP_NORETRY /* don't trigger OOM-killer */
 		| __GFP_NOWARN; /* no stack trace print - this call is non-critical */
 	res = dma_alloc_coherent(dev, PAGE_SIZE << pg, dma, gfp_flags);
-	if (res != NULL)
+	if (res != NULL) {
+#ifdef NEED_RESERVE_PAGES
+		mark_pages(virt_to_page(res), pg); /* should be dma_to_page() */
+#endif
 		inc_snd_pages(pg);
+	}
 
 	return res;
 }
@@ -236,6 +262,9 @@ static void snd_free_dev_pages(struct device *dev, size_t size, void *ptr,
 		return;
 	pg = get_order(size);
 	dec_snd_pages(pg);
+#ifdef NEED_RESERVE_PAGES
+	unmark_pages(virt_to_page(ptr), pg); /* should be dma_to_page() */
+#endif
 	dma_free_coherent(dev, PAGE_SIZE << pg, ptr, dma);
 }
 
@@ -411,7 +440,7 @@ size_t snd_dma_get_reserved_buf(struct snd_dma_buffer *dmab, unsigned int id)
 
 	snd_assert(dmab, return 0);
 
-	mutex_lock(&list_mutex);
+	down(&list_mutex);
 	list_for_each(p, &mem_list_head) {
 		mem = list_entry(p, struct snd_mem_list, list);
 		if (mem->id == id &&
@@ -423,11 +452,11 @@ size_t snd_dma_get_reserved_buf(struct snd_dma_buffer *dmab, unsigned int id)
 			if (dmab->dev.dev == NULL)
 				dmab->dev.dev = dev;
 			kfree(mem);
-			mutex_unlock(&list_mutex);
+			up(&list_mutex);
 			return dmab->bytes;
 		}
 	}
-	mutex_unlock(&list_mutex);
+	up(&list_mutex);
 	return 0;
 }
 
@@ -448,11 +477,11 @@ int snd_dma_reserve_buf(struct snd_dma_buffer *dmab, unsigned int id)
 	mem = kmalloc(sizeof(*mem), GFP_KERNEL);
 	if (! mem)
 		return -ENOMEM;
-	mutex_lock(&list_mutex);
+	down(&list_mutex);
 	mem->buffer = *dmab;
 	mem->id = id;
 	list_add_tail(&mem->list, &mem_list_head);
-	mutex_unlock(&list_mutex);
+	up(&list_mutex);
 	return 0;
 }
 
@@ -464,7 +493,7 @@ static void free_all_reserved_pages(void)
 	struct list_head *p;
 	struct snd_mem_list *mem;
 
-	mutex_lock(&list_mutex);
+	down(&list_mutex);
 	while (! list_empty(&mem_list_head)) {
 		p = mem_list_head.next;
 		mem = list_entry(p, struct snd_mem_list, list);
@@ -472,7 +501,7 @@ static void free_all_reserved_pages(void)
 		snd_dma_free_pages(&mem->buffer);
 		kfree(mem);
 	}
-	mutex_unlock(&list_mutex);
+	up(&list_mutex);
 }
 
 
@@ -493,7 +522,7 @@ static int snd_mem_proc_read(char *page, char **start, off_t off,
 	int devno;
 	static char *types[] = { "UNKNOWN", "CONT", "DEV", "DEV-SG", "SBUS" };
 
-	mutex_lock(&list_mutex);
+	down(&list_mutex);
 	len += snprintf(page + len, count - len,
 			"pages  : %li bytes (%li pages per %likB)\n",
 			pages * PAGE_SIZE, pages, PAGE_SIZE / 1024);
@@ -508,7 +537,7 @@ static int snd_mem_proc_read(char *page, char **start, off_t off,
 				"  addr = 0x%lx, size = %d bytes\n",
 				(unsigned long)mem->buffer.addr, (int)mem->buffer.bytes);
 	}
-	mutex_unlock(&list_mutex);
+	up(&list_mutex);
 	return len;
 }
 

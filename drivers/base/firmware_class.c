@@ -15,7 +15,7 @@
 #include <linux/vmalloc.h>
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #include <linux/firmware.h>
 #include "base.h"
@@ -32,11 +32,11 @@ enum {
 	FW_STATUS_READY_NOHOTPLUG,
 };
 
-static int loading_timeout = 60;	/* In seconds */
+static int loading_timeout = 10;	/* In seconds */
 
 /* fw_lock could be moved to 'struct firmware_priv' but since it is just
  * guarding for corner cases a global lock should be OK */
-static DEFINE_MUTEX(fw_lock);
+static DECLARE_MUTEX(fw_lock);
 
 struct firmware_priv {
 	char fw_id[FIRMWARE_NAME_MAX];
@@ -86,9 +86,18 @@ firmware_timeout_store(struct class *class, const char *buf, size_t count)
 static CLASS_ATTR(timeout, 0644, firmware_timeout_show, firmware_timeout_store);
 
 static void  fw_class_dev_release(struct class_device *class_dev);
+int firmware_class_uevent(struct class_device *dev, char **envp,
+			   int num_envp, char *buffer, int buffer_size);
 
-static int firmware_class_uevent(struct class_device *class_dev, char **envp,
-				 int num_envp, char *buffer, int buffer_size)
+static struct class firmware_class = {
+	.name		= "firmware",
+	.uevent	= firmware_class_uevent,
+	.release	= fw_class_dev_release,
+};
+
+int
+firmware_class_uevent(struct class_device *class_dev, char **envp,
+		       int num_envp, char *buffer, int buffer_size)
 {
 	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
 	int i = 0, len = 0;
@@ -106,12 +115,6 @@ static int firmware_class_uevent(struct class_device *class_dev, char **envp,
 
 	return 0;
 }
-
-static struct class firmware_class = {
-	.name		= "firmware",
-	.uevent		= firmware_class_uevent,
-	.release	= fw_class_dev_release,
-};
 
 static ssize_t
 firmware_loading_show(struct class_device *class_dev, char *buf)
@@ -142,9 +145,9 @@ firmware_loading_store(struct class_device *class_dev,
 
 	switch (loading) {
 	case 1:
-		mutex_lock(&fw_lock);
+		down(&fw_lock);
 		if (!fw_priv->fw) {
-			mutex_unlock(&fw_lock);
+			up(&fw_lock);
 			break;
 		}
 		vfree(fw_priv->fw->data);
@@ -152,7 +155,7 @@ firmware_loading_store(struct class_device *class_dev,
 		fw_priv->fw->size = 0;
 		fw_priv->alloc_size = 0;
 		set_bit(FW_STATUS_LOADING, &fw_priv->status);
-		mutex_unlock(&fw_lock);
+		up(&fw_lock);
 		break;
 	case 0:
 		if (test_bit(FW_STATUS_LOADING, &fw_priv->status)) {
@@ -185,7 +188,7 @@ firmware_data_read(struct kobject *kobj,
 	struct firmware *fw;
 	ssize_t ret_count = count;
 
-	mutex_lock(&fw_lock);
+	down(&fw_lock);
 	fw = fw_priv->fw;
 	if (!fw || test_bit(FW_STATUS_DONE, &fw_priv->status)) {
 		ret_count = -ENODEV;
@@ -200,7 +203,7 @@ firmware_data_read(struct kobject *kobj,
 
 	memcpy(buffer, fw->data + offset, ret_count);
 out:
-	mutex_unlock(&fw_lock);
+	up(&fw_lock);
 	return ret_count;
 }
 
@@ -253,7 +256,7 @@ firmware_data_write(struct kobject *kobj,
 	if (!capable(CAP_SYS_RAWIO))
 		return -EPERM;
 
-	mutex_lock(&fw_lock);
+	down(&fw_lock);
 	fw = fw_priv->fw;
 	if (!fw || test_bit(FW_STATUS_DONE, &fw_priv->status)) {
 		retval = -ENODEV;
@@ -268,7 +271,7 @@ firmware_data_write(struct kobject *kobj,
 	fw->size = max_t(size_t, offset + count, fw->size);
 	retval = count;
 out:
-	mutex_unlock(&fw_lock);
+	up(&fw_lock);
 	return retval;
 }
 
@@ -436,14 +439,14 @@ _request_firmware(const struct firmware **firmware_p, const char *name,
 	} else
 		wait_for_completion(&fw_priv->completion);
 
-	mutex_lock(&fw_lock);
+	down(&fw_lock);
 	if (!fw_priv->fw->size || test_bit(FW_STATUS_ABORT, &fw_priv->status)) {
 		retval = -ENOENT;
 		release_firmware(fw_priv->fw);
 		*firmware_p = NULL;
 	}
 	fw_priv->fw = NULL;
-	mutex_unlock(&fw_lock);
+	up(&fw_lock);
 	class_device_unregister(class_dev);
 	goto out;
 
@@ -488,6 +491,25 @@ release_firmware(const struct firmware *fw)
 		vfree(fw->data);
 		kfree(fw);
 	}
+}
+
+/**
+ * register_firmware: - provide a firmware image for later usage
+ * @name: name of firmware image file
+ * @data: buffer pointer for the firmware image
+ * @size: size of the data buffer area
+ *
+ *	Make sure that @data will be available by requesting firmware @name.
+ *
+ *	Note: This will not be possible until some kind of persistence
+ *	is available.
+ **/
+void
+register_firmware(const char *name, const u8 *data, size_t size)
+{
+	/* This is meaningless without firmware caching, so until we
+	 * decide if firmware caching is reasonable just leave it as a
+	 * noop */
 }
 
 /* Async support */
@@ -608,3 +630,4 @@ module_exit(firmware_class_exit);
 EXPORT_SYMBOL(release_firmware);
 EXPORT_SYMBOL(request_firmware);
 EXPORT_SYMBOL(request_firmware_nowait);
+EXPORT_SYMBOL(register_firmware);

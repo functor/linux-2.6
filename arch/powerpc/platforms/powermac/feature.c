@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/platforms/pmac_feature.c
+ *
  *  Copyright (C) 1996-2001 Paul Mackerras (paulus@cs.anu.edu.au)
  *                          Ben. Herrenschmidt (benh@kernel.crashing.org)
  *
@@ -16,6 +18,7 @@
  *   - Split split split...
  *
  */
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/delay.h>
@@ -2509,7 +2512,7 @@ found:
 		if (get_property(np, "flush-on-lock", NULL))
 			break;
 		powersave_nap = 1;
-		printk(KERN_DEBUG "Processor NAP mode on idle enabled.\n");
+		printk(KERN_INFO "Processor NAP mode on idle enabled.\n");
 		break;
 	}
 
@@ -2950,7 +2953,7 @@ static void *pmac_early_vresume_data;
 
 void pmac_set_early_video_resume(void (*proc)(void *data), void *data)
 {
-	if (!machine_is(powermac))
+	if (_machine != _MACH_Pmac)
 		return;
 	preempt_disable();
 	pmac_early_vresume_proc = proc;

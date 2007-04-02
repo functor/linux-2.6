@@ -28,8 +28,6 @@
 #include <linux/sctp.h>
 #include <linux/string.h>
 #include <linux/seq_file.h>
-#include <linux/spinlock.h>
-#include <linux/interrupt.h>
 
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_protocol.h>
@@ -620,7 +618,7 @@ static ctl_table nf_ct_net_table[] = {
 static struct ctl_table_header *nf_ct_sysctl_header;
 #endif
 
-int __init nf_conntrack_proto_sctp_init(void)
+int __init init(void)
 {
 	int ret;
 
@@ -657,7 +655,7 @@ int __init nf_conntrack_proto_sctp_init(void)
 	return ret;
 }
 
-void __exit nf_conntrack_proto_sctp_fini(void)
+void __exit fini(void)
 {
 	nf_conntrack_protocol_unregister(&nf_conntrack_protocol_sctp6);
 	nf_conntrack_protocol_unregister(&nf_conntrack_protocol_sctp4);
@@ -667,8 +665,8 @@ void __exit nf_conntrack_proto_sctp_fini(void)
 	DEBUGP("SCTP conntrack module unloaded\n");
 }
 
-module_init(nf_conntrack_proto_sctp_init);
-module_exit(nf_conntrack_proto_sctp_fini);
+module_init(init);
+module_exit(fini);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kiran Kumar Immidi");

@@ -47,7 +47,6 @@
 #include <linux/usbdevice_fs.h>
 #include <linux/cdev.h>
 #include <linux/notifier.h>
-#include <linux/security.h>
 #include <asm/uaccess.h>
 #include <asm/byteorder.h>
 #include <linux/moduleparam.h>
@@ -59,9 +58,6 @@
 #define USB_DEVICE_MAX			USB_MAXBUS * 128
 static struct class *usb_device_class;
 
-/* Mutual exclusion for removal, open, and release */
-DEFINE_MUTEX(usbfs_mutex);
-
 struct async {
 	struct list_head asynclist;
 	struct dev_state *ps;
@@ -72,7 +68,6 @@ struct async {
 	void __user *userbuffer;
 	void __user *userurb;
 	struct urb *urb;
-	u32 secid;
 };
 
 static int usbfs_snoop = 0;
@@ -139,21 +134,26 @@ static ssize_t usbdev_read(struct file *file, char __user *buf, size_t nbytes, l
 	}
 
 	if (pos < sizeof(struct usb_device_descriptor)) {
-		struct usb_device_descriptor temp_desc ; /* 18 bytes - fits on the stack */
-
-		memcpy(&temp_desc, &dev->descriptor, sizeof(dev->descriptor));
-		le16_to_cpus(&temp_desc.bcdUSB);
-		le16_to_cpus(&temp_desc.idVendor);
-		le16_to_cpus(&temp_desc.idProduct);
-		le16_to_cpus(&temp_desc.bcdDevice);
+		struct usb_device_descriptor *desc = kmalloc(sizeof(*desc), GFP_KERNEL);
+		if (!desc) {
+			ret = -ENOMEM;
+			goto err;
+		}
+		memcpy(desc, &dev->descriptor, sizeof(dev->descriptor));
+		le16_to_cpus(&desc->bcdUSB);
+		le16_to_cpus(&desc->idVendor);
+		le16_to_cpus(&desc->idProduct);
+		le16_to_cpus(&desc->bcdDevice);
 
 		len = sizeof(struct usb_device_descriptor) - pos;
 		if (len > nbytes)
 			len = nbytes;
-		if (copy_to_user(buf, ((char *)&temp_desc) + pos, len)) {
+		if (copy_to_user(buf, ((char *)desc) + pos, len)) {
+			kfree(desc);
 			ret = -EFAULT;
 			goto err;
 		}
+		kfree(desc);
 
 		*ppos += len;
 		buf += len;
@@ -317,7 +317,7 @@ static void async_completed(struct urb *urb, struct pt_regs *regs)
 		sinfo.si_code = SI_ASYNCIO;
 		sinfo.si_addr = as->userurb;
 		kill_proc_info_as_uid(as->signr, &sinfo, as->pid, as->uid, 
-				      as->euid, as->secid);
+				      as->euid);
 	}
 	snoop(&urb->dev->dev, "urb complete\n");
 	snoop_urb(urb, as->userurb);
@@ -498,8 +498,7 @@ static int check_ctrlrecip(struct dev_state *ps, unsigned int requesttype, unsig
 {
 	int ret = 0;
 
-	if (ps->dev->state != USB_STATE_ADDRESS
-	 && ps->dev->state != USB_STATE_CONFIGURED)
+	if (ps->dev->state != USB_STATE_CONFIGURED)
 		return -EHOSTUNREACH;
 	if (USB_TYPE_VENDOR == (USB_TYPE_MASK & requesttype))
 		return 0;
@@ -544,19 +543,21 @@ static int usbdev_open(struct inode *inode, struct file *file)
 	struct dev_state *ps;
 	int ret;
 
-	/* Protect against simultaneous removal or release */
-	mutex_lock(&usbfs_mutex);
-
+	/* 
+	 * no locking necessary here, as chrdev_open has the kernel lock
+	 * (still acquire the kernel lock for safety)
+	 */
 	ret = -ENOMEM;
 	if (!(ps = kmalloc(sizeof(struct dev_state), GFP_KERNEL)))
-		goto out;
+		goto out_nolock;
 
+	lock_kernel();
 	ret = -ENOENT;
 	/* check if we are called from a real node or usbfs */
 	if (imajor(inode) == USB_DEVICE_MAJOR)
 		dev = usbdev_lookup_minor(iminor(inode));
 	if (!dev)
-		dev = inode->i_private;
+		dev = inode->u.generic_ip;
 	if (!dev) {
 		kfree(ps);
 		goto out;
@@ -575,13 +576,13 @@ static int usbdev_open(struct inode *inode, struct file *file)
 	ps->disc_euid = current->euid;
 	ps->disccontext = NULL;
 	ps->ifclaimed = 0;
-	security_task_getsecid(current, &ps->secid);
 	wmb();
 	list_add_tail(&ps->list, &dev->filelist);
 	file->private_data = ps;
  out:
-	mutex_unlock(&usbfs_mutex);
-	return ret;
+	unlock_kernel();
+ out_nolock:
+        return ret;
 }
 
 static int usbdev_release(struct inode *inode, struct file *file)
@@ -591,12 +592,7 @@ static int usbdev_release(struct inode *inode, struct file *file)
 	unsigned int ifnum;
 
 	usb_lock_device(dev);
-
-	/* Protect against simultaneous open */
-	mutex_lock(&usbfs_mutex);
 	list_del_init(&ps->list);
-	mutex_unlock(&usbfs_mutex);
-
 	for (ifnum = 0; ps->ifclaimed && ifnum < 8*sizeof(ps->ifclaimed);
 			ifnum++) {
 		if (test_bit(ifnum, &ps->ifclaimed))
@@ -605,8 +601,9 @@ static int usbdev_release(struct inode *inode, struct file *file)
 	destroy_all_async(ps);
 	usb_unlock_device(dev);
 	usb_put_dev(dev);
+	ps->dev = NULL;
 	kfree(ps);
-	return 0;
+        return 0;
 }
 
 static int proc_control(struct dev_state *ps, void __user *arg)
@@ -830,7 +827,8 @@ static int proc_connectinfo(struct dev_state *ps, void __user *arg)
 
 static int proc_resetdevice(struct dev_state *ps)
 {
-	return usb_reset_composite_device(ps->dev, NULL);
+	return usb_reset_device(ps->dev);
+
 }
 
 static int proc_setintf(struct dev_state *ps, void __user *arg)
@@ -929,8 +927,8 @@ static int proc_do_submiturb(struct dev_state *ps, struct usbdevfs_urb *uurb,
 		if ((ep->desc.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK)
 				!= USB_ENDPOINT_XFER_CONTROL)
 			return -EINVAL;
-		/* min 8 byte setup packet, max 8 byte setup plus an arbitrary data stage */
-		if (uurb->buffer_length < 8 || uurb->buffer_length > (8 + MAX_USBFS_BUFFER_SIZE))
+		/* min 8 byte setup packet, max arbitrary */
+		if (uurb->buffer_length < 8 || uurb->buffer_length > PAGE_SIZE)
 			return -EINVAL;
 		if (!(dr = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL)))
 			return -ENOMEM;
@@ -988,8 +986,7 @@ static int proc_do_submiturb(struct dev_state *ps, struct usbdevfs_urb *uurb,
 			return -EFAULT;
 		}
 		for (totlen = u = 0; u < uurb->number_of_packets; u++) {
-			/* arbitrary limit, sufficient for USB 2.0 high-bandwidth iso */
-			if (isopkt[u].length > 8192) {
+			if (isopkt[u].length > 1023) {
 				kfree(isopkt);
 				return -EINVAL;
 			}
@@ -1060,7 +1057,6 @@ static int proc_do_submiturb(struct dev_state *ps, struct usbdevfs_urb *uurb,
 	as->pid = current->pid;
 	as->uid = current->uid;
 	as->euid = current->euid;
-	security_task_getsecid(current, &as->secid);
 	if (!(uurb->endpoint & USB_DIR_IN)) {
 		if (copy_from_user(as->urb->transfer_buffer, uurb->buffer, as->urb->transfer_buffer_length)) {
 			free_async(as);

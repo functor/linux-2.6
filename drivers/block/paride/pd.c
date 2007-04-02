@@ -151,7 +151,6 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_GEO, D_SBY, D_DLY, D_SLV};
 #include <linux/cdrom.h>	/* for the eject ioctl */
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
-#include <linux/kernel.h>
 #include <asm/uaccess.h>
 #include <linux/sched.h>
 #include <linux/workqueue.h>
@@ -276,7 +275,7 @@ static void pd_print_error(struct pd_unit *disk, char *msg, int status)
 	int i;
 
 	printk("%s: %s: status = 0x%x =", disk->name, msg, status);
-	for (i = 0; i < ARRAY_SIZE(pd_errs); i++)
+	for (i = 0; i < 18; i++)
 		if (status & (1 << i))
 			printk(" %s", pd_errs[i]);
 	printk("\n");
@@ -713,7 +712,7 @@ static void do_pd_request(request_queue_t * q)
 static int pd_special_command(struct pd_unit *disk,
 		      enum action (*func)(struct pd_unit *disk))
 {
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	struct request rq;
 	int err = 0;
 

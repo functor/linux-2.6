@@ -27,6 +27,7 @@
  * TODO:
  * - Allocate more than order 0 pages to avoid too much linear map splitting.
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/init.h>
@@ -298,7 +299,7 @@ EXPORT_SYMBOL_GPL(agp_num_entries);
 /**
  *	agp_copy_info  -  copy bridge state information
  *
- *	@info:		agp_kern_info pointer.  The caller should insure that this pointer is valid.
+ *	@info:		agp_kern_info pointer.  The caller should insure that this pointer is valid. 
  *
  *	This function copies information about the agp bridge device and the state of
  *	the agp backend into an agp_kern_info pointer.
@@ -568,34 +569,25 @@ static void agp_v3_parse_one(u32 *requested_mode, u32 *bridge_agpstat, u32 *vga_
 		*bridge_agpstat &= ~(AGPSTAT3_4X | AGPSTAT3_RSVD);
 		goto done;
 
-	} else if (*requested_mode & AGPSTAT3_4X) {
-		*bridge_agpstat &= ~(AGPSTAT3_8X | AGPSTAT3_RSVD);
-		*bridge_agpstat |= AGPSTAT3_4X;
-		goto done;
-
 	} else {
 
 		/*
-		 * If we didn't specify an AGP mode, we see if both
-		 * the graphics card, and the bridge can do x8, and use if so.
-		 * If not, we fall back to x4 mode.
+		 * If we didn't specify AGPx8, we can only do x4.
+		 * If the hardware can't do x4, we're up shit creek, and never
+		 *  should have got this far.
 		 */
-		if ((*bridge_agpstat & AGPSTAT3_8X) && (*vga_agpstat & AGPSTAT3_8X)) {
-			printk(KERN_INFO PFX "No AGP mode specified. Setting to highest mode supported by bridge & card (x8).\n");
-			*bridge_agpstat &= ~(AGPSTAT3_4X | AGPSTAT3_RSVD);
-			*vga_agpstat &= ~(AGPSTAT3_4X | AGPSTAT3_RSVD);
-		} else {
-			printk(KERN_INFO PFX "Fell back to AGPx4 mode because");
-			if (!(*bridge_agpstat & AGPSTAT3_8X)) {
-				printk(KERN_INFO PFX "bridge couldn't do x8. bridge_agpstat:%x (orig=%x)\n", *bridge_agpstat, origbridge);
-				*bridge_agpstat &= ~(AGPSTAT3_8X | AGPSTAT3_RSVD);
-				*bridge_agpstat |= AGPSTAT3_4X;
-			}
-			if (!(*vga_agpstat & AGPSTAT3_8X)) {
-				printk(KERN_INFO PFX "graphics card couldn't do x8. vga_agpstat:%x (orig=%x)\n", *vga_agpstat, origvga);
-				*vga_agpstat &= ~(AGPSTAT3_8X | AGPSTAT3_RSVD);
-				*vga_agpstat |= AGPSTAT3_4X;
-			}
+		*bridge_agpstat &= ~(AGPSTAT3_8X | AGPSTAT3_RSVD);
+		if ((*bridge_agpstat & AGPSTAT3_4X) && (*vga_agpstat & AGPSTAT3_4X))
+			*bridge_agpstat |= AGPSTAT3_4X;
+		else {
+			printk(KERN_INFO PFX "Badness. Don't know which AGP mode to set. "
+							"[bridge_agpstat:%x vga_agpstat:%x fell back to:- bridge_agpstat:%x vga_agpstat:%x]\n",
+							origbridge, origvga, *bridge_agpstat, *vga_agpstat);
+			if (!(*bridge_agpstat & AGPSTAT3_4X))
+				printk(KERN_INFO PFX "Bridge couldn't do AGP x4.\n");
+			if (!(*vga_agpstat & AGPSTAT3_4X))
+				printk(KERN_INFO PFX "Graphic card couldn't do AGP x4.\n");
+			return;
 		}
 	}
 
@@ -817,10 +809,12 @@ int agp_generic_create_gatt_table(struct agp_bridge_data *bridge)
 				case U32_APER_SIZE:
 					bridge->current_size = A_IDX32(bridge);
 					break;
-				/* These cases will never really happen. */
+					/* This case will never really happen. */
 				case FIXED_APER_SIZE:
 				case LVL2_APER_SIZE:
 				default:
+					bridge->current_size =
+					    bridge->current_size;
 					break;
 				}
 				temp = bridge->current_size;

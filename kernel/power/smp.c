@@ -49,7 +49,9 @@ void enable_nonboot_cpus(void)
 
 	printk("Thawing cpus ...\n");
 	for_each_cpu_mask(cpu, frozen_cpus) {
-		error = cpu_up(cpu);
+		error = smp_prepare_cpu(cpu);
+		if (!error)
+			error = cpu_up(cpu);
 		if (!error) {
 			printk("CPU%d is up\n", cpu);
 			continue;

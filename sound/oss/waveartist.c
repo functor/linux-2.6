@@ -35,6 +35,7 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
@@ -2027,8 +2028,8 @@ __setup("waveartist=", setup_waveartist);
 #endif
 
 MODULE_DESCRIPTION("Rockwell WaveArtist RWA-010 sound driver");
-module_param(io, int, 0);		/* IO base */
-module_param(irq, int, 0);		/* IRQ */
-module_param(dma, int, 0);		/* DMA */
-module_param(dma2, int, 0);		/* DMA2 */
+MODULE_PARM(io, "i");		/* IO base */
+MODULE_PARM(irq, "i");		/* IRQ */
+MODULE_PARM(dma, "i");		/* DMA */
+MODULE_PARM(dma2, "i");		/* DMA2 */
 MODULE_LICENSE("GPL");

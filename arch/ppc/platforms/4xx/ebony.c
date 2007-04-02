@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ebony.c
+ *
  * Ebony board specific routines
  *
  * Matt Porter <mporter@kernel.crashing.org>
@@ -13,6 +15,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>

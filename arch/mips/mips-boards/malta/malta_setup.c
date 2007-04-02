@@ -15,11 +15,12 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
  */
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/ioport.h>
 #include <linux/pci.h>
-#include <linux/screen_info.h>
+#include <linux/tty.h>
 
 #ifdef CONFIG_MTD
 #include <linux/mtd/partitions.h>
@@ -44,6 +45,7 @@
 
 extern void mips_reboot_setup(void);
 extern void mips_time_init(void);
+extern void mips_timer_setup(struct irqaction *irq);
 extern unsigned long mips_rtc_get_time(void);
 
 #ifdef CONFIG_KGDB
@@ -51,11 +53,11 @@ extern void kgdb_config(void);
 #endif
 
 struct resource standard_io_resources[] = {
-	{ .name = "dma1", .start = 0x00, .end = 0x1f, .flags = IORESOURCE_BUSY },
-	{ .name = "timer", .start = 0x40, .end = 0x5f, .flags = IORESOURCE_BUSY },
-	{ .name = "keyboard", .start = 0x60, .end = 0x6f, .flags = IORESOURCE_BUSY },
-	{ .name = "dma page reg", .start = 0x80, .end = 0x8f, .flags = IORESOURCE_BUSY },
-	{ .name = "dma2", .start = 0xc0, .end = 0xdf, .flags = IORESOURCE_BUSY },
+	{ "dma1", 0x00, 0x1f, IORESOURCE_BUSY },
+	{ "timer", 0x40, 0x5f, IORESOURCE_BUSY },
+	{ "keyboard", 0x60, 0x6f, IORESOURCE_BUSY },
+	{ "dma page reg", 0x80, 0x8f, IORESOURCE_BUSY },
+	{ "dma2", 0xc0, 0xdf, IORESOURCE_BUSY },
 };
 
 #ifdef CONFIG_MTD
@@ -109,7 +111,7 @@ void __init fd_activate(void)
 }
 #endif
 
-void __init plat_mem_setup(void)
+void __init plat_setup(void)
 {
 	unsigned int i;
 
@@ -222,5 +224,6 @@ void __init plat_mem_setup(void)
 	mips_reboot_setup();
 
 	board_time_init = mips_time_init;
-	rtc_mips_get_time = mips_rtc_get_time;
+	board_timer_setup = mips_timer_setup;
+	rtc_get_time = mips_rtc_get_time;
 }

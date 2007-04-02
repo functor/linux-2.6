@@ -21,6 +21,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/device.h>
 #include <linux/usb.h>
 #include "hcd.h"
@@ -377,7 +378,7 @@ const struct usb_device_id *usb_match_id(struct usb_interface *interface,
 
 	return NULL;
 }
-EXPORT_SYMBOL_GPL_FUTURE(usb_match_id);
+EXPORT_SYMBOL(usb_match_id);
 
 int usb_device_match(struct device *dev, struct device_driver *drv)
 {
@@ -445,7 +446,7 @@ int usb_register_driver(struct usb_driver *new_driver, struct module *owner)
 
 	return retval;
 }
-EXPORT_SYMBOL_GPL_FUTURE(usb_register_driver);
+EXPORT_SYMBOL(usb_register_driver);
 
 /**
  * usb_deregister - unregister a USB driver
@@ -468,4 +469,4 @@ void usb_deregister(struct usb_driver *driver)
 
 	usbfs_update_special();
 }
-EXPORT_SYMBOL_GPL_FUTURE(usb_deregister);
+EXPORT_SYMBOL(usb_deregister);

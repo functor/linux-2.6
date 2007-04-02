@@ -74,6 +74,7 @@
  * This file is licenced under the GPL.
  */
  
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/pci.h>
@@ -442,15 +443,10 @@ ohci_reboot (struct notifier_block *block, unsigned long code, void *null)
 static int ohci_init (struct ohci_hcd *ohci)
 {
 	int ret;
-	struct usb_hcd *hcd = ohci_to_hcd(ohci);
 
 	disable (ohci);
-	ohci->regs = hcd->regs;
+	ohci->regs = ohci_to_hcd(ohci)->regs;
 	ohci->next_statechange = jiffies;
-
-	/* REVISIT this BIOS handshake is now moved into PCI "quirks", and
-	 * was never needed for most non-PCI systems ... remove the code?
-	 */
 
 #ifndef IR_DISABLE
 	/* SMM owns the HC?  not for long! */
@@ -482,10 +478,8 @@ static int ohci_init (struct ohci_hcd *ohci)
 
 	/* Disable HC interrupts */
 	ohci_writel (ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
-
-	/* flush the writes, and save key bits like RWC */
-	if (ohci_readl (ohci, &ohci->regs->control) & OHCI_CTRL_RWC)
-		ohci->hc_control |= OHCI_CTRL_RWC;
+	// flush the writes
+	(void) ohci_readl (ohci, &ohci->regs->control);
 
 	/* Read the number of ports unless overridden */
 	if (ohci->num_ports == 0)
@@ -494,19 +488,16 @@ static int ohci_init (struct ohci_hcd *ohci)
 	if (ohci->hcca)
 		return 0;
 
-	ohci->hcca = dma_alloc_coherent (hcd->self.controller,
+	ohci->hcca = dma_alloc_coherent (ohci_to_hcd(ohci)->self.controller,
 			sizeof *ohci->hcca, &ohci->hcca_dma, 0);
 	if (!ohci->hcca)
 		return -ENOMEM;
 
 	if ((ret = ohci_mem_init (ohci)) < 0)
-		ohci_stop (hcd);
-	else {
-		register_reboot_notifier (&ohci->reboot_notifier);
-		create_debug_files (ohci);
-	}
+		ohci_stop (ohci_to_hcd(ohci));
 
 	return ret;
+
 }
 
 /*-------------------------------------------------------------------------*/
@@ -519,7 +510,6 @@ static int ohci_run (struct ohci_hcd *ohci)
 {
   	u32			mask, temp;
 	int			first = ohci->fminterval == 0;
-	struct usb_hcd		*hcd = ohci_to_hcd(ohci);
 
 	disable (ohci);
 
@@ -535,17 +525,18 @@ static int ohci_run (struct ohci_hcd *ohci)
 		/* also: power/overcurrent flags in roothub.a */
 	}
 
-  	/* Reset USB nearly "by the book".  RemoteWakeupConnected was
-	 * saved if boot firmware (BIOS/SMM/...) told us it's connected,
-	 * or if bus glue did the same (e.g. for PCI add-in cards with
-	 * PCI PM support).
+  	/* Reset USB nearly "by the book".  RemoteWakeupConnected
+	 * saved if boot firmware (BIOS/SMM/...) told us it's connected
+	 * (for OHCI integrated on mainboard, it normally is)
 	 */
+	ohci->hc_control = ohci_readl (ohci, &ohci->regs->control);
 	ohci_dbg (ohci, "resetting from state '%s', control = 0x%x\n",
 			hcfs2string (ohci->hc_control & OHCI_CTRL_HCFS),
-			ohci_readl (ohci, &ohci->regs->control));
-	if ((ohci->hc_control & OHCI_CTRL_RWC) != 0
-			&& !device_may_wakeup(hcd->self.controller))
-		device_init_wakeup(hcd->self.controller, 1);
+			ohci->hc_control);
+
+	if (ohci->hc_control & OHCI_CTRL_RWC
+			&& !(ohci->flags & OHCI_QUIRK_AMD756))
+		ohci_to_hcd(ohci)->can_wakeup = 1;
 
 	switch (ohci->hc_control & OHCI_CTRL_HCFS) {
 	case OHCI_USB_OPER:
@@ -641,7 +632,7 @@ retry:
 	ohci->hc_control &= OHCI_CTRL_RWC;
  	ohci->hc_control |= OHCI_CONTROL_INIT | OHCI_USB_OPER;
  	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
-	hcd->state = HC_STATE_RUNNING;
+	ohci_to_hcd(ohci)->state = HC_STATE_RUNNING;
 
 	/* wake on ConnectStatusChange, matching external hubs */
 	ohci_writel (ohci, RH_HS_DRWE, &ohci->regs->roothub.status);
@@ -676,9 +667,14 @@ retry:
 
 	// POTPGT delay is bits 24-31, in 2 ms units.
 	mdelay ((temp >> 23) & 0x1fe);
-	hcd->state = HC_STATE_RUNNING;
+	ohci_to_hcd(ohci)->state = HC_STATE_RUNNING;
 
 	ohci_dump (ohci, 1);
+
+	if (ohci_to_hcd(ohci)->self.root_hub == NULL) {
+		register_reboot_notifier (&ohci->reboot_notifier);
+		create_debug_files (ohci);
+	}
 
 	return 0;
 }
@@ -862,7 +858,7 @@ static int ohci_restart (struct ohci_hcd *ohci)
 		i = ohci->num_ports;
 		while (i--)
 			ohci_writel (ohci, RH_PS_PSS,
-				&ohci->regs->roothub.portstatus [i]);
+				&ohci->regs->roothub.portstatus [temp]);
 		ohci_dbg (ohci, "restart complete\n");
 	}
 	return 0;
@@ -901,10 +897,6 @@ MODULE_LICENSE ("GPL");
 #include "ohci-pxa27x.c"
 #endif
 
-#ifdef CONFIG_ARCH_EP93XX
-#include "ohci-ep93xx.c"
-#endif
-
 #ifdef CONFIG_SOC_AU1X00
 #include "ohci-au1xxx.c"
 #endif
@@ -913,21 +905,14 @@ MODULE_LICENSE ("GPL");
 #include "ohci-ppc-soc.c"
 #endif
 
-#if defined(CONFIG_ARCH_AT91RM9200) || defined(CONFIG_ARCH_AT91SAM9261)
-#include "ohci-at91.c"
-#endif
-
 #if !(defined(CONFIG_PCI) \
       || defined(CONFIG_SA1111) \
       || defined(CONFIG_ARCH_S3C2410) \
       || defined(CONFIG_ARCH_OMAP) \
       || defined (CONFIG_ARCH_LH7A404) \
       || defined (CONFIG_PXA27x) \
-      || defined (CONFIG_ARCH_EP93XX) \
       || defined (CONFIG_SOC_AU1X00) \
       || defined (CONFIG_USB_OHCI_HCD_PPC_SOC) \
-      || defined (CONFIG_ARCH_AT91RM9200) \
-      || defined (CONFIG_ARCH_AT91SAM9261) \
 	)
 #error "missing bus glue for ohci-hcd"
 #endif

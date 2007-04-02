@@ -9,9 +9,6 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-/* Check of existence of legacy devices */
-extern int check_legacy_ioport(unsigned long base_port);
-
 #ifndef CONFIG_PPC64
 #include <asm-ppc/io.h>
 #else
@@ -19,7 +16,6 @@ extern int check_legacy_ioport(unsigned long base_port);
 #include <linux/compiler.h>
 #include <asm/page.h>
 #include <asm/byteorder.h>
-#include <asm/paca.h>
 #ifdef CONFIG_PPC_ISERIES 
 #include <asm/iseries/iseries_io.h>
 #endif  
@@ -41,6 +37,12 @@ extern int check_legacy_ioport(unsigned long base_port);
 
 extern unsigned long isa_io_base;
 extern unsigned long pci_io_base;
+extern unsigned long io_page_mask;
+
+#define MAX_ISA_PORT 0x10000
+
+#define _IO_IS_VALID(port) ((port) >= MAX_ISA_PORT || (1 << (port>>PAGE_SHIFT)) \
+			    & io_page_mask)
 
 #ifdef CONFIG_PPC_ISERIES
 /* __raw_* accessors aren't supported on iSeries */
@@ -73,9 +75,6 @@ extern unsigned long pci_io_base;
  * Neither do the standard versions now, these are just here
  * for older code.
  */
-#define insb(port, buf, ns)	_insb((u8 __iomem *)((port)+pci_io_base), (buf), (ns))
-#define insw(port, buf, ns)	_insw_ns((u8 __iomem *)((port)+pci_io_base), (buf), (ns))
-#define insl(port, buf, nl)	_insl_ns((u8 __iomem *)((port)+pci_io_base), (buf), (nl))
 #define insw_ns(port, buf, ns)	_insw_ns((u16 __iomem *)((port)+pci_io_base), (buf), (ns))
 #define insl_ns(port, buf, nl)	_insl_ns((u32 __iomem *)((port)+pci_io_base), (buf), (nl))
 #else
@@ -141,11 +140,11 @@ static inline void __raw_writeq(unsigned long v, volatile void __iomem *addr)
 #define insw_ns(port, buf, ns)	eeh_insw_ns((port), (buf), (ns))
 #define insl_ns(port, buf, nl)	eeh_insl_ns((port), (buf), (nl))
 
-#endif
-
 #define outsb(port, buf, ns)  _outsb((u8 __iomem *)((port)+pci_io_base), (buf), (ns))
 #define outsw(port, buf, ns)  _outsw_ns((u16 __iomem *)((port)+pci_io_base), (buf), (ns))
 #define outsl(port, buf, nl)  _outsl_ns((u32 __iomem *)((port)+pci_io_base), (buf), (nl))
+
+#endif
 
 #define readb_relaxed(addr) readb(addr)
 #define readw_relaxed(addr) readw(addr)
@@ -163,11 +162,7 @@ extern void _outsw_ns(volatile u16 __iomem *port, const void *buf, int ns);
 extern void _insl_ns(volatile u32 __iomem *port, void *buf, int nl);
 extern void _outsl_ns(volatile u32 __iomem *port, const void *buf, int nl);
 
-static inline void mmiowb(void)
-{
-	__asm__ __volatile__ ("sync" : : : "memory");
-	get_paca()->io_sync = 0;
-}
+#define mmiowb()
 
 /*
  * output pause versions need a delay at least for the
@@ -283,23 +278,22 @@ static inline int in_8(const volatile unsigned char __iomem *addr)
 {
 	int ret;
 
-	__asm__ __volatile__("sync; lbz%U1%X1 %0,%1; twi 0,%0,0; isync"
+	__asm__ __volatile__("lbz%U1%X1 %0,%1; twi 0,%0,0; isync"
 			     : "=r" (ret) : "m" (*addr));
 	return ret;
 }
 
 static inline void out_8(volatile unsigned char __iomem *addr, int val)
 {
-	__asm__ __volatile__("sync; stb%U0%X0 %1,%0"
+	__asm__ __volatile__("stb%U0%X0 %1,%0; sync"
 			     : "=m" (*addr) : "r" (val));
-	get_paca()->io_sync = 1;
 }
 
 static inline int in_le16(const volatile unsigned short __iomem *addr)
 {
 	int ret;
 
-	__asm__ __volatile__("sync; lhbrx %0,0,%1; twi 0,%0,0; isync"
+	__asm__ __volatile__("lhbrx %0,0,%1; twi 0,%0,0; isync"
 			     : "=r" (ret) : "r" (addr), "m" (*addr));
 	return ret;
 }
@@ -308,30 +302,28 @@ static inline int in_be16(const volatile unsigned short __iomem *addr)
 {
 	int ret;
 
-	__asm__ __volatile__("sync; lhz%U1%X1 %0,%1; twi 0,%0,0; isync"
+	__asm__ __volatile__("lhz%U1%X1 %0,%1; twi 0,%0,0; isync"
 			     : "=r" (ret) : "m" (*addr));
 	return ret;
 }
 
 static inline void out_le16(volatile unsigned short __iomem *addr, int val)
 {
-	__asm__ __volatile__("sync; sthbrx %1,0,%2"
+	__asm__ __volatile__("sthbrx %1,0,%2; sync"
 			     : "=m" (*addr) : "r" (val), "r" (addr));
-	get_paca()->io_sync = 1;
 }
 
 static inline void out_be16(volatile unsigned short __iomem *addr, int val)
 {
-	__asm__ __volatile__("sync; sth%U0%X0 %1,%0"
+	__asm__ __volatile__("sth%U0%X0 %1,%0; sync"
 			     : "=m" (*addr) : "r" (val));
-	get_paca()->io_sync = 1;
 }
 
 static inline unsigned in_le32(const volatile unsigned __iomem *addr)
 {
 	unsigned ret;
 
-	__asm__ __volatile__("sync; lwbrx %0,0,%1; twi 0,%0,0; isync"
+	__asm__ __volatile__("lwbrx %0,0,%1; twi 0,%0,0; isync"
 			     : "=r" (ret) : "r" (addr), "m" (*addr));
 	return ret;
 }
@@ -340,23 +332,21 @@ static inline unsigned in_be32(const volatile unsigned __iomem *addr)
 {
 	unsigned ret;
 
-	__asm__ __volatile__("sync; lwz%U1%X1 %0,%1; twi 0,%0,0; isync"
+	__asm__ __volatile__("lwz%U1%X1 %0,%1; twi 0,%0,0; isync"
 			     : "=r" (ret) : "m" (*addr));
 	return ret;
 }
 
 static inline void out_le32(volatile unsigned __iomem *addr, int val)
 {
-	__asm__ __volatile__("sync; stwbrx %1,0,%2" : "=m" (*addr)
+	__asm__ __volatile__("stwbrx %1,0,%2; sync" : "=m" (*addr)
 			     : "r" (val), "r" (addr));
-	get_paca()->io_sync = 1;
 }
 
 static inline void out_be32(volatile unsigned __iomem *addr, int val)
 {
-	__asm__ __volatile__("sync; stw%U0%X0 %1,%0"
+	__asm__ __volatile__("stw%U0%X0 %1,%0; sync"
 			     : "=m" (*addr) : "r" (val));
-	get_paca()->io_sync = 1;
 }
 
 static inline unsigned long in_le64(const volatile unsigned long __iomem *addr)
@@ -364,7 +354,6 @@ static inline unsigned long in_le64(const volatile unsigned long __iomem *addr)
 	unsigned long tmp, ret;
 
 	__asm__ __volatile__(
-			     "sync\n"
 			     "ld %1,0(%2)\n"
 			     "twi 0,%1,0\n"
 			     "isync\n"
@@ -383,7 +372,7 @@ static inline unsigned long in_be64(const volatile unsigned long __iomem *addr)
 {
 	unsigned long ret;
 
-	__asm__ __volatile__("sync; ld%U1%X1 %0,%1; twi 0,%0,0; isync"
+	__asm__ __volatile__("ld%U1%X1 %0,%1; twi 0,%0,0; isync"
 			     : "=r" (ret) : "m" (*addr));
 	return ret;
 }
@@ -400,16 +389,14 @@ static inline void out_le64(volatile unsigned long __iomem *addr, unsigned long 
 			     "rldicl %1,%1,32,0\n"
 			     "rlwimi %0,%1,8,8,31\n"
 			     "rlwimi %0,%1,24,16,23\n"
-			     "sync\n"
-			     "std %0,0(%3)"
+			     "std %0,0(%3)\n"
+			     "sync"
 			     : "=&r" (tmp) , "=&r" (val) : "1" (val) , "b" (addr) , "m" (*addr));
-	get_paca()->io_sync = 1;
 }
 
 static inline void out_be64(volatile unsigned long __iomem *addr, unsigned long val)
 {
-	__asm__ __volatile__("sync; std%U0%X0 %1,%0" : "=m" (*addr) : "r" (val));
-	get_paca()->io_sync = 1;
+	__asm__ __volatile__("std%U0%X0 %1,%0; sync" : "=m" (*addr) : "r" (val));
 }
 
 #ifndef CONFIG_PPC_ISERIES 
@@ -449,6 +436,9 @@ out:
 #define dma_cache_inv(_start,_size)		do { } while (0)
 #define dma_cache_wback(_start,_size)		do { } while (0)
 #define dma_cache_wback_inv(_start,_size)	do { } while (0)
+
+/* Check of existence of legacy devices */
+extern int check_legacy_ioport(unsigned long base_port);
 
 
 /*

@@ -27,6 +27,7 @@
 
 /*****************************************************************************/
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
@@ -200,7 +201,7 @@ static void update_sb(struct super_block *sb)
 	if (!root)
 		return;
 
-	mutex_lock_nested(&root->d_inode->i_mutex, I_MUTEX_PARENT);
+	mutex_lock(&root->d_inode->i_mutex);
 
 	list_for_each_entry(bus, &root->d_subdirs, d_u.d_child) {
 		if (bus->d_inode) {
@@ -249,6 +250,7 @@ static struct inode *usbfs_get_inode (struct super_block *sb, int mode, dev_t de
 		inode->i_mode = mode;
 		inode->i_uid = current->fsuid;
 		inode->i_gid = current->fsgid;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		switch (mode & S_IFMT) {
@@ -401,8 +403,8 @@ static loff_t default_file_lseek (struct file *file, loff_t offset, int orig)
 
 static int default_open (struct inode *inode, struct file *file)
 {
-	if (inode->i_private)
-		file->private_data = inode->i_private;
+	if (inode->u.generic_ip)
+		file->private_data = inode->u.generic_ip;
 
 	return 0;
 }
@@ -508,7 +510,7 @@ static struct dentry *fs_create_file (const char *name, mode_t mode,
 	} else {
 		if (dentry->d_inode) {
 			if (data)
-				dentry->d_inode->i_private = data;
+				dentry->d_inode->u.generic_ip = data;
 			if (fops)
 				dentry->d_inode->i_fop = fops;
 			dentry->d_inode->i_uid = uid;
@@ -526,7 +528,7 @@ static void fs_remove_file (struct dentry *dentry)
 	if (!parent || !parent->d_inode)
 		return;
 
-	mutex_lock_nested(&parent->d_inode->i_mutex, I_MUTEX_PARENT);
+	mutex_lock(&parent->d_inode->i_mutex);
 	if (usbfs_positive(dentry)) {
 		if (dentry->d_inode) {
 			if (S_ISDIR(dentry->d_inode->i_mode))
@@ -541,10 +543,10 @@ static void fs_remove_file (struct dentry *dentry)
 
 /* --------------------------------------------------------------------- */
 
-static int usb_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *usb_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_single(fs_type, flags, data, usbfs_fill_super, mnt);
+	return get_sb_single(fs_type, flags, data, usbfs_fill_super);
 }
 
 static struct file_system_type usb_fs_type = {
@@ -567,7 +569,7 @@ static int create_special_files (void)
 	ignore_mount = 1;
 
 	/* create the devices special file */
-	retval = simple_pin_fs(&usb_fs_type, &usbfs_mount, &usbfs_mount_count);
+	retval = simple_pin_fs("usbfs", &usbfs_mount, &usbfs_mount_count);
 	if (retval) {
 		err ("Unable to get usbfs mount");
 		goto exit;
@@ -694,11 +696,11 @@ static void usbfs_remove_device(struct usb_device *dev)
 		wake_up_all(&ds->wait);
 		list_del_init(&ds->list);
 		if (ds->discsignr) {
-			sinfo.si_signo = ds->discsignr;
+			sinfo.si_signo = SIGPIPE;
 			sinfo.si_errno = EPIPE;
 			sinfo.si_code = SI_ASYNCIO;
 			sinfo.si_addr = ds->disccontext;
-			kill_proc_info_as_uid(ds->discsignr, &sinfo, ds->disc_pid, ds->disc_uid, ds->disc_euid, ds->secid);
+			kill_proc_info_as_uid(ds->discsignr, &sinfo, ds->disc_pid, ds->disc_uid, ds->disc_euid);
 		}
 	}
 }

@@ -13,13 +13,10 @@
 #ifndef _S390_PGALLOC_H
 #define _S390_PGALLOC_H
 
+#include <linux/config.h>
 #include <linux/threads.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
-
-#define arch_add_exec_range(mm, limit) do { ; } while (0)
-#define arch_flush_exec_range(mm)      do { ; } while (0)
-#define arch_remove_exec_range(mm, limit) do { ; } while (0)
 
 #define check_pgt_cache()	do {} while (0)
 
@@ -146,7 +143,7 @@ pte_alloc_one(struct mm_struct *mm, unsigned long vmaddr)
 	pte_t *pte = pte_alloc_one_kernel(mm, vmaddr);
 	if (pte)
 		return virt_to_page(pte);
-	return NULL;
+	return 0;
 }
 
 static inline void pte_free_kernel(pte_t *pte)
@@ -160,5 +157,12 @@ static inline void pte_free(struct page *pte)
 }
 
 #define __pte_free_tlb(tlb,pte) tlb_remove_page(tlb,pte)
+
+/*
+ * This establishes kernel virtual mappings (e.g., as a result of a
+ * vmalloc call).  Since s390-esame uses a separate kernel page table,
+ * there is nothing to do here... :)
+ */
+#define set_pgdir(addr,entry) do { } while(0)
 
 #endif /* _S390_PGALLOC_H */

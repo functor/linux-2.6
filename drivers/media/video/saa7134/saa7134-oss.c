@@ -84,7 +84,8 @@ static int dsp_buffer_init(struct saa7134_dev *dev)
 {
 	int err;
 
-	BUG_ON(!dev->dmasound.bufsize);
+	if (!dev->dmasound.bufsize)
+		BUG();
 	videobuf_dma_init(&dev->dmasound.dma);
 	err = videobuf_dma_init_kernel(&dev->dmasound.dma, PCI_DMA_FROMDEVICE,
 				       (dev->dmasound.bufsize + PAGE_SIZE) >> PAGE_SHIFT);
@@ -95,7 +96,8 @@ static int dsp_buffer_init(struct saa7134_dev *dev)
 
 static int dsp_buffer_free(struct saa7134_dev *dev)
 {
-	BUG_ON(!dev->dmasound.blksize);
+	if (!dev->dmasound.blksize)
+		BUG();
 	videobuf_dma_free(&dev->dmasound.dma);
 	dev->dmasound.blocks  = 0;
 	dev->dmasound.blksize = 0;
@@ -124,7 +126,7 @@ static int dsp_rec_start(struct saa7134_dev *dev)
 	unsigned long flags;
 
 	/* prepare buffer */
-	if (0 != (err = videobuf_pci_dma_map(dev->pci,&dev->dmasound.dma)))
+	if (0 != (err = videobuf_dma_pci_map(dev->pci,&dev->dmasound.dma)))
 		return err;
 	if (0 != (err = saa7134_pgtable_alloc(dev->pci,&dev->dmasound.pt)))
 		goto fail1;
@@ -213,7 +215,7 @@ static int dsp_rec_start(struct saa7134_dev *dev)
  fail2:
 	saa7134_pgtable_free(dev->pci,&dev->dmasound.pt);
  fail1:
-	videobuf_pci_dma_unmap(dev->pci,&dev->dmasound.dma);
+	videobuf_dma_pci_unmap(dev->pci,&dev->dmasound.dma);
 	return err;
 }
 
@@ -231,7 +233,7 @@ static int dsp_rec_stop(struct saa7134_dev *dev)
 
 	/* unlock buffer */
 	saa7134_pgtable_free(dev->pci,&dev->dmasound.pt);
-	videobuf_pci_dma_unmap(dev->pci,&dev->dmasound.dma);
+	videobuf_dma_pci_unmap(dev->pci,&dev->dmasound.dma);
 	return 0;
 }
 
@@ -252,7 +254,7 @@ static int dsp_open(struct inode *inode, struct file *file)
 	if (NULL == dev)
 		return -ENODEV;
 
-	mutex_lock(&dev->dmasound.lock);
+	down(&dev->dmasound.lock);
 	err = -EBUSY;
 	if (dev->dmasound.users_dsp)
 		goto fail1;
@@ -268,13 +270,13 @@ static int dsp_open(struct inode *inode, struct file *file)
 	if (0 != err)
 		goto fail2;
 
-	mutex_unlock(&dev->dmasound.lock);
+	up(&dev->dmasound.lock);
 	return 0;
 
  fail2:
 	dev->dmasound.users_dsp--;
  fail1:
-	mutex_unlock(&dev->dmasound.lock);
+	up(&dev->dmasound.lock);
 	return err;
 }
 
@@ -282,13 +284,13 @@ static int dsp_release(struct inode *inode, struct file *file)
 {
 	struct saa7134_dev *dev = file->private_data;
 
-	mutex_lock(&dev->dmasound.lock);
+	down(&dev->dmasound.lock);
 	if (dev->dmasound.recording_on)
 		dsp_rec_stop(dev);
 	dsp_buffer_free(dev);
 	dev->dmasound.users_dsp--;
 	file->private_data = NULL;
-	mutex_unlock(&dev->dmasound.lock);
+	up(&dev->dmasound.lock);
 	return 0;
 }
 
@@ -302,7 +304,7 @@ static ssize_t dsp_read(struct file *file, char __user *buffer,
 	int err,ret = 0;
 
 	add_wait_queue(&dev->dmasound.wq, &wait);
-	mutex_lock(&dev->dmasound.lock);
+	down(&dev->dmasound.lock);
 	while (count > 0) {
 		/* wait for data if needed */
 		if (0 == dev->dmasound.read_count) {
@@ -326,12 +328,12 @@ static ssize_t dsp_read(struct file *file, char __user *buffer,
 					ret = -EAGAIN;
 				break;
 			}
-			mutex_unlock(&dev->dmasound.lock);
+			up(&dev->dmasound.lock);
 			set_current_state(TASK_INTERRUPTIBLE);
 			if (0 == dev->dmasound.read_count)
 				schedule();
 			set_current_state(TASK_RUNNING);
-			mutex_lock(&dev->dmasound.lock);
+			down(&dev->dmasound.lock);
 			if (signal_pending(current)) {
 				if (0 == ret)
 					ret = -EINTR;
@@ -360,7 +362,7 @@ static ssize_t dsp_read(struct file *file, char __user *buffer,
 		if (dev->dmasound.read_offset == dev->dmasound.bufsize)
 			dev->dmasound.read_offset = 0;
 	}
-	mutex_unlock(&dev->dmasound.lock);
+	up(&dev->dmasound.lock);
 	remove_wait_queue(&dev->dmasound.wq, &wait);
 	return ret;
 }
@@ -433,13 +435,13 @@ static int dsp_ioctl(struct inode *inode, struct file *file,
 	case SNDCTL_DSP_STEREO:
 		if (get_user(val, p))
 			return -EFAULT;
-		mutex_lock(&dev->dmasound.lock);
+		down(&dev->dmasound.lock);
 		dev->dmasound.channels = val ? 2 : 1;
 		if (dev->dmasound.recording_on) {
 			dsp_rec_stop(dev);
 			dsp_rec_start(dev);
 		}
-		mutex_unlock(&dev->dmasound.lock);
+		up(&dev->dmasound.lock);
 		return put_user(dev->dmasound.channels-1, p);
 
 	case SNDCTL_DSP_CHANNELS:
@@ -447,13 +449,13 @@ static int dsp_ioctl(struct inode *inode, struct file *file,
 			return -EFAULT;
 		if (val != 1 && val != 2)
 			return -EINVAL;
-		mutex_lock(&dev->dmasound.lock);
+		down(&dev->dmasound.lock);
 		dev->dmasound.channels = val;
 		if (dev->dmasound.recording_on) {
 			dsp_rec_stop(dev);
 			dsp_rec_start(dev);
 		}
-		mutex_unlock(&dev->dmasound.lock);
+		up(&dev->dmasound.lock);
 		/* fall through */
 	case SOUND_PCM_READ_CHANNELS:
 		return put_user(dev->dmasound.channels, p);
@@ -476,13 +478,13 @@ static int dsp_ioctl(struct inode *inode, struct file *file,
 		case AFMT_U16_BE:
 		case AFMT_S16_LE:
 		case AFMT_S16_BE:
-			mutex_lock(&dev->dmasound.lock);
+			down(&dev->dmasound.lock);
 			dev->dmasound.afmt = val;
 			if (dev->dmasound.recording_on) {
 				dsp_rec_stop(dev);
 				dsp_rec_start(dev);
 			}
-			mutex_unlock(&dev->dmasound.lock);
+			up(&dev->dmasound.lock);
 			return put_user(dev->dmasound.afmt, p);
 		default:
 			return -EINVAL;
@@ -507,10 +509,10 @@ static int dsp_ioctl(struct inode *inode, struct file *file,
 		return 0;
 
 	case SNDCTL_DSP_RESET:
-		mutex_lock(&dev->dmasound.lock);
+		down(&dev->dmasound.lock);
 		if (dev->dmasound.recording_on)
 			dsp_rec_stop(dev);
-		mutex_unlock(&dev->dmasound.lock);
+		up(&dev->dmasound.lock);
 		return 0;
 	case SNDCTL_DSP_GETBLKSIZE:
 		return put_user(dev->dmasound.blksize, p);
@@ -554,10 +556,10 @@ static unsigned int dsp_poll(struct file *file, struct poll_table_struct *wait)
 	poll_wait(file, &dev->dmasound.wq, wait);
 
 	if (0 == dev->dmasound.read_count) {
-		mutex_lock(&dev->dmasound.lock);
+		down(&dev->dmasound.lock);
 		if (!dev->dmasound.recording_on)
 			dsp_rec_start(dev);
-		mutex_unlock(&dev->dmasound.lock);
+		up(&dev->dmasound.lock);
 	} else
 		mask |= (POLLIN | POLLRDNORM);
 	return mask;
@@ -845,12 +847,12 @@ int saa7134_oss_init1(struct saa7134_dev *dev)
 {
 
 	if ((request_irq(dev->pci->irq, saa7134_oss_irq,
-			 IRQF_SHARED | IRQF_DISABLED, dev->name,
+			 SA_SHIRQ | SA_INTERRUPT, dev->name,
 			(void*) &dev->dmasound)) < 0)
 		return -1;
 
 	/* general */
-	mutex_init(&dev->dmasound.lock);
+	init_MUTEX(&dev->dmasound.lock);
 	init_waitqueue_head(&dev->dmasound.wq);
 
 	switch (dev->pci->device) {

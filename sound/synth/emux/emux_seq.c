@@ -55,8 +55,7 @@ static struct snd_midi_op emux_ops = {
 				 SNDRV_SEQ_PORT_TYPE_MIDI_GM |\
 				 SNDRV_SEQ_PORT_TYPE_MIDI_GS |\
 				 SNDRV_SEQ_PORT_TYPE_MIDI_XG |\
-				 SNDRV_SEQ_PORT_TYPE_HARDWARE |\
-				 SNDRV_SEQ_PORT_TYPE_SYNTHESIZER)
+				 SNDRV_SEQ_PORT_TYPE_DIRECT_SAMPLE)
 
 /*
  * Initialise the EMUX Synth by creating a client and registering
@@ -124,12 +123,12 @@ snd_emux_detach_seq(struct snd_emux *emu)
 	if (emu->voices)
 		snd_emux_terminate_all(emu);
 		
-	mutex_lock(&emu->register_mutex);
+	down(&emu->register_mutex);
 	if (emu->client >= 0) {
 		snd_seq_delete_kernel_client(emu->client);
 		emu->client = -1;
 	}
-	mutex_unlock(&emu->register_mutex);
+	up(&emu->register_mutex);
 }
 
 
@@ -312,10 +311,10 @@ snd_emux_use(void *private_data, struct snd_seq_port_subscribe *info)
 	emu = p->emu;
 	snd_assert(emu != NULL, return -EINVAL);
 
-	mutex_lock(&emu->register_mutex);
+	down(&emu->register_mutex);
 	snd_emux_init_port(p);
 	snd_emux_inc_count(emu);
-	mutex_unlock(&emu->register_mutex);
+	up(&emu->register_mutex);
 	return 0;
 }
 
@@ -333,10 +332,10 @@ snd_emux_unuse(void *private_data, struct snd_seq_port_subscribe *info)
 	emu = p->emu;
 	snd_assert(emu != NULL, return -EINVAL);
 
-	mutex_lock(&emu->register_mutex);
+	down(&emu->register_mutex);
 	snd_emux_sounds_off_all(p);
 	snd_emux_dec_count(emu);
-	mutex_unlock(&emu->register_mutex);
+	up(&emu->register_mutex);
 	return 0;
 }
 

@@ -62,6 +62,7 @@
  *	-	Move to libata once it grows up
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -498,14 +499,9 @@ static int config_chipset_for_dma (ide_drive_t *drive)
 {
 	u8 speed	= ide_dma_speed(drive, it821x_ratemask(drive));
 
-	if (speed) {
-		config_it821x_chipset_for_pio(drive, 0);
-		it821x_tune_chipset(drive, speed);
-
-		return ide_dma_enable(drive);
-	}
-
-	return 0;
+	config_it821x_chipset_for_pio(drive, !speed);
+	it821x_tune_chipset(drive, speed);
+	return ide_dma_enable(drive);
 }
 
 /**
@@ -654,8 +650,6 @@ static void __devinit init_hwif_it821x(ide_hwif_t *hwif)
 		goto fallback;
 	}
 	ide_set_hwifdata(hwif, idev);
-
-	hwif->atapi_dma = 1;
 
 	pci_read_config_byte(hwif->pci_dev, 0x50, &conf);
 	if(conf & 1) {

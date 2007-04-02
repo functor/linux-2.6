@@ -35,6 +35,7 @@
 
 #define MAX_DEVICE_COUNT 4
 
+#include <linux/config.h>	
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/signal.h>
@@ -227,7 +228,7 @@ typedef struct _mgslpc_info {
 	struct	_input_signal_events	input_signal_events;
 
 	/* PCMCIA support */
-	struct pcmcia_device	*p_dev;
+	dev_link_t	      link;
 	dev_node_t	      node;
 	int		      stop;
 
@@ -483,7 +484,7 @@ static void mgslpc_wait_until_sent(struct tty_struct *tty, int timeout);
 
 /* PCMCIA prototypes */
 
-static int mgslpc_config(struct pcmcia_device *link);
+static void mgslpc_config(dev_link_t *link);
 static void mgslpc_release(u_long arg);
 static void mgslpc_detach(struct pcmcia_device *p_dev);
 
@@ -532,14 +533,14 @@ static void ldisc_receive_buf(struct tty_struct *tty,
 	}
 }
 
-static int mgslpc_probe(struct pcmcia_device *link)
+static int mgslpc_attach(struct pcmcia_device *p_dev)
 {
     MGSLPC_INFO *info;
-    int ret;
-
+    dev_link_t *link;
+    
     if (debug_level >= DEBUG_LEVEL_INFO)
 	    printk("mgslpc_attach\n");
-
+	
     info = (MGSLPC_INFO *)kmalloc(sizeof(MGSLPC_INFO), GFP_KERNEL);
     if (!info) {
 	    printk("Error can't allocate device instance data\n");
@@ -564,22 +565,25 @@ static int mgslpc_probe(struct pcmcia_device *link)
     info->imrb_value = 0xffff;
     info->pim_value = 0xff;
 
-    info->p_dev = link;
+    link = &info->link;
     link->priv = info;
-
-    /* Initialize the struct pcmcia_device structure */
+    
+    /* Initialize the dev_link_t structure */
 
     /* Interrupt setup */
     link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
     link->irq.IRQInfo1   = IRQ_LEVEL_ID;
     link->irq.Handler = NULL;
-
+    
     link->conf.Attributes = 0;
+    link->conf.Vcc = 50;
     link->conf.IntType = INT_MEMORY_AND_IO;
 
-    ret = mgslpc_config(link);
-    if (ret)
-	    return ret;
+    link->handle = p_dev;
+    p_dev->instance = link;
+
+    link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
+    mgslpc_config(link);
 
     mgslpc_add_device(info);
 
@@ -592,13 +596,15 @@ static int mgslpc_probe(struct pcmcia_device *link)
 #define CS_CHECK(fn, ret) \
 do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 
-static int mgslpc_config(struct pcmcia_device *link)
+static void mgslpc_config(dev_link_t *link)
 {
+    client_handle_t handle = link->handle;
     MGSLPC_INFO *info = link->priv;
     tuple_t tuple;
     cisparse_t parse;
     int last_fn, last_ret;
     u_char buf[64];
+    config_info_t conf;
     cistpl_cftable_entry_t dflt = { 0 };
     cistpl_cftable_entry_t *cfg;
     
@@ -611,20 +617,27 @@ static int mgslpc_config(struct pcmcia_device *link)
     tuple.TupleData = buf;
     tuple.TupleDataMax = sizeof(buf);
     tuple.TupleOffset = 0;
-    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
-    CS_CHECK(GetTupleData, pcmcia_get_tuple_data(link, &tuple));
-    CS_CHECK(ParseTuple, pcmcia_parse_tuple(link, &tuple, &parse));
+    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+    CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
+    CS_CHECK(ParseTuple, pcmcia_parse_tuple(handle, &tuple, &parse));
     link->conf.ConfigBase = parse.config.base;
     link->conf.Present = parse.config.rmask[0];
+    
+    /* Configure card */
+    link->state |= DEV_CONFIG;
+
+    /* Look up the current Vcc */
+    CS_CHECK(GetConfigurationInfo, pcmcia_get_configuration_info(handle, &conf));
+    link->conf.Vcc = conf.Vcc;
 
     /* get CIS configuration entry */
 
     tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
-    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
+    CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
 
     cfg = &(parse.cftable_entry);
-    CS_CHECK(GetTupleData, pcmcia_get_tuple_data(link, &tuple));
-    CS_CHECK(ParseTuple, pcmcia_parse_tuple(link, &tuple, &parse));
+    CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
+    CS_CHECK(ParseTuple, pcmcia_parse_tuple(handle, &tuple, &parse));
 
     if (cfg->flags & CISTPL_CFTABLE_DEFAULT) dflt = *cfg;
     if (cfg->index == 0)
@@ -645,10 +658,11 @@ static int mgslpc_config(struct pcmcia_device *link)
 	    link->io.IOAddrLines = io->flags & CISTPL_IO_LINES_MASK;
 	    link->io.BasePort1 = io->win[0].base;
 	    link->io.NumPorts1 = io->win[0].len;
-	    CS_CHECK(RequestIO, pcmcia_request_io(link, &link->io));
+	    CS_CHECK(RequestIO, pcmcia_request_io(link->handle, &link->io));
     }
 
     link->conf.Attributes = CONF_ENABLE_IRQ;
+    link->conf.Vcc = 50;
     link->conf.IntType = INT_MEMORY_AND_IO;
     link->conf.ConfigIndex = 8;
     link->conf.Present = PRESENT_OPTION;
@@ -656,9 +670,9 @@ static int mgslpc_config(struct pcmcia_device *link)
     link->irq.Attributes |= IRQ_HANDLE_PRESENT;
     link->irq.Handler     = mgslpc_isr;
     link->irq.Instance    = info;
-    CS_CHECK(RequestIRQ, pcmcia_request_irq(link, &link->irq));
+    CS_CHECK(RequestIRQ, pcmcia_request_irq(link->handle, &link->irq));
 
-    CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link, &link->conf));
+    CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link->handle, &link->conf));
 
     info->io_base = link->io.BasePort1;
     info->irq_level = link->irq.AssignedIRQ;
@@ -666,7 +680,7 @@ static int mgslpc_config(struct pcmcia_device *link)
     /* add to linked list of devices */
     sprintf(info->node.dev_name, "mgslpc0");
     info->node.major = info->node.minor = 0;
-    link->dev_node = &info->node;
+    link->dev = &info->node;
 
     printk(KERN_INFO "%s: index 0x%02x:",
 	   info->node.dev_name, link->conf.ConfigIndex);
@@ -676,12 +690,13 @@ static int mgslpc_config(struct pcmcia_device *link)
 	    printk(", io 0x%04x-0x%04x", link->io.BasePort1,
 		   link->io.BasePort1+link->io.NumPorts1-1);
     printk("\n");
-    return 0;
+    
+    link->state &= ~DEV_CONFIG_PENDING;
+    return;
 
 cs_failed:
-    cs_error(link, last_fn, last_ret);
+    cs_error(link->handle, last_fn, last_ret);
     mgslpc_release((u_long)link);
-    return -ENODEV;
 }
 
 /* Card has been removed.
@@ -690,38 +705,58 @@ cs_failed:
  */
 static void mgslpc_release(u_long arg)
 {
-	struct pcmcia_device *link = (struct pcmcia_device *)arg;
+    dev_link_t *link = (dev_link_t *)arg;
 
-	if (debug_level >= DEBUG_LEVEL_INFO)
-		printk("mgslpc_release(0x%p)\n", link);
+    if (debug_level >= DEBUG_LEVEL_INFO)
+	    printk("mgslpc_release(0x%p)\n", link);
 
-	pcmcia_disable_device(link);
+    /* Unlink the device chain */
+    link->dev = NULL;
+    link->state &= ~DEV_CONFIG;
+
+    pcmcia_release_configuration(link->handle);
+    if (link->io.NumPorts1)
+	    pcmcia_release_io(link->handle, &link->io);
+    if (link->irq.AssignedIRQ)
+	    pcmcia_release_irq(link->handle, &link->irq);
 }
 
-static void mgslpc_detach(struct pcmcia_device *link)
+static void mgslpc_detach(struct pcmcia_device *p_dev)
 {
-	if (debug_level >= DEBUG_LEVEL_INFO)
-		printk("mgslpc_detach(0x%p)\n", link);
+    dev_link_t *link = dev_to_instance(p_dev);
 
-	((MGSLPC_INFO *)link->priv)->stop = 1;
-	mgslpc_release((u_long)link);
+    if (debug_level >= DEBUG_LEVEL_INFO)
+	    printk("mgslpc_detach(0x%p)\n", link);
 
-	mgslpc_remove_device((MGSLPC_INFO *)link->priv);
+    if (link->state & DEV_CONFIG) {
+	    ((MGSLPC_INFO *)link->priv)->stop = 1;
+	    mgslpc_release((u_long)link);
+    }
+
+    mgslpc_remove_device((MGSLPC_INFO *)link->priv);
 }
 
-static int mgslpc_suspend(struct pcmcia_device *link)
+static int mgslpc_suspend(struct pcmcia_device *dev)
 {
+	dev_link_t *link = dev_to_instance(dev);
 	MGSLPC_INFO *info = link->priv;
 
+	link->state |= DEV_SUSPEND;
 	info->stop = 1;
+	if (link->state & DEV_CONFIG)
+		pcmcia_release_configuration(link->handle);
 
 	return 0;
 }
 
-static int mgslpc_resume(struct pcmcia_device *link)
+static int mgslpc_resume(struct pcmcia_device *dev)
 {
+	dev_link_t *link = dev_to_instance(dev);
 	MGSLPC_INFO *info = link->priv;
 
+	link->state &= ~DEV_SUSPEND;
+	if (link->state & DEV_CONFIG)
+		pcmcia_request_configuration(link->handle, &link->conf);
 	info->stop = 0;
 
 	return 0;
@@ -843,7 +878,7 @@ static int bh_action(MGSLPC_INFO *info)
 	return rc;
 }
 
-static void bh_handler(void* Context)
+void bh_handler(void* Context)
 {
 	MGSLPC_INFO *info = (MGSLPC_INFO*)Context;
 	int action;
@@ -887,7 +922,7 @@ static void bh_handler(void* Context)
 			__FILE__,__LINE__,info->device_name);
 }
 
-static void bh_transmit(MGSLPC_INFO *info)
+void bh_transmit(MGSLPC_INFO *info)
 {
 	struct tty_struct *tty = info->tty;
 	if (debug_level >= DEBUG_LEVEL_BH)
@@ -899,7 +934,7 @@ static void bh_transmit(MGSLPC_INFO *info)
 	}
 }
 
-static void bh_status(MGSLPC_INFO *info)
+void bh_status(MGSLPC_INFO *info)
 {
 	info->ri_chkcount = 0;
 	info->dsr_chkcount = 0;
@@ -1173,12 +1208,8 @@ static void dcd_change(MGSLPC_INFO *info)
 	else
 		info->input_signal_events.dcd_down++;
 #ifdef CONFIG_HDLC
-	if (info->netcount) {
-		if (info->serial_signals & SerialSignal_DCD)
-			netif_carrier_on(info->netdev);
-		else
-			netif_carrier_off(info->netdev);
-	}
+	if (info->netcount)
+		hdlc_set_carrier(info->serial_signals & SerialSignal_DCD, info->netdev);
 #endif
 	wake_up_interruptible(&info->status_event_wait_q);
 	wake_up_interruptible(&info->event_wait_q);
@@ -1249,7 +1280,7 @@ static irqreturn_t mgslpc_isr(int irq, void *dev_id, struct pt_regs * regs)
 	if (!info)
 		return IRQ_NONE;
 		
-	if (!(info->p_dev->_locked))
+	if (!(info->link.state & DEV_CONFIG))
 		return IRQ_HANDLED;
 
 	spin_lock(&info->lock);
@@ -1585,7 +1616,7 @@ static void mgslpc_put_char(struct tty_struct *tty, unsigned char ch)
 	if (mgslpc_paranoia_check(info, tty->name, "mgslpc_put_char"))
 		return;
 
-	if (!info->tx_buf)
+	if (!tty || !info->tx_buf)
 		return;
 
 	spin_lock_irqsave(&info->lock,flags);
@@ -1652,7 +1683,7 @@ static int mgslpc_write(struct tty_struct * tty,
 			__FILE__,__LINE__,info->device_name,count);
 	
 	if (mgslpc_paranoia_check(info, tty->name, "mgslpc_write") ||
-		!info->tx_buf)
+	    !tty || !info->tx_buf)
 		goto cleanup;
 
 	if (info->params.mode == MGSL_MODE_HDLC) {
@@ -2308,7 +2339,7 @@ static int mgslpc_ioctl(struct tty_struct *tty, struct file * file,
 	return ioctl_common(info, cmd, arg);
 }
 
-static int ioctl_common(MGSLPC_INFO *info, unsigned int cmd, unsigned long arg)
+int ioctl_common(MGSLPC_INFO *info, unsigned int cmd, unsigned long arg)
 {
 	int error;
 	struct mgsl_icount cnow;	/* kernel counter temps */
@@ -2880,7 +2911,7 @@ done:
 	return ((count < begin+len-off) ? count : begin+len-off);
 }
 
-static int rx_alloc_buffers(MGSLPC_INFO *info)
+int rx_alloc_buffers(MGSLPC_INFO *info)
 {
 	/* each buffer has header and data */
 	info->rx_buf_size = sizeof(RXBUF) + info->max_frame_size;
@@ -2903,13 +2934,13 @@ static int rx_alloc_buffers(MGSLPC_INFO *info)
 	return 0;
 }
 
-static void rx_free_buffers(MGSLPC_INFO *info)
+void rx_free_buffers(MGSLPC_INFO *info)
 {
 	kfree(info->rx_buf);
 	info->rx_buf = NULL;
 }
 
-static int claim_resources(MGSLPC_INFO *info)
+int claim_resources(MGSLPC_INFO *info)
 {
 	if (rx_alloc_buffers(info) < 0 ) {
 		printk( "Cant allocate rx buffer %s\n", info->device_name);
@@ -2919,7 +2950,7 @@ static int claim_resources(MGSLPC_INFO *info)
 	return 0;
 }
 
-static void release_resources(MGSLPC_INFO *info)
+void release_resources(MGSLPC_INFO *info)
 {
 	if (debug_level >= DEBUG_LEVEL_INFO)
 		printk("release_resources(%s)\n", info->device_name);
@@ -2931,7 +2962,7 @@ static void release_resources(MGSLPC_INFO *info)
  * 	
  * Arguments:		info	pointer to device instance data
  */
-static void mgslpc_add_device(MGSLPC_INFO *info)
+void mgslpc_add_device(MGSLPC_INFO *info)
 {
 	info->next_device = NULL;
 	info->line = mgslpc_device_count;
@@ -2967,7 +2998,7 @@ static void mgslpc_add_device(MGSLPC_INFO *info)
 #endif
 }
 
-static void mgslpc_remove_device(MGSLPC_INFO *remove_info)
+void mgslpc_remove_device(MGSLPC_INFO *remove_info)
 {
 	MGSLPC_INFO *info = mgslpc_device_list;
 	MGSLPC_INFO *last = NULL;
@@ -3002,7 +3033,7 @@ static struct pcmcia_driver mgslpc_driver = {
 	.drv		= {
 		.name	= "synclink_cs",
 	},
-	.probe		= mgslpc_probe,
+	.probe		= mgslpc_attach,
 	.remove		= mgslpc_detach,
 	.id_table	= mgslpc_ids,
 	.suspend	= mgslpc_suspend,
@@ -3260,7 +3291,7 @@ static void loopback_enable(MGSLPC_INFO *info)
 	write_reg(info, CHA + MODE, val);
 }
 
-static void hdlc_mode(MGSLPC_INFO *info)
+void hdlc_mode(MGSLPC_INFO *info)
 {
 	unsigned char val;
 	unsigned char clkmode, clksubmode;
@@ -3500,7 +3531,7 @@ static void hdlc_mode(MGSLPC_INFO *info)
 	rx_stop(info);
 }
 
-static void rx_stop(MGSLPC_INFO *info)
+void rx_stop(MGSLPC_INFO *info)
 {
 	if (debug_level >= DEBUG_LEVEL_ISR)
 		printk("%s(%d):rx_stop(%s)\n",
@@ -3513,7 +3544,7 @@ static void rx_stop(MGSLPC_INFO *info)
 	info->rx_overflow = 0;
 }
 
-static void rx_start(MGSLPC_INFO *info)
+void rx_start(MGSLPC_INFO *info)
 {
 	if (debug_level >= DEBUG_LEVEL_ISR)
 		printk("%s(%d):rx_start(%s)\n",
@@ -3529,7 +3560,7 @@ static void rx_start(MGSLPC_INFO *info)
 	info->rx_enabled = 1;
 }
 
-static void tx_start(MGSLPC_INFO *info)
+void tx_start(MGSLPC_INFO *info)
 {
 	if (debug_level >= DEBUG_LEVEL_ISR)
 		printk("%s(%d):tx_start(%s)\n",
@@ -3567,7 +3598,7 @@ static void tx_start(MGSLPC_INFO *info)
 		info->tx_enabled = 1;
 }
 
-static void tx_stop(MGSLPC_INFO *info)
+void tx_stop(MGSLPC_INFO *info)
 {
 	if (debug_level >= DEBUG_LEVEL_ISR)
 		printk("%s(%d):tx_stop(%s)\n",
@@ -3581,7 +3612,7 @@ static void tx_stop(MGSLPC_INFO *info)
 
 /* Reset the adapter to a known state and prepare it for further use.
  */
-static void reset_device(MGSLPC_INFO *info)
+void reset_device(MGSLPC_INFO *info)
 {
 	/* power up both channels (set BIT7) */ 
 	write_reg(info, CHA + CCR0, 0x80);
@@ -3631,7 +3662,7 @@ static void reset_device(MGSLPC_INFO *info)
 	write_reg(info, IPC, 0x05);
 }
 
-static void async_mode(MGSLPC_INFO *info)
+void async_mode(MGSLPC_INFO *info)
 {
 	unsigned char val;
 
@@ -3802,7 +3833,7 @@ static void async_mode(MGSLPC_INFO *info)
 
 /* Set the HDLC idle mode for the transmitter.
  */
-static void tx_set_idle(MGSLPC_INFO *info)
+void tx_set_idle(MGSLPC_INFO *info)
 {
 	/* Note: ESCC2 only supports flags and one idle modes */ 
 	if (info->idle_mode == HDLC_TXIDLE_FLAGS)
@@ -3813,7 +3844,7 @@ static void tx_set_idle(MGSLPC_INFO *info)
 
 /* get state of the V24 status (input) signals.
  */
-static void get_signals(MGSLPC_INFO *info)
+void get_signals(MGSLPC_INFO *info)
 {
 	unsigned char status = 0;
 	
@@ -3835,7 +3866,7 @@ static void get_signals(MGSLPC_INFO *info)
 /* Set the state of DTR and RTS based on contents of
  * serial_signals member of device extension.
  */
-static void set_signals(MGSLPC_INFO *info)
+void set_signals(MGSLPC_INFO *info)
 {
 	unsigned char val;
 
@@ -3859,7 +3890,7 @@ static void set_signals(MGSLPC_INFO *info)
 		set_reg_bits(info, CHA + PVR, PVR_DTR);
 }
 
-static void rx_reset_buffers(MGSLPC_INFO *info)
+void rx_reset_buffers(MGSLPC_INFO *info)
 {
 	RXBUF *buf;
 	int i;
@@ -3878,7 +3909,7 @@ static void rx_reset_buffers(MGSLPC_INFO *info)
  *
  * Returns 1 if frame returned, otherwise 0
  */
-static int rx_get_frame(MGSLPC_INFO *info)
+int rx_get_frame(MGSLPC_INFO *info)
 {
 	unsigned short status;
 	RXBUF *buf;
@@ -3964,7 +3995,7 @@ static int rx_get_frame(MGSLPC_INFO *info)
 	return 1;
 }
 
-static BOOLEAN register_test(MGSLPC_INFO *info)
+BOOLEAN register_test(MGSLPC_INFO *info)
 {
 	static unsigned char patterns[] = 
 	    { 0x00, 0xff, 0xaa, 0x55, 0x69, 0x96, 0x0f };
@@ -3990,7 +4021,7 @@ static BOOLEAN register_test(MGSLPC_INFO *info)
 	return rc;
 }
 
-static BOOLEAN irq_test(MGSLPC_INFO *info)
+BOOLEAN irq_test(MGSLPC_INFO *info)
 {
 	unsigned long end_time;
 	unsigned long flags;
@@ -4025,7 +4056,7 @@ static BOOLEAN irq_test(MGSLPC_INFO *info)
 	return info->irq_occurred ? TRUE : FALSE;
 }
 
-static int adapter_test(MGSLPC_INFO *info)
+int adapter_test(MGSLPC_INFO *info)
 {
 	if (!register_test(info)) {
 		info->init_error = DiagStatus_AddressFailure;
@@ -4047,7 +4078,7 @@ static int adapter_test(MGSLPC_INFO *info)
 	return 0;
 }
 
-static void trace_block(MGSLPC_INFO *info,const char* data, int count, int xmit)
+void trace_block(MGSLPC_INFO *info,const char* data, int count, int xmit)
 {
 	int i;
 	int linecount;
@@ -4082,7 +4113,7 @@ static void trace_block(MGSLPC_INFO *info,const char* data, int count, int xmit)
 /* HDLC frame time out
  * update stats and do tx completion processing
  */
-static void tx_timeout(unsigned long context)
+void tx_timeout(unsigned long context)
 {
 	MGSLPC_INFO *info = (MGSLPC_INFO*)context;
 	unsigned long flags;
@@ -4150,7 +4181,7 @@ static int hdlcdev_attach(struct net_device *dev, unsigned short encoding,
 	}
 
 	info->params.encoding = new_encoding;
-	info->params.crc_type = new_crctype;
+	info->params.crc_type = new_crctype;;
 
 	/* if network interface up, reprogram hardware */
 	if (info->netcount)
@@ -4254,10 +4285,8 @@ static int hdlcdev_open(struct net_device *dev)
 	spin_lock_irqsave(&info->lock, flags);
 	get_signals(info);
 	spin_unlock_irqrestore(&info->lock, flags);
-	if (info->serial_signals & SerialSignal_DCD)
-		netif_carrier_on(dev);
-	else
-		netif_carrier_off(dev);
+	hdlc_set_carrier(info->serial_signals & SerialSignal_DCD, dev);
+
 	return 0;
 }
 

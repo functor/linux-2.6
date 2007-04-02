@@ -1,3 +1,4 @@
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/linkage.h>
 
@@ -35,6 +36,24 @@
 	mov	fp, #0
 #endif
 	.endm
+
+#if __LINUX_ARM_ARCH__ >= 6
+	.macro	disable_irq
+	cpsid	i
+	.endm
+
+	.macro	enable_irq
+	cpsie	i
+	.endm
+#else
+	.macro	disable_irq
+	msr	cpsr_c, #PSR_I_BIT | SVC_MODE
+	.endm
+
+	.macro	enable_irq
+	msr	cpsr_c, #SVC_MODE
+	.endm
+#endif
 
 	.macro	get_thread_info, rd
 	mov	\rd, sp, lsr #13

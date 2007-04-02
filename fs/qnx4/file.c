@@ -12,14 +12,17 @@
  * 27-06-1998 by Frank Denis : file overwriting.
  */
 
+#include <linux/config.h>
+#include <linux/types.h>
 #include <linux/fs.h>
+#include <linux/time.h>
 #include <linux/qnx4_fs.h>
 
 /*
  * We have mostly NULL's here: the current defaults are ok for
  * the qnx4 filesystem.
  */
-const struct file_operations qnx4_file_operations =
+struct file_operations qnx4_file_operations =
 {
 	.llseek		= generic_file_llseek,
 	.read		= generic_file_read,

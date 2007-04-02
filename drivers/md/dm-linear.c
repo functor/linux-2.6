@@ -12,8 +12,6 @@
 #include <linux/bio.h>
 #include <linux/slab.h>
 
-#define DM_MSG_PREFIX "linear"
-
 /*
  * Linear: maps a linear range of a device.
  */
@@ -28,10 +26,9 @@ struct linear_c {
 static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct linear_c *lc;
-	unsigned long long tmp;
 
 	if (argc != 2) {
-		ti->error = "Invalid argument count";
+		ti->error = "dm-linear: Invalid argument count";
 		return -EINVAL;
 	}
 
@@ -41,11 +38,10 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -ENOMEM;
 	}
 
-	if (sscanf(argv[1], "%llu", &tmp) != 1) {
+	if (sscanf(argv[1], SECTOR_FORMAT, &lc->start) != 1) {
 		ti->error = "dm-linear: Invalid device sector";
 		goto bad;
 	}
-	lc->start = tmp;
 
 	if (dm_get_device(ti, argv[0], lc->start, ti->len,
 			  dm_table_get_mode(ti->table), &lc->dev)) {
@@ -91,8 +87,8 @@ static int linear_status(struct dm_target *ti, status_type_t type,
 		break;
 
 	case STATUSTYPE_TABLE:
-		snprintf(result, maxlen, "%s %llu", lc->dev->name,
-				(unsigned long long)lc->start);
+		snprintf(result, maxlen, "%s " SECTOR_FORMAT, lc->dev->name,
+			 lc->start);
 		break;
 	}
 	return 0;
@@ -113,7 +109,7 @@ int __init dm_linear_init(void)
 	int r = dm_register_target(&linear_target);
 
 	if (r < 0)
-		DMERR("register failed %d", r);
+		DMERR("linear: register failed %d", r);
 
 	return r;
 }
@@ -123,5 +119,5 @@ void dm_linear_exit(void)
 	int r = dm_unregister_target(&linear_target);
 
 	if (r < 0)
-		DMERR("unregister failed %d", r);
+		DMERR("linear: unregister failed %d", r);
 }

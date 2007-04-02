@@ -96,7 +96,7 @@ static int videobuf_dvb_start_feed(struct dvb_demux_feed *feed)
 	if (!demux->dmx.frontend)
 		return -EINVAL;
 
-	mutex_lock(&dvb->lock);
+	down(&dvb->lock);
 	dvb->nfeeds++;
 	rc = dvb->nfeeds;
 
@@ -110,7 +110,7 @@ static int videobuf_dvb_start_feed(struct dvb_demux_feed *feed)
 	}
 
 out:
-	mutex_unlock(&dvb->lock);
+	up(&dvb->lock);
 	return rc;
 }
 
@@ -120,14 +120,14 @@ static int videobuf_dvb_stop_feed(struct dvb_demux_feed *feed)
 	struct videobuf_dvb *dvb = demux->priv;
 	int err = 0;
 
-	mutex_lock(&dvb->lock);
+	down(&dvb->lock);
 	dvb->nfeeds--;
 	if (0 == dvb->nfeeds  &&  NULL != dvb->thread) {
 		// FIXME: cx8802_cancel_buffers(dev);
 		err = kthread_stop(dvb->thread);
 		dvb->thread = NULL;
 	}
-	mutex_unlock(&dvb->lock);
+	up(&dvb->lock);
 	return err;
 }
 
@@ -135,15 +135,14 @@ static int videobuf_dvb_stop_feed(struct dvb_demux_feed *feed)
 
 int videobuf_dvb_register(struct videobuf_dvb *dvb,
 			  struct module *module,
-			  void *adapter_priv,
-			  struct device *device)
+			  void *adapter_priv)
 {
 	int result;
 
-	mutex_init(&dvb->lock);
+	init_MUTEX(&dvb->lock);
 
 	/* register adapter */
-	result = dvb_register_adapter(&dvb->adapter, dvb->name, module, device);
+	result = dvb_register_adapter(&dvb->adapter, dvb->name, module);
 	if (result < 0) {
 		printk(KERN_WARNING "%s: dvb_register_adapter failed (errno = %d)\n",
 		       dvb->name, result);

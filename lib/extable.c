@@ -1,4 +1,5 @@
 /*
+ * lib/extable.c
  * Derived from arch/ppc/mm/extable.c and arch/i386/mm/extable.c.
  *
  * Copyright (C) 2004 Paul Mackerras, IBM Corp.
@@ -9,6 +10,7 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sort.h>

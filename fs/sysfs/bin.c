@@ -163,7 +163,7 @@ static int release(struct inode * inode, struct file * file)
 	return 0;
 }
 
-const struct file_operations bin_fops = {
+struct file_operations bin_fops = {
 	.read		= read,
 	.write		= write,
 	.mmap		= mmap,

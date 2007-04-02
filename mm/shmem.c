@@ -23,8 +23,10 @@
  * which makes it a completely usable filesystem.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/devfs_fs_kernel.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
@@ -44,8 +46,6 @@
 #include <linux/mempolicy.h>
 #include <linux/namei.h>
 #include <linux/ctype.h>
-#include <linux/migrate.h>
-
 #include <asm/uaccess.h>
 #include <asm/div64.h>
 #include <asm/pgtable.h>
@@ -171,7 +171,7 @@ static inline void shmem_unacct_blocks(unsigned long flags, long pages)
 }
 
 static struct super_operations shmem_ops;
-static const struct address_space_operations shmem_aops;
+static struct address_space_operations shmem_aops;
 static struct file_operations shmem_file_operations;
 static struct inode_operations shmem_inode_operations;
 static struct inode_operations shmem_dir_inode_operations;
@@ -509,7 +509,12 @@ static void shmem_truncate_range(struct inode *inode, loff_t start, loff_t end)
 			size = SHMEM_NR_DIRECT;
 		nr_swaps_freed = shmem_free_swp(ptr+idx, ptr+size);
 	}
-	if (!topdir)
+
+	/*
+	 * If there are no indirect blocks or we are punching a hole
+	 * below indirect blocks, nothing to be done.
+	 */
+	if (!topdir || (punch_hole && (limit <= SHMEM_NR_DIRECT)))
 		goto done2;
 
 	BUG_ON(limit <= SHMEM_NR_DIRECT);
@@ -874,7 +879,7 @@ redirty:
 }
 
 #ifdef CONFIG_NUMA
-static inline int shmem_parse_mpol(char *value, int *policy, nodemask_t *policy_nodes)
+static int shmem_parse_mpol(char *value, int *policy, nodemask_t *policy_nodes)
 {
 	char *nodelist = strchr(value, ':');
 	int err = 1;
@@ -1043,12 +1048,12 @@ repeat:
 		swappage = lookup_swap_cache(swap);
 		if (!swappage) {
 			shmem_swp_unmap(entry);
+			spin_unlock(&info->lock);
 			/* here we actually do the io */
 			if (type && *type == VM_FAULT_MINOR) {
-				__count_vm_event(PGMAJFAULT);
+				inc_page_state(pgmajfault);
 				*type = VM_FAULT_MAJOR;
 			}
-			spin_unlock(&info->lock);
 			swappage = shmem_swapin(info, swap, idx);
 			if (!swappage) {
 				spin_lock(&info->lock);
@@ -1075,6 +1080,14 @@ repeat:
 			shmem_swp_unmap(entry);
 			spin_unlock(&info->lock);
 			wait_on_page_locked(swappage);
+			page_cache_release(swappage);
+			goto repeat;
+		}
+		if (!PageSwapCache(swappage)) {
+			/* Page migration has occured */
+			shmem_swp_unmap(entry);
+			spin_unlock(&info->lock);
+			unlock_page(swappage);
 			page_cache_release(swappage);
 			goto repeat;
 		}
@@ -1349,6 +1362,7 @@ shmem_get_inode(struct super_block *sb, int mode, dev_t dev)
 		inode->i_mode = mode;
 		inode->i_uid = current->fsuid;
 		inode->i_gid = current->fsgid;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_mapping->a_ops = &shmem_aops;
 		inode->i_mapping->backing_dev_info = &shmem_backing_dev_info;
@@ -1642,9 +1656,9 @@ static ssize_t shmem_file_sendfile(struct file *in_file, loff_t *ppos,
 	return desc.error;
 }
 
-static int shmem_statfs(struct dentry *dentry, struct kstatfs *buf)
+static int shmem_statfs(struct super_block *sb, struct kstatfs *buf)
 {
-	struct shmem_sb_info *sbinfo = SHMEM_SB(dentry->d_sb);
+	struct shmem_sb_info *sbinfo = SHMEM_SB(sb);
 
 	buf->f_type = TMPFS_SUPER_MAGIC;
 	buf->f_bsize = PAGE_CACHE_SIZE;
@@ -1768,7 +1782,6 @@ static int shmem_rmdir(struct inode *dir, struct dentry *dentry)
 	if (!simple_empty(dentry))
 		return -ENOTEMPTY;
 
-	dentry->d_inode->i_nlink--;
 	dir->i_nlink--;
 	return shmem_unlink(dir, dentry);
 }
@@ -2111,7 +2124,7 @@ failed:
 	return err;
 }
 
-static struct kmem_cache *shmem_inode_cachep;
+static kmem_cache_t *shmem_inode_cachep;
 
 static struct inode *shmem_alloc_inode(struct super_block *sb)
 {
@@ -2131,8 +2144,7 @@ static void shmem_destroy_inode(struct inode *inode)
 	kmem_cache_free(shmem_inode_cachep, SHMEM_I(inode));
 }
 
-static void init_once(void *foo, struct kmem_cache *cachep,
-		      unsigned long flags)
+static void init_once(void *foo, kmem_cache_t *cachep, unsigned long flags)
 {
 	struct shmem_inode_info *p = (struct shmem_inode_info *) foo;
 
@@ -2158,7 +2170,7 @@ static void destroy_inodecache(void)
 		printk(KERN_INFO "shmem_inode_cache: not all structures were freed\n");
 }
 
-static const struct address_space_operations shmem_aops = {
+static struct address_space_operations shmem_aops = {
 	.writepage	= shmem_writepage,
 	.set_page_dirty	= __set_page_dirty_nobuffers,
 #ifdef CONFIG_TMPFS
@@ -2221,10 +2233,10 @@ static struct vm_operations_struct shmem_vm_ops = {
 };
 
 
-static int shmem_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *shmem_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_nodev(fs_type, flags, data, shmem_fill_super, mnt);
+	return get_sb_nodev(fs_type, flags, data, shmem_fill_super);
 }
 
 static struct file_system_type tmpfs_fs_type = {
@@ -2248,8 +2260,10 @@ static int __init init_tmpfs(void)
 		printk(KERN_ERR "Could not register tmpfs\n");
 		goto out2;
 	}
-
-	shm_mnt = vfs_kern_mount(&tmpfs_fs_type, MS_NOUSER,
+#ifdef CONFIG_TMPFS
+	devfs_mk_dir("shm");
+#endif
+	shm_mnt = do_kern_mount(tmpfs_fs_type.name, MS_NOUSER,
 				tmpfs_fs_type.name, NULL);
 	if (IS_ERR(shm_mnt)) {
 		error = PTR_ERR(shm_mnt);

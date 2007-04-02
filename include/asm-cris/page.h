@@ -1,8 +1,7 @@
 #ifndef _CRIS_PAGE_H
 #define _CRIS_PAGE_H
 
-#ifdef __KERNEL__
-
+#include <linux/config.h>
 #include <asm/arch/page.h>
 
 /* PAGE_SHIFT determines the page size */
@@ -13,6 +12,8 @@
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #endif
 #define PAGE_MASK	(~(PAGE_SIZE-1))
+
+#ifdef __KERNEL__
 
 #define clear_page(page)        memset((void *)(page), 0, PAGE_SIZE)
 #define copy_page(to,from)      memcpy((void *)(to), (void *)(from), PAGE_SIZE)
@@ -42,7 +43,8 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 
 /* On CRIS the PFN numbers doesn't start at 0 so we have to compensate */
 /* for that before indexing into the page table starting at mem_map    */
-#define ARCH_PFN_OFFSET		(PAGE_OFFSET >> PAGE_SHIFT)
+#define pfn_to_page(pfn)	(mem_map + ((pfn) - (PAGE_OFFSET >> PAGE_SHIFT)))
+#define page_to_pfn(page)	((unsigned long)((page) - mem_map) + (PAGE_OFFSET >> PAGE_SHIFT))
 #define pfn_valid(pfn)		(((pfn) - (PAGE_OFFSET >> PAGE_SHIFT)) < max_mapnr)
 
 /* to index into the page map. our pages all start at physical addr PAGE_OFFSET so
@@ -73,12 +75,9 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#include <asm-generic/memory_model.h>
-#include <asm-generic/page.h>
-
-#define devmem_is_allowed(x) 1
-
 #endif /* __KERNEL__ */
+
+#include <asm-generic/page.h>
 
 #endif /* _CRIS_PAGE_H */
 

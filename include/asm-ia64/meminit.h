@@ -7,6 +7,7 @@
  * for more details.
  */
 
+#include <linux/config.h>
 
 /*
  * Entries defined so far:
@@ -16,15 +17,10 @@
  * 	- command line string
  * 	- kernel code & data
  * 	- Kernel memory map built from EFI memory map
- *	- xen start info
  *
  * More could be added if necessary
  */
-#ifndef CONFIG_XEN
 #define IA64_MAX_RSVD_REGIONS 6
-#else
-#define IA64_MAX_RSVD_REGIONS 7
-#endif
 
 struct rsvd_region {
 	unsigned long start;	/* virtual address of beginning of element */
@@ -61,11 +57,6 @@ extern void efi_memmap_init(unsigned long *, unsigned long *);
   extern struct page *vmem_map;
   extern int find_largest_hole (u64 start, u64 end, void *arg);
   extern int create_mem_map_page_table (u64 start, u64 end, void *arg);
-  extern int vmemmap_find_next_valid_pfn(int, int);
-#else
-static inline int vmemmap_find_next_valid_pfn(int node, int i)
-{
-	return i + 1;
-}
 #endif
+
 #endif /* meminit_h */

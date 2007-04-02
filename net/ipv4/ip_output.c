@@ -53,6 +53,7 @@
 #include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/errno.h>
+#include <linux/config.h>
 
 #include <linux/socket.h>
 #include <linux/sockios.h>
@@ -209,7 +210,8 @@ static inline int ip_finish_output(struct sk_buff *skb)
 		return dst_output(skb);
 	}
 #endif
-	if (skb->len > dst_mtu(skb->dst) && !skb_is_gso(skb))
+	if (skb->len > dst_mtu(skb->dst) &&
+	    !(skb_shinfo(skb)->ufo_size || skb_shinfo(skb)->tso_size))
 		return ip_fragment(skb, ip_finish_output2);
 	else
 		return ip_finish_output2(skb);
@@ -360,7 +362,7 @@ packet_routed:
 	}
 
 	ip_select_ident_more(iph, &rt->u.dst, sk,
-			     (skb_shinfo(skb)->gso_segs ?: 1) - 1);
+			     (skb_shinfo(skb)->tso_segs ?: 1) - 1);
 
 	/* Add an IP checksum. */
 	ip_send_check(iph);
@@ -408,7 +410,6 @@ static void ip_copy_metadata(struct sk_buff *to, struct sk_buff *from)
 	nf_bridge_get(to->nf_bridge);
 #endif
 #endif
-	skb_copy_secmark(to, from);
 }
 
 /*
@@ -440,7 +441,6 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))
 	iph = skb->nh.iph;
 
 	if (unlikely((iph->frag_off & htons(IP_DF)) && !skb->local_df)) {
-		IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);
 		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
 			  htonl(dst_mtu(&rt->u.dst)));
 		kfree_skb(skb);
@@ -527,8 +527,6 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))
 
 			err = output(skb);
 
-			if (!err)
-				IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);
 			if (err || !frag)
 				break;
 
@@ -652,6 +650,9 @@ slow_path:
 		/*
 		 *	Put this fragment into the sending queue.
 		 */
+
+		IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);
+
 		iph->tot_len = htons(len + hlen);
 
 		ip_send_check(iph);
@@ -659,8 +660,6 @@ slow_path:
 		err = output(skb2);
 		if (err)
 			goto fail;
-
-		IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);
 	}
 	kfree_skb(skb);
 	IP_INC_STATS(IPSTATS_MIB_FRAGOKS);
@@ -744,8 +743,7 @@ static inline int ip_ufo_append_data(struct sock *sk,
 			       (length - transhdrlen));
 	if (!err) {
 		/* specify the length of each IP datagram fragment*/
-		skb_shinfo(skb)->gso_size = mtu - fragheaderlen;
-		skb_shinfo(skb)->gso_type = SKB_GSO_UDP;
+		skb_shinfo(skb)->ufo_size = (mtu - fragheaderlen);
 		__skb_queue_tail(&sk->sk_write_queue, skb);
 
 		return 0;
@@ -841,7 +839,7 @@ int ip_append_data(struct sock *sk,
 	 */
 	if (transhdrlen &&
 	    length + fragheaderlen <= mtu &&
-	    rt->u.dst.dev->features & NETIF_F_ALL_CSUM &&
+	    rt->u.dst.dev->features&(NETIF_F_IP_CSUM|NETIF_F_NO_CSUM|NETIF_F_HW_CSUM) &&
 	    !exthdrlen)
 		csummode = CHECKSUM_HW;
 
@@ -906,7 +904,7 @@ alloc_new_skb:
 			 * because we have no idea what fragment will be
 			 * the last.
 			 */
-			if (datalen == length + fraggap)
+			if (datalen == length)
 				alloclen += rt->u.dst.trailer_len;
 
 			if (transhdrlen) {
@@ -948,7 +946,7 @@ alloc_new_skb:
 				skb_prev->csum = csum_sub(skb_prev->csum,
 							  skb->csum);
 				data += fraggap;
-				pskb_trim_unique(skb_prev, maxfraglen);
+				skb_trim(skb_prev, maxfraglen);
 			}
 
 			copy = datalen - transhdrlen - fraggap;
@@ -1088,16 +1086,14 @@ ssize_t	ip_append_page(struct sock *sk, struct page *page,
 
 	inet->cork.length += size;
 	if ((sk->sk_protocol == IPPROTO_UDP) &&
-	    (rt->u.dst.dev->features & NETIF_F_UFO)) {
-		skb_shinfo(skb)->gso_size = mtu - fragheaderlen;
-		skb_shinfo(skb)->gso_type = SKB_GSO_UDP;
-	}
+	    (rt->u.dst.dev->features & NETIF_F_UFO))
+		skb_shinfo(skb)->ufo_size = (mtu - fragheaderlen);
 
 
 	while (size > 0) {
 		int i;
 
-		if (skb_is_gso(skb))
+		if (skb_shinfo(skb)->ufo_size)
 			len = size;
 		else {
 
@@ -1143,7 +1139,7 @@ ssize_t	ip_append_page(struct sock *sk, struct page *page,
 					data, fraggap, 0);
 				skb_prev->csum = csum_sub(skb_prev->csum,
 							  skb->csum);
-				pskb_trim_unique(skb_prev, maxfraglen);
+				skb_trim(skb_prev, maxfraglen);
 			}
 
 			/*

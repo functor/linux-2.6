@@ -28,6 +28,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -36,12 +37,10 @@
 #include <linux/init.h>
 #include "pci_hotplug.h"
 
-#define SLOT_NAME_SIZE	10
 struct slot {
 	u8 number;
 	struct hotplug_slot *hotplug_slot;
 	struct list_head slot_list;
-	char name[SLOT_NAME_SIZE];
 };
 
 static LIST_HEAD(slot_list);
@@ -234,10 +233,12 @@ static void release_slot(struct hotplug_slot *hotplug_slot)
 
 	dbg("%s - physical_slot = %s\n", __FUNCTION__, hotplug_slot->name);
 	kfree(slot->hotplug_slot->info);
+	kfree(slot->hotplug_slot->name);
 	kfree(slot->hotplug_slot);
 	kfree(slot);
 }
 
+#define SLOT_NAME_SIZE	10
 static void make_slot_name(struct slot *slot)
 {
 	/*
@@ -256,6 +257,7 @@ static int __init init_slots(void)
 	struct slot *slot;
 	struct hotplug_slot *hotplug_slot;
 	struct hotplug_slot_info *info;
+	char *name;
 	int retval = -ENOMEM;
 	int i;
 
@@ -264,23 +266,31 @@ static int __init init_slots(void)
 	 * with the pci_hotplug subsystem.
 	 */
 	for (i = 0; i < num_slots; ++i) {
-		slot = kzalloc(sizeof(*slot), GFP_KERNEL);
+		slot = kmalloc(sizeof(struct slot), GFP_KERNEL);
 		if (!slot)
 			goto error;
+		memset(slot, 0, sizeof(struct slot));
 
-		hotplug_slot = kzalloc(sizeof(*hotplug_slot), GFP_KERNEL);
+		hotplug_slot = kmalloc(sizeof(struct hotplug_slot),
+					GFP_KERNEL);
 		if (!hotplug_slot)
 			goto error_slot;
+		memset(hotplug_slot, 0, sizeof (struct hotplug_slot));
 		slot->hotplug_slot = hotplug_slot;
 
-		info = kzalloc(sizeof(*info), GFP_KERNEL);
+		info = kmalloc(sizeof(struct hotplug_slot_info), GFP_KERNEL);
 		if (!info)
 			goto error_hpslot;
+		memset(info, 0, sizeof (struct hotplug_slot_info));
 		hotplug_slot->info = info;
+
+		name = kmalloc(SLOT_NAME_SIZE, GFP_KERNEL);
+		if (!name)
+			goto error_info;
+		hotplug_slot->name = name;
 
 		slot->number = i;
 
-		hotplug_slot->name = slot->name;
 		hotplug_slot->private = slot;
 		hotplug_slot->release = &release_slot;
 		make_slot_name(slot);
@@ -290,16 +300,16 @@ static int __init init_slots(void)
 		 * Initialize the slot info structure with some known
 		 * good values.
 		 */
-		get_power_status(hotplug_slot, &info->power_status);
-		get_attention_status(hotplug_slot, &info->attention_status);
-		get_latch_status(hotplug_slot, &info->latch_status);
-		get_adapter_status(hotplug_slot, &info->adapter_status);
+		info->power_status = get_power_status(slot);
+		info->attention_status = get_attention_status(slot);
+		info->latch_status = get_latch_status(slot);
+		info->adapter_status = get_adapter_status(slot);
 		
 		dbg("registering slot %d\n", i);
 		retval = pci_hp_register(slot->hotplug_slot);
 		if (retval) {
 			err("pci_hp_register failed with error %d\n", retval);
-			goto error_info;
+			goto error_name;
 		}
 
 		/* add slot to our internal list */
@@ -307,6 +317,8 @@ static int __init init_slots(void)
 	}
 
 	return 0;
+error_name:
+	kfree(name);
 error_info:
 	kfree(info);
 error_hpslot:

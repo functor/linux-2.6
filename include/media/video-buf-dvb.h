@@ -11,7 +11,7 @@ struct videobuf_dvb {
 	struct videobuf_queue      dvbq;
 
 	/* video-buf-dvb state info */
-	struct mutex               lock;
+	struct semaphore           lock;
 	struct task_struct         *thread;
 	int                        nfeeds;
 
@@ -26,8 +26,7 @@ struct videobuf_dvb {
 
 int videobuf_dvb_register(struct videobuf_dvb *dvb,
 			  struct module *module,
-			  void *adapter_priv,
-			  struct device *device);
+			  void *adapter_priv);
 void videobuf_dvb_unregister(struct videobuf_dvb *dvb);
 
 /*

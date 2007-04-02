@@ -11,6 +11,7 @@
  *              Init --  EINVAL when opt undefined
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -164,7 +165,7 @@ static unsigned int prio_drop(struct Qdisc* sch)
 
 	for (prio = q->bands-1; prio >= 0; prio--) {
 		qdisc = q->queues[prio];
-		if (qdisc->ops->drop && (len = qdisc->ops->drop(qdisc)) != 0) {
+		if ((len = qdisc->ops->drop(qdisc)) != 0) {
 			sch->q.qlen--;
 			return len;
 		}

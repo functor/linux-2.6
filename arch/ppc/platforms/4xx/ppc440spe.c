@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ppc440spe.c
+ *
  * PPC440SPe I/O descriptions
  *
  * Roland Dreier <rolandd@cisco.com>

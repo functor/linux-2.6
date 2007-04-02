@@ -16,6 +16,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -106,16 +107,14 @@ void innovator_fpga_IRQ_demux(unsigned int irq, struct irqdesc *desc,
 	}
 }
 
-static struct irq_chip omap_fpga_irq_ack = {
-	.name		= "FPGA-ack",
+static struct irqchip omap_fpga_irq_ack = {
 	.ack		= fpga_mask_ack_irq,
 	.mask		= fpga_mask_irq,
 	.unmask		= fpga_unmask_irq,
 };
 
 
-static struct irq_chip omap_fpga_irq = {
-	.name		= "FPGA",
+static struct irqchip omap_fpga_irq = {
 	.ack		= fpga_ack_irq,
 	.mask		= fpga_mask_irq,
 	.unmask		= fpga_unmask_irq,
@@ -135,7 +134,7 @@ static struct irq_chip omap_fpga_irq = {
  * mask_ack routine for all of the FPGA interrupts has been changed from
  * fpga_mask_ack_irq() to fpga_ack_irq() so that the specific FPGA interrupt
  * being serviced is left unmasked.  We can do this because the FPGA cascade
- * interrupt is installed with the IRQF_DISABLED flag, which leaves all
+ * interrupt is installed with the SA_INTERRUPT flag, which leaves all
  * interrupts masked at the CPU while an FPGA interrupt handler executes.
  *
  * Limited testing indicates that this workaround appears to be effective

@@ -59,21 +59,17 @@ static LIST_HEAD(afs_vlocation_update_pendq);	/* queue of VLs awaiting update */
 static struct afs_vlocation *afs_vlocation_update;	/* VL currently being updated */
 static DEFINE_SPINLOCK(afs_vlocation_update_lock); /* lock guarding update queue */
 
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_vlocation_cache_get_key(const void *cookie_netfs_data,
-					    void *buffer, uint16_t buflen);
-static uint16_t afs_vlocation_cache_get_aux(const void *cookie_netfs_data,
-					    void *buffer, uint16_t buflen);
-static fscache_checkaux_t afs_vlocation_cache_check_aux(void *cookie_netfs_data,
-							const void *buffer,
-							uint16_t buflen);
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_vlocation_cache_match(void *target,
+						     const void *entry);
+static void afs_vlocation_cache_update(void *source, void *entry);
 
-static struct fscache_cookie_def afs_vlocation_cache_index_def = {
-	.name		= "AFS.vldb",
-	.type		= FSCACHE_COOKIE_TYPE_INDEX,
-	.get_key	= afs_vlocation_cache_get_key,
-	.get_aux	= afs_vlocation_cache_get_aux,
-	.check_aux	= afs_vlocation_cache_check_aux,
+struct cachefs_index_def afs_vlocation_cache_index_def = {
+	.name		= "vldb",
+	.data_size	= sizeof(struct afs_cache_vlocation),
+	.keys[0]	= { CACHEFS_INDEX_KEYS_ASCIIZ, 64 },
+	.match		= afs_vlocation_cache_match,
+	.update		= afs_vlocation_cache_update,
 };
 #endif
 
@@ -304,12 +300,13 @@ int afs_vlocation_lookup(struct afs_cell *cell,
 
 	list_add_tail(&vlocation->link, &cell->vl_list);
 
-#ifdef CONFIG_AFS_FSCACHE
+#ifdef AFS_CACHING_SUPPORT
 	/* we want to store it in the cache, plus it might already be
 	 * encached */
-	vlocation->cache = fscache_acquire_cookie(cell->cache,
-						  &afs_vlocation_cache_index_def,
-						  vlocation);
+	cachefs_acquire_cookie(cell->cache,
+			       &afs_volume_cache_index_def,
+			       vlocation,
+			       &vlocation->cache);
 
 	if (vlocation->valid)
 		goto found_in_cache;
@@ -329,7 +326,8 @@ int afs_vlocation_lookup(struct afs_cell *cell,
 	/* found in the graveyard - resurrect */
 	_debug("found in graveyard");
 	atomic_inc(&vlocation->usage);
-	list_move_tail(&vlocation->link, &cell->vl_list);
+	list_del(&vlocation->link);
+	list_add_tail(&vlocation->link, &cell->vl_list);
 	spin_unlock(&cell->vl_gylock);
 
 	afs_kafstimod_del_timer(&vlocation->timeout);
@@ -343,7 +341,7 @@ int afs_vlocation_lookup(struct afs_cell *cell,
  active:
 	active = 1;
 
-#ifdef CONFIG_AFS_FSCACHE
+#ifdef AFS_CACHING_SUPPORT
  found_in_cache:
 #endif
 	/* try to look up a cached volume in the cell VL databases by ID */
@@ -425,9 +423,9 @@ int afs_vlocation_lookup(struct afs_cell *cell,
 
 	afs_kafstimod_add_timer(&vlocation->upd_timer, 10 * HZ);
 
-#ifdef CONFIG_AFS_FSCACHE
+#ifdef AFS_CACHING_SUPPORT
 	/* update volume entry in local cache */
-	fscache_update_cookie(vlocation->cache);
+	cachefs_update_cookie(vlocation->cache);
 #endif
 
 	*_vlocation = vlocation;
@@ -441,8 +439,8 @@ int afs_vlocation_lookup(struct afs_cell *cell,
 		}
 		else {
 			list_del(&vlocation->link);
-#ifdef CONFIG_AFS_FSCACHE
-			fscache_relinquish_cookie(vlocation->cache, 0);
+#ifdef AFS_CACHING_SUPPORT
+			cachefs_relinquish_cookie(vlocation->cache, 0);
 #endif
 			afs_put_cell(vlocation->cell);
 			kfree(vlocation);
@@ -480,7 +478,8 @@ static void __afs_put_vlocation(struct afs_vlocation *vlocation)
 	}
 
 	/* move to graveyard queue */
-	list_move_tail(&vlocation->link,&cell->vl_graveyard);
+	list_del(&vlocation->link);
+	list_add_tail(&vlocation->link,&cell->vl_graveyard);
 
 	/* remove from pending timeout queue (refcounted if actually being
 	 * updated) */
@@ -539,8 +538,8 @@ void afs_vlocation_do_timeout(struct afs_vlocation *vlocation)
 	}
 
 	/* we can now destroy it properly */
-#ifdef CONFIG_AFS_FSCACHE
-	fscache_relinquish_cookie(vlocation->cache, 0);
+#ifdef AFS_CACHING_SUPPORT
+	cachefs_relinquish_cookie(vlocation->cache, 0);
 #endif
 	afs_put_cell(cell);
 
@@ -891,103 +890,65 @@ static void afs_vlocation_update_discard(struct afs_async_op *op)
 
 /*****************************************************************************/
 /*
- * set the key for the index entry
+ * match a VLDB record stored in the cache
+ * - may also load target from entry
  */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_vlocation_cache_get_key(const void *cookie_netfs_data,
-					    void *buffer, uint16_t bufmax)
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_vlocation_cache_match(void *target,
+						     const void *entry)
 {
-	const struct afs_vlocation *vlocation = cookie_netfs_data;
-	uint16_t klen;
+	const struct afs_cache_vlocation *vldb = entry;
+	struct afs_vlocation *vlocation = target;
 
-	_enter("{%s},%p,%u", vlocation->vldb.name, buffer, bufmax);
+	_enter("{%s},{%s}", vlocation->vldb.name, vldb->name);
 
-	klen = strnlen(vlocation->vldb.name, sizeof(vlocation->vldb.name));
-	if (klen > bufmax)
-		return 0;
-
-	memcpy(buffer, vlocation->vldb.name, klen);
-
-	_leave(" = %u", klen);
-	return klen;
-
-} /* end afs_vlocation_cache_get_key() */
-#endif
-
-/*****************************************************************************/
-/*
- * provide new auxilliary cache data
- */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_vlocation_cache_get_aux(const void *cookie_netfs_data,
-					    void *buffer, uint16_t bufmax)
-{
-	const struct afs_vlocation *vlocation = cookie_netfs_data;
-	uint16_t dlen;
-
-	_enter("{%s},%p,%u", vlocation->vldb.name, buffer, bufmax);
-
-	dlen = sizeof(struct afs_cache_vlocation);
-	dlen -= offsetof(struct afs_cache_vlocation, nservers);
-	if (dlen > bufmax)
-		return 0;
-
-	memcpy(buffer, (uint8_t *)&vlocation->vldb.nservers, dlen);
-
-	_leave(" = %u", dlen);
-	return dlen;
-
-} /* end afs_vlocation_cache_get_aux() */
-#endif
-
-/*****************************************************************************/
-/*
- * check that the auxilliary data indicates that the entry is still valid
- */
-#ifdef CONFIG_AFS_FSCACHE
-static fscache_checkaux_t afs_vlocation_cache_check_aux(void *cookie_netfs_data,
-							const void *buffer,
-							uint16_t buflen)
-{
-	const struct afs_cache_vlocation *cvldb;
-	struct afs_vlocation *vlocation = cookie_netfs_data;
-	uint16_t dlen;
-
-	_enter("{%s},%p,%u", vlocation->vldb.name, buffer, buflen);
-
-	/* check the size of the data is what we're expecting */
-	dlen = sizeof(struct afs_cache_vlocation);
-	dlen -= offsetof(struct afs_cache_vlocation, nservers);
-	if (dlen != buflen)
-		return FSCACHE_CHECKAUX_OBSOLETE;
-
-	cvldb = container_of(buffer, struct afs_cache_vlocation, nservers);
-
-	/* if what's on disk is more valid than what's in memory, then use the
-	 * VL record from the cache */
-	if (!vlocation->valid || vlocation->vldb.rtime == cvldb->rtime) {
-		memcpy((uint8_t *)&vlocation->vldb.nservers, buffer, dlen);
-		vlocation->valid = 1;
-		_leave(" = SUCCESS [c->m]");
-		return FSCACHE_CHECKAUX_OKAY;
-	}
-
-	/* need to update the cache if the cached info differs */
-	if (memcmp(&vlocation->vldb, buffer, dlen) != 0) {
-		/* delete if the volume IDs for this name differ */
-		if (memcmp(&vlocation->vldb.vid, &cvldb->vid,
-			   sizeof(cvldb->vid)) != 0
+	if (strncmp(vlocation->vldb.name, vldb->name, sizeof(vldb->name)) == 0
+	    ) {
+		if (!vlocation->valid ||
+		    vlocation->vldb.rtime == vldb->rtime
 		    ) {
-			_leave(" = OBSOLETE");
-			return FSCACHE_CHECKAUX_OBSOLETE;
+			vlocation->vldb = *vldb;
+			vlocation->valid = 1;
+			_leave(" = SUCCESS [c->m]");
+			return CACHEFS_MATCH_SUCCESS;
 		}
+		/* need to update cache if cached info differs */
+		else if (memcmp(&vlocation->vldb, vldb, sizeof(*vldb)) != 0) {
+			/* delete if VIDs for this name differ */
+			if (memcmp(&vlocation->vldb.vid,
+				   &vldb->vid,
+				   sizeof(vldb->vid)) != 0) {
+				_leave(" = DELETE");
+				return CACHEFS_MATCH_SUCCESS_DELETE;
+			}
 
-		_leave(" = UPDATE");
-		return FSCACHE_CHECKAUX_NEEDS_UPDATE;
+			_leave(" = UPDATE");
+			return CACHEFS_MATCH_SUCCESS_UPDATE;
+		}
+		else {
+			_leave(" = SUCCESS");
+			return CACHEFS_MATCH_SUCCESS;
+		}
 	}
 
-	_leave(" = OKAY");
-	return FSCACHE_CHECKAUX_OKAY;
+	_leave(" = FAILED");
+	return CACHEFS_MATCH_FAILED;
+} /* end afs_vlocation_cache_match() */
+#endif
 
-} /* end afs_vlocation_cache_check_aux() */
+/*****************************************************************************/
+/*
+ * update a VLDB record stored in the cache
+ */
+#ifdef AFS_CACHING_SUPPORT
+static void afs_vlocation_cache_update(void *source, void *entry)
+{
+	struct afs_cache_vlocation *vldb = entry;
+	struct afs_vlocation *vlocation = source;
+
+	_enter("");
+
+	*vldb = vlocation->vldb;
+
+} /* end afs_vlocation_cache_update() */
 #endif

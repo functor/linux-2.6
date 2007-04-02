@@ -102,12 +102,6 @@ get_key(const void *p, const void *end, struct crypto_tfm **res, int *resalg)
 			alg_mode = CRYPTO_TFM_MODE_CBC;
 			setkey = 1;
 			break;
-		case NID_cast5_cbc:
-			/* XXXX here in name only, not used */
-			alg_name = "cast5";
-			alg_mode = CRYPTO_TFM_MODE_CBC;
-			setkey = 0; /* XXX will need to set to 1 */
-			break;
 		case NID_md5:
 			if (key.len == 0) {
 				dprintk("RPC: SPKM3 get_key: NID_md5 zero Key length\n");
@@ -152,8 +146,9 @@ gss_import_sec_context_spkm3(const void *p, size_t len,
 	const void *end = (const void *)((const char *)p + len);
 	struct	spkm3_ctx *ctx;
 
-	if (!(ctx = kzalloc(sizeof(*ctx), GFP_KERNEL)))
+	if (!(ctx = kmalloc(sizeof(*ctx), GFP_KERNEL)))
 		goto out_err;
+	memset(ctx, 0, sizeof(*ctx));
 
 	p = simple_get_netobj(p, end, &ctx->ctx_id);
 	if (IS_ERR(p))
@@ -200,7 +195,7 @@ gss_import_sec_context_spkm3(const void *p, size_t len,
 
 	ctx_id->internal_ctx_id = ctx;
 
-	dprintk("Successfully imported new spkm context.\n");
+	dprintk("Succesfully imported new spkm context.\n");
 	return 0;
 
 out_err_free_key2:

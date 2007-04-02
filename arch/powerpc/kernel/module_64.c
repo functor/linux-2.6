@@ -191,18 +191,10 @@ int module_frob_arch_sections(Elf64_Ehdr *hdr,
 				 (void *)hdr
 				 + sechdrs[sechdrs[i].sh_link].sh_offset);
 	}
-
-	if (!me->arch.stubs_section) {
-		printk("%s: doesn't contain .stubs.\n", me->name);
+	if (!me->arch.stubs_section || !me->arch.toc_section) {
+		printk("%s: doesn't contain .toc or .stubs.\n", me->name);
 		return -ENOEXEC;
 	}
-
-	/* If we don't have a .toc, just use .stubs.  We need to set r2
-	   to some reasonable value in case the module calls out to
-	   other functions via a stub, or if a function pointer escapes
-	   the module by some means.  */
-	if (!me->arch.toc_section)
-		me->arch.toc_section = me->arch.stubs_section;
 
 	/* Override the stubs size */
 	sechdrs[me->arch.stubs_section].sh_size = get_stubs_size(hdr, sechdrs);
@@ -350,7 +342,7 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			break;
 
 		case R_PPC64_TOC16:
-			/* Subtract TOC pointer */
+			/* Subtact TOC pointer */
 			value -= my_r2(sechdrs, me);
 			if (value + 0x8000 > 0xffff) {
 				printk("%s: bad TOC16 relocation (%lu)\n",
@@ -363,7 +355,7 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			break;
 
 		case R_PPC64_TOC16_DS:
-			/* Subtract TOC pointer */
+			/* Subtact TOC pointer */
 			value -= my_r2(sechdrs, me);
 			if ((value & 3) != 0 || value + 0x8000 > 0xffff) {
 				printk("%s: bad TOC16_DS relocation (%lu)\n",

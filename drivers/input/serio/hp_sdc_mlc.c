@@ -270,10 +270,9 @@ static void hp_sdc_mlc_out (hil_mlc *mlc) {
 
  do_control:
 	priv->emtestmode = mlc->opacket & HIL_CTRL_TEST;
-	
-	/* we cannot emulate this, it should not be used. */
-	BUG_ON((mlc->opacket & (HIL_CTRL_APE | HIL_CTRL_IPF)) == HIL_CTRL_APE);
-	
+	if ((mlc->opacket & (HIL_CTRL_APE | HIL_CTRL_IPF)) == HIL_CTRL_APE) {
+		BUG(); /* we cannot emulate this, it should not be used. */
+	}
 	if ((mlc->opacket & HIL_CTRL_ONLY) == HIL_CTRL_ONLY) goto control_only;
 	if (mlc->opacket & HIL_CTRL_APE) { 
 		BUG(); /* Should not send command/data after engaging APE */

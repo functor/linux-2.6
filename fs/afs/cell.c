@@ -31,21 +31,17 @@ static DEFINE_RWLOCK(afs_cells_lock);
 static DECLARE_RWSEM(afs_cells_sem); /* add/remove serialisation */
 static struct afs_cell *afs_cell_root;
 
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_cell_cache_get_key(const void *cookie_netfs_data,
-				       void *buffer, uint16_t buflen);
-static uint16_t afs_cell_cache_get_aux(const void *cookie_netfs_data,
-				       void *buffer, uint16_t buflen);
-static fscache_checkaux_t afs_cell_cache_check_aux(void *cookie_netfs_data,
-						   const void *buffer,
-						   uint16_t buflen);
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_cell_cache_match(void *target,
+						const void *entry);
+static void afs_cell_cache_update(void *source, void *entry);
 
-static struct fscache_cookie_def afs_cell_cache_index_def = {
-	.name		= "AFS cell",
-	.type		= FSCACHE_COOKIE_TYPE_INDEX,
-	.get_key	= afs_cell_cache_get_key,
-	.get_aux	= afs_cell_cache_get_aux,
-	.check_aux	= afs_cell_cache_check_aux,
+struct cachefs_index_def afs_cache_cell_index_def = {
+	.name			= "cell_ix",
+	.data_size		= sizeof(struct afs_cache_cell),
+	.keys[0]		= { CACHEFS_INDEX_KEYS_ASCIIZ, 64 },
+	.match			= afs_cell_cache_match,
+	.update			= afs_cell_cache_update,
 };
 #endif
 
@@ -119,11 +115,12 @@ int afs_cell_create(const char *name, char *vllist, struct afs_cell **_cell)
 	if (ret < 0)
 		goto error;
 
-#ifdef CONFIG_AFS_FSCACHE
-	/* put it up for caching (this never returns an error) */
-	cell->cache = fscache_acquire_cookie(afs_cache_netfs.primary_index,
-					     &afs_cell_cache_index_def,
-					     cell);
+#ifdef AFS_CACHING_SUPPORT
+	/* put it up for caching */
+	cachefs_acquire_cookie(afs_cache_netfs.primary_index,
+			       &afs_vlocation_cache_index_def,
+			       cell,
+			       &cell->cache);
 #endif
 
 	/* add to the cell lists */
@@ -348,8 +345,8 @@ static void afs_cell_destroy(struct afs_cell *cell)
 	list_del_init(&cell->proc_link);
 	up_write(&afs_proc_cells_sem);
 
-#ifdef CONFIG_AFS_FSCACHE
-	fscache_relinquish_cookie(cell->cache, 0);
+#ifdef AFS_CACHING_SUPPORT
+	cachefs_relinquish_cookie(cell->cache, 0);
 #endif
 
 	up_write(&afs_cells_sem);
@@ -416,7 +413,8 @@ int afs_server_find_by_peer(const struct rxrpc_peer *peer,
 
 	/* we found it in the graveyard - resurrect it */
  found_dead_server:
-	list_move_tail(&server->link, &cell->sv_list);
+	list_del(&server->link);
+	list_add_tail(&server->link, &cell->sv_list);
 	afs_get_server(server);
 	afs_kafstimod_del_timer(&server->timeout);
 	spin_unlock(&cell->sv_gylock);
@@ -528,62 +526,44 @@ void afs_cell_purge(void)
 
 /*****************************************************************************/
 /*
- * set the key for the index entry
+ * match a cell record obtained from the cache
  */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_cell_cache_get_key(const void *cookie_netfs_data,
-				       void *buffer, uint16_t bufmax)
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_cell_cache_match(void *target,
+						const void *entry)
 {
-	const struct afs_cell *cell = cookie_netfs_data;
-	uint16_t klen;
+	const struct afs_cache_cell *ccell = entry;
+	struct afs_cell *cell = target;
 
-	_enter("%p,%p,%u", cell, buffer, bufmax);
+	_enter("{%s},{%s}", ccell->name, cell->name);
 
-	klen = strlen(cell->name);
-	if (klen > bufmax)
-		return 0;
+	if (strncmp(ccell->name, cell->name, sizeof(ccell->name)) == 0) {
+		_leave(" = SUCCESS");
+		return CACHEFS_MATCH_SUCCESS;
+	}
 
-	memcpy(buffer, cell->name, klen);
-	return klen;
-
-} /* end afs_cell_cache_get_key() */
+	_leave(" = FAILED");
+	return CACHEFS_MATCH_FAILED;
+} /* end afs_cell_cache_match() */
 #endif
 
 /*****************************************************************************/
 /*
- * provide new auxilliary cache data
+ * update a cell record in the cache
  */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_cell_cache_get_aux(const void *cookie_netfs_data,
-				       void *buffer, uint16_t bufmax)
+#ifdef AFS_CACHING_SUPPORT
+static void afs_cell_cache_update(void *source, void *entry)
 {
-	const struct afs_cell *cell = cookie_netfs_data;
-	uint16_t dlen;
+	struct afs_cache_cell *ccell = entry;
+	struct afs_cell *cell = source;
 
-	_enter("%p,%p,%u", cell, buffer, bufmax);
+	_enter("%p,%p", source, entry);
 
-	dlen = cell->vl_naddrs * sizeof(cell->vl_addrs[0]);
-	dlen = min(dlen, bufmax);
-	dlen &= ~(sizeof(cell->vl_addrs[0]) - 1);
+	strncpy(ccell->name, cell->name, sizeof(ccell->name));
 
-	memcpy(buffer, cell->vl_addrs, dlen);
+	memcpy(ccell->vl_servers,
+	       cell->vl_addrs,
+	       min(sizeof(ccell->vl_servers), sizeof(cell->vl_addrs)));
 
-	return dlen;
-
-} /* end afs_cell_cache_get_aux() */
-#endif
-
-/*****************************************************************************/
-/*
- * check that the auxilliary data indicates that the entry is still valid
- */
-#ifdef CONFIG_AFS_FSCACHE
-static fscache_checkaux_t afs_cell_cache_check_aux(void *cookie_netfs_data,
-						   const void *buffer,
-						   uint16_t buflen)
-{
-	_leave(" = OKAY");
-	return FSCACHE_CHECKAUX_OKAY;
-
-} /* end afs_cell_cache_check_aux() */
+} /* end afs_cell_cache_update() */
 #endif

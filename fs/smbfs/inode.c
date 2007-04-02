@@ -7,6 +7,7 @@
  *  Please add a note about your changes to smbfs in the ChangeLog file.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/time.h>
 #include <linux/kernel.h>
@@ -47,7 +48,7 @@
 
 static void smb_delete_inode(struct inode *);
 static void smb_put_super(struct super_block *);
-static int  smb_statfs(struct dentry *, struct kstatfs *);
+static int  smb_statfs(struct super_block *, struct kstatfs *);
 static int  smb_show_options(struct seq_file *, struct vfsmount *);
 
 static kmem_cache_t *smb_inode_cachep;
@@ -79,8 +80,7 @@ static int init_inodecache(void)
 {
 	smb_inode_cachep = kmem_cache_create("smb_inode_cache",
 					     sizeof(struct smb_inode_info),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+					     0, SLAB_RECLAIM_ACCOUNT,
 					     init_once, NULL);
 	if (smb_inode_cachep == NULL)
 		return -ENOMEM;
@@ -167,6 +167,7 @@ smb_get_inode_attr(struct inode *inode, struct smb_fattr *fattr)
 	fattr->f_mtime	= inode->i_mtime;
 	fattr->f_ctime	= inode->i_ctime;
 	fattr->f_atime	= inode->i_atime;
+	fattr->f_blksize= inode->i_blksize;
 	fattr->f_blocks	= inode->i_blocks;
 
 	fattr->attr	= SMB_I(inode)->attr;
@@ -200,6 +201,7 @@ smb_set_inode_attr(struct inode *inode, struct smb_fattr *fattr)
 	inode->i_uid	= fattr->f_uid;
 	inode->i_gid	= fattr->f_gid;
 	inode->i_ctime	= fattr->f_ctime;
+	inode->i_blksize= fattr->f_blksize;
 	inode->i_blocks = fattr->f_blocks;
 	inode->i_size	= fattr->f_size;
 	inode->i_mtime	= fattr->f_mtime;
@@ -214,7 +216,7 @@ smb_set_inode_attr(struct inode *inode, struct smb_fattr *fattr)
 	if (inode->i_mtime.tv_sec != last_time || inode->i_size != last_sz) {
 		VERBOSE("%ld changed, old=%ld, new=%ld, oz=%ld, nz=%ld\n",
 			inode->i_ino,
-			(long) last_time, (long) inode->i_mtime.tv_sec,
+			(long) last_time, (long) inode->i_mtime,
 			(long) last_sz, (long) inode->i_size);
 
 		if (!S_ISDIR(inode->i_mode))
@@ -638,13 +640,13 @@ out_no_server:
 }
 
 static int
-smb_statfs(struct dentry *dentry, struct kstatfs *buf)
+smb_statfs(struct super_block *sb, struct kstatfs *buf)
 {
 	int result;
 	
 	lock_kernel();
 
-	result = smb_proc_dskattr(dentry, buf);
+	result = smb_proc_dskattr(sb, buf);
 
 	unlock_kernel();
 
@@ -779,10 +781,10 @@ out:
 	return error;
 }
 
-static int smb_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct super_block *smb_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_nodev(fs_type, flags, data, smb_fill_super, mnt);
+	return get_sb_nodev(fs_type, flags, data, smb_fill_super);
 }
 
 static struct file_system_type smb_fs_type = {

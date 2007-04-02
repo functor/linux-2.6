@@ -68,6 +68,7 @@
  * fi
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -83,8 +84,8 @@
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
 
+#include "usb-serial.h"
 #include "ti_usb_3410_5052.h"
 #include "ti_fw_3410.h"		/* firmware image for 3410 */
 #include "ti_fw_5052.h"		/* firmware image for 5052 */
@@ -415,11 +416,12 @@ static int ti_startup(struct usb_serial *serial)
 	    dev->actconfig->desc.bConfigurationValue);
 
 	/* create device structure */
-	tdev = kzalloc(sizeof(struct ti_device), GFP_KERNEL);
+	tdev = kmalloc(sizeof(struct ti_device), GFP_KERNEL);
 	if (tdev == NULL) {
 		dev_err(&dev->dev, "%s - out of memory\n", __FUNCTION__);
 		return -ENOMEM;
 	}
+	memset(tdev, 0, sizeof(struct ti_device));
 	sema_init(&tdev->td_open_close_sem, 1);
 	tdev->td_serial = serial;
 	usb_set_serial_data(serial, tdev);

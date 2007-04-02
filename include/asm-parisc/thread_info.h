@@ -49,8 +49,7 @@ struct thread_info {
 
 #endif /* !__ASSEMBLY */
 
-#define PREEMPT_ACTIVE_BIT	28
-#define PREEMPT_ACTIVE		(1 << PREEMPT_ACTIVE_BIT)
+#define PREEMPT_ACTIVE          0x10000000
 
 /*
  * thread information flags

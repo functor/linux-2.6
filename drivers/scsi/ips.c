@@ -179,7 +179,6 @@
 
 #include <linux/blkdev.h>
 #include <linux/types.h>
-#include <linux/dma-mapping.h>
 
 #include <scsi/sg.h>
 
@@ -196,6 +195,7 @@
 #include <linux/module.h>
 
 #include <linux/stat.h>
+#include <linux/config.h>
 
 #include <linux/spinlock.h>
 #include <linux/init.h>
@@ -555,7 +555,7 @@ ips_setup(char *ips_str)
 		 * We now have key/value pairs.
 		 * Update the variables
 		 */
-		for (i = 0; i < ARRAY_SIZE(options); i++) {
+		for (i = 0; i < (sizeof (options) / sizeof (options[0])); i++) {
 			if (strnicmp
 			    (key, options[i].option_name,
 			     strlen(options[i].option_name)) == 0) {
@@ -1146,7 +1146,7 @@ ips_queue(Scsi_Cmnd * SC, void (*done) (Scsi_Cmnd *))
 				return (0);
 			}
 			ha->ioctl_reset = 1;	/* This reset request is from an IOCTL */
-			__ips_eh_reset(SC);
+			ips_eh_reset(SC);
 			SC->result = DID_OK << 16;
 			SC->scsi_done(SC);
 			return (0);
@@ -4363,7 +4363,7 @@ ips_rdcap(ips_ha_t * ha, ips_scb_t * scb)
 
 	METHOD_TRACE("ips_rdcap", 1);
 
-	if (scb->scsi_cmd->request_bufflen < 8)
+	if (scb->scsi_cmd->bufflen < 8)
 		return (0);
 
 	cap.lba =
@@ -5014,7 +5014,7 @@ ips_init_copperhead(ips_ha_t * ha)
 				break;
 
 			/* Delay for 1 Second */
-			MDELAY(IPS_ONE_SEC);
+			msleep(IPS_ONE_SEC);
 		}
 
 		if (j >= 45)
@@ -5040,7 +5040,7 @@ ips_init_copperhead(ips_ha_t * ha)
 				break;
 
 			/* Delay for 1 Second */
-			MDELAY(IPS_ONE_SEC);
+			msleep(IPS_ONE_SEC);
 		}
 
 		if (j >= 240)
@@ -5058,7 +5058,7 @@ ips_init_copperhead(ips_ha_t * ha)
 			break;
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 	}
 
 	if (i >= 240)
@@ -5108,7 +5108,7 @@ ips_init_copperhead_memio(ips_ha_t * ha)
 				break;
 
 			/* Delay for 1 Second */
-			MDELAY(IPS_ONE_SEC);
+			msleep(IPS_ONE_SEC);
 		}
 
 		if (j >= 45)
@@ -5134,7 +5134,7 @@ ips_init_copperhead_memio(ips_ha_t * ha)
 				break;
 
 			/* Delay for 1 Second */
-			MDELAY(IPS_ONE_SEC);
+			msleep(IPS_ONE_SEC);
 		}
 
 		if (j >= 240)
@@ -5152,7 +5152,7 @@ ips_init_copperhead_memio(ips_ha_t * ha)
 			break;
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 	}
 
 	if (i >= 240)
@@ -5204,7 +5204,7 @@ ips_init_morpheus(ips_ha_t * ha)
 			break;
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 	}
 
 	if (i >= 45) {
@@ -5230,7 +5230,7 @@ ips_init_morpheus(ips_ha_t * ha)
 			if (Post != 0x4F00)
 				break;
 			/* Delay for 1 Second */
-			MDELAY(IPS_ONE_SEC);
+			msleep(IPS_ONE_SEC);
 		}
 
 		if (i >= 120) {
@@ -5260,7 +5260,7 @@ ips_init_morpheus(ips_ha_t * ha)
 			break;
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 	}
 
 	if (i >= 240) {
@@ -5320,12 +5320,12 @@ ips_reset_copperhead(ips_ha_t * ha)
 		outb(IPS_BIT_RST, ha->io_addr + IPS_REG_SCPR);
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 
 		outb(0, ha->io_addr + IPS_REG_SCPR);
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 
 		if ((*ha->func.init) (ha))
 			break;
@@ -5365,12 +5365,12 @@ ips_reset_copperhead_memio(ips_ha_t * ha)
 		writeb(IPS_BIT_RST, ha->mem_ptr + IPS_REG_SCPR);
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 
 		writeb(0, ha->mem_ptr + IPS_REG_SCPR);
 
 		/* Delay for 1 Second */
-		MDELAY(IPS_ONE_SEC);
+		msleep(IPS_ONE_SEC);
 
 		if ((*ha->func.init) (ha))
 			break;
@@ -5411,7 +5411,7 @@ ips_reset_morpheus(ips_ha_t * ha)
 		writel(0x80000000, ha->mem_ptr + IPS_REG_I960_IDR);
 
 		/* Delay for 5 Seconds */
-		MDELAY(5 * IPS_ONE_SEC);
+		msleep(5 * IPS_ONE_SEC);
 
 		/* Do a PCI config read to wait for adapter */
 		pci_read_config_byte(ha->pcidev, 4, &junk);
@@ -6437,7 +6437,7 @@ ips_erase_bios(ips_ha_t * ha)
 		/* VPP failure */
 		return (1);
 
-	/* check for successful flash */
+	/* check for succesful flash */
 	if (status & 0x30)
 		/* sequence error */
 		return (1);
@@ -6549,7 +6549,7 @@ ips_erase_bios_memio(ips_ha_t * ha)
 		/* VPP failure */
 		return (1);
 
-	/* check for successful flash */
+	/* check for succesful flash */
 	if (status & 0x30)
 		/* sequence error */
 		return (1);
@@ -7007,7 +7007,7 @@ ips_register_scsi(int index)
 	memcpy(ha, oldha, sizeof (ips_ha_t));
 	free_irq(oldha->irq, oldha);
 	/* Install the interrupt handler with the new ha */
-	if (request_irq(ha->irq, do_ipsintr, IRQF_SHARED, ips_name, ha)) {
+	if (request_irq(ha->irq, do_ipsintr, SA_SHIRQ, ips_name, ha)) {
 		IPS_PRINTK(KERN_WARNING, ha->pcidev,
 			   "Unable to install interrupt handler\n");
 		scsi_host_put(sh);
@@ -7284,10 +7284,10 @@ ips_init_phase1(struct pci_dev *pci_dev, int *indexPtr)
 	 * are guaranteed to be < 4G.
 	 */
 	if (IPS_ENABLE_DMA64 && IPS_HAS_ENH_SGLIST(ha) &&
-	    !pci_set_dma_mask(ha->pcidev, DMA_64BIT_MASK)) {
+	    !pci_set_dma_mask(ha->pcidev, 0xffffffffffffffffULL)) {
 		(ha)->flags |= IPS_HA_ENH_SG;
 	} else {
-		if (pci_set_dma_mask(ha->pcidev, DMA_32BIT_MASK) != 0) {
+		if (pci_set_dma_mask(ha->pcidev, 0xffffffffULL) != 0) {
 			printk(KERN_WARNING "Unable to set DMA Mask\n");
 			return ips_abort_init(ha, index);
 		}
@@ -7419,7 +7419,7 @@ ips_init_phase2(int index)
 	}
 
 	/* Install the interrupt handler */
-	if (request_irq(ha->irq, do_ipsintr, IRQF_SHARED, ips_name, ha)) {
+	if (request_irq(ha->irq, do_ipsintr, SA_SHIRQ, ips_name, ha)) {
 		IPS_PRINTK(KERN_WARNING, ha->pcidev,
 			   "Unable to install interrupt handler\n");
 		return ips_abort_init(ha, index);

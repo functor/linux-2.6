@@ -203,6 +203,12 @@ extern SKCS_STATUS SkCsGetReceiveInfo(
 	unsigned	Checksum2,
 	int			NetNumber);
 
+extern void SkCsGetSendInfo(
+	SK_AC				*pAc,
+	void				*pIpHeader,
+	SKCS_PACKET_INFO	*pPacketInfo,
+	int					NetNumber);
+
 extern void SkCsSetReceiveFlags(
 	SK_AC		*pAc,
 	unsigned	ReceiveFlags,

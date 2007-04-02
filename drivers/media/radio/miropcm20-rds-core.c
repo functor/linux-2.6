@@ -18,39 +18,38 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
-
+#include <asm/semaphore.h>
 #include <asm/io.h>
-#include "oss/aci.h"
+#include "../../../sound/oss/aci.h"
 #include "miropcm20-rds-core.h"
 
 #define DEBUG 0
 
-static struct mutex aci_rds_mutex;
+static struct semaphore aci_rds_sem;
 
 #define RDS_DATASHIFT          2   /* Bit 2 */
 #define RDS_DATAMASK        (1 << RDS_DATASHIFT)
 #define RDS_BUSYMASK        0x10   /* Bit 4 */
 #define RDS_CLOCKMASK       0x08   /* Bit 3 */
 
-#define RDS_DATA(x)         (((x) >> RDS_DATASHIFT) & 1)
+#define RDS_DATA(x)         (((x) >> RDS_DATASHIFT) & 1) 
 
 
 #if DEBUG
 static void print_matrix(char array[], unsigned int length)
 {
-	int i, j;
+        int i, j;
 
-	for (i=0; i<length; i++) {
-		printk(KERN_DEBUG "aci-rds: ");
-		for (j=7; j>=0; j--) {
-			printk("%d", (array[i] >> j) & 0x1);
-		}
-		if (i%8 == 0)
-			printk(" byte-border\n");
-		else
-			printk("\n");
-	}
+        for (i=0; i<length; i++) {
+                printk(KERN_DEBUG "aci-rds: ");
+                for (j=7; j>=0; j--) {
+                        printk("%d", (array[i] >> j) & 0x1);
+                }
+                if (i%8 == 0)
+                        printk(" byte-border\n");
+                else
+                        printk("\n");
+        }
 }
 #endif /* DEBUG */
 
@@ -114,7 +113,7 @@ static int rds_write(unsigned char cmd)
 {
 	unsigned char sendbuffer[8];
 	int i;
-
+	
 	if (byte2trans(cmd, sendbuffer, 8) != 0){
 		return -1;
 	} else {
@@ -151,7 +150,7 @@ static int rds_read(unsigned char databuffer[], int datasize)
 	   I have to waitread() here */
 	if (rds_waitread() < 0)
 		return -1;
-
+	
 	memset(databuffer, 0, datasize);
 
 	for (i=0; i< READSIZE; i++)
@@ -182,7 +181,7 @@ int aci_rds_cmd(unsigned char cmd, unsigned char databuffer[], int datasize)
 {
 	int ret;
 
-	if (mutex_lock_interruptible(&aci_rds_mutex))
+	if (down_interruptible(&aci_rds_sem))
 		return -EINTR;
 
 	rds_write(cmd);
@@ -193,15 +192,15 @@ int aci_rds_cmd(unsigned char cmd, unsigned char databuffer[], int datasize)
 	else
 		ret = 0;
 
-	mutex_unlock(&aci_rds_mutex);
-
+	up(&aci_rds_sem);
+	
 	return ret;
 }
 EXPORT_SYMBOL(aci_rds_cmd);
 
 int __init attach_aci_rds(void)
 {
-	mutex_init(&aci_rds_mutex);
+	init_MUTEX(&aci_rds_sem);
 	return 0;
 }
 

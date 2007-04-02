@@ -36,7 +36,6 @@
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
-#include <linux/mutex.h>
 
 #include <asm/system.h>
 #include <asm/amigahw.h>
@@ -53,7 +52,7 @@ MODULE_PARM_DESC(map, "Map of attached joysticks in form of <a>,<b> (default is 
 __obsolete_setup("amijoy=");
 
 static int amijoy_used;
-static DEFINE_MUTEX(amijoy_mutex);
+static DECLARE_MUTEX(amijoy_sem);
 static struct input_dev *amijoy_dev[2];
 static char *amijoy_phys[2] = { "amijoy/input0", "amijoy/input1" };
 
@@ -86,7 +85,7 @@ static int amijoy_open(struct input_dev *dev)
 {
 	int err;
 
-	err = mutex_lock_interruptible(&amijoy_mutex);
+	err = down_interruptible(&amijoy_sem);
 	if (err)
 		return err;
 
@@ -98,16 +97,16 @@ static int amijoy_open(struct input_dev *dev)
 
 	amijoy_used++;
 out:
-	mutex_unlock(&amijoy_mutex);
+	up(&amijoy_sem);
 	return err;
 }
 
 static void amijoy_close(struct input_dev *dev)
 {
-	mutex_lock(&amijoy_mutex);
+	down(&amijoy_sem);
 	if (!--amijoy_used)
 		free_irq(IRQ_AMIGA_VERTB, amijoy_interrupt);
-	mutex_unlock(&amijoy_mutex);
+	up(&amijoy_sem);
 }
 
 static int __init amijoy_init(void)

@@ -8,6 +8,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/stddef.h>
 #include <linux/ioport.h>
@@ -17,7 +18,7 @@
 #include <linux/console.h>
 #include <linux/bootmem.h>
 #include <linux/seq_file.h>
-#include <linux/screen_info.h>
+#include <linux/tty.h>
 #include <linux/init.h>
 #include <linux/root_dev.h>
 

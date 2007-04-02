@@ -25,7 +25,6 @@
 #include <linux/pm.h>
 #include <linux/pm_legacy.h>
 #include <linux/interrupt.h>
-#include <linux/mutex.h>
 
 int pm_active;
 
@@ -41,7 +40,7 @@ int pm_active;
  *	until a resume but that will be fine.
  */
  
-static DEFINE_MUTEX(pm_devs_lock);
+static DECLARE_MUTEX(pm_devs_lock);
 static LIST_HEAD(pm_devs);
 
 /**
@@ -68,11 +67,66 @@ struct pm_dev *pm_register(pm_dev_t type,
 		dev->id = id;
 		dev->callback = callback;
 
-		mutex_lock(&pm_devs_lock);
+		down(&pm_devs_lock);
 		list_add(&dev->entry, &pm_devs);
-		mutex_unlock(&pm_devs_lock);
+		up(&pm_devs_lock);
 	}
 	return dev;
+}
+
+/**
+ *	pm_unregister -  unregister a device with power management
+ *	@dev: device to unregister
+ *
+ *	Remove a device from the power management notification lists. The
+ *	dev passed must be a handle previously returned by pm_register.
+ */
+ 
+void pm_unregister(struct pm_dev *dev)
+{
+	if (dev) {
+		down(&pm_devs_lock);
+		list_del(&dev->entry);
+		up(&pm_devs_lock);
+
+		kfree(dev);
+	}
+}
+
+static void __pm_unregister(struct pm_dev *dev)
+{
+	if (dev) {
+		list_del(&dev->entry);
+		kfree(dev);
+	}
+}
+
+/**
+ *	pm_unregister_all - unregister all devices with matching callback
+ *	@callback: callback function pointer
+ *
+ *	Unregister every device that would call the callback passed. This
+ *	is primarily meant as a helper function for loadable modules. It
+ *	enables a module to give up all its managed devices without keeping
+ *	its own private list.
+ */
+ 
+void pm_unregister_all(pm_callback callback)
+{
+	struct list_head *entry;
+
+	if (!callback)
+		return;
+
+	down(&pm_devs_lock);
+	entry = pm_devs.next;
+	while (entry != &pm_devs) {
+		struct pm_dev *dev = list_entry(entry, struct pm_dev, entry);
+		entry = entry->next;
+		if (dev->callback == callback)
+			__pm_unregister(dev);
+	}
+	up(&pm_devs_lock);
 }
 
 /**
@@ -180,7 +234,7 @@ int pm_send_all(pm_request_t rqst, void *data)
 {
 	struct list_head *entry;
 	
-	mutex_lock(&pm_devs_lock);
+	down(&pm_devs_lock);
 	entry = pm_devs.next;
 	while (entry != &pm_devs) {
 		struct pm_dev *dev = list_entry(entry, struct pm_dev, entry);
@@ -192,17 +246,19 @@ int pm_send_all(pm_request_t rqst, void *data)
 				 */
 				if (rqst == PM_SUSPEND)
 					pm_undo_all(dev);
-				mutex_unlock(&pm_devs_lock);
+				up(&pm_devs_lock);
 				return status;
 			}
 		}
 		entry = entry->next;
 	}
-	mutex_unlock(&pm_devs_lock);
+	up(&pm_devs_lock);
 	return 0;
 }
 
 EXPORT_SYMBOL(pm_register);
+EXPORT_SYMBOL(pm_unregister);
+EXPORT_SYMBOL(pm_unregister_all);
 EXPORT_SYMBOL(pm_send_all);
 EXPORT_SYMBOL(pm_active);
 

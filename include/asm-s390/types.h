@@ -58,6 +58,7 @@ typedef __signed__ long saddr_t;
 
 #ifndef __ASSEMBLY__
 
+#include <linux/config.h>
 
 typedef signed char s8;
 typedef unsigned char u8;
@@ -90,11 +91,6 @@ typedef union {
 #ifdef CONFIG_LBD
 typedef u64 sector_t;
 #define HAVE_SECTOR_T
-#endif
-
-#ifdef CONFIG_LSF
-typedef u64 blkcnt_t;
-#define HAVE_BLKCNT_T
 #endif
 
 #endif /* ! __s390x__   */

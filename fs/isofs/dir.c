@@ -10,12 +10,13 @@
  * 
  *  isofs directory handling functions
  */
+#include <linux/config.h>
 #include <linux/smp_lock.h>
 #include "isofs.h"
 
 static int isofs_readdir(struct file *, void *, filldir_t);
 
-const struct file_operations isofs_dir_operations =
+struct file_operations isofs_dir_operations =
 {
 	.read		= generic_read_dir,
 	.readdir	= isofs_readdir,

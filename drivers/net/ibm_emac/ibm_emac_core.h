@@ -20,6 +20,7 @@
 #ifndef __IBM_EMAC_CORE_H_
 #define __IBM_EMAC_CORE_H_
 
+#include <linux/config.h>
 #include <linux/netdevice.h>
 #include <linux/dma-mapping.h>
 #include <asm/ocp.h>
@@ -154,7 +155,7 @@ struct ibm_emac_error_stats {
 
 struct ocp_enet_private {
 	struct net_device		*ndev;		/* 0 */
-	struct emac_regs		__iomem *emacp;
+	struct emac_regs		*emacp;
 	
 	struct mal_descriptor		*tx_desc;
 	int				tx_cnt;

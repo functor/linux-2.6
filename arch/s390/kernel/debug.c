@@ -10,6 +10,7 @@
  *    Bugreports to: <Linux390@de.ibm.com>
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -203,13 +204,16 @@ debug_areas_alloc(int pages_per_area, int nr_areas)
 			goto fail_malloc_areas2;
 		}
 		for(j = 0; j < pages_per_area; j++) {
-			areas[i][j] = kzalloc(PAGE_SIZE, GFP_KERNEL);
+			areas[i][j] = (debug_entry_t*)kmalloc(PAGE_SIZE,
+						GFP_KERNEL);
 			if(!areas[i][j]) {
 				for(j--; j >=0 ; j--) {
 					kfree(areas[i][j]);
 				}
 				kfree(areas[i]);
 				goto fail_malloc_areas2;
+			} else {
+				memset(areas[i][j],0,PAGE_SIZE);
 			}
 		}
 	}
@@ -245,12 +249,14 @@ debug_info_alloc(char *name, int pages_per_area, int nr_areas, int buf_size,
 	rc = (debug_info_t*) kmalloc(sizeof(debug_info_t), GFP_KERNEL);
 	if(!rc)
 		goto fail_malloc_rc;
-	rc->active_entries = kcalloc(nr_areas, sizeof(int), GFP_KERNEL);
+	rc->active_entries = (int*)kmalloc(nr_areas * sizeof(int), GFP_KERNEL);
 	if(!rc->active_entries)
 		goto fail_malloc_active_entries;
-	rc->active_pages = kcalloc(nr_areas, sizeof(int), GFP_KERNEL);
+	memset(rc->active_entries, 0, nr_areas * sizeof(int));
+	rc->active_pages = (int*)kmalloc(nr_areas * sizeof(int), GFP_KERNEL);
 	if(!rc->active_pages)
 		goto fail_malloc_active_pages;
+	memset(rc->active_pages, 0, nr_areas * sizeof(int));
 	if((mode == ALL_AREAS) && (pages_per_area != 0)){
 		rc->areas = debug_areas_alloc(pages_per_area, nr_areas);
 		if(!rc->areas)
@@ -603,7 +609,7 @@ debug_open(struct inode *inode, struct file *file)
 	debug_info_t *debug_info, *debug_info_snapshot;
 
 	down(&debug_lock);
-	debug_info = file->f_dentry->d_inode->i_private;
+	debug_info = (struct debug_info*)file->f_dentry->d_inode->u.generic_ip;
 	/* find debug view */
 	for (i = 0; i < DEBUG_MAX_VIEWS; i++) {
 		if (!debug_info->views[i])

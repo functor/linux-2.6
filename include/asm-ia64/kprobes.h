@@ -82,7 +82,6 @@ struct kprobe_ctlblk {
 #define JPROBE_ENTRY(pentry)	(kprobe_opcode_t *)pentry
 
 #define ARCH_SUPPORTS_KRETPROBES
-#define  ARCH_INACTIVE_KPROBE_COUNT 1
 
 #define SLOT0_OPCODE_SHIFT	(37)
 #define SLOT1_p1_OPCODE_SHIFT	(37 - (64-46))
@@ -125,6 +124,5 @@ static inline void jprobe_return(void)
 }
 extern void invalidate_stacked_regs(void);
 extern void flush_register_stack(void);
-extern void flush_insn_slot(struct kprobe *p);
 
 #endif				/* _ASM_KPROBES_H */

@@ -18,6 +18,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
@@ -35,7 +36,6 @@
 #include <asm/hardware/arm_timer.h>
 #include <asm/hardware/icst307.h>
 #include <asm/hardware/vic.h>
-#include <asm/mach-types.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
@@ -69,8 +69,7 @@ static void sic_unmask_irq(unsigned int irq)
 	writel(1 << irq, VA_SIC_BASE + SIC_IRQ_ENABLE_SET);
 }
 
-static struct irq_chip sic_chip = {
-	.name	= "SIC",
+static struct irqchip sic_chip = {
 	.ack	= sic_mask_irq,
 	.mask	= sic_mask_irq,
 	.unmask	= sic_unmask_irq,
@@ -113,9 +112,10 @@ void __init versatile_init_irq(void)
 {
 	unsigned int i;
 
-	vic_init(VA_VIC_BASE, IRQ_VIC_START, ~0);
+	vic_init(VA_VIC_BASE, ~(1 << 31));
 
-	set_irq_chained_handler(IRQ_VICSOURCE31, sic_handle_irq);
+	set_irq_handler(IRQ_VICSOURCE31, sic_handle_irq);
+	enable_irq(IRQ_VICSOURCE31);
 
 	/* Do second interrupt controller */
 	writel(~0, VA_SIC_BASE + SIC_IRQ_ENABLE_CLEAR);
@@ -285,7 +285,7 @@ static struct flash_platform_data versatile_flash_data = {
 
 static struct resource versatile_flash_resource = {
 	.start			= VERSATILE_FLASH_BASE,
-	.end			= VERSATILE_FLASH_BASE + VERSATILE_FLASH_SIZE - 1,
+	.end			= VERSATILE_FLASH_BASE + VERSATILE_FLASH_SIZE,
 	.flags			= IORESOURCE_MEM,
 };
 
@@ -354,7 +354,11 @@ static const struct icst307_params versatile_oscvco_params = {
 static void versatile_oscvco_set(struct clk *clk, struct icst307_vco vco)
 {
 	void __iomem *sys_lock = __io_address(VERSATILE_SYS_BASE) + VERSATILE_SYS_LOCK_OFFSET;
-	void __iomem *sys_osc = __io_address(VERSATILE_SYS_BASE) + VERSATILE_SYS_OSCCLCD_OFFSET;
+#if defined(CONFIG_ARCH_VERSATILE_PB)
+	void __iomem *sys_osc = __io_address(VERSATILE_SYS_BASE) + VERSATILE_SYS_OSC4_OFFSET;
+#elif defined(CONFIG_MACH_VERSATILE_AB)
+	void __iomem *sys_osc = __io_address(VERSATILE_SYS_BASE) + VERSATILE_SYS_OSC1_OFFSET;
+#endif
 	u32 val;
 
 	val = readl(sys_osc) & ~0x7ffff;
@@ -527,7 +531,7 @@ static void versatile_clcd_disable(struct clcd_fb *fb)
 	/*
 	 * If the LCD is Sanyo 2x5 in on the IB2 board, turn the back-light off
 	 */
-	if (machine_is_versatile_ab() && fb->panel == &sanyo_2_5_in) {
+	if (fb->panel == &sanyo_2_5_in) {
 		void __iomem *versatile_ib2_ctrl = __io_address(VERSATILE_IB2_CTRL);
 		unsigned long ctrl;
 
@@ -576,7 +580,7 @@ static void versatile_clcd_enable(struct clcd_fb *fb)
 	/*
 	 * If the LCD is Sanyo 2x5 in on the IB2 board, turn the back-light on
 	 */
-	if (machine_is_versatile_ab() && fb->panel == &sanyo_2_5_in) {
+	if (fb->panel == &sanyo_2_5_in) {
 		void __iomem *versatile_ib2_ctrl = __io_address(VERSATILE_IB2_CTRL);
 		unsigned long ctrl;
 
@@ -867,7 +871,7 @@ static irqreturn_t versatile_timer_interrupt(int irq, void *dev_id, struct pt_re
 
 static struct irqaction versatile_timer_irq = {
 	.name		= "Versatile Timer Tick",
-	.flags		= IRQF_DISABLED | IRQF_TIMER,
+	.flags		= SA_INTERRUPT | SA_TIMER,
 	.handler	= versatile_timer_interrupt,
 };
 

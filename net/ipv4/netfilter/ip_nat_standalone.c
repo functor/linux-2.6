@@ -18,6 +18,7 @@
  * 	- now capable of multiple expectations for one master
  * */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/icmp.h>
 #include <linux/ip.h>
@@ -110,17 +111,12 @@ ip_nat_fn(unsigned int hooknum,
 	IP_NF_ASSERT(!((*pskb)->nh.iph->frag_off
 		       & htons(IP_MF|IP_OFFSET)));
 
-	ct = ip_conntrack_get(*pskb, &ctinfo);
-
-	/* Don't try to NAT if this packet is not conntracked */
-	if (ct == &ip_conntrack_untracked)
-		return NF_ACCEPT;
-
 	/* If we had a hardware checksum before, it's now invalid */
 	if ((*pskb)->ip_summed == CHECKSUM_HW)
 		if (skb_checksum_help(*pskb, (out == NULL)))
 			return NF_DROP;
 
+	ct = ip_conntrack_get(*pskb, &ctinfo);
 	/* Can't track?  It's not due to stress, or conntrack would
 	   have dropped it.  Hence it's the user's responsibilty to
 	   packet filter it out, or implement conntrack/NAT for that
@@ -141,6 +137,10 @@ ip_nat_fn(unsigned int hooknum,
 		}
 		return NF_ACCEPT;
 	}
+
+	/* Don't try to NAT if this packet is not conntracked */
+	if (ct == &ip_conntrack_untracked)
+		return NF_ACCEPT;
 
 	switch (ctinfo) {
 	case IP_CT_RELATED:
@@ -219,10 +219,8 @@ ip_nat_out(unsigned int hooknum,
 	   const struct net_device *out,
 	   int (*okfn)(struct sk_buff *))
 {
-#ifdef CONFIG_XFRM
 	struct ip_conntrack *ct;
 	enum ip_conntrack_info ctinfo;
-#endif
 	unsigned int ret;
 
 	/* root is playing with raw sockets. */
@@ -275,8 +273,7 @@ ip_nat_local_fn(unsigned int hooknum,
 		       ct->tuplehash[!dir].tuple.src.u.all
 #endif
 		    )
-			if (ip_route_me_harder(pskb, RTN_UNSPEC))
-				ret = NF_DROP;
+			return ip_route_me_harder(pskb) == 0 ? ret : NF_DROP;
 	}
 	return ret;
 }
@@ -302,62 +299,68 @@ ip_nat_adjust(unsigned int hooknum,
 
 /* We must be after connection tracking and before packet filtering. */
 
-static struct nf_hook_ops ip_nat_ops[] = {
-	/* Before packet filtering, change destination */
-	{
-		.hook		= ip_nat_in,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_PRE_ROUTING,
-		.priority	= NF_IP_PRI_NAT_DST,
-	},
-	/* After packet filtering, change source */
-	{
-		.hook		= ip_nat_out,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_POST_ROUTING,
-		.priority	= NF_IP_PRI_NAT_SRC,
-	},
-	/* After conntrack, adjust sequence number */
-	{
-		.hook		= ip_nat_adjust,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_POST_ROUTING,
-		.priority	= NF_IP_PRI_NAT_SEQ_ADJUST,
-	},
-	/* Before packet filtering, change destination */
-	{
-		.hook		= ip_nat_local_fn,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_LOCAL_OUT,
-		.priority	= NF_IP_PRI_NAT_DST,
-	},
-	/* After packet filtering, change source */
-	{
-		.hook		= ip_nat_fn,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_LOCAL_IN,
-		.priority	= NF_IP_PRI_NAT_SRC,
-	},
-	/* After conntrack, adjust sequence number */
-	{
-		.hook		= ip_nat_adjust,
-		.owner		= THIS_MODULE,
-		.pf		= PF_INET,
-		.hooknum	= NF_IP_LOCAL_IN,
-		.priority	= NF_IP_PRI_NAT_SEQ_ADJUST,
-	},
+/* Before packet filtering, change destination */
+static struct nf_hook_ops ip_nat_in_ops = {
+	.hook		= ip_nat_in,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_PRE_ROUTING,
+	.priority	= NF_IP_PRI_NAT_DST,
 };
 
-static int __init ip_nat_standalone_init(void)
+/* After packet filtering, change source */
+static struct nf_hook_ops ip_nat_out_ops = {
+	.hook		= ip_nat_out,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_POST_ROUTING,
+	.priority	= NF_IP_PRI_NAT_SRC,
+};
+
+/* After conntrack, adjust sequence number */
+static struct nf_hook_ops ip_nat_adjust_out_ops = {
+	.hook		= ip_nat_adjust,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_POST_ROUTING,
+	.priority	= NF_IP_PRI_NAT_SEQ_ADJUST,
+};
+
+/* Before packet filtering, change destination */
+static struct nf_hook_ops ip_nat_local_out_ops = {
+	.hook		= ip_nat_local_fn,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_LOCAL_OUT,
+	.priority	= NF_IP_PRI_NAT_DST,
+};
+
+/* After packet filtering, change source for reply packets of LOCAL_OUT DNAT */
+static struct nf_hook_ops ip_nat_local_in_ops = {
+	.hook		= ip_nat_fn,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_LOCAL_IN,
+	.priority	= NF_IP_PRI_NAT_SRC,
+};
+
+/* After conntrack, adjust sequence number */
+static struct nf_hook_ops ip_nat_adjust_in_ops = {
+	.hook		= ip_nat_adjust,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_IP_LOCAL_IN,
+	.priority	= NF_IP_PRI_NAT_SEQ_ADJUST,
+};
+
+
+static int init_or_cleanup(int init)
 {
 	int ret = 0;
 
 	need_conntrack();
+
+	if (!init) goto cleanup;
 
 #ifdef CONFIG_XFRM
 	BUG_ON(ip_nat_decode_session != NULL);
@@ -368,13 +371,50 @@ static int __init ip_nat_standalone_init(void)
 		printk("ip_nat_init: can't setup rules.\n");
 		goto cleanup_decode_session;
 	}
-	ret = nf_register_hooks(ip_nat_ops, ARRAY_SIZE(ip_nat_ops));
+	ret = nf_register_hook(&ip_nat_in_ops);
 	if (ret < 0) {
-		printk("ip_nat_init: can't register hooks.\n");
+		printk("ip_nat_init: can't register in hook.\n");
 		goto cleanup_rule_init;
+	}
+	ret = nf_register_hook(&ip_nat_out_ops);
+	if (ret < 0) {
+		printk("ip_nat_init: can't register out hook.\n");
+		goto cleanup_inops;
+	}
+	ret = nf_register_hook(&ip_nat_adjust_in_ops);
+	if (ret < 0) {
+		printk("ip_nat_init: can't register adjust in hook.\n");
+		goto cleanup_outops;
+	}
+	ret = nf_register_hook(&ip_nat_adjust_out_ops);
+	if (ret < 0) {
+		printk("ip_nat_init: can't register adjust out hook.\n");
+		goto cleanup_adjustin_ops;
+	}
+	ret = nf_register_hook(&ip_nat_local_out_ops);
+	if (ret < 0) {
+		printk("ip_nat_init: can't register local out hook.\n");
+		goto cleanup_adjustout_ops;;
+	}
+	ret = nf_register_hook(&ip_nat_local_in_ops);
+	if (ret < 0) {
+		printk("ip_nat_init: can't register local in hook.\n");
+		goto cleanup_localoutops;
 	}
 	return ret;
 
+ cleanup:
+	nf_unregister_hook(&ip_nat_local_in_ops);
+ cleanup_localoutops:
+	nf_unregister_hook(&ip_nat_local_out_ops);
+ cleanup_adjustout_ops:
+	nf_unregister_hook(&ip_nat_adjust_out_ops);
+ cleanup_adjustin_ops:
+	nf_unregister_hook(&ip_nat_adjust_in_ops);
+ cleanup_outops:
+	nf_unregister_hook(&ip_nat_out_ops);
+ cleanup_inops:
+	nf_unregister_hook(&ip_nat_in_ops);
  cleanup_rule_init:
 	ip_nat_rule_cleanup();
  cleanup_decode_session:
@@ -385,17 +425,17 @@ static int __init ip_nat_standalone_init(void)
 	return ret;
 }
 
-static void __exit ip_nat_standalone_fini(void)
+static int __init init(void)
 {
-	nf_unregister_hooks(ip_nat_ops, ARRAY_SIZE(ip_nat_ops));
-	ip_nat_rule_cleanup();
-#ifdef CONFIG_XFRM
-	ip_nat_decode_session = NULL;
-	synchronize_net();
-#endif
+	return init_or_cleanup(1);
 }
 
-module_init(ip_nat_standalone_init);
-module_exit(ip_nat_standalone_fini);
+static void __exit fini(void)
+{
+	init_or_cleanup(0);
+}
+
+module_init(init);
+module_exit(fini);
 
 MODULE_LICENSE("GPL");

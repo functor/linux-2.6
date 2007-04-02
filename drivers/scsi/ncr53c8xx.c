@@ -69,10 +69,6 @@
 **     Low PCI traffic for command handling when on-chip RAM is present.
 **     Aggressive SCSI SCRIPTS optimizations.
 **
-**  2005 by Matthew Wilcox and James Bottomley
-**     PCI-ectomy.  This driver now supports only the 720 chip (see the
-**     NCR_Q720 and zalon drivers for the bus probe logic).
-**
 *******************************************************************************
 */
 
@@ -93,6 +89,13 @@
 #define SCSI_NCR_DRIVER_NAME	"ncr53c8xx-3.4.3g"
 
 #define SCSI_NCR_DEBUG_FLAGS	(0)
+
+/*==========================================================
+**
+**      Include files
+**
+**==========================================================
+*/
 
 #include <linux/blkdev.h>
 #include <linux/delay.h>
@@ -118,7 +121,6 @@
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
-#include <scsi/scsi_dbg.h>
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_tcq.h>
 #include <scsi/scsi_transport.h>
@@ -126,7 +128,9 @@
 
 #include "ncr53c8xx.h"
 
+#define NAME53C			"ncr53c"
 #define NAME53C8XX		"ncr53c8xx"
+
 
 /*==========================================================
 **
@@ -529,7 +533,7 @@ static void __unmap_scsi_data(struct device *dev, struct scsi_cmnd *cmd)
 {
 	switch(cmd->__data_mapped) {
 	case 2:
-		dma_unmap_sg(dev, cmd->request_buffer, cmd->use_sg,
+		dma_unmap_sg(dev, cmd->buffer, cmd->use_sg,
 				cmd->sc_data_direction);
 		break;
 	case 1:
@@ -564,7 +568,7 @@ static int __map_scsi_sg_data(struct device *dev, struct scsi_cmnd *cmd)
 	if (cmd->use_sg == 0)
 		return 0;
 
-	use_sg = dma_map_sg(dev, cmd->request_buffer, cmd->use_sg,
+	use_sg = dma_map_sg(dev, cmd->buffer, cmd->use_sg,
 			cmd->sc_data_direction);
 	cmd->__data_mapped = 2;
 	cmd->__data_mapping = use_sg;
@@ -2107,7 +2111,7 @@ static	struct script script0 __initdata = {
 	*/
 
 	/*
-	**	The MESSAGE_REJECT problem seems to be due to a selection 
+	**	The M_REJECT problem seems to be due to a selection 
 	**	timing problem.
 	**	Wait immediately for the selection to complete. 
 	**	(2.5x behaves so)
@@ -2158,7 +2162,7 @@ static	struct script script0 __initdata = {
 	/*
 	**	Selection complete.
 	**	Send the IDENTIFY and SIMPLE_TAG messages
-	**	(and the EXTENDED_SDTR message)
+	**	(and the M_X_SYNC_REQ message)
 	*/
 	SCR_MOVE_TBL ^ SCR_MSG_OUT,
 		offsetof (struct dsb, smsg),
@@ -2187,7 +2191,7 @@ static	struct script script0 __initdata = {
 	/*
 	**	Initialize the msgout buffer with a NOOP message.
 	*/
-	SCR_LOAD_REG (scratcha, NOP),
+	SCR_LOAD_REG (scratcha, M_NOOP),
 		0,
 	SCR_COPY (1),
 		RADDR (scratcha),
@@ -2339,21 +2343,21 @@ static	struct script script0 __initdata = {
 	/*
 	**	Handle this message.
 	*/
-	SCR_JUMP ^ IFTRUE (DATA (COMMAND_COMPLETE)),
+	SCR_JUMP ^ IFTRUE (DATA (M_COMPLETE)),
 		PADDR (complete),
-	SCR_JUMP ^ IFTRUE (DATA (DISCONNECT)),
+	SCR_JUMP ^ IFTRUE (DATA (M_DISCONNECT)),
 		PADDR (disconnect),
-	SCR_JUMP ^ IFTRUE (DATA (SAVE_POINTERS)),
+	SCR_JUMP ^ IFTRUE (DATA (M_SAVE_DP)),
 		PADDR (save_dp),
-	SCR_JUMP ^ IFTRUE (DATA (RESTORE_POINTERS)),
+	SCR_JUMP ^ IFTRUE (DATA (M_RESTORE_DP)),
 		PADDR (restore_dp),
-	SCR_JUMP ^ IFTRUE (DATA (EXTENDED_MESSAGE)),
+	SCR_JUMP ^ IFTRUE (DATA (M_EXTENDED)),
 		PADDRH (msg_extended),
-	SCR_JUMP ^ IFTRUE (DATA (NOP)),
+	SCR_JUMP ^ IFTRUE (DATA (M_NOOP)),
 		PADDR (clrack),
-	SCR_JUMP ^ IFTRUE (DATA (MESSAGE_REJECT)),
+	SCR_JUMP ^ IFTRUE (DATA (M_REJECT)),
 		PADDRH (msg_reject),
-	SCR_JUMP ^ IFTRUE (DATA (IGNORE_WIDE_RESIDUE)),
+	SCR_JUMP ^ IFTRUE (DATA (M_IGN_RESIDUE)),
 		PADDRH (msg_ign_residue),
 	/*
 	**	Rest of the messages left as
@@ -2368,7 +2372,7 @@ static	struct script script0 __initdata = {
 	*/
 	SCR_INT,
 		SIR_REJECT_SENT,
-	SCR_LOAD_REG (scratcha, MESSAGE_REJECT),
+	SCR_LOAD_REG (scratcha, M_REJECT),
 		0,
 }/*-------------------------< SETMSG >----------------------*/,{
 	SCR_COPY (1),
@@ -2560,7 +2564,7 @@ static	struct script script0 __initdata = {
 	/*
 	**	If it was no ABORT message ...
 	*/
-	SCR_JUMP ^ IFTRUE (DATA (ABORT_TASK_SET)),
+	SCR_JUMP ^ IFTRUE (DATA (M_ABORT)),
 		PADDRH (msg_out_abort),
 	/*
 	**	... wait for the next phase
@@ -2572,7 +2576,7 @@ static	struct script script0 __initdata = {
 	/*
 	**	... else clear the message ...
 	*/
-	SCR_LOAD_REG (scratcha, NOP),
+	SCR_LOAD_REG (scratcha, M_NOOP),
 		0,
 	SCR_COPY (4),
 		RADDR (scratcha),
@@ -3031,7 +3035,7 @@ static	struct scripth scripth0 __initdata = {
 	*/
 	SCR_MOVE_ABS (1) ^ SCR_MSG_IN,
 		NADDR (msgin[2]),
-	SCR_JUMP ^ IFTRUE (DATA (EXTENDED_WDTR)),
+	SCR_JUMP ^ IFTRUE (DATA (M_X_WIDE_REQ)),
 		PADDRH (msg_wdtr),
 	/*
 	**	unknown extended message
@@ -3065,7 +3069,7 @@ static	struct scripth scripth0 __initdata = {
 
 }/*-------------------------< SEND_WDTR >----------------*/,{
 	/*
-	**	Send the EXTENDED_WDTR
+	**	Send the M_X_WIDE_REQ
 	*/
 	SCR_MOVE_ABS (4) ^ SCR_MSG_OUT,
 		NADDR (msgout),
@@ -3085,7 +3089,7 @@ static	struct scripth scripth0 __initdata = {
 	*/
 	SCR_MOVE_ABS (1) ^ SCR_MSG_IN,
 		NADDR (msgin[2]),
-	SCR_JUMP ^ IFTRUE (DATA (EXTENDED_SDTR)),
+	SCR_JUMP ^ IFTRUE (DATA (M_X_SYNC_REQ)),
 		PADDRH (msg_sdtr),
 	/*
 	**	unknown extended message
@@ -3120,7 +3124,7 @@ static	struct scripth scripth0 __initdata = {
 
 }/*-------------------------< SEND_SDTR >-------------*/,{
 	/*
-	**	Send the EXTENDED_SDTR
+	**	Send the M_X_SYNC_REQ
 	*/
 	SCR_MOVE_ABS (5) ^ SCR_MSG_OUT,
 		NADDR (msgout),
@@ -3198,10 +3202,10 @@ static	struct scripth scripth0 __initdata = {
 
 }/*-------------------------< RESET >----------------------*/,{
 	/*
-	**      Send a TARGET_RESET message if bad IDENTIFY 
+	**      Send a M_RESET message if bad IDENTIFY 
 	**	received on reselection.
 	*/
-	SCR_LOAD_REG (scratcha, ABORT_TASK),
+	SCR_LOAD_REG (scratcha, M_ABORT_TAG),
 		0,
 	SCR_JUMP,
 		PADDRH (abort_resel),
@@ -3209,7 +3213,7 @@ static	struct scripth scripth0 __initdata = {
 	/*
 	**      Abort a wrong tag received on reselection.
 	*/
-	SCR_LOAD_REG (scratcha, ABORT_TASK),
+	SCR_LOAD_REG (scratcha, M_ABORT_TAG),
 		0,
 	SCR_JUMP,
 		PADDRH (abort_resel),
@@ -3217,7 +3221,7 @@ static	struct scripth scripth0 __initdata = {
 	/*
 	**      Abort a reselection when no active CCB.
 	*/
-	SCR_LOAD_REG (scratcha, ABORT_TASK_SET),
+	SCR_LOAD_REG (scratcha, M_ABORT),
 		0,
 }/*-------------------------< ABORT_RESEL >----------------*/,{
 	SCR_COPY (1),
@@ -3329,7 +3333,7 @@ static	struct scripth scripth0 __initdata = {
 	**	Read the message, since we got it directly 
 	**	from the SCSI BUS data lines.
 	**	Signal problem to C code for logging the event.
-	**	Send an ABORT_TASK_SET to clear all pending tasks.
+	**	Send a M_ABORT to clear all pending tasks.
 	*/
 	SCR_INT,
 		SIR_RESEL_BAD_LUN,
@@ -3341,7 +3345,7 @@ static	struct scripth scripth0 __initdata = {
 	/*
 	**	We donnot have a task for that I_T_L.
 	**	Signal problem to C code for logging the event.
-	**	Send an ABORT_TASK_SET message.
+	**	Send a M_ABORT message.
 	*/
 	SCR_INT,
 		SIR_RESEL_BAD_I_T_L,
@@ -3351,7 +3355,7 @@ static	struct scripth scripth0 __initdata = {
 	/*
 	**	We donnot have a task that matches the tag.
 	**	Signal problem to C code for logging the event.
-	**	Send an ABORT_TASK message.
+	**	Send a M_ABORTTAG message.
 	*/
 	SCR_INT,
 		SIR_RESEL_BAD_I_T_L_Q,
@@ -3362,7 +3366,7 @@ static	struct scripth scripth0 __initdata = {
 	**	We donnot know the target that reselected us.
 	**	Grab the first message if any (IDENTIFY).
 	**	Signal problem to C code for logging the event.
-	**	TARGET_RESET message.
+	**	M_RESET message.
 	*/
 	SCR_INT,
 		SIR_RESEL_BAD_TARGET,
@@ -4105,11 +4109,17 @@ static int ncr_prepare_nego(struct ncb *np, struct ccb *cp, u_char *msgptr)
 
 	switch (nego) {
 	case NS_SYNC:
-		msglen += spi_populate_sync_msg(msgptr + msglen,
-				tp->maxoffs ? tp->minsync : 0, tp->maxoffs);
+		msgptr[msglen++] = M_EXTENDED;
+		msgptr[msglen++] = 3;
+		msgptr[msglen++] = M_X_SYNC_REQ;
+		msgptr[msglen++] = tp->maxoffs ? tp->minsync : 0;
+		msgptr[msglen++] = tp->maxoffs;
 		break;
 	case NS_WIDE:
-		msglen += spi_populate_width_msg(msgptr + msglen, tp->usrwide);
+		msgptr[msglen++] = M_EXTENDED;
+		msgptr[msglen++] = 2;
+		msgptr[msglen++] = M_X_WIDE_REQ;
+		msgptr[msglen++] = tp->usrwide;
 		break;
 	}
 
@@ -4210,7 +4220,7 @@ static int ncr_queue_command (struct ncb *np, struct scsi_cmnd *cmd)
 	**----------------------------------------------------
 	*/
 
-	idmsg = IDENTIFY(0, sdev->lun);
+	idmsg = M_IDENTIFY | sdev->lun;
 
 	if (cp ->tag != NO_TAG ||
 		(cp != np->ccb && np->disc && !(tp->usrflag & UF_NODISC)))
@@ -4229,7 +4239,7 @@ static int ncr_queue_command (struct ncb *np, struct scsi_cmnd *cmd)
 		*/
 		if (lp && time_after(jiffies, lp->tags_stime)) {
 			if (lp->tags_smap) {
-				order = ORDERED_QUEUE_TAG;
+				order = M_ORDERED_TAG;
 				if ((DEBUG_FLAGS & DEBUG_TAGS)||bootverbose>2){ 
 					PRINT_ADDR(cmd,
 						"ordered tag forced.\n");
@@ -4247,10 +4257,10 @@ static int ncr_queue_command (struct ncb *np, struct scsi_cmnd *cmd)
 			case 0x08:  /* READ_SMALL (6) */
 			case 0x28:  /* READ_BIG  (10) */
 			case 0xa8:  /* READ_HUGE (12) */
-				order = SIMPLE_QUEUE_TAG;
+				order = M_SIMPLE_TAG;
 				break;
 			default:
-				order = ORDERED_QUEUE_TAG;
+				order = M_ORDERED_TAG;
 			}
 		}
 		msgptr[msglen++] = order;
@@ -5118,7 +5128,8 @@ static void ncr_ccb_skipped(struct ncb *np, struct ccb *cp)
 		cp->host_status &= ~HS_SKIPMASK;
 		cp->start.schedule.l_paddr = 
 			cpu_to_scr(NCB_SCRIPT_PHYS (np, select));
-		list_move_tail(&cp->link_ccbq, &lp->skip_ccbq);
+		list_del(&cp->link_ccbq);
+		list_add_tail(&cp->link_ccbq, &lp->skip_ccbq);
 		if (cp->queued) {
 			--lp->queuedccbs;
 		}
@@ -6218,9 +6229,9 @@ static int ncr_int_par (struct ncb *np)
 	if (!(dbc & 0xc0000000))
 		phase = (dbc >> 24) & 7;
 	if (phase == 7)
-		msg = MSG_PARITY_ERROR;
+		msg = M_PARITY;
 	else
-		msg = INITIATOR_ERROR;
+		msg = M_ID_ERROR;
 
 
 	/*
@@ -6784,8 +6795,6 @@ void ncr_int_sir (struct ncb *np)
 /*-----------------------------------------------------------------------------
 **
 **	Was Sie schon immer ueber transfermode negotiation wissen wollten ...
-**	("Everything you've always wanted to know about transfer mode
-**	  negotiation")
 **
 **	We try to negotiate sync and wide transfer only after
 **	a successful inquire command. We look at byte 7 of the
@@ -6887,8 +6896,8 @@ void ncr_int_sir (struct ncb *np)
 			break;
 
 		}
-		np->msgin [0] = NOP;
-		np->msgout[0] = NOP;
+		np->msgin [0] = M_NOOP;
+		np->msgout[0] = M_NOOP;
 		cp->nego_status = 0;
 		break;
 
@@ -6982,7 +6991,12 @@ void ncr_int_sir (struct ncb *np)
 		spi_offset(starget) = ofs;
 		ncr_setsync(np, cp, scntl3, (fak<<5)|ofs);
 
-		spi_populate_sync_msg(np->msgout, per, ofs);
+		np->msgout[0] = M_EXTENDED;
+		np->msgout[1] = 3;
+		np->msgout[2] = M_X_SYNC_REQ;
+		np->msgout[3] = per;
+		np->msgout[4] = ofs;
+
 		cp->nego_status = NS_SYNC;
 
 		if (DEBUG_FLAGS & DEBUG_NEGO) {
@@ -6993,7 +7007,7 @@ void ncr_int_sir (struct ncb *np)
 			OUTL_DSP (NCB_SCRIPT_PHYS (np, msg_bad));
 			return;
 		}
-		np->msgin [0] = NOP;
+		np->msgin [0] = M_NOOP;
 
 		break;
 
@@ -7068,9 +7082,13 @@ void ncr_int_sir (struct ncb *np)
 
 		spi_width(starget) = wide;
 		ncr_setwide(np, cp, wide, 1);
-		spi_populate_width_msg(np->msgout, wide);
 
-		np->msgin [0] = NOP;
+		np->msgout[0] = M_EXTENDED;
+		np->msgout[1] = 2;
+		np->msgout[2] = M_X_WIDE_REQ;
+		np->msgout[3] = wide;
+
+		np->msgin [0] = M_NOOP;
 
 		cp->nego_status = NS_WIDE;
 
@@ -7089,12 +7107,12 @@ void ncr_int_sir (struct ncb *np)
 	case SIR_REJECT_RECEIVED:
 		/*-----------------------------------------------
 		**
-		**	We received a MESSAGE_REJECT.
+		**	We received a M_REJECT message.
 		**
 		**-----------------------------------------------
 		*/
 
-		PRINT_ADDR(cp->cmd, "MESSAGE_REJECT received (%x:%x).\n",
+		PRINT_ADDR(cp->cmd, "M_REJECT received (%x:%x).\n",
 			(unsigned)scr_to_cpu(np->lastmsg), np->msgout[0]);
 		break;
 
@@ -7106,7 +7124,7 @@ void ncr_int_sir (struct ncb *np)
 		**-----------------------------------------------
 		*/
 
-		ncr_print_msg(cp, "MESSAGE_REJECT sent for", np->msgin);
+		ncr_print_msg(cp, "M_REJECT sent for", np->msgin);
 		break;
 
 /*--------------------------------------------------------------------
@@ -7125,7 +7143,7 @@ void ncr_int_sir (struct ncb *np)
 		**-----------------------------------------------
 		*/
 
-		PRINT_ADDR(cp->cmd, "IGNORE_WIDE_RESIDUE received, but not yet "
+		PRINT_ADDR(cp->cmd, "M_IGN_RESIDUE received, but not yet "
 				"implemented.\n");
 		break;
 #if 0
@@ -7138,7 +7156,7 @@ void ncr_int_sir (struct ncb *np)
 		**-----------------------------------------------
 		*/
 
-		PRINT_ADDR(cp->cmd, "DISCONNECT received, but datapointer "
+		PRINT_ADDR(cp->cmd, "M_DISCONNECT received, but datapointer "
 				"not saved: data=%x save=%x goal=%x.\n",
 			(unsigned) INL (nc_temp),
 			(unsigned) scr_to_cpu(np->header.savep),
@@ -7696,7 +7714,7 @@ static int ncr_scatter(struct ncb *np, struct ccb *cp, struct scsi_cmnd *cmd)
 	if (!use_sg)
 		segment = ncr_scatter_no_sglist(np, cp, cmd);
 	else if ((use_sg = map_scsi_sg_data(np, cmd)) > 0) {
-		struct scatterlist *scatter = (struct scatterlist *)cmd->request_buffer;
+		struct scatterlist *scatter = (struct scatterlist *)cmd->buffer;
 		struct scr_tblmove *data;
 
 		if (use_sg > MAX_SCATTER) {
@@ -7844,7 +7862,7 @@ static int __init ncr_snooptest (struct ncb* np)
 **==========================================================
 **
 **	Note: we have to return the correct value.
-**	THERE IS NO SAFE DEFAULT VALUE.
+**	THERE IS NO SAVE DEFAULT VALUE.
 **
 **	Most NCR/SYMBIOS boards are delivered with a 40 Mhz clock.
 **	53C860 and 53C875 rev. 1 support fast20 transfers but 
@@ -8544,7 +8562,7 @@ struct Scsi_Host * __init ncr_attach(struct scsi_host_template *tpnt,
 
 	/* use SIMPLE TAG messages by default */
 #ifdef SCSI_NCR_ALWAYS_SIMPLE_TAG
-	np->order = SIMPLE_QUEUE_TAG;
+	np->order = M_SIMPLE_TAG;
 #endif
 
 	spin_unlock_irqrestore(&np->smp_lock, flags);

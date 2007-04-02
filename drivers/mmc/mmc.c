@@ -9,6 +9,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -25,6 +26,12 @@
 #include <linux/mmc/protocol.h>
 
 #include "mmc.h"
+
+#ifdef CONFIG_MMC_DEBUG
+#define DBG(x...)	printk(KERN_DEBUG x)
+#else
+#define DBG(x...)	do { } while (0)
+#endif
 
 #define CMD_RETRIES	3
 
@@ -58,23 +65,20 @@ static const unsigned int tacc_mant[] = {
 
 
 /**
- *	mmc_request_done - finish processing an MMC request
- *	@host: MMC host which completed request
- *	@mrq: MMC request which request
+ *	mmc_request_done - finish processing an MMC command
+ *	@host: MMC host which completed command
+ *	@mrq: MMC request which completed
  *
  *	MMC drivers should call this function when they have completed
- *	their processing of a request.
+ *	their processing of a command.  This should be called before the
+ *	data part of the command has completed.
  */
 void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 {
 	struct mmc_command *cmd = mrq->cmd;
-	int err = cmd->error;
-
-	pr_debug("%s: req done (CMD%u): %d/%d/%d: %08x %08x %08x %08x\n",
-		 mmc_hostname(host), cmd->opcode, err,
-		 mrq->data ? mrq->data->error : 0,
-		 mrq->stop ? mrq->stop->error : 0,
-		 cmd->resp[0], cmd->resp[1], cmd->resp[2], cmd->resp[3]);
+	int err = mrq->cmd->error;
+	DBG("MMC: req done (%02x): %d: %08x %08x %08x %08x\n", cmd->opcode,
+	    err, cmd->resp[0], cmd->resp[1], cmd->resp[2], cmd->resp[3]);
 
 	if (err && cmd->retries) {
 		cmd->retries--;
@@ -98,9 +102,8 @@ EXPORT_SYMBOL(mmc_request_done);
 void
 mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 {
-	pr_debug("%s: starting CMD%u arg %08x flags %08x\n",
-		 mmc_hostname(host), mrq->cmd->opcode,
-		 mrq->cmd->arg, mrq->cmd->flags);
+	DBG("MMC: starting cmd %02x arg %08x flags %08x\n",
+	    mrq->cmd->opcode, mrq->cmd->arg, mrq->cmd->flags);
 
 	WARN_ON(host->card_busy == NULL);
 
@@ -128,7 +131,7 @@ static void mmc_wait_done(struct mmc_request *mrq)
 
 int mmc_wait_for_req(struct mmc_host *host, struct mmc_request *mrq)
 {
-	DECLARE_COMPLETION_ONSTACK(complete);
+	DECLARE_COMPLETION(complete);
 
 	mrq->done_data = &complete;
 	mrq->done = mmc_wait_done;
@@ -247,55 +250,6 @@ int mmc_wait_for_app_cmd(struct mmc_host *host, unsigned int rca,
 
 EXPORT_SYMBOL(mmc_wait_for_app_cmd);
 
-/**
- *	mmc_set_data_timeout - set the timeout for a data command
- *	@data: data phase for command
- *	@card: the MMC card associated with the data transfer
- *	@write: flag to differentiate reads from writes
- */
-void mmc_set_data_timeout(struct mmc_data *data, const struct mmc_card *card,
-			  int write)
-{
-	unsigned int mult;
-
-	/*
-	 * SD cards use a 100 multiplier rather than 10
-	 */
-	mult = mmc_card_sd(card) ? 100 : 10;
-
-	/*
-	 * Scale up the multiplier (and therefore the timeout) by
-	 * the r2w factor for writes.
-	 */
-	if (write)
-		mult <<= card->csd.r2w_factor;
-
-	data->timeout_ns = card->csd.tacc_ns * mult;
-	data->timeout_clks = card->csd.tacc_clks * mult;
-
-	/*
-	 * SD cards also have an upper limit on the timeout.
-	 */
-	if (mmc_card_sd(card)) {
-		unsigned int timeout_us, limit_us;
-
-		timeout_us = data->timeout_ns / 1000;
-		timeout_us += data->timeout_clks * 1000 /
-			(card->host->ios.clock / 1000);
-
-		if (write)
-			limit_us = 250000;
-		else
-			limit_us = 100000;
-
-		if (timeout_us > limit_us) {
-			data->timeout_ns = limit_us * 1000;
-			data->timeout_clks = 0;
-		}
-	}
-}
-EXPORT_SYMBOL(mmc_set_data_timeout);
-
 static int mmc_select_card(struct mmc_host *host, struct mmc_card *card);
 
 /**
@@ -363,18 +317,6 @@ void mmc_release_host(struct mmc_host *host)
 
 EXPORT_SYMBOL(mmc_release_host);
 
-static inline void mmc_set_ios(struct mmc_host *host)
-{
-	struct mmc_ios *ios = &host->ios;
-
-	pr_debug("%s: clock %uHz busmode %u powermode %u cs %u Vdd %u width %u\n",
-		 mmc_hostname(host), ios->clock, ios->bus_mode,
-		 ios->power_mode, ios->chip_select, ios->vdd,
-		 ios->bus_width);
-	
-	host->ops->set_ios(host, ios);
-}
-
 static int mmc_select_card(struct mmc_host *host, struct mmc_card *card)
 {
 	int err;
@@ -427,7 +369,7 @@ static int mmc_select_card(struct mmc_host *host, struct mmc_card *card)
 		}
 	}
 
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 
 	return MMC_ERR_NONE;
 }
@@ -478,7 +420,7 @@ static u32 mmc_select_voltage(struct mmc_host *host, u32 ocr)
 		ocr = 3 << bit;
 
 		host->ios.vdd = bit;
-		mmc_set_ios(host);
+		host->ops->set_ios(host, &host->ios);
 	} else {
 		ocr = 0;
 	}
@@ -612,7 +554,6 @@ static void mmc_decode_csd(struct mmc_card *card)
 		csd->read_partial = UNSTUFF_BITS(resp, 79, 1);
 		csd->write_misalign = UNSTUFF_BITS(resp, 78, 1);
 		csd->read_misalign = UNSTUFF_BITS(resp, 77, 1);
-		csd->r2w_factor = UNSTUFF_BITS(resp, 26, 3);
 		csd->write_blkbits = UNSTUFF_BITS(resp, 22, 4);
 		csd->write_partial = UNSTUFF_BITS(resp, 21, 1);
 	} else {
@@ -647,7 +588,6 @@ static void mmc_decode_csd(struct mmc_card *card)
 		csd->read_partial = UNSTUFF_BITS(resp, 79, 1);
 		csd->write_misalign = UNSTUFF_BITS(resp, 78, 1);
 		csd->read_misalign = UNSTUFF_BITS(resp, 77, 1);
-		csd->r2w_factor = UNSTUFF_BITS(resp, 26, 3);
 		csd->write_blkbits = UNSTUFF_BITS(resp, 22, 4);
 		csd->write_partial = UNSTUFF_BITS(resp, 21, 1);
 	}
@@ -731,7 +671,7 @@ static void mmc_idle_cards(struct mmc_host *host)
 	struct mmc_command cmd;
 
 	host->ios.chip_select = MMC_CS_HIGH;
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 
 	mmc_delay(1);
 
@@ -744,7 +684,7 @@ static void mmc_idle_cards(struct mmc_host *host)
 	mmc_delay(1);
 
 	host->ios.chip_select = MMC_CS_DONTCARE;
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 
 	mmc_delay(1);
 }
@@ -769,13 +709,13 @@ static void mmc_power_up(struct mmc_host *host)
 	host->ios.chip_select = MMC_CS_DONTCARE;
 	host->ios.power_mode = MMC_POWER_UP;
 	host->ios.bus_width = MMC_BUS_WIDTH_1;
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 
 	mmc_delay(1);
 
 	host->ios.clock = host->f_min;
 	host->ios.power_mode = MMC_POWER_ON;
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 
 	mmc_delay(2);
 }
@@ -788,7 +728,7 @@ static void mmc_power_off(struct mmc_host *host)
 	host->ios.chip_select = MMC_CS_DONTCARE;
 	host->ios.power_mode = MMC_POWER_OFF;
 	host->ios.bus_width = MMC_BUS_WIDTH_1;
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 }
 
 static int mmc_send_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
@@ -957,9 +897,11 @@ static void mmc_read_scrs(struct mmc_host *host)
 {
 	int err;
 	struct mmc_card *card;
+
 	struct mmc_request mrq;
 	struct mmc_command cmd;
 	struct mmc_data data;
+
 	struct scatterlist sg;
 
 	list_for_each_entry(card, &host->cards, node) {
@@ -994,10 +936,9 @@ static void mmc_read_scrs(struct mmc_host *host)
 
 		memset(&data, 0, sizeof(struct mmc_data));
 
-		mmc_set_data_timeout(&data, card, 0);
-
+		data.timeout_ns = card->csd.tacc_ns * 10;
+		data.timeout_clks = card->csd.tacc_clks * 10;
 		data.blksz_bits = 3;
-		data.blksz = 1 << 3;
 		data.blocks = 1;
 		data.flags = MMC_DATA_READ;
 		data.sg = &sg;
@@ -1035,9 +976,8 @@ static unsigned int mmc_calculate_clock(struct mmc_host *host)
 		if (!mmc_card_dead(card) && max_dtr > card->csd.max_dtr)
 			max_dtr = card->csd.max_dtr;
 
-	pr_debug("%s: selected %d.%03dMHz transfer rate\n",
-		 mmc_hostname(host),
-		 max_dtr / 1000000, (max_dtr / 1000) % 1000);
+	DBG("MMC: selected %d.%03dMHz transfer rate\n",
+	    max_dtr / 1000000, (max_dtr / 1000) % 1000);
 
 	return max_dtr;
 }
@@ -1111,7 +1051,7 @@ static void mmc_setup(struct mmc_host *host)
 	} else {
 		host->ios.bus_mode = MMC_BUSMODE_OPENDRAIN;
 		host->ios.clock = host->f_min;
-		mmc_set_ios(host);
+		host->ops->set_ios(host, &host->ios);
 
 		/*
 		 * We should remember the OCR mask from the existing
@@ -1147,7 +1087,7 @@ static void mmc_setup(struct mmc_host *host)
 	 * Ok, now switch to push-pull mode.
 	 */
 	host->ios.bus_mode = MMC_BUSMODE_PUSHPULL;
-	mmc_set_ios(host);
+	host->ops->set_ios(host, &host->ios);
 
 	mmc_read_csds(host);
 
@@ -1193,7 +1133,7 @@ static void mmc_rescan(void *data)
 		 * attached cards and the host support.
 		 */
 		host->ios.clock = mmc_calculate_clock(host);
-		mmc_set_ios(host);
+		host->ops->set_ios(host, &host->ios);
 	}
 
 	mmc_release_host(host);

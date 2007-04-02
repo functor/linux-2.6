@@ -32,7 +32,6 @@
 #include <linux/interrupt.h>
 #include <asm/io.h>		/* for read? and write? functions */
 #include <linux/delay.h>	/* for delays */
-#include <linux/mutex.h>
 
 #define MY_NAME	"cpqphp"
 
@@ -287,7 +286,7 @@ struct event_info {
 struct controller {
 	struct controller *next;
 	u32 ctrl_int_comp;
-	struct mutex crit_sect;		/* critical section mutex */
+	struct semaphore crit_sect;	/* critical section semaphore */
 	void __iomem *hpc_reg;		/* cookie for our pci controller location */
 	struct pci_resource *mem_head;
 	struct pci_resource *p_mem_head;

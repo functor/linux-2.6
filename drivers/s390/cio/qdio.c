@@ -30,6 +30,7 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 
@@ -37,7 +38,6 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
-#include <linux/mempool.h>
 
 #include <asm/ccwdev.h>
 #include <asm/io.h>
@@ -80,8 +80,6 @@ static int indicator_used[INDICATORS_PER_CACHELINE];
 static __u32 * volatile indicators;
 static __u32 volatile spare_indicator;
 static atomic_t spare_indicator_usecount;
-#define QDIO_MEMPOOL_SCSSC_ELEMENTS 2
-static mempool_t *qdio_mempool_scssc;
 
 static debug_info_t *qdio_dbf_setup;
 static debug_info_t *qdio_dbf_sbal;
@@ -1639,7 +1637,7 @@ next:
 
 	}
 	kfree(irq_ptr->qdr);
-	free_page((unsigned long) irq_ptr);
+	kfree(irq_ptr);
 }
 
 static void
@@ -1688,14 +1686,16 @@ qdio_alloc_qs(struct qdio_irq *irq_ptr,
 	int result=-ENOMEM;
 
 	for (i=0;i<no_input_qs;i++) {
-		q = kzalloc(sizeof(struct qdio_q), GFP_KERNEL);
+		q=kmalloc(sizeof(struct qdio_q),GFP_KERNEL);
 
 		if (!q) {
 			QDIO_PRINT_ERR("kmalloc of q failed!\n");
 			goto out;
 		}
 
-		q->slib = kmalloc(PAGE_SIZE, GFP_KERNEL);
+		memset(q,0,sizeof(struct qdio_q));
+
+		q->slib=kmalloc(PAGE_SIZE,GFP_KERNEL);
 		if (!q->slib) {
 			QDIO_PRINT_ERR("kmalloc of slib failed!\n");
 			goto out;
@@ -1705,11 +1705,13 @@ qdio_alloc_qs(struct qdio_irq *irq_ptr,
 	}
 
 	for (i=0;i<no_output_qs;i++) {
-		q = kzalloc(sizeof(struct qdio_q), GFP_KERNEL);
+		q=kmalloc(sizeof(struct qdio_q),GFP_KERNEL);
 
 		if (!q) {
 			goto out;
 		}
+
+		memset(q,0,sizeof(struct qdio_q));
 
 		q->slib=kmalloc(PAGE_SIZE,GFP_KERNEL);
 		if (!q->slib) {
@@ -2306,7 +2308,7 @@ qdio_get_ssqd_information(struct qdio_irq *irq_ptr)
 
 	QDIO_DBF_TEXT0(0,setup,"getssqd");
 	qdioac = 0;
-	ssqd_area = mempool_alloc(qdio_mempool_scssc, GFP_ATOMIC);
+	ssqd_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!ssqd_area) {
 	        QDIO_PRINT_WARN("Could not get memory for chsc. Using all " \
 				"SIGAs for sch x%x.\n", irq_ptr->schid.sch_no);
@@ -2366,7 +2368,7 @@ qdio_get_ssqd_information(struct qdio_irq *irq_ptr)
 out:
 	qdio_check_subchannel_qebsm(irq_ptr, qdioac,
 				    ssqd_area->sch_token);
-	mempool_free(ssqd_area, qdio_mempool_scssc);
+	free_page ((unsigned long) ssqd_area);
 	irq_ptr->qdioac = qdioac;
 }
 
@@ -2460,7 +2462,7 @@ tiqdio_set_subchannel_ind(struct qdio_irq *irq_ptr, int reset_to_zero)
 			virt_to_phys((volatile void *)irq_ptr->dev_st_chg_ind);
 	}
 
-	scssc_area = mempool_alloc(qdio_mempool_scssc, GFP_ATOMIC);
+	scssc_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!scssc_area) {
 		QDIO_PRINT_WARN("No memory for setting indicators on " \
 				"subchannel 0.%x.%x.\n",
@@ -2516,7 +2518,7 @@ tiqdio_set_subchannel_ind(struct qdio_irq *irq_ptr, int reset_to_zero)
 	QDIO_DBF_HEX2(0,setup,&real_addr_dev_st_chg_ind,sizeof(unsigned long));
 	result = 0;
 out:
-	mempool_free(scssc_area, qdio_mempool_scssc);
+	free_page ((unsigned long) scssc_area);
 	return result;
 
 }
@@ -2545,7 +2547,7 @@ tiqdio_set_delay_target(struct qdio_irq *irq_ptr, unsigned long delay_target)
 	if (!irq_ptr->is_thinint_irq)
 		return -ENODEV;
 
-	scsscf_area = mempool_alloc(qdio_mempool_scssc, GFP_ATOMIC);
+	scsscf_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!scsscf_area) {
 		QDIO_PRINT_WARN("No memory for setting delay target on " \
 				"subchannel 0.%x.%x.\n",
@@ -2583,7 +2585,7 @@ tiqdio_set_delay_target(struct qdio_irq *irq_ptr, unsigned long delay_target)
 	QDIO_DBF_HEX2(0,trace,&delay_target,sizeof(unsigned long));
 	result = 0; /* not critical */
 out:
-	mempool_free(scsscf_area, qdio_mempool_scssc);
+	free_page ((unsigned long) scsscf_area);
 	return result;
 }
 
@@ -2735,7 +2737,7 @@ qdio_free(struct ccw_device *cdev)
 	QDIO_DBF_TEXT1(0,trace,dbf_text);
 	QDIO_DBF_TEXT0(0,setup,dbf_text);
 
-	cdev->private->qdio_data = NULL;
+	cdev->private->qdio_data = 0;
 
 	up(&irq_ptr->setting_up_sema);
 
@@ -2982,7 +2984,7 @@ qdio_allocate(struct qdio_initialize *init_data)
 	qdio_allocate_do_dbf(init_data);
 
 	/* create irq */
-	irq_ptr = (void *) get_zeroed_page(GFP_KERNEL | GFP_DMA);
+	irq_ptr=kmalloc(sizeof(struct qdio_irq), GFP_KERNEL | GFP_DMA);
 
 	QDIO_DBF_TEXT0(0,setup,"irq_ptr:");
 	QDIO_DBF_HEX0(0,setup,&irq_ptr,sizeof(void*));
@@ -2992,12 +2994,14 @@ qdio_allocate(struct qdio_initialize *init_data)
 		return -ENOMEM;
 	}
 
+	memset(irq_ptr,0,sizeof(struct qdio_irq));
+
 	init_MUTEX(&irq_ptr->setting_up_sema);
 
 	/* QDR must be in DMA area since CCW data address is only 32 bit */
 	irq_ptr->qdr=kmalloc(sizeof(struct qdr), GFP_KERNEL | GFP_DMA);
   	if (!(irq_ptr->qdr)) {
-   		free_page((unsigned long) irq_ptr);
+   		kfree(irq_ptr);
     		QDIO_PRINT_ERR("kmalloc of irq_ptr->qdr failed!\n");
 		return -ENOMEM;
        	}
@@ -3682,10 +3686,10 @@ qdio_get_qdio_memory(void)
 
 	for (i=1;i<INDICATORS_PER_CACHELINE;i++)
 		indicator_used[i]=0;
-	indicators = kzalloc(sizeof(__u32)*(INDICATORS_PER_CACHELINE),
+	indicators=(__u32*)kmalloc(sizeof(__u32)*(INDICATORS_PER_CACHELINE),
 				   GFP_KERNEL);
-       	if (!indicators)
-		return -ENOMEM;
+       	if (!indicators) return -ENOMEM;
+	memset(indicators,0,sizeof(__u32)*(INDICATORS_PER_CACHELINE));
 	return 0;
 }
 
@@ -3782,16 +3786,6 @@ oom:
 	return -ENOMEM;
 }
 
-static void *qdio_mempool_alloc(gfp_t gfp_mask, void *size)
-{
-	return (void *) get_zeroed_page(gfp_mask|GFP_DMA);
-}
-
-static void qdio_mempool_free(void *element, void *size)
-{
-	free_page((unsigned long) element);
-}
-
 static int __init
 init_QDIO(void)
 {
@@ -3821,10 +3815,6 @@ init_QDIO(void)
 
 	qdio_add_procfs_entry();
 
-	qdio_mempool_scssc = mempool_create(QDIO_MEMPOOL_SCSSC_ELEMENTS,
-					    qdio_mempool_alloc,
-					    qdio_mempool_free, NULL);
-
 	if (tiqdio_check_chsc_availability())
 		QDIO_PRINT_ERR("Not all CHSCs supported. Continuing.\n");
 
@@ -3840,7 +3830,6 @@ cleanup_QDIO(void)
 	qdio_remove_procfs_entry();
 	qdio_release_qdio_memory();
 	qdio_unregister_dbf_views();
-	mempool_destroy(qdio_mempool_scssc);
 
   	printk("qdio: %s: module removed\n",version);
 }

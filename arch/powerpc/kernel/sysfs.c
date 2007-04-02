@@ -1,3 +1,4 @@
+#include <linux/config.h>
 #include <linux/sysdev.h>
 #include <linux/cpu.h>
 #include <linux/smp.h>
@@ -64,20 +65,20 @@ static int __init smt_setup(void)
 	unsigned int cpu;
 
 	if (!cpu_has_feature(CPU_FTR_SMT))
-		return -ENODEV;
+		return 1;
 
 	options = find_path_device("/options");
 	if (!options)
-		return -ENODEV;
+		return 1;
 
 	val = (unsigned int *)get_property(options, "ibm,smt-snooze-delay",
 					   NULL);
 	if (!smt_snooze_cmdline && val) {
-		for_each_possible_cpu(cpu)
+		for_each_cpu(cpu)
 			per_cpu(smt_snooze_delay, cpu) = *val;
 	}
 
-	return 0;
+	return 1;
 }
 __initcall(smt_setup);
 
@@ -92,7 +93,7 @@ static int __init setup_smt_snooze_delay(char *str)
 	smt_snooze_cmdline = 1;
 
 	if (get_option(&str, &snooze)) {
-		for_each_possible_cpu(cpu)
+		for_each_cpu(cpu)
 			per_cpu(smt_snooze_delay, cpu) = snooze;
 	}
 
@@ -278,7 +279,7 @@ static void unregister_cpu_online(unsigned int cpu)
 }
 #endif /* CONFIG_HOTPLUG_CPU */
 
-static int __cpuinit sysfs_cpu_notify(struct notifier_block *self,
+static int __devinit sysfs_cpu_notify(struct notifier_block *self,
 				      unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (unsigned int)(long)hcpu;
@@ -296,44 +297,37 @@ static int __cpuinit sysfs_cpu_notify(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block __cpuinitdata sysfs_cpu_nb = {
+static struct notifier_block __devinitdata sysfs_cpu_nb = {
 	.notifier_call	= sysfs_cpu_notify,
 };
 
 /* NUMA stuff */
 
 #ifdef CONFIG_NUMA
+static struct node node_devices[MAX_NUMNODES];
+
 static void register_nodes(void)
 {
 	int i;
 
-	for (i = 0; i < MAX_NUMNODES; i++)
-		register_one_node(i);
-}
+	for (i = 0; i < MAX_NUMNODES; i++) {
+		if (node_online(i)) {
+			int p_node = parent_node(i);
+			struct node *parent = NULL;
 
-int sysfs_add_device_to_node(struct sys_device *dev, int nid)
-{
-	struct node *node = &node_devices[nid];
-	return sysfs_create_link(&node->sysdev.kobj, &dev->kobj,
-			kobject_name(&dev->kobj));
-}
+			if (p_node != i)
+				parent = &node_devices[p_node];
 
-void sysfs_remove_device_from_node(struct sys_device *dev, int nid)
-{
-	struct node *node = &node_devices[nid];
-	sysfs_remove_link(&node->sysdev.kobj, kobject_name(&dev->kobj));
+			register_node(&node_devices[i], i, parent);
+		}
+	}
 }
-
 #else
 static void register_nodes(void)
 {
 	return;
 }
-
 #endif
-
-EXPORT_SYMBOL_GPL(sysfs_add_device_to_node);
-EXPORT_SYMBOL_GPL(sysfs_remove_device_from_node);
 
 /* Only valid if CPU is present. */
 static ssize_t show_physical_id(struct sys_device *dev, char *buf)
@@ -347,13 +341,23 @@ static SYSDEV_ATTR(physical_id, 0444, show_physical_id, NULL);
 static int __init topology_init(void)
 {
 	int cpu;
+	struct node *parent = NULL;
 
 	register_nodes();
+
 	register_cpu_notifier(&sysfs_cpu_nb);
 
-	for_each_possible_cpu(cpu) {
+	for_each_cpu(cpu) {
 		struct cpu *c = &per_cpu(cpu_devices, cpu);
 
+#ifdef CONFIG_NUMA
+		/* The node to which a cpu belongs can't be known
+		 * until the cpu is made present.
+		 */
+		parent = NULL;
+		if (cpu_present(cpu))
+			parent = &node_devices[cpu_to_node(cpu)];
+#endif
 		/*
 		 * For now, we just see if the system supports making
 		 * the RTAS calls for CPU hotplug.  But, there may be a
@@ -365,7 +369,7 @@ static int __init topology_init(void)
 			c->no_control = 1;
 
 		if (cpu_online(cpu) || (c->no_control == 0)) {
-			register_cpu(c, cpu);
+			register_cpu(c, cpu, parent);
 
 			sysdev_create_file(&c->sysdev, &attr_physical_id);
 		}

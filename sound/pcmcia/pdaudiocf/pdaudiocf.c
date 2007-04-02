@@ -57,12 +57,18 @@ static struct snd_card *card_list[SNDRV_CARDS];
 /*
  * prototypes
  */
-static int pdacf_config(struct pcmcia_device *link);
+static void pdacf_config(dev_link_t *link);
 static void snd_pdacf_detach(struct pcmcia_device *p_dev);
 
-static void pdacf_release(struct pcmcia_device *link)
+static void pdacf_release(dev_link_t *link)
 {
-	pcmcia_disable_device(link);
+	if (link->state & DEV_CONFIG) {
+		/* release cs resources */
+		pcmcia_release_configuration(link->handle);
+		pcmcia_release_io(link->handle, &link->io);
+		pcmcia_release_irq(link->handle, &link->irq);
+		link->state &= ~DEV_CONFIG;
+	}
 }
 
 /*
@@ -70,7 +76,7 @@ static void pdacf_release(struct pcmcia_device *link)
  */
 static int snd_pdacf_free(struct snd_pdacf *pdacf)
 {
-	struct pcmcia_device *link = pdacf->p_dev;
+	dev_link_t *link = &pdacf->link;
 
 	pdacf_release(link);
 
@@ -90,9 +96,10 @@ static int snd_pdacf_dev_free(struct snd_device *device)
 /*
  * snd_pdacf_attach - attach callback for cs
  */
-static int snd_pdacf_probe(struct pcmcia_device *link)
+static int snd_pdacf_attach(struct pcmcia_device *p_dev)
 {
 	int i;
+	dev_link_t *link;               /* Info for cardmgr */
 	struct snd_pdacf *pdacf;
 	struct snd_card *card;
 	static struct snd_device_ops ops = {
@@ -132,7 +139,7 @@ static int snd_pdacf_probe(struct pcmcia_device *link)
 	pdacf->index = i;
 	card_list[i] = card;
 
-	pdacf->p_dev = link;
+	link = &pdacf->link;
 	link->priv = pdacf;
 
 	link->io.Attributes1 = IO_DATA_PATH_WIDTH_AUTO;
@@ -149,7 +156,13 @@ static int snd_pdacf_probe(struct pcmcia_device *link)
 	link->conf.ConfigIndex = 1;
 	link->conf.Present = PRESENT_OPTION;
 
-	return pdacf_config(link);
+	/* Chain drivers */
+	link->next = NULL;
+
+	link->handle = p_dev;
+	pdacf_config(link);
+
+	return 0;
 }
 
 
@@ -196,8 +209,9 @@ static int snd_pdacf_assign_resources(struct snd_pdacf *pdacf, int port, int irq
 /*
  * snd_pdacf_detach - detach callback for cs
  */
-static void snd_pdacf_detach(struct pcmcia_device *link)
+static void snd_pdacf_detach(struct pcmcia_device *p_dev)
 {
+	dev_link_t *link = dev_to_instance(p_dev);
 	struct snd_pdacf *chip = link->priv;
 
 	snd_printdd(KERN_DEBUG "pdacf_detach called\n");
@@ -216,11 +230,13 @@ static void snd_pdacf_detach(struct pcmcia_device *link)
 #define CS_CHECK(fn, ret) \
 do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 
-static int pdacf_config(struct pcmcia_device *link)
+static void pdacf_config(dev_link_t *link)
 {
+	client_handle_t handle = link->handle;
 	struct snd_pdacf *pdacf = link->priv;
 	tuple_t tuple;
 	cisparse_t *parse = NULL;
+	config_info_t conf;
 	u_short buf[32];
 	int last_fn, last_ret;
 
@@ -228,7 +244,7 @@ static int pdacf_config(struct pcmcia_device *link)
 	parse = kmalloc(sizeof(*parse), GFP_KERNEL);
 	if (! parse) {
 		snd_printk(KERN_ERR "pdacf_config: cannot allocate\n");
-		return -ENOMEM;
+		return;
 	}
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
 	tuple.Attributes = 0;
@@ -236,53 +252,71 @@ static int pdacf_config(struct pcmcia_device *link)
 	tuple.TupleDataMax = sizeof(buf);
 	tuple.TupleOffset = 0;
 	tuple.DesiredTuple = CISTPL_CONFIG;
-	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
-	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(link, &tuple));
-	CS_CHECK(ParseTuple, pcmcia_parse_tuple(link, &tuple, parse));
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
+	CS_CHECK(ParseTuple, pcmcia_parse_tuple(handle, &tuple, parse));
 	link->conf.ConfigBase = parse->config.base;
 	link->conf.ConfigIndex = 0x5;
-
-	CS_CHECK(RequestIO, pcmcia_request_io(link, &link->io));
-	CS_CHECK(RequestIRQ, pcmcia_request_irq(link, &link->irq));
-	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link, &link->conf));
-
 	kfree(parse);
+
+	CS_CHECK(GetConfigurationInfo, pcmcia_get_configuration_info(handle, &conf));
+	link->conf.Vcc = conf.Vcc;
+
+	/* Configure card */
+	link->state |= DEV_CONFIG;
+
+	CS_CHECK(RequestIO, pcmcia_request_io(handle, &link->io));
+	CS_CHECK(RequestIRQ, pcmcia_request_irq(link->handle, &link->irq));
+	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link->handle, &link->conf));
 
 	if (snd_pdacf_assign_resources(pdacf, link->io.BasePort1, link->irq.AssignedIRQ) < 0)
 		goto failed;
 
-	link->dev_node = &pdacf->node;
-	return 0;
+	link->dev = &pdacf->node;
+	link->state &= ~DEV_CONFIG_PENDING;
+	return;
 
 cs_failed:
-	kfree(parse);
-	cs_error(link, last_fn, last_ret);
+	cs_error(link->handle, last_fn, last_ret);
 failed:
-	pcmcia_disable_device(link);
-	return -ENODEV;
+	pcmcia_release_configuration(link->handle);
+	pcmcia_release_io(link->handle, &link->io);
+	pcmcia_release_irq(link->handle, &link->irq);
 }
 
 #ifdef CONFIG_PM
 
-static int pdacf_suspend(struct pcmcia_device *link)
+static int pdacf_suspend(struct pcmcia_device *dev)
 {
+	dev_link_t *link = dev_to_instance(dev);
 	struct snd_pdacf *chip = link->priv;
 
 	snd_printdd(KERN_DEBUG "SUSPEND\n");
+	link->state |= DEV_SUSPEND;
 	if (chip) {
 		snd_printdd(KERN_DEBUG "snd_pdacf_suspend calling\n");
 		snd_pdacf_suspend(chip, PMSG_SUSPEND);
 	}
 
+	snd_printdd(KERN_DEBUG "RESET_PHYSICAL\n");
+	if (link->state & DEV_CONFIG)
+		pcmcia_release_configuration(link->handle);
+
 	return 0;
 }
 
-static int pdacf_resume(struct pcmcia_device *link)
+static int pdacf_resume(struct pcmcia_device *dev)
 {
+	dev_link_t *link = dev_to_instance(dev);
 	struct snd_pdacf *chip = link->priv;
 
 	snd_printdd(KERN_DEBUG "RESUME\n");
-	if (pcmcia_dev_present(link)) {
+	link->state &= ~DEV_SUSPEND;
+
+	snd_printdd(KERN_DEBUG "CARD_RESET\n");
+	if (DEV_OK(link)) {
+		snd_printdd(KERN_DEBUG "requestconfig...\n");
+		pcmcia_request_configuration(link->handle, &link->conf);
 		if (chip) {
 			snd_printdd(KERN_DEBUG "calling snd_pdacf_resume\n");
 			snd_pdacf_resume(chip);
@@ -309,7 +343,7 @@ static struct pcmcia_driver pdacf_cs_driver = {
 	.drv		= {
 		.name	= "snd-pdaudiocf",
 	},
-	.probe		= snd_pdacf_probe,
+	.probe		= snd_pdacf_attach,
 	.remove		= snd_pdacf_detach,
 	.id_table	= snd_pdacf_ids,
 #ifdef CONFIG_PM

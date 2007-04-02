@@ -30,8 +30,7 @@ static inline int mps_oem_check(struct mp_config_table *mpc, char *oem,
 	return 0;
 }
 
-#ifdef CONFIG_ACPI
-static inline int es7000_check_dsdt(void)
+static inline int es7000_check_dsdt()
 {
 	struct acpi_table_header *header = NULL;
 	if(!acpi_get_table_header_early(ACPI_DSDT, &header))
@@ -55,11 +54,6 @@ static inline int acpi_madt_oem_check(char *oem_id, char *oem_table_id)
 	}
 	return 0;
 }
-#else
-static inline int acpi_madt_oem_check(char *oem_id, char *oem_table_id)
-{
-	return 0;
-}
-#endif
+
 
 #endif /* __ASM_MACH_MPPARSE_H */

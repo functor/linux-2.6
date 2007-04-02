@@ -558,9 +558,9 @@ partitions.
 
 The proper channel for reporting bugs is either through the Linux OS
 distribution company that provided your OS or by posting issues to the
-PowerPC development mailing list at:
+ppc64 development mailing list at:
 
-linuxppc-dev@ozlabs.org
+linuxppc64-dev@lists.linuxppc.org
 
 This request is to provide a documented and searchable public exchange
 of the problems and solutions surrounding this driver for the benefit of

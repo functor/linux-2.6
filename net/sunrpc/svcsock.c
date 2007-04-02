@@ -73,37 +73,6 @@ static struct svc_deferred_req *svc_deferred_dequeue(struct svc_sock *svsk);
 static int svc_deferred_recv(struct svc_rqst *rqstp);
 static struct cache_deferred_req *svc_defer(struct cache_req *req);
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-static struct lock_class_key svc_key[2];
-static struct lock_class_key svc_slock_key[2];
-
-static inline void svc_reclassify_socket(struct socket *sock)
-{
-	struct sock *sk = sock->sk;
-	BUG_ON(sk->sk_lock.owner != NULL);
-	switch (sk->sk_family) {
-		case AF_INET:
-			sock_lock_init_class_and_name(sk,
-				"slock-AF_INET-NFSD", &svc_slock_key[0],
-				"sk_lock-AF_INET-NFSD", &svc_key[0]);
-			break;
-
-		case AF_INET6:
-			sock_lock_init_class_and_name(sk,
-				"slock-AF_INET6-NFSD", &svc_slock_key[1],
-				"sk_lock-AF_INET6-NFSD", &svc_key[1]);
-			break;
-
-		default:
-			BUG();
-	}
-}
-#else
-static inline void svc_reclassify_socket(struct socket *sock)
-{
-}
-#endif
-
 /*
  * Queue up an idle server thread.  Must have serv->sv_lock held.
  * Note: this is really a stack rather than a queue, so that we only
@@ -1327,13 +1296,13 @@ svc_send(struct svc_rqst *rqstp)
 		xb->page_len +
 		xb->tail[0].iov_len;
 
-	/* Grab svsk->sk_mutex to serialize outgoing data. */
-	mutex_lock(&svsk->sk_mutex);
+	/* Grab svsk->sk_sem to serialize outgoing data. */
+	down(&svsk->sk_sem);
 	if (test_bit(SK_DEAD, &svsk->sk_flags))
 		len = -ENOTCONN;
 	else
 		len = svsk->sk_sendto(rqstp);
-	mutex_unlock(&svsk->sk_mutex);
+	up(&svsk->sk_sem);
 	svc_sock_release(rqstp);
 
 	if (len == -ECONNREFUSED || len == -ENOTCONN || len == -EAGAIN)
@@ -1353,10 +1322,11 @@ svc_setup_socket(struct svc_serv *serv, struct socket *sock,
 	struct sock	*inet;
 
 	dprintk("svc: svc_setup_socket %p\n", sock);
-	if (!(svsk = kzalloc(sizeof(*svsk), GFP_KERNEL))) {
+	if (!(svsk = kmalloc(sizeof(*svsk), GFP_KERNEL))) {
 		*errp = -ENOMEM;
 		return NULL;
 	}
+	memset(svsk, 0, sizeof(*svsk));
 
 	inet = sock->sk;
 
@@ -1381,7 +1351,7 @@ svc_setup_socket(struct svc_serv *serv, struct socket *sock,
 	svsk->sk_lastrecv = get_seconds();
 	INIT_LIST_HEAD(&svsk->sk_deferred);
 	INIT_LIST_HEAD(&svsk->sk_ready);
-	mutex_init(&svsk->sk_mutex);
+	sema_init(&svsk->sk_sem, 1);
 
 	/* Initialize the socket */
 	if (sock->type == SOCK_DGRAM)
@@ -1433,8 +1403,6 @@ svc_create_socket(struct svc_serv *serv, int protocol, struct sockaddr_in *sin)
 
 	if ((error = sock_create_kern(PF_INET, type, protocol, &sock)) < 0)
 		return error;
-
-	svc_reclassify_socket(sock);
 
 	if (sin != NULL) {
 		if (type == SOCK_STREAM)

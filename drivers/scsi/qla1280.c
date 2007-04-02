@@ -192,7 +192,7 @@
         - Don't walk the entire list in qla1280_putq_t() just to directly
 	  grab the pointer to the last element afterwards
     Rev  3.23.5 Beta August 9, 2001, Jes Sorensen
-	- Don't use IRQF_DISABLED, it's use is deprecated for this kinda driver
+	- Don't use SA_INTERRUPT, it's use is deprecated for this kinda driver
     Rev  3.23.4 Beta August 8, 2001, Jes Sorensen
 	- Set dev->max_sectors to 1024
     Rev  3.23.3 Beta August 6, 2001, Jes Sorensen
@@ -331,6 +331,7 @@
 *****************************************************************************/
 
 
+#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/version.h>
@@ -349,7 +350,6 @@
 #include <linux/pci_ids.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
-#include <linux/dma-mapping.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -395,6 +395,30 @@
 #include "ql12160_fw.h"		/* ISP RISC codes */
 #include "ql1280_fw.h"
 #include "ql1040_fw.h"
+
+
+/*
+ * Missing PCI ID's
+ */
+#ifndef PCI_DEVICE_ID_QLOGIC_ISP1080
+#define PCI_DEVICE_ID_QLOGIC_ISP1080	0x1080
+#endif
+#ifndef PCI_DEVICE_ID_QLOGIC_ISP1240
+#define PCI_DEVICE_ID_QLOGIC_ISP1240	0x1240
+#endif
+#ifndef PCI_DEVICE_ID_QLOGIC_ISP1280
+#define PCI_DEVICE_ID_QLOGIC_ISP1280	0x1280
+#endif
+#ifndef PCI_DEVICE_ID_QLOGIC_ISP10160
+#define PCI_DEVICE_ID_QLOGIC_ISP10160	0x1016
+#endif
+#ifndef PCI_DEVICE_ID_QLOGIC_ISP12160
+#define PCI_DEVICE_ID_QLOGIC_ISP12160	0x1216
+#endif
+
+#ifndef PCI_VENDOR_ID_AMI
+#define PCI_VENDOR_ID_AMI               0x101e
+#endif
 
 #ifndef BITS_PER_LONG
 #error "BITS_PER_LONG not defined!"
@@ -813,7 +837,7 @@ qla1280_error_action(struct scsi_cmnd *cmd, enum action action)
 	uint16_t data;
 	unsigned char *handle;
 	int result, i;
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	struct timer_list timer;
 
 	ha = (struct scsi_qla_host *)(CMD_HOST(cmd)->hostdata);
@@ -2406,7 +2430,7 @@ qla1280_mailbox_command(struct scsi_qla_host *ha, uint8_t mr, uint16_t *mb)
 	uint16_t *optr, *iptr;
 	uint16_t __iomem *mptr;
 	uint16_t data;
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	struct timer_list timer;
 
 	ENTER("qla1280_mailbox_command");
@@ -4209,17 +4233,20 @@ qla1280_setup(char *s)
 }
 
 
-static int __init
+static int
 qla1280_get_token(char *str)
 {
 	char *sep;
 	long ret = -1;
-	int i;
+	int i, len;
+
+	len = sizeof(setup_token)/sizeof(struct setup_tokens);
 
 	sep = strchr(str, ':');
 
 	if (sep) {
-		for (i = 0; i < ARRAY_SIZE(setup_token); i++) {
+		for (i = 0; i < len; i++){
+
 			if (!strncmp(setup_token[i].token, str, (sep - str))) {
 				ret =  setup_token[i].val;
 				break;
@@ -4294,7 +4321,7 @@ qla1280_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 #ifdef QLA_64BIT_PTR
 	if (pci_set_dma_mask(ha->pdev, (dma_addr_t) ~ 0ULL)) {
-		if (pci_set_dma_mask(ha->pdev, DMA_32BIT_MASK)) {
+		if (pci_set_dma_mask(ha->pdev, 0xffffffff)) {
 			printk(KERN_WARNING "scsi(%li): Unable to set a "
 			       "suitable DMA mask - aborting\n", ha->host_no);
 			error = -ENODEV;
@@ -4304,7 +4331,7 @@ qla1280_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		dprintk(2, "scsi(%li): 64 Bit PCI Addressing Enabled\n",
 			ha->host_no);
 #else
-	if (pci_set_dma_mask(ha->pdev, DMA_32BIT_MASK)) {
+	if (pci_set_dma_mask(ha->pdev, 0xffffffff)) {
 		printk(KERN_WARNING "scsi(%li): Unable to set a "
 		       "suitable DMA mask - aborting\n", ha->host_no);
 		error = -ENODEV;
@@ -4369,7 +4396,7 @@ qla1280_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* Disable ISP interrupts. */
 	qla1280_disable_intrs(ha);
 
-	if (request_irq(pdev->irq, qla1280_intr_handler, IRQF_SHARED,
+	if (request_irq(pdev->irq, qla1280_intr_handler, SA_SHIRQ,
 				"qla1280", ha)) {
 		printk("qla1280 : Failed to reserve interrupt %d already "
 		       "in use\n", pdev->irq);

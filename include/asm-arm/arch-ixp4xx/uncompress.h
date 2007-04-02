@@ -21,18 +21,26 @@
 
 static volatile u32* uart_base;
 
-static inline void putc(int c)
+static __inline__ void putc(char c)
 {
 	/* Check THRE and TEMT bits before we transmit the character.
 	 */
-	while ((uart_base[UART_LSR] & TX_DONE) != TX_DONE)
-		barrier();
-
+	while ((uart_base[UART_LSR] & TX_DONE) != TX_DONE); 
 	*uart_base = c;
 }
 
-static void flush(void)
+/*
+ * This does not append a newline
+ */
+static void putstr(const char *s)
 {
+	while (*s)
+	{
+		putc(*s);
+		if (*s == '\n')
+			putc('\r');
+		s++;
+	}
 }
 
 static __inline__ void __arch_decomp_setup(unsigned long arch_id)

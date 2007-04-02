@@ -19,7 +19,7 @@
 #include <linux/interrupt.h>
 
 
-int
+int __init
 JadeVersion(struct IsdnCardState *cs, char *s)
 {
     int ver,i;
@@ -253,7 +253,7 @@ setstack_jade(struct PStack *st, struct BCState *bcs)
 	return (0);
 }
 
-void
+void __init
 clear_pending_jade_ints(struct IsdnCardState *cs)
 {
 	int val;
@@ -279,7 +279,7 @@ clear_pending_jade_ints(struct IsdnCardState *cs)
 	cs->BC_Write_Reg(cs, 1, jade_HDLC_IMR, 0xF8);
 }
 
-void
+void __init
 initjade(struct IsdnCardState *cs)
 {
 	cs->bcs[0].BC_SetStack = setstack_jade;

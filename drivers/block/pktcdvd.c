@@ -44,6 +44,7 @@
  *************************************************************************/
 
 #include <linux/pktcdvd.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -55,7 +56,6 @@
 #include <linux/seq_file.h>
 #include <linux/miscdevice.h>
 #include <linux/suspend.h>
-#include <linux/mutex.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_ioctl.h>
 #include <scsi/scsi.h>
@@ -81,7 +81,7 @@
 static struct pktcdvd_device *pkt_devs[MAX_WRITERS];
 static struct proc_dir_entry *pkt_proc;
 static int pkt_major;
-static struct mutex ctl_mutex;	/* Serialize open/close/setup/teardown */
+static struct semaphore ctl_mutex;	/* Serialize open/close/setup/teardown */
 static mempool_t *psd_pool;
 
 
@@ -229,6 +229,16 @@ static int pkt_grow_pktlist(struct pktcdvd_device *pd, int nr_packets)
 	return 1;
 }
 
+static void *pkt_rb_alloc(gfp_t gfp_mask, void *data)
+{
+	return kmalloc(sizeof(struct pkt_rb_node), gfp_mask);
+}
+
+static void pkt_rb_free(void *ptr, void *data)
+{
+	kfree(ptr);
+}
+
 static inline struct pkt_rb_node *pkt_rbtree_next(struct pkt_rb_node *node)
 {
 	struct rb_node *n = rb_next(&node->rb_node);
@@ -348,7 +358,7 @@ static int pkt_generic_packet(struct pktcdvd_device *pd, struct packet_command *
 	char sense[SCSI_SENSE_BUFFERSIZE];
 	request_queue_t *q;
 	struct request *rq;
-	DECLARE_COMPLETION_ONSTACK(wait);
+	DECLARE_COMPLETION(wait);
 	int err = 0;
 
 	q = bdev_get_queue(pd->bdev);
@@ -2008,7 +2018,7 @@ static int pkt_open(struct inode *inode, struct file *file)
 
 	VPRINTK("pktcdvd: entering open\n");
 
-	mutex_lock(&ctl_mutex);
+	down(&ctl_mutex);
 	pd = pkt_find_dev_from_minor(iminor(inode));
 	if (!pd) {
 		ret = -ENODEV;
@@ -2034,14 +2044,14 @@ static int pkt_open(struct inode *inode, struct file *file)
 		set_blocksize(inode->i_bdev, CD_FRAMESIZE);
 	}
 
-	mutex_unlock(&ctl_mutex);
+	up(&ctl_mutex);
 	return 0;
 
 out_dec:
 	pd->refcnt--;
 out:
 	VPRINTK("pktcdvd: failed open (%d)\n", ret);
-	mutex_unlock(&ctl_mutex);
+	up(&ctl_mutex);
 	return ret;
 }
 
@@ -2050,17 +2060,27 @@ static int pkt_close(struct inode *inode, struct file *file)
 	struct pktcdvd_device *pd = inode->i_bdev->bd_disk->private_data;
 	int ret = 0;
 
-	mutex_lock(&ctl_mutex);
+	down(&ctl_mutex);
 	pd->refcnt--;
 	BUG_ON(pd->refcnt < 0);
 	if (pd->refcnt == 0) {
 		int flush = test_bit(PACKET_WRITABLE, &pd->flags);
 		pkt_release_dev(pd, flush);
 	}
-	mutex_unlock(&ctl_mutex);
+	up(&ctl_mutex);
 	return ret;
 }
 
+
+static void *psd_pool_alloc(gfp_t gfp_mask, void *data)
+{
+	return kmalloc(sizeof(struct packet_stacked_data), gfp_mask);
+}
+
+static void psd_pool_free(void *ptr, void *data)
+{
+	kfree(ptr);
+}
 
 static int pkt_end_io_read_cloned(struct bio *bio, unsigned int bytes_done, int err)
 {
@@ -2454,8 +2474,7 @@ static int pkt_setup_dev(struct pkt_ctrl_command *ctrl_cmd)
 	if (!pd)
 		return ret;
 
-	pd->rb_pool = mempool_create_kmalloc_pool(PKT_RB_POOL_SIZE,
-						  sizeof(struct pkt_rb_node));
+	pd->rb_pool = mempool_create(PKT_RB_POOL_SIZE, pkt_rb_alloc, pkt_rb_free, NULL);
 	if (!pd->rb_pool)
 		goto out_mem;
 
@@ -2495,7 +2514,7 @@ static int pkt_setup_dev(struct pkt_ctrl_command *ctrl_cmd)
 	return 0;
 
 out_new_dev:
-	blk_cleanup_queue(disk->queue);
+	blk_put_queue(disk->queue);
 out_mem2:
 	put_disk(disk);
 out_mem:
@@ -2536,7 +2555,7 @@ static int pkt_remove_dev(struct pkt_ctrl_command *ctrl_cmd)
 	DPRINTK("pktcdvd: writer %s unmapped\n", pd->name);
 
 	del_gendisk(pd->disk);
-	blk_cleanup_queue(pd->disk->queue);
+	blk_put_queue(pd->disk->queue);
 	put_disk(pd->disk);
 
 	pkt_devs[idx] = NULL;
@@ -2577,21 +2596,21 @@ static int pkt_ctl_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	case PKT_CTRL_CMD_SETUP:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+		down(&ctl_mutex);
 		ret = pkt_setup_dev(&ctrl_cmd);
-		mutex_unlock(&ctl_mutex);
+		up(&ctl_mutex);
 		break;
 	case PKT_CTRL_CMD_TEARDOWN:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+		down(&ctl_mutex);
 		ret = pkt_remove_dev(&ctrl_cmd);
-		mutex_unlock(&ctl_mutex);
+		up(&ctl_mutex);
 		break;
 	case PKT_CTRL_CMD_STATUS:
-		mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+		down(&ctl_mutex);
 		pkt_get_status(&ctrl_cmd);
-		mutex_unlock(&ctl_mutex);
+		up(&ctl_mutex);
 		break;
 	default:
 		return -ENOTTY;
@@ -2611,6 +2630,7 @@ static struct file_operations pkt_ctl_fops = {
 static struct miscdevice pkt_misc = {
 	.minor 		= MISC_DYNAMIC_MINOR,
 	.name  		= "pktcdvd",
+	.devfs_name 	= "pktcdvd/control",
 	.fops  		= &pkt_ctl_fops
 };
 
@@ -2618,8 +2638,7 @@ static int __init pkt_init(void)
 {
 	int ret;
 
-	psd_pool = mempool_create_kmalloc_pool(PSD_POOL_SIZE,
-					sizeof(struct packet_stacked_data));
+	psd_pool = mempool_create(PSD_POOL_SIZE, psd_pool_alloc, psd_pool_free, NULL);
 	if (!psd_pool)
 		return -ENOMEM;
 
@@ -2637,7 +2656,7 @@ static int __init pkt_init(void)
 		goto out;
 	}
 
-	mutex_init(&ctl_mutex);
+	init_MUTEX(&ctl_mutex);
 
 	pkt_proc = proc_mkdir("pktcdvd", proc_root_driver);
 

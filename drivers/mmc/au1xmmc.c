@@ -34,6 +34,7 @@
  * So we use the timer to check the status manually.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -55,11 +56,12 @@
 #define DRIVER_NAME "au1xxx-mmc"
 
 /* Set this to enable special debugging macros */
+/* #define MMC_DEBUG */
 
-#ifdef DEBUG
-#define DBG(fmt, idx, args...) printk("au1xx(%d): DEBUG: " fmt, idx, ##args)
+#ifdef MMC_DEBUG
+#define DEBUG(fmt, idx, args...) printk("au1xx(%d): DEBUG: " fmt, idx, ##args)
 #else
-#define DBG(fmt, idx, args...)
+#define DEBUG(fmt, idx, args...)
 #endif
 
 const struct {
@@ -85,7 +87,7 @@ struct au1xmmc_host *au1xmmc_hosts[AU1XMMC_CONTROLLER_COUNT];
 static int dma = 1;
 
 #ifdef MODULE
-module_param(dma, bool, 0);
+MODULE_PARM(dma, "i");
 MODULE_PARM_DESC(dma, "Use DMA engine for data transfers (0 = disabled)");
 #endif
 
@@ -309,7 +311,7 @@ static void au1xmmc_data_complete(struct au1xmmc_host *host, u32 status)
 		}
 		else
 			data->bytes_xfered =
-				(data->blocks * data->blksz) -
+				(data->blocks * (1 << data->blksz_bits)) -
 				host->pio.len;
 	}
 
@@ -422,18 +424,18 @@ static void au1xmmc_receive_pio(struct au1xmmc_host *host)
 			break;
 
 		if (status & SD_STATUS_RC) {
-			DBG("RX CRC Error [%d + %d].\n", host->id,
+			DEBUG("RX CRC Error [%d + %d].\n", host->id,
 					host->pio.len, count);
 			break;
 		}
 
 		if (status & SD_STATUS_RO) {
-			DBG("RX Overrun [%d + %d]\n", host->id,
+			DEBUG("RX Overrun [%d + %d]\n", host->id,
 					host->pio.len, count);
 			break;
 		}
 		else if (status & SD_STATUS_RU) {
-			DBG("RX Underrun [%d + %d]\n", host->id,
+			DEBUG("RX Underrun [%d + %d]\n", host->id,
 					host->pio.len,	count);
 			break;
 		}
@@ -574,7 +576,7 @@ static int
 au1xmmc_prepare_data(struct au1xmmc_host *host, struct mmc_data *data)
 {
 
-	int datalen = data->blocks * data->blksz;
+	int datalen = data->blocks * (1 << data->blksz_bits);
 
 	if (dma != 0)
 		host->flags |= HOST_F_DMA;
@@ -595,7 +597,7 @@ au1xmmc_prepare_data(struct au1xmmc_host *host, struct mmc_data *data)
 	if (host->dma.len == 0)
 		return MMC_ERR_TIMEOUT;
 
-	au_writel(data->blksz - 1, HOST_BLKSIZE(host));
+	au_writel((1 << data->blksz_bits) - 1, HOST_BLKSIZE(host));
 
 	if (host->flags & HOST_F_DMA) {
 		int i;
@@ -719,6 +721,10 @@ static void au1xmmc_set_ios(struct mmc_host* mmc, struct mmc_ios* ios)
 {
 	struct au1xmmc_host *host = mmc_priv(mmc);
 
+	DEBUG("set_ios (power=%u, clock=%uHz, vdd=%u, mode=%u)\n",
+	      host->id, ios->power_mode, ios->clock, ios->vdd,
+	      ios->bus_mode);
+
 	if (ios->power_mode == MMC_POWER_OFF)
 		au1xmmc_set_power(host, 0);
 	else if (ios->power_mode == MMC_POWER_ON) {
@@ -804,7 +810,7 @@ static irqreturn_t au1xmmc_irq(int irq, void *dev_id, struct pt_regs *regs)
 				au1xmmc_receive_pio(host);
 		}
 		else if (status & 0x203FBC70) {
-			DBG("Unhandled status %8.8x\n", host->id, status);
+			DEBUG("Unhandled status %8.8x\n", host->id, status);
 			handled = 0;
 		}
 
@@ -833,7 +839,7 @@ static void au1xmmc_poll_event(unsigned long arg)
 
 	if (host->mrq != NULL) {
 		u32 status = au_readl(HOST_STATUS(host));
-		DBG("PENDING - %8.8x\n", host->id, status);
+		DEBUG("PENDING - %8.8x\n", host->id, status);
 	}
 
 	mod_timer(&host->timer, jiffies + AU1XMMC_DETECT_TIMEOUT);
@@ -886,7 +892,7 @@ static int __devinit au1xmmc_probe(struct platform_device *pdev)
 	int i, ret = 0;
 
 	/* THe interrupt is shared among all controllers */
-	ret = request_irq(AU1100_SD_IRQ, au1xmmc_irq, IRQF_DISABLED, "MMC", 0);
+	ret = request_irq(AU1100_SD_IRQ, au1xmmc_irq, SA_INTERRUPT, "MMC", 0);
 
 	if (ret) {
 		printk(DRIVER_NAME "ERROR: Couldn't get int %d: %d\n",

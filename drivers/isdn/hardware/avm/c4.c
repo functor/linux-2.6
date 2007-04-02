@@ -9,6 +9,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
@@ -49,7 +50,7 @@ MODULE_DEVICE_TABLE(pci, c4_pci_tbl);
 MODULE_DESCRIPTION("CAPI4Linux: Driver for AVM C2/C4 cards");
 MODULE_AUTHOR("Carsten Paeth");
 MODULE_LICENSE("GPL");
-module_param(suppress_pollack, bool, 0);
+MODULE_PARM(suppress_pollack, "0-1i");
 
 /* ------------------------------------------------------------- */
 
@@ -1172,7 +1173,7 @@ static int c4_add_card(struct capicardparams *p, struct pci_dev *dev,
 	}
 	c4_reset(card);
 
-	retval = request_irq(card->irq, c4_interrupt, IRQF_SHARED, card->name, card);
+	retval = request_irq(card->irq, c4_interrupt, SA_SHIRQ, card->name, card);
 	if (retval) {
 		printk(KERN_ERR "c4: unable to get IRQ %d.\n",card->irq);
 		retval = -EBUSY;

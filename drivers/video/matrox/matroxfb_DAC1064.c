@@ -12,6 +12,8 @@
  *
  */
 
+/* make checkconfig does not walk through include tree :-( */
+#include <linux/config.h>
 
 #include "matroxfb_DAC1064.h"
 #include "matroxfb_misc.h"

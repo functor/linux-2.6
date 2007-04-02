@@ -19,10 +19,9 @@
 #include <asm/io.h>		/* outb, outb_p			*/
 #include <asm/uaccess.h>	/* copy to/from user		*/
 #include <linux/videodev.h>	/* kernel radio structs		*/
-#include <media/v4l2-common.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
-static struct mutex lock;
+static struct semaphore lock;
 
 #undef DEBUG
 //#define DEBUG 1
@@ -203,7 +202,7 @@ static int fmr2_setvolume(struct fmr2_device *dev)
 }
 
 static int fmr2_do_ioctl(struct inode *inode, struct file *file,
-		      unsigned int cmd, void *arg)
+                      unsigned int cmd, void *arg)
 {
 	struct video_device *dev = video_devdata(file);
 	struct fmr2_device *fmr2 = dev->priv;
@@ -239,9 +238,9 @@ static int fmr2_do_ioctl(struct inode *inode, struct file *file,
 			if (fmr2->mute)
 				v->flags |= VIDEO_AUDIO_MUTE;
 			v->mode=VIDEO_MODE_AUTO;
-			mutex_lock(&lock);
+			down(&lock);
 			v->signal = fmr2_getsigstr(fmr2);
-			mutex_unlock(&lock);
+			up(&lock);
 			return 0;
 		}
 		case VIDIOCSTUNER:
@@ -275,9 +274,9 @@ static int fmr2_do_ioctl(struct inode *inode, struct file *file,
 			/* set card freq (if not muted) */
 			if (fmr2->curvol && !fmr2->mute)
 			{
-				mutex_lock(&lock);
+				down(&lock);
 				fmr2_setfreq(fmr2);
-				mutex_unlock(&lock);
+				up(&lock);
 			}
 			return 0;
 		}
@@ -319,14 +318,14 @@ static int fmr2_do_ioctl(struct inode *inode, struct file *file,
 			else
 				printk(KERN_DEBUG "mute\n");
 #endif
-			mutex_lock(&lock);
+			down(&lock);
 			if (fmr2->curvol && !fmr2->mute)
 			{
 				fmr2_setvolume(fmr2);
 				fmr2_setfreq(fmr2);
 			}
 			else fmr2_mute(fmr2->port);
-			mutex_unlock(&lock);
+			up(&lock);
 			return 0;
 		}
 		case VIDIOCGUNIT:
@@ -345,7 +344,7 @@ static int fmr2_do_ioctl(struct inode *inode, struct file *file,
 }
 
 static int fmr2_ioctl(struct inode *inode, struct file *file,
-		      unsigned int cmd, unsigned long arg)
+                      unsigned int cmd, unsigned long arg)
  {
 	return video_usercopy(inode, file, cmd, arg, fmr2_do_ioctl);
 }
@@ -381,7 +380,7 @@ static int __init fmr2_init(void)
 	fmr2_unit.card_type = 0;
 	fmr2_radio.priv = &fmr2_unit;
 
-	mutex_init(&lock);
+	init_MUTEX(&lock);
 
 	if (request_region(io, 2, "sf16fmr2"))
 	{
@@ -398,10 +397,10 @@ static int __init fmr2_init(void)
 	printk(KERN_INFO "SF16FMR2 radio card driver at 0x%x.\n", io);
 	debug_print((KERN_DEBUG "Mute %d Low %d\n",VIDEO_AUDIO_MUTE,VIDEO_TUNER_LOW));
 	/* mute card - prevents noisy bootups */
-	mutex_lock(&lock);
+	down(&lock);
 	fmr2_mute(io);
 	fmr2_product_info(&fmr2_unit);
-	mutex_unlock(&lock);
+	up(&lock);
 	debug_print((KERN_DEBUG "card_type %d\n", fmr2_unit.card_type));
 	return 0;
 }

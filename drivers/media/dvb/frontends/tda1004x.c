@@ -47,10 +47,12 @@ enum tda1004x_demod {
 
 struct tda1004x_state {
 	struct i2c_adapter* i2c;
+	struct dvb_frontend_ops ops;
 	const struct tda1004x_config* config;
 	struct dvb_frontend frontend;
 
 	/* private demod data */
+	u8 initialised;
 	enum tda1004x_demod demod_type;
 };
 
@@ -592,12 +594,22 @@ static int tda10045_init(struct dvb_frontend* fe)
 
 	dprintk("%s\n", __FUNCTION__);
 
+	if (state->initialised)
+		return 0;
+
 	if (tda10045_fwupload(fe)) {
 		printk("tda1004x: firmware upload failed\n");
 		return -EIO;
 	}
 
 	tda1004x_write_mask(state, TDA1004X_CONFADC1, 0x10, 0); // wake up the ADC
+
+	// Init the PLL
+	if (state->config->pll_init) {
+		tda1004x_enable_tuner_i2c(state);
+		state->config->pll_init(fe);
+		tda1004x_disable_tuner_i2c(state);
+	}
 
 	// tda setup
 	tda1004x_write_mask(state, TDA1004X_CONFC4, 0x20, 0); // disable DSP watchdog timer
@@ -614,6 +626,7 @@ static int tda10045_init(struct dvb_frontend* fe)
 
 	tda1004x_write_mask(state, 0x1f, 0x01, state->config->invert_oclk);
 
+	state->initialised = 1;
 	return 0;
 }
 
@@ -622,9 +635,22 @@ static int tda10046_init(struct dvb_frontend* fe)
 	struct tda1004x_state* state = fe->demodulator_priv;
 	dprintk("%s\n", __FUNCTION__);
 
+	if (state->initialised)
+		return 0;
+
 	if (tda10046_fwupload(fe)) {
 		printk("tda1004x: firmware upload failed\n");
 			return -EIO;
+	}
+
+	// Init the tuner PLL
+	if (state->config->pll_init) {
+		tda1004x_enable_tuner_i2c(state);
+		if (state->config->pll_init(fe)) {
+			printk(KERN_ERR "tda1004x: pll init failed\n");
+			return 	-EIO;
+		}
+		tda1004x_disable_tuner_i2c(state);
 	}
 
 	// tda setup
@@ -671,6 +697,7 @@ static int tda10046_init(struct dvb_frontend* fe)
 	// tda1004x_write_mask(state, 0x50, 0x80, 0x80);         // handle out of guard echoes
 	tda1004x_write_mask(state, 0x3a, 0x80, state->config->invert_oclk << 7);
 
+	state->initialised = 1;
 	return 0;
 }
 
@@ -694,10 +721,12 @@ static int tda1004x_set_fe(struct dvb_frontend* fe,
 	}
 
 	// set frequency
-	if (fe->ops.tuner_ops.set_params) {
-		fe->ops.tuner_ops.set_params(fe, fe_params);
-		if (fe->ops.i2c_gate_ctrl) fe->ops.i2c_gate_ctrl(fe, 0);
+	tda1004x_enable_tuner_i2c(state);
+	if (state->config->pll_set(fe, fe_params)) {
+		printk(KERN_ERR "tda1004x: pll set failed\n");
+		return 	-EIO;
 	}
+	tda1004x_disable_tuner_i2c(state);
 
 	// Hardcoded to use auto as much as possible on the TDA10045 as it
 	// is very unreliable if AUTO mode is _not_ used.
@@ -1163,24 +1192,24 @@ static int tda1004x_sleep(struct dvb_frontend* fe)
 		break;
 
 	case TDA1004X_DEMOD_TDA10046:
+		if (state->config->pll_sleep != NULL) {
+			tda1004x_enable_tuner_i2c(state);
+			state->config->pll_sleep(fe);
+			if (state->config->if_freq != TDA10046_FREQ_052) {
+				/* special hack for Philips EUROPA Based boards:
+				 * keep the I2c bridge open for tuner access in analog mode
+				 */
+				tda1004x_disable_tuner_i2c(state);
+			}
+		}
 		/* set outputs to tristate */
 		tda1004x_write_byteI(state, TDA10046H_CONF_TRISTATE1, 0xff);
 		tda1004x_write_mask(state, TDA1004X_CONFC4, 1, 1);
 		break;
 	}
+	state->initialised = 0;
 
 	return 0;
-}
-
-static int tda1004x_i2c_gate_ctrl(struct dvb_frontend* fe, int enable)
-{
-	struct tda1004x_state* state = fe->demodulator_priv;
-
-	if (enable) {
-		return tda1004x_enable_tuner_i2c(state);
-	} else {
-		return tda1004x_disable_tuner_i2c(state);
-	}
 }
 
 static int tda1004x_get_tune_settings(struct dvb_frontend* fe, struct dvb_frontend_tune_settings* fesettings)
@@ -1216,7 +1245,6 @@ static struct dvb_frontend_ops tda10045_ops = {
 
 	.init = tda10045_init,
 	.sleep = tda1004x_sleep,
-	.i2c_gate_ctrl = tda1004x_i2c_gate_ctrl,
 
 	.set_frontend = tda1004x_set_fe,
 	.get_frontend = tda1004x_get_fe,
@@ -1242,6 +1270,8 @@ struct dvb_frontend* tda10045_attach(const struct tda1004x_config* config,
 	/* setup the state */
 	state->config = config;
 	state->i2c = i2c;
+	memcpy(&state->ops, &tda10045_ops, sizeof(struct dvb_frontend_ops));
+	state->initialised = 0;
 	state->demod_type = TDA1004X_DEMOD_TDA10045;
 
 	/* check if the demod is there */
@@ -1251,7 +1281,7 @@ struct dvb_frontend* tda10045_attach(const struct tda1004x_config* config,
 	}
 
 	/* create dvb_frontend */
-	memcpy(&state->frontend.ops, &tda10045_ops, sizeof(struct dvb_frontend_ops));
+	state->frontend.ops = &state->ops;
 	state->frontend.demodulator_priv = state;
 	return &state->frontend;
 }
@@ -1274,7 +1304,6 @@ static struct dvb_frontend_ops tda10046_ops = {
 
 	.init = tda10046_init,
 	.sleep = tda1004x_sleep,
-	.i2c_gate_ctrl = tda1004x_i2c_gate_ctrl,
 
 	.set_frontend = tda1004x_set_fe,
 	.get_frontend = tda1004x_get_fe,
@@ -1300,6 +1329,8 @@ struct dvb_frontend* tda10046_attach(const struct tda1004x_config* config,
 	/* setup the state */
 	state->config = config;
 	state->i2c = i2c;
+	memcpy(&state->ops, &tda10046_ops, sizeof(struct dvb_frontend_ops));
+	state->initialised = 0;
 	state->demod_type = TDA1004X_DEMOD_TDA10046;
 
 	/* check if the demod is there */
@@ -1309,7 +1340,7 @@ struct dvb_frontend* tda10046_attach(const struct tda1004x_config* config,
 	}
 
 	/* create dvb_frontend */
-	memcpy(&state->frontend.ops, &tda10046_ops, sizeof(struct dvb_frontend_ops));
+	state->frontend.ops = &state->ops;
 	state->frontend.demodulator_priv = state;
 	return &state->frontend;
 }

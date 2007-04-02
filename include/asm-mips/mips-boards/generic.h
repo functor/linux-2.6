@@ -20,6 +20,7 @@
 #ifndef __ASM_MIPS_BOARDS_GENERIC_H
 #define __ASM_MIPS_BOARDS_GENERIC_H
 
+#include <linux/config.h>
 #include <asm/addrspace.h>
 #include <asm/byteorder.h>
 #include <asm/mips-boards/bonito64.h>
@@ -66,7 +67,6 @@
 #define MIPS_REVISION_CORID_CORE_FPGA2     7
 #define MIPS_REVISION_CORID_CORE_FPGAR2    8
 #define MIPS_REVISION_CORID_CORE_FPGA3     9
-#define MIPS_REVISION_CORID_CORE_24K       10
 
 /**** Artificial corid defines ****/
 /*

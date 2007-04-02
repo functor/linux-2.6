@@ -17,6 +17,7 @@
 #ifndef __ASM_MPC85xx_H__
 #define __ASM_MPC85xx_H__
 
+#include <linux/config.h>
 #include <asm/mmu.h>
 
 #ifdef CONFIG_85xx
@@ -26,9 +27,6 @@
 #endif
 #if defined(CONFIG_MPC8555_CDS) || defined(CONFIG_MPC8548_CDS)
 #include <platforms/85xx/mpc8555_cds.h>
-#endif
-#ifdef CONFIG_MPC85xx_CDS
-#include <platforms/85xx/mpc85xx_cds.h>
 #endif
 #ifdef CONFIG_MPC8560_ADS
 #include <platforms/85xx/mpc8560_ads.h>
@@ -141,7 +139,6 @@ enum ppc_sys_devices {
 	MPC85xx_eTSEC4,
 	MPC85xx_IIC2,
 	MPC85xx_MDIO,
-	NUM_PPC_SYS_DEVS,
 };
 
 /* Internal interrupts are all Level Sensitive, and Positive Polarity */

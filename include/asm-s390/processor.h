@@ -199,13 +199,15 @@ unsigned long get_wchan(struct task_struct *p);
 /*
  * Give up the time slice of the virtual PU.
  */
-static inline void cpu_relax(void)
-{
-	if (MACHINE_HAS_DIAG44)
-		asm volatile ("diag 0,0,68" : : : "memory");
-	else
-		barrier();
-}
+#ifndef __s390x__
+# define cpu_relax()	asm volatile ("diag 0,0,68" : : : "memory")
+#else /* __s390x__ */
+# define cpu_relax() \
+	do { \
+		if (MACHINE_HAS_DIAG44) \
+			asm volatile ("diag 0,0,68" : : : "memory"); \
+	} while (0)
+#endif /* __s390x__ */
 
 /*
  * Set PSW to specified value.

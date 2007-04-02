@@ -21,10 +21,9 @@
 #include "xfs_log.h"
 #include "xfs_trans.h"
 #include "xfs_sb.h"
+#include "xfs_dir.h"
 #include "xfs_mount.h"
 #include "xfs_export.h"
-
-STATIC struct dentry dotdot = { .d_name.name = "..", .d_name.len = 2, };
 
 /*
  * XFS encodes and decodes the fileid portion of NFS filehandles
@@ -38,7 +37,7 @@ STATIC struct dentry dotdot = { .d_name.name = "..", .d_name.len = 2, };
  */
 
 STATIC struct dentry *
-xfs_fs_decode_fh(
+linvfs_decode_fh(
 	struct super_block	*sb,
 	__u32			*fh,
 	int			fh_len,
@@ -79,12 +78,12 @@ xfs_fs_decode_fh(
 	}
 
 	fh = (__u32 *)&ifid;
-	return sb->s_export_op->find_exported_dentry(sb, fh, parent, acceptable, context);
+	return find_exported_dentry(sb, fh, parent, acceptable, context);
 }
 
 
 STATIC int
-xfs_fs_encode_fh(
+linvfs_encode_fh(
 	struct dentry		*dentry,
 	__u32			*fh,
 	int			*max_len,
@@ -96,7 +95,7 @@ xfs_fs_encode_fh(
 	int			len;
 	int			is64 = 0;
 #if XFS_BIG_INUMS
-	bhv_vfs_t		*vfs = vfs_from_sb(inode->i_sb);
+	vfs_t			*vfs = LINVFS_GET_VFS(inode->i_sb);
 
 	if (!(vfs->vfs_flag & VFS_32BITINODES)) {
 		/* filesystem may contain 64bit inode numbers */
@@ -131,21 +130,21 @@ xfs_fs_encode_fh(
 }
 
 STATIC struct dentry *
-xfs_fs_get_dentry(
+linvfs_get_dentry(
 	struct super_block	*sb,
 	void			*data)
 {
-	bhv_vnode_t		*vp;
+	vnode_t			*vp;
 	struct inode		*inode;
 	struct dentry		*result;
-	bhv_vfs_t		*vfsp = vfs_from_sb(sb);
+	vfs_t			*vfsp = LINVFS_GET_VFS(sb);
 	int			error;
 
-	error = bhv_vfs_vget(vfsp, &vp, (fid_t *)data);
+	VFS_VGET(vfsp, &vp, (fid_t *)data, error);
 	if (error || vp == NULL)
 		return ERR_PTR(-ESTALE) ;
 
-	inode = vn_to_inode(vp);
+	inode = LINVFS_GET_IP(vp);
 	result = d_alloc_anon(inode);
         if (!result) {
 		iput(inode);
@@ -155,20 +154,25 @@ xfs_fs_get_dentry(
 }
 
 STATIC struct dentry *
-xfs_fs_get_parent(
+linvfs_get_parent(
 	struct dentry		*child)
 {
 	int			error;
-	bhv_vnode_t		*vp, *cvp;
+	vnode_t			*vp, *cvp;
 	struct dentry		*parent;
+	struct dentry		dotdot;
+
+	dotdot.d_name.name = "..";
+	dotdot.d_name.len = 2;
+	dotdot.d_inode = NULL;
 
 	cvp = NULL;
-	vp = vn_from_inode(child->d_inode);
-	error = bhv_vop_lookup(vp, &dotdot, &cvp, 0, NULL, NULL);
+	vp = LINVFS_GET_VP(child->d_inode);
+	VOP_LOOKUP(vp, &dotdot, &cvp, 0, NULL, NULL, error);
 	if (unlikely(error))
 		return ERR_PTR(-error);
 
-	parent = d_alloc_anon(vn_to_inode(cvp));
+	parent = d_alloc_anon(LINVFS_GET_IP(cvp));
 	if (unlikely(!parent)) {
 		VN_RELE(cvp);
 		return ERR_PTR(-ENOMEM);
@@ -176,9 +180,9 @@ xfs_fs_get_parent(
 	return parent;
 }
 
-struct export_operations xfs_export_operations = {
-	.decode_fh		= xfs_fs_decode_fh,
-	.encode_fh		= xfs_fs_encode_fh,
-	.get_parent		= xfs_fs_get_parent,
-	.get_dentry		= xfs_fs_get_dentry,
+struct export_operations linvfs_export_ops = {
+	.decode_fh		= linvfs_decode_fh,
+	.encode_fh		= linvfs_encode_fh,
+	.get_parent		= linvfs_get_parent,
+	.get_dentry		= linvfs_get_dentry,
 };

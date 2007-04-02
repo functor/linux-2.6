@@ -15,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/usb.h>
-#include <linux/delay.h>
 
 #define MAX_INTEL_HEX_RECORD_LENGTH 16
 typedef struct _INTEL_HEX_RECORD
@@ -115,7 +114,6 @@ static int emi26_load_firmware (struct usb_device *dev)
 
 	/* De-assert reset (let the CPU run) */
 	err = emi26_set_reset(dev,0);
-	msleep(250);	/* let device settle */
 
 	/* 2. We upload the FPGA firmware into the EMI
 	 * Note: collect up to 1023 (yes!) bytes and send them with
@@ -152,7 +150,6 @@ static int emi26_load_firmware (struct usb_device *dev)
 			goto wraperr;
 		}
 	}
-	msleep(250);	/* let device settle */
 
 	/* De-assert reset (let the CPU run) */
 	err = emi26_set_reset(dev,0);
@@ -195,7 +192,6 @@ static int emi26_load_firmware (struct usb_device *dev)
 		err("%s - error loading firmware: error = %d", __FUNCTION__, err);
 		goto wraperr;
 	}
-	msleep(250);	/* let device settle */
 
 	/* return 1 to fail the driver inialization
 	 * and give real driver change to load */

@@ -32,8 +32,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/sound.h>
 #include <linux/soundcard.h>
-#include <linux/mutex.h>
-
 
 #include <asm/io.h>
 #include <asm/sgi/hpc3.h>
@@ -94,7 +92,7 @@ struct hal2_codec {
 
 	wait_queue_head_t dma_wait;
 	spinlock_t lock;
-	struct mutex sem;
+	struct semaphore sem;
 
 	int usecount;			/* recording and playback are
 					 * independent */
@@ -1180,7 +1178,7 @@ static ssize_t hal2_read(struct file *file, char *buffer,
 
 	if (!count)
 		return 0;
-	if (mutex_lock_interruptible(&adc->sem))
+	if (down_interruptible(&adc->sem))
 		return -EINTR;
 	if (file->f_flags & O_NONBLOCK) {
 		err = hal2_get_buffer(hal2, buffer, count);
@@ -1219,7 +1217,7 @@ static ssize_t hal2_read(struct file *file, char *buffer,
 			}
 		} while (count > 0 && err >= 0);
 	}
-	mutex_unlock(&adc->sem);
+	up(&adc->sem);
 
 	return err;
 }
@@ -1234,7 +1232,7 @@ static ssize_t hal2_write(struct file *file, const char *buffer,
 
 	if (!count)
 		return 0;
-	if (mutex_lock_interruptible(&dac->sem))
+	if (down_interruptible(&dac->sem))
 		return -EINTR;
 	if (file->f_flags & O_NONBLOCK) {
 		err = hal2_add_buffer(hal2, buf, count);
@@ -1273,7 +1271,7 @@ static ssize_t hal2_write(struct file *file, const char *buffer,
 			}
 		} while (count > 0 && err >= 0);
 	}
-	mutex_unlock(&dac->sem);
+	up(&dac->sem);
 
 	return err;
 }
@@ -1358,20 +1356,20 @@ static int hal2_release(struct inode *inode, struct file *file)
 	if (file->f_mode & FMODE_READ) {
 		struct hal2_codec *adc = &hal2->adc;
 
-		mutex_lock(&adc->sem);
+		down(&adc->sem);
 		hal2_stop_adc(hal2);
 		hal2_free_adc_dmabuf(adc);
 		adc->usecount--;
-		mutex_unlock(&adc->sem);
+		up(&adc->sem);
 	}
 	if (file->f_mode & FMODE_WRITE) {
 		struct hal2_codec *dac = &hal2->dac;
 
-		mutex_lock(&dac->sem);
+		down(&dac->sem);
 		hal2_sync_dac(hal2);
 		hal2_free_dac_dmabuf(dac);
 		dac->usecount--;
-		mutex_unlock(&dac->sem);
+		up(&dac->sem);
 	}
 
 	return 0;
@@ -1402,7 +1400,7 @@ static void hal2_init_codec(struct hal2_codec *codec, struct hpc3_regs *hpc3,
 	codec->pbus.pbusnr = index;
 	codec->pbus.pbus = &hpc3->pbdma[index];
 	init_waitqueue_head(&codec->dma_wait);
-	mutex_init(&codec->sem);
+	init_MUTEX(&codec->sem);
 	spin_lock_init(&codec->lock);
 }
 
@@ -1479,7 +1477,7 @@ static int hal2_init_card(struct hal2_card **phal2, struct hpc3_regs *hpc3)
 	hpc3->pbus_dmacfg[hal2->dac.pbus.pbusnr][0] = 0x8208844;
 	hpc3->pbus_dmacfg[hal2->adc.pbus.pbusnr][0] = 0x8208844;
 
-	if (request_irq(SGI_HPCDMA_IRQ, hal2_interrupt, IRQF_SHARED,
+	if (request_irq(SGI_HPCDMA_IRQ, hal2_interrupt, SA_SHIRQ,
 			hal2str, hal2)) {
 		printk(KERN_ERR "HAL2: Can't get irq %d\n", SGI_HPCDMA_IRQ);
 		ret = -EAGAIN;

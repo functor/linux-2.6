@@ -396,7 +396,7 @@ int		Rw)		/* Read / Write Flag */
  *			1:	error,	 transfer does not complete, I2C transfer
  *						 killed, wait loop terminated.
  */
-static int	SkI2cWait(
+int	SkI2cWait(
 SK_AC	*pAC,	/* Adapter Context */
 SK_IOC	IoC,	/* I/O Context */
 int		Event)	/* complete event to wait for (I2C_READ or I2C_WRITE) */
@@ -481,7 +481,7 @@ SK_IOC	IoC)	/* I/O Context */
  * returns	0:	success
  *			1:	error
  */
-static int SkI2cWrite(
+int SkI2cWrite(
 SK_AC	*pAC,		/* Adapter Context */
 SK_IOC	IoC,		/* I/O Context */
 SK_U32	I2cData,	/* I2C Data to write */
@@ -538,7 +538,7 @@ int		I2cBurst)	/* I2C Burst Flag */
  *		1 if the read is completed
  *		0 if the read must be continued (I2C Bus still allocated)
  */
-static int	SkI2cReadSensor(
+int	SkI2cReadSensor(
 SK_AC		*pAC,	/* Adapter Context */
 SK_IOC		IoC,	/* I/O Context */
 SK_SENSOR	*pSen)	/* Sensor to be read */

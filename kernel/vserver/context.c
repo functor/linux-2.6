@@ -673,7 +673,7 @@ void	exit_vx_info(struct task_struct *p, int code)
 	}
 }
 
-void	exit_vx_info_early(struct task_struct *p, int code)
+void    exit_vx_info_early(struct task_struct *p, int code)
 {
 	struct vx_info *vxi = p->vx_info;
 

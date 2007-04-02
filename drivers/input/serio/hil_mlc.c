@@ -556,7 +556,7 @@ static inline void hilse_setup_input(hil_mlc *mlc, struct hilse_node *node) {
 	do_gettimeofday(&(mlc->instart));
 	mlc->icount = 15;
 	memset(mlc->ipacket, 0, 16 * sizeof(hil_packet));
-	BUG_ON(down_trylock(&(mlc->isem)));
+	if (down_trylock(&(mlc->isem))) BUG();
 
 	return;
 }
@@ -872,8 +872,9 @@ int hil_mlc_register(hil_mlc *mlc) {
 	for (i = 0; i < HIL_MLC_DEVMEM; i++) {
 		struct serio *mlc_serio;
 		hil_mlc_copy_di_scratch(mlc, i);
-		mlc_serio = kzalloc(sizeof(*mlc_serio), GFP_KERNEL);
+		mlc_serio = kmalloc(sizeof(*mlc_serio), GFP_KERNEL);
 		mlc->serio[i] = mlc_serio;
+		memset(mlc_serio, 0, sizeof(*mlc_serio));
 		mlc_serio->id			= hil_mlc_serio_id;
 		mlc_serio->write		= hil_mlc_serio_write;
 		mlc_serio->open			= hil_mlc_serio_open;

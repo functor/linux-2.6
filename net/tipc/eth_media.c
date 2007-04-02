@@ -2,7 +2,7 @@
  * net/tipc/eth_media.c: Ethernet bearer support for TIPC
  * 
  * Copyright (c) 2001-2006, Ericsson AB
- * Copyright (c) 2005-2006, Wind River Systems
+ * Copyright (c) 2005, Wind River Systems
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -98,19 +98,17 @@ static int recv_msg(struct sk_buff *buf, struct net_device *dev,
 	u32 size;
 
 	if (likely(eb_ptr->bearer)) {
-	       if (likely(!dev->promiscuity) ||
-	           !memcmp(buf->mac.raw,dev->dev_addr,ETH_ALEN) ||
-	           !memcmp(buf->mac.raw,dev->broadcast,ETH_ALEN)) {
-		        size = msg_size((struct tipc_msg *)buf->data);
-	                skb_trim(buf, size);
-	        	if (likely(buf->len == size)) {
-		        	buf->next = NULL;
-			        tipc_recv_msg(buf, eb_ptr->bearer);
-			        return TIPC_OK;
-			}
+		size = msg_size((struct tipc_msg *)buf->data);
+		skb_trim(buf, size);
+		if (likely(buf->len == size)) {
+			buf->next = NULL;
+			tipc_recv_msg(buf, eb_ptr->bearer);
+		} else {
+			kfree_skb(buf);
 		}
+	} else {
+		kfree_skb(buf);
 	}
-	kfree_skb(buf);
 	return TIPC_OK;
 }
 
@@ -127,7 +125,8 @@ static int enable_bearer(struct tipc_bearer *tb_ptr)
 
 	/* Find device with specified name */
 
-	while (dev && dev->name && strncmp(dev->name, driver_name, IFNAMSIZ)) {	
+	while (dev && dev->name &&
+	       (memcmp(dev->name, driver_name, strlen(dev->name)))) {
 		dev = dev->next;
 	}
 	if (!dev)
@@ -170,7 +169,7 @@ static int enable_bearer(struct tipc_bearer *tb_ptr)
 
 static void disable_bearer(struct tipc_bearer *tb_ptr)
 {
-	((struct eth_bearer *)tb_ptr->usr_handle)->bearer = NULL;
+	((struct eth_bearer *)tb_ptr->usr_handle)->bearer = 0;
 }
 
 /**
@@ -253,9 +252,7 @@ int tipc_eth_media_start(void)
 	if (eth_started)
 		return -EINVAL;
 
-	bcast_addr.type = htonl(TIPC_MEDIA_TYPE_ETH);
-	memset(&bcast_addr.dev_addr, 0xff, ETH_ALEN);
-
+	memset(&bcast_addr, 0xff, sizeof(bcast_addr));
 	memset(eth_bearers, 0, sizeof(eth_bearers));
 
 	res = tipc_register_media(TIPC_MEDIA_TYPE_ETH, "eth",
@@ -288,7 +285,7 @@ void tipc_eth_media_stop(void)
 	for (i = 0; i < MAX_ETH_BEARERS ; i++) {
 		if (eth_bearers[i].bearer) {
 			eth_bearers[i].bearer->blocked = 1;
-			eth_bearers[i].bearer = NULL;
+			eth_bearers[i].bearer = 0;
 		}
 		if (eth_bearers[i].dev) {
 			dev_remove_pack(&eth_bearers[i].tipc_packet_type);

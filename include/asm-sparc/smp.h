@@ -6,6 +6,7 @@
 #ifndef _SPARC_SMP_H
 #define _SPARC_SMP_H
 
+#include <linux/config.h>
 #include <linux/threads.h>
 #include <asm/head.h>
 #include <asm/btfixup.h>
@@ -80,9 +81,16 @@ static inline int smp_call_function(void (*func)(void *info), void *info, int no
 	return 0;
 }
 
+extern __volatile__ int __cpu_number_map[NR_CPUS];
+extern __volatile__ int __cpu_logical_map[NR_CPUS];
+
 static inline int cpu_logical_map(int cpu)
 {
-	return cpu;
+	return __cpu_logical_map[cpu];
+}
+static inline int cpu_number_map(int cpu)
+{
+	return __cpu_number_map[cpu];
 }
 
 static inline int hard_smp4m_processor_id(void)
@@ -145,8 +153,6 @@ static inline int hard_smp_processor_id(void)
 #define prof_multiplier(__cpu)		cpu_data(__cpu).multiplier
 #define prof_counter(__cpu)		cpu_data(__cpu).counter
 
-void smp_setup_cpu_possible_map(void);
-
 #endif /* !(__ASSEMBLY__) */
 
 /* Sparc specific messages. */
@@ -163,11 +169,7 @@ void smp_setup_cpu_possible_map(void);
 #define MBOX_IDLECPU2         0xFD
 #define MBOX_STOPCPU2         0xFE
 
-#else /* SMP */
-
-#define smp_setup_cpu_possible_map() do { } while (0)
-
-#endif /* !(SMP) */
+#endif /* SMP */
 
 #define NO_PROC_ID            0xFF
 

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/ibm44x_common.c
+ *
  * PPC44x system library
  *
  * Matt Porter <mporter@kernel.crashing.org>
@@ -13,6 +15,7 @@
  * option) any later version.
  *
  */
+#include <linux/config.h>
 #include <linux/time.h>
 #include <linux/types.h>
 #include <linux/serial.h>

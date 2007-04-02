@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/mpc8xx_devices.c
+ *
  * MPC8xx Device descriptions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
@@ -170,18 +172,12 @@ struct platform_device ppc_sys_platform_devices[] = {
 	[MPC8xx_CPM_SMC1] = {
 		.name = "fsl-cpm-smc",
 		.id	= 1,
-		.num_resources	= 3,
+		.num_resources	= 2,
 		.resource = (struct resource[]) {
 			{
 				.name	= "regs",
-				.start	= 0xa80,
-				.end	= 0xa8f,
-				.flags	= IORESOURCE_MEM,
-			},
-			{
-				.name	= "pram",
-				.start	= 0x3e80,
-				.end	= 0x3ebf,
+				.start	= 0xa82,
+				.end	= 0xa91,
 				.flags	= IORESOURCE_MEM,
 			},
 			{
@@ -195,20 +191,13 @@ struct platform_device ppc_sys_platform_devices[] = {
 	[MPC8xx_CPM_SMC2] = {
 		.name = "fsl-cpm-smc",
 		.id	= 2,
-		.num_resources	= 3,
+		.num_resources	= 2,
 		.resource = (struct resource[]) {
 			{
 				.name	= "regs",
-				.start	= 0xa90,
-				.end	= 0xa9f,
+				.start	= 0xa92,
+				.end	= 0xaa1,
 				.flags	= IORESOURCE_MEM,
-			},
-			{
- 				.name	= "pram",
- 				.start	= 0x3f80,
- 				.end	= 0x3fbf,
- 				.flags	= IORESOURCE_MEM,
-
 			},
 			{
 				.name	= "interrupt",
@@ -218,14 +207,6 @@ struct platform_device ppc_sys_platform_devices[] = {
 			},
 		},
 	},
-
-        [MPC8xx_MDIO_FEC] = {
-                .name = "fsl-cpm-fec-mdio",
-                .id = 0,
-                .num_resources = 0,
-
-        },
-
 };
 
 static int __init mach_mpc8xx_fixup(struct platform_device *pdev)

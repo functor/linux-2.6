@@ -159,9 +159,7 @@ struct svc_rqst {
 						 * determine what device number
 						 * to report (real or virtual)
 						 */
-	int			rq_sendfile_ok; /* turned off in gss privacy
-						 * to prevent encrypting page
-						 * cache pages */
+
 	wait_queue_head_t	rq_wait;	/* synchronization */
 };
 
@@ -199,16 +197,15 @@ svc_take_res_page(struct svc_rqst *rqstp)
 	return rqstp->rq_respages[rqstp->rq_resused++];
 }
 
-static inline void svc_take_page(struct svc_rqst *rqstp)
+static inline int svc_take_page(struct svc_rqst *rqstp)
 {
-	if (rqstp->rq_arghi <= rqstp->rq_argused) {
-		WARN_ON(1);
-		return;
-	}
+	if (rqstp->rq_arghi <= rqstp->rq_argused)
+		return -ENOMEM;
 	rqstp->rq_arghi--;
 	rqstp->rq_respages[rqstp->rq_resused] =
 		rqstp->rq_argpages[rqstp->rq_arghi];
 	rqstp->rq_resused++;
+	return 0;
 }
 
 static inline void svc_pushback_allpages(struct svc_rqst *rqstp)

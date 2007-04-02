@@ -16,6 +16,7 @@
  * - move bus probe to a kernel thread
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -35,12 +36,12 @@
 #include <linux/spinlock.h>
 #include <linux/completion.h>
 #include <linux/device.h>
+#include <linux/devfs_fs_kernel.h>
 
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
 #ifdef CONFIG_PPC
 #include <asm/prom.h>
-#include <asm/machdep.h>
 #endif
 
 
@@ -79,7 +80,7 @@ static struct adb_driver *adb_driver_list[] = {
 static struct class *adb_dev_class;
 
 struct adb_driver *adb_controller;
-BLOCKING_NOTIFIER_HEAD(adb_client_list);
+struct notifier_block *adb_client_list = NULL;
 static int adb_got_sleep;
 static int adb_inited;
 static pid_t adb_probe_task_pid;
@@ -293,7 +294,7 @@ int __init adb_init(void)
 	int i;
 
 #ifdef CONFIG_PPC32
-	if (!machine_is(chrp) && !machine_is(powermac))
+	if ( (_machine != _MACH_chrp) && (_machine != _MACH_Pmac) )
 		return 0;
 #endif
 #ifdef CONFIG_MAC
@@ -353,8 +354,7 @@ adb_notify_sleep(struct pmu_sleep_notifier *self, int when)
 		/* Stop autopoll */
 		if (adb_controller->autopoll)
 			adb_controller->autopoll(0);
-		ret = blocking_notifier_call_chain(&adb_client_list,
-				ADB_MSG_POWERDOWN, NULL);
+		ret = notifier_call_chain(&adb_client_list, ADB_MSG_POWERDOWN, NULL);
 		if (ret & NOTIFY_STOP_MASK) {
 			up(&adb_probe_mutex);
 			return PBOOK_SLEEP_REFUSE;
@@ -391,8 +391,7 @@ do_adb_reset_bus(void)
 	if (adb_controller->autopoll)
 		adb_controller->autopoll(0);
 
-	nret = blocking_notifier_call_chain(&adb_client_list,
-			ADB_MSG_PRE_RESET, NULL);
+	nret = notifier_call_chain(&adb_client_list, ADB_MSG_PRE_RESET, NULL);
 	if (nret & NOTIFY_STOP_MASK) {
 		if (adb_controller->autopoll)
 			adb_controller->autopoll(autopoll_devs);
@@ -427,8 +426,7 @@ do_adb_reset_bus(void)
 	}
 	up(&adb_handler_sem);
 
-	nret = blocking_notifier_call_chain(&adb_client_list,
-			ADB_MSG_POST_RESET, NULL);
+	nret = notifier_call_chain(&adb_client_list, ADB_MSG_POST_RESET, NULL);
 	if (nret & NOTIFY_STOP_MASK)
 		return -EBUSY;
 	
@@ -901,6 +899,8 @@ adbdev_init(void)
 		printk(KERN_ERR "adb: unable to get major %d\n", ADB_MAJOR);
 		return;
 	}
+
+	devfs_mk_cdev(MKDEV(ADB_MAJOR, 0), S_IFCHR | S_IRUSR | S_IWUSR, "adb");
 
 	adb_dev_class = class_create(THIS_MODULE, "adb");
 	if (IS_ERR(adb_dev_class))

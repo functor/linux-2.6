@@ -1,9 +1,6 @@
 /*
  * linux/fs/ufs/namei.c
  *
- * Migration to usage of "page cache" on May 2006 by
- * Evgeniy Dushistov <dushistov@mail.ru> based on ext2 code base.
- *
  * Copyright (C) 1998
  * Daniel Pirkl <daniel.pirkl@email.cz>
  * Charles University, Faculty of Mathematics and Physics
@@ -31,8 +28,32 @@
 #include <linux/fs.h>
 #include <linux/ufs_fs.h>
 #include <linux/smp_lock.h>
+#include <linux/buffer_head.h>
 #include "swab.h"	/* will go away - see comment in mknod() */
 #include "util.h"
+
+/*
+#undef UFS_NAMEI_DEBUG
+*/
+#define UFS_NAMEI_DEBUG
+
+#ifdef UFS_NAMEI_DEBUG
+#define UFSD(x) printk("(%s, %d), %s: ", __FILE__, __LINE__, __FUNCTION__); printk x;
+#else
+#define UFSD(x)
+#endif
+
+static inline void ufs_inc_count(struct inode *inode)
+{
+	inode->i_nlink++;
+	mark_inode_dirty(inode);
+}
+
+static inline void ufs_dec_count(struct inode *inode)
+{
+	inode->i_nlink--;
+	mark_inode_dirty(inode);
+}
 
 static inline int ufs_add_nondir(struct dentry *dentry, struct inode *inode)
 {
@@ -41,7 +62,7 @@ static inline int ufs_add_nondir(struct dentry *dentry, struct inode *inode)
 		d_instantiate(dentry, inode);
 		return 0;
 	}
-	inode_dec_link_count(inode);
+	ufs_dec_count(inode);
 	iput(inode);
 	return err;
 }
@@ -79,13 +100,8 @@ static struct dentry *ufs_lookup(struct inode * dir, struct dentry *dentry, stru
 static int ufs_create (struct inode * dir, struct dentry * dentry, int mode,
 		struct nameidata *nd)
 {
-	struct inode *inode;
-	int err;
-
-	UFSD("BEGIN\n");
-	inode = ufs_new_inode(dir, mode);
-	err = PTR_ERR(inode);
-
+	struct inode * inode = ufs_new_inode(dir, mode);
+	int err = PTR_ERR(inode);
 	if (!IS_ERR(inode)) {
 		inode->i_op = &ufs_file_inode_operations;
 		inode->i_fop = &ufs_file_operations;
@@ -95,7 +111,6 @@ static int ufs_create (struct inode * dir, struct dentry * dentry, int mode,
 		err = ufs_add_nondir(dentry, inode);
 		unlock_kernel();
 	}
-	UFSD("END: err=%d\n", err);
 	return err;
 }
 
@@ -129,7 +144,7 @@ static int ufs_symlink (struct inode * dir, struct dentry * dentry,
 	struct inode * inode;
 
 	if (l > sb->s_blocksize)
-		goto out_notlocked;
+		goto out;
 
 	lock_kernel();
 	inode = ufs_new_inode(dir, S_IFLNK | S_IRWXUGO);
@@ -155,11 +170,10 @@ static int ufs_symlink (struct inode * dir, struct dentry * dentry,
 	err = ufs_add_nondir(dentry, inode);
 out:
 	unlock_kernel();
-out_notlocked:
 	return err;
 
 out_fail:
-	inode_dec_link_count(inode);
+	ufs_dec_count(inode);
 	iput(inode);
 	goto out;
 }
@@ -177,7 +191,7 @@ static int ufs_link (struct dentry * old_dentry, struct inode * dir,
 	}
 
 	inode->i_ctime = CURRENT_TIME_SEC;
-	inode_inc_link_count(inode);
+	ufs_inc_count(inode);
 	atomic_inc(&inode->i_count);
 
 	error = ufs_add_nondir(dentry, inode);
@@ -194,7 +208,7 @@ static int ufs_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 		goto out;
 
 	lock_kernel();
-	inode_inc_link_count(dir);
+	ufs_inc_count(dir);
 
 	inode = ufs_new_inode(dir, S_IFDIR|mode);
 	err = PTR_ERR(inode);
@@ -203,9 +217,8 @@ static int ufs_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 
 	inode->i_op = &ufs_dir_inode_operations;
 	inode->i_fop = &ufs_dir_operations;
-	inode->i_mapping->a_ops = &ufs_aops;
 
-	inode_inc_link_count(inode);
+	ufs_inc_count(inode);
 
 	err = ufs_make_empty(inode, dir);
 	if (err)
@@ -221,34 +234,36 @@ out:
 	return err;
 
 out_fail:
-	inode_dec_link_count(inode);
-	inode_dec_link_count(inode);
+	ufs_dec_count(inode);
+	ufs_dec_count(inode);
 	iput (inode);
 out_dir:
-	inode_dec_link_count(dir);
+	ufs_dec_count(dir);
 	unlock_kernel();
 	goto out;
 }
 
-static int ufs_unlink(struct inode *dir, struct dentry *dentry)
+static int ufs_unlink(struct inode * dir, struct dentry *dentry)
 {
 	struct inode * inode = dentry->d_inode;
-	struct ufs_dir_entry *de;
-	struct page *page;
+	struct buffer_head * bh;
+	struct ufs_dir_entry * de;
 	int err = -ENOENT;
 
-	de = ufs_find_entry(dir, dentry, &page);
+	lock_kernel();
+	de = ufs_find_entry (dentry, &bh);
 	if (!de)
 		goto out;
 
-	err = ufs_delete_entry(dir, de, page);
+	err = ufs_delete_entry (dir, de, bh);
 	if (err)
 		goto out;
 
 	inode->i_ctime = dir->i_ctime;
-	inode_dec_link_count(inode);
+	ufs_dec_count(inode);
 	err = 0;
 out:
+	unlock_kernel();
 	return err;
 }
 
@@ -262,96 +277,88 @@ static int ufs_rmdir (struct inode * dir, struct dentry *dentry)
 		err = ufs_unlink(dir, dentry);
 		if (!err) {
 			inode->i_size = 0;
-			inode_dec_link_count(inode);
-			inode_dec_link_count(dir);
+			ufs_dec_count(inode);
+			ufs_dec_count(dir);
 		}
 	}
 	unlock_kernel();
 	return err;
 }
 
-static int ufs_rename(struct inode *old_dir, struct dentry *old_dentry,
-		      struct inode *new_dir, struct dentry *new_dentry)
+static int ufs_rename (struct inode * old_dir, struct dentry * old_dentry,
+	struct inode * new_dir,	struct dentry * new_dentry )
 {
 	struct inode *old_inode = old_dentry->d_inode;
 	struct inode *new_inode = new_dentry->d_inode;
-	struct page *dir_page = NULL;
-	struct ufs_dir_entry * dir_de = NULL;
-	struct page *old_page;
+	struct buffer_head *dir_bh = NULL;
+	struct ufs_dir_entry *dir_de = NULL;
+	struct buffer_head *old_bh;
 	struct ufs_dir_entry *old_de;
 	int err = -ENOENT;
 
-	old_de = ufs_find_entry(old_dir, old_dentry, &old_page);
+	lock_kernel();
+	old_de = ufs_find_entry (old_dentry, &old_bh);
 	if (!old_de)
 		goto out;
 
 	if (S_ISDIR(old_inode->i_mode)) {
 		err = -EIO;
-		dir_de = ufs_dotdot(old_inode, &dir_page);
+		dir_de = ufs_dotdot(old_inode, &dir_bh);
 		if (!dir_de)
 			goto out_old;
 	}
 
 	if (new_inode) {
-		struct page *new_page;
+		struct buffer_head *new_bh;
 		struct ufs_dir_entry *new_de;
 
 		err = -ENOTEMPTY;
-		if (dir_de && !ufs_empty_dir(new_inode))
+		if (dir_de && !ufs_empty_dir (new_inode))
 			goto out_dir;
-
 		err = -ENOENT;
-		new_de = ufs_find_entry(new_dir, new_dentry, &new_page);
+		new_de = ufs_find_entry (new_dentry, &new_bh);
 		if (!new_de)
 			goto out_dir;
-		inode_inc_link_count(old_inode);
-		ufs_set_link(new_dir, new_de, new_page, old_inode);
+		ufs_inc_count(old_inode);
+		ufs_set_link(new_dir, new_de, new_bh, old_inode);
 		new_inode->i_ctime = CURRENT_TIME_SEC;
 		if (dir_de)
 			new_inode->i_nlink--;
-		inode_dec_link_count(new_inode);
+		ufs_dec_count(new_inode);
 	} else {
 		if (dir_de) {
 			err = -EMLINK;
 			if (new_dir->i_nlink >= UFS_LINK_MAX)
 				goto out_dir;
 		}
-		inode_inc_link_count(old_inode);
+		ufs_inc_count(old_inode);
 		err = ufs_add_link(new_dentry, old_inode);
 		if (err) {
-			inode_dec_link_count(old_inode);
+			ufs_dec_count(old_inode);
 			goto out_dir;
 		}
 		if (dir_de)
-			inode_inc_link_count(new_dir);
+			ufs_inc_count(new_dir);
 	}
 
-	/*
-	 * Like most other Unix systems, set the ctime for inodes on a
- 	 * rename.
-	 * inode_dec_link_count() will mark the inode dirty.
-	 */
-	old_inode->i_ctime = CURRENT_TIME_SEC;
+	ufs_delete_entry (old_dir, old_de, old_bh);
 
-	ufs_delete_entry(old_dir, old_de, old_page);
-	inode_dec_link_count(old_inode);
+	ufs_dec_count(old_inode);
 
 	if (dir_de) {
-		ufs_set_link(old_inode, dir_de, dir_page, new_dir);
-		inode_dec_link_count(old_dir);
+		ufs_set_link(old_inode, dir_de, dir_bh, new_dir);
+		ufs_dec_count(old_dir);
 	}
+	unlock_kernel();
 	return 0;
 
-
 out_dir:
-	if (dir_de) {
-		kunmap(dir_page);
-		page_cache_release(dir_page);
-	}
+	if (dir_de)
+		brelse(dir_bh);
 out_old:
-	kunmap(old_page);
-	page_cache_release(old_page);
+	brelse (old_bh);
 out:
+	unlock_kernel();
 	return err;
 }
 

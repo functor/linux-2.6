@@ -26,14 +26,18 @@
 #include <linux/init.h>
 #include <linux/hash.h>
 #include <linux/highmem.h>
-#include <linux/blktrace_api.h>
 #include <asm/tlbflush.h>
 
 static mempool_t *page_pool, *isa_page_pool;
 
-static void *mempool_alloc_pages_isa(gfp_t gfp_mask, void *data)
+static void *page_pool_alloc_isa(gfp_t gfp_mask, void *data)
 {
-	return mempool_alloc_pages(gfp_mask | GFP_DMA, data);
+	return alloc_page(gfp_mask | GFP_DMA);
+}
+
+static void page_pool_free(void *page, void *data)
+{
+	__free_page(page);
 }
 
 /*
@@ -45,6 +49,11 @@ static void *mempool_alloc_pages_isa(gfp_t gfp_mask, void *data)
  *  n means that there are (n-1) current users of it.
  */
 #ifdef CONFIG_HIGHMEM
+
+static void *page_pool_alloc(gfp_t gfp_mask, void *data)
+{
+	return alloc_page(gfp_mask);
+}
 
 static int pkmap_count[LAST_PKMAP];
 static unsigned int last_pkmap_nr;
@@ -74,7 +83,8 @@ static void flush_all_zero_pkmaps(void)
 		pkmap_count[i] = 0;
 
 		/* sanity check */
-		BUG_ON(pte_none(pkmap_page_table[i]));
+		if (pte_none(pkmap_page_table[i]))
+			BUG();
 
 		/*
 		 * Don't need an atomic fetch-and-clear op here;
@@ -142,17 +152,6 @@ start:
 	return vaddr;
 }
 
-#ifdef CONFIG_XEN
-void kmap_flush_unused(void)
-{
-	spin_lock(&kmap_lock);
-	flush_all_zero_pkmaps();
-	spin_unlock(&kmap_lock);
-}
-
-EXPORT_SYMBOL(kmap_flush_unused);
-#endif
-
 void fastcall *kmap_high(struct page *page)
 {
 	unsigned long vaddr;
@@ -168,7 +167,8 @@ void fastcall *kmap_high(struct page *page)
 	if (!vaddr)
 		vaddr = map_new_virtual(page);
 	pkmap_count[PKMAP_NR(vaddr)]++;
-	BUG_ON(pkmap_count[PKMAP_NR(vaddr)] < 2);
+	if (pkmap_count[PKMAP_NR(vaddr)] < 2)
+		BUG();
 	spin_unlock(&kmap_lock);
 	return (void*) vaddr;
 }
@@ -183,7 +183,8 @@ void fastcall kunmap_high(struct page *page)
 
 	spin_lock(&kmap_lock);
 	vaddr = (unsigned long)page_address(page);
-	BUG_ON(!vaddr);
+	if (!vaddr)
+		BUG();
 	nr = PKMAP_NR(vaddr);
 
 	/*
@@ -227,8 +228,9 @@ static __init int init_emergency_pool(void)
 	if (!i.totalhigh)
 		return 0;
 
-	page_pool = mempool_create_page_pool(POOL_SIZE, 0);
-	BUG_ON(!page_pool);
+	page_pool = mempool_create(POOL_SIZE, page_pool_alloc, page_pool_free, NULL);
+	if (!page_pool)
+		BUG();
 	printk("highmem bounce pool size: %d pages\n", POOL_SIZE);
 
 	return 0;
@@ -269,9 +271,9 @@ int init_emergency_isa_pool(void)
 	if (isa_page_pool)
 		return 0;
 
-	isa_page_pool = mempool_create(ISA_POOL_SIZE, mempool_alloc_pages_isa,
-				       mempool_free_pages, (void *) 0);
-	BUG_ON(!isa_page_pool);
+	isa_page_pool = mempool_create(ISA_POOL_SIZE, page_pool_alloc_isa, page_pool_free, NULL);
+	if (!isa_page_pool)
+		BUG();
 
 	printk("isa bounce pool size: %d pages\n", ISA_POOL_SIZE);
 	return 0;
@@ -326,15 +328,15 @@ static void bounce_end_io(struct bio *bio, mempool_t *pool, int err)
 		if (bvec->bv_page == org_vec->bv_page)
 			continue;
 
-		dec_zone_page_state(bvec->bv_page, NR_BOUNCE);
-		mempool_free(bvec->bv_page, pool);
+		mempool_free(bvec->bv_page, pool);	
+		dec_page_state(nr_bounce);
 	}
 
 	bio_endio(bio_orig, bio_orig->bi_size, err);
 	bio_put(bio);
 }
 
-static int bounce_end_io_write(struct bio *bio, unsigned int bytes_done, int err)
+static int bounce_end_io_write(struct bio *bio, unsigned int bytes_done,int err)
 {
 	if (bio->bi_size)
 		return 1;
@@ -381,7 +383,7 @@ static int bounce_end_io_read_isa(struct bio *bio, unsigned int bytes_done, int 
 }
 
 static void __blk_queue_bounce(request_queue_t *q, struct bio **bio_orig,
-			       mempool_t *pool)
+			mempool_t *pool)
 {
 	struct page *page;
 	struct bio *bio = NULL;
@@ -408,7 +410,7 @@ static void __blk_queue_bounce(request_queue_t *q, struct bio **bio_orig,
 		to->bv_page = mempool_alloc(pool, q->bounce_gfp);
 		to->bv_len = from->bv_len;
 		to->bv_offset = from->bv_offset;
-		inc_zone_page_state(to->bv_page, NR_BOUNCE);
+		inc_page_state(nr_bounce);
 
 		if (rw == WRITE) {
 			char *vto, *vfrom;
@@ -480,8 +482,6 @@ void blk_queue_bounce(request_queue_t *q, struct bio **bio_orig)
 		BUG_ON(!isa_page_pool);
 		pool = isa_page_pool;
 	}
-
-	blk_add_trace_bio(q, *bio_orig, BLK_TA_BOUNCE);
 
 	/*
 	 * slow path

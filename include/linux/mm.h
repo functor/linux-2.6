@@ -7,6 +7,7 @@
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 #include <linux/gfp.h>
 #include <linux/list.h>
 #include <linux/mmzone.h>
@@ -14,8 +15,6 @@
 #include <linux/prio_tree.h>
 #include <linux/fs.h>
 #include <linux/mutex.h>
-#include <linux/debug_locks.h>
-#include <linux/backing-dev.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -38,6 +37,7 @@ extern int sysctl_legacy_va_layout;
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
+#include <asm/atomic.h>
 
 #define nth_page(page,n) pfn_to_page(page_to_pfn((page)) + (n))
 
@@ -146,6 +146,7 @@ extern unsigned int kobjsize(const void *objp);
 
 #define VM_GROWSDOWN	0x00000100	/* general info on the segment */
 #define VM_GROWSUP	0x00000200
+#define VM_SHM		0x00000000	/* Means nothing: delete it later */
 #define VM_PFNMAP	0x00000400	/* Page-ranges managed without "struct page", just pure PFN */
 #define VM_DENYWRITE	0x00000800	/* ETXTBSY on write attempts.. */
 
@@ -165,9 +166,6 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_NONLINEAR	0x00800000	/* Is non-linear (remap_file_pages) */
 #define VM_MAPPED_COPY	0x01000000	/* T if mapped copy of data (nommu mmap) */
 #define VM_INSERTPAGE	0x02000000	/* The vma has had "vm_insert_page()" done on it */
-#ifdef CONFIG_XEN
-#define VM_FOREIGN	0x04000000	/* Has pages belonging to another VM */
-#endif
 
 #ifndef VM_STACK_DEFAULT_FLAGS		/* arch can override this */
 #define VM_STACK_DEFAULT_FLAGS VM_DATA_DEFAULT_FLAGS
@@ -202,16 +200,10 @@ struct vm_operations_struct {
 	void (*close)(struct vm_area_struct * area);
 	struct page * (*nopage)(struct vm_area_struct * area, unsigned long address, int *type);
 	int (*populate)(struct vm_area_struct * area, unsigned long address, unsigned long len, pgprot_t prot, unsigned long pgoff, int nonblock);
-
-	/* notification that a previously read-only page is about to become
-	 * writable, if an error is returned it will cause a SIGBUS */
-	int (*page_mkwrite)(struct vm_area_struct *vma, struct page *page);
 #ifdef CONFIG_NUMA
 	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
 	struct mempolicy *(*get_policy)(struct vm_area_struct *vma,
 					unsigned long addr);
-	int (*migrate)(struct vm_area_struct *vma, const nodemask_t *from,
-		const nodemask_t *to, unsigned long flags);
 #endif
 };
 
@@ -293,34 +285,43 @@ struct page {
  *
  * Also, many kernel routines increase the page count before a critical
  * routine so they can be sure the page doesn't go away from under them.
+ *
+ * Since 2.6.6 (approx), a free page has ->_count = -1.  This is so that we
+ * can use atomic_add_negative(-1, page->_count) to detect when the page
+ * becomes free and so that we can also use atomic_inc_and_test to atomically
+ * detect when we just tried to grab a ref on a page which some other CPU has
+ * already deemed to be freeable.
+ *
+ * NO code should make assumptions about this internal detail!  Use the provided
+ * macros which retain the old rules: page_count(page) == 0 is a free page.
  */
 
 /*
  * Drop a ref, return true if the logical refcount fell to zero (the page has
  * no users)
  */
-static inline int put_page_testzero(struct page *page)
-{
-	BUG_ON(atomic_read(&page->_count) == 0);
-	return atomic_dec_and_test(&page->_count);
-}
+#define put_page_testzero(p)				\
+	({						\
+		BUG_ON(atomic_read(&(p)->_count) == -1);\
+		atomic_add_negative(-1, &(p)->_count);	\
+	})
 
 /*
- * Try to grab a ref unless the page has a refcount of zero, return false if
- * that is the case.
+ * Grab a ref, return true if the page previously had a logical refcount of
+ * zero.  ie: returns true if we just grabbed an already-deemed-to-be-free page
  */
-static inline int get_page_unless_zero(struct page *page)
-{
-	return atomic_inc_not_zero(&page->_count);
-}
+#define get_page_testone(p)	atomic_inc_and_test(&(p)->_count)
+
+#define set_page_count(p,v) 	atomic_set(&(p)->_count, (v) - 1)
+#define __put_page(p)		atomic_dec(&(p)->_count)
 
 extern void FASTCALL(__page_cache_release(struct page *));
 
 static inline int page_count(struct page *page)
 {
-	if (unlikely(PageCompound(page)))
+	if (PageCompound(page))
 		page = (struct page *)page_private(page);
-	return atomic_read(&page->_count);
+	return atomic_read(&page->_count) + 1;
 }
 
 static inline void get_page(struct page *page)
@@ -330,19 +331,7 @@ static inline void get_page(struct page *page)
 	atomic_inc(&page->_count);
 }
 
-/*
- * Setup the page count before being freed into the page allocator for
- * the first time (boot or memory hotplug)
- */
-static inline void init_page_count(struct page *page)
-{
-	atomic_set(&page->_count, 1);
-}
-
 void put_page(struct page *page);
-void put_pages_list(struct list_head *pages);
-
-void split_page(struct page *page, unsigned int order);
 
 /*
  * Multiple processes may "see" the same page. E.g. for untouched
@@ -475,13 +464,10 @@ static inline unsigned long page_zonenum(struct page *page)
 struct zone;
 extern struct zone *zone_table[];
 
-static inline int page_zone_id(struct page *page)
-{
-	return (page->flags >> ZONETABLE_PGSHIFT) & ZONETABLE_MASK;
-}
 static inline struct zone *page_zone(struct page *page)
 {
-	return zone_table[page_zone_id(page)];
+	return zone_table[(page->flags >> ZONETABLE_PGSHIFT) &
+			ZONETABLE_MASK];
 }
 
 static inline unsigned long page_to_nid(struct page *page)
@@ -519,11 +505,6 @@ static inline void set_page_links(struct page *page, unsigned long zone,
 	set_page_node(page, node);
 	set_page_section(page, pfn_to_section_nr(pfn));
 }
-
-/*
- * Some inline functions in vmstat.h depend on page_zone()
- */
-#include <linux/vmstat.h>
 
 #ifndef CONFIG_DISCONTIGMEM
 /* The array of struct pages - for discontigmem use pgdat->lmem_map */
@@ -806,39 +787,6 @@ struct shrinker;
 extern struct shrinker *set_shrinker(int, shrinker_t);
 extern void remove_shrinker(struct shrinker *shrinker);
 
-/*
- * Some shared mappigns will want the pages marked read-only
- * to track write events. If so, we'll downgrade vm_page_prot
- * to the private version (using protection_map[] without the
- * VM_SHARED bit).
- */
-static inline int vma_wants_writenotify(struct vm_area_struct *vma)
-{
-	unsigned int vm_flags = vma->vm_flags;
-
-	/* If it was private or non-writable, the write bit is already clear */
-	if ((vm_flags & (VM_WRITE|VM_SHARED)) != ((VM_WRITE|VM_SHARED)))
-		return 0;
-
-	/* The backer wishes to know when pages are first written to? */
-	if (vma->vm_ops && vma->vm_ops->page_mkwrite)
-		return 1;
-
-	/* The open routine did something to the protections already? */
-	if (pgprot_val(vma->vm_page_prot) !=
-	    pgprot_val(protection_map[vm_flags &
-		    (VM_READ|VM_WRITE|VM_EXEC|VM_SHARED)]))
-		return 0;
-
-	/* Specialty mapping? */
-	if (vm_flags & (VM_PFNMAP|VM_INSERTPAGE))
-		return 0;
-
-	/* Can the mapping track the dirty pages? */
-	return vma->vm_file && vma->vm_file->f_mapping &&
-		mapping_cap_account_dirty(vma->vm_file->f_mapping);
-}
-
 extern pte_t *FASTCALL(get_locked_pte(struct mm_struct *mm, unsigned long addr, spinlock_t **ptl));
 
 int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address);
@@ -967,19 +915,7 @@ extern struct vm_area_struct *copy_vma(struct vm_area_struct **,
 extern void exit_mmap(struct mm_struct *);
 extern int may_expand_vm(struct mm_struct *mm, unsigned long npages);
 
-extern unsigned long get_unmapped_area_prot(struct file *, unsigned long, unsigned long, unsigned long, unsigned long, int);
-
-
-static inline unsigned long get_unmapped_area(struct file * file, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags)
-{
-	return get_unmapped_area_prot(file, addr, len, pgoff, flags, 0);
-}
-
-extern int install_special_mapping(struct mm_struct *mm,
-				   unsigned long addr, unsigned long len,
-				   unsigned long vm_flags, pgprot_t pgprot,
-				   struct page **pages);
+extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 
 extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -1031,7 +967,7 @@ unsigned long page_cache_readahead(struct address_space *mapping,
 			  struct file *filp,
 			  pgoff_t offset,
 			  unsigned long size);
-void handle_ra_miss(struct address_space *mapping,
+void handle_ra_miss(struct address_space *mapping, 
 		    struct file_ra_state *ra, pgoff_t offset);
 unsigned long max_sane_readahead(unsigned long nr);
 
@@ -1062,7 +998,6 @@ static inline unsigned long vma_pages(struct vm_area_struct *vma)
 	return (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 }
 
-pgprot_t vm_get_page_prot(unsigned long vm_flags);
 struct vm_area_struct *find_extend_vma(struct mm_struct *, unsigned long addr);
 struct page *vmalloc_to_page(void *addr);
 unsigned long vmalloc_to_pfn(void *addr);
@@ -1076,13 +1011,6 @@ struct page *follow_page(struct vm_area_struct *, unsigned long address,
 #define FOLL_TOUCH	0x02	/* mark page accessed */
 #define FOLL_GET	0x04	/* do get_page on page */
 #define FOLL_ANON	0x08	/* give ZERO_PAGE if no pgtable */
-
-#ifdef CONFIG_XEN
-typedef int (*pte_fn_t)(pte_t *pte, struct page *pmd_page, unsigned long addr,
-			void *data);
-extern int apply_to_page_range(struct mm_struct *mm, unsigned long address,
-			       unsigned long size, pte_fn_t fn, void *data);
-#endif
 
 #ifdef CONFIG_PROC_FS
 void vm_stat_account(struct mm_struct *, unsigned long, struct file *, long);
@@ -1098,8 +1026,8 @@ static inline void
 kernel_map_pages(struct page *page, int numpages, int enable)
 {
 	if (!PageHighMem(page) && !enable)
-		debug_check_no_locks_freed(page_address(page),
-					   numpages * PAGE_SIZE);
+		mutex_debug_check_no_locks_freed(page_address(page),
+						 numpages * PAGE_SIZE);
 }
 #endif
 
@@ -1117,7 +1045,7 @@ int in_gate_area_no_task(unsigned long addr);
 
 int drop_caches_sysctl_handler(struct ctl_table *, int, struct file *,
 					void __user *, size_t *, loff_t *);
-unsigned long shrink_slab(unsigned long scanned, gfp_t gfp_mask,
+int shrink_slab(unsigned long scanned, gfp_t gfp_mask,
 			unsigned long lru_pages);
 void drop_pagecache(void);
 void drop_slab(void);
@@ -1127,8 +1055,6 @@ void drop_slab(void);
 #else
 extern int randomize_va_space;
 #endif
-
-const char *arch_vma_name(struct vm_area_struct *vma);
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

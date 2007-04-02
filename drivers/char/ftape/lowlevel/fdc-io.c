@@ -26,6 +26,7 @@
  *      Linux.
  */
 
+#include <linux/config.h> /* for CONFIG_FT_* */
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/ioport.h>
@@ -606,7 +607,7 @@ void fdc_reset(void)
 
 	fdc_mode = fdc_idle;
 
-	/*  maybe the spin_lock_irq* pair is not necessary, BUT:
+	/*  maybe the cli()/sti() pair is not necessary, BUT:
 	 *  the following line MUST be here. Otherwise fdc_interrupt_wait()
 	 *  won't wait. Note that fdc_reset() is called from 
 	 *  ftape_dumb_stop() when the fdc is busy transferring data. In this
@@ -1267,7 +1268,7 @@ static int fdc_grab_irq_and_dma(void)
 		/*  Get fast interrupt handler.
 		 */
 		if (request_irq(fdc.irq, ftape_interrupt,
-				IRQF_DISABLED, "ft", ftape_id)) {
+				SA_INTERRUPT, "ft", ftape_id)) {
 			TRACE_ABORT(-EIO, ft_t_bug,
 				    "Unable to grab IRQ%d for ftape driver",
 				    fdc.irq);

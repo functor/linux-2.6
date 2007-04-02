@@ -12,6 +12,7 @@
  * for more details.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -65,7 +66,7 @@ static const struct font_desc *fonts[] = {
 #endif
 };
 
-#define num_fonts ARRAY_SIZE(fonts)
+#define num_fonts (sizeof(fonts)/sizeof(*fonts))
 
 #ifdef NO_FONTS
 #error No fonts configured.

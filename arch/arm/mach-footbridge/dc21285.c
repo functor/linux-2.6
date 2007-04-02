@@ -35,6 +35,7 @@
 
 extern int setup_arm_irq(int, struct irqaction *);
 extern void pcibios_report_status(u_int status_mask, int warn);
+extern void register_isa_ports(unsigned int, unsigned int, unsigned int);
 
 static unsigned long
 dc21285_base_address(struct pci_bus *bus, unsigned int devfn)
@@ -254,11 +255,13 @@ int __init dc21285_setup(int nr, struct pci_sys_data *sys)
 	if (nr || !footbridge_cfn_mode())
 		return 0;
 
-	res = kzalloc(sizeof(struct resource) * 2, GFP_KERNEL);
+	res = kmalloc(sizeof(struct resource) * 2, GFP_KERNEL);
 	if (!res) {
 		printk("out of memory for root bus resources");
 		return 0;
 	}
+
+	memset(res, 0, sizeof(struct resource) * 2);
 
 	res[0].flags = IORESOURCE_MEM;
 	res[0].name  = "Footbridge non-prefetch";
@@ -331,15 +334,15 @@ void __init dc21285_preinit(void)
 	/*
 	 * We don't care if these fail.
 	 */
-	request_irq(IRQ_PCI_SERR, dc21285_serr_irq, IRQF_DISABLED,
+	request_irq(IRQ_PCI_SERR, dc21285_serr_irq, SA_INTERRUPT,
 		    "PCI system error", &serr_timer);
-	request_irq(IRQ_PCI_PERR, dc21285_parity_irq, IRQF_DISABLED,
+	request_irq(IRQ_PCI_PERR, dc21285_parity_irq, SA_INTERRUPT,
 		    "PCI parity error", &perr_timer);
-	request_irq(IRQ_PCI_ABORT, dc21285_abort_irq, IRQF_DISABLED,
+	request_irq(IRQ_PCI_ABORT, dc21285_abort_irq, SA_INTERRUPT,
 		    "PCI abort", NULL);
-	request_irq(IRQ_DISCARD_TIMER, dc21285_discard_irq, IRQF_DISABLED,
+	request_irq(IRQ_DISCARD_TIMER, dc21285_discard_irq, SA_INTERRUPT,
 		    "Discard timer", NULL);
-	request_irq(IRQ_PCI_DPERR, dc21285_dparity_irq, IRQF_DISABLED,
+	request_irq(IRQ_PCI_DPERR, dc21285_dparity_irq, SA_INTERRUPT,
 		    "PCI data parity", NULL);
 
 	if (cfn_mode) {

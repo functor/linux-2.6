@@ -16,6 +16,7 @@
 #include <asm/ccwdev.h>
 #include <asm/debug.h>
 #include <asm/idals.h>
+#include <linux/config.h>
 #include <linux/blkdev.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -249,7 +250,6 @@ extern void tape_free_request(struct tape_request *);
 extern int tape_do_io(struct tape_device *, struct tape_request *);
 extern int tape_do_io_async(struct tape_device *, struct tape_request *);
 extern int tape_do_io_interruptible(struct tape_device *, struct tape_request *);
-extern int tape_cancel_io(struct tape_device *, struct tape_request *);
 void tape_hotplug_event(struct tape_device *, int major, int action);
 
 static inline int

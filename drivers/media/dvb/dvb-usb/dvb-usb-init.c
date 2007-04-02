@@ -42,8 +42,8 @@ static int dvb_usb_init(struct dvb_usb_device *d)
 {
 	int ret = 0;
 
-	mutex_init(&d->usb_mutex);
-	mutex_init(&d->i2c_mutex);
+	sema_init(&d->usb_sem, 1);
+	sema_init(&d->i2c_sem, 1);
 
 	d->state = DVB_USB_STATE_INIT;
 

@@ -28,7 +28,6 @@
 #include <linux/pci.h>
 #include <asm/pci-bridge.h>
 #include <asm/ppc-pci.h>
-#include <asm/firmware.h>
 
 static struct pci_bus *
 find_bus_among_children(struct pci_bus *bus,
@@ -153,24 +152,20 @@ pcibios_pci_config_bridge(struct pci_dev *dev)
 void
 pcibios_add_pci_devices(struct pci_bus * bus)
 {
-	int slotno, num, mode;
+	int slotno, num;
 	struct pci_dev *dev;
 	struct device_node *dn = pci_bus_to_OF_node(bus);
 
 	eeh_add_device_tree_early(dn);
 
-	mode = PCI_PROBE_NORMAL;
-	if (ppc_md.pci_probe_mode)
-		mode = ppc_md.pci_probe_mode(bus);
-
-	if (mode == PCI_PROBE_DEVTREE) {
+	if (_machine == PLATFORM_PSERIES_LPAR) {
 		/* use ofdt-based probe */
 		of_scan_bus(dn, bus);
 		if (!list_empty(&bus->devices)) {
 			pcibios_fixup_new_pci_devices(bus, 0);
 			pci_bus_add_devices(bus);
 		}
-	} else if (mode == PCI_PROBE_NORMAL) {
+	} else {
 		/* use legacy probe */
 		slotno = PCI_SLOT(PCI_DN(dn->child)->devfn);
 		num = pci_scan_slot(bus, PCI_DEVFN(slotno, 0));

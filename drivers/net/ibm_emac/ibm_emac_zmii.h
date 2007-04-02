@@ -19,6 +19,7 @@
 #ifndef _IBM_EMAC_ZMII_H_
 #define _IBM_EMAC_ZMII_H_
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <asm/ocp.h>
 
@@ -31,7 +32,7 @@ struct zmii_regs {
 
 /* ZMII device */
 struct ibm_ocp_zmii {
-	struct zmii_regs __iomem *base;
+	struct zmii_regs *base;
 	int mode;		/* subset of PHY_MODE_XXXX */
 	int users;		/* number of EMACs using this ZMII bridge */
 	u32 fer_save;		/* FER value left by firmware */

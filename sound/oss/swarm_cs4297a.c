@@ -76,7 +76,6 @@
 #include <linux/init.h>
 #include <linux/poll.h>
 #include <linux/smp_lock.h>
-#include <linux/mutex.h>
 
 #include <asm/byteorder.h>
 #include <asm/dma.h>
@@ -154,8 +153,8 @@ static void start_adc(struct cs4297a_state *s);
 #if CSDEBUG
 static unsigned long cs_debuglevel = 4;	// levels range from 1-9
 static unsigned long cs_debugmask = CS_INIT /*| CS_IOCTL*/;
-module_param(cs_debuglevel, int, 0);
-module_param(cs_debugmask, int, 0);
+MODULE_PARM(cs_debuglevel, "i");
+MODULE_PARM(cs_debugmask, "i");
 #endif
 #define CS_TRUE 	1
 #define CS_FALSE 	0
@@ -292,9 +291,9 @@ struct cs4297a_state {
 	unsigned conversion:1;	// conversion from 16 to 8 bit in progress
 	unsigned ena;
 	spinlock_t lock;
-	struct mutex open_mutex;
-	struct mutex open_sem_adc;
-	struct mutex open_sem_dac;
+	struct semaphore open_sem;
+	struct semaphore open_sem_adc;
+	struct semaphore open_sem_dac;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 	wait_queue_head_t open_wait_adc;
@@ -725,7 +724,7 @@ static int serdma_reg_access(struct cs4297a_state *s, u64 data)
         serdma_t *d = &s->dma_dac;
         u64 *data_p;
         unsigned swptr;
-        int flags;
+        unsigned long flags;
         serdma_descr_t *descr;
 
         if (s->reg_request) {
@@ -2353,20 +2352,20 @@ static int cs4297a_release(struct inode *inode, struct file *file)
 
 	if (file->f_mode & FMODE_WRITE) {
 		drain_dac(s, file->f_flags & O_NONBLOCK);
-		mutex_lock(&s->open_sem_dac);
+		down(&s->open_sem_dac);
 		stop_dac(s);
 		dealloc_dmabuf(s, &s->dma_dac);
 		s->open_mode &= ~FMODE_WRITE;
-		mutex_unlock(&s->open_sem_dac);
+		up(&s->open_sem_dac);
 		wake_up(&s->open_wait_dac);
 	}
 	if (file->f_mode & FMODE_READ) {
 		drain_adc(s, file->f_flags & O_NONBLOCK);
-		mutex_lock(&s->open_sem_adc);
+		down(&s->open_sem_adc);
 		stop_adc(s);
 		dealloc_dmabuf(s, &s->dma_adc);
 		s->open_mode &= ~FMODE_READ;
-		mutex_unlock(&s->open_sem_adc);
+		up(&s->open_sem_adc);
 		wake_up(&s->open_wait_adc);
 	}
 	return 0;
@@ -2414,37 +2413,37 @@ static int cs4297a_open(struct inode *inode, struct file *file)
                                 ;
                 }
           
-		mutex_lock(&s->open_sem_dac);
+		down(&s->open_sem_dac);
 		while (s->open_mode & FMODE_WRITE) {
 			if (file->f_flags & O_NONBLOCK) {
-				mutex_unlock(&s->open_sem_dac);
+				up(&s->open_sem_dac);
 				return -EBUSY;
 			}
-			mutex_unlock(&s->open_sem_dac);
+			up(&s->open_sem_dac);
 			interruptible_sleep_on(&s->open_wait_dac);
 
 			if (signal_pending(current)) {
                                 printk("open - sig pending\n");
 				return -ERESTARTSYS;
                         }
-			mutex_lock(&s->open_sem_dac);
+			down(&s->open_sem_dac);
 		}
 	}
 	if (file->f_mode & FMODE_READ) {
-		mutex_lock(&s->open_sem_adc);
+		down(&s->open_sem_adc);
 		while (s->open_mode & FMODE_READ) {
 			if (file->f_flags & O_NONBLOCK) {
-				mutex_unlock(&s->open_sem_adc);
+				up(&s->open_sem_adc);
 				return -EBUSY;
 			}
-			mutex_unlock(&s->open_sem_adc);
+			up(&s->open_sem_adc);
 			interruptible_sleep_on(&s->open_wait_adc);
 
 			if (signal_pending(current)) {
                                 printk("open - sig pending\n");
 				return -ERESTARTSYS;
                         }
-			mutex_lock(&s->open_sem_adc);
+			down(&s->open_sem_adc);
 		}
 	}
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
@@ -2457,7 +2456,7 @@ static int cs4297a_open(struct inode *inode, struct file *file)
 		s->ena &= ~FMODE_READ;
 		s->dma_adc.ossfragshift = s->dma_adc.ossmaxfrags =
 		    s->dma_adc.subdivision = 0;
-		mutex_unlock(&s->open_sem_adc);
+		up(&s->open_sem_adc);
 
 		if (prog_dmabuf_adc(s)) {
 			CS_DBGOUT(CS_OPEN | CS_ERROR, 2, printk(KERN_ERR
@@ -2475,7 +2474,7 @@ static int cs4297a_open(struct inode *inode, struct file *file)
 		s->ena &= ~FMODE_WRITE;
 		s->dma_dac.ossfragshift = s->dma_dac.ossmaxfrags =
 		    s->dma_dac.subdivision = 0;
-		mutex_unlock(&s->open_sem_dac);
+		up(&s->open_sem_dac);
 
 		if (prog_dmabuf_dac(s)) {
 			CS_DBGOUT(CS_OPEN | CS_ERROR, 2, printk(KERN_ERR
@@ -2632,8 +2631,8 @@ static int __init cs4297a_init(void)
 	init_waitqueue_head(&s->open_wait);
 	init_waitqueue_head(&s->open_wait_adc);
 	init_waitqueue_head(&s->open_wait_dac);
-	mutex_init(&s->open_sem_adc);
-	mutex_init(&s->open_sem_dac);
+	init_MUTEX(&s->open_sem_adc);
+	init_MUTEX(&s->open_sem_dac);
 	spin_lock_init(&s->lock);
 
         s->irq = K_INT_SER_1;

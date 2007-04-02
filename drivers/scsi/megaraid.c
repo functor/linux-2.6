@@ -45,7 +45,6 @@
 #include <linux/interrupt.h>
 #include <linux/pci.h>
 #include <linux/init.h>
-#include <linux/dma-mapping.h>
 #include <scsi/scsicam.h>
 
 #include "scsi.h"
@@ -524,7 +523,7 @@ mega_build_cmd(adapter_t *adapter, Scsi_Cmnd *cmd, int *busy)
 	 * filter the internal and ioctl commands
 	 */
 	if((cmd->cmnd[0] == MEGA_INTERNAL_CMD)) {
-		return cmd->request_buffer;
+		return cmd->buffer;
 	}
 
 
@@ -1828,7 +1827,7 @@ mega_build_sglist(adapter_t *adapter, scb_t *scb, u32 *buf, u32 *len)
 
 	scb->dma_type = MEGA_SGLIST;
 
-	BUG_ON(sgcnt > adapter->sglen);
+	if( sgcnt > adapter->sglen ) BUG();
 
 	*len = 0;
 
@@ -2095,7 +2094,7 @@ make_local_pdev(adapter_t *adapter, struct pci_dev **pdev)
 
 	memcpy(*pdev, adapter->dev, sizeof(struct pci_dev));
 
-	if( pci_set_dma_mask(*pdev, DMA_32BIT_MASK) != 0 ) {
+	if( pci_set_dma_mask(*pdev, 0xffffffff) != 0 ) {
 		kfree(*pdev);
 		return -1;
 	}
@@ -4471,6 +4470,7 @@ mega_internal_command(adapter_t *adapter, megacmd_t *mc, mega_passthru *pthru)
 {
 	Scsi_Cmnd	*scmd;
 	struct	scsi_device *sdev;
+	unsigned long	flags = 0;
 	scb_t	*scb;
 	int	rval;
 
@@ -4492,7 +4492,7 @@ mega_internal_command(adapter_t *adapter, megacmd_t *mc, mega_passthru *pthru)
 	scmd->device = sdev;
 
 	scmd->device->host = adapter->host;
-	scmd->request_buffer = (void *)scb;
+	scmd->buffer = (void *)scb;
 	scmd->cmnd[0] = MEGA_INTERNAL_CMD;
 
 	scb->state |= SCB_ACTIVE;
@@ -4714,7 +4714,7 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (request_irq(irq, (adapter->flag & BOARD_MEMMAP) ?
 				megaraid_isr_memmapped : megaraid_isr_iomapped,
-					IRQF_SHARED, "megaraid", adapter)) {
+					SA_SHIRQ, "megaraid", adapter)) {
 		printk(KERN_WARNING
 			"megaraid: Couldn't register IRQ %d!\n", irq);
 		goto out_free_scb_list;
@@ -4859,10 +4859,10 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* Set the Mode of addressing to 64 bit if we can */
 	if ((adapter->flag & BOARD_64BIT) && (sizeof(dma_addr_t) == 8)) {
-		pci_set_dma_mask(pdev, DMA_64BIT_MASK);
+		pci_set_dma_mask(pdev, 0xffffffffffffffffULL);
 		adapter->has_64bit_addr = 1;
 	} else  {
-		pci_set_dma_mask(pdev, DMA_32BIT_MASK);
+		pci_set_dma_mask(pdev, 0xffffffff);
 		adapter->has_64bit_addr = 0;
 	}
 		

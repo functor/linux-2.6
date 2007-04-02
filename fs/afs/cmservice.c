@@ -24,7 +24,7 @@
 #include "internal.h"
 
 static unsigned afscm_usage;		/* AFS cache manager usage count */
-static DECLARE_RWSEM(afscm_sem);	/* AFS cache manager start/stop semaphore */
+static struct rw_semaphore afscm_sem;	/* AFS cache manager start/stop semaphore */
 
 static int afscm_new_call(struct rxrpc_call *call);
 static void afscm_attention(struct rxrpc_call *call);
@@ -94,7 +94,7 @@ static struct rxrpc_service AFSCM_service = {
 	.error_func	= afscm_error,
 	.aemap_func	= afscm_aemap,
 	.ops_begin	= &AFSCM_ops[0],
-	.ops_end	= &AFSCM_ops[ARRAY_SIZE(AFSCM_ops)],
+	.ops_end	= &AFSCM_ops[sizeof(AFSCM_ops) / sizeof(AFSCM_ops[0])],
 };
 
 static DECLARE_COMPLETION(kafscmd_alive);

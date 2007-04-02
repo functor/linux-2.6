@@ -6,6 +6,7 @@
  * NFSv4 callback handling
  */
 
+#include <linux/config.h>
 #include <linux/completion.h>
 #include <linux/ip.h>
 #include <linux/module.h>
@@ -13,13 +14,11 @@
 #include <linux/sunrpc/svc.h>
 #include <linux/sunrpc/svcsock.h>
 #include <linux/nfs_fs.h>
-#include <linux/mutex.h>
 
 #include <net/inet_sock.h>
 
 #include "nfs4_fs.h"
 #include "callback.h"
-#include "internal.h"
 
 #define NFSDBG_FACILITY NFSDBG_CALLBACK
 
@@ -32,26 +31,11 @@ struct nfs_callback_data {
 };
 
 static struct nfs_callback_data nfs_callback_info;
-static DEFINE_MUTEX(nfs_callback_mutex);
+static DECLARE_MUTEX(nfs_callback_sema);
 static struct svc_program nfs4_callback_program;
 
 unsigned int nfs_callback_set_tcpport;
 unsigned short nfs_callback_tcpport;
-static const int nfs_set_port_min = 0;
-static const int nfs_set_port_max = 65535;
-
-static int param_set_port(const char *val, struct kernel_param *kp)
-{
-	char *endp;
-	int num = simple_strtol(val, &endp, 0);
-	if (endp == val || *endp || num < nfs_set_port_min || num > nfs_set_port_max)
-		return -EINVAL;
-	*((int *)kp->arg) = num;
-	return 0;
-}
-
-module_param_call(callback_tcpport, param_set_port, param_get_int,
-		 &nfs_callback_set_tcpport, 0644);
 
 /*
  * This is the callback kernel thread.
@@ -71,12 +55,7 @@ static void nfs_callback_svc(struct svc_rqst *rqstp)
 
 	complete(&nfs_callback_info.started);
 
-	for(;;) {
-		if (signalled()) {
-			if (nfs_callback_info.users == 0)
-				break;
-			flush_signals(current);
-		}
+	while (nfs_callback_info.users != 0 || !signalled()) {
 		/*
 		 * Listen for a request on the socket
 		 */
@@ -94,7 +73,6 @@ static void nfs_callback_svc(struct svc_rqst *rqstp)
 		svc_process(serv, rqstp);
 	}
 
-	svc_exit_thread(rqstp);
 	nfs_callback_info.pid = 0;
 	complete(&nfs_callback_info.stopped);
 	unlock_kernel();
@@ -111,7 +89,7 @@ int nfs_callback_up(void)
 	int ret = 0;
 
 	lock_kernel();
-	mutex_lock(&nfs_callback_mutex);
+	down(&nfs_callback_sema);
 	if (nfs_callback_info.users++ || nfs_callback_info.pid != 0)
 		goto out;
 	init_completion(&nfs_callback_info.started);
@@ -137,7 +115,7 @@ int nfs_callback_up(void)
 	nfs_callback_info.serv = serv;
 	wait_for_completion(&nfs_callback_info.started);
 out:
-	mutex_unlock(&nfs_callback_mutex);
+	up(&nfs_callback_sema);
 	unlock_kernel();
 	return ret;
 out_destroy:
@@ -150,32 +128,33 @@ out_err:
 /*
  * Kill the server process if it is not already up.
  */
-void nfs_callback_down(void)
+int nfs_callback_down(void)
 {
+	int ret = 0;
+
 	lock_kernel();
-	mutex_lock(&nfs_callback_mutex);
-	nfs_callback_info.users--;
-	do {
-		if (nfs_callback_info.users != 0 || nfs_callback_info.pid == 0)
-			break;
-		if (kill_proc(nfs_callback_info.pid, SIGKILL, 1) < 0)
-			break;
-	} while (wait_for_completion_timeout(&nfs_callback_info.stopped, 5*HZ) == 0);
-	mutex_unlock(&nfs_callback_mutex);
+	down(&nfs_callback_sema);
+	if (--nfs_callback_info.users || nfs_callback_info.pid == 0)
+		goto out;
+	kill_proc(nfs_callback_info.pid, SIGKILL, 1);
+	wait_for_completion(&nfs_callback_info.stopped);
+out:
+	up(&nfs_callback_sema);
 	unlock_kernel();
+	return ret;
 }
 
 static int nfs_callback_authenticate(struct svc_rqst *rqstp)
 {
-	struct sockaddr_in *addr = &rqstp->rq_addr;
-	struct nfs_client *clp;
+	struct in_addr *addr = &rqstp->rq_addr.sin_addr;
+	struct nfs4_client *clp;
 
 	/* Don't talk to strangers */
-	clp = nfs_find_client(addr, 4);
+	clp = nfs4_find_client(addr);
 	if (clp == NULL)
 		return SVC_DROP;
-	dprintk("%s: %u.%u.%u.%u NFSv4 callback!\n", __FUNCTION__, NIPQUAD(addr->sin_addr));
-	nfs_put_client(clp);
+	dprintk("%s: %u.%u.%u.%u NFSv4 callback!\n", __FUNCTION__, NIPQUAD(addr));
+	nfs4_put_client(clp);
 	switch (rqstp->rq_authop->flavour) {
 		case RPC_AUTH_NULL:
 			if (rqstp->rq_proc != CB_NULL)
@@ -194,6 +173,8 @@ static int nfs_callback_authenticate(struct svc_rqst *rqstp)
 /*
  * Define NFS4 callback program
  */
+extern struct svc_version nfs4_callback_version1;
+
 static struct svc_version *nfs4_callback_version[] = {
 	[1] = &nfs4_callback_version1,
 };

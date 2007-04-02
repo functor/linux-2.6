@@ -3,6 +3,8 @@
 
 /* $Id$ */
 
+#include <asm/syscall.h>	/* SYSCALL_* */
+
 /*
  * This file contains the system call numbers.
  */
@@ -290,18 +292,14 @@
 #define __NR_mq_timedreceive	(__NR_mq_open+3)
 #define __NR_mq_notify		(__NR_mq_open+4)
 #define __NR_mq_getsetattr	(__NR_mq_open+5)
-#define __NR_kexec_load		283
+#define __NR_sys_kexec_load	283
 #define __NR_waitid		284
-
-#ifdef __KERNEL__
 
 #define NR_syscalls 285
 
 /* user-visible error numbers are in the range -1 - -124: see
  * <asm-m32r/errno.h>
  */
-
-#include <asm/syscall.h>	/* SYSCALL_* */
 
 #define __syscall_return(type, res) \
 do { \
@@ -407,6 +405,7 @@ __asm__ __volatile__ (\
 __syscall_return(type,__res); \
 }
 
+#ifdef __KERNEL__
 #define __ARCH_WANT_IPC_PARSE_VERSION
 #define __ARCH_WANT_STAT64
 #define __ARCH_WANT_SYS_ALARM
@@ -422,6 +421,7 @@ __syscall_return(type,__res); \
 #define __ARCH_WANT_SYS_OLD_GETRLIMIT /*will be unused*/
 #define __ARCH_WANT_SYS_OLDUMOUNT
 #define __ARCH_WANT_SYS_RT_SIGACTION
+#endif
 
 #ifdef __KERNEL_SYSCALLS__
 
@@ -470,5 +470,4 @@ asmlinkage long sys_rt_sigaction(int sig,
 #define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 #endif
 
-#endif /* __KERNEL__ */
 #endif /* _ASM_M32R_UNISTD_H */

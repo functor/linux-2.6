@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/mv64x60_win.c
+ *
  * Tables with info on how to manipulate the 32 & 64 bit windows on the
  * various types of Marvell bridge chips.
  *

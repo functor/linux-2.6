@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/85xx/tqm85xx.c
+ *
  * TQM85xx (40/41/55/60) board specific routines
  *
  * Copyright (c) 2005 DENX Software Engineering
@@ -14,6 +16,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -190,7 +193,7 @@ static irqreturn_t cpm2_cascade(int irq, void *dev_id, struct pt_regs *regs)
 
 static struct irqaction cpm2_irqaction = {
 	.handler = cpm2_cascade,
-	.flags = IRQF_DISABLED,
+	.flags = SA_INTERRUPT,
 	.mask = CPU_MASK_NONE,
 	.name = "cpm2_cascade",
 };

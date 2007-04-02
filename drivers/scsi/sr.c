@@ -60,10 +60,6 @@
 #include "sr.h"
 
 
-MODULE_DESCRIPTION("SCSI cdrom (sr) driver");
-MODULE_LICENSE("GPL");
-MODULE_ALIAS_BLOCKDEV_MAJOR(SCSI_CDROM_MAJOR);
-
 #define SR_DISKS	256
 
 #define MAX_RETRIES	3
@@ -71,7 +67,7 @@ MODULE_ALIAS_BLOCKDEV_MAJOR(SCSI_CDROM_MAJOR);
 #define SR_CAPABILITIES \
 	(CDC_CLOSE_TRAY|CDC_OPEN_TRAY|CDC_LOCK|CDC_SELECT_SPEED| \
 	 CDC_SELECT_DISC|CDC_MULTI_SESSION|CDC_MCN|CDC_MEDIA_CHANGED| \
-	 CDC_PLAY_AUDIO|CDC_RESET|CDC_DRIVE_STATUS| \
+	 CDC_PLAY_AUDIO|CDC_RESET|CDC_IOCTLS|CDC_DRIVE_STATUS| \
 	 CDC_CD_R|CDC_CD_RW|CDC_DVD|CDC_DVD_R|CDC_DVD_RAM|CDC_GENERIC_PACKET| \
 	 CDC_MRW|CDC_MRW_W|CDC_RAM)
 
@@ -118,6 +114,7 @@ static struct cdrom_device_ops sr_dops = {
 	.get_mcn		= sr_get_mcn,
 	.reset			= sr_reset,
 	.audio_ioctl		= sr_audio_ioctl,
+	.dev_ioctl		= sr_dev_ioctl,
 	.capability		= SR_CAPABILITIES,
 	.generic_packet		= sr_packet,
 };
@@ -217,7 +214,7 @@ int sr_media_change(struct cdrom_device_info *cdi, int slot)
 static void rw_intr(struct scsi_cmnd * SCpnt)
 {
 	int result = SCpnt->result;
-	int this_count = SCpnt->request_bufflen;
+	int this_count = SCpnt->bufflen;
 	int good_bytes = (result == 0 ? this_count : 0);
 	int block_sectors = 0;
 	long error_sector;
@@ -292,7 +289,7 @@ static void rw_intr(struct scsi_cmnd * SCpnt)
 	 * how many actual sectors finished, and how many sectors we need
 	 * to say have failed.
 	 */
-	scsi_io_completion(SCpnt, good_bytes);
+	scsi_io_completion(SCpnt, good_bytes, block_sectors << 9);
 }
 
 static int sr_init_command(struct scsi_cmnd * SCpnt)
@@ -360,7 +357,7 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 				"mismatch count %d, bytes %d\n",
 				size, SCpnt->request_bufflen);
 			if (SCpnt->request_bufflen > size)
-				SCpnt->request_bufflen = size;
+				SCpnt->request_bufflen = SCpnt->bufflen = size;
 		}
 	}
 
@@ -387,7 +384,8 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 
 	if (this_count > 0xffff) {
 		this_count = 0xffff;
-		SCpnt->request_bufflen = this_count * s_size;
+		SCpnt->request_bufflen = SCpnt->bufflen =
+				this_count * s_size;
 	}
 
 	SCpnt->cmnd[2] = (unsigned char) (block >> 24) & 0xff;
@@ -454,33 +452,17 @@ static int sr_block_ioctl(struct inode *inode, struct file *file, unsigned cmd,
 {
 	struct scsi_cd *cd = scsi_cd(inode->i_bdev->bd_disk);
 	struct scsi_device *sdev = cd->device;
-	void __user *argp = (void __user *)arg;
-	int ret;
 
-	/*
-	 * Send SCSI addressing ioctls directly to mid level, send other
-	 * ioctls to cdrom/block level.
-	 */
-	switch (cmd) {
-	case SCSI_IOCTL_GET_IDLUN:
-	case SCSI_IOCTL_GET_BUS_NUMBER:
-		return scsi_ioctl(sdev, cmd, argp);
+        /*
+         * Send SCSI addressing ioctls directly to mid level, send other
+         * ioctls to cdrom/block level.
+         */
+        switch (cmd) {
+                case SCSI_IOCTL_GET_IDLUN:
+                case SCSI_IOCTL_GET_BUS_NUMBER:
+                        return scsi_ioctl(sdev, cmd, (void __user *)arg);
 	}
-
-	ret = cdrom_ioctl(file, &cd->cdi, inode, cmd, arg);
-	if (ret != ENOSYS)
-		return ret;
-
-	/*
-	 * ENODEV means that we didn't recognise the ioctl, or that we
-	 * cannot execute it in the current device state.  In either
-	 * case fall through to scsi_ioctl, which will return ENDOEV again
-	 * if it doesn't recognise the ioctl
-	 */
-	ret = scsi_nonblockable_ioctl(sdev, cmd, argp, NULL);
-	if (ret != -ENODEV)
-		return ret;
-	return scsi_ioctl(sdev, cmd, argp);
+	return cdrom_ioctl(file, &cd->cdi, inode, cmd, arg);
 }
 
 static int sr_block_media_changed(struct gendisk *disk)
@@ -543,9 +525,10 @@ static int sr_probe(struct device *dev)
 		goto fail;
 
 	error = -ENOMEM;
-	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
+	cd = kmalloc(sizeof(*cd), GFP_KERNEL);
 	if (!cd)
 		goto fail;
+	memset(cd, 0, sizeof(*cd));
 
 	kref_init(&cd->kref);
 
@@ -591,6 +574,8 @@ static int sr_probe(struct device *dev)
 	get_capabilities(cd);
 	sr_vendor_init(cd);
 
+	snprintf(disk->devfs_name, sizeof(disk->devfs_name),
+			"%s/cd", sdev->devfs_name);
 	disk->driverfs_dev = &sdev->sdev_gendev;
 	set_capacity(disk, cd->capacity);
 	disk->private_data = &cd->driver;

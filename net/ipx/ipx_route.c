@@ -7,6 +7,7 @@
  *	See net/ipx/ChangeLog.
  */
 
+#include <linux/config.h>
 #include <linux/list.h>
 #include <linux/route.h>
 #include <linux/spinlock.h>
@@ -19,7 +20,7 @@ DEFINE_RWLOCK(ipx_routes_lock);
 
 extern struct ipx_interface *ipx_internal_net;
 
-extern __u16 ipx_cksum(struct ipxhdr *packet, int length);
+extern __be16 ipx_cksum(struct ipxhdr *packet, int length);
 extern struct ipx_interface *ipxitf_find_using_net(__u32 net);
 extern int ipxitf_demux_socket(struct ipx_interface *intrfc,
 			       struct sk_buff *skb, int copy);
@@ -118,7 +119,7 @@ out:
 	return rc;
 }
 
-static int ipxrtr_delete(__u32 net)
+static int ipxrtr_delete(long net)
 {
 	struct ipx_route *r, *tmp;
 	int rc;
@@ -237,8 +238,8 @@ int ipxrtr_route_packet(struct sock *sk, struct sockaddr_ipx *usipx,
 	}	
 
 	/* Apply checksum. Not allowed on 802.3 links. */
-	if (sk->sk_no_check || intrfc->if_dlink_type == htons(IPX_FRAME_8023))
-		ipx->ipx_checksum = 0xFFFF;
+	if (sk->sk_no_check || intrfc->if_dlink_type == IPX_FRAME_8023)
+		ipx->ipx_checksum = htons(0xFFFF);
 	else
 		ipx->ipx_checksum = ipx_cksum(ipx, len + sizeof(struct ipxhdr));
 

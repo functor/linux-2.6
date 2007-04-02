@@ -369,15 +369,9 @@ static void tio_corelet_reset(nasid_t nasid, int corelet)
 
 static int is_fpga_tio(int nasid, int *bt)
 {
-	u16 ioboard_type;
-	s64 rc;
+	int ioboard_type;
 
-	rc = ia64_sn_sysctl_ioboard_get(nasid, &ioboard_type);
-	if (rc) {
-		printk(KERN_WARNING "ia64_sn_sysctl_ioboard_get failed: %ld\n",
-		       rc);
-		return 0;
-	}
+	ioboard_type = ia64_sn_sysctl_ioboard_get(nasid);
 
 	switch (ioboard_type) {
 	case L1_BRICKTYPE_SA:

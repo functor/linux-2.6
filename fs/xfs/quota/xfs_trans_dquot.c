@@ -23,6 +23,7 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
+#include "xfs_dir.h"
 #include "xfs_dir2.h"
 #include "xfs_alloc.h"
 #include "xfs_dmapi.h"
@@ -32,6 +33,7 @@
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
 #include "xfs_attr_sf.h"
+#include "xfs_dir_sf.h"
 #include "xfs_dir2_sf.h"
 #include "xfs_dinode.h"
 #include "xfs_inode.h"
@@ -593,19 +595,12 @@ xfs_trans_unreserve_and_mod_dquots(
 	}
 }
 
-STATIC int
-xfs_quota_error(uint flags)
-{
-	if (flags & XFS_QMOPT_ENOSPC)
-		return ENOSPC;
-	return EDQUOT;
-}
-
 /*
  * This reserves disk blocks and inodes against a dquot.
  * Flags indicate if the dquot is to be locked here and also
  * if the blk reservation is for RT or regular blocks.
  * Sending in XFS_QMOPT_FORCE_RES flag skips the quota check.
+ * Returns EDQUOT if quota is exceeded.
  */
 STATIC int
 xfs_trans_dqresv(
@@ -671,15 +666,19 @@ xfs_trans_dqresv(
 			 */
 			if (hardlimit > 0ULL &&
 			     (hardlimit <= nblks + *resbcountp)) {
-				error = xfs_quota_error(flags);
+				error = EDQUOT;
 				goto error_return;
 			}
 
 			if (softlimit > 0ULL &&
 			     (softlimit <= nblks + *resbcountp)) {
+				/*
+				 * If timer or warnings has expired,
+				 * return EDQUOT
+				 */
 				if ((timer != 0 && get_seconds() > timer) ||
 				    (warns != 0 && warns >= warnlimit)) {
-					error = xfs_quota_error(flags);
+					error = EDQUOT;
 					goto error_return;
 				}
 			}
@@ -696,12 +695,16 @@ xfs_trans_dqresv(
 			if (!softlimit)
 				softlimit = q->qi_isoftlimit;
 			if (hardlimit > 0ULL && count >= hardlimit) {
-				error = xfs_quota_error(flags);
+				error = EDQUOT;
 				goto error_return;
 			} else if (softlimit > 0ULL && count >= softlimit) {
+				/*
+				 * If timer or warnings has expired,
+				 * return EDQUOT
+				 */
 				if ((timer != 0 && get_seconds() > timer) ||
 				     (warns != 0 && warns >= warnlimit)) {
-					error = xfs_quota_error(flags);
+					error = EDQUOT;
 					goto error_return;
 				}
 			}
@@ -748,14 +751,13 @@ error_return:
 
 
 /*
- * Given dquot(s), make disk block and/or inode reservations against them.
+ * Given a dquot(s), make disk block and/or inode reservations against them.
  * The fact that this does the reservation against both the usr and
- * grp/prj quotas is important, because this follows a both-or-nothing
+ * grp quotas is important, because this follows a both-or-nothing
  * approach.
  *
  * flags = XFS_QMOPT_DQLOCK indicate if dquot(s) need to be locked.
  *	   XFS_QMOPT_FORCE_RES evades limit enforcement. Used by chown.
- *	   XFS_QMOPT_ENOSPC returns ENOSPC not EDQUOT.  Used by pquota.
  *	   XFS_TRANS_DQ_RES_BLKS reserves regular disk blocks
  *	   XFS_TRANS_DQ_RES_RTBLKS reserves realtime disk blocks
  * dquots are unlocked on return, if they were not locked by caller.
@@ -770,27 +772,25 @@ xfs_trans_reserve_quota_bydquots(
 	long		ninos,
 	uint		flags)
 {
-	int		resvd = 0, error;
+	int		resvd;
 
-	if (!XFS_IS_QUOTA_ON(mp))
-		return 0;
+	if (! XFS_IS_QUOTA_ON(mp))
+		return (0);
 
 	if (tp && tp->t_dqinfo == NULL)
 		xfs_trans_alloc_dqinfo(tp);
 
 	ASSERT(flags & XFS_QMOPT_RESBLK_MASK);
+	resvd = 0;
 
 	if (udqp) {
-		error = xfs_trans_dqresv(tp, mp, udqp, nblks, ninos,
-					(flags & ~XFS_QMOPT_ENOSPC));
-		if (error)
-			return error;
+		if (xfs_trans_dqresv(tp, mp, udqp, nblks, ninos, flags))
+			return (EDQUOT);
 		resvd = 1;
 	}
 
 	if (gdqp) {
-		error = xfs_trans_dqresv(tp, mp, gdqp, nblks, ninos, flags);
-		if (error) {
+		if (xfs_trans_dqresv(tp, mp, gdqp, nblks, ninos, flags)) {
 			/*
 			 * can't do it, so backout previous reservation
 			 */
@@ -799,14 +799,14 @@ xfs_trans_reserve_quota_bydquots(
 				xfs_trans_dqresv(tp, mp, udqp,
 						 -nblks, -ninos, flags);
 			}
-			return error;
+			return (EDQUOT);
 		}
 	}
 
 	/*
-	 * Didn't change anything critical, so, no need to log
+	 * Didnt change anything critical, so, no need to log
 	 */
-	return 0;
+	return (0);
 }
 
 
@@ -814,6 +814,8 @@ xfs_trans_reserve_quota_bydquots(
  * Lock the dquot and change the reservation if we can.
  * This doesn't change the actual usage, just the reservation.
  * The inode sent in is locked.
+ *
+ * Returns 0 on success, EDQUOT or other errors otherwise
  */
 STATIC int
 xfs_trans_reserve_quota_nblks(
@@ -822,24 +824,20 @@ xfs_trans_reserve_quota_nblks(
 	xfs_inode_t	*ip,
 	long		nblks,
 	long		ninos,
-	uint		flags)
+	uint		type)
 {
 	int		error;
 
 	if (!XFS_IS_QUOTA_ON(mp))
-		return 0;
-	if (XFS_IS_PQUOTA_ON(mp))
-		flags |= XFS_QMOPT_ENOSPC;
+		return (0);
 
 	ASSERT(ip->i_ino != mp->m_sb.sb_uquotino);
 	ASSERT(ip->i_ino != mp->m_sb.sb_gquotino);
 
 	ASSERT(XFS_ISLOCKED_INODE_EXCL(ip));
 	ASSERT(XFS_IS_QUOTA_RUNNING(ip->i_mount));
-	ASSERT((flags & ~(XFS_QMOPT_FORCE_RES | XFS_QMOPT_ENOSPC)) ==
-				XFS_TRANS_DQ_RES_RTBLKS ||
-	       (flags & ~(XFS_QMOPT_FORCE_RES | XFS_QMOPT_ENOSPC)) ==
-				XFS_TRANS_DQ_RES_BLKS);
+	ASSERT((type & ~XFS_QMOPT_FORCE_RES) == XFS_TRANS_DQ_RES_RTBLKS ||
+	       (type & ~XFS_QMOPT_FORCE_RES) == XFS_TRANS_DQ_RES_BLKS);
 
 	/*
 	 * Reserve nblks against these dquots, with trans as the mediator.
@@ -847,8 +845,8 @@ xfs_trans_reserve_quota_nblks(
 	error = xfs_trans_reserve_quota_bydquots(tp, mp,
 						 ip->i_udquot, ip->i_gdquot,
 						 nblks, ninos,
-						 flags);
-	return error;
+						 type);
+	return (error);
 }
 
 /*

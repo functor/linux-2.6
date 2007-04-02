@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/pm.h>
 #include <linux/ptrace.h>
+#include <linux/platform.h>
 #include <linux/kallsyms.h>
 #include <linux/kexec.h>
 
@@ -26,7 +27,6 @@
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
 #include <asm/elf.h>
-#include <asm/ubc.h>
 
 static int hlt_counter=0;
 

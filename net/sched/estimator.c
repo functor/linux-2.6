@@ -139,10 +139,11 @@ int qdisc_new_estimator(struct tc_stats *stats, spinlock_t *stats_lock, struct r
 	if (parm->interval < -2 || parm->interval > 3)
 		return -EINVAL;
 
-	est = kzalloc(sizeof(*est), GFP_KERNEL);
+	est = kmalloc(sizeof(*est), GFP_KERNEL);
 	if (est == NULL)
 		return -ENOBUFS;
 
+	memset(est, 0, sizeof(*est));
 	est->interval = parm->interval + 2;
 	est->stats = stats;
 	est->stats_lock = stats_lock;

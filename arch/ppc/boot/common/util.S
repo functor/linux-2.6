@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/common/util.S
+ *
  * Useful bootup functions, which are more easily done in asm than C.
  *
  * NOTE:  Be very very careful about the registers you use here.

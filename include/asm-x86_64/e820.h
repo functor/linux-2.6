@@ -46,10 +46,8 @@ extern void setup_memory_region(void);
 extern void contig_e820_setup(void); 
 extern unsigned long e820_end_of_ram(void);
 extern void e820_reserve_resources(void);
-extern void e820_mark_nosave_regions(void);
 extern void e820_print_map(char *who);
-extern int e820_any_mapped(unsigned long start, unsigned long end, unsigned type);
-extern int e820_all_mapped(unsigned long start, unsigned long end, unsigned type);
+extern int e820_mapped(unsigned long start, unsigned long end, unsigned type);
 
 extern void e820_bootmem_free(pg_data_t *pgdat, unsigned long start,unsigned long end);
 extern void e820_setup_gap(void);
@@ -60,8 +58,6 @@ extern void __init parse_memopt(char *p, char **end);
 extern void __init parse_memmapopt(char *p, char **end);
 
 extern struct e820map e820;
-
-extern unsigned ebda_addr, ebda_size;
 #endif/*!__ASSEMBLY__*/
 
 #endif/*__E820_HEADER*/

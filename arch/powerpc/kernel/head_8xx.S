@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/kernel/except_8xx.S
+ *
  *  PowerPC version
  *    Copyright (C) 1995-1996 Gary Thomas (gdt@linuxppc.org)
  *  Rewritten by Cort Dougan (cort@cs.nmt.edu) for PReP
@@ -19,6 +21,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/mmu.h>

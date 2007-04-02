@@ -36,9 +36,9 @@
 
 #include <asm/uaccess.h>
 
-#include "core.h"
-
 #define SG_TABLESIZE		30
+
+extern int i2o_parm_issue(struct i2o_device *, int, void *, int, void *, int);
 
 static int i2o_cfg_ioctl(struct inode *, struct file *, unsigned int,
 			 unsigned long);

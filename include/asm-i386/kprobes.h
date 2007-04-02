@@ -34,7 +34,6 @@ struct pt_regs;
 
 typedef u8 kprobe_opcode_t;
 #define BREAKPOINT_INSTRUCTION	0xcc
-#define RELATIVEJUMP_INSTRUCTION 0xe9
 #define MAX_INSN_SIZE 16
 #define MAX_STACK_SIZE 64
 #define MIN_STACK_SIZE(ADDR) (((MAX_STACK_SIZE) < \
@@ -44,8 +43,6 @@ typedef u8 kprobe_opcode_t;
 
 #define JPROBE_ENTRY(pentry)	(kprobe_opcode_t *)pentry
 #define ARCH_SUPPORTS_KRETPROBES
-#define  ARCH_INACTIVE_KPROBE_COUNT 0
-#define flush_insn_slot(p)	do { } while (0)
 
 void arch_remove_kprobe(struct kprobe *p);
 void kretprobe_trampoline(void);
@@ -54,11 +51,6 @@ void kretprobe_trampoline(void);
 struct arch_specific_insn {
 	/* copy of the original instruction */
 	kprobe_opcode_t *insn;
-	/*
-	 * If this flag is not 0, this kprobe can be boost when its
-	 * post_handler and break_handler is not set.
-	 */
-	int boostable;
 };
 
 struct prev_kprobe {

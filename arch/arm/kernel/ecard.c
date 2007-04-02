@@ -27,6 +27,7 @@
  */
 #define ECARD_C
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -295,7 +296,7 @@ ecard_task(void * unused)
  */
 static void ecard_call(struct ecard_request *req)
 {
-	DECLARE_COMPLETION_ONSTACK(completion);
+	DECLARE_COMPLETION(completion);
 
 	req->complete = &completion;
 
@@ -470,8 +471,7 @@ static void ecard_irq_mask(unsigned int irqnr)
 	}
 }
 
-static struct irq_chip ecard_chip = {
-	.name	= "ECARD",
+static struct irqchip ecard_chip = {
 	.ack	= ecard_irq_mask,
 	.mask	= ecard_irq_mask,
 	.unmask = ecard_irq_unmask,
@@ -620,7 +620,7 @@ ecard_irqexp_handler(unsigned int irq, struct irqdesc *desc, struct pt_regs *reg
 		ecard_t *ec = slot_to_ecard(slot);
 
 		if (ec->claimed) {
-			struct irq_desc *d = irq_desc + ec->irq;
+			struct irqdesc *d = irqdesc + ec->irq;
 			/*
 			 * this ugly code is so that we can operate a
 			 * prioritorising system:
@@ -807,11 +807,13 @@ static struct expansion_card *__init ecard_alloc_card(int type, int slot)
 	unsigned long base;
 	int i;
 
-	ec = kzalloc(sizeof(ecard_t), GFP_KERNEL);
+	ec = kmalloc(sizeof(ecard_t), GFP_KERNEL);
 	if (!ec) {
 		ec = ERR_PTR(-ENOMEM);
 		goto nomem;
 	}
+
+	memset(ec, 0, sizeof(ecard_t));
 
 	ec->slot_no = slot;
 	ec->type = type;
@@ -884,7 +886,7 @@ static ssize_t ecard_show_resources(struct device *dev, struct device_attribute 
 	int i;
 
 	for (i = 0; i < ECARD_NUM_RESOURCES; i++)
-		str += sprintf(str, "%08x %08x %08lx\n",
+		str += sprintf(str, "%08lx %08lx %08lx\n",
 				ec->resource[i].start,
 				ec->resource[i].end,
 				ec->resource[i].flags);

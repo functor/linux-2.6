@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 1996 Paul Mackerras.
  */
+#include <linux/config.h>
 #include <linux/string.h>
 #include <asm/machdep.h>
 #include <asm/io.h>
@@ -57,7 +58,7 @@ static struct sysrq_key_op sysrq_xmon_op =
 void
 xmon_map_scc(void)
 {
-#ifdef CONFIG_PPC_PREP
+#ifdef CONFIG_PPC_MULTIPLATFORM
 	volatile unsigned char *base;
 
 #elif defined(CONFIG_GEMINI)

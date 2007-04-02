@@ -29,30 +29,17 @@ struct afs_timer_ops afs_vnode_cb_timed_out_ops = {
 	.timed_out	= afs_vnode_cb_timed_out,
 };
 
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_vnode_cache_get_key(const void *cookie_netfs_data,
-					void *buffer, uint16_t buflen);
-static void afs_vnode_cache_get_attr(const void *cookie_netfs_data,
-				     uint64_t *size);
-static uint16_t afs_vnode_cache_get_aux(const void *cookie_netfs_data,
-					void *buffer, uint16_t buflen);
-static fscache_checkaux_t afs_vnode_cache_check_aux(void *cookie_netfs_data,
-						    const void *buffer,
-						    uint16_t buflen);
-static void afs_vnode_cache_mark_pages_cached(void *cookie_netfs_data,
-					      struct address_space *mapping,
-					      struct pagevec *cached_pvec);
-static void afs_vnode_cache_now_uncached(void *cookie_netfs_data);
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_vnode_cache_match(void *target,
+						 const void *entry);
+static void afs_vnode_cache_update(void *source, void *entry);
 
-struct fscache_cookie_def afs_vnode_cache_index_def = {
-	.name			= "AFS.vnode",
-	.type			= FSCACHE_COOKIE_TYPE_DATAFILE,
-	.get_key		= afs_vnode_cache_get_key,
-	.get_attr		= afs_vnode_cache_get_attr,
-	.get_aux		= afs_vnode_cache_get_aux,
-	.check_aux		= afs_vnode_cache_check_aux,
-	.mark_pages_cached	= afs_vnode_cache_mark_pages_cached,
-	.now_uncached		= afs_vnode_cache_now_uncached,
+struct cachefs_index_def afs_vnode_cache_index_def = {
+	.name		= "vnode",
+	.data_size	= sizeof(struct afs_cache_vnode),
+	.keys[0]	= { CACHEFS_INDEX_KEYS_BIN, 4 },
+	.match		= afs_vnode_cache_match,
+	.update		= afs_vnode_cache_update,
 };
 #endif
 
@@ -117,7 +104,8 @@ static void afs_vnode_finalise_status_update(struct afs_vnode *vnode,
 					vnode->cb_expiry * HZ);
 
 		spin_lock(&afs_cb_hash_lock);
-		list_move_tail(&vnode->cb_hash_link,
+		list_del(&vnode->cb_hash_link);
+		list_add_tail(&vnode->cb_hash_link,
 			      &afs_cb_hash(server, &vnode->fid));
 		spin_unlock(&afs_cb_hash_lock);
 
@@ -201,8 +189,6 @@ int afs_vnode_fetch_status(struct afs_vnode *vnode)
 
 	if (vnode->update_cnt > 0) {
 		/* someone else started a fetch */
-		_debug("conflict");
-
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		add_wait_queue(&vnode->update_waitq, &myself);
 
@@ -234,7 +220,6 @@ int afs_vnode_fetch_status(struct afs_vnode *vnode)
 		spin_unlock(&vnode->lock);
 		set_current_state(TASK_RUNNING);
 
-		_leave(" [conflicted, %d", !!(vnode->flags & AFS_VNODE_DELETED));
 		return vnode->flags & AFS_VNODE_DELETED ? -ENOENT : 0;
 	}
 
@@ -357,198 +342,54 @@ int afs_vnode_give_up_callback(struct afs_vnode *vnode)
 
 /*****************************************************************************/
 /*
- * set the key for the index entry
+ * match a vnode record stored in the cache
  */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_vnode_cache_get_key(const void *cookie_netfs_data,
-					void *buffer, uint16_t bufmax)
+#ifdef AFS_CACHING_SUPPORT
+static cachefs_match_val_t afs_vnode_cache_match(void *target,
+						 const void *entry)
 {
-	const struct afs_vnode *vnode = cookie_netfs_data;
-	uint16_t klen;
+	const struct afs_cache_vnode *cvnode = entry;
+	struct afs_vnode *vnode = target;
 
-	_enter("{%x,%x,%Lx},%p,%u",
-	       vnode->fid.vnode, vnode->fid.unique, vnode->status.version,
-	       buffer, bufmax);
+	_enter("{%x,%x,%Lx},{%x,%x,%Lx}",
+	       vnode->fid.vnode,
+	       vnode->fid.unique,
+	       vnode->status.version,
+	       cvnode->vnode_id,
+	       cvnode->vnode_unique,
+	       cvnode->data_version);
 
-	klen = sizeof(vnode->fid.vnode);
-	if (klen > bufmax)
-		return 0;
-
-	memcpy(buffer, &vnode->fid.vnode, sizeof(vnode->fid.vnode));
-
-	_leave(" = %u", klen);
-	return klen;
-
-} /* end afs_vnode_cache_get_key() */
-#endif
-
-/*****************************************************************************/
-/*
- * provide an updated file attributes
- */
-#ifdef CONFIG_AFS_FSCACHE
-static void afs_vnode_cache_get_attr(const void *cookie_netfs_data,
-				     uint64_t *size)
-{
-	const struct afs_vnode *vnode = cookie_netfs_data;
-
-	_enter("{%x,%x,%Lx},",
-	       vnode->fid.vnode, vnode->fid.unique, vnode->status.version);
-
-	*size = i_size_read((struct inode *) &vnode->vfs_inode);
-
-} /* end afs_vnode_cache_get_attr() */
-#endif
-
-/*****************************************************************************/
-/*
- * provide new auxilliary cache data
- */
-#ifdef CONFIG_AFS_FSCACHE
-static uint16_t afs_vnode_cache_get_aux(const void *cookie_netfs_data,
-					void *buffer, uint16_t bufmax)
-{
-	const struct afs_vnode *vnode = cookie_netfs_data;
-	uint16_t dlen;
-
-	_enter("{%x,%x,%Lx},%p,%u",
-	       vnode->fid.vnode, vnode->fid.unique, vnode->status.version,
-	       buffer, bufmax);
-
-	dlen = sizeof(vnode->fid.unique) + sizeof(vnode->status.version);
-	if (dlen > bufmax)
-		return 0;
-
-	memcpy(buffer, &vnode->fid.unique, sizeof(vnode->fid.unique));
-	buffer += sizeof(vnode->fid.unique);
-	memcpy(buffer, &vnode->status.version, sizeof(vnode->status.version));
-
-	_leave(" = %u", dlen);
-	return dlen;
-
-} /* end afs_vnode_cache_get_aux() */
-#endif
-
-/*****************************************************************************/
-/*
- * check that the auxilliary data indicates that the entry is still valid
- */
-#ifdef CONFIG_AFS_FSCACHE
-static fscache_checkaux_t afs_vnode_cache_check_aux(void *cookie_netfs_data,
-						    const void *buffer,
-						    uint16_t buflen)
-{
-	struct afs_vnode *vnode = cookie_netfs_data;
-	uint16_t dlen;
-
-	_enter("{%x,%x,%Lx},%p,%u",
-	       vnode->fid.vnode, vnode->fid.unique, vnode->status.version,
-	       buffer, buflen);
-
-	/* check the size of the data is what we're expecting */
-	dlen = sizeof(vnode->fid.unique) + sizeof(vnode->status.version);
-	if (dlen != buflen) {
-		_leave(" = OBSOLETE [len %hx != %hx]", dlen, buflen);
-		return FSCACHE_CHECKAUX_OBSOLETE;
+	if (vnode->fid.vnode != cvnode->vnode_id) {
+		_leave(" = FAILED");
+		return CACHEFS_MATCH_FAILED;
 	}
 
-	if (memcmp(buffer,
-		   &vnode->fid.unique,
-		   sizeof(vnode->fid.unique)
-		   ) != 0
-	    ) {
-		unsigned unique;
-
-		memcpy(&unique, buffer, sizeof(unique));
-
-		_leave(" = OBSOLETE [uniq %x != %x]",
-		       unique, vnode->fid.unique);
-		return FSCACHE_CHECKAUX_OBSOLETE;
-	}
-
-	if (memcmp(buffer + sizeof(vnode->fid.unique),
-		   &vnode->status.version,
-		   sizeof(vnode->status.version)
-		   ) != 0
-	    ) {
-		afs_dataversion_t version;
-
-		memcpy(&version, buffer + sizeof(vnode->fid.unique),
-		       sizeof(version));
-
-		_leave(" = OBSOLETE [vers %llx != %llx]",
-		       version, vnode->status.version);
-		return FSCACHE_CHECKAUX_OBSOLETE;
+	if (vnode->fid.unique != cvnode->vnode_unique ||
+	    vnode->status.version != cvnode->data_version) {
+		_leave(" = DELETE");
+		return CACHEFS_MATCH_SUCCESS_DELETE;
 	}
 
 	_leave(" = SUCCESS");
-	return FSCACHE_CHECKAUX_OKAY;
-
-} /* end afs_vnode_cache_check_aux() */
+	return CACHEFS_MATCH_SUCCESS;
+} /* end afs_vnode_cache_match() */
 #endif
 
 /*****************************************************************************/
 /*
- * indication of pages that now have cache metadata retained
- * - this function should mark the specified pages as now being cached
+ * update a vnode record stored in the cache
  */
-#ifdef CONFIG_AFS_FSCACHE
-static void afs_vnode_cache_mark_pages_cached(void *cookie_netfs_data,
-					      struct address_space *mapping,
-					      struct pagevec *cached_pvec)
+#ifdef AFS_CACHING_SUPPORT
+static void afs_vnode_cache_update(void *source, void *entry)
 {
-	unsigned long loop;
+	struct afs_cache_vnode *cvnode = entry;
+	struct afs_vnode *vnode = source;
 
-	for (loop = 0; loop < cached_pvec->nr; loop++) {
-		struct page *page = cached_pvec->pages[loop];
+	_enter("");
 
-		_debug("- mark %p{%lx}", page, page->index);
+	cvnode->vnode_id	= vnode->fid.vnode;
+	cvnode->vnode_unique	= vnode->fid.unique;
+	cvnode->data_version	= vnode->status.version;
 
-		SetPagePrivate(page);
-	}
-
-} /* end afs_vnode_cache_mark_pages_cached() */
+} /* end afs_vnode_cache_update() */
 #endif
-
-/*****************************************************************************/
-/*
- * indication the cookie is no longer uncached
- * - this function is called when the backing store currently caching a cookie
- *   is removed
- * - the netfs should use this to clean up any markers indicating cached pages
- * - this is mandatory for any object that may have data
- */
-static void afs_vnode_cache_now_uncached(void *cookie_netfs_data)
-{
-	struct afs_vnode *vnode = cookie_netfs_data;
-	struct pagevec pvec;
-	pgoff_t first;
-	int loop, nr_pages;
-
-	_enter("{%x,%x,%Lx}",
-	       vnode->fid.vnode, vnode->fid.unique, vnode->status.version);
-
-	pagevec_init(&pvec, 0);
-	first = 0;
-
-	for (;;) {
-		/* grab a bunch of pages to clean */
-		nr_pages = pagevec_lookup(&pvec, vnode->vfs_inode.i_mapping,
-					  first,
-					  PAGEVEC_SIZE - pagevec_count(&pvec));
-		if (!nr_pages)
-			break;
-
-		for (loop = 0; loop < nr_pages; loop++)
-			ClearPagePrivate(pvec.pages[loop]);
-
-		first = pvec.pages[nr_pages - 1]->index + 1;
-
-		pvec.nr = nr_pages;
-		pagevec_release(&pvec);
-		cond_resched();
-	}
-
-	_leave("");
-
-} /* end afs_vnode_cache_now_uncached() */

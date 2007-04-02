@@ -78,7 +78,6 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /*
  * Addresses to scan
@@ -202,7 +201,7 @@ static struct i2c_driver lm90_driver = {
 struct lm90_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
 	int kind;
@@ -248,13 +247,13 @@ static ssize_t set_temp8(struct device *dev, struct device_attribute *devattr,
 	long val = simple_strtol(buf, NULL, 10);
 	int nr = attr->index;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	if (data->kind == adt7461)
 		data->temp8[nr] = TEMP1_TO_REG_ADT7461(val);
 	else
 		data->temp8[nr] = TEMP1_TO_REG(val);
 	i2c_smbus_write_byte_data(client, reg[nr - 1], data->temp8[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -282,7 +281,7 @@ static ssize_t set_temp11(struct device *dev, struct device_attribute *devattr,
 	long val = simple_strtol(buf, NULL, 10);
 	int nr = attr->index;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	if (data->kind == adt7461)
 		data->temp11[nr] = TEMP2_TO_REG_ADT7461(val);
 	else
@@ -291,7 +290,7 @@ static ssize_t set_temp11(struct device *dev, struct device_attribute *devattr,
 				  data->temp11[nr] >> 8);
 	i2c_smbus_write_byte_data(client, reg[(nr - 1) * 2 + 1],
 				  data->temp11[nr] & 0xff);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -312,11 +311,11 @@ static ssize_t set_temphyst(struct device *dev, struct device_attribute *dummy,
 	long val = simple_strtol(buf, NULL, 10);
 	long hyst;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	hyst = TEMP1_FROM_REG(data->temp8[3]) - val;
 	i2c_smbus_write_byte_data(client, LM90_REG_W_TCRIT_HYST,
 				  HYST_TO_REG(hyst));
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -559,7 +558,7 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->valid = 0;
 	data->kind = kind;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -647,7 +646,7 @@ static struct lm90_data *lm90_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm90_data *data = i2c_get_clientdata(client);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ * 2) || !data->valid) {
 		u8 oldh, newh, l;
@@ -693,7 +692,7 @@ static struct lm90_data *lm90_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return data;
 }

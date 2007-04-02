@@ -31,6 +31,7 @@
  *              --  Josef Siemes <jsiemes@web.de>, Aug 2002
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
@@ -185,7 +186,7 @@ static int __init ic_open_devs(void)
 	unsigned short oflags;
 
 	last = &ic_first_dev;
-	rtnl_lock();
+	rtnl_shlock();
 
 	/* bring loopback device up first */
 	if (dev_change_flags(&loopback_dev, loopback_dev.flags | IFF_UP) < 0)
@@ -214,7 +215,7 @@ static int __init ic_open_devs(void)
 				continue;
 			}
 			if (!(d = kmalloc(sizeof(struct ic_device), GFP_KERNEL))) {
-				rtnl_unlock();
+				rtnl_shunlock();
 				return -1;
 			}
 			d->dev = dev;
@@ -231,7 +232,7 @@ static int __init ic_open_devs(void)
 				dev->name, able, d->xid));
 		}
 	}
-	rtnl_unlock();
+	rtnl_shunlock();
 
 	*last = NULL;
 
@@ -250,7 +251,7 @@ static void __init ic_close_devs(void)
 	struct ic_device *d, *next;
 	struct net_device *dev;
 
-	rtnl_lock();
+	rtnl_shlock();
 	next = ic_first_dev;
 	while ((d = next)) {
 		next = d->next;
@@ -261,7 +262,7 @@ static void __init ic_close_devs(void)
 		}
 		kfree(d);
 	}
-	rtnl_unlock();
+	rtnl_shunlock();
 }
 
 /*
@@ -420,7 +421,7 @@ ic_rarp_recv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt
 {
 	struct arphdr *rarp;
 	unsigned char *rarp_ptr;
-	unsigned long sip, tip;
+	u32 sip, tip;
 	unsigned char *sha, *tha;		/* s for "source", t for "target" */
 	struct ic_device *d;
 

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/pplus.h
+ *
  * Definitions for Motorola MCG Falcon/Raven & HAWK North Bridge & Memory ctlr.
  *
  * Author: Mark A. Greerinclude/asm-ppc/hawk.h

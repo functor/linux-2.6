@@ -22,6 +22,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -222,8 +223,6 @@ __dma_alloc_coherent(size_t size, dma_addr_t *handle, gfp_t gfp)
 		pte_t *pte = consistent_pte + CONSISTENT_OFFSET(vaddr);
 		struct page *end = page + (1 << order);
 
-		split_page(page, order);
-
 		/*
 		 * Set the "dma handle"
 		 */
@@ -232,6 +231,7 @@ __dma_alloc_coherent(size_t size, dma_addr_t *handle, gfp_t gfp)
 		do {
 			BUG_ON(!pte_none(*pte));
 
+			set_page_count(page, 1);
 			SetPageReserved(page);
 			set_pte_at(&init_mm, vaddr,
 				   pte, mk_pte(page, pgprot_noncached(PAGE_KERNEL)));
@@ -244,6 +244,7 @@ __dma_alloc_coherent(size_t size, dma_addr_t *handle, gfp_t gfp)
 		 * Free the otherwise unused pages.
 		 */
 		while (page < end) {
+			set_page_count(page, 1);
 			__free_page(page);
 			page++;
 		}

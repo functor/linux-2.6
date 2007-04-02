@@ -45,7 +45,6 @@ static int
 match(const struct sk_buff *skb,
       const struct net_device *in,
       const struct net_device *out,
-      const struct xt_match *match,
       const void *matchinfo,
       int offset,
       unsigned int protoff,
@@ -58,9 +57,14 @@ match(const struct sk_buff *skb,
 	unsigned int hdrlen = 0;
 	unsigned int ret = 0;
 	struct in6_addr *ap, _addr;
+	int err;
 
-	if (ipv6_find_hdr(skb, &ptr, NEXTHDR_ROUTING, NULL) < 0)
+	err = ipv6_find_hdr(skb, &ptr, NEXTHDR_ROUTING, NULL);
+	if (err < 0) {
+		if (err != -ENOENT)
+			*hotdrop = 1;
 		return 0;
+	}
 
 	rh = skb_header_pointer(skb, ptr, sizeof(_route), &_route);
 	if (rh == NULL) {
@@ -195,13 +199,17 @@ match(const struct sk_buff *skb,
 static int
 checkentry(const char *tablename,
 	   const void *entry,
-	   const struct xt_match *match,
 	   void *matchinfo,
 	   unsigned int matchinfosize,
 	   unsigned int hook_mask)
 {
 	const struct ip6t_rt *rtinfo = matchinfo;
 
+	if (matchinfosize != IP6T_ALIGN(sizeof(struct ip6t_rt))) {
+		DEBUGP("ip6t_rt: matchsize %u != %u\n",
+		       matchinfosize, IP6T_ALIGN(sizeof(struct ip6t_rt)));
+		return 0;
+	}
 	if (rtinfo->invflags & ~IP6T_RT_INV_MASK) {
 		DEBUGP("ip6t_rt: unknown flags %X\n", rtinfo->invflags);
 		return 0;
@@ -219,21 +227,20 @@ checkentry(const char *tablename,
 
 static struct ip6t_match rt_match = {
 	.name		= "rt",
-	.match		= match,
-	.matchsize	= sizeof(struct ip6t_rt),
-	.checkentry	= checkentry,
+	.match		= &match,
+	.checkentry	= &checkentry,
 	.me		= THIS_MODULE,
 };
 
-static int __init ip6t_rt_init(void)
+static int __init init(void)
 {
 	return ip6t_register_match(&rt_match);
 }
 
-static void __exit ip6t_rt_fini(void)
+static void __exit cleanup(void)
 {
 	ip6t_unregister_match(&rt_match);
 }
 
-module_init(ip6t_rt_init);
-module_exit(ip6t_rt_fini);
+module_init(init);
+module_exit(cleanup);

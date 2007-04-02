@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/simple/misc-radstone_ppc7d.c
+ *
  * Misc data for Radstone PPC7D board.
  *
  * Author: James Chapman <jchapman@katalix.com>

@@ -12,6 +12,7 @@
 
 #undef DEBUG
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/sched.h>
@@ -72,6 +73,7 @@
 
 int have_of = 1;
 int boot_cpuid = 0;
+int boot_cpuid_phys = 0;
 dev_t boot_dev;
 u64 ppc64_pft_size;
 
@@ -94,10 +96,21 @@ int dcache_bsize;
 int icache_bsize;
 int ucache_bsize;
 
+/* The main machine-dep calls structure
+ */
+struct machdep_calls ppc_md;
+EXPORT_SYMBOL(ppc_md);
+
 #ifdef CONFIG_MAGIC_SYSRQ
 unsigned long SYSRQ_KEY;
 #endif /* CONFIG_MAGIC_SYSRQ */
 
+
+static int ppc64_panic_event(struct notifier_block *, unsigned long, void *);
+static struct notifier_block ppc64_panic_block = {
+	.notifier_call = ppc64_panic_event,
+	.priority = INT_MIN /* may not return; must be done last */
+};
 
 #ifdef CONFIG_SMP
 
@@ -148,12 +161,31 @@ early_param("smt-enabled", early_smt_enabled);
 #define check_smt_enabled()
 #endif /* CONFIG_SMP */
 
-/* Put the paca pointer into r13 and SPRG3 */
-void __init setup_paca(int cpu)
-{
-	local_paca = &paca[cpu];
-	mtspr(SPRN_SPRG3, local_paca);
-}
+extern struct machdep_calls pSeries_md;
+extern struct machdep_calls pmac_md;
+extern struct machdep_calls maple_md;
+extern struct machdep_calls cell_md;
+extern struct machdep_calls iseries_md;
+
+/* Ultimately, stuff them in an elf section like initcalls... */
+static struct machdep_calls __initdata *machines[] = {
+#ifdef CONFIG_PPC_PSERIES
+	&pSeries_md,
+#endif /* CONFIG_PPC_PSERIES */
+#ifdef CONFIG_PPC_PMAC
+	&pmac_md,
+#endif /* CONFIG_PPC_PMAC */
+#ifdef CONFIG_PPC_MAPLE
+	&maple_md,
+#endif /* CONFIG_PPC_MAPLE */
+#ifdef CONFIG_PPC_CELL
+	&cell_md,
+#endif
+#ifdef CONFIG_PPC_ISERIES
+	&iseries_md,
+#endif
+	NULL
+};
 
 /*
  * Early initialization entry point. This is called by head.S
@@ -176,13 +208,13 @@ void __init setup_paca(int cpu)
 
 void __init early_setup(unsigned long dt_ptr)
 {
-	/* Assume we're on cpu 0 for now. Don't write to the paca yet! */
-	setup_paca(0);
+	struct paca_struct *lpaca = get_paca();
+	static struct machdep_calls **mach;
 
 	/* Enable early debugging if any specified (see udbg.h) */
 	udbg_early_init();
 
- 	DBG(" -> early_setup(), dt_ptr: 0x%lx\n", dt_ptr);
+	DBG(" -> early_setup()\n");
 
 	/*
 	 * Do early initializations using the flattened device
@@ -191,18 +223,26 @@ void __init early_setup(unsigned long dt_ptr)
 	 */
 	early_init_devtree(__va(dt_ptr));
 
-	/* Now we know the logical id of our boot cpu, setup the paca. */
-	setup_paca(boot_cpuid);
+	/*
+	 * Iterate all ppc_md structures until we find the proper
+	 * one for the current machine type
+	 */
+	DBG("Probing machine type for platform %x...\n", _machine);
 
-	/* Fix up paca fields required for the boot cpu */
-	get_paca()->cpu_start = 1;
-	get_paca()->stab_real = __pa((u64)&initial_stab);
-	get_paca()->stab_addr = (u64)&initial_stab;
+	for (mach = machines; *mach; mach++) {
+		if ((*mach)->probe(_machine))
+			break;
+	}
+	/* What can we do if we didn't find ? */
+	if (*mach == NULL) {
+		DBG("No suitable machine found !\n");
+		for (;;);
+	}
+	ppc_md = **mach;
 
-	/* Probe the machine type */
-	probe_machine();
-
-	setup_kdump_trampoline();
+#ifdef CONFIG_CRASH_DUMP
+	kdump_setup();
+#endif
 
 	DBG("Found, Initializing memory management...\n");
 
@@ -219,7 +259,7 @@ void __init early_setup(unsigned long dt_ptr)
 	if (cpu_has_feature(CPU_FTR_SLB))
 		slb_initialize();
 	else if (!firmware_has_feature(FW_FEATURE_ISERIES))
-		stab_initialize(get_paca()->stab_real);
+		stab_initialize(lpaca->stab_real);
 
 	DBG(" <- early_setup()\n");
 }
@@ -298,7 +338,7 @@ static void __init initialize_cache_info(void)
 			const char *dc, *ic;
 
 			/* Then read cache informations */
-			if (machine_is(powermac)) {
+			if (_machine == PLATFORM_POWERMAC) {
 				dc = "d-cache-block-size";
 				ic = "i-cache-block-size";
 			} else {
@@ -354,21 +394,29 @@ void __init setup_system(void)
 {
 	DBG(" -> setup_system()\n");
 
+#ifdef CONFIG_KEXEC
+	kdump_move_device_tree();
+#endif
 	/*
 	 * Unflatten the device-tree passed by prom_init or kexec
 	 */
 	unflatten_device_tree();
 
-	/*
-	 * Fill the ppc64_caches & systemcfg structures with informations
- 	 * retrieved from the device-tree.
-	 */
-	initialize_cache_info();
+#ifdef CONFIG_KEXEC
+	kexec_setup();	/* requires unflattened device tree. */
+#endif
 
 	/*
-	 * Initialize irq remapping subsystem
+	 * Fill the ppc64_caches & systemcfg structures with informations
+	 * retrieved from the device-tree. Need to be called before
+	 * finish_device_tree() since the later requires some of the
+	 * informations filled up here to properly parse the interrupt
+	 * tree.
+	 * It also sets up the cache line sizes which allows to call
+	 * routines like flush_icache_range (used by the hash init
+	 * later on).
 	 */
-	irq_early_init();
+	initialize_cache_info();
 
 #ifdef CONFIG_PPC_RTAS
 	/*
@@ -397,6 +445,12 @@ void __init setup_system(void)
 	find_legacy_serial_ports();
 
 	/*
+	 * "Finish" the device-tree, that is do the actual parsing of
+	 * some of the properties like the interrupt map
+	 */
+	finish_device_tree();
+
+	/*
 	 * Initialize xmon
 	 */
 #ifdef CONFIG_XMON_DEFAULT
@@ -407,8 +461,10 @@ void __init setup_system(void)
 	 */
 	register_early_udbg_console();
 
-	if (do_early_xmon)
-		debugger(NULL);
+	/* Save unparsed command line copy for /proc/cmdline */
+	strlcpy(saved_command_line, cmd_line, COMMAND_LINE_SIZE);
+
+	parse_early_param();
 
 	check_smt_enabled();
 	smp_setup_cpu_maps();
@@ -424,6 +480,9 @@ void __init setup_system(void)
 
 	printk("-----------------------------------------------------\n");
 	printk("ppc64_pft_size                = 0x%lx\n", ppc64_pft_size);
+	printk("ppc64_interrupt_controller    = 0x%ld\n",
+	       ppc64_interrupt_controller);
+	printk("platform                      = 0x%x\n", _machine);
 	printk("physicalMemorySize            = 0x%lx\n", lmb_phys_mem_size());
 	printk("ppc64_caches.dcache_line_size = 0x%x\n",
 	       ppc64_caches.dline_size);
@@ -436,7 +495,16 @@ void __init setup_system(void)
 #endif
 	printk("-----------------------------------------------------\n");
 
+	mm_init_ppc64();
+
 	DBG(" <- setup_system()\n");
+}
+
+static int ppc64_panic_event(struct notifier_block *this,
+                             unsigned long event, void *ptr)
+{
+	ppc_md.panic((char *)ptr);  /* May not return */
+	return NOTIFY_DONE;
 }
 
 #ifdef CONFIG_IRQSTACKS
@@ -448,7 +516,7 @@ static void __init irqstack_early_init(void)
 	 * interrupt stacks must be under 256MB, we cannot afford to take
 	 * SLB misses on them.
 	 */
-	for_each_possible_cpu(i) {
+	for_each_cpu(i) {
 		softirq_ctx[i] = (struct thread_info *)
 			__va(lmb_alloc_base(THREAD_SIZE,
 					    THREAD_SIZE, 0x10000000));
@@ -481,7 +549,7 @@ static void __init emergency_stack_init(void)
 	 */
 	limit = min(0x10000000UL, lmb.rmo_size);
 
-	for_each_possible_cpu(i)
+	for_each_cpu(i)
 		paca[i].emergency_sp =
 		__va(lmb_alloc_base(HW_PAGE_SIZE, 128, limit)) + HW_PAGE_SIZE;
 }
@@ -493,6 +561,8 @@ static void __init emergency_stack_init(void)
  */
 void __init setup_arch(char **cmdline_p)
 {
+	extern void do_init_bootmem(void);
+
 	ppc64_boot_msg(0x12, "Setup Arch");
 
 	*cmdline_p = cmd_line;
@@ -509,7 +579,7 @@ void __init setup_arch(char **cmdline_p)
 	panic_timeout = 180;
 
 	if (ppc_md.panic)
-		setup_panic();
+		notifier_chain_register(&panic_notifier_list, &ppc64_panic_block);
 
 	init_mm.start_code = PAGE_OFFSET;
 	init_mm.end_code = (unsigned long) _etext;
@@ -530,6 +600,12 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	ppc_md.setup_arch();
+
+	/* Use the default idle loop if the platform hasn't provided one. */
+	if (NULL == ppc_md.idle_loop) {
+		ppc_md.idle_loop = default_idle;
+		printk(KERN_INFO "Using default idle loop\n");
+	}
 
 	paging_init();
 	ppc64_boot_msg(0x15, "Setup Done");
@@ -567,6 +643,14 @@ void ppc64_terminate_msg(unsigned int src, const char *msg)
 	printk("[terminate]%04x %s\n", src, msg);
 }
 
+int check_legacy_ioport(unsigned long base_port)
+{
+	if (ppc_md.check_legacy_ioport == NULL)
+		return 0;
+	return ppc_md.check_legacy_ioport(base_port);
+}
+EXPORT_SYMBOL(check_legacy_ioport);
+
 void cpu_die(void)
 {
 	if (ppc_md.cpu_die)
@@ -587,7 +671,7 @@ void __init setup_per_cpu_areas(void)
 		size = PERCPU_ENOUGH_ROOM;
 #endif
 
-	for_each_possible_cpu(i) {
+	for_each_cpu(i) {
 		ptr = alloc_bootmem_node(NODE_DATA(cpu_to_node(i)), size);
 		if (!ptr)
 			panic("Cannot allocate cpu data for CPU %d\n", i);

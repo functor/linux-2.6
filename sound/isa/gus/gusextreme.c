@@ -87,7 +87,7 @@ MODULE_PARM_DESC(channels, "GF1 channels for GUS Extreme driver.");
 module_param_array(pcm_channels, int, NULL, 0444);
 MODULE_PARM_DESC(pcm_channels, "Reserved PCM channels for GUS Extreme driver.");
 
-static struct platform_device *devices[SNDRV_CARDS];
+struct platform_device *devices[SNDRV_CARDS];
 
 
 #define PFX	"gusextreme: "
@@ -301,7 +301,7 @@ static int __init snd_gusextreme_probe(struct platform_device *pdev)
 	    (err = snd_mpu401_uart_new(card, 0, MPU401_HW_ES1688,
 					       es1688->mpu_port, 0,
 					       xmpu_irq,
-					       IRQF_DISABLED,
+					       SA_INTERRUPT,
 					       NULL)) < 0)
 		goto out;
 
@@ -357,17 +357,13 @@ static int __init alsa_card_gusextreme_init(void)
 		return err;
 
 	cards = 0;
-	for (i = 0; i < SNDRV_CARDS; i++) {
+	for (i = 0; i < SNDRV_CARDS && enable[i]; i++) {
 		struct platform_device *device;
-		if (! enable[i])
-			continue;
 		device = platform_device_register_simple(GUSEXTREME_DRIVER,
 							 i, NULL, 0);
-		if (IS_ERR(device))
-			continue;
-		if (!platform_get_drvdata(device)) {
-			platform_device_unregister(device);
-			continue;
+		if (IS_ERR(device)) {
+			err = PTR_ERR(device);
+			goto errout;
 		}
 		devices[i] = device;
 		cards++;
@@ -376,10 +372,14 @@ static int __init alsa_card_gusextreme_init(void)
 #ifdef MODULE
 		printk(KERN_ERR "GUS Extreme soundcard not found or device busy\n");
 #endif
-		snd_gusextreme_unregister_all();
-		return -ENODEV;
+		err = -ENODEV;
+		goto errout;
 	}
 	return 0;
+
+ errout:
+	snd_gusextreme_unregister_all();
+	return err;
 }
 
 static void __exit alsa_card_gusextreme_exit(void)

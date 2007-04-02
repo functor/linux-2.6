@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/ppc85xx_common.c
+ *
  * MPC85xx support routines
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
@@ -11,6 +13,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/init.h>

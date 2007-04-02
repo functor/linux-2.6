@@ -28,9 +28,6 @@
 #include <linux/journal-head.h>
 #include <linux/stddef.h>
 #include <linux/bit_spinlock.h>
-#include <linux/mutex.h>
-#include <linux/timer.h>
-
 #include <asm/semaphore.h>
 #endif
 
@@ -72,9 +69,6 @@ extern int journal_enable_debug;
 #endif
 
 extern void * __jbd_kmalloc (const char *where, size_t size, gfp_t flags, int retry);
-extern void * jbd_slab_alloc(size_t size, gfp_t flags);
-extern void jbd_slab_free(void *ptr, size_t size);
-
 #define jbd_kmalloc(size, flags) \
 	__jbd_kmalloc(__FUNCTION__, (size), (flags), journal_oom_retry)
 #define jbd_rep_kmalloc(size, flags) \
@@ -504,12 +498,6 @@ struct transaction_s
 	struct journal_head	*t_checkpoint_list;
 
 	/*
-	 * Doubly-linked circular list of all buffers submitted for IO while
-	 * checkpointing. [j_list_lock]
-	 */
-	struct journal_head	*t_checkpoint_io_list;
-
-	/*
 	 * Doubly-linked circular list of temporary buffers currently undergoing
 	 * IO in the log [j_list_lock]
 	 */
@@ -587,7 +575,7 @@ struct transaction_s
  * @j_wait_checkpoint:  Wait queue to trigger checkpointing
  * @j_wait_commit: Wait queue to trigger commit
  * @j_wait_updates: Wait queue to wait for updates to complete
- * @j_checkpoint_mutex: Mutex for locking against concurrent checkpoints
+ * @j_checkpoint_sem: Semaphore for locking against concurrent checkpoints
  * @j_head: Journal head - identifies the first unused block in the journal
  * @j_tail: Journal tail - identifies the oldest still-used block in the
  *  journal.
@@ -657,7 +645,7 @@ struct journal_s
 	int			j_barrier_count;
 
 	/* The barrier lock itself */
-	struct mutex		j_barrier;
+	struct semaphore	j_barrier;
 
 	/*
 	 * Transactions: The current running transaction...
@@ -699,7 +687,7 @@ struct journal_s
 	wait_queue_head_t	j_wait_updates;
 
 	/* Semaphore for locking against concurrent checkpoints */
-	struct mutex	 	j_checkpoint_mutex;
+	struct semaphore 	j_checkpoint_sem;
 
 	/*
 	 * Journal head: identifies the first unused block in the journal.
@@ -798,7 +786,7 @@ struct journal_s
 	unsigned long		j_commit_interval;
 
 	/* The timer used to wakeup the commit thread: */
-	struct timer_list	j_commit_timer;
+	struct timer_list	*j_commit_timer;
 
 	/*
 	 * The revoke table: maintains the list of revoked blocks in the
@@ -858,7 +846,7 @@ extern void journal_commit_transaction(journal_t *);
 
 /* Checkpoint list management */
 int __journal_clean_checkpoint_list(journal_t *journal);
-int __journal_remove_checkpoint(struct journal_head *);
+void __journal_remove_checkpoint(struct journal_head *);
 void __journal_insert_checkpoint(struct journal_head *, transaction_t *);
 
 /* Buffer IO */
@@ -904,7 +892,7 @@ extern int	 journal_dirty_metadata (handle_t *, struct buffer_head *);
 extern void	 journal_release_buffer (handle_t *, struct buffer_head *);
 extern int	 journal_forget (handle_t *, struct buffer_head *);
 extern void	 journal_sync_buffer (struct buffer_head *);
-extern void	 journal_invalidatepage(journal_t *,
+extern int	 journal_invalidatepage(journal_t *,
 				struct page *, unsigned long);
 extern int	 journal_try_to_free_buffers(journal_t *, struct page *, gfp_t);
 extern int	 journal_stop(handle_t *);

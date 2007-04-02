@@ -65,6 +65,7 @@
    Well, as result, despite its simplicity, we get a pretty
    powerful classification engine.  */
 
+#include <linux/config.h>
 
 struct rsvp_head
 {
@@ -240,8 +241,9 @@ static int rsvp_init(struct tcf_proto *tp)
 {
 	struct rsvp_head *data;
 
-	data = kzalloc(sizeof(struct rsvp_head), GFP_KERNEL);
+	data = kmalloc(sizeof(struct rsvp_head), GFP_KERNEL);
 	if (data) {
+		memset(data, 0, sizeof(struct rsvp_head));
 		tp->root = data;
 		return 0;
 	}
@@ -445,10 +447,11 @@ static int rsvp_change(struct tcf_proto *tp, unsigned long base,
 		goto errout2;
 
 	err = -ENOBUFS;
-	f = kzalloc(sizeof(struct rsvp_filter), GFP_KERNEL);
+	f = kmalloc(sizeof(struct rsvp_filter), GFP_KERNEL);
 	if (f == NULL)
 		goto errout2;
 
+	memset(f, 0, sizeof(*f));
 	h2 = 16;
 	if (tb[TCA_RSVP_SRC-1]) {
 		err = -EINVAL;
@@ -530,9 +533,10 @@ insert:
 	/* No session found. Create new one. */
 
 	err = -ENOBUFS;
-	s = kzalloc(sizeof(struct rsvp_session), GFP_KERNEL);
+	s = kmalloc(sizeof(struct rsvp_session), GFP_KERNEL);
 	if (s == NULL)
 		goto errout;
+	memset(s, 0, sizeof(*s));
 	memcpy(s->dst, dst, sizeof(s->dst));
 
 	if (pinfo) {

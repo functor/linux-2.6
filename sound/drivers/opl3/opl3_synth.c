@@ -58,8 +58,6 @@ char snd_opl3_regmap[MAX_OPL2_VOICES][4] =
 	{ 0x12, 0x15, 0x00, 0x00 }	/* is selected (only left reg block) */
 };
 
-EXPORT_SYMBOL(snd_opl3_regmap);
-
 /*
  * prototypes
  */
@@ -78,13 +76,13 @@ int snd_opl3_open(struct snd_hwdep * hw, struct file *file)
 {
 	struct snd_opl3 *opl3 = hw->private_data;
 
-	mutex_lock(&opl3->access_mutex);
+	down(&opl3->access_mutex);
 	if (opl3->used) {
-		mutex_unlock(&opl3->access_mutex);
+		up(&opl3->access_mutex);
 		return -EAGAIN;
 	}
 	opl3->used++;
-	mutex_unlock(&opl3->access_mutex);
+	up(&opl3->access_mutex);
 
 	return 0;
 }
@@ -181,9 +179,9 @@ int snd_opl3_release(struct snd_hwdep * hw, struct file *file)
 	struct snd_opl3 *opl3 = hw->private_data;
 
 	snd_opl3_reset(opl3);
-	mutex_lock(&opl3->access_mutex);
+	down(&opl3->access_mutex);
 	opl3->used--;
-	mutex_unlock(&opl3->access_mutex);
+	up(&opl3->access_mutex);
 
 	return 0;
 }
@@ -230,7 +228,6 @@ void snd_opl3_reset(struct snd_opl3 * opl3)
 	opl3->rhythm = 0;
 }
 
-EXPORT_SYMBOL(snd_opl3_reset);
 
 static int snd_opl3_play_note(struct snd_opl3 * opl3, struct snd_dm_fm_note * note)
 {
@@ -448,4 +445,3 @@ static int snd_opl3_set_connection(struct snd_opl3 * opl3, int connection)
 
 	return 0;
 }
-

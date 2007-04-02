@@ -135,8 +135,13 @@ struct bus_type eisa_bus_type = {
 
 int eisa_driver_register (struct eisa_driver *edrv)
 {
+	int r;
+	
 	edrv->driver.bus = &eisa_bus_type;
-	return driver_register (&edrv->driver);
+	if ((r = driver_register (&edrv->driver)) < 0)
+		return r;
+
+	return 0;
 }
 
 void eisa_driver_unregister (struct eisa_driver *edrv)

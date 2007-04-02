@@ -17,6 +17,7 @@
 #ifndef _LINUX_CRYPTO_H
 #define _LINUX_CRYPTO_H
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -66,7 +67,7 @@ struct crypto_tfm;
 
 struct cipher_desc {
 	struct crypto_tfm *tfm;
-	void (*crfn)(struct crypto_tfm *tfm, u8 *dst, const u8 *src);
+	void (*crfn)(void *ctx, u8 *dst, const u8 *src);
 	unsigned int (*prfn)(const struct cipher_desc *desc, u8 *dst,
 			     const u8 *src, unsigned int nbytes);
 	void *info;
@@ -79,10 +80,10 @@ struct cipher_desc {
 struct cipher_alg {
 	unsigned int cia_min_keysize;
 	unsigned int cia_max_keysize;
-	int (*cia_setkey)(struct crypto_tfm *tfm, const u8 *key,
+	int (*cia_setkey)(void *ctx, const u8 *key,
 	                  unsigned int keylen, u32 *flags);
-	void (*cia_encrypt)(struct crypto_tfm *tfm, u8 *dst, const u8 *src);
-	void (*cia_decrypt)(struct crypto_tfm *tfm, u8 *dst, const u8 *src);
+	void (*cia_encrypt)(void *ctx, u8 *dst, const u8 *src);
+	void (*cia_decrypt)(void *ctx, u8 *dst, const u8 *src);
 
 	unsigned int (*cia_encrypt_ecb)(const struct cipher_desc *desc,
 					u8 *dst, const u8 *src,
@@ -100,19 +101,20 @@ struct cipher_alg {
 
 struct digest_alg {
 	unsigned int dia_digestsize;
-	void (*dia_init)(struct crypto_tfm *tfm);
-	void (*dia_update)(struct crypto_tfm *tfm, const u8 *data,
-			   unsigned int len);
-	void (*dia_final)(struct crypto_tfm *tfm, u8 *out);
-	int (*dia_setkey)(struct crypto_tfm *tfm, const u8 *key,
+	void (*dia_init)(void *ctx);
+	void (*dia_update)(void *ctx, const u8 *data, unsigned int len);
+	void (*dia_final)(void *ctx, u8 *out);
+	int (*dia_setkey)(void *ctx, const u8 *key,
 	                  unsigned int keylen, u32 *flags);
 };
 
 struct compress_alg {
-	int (*coa_compress)(struct crypto_tfm *tfm, const u8 *src,
-			    unsigned int slen, u8 *dst, unsigned int *dlen);
-	int (*coa_decompress)(struct crypto_tfm *tfm, const u8 *src,
-			      unsigned int slen, u8 *dst, unsigned int *dlen);
+	int (*coa_init)(void *ctx);
+	void (*coa_exit)(void *ctx);
+	int (*coa_compress)(void *ctx, const u8 *src, unsigned int slen,
+	                    u8 *dst, unsigned int *dlen);
+	int (*coa_decompress)(void *ctx, const u8 *src, unsigned int slen,
+	                      u8 *dst, unsigned int *dlen);
 };
 
 #define cra_cipher	cra_u.cipher
@@ -128,17 +130,14 @@ struct crypto_alg {
 
 	int cra_priority;
 
-	char cra_name[CRYPTO_MAX_ALG_NAME];
-	char cra_driver_name[CRYPTO_MAX_ALG_NAME];
+	const char cra_name[CRYPTO_MAX_ALG_NAME];
+	const char cra_driver_name[CRYPTO_MAX_ALG_NAME];
 
 	union {
 		struct cipher_alg cipher;
 		struct digest_alg digest;
 		struct compress_alg compress;
 	} cra_u;
-
-	int (*cra_init)(struct crypto_tfm *tfm);
-	void (*cra_exit)(struct crypto_tfm *tfm);
 	
 	struct module *cra_module;
 };
@@ -196,8 +195,6 @@ struct digest_tfm {
 	void (*dit_init)(struct crypto_tfm *tfm);
 	void (*dit_update)(struct crypto_tfm *tfm,
 	                   struct scatterlist *sg, unsigned int nsg);
-	void (*dit_update_kernel)(struct crypto_tfm *tfm,
-				  const void *data, size_t count);
 	void (*dit_final)(struct crypto_tfm *tfm, u8 *out);
 	void (*dit_digest)(struct crypto_tfm *tfm, struct scatterlist *sg,
 	                   unsigned int nsg, u8 *out);
@@ -232,8 +229,6 @@ struct crypto_tfm {
 	} crt_u;
 	
 	struct crypto_alg *__crt_alg;
-
-	char __crt_ctx[] __attribute__ ((__aligned__));
 };
 
 /* 
@@ -246,14 +241,10 @@ struct crypto_tfm {
  * will then attempt to load a module of the same name or alias.  A refcount
  * is grabbed on the algorithm which is then associated with the new transform.
  *
- * crypto_alloc_tfm2() is similar, but allows module loading to be suppressed.
- *
  * crypto_free_tfm() frees up the transform and any associated resources,
  * then drops the refcount on the associated algorithm.
  */
 struct crypto_tfm *crypto_alloc_tfm(const char *alg_name, u32 tfm_flags);
-struct crypto_tfm *crypto_alloc_tfm2(const char *alg_name, u32 tfm_flags,
-				     int nomodload);
 void crypto_free_tfm(struct crypto_tfm *tfm);
 
 /*
@@ -310,13 +301,7 @@ static inline unsigned int crypto_tfm_alg_alignmask(struct crypto_tfm *tfm)
 
 static inline void *crypto_tfm_ctx(struct crypto_tfm *tfm)
 {
-	return tfm->__crt_ctx;
-}
-
-static inline unsigned int crypto_tfm_ctx_alignment(void)
-{
-	struct crypto_tfm *tfm;
-	return __alignof__(tfm->__crt_ctx);
+	return (void *)&tfm[1];
 }
 
 /*
@@ -334,14 +319,6 @@ static inline void crypto_digest_update(struct crypto_tfm *tfm,
 {
 	BUG_ON(crypto_tfm_alg_type(tfm) != CRYPTO_ALG_TYPE_DIGEST);
 	tfm->crt_digest.dit_update(tfm, sg, nsg);
-}
-
-static inline void crypto_digest_update_kernel(struct crypto_tfm *tfm,
-					       const void *data,
-					       size_t count)
-{
-	BUG_ON(crypto_tfm_alg_type(tfm) != CRYPTO_ALG_TYPE_DIGEST);
-	tfm->crt_digest.dit_update_kernel(tfm, data, count);
 }
 
 static inline void crypto_digest_final(struct crypto_tfm *tfm, u8 *out)

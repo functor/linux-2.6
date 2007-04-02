@@ -7,8 +7,6 @@
  *  	Karl Lessard <klessard@sunrisetelecom.com>
  *  	<c.pellegrin@exadron.com>
  *
- * PM support added by Rodolfo Giometti <giometti@linux.it>
- *
  * Copyright 2002 MontaVista Software
  * Author: MontaVista Software, Inc.
  *		ppopov@mvista.com or source@mvista.com
@@ -40,6 +38,7 @@
  *  with this program; if not, write  to the Free Software Foundation, Inc.,
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -156,7 +155,7 @@ int au1100fb_setmode(struct au1100fb_device *fbdev)
 
 			info->fix.visual = FB_VISUAL_TRUECOLOR;
 			info->fix.line_length = info->var.xres_virtual << 1; /* depth=16 */
-		}
+	}
 	} else {
 		/* mono */
 		info->fix.visual = FB_VISUAL_MONO10;
@@ -164,16 +163,20 @@ int au1100fb_setmode(struct au1100fb_device *fbdev)
 	}
 
 	info->screen_size = info->fix.line_length * info->var.yres_virtual;
-	info->var.rotate = ((fbdev->panel->control_base&LCD_CONTROL_SM_MASK) \
-				>> LCD_CONTROL_SM_BIT) * 90;
 
 	/* Determine BPP mode and format */
-	fbdev->regs->lcd_control = fbdev->panel->control_base;
-	fbdev->regs->lcd_horztiming = fbdev->panel->horztiming;
-	fbdev->regs->lcd_verttiming = fbdev->panel->verttiming;
-	fbdev->regs->lcd_clkcontrol = fbdev->panel->clkcontrol_base;
+	fbdev->regs->lcd_control = fbdev->panel->control_base |
+			    ((info->var.rotate/90) << LCD_CONTROL_SM_BIT);
+
 	fbdev->regs->lcd_intenable = 0;
 	fbdev->regs->lcd_intstatus = 0;
+
+	fbdev->regs->lcd_horztiming = fbdev->panel->horztiming;
+
+	fbdev->regs->lcd_verttiming = fbdev->panel->verttiming;
+
+	fbdev->regs->lcd_clkcontrol = fbdev->panel->clkcontrol_base;
+
 	fbdev->regs->lcd_dmaaddr0 = LCD_DMA_SA_N(fbdev->fb_phys);
 
 	if (panel_is_dual(fbdev->panel)) {
@@ -202,8 +205,6 @@ int au1100fb_setmode(struct au1100fb_device *fbdev)
 
 	/* Resume controller */
 	fbdev->regs->lcd_control |= LCD_CONTROL_GO;
-	mdelay(10);
-	au1100fb_fb_blank(VESA_NO_BLANKING, info);
 
 	return 0;
 }
@@ -213,12 +214,9 @@ int au1100fb_setmode(struct au1100fb_device *fbdev)
  */
 int au1100fb_fb_setcolreg(unsigned regno, unsigned red, unsigned green, unsigned blue, unsigned transp, struct fb_info *fbi)
 {
-	struct au1100fb_device *fbdev;
-	u32 *palette;
+	struct au1100fb_device *fbdev = to_au1100fb_device(fbi);
+	u32 *palette = fbdev->regs->lcd_pallettebase;
 	u32 value;
-
-	fbdev = to_au1100fb_device(fbi);
-	palette = fbdev->regs->lcd_pallettebase;
 
 	if (regno > (AU1100_LCD_NBR_PALETTE_ENTRIES - 1))
 		return -EINVAL;
@@ -318,10 +316,8 @@ int au1100fb_fb_blank(int blank_mode, struct fb_info *fbi)
  */
 int au1100fb_fb_pan_display(struct fb_var_screeninfo *var, struct fb_info *fbi)
 {
-	struct au1100fb_device *fbdev;
+	struct au1100fb_device *fbdev = to_au1100fb_device(fbi);
 	int dy;
-
-	fbdev = to_au1100fb_device(fbi);
 
 	print_dbg("fb_pan_display %p %p", var, fbi);
 
@@ -386,11 +382,9 @@ void au1100fb_fb_rotate(struct fb_info *fbi, int angle)
  */
 int au1100fb_fb_mmap(struct fb_info *fbi, struct vm_area_struct *vma)
 {
-	struct au1100fb_device *fbdev;
+	struct au1100fb_device *fbdev = to_au1100fb_device(fbi);
 	unsigned int len;
 	unsigned long start=0, off;
-
-	fbdev = to_au1100fb_device(fbi);
 
 	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT)) {
 		return -EINVAL;
@@ -473,7 +467,7 @@ int au1100fb_drv_probe(struct device *dev)
 
 	if (!request_mem_region(au1100fb_fix.mmio_start, au1100fb_fix.mmio_len,
 				DRIVER_NAME)) {
-		print_err("fail to lock memory region at 0x%08lx",
+		print_err("fail to lock memory region at 0x%08x",
 				au1100fb_fix.mmio_start);
 		return -EBUSY;
 	}
@@ -601,52 +595,17 @@ int au1100fb_drv_remove(struct device *dev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static u32 sys_clksrc;
-static struct au1100fb_regs fbregs;
-
-int au1100fb_drv_suspend(struct device *dev, pm_message_t state)
+int au1100fb_drv_suspend(struct device *dev, u32 state, u32 level)
 {
-	struct au1100fb_device *fbdev = dev_get_drvdata(dev);
-
-	if (!fbdev)
-		return 0;
-
-	/* Save the clock source state */
-	sys_clksrc = au_readl(SYS_CLKSRC);
-
-	/* Blank the LCD */
-	au1100fb_fb_blank(VESA_POWERDOWN, &fbdev->info);
-
-	/* Stop LCD clocking */
-	au_writel(sys_clksrc & ~SYS_CS_ML_MASK, SYS_CLKSRC);
-
-	memcpy(&fbregs, fbdev->regs, sizeof(struct au1100fb_regs));
-
+	/* TODO */
 	return 0;
 }
 
-int au1100fb_drv_resume(struct device *dev)
+int au1100fb_drv_resume(struct device *dev, u32 level)
 {
-	struct au1100fb_device *fbdev = dev_get_drvdata(dev);
-
-	if (!fbdev)
-		return 0;
-
-	memcpy(fbdev->regs, &fbregs, sizeof(struct au1100fb_regs));
-
-	/* Restart LCD clocking */
-	au_writel(sys_clksrc, SYS_CLKSRC);
-
-	/* Unblank the LCD */
-	au1100fb_fb_blank(VESA_NO_BLANKING, &fbdev->info);
-
+	/* TODO */
 	return 0;
 }
-#else
-#define au1100fb_drv_suspend NULL
-#define au1100fb_drv_resume NULL
-#endif
 
 static struct device_driver au1100fb_driver = {
 	.name		= "au1100-lcd",
@@ -740,7 +699,8 @@ void __exit au1100fb_cleanup(void)
 {
 	driver_unregister(&au1100fb_driver);
 
-	kfree(drv_info.opt_mode);
+	if (drv_info.opt_mode)
+		kfree(drv_info.opt_mode);
 }
 
 module_init(au1100fb_init);

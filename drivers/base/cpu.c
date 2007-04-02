@@ -8,7 +8,6 @@
 #include <linux/cpu.h>
 #include <linux/topology.h>
 #include <linux/device.h>
-#include <linux/node.h>
 
 #include "base.h"
 
@@ -20,6 +19,11 @@ EXPORT_SYMBOL(cpu_sysdev_class);
 static struct sys_device *cpu_sys_devices[NR_CPUS];
 
 #ifdef CONFIG_HOTPLUG_CPU
+int __attribute__((weak)) smp_prepare_cpu (int cpu)
+{
+	return 0;
+}
+
 static ssize_t show_online(struct sys_device *dev, char *buf)
 {
 	struct cpu *cpu = container_of(dev, struct cpu, sysdev);
@@ -40,7 +44,9 @@ static ssize_t store_online(struct sys_device *dev, const char *buf,
 			kobject_uevent(&dev->kobj, KOBJ_OFFLINE);
 		break;
 	case '1':
-		ret = cpu_up(cpu->sysdev.id);
+		ret = smp_prepare_cpu(cpu->sysdev.id);
+		if (!ret)
+			ret = cpu_up(cpu->sysdev.id);
 		if (!ret)
 			kobject_uevent(&dev->kobj, KOBJ_ONLINE);
 		break;
@@ -58,12 +64,13 @@ static void __devinit register_cpu_control(struct cpu *cpu)
 {
 	sysdev_create_file(&cpu->sysdev, &attr_online);
 }
-void unregister_cpu(struct cpu *cpu)
+void unregister_cpu(struct cpu *cpu, struct node *root)
 {
 	int logical_cpu = cpu->sysdev.id;
 
-	unregister_cpu_under_node(logical_cpu, cpu_to_node(logical_cpu));
-
+	if (root)
+		sysfs_remove_link(&root->sysdev.kobj,
+				  kobject_name(&cpu->sysdev.kobj));
 	sysdev_remove_file(&cpu->sysdev, &attr_online);
 
 	sysdev_unregister(&cpu->sysdev);
@@ -109,21 +116,23 @@ static SYSDEV_ATTR(crash_notes, 0400, show_crash_notes, NULL);
  *
  * Initialize and register the CPU device.
  */
-int __devinit register_cpu(struct cpu *cpu, int num)
+int __devinit register_cpu(struct cpu *cpu, int num, struct node *root)
 {
 	int error;
+
 	cpu->node_id = cpu_to_node(num);
 	cpu->sysdev.id = num;
 	cpu->sysdev.cls = &cpu_sysdev_class;
 
 	error = sysdev_register(&cpu->sysdev);
-
+	if (!error && root)
+		error = sysfs_create_link(&root->sysdev.kobj,
+					  &cpu->sysdev.kobj,
+					  kobject_name(&cpu->sysdev.kobj));
 	if (!error && !cpu->no_control)
 		register_cpu_control(cpu);
 	if (!error)
 		cpu_sys_devices[num] = &cpu->sysdev;
-	if (!error)
-		register_cpu_under_node(num, cpu_to_node(num));
 
 #ifdef CONFIG_KEXEC
 	if (!error)
@@ -143,13 +152,5 @@ EXPORT_SYMBOL_GPL(get_cpu_sysdev);
 
 int __init cpu_dev_init(void)
 {
-	int err;
-
-	err = sysdev_class_register(&cpu_sysdev_class);
-#if defined(CONFIG_SCHED_MC) || defined(CONFIG_SCHED_SMT)
-	if (!err)
-		err = sched_create_sysfs_power_savings_entries(&cpu_sysdev_class);
-#endif
-
-	return err;
+	return sysdev_class_register(&cpu_sysdev_class);
 }

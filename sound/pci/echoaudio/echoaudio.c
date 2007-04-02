@@ -236,9 +236,9 @@ static int pcm_open(struct snd_pcm_substream *substream,
 	chip = snd_pcm_substream_chip(substream);
 	runtime = substream->runtime;
 
-	pipe = kzalloc(sizeof(struct audiopipe), GFP_KERNEL);
-	if (!pipe)
+	if (!(pipe = kmalloc(sizeof(struct audiopipe), GFP_KERNEL)))
 		return -ENOMEM;
+	memset(pipe, 0, sizeof(struct audiopipe));
 	pipe->index = -1;		/* Not configured yet */
 
 	/* Set up hw capabilities and contraints */
@@ -1951,7 +1951,7 @@ static __devinit int snd_echo_create(struct snd_card *card,
 	chip->dsp_registers = (volatile u32 __iomem *)
 		ioremap_nocache(chip->dsp_registers_phys, sz);
 
-	if (request_irq(pci->irq, snd_echo_interrupt, IRQF_DISABLED | IRQF_SHARED,
+	if (request_irq(pci->irq, snd_echo_interrupt, SA_INTERRUPT | SA_SHIRQ,
 						ECHOCARD_NAME, (void *)chip)) {
 		snd_echo_free(chip);
 		snd_printk(KERN_ERR "cannot grab irq\n");

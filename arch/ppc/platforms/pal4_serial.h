@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/pal4_serial.h
+ *
  * Definitions for SBS PalomarIV serial support
  *
  * Author: Dan Cox

@@ -28,15 +28,14 @@
 #include <linux/sunrpc/clnt.h>
 #include <linux/nfs_fs.h>
 #include <linux/nfs_mount.h>
+#include <linux/mount.h>
 #include <linux/pagemap.h>
 #include <linux/smp_lock.h>
 #include <linux/namei.h>
-#include <linux/mount.h>
 #include <linux/vserver/xid.h>
 
 #include "nfs4_fs.h"
 #include "delegation.h"
-#include "iostat.h"
 
 #define NFS_PARANOIA 1
 /* #define NFS_DEBUG_VERBOSE 1 */
@@ -56,7 +55,7 @@ static int nfs_rename(struct inode *, struct dentry *,
 static int nfs_fsync_dir(struct file *, struct dentry *, int);
 static loff_t nfs_llseek_dir(struct file *, loff_t, int);
 
-const struct file_operations nfs_dir_operations = {
+struct file_operations nfs_dir_operations = {
 	.llseek		= nfs_llseek_dir,
 	.read		= generic_read_dir,
 	.readdir	= nfs_readdir,
@@ -130,14 +129,12 @@ struct inode_operations nfs4_dir_inode_operations = {
 static int
 nfs_opendir(struct inode *inode, struct file *filp)
 {
-	int res;
-
-	dfprintk(VFS, "NFS: opendir(%s/%ld)\n",
-			inode->i_sb->s_id, inode->i_ino);
+	int res = 0;
 
 	lock_kernel();
 	/* Call generic open code in order to cache credentials */
-	res = nfs_open(inode, filp);
+	if (!res)
+		res = nfs_open(inode, filp);
 	unlock_kernel();
 	return res;
 }
@@ -177,9 +174,7 @@ int nfs_readdir_filler(nfs_readdir_descriptor_t *desc, struct page *page)
 	unsigned long	timestamp;
 	int		error;
 
-	dfprintk(DIRCACHE, "NFS: %s: reading cookie %Lu into page %lu\n",
-			__FUNCTION__, (long long)desc->entry->cookie,
-			page->index);
+	dfprintk(VFS, "NFS: nfs_readdir_filler() reading cookie %Lu into page %lu.\n", (long long)desc->entry->cookie, page->index);
 
  again:
 	timestamp = jiffies;
@@ -251,8 +246,7 @@ int find_dirent(nfs_readdir_descriptor_t *desc)
 			status;
 
 	while((status = dir_decode(desc)) == 0) {
-		dfprintk(DIRCACHE, "NFS: %s: examining cookie %Lu\n",
-				__FUNCTION__, (unsigned long long)entry->cookie);
+		dfprintk(VFS, "NFS: found cookie %Lu\n", (unsigned long long)entry->cookie);
 		if (entry->prev_cookie == *desc->dir_cookie)
 			break;
 		if (loop_count++ > 200) {
@@ -260,6 +254,7 @@ int find_dirent(nfs_readdir_descriptor_t *desc)
 			schedule();
 		}
 	}
+	dfprintk(VFS, "NFS: find_dirent() returns %d\n", status);
 	return status;
 }
 
@@ -283,8 +278,7 @@ int find_dirent_index(nfs_readdir_descriptor_t *desc)
 		if (status)
 			break;
 
-		dfprintk(DIRCACHE, "NFS: found cookie %Lu at index %Ld\n",
-				(unsigned long long)entry->cookie, desc->current_index);
+		dfprintk(VFS, "NFS: found cookie %Lu at index %Ld\n", (unsigned long long)entry->cookie, desc->current_index);
 
 		if (desc->file->f_pos == desc->current_index) {
 			*desc->dir_cookie = entry->cookie;
@@ -296,6 +290,7 @@ int find_dirent_index(nfs_readdir_descriptor_t *desc)
 			schedule();
 		}
 	}
+	dfprintk(VFS, "NFS: find_dirent_index() returns %d\n", status);
 	return status;
 }
 
@@ -310,9 +305,7 @@ int find_dirent_page(nfs_readdir_descriptor_t *desc)
 	struct page	*page;
 	int		status;
 
-	dfprintk(DIRCACHE, "NFS: %s: searching page %ld for target %Lu\n",
-			__FUNCTION__, desc->page_index,
-			(long long) *desc->dir_cookie);
+	dfprintk(VFS, "NFS: find_dirent_page() searching directory page %ld\n", desc->page_index);
 
 	page = read_cache_page(inode->i_mapping, desc->page_index,
 			       (filler_t *)nfs_readdir_filler, desc);
@@ -333,7 +326,7 @@ int find_dirent_page(nfs_readdir_descriptor_t *desc)
 	if (status < 0)
 		dir_page_release(desc);
  out:
-	dfprintk(DIRCACHE, "NFS: %s: returns %d\n", __FUNCTION__, status);
+	dfprintk(VFS, "NFS: find_dirent_page() returns %d\n", status);
 	return status;
  read_error:
 	page_cache_release(page);
@@ -355,15 +348,13 @@ int readdir_search_pagecache(nfs_readdir_descriptor_t *desc)
 
 	/* Always search-by-index from the beginning of the cache */
 	if (*desc->dir_cookie == 0) {
-		dfprintk(DIRCACHE, "NFS: readdir_search_pagecache() searching for offset %Ld\n",
-				(long long)desc->file->f_pos);
+		dfprintk(VFS, "NFS: readdir_search_pagecache() searching for offset %Ld\n", (long long)desc->file->f_pos);
 		desc->page_index = 0;
 		desc->entry->cookie = desc->entry->prev_cookie = 0;
 		desc->entry->eof = 0;
 		desc->current_index = 0;
 	} else
-		dfprintk(DIRCACHE, "NFS: readdir_search_pagecache() searching for cookie %Lu\n",
-				(unsigned long long)*desc->dir_cookie);
+		dfprintk(VFS, "NFS: readdir_search_pagecache() searching for cookie %Lu\n", (unsigned long long)*desc->dir_cookie);
 
 	for (;;) {
 		res = find_dirent_page(desc);
@@ -376,8 +367,7 @@ int readdir_search_pagecache(nfs_readdir_descriptor_t *desc)
 			schedule();
 		}
 	}
-
-	dfprintk(DIRCACHE, "NFS: %s: returns %d\n", __FUNCTION__, res);
+	dfprintk(VFS, "NFS: readdir_search_pagecache() returned %d\n", res);
 	return res;
 }
 
@@ -398,18 +388,17 @@ int nfs_do_filldir(nfs_readdir_descriptor_t *desc, void *dirent,
 	struct file	*file = desc->file;
 	struct nfs_entry *entry = desc->entry;
 	struct dentry	*dentry = NULL;
-	u64		fileid;
+	unsigned long	fileid;
 	int		loop_count = 0,
 			res;
 
-	dfprintk(DIRCACHE, "NFS: nfs_do_filldir() filling starting @ cookie %Lu\n",
-			(unsigned long long)entry->cookie);
+	dfprintk(VFS, "NFS: nfs_do_filldir() filling starting @ cookie %Lu\n", (long long)entry->cookie);
 
 	for(;;) {
 		unsigned d_type = DT_UNKNOWN;
 		/* Note: entry->prev_cookie contains the cookie for
 		 *	 retrieving the current dirent on the server */
-		fileid = entry->ino;
+		fileid = nfs_fileid_to_ino_t(entry->ino);
 
 		/* Get a dentry if we have one */
 		if (dentry != NULL)
@@ -419,7 +408,7 @@ int nfs_do_filldir(nfs_readdir_descriptor_t *desc, void *dirent,
 		/* Use readdirplus info */
 		if (dentry != NULL && dentry->d_inode != NULL) {
 			d_type = dt_type(dentry->d_inode);
-			fileid = NFS_FILEID(dentry->d_inode);
+			fileid = dentry->d_inode->i_ino;
 		}
 
 		res = filldir(dirent, entry->name, entry->len, 
@@ -440,8 +429,7 @@ int nfs_do_filldir(nfs_readdir_descriptor_t *desc, void *dirent,
 	dir_page_release(desc);
 	if (dentry != NULL)
 		dput(dentry);
-	dfprintk(DIRCACHE, "NFS: nfs_do_filldir() filling ended @ cookie %Lu; returning = %d\n",
-			(unsigned long long)*desc->dir_cookie, res);
+	dfprintk(VFS, "NFS: nfs_do_filldir() filling ended @ cookie %Lu; returning = %d\n", (unsigned long long)*desc->dir_cookie, res);
 	return res;
 }
 
@@ -467,8 +455,7 @@ int uncached_readdir(nfs_readdir_descriptor_t *desc, void *dirent,
 	struct page	*page = NULL;
 	int		status;
 
-	dfprintk(DIRCACHE, "NFS: uncached_readdir() searching for cookie %Lu\n",
-			(unsigned long long)*desc->dir_cookie);
+	dfprintk(VFS, "NFS: uncached_readdir() searching for cookie %Lu\n", (unsigned long long)*desc->dir_cookie);
 
 	page = alloc_page(GFP_HIGHUSER);
 	if (!page) {
@@ -500,8 +487,7 @@ int uncached_readdir(nfs_readdir_descriptor_t *desc, void *dirent,
 	desc->entry->cookie = desc->entry->prev_cookie = 0;
 	desc->entry->eof = 0;
  out:
-	dfprintk(DIRCACHE, "NFS: %s: returns %d\n",
-			__FUNCTION__, status);
+	dfprintk(VFS, "NFS: uncached_readdir() returns %d\n", status);
 	return status;
  out_release:
 	dir_page_release(desc);
@@ -523,14 +509,9 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	struct nfs_fattr fattr;
 	long		res;
 
-	dfprintk(VFS, "NFS: readdir(%s/%s) starting at cookie %Lu\n",
-			dentry->d_parent->d_name.name, dentry->d_name.name,
-			(long long)filp->f_pos);
-	nfs_inc_stats(inode, NFSIOS_VFSGETDENTS);
-
 	lock_kernel();
 
-	res = nfs_revalidate_mapping(inode, filp->f_mapping);
+	res = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	if (res < 0) {
 		unlock_kernel();
 		return res;
@@ -587,12 +568,9 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		}
 	}
 	unlock_kernel();
-	if (res > 0)
-		res = 0;
-	dfprintk(VFS, "NFS: readdir(%s/%s) returns %ld\n",
-			dentry->d_parent->d_name.name, dentry->d_name.name,
-			res);
-	return res;
+	if (res < 0)
+		return res;
+	return 0;
 }
 
 loff_t nfs_llseek_dir(struct file *filp, loff_t offset, int origin)
@@ -623,10 +601,6 @@ out:
  */
 int nfs_fsync_dir(struct file *filp, struct dentry *dentry, int datasync)
 {
-	dfprintk(VFS, "NFS: fsync_dir(%s/%s) datasync %d\n",
-			dentry->d_parent->d_name.name, dentry->d_name.name,
-			datasync);
-
 	return 0;
 }
 
@@ -692,9 +666,7 @@ int nfs_lookup_verify_inode(struct inode *inode, struct nameidata *nd)
 			goto out_force;
 		/* This is an open(2) */
 		if (nfs_lookup_check_intent(nd, LOOKUP_OPEN) != 0 &&
-				!(server->flags & NFS_MOUNT_NOCTO) &&
-				(S_ISREG(inode->i_mode) ||
-				 S_ISDIR(inode->i_mode)))
+				!(server->flags & NFS_MOUNT_NOCTO))
 			goto out_force;
 	}
 	return nfs_revalidate_inode(server, inode);
@@ -743,7 +715,6 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 	parent = dget_parent(dentry);
 	lock_kernel();
 	dir = parent->d_inode;
-	nfs_inc_stats(dir, NFSIOS_DENTRYREVALIDATE);
 	inode = dentry->d_inode;
 
 	if (!inode) {
@@ -753,9 +724,8 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 	}
 
 	if (is_bad_inode(inode)) {
-		dfprintk(LOOKUPCACHE, "%s: %s/%s has dud inode\n",
-				__FUNCTION__, dentry->d_parent->d_name.name,
-				dentry->d_name.name);
+		dfprintk(VFS, "nfs_lookup_validate: %s/%s has dud inode\n",
+			dentry->d_parent->d_name.name, dentry->d_name.name);
 		goto out_bad;
 	}
 
@@ -787,9 +757,6 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
  out_valid:
 	unlock_kernel();
 	dput(parent);
-	dfprintk(LOOKUPCACHE, "NFS: %s(%s/%s) is valid\n",
-			__FUNCTION__, dentry->d_parent->d_name.name,
-			dentry->d_name.name);
 	return 1;
 out_zap_parent:
 	nfs_zap_caches(dir);
@@ -806,9 +773,6 @@ out_zap_parent:
 	d_drop(dentry);
 	unlock_kernel();
 	dput(parent);
-	dfprintk(LOOKUPCACHE, "NFS: %s(%s/%s) is invalid\n",
-			__FUNCTION__, dentry->d_parent->d_name.name,
-			dentry->d_name.name);
 	return 0;
 }
 
@@ -872,17 +836,6 @@ int nfs_is_exclusive_create(struct inode *dir, struct nameidata *nd)
 	return (nd->intent.open.flags & O_EXCL) != 0;
 }
 
-static inline int nfs_reval_fsid(struct vfsmount *mnt, struct inode *dir,
-				 struct nfs_fh *fh, struct nfs_fattr *fattr)
-{
-	struct nfs_server *server = NFS_SERVER(dir);
-
-	if (!nfs_fsid_equal(&server->fsid, &fattr->fsid))
-		/* Revalidate fsid on root dir */
-		return __nfs_revalidate_inode(server, mnt->mnt_root->d_inode);
-	return 0;
-}
-
 static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
 	struct dentry *res;
@@ -893,7 +846,6 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 
 	dfprintk(VFS, "NFS: lookup(%s/%s)\n",
 		dentry->d_parent->d_name.name, dentry->d_name.name);
-	nfs_inc_stats(dir, NFSIOS_VFSLOOKUP);
 
 	res = ERR_PTR(-ENAMETOOLONG);
 	if (dentry->d_name.len > NFS_SERVER(dir)->namelen)
@@ -921,19 +873,13 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 		res = ERR_PTR(error);
 		goto out_unlock;
 	}
-	error = nfs_reval_fsid(nd->mnt, dir, &fhandle, &fattr);
-	if (error < 0) {
-		res = ERR_PTR(error);
-		goto out_unlock;
-	}
+	res = ERR_PTR(-EACCES);
 	inode = nfs_fhget(dentry->d_sb, &fhandle, &fattr);
-	res = (struct dentry *)inode;
-	if (IS_ERR(res))
+	if (!inode)
 		goto out_unlock;
 	vx_propagate_xid(nd, inode);
-
 no_entry:
-	res = d_materialise_unique(dentry, inode);
+	res = d_add_unique(dentry, inode);
 	if (res != NULL)
 		dentry = res;
 	nfs_renew_times(dentry);
@@ -975,9 +921,6 @@ static struct dentry *nfs_atomic_lookup(struct inode *dir, struct dentry *dentry
 {
 	struct dentry *res = NULL;
 	int error;
-
-	dfprintk(VFS, "NFS: atomic_lookup(%s/%ld), %s\n",
-			dir->i_sb->s_id, dir->i_ino, dentry->d_name.name);
 
 	/* Check that we are indeed trying to open this file */
 	if (!is_atomic_open(dir, nd))
@@ -1124,17 +1067,15 @@ static struct dentry *nfs_readdir_lookup(nfs_readdir_descriptor_t *desc)
 		return NULL;
 	dentry->d_op = NFS_PROTO(dir)->dentry_ops;
 	inode = nfs_fhget(dentry->d_sb, entry->fh, entry->fattr);
-	if (IS_ERR(inode)) {
+	if (!inode) {
 		dput(dentry);
 		return NULL;
 	}
-
-	alias = d_materialise_unique(dentry, inode);
+	alias = d_add_unique(dentry, inode);
 	if (alias != NULL) {
 		dput(dentry);
 		dentry = alias;
 	}
-
 	nfs_renew_times(dentry);
 	nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
 	return dentry;
@@ -1160,13 +1101,13 @@ int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fhandle,
 	}
 	if (!(fattr->valid & NFS_ATTR_FATTR)) {
 		struct nfs_server *server = NFS_SB(dentry->d_sb);
-		error = server->nfs_client->rpc_ops->getattr(server, fhandle, fattr);
+		error = server->rpc_ops->getattr(server, fhandle, fattr);
 		if (error < 0)
 			goto out_err;
 	}
+	error = -ENOMEM;
 	inode = nfs_fhget(dentry->d_sb, fhandle, fattr);
-	error = PTR_ERR(inode);
-	if (IS_ERR(inode))
+	if (inode == NULL)
 		goto out_err;
 	d_instantiate(dentry, inode);
 	if (d_unhashed(dentry))
@@ -1190,8 +1131,8 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	int error;
 	int open_flags = 0;
 
-	dfprintk(VFS, "NFS: create(%s/%ld), %s\n",
-			dir->i_sb->s_id, dir->i_ino, dentry->d_name.name);
+	dfprintk(VFS, "NFS: create(%s/%ld, %s\n", dir->i_sb->s_id, 
+		dir->i_ino, dentry->d_name.name);
 
 	attr.ia_mode = mode;
 	attr.ia_valid = ATTR_MODE;
@@ -1224,8 +1165,8 @@ nfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t rdev)
 	struct iattr attr;
 	int status;
 
-	dfprintk(VFS, "NFS: mknod(%s/%ld), %s\n",
-			dir->i_sb->s_id, dir->i_ino, dentry->d_name.name);
+	dfprintk(VFS, "NFS: mknod(%s/%ld, %s\n", dir->i_sb->s_id,
+		dir->i_ino, dentry->d_name.name);
 
 	if (!new_valid_dev(rdev))
 		return -EINVAL;
@@ -1257,8 +1198,8 @@ static int nfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	struct iattr attr;
 	int error;
 
-	dfprintk(VFS, "NFS: mkdir(%s/%ld), %s\n",
-			dir->i_sb->s_id, dir->i_ino, dentry->d_name.name);
+	dfprintk(VFS, "NFS: mkdir(%s/%ld, %s\n", dir->i_sb->s_id,
+		dir->i_ino, dentry->d_name.name);
 
 	attr.ia_valid = ATTR_MODE;
 	attr.ia_mode = mode | S_IFDIR;
@@ -1283,8 +1224,8 @@ static int nfs_rmdir(struct inode *dir, struct dentry *dentry)
 {
 	int error;
 
-	dfprintk(VFS, "NFS: rmdir(%s/%ld), %s\n",
-			dir->i_sb->s_id, dir->i_ino, dentry->d_name.name);
+	dfprintk(VFS, "NFS: rmdir(%s/%ld, %s\n", dir->i_sb->s_id,
+		dir->i_ino, dentry->d_name.name);
 
 	lock_kernel();
 	nfs_begin_data_update(dir);
@@ -1312,7 +1253,6 @@ static int nfs_sillyrename(struct inode *dir, struct dentry *dentry)
 	dfprintk(VFS, "NFS: silly-rename(%s/%s, ct=%d)\n",
 		dentry->d_parent->d_name.name, dentry->d_name.name, 
 		atomic_read(&dentry->d_count));
-	nfs_inc_stats(dir, NFSIOS_SILLYRENAME);
 
 #ifdef NFS_PARANOIA
 if (!dentry->d_inode)
@@ -1340,8 +1280,8 @@ dentry->d_parent->d_name.name, dentry->d_name.name);
 		sillycounter++;
 		sprintf(suffix, "%*.*x", countersize, countersize, sillycounter);
 
-		dfprintk(VFS, "NFS: trying to rename %s to %s\n",
-				dentry->d_name.name, silly);
+		dfprintk(VFS, "trying to rename %s to %s\n",
+			 dentry->d_name.name, silly);
 		
 		sdentry = lookup_one_len(silly, dentry->d_parent, slen);
 		/*
@@ -1712,8 +1652,6 @@ int nfs_permission(struct inode *inode, int mask, struct nameidata *nd)
 	struct rpc_cred *cred;
 	int res = 0;
 
-	nfs_inc_stats(inode, NFSIOS_VFSACCESS);
-
 	if (mask == 0)
 		goto out;
 	/* Is this sys_access() ? */
@@ -1753,15 +1691,13 @@ force_lookup:
 		res = PTR_ERR(cred);
 	unlock_kernel();
 out:
-	dfprintk(VFS, "NFS: permission(%s/%ld), mask=0x%x, res=%d\n",
-		inode->i_sb->s_id, inode->i_ino, mask, res);
 	return res;
 out_notsup:
 	res = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	if (res == 0)
 		res = generic_permission(inode, mask, NULL);
 	unlock_kernel();
-	goto out;
+	return res;
 }
 
 /*

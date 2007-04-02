@@ -28,8 +28,6 @@
 #include <linux/pm.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
-
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/info.h>
@@ -79,7 +77,7 @@ static void cs46xx_dsp_proc_scb_info_read (struct snd_info_entry *entry,
 
 	ins = chip->dsp_spos_instance;
 
-	mutex_lock(&chip->spos_mutex);
+	down(&chip->spos_mutex);
 	snd_iprintf(buffer,"%04x %s:\n",scb->address,scb->scb_name);
 
 	for (col = 0,j = 0;j < 0x10; j++,col++) {
@@ -107,7 +105,7 @@ static void cs46xx_dsp_proc_scb_info_read (struct snd_info_entry *entry,
 		    scb->task_entry->address);
 
 	snd_iprintf(buffer,"index [%d] ref_count [%d]\n",scb->index,scb->ref_count);  
-	mutex_unlock(&chip->spos_mutex);
+	up(&chip->spos_mutex);
 }
 #endif
 
@@ -180,7 +178,6 @@ static void _dsp_clear_sample_buffer (struct snd_cs46xx *chip, u32 sample_buffer
 void cs46xx_dsp_remove_scb (struct snd_cs46xx *chip, struct dsp_scb_descriptor * scb)
 {
 	struct dsp_spos_instance * ins = chip->dsp_spos_instance;
-	unsigned long flags;
 
 	/* check integrety */
 	snd_assert ( (scb->index >= 0 && 
@@ -195,9 +192,9 @@ void cs46xx_dsp_remove_scb (struct snd_cs46xx *chip, struct dsp_scb_descriptor *
 		     goto _end);
 #endif
 
-	spin_lock_irqsave(&scb->lock, flags);
+	spin_lock(&scb->lock);
 	_dsp_unlink_scb (chip,scb);
-	spin_unlock_irqrestore(&scb->lock, flags);
+	spin_unlock(&scb->lock);
 
 	cs46xx_dsp_proc_free_scb_desc(scb);
 	snd_assert (scb->scb_symbol != NULL, return );
@@ -268,6 +265,7 @@ void cs46xx_dsp_proc_register_scb_desc (struct snd_cs46xx *chip,
 			entry->private_data = scb_info;
 			entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
       
+			entry->c.text.read_size = 512;
 			entry->c.text.read = cs46xx_dsp_proc_scb_info_read;
       
 			if (snd_info_register(entry) < 0) {

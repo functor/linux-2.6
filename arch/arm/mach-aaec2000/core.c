@@ -9,6 +9,7 @@
  *  it under the terms of the GNU General Public License version 2 as
  *  published by the Free Software Foundation.
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -19,6 +20,7 @@
 #include <linux/interrupt.h>
 #include <linux/timex.h>
 #include <linux/signal.h>
+#include <linux/amba/bus.h>
 
 #include <asm/hardware.h>
 #include <asm/irq.h>
@@ -48,12 +50,12 @@
 static struct map_desc standard_io_desc[] __initdata = {
 	{
 		.virtual	= VIO_APB_BASE,
-		.pfn		= __phys_to_pfn(PIO_APB_BASE),
+		.physical	= __phys_to_pfn(PIO_APB_BASE),
 		.length		= IO_APB_LENGTH,
 		.type		= MT_DEVICE
 	}, {
 		.virtual	= VIO_AHB_BASE,
-		.pfn		= __phys_to_pfn(PIO_AHB_BASE),
+		.physical	= __phys_to_pfn(PIO_AHB_BASE),
 		.length		= IO_AHB_LENGTH,
 		.type		= MT_DEVICE
 	}
@@ -142,7 +144,7 @@ aaec2000_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 static struct irqaction aaec2000_timer_irq = {
 	.name		= "AAEC-2000 Timer Tick",
-	.flags		= IRQF_DISABLED | IRQF_TIMER,
+	.flags		= SA_INTERRUPT | SA_TIMER,
 	.handler	= aaec2000_timer_interrupt,
 };
 

@@ -63,7 +63,7 @@ ccw_device_id_match(const struct ccw_device_id *array,
 		return id;
 	}
 
-	return NULL;
+	return 0;
 }
 
 /* The struct ccw device is our replacement for the globally accessible

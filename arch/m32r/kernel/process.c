@@ -21,6 +21,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/ptrace.h>
 #include <linux/unistd.h>
@@ -115,10 +116,6 @@ void cpu_idle (void)
 
 void machine_restart(char *__unused)
 {
-#if defined(CONFIG_PLAT_MAPPI3)
-	outw(1, (unsigned long)PLD_REBOOT);
-#endif
-
 	printk("Please push reset button!\n");
 	while (1)
 		cpu_relax();

@@ -22,7 +22,6 @@
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <linux/init.h> /* For __init, __exit */
-#include <linux/dma-mapping.h>
 
 #include "prismcompat.h"
 #include "islpci_dev.h"
@@ -125,7 +124,7 @@ prism54_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	/* enable PCI DMA */
-	if (pci_set_dma_mask(pdev, DMA_32BIT_MASK)) {
+	if (pci_set_dma_mask(pdev, 0xffffffff)) {
 		printk(KERN_ERR "%s: 32-bit PCI DMA not supported", DRV_NAME);
 		goto do_pci_disable_device;
         }
@@ -189,7 +188,7 @@ prism54_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* request for the interrupt before uploading the firmware */
 	rvalue = request_irq(pdev->irq, &islpci_interrupt,
-			     IRQF_SHARED, ndev->name, priv);
+			     SA_SHIRQ, ndev->name, priv);
 
 	if (rvalue) {
 		/* error, could not hook the handler to the irq */

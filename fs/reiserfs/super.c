@@ -11,6 +11,7 @@
  * NO WARRANTY
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/time.h>
@@ -59,7 +60,7 @@ static int is_any_reiserfs_magic_string(struct reiserfs_super_block *rs)
 }
 
 static int reiserfs_remount(struct super_block *s, int *flags, char *data);
-static int reiserfs_statfs(struct dentry *dentry, struct kstatfs *buf);
+static int reiserfs_statfs(struct super_block *s, struct kstatfs *buf);
 
 static int reiserfs_sync_fs(struct super_block *s, int wait)
 {
@@ -430,28 +431,21 @@ int remove_save_link(struct inode *inode, int truncate)
 	return journal_end(&th, inode->i_sb, JOURNAL_PER_BALANCE_CNT);
 }
 
-static void reiserfs_kill_sb(struct super_block *s)
-{
-	if (REISERFS_SB(s)) {
-		if (REISERFS_SB(s)->xattr_root) {
-			d_invalidate(REISERFS_SB(s)->xattr_root);
-			dput(REISERFS_SB(s)->xattr_root);
-			REISERFS_SB(s)->xattr_root = NULL;
-		}
-		if (REISERFS_SB(s)->priv_root) {
-			d_invalidate(REISERFS_SB(s)->priv_root);
-			dput(REISERFS_SB(s)->priv_root);
-			REISERFS_SB(s)->priv_root = NULL;
-		}
-		kill_block_super(s);
-	}
-}
-
 static void reiserfs_put_super(struct super_block *s)
 {
 	int i;
 	struct reiserfs_transaction_handle th;
 	th.t_trans_id = 0;
+
+	if (REISERFS_SB(s)->xattr_root) {
+		d_invalidate(REISERFS_SB(s)->xattr_root);
+		dput(REISERFS_SB(s)->xattr_root);
+	}
+
+	if (REISERFS_SB(s)->priv_root) {
+		d_invalidate(REISERFS_SB(s)->priv_root);
+		dput(REISERFS_SB(s)->priv_root);
+	}
 
 	/* change file system state to current state if it was mounted with read-write permissions */
 	if (!(s->s_flags & MS_RDONLY)) {
@@ -527,8 +521,7 @@ static int init_inodecache(void)
 	reiserfs_inode_cachep = kmem_cache_create("reiser_inode_cache",
 						  sizeof(struct
 							 reiserfs_inode_info),
-						  0, (SLAB_RECLAIM_ACCOUNT|
-							SLAB_MEM_SPREAD),
+						  0, SLAB_RECLAIM_ACCOUNT,
 						  init_once, NULL);
 	if (reiserfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -691,14 +684,14 @@ static const arg_desc_t logging_mode[] = {
 	 (1 << REISERFS_DATA_ORDERED | 1 << REISERFS_DATA_WRITEBACK)},
 	{"writeback", 1 << REISERFS_DATA_WRITEBACK,
 	 (1 << REISERFS_DATA_ORDERED | 1 << REISERFS_DATA_LOG)},
-	{.value = NULL}
+	{NULL, 0}
 };
 
 /* possible values for -o barrier= */
 static const arg_desc_t barrier_mode[] = {
 	{"none", 1 << REISERFS_BARRIER_NONE, 1 << REISERFS_BARRIER_FLUSH},
 	{"flush", 1 << REISERFS_BARRIER_FLUSH, 1 << REISERFS_BARRIER_NONE},
-	{.value = NULL}
+	{NULL, 0}
 };
 
 /* possible values for "-o block-allocator=" and bits which are to be set in
@@ -899,7 +892,7 @@ static int reiserfs_parse_options(struct super_block *s, char *options,	/* strin
 		{"acl",.setmask = 1 << REISERFS_UNSUPPORTED_OPT},
 		{"noacl",.clrmask = 1 << REISERFS_UNSUPPORTED_OPT},
 #endif
-		{.option_name = "nolog"},
+		{"nolog",},	/* This is unsupported */
 		{"replayonly",.setmask = 1 << REPLAYONLY},
 		{"block-allocator",.arg_required = 'a',.values = balloc},
 		{"data",.arg_required = 'd',.values = logging_mode},
@@ -917,7 +910,7 @@ static int reiserfs_parse_options(struct super_block *s, char *options,	/* strin
 		{"grpjquota",.arg_required =
 		 'g' | (1 << REISERFS_OPT_ALLOWEMPTY),.values = NULL},
 		{"jqfmt",.arg_required = 'f',.values = NULL},
-		{.option_name = NULL}
+		{NULL,}
 	};
 
 	*blocks = 0;
@@ -1957,15 +1950,15 @@ static int reiserfs_fill_super(struct super_block *s, void *data, int silent)
 	return errval;
 }
 
-static int reiserfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+static int reiserfs_statfs(struct super_block *s, struct kstatfs *buf)
 {
-	struct reiserfs_super_block *rs = SB_DISK_SUPER_BLOCK(dentry->d_sb);
+	struct reiserfs_super_block *rs = SB_DISK_SUPER_BLOCK(s);
 
 	buf->f_namelen = (REISERFS_MAX_NAME(s->s_blocksize));
 	buf->f_bfree = sb_free_blocks(rs);
 	buf->f_bavail = buf->f_bfree;
 	buf->f_blocks = sb_block_count(rs) - sb_bmap_nr(rs) - 1;
-	buf->f_bsize = dentry->d_sb->s_blocksize;
+	buf->f_bsize = s->s_blocksize;
 	/* changed to accommodate gcc folks. */
 	buf->f_type = REISERFS_SUPER_MAGIC;
 	return 0;
@@ -2223,7 +2216,7 @@ static ssize_t reiserfs_quota_write(struct super_block *sb, int type,
 	size_t towrite = len;
 	struct buffer_head tmp_bh, *bh;
 
-	mutex_lock_nested(&inode->i_mutex, I_MUTEX_QUOTA);
+	mutex_lock(&inode->i_mutex);
 	while (towrite > 0) {
 		tocopy = sb->s_blocksize - offset < towrite ?
 		    sb->s_blocksize - offset : towrite;
@@ -2268,12 +2261,11 @@ static ssize_t reiserfs_quota_write(struct super_block *sb, int type,
 
 #endif
 
-static int get_super_block(struct file_system_type *fs_type,
-			   int flags, const char *dev_name,
-			   void *data, struct vfsmount *mnt)
+static struct super_block *get_super_block(struct file_system_type *fs_type,
+					   int flags, const char *dev_name,
+					   void *data)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, reiserfs_fill_super,
-			   mnt);
+	return get_sb_bdev(fs_type, flags, dev_name, data, reiserfs_fill_super);
 }
 
 static int __init init_reiserfs_fs(void)
@@ -2320,7 +2312,7 @@ struct file_system_type reiserfs_fs_type = {
 	.owner = THIS_MODULE,
 	.name = "reiserfs",
 	.get_sb = get_super_block,
-	.kill_sb = reiserfs_kill_sb,
+	.kill_sb = kill_block_super,
 	.fs_flags = FS_REQUIRES_DEV,
 };
 

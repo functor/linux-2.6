@@ -31,6 +31,7 @@
 #undef	VERBOSE
 #undef	PACKET_TRACE
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -45,7 +46,7 @@
 #include <linux/list.h>
 #include <linux/interrupt.h>
 #include <linux/usb.h>
-#include <linux/usb/sl811.h>
+#include <linux/usb_sl811.h>
 #include <linux/platform_device.h>
 
 #include <asm/io.h>
@@ -852,7 +853,7 @@ static int sl811h_urb_enqueue(
 
 	} else {
 		INIT_LIST_HEAD(&ep->schedule);
-		ep->udev = udev;
+		ep->udev = usb_get_dev(udev);
 		ep->epnum = epnum;
 		ep->maxpacket = usb_maxpacket(udev, urb->pipe, is_out);
 		ep->defctrl = SL11H_HCTLMASK_ARM | SL11H_HCTLMASK_ENABLE;
@@ -1051,6 +1052,7 @@ sl811h_endpoint_disable(struct usb_hcd *hcd, struct usb_host_endpoint *hep)
 	if (!list_empty(&hep->urb_list))
 		WARN("ep %p not empty?\n", ep);
 
+	usb_put_dev(ep->udev);
 	kfree(ep);
 	hep->hcpriv = NULL;
 }
@@ -1683,13 +1685,9 @@ sl811h_probe(struct platform_device *dev)
 		if (!addr || !data)
 			return -ENODEV;
 		ioaddr = 1;
-		/*
-		 * NOTE: 64-bit resource->start is getting truncated
-		 * to avoid compiler warning, assuming that ->start
-		 * is always 32-bit for this case
-		 */
-		addr_reg = (void __iomem *) (unsigned long) addr->start;
-		data_reg = (void __iomem *) (unsigned long) data->start;
+
+		addr_reg = (void __iomem *) addr->start;
+		data_reg = (void __iomem *) data->start;
 	} else {
 		addr_reg = ioremap(addr->start, 1);
 		if (addr_reg == NULL) {
@@ -1749,7 +1747,7 @@ sl811h_probe(struct platform_device *dev)
 	 * was on a system with single edge triggering, so most sorts of
 	 * triggering arrangement should work.
 	 */
-	retval = usb_add_hcd(hcd, irq, IRQF_DISABLED | IRQF_SHARED);
+	retval = usb_add_hcd(hcd, irq, SA_INTERRUPT | SA_SHIRQ);
 	if (retval != 0)
 		goto err6;
 

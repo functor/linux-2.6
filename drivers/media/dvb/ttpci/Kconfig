@@ -1,9 +1,9 @@
 config DVB_AV7110
 	tristate "AV7110 cards"
-	depends on DVB_CORE && PCI && I2C && VIDEO_V4L1
+	depends on DVB_CORE && PCI
 	select FW_LOADER
+	select VIDEO_DEV
 	select VIDEO_SAA7146_VV
-	select DVB_PLL
 	select DVB_VES1820
 	select DVB_VES1X93
 	select DVB_STV0299
@@ -11,7 +11,6 @@ config DVB_AV7110
 	select DVB_SP8870
 	select DVB_STV0297
 	select DVB_L64781
-	select DVB_LNBP21
 	help
 	  Support for SAA7146 and AV7110 based DVB cards as produced
 	  by Fujitsu-Siemens, Technotrend, Hauppauge and others.
@@ -60,9 +59,8 @@ config DVB_AV7110_OSD
 
 config DVB_BUDGET
 	tristate "Budget cards"
-	depends on DVB_CORE && PCI && I2C && VIDEO_V4L1
+	depends on DVB_CORE && PCI
 	select VIDEO_SAA7146
-	select DVB_PLL
 	select DVB_STV0299
 	select DVB_VES1X93
 	select DVB_VES1820
@@ -70,7 +68,6 @@ config DVB_BUDGET
 	select DVB_TDA8083
 	select DVB_TDA10021
 	select DVB_S5H1420
-	select DVB_LNBP21
 	help
 	  Support for simple SAA7146 based DVB cards
 	  (so called Budget- or Nova-PCI cards) without onboard
@@ -83,13 +80,11 @@ config DVB_BUDGET
 
 config DVB_BUDGET_CI
 	tristate "Budget cards with onboard CI connector"
-	depends on DVB_CORE && PCI && I2C && VIDEO_V4L1
+	depends on DVB_CORE && PCI
 	select VIDEO_SAA7146
-	select DVB_PLL
 	select DVB_STV0297
 	select DVB_STV0299
 	select DVB_TDA1004X
-	select DVB_LNBP21
 	help
 	  Support for simple SAA7146 based DVB cards
 	  (so called Budget- or Nova-PCI cards) without onboard
@@ -105,9 +100,9 @@ config DVB_BUDGET_CI
 
 config DVB_BUDGET_AV
 	tristate "Budget cards with analog video inputs"
-	depends on DVB_CORE && PCI && I2C && VIDEO_V4L1
+	depends on DVB_CORE && PCI
+	select VIDEO_DEV
 	select VIDEO_SAA7146_VV
-	select DVB_PLL
 	select DVB_STV0299
 	select DVB_TDA1004X
 	select DVB_TDA10021
@@ -124,9 +119,8 @@ config DVB_BUDGET_AV
 
 config DVB_BUDGET_PATCH
 	tristate "AV7110 cards with Budget Patch"
-	depends on DVB_CORE && DVB_BUDGET && VIDEO_V4L1
+	depends on DVB_CORE && DVB_BUDGET
 	select DVB_AV7110
-	select DVB_PLL
 	select DVB_STV0299
 	select DVB_VES1X93
 	select DVB_TDA8083

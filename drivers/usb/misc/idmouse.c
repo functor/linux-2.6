@@ -16,6 +16,7 @@
 
 */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
@@ -24,7 +25,6 @@
 #include <linux/module.h>
 #include <linux/smp_lock.h>
 #include <linux/completion.h>
-#include <linux/mutex.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 
@@ -121,7 +121,7 @@ static struct usb_driver idmouse_driver = {
 };
 
 /* prevent races between open() and disconnect() */
-static DEFINE_MUTEX(disconnect_mutex);
+static DECLARE_MUTEX(disconnect_sem);
 
 static int idmouse_create_image(struct usb_idmouse *dev)
 {
@@ -213,18 +213,18 @@ static int idmouse_open(struct inode *inode, struct file *file)
 	int result = 0;
 
 	/* prevent disconnects */
-	mutex_lock(&disconnect_mutex);
+	down(&disconnect_sem);
 
 	/* get the interface from minor number and driver information */
 	interface = usb_find_interface (&idmouse_driver, iminor (inode));
 	if (!interface) {
-		mutex_unlock(&disconnect_mutex);
+		up(&disconnect_sem);
 		return -ENODEV;
 	}
 	/* get the device information block from the interface */
 	dev = usb_get_intfdata(interface);
 	if (!dev) {
-		mutex_unlock(&disconnect_mutex);
+		up(&disconnect_sem);
 		return -ENODEV;
 	}
 
@@ -258,7 +258,7 @@ error:
 	up(&dev->sem);
 
 	/* unlock the disconnect semaphore */
-	mutex_unlock(&disconnect_mutex);
+	up(&disconnect_sem);
 	return result;
 }
 
@@ -267,12 +267,12 @@ static int idmouse_release(struct inode *inode, struct file *file)
 	struct usb_idmouse *dev;
 
 	/* prevent a race condition with open() */
-	mutex_lock(&disconnect_mutex);
+	down(&disconnect_sem);
 
 	dev = (struct usb_idmouse *) file->private_data;
 
 	if (dev == NULL) {
-		mutex_unlock(&disconnect_mutex);
+		up(&disconnect_sem);
 		return -ENODEV;
 	}
 
@@ -282,7 +282,7 @@ static int idmouse_release(struct inode *inode, struct file *file)
 	/* are we really open? */
 	if (dev->open <= 0) {
 		up(&dev->sem);
-		mutex_unlock(&disconnect_mutex);
+		up(&disconnect_sem);
 		return -ENODEV;
 	}
 
@@ -292,12 +292,12 @@ static int idmouse_release(struct inode *inode, struct file *file)
 		/* the device was unplugged before the file was released */
 		up(&dev->sem);
 		idmouse_delete(dev);
-		mutex_unlock(&disconnect_mutex);
+		up(&disconnect_sem);
 		return 0;
 	}
 
 	up(&dev->sem);
-	mutex_unlock(&disconnect_mutex);
+	up(&disconnect_sem);
 	return 0;
 }
 
@@ -340,9 +340,10 @@ static int idmouse_probe(struct usb_interface *interface,
 		return -ENODEV;
 
 	/* allocate memory for our device state and initialize it */
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
 	if (dev == NULL)
 		return -ENOMEM;
+	memset(dev, 0x00, sizeof(*dev));
 
 	init_MUTEX(&dev->sem);
 	dev->udev = udev;
@@ -399,7 +400,7 @@ static void idmouse_disconnect(struct usb_interface *interface)
 	struct usb_idmouse *dev;
 
 	/* prevent races with open() */
-	mutex_lock(&disconnect_mutex);
+	down(&disconnect_sem);
 
 	/* get device structure */
 	dev = usb_get_intfdata(interface);
@@ -421,7 +422,7 @@ static void idmouse_disconnect(struct usb_interface *interface)
 	if (!dev->open)
 		idmouse_delete(dev);
 
-	mutex_unlock(&disconnect_mutex);
+	up(&disconnect_sem);
 
 	info("%s disconnected", DRIVER_DESC);
 }

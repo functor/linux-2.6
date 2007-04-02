@@ -98,12 +98,12 @@ __bzero_done:
 	.text;			\
 	.align 4;
 
-	.globl	__clear_user
-	.type	__clear_user, #function
-__clear_user:		/* %o0=buf, %o1=len */
-	brz,pn		%o1, __clear_user_done
+	.globl	__bzero_noasi
+	.type	__bzero_noasi, #function
+__bzero_noasi:		/* %o0=buf, %o1=len */
+	brz,pn		%o1, __bzero_noasi_done
 	 cmp		%o1, 16
-	bl,pn		%icc, __clear_user_tiny
+	bl,pn		%icc, __bzero_noasi_tiny
 	 EX_ST(prefetcha [%o0 + 0x00] %asi, #n_writes)
 	andcc		%o0, 0x3, %g0
 	be,pt		%icc, 2f
@@ -145,14 +145,14 @@ __clear_user:		/* %o0=buf, %o1=len */
 	subcc		%g1, 8, %g1
 	bne,pt		%icc, 5b
 	 add		%o0, 0x8, %o0
-6:	brz,pt		%o1, __clear_user_done
+6:	brz,pt		%o1, __bzero_noasi_done
 	 nop
-__clear_user_tiny:
+__bzero_noasi_tiny:
 1:	EX_ST(stba	%g0, [%o0 + 0x00] %asi)
 	subcc		%o1, 1, %o1
 	bne,pt		%icc, 1b
 	 add		%o0, 1, %o0
-__clear_user_done:
+__bzero_noasi_done:
 	retl
 	 clr		%o0
-	.size		__clear_user, .-__clear_user
+	.size		__bzero_noasi, .-__bzero_noasi

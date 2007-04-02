@@ -8,6 +8,7 @@
  * Copyright (c) by Jaroslav Kysela <perex@suse.cz>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -114,8 +115,8 @@ struct snd_cs4231 {
 	unsigned char		image[32];	/* registers image */
 	int			mce_bit;
 	int			calibrate_mute;
-	struct mutex		mce_mutex;
-	struct mutex		open_mutex;
+	struct semaphore	mce_mutex;
+	struct semaphore	open_mutex;
 
 	union {
 #ifdef SBUS_SUPPORT
@@ -610,7 +611,8 @@ static void snd_cs4231_advance_dma(struct cs4231_dma_control *dma_cont,
 		unsigned int period_size = snd_pcm_lib_period_bytes(substream);
 		unsigned int offset = period_size * (*periods_sent);
 
-		BUG_ON(period_size >= (1 << 24));
+		if (period_size >= (1 << 24))
+			BUG();
 
 		if (dma_cont->request(dma_cont, runtime->dma_addr + offset, period_size))
 			return;
@@ -773,7 +775,7 @@ static void snd_cs4231_playback_format(struct snd_cs4231 *chip, struct snd_pcm_h
 {
 	unsigned long flags;
 
-	mutex_lock(&chip->mce_mutex);
+	down(&chip->mce_mutex);
 	snd_cs4231_calibrate_mute(chip, 1);
 
 	snd_cs4231_mce_up(chip);
@@ -788,7 +790,7 @@ static void snd_cs4231_playback_format(struct snd_cs4231 *chip, struct snd_pcm_h
 	snd_cs4231_mce_down(chip);
 
 	snd_cs4231_calibrate_mute(chip, 0);
-	mutex_unlock(&chip->mce_mutex);
+	up(&chip->mce_mutex);
 }
 
 static void snd_cs4231_capture_format(struct snd_cs4231 *chip, struct snd_pcm_hw_params *params,
@@ -796,7 +798,7 @@ static void snd_cs4231_capture_format(struct snd_cs4231 *chip, struct snd_pcm_hw
 {
 	unsigned long flags;
 
-	mutex_lock(&chip->mce_mutex);
+	down(&chip->mce_mutex);
 	snd_cs4231_calibrate_mute(chip, 1);
 
 	snd_cs4231_mce_up(chip);
@@ -817,7 +819,7 @@ static void snd_cs4231_capture_format(struct snd_cs4231 *chip, struct snd_pcm_hw
 	snd_cs4231_mce_down(chip);
 
 	snd_cs4231_calibrate_mute(chip, 0);
-	mutex_unlock(&chip->mce_mutex);
+	up(&chip->mce_mutex);
 }
 
 /*
@@ -931,14 +933,14 @@ static int snd_cs4231_open(struct snd_cs4231 *chip, unsigned int mode)
 {
 	unsigned long flags;
 
-	mutex_lock(&chip->open_mutex);
+	down(&chip->open_mutex);
 	if ((chip->mode & mode)) {
-		mutex_unlock(&chip->open_mutex);
+		up(&chip->open_mutex);
 		return -EAGAIN;
 	}
 	if (chip->mode & CS4231_MODE_OPEN) {
 		chip->mode |= mode;
-		mutex_unlock(&chip->open_mutex);
+		up(&chip->open_mutex);
 		return 0;
 	}
 	/* ok. now enable and ack CODEC IRQ */
@@ -958,7 +960,7 @@ static int snd_cs4231_open(struct snd_cs4231 *chip, unsigned int mode)
 	spin_unlock_irqrestore(&chip->lock, flags);
 
 	chip->mode = mode;
-	mutex_unlock(&chip->open_mutex);
+	up(&chip->open_mutex);
 	return 0;
 }
 
@@ -966,10 +968,10 @@ static void snd_cs4231_close(struct snd_cs4231 *chip, unsigned int mode)
 {
 	unsigned long flags;
 
-	mutex_lock(&chip->open_mutex);
+	down(&chip->open_mutex);
 	chip->mode &= ~mode;
 	if (chip->mode & CS4231_MODE_OPEN) {
-		mutex_unlock(&chip->open_mutex);
+		up(&chip->open_mutex);
 		return;
 	}
 	snd_cs4231_calibrate_mute(chip, 1);
@@ -1006,7 +1008,7 @@ static void snd_cs4231_close(struct snd_cs4231 *chip, unsigned int mode)
 	snd_cs4231_calibrate_mute(chip, 0);
 
 	chip->mode = 0;
-	mutex_unlock(&chip->open_mutex);
+	up(&chip->open_mutex);
 }
 
 /*
@@ -1077,7 +1079,8 @@ static int snd_cs4231_playback_prepare(struct snd_pcm_substream *substream)
 	chip->image[CS4231_IFACE_CTRL] &= ~(CS4231_PLAYBACK_ENABLE |
 					    CS4231_PLAYBACK_PIO);
 
-	BUG_ON(runtime->period_size > 0xffff + 1);
+	if (runtime->period_size > 0xffff + 1)
+		BUG();
 
 	chip->p_periods_sent = 0;
 	spin_unlock_irqrestore(&chip->lock, flags);
@@ -1268,7 +1271,7 @@ static struct snd_pcm_hardware snd_cs4231_playback =
 	.channels_min		= 1,
 	.channels_max		= 2,
 	.buffer_bytes_max	= (32*1024),
-	.period_bytes_min	= 4096,
+	.period_bytes_min	= 64,
 	.period_bytes_max	= (32*1024),
 	.periods_min		= 1,
 	.periods_max		= 1024,
@@ -1288,7 +1291,7 @@ static struct snd_pcm_hardware snd_cs4231_capture =
 	.channels_min		= 1,
 	.channels_max		= 2,
 	.buffer_bytes_max	= (32*1024),
-	.period_bytes_min	= 4096,
+	.period_bytes_min	= 64,
 	.period_bytes_max	= (32*1024),
 	.periods_min		= 1,
 	.periods_max		= 1024,
@@ -1796,7 +1799,7 @@ static irqreturn_t snd_cs4231_sbus_interrupt(int irq, void *dev_id, struct pt_re
 	snd_cs4231_outm(chip, CS4231_IRQ_STATUS, ~CS4231_ALL_IRQS | ~status, 0);
 	spin_unlock_irqrestore(&chip->lock, flags);
 
-	return 0;
+	return IRQ_HANDLED;
 }
 
 /*
@@ -1821,7 +1824,6 @@ static int sbus_dma_request(struct cs4231_dma_control *dma_cont, dma_addr_t bus_
 	if (!(csr & test))
 		goto out;
 	err = -EBUSY;
-	csr = sbus_readl(base->regs + APCCSR);
 	test = APC_XINT_CNVA;
 	if ( base->dir == APC_PLAY )
 		test = APC_XINT_PNVA;
@@ -1862,17 +1864,16 @@ static void sbus_dma_enable(struct cs4231_dma_control *dma_cont, int on)
 
 	spin_lock_irqsave(&base->lock, flags);
 	if (!on) {
-		if (base->dir == APC_PLAY) { 
-			sbus_writel(0, base->regs + base->dir + APCNVA); 
-			sbus_writel(1, base->regs + base->dir + APCC); 
-		}
-		else
-		{
-			sbus_writel(0, base->regs + base->dir + APCNC); 
-			sbus_writel(0, base->regs + base->dir + APCVA); 
-		} 
+		sbus_writel(0, base->regs + base->dir + APCNC);
+		sbus_writel(0, base->regs + base->dir + APCNVA);
+		sbus_writel(0, base->regs + base->dir + APCC);
+		sbus_writel(0, base->regs + base->dir + APCVA);
+
+		/* ACK any APC interrupts. */
+		csr = sbus_readl(base->regs + APCCSR);
+		sbus_writel(csr, base->regs + APCCSR);
 	} 
-	udelay(600); 
+	udelay(1000);
 	csr = sbus_readl(base->regs + APCCSR);
 	shift = 0;
 	if ( base->dir == APC_PLAY )
@@ -1966,8 +1967,8 @@ static int __init snd_cs4231_sbus_create(struct snd_card *card,
 	spin_lock_init(&chip->lock);
 	spin_lock_init(&chip->c_dma.sbus_info.lock);
 	spin_lock_init(&chip->p_dma.sbus_info.lock);
-	mutex_init(&chip->mce_mutex);
-	mutex_init(&chip->open_mutex);
+	init_MUTEX(&chip->mce_mutex);
+	init_MUTEX(&chip->open_mutex);
 	chip->card = card;
 	chip->dev_u.sdev = sdev;
 	chip->regs_size = sdev->reg_addrs[0].reg_size;
@@ -2001,9 +2002,10 @@ static int __init snd_cs4231_sbus_create(struct snd_card *card,
 	chip->c_dma.preallocate = sbus_dma_preallocate;
 
 	if (request_irq(sdev->irqs[0], snd_cs4231_sbus_interrupt,
-			IRQF_SHARED, "cs4231", chip)) {
-		snd_printdd("cs4231-%d: Unable to grab SBUS IRQ %d\n",
-			    dev, sdev->irqs[0]);
+			SA_SHIRQ, "cs4231", chip)) {
+		snd_printdd("cs4231-%d: Unable to grab SBUS IRQ %s\n",
+			   dev,
+			   __irq_itoa(sdev->irqs[0]));
 		snd_cs4231_sbus_free(chip);
 		return -EBUSY;
 	}
@@ -2036,11 +2038,11 @@ static int __init cs4231_sbus_attach(struct sbus_dev *sdev)
 	if (err)
 		return err;
 
-	sprintf(card->longname, "%s at 0x%02lx:0x%016Lx, irq %d",
+	sprintf(card->longname, "%s at 0x%02lx:0x%08lx, irq %s",
 		card->shortname,
 		rp->flags & 0xffL,
-		(unsigned long long)rp->start,
-		sdev->irqs[0]);
+		rp->start,
+		__irq_itoa(sdev->irqs[0]));
 
 	if ((err = snd_cs4231_sbus_create(card, sdev, dev, &cp)) < 0) {
 		snd_card_free(card);
@@ -2153,8 +2155,8 @@ static int __init snd_cs4231_ebus_create(struct snd_card *card,
 	spin_lock_init(&chip->lock);
 	spin_lock_init(&chip->c_dma.ebus_info.lock);
 	spin_lock_init(&chip->p_dma.ebus_info.lock);
-	mutex_init(&chip->mce_mutex);
-	mutex_init(&chip->open_mutex);
+	init_MUTEX(&chip->mce_mutex);
+	init_MUTEX(&chip->open_mutex);
 	chip->flags |= CS4231_FLAG_EBUS;
 	chip->card = card;
 	chip->dev_u.pdev = edev->bus->self;
@@ -2242,10 +2244,10 @@ static int __init cs4231_ebus_attach(struct linux_ebus_device *edev)
 	if (err)
 		return err;
 
-	sprintf(card->longname, "%s at 0x%lx, irq %d",
+	sprintf(card->longname, "%s at 0x%lx, irq %s",
 		card->shortname,
 		edev->resource[0].start,
-		edev->irqs[0]);
+		__irq_itoa(edev->irqs[0]));
 
 	if ((err = snd_cs4231_ebus_create(card, edev, dev, &chip)) < 0) {
 		snd_card_free(card);
@@ -2283,14 +2285,15 @@ static int __init cs4231_init(void)
 		for_each_ebusdev(edev, ebus) {
 			int match = 0;
 
-			if (!strcmp(edev->prom_node->name, "SUNW,CS4231")) {
+			if (!strcmp(edev->prom_name, "SUNW,CS4231")) {
 				match = 1;
-			} else if (!strcmp(edev->prom_node->name, "audio")) {
-				char *compat;
+			} else if (!strcmp(edev->prom_name, "audio")) {
+				char compat[16];
 
-				compat = of_get_property(edev->prom_node,
-							 "compatible", NULL);
-				if (compat && !strcmp(compat, "SUNW,CS4231"))
+				prom_getstring(edev->prom_node, "compatible",
+					       compat, sizeof(compat));
+				compat[15] = '\0';
+				if (!strcmp(compat, "SUNW,CS4231"))
 					match = 1;
 			}
 

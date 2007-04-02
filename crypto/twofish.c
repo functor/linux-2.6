@@ -44,7 +44,6 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/crypto.h>
-#include <linux/bitops.h>
 
 
 /* The large precomputed tables for the Twofish cipher (twofish.c)
@@ -543,9 +542,9 @@ static const u8 calc_sb_tbl[512] = {
 #define CALC_K(a, j, k, l, m, n) \
    x = CALC_K_2 (k, l, k, l, 0); \
    y = CALC_K_2 (m, n, m, n, 4); \
-   y = rol32(y, 8); \
+   y = (y << 8) + (y >> 24); \
    x += y; y += x; ctx->a[j] = x; \
-   ctx->a[(j) + 1] = rol32(y, 9)
+   ctx->a[(j) + 1] = (y << 9) + (y >> 23)
 
 #define CALC_K192_2(a, b, c, d, j) \
    CALC_K_2 (q0[a ^ key[(j) + 16]], \
@@ -556,9 +555,9 @@ static const u8 calc_sb_tbl[512] = {
 #define CALC_K192(a, j, k, l, m, n) \
    x = CALC_K192_2 (l, l, k, k, 0); \
    y = CALC_K192_2 (n, n, m, m, 4); \
-   y = rol32(y, 8); \
+   y = (y << 8) + (y >> 24); \
    x += y; y += x; ctx->a[j] = x; \
-   ctx->a[(j) + 1] = rol32(y, 9)
+   ctx->a[(j) + 1] = (y << 9) + (y >> 23)
 
 #define CALC_K256_2(a, b, j) \
    CALC_K192_2 (q1[b ^ key[(j) + 24]], \
@@ -569,9 +568,9 @@ static const u8 calc_sb_tbl[512] = {
 #define CALC_K256(a, j, k, l, m, n) \
    x = CALC_K256_2 (k, l, 0); \
    y = CALC_K256_2 (m, n, 4); \
-   y = rol32(y, 8); \
+   y = (y << 8) + (y >> 24); \
    x += y; y += x; ctx->a[j] = x; \
-   ctx->a[(j) + 1] = rol32(y, 9)
+   ctx->a[(j) + 1] = (y << 9) + (y >> 23)
 
 
 /* Macros to compute the g() function in the encryption and decryption
@@ -595,15 +594,15 @@ static const u8 calc_sb_tbl[512] = {
    x = G1 (a); y = G2 (b); \
    x += y; y += x + ctx->k[2 * (n) + 1]; \
    (c) ^= x + ctx->k[2 * (n)]; \
-   (c) = ror32((c), 1); \
-   (d) = rol32((d), 1) ^ y
+   (c) = ((c) >> 1) + ((c) << 31); \
+   (d) = (((d) << 1)+((d) >> 31)) ^ y
 
 #define DECROUND(n, a, b, c, d) \
    x = G1 (a); y = G2 (b); \
    x += y; y += x; \
    (d) ^= y + ctx->k[2 * (n) + 1]; \
-   (d) = ror32((d), 1); \
-   (c) = rol32((c), 1); \
+   (d) = ((d) >> 1) + ((d) << 31); \
+   (c) = (((c) << 1)+((c) >> 31)); \
    (c) ^= (x + ctx->k[2 * (n)])
 
 /* Encryption and decryption cycles; each one is simply two Feistel rounds
@@ -643,11 +642,11 @@ struct twofish_ctx {
 };
 
 /* Perform the key setup. */
-static int twofish_setkey(struct crypto_tfm *tfm, const u8 *key,
-			  unsigned int key_len, u32 *flags)
+static int twofish_setkey(void *cx, const u8 *key,
+                          unsigned int key_len, u32 *flags)
 {
 	
-	struct twofish_ctx *ctx = crypto_tfm_ctx(tfm);
+	struct twofish_ctx *ctx = cx;
 
 	int i, j, k;
 
@@ -802,9 +801,9 @@ static int twofish_setkey(struct crypto_tfm *tfm, const u8 *key,
 }
 
 /* Encrypt one block.  in and out may be the same. */
-static void twofish_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
+static void twofish_encrypt(void *cx, u8 *out, const u8 *in)
 {
-	struct twofish_ctx *ctx = crypto_tfm_ctx(tfm);
+	struct twofish_ctx *ctx = cx;
 	const __le32 *src = (const __le32 *)in;
 	__le32 *dst = (__le32 *)out;
 
@@ -839,9 +838,9 @@ static void twofish_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
 }
 
 /* Decrypt one block.  in and out may be the same. */
-static void twofish_decrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
+static void twofish_decrypt(void *cx, u8 *out, const u8 *in)
 {
-	struct twofish_ctx *ctx = crypto_tfm_ctx(tfm);
+	struct twofish_ctx *ctx = cx;
 	const __le32 *src = (const __le32 *)in;
 	__le32 *dst = (__le32 *)out;
   

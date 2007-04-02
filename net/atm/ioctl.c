@@ -4,6 +4,7 @@
 /* 2003 John Levon  <levon@movementarian.org> */
 
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kmod.h>
 #include <linux/net.h>		/* struct socket, struct proto_ops */
@@ -17,7 +18,6 @@
 #include <linux/atmmpc.h>
 #include <net/atmclip.h>
 #include <linux/atmlec.h>
-#include <linux/mutex.h>
 #include <asm/ioctls.h>
 
 #include "resources.h"
@@ -25,22 +25,22 @@
 #include "common.h"
 
 
-static DEFINE_MUTEX(ioctl_mutex);
+static DECLARE_MUTEX(ioctl_mutex);
 static LIST_HEAD(ioctl_list);
 
 
 void register_atm_ioctl(struct atm_ioctl *ioctl)
 {
-	mutex_lock(&ioctl_mutex);
+	down(&ioctl_mutex);
 	list_add_tail(&ioctl->list, &ioctl_list);
-	mutex_unlock(&ioctl_mutex);
+	up(&ioctl_mutex);
 }
 
 void deregister_atm_ioctl(struct atm_ioctl *ioctl)
 {
-	mutex_lock(&ioctl_mutex);
+	down(&ioctl_mutex);
 	list_del(&ioctl->list);
-	mutex_unlock(&ioctl_mutex);
+	up(&ioctl_mutex);
 }
 
 EXPORT_SYMBOL(register_atm_ioctl);
@@ -137,7 +137,7 @@ int vcc_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 
 	error = -ENOIOCTLCMD;
 
-	mutex_lock(&ioctl_mutex);
+	down(&ioctl_mutex);
 	list_for_each(pos, &ioctl_list) {
 		struct atm_ioctl * ic = list_entry(pos, struct atm_ioctl, list);
 		if (try_module_get(ic->owner)) {
@@ -147,7 +147,7 @@ int vcc_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 				break;
 		}
 	}
-	mutex_unlock(&ioctl_mutex);
+	up(&ioctl_mutex);
 
 	if (error != -ENOIOCTLCMD)
 		goto done;

@@ -35,52 +35,73 @@ typedef struct ixj_info_t {
 } ixj_info_t;
 
 static void ixj_detach(struct pcmcia_device *p_dev);
-static int ixj_config(struct pcmcia_device * link);
-static void ixj_cs_release(struct pcmcia_device * link);
+static void ixj_config(dev_link_t * link);
+static void ixj_cs_release(dev_link_t * link);
 
-static int ixj_probe(struct pcmcia_device *p_dev)
+static int ixj_attach(struct pcmcia_device *p_dev)
 {
+	dev_link_t *link;
+
 	DEBUG(0, "ixj_attach()\n");
 	/* Create new ixj device */
-	p_dev->io.Attributes1 = IO_DATA_PATH_WIDTH_8;
-	p_dev->io.Attributes2 = IO_DATA_PATH_WIDTH_8;
-	p_dev->io.IOAddrLines = 3;
-	p_dev->conf.IntType = INT_MEMORY_AND_IO;
-	p_dev->priv = kmalloc(sizeof(struct ixj_info_t), GFP_KERNEL);
-	if (!p_dev->priv) {
+	link = kmalloc(sizeof(struct dev_link_t), GFP_KERNEL);
+	if (!link)
+		return -ENOMEM;
+	memset(link, 0, sizeof(struct dev_link_t));
+	link->io.Attributes1 = IO_DATA_PATH_WIDTH_8;
+	link->io.Attributes2 = IO_DATA_PATH_WIDTH_8;
+	link->io.IOAddrLines = 3;
+	link->conf.Vcc = 50;
+	link->conf.IntType = INT_MEMORY_AND_IO;
+	link->priv = kmalloc(sizeof(struct ixj_info_t), GFP_KERNEL);
+	if (!link->priv) {
+		kfree(link);
 		return -ENOMEM;
 	}
-	memset(p_dev->priv, 0, sizeof(struct ixj_info_t));
+	memset(link->priv, 0, sizeof(struct ixj_info_t));
 
-	return ixj_config(p_dev);
+	link->handle = p_dev;
+	p_dev->instance = link;
+
+	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
+	ixj_config(link);
+
+	return 0;
 }
 
-static void ixj_detach(struct pcmcia_device *link)
+static void ixj_detach(struct pcmcia_device *p_dev)
 {
+	dev_link_t *link = dev_to_instance(p_dev);
+
 	DEBUG(0, "ixj_detach(0x%p)\n", link);
 
-	ixj_cs_release(link);
+	link->state &= ~DEV_RELEASE_PENDING;
+	if (link->state & DEV_CONFIG)
+		ixj_cs_release(link);
 
         kfree(link->priv);
+        kfree(link);
 }
 
 #define CS_CHECK(fn, ret) \
 do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 
-static void ixj_get_serial(struct pcmcia_device * link, IXJ * j)
+static void ixj_get_serial(dev_link_t * link, IXJ * j)
 {
+	client_handle_t handle;
 	tuple_t tuple;
 	u_short buf[128];
 	char *str;
 	int last_ret, last_fn, i, place;
+	handle = link->handle;
 	DEBUG(0, "ixj_get_serial(0x%p)\n", link);
 	tuple.TupleData = (cisdata_t *) buf;
 	tuple.TupleOffset = 0;
 	tuple.TupleDataMax = 80;
 	tuple.Attributes = 0;
 	tuple.DesiredTuple = CISTPL_VERS_1;
-	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
-	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(link, &tuple));
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
 	str = (char *) buf;
 	printk("PCMCIA Version %d.%d\n", str[0], str[1]);
 	str += 2;
@@ -128,19 +149,22 @@ static void ixj_get_serial(struct pcmcia_device * link, IXJ * j)
 	return;
 }
 
-static int ixj_config(struct pcmcia_device * link)
+static void ixj_config(dev_link_t * link)
 {
 	IXJ *j;
+	client_handle_t handle;
 	ixj_info_t *info;
 	tuple_t tuple;
 	u_short buf[128];
 	cisparse_t parse;
+	config_info_t conf;
 	cistpl_cftable_entry_t *cfg = &parse.cftable_entry;
 	cistpl_cftable_entry_t dflt =
 	{
 		0
 	};
 	int last_ret, last_fn;
+	handle = link->handle;
 	info = link->priv;
 	DEBUG(0, "ixj_config(0x%p)\n", link);
 	tuple.TupleData = (cisdata_t *) buf;
@@ -148,17 +172,19 @@ static int ixj_config(struct pcmcia_device * link)
 	tuple.TupleDataMax = 255;
 	tuple.Attributes = 0;
 	tuple.DesiredTuple = CISTPL_CONFIG;
-	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
-	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(link, &tuple));
-	CS_CHECK(ParseTuple, pcmcia_parse_tuple(link, &tuple, &parse));
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
+	CS_CHECK(ParseTuple, pcmcia_parse_tuple(handle, &tuple, &parse));
 	link->conf.ConfigBase = parse.config.base;
 	link->conf.Present = parse.config.rmask[0];
+	link->state |= DEV_CONFIG;
+	CS_CHECK(GetConfigurationInfo, pcmcia_get_configuration_info(handle, &conf));
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
 	tuple.Attributes = 0;
-	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
 	while (1) {
-		if (pcmcia_get_tuple_data(link, &tuple) != 0 ||
-				pcmcia_parse_tuple(link, &tuple, &parse) != 0)
+		if (pcmcia_get_tuple_data(handle, &tuple) != 0 ||
+				pcmcia_parse_tuple(handle, &tuple, &parse) != 0)
 			goto next_entry;
 		if ((cfg->io.nwin > 0) || (dflt.io.nwin > 0)) {
 			cistpl_io_t *io = (cfg->io.nwin) ? &cfg->io : &dflt.io;
@@ -169,7 +195,7 @@ static int ixj_config(struct pcmcia_device * link)
 				link->io.BasePort2 = io->win[1].base;
 				link->io.NumPorts2 = io->win[1].len;
 			}
-			if (pcmcia_request_io(link, &link->io) != 0)
+			if (pcmcia_request_io(link->handle, &link->io) != 0)
 				goto next_entry;
 			/* If we've got this far, we're done */
 			break;
@@ -177,10 +203,10 @@ static int ixj_config(struct pcmcia_device * link)
 	      next_entry:
 		if (cfg->flags & CISTPL_CFTABLE_DEFAULT)
 			dflt = *cfg;
-		CS_CHECK(GetNextTuple, pcmcia_get_next_tuple(link, &tuple));
+		CS_CHECK(GetNextTuple, pcmcia_get_next_tuple(handle, &tuple));
 	}
 
-	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link, &link->conf));
+	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(handle, &link->conf));
 
 	/*
  	 *	Register the card with the core.
@@ -189,21 +215,46 @@ static int ixj_config(struct pcmcia_device * link)
 
 	info->ndev = 1;
 	info->node.major = PHONE_MAJOR;
-	link->dev_node = &info->node;
+	link->dev = &info->node;
 	ixj_get_serial(link, j);
-	return 0;
+	link->state &= ~DEV_CONFIG_PENDING;
+	return;
       cs_failed:
-	cs_error(link, last_fn, last_ret);
+	cs_error(link->handle, last_fn, last_ret);
 	ixj_cs_release(link);
-	return -ENODEV;
 }
 
-static void ixj_cs_release(struct pcmcia_device *link)
+static void ixj_cs_release(dev_link_t *link)
 {
 	ixj_info_t *info = link->priv;
 	DEBUG(0, "ixj_cs_release(0x%p)\n", link);
 	info->ndev = 0;
-	pcmcia_disable_device(link);
+	link->dev = NULL;
+	pcmcia_release_configuration(link->handle);
+	pcmcia_release_io(link->handle, &link->io);
+	link->state &= ~DEV_CONFIG;
+}
+
+static int ixj_suspend(struct pcmcia_device *dev)
+{
+	dev_link_t *link = dev_to_instance(dev);
+
+	link->state |= DEV_SUSPEND;
+	if (link->state & DEV_CONFIG)
+		pcmcia_release_configuration(link->handle);
+
+	return 0;
+}
+
+static int ixj_resume(struct pcmcia_device *dev)
+{
+	dev_link_t *link = dev_to_instance(dev);
+
+	link->state &= ~DEV_SUSPEND;
+	if (DEV_OK(link))
+		pcmcia_request_configuration(link->handle, &link->conf);
+
+	return 0;
 }
 
 static struct pcmcia_device_id ixj_ids[] = {
@@ -217,9 +268,11 @@ static struct pcmcia_driver ixj_driver = {
 	.drv		= {
 		.name	= "ixj_cs",
 	},
-	.probe		= ixj_probe,
+	.probe		= ixj_attach,
 	.remove		= ixj_detach,
 	.id_table	= ixj_ids,
+	.suspend	= ixj_suspend,
+	.resume		= ixj_resume,
 };
 
 static int __init ixj_pcmcia_init(void)

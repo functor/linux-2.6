@@ -33,7 +33,6 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /*
  * Addresses to scan
@@ -134,7 +133,7 @@ static struct i2c_driver fscher_driver = {
 struct fscher_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
 
@@ -333,7 +332,7 @@ static int fscher_detect(struct i2c_adapter *adapter, int address, int kind)
 	 * global list */
 	strlcpy(new_client->name, "fscher", I2C_NAME_SIZE);
 	data->valid = 0;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -418,7 +417,7 @@ static struct fscher_data *fscher_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct fscher_data *data = i2c_get_clientdata(client);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + 2 * HZ) || !data->valid) {
 
@@ -458,7 +457,7 @@ static struct fscher_data *fscher_update_device(struct device *dev)
 		data->valid = 1;                 
 	}
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return data;
 }
@@ -473,10 +472,10 @@ static ssize_t set_fan_status(struct i2c_client *client, struct fscher_data *dat
 	/* bits 0..1, 3..7 reserved => mask with 0x04 */  
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0x04;
 	
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->fan_status[FAN_INDEX_FROM_NUM(nr)] &= ~v;
 	fscher_write_value(client, reg, v);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -491,10 +490,10 @@ static ssize_t set_pwm(struct i2c_client *client, struct fscher_data *data,
 {
 	unsigned long v = simple_strtoul(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->fan_min[FAN_INDEX_FROM_NUM(nr)] = v > 0xff ? 0xff : v;
 	fscher_write_value(client, reg, data->fan_min[FAN_INDEX_FROM_NUM(nr)]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -519,14 +518,14 @@ static ssize_t set_fan_div(struct i2c_client *client, struct fscher_data *data,
 		return -EINVAL;
 	}
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	/* bits 2..7 reserved => mask with 0x03 */
 	data->fan_ripple[FAN_INDEX_FROM_NUM(nr)] &= ~0x03;
 	data->fan_ripple[FAN_INDEX_FROM_NUM(nr)] |= v;
 
 	fscher_write_value(client, reg, data->fan_ripple[FAN_INDEX_FROM_NUM(nr)]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -553,10 +552,10 @@ static ssize_t set_temp_status(struct i2c_client *client, struct fscher_data *da
 	/* bits 2..7 reserved, 0 read only => mask with 0x02 */  
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0x02;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_status[TEMP_INDEX_FROM_NUM(nr)] &= ~v;
 	fscher_write_value(client, reg, v);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -610,10 +609,10 @@ static ssize_t set_control(struct i2c_client *client, struct fscher_data *data,
 	/* bits 1..7 reserved => mask with 0x01 */  
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0x01;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->global_control &= ~v;
 	fscher_write_value(client, reg, v);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -632,11 +631,11 @@ static ssize_t set_watchdog_control(struct i2c_client *client, struct
 	/* bits 0..3 reserved => mask with 0xf0 */  
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0xf0;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->watchdog[2] &= ~0xf0;
 	data->watchdog[2] |= v;
 	fscher_write_value(client, reg, data->watchdog[2]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -652,10 +651,10 @@ static ssize_t set_watchdog_status(struct i2c_client *client, struct fscher_data
 	/* bits 0, 2..7 reserved => mask with 0x02 */  
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0x02;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->watchdog[1] &= ~v;
 	fscher_write_value(client, reg, v);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -670,10 +669,10 @@ static ssize_t set_watchdog_preset(struct i2c_client *client, struct fscher_data
 {
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0xff;
 	
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->watchdog[0] = v;
 	fscher_write_value(client, reg, data->watchdog[0]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 

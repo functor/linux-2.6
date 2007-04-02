@@ -4,6 +4,7 @@
  */
 
 #include "linux/init.h"
+#include "linux/config.h"
 #include "mconsole_kern.h"
 
 #ifdef CONFIG_MCONSOLE

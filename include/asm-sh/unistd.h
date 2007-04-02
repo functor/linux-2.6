@@ -290,7 +290,7 @@
 #define __NR_mq_timedreceive    (__NR_mq_open+3)
 #define __NR_mq_notify          (__NR_mq_open+4)
 #define __NR_mq_getsetattr      (__NR_mq_open+5)
-#define __NR_kexec_load		283
+#define __NR_sys_kexec_load	283
 #define __NR_waitid		284
 #define __NR_add_key		285
 #define __NR_request_key	286
@@ -303,8 +303,6 @@
 
 
 #define NR_syscalls 293
-
-#ifdef __KERNEL__
 
 /* user-visible error numbers are in the range -1 - -124: see <asm-sh/errno.h> */
 
@@ -422,6 +420,7 @@ __asm__ __volatile__ ("trapa	#0x16" \
 __syscall_return(type,__sc0); \
 }
 
+#ifdef __KERNEL__
 #define __ARCH_WANT_IPC_PARSE_VERSION
 #define __ARCH_WANT_OLD_READDIR
 #define __ARCH_WANT_OLD_STAT
@@ -444,6 +443,7 @@ __syscall_return(type,__sc0); \
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGACTION
+#endif
 
 #ifdef __KERNEL_SYSCALLS__
 
@@ -513,7 +513,7 @@ asmlinkage long sys_rt_sigaction(int sig,
 				struct sigaction __user *oact,
 				size_t sigsetsize);
 
-#endif /* __KERNEL_SYSCALLS__ */
+#endif
 
 /*
  * "Conditional" syscalls
@@ -525,5 +525,4 @@ asmlinkage long sys_rt_sigaction(int sig,
 #define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 #endif
 
-#endif /* __KERNEL__ */
 #endif /* __ASM_SH_UNISTD_H */

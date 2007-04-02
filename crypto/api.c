@@ -165,44 +165,38 @@ static unsigned int crypto_ctxsize(struct crypto_alg *alg, int flags)
 		break;
 	}
 
-	return len + (alg->cra_alignmask & ~(crypto_tfm_ctx_alignment() - 1));
+	return len + alg->cra_alignmask;
 }
 
-struct crypto_tfm *crypto_alloc_tfm2(const char *name, u32 flags,
-				     int nomodload)
+struct crypto_tfm *crypto_alloc_tfm(const char *name, u32 flags)
 {
 	struct crypto_tfm *tfm = NULL;
 	struct crypto_alg *alg;
 	unsigned int tfm_size;
 
-	if (!nomodload)
-		alg = crypto_alg_mod_lookup(name);
-	else
-		alg = crypto_alg_lookup(name);
-
+	alg = crypto_alg_mod_lookup(name);
 	if (alg == NULL)
 		goto out;
 
 	tfm_size = sizeof(*tfm) + crypto_ctxsize(alg, flags);
-	tfm = kzalloc(tfm_size, GFP_KERNEL);
+	tfm = kmalloc(tfm_size, GFP_KERNEL);
 	if (tfm == NULL)
 		goto out_put;
 
+	memset(tfm, 0, tfm_size);
+	
 	tfm->__crt_alg = alg;
 	
 	if (crypto_init_flags(tfm, flags))
 		goto out_free_tfm;
 		
-	if (crypto_init_ops(tfm))
+	if (crypto_init_ops(tfm)) {
+		crypto_exit_ops(tfm);
 		goto out_free_tfm;
-
-	if (alg->cra_init && alg->cra_init(tfm))
-		goto cra_init_failed;
+	}
 
 	goto out;
 
-cra_init_failed:
-	crypto_exit_ops(tfm);
 out_free_tfm:
 	kfree(tfm);
 	tfm = NULL;
@@ -210,11 +204,6 @@ out_put:
 	crypto_alg_put(alg);
 out:
 	return tfm;
-}
-
-struct crypto_tfm *crypto_alloc_tfm(const char *name, u32 flags)
-{
-	return crypto_alloc_tfm2(name, flags, 0);
 }
 
 void crypto_free_tfm(struct crypto_tfm *tfm)
@@ -228,8 +217,6 @@ void crypto_free_tfm(struct crypto_tfm *tfm)
 	alg = tfm->__crt_alg;
 	size = sizeof(*tfm) + alg->cra_ctxsize;
 
-	if (alg->cra_exit)
-		alg->cra_exit(tfm);
 	crypto_exit_ops(tfm);
 	crypto_alg_put(alg);
 	memset(tfm, 0, size);
@@ -239,7 +226,7 @@ void crypto_free_tfm(struct crypto_tfm *tfm)
 static inline int crypto_set_driver_name(struct crypto_alg *alg)
 {
 	static const char suffix[] = "-generic";
-	char *driver_name = alg->cra_driver_name;
+	char *driver_name = (char *)alg->cra_driver_name;
 	int len;
 
 	if (*driver_name)
@@ -277,13 +264,13 @@ int crypto_register_alg(struct crypto_alg *alg)
 	down_write(&crypto_alg_sem);
 	
 	list_for_each_entry(q, &crypto_alg_list, cra_list) {
-		if (q == alg) {
+		if (!strcmp(q->cra_driver_name, alg->cra_driver_name)) {
 			ret = -EEXIST;
 			goto out;
 		}
 	}
 	
-	list_add(&alg->cra_list, &crypto_alg_list);
+	list_add_tail(&alg->cra_list, &crypto_alg_list);
 out:	
 	up_write(&crypto_alg_sem);
 	return ret;

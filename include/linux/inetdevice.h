@@ -25,7 +25,6 @@ struct ipv4_devconf
 	int     arp_filter;
 	int	arp_announce;
 	int	arp_ignore;
-	int	arp_accept;
 	int	medium_id;
 	int	no_xfrm;
 	int	no_policy;

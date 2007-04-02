@@ -11,6 +11,7 @@
  *	       Dan Morrison, IBM Corporation (dmorriso@cse.buffalo.edu)
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kdev_t.h>
@@ -693,7 +694,7 @@ raw3215_probe (struct ccw_device *cdev)
 				       GFP_KERNEL|GFP_DMA);
 	if (raw->buffer == NULL) {
 		spin_lock(&raw3215_device_lock);
-		raw3215[line] = NULL;
+		raw3215[line] = 0;
 		spin_unlock(&raw3215_device_lock);
 		kfree(raw);
 		return -ENOMEM;

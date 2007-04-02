@@ -13,6 +13,7 @@
  *	to resolve timer interrupt livelocks, William Irwin, Oracle, 2004
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/profile.h>
 #include <linux/bootmem.h>
@@ -22,7 +23,6 @@
 #include <linux/cpu.h>
 #include <linux/profile.h>
 #include <linux/highmem.h>
-#include <linux/mutex.h>
 #include <asm/sections.h>
 #include <asm/semaphore.h>
 
@@ -44,7 +44,7 @@ static cpumask_t prof_cpu_mask = CPU_MASK_ALL;
 #ifdef CONFIG_SMP
 static DEFINE_PER_CPU(struct profile_hit *[2], cpu_profile_hits);
 static DEFINE_PER_CPU(int, cpu_profile_flip);
-static DEFINE_MUTEX(profile_flip_mutex);
+static DECLARE_MUTEX(profile_flip_mutex);
 #endif /* CONFIG_SMP */
 
 static int __init profile_setup(char * str)
@@ -86,51 +86,71 @@ void __init profile_init(void)
  
 #ifdef CONFIG_PROFILING
  
-static BLOCKING_NOTIFIER_HEAD(task_exit_notifier);
-static ATOMIC_NOTIFIER_HEAD(task_free_notifier);
-static BLOCKING_NOTIFIER_HEAD(munmap_notifier);
+static DECLARE_RWSEM(profile_rwsem);
+static DEFINE_RWLOCK(handoff_lock);
+static struct notifier_block * task_exit_notifier;
+static struct notifier_block * task_free_notifier;
+static struct notifier_block * munmap_notifier;
  
 void profile_task_exit(struct task_struct * task)
 {
-	blocking_notifier_call_chain(&task_exit_notifier, 0, task);
+	down_read(&profile_rwsem);
+	notifier_call_chain(&task_exit_notifier, 0, task);
+	up_read(&profile_rwsem);
 }
  
 int profile_handoff_task(struct task_struct * task)
 {
 	int ret;
-	ret = atomic_notifier_call_chain(&task_free_notifier, 0, task);
+	read_lock(&handoff_lock);
+	ret = notifier_call_chain(&task_free_notifier, 0, task);
+	read_unlock(&handoff_lock);
 	return (ret == NOTIFY_OK) ? 1 : 0;
 }
 
 void profile_munmap(unsigned long addr)
 {
-	blocking_notifier_call_chain(&munmap_notifier, 0, (void *)addr);
+	down_read(&profile_rwsem);
+	notifier_call_chain(&munmap_notifier, 0, (void *)addr);
+	up_read(&profile_rwsem);
 }
 
 int task_handoff_register(struct notifier_block * n)
 {
-	return atomic_notifier_chain_register(&task_free_notifier, n);
+	int err = -EINVAL;
+
+	write_lock(&handoff_lock);
+	err = notifier_chain_register(&task_free_notifier, n);
+	write_unlock(&handoff_lock);
+	return err;
 }
 
 int task_handoff_unregister(struct notifier_block * n)
 {
-	return atomic_notifier_chain_unregister(&task_free_notifier, n);
+	int err = -EINVAL;
+
+	write_lock(&handoff_lock);
+	err = notifier_chain_unregister(&task_free_notifier, n);
+	write_unlock(&handoff_lock);
+	return err;
 }
 
 int profile_event_register(enum profile_type type, struct notifier_block * n)
 {
 	int err = -EINVAL;
  
+	down_write(&profile_rwsem);
+ 
 	switch (type) {
 		case PROFILE_TASK_EXIT:
-			err = blocking_notifier_chain_register(
-					&task_exit_notifier, n);
+			err = notifier_chain_register(&task_exit_notifier, n);
 			break;
 		case PROFILE_MUNMAP:
-			err = blocking_notifier_chain_register(
-					&munmap_notifier, n);
+			err = notifier_chain_register(&munmap_notifier, n);
 			break;
 	}
+ 
+	up_write(&profile_rwsem);
  
 	return err;
 }
@@ -140,17 +160,18 @@ int profile_event_unregister(enum profile_type type, struct notifier_block * n)
 {
 	int err = -EINVAL;
  
+	down_write(&profile_rwsem);
+ 
 	switch (type) {
 		case PROFILE_TASK_EXIT:
-			err = blocking_notifier_chain_unregister(
-					&task_exit_notifier, n);
+			err = notifier_chain_unregister(&task_exit_notifier, n);
 			break;
 		case PROFILE_MUNMAP:
-			err = blocking_notifier_chain_unregister(
-					&munmap_notifier, n);
+			err = notifier_chain_unregister(&munmap_notifier, n);
 			break;
 	}
 
+	up_write(&profile_rwsem);
 	return err;
 }
 
@@ -222,7 +243,7 @@ static void profile_flip_buffers(void)
 {
 	int i, j, cpu;
 
-	mutex_lock(&profile_flip_mutex);
+	down(&profile_flip_mutex);
 	j = per_cpu(cpu_profile_flip, get_cpu());
 	put_cpu();
 	on_each_cpu(__profile_flip_buffers, NULL, 0, 1);
@@ -238,14 +259,14 @@ static void profile_flip_buffers(void)
 			hits[i].hits = hits[i].pc = 0;
 		}
 	}
-	mutex_unlock(&profile_flip_mutex);
+	up(&profile_flip_mutex);
 }
 
 static void profile_discard_flip_buffers(void)
 {
 	int i, cpu;
 
-	mutex_lock(&profile_flip_mutex);
+	down(&profile_flip_mutex);
 	i = per_cpu(cpu_profile_flip, get_cpu());
 	put_cpu();
 	on_each_cpu(__profile_flip_buffers, NULL, 0, 1);
@@ -253,7 +274,7 @@ static void profile_discard_flip_buffers(void)
 		struct profile_hit *hits = per_cpu(cpu_profile_hits, cpu)[i];
 		memset(hits, 0, NR_PROFILE_HIT*sizeof(struct profile_hit));
 	}
-	mutex_unlock(&profile_flip_mutex);
+	up(&profile_flip_mutex);
 }
 
 void profile_hit(int type, void *__pc)

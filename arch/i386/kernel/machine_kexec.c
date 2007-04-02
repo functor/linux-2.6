@@ -133,9 +133,9 @@ typedef asmlinkage NORET_TYPE void (*relocate_new_kernel_t)(
 					unsigned long start_address,
 					unsigned int has_pae) ATTRIB_NORET;
 
-extern const unsigned char relocate_new_kernel[];
+const extern unsigned char relocate_new_kernel[];
 extern void relocate_new_kernel_end(void);
-extern const unsigned int relocate_new_kernel_size;
+const extern unsigned int relocate_new_kernel_size;
 
 /*
  * A architecture hook called to validate the
@@ -189,11 +189,14 @@ NORET_TYPE void machine_kexec(struct kimage *image)
 	memcpy((void *)reboot_code_buffer, relocate_new_kernel,
 						relocate_new_kernel_size);
 
-	/* The segment registers are funny things, they have both a
-	 * visible and an invisible part.  Whenever the visible part is
-	 * set to a specific selector, the invisible part is loaded
-	 * with from a table in memory.  At no other time is the
-	 * descriptor table in memory accessed.
+	/* The segment registers are funny things, they are
+	 * automatically loaded from a table, in memory wherever you
+	 * set them to a specific selector, but this table is never
+	 * accessed again you set the segment to a different selector.
+	 *
+	 * The more common model is are caches where the behide
+	 * the scenes work is done, but is also dropped at arbitrary
+	 * times.
 	 *
 	 * I take advantage of this here by force loading the
 	 * segments, before I zap the gdt with an invalid value.

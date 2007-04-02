@@ -15,6 +15,7 @@
  * option) any later version.
  *
  */
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -107,5 +108,5 @@ static struct notifier_block iss_panic_block = {
 
 void __init platform_setup(char **p_cmdline)
 {
-	atomic_notifier_chain_register(&panic_notifier_list, &iss_panic_block);
+	notifier_chain_register(&panic_notifier_list, &iss_panic_block);
 }

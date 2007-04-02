@@ -24,13 +24,12 @@
 #ifndef _LINUX_NTFS_INODE_H
 #define _LINUX_NTFS_INODE_H
 
-#include <asm/atomic.h>
-
-#include <linux/fs.h>
-#include <linux/list.h>
 #include <linux/mm.h>
-#include <linux/mutex.h>
+#include <linux/fs.h>
 #include <linux/seq_file.h>
+#include <linux/list.h>
+#include <asm/atomic.h>
+#include <asm/semaphore.h>
 
 #include "layout.h"
 #include "volume.h"
@@ -82,7 +81,7 @@ struct _ntfs_inode {
 	 * The following fields are only valid for real inodes and extent
 	 * inodes.
 	 */
-	struct mutex mrec_lock;	/* Lock for serializing access to the
+	struct semaphore mrec_lock; /* Lock for serializing access to the
 				   mft record belonging to this inode. */
 	struct page *page;	/* The page containing the mft record of the
 				   inode. This should only be touched by the
@@ -120,7 +119,7 @@ struct _ntfs_inode {
 			u8 block_clusters;	/* Number of clusters per cb. */
 		} compressed;
 	} itype;
-	struct mutex extent_lock;	/* Lock for accessing/modifying the
+	struct semaphore extent_lock;	/* Lock for accessing/modifying the
 					   below . */
 	s32 nr_extents;	/* For a base mft record, the number of attached extent
 			   inodes (0 if none), for extent records and for fake

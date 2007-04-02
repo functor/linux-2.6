@@ -6,6 +6,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -19,8 +20,7 @@ DECLARE_MUTEX(pnp_res_mutex);
 
 static int pnp_assign_port(struct pnp_dev *dev, struct pnp_port *rule, int idx)
 {
-	resource_size_t *start, *end;
-	unsigned long *flags;
+	unsigned long *start, *end, *flags;
 
 	if (!dev || !rule)
 		return -EINVAL;
@@ -63,8 +63,7 @@ static int pnp_assign_port(struct pnp_dev *dev, struct pnp_port *rule, int idx)
 
 static int pnp_assign_mem(struct pnp_dev *dev, struct pnp_mem *rule, int idx)
 {
-	resource_size_t *start, *end;
-	unsigned long *flags;
+	unsigned long *start, *end, *flags;
 
 	if (!dev || !rule)
 		return -EINVAL;
@@ -117,8 +116,7 @@ static int pnp_assign_mem(struct pnp_dev *dev, struct pnp_mem *rule, int idx)
 
 static int pnp_assign_irq(struct pnp_dev * dev, struct pnp_irq *rule, int idx)
 {
-	resource_size_t *start, *end;
-	unsigned long *flags;
+	unsigned long *start, *end, *flags;
 	int i;
 
 	/* IRQ priority: this table is good for i386 */
@@ -170,8 +168,7 @@ static int pnp_assign_irq(struct pnp_dev * dev, struct pnp_irq *rule, int idx)
 
 static int pnp_assign_dma(struct pnp_dev *dev, struct pnp_dma *rule, int idx)
 {
-	resource_size_t *start, *end;
-	unsigned long *flags;
+	unsigned long *start, *end, *flags;
 	int i;
 
 	/* DMA priority: this table is good for i386 */
@@ -482,7 +479,7 @@ int pnp_auto_config_dev(struct pnp_dev *dev)
 int pnp_start_dev(struct pnp_dev *dev)
 {
 	if (!pnp_can_write(dev)) {
-		pnp_info("Device %s does not support activation.", dev->dev.bus_id);
+		pnp_info("Device %s does not supported activation.", dev->dev.bus_id);
 		return -EINVAL;
 	}
 
@@ -506,7 +503,7 @@ int pnp_start_dev(struct pnp_dev *dev)
 int pnp_stop_dev(struct pnp_dev *dev)
 {
 	if (!pnp_can_disable(dev)) {
-		pnp_info("Device %s does not support disabling.", dev->dev.bus_id);
+		pnp_info("Device %s does not supported disabling.", dev->dev.bus_id);
 		return -EINVAL;
 	}
 	if (dev->protocol->disable(dev)<0) {
@@ -585,8 +582,7 @@ int pnp_disable_dev(struct pnp_dev *dev)
  * @size: size of region
  *
  */
-void pnp_resource_change(struct resource *resource, resource_size_t start,
-				resource_size_t size)
+void pnp_resource_change(struct resource *resource, unsigned long start, unsigned long size)
 {
 	if (resource == NULL)
 		return;

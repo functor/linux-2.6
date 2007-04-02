@@ -9,6 +9,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -17,8 +18,8 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/usb.h>
-#include <linux/usb/serial.h>
 #include <asm/uaccess.h>
+#include "usb-serial.h"
 
 static int debug;
 
@@ -137,7 +138,6 @@ int usb_serial_generic_open (struct usb_serial_port *port, struct file *filp)
 
 	return result;
 }
-EXPORT_SYMBOL_GPL(usb_serial_generic_open);
 
 static void generic_cleanup (struct usb_serial_port *port)
 {
@@ -175,14 +175,14 @@ int usb_serial_generic_write(struct usb_serial_port *port, const unsigned char *
 
 	/* only do something if we have a bulk out endpoint */
 	if (serial->num_bulk_out) {
-		spin_lock_bh(&port->lock);
+		spin_lock(&port->lock);
 		if (port->write_urb_busy) {
-			spin_unlock_bh(&port->lock);
+			spin_unlock(&port->lock);
 			dbg("%s - already writing", __FUNCTION__);
 			return 0;
 		}
 		port->write_urb_busy = 1;
-		spin_unlock_bh(&port->lock);
+		spin_unlock(&port->lock);
 
 		count = (count > port->bulk_out_size) ? port->bulk_out_size : count;
 
@@ -285,7 +285,6 @@ void usb_serial_generic_read_bulk_callback (struct urb *urb, struct pt_regs *reg
 	if (result)
 		dev_err(&port->dev, "%s - failed resubmitting read urb, error %d\n", __FUNCTION__, result);
 }
-EXPORT_SYMBOL_GPL(usb_serial_generic_read_bulk_callback);
 
 void usb_serial_generic_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 {
@@ -299,7 +298,9 @@ void usb_serial_generic_write_bulk_callback (struct urb *urb, struct pt_regs *re
 		return;
 	}
 
-	usb_serial_port_softint(port);
+	usb_serial_port_softint((void *)port);
+
+	schedule_work(&port->work);
 }
 EXPORT_SYMBOL_GPL(usb_serial_generic_write_bulk_callback);
 

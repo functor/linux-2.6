@@ -8,6 +8,7 @@
  * the reader.
  */
 
+#include <linux/config.h>
 #include <linux/module.h> /* for EXPORT_SYMBOL */
 #include <linux/string.h>
 #include <linux/types.h>
@@ -507,7 +508,7 @@ err_out:
 	goto out;
 }
 
-void atm_proc_exit(void)
+void __exit atm_proc_exit(void)
 {
 	atm_proc_dirs_remove();
 }

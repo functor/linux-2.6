@@ -128,7 +128,6 @@ void kobject_init(struct kobject * kobj)
 {
 	kref_init(&kobj->kref);
 	INIT_LIST_HEAD(&kobj->entry);
-	init_waitqueue_head(&kobj->poll);
 	kobj->kset = kset_get(kobj->kset);
 }
 
@@ -195,17 +194,6 @@ int kobject_add(struct kobject * kobj)
 		unlink(kobj);
 		if (parent)
 			kobject_put(parent);
-
-		/* be noisy on error issues */
-		if (error == -EEXIST)
-			printk("kobject_add failed for %s with -EEXIST, "
-			       "don't try to register things with the "
-			       "same name in the same directory.\n",
-			       kobject_name(kobj));
-		else
-			printk("kobject_add failed for %s (%d)\n",
-			       kobject_name(kobj), error);
-		 dump_stack();
 	}
 
 	return error;
@@ -219,13 +207,18 @@ int kobject_add(struct kobject * kobj)
 
 int kobject_register(struct kobject * kobj)
 {
-	int error = -EINVAL;
+	int error = 0;
 	if (kobj) {
 		kobject_init(kobj);
 		error = kobject_add(kobj);
-		if (!error)
+		if (error) {
+			printk("kobject_register failed for %s (%d)\n",
+			       kobject_name(kobj),error);
+			dump_stack();
+		} else
 			kobject_uevent(kobj, KOBJ_ADD);
-	}
+	} else
+		error = -EINVAL;
 	return error;
 }
 
@@ -386,43 +379,6 @@ void kobject_put(struct kobject * kobj)
 }
 
 
-static void dir_release(struct kobject *kobj)
-{
-	kfree(kobj);
-}
-
-static struct kobj_type dir_ktype = {
-	.release	= dir_release,
-	.sysfs_ops	= NULL,
-	.default_attrs	= NULL,
-};
-
-/**
- *	kobject_add_dir - add sub directory of object.
- *	@parent:	object in which a directory is created.
- *	@name:	directory name.
- *
- *	Add a plain directory object as child of given object.
- */
-struct kobject *kobject_add_dir(struct kobject *parent, const char *name)
-{
-	struct kobject *k;
-
-	if (!parent)
-		return NULL;
-
-	k = kzalloc(sizeof(*k), GFP_KERNEL);
-	if (!k)
-		return NULL;
-
-	k->parent = parent;
-	k->ktype = &dir_ktype;
-	kobject_set_name(k, name);
-	kobject_register(k);
-
-	return k;
-}
-
 /**
  *	kset_init - initialize a kset for use
  *	@k:	kset 
@@ -568,7 +524,7 @@ int subsys_create_file(struct subsystem * s, struct subsys_attribute * a)
  *	@s:	subsystem.
  *	@a:	attribute desciptor.
  */
-#if 0
+
 void subsys_remove_file(struct subsystem * s, struct subsys_attribute * a)
 {
 	if (subsys_get(s)) {
@@ -576,7 +532,6 @@ void subsys_remove_file(struct subsystem * s, struct subsys_attribute * a)
 		subsys_put(s);
 	}
 }
-#endif  /*  0  */
 
 EXPORT_SYMBOL(kobject_init);
 EXPORT_SYMBOL(kobject_register);
@@ -588,7 +543,10 @@ EXPORT_SYMBOL(kobject_del);
 
 EXPORT_SYMBOL(kset_register);
 EXPORT_SYMBOL(kset_unregister);
+EXPORT_SYMBOL(kset_find_obj);
 
+EXPORT_SYMBOL(subsystem_init);
 EXPORT_SYMBOL(subsystem_register);
 EXPORT_SYMBOL(subsystem_unregister);
 EXPORT_SYMBOL(subsys_create_file);
+EXPORT_SYMBOL(subsys_remove_file);

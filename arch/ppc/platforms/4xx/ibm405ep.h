@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibm405ep.h
+ *
  * IBM PPC 405EP processor defines.
  *
  * Author: SAW (IBM), derived from ibm405gp.h.
@@ -14,6 +16,7 @@
 #ifndef __ASM_IBM405EP_H__
 #define __ASM_IBM405EP_H__
 
+#include <linux/config.h>
 
 /* ibm405.h at bottom of this file */
 

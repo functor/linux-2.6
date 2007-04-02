@@ -10,7 +10,7 @@
  *	   2 of the License, or (at your option) any later version.
  *
  * FILE		: megaraid_mm.c
- * Version	: v2.20.2.7 (Jul 16 2006)
+ * Version	: v2.20.2.6 (Mar 7 2005)
  *
  * Common management module
  */
@@ -898,8 +898,10 @@ mraid_mm_register_adp(mraid_mmadp_t *lld_adp)
 
 	adapter = kmalloc(sizeof(mraid_mmadp_t), GFP_KERNEL);
 
-	if (!adapter)
-		return -ENOMEM;
+	if (!adapter) {
+		rval = -ENOMEM;
+		goto memalloc_error;
+	}
 
 	memset(adapter, 0, sizeof(mraid_mmadp_t));
 

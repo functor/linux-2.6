@@ -17,6 +17,7 @@
  * Derived from net/ipv4/netfilter/ip_conntrack_standalone.c
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/netfilter.h>
 #include <linux/module.h>
@@ -209,11 +210,6 @@ static int ct_seq_show(struct seq_file *s, void *v)
 
 #if defined(CONFIG_NF_CONNTRACK_MARK)
 	if (seq_printf(s, "mark=%u ", conntrack->mark))
-		return -ENOSPC;
-#endif
-
-#ifdef CONFIG_NF_CONNTRACK_SECMARK
-	if (seq_printf(s, "secmark=%u ", conntrack->secmark))
 		return -ENOSPC;
 #endif
 
@@ -428,8 +424,6 @@ static struct file_operations ct_cpu_seq_fops = {
 
 /* Sysctl support */
 
-int nf_conntrack_checksum = 1;
-
 #ifdef CONFIG_SYSCTL
 
 /* From nf_conntrack_core.c */
@@ -487,14 +481,6 @@ static ctl_table nf_ct_sysctl_table[] = {
 		.maxlen         = sizeof(unsigned int),
 		.mode           = 0444,
 		.proc_handler   = &proc_dointvec,
-	},
-	{
-		.ctl_name	= NET_NF_CONNTRACK_CHECKSUM,
-		.procname	= "nf_conntrack_checksum",
-		.data		= &nf_conntrack_checksum,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
 	},
 	{
 		.ctl_name	= NET_NF_CONNTRACK_TCP_TIMEOUT_SYN_SENT,
@@ -663,6 +649,63 @@ static ctl_table nf_ct_net_table[] = {
 EXPORT_SYMBOL(nf_ct_log_invalid);
 #endif /* CONFIG_SYSCTL */
 
+static int init_or_cleanup(int init)
+{
+#ifdef CONFIG_PROC_FS
+	struct proc_dir_entry *proc, *proc_exp, *proc_stat;
+#endif
+	int ret = 0;
+
+	if (!init) goto cleanup;
+
+	ret = nf_conntrack_init();
+	if (ret < 0)
+		goto cleanup_nothing;
+
+#ifdef CONFIG_PROC_FS
+	proc = proc_net_fops_create("nf_conntrack", 0440, &ct_file_ops);
+	if (!proc) goto cleanup_init;
+
+	proc_exp = proc_net_fops_create("nf_conntrack_expect", 0440,
+					&exp_file_ops);
+	if (!proc_exp) goto cleanup_proc;
+
+	proc_stat = create_proc_entry("nf_conntrack", S_IRUGO, proc_net_stat);
+	if (!proc_stat)
+		goto cleanup_proc_exp;
+
+	proc_stat->proc_fops = &ct_cpu_seq_fops;
+	proc_stat->owner = THIS_MODULE;
+#endif
+#ifdef CONFIG_SYSCTL
+	nf_ct_sysctl_header = register_sysctl_table(nf_ct_net_table, 0);
+	if (nf_ct_sysctl_header == NULL) {
+		printk("nf_conntrack: can't register to sysctl.\n");
+		ret = -ENOMEM;
+		goto cleanup_proc_stat;
+	}
+#endif
+
+	return ret;
+
+ cleanup:
+#ifdef CONFIG_SYSCTL
+ 	unregister_sysctl_table(nf_ct_sysctl_header);
+ cleanup_proc_stat:
+#endif
+#ifdef CONFIG_PROC_FS
+	remove_proc_entry("nf_conntrack", proc_net_stat);
+ cleanup_proc_exp:
+	proc_net_remove("nf_conntrack_expect");
+ cleanup_proc:
+	proc_net_remove("nf_conntrack");
+ cleanup_init:
+#endif /* CNFIG_PROC_FS */
+	nf_conntrack_cleanup();
+ cleanup_nothing:
+	return ret;
+}
+
 int nf_conntrack_l3proto_register(struct nf_conntrack_l3proto *proto)
 {
 	int ret = 0;
@@ -763,72 +806,18 @@ void nf_conntrack_protocol_unregister(struct nf_conntrack_protocol *proto)
 	nf_ct_iterate_cleanup(kill_proto, proto);
 }
 
-static int __init nf_conntrack_standalone_init(void)
+static int __init init(void)
 {
-#ifdef CONFIG_PROC_FS
-	struct proc_dir_entry *proc, *proc_exp, *proc_stat;
-#endif
-	int ret = 0;
-
-	ret = nf_conntrack_init();
-	if (ret < 0)
-		return ret;
-
-#ifdef CONFIG_PROC_FS
-	proc = proc_net_fops_create("nf_conntrack", 0440, &ct_file_ops);
-	if (!proc) goto cleanup_init;
-
-	proc_exp = proc_net_fops_create("nf_conntrack_expect", 0440,
-					&exp_file_ops);
-	if (!proc_exp) goto cleanup_proc;
-
-	proc_stat = create_proc_entry("nf_conntrack", S_IRUGO, proc_net_stat);
-	if (!proc_stat)
-		goto cleanup_proc_exp;
-
-	proc_stat->proc_fops = &ct_cpu_seq_fops;
-	proc_stat->owner = THIS_MODULE;
-#endif
-#ifdef CONFIG_SYSCTL
-	nf_ct_sysctl_header = register_sysctl_table(nf_ct_net_table, 0);
-	if (nf_ct_sysctl_header == NULL) {
-		printk("nf_conntrack: can't register to sysctl.\n");
-		ret = -ENOMEM;
-		goto cleanup_proc_stat;
-	}
-#endif
-	return ret;
-
-#ifdef CONFIG_SYSCTL
- cleanup_proc_stat:
-#endif
-#ifdef CONFIG_PROC_FS
-	remove_proc_entry("nf_conntrack", proc_net_stat);
- cleanup_proc_exp:
-	proc_net_remove("nf_conntrack_expect");
- cleanup_proc:
-	proc_net_remove("nf_conntrack");
- cleanup_init:
-#endif /* CNFIG_PROC_FS */
-	nf_conntrack_cleanup();
-	return ret;
+	return init_or_cleanup(1);
 }
 
-static void __exit nf_conntrack_standalone_fini(void)
+static void __exit fini(void)
 {
-#ifdef CONFIG_SYSCTL
- 	unregister_sysctl_table(nf_ct_sysctl_header);
-#endif
-#ifdef CONFIG_PROC_FS
-	remove_proc_entry("nf_conntrack", proc_net_stat);
-	proc_net_remove("nf_conntrack_expect");
-	proc_net_remove("nf_conntrack");
-#endif /* CNFIG_PROC_FS */
-	nf_conntrack_cleanup();
+	init_or_cleanup(0);
 }
 
-module_init(nf_conntrack_standalone_init);
-module_exit(nf_conntrack_standalone_fini);
+module_init(init);
+module_exit(fini);
 
 /* Some modules need us, but don't depend directly on any symbol.
    They should call this. */
@@ -845,13 +834,12 @@ EXPORT_SYMBOL_GPL(__nf_ct_event_cache_init);
 EXPORT_PER_CPU_SYMBOL_GPL(nf_conntrack_ecache);
 EXPORT_SYMBOL_GPL(nf_ct_deliver_cached_events);
 #endif
-EXPORT_SYMBOL(nf_ct_l3proto_try_module_get);
-EXPORT_SYMBOL(nf_ct_l3proto_module_put);
 EXPORT_SYMBOL(nf_conntrack_l3proto_register);
 EXPORT_SYMBOL(nf_conntrack_l3proto_unregister);
 EXPORT_SYMBOL(nf_conntrack_protocol_register);
 EXPORT_SYMBOL(nf_conntrack_protocol_unregister);
 EXPORT_SYMBOL(nf_ct_invert_tuplepr);
+EXPORT_SYMBOL(nf_conntrack_alter_reply);
 EXPORT_SYMBOL(nf_conntrack_destroyed);
 EXPORT_SYMBOL(need_conntrack);
 EXPORT_SYMBOL(nf_conntrack_helper_register);
@@ -865,7 +853,6 @@ EXPORT_SYMBOL(nf_ct_proto_put);
 EXPORT_SYMBOL(nf_ct_l3proto_find_get);
 EXPORT_SYMBOL(nf_ct_l3proto_put);
 EXPORT_SYMBOL(nf_ct_l3protos);
-EXPORT_SYMBOL_GPL(nf_conntrack_checksum);
 EXPORT_SYMBOL(nf_conntrack_expect_alloc);
 EXPORT_SYMBOL(nf_conntrack_expect_put);
 EXPORT_SYMBOL(nf_conntrack_expect_related);

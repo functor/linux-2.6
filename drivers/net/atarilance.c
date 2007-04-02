@@ -78,7 +78,7 @@ static int lance_debug = LANCE_DEBUG;
 #else
 static int lance_debug = 1;
 #endif
-module_param(lance_debug, int, 0);
+MODULE_PARM(lance_debug, "i");
 MODULE_PARM_DESC(lance_debug, "atarilance debug level (0-3)");
 MODULE_LICENSE("GPL");
 
@@ -804,7 +804,8 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 		++len;
 		
 	if (len > skb->len) {
-		if (skb_padto(skb, len))
+		skb = skb_padto(skb, len);
+		if (skb == NULL)
 			return 0;
 	}
 		

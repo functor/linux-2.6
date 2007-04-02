@@ -5,6 +5,7 @@
  * 				Thomas Graf <tgraf@suug.ch>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -12,27 +13,26 @@
 #include <linux/socket.h>
 #include <linux/string.h>
 #include <linux/skbuff.h>
-#include <linux/mutex.h>
 #include <net/sock.h>
 #include <net/genetlink.h>
 
 struct sock *genl_sock = NULL;
 
-static DEFINE_MUTEX(genl_mutex); /* serialization of message processing */
+static DECLARE_MUTEX(genl_sem); /* serialization of message processing */
 
 static void genl_lock(void)
 {
-	mutex_lock(&genl_mutex);
+	down(&genl_sem);
 }
 
 static int genl_trylock(void)
 {
-	return !mutex_trylock(&genl_mutex);
+	return down_trylock(&genl_sem);
 }
 
 static void genl_unlock(void)
 {
-	mutex_unlock(&genl_mutex);
+	up(&genl_sem);
 
 	if (genl_sock && genl_sock->sk_receive_queue.qlen)
 		genl_sock->sk_data_ready(genl_sock, 0);
@@ -319,7 +319,7 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto errout;
 	}
 
-	if ((ops->flags & GENL_ADMIN_PERM) && security_netlink_recv(skb, CAP_NET_ADMIN)) {
+	if ((ops->flags & GENL_ADMIN_PERM) && security_netlink_recv(skb)) {
 		err = -EPERM;
 		goto errout;
 	}

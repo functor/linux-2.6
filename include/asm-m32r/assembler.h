@@ -9,6 +9,7 @@
  * This file contains M32R architecture specific macro definitions.
  */
 
+#include <linux/config.h>
 
 #ifndef __STR
 #ifdef __ASSEMBLY__
@@ -108,9 +109,6 @@
 	push	r13
 	mvfachi	r13
 	push	r13
-	ldi	r13, #0
-	push	r13		; dummy push acc1h
-	push	r13		; dummy push acc1l
 #else
 #error unknown isa configuration
 #endif
@@ -158,8 +156,6 @@
 	pop	r13
 	mvtaclo	r13, a1
 #elif defined(CONFIG_ISA_M32R2) || defined(CONFIG_ISA_M32R)
-	pop	r13		; dummy pop acc1h
-	pop	r13		; dummy pop acc1l
 	pop	r13
 	mvtachi	r13
 	pop	r13

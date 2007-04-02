@@ -1152,7 +1152,10 @@ mpt_lan_receive_post_reply(struct net_device *dev,
 				priv->mpt_rxfidx_tail,
 				MPT_LAN_MAX_BUCKETS_OUT);
 
-		return -1;
+		panic("Damn it Jim! I'm a doctor, not a programmer! "
+				"Oh, wait a sec, I am a programmer. "
+				"And, who's Jim?!?!\n"
+				"Arrgghh! We've done it again!\n");
 	}
 
 	if (remaining == 0)

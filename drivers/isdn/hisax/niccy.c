@@ -14,6 +14,7 @@
  */
 
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include "hisax.h"
 #include "isac.h"
@@ -232,12 +233,12 @@ niccy_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return(0);
 }
 
-static struct pci_dev *niccy_dev __devinitdata = NULL;
+static struct pci_dev *niccy_dev __initdata = NULL;
 #ifdef __ISAPNP__
 static struct pnp_card *pnp_c __devinitdata = NULL;
 #endif
 
-int __devinit
+int __init
 setup_niccy(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;
@@ -336,7 +337,7 @@ setup_niccy(struct IsdnCard *card)
 			printk(KERN_WARNING "Niccy: No PCI card found\n");
 			return(0);
 		}
-		cs->irq_flags |= IRQF_SHARED;
+		cs->irq_flags |= SA_SHIRQ;
 		cs->hw.niccy.isac = pci_ioaddr + ISAC_PCI_DATA;
 		cs->hw.niccy.isac_ale = pci_ioaddr + ISAC_PCI_ADDR;
 		cs->hw.niccy.hscx = pci_ioaddr + HSCX_PCI_DATA;

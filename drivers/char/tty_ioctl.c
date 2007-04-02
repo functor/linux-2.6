@@ -20,7 +20,6 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
-#include <linux/mutex.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -36,18 +35,6 @@
 #define TERMIOS_FLUSH	1
 #define TERMIOS_WAIT	2
 #define TERMIOS_TERMIO	4
-
-
-/**
- *	tty_wait_until_sent	-	wait for I/O to finish
- *	@tty: tty we are waiting for
- *	@timeout: how long we will wait
- *
- *	Wait for characters pending in a tty driver to hit the wire, or
- *	for a timeout to occur (eg due to flow control)
- *
- *	Locking: none
- */
 
 void tty_wait_until_sent(struct tty_struct * tty, long timeout)
 {
@@ -107,18 +94,6 @@ static void unset_locked_termios(struct termios *termios,
 			old->c_cc[i] : termios->c_cc[i];
 }
 
-/**
- *	change_termios		-	update termios values
- *	@tty: tty to update
- *	@new_termios: desired new value
- *
- *	Perform updates to the termios values set on this terminal. There
- *	is a bit of layering violation here with n_tty in terms of the
- *	internal knowledge of this function.
- *
- *	Locking: termios_sem
- */
-
 static void change_termios(struct tty_struct * tty, struct termios * new_termios)
 {
 	int canon_change;
@@ -132,7 +107,7 @@ static void change_termios(struct tty_struct * tty, struct termios * new_termios
 
 	/* FIXME: we need to decide on some locking/ordering semantics
 	   for the set_termios notification eventually */
-	mutex_lock(&tty->termios_mutex);
+	down(&tty->termios_sem);
 
 	*tty->termios = *new_termios;
 	unset_locked_termios(tty->termios, &old_termios, tty->termios_locked);
@@ -177,21 +152,8 @@ static void change_termios(struct tty_struct * tty, struct termios * new_termios
 			(ld->set_termios)(tty, &old_termios);
 		tty_ldisc_deref(ld);
 	}
-	mutex_unlock(&tty->termios_mutex);
+	up(&tty->termios_sem);
 }
-
-/**
- *	set_termios		-	set termios values for a tty
- *	@tty: terminal device
- *	@arg: user data
- *	@opt: option information
- *
- *	Helper function to prepare termios data and run neccessary other
- *	functions before using change_termios to do the actual changes.
- *
- *	Locking:
- *		Called functions take ldisc and termios_sem locks
- */
 
 static int set_termios(struct tty_struct * tty, void __user *arg, int opt)
 {
@@ -285,13 +247,13 @@ static int get_sgttyb(struct tty_struct * tty, struct sgttyb __user * sgttyb)
 {
 	struct sgttyb tmp;
 
-	mutex_lock(&tty->termios_mutex);
+	down(&tty->termios_sem);
 	tmp.sg_ispeed = 0;
 	tmp.sg_ospeed = 0;
 	tmp.sg_erase = tty->termios->c_cc[VERASE];
 	tmp.sg_kill = tty->termios->c_cc[VKILL];
 	tmp.sg_flags = get_sgflags(tty);
-	mutex_unlock(&tty->termios_mutex);
+	up(&tty->termios_sem);
 	
 	return copy_to_user(sgttyb, &tmp, sizeof(tmp)) ? -EFAULT : 0;
 }
@@ -322,17 +284,6 @@ static void set_sgflags(struct termios * termios, int flags)
 	}
 }
 
-/**
- *	set_sgttyb		-	set legacy terminal values
- *	@tty: tty structure
- *	@sgttyb: pointer to old style terminal structure
- *
- *	Updates a terminal from the legacy BSD style terminal information
- *	structure.
- *
- *	Locking: termios_sem
- */
-
 static int set_sgttyb(struct tty_struct * tty, struct sgttyb __user * sgttyb)
 {
 	int retval;
@@ -346,12 +297,12 @@ static int set_sgttyb(struct tty_struct * tty, struct sgttyb __user * sgttyb)
 	if (copy_from_user(&tmp, sgttyb, sizeof(tmp)))
 		return -EFAULT;
 
-	mutex_lock(&tty->termios_mutex);
+	down(&tty->termios_sem);		
 	termios =  *tty->termios;
 	termios.c_cc[VERASE] = tmp.sg_erase;
 	termios.c_cc[VKILL] = tmp.sg_kill;
 	set_sgflags(&termios, tmp.sg_flags);
-	mutex_unlock(&tty->termios_mutex);
+	up(&tty->termios_sem);
 	change_termios(tty, &termios);
 	return 0;
 }
@@ -418,33 +369,22 @@ static int set_ltchars(struct tty_struct * tty, struct ltchars __user * ltchars)
 }
 #endif
 
-/**
- *	send_prio_char		-	send priority character
- *
- *	Send a high priority character to the tty even if stopped
- *
- *	Locking: none for xchar method, write ordering for write method.
+/*
+ * Send a high priority character to the tty.
  */
-
-static int send_prio_char(struct tty_struct *tty, char ch)
+static void send_prio_char(struct tty_struct *tty, char ch)
 {
 	int	was_stopped = tty->stopped;
 
 	if (tty->driver->send_xchar) {
 		tty->driver->send_xchar(tty, ch);
-		return 0;
+		return;
 	}
-
-	if (mutex_lock_interruptible(&tty->atomic_write_lock))
-		return -ERESTARTSYS;
-
 	if (was_stopped)
 		start_tty(tty);
 	tty->driver->write(tty, &ch, 1);
 	if (was_stopped)
 		stop_tty(tty);
-	mutex_unlock(&tty->atomic_write_lock);
-	return 0;
 }
 
 int n_tty_ioctl(struct tty_struct * tty, struct file * file,
@@ -518,11 +458,11 @@ int n_tty_ioctl(struct tty_struct * tty, struct file * file,
 				break;
 			case TCIOFF:
 				if (STOP_CHAR(tty) != __DISABLED_CHAR)
-					return send_prio_char(tty, STOP_CHAR(tty));
+					send_prio_char(tty, STOP_CHAR(tty));
 				break;
 			case TCION:
 				if (START_CHAR(tty) != __DISABLED_CHAR)
-					return send_prio_char(tty, START_CHAR(tty));
+					send_prio_char(tty, START_CHAR(tty));
 				break;
 			default:
 				return -EINVAL;
@@ -597,11 +537,11 @@ int n_tty_ioctl(struct tty_struct * tty, struct file * file,
 		case TIOCSSOFTCAR:
 			if (get_user(arg, (unsigned int __user *) arg))
 				return -EFAULT;
-			mutex_lock(&tty->termios_mutex);
+			down(&tty->termios_sem);
 			tty->termios->c_cflag =
 				((tty->termios->c_cflag & ~CLOCAL) |
 				 (arg ? CLOCAL : 0));
-			mutex_unlock(&tty->termios_mutex);
+			up(&tty->termios_sem);
 			return 0;
 		default:
 			return -ENOIOCTLCMD;

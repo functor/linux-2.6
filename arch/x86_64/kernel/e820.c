@@ -1,6 +1,7 @@
 /* 
  * Handle the memory map.
  * The functions here do the job until bootmem takes over.
+ * $Id: e820.c,v 1.4 2002/09/19 19:25:32 ak Exp $
  *
  *  Getting sanitize_e820_map() in sync with i386 version by applying change:
  *  -  Provisions for empty E820 memory regions (reported by certain BIOSes).
@@ -8,6 +9,7 @@
  *  Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>
  *
  */
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/init.h>
@@ -16,9 +18,7 @@
 #include <linux/string.h>
 #include <linux/kexec.h>
 #include <linux/module.h>
-#include <linux/mm.h>
 
-#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <asm/e820.h>
 #include <asm/proto.h>
@@ -72,30 +72,15 @@ static inline int bad_addr(unsigned long *addrp, unsigned long size)
 #endif
 	/* kernel code + 640k memory hole (later should not be needed, but 
 	   be paranoid for now) */
-	if (last >= 640*1024 && addr < 1024*1024) {
-		*addrp = 1024*1024;
-		return 1;
-	}
-	if (last >= __pa_symbol(&_text) && last < __pa_symbol(&_end)) {
+	if (last >= 640*1024 && addr < __pa_symbol(&_end)) { 
 		*addrp = __pa_symbol(&_end);
 		return 1;
 	}
-
-	if (last >= ebda_addr && addr < ebda_addr + ebda_size) {
-		*addrp = ebda_addr + ebda_size;
-		return 1;
-	}
-
 	/* XXX ramdisk image here? */ 
 	return 0;
 } 
 
-/*
- * This function checks if any part of the range <start,end> is mapped
- * with type.
- */
-int __meminit
-e820_any_mapped(unsigned long start, unsigned long end, unsigned type)
+int __init e820_mapped(unsigned long start, unsigned long end, unsigned type) 
 { 
 	int i;
 	for (i = 0; i < e820.nr_map; i++) { 
@@ -106,35 +91,6 @@ e820_any_mapped(unsigned long start, unsigned long end, unsigned type)
 			continue; 
 		return 1; 
 	} 
-	return 0;
-}
-
-/*
- * This function checks if the entire range <start,end> is mapped with type.
- *
- * Note: this function only works correct if the e820 table is sorted and
- * not-overlapping, which is the case
- */
-int __init e820_all_mapped(unsigned long start, unsigned long end, unsigned type)
-{
-	int i;
-	for (i = 0; i < e820.nr_map; i++) {
-		struct e820entry *ei = &e820.map[i];
-		if (type && ei->type != type)
-			continue;
-		/* is the region (part) in overlap with the current region ?*/
-		if (ei->addr >= end || ei->addr + ei->size <= start)
-			continue;
-
-		/* if the region is at the beginning of <start,end> we move
-		 * start to the end of the region since it's ok until there
-		 */
-		if (ei->addr <= start)
-			start = ei->addr + ei->size;
-		/* if start is now at or beyond end, we're done, full coverage */
-		if (start >= end)
-			return 1; /* we're done */
-	}
 	return 0;
 }
 
@@ -153,7 +109,7 @@ unsigned long __init find_e820_area(unsigned long start, unsigned long end, unsi
 			addr = start;
 		if (addr > ei->addr + ei->size) 
 			continue; 
-		while (bad_addr(&addr, size) && addr+size <= ei->addr+ei->size)
+		while (bad_addr(&addr, size) && addr+size < ei->addr + ei->size)
 			;
 		last = addr + size;
 		if (last > ei->addr + ei->size)
@@ -295,53 +251,6 @@ void __init e820_reserve_resources(void)
 			request_resource(res, &crashk_res);
 #endif
 		}
-	}
-}
-
-/* Mark pages corresponding to given address range as nosave */
-static void __init
-e820_mark_nosave_range(unsigned long start, unsigned long end)
-{
-	unsigned long pfn, max_pfn;
-
-	if (start >= end)
-		return;
-
-	printk("Nosave address range: %016lx - %016lx\n", start, end);
-	max_pfn = end >> PAGE_SHIFT;
-	for (pfn = start >> PAGE_SHIFT; pfn < max_pfn; pfn++)
-		if (pfn_valid(pfn))
-			SetPageNosave(pfn_to_page(pfn));
-}
-
-/*
- * Find the ranges of physical addresses that do not correspond to
- * e820 RAM areas and mark the corresponding pages as nosave for software
- * suspend and suspend to RAM.
- *
- * This function requires the e820 map to be sorted and without any
- * overlapping entries and assumes the first e820 area to be RAM.
- */
-void __init e820_mark_nosave_regions(void)
-{
-	int i;
-	unsigned long paddr;
-
-	paddr = round_down(e820.map[0].addr + e820.map[0].size, PAGE_SIZE);
-	for (i = 1; i < e820.nr_map; i++) {
-		struct e820entry *ei = &e820.map[i];
-
-		if (paddr < ei->addr)
-			e820_mark_nosave_range(paddr,
-					round_up(ei->addr, PAGE_SIZE));
-
-		paddr = round_down(ei->addr + ei->size, PAGE_SIZE);
-		if (ei->type != E820_RAM)
-			e820_mark_nosave_range(round_up(ei->addr, PAGE_SIZE),
-					paddr);
-
-		if (paddr >= (end_pfn << PAGE_SHIFT))
-			break;
 	}
 }
 
@@ -672,7 +581,6 @@ void __init parse_memmapopt(char *p, char **from)
 }
 
 unsigned long pci_mem_start = 0xaeedbabe;
-EXPORT_SYMBOL(pci_mem_start);
 
 /*
  * Search for the biggest gap in the low 32 bits of the e820

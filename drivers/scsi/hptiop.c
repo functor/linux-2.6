@@ -15,6 +15,7 @@
  *
  * For more information, visit http://www.highpoint-tech.com
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -772,7 +773,7 @@ static int __devinit hptiop_probe(struct pci_dev *pcidev,
 
 	pci_set_drvdata(pcidev, host);
 
-	if (request_irq(pcidev->irq, hptiop_intr, IRQF_SHARED,
+	if (request_irq(pcidev->irq, hptiop_intr, SA_SHIRQ,
 					driver_name, hba)) {
 		printk(KERN_ERR "scsi%d: request irq %d failed\n",
 					hba->host->host_no, pcidev->irq);

@@ -34,6 +34,7 @@
  *  2003-08-11	Resource Management Updates - Adam Belay <ambx1@neo.rr.com>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -41,7 +42,6 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/isapnp.h>
-#include <linux/mutex.h>
 #include <asm/io.h>
 
 #if 0
@@ -92,7 +92,7 @@ MODULE_LICENSE("GPL");
 #define _LTAG_FIXEDMEM32RANGE	0x86
 
 static unsigned char isapnp_checksum_value;
-static DEFINE_MUTEX(isapnp_cfg_mutex);
+static DECLARE_MUTEX(isapnp_cfg_mutex);
 static int isapnp_detected;
 static int isapnp_csn_count;
 
@@ -646,10 +646,8 @@ static int __init isapnp_create_device(struct pnp_card *card,
 				size = 0;
 				skip = 0;
 				option = pnp_register_independent_option(dev);
-				if (!option) {
-					kfree(dev);
+				if (!option)
 					return 1;
-				}
 				pnp_add_card_device(card,dev);
 			} else {
 				skip = 1;
@@ -903,7 +901,7 @@ int isapnp_cfg_begin(int csn, int logdev)
 {
 	if (csn < 1 || csn > isapnp_csn_count || logdev > 10)
 		return -EINVAL;
-	mutex_lock(&isapnp_cfg_mutex);
+	down(&isapnp_cfg_mutex);
 	isapnp_wait();
 	isapnp_key();
 	isapnp_wake(csn);
@@ -929,7 +927,7 @@ int isapnp_cfg_begin(int csn, int logdev)
 int isapnp_cfg_end(void)
 {
 	isapnp_wait();
-	mutex_unlock(&isapnp_cfg_mutex);
+	up(&isapnp_cfg_mutex);
 	return 0;
 }
 
@@ -1049,10 +1047,6 @@ static int __init isapnp_init(void)
 		printk(KERN_INFO "isapnp: ISA Plug & Play support disabled\n");
 		return 0;
 	}
-#ifdef CONFIG_PPC_MERGE
-	if (check_legacy_ioport(_PIDXR) || check_legacy_ioport(_PNPWRP))
-		return -EINVAL;
-#endif
 #ifdef ISAPNP_REGION_OK
 	if (!request_region(_PIDXR, 1, "isapnp index")) {
 		printk(KERN_ERR "isapnp: Index Register 0x%x already used\n", _PIDXR);

@@ -34,7 +34,7 @@ static int zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 		if (page) {
 			if (pte_dirty(pte))
 				set_page_dirty(page);
-			page_remove_rmap(page, vma);
+			page_remove_rmap(page);
 			page_cache_release(page);
 		}
 	} else {
@@ -68,27 +68,24 @@ int install_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * caller about it.
 	 */
 	err = -EINVAL;
-	if (vma->vm_file) {
-		inode = vma->vm_file->f_mapping->host;
-		size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-		if (!page->mapping || page->index >= size)
-			goto unlock;
-		err = -ENOMEM;
-		if (page_mapcount(page) > INT_MAX/2)
-			goto unlock;
-		if (!vx_rsspages_avail(mm, 1))
-			goto unlock;
-	}
+	inode = vma->vm_file->f_mapping->host;
+	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+	if (!page->mapping || page->index >= size)
+		goto unlock;
+	err = -ENOMEM;
+	if (page_mapcount(page) > INT_MAX/2)
+		goto unlock;
+	if (!vx_rsspages_avail(mm, 1))
+		goto unlock;
 
 	if (pte_none(*pte) || !zap_pte(mm, vma, addr, pte))
 		inc_mm_counter(mm, file_rss);
 
 	flush_icache_page(vma, page);
-	pte_val = mk_pte(page, prot);
-	set_pte_at(mm, addr, pte, pte_val);
+	set_pte_at(mm, addr, pte, mk_pte(page, prot));
 	page_add_file_rmap(page);
+	pte_val = *pte;
 	update_mmu_cache(vma, addr, pte_val);
-	lazy_mmu_prot_update(pte_val);
 	err = 0;
 unlock:
 	pte_unmap_unlock(pte, ptl);
@@ -120,13 +117,7 @@ int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	set_pte_at(mm, addr, pte, pgoff_to_pte(pgoff));
 	pte_val = *pte;
-	/*
-	 * We don't need to run update_mmu_cache() here because the "file pte"
-	 * being installed by install_file_pte() is not a real pte - it's a
-	 * non-present entry (like a swap entry), noting what file offset should
-	 * be mapped there when there's a fault (in a non-linear vma where
-	 * that's not obvious).
-	 */
+	update_mmu_cache(vma, addr, pte_val);
 	pte_unmap_unlock(pte, ptl);
 	err = 0;
 out:

@@ -12,6 +12,7 @@
  * to the pair and can be looked up from userspace.
  */
 
+#include <linux/config.h>
 #include <linux/syscalls.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -22,7 +23,6 @@
 #include <linux/mm.h>
 #include <linux/errno.h>
 #include <linux/dcookies.h>
-#include <linux/mutex.h>
 #include <asm/uaccess.h>
 
 /* The dcookies are allocated from a kmem_cache and
@@ -36,10 +36,10 @@ struct dcookie_struct {
 };
 
 static LIST_HEAD(dcookie_users);
-static DEFINE_MUTEX(dcookie_mutex);
-static kmem_cache_t *dcookie_cache __read_mostly;
-static struct list_head *dcookie_hashtable __read_mostly;
-static size_t hash_size __read_mostly;
+static DECLARE_MUTEX(dcookie_sem);
+static kmem_cache_t * dcookie_cache;
+static struct list_head * dcookie_hashtable;
+static size_t hash_size;
 
 static inline int is_live(void)
 {
@@ -114,7 +114,7 @@ int get_dcookie(struct dentry * dentry, struct vfsmount * vfsmnt,
 	int err = 0;
 	struct dcookie_struct * dcs;
 
-	mutex_lock(&dcookie_mutex);
+	down(&dcookie_sem);
 
 	if (!is_live()) {
 		err = -EINVAL;
@@ -134,7 +134,7 @@ int get_dcookie(struct dentry * dentry, struct vfsmount * vfsmnt,
 	*cookie = dcookie_value(dcs);
 
 out:
-	mutex_unlock(&dcookie_mutex);
+	up(&dcookie_sem);
 	return err;
 }
 
@@ -157,7 +157,7 @@ asmlinkage long sys_lookup_dcookie(u64 cookie64, char __user * buf, size_t len)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	mutex_lock(&dcookie_mutex);
+	down(&dcookie_sem);
 
 	if (!is_live()) {
 		err = -EINVAL;
@@ -192,7 +192,7 @@ asmlinkage long sys_lookup_dcookie(u64 cookie64, char __user * buf, size_t len)
 out_free:
 	kfree(kbuf);
 out:
-	mutex_unlock(&dcookie_mutex);
+	up(&dcookie_sem);
 	return err;
 }
 
@@ -290,7 +290,7 @@ struct dcookie_user * dcookie_register(void)
 {
 	struct dcookie_user * user;
 
-	mutex_lock(&dcookie_mutex);
+	down(&dcookie_sem);
 
 	user = kmalloc(sizeof(struct dcookie_user), GFP_KERNEL);
 	if (!user)
@@ -302,7 +302,7 @@ struct dcookie_user * dcookie_register(void)
 	list_add(&user->next, &dcookie_users);
 
 out:
-	mutex_unlock(&dcookie_mutex);
+	up(&dcookie_sem);
 	return user;
 out_free:
 	kfree(user);
@@ -313,7 +313,7 @@ out_free:
 
 void dcookie_unregister(struct dcookie_user * user)
 {
-	mutex_lock(&dcookie_mutex);
+	down(&dcookie_sem);
 
 	list_del(&user->next);
 	kfree(user);
@@ -321,7 +321,7 @@ void dcookie_unregister(struct dcookie_user * user)
 	if (!is_live())
 		dcookie_exit();
 
-	mutex_unlock(&dcookie_mutex);
+	up(&dcookie_sem);
 }
 
 EXPORT_SYMBOL_GPL(dcookie_register);

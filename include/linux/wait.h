@@ -19,6 +19,7 @@
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 #include <linux/list.h>
 #include <linux/stddef.h>
 #include <linux/spinlock.h>
@@ -68,7 +69,7 @@ struct task_struct;
 	wait_queue_t name = __WAITQUEUE_INITIALIZER(name, tsk)
 
 #define __WAIT_QUEUE_HEAD_INITIALIZER(name) {				\
-	.lock		= __SPIN_LOCK_UNLOCKED(name.lock),		\
+	.lock		= SPIN_LOCK_UNLOCKED,				\
 	.task_list	= { &(name).task_list, &(name).task_list } }
 
 #define DECLARE_WAIT_QUEUE_HEAD(name) \
@@ -77,7 +78,11 @@ struct task_struct;
 #define __WAIT_BIT_KEY_INITIALIZER(word, bit)				\
 	{ .flags = word, .bit_nr = bit, }
 
-extern void init_waitqueue_head(wait_queue_head_t *q);
+static inline void init_waitqueue_head(wait_queue_head_t *q)
+{
+	spin_lock_init(&q->lock);
+	INIT_LIST_HEAD(&q->task_list);
+}
 
 static inline void init_waitqueue_entry(wait_queue_t *q, struct task_struct *p)
 {
@@ -360,10 +365,10 @@ static inline void remove_wait_queue_locked(wait_queue_head_t *q,
  * They are racy.  DO NOT use them, use the wait_event* interfaces above.  
  * We plan to remove these interfaces during 2.7.
  */
-extern void __deprecated FASTCALL(sleep_on(wait_queue_head_t *q));
-extern long __deprecated FASTCALL(sleep_on_timeout(wait_queue_head_t *q,
+extern void FASTCALL(sleep_on(wait_queue_head_t *q));
+extern long FASTCALL(sleep_on_timeout(wait_queue_head_t *q,
 				      signed long timeout));
-extern void __deprecated FASTCALL(interruptible_sleep_on(wait_queue_head_t *q));
+extern void FASTCALL(interruptible_sleep_on(wait_queue_head_t *q));
 extern long FASTCALL(interruptible_sleep_on_timeout(wait_queue_head_t *q,
 						    signed long timeout));
 

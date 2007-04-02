@@ -8,6 +8,7 @@
  *		 Cornelia Huck (cornelia.huck@de.ibm.com)
  *		 Martin Schwidefsky (schwidefsky@de.ibm.com)
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
@@ -100,7 +101,7 @@ ccw_uevent (struct device *dev, char **envp, int num_envp,
 	if ((buffer_size - length <= 0) || (i >= num_envp))
 		return -ENOMEM;
 
-	envp[i] = NULL;
+	envp[i] = 0;
 
 	return 0;
 }
@@ -132,8 +133,8 @@ struct css_driver io_subchannel_driver = {
 
 struct workqueue_struct *ccw_device_work;
 struct workqueue_struct *ccw_device_notify_work;
-wait_queue_head_t ccw_device_init_wq;
-atomic_t ccw_device_init_count;
+static wait_queue_head_t ccw_device_init_wq;
+static atomic_t ccw_device_init_count;
 
 static int __init
 init_ccw_bus_type (void)
@@ -280,7 +281,7 @@ ccw_device_remove_disconnected(struct ccw_device *cdev)
 	 * 'throw away device'.
 	 */
 	sch = to_subchannel(cdev->dev.parent);
-	css_sch_device_unregister(sch);
+	device_unregister(&sch->dev);
 	/* Reset intparm to zeroes. */
 	sch->schib.pmcw.intparm = 0;
 	cio_modify(sch);
@@ -556,11 +557,12 @@ get_disc_ccwdev_by_devno(unsigned int devno, unsigned int ssid,
 			 struct ccw_device *sibling)
 {
 	struct device *dev;
-	struct match_data data;
+	struct match_data data = {
+		.devno   = devno,
+		.ssid    = ssid,
+		.sibling = sibling,
+	};
 
-	data.devno = devno;
-	data.ssid = ssid;
-	data.sibling = sibling;
 	dev = bus_find_device(&ccw_bus_type, NULL, &data, match_devno);
 
 	return dev ? to_ccwdev(dev) : NULL;
@@ -624,7 +626,7 @@ ccw_device_do_unreg_rereg(void *data)
 					other_sch->schib.pmcw.intparm = 0;
 					cio_modify(other_sch);
 				}
-				css_sch_device_unregister(other_sch);
+				device_unregister(&other_sch->dev);
 			}
 		}
 		/* Update ssd info here. */
@@ -708,7 +710,7 @@ ccw_device_call_sch_unregister(void *data)
 	struct subchannel *sch;
 
 	sch = to_subchannel(cdev->dev.parent);
-	css_sch_device_unregister(sch);
+	device_unregister(&sch->dev);
 	/* Reset intparm to zeroes. */
 	sch->schib.pmcw.intparm = 0;
 	cio_modify(sch);
@@ -824,18 +826,22 @@ io_subchannel_probe (struct subchannel *sch)
 			get_device(&cdev->dev);
 		return 0;
 	}
-	cdev = kzalloc (sizeof(*cdev), GFP_KERNEL);
+	cdev  = kmalloc (sizeof(*cdev), GFP_KERNEL);
 	if (!cdev)
 		return -ENOMEM;
-	cdev->private = kzalloc(sizeof(struct ccw_device_private),
+	memset(cdev, 0, sizeof(struct ccw_device));
+	cdev->private = kmalloc(sizeof(struct ccw_device_private), 
 				GFP_KERNEL | GFP_DMA);
 	if (!cdev->private) {
 		kfree(cdev);
 		return -ENOMEM;
 	}
+	memset(cdev->private, 0, sizeof(struct ccw_device_private));
 	atomic_set(&cdev->private->onoff, 0);
-	cdev->dev.parent = &sch->dev;
-	cdev->dev.release = ccw_device_release;
+	cdev->dev = (struct device) {
+		.parent = &sch->dev,
+		.release = ccw_device_release,
+	};
 	INIT_LIST_HEAD(&cdev->private->kick_work.entry);
 	/* Do first half of device_register. */
 	device_initialize(&cdev->dev);
@@ -974,7 +980,9 @@ ccw_device_console_enable (struct ccw_device *cdev, struct subchannel *sch)
 	int rc;
 
 	/* Initialize the ccw_device structure. */
-	cdev->dev.parent= &sch->dev;
+	cdev->dev = (struct device) {
+		.parent = &sch->dev,
+	};
 	rc = io_subchannel_recog(cdev, sch);
 	if (rc)
 		return rc;
@@ -1052,7 +1060,7 @@ get_ccwdev_by_busid(struct ccw_driver *cdrv, const char *bus_id)
 				 __ccwdev_check_busid);
 	put_driver(drv);
 
-	return dev ? to_ccwdev(dev) : NULL;
+	return dev ? to_ccwdev(dev) : 0;
 }
 
 /************************** device driver handling ************************/
@@ -1077,7 +1085,7 @@ ccw_device_probe (struct device *dev)
 	ret = cdrv->probe ? cdrv->probe(cdev) : -ENODEV;
 
 	if (ret) {
-		cdev->drv = NULL;
+		cdev->drv = 0;
 		return ret;
 	}
 
@@ -1108,7 +1116,7 @@ ccw_device_remove (struct device *dev)
 				 ret, cdev->dev.bus_id);
 	}
 	ccw_device_set_timeout(cdev, 0);
-	cdev->drv = NULL;
+	cdev->drv = 0;
 	return 0;
 }
 

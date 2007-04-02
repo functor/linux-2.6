@@ -24,17 +24,17 @@
 #define POLICYDB_VERSION_VALIDATETRANS	19
 #define POLICYDB_VERSION_MLS		19
 #define POLICYDB_VERSION_AVTAB		20
-#define POLICYDB_VERSION_RANGETRANS	21
 
 /* Range of policy versions we understand*/
 #define POLICYDB_VERSION_MIN   POLICYDB_VERSION_BASE
-#ifdef CONFIG_SECURITY_SELINUX_POLICYDB_VERSION_MAX
-#define POLICYDB_VERSION_MAX	CONFIG_SECURITY_SELINUX_POLICYDB_VERSION_MAX_VALUE
+#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_AVTAB
+
+#ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
+extern int selinux_enabled;
 #else
-#define POLICYDB_VERSION_MAX	POLICYDB_VERSION_RANGETRANS
+#define selinux_enabled 1
 #endif
 
-extern int selinux_enabled;
 extern int selinux_mls_enabled;
 
 int security_load_policy(void * data, size_t len);

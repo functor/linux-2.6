@@ -37,7 +37,6 @@
 #include <linux/init.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /*
  * Addresses to scan
@@ -90,8 +89,8 @@ static int fscpos_attach_adapter(struct i2c_adapter *adapter);
 static int fscpos_detect(struct i2c_adapter *adapter, int address, int kind);
 static int fscpos_detach_client(struct i2c_client *client);
 
-static int fscpos_read_value(struct i2c_client *client, u8 reg);
-static int fscpos_write_value(struct i2c_client *client, u8 reg, u8 value);
+static int fscpos_read_value(struct i2c_client *client, u8 register);
+static int fscpos_write_value(struct i2c_client *client, u8 register, u8 value);
 static struct fscpos_data *fscpos_update_device(struct device *dev);
 static void fscpos_init_client(struct i2c_client *client);
 
@@ -115,7 +114,7 @@ static struct i2c_driver fscpos_driver = {
 struct fscpos_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid; 		/* 0 until following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -209,13 +208,13 @@ static ssize_t set_fan_ripple(struct i2c_client *client, struct fscpos_data
 		return -EINVAL;
 	}
 	
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	/* bits 2..7 reserved => mask with 0x03 */
 	data->fan_ripple[nr - 1] &= ~0x03;
 	data->fan_ripple[nr - 1] |= v;
 	
 	fscpos_write_value(client, reg, data->fan_ripple[nr - 1]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -233,10 +232,10 @@ static ssize_t set_pwm(struct i2c_client *client, struct fscpos_data *data,
 	if (v < 0) v = 0;
 	if (v > 255) v = 255;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->pwm[nr - 1] = v;
 	fscpos_write_value(client, reg, data->pwm[nr - 1]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -279,11 +278,11 @@ static ssize_t set_wdog_control(struct i2c_client *client, struct fscpos_data
 	/* bits 0..3 reserved => mask with 0xf0 */
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0xf0;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->wdog_control &= ~0xf0;
 	data->wdog_control |= v;
 	fscpos_write_value(client, reg, data->wdog_control);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -305,10 +304,10 @@ static ssize_t set_wdog_state(struct i2c_client *client, struct fscpos_data
 		return -EINVAL;
 	}
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->wdog_state &= ~v;
 	fscpos_write_value(client, reg, v);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -322,10 +321,10 @@ static ssize_t set_wdog_preset(struct i2c_client *client, struct fscpos_data
 {
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0xff;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->wdog_preset = v;
 	fscpos_write_value(client, reg, data->wdog_preset);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -484,7 +483,7 @@ static int fscpos_detect(struct i2c_adapter *adapter, int address, int kind)
 	strlcpy(new_client->name, "fscpos", I2C_NAME_SIZE);
 
 	data->valid = 0;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -580,7 +579,7 @@ static struct fscpos_data *fscpos_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct fscpos_data *data = i2c_get_clientdata(client);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + 2 * HZ) || !data->valid) {
 		int i;
@@ -626,7 +625,7 @@ static struct fscpos_data *fscpos_update_device(struct device *dev)
 		data->last_updated = jiffies;
 		data->valid = 1;
 	}
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return data;
 }
 

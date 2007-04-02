@@ -6,6 +6,7 @@
 #ifndef __SKAS_MMU_H
 #define __SKAS_MMU_H
 
+#include "linux/config.h"
 #include "mm_id.h"
 #include "asm/ldt.h"
 

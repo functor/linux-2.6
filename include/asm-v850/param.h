@@ -14,6 +14,8 @@
 #ifndef __V850_PARAM_H__
 #define __V850_PARAM_H__
 
+#include <asm/machdep.h>	/* For HZ */
+
 #define EXEC_PAGESIZE	4096
 
 #ifndef NOGROUP
@@ -23,8 +25,6 @@
 #define MAXHOSTNAMELEN	64	/* max length of hostname */
 
 #ifdef __KERNEL__
-#include <asm/machdep.h>	/* For HZ */
-
 # define USER_HZ	100
 # define CLOCKS_PER_SEC	USER_HZ
 #endif

@@ -7,6 +7,9 @@
  * published by the Free Software Foundation.
  *
  * S3C2410 ADC registers
+ *
+ *  Changelog:
+ *    27-09-2004     SAH     Created file
 */
 
 #ifndef __ASM_ARCH_REGS_ADC_H

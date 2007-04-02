@@ -52,8 +52,7 @@ static int property_read_proc(char *page, char **start, off_t off,
  * Add a property to a node
  */
 static struct proc_dir_entry *
-__proc_device_tree_add_prop(struct proc_dir_entry *de, struct property *pp,
-		const char *name)
+__proc_device_tree_add_prop(struct proc_dir_entry *de, struct property *pp)
 {
 	struct proc_dir_entry *ent;
 
@@ -61,14 +60,14 @@ __proc_device_tree_add_prop(struct proc_dir_entry *de, struct property *pp,
 	 * Unfortunately proc_register puts each new entry
 	 * at the beginning of the list.  So we rearrange them.
 	 */
-	ent = create_proc_read_entry(name,
-				     strncmp(name, "security-", 9)
+	ent = create_proc_read_entry(pp->name,
+				     strncmp(pp->name, "security-", 9)
 				     ? S_IRUGO : S_IRUSR, de,
 				     property_read_proc, pp);
 	if (ent == NULL)
 		return NULL;
 
-	if (!strncmp(name, "security-", 9))
+	if (!strncmp(pp->name, "security-", 9))
 		ent->size = 0; /* don't leak number of password chars */
 	else
 		ent->size = pp->length;
@@ -79,7 +78,7 @@ __proc_device_tree_add_prop(struct proc_dir_entry *de, struct property *pp,
 
 void proc_device_tree_add_prop(struct proc_dir_entry *pde, struct property *prop)
 {
-	__proc_device_tree_add_prop(pde, prop, prop->name);
+	__proc_device_tree_add_prop(pde, prop);
 }
 
 void proc_device_tree_remove_prop(struct proc_dir_entry *pde,
@@ -107,69 +106,6 @@ void proc_device_tree_update_prop(struct proc_dir_entry *pde,
 }
 
 /*
- * Various dodgy firmware might give us nodes and/or properties with
- * conflicting names. That's generally ok, except for exporting via /proc,
- * so munge names here to ensure they're unique.
- */
-
-static int duplicate_name(struct proc_dir_entry *de, const char *name)
-{
-	struct proc_dir_entry *ent;
-	int found = 0;
-
-	spin_lock(&proc_subdir_lock);
-
-	for (ent = de->subdir; ent != NULL; ent = ent->next) {
-		if (strcmp(ent->name, name) == 0) {
-			found = 1;
-			break;
-		}
-	}
-
-	spin_unlock(&proc_subdir_lock);
-
-	return found;
-}
-
-static const char *fixup_name(struct device_node *np, struct proc_dir_entry *de,
-		const char *name)
-{
-	char *fixed_name;
-	int fixup_len = strlen(name) + 2 + 1; /* name + #x + \0 */
-	int i = 1, size;
-
-realloc:
-	fixed_name = kmalloc(fixup_len, GFP_KERNEL);
-	if (fixed_name == NULL) {
-		printk(KERN_ERR "device-tree: Out of memory trying to fixup "
-				"name \"%s\"\n", name);
-		return name;
-	}
-
-retry:
-	size = snprintf(fixed_name, fixup_len, "%s#%d", name, i);
-	size++; /* account for NULL */
-
-	if (size > fixup_len) {
-		/* We ran out of space, free and reallocate. */
-		kfree(fixed_name);
-		fixup_len = size;
-		goto realloc;
-	}
-
-	if (duplicate_name(de, fixed_name)) {
-		/* Multiple duplicates. Retry with a different offset. */
-		i++;
-		goto retry;
-	}
-
-	printk(KERN_WARNING "device-tree: Duplicate name in %s, "
-			"renamed to \"%s\"\n", np->full_name, fixed_name);
-
-	return fixed_name;
-}
-
-/*
  * Process a node, adding entries for its children and its properties.
  */
 void proc_device_tree_add_node(struct device_node *np,
@@ -182,30 +118,35 @@ void proc_device_tree_add_node(struct device_node *np,
 
 	set_node_proc_entry(np, de);
 	for (child = NULL; (child = of_get_next_child(np, child));) {
-		/* Use everything after the last slash, or the full name */
 		p = strrchr(child->full_name, '/');
 		if (!p)
 			p = child->full_name;
 		else
 			++p;
-
-		if (duplicate_name(de, p))
-			p = fixup_name(np, de, p);
-
 		ent = proc_mkdir(p, de);
 		if (ent == 0)
 			break;
 		proc_device_tree_add_node(child, ent);
 	}
 	of_node_put(child);
-
 	for (pp = np->properties; pp != 0; pp = pp->next) {
-		p = pp->name;
+		/*
+		 * Yet another Apple device-tree bogosity: on some machines,
+		 * they have properties & nodes with the same name. Those
+		 * properties are quite unimportant for us though, thus we
+		 * simply "skip" them here, but we do have to check.
+		 */
+		for (ent = de->subdir; ent != NULL; ent = ent->next)
+			if (!strcmp(ent->name, pp->name))
+				break;
+		if (ent != NULL) {
+			printk(KERN_WARNING "device-tree: property \"%s\" name"
+			       " conflicts with node in %s\n", pp->name,
+			       np->full_name);
+			continue;
+		}
 
-		if (duplicate_name(de, p))
-			p = fixup_name(np, de, p);
-
-		ent = __proc_device_tree_add_prop(de, pp, p);
+		ent = __proc_device_tree_add_prop(de, pp);
 		if (ent == 0)
 			break;
 	}

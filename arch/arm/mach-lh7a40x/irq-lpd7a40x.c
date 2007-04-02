@@ -19,7 +19,6 @@
 #include <asm/mach/irq.h>
 #include <asm/arch/irqs.h>
 
-#include "common.h"
 
 static void lh7a40x_ack_cpld_irq (u32 irq)
 {
@@ -50,8 +49,7 @@ static void lh7a40x_unmask_cpld_irq (u32 irq)
 	}
 }
 
-static struct irq_chip lh7a40x_cpld_chip = {
-	.name	= "CPLD",
+static struct irqchip lh7a40x_cpld_chip = {
 	.ack	= lh7a40x_ack_cpld_irq,
 	.mask	= lh7a40x_mask_cpld_irq,
 	.unmask	= lh7a40x_unmask_cpld_irq,

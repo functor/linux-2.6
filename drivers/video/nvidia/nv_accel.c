@@ -300,9 +300,6 @@ int nvidiafb_sync(struct fb_info *info)
 {
 	struct nvidia_par *par = info->par;
 
-	if (info->state != FBINFO_STATE_RUNNING)
-		return 0;
-
 	if (!par->lockup)
 		NVFlush(par);
 
@@ -315,9 +312,6 @@ int nvidiafb_sync(struct fb_info *info)
 void nvidiafb_copyarea(struct fb_info *info, const struct fb_copyarea *region)
 {
 	struct nvidia_par *par = info->par;
-
-	if (info->state != FBINFO_STATE_RUNNING)
-		return;
 
 	if (par->lockup)
 		return cfb_copyarea(info, region);
@@ -334,9 +328,6 @@ void nvidiafb_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
 {
 	struct nvidia_par *par = info->par;
 	u32 color;
-
-	if (info->state != FBINFO_STATE_RUNNING)
-		return;
 
 	if (par->lockup)
 		return cfb_fillrect(info, rect);
@@ -420,9 +411,6 @@ static void nvidiafb_mono_color_expand(struct fb_info *info,
 void nvidiafb_imageblit(struct fb_info *info, const struct fb_image *image)
 {
 	struct nvidia_par *par = info->par;
-
-	if (info->state != FBINFO_STATE_RUNNING)
-		return;
 
 	if (image->depth == 1 && !par->lockup)
 		nvidiafb_mono_color_expand(info, image);

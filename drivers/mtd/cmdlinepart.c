@@ -42,8 +42,7 @@
 
 
 /* special size referring to all the remaining space in a partition */
-#define SIZE_REMAINING UINT_MAX
-#define OFFSET_CONTINUOUS UINT_MAX
+#define SIZE_REMAINING 0xffffffff
 
 struct cmdline_mtd_partition {
 	struct cmdline_mtd_partition *next;
@@ -76,7 +75,7 @@ static struct mtd_partition * newpart(char *s,
 {
 	struct mtd_partition *parts;
 	unsigned long size;
-	unsigned long offset = OFFSET_CONTINUOUS;
+	unsigned long offset = 0;
 	char *name;
 	int name_len;
 	unsigned char *extra_mem;
@@ -315,7 +314,7 @@ static int parse_cmdline_partitions(struct mtd_info *master,
 		{
 			for(i = 0, offset = 0; i < part->num_parts; i++)
 			{
-				if (part->parts[i].offset == OFFSET_CONTINUOUS)
+				if (!part->parts[i].offset)
 				  part->parts[i].offset = offset;
 				else
 				  offset = part->parts[i].offset;

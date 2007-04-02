@@ -265,7 +265,7 @@ out_unregister:
 	return NULL;
 }
 
-static int __init sgiwd93_detect(struct scsi_host_template *SGIblows)
+int __init sgiwd93_detect(struct scsi_host_template *SGIblows)
 {
 	int found = 0;
 
@@ -288,7 +288,7 @@ static int __init sgiwd93_detect(struct scsi_host_template *SGIblows)
 	return found;
 }
 
-static int sgiwd93_release(struct Scsi_Host *instance)
+int sgiwd93_release(struct Scsi_Host *instance)
 {
 	struct ip22_hostdata *hdata = HDATA(instance);
 	int irq = 0;

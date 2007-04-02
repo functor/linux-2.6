@@ -24,6 +24,7 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
+#include "xfs_dir.h"
 #include "xfs_dir2.h"
 #include "xfs_dmapi.h"
 #include "xfs_mount.h"
@@ -32,6 +33,7 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
+#include "xfs_dir_sf.h"
 #include "xfs_dir2_sf.h"
 #include "xfs_attr_sf.h"
 #include "xfs_dinode.h"
@@ -53,139 +55,8 @@ STATIC void	xfs_trans_committed(xfs_trans_t *, int);
 STATIC void	xfs_trans_chunk_committed(xfs_log_item_chunk_t *, xfs_lsn_t, int);
 STATIC void	xfs_trans_free(xfs_trans_t *);
 
-kmem_zone_t	*xfs_trans_zone;
+kmem_zone_t		*xfs_trans_zone;
 
-
-/*
- * Reservation functions here avoid a huge stack in xfs_trans_init
- * due to register overflow from temporaries in the calculations.
- */
-
-STATIC uint
-xfs_calc_write_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_WRITE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_itruncate_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_ITRUNCATE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_rename_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_RENAME_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_link_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_LINK_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_remove_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_REMOVE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_symlink_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_SYMLINK_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_create_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_CREATE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_mkdir_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_MKDIR_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_ifree_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_IFREE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_ichange_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_ICHANGE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_growdata_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_GROWDATA_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_growrtalloc_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_GROWRTALLOC_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_growrtzero_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_GROWRTZERO_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_growrtfree_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_GROWRTFREE_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_swrite_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_SWRITE_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_writeid_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_WRITEID_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_addafork_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_ADDAFORK_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_attrinval_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_ATTRINVAL_LOG_RES(mp);
-}
-
-STATIC uint
-xfs_calc_attrset_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_ATTRSET_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_attrrm_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_ATTRRM_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp);
-}
-
-STATIC uint
-xfs_calc_clear_agi_bucket_reservation(xfs_mount_t *mp)
-{
-	return XFS_CALC_CLEAR_AGI_BUCKET_LOG_RES(mp);
-}
 
 /*
  * Initialize the precomputed transaction reservation values
@@ -198,27 +69,39 @@ xfs_trans_init(
 	xfs_trans_reservations_t	*resp;
 
 	resp = &(mp->m_reservations);
-	resp->tr_write = xfs_calc_write_reservation(mp);
-	resp->tr_itruncate = xfs_calc_itruncate_reservation(mp);
-	resp->tr_rename = xfs_calc_rename_reservation(mp);
-	resp->tr_link = xfs_calc_link_reservation(mp);
-	resp->tr_remove = xfs_calc_remove_reservation(mp);
-	resp->tr_symlink = xfs_calc_symlink_reservation(mp);
-	resp->tr_create = xfs_calc_create_reservation(mp);
-	resp->tr_mkdir = xfs_calc_mkdir_reservation(mp);
-	resp->tr_ifree = xfs_calc_ifree_reservation(mp);
-	resp->tr_ichange = xfs_calc_ichange_reservation(mp);
-	resp->tr_growdata = xfs_calc_growdata_reservation(mp);
-	resp->tr_swrite = xfs_calc_swrite_reservation(mp);
-	resp->tr_writeid = xfs_calc_writeid_reservation(mp);
-	resp->tr_addafork = xfs_calc_addafork_reservation(mp);
-	resp->tr_attrinval = xfs_calc_attrinval_reservation(mp);
-	resp->tr_attrset = xfs_calc_attrset_reservation(mp);
-	resp->tr_attrrm = xfs_calc_attrrm_reservation(mp);
-	resp->tr_clearagi = xfs_calc_clear_agi_bucket_reservation(mp);
-	resp->tr_growrtalloc = xfs_calc_growrtalloc_reservation(mp);
-	resp->tr_growrtzero = xfs_calc_growrtzero_reservation(mp);
-	resp->tr_growrtfree = xfs_calc_growrtfree_reservation(mp);
+	resp->tr_write =
+		(uint)(XFS_CALC_WRITE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_itruncate =
+		(uint)(XFS_CALC_ITRUNCATE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_rename =
+		(uint)(XFS_CALC_RENAME_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_link = (uint)XFS_CALC_LINK_LOG_RES(mp);
+	resp->tr_remove =
+		(uint)(XFS_CALC_REMOVE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_symlink =
+		(uint)(XFS_CALC_SYMLINK_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_create =
+		(uint)(XFS_CALC_CREATE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_mkdir =
+		(uint)(XFS_CALC_MKDIR_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_ifree =
+		(uint)(XFS_CALC_IFREE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_ichange =
+		(uint)(XFS_CALC_ICHANGE_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_growdata = (uint)XFS_CALC_GROWDATA_LOG_RES(mp);
+	resp->tr_swrite = (uint)XFS_CALC_SWRITE_LOG_RES(mp);
+	resp->tr_writeid = (uint)XFS_CALC_WRITEID_LOG_RES(mp);
+	resp->tr_addafork =
+		(uint)(XFS_CALC_ADDAFORK_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_attrinval = (uint)XFS_CALC_ATTRINVAL_LOG_RES(mp);
+	resp->tr_attrset =
+		(uint)(XFS_CALC_ATTRSET_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_attrrm =
+		(uint)(XFS_CALC_ATTRRM_LOG_RES(mp) + XFS_DQUOT_LOGRES(mp));
+	resp->tr_clearagi = (uint)XFS_CALC_CLEAR_AGI_BUCKET_LOG_RES(mp);
+	resp->tr_growrtalloc = (uint)XFS_CALC_GROWRTALLOC_LOG_RES(mp);
+	resp->tr_growrtzero = (uint)XFS_CALC_GROWRTZERO_LOG_RES(mp);
+	resp->tr_growrtfree = (uint)XFS_CALC_GROWRTFREE_LOG_RES(mp);
 }
 
 /*
@@ -234,8 +117,11 @@ xfs_trans_alloc(
 	xfs_mount_t	*mp,
 	uint		type)
 {
-	vfs_wait_for_freeze(XFS_MTOVFS(mp), SB_FREEZE_TRANS);
-	return _xfs_trans_alloc(mp, type);
+	fs_check_frozen(XFS_MTOVFS(mp), SB_FREEZE_TRANS);
+	atomic_inc(&mp->m_active_trans);
+
+	return (_xfs_trans_alloc(mp, type));
+
 }
 
 xfs_trans_t *
@@ -245,9 +131,12 @@ _xfs_trans_alloc(
 {
 	xfs_trans_t	*tp;
 
-	atomic_inc(&mp->m_active_trans);
-
+	ASSERT(xfs_trans_zone != NULL);
 	tp = kmem_zone_zalloc(xfs_trans_zone, KM_SLEEP);
+
+	/*
+	 * Initialize the transaction structure.
+	 */
 	tp->t_magic = XFS_TRANS_MAGIC;
 	tp->t_type = type;
 	tp->t_mountp = mp;
@@ -255,7 +144,8 @@ _xfs_trans_alloc(
 	tp->t_busy_free = XFS_LBC_NUM_SLOTS;
 	XFS_LIC_INIT(&(tp->t_items));
 	XFS_LBC_INIT(&(tp->t_busy));
-	return tp;
+
+	return (tp);
 }
 
 /*
@@ -294,7 +184,7 @@ xfs_trans_dup(
 	tp->t_blk_res = tp->t_blk_res_used;
 	ntp->t_rtx_res = tp->t_rtx_res - tp->t_rtx_res_used;
 	tp->t_rtx_res = tp->t_rtx_res_used;
-	ntp->t_pflags = tp->t_pflags;
+	PFLAGS_DUP(&tp->t_pflags, &ntp->t_pflags);
 
 	XFS_TRANS_DUP_DQINFO(tp->t_mountp, tp, ntp);
 
@@ -326,11 +216,14 @@ xfs_trans_reserve(
 	uint		logcount)
 {
 	int		log_flags;
-	int		error = 0;
-	int		rsvd = (tp->t_flags & XFS_TRANS_RESERVE) != 0;
+	int		error;
+	int	rsvd;
+
+	error = 0;
+	rsvd = (tp->t_flags & XFS_TRANS_RESERVE) != 0;
 
 	/* Mark this thread as being in a transaction */
-	current_set_flags_nested(&tp->t_pflags, PF_FSTRANS);
+        PFLAGS_SET_FSTRANS(&tp->t_pflags);
 
 	/*
 	 * Attempt to reserve the needed disk blocks by decrementing
@@ -341,7 +234,7 @@ xfs_trans_reserve(
 		error = xfs_mod_incore_sb(tp->t_mountp, XFS_SBS_FDBLOCKS,
 					  -blocks, rsvd);
 		if (error != 0) {
-			current_restore_flags_nested(&tp->t_pflags, PF_FSTRANS);
+                        PFLAGS_RESTORE_FSTRANS(&tp->t_pflags);
 			return (XFS_ERROR(ENOSPC));
 		}
 		tp->t_blk_res += blocks;
@@ -414,9 +307,9 @@ undo_blocks:
 		tp->t_blk_res = 0;
 	}
 
-	current_restore_flags_nested(&tp->t_pflags, PF_FSTRANS);
+        PFLAGS_RESTORE_FSTRANS(&tp->t_pflags);
 
-	return error;
+	return (error);
 }
 
 
@@ -478,7 +371,7 @@ xfs_trans_mod_sb(
 	case XFS_TRANS_SB_RES_FREXTENTS:
 		/*
 		 * The allocation has already been applied to the
-		 * in-core superblock's counter.  This should only
+		 * in-core superblocks's counter.  This should only
 		 * be applied to the on-disk superblock.
 		 */
 		ASSERT(delta < 0);
@@ -599,7 +492,7 @@ xfs_trans_apply_sb_deltas(
 
 	if (whole)
 		/*
-		 * Log the whole thing, the fields are noncontiguous.
+		 * Log the whole thing, the fields are discontiguous.
 		 */
 		xfs_trans_log_buf(tp, bp, 0, sizeof(xfs_sb_t) - 1);
 	else
@@ -657,7 +550,7 @@ xfs_trans_unreserve_and_mod_sb(
 	/*
 	 * Apply any superblock modifications to the in-core version.
 	 * The t_res_fdblocks_delta and t_res_frextents_delta fields are
-	 * explicitly NOT applied to the in-core superblock.
+	 * explicity NOT applied to the in-core superblock.
 	 * The idea is that that has already been done.
 	 */
 	if (tp->t_flags & XFS_TRANS_SB_DIRTY) {
@@ -807,7 +700,7 @@ shut_us_down:
 			if (commit_lsn == -1 && !shutdown)
 				shutdown = XFS_ERROR(EIO);
 		}
-		current_restore_flags_nested(&tp->t_pflags, PF_FSTRANS);
+                PFLAGS_RESTORE_FSTRANS(&tp->t_pflags);
 		xfs_trans_free_items(tp, shutdown? XFS_TRANS_ABORT : 0);
 		xfs_trans_free_busy(tp);
 		xfs_trans_free(tp);
@@ -834,7 +727,7 @@ shut_us_down:
 	 */
 	nvec = xfs_trans_count_vecs(tp);
 	if (nvec == 0) {
-		xfs_force_shutdown(mp, SHUTDOWN_LOG_IO_ERROR);
+		xfs_force_shutdown(mp, XFS_LOG_IO_ERROR);
 		goto shut_us_down;
 	} else if (nvec <= XFS_TRANS_LOGVEC_COUNT) {
 		log_vector = log_vector_fast;
@@ -872,7 +765,7 @@ shut_us_down:
 	 * had pinned, clean up, free trans structure, and return error.
 	 */
 	if (error || commit_lsn == -1) {
-		current_restore_flags_nested(&tp->t_pflags, PF_FSTRANS);
+                PFLAGS_RESTORE_FSTRANS(&tp->t_pflags);
 		xfs_trans_uncommit(tp, flags|XFS_TRANS_ABORT);
 		return XFS_ERROR(EIO);
 	}
@@ -914,7 +807,7 @@ shut_us_down:
 	/*
 	 * Mark this thread as no longer being in a transaction
 	 */
-	current_restore_flags_nested(&tp->t_pflags, PF_FSTRANS);
+	PFLAGS_RESTORE_FSTRANS(&tp->t_pflags);
 
 	/*
 	 * Once all the items of the transaction have been copied
@@ -1136,7 +1029,7 @@ xfs_trans_cancel(
 	 */
 	if ((tp->t_flags & XFS_TRANS_DIRTY) && !XFS_FORCED_SHUTDOWN(mp)) {
 		XFS_ERROR_REPORT("xfs_trans_cancel", XFS_ERRLEVEL_LOW, mp);
-		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+		xfs_force_shutdown(mp, XFS_CORRUPT_INCORE);
 	}
 #ifdef DEBUG
 	if (!(flags & XFS_TRANS_ABORT)) {
@@ -1170,7 +1063,7 @@ xfs_trans_cancel(
 	}
 
 	/* mark this thread as no longer being in a transaction */
-	current_restore_flags_nested(&tp->t_pflags, PF_FSTRANS);
+        PFLAGS_RESTORE_FSTRANS(&tp->t_pflags);
 
 	xfs_trans_free_items(tp, flags);
 	xfs_trans_free_busy(tp);

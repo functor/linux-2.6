@@ -7,8 +7,9 @@
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -204,7 +205,7 @@ int v9fs_dir_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-const struct file_operations v9fs_dir_operations = {
+struct file_operations v9fs_dir_operations = {
 	.read = generic_read_dir,
 	.readdir = v9fs_dir_readdir,
 	.open = v9fs_file_open,

@@ -60,6 +60,7 @@
  */
 
 
+#include <linux/config.h>
 #include "hisax.h"
 #include "isac.h"
 #include "isdnl1.h"
@@ -301,10 +302,10 @@ enpci_interrupt(int intno, void *dev_id, struct pt_regs *regs)
 }
 
 
-static struct pci_dev *dev_netjet __devinitdata = NULL;
+static struct pci_dev *dev_netjet __initdata = NULL;
 
 /* called by config.c */
-int __devinit
+int __init
 setup_enternow_pci(struct IsdnCard *card)
 {
 	int bytecnt;
@@ -405,7 +406,7 @@ setup_enternow_pci(struct IsdnCard *card)
 	cs->BC_Send_Data = &netjet_fill_dma;
 	cs->cardmsg = &enpci_card_msg;
 	cs->irq_func = &enpci_interrupt;
-	cs->irq_flags |= IRQF_SHARED;
+	cs->irq_flags |= SA_SHIRQ;
 
         return (1);
 }

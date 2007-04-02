@@ -320,7 +320,7 @@ static int ariadne_open(struct net_device *dev)
 
     netif_start_queue(dev);
 
-    i = request_irq(IRQ_AMIGA_PORTS, ariadne_interrupt, IRQF_SHARED,
+    i = request_irq(IRQ_AMIGA_PORTS, ariadne_interrupt, SA_SHIRQ,
                     dev->name, dev);
     if (i) return i;
 
@@ -607,7 +607,8 @@ static int ariadne_start_xmit(struct sk_buff *skb, struct net_device *dev)
     /* FIXME: is the 79C960 new enough to do its own padding right ? */
     if (skb->len < ETH_ZLEN)
     {
-    	if (skb_padto(skb, ETH_ZLEN))
+    	skb = skb_padto(skb, ETH_ZLEN);
+    	if (skb == NULL)
     	    return 0;
     	len = ETH_ZLEN;
     }
@@ -863,7 +864,7 @@ static void __devexit ariadne_remove_one(struct zorro_dev *z)
 
 static int __init ariadne_init_module(void)
 {
-    return zorro_register_driver(&ariadne_driver);
+    return zorro_module_init(&ariadne_driver);
 }
 
 static void __exit ariadne_cleanup_module(void)

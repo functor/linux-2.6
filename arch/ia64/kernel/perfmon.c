@@ -19,6 +19,7 @@
  * 	http://www.hpl.hp.com/research/linux/perfmon
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -41,6 +42,7 @@
 #include <linux/rcupdate.h>
 #include <linux/completion.h>
 #include <linux/vs_memory.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/errno.h>
 #include <asm/intrinsics.h>
@@ -532,6 +534,7 @@ static ctl_table pfm_sysctl_root[] = {
 static struct ctl_table_header *pfm_sysctl_header;
 
 static int pfm_context_unload(pfm_context_t *ctx, void *arg, int count, struct pt_regs *regs);
+static int pfm_flush(struct file *filp);
 
 #define pfm_get_cpu_var(v)		__ia64_per_cpu_var(v)
 #define pfm_get_cpu_data(a,b)		per_cpu(a, b)
@@ -594,11 +597,10 @@ pfm_get_unmapped_area(struct file *file, unsigned long addr, unsigned long len, 
 }
 
 
-static int
-pfmfs_get_sb(struct file_system_type *fs_type, int flags, const char *dev_name, void *data,
-	     struct vfsmount *mnt)
+static struct super_block *
+pfmfs_get_sb(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
-	return get_sb_pseudo(fs_type, "pfm:", NULL, PFMFS_MAGIC, mnt);
+	return get_sb_pseudo(fs_type, "pfm:", NULL, PFMFS_MAGIC);
 }
 
 static struct file_system_type pfm_fs_type = {
@@ -1773,7 +1775,7 @@ pfm_syswide_cleanup_other_cpu(pfm_context_t *ctx)
  * When caller is self-monitoring, the context is unloaded.
  */
 static int
-pfm_flush(struct file *filp, fl_owner_t id)
+pfm_flush(struct file *filp)
 {
 	pfm_context_t *ctx;
 	struct task_struct *task;
@@ -6167,7 +6169,7 @@ pfm_load_regs (struct task_struct *task)
 		/*
 		 * will replay the PMU interrupt
 		 */
-		if (need_irq_resend) ia64_resend_irq(IA64_PERFMON_VECTOR);
+		if (need_irq_resend) hw_resend_irq(NULL, IA64_PERFMON_VECTOR);
 
 		pfm_stats[smp_processor_id()].pfm_replay_ovfl_intr_count++;
 	}
@@ -6307,7 +6309,7 @@ pfm_load_regs (struct task_struct *task)
 		/*
 		 * will replay the PMU interrupt
 		 */
-		if (need_irq_resend) ia64_resend_irq(IA64_PERFMON_VECTOR);
+		if (need_irq_resend) hw_resend_irq(NULL, IA64_PERFMON_VECTOR);
 
 		pfm_stats[smp_processor_id()].pfm_replay_ovfl_intr_count++;
 	}
@@ -6442,7 +6444,7 @@ pfm_flush_pmds(struct task_struct *task, pfm_context_t *ctx)
 
 static struct irqaction perfmon_irqaction = {
 	.handler = pfm_interrupt_handler,
-	.flags   = IRQF_DISABLED,
+	.flags   = SA_INTERRUPT,
 	.name    = "perfmon"
 };
 
@@ -6724,7 +6726,6 @@ __initcall(pfm_init);
 void
 pfm_init_percpu (void)
 {
-	static int first_time=1;
 	/*
 	 * make sure no measurement is active
 	 * (may inherit programmed PMCs from EFI).
@@ -6737,10 +6738,8 @@ pfm_init_percpu (void)
 	 */
 	pfm_unfreeze_pmu();
 
-	if (first_time) {
+	if (smp_processor_id() == 0)
 		register_percpu_irq(IA64_PERFMON_VECTOR, &perfmon_irqaction);
-		first_time=0;
-	}
 
 	ia64_setreg(_IA64_REG_CR_PMV, IA64_PERFMON_VECTOR);
 	ia64_srlz_d();

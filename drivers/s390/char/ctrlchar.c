@@ -7,6 +7,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <asm/errno.h>
 #include <linux/sysrq.h>
@@ -23,7 +24,7 @@ ctrlchar_handle_sysrq(void *tty)
 	handle_sysrq(ctrlchar_sysrq_key, NULL, (struct tty_struct *) tty);
 }
 
-static DECLARE_WORK(ctrlchar_work, ctrlchar_handle_sysrq, NULL);
+static DECLARE_WORK(ctrlchar_work, ctrlchar_handle_sysrq, 0);
 #endif
 
 

@@ -909,7 +909,7 @@ setstack_tiger(struct PStack *st, struct BCState *bcs)
 }
 
  
-void
+void __init
 inittiger(struct IsdnCardState *cs)
 {
 	if (!(cs->bcs[0].hw.tiger.send = kmalloc(NETJET_DMA_TXSIZE * sizeof(unsigned int),

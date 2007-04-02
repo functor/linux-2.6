@@ -4,6 +4,7 @@
  * (C) 1997 Linus Torvalds
  */
 
+#include <linux/config.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/dcache.h>
@@ -55,8 +56,8 @@
 #define I_HASHBITS	i_hash_shift
 #define I_HASHMASK	i_hash_mask
 
-static unsigned int i_hash_mask __read_mostly;
-static unsigned int i_hash_shift __read_mostly;
+static unsigned int i_hash_mask;
+static unsigned int i_hash_shift;
 
 /*
  * Each inode can be on two separate lists. One is
@@ -72,7 +73,7 @@ static unsigned int i_hash_shift __read_mostly;
 
 LIST_HEAD(inode_in_use);
 LIST_HEAD(inode_unused);
-static struct hlist_head *inode_hashtable __read_mostly;
+static struct hlist_head *inode_hashtable;
 
 /*
  * A simple spinlock to protect the list manipulations.
@@ -83,27 +84,27 @@ static struct hlist_head *inode_hashtable __read_mostly;
 DEFINE_SPINLOCK(inode_lock);
 
 /*
- * iprune_mutex provides exclusion between the kswapd or try_to_free_pages
+ * iprune_sem provides exclusion between the kswapd or try_to_free_pages
  * icache shrinking path, and the umount path.  Without this exclusion,
  * by the time prune_icache calls iput for the inode whose pages it has
  * been invalidating, or by the time it calls clear_inode & destroy_inode
  * from its final dispose_list, the struct super_block they refer to
  * (for inode->i_sb->s_op) may already have been freed and reused.
  */
-static DEFINE_MUTEX(iprune_mutex);
+DECLARE_MUTEX(iprune_sem);
 
 /*
  * Statistics gathering..
  */
 struct inodes_stat_t inodes_stat;
 
-static kmem_cache_t * inode_cachep __read_mostly;
+static kmem_cache_t * inode_cachep;
 
 static struct inode *alloc_inode(struct super_block *sb)
 {
-	static const struct address_space_operations empty_aops;
+	static struct address_space_operations empty_aops;
 	static struct inode_operations empty_iops;
-	static const struct file_operations empty_fops;
+	static struct file_operations empty_fops;
 	struct inode *inode;
 
 	if (sb->s_op->alloc_inode)
@@ -166,7 +167,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 				bdi = sb->s_bdev->bd_inode->i_mapping->backing_dev_info;
 			mapping->backing_dev_info = bdi;
 		}
-		inode->i_private = 0;
+		memset(&inode->u, 0, sizeof(inode->u));
 		inode->i_mapping = mapping;
 	}
 	return inode;
@@ -174,7 +175,8 @@ static struct inode *alloc_inode(struct super_block *sb)
 
 void destroy_inode(struct inode *inode) 
 {
-	BUG_ON(inode_has_buffers(inode));
+	if (inode_has_buffers(inode))
+		BUG();
 	security_inode_free(inode);
 	if (inode->i_sb->s_op->destroy_inode)
 		inode->i_sb->s_op->destroy_inode(inode);
@@ -207,7 +209,7 @@ void inode_init_once(struct inode *inode)
 	i_size_ordered_init(inode);
 #ifdef CONFIG_INOTIFY
 	INIT_LIST_HEAD(&inode->inotify_watches);
-	mutex_init(&inode->inotify_mutex);
+	sema_init(&inode->inotify_sem, 1);
 #endif
 }
 
@@ -252,16 +254,19 @@ void clear_inode(struct inode *inode)
 	might_sleep();
 	invalidate_inode_buffers(inode);
        
-	BUG_ON(inode->i_data.nrpages);
-	BUG_ON(!(inode->i_state & I_FREEING));
-	BUG_ON(inode->i_state & I_CLEAR);
+	if (inode->i_data.nrpages)
+		BUG();
+	if (!(inode->i_state & I_FREEING))
+		BUG();
+	if (inode->i_state & I_CLEAR)
+		BUG();
 	wait_on_inode(inode);
 	DQUOT_DROP(inode);
 	if (inode->i_sb && inode->i_sb->s_op->clear_inode)
 		inode->i_sb->s_op->clear_inode(inode);
-	if (S_ISBLK(inode->i_mode) && inode->i_bdev)
+	if (inode->i_bdev)
 		bd_forget(inode);
-	if (S_ISCHR(inode->i_mode) && inode->i_cdev)
+	if (inode->i_cdev)
 		cd_forget(inode);
 	inode->i_state = I_CLEAR;
 }
@@ -319,7 +324,7 @@ static int invalidate_list(struct list_head *head, struct list_head *dispose)
 		/*
 		 * We can reschedule here without worrying about the list's
 		 * consistency because the per-sb list of inodes must not
-		 * change during umount anymore, and because iprune_mutex keeps
+		 * change during umount anymore, and because iprune_sem keeps
 		 * shrink_icache_memory() away.
 		 */
 		cond_resched_lock(&inode_lock);
@@ -355,14 +360,14 @@ int invalidate_inodes(struct super_block * sb)
 	int busy;
 	LIST_HEAD(throw_away);
 
-	mutex_lock(&iprune_mutex);
+	down(&iprune_sem);
 	spin_lock(&inode_lock);
 	inotify_unmount_inodes(&sb->s_inodes);
 	busy = invalidate_list(&sb->s_inodes, &throw_away);
 	spin_unlock(&inode_lock);
 
 	dispose_list(&throw_away);
-	mutex_unlock(&iprune_mutex);
+	up(&iprune_sem);
 
 	return busy;
 }
@@ -377,7 +382,7 @@ int __invalidate_device(struct block_device *bdev)
 	if (sb) {
 		/*
 		 * no need to lock the super, get_super holds the
-		 * read mutex so the filesystem cannot go away
+		 * read semaphore so the filesystem cannot go away
 		 * under us (->put_super runs with the write lock
 		 * hold).
 		 */
@@ -423,7 +428,7 @@ static void prune_icache(int nr_to_scan)
 	int nr_scanned;
 	unsigned long reap = 0;
 
-	mutex_lock(&iprune_mutex);
+	down(&iprune_sem);
 	spin_lock(&inode_lock);
 	for (nr_scanned = 0; nr_scanned < nr_to_scan; nr_scanned++) {
 		struct inode *inode;
@@ -456,14 +461,15 @@ static void prune_icache(int nr_to_scan)
 		nr_pruned++;
 	}
 	inodes_stat.nr_unused -= nr_pruned;
-	if (current_is_kswapd())
-		__count_vm_events(KSWAPD_INODESTEAL, reap);
-	else
-		__count_vm_events(PGINODESTEAL, reap);
 	spin_unlock(&inode_lock);
 
 	dispose_list(&freeable);
-	mutex_unlock(&iprune_mutex);
+	up(&iprune_sem);
+
+	if (current_is_kswapd())
+		mod_page_state(kswapd_inodesteal, reap);
+	else
+		mod_page_state(pginodesteal, reap);
 }
 
 /*
@@ -1053,7 +1059,8 @@ void generic_delete_inode(struct inode *inode)
 	hlist_del_init(&inode->i_hash);
 	spin_unlock(&inode_lock);
 	wake_up_inode(inode);
-	BUG_ON(inode->i_state != I_CLEAR);
+	if (inode->i_state != I_CLEAR)
+		BUG();
 	destroy_inode(inode);
 }
 
@@ -1373,13 +1380,8 @@ void __init inode_init(unsigned long mempages)
 	int loop;
 
 	/* inode slab cache */
-	inode_cachep = kmem_cache_create("inode_cache",
-					 sizeof(struct inode),
-					 0,
-					 (SLAB_RECLAIM_ACCOUNT|SLAB_PANIC|
-					 SLAB_MEM_SPREAD),
-					 init_once,
-					 NULL);
+	inode_cachep = kmem_cache_create("inode_cache", sizeof(struct inode),
+				0, SLAB_RECLAIM_ACCOUNT|SLAB_PANIC, init_once, NULL);
 	set_shrinker(DEFAULT_SEEKS, shrink_icache_memory);
 
 	/* Hash may have been set up in inode_init_early */

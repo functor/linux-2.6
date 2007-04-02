@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibmnp405h.c
+ *
  * Author: Armin Kuster <akuster@mvista.com>
  *
  * 2000-2002 (c) MontaVista, Software, Inc.  This file is licensed under
@@ -7,6 +9,7 @@
  * or implied.
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <asm/ocp.h>
 #include <platforms/4xx/ibmnp405h.h>

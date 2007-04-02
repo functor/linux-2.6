@@ -51,6 +51,8 @@ struct mip_reg		*host_reg;
 int 			mip_port;
 unsigned long		mip_addr, host_addr;
 
+#if defined(CONFIG_X86_IO_APIC) && defined(CONFIG_ACPI)
+
 /*
  * GSI override for ES7000 platforms.
  */
@@ -73,6 +75,8 @@ es7000_rename_gsi(int ioapic, int gsi)
 		gsi += base;
 	return gsi;
 }
+
+#endif	/* (CONFIG_X86_IO_APIC) && (CONFIG_ACPI) */
 
 void __init
 setup_unisys(void)
@@ -156,7 +160,6 @@ parse_unisys_oem (char *oemptr)
 	return es7000_plat;
 }
 
-#ifdef CONFIG_ACPI
 int __init
 find_unisys_acpi_oem_table(unsigned long *oem_addr)
 {
@@ -209,7 +212,6 @@ find_unisys_acpi_oem_table(unsigned long *oem_addr)
 	}
 	return -1;
 }
-#endif
 
 static void
 es7000_spin(int n)

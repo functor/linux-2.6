@@ -26,6 +26,7 @@
  * $Id: ts5500_flash.c,v 1.5 2005/11/07 11:14:28 gleixner Exp $
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -63,7 +64,7 @@ static struct mtd_partition ts5500_partitions[] = {
 	}
 };
 
-#define NUM_PARTITIONS ARRAY_SIZE(ts5500_partitions)
+#define NUM_PARTITIONS (sizeof(ts5500_partitions)/sizeof(struct mtd_partition))
 
 static struct mtd_info *mymtd;
 

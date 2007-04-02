@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/ppc83xx_setup.c
+ *
  * MPC83XX common board code
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
@@ -22,6 +24,7 @@
  * Added PCI support -- Tony Li <tony.li@freescale.com>
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/init.h>

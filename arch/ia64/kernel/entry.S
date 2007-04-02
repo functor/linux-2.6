@@ -31,6 +31,7 @@
  *	pNonSys:	!pSys
  */
 
+#include <linux/config.h>
 
 #include <asm/asmmacro.h>
 #include <asm/cache.h>
@@ -180,7 +181,7 @@ END(sys_clone)
  *	called.  The code starting at .map relies on this.  The rest of the code
  *	doesn't care about the interrupt masking status.
  */
-GLOBAL_ENTRY(__ia64_switch_to)
+GLOBAL_ENTRY(ia64_switch_to)
 	.prologue
 	alloc r16=ar.pfs,1,0,0,0
 	DO_SAVE_SWITCH_STACK
@@ -234,7 +235,7 @@ GLOBAL_ENTRY(__ia64_switch_to)
 	;;
 	srlz.d
 	br.cond.sptk .done
-END(__ia64_switch_to)
+END(ia64_switch_to)
 
 /*
  * Note that interrupts are enabled during save_switch_stack and load_switch_stack.  This
@@ -375,7 +376,7 @@ END(save_switch_stack)
  *	- b7 holds address to return to
  *	- must not touch r8-r11
  */
-GLOBAL_ENTRY(load_switch_stack)
+ENTRY(load_switch_stack)
 	.prologue
 	.altrp b7
 
@@ -510,7 +511,7 @@ END(clone)
 	 * because some system calls (such as ia64_execve) directly
 	 * manipulate ar.pfs.
 	 */
-GLOBAL_ENTRY(__ia64_trace_syscall)
+GLOBAL_ENTRY(ia64_trace_syscall)
 	PT_REGS_UNWIND_INFO(0)
 	/*
 	 * We need to preserve the scratch registers f6-f11 in case the system
@@ -582,7 +583,7 @@ strace_error:
 (p6)	mov r10=-1
 (p6)	mov r8=r9
 	br.cond.sptk .strace_save_retval
-END(__ia64_trace_syscall)
+END(ia64_trace_syscall)
 
 	/*
 	 * When traced and returning from sigreturn, we invoke syscall_trace but then
@@ -635,11 +636,8 @@ GLOBAL_ENTRY(ia64_ret_from_syscall)
 	adds r2=PT(R8)+16,sp			// r2 = &pt_regs.r8
 	mov r10=r0				// clear error indication in r10
 (p7)	br.cond.spnt handle_syscall_error	// handle potential syscall failure
-	;;
-	// don't fall through, ia64_leave_syscall may be #define'd
-	br.cond.sptk.few ia64_leave_syscall
-	;;
 END(ia64_ret_from_syscall)
+	// fall through
 /*
  * ia64_leave_syscall(): Same as ia64_leave_kernel, except that it doesn't
  *	need to switch to bank 0 and doesn't restore the scratch registers.
@@ -684,7 +682,7 @@ END(ia64_ret_from_syscall)
  *	      ar.csd: cleared
  *	      ar.ssd: cleared
  */
-GLOBAL_ENTRY(__ia64_leave_syscall)
+ENTRY(ia64_leave_syscall)
 	PT_REGS_UNWIND_INFO(0)
 	/*
 	 * work.need_resched etc. mustn't get changed by this CPU before it returns to
@@ -792,7 +790,7 @@ GLOBAL_ENTRY(__ia64_leave_syscall)
 	mov.m ar.ssd=r0			// M2   clear ar.ssd
 	mov f11=f0			// F    clear f11
 	br.cond.sptk.many rbs_switch	// B
-END(__ia64_leave_syscall)
+END(ia64_leave_syscall)
 
 #ifdef CONFIG_IA32_SUPPORT
 GLOBAL_ENTRY(ia64_ret_from_ia32_execve)
@@ -804,13 +802,10 @@ GLOBAL_ENTRY(ia64_ret_from_ia32_execve)
 	st8.spill [r2]=r8	// store return value in slot for r8 and set unat bit
 	.mem.offset 8,0
 	st8.spill [r3]=r0	// clear error indication in slot for r10 and set unat bit
-	;;
-	// don't fall through, ia64_leave_kernel may be #define'd
-	br.cond.sptk.few ia64_leave_kernel
-	;;
 END(ia64_ret_from_ia32_execve)
+	// fall through
 #endif /* CONFIG_IA32_SUPPORT */
-GLOBAL_ENTRY(__ia64_leave_kernel)
+GLOBAL_ENTRY(ia64_leave_kernel)
 	PT_REGS_UNWIND_INFO(0)
 	/*
 	 * work.need_resched etc. mustn't get changed by this CPU before it returns to
@@ -1107,6 +1102,9 @@ skip_rbs_switch:
 	st8 [r2]=r8
 	st8 [r3]=r10
 .work_pending:
+	tbit.nz p6,p0=r31,TIF_SIGDELAYED		// signal delayed from  MCA/INIT/NMI/PMI context?
+(p6)	br.cond.sptk.few .sigdelayed
+	;;
 	tbit.z p6,p0=r31,TIF_NEED_RESCHED		// current_thread_info()->need_resched==0?
 (p6)	br.cond.sptk.few .notify
 #ifdef CONFIG_PREEMPT
@@ -1133,6 +1131,17 @@ skip_rbs_switch:
 (pLvSys)br.cond.sptk.few  .work_pending_syscall_end
 	br.cond.sptk.many .work_processed_kernel	// don't re-check
 
+// There is a delayed signal that was detected in MCA/INIT/NMI/PMI context where
+// it could not be delivered.  Deliver it now.  The signal might be for us and
+// may set TIF_SIGPENDING, so redrive ia64_leave_* after processing the delayed
+// signal.
+
+.sigdelayed:
+	br.call.sptk.many rp=do_sigdelayed
+	cmp.eq p6,p0=r0,r0				// p6 <- 1, always re-check
+(pLvSys)br.cond.sptk.few  .work_pending_syscall_end
+	br.cond.sptk.many .work_processed_kernel	// re-check
+
 .work_pending_syscall_end:
 	adds r2=PT(R8)+16,r12
 	adds r3=PT(R10)+16,r12
@@ -1141,7 +1150,7 @@ skip_rbs_switch:
 	ld8 r10=[r3]
 	br.cond.sptk.many .work_processed_syscall	// re-check
 
-END(__ia64_leave_kernel)
+END(ia64_leave_kernel)
 
 ENTRY(handle_syscall_error)
 	/*
@@ -1181,7 +1190,7 @@ END(ia64_invoke_schedule_tail)
 	 * be set up by the caller.  We declare 8 input registers so the system call
 	 * args get preserved, in case we need to restart a system call.
 	 */
-GLOBAL_ENTRY(notify_resume_user)
+ENTRY(notify_resume_user)
 	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
 	alloc loc1=ar.pfs,8,2,3,0 // preserve all eight input regs in case of syscall restart!
 	mov r9=ar.unat
@@ -1269,7 +1278,7 @@ ENTRY(sys_rt_sigreturn)
 	adds sp=16,sp
 	;;
 	ld8 r9=[sp]				// load new ar.unat
-	mov.sptk b7=r8,__ia64_leave_kernel
+	mov.sptk b7=r8,ia64_leave_kernel
 	;;
 	mov ar.unat=r9
 	br.many b7
@@ -1433,15 +1442,7 @@ sys_call_table:
 	data8 sys_syslog
 	data8 sys_setitimer
 	data8 sys_getitimer
-#ifdef CONFIG_TUX
-	data8 __sys_tux				// 1120		/* was: ia64_oldstat */
-#else
-# ifdef CONFIG_TUX_MODULE
-	data8 sys_tux				// 1120		/* was: ia64_oldstat */
-# else
 	data8 sys_ni_syscall			// 1120		/* was: ia64_oldstat */
-# endif
-#endif
 	data8 sys_ni_syscall					/* was: ia64_oldlstat */
 	data8 sys_ni_syscall					/* was: ia64_oldfstat */
 	data8 sys_vhangup
@@ -1597,7 +1598,7 @@ sys_call_table:
 	data8 sys_keyctl
 	data8 sys_ioprio_set
 	data8 sys_ioprio_get			// 1275
-	data8 sys_move_pages
+	data8 sys_ni_syscall
 	data8 sys_inotify_init
 	data8 sys_inotify_add_watch
 	data8 sys_inotify_rm_watch
@@ -1618,11 +1619,5 @@ sys_call_table:
 	data8 sys_ni_syscall			// reserved for pselect
 	data8 sys_ni_syscall			// 1295 reserved for ppoll
 	data8 sys_unshare
-	data8 sys_splice
-	data8 sys_ni_syscall			// reserved for set_robust_list
-	data8 sys_ni_syscall			// reserved for get_robust_list
-	data8 sys_sync_file_range		// 1300
-	data8 sys_tee
-	data8 sys_vmsplice
 
 	.org sys_call_table + 8*NR_syscalls	// guard against failures to increase NR_syscalls

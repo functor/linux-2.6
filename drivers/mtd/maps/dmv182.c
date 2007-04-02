@@ -16,6 +16,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/types.h>
@@ -98,7 +99,7 @@ static struct mtd_info *this_mtd;
 static int __init init_svme182(void)
 {
 	struct mtd_partition *partitions;
-	int num_parts = ARRAY_SIZE(svme182_partitions);
+	int num_parts = sizeof(svme182_partitions) / sizeof(struct mtd_partition);
 
 	partitions = svme182_partitions;
 

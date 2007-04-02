@@ -39,6 +39,7 @@ extern void rbtx4938_time_init(void);
 
 void __init tx4938_setup(void);
 void __init tx4938_time_init(void);
+void __init tx4938_timer_setup(struct irqaction *irq);
 void dump_cp0(char *key);
 
 void (*__wbflush) (void);
@@ -60,9 +61,10 @@ tx4938_write_buffer_flush(void)
 }
 
 void __init
-plat_mem_setup(void)
+plat_setup(void)
 {
 	board_time_init = tx4938_time_init;
+	board_timer_setup = tx4938_timer_setup;
 	__wbflush = tx4938_write_buffer_flush;
 	toshiba_rbtx4938_setup();
 }
@@ -73,7 +75,8 @@ tx4938_time_init(void)
 	rbtx4938_time_init();
 }
 
-void __init plat_timer_setup(struct irqaction *irq)
+void __init
+tx4938_timer_setup(struct irqaction *irq)
 {
 	u32 count;
 	u32 c1;

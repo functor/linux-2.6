@@ -87,21 +87,6 @@ static const SK_U16	OnesHash[4] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
 static int	Next0[SK_MAX_MACS] = {0};
 #endif	/* DEBUG */
 
-static int SkAddrGmacMcAdd(SK_AC *pAC, SK_IOC IoC, SK_U32 PortNumber,
-			   SK_MAC_ADDR *pMc, int Flags);
-static int SkAddrGmacMcClear(SK_AC *pAC, SK_IOC IoC, SK_U32 PortNumber,
-			     int Flags);
-static int SkAddrGmacMcUpdate(SK_AC *pAC, SK_IOC IoC, SK_U32 PortNumber);
-static int SkAddrGmacPromiscuousChange(SK_AC *pAC, SK_IOC IoC,
-				       SK_U32 PortNumber, int NewPromMode);
-static int SkAddrXmacMcAdd(SK_AC *pAC, SK_IOC IoC, SK_U32 PortNumber,
-			   SK_MAC_ADDR *pMc, int Flags);
-static int SkAddrXmacMcClear(SK_AC *pAC, SK_IOC IoC, SK_U32 PortNumber,
-			     int Flags);
-static int SkAddrXmacMcUpdate(SK_AC *pAC, SK_IOC IoC, SK_U32 PortNumber);
-static int SkAddrXmacPromiscuousChange(SK_AC *pAC, SK_IOC IoC,
-				       SK_U32 PortNumber, int NewPromMode);
-
 /* functions ******************************************************************/
 
 /******************************************************************************
@@ -387,7 +372,7 @@ int		Flags)		/* permanent/non-perm, sw-only */
  *	SK_ADDR_SUCCESS
  *	SK_ADDR_ILLEGAL_PORT
  */
-static int	SkAddrXmacMcClear(
+int	SkAddrXmacMcClear(
 SK_AC	*pAC,		/* adapter context */
 SK_IOC	IoC,		/* I/O context */
 SK_U32	PortNumber,	/* Index of affected port */
@@ -444,7 +429,7 @@ int		Flags)		/* permanent/non-perm, sw-only */
  *	SK_ADDR_SUCCESS
  *	SK_ADDR_ILLEGAL_PORT
  */
-static int	SkAddrGmacMcClear(
+int	SkAddrGmacMcClear(
 SK_AC	*pAC,		/* adapter context */
 SK_IOC	IoC,		/* I/O context */
 SK_U32	PortNumber,	/* Index of affected port */
@@ -534,7 +519,7 @@ int		Flags)		/* permanent/non-perm, sw-only */
  * Returns:
  *	Hash value of multicast address.
  */
-static SK_U32 SkXmacMcHash(
+SK_U32 SkXmacMcHash(
 unsigned char *pMc)	/* Multicast address */
 {
 	SK_U32 Idx;
@@ -572,7 +557,7 @@ unsigned char *pMc)	/* Multicast address */
  * Returns:
  *	Hash value of multicast address.
  */
-static SK_U32 SkGmacMcHash(
+SK_U32 SkGmacMcHash(
 unsigned char *pMc)	/* Multicast address */
 {
 	SK_U32 Data;
@@ -687,7 +672,7 @@ int			Flags)		/* permanent/non-permanent */
  *	SK_MC_ILLEGAL_ADDRESS
  *	SK_MC_RLMT_OVERFLOW
  */
-static int	SkAddrXmacMcAdd(
+int	SkAddrXmacMcAdd(
 SK_AC		*pAC,		/* adapter context */
 SK_IOC		IoC,		/* I/O context */
 SK_U32		PortNumber,	/* Port Number */
@@ -793,7 +778,7 @@ int		Flags)		/* permanent/non-permanent */
  *	SK_MC_FILTERING_INEXACT
  *	SK_MC_ILLEGAL_ADDRESS
  */
-static int	SkAddrGmacMcAdd(
+int	SkAddrGmacMcAdd(
 SK_AC		*pAC,		/* adapter context */
 SK_IOC		IoC,		/* I/O context */
 SK_U32		PortNumber,	/* Port Number */
@@ -952,7 +937,7 @@ SK_U32	PortNumber)	/* Port Number */
  *	SK_MC_FILTERING_INEXACT
  *	SK_ADDR_ILLEGAL_PORT
  */
-static int	SkAddrXmacMcUpdate(
+int	SkAddrXmacMcUpdate(
 SK_AC	*pAC,		/* adapter context */
 SK_IOC	IoC,		/* I/O context */
 SK_U32	PortNumber)	/* Port Number */
@@ -1097,7 +1082,7 @@ SK_U32	PortNumber)	/* Port Number */
  *	SK_MC_FILTERING_INEXACT
  *	SK_ADDR_ILLEGAL_PORT
  */
-static int	SkAddrGmacMcUpdate(
+int	SkAddrGmacMcUpdate(
 SK_AC	*pAC,		/* adapter context */
 SK_IOC	IoC,		/* I/O context */
 SK_U32	PortNumber)	/* Port Number */
@@ -1483,7 +1468,7 @@ int		NewPromMode)	/* new promiscuous mode */
  *	SK_ADDR_SUCCESS
  *	SK_ADDR_ILLEGAL_PORT
  */
-static int	SkAddrXmacPromiscuousChange(
+int	SkAddrXmacPromiscuousChange(
 SK_AC	*pAC,			/* adapter context */
 SK_IOC	IoC,			/* I/O context */
 SK_U32	PortNumber,		/* port whose promiscuous mode changes */
@@ -1600,7 +1585,7 @@ int		NewPromMode)	/* new promiscuous mode */
  *	SK_ADDR_SUCCESS
  *	SK_ADDR_ILLEGAL_PORT
  */
-static int	SkAddrGmacPromiscuousChange(
+int	SkAddrGmacPromiscuousChange(
 SK_AC	*pAC,			/* adapter context */
 SK_IOC	IoC,			/* I/O context */
 SK_U32	PortNumber,		/* port whose promiscuous mode changes */

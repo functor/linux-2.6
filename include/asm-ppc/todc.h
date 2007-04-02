@@ -1,4 +1,6 @@
 /*
+ * include/asm-ppc/todc.h
+ *
  * Definitions for the M48Txx and mc146818 series of Time of day/Real Time
  * Clock chips.
  *

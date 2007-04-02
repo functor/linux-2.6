@@ -1,3 +1,4 @@
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
@@ -418,53 +419,58 @@ void i2o_dump_hrt(struct i2o_controller *c)
 		d = (u8 *) (rows + 2);
 		state = p[1] << 8 | p[0];
 
-		printk("TID %04X:[", state & 0xFFF);
+		printk(KERN_DEBUG "TID %04X:[", state & 0xFFF);
 		state >>= 12;
 		if (state & (1 << 0))
-			printk("H");	/* Hidden */
+			printk(KERN_DEBUG "H");	/* Hidden */
 		if (state & (1 << 2)) {
-			printk("P");	/* Present */
+			printk(KERN_DEBUG "P");	/* Present */
 			if (state & (1 << 1))
-				printk("C");	/* Controlled */
+				printk(KERN_DEBUG "C");	/* Controlled */
 		}
 		if (state > 9)
-			printk("*");	/* Hard */
+			printk(KERN_DEBUG "*");	/* Hard */
 
-		printk("]:");
+		printk(KERN_DEBUG "]:");
 
 		switch (p[3] & 0xFFFF) {
 		case 0:
 			/* Adapter private bus - easy */
-			printk("Local bus %d: I/O at 0x%04X Mem 0x%08X", p[2],
+			printk(KERN_DEBUG
+			       "Local bus %d: I/O at 0x%04X Mem 0x%08X", p[2],
 			       d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 		case 1:
 			/* ISA bus */
-			printk("ISA %d: CSN %d I/O at 0x%04X Mem 0x%08X", p[2],
+			printk(KERN_DEBUG
+			       "ISA %d: CSN %d I/O at 0x%04X Mem 0x%08X", p[2],
 			       d[2], d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 
 		case 2:	/* EISA bus */
-			printk("EISA %d: Slot %d I/O at 0x%04X Mem 0x%08X",
+			printk(KERN_DEBUG
+			       "EISA %d: Slot %d I/O at 0x%04X Mem 0x%08X",
 			       p[2], d[3], d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 
 		case 3:	/* MCA bus */
-			printk("MCA %d: Slot %d I/O at 0x%04X Mem 0x%08X", p[2],
+			printk(KERN_DEBUG
+			       "MCA %d: Slot %d I/O at 0x%04X Mem 0x%08X", p[2],
 			       d[3], d[1] << 8 | d[0], *(u32 *) (d + 4));
 			break;
 
 		case 4:	/* PCI bus */
-			printk("PCI %d: Bus %d Device %d Function %d", p[2],
+			printk(KERN_DEBUG
+			       "PCI %d: Bus %d Device %d Function %d", p[2],
 			       d[2], d[1], d[0]);
 			break;
 
 		case 0x80:	/* Other */
 		default:
-			printk("Unsupported bus type.");
+			printk(KERN_DEBUG "Unsupported bus type.");
 			break;
 		}
-		printk("\n");
+		printk(KERN_DEBUG "\n");
 		rows += length;
 	}
 }

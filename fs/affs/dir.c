@@ -17,7 +17,7 @@
 
 static int affs_readdir(struct file *, void *, filldir_t);
 
-const struct file_operations affs_dir_operations = {
+struct file_operations affs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= affs_readdir,
 	.fsync		= file_fsync,

@@ -13,6 +13,7 @@
 
 #include <linux/string.h>
 #include <linux/module.h>
+#include <linux/tty.h>
 #include <linux/fb.h>
 #include <linux/slab.h>
 
@@ -84,7 +85,7 @@ static struct fb_cmap default_16_colors = {
  *	Allocates memory for a colormap @cmap.  @len is the
  *	number of entries in the palette.
  *
- *	Returns negative errno on error, or zero on success.
+ *	Returns -1 errno on error, or zero on success.
  *
  */
 
@@ -115,7 +116,7 @@ int fb_alloc_cmap(struct fb_cmap *cmap, int len, int transp)
 
 fail:
     fb_dealloc_cmap(cmap);
-    return -ENOMEM;
+    return -1;
 }
 
 /**

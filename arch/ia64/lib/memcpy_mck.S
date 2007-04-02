@@ -6,13 +6,12 @@
  *	in1:	source address
  *	in2:	number of bytes to copy
  * Output:
- *	for memcpy:    return dest
- * 	for copy_user: return 0 if success,
- *		       or number of byte NOT copied if error occurred.
+ * 	0 if success, or number of byte NOT copied if error occurred.
  *
  * Copyright (C) 2002 Intel Corp.
  * Copyright (C) 2002 Ken Chen <kenneth.w.chen@intel.com>
  */
+#include <linux/config.h>
 #include <asm/asmmacro.h>
 #include <asm/page.h>
 
@@ -74,7 +73,6 @@ GLOBAL_ENTRY(memcpy)
 	and	r28=0x7,in0
 	and	r29=0x7,in1
 	mov	f6=f0
-	mov	retval=in0
 	br.cond.sptk .common_code
 	;;
 END(memcpy)
@@ -86,7 +84,7 @@ GLOBAL_ENTRY(__copy_user)
 	mov	f6=f1
 	mov	saved_in0=in0	// save dest pointer
 	mov	saved_in1=in1	// save src pointer
-	mov	retval=r0	// initialize return value
+	mov	saved_in2=in2	// save len
 	;;
 .common_code:
 	cmp.gt	p15,p0=8,in2	// check for small size
@@ -94,7 +92,7 @@ GLOBAL_ENTRY(__copy_user)
 	cmp.ne	p14,p0=0,r29	// check src alignment
 	add	src0=0,in1
 	sub	r30=8,r28	// for .align_dest
-	mov	saved_in2=in2	// save len
+	mov	retval=r0	// initialize return value
 	;;
 	add	dst0=0,in0
 	add	dst1=1,in0	// dest odd index

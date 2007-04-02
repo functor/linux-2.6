@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibm440ep.h
+ *
  * PPC440EP definitions
  *
  * Wade Farnsworth <wfarnsworth@mvista.com>
@@ -17,6 +19,7 @@
 #ifndef __PPC_PLATFORMS_IBM440EP_H
 #define __PPC_PLATFORMS_IBM440EP_H
 
+#include <linux/config.h>
 #include <asm/ibm44x.h>
 
 /* UART */

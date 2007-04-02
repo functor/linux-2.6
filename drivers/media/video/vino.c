@@ -40,9 +40,8 @@
 #include <linux/i2c-algo-sgi.h>
 
 #include <linux/videodev.h>
-#include <media/v4l2-common.h>
+#include <linux/videodev2.h>
 #include <linux/video_decoder.h>
-#include <linux/mutex.h>
 
 #include <asm/paccess.h>
 #include <asm/io.h>
@@ -246,7 +245,7 @@ struct vino_framebuffer_queue {
 	struct vino_framebuffer *buffer[VINO_FRAMEBUFFER_COUNT_MAX];
 
 	spinlock_t queue_lock;
-	struct mutex queue_mutex;
+	struct semaphore queue_sem;
 	wait_queue_head_t frame_wait_queue;
 };
 
@@ -284,7 +283,7 @@ struct vino_channel_settings {
 	/* the driver is currently processing the queue */
 	int capturing;
 
-	struct mutex mutex;
+	struct semaphore sem;
 	spinlock_t capture_lock;
 
 	unsigned int users;
@@ -1132,11 +1131,11 @@ static void vino_queue_free(struct vino_framebuffer_queue *q)
 	if (q->type != VINO_MEMORY_MMAP)
 		return;
 
-	mutex_lock(&q->queue_mutex);
+	down(&q->queue_sem);
 
 	vino_queue_free_with_count(q, q->length);
 
-	mutex_unlock(&q->queue_mutex);
+	up(&q->queue_sem);
 }
 
 static int vino_queue_init(struct vino_framebuffer_queue *q,
@@ -1160,7 +1159,7 @@ static int vino_queue_init(struct vino_framebuffer_queue *q,
 	if (*length < 1)
 		return -EINVAL;
 
-	mutex_lock(&q->queue_mutex);
+	down(&q->queue_sem);
 
 	if (*length > VINO_FRAMEBUFFER_COUNT_MAX)
 		*length = VINO_FRAMEBUFFER_COUNT_MAX;
@@ -1212,7 +1211,7 @@ static int vino_queue_init(struct vino_framebuffer_queue *q,
 		q->magic = VINO_QUEUE_MAGIC;
 	}
 
-	mutex_unlock(&q->queue_mutex);
+	up(&q->queue_sem);
 
 	return ret;
 }
@@ -1555,12 +1554,12 @@ static void vino_update_line_size(struct vino_channel_settings *vcs)
 	unsigned int w = vcs->clipping.right - vcs->clipping.left;
 	unsigned int d = vcs->decimation;
 	unsigned int bpp = vino_data_formats[vcs->data_format].bpp;
-	unsigned int lsize;
+        unsigned int lsize;
 
 	dprintk("update_line_size(): before: w = %d, d = %d, "
 		"line_size = %d\n", w, d, vcs->line_size);
 
-	/* line size must be multiple of 8 bytes */
+        /* line size must be multiple of 8 bytes */
 	lsize = (bpp * (w / d)) & ~7;
 	w = (lsize / bpp) * d;
 
@@ -4046,7 +4045,7 @@ static int vino_open(struct inode *inode, struct file *file)
 	dprintk("open(): channel = %c\n",
 	       (vcs->channel == VINO_CHANNEL_A) ? 'A' : 'B');
 
-	mutex_lock(&vcs->mutex);
+	down(&vcs->sem);
 
 	if (vcs->users) {
 		dprintk("open(): driver busy\n");
@@ -4063,7 +4062,7 @@ static int vino_open(struct inode *inode, struct file *file)
 	vcs->users++;
 
  out:
-	mutex_unlock(&vcs->mutex);
+	up(&vcs->sem);
 
 	dprintk("open(): %s!\n", ret ? "failed" : "complete");
 
@@ -4076,7 +4075,7 @@ static int vino_close(struct inode *inode, struct file *file)
 	struct vino_channel_settings *vcs = video_get_drvdata(dev);
 	dprintk("close():\n");
 
-	mutex_lock(&vcs->mutex);
+	down(&vcs->sem);
 
 	vcs->users--;
 
@@ -4088,7 +4087,7 @@ static int vino_close(struct inode *inode, struct file *file)
 		vino_queue_free(&vcs->fb_queue);
 	}
 
-	mutex_unlock(&vcs->mutex);
+	up(&vcs->sem);
 
 	return 0;
 }
@@ -4131,7 +4130,7 @@ static int vino_mmap(struct file *file, struct vm_area_struct *vma)
 
 	// TODO: reject mmap if already mapped
 
-	if (mutex_lock_interruptible(&vcs->mutex))
+	if (down_interruptible(&vcs->sem))
 		return -EINTR;
 
 	if (vcs->reading) {
@@ -4215,7 +4214,7 @@ found:
 	vma->vm_ops = &vino_vm_ops;
 
 out:
-	mutex_unlock(&vcs->mutex);
+	up(&vcs->sem);
 
 	return ret;
 }
@@ -4375,12 +4374,12 @@ static int vino_ioctl(struct inode *inode, struct file *file,
 	struct vino_channel_settings *vcs = video_get_drvdata(dev);
 	int ret;
 
-	if (mutex_lock_interruptible(&vcs->mutex))
+	if (down_interruptible(&vcs->sem))
 		return -EINTR;
 
 	ret = video_usercopy(inode, file, cmd, arg, vino_do_ioctl);
 
-	mutex_unlock(&vcs->mutex);
+	up(&vcs->sem);
 
 	return ret;
 }
@@ -4565,10 +4564,10 @@ static int vino_init_channel_settings(struct vino_channel_settings *vcs,
 
 	vcs->capturing = 0;
 
-	mutex_init(&vcs->mutex);
+	init_MUTEX(&vcs->sem);
 	spin_lock_init(&vcs->capture_lock);
 
-	mutex_init(&vcs->fb_queue.queue_mutex);
+	init_MUTEX(&vcs->fb_queue.queue_sem);
 	spin_lock_init(&vcs->fb_queue.queue_lock);
 	init_waitqueue_head(&vcs->fb_queue.frame_wait_queue);
 

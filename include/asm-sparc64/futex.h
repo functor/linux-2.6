@@ -83,26 +83,4 @@ static inline int futex_atomic_op_inuser(int encoded_op, int __user *uaddr)
 	return ret;
 }
 
-static inline int
-futex_atomic_cmpxchg_inatomic(int __user *uaddr, int oldval, int newval)
-{
-	__asm__ __volatile__(
-	"\n1:	casa	[%3] %%asi, %2, %0\n"
-	"2:\n"
-	"	.section .fixup,#alloc,#execinstr\n"
-	"	.align	4\n"
-	"3:	ba	2b\n"
-	"	 mov	%4, %0\n"
-	"	.previous\n"
-	"	.section __ex_table,\"a\"\n"
-	"	.align	4\n"
-	"	.word	1b, 3b\n"
-	"	.previous\n"
-	: "=r" (newval)
-	: "0" (newval), "r" (oldval), "r" (uaddr), "i" (-EFAULT)
-	: "memory");
-
-	return newval;
-}
-
 #endif /* !(_SPARC64_FUTEX_H) */

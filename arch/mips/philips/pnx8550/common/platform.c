@@ -18,7 +18,6 @@
 #include <linux/resource.h>
 #include <linux/serial.h>
 #include <linux/serial_ip3106.h>
-#include <linux/platform_device.h>
 
 #include <int.h>
 #include <usb.h>

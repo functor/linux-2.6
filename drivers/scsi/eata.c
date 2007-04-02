@@ -477,6 +477,7 @@
  *  the driver sets host->wish_block = 1 for all ISA boards.
  */
 
+#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/ioport.h>
@@ -489,7 +490,6 @@
 #include <linux/init.h>
 #include <linux/ctype.h>
 #include <linux/spinlock.h>
-#include <linux/dma-mapping.h>
 #include <asm/byteorder.h>
 #include <asm/dma.h>
 #include <asm/io.h>
@@ -1221,7 +1221,7 @@ static int port_detect(unsigned long port_base, unsigned int j,
 
 	/* Board detected, allocate its IRQ */
 	if (request_irq(irq, do_interrupt_handler,
-			IRQF_DISABLED | ((subversion == ESA) ? IRQF_SHARED : 0),
+			SA_INTERRUPT | ((subversion == ESA) ? SA_SHIRQ : 0),
 			driver_name, (void *)&sha[j])) {
 		printk("%s: unable to allocate IRQ %u, detaching.\n", name,
 		       irq);
@@ -1426,7 +1426,7 @@ static int port_detect(unsigned long port_base, unsigned int j,
 
 	if (ha->pdev) {
 		pci_set_master(ha->pdev);
-		if (pci_set_dma_mask(ha->pdev, DMA_32BIT_MASK))
+		if (pci_set_dma_mask(ha->pdev, 0xffffffff))
 			printk("%s: warning, pci_set_dma_mask failed.\n",
 			       ha->board_name);
 	}

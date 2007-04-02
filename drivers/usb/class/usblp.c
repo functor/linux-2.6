@@ -55,7 +55,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/lp.h>
-#include <linux/mutex.h>
 #undef DEBUG
 #include <linux/usb.h>
 
@@ -224,7 +223,7 @@ static int usblp_cache_device_id_string(struct usblp *usblp);
 
 /* forward reference to make our lives easier */
 static struct usb_driver usblp_driver;
-static DEFINE_MUTEX(usblp_mutex);	/* locks the existence of usblp's */
+static DECLARE_MUTEX(usblp_sem);	/* locks the existence of usblp's */
 
 /*
  * Functions for usblp control messages.
@@ -352,7 +351,7 @@ static int usblp_open(struct inode *inode, struct file *file)
 	if (minor < 0)
 		return -ENODEV;
 
-	mutex_lock (&usblp_mutex);
+	down (&usblp_sem);
 
 	retval = -ENODEV;
 	intf = usb_find_interface(&usblp_driver, minor);
@@ -400,7 +399,7 @@ static int usblp_open(struct inode *inode, struct file *file)
 		}
 	}
 out:
-	mutex_unlock (&usblp_mutex);
+	up (&usblp_sem);
 	return retval;
 }
 
@@ -426,13 +425,13 @@ static int usblp_release(struct inode *inode, struct file *file)
 {
 	struct usblp *usblp = file->private_data;
 
-	mutex_lock (&usblp_mutex);
+	down (&usblp_sem);
 	usblp->used = 0;
 	if (usblp->present) {
 		usblp_unlink_urbs(usblp);
 	} else 		/* finish cleanup from disconnect */
 		usblp_cleanup (usblp);
-	mutex_unlock (&usblp_mutex);
+	up (&usblp_sem);
 	return 0;
 }
 
@@ -1154,7 +1153,7 @@ static void usblp_disconnect(struct usb_interface *intf)
 
 	device_remove_file(&intf->dev, &dev_attr_ieee1284_id);
 
-	mutex_lock (&usblp_mutex);
+	down (&usblp_sem);
 	down (&usblp->sem);
 	usblp->present = 0;
 	usb_set_intfdata (intf, NULL);
@@ -1168,7 +1167,7 @@ static void usblp_disconnect(struct usb_interface *intf)
 
 	if (!usblp->used)
 		usblp_cleanup (usblp);
-	mutex_unlock (&usblp_mutex);
+	up (&usblp_sem);
 }
 
 static struct usb_device_id usblp_ids [] = {

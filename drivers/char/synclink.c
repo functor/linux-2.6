@@ -63,6 +63,7 @@
 #define MAX_PCI_DEVICES 10
 #define MAX_TOTAL_DEVICES 20
 
+#include <linux/config.h>	
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/signal.h>
@@ -940,6 +941,17 @@ static void* mgsl_get_text_ptr(void)
 	return mgsl_get_text_ptr;
 }
 
+/*
+ * tmp_buf is used as a temporary buffer by mgsl_write.  We need to
+ * lock it in case the COPY_FROM_USER blocks while swapping in a page,
+ * and some other program tries to do a serial write at the same time.
+ * Since the lock will only come under contention when the system is
+ * swapping and available memory is low, it makes sense to share one
+ * buffer across all the serial ioports, since it significantly saves
+ * memory if large numbers of serial ports are open.
+ */
+static unsigned char *tmp_buf;
+
 static inline int mgsl_paranoia_check(struct mgsl_struct *info,
 					char *name, const char *routine)
 {
@@ -1343,12 +1355,8 @@ static void mgsl_isr_io_pin( struct mgsl_struct *info )
 			} else
 				info->input_signal_events.dcd_down++;
 #ifdef CONFIG_HDLC
-			if (info->netcount) {
-				if (status & MISCSTATUS_DCD)
-					netif_carrier_on(info->netdev);
-				else
-					netif_carrier_off(info->netdev);
-			}
+			if (info->netcount)
+				hdlc_set_carrier(status & MISCSTATUS_DCD, info->netdev);
 #endif
 		}
 		if (status & MISCSTATUS_CTS_LATCHED)
@@ -2142,7 +2150,7 @@ static int mgsl_write(struct tty_struct * tty,
 	if (mgsl_paranoia_check(info, tty->name, "mgsl_write"))
 		goto cleanup;
 
-	if (!tty || !info->xmit_buf)
+	if (!tty || !info->xmit_buf || !tmp_buf)
 		goto cleanup;
 
 	if ( info->params.mode == MGSL_MODE_HDLC ||
@@ -3430,6 +3438,7 @@ static int mgsl_open(struct tty_struct *tty, struct file * filp)
 {
 	struct mgsl_struct	*info;
 	int 			retval, line;
+	unsigned long		page;
 	unsigned long flags;
 
 	/* verify range of specified line number */	
@@ -3461,6 +3470,18 @@ static int mgsl_open(struct tty_struct *tty, struct file * filp)
 		retval = ((info->flags & ASYNC_HUP_NOTIFY) ?
 			-EAGAIN : -ERESTARTSYS);
 		goto cleanup;
+	}
+	
+	if (!tmp_buf) {
+		page = get_zeroed_page(GFP_KERNEL);
+		if (!page) {
+			retval = -ENOMEM;
+			goto cleanup;
+		}
+		if (tmp_buf)
+			free_page(page);
+		else
+			tmp_buf = (unsigned char *) page;
 	}
 	
 	info->tty->low_latency = (info->flags & ASYNC_LOW_LATENCY) ? 1 : 0;
@@ -4479,6 +4500,11 @@ static void synclink_cleanup(void)
 		tmp = info;
 		info = info->next_device;
 		kfree(tmp);
+	}
+	
+	if (tmp_buf) {
+		free_page((unsigned long) tmp_buf);
+		tmp_buf = NULL;
 	}
 	
 	if (pci_registered)
@@ -5999,7 +6025,7 @@ static void usc_set_async_mode( struct mgsl_struct *info )
 	 * <15..8>	?		RxFIFO IRQ Request Level
 	 *
 	 * Note: For async mode the receive FIFO level must be set
-	 * to 0 to avoid the situation where the FIFO contains fewer bytes
+	 * to 0 to aviod the situation where the FIFO contains fewer bytes
 	 * than the trigger level and no more data is expected.
 	 *
 	 * <7>		0		Exited Hunt IA (Interrupt Arm)
@@ -7744,7 +7770,7 @@ static int hdlcdev_attach(struct net_device *dev, unsigned short encoding,
 	}
 
 	info->params.encoding = new_encoding;
-	info->params.crc_type = new_crctype;
+	info->params.crc_type = new_crctype;;
 
 	/* if network interface up, reprogram hardware */
 	if (info->netcount)
@@ -7847,10 +7873,8 @@ static int hdlcdev_open(struct net_device *dev)
 	spin_lock_irqsave(&info->irq_spinlock, flags);
 	usc_get_serial_signals(info);
 	spin_unlock_irqrestore(&info->irq_spinlock, flags);
-	if (info->serial_signals & SerialSignal_DCD)
-		netif_carrier_on(dev);
-	else
-		netif_carrier_off(dev);
+	hdlc_set_carrier(info->serial_signals & SerialSignal_DCD, dev);
+
 	return 0;
 }
 
@@ -8155,7 +8179,7 @@ static int __devinit synclink_init_one (struct pci_dev *dev,
 				
 	info->bus_type = MGSL_BUS_TYPE_PCI;
 	info->io_addr_size = 8;
-	info->irq_flags = IRQF_SHARED;
+	info->irq_flags = SA_SHIRQ;
 
 	if (dev->device == 0x0210) {
 		/* Version 1 PCI9030 based universal PCI adapter */

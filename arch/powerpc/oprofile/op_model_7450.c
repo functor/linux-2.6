@@ -176,13 +176,13 @@ static void fsl7450_handle_interrupt(struct pt_regs *regs,
 	mtmsr(mfmsr() | MSR_PMM);
 
 	pc = mfspr(SPRN_SIAR);
-	is_kernel = is_kernel_addr(pc);
+	is_kernel = (pc >= KERNELBASE);
 
 	for (i = 0; i < NUM_CTRS; ++i) {
 		val = ctr_read(i);
 		if (val < 0) {
 			if (oprofile_running && ctr[i].enabled) {
-				oprofile_add_ext_sample(pc, regs, i, is_kernel);
+				oprofile_add_pc(pc, is_kernel, i);
 				ctr_write(i, reset_value[i]);
 			} else {
 				ctr_write(i, 0);

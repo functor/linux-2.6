@@ -2,6 +2,7 @@
 #define _LINUX_MSG_H
 
 #include <linux/ipc.h>
+#include <linux/list.h>
 
 /* ipcs ctl commands */
 #define MSG_STAT 11
@@ -62,7 +63,6 @@ struct msginfo {
 #define MSGSEG (__MSGSEG <= 0xffff ? __MSGSEG : 0xffff)
 
 #ifdef __KERNEL__
-#include <linux/list.h>
 
 /* one msg_msg structure for each message */
 struct msg_msg {

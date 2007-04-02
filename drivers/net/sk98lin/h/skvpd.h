@@ -183,6 +183,14 @@ extern SK_U32	VpdReadDWord(
 	int			addr);
 #endif	/* SKDIAG */
 
+extern int	VpdSetupPara(
+	SK_AC		*pAC,
+	const char	*key,
+	const char	*buf,
+	int			len,
+	int			type,
+	int			op);
+
 extern SK_VPD_STATUS	*VpdStat(
 	SK_AC		*pAC,
 	SK_IOC		IoC);
@@ -219,6 +227,11 @@ extern int	VpdUpdate(
 	SK_AC		*pAC,
 	SK_IOC		IoC);
 
+extern void	VpdErrLog(
+	SK_AC		*pAC,
+	SK_IOC		IoC,
+	char		*msg);
+
 #ifdef	SKDIAG
 extern int	VpdReadBlock(
 	SK_AC		*pAC,
@@ -236,6 +249,7 @@ extern int	VpdWriteBlock(
 #endif	/* SKDIAG */
 #else	/* SK_KR_PROTO */
 extern SK_U32	VpdReadDWord();
+extern int	VpdSetupPara();
 extern SK_VPD_STATUS	*VpdStat();
 extern int	VpdKeys();
 extern int	VpdRead();
@@ -243,6 +257,7 @@ extern SK_BOOL	VpdMayWrite();
 extern int	VpdWrite();
 extern int	VpdDelete();
 extern int	VpdUpdate();
+extern void	VpdErrLog();
 #endif	/* SK_KR_PROTO */
 
 #endif	/* __INC_SKVPD_H_ */

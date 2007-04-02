@@ -113,7 +113,7 @@ cifs_bp_rename_retry:
 	full_path[namelen+2] = 0;
 BB remove above eight lines BB */
 
-/* Inode operations in similar order to how they appear in Linux file fs.h */
+/* Inode operations in similar order to how they appear in the Linux file fs.h */
 
 int
 cifs_create(struct inode *inode, struct dentry *direntry, int mode,
@@ -139,7 +139,9 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 
+	down(&direntry->d_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
+	up(&direntry->d_sb->s_vfs_rename_sem);
 	if(full_path == NULL) {
 		FreeXid(xid);
 		return -ENOMEM;
@@ -178,14 +180,11 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 		FreeXid(xid);
 		return -ENOMEM;
 	}
-	if (cifs_sb->tcon->ses->capabilities & CAP_NT_SMBS) 
-		rc = CIFSSMBOpen(xid, pTcon, full_path, disposition,
+
+	rc = CIFSSMBOpen(xid, pTcon, full_path, disposition,
 			 desiredAccess, CREATE_NOT_DIR,
 			 &fileHandle, &oplock, buf, cifs_sb->local_nls,
 			 cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SPECIAL_CHR);
-	else
-		rc = -EIO; /* no NT SMB support fall into legacy open below */
-
 	if(rc == -EIO) {
 		/* old server, retry the open legacy style */
 		rc = SMBLegacyOpen(xid, pTcon, full_path, disposition,
@@ -194,7 +193,7 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 			cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SPECIAL_CHR);
 	} 
 	if (rc) {
-		cFYI(1, ("cifs_create returned 0x%x", rc));
+		cFYI(1, ("cifs_create returned 0x%x ", rc));
 	} else {
 		/* If Open reported that we actually created a file
 		then we now have to set the mode if possible */
@@ -257,20 +256,18 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 			CIFSSMBClose(xid, pTcon, fileHandle);
 		} else if(newinode) {
 			pCifsFile =
-			   kzalloc(sizeof (struct cifsFileInfo), GFP_KERNEL);
+			   kmalloc(sizeof (struct cifsFileInfo), GFP_KERNEL);
 			
 			if(pCifsFile == NULL)
 				goto cifs_create_out;
+			memset((char *)pCifsFile, 0,
+			       sizeof (struct cifsFileInfo));
 			pCifsFile->netfid = fileHandle;
 			pCifsFile->pid = current->tgid;
 			pCifsFile->pInode = newinode;
 			pCifsFile->invalidHandle = FALSE;
 			pCifsFile->closePend     = FALSE;
 			init_MUTEX(&pCifsFile->fh_sem);
-			init_MUTEX(&pCifsFile->lock_sem);
-			INIT_LIST_HEAD(&pCifsFile->llist);
-			atomic_set(&pCifsFile->wrtPending,0);
-
 			/* set the following in open now 
 				pCifsFile->pfile = file; */
 			write_lock(&GlobalSMBSeslock);
@@ -321,7 +318,9 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, int mode,
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 
+	down(&direntry->d_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
+	up(&direntry->d_sb->s_vfs_rename_sem);
 	if(full_path == NULL)
 		rc = -ENOMEM;
 	else if (pTcon->ses->capabilities & CAP_UNIX) {
@@ -376,10 +375,6 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, int mode,
 					 cifs_sb->mnt_cifs_flags & 
 					    CIFS_MOUNT_MAP_SPECIAL_CHR);
 
-			/* BB FIXME - add handling for backlevel servers
-			   which need legacy open and check for all
-			   calls to SMBOpen for fallback to 
-			   SMBLeagcyOpen */
 			if(!rc) {
 				/* BB Do not bother to decode buf since no
 				   local inode yet to put timestamps in,

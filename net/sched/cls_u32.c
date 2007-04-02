@@ -33,6 +33,7 @@
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #include <linux/bitops.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -307,21 +308,23 @@ static int u32_init(struct tcf_proto *tp)
 		if (tp_c->q == tp->q)
 			break;
 
-	root_ht = kzalloc(sizeof(*root_ht), GFP_KERNEL);
+	root_ht = kmalloc(sizeof(*root_ht), GFP_KERNEL);
 	if (root_ht == NULL)
 		return -ENOBUFS;
 
+	memset(root_ht, 0, sizeof(*root_ht));
 	root_ht->divisor = 0;
 	root_ht->refcnt++;
 	root_ht->handle = tp_c ? gen_new_htid(tp_c) : 0x80000000;
 	root_ht->prio = tp->prio;
 
 	if (tp_c == NULL) {
-		tp_c = kzalloc(sizeof(*tp_c), GFP_KERNEL);
+		tp_c = kmalloc(sizeof(*tp_c), GFP_KERNEL);
 		if (tp_c == NULL) {
 			kfree(root_ht);
 			return -ENOBUFS;
 		}
+		memset(tp_c, 0, sizeof(*tp_c));
 		tp_c->q = tp->q;
 		tp_c->next = u32_list;
 		u32_list = tp_c;
@@ -344,7 +347,8 @@ static int u32_destroy_key(struct tcf_proto *tp, struct tc_u_knode *n)
 	if (n->ht_down)
 		n->ht_down->refcnt--;
 #ifdef CONFIG_CLS_U32_PERF
-	kfree(n->pf);
+	if (n)
+		kfree(n->pf);
 #endif
 	kfree(n);
 	return 0;
@@ -569,9 +573,10 @@ static int u32_change(struct tcf_proto *tp, unsigned long base, u32 handle,
 			if (handle == 0)
 				return -ENOMEM;
 		}
-		ht = kzalloc(sizeof(*ht) + divisor*sizeof(void*), GFP_KERNEL);
+		ht = kmalloc(sizeof(*ht) + divisor*sizeof(void*), GFP_KERNEL);
 		if (ht == NULL)
 			return -ENOBUFS;
+		memset(ht, 0, sizeof(*ht) + divisor*sizeof(void*));
 		ht->tp_c = tp_c;
 		ht->refcnt = 0;
 		ht->divisor = divisor;
@@ -614,16 +619,18 @@ static int u32_change(struct tcf_proto *tp, unsigned long base, u32 handle,
 
 	s = RTA_DATA(tb[TCA_U32_SEL-1]);
 
-	n = kzalloc(sizeof(*n) + s->nkeys*sizeof(struct tc_u32_key), GFP_KERNEL);
+	n = kmalloc(sizeof(*n) + s->nkeys*sizeof(struct tc_u32_key), GFP_KERNEL);
 	if (n == NULL)
 		return -ENOBUFS;
 
+	memset(n, 0, sizeof(*n) + s->nkeys*sizeof(struct tc_u32_key));
 #ifdef CONFIG_CLS_U32_PERF
-	n->pf = kzalloc(sizeof(struct tc_u32_pcnt) + s->nkeys*sizeof(u64), GFP_KERNEL);
+	n->pf = kmalloc(sizeof(struct tc_u32_pcnt) + s->nkeys*sizeof(u64), GFP_KERNEL);
 	if (n->pf == NULL) {
 		kfree(n);
 		return -ENOBUFS;
 	}
+	memset(n->pf, 0, sizeof(struct tc_u32_pcnt) + s->nkeys*sizeof(u64));
 #endif
 
 	memcpy(&n->sel, s, sizeof(*s) + s->nkeys*sizeof(struct tc_u32_key));
@@ -673,7 +680,8 @@ static int u32_change(struct tcf_proto *tp, unsigned long base, u32 handle,
 		return 0;
 	}
 #ifdef CONFIG_CLS_U32_PERF
-	kfree(n->pf);
+	if (n)
+		kfree(n->pf);
 #endif
 	kfree(n);
 	return err;
@@ -796,7 +804,7 @@ static int __init init_u32(void)
 {
 	printk("u32 classifier\n");
 #ifdef CONFIG_CLS_U32_PERF
-	printk("    Performance counters on\n");
+	printk("    Perfomance counters on\n");
 #endif
 #ifdef CONFIG_NET_CLS_POLICE
 	printk("    OLD policer on \n");

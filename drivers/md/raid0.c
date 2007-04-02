@@ -331,14 +331,13 @@ static int raid0_run (mddev_t *mddev)
 		goto out_free_conf;
 	size = conf->strip_zone[cur].size;
 
-	conf->hash_table[0] = conf->strip_zone + cur;
-	for (i=1; i< nb_zone; i++) {
+	for (i=0; i< nb_zone; i++) {
+		conf->hash_table[i] = conf->strip_zone + cur;
 		while (size <= conf->hash_spacing) {
 			cur++;
 			size += conf->strip_zone[cur].size;
 		}
 		size -= conf->hash_spacing;
-		conf->hash_table[i] = conf->strip_zone + cur;
 	}
 	if (conf->preshift) {
 		conf->hash_spacing >>= conf->preshift;

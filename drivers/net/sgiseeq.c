@@ -3,9 +3,6 @@
  *
  * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
  */
-
-#undef DEBUG
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -61,6 +58,8 @@ static char *sgiseeqstr = "SGI Seeq8003";
 #define TX_BUFFS_AVAIL(sp) ((sp->tx_old <= sp->tx_new) ? \
 			    sp->tx_old + (SEEQ_TX_BUFFERS - 1) - sp->tx_new : \
 			    sp->tx_old - sp->tx_new - 1)
+
+#define DEBUG
 
 struct sgiseeq_rx_desc {
 	volatile struct hpc_dma_desc rdma;
@@ -210,7 +209,7 @@ static int seeq_init_ring(struct net_device *dev)
 static struct sgiseeq_private *gpriv;
 static struct net_device *gdev;
 
-static void sgiseeq_dump_rings(void)
+void sgiseeq_dump_rings(void)
 {
 	static int once;
 	struct sgiseeq_rx_desc *r = gpriv->rx_desc;
@@ -312,9 +311,9 @@ static inline void sgiseeq_rx(struct net_device *dev, struct sgiseeq_private *sp
 			      struct sgiseeq_regs *sregs)
 {
 	struct sgiseeq_rx_desc *rd;
-	struct sk_buff *skb = NULL;
+	struct sk_buff *skb = 0;
 	unsigned char pkt_status;
-	unsigned char *pkt_pointer = NULL;
+	unsigned char *pkt_pointer = 0;
 	int len = 0;
 	unsigned int orig_end = PREV_RX(sp->rx_new);
 
@@ -514,6 +513,12 @@ static inline int sgiseeq_reset(struct net_device *dev)
 	netif_wake_queue(dev);
 
 	return 0;
+}
+
+void sgiseeq_my_reset(void)
+{
+	printk("RESET!\n");
+	sgiseeq_reset(gdev);
 }
 
 static int sgiseeq_start_xmit(struct sk_buff *skb, struct net_device *dev)

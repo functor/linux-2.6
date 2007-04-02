@@ -16,7 +16,6 @@
 #include <linux/init.h>
 #include <linux/smp_lock.h>
 #include <linux/kmod.h>
-#include <linux/mutex.h>
 
 #include <net/irda/irda.h>
 
@@ -29,7 +28,7 @@
  */
 
 static LIST_HEAD(dongle_list);			/* list of registered dongle drivers */
-static DEFINE_MUTEX(dongle_list_lock);		/* protects the list */
+static DECLARE_MUTEX(dongle_list_lock);		/* protects the list */
 
 int irda_register_dongle(struct dongle_driver *new)
 {
@@ -39,25 +38,25 @@ int irda_register_dongle(struct dongle_driver *new)
 	IRDA_DEBUG(0, "%s : registering dongle \"%s\" (%d).\n",
 		   __FUNCTION__, new->driver_name, new->type);
 
-	mutex_lock(&dongle_list_lock);
+	down(&dongle_list_lock);
 	list_for_each(entry, &dongle_list) {
 		drv = list_entry(entry, struct dongle_driver, dongle_list);
 		if (new->type == drv->type) {
-			mutex_unlock(&dongle_list_lock);
+			up(&dongle_list_lock);
 			return -EEXIST;
 		}
 	}
 	list_add(&new->dongle_list, &dongle_list);
-	mutex_unlock(&dongle_list_lock);
+	up(&dongle_list_lock);
 	return 0;
 }
 EXPORT_SYMBOL(irda_register_dongle);
 
 int irda_unregister_dongle(struct dongle_driver *drv)
 {
-	mutex_lock(&dongle_list_lock);
+	down(&dongle_list_lock);
 	list_del(&drv->dongle_list);
-	mutex_unlock(&dongle_list_lock);
+	up(&dongle_list_lock);
 	return 0;
 }
 EXPORT_SYMBOL(irda_unregister_dongle);
@@ -76,7 +75,7 @@ int sirdev_get_dongle(struct sir_dev *dev, IRDA_DONGLE type)
 		return -EBUSY;
 	
 	/* serialize access to the list of registered dongles */
-	mutex_lock(&dongle_list_lock);
+	down(&dongle_list_lock);
 
 	list_for_each(entry, &dongle_list) {
 		drv = list_entry(entry, struct dongle_driver, dongle_list);
@@ -110,14 +109,14 @@ int sirdev_get_dongle(struct sir_dev *dev, IRDA_DONGLE type)
 	if (!drv->open  ||  (err=drv->open(dev))!=0)
 		goto out_reject;		/* failed to open driver */
 
-	mutex_unlock(&dongle_list_lock);
+	up(&dongle_list_lock);
 	return 0;
 
 out_reject:
 	dev->dongle_drv = NULL;
 	module_put(drv->owner);
 out_unlock:
-	mutex_unlock(&dongle_list_lock);
+	up(&dongle_list_lock);
 	return err;
 }
 

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/yucca.c
+ *
  * Yucca board specific routines
  *
  * Roland Dreier <rolandd@cisco.com> (based on luan.c by Matt Porter)
@@ -12,6 +14,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>

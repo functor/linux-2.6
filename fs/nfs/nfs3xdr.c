@@ -23,12 +23,13 @@
 #include <linux/nfs_fs.h>
 #include <linux/nfsacl.h>
 #include <linux/vserver/xid.h>
-#include "internal.h"
 
 #define NFSDBG_FACILITY		NFSDBG_XDR
 
 /* Mapping from NFS error code to "errno" error code. */
 #define errno_NFSERR_IO		EIO
+
+extern int			nfs_stat_to_errno(int);
 
 /*
  * Declare the space requirements for NFS arguments and replies as
@@ -166,8 +167,7 @@ xdr_decode_fattr(u32 *p, struct nfs_fattr *fattr)
 	if (MAJOR(fattr->rdev) != major || MINOR(fattr->rdev) != minor)
 		fattr->rdev = 0;
 
-	p = xdr_decode_hyper(p, &fattr->fsid.major);
-	fattr->fsid.minor = 0;
+	p = xdr_decode_hyper(p, &fattr->fsid_u.nfs3);
 	p = xdr_decode_hyper(p, &fattr->fileid);
 	p = xdr_decode_time3(p, &fattr->atime);
 	p = xdr_decode_time3(p, &fattr->mtime);
@@ -1117,9 +1117,7 @@ nfs3_xdr_setaclres(struct rpc_rqst *req, u32 *p, struct nfs_fattr *fattr)
 	.p_encode    = (kxdrproc_t) nfs3_xdr_##argtype,			\
 	.p_decode    = (kxdrproc_t) nfs3_xdr_##restype,			\
 	.p_bufsiz    = MAX(NFS3_##argtype##_sz,NFS3_##restype##_sz) << 2,	\
-	.p_timer     = timer,						\
-	.p_statidx   = NFS3PROC_##proc,					\
-	.p_name      = #proc,						\
+	.p_timer     = timer						\
 	}
 
 struct rpc_procinfo	nfs3_procedures[] = {
@@ -1148,7 +1146,7 @@ struct rpc_procinfo	nfs3_procedures[] = {
 
 struct rpc_version		nfs_version3 = {
 	.number			= 3,
-	.nrprocs		= ARRAY_SIZE(nfs3_procedures),
+	.nrprocs		= sizeof(nfs3_procedures)/sizeof(nfs3_procedures[0]),
 	.procs			= nfs3_procedures
 };
 
@@ -1160,7 +1158,6 @@ static struct rpc_procinfo	nfs3_acl_procedures[] = {
 		.p_decode = (kxdrproc_t) nfs3_xdr_getaclres,
 		.p_bufsiz = MAX(ACL3_getaclargs_sz, ACL3_getaclres_sz) << 2,
 		.p_timer = 1,
-		.p_name = "GETACL",
 	},
 	[ACLPROC3_SETACL] = {
 		.p_proc = ACLPROC3_SETACL,
@@ -1168,7 +1165,6 @@ static struct rpc_procinfo	nfs3_acl_procedures[] = {
 		.p_decode = (kxdrproc_t) nfs3_xdr_setaclres,
 		.p_bufsiz = MAX(ACL3_setaclargs_sz, ACL3_setaclres_sz) << 2,
 		.p_timer = 0,
-		.p_name = "SETACL",
 	},
 };
 

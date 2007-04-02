@@ -22,9 +22,7 @@ struct uio;
 struct xfs_dabuf;
 struct xfs_da_args;
 struct xfs_dir2_put_args;
-struct xfs_bmap_free;
 struct xfs_inode;
-struct xfs_mount;
 struct xfs_trans;
 
 /*
@@ -57,16 +55,16 @@ typedef	__uint32_t	xfs_dir2_db_t;
 /*
  * Byte offset in a directory.
  */
-typedef	xfs_off_t	xfs_dir2_off_t;
+typedef	xfs_off_t		xfs_dir2_off_t;
 
 /*
  * For getdents, argument struct for put routines.
  */
 typedef int (*xfs_dir2_put_t)(struct xfs_dir2_put_args *pa);
 typedef struct xfs_dir2_put_args {
-	xfs_off_t	cook;		/* cookie of (next) entry */
+	xfs_off_t		cook;		/* cookie of (next) entry */
 	xfs_intino_t	ino;		/* inode number */
-	xfs_dirent_t	*dbp;		/* buffer pointer */
+	struct xfs_dirent	*dbp;		/* buffer pointer */
 	char		*name;		/* directory entry name */
 	int		namelen;	/* length of name */
 	int		done;		/* output: set if value was stored */
@@ -75,43 +73,20 @@ typedef struct xfs_dir2_put_args {
 } xfs_dir2_put_args_t;
 
 /*
- * Generic directory interface routines
+ * Other interfaces used by the rest of the dir v2 code.
  */
-extern void xfs_dir_startup(void);
-extern void xfs_dir_mount(struct xfs_mount *mp);
-extern int xfs_dir_isempty(struct xfs_inode *dp);
-extern int xfs_dir_init(struct xfs_trans *tp, struct xfs_inode *dp,
-				struct xfs_inode *pdp);
-extern int xfs_dir_createname(struct xfs_trans *tp, struct xfs_inode *dp,
-				char *name, int namelen, xfs_ino_t inum,
-				xfs_fsblock_t *first,
-				struct xfs_bmap_free *flist, xfs_extlen_t tot);
-extern int xfs_dir_lookup(struct xfs_trans *tp, struct xfs_inode *dp,
-				char *name, int namelen, xfs_ino_t *inum);
-extern int xfs_dir_removename(struct xfs_trans *tp, struct xfs_inode *dp,
-				char *name, int namelen, xfs_ino_t ino,
-				xfs_fsblock_t *first,
-				struct xfs_bmap_free *flist, xfs_extlen_t tot);
-extern int xfs_dir_getdents(struct xfs_trans *tp, struct xfs_inode *dp,
-				uio_t *uio, int *eofp);
-extern int xfs_dir_replace(struct xfs_trans *tp, struct xfs_inode *dp,
-				char *name, int namelen, xfs_ino_t inum,
-				xfs_fsblock_t *first,
-				struct xfs_bmap_free *flist, xfs_extlen_t tot);
-extern int xfs_dir_canenter(struct xfs_trans *tp, struct xfs_inode *dp,
-				char *name, int namelen);
-extern int xfs_dir_ino_validate(struct xfs_mount *mp, xfs_ino_t ino);
+extern int
+	xfs_dir2_grow_inode(struct xfs_da_args *args, int space,
+			    xfs_dir2_db_t *dbp);
 
-/*
- * Utility routines for v2 directories.
- */
-extern int xfs_dir2_grow_inode(struct xfs_da_args *args, int space,
-				xfs_dir2_db_t *dbp);
-extern int xfs_dir2_isblock(struct xfs_trans *tp, struct xfs_inode *dp,
-				int *vp);
-extern int xfs_dir2_isleaf(struct xfs_trans *tp, struct xfs_inode *dp,
-				int *vp);
-extern int xfs_dir2_shrink_inode(struct xfs_da_args *args, xfs_dir2_db_t db,
-				struct xfs_dabuf *bp);
+extern int
+	xfs_dir2_isblock(struct xfs_trans *tp, struct xfs_inode *dp, int *vp);
+
+extern int
+	xfs_dir2_isleaf(struct xfs_trans *tp, struct xfs_inode *dp, int *vp);
+
+extern int
+	xfs_dir2_shrink_inode(struct xfs_da_args *args, xfs_dir2_db_t db,
+			      struct xfs_dabuf *bp);
 
 #endif	/* __XFS_DIR2_H__ */

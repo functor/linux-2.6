@@ -18,6 +18,7 @@
 #include <linux/ptrace.h>
 #include <linux/security.h>
 #include <linux/signal.h>
+#include <linux/vs_cvirt.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -28,15 +29,16 @@
  *
  * Must be called with the tasklist lock write-held.
  */
-void __ptrace_link(struct task_struct *child, struct task_struct *new_parent)
+void __ptrace_link(task_t *child, task_t *new_parent)
 {
-	BUG_ON(!list_empty(&child->ptrace_list));
+	if (!list_empty(&child->ptrace_list))
+		BUG();
 	if (child->parent == new_parent)
 		return;
 	list_add(&child->ptrace_list, &child->parent->ptrace_children);
-	remove_parent(child);
+	REMOVE_LINKS(child);
 	child->parent = new_parent;
-	add_parent(child);
+	SET_LINKS(child);
 }
  
 /*
@@ -46,7 +48,7 @@ void __ptrace_link(struct task_struct *child, struct task_struct *new_parent)
  * TASK_TRACED, resume it now.
  * Requires that irqs be disabled.
  */
-void ptrace_untrace(struct task_struct *child)
+void ptrace_untrace(task_t *child)
 {
 	spin_lock(&child->sighand->siglock);
 	if (child->state == TASK_TRACED) {
@@ -65,16 +67,16 @@ void ptrace_untrace(struct task_struct *child)
  *
  * Must be called with the tasklist lock write-held.
  */
-void __ptrace_unlink(struct task_struct *child)
+void __ptrace_unlink(task_t *child)
 {
 	BUG_ON(!child->ptrace);
 
 	child->ptrace = 0;
 	if (!list_empty(&child->ptrace_list)) {
 		list_del_init(&child->ptrace_list);
-		remove_parent(child);
+		REMOVE_LINKS(child);
 		child->parent = child->real_parent;
-		add_parent(child);
+		SET_LINKS(child);
 	}
 
 	if (child->state == TASK_TRACED)
@@ -118,20 +120,10 @@ int ptrace_check_attach(struct task_struct *child, int kill)
 	return ret;
 }
 
-int __ptrace_may_attach(struct task_struct *task)
+static int may_attach(struct task_struct *task)
 {
-	/* May we inspect the given task?
-	 * This check is used both for attaching with ptrace
-	 * and for allowing access to sensitive information in /proc.
-	 *
-	 * ptrace_attach denies several cases that /proc allows
-	 * because setting up the necessary parent/child relationship
-	 * or halting the specified task is impossible.
-	 */
-	int dumpable = 0;
-	/* Don't let security modules deny introspection */
-	if (task == current)
-		return 0;
+	if (!task->mm)
+		return -EPERM;
 	if (((current->uid != task->euid) ||
 	     (current->uid != task->suid) ||
 	     (current->uid != task->uid) ||
@@ -140,9 +132,7 @@ int __ptrace_may_attach(struct task_struct *task)
 	     (current->gid != task->gid)) && !capable(CAP_SYS_PTRACE))
 		return -EPERM;
 	smp_rmb();
-	if (task->mm)
-		dumpable = task->mm->dumpable;
-	if (!dumpable && !capable(CAP_SYS_PTRACE))
+	if (!task->mm->dumpable && !capable(CAP_SYS_PTRACE))
 		return -EPERM;
 
 	return security_ptrace(current, task);
@@ -152,7 +142,7 @@ int ptrace_may_attach(struct task_struct *task)
 {
 	int err;
 	task_lock(task);
-	err = __ptrace_may_attach(task);
+	err = may_attach(task);
 	task_unlock(task);
 	return !err;
 }
@@ -188,12 +178,10 @@ repeat:
 		goto repeat;
 	}
 
-	if (!task->mm)
-		goto bad;
 	/* the same process cannot be attached many times */
 	if (task->ptrace & PT_PTRACED)
 		goto bad;
-	retval = __ptrace_may_attach(task);
+	retval = may_attach(task);
 	if (retval)
 		goto bad;
 
@@ -214,7 +202,7 @@ out:
 	return retval;
 }
 
-static inline void __ptrace_detach(struct task_struct *child, unsigned int data)
+void __ptrace_detach(struct task_struct *child, unsigned int data)
 {
 	child->exit_code = data;
 	/* .. re-parent .. */
@@ -233,7 +221,6 @@ int ptrace_detach(struct task_struct *child, unsigned int data)
 	ptrace_disable(child);
 
 	write_lock_irq(&tasklist_lock);
-	/* protect against de_thread()->release_task() */
 	if (child->ptrace)
 		__ptrace_detach(child, data);
 	write_unlock_irq(&tasklist_lock);

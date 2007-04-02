@@ -14,6 +14,7 @@
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #include <linux/bitops.h>
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -312,9 +313,10 @@ struct tc_action *tcf_action_init_1(struct rtattr *rta, struct rtattr *est,
 	}
 
 	*err = -ENOMEM;
-	a = kzalloc(sizeof(*a), GFP_KERNEL);
+	a = kmalloc(sizeof(*a), GFP_KERNEL);
 	if (a == NULL)
 		goto err_mod;
+	memset(a, 0, sizeof(*a));
 
 	/* backward compatibility for policer */
 	if (name == NULL)
@@ -491,9 +493,10 @@ tcf_action_get_1(struct rtattr *rta, struct nlmsghdr *n, u32 pid, int *err)
 	index = *(int *)RTA_DATA(tb[TCA_ACT_INDEX - 1]);
 
 	*err = -ENOMEM;
-	a = kzalloc(sizeof(struct tc_action), GFP_KERNEL);
+	a = kmalloc(sizeof(struct tc_action), GFP_KERNEL);
 	if (a == NULL)
 		return NULL;
+	memset(a, 0, sizeof(struct tc_action));
 
 	*err = -EINVAL;
 	a->ops = tc_lookup_action(tb[TCA_ACT_KIND - 1]);
@@ -529,11 +532,12 @@ static struct tc_action *create_a(int i)
 {
 	struct tc_action *act;
 
-	act = kzalloc(sizeof(*act), GFP_KERNEL);
+	act = kmalloc(sizeof(*act), GFP_KERNEL);
 	if (act == NULL) {
 		printk("create_a: failed to alloc!\n");
 		return NULL;
 	}
+	memset(act, 0, sizeof(*act));
 	act->order = i;
 	return act;
 }

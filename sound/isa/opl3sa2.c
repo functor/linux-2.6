@@ -59,7 +59,7 @@ static long midi_port[SNDRV_CARDS] = SNDRV_DEFAULT_PORT;/* 0x330,0x300 */
 static int irq[SNDRV_CARDS] = SNDRV_DEFAULT_IRQ;	/* 0,1,3,5,9,11,12,15 */
 static int dma1[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 1,3,5,6,7 */
 static int dma2[SNDRV_CARDS] = SNDRV_DEFAULT_DMA;	/* 1,3,5,6,7 */
-static int opl3sa3_ymode[SNDRV_CARDS];   /* 0,1,2,3 */ /*SL Added*/
+static int opl3sa3_ymode[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = 0 };   /* 0,1,2,3 */ /*SL Added*/
 
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for OPL3-SA soundcard.");
@@ -95,7 +95,6 @@ static struct platform_device *platform_devices[SNDRV_CARDS];
 static int pnp_registered;
 static int pnpc_registered;
 #endif
-static unsigned int snd_opl3sa2_devices;
 
 /* control ports */
 #define OPL3SA2_PM_CTRL		0x01
@@ -221,7 +220,7 @@ static void snd_opl3sa2_write(struct snd_opl3sa2 *chip, unsigned char reg, unsig
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
-static int __devinit snd_opl3sa2_detect(struct snd_opl3sa2 *chip)
+static int __init snd_opl3sa2_detect(struct snd_opl3sa2 *chip)
 {
 	struct snd_card *card;
 	unsigned long port;
@@ -489,7 +488,7 @@ static void snd_opl3sa2_master_free(struct snd_kcontrol *kcontrol)
 	chip->master_volume = NULL;
 }
 
-static int __devinit snd_opl3sa2_mixer(struct snd_opl3sa2 *chip)
+static int __init snd_opl3sa2_mixer(struct snd_opl3sa2 *chip)
 {
 	struct snd_card *card = chip->card;
 	struct snd_ctl_elem_id id1, id2;
@@ -583,8 +582,8 @@ static int snd_opl3sa2_resume(struct snd_card *card)
 #endif /* CONFIG_PM */
 
 #ifdef CONFIG_PNP
-static int __devinit snd_opl3sa2_pnp(int dev, struct snd_opl3sa2 *chip,
-				     struct pnp_dev *pdev)
+static int __init snd_opl3sa2_pnp(int dev, struct snd_opl3sa2 *chip,
+				  struct pnp_dev *pdev)
 {
 	struct pnp_resource_table * cfg;
 	int err;
@@ -683,7 +682,7 @@ static int __devinit snd_opl3sa2_probe(struct snd_card *card, int dev)
 		chip->single_dma = 1;
 	if ((err = snd_opl3sa2_detect(chip)) < 0)
 		return err;
-	if (request_irq(xirq, snd_opl3sa2_interrupt, IRQF_DISABLED, "OPL3-SA2", chip)) {
+	if (request_irq(xirq, snd_opl3sa2_interrupt, SA_INTERRUPT, "OPL3-SA2", chip)) {
 		snd_printk(KERN_ERR PFX "can't grab IRQ %d\n", xirq);
 		return -ENODEV;
 	}
@@ -761,7 +760,6 @@ static int __devinit snd_opl3sa2_pnp_detect(struct pnp_dev *pdev,
 	}
 	pnp_set_drvdata(pdev, card);
 	dev++;
-	snd_opl3sa2_devices++;
 	return 0;
 }
 
@@ -828,7 +826,6 @@ static int __devinit snd_opl3sa2_pnp_cdetect(struct pnp_card_link *pcard,
 	}
 	pnp_set_card_drvdata(pcard, card);
 	dev++;
-	snd_opl3sa2_devices++;
 	return 0;
 }
 
@@ -862,7 +859,7 @@ static struct pnp_card_driver opl3sa2_pnpc_driver = {
 };
 #endif /* CONFIG_PNP */
 
-static int __devinit snd_opl3sa2_nonpnp_probe(struct platform_device *pdev)
+static int __init snd_opl3sa2_nonpnp_probe(struct platform_device *pdev)
 {
 	struct snd_card *card;
 	int err;
@@ -947,48 +944,52 @@ static void __init_or_module snd_opl3sa2_unregister_all(void)
 
 static int __init alsa_card_opl3sa2_init(void)
 {
-	int i, err;
+	int i, err, cards = 0;
 
 	if ((err = platform_driver_register(&snd_opl3sa2_nonpnp_driver)) < 0)
 		return err;
 
-	for (i = 0; i < SNDRV_CARDS; i++) {
+	for (i = 0; i < SNDRV_CARDS && enable[i]; i++) {
 		struct platform_device *device;
-		if (! enable[i])
-			continue;
 #ifdef CONFIG_PNP
 		if (isapnp[i])
 			continue;
 #endif
 		device = platform_device_register_simple(OPL3SA2_DRIVER,
 							 i, NULL, 0);
-		if (IS_ERR(device))
-			continue;
-		if (!platform_get_drvdata(device)) {
-			platform_device_unregister(device);
-			continue;
+		if (IS_ERR(device)) {
+			err = PTR_ERR(device);
+			goto errout;
 		}
 		platform_devices[i] = device;
-		snd_opl3sa2_devices++;
+		cards++;
 	}
 
 #ifdef CONFIG_PNP
 	err = pnp_register_driver(&opl3sa2_pnp_driver);
-	if (!err)
+	if (err >= 0) {
 		pnp_registered = 1;
+		cards += err;
+	}
 	err = pnp_register_card_driver(&opl3sa2_pnpc_driver);
-	if (!err)
+	if (err >= 0) {
 		pnpc_registered = 1;
+		cards += err;
+	}
 #endif
 
-	if (!snd_opl3sa2_devices) {
+	if (!cards) {
 #ifdef MODULE
 		snd_printk(KERN_ERR "Yamaha OPL3-SA soundcard not found or device busy\n");
 #endif
-		snd_opl3sa2_unregister_all();
-		return -ENODEV;
+		err = -ENODEV;
+		goto errout;
 	}
 	return 0;
+
+ errout:
+	snd_opl3sa2_unregister_all();
+	return err;
 }
 
 static void __exit alsa_card_opl3sa2_exit(void)

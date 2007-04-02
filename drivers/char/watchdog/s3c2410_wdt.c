@@ -37,6 +37,7 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/timer.h>
 #include <linux/miscdevice.h>
@@ -319,7 +320,7 @@ static int s3c2410wdt_ioctl(struct inode *inode, struct file *file,
 
 /* kernel interface */
 
-static const struct file_operations s3c2410wdt_fops = {
+static struct file_operations s3c2410wdt_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.write		= s3c2410wdt_write,
@@ -422,12 +423,6 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 	if (tmr_atboot && started == 0) {
 		printk(KERN_INFO PFX "Starting Watchdog Timer\n");
 		s3c2410wdt_start();
-	} else if (!tmr_atboot) {
-		/* if we're not enabling the watchdog, then ensure it is
-		 * disabled if it has been left running from the bootloader
-		 * or other source */
-
-		s3c2410wdt_stop();
 	}
 
 	return 0;

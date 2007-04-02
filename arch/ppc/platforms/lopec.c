@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/lopec.c
+ *
  * Setup routines for the Motorola LoPEC.
  *
  * Author: Dan Cox
@@ -10,6 +12,7 @@
  * or implied.
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/pci_ids.h>

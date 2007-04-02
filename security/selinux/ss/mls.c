@@ -8,7 +8,7 @@
  *
  *	Support for enhanced MLS infrastructure.
  *
- * Copyright (C) 2004-2006 Trusted Computer Solutions, Inc.
+ * Copyright (C) 2004-2005 Trusted Computer Solutions, Inc.
  */
 
 #include <linux/kernel.h>
@@ -385,34 +385,6 @@ out:
 }
 
 /*
- * Set the MLS fields in the security context structure
- * `context' based on the string representation in
- * the string `str'.  This function will allocate temporary memory with the
- * given constraints of gfp_mask.
- */
-int mls_from_string(char *str, struct context *context, gfp_t gfp_mask)
-{
-	char *tmpstr, *freestr;
-	int rc;
-
-	if (!selinux_mls_enabled)
-		return -EINVAL;
-
-	/* we need freestr because mls_context_to_sid will change
-	   the value of tmpstr */
-	tmpstr = freestr = kstrdup(str, gfp_mask);
-	if (!tmpstr) {
-		rc = -ENOMEM;
-	} else {
-		rc = mls_context_to_sid(':', &tmpstr, context,
-		                        NULL, SECSID_NULL);
-		kfree(freestr);
-	}
-
-	return rc;
-}
-
-/*
  * Copies the effective MLS range from `src' into `dst'.
  */
 static inline int mls_scopy_context(struct context *dst,
@@ -543,21 +515,22 @@ int mls_compute_sid(struct context *scontext,
 		    u32 specified,
 		    struct context *newcontext)
 {
-	struct range_trans *rtr;
-
 	if (!selinux_mls_enabled)
 		return 0;
 
 	switch (specified) {
 	case AVTAB_TRANSITION:
-		/* Look for a range transition rule. */
-		for (rtr = policydb.range_tr; rtr; rtr = rtr->next) {
-			if (rtr->source_type == scontext->type &&
-			    rtr->target_type == tcontext->type &&
-			    rtr->target_class == tclass) {
-				/* Set the range from the rule */
-				return mls_range_set(newcontext,
-				                     &rtr->target_range);
+		if (tclass == SECCLASS_PROCESS) {
+			struct range_trans *rangetr;
+			/* Look for a range transition rule. */
+			for (rangetr = policydb.range_tr; rangetr;
+			     rangetr = rangetr->next) {
+				if (rangetr->dom == scontext->type &&
+				    rangetr->type == tcontext->type) {
+					/* Set the range from the rule */
+					return mls_range_set(newcontext,
+					                     &rangetr->range);
+				}
 			}
 		}
 		/* Fallthrough */

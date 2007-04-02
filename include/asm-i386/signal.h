@@ -2,6 +2,7 @@
 #define _ASMi386_SIGNAL_H
 
 #include <linux/types.h>
+#include <linux/linkage.h>
 #include <linux/time.h>
 #include <linux/compiler.h>
 
@@ -9,9 +10,6 @@
 struct siginfo;
 
 #ifdef __KERNEL__
-
-#include <linux/linkage.h>
-
 /* Most things should be clean enough to redefine this at will, if care
    is taken to make libc match.  */
 
@@ -79,6 +77,7 @@ typedef unsigned long sigset_t;
  * SA_FLAGS values:
  *
  * SA_ONSTACK indicates that a registered stack_t will be used.
+ * SA_INTERRUPT is a no-op, but left due to historical reasons. Use the
  * SA_RESTART flag to get restarting signals (which were the default long ago)
  * SA_NOCLDSTOP flag to turn off SIGCHLD when children stop.
  * SA_RESETHAND clears the handler when the signal is delivered.
@@ -98,6 +97,7 @@ typedef unsigned long sigset_t;
 
 #define SA_NOMASK	SA_NODEFER
 #define SA_ONESHOT	SA_RESETHAND
+#define SA_INTERRUPT	0x20000000 /* dummy -- ignored */
 
 #define SA_RESTORER	0x04000000
 

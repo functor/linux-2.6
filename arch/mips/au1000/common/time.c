@@ -33,6 +33,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kernel_stat.h>
 #include <linux/sched.h>
@@ -48,6 +49,10 @@
 
 #include <linux/mc146818rtc.h>
 #include <linux/timex.h>
+
+extern void do_softirq(void);
+extern volatile unsigned long wall_jiffies;
+unsigned long missed_heart_beats = 0;
 
 static unsigned long r4k_offset; /* Amount to increment compare reg each time */
 static unsigned long r4k_cur;    /* What counter should be at next timer irq */
@@ -111,7 +116,6 @@ void mips_timer_interrupt(struct pt_regs *regs)
 
 null:
 	ack_r4ktimer(0);
-	irq_exit();
 }
 
 #ifdef CONFIG_PM
@@ -355,7 +359,7 @@ static unsigned long do_fast_cp0_gettimeoffset(void)
 		: "hi", "lo", GCC_REG_ACCUM);
 
 	/*
-	 * Due to possible jiffies inconsistencies, we need to check
+ 	 * Due to possible jiffies inconsistencies, we need to check
 	 * the result so that we'll get a timer that is monotonic.
 	 */
 	if (res >= USECS_PER_JIFFY)
@@ -383,9 +387,10 @@ static unsigned long do_fast_pm_gettimeoffset(void)
 }
 #endif
 
-void __init plat_timer_setup(struct irqaction *irq)
+void au1xxx_timer_setup(struct irqaction *irq)
 {
-	unsigned int est_freq;
+        unsigned int est_freq;
+	extern unsigned long (*do_gettimeoffset)(void);
 
 	printk("calculating r4koff... ");
 	r4k_offset = cal_r4koff();

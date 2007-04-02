@@ -109,7 +109,7 @@
 #define __NR_syslog			1117
 #define __NR_setitimer			1118
 #define __NR_getitimer			1119
-#define __NR_tux			1120 /* was __NR_old_stat */
+/* 1120 was __NR_old_stat */
 /* 1121 was __NR_old_lstat */
 /* 1122 was __NR_old_fstat */
 #define __NR_vhangup			1123
@@ -265,7 +265,7 @@
 #define __NR_keyctl			1273
 #define __NR_ioprio_set			1274
 #define __NR_ioprio_get			1275
-#define __NR_move_pages			1276
+/* 1276 is available for reuse (was briefly sys_set_zone_reclaim) */
 #define __NR_inotify_init		1277
 #define __NR_inotify_add_watch		1278
 #define __NR_inotify_rm_watch		1279
@@ -285,16 +285,12 @@
 #define __NR_faccessat			1293
 /* 1294, 1295 reserved for pselect/ppoll */
 #define __NR_unshare			1296
-#define __NR_splice			1297
-/* 1298, 1299 reserved for set_robust_list/get_robust_list */
-#define __NR_sync_file_range		1300
-#define __NR_tee			1301
-#define __NR_vmsplice			1302
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 
-#define NR_syscalls			279 /* length of syscall table */
+#define NR_syscalls			273 /* length of syscall table */
 
 #define __ARCH_WANT_SYS_RT_SIGACTION
 

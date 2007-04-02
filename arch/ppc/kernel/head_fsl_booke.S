@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/kernel/head_fsl_booke.S
+ *
  * Kernel execution entry point code.
  *
  *    Copyright (c) 1995-1996 Gary Thomas <gdt@linuxppc.org>
@@ -30,6 +32,7 @@
  * option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/threads.h>
 #include <asm/processor.h>
 #include <asm/page.h>
@@ -313,7 +316,6 @@ skpinv:	addi	r6,r6,1				/* Increment */
 	 */
 	lis	r2,DBCR0_IDM@h
 	mtspr	SPRN_DBCR0,r2
-	isync
 	/* clear any residual debug events */
 	li	r2,-1
 	mtspr	SPRN_DBSR,r2
@@ -1000,15 +1002,12 @@ _GLOBAL(giveup_fpu)
 _GLOBAL(abort)
 	li	r13,0
         mtspr   SPRN_DBCR0,r13		/* disable all debug events */
-	isync
 	mfmsr	r13
 	ori	r13,r13,MSR_DE@l	/* Enable Debug Events */
 	mtmsr	r13
-	isync
         mfspr   r13,SPRN_DBCR0
         lis	r13,(DBCR0_IDM|DBCR0_RST_CHIP)@h
         mtspr   SPRN_DBCR0,r13
-	isync
 
 _GLOBAL(set_context)
 

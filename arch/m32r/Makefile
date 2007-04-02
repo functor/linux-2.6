@@ -1,9 +1,6 @@
 #
 # m32r/Makefile
 #
-# This file is included by the global makefile so that you can add your own
-# architecture-specific flags and dependencies.
-#
 
 LDFLAGS		:=
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
@@ -42,7 +39,7 @@ drivers-$(CONFIG_OPROFILE)	+= arch/m32r/oprofile/
 
 boot := arch/m32r/boot
 
-PHONY += zImage
+.PHONY: zImage
 
 all: zImage
 

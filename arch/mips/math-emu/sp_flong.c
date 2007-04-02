@@ -29,9 +29,7 @@
 
 ieee754sp ieee754sp_flong(s64 x)
 {
-	u64 xm;		/* <--- need 64-bit mantissa temp */
-	int xe;
-	int xs;
+	COMPXDP;		/* <--- need 64-bit mantissa temp */
 
 	CLEARCX;
 

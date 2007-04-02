@@ -11,6 +11,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/blkdev.h>
 #include <linux/interrupt.h>
@@ -197,7 +198,9 @@ tapeblock_request_fn(request_queue_t *queue)
 
 	device = (struct tape_device *) queue->queuedata;
 	DBF_LH(6, "tapeblock_request_fn(device=%p)\n", device);
-	BUG_ON(device == NULL);
+	if (device == NULL)
+		BUG();
+
 	tapeblock_trigger_requeue(device);
 }
 
@@ -304,7 +307,8 @@ tapeblock_revalidate_disk(struct gendisk *disk)
 	int			rc;
 
 	device = (struct tape_device *) disk->private_data;
-	BUG_ON(!device);
+	if (!device)
+		BUG();
 
 	if (!device->blk_data.medium_changed)
 		return 0;
@@ -431,14 +435,16 @@ tapeblock_ioctl(
 ) {
 	int rc;
 	int minor;
-	struct gendisk *disk;
-	struct tape_device *device;
+	struct gendisk *disk = inode->i_bdev->bd_disk;
+	struct tape_device *device = disk->private_data;
 
 	rc     = 0;
 	disk   = inode->i_bdev->bd_disk;
-	BUG_ON(!disk);
+	if (!disk)
+		BUG();
 	device = disk->private_data;
-	BUG_ON(!device);
+	if (!device)
+		BUG();
 	minor  = iminor(inode);
 
 	DBF_LH(6, "tapeblock_ioctl(0x%0x)\n", command);

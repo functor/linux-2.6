@@ -19,7 +19,7 @@
 #include <linux/string.h>
 
 #include <asm/pci-bridge.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 #include <asm/rtas.h>
 #include <asm/vio.h>
 
@@ -27,7 +27,7 @@
 #include "rpaphp.h"
 #include "rpadlpar.h"
 
-static DEFINE_MUTEX(rpadlpar_mutex);
+static DECLARE_MUTEX(rpadlpar_sem);
 
 #define DLPAR_MODULE_NAME "rpadlpar_io"
 
@@ -300,7 +300,7 @@ int dlpar_add_slot(char *drc_name)
 	int node_type;
 	int rc = -EIO;
 
-	if (mutex_lock_interruptible(&rpadlpar_mutex))
+	if (down_interruptible(&rpadlpar_sem))
 		return -ERESTARTSYS;
 
 	/* Find newly added node */
@@ -324,7 +324,7 @@ int dlpar_add_slot(char *drc_name)
 
 	printk(KERN_INFO "%s: slot %s added\n", DLPAR_MODULE_NAME, drc_name);
 exit:
-	mutex_unlock(&rpadlpar_mutex);
+	up(&rpadlpar_sem);
 	return rc;
 }
 
@@ -417,7 +417,7 @@ int dlpar_remove_slot(char *drc_name)
 	int node_type;
 	int rc = 0;
 
-	if (mutex_lock_interruptible(&rpadlpar_mutex))
+	if (down_interruptible(&rpadlpar_sem))
 		return -ERESTARTSYS;
 
 	dn = find_dlpar_node(drc_name, &node_type);
@@ -439,7 +439,7 @@ int dlpar_remove_slot(char *drc_name)
 	}
 	printk(KERN_INFO "%s: slot %s removed\n", DLPAR_MODULE_NAME, drc_name);
 exit:
-	mutex_unlock(&rpadlpar_mutex);
+	up(&rpadlpar_sem);
 	return rc;
 }
 

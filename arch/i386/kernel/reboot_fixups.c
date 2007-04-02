@@ -51,5 +51,7 @@ void mach_reboot_fixups(void)
 
 		cur->reboot_fixup(dev);
 	}
+
+	printk(KERN_WARNING "No reboot fixup found for your hardware\n");
 }
 

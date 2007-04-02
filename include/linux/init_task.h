@@ -3,16 +3,15 @@
 
 #include <linux/file.h>
 #include <linux/rcupdate.h>
-#include <linux/irqflags.h>
-#include <linux/lockdep.h>
 
 #define INIT_FDTABLE \
 {							\
 	.max_fds	= NR_OPEN_DEFAULT, 		\
-	.max_fdset	= EMBEDDED_FD_SET_SIZE,		\
+	.max_fdset	= __FD_SETSIZE, 		\
+	.next_fd	= 0, 				\
 	.fd		= &init_files.fd_array[0], 	\
-	.close_on_exec	= (fd_set *)&init_files.close_on_exec_init, \
-	.open_fds	= (fd_set *)&init_files.open_fds_init, 	\
+	.close_on_exec	= &init_files.close_on_exec_init, \
+	.open_fds	= &init_files.open_fds_init, 	\
 	.rcu		= RCU_HEAD_INIT, 		\
 	.free_files	= NULL,		 		\
 	.next		= NULL,		 		\
@@ -21,10 +20,9 @@
 #define INIT_FILES \
 { 							\
 	.count		= ATOMIC_INIT(1), 		\
+	.file_lock	= SPIN_LOCK_UNLOCKED, 		\
 	.fdt		= &init_files.fdtab, 		\
 	.fdtab		= INIT_FDTABLE,			\
-	.file_lock	= __SPIN_LOCK_UNLOCKED(init_task.file_lock), \
-	.next_fd	= 0, 				\
 	.close_on_exec_init = { { 0, } }, 		\
 	.open_fds_init	= { { 0, } }, 			\
 	.fd_array	= { NULL, } 			\
@@ -38,7 +36,7 @@
 	.user_id	= 0,				\
 	.next		= NULL,				\
 	.wait		= __WAIT_QUEUE_HEAD_INITIALIZER(name.wait), \
-	.ctx_lock	= __SPIN_LOCK_UNLOCKED(name.ctx_lock), \
+	.ctx_lock	= SPIN_LOCK_UNLOCKED,		\
 	.reqs_active	= 0U,				\
 	.max_reqs	= ~0U,				\
 }
@@ -50,7 +48,7 @@
 	.mm_users	= ATOMIC_INIT(2), 			\
 	.mm_count	= ATOMIC_INIT(1), 			\
 	.mmap_sem	= __RWSEM_INITIALIZER(name.mmap_sem),	\
-	.page_table_lock =  __SPIN_LOCK_UNLOCKED(name.page_table_lock),	\
+	.page_table_lock =  SPIN_LOCK_UNLOCKED, 		\
 	.mmlist		= LIST_HEAD_INIT(name.mmlist),		\
 	.cpu_vm_mask	= CPU_MASK_ALL,				\
 }
@@ -64,14 +62,12 @@
 	.posix_timers	 = LIST_HEAD_INIT(sig.posix_timers),		\
 	.cpu_timers	= INIT_CPU_TIMERS(sig.cpu_timers),		\
 	.rlim		= INIT_RLIMITS,					\
-	.pgrp		= 1,						\
-	.session	= 1,						\
 }
 
 #define INIT_SIGHAND(sighand) {						\
 	.count		= ATOMIC_INIT(1), 				\
 	.action		= { { { .sa_handler = NULL, } }, },		\
-	.siglock	= __SPIN_LOCK_UNLOCKED(sighand.siglock),	\
+	.siglock	= SPIN_LOCK_UNLOCKED, 				\
 }
 
 extern struct group_info init_groups;
@@ -89,7 +85,6 @@ extern struct group_info init_groups;
 	.lock_depth	= -1,						\
 	.prio		= MAX_PRIO-20,					\
 	.static_prio	= MAX_PRIO-20,					\
-	.normal_prio	= MAX_PRIO-20,					\
 	.policy		= SCHED_NORMAL,					\
 	.cpus_allowed	= CPU_MASK_ALL,					\
 	.mm		= NULL,						\
@@ -121,13 +116,11 @@ extern struct group_info init_groups;
 		.list = LIST_HEAD_INIT(tsk.pending.list),		\
 		.signal = {{0}}},					\
 	.blocked	= {{0}},					\
-	.alloc_lock	= __SPIN_LOCK_UNLOCKED(tsk.alloc_lock),		\
+	.alloc_lock	= SPIN_LOCK_UNLOCKED,				\
+	.proc_lock	= SPIN_LOCK_UNLOCKED,				\
 	.journal_info	= NULL,						\
 	.cpu_timers	= INIT_CPU_TIMERS(tsk.cpu_timers),		\
 	.fs_excl	= ATOMIC_INIT(0),				\
-	.pi_lock	= SPIN_LOCK_UNLOCKED,				\
-	INIT_TRACE_IRQFLAGS						\
-	INIT_LOCKDEP							\
 	.xid		= 0,						\
 	.vx_info	= NULL,						\
 	.nid		= 0,						\

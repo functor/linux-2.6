@@ -14,6 +14,7 @@
  *      2 of the License, or (at your option) any later version.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/fs.h> 
@@ -23,6 +24,7 @@
 #include <linux/resource.h>
 #include <linux/times.h>
 #include <linux/utsname.h>
+#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -69,20 +71,16 @@ struct readdir_callback32 {
 };
 
 static int fillonedir(void * __buf, const char * name, int namlen,
-		                  off_t offset, u64 ino, unsigned int d_type)
+		                  off_t offset, ino_t ino, unsigned int d_type)
 {
 	struct readdir_callback32 * buf = (struct readdir_callback32 *) __buf;
 	struct old_linux_dirent32 __user * dirent;
-	ino_t d_ino;
 
 	if (buf->count)
 		return -EINVAL;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
-		return -EOVERFLOW;
 	buf->count++;
 	dirent = buf->dirent;
-	put_user(d_ino, &dirent->d_ino);
+	put_user(ino, &dirent->d_ino);
 	put_user(offset, &dirent->d_offset);
 	put_user(namlen, &dirent->d_namlen);
 	copy_to_user(dirent->d_name, name, namlen);
@@ -124,20 +122,15 @@ asmlinkage long ppc32_select(u32 n, compat_ulong_t __user *inp,
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *statbuf)
 {
-	compat_ino_t ino;
 	long err;
 
 	if (stat->size > MAX_NON_LFS || !new_valid_dev(stat->dev) ||
 	    !new_valid_dev(stat->rdev))
 		return -EOVERFLOW;
 
-	ino = stat->ino;
-	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
-		return -EOVERFLOW;
-
 	err  = access_ok(VERIFY_WRITE, statbuf, sizeof(*statbuf)) ? 0 : -EFAULT;
 	err |= __put_user(new_encode_dev(stat->dev), &statbuf->st_dev);
-	err |= __put_user(ino, &statbuf->st_ino);
+	err |= __put_user(stat->ino, &statbuf->st_ino);
 	err |= __put_user(stat->mode, &statbuf->st_mode);
 	err |= __put_user(stat->nlink, &statbuf->st_nlink);
 	err |= __put_user(stat->uid, &statbuf->st_uid);
@@ -166,6 +159,78 @@ int cp_compat_stat(struct kstat *stat, struct compat_stat __user *statbuf)
 asmlinkage long compat_sys_sysfs(u32 option, u32 arg1, u32 arg2)
 {
 	return sys_sysfs((int)option, arg1, arg2);
+}
+
+/* Handle adjtimex compatibility. */
+struct timex32 {
+	u32 modes;
+	s32 offset, freq, maxerror, esterror;
+	s32 status, constant, precision, tolerance;
+	struct compat_timeval time;
+	s32 tick;
+	s32 ppsfreq, jitter, shift, stabil;
+	s32 jitcnt, calcnt, errcnt, stbcnt;
+	s32  :32; s32  :32; s32  :32; s32  :32;
+	s32  :32; s32  :32; s32  :32; s32  :32;
+	s32  :32; s32  :32; s32  :32; s32  :32;
+};
+
+extern int do_adjtimex(struct timex *);
+
+asmlinkage long compat_sys_adjtimex(struct timex32 __user *utp)
+{
+	struct timex txc;
+	int ret;
+	
+	memset(&txc, 0, sizeof(struct timex));
+
+	if(get_user(txc.modes, &utp->modes) ||
+	   __get_user(txc.offset, &utp->offset) ||
+	   __get_user(txc.freq, &utp->freq) ||
+	   __get_user(txc.maxerror, &utp->maxerror) ||
+	   __get_user(txc.esterror, &utp->esterror) ||
+	   __get_user(txc.status, &utp->status) ||
+	   __get_user(txc.constant, &utp->constant) ||
+	   __get_user(txc.precision, &utp->precision) ||
+	   __get_user(txc.tolerance, &utp->tolerance) ||
+	   __get_user(txc.time.tv_sec, &utp->time.tv_sec) ||
+	   __get_user(txc.time.tv_usec, &utp->time.tv_usec) ||
+	   __get_user(txc.tick, &utp->tick) ||
+	   __get_user(txc.ppsfreq, &utp->ppsfreq) ||
+	   __get_user(txc.jitter, &utp->jitter) ||
+	   __get_user(txc.shift, &utp->shift) ||
+	   __get_user(txc.stabil, &utp->stabil) ||
+	   __get_user(txc.jitcnt, &utp->jitcnt) ||
+	   __get_user(txc.calcnt, &utp->calcnt) ||
+	   __get_user(txc.errcnt, &utp->errcnt) ||
+	   __get_user(txc.stbcnt, &utp->stbcnt))
+		return -EFAULT;
+
+	ret = do_adjtimex(&txc);
+
+	if(put_user(txc.modes, &utp->modes) ||
+	   __put_user(txc.offset, &utp->offset) ||
+	   __put_user(txc.freq, &utp->freq) ||
+	   __put_user(txc.maxerror, &utp->maxerror) ||
+	   __put_user(txc.esterror, &utp->esterror) ||
+	   __put_user(txc.status, &utp->status) ||
+	   __put_user(txc.constant, &utp->constant) ||
+	   __put_user(txc.precision, &utp->precision) ||
+	   __put_user(txc.tolerance, &utp->tolerance) ||
+	   __put_user(txc.time.tv_sec, &utp->time.tv_sec) ||
+	   __put_user(txc.time.tv_usec, &utp->time.tv_usec) ||
+	   __put_user(txc.tick, &utp->tick) ||
+	   __put_user(txc.ppsfreq, &utp->ppsfreq) ||
+	   __put_user(txc.jitter, &utp->jitter) ||
+	   __put_user(txc.shift, &utp->shift) ||
+	   __put_user(txc.stabil, &utp->stabil) ||
+	   __put_user(txc.jitcnt, &utp->jitcnt) ||
+	   __put_user(txc.calcnt, &utp->calcnt) ||
+	   __put_user(txc.errcnt, &utp->errcnt) ||
+	   __put_user(txc.stbcnt, &utp->stbcnt))
+		ret = -EFAULT;
+
+	return ret;
 }
 
 asmlinkage long compat_sys_pause(void)

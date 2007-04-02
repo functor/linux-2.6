@@ -1,4 +1,6 @@
 /*
+ *  arch/ppc/platforms/gemini_prom.S
+ *
  *  Not really prom support code (yet), but sort of anti-prom code.  The current
  *  bootloader does a number of things it shouldn't and doesn't do things that it
  *  should.  The stuff in here is mainly a hodge-podge collection of setup code
@@ -6,6 +8,7 @@
  *    ---Dan
  */
 
+#include <linux/config.h>
 #include <asm/reg.h>
 #include <asm/page.h>
 #include <platforms/gemini.h>

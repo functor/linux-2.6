@@ -13,7 +13,7 @@
 #ifndef _UDF_FS_SB_H
 #define _UDF_FS_SB_H 1
 
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 
 #pragma pack(1)
 
@@ -111,7 +111,7 @@ struct udf_sb_info
 	/* VAT inode */
 	struct inode		*s_vat;
 
-	struct mutex		s_alloc_mutex;
+	struct semaphore	s_alloc_sem;
 };
 
 #endif /* _UDF_FS_SB_H */

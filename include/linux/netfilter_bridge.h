@@ -4,8 +4,10 @@
 /* bridge-specific defines for netfilter. 
  */
 
+#include <linux/config.h>
 #include <linux/netfilter.h>
 #if defined(__KERNEL__) && defined(CONFIG_BRIDGE_NETFILTER)
+#include <asm/atomic.h>
 #include <linux/if_ether.h>
 #endif
 
@@ -45,10 +47,25 @@ enum nf_br_hook_priorities {
 #define BRNF_BRIDGED			0x08
 #define BRNF_NF_BRIDGE_PREROUTING	0x10
 
+static inline
+struct nf_bridge_info *nf_bridge_alloc(struct sk_buff *skb)
+{
+	struct nf_bridge_info **nf_bridge = &(skb->nf_bridge);
+
+	if ((*nf_bridge = kmalloc(sizeof(**nf_bridge), GFP_ATOMIC)) != NULL) {
+		atomic_set(&(*nf_bridge)->use, 1);
+		(*nf_bridge)->mask = 0;
+		(*nf_bridge)->physindev = (*nf_bridge)->physoutdev = NULL;
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
+		(*nf_bridge)->netoutdev = NULL;
+#endif
+	}
+
+	return *nf_bridge;
+}
 
 /* Only used in br_forward.c */
-static inline
-int nf_bridge_maybe_copy_header(struct sk_buff *skb)
+static inline int nf_bridge_maybe_copy_header(struct sk_buff *skb)
 {
 	int err;
 
@@ -67,6 +84,17 @@ int nf_bridge_maybe_copy_header(struct sk_buff *skb)
 		}
 	}
 	return 0;
+}
+
+static inline
+void nf_bridge_save_header(struct sk_buff *skb)
+{
+        int header_size = 16;
+
+	if (skb->protocol == __constant_htons(ETH_P_8021Q))
+		header_size = 18;
+
+	memcpy(skb->nf_bridge->data, skb->data - header_size, header_size);
 }
 
 /* This is called by the IP fragmenting code and it ensures there is
@@ -88,8 +116,6 @@ struct bridge_skb_cb {
 		__u32 ipv4;
 	} daddr;
 };
-
-extern int brnf_deferred_hooks;
 #endif /* CONFIG_BRIDGE_NETFILTER */
 
 #endif /* __KERNEL__ */

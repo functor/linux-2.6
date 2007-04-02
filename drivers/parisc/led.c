@@ -23,6 +23,7 @@
  *	  			  David Pye <dmp@davidmpye.dyndns.org>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/stddef.h>	/* for offsetof() */
 #include <linux/init.h>
@@ -410,17 +411,16 @@ static __inline__ int led_get_net_activity(void)
 static __inline__ int led_get_diskio_activity(void)
 {	
 	static unsigned long last_pgpgin, last_pgpgout;
-	unsigned long events[NR_VM_EVENT_ITEMS];
+	struct page_state pgstat;
 	int changed;
 
-	all_vm_events(events);
+	get_full_page_state(&pgstat); /* get no of sectors in & out */
 
 	/* Just use a very simple calculation here. Do not care about overflow,
 	   since we only want to know if there was activity or not. */
-	changed = (events[PGPGIN] != last_pgpgin) ||
-		  (events[PGPGOUT] != last_pgpgout);
-	last_pgpgin  = events[PGPGIN];
-	last_pgpgout = events[PGPGOUT];
+	changed = (pgstat.pgpgin != last_pgpgin) || (pgstat.pgpgout != last_pgpgout);
+	last_pgpgin  = pgstat.pgpgin;
+	last_pgpgout = pgstat.pgpgout;
 
 	return (changed ? LED_DISK_IO : 0);
 }
@@ -499,16 +499,11 @@ static int led_halt(struct notifier_block *, unsigned long, void *);
 static struct notifier_block led_notifier = {
 	.notifier_call = led_halt,
 };
-static int notifier_disabled = 0;
 
 static int led_halt(struct notifier_block *nb, unsigned long event, void *buf) 
 {
 	char *txt;
-
-	if (notifier_disabled)
-		return NOTIFY_OK;
-
-	notifier_disabled = 1;
+	
 	switch (event) {
 	case SYS_RESTART:	txt = "SYSTEM RESTART";
 				break;
@@ -532,6 +527,7 @@ static int led_halt(struct notifier_block *nb, unsigned long event, void *buf)
 		if (led_func_ptr)
 			led_func_ptr(0xff); /* turn all LEDs ON */
 	
+	unregister_reboot_notifier(&led_notifier);
 	return NOTIFY_OK;
 }
 
@@ -760,12 +756,6 @@ found:
 not_found:
 	lcd_info.model = DISPLAY_MODEL_NONE;
 	return 1;
-}
-
-static void __exit led_exit(void)
-{
-	unregister_reboot_notifier(&led_notifier);
-	return;
 }
 
 #ifdef CONFIG_PROC_FS

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/xilinx_ml300.h
+ *
  * Include file that defines the Xilinx ML300 evaluation board
  *
  * Author: MontaVista Software, Inc.
@@ -14,7 +16,7 @@
 #define __ASM_XILINX_ML300_H__
 
 /* ML300 has a Xilinx Virtex-II Pro processor */
-#include <platforms/4xx/virtex.h>
+#include <platforms/4xx/virtex-ii_pro.h>
 
 #ifndef __ASSEMBLY__
 
@@ -39,7 +41,7 @@ typedef struct board_info {
 #define PPC4xx_ONB_IO_VADDR	0u
 #define PPC4xx_ONB_IO_SIZE	0u
 
-#define PPC4xx_MACHINE_NAME "Xilinx ML300 Reference System"
+#define PPC4xx_MACHINE_NAME "Xilinx ML300"
 
 #endif /* __ASM_XILINX_ML300_H__ */
 #endif /* __KERNEL__ */

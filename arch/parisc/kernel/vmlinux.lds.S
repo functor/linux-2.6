@@ -6,7 +6,6 @@
  *    Copyright (C) 2000 Michael Ang <mang with subcarrier.org>
  *    Copyright (C) 2002 Randolph Chung <tausq with parisc-linux.org>
  *    Copyright (C) 2003 James Bottomley <jejb with parisc-linux.org>
- *    Copyright (C) 2006 Helge Deller <deller@gmx.de>
  *
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -23,11 +22,11 @@
  *    along with this program; if not, write to the Free Software
  *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+#include <linux/config.h>
 #include <asm-generic/vmlinux.lds.h>
 /* needed for the processor specific cache alignment size */	
 #include <asm/cache.h>
 #include <asm/page.h>
-#include <asm/asm-offsets.h>
 	
 /* ld script to make hppa Linux kernel */
 #ifndef CONFIG_64BIT
@@ -69,7 +68,7 @@ SECTIONS
   RODATA
 
   /* writeable */
-  . = ALIGN(ASM_PAGE_SIZE);	/* Make sure this is page aligned so
+  . = ALIGN(4096);		/* Make sure this is page aligned so
   				   that we can properly leave these
 				   as writable */
   data_start = .;
@@ -82,16 +81,22 @@ SECTIONS
   __start___unwind = .;         /* unwind info */
   .PARISC.unwind : { *(.PARISC.unwind) }
   __stop___unwind = .;
-
-  /* rarely changed data like cpu maps */
-  . = ALIGN(16);
-  .data.read_mostly : { *(.data.read_mostly) }
-
-  . = ALIGN(L1_CACHE_BYTES);
+ 
   .data : {			/* Data */
 	*(.data)
+	*(.data.vm0.pmd)
+	*(.data.vm0.pgd)
+	*(.data.vm0.pte)
 	CONSTRUCTORS
 	}
+
+  . = ALIGN(4096);
+  /* nosave data is really only used for software suspend...it's here
+   * just in case we ever implement it */
+  __nosave_begin = .;
+  .data_nosave : { *(.data.nosave) }
+  . = ALIGN(4096);
+  __nosave_end = .;
 
   . = ALIGN(L1_CACHE_BYTES);
   .data.cacheline_aligned : { *(.data.cacheline_aligned) }
@@ -100,29 +105,12 @@ SECTIONS
   . = ALIGN(16);
   .data.lock_aligned : { *(.data.lock_aligned) }
 
-  . = ALIGN(ASM_PAGE_SIZE);
-  /* nosave data is really only used for software suspend...it's here
-   * just in case we ever implement it */
-  __nosave_begin = .;
-  .data_nosave : { *(.data.nosave) }
-  . = ALIGN(ASM_PAGE_SIZE);
-  __nosave_end = .;
+  /* rarely changed data like cpu maps */
+  . = ALIGN(16);
+  .data.read_mostly : { *(.data.read_mostly) }
 
   _edata = .;			/* End of data section */
 
-  __bss_start = .;		/* BSS */
-  /* page table entries need to be PAGE_SIZE aligned */
-  . = ALIGN(ASM_PAGE_SIZE);
-  .data.vmpages : {
-	*(.data.vm0.pmd)
-	*(.data.vm0.pgd)
-	*(.data.vm0.pte)
-	}
-  .bss : { *(.bss) *(COMMON) }
-  __bss_stop = .;
-
-
-  /* assembler code expects init_task to be 16k aligned */
   . = ALIGN(16384); 		/* init_task */
   .data.init_task : { *(.data.init_task) }
 
@@ -138,7 +126,6 @@ SECTIONS
   .dlt : { *(.dlt) }
 #endif
 
-  /* reserve space for interrupt stack by aligning __init* to 16k */
   . = ALIGN(16384);
   __init_begin = .;
   .init.text : { 
@@ -179,7 +166,7 @@ SECTIONS
      from .altinstructions and .eh_frame */
   .exit.text : { *(.exit.text) }
   .exit.data : { *(.exit.data) }
-  . = ALIGN(ASM_PAGE_SIZE);
+  . = ALIGN(4096);
   __initramfs_start = .;
   .init.ramfs : { *(.init.ramfs) }
   __initramfs_end = .;
@@ -187,10 +174,14 @@ SECTIONS
   __per_cpu_start = .;
   .data.percpu  : { *(.data.percpu) }
   __per_cpu_end = .;
-  . = ALIGN(ASM_PAGE_SIZE);
+  . = ALIGN(4096);
   __init_end = .;
   /* freed after init ends here */
 	
+  __bss_start = .;		/* BSS */
+  .bss : { *(.bss) *(COMMON) }
+  __bss_stop = .; 
+
   _end = . ;
 
   /* Sections to be discarded */
@@ -204,7 +195,6 @@ SECTIONS
 	*(.dynstr)
 	*(.dynamic)
 	*(.hash)
-	*(.gnu.hash)
 #endif
 	}
 

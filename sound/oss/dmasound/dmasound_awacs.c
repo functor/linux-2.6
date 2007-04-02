@@ -67,6 +67,7 @@
 
 #include <linux/types.h>
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/delay.h>
@@ -79,13 +80,15 @@
 #include <linux/kmod.h>
 #include <linux/interrupt.h>
 #include <linux/input.h>
-#include <linux/mutex.h>
+#include <asm/semaphore.h>
 #ifdef CONFIG_ADB_CUDA
 #include <linux/cuda.h>
 #endif
 #ifdef CONFIG_ADB_PMU
 #include <linux/pmu.h>
 #endif
+
+#include <linux/i2c-dev.h>
 
 #include <asm/uaccess.h>
 #include <asm/prom.h>
@@ -127,7 +130,7 @@ static struct resource awacs_rsrc[3];
 static char awacs_name[64];
 static int awacs_revision;
 static int awacs_sleeping;
-static DEFINE_MUTEX(dmasound_mutex);
+static DECLARE_MUTEX(dmasound_sem);
 
 static int sound_device_id;		/* exists after iMac revA */
 static int hw_can_byteswap = 1 ;	/* most pmac sound h/w can */
@@ -309,11 +312,11 @@ extern int daca_enter_sleep(void);
 extern int daca_leave_sleep(void);
 
 #define TRY_LOCK()	\
-	if ((rc = mutex_lock_interruptible(&dmasound_mutex)) != 0)	\
+	if ((rc = down_interruptible(&dmasound_sem)) != 0)	\
 		return rc;
-#define LOCK()		mutex_lock(&dmasound_mutex);
+#define LOCK()		down(&dmasound_sem);
 
-#define UNLOCK()	mutex_unlock(&dmasound_mutex);
+#define UNLOCK()	up(&dmasound_sem);
 
 /* We use different versions that the ones provided in dmasound.h
  * 
@@ -374,7 +377,10 @@ setup_audio_gpio(const char *name, const char* compatible, int *gpio_addr, int* 
 		*gpio_pol = *pp;
 	else
 		*gpio_pol = 1;
-	return irq_of_parse_and_map(np, 0);
+	if (np->n_intrs > 0)
+		return np->intrs[0].line;
+	
+	return 0;
 }
 
 static inline void
@@ -2794,7 +2800,7 @@ __init setup_beep(void)
 			DBDMA_ALIGN(beep_dbdma_cmd_space);
 	/* set up emergency dbdma cmd */
 	emergency_dbdma_cmd = beep_dbdma_cmd+1 ;
-	beep_buf = kmalloc(BEEP_BUFLEN * 4, GFP_KERNEL);
+	beep_buf = (short *) kmalloc(BEEP_BUFLEN * 4, GFP_KERNEL);
 	if (beep_buf == NULL) {
 		printk(KERN_ERR "dmasound_pmac: no memory for beep buffer\n");
 		kfree(beep_dbdma_cmd_space) ;
@@ -2810,7 +2816,7 @@ int __init dmasound_awacs_init(void)
 	struct device_node *io = NULL, *info = NULL;
 	int vol, res;
 
-	if (!machine_is(powermac))
+	if (_machine != _MACH_Pmac)
 		return -ENODEV;
 
 	awacs_subframe = 0;
@@ -2861,13 +2867,14 @@ printk("dmasound_pmac: couldn't find a Codec we can handle\n");
 	 * other info if necessary (early AWACS we want to read chip ids)
 	 */
 
-	if (of_get_address(io, 2, NULL, NULL) == NULL) {
+	if (of_get_address(io, 2, NULL, NULL) == NULL || io->n_intrs < 3) {
 		/* OK - maybe we need to use the 'awacs' node (on earlier
 		 * machines).
 		 */
 		if (awacs_node) {
 			io = awacs_node ;
-			if (of_get_address(io, 2, NULL, NULL) == NULL) {
+			if (of_get_address(io, 2, NULL, NULL) == NULL ||
+			    io->n_intrs < 3) {
 				printk("dmasound_pmac: can't use %s\n",
 				       io->full_name);
 				return -ENODEV;
@@ -2936,9 +2943,9 @@ printk("dmasound_pmac: couldn't find a Codec we can handle\n");
 	if (awacs_revision == AWACS_SCREAMER && awacs)
 		awacs_recalibrate();
 
-	awacs_irq = irq_of_parse_and_map(io, 0);
-	awacs_tx_irq = irq_of_parse_and_map(io, 1);
-	awacs_rx_irq = irq_of_parse_and_map(io, 2);
+	awacs_irq = io->intrs[0].line;
+	awacs_tx_irq = io->intrs[1].line;
+	awacs_rx_irq = io->intrs[2].line;
 
 	/* Hack for legacy crap that will be killed someday */
 	awacs_node = io;

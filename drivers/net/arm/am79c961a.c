@@ -696,9 +696,7 @@ static int __init am79c961_probe(struct platform_device *pdev)
 	dev->base_addr = res->start;
 	dev->irq = platform_get_irq(pdev, 0);
 
-	ret = -ENODEV;
-	if (dev->irq < 0)
-		goto nodev;
+    	ret = -ENODEV;
 	if (!request_region(dev->base_addr, 0x18, dev->name))
 		goto nodev;
 

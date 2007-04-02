@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/boot/simple/misc-chestnut.c
+ *
  * Setup for the IBM Chestnut (ibm-750fxgx_eval)
  *
  * Author: Mark A. Greer <mgreer@mvista.com>
@@ -9,6 +11,7 @@
  * or implied.
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <asm/io.h>
 #include <asm/mv64x60_defs.h>

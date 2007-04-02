@@ -20,6 +20,7 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/types.h>
@@ -335,9 +336,10 @@ int cmtp_add_connection(struct cmtp_connadd_req *req, struct socket *sock)
 	baswap(&src, &bt_sk(sock->sk)->src);
 	baswap(&dst, &bt_sk(sock->sk)->dst);
 
-	session = kzalloc(sizeof(struct cmtp_session), GFP_KERNEL);
+	session = kmalloc(sizeof(struct cmtp_session), GFP_KERNEL);
 	if (!session) 
 		return -ENOMEM;
+	memset(session, 0, sizeof(struct cmtp_session));
 
 	down_write(&cmtp_session_sem);
 

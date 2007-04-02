@@ -60,7 +60,6 @@ enum ppc_sys_devices {
 	MPC52xx_ATA,
 	MPC52xx_I2C1,
 	MPC52xx_I2C2,
-	NUM_PPC_SYS_DEVS,
 };
 
 
@@ -355,7 +354,6 @@ struct mpc52xx_xlb {
 	u32	snoop_window;		/* XLB + 0x70 */
 };
 
-#define MPC52xx_XLB_CFG_PLDIS		(1 << 31)
 #define MPC52xx_XLB_CFG_SNOOP		(1 << 15)
 
 /* Clock Distribution control */
@@ -427,9 +425,6 @@ extern void mpc52xx_progress(char *s, unsigned short hex);
 extern void mpc52xx_calibrate_decr(void);
 
 extern void mpc52xx_find_bridges(void);
-
-extern void mpc52xx_setup_cpu(void);
-
 
 
 	/* Matching of PSC function */

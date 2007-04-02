@@ -76,11 +76,6 @@ static void level_mask_and_ack_msc_irq(unsigned int irq)
 	mask_msc_irq(irq);
 	if (!cpu_has_veic)
 		MSCIC_WRITE(MSC01_IC_EOI, 0);
-#ifdef CONFIG_MIPS_MT_SMTC
-	/* This actually needs to be a call into platform code */
-	if (irq_hwmask[irq] & ST0_IM)
-		set_c0_status(irq_hwmask[irq] & ST0_IM);
-#endif /* CONFIG_MIPS_MT_SMTC */
 }
 
 /*
@@ -97,10 +92,6 @@ static void edge_mask_and_ack_msc_irq(unsigned int irq)
 		MSCIC_WRITE(MSC01_IC_SUP+irq*8, r | ~MSC01_IC_SUP_EDGE_BIT);
 		MSCIC_WRITE(MSC01_IC_SUP+irq*8, r);
 	}
-#ifdef CONFIG_MIPS_MT_SMTC
-	if (irq_hwmask[irq] & ST0_IM)
-		set_c0_status(irq_hwmask[irq] & ST0_IM);
-#endif /* CONFIG_MIPS_MT_SMTC */
 }
 
 /*
@@ -137,7 +128,7 @@ msc_bind_eic_interrupt (unsigned int irq, unsigned int set)
 
 #define shutdown_msc_irq	disable_msc_irq
 
-struct irq_chip msc_levelirq_type = {
+struct hw_interrupt_type msc_levelirq_type = {
 	.typename = "SOC-it-Level",
 	.startup = startup_msc_irq,
 	.shutdown = shutdown_msc_irq,
@@ -147,7 +138,7 @@ struct irq_chip msc_levelirq_type = {
 	.end = end_msc_irq,
 };
 
-struct irq_chip msc_edgeirq_type = {
+struct hw_interrupt_type msc_edgeirq_type = {
 	.typename = "SOC-it-Edge",
 	.startup =startup_msc_irq,
 	.shutdown = shutdown_msc_irq,
@@ -174,14 +165,14 @@ void __init init_msc_irqs(unsigned int base, msc_irqmap_t *imp, int nirq)
 
 		switch (imp->im_type) {
 		case MSC01_IRQ_EDGE:
-			irq_desc[base+n].chip = &msc_edgeirq_type;
+			irq_desc[base+n].handler = &msc_edgeirq_type;
 			if (cpu_has_veic)
 				MSCIC_WRITE(MSC01_IC_SUP+n*8, MSC01_IC_SUP_EDGE_BIT);
 			else
 				MSCIC_WRITE(MSC01_IC_SUP+n*8, MSC01_IC_SUP_EDGE_BIT | imp->im_lvl);
 			break;
 		case MSC01_IRQ_LEVEL:
-			irq_desc[base+n].chip = &msc_levelirq_type;
+			irq_desc[base+n].handler = &msc_levelirq_type;
 			if (cpu_has_veic)
 				MSCIC_WRITE(MSC01_IC_SUP+n*8, 0);
 			else

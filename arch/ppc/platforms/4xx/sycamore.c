@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/sycamore.c
+ *
  * Architecture- / platform-specific boot-time initialization code for
  * IBM PowerPC 4xx based boards.
  *
@@ -9,6 +11,7 @@
  * is licensed "as is" without any warranty of any kind, whether express
  * or implied.
  */
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/smp.h>
 #include <linux/threads.h>

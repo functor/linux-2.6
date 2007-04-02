@@ -1,6 +1,7 @@
 #ifndef _ASM_IA64_IA32_PRIV_H
 #define _ASM_IA64_IA32_PRIV_H
 
+#include <linux/config.h>
 
 #include <asm/ia32.h>
 
@@ -28,9 +29,9 @@
 struct partial_page {
 	struct partial_page	*next; /* linked list, sorted by address */
 	struct rb_node		pp_rb;
-	/* 64K is the largest "normal" page supported by ia64 ABI. So 4K*64
+	/* 64K is the largest "normal" page supported by ia64 ABI. So 4K*32
 	 * should suffice.*/
-	unsigned long		bitmap;
+	unsigned int		bitmap;
 	unsigned int		base;
 };
 

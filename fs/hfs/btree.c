@@ -36,7 +36,8 @@ struct hfs_btree *hfs_btree_open(struct super_block *sb, u32 id, btree_keycmp ke
 	tree->inode = iget_locked(sb, id);
 	if (!tree->inode)
 		goto free_tree;
-	BUG_ON(!(tree->inode->i_state & I_NEW));
+	if (!(tree->inode->i_state & I_NEW))
+		BUG();
 	{
 	struct hfs_mdb *mdb = HFS_SB(sb)->mdb;
 	HFS_I(tree->inode)->flags = 0;
@@ -59,7 +60,7 @@ struct hfs_btree *hfs_btree_open(struct super_block *sb, u32 id, btree_keycmp ke
 	unlock_new_inode(tree->inode);
 
 	mapping = tree->inode->i_mapping;
-	page = read_mapping_page(mapping, 0, NULL);
+	page = read_cache_page(mapping, 0, (filler_t *)mapping->a_ops->readpage, NULL);
 	if (IS_ERR(page))
 		goto free_tree;
 

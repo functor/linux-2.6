@@ -65,8 +65,35 @@ struct arpt_arp {
 	u_int16_t invflags;
 };
 
-#define arpt_entry_target xt_entry_target
-#define arpt_standard_target xt_standard_target
+struct arpt_entry_target
+{
+	union {
+		struct {
+			u_int16_t target_size;
+
+			/* Used by userspace */
+			char name[ARPT_FUNCTION_MAXNAMELEN-1];
+			u_int8_t revision;
+		} user;
+		struct {
+			u_int16_t target_size;
+
+			/* Used inside the kernel */
+			struct arpt_target *target;
+		} kernel;
+
+		/* Total length */
+		u_int16_t target_size;
+	} u;
+
+	unsigned char data[0];
+};
+
+struct arpt_standard_target
+{
+	struct arpt_entry_target target;
+	int verdict;
+};
 
 /* Values for "flag" field in struct arpt_ip (general arp structure).
  * No flags defined yet.
@@ -236,10 +263,8 @@ static __inline__ struct arpt_entry_target *arpt_get_target(struct arpt_entry *e
  */
 #ifdef __KERNEL__
 
-#define arpt_register_target(tgt) 	\
-({	(tgt)->family = NF_ARP;		\
- 	xt_register_target(tgt); })
-#define arpt_unregister_target(tgt) xt_unregister_target(tgt)
+#define arpt_register_target(tgt) xt_register_target(NF_ARP, tgt)
+#define arpt_unregister_target(tgt) xt_unregister_target(NF_ARP, tgt)
 
 extern int arpt_register_table(struct arpt_table *table,
 			       const struct arpt_replace *repl);

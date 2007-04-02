@@ -28,12 +28,13 @@
 #define atmel_request_region request_mem_region
 #define atmel_release_region release_mem_region
 
-static inline void atmel_put_base_addr(void __iomem *iobase)
+static inline void atmel_put_base_addr(struct tpm_vendor_specific
+					 *vendor)
 {
-	iounmap(iobase);
+	iounmap(vendor->iobase);
 }
 
-static void __iomem * atmel_get_base_addr(unsigned long *base, int *region_size)
+static void __iomem * atmel_get_base_addr(struct tpm_vendor_specific *vendor)
 {
 	struct device_node *dn;
 	unsigned long address, size;
@@ -70,9 +71,9 @@ static void __iomem * atmel_get_base_addr(unsigned long *base, int *region_size)
 	else
 		size = reg[naddrc];
 
-	*base = address;
-	*region_size = size;
-	return ioremap(*base, *region_size);
+	vendor->base = address;
+	vendor->region_size = size;
+	return ioremap(vendor->base, vendor->region_size);
 }
 #else
 #define atmel_getb(chip, offset) inb(chip->vendor->base + offset)
@@ -105,12 +106,14 @@ static int atmel_verify_tpm11(void)
 	return 0;
 }
 
-static inline void atmel_put_base_addr(void __iomem *iobase)
+static inline void atmel_put_base_addr(struct tpm_vendor_specific
+					 *vendor)
 {
 }
 
 /* Determine where to talk to device */
-static void __iomem * atmel_get_base_addr(unsigned long *base, int *region_size)
+static void __iomem * atmel_get_base_addr(struct tpm_vendor_specific
+					 *vendor)
 {
 	int lo, hi;
 
@@ -120,9 +123,9 @@ static void __iomem * atmel_get_base_addr(unsigned long *base, int *region_size)
 	lo = tpm_read_index(TPM_ADDR, TPM_ATMEL_BASE_ADDR_LO);
 	hi = tpm_read_index(TPM_ADDR, TPM_ATMEL_BASE_ADDR_HI);
 
-	*base = (hi << 8) | lo;
-	*region_size = 2;
+	vendor->base = (hi << 8) | lo;
+	vendor->region_size = 2;
 
-	return ioport_map(*base, *region_size);
+	return ioport_map(vendor->base, vendor->region_size);
 }
 #endif

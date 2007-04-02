@@ -17,18 +17,18 @@ int saa7146_res_get(struct saa7146_fh *fh, unsigned int bit)
 	}
 
 	/* is it free? */
-	mutex_lock(&dev->lock);
+	down(&dev->lock);
 	if (vv->resources & bit) {
 		DEB_D(("locked! vv->resources:0x%02x, we want:0x%02x\n",vv->resources,bit));
 		/* no, someone else uses it */
-		mutex_unlock(&dev->lock);
+		up(&dev->lock);
 		return 0;
 	}
 	/* it's free, grab it */
 	fh->resources  |= bit;
 	vv->resources |= bit;
 	DEB_D(("res: get 0x%02x, cur:0x%02x\n",bit,vv->resources));
-	mutex_unlock(&dev->lock);
+	up(&dev->lock);
 	return 1;
 }
 
@@ -37,28 +37,29 @@ void saa7146_res_free(struct saa7146_fh *fh, unsigned int bits)
 	struct saa7146_dev *dev = fh->dev;
 	struct saa7146_vv *vv = dev->vv_data;
 
-	BUG_ON((fh->resources & bits) != bits);
+	if ((fh->resources & bits) != bits)
+		BUG();
 
-	mutex_lock(&dev->lock);
+	down(&dev->lock);
 	fh->resources  &= ~bits;
 	vv->resources &= ~bits;
 	DEB_D(("res: put 0x%02x, cur:0x%02x\n",bits,vv->resources));
-	mutex_unlock(&dev->lock);
+	up(&dev->lock);
 }
 
 
 /********************************************************************************/
 /* common dma functions */
 
-void saa7146_dma_free(struct saa7146_dev *dev,struct videobuf_queue *q,
-						struct saa7146_buf *buf)
+void saa7146_dma_free(struct saa7146_dev *dev,struct saa7146_buf *buf)
 {
 	DEB_EE(("dev:%p, buf:%p\n",dev,buf));
 
-	BUG_ON(in_interrupt());
+	if (in_interrupt())
+		BUG();
 
 	videobuf_waiton(&buf->vb,0,0);
-	videobuf_dma_unmap(q, &buf->vb.dma);
+	videobuf_dma_pci_unmap(dev->pci, &buf->vb.dma);
 	videobuf_dma_free(&buf->vb.dma);
 	buf->vb.state = STATE_NEEDS_INIT;
 }
@@ -203,7 +204,7 @@ static int fops_open(struct inode *inode, struct file *file)
 
 	DEB_EE(("inode:%p, file:%p, minor:%d\n",inode,file,minor));
 
-	if (mutex_lock_interruptible(&saa7146_devices_lock))
+	if (down_interruptible(&saa7146_devices_lock))
 		return -ERESTARTSYS;
 
 	list_for_each(list,&saa7146_devices) {
@@ -275,7 +276,7 @@ out:
 		kfree(fh);
 		file->private_data = NULL;
 	}
-	mutex_unlock(&saa7146_devices_lock);
+	up(&saa7146_devices_lock);
 	return result;
 }
 
@@ -286,7 +287,7 @@ static int fops_release(struct inode *inode, struct file *file)
 
 	DEB_EE(("inode:%p, file:%p\n",inode,file));
 
-	if (mutex_lock_interruptible(&saa7146_devices_lock))
+	if (down_interruptible(&saa7146_devices_lock))
 		return -ERESTARTSYS;
 
 	if( fh->type == V4L2_BUF_TYPE_VBI_CAPTURE) {
@@ -302,7 +303,7 @@ static int fops_release(struct inode *inode, struct file *file)
 	file->private_data = NULL;
 	kfree(fh);
 
-	mutex_unlock(&saa7146_devices_lock);
+	up(&saa7146_devices_lock);
 
 	return 0;
 }
@@ -501,7 +502,6 @@ int saa7146_vv_init(struct saa7146_dev* dev, struct saa7146_ext_vv *ext_vv)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(saa7146_vv_init);
 
 int saa7146_vv_release(struct saa7146_dev* dev)
 {
@@ -516,7 +516,6 @@ int saa7146_vv_release(struct saa7146_dev* dev)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(saa7146_vv_release);
 
 int saa7146_register_device(struct video_device **vid, struct saa7146_dev* dev,
 			    char *name, int type)
@@ -555,7 +554,6 @@ int saa7146_register_device(struct video_device **vid, struct saa7146_dev* dev,
 	*vid = vfd;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(saa7146_register_device);
 
 int saa7146_unregister_device(struct video_device **vid, struct saa7146_dev* dev)
 {
@@ -574,7 +572,6 @@ int saa7146_unregister_device(struct video_device **vid, struct saa7146_dev* dev
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(saa7146_unregister_device);
 
 static int __init saa7146_vv_init_module(void)
 {

@@ -12,6 +12,7 @@
  * Joe Taylor <joe@tensilica.com>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/mm.h>
@@ -47,6 +48,7 @@ EXPORT_SYMBOL(memchr);
 EXPORT_SYMBOL(strcat);
 EXPORT_SYMBOL(strchr);
 EXPORT_SYMBOL(strlen);
+EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strncat);
 EXPORT_SYMBOL(strnlen);
 EXPORT_SYMBOL(strrchr);
@@ -110,6 +112,8 @@ EXPORT_SYMBOL(__xtensa_copy_user);
 #if defined(CONFIG_VGA_CONSOLE) || defined(CONFIG_DUMMY_CONSOLE)
 // FIXME EXPORT_SYMBOL(screen_info);
 #endif
+
+EXPORT_SYMBOL(get_wchan);
 
 EXPORT_SYMBOL(outsb);
 EXPORT_SYMBOL(outsw);

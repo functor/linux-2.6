@@ -269,7 +269,7 @@ struct nsc_ircc_cb {
 	__u32 new_speed;
 	int index;                 /* Instance index */
 
-	struct platform_device *pldev;
+        struct pm_dev *dev;
 };
 
 static inline void switch_bank(int iobase, int bank)

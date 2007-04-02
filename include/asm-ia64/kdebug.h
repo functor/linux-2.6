@@ -40,9 +40,7 @@ struct die_args {
 
 extern int register_die_notifier(struct notifier_block *);
 extern int unregister_die_notifier(struct notifier_block *);
-extern int register_page_fault_notifier(struct notifier_block *);
-extern int unregister_page_fault_notifier(struct notifier_block *);
-extern struct atomic_notifier_head ia64die_chain;
+extern struct notifier_block *ia64die_chain;
 
 enum die_val {
 	DIE_BREAK = 1,
@@ -60,8 +58,6 @@ enum die_val {
 	DIE_MCA_RENDZVOUS_ENTER,
 	DIE_MCA_RENDZVOUS_PROCESS,
 	DIE_MCA_RENDZVOUS_LEAVE,
-	DIE_MCA_NEW_TIMEOUT,
-	DIE_INIT_ENTER,
 	DIE_INIT_MONARCH_ENTER,
 	DIE_INIT_MONARCH_PROCESS,
 	DIE_INIT_MONARCH_LEAVE,
@@ -85,7 +81,7 @@ static inline int notify_die(enum die_val val, char *str, struct pt_regs *regs,
 		.signr  = sig
 	};
 
-	return atomic_notifier_call_chain(&ia64die_chain, val, &args);
+	return notifier_call_chain(&ia64die_chain, val, &args);
 }
 
 #endif

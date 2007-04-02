@@ -24,6 +24,7 @@
  * with the serial core maintainer satisfaction to appear soon.
  */
 
+#include <linux/config.h>
 
 #if defined(CONFIG_SERIAL_PXA_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
@@ -268,6 +269,7 @@ static unsigned int serial_pxa_get_mctrl(struct uart_port *port)
 	unsigned char status;
 	unsigned int ret;
 
+return TIOCM_CTS | TIOCM_DSR | TIOCM_CAR;
 	status = serial_in(up, UART_MSR);
 
 	ret = 0;
@@ -389,7 +391,7 @@ static int serial_pxa_startup(struct uart_port *port)
 
 	/*
 	 * Finally, enable interrupts.  Note: Modem status interrupts
-	 * are set via set_termios(), which will be occurring imminently
+	 * are set via set_termios(), which will be occuring imminently
 	 * anyway, so we don't enable them here.
 	 */
 	up->ier = UART_IER_RLSI | UART_IER_RDI | UART_IER_RTOIE | UART_IER_UUE;
@@ -617,14 +619,6 @@ static inline void wait_for_xmitr(struct uart_pxa_port *up)
 	}
 }
 
-static void serial_pxa_console_putchar(struct uart_port *port, int ch)
-{
-	struct uart_pxa_port *up = (struct uart_pxa_port *)port;
-
-	wait_for_xmitr(up);
-	serial_out(up, UART_TX, ch);
-}
-
 /*
  * Print a string to the serial port trying not to disturb
  * any possible real use of the port...
@@ -636,6 +630,7 @@ serial_pxa_console_write(struct console *co, const char *s, unsigned int count)
 {
 	struct uart_pxa_port *up = &serial_pxa_ports[co->index];
 	unsigned int ier;
+	int i;
 
 	/*
 	 *	First save the IER then disable the interrupts
@@ -643,7 +638,22 @@ serial_pxa_console_write(struct console *co, const char *s, unsigned int count)
 	ier = serial_in(up, UART_IER);
 	serial_out(up, UART_IER, UART_IER_UUE);
 
-	uart_console_write(&up->port, s, count, serial_pxa_console_putchar);
+	/*
+	 *	Now, do each character
+	 */
+	for (i = 0; i < count; i++, s++) {
+		wait_for_xmitr(up);
+
+		/*
+		 *	Send the character out.
+		 *	If a LF, also do CR...
+		 */
+		serial_out(up, UART_TX, *s);
+		if (*s == 10) {
+			wait_for_xmitr(up);
+			serial_out(up, UART_TX, 13);
+		}
+	}
 
 	/*
 	 *	Finally, wait for transmitter to become empty
@@ -779,6 +789,7 @@ static struct uart_pxa_port serial_pxa_ports[] = {
 static struct uart_driver serial_pxa_reg = {
 	.owner		= THIS_MODULE,
 	.driver_name	= "PXA serial",
+	.devfs_name	= "tts/",
 	.dev_name	= "ttyS",
 	.major		= TTY_MAJOR,
 	.minor		= 64,

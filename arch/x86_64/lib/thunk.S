@@ -6,6 +6,7 @@
 	 * $Id: thunk.S,v 1.2 2002/03/13 20:06:58 ak Exp $
 	 */
 
+	#include <linux/config.h>
 	#include <linux/linkage.h>
 	#include <asm/dwarf2.h>
 	#include <asm/calling.h>			
@@ -41,16 +42,12 @@
 	thunk rwsem_wake_thunk,rwsem_wake
 	thunk rwsem_downgrade_thunk,rwsem_downgrade_wake
 #endif	
+	thunk do_softirq_thunk,do_softirq
 	
 	thunk __down_failed,__down
 	thunk_retrax __down_failed_interruptible,__down_interruptible
 	thunk_retrax __down_failed_trylock,__down_trylock
 	thunk __up_wakeup,__up
-
-#ifdef CONFIG_TRACE_IRQFLAGS
-	thunk trace_hardirqs_on_thunk,trace_hardirqs_on
-	thunk trace_hardirqs_off_thunk,trace_hardirqs_off
-#endif
 	
 	/* SAVE_ARGS below is used only for the .cfi directives it contains. */
 	CFI_STARTPROC
@@ -66,3 +63,33 @@ restore_norax:
 	RESTORE_ARGS 1
 	ret
 	CFI_ENDPROC
+
+#ifdef CONFIG_SMP
+/* Support for read/write spinlocks. */
+	.text
+/* rax:	pointer to rwlock_t */	
+ENTRY(__write_lock_failed)
+	lock
+	addl $RW_LOCK_BIAS,(%rax)
+1:	rep
+	nop
+	cmpl $RW_LOCK_BIAS,(%rax)
+	jne 1b
+	lock 
+	subl $RW_LOCK_BIAS,(%rax)
+	jnz  __write_lock_failed
+	ret
+
+/* rax:	pointer to rwlock_t */	
+ENTRY(__read_lock_failed)
+	lock
+	incl (%rax)
+1:	rep
+	nop
+	cmpl $1,(%rax)
+	js 1b
+	lock
+	decl (%rax)
+	js __read_lock_failed
+	ret
+#endif

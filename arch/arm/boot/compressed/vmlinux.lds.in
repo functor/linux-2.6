@@ -18,7 +18,6 @@ SECTIONS
     _start = .;
     *(.start)
     *(.text)
-    *(.text.*)
     *(.fixup)
     *(.gnu.warning)
     *(.rodata)

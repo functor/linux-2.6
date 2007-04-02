@@ -2,15 +2,12 @@
 #define _ASM_GENERIC_BUG_H
 
 #include <linux/compiler.h>
-
-#ifndef __ASSEMBLY__
-extern const char *print_tainted(void);
-#endif
+#include <linux/config.h>
 
 #ifdef CONFIG_BUG
 #ifndef HAVE_ARCH_BUG
 #define BUG() do { \
-	printk("BUG: failure at %s:%d/%s()! (%s)\n", __FILE__, __LINE__, __FUNCTION__, print_tainted()); \
+	printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); \
 	panic("BUG!"); \
 } while (0)
 #endif
@@ -22,7 +19,7 @@ extern const char *print_tainted(void);
 #ifndef HAVE_ARCH_WARN_ON
 #define WARN_ON(condition) do { \
 	if (unlikely((condition)!=0)) { \
-		printk("BUG: warning at %s:%d/%s() (%s)\n", __FILE__, __LINE__, __FUNCTION__, print_tainted()); \
+		printk("Badness in %s at %s:%d\n", __FUNCTION__, __FILE__, __LINE__); \
 		dump_stack(); \
 	} \
 } while (0)
@@ -34,42 +31,12 @@ extern const char *print_tainted(void);
 #endif
 
 #ifndef HAVE_ARCH_BUG_ON
-#define BUG_ON(condition) do { \
-	if (unlikely((condition)!=0)) { \
-		printk("BUGging on (%s)\n", #condition); \
-		BUG(); \
-	} \
-} while(0)
+#define BUG_ON(condition) do { if (condition) ; } while(0)
 #endif
 
 #ifndef HAVE_ARCH_WARN_ON
-#define WARN_ON(condition) do { \
-	if (unlikely((condition)!=0)) { \
-		printk("BUG: warning: (%s) at %s:%d/%s()\n", \
-			#condition, __FILE__, __LINE__, __FUNCTION__); \
-		dump_stack(); \
-	} \
-} while (0)
+#define WARN_ON(condition) do { if (condition) ; } while(0)
 #endif
-#endif
-
-#define WARN_ON_ONCE(condition)				\
-({							\
-	static int __warn_once = 1;			\
-	int __ret = 0;					\
-							\
-	if (unlikely((condition) && __warn_once)) {	\
-		__warn_once = 0;			\
-		WARN_ON(condition);				\
-		__ret = 1;				\
-	}						\
-	__ret;						\
-})
-
-#ifdef CONFIG_SMP
-# define WARN_ON_SMP(x)			WARN_ON(x)
-#else
-# define WARN_ON_SMP(x)			do { } while (0)
 #endif
 
 #endif

@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/ppc85xx_setup.h
+ *
  * MPC85XX common board definitions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
@@ -15,6 +17,7 @@
 #ifndef __PPC_SYSLIB_PPC85XX_SETUP_H
 #define __PPC_SYSLIB_PPC85XX_SETUP_H
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <asm/ppcboot.h>
 

@@ -83,13 +83,12 @@ exit1:
 int sysfs_create_link(struct kobject * kobj, struct kobject * target, const char * name)
 {
 	struct dentry * dentry = kobj->dentry;
-	int error = -EEXIST;
+	int error = 0;
 
 	BUG_ON(!kobj || !kobj->dentry || !name);
 
 	mutex_lock(&dentry->d_inode->i_mutex);
-	if (!sysfs_dirent_exist(dentry->d_fsdata, name))
-		error = sysfs_add_link(dentry, name, target);
+	error = sysfs_add_link(dentry, name, target);
 	mutex_unlock(&dentry->d_inode->i_mutex);
 	return error;
 }

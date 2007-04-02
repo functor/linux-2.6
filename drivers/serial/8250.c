@@ -7,9 +7,6 @@
  *
  *  Copyright (C) 2001 Russell King.
  *
- *  2005/09/16: Enabled higher baud rates for 16C95x.
- *		(Mathias Adam <a2@adamis.de>)
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -22,6 +19,7 @@
  *  mapbase is the physical address of the IO port.
  *  membase is an 'ioremapped' cookie.
  */
+#include <linux/config.h>
 
 #if defined(CONFIG_SERIAL_8250_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
@@ -51,7 +49,7 @@
 
 /*
  * Configuration:
- *   share_irqs - whether we pass IRQF_SHARED to request_irq().  This option
+ *   share_irqs - whether we pass SA_SHIRQ to request_irq().  This option
  *                is unsafe when used on edge-triggered interrupts.
  */
 static unsigned int share_irqs = SERIAL8250_SHARE_IRQS;
@@ -302,7 +300,6 @@ static inline int map_8250_out_reg(struct uart_8250_port *up, int offset)
 
 static unsigned int serial_in(struct uart_8250_port *up, int offset)
 {
-	unsigned int tmp;
 	offset = map_8250_in_reg(up, offset) << up->port.regshift;
 
 	switch (up->port.iotype) {
@@ -320,13 +317,6 @@ static unsigned int serial_in(struct uart_8250_port *up, int offset)
 	case UPIO_AU:
 		return __raw_readl(up->port.membase + offset);
 #endif
-
-	case UPIO_TSI:
-		if (offset == UART_IIR) {
-			tmp = readl((u32 *)(up->port.membase + UART_RX));
-			return (cpu_to_le32(tmp) >> 8) & 0xff;
-		} else
-			return readb(up->port.membase + offset);
 
 	default:
 		return inb(up->port.iobase + offset);
@@ -357,10 +347,6 @@ serial_out(struct uart_8250_port *up, int offset, int value)
 		__raw_writel(value, up->port.membase + offset);
 		break;
 #endif
-	case UPIO_TSI:
-		if (!((offset == UART_IER) && (value & UART_IER_UUE)))
-			writeb(value, up->port.membase + offset);
-		break;
 
 	default:
 		outb(value, up->port.iobase + offset);
@@ -376,40 +362,6 @@ serial_out(struct uart_8250_port *up, int offset, int value)
 #define serial_inp(up, offset)		serial_in(up, offset)
 #define serial_outp(up, offset, value)	serial_out(up, offset, value)
 
-/* Uart divisor latch read */
-static inline int _serial_dl_read(struct uart_8250_port *up)
-{
-	return serial_inp(up, UART_DLL) | serial_inp(up, UART_DLM) << 8;
-}
-
-/* Uart divisor latch write */
-static inline void _serial_dl_write(struct uart_8250_port *up, int value)
-{
-	serial_outp(up, UART_DLL, value & 0xff);
-	serial_outp(up, UART_DLM, value >> 8 & 0xff);
-}
-
-#ifdef CONFIG_SERIAL_8250_AU1X00
-/* Au1x00 haven't got a standard divisor latch */
-static int serial_dl_read(struct uart_8250_port *up)
-{
-	if (up->port.iotype == UPIO_AU)
-		return __raw_readl(up->port.membase + 0x28);
-	else
-		return _serial_dl_read(up);
-}
-
-static void serial_dl_write(struct uart_8250_port *up, int value)
-{
-	if (up->port.iotype == UPIO_AU)
-		__raw_writel(value, up->port.membase + 0x28);
-	else
-		_serial_dl_write(up, value);
-}
-#else
-#define serial_dl_read(up) _serial_dl_read(up)
-#define serial_dl_write(up, value) _serial_dl_write(up, value)
-#endif
 
 /*
  * For the 16C950
@@ -542,8 +494,7 @@ static void disable_rsa(struct uart_8250_port *up)
  */
 static int size_fifo(struct uart_8250_port *up)
 {
-	unsigned char old_fcr, old_mcr, old_lcr;
-	unsigned short old_dl;
+	unsigned char old_fcr, old_mcr, old_dll, old_dlm, old_lcr;
 	int count;
 
 	old_lcr = serial_inp(up, UART_LCR);
@@ -554,8 +505,10 @@ static int size_fifo(struct uart_8250_port *up)
 		    UART_FCR_CLEAR_RCVR | UART_FCR_CLEAR_XMIT);
 	serial_outp(up, UART_MCR, UART_MCR_LOOP);
 	serial_outp(up, UART_LCR, UART_LCR_DLAB);
-	old_dl = serial_dl_read(up);
-	serial_dl_write(up, 0x0001);
+	old_dll = serial_inp(up, UART_DLL);
+	old_dlm = serial_inp(up, UART_DLM);
+	serial_outp(up, UART_DLL, 0x01);
+	serial_outp(up, UART_DLM, 0x00);
 	serial_outp(up, UART_LCR, 0x03);
 	for (count = 0; count < 256; count++)
 		serial_outp(up, UART_TX, count);
@@ -566,7 +519,8 @@ static int size_fifo(struct uart_8250_port *up)
 	serial_outp(up, UART_FCR, old_fcr);
 	serial_outp(up, UART_MCR, old_mcr);
 	serial_outp(up, UART_LCR, UART_LCR_DLAB);
-	serial_dl_write(up, old_dl);
+	serial_outp(up, UART_DLL, old_dll);
+	serial_outp(up, UART_DLM, old_dlm);
 	serial_outp(up, UART_LCR, old_lcr);
 
 	return count;
@@ -796,7 +750,8 @@ static void autoconfig_16550a(struct uart_8250_port *up)
 
 			serial_outp(up, UART_LCR, 0xE0);
 
-			quot = serial_dl_read(up);
+			quot = serial_inp(up, UART_DLM) << 8;
+			quot += serial_inp(up, UART_DLL);
 			quot <<= 3;
 
 			status1 = serial_in(up, 0x04); /* EXCR1 */
@@ -804,7 +759,8 @@ static void autoconfig_16550a(struct uart_8250_port *up)
 			status1 |= 0x10;  /* 1.625 divisor for baud_base --> 921600 */
 			serial_outp(up, 0x04, status1);
 			
-			serial_dl_write(up, quot);
+			serial_outp(up, UART_DLL, quot & 0xff);
+			serial_outp(up, UART_DLM, quot >> 8);
 
 			serial_outp(up, UART_LCR, 0);
 
@@ -1415,7 +1371,7 @@ static void serial_do_unlink(struct irq_info *i, struct uart_8250_port *up)
 static int serial_link_irq_chain(struct uart_8250_port *up)
 {
 	struct irq_info *i = irq_lists + up->port.irq;
-	int ret, irq_flags = up->port.flags & UPF_SHARE_IRQ ? IRQF_SHARED : 0;
+	int ret, irq_flags = up->port.flags & UPF_SHARE_IRQ ? SA_SHIRQ : 0;
 
 	spin_lock_irq(&i->lock);
 
@@ -1572,7 +1528,7 @@ static int serial8250_startup(struct uart_port *port)
 
 	/*
 	 * Clear the FIFO buffers and disable them.
-	 * (they will be reenabled in set_termios())
+	 * (they will be reeanbled in set_termios())
 	 */
 	serial8250_clear_fifos(up);
 
@@ -1759,14 +1715,6 @@ static unsigned int serial8250_get_divisor(struct uart_port *port, unsigned int 
 	else if ((port->flags & UPF_MAGIC_MULTIPLIER) &&
 		 baud == (port->uartclk/8))
 		quot = 0x8002;
-	/*
-	 * For 16C950s UART_TCR is used in combination with divisor==1
-	 * to achieve baud rates up to baud_base*4.
-	 */
-	else if ((port->type == PORT_16C950) &&
-		 baud > (port->uartclk/16))
-		quot = 1;
-
 	else
 		quot = uart_get_divisor(port, baud);
 
@@ -1780,7 +1728,7 @@ serial8250_set_termios(struct uart_port *port, struct termios *termios,
 	struct uart_8250_port *up = (struct uart_8250_port *)port;
 	unsigned char cval, fcr = 0;
 	unsigned long flags;
-	unsigned int baud, quot, max_baud;
+	unsigned int baud, quot;
 
 	switch (termios->c_cflag & CSIZE) {
 	case CS5:
@@ -1812,8 +1760,7 @@ serial8250_set_termios(struct uart_port *port, struct termios *termios,
 	/*
 	 * Ask the core to calculate the divisor for us.
 	 */
-	max_baud = (up->port.type == PORT_16C950 ? port->uartclk/4 : port->uartclk/16);
-	baud = uart_get_baud_rate(port, termios, old, 0, max_baud); 
+	baud = uart_get_baud_rate(port, termios, old, 0, port->uartclk/16); 
 	quot = serial8250_get_divisor(port, baud);
 
 	/*
@@ -1849,19 +1796,6 @@ serial8250_set_termios(struct uart_port *port, struct termios *termios,
 	 */
 	spin_lock_irqsave(&up->port.lock, flags);
 
-	/* 
-	 * 16C950 supports additional prescaler ratios between 1:16 and 1:4
-	 * thus increasing max baud rate to uartclk/4.
-	 */
-	if (up->port.type == PORT_16C950) {
-		if (baud == port->uartclk/4)
-			serial_icr_write(up, UART_TCR, 0x4);
-		else if (baud == port->uartclk/8)
-			serial_icr_write(up, UART_TCR, 0x8);
-		else
-			serial_icr_write(up, UART_TCR, 0);
-	}
-	
 	/*
 	 * Update the per-port timeout.
 	 */
@@ -1928,7 +1862,8 @@ serial8250_set_termios(struct uart_port *port, struct termios *termios,
 		serial_outp(up, UART_LCR, cval | UART_LCR_DLAB);/* set DLAB */
 	}
 
-	serial_dl_write(up, quot);
+	serial_outp(up, UART_DLL, quot & 0xff);		/* LS of divisor */
+	serial_outp(up, UART_DLM, quot >> 8);		/* MS of divisor */
 
 	/*
 	 * LCR DLAB must be set to enable 64-byte FIFO mode. If the FCR
@@ -1971,9 +1906,6 @@ static int serial8250_request_std_resource(struct uart_8250_port *up)
 	int ret = 0;
 
 	switch (up->port.iotype) {
-	case UPIO_AU:
-		size = 0x100000;
-		/* fall thru */
 	case UPIO_MEM:
 		if (!up->port.mapbase)
 			break;
@@ -2006,9 +1938,6 @@ static void serial8250_release_std_resource(struct uart_8250_port *up)
 	unsigned int size = 8 << up->port.regshift;
 
 	switch (up->port.iotype) {
-	case UPIO_AU:
-		size = 0x100000;
-		/* fall thru */
 	case UPIO_MEM:
 		if (!up->port.mapbase)
 			break;
@@ -2247,20 +2176,10 @@ static inline void wait_for_xmitr(struct uart_8250_port *up, int bits)
 	/* Wait up to 1s for flow control if necessary */
 	if (up->port.flags & UPF_CONS_FLOW) {
 		tmout = 1000000;
-		while (!(serial_in(up, UART_MSR) & UART_MSR_CTS) && --tmout) {
+		while (--tmout &&
+		       ((serial_in(up, UART_MSR) & UART_MSR_CTS) == 0))
 			udelay(1);
-			if ((tmout % 1000) == 0)
-				touch_nmi_watchdog();
-		}
 	}
-}
-
-static void serial8250_console_putchar(struct uart_port *port, int ch)
-{
-	struct uart_8250_port *up = (struct uart_8250_port *)port;
-
-	wait_for_xmitr(up, UART_LSR_THRE);
-	serial_out(up, UART_TX, ch);
 }
 
 /*
@@ -2273,20 +2192,10 @@ static void
 serial8250_console_write(struct console *co, const char *s, unsigned int count)
 {
 	struct uart_8250_port *up = &serial8250_ports[co->index];
-	unsigned long flags;
 	unsigned int ier;
-	int locked = 1;
+	int i;
 
 	touch_nmi_watchdog();
-
-	local_irq_save(flags);
-	if (up->port.sysrq) {
-		/* serial8250_handle_port() already took the lock */
-		locked = 0;
-	} else if (oops_in_progress) {
-		locked = spin_trylock(&up->port.lock);
-	} else
-		spin_lock(&up->port.lock);
 
 	/*
 	 *	First save the IER then disable the interrupts
@@ -2298,18 +2207,30 @@ serial8250_console_write(struct console *co, const char *s, unsigned int count)
 	else
 		serial_out(up, UART_IER, 0);
 
-	uart_console_write(&up->port, s, count, serial8250_console_putchar);
+	/*
+	 *	Now, do each character
+	 */
+	for (i = 0; i < count; i++, s++) {
+		wait_for_xmitr(up, UART_LSR_THRE);
+
+		/*
+		 *	Send the character out.
+		 *	If a LF, also do CR...
+		 */
+		serial_out(up, UART_TX, *s);
+		if (*s == 10) {
+			wait_for_xmitr(up, UART_LSR_THRE);
+			serial_out(up, UART_TX, 13);
+		}
+	}
 
 	/*
 	 *	Finally, wait for transmitter to become empty
 	 *	and restore the IER
 	 */
 	wait_for_xmitr(up, BOTH_EMPTY);
-	serial_out(up, UART_IER, ier);
-
-	if (locked)
-		spin_unlock(&up->port.lock);
-	local_irq_restore(flags);
+	up->ier |= UART_IER_THRI;
+	serial_out(up, UART_IER, ier | UART_IER_THRI);
 }
 
 static int serial8250_console_setup(struct console *co, char *options)
@@ -2397,6 +2318,7 @@ int __init serial8250_start_console(struct uart_port *port, char *options)
 static struct uart_driver serial8250_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "serial",
+	.devfs_name		= "tts/",
 	.dev_name		= "ttyS",
 	.major			= TTY_MAJOR,
 	.minor			= 64,

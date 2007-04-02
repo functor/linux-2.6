@@ -3,6 +3,7 @@
  * Licensed under the GPL
  */
 
+#include "linux/config.h"
 #include "linux/fs.h"
 #include "linux/tty.h"
 #include "linux/tty_driver.h"
@@ -53,6 +54,7 @@ static int ssl_remove(int n);
 static struct line_driver driver = {
 	.name 			= "UML serial line",
 	.device_name 		= "ttyS",
+	.devfs_name 		= "tts/",
 	.major 			= TTY_MAJOR,
 	.minor_start 		= 64,
 	.type 		 	= TTY_DRIVER_TYPE_SERIAL,

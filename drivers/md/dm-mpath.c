@@ -21,7 +21,6 @@
 #include <linux/workqueue.h>
 #include <asm/atomic.h>
 
-#define DM_MSG_PREFIX "multipath"
 #define MESG_STR(x) x, sizeof(x)
 
 /* Path properties */
@@ -180,7 +179,8 @@ static struct multipath *alloc_multipath(void)
 		m->queue_io = 1;
 		INIT_WORK(&m->process_queued_ios, process_queued_ios, m);
 		INIT_WORK(&m->trigger_event, trigger_event, m);
-		m->mpio_pool = mempool_create_slab_pool(MIN_IOS, _mpio_cache);
+		m->mpio_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
+					      mempool_free_slab, _mpio_cache);
 		if (!m->mpio_pool) {
 			kfree(m);
 			return NULL;
@@ -447,6 +447,8 @@ struct param {
 	char *error;
 };
 
+#define ESTR(s) ("dm-multipath: " s)
+
 static int read_param(struct param *param, char *str, unsigned *v, char **error)
 {
 	if (!str ||
@@ -494,12 +496,12 @@ static int parse_path_selector(struct arg_set *as, struct priority_group *pg,
 	unsigned ps_argc;
 
 	static struct param _params[] = {
-		{0, 1024, "invalid number of path selector args"},
+		{0, 1024, ESTR("invalid number of path selector args")},
 	};
 
 	pst = dm_get_path_selector(shift(as));
 	if (!pst) {
-		ti->error = "unknown path selector type";
+		ti->error = ESTR("unknown path selector type");
 		return -EINVAL;
 	}
 
@@ -510,7 +512,7 @@ static int parse_path_selector(struct arg_set *as, struct priority_group *pg,
 	r = pst->create(&pg->ps, ps_argc, as->argv);
 	if (r) {
 		dm_put_path_selector(pst);
-		ti->error = "path selector constructor failed";
+		ti->error = ESTR("path selector constructor failed");
 		return r;
 	}
 
@@ -528,7 +530,7 @@ static struct pgpath *parse_path(struct arg_set *as, struct path_selector *ps,
 
 	/* we need at least a path arg */
 	if (as->argc < 1) {
-		ti->error = "no device given";
+		ti->error = ESTR("no device given");
 		return NULL;
 	}
 
@@ -539,7 +541,7 @@ static struct pgpath *parse_path(struct arg_set *as, struct path_selector *ps,
 	r = dm_get_device(ti, shift(as), ti->begin, ti->len,
 			  dm_table_get_mode(ti->table), &p->path.dev);
 	if (r) {
-		ti->error = "error getting device";
+		ti->error = ESTR("error getting device");
 		goto bad;
 	}
 
@@ -561,8 +563,8 @@ static struct priority_group *parse_priority_group(struct arg_set *as,
 						   struct dm_target *ti)
 {
 	static struct param _params[] = {
-		{1, 1024, "invalid number of paths"},
-		{0, 1024, "invalid number of selector args"}
+		{1, 1024, ESTR("invalid number of paths")},
+		{0, 1024, ESTR("invalid number of selector args")}
 	};
 
 	int r;
@@ -571,13 +573,13 @@ static struct priority_group *parse_priority_group(struct arg_set *as,
 
 	if (as->argc < 2) {
 		as->argc = 0;
-		ti->error = "not enough priority group aruments";
+		ti->error = ESTR("not enough priority group aruments");
 		return NULL;
 	}
 
 	pg = alloc_priority_group();
 	if (!pg) {
-		ti->error = "couldn't allocate priority group";
+		ti->error = ESTR("couldn't allocate priority group");
 		return NULL;
 	}
 	pg->m = m;
@@ -632,7 +634,7 @@ static int parse_hw_handler(struct arg_set *as, struct multipath *m,
 	unsigned hw_argc;
 
 	static struct param _params[] = {
-		{0, 1024, "invalid number of hardware handler args"},
+		{0, 1024, ESTR("invalid number of hardware handler args")},
 	};
 
 	r = read_param(_params, shift(as), &hw_argc, &ti->error);
@@ -644,14 +646,14 @@ static int parse_hw_handler(struct arg_set *as, struct multipath *m,
 
 	hwht = dm_get_hw_handler(shift(as));
 	if (!hwht) {
-		ti->error = "unknown hardware handler type";
+		ti->error = ESTR("unknown hardware handler type");
 		return -EINVAL;
 	}
 
 	r = hwht->create(&m->hw_handler, hw_argc - 1, as->argv);
 	if (r) {
 		dm_put_hw_handler(hwht);
-		ti->error = "hardware handler constructor failed";
+		ti->error = ESTR("hardware handler constructor failed");
 		return r;
 	}
 
@@ -668,7 +670,7 @@ static int parse_features(struct arg_set *as, struct multipath *m,
 	unsigned argc;
 
 	static struct param _params[] = {
-		{0, 1, "invalid number of feature args"},
+		{0, 1, ESTR("invalid number of feature args")},
 	};
 
 	r = read_param(_params, shift(as), &argc, &ti->error);
@@ -691,8 +693,8 @@ static int multipath_ctr(struct dm_target *ti, unsigned int argc,
 {
 	/* target parameters */
 	static struct param _params[] = {
-		{1, 1024, "invalid number of priority groups"},
-		{1, 1024, "invalid initial priority group number"},
+		{1, 1024, ESTR("invalid number of priority groups")},
+		{1, 1024, ESTR("invalid initial priority group number")},
 	};
 
 	int r;
@@ -706,7 +708,7 @@ static int multipath_ctr(struct dm_target *ti, unsigned int argc,
 
 	m = alloc_multipath();
 	if (!m) {
-		ti->error = "can't allocate multipath";
+		ti->error = ESTR("can't allocate multipath");
 		return -EINVAL;
 	}
 
@@ -747,7 +749,7 @@ static int multipath_ctr(struct dm_target *ti, unsigned int argc,
 	}
 
 	if (pg_count != m->nr_priority_groups) {
-		ti->error = "priority group count mismatch";
+		ti->error = ESTR("priority group count mismatch");
 		r = -EINVAL;
 		goto bad;
 	}
@@ -807,7 +809,7 @@ static int fail_path(struct pgpath *pgpath)
 	if (!pgpath->path.is_active)
 		goto out;
 
-	DMWARN("Failing path %s.", pgpath->path.dev->name);
+	DMWARN("dm-multipath: Failing path %s.", pgpath->path.dev->name);
 
 	pgpath->pg->ps.type->fail_path(&pgpath->pg->ps, &pgpath->path);
 	pgpath->path.is_active = 0;
@@ -1250,7 +1252,7 @@ static int multipath_message(struct dm_target *ti, unsigned argc, char **argv)
 	r = dm_get_device(ti, argv[1], ti->begin, ti->len,
 			  dm_table_get_mode(ti->table), &dev);
 	if (r) {
-		DMWARN("message: error getting device %s",
+		DMWARN("dm-multipath message: error getting device %s",
 		       argv[1]);
 		return -EINVAL;
 	}
@@ -1309,7 +1311,7 @@ static int __init dm_multipath_init(void)
 		return -ENOMEM;
 	}
 
-	DMINFO("version %u.%u.%u loaded",
+	DMINFO("dm-multipath version %u.%u.%u loaded",
 	       multipath_target.version[0], multipath_target.version[1],
 	       multipath_target.version[2]);
 

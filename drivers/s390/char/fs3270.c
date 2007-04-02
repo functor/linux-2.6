@@ -8,6 +8,7 @@
  *	-- Copyright (C) 2003 IBM Deutschland Entwicklung GmbH, IBM Corporation
  */
 
+#include <linux/config.h>
 #include <linux/bootmem.h>
 #include <linux/console.h>
 #include <linux/init.h>
@@ -236,7 +237,7 @@ fs3270_irq(struct fs3270 *fp, struct raw3270_request *rq, struct irb *irb)
  * Process reads from fullscreen 3270.
  */
 static ssize_t
-fs3270_read(struct file *filp, char __user *data, size_t count, loff_t *off)
+fs3270_read(struct file *filp, char *data, size_t count, loff_t *off)
 {
 	struct fs3270 *fp;
 	struct raw3270_request *rq;
@@ -281,7 +282,7 @@ fs3270_read(struct file *filp, char __user *data, size_t count, loff_t *off)
  * Process writes to fullscreen 3270.
  */
 static ssize_t
-fs3270_write(struct file *filp, const char __user *data, size_t count, loff_t *off)
+fs3270_write(struct file *filp, const char *data, size_t count, loff_t *off)
 {
 	struct fs3270 *fp;
 	struct raw3270_request *rq;
@@ -338,10 +339,10 @@ fs3270_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		fp->write_command = arg;
 		break;
 	case TUBGETI:
-		rc = put_user(fp->read_command, (char __user *) arg);
+		rc = put_user(fp->read_command, (char *) arg);
 		break;
 	case TUBGETO:
-		rc = put_user(fp->write_command,(char __user *) arg);
+		rc = put_user(fp->write_command,(char *) arg);
 		break;
 	case TUBGETMOD:
 		iocb.model = fp->view.model;
@@ -350,7 +351,7 @@ fs3270_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		iocb.pf_cnt = 24;
 		iocb.re_cnt = 20;
 		iocb.map = 0;
-		if (copy_to_user((char __user *) arg, &iocb,
+		if (copy_to_user((char *) arg, &iocb,
 				 sizeof(struct raw3270_iocb)))
 			rc = -EFAULT;
 		break;
@@ -367,9 +368,10 @@ fs3270_alloc_view(void)
 {
 	struct fs3270 *fp;
 
-	fp = kzalloc(sizeof(struct fs3270),GFP_KERNEL);
+	fp = (struct fs3270 *) kmalloc(sizeof(struct fs3270),GFP_KERNEL);
 	if (!fp)
 		return ERR_PTR(-ENOMEM);
+	memset(fp, 0, sizeof(struct fs3270));
 	fp->init = raw3270_request_alloc(0);
 	if (IS_ERR(fp->init)) {
 		kfree(fp);
@@ -425,15 +427,11 @@ fs3270_open(struct inode *inode, struct file *filp)
 	minor = iminor(filp->f_dentry->d_inode);
 	/* Check for minor 0 multiplexer. */
 	if (minor == 0) {
-		struct tty_struct *tty;
-		mutex_lock(&tty_mutex);
-		tty = get_current_tty();
-		if (!tty || tty->driver->major != IBM_TTY3270_MAJOR) {
-			mutex_unlock(&tty_mutex);
+		if (!current->signal->tty)
 			return -ENODEV;
-		}
-		minor = tty->index + RAW3270_FIRSTMINOR;
-		mutex_unlock(&tty_mutex);
+		if (current->signal->tty->driver->major != IBM_TTY3270_MAJOR)
+			return -ENODEV;
+		minor = current->signal->tty->index + RAW3270_FIRSTMINOR;
 	}
 	/* Check if some other program is already using fullscreen mode. */
 	fp = (struct fs3270 *) raw3270_find_view(&fs3270_fn, minor);
@@ -483,7 +481,7 @@ fs3270_close(struct inode *inode, struct file *filp)
 	struct fs3270 *fp;
 
 	fp = filp->private_data;
-	filp->private_data = NULL;
+	filp->private_data = 0;
 	if (fp) {
 		fp->fs_pid = 0;
 		raw3270_reset(&fp->view);

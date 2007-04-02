@@ -38,7 +38,8 @@ xfs_stats_clear_proc_handler(
 
 	if (!ret && write && *valp) {
 		printk("XFS Clearing xfsstats\n");
-		for_each_possible_cpu(c) {
+		for (c = 0; c < NR_CPUS; c++) {
+			if (!cpu_possible(c)) continue;
 			preempt_disable();
 			/* save vn_active, it's a universal truth! */
 			vn_active = per_cpu(xfsstats, c).vn_active;
@@ -119,11 +120,6 @@ STATIC ctl_table xfs_table[] = {
 	sizeof(int), 0644, NULL, &proc_dointvec_minmax,
 	NULL, &sysctl_intvec, NULL,
 	&xfs_params.rotorstep.min, &xfs_params.rotorstep.max},
-
-	{XFS_INHERIT_NODFRG, "inherit_nodefrag", &xfs_params.inherit_nodfrg.val,
-	sizeof(int), 0644, NULL, &proc_dointvec_minmax,
-	NULL, &sysctl_intvec, NULL,
-	&xfs_params.inherit_nodfrg.min, &xfs_params.inherit_nodfrg.max},
 
 	/* please keep this the last entry */
 #ifdef CONFIG_PROC_FS

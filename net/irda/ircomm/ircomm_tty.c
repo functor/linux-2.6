@@ -30,6 +30,7 @@
  *     
  ********************************************************************/
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -123,6 +124,7 @@ static int __init ircomm_tty_init(void)
 	driver->owner		= THIS_MODULE;
 	driver->driver_name     = "ircomm";
 	driver->name            = "ircomm";
+	driver->devfs_name      = "ircomm";
 	driver->major           = IRCOMM_TTY_MAJOR;
 	driver->minor_start     = IRCOMM_TTY_MINOR;
 	driver->type            = TTY_DRIVER_TYPE_SERIAL;
@@ -379,11 +381,12 @@ static int ircomm_tty_open(struct tty_struct *tty, struct file *filp)
 	self = hashbin_lock_find(ircomm_tty, line, NULL);
 	if (!self) {
 		/* No, so make new instance */
-		self = kzalloc(sizeof(struct ircomm_tty_cb), GFP_KERNEL);
+		self = kmalloc(sizeof(struct ircomm_tty_cb), GFP_KERNEL);
 		if (self == NULL) {
 			IRDA_ERROR("%s(), kmalloc failed!\n", __FUNCTION__);
 			return -ENOMEM;
 		}
+		memset(self, 0, sizeof(struct ircomm_tty_cb));
 		
 		self->magic = IRCOMM_TTY_MAGIC;
 		self->flow = FLOW_STOP;
@@ -758,9 +761,8 @@ static int ircomm_tty_write(struct tty_struct *tty,
 			}
 		} else {
 			/* Prepare a full sized frame */
-			skb = alloc_skb(self->max_data_size+
-					self->max_header_size,
-					GFP_ATOMIC);
+			skb = dev_alloc_skb(self->max_data_size+
+					    self->max_header_size);
 			if (!skb) {
 				spin_unlock_irqrestore(&self->spinlock, flags);
 				return -ENOBUFS;

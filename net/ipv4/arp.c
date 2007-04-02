@@ -80,6 +80,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/capability.h>
+#include <linux/config.h>
 #include <linux/socket.h>
 #include <linux/sockios.h>
 #include <linux/errno.h>
@@ -878,16 +879,16 @@ static int arp_process(struct sk_buff *skb)
 
 	n = __neigh_lookup(&arp_tbl, &sip, dev, 0);
 
-	if (ipv4_devconf.arp_accept) {
-		/* Unsolicited ARP is not accepted by default.
-		   It is possible, that this option should be enabled for some
-		   devices (strip is candidate)
-		 */
-		if (n == NULL &&
-		    arp->ar_op == htons(ARPOP_REPLY) &&
-		    inet_addr_type(sip) == RTN_UNICAST)
-			n = __neigh_lookup(&arp_tbl, &sip, dev, -1);
-	}
+#ifdef CONFIG_IP_ACCEPT_UNSOLICITED_ARP
+	/* Unsolicited ARP is not accepted by default.
+	   It is possible, that this option should be enabled for some
+	   devices (strip is candidate)
+	 */
+	if (n == NULL &&
+	    arp->ar_op == htons(ARPOP_REPLY) &&
+	    inet_addr_type(sip) == RTN_UNICAST)
+		n = __neigh_lookup(&arp_tbl, &sip, dev, -1);
+#endif
 
 	if (n) {
 		int state = NUD_REACHABLE;
@@ -927,8 +928,7 @@ static void parp_redo(struct sk_buff *skb)
  *	Receive an arp request from the device layer.
  */
 
-static int arp_rcv(struct sk_buff *skb, struct net_device *dev,
-		   struct packet_type *pt, struct net_device *orig_dev)
+int arp_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct arphdr *arp;
 
@@ -1372,11 +1372,12 @@ static int arp_seq_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
 	int rc = -ENOMEM;
-	struct neigh_seq_state *s = kzalloc(sizeof(*s), GFP_KERNEL);
+	struct neigh_seq_state *s = kmalloc(sizeof(*s), GFP_KERNEL);
        
 	if (!s)
 		goto out;
 
+	memset(s, 0, sizeof(*s));
 	rc = seq_open(file, &arp_seq_ops);
 	if (rc)
 		goto out_kfree;
@@ -1416,6 +1417,7 @@ static int __init arp_proc_init(void)
 
 EXPORT_SYMBOL(arp_broken_ops);
 EXPORT_SYMBOL(arp_find);
+EXPORT_SYMBOL(arp_rcv);
 EXPORT_SYMBOL(arp_create);
 EXPORT_SYMBOL(arp_xmit);
 EXPORT_SYMBOL(arp_send);

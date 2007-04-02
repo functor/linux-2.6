@@ -28,6 +28,7 @@
  *	See net/ipx/ChangeLog.
  */
 
+#include <linux/config.h>
 #include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/if_arp.h>
@@ -1234,27 +1235,27 @@ static int ipxitf_ioctl(unsigned int cmd, void __user *arg)
 /* Note: We assume ipx_tctrl==0 and htons(length)==ipx_pktsize */
 /* This functions should *not* mess with packet contents */
 
-__u16 ipx_cksum(struct ipxhdr *packet, int length) 
+__be16 ipx_cksum(struct ipxhdr *packet, int length)
 {
 	/* 
 	 *	NOTE: sum is a net byte order quantity, which optimizes the 
 	 *	loop. This only works on big and little endian machines. (I
 	 *	don't know of a machine that isn't.)
 	 */
-	/* start at ipx_dest - We skip the checksum field and start with
-	 * ipx_type before the loop, not considering ipx_tctrl in the calc */
-	__u16 *p = (__u16 *)&packet->ipx_dest;
-	__u32 i = (length >> 1) - 1; /* Number of complete words */
-	__u32 sum = packet->ipx_type << sizeof(packet->ipx_tctrl); 
+	/* handle the first 3 words separately; checksum should be skipped
+	 * and ipx_tctrl masked out */
+	__u16 *p = (__u16 *)packet;
+	__u32 sum = p[1] + (p[2] & (__force u16)htons(0x00ff));
+	__u32 i = (length >> 1) - 3; /* Number of remaining complete words */
 
-	/* Loop through all complete words except the checksum field,
-	 * ipx_type (accounted above) and ipx_tctrl (not used in the cksum) */
-	while (--i)
+	/* Loop through them */
+	p += 3;
+	while (i--)
 		sum += *p++;
 
 	/* Add on the last part word if it exists */
 	if (packet->ipx_pktsize & htons(1))
-		sum += ntohs(0xff00) & *p;
+		sum += (__force u16)htons(0xff00) & *p;
 
 	/* Do final fixup */
 	sum = (sum & 0xffff) + (sum >> 16);
@@ -1263,7 +1264,14 @@ __u16 ipx_cksum(struct ipxhdr *packet, int length)
 	if (sum >= 0x10000)
 		sum++;
 
-	return ~sum;
+	/*
+	 * Leave 0 alone; we don't want 0xffff here.  Note that we can't get
+	 * here with 0x10000, so this check is the same as ((__u16)sum)
+	 */
+	if (sum)
+		sum = ~sum;
+
+	return (__force __be16)sum;
 }
 
 const char *ipx_frame_name(unsigned short frame)
@@ -1895,29 +1903,6 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	return rc;
 }
 
-
-#ifdef CONFIG_COMPAT
-static int ipx_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
-{
-	/*
-	 * These 4 commands use same structure on 32bit and 64bit.  Rest of IPX
-	 * commands is handled by generic ioctl code.  As these commands are
-	 * SIOCPROTOPRIVATE..SIOCPROTOPRIVATE+3, they cannot be handled by generic
-	 * code.
-	 */
-	switch (cmd) {
-	case SIOCAIPXITFCRT:
-	case SIOCAIPXPRISLT:
-	case SIOCIPXCFGDATA:
-	case SIOCIPXNCPCONN:
-		return ipx_ioctl(sock, cmd, arg);
-	default:
-		return -ENOIOCTLCMD;
-	}
-}
-#endif
-
-
 /*
  * Socket family declarations
  */
@@ -1939,9 +1924,6 @@ static const struct proto_ops SOCKOPS_WRAPPED(ipx_dgram_ops) = {
 	.getname	= ipx_getname,
 	.poll		= datagram_poll,
 	.ioctl		= ipx_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl	= ipx_compat_ioctl,
-#endif
 	.listen		= sock_no_listen,
 	.shutdown	= sock_no_shutdown, /* FIXME: support shutdown */
 	.setsockopt	= ipx_setsockopt,

@@ -158,8 +158,10 @@ int ipoib_vlan_delete(struct net_device *pdev, unsigned short pkey)
 		if (priv->pkey == pkey) {
 			unregister_netdev(priv->dev);
 			ipoib_dev_cleanup(priv->dev);
+
 			list_del(&priv->list);
-			free_netdev(priv->dev);
+
+			kfree(priv);
 
 			ret = 0;
 			break;

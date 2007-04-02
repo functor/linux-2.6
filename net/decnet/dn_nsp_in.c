@@ -45,6 +45,7 @@
     GNU General Public License for more details.
 *******************************************************************************/
 
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/socket.h>
@@ -84,7 +85,7 @@ static void dn_log_martian(struct sk_buff *skb, const char *msg)
 	if (decnet_log_martians && net_ratelimit()) {
 		char *devname = skb->dev ? skb->dev->name : "???";
 		struct dn_skb_cb *cb = DN_SKB_CB(skb);
-		printk(KERN_INFO "DECnet: Martian packet (%s) dev=%s src=0x%04hx dst=0x%04hx srcport=0x%04hx dstport=0x%04hx\n", msg, devname, dn_ntohs(cb->src), dn_ntohs(cb->dst), dn_ntohs(cb->src_port), dn_ntohs(cb->dst_port));
+		printk(KERN_INFO "DECnet: Martian packet (%s) dev=%s src=0x%04hx dst=0x%04hx srcport=0x%04hx dstport=0x%04hx\n", msg, devname, cb->src, cb->dst, cb->src_port, cb->dst_port);
 	}
 }
 
@@ -127,7 +128,7 @@ static void dn_ack(struct sock *sk, struct sk_buff *skb, unsigned short ack)
  */
 static int dn_process_ack(struct sock *sk, struct sk_buff *skb, int oth)
 {
-	__le16 *ptr = (__le16 *)skb->data;
+	unsigned short *ptr = (unsigned short *)skb->data;
 	int len = 0;
 	unsigned short ack;
 
@@ -345,7 +346,7 @@ static void dn_nsp_conn_conf(struct sock *sk, struct sk_buff *skb)
 	ptr = skb->data;
 	cb->services = *ptr++;
 	cb->info = *ptr++;
-	cb->segsize = dn_ntohs(*(__le16 *)ptr);
+	cb->segsize = dn_ntohs(*(__u16 *)ptr);
 
 	if ((scp->state == DN_CI) || (scp->state == DN_CD)) {
 		scp->persist = 0;
@@ -362,7 +363,7 @@ static void dn_nsp_conn_conf(struct sock *sk, struct sk_buff *skb)
 		if (skb->len > 0) {
 			unsigned char dlen = *skb->data;
 			if ((dlen <= 16) && (dlen <= skb->len)) {
-				scp->conndata_in.opt_optl = dn_htons((__u16)dlen);
+				scp->conndata_in.opt_optl = dlen;
 				memcpy(scp->conndata_in.opt_data, skb->data + 1, dlen);
 			}
 		}
@@ -396,17 +397,17 @@ static void dn_nsp_disc_init(struct sock *sk, struct sk_buff *skb)
 	if (skb->len < 2)
 		goto out;
 
-	reason = dn_ntohs(*(__le16 *)skb->data);
+	reason = dn_ntohs(*(__u16 *)skb->data);
 	skb_pull(skb, 2);
 
-	scp->discdata_in.opt_status = dn_htons(reason);
+	scp->discdata_in.opt_status = reason;
 	scp->discdata_in.opt_optl   = 0;
 	memset(scp->discdata_in.opt_data, 0, 16);
 
 	if (skb->len > 0) {
 		unsigned char dlen = *skb->data;
 		if ((dlen <= 16) && (dlen <= skb->len)) {
-			scp->discdata_in.opt_optl = dn_htons((__u16)dlen);
+			scp->discdata_in.opt_optl = dlen;
 			memcpy(scp->discdata_in.opt_data, skb->data + 1, dlen);
 		}
 	}
@@ -463,7 +464,7 @@ static void dn_nsp_disc_conf(struct sock *sk, struct sk_buff *skb)
 	if (skb->len != 2)
 		goto out;
 
-	reason = dn_ntohs(*(__le16 *)skb->data);
+	reason = dn_ntohs(*(__u16 *)skb->data);
 
 	sk->sk_state = TCP_CLOSE;
 
@@ -512,7 +513,7 @@ static void dn_nsp_linkservice(struct sock *sk, struct sk_buff *skb)
 	if (skb->len != 4)
 		goto out;
 
-	segnum = dn_ntohs(*(__le16 *)ptr);
+	segnum = dn_ntohs(*(__u16 *)ptr);
 	ptr += 2;
 	lsflags = *(unsigned char *)ptr++;
 	fcval = *ptr;
@@ -620,7 +621,7 @@ static void dn_nsp_otherdata(struct sock *sk, struct sk_buff *skb)
 	if (skb->len < 2)
 		goto out;
 
-	cb->segnum = segnum = dn_ntohs(*(__le16 *)skb->data);
+	cb->segnum = segnum = dn_ntohs(*(__u16 *)skb->data);
 	skb_pull(skb, 2);
 
 	if (seq_next(scp->numoth_rcv, segnum)) {
@@ -648,7 +649,7 @@ static void dn_nsp_data(struct sock *sk, struct sk_buff *skb)
 	if (skb->len < 2)
 		goto out;
 
-	cb->segnum = segnum = dn_ntohs(*(__le16 *)skb->data);
+	cb->segnum = segnum = dn_ntohs(*(__u16 *)skb->data);
 	skb_pull(skb, 2);
 
 	if (seq_next(scp->numdat_rcv, segnum)) {
@@ -759,7 +760,7 @@ static int dn_nsp_rx_packet(struct sk_buff *skb)
 	/*
 	 * Grab the destination address.
 	 */
-	cb->dst_port = *(__le16 *)ptr;
+	cb->dst_port = *(unsigned short *)ptr;
 	cb->src_port = 0;
 	ptr += 2;
 
@@ -767,7 +768,7 @@ static int dn_nsp_rx_packet(struct sk_buff *skb)
 	 * If not a connack, grab the source address too.
 	 */
 	if (pskb_may_pull(skb, 5)) {
-		cb->src_port = *(__le16 *)ptr;
+		cb->src_port = *(unsigned short *)ptr;
 		ptr += 2;
 		skb_pull(skb, 5);
 	}
@@ -777,7 +778,7 @@ static int dn_nsp_rx_packet(struct sk_buff *skb)
 	 * Swap src & dst and look up in the normal way.
 	 */
 	if (unlikely(cb->rt_flags & DN_RT_F_RTS)) {
-		__le16 tmp = cb->dst_port;
+		unsigned short tmp = cb->dst_port;
 		cb->dst_port = cb->src_port;
 		cb->src_port = tmp;
 		tmp = cb->dst;
@@ -800,7 +801,8 @@ got_it:
 		 * We linearize everything except data segments here.
 		 */
 		if (cb->nsp_flags & ~0x60) {
-			if (unlikely(skb_linearize(skb)))
+			if (unlikely(skb_is_nonlinear(skb)) &&
+			    skb_linearize(skb, GFP_ATOMIC) != 0)
 				goto free_out;
 		}
 

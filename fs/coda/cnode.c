@@ -120,7 +120,8 @@ void coda_replace_fid(struct inode *inode, struct CodaFid *oldfid,
 	
 	cii = ITOC(inode);
 
-	BUG_ON(!coda_fideq(&cii->c_fid, oldfid));
+	if (!coda_fideq(&cii->c_fid, oldfid))
+		BUG();
 
 	/* replace fid and rehash inode */
 	/* XXX we probably need to hold some lock here! */

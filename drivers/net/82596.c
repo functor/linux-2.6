@@ -40,6 +40,7 @@
 
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -613,7 +614,7 @@ static void rebuild_rx_bufs(struct net_device *dev)
 static int init_i596_mem(struct net_device *dev)
 {
 	struct i596_private *lp = dev->priv;
-#if !defined(ENABLE_MVME16x_NET) && !defined(ENABLE_BVME6000_NET) || defined(ENABLE_APRICOT)
+#if !defined(ENABLE_MVME16x_NET) && !defined(ENABLE_BVME6000_NET)
 	short ioaddr = dev->base_addr;
 #endif
 	unsigned long flags;
@@ -899,7 +900,7 @@ memory_squeeze:
 }
 
 
-static void i596_cleanup_cmd(struct net_device *dev, struct i596_private *lp)
+static inline void i596_cleanup_cmd(struct net_device *dev, struct i596_private *lp)
 {
 	struct i596_cmd *ptr;
 
@@ -932,8 +933,7 @@ static void i596_cleanup_cmd(struct net_device *dev, struct i596_private *lp)
 	lp->scb.cmd = I596_NULL;
 }
 
-static void i596_reset(struct net_device *dev, struct i596_private *lp,
-			int ioaddr)
+static inline void i596_reset(struct net_device *dev, struct i596_private *lp, int ioaddr)
 {
 	unsigned long flags;
 
@@ -1070,7 +1070,8 @@ static int i596_start_xmit(struct sk_buff *skb, struct net_device *dev)
 				skb->len, (unsigned int)skb->data));
 
 	if (skb->len < ETH_ZLEN) {
-		if (skb_padto(skb, ETH_ZLEN))
+		skb = skb_padto(skb, ETH_ZLEN);
+		if (skb == NULL)
 			return 0;
 		length = ETH_ZLEN;
 	}
@@ -1579,7 +1580,7 @@ static int debug = -1;
 module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "i82596 debug mask");
 
-int __init init_module(void)
+int init_module(void)
 {
 	if (debug >= 0)
 		i596_debug = debug;
@@ -1589,7 +1590,7 @@ int __init init_module(void)
 	return 0;
 }
 
-void __exit cleanup_module(void)
+void cleanup_module(void)
 {
 	unregister_netdev(dev_82596);
 #ifdef __mc68000__

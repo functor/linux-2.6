@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/interrupt.h>
 #include <linux/fs.h>
 #include <linux/blkpg.h>
@@ -67,6 +68,8 @@ dasd_gendisk_alloc(struct dasd_device *device)
 	}
 	len += sprintf(gdp->disk_name + len, "%c", 'a'+(device->devindex%26));
 
+ 	sprintf(gdp->devfs_name, "dasd/%s", device->cdev->dev.bus_id);
+
 	if (device->features & DASD_FEATURE_READONLY)
 		set_disk_ro(gdp, 1);
 	gdp->private_data = device;
@@ -83,12 +86,10 @@ dasd_gendisk_alloc(struct dasd_device *device)
 void
 dasd_gendisk_free(struct dasd_device *device)
 {
-	if (device->gdp) {
-		del_gendisk(device->gdp);
-		device->gdp->queue = NULL;
-		put_disk(device->gdp);
-		device->gdp = NULL;
-	}
+	del_gendisk(device->gdp);
+	device->gdp->queue = 0;
+	put_disk(device->gdp);
+	device->gdp = 0;
 }
 
 /*
@@ -138,7 +139,7 @@ dasd_destroy_partitions(struct dasd_device * device)
 	 * device->bdev to lower the offline open_count limit again.
 	 */
 	bdev = device->bdev;
-	device->bdev = NULL;
+	device->bdev = 0;
 
 	/*
 	 * See fs/partition/check.c:delete_partition
@@ -147,7 +148,7 @@ dasd_destroy_partitions(struct dasd_device * device)
 	 */
 	memset(&bpart, 0, sizeof(struct blkpg_partition));
 	memset(&barg, 0, sizeof(struct blkpg_ioctl_arg));
-	barg.data = (void __user *) &bpart;
+	barg.data = &bpart;
 	barg.op = BLKPG_DEL_PARTITION;
 	for (bpart.pno = device->gdp->minors - 1; bpart.pno > 0; bpart.pno--)
 		ioctl_by_bdev(bdev, BLKPG, (unsigned long) &barg);

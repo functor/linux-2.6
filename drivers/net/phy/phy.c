@@ -14,6 +14,7 @@
  * option) any later version.
  *
  */
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -131,7 +132,7 @@ struct phy_setting {
 };
 
 /* A mapping of all SUPPORTED settings to speed/duplex */
-static const struct phy_setting settings[] = {
+static struct phy_setting settings[] = {
 	{
 		.speed = 10000,
 		.duplex = DUPLEX_FULL,
@@ -419,8 +420,9 @@ void phy_start_machine(struct phy_device *phydev,
 
 /* phy_stop_machine
  *
- * description: Stops the state machine timer, sets the state to UP
- *   (unless it wasn't up yet). This function must be called BEFORE
+ * description: Stops the state machine timer, sets the state to
+ *   UP (unless it wasn't up yet), and then frees the interrupt,
+ *   if it is in use. This function must be called BEFORE
  *   phy_detach.
  */
 void phy_stop_machine(struct phy_device *phydev)
@@ -431,6 +433,9 @@ void phy_stop_machine(struct phy_device *phydev)
 	if (phydev->state > PHY_UP)
 		phydev->state = PHY_UP;
 	spin_unlock(&phydev->lock);
+
+	if (phydev->irq != PHY_POLL)
+		phy_stop_interrupts(phydev);
 
 	phydev->adjust_state = NULL;
 }
@@ -552,7 +557,7 @@ int phy_start_interrupts(struct phy_device *phydev)
 	INIT_WORK(&phydev->phy_queue, phy_change, phydev);
 
 	if (request_irq(phydev->irq, phy_interrupt,
-				IRQF_SHARED,
+				SA_SHIRQ,
 				"phy_interrupt",
 				phydev) < 0) {
 		printk(KERN_WARNING "%s: Can't get IRQ %d (PHY)\n",

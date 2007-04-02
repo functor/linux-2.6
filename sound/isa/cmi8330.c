@@ -175,7 +175,7 @@ MODULE_DEVICE_TABLE(pnp_card, snd_cmi8330_pnpids);
 #endif
 
 
-static struct ad1848_mix_elem snd_cmi8330_controls[] __devinitdata = {
+static struct ad1848_mix_elem snd_cmi8330_controls[] __initdata = {
 AD1848_DOUBLE("Master Playback Volume", 0, CMI8330_MASTVOL, CMI8330_MASTVOL, 4, 0, 15, 0),
 AD1848_SINGLE("Loud Playback Switch", 0, CMI8330_MUTEMUX, 6, 1, 1),
 AD1848_DOUBLE("PCM Playback Switch", 0, AD1848_LEFT_OUTPUT, AD1848_RIGHT_OUTPUT, 7, 7, 1, 1),
@@ -204,7 +204,7 @@ AD1848_SINGLE(SNDRV_CTL_NAME_IEC958("Input ",PLAYBACK,SWITCH), 0, CMI8330_MUTEMU
 };
 
 #ifdef ENABLE_SB_MIXER
-static struct sbmix_elem cmi8330_sb_mixers[] __devinitdata = {
+static struct sbmix_elem cmi8330_sb_mixers[] __initdata = {
 SB_DOUBLE("SB Master Playback Volume", SB_DSP4_MASTER_DEV, (SB_DSP4_MASTER_DEV + 1), 3, 3, 31),
 SB_DOUBLE("Tone Control - Bass", SB_DSP4_BASS_DEV, (SB_DSP4_BASS_DEV + 1), 4, 4, 15),
 SB_DOUBLE("Tone Control - Treble", SB_DSP4_TREBLE_DEV, (SB_DSP4_TREBLE_DEV + 1), 4, 4, 15),
@@ -222,7 +222,7 @@ SB_DOUBLE("SB Playback Volume", SB_DSP4_OGAIN_DEV, (SB_DSP4_OGAIN_DEV + 1), 6, 6
 SB_SINGLE("SB Mic Auto Gain", SB_DSP4_MIC_AGC, 0, 1),
 };
 
-static unsigned char cmi8330_sb_init_values[][2] __devinitdata = {
+static unsigned char cmi8330_sb_init_values[][2] __initdata = {
 	{ SB_DSP4_MASTER_DEV + 0, 0 },
 	{ SB_DSP4_MASTER_DEV + 1, 0 },
 	{ SB_DSP4_PCM_DEV + 0, 0 },
@@ -545,7 +545,7 @@ static int __devinit snd_cmi8330_probe(struct snd_card *card, int dev)
 	return snd_card_register(card);
 }
 
-static int __devinit snd_cmi8330_nonpnp_probe(struct platform_device *pdev)
+static int __init snd_cmi8330_nonpnp_probe(struct platform_device *pdev)
 {
 	struct snd_card *card;
 	int err;
@@ -607,8 +607,6 @@ static struct platform_driver snd_cmi8330_driver = {
 
 
 #ifdef CONFIG_PNP
-static unsigned int __devinitdata cmi8330_pnp_devices;
-
 static int __devinit snd_cmi8330_pnp_detect(struct pnp_card_link *pcard,
 					    const struct pnp_card_device_id *pid)
 {
@@ -638,7 +636,6 @@ static int __devinit snd_cmi8330_pnp_detect(struct pnp_card_link *pcard,
 	}
 	pnp_set_card_drvdata(pcard, card);
 	dev++;
-	cmi8330_pnp_devices++;
 	return 0;
 }
 
@@ -693,17 +690,15 @@ static int __init alsa_card_cmi8330_init(void)
 	if ((err = platform_driver_register(&snd_cmi8330_driver)) < 0)
 		return err;
 
-	for (i = 0; i < SNDRV_CARDS; i++) {
+	for (i = 0; i < SNDRV_CARDS && enable[i]; i++) {
 		struct platform_device *device;
-		if (! enable[i] || is_isapnp_selected(i))
+		if (is_isapnp_selected(i))
 			continue;
 		device = platform_device_register_simple(CMI8330_DRIVER,
 							 i, NULL, 0);
-		if (IS_ERR(device))
-			continue;
-		if (!platform_get_drvdata(device)) {
-			platform_device_unregister(device);
-			continue;
+		if (IS_ERR(device)) {
+			err = PTR_ERR(device);
+			goto errout;
 		}
 		platform_devices[i] = device;
 		cards++;
@@ -711,9 +706,9 @@ static int __init alsa_card_cmi8330_init(void)
 
 #ifdef CONFIG_PNP
 	err = pnp_register_card_driver(&cmi8330_pnpc_driver);
-	if (!err) {
+	if (err >= 0) {
 		pnp_registered = 1;
-		cards += cmi8330_pnp_devices;
+		cards += err;
 	}
 #endif
 
@@ -721,10 +716,14 @@ static int __init alsa_card_cmi8330_init(void)
 #ifdef MODULE
 		snd_printk(KERN_ERR "CMI8330 not found or device busy\n");
 #endif
-		snd_cmi8330_unregister_all();
-		return -ENODEV;
+		err = -ENODEV;
+		goto errout;
 	}
 	return 0;
+
+ errout:
+	snd_cmi8330_unregister_all();
+	return err;
 }
 
 static void __exit alsa_card_cmi8330_exit(void)

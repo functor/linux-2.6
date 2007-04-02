@@ -1,6 +1,7 @@
 #ifndef _LINUX_BLKDEV_H
 #define _LINUX_BLKDEV_H
 
+#include <linux/config.h>
 #include <linux/major.h>
 #include <linux/genhd.h>
 #include <linux/list.h>
@@ -16,14 +17,11 @@
 
 #include <asm/scatterlist.h>
 
-struct scsi_ioctl_command;
-
 struct request_queue;
 typedef struct request_queue request_queue_t;
 struct elevator_queue;
 typedef struct elevator_queue elevator_t;
 struct request_pm_state;
-struct blk_trace;
 
 #define BLKDEV_MIN_RQ	4
 #define BLKDEV_MAX_RQ	128	/* Default maximum */
@@ -56,29 +54,23 @@ struct as_io_context {
 
 struct cfq_queue;
 struct cfq_io_context {
-	struct rb_node rb_node;
+	/*
+	 * circular list of cfq_io_contexts belonging to a process io context
+	 */
+	struct list_head list;
+	struct cfq_queue *cfqq;
 	void *key;
-
-	struct cfq_queue *cfqq[2];
 
 	struct io_context *ioc;
 
 	unsigned long last_end_request;
-	sector_t last_request_pos;
- 	unsigned long last_queue;
-
+	unsigned long last_queue;
 	unsigned long ttime_total;
 	unsigned long ttime_samples;
 	unsigned long ttime_mean;
 
-	unsigned int seek_samples;
-	u64 seek_total;
-	sector_t seek_mean;
-
-	struct list_head queue_list;
-
-	void (*dtor)(struct io_context *); /* destructor */
-	void (*exit)(struct io_context *); /* called on task exit */
+	void (*dtor)(struct cfq_io_context *);
+	void (*exit)(struct cfq_io_context *);
 };
 
 /*
@@ -99,7 +91,7 @@ struct io_context {
 	int nr_batch_requests;     /* Number of requests left in the batch */
 
 	struct as_io_context *aic;
-	struct rb_root cic_root;
+	struct cfq_io_context *cic;
 };
 
 void put_io_context(struct io_context *ioc);
@@ -151,9 +143,11 @@ struct request {
 	void *elevator_private;
 	void *completion_data;
 
+	unsigned short ioprio;
+
 	int rq_status;	/* should split this into a few status bits */
-	int errors;
 	struct gendisk *rq_disk;
+	int errors;
 	unsigned long start_time;
 
 	/* Number of scatter-gather DMA addr+len pairs after
@@ -168,9 +162,8 @@ struct request {
 	 */
 	unsigned short nr_hw_segments;
 
-	unsigned short ioprio;
-
 	int tag;
+	char *buffer;
 
 	int ref_count;
 	request_queue_t *q;
@@ -178,7 +171,6 @@ struct request {
 
 	struct completion *waiting;
 	void *special;
-	char *buffer;
 
 	/*
 	 * when request is used as a packet command carrier
@@ -187,12 +179,18 @@ struct request {
 	unsigned char cmd[BLK_MAX_CDB];
 
 	unsigned int data_len;
-	unsigned int sense_len;
 	void *data;
+
+	unsigned int sense_len;
 	void *sense;
 
 	unsigned int timeout;
 	int retries;
+
+	/*
+	 * For Power Management requests
+	 */
+	struct request_pm_state *pm;
 
 	/*
 	 * completion callback. end_io_data should be folded in with waiting
@@ -235,7 +233,6 @@ enum rq_flag_bits {
 	__REQ_PM_RESUME,	/* resume request */
 	__REQ_PM_SHUTDOWN,	/* shutdown request */
 	__REQ_ORDERED_COLOR,	/* is before or after barrier */
-	__REQ_RW_SYNC,		/* request is sync (O_DIRECT) */
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -265,7 +262,6 @@ enum rq_flag_bits {
 #define REQ_PM_RESUME	(1 << __REQ_PM_RESUME)
 #define REQ_PM_SHUTDOWN	(1 << __REQ_PM_SHUTDOWN)
 #define REQ_ORDERED_COLOR	(1 << __REQ_ORDERED_COLOR)
-#define REQ_RW_SYNC	(1 << __REQ_RW_SYNC)
 
 /*
  * State information carried for REQ_PM_SUSPEND and REQ_PM_RESUME
@@ -408,6 +404,8 @@ struct request_queue
 
 	struct blk_queue_tag	*queue_tags;
 
+	atomic_t		refcnt;
+
 	unsigned int		nr_sorted;
 	unsigned int		in_flight;
 
@@ -418,8 +416,6 @@ struct request_queue
 	unsigned int		sg_reserved_size;
 	int			node;
 
-	struct blk_trace	*blk_trace;
-
 	/*
 	 * reserved for flush operations
 	 */
@@ -428,12 +424,13 @@ struct request_queue
 	struct request		pre_flush_rq, bar_rq, post_flush_rq;
 	struct request		*orig_bar_rq;
 	unsigned int		bi_size;
-
-	struct mutex		sysfs_lock;
 };
 
 #define RQ_INACTIVE		(-1)
 #define RQ_ACTIVE		1
+#define RQ_SCSI_BUSY		0xffff
+#define RQ_SCSI_DONE		0xfffe
+#define RQ_SCSI_DISCONNECTING	0xffe0
 
 #define QUEUE_FLAG_CLUSTER	0	/* cluster several segments into 1 */
 #define QUEUE_FLAG_QUEUED	1	/* uses generic tag queueing */
@@ -605,8 +602,6 @@ extern void blk_plug_device(request_queue_t *);
 extern int blk_remove_plug(request_queue_t *);
 extern void blk_recount_segments(request_queue_t *, struct bio *);
 extern int scsi_cmd_ioctl(struct file *, struct gendisk *, unsigned int, void __user *);
-extern int sg_scsi_ioctl(struct file *, struct request_queue *,
-		struct gendisk *, struct scsi_ioctl_command __user *);
 extern void blk_start_queue(request_queue_t *q);
 extern void blk_stop_queue(request_queue_t *q);
 extern void blk_sync_queue(struct request_queue *q);
@@ -730,7 +725,7 @@ extern long nr_blockdev_pages(void);
 int blk_get_queue(request_queue_t *);
 request_queue_t *blk_alloc_queue(gfp_t);
 request_queue_t *blk_alloc_queue_node(gfp_t, int);
-extern void blk_put_queue(request_queue_t *);
+#define blk_put_queue(q) blk_cleanup_queue((q))
 
 /*
  * tag stuff

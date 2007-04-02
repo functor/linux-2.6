@@ -60,7 +60,6 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /*
  * Addresses to scan
@@ -177,7 +176,7 @@ static struct i2c_driver lm87_driver = {
 struct lm87_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* In jiffies */
 
@@ -254,11 +253,11 @@ static void set_in_min(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->in_min[nr] = IN_TO_REG(val, data->in_scale[nr]);
 	lm87_write_value(client, nr<6 ? LM87_REG_IN_MIN(nr) :
 			 LM87_REG_AIN_MIN(nr-6), data->in_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 }
 
 static void set_in_max(struct device *dev, const char *buf, int nr)
@@ -267,11 +266,11 @@ static void set_in_max(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->in_max[nr] = IN_TO_REG(val, data->in_scale[nr]);
 	lm87_write_value(client, nr<6 ? LM87_REG_IN_MAX(nr) :
 			 LM87_REG_AIN_MAX(nr-6), data->in_max[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 }
 
 #define set_in(offset) \
@@ -328,10 +327,10 @@ static void set_temp_low(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_low[nr] = TEMP_TO_REG(val);
 	lm87_write_value(client, LM87_REG_TEMP_LOW[nr], data->temp_low[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 }
 
 static void set_temp_high(struct device *dev, const char *buf, int nr)
@@ -340,10 +339,10 @@ static void set_temp_high(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_high[nr] = TEMP_TO_REG(val);
 	lm87_write_value(client, LM87_REG_TEMP_HIGH[nr], data->temp_high[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 }
 
 #define set_temp(offset) \
@@ -412,16 +411,16 @@ static void set_fan_min(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->fan_min[nr] = FAN_TO_REG(val,
 			    FAN_DIV_FROM_REG(data->fan_div[nr]));
 	lm87_write_value(client, LM87_REG_FAN_MIN(nr), data->fan_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 }
 
 /* Note: we save and restore the fan minimum here, because its value is
    determined in part by the fan clock divider.  This follows the principle
-   of least surprise; the user doesn't expect the fan minimum to change just
+   of least suprise; the user doesn't expect the fan minimum to change just
    because the divider changed. */
 static ssize_t set_fan_div(struct device *dev, const char *buf,
 		size_t count, int nr)
@@ -432,7 +431,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	unsigned long min;
 	u8 reg;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	min = FAN_FROM_REG(data->fan_min[nr],
 			   FAN_DIV_FROM_REG(data->fan_div[nr]));
 
@@ -442,7 +441,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	case 4: data->fan_div[nr] = 2; break;
 	case 8: data->fan_div[nr] = 3; break;
 	default:
-		mutex_unlock(&data->update_lock);
+		up(&data->update_lock);
 		return -EINVAL;
 	}
 
@@ -460,7 +459,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	data->fan_min[nr] = FAN_TO_REG(min, val);
 	lm87_write_value(client, LM87_REG_FAN_MIN(nr),
 			 data->fan_min[nr]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return count;
 }
@@ -523,10 +522,10 @@ static ssize_t set_aout(struct device *dev, struct device_attribute *attr, const
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->aout = AOUT_TO_REG(val);
 	lm87_write_value(client, LM87_REG_AOUT, data->aout);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 static DEVICE_ATTR(aout_output, S_IRUGO | S_IWUSR, show_aout, set_aout);
@@ -590,7 +589,7 @@ static int lm87_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* We can fill in the remaining client fields */
 	strlcpy(new_client->name, "lm87", I2C_NAME_SIZE);
 	data->valid = 0;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -745,7 +744,7 @@ static struct lm87_data *lm87_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm87_data *data = i2c_get_clientdata(client);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ) || !data->valid) {
 		int i, j;
@@ -814,7 +813,7 @@ static struct lm87_data *lm87_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 
 	return data;
 }

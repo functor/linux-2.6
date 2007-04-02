@@ -13,6 +13,7 @@
  * This file handles the architecture-dependent parts of process handling..
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
@@ -50,7 +51,7 @@ EXPORT_SYMBOL(pm_power_off);
 /*
  * The idle loop on an m68knommu..
  */
-static void default_idle(void)
+void default_idle(void)
 {
 	local_irq_disable();
  	while (!need_resched()) {

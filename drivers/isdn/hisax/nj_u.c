@@ -5,6 +5,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include "hisax.h"
 #include "icc.h"
@@ -128,9 +129,9 @@ NETjet_U_card_msg(struct IsdnCardState *cs, int mt, void *arg)
 	return(0);
 }
 
-static struct pci_dev *dev_netjet __devinitdata = NULL;
+static struct pci_dev *dev_netjet __initdata = NULL;
 
-int __devinit
+int __init
 setup_netjet_u(struct IsdnCard *card)
 {
 	int bytecnt;
@@ -237,7 +238,7 @@ setup_netjet_u(struct IsdnCard *card)
 	cs->BC_Send_Data = &netjet_fill_dma;
 	cs->cardmsg = &NETjet_U_card_msg;
 	cs->irq_func = &netjet_u_interrupt;
-	cs->irq_flags |= IRQF_SHARED;
+	cs->irq_flags |= SA_SHIRQ;
 	ICCVersion(cs, "NETspider-U:");
 	return (1);
 }

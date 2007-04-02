@@ -95,11 +95,7 @@ struct relocation_info /* used when header.a_machtype == M_SPARC */
 
 #ifdef __KERNEL__
 
-#define STACK_TOP32	((1UL << 32UL) - PAGE_SIZE)
-#define STACK_TOP64	(0x0000080000000000UL - (1UL << 32UL))
-
-#define STACK_TOP (test_thread_flag(TIF_32BIT) ? \
-		   STACK_TOP32 : STACK_TOP64)
+#define STACK_TOP (test_thread_flag(TIF_32BIT) ? 0xf0000000 : 0x80000000000L)
 
 #endif
 

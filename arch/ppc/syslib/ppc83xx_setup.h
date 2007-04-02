@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/ppc83xx_setup.h
+ *
  * MPC83XX common board definitions
  *
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
@@ -23,6 +25,7 @@
 #ifndef __PPC_SYSLIB_PPC83XX_SETUP_H
 #define __PPC_SYSLIB_PPC83XX_SETUP_H
 
+#include <linux/config.h>
 #include <linux/init.h>
 
 extern unsigned long mpc83xx_find_end_of_memory(void) __init;

@@ -11,6 +11,7 @@
 
 #include <asm/types.h>
 #ifdef __KERNEL__
+# include <linux/config.h>
 # include <linux/types.h>
 # include <linux/in.h>
 #endif 
@@ -39,7 +40,7 @@
 #define	NFSCTL_GETFS		8	/* get an fh by path with max FH len */
 
 /*
- * Macros used to set version and protocol
+ * Macros used to set version
  */
 #define NFSCTL_VERSET(_cltbits, _v)   ((_cltbits) |=  (1 << (_v)))
 #define NFSCTL_VERUNSET(_cltbits, _v) ((_cltbits) &= ~(1 << (_v)))
@@ -52,15 +53,6 @@
 #else
 #define	NFSCTL_VERALL	(0x04 /* 0b000100 */)
 #endif
-
-#define NFSCTL_UDPSET(_cltbits)       ((_cltbits) |=  (1 << (17 - 1)))
-#define NFSCTL_UDPUNSET(_cltbits)     ((_cltbits) &= ~(1 << (17 - 1)))
-#define NFSCTL_UDPISSET(_cltbits)     ((_cltbits) & (1 << (17 - 1)))
-
-#define NFSCTL_TCPSET(_cltbits)       ((_cltbits) |=  (1 << (18 - 1)))
-#define NFSCTL_TCPUNSET(_cltbits)     ((_cltbits) &= ~(1 << (18 - 1)))
-#define NFSCTL_TCPISSET(_cltbits)     ((_cltbits) & (1 << (18 - 1)))
-
 
 /* SVC */
 struct nfsctl_svc {
@@ -143,8 +135,7 @@ extern int		exp_delclient(struct nfsctl_client *ncp);
 extern int		exp_export(struct nfsctl_export *nxp);
 extern int		exp_unexport(struct nfsctl_export *nxp);
 
-extern int nfsd_port;
-extern unsigned int nfsd_versbits, nfsd_portbits;
+extern unsigned int nfsd_versbits;
 
 #endif /* __KERNEL__ */
 

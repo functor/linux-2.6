@@ -97,7 +97,10 @@ extern int write_mft_record_nolock(ntfs_inode *ni, MFT_RECORD *m, int sync);
  * uptodate.
  *
  * On success, clean the mft record and return 0.  On error, leave the mft
- * record dirty and return -errno.
+ * record dirty and return -errno.  The caller should call make_bad_inode() on
+ * the base inode to ensure no more access happens to this inode.  We do not do
+ * it here as the caller may want to finish writing other extent mft records
+ * first to minimize on-disk metadata inconsistencies.
  */
 static inline int write_mft_record(ntfs_inode *ni, MFT_RECORD *m, int sync)
 {

@@ -8,8 +8,9 @@
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -25,6 +26,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -98,13 +100,12 @@ v9fs_fill_super(struct super_block *sb, struct v9fs_session_info *v9ses,
  * @flags: mount flags
  * @dev_name: device name that was mounted
  * @data: mount options
- * @mnt: mountpoint record to be instantiated
  *
  */
 
-static int v9fs_get_sb(struct file_system_type *fs_type, int flags,
-		       const char *dev_name, void *data,
-		       struct vfsmount *mnt)
+static struct super_block *v9fs_get_sb(struct file_system_type
+				       *fs_type, int flags,
+				       const char *dev_name, void *data)
 {
 	struct super_block *sb = NULL;
 	struct v9fs_fcall *fcall = NULL;
@@ -123,19 +124,16 @@ static int v9fs_get_sb(struct file_system_type *fs_type, int flags,
 
 	v9ses = kzalloc(sizeof(struct v9fs_session_info), GFP_KERNEL);
 	if (!v9ses)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	if ((newfid = v9fs_session_init(v9ses, dev_name, data)) < 0) {
 		dprintk(DEBUG_ERROR, "problem initiating session\n");
-		retval = newfid;
-		goto out_free_session;
+		kfree(v9ses);
+		return ERR_PTR(newfid);
 	}
 
 	sb = sget(fs_type, NULL, v9fs_set_super, v9ses);
-	if (IS_ERR(sb)) {
-		retval = PTR_ERR(sb);
-		goto out_close_session;
-	}
+
 	v9fs_fill_super(sb, v9ses, flags);
 
 	inode = v9fs_get_inode(sb, S_IFDIR | mode);
@@ -186,19 +184,13 @@ static int v9fs_get_sb(struct file_system_type *fs_type, int flags,
 		goto put_back_sb;
 	}
 
-	return simple_set_mnt(mnt, sb);
-
-out_close_session:
-	v9fs_session_close(v9ses);
-out_free_session:
-	kfree(v9ses);
-	return retval;
+	return sb;
 
 put_back_sb:
 	/* deactivate_super calls v9fs_kill_super which will frees the rest */
 	up_write(&sb->s_umount);
 	deactivate_super(sb);
-	return retval;
+	return ERR_PTR(retval);
 }
 
 /**
@@ -255,12 +247,11 @@ static int v9fs_show_options(struct seq_file *m, struct vfsmount *mnt)
 }
 
 static void
-v9fs_umount_begin(struct vfsmount *vfsmnt, int flags)
+v9fs_umount_begin(struct super_block *sb)
 {
-	struct v9fs_session_info *v9ses = vfsmnt->mnt_sb->s_fs_info;
+	struct v9fs_session_info *v9ses = sb->s_fs_info;
 
-	if (flags & MNT_FORCE)
-		v9fs_session_cancel(v9ses);
+	v9fs_session_cancel(v9ses);
 }
 
 static struct super_operations v9fs_super_ops = {
@@ -271,7 +262,7 @@ static struct super_operations v9fs_super_ops = {
 };
 
 struct file_system_type v9fs_fs_type = {
-	.name = "9p",
+	.name = "9P",
 	.get_sb = v9fs_get_sb,
 	.kill_sb = v9fs_kill_super,
 	.owner = THIS_MODULE,

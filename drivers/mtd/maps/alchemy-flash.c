@@ -7,6 +7,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -125,6 +126,8 @@ static struct mtd_partition alchemy_partitions[] = {
         }
 };
 
+#define NB_OF(x)  (sizeof(x)/sizeof(x[0]))
+
 static struct mtd_info *mymtd;
 
 int __init alchemy_mtd_init(void)
@@ -151,7 +154,7 @@ int __init alchemy_mtd_init(void)
 	 * Static partition definition selection
 	 */
 	parts = alchemy_partitions;
-	nb_parts = ARRAY_SIZE(alchemy_partitions);
+	nb_parts = NB_OF(alchemy_partitions);
 	alchemy_map.size = window_size;
 
 	/*

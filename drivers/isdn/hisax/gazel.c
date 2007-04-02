@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include "hisax.h"
 #include "isac.h"
@@ -484,7 +485,7 @@ reserve_regions(struct IsdnCard *card, struct IsdnCardState *cs)
 	return 1;
 }
 
-static int __devinit
+static int __init
 setup_gazelisa(struct IsdnCard *card, struct IsdnCardState *cs)
 {
 	printk(KERN_INFO "Gazel: ISA PnP card automatic recognition\n");
@@ -532,9 +533,9 @@ setup_gazelisa(struct IsdnCard *card, struct IsdnCardState *cs)
 	return (0);
 }
 
-static struct pci_dev *dev_tel __devinitdata = NULL;
+static struct pci_dev *dev_tel __initdata = NULL;
 
-static int __devinit
+static int __init
 setup_gazelpci(struct IsdnCardState *cs)
 {
 	u_int pci_ioaddr0 = 0, pci_ioaddr1 = 0;
@@ -592,7 +593,7 @@ setup_gazelpci(struct IsdnCardState *cs)
 	cs->hw.gazel.hscxfifo[0] = cs->hw.gazel.hscx[0];
 	cs->hw.gazel.hscxfifo[1] = cs->hw.gazel.hscx[1];
 	cs->irq = pci_irq;
-	cs->irq_flags |= IRQF_SHARED;
+	cs->irq_flags |= SA_SHIRQ;
 
 	switch (seekcard) {
 		case PCI_DEVICE_ID_PLX_R685:
@@ -621,7 +622,7 @@ setup_gazelpci(struct IsdnCardState *cs)
 	return (0);
 }
 
-int __devinit
+int __init
 setup_gazel(struct IsdnCard *card)
 {
 	struct IsdnCardState *cs = card->cs;

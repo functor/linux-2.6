@@ -57,6 +57,7 @@
  * be incorporated into the next SCTP release.
  */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/wait.h>
@@ -369,7 +370,7 @@ SCTP_STATIC int sctp_do_bind(struct sock *sk, union sctp_addr *addr, int len)
 
 	/* Use GFP_ATOMIC since BHs are disabled.  */
 	addr->v4.sin_port = ntohs(addr->v4.sin_port);
-	ret = sctp_add_bind_addr(bp, addr, 1, GFP_ATOMIC);
+	ret = sctp_add_bind_addr(bp, addr, GFP_ATOMIC);
 	addr->v4.sin_port = htons(addr->v4.sin_port);
 	sctp_write_unlock(&ep->base.addr_lock);
 	sctp_local_bh_enable();
@@ -491,7 +492,6 @@ static int sctp_send_asconf_add_ip(struct sock		*sk,
 	struct sctp_chunk		*chunk;
 	struct sctp_sockaddr_entry	*laddr;
 	union sctp_addr			*addr;
-	union sctp_addr			saveaddr;
 	void				*addr_buf;
 	struct sctp_af			*af;
 	struct list_head		*pos;
@@ -559,26 +559,14 @@ static int sctp_send_asconf_add_ip(struct sock		*sk,
 		}
 
 		retval = sctp_send_asconf(asoc, chunk);
-		if (retval)
-			goto out;
 
-		/* Add the new addresses to the bind address list with
-		 * use_as_src set to 0.
+		/* FIXME: After sending the add address ASCONF chunk, we
+		 * cannot append the address to the association's binding
+		 * address list, because the new address may be used as the
+		 * source of a message sent to the peer before the ASCONF
+		 * chunk is received by the peer.  So we should wait until
+		 * ASCONF_ACK is received.
 		 */
-		sctp_local_bh_disable();
-		sctp_write_lock(&asoc->base.addr_lock);
-		addr_buf = addrs;
-		for (i = 0; i < addrcnt; i++) {
-			addr = (union sctp_addr *)addr_buf;
-			af = sctp_get_af_specific(addr->v4.sin_family);
-			memcpy(&saveaddr, addr, af->sockaddr_len);
-			saveaddr.v4.sin_port = ntohs(saveaddr.v4.sin_port);
-			retval = sctp_add_bind_addr(bp, &saveaddr, 0,
-						    GFP_ATOMIC);
-			addr_buf += af->sockaddr_len;
-		}
-		sctp_write_unlock(&asoc->base.addr_lock);
-		sctp_local_bh_enable();
 	}
 
 out:
@@ -689,15 +677,12 @@ static int sctp_send_asconf_del_ip(struct sock		*sk,
 	struct sctp_sock	*sp;
 	struct sctp_endpoint	*ep;
 	struct sctp_association	*asoc;
-	struct sctp_transport	*transport;
 	struct sctp_bind_addr	*bp;
 	struct sctp_chunk	*chunk;
 	union sctp_addr		*laddr;
-	union sctp_addr		saveaddr;
 	void			*addr_buf;
 	struct sctp_af		*af;
-	struct list_head	*pos, *pos1;
-	struct sctp_sockaddr_entry *saddr;
+	struct list_head	*pos;
 	int 			i;
 	int 			retval = 0;
 
@@ -764,42 +749,14 @@ static int sctp_send_asconf_del_ip(struct sock		*sk,
 			goto out;
 		}
 
-		/* Reset use_as_src flag for the addresses in the bind address
-		 * list that are to be deleted.
-		 */
-		sctp_local_bh_disable();
-		sctp_write_lock(&asoc->base.addr_lock);
-		addr_buf = addrs;
-		for (i = 0; i < addrcnt; i++) {
-			laddr = (union sctp_addr *)addr_buf;
-			af = sctp_get_af_specific(laddr->v4.sin_family);
-			memcpy(&saveaddr, laddr, af->sockaddr_len);
-			saveaddr.v4.sin_port = ntohs(saveaddr.v4.sin_port);
-			list_for_each(pos1, &bp->address_list) {
-				saddr = list_entry(pos1,
-						   struct sctp_sockaddr_entry,
-						   list);
-				if (sctp_cmp_addr_exact(&saddr->a, &saveaddr))
-					saddr->use_as_src = 0;
-			}
-			addr_buf += af->sockaddr_len;
-		}
-		sctp_write_unlock(&asoc->base.addr_lock);
-		sctp_local_bh_enable();
-
-		/* Update the route and saddr entries for all the transports
-		 * as some of the addresses in the bind address list are
-		 * about to be deleted and cannot be used as source addresses.
-		 */
-		list_for_each(pos1, &asoc->peer.transport_addr_list) {
-			transport = list_entry(pos1, struct sctp_transport,
-					       transports);
-			dst_release(transport->dst);
-			sctp_transport_route(transport, NULL,
-					     sctp_sk(asoc->base.sk));
-		}
-
 		retval = sctp_send_asconf(asoc, chunk);
+
+		/* FIXME: After sending the delete address ASCONF chunk, we
+		 * cannot remove the addresses from the association's bind
+		 * address list, because there maybe some packet send to
+		 * the delete addresses, so we should wait until ASCONF_ACK
+		 * packet is received.
+		 */
 	}
 out:
 	return retval;
@@ -1100,7 +1057,6 @@ static int __sctp_connect(struct sock* sk,
 	inet_sk(sk)->dport = htons(asoc->peer.port);
 	af = sctp_get_af_specific(to.sa.sa_family);
 	af->to_sk_daddr(&to, sk);
-	sk->sk_err = 0;
 
 	timeo = sock_sndtimeo(sk, sk->sk_socket->file->f_flags & O_NONBLOCK);
 	err = sctp_wait_for_connect(asoc, &timeo);
@@ -1272,7 +1228,7 @@ SCTP_STATIC void sctp_close(struct sock *sk, long timeout)
 
 	ep = sctp_sk(sk)->ep;
 
-	/* Walk all associations on an endpoint.  */
+	/* Walk all associations on a socket, not on an endpoint.  */
 	list_for_each_safe(pos, temp, &ep->asocs) {
 		asoc = list_entry(pos, struct sctp_association, asocs);
 
@@ -1285,16 +1241,16 @@ SCTP_STATIC void sctp_close(struct sock *sk, long timeout)
 			if (sctp_state(asoc, CLOSED)) {
 				sctp_unhash_established(asoc);
 				sctp_association_free(asoc);
-				continue;
-			}
-		}
 
-		if (sock_flag(sk, SOCK_LINGER) && !sk->sk_lingertime) {
-			struct sctp_chunk *chunk;
+			} else if (sock_flag(sk, SOCK_LINGER) &&
+				   !sk->sk_lingertime) {
+				struct sctp_chunk *chunk;
 
-			chunk = sctp_make_abort_user(asoc, NULL, 0);
-			if (chunk)
-				sctp_primitive_ABORT(asoc, chunk);
+				chunk = sctp_make_abort_user(asoc, NULL, 0);
+				if (chunk)
+					sctp_primitive_ABORT(asoc, chunk);
+			} else
+				sctp_primitive_SHUTDOWN(asoc, NULL);
 		} else
 			sctp_primitive_SHUTDOWN(asoc, NULL);
 	}
@@ -4974,8 +4930,6 @@ unsigned int sctp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	/* Is there any exceptional events?  */
 	if (sk->sk_err || !skb_queue_empty(&sk->sk_error_queue))
 		mask |= POLLERR;
-	if (sk->sk_shutdown & RCV_SHUTDOWN)
-		mask |= POLLRDHUP;
 	if (sk->sk_shutdown == SHUTDOWN_MASK)
 		mask |= POLLHUP;
 
@@ -5033,7 +4987,7 @@ static struct sctp_bind_bucket *sctp_bucket_create(
 /* Caller must hold hashbucket lock for this tb with local BH disabled */
 static void sctp_bucket_destroy(struct sctp_bind_bucket *pp)
 {
-	if (pp && hlist_empty(&pp->owner)) {
+	if (hlist_empty(&pp->owner)) {
 		if (pp->next)
 			pp->next->pprev = pp->pprev;
 		*(pp->pprev) = pp->next;
@@ -5397,7 +5351,6 @@ static int sctp_wait_for_sndbuf(struct sctp_association *asoc, long *timeo_p,
 		 */
 		sctp_release_sock(sk);
 		current_timeo = schedule_timeout(current_timeo);
-		BUG_ON(sk != asoc->base.sk);
 		sctp_lock_sock(sk);
 
 		*timeo_p = current_timeo;
@@ -5685,14 +5638,12 @@ static void sctp_sock_migrate(struct sock *oldsk, struct sock *newsk,
 	 */
 	newsp->type = type;
 
-	/* Mark the new socket "in-use" by the user so that any packets
-	 * that may arrive on the association after we've moved it are
-	 * queued to the backlog.  This prevents a potential race between
-	 * backlog processing on the old socket and new-packet processing
-	 * on the new socket.
-	 */
-	sctp_lock_sock(newsk);
+	spin_lock_bh(&oldsk->sk_lock.slock);
+	/* Migrate the backlog from oldsk to newsk. */
+	sctp_backlog_migrate(assoc, oldsk, newsk);
+	/* Migrate the association to the new socket. */
 	sctp_assoc_migrate(assoc, newsk);
+	spin_unlock_bh(&oldsk->sk_lock.slock);
 
 	/* If the association on the newsk is already closed before accept()
 	 * is called, set RCV_SHUTDOWN flag.
@@ -5701,7 +5652,6 @@ static void sctp_sock_migrate(struct sock *oldsk, struct sock *newsk,
 		newsk->sk_shutdown |= RCV_SHUTDOWN;
 
 	newsk->sk_state = SCTP_SS_ESTABLISHED;
-	sctp_release_sock(newsk);
 }
 
 /* This proto struct describes the ULP interface for SCTP.  */

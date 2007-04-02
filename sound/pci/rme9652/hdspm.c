@@ -426,7 +426,7 @@ static char channel_map_madi_qs[HDSPM_MAX_CHANNELS] = {
 };
 
 
-static struct pci_device_id snd_hdspm_ids[] __devinitdata = {
+static struct pci_device_id snd_hdspm_ids[] = {
 	{
 	 .vendor = PCI_VENDOR_ID_XILINX,
 	 .device = PCI_DEVICE_ID_XILINX_HAMMERFALL_DSP_MADI,
@@ -2256,7 +2256,7 @@ static int snd_hdspm_create_controls(struct snd_card *card, struct hdspm * hdspm
 	}
 
 	/* Channel playback mixer as default control 
-	   Note: the whole matrix would be 128*HDSPM_MIXER_CHANNELS Faders, thats too big for any alsamixer
+	   Note: the whole matrix would be 128*HDSPM_MIXER_CHANNELS Faders, thats to big for any alsamixer 
 	   they are accesible via special IOCTL on hwdep
 	   and the mixer 2dimensional mixer control */
 
@@ -2489,7 +2489,7 @@ static void __devinit snd_hdspm_proc_init(struct hdspm * hdspm)
 	struct snd_info_entry *entry;
 
 	if (!snd_card_proc_new(hdspm->card, "hdspm", &entry))
-		snd_info_set_text_ops(entry, hdspm,
+		snd_info_set_text_ops(entry, hdspm, 1024,
 				      snd_hdspm_proc_read);
 }
 
@@ -3497,7 +3497,7 @@ static int __devinit snd_hdspm_create(struct snd_card *card, struct hdspm * hdsp
 		   hdspm->port + io_extent - 1);
 
 	if (request_irq(pci->irq, snd_hdspm_interrupt,
-			IRQF_DISABLED | IRQF_SHARED, "hdspm",
+			SA_INTERRUPT | SA_SHIRQ, "hdspm",
 			(void *) hdspm)) {
 		snd_printk(KERN_ERR "HDSPM: unable to use IRQ %d\n", pci->irq);
 		return -EBUSY;

@@ -134,8 +134,7 @@
 	.flags			= SD_LOAD_BALANCE	\
 				| SD_BALANCE_NEWIDLE	\
 				| SD_BALANCE_EXEC	\
-				| SD_WAKE_AFFINE	\
-				| BALANCE_FOR_POWER,	\
+				| SD_WAKE_AFFINE,	\
 	.last_balance		= jiffies,		\
 	.balance_interval	= 1,			\
 	.nr_balance_failed	= 0,			\
@@ -164,15 +163,6 @@
 	.balance_interval	= 64,			\
 	.nr_balance_failed	= 0,			\
 }
-
-#ifdef CONFIG_SCHED_MC
-#ifndef SD_MC_INIT
-/* for now its same as SD_CPU_INIT.
- * TBD: Tune Domain parameters!
- */
-#define SD_MC_INIT   SD_CPU_INIT
-#endif
-#endif
 
 #ifdef CONFIG_NUMA
 #ifndef SD_NODE_INIT

@@ -8,8 +8,6 @@
  * Lockless receive & send, fd based notify:
  * 			    Manfred Spraul	    (manfred@colorfullife.com)
  *
- * Audit:                   George Wilson           (ltcgcw@us.ibm.com)
- *
  * This file is released under the GPL.
  */
 
@@ -26,12 +24,9 @@
 #include <linux/skbuff.h>
 #include <linux/netlink.h>
 #include <linux/syscalls.h>
-#include <linux/audit.h>
 #include <linux/signal.h>
-#include <linux/mutex.h>
 #include <linux/vs_context.h>
 #include <linux/vs_limit.h>
-
 #include <net/sock.h>
 #include "util.h"
 
@@ -58,6 +53,7 @@
 #define HARD_MSGMAX 	(131072/sizeof(void*))
 #define DFLT_MSGSIZEMAX 8192	/* max message size */
 
+#define NOTIFY_COOKIE_LEN	32
 
 struct ext_wait_queue {		/* queue of sleeping tasks */
 	struct task_struct *task;
@@ -117,6 +113,7 @@ static struct inode *mqueue_get_inode(struct super_block *sb, int mode,
 		inode->i_mode = mode;
 		inode->i_uid = current->fsuid;
 		inode->i_gid = current->fsgid;
+		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_mtime = inode->i_ctime = inode->i_atime =
 				CURRENT_TIME;
@@ -209,11 +206,11 @@ static int mqueue_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 }
 
-static int mqueue_get_sb(struct file_system_type *fs_type,
-			 int flags, const char *dev_name,
-			 void *data, struct vfsmount *mnt)
+static struct super_block *mqueue_get_sb(struct file_system_type *fs_type,
+					 int flags, const char *dev_name,
+					 void *data)
 {
-	return get_sb_single(fs_type, flags, data, mqueue_fill_super, mnt);
+	return get_sb_single(fs_type, flags, data, mqueue_fill_super);
 }
 
 static void init_once(void *foo, kmem_cache_t * cachep, unsigned long flags)
@@ -367,7 +364,7 @@ static ssize_t mqueue_read_file(struct file *filp, char __user *u_data,
 	return count;
 }
 
-static int mqueue_flush_file(struct file *filp, fl_owner_t id)
+static int mqueue_flush_file(struct file *filp)
 {
 	struct mqueue_inode_info *info = MQUEUE_I(filp->f_dentry->d_inode);
 
@@ -668,10 +665,6 @@ asmlinkage long sys_mq_open(const char __user *u_name, int oflag, mode_t mode,
 	char *name;
 	int fd, error;
 
-	error = audit_mq_open(oflag, mode, u_attr);
-	if (error != 0)
-		return error;
-
 	if (IS_ERR(name = getname(u_name)))
 		return PTR_ERR(name);
 
@@ -777,7 +770,7 @@ out_unlock:
  * The receiver accepts the message and returns without grabbing the queue
  * spinlock. Therefore an intermediate STATE_PENDING state and memory barriers
  * are necessary. The same algorithm is used for sysv semaphores, see
- * ipc/sem.c for more details.
+ * ipc/sem.c fore more details.
  *
  * The same algorithm is used for senders.
  */
@@ -828,10 +821,6 @@ asmlinkage long sys_mq_timedsend(mqd_t mqdes, const char __user *u_msg_ptr,
 	struct mqueue_inode_info *info;
 	long timeout;
 	int ret;
-
-	ret = audit_mq_timedsend(mqdes, msg_len, msg_prio, u_abs_timeout);
-	if (ret != 0)
-		return ret;
 
 	if (unlikely(msg_prio >= (unsigned long) MQ_PRIO_MAX))
 		return -EINVAL;
@@ -915,10 +904,6 @@ asmlinkage ssize_t sys_mq_timedreceive(mqd_t mqdes, char __user *u_msg_ptr,
 	struct mqueue_inode_info *info;
 	struct ext_wait_queue wait;
 
-	ret = audit_mq_timedreceive(mqdes, msg_len, u_msg_prio, u_abs_timeout);
-	if (ret != 0)
-		return ret;
-
 	timeout = prepare_timeout(u_abs_timeout);
 
 	ret = -EBADF;
@@ -997,10 +982,6 @@ asmlinkage long sys_mq_notify(mqd_t mqdes,
 	struct sigevent notification;
 	struct mqueue_inode_info *info;
 	struct sk_buff *nc;
-
-	ret = audit_mq_notify(mqdes, u_notification);
-	if (ret != 0)
-		return ret;
 
 	nc = NULL;
 	sock = NULL;
@@ -1142,9 +1123,6 @@ asmlinkage long sys_mq_getsetattr(mqd_t mqdes,
 	omqstat = info->attr;
 	omqstat.mq_flags = filp->f_flags & O_NONBLOCK;
 	if (u_mqstat) {
-		ret = audit_mq_getsetattr(mqdes, &mqstat);
-		if (ret != 0)
-			goto out;
 		if (mqstat.mq_flags & O_NONBLOCK)
 			filp->f_flags |= O_NONBLOCK;
 		else

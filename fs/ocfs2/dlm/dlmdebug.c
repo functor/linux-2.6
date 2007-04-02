@@ -37,8 +37,10 @@
 
 #include "dlmapi.h"
 #include "dlmcommon.h"
+#include "dlmdebug.h"
 
 #include "dlmdomain.h"
+#include "dlmdebug.h"
 
 #define MLOG_MASK_PREFIX ML_DLM
 #include "cluster/masklog.h"
@@ -70,10 +72,8 @@ void __dlm_print_one_lock_resource(struct dlm_lock_resource *res)
 		lock = list_entry(iter2, struct dlm_lock, list);
 		spin_lock(&lock->spinlock);
 		mlog(ML_NOTICE, "    type=%d, conv=%d, node=%u, "
-		       "cookie=%u:%llu, ast=(empty=%c,pend=%c), bast=(empty=%c,pend=%c)\n", 
-		       lock->ml.type, lock->ml.convert_type, lock->ml.node, 
-		       dlm_get_lock_cookie_node(lock->ml.cookie), 
-		       dlm_get_lock_cookie_seq(lock->ml.cookie), 
+		       "cookie=%"MLFu64", ast=(empty=%c,pend=%c), bast=(empty=%c,pend=%c)\n", 
+		       lock->ml.type, lock->ml.convert_type, lock->ml.node, lock->ml.cookie, 
 		       list_empty(&lock->ast_list) ? 'y' : 'n',
 		       lock->ast_pending ? 'y' : 'n',
 		       list_empty(&lock->bast_list) ? 'y' : 'n',
@@ -85,10 +85,8 @@ void __dlm_print_one_lock_resource(struct dlm_lock_resource *res)
 		lock = list_entry(iter2, struct dlm_lock, list);
 		spin_lock(&lock->spinlock);
 		mlog(ML_NOTICE, "    type=%d, conv=%d, node=%u, "
-		       "cookie=%u:%llu, ast=(empty=%c,pend=%c), bast=(empty=%c,pend=%c)\n", 
-		       lock->ml.type, lock->ml.convert_type, lock->ml.node, 
-		       dlm_get_lock_cookie_node(lock->ml.cookie), 
-		       dlm_get_lock_cookie_seq(lock->ml.cookie), 
+		       "cookie=%"MLFu64", ast=(empty=%c,pend=%c), bast=(empty=%c,pend=%c)\n", 
+		       lock->ml.type, lock->ml.convert_type, lock->ml.node, lock->ml.cookie, 
 		       list_empty(&lock->ast_list) ? 'y' : 'n',
 		       lock->ast_pending ? 'y' : 'n',
 		       list_empty(&lock->bast_list) ? 'y' : 'n',
@@ -100,10 +98,8 @@ void __dlm_print_one_lock_resource(struct dlm_lock_resource *res)
 		lock = list_entry(iter2, struct dlm_lock, list);
 		spin_lock(&lock->spinlock);
 		mlog(ML_NOTICE, "    type=%d, conv=%d, node=%u, "
-		       "cookie=%u:%llu, ast=(empty=%c,pend=%c), bast=(empty=%c,pend=%c)\n", 
-		       lock->ml.type, lock->ml.convert_type, lock->ml.node, 
-		       dlm_get_lock_cookie_node(lock->ml.cookie), 
-		       dlm_get_lock_cookie_seq(lock->ml.cookie), 
+		       "cookie=%"MLFu64", ast=(empty=%c,pend=%c), bast=(empty=%c,pend=%c)\n", 
+		       lock->ml.type, lock->ml.convert_type, lock->ml.node, lock->ml.cookie, 
 		       list_empty(&lock->ast_list) ? 'y' : 'n',
 		       lock->ast_pending ? 'y' : 'n',
 		       list_empty(&lock->bast_list) ? 'y' : 'n',
@@ -118,7 +114,6 @@ void dlm_print_one_lock(struct dlm_lock *lockid)
 }
 EXPORT_SYMBOL_GPL(dlm_print_one_lock);
 
-#if 0
 void dlm_dump_lock_resources(struct dlm_ctxt *dlm)
 {
 	struct dlm_lock_resource *res;
@@ -135,13 +130,12 @@ void dlm_dump_lock_resources(struct dlm_ctxt *dlm)
 
 	spin_lock(&dlm->spinlock);
 	for (i=0; i<DLM_HASH_BUCKETS; i++) {
-		bucket = dlm_lockres_hash(dlm, i);
+		bucket = &(dlm->lockres_hash[i]);
 		hlist_for_each_entry(res, iter, bucket, hash_node)
 			dlm_print_one_lock_resource(res);
 	}
 	spin_unlock(&dlm->spinlock);
 }
-#endif  /*  0  */
 
 static const char *dlm_errnames[] = {
 	[DLM_NORMAL] =			"DLM_NORMAL",

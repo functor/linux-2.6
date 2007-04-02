@@ -7,6 +7,7 @@
  *    Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com),
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/sysrq.h>
@@ -49,12 +50,14 @@ kbd_alloc(void) {
 	struct kbd_data *kbd;
 	int i, len;
 
-	kbd = kzalloc(sizeof(struct kbd_data), GFP_KERNEL);
+	kbd = kmalloc(sizeof(struct kbd_data), GFP_KERNEL);
 	if (!kbd)
 		goto out;
-	kbd->key_maps = kzalloc(sizeof(key_maps), GFP_KERNEL);
-	if (!kbd->key_maps)
+	memset(kbd, 0, sizeof(struct kbd_data));
+	kbd->key_maps = kmalloc(sizeof(key_maps), GFP_KERNEL);
+	if (!key_maps)
 		goto out_kbd;
+	memset(kbd->key_maps, 0, sizeof(key_maps));
 	for (i = 0; i < ARRAY_SIZE(key_maps); i++) {
 		if (key_maps[i]) {
 			kbd->key_maps[i] =
@@ -65,9 +68,10 @@ kbd_alloc(void) {
 			       sizeof(u_short)*NR_KEYS);
 		}
 	}
-	kbd->func_table = kzalloc(sizeof(func_table), GFP_KERNEL);
+	kbd->func_table = kmalloc(sizeof(func_table), GFP_KERNEL);
 	if (!kbd->func_table)
 		goto out_maps;
+	memset(kbd->func_table, 0, sizeof(func_table));
 	for (i = 0; i < ARRAY_SIZE(func_table); i++) {
 		if (func_table[i]) {
 			len = strlen(func_table[i]) + 1;
@@ -78,9 +82,10 @@ kbd_alloc(void) {
 		}
 	}
 	kbd->fn_handler =
-		kzalloc(sizeof(fn_handler_fn *) * NR_FN_HANDLER, GFP_KERNEL);
+		kmalloc(sizeof(fn_handler_fn *) * NR_FN_HANDLER, GFP_KERNEL);
 	if (!kbd->fn_handler)
 		goto out_func;
+	memset(kbd->fn_handler, 0, sizeof(fn_handler_fn *) * NR_FN_HANDLER);
 	kbd->accent_table =
 		kmalloc(sizeof(struct kbdiacr)*MAX_DIACR, GFP_KERNEL);
 	if (!kbd->accent_table)
@@ -103,7 +108,7 @@ out_maps:
 out_kbd:
 	kfree(kbd);
 out:
-	return NULL;
+	return 0;
 }
 
 void
@@ -304,7 +309,7 @@ kbd_keycode(struct kbd_data *kbd, unsigned int keycode)
 		if (kbd->sysrq) {
 			if (kbd->sysrq == K(KT_LATIN, '-')) {
 				kbd->sysrq = 0;
-				handle_sysrq(value, NULL, kbd->tty);
+				handle_sysrq(value, 0, kbd->tty);
 				return;
 			}
 			if (value == '-') {
@@ -363,7 +368,7 @@ do_kdsk_ioctl(struct kbd_data *kbd, struct kbentry __user *user_kbe,
 			/* disallocate map */
 			key_map = kbd->key_maps[tmp.kb_table];
 			if (key_map) {
-			    kbd->key_maps[tmp.kb_table] = NULL;
+			    kbd->key_maps[tmp.kb_table] = 0;
 			    kfree(key_map);
 			}
 			break;

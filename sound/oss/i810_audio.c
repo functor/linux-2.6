@@ -100,8 +100,6 @@
 #include <linux/smp_lock.h>
 #include <linux/ac97_codec.h>
 #include <linux/bitops.h>
-#include <linux/mutex.h>
-
 #include <asm/uaccess.h>
 
 #define DRIVER_VERSION "1.01"
@@ -333,7 +331,7 @@ struct i810_state {
 	struct i810_card *card;	/* Card info */
 
 	/* single open lock mechanism, only used for recording */
-	struct mutex open_mutex;
+	struct semaphore open_sem;
 	wait_queue_head_t open_wait;
 
 	/* file mode */
@@ -2599,7 +2597,7 @@ found_virt:
 	state->card = card;
 	state->magic = I810_STATE_MAGIC;
 	init_waitqueue_head(&dmabuf->wait);
-	mutex_init(&state->open_mutex);
+	init_MUTEX(&state->open_sem);
 	file->private_data = state;
 	dmabuf->trigger = 0;
 
@@ -3215,7 +3213,7 @@ static void __devinit i810_configure_clocking (void)
 		state->card = card;
 		state->magic = I810_STATE_MAGIC;
 		init_waitqueue_head(&dmabuf->wait);
-		mutex_init(&state->open_mutex);
+		init_MUTEX(&state->open_sem);
 		dmabuf->fmt = I810_FMT_STEREO | I810_FMT_16BIT;
 		dmabuf->trigger = PCM_ENABLE_OUTPUT;
 		i810_set_spdif_output(state, -1, 0);
@@ -3413,7 +3411,7 @@ static int __devinit i810_probe(struct pci_dev *pci_dev, const struct pci_device
 		goto out_iospace;
 	}
 
-	if (request_irq(card->irq, &i810_interrupt, IRQF_SHARED,
+	if (request_irq(card->irq, &i810_interrupt, SA_SHIRQ,
 			card_names[pci_id->driver_data], card)) {
 		printk(KERN_ERR "i810_audio: unable to allocate irq %d\n", card->irq);
 		goto out_iospace;

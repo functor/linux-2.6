@@ -144,16 +144,18 @@ static int vdma_get_dma_residue(unsigned int dummy)
 static int fd_request_irq(void)
 {
 	if(can_use_virtual_dma)
-		return request_irq(FLOPPY_IRQ, floppy_hardint,
-				   IRQF_DISABLED, "floppy", NULL);
+		return request_irq(FLOPPY_IRQ, floppy_hardint,SA_INTERRUPT,
+						   "floppy", NULL);
 	else
 		return request_irq(FLOPPY_IRQ, floppy_interrupt,
-				   IRQF_DISABLED, "floppy", NULL);
+						   SA_INTERRUPT|SA_SAMPLE_RANDOM,
+						   "floppy", NULL);	
+
 }
 
 static unsigned long dma_mem_alloc(unsigned long size)
 {
-	return __get_dma_pages(GFP_KERNEL|__GFP_NORETRY,get_order(size));
+	return __get_dma_pages(GFP_KERNEL,get_order(size));
 }
 
 

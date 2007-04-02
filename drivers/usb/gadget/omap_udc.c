@@ -22,6 +22,7 @@
 #undef	DEBUG
 #undef	VERBOSE
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/ioport.h>
@@ -272,8 +273,9 @@ omap_alloc_request(struct usb_ep *ep, gfp_t gfp_flags)
 {
 	struct omap_req	*req;
 
-	req = kzalloc(sizeof(*req), gfp_flags);
+	req = kmalloc(sizeof *req, gfp_flags);
 	if (req) {
+		memset (req, 0, sizeof *req);
 		req->req.dma = DMA_ADDR_INVALID;
 		INIT_LIST_HEAD (&req->queue);
 	}
@@ -772,7 +774,7 @@ static void dma_error(int lch, u16 ch_status, void *data)
 	struct omap_ep	*ep = data;
 
 	/* if ch_status & OMAP_DMA_DROP_IRQ ... */
-	/* if ch_status & OMAP1_DMA_TOUT_IRQ ... */
+	/* if ch_status & OMAP_DMA_TOUT_IRQ ... */
 	ERR("%s dma error, lch %d status %02x\n", ep->ep.name, lch, ch_status);
 
 	/* complete current transfer ... */
@@ -2584,10 +2586,11 @@ omap_udc_setup(struct platform_device *odev, struct otg_transceiver *xceiv)
 	/* UDC_PULLUP_EN gates the chip clock */
 	// OTG_SYSCON_1_REG |= DEV_IDLE_EN;
 
-	udc = kzalloc(sizeof(*udc), SLAB_KERNEL);
+	udc = kmalloc (sizeof *udc, SLAB_KERNEL);
 	if (!udc)
 		return -ENOMEM;
 
+	memset(udc, 0, sizeof *udc);
 	spin_lock_init (&udc->lock);
 
 	udc->gadget.ops = &omap_gadget_ops;
@@ -2818,7 +2821,7 @@ bad_on_1710:
 
 	/* USB general purpose IRQ:  ep0, state changes, dma, etc */
 	status = request_irq(pdev->resource[1].start, omap_udc_irq,
-			IRQF_SAMPLE_RANDOM, driver_name, udc);
+			SA_SAMPLE_RANDOM, driver_name, udc);
 	if (status != 0) {
 		ERR( "can't get irq %ld, err %d\n",
 			pdev->resource[1].start, status);
@@ -2827,7 +2830,7 @@ bad_on_1710:
 
 	/* USB "non-iso" IRQ (PIO for all but ep0) */
 	status = request_irq(pdev->resource[2].start, omap_udc_pio_irq,
-			IRQF_SAMPLE_RANDOM, "omap_udc pio", udc);
+			SA_SAMPLE_RANDOM, "omap_udc pio", udc);
 	if (status != 0) {
 		ERR( "can't get irq %ld, err %d\n",
 			pdev->resource[2].start, status);
@@ -2835,7 +2838,7 @@ bad_on_1710:
 	}
 #ifdef	USE_ISO
 	status = request_irq(pdev->resource[3].start, omap_udc_iso_irq,
-			IRQF_DISABLED, "omap_udc iso", udc);
+			SA_INTERRUPT, "omap_udc iso", udc);
 	if (status != 0) {
 		ERR("can't get irq %ld, err %d\n",
 			pdev->resource[3].start, status);
@@ -2869,7 +2872,7 @@ cleanup0:
 
 static int __exit omap_udc_remove(struct platform_device *pdev)
 {
-	DECLARE_COMPLETION_ONSTACK(done);
+	DECLARE_COMPLETION(done);
 
 	if (!udc)
 		return -ENODEV;

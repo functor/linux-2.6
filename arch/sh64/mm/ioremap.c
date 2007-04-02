@@ -449,9 +449,7 @@ ioremap_proc_info(char *buf, char **start, off_t fpos, int length, int *eof,
 		if (p + 32 >= e)        /* Better than nothing */
 			break;
 		if ((nm = r->name) == 0) nm = "???";
-		p += sprintf(p, "%08lx-%08lx: %s\n",
-			     (unsigned long)r->start,
-			     (unsigned long)r->end, nm);
+		p += sprintf(p, "%08lx-%08lx: %s\n", r->start, r->end, nm);
 	}
 
 	return p-buf;

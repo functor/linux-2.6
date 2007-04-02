@@ -10,6 +10,7 @@
 #ifndef _ASM_FPU_H
 #define _ASM_FPU_H
 
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/thread_info.h>
 
@@ -19,10 +20,6 @@
 #include <asm/bitops.h>
 #include <asm/processor.h>
 #include <asm/current.h>
-
-#ifdef CONFIG_MIPS_MT_FPAFF
-#include <asm/mips_mt.h>
-#endif
 
 struct sigcontext;
 struct sigcontext32;
@@ -137,9 +134,10 @@ static inline fpureg_t *get_fpu_regs(struct task_struct *tsk)
 	if (cpu_has_fpu) {
 		if ((tsk == current) && __is_fpu_owner())
 			_save_fp(current);
+		return tsk->thread.fpu.hard.fpr;
 	}
 
-	return tsk->thread.fpu.fpr;
+	return tsk->thread.fpu.soft.fpr;
 }
 
 #endif /* _ASM_FPU_H */

@@ -19,6 +19,7 @@
  *    Questions/Comments/Bugfixes to iss_storagedev@hp.com
  *
  */
+#include <linux/config.h>	/* CONFIG_PROC_FS */
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/pci.h>
@@ -32,6 +33,7 @@
 #include <linux/blkpg.h>
 #include <linux/timer.h>
 #include <linux/proc_fs.h>
+#include <linux/devfs_fs_kernel.h>
 #include <linux/init.h>
 #include <linux/hdreg.h>
 #include <linux/spinlock.h>
@@ -50,7 +52,6 @@
 /* Original author Chris Frantz - Compaq Computer Corporation */
 MODULE_AUTHOR("Compaq Computer Corporation");
 MODULE_DESCRIPTION("Driver for Compaq Smart2 Array Controllers version 2.6.0");
-MODULE_VERSION("2.6.0");
 MODULE_LICENSE("GPL");
 
 #include "cpqarray.h"
@@ -347,6 +348,7 @@ static void __devexit cpqarray_remove_one(int i)
 	for(j = 0; j < NWD; j++) {
 		if (ida_gendisk[i][j]->flags & GENHD_FL_UP)
 			del_gendisk(ida_gendisk[i][j]);
+		devfs_remove("ida/c%dd%d",i,j);
 		put_disk(ida_gendisk[i][j]);
 	}
 	blk_cleanup_queue(hba[i]->queue);
@@ -390,7 +392,7 @@ static void __devexit cpqarray_remove_one_eisa (int i)
 }
 
 /* pdev is NULL for eisa */
-static int __init cpqarray_register_ctlr( int i, struct pci_dev *pdev)
+static int cpqarray_register_ctlr( int i, struct pci_dev *pdev)
 {
 	request_queue_t *q;
 	int j;
@@ -408,7 +410,8 @@ static int __init cpqarray_register_ctlr( int i, struct pci_dev *pdev)
 	}
 	hba[i]->access.set_intr_mask(hba[i], 0);
 	if (request_irq(hba[i]->intr, do_ida_intr,
-		IRQF_DISABLED|IRQF_SHARED, hba[i]->devname, hba[i]))
+		SA_INTERRUPT|SA_SHIRQ|SA_SAMPLE_RANDOM,
+		hba[i]->devname, hba[i]))
 	{
 		printk(KERN_ERR "cpqarray: Unable to get irq %d for %s\n",
 				hba[i]->intr, hba[i]->devname);
@@ -614,7 +617,6 @@ static int cpqarray_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 	int i;
 
 	c->pci_dev = pdev;
-	pci_set_master(pdev);
 	if (pci_enable_device(pdev)) {
 		printk(KERN_ERR "cpqarray: Unable to Enable PCI device\n");
 		return -1;
@@ -743,7 +745,7 @@ __setup("smart2=", cpqarray_setup);
 /*
  * Find an EISA controller's signature.  Set up an hba if we find it.
  */
-static int __init cpqarray_eisa_detect(void)
+static int cpqarray_eisa_detect(void)
 {
 	int i=0, j;
 	__u32 board_id;
@@ -904,7 +906,8 @@ queue_next:
 	if (!creq)
 		goto startio;
 
-	BUG_ON(creq->nr_phys_segments > SG_MAX);
+	if (creq->nr_phys_segments > SG_MAX)
+		BUG();
 
 	if ((c = cmd_alloc(h,1)) == NULL)
 		goto startio;
@@ -1037,11 +1040,9 @@ static inline void complete_command(cmdlist_t *cmd, int timeout)
 
 	if (blk_fs_request(rq)) {
 		const int rw = rq_data_dir(rq);
-
+ 
 		disk_stat_add(rq->rq_disk, sectors[rw], rq->nr_sectors);
 	}
-
-	add_disk_randomness(rq->rq_disk);
 
 	DBGPX(printk("Done with %p\n", rq););
 	end_that_request_last(rq, ok ? 1 : -EIO);
@@ -1747,6 +1748,8 @@ static void getgeometry(int ctlr)
 	     (log_index < id_ctlr_buf->nr_drvs)
 	     && (log_unit < NWD);
 	     log_unit++) {
+		struct gendisk *disk = ida_gendisk[ctlr][log_unit];
+
 		size = sizeof(sense_log_drv_stat_t);
 
 		/*
@@ -1811,6 +1814,8 @@ static void getgeometry(int ctlr)
 
 				}
 
+				sprintf(disk->devfs_name, "ida/c%dd%d", ctlr, log_unit);
+
 				info_p->phys_drives =
 				    sense_config_buf->ctlr_phys_drv;
 				info_p->drv_assign_map
@@ -1846,6 +1851,7 @@ static void __exit cpqarray_exit(void)
 		}
 	}
 
+	devfs_remove("ida");
 	remove_proc_entry("cpqarray", proc_root_driver);
 }
 

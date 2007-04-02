@@ -35,6 +35,7 @@
  * 
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
@@ -50,8 +51,6 @@
 #include <linux/netfilter_ipv4/ip_conntrack_pptp.h>
 
 #define IP_NAT_PPTP_VERSION "3.0"
-
-#define REQ_CID(req, off)		(*(u_int16_t *)((char *)(req) + (off)))
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Harald Welte <laforge@gnumonks.org>");
@@ -199,7 +198,7 @@ pptp_outbound_pkt(struct sk_buff **pskb,
 	/* only OUT_CALL_REQUEST, IN_CALL_REPLY, CALL_CLEAR_REQUEST pass
 	 * down to here */
 	DEBUGP("altering call id from 0x%04x to 0x%04x\n",
-		ntohs(REQ_CID(pptpReq, cid_off)), ntohs(new_callid));
+		ntohs(*(u_int16_t *)pptpReq + cid_off), ntohs(new_callid));
 
 	/* mangle packet */
 	if (ip_nat_mangle_tcp_packet(pskb, ct, ctinfo,
@@ -343,7 +342,7 @@ pptp_inbound_pkt(struct sk_buff **pskb,
 
 	/* mangle packet */
 	DEBUGP("altering peer call id from 0x%04x to 0x%04x\n",
-		ntohs(REQ_CID(pptpReq, pcid_off)), ntohs(new_pcid));
+		ntohs(*(u_int16_t *)pptpReq + pcid_off), ntohs(new_pcid));
 
 	if (ip_nat_mangle_tcp_packet(pskb, ct, ctinfo,
 	                             pcid_off + sizeof(struct pptp_pkt_hdr) +
@@ -354,7 +353,7 @@ pptp_inbound_pkt(struct sk_buff **pskb,
 
 	if (new_cid) {
 		DEBUGP("altering call id from 0x%04x to 0x%04x\n",
-			ntohs(REQ_CID(pptpReq, cid_off)), ntohs(new_cid));
+			ntohs(*(u_int16_t *)pptpReq + cid_off), ntohs(new_cid));
 		if (ip_nat_mangle_tcp_packet(pskb, ct, ctinfo,
 		                             cid_off + sizeof(struct pptp_pkt_hdr) +
 					     sizeof(struct PptpControlHeader),
@@ -369,7 +368,7 @@ pptp_inbound_pkt(struct sk_buff **pskb,
 extern int __init ip_nat_proto_gre_init(void);
 extern void __exit ip_nat_proto_gre_fini(void);
 
-static int __init ip_nat_helper_pptp_init(void)
+static int __init init(void)
 {
 	int ret;
 
@@ -395,7 +394,7 @@ static int __init ip_nat_helper_pptp_init(void)
 	return 0;
 }
 
-static void __exit ip_nat_helper_pptp_fini(void)
+static void __exit fini(void)
 {
 	DEBUGP("cleanup_module\n" );
 
@@ -411,5 +410,5 @@ static void __exit ip_nat_helper_pptp_fini(void)
 	printk("ip_nat_pptp version %s unloaded\n", IP_NAT_PPTP_VERSION);
 }
 
-module_init(ip_nat_helper_pptp_init);
-module_exit(ip_nat_helper_pptp_fini);
+module_init(init);
+module_exit(fini);

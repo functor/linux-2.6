@@ -3,8 +3,7 @@
 #ifndef _SPARC64_PAGE_H
 #define _SPARC64_PAGE_H
 
-#ifdef __KERNEL__
-
+#include <linux/config.h>
 #include <asm/const.h>
 
 #if defined(CONFIG_SPARC64_PAGE_SIZE_8KB)
@@ -29,22 +28,7 @@
 #define DCACHE_ALIASING_POSSIBLE
 #endif
 
-#if defined(CONFIG_HUGETLB_PAGE_SIZE_4MB)
-#define HPAGE_SHIFT		22
-#elif defined(CONFIG_HUGETLB_PAGE_SIZE_512K)
-#define HPAGE_SHIFT		19
-#elif defined(CONFIG_HUGETLB_PAGE_SIZE_64K)
-#define HPAGE_SHIFT		16
-#endif
-
-#ifdef CONFIG_HUGETLB_PAGE
-#define HPAGE_SIZE		(_AC(1,UL) << HPAGE_SHIFT)
-#define HPAGE_MASK		(~(HPAGE_SIZE - 1UL))
-#define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
-#define ARCH_HAS_SETCLEAR_HUGE_PTE
-#define ARCH_HAS_HUGETLB_PREFAULT_HOOK
-#define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
-#endif
+#ifdef __KERNEL__
 
 #ifndef __ASSEMBLY__
 
@@ -106,11 +90,24 @@ typedef unsigned long pgprot_t;
 
 #endif /* (STRICT_MM_TYPECHECKS) */
 
-#define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_32BIT) ? \
-				 (_AC(0x0000000070000000,UL)) : \
-				 (_AC(0xfffff80000000000,UL) + (1UL << 32UL)))
+#if defined(CONFIG_HUGETLB_PAGE_SIZE_4MB)
+#define HPAGE_SHIFT		22
+#elif defined(CONFIG_HUGETLB_PAGE_SIZE_512K)
+#define HPAGE_SHIFT		19
+#elif defined(CONFIG_HUGETLB_PAGE_SIZE_64K)
+#define HPAGE_SHIFT		16
+#endif
 
-#include <asm-generic/memory_model.h>
+#ifdef CONFIG_HUGETLB_PAGE
+#define HPAGE_SIZE		(_AC(1,UL) << HPAGE_SHIFT)
+#define HPAGE_MASK		(~(HPAGE_SIZE - 1UL))
+#define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
+#define ARCH_HAS_SETCLEAR_HUGE_PTE
+#define ARCH_HAS_HUGETLB_PREFAULT_HOOK
+#endif
+
+#define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_32BIT) ? \
+				 (_AC(0x0000000070000000,UL)) : (PAGE_OFFSET))
 
 #endif /* !(__ASSEMBLY__) */
 
@@ -127,10 +124,17 @@ typedef unsigned long pgprot_t;
 #define __pa(x)			((unsigned long)(x) - PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long) (x) + PAGE_OFFSET))
 
-#define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
+/* PFNs are real physical page numbers.  However, mem_map only begins to record
+ * per-page information starting at pfn_base.  This is to handle systems where
+ * the first physical page in the machine is at some huge physical address,
+ * such as 4GB.   This is common on a partitioned E10000, for example.
+ */
+extern struct page *pfn_to_page(unsigned long pfn);
+extern unsigned long page_to_pfn(struct page *);
 
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr)>>PAGE_SHIFT)
 
+#define pfn_valid(pfn)		(((pfn)-(pfn_base)) < max_mapnr)
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
 #define virt_to_phys __pa
@@ -141,9 +145,8 @@ typedef unsigned long pgprot_t;
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#define devmem_is_allowed(x) 1
+#endif /* !(__KERNEL__) */
 
 #include <asm-generic/page.h>
 
-#endif /* __KERNEL__ */
-#endif /* _SPARC64_PAGE_H */
+#endif /* !(_SPARC64_PAGE_H) */

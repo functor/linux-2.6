@@ -1,6 +1,6 @@
 /*
  *  include/linux/eventpoll.h ( Efficent event polling implementation )
- *  Copyright (C) 2001,...,2006	 Davide Libenzi
+ *  Copyright (C) 2001,...,2003	 Davide Libenzi
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -52,12 +52,7 @@ struct file;
 #ifdef CONFIG_EPOLL
 
 /* Used to initialize the epoll bits inside the "struct file" */
-static inline void eventpoll_init_file(struct file *file)
-{
-	INIT_LIST_HEAD(&file->f_ep_links);
-	spin_lock_init(&file->f_ep_lock);
-}
-
+void eventpoll_init_file(struct file *file);
 
 /* Used to release the epoll bits inside the "struct file" */
 void eventpoll_release_file(struct file *file);
@@ -89,6 +84,7 @@ static inline void eventpoll_release(struct file *file)
 	 */
 	eventpoll_release_file(file);
 }
+
 
 #else
 

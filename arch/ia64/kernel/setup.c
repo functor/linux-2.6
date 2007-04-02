@@ -22,6 +22,7 @@
  * 06/24/99 W.Drummond	added boot_cpu_data.
  * 05/28/05 Z. Menyhart	Dynamic stride size for "flush_icache_range()"
  */
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 
@@ -35,12 +36,12 @@
 #include <linux/seq_file.h>
 #include <linux/string.h>
 #include <linux/threads.h>
-#include <linux/screen_info.h>
-#include <linux/dmi.h>
+#include <linux/tty.h>
 #include <linux/serial.h>
 #include <linux/serial_core.h>
 #include <linux/efi.h>
 #include <linux/initrd.h>
+#include <linux/platform.h>
 #include <linux/pm.h>
 #include <linux/cpufreq.h>
 
@@ -60,10 +61,6 @@
 #include <asm/system.h>
 #include <asm/unistd.h>
 #include <asm/system.h>
-#ifdef CONFIG_XEN
-#include <asm/hypervisor.h>
-#endif
-#include <linux/dma-mapping.h>
 
 #if defined(CONFIG_SMP) && (IA64_CPU_SIZE > PAGE_SIZE)
 # error "struct cpuinfo_ia64 too big!"
@@ -72,22 +69,6 @@
 #ifdef CONFIG_SMP
 unsigned long __per_cpu_offset[NR_CPUS];
 EXPORT_SYMBOL(__per_cpu_offset);
-#endif
-
-#ifdef CONFIG_XEN
-static int
-xen_panic_event(struct notifier_block *this, unsigned long event, void *ptr)
-{
-	HYPERVISOR_shutdown(SHUTDOWN_crash);
-	/* we're never actually going to get here... */
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block xen_panic_block = {
-	.notifier_call	= xen_panic_event,
-	.next		= NULL,
-	.priority	= 0	/* try to go last */
-};
 #endif
 
 extern void ia64_setup_printk_clock(void);
@@ -150,8 +131,8 @@ EXPORT_SYMBOL(ia64_max_iommu_merge_mask);
 /*
  * We use a special marker for the end of memory and it uses the extra (+1) slot
  */
-struct rsvd_region rsvd_region[IA64_MAX_RSVD_REGIONS + 1] __initdata;
-int num_rsvd_regions __initdata;
+struct rsvd_region rsvd_region[IA64_MAX_RSVD_REGIONS + 1];
+int num_rsvd_regions;
 
 
 /*
@@ -160,7 +141,7 @@ int num_rsvd_regions __initdata;
  * caller-specified function is called with the memory ranges that remain after filtering.
  * This routine does not assume the incoming segments are sorted.
  */
-int __init
+int
 filter_rsvd_memory (unsigned long start, unsigned long end, void *arg)
 {
 	unsigned long range_start, range_end, prev_start;
@@ -196,69 +177,21 @@ filter_rsvd_memory (unsigned long start, unsigned long end, void *arg)
 	return 0;
 }
 
-static int __init
-rsvd_region_cmp(struct rsvd_region *lhs, struct rsvd_region *rhs)
-{
-	if (lhs->start > rhs->start)
-		return 1;
-	if (lhs->start < rhs->start)
-		return -1;
-
-	if (lhs->end > rhs->end)
-		return 1;
-	if (lhs->end < rhs->end)
-		return -1;
-
-	return 0;
-}
-
-static void __init
+static void
 sort_regions (struct rsvd_region *rsvd_region, int max)
 {
-	int num = max;
 	int j;
 
 	/* simple bubble sorting */
 	while (max--) {
 		for (j = 0; j < max; ++j) {
-			if (rsvd_region_cmp(&rsvd_region[j],
-					    &rsvd_region[j + 1]) > 0) {
+			if (rsvd_region[j].start > rsvd_region[j+1].start) {
 				struct rsvd_region tmp;
 				tmp = rsvd_region[j];
 				rsvd_region[j] = rsvd_region[j + 1];
 				rsvd_region[j + 1] = tmp;
 			}
 		}
-	}
-
-	for (j = 0; j < num - 1; j++) {
-		int k;
-		unsigned long start = rsvd_region[j].start;
-		unsigned long end = rsvd_region[j].end;
-		int collapsed;
-		
-		for (k = j + 1; k < num; k++) {
-			BUG_ON(start > rsvd_region[k].start);
-			if (end < rsvd_region[k].start) {
-				k--;
-				break;
-			}
-			end = max(end, rsvd_region[k].end);
-		}
-		if (k == num)
-			k--;
-		rsvd_region[j].end = end;
-		collapsed = k - j;
-		num -= collapsed;
-		for (k = j + 1; k < num; k++) {
-			rsvd_region[k] = rsvd_region[k + collapsed];
-		}
-	}
-
-	num_rsvd_regions = num;
-	for (j = 0; j < num; j++) {
-		printk("rsvd_region[%d]: [0x%016lx, 0x%06lx)\n",
-		       j, rsvd_region[j].start, rsvd_region[j].end);
 	}
 }
 
@@ -285,7 +218,7 @@ __initcall(register_memory);
  * initrd, etc.  There are currently %IA64_MAX_RSVD_REGIONS defined,
  * see include/asm-ia64/meminit.h if you need to define more.
  */
-void __init
+void
 reserve_memory (void)
 {
 	int n = 0;
@@ -310,14 +243,6 @@ reserve_memory (void)
 	rsvd_region[n].end   = (unsigned long) ia64_imva(_end);
 	n++;
 
-#ifdef CONFIG_XEN
-	if (is_running_on_xen()) {
-		rsvd_region[n].start = (unsigned long)__va((HYPERVISOR_shared_info->arch.start_info_pfn << PAGE_SHIFT));
-		rsvd_region[n].end   = rsvd_region[n].start + PAGE_SIZE;
-		n++;
- 	}
-#endif
-
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (ia64_boot_param->initrd_start) {
 		rsvd_region[n].start = (unsigned long)__va(ia64_boot_param->initrd_start);
@@ -335,7 +260,6 @@ reserve_memory (void)
 	n++;
 
 	num_rsvd_regions = n;
-	BUG_ON(IA64_MAX_RSVD_REGIONS + 1 < n);
 
 	sort_regions(rsvd_region, num_rsvd_regions);
 }
@@ -346,7 +270,7 @@ reserve_memory (void)
  * Grab the initrd start and end from the boot parameter struct given us by
  * the boot loader.
  */
-void __init
+void
 find_initrd (void)
 {
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -409,16 +333,6 @@ early_console_setup (char *cmdline)
 {
 	int earlycons = 0;
 
-#ifdef CONFIG_XEN
-#ifndef CONFIG_IA64_HP_SIM
-	if (is_running_on_xen()) {
-		extern struct console hpsim_cons;
-		hpsim_cons.flags |= CON_BOOT;
-		register_console(&hpsim_cons);
-		earlycons++;
-	}
-#endif
-#endif
 #ifdef CONFIG_SERIAL_SGI_L1_CONSOLE
 	{
 		extern int sn_serial_console_early_setup(void);
@@ -448,7 +362,7 @@ mark_bsp_online (void)
 }
 
 #ifdef CONFIG_SMP
-static void __init
+static void
 check_for_logical_procs (void)
 {
 	pal_logical_to_physical_t info;
@@ -475,26 +389,10 @@ check_for_logical_procs (void)
 }
 #endif
 
-static __initdata int nomca;
-static __init int setup_nomca(char *s)
-{
-	nomca = 1;
-	return 0;
-}
-early_param("nomca", setup_nomca);
-
 void __init
 setup_arch (char **cmdline_p)
 {
 	unw_init();
-
-#ifdef CONFIG_XEN
-	if (is_running_on_xen()) {
-		setup_xen_features();
-		/* Register a call for panic conditions. */
-		atomic_notifier_chain_register(&panic_notifier_list, &xen_panic_block);
-	}
-#endif
 
 	ia64_patch_vtop((u64) __start___vtop_patchlist, (u64) __end___vtop_patchlist);
 
@@ -504,15 +402,35 @@ setup_arch (char **cmdline_p)
 	efi_init();
 	io_port_init();
 
-	parse_early_param();
-
 #ifdef CONFIG_IA64_GENERIC
-	machvec_init(NULL);
+	{
+		const char *mvec_name = strstr (*cmdline_p, "machvec=");
+		char str[64];
+
+		if (mvec_name) {
+			const char *end;
+			size_t len;
+
+			mvec_name += 8;
+			end = strchr (mvec_name, ' ');
+			if (end)
+				len = end - mvec_name;
+			else
+				len = strlen (mvec_name);
+			len = min(len, sizeof (str) - 1);
+			strncpy (str, mvec_name, len);
+			str[len] = '\0';
+			mvec_name = str;
+		} else
+			mvec_name = acpi_get_sysname();
+		machvec_init(mvec_name);
+	}
 #endif
 
 	if (early_console_setup(*cmdline_p) == 0)
 		mark_bsp_online();
 
+	parse_early_param();
 #ifdef CONFIG_ACPI
 	/* Initialize the ACPI boot-time table parser */
 	acpi_table_init();
@@ -528,7 +446,7 @@ setup_arch (char **cmdline_p)
 	find_memory();
 
 	/* process SAL system table: */
-	ia64_sal_init(__va(efi.sal_systab));
+	ia64_sal_init(efi.sal_systab);
 
 	ia64_setup_printk_clock();
 
@@ -572,34 +490,14 @@ setup_arch (char **cmdline_p)
 			conswitchp = &vga_con;
 # endif
 	}
-#ifdef CONFIG_XEN
-	if (is_running_on_xen()) {
-		shared_info_t *s = HYPERVISOR_shared_info;
-
-		xen_start_info = __va(s->arch.start_info_pfn << PAGE_SHIFT);
-
-		printk("Running on Xen! start_info_pfn=0x%lx nr_pages=%ld "
-		       "flags=0x%x\n", s->arch.start_info_pfn,
-		       xen_start_info->nr_pages, xen_start_info->flags);
-
-		if (!is_initial_xendomain()) {
-#if !defined(CONFIG_VT) || !defined(CONFIG_DUMMY_CONSOLE)
-			conswitchp = NULL;
-#endif
-		}
-	}
-#endif
 #endif
 
 	/* enable IA-64 Machine Check Abort Handling unless disabled */
-	if (!nomca)
+	if (!strstr(saved_command_line, "nomca"))
 		ia64_mca_init();
 
 	platform_setup(cmdline_p);
 	paging_init();
-#ifdef CONFIG_XEN
-	contiguous_bitmap_init(max_pfn);
-#endif
 }
 
 /*
@@ -725,7 +623,7 @@ struct seq_operations cpuinfo_op = {
 	.show =		show_cpuinfo
 };
 
-static void __cpuinit
+void
 identify_cpu (struct cpuinfo_ia64 *c)
 {
 	union {
@@ -802,7 +700,7 @@ setup_per_cpu_areas (void)
  * In addition, the minimum of the i-cache stride sizes is calculated for
  * "flush_icache_range()".
  */
-static void __cpuinit
+static void
 get_max_cacheline_size (void)
 {
 	unsigned long line_size, max = 1;
@@ -865,10 +763,10 @@ get_max_cacheline_size (void)
  * cpu_init() initializes state that is per-CPU.  This function acts
  * as a 'CPU state barrier', nothing should get across.
  */
-void __cpuinit
+void
 cpu_init (void)
 {
-	extern void __cpuinit ia64_mmu_init (void *);
+	extern void __devinit ia64_mmu_init (void *);
 	unsigned long num_phys_stacked;
 	pal_vm_info_2_u_t vmi;
 	unsigned int max_ctx;
@@ -984,15 +882,6 @@ cpu_init (void)
 	/* size of physical stacked register partition plus 8 bytes: */
 	__get_cpu_var(ia64_phys_stacked_size_p8) = num_phys_stacked*8 + 8;
 	platform_cpu_init();
-
-#ifdef CONFIG_XEN
-	/* Need to be moved into platform_cpu_init later */
-	if (is_running_on_xen()) {
-		extern void xen_smp_intr_init(void);
-		xen_smp_intr_init();
-	}
-#endif
-
 	pm_idle = default_idle;
 }
 
@@ -1005,16 +894,9 @@ void sched_cacheflush(void)
 	ia64_sal_cache_flush(3);
 }
 
-void __init
+void
 check_bugs (void)
 {
 	ia64_patch_mckinley_e9((unsigned long) __start___mckinley_e9_bundles,
 			       (unsigned long) __end___mckinley_e9_bundles);
 }
-
-static int __init run_dmi_scan(void)
-{
-	dmi_scan_machine();
-	return 0;
-}
-core_initcall(run_dmi_scan);

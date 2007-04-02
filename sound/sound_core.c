@@ -34,6 +34,7 @@
  *	locking at some point in 2.3.x.
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -43,6 +44,7 @@
 #include <linux/sound.h>
 #include <linux/major.h>
 #include <linux/kmod.h>
+#include <linux/devfs_fs_kernel.h>
 #include <linux/device.h>
 
 #define SOUND_STEP 16
@@ -51,7 +53,7 @@
 struct sound_unit
 {
 	int unit_minor;
-	const struct file_operations *unit_fops;
+	struct file_operations *unit_fops;
 	struct sound_unit *next;
 	char name[32];
 };
@@ -71,7 +73,7 @@ EXPORT_SYMBOL(sound_class);
  *	join into it. Called with the lock asserted
  */
 
-static int __sound_insert_unit(struct sound_unit * s, struct sound_unit **list, const struct file_operations *fops, int index, int low, int top)
+static int __sound_insert_unit(struct sound_unit * s, struct sound_unit **list, struct file_operations *fops, int index, int low, int top)
 {
 	int n=low;
 
@@ -151,7 +153,7 @@ static DEFINE_SPINLOCK(sound_loader_lock);
  *	list. Acquires locks as needed
  */
 
-static int sound_insert_unit(struct sound_unit **list, const struct file_operations *fops, int index, int low, int top, const char *name, umode_t mode, struct device *dev)
+static int sound_insert_unit(struct sound_unit **list, struct file_operations *fops, int index, int low, int top, const char *name, umode_t mode, struct device *dev)
 {
 	struct sound_unit *s = kmalloc(sizeof(*s), GFP_KERNEL);
 	int r;
@@ -170,6 +172,8 @@ static int sound_insert_unit(struct sound_unit **list, const struct file_operati
 	else
 		sprintf(s->name, "sound/%s%d", name, r / SOUND_STEP);
 
+	devfs_mk_cdev(MKDEV(SOUND_MAJOR, s->unit_minor),
+			S_IFCHR | mode, s->name);
 	class_device_create(sound_class, NULL, MKDEV(SOUND_MAJOR, s->unit_minor),
 			    dev, s->name+6);
 	return r;
@@ -193,6 +197,7 @@ static void sound_remove_unit(struct sound_unit **list, int unit)
 	p = __sound_remove_unit(list, unit);
 	spin_unlock(&sound_loader_lock);
 	if (p) {
+		devfs_remove(p->name);
 		class_device_destroy(sound_class, MKDEV(SOUND_MAJOR, p->unit_minor));
 		kfree(p);
 	}
@@ -232,7 +237,7 @@ static struct sound_unit *chains[SOUND_STEP];
  *	a negative error code is returned.
  */
  
-int register_sound_special_device(const struct file_operations *fops, int unit,
+int register_sound_special_device(struct file_operations *fops, int unit,
 				  struct device *dev)
 {
 	const int chain = unit % SOUND_STEP;
@@ -296,7 +301,7 @@ int register_sound_special_device(const struct file_operations *fops, int unit,
  
 EXPORT_SYMBOL(register_sound_special_device);
 
-int register_sound_special(const struct file_operations *fops, int unit)
+int register_sound_special(struct file_operations *fops, int unit)
 {
 	return register_sound_special_device(fops, unit, NULL);
 }
@@ -313,7 +318,7 @@ EXPORT_SYMBOL(register_sound_special);
  *	number is returned, on failure a negative error code is returned.
  */
 
-int register_sound_mixer(const struct file_operations *fops, int dev)
+int register_sound_mixer(struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[0], fops, dev, 0, 128,
 				 "mixer", S_IRUSR | S_IWUSR, NULL);
@@ -331,7 +336,7 @@ EXPORT_SYMBOL(register_sound_mixer);
  *	number is returned, on failure a negative error code is returned.
  */
 
-int register_sound_midi(const struct file_operations *fops, int dev)
+int register_sound_midi(struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[2], fops, dev, 2, 130,
 				 "midi", S_IRUSR | S_IWUSR, NULL);
@@ -357,7 +362,7 @@ EXPORT_SYMBOL(register_sound_midi);
  *	and will always allocate them as a matching pair - eg dsp3/audio3
  */
 
-int register_sound_dsp(const struct file_operations *fops, int dev)
+int register_sound_dsp(struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[3], fops, dev, 3, 131,
 				 "dsp", S_IWUSR | S_IRUSR, NULL);
@@ -376,7 +381,7 @@ EXPORT_SYMBOL(register_sound_dsp);
  */
 
 
-int register_sound_synth(const struct file_operations *fops, int dev)
+int register_sound_synth(struct file_operations *fops, int dev)
 {
 	return sound_insert_unit(&chains[9], fops, dev, 9, 137,
 				 "synth", S_IRUSR | S_IWUSR, NULL);
@@ -496,7 +501,7 @@ int soundcore_open(struct inode *inode, struct file *file)
 	int chain;
 	int unit = iminor(inode);
 	struct sound_unit *s;
-	const struct file_operations *new_fops = NULL;
+	struct file_operations *new_fops = NULL;
 
 	chain=unit&0x0F;
 	if(chain==4 || chain==5)	/* dsp/audio/dsp16 */
@@ -535,7 +540,7 @@ int soundcore_open(struct inode *inode, struct file *file)
 		 * switching ->f_op in the first place.
 		 */
 		int err = 0;
-		const struct file_operations *old_fops = file->f_op;
+		struct file_operations *old_fops = file->f_op;
 		file->f_op = new_fops;
 		spin_unlock(&sound_loader_lock);
 		if(file->f_op->open)
@@ -565,6 +570,7 @@ static void __exit cleanup_soundcore(void)
 	/* We have nothing to really do here - we know the lists must be
 	   empty */
 	unregister_chrdev(SOUND_MAJOR, "sound");
+	devfs_remove("sound");
 	class_destroy(sound_class);
 }
 
@@ -574,6 +580,7 @@ static int __init init_soundcore(void)
 		printk(KERN_ERR "soundcore: sound device already in use.\n");
 		return -EBUSY;
 	}
+	devfs_mk_dir ("sound");
 	sound_class = class_create(THIS_MODULE, "sound");
 	if (IS_ERR(sound_class))
 		return PTR_ERR(sound_class);

@@ -8,6 +8,7 @@
  *  Collaborative memory management interface.
  */
 
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/init.h>
@@ -161,7 +162,7 @@ cmm_thread(void *dummy)
 static void
 cmm_start_thread(void)
 {
-	kernel_thread(cmm_thread, NULL, 0);
+	kernel_thread(cmm_thread, 0, 0);
 }
 
 static void
@@ -338,19 +339,19 @@ static struct ctl_table cmm_table[] = {
 	{
 		.ctl_name	= VM_CMM_PAGES,
 		.procname	= "cmm_pages",
-		.mode		= 0644,
+		.mode		= 0600,
 		.proc_handler	= &cmm_pages_handler,
 	},
 	{
 		.ctl_name	= VM_CMM_TIMED_PAGES,
 		.procname	= "cmm_timed_pages",
-		.mode		= 0644,
+		.mode		= 0600,
 		.proc_handler	= &cmm_pages_handler,
 	},
 	{
 		.ctl_name	= VM_CMM_TIMEOUT,
 		.procname	= "cmm_timeout",
-		.mode		= 0644,
+		.mode		= 0600,
 		.proc_handler	= &cmm_timeout_handler,
 	},
 	{ .ctl_name = 0 }

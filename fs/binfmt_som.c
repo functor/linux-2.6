@@ -33,6 +33,7 @@
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 
+#include <linux/config.h>
 
 #include <linux/elf.h>
 

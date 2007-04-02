@@ -35,7 +35,6 @@
 #include <linux/sysctl.h>
 #include <linux/proc_fs.h>
 #include <linux/security.h>
-#include <linux/mutex.h>
 #include <net/sock.h>
 #include <net/route.h>
 
@@ -62,7 +61,7 @@ static unsigned int queue_dropped = 0;
 static unsigned int queue_user_dropped = 0;
 static struct sock *ipqnl;
 static LIST_HEAD(queue_list);
-static DEFINE_MUTEX(ipqnl_mutex);
+static DECLARE_MUTEX(ipqnl_sem);
 
 static void
 ipq_issue_verdict(struct ipq_queue_entry *entry, int verdict)
@@ -457,19 +456,11 @@ dev_cmp(struct ipq_queue_entry *entry, unsigned long ifindex)
 	if (entry->info->indev)
 		if (entry->info->indev->ifindex == ifindex)
 			return 1;
+			
 	if (entry->info->outdev)
 		if (entry->info->outdev->ifindex == ifindex)
 			return 1;
-#ifdef CONFIG_BRIDGE_NETFILTER
-	if (entry->skb->nf_bridge) {
-		if (entry->skb->nf_bridge->physindev &&
-		    entry->skb->nf_bridge->physindev->ifindex == ifindex)
-			return 1;
-		if (entry->skb->nf_bridge->physoutdev &&
-		    entry->skb->nf_bridge->physoutdev->ifindex == ifindex)
-		    	return 1;
-	}
-#endif
+
 	return 0;
 }
 
@@ -515,7 +506,7 @@ ipq_rcv_skb(struct sk_buff *skb)
 	if (type <= IPQM_BASE)
 		return;
 		
-	if (security_netlink_recv(skb, CAP_NET_ADMIN))
+	if (security_netlink_recv(skb))
 		RCV_SKB_FAIL(-EPERM);
 	
 	write_lock_bh(&queue_lock);
@@ -548,7 +539,7 @@ ipq_rcv_sk(struct sock *sk, int len)
 	struct sk_buff *skb;
 	unsigned int qlen;
 
-	mutex_lock(&ipqnl_mutex);
+	down(&ipqnl_sem);
 			
 	for (qlen = skb_queue_len(&sk->sk_receive_queue); qlen; qlen--) {
 		skb = skb_dequeue(&sk->sk_receive_queue);
@@ -556,7 +547,7 @@ ipq_rcv_sk(struct sock *sk, int len)
 		kfree_skb(skb);
 	}
 		
-	mutex_unlock(&ipqnl_mutex);
+	up(&ipqnl_sem);
 }
 
 static int
@@ -670,11 +661,15 @@ static struct nf_queue_handler nfqh = {
 	.outfn	= &ipq_enqueue_packet,
 };
 
-static int __init ip_queue_init(void)
+static int
+init_or_cleanup(int init)
 {
 	int status = -ENOMEM;
 	struct proc_dir_entry *proc;
 	
+	if (!init)
+		goto cleanup;
+
 	netlink_register_notifier(&ipq_nl_notifier);
 	ipqnl = netlink_kernel_create(NETLINK_FIREWALL, 0, ipq_rcv_sk,
 				      THIS_MODULE);
@@ -701,6 +696,11 @@ static int __init ip_queue_init(void)
 	}
 	return status;
 
+cleanup:
+	nf_unregister_queue_handlers(&nfqh);
+	synchronize_net();
+	ipq_flush(NF_DROP);
+	
 cleanup_sysctl:
 	unregister_sysctl_table(ipq_sysctl_header);
 	unregister_netdevice_notifier(&ipq_dev_notifier);
@@ -708,34 +708,28 @@ cleanup_sysctl:
 	
 cleanup_ipqnl:
 	sock_release(ipqnl->sk_socket);
-	mutex_lock(&ipqnl_mutex);
-	mutex_unlock(&ipqnl_mutex);
+	down(&ipqnl_sem);
+	up(&ipqnl_sem);
 	
 cleanup_netlink_notifier:
 	netlink_unregister_notifier(&ipq_nl_notifier);
 	return status;
 }
 
-static void __exit ip_queue_fini(void)
+static int __init init(void)
 {
-	nf_unregister_queue_handlers(&nfqh);
-	synchronize_net();
-	ipq_flush(NF_DROP);
+	
+	return init_or_cleanup(1);
+}
 
-	unregister_sysctl_table(ipq_sysctl_header);
-	unregister_netdevice_notifier(&ipq_dev_notifier);
-	proc_net_remove(IPQ_PROC_FS_NAME);
-
-	sock_release(ipqnl->sk_socket);
-	mutex_lock(&ipqnl_mutex);
-	mutex_unlock(&ipqnl_mutex);
-
-	netlink_unregister_notifier(&ipq_nl_notifier);
+static void __exit fini(void)
+{
+	init_or_cleanup(0);
 }
 
 MODULE_DESCRIPTION("IPv4 packet queue handler");
 MODULE_AUTHOR("James Morris <jmorris@intercode.com.au>");
 MODULE_LICENSE("GPL");
 
-module_init(ip_queue_init);
-module_exit(ip_queue_fini);
+module_init(init);
+module_exit(fini);

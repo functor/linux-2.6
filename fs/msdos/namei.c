@@ -12,6 +12,14 @@
 #include <linux/msdos_fs.h>
 #include <linux/smp_lock.h>
 
+/* MS-DOS "device special files" */
+static const unsigned char *reserved_names[] = {
+	"CON     ", "PRN     ", "NUL     ", "AUX     ",
+	"LPT1    ", "LPT2    ", "LPT3    ", "LPT4    ",
+	"COM1    ", "COM2    ", "COM3    ", "COM4    ",
+	NULL
+};
+
 /* Characters that are undesirable in an MS-DOS file name */
 static unsigned char bad_chars[] = "*?<>|\"";
 static unsigned char bad_if_strict_pc[] = "+=,; ";
@@ -32,6 +40,7 @@ static int msdos_format_name(const unsigned char *name, int len,
 	 */
 {
 	unsigned char *walk;
+	const unsigned char **reserved;
 	unsigned char c;
 	int space;
 
@@ -118,7 +127,11 @@ static int msdos_format_name(const unsigned char *name, int len,
 	}
 	while (walk - res < MSDOS_NAME)
 		*walk++ = ' ';
-
+	if (!opts->atari)
+		/* GEMDOS is less stupid and has no reserved names */
+		for (reserved = reserved_names; *reserved; reserved++)
+			if (!strncmp(res, *reserved, 8))
+				return -EINVAL;
 	return 0;
 }
 
@@ -661,12 +674,11 @@ static int msdos_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 }
 
-static int msdos_get_sb(struct file_system_type *fs_type,
-			int flags, const char *dev_name,
-			void *data, struct vfsmount *mnt)
+static struct super_block *msdos_get_sb(struct file_system_type *fs_type,
+					int flags, const char *dev_name,
+					void *data)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, msdos_fill_super,
-			   mnt);
+	return get_sb_bdev(fs_type, flags, dev_name, data, msdos_fill_super);
 }
 
 static struct file_system_type msdos_fs_type = {

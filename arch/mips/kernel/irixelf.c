@@ -999,6 +999,8 @@ static inline int maydump(struct vm_area_struct *vma)
 	return 1;
 }
 
+#define roundup(x, y)  ((((x)+((y)-1))/(y))*(y))
+
 /* An ELF note in memory. */
 struct memelfnote
 {

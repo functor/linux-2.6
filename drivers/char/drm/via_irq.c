@@ -196,9 +196,9 @@ via_driver_irq_wait(drm_device_t * dev, unsigned int irq, int force_sequence,
 {
 	drm_via_private_t *dev_priv = (drm_via_private_t *) dev->dev_private;
 	unsigned int cur_irq_sequence;
-	drm_via_irq_t *cur_irq;
+	drm_via_irq_t *cur_irq = dev_priv->via_irqs;
 	int ret = 0;
-	maskarray_t *masks;
+	maskarray_t *masks = dev_priv->irq_masks;
 	int real_irq;
 
 	DRM_DEBUG("%s\n", __FUNCTION__);
@@ -221,9 +221,8 @@ via_driver_irq_wait(drm_device_t * dev, unsigned int irq, int force_sequence,
 			  __FUNCTION__, irq);
 		return DRM_ERR(EINVAL);
 	}
-
-	masks = dev_priv->irq_masks;
-	cur_irq = dev_priv->via_irqs + real_irq;
+	
+	cur_irq += real_irq;
 
 	if (masks[real_irq][2] && !force_sequence) {
 		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * DRM_HZ,
@@ -248,12 +247,11 @@ void via_driver_irq_preinstall(drm_device_t * dev)
 {
 	drm_via_private_t *dev_priv = (drm_via_private_t *) dev->dev_private;
 	u32 status;
-	drm_via_irq_t *cur_irq;
+	drm_via_irq_t *cur_irq = dev_priv->via_irqs;
 	int i;
 
 	DRM_DEBUG("driver_irq_preinstall: dev_priv: %p\n", dev_priv);
 	if (dev_priv) {
-		cur_irq = dev_priv->via_irqs;
 
 		dev_priv->irq_enable_mask = VIA_IRQ_VBLANK_ENABLE;
 		dev_priv->irq_pending_mask = VIA_IRQ_VBLANK_PENDING;

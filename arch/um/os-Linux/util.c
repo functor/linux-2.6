@@ -104,7 +104,7 @@ void setup_hostinfo(void)
 int setjmp_wrapper(void (*proc)(void *, void *), ...)
 {
 	va_list args;
-	jmp_buf buf;
+	sigjmp_buf buf;
 	int n;
 
 	n = sigsetjmp(buf, 1);

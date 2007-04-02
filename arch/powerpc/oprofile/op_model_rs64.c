@@ -175,12 +175,9 @@ static void rs64_handle_interrupt(struct pt_regs *regs,
 				  struct op_counter_config *ctr)
 {
 	unsigned int mmcr0;
-	int is_kernel;
 	int val;
 	int i;
 	unsigned long pc = mfspr(SPRN_SIAR);
-
-	is_kernel = is_kernel_addr(pc);
 
 	/* set the PMM bit (see comment below) */
 	mtmsrd(mfmsr() | MSR_PMM);
@@ -189,7 +186,7 @@ static void rs64_handle_interrupt(struct pt_regs *regs,
 		val = ctr_read(i);
 		if (val < 0) {
 			if (ctr[i].enabled) {
-				oprofile_add_ext_sample(pc, regs, i, is_kernel);
+				oprofile_add_pc(pc, is_kernel_addr(pc), i);
 				ctr_write(i, reset_value[i]);
 			} else {
 				ctr_write(i, 0);

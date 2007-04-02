@@ -26,6 +26,7 @@
 
 #undef DEBUG_DZ
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -673,12 +674,11 @@ static void dz_reset(struct dz_port *dport)
 }
 
 #ifdef CONFIG_SERIAL_DZ_CONSOLE
-static void dz_console_putchar(struct uart_port *uport, int ch)
+static void dz_console_put_char(struct dz_port *dport, unsigned char ch)
 {
-	struct dz_port *dport = (struct dz_port *)uport;
 	unsigned long flags;
 	int loops = 2500;
-	unsigned short tmp = (unsigned char)ch;
+	unsigned short tmp = ch;
 	/* this code sends stuff out to serial device - spinning its
 	   wheels and waiting. */
 
@@ -694,7 +694,6 @@ static void dz_console_putchar(struct uart_port *uport, int ch)
 
 	spin_unlock_irqrestore(&dport->port.lock, flags);
 }
-
 /*
  * -------------------------------------------------------------------
  * dz_console_print ()
@@ -711,7 +710,11 @@ static void dz_console_print(struct console *cons,
 #ifdef DEBUG_DZ
 	prom_printf((char *) str);
 #endif
-	uart_console_write(&dport->port, str, count, dz_console_putchar);
+	while (count--) {
+		if (*str == '\n')
+			dz_console_put_char(dport, '\r');
+		dz_console_put_char(dport, *str++);
+	}
 }
 
 static int __init dz_console_setup(struct console *co, char *options)
@@ -767,7 +770,11 @@ void __init dz_serial_console_init(void)
 static struct uart_driver dz_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "serial",
+#ifdef CONFIG_DEVFS
+	.dev_name		= "tts/%d",
+#else
 	.dev_name		= "ttyS%d",
+#endif
 	.major			= TTY_MAJOR,
 	.minor			= 64,
 	.nr			= DZ_NB_PORT,
@@ -797,7 +804,7 @@ int __init dz_init(void)
 	restore_flags(flags);
 
 	if (request_irq(dz_ports[0].port.irq, dz_interrupt,
-			IRQF_DISABLED, "DZ", &dz_ports[0]))
+			SA_INTERRUPT, "DZ", &dz_ports[0]))
 		panic("Unable to register DZ interrupt");
 
 	ret = uart_register_driver(&dz_reg);

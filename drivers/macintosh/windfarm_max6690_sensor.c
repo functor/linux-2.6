@@ -11,6 +11,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
+#include <linux/i2c-dev.h>
 #include <asm/prom.h>
 #include <asm/pmac_low_i2c.h>
 

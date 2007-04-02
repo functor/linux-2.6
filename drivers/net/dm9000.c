@@ -339,17 +339,6 @@ static void dm9000_timeout(struct net_device *dev)
 	spin_unlock_irqrestore(&db->lock,flags);
 }
 
-#ifdef CONFIG_NET_POLL_CONTROLLER
-/*
- *Used by netconsole
- */
-static void dm9000_poll_controller(struct net_device *dev)
-{
-	disable_irq(dev->irq);
-	dm9000_interrupt(dev->irq,dev,NULL);
-	enable_irq(dev->irq);
-}
-#endif
 
 /* dm9000_release_board
  *
@@ -377,8 +366,8 @@ dm9000_release_board(struct platform_device *pdev, struct board_info *db)
 		kfree(db->data_req);
 	}
 
-	if (db->addr_req != NULL) {
-		release_resource(db->addr_req);
+	if (db->addr_res != NULL) {
+		release_resource(db->addr_res);
 		kfree(db->addr_req);
 	}
 }
@@ -421,7 +410,10 @@ dm9000_probe(struct platform_device *pdev)
 	if (pdev->num_resources < 2) {
 		ret = -ENODEV;
 		goto out;
-	} else if (pdev->num_resources == 2) {
+	}
+
+	switch (pdev->num_resources) {
+	case 2:
 		base = pdev->resource[0].start;
 
 		if (!request_mem_region(base, 4, ndev->name)) {
@@ -431,16 +423,17 @@ dm9000_probe(struct platform_device *pdev)
 
 		ndev->base_addr = base;
 		ndev->irq = pdev->resource[1].start;
-		db->io_addr = (void __iomem *)base;
-		db->io_data = (void __iomem *)(base + 4);
+		db->io_addr = (void *)base;
+		db->io_data = (void *)(base + 4);
 
-	} else {
+		break;
+
+	case 3:
 		db->addr_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 		db->data_res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 		db->irq_res  = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 
-		if (db->addr_res == NULL || db->data_res == NULL ||
-		    db->irq_res == NULL) {
+		if (db->addr_res == NULL || db->data_res == NULL) {
 			printk(KERN_ERR PFX "insufficient resources\n");
 			ret = -ENOENT;
 			goto out;
@@ -489,6 +482,7 @@ dm9000_probe(struct platform_device *pdev)
 
 		/* ensure at least we have a default set of IO routines */
 		dm9000_set_io(db, iosize);
+
 	}
 
 	/* check to see if anything is being over-ridden */
@@ -549,9 +543,6 @@ dm9000_probe(struct platform_device *pdev)
 	ndev->stop		 = &dm9000_stop;
 	ndev->get_stats		 = &dm9000_get_stats;
 	ndev->set_multicast_list = &dm9000_hash_table;
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	ndev->poll_controller	 = &dm9000_poll_controller;
-#endif
 
 #ifdef DM9000_PROGRAM_EEPROM
 	program_eeprom(db);
@@ -572,13 +563,6 @@ dm9000_probe(struct platform_device *pdev)
 	/* Set Node Address */
 	for (i = 0; i < 6; i++)
 		ndev->dev_addr[i] = db->srom[i];
-
-	if (!is_valid_ether_addr(ndev->dev_addr)) {
-		/* try reading from mac */
-
-		for (i = 0; i < 6; i++)
-			ndev->dev_addr[i] = ior(db, i+DM9000_PAR);
-	}
 
 	if (!is_valid_ether_addr(ndev->dev_addr))
 		printk("%s: Invalid ethernet MAC address.  Please "
@@ -617,7 +601,7 @@ dm9000_open(struct net_device *dev)
 
 	PRINTK2("entering dm9000_open\n");
 
-	if (request_irq(dev->irq, &dm9000_interrupt, IRQF_SHARED, dev->name, dev))
+	if (request_irq(dev->irq, &dm9000_interrupt, SA_SHIRQ, dev->name, dev))
 		return -EAGAIN;
 
 	/* Initialize DM9000 board */
@@ -679,6 +663,7 @@ dm9000_init_dm9000(struct net_device *dev)
 	db->tx_pkt_cnt = 0;
 	db->queue_pkt_len = 0;
 	dev->trans_start = 0;
+	spin_lock_init(&db->lock);
 }
 
 /*
@@ -782,7 +767,7 @@ dm9000_stop(struct net_device *ndev)
  * receive the packet to upper layer, free the transmitted packet
  */
 
-static void
+void
 dm9000_tx_done(struct net_device *dev, board_info_t * db)
 {
 	int tx_status = ior(db, DM9000_NSR);	/* Got TX status */
@@ -1202,14 +1187,13 @@ dm9000_drv_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver dm9000_driver = {
-	.driver	= {
-		.name    = "dm9000",
-		.owner	 = THIS_MODULE,
-	},
 	.probe   = dm9000_probe,
 	.remove  = dm9000_drv_remove,
 	.suspend = dm9000_drv_suspend,
 	.resume  = dm9000_drv_resume,
+	.driver	= {
+		.name	= "dm9000",
+	},
 };
 
 static int __init

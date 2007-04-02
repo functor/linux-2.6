@@ -49,7 +49,6 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 
 /* Addresses to scan */
 static unsigned short normal_i2c[] = { 0x2c, 0x2d, 0x2e, 0x2f,
@@ -151,7 +150,7 @@ struct adm9240_data {
 	enum chips type;
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct mutex update_lock;
+	struct semaphore update_lock;
 	char valid;
 	unsigned long last_updated_measure;
 	unsigned long last_updated_config;
@@ -196,11 +195,11 @@ static ssize_t set_max(struct device *dev, struct device_attribute *devattr,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->temp_max[attr->index] = TEMP_TO_REG(val);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_TEMP_MAX(attr->index),
 			data->temp_max[attr->index]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -247,11 +246,11 @@ static ssize_t set_in_min(struct device *dev,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->in_min[attr->index] = IN_TO_REG(val, attr->index);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_IN_MIN(attr->index),
 			data->in_min[attr->index]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -264,11 +263,11 @@ static ssize_t set_in_max(struct device *dev,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->in_max[attr->index] = IN_TO_REG(val, attr->index);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_IN_MAX(attr->index),
 			data->in_max[attr->index]);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -351,7 +350,7 @@ static ssize_t set_fan_min(struct device *dev,
 	int nr = attr->index;
 	u8 new_div;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	if (!val) {
 		data->fan_min[nr] = 255;
@@ -391,7 +390,7 @@ static ssize_t set_fan_min(struct device *dev,
 	i2c_smbus_write_byte_data(client, ADM9240_REG_FAN_MIN(nr),
 			data->fan_min[nr]);
 
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 
@@ -440,10 +439,10 @@ static ssize_t set_aout(struct device *dev,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtol(buf, NULL, 10);
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 	data->aout = AOUT_TO_REG(val);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_ANALOG_OUT, data->aout);
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return count;
 }
 static DEVICE_ATTR(aout_output, S_IRUGO | S_IWUSR, show_aout, set_aout);
@@ -540,7 +539,7 @@ static int adm9240_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* fill in the remaining client fields and attach */
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->type = kind;
-	mutex_init(&data->update_lock);
+	init_MUTEX(&data->update_lock);
 
 	if ((err = i2c_attach_client(new_client)))
 		goto exit_free;
@@ -692,7 +691,7 @@ static struct adm9240_data *adm9240_update_device(struct device *dev)
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	int i;
 
-	mutex_lock(&data->update_lock);
+	down(&data->update_lock);
 
 	/* minimum measurement cycle: 1.75 seconds */
 	if (time_after(jiffies, data->last_updated_measure + (HZ * 7 / 4))
@@ -772,7 +771,7 @@ static struct adm9240_data *adm9240_update_device(struct device *dev)
 		data->last_updated_config = jiffies;
 		data->valid = 1;
 	}
-	mutex_unlock(&data->update_lock);
+	up(&data->update_lock);
 	return data;
 }
 

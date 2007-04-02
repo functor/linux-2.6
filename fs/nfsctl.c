@@ -4,6 +4,7 @@
  *	This should eventually move to userland.
  *
  */
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/file.h>
 #include <linux/fs.h>
@@ -100,7 +101,7 @@ asmlinkage sys_nfsservctl(int cmd, struct nfsctl_arg __user *arg, void __user *r
 	if (version != NFSCTL_VERSION)
 		return -EINVAL;
 
-	if (cmd < 0 || cmd >= ARRAY_SIZE(map) || !map[cmd].name)
+	if (cmd < 0 || cmd >= sizeof(map)/sizeof(map[0]) || !map[cmd].name)
 		return -EINVAL;
 
 	file = do_open(map[cmd].name, map[cmd].rsize ? O_RDWR : O_WRONLY);	

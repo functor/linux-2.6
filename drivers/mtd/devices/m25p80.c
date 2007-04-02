@@ -186,7 +186,7 @@ static int m25p80_erase(struct mtd_info *mtd, struct erase_info *instr)
 	struct m25p *flash = mtd_to_m25p(mtd);
 	u32 addr,len;
 
-	DEBUG(MTD_DEBUG_LEVEL2, "%s: %s %s 0x%08x, len %d\n",
+	DEBUG(MTD_DEBUG_LEVEL2, "%s: %s %s 0x%08x, len %zd\n",
 			flash->spi->dev.bus_id, __FUNCTION__, "at",
 			(u32)instr->addr, instr->len);
 
@@ -406,13 +406,13 @@ struct flash_info {
 
 static struct flash_info __devinitdata m25p_data [] = {
 	/* REVISIT: fill in JEDEC ids, for parts that have them */
-	{ "m25p05", 0x05, 0x2010, 32 * 1024, 2 },
-	{ "m25p10", 0x10, 0x2011, 32 * 1024, 4 },
-	{ "m25p20", 0x11, 0x2012, 64 * 1024, 4 },
-	{ "m25p40", 0x12, 0x2013, 64 * 1024, 8 },
+	{ "m25p05", 0x05, 0x0000, 32 * 1024, 2 },
+	{ "m25p10", 0x10, 0x0000, 32 * 1024, 4 },
+	{ "m25p20", 0x11, 0x0000, 64 * 1024, 4 },
+	{ "m25p40", 0x12, 0x0000, 64 * 1024, 8 },
 	{ "m25p80", 0x13, 0x0000, 64 * 1024, 16 },
-	{ "m25p16", 0x14, 0x2015, 64 * 1024, 32 },
-	{ "m25p32", 0x15, 0x2016, 64 * 1024, 64 },
+	{ "m25p16", 0x14, 0x0000, 64 * 1024, 32 },
+	{ "m25p32", 0x15, 0x0000, 64 * 1024, 64 },
 	{ "m25p64", 0x16, 0x2017, 64 * 1024, 128 },
 };
 
@@ -465,7 +465,6 @@ static int __devinit m25p_probe(struct spi_device *spi)
 		flash->mtd.name = spi->dev.bus_id;
 
 	flash->mtd.type = MTD_NORFLASH;
-	flash->mtd.writesize = 1;
 	flash->mtd.flags = MTD_CAP_NORFLASH;
 	flash->mtd.size = info->sector_size * info->n_sectors;
 	flash->mtd.erasesize = info->sector_size;

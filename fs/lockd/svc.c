@@ -12,6 +12,7 @@
  * Copyright (C) 1995, 1996 Olaf Kirch <okir@monad.swb.de>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sysctl.h>
@@ -24,7 +25,6 @@
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
-#include <linux/mutex.h>
 
 #include <linux/sunrpc/types.h>
 #include <linux/sunrpc/stats.h>
@@ -43,13 +43,13 @@ static struct svc_program	nlmsvc_program;
 struct nlmsvc_binding *		nlmsvc_ops;
 EXPORT_SYMBOL(nlmsvc_ops);
 
-static DEFINE_MUTEX(nlmsvc_mutex);
+static DECLARE_MUTEX(nlmsvc_sema);
 static unsigned int		nlmsvc_users;
 static pid_t			nlmsvc_pid;
 int				nlmsvc_grace_period;
 unsigned long			nlmsvc_timeout;
 
-static DECLARE_COMPLETION(lockd_start_done);
+static DECLARE_MUTEX_LOCKED(lockd_start);
 static DECLARE_WAIT_QUEUE_HEAD(lockd_exit);
 
 /*
@@ -112,7 +112,7 @@ lockd(struct svc_rqst *rqstp)
 	 * Let our maker know we're running.
 	 */
 	nlmsvc_pid = current->pid;
-	complete(&lockd_start_done);
+	up(&lockd_start);
 
 	daemonize("lockd");
 
@@ -215,7 +215,7 @@ lockd_up(void)
 	struct svc_serv *	serv;
 	int			error = 0;
 
-	mutex_lock(&nlmsvc_mutex);
+	down(&nlmsvc_sema);
 	/*
 	 * Unconditionally increment the user count ... this is
 	 * the number of clients who _want_ a lockd process.
@@ -263,7 +263,7 @@ lockd_up(void)
 			"lockd_up: create thread failed, error=%d\n", error);
 		goto destroy_and_out;
 	}
-	wait_for_completion(&lockd_start_done);
+	down(&lockd_start);
 
 	/*
 	 * Note: svc_serv structures have an initial use count of 1,
@@ -272,7 +272,7 @@ lockd_up(void)
 destroy_and_out:
 	svc_destroy(serv);
 out:
-	mutex_unlock(&nlmsvc_mutex);
+	up(&nlmsvc_sema);
 	return error;
 }
 EXPORT_SYMBOL(lockd_up);
@@ -285,7 +285,7 @@ lockd_down(void)
 {
 	static int warned;
 
-	mutex_lock(&nlmsvc_mutex);
+	down(&nlmsvc_sema);
 	if (nlmsvc_users) {
 		if (--nlmsvc_users)
 			goto out;
@@ -305,7 +305,7 @@ lockd_down(void)
 	 * the lockd semaphore, we can't wait around forever ...
 	 */
 	clear_thread_flag(TIF_SIGPENDING);
-	wait_event_timeout(lockd_exit, nlmsvc_pid == 0, HZ);
+	interruptible_sleep_on_timeout(&lockd_exit, HZ);
 	if (nlmsvc_pid) {
 		printk(KERN_WARNING 
 			"lockd_down: lockd failed to exit, clearing pid\n");
@@ -315,7 +315,7 @@ lockd_down(void)
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 out:
-	mutex_unlock(&nlmsvc_mutex);
+	up(&nlmsvc_sema);
 }
 EXPORT_SYMBOL(lockd_down);
 
@@ -509,7 +509,7 @@ static struct svc_version *	nlmsvc_version[] = {
 
 static struct svc_stat		nlmsvc_stats;
 
-#define NLM_NRVERS	ARRAY_SIZE(nlmsvc_version)
+#define NLM_NRVERS	(sizeof(nlmsvc_version)/sizeof(nlmsvc_version[0]))
 static struct svc_program	nlmsvc_program = {
 	.pg_prog		= NLM_PROGRAM,		/* program number */
 	.pg_nvers		= NLM_NRVERS,		/* number of entries in nlmsvc_version */

@@ -152,7 +152,7 @@ static void udf_bitmap_free_blocks(struct super_block * sb,
 	int bitmap_nr;
 	unsigned long overflow;
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	if (bloc.logicalBlockNum < 0 ||
 		(bloc.logicalBlockNum + count) > UDF_SB_PARTLEN(sb, bloc.partitionReferenceNum))
 	{
@@ -211,7 +211,7 @@ error_return:
 	sb->s_dirt = 1;
 	if (UDF_SB_LVIDBH(sb))
 		mark_buffer_dirty(UDF_SB_LVIDBH(sb));
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	return;
 }
 
@@ -226,7 +226,7 @@ static int udf_bitmap_prealloc_blocks(struct super_block * sb,
 	int nr_groups, bitmap_nr;
 	struct buffer_head *bh;
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	if (first_block < 0 || first_block >= UDF_SB_PARTLEN(sb, partition))
 		goto out;
 
@@ -275,7 +275,7 @@ out:
 		mark_buffer_dirty(UDF_SB_LVIDBH(sb));
 	}
 	sb->s_dirt = 1;
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	return alloc_count;
 }
 
@@ -291,7 +291,7 @@ static int udf_bitmap_new_block(struct super_block * sb,
 	int newblock = 0;
 
 	*err = -ENOSPC;
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 
 repeat:
 	if (goal < 0 || goal >= UDF_SB_PARTLEN(sb, partition))
@@ -364,7 +364,7 @@ repeat:
 	}
 	if (i >= (nr_groups*2))
 	{
-		mutex_unlock(&sbi->s_alloc_mutex);
+		up(&sbi->s_alloc_sem);
 		return newblock;
 	}
 	if (bit < sb->s_blocksize << 3)
@@ -373,7 +373,7 @@ repeat:
 		bit = udf_find_next_one_bit(bh->b_data, sb->s_blocksize << 3, group_start << 3);
 	if (bit >= sb->s_blocksize << 3)
 	{
-		mutex_unlock(&sbi->s_alloc_mutex);
+		up(&sbi->s_alloc_sem);
 		return 0;
 	}
 
@@ -387,7 +387,7 @@ got_block:
 	 */
 	if (inode && DQUOT_ALLOC_BLOCK(inode, 1))
 	{
-		mutex_unlock(&sbi->s_alloc_mutex);
+		up(&sbi->s_alloc_sem);
 		*err = -EDQUOT;
 		return 0;
 	}
@@ -410,13 +410,13 @@ got_block:
 		mark_buffer_dirty(UDF_SB_LVIDBH(sb));
 	}
 	sb->s_dirt = 1;
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	*err = 0;
 	return newblock;
 
 error_return:
 	*err = -EIO;
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	return 0;
 }
 
@@ -433,7 +433,7 @@ static void udf_table_free_blocks(struct super_block * sb,
 	int8_t etype;
 	int i;
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	if (bloc.logicalBlockNum < 0 ||
 		(bloc.logicalBlockNum + count) > UDF_SB_PARTLEN(sb, bloc.partitionReferenceNum))
 	{
@@ -666,7 +666,7 @@ static void udf_table_free_blocks(struct super_block * sb,
 
 error_return:
 	sb->s_dirt = 1;
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	return;
 }
 
@@ -692,7 +692,7 @@ static int udf_table_prealloc_blocks(struct super_block * sb,
 	else
 		return 0;
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	extoffset = sizeof(struct unallocSpaceEntry);
 	bloc = UDF_I_LOCATION(table);
 
@@ -736,7 +736,7 @@ static int udf_table_prealloc_blocks(struct super_block * sb,
 		mark_buffer_dirty(UDF_SB_LVIDBH(sb));
 		sb->s_dirt = 1;
 	}
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	return alloc_count;
 }
 
@@ -761,7 +761,7 @@ static int udf_table_new_block(struct super_block * sb,
 	else
 		return newblock;
 
-	mutex_lock(&sbi->s_alloc_mutex);
+	down(&sbi->s_alloc_sem);
 	if (goal < 0 || goal >= UDF_SB_PARTLEN(sb, partition))
 		goal = 0;
 
@@ -811,7 +811,7 @@ static int udf_table_new_block(struct super_block * sb,
 	if (spread == 0xFFFFFFFF)
 	{
 		udf_release_data(goal_bh);
-		mutex_unlock(&sbi->s_alloc_mutex);
+		up(&sbi->s_alloc_sem);
 		return 0;
 	}
 
@@ -827,7 +827,7 @@ static int udf_table_new_block(struct super_block * sb,
 	if (inode && DQUOT_ALLOC_BLOCK(inode, 1))
 	{
 		udf_release_data(goal_bh);
-		mutex_unlock(&sbi->s_alloc_mutex);
+		up(&sbi->s_alloc_sem);
 		*err = -EDQUOT;
 		return 0;
 	}
@@ -846,7 +846,7 @@ static int udf_table_new_block(struct super_block * sb,
 	}
 
 	sb->s_dirt = 1;
-	mutex_unlock(&sbi->s_alloc_mutex);
+	up(&sbi->s_alloc_sem);
 	*err = 0;
 	return newblock;
 }

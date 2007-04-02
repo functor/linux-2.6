@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/4xx/ibm440sp.c
+ *
  * PPC440SP I/O descriptions
  *
  * Matt Porter <mporter@kernel.crashing.org>

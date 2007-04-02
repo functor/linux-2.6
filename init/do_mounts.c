@@ -19,10 +19,11 @@ extern int get_filesystem_list(char * buf);
 
 int __initdata rd_doload;	/* 1 = load RAM disk, 0 = don't load */
 
-int root_mountflags = MS_RDONLY | MS_SILENT;
+int root_mountflags = MS_RDONLY | MS_VERBOSE;
 char * __initdata root_device_name;
 static char __initdata saved_root_name[64];
 
+/* this is initialized in init/main.c */
 dev_t ROOT_DEV;
 
 static int __init load_ramdisk(char *str)
@@ -310,11 +311,6 @@ retry:
 
 		panic("VFS: Unable to mount root fs on %s", b);
 	}
-
-	printk("No filesystem could mount root, tried: ");
-	for (p = fs_names; *p; p += strlen(p)+1)
-		printk(" %s", p);
-	printk("\n");
 	panic("VFS: Unable to mount root fs on %s", __bdevname(ROOT_DEV, b));
 out:
 	putname(fs_names);
@@ -325,7 +321,7 @@ static int __init mount_nfs_root(void)
 {
 	void *data = nfs_root_data();
 
-	create_dev("/dev/root", ROOT_DEV);
+	create_dev("/dev/root", ROOT_DEV, NULL);
 	if (data &&
 	    do_mount_root("/dev/root", "nfs", root_mountflags, data) == 0)
 		return 1;
@@ -386,7 +382,7 @@ void __init mount_root(void)
 			change_floppy("root floppy");
 	}
 #endif
-	create_dev("/dev/root", ROOT_DEV);
+	create_dev("/dev/root", ROOT_DEV, root_device_name);
 	mount_block_root("/dev/root", root_mountflags);
 }
 
@@ -396,6 +392,8 @@ void __init mount_root(void)
 void __init prepare_namespace(void)
 {
 	int is_floppy;
+
+	mount_devfs();
 
 	if (root_delay) {
 		printk(KERN_INFO "Waiting %dsec before mounting root device...\n",
@@ -407,10 +405,6 @@ void __init prepare_namespace(void)
 
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
-		if (!strncmp(root_device_name, "mtd", 3)) {
-			mount_block_root(root_device_name, root_mountflags);
-			goto out;
-		}
 		ROOT_DEV = name_to_dev_t(root_device_name);
 		if (strncmp(root_device_name, "/dev/", 5) == 0)
 			root_device_name += 5;
@@ -426,8 +420,10 @@ void __init prepare_namespace(void)
 
 	mount_root();
 out:
+	umount_devfs("/dev");
 	sys_mount(".", "/", NULL, MS_MOVE, NULL);
 	sys_chroot(".");
 	security_sb_post_mountroot();
+	mount_devfs_fs ();
 }
 

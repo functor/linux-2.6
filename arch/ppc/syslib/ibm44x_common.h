@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/kernel/ibm44x_common.h
+ *
  * PPC44x system library
  *
  * Eugene Surovegin <eugene.surovegin@zultys.com> or <ebs@ebshome.net>

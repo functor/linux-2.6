@@ -35,6 +35,18 @@
 #define	NR_RESERVED_BUFS	32
 
 
+static void *mp_pool_alloc(gfp_t gfp_flags, void *data)
+{
+	struct multipath_bh *mpb;
+	mpb = kzalloc(sizeof(*mpb), gfp_flags);
+	return mpb;
+}
+
+static void mp_pool_free(void *mpb, void *data)
+{
+	kfree(mpb);
+}
+
 static int multipath_map (multipath_conf_t *conf)
 {
 	int i, disks = conf->raid_disks;
@@ -480,10 +492,11 @@ static int multipath_run (mddev_t *mddev)
 			mdname(mddev));
 		goto out_free_conf;
 	}
-	mddev->degraded = conf->raid_disks - conf->working_disks;
+	mddev->degraded = conf->raid_disks = conf->working_disks;
 
-	conf->pool = mempool_create_kzalloc_pool(NR_RESERVED_BUFS,
-						 sizeof(struct multipath_bh));
+	conf->pool = mempool_create(NR_RESERVED_BUFS,
+				    mp_pool_alloc, mp_pool_free,
+				    NULL);
 	if (conf->pool == NULL) {
 		printk(KERN_ERR 
 			"multipath: couldn't allocate memory for %s\n",

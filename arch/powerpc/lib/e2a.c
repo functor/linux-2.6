@@ -1,7 +1,9 @@
 /*
+ *  arch/ppc64/lib/e2a.c
+ *
  *  EBCDIC to ASCII conversion
  *
- * This function moved here from arch/powerpc/platforms/iseries/viopath.c 
+ * This function moved here from arch/ppc64/kernel/viopath.c
  *
  * (C) Copyright 2000-2004 IBM Corporation
  *
@@ -103,14 +105,4 @@ unsigned char e2a(unsigned char x)
 }
 EXPORT_SYMBOL(e2a);
 
-unsigned char* strne2a(unsigned char *dest, const unsigned char *src, size_t n)
-{
-	int i;
 
-	n = strnlen(src, n);
-
-	for (i = 0; i < n; i++)
-		dest[i] = e2a(src[i]);
-
-	return dest;
-}

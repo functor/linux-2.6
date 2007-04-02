@@ -123,14 +123,15 @@ static int
 match(const struct sk_buff *skb,
       const struct net_device *in,
       const struct net_device *out,
-      const struct xt_match *match,
       const void *matchinfo,
       int offset,
       unsigned int protoff,
       int *hotdrop)
 {
-	const struct xt_sctp_info *info = matchinfo;
+	const struct xt_sctp_info *info;
 	sctp_sctphdr_t _sh, *sh;
+
+	info = (const struct xt_sctp_info *)matchinfo;
 
 	if (offset) {
 		duprintf("Dropping non-first fragment.. FIXME\n");
@@ -151,7 +152,7 @@ match(const struct sk_buff *skb,
 		&& SCCHECK(((ntohs(sh->dest) >= info->dpts[0]) 
 			&& (ntohs(sh->dest) <= info->dpts[1])), 
 			XT_SCTP_DEST_PORTS, info->flags, info->invflags)
-		&& SCCHECK(match_packet(skb, protoff + sizeof (sctp_sctphdr_t),
+		&& SCCHECK(match_packet(skb, protoff,
 					info->chunkmap, info->chunk_match_type,
  					info->flag_info, info->flag_count, 
 					hotdrop),
@@ -161,14 +162,19 @@ match(const struct sk_buff *skb,
 static int
 checkentry(const char *tablename,
 	   const void *inf,
-	   const struct xt_match *match,
 	   void *matchinfo,
 	   unsigned int matchsize,
 	   unsigned int hook_mask)
 {
-	const struct xt_sctp_info *info = matchinfo;
+	const struct xt_sctp_info *info;
+	const struct ipt_ip *ip = inf;
 
-	return !(info->flags & ~XT_SCTP_VALID_FLAGS)
+	info = (const struct xt_sctp_info *)matchinfo;
+
+	return ip->proto == IPPROTO_SCTP
+		&& !(ip->invflags & XT_INV_PROTO)
+		&& matchsize == XT_ALIGN(sizeof(struct xt_sctp_info))
+		&& !(info->flags & ~XT_SCTP_VALID_FLAGS)
 		&& !(info->invflags & ~XT_SCTP_VALID_FLAGS)
 		&& !(info->invflags & ~info->flags)
 		&& ((!(info->flags & XT_SCTP_CHUNK_TYPES)) || 
@@ -178,45 +184,67 @@ checkentry(const char *tablename,
 				| SCTP_CHUNK_MATCH_ONLY)));
 }
 
-static struct xt_match sctp_match = {
-	.name		= "sctp",
-	.match		= match,
-	.matchsize	= sizeof(struct xt_sctp_info),
-	.proto		= IPPROTO_SCTP,
-	.checkentry	= checkentry,
-	.family		= AF_INET,
-	.me		= THIS_MODULE
+static int
+checkentry6(const char *tablename,
+	   const void *inf,
+	   void *matchinfo,
+	   unsigned int matchsize,
+	   unsigned int hook_mask)
+{
+	const struct xt_sctp_info *info;
+	const struct ip6t_ip6 *ip = inf;
+
+	info = (const struct xt_sctp_info *)matchinfo;
+
+	return ip->proto == IPPROTO_SCTP
+		&& !(ip->invflags & XT_INV_PROTO)
+		&& matchsize == XT_ALIGN(sizeof(struct xt_sctp_info))
+		&& !(info->flags & ~XT_SCTP_VALID_FLAGS)
+		&& !(info->invflags & ~XT_SCTP_VALID_FLAGS)
+		&& !(info->invflags & ~info->flags)
+		&& ((!(info->flags & XT_SCTP_CHUNK_TYPES)) || 
+			(info->chunk_match_type &
+				(SCTP_CHUNK_MATCH_ALL 
+				| SCTP_CHUNK_MATCH_ANY
+				| SCTP_CHUNK_MATCH_ONLY)));
+}
+
+
+static struct xt_match sctp_match = 
+{ 
+	.name = "sctp",
+	.match = &match,
+	.checkentry = &checkentry,
+	.me = THIS_MODULE
+};
+static struct xt_match sctp6_match = 
+{ 
+	.name = "sctp",
+	.match = &match,
+	.checkentry = &checkentry6,
+	.me = THIS_MODULE
 };
 
-static struct xt_match sctp6_match = {
-	.name		= "sctp",
-	.match		= match,
-	.matchsize	= sizeof(struct xt_sctp_info),
-	.proto		= IPPROTO_SCTP,
-	.checkentry	= checkentry,
-	.family		= AF_INET6,
-	.me		= THIS_MODULE
-};
 
-static int __init xt_sctp_init(void)
+static int __init init(void)
 {
 	int ret;
-	ret = xt_register_match(&sctp_match);
+	ret = xt_register_match(AF_INET, &sctp_match);
 	if (ret)
 		return ret;
 
-	ret = xt_register_match(&sctp6_match);
+	ret = xt_register_match(AF_INET6, &sctp6_match);
 	if (ret)
-		xt_unregister_match(&sctp_match);
+		xt_unregister_match(AF_INET, &sctp_match);
 
 	return ret;
 }
 
-static void __exit xt_sctp_fini(void)
+static void __exit fini(void)
 {
-	xt_unregister_match(&sctp6_match);
-	xt_unregister_match(&sctp_match);
+	xt_unregister_match(AF_INET6, &sctp6_match);
+	xt_unregister_match(AF_INET, &sctp_match);
 }
 
-module_init(xt_sctp_init);
-module_exit(xt_sctp_fini);
+module_init(init);
+module_exit(fini);

@@ -84,6 +84,7 @@ typedef struct {
 
 #include <asm/processor.h>
 #include <linux/module.h>
+#include <linux/config.h>
 #include <linux/elfcore.h>
 #include <linux/compat.h>
 
@@ -152,9 +153,7 @@ MODULE_AUTHOR("Eric Youngdale, David S. Miller, Jakub Jelinek");
 #undef MODULE_DESCRIPTION
 #undef MODULE_AUTHOR
 
-#include <asm/a.out.h>
-
 #undef TASK_SIZE
-#define TASK_SIZE STACK_TOP32
+#define TASK_SIZE 0xf0000000
 
 #include "../../../fs/binfmt_elf.c"

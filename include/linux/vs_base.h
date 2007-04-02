@@ -10,7 +10,6 @@
 
 #define current_vx_info() (current->vx_info)
 
-
 #define vx_check(c,m)	__vx_check(vx_current_xid(),c,m)
 
 #define vx_weak_check(c,m)	((m) ? vx_check(c,m) : 1)

@@ -19,6 +19,7 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+#include <linux/config.h>
 
 #if defined(CONFIG_SERIAL_VR41XX_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
@@ -38,7 +39,6 @@
 #include <linux/tty_flip.h>
 
 #include <asm/io.h>
-#include <asm/vr41xx/irq.h>
 #include <asm/vr41xx/siu.h>
 #include <asm/vr41xx/vr41xx.h>
 
@@ -821,23 +821,25 @@ static void wait_for_xmitr(struct uart_port *port)
 	}
 }
 
-static void siu_console_putchar(struct uart_port *port, int ch)
-{
-	wait_for_xmitr(port);
-	siu_write(port, UART_TX, ch);
-}
-
 static void siu_console_write(struct console *con, const char *s, unsigned count)
 {
 	struct uart_port *port;
 	uint8_t ier;
+	unsigned i;
 
 	port = &siu_uart_ports[con->index];
 
 	ier = siu_read(port, UART_IER);
 	siu_write(port, UART_IER, 0);
 
-	uart_console_write(port, s, count, siu_console_putchar);
+	for (i = 0; i < count && *s != '\0'; i++, s++) {
+		wait_for_xmitr(port);
+		siu_write(port, UART_TX, *s);
+		if (*s == '\n') {
+			wait_for_xmitr(port);
+			siu_write(port, UART_TX, '\r');
+		}
+	}
 
 	wait_for_xmitr(port);
 	siu_write(port, UART_IER, ier);
@@ -911,12 +913,13 @@ static struct uart_driver siu_uart_driver = {
 	.owner		= THIS_MODULE,
 	.driver_name	= "SIU",
 	.dev_name	= "ttyVR",
+	.devfs_name	= "ttvr/",
 	.major		= SIU_MAJOR,
 	.minor		= SIU_MINOR_BASE,
 	.cons		= SERIAL_VR41XX_CONSOLE,
 };
 
-static int __devinit siu_probe(struct platform_device *dev)
+static int siu_probe(struct platform_device *dev)
 {
 	struct uart_port *port;
 	int num, i, retval;
@@ -950,7 +953,7 @@ static int __devinit siu_probe(struct platform_device *dev)
 	return 0;
 }
 
-static int __devexit siu_remove(struct platform_device *dev)
+static int siu_remove(struct platform_device *dev)
 {
 	struct uart_port *port;
 	int i;
@@ -1003,28 +1006,21 @@ static struct platform_device *siu_platform_device;
 
 static struct platform_driver siu_device_driver = {
 	.probe		= siu_probe,
-	.remove		= __devexit_p(siu_remove),
+	.remove		= siu_remove,
 	.suspend	= siu_suspend,
 	.resume		= siu_resume,
 	.driver		= {
 		.name	= "SIU",
-		.owner	= THIS_MODULE,
 	},
 };
 
-static int __init vr41xx_siu_init(void)
+static int __devinit vr41xx_siu_init(void)
 {
 	int retval;
 
-	siu_platform_device = platform_device_alloc("SIU", -1);
-	if (!siu_platform_device)
-		return -ENOMEM;
-
-	retval = platform_device_add(siu_platform_device);
-	if (retval < 0) {
-		platform_device_put(siu_platform_device);
-		return retval;
-	}
+	siu_platform_device = platform_device_register_simple("SIU", -1, NULL, 0);
+	if (IS_ERR(siu_platform_device))
+		return PTR_ERR(siu_platform_device);
 
 	retval = platform_driver_register(&siu_device_driver);
 	if (retval < 0)
@@ -1033,9 +1029,10 @@ static int __init vr41xx_siu_init(void)
 	return retval;
 }
 
-static void __exit vr41xx_siu_exit(void)
+static void __devexit vr41xx_siu_exit(void)
 {
 	platform_driver_unregister(&siu_device_driver);
+
 	platform_device_unregister(siu_platform_device);
 }
 

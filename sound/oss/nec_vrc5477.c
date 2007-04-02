@@ -78,8 +78,6 @@
 #include <linux/spinlock.h>
 #include <linux/smp_lock.h>
 #include <linux/ac97_codec.h>
-#include <linux/mutex.h>
-
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
@@ -200,7 +198,7 @@ struct vrc5477_ac97_state {
 	unsigned short extended_status;
 
 	spinlock_t lock;
-	struct mutex open_mutex;
+	struct semaphore open_sem;
 	mode_t open_mode;
 	wait_queue_head_t open_wait;
 
@@ -1619,22 +1617,22 @@ static int vrc5477_ac97_open(struct inode *inode, struct file *file)
 	file->private_data = s;
 
 	/* wait for device to become free */
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	while (s->open_mode & file->f_mode) {
 
 		if (file->f_flags & O_NONBLOCK) {
-			mutex_unlock(&s->open_mutex);
+			up(&s->open_sem);
 			return -EBUSY;
 		}
 		add_wait_queue(&s->open_wait, &wait);
 		__set_current_state(TASK_INTERRUPTIBLE);
-		mutex_unlock(&s->open_mutex);
+		up(&s->open_sem);
 		schedule();
 		remove_wait_queue(&s->open_wait, &wait);
 		set_current_state(TASK_RUNNING);
 		if (signal_pending(current))
 			return -ERESTARTSYS;
-		mutex_lock(&s->open_mutex);
+		down(&s->open_sem);
 	}
 
 	spin_lock_irqsave(&s->lock, flags);
@@ -1661,7 +1659,7 @@ static int vrc5477_ac97_open(struct inode *inode, struct file *file)
  bailout:
 	spin_unlock_irqrestore(&s->lock, flags);
 
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	return ret;
 }
 
@@ -1673,7 +1671,7 @@ static int vrc5477_ac97_release(struct inode *inode, struct file *file)
 	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac(s, file->f_flags & O_NONBLOCK);
-	mutex_lock(&s->open_mutex);
+	down(&s->open_sem);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac(s);
 		dealloc_dmabuf(s, &s->dma_dac);
@@ -1683,7 +1681,7 @@ static int vrc5477_ac97_release(struct inode *inode, struct file *file)
 		dealloc_dmabuf(s, &s->dma_adc);
 	}
 	s->open_mode &= (~file->f_mode) & (FMODE_READ|FMODE_WRITE);
-	mutex_unlock(&s->open_mutex);
+	up(&s->open_sem);
 	wake_up(&s->open_wait);
 	unlock_kernel();
 	return 0;
@@ -1869,7 +1867,7 @@ static int __devinit vrc5477_ac97_probe(struct pci_dev *pcidev,
 	init_waitqueue_head(&s->dma_adc.wait);
 	init_waitqueue_head(&s->dma_dac.wait);
 	init_waitqueue_head(&s->open_wait);
-	mutex_init(&s->open_mutex);
+	init_MUTEX(&s->open_sem);
 	spin_lock_init(&s->lock);
 
 	s->dev = pcidev;
@@ -1909,7 +1907,7 @@ static int __devinit vrc5477_ac97_probe(struct pci_dev *pcidev,
 		       s->io, s->io + pci_resource_len(pcidev,0)-1);
 		goto err_region;
 	}
-	if (request_irq(s->irq, vrc5477_ac97_interrupt, IRQF_DISABLED,
+	if (request_irq(s->irq, vrc5477_ac97_interrupt, SA_INTERRUPT,
 			VRC5477_AC97_MODULE_NAME, s)) {
 		printk(KERN_ERR PFX "irq %u in use\n", s->irq);
 		goto err_irq;

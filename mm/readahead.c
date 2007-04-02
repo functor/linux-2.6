@@ -14,7 +14,6 @@
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
 #include <linux/pagevec.h>
-#include <linux/buffer_head.h>
 
 void default_unplug_io_fn(struct backing_dev_info *bdi, struct page *page)
 {
@@ -53,24 +52,13 @@ static inline unsigned long get_min_readahead(struct file_ra_state *ra)
 	return (VM_MIN_READAHEAD * 1024) / PAGE_CACHE_SIZE;
 }
 
-static inline void reset_ahead_window(struct file_ra_state *ra)
-{
-	/*
-	 * ... but preserve ahead_start + ahead_size value,
-	 * see 'recheck:' label in page_cache_readahead().
-	 * Note: We never use ->ahead_size as rvalue without
-	 * checking ->ahead_start != 0 first.
-	 */
-	ra->ahead_size += ra->ahead_start;
-	ra->ahead_start = 0;
-}
-
 static inline void ra_off(struct file_ra_state *ra)
 {
 	ra->start = 0;
 	ra->flags = 0;
 	ra->size = 0;
-	reset_ahead_window(ra);
+	ra->ahead_start = 0;
+	ra->ahead_size = 0;
 	return;
 }
 
@@ -84,10 +72,10 @@ static unsigned long get_init_ra_size(unsigned long size, unsigned long max)
 {
 	unsigned long newsize = roundup_pow_of_two(size);
 
-	if (newsize <= max / 32)
-		newsize = newsize * 4;
+	if (newsize <= max / 64)
+		newsize = newsize * newsize;
 	else if (newsize <= max / 4)
-		newsize = newsize * 2;
+		newsize = max / 4;
 	else
 		newsize = max;
 	return newsize;
@@ -118,28 +106,9 @@ static inline unsigned long get_next_ra_size(struct file_ra_state *ra)
 
 #define list_to_page(head) (list_entry((head)->prev, struct page, lru))
 
-/*
- * see if a page needs releasing upon read_cache_pages() failure
- * - the caller of read_cache_pages() may have set PG_private before calling,
- *   such as the NFS fs marking pages that are cached locally on disk, thus we
- *   need to give the fs a chance to clean up in the event of an error
- */
-static void read_cache_pages_release_page(struct address_space *mapping,
-					  struct page *page)
-{
-	if (PagePrivate(page)) {
-		if (TestSetPageLocked(page))
-			BUG();
-		page->mapping = mapping;
-		try_to_release_page(page, GFP_KERNEL);
-		page->mapping = NULL;
-		unlock_page(page);
-	}
-	page_cache_release(page);
-}
-
 /**
- * read_cache_pages - populate an address space with some pages & start reads against them
+ * read_cache_pages - populate an address space with some pages, and
+ * 			start reads against them.
  * @mapping: the address_space
  * @pages: The address of a list_head which contains the target pages.  These
  *   pages have their ->index populated and are otherwise uninitialised.
@@ -161,7 +130,7 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 		page = list_to_page(pages);
 		list_del(&page->lru);
 		if (add_to_page_cache(page, mapping, page->index, GFP_KERNEL)) {
-			read_cache_pages_release_page(mapping, page);
+			page_cache_release(page);
 			continue;
 		}
 		ret = filler(data, page);
@@ -173,7 +142,7 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 
 				victim = list_to_page(pages);
 				list_del(&victim->lru);
-				read_cache_pages_release_page(mapping, victim);
+				page_cache_release(victim);
 			}
 			break;
 		}
@@ -202,11 +171,14 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 		list_del(&page->lru);
 		if (!add_to_page_cache(page, mapping,
 					page->index, GFP_KERNEL)) {
-			mapping->a_ops->readpage(filp, page);
-			if (!pagevec_add(&lru_pvec, page))
-				__pagevec_lru_add(&lru_pvec);
-		} else
-			page_cache_release(page);
+			ret = mapping->a_ops->readpage(filp, page);
+			if (ret != AOP_TRUNCATED_PAGE) {
+				if (!pagevec_add(&lru_pvec, page))
+					__pagevec_lru_add(&lru_pvec);
+				continue;
+			} /* else fall through to release */
+		}
+		page_cache_release(page);
 	}
 	pagevec_lru_add(&lru_pvec);
 	ret = 0;
@@ -411,8 +383,8 @@ int do_page_cache_readahead(struct address_space *mapping, struct file *filp,
  * Read 'nr_to_read' pages starting at page 'offset'. If the flag 'block'
  * is set wait till the read completes.  Otherwise attempt to read without
  * blocking.
- * Returns 1 meaning 'success' if read is successful without switching off
- * readahead mode. Otherwise return failure.
+ * Returns 1 meaning 'success' if read is succesfull without switching off
+ * readhaead mode. Otherwise return failure.
  */
 static int
 blockable_page_cache_readahead(struct address_space *mapping, struct file *filp,
@@ -454,7 +426,8 @@ static int make_ahead_window(struct address_space *mapping, struct file *filp,
 		 * congestion.  The ahead window will any way be closed
 		 * in case we failed due to excessive page cache hits.
 		 */
-		reset_ahead_window(ra);
+		ra->ahead_start = 0;
+		ra->ahead_size = 0;
 	}
 
 	return ret;
@@ -547,11 +520,11 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	 * If we get here we are doing sequential IO and this was not the first
 	 * occurence (ie we have an existing window)
 	 */
+
 	if (ra->ahead_start == 0) {	 /* no ahead window yet */
 		if (!make_ahead_window(mapping, filp, ra, 0))
-			goto recheck;
+			goto out;
 	}
-
 	/*
 	 * Already have an ahead window, check if we crossed into it.
 	 * If so, shift windows and issue a new ahead window.
@@ -563,16 +536,11 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 		ra->start = ra->ahead_start;
 		ra->size = ra->ahead_size;
 		make_ahead_window(mapping, filp, ra, 0);
-recheck:
-		/* prev_page shouldn't overrun the ahead window */
-		ra->prev_page = min(ra->prev_page,
-			ra->ahead_start + ra->ahead_size - 1);
 	}
 
 out:
 	return ra->prev_page + 1;
 }
-EXPORT_SYMBOL_GPL(page_cache_readahead);
 
 /*
  * handle_ra_miss() is called when it is known that a page which should have

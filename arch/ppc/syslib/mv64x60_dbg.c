@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/syslib/mv64x60_dbg.c
+ *
  * KGDB and progress routines for the Marvell/Galileo MV64x60 (Discovery).
  *
  * Author: Mark A. Greer <mgreer@mvista.com>
@@ -18,6 +20,7 @@
  */
 
 
+#include <linux/config.h>
 #include <linux/irq.h>
 #include <asm/delay.h>
 #include <asm/mv64x60.h>

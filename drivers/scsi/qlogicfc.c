@@ -711,7 +711,7 @@ static inline void isp2x00_disable_irqs(struct Scsi_Host *host)
 }
 
 
-static int isp2x00_detect(Scsi_Host_Template * tmpt)
+static int isp2x00_detect(struct scsi_host_template * tmpt)
 {
 	int hosts = 0;
 	unsigned long wait_time;
@@ -746,7 +746,6 @@ static int isp2x00_detect(Scsi_Host_Template * tmpt)
 			        printk("qlogicfc%d : could not register host.\n", hosts);
 				continue;
 			}
- 			scsi_set_device(host, &pdev->dev);
 			host->max_id = QLOGICFC_MAX_ID + 1;
 			host->max_lun = QLOGICFC_MAX_LUN;
 			hostdata = (struct isp2x00_hostdata *) host->hostdata;
@@ -2211,7 +2210,7 @@ void isp2x00_print_scsi_cmd(Scsi_Cmnd * cmd)
 
 MODULE_LICENSE("GPL");
 
-static Scsi_Host_Template driver_template = {
+static struct scsi_host_template driver_template = {
         .detect                 = isp2x00_detect,
         .release                = isp2x00_release,
         .info                   = isp2x00_info,

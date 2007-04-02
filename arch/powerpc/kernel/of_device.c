@@ -1,3 +1,4 @@
+#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -146,12 +147,15 @@ postcore_initcall(of_bus_driver_init);
 
 int of_register_driver(struct of_platform_driver *drv)
 {
+	int count = 0;
+
 	/* initialize common driver fields */
 	drv->driver.name = drv->name;
 	drv->driver.bus = &of_platform_bus_type;
 
 	/* register with core */
-	return driver_register(&drv->driver);
+	count = driver_register(&drv->driver);
+	return count ? count : 1;
 }
 
 void of_unregister_driver(struct of_platform_driver *drv)

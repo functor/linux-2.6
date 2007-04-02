@@ -1,7 +1,3 @@
-ifeq ($(CONFIG_PPC64),y)
-EXTRA_CFLAGS	+= -mno-minimal-toc
-endif
-
 obj-$(CONFIG_OPROFILE) += oprofile.o
 
 DRIVER_OBJS := $(addprefix ../../../drivers/oprofile/, \
@@ -10,7 +6,7 @@ DRIVER_OBJS := $(addprefix ../../../drivers/oprofile/, \
 		oprofilefs.o oprofile_stats.o \
 		timer_int.o )
 
-oprofile-y := $(DRIVER_OBJS) common.o backtrace.o
+oprofile-y := $(DRIVER_OBJS) common.o
 oprofile-$(CONFIG_PPC64) += op_model_rs64.o op_model_power4.o
 oprofile-$(CONFIG_FSL_BOOKE) += op_model_fsl_booke.o
 oprofile-$(CONFIG_PPC32) += op_model_7450.o

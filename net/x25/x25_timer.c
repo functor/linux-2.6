@@ -114,9 +114,8 @@ static void x25_heartbeat_expiry(unsigned long param)
 			if (sock_flag(sk, SOCK_DESTROY) ||
 			    (sk->sk_state == TCP_LISTEN &&
 			     sock_flag(sk, SOCK_DEAD))) {
-				bh_unlock_sock(sk);
 				x25_destroy_socket(sk);
-				return;
+				goto unlock;
 			}
 			break;
 
@@ -129,6 +128,7 @@ static void x25_heartbeat_expiry(unsigned long param)
 	}
 restart_heartbeat:
 	x25_start_heartbeat(sk);
+unlock:
 	bh_unlock_sock(sk);
 }
 

@@ -15,6 +15,7 @@
  *  by reference.
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -454,14 +455,10 @@ static int gfar_sringparam(struct net_device *dev, struct ethtool_ringparam *rva
 
 		/* Halt TX and RX, and process the frames which
 		 * have already been received */
-		spin_lock_irqsave(&priv->txlock, flags);
-		spin_lock(&priv->rxlock);
-
+		spin_lock_irqsave(&priv->lock, flags);
 		gfar_halt(dev);
 		gfar_clean_rx_ring(dev, priv->rx_ring_size);
-
-		spin_unlock(&priv->rxlock);
-		spin_unlock_irqrestore(&priv->txlock, flags);
+		spin_unlock_irqrestore(&priv->lock, flags);
 
 		/* Now we take down the rings to rebuild them */
 		stop_gfar(dev);
@@ -491,14 +488,10 @@ static int gfar_set_rx_csum(struct net_device *dev, uint32_t data)
 
 		/* Halt TX and RX, and process the frames which
 		 * have already been received */
-		spin_lock_irqsave(&priv->txlock, flags);
-		spin_lock(&priv->rxlock);
-
+		spin_lock_irqsave(&priv->lock, flags);
 		gfar_halt(dev);
 		gfar_clean_rx_ring(dev, priv->rx_ring_size);
-
-		spin_unlock(&priv->rxlock);
-		spin_unlock_irqrestore(&priv->txlock, flags);
+		spin_unlock_irqrestore(&priv->lock, flags);
 
 		/* Now we take down the rings to rebuild them */
 		stop_gfar(dev);
@@ -530,7 +523,7 @@ static int gfar_set_tx_csum(struct net_device *dev, uint32_t data)
 	if (!(priv->einfo->device_flags & FSL_GIANFAR_DEV_HAS_CSUM))
 		return -EOPNOTSUPP;
 
-	spin_lock_irqsave(&priv->txlock, flags);
+	spin_lock_irqsave(&priv->lock, flags);
 	gfar_halt(dev);
 
 	if (data)
@@ -539,7 +532,7 @@ static int gfar_set_tx_csum(struct net_device *dev, uint32_t data)
 		dev->features &= ~NETIF_F_IP_CSUM;
 
 	gfar_start(dev);
-	spin_unlock_irqrestore(&priv->txlock, flags);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return 0;
 }

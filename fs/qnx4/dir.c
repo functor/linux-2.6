@@ -11,6 +11,7 @@
  * 20-06-1998 by Frank Denis : Linux 2.1.99+ & dcache support.
  */
 
+#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -80,7 +81,7 @@ out:
 	return 0;
 }
 
-const struct file_operations qnx4_dir_operations =
+struct file_operations qnx4_dir_operations =
 {
 	.read		= generic_read_dir,
 	.readdir	= qnx4_readdir,

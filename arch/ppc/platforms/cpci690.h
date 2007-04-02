@@ -1,4 +1,6 @@
 /*
+ * arch/ppc/platforms/cpci690.h
+ *
  * Definitions for Force CPCI690
  *
  * Author: Mark A. Greer <mgreer@mvista.com>
