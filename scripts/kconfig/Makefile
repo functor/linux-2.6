@@ -23,6 +23,9 @@ oldconfig: $(obj)/conf
 silentoldconfig: $(obj)/conf
 	$< -s arch/$(ARCH)/Kconfig
 
+nonint_oldconfig: $(obj)/conf
+	$< -b arch/$(ARCH)/Kconfig
+
 update-po-config: $(obj)/kxgettext
 	xgettext --default-domain=linux \
           --add-comments --keyword=_ --keyword=N_ \
