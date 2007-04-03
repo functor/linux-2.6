@@ -13,6 +13,131 @@
 #ifndef BNX2_H
 #define BNX2_H
 
+#ifndef ADVERTISE_1000XFULL
+#define ADVERTISE_1000XFULL	0x0020
+#define ADVERTISE_1000XHALF	0x0040
+#define ADVERTISE_1000XPAUSE	0x0080
+#define ADVERTISE_1000XPSE_ASYM	0x0100
+#endif
+
+#ifndef ADVERTISE_PAUSE_CAP
+#define ADVERTISE_PAUSE_CAP	0x0400
+#define ADVERTISE_PAUSE_ASYM	0x0800
+#endif
+
+#ifndef MII_CTRL1000
+#define MII_CTRL1000		0x9
+#define MII_STAT1000		0xa
+#endif
+
+#ifndef BMCR_SPEED1000
+#define BMCR_SPEED1000		0x0040
+#endif
+
+#ifndef ADVERTISE_1000FULL
+#define ADVERTISE_1000FULL	0x0200
+#define ADVERTISE_1000HALF	0x0100
+#endif
+
+#ifndef SPEED_2500
+#define SPEED_2500		2500
+#endif
+
+#ifndef PCI_DEVICE_ID_NX2_5706
+#define PCI_DEVICE_ID_NX2_5706	0x164a
+#define PCI_DEVICE_ID_NX2_5706S	0x16aa
+#endif
+
+#ifndef PCI_DEVICE_ID_NX2_5708
+#define PCI_DEVICE_ID_NX2_5708	0x164c
+#define PCI_DEVICE_ID_NX2_5708S	0x16ac
+#endif
+
+#ifndef IRQ_RETVAL
+typedef void irqreturn_t;
+#define IRQ_RETVAL(x)
+#define IRQ_HANDLED
+#define IRQ_NONE
+#endif
+
+#ifndef NETDEV_TX_OK
+#define NETDEV_TX_OK 0
+#endif
+
+#ifndef NETDEV_TX_BUSY
+#define NETDEV_TX_BUSY 1
+#endif
+
+#if (LINUX_VERSION_CODE < 0x020547)
+#define pci_set_consistent_dma_mask(pdev, mask) (0)
+#endif
+
+#if (LINUX_VERSION_CODE < 0x020604)
+#define MODULE_VERSION(version)
+#endif
+
+#ifndef DMA_64BIT_MASK
+#define DMA_64BIT_MASK ((u64) 0xffffffffffffffffULL)
+#define DMA_32BIT_MASK ((u64) 0x00000000ffffffffULL)
+#endif
+
+#ifndef DMA_40BIT_MASK
+#define DMA_40BIT_MASK ((u64) 0x000000ffffffffffULL)
+#endif
+
+#ifndef mmiowb
+#define mmiowb()
+#endif
+
+#if !defined(__iomem)
+#define __iomem
+#endif
+
+#if (LINUX_VERSION_CODE < 0x2060b)
+typedef u32 pm_message_t;
+typedef u32 pci_power_t;
+#define PCI_D0		0
+#define PCI_D3hot	3
+#endif
+
+#if (LINUX_VERSION_CODE < 0x020605)
+#define pci_dma_sync_single_for_cpu(pdev, map, len, dir)	\
+	pci_dma_sync_single(pdev, map, len, dir)
+
+#define pci_dma_sync_single_for_device(pdev, map, len, dir)
+#endif
+
+#if !defined(HAVE_NETDEV_PRIV) && (LINUX_VERSION_CODE != 0x020603) && (LINUX_VERSION_CODE != 0x020604) && (LINUX_VERSION_CODE != 0x20605)
+static inline void *netdev_priv(struct net_device *dev)
+{
+	return dev->priv;
+}
+#endif
+
+#ifdef OLD_NETIF
+static inline void netif_poll_disable(struct net_device *dev)
+{
+	while (test_and_set_bit(__LINK_STATE_RX_SCHED, &dev->state)) {
+		/* No hurry. */
+		current->state = TASK_INTERRUPTIBLE;
+		schedule_timeout(1);
+	}
+}
+
+static inline void netif_poll_enable(struct net_device *dev)
+{
+	clear_bit(__LINK_STATE_RX_SCHED, &dev->state);
+}
+
+static inline void netif_tx_disable(struct net_device *dev)
+{
+	spin_lock_bh(&dev->xmit_lock);
+	netif_stop_queue(dev);
+	spin_unlock_bh(&dev->xmit_lock);
+}
+
+#endif
+
 /* Hardware data structures and register definitions automatically
  * generated from RTL code. Do not modify.
  */
@@ -231,6 +356,7 @@ struct statistics_block {
 	u32 stat_GenStat13;
 	u32 stat_GenStat14;
 	u32 stat_GenStat15;
+	u32 stat_FwRxDrop;
 };
 
 
@@ -3481,6 +3607,8 @@ struct l2_fhdr {
 
 #define BNX2_COM_SCRATCH				0x00120000
 
+#define BNX2_FW_RX_DROP_COUNT				 0x00120084
+
 
 /*
  *  cp_reg definition
@@ -3747,7 +3875,12 @@ struct l2_fhdr {
 #define DMA_READ_CHANS	5
 #define DMA_WRITE_CHANS	3
 
-#define BCM_PAGE_BITS	12
+/* Use CPU native page size up to 16K for the ring sizes.  */
+#if (PAGE_SHIFT > 14)
+#define BCM_PAGE_BITS	14
+#else
+#define BCM_PAGE_BITS	PAGE_SHIFT
+#endif
 #define BCM_PAGE_SIZE	(1 << BCM_PAGE_BITS)
 
 #define TX_DESC_CNT  (BCM_PAGE_SIZE / sizeof(struct tx_bd))
@@ -3770,7 +3903,7 @@ struct l2_fhdr {
 
 #define RX_RING_IDX(x) ((x) & bp->rx_max_ring_idx)
 
-#define RX_RING(x) (((x) & ~MAX_RX_DESC_CNT) >> 8)
+#define RX_RING(x) (((x) & ~MAX_RX_DESC_CNT) >> (BCM_PAGE_BITS - 4))
 #define RX_IDX(x) ((x) & MAX_RX_DESC_CNT)
 
 /* Context size. */
@@ -3858,6 +3991,7 @@ struct flash_spec {
 struct bnx2 {
 	/* Fields used in the tx and intr/napi performance paths are grouped */
 	/* together in the beginning of the structure. */
+
 	void __iomem		*regview;
 
 	struct net_device	*dev;
@@ -3873,7 +4007,6 @@ struct bnx2 {
 #define PCI_32BIT_FLAG			2
 #define ONE_TDMA_FLAG			4	/* no longer used */
 #define NO_WOL_FLAG			8
-#define USING_DAC_FLAG			0x10
 #define USING_MSI_FLAG			0x20
 #define ASF_ENABLE_FLAG			0x40
 
@@ -3919,7 +4052,11 @@ struct bnx2 {
 	int			timer_interval;
 	int			current_interval;
 	struct			timer_list timer;
+#if (LINUX_VERSION_CODE >= 0x020600)
 	struct work_struct	reset_task;
+#else
+	struct tq_struct	reset_task;
+#endif
 	int			in_reset_task;
 
 	/* Used to synchronize phy accesses. */
@@ -4048,6 +4185,9 @@ struct bnx2 {
 	u32			flash_size;
 
 	int			status_stats_size;
+
+	struct z_stream_s	*strm;
+	void			*gunzip_buf;
 };
 
 static u32 bnx2_reg_rd_ind(struct bnx2 *bp, u32 offset);
@@ -4163,12 +4303,14 @@ struct fw_info {
 #define BNX2_DRV_MSG_CODE_PULSE			 0x06000000
 #define BNX2_DRV_MSG_CODE_DIAG			 0x07000000
 #define BNX2_DRV_MSG_CODE_SUSPEND_NO_WOL	 0x09000000
+#define BNX2_DRV_MSG_CODE_UNLOAD_LNK_DN		 0x0b000000
 
 #define BNX2_DRV_MSG_DATA			 0x00ff0000
 #define BNX2_DRV_MSG_DATA_WAIT0			 0x00010000
 #define BNX2_DRV_MSG_DATA_WAIT1			 0x00020000
 #define BNX2_DRV_MSG_DATA_WAIT2			 0x00030000
 #define BNX2_DRV_MSG_DATA_WAIT3			 0x00040000
+#define BNX2_DRV_MSG_DATA_WAIT4			 0x00060000
         
 #define BNX2_DRV_MSG_SEQ			 0x0000ffff
 
@@ -4235,7 +4377,7 @@ struct fw_info {
 #define BNX2_SHARED_HW_CFG_POWER_STATE_D1_MASK	 0xff00
 #define BNX2_SHARED_HW_CFG_POWER_STATE_D0_MASK	 0xff
 
-#define BNX2_SHARED_HW_CFG POWER_CONSUMED	0x00000038
+#define BNX2_SHARED_HW_CFG_POWER_CONSUMED	0x00000038
 #define BNX2_SHARED_HW_CFG_CONFIG		0x0000003c
 #define BNX2_SHARED_HW_CFG_DESIGN_NIC		 0
 #define BNX2_SHARED_HW_CFG_DESIGN_LOM		 0x1
