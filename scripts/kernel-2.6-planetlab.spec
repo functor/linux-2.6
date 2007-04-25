@@ -409,8 +409,12 @@ BuildKernel() {
     rm -f $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/scripts/*/*.o
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     cd include
-    cp -a acpi config keys linux math-emu media mtd net pcmcia rdma rxrpc scsi sound video asm asm-generic $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-    cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+    #cp -a acpi config keys linux math-emu media mtd net pcmcia rdma rxrpc scsi sound video asm asm-generic $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+    #cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+    for directory in acpi config keys linux math-emu media mtd net pcmcia rdma rxrpc scsi sound video asm asm-generic; do
+	[ -d $directory ] && cp -a $directory $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+	[ -h $directory ] && cp -a `readlink $directory` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+    done
     if [ "$Arch" = "x86_64" ]; then
       cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
