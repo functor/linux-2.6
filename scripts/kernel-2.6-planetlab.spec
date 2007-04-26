@@ -300,11 +300,11 @@ BuildKernel() {
 
     # Pick the right config file for the kernel we're building
     if [ -n "$Flavour" ] ; then
-      Config=kernel-%{kversion}-%{_target_cpu}-$Flavour-planetlab.config
+      Config=kernel-%{kversion}-%{_target_cpu}-$Flavour-%{pldistro}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-$Flavour-%{_target_cpu}
       DevelLink=/usr/src/kernels/%{KVERREL}$Flavour-%{_target_cpu}
     else
-      Config=kernel-%{kversion}-%{_target_cpu}-planetlab.config
+      Config=kernel-%{kversion}-%{_target_cpu}-%{pldistro}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-%{_target_cpu}
       DevelLink=
     fi
