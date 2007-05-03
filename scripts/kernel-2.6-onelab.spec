@@ -1,5 +1,7 @@
 Summary: The Linux kernel (the core of the Linux operating system)
 
+# $Id$
+
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
 
@@ -317,39 +319,15 @@ BuildKernel() {
 
     # and now to start the build process
 
-    CC=gcc
-    gccversion=$(gcc -v 2>&1 | grep "gcc version" | awk '{print $3'} | awk -F . '{print $1}')
-    if [ "$gccversion" == "4" ] ; then
-	echo "Currently not compiling kernel with gcc 4.x"
-	echo "Trying to find a recent gcc 3.x based compiler"
-	CC=
-	gcc3=$(which gcc32 2>/dev/null || /bin/true)
-	[ "$gcc3" != "" ] && CC=gcc32
-	echo "gcc3 = $gcc3; CC=${CC}"
-	gcc3=$(which gcc33 2>/dev/null || /bin/true)
-	[ "$gcc3" != "" ] && CC=gcc33
-	echo "gcc3 = $gcc3; CC=${CC}"
-	gcc3=$(which gcc34 2>/dev/null || /bin/true)
-	[ "$gcc3" != "" ] && CC=gcc34
-	echo "gcc3 = $gcc3; CC=${CC}"
-	if [ -z "$CC" ]; then
-	    echo "Could not find a gcc 3.x based compiler!"
-	    echo "Trying to compile with gcc $gccversion anyway"
-	    CC=gcc
-	    #echo "Aborting kernel compilation!"
-	    #exit -1
-	fi
-    fi
-    HOSTCC=${CC}
-
-    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch mrproper
+    make -s mrproper
     cp configs/$Config .config
-    echo "USING ARCH=$Arch CC=${CC} HOSTCC=${HOSTCC}"
 
-    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch nonint_oldconfig > /dev/null
-    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch include/linux/version.h 
-    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} $Target
-    make -s CC=${CC} HOSTCC=${HOSTCC} ARCH=$Arch %{?_smp_mflags} modules || exit 1
+    echo "USING ARCH=$Arch"
+
+    make -s ARCH=$Arch nonint_oldconfig > /dev/null
+    make -s ARCH=$Arch include/linux/version.h 
+    make -s ARCH=$Arch %{?_smp_mflags} $Target
+    make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 
     # Start installing the results
 
