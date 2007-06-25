@@ -38,6 +38,10 @@
 #include <asm/mmu_context.h>
 #include <asm/smp.h>
 
+#ifdef CONFIG_MIPS_MT_SMTC
+#include <asm/mipsmtregs.h>
+#endif /* CONFIG_MIPS_MT_SMTC */
+
 cpumask_t phys_cpu_present_map;		/* Bitmask of available CPUs */
 volatile cpumask_t cpu_callin_map;	/* Bitmask of started secondaries */
 cpumask_t cpu_online_map;		/* Bitmask of currently online CPUs */
@@ -85,6 +89,10 @@ asmlinkage void start_secondary(void)
 {
 	unsigned int cpu;
 
+#ifdef CONFIG_MIPS_MT_SMTC
+	/* Only do cpu_probe for first TC of CPU */
+	if ((read_c0_tcbind() & TCBIND_CURTC) == 0)
+#endif /* CONFIG_MIPS_MT_SMTC */
 	cpu_probe();
 	cpu_report();
 	per_cpu_trap_init();
@@ -164,11 +172,11 @@ int smp_call_function (void (*func) (void *info), void *info, int retry,
 
 	spin_lock(&smp_call_lock);
 	call_data = &data;
-	mb();
+	smp_mb();
 
 	/* Send a message to all other CPUs and wait for them to respond */
-	for (i = 0; i < NR_CPUS; i++)
-		if (cpu_online(i) && i != cpu)
+	for_each_online_cpu(i)
+		if (i != cpu)
 			core_send_ipi(i, SMP_CALL_FUNCTION);
 
 	/* Wait for response */
@@ -179,10 +187,12 @@ int smp_call_function (void (*func) (void *info), void *info, int retry,
 	if (wait)
 		while (atomic_read(&data.finished) != cpus)
 			barrier();
+	call_data = NULL;
 	spin_unlock(&smp_call_lock);
 
 	return 0;
 }
+
 
 void smp_call_function_interrupt(void)
 {
@@ -194,7 +204,7 @@ void smp_call_function_interrupt(void)
 	 * Notify initiating CPU that I've grabbed the data and am
 	 * about to execute the function.
 	 */
-	mb();
+	smp_mb();
 	atomic_inc(&call_data->started);
 
 	/*
@@ -205,7 +215,7 @@ void smp_call_function_interrupt(void)
 	irq_exit();
 
 	if (wait) {
-		mb();
+		smp_mb();
 		atomic_inc(&call_data->finished);
 	}
 }
@@ -237,6 +247,9 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	current_thread_info()->cpu = 0;
 	smp_tune_scheduling();
 	plat_prepare_cpus(max_cpus);
+#ifndef CONFIG_HOTPLUG_CPU
+	cpu_present_map = cpu_possible_map;
+#endif
 }
 
 /* preload SMP state for boot cpu */
@@ -258,7 +271,7 @@ void __devinit smp_prepare_boot_cpu(void)
  * and keep control until "cpu_online(cpu)" is set.  Note: cpu is
  * physical, not logical.
  */
-int __devinit __cpu_up(unsigned int cpu)
+int __cpuinit __cpu_up(unsigned int cpu)
 {
 	struct task_struct *idle;
 
@@ -297,12 +310,38 @@ static void flush_tlb_all_ipi(void *info)
 
 void flush_tlb_all(void)
 {
-	on_each_cpu(flush_tlb_all_ipi, 0, 1, 1);
+	on_each_cpu(flush_tlb_all_ipi, NULL, 1, 1);
 }
 
 static void flush_tlb_mm_ipi(void *mm)
 {
 	local_flush_tlb_mm((struct mm_struct *)mm);
+}
+
+/*
+ * Special Variant of smp_call_function for use by TLB functions:
+ *
+ *  o No return value
+ *  o collapses to normal function call on UP kernels
+ *  o collapses to normal function call on systems with a single shared
+ *    primary cache.
+ *  o CONFIG_MIPS_MT_SMTC currently implies there is only one physical core.
+ */
+static inline void smp_on_other_tlbs(void (*func) (void *info), void *info)
+{
+#ifndef CONFIG_MIPS_MT_SMTC
+	smp_call_function(func, info, 1, 1);
+#endif
+}
+
+static inline void smp_on_each_tlb(void (*func) (void *info), void *info)
+{
+	preempt_disable();
+
+	smp_on_other_tlbs(func, info);
+	func(info);
+
+	preempt_enable();
 }
 
 /*
@@ -323,7 +362,7 @@ void flush_tlb_mm(struct mm_struct *mm)
 	preempt_disable();
 
 	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
-		smp_call_function(flush_tlb_mm_ipi, (void *)mm, 1, 1);
+		smp_on_other_tlbs(flush_tlb_mm_ipi, (void *)mm);
 	} else {
 		int i;
 		for (i = 0; i < num_online_cpus(); i++)
@@ -359,7 +398,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned l
 		fd.vma = vma;
 		fd.addr1 = start;
 		fd.addr2 = end;
-		smp_call_function(flush_tlb_range_ipi, (void *)&fd, 1, 1);
+		smp_on_other_tlbs(flush_tlb_range_ipi, (void *)&fd);
 	} else {
 		int i;
 		for (i = 0; i < num_online_cpus(); i++)
@@ -401,7 +440,7 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 
 		fd.vma = vma;
 		fd.addr1 = page;
-		smp_call_function(flush_tlb_page_ipi, (void *)&fd, 1, 1);
+		smp_on_other_tlbs(flush_tlb_page_ipi, (void *)&fd);
 	} else {
 		int i;
 		for (i = 0; i < num_online_cpus(); i++)
@@ -421,30 +460,8 @@ static void flush_tlb_one_ipi(void *info)
 
 void flush_tlb_one(unsigned long vaddr)
 {
-	smp_call_function(flush_tlb_one_ipi, (void *) vaddr, 1, 1);
-	local_flush_tlb_one(vaddr);
+	smp_on_each_tlb(flush_tlb_one_ipi, (void *) vaddr);
 }
-
-static DEFINE_PER_CPU(struct cpu, cpu_devices);
-
-static int __init topology_init(void)
-{
-	int cpu;
-	int ret;
-
-	for_each_cpu(cpu) {
-		ret = register_cpu(&per_cpu(cpu_devices, cpu), cpu, NULL);
-		if (ret)
-			printk(KERN_WARNING "topology_init: register_cpu %d "
-			       "failed (%d)\n", cpu, ret);
-	}
-
-	return 0;
-}
-
-subsys_initcall(topology_init);
 
 EXPORT_SYMBOL(flush_tlb_page);
 EXPORT_SYMBOL(flush_tlb_one);
-EXPORT_SYMBOL(cpu_data);
-EXPORT_SYMBOL(synchronize_irq);

@@ -43,7 +43,7 @@ struct nfattr
 	u_int16_t nfa_len;
 	u_int16_t nfa_type;	/* we use 15 bits for the type, and the highest
 				 * bit to indicate whether the payload is nested */
-} __attribute__ ((packed));
+};
 
 /* FIXME: Apart from NFNL_NFA_NESTED shamelessly copy and pasted from
  * rtnetlink.h, it's time to put this in a generic file */
@@ -78,8 +78,8 @@ struct nfattr
 struct nfgenmsg {
 	u_int8_t  nfgen_family;		/* AF_xxx */
 	u_int8_t  version;		/* nfnetlink version */
-	u_int16_t res_id;		/* resource id */
-} __attribute__ ((packed));
+	__be16    res_id;		/* resource id */
+};
 
 #define NFNETLINK_V0	0
 
@@ -164,6 +164,7 @@ extern void nfattr_parse(struct nfattr *tb[], int maxattr,
  	__res;								\
 })
 
+extern int nfnetlink_has_listeners(unsigned int group);
 extern int nfnetlink_send(struct sk_buff *skb, u32 pid, unsigned group, 
 			  int echo);
 extern int nfnetlink_unicast(struct sk_buff *skb, u_int32_t pid, int flags);

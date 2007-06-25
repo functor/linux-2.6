@@ -52,7 +52,6 @@
 #include <linux/syscalls.h>
 #include <linux/cache.h>
 #include <linux/interrupt.h>
-#include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
 #include <linux/completion.h>
@@ -226,7 +225,7 @@ xpc_timeout_partition_disengage_request(unsigned long data)
  * Notify the heartbeat check thread that an IRQ has been received.
  */
 static irqreturn_t
-xpc_act_IRQ_handler(int irq, void *dev_id, struct pt_regs *regs)
+xpc_act_IRQ_handler(int irq, void *dev_id)
 {
 	atomic_inc(&xpc_act_IRQ_rcvd);
 	wake_up_interruptible(&xpc_act_IRQ_wq);
@@ -484,7 +483,7 @@ xpc_activating(void *__partid)
 	partid_t partid = (u64) __partid;
 	struct xpc_partition *part = &xpc_partitions[partid];
 	unsigned long irq_flags;
-	struct sched_param param = { sched_priority: MAX_RT_PRIO - 1 };
+	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
 	int ret;
 
 
@@ -611,12 +610,9 @@ xpc_activate_partition(struct xpc_partition *part)
  *	irq - Interrupt ReQuest number. NOT USED.
  *
  *	dev_id - partid of IPI's potential sender.
- *
- *	regs - processor's context before the processor entered
- *	       interrupt code. NOT USED.
  */
 irqreturn_t
-xpc_notify_IRQ_handler(int irq, void *dev_id, struct pt_regs *regs)
+xpc_notify_IRQ_handler(int irq, void *dev_id)
 {
 	partid_t partid = (partid_t) (u64) dev_id;
 	struct xpc_partition *part = &xpc_partitions[partid];
@@ -688,7 +684,7 @@ xpc_activate_kthreads(struct xpc_channel *ch, int needed)
 	dev_dbg(xpc_chan, "create %d new kthreads, partid=%d, channel=%d\n",
 		needed, ch->partid, ch->number);
 
-	xpc_create_kthreads(ch, needed);
+	xpc_create_kthreads(ch, needed, 0);
 }
 
 
@@ -782,25 +778,27 @@ xpc_daemonize_kthread(void *args)
 		xpc_kthread_waitmsgs(part, ch);
 	}
 
-	if (atomic_dec_return(&ch->kthreads_assigned) == 0) {
-		spin_lock_irqsave(&ch->lock, irq_flags);
-		if ((ch->flags & XPC_C_CONNECTEDCALLOUT_MADE) &&
-				!(ch->flags & XPC_C_DISCONNECTINGCALLOUT)) {
-			ch->flags |= XPC_C_DISCONNECTINGCALLOUT;
-			spin_unlock_irqrestore(&ch->lock, irq_flags);
+	/* let registerer know that connection is disconnecting */
 
-			xpc_disconnect_callout(ch, xpcDisconnecting);
-
-			spin_lock_irqsave(&ch->lock, irq_flags);
-			ch->flags |= XPC_C_DISCONNECTINGCALLOUT_MADE;
-		}
+	spin_lock_irqsave(&ch->lock, irq_flags);
+	if ((ch->flags & XPC_C_CONNECTEDCALLOUT_MADE) &&
+			!(ch->flags & XPC_C_DISCONNECTINGCALLOUT)) {
+		ch->flags |= XPC_C_DISCONNECTINGCALLOUT;
 		spin_unlock_irqrestore(&ch->lock, irq_flags);
+
+		xpc_disconnect_callout(ch, xpcDisconnecting);
+
+		spin_lock_irqsave(&ch->lock, irq_flags);
+		ch->flags |= XPC_C_DISCONNECTINGCALLOUT_MADE;
+	}
+	spin_unlock_irqrestore(&ch->lock, irq_flags);
+
+	if (atomic_dec_return(&ch->kthreads_assigned) == 0) {
 		if (atomic_dec_return(&part->nchannels_engaged) == 0) {
 			xpc_mark_partition_disengaged(part);
 			xpc_IPI_send_disengage(part);
 		}
 	}
-
 
 	xpc_msgqueue_deref(ch);
 
@@ -825,7 +823,8 @@ xpc_daemonize_kthread(void *args)
  * partition.
  */
 void
-xpc_create_kthreads(struct xpc_channel *ch, int needed)
+xpc_create_kthreads(struct xpc_channel *ch, int needed,
+			int ignore_disconnecting)
 {
 	unsigned long irq_flags;
 	pid_t pid;
@@ -840,16 +839,38 @@ xpc_create_kthreads(struct xpc_channel *ch, int needed)
 		 * kthread. That kthread is responsible for doing the
 		 * counterpart to the following before it exits.
 		 */
+		if (ignore_disconnecting) {
+			if (!atomic_inc_not_zero(&ch->kthreads_assigned)) {
+				/* kthreads assigned had gone to zero */
+				BUG_ON(!(ch->flags &
+					XPC_C_DISCONNECTINGCALLOUT_MADE));
+				break;
+			}
+
+		} else if (ch->flags & XPC_C_DISCONNECTING) {
+			break;
+
+		} else if (atomic_inc_return(&ch->kthreads_assigned) == 1) {
+			if (atomic_inc_return(&part->nchannels_engaged) == 1)
+				xpc_mark_partition_engaged(part);
+		}
 		(void) xpc_part_ref(part);
 		xpc_msgqueue_ref(ch);
-		if (atomic_inc_return(&ch->kthreads_assigned) == 1 &&
-		    atomic_inc_return(&part->nchannels_engaged) == 1) {
-			xpc_mark_partition_engaged(part);
-		}
 
 		pid = kernel_thread(xpc_daemonize_kthread, (void *) args, 0);
 		if (pid < 0) {
 			/* the fork failed */
+
+			/*
+			 * NOTE: if (ignore_disconnecting &&
+			 * !(ch->flags & XPC_C_DISCONNECTINGCALLOUT)) is true,
+			 * then we'll deadlock if all other kthreads assigned
+			 * to this channel are blocked in the channel's
+			 * registerer, because the only thing that will unblock
+			 * them is the xpcDisconnecting callout that this
+			 * failed kernel_thread would have made.
+			 */
+
 			if (atomic_dec_return(&ch->kthreads_assigned) == 0 &&
 			    atomic_dec_return(&part->nchannels_engaged) == 0) {
 				xpc_mark_partition_disengaged(part);
@@ -864,9 +885,6 @@ xpc_create_kthreads(struct xpc_channel *ch, int needed)
 				 * Flag this as an error only if we have an
 				 * insufficient #of kthreads for the channel
 				 * to function.
-				 *
-				 * No xpc_msgqueue_ref() is needed here since
-				 * the channel mgr is doing this.
 				 */
 				spin_lock_irqsave(&ch->lock, irq_flags);
 				XPC_DISCONNECT_CHANNEL(ch, xpcLackOfResources,

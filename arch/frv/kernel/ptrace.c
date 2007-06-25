@@ -18,7 +18,6 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
-#include <linux/config.h>
 #include <linux/security.h>
 #include <linux/signal.h>
 
@@ -701,24 +700,11 @@ asmlinkage void do_syscall_trace(int leaving)
 	if (!test_thread_flag(TIF_SYSCALL_TRACE))
 		return;
 
-	if (!(current->ptrace & PT_PTRACED))
-		return;
-
 	/* we need to indicate entry or exit to strace */
 	if (leaving)
 		__frame->__status |= REG__STATUS_SYSC_EXIT;
 	else
 		__frame->__status |= REG__STATUS_SYSC_ENTRY;
 
-	ptrace_notify(SIGTRAP);
-
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
-	}
+	tracehook_report_syscall(regs, leaving);
 }

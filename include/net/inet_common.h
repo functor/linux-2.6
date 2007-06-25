@@ -1,13 +1,8 @@
 #ifndef _INET_COMMON_H
 #define _INET_COMMON_H
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-extern struct proto_ops		inet_stream_ops;
-extern struct proto_ops		inet_dgram_ops;
-#else
 extern const struct proto_ops		inet_stream_ops;
 extern const struct proto_ops		inet_dgram_ops;
-#endif
 
 /*
  *	INET4 prototypes used by INET6

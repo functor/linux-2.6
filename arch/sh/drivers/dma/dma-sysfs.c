@@ -3,7 +3,7 @@
  *
  * sysfs interface for SH DMA API
  *
- * Copyright (C) 2004  Paul Mundt
+ * Copyright (C) 2004 - 2006  Paul Mundt
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -12,13 +12,15 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/sysdev.h>
+#include <linux/platform_device.h>
 #include <linux/module.h>
+#include <linux/err.h>
+#include <linux/string.h>
 #include <asm/dma.h>
 
 static struct sysdev_class dma_sysclass = {
 	set_kset_name("dma"),
 };
-
 EXPORT_SYMBOL(dma_sysclass);
 
 static ssize_t dma_show_devices(struct sys_device *dev, char *buf)
@@ -28,7 +30,10 @@ static ssize_t dma_show_devices(struct sys_device *dev, char *buf)
 
 	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
 		struct dma_info *info = get_dma_info(i);
-		struct dma_channel *channel = &info->channels[i];
+		struct dma_channel *channel = get_dma_channel(i);
+
+		if (unlikely(!info) || !channel)
+			continue;
 
 		len += sprintf(buf + len, "%2d: %14s    %s\n",
 			       channel->chan, info->name,
@@ -45,12 +50,11 @@ static int __init dma_sysclass_init(void)
 	int ret;
 
 	ret = sysdev_class_register(&dma_sysclass);
-	if (ret == 0)
-		sysfs_create_file(&dma_sysclass.kset.kobj, &attr_devices.attr);
+	if (unlikely(ret))
+		return ret;
 
-	return ret;
+	return sysfs_create_file(&dma_sysclass.kset.kobj, &attr_devices.attr);
 }
-
 postcore_initcall(dma_sysclass_init);
 
 static ssize_t dma_show_dev_id(struct sys_device *dev, char *buf)
@@ -76,7 +80,7 @@ static ssize_t dma_store_config(struct sys_device *dev,
 	unsigned long config;
 
 	config = simple_strtoul(buf, NULL, 0);
-	dma_configure_channel(channel->chan, config);
+	dma_configure_channel(channel->vchan, config);
 
 	return count;
 }
@@ -110,24 +114,47 @@ static SYSDEV_ATTR(field, S_IRUGO, dma_show_##field, NULL);
 dma_ro_attr(count, "0x%08x\n");
 dma_ro_attr(flags, "0x%08lx\n");
 
-int __init dma_create_sysfs_files(struct dma_channel *chan)
+int dma_create_sysfs_files(struct dma_channel *chan, struct dma_info *info)
 {
 	struct sys_device *dev = &chan->dev;
+	char name[16];
 	int ret;
 
-	dev->id  = chan->chan;
+	dev->id  = chan->vchan;
 	dev->cls = &dma_sysclass;
 
 	ret = sysdev_register(dev);
 	if (ret)
 		return ret;
 
-	sysdev_create_file(dev, &attr_dev_id);
-	sysdev_create_file(dev, &attr_count);
-	sysdev_create_file(dev, &attr_mode);
-	sysdev_create_file(dev, &attr_flags);
-	sysdev_create_file(dev, &attr_config);
+	ret |= sysdev_create_file(dev, &attr_dev_id);
+	ret |= sysdev_create_file(dev, &attr_count);
+	ret |= sysdev_create_file(dev, &attr_mode);
+	ret |= sysdev_create_file(dev, &attr_flags);
+	ret |= sysdev_create_file(dev, &attr_config);
 
-	return 0;
+	if (unlikely(ret)) {
+		dev_err(&info->pdev->dev, "Failed creating attrs\n");
+		return ret;
+	}
+
+	snprintf(name, sizeof(name), "dma%d", chan->chan);
+	return sysfs_create_link(&info->pdev->dev.kobj, &dev->kobj, name);
 }
 
+void dma_remove_sysfs_files(struct dma_channel *chan, struct dma_info *info)
+{
+	struct sys_device *dev = &chan->dev;
+	char name[16];
+
+	sysdev_remove_file(dev, &attr_dev_id);
+	sysdev_remove_file(dev, &attr_count);
+	sysdev_remove_file(dev, &attr_mode);
+	sysdev_remove_file(dev, &attr_flags);
+	sysdev_remove_file(dev, &attr_config);
+
+	snprintf(name, sizeof(name), "dma%d", chan->chan);
+	sysfs_remove_link(&info->pdev->dev.kobj, name);
+
+	sysdev_unregister(dev);
+}

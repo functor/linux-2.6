@@ -236,9 +236,9 @@ static int pcm_open(struct snd_pcm_substream *substream,
 	chip = snd_pcm_substream_chip(substream);
 	runtime = substream->runtime;
 
-	if (!(pipe = kmalloc(sizeof(struct audiopipe), GFP_KERNEL)))
+	pipe = kzalloc(sizeof(struct audiopipe), GFP_KERNEL);
+	if (!pipe)
 		return -ENOMEM;
-	memset(pipe, 0, sizeof(struct audiopipe));
 	pipe->index = -1;		/* Not configured yet */
 
 	/* Set up hw capabilities and contraints */
@@ -1818,8 +1818,7 @@ static struct snd_kcontrol_new snd_echo_channels_info __devinitdata = {
 	IRQ Handler
 ******************************************************************************/
 
-static irqreturn_t snd_echo_interrupt(int irq, void *dev_id,
-				      struct pt_regs *regs)
+static irqreturn_t snd_echo_interrupt(int irq, void *dev_id)
 {
 	struct echoaudio *chip = dev_id;
 	struct snd_pcm_substream *substream;
@@ -1873,7 +1872,7 @@ static int snd_echo_free(struct echoaudio *chip)
 	DE_INIT(("Stopped.\n"));
 
 	if (chip->irq >= 0)
-		free_irq(chip->irq, (void *)chip);
+		free_irq(chip->irq, chip);
 
 	if (chip->dsp_registers)
 		iounmap(chip->dsp_registers);
@@ -1951,8 +1950,8 @@ static __devinit int snd_echo_create(struct snd_card *card,
 	chip->dsp_registers = (volatile u32 __iomem *)
 		ioremap_nocache(chip->dsp_registers_phys, sz);
 
-	if (request_irq(pci->irq, snd_echo_interrupt, SA_INTERRUPT | SA_SHIRQ,
-						ECHOCARD_NAME, (void *)chip)) {
+	if (request_irq(pci->irq, snd_echo_interrupt, IRQF_SHARED,
+			ECHOCARD_NAME, chip)) {
 		snd_echo_free(chip);
 		snd_printk(KERN_ERR "cannot grab irq\n");
 		return -EBUSY;

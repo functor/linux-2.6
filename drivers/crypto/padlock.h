@@ -13,24 +13,11 @@
 #ifndef _CRYPTO_PADLOCK_H
 #define _CRYPTO_PADLOCK_H
 
-/* Control word. */
-union cword {
-	uint32_t cword[4];
-	struct {
-		int rounds:4;
-		int algo:3;
-		int keygen:1;
-		int interm:1;
-		int encdec:1;
-		int ksize:2;
-	} b;
-};
+#define PADLOCK_ALIGNMENT 16
 
 #define PFX	"padlock: "
 
-#ifdef CONFIG_CRYPTO_DEV_PADLOCK_AES
-int padlock_init_aes(void);
-void padlock_fini_aes(void);
-#endif
+#define PADLOCK_CRA_PRIORITY	300
+#define PADLOCK_COMPOSITE_PRIORITY 400
 
 #endif	/* _CRYPTO_PADLOCK_H */

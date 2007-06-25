@@ -10,7 +10,6 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <setjmp.h>
 #include <sys/time.h>
 #include <sys/ptrace.h>
 #include <linux/ptrace.h>
@@ -108,6 +107,16 @@ int wait_for_stop(int pid, int sig, int cont_type, void *relay)
 		}
 		return(status);
 	}
+}
+
+void forward_ipi(int fd, int pid)
+{
+	int err;
+
+	err = os_set_owner(fd, pid);
+	if(err < 0)
+		printk("forward_ipi: set_owner failed, fd = %d, me = %d, "
+		       "target = %d, err = %d\n", fd, os_getpid(), pid, -err);
 }
 
 /*

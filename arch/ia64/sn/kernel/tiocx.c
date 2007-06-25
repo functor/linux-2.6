@@ -369,9 +369,15 @@ static void tio_corelet_reset(nasid_t nasid, int corelet)
 
 static int is_fpga_tio(int nasid, int *bt)
 {
-	int ioboard_type;
+	u16 ioboard_type;
+	s64 rc;
 
-	ioboard_type = ia64_sn_sysctl_ioboard_get(nasid);
+	rc = ia64_sn_sysctl_ioboard_get(nasid, &ioboard_type);
+	if (rc) {
+		printk(KERN_WARNING "ia64_sn_sysctl_ioboard_get failed: %ld\n",
+		       rc);
+		return 0;
+	}
 
 	switch (ioboard_type) {
 	case L1_BRICKTYPE_SA:
@@ -546,7 +552,7 @@ static void __exit tiocx_exit(void)
 	bus_unregister(&tiocx_bus_type);
 }
 
-subsys_initcall(tiocx_init);
+fs_initcall(tiocx_init);
 module_exit(tiocx_exit);
 
 /************************************************************************

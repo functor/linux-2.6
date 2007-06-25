@@ -9,7 +9,6 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
 */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -460,7 +459,7 @@ add_dataflash(struct spi_device *spi, char *name,
 	struct mtd_info			*device;
 	struct flash_platform_data	*pdata = spi->dev.platform_data;
 
-	priv = (struct dataflash *) kzalloc(sizeof *priv, GFP_KERNEL);
+	priv = kzalloc(sizeof *priv, GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
@@ -478,9 +477,10 @@ add_dataflash(struct spi_device *spi, char *name,
 	device->name = (pdata && pdata->name) ? pdata->name : priv->name;
 	device->size = nr_pages * pagesize;
 	device->erasesize = pagesize;
+	device->writesize = pagesize;
 	device->owner = THIS_MODULE;
 	device->type = MTD_DATAFLASH;
-	device->flags = MTD_CAP_NORFLASH;
+	device->flags = MTD_WRITEABLE;
 	device->erase = dataflash_erase;
 	device->read = dataflash_read;
 	device->write = dataflash_write;

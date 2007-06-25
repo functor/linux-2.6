@@ -29,17 +29,6 @@ struct pt_regs;
 #endif /* __ASSEMBLY__ */
 
 
-#ifdef CONFIG_PCI
-#define _IO_BASE	isa_io_base
-#define _ISA_MEM_BASE	isa_mem_base
-#define PCI_DRAM_OFFSET	pci_dram_offset
-#else
-#define _IO_BASE	0
-#define _ISA_MEM_BASE	0
-#define PCI_DRAM_OFFSET	0
-#endif
-
-
 /* ======================================================================== */
 /* PPC Sys devices definition                                               */
 /* ======================================================================== */
@@ -60,6 +49,7 @@ enum ppc_sys_devices {
 	MPC52xx_ATA,
 	MPC52xx_I2C1,
 	MPC52xx_I2C2,
+	NUM_PPC_SYS_DEVS,
 };
 
 
@@ -354,6 +344,7 @@ struct mpc52xx_xlb {
 	u32	snoop_window;		/* XLB + 0x70 */
 };
 
+#define MPC52xx_XLB_CFG_PLDIS		(1 << 31)
 #define MPC52xx_XLB_CFG_SNOOP		(1 << 15)
 
 /* Clock Distribution control */
@@ -413,7 +404,7 @@ struct mpc52xx_cdm {
 #ifndef __ASSEMBLY__
 
 extern void mpc52xx_init_irq(void);
-extern int mpc52xx_get_irq(struct pt_regs *regs);
+extern int mpc52xx_get_irq(void);
 
 extern unsigned long mpc52xx_find_end_of_memory(void);
 extern void mpc52xx_set_bat(void);
@@ -425,6 +416,9 @@ extern void mpc52xx_progress(char *s, unsigned short hex);
 extern void mpc52xx_calibrate_decr(void);
 
 extern void mpc52xx_find_bridges(void);
+
+extern void mpc52xx_setup_cpu(void);
+
 
 
 	/* Matching of PSC function */

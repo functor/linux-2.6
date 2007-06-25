@@ -539,7 +539,73 @@ static int setPauseParams(struct net_device *dev , struct ethtool_pauseparam *ep
         return ret ? -EIO : 0;
 }
 
-struct ethtool_ops SkGeEthtoolOps = {
+/* Only Yukon supports checksum offload. */
+static int setScatterGather(struct net_device *dev, u32 data)
+{
+	DEV_NET *pNet = netdev_priv(dev);
+	SK_AC *pAC = pNet->pAC;
+
+	if (pAC->GIni.GIChipId == CHIP_ID_GENESIS)
+		return -EOPNOTSUPP;
+	return ethtool_op_set_sg(dev, data);
+}
+
+static int setTxCsum(struct net_device *dev, u32 data)
+{
+	DEV_NET *pNet = netdev_priv(dev);
+	SK_AC *pAC = pNet->pAC;
+
+	if (pAC->GIni.GIChipId == CHIP_ID_GENESIS)
+		return -EOPNOTSUPP;
+
+	return ethtool_op_set_tx_csum(dev, data);
+}
+
+static u32 getRxCsum(struct net_device *dev)
+{
+	DEV_NET *pNet = netdev_priv(dev);
+	SK_AC *pAC = pNet->pAC;
+
+	return pAC->RxPort[pNet->PortNr].RxCsum;
+}
+
+static int setRxCsum(struct net_device *dev, u32 data)
+{
+	DEV_NET *pNet = netdev_priv(dev);
+	SK_AC *pAC = pNet->pAC;
+
+	if (pAC->GIni.GIChipId == CHIP_ID_GENESIS)
+		return -EOPNOTSUPP;
+
+	pAC->RxPort[pNet->PortNr].RxCsum = data != 0;
+	return 0;
+}
+
+static int getRegsLen(struct net_device *dev)
+{
+	return 0x4000;
+}
+
+/*
+ * Returns copy of whole control register region
+ * Note: skip RAM address register because accessing it will
+ * 	 cause bus hangs!
+ */
+static void getRegs(struct net_device *dev, struct ethtool_regs *regs,
+			  void *p)
+{
+	DEV_NET *pNet = netdev_priv(dev);
+	const void __iomem *io = pNet->pAC->IoBase;
+
+	regs->version = 1;
+	memset(p, 0, regs->len);
+	memcpy_fromio(p, io, B3_RAM_ADDR);
+
+	memcpy_fromio(p + B3_RI_WTO_R1, io + B3_RI_WTO_R1,
+		      regs->len - B3_RI_WTO_R1);
+}
+
+const struct ethtool_ops SkGeEthtoolOps = {
 	.get_settings		= getSettings,
 	.set_settings		= setSettings,
 	.get_drvinfo		= getDriverInfo,
@@ -549,4 +615,14 @@ struct ethtool_ops SkGeEthtoolOps = {
 	.phys_id		= locateDevice,
 	.get_pauseparam		= getPauseParams,
 	.set_pauseparam		= setPauseParams,
+	.get_link		= ethtool_op_get_link,
+	.get_perm_addr		= ethtool_op_get_perm_addr,
+	.get_sg			= ethtool_op_get_sg,
+	.set_sg			= setScatterGather,
+	.get_tx_csum		= ethtool_op_get_tx_csum,
+	.set_tx_csum		= setTxCsum,
+	.get_rx_csum		= getRxCsum,
+	.set_rx_csum		= setRxCsum,
+	.get_regs		= getRegs,
+	.get_regs_len		= getRegsLen,
 };

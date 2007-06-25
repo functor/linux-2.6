@@ -4,7 +4,7 @@
  * (C) 2001 by Jay Schulist <jschlst@samba.org>
  * (C) 2002-2005 by Harald Welte <laforge@gnumonks.org>
  * (C) 2003 by Patrick Mchardy <kaber@trash.net>
- * (C) 2005 by Pablo Neira Ayuso <pablo@eurodev.net>
+ * (C) 2005-2006 by Pablo Neira Ayuso <pablo@eurodev.net>
  *
  * I've reworked this stuff to use attributes instead of conntrack 
  * structures. 5.44 am. I need more tea. --pablo 05/07/11.
@@ -44,29 +44,20 @@ MODULE_LICENSE("GPL");
 
 static char __initdata version[] = "0.90";
 
-#if 0
-#define DEBUGP printk
-#else
-#define DEBUGP(format, args...)
-#endif
-
-
 static inline int
 ctnetlink_dump_tuples_proto(struct sk_buff *skb, 
-			    const struct ip_conntrack_tuple *tuple)
+			    const struct ip_conntrack_tuple *tuple,
+			    struct ip_conntrack_protocol *proto)
 {
-	struct ip_conntrack_protocol *proto;
 	int ret = 0;
+	struct nfattr *nest_parms = NFA_NEST(skb, CTA_TUPLE_PROTO);
 
 	NFA_PUT(skb, CTA_PROTO_NUM, sizeof(u_int8_t), &tuple->dst.protonum);
 
-	/* If no protocol helper is found, this function will return the
-	 * generic protocol helper, so proto won't *ever* be NULL */
-	proto = ip_conntrack_proto_find_get(tuple->dst.protonum);
 	if (likely(proto->tuple_to_nfattr))
 		ret = proto->tuple_to_nfattr(skb, tuple);
 	
-	ip_conntrack_proto_put(proto);
+	NFA_NEST_END(skb, nest_parms);
 
 	return ret;
 
@@ -75,31 +66,44 @@ nfattr_failure:
 }
 
 static inline int
-ctnetlink_dump_tuples(struct sk_buff *skb, 
-		      const struct ip_conntrack_tuple *tuple)
+ctnetlink_dump_tuples_ip(struct sk_buff *skb,
+			 const struct ip_conntrack_tuple *tuple)
 {
-	struct nfattr *nest_parms;
-	int ret;
+	struct nfattr *nest_parms = NFA_NEST(skb, CTA_TUPLE_IP);
 	
-	nest_parms = NFA_NEST(skb, CTA_TUPLE_IP);
-	NFA_PUT(skb, CTA_IP_V4_SRC, sizeof(u_int32_t), &tuple->src.ip);
-	NFA_PUT(skb, CTA_IP_V4_DST, sizeof(u_int32_t), &tuple->dst.ip);
+	NFA_PUT(skb, CTA_IP_V4_SRC, sizeof(__be32), &tuple->src.ip);
+	NFA_PUT(skb, CTA_IP_V4_DST, sizeof(__be32), &tuple->dst.ip);
+
 	NFA_NEST_END(skb, nest_parms);
 
-	nest_parms = NFA_NEST(skb, CTA_TUPLE_PROTO);
-	ret = ctnetlink_dump_tuples_proto(skb, tuple);
-	NFA_NEST_END(skb, nest_parms);
-
-	return ret;
+	return 0;
 
 nfattr_failure:
 	return -1;
+}
+
+static inline int
+ctnetlink_dump_tuples(struct sk_buff *skb,
+		      const struct ip_conntrack_tuple *tuple)
+{
+	int ret;
+	struct ip_conntrack_protocol *proto;
+
+	ret = ctnetlink_dump_tuples_ip(skb, tuple);
+	if (unlikely(ret < 0))
+		return ret;
+
+	proto = ip_conntrack_proto_find_get(tuple->dst.protonum);
+	ret = ctnetlink_dump_tuples_proto(skb, tuple, proto);
+	ip_conntrack_proto_put(proto);
+
+	return ret;
 }
 
 static inline int
 ctnetlink_dump_status(struct sk_buff *skb, const struct ip_conntrack *ct)
 {
-	u_int32_t status = htonl((u_int32_t) ct->status);
+	__be32 status = htonl((u_int32_t) ct->status);
 	NFA_PUT(skb, CTA_STATUS, sizeof(status), &status);
 	return 0;
 
@@ -111,7 +115,7 @@ static inline int
 ctnetlink_dump_timeout(struct sk_buff *skb, const struct ip_conntrack *ct)
 {
 	long timeout_l = ct->timeout.expires - jiffies;
-	u_int32_t timeout;
+	__be32 timeout;
 
 	if (timeout_l < 0)
 		timeout = 0;
@@ -149,6 +153,7 @@ ctnetlink_dump_protoinfo(struct sk_buff *skb, const struct ip_conntrack *ct)
 	return ret;
 
 nfattr_failure:
+	ip_conntrack_proto_put(proto);
 	return -1;
 }
 
@@ -181,13 +186,13 @@ ctnetlink_dump_counters(struct sk_buff *skb, const struct ip_conntrack *ct,
 {
 	enum ctattr_type type = dir ? CTA_COUNTERS_REPLY: CTA_COUNTERS_ORIG;
 	struct nfattr *nest_count = NFA_NEST(skb, type);
-	u_int32_t tmp;
+	__be32 tmp;
 
 	tmp = htonl(ct->counters[dir].packets);
-	NFA_PUT(skb, CTA_COUNTERS32_PACKETS, sizeof(u_int32_t), &tmp);
+	NFA_PUT(skb, CTA_COUNTERS32_PACKETS, sizeof(__be32), &tmp);
 
 	tmp = htonl(ct->counters[dir].bytes);
-	NFA_PUT(skb, CTA_COUNTERS32_BYTES, sizeof(u_int32_t), &tmp);
+	NFA_PUT(skb, CTA_COUNTERS32_BYTES, sizeof(__be32), &tmp);
 
 	NFA_NEST_END(skb, nest_count);
 
@@ -204,9 +209,9 @@ nfattr_failure:
 static inline int
 ctnetlink_dump_mark(struct sk_buff *skb, const struct ip_conntrack *ct)
 {
-	u_int32_t mark = htonl(ct->mark);
+	__be32 mark = htonl(ct->mark);
 
-	NFA_PUT(skb, CTA_MARK, sizeof(u_int32_t), &mark);
+	NFA_PUT(skb, CTA_MARK, sizeof(__be32), &mark);
 	return 0;
 
 nfattr_failure:
@@ -219,8 +224,8 @@ nfattr_failure:
 static inline int
 ctnetlink_dump_id(struct sk_buff *skb, const struct ip_conntrack *ct)
 {
-	u_int32_t id = htonl(ct->id);
-	NFA_PUT(skb, CTA_ID, sizeof(u_int32_t), &id);
+	__be32 id = htonl(ct->id);
+	NFA_PUT(skb, CTA_ID, sizeof(__be32), &id);
 	return 0;
 
 nfattr_failure:
@@ -230,9 +235,9 @@ nfattr_failure:
 static inline int
 ctnetlink_dump_use(struct sk_buff *skb, const struct ip_conntrack *ct)
 {
-	u_int32_t use = htonl(atomic_read(&ct->ct_general.use));
+	__be32 use = htonl(atomic_read(&ct->ct_general.use));
 	
-	NFA_PUT(skb, CTA_USE, sizeof(u_int32_t), &use);
+	NFA_PUT(skb, CTA_USE, sizeof(__be32), &use);
 	return 0;
 
 nfattr_failure:
@@ -315,21 +320,16 @@ static int ctnetlink_conntrack_event(struct notifier_block *this,
 	} else if (events & (IPCT_NEW | IPCT_RELATED)) {
 		type = IPCTNL_MSG_CT_NEW;
 		flags = NLM_F_CREATE|NLM_F_EXCL;
-		/* dump everything */
-		events = ~0UL;
 		group = NFNLGRP_CONNTRACK_NEW;
-	} else if (events & (IPCT_STATUS |
-		      IPCT_PROTOINFO |
-		      IPCT_HELPER |
-		      IPCT_HELPINFO |
-		      IPCT_NATINFO)) {
+	} else if (events & (IPCT_STATUS | IPCT_PROTOINFO)) {
 		type = IPCTNL_MSG_CT_NEW;
 		group = NFNLGRP_CONNTRACK_UPDATE;
 	} else 
 		return NOTIFY_DONE;
-	
-  /* FIXME: Check if there are any listeners before, don't hurt performance */
-	
+
+	if (!nfnetlink_has_listeners(group))
+		return NOTIFY_DONE;
+
 	skb = alloc_skb(NLMSG_GOODSIZE, GFP_ATOMIC);
 	if (!skb)
 		return NOTIFY_DONE;
@@ -354,24 +354,37 @@ static int ctnetlink_conntrack_event(struct notifier_block *this,
 	if (ctnetlink_dump_tuples(skb, tuple(ct, IP_CT_DIR_REPLY)) < 0)
 		goto nfattr_failure;
 	NFA_NEST_END(skb, nest_parms);
-	
-	/* NAT stuff is now a status flag */
-	if ((events & IPCT_STATUS || events & IPCT_NATINFO)
-	    && ctnetlink_dump_status(skb, ct) < 0)
-		goto nfattr_failure;
-	if (events & IPCT_REFRESH
-	    && ctnetlink_dump_timeout(skb, ct) < 0)
-		goto nfattr_failure;
-	if (events & IPCT_PROTOINFO
-	    && ctnetlink_dump_protoinfo(skb, ct) < 0)
-		goto nfattr_failure;
-	if (events & IPCT_HELPINFO
-	    && ctnetlink_dump_helpinfo(skb, ct) < 0)
-		goto nfattr_failure;
 
-	if (ctnetlink_dump_counters(skb, ct, IP_CT_DIR_ORIGINAL) < 0 ||
-	    ctnetlink_dump_counters(skb, ct, IP_CT_DIR_REPLY) < 0)
-		goto nfattr_failure;
+	if (events & IPCT_DESTROY) {
+		if (ctnetlink_dump_counters(skb, ct, IP_CT_DIR_ORIGINAL) < 0 ||
+		    ctnetlink_dump_counters(skb, ct, IP_CT_DIR_REPLY) < 0)
+			goto nfattr_failure;
+	} else {
+		if (ctnetlink_dump_status(skb, ct) < 0)
+			goto nfattr_failure;
+
+		if (ctnetlink_dump_timeout(skb, ct) < 0)
+			goto nfattr_failure;
+
+		if (events & IPCT_PROTOINFO
+		    && ctnetlink_dump_protoinfo(skb, ct) < 0)
+		    	goto nfattr_failure;
+
+		if ((events & IPCT_HELPER || ct->helper)
+		    && ctnetlink_dump_helpinfo(skb, ct) < 0)
+		    	goto nfattr_failure;
+
+#ifdef CONFIG_IP_NF_CONNTRACK_MARK
+		if ((events & IPCT_MARK || ct->mark)
+		    && ctnetlink_dump_mark(skb, ct) < 0)
+		    	goto nfattr_failure;
+#endif
+
+		if (events & IPCT_COUNTER_FILLING &&
+		    (ctnetlink_dump_counters(skb, ct, IP_CT_DIR_ORIGINAL) < 0 ||
+		     ctnetlink_dump_counters(skb, ct, IP_CT_DIR_REPLY) < 0))
+			goto nfattr_failure;
+	}
 
 	nlh->nlmsg_len = skb->tail - b;
 	nfnetlink_send(skb, 0, group, 0);
@@ -386,97 +399,68 @@ nfattr_failure:
 
 static int ctnetlink_done(struct netlink_callback *cb)
 {
-	DEBUGP("entered %s\n", __FUNCTION__);
+	if (cb->args[1])
+		ip_conntrack_put((struct ip_conntrack *)cb->args[1]);
 	return 0;
 }
 
 static int
 ctnetlink_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
 {
-	struct ip_conntrack *ct = NULL;
+	struct ip_conntrack *ct, *last;
 	struct ip_conntrack_tuple_hash *h;
 	struct list_head *i;
-	u_int32_t *id = (u_int32_t *) &cb->args[1];
-
-	DEBUGP("entered %s, last bucket=%lu id=%u\n", __FUNCTION__, 
-			cb->args[0], *id);
 
 	read_lock_bh(&ip_conntrack_lock);
-	for (; cb->args[0] < ip_conntrack_htable_size; cb->args[0]++, *id = 0) {
+	last = (struct ip_conntrack *)cb->args[1];
+	for (; cb->args[0] < ip_conntrack_htable_size; cb->args[0]++) {
+restart:
 		list_for_each_prev(i, &ip_conntrack_hash[cb->args[0]]) {
 			h = (struct ip_conntrack_tuple_hash *) i;
 			if (DIRECTION(h) != IP_CT_DIR_ORIGINAL)
 				continue;
 			ct = tuplehash_to_ctrack(h);
-			if (ct->id <= *id)
-				continue;
+			if (cb->args[1]) {
+				if (ct != last)
+					continue;
+				cb->args[1] = 0;
+			}
 			if (ctnetlink_fill_info(skb, NETLINK_CB(cb->skb).pid,
 		                        	cb->nlh->nlmsg_seq,
 						IPCTNL_MSG_CT_NEW,
-						1, ct) < 0)
+						1, ct) < 0) {
+				nf_conntrack_get(&ct->ct_general);
+				cb->args[1] = (unsigned long)ct;
 				goto out;
-			*id = ct->id;
-		}
-	}
-out:	
-	read_unlock_bh(&ip_conntrack_lock);
-
-	DEBUGP("leaving, last bucket=%lu id=%u\n", cb->args[0], *id);
-
-	return skb->len;
-}
-
-#ifdef CONFIG_IP_NF_CT_ACCT
-static int
-ctnetlink_dump_table_w(struct sk_buff *skb, struct netlink_callback *cb)
-{
-	struct ip_conntrack *ct = NULL;
-	struct ip_conntrack_tuple_hash *h;
-	struct list_head *i;
-	u_int32_t *id = (u_int32_t *) &cb->args[1];
-
-	DEBUGP("entered %s, last bucket=%u id=%u\n", __FUNCTION__, 
-			cb->args[0], *id);
-
-	write_lock_bh(&ip_conntrack_lock);
-	for (; cb->args[0] < ip_conntrack_htable_size; cb->args[0]++, *id = 0) {
-		list_for_each_prev(i, &ip_conntrack_hash[cb->args[0]]) {
-			h = (struct ip_conntrack_tuple_hash *) i;
-			if (DIRECTION(h) != IP_CT_DIR_ORIGINAL)
-				continue;
-			ct = tuplehash_to_ctrack(h);
-			if (ct->id <= *id)
-				continue;
-			if (ctnetlink_fill_info(skb, NETLINK_CB(cb->skb).pid,
-		                        	cb->nlh->nlmsg_seq,
-						IPCTNL_MSG_CT_NEW,
-						1, ct) < 0)
-				goto out;
-			*id = ct->id;
-
-			memset(&ct->counters, 0, sizeof(ct->counters));
-		}
-	}
-out:	
-	write_unlock_bh(&ip_conntrack_lock);
-
-	DEBUGP("leaving, last bucket=%lu id=%u\n", cb->args[0], *id);
-
-	return skb->len;
-}
+			}
+#ifdef CONFIG_NF_CT_ACCT
+			if (NFNL_MSG_TYPE(cb->nlh->nlmsg_type) ==
+						IPCTNL_MSG_CT_GET_CTRZERO)
+				memset(&ct->counters, 0, sizeof(ct->counters));
 #endif
+		}
+		if (cb->args[1]) {
+			cb->args[1] = 0;
+			goto restart;
+		}
+	}
+out:
+	read_unlock_bh(&ip_conntrack_lock);
+	if (last)
+		ip_conntrack_put(last);
+
+	return skb->len;
+}
 
 static const size_t cta_min_ip[CTA_IP_MAX] = {
-	[CTA_IP_V4_SRC-1]	= sizeof(u_int32_t),
-	[CTA_IP_V4_DST-1]	= sizeof(u_int32_t),
+	[CTA_IP_V4_SRC-1]	= sizeof(__be32),
+	[CTA_IP_V4_DST-1]	= sizeof(__be32),
 };
 
 static inline int
 ctnetlink_parse_tuple_ip(struct nfattr *attr, struct ip_conntrack_tuple *tuple)
 {
 	struct nfattr *tb[CTA_IP_MAX];
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	nfattr_parse_nested(tb, CTA_IP_MAX, attr);
 
@@ -485,13 +469,11 @@ ctnetlink_parse_tuple_ip(struct nfattr *attr, struct ip_conntrack_tuple *tuple)
 
 	if (!tb[CTA_IP_V4_SRC-1])
 		return -EINVAL;
-	tuple->src.ip = *(u_int32_t *)NFA_DATA(tb[CTA_IP_V4_SRC-1]);
+	tuple->src.ip = *(__be32 *)NFA_DATA(tb[CTA_IP_V4_SRC-1]);
 
 	if (!tb[CTA_IP_V4_DST-1])
 		return -EINVAL;
-	tuple->dst.ip = *(u_int32_t *)NFA_DATA(tb[CTA_IP_V4_DST-1]);
-
-	DEBUGP("leaving\n");
+	tuple->dst.ip = *(__be32 *)NFA_DATA(tb[CTA_IP_V4_DST-1]);
 
 	return 0;
 }
@@ -512,8 +494,6 @@ ctnetlink_parse_tuple_proto(struct nfattr *attr,
 	struct nfattr *tb[CTA_PROTO_MAX];
 	struct ip_conntrack_protocol *proto;
 	int ret = 0;
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	nfattr_parse_nested(tb, CTA_PROTO_MAX, attr);
 
@@ -541,8 +521,6 @@ ctnetlink_parse_tuple(struct nfattr *cda[], struct ip_conntrack_tuple *tuple,
 	struct nfattr *tb[CTA_TUPLE_MAX];
 	int err;
 
-	DEBUGP("entered %s\n", __FUNCTION__);
-
 	memset(tuple, 0, sizeof(*tuple));
 
 	nfattr_parse_nested(tb, CTA_TUPLE_MAX, cda[type-1]);
@@ -567,10 +545,6 @@ ctnetlink_parse_tuple(struct nfattr *cda[], struct ip_conntrack_tuple *tuple,
 	else
 		tuple->dst.dir = IP_CT_DIR_ORIGINAL;
 
-	DUMP_TUPLE(tuple);
-
-	DEBUGP("leaving\n");
-
 	return 0;
 }
 
@@ -586,8 +560,6 @@ static int ctnetlink_parse_nat_proto(struct nfattr *attr,
 {
 	struct nfattr *tb[CTA_PROTONAT_MAX];
 	struct ip_nat_protocol *npt;
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	nfattr_parse_nested(tb, CTA_PROTONAT_MAX, attr);
 
@@ -607,38 +579,35 @@ static int ctnetlink_parse_nat_proto(struct nfattr *attr,
 
 	ip_nat_proto_put(npt);
 
-	DEBUGP("leaving\n");
 	return 0;
 }
 
 static const size_t cta_min_nat[CTA_NAT_MAX] = {
-	[CTA_NAT_MINIP-1]       = sizeof(u_int32_t),
-	[CTA_NAT_MAXIP-1]       = sizeof(u_int32_t),
+	[CTA_NAT_MINIP-1]       = sizeof(__be32),
+	[CTA_NAT_MAXIP-1]       = sizeof(__be32),
 };
 
 static inline int
-ctnetlink_parse_nat(struct nfattr *cda[],
+ctnetlink_parse_nat(struct nfattr *nat,
 		    const struct ip_conntrack *ct, struct ip_nat_range *range)
 {
 	struct nfattr *tb[CTA_NAT_MAX];
 	int err;
 
-	DEBUGP("entered %s\n", __FUNCTION__);
-
 	memset(range, 0, sizeof(*range));
 	
-	nfattr_parse_nested(tb, CTA_NAT_MAX, cda[CTA_NAT-1]);
+	nfattr_parse_nested(tb, CTA_NAT_MAX, nat);
 
 	if (nfattr_bad_size(tb, CTA_NAT_MAX, cta_min_nat))
 		return -EINVAL;
 
 	if (tb[CTA_NAT_MINIP-1])
-		range->min_ip = *(u_int32_t *)NFA_DATA(tb[CTA_NAT_MINIP-1]);
+		range->min_ip = *(__be32 *)NFA_DATA(tb[CTA_NAT_MINIP-1]);
 
 	if (!tb[CTA_NAT_MAXIP-1])
 		range->max_ip = range->min_ip;
 	else
-		range->max_ip = *(u_int32_t *)NFA_DATA(tb[CTA_NAT_MAXIP-1]);
+		range->max_ip = *(__be32 *)NFA_DATA(tb[CTA_NAT_MAXIP-1]);
 
 	if (range->min_ip)
 		range->flags |= IP_NAT_RANGE_MAP_IPS;
@@ -650,7 +619,6 @@ ctnetlink_parse_nat(struct nfattr *cda[],
 	if (err < 0)
 		return err;
 
-	DEBUGP("leaving\n");
 	return 0;
 }
 #endif
@@ -659,8 +627,6 @@ static inline int
 ctnetlink_parse_help(struct nfattr *attr, char **helper_name)
 {
 	struct nfattr *tb[CTA_HELP_MAX];
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	nfattr_parse_nested(tb, CTA_HELP_MAX, attr);
 
@@ -673,11 +639,11 @@ ctnetlink_parse_help(struct nfattr *attr, char **helper_name)
 }
 
 static const size_t cta_min[CTA_MAX] = {
-	[CTA_STATUS-1] 		= sizeof(u_int32_t),
-	[CTA_TIMEOUT-1] 	= sizeof(u_int32_t),
-	[CTA_MARK-1]		= sizeof(u_int32_t),
-	[CTA_USE-1]		= sizeof(u_int32_t),
-	[CTA_ID-1]		= sizeof(u_int32_t)
+	[CTA_STATUS-1] 		= sizeof(__be32),
+	[CTA_TIMEOUT-1] 	= sizeof(__be32),
+	[CTA_MARK-1]		= sizeof(__be32),
+	[CTA_USE-1]		= sizeof(__be32),
+	[CTA_ID-1]		= sizeof(__be32)
 };
 
 static int
@@ -688,8 +654,6 @@ ctnetlink_del_conntrack(struct sock *ctnl, struct sk_buff *skb,
 	struct ip_conntrack_tuple tuple;
 	struct ip_conntrack *ct;
 	int err = 0;
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	if (nfattr_bad_size(cda, CTA_MAX, cta_min))
 		return -EINVAL;
@@ -708,15 +672,13 @@ ctnetlink_del_conntrack(struct sock *ctnl, struct sk_buff *skb,
 		return err;
 
 	h = ip_conntrack_find_get(&tuple, NULL);
-	if (!h) {
-		DEBUGP("tuple not found in conntrack hash\n");
+	if (!h)
 		return -ENOENT;
-	}
 
 	ct = tuplehash_to_ctrack(h);
 	
 	if (cda[CTA_ID-1]) {
-		u_int32_t id = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_ID-1]));
+		u_int32_t id = ntohl(*(__be32 *)NFA_DATA(cda[CTA_ID-1]));
 		if (ct->id != id) {
 			ip_conntrack_put(ct);
 			return -ENOENT;
@@ -726,7 +688,6 @@ ctnetlink_del_conntrack(struct sock *ctnl, struct sk_buff *skb,
 		ct->timeout.function((unsigned long)ct);
 
 	ip_conntrack_put(ct);
-	DEBUGP("leaving\n");
 
 	return 0;
 }
@@ -741,8 +702,6 @@ ctnetlink_get_conntrack(struct sock *ctnl, struct sk_buff *skb,
 	struct sk_buff *skb2 = NULL;
 	int err = 0;
 
-	DEBUGP("entered %s\n", __FUNCTION__);
-
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {
 		struct nfgenmsg *msg = NLMSG_DATA(nlh);
 		u32 rlen;
@@ -750,22 +709,14 @@ ctnetlink_get_conntrack(struct sock *ctnl, struct sk_buff *skb,
 		if (msg->nfgen_family != AF_INET)
 			return -EAFNOSUPPORT;
 
-		if (NFNL_MSG_TYPE(nlh->nlmsg_type) ==
-					IPCTNL_MSG_CT_GET_CTRZERO) {
-#ifdef CONFIG_IP_NF_CT_ACCT
-			if ((*errp = netlink_dump_start(ctnl, skb, nlh,
-						ctnetlink_dump_table_w,
-						ctnetlink_done)) != 0)
-				return -EINVAL;
-#else
+#ifndef CONFIG_IP_NF_CT_ACCT
+		if (NFNL_MSG_TYPE(nlh->nlmsg_type) == IPCTNL_MSG_CT_GET_CTRZERO)
 			return -ENOTSUPP;
 #endif
-		} else {
-			if ((*errp = netlink_dump_start(ctnl, skb, nlh,
-		      		                        ctnetlink_dump_table,
-		                                	ctnetlink_done)) != 0)
+		if ((*errp = netlink_dump_start(ctnl, skb, nlh,
+	      		                        ctnetlink_dump_table,
+	                                	ctnetlink_done)) != 0)
 			return -EINVAL;
-		}
 
 		rlen = NLMSG_ALIGN(nlh->nlmsg_len);
 		if (rlen > skb->len)
@@ -788,11 +739,9 @@ ctnetlink_get_conntrack(struct sock *ctnl, struct sk_buff *skb,
 		return err;
 
 	h = ip_conntrack_find_get(&tuple, NULL);
-	if (!h) {
-		DEBUGP("tuple not found in conntrack hash");
+	if (!h)
 		return -ENOENT;
-	}
-	DEBUGP("tuple found\n");
+
 	ct = tuplehash_to_ctrack(h);
 
 	err = -ENOMEM;
@@ -801,7 +750,6 @@ ctnetlink_get_conntrack(struct sock *ctnl, struct sk_buff *skb,
 		ip_conntrack_put(ct);
 		return -ENOMEM;
 	}
-	NETLINK_CB(skb2).dst_pid = NETLINK_CB(skb).pid;
 
 	err = ctnetlink_fill_info(skb2, NETLINK_CB(skb).pid, nlh->nlmsg_seq, 
 				  IPCTNL_MSG_CT_NEW, 1, ct);
@@ -813,7 +761,6 @@ ctnetlink_get_conntrack(struct sock *ctnl, struct sk_buff *skb,
 	if (err < 0)
 		goto out;
 
-	DEBUGP("leaving\n");
 	return 0;
 
 free:
@@ -826,7 +773,7 @@ static inline int
 ctnetlink_change_status(struct ip_conntrack *ct, struct nfattr *cda[])
 {
 	unsigned long d;
-	unsigned status = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_STATUS-1]));
+	unsigned status = ntohl(*(__be32 *)NFA_DATA(cda[CTA_STATUS-1]));
 	d = ct->status ^ status;
 
 	if (d & (IPS_EXPECTED|IPS_CONFIRMED|IPS_DYING))
@@ -842,39 +789,30 @@ ctnetlink_change_status(struct ip_conntrack *ct, struct nfattr *cda[])
 		/* ASSURED bit can only be set */
 		return -EINVAL;
 
-	if (cda[CTA_NAT-1]) {
+	if (cda[CTA_NAT_SRC-1] || cda[CTA_NAT_DST-1]) {
 #ifndef CONFIG_IP_NF_NAT_NEEDED
 		return -EINVAL;
 #else
-		unsigned int hooknum;
 		struct ip_nat_range range;
 
-		if (ctnetlink_parse_nat(cda, ct, &range) < 0)
-			return -EINVAL;
-
-		DEBUGP("NAT: %u.%u.%u.%u-%u.%u.%u.%u:%u-%u\n", 
-		       NIPQUAD(range.min_ip), NIPQUAD(range.max_ip),
-		       htons(range.min.all), htons(range.max.all));
-		
-		/* This is tricky but it works. ip_nat_setup_info needs the
-		 * hook number as parameter, so let's do the correct 
-		 * conversion and run away */
-		if (status & IPS_SRC_NAT_DONE)
-			hooknum = NF_IP_POST_ROUTING; /* IP_NAT_MANIP_SRC */
-		else if (status & IPS_DST_NAT_DONE)
-			hooknum = NF_IP_PRE_ROUTING;  /* IP_NAT_MANIP_DST */
-		else 
-			return -EINVAL; /* Missing NAT flags */
-
-		DEBUGP("NAT status: %lu\n", 
-		       status & (IPS_NAT_MASK | IPS_NAT_DONE_MASK));
-		
-		if (ip_nat_initialized(ct, HOOK2MANIP(hooknum)))
-			return -EEXIST;
-		ip_nat_setup_info(ct, &range, hooknum);
-
-                DEBUGP("NAT status after setup_info: %lu\n",
-                       ct->status & (IPS_NAT_MASK | IPS_NAT_DONE_MASK));
+		if (cda[CTA_NAT_DST-1]) {
+			if (ctnetlink_parse_nat(cda[CTA_NAT_DST-1], ct,
+						&range) < 0)
+				return -EINVAL;
+			if (ip_nat_initialized(ct,
+					       HOOK2MANIP(NF_IP_PRE_ROUTING)))
+				return -EEXIST;
+			ip_nat_setup_info(ct, &range, NF_IP_PRE_ROUTING);
+		}
+		if (cda[CTA_NAT_SRC-1]) {
+			if (ctnetlink_parse_nat(cda[CTA_NAT_SRC-1], ct,
+						&range) < 0)
+				return -EINVAL;
+			if (ip_nat_initialized(ct,
+					       HOOK2MANIP(NF_IP_POST_ROUTING)))
+				return -EEXIST;
+			ip_nat_setup_info(ct, &range, NF_IP_POST_ROUTING);
+		}
 #endif
 	}
 
@@ -892,8 +830,6 @@ ctnetlink_change_helper(struct ip_conntrack *ct, struct nfattr *cda[])
 	struct ip_conntrack_helper *helper;
 	char *helpname;
 	int err;
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	/* don't change helper of sibling connections */
 	if (ct->master)
@@ -930,7 +866,7 @@ ctnetlink_change_helper(struct ip_conntrack *ct, struct nfattr *cda[])
 static inline int
 ctnetlink_change_timeout(struct ip_conntrack *ct, struct nfattr *cda[])
 {
-	u_int32_t timeout = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_TIMEOUT-1]));
+	u_int32_t timeout = ntohl(*(__be32 *)NFA_DATA(cda[CTA_TIMEOUT-1]));
 	
 	if (!del_timer(&ct->timeout))
 		return -ETIME;
@@ -965,8 +901,6 @@ ctnetlink_change_conntrack(struct ip_conntrack *ct, struct nfattr *cda[])
 {
 	int err;
 
-	DEBUGP("entered %s\n", __FUNCTION__);
-
 	if (cda[CTA_HELP-1]) {
 		err = ctnetlink_change_helper(ct, cda);
 		if (err < 0)
@@ -993,10 +927,9 @@ ctnetlink_change_conntrack(struct ip_conntrack *ct, struct nfattr *cda[])
 
 #if defined(CONFIG_IP_NF_CONNTRACK_MARK)
 	if (cda[CTA_MARK-1])
-		ct->mark = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_MARK-1]));
+		ct->mark = ntohl(*(__be32 *)NFA_DATA(cda[CTA_MARK-1]));
 #endif
 
-	DEBUGP("all done\n");
 	return 0;
 }
 
@@ -1008,32 +941,32 @@ ctnetlink_create_conntrack(struct nfattr *cda[],
 	struct ip_conntrack *ct;
 	int err = -EINVAL;
 
-	DEBUGP("entered %s\n", __FUNCTION__);
-
 	ct = ip_conntrack_alloc(otuple, rtuple);
 	if (ct == NULL || IS_ERR(ct))
 		return -ENOMEM;	
 
 	if (!cda[CTA_TIMEOUT-1])
 		goto err;
-	ct->timeout.expires = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_TIMEOUT-1]));
+	ct->timeout.expires = ntohl(*(__be32 *)NFA_DATA(cda[CTA_TIMEOUT-1]));
 
 	ct->timeout.expires = jiffies + ct->timeout.expires * HZ;
 	ct->status |= IPS_CONFIRMED;
 
-	err = ctnetlink_change_status(ct, cda);
-	if (err < 0)
-		goto err;
+	if (cda[CTA_STATUS-1]) {
+		err = ctnetlink_change_status(ct, cda);
+		if (err < 0)
+			goto err;
+	}
 
 	if (cda[CTA_PROTOINFO-1]) {
 		err = ctnetlink_change_protoinfo(ct, cda);
 		if (err < 0)
-			return err;
+			goto err;
 	}
 
 #if defined(CONFIG_IP_NF_CONNTRACK_MARK)
 	if (cda[CTA_MARK-1])
-		ct->mark = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_MARK-1]));
+		ct->mark = ntohl(*(__be32 *)NFA_DATA(cda[CTA_MARK-1]));
 #endif
 
 	ct->helper = ip_conntrack_helper_find_get(rtuple);
@@ -1044,7 +977,6 @@ ctnetlink_create_conntrack(struct nfattr *cda[],
 	if (ct->helper)
 		ip_conntrack_helper_put(ct->helper);
 
-	DEBUGP("conntrack with id %u inserted\n", ct->id);
 	return 0;
 
 err:	
@@ -1059,8 +991,6 @@ ctnetlink_new_conntrack(struct sock *ctnl, struct sk_buff *skb,
 	struct ip_conntrack_tuple otuple, rtuple;
 	struct ip_conntrack_tuple_hash *h = NULL;
 	int err = 0;
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	if (nfattr_bad_size(cda, CTA_MAX, cta_min))
 		return -EINVAL;
@@ -1085,7 +1015,6 @@ ctnetlink_new_conntrack(struct sock *ctnl, struct sk_buff *skb,
 
 	if (h == NULL) {
 		write_unlock_bh(&ip_conntrack_lock);
-		DEBUGP("no such conntrack, create new\n");
 		err = -ENOENT;
 		if (nlh->nlmsg_flags & NLM_F_CREATE)
 			err = ctnetlink_create_conntrack(cda, &otuple, &rtuple);
@@ -1094,14 +1023,13 @@ ctnetlink_new_conntrack(struct sock *ctnl, struct sk_buff *skb,
 	/* implicit 'else' */
 
 	/* we only allow nat config for new conntracks */
-	if (cda[CTA_NAT-1]) {
+	if (cda[CTA_NAT_SRC-1] || cda[CTA_NAT_DST-1]) {
 		err = -EINVAL;
 		goto out_unlock;
 	}
 
 	/* We manipulate the conntrack inside the global conntrack table lock,
 	 * so there's no need to increase the refcount */
-	DEBUGP("conntrack found\n");
 	err = -EEXIST;
 	if (!(nlh->nlmsg_flags & NLM_F_EXCL))
 		err = ctnetlink_change_conntrack(tuplehash_to_ctrack(h), cda);
@@ -1134,24 +1062,51 @@ nfattr_failure:
 }			
 
 static inline int
+ctnetlink_exp_dump_mask(struct sk_buff *skb,
+			const struct ip_conntrack_tuple *tuple,
+			const struct ip_conntrack_tuple *mask)
+{
+	int ret;
+	struct ip_conntrack_protocol *proto;
+	struct nfattr *nest_parms = NFA_NEST(skb, CTA_EXPECT_MASK);
+
+	ret = ctnetlink_dump_tuples_ip(skb, mask);
+	if (unlikely(ret < 0))
+		goto nfattr_failure;
+
+	proto = ip_conntrack_proto_find_get(tuple->dst.protonum);
+	ret = ctnetlink_dump_tuples_proto(skb, mask, proto);
+	ip_conntrack_proto_put(proto);
+	if (unlikely(ret < 0))
+		goto nfattr_failure;
+
+	NFA_NEST_END(skb, nest_parms);
+
+	return 0;
+
+nfattr_failure:
+	return -1;
+}
+
+static inline int
 ctnetlink_exp_dump_expect(struct sk_buff *skb,
                           const struct ip_conntrack_expect *exp)
 {
 	struct ip_conntrack *master = exp->master;
-	u_int32_t timeout = htonl((exp->timeout.expires - jiffies) / HZ);
-	u_int32_t id = htonl(exp->id);
+	__be32 timeout = htonl((exp->timeout.expires - jiffies) / HZ);
+	__be32 id = htonl(exp->id);
 
 	if (ctnetlink_exp_dump_tuple(skb, &exp->tuple, CTA_EXPECT_TUPLE) < 0)
 		goto nfattr_failure;
-	if (ctnetlink_exp_dump_tuple(skb, &exp->mask, CTA_EXPECT_MASK) < 0)
+	if (ctnetlink_exp_dump_mask(skb, &exp->tuple, &exp->mask) < 0)
 		goto nfattr_failure;
 	if (ctnetlink_exp_dump_tuple(skb,
 				 &master->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
 				 CTA_EXPECT_MASTER) < 0)
 		goto nfattr_failure;
 	
-	NFA_PUT(skb, CTA_EXPECT_TIMEOUT, sizeof(timeout), &timeout);
-	NFA_PUT(skb, CTA_EXPECT_ID, sizeof(u_int32_t), &id);
+	NFA_PUT(skb, CTA_EXPECT_TIMEOUT, sizeof(__be32), &timeout);
+	NFA_PUT(skb, CTA_EXPECT_ID, sizeof(__be32), &id);
 
 	return 0;
 	
@@ -1210,6 +1165,9 @@ static int ctnetlink_expect_event(struct notifier_block *this,
 	} else
 		return NOTIFY_DONE;
 
+	if (!nfnetlink_has_listeners(NFNLGRP_CONNTRACK_EXP_NEW))
+		return NOTIFY_DONE;
+
 	skb = alloc_skb(NLMSG_GOODSIZE, GFP_ATOMIC);
 	if (!skb)
 		return NOTIFY_DONE;
@@ -1246,8 +1204,6 @@ ctnetlink_exp_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
 	struct list_head *i;
 	u_int32_t *id = (u_int32_t *) &cb->args[0];
 
-	DEBUGP("entered %s, last id=%llu\n", __FUNCTION__, *id);
-
 	read_lock_bh(&ip_conntrack_lock);
 	list_for_each_prev(i, &ip_conntrack_expect_list) {
 		exp = (struct ip_conntrack_expect *) i;
@@ -1263,14 +1219,12 @@ ctnetlink_exp_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
 out:	
 	read_unlock_bh(&ip_conntrack_lock);
 
-	DEBUGP("leaving, last id=%llu\n", *id);
-
 	return skb->len;
 }
 
 static const size_t cta_min_exp[CTA_EXPECT_MAX] = {
-	[CTA_EXPECT_TIMEOUT-1]          = sizeof(u_int32_t),
-	[CTA_EXPECT_ID-1]               = sizeof(u_int32_t)
+	[CTA_EXPECT_TIMEOUT-1]          = sizeof(__be32),
+	[CTA_EXPECT_ID-1]               = sizeof(__be32)
 };
 
 static int
@@ -1281,8 +1235,6 @@ ctnetlink_get_expect(struct sock *ctnl, struct sk_buff *skb,
 	struct ip_conntrack_expect *exp;
 	struct sk_buff *skb2;
 	int err = 0;
-
-	DEBUGP("entered %s\n", __FUNCTION__);
 
 	if (nfattr_bad_size(cda, CTA_EXPECT_MAX, cta_min_exp))
 		return -EINVAL;
@@ -1313,12 +1265,12 @@ ctnetlink_get_expect(struct sock *ctnl, struct sk_buff *skb,
 	if (err < 0)
 		return err;
 
-	exp = ip_conntrack_expect_find(&tuple);
+	exp = ip_conntrack_expect_find_get(&tuple);
 	if (!exp)
 		return -ENOENT;
 
 	if (cda[CTA_EXPECT_ID-1]) {
-		u_int32_t id = *(u_int32_t *)NFA_DATA(cda[CTA_EXPECT_ID-1]);
+		__be32 id = *(__be32 *)NFA_DATA(cda[CTA_EXPECT_ID-1]);
 		if (exp->id != ntohl(id)) {
 			ip_conntrack_expect_put(exp);
 			return -ENOENT;
@@ -1329,8 +1281,7 @@ ctnetlink_get_expect(struct sock *ctnl, struct sk_buff *skb,
 	skb2 = alloc_skb(NLMSG_GOODSIZE, GFP_KERNEL);
 	if (!skb2)
 		goto out;
-	NETLINK_CB(skb2).dst_pid = NETLINK_CB(skb).pid;
-	
+
 	err = ctnetlink_exp_fill_info(skb2, NETLINK_CB(skb).pid, 
 				      nlh->nlmsg_seq, IPCTNL_MSG_EXP_NEW,
 				      1, exp);
@@ -1367,13 +1318,13 @@ ctnetlink_del_expect(struct sock *ctnl, struct sk_buff *skb,
 			return err;
 
 		/* bump usage count to 2 */
-		exp = ip_conntrack_expect_find(&tuple);
+		exp = ip_conntrack_expect_find_get(&tuple);
 		if (!exp)
 			return -ENOENT;
 
 		if (cda[CTA_EXPECT_ID-1]) {
-			u_int32_t id = 
-				*(u_int32_t *)NFA_DATA(cda[CTA_EXPECT_ID-1]);
+			__be32 id =
+				*(__be32 *)NFA_DATA(cda[CTA_EXPECT_ID-1]);
 			if (exp->id != ntohl(id)) {
 				ip_conntrack_expect_put(exp);
 				return -ENOENT;
@@ -1434,8 +1385,6 @@ ctnetlink_create_expect(struct nfattr *cda[])
 	struct ip_conntrack *ct;
 	int err = 0;
 
-	DEBUGP("entered %s\n", __FUNCTION__);
-
 	/* caller guarantees that those three CTA_EXPECT_* exist */
 	err = ctnetlink_parse_tuple(cda, &tuple, CTA_EXPECT_TUPLE);
 	if (err < 0)
@@ -1487,8 +1436,6 @@ ctnetlink_new_expect(struct sock *ctnl, struct sk_buff *skb,
 	struct ip_conntrack_expect *exp;
 	int err = 0;
 
-	DEBUGP("entered %s\n", __FUNCTION__);	
-
 	if (nfattr_bad_size(cda, CTA_EXPECT_MAX, cta_min_exp))
 		return -EINVAL;
 
@@ -1517,8 +1464,6 @@ ctnetlink_new_expect(struct sock *ctnl, struct sk_buff *skb,
 		err = ctnetlink_change_expect(exp, cda);
 	write_unlock_bh(&ip_conntrack_lock);
 
-	DEBUGP("leaving\n");
-	
 	return err;
 }
 

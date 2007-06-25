@@ -80,8 +80,7 @@ static void rm9000_cpu_stop(void *args)
 	write_c0_perfcontrol(0);
 }
 
-static irqreturn_t rm9000_perfcount_handler(int irq, void * dev_id,
-	struct pt_regs *regs)
+static irqreturn_t rm9000_perfcount_handler(int irq, void * dev_id)
 {
 	unsigned int control = read_c0_perfcontrol();
 	uint32_t counter1, counter2;
@@ -126,7 +125,7 @@ static void rm9000_exit(void)
 	free_irq(rm9000_perfcount_irq, NULL);
 }
 
-struct op_mips_model op_model_rm9000 = {
+struct op_mips_model op_model_rm9000_ops = {
 	.reg_setup	= rm9000_reg_setup,
 	.cpu_setup	= rm9000_cpu_setup,
 	.init		= rm9000_init,

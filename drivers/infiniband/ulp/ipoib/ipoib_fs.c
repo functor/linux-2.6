@@ -141,7 +141,7 @@ static int ipoib_mcg_open(struct inode *inode, struct file *file)
 		return ret;
 
 	seq = file->private_data;
-	seq->private = inode->u.generic_ip;
+	seq->private = inode->i_private;
 
 	return 0;
 }
@@ -213,7 +213,7 @@ static int ipoib_path_seq_show(struct seq_file *file, void *iter_ptr)
 		   gid_buf, path.pathrec.dlid ? "yes" : "no");
 
 	if (path.pathrec.dlid) {
-		rate = ib_sa_rate_enum_to_int(path.pathrec.rate) * 25;
+		rate = ib_rate_to_mult(path.pathrec.rate) * 25;
 
 		seq_printf(file,
 			   "  DLID:     0x%04x\n"
@@ -247,7 +247,7 @@ static int ipoib_path_open(struct inode *inode, struct file *file)
 		return ret;
 
 	seq = file->private_data;
-	seq->private = inode->u.generic_ip;
+	seq->private = inode->i_private;
 
 	return 0;
 }

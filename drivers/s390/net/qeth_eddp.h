@@ -1,13 +1,11 @@
 /*
- * linux/drivers/s390/net/qeth_eddp.c ($Revision: 1.5 $)
+ * linux/drivers/s390/net/qeth_eddp.h
  *
- * Header file for qeth enhanced device driver pakcing.
+ * Header file for qeth enhanced device driver packing.
  *
  * Copyright 2004 IBM Corporation
  *
  *    Author(s): Thomas Spatzier <tspat@de.ibm.com>
- *
- *    $Revision: 1.5 $	 $Date: 2005/03/24 09:04:18 $
  *
  */
 #ifndef __QETH_EDDP_H__
@@ -56,7 +54,7 @@ qeth_eddp_check_buffers_for_context(struct qeth_qdio_out_q *,
 struct qeth_eddp_data {
 	struct qeth_hdr qh;
 	struct ethhdr mac;
-	u16 vlan[2];
+	__be16 vlan[2];
 	union {
 		struct {
 			struct iphdr h;

@@ -52,14 +52,14 @@ static int ocfs2_extent_contig(struct inode *inode,
 			       u64 blkno);
 
 static int ocfs2_create_new_meta_bhs(struct ocfs2_super *osb,
-				     struct ocfs2_journal_handle *handle,
+				     handle_t *handle,
 				     struct inode *inode,
 				     int wanted,
 				     struct ocfs2_alloc_context *meta_ac,
 				     struct buffer_head *bhs[]);
 
 static int ocfs2_add_branch(struct ocfs2_super *osb,
-			    struct ocfs2_journal_handle *handle,
+			    handle_t *handle,
 			    struct inode *inode,
 			    struct buffer_head *fe_bh,
 			    struct buffer_head *eb_bh,
@@ -67,14 +67,14 @@ static int ocfs2_add_branch(struct ocfs2_super *osb,
 			    struct ocfs2_alloc_context *meta_ac);
 
 static int ocfs2_shift_tree_depth(struct ocfs2_super *osb,
-				  struct ocfs2_journal_handle *handle,
+				  handle_t *handle,
 				  struct inode *inode,
 				  struct buffer_head *fe_bh,
 				  struct ocfs2_alloc_context *meta_ac,
 				  struct buffer_head **ret_new_eb_bh);
 
 static int ocfs2_do_insert_extent(struct ocfs2_super *osb,
-				  struct ocfs2_journal_handle *handle,
+				  handle_t *handle,
 				  struct inode *inode,
 				  struct buffer_head *fe_bh,
 				  u64 blkno,
@@ -152,7 +152,7 @@ bail:
  * l_count for you
  */
 static int ocfs2_create_new_meta_bhs(struct ocfs2_super *osb,
-				     struct ocfs2_journal_handle *handle,
+				     handle_t *handle,
 				     struct inode *inode,
 				     int wanted,
 				     struct ocfs2_alloc_context *meta_ac,
@@ -253,7 +253,7 @@ bail:
  * contain a single record with e_clusters == 0.
  */
 static int ocfs2_add_branch(struct ocfs2_super *osb,
-			    struct ocfs2_journal_handle *handle,
+			    handle_t *handle,
 			    struct inode *inode,
 			    struct buffer_head *fe_bh,
 			    struct buffer_head *eb_bh,
@@ -418,7 +418,7 @@ bail:
  * after this call.
  */
 static int ocfs2_shift_tree_depth(struct ocfs2_super *osb,
-				  struct ocfs2_journal_handle *handle,
+				  handle_t *handle,
 				  struct inode *inode,
 				  struct buffer_head *fe_bh,
 				  struct ocfs2_alloc_context *meta_ac,
@@ -520,7 +520,7 @@ bail:
  * down.
  */
 static int ocfs2_do_insert_extent(struct ocfs2_super *osb,
-				  struct ocfs2_journal_handle *handle,
+				  handle_t *handle,
 				  struct inode *inode,
 				  struct buffer_head *fe_bh,
 				  u64 start_blk,
@@ -566,9 +566,8 @@ static int ocfs2_do_insert_extent(struct ocfs2_super *osb,
 			next_free = le16_to_cpu(el->l_next_free_rec);
 			if (next_free == 0) {
 				ocfs2_error(inode->i_sb,
-					    "Dinode %"MLFu64" has a bad "
-					    "extent list",
-					    OCFS2_I(inode)->ip_blkno);
+					    "Dinode %llu has a bad extent list",
+					    (unsigned long long)OCFS2_I(inode)->ip_blkno);
 				status = -EIO;
 				goto bail;
 			}
@@ -611,9 +610,8 @@ static int ocfs2_do_insert_extent(struct ocfs2_super *osb,
 		next_free = le16_to_cpu(el->l_next_free_rec);
 		if (next_free == 0) {
 			ocfs2_error(inode->i_sb,
-				    "Dinode %"MLFu64" has a bad "
-				    "extent list",
-				    OCFS2_I(inode)->ip_blkno);
+				    "Dinode %llu has a bad extent list",
+				    (unsigned long long)OCFS2_I(inode)->ip_blkno);
 			status = -EIO;
 			goto bail;
 		}
@@ -652,8 +650,9 @@ static int ocfs2_do_insert_extent(struct ocfs2_super *osb,
 		/* having an empty extent at eof is legal. */
 		if (el->l_recs[i].e_cpos != fe->i_clusters) {
 			ocfs2_error(inode->i_sb,
-				    "Dinode %"MLFu64" trailing extent is bad: "
+				    "Dinode %llu trailing extent is bad: "
 				    "cpos (%u) != number of clusters (%u)",
+				    (unsigned long long)OCFS2_I(inode)->ip_blkno,
 				    le32_to_cpu(el->l_recs[i].e_cpos),
 				    le32_to_cpu(fe->i_clusters));
 			status = -EIO;
@@ -747,19 +746,19 @@ static int ocfs2_find_branch_target(struct ocfs2_super *osb,
 
 	while(le16_to_cpu(el->l_tree_depth) > 1) {
 		if (le16_to_cpu(el->l_next_free_rec) == 0) {
-			ocfs2_error(inode->i_sb, "Dinode %"MLFu64" has empty "
+			ocfs2_error(inode->i_sb, "Dinode %llu has empty "
 				    "extent list (next_free_rec == 0)",
-				    OCFS2_I(inode)->ip_blkno);
+				    (unsigned long long)OCFS2_I(inode)->ip_blkno);
 			status = -EIO;
 			goto bail;
 		}
 		i = le16_to_cpu(el->l_next_free_rec) - 1;
 		blkno = le64_to_cpu(el->l_recs[i].e_blkno);
 		if (!blkno) {
-			ocfs2_error(inode->i_sb, "Dinode %"MLFu64" has extent "
+			ocfs2_error(inode->i_sb, "Dinode %llu has extent "
 				    "list where extent # %d has no physical "
 				    "block start",
-				    OCFS2_I(inode)->ip_blkno, i);
+				    (unsigned long long)OCFS2_I(inode)->ip_blkno, i);
 			status = -EIO;
 			goto bail;
 		}
@@ -810,7 +809,7 @@ bail:
 
 /* the caller needs to update fe->i_clusters */
 int ocfs2_insert_extent(struct ocfs2_super *osb,
-			struct ocfs2_journal_handle *handle,
+			handle_t *handle,
 			struct inode *inode,
 			struct buffer_head *fe_bh,
 			u64 start_blk,
@@ -826,9 +825,9 @@ int ocfs2_insert_extent(struct ocfs2_super *osb,
 
 	mlog_entry_void();
 
-	mlog(0, "add %u clusters starting at block %"MLFu64" to "
-		"inode %"MLFu64"\n",
-	     new_clusters, start_blk, OCFS2_I(inode)->ip_blkno);
+	mlog(0, "add %u clusters starting at block %llu to inode %llu\n",
+	     new_clusters, (unsigned long long)start_blk,
+	     (unsigned long long)OCFS2_I(inode)->ip_blkno);
 
 	fe = (struct ocfs2_dinode *) fe_bh->b_data;
 	el = &fe->id2.i_list;
@@ -952,7 +951,7 @@ static int ocfs2_truncate_log_can_coalesce(struct ocfs2_truncate_log *tl,
 }
 
 static int ocfs2_truncate_log_append(struct ocfs2_super *osb,
-				     struct ocfs2_journal_handle *handle,
+				     handle_t *handle,
 				     u64 start_blk,
 				     unsigned int num_clusters)
 {
@@ -963,8 +962,8 @@ static int ocfs2_truncate_log_append(struct ocfs2_super *osb,
 	struct ocfs2_dinode *di;
 	struct ocfs2_truncate_log *tl;
 
-	mlog_entry("start_blk = %"MLFu64", num_clusters = %u\n", start_blk,
-		   num_clusters);
+	mlog_entry("start_blk = %llu, num_clusters = %u\n",
+		   (unsigned long long)start_blk, num_clusters);
 
 	BUG_ON(mutex_trylock(&tl_inode->i_mutex));
 
@@ -981,8 +980,9 @@ static int ocfs2_truncate_log_append(struct ocfs2_super *osb,
 	tl_count = le16_to_cpu(tl->tl_count);
 	mlog_bug_on_msg(tl_count > ocfs2_truncate_recs_per_inode(osb->sb) ||
 			tl_count == 0,
-			"Truncate record count on #%"MLFu64" invalid ("
-			"wanted %u, actual %u\n", OCFS2_I(tl_inode)->ip_blkno,
+			"Truncate record count on #%llu invalid "
+			"wanted %u, actual %u\n",
+			(unsigned long long)OCFS2_I(tl_inode)->ip_blkno,
 			ocfs2_truncate_recs_per_inode(osb->sb),
 			le16_to_cpu(tl->tl_count));
 
@@ -1002,8 +1002,8 @@ static int ocfs2_truncate_log_append(struct ocfs2_super *osb,
 	}
 
 	mlog(0, "Log truncate of %u clusters starting at cluster %u to "
-	     "%"MLFu64" (index = %d)\n", num_clusters, start_cluster,
-	     OCFS2_I(tl_inode)->ip_blkno, index);
+	     "%llu (index = %d)\n", num_clusters, start_cluster,
+	     (unsigned long long)OCFS2_I(tl_inode)->ip_blkno, index);
 
 	if (ocfs2_truncate_log_can_coalesce(tl, start_cluster)) {
 		/*
@@ -1034,7 +1034,7 @@ bail:
 }
 
 static int ocfs2_replay_truncate_records(struct ocfs2_super *osb,
-					 struct ocfs2_journal_handle *handle,
+					 handle_t *handle,
 					 struct inode *data_alloc_inode,
 					 struct buffer_head *data_alloc_bh)
 {
@@ -1113,7 +1113,7 @@ static int __ocfs2_flush_truncate_log(struct ocfs2_super *osb)
 {
 	int status;
 	unsigned int num_to_flush;
-	struct ocfs2_journal_handle *handle = NULL;
+	handle_t *handle;
 	struct inode *tl_inode = osb->osb_tl_inode;
 	struct inode *data_alloc_inode = NULL;
 	struct buffer_head *tl_bh = osb->osb_tl_bh;
@@ -1130,22 +1130,15 @@ static int __ocfs2_flush_truncate_log(struct ocfs2_super *osb)
 	if (!OCFS2_IS_VALID_DINODE(di)) {
 		OCFS2_RO_ON_INVALID_DINODE(osb->sb, di);
 		status = -EIO;
-		goto bail;
+		goto out;
 	}
 
 	num_to_flush = le16_to_cpu(tl->tl_used);
-	mlog(0, "Flush %u records from truncate log #%"MLFu64"\n",
-	     num_to_flush, OCFS2_I(tl_inode)->ip_blkno);
+	mlog(0, "Flush %u records from truncate log #%llu\n",
+	     num_to_flush, (unsigned long long)OCFS2_I(tl_inode)->ip_blkno);
 	if (!num_to_flush) {
 		status = 0;
-		goto bail;
-	}
-
-	handle = ocfs2_alloc_handle(osb);
-	if (!handle) {
-		status = -ENOMEM;
-		mlog_errno(status);
-		goto bail;
+		goto out;
 	}
 
 	data_alloc_inode = ocfs2_get_system_file_inode(osb,
@@ -1154,41 +1147,40 @@ static int __ocfs2_flush_truncate_log(struct ocfs2_super *osb)
 	if (!data_alloc_inode) {
 		status = -EINVAL;
 		mlog(ML_ERROR, "Could not get bitmap inode!\n");
-		goto bail;
+		goto out;
 	}
 
-	ocfs2_handle_add_inode(handle, data_alloc_inode);
-	status = ocfs2_meta_lock(data_alloc_inode, handle, &data_alloc_bh, 1);
+	mutex_lock(&data_alloc_inode->i_mutex);
+
+	status = ocfs2_meta_lock(data_alloc_inode, &data_alloc_bh, 1);
 	if (status < 0) {
 		mlog_errno(status);
-		goto bail;
+		goto out_mutex;
 	}
 
-	handle = ocfs2_start_trans(osb, handle, OCFS2_TRUNCATE_LOG_UPDATE);
+	handle = ocfs2_start_trans(osb, OCFS2_TRUNCATE_LOG_UPDATE);
 	if (IS_ERR(handle)) {
 		status = PTR_ERR(handle);
-		handle = NULL;
 		mlog_errno(status);
-		goto bail;
+		goto out_unlock;
 	}
 
 	status = ocfs2_replay_truncate_records(osb, handle, data_alloc_inode,
 					       data_alloc_bh);
-	if (status < 0) {
+	if (status < 0)
 		mlog_errno(status);
-		goto bail;
-	}
 
-bail:
-	if (handle)
-		ocfs2_commit_trans(handle);
+	ocfs2_commit_trans(osb, handle);
 
-	if (data_alloc_inode)
-		iput(data_alloc_inode);
+out_unlock:
+	brelse(data_alloc_bh);
+	ocfs2_meta_unlock(data_alloc_inode, 1);
 
-	if (data_alloc_bh)
-		brelse(data_alloc_bh);
+out_mutex:
+	mutex_unlock(&data_alloc_inode->i_mutex);
+	iput(data_alloc_inode);
 
+out:
 	mlog_exit(status);
 	return status;
 }
@@ -1205,10 +1197,12 @@ int ocfs2_flush_truncate_log(struct ocfs2_super *osb)
 	return status;
 }
 
-static void ocfs2_truncate_log_worker(void *data)
+static void ocfs2_truncate_log_worker(struct work_struct *work)
 {
 	int status;
-	struct ocfs2_super *osb = data;
+	struct ocfs2_super *osb =
+		container_of(work, struct ocfs2_super,
+			     osb_truncate_log_wq.work);
 
 	mlog_entry_void();
 
@@ -1347,7 +1341,7 @@ int ocfs2_complete_truncate_log_recovery(struct ocfs2_super *osb,
 	int i;
 	unsigned int clusters, num_recs, start_cluster;
 	u64 start_blk;
-	struct ocfs2_journal_handle *handle;
+	handle_t *handle;
 	struct inode *tl_inode = osb->osb_tl_inode;
 	struct ocfs2_truncate_log *tl;
 
@@ -1360,8 +1354,8 @@ int ocfs2_complete_truncate_log_recovery(struct ocfs2_super *osb,
 
 	tl = &tl_copy->id2.i_dealloc;
 	num_recs = le16_to_cpu(tl->tl_used);
-	mlog(0, "cleanup %u records from %"MLFu64"\n", num_recs,
-	     tl_copy->i_blkno);
+	mlog(0, "cleanup %u records from %llu\n", num_recs,
+	     (unsigned long long)tl_copy->i_blkno);
 
 	mutex_lock(&tl_inode->i_mutex);
 	for(i = 0; i < num_recs; i++) {
@@ -1373,8 +1367,7 @@ int ocfs2_complete_truncate_log_recovery(struct ocfs2_super *osb,
 			}
 		}
 
-		handle = ocfs2_start_trans(osb, NULL,
-					   OCFS2_TRUNCATE_LOG_UPDATE);
+		handle = ocfs2_start_trans(osb, OCFS2_TRUNCATE_LOG_UPDATE);
 		if (IS_ERR(handle)) {
 			status = PTR_ERR(handle);
 			mlog_errno(status);
@@ -1387,7 +1380,7 @@ int ocfs2_complete_truncate_log_recovery(struct ocfs2_super *osb,
 
 		status = ocfs2_truncate_log_append(osb, handle,
 						   start_blk, clusters);
-		ocfs2_commit_trans(handle);
+		ocfs2_commit_trans(osb, handle);
 		if (status < 0) {
 			mlog_errno(status);
 			goto bail_up;
@@ -1441,7 +1434,8 @@ int ocfs2_truncate_log_init(struct ocfs2_super *osb)
 	/* ocfs2_truncate_log_shutdown keys on the existence of
 	 * osb->osb_tl_inode so we don't set any of the osb variables
 	 * until we're sure all is well. */
-	INIT_WORK(&osb->osb_truncate_log_wq, ocfs2_truncate_log_worker, osb);
+	INIT_DELAYED_WORK(&osb->osb_truncate_log_wq,
+			  ocfs2_truncate_log_worker);
 	osb->osb_tl_bh    = tl_bh;
 	osb->osb_tl_inode = tl_inode;
 
@@ -1529,7 +1523,8 @@ static int ocfs2_find_new_last_ext_blk(struct ocfs2_super *osb,
 
 	*new_last_eb = bh;
 	get_bh(*new_last_eb);
-	mlog(0, "returning block %"MLFu64"\n", le64_to_cpu(eb->h_blkno));
+	mlog(0, "returning block %llu\n",
+	     (unsigned long long)le64_to_cpu(eb->h_blkno));
 bail:
 	if (bh)
 		brelse(bh);
@@ -1542,7 +1537,7 @@ static int ocfs2_do_truncate(struct ocfs2_super *osb,
 			     struct inode *inode,
 			     struct buffer_head *fe_bh,
 			     struct buffer_head *old_last_eb_bh,
-			     struct ocfs2_journal_handle *handle,
+			     handle_t *handle,
 			     struct ocfs2_truncate_context *tc)
 {
 	int status, i, depth;
@@ -1646,8 +1641,8 @@ static int ocfs2_do_truncate(struct ocfs2_super *osb,
 
 	/* if our tree depth > 0, update all the tree blocks below us. */
 	while (depth) {
-		mlog(0, "traveling tree (depth = %d, next_eb = %"MLFu64")\n",
-		     depth,  next_eb);
+		mlog(0, "traveling tree (depth = %d, next_eb = %llu)\n",
+		     depth,  (unsigned long long)next_eb);
 		status = ocfs2_read_block(osb, next_eb, &eb_bh,
 					  OCFS2_BH_CACHED, inode);
 		if (status < 0) {
@@ -1674,12 +1669,12 @@ static int ocfs2_do_truncate(struct ocfs2_super *osb,
 
 		i = le16_to_cpu(el->l_next_free_rec) - 1;
 
-		mlog(0, "extent block %"MLFu64", before: record %d: "
-		     "(%u, %u, %"MLFu64"), next = %u\n",
-		     le64_to_cpu(eb->h_blkno), i,
+		mlog(0, "extent block %llu, before: record %d: "
+		     "(%u, %u, %llu), next = %u\n",
+		     (unsigned long long)le64_to_cpu(eb->h_blkno), i,
 		     le32_to_cpu(el->l_recs[i].e_cpos),
 		     le32_to_cpu(el->l_recs[i].e_clusters),
-		     le64_to_cpu(el->l_recs[i].e_blkno),
+		     (unsigned long long)le64_to_cpu(el->l_recs[i].e_blkno),
 		     le16_to_cpu(el->l_next_free_rec));
 
 		BUG_ON(le32_to_cpu(el->l_recs[i].e_clusters) < clusters_to_del);
@@ -1697,12 +1692,12 @@ static int ocfs2_do_truncate(struct ocfs2_super *osb,
 			BUG_ON(!el->l_next_free_rec);
 			le16_add_cpu(&el->l_next_free_rec, -1);
 		}
-		mlog(0, "extent block %"MLFu64", after: record %d: "
-		     "(%u, %u, %"MLFu64"), next = %u\n",
-		     le64_to_cpu(eb->h_blkno), i,
+		mlog(0, "extent block %llu, after: record %d: "
+		     "(%u, %u, %llu), next = %u\n",
+		     (unsigned long long)le64_to_cpu(eb->h_blkno), i,
 		     le32_to_cpu(el->l_recs[i].e_cpos),
 		     le32_to_cpu(el->l_recs[i].e_clusters),
-		     le64_to_cpu(el->l_recs[i].e_blkno),
+		     (unsigned long long)le64_to_cpu(el->l_recs[i].e_blkno),
 		     le16_to_cpu(el->l_next_free_rec));
 
 		status = ocfs2_journal_dirty(handle, eb_bh);
@@ -1716,17 +1711,29 @@ static int ocfs2_do_truncate(struct ocfs2_super *osb,
 
 			ocfs2_remove_from_cache(inode, eb_bh);
 
-			BUG_ON(eb->h_suballoc_slot);
 			BUG_ON(el->l_recs[0].e_clusters);
 			BUG_ON(el->l_recs[0].e_cpos);
 			BUG_ON(el->l_recs[0].e_blkno);
-			status = ocfs2_free_extent_block(handle,
-							 tc->tc_ext_alloc_inode,
-							 tc->tc_ext_alloc_bh,
-							 eb);
-			if (status < 0) {
-				mlog_errno(status);
-				goto bail;
+			if (eb->h_suballoc_slot == 0) {
+				/*
+				 * This code only understands how to
+				 * lock the suballocator in slot 0,
+				 * which is fine because allocation is
+				 * only ever done out of that
+				 * suballocator too. A future version
+				 * might change that however, so avoid
+				 * a free if we don't know how to
+				 * handle it. This way an fs incompat
+				 * bit will not be necessary.
+				 */
+				status = ocfs2_free_extent_block(handle,
+								 tc->tc_ext_alloc_inode,
+								 tc->tc_ext_alloc_bh,
+								 eb);
+				if (status < 0) {
+					mlog_errno(status);
+					goto bail;
+				}
 			}
 		}
 		brelse(eb_bh);
@@ -1769,7 +1776,7 @@ int ocfs2_commit_truncate(struct ocfs2_super *osb,
 	struct ocfs2_extent_block *eb;
 	struct ocfs2_extent_list *el;
 	struct buffer_head *last_eb_bh;
-	struct ocfs2_journal_handle *handle = NULL;
+	handle_t *handle = NULL;
 	struct inode *tl_inode = osb->osb_tl_inode;
 
 	mlog_entry_void();
@@ -1792,10 +1799,10 @@ int ocfs2_commit_truncate(struct ocfs2_super *osb,
 	last_eb = le64_to_cpu(fe->i_last_eb_blk);
 start:
 	mlog(0, "ocfs2_commit_truncate: fe->i_clusters = %u, "
-	     "last_eb = %"MLFu64", fe->i_last_eb_blk = %"MLFu64", "
+	     "last_eb = %llu, fe->i_last_eb_blk = %llu, "
 	     "fe->id2.i_list.l_tree_depth = %u last_eb_bh = %p\n",
-	     le32_to_cpu(fe->i_clusters), last_eb,
-	     le64_to_cpu(fe->i_last_eb_blk),
+	     le32_to_cpu(fe->i_clusters), (unsigned long long)last_eb,
+	     (unsigned long long)le64_to_cpu(fe->i_last_eb_blk),
 	     le16_to_cpu(fe->id2.i_list.l_tree_depth), last_eb_bh);
 
 	if (last_eb != le64_to_cpu(fe->i_last_eb_blk)) {
@@ -1855,7 +1862,7 @@ start:
 
 	credits = ocfs2_calc_tree_trunc_credits(osb->sb, clusters_to_del,
 						fe, el);
-	handle = ocfs2_start_trans(osb, NULL, credits);
+	handle = ocfs2_start_trans(osb, credits);
 	if (IS_ERR(handle)) {
 		status = PTR_ERR(handle);
 		handle = NULL;
@@ -1878,7 +1885,7 @@ start:
 	mutex_unlock(&tl_inode->i_mutex);
 	tl_sem = 0;
 
-	ocfs2_commit_trans(handle);
+	ocfs2_commit_trans(osb, handle);
 	handle = NULL;
 
 	BUG_ON(le32_to_cpu(fe->i_clusters) < target_i_clusters);
@@ -1893,7 +1900,7 @@ bail:
 		mutex_unlock(&tl_inode->i_mutex);
 
 	if (handle)
-		ocfs2_commit_trans(handle);
+		ocfs2_commit_trans(osb, handle);
 
 	if (last_eb_bh)
 		brelse(last_eb_bh);
@@ -1934,16 +1941,17 @@ int ocfs2_prepare_truncate(struct ocfs2_super *osb,
 	fe = (struct ocfs2_dinode *) fe_bh->b_data;
 
 	mlog(0, "fe->i_clusters = %u, new_i_clusters = %u, fe->i_size ="
-	     "%"MLFu64"\n", fe->i_clusters, new_i_clusters, fe->i_size);
+	     "%llu\n", fe->i_clusters, new_i_clusters,
+	     (unsigned long long)fe->i_size);
 
 	if (le32_to_cpu(fe->i_clusters) <= new_i_clusters) {
-		ocfs2_error(inode->i_sb, "Dinode %"MLFu64" has cluster count "
-			    "%u and size %"MLFu64" whereas struct inode has "
+		ocfs2_error(inode->i_sb, "Dinode %llu has cluster count "
+			    "%u and size %llu whereas struct inode has "
 			    "cluster count %u and size %llu which caused an "
 			    "invalid truncate to %u clusters.",
-			    le64_to_cpu(fe->i_blkno),
+			    (unsigned long long)le64_to_cpu(fe->i_blkno),
 			    le32_to_cpu(fe->i_clusters),
-			    le64_to_cpu(fe->i_size),
+			    (unsigned long long)le64_to_cpu(fe->i_size),
 			    OCFS2_I(inode)->ip_clusters, i_size_read(inode),
 			    new_i_clusters);
 		mlog_meta_lvb(ML_ERROR, &OCFS2_I(inode)->ip_meta_lockres);
@@ -1951,7 +1959,7 @@ int ocfs2_prepare_truncate(struct ocfs2_super *osb,
 		goto bail;
 	}
 
-	*tc = kcalloc(1, sizeof(struct ocfs2_truncate_context), GFP_KERNEL);
+	*tc = kzalloc(sizeof(struct ocfs2_truncate_context), GFP_KERNEL);
 	if (!(*tc)) {
 		status = -ENOMEM;
 		mlog_errno(status);
@@ -1997,10 +2005,7 @@ int ocfs2_prepare_truncate(struct ocfs2_super *osb,
 		mutex_lock(&ext_alloc_inode->i_mutex);
 		(*tc)->tc_ext_alloc_inode = ext_alloc_inode;
 
-		status = ocfs2_meta_lock(ext_alloc_inode,
-					 NULL,
-					 &ext_alloc_bh,
-					 1);
+		status = ocfs2_meta_lock(ext_alloc_inode, &ext_alloc_bh, 1);
 		if (status < 0) {
 			mlog_errno(status);
 			goto bail;

@@ -3,7 +3,7 @@
  *
  *  Virtual Context Support
  *
- *  Copyright (C) 2004-2005  Herbert Pötzl
+ *  Copyright (C) 2004-2007  Herbert Pötzl
  *
  *  V0.01  basic helper
  *
@@ -107,7 +107,7 @@ long vs_reboot_helper(struct vx_info *vxi, int cmd, void __user *arg)
 }
 
 
-long vs_reboot(unsigned int cmd, void __user *arg)
+long vs_reboot(unsigned int cmd, void __user * arg)
 {
 	struct vx_info *vxi = current->vx_info;
 	long ret = 0;

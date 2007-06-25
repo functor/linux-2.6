@@ -5,14 +5,17 @@
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/device.h>
 #include <linux/usb.h>
 #include <linux/usb_usual.h>
 #include <linux/vmalloc.h>
+#include <linux/kthread.h>
 
 /*
  */
 #define USU_MOD_FL_THREAD   1	/* Thread is running */
 #define USU_MOD_FL_PRESENT  2	/* The module is loaded */
+#define USU_MOD_FL_FAILED   4	/* The module failed to load */
 
 struct mod_status {
 	unsigned long fls;
@@ -33,7 +36,11 @@ static DECLARE_MUTEX_LOCKED(usu_init_notify);
 static DECLARE_COMPLETION(usu_end_notify);
 static atomic_t total_threads = ATOMIC_INIT(0);
 
+static int usu_kick(unsigned long type);
 static int usu_probe_thread(void *arg);
+
+static struct class *usu_class;
+static struct class_device *usu_class_device;
 
 /*
  * The table.
@@ -113,16 +120,42 @@ EXPORT_SYMBOL_GPL(usb_usual_check_type);
 
 /*
  */
+static int usu_uevent(struct class_device *class_dev,
+    char **envp, int num_envp, char *buffer, int buffer_size)
+{
+	unsigned long flags;
+	int i;
+
+	for (i = 1; i < 3; i++) {
+		spin_lock_irqsave(&usu_lock, flags);
+		if (stat[i].fls & USU_MOD_FL_FAILED) {
+			stat[i].fls &= ~USU_MOD_FL_FAILED;
+			spin_unlock_irqrestore(&usu_lock, flags);
+			usu_kick(i);
+		} else {
+			spin_unlock_irqrestore(&usu_lock, flags);
+		}
+	}
+	return 0;
+}
+
+/*
+ */
 static int usu_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
 {
 	unsigned long type;
-	int rc;
-	unsigned long flags;
 
 	type = USB_US_TYPE(id->driver_info);
 	if (type == 0)
 		type = atomic_read(&usu_bias);
+	return usu_kick(type);
+}
+
+static int usu_kick(unsigned long type)
+{
+	unsigned long flags;
+	struct task_struct* task;
 
 	spin_lock_irqsave(&usu_lock, flags);
 	if ((stat[type].fls & (USU_MOD_FL_THREAD|USU_MOD_FL_PRESENT)) != 0) {
@@ -132,8 +165,9 @@ static int usu_probe(struct usb_interface *intf,
 	stat[type].fls |= USU_MOD_FL_THREAD;
 	spin_unlock_irqrestore(&usu_lock, flags);
 
-	rc = kernel_thread(usu_probe_thread, (void*)type, CLONE_VM);
-	if (rc < 0) {
+	task = kthread_run(usu_probe_thread, (void*)type, "libusual_%d", type);
+	if (IS_ERR(task)) {
+		int rc = PTR_ERR(task);
 		printk(KERN_WARNING "libusual: "
 		    "Unable to start the thread for %s: %d\n",
 		    bias_names[type], rc);
@@ -175,8 +209,6 @@ static int usu_probe_thread(void *arg)
 	int rc;
 	unsigned long flags;
 
-	daemonize("libusual_%d", type);	/* "usb-storage" is kinda too long */
-
 	/* A completion does not work here because it's counted. */
 	down(&usu_init_notify);
 	up(&usu_init_notify);
@@ -186,10 +218,14 @@ static int usu_probe_thread(void *arg)
 	if (rc == 0 && (st->fls & USU_MOD_FL_PRESENT) == 0) {
 		/*
 		 * This should not happen, but let us keep tabs on it.
+		 * One common source of this a user who builds USB statically,
+		 * then uses initrd, and has a USB device. When static devices
+		 * are probed, request_module() calls a fake modprobe and fails.
 		 */
 		printk(KERN_NOTICE "libusual: "
-		    "modprobe for %s succeeded, but module is not present\n",
+		    "request for %s succeeded, but module is not present\n",
 		    bias_names[type]);
+		st->fls |= USU_MOD_FL_FAILED;
 	}
 	st->fls &= ~USU_MOD_FL_THREAD;
 	spin_unlock_irqrestore(&usu_lock, flags);
@@ -203,8 +239,26 @@ static int __init usb_usual_init(void)
 {
 	int rc;
 
+	usu_class = class_create(THIS_MODULE, "libusual");
+	if (IS_ERR(usu_class)) {
+		rc = PTR_ERR(usu_class_device);
+		goto err_class;
+	}
+	usu_class_device = class_device_create(usu_class, NULL, 0, NULL, "0");
+	if (IS_ERR(usu_class_device)) {
+		rc = PTR_ERR(usu_class_device);
+		goto err_classdev;
+	}
+	usu_class_device->uevent = usu_uevent;
+
 	rc = usb_register(&usu_driver);
 	up(&usu_init_notify);
+	return rc;
+
+	// class_device_destroy(usu_class, 0);
+err_classdev:
+	class_destroy(usu_class);
+err_class:
 	return rc;
 }
 
@@ -221,6 +275,9 @@ static void __exit usb_usual_exit(void)
 		wait_for_completion(&usu_end_notify);
 		atomic_dec(&total_threads);
 	}
+
+	class_device_destroy(usu_class, 0);
+	class_destroy(usu_class);
 }
 
 /*

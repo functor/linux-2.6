@@ -45,8 +45,8 @@ static struct audio_driver nm256_audio_driver;
 
 static int nm256_grabInterrupt (struct nm256_info *card);
 static int nm256_releaseInterrupt (struct nm256_info *card);
-static irqreturn_t nm256_interrupt (int irq, void *dev_id, struct pt_regs *dummy);
-static irqreturn_t nm256_interrupt_zx (int irq, void *dev_id, struct pt_regs *dummy);
+static irqreturn_t nm256_interrupt (int irq, void *dev_id);
+static irqreturn_t nm256_interrupt_zx (int irq, void *dev_id);
 
 /* These belong in linux/pci.h. */
 #define PCI_DEVICE_ID_NEOMAGIC_NM256AV_AUDIO 0x8005
@@ -526,7 +526,7 @@ nm256_initHw (struct nm256_info *card)
  */
 
 static irqreturn_t
-nm256_interrupt (int irq, void *dev_id, struct pt_regs *dummy)
+nm256_interrupt (int irq, void *dev_id)
 {
     struct nm256_info *card = (struct nm256_info *)dev_id;
     u16 status;
@@ -629,7 +629,7 @@ nm256_interrupt (int irq, void *dev_id, struct pt_regs *dummy)
  */
 
 static irqreturn_t
-nm256_interrupt_zx (int irq, void *dev_id, struct pt_regs *dummy)
+nm256_interrupt_zx (int irq, void *dev_id)
 {
     struct nm256_info *card = (struct nm256_info *)dev_id;
     u32 status;
@@ -733,7 +733,7 @@ static int
 nm256_grabInterrupt (struct nm256_info *card)
 {
     if (card->has_irq++ == 0) {
-	if (request_irq (card->irq, card->introutine, SA_SHIRQ,
+	if (request_irq (card->irq, card->introutine, IRQF_SHARED,
 			 "NM256_audio", card) < 0) {
 	    printk (KERN_ERR "NM256: can't obtain IRQ %d\n", card->irq);
 	    return -1;
@@ -960,7 +960,7 @@ static struct ac97_mixer_value_list mixer_defaults[] = {
 
 
 /* Installs the AC97 mixer into CARD.  */
-static int __init
+static int __devinit
 nm256_install_mixer (struct nm256_info *card)
 {
     int mixer;
@@ -995,7 +995,7 @@ nm256_install_mixer (struct nm256_info *card)
  * RAM.
  */
 
-static void __init
+static void __devinit
 nm256_peek_for_sig (struct nm256_info *card)
 {
     u32 port1offset 
@@ -1056,7 +1056,7 @@ nm256_install(struct pci_dev *pcidev, enum nm256rev rev, char *verstr)
     card->playing  = 0;
     card->recording = 0;
     card->rev = rev;
-	spin_lock_init(&card->lock);
+    spin_lock_init(&card->lock);
 
     /* Init the memory port info.  */
     for (x = 0; x < 2; x++) {

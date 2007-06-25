@@ -138,10 +138,9 @@ eesoxscsi_terminator_ctl(struct Scsi_Host *host, int on_off)
  * Purpose  : handle interrupts from EESOX SCSI card
  * Params   : irq    - interrupt number
  *	      dev_id - user-defined (Scsi_Host structure)
- *	      regs   - processor registers at interrupt
  */
 static irqreturn_t
-eesoxscsi_intr(int irq, void *dev_id, struct pt_regs *regs)
+eesoxscsi_intr(int irq, void *dev_id)
 {
 	struct eesoxscsi_info *info = dev_id;
 
@@ -674,6 +673,6 @@ module_exit(eesox_exit);
 
 MODULE_AUTHOR("Russell King");
 MODULE_DESCRIPTION("EESOX 'Fast' SCSI driver for Acorn machines");
-MODULE_PARM(term, "1-8i");
+module_param_array(term, int, NULL, 0);
 MODULE_PARM_DESC(term, "SCSI bus termination");
 MODULE_LICENSE("GPL");

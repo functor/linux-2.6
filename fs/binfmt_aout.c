@@ -276,9 +276,16 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	if ((N_MAGIC(ex) != ZMAGIC && N_MAGIC(ex) != OMAGIC &&
 	     N_MAGIC(ex) != QMAGIC && N_MAGIC(ex) != NMAGIC) ||
 	    N_TRSIZE(ex) || N_DRSIZE(ex) ||
-	    i_size_read(bprm->file->f_dentry->d_inode) < ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
+	    i_size_read(bprm->file->f_path.dentry->d_inode) < ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
 		return -ENOEXEC;
 	}
+
+	/*
+	 * Requires a mmap handler. This prevents people from using a.out
+	 * as part of an exploit attack against /proc-related vulnerabilities.
+	 */
+	if (!bprm->file->f_op || !bprm->file->f_op->mmap)
+		return -ENOEXEC;
 
 	fd_offset = N_TXTOFF(ex);
 
@@ -384,7 +391,7 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		{
 			printk(KERN_WARNING 
 			       "fd_offset is not page aligned. Please convert program: %s\n",
-			       bprm->file->f_dentry->d_name.name);
+			       bprm->file->f_path.dentry->d_name.name);
 			error_time = jiffies;
 		}
 
@@ -447,12 +454,6 @@ beyond_if:
 	regs->gp = ex.a_gpvalue;
 #endif
 	start_thread(regs, ex.a_entry, current->mm->start_stack);
-	if (unlikely(current->ptrace & PT_PTRACED)) {
-		if (current->ptrace & PT_TRACE_EXEC)
-			ptrace_notify ((PTRACE_EVENT_EXEC << 8) | SIGTRAP);
-		else
-			send_sig(SIGTRAP, current, 0);
-	}
 	return 0;
 }
 
@@ -464,7 +465,7 @@ static int load_aout_library(struct file *file)
 	int retval;
 	struct exec ex;
 
-	inode = file->f_dentry->d_inode;
+	inode = file->f_path.dentry->d_inode;
 
 	retval = -ENOEXEC;
 	error = kernel_read(file, 0, (char *) &ex, sizeof(ex));
@@ -477,6 +478,13 @@ static int load_aout_library(struct file *file)
 	    i_size_read(inode) < ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
 		goto out;
 	}
+
+	/*
+	 * Requires a mmap handler. This prevents people from using a.out
+	 * as part of an exploit attack against /proc-related vulnerabilities.
+	 */
+	if (!file->f_op || !file->f_op->mmap)
+		goto out;
 
 	if (N_FLAGS(ex))
 		goto out;
@@ -494,7 +502,7 @@ static int load_aout_library(struct file *file)
 		{
 			printk(KERN_WARNING 
 			       "N_TXTOFF is not page aligned. Please convert library: %s\n",
-			       file->f_dentry->d_name.name);
+			       file->f_path.dentry->d_name.name);
 			error_time = jiffies;
 		}
 		down_write(&current->mm->mmap_sem);

@@ -1,7 +1,7 @@
 /*
 * hfc_usb.h
 *
-* $Id: hfc_usb.h,v 4.1 2005/01/26 17:25:53 martinb1 Exp $
+* $Id: hfc_usb.h,v 4.2 2005/04/07 15:27:17 martinb1 Exp $
 */
 
 #ifndef __HFC_USB_H__
@@ -91,7 +91,7 @@
 /**********/
 /* macros */
 /**********/
-#define write_usb(a,b,c)usb_control_msg((a)->dev,(a)->ctrl_out_pipe,0,0x40,(c),(b),0,0,HFC_CTRL_TIMEOUT)
+#define write_usb(a,b,c)usb_control_msg((a)->dev,(a)->ctrl_out_pipe,0,0x40,(c),(b),NULL,0,HFC_CTRL_TIMEOUT)
 #define read_usb(a,b,c) usb_control_msg((a)->dev,(a)->ctrl_in_pipe,1,0xC0,0,(b),(c),1,HFC_CTRL_TIMEOUT)
 
 
@@ -137,11 +137,11 @@ static struct hfcusb_symbolic_list urb_errlist[] = {
 	{-ENXIO, "URB already queued"},
 	{-EFBIG, "Too much ISO frames requested"},
 	{-ENOSR, "Buffer error (overrun)"},
-	{-EPIPE, "Specified endpoint is stalled (device not responding)"},
+	{-EPIPE, "Specified endpoint is stalled"},
 	{-EOVERFLOW, "Babble (bad cable?)"},
 	{-EPROTO, "Bit-stuff error (bad cable?)"},
-	{-EILSEQ, "CRC/Timeout"},
-	{-ETIMEDOUT, "NAK (device does not respond)"},
+	{-EILSEQ, "CRC or missing token"},
+	{-ETIME, "Device did not respond"},
 	{-ESHUTDOWN, "Device unplugged"},
 	{-1, NULL}
 };
@@ -168,7 +168,7 @@ static struct hfcusb_symbolic_list urb_errlist[] = {
 * 3 entries are the configuration number, the minimum interval for
 * Interrupt endpoints & boolean if E-channel logging possible
 */
-int validconf[][19] = {
+static int validconf[][19] = {
 	// INT in, ISO out config
 	{EP_NUL, EP_INT, EP_NUL, EP_INT, EP_NUL, EP_INT, EP_NOP, EP_INT,
 	 EP_ISO, EP_NUL, EP_ISO, EP_NUL, EP_ISO, EP_NUL, EP_NUL, EP_NUL,
@@ -186,13 +186,15 @@ int validconf[][19] = {
 	{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}	// EOL element
 };
 
+#ifdef CONFIG_HISAX_DEBUG
 // string description of chosen config
-char *conf_str[] = {
+static char *conf_str[] = {
 	"4 Interrupt IN + 3 Isochron OUT",
 	"3 Interrupt IN + 3 Isochron OUT",
 	"4 Isochron IN + 3 Isochron OUT",
 	"3 Isochron IN + 3 Isochron OUT"
 };
+#endif
 
 
 typedef struct {

@@ -216,13 +216,13 @@ static void synaptics_pass_pt_packet(struct serio *ptport, unsigned char *packet
 	struct psmouse *child = serio_get_drvdata(ptport);
 
 	if (child && child->state == PSMOUSE_ACTIVATED) {
-		serio_interrupt(ptport, packet[1], 0, NULL);
-		serio_interrupt(ptport, packet[4], 0, NULL);
-		serio_interrupt(ptport, packet[5], 0, NULL);
+		serio_interrupt(ptport, packet[1], 0);
+		serio_interrupt(ptport, packet[4], 0);
+		serio_interrupt(ptport, packet[5], 0);
 		if (child->pktsize == 4)
-			serio_interrupt(ptport, packet[2], 0, NULL);
+			serio_interrupt(ptport, packet[2], 0);
 	} else
-		serio_interrupt(ptport, packet[1], 0, NULL);
+		serio_interrupt(ptport, packet[1], 0);
 }
 
 static void synaptics_pt_activate(struct psmouse *psmouse)
@@ -247,13 +247,11 @@ static void synaptics_pt_create(struct psmouse *psmouse)
 {
 	struct serio *serio;
 
-	serio = kmalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
 	if (!serio) {
 		printk(KERN_ERR "synaptics: not enough memory to allocate pass-through port\n");
 		return;
 	}
-
-	memset(serio, 0, sizeof(struct serio));
 
 	serio->id.type = SERIO_PS_PSTHRU;
 	strlcpy(serio->name, "Synaptics pass-through", sizeof(serio->name));
@@ -432,11 +430,11 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 
 static int synaptics_validate_byte(unsigned char packet[], int idx, unsigned char pkt_type)
 {
-	static unsigned char newabs_mask[]	= { 0xC8, 0x00, 0x00, 0xC8, 0x00 };
-	static unsigned char newabs_rel_mask[]	= { 0xC0, 0x00, 0x00, 0xC0, 0x00 };
-	static unsigned char newabs_rslt[]	= { 0x80, 0x00, 0x00, 0xC0, 0x00 };
-	static unsigned char oldabs_mask[]	= { 0xC0, 0x60, 0x00, 0xC0, 0x60 };
-	static unsigned char oldabs_rslt[]	= { 0xC0, 0x00, 0x00, 0x80, 0x00 };
+	static const unsigned char newabs_mask[]	= { 0xC8, 0x00, 0x00, 0xC8, 0x00 };
+	static const unsigned char newabs_rel_mask[]	= { 0xC0, 0x00, 0x00, 0xC0, 0x00 };
+	static const unsigned char newabs_rslt[]	= { 0x80, 0x00, 0x00, 0xC0, 0x00 };
+	static const unsigned char oldabs_mask[]	= { 0xC0, 0x60, 0x00, 0xC0, 0x60 };
+	static const unsigned char oldabs_rslt[]	= { 0xC0, 0x00, 0x00, 0x80, 0x00 };
 
 	if (idx < 0 || idx > 4)
 		return 0;
@@ -471,12 +469,9 @@ static unsigned char synaptics_detect_pkt_type(struct psmouse *psmouse)
 	return SYN_NEWABS_STRICT;
 }
 
-static psmouse_ret_t synaptics_process_byte(struct psmouse *psmouse, struct pt_regs *regs)
+static psmouse_ret_t synaptics_process_byte(struct psmouse *psmouse)
 {
-	struct input_dev *dev = psmouse->dev;
 	struct synaptics_data *priv = psmouse->private;
-
-	input_regs(dev, regs);
 
 	if (psmouse->pktcnt >= 6) { /* Full packet received */
 		if (unlikely(priv->pkt_type == SYN_NEWABS))
@@ -605,14 +600,21 @@ static struct dmi_system_id toshiba_dmi_table[] = {
 		.ident = "Toshiba Satellite",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
-			DMI_MATCH(DMI_PRODUCT_NAME , "Satellite"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Satellite"),
 		},
 	},
 	{
 		.ident = "Toshiba Dynabook",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
-			DMI_MATCH(DMI_PRODUCT_NAME , "dynabook"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "dynabook"),
+		},
+	},
+	{
+		.ident = "Toshiba Portege M300",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "PORTEGE M300"),
 		},
 	},
 	{ }
@@ -623,10 +625,9 @@ int synaptics_init(struct psmouse *psmouse)
 {
 	struct synaptics_data *priv;
 
-	psmouse->private = priv = kmalloc(sizeof(struct synaptics_data), GFP_KERNEL);
+	psmouse->private = priv = kzalloc(sizeof(struct synaptics_data), GFP_KERNEL);
 	if (!priv)
 		return -1;
-	memset(priv, 0, sizeof(struct synaptics_data));
 
 	if (synaptics_query_hardware(psmouse)) {
 		printk(KERN_ERR "Unable to query Synaptics hardware.\n");
@@ -651,6 +652,7 @@ int synaptics_init(struct psmouse *psmouse)
 	psmouse->set_rate = synaptics_set_rate;
 	psmouse->disconnect = synaptics_disconnect;
 	psmouse->reconnect = synaptics_reconnect;
+	psmouse->cleanup = synaptics_reset;
 	psmouse->pktsize = 6;
 	/* Synaptics can usually stay in sync without extra help */
 	psmouse->resync_time = 0;

@@ -1,6 +1,8 @@
 #ifndef _NET_NEIGHBOUR_H
 #define _NET_NEIGHBOUR_H
 
+#include <linux/neighbour.h>
+
 /*
  *	Generic neighbour manipulation
  *
@@ -13,40 +15,6 @@
  *	Harald Welte:		<laforge@gnumonks.org>
  *		- Add neighbour cache statistics like rtstat
  */
-
-/* The following flags & states are exported to user space,
-   so that they should be moved to include/linux/ directory.
- */
-
-/*
- *	Neighbor Cache Entry Flags
- */
-
-#define NTF_PROXY	0x08	/* == ATF_PUBL */
-#define NTF_ROUTER	0x80
-
-/*
- *	Neighbor Cache Entry States.
- */
-
-#define NUD_INCOMPLETE	0x01
-#define NUD_REACHABLE	0x02
-#define NUD_STALE	0x04
-#define NUD_DELAY	0x08
-#define NUD_PROBE	0x10
-#define NUD_FAILED	0x20
-
-/* Dummy states */
-#define NUD_NOARP	0x40
-#define NUD_PERMANENT	0x80
-#define NUD_NONE	0x00
-
-/* NUD_NOARP & NUD_PERMANENT are pseudostates, they never change
-   and make no address resolution or NUD.
-   NUD_PERMANENT is also cannot be deleted by garbage collectors.
- */
-
-#ifdef __KERNEL__
 
 #include <asm/atomic.h>
 #include <linux/netdevice.h>
@@ -68,6 +36,7 @@ struct neigh_parms
 	struct net_device *dev;
 	struct neigh_parms *next;
 	int	(*neigh_setup)(struct neighbour *);
+	void	(*neigh_destructor)(struct neighbour *);
 	struct neigh_table *tbl;
 
 	void	*sysctl_table;
@@ -132,7 +101,7 @@ struct neighbour
 	__u8			dead;
 	atomic_t		probes;
 	rwlock_t		lock;
-	unsigned char		ha[(MAX_ADDR_LEN+sizeof(unsigned long)-1)&~(sizeof(unsigned long)-1)];
+	unsigned char		ha[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];
 	struct hh_cache		*hh;
 	atomic_t		refcnt;
 	int			(*output)(struct sk_buff *skb);
@@ -145,7 +114,6 @@ struct neighbour
 struct neigh_ops
 {
 	int			family;
-	void			(*destructor)(struct neighbour *);
 	void			(*solicit)(struct neighbour *, struct sk_buff*);
 	void			(*error_report)(struct neighbour *, struct sk_buff*);
 	int			(*output)(struct sk_buff*);
@@ -158,6 +126,7 @@ struct pneigh_entry
 {
 	struct pneigh_entry	*next;
 	struct net_device		*dev;
+	u8			flags;
 	u8			key[0];
 };
 
@@ -191,7 +160,7 @@ struct neigh_table
 	atomic_t		entries;
 	rwlock_t		lock;
 	unsigned long		last_rand;
-	kmem_cache_t		*kmem_cachep;
+	struct kmem_cache		*kmem_cachep;
 	struct neigh_statistics	*stats;
 	struct neighbour	**hash_buckets;
 	unsigned int		hash_mask;
@@ -211,6 +180,7 @@ struct neigh_table
 #define NEIGH_UPDATE_F_ADMIN			0x80000000
 
 extern void			neigh_table_init(struct neigh_table *tbl);
+extern void			neigh_table_init_no_netlink(struct neigh_table *tbl);
 extern int			neigh_table_clear(struct neigh_table *tbl);
 extern struct neighbour *	neigh_lookup(struct neigh_table *tbl,
 					     const void *pkey,
@@ -339,6 +309,24 @@ static inline int neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 	return 0;
 }
 
+static inline int neigh_hh_output(struct hh_cache *hh, struct sk_buff *skb)
+{
+	unsigned seq;
+	int hh_len;
+
+	do {
+		int hh_alen;
+
+		seq = read_seqbegin(&hh->hh_lock);
+		hh_len = hh->hh_len;
+		hh_alen = HH_DATA_ALIGN(hh_len);
+		memcpy(skb->data - hh_alen, hh->hh_data, hh_alen);
+	} while (read_seqretry(&hh->hh_lock, seq));
+
+	skb_push(skb, hh_len);
+	return hh->hh_output(skb);
+}
+
 static inline struct neighbour *
 __neigh_lookup(struct neigh_table *tbl, const void *pkey, struct net_device *dev, int creat)
 {
@@ -373,6 +361,3 @@ struct neighbour_cb {
 #define NEIGH_CB(skb)	((struct neighbour_cb *)(skb)->cb)
 
 #endif
-#endif
-
-

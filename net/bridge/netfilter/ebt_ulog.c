@@ -29,7 +29,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/spinlock.h>
 #include <linux/socket.h>
 #include <linux/skbuff.h>
@@ -172,7 +171,7 @@ static void ebt_ulog_packet(unsigned int hooknr, const struct sk_buff *skb,
 	if (ub->qlen == 1)
 		skb_set_timestamp(ub->skb, &pm->stamp);
 	pm->data_len = copy_len;
-	pm->mark = skb->nfmark;
+	pm->mark = skb->mark;
 	pm->hook = hooknr;
 	if (uloginfo->prefix != NULL)
 		strcpy(pm->prefix, uloginfo->prefix);
@@ -287,7 +286,7 @@ static struct nf_logger ebt_ulog_logger = {
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ebt_ulog_init(void)
 {
 	int i, ret = 0;
 
@@ -322,7 +321,7 @@ static int __init init(void)
 	return ret;
 }
 
-static void __exit fini(void)
+static void __exit ebt_ulog_fini(void)
 {
 	ebt_ulog_buff_t *ub;
 	int i;
@@ -343,8 +342,8 @@ static void __exit fini(void)
 	sock_release(ebtulognl->sk_socket);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ebt_ulog_init);
+module_exit(ebt_ulog_fini);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Bart De Schuymer <bdschuym@pandora.be>");
 MODULE_DESCRIPTION("ebtables userspace logging module for bridged Ethernet"

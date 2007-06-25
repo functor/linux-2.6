@@ -93,25 +93,14 @@ static int hfsplus_releasepage(struct page *page, gfp_t mask)
 	return res ? try_to_free_buffers(page) : 0;
 }
 
-static int hfsplus_get_blocks(struct inode *inode, sector_t iblock, unsigned long max_blocks,
-			      struct buffer_head *bh_result, int create)
-{
-	int ret;
-
-	ret = hfsplus_get_block(inode, iblock, bh_result, create);
-	if (!ret)
-		bh_result->b_size = (1 << inode->i_blkbits);
-	return ret;
-}
-
 static ssize_t hfsplus_direct_IO(int rw, struct kiocb *iocb,
 		const struct iovec *iov, loff_t offset, unsigned long nr_segs)
 {
 	struct file *file = iocb->ki_filp;
-	struct inode *inode = file->f_dentry->d_inode->i_mapping->host;
+	struct inode *inode = file->f_path.dentry->d_inode->i_mapping->host;
 
 	return blockdev_direct_IO(rw, iocb, inode, inode->i_sb->s_bdev, iov,
-				  offset, nr_segs, hfsplus_get_blocks, NULL);
+				  offset, nr_segs, hfsplus_get_block, NULL);
 }
 
 static int hfsplus_writepages(struct address_space *mapping,
@@ -120,7 +109,7 @@ static int hfsplus_writepages(struct address_space *mapping,
 	return mpage_writepages(mapping, wbc, hfsplus_get_block);
 }
 
-struct address_space_operations hfsplus_btree_aops = {
+const struct address_space_operations hfsplus_btree_aops = {
 	.readpage	= hfsplus_readpage,
 	.writepage	= hfsplus_writepage,
 	.sync_page	= block_sync_page,
@@ -130,7 +119,7 @@ struct address_space_operations hfsplus_btree_aops = {
 	.releasepage	= hfsplus_releasepage,
 };
 
-struct address_space_operations hfsplus_aops = {
+const struct address_space_operations hfsplus_aops = {
 	.readpage	= hfsplus_readpage,
 	.writepage	= hfsplus_writepage,
 	.sync_page	= block_sync_page,
@@ -291,10 +280,12 @@ static struct inode_operations hfsplus_file_inode_operations = {
 	.listxattr	= hfsplus_listxattr,
 };
 
-static struct file_operations hfsplus_file_operations = {
+static const struct file_operations hfsplus_file_operations = {
 	.llseek 	= generic_file_llseek,
-	.read		= generic_file_read,
-	.write		= generic_file_write,
+	.read		= do_sync_read,
+	.aio_read	= generic_file_aio_read,
+	.write		= do_sync_write,
+	.aio_write	= generic_file_aio_write,
 	.mmap		= generic_file_mmap,
 	.sendfile	= generic_file_sendfile,
 	.fsync		= file_fsync,
@@ -315,7 +306,6 @@ struct inode *hfsplus_new_inode(struct super_block *sb, int mode)
 	inode->i_gid = current->fsgid;
 	inode->i_nlink = 1;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
-	inode->i_blksize = HFSPLUS_SB(sb).alloc_blksz;
 	INIT_LIST_HEAD(&HFSPLUS_I(inode).open_dir_list);
 	init_MUTEX(&HFSPLUS_I(inode).extents_lock);
 	atomic_set(&HFSPLUS_I(inode).opencnt, 0);
@@ -418,7 +408,6 @@ int hfsplus_cat_read_inode(struct inode *inode, struct hfs_find_data *fd)
 	type = hfs_bnode_read_u16(fd->bnode, fd->entryoffset);
 
 	HFSPLUS_I(inode).dev = 0;
-	inode->i_blksize = HFSPLUS_SB(inode->i_sb).alloc_blksz;
 	if (type == HFSPLUS_FOLDER) {
 		struct hfsplus_cat_folder *folder = &entry.folder;
 

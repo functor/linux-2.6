@@ -13,7 +13,7 @@
 extern unsigned long __nongprelbss dma_coherent_mem_start;
 extern unsigned long __nongprelbss dma_coherent_mem_end;
 
-void *dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle, int gfp);
+void *dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle, gfp_t gfp);
 void dma_free_coherent(struct device *dev, size_t size, void *vaddr, dma_addr_t dma_handle);
 
 /*
@@ -23,7 +23,7 @@ void dma_free_coherent(struct device *dev, size_t size, void *vaddr, dma_addr_t 
  * returns, or alternatively stop on the first sg_dma_len(sg) which
  * is 0.
  */
-#define sg_dma_address(sg)	((unsigned long) (page_to_phys((sg)->page) + (sg)->offset))
+#define sg_dma_address(sg)	((sg)->dma_address)
 #define sg_dma_len(sg)		((sg)->length)
 
 /*
@@ -172,10 +172,10 @@ int dma_get_cache_alignment(void)
 	return 1 << L1_CACHE_SHIFT;
 }
 
-#define dma_is_consistent(d)	(1)
+#define dma_is_consistent(d, h)	(1)
 
 static inline
-void dma_cache_sync(void *vaddr, size_t size,
+void dma_cache_sync(struct device *dev, void *vaddr, size_t size,
 		    enum dma_data_direction direction)
 {
 	flush_write_buffers();

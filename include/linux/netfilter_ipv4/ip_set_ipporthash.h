@@ -9,6 +9,7 @@
 
 struct ip_set_ipporthash {
 	ip_set_ip_t *members;		/* the ipporthash proper */
+	uint32_t elements;		/* number of elements */
 	uint32_t hashsize;		/* hash size */
 	uint16_t probes;		/* max number of probes  */
 	uint16_t resize;		/* resize factor in percent */

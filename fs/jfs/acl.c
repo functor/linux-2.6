@@ -5,16 +5,16 @@
  *
  *   This program is free software;  you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or 
+ *   the Free Software Foundation; either version 2 of the License, or
  *   (at your option) any later version.
- * 
+ *
  *   This program is distributed in the hope that it will be useful,
  *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
  *   the GNU General Public License for more details.
  *
  *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software 
+ *   along with this program;  if not, write to the Free Software
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
@@ -184,6 +184,9 @@ cleanup:
 	} else
 		inode->i_mode &= ~current->fs->umask;
 
+	JFS_IP(inode)->mode2 = (JFS_IP(inode)->mode2 & 0xffff0000) |
+			       inode->i_mode;
+
 	return rc;
 }
 
@@ -207,12 +210,12 @@ static int jfs_acl_chmod(struct inode *inode)
 	rc = posix_acl_chmod_masq(clone, inode->i_mode);
 	if (!rc) {
 		tid_t tid = txBegin(inode->i_sb, 0);
-		down(&JFS_IP(inode)->commit_sem);
+		mutex_lock(&JFS_IP(inode)->commit_mutex);
 		rc = jfs_set_acl(tid, inode, ACL_TYPE_ACCESS, clone);
 		if (!rc)
 			rc = txCommit(tid, 1, &inode, 0);
 		txEnd(tid);
-		up(&JFS_IP(inode)->commit_sem);
+		mutex_unlock(&JFS_IP(inode)->commit_mutex);
 	}
 
 	posix_acl_release(clone);
@@ -230,7 +233,7 @@ int jfs_setattr(struct dentry *dentry, struct iattr *iattr)
 
 	if ((iattr->ia_valid & ATTR_UID && iattr->ia_uid != inode->i_uid) ||
 	    (iattr->ia_valid & ATTR_GID && iattr->ia_gid != inode->i_gid) ||
-	    (iattr->ia_valid & ATTR_XID && iattr->ia_xid != inode->i_xid)) {
+	    (iattr->ia_valid & ATTR_TAG && iattr->ia_tag != inode->i_tag)) {
 		if (DQUOT_TRANSFER(inode, iattr))
 			return -EDQUOT;
 	}

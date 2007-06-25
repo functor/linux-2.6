@@ -7,7 +7,6 @@
  *      2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/threads.h>
 #include <linux/module.h>
@@ -16,9 +15,9 @@
 #include <asm/ptrace.h>
 #include <asm/page.h>
 #include <asm/lppaca.h>
-#include <asm/iseries/it_lp_queue.h>
 #include <asm/iseries/it_lp_reg_save.h>
 #include <asm/paca.h>
+#include <asm/mmu.h>
 
 
 /* This symbol is provided by the linker - let it fill in the paca
@@ -47,6 +46,17 @@ struct lppaca lppaca[] = {
 	},
 };
 
+/*
+ * 3 persistent SLBs are registered here.  The buffer will be zero
+ * initially, hence will all be invaild until we actually write them.
+ */
+struct slb_shadow slb_shadow[] __cacheline_aligned = {
+	[0 ... (NR_CPUS-1)] = {
+		.persistent = SLB_NUM_BOLTED,
+		.buffer_length = sizeof(struct slb_shadow),
+	},
+};
+
 /* The Paca is an array with one entry per processor.  Each contains an
  * lppaca, which contains the information shared between the
  * hypervisor and Linux.
@@ -56,15 +66,13 @@ struct lppaca lppaca[] = {
  * processors.  The processor VPD array needs one entry per physical
  * processor (not thread).
  */
-#define PACA_INIT_COMMON(number, start, asrr, asrv)			    \
+#define PACA_INIT_COMMON(number)					    \
 	.lppaca_ptr = &lppaca[number],					    \
 	.lock_token = 0x8000,						    \
 	.paca_index = (number),		/* Paca Index */		    \
 	.kernel_toc = (unsigned long)(&__toc_start) + 0x8000UL,		    \
-	.stab_real = (asrr), 		/* Real pointer to segment table */ \
-	.stab_addr = (asrv),		/* Virt pointer to segment table */ \
-	.cpu_start = (start),		/* Processor start */		    \
-	.hw_cpu_id = 0xffff,
+	.hw_cpu_id = 0xffff,						    \
+	.slb_shadow_ptr = &slb_shadow[number],
 
 #ifdef CONFIG_PPC_ISERIES
 #define PACA_INIT_ISERIES(number)					    \
@@ -72,30 +80,20 @@ struct lppaca lppaca[] = {
 
 #define PACA_INIT(number)						    \
 {									    \
-	PACA_INIT_COMMON(number, 0, 0, 0)				    \
-	PACA_INIT_ISERIES(number)					    \
-}
-
-#define BOOTCPU_PACA_INIT(number)					    \
-{									    \
-	PACA_INIT_COMMON(number, 1, 0, (u64)&initial_stab)		    \
+	PACA_INIT_COMMON(number)					    \
 	PACA_INIT_ISERIES(number)					    \
 }
 
 #else
 #define PACA_INIT(number)						    \
 {									    \
-	PACA_INIT_COMMON(number, 0, 0, 0)				    \
+	PACA_INIT_COMMON(number)					    \
 }
 
-#define BOOTCPU_PACA_INIT(number)					    \
-{									    \
-	PACA_INIT_COMMON(number, 1, STAB0_PHYS_ADDR, (u64)&initial_stab)    \
-}
 #endif
 
 struct paca_struct paca[] = {
-	BOOTCPU_PACA_INIT(0),
+	PACA_INIT(0),
 #if NR_CPUS > 1
 	PACA_INIT(  1), PACA_INIT(  2), PACA_INIT(  3),
 #if NR_CPUS > 4

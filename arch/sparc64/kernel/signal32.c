@@ -21,6 +21,7 @@
 #include <linux/binfmts.h>
 #include <linux/compat.h>
 #include <linux/bitops.h>
+#include <linux/tracehook.h>
 
 #include <asm/uaccess.h>
 #include <asm/ptrace.h>
@@ -29,6 +30,7 @@
 #include <asm/psrcompat.h>
 #include <asm/fpumacro.h>
 #include <asm/visasm.h>
+#include <asm/compat_signal.h>
 
 #define _BLOCKABLE (~(sigmask(SIGKILL) | sigmask(SIGSTOP)))
 
@@ -1236,6 +1238,7 @@ static inline void handle_signal32(unsigned long signr, struct k_sigaction *ka,
 		sigaddset(&current->blocked,signr);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
+	tracehook_report_handle_signal(signr, ka, oldset, regs);
 }
 
 static inline void syscall_restart32(unsigned long orig_i0, struct pt_regs *regs,

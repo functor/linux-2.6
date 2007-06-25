@@ -3,6 +3,8 @@
 
 #include <linux/time.h>
 
+struct task_struct;
+
 /*
  * Resource control/accounting header file for linux
  */
@@ -52,8 +54,11 @@ struct rlimit {
 /*
  * Limit the stack by to some sane default: root can always
  * increase this limit if needed..  8MB seems reasonable.
+ *
+ * (2MB more to cover randomization effects.)
  */
-#define _STK_LIM	(8*1024*1024)
+#define _STK_LIM	(10*1024*1024)
+#define EXEC_STACK_BIAS	(2*1024*1024)
 
 /*
  * GPG wants 32kB of mlocked memory, to make sure pass phrases
@@ -66,5 +71,7 @@ struct rlimit {
  * may be different for different linux versions..
  */
 #include <asm/resource.h>
+
+int getrusage(struct task_struct *p, int who, struct rusage __user *ru);
 
 #endif

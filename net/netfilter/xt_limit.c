@@ -68,6 +68,7 @@ static int
 ipt_limit_match(const struct sk_buff *skb,
 		const struct net_device *in,
 		const struct net_device *out,
+		const struct xt_match *match,
 		const void *matchinfo,
 		int offset,
 		unsigned int protoff,
@@ -107,14 +108,11 @@ user2credits(u_int32_t user)
 static int
 ipt_limit_checkentry(const char *tablename,
 		     const void *inf,
+		     const struct xt_match *match,
 		     void *matchinfo,
-		     unsigned int matchsize,
 		     unsigned int hook_mask)
 {
 	struct xt_rateinfo *r = matchinfo;
-
-	if (matchsize != XT_ALIGN(sizeof(struct xt_rateinfo)))
-		return 0;
 
 	/* Check for overflow. */
 	if (r->burst == 0
@@ -124,52 +122,96 @@ ipt_limit_checkentry(const char *tablename,
 		return 0;
 	}
 
-	/* User avg in seconds * XT_LIMIT_SCALE: convert to jiffies *
-	   128. */
-	r->prev = jiffies;
-	r->credit = user2credits(r->avg * r->burst);	 /* Credits full. */
-	r->credit_cap = user2credits(r->avg * r->burst); /* Credits full. */
-	r->cost = user2credits(r->avg);
-
 	/* For SMP, we only want to use one set of counters. */
 	r->master = r;
-
+	if (r->cost == 0) {
+		/* User avg in seconds * XT_LIMIT_SCALE: convert to jiffies *
+		   128. */
+		r->prev = jiffies;
+		r->credit = user2credits(r->avg * r->burst);	 /* Credits full. */
+		r->credit_cap = user2credits(r->avg * r->burst); /* Credits full. */
+		r->cost = user2credits(r->avg);
+	}
 	return 1;
 }
 
-static struct xt_match ipt_limit_reg = {
-	.name		= "limit",
-	.match		= ipt_limit_match,
-	.checkentry	= ipt_limit_checkentry,
-	.me		= THIS_MODULE,
-};
-static struct xt_match limit6_reg = {
-	.name		= "limit",
-	.match		= ipt_limit_match,
-	.checkentry	= ipt_limit_checkentry,
-	.me		= THIS_MODULE,
+#ifdef CONFIG_COMPAT
+struct compat_xt_rateinfo {
+	u_int32_t avg;
+	u_int32_t burst;
+
+	compat_ulong_t prev;
+	u_int32_t credit;
+	u_int32_t credit_cap, cost;
+
+	u_int32_t master;
 };
 
-static int __init init(void)
+/* To keep the full "prev" timestamp, the upper 32 bits are stored in the
+ * master pointer, which does not need to be preserved. */
+static void compat_from_user(void *dst, void *src)
 {
-	int ret;
-	
-	ret = xt_register_match(AF_INET, &ipt_limit_reg);
-	if (ret)
-		return ret;
-	
-	ret = xt_register_match(AF_INET6, &limit6_reg);
-	if (ret)
-		xt_unregister_match(AF_INET, &ipt_limit_reg);
-
-	return ret;
+	struct compat_xt_rateinfo *cm = src;
+	struct xt_rateinfo m = {
+		.avg		= cm->avg,
+		.burst		= cm->burst,
+		.prev		= cm->prev | (unsigned long)cm->master << 32,
+		.credit		= cm->credit,
+		.credit_cap	= cm->credit_cap,
+		.cost		= cm->cost,
+	};
+	memcpy(dst, &m, sizeof(m));
 }
 
-static void __exit fini(void)
+static int compat_to_user(void __user *dst, void *src)
 {
-	xt_unregister_match(AF_INET, &ipt_limit_reg);
-	xt_unregister_match(AF_INET6, &limit6_reg);
+	struct xt_rateinfo *m = src;
+	struct compat_xt_rateinfo cm = {
+		.avg		= m->avg,
+		.burst		= m->burst,
+		.prev		= m->prev,
+		.credit		= m->credit,
+		.credit_cap	= m->credit_cap,
+		.cost		= m->cost,
+		.master		= m->prev >> 32,
+	};
+	return copy_to_user(dst, &cm, sizeof(cm)) ? -EFAULT : 0;
+}
+#endif /* CONFIG_COMPAT */
+
+static struct xt_match xt_limit_match[] = {
+	{
+		.name		= "limit",
+		.family		= AF_INET,
+		.checkentry	= ipt_limit_checkentry,
+		.match		= ipt_limit_match,
+		.matchsize	= sizeof(struct xt_rateinfo),
+#ifdef CONFIG_COMPAT
+		.compatsize	= sizeof(struct compat_xt_rateinfo),
+		.compat_from_user = compat_from_user,
+		.compat_to_user	= compat_to_user,
+#endif
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "limit",
+		.family		= AF_INET6,
+		.checkentry	= ipt_limit_checkentry,
+		.match		= ipt_limit_match,
+		.matchsize	= sizeof(struct xt_rateinfo),
+		.me		= THIS_MODULE,
+	},
+};
+
+static int __init xt_limit_init(void)
+{
+	return xt_register_matches(xt_limit_match, ARRAY_SIZE(xt_limit_match));
 }
 
-module_init(init);
-module_exit(fini);
+static void __exit xt_limit_fini(void)
+{
+	xt_unregister_matches(xt_limit_match, ARRAY_SIZE(xt_limit_match));
+}
+
+module_init(xt_limit_init);
+module_exit(xt_limit_fini);

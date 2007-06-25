@@ -25,6 +25,8 @@
 #include <linux/netfilter_ipv4/ip_set_iphash.h>
 #include <linux/netfilter_ipv4/ip_set_jhash.h>
 
+static int limit = MAX_RANGE;
+
 static inline __u32
 jhash_ip(const struct ip_set_iphash *map, uint16_t i, ip_set_ip_t ip)
 {
@@ -58,7 +60,7 @@ hash_id(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 static inline int
 __testip(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 {
-	return (hash_id(set, ip, hash_ip) != UINT_MAX);
+	return (ip && hash_id(set, ip, hash_ip) != UINT_MAX);
 }
 
 static int
@@ -97,6 +99,9 @@ __addip(struct ip_set_iphash *map, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 	__u32 probe;
 	u_int16_t i;
 	ip_set_ip_t *elem;
+	
+	if (!ip || map->elements > limit)
+		return -ERANGE;
 
 	*hash_ip = ip & map->netmask;
 	
@@ -107,6 +112,7 @@ __addip(struct ip_set_iphash *map, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 			return -EEXIST;
 		if (!*elem) {
 			*elem = *hash_ip;
+			map->elements++;
 			return 0;
 		}
 	}
@@ -183,6 +189,7 @@ static int retry(struct ip_set *set)
 		return -ENOMEM;
 	}
 	tmp->hashsize = hashsize;
+	tmp->elements = 0;
 	tmp->probes = map->probes;
 	tmp->resize = map->resize;
 	tmp->netmask = map->netmask;
@@ -220,14 +227,18 @@ static inline int
 __delip(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 {
 	struct ip_set_iphash *map = (struct ip_set_iphash *) set->data;
-	ip_set_ip_t id = hash_id(set, ip, hash_ip);
-	ip_set_ip_t *elem;
+	ip_set_ip_t id, *elem;
 
+	if (!ip)
+		return -ERANGE;
+
+	id = hash_id(set, ip, hash_ip);
 	if (id == UINT_MAX)
 		return -EEXIST;
 		
 	elem = HARRAY_ELEM(map->members, ip_set_ip_t *, id);
 	*elem = 0;
+	map->elements--;
 
 	return 0;
 }
@@ -296,6 +307,7 @@ static int create(struct ip_set *set, const void *data, size_t size)
 	}
 	for (i = 0; i < req->probes; i++)
 		get_random_bytes(((uint32_t *) map->initval)+i, 4);
+	map->elements = 0;
 	map->hashsize = req->hashsize;
 	map->probes = req->probes;
 	map->resize = req->resize;
@@ -325,6 +337,7 @@ static void flush(struct ip_set *set)
 {
 	struct ip_set_iphash *map = (struct ip_set_iphash *) set->data;
 	harray_flush(map->members, map->hashsize, sizeof(ip_set_ip_t));
+	map->elements = 0;
 }
 
 static void list_header(const struct ip_set *set, void *data)
@@ -382,6 +395,8 @@ static struct ip_set_type ip_set_iphash = {
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 MODULE_DESCRIPTION("iphash type of IP sets");
+module_param(limit, int, 0600);
+MODULE_PARM_DESC(limit, "maximal number of elements stored in the sets");
 
 static int __init init(void)
 {

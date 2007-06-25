@@ -29,13 +29,13 @@
  *		<jkenisto@us.ibm.com>  and Prasanna S Panchamukhi
  *		<prasanna@in.ibm.com> added function-return probes.
  */
-#include <linux/config.h>
 #include <linux/list.h>
 #include <linux/notifier.h>
 #include <linux/smp.h>
 #include <linux/percpu.h>
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
+#include <linux/mutex.h>
 
 #ifdef CONFIG_KPROBES
 #include <asm/kprobes.h>
@@ -76,6 +76,12 @@ struct kprobe {
 
 	/* location of the probe point */
 	kprobe_opcode_t *addr;
+
+	/* Allow user to indicate symbol name of the probe point */
+	char *symbol_name;
+
+	/* Offset into the symbol */
+	unsigned int offset;
 
 	/* Called before addr is executed. */
 	kprobe_pre_handler_t pre_handler;
@@ -152,14 +158,14 @@ struct kretprobe_instance {
 };
 
 extern spinlock_t kretprobe_lock;
-extern struct semaphore kprobe_mutex;
+extern struct mutex kprobe_mutex;
 extern int arch_prepare_kprobe(struct kprobe *p);
 extern void arch_arm_kprobe(struct kprobe *p);
 extern void arch_disarm_kprobe(struct kprobe *p);
 extern int arch_init_kprobes(void);
 extern void show_registers(struct pt_regs *regs);
 extern kprobe_opcode_t *get_insn_slot(void);
-extern void free_insn_slot(kprobe_opcode_t *slot);
+extern void free_insn_slot(kprobe_opcode_t *slot, int dirty);
 extern void kprobes_inc_nmissed_count(struct kprobe *p);
 
 /* Get the kprobe at this addr (if any) - called with preemption disabled */
@@ -196,7 +202,7 @@ void unregister_kretprobe(struct kretprobe *rp);
 struct kretprobe_instance *get_free_rp_inst(struct kretprobe *rp);
 void add_rp_inst(struct kretprobe_instance *ri);
 void kprobe_flush_task(struct task_struct *tk);
-void recycle_rp_inst(struct kretprobe_instance *ri);
+void recycle_rp_inst(struct kretprobe_instance *ri, struct hlist_head *head);
 #else /* CONFIG_KPROBES */
 
 #define __kprobes	/**/

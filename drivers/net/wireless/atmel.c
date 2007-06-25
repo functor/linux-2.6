@@ -39,7 +39,6 @@
 
 ******************************************************************************/
 
-#include <linux/config.h>
 #include <linux/init.h>
 
 #include <linux/kernel.h>
@@ -136,44 +135,6 @@ static struct {
 #define MAC_INIT_COMPLETE       0x0001        // MAC init has been completed
 #define MAC_BOOT_COMPLETE       0x0010        // MAC boot has been completed
 #define MAC_INIT_OK             0x0002        // MAC boot has been completed
-
-#define C80211_SUBTYPE_MGMT_ASS_REQUEST                 0x00
-#define C80211_SUBTYPE_MGMT_ASS_RESPONSE                0x10
-#define C80211_SUBTYPE_MGMT_REASS_REQUEST               0x20
-#define C80211_SUBTYPE_MGMT_REASS_RESPONSE              0x30
-#define C80211_SUBTYPE_MGMT_ProbeRequest                0x40
-#define C80211_SUBTYPE_MGMT_ProbeResponse               0x50
-#define C80211_SUBTYPE_MGMT_BEACON                      0x80
-#define C80211_SUBTYPE_MGMT_ATIM                        0x90
-#define C80211_SUBTYPE_MGMT_DISASSOSIATION              0xA0
-#define C80211_SUBTYPE_MGMT_Authentication              0xB0
-#define C80211_SUBTYPE_MGMT_Deauthentication    0xC0
-
-#define C80211_MGMT_AAN_OPENSYSTEM              0x0000
-#define C80211_MGMT_AAN_SHAREDKEY               0x0001
-
-#define C80211_MGMT_CAPABILITY_ESS              0x0001  // see 802.11 p.58
-#define C80211_MGMT_CAPABILITY_IBSS             0x0002  //      - " -
-#define C80211_MGMT_CAPABILITY_CFPollable       0x0004  //      - " -
-#define C80211_MGMT_CAPABILITY_CFPollRequest    0x0008  //      - " -
-#define C80211_MGMT_CAPABILITY_Privacy          0x0010  //      - " -
-
-#define C80211_MGMT_SC_Success                  0
-#define C80211_MGMT_SC_Unspecified              1
-#define C80211_MGMT_SC_SupportCapabilities      10
-#define C80211_MGMT_SC_ReassDenied              11
-#define C80211_MGMT_SC_AssDenied                12
-#define C80211_MGMT_SC_AuthAlgNotSupported      13
-#define C80211_MGMT_SC_AuthTransSeqNumError     14
-#define C80211_MGMT_SC_AuthRejectChallenge      15
-#define C80211_MGMT_SC_AuthRejectTimeout        16
-#define C80211_MGMT_SC_AssDeniedHandleAP        17
-#define C80211_MGMT_SC_AssDeniedBSSRate         18
-
-#define C80211_MGMT_ElementID_SSID              0
-#define C80211_MGMT_ElementID_SupportedRates    1
-#define C80211_MGMT_ElementID_ChallengeText     16
-#define C80211_MGMT_CAPABILITY_ShortPreamble    0x0020
 
 #define MIB_MAX_DATA_BYTES    212
 #define MIB_HEADER_SIZE       4    /* first four fields */
@@ -634,7 +595,7 @@ static void atmel_join_bss(struct atmel_private *priv, int bss_index);
 static void atmel_smooth_qual(struct atmel_private *priv);
 static void atmel_writeAR(struct net_device *dev, u16 data);
 static int probe_atmel_card(struct net_device *dev);
-static int reset_atmel_card(struct net_device *dev );
+static int reset_atmel_card(struct net_device *dev);
 static void atmel_enter_state(struct atmel_private *priv, int new_state);
 int atmel_open (struct net_device *dev);
 
@@ -823,11 +784,11 @@ static void tx_update_descriptor(struct atmel_private *priv, int is_bcast,
 
 static int start_tx(struct sk_buff *skb, struct net_device *dev)
 {
+	static const u8 SNAP_RFC1024[6] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00 };
 	struct atmel_private *priv = netdev_priv(dev);
 	struct ieee80211_hdr_4addr header;
 	unsigned long flags;
 	u16 buff, frame_ctl, len = (ETH_ZLEN < skb->len) ? skb->len : ETH_ZLEN;
-	u8 SNAP_RFC1024[6] = {0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00};
 
 	if (priv->card && priv->present_callback &&
 	    !(*priv->present_callback)(priv->card)) {
@@ -1184,7 +1145,7 @@ next:
 	}
 }
 
-static irqreturn_t service_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t service_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = (struct net_device *) dev_id;
 	struct atmel_private *priv = netdev_priv(dev);
@@ -1232,7 +1193,7 @@ static irqreturn_t service_interrupt(int irq, void *dev_id, struct pt_regs *regs
 
 		atmel_set_gcr(dev, GCR_ACKINT); /* acknowledge interrupt */
 
-		for (i = 0; i < sizeof(irq_order)/sizeof(u8); i++)
+		for (i = 0; i < ARRAY_SIZE(irq_order); i++)
 			if (isr & irq_order[i])
 				break;
 
@@ -1384,10 +1345,10 @@ int atmel_open(struct net_device *dev)
 		atmel_set_mib8(priv, Phy_Mib_Type, PHY_MIB_REG_DOMAIN_POS, priv->reg_domain);
 	} else {
 		priv->reg_domain = atmel_get_mib8(priv, Phy_Mib_Type, PHY_MIB_REG_DOMAIN_POS);
-		for (i = 0; i < sizeof(channel_table)/sizeof(channel_table[0]); i++)
+		for (i = 0; i < ARRAY_SIZE(channel_table); i++)
 			if (priv->reg_domain == channel_table[i].reg_domain)
 				break;
-		if (i == sizeof(channel_table)/sizeof(channel_table[0])) {
+		if (i == ARRAY_SIZE(channel_table)) {
 			priv->reg_domain = REG_DOMAIN_MKK1;
 			printk(KERN_ALERT "%s: failed to get regulatory domain: assuming MKK1.\n", dev->name);
 		}
@@ -1432,7 +1393,7 @@ static int atmel_validate_channel(struct atmel_private *priv, int channel)
 	   else return suitable default channel */
 	int i;
 
-	for (i = 0; i < sizeof(channel_table)/sizeof(channel_table[0]); i++)
+	for (i = 0; i < ARRAY_SIZE(channel_table); i++)
 		if (priv->reg_domain == channel_table[i].reg_domain) {
 			if (channel >= channel_table[i].min &&
 			    channel <= channel_table[i].max)
@@ -1476,7 +1437,7 @@ static int atmel_proc_output (char *buf, struct atmel_private *priv)
 		}
 
 		r = "<unknown>";
-		for (i = 0; i < sizeof(channel_table)/sizeof(channel_table[0]); i++)
+		for (i = 0; i < ARRAY_SIZE(channel_table); i++)
 			if (priv->reg_domain == channel_table[i].reg_domain)
 				r = channel_table[i].name;
 
@@ -1616,7 +1577,7 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 
 	SET_NETDEV_DEV(dev, sys_dev);
 
-	if ((rc = request_irq(dev->irq, service_interrupt, SA_SHIRQ, dev->name, dev))) {
+	if ((rc = request_irq(dev->irq, service_interrupt, IRQF_SHARED, dev->name, dev))) {
 		printk(KERN_ERR "%s: register interrupt %d failed, rc %d\n", dev->name, irq, rc);
 		goto err_out_free;
 	}
@@ -1695,13 +1656,13 @@ static int atmel_set_essid(struct net_device *dev,
 		priv->connect_to_any_BSS = 0;
 
 		/* Check the size of the string */
-		if (dwrq->length > MAX_SSID_LENGTH + 1)
+		if (dwrq->length > MAX_SSID_LENGTH)
 			 return -E2BIG;
 		if (index != 0)
 			return -EINVAL;
 
-		memcpy(priv->new_SSID, extra, dwrq->length - 1);
-		priv->new_SSID_size = dwrq->length - 1;
+		memcpy(priv->new_SSID, extra, dwrq->length);
+		priv->new_SSID_size = dwrq->length;
 	}
 
 	return -EINPROGRESS;
@@ -1717,11 +1678,9 @@ static int atmel_get_essid(struct net_device *dev,
 	/* Get the current SSID */
 	if (priv->new_SSID_size != 0) {
 		memcpy(extra, priv->new_SSID, priv->new_SSID_size);
-		extra[priv->new_SSID_size] = '\0';
 		dwrq->length = priv->new_SSID_size;
 	} else {
 		memcpy(extra, priv->SSID, priv->SSID_size);
-		extra[priv->SSID_size] = '\0';
 		dwrq->length = priv->SSID_size;
 	}
 
@@ -1777,7 +1736,7 @@ static int atmel_set_encode(struct net_device *dev,
 				/* Disable the key */
 				priv->wep_key_len[index] = 0;
 		/* Check if the key is not marked as invalid */
-		if(!(dwrq->flags & IW_ENCODE_NOKEY)) {
+		if (!(dwrq->flags & IW_ENCODE_NOKEY)) {
 			/* Cleanup */
 			memset(priv->wep_keys[index], 0, 13);
 			/* Copy the key in the driver */
@@ -1948,7 +1907,7 @@ static int atmel_get_encodeext(struct net_device *dev,
 
 	encoding->flags = idx + 1;
 	memset(ext, 0, sizeof(*ext));
-	
+
 	if (!priv->wep_is_on) {
 		ext->alg = IW_ENCODE_ALG_NONE;
 		ext->key_len = 0;
@@ -2159,9 +2118,9 @@ static int atmel_set_retry(struct net_device *dev,
 	struct atmel_private *priv = netdev_priv(dev);
 
 	if (!vwrq->disabled && (vwrq->flags & IW_RETRY_LIMIT)) {
-		if (vwrq->flags & IW_RETRY_MAX)
+		if (vwrq->flags & IW_RETRY_LONG)
 			priv->long_retry = vwrq->value;
-		else if (vwrq->flags & IW_RETRY_MIN)
+		else if (vwrq->flags & IW_RETRY_SHORT)
 			priv->short_retry = vwrq->value;
 		else {
 			/* No modifier : set both */
@@ -2183,15 +2142,15 @@ static int atmel_get_retry(struct net_device *dev,
 
 	vwrq->disabled = 0;      /* Can't be disabled */
 
-	/* Note : by default, display the min retry number */
-	if (vwrq->flags & IW_RETRY_MAX) {
-		vwrq->flags = IW_RETRY_LIMIT | IW_RETRY_MAX;
+	/* Note : by default, display the short retry number */
+	if (vwrq->flags & IW_RETRY_LONG) {
+		vwrq->flags = IW_RETRY_LIMIT | IW_RETRY_LONG;
 		vwrq->value = priv->long_retry;
 	} else {
 		vwrq->flags = IW_RETRY_LIMIT;
 		vwrq->value = priv->short_retry;
 		if (priv->long_retry != priv->short_retry)
-			vwrq->flags |= IW_RETRY_MIN;
+			vwrq->flags |= IW_RETRY_SHORT;
 	}
 
 	return 0;
@@ -2384,6 +2343,14 @@ static int atmel_get_scan(struct net_device *dev,
 		iwe.u.freq.e = 0;
 		current_ev = iwe_stream_add_event(current_ev, extra + IW_SCAN_MAX_DATA, &iwe, IW_EV_FREQ_LEN);
 
+		/* Add quality statistics */
+		iwe.cmd = IWEVQUAL;
+		iwe.u.qual.level = priv->BSSinfo[i].RSSI;
+		iwe.u.qual.qual  = iwe.u.qual.level;
+		/* iwe.u.qual.noise  = SOMETHING */
+		current_ev = iwe_stream_add_event(current_ev, extra + IW_SCAN_MAX_DATA , &iwe, IW_EV_QUAL_LEN);
+
+
 		iwe.cmd = SIOCGIWENCODE;
 		if (priv->BSSinfo[i].UsingWEP)
 			iwe.u.data.flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY;
@@ -2414,7 +2381,7 @@ static int atmel_get_range(struct net_device *dev,
 	range->min_nwid = 0x0000;
 	range->max_nwid = 0x0000;
 	range->num_channels = 0;
-	for (j = 0; j < sizeof(channel_table)/sizeof(channel_table[0]); j++)
+	for (j = 0; j < ARRAY_SIZE(channel_table); j++)
 		if (priv->reg_domain == channel_table[j].reg_domain) {
 			range->num_channels = channel_table[j].max - channel_table[j].min + 1;
 			break;
@@ -2620,9 +2587,9 @@ static const struct iw_priv_args atmel_private_args[] = {
 
 static const struct iw_handler_def atmel_handler_def =
 {
-	.num_standard	= sizeof(atmel_handler)/sizeof(iw_handler),
-	.num_private	= sizeof(atmel_private_handler)/sizeof(iw_handler),
-	.num_private_args = sizeof(atmel_private_args)/sizeof(struct iw_priv_args),
+	.num_standard	= ARRAY_SIZE(atmel_handler),
+	.num_private	= ARRAY_SIZE(atmel_private_handler),
+	.num_private_args = ARRAY_SIZE(atmel_private_args),
 	.standard	= (iw_handler *) atmel_handler,
 	.private	= (iw_handler *) atmel_private_handler,
 	.private_args	= (struct iw_priv_args *) atmel_private_args,
@@ -2686,7 +2653,7 @@ static int atmel_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 		domain[REGDOMAINSZ] = 0;
 		rc = -EINVAL;
-		for (i = 0; i < sizeof(channel_table)/sizeof(channel_table[0]); i++) {
+		for (i = 0; i < ARRAY_SIZE(channel_table); i++) {
 			/* strcasecmp doesn't exist in the library */
 			char *a = channel_table[i].name;
 			char *b = domain;
@@ -2835,7 +2802,7 @@ static void handle_beacon_probe(struct atmel_private *priv, u16 capability,
 				u8 channel)
 {
 	int rejoin = 0;
-	int new = capability  & C80211_MGMT_CAPABILITY_ShortPreamble ?
+	int new = capability & MFIE_TYPE_POWER_CONSTRAINT ?
 		SHORT_PREAMBLE : LONG_PREAMBLE;
 
 	if (priv->preamble != new) {
@@ -2921,11 +2888,11 @@ static void send_association_request(struct atmel_private *priv, int is_reassoc)
 	memcpy(header.addr2, priv->dev->dev_addr, 6);
 	memcpy(header.addr3, priv->CurrentBSSID, 6);
 
-	body.capability = cpu_to_le16(C80211_MGMT_CAPABILITY_ESS);
+	body.capability = cpu_to_le16(WLAN_CAPABILITY_ESS);
 	if (priv->wep_is_on)
-		body.capability |= cpu_to_le16(C80211_MGMT_CAPABILITY_Privacy);
+		body.capability |= cpu_to_le16(WLAN_CAPABILITY_PRIVACY);
 	if (priv->preamble == SHORT_PREAMBLE)
-		body.capability |= cpu_to_le16(C80211_MGMT_CAPABILITY_ShortPreamble);
+		body.capability |= cpu_to_le16(MFIE_TYPE_POWER_CONSTRAINT);
 
 	body.listen_interval = cpu_to_le16(priv->listen_interval * priv->beacon_period);
 
@@ -2939,10 +2906,10 @@ static void send_association_request(struct atmel_private *priv, int is_reassoc)
 		bodysize = 12 + priv->SSID_size;
 	}
 
-	ssid_el_p[0] = C80211_MGMT_ElementID_SSID;
+	ssid_el_p[0] = MFIE_TYPE_SSID;
 	ssid_el_p[1] = priv->SSID_size;
 	memcpy(ssid_el_p + 2, priv->SSID, priv->SSID_size);
-	ssid_el_p[2 + priv->SSID_size] = C80211_MGMT_ElementID_SupportedRates;
+	ssid_el_p[2 + priv->SSID_size] = MFIE_TYPE_RATES;
 	ssid_el_p[3 + priv->SSID_size] = 4; /* len of suported rates */
 	memcpy(ssid_el_p + 4 + priv->SSID_size, atmel_basic_rates, 4);
 
@@ -3004,7 +2971,7 @@ static void store_bss_info(struct atmel_private *priv,
 			   u16 beacon_period, u8 channel, u8 rssi, u8 ssid_len,
 			   u8 *ssid, int is_beacon)
 {
-	u8 *bss = capability & C80211_MGMT_CAPABILITY_ESS ? header->addr2 : header->addr3;
+	u8 *bss = capability & WLAN_CAPABILITY_ESS ? header->addr2 : header->addr3;
 	int i, index;
 
 	for (index = -1, i = 0; i < priv->BSS_list_entries; i++)
@@ -3030,16 +2997,16 @@ static void store_bss_info(struct atmel_private *priv,
 
 	priv->BSSinfo[index].channel = channel;
 	priv->BSSinfo[index].beacon_period = beacon_period;
-	priv->BSSinfo[index].UsingWEP = capability & C80211_MGMT_CAPABILITY_Privacy;
+	priv->BSSinfo[index].UsingWEP = capability & WLAN_CAPABILITY_PRIVACY;
 	memcpy(priv->BSSinfo[index].SSID, ssid, ssid_len);
 	priv->BSSinfo[index].SSIDsize = ssid_len;
 
-	if (capability & C80211_MGMT_CAPABILITY_IBSS)
+	if (capability & WLAN_CAPABILITY_IBSS)
 		priv->BSSinfo[index].BSStype = IW_MODE_ADHOC;
-	else if (capability & C80211_MGMT_CAPABILITY_ESS)
+	else if (capability & WLAN_CAPABILITY_ESS)
 		priv->BSSinfo[index].BSStype =IW_MODE_INFRA;
 
-	priv->BSSinfo[index].preamble = capability & C80211_MGMT_CAPABILITY_ShortPreamble ?
+	priv->BSSinfo[index].preamble = capability & MFIE_TYPE_POWER_CONSTRAINT ?
 		SHORT_PREAMBLE : LONG_PREAMBLE;
 }
 
@@ -3050,7 +3017,7 @@ static void authenticate(struct atmel_private *priv, u16 frame_len)
 	u16 trans_seq_no = le16_to_cpu(auth->trans_seq);
 	u16 system = le16_to_cpu(auth->alg);
 
-	if (status == C80211_MGMT_SC_Success && !priv->wep_is_on) {
+	if (status == WLAN_STATUS_SUCCESS && !priv->wep_is_on) {
 		/* no WEP */
 		if (priv->station_was_associated) {
 			atmel_enter_state(priv, STATION_STATE_REASSOCIATING);
@@ -3063,19 +3030,19 @@ static void authenticate(struct atmel_private *priv, u16 frame_len)
 		}
 	}
 
-	if (status == C80211_MGMT_SC_Success && priv->wep_is_on) {
+	if (status == WLAN_STATUS_SUCCESS && priv->wep_is_on) {
 		int should_associate = 0;
 		/* WEP */
 		if (trans_seq_no != priv->ExpectedAuthentTransactionSeqNum)
 			return;
 
-		if (system == C80211_MGMT_AAN_OPENSYSTEM) {
+		if (system == WLAN_AUTH_OPEN) {
 			if (trans_seq_no == 0x0002) {
 				should_associate = 1;
 			}
-		} else if (system == C80211_MGMT_AAN_SHAREDKEY) {
+		} else if (system == WLAN_AUTH_SHARED_KEY) {
 			if (trans_seq_no == 0x0002 &&
-			    auth->el_id == C80211_MGMT_ElementID_ChallengeText) {
+			    auth->el_id == MFIE_TYPE_CHALLENGE) {
 				send_authentication_request(priv, system, auth->chall_text, auth->chall_text_len);
 				return;
 			} else if (trans_seq_no == 0x0004) {
@@ -3140,8 +3107,8 @@ static void associate(struct atmel_private *priv, u16 frame_len, u16 subtype)
 	if (frame_len < 8 + rates_len)
 		return;
 
-	if (status == C80211_MGMT_SC_Success) {
-		if (subtype == C80211_SUBTYPE_MGMT_ASS_RESPONSE)
+	if (status == WLAN_STATUS_SUCCESS) {
+		if (subtype == IEEE80211_STYPE_ASSOC_RESP)
 			priv->AssociationRequestRetryCnt = 0;
 		else
 			priv->ReAssociationRequestRetryCnt = 0;
@@ -3178,9 +3145,9 @@ static void associate(struct atmel_private *priv, u16 frame_len, u16 subtype)
 		return;
 	}
 
-	if (subtype == C80211_SUBTYPE_MGMT_ASS_RESPONSE &&
-	    status != C80211_MGMT_SC_AssDeniedBSSRate &&
-	    status != C80211_MGMT_SC_SupportCapabilities &&
+	if (subtype == IEEE80211_STYPE_ASSOC_RESP &&
+	    status != WLAN_STATUS_ASSOC_DENIED_RATES &&
+	    status != WLAN_STATUS_CAPS_UNSUPPORTED &&
 	    priv->AssociationRequestRetryCnt < MAX_ASSOCIATION_RETRIES) {
 		mod_timer(&priv->management_timer, jiffies + MGMT_JIFFIES);
 		priv->AssociationRequestRetryCnt++;
@@ -3188,9 +3155,9 @@ static void associate(struct atmel_private *priv, u16 frame_len, u16 subtype)
 		return;
 	}
 
-	if (subtype == C80211_SUBTYPE_MGMT_REASS_RESPONSE &&
-	    status != C80211_MGMT_SC_AssDeniedBSSRate &&
-	    status != C80211_MGMT_SC_SupportCapabilities &&
+	if (subtype == IEEE80211_STYPE_REASSOC_RESP &&
+	    status != WLAN_STATUS_ASSOC_DENIED_RATES &&
+	    status != WLAN_STATUS_CAPS_UNSUPPORTED &&
 	    priv->AssociationRequestRetryCnt < MAX_ASSOCIATION_RETRIES) {
 		mod_timer(&priv->management_timer, jiffies + MGMT_JIFFIES);
 		priv->ReAssociationRequestRetryCnt++;
@@ -3325,8 +3292,8 @@ static void atmel_management_frame(struct atmel_private *priv,
 
 	subtype = le16_to_cpu(header->frame_ctl) & IEEE80211_FCTL_STYPE;
 	switch (subtype) {
-	case C80211_SUBTYPE_MGMT_BEACON:
-	case C80211_SUBTYPE_MGMT_ProbeResponse:
+	case IEEE80211_STYPE_BEACON:
+	case IEEE80211_STYPE_PROBE_RESP:
 
 		/* beacon frame has multiple variable-length fields -
 		   never let an engineer loose with a data structure design. */
@@ -3384,19 +3351,19 @@ static void atmel_management_frame(struct atmel_private *priv,
 					       beacon_interval, channel, rssi,
 					       ssid_length,
 					       &beacon->rates_el_id,
-					       subtype == C80211_SUBTYPE_MGMT_BEACON);
+					       subtype == IEEE80211_STYPE_BEACON);
 		}
 		break;
 
-	case C80211_SUBTYPE_MGMT_Authentication:
+	case IEEE80211_STYPE_AUTH:
 
 		if (priv->station_state == STATION_STATE_AUTHENTICATING)
 			authenticate(priv, frame_len);
 
 		break;
 
-	case C80211_SUBTYPE_MGMT_ASS_RESPONSE:
-	case C80211_SUBTYPE_MGMT_REASS_RESPONSE:
+	case IEEE80211_STYPE_ASSOC_RESP:
+	case IEEE80211_STYPE_REASSOC_RESP:
 
 		if (priv->station_state == STATION_STATE_ASSOCIATING ||
 		    priv->station_state == STATION_STATE_REASSOCIATING)
@@ -3404,7 +3371,7 @@ static void atmel_management_frame(struct atmel_private *priv,
 
 		break;
 
-	case C80211_SUBTYPE_MGMT_DISASSOSIATION:
+	case IEEE80211_STYPE_DISASSOC:
 		if (priv->station_is_associated &&
 		    priv->operating_mode == IW_MODE_INFRA &&
 		    is_frame_from_current_bss(priv, header)) {
@@ -3417,7 +3384,7 @@ static void atmel_management_frame(struct atmel_private *priv,
 
 		break;
 
-	case C80211_SUBTYPE_MGMT_Deauthentication:
+	case IEEE80211_STYPE_DEAUTH:
 		if (priv->operating_mode == IW_MODE_INFRA &&
 		    is_frame_from_current_bss(priv, header)) {
 			priv->station_was_associated = 0;
@@ -3453,12 +3420,12 @@ static void atmel_management_timer(u_long a)
 			priv->AuthenticationRequestRetryCnt = 0;
 			restart_search(priv);
 		} else {
-			int auth = C80211_MGMT_AAN_OPENSYSTEM;
+			int auth = WLAN_AUTH_OPEN;
 			priv->AuthenticationRequestRetryCnt++;
 			priv->CurrentAuthentTransactionSeqNum = 0x0001;
 			mod_timer(&priv->management_timer, jiffies + MGMT_JIFFIES);
 			if (priv->wep_is_on && priv->exclude_unencrypted)
-				auth = C80211_MGMT_AAN_SHAREDKEY;
+				auth = WLAN_AUTH_SHARED_KEY;
 			send_authentication_request(priv, auth, NULL, 0);
 	  }
 	  break;
@@ -3501,6 +3468,7 @@ static void atmel_command_irq(struct atmel_private *priv)
 	u8 status = atmel_rmem8(priv, atmel_co(priv, CMD_BLOCK_STATUS_OFFSET));
 	u8 command = atmel_rmem8(priv, atmel_co(priv, CMD_BLOCK_COMMAND_OFFSET));
 	int fast_scan;
+	union iwreq_data wrqu;
 
 	if (status == CMD_STATUS_IDLE ||
 	    status == CMD_STATUS_IN_PROGRESS)
@@ -3525,6 +3493,7 @@ static void atmel_command_irq(struct atmel_private *priv)
 			atmel_scan(priv, 1);
 		} else {
 			int bss_index = retrieve_bss(priv);
+			int notify_scan_complete = 1;
 			if (bss_index != -1) {
 				atmel_join_bss(priv, bss_index);
 			} else if (priv->operating_mode == IW_MODE_ADHOC &&
@@ -3533,8 +3502,14 @@ static void atmel_command_irq(struct atmel_private *priv)
 			} else {
 				priv->fast_scan = !fast_scan;
 				atmel_scan(priv, 1);
+				notify_scan_complete = 0;
 			}
 			priv->site_survey_state = SITE_SURVEY_COMPLETED;
+			if (notify_scan_complete) {
+				wrqu.data.length = 0;
+				wrqu.data.flags = 0;
+				wireless_send_event(priv->dev, SIOCGIWSCAN, &wrqu, NULL);
+			}
 		}
 		break;
 
@@ -3547,6 +3522,9 @@ static void atmel_command_irq(struct atmel_private *priv)
 		priv->site_survey_state = SITE_SURVEY_COMPLETED;
 		if (priv->station_is_associated) {
 			atmel_enter_state(priv, STATION_STATE_READY);
+			wrqu.data.length = 0;
+			wrqu.data.flags = 0;
+			wireless_send_event(priv->dev, SIOCGIWSCAN, &wrqu, NULL);
 		} else {
 			atmel_scan(priv, 1);
 		}
@@ -3558,14 +3536,14 @@ static void atmel_command_irq(struct atmel_private *priv)
 				priv->station_was_associated = priv->station_is_associated;
 				atmel_enter_state(priv, STATION_STATE_READY);
 			} else {
-				int auth = C80211_MGMT_AAN_OPENSYSTEM;
+				int auth = WLAN_AUTH_OPEN;
 				priv->AuthenticationRequestRetryCnt = 0;
 				atmel_enter_state(priv, STATION_STATE_AUTHENTICATING);
 
 				mod_timer(&priv->management_timer, jiffies + MGMT_JIFFIES);
 				priv->CurrentAuthentTransactionSeqNum = 0x0001;
 				if (priv->wep_is_on && priv->exclude_unencrypted)
-					auth = C80211_MGMT_AAN_SHAREDKEY;
+					auth = WLAN_AUTH_SHARED_KEY;
 				send_authentication_request(priv, auth, NULL, 0);
 			}
 			return;

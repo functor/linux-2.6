@@ -1,5 +1,9 @@
 menu "Kernel hacking"
 
+config TRACE_IRQFLAGS_SUPPORT
+	bool
+	default y
+
 source "lib/Kconfig.debug"
 
 config DEBUG_STACK_USAGE
@@ -24,7 +28,7 @@ config DEBUG_BOOTMEM
 	bool "Debug BOOTMEM initialization"
 
 config DEBUG_PAGEALLOC
-	bool "Page alloc debugging"
+	bool "Debug page memory allocations"
 	depends on DEBUG_KERNEL && !SOFTWARE_SUSPEND
 	help
 	  Unmap pages from the kernel linear mapping after free_pages().

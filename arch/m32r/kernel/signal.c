@@ -10,7 +10,6 @@
  *  2000-06-20  Pentium III FXSR, SSE support by Gareth Hughes
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
@@ -22,7 +21,7 @@
 #include <linux/unistd.h>
 #include <linux/stddef.h>
 #include <linux/personality.h>
-#include <linux/suspend.h>
+#include <linux/freezer.h>
 #include <asm/cacheflush.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
@@ -34,7 +33,7 @@
 int do_signal(struct pt_regs *, sigset_t *);
 
 asmlinkage int
-sys_rt_sigsuspend(sigset_t *unewset, size_t sigsetsize,
+sys_rt_sigsuspend(sigset_t __user *unewset, size_t sigsetsize,
 		  unsigned long r2, unsigned long r3, unsigned long r4,
 		  unsigned long r5, unsigned long r6, struct pt_regs *regs)
 {
@@ -79,8 +78,8 @@ sys_sigaltstack(const stack_t __user *uss, stack_t __user *uoss,
 struct rt_sigframe
 {
 	int sig;
-	struct siginfo *pinfo;
-	void *puc;
+	struct siginfo __user *pinfo;
+	void __user *puc;
 	struct siginfo info;
 	struct ucontext uc;
 //	struct _fpstate fpstate;
@@ -110,17 +109,10 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc,
 	COPY(r10);
 	COPY(r11);
 	COPY(r12);
-#if defined(CONFIG_ISA_M32R2) && defined(CONFIG_ISA_DSP_LEVEL2)
 	COPY(acc0h);
 	COPY(acc0l);
-	COPY(acc1h);
-	COPY(acc1l);
-#elif defined(CONFIG_ISA_M32R2) || defined(CONFIG_ISA_M32R)
-	COPY(acch);
-	COPY(accl);
-#else
-#error unknown isa configuration
-#endif
+	COPY(acc1h);		/* ISA_DSP_LEVEL2 only */
+	COPY(acc1l);		/* ISA_DSP_LEVEL2 only */
 	COPY(psw);
 	COPY(bpc);
 	COPY(bbpsw);
@@ -195,17 +187,10 @@ setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs,
 	COPY(r10);
 	COPY(r11);
 	COPY(r12);
-#if defined(CONFIG_ISA_M32R2) && defined(CONFIG_ISA_DSP_LEVEL2)
 	COPY(acc0h);
 	COPY(acc0l);
-	COPY(acc1h);
-	COPY(acc1l);
-#elif defined(CONFIG_ISA_M32R2) || defined(CONFIG_ISA_M32R)
-	COPY(acch);
-	COPY(accl);
-#else
-#error unknown isa configuration
-#endif
+	COPY(acc1h);		/* ISA_DSP_LEVEL2 only */
+	COPY(acc1l);		/* ISA_DSP_LEVEL2 only */
 	COPY(psw);
 	COPY(bpc);
 	COPY(bbpsw);

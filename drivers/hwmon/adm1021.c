@@ -26,6 +26,7 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 
 
 /* Addresses to scan */
@@ -92,7 +93,7 @@ struct adm1021_data {
 	struct class_device *class_dev;
 	enum chips type;
 
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -162,10 +163,10 @@ static ssize_t set_##value(struct device *dev, struct device_attribute *attr, co
 	struct adm1021_data *data = i2c_get_clientdata(client);	\
 	int temp = simple_strtoul(buf, NULL, 10);		\
 								\
-	down(&data->update_lock);				\
+	mutex_lock(&data->update_lock);				\
 	data->value = TEMP_TO_REG(temp);			\
 	adm1021_write_value(client, reg, data->value);		\
-	up(&data->update_lock);					\
+	mutex_unlock(&data->update_lock);			\
 	return count;						\
 }
 set(temp_max, ADM1021_REG_TOS_W);
@@ -188,6 +189,21 @@ static int adm1021_attach_adapter(struct i2c_adapter *adapter)
 		return 0;
 	return i2c_probe(adapter, &addr_data, adm1021_detect);
 }
+
+static struct attribute *adm1021_attributes[] = {
+	&dev_attr_temp1_max.attr,
+	&dev_attr_temp1_min.attr,
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp2_max.attr,
+	&dev_attr_temp2_min.attr,
+	&dev_attr_temp2_input.attr,
+	&dev_attr_alarms.attr,
+	NULL
+};
+
+static const struct attribute_group adm1021_group = {
+	.attrs = adm1021_attributes,
+};
 
 static int adm1021_detect(struct i2c_adapter *adapter, int address, int kind)
 {
@@ -275,7 +291,7 @@ static int adm1021_detect(struct i2c_adapter *adapter, int address, int kind)
 	strlcpy(new_client->name, type_name, I2C_NAME_SIZE);
 	data->type = kind;
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -286,22 +302,19 @@ static int adm1021_detect(struct i2c_adapter *adapter, int address, int kind)
 		adm1021_init_client(new_client);
 
 	/* Register sysfs hooks */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &adm1021_group)))
+		goto error2;
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto error2;
+		goto error3;
 	}
-
-	device_create_file(&new_client->dev, &dev_attr_temp1_max);
-	device_create_file(&new_client->dev, &dev_attr_temp1_min);
-	device_create_file(&new_client->dev, &dev_attr_temp1_input);
-	device_create_file(&new_client->dev, &dev_attr_temp2_max);
-	device_create_file(&new_client->dev, &dev_attr_temp2_min);
-	device_create_file(&new_client->dev, &dev_attr_temp2_input);
-	device_create_file(&new_client->dev, &dev_attr_alarms);
 
 	return 0;
 
+error3:
+	sysfs_remove_group(&new_client->dev.kobj, &adm1021_group);
 error2:
 	i2c_detach_client(new_client);
 error1:
@@ -325,6 +338,7 @@ static int adm1021_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &adm1021_group);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -351,7 +365,7 @@ static struct adm1021_data *adm1021_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct adm1021_data *data = i2c_get_clientdata(client);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
@@ -375,7 +389,7 @@ static struct adm1021_data *adm1021_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

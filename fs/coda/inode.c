@@ -31,17 +31,19 @@
 #include <linux/coda_fs_i.h>
 #include <linux/coda_cache.h>
 
+#include "coda_int.h"
+
 /* VFS super_block ops */
 static void coda_clear_inode(struct inode *);
 static void coda_put_super(struct super_block *);
-static int coda_statfs(struct super_block *sb, struct kstatfs *buf);
+static int coda_statfs(struct dentry *dentry, struct kstatfs *buf);
 
-static kmem_cache_t * coda_inode_cachep;
+static struct kmem_cache * coda_inode_cachep;
 
 static struct inode *coda_alloc_inode(struct super_block *sb)
 {
 	struct coda_inode_info *ei;
-	ei = (struct coda_inode_info *)kmem_cache_alloc(coda_inode_cachep, SLAB_KERNEL);
+	ei = (struct coda_inode_info *)kmem_cache_alloc(coda_inode_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
 	memset(&ei->c_fid, 0, sizeof(struct CodaFid));
@@ -56,7 +58,7 @@ static void coda_destroy_inode(struct inode *inode)
 	kmem_cache_free(coda_inode_cachep, ITOC(inode));
 }
 
-static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
+static void init_once(void * foo, struct kmem_cache * cachep, unsigned long flags)
 {
 	struct coda_inode_info *ei = (struct coda_inode_info *) foo;
 
@@ -69,7 +71,7 @@ int coda_init_inodecache(void)
 {
 	coda_inode_cachep = kmem_cache_create("coda_inode_cache",
 				sizeof(struct coda_inode_info),
-				0, SLAB_RECLAIM_ACCOUNT,
+				0, SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD,
 				init_once, NULL);
 	if (coda_inode_cachep == NULL)
 		return -ENOMEM;
@@ -78,8 +80,7 @@ int coda_init_inodecache(void)
 
 void coda_destroy_inodecache(void)
 {
-	if (kmem_cache_destroy(coda_inode_cachep))
-		printk(KERN_INFO "coda_inode_cache: not all structures were freed\n");
+	kmem_cache_destroy(coda_inode_cachep);
 }
 
 static int coda_remount(struct super_block *sb, int *flags, char *data)
@@ -118,7 +119,7 @@ static int get_device_index(struct coda_mount_data *data)
 	file = fget(data->fd);
 	inode = NULL;
 	if(file)
-		inode = file->f_dentry->d_inode;
+		inode = file->f_path.dentry->d_inode;
 	
 	if(!inode || !S_ISCHR(inode->i_mode) ||
 	   imajor(inode) != CODA_PSDEV_MAJOR) {
@@ -276,13 +277,13 @@ struct inode_operations coda_file_inode_operations = {
 	.setattr	= coda_setattr,
 };
 
-static int coda_statfs(struct super_block *sb, struct kstatfs *buf)
+static int coda_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	int error;
 	
 	lock_kernel();
 
-	error = venus_statfs(sb, buf);
+	error = venus_statfs(dentry, buf);
 
 	unlock_kernel();
 
@@ -305,10 +306,10 @@ static int coda_statfs(struct super_block *sb, struct kstatfs *buf)
 
 /* init_coda: used by filesystems.c to register coda */
 
-static struct super_block *coda_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int coda_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_nodev(fs_type, flags, data, coda_fill_super);
+	return get_sb_nodev(fs_type, flags, data, coda_fill_super, mnt);
 }
 
 struct file_system_type coda_fs_type = {

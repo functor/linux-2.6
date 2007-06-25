@@ -83,7 +83,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -118,10 +117,9 @@
 #include <net/checksum.h>
 #include <linux/security.h>
 #include <linux/vs_context.h>
-#include <linux/vs_network.h>
 #include <linux/vs_limit.h>
 
-int sysctl_unix_max_dgram_qlen = 10;
+int sysctl_unix_max_dgram_qlen __read_mostly = 10;
 
 struct hlist_head unix_socket_table[UNIX_HASH_SIZE + 1];
 DEFINE_SPINLOCK(unix_table_lock);
@@ -131,14 +129,33 @@ static atomic_t unix_nr_socks = ATOMIC_INIT(0);
 
 #define UNIX_ABSTRACT(sk)	(unix_sk(sk)->addr->hash != UNIX_HASH_SIZE)
 
+#ifdef CONFIG_SECURITY_NETWORK
+static void unix_get_secdata(struct scm_cookie *scm, struct sk_buff *skb)
+{
+	memcpy(UNIXSID(skb), &scm->secid, sizeof(u32));
+}
+
+static inline void unix_set_secdata(struct scm_cookie *scm, struct sk_buff *skb)
+{
+	scm->secid = *UNIXSID(skb);
+}
+#else
+static inline void unix_get_secdata(struct scm_cookie *scm, struct sk_buff *skb)
+{ }
+
+static inline void unix_set_secdata(struct scm_cookie *scm, struct sk_buff *skb)
+{ }
+#endif /* CONFIG_SECURITY_NETWORK */
+
 /*
  *  SMP locking strategy:
  *    hash table is protected with spinlock unix_table_lock
  *    each socket state is protected by separate rwlock.
  */
 
-static inline unsigned unix_hash_fold(unsigned hash)
+static inline unsigned unix_hash_fold(__wsum n)
 {
+	unsigned hash = (__force unsigned)n;
 	hash ^= hash>>16;
 	hash ^= hash>>8;
 	return hash&(UNIX_HASH_SIZE-1);
@@ -238,7 +255,7 @@ static struct sock *__unix_find_socket_byname(struct sockaddr_un *sunname,
 	sk_for_each(s, node, &unix_socket_table[hash ^ type]) {
 		struct unix_sock *u = unix_sk(s);
 
-		if (!vx_check(s->sk_xid, VX_IDENT|VX_WATCH))
+		if (!nx_check(s->sk_nid, VS_WATCH_P|VS_IDENT))
 			continue;
 		if (u->addr->len == len &&
 		    !memcmp(u->addr->name, sunname, len))
@@ -547,6 +564,14 @@ static struct proto unix_proto = {
 	.obj_size = sizeof(struct unix_sock),
 };
 
+/*
+ * AF_UNIX sockets do not interact with hardware, hence they
+ * dont trigger interrupts - so it's safe for them to have
+ * bh-unsafe locking for their sk_receive_queue.lock. Split off
+ * this special lock-class by reinitializing the spinlock key:
+ */
+static struct lock_class_key af_unix_sk_receive_queue_lock_key;
+
 static struct sock * unix_create1(struct socket *sock)
 {
 	struct sock *sk = NULL;
@@ -562,6 +587,8 @@ static struct sock * unix_create1(struct socket *sock)
 	atomic_inc(&unix_nr_socks);
 
 	sock_init_data(sock,sk);
+	lockdep_set_class(&sk->sk_receive_queue.lock,
+				&af_unix_sk_receive_queue_lock_key);
 
 	sk->sk_write_space	= unix_write_space;
 	sk->sk_max_ack_backlog	= sysctl_unix_max_dgram_qlen;
@@ -571,7 +598,7 @@ static struct sock * unix_create1(struct socket *sock)
 	u->mnt	  = NULL;
 	spin_lock_init(&u->lock);
 	atomic_set(&u->inflight, sock ? 0 : -1);
-	init_MUTEX(&u->readsem); /* single task reading lock */
+	mutex_init(&u->readlock); /* single task reading lock */
 	init_waitqueue_head(&u->peer_wait);
 	unix_insert_socket(unix_sockets_unbound, sk);
 out:
@@ -628,18 +655,17 @@ static int unix_autobind(struct socket *sock)
 	struct unix_address * addr;
 	int err;
 
-	down(&u->readsem);
+	mutex_lock(&u->readlock);
 
 	err = 0;
 	if (u->addr)
 		goto out;
 
 	err = -ENOMEM;
-	addr = kmalloc(sizeof(*addr) + sizeof(short) + 16, GFP_KERNEL);
+	addr = kzalloc(sizeof(*addr) + sizeof(short) + 16, GFP_KERNEL);
 	if (!addr)
 		goto out;
 
-	memset(addr, 0, sizeof(*addr) + sizeof(short) + 16);
 	addr->name->sun_family = AF_UNIX;
 	atomic_set(&addr->refcnt, 1);
 
@@ -666,7 +692,7 @@ retry:
 	spin_unlock(&unix_table_lock);
 	err = 0;
 
-out:	up(&u->readsem);
+out:	mutex_unlock(&u->readlock);
 	return err;
 }
 
@@ -749,7 +775,7 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		goto out;
 	addr_len = err;
 
-	down(&u->readsem);
+	mutex_lock(&u->readlock);
 
 	err = -EINVAL;
 	if (u->addr)
@@ -821,7 +847,7 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 out_unlock:
 	spin_unlock(&unix_table_lock);
 out_up:
-	up(&u->readsem);
+	mutex_unlock(&u->readlock);
 out:
 	return err;
 
@@ -1027,7 +1053,7 @@ restart:
 		goto out_unlock;
 	}
 
-	unix_state_wlock(sk);
+	unix_state_wlock_nested(sk);
 
 	if (sk->sk_state != st) {
 		unix_state_wunlock(sk);
@@ -1295,6 +1321,7 @@ static int unix_dgram_sendmsg(struct kiocb *kiocb, struct socket *sock,
 	memcpy(UNIXCREDS(skb), &siocb->scm->creds, sizeof(struct ucred));
 	if (siocb->scm->fp)
 		unix_attach_fds(siocb->scm, skb);
+	unix_get_secdata(siocb->scm, skb);
 
 	skb->h.raw = skb->data;
 	err = memcpy_fromiovec(skb_put(skb,len), msg->msg_iov, len);
@@ -1432,15 +1459,15 @@ static int unix_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
 	while(sent < len)
 	{
 		/*
-		 *	Optimisation for the fact that under 0.01% of X messages typically
-		 *	need breaking up.
+		 *	Optimisation for the fact that under 0.01% of X
+		 *	messages typically need breaking up.
 		 */
 
-		size=len-sent;
+		size = len-sent;
 
 		/* Keep two messages in the pipe so it schedules better */
-		if (size > sk->sk_sndbuf / 2 - 64)
-			size = sk->sk_sndbuf / 2 - 64;
+		if (size > ((sk->sk_sndbuf >> 1) - 64))
+			size = (sk->sk_sndbuf >> 1) - 64;
 
 		if (size > SKB_MAX_ALLOC)
 			size = SKB_MAX_ALLOC;
@@ -1550,7 +1577,7 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 	msg->msg_namelen = 0;
 
-	down(&u->readsem);
+	mutex_lock(&u->readlock);
 
 	skb = skb_recv_datagram(sk, flags, noblock, &err);
 	if (!skb)
@@ -1575,6 +1602,7 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 		memset(&tmp_scm, 0, sizeof(tmp_scm));
 	}
 	siocb->scm->creds = *UNIXCREDS(skb);
+	unix_set_secdata(siocb->scm, skb);
 
 	if (!(flags & MSG_PEEK))
 	{
@@ -1605,7 +1633,7 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 out_free:
 	skb_free_datagram(sk,skb);
 out_unlock:
-	up(&u->readsem);
+	mutex_unlock(&u->readlock);
 out:
 	return err;
 }
@@ -1681,7 +1709,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 		memset(&tmp_scm, 0, sizeof(tmp_scm));
 	}
 
-	down(&u->readsem);
+	mutex_lock(&u->readlock);
 
 	do
 	{
@@ -1705,7 +1733,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 			err = -EAGAIN;
 			if (!timeo)
 				break;
-			up(&u->readsem);
+			mutex_unlock(&u->readlock);
 
 			timeo = unix_stream_data_wait(sk, timeo);
 
@@ -1713,7 +1741,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 				err = sock_intr_errno(timeo);
 				goto out;
 			}
-			down(&u->readsem);
+			mutex_lock(&u->readlock);
 			continue;
 		}
 
@@ -1779,7 +1807,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 		}
 	} while (size);
 
-	up(&u->readsem);
+	mutex_unlock(&u->readlock);
 	scm_recv(sock, msg, siocb->scm, flags);
 out:
 	return copied ? : err;
@@ -1883,6 +1911,8 @@ static unsigned int unix_poll(struct file * file, struct socket *sock, poll_tabl
 		mask |= POLLERR;
 	if (sk->sk_shutdown == SHUTDOWN_MASK)
 		mask |= POLLHUP;
+	if (sk->sk_shutdown & RCV_SHUTDOWN)
+		mask |= POLLRDHUP;
 
 	/* readable? */
 	if (!skb_queue_empty(&sk->sk_receive_queue) ||
@@ -2035,10 +2065,7 @@ static int __init af_unix_init(void)
 	int rc = -1;
 	struct sk_buff *dummy_skb;
 
-	if (sizeof(struct unix_skb_parms) > sizeof(dummy_skb->cb)) {
-		printk(KERN_CRIT "%s: panic\n", __FUNCTION__);
-		goto out;
-	}
+	BUILD_BUG_ON(sizeof(struct unix_skb_parms) > sizeof(dummy_skb->cb));
 
 	rc = proto_register(&unix_proto, 1);
         if (rc != 0) {

@@ -14,7 +14,6 @@
  *	Mikael Pettersson	:	PM converted to driver model.
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 
 #include <linux/mm.h>
@@ -36,8 +35,10 @@
 #include <asm/arch_hooks.h>
 #include <asm/hpet.h>
 #include <asm/i8253.h>
+#include <asm/nmi.h>
 
 #include <mach_apic.h>
+#include <mach_apicdef.h>
 #include <mach_ipi.h>
 
 #include "io_ports.h"
@@ -51,7 +52,18 @@ static cpumask_t timer_bcast_ipi;
 /*
  * Knob to control our willingness to enable the local APIC.
  */
-int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
+static int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
+
+static inline void lapic_disable(void)
+{
+	enable_local_apic = -1;
+	clear_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability);
+}
+
+static inline void lapic_enable(void)
+{
+	enable_local_apic = 1;
+}
 
 /*
  * Debug level
@@ -60,6 +72,18 @@ int apic_verbosity;
 
 
 static void apic_pm_activate(void);
+
+static int modern_apic(void)
+{
+	unsigned int lvr, version;
+	/* AMD systems use old APIC versions, so check the CPU */
+	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
+		boot_cpu_data.x86 >= 0xf)
+		return 1;
+	lvr = apic_read(APIC_LVR);
+	version = GET_APIC_VERSION(lvr);
+	return version >= 0x14;
+}
 
 /*
  * 'what should we do if we get a hw irq event on an illegal vector'.
@@ -100,7 +124,7 @@ void __init apic_intr_init(void)
 }
 
 /* Using APIC to generate smp_local_timer_interrupt? */
-int using_apic_timer = 0;
+int using_apic_timer __read_mostly = 0;
 
 static int enabled_via_apicbase;
 
@@ -118,10 +142,7 @@ void enable_NMI_through_LVT0 (void * dummy)
 
 int get_physical_broadcast(void)
 {
-	unsigned int lvr, version;
-	lvr = apic_read(APIC_LVR);
-	version = GET_APIC_VERSION(lvr);
-	if (!APIC_INTEGRATED(version) || version >= 0x14)
+	if (modern_apic())
 		return 0xff;
 	else
 		return 0xf;
@@ -146,7 +167,7 @@ void clear_local_APIC(void)
 	maxlvt = get_maxlvt();
 
 	/*
-	 * Masking an LVT entry on a P6 can trigger a local APIC error
+	 * Masking an LVT entry can trigger a local APIC error
 	 * if the vector is zero. Mask LVTERR first to prevent this.
 	 */
 	if (maxlvt >= 3) {
@@ -348,9 +369,9 @@ int __init verify_local_APIC(void)
 
 void __init sync_Arb_IDs(void)
 {
-	/* Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1 */
-	unsigned int ver = GET_APIC_VERSION(apic_read(APIC_LVR));
-	if (ver >= 0x14)	/* P4 or higher */
+	/* Unsupported on P4 - see Intel Dev. Manual Vol. 3, Ch. 8.6.1
+	   And not needed on AMD */
+	if (modern_apic())
 		return;
 	/*
 	 * Wait for idle.
@@ -414,6 +435,7 @@ void __init init_bsp_APIC(void)
 void __devinit setup_local_APIC(void)
 {
 	unsigned long oldvalue, value, ver, maxlvt;
+	int i, j;
 
 	/* Pound the ESR really hard over the head with a big hammer - mbligh */
 	if (esr_disable) {
@@ -449,6 +471,25 @@ void __devinit setup_local_APIC(void)
 	value = apic_read(APIC_TASKPRI);
 	value &= ~APIC_TPRI_MASK;
 	apic_write_around(APIC_TASKPRI, value);
+
+	/*
+	 * After a crash, we no longer service the interrupts and a pending
+	 * interrupt from previous kernel might still have ISR bit set.
+	 *
+	 * Most probably by now CPU has serviced that pending interrupt and
+	 * it might not have done the ack_APIC_irq() because it thought,
+	 * interrupt came from i8259 as ExtInt. LAPIC did not get EOI so it
+	 * does not clear the ISR bit and cpu thinks it has already serivced
+	 * the interrupt. Hence a vector might get locked. It was noticed
+	 * for timer irq (vector 0x31). Issue an extra EOI to clear ISR.
+	 */
+	for (i = APIC_ISR_NR - 1; i >= 0; i--) {
+		value = apic_read(APIC_ISR + i*0x10);
+		for (j = 31; j >= 0; j--) {
+			if (value & (1<<j))
+				ack_APIC_irq();
+		}
+	}
 
 	/*
 	 * Now that we are all set up, enable the APIC
@@ -556,8 +597,7 @@ void __devinit setup_local_APIC(void)
 			printk("No ESR for 82489DX.\n");
 	}
 
-	if (nmi_watchdog == NMI_LOCAL_APIC)
-		setup_apic_nmi_watchdog();
+	setup_apic_nmi_watchdog(NULL);
 	apic_pm_activate();
 }
 
@@ -607,9 +647,12 @@ static struct {
 static int lapic_suspend(struct sys_device *dev, pm_message_t state)
 {
 	unsigned long flags;
+	int maxlvt;
 
 	if (!apic_pm_state.active)
 		return 0;
+
+	maxlvt = get_maxlvt();
 
 	apic_pm_state.apic_id = apic_read(APIC_ID);
 	apic_pm_state.apic_taskpri = apic_read(APIC_TASKPRI);
@@ -617,13 +660,17 @@ static int lapic_suspend(struct sys_device *dev, pm_message_t state)
 	apic_pm_state.apic_dfr = apic_read(APIC_DFR);
 	apic_pm_state.apic_spiv = apic_read(APIC_SPIV);
 	apic_pm_state.apic_lvtt = apic_read(APIC_LVTT);
-	apic_pm_state.apic_lvtpc = apic_read(APIC_LVTPC);
+	if (maxlvt >= 4)
+		apic_pm_state.apic_lvtpc = apic_read(APIC_LVTPC);
 	apic_pm_state.apic_lvt0 = apic_read(APIC_LVT0);
 	apic_pm_state.apic_lvt1 = apic_read(APIC_LVT1);
 	apic_pm_state.apic_lvterr = apic_read(APIC_LVTERR);
 	apic_pm_state.apic_tmict = apic_read(APIC_TMICT);
 	apic_pm_state.apic_tdcr = apic_read(APIC_TDCR);
-	apic_pm_state.apic_thmr = apic_read(APIC_LVTTHMR);
+#ifdef CONFIG_X86_MCE_P4THERMAL
+	if (maxlvt >= 5)
+		apic_pm_state.apic_thmr = apic_read(APIC_LVTTHMR);
+#endif
 	
 	local_irq_save(flags);
 	disable_local_APIC();
@@ -635,9 +682,12 @@ static int lapic_resume(struct sys_device *dev)
 {
 	unsigned int l, h;
 	unsigned long flags;
+	int maxlvt;
 
 	if (!apic_pm_state.active)
 		return 0;
+
+	maxlvt = get_maxlvt();
 
 	local_irq_save(flags);
 
@@ -660,8 +710,12 @@ static int lapic_resume(struct sys_device *dev)
 	apic_write(APIC_SPIV, apic_pm_state.apic_spiv);
 	apic_write(APIC_LVT0, apic_pm_state.apic_lvt0);
 	apic_write(APIC_LVT1, apic_pm_state.apic_lvt1);
-	apic_write(APIC_LVTTHMR, apic_pm_state.apic_thmr);
-	apic_write(APIC_LVTPC, apic_pm_state.apic_lvtpc);
+#ifdef CONFIG_X86_MCE_P4THERMAL
+	if (maxlvt >= 5)
+		apic_write(APIC_LVTTHMR, apic_pm_state.apic_thmr);
+#endif
+	if (maxlvt >= 4)
+		apic_write(APIC_LVTPC, apic_pm_state.apic_lvtpc);
 	apic_write(APIC_LVTT, apic_pm_state.apic_lvtt);
 	apic_write(APIC_TDCR, apic_pm_state.apic_tdcr);
 	apic_write(APIC_TMICT, apic_pm_state.apic_tmict);
@@ -727,11 +781,7 @@ static int __init apic_set_verbosity(char *str)
 		apic_verbosity = APIC_DEBUG;
 	else if (strcmp("verbose", str) == 0)
 		apic_verbosity = APIC_VERBOSE;
-	else
-		printk(KERN_WARNING "APIC Verbosity level %s not recognised"
-				" use apic=verbose or apic=debug\n", str);
-
-	return 0;
+	return 1;
 }
 
 __setup("apic=", apic_set_verbosity);
@@ -1091,7 +1141,18 @@ void disable_APIC_timer(void)
 		unsigned long v;
 
 		v = apic_read(APIC_LVTT);
-		apic_write_around(APIC_LVTT, v | APIC_LVT_MASKED);
+		/*
+		 * When an illegal vector value (0-15) is written to an LVT
+		 * entry and delivery mode is Fixed, the APIC may signal an
+		 * illegal vector error, with out regard to whether the mask
+		 * bit is set or whether an interrupt is actually seen on input.
+		 *
+		 * Boot sequence might call this function when the LVTT has
+		 * '0' vector value. So make sure vector field is set to
+		 * valid value.
+		 */
+		v |= (APIC_LVT_MASKED | LOCAL_TIMER_VECTOR);
+		apic_write_around(APIC_LVTT, v);
 	}
 }
 
@@ -1146,11 +1207,11 @@ EXPORT_SYMBOL(switch_ipi_to_APIC_timer);
  * value into /proc/profile.
  */
 
-inline void smp_local_timer_interrupt(struct pt_regs * regs)
+inline void smp_local_timer_interrupt(void)
 {
-	profile_tick(CPU_PROFILING, regs);
+	profile_tick(CPU_PROFILING);
 #ifdef CONFIG_SMP
-	update_process_times(user_mode_vm(regs));
+	update_process_times(user_mode_vm(get_irq_regs()));
 #endif
 
 	/*
@@ -1176,6 +1237,7 @@ inline void smp_local_timer_interrupt(struct pt_regs * regs)
 
 fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 {
+	struct pt_regs *old_regs = set_irq_regs(regs);
 	int cpu = smp_processor_id();
 
 	/*
@@ -1194,12 +1256,13 @@ fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 	 * interrupt lock, which is the WrongThing (tm) to do.
 	 */
 	irq_enter();
-	smp_local_timer_interrupt(regs);
+	smp_local_timer_interrupt();
 	irq_exit();
+	set_irq_regs(old_regs);
 }
 
 #ifndef CONFIG_SMP
-static void up_apic_timer_interrupt_call(struct pt_regs *regs)
+static void up_apic_timer_interrupt_call(void)
 {
 	int cpu = smp_processor_id();
 
@@ -1208,11 +1271,11 @@ static void up_apic_timer_interrupt_call(struct pt_regs *regs)
 	 */
 	per_cpu(irq_stat, cpu).apic_timer_irqs++;
 
-	smp_local_timer_interrupt(regs);
+	smp_local_timer_interrupt();
 }
 #endif
 
-void smp_send_timer_broadcast_ipi(struct pt_regs *regs)
+void smp_send_timer_broadcast_ipi(void)
 {
 	cpumask_t mask;
 
@@ -1225,7 +1288,7 @@ void smp_send_timer_broadcast_ipi(struct pt_regs *regs)
 		 * We can directly call the apic timer interrupt handler
 		 * in UP case. Minus all irq related functions
 		 */
-		up_apic_timer_interrupt_call(regs);
+		up_apic_timer_interrupt_call();
 #endif
 	}
 }
@@ -1315,6 +1378,14 @@ int __init APIC_init_uniprocessor (void)
 
 	connect_bsp_APIC();
 
+	/*
+	 * Hack: In case of kdump, after a crash, kernel might be booting
+	 * on a cpu with non-zero lapic id. But boot_cpu_physical_apicid
+	 * might be zero if read from MP tables. Get it from LAPIC.
+	 */
+#ifdef CONFIG_CRASH_DUMP
+	boot_cpu_physical_apicid = GET_APIC_ID(apic_read(APIC_ID));
+#endif
 	phys_cpu_present_map = physid_mask_of_physid(boot_cpu_physical_apicid);
 
 	setup_local_APIC();
@@ -1328,3 +1399,18 @@ int __init APIC_init_uniprocessor (void)
 
 	return 0;
 }
+
+static int __init parse_lapic(char *arg)
+{
+	lapic_enable();
+	return 0;
+}
+early_param("lapic", parse_lapic);
+
+static int __init parse_nolapic(char *arg)
+{
+	lapic_disable();
+	return 0;
+}
+early_param("nolapic", parse_nolapic);
+

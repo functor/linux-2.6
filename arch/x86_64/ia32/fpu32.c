@@ -2,7 +2,6 @@
  * Copyright 2002 Andi Kleen, SuSE Labs.
  * FXSAVE<->i387 conversion support. Based on code by Gareth Hughes.
  * This is used for ptrace, signals and coredumps in 32bit emulation.
- * $Id: fpu32.c,v 1.1 2002/03/21 14:16:32 ak Exp $
  */ 
 
 #include <linux/sched.h>
@@ -10,6 +9,7 @@
 #include <asm/processor.h>
 #include <asm/uaccess.h>
 #include <asm/i387.h>
+#include <asm/user32.h>
 
 static inline unsigned short twd_i387_to_fxsr(unsigned short twd)
 {
@@ -25,7 +25,8 @@ static inline unsigned short twd_i387_to_fxsr(unsigned short twd)
         return tmp;
 }
 
-static inline unsigned long twd_fxsr_to_i387(struct i387_fxsave_struct *fxsave)
+static inline unsigned long
+twd_fxsr_to_i387(const struct i387_fxsave_struct *fxsave)
 {
 	struct _fpxreg *st = NULL;
 	unsigned long tos = (fxsave->swd >> 11) & 7;
@@ -72,16 +73,11 @@ static inline unsigned long twd_fxsr_to_i387(struct i387_fxsave_struct *fxsave)
 }
 
 
-static inline int convert_fxsr_from_user(struct i387_fxsave_struct *fxsave,
-					 struct _fpstate_ia32 __user *buf)
+static inline void
+convert_fxsr_env_from_i387(struct i387_fxsave_struct *fxsave, const u32 env[7])
 {
-	struct _fpxreg *to;
-	struct _fpreg __user *from;
-	int i;
 	u32 v;
-	int err = 0;
-
-#define G(num,val) err |= __get_user(val, num + (u32 __user *)buf)
+#define G(num,val) val = env[num]
 	G(0, fxsave->cwd);
 	G(1, fxsave->swd);
 	G(2, fxsave->twd);
@@ -92,8 +88,20 @@ static inline int convert_fxsr_from_user(struct i387_fxsave_struct *fxsave,
 	G(5, fxsave->rdp);
 	/* 6: ds ignored */
 #undef G
-	if (err) 
+}
+
+static inline int convert_fxsr_from_user(struct i387_fxsave_struct *fxsave,
+					 struct _fpstate_ia32 __user *buf)
+{
+	u32 env[7];
+	struct _fpxreg *to;
+	struct _fpreg __user *from;
+	int i;
+
+	if (__copy_from_user(env, buf, sizeof(env)))
 		return -1; 
+
+	convert_fxsr_env_from_i387(fxsave, env);
 
 	to = (struct _fpxreg *)&fxsave->st_space[0];
 	from = &buf->_st[0];
@@ -105,16 +113,11 @@ static inline int convert_fxsr_from_user(struct i387_fxsave_struct *fxsave,
 }
 
 
-static inline int convert_fxsr_to_user(struct _fpstate_ia32 __user *buf,
-				       struct i387_fxsave_struct *fxsave,
-				       struct pt_regs *regs,
-				       struct task_struct *tsk)
+static inline void
+convert_fxsr_env_to_i387(struct task_struct *tsk, struct pt_regs *regs,
+			 u32 env[7], const struct i387_fxsave_struct *fxsave)
 {
-	struct _fpreg __user *to;
-	struct _fpxreg *from;
-	int i;
 	u16 cs,ds; 
-	int err = 0; 
 
 	if (tsk == current) {
 		/* should be actually ds/cs at fpu exception time,
@@ -126,7 +129,7 @@ static inline int convert_fxsr_to_user(struct _fpstate_ia32 __user *buf,
 		cs = regs->cs;
 	} 
 
-#define P(num,val) err |= __put_user(val, num + (u32 __user *)buf)
+#define P(num,val) env[num] = val
 	P(0, (u32)fxsave->cwd | 0xffff0000);
 	P(1, (u32)fxsave->swd | 0xffff0000);
 	P(2, twd_fxsr_to_i387(fxsave));
@@ -135,8 +138,21 @@ static inline int convert_fxsr_to_user(struct _fpstate_ia32 __user *buf,
 	P(5, fxsave->rdp);
 	P(6, 0xffff0000 | ds);
 #undef P
+}
 
-	if (err) 
+
+static inline int convert_fxsr_to_user(struct _fpstate_ia32 __user *buf,
+				       struct i387_fxsave_struct *fxsave,
+				       struct pt_regs *regs,
+				       struct task_struct *tsk)
+{
+	struct _fpreg __user *to;
+	struct _fpxreg *from;
+	int i;
+	u32 env[7];
+
+	convert_fxsr_env_to_i387(tsk, regs, env, fxsave);
+	if (__copy_to_user(buf, env, sizeof(env)))
 		return -1; 
 
 	to = &buf->_st[0];
@@ -181,4 +197,39 @@ int save_i387_ia32(struct task_struct *tsk,
 	err |= __copy_to_user(&buf->_fxsr_env[0], &tsk->thread.i387.fxsave,
 			      sizeof(struct i387_fxsave_struct));
 	return err ? -1 : 1;
+}
+
+int get_fpregs32(struct user_i387_ia32_struct *buf, struct task_struct *tsk)
+{
+	struct pt_regs *regs = ((struct pt_regs *)tsk->thread.rsp0) - 1;
+	struct _fpreg *to;
+	const struct _fpxreg *from;
+	unsigned int i;
+
+	convert_fxsr_env_to_i387(tsk, regs,
+				 (u32 *) buf, &tsk->thread.i387.fxsave);
+
+	to = (struct _fpreg *) buf->st_space;
+	from = (const struct _fpxreg *) &tsk->thread.i387.fxsave.st_space[0];
+	for (i = 0; i < 8; i++, to++, from++)
+		*to = *(const struct _fpreg *) from;
+
+	return 0;
+}
+
+int
+set_fpregs32(struct task_struct *tsk, const struct user_i387_ia32_struct *buf)
+{
+	struct _fpxreg *to;
+	const struct _fpreg *from;
+	unsigned int i;
+
+	convert_fxsr_env_from_i387(&tsk->thread.i387.fxsave, (u32 *) buf);
+
+	to = (struct _fpxreg *) &tsk->thread.i387.fxsave.st_space[0];
+	from = (const struct _fpreg *) buf->st_space;
+	for (i = 0; i < 8; i++, to++, from++)
+		*(struct _fpreg *) to = *from;
+
+	return 0;
 }

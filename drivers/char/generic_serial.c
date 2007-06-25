@@ -33,8 +33,6 @@
 
 #define DEBUG 
 
-static char *                  tmp_buf; 
-
 static int gs_debug;
 
 #ifdef DEBUG
@@ -48,8 +46,8 @@ static int gs_debug;
 #define NEW_WRITE_LOCKING 1
 #if NEW_WRITE_LOCKING
 #define DECL      /* Nothing */
-#define LOCKIT    down (& port->port_write_sem);
-#define RELEASEIT up (&port->port_write_sem);
+#define LOCKIT    mutex_lock(& port->port_write_mutex);
+#define RELEASEIT mutex_unlock(&port->port_write_mutex);
 #else
 #define DECL      unsigned long flags;
 #define LOCKIT    save_flags (flags);cli ()
@@ -124,14 +122,14 @@ int gs_write(struct tty_struct * tty,
 	/* get exclusive "write" access to this port (problem 3) */
 	/* This is not a spinlock because we can have a disk access (page 
 		 fault) in copy_from_user */
-	down (& port->port_write_sem);
+	mutex_lock(& port->port_write_mutex);
 
 	while (1) {
 
 		c = count;
  
 		/* This is safe because we "OWN" the "head". Noone else can 
-		   change the "head": we own the port_write_sem. */
+		   change the "head": we own the port_write_mutex. */
 		/* Don't overrun the end of the buffer */
 		t = SERIAL_XMIT_SIZE - port->xmit_head;
 		if (t < c) c = t;
@@ -153,7 +151,7 @@ int gs_write(struct tty_struct * tty,
 		count -= c;
 		total += c;
 	}
-	up (& port->port_write_sem);
+	mutex_unlock(& port->port_write_mutex);
 
 	gs_dprintk (GS_DEBUG_WRITE, "write: interrupts are %s\n", 
 	            (port->flags & GS_TX_INTEN)?"enabled": "disabled"); 
@@ -205,7 +203,7 @@ int gs_write(struct tty_struct * tty,
 	if (!tty) return -EIO;
 
 	port = tty->driver_data;
-	if (!port || !port->xmit_buf || !tmp_buf)
+	if (!port || !port->xmit_buf)
 		return -EIO;
 
 	local_save_flags(flags);
@@ -214,7 +212,7 @@ int gs_write(struct tty_struct * tty,
 		c = count;
 
 		/* This is safe because we "OWN" the "head". Noone else can 
-		   change the "head": we own the port_write_sem. */
+		   change the "head": we own the port_write_mutex. */
 		/* Don't overrun the end of the buffer */
 		t = SERIAL_XMIT_SIZE - port->xmit_head;
 		if (t < c) c = t;
@@ -713,18 +711,12 @@ void gs_close(struct tty_struct * tty, struct file * filp)
 }
 
 
-static unsigned int     gs_baudrates[] = {
-  0, 50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800,
-  9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600
-};
-
-
 void gs_set_termios (struct tty_struct * tty, 
-                     struct termios * old_termios)
+                     struct ktermios * old_termios)
 {
 	struct gs_port *port;
 	int baudrate, tmp, rv;
-	struct termios *tiosp;
+	struct ktermios *tiosp;
 
 	func_enter();
 
@@ -746,11 +738,9 @@ void gs_set_termios (struct tty_struct * tty,
 		gs_dprintk (GS_DEBUG_TERMIOS, "termios structure (%p):\n", tiosp);
 	}
 
-#if 0
 	/* This is an optimization that is only allowed for dumb cards */
 	/* Smart cards require knowledge of iflags and oflags too: that 
 	   might change hardware cooking mode.... */
-#endif
 	if (old_termios) {
 		if(   (tiosp->c_iflag == old_termios->c_iflag)
 		   && (tiosp->c_oflag == old_termios->c_oflag)
@@ -774,16 +764,8 @@ void gs_set_termios (struct tty_struct * tty,
 		if(!memcmp(tiosp->c_cc, old_termios->c_cc, NCC)) printk("c_cc changed\n");
 	}
 
-	baudrate = tiosp->c_cflag & CBAUD;
-	if (baudrate & CBAUDEX) {
-		baudrate &= ~CBAUDEX;
-		if ((baudrate < 1) || (baudrate > 4))
-			tiosp->c_cflag &= ~CBAUDEX;
-		else
-			baudrate += 15;
-	}
+	baudrate = tty_get_baud_rate(tty);
 
-	baudrate = gs_baudrates[baudrate];
 	if ((tiosp->c_cflag & CBAUD) == B38400) {
 		if (     (port->flags & ASYNC_SPD_MASK) == ASYNC_SPD_HI)
 			baudrate = 57600;
@@ -846,23 +828,8 @@ void gs_set_termios (struct tty_struct * tty,
 int gs_init_port(struct gs_port *port)
 {
 	unsigned long flags;
-	unsigned long page;
 
 	func_enter ();
-
-        if (!tmp_buf) {
-		page = get_zeroed_page(GFP_KERNEL);
-		spin_lock_irqsave (&port->driver_lock, flags); /* Don't expect this to make a difference. */
-		if (tmp_buf)
-			free_page(page);
-		else
-			tmp_buf = (unsigned char *) page;
-		spin_unlock_irqrestore (&port->driver_lock, flags);
-		if (!tmp_buf) {
-			func_exit ();
-			return -ENOMEM;
-		}
-	}
 
 	if (port->flags & ASYNC_INITIALIZED) {
 		func_exit ();
@@ -888,7 +855,7 @@ int gs_init_port(struct gs_port *port)
 	spin_lock_irqsave (&port->driver_lock, flags);
 	if (port->tty) 
 		clear_bit(TTY_IO_ERROR, &port->tty->flags);
-	init_MUTEX(&port->port_write_sem);
+	mutex_init(&port->port_write_mutex);
 	port->xmit_cnt = port->xmit_head = port->xmit_tail = 0;
 	spin_unlock_irqrestore(&port->driver_lock, flags);
 	gs_set_termios(port->tty, NULL);

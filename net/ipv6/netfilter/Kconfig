@@ -6,8 +6,8 @@ menu "IPv6: Netfilter Configuration (EXPERIMENTAL)"
 	depends on INET && IPV6 && NETFILTER && EXPERIMENTAL
 
 config NF_CONNTRACK_IPV6
-	tristate "IPv6 support for new connection tracking (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && NF_CONNTRACK
+	tristate "IPv6 connection tracking support (EXPERIMENTAL)"
+	depends on INET && IPV6 && EXPERIMENTAL && NF_CONNTRACK
 	---help---
 	  Connection tracking keeps a record of what packets have passed
 	  through your machine, in order to figure out how they are related
@@ -21,6 +21,7 @@ config NF_CONNTRACK_IPV6
 
 config IP6_NF_QUEUE
 	tristate "IP6 Userspace queueing via NETLINK (OBSOLETE)"
+	depends on INET && IPV6 && NETFILTER && EXPERIMENTAL
 	---help---
 
 	  This option adds a queue handler to the kernel for IPv6
@@ -40,8 +41,8 @@ config IP6_NF_QUEUE
 	  To compile it as a module, choose M here.  If unsure, say N.
 
 config IP6_NF_IPTABLES
-	tristate "IP6 tables support (required for filtering/masq/NAT)"
-	depends on NETFILTER_XTABLES
+	tristate "IP6 tables support (required for filtering)"
+	depends on INET && IPV6 && EXPERIMENTAL && NETFILTER_XTABLES
 	help
 	  ip6tables is a general, extensible packet identification framework.
 	  Currently only the packet filtering and packet mangling subsystem
@@ -87,16 +88,6 @@ config IP6_NF_MATCH_HL
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
-config IP6_NF_MATCH_MULTIPORT
-	tristate "Multiple port match support"
-	depends on IP6_NF_IPTABLES
-	help
-	  Multiport matching allows you to match TCP or UDP packets based on
-	  a series of source or destination ports: normally a rule can only
-	  match a single range of ports.
-
-	  To compile it as a module, choose M here.  If unsure, say N.
-
 config IP6_NF_MATCH_OWNER
 	tristate "Owner match support"
 	depends on IP6_NF_IPTABLES
@@ -115,11 +106,11 @@ config IP6_NF_MATCH_IPV6HEADER
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
-config IP6_NF_MATCH_AHESP
-	tristate "AH/ESP match support"
+config IP6_NF_MATCH_AH
+	tristate "AH match support"
 	depends on IP6_NF_IPTABLES
 	help
-	  This module allows one to match AH and ESP packets.
+	  This module allows one to match AH packets.
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
@@ -130,16 +121,6 @@ config IP6_NF_MATCH_EUI64
 	  This module performs checking on the IPv6 source address
 	  Compares the last 64 bits with the EUI64 (delivered
 	  from the MAC address) address
-
-	  To compile it as a module, choose M here.  If unsure, say N.
-
-config IP6_NF_MATCH_POLICY
-	tristate "IPsec policy match support"
-	depends on IP6_NF_IPTABLES && XFRM
-	help
-	  Policy matching allows you to match packets based on the
-	  IPsec policy that was used during decapsulation/will
-	  be used during encapsulation.
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 

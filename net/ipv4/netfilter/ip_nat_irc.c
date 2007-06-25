@@ -96,17 +96,16 @@ static unsigned int help(struct sk_buff **pskb,
 	return ret;
 }
 
-static void __exit fini(void)
+static void __exit ip_nat_irc_fini(void)
 {
-	ip_nat_irc_hook = NULL;
-	/* Make sure noone calls it, meanwhile. */
-	synchronize_net();
+	rcu_assign_pointer(ip_nat_irc_hook, NULL);
+	synchronize_rcu();
 }
 
-static int __init init(void)
+static int __init ip_nat_irc_init(void)
 {
-	BUG_ON(ip_nat_irc_hook);
-	ip_nat_irc_hook = help;
+	BUG_ON(rcu_dereference(ip_nat_irc_hook));
+	rcu_assign_pointer(ip_nat_irc_hook, help);
 	return 0;
 }
 
@@ -119,5 +118,5 @@ static int warn_set(const char *val, struct kernel_param *kp)
 }
 module_param_call(ports, warn_set, NULL, NULL, 0);
 
-module_init(init);
-module_exit(fini);
+module_init(ip_nat_irc_init);
+module_exit(ip_nat_irc_fini);

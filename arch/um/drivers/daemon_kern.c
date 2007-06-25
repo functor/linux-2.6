@@ -57,7 +57,7 @@ static int daemon_write(int fd, struct sk_buff **skb,
 				 (struct daemon_data *) &lp->user));
 }
 
-static struct net_kern_info daemon_kern_info = {
+static const struct net_kern_info daemon_kern_info = {
 	.init			= daemon_init,
 	.protocol		= eth_protocol,
 	.read			= daemon_read,
@@ -95,18 +95,7 @@ static struct transport daemon_transport = {
 static int register_daemon(void)
 {
 	register_transport(&daemon_transport);
-	return(1);
+	return 0;
 }
 
-__initcall(register_daemon);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+late_initcall(register_daemon);

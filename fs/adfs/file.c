@@ -19,22 +19,20 @@
  *
  *  adfs regular file handling primitives           
  */
-#include <linux/errno.h>
 #include <linux/fs.h>
-#include <linux/fcntl.h>
-#include <linux/time.h>
-#include <linux/stat.h>
 #include <linux/buffer_head.h>			/* for file_fsync() */
 #include <linux/adfs_fs.h>
 
 #include "adfs.h"
 
-struct file_operations adfs_file_operations = {
+const struct file_operations adfs_file_operations = {
 	.llseek		= generic_file_llseek,
-	.read		= generic_file_read,
+	.read		= do_sync_read,
+	.aio_read	= generic_file_aio_read,
 	.mmap		= generic_file_mmap,
 	.fsync		= file_fsync,
-	.write		= generic_file_write,
+	.write		= do_sync_write,
+	.aio_write	= generic_file_aio_write,
 	.sendfile	= generic_file_sendfile,
 };
 

@@ -387,8 +387,7 @@ static void hdlc_fill_fifo(struct fritz_bcs *bcs)
 
 	DBG(0x40, "hdlc_fill_fifo");
 
-	if (skb->len == 0)
-		BUG();
+	BUG_ON(skb->len == 0);
 
 	bcs->ctrl.sr.cmd &= ~HDLC_CMD_XME;
 	if (bcs->tx_skb->len > bcs->fifo_size) {
@@ -547,7 +546,7 @@ static inline void hdlc_xpr_irq(struct fritz_bcs *bcs)
 	}
 	bcs->tx_cnt = 0;
 	bcs->tx_skb = NULL;
-	B_L1L2(bcs, PH_DATA | CONFIRM, (void *) skb->truesize);
+	B_L1L2(bcs, PH_DATA | CONFIRM, (void *)(unsigned long)skb->truesize);
 	dev_kfree_skb_irq(skb);
 }
 
@@ -630,15 +629,13 @@ static void fritz_b_l2l1(struct hisax_if *ifc, int pr, void *arg)
 
 	switch (pr) {
 	case PH_DATA | REQUEST:
-		if (bcs->tx_skb)
-			BUG();
-		
+		BUG_ON(bcs->tx_skb);
 		bcs->tx_skb = skb;
 		DBG_SKB(1, skb);
 		hdlc_fill_fifo(bcs);
 		break;
 	case PH_ACTIVATE | REQUEST:
-		mode = (int) arg;
+		mode = (long) arg;
 		DBG(4,"B%d,PH_ACTIVATE_REQUEST %d", bcs->channel + 1, mode);
 		modehdlc(bcs, mode);
 		B_L1L2(bcs, PH_ACTIVATE | INDICATION, NULL);
@@ -654,7 +651,7 @@ static void fritz_b_l2l1(struct hisax_if *ifc, int pr, void *arg)
 // ----------------------------------------------------------------------
 
 static irqreturn_t
-fcpci2_irq(int intno, void *dev, struct pt_regs *regs)
+fcpci2_irq(int intno, void *dev)
 {
 	struct fritz_adapter *adapter = dev;
 	unsigned char val;
@@ -674,7 +671,7 @@ fcpci2_irq(int intno, void *dev, struct pt_regs *regs)
 }
 
 static irqreturn_t
-fcpci_irq(int intno, void *dev, struct pt_regs *regs)
+fcpci_irq(int intno, void *dev)
 {
 	struct fritz_adapter *adapter = dev;
 	unsigned char sval;
@@ -728,11 +725,11 @@ static int __devinit fcpcipnp_setup(struct fritz_adapter *adapter)
 
 	switch (adapter->type) {
 	case AVM_FRITZ_PCIV2:
-		retval = request_irq(adapter->irq, fcpci2_irq, SA_SHIRQ, 
+		retval = request_irq(adapter->irq, fcpci2_irq, IRQF_SHARED,
 				     "fcpcipnp", adapter);
 		break;
 	case AVM_FRITZ_PCI:
-		retval = request_irq(adapter->irq, fcpci_irq, SA_SHIRQ,
+		retval = request_irq(adapter->irq, fcpci_irq, IRQF_SHARED,
 				     "fcpcipnp", adapter);
 		break;
 	case AVM_FRITZ_PNP:
@@ -844,11 +841,9 @@ new_adapter(void)
 	struct hisax_b_if *b_if[2];
 	int i;
 
-	adapter = kmalloc(sizeof(struct fritz_adapter), GFP_KERNEL);
+	adapter = kzalloc(sizeof(struct fritz_adapter), GFP_KERNEL);
 	if (!adapter)
 		return NULL;
-
-	memset(adapter, 0, sizeof(struct fritz_adapter));
 
 	adapter->isac.hisax_d_if.owner = THIS_MODULE;
 	adapter->isac.hisax_d_if.ifc.priv = &adapter->isac;
@@ -1001,18 +996,15 @@ static int __init hisax_fcpcipnp_init(void)
 
 	retval = pci_register_driver(&fcpci_driver);
 	if (retval)
-		goto out;
+		return retval;
 #ifdef __ISAPNP__
 	retval = pnp_register_driver(&fcpnp_driver);
-	if (retval < 0)
-		goto out_unregister_pci;
+	if (retval < 0) {
+		pci_unregister_driver(&fcpci_driver);
+		return retval;
+	}
 #endif
 	return 0;
-
- out_unregister_pci:
-	pci_unregister_driver(&fcpci_driver);
- out:
-	return retval;
 }
 
 static void __exit hisax_fcpcipnp_exit(void)

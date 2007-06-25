@@ -1,4 +1,4 @@
-/* Copyright (c) 2004 Coraid, Inc.  See COPYING for GPL terms. */
+/* Copyright (c) 2006 Coraid, Inc.  See COPYING for GPL terms. */
 /*
  * aoedev.c
  * AoE device utility functions; maintains device list.
@@ -11,6 +11,21 @@
 
 static struct aoedev *devlist;
 static spinlock_t devlist_lock;
+
+int
+aoedev_isbusy(struct aoedev *d)
+{
+	struct frame *f, *e;
+
+	f = d->frames;
+	e = f + d->nframes;
+	do {
+		if (f->tag != FREETAG)
+			return 1;
+	} while (++f < e);
+
+	return 0;
+}
 
 struct aoedev *
 aoedev_by_aoeaddr(int maj, int min)
@@ -28,6 +43,18 @@ aoedev_by_aoeaddr(int maj, int min)
 	return d;
 }
 
+static void
+dummy_timer(ulong vp)
+{
+	struct aoedev *d;
+
+	d = (struct aoedev *)vp;
+	if (d->flags & DEVFL_TKILL)
+		return;
+	d->timer.expires = jiffies + HZ;
+	add_timer(&d->timer);
+}
+
 /* called with devlist lock held */
 static struct aoedev *
 aoedev_newdev(ulong nframes)
@@ -36,22 +63,38 @@ aoedev_newdev(ulong nframes)
 	struct frame *f, *e;
 
 	d = kzalloc(sizeof *d, GFP_ATOMIC);
-	if (d == NULL)
-		return NULL;
 	f = kcalloc(nframes, sizeof *f, GFP_ATOMIC);
-	if (f == NULL) {
-		kfree(d);
+ 	switch (!d || !f) {
+ 	case 0:
+ 		d->nframes = nframes;
+ 		d->frames = f;
+ 		e = f + nframes;
+ 		for (; f<e; f++) {
+ 			f->tag = FREETAG;
+ 			f->skb = new_skb(ETH_ZLEN);
+ 			if (!f->skb)
+ 				break;
+ 		}
+ 		if (f == e)
+ 			break;
+ 		while (f > d->frames) {
+ 			f--;
+ 			dev_kfree_skb(f->skb);
+ 		}
+ 	default:
+ 		if (f)
+ 			kfree(f);
+ 		if (d)
+ 			kfree(d);
 		return NULL;
 	}
-
-	d->nframes = nframes;
-	d->frames = f;
-	e = f + nframes;
-	for (; f<e; f++)
-		f->tag = FREETAG;
-
+	INIT_WORK(&d->work, aoecmd_sleepwork);
 	spin_lock_init(&d->lock);
 	init_timer(&d->timer);
+	d->timer.data = (ulong) d;
+	d->timer.function = dummy_timer;
+	d->timer.expires = jiffies + HZ;
+	add_timer(&d->timer);
 	d->bufpool = NULL;	/* defer to aoeblk_gdalloc */
 	INIT_LIST_HEAD(&d->bufq);
 	d->next = devlist;
@@ -67,9 +110,6 @@ aoedev_downdev(struct aoedev *d)
 	struct buf *buf;
 	struct bio *bio;
 
-	d->flags |= DEVFL_TKILL;
-	del_timer(&d->timer);
-
 	f = d->frames;
 	e = f + d->nframes;
 	for (; f<e; f->tag = FREETAG, f->buf = NULL, f++) {
@@ -81,6 +121,7 @@ aoedev_downdev(struct aoedev *d)
 			mempool_free(buf, d->bufpool);
 			bio_endio(bio, bio->bi_size, -EIO);
 		}
+		skb_shinfo(f->skb)->nr_frags = f->skb->data_len = 0;
 	}
 	d->inprocess = NULL;
 
@@ -92,16 +133,15 @@ aoedev_downdev(struct aoedev *d)
 		bio_endio(bio, bio->bi_size, -EIO);
 	}
 
-	if (d->nopen)
-		d->flags |= DEVFL_CLOSEWAIT;
 	if (d->gd)
 		d->gd->capacity = 0;
 
-	d->flags &= ~DEVFL_UP;
+	d->flags &= ~(DEVFL_UP | DEVFL_PAUSE);
 }
 
+/* find it or malloc it */
 struct aoedev *
-aoedev_set(ulong sysminor, unsigned char *addr, struct net_device *ifp, ulong bufcnt)
+aoedev_by_sysminor_m(ulong sysminor, ulong bufcnt)
 {
 	struct aoedev *d;
 	ulong flags;
@@ -112,35 +152,37 @@ aoedev_set(ulong sysminor, unsigned char *addr, struct net_device *ifp, ulong bu
 		if (d->sysminor == sysminor)
 			break;
 
-	if (d == NULL && (d = aoedev_newdev(bufcnt)) == NULL) {
-		spin_unlock_irqrestore(&devlist_lock, flags);
-		printk(KERN_INFO "aoe: aoedev_set: aoedev_newdev failure.\n");
-		return NULL;
-	} /* if newdev, (d->flags & DEVFL_UP) == 0 for below */
-
-	spin_unlock_irqrestore(&devlist_lock, flags);
-	spin_lock_irqsave(&d->lock, flags);
-
-	d->ifp = ifp;
-	memcpy(d->addr, addr, sizeof d->addr);
-	if ((d->flags & DEVFL_UP) == 0) {
-		aoedev_downdev(d); /* flushes outstanding frames */
+	if (d == NULL) {
+		d = aoedev_newdev(bufcnt);
+	 	if (d == NULL) {
+			spin_unlock_irqrestore(&devlist_lock, flags);
+			printk(KERN_INFO "aoe: aoedev_newdev failure.\n");
+			return NULL;
+		}
 		d->sysminor = sysminor;
 		d->aoemajor = AOEMAJOR(sysminor);
 		d->aoeminor = AOEMINOR(sysminor);
 	}
 
-	spin_unlock_irqrestore(&d->lock, flags);
+	spin_unlock_irqrestore(&devlist_lock, flags);
 	return d;
 }
 
 static void
 aoedev_freedev(struct aoedev *d)
 {
+	struct frame *f, *e;
+
 	if (d->gd) {
 		aoedisk_rm_sysfs(d);
 		del_gendisk(d->gd);
 		put_disk(d->gd);
+	}
+	f = d->frames;
+	e = f + d->nframes;
+	for (; f<e; f++) {
+		skb_shinfo(f->skb)->nr_frags = 0;
+		dev_kfree_skb(f->skb);
 	}
 	kfree(d->frames);
 	if (d->bufpool)
@@ -161,6 +203,7 @@ aoedev_exit(void)
 
 		spin_lock_irqsave(&d->lock, flags);
 		aoedev_downdev(d);
+		d->flags |= DEVFL_TKILL;
 		spin_unlock_irqrestore(&d->lock, flags);
 
 		del_timer_sync(&d->timer);

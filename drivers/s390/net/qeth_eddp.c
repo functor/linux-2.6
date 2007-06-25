@@ -8,7 +8,6 @@
  *    Author(s): Thomas Spatzier <tspat@de.ibm.com>
  *
  */
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/ip.h>
 #include <linux/inetdevice.h>
@@ -81,7 +80,7 @@ void
 qeth_eddp_buf_release_contexts(struct qeth_qdio_out_buffer *buf)
 {
 	struct qeth_eddp_context_reference *ref;
-	
+
 	QETH_DBF_TEXT(trace, 6, "eddprctx");
 	while (!list_empty(&buf->ctx_list)){
 		ref = list_entry(buf->ctx_list.next,
@@ -135,7 +134,7 @@ qeth_eddp_fill_buffer(struct qeth_qdio_out_q *queue,
 					   "buffer!\n");
 				goto out;
 			}
-		}		
+		}
 		/* check if the whole next skb fits into current buffer */
 		if ((QETH_MAX_BUFFER_ELEMENTS(queue->card) -
 					buf->next_element_to_fill)
@@ -148,7 +147,7 @@ qeth_eddp_fill_buffer(struct qeth_qdio_out_q *queue,
 			 * and increment ctx's refcnt */
 			must_refcnt = 1;
 			continue;
-		}	
+		}
 		if (must_refcnt){
 			must_refcnt = 0;
 			if (qeth_eddp_buf_ref_context(buf, ctx)){
@@ -180,9 +179,8 @@ out_check:
 			flush_cnt++;
 		}
 	} else {
-#ifdef CONFIG_QETH_PERF_STATS
-		queue->card->perf_stats.skbs_sent_pack++;
-#endif
+		if (queue->card->options.performance_stats)
+			queue->card->perf_stats.skbs_sent_pack++;
 		QETH_DBF_TEXT(trace, 6, "fillbfpa");
 		if (buf->next_element_to_fill >=
 				QETH_MAX_BUFFER_ELEMENTS(queue->card)) {
@@ -260,13 +258,13 @@ qeth_eddp_create_segment_hdrs(struct qeth_eddp_context *ctx,
 
 static inline void
 qeth_eddp_copy_data_tcp(char *dst, struct qeth_eddp_data *eddp, int len,
-			u32 *hcsum)
+			__wsum *hcsum)
 {
 	struct skb_frag_struct *frag;
 	int left_in_frag;
 	int copy_len;
 	u8 *src;
-	
+
 	QETH_DBF_TEXT(trace, 5, "eddpcdtc");
 	if (skb_shinfo(eddp->skb)->nr_frags == 0) {
 		memcpy(dst, eddp->skb->data + eddp->skb_offset, len);
@@ -307,7 +305,7 @@ qeth_eddp_copy_data_tcp(char *dst, struct qeth_eddp_data *eddp, int len,
 static inline void
 qeth_eddp_create_segment_data_tcp(struct qeth_eddp_context *ctx,
 				  struct qeth_eddp_data *eddp, int data_len,
-				  u32 hcsum)
+				  __wsum hcsum)
 {
 	u8 *page;
 	int page_remainder;
@@ -351,10 +349,10 @@ qeth_eddp_create_segment_data_tcp(struct qeth_eddp_context *ctx,
 	((struct tcphdr *)eddp->th_in_ctx)->check = csum_fold(hcsum);
 }
 
-static inline u32
+static inline __wsum
 qeth_eddp_check_tcp4_hdr(struct qeth_eddp_data *eddp, int data_len)
 {
-	u32 phcsum; /* pseudo header checksum */
+	__wsum phcsum; /* pseudo header checksum */
 
 	QETH_DBF_TEXT(trace, 5, "eddpckt4");
 	eddp->th.tcp.h.check = 0;
@@ -365,11 +363,11 @@ qeth_eddp_check_tcp4_hdr(struct qeth_eddp_data *eddp, int data_len)
 	return csum_partial((u8 *)&eddp->th, eddp->thl, phcsum);
 }
 
-static inline u32
+static inline __wsum
 qeth_eddp_check_tcp6_hdr(struct qeth_eddp_data *eddp, int data_len)
 {
-	u32 proto;
-	u32 phcsum; /* pseudo header checksum */
+	__be32 proto;
+	__wsum phcsum; /* pseudo header checksum */
 
 	QETH_DBF_TEXT(trace, 5, "eddpckt6");
 	eddp->th.tcp.h.check = 0;
@@ -389,9 +387,8 @@ qeth_eddp_create_eddp_data(struct qeth_hdr *qh, u8 *nh, u8 nhl, u8 *th, u8 thl)
 	struct qeth_eddp_data *eddp;
 
 	QETH_DBF_TEXT(trace, 5, "eddpcrda");
-	eddp = kmalloc(sizeof(struct qeth_eddp_data), GFP_ATOMIC);
+	eddp = kzalloc(sizeof(struct qeth_eddp_data), GFP_ATOMIC);
 	if (eddp){
-		memset(eddp, 0, sizeof(struct qeth_eddp_data));
 		eddp->nhl = nhl;
 		eddp->thl = thl;
 		memcpy(&eddp->qh, qh, sizeof(struct qeth_hdr));
@@ -408,8 +405,8 @@ __qeth_eddp_fill_context_tcp(struct qeth_eddp_context *ctx,
 {
 	struct tcphdr *tcph;
 	int data_len;
-	u32 hcsum;
-	
+	__wsum hcsum;
+
 	QETH_DBF_TEXT(trace, 5, "eddpftcp");
 	eddp->skb_offset = sizeof(struct qeth_hdr) + eddp->nhl + eddp->thl;
        if (eddp->qh.hdr.l2.id == QETH_HEADER_TYPE_LAYER2) {
@@ -421,7 +418,7 @@ __qeth_eddp_fill_context_tcp(struct qeth_eddp_context *ctx,
        }
 	tcph = eddp->skb->h.th;
 	while (eddp->skb_offset < eddp->skb->len) {
-		data_len = min((int)skb_shinfo(eddp->skb)->tso_size,
+		data_len = min((int)skb_shinfo(eddp->skb)->gso_size,
 			       (int)(eddp->skb->len - eddp->skb_offset));
 		/* prepare qdio hdr */
 		if (eddp->qh.hdr.l2.id == QETH_HEADER_TYPE_LAYER2){
@@ -436,22 +433,22 @@ __qeth_eddp_fill_context_tcp(struct qeth_eddp_context *ctx,
 			eddp->qh.hdr.l3.length = data_len + eddp->nhl +
 						 eddp->thl;
 		/* prepare ip hdr */
-		if (eddp->skb->protocol == ETH_P_IP){
-			eddp->nh.ip4.h.tot_len = data_len + eddp->nhl +
-						 eddp->thl;
+		if (eddp->skb->protocol == htons(ETH_P_IP)){
+			eddp->nh.ip4.h.tot_len = htons(data_len + eddp->nhl +
+						 eddp->thl);
 			eddp->nh.ip4.h.check = 0;
 			eddp->nh.ip4.h.check =
 				ip_fast_csum((u8 *)&eddp->nh.ip4.h,
 						eddp->nh.ip4.h.ihl);
 		} else
-			eddp->nh.ip6.h.payload_len = data_len + eddp->thl;
+			eddp->nh.ip6.h.payload_len = htons(data_len + eddp->thl);
 		/* prepare tcp hdr */
 		if (data_len == (eddp->skb->len - eddp->skb_offset)){
 			/* last segment -> set FIN and PSH flags */
 			eddp->th.tcp.h.fin = tcph->fin;
 			eddp->th.tcp.h.psh = tcph->psh;
 		}
-		if (eddp->skb->protocol == ETH_P_IP)
+		if (eddp->skb->protocol == htons(ETH_P_IP))
 			hcsum = qeth_eddp_check_tcp4_hdr(eddp, data_len);
 		else
 			hcsum = qeth_eddp_check_tcp6_hdr(eddp, data_len);
@@ -461,21 +458,21 @@ __qeth_eddp_fill_context_tcp(struct qeth_eddp_context *ctx,
 		if (eddp->skb_offset >= eddp->skb->len)
 			break;
 		/* prepare headers for next round */
-		if (eddp->skb->protocol == ETH_P_IP)
-			eddp->nh.ip4.h.id++;
-		eddp->th.tcp.h.seq += data_len;
+		if (eddp->skb->protocol == htons(ETH_P_IP))
+			eddp->nh.ip4.h.id = htons(ntohs(eddp->nh.ip4.h.id) + 1);
+		eddp->th.tcp.h.seq = htonl(ntohl(eddp->th.tcp.h.seq) + data_len);
 	}
 }
-			   
+
 static inline int
 qeth_eddp_fill_context_tcp(struct qeth_eddp_context *ctx,
 			   struct sk_buff *skb, struct qeth_hdr *qhdr)
 {
 	struct qeth_eddp_data *eddp = NULL;
-	
+
 	QETH_DBF_TEXT(trace, 5, "eddpficx");
 	/* create our segmentation headers and copy original headers */
-	if (skb->protocol == ETH_P_IP)
+	if (skb->protocol == htons(ETH_P_IP))
 		eddp = qeth_eddp_create_eddp_data(qhdr, (u8 *)skb->nh.iph,
 				skb->nh.iph->ihl*4,
 				(u8 *)skb->h.th, skb->h.th->doff*4);
@@ -493,7 +490,7 @@ qeth_eddp_fill_context_tcp(struct qeth_eddp_context *ctx,
 		memcpy(&eddp->mac, eth_hdr(skb), ETH_HLEN);
 #ifdef CONFIG_QETH_VLAN
 		if (eddp->mac.h_proto == __constant_htons(ETH_P_8021Q)) {
-			eddp->vlan[0] = __constant_htons(skb->protocol);
+			eddp->vlan[0] = skb->protocol;
 			eddp->vlan[1] = htons(vlan_tx_tag_get(skb));
 		}
 #endif /* CONFIG_QETH_VLAN */
@@ -513,23 +510,23 @@ qeth_eddp_calc_num_pages(struct qeth_eddp_context *ctx, struct sk_buff *skb,
 			 int hdr_len)
 {
 	int skbs_per_page;
-	
+
 	QETH_DBF_TEXT(trace, 5, "eddpcanp");
 	/* can we put multiple skbs in one page? */
-	skbs_per_page = PAGE_SIZE / (skb_shinfo(skb)->tso_size + hdr_len);
+	skbs_per_page = PAGE_SIZE / (skb_shinfo(skb)->gso_size + hdr_len);
 	if (skbs_per_page > 1){
-		ctx->num_pages = (skb_shinfo(skb)->tso_segs + 1) /
+		ctx->num_pages = (skb_shinfo(skb)->gso_segs + 1) /
 				 skbs_per_page + 1;
 		ctx->elements_per_skb = 1;
 	} else {
 		/* no -> how many elements per skb? */
-		ctx->elements_per_skb = (skb_shinfo(skb)->tso_size + hdr_len +
+		ctx->elements_per_skb = (skb_shinfo(skb)->gso_size + hdr_len +
 				     PAGE_SIZE) >> PAGE_SHIFT;
 		ctx->num_pages = ctx->elements_per_skb *
-				 (skb_shinfo(skb)->tso_segs + 1);
+				 (skb_shinfo(skb)->gso_segs + 1);
 	}
 	ctx->num_elements = ctx->elements_per_skb *
-			    (skb_shinfo(skb)->tso_segs + 1);
+			    (skb_shinfo(skb)->gso_segs + 1);
 }
 
 static inline struct qeth_eddp_context *
@@ -542,12 +539,11 @@ qeth_eddp_create_context_generic(struct qeth_card *card, struct sk_buff *skb,
 
 	QETH_DBF_TEXT(trace, 5, "creddpcg");
 	/* create the context and allocate pages */
-	ctx = kmalloc(sizeof(struct qeth_eddp_context), GFP_ATOMIC);
+	ctx = kzalloc(sizeof(struct qeth_eddp_context), GFP_ATOMIC);
 	if (ctx == NULL){
 		QETH_DBF_TEXT(trace, 2, "ceddpcn1");
 		return NULL;
 	}
-	memset(ctx, 0, sizeof(struct qeth_eddp_context));
 	ctx->type = QETH_LARGE_SEND_EDDP;
 	qeth_eddp_calc_num_pages(ctx, skb, hdr_len);
 	if (ctx->elements_per_skb > QETH_MAX_BUFFER_ELEMENTS(card)){
@@ -555,13 +551,12 @@ qeth_eddp_create_context_generic(struct qeth_card *card, struct sk_buff *skb,
 		kfree(ctx);
 		return NULL;
 	}
-	ctx->pages = kmalloc(ctx->num_pages * sizeof(u8 *), GFP_ATOMIC);
+	ctx->pages = kcalloc(ctx->num_pages, sizeof(u8 *), GFP_ATOMIC);
 	if (ctx->pages == NULL){
 		QETH_DBF_TEXT(trace, 2, "ceddpcn2");
 		kfree(ctx);
 		return NULL;
 	}
-	memset(ctx->pages, 0, ctx->num_pages * sizeof(u8 *));
 	for (i = 0; i < ctx->num_pages; ++i){
 		addr = (u8 *)__get_free_page(GFP_ATOMIC);
 		if (addr == NULL){
@@ -573,15 +568,13 @@ qeth_eddp_create_context_generic(struct qeth_card *card, struct sk_buff *skb,
 		memset(addr, 0, PAGE_SIZE);
 		ctx->pages[i] = addr;
 	}
-	ctx->elements = kmalloc(ctx->num_elements *
+	ctx->elements = kcalloc(ctx->num_elements,
 				sizeof(struct qeth_eddp_element), GFP_ATOMIC);
 	if (ctx->elements == NULL){
 		QETH_DBF_TEXT(trace, 2, "ceddpcn4");
 		qeth_eddp_free_context(ctx);
 		return NULL;
 	}
-	memset(ctx->elements, 0,
-	       ctx->num_elements * sizeof(struct qeth_eddp_element));
 	/* reset num_elements; will be incremented again in fill_buffer to
 	 * reflect number of actually used elements */
 	ctx->num_elements = 0;
@@ -593,13 +586,13 @@ qeth_eddp_create_context_tcp(struct qeth_card *card, struct sk_buff *skb,
 			     struct qeth_hdr *qhdr)
 {
 	struct qeth_eddp_context *ctx = NULL;
-	
+
 	QETH_DBF_TEXT(trace, 5, "creddpct");
-	if (skb->protocol == ETH_P_IP)
+	if (skb->protocol == htons(ETH_P_IP))
 		ctx = qeth_eddp_create_context_generic(card, skb,
 			sizeof(struct qeth_hdr) + skb->nh.iph->ihl*4 +
 			skb->h.th->doff*4);
-	else if (skb->protocol == ETH_P_IPV6)
+	else if (skb->protocol == htons(ETH_P_IPV6))
 		ctx = qeth_eddp_create_context_generic(card, skb,
 			sizeof(struct qeth_hdr) + sizeof(struct ipv6hdr) +
 			skb->h.th->doff*4);

@@ -476,13 +476,13 @@ static int auide_dma_lostirq(ide_drive_t *drive)
 	return 0;
 }
 
-static void auide_ddma_tx_callback(int irq, void *param, struct pt_regs *regs)
+static void auide_ddma_tx_callback(int irq, void *param)
 {
 	_auide_hwif *ahwif = (_auide_hwif*)param;
 	ahwif->drive->waiting_for_dma = 0;
 }
 
-static void auide_ddma_rx_callback(int irq, void *param, struct pt_regs *regs)
+static void auide_ddma_rx_callback(int irq, void *param)
 {
 	_auide_hwif *ahwif = (_auide_hwif*)param;
 	ahwif->drive->waiting_for_dma = 0;
@@ -671,6 +671,11 @@ static int au_ide_probe(struct device *dev)
 
 	if (res == NULL) {
 		pr_debug("%s %d: no base address\n", DRV_NAME, pdev->id);
+		ret = -ENODEV;
+		goto out;
+	}
+	if (ahwif->irq < 0) {
+		pr_debug("%s %d: no IRQ\n", DRV_NAME, pdev->id);
 		ret = -ENODEV;
 		goto out;
 	}

@@ -1,7 +1,6 @@
 #ifndef _ASMARM_PAGE_H
 #define _ASMARM_PAGE_H
 
-#include <linux/config.h>
 
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
@@ -95,6 +94,8 @@ typedef unsigned long pgprot_t;
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+
+#define devmem_is_allowed(x) 1
 
 #endif /* __KERNEL__ */
 

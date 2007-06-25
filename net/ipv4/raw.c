@@ -38,8 +38,7 @@
  *		as published by the Free Software Foundation; either version
  *		2 of the License, or (at your option) any later version.
  */
- 
-#include <linux/config.h> 
+
 #include <linux/types.h>
 #include <asm/atomic.h>
 #include <asm/byteorder.h>
@@ -124,7 +123,7 @@ static inline int raw_addr_match (
 }
 
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
-			     unsigned long raddr, unsigned long laddr,
+			     __be32 raddr, __be32 laddr,
 			     int dif)
 {
 	struct hlist_node *node;
@@ -336,7 +335,7 @@ static int raw_send_hdrinc(struct sock *sk, void *from, size_t length,
 	}
 
 	err = -EPERM;
-	if (!vx_check(0, VX_ADMIN) && !capable(CAP_NET_RAW)
+	if (!nx_check(0, VS_ADMIN) && !capable(CAP_NET_RAW)
 		&& (!addr_in_nx_info(sk->sk_nx_info, iph->saddr)))
 		goto error_free;
 
@@ -358,7 +357,7 @@ error:
 	return err; 
 }
 
-static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
+static int raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 {
 	struct iovec *iov;
 	u8 __user *type = NULL;
@@ -367,7 +366,7 @@ static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 	unsigned int i;
 
 	if (!msg->msg_iov)
-		return;
+		return 0;
 
 	for (i = 0; i < msg->msg_iovlen; i++) {
 		iov = &msg->msg_iov[i];
@@ -389,8 +388,9 @@ static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 				code = iov->iov_base;
 
 			if (type && code) {
-				get_user(fl->fl_icmp_type, type);
-			        get_user(fl->fl_icmp_code, code);
+				if (get_user(fl->fl_icmp_type, type) ||
+				    get_user(fl->fl_icmp_code, code))
+					return -EFAULT;
 				probed = 1;
 			}
 			break;
@@ -401,6 +401,7 @@ static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 		if (probed)
 			break;
 	}
+	return 0;
 }
 
 static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
@@ -410,8 +411,8 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	struct ipcm_cookie ipc;
 	struct rtable *rt = NULL;
 	int free = 0;
-	u32 daddr;
-	u32 saddr;
+	__be32 daddr;
+	__be32 saddr;
 	u8  tos;
 	int err;
 
@@ -509,9 +510,13 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				    .proto = inet->hdrincl ? IPPROTO_RAW :
 					    		     sk->sk_protocol,
 				  };
-		if (!inet->hdrincl)
-			raw_probe_proto_opt(&fl, msg);
+		if (!inet->hdrincl) {
+			err = raw_probe_proto_opt(&fl, msg);
+			if (err)
+				goto done;
+		}
 
+		security_sk_classify_flow(sk, &fl);
 		if (sk->sk_nx_info) {
 			err = ip_find_src(sk->sk_nx_info, &rt, &fl);
 
@@ -643,6 +648,7 @@ static int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (sin) {
 		sin->sin_family = AF_INET;
 		sin->sin_addr.s_addr = skb->nh.iph->saddr;
+		sin->sin_port = 0;
 		memset(&sin->sin_zero, 0, sizeof(sin->sin_zero));
 	}
 	if (inet->cmsg_flags)
@@ -694,12 +700,9 @@ static int raw_geticmpfilter(struct sock *sk, char __user *optval, int __user *o
 out:	return ret;
 }
 
-static int raw_setsockopt(struct sock *sk, int level, int optname, 
+static int do_raw_setsockopt(struct sock *sk, int level, int optname,
 			  char __user *optval, int optlen)
 {
-	if (level != SOL_RAW)
-		return ip_setsockopt(sk, level, optname, optval, optlen);
-
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
 			return -EOPNOTSUPP;
@@ -709,12 +712,27 @@ static int raw_setsockopt(struct sock *sk, int level, int optname,
 	return -ENOPROTOOPT;
 }
 
-static int raw_getsockopt(struct sock *sk, int level, int optname, 
-			  char __user *optval, int __user *optlen)
+static int raw_setsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int optlen)
 {
 	if (level != SOL_RAW)
-		return ip_getsockopt(sk, level, optname, optval, optlen);
+		return ip_setsockopt(sk, level, optname, optval, optlen);
+	return do_raw_setsockopt(sk, level, optname, optval, optlen);
+}
 
+#ifdef CONFIG_COMPAT
+static int compat_raw_setsockopt(struct sock *sk, int level, int optname,
+				 char __user *optval, int optlen)
+{
+	if (level != SOL_RAW)
+		return compat_ip_setsockopt(sk, level, optname, optval, optlen);
+	return do_raw_setsockopt(sk, level, optname, optval, optlen);
+}
+#endif
+
+static int do_raw_getsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int __user *optlen)
+{
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
 			return -EOPNOTSUPP;
@@ -723,6 +741,24 @@ static int raw_getsockopt(struct sock *sk, int level, int optname,
 	}
 	return -ENOPROTOOPT;
 }
+
+static int raw_getsockopt(struct sock *sk, int level, int optname,
+			  char __user *optval, int __user *optlen)
+{
+	if (level != SOL_RAW)
+		return ip_getsockopt(sk, level, optname, optval, optlen);
+	return do_raw_getsockopt(sk, level, optname, optval, optlen);
+}
+
+#ifdef CONFIG_COMPAT
+static int compat_raw_getsockopt(struct sock *sk, int level, int optname,
+				 char __user *optval, int __user *optlen)
+{
+	if (level != SOL_RAW)
+		return compat_ip_getsockopt(sk, level, optname, optval, optlen);
+	return do_raw_getsockopt(sk, level, optname, optval, optlen);
+}
+#endif
 
 static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 {
@@ -753,22 +789,26 @@ static int raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 }
 
 struct proto raw_prot = {
-	.name =		"RAW",
-	.owner =	THIS_MODULE,
-	.close =	raw_close,
-	.connect =	ip4_datagram_connect,
-	.disconnect =	udp_disconnect,
-	.ioctl =	raw_ioctl,
-	.init =		raw_init,
-	.setsockopt =	raw_setsockopt,
-	.getsockopt =	raw_getsockopt,
-	.sendmsg =	raw_sendmsg,
-	.recvmsg =	raw_recvmsg,
-	.bind =		raw_bind,
-	.backlog_rcv =	raw_rcv_skb,
-	.hash =		raw_v4_hash,
-	.unhash =	raw_v4_unhash,
-	.obj_size =	sizeof(struct raw_sock),
+	.name		   = "RAW",
+	.owner		   = THIS_MODULE,
+	.close		   = raw_close,
+	.connect	   = ip4_datagram_connect,
+	.disconnect	   = udp_disconnect,
+	.ioctl		   = raw_ioctl,
+	.init		   = raw_init,
+	.setsockopt	   = raw_setsockopt,
+	.getsockopt	   = raw_getsockopt,
+	.sendmsg	   = raw_sendmsg,
+	.recvmsg	   = raw_recvmsg,
+	.bind		   = raw_bind,
+	.backlog_rcv	   = raw_rcv_skb,
+	.hash		   = raw_v4_hash,
+	.unhash		   = raw_v4_unhash,
+	.obj_size	   = sizeof(struct raw_sock),
+#ifdef CONFIG_COMPAT
+	.compat_setsockopt = compat_raw_setsockopt,
+	.compat_getsockopt = compat_raw_getsockopt,
+#endif
 };
 
 #ifdef CONFIG_PROC_FS
@@ -788,7 +828,7 @@ static struct sock *raw_get_first(struct seq_file *seq)
 
 		sk_for_each(sk, node, &raw_v4_htable[state->bucket])
 			if (sk->sk_family == PF_INET &&
-				vx_check(sk->sk_xid, VX_IDENT|VX_WATCH))
+				nx_check(sk->sk_nid, VS_WATCH_P|VS_IDENT))
 				goto found;
 	}
 	sk = NULL;
@@ -805,7 +845,7 @@ static struct sock *raw_get_next(struct seq_file *seq, struct sock *sk)
 try_again:
 		;
 	} while (sk && (sk->sk_family != PF_INET ||
-		!vx_check(sk->sk_xid, VX_IDENT|VX_WATCH)));
+		!nx_check(sk->sk_nid, VS_WATCH_P|VS_IDENT)));
 
 	if (!sk && ++state->bucket < RAWV4_HTABLE_SIZE) {
 		sk = sk_head(&raw_v4_htable[state->bucket]);
@@ -850,8 +890,8 @@ static void raw_seq_stop(struct seq_file *seq, void *v)
 static __inline__ char *get_raw_sock(struct sock *sp, char *tmpbuf, int i)
 {
 	struct inet_sock *inet = inet_sk(sp);
-	unsigned int dest = inet->daddr,
-		     src = inet->rcv_saddr;
+	__be32 dest = inet->daddr,
+	       src = inet->rcv_saddr;
 	__u16 destp = 0,
 	      srcp  = inet->num;
 

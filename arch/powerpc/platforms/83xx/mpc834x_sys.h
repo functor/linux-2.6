@@ -1,5 +1,5 @@
 /*
- * arch/powerppc/platforms/83xx/mpc834x_sys.h
+ * arch/powerpc/platforms/83xx/mpc834x_sys.h
  *
  * MPC834X SYS common board definitions
  *
@@ -20,4 +20,4 @@
 #define PIRQC	MPC83xx_IRQ_EXT6
 #define PIRQD	MPC83xx_IRQ_EXT7
 
-#endif                /* __MACH_MPC83XX_SYS_H__ */
+#endif				/* __MACH_MPC83XX_SYS_H__ */

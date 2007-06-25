@@ -1,6 +1,6 @@
-/* ptrace.c: Sparc process tracing support.
+/* ptrace.c: Sparc64 process tracing support.
  *
- * Copyright (C) 1996 David S. Miller (davem@caipfs.rutgers.edu)
+ * Copyright (C) 1996, 2006 David S. Miller (davem@davemloft.net)
  * Copyright (C) 1997 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
  *
  * Based upon code written by Ross Biro, Linus Torvalds, Bob Manson,
@@ -11,102 +11,594 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
-#include <linux/errno.h>
-#include <linux/ptrace.h>
-#include <linux/user.h>
-#include <linux/smp.h>
-#include <linux/smp_lock.h>
 #include <linux/security.h>
 #include <linux/seccomp.h>
 #include <linux/audit.h>
-#include <linux/signal.h>
+#include <linux/tracehook.h>
+#include <linux/elf.h>
+#include <linux/ptrace.h>
 
 #include <asm/asi.h>
 #include <asm/pgtable.h>
 #include <asm/system.h>
-#include <asm/uaccess.h>
-#include <asm/psrcompat.h>
-#include <asm/visasm.h>
 #include <asm/spitfire.h>
 #include <asm/page.h>
 #include <asm/cpudata.h>
+#include <asm/psrcompat.h>
 
-/* Returning from ptrace is a bit tricky because the syscall return
- * low level code assumes any value returned which is negative and
- * is a valid errno will mean setting the condition codes to indicate
- * an error return.  This doesn't work, so we have this hook.
- */
-static inline void pt_error_return(struct pt_regs *regs, unsigned long error)
-{
-	regs->u_regs[UREG_I0] = error;
-	regs->tstate |= (TSTATE_ICARRY | TSTATE_XCARRY);
-	regs->tpc = regs->tnpc;
-	regs->tnpc += 4;
-}
+#define GENREG_G0	0
+#define GENREG_O0	8
+#define GENREG_L0	16
+#define GENREG_I0	24
+#define GENREG_TSTATE	32
+#define GENREG_TPC	33
+#define GENREG_TNPC	34
+#define GENREG_Y	35
 
-static inline void pt_succ_return(struct pt_regs *regs, unsigned long value)
-{
-	regs->u_regs[UREG_I0] = value;
-	regs->tstate &= ~(TSTATE_ICARRY | TSTATE_XCARRY);
-	regs->tpc = regs->tnpc;
-	regs->tnpc += 4;
-}
+#define SPARC64_NGREGS	36
 
-static inline void
-pt_succ_return_linux(struct pt_regs *regs, unsigned long value, void __user *addr)
+static int genregs_get(struct task_struct *target,
+		       const struct utrace_regset *regset,
+		       unsigned int pos, unsigned int count,
+		       void *kbuf, void __user *ubuf)
 {
-	if (test_thread_flag(TIF_32BIT)) {
-		if (put_user(value, (unsigned int __user *) addr)) {
-			pt_error_return(regs, EFAULT);
-			return;
+	struct pt_regs *regs = task_pt_regs(target);
+	int err;
+
+	err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf, regs->u_regs,
+				    GENREG_G0 * 8, GENREG_L0 * 8);
+
+	if (err == 0 && count > 0 && pos < (GENREG_TSTATE * 8)) {
+		struct thread_info *t = task_thread_info(target);
+		unsigned long rwindow[16], fp, *win;
+		int wsaved;
+
+		if (target == current)
+			flushw_user();
+
+		wsaved = __thread_flag_byte_ptr(t)[TI_FLAG_BYTE_WSAVED];
+		fp = regs->u_regs[UREG_FP] + STACK_BIAS;
+		if (wsaved && t->rwbuf_stkptrs[wsaved - 1] == fp)
+			win = &t->reg_window[wsaved - 1].locals[0];
+		else {
+			if (target == current) {
+				if (copy_from_user(rwindow,
+						   (void __user *) fp,
+						   16 * sizeof(long)))
+					err = -EFAULT;
+			} else
+				err = access_process_vm(target, fp, rwindow,
+							16 * sizeof(long), 0);
+			if (err)
+				return err;
+			win = rwindow;
 		}
-	} else {
-		if (put_user(value, (long __user *) addr)) {
-			pt_error_return(regs, EFAULT);
-			return;
+
+		err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					    win, GENREG_L0 * 8,
+					    GENREG_TSTATE * 8);
+	}
+
+	if (err == 0)
+		err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					    &regs->tstate, GENREG_TSTATE * 8,
+					    GENREG_Y * 8);
+	if (err == 0 && count > 0) {
+		if (kbuf)
+			*(unsigned long *) kbuf = regs->y;
+		else if (put_user(regs->y, (unsigned long __user *) ubuf))
+			return -EFAULT;
+	}
+
+	return err;
+}
+
+/* Consistent with signal handling, we only allow userspace to
+ * modify the %asi, %icc, and %xcc fields of the %tstate register.
+ */
+#define TSTATE_DEBUGCHANGE	(TSTATE_ASI | TSTATE_ICC | TSTATE_XCC)
+
+static int genregs_set(struct task_struct *target,
+		       const struct utrace_regset *regset,
+		       unsigned int pos, unsigned int count,
+		       const void *kbuf, const void __user *ubuf)
+{
+	struct pt_regs *regs = task_pt_regs(target);
+	unsigned long tstate_save;
+	int err;
+
+	err = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf, regs->u_regs,
+				   GENREG_G0 * 8, GENREG_L0 * 8);
+
+	if (err == 0 && count > 0 && pos < (GENREG_TSTATE * 8)) {
+		unsigned long fp = regs->u_regs[UREG_FP] + STACK_BIAS;
+		unsigned long rwindow[16], *winbuf;
+		unsigned int copy = (GENREG_TSTATE * 8) - pos;
+		unsigned int off;
+		int err;
+
+		if (target == current)
+			flushw_user();
+
+		if (count < copy)
+			copy = count;
+		off = pos - (GENREG_L0 * 8);
+
+		if (kbuf) {
+			winbuf = (unsigned long *) kbuf;
+			kbuf += copy;
+		}
+		else {
+			winbuf = rwindow;
+			if (copy_from_user(winbuf, ubuf, copy))
+				return -EFAULT;
+			ubuf += copy;
+		}
+		count -= copy;
+		pos += copy;
+
+		if (target == current)
+			err = copy_to_user((void __user *) fp + off,
+					   winbuf, copy);
+		else
+			err = access_process_vm(target, fp + off,
+						winbuf, copy, 1);
+	}
+
+	tstate_save = regs->tstate &~ TSTATE_DEBUGCHANGE;
+
+	if (err == 0)
+		err = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+					    &regs->tstate, GENREG_TSTATE * 8,
+					    GENREG_Y * 8);
+
+	regs->tstate &= TSTATE_DEBUGCHANGE;
+	regs->tstate |= tstate_save;
+
+	if (err == 0 && count > 0) {
+		if (kbuf)
+			regs->y = *(unsigned long *) kbuf;
+		else if (get_user(regs->y, (unsigned long __user *) ubuf))
+			return -EFAULT;
+	}
+
+	return err;
+}
+
+#define FPREG_F0	0
+#define FPREG_FSR	32
+#define FPREG_GSR	33
+#define FPREG_FPRS	34
+
+#define SPARC64_NFPREGS	35
+
+static int fpregs_get(struct task_struct *target,
+		      const struct utrace_regset *regset,
+		      unsigned int pos, unsigned int count,
+		      void *kbuf, void __user *ubuf)
+{
+	struct thread_info *t = task_thread_info(target);
+	int err;
+
+	err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				    t->fpregs, FPREG_F0 * 8, FPREG_FSR * 8);
+
+	if (err == 0)
+		err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					    &t->xfsr[0], FPREG_FSR * 8,
+					    FPREG_GSR * 8);
+
+	if (err == 0)
+		err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					    &t->gsr[0], FPREG_GSR * 8,
+					    FPREG_FPRS * 8);
+
+	if (err == 0 && count > 0) {
+		struct pt_regs *regs = task_pt_regs(target);
+
+		if (kbuf)
+			*(unsigned long *) kbuf = regs->fprs;
+		else if (put_user(regs->fprs, (unsigned long __user *) ubuf))
+			return -EFAULT;
+	}
+
+	return err;
+}
+
+static int fpregs_set(struct task_struct *target,
+		      const struct utrace_regset *regset,
+		      unsigned int pos, unsigned int count,
+		      const void *kbuf, const void __user *ubuf)
+{
+	struct thread_info *t = task_thread_info(target);
+	int err;
+
+	err = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				   t->fpregs, FPREG_F0 * 8, FPREG_FSR * 8);
+
+	if (err == 0)
+		err = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+					   &t->xfsr[0], FPREG_FSR * 8,
+					   FPREG_GSR * 8);
+
+	if (err == 0)
+		err = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+					   &t->gsr[0], FPREG_GSR * 8,
+					   FPREG_FPRS * 8);
+
+	if (err == 0 && count > 0) {
+		struct pt_regs *regs = task_pt_regs(target);
+
+		if (kbuf)
+			regs->fprs = *(unsigned long *) kbuf;
+		else if (get_user(regs->fprs, (unsigned long __user *) ubuf))
+			return -EFAULT;
+	}
+
+	return err;
+}
+
+static const struct utrace_regset native_regsets[] = {
+	{
+		.n = SPARC64_NGREGS,
+		.size = sizeof(long), .align = sizeof(long),
+		.get = genregs_get, .set = genregs_set
+	},
+	{
+		.n = SPARC64_NFPREGS,
+		.size = sizeof(long), .align = sizeof(long),
+		.get = fpregs_get, .set = fpregs_set
+	},
+};
+
+const struct utrace_regset_view utrace_sparc64_native_view = {
+	.name = UTS_MACHINE, .e_machine = ELF_ARCH,
+	.regsets = native_regsets, .n = ARRAY_SIZE(native_regsets)
+};
+EXPORT_SYMBOL_GPL(utrace_sparc64_native_view);
+
+#ifdef CONFIG_COMPAT
+
+#define GENREG32_G0	0
+#define GENREG32_O0	8
+#define GENREG32_L0	16
+#define GENREG32_I0	24
+#define GENREG32_PSR	32
+#define GENREG32_PC	33
+#define GENREG32_NPC	34
+#define GENREG32_Y	35
+#define GENREG32_WIM	36
+#define GENREG32_TBR	37
+
+#define SPARC32_NGREGS	38
+
+static int genregs32_get(struct task_struct *target,
+			 const struct utrace_regset *regset,
+			 unsigned int pos, unsigned int count,
+			 void *kbuf, void __user *ubuf)
+{
+	struct pt_regs *regs = task_pt_regs(target);
+
+	while (count > 0 && pos < (GENREG32_L0 * 4)) {
+		u32 val = regs->u_regs[(pos - (GENREG32_G0*4))/sizeof(u32)];
+		if (kbuf) {
+			*(u32 *) kbuf = val;
+			kbuf += sizeof(u32);
+		} else if (put_user(val, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos < (GENREG32_PSR * 4)) {
+		struct thread_info *t = task_thread_info(target);
+		unsigned long fp;
+		u32 rwindow[16];
+		int wsaved;
+
+		if (target == current)
+			flushw_user();
+
+		wsaved = __thread_flag_byte_ptr(t)[TI_FLAG_BYTE_WSAVED];
+		fp = regs->u_regs[UREG_FP] & 0xffffffffUL;
+		if (wsaved && t->rwbuf_stkptrs[wsaved - 1] == fp) {
+			int i;
+			for (i = 0; i < 8; i++)
+				rwindow[i + 0] =
+					t->reg_window[wsaved-1].locals[i];
+			for (i = 0; i < 8; i++)
+				rwindow[i + 8] =
+					t->reg_window[wsaved-1].ins[i];
+		} else {
+			int err;
+
+			if (target == current) {
+				err = 0;
+				if (copy_from_user(rwindow, (void __user *) fp,
+						   16 * sizeof(u32)))
+					err = -EFAULT;
+			} else
+				err = access_process_vm(target, fp, rwindow,
+							16 * sizeof(u32), 0);
+			if (err)
+				return err;
+		}
+
+		while (count > 0 && pos < (GENREG32_PSR * 4)) {
+			u32 val = rwindow[(pos - (GENREG32_L0*4))/sizeof(u32)];
+
+			if (kbuf) {
+				*(u32 *) kbuf = val;
+				kbuf += sizeof(u32);
+			} else if (put_user(val, (u32 __user *) ubuf))
+				return -EFAULT;
+			else
+				ubuf += sizeof(u32);
+			pos += sizeof(u32);
+			count -= sizeof(u32);
 		}
 	}
-	regs->u_regs[UREG_I0] = 0;
-	regs->tstate &= ~(TSTATE_ICARRY | TSTATE_XCARRY);
-	regs->tpc = regs->tnpc;
-	regs->tnpc += 4;
+
+	if (count > 0 && pos == (GENREG32_PSR * 4)) {
+		u32 psr = tstate_to_psr(regs->tstate);
+
+		if (kbuf) {
+			*(u32 *) kbuf = psr;
+			kbuf += sizeof(u32);
+		} else if (put_user(psr, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos == (GENREG32_PC * 4)) {
+		u32 val = regs->tpc;
+
+		if (kbuf) {
+			*(u32 *) kbuf = val;
+			kbuf += sizeof(u32);
+		} else if (put_user(val, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos == (GENREG32_NPC * 4)) {
+		u32 val = regs->tnpc;
+
+		if (kbuf) {
+			*(u32 *) kbuf = val;
+			kbuf += sizeof(u32);
+		} else if (put_user(val, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos == (GENREG32_Y * 4)) {
+		if (kbuf) {
+			*(u32 *) kbuf = regs->y;
+			kbuf += sizeof(u32);
+		} else if (put_user(regs->y, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0) {
+		if (kbuf)
+			memset(kbuf, 0, count);
+		else if (clear_user(ubuf, count))
+			return -EFAULT;
+	}
+
+	return 0;
 }
 
-static void
-pt_os_succ_return (struct pt_regs *regs, unsigned long val, void __user *addr)
+static int genregs32_set(struct task_struct *target,
+			 const struct utrace_regset *regset,
+			 unsigned int pos, unsigned int count,
+			 const void *kbuf, const void __user *ubuf)
 {
-	if (current->personality == PER_SUNOS)
-		pt_succ_return (regs, val);
-	else
-		pt_succ_return_linux (regs, val, addr);
+	struct pt_regs *regs = task_pt_regs(target);
+
+	while (count > 0 && pos < (GENREG32_L0 * 4)) {
+		unsigned long *loc;
+		loc = &regs->u_regs[(pos - (GENREG32_G0*4))/sizeof(u32)];
+		if (kbuf) {
+			*loc = *(u32 *) kbuf;
+			kbuf += sizeof(u32);
+		} else if (get_user(*loc, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos < (GENREG32_PSR * 4)) {
+		unsigned long fp;
+		u32 regbuf[16];
+		unsigned int off, copy;
+		int err;
+
+		if (target == current)
+			flushw_user();
+
+		copy = (GENREG32_PSR * 4) - pos;
+		if (count < copy)
+			copy = count;
+		BUG_ON(copy > 16 * sizeof(u32));
+
+		fp = regs->u_regs[UREG_FP] & 0xffffffffUL;
+		off = pos - (GENREG32_L0 * 4);
+		if (kbuf) {
+			memcpy(regbuf, kbuf, copy);
+			kbuf += copy;
+		} else if (copy_from_user(regbuf, ubuf, copy))
+			return -EFAULT;
+		else
+			ubuf += copy;
+		pos += copy;
+		count -= copy;
+
+		if (target == current) {
+			err = 0;
+			if (copy_to_user((void __user *) fp + off,
+					 regbuf, count))
+				err = -EFAULT;
+		} else
+			err = access_process_vm(target, fp + off,
+						regbuf, count, 1);
+		if (err)
+			return err;
+	}
+
+	if (count > 0 && pos == (GENREG32_PSR * 4)) {
+		unsigned long tstate, tstate_save;
+		u32 psr;
+
+		tstate_save = regs->tstate&~(TSTATE_ICC|TSTATE_XCC);
+
+		if (kbuf) {
+			psr = *(u32 *) kbuf;
+			kbuf += sizeof(u32);
+		} else if (get_user(psr, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+
+		tstate = psr_to_tstate_icc(psr);
+		regs->tstate = tstate_save | tstate;
+	}
+
+	if (count > 0 && pos == (GENREG32_PC * 4)) {
+		if (kbuf) {
+			regs->tpc = *(u32 *) kbuf;
+			kbuf += sizeof(u32);
+		} else if (get_user(regs->tpc, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos == (GENREG32_NPC * 4)) {
+		if (kbuf) {
+			regs->tnpc = *(u32 *) kbuf;
+			kbuf += sizeof(u32);
+		} else if (get_user(regs->tnpc, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	if (count > 0 && pos == (GENREG32_Y * 4)) {
+		if (kbuf) {
+			regs->y = *(u32 *) kbuf;
+			kbuf += sizeof(u32);
+		} else if (get_user(regs->y, (u32 __user *) ubuf))
+			return -EFAULT;
+		else
+			ubuf += sizeof(u32);
+		pos += sizeof(u32);
+		count -= sizeof(u32);
+	}
+
+	/* Ignore WIM and TBR */
+
+	return 0;
 }
 
-/* #define ALLOW_INIT_TRACING */
-/* #define DEBUG_PTRACE */
+#define FPREG32_F0	0
+#define FPREG32_FSR	32
 
-#ifdef DEBUG_PTRACE
-char *pt_rq [] = {
-	/* 0  */ "TRACEME", "PEEKTEXT", "PEEKDATA", "PEEKUSR",
-	/* 4  */ "POKETEXT", "POKEDATA", "POKEUSR", "CONT",
-	/* 8  */ "KILL", "SINGLESTEP", "SUNATTACH", "SUNDETACH",
-	/* 12 */ "GETREGS", "SETREGS", "GETFPREGS", "SETFPREGS",
-	/* 16 */ "READDATA", "WRITEDATA", "READTEXT", "WRITETEXT",
-	/* 20 */ "GETFPAREGS", "SETFPAREGS", "unknown", "unknown",
-	/* 24 */ "SYSCALL", ""
+#define SPARC32_NFPREGS	33
+
+static int fpregs32_get(struct task_struct *target,
+			const struct utrace_regset *regset,
+			unsigned int pos, unsigned int count,
+			void *kbuf, void __user *ubuf)
+{
+	struct thread_info *t = task_thread_info(target);
+	int err;
+
+	err = utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				    t->fpregs, FPREG32_F0 * 4,
+				    FPREG32_FSR * 4);
+
+	if (err == 0 && count > 0) {
+		if (kbuf) {
+			*(u32 *) kbuf = t->xfsr[0];
+		} else if (put_user(t->xfsr[0], (u32 __user *) ubuf))
+			return -EFAULT;
+	}
+
+	return err;
+}
+
+static int fpregs32_set(struct task_struct *target,
+			const struct utrace_regset *regset,
+			unsigned int pos, unsigned int count,
+			const void *kbuf, const void __user *ubuf)
+{
+	struct thread_info *t = task_thread_info(target);
+	int err;
+
+	err = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				   t->fpregs, FPREG32_F0 * 4,
+				   FPREG32_FSR * 4);
+
+	if (err == 0 && count > 0) {
+		u32 fsr;
+		if (kbuf) {
+			fsr = *(u32 *) kbuf;
+		} else if (get_user(fsr, (u32 __user *) ubuf))
+			return -EFAULT;
+		t->xfsr[0] = (t->xfsr[0] & 0xffffffff00000000UL) | fsr;
+	}
+
+	return 0;
+}
+
+static const struct utrace_regset sparc32_regsets[] = {
+	{
+		.n = SPARC32_NGREGS,
+		.size = sizeof(u32), .align = sizeof(u32),
+		.get = genregs32_get, .set = genregs32_set
+	},
+	{
+		.n = SPARC32_NFPREGS,
+		.size = sizeof(u32), .align = sizeof(u32),
+		.get = fpregs32_get, .set = fpregs32_set
+	},
 };
-#endif
 
-/*
- * Called by kernel/ptrace.c when detaching..
- *
- * Make sure single step bits etc are not set.
- */
-void ptrace_disable(struct task_struct *child)
-{
-	/* nothing to do */
-}
+const struct utrace_regset_view utrace_sparc32_view = {
+	.name = "sparc", .e_machine = EM_SPARC,
+	.regsets = sparc32_regsets, .n = ARRAY_SIZE(sparc32_regsets)
+};
+EXPORT_SYMBOL_GPL(utrace_sparc32_view);
+
+#endif	/* CONFIG_COMPAT */
 
 /* To get the necessary page struct, access_process_vm() first calls
  * get_user_pages().  This has done a flush_dcache_page() on the
@@ -123,6 +615,9 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 			 unsigned long len, int write)
 {
 	BUG_ON(len > PAGE_SIZE);
+
+	if (tlb_type == hypervisor)
+		return;
 
 #ifdef DCACHE_ALIASING_POSSIBLE
 	/* If bit 13 of the kernel address we used to access the
@@ -164,465 +659,124 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 	}
 }
 
-asmlinkage void do_ptrace(struct pt_regs *regs)
+#ifdef CONFIG_PTRACE
+static const struct ptrace_layout_segment sparc64_getregs_layout[] = {
+	{ 0, offsetof(struct pt_regs, u_regs[15]), 0, sizeof(long) },
+	{ offsetof(struct pt_regs, u_regs[15]),
+	  offsetof(struct pt_regs, tstate),
+	  -1, 0 },
+	{ offsetof(struct pt_regs, tstate), offsetof(struct pt_regs, y),
+	  0, 32 * sizeof(long) },
+	{0, 0, -1, 0}
+};
+
+int arch_ptrace(long *request, struct task_struct *child,
+		struct utrace_attached_engine *engine,
+		unsigned long addr, unsigned long data,
+		long *retval)
 {
-	int request = regs->u_regs[UREG_I0];
-	pid_t pid = regs->u_regs[UREG_I1];
-	unsigned long addr = regs->u_regs[UREG_I2];
-	unsigned long data = regs->u_regs[UREG_I3];
-	unsigned long addr2 = regs->u_regs[UREG_I4];
-	struct task_struct *child;
-	int ret;
+	void __user *uaddr = (void __user *) addr;
+	struct pt_regs *uregs = uaddr;
+	int err = -ENOSYS;
 
-	if (test_thread_flag(TIF_32BIT)) {
-		addr &= 0xffffffffUL;
-		data &= 0xffffffffUL;
-		addr2 &= 0xffffffffUL;
-	}
-	lock_kernel();
-#ifdef DEBUG_PTRACE
-	{
-		char *s;
+	switch (*request) {
+	case PTRACE_GETREGS64:
+		err = ptrace_layout_access(child, engine,
+					   &utrace_sparc64_native_view,
+					   sparc64_getregs_layout,
+					   0, offsetof(struct pt_regs, y),
+					   uaddr, NULL, 0);
+		if (!err &&
+		    (put_user(task_pt_regs(child)->y, &uregs->y) ||
+		     put_user(task_pt_regs(child)->fprs, &uregs->fprs)))
+			err = -EFAULT;
+		break;
 
-		if ((request >= 0) && (request <= 24))
-			s = pt_rq [request];
-		else
-			s = "unknown";
+	case PTRACE_SETREGS64:
+		err = ptrace_layout_access(child, engine,
+					   &utrace_sparc64_native_view,
+					   sparc64_getregs_layout,
+					   0, offsetof(struct pt_regs, y),
+					   uaddr, NULL, 1);
+		if (!err &&
+		    (get_user(task_pt_regs(child)->y, &uregs->y) ||
+		     get_user(task_pt_regs(child)->fprs, &uregs->fprs)))
+			err = -EFAULT;
+		break;
 
-		if (request == PTRACE_POKEDATA && data == 0x91d02001){
-			printk ("do_ptrace: breakpoint pid=%d, addr=%016lx addr2=%016lx\n",
-				pid, addr, addr2);
-		} else 
-			printk("do_ptrace: rq=%s(%d) pid=%d addr=%016lx data=%016lx addr2=%016lx\n",
-			       s, request, pid, addr, data, addr2);
-	}
-#endif
-	if (request == PTRACE_TRACEME) {
-		ret = ptrace_traceme();
-		pt_succ_return(regs, 0);
-		goto out;
-	}
+	case PTRACE_GETFPREGS64:
+	case PTRACE_SETFPREGS64:
+		err = ptrace_regset_access(child, engine,
+					   utrace_native_view(current),
+					   2, 0, 34 * sizeof(long), uaddr,
+					   (*request == PTRACE_SETFPREGS64));
+		break;
 
-	child = ptrace_get_task_struct(pid);
-	if (IS_ERR(child)) {
-		ret = PTR_ERR(child);
-		pt_error_return(regs, -ret);
-		goto out;
-	}
-	if (!vx_check(vx_task_xid(child), VX_WATCH|VX_IDENT)) {
-		pt_error_return(regs, ESRCH);
-		goto out_tsk;
-	}
-
-	if ((current->personality == PER_SUNOS && request == PTRACE_SUNATTACH)
-	    || (current->personality != PER_SUNOS && request == PTRACE_ATTACH)) {
-		if (ptrace_attach(child)) {
-			pt_error_return(regs, EPERM);
-			goto out_tsk;
-		}
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	ret = ptrace_check_attach(child, request == PTRACE_KILL);
-	if (ret < 0) {
-		pt_error_return(regs, -ret);
-		goto out_tsk;
-	}
-
-	if (!(test_thread_flag(TIF_32BIT))	&&
-	    ((request == PTRACE_READDATA64)		||
-	     (request == PTRACE_WRITEDATA64)		||
-	     (request == PTRACE_READTEXT64)		||
-	     (request == PTRACE_WRITETEXT64)		||
-	     (request == PTRACE_PEEKTEXT64)		||
-	     (request == PTRACE_POKETEXT64)		||
-	     (request == PTRACE_PEEKDATA64)		||
-	     (request == PTRACE_POKEDATA64))) {
-		addr = regs->u_regs[UREG_G2];
-		addr2 = regs->u_regs[UREG_G3];
-		request -= 30; /* wheee... */
-	}
-
-	switch(request) {
-	case PTRACE_PEEKTEXT: /* read word at location addr. */ 
-	case PTRACE_PEEKDATA: {
-		unsigned long tmp64;
-		unsigned int tmp32;
-		int res, copied;
-
-		res = -EIO;
-		if (test_thread_flag(TIF_32BIT)) {
-			copied = access_process_vm(child, addr,
-						   &tmp32, sizeof(tmp32), 0);
-			tmp64 = (unsigned long) tmp32;
-			if (copied == sizeof(tmp32))
-				res = 0;
-		} else {
-			copied = access_process_vm(child, addr,
-						   &tmp64, sizeof(tmp64), 0);
-			if (copied == sizeof(tmp64))
-				res = 0;
-		}
-		if (res < 0)
-			pt_error_return(regs, -res);
-		else
-			pt_os_succ_return(regs, tmp64, (void __user *) data);
-		goto out_tsk;
-	}
-
-	case PTRACE_POKETEXT: /* write the word at location addr. */
-	case PTRACE_POKEDATA: {
-		unsigned long tmp64;
-		unsigned int tmp32;
-		int copied, res = -EIO;
-
-		if (test_thread_flag(TIF_32BIT)) {
-			tmp32 = data;
-			copied = access_process_vm(child, addr,
-						   &tmp32, sizeof(tmp32), 1);
-			if (copied == sizeof(tmp32))
-				res = 0;
-		} else {
-			tmp64 = data;
-			copied = access_process_vm(child, addr,
-						   &tmp64, sizeof(tmp64), 1);
-			if (copied == sizeof(tmp64))
-				res = 0;
-		}
-		if (res < 0)
-			pt_error_return(regs, -res);
-		else
-			pt_succ_return(regs, res);
-		goto out_tsk;
-	}
-
-	case PTRACE_GETREGS: {
-		struct pt_regs32 __user *pregs =
-			(struct pt_regs32 __user *) addr;
-		struct pt_regs *cregs = task_pt_regs(child);
-		int rval;
-
-		if (__put_user(tstate_to_psr(cregs->tstate), (&pregs->psr)) ||
-		    __put_user(cregs->tpc, (&pregs->pc)) ||
-		    __put_user(cregs->tnpc, (&pregs->npc)) ||
-		    __put_user(cregs->y, (&pregs->y))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		for (rval = 1; rval < 16; rval++)
-			if (__put_user(cregs->u_regs[rval], (&pregs->u_regs[rval - 1]))) {
-				pt_error_return(regs, EFAULT);
-				goto out_tsk;
-			}
-		pt_succ_return(regs, 0);
-#ifdef DEBUG_PTRACE
-		printk ("PC=%lx nPC=%lx o7=%lx\n", cregs->tpc, cregs->tnpc, cregs->u_regs [15]);
-#endif
-		goto out_tsk;
-	}
-
-	case PTRACE_GETREGS64: {
-		struct pt_regs __user *pregs = (struct pt_regs __user *) addr;
-		struct pt_regs *cregs = task_pt_regs(child);
-		unsigned long tpc = cregs->tpc;
-		int rval;
-
-		if ((task_thread_info(child)->flags & _TIF_32BIT) != 0)
-			tpc &= 0xffffffff;
-		if (__put_user(cregs->tstate, (&pregs->tstate)) ||
-		    __put_user(tpc, (&pregs->tpc)) ||
-		    __put_user(cregs->tnpc, (&pregs->tnpc)) ||
-		    __put_user(cregs->y, (&pregs->y))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		for (rval = 1; rval < 16; rval++)
-			if (__put_user(cregs->u_regs[rval], (&pregs->u_regs[rval - 1]))) {
-				pt_error_return(regs, EFAULT);
-				goto out_tsk;
-			}
-		pt_succ_return(regs, 0);
-#ifdef DEBUG_PTRACE
-		printk ("PC=%lx nPC=%lx o7=%lx\n", cregs->tpc, cregs->tnpc, cregs->u_regs [15]);
-#endif
-		goto out_tsk;
-	}
-
-	case PTRACE_SETREGS: {
-		struct pt_regs32 __user *pregs =
-			(struct pt_regs32 __user *) addr;
-		struct pt_regs *cregs = task_pt_regs(child);
-		unsigned int psr, pc, npc, y;
-		int i;
-
-		/* Must be careful, tracing process can only set certain
-		 * bits in the psr.
-		 */
-		if (__get_user(psr, (&pregs->psr)) ||
-		    __get_user(pc, (&pregs->pc)) ||
-		    __get_user(npc, (&pregs->npc)) ||
-		    __get_user(y, (&pregs->y))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		cregs->tstate &= ~(TSTATE_ICC);
-		cregs->tstate |= psr_to_tstate_icc(psr);
-               	if (!((pc | npc) & 3)) {
-			cregs->tpc = pc;
-			cregs->tnpc = npc;
-		}
-		cregs->y = y;
-		for (i = 1; i < 16; i++) {
-			if (__get_user(cregs->u_regs[i], (&pregs->u_regs[i-1]))) {
-				pt_error_return(regs, EFAULT);
-				goto out_tsk;
-			}
-		}
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_SETREGS64: {
-		struct pt_regs __user *pregs = (struct pt_regs __user *) addr;
-		struct pt_regs *cregs = task_pt_regs(child);
-		unsigned long tstate, tpc, tnpc, y;
-		int i;
-
-		/* Must be careful, tracing process can only set certain
-		 * bits in the psr.
-		 */
-		if (__get_user(tstate, (&pregs->tstate)) ||
-		    __get_user(tpc, (&pregs->tpc)) ||
-		    __get_user(tnpc, (&pregs->tnpc)) ||
-		    __get_user(y, (&pregs->y))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		if ((task_thread_info(child)->flags & _TIF_32BIT) != 0) {
-			tpc &= 0xffffffff;
-			tnpc &= 0xffffffff;
-		}
-		tstate &= (TSTATE_ICC | TSTATE_XCC);
-		cregs->tstate &= ~(TSTATE_ICC | TSTATE_XCC);
-		cregs->tstate |= tstate;
-		if (!((tpc | tnpc) & 3)) {
-			cregs->tpc = tpc;
-			cregs->tnpc = tnpc;
-		}
-		cregs->y = y;
-		for (i = 1; i < 16; i++) {
-			if (__get_user(cregs->u_regs[i], (&pregs->u_regs[i-1]))) {
-				pt_error_return(regs, EFAULT);
-				goto out_tsk;
-			}
-		}
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_GETFPREGS: {
-		struct fps {
-			unsigned int regs[32];
-			unsigned int fsr;
-			unsigned int flags;
-			unsigned int extra;
-			unsigned int fpqd;
-			struct fq {
-				unsigned int insnaddr;
-				unsigned int insn;
-			} fpq[16];
-		};
-		struct fps __user *fps = (struct fps __user *) addr;
-		unsigned long *fpregs = task_thread_info(child)->fpregs;
-
-		if (copy_to_user(&fps->regs[0], fpregs,
-				 (32 * sizeof(unsigned int))) ||
-		    __put_user(task_thread_info(child)->xfsr[0], (&fps->fsr)) ||
-		    __put_user(0, (&fps->fpqd)) ||
-		    __put_user(0, (&fps->flags)) ||
-		    __put_user(0, (&fps->extra)) ||
-		    clear_user(&fps->fpq[0], 32 * sizeof(unsigned int))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_GETFPREGS64: {
-		struct fps {
-			unsigned int regs[64];
-			unsigned long fsr;
-		};
-		struct fps __user *fps = (struct fps __user *) addr;
-		unsigned long *fpregs = task_thread_info(child)->fpregs;
-
-		if (copy_to_user(&fps->regs[0], fpregs,
-				 (64 * sizeof(unsigned int))) ||
-		    __put_user(task_thread_info(child)->xfsr[0], (&fps->fsr))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_SETFPREGS: {
-		struct fps {
-			unsigned int regs[32];
-			unsigned int fsr;
-			unsigned int flags;
-			unsigned int extra;
-			unsigned int fpqd;
-			struct fq {
-				unsigned int insnaddr;
-				unsigned int insn;
-			} fpq[16];
-		};
-		struct fps __user *fps = (struct fps __user *) addr;
-		unsigned long *fpregs = task_thread_info(child)->fpregs;
-		unsigned fsr;
-
-		if (copy_from_user(fpregs, &fps->regs[0],
-				   (32 * sizeof(unsigned int))) ||
-		    __get_user(fsr, (&fps->fsr))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		task_thread_info(child)->xfsr[0] &= 0xffffffff00000000UL;
-		task_thread_info(child)->xfsr[0] |= fsr;
-		if (!(task_thread_info(child)->fpsaved[0] & FPRS_FEF))
-			task_thread_info(child)->gsr[0] = 0;
-		task_thread_info(child)->fpsaved[0] |= (FPRS_FEF | FPRS_DL);
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_SETFPREGS64: {
-		struct fps {
-			unsigned int regs[64];
-			unsigned long fsr;
-		};
-		struct fps __user *fps = (struct fps __user *) addr;
-		unsigned long *fpregs = task_thread_info(child)->fpregs;
-
-		if (copy_from_user(fpregs, &fps->regs[0],
-				   (64 * sizeof(unsigned int))) ||
-		    __get_user(task_thread_info(child)->xfsr[0], (&fps->fsr))) {
-			pt_error_return(regs, EFAULT);
-			goto out_tsk;
-		}
-		if (!(task_thread_info(child)->fpsaved[0] & FPRS_FEF))
-			task_thread_info(child)->gsr[0] = 0;
-		task_thread_info(child)->fpsaved[0] |= (FPRS_FEF | FPRS_DL | FPRS_DU);
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_READTEXT:
-	case PTRACE_READDATA: {
-		int res = ptrace_readdata(child, addr,
-					  (char __user *)addr2, data);
-		if (res == data) {
-			pt_succ_return(regs, 0);
-			goto out_tsk;
-		}
-		if (res >= 0)
-			res = -EIO;
-		pt_error_return(regs, -res);
-		goto out_tsk;
-	}
-
-	case PTRACE_WRITETEXT:
-	case PTRACE_WRITEDATA: {
-		int res = ptrace_writedata(child, (char __user *) addr2,
-					   addr, data);
-		if (res == data) {
-			pt_succ_return(regs, 0);
-			goto out_tsk;
-		}
-		if (res >= 0)
-			res = -EIO;
-		pt_error_return(regs, -res);
-		goto out_tsk;
-	}
-	case PTRACE_SYSCALL: /* continue and stop at (return from) syscall */
-		addr = 1;
-
-	case PTRACE_CONT: { /* restart after signal. */
-		if (!valid_signal(data)) {
-			pt_error_return(regs, EIO);
-			goto out_tsk;
-		}
-
-		if (request == PTRACE_SYSCALL) {
-			set_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-		} else {
-			clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-		}
-
-		child->exit_code = data;
-#ifdef DEBUG_PTRACE
-		printk("CONT: %s [%d]: set exit_code = %x %lx %lx\n", child->comm,
-			child->pid, child->exit_code,
-			task_pt_regs(child)->tpc,
-			task_pt_regs(child)->tnpc);
+	case PTRACE_SUNDETACH:
+		*request = PTRACE_DETACH;
+		break;
 		       
-#endif
-		wake_up_process(child);
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-/*
- * make the child exit.  Best I can do is send it a sigkill. 
- * perhaps it should be put in the status that it wants to 
- * exit.
- */
-	case PTRACE_KILL: {
-		if (child->exit_state == EXIT_ZOMBIE) {	/* already dead */
-			pt_succ_return(regs, 0);
-			goto out_tsk;
-		}
-		child->exit_code = SIGKILL;
-		wake_up_process(child);
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	case PTRACE_SUNDETACH: { /* detach a process that was attached. */
-		int error = ptrace_detach(child, data);
-		if (error) {
-			pt_error_return(regs, EIO);
-			goto out_tsk;
-		}
-		pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-
-	/* PTRACE_DUMPCORE unsupported... */
-
-	default: {
-		int err = ptrace_request(child, request, addr, data);
-		if (err)
-			pt_error_return(regs, -err);
-		else
-			pt_succ_return(regs, 0);
-		goto out_tsk;
-	}
-	}
-out_tsk:
-	if (child)
-		put_task_struct(child);
-out:
-	unlock_kernel();
+	default:
+		break;
+	};
+	return err;
 }
+
+#ifdef CONFIG_COMPAT
+static const struct ptrace_layout_segment sparc32_getregs_layout[] = {
+	{ 0, offsetof(struct pt_regs32, u_regs[0]),
+	  0, GENREG32_PSR * sizeof(u32) },
+	{ offsetof(struct pt_regs32, u_regs[0]),
+	  offsetof(struct pt_regs32, u_regs[15]),
+	  0, 1 * sizeof(u32) },
+	{ offsetof(struct pt_regs32, u_regs[15]), sizeof(struct pt_regs32),
+	  -1, 0 },
+	{0, 0, -1, 0}
+};
+
+int arch_compat_ptrace(compat_long_t *request, struct task_struct *child,
+		       struct utrace_attached_engine *engine,
+		       compat_ulong_t addr, compat_ulong_t data,
+		       compat_long_t *retval)
+{
+	void __user *uaddr = (void __user *) (unsigned long) addr;
+	int err = -ENOSYS;
+
+	switch (*request) {
+	case PTRACE_GETREGS:
+	case PTRACE_SETREGS:
+		err = ptrace_layout_access(child, engine,
+					   &utrace_sparc32_view,
+					   sparc32_getregs_layout,
+					   0, sizeof(struct pt_regs32),
+					   uaddr, NULL,
+					   (*request ==
+					    PTRACE_SETREGS));
+		break;
+
+	case PTRACE_GETFPREGS:
+	case PTRACE_SETFPREGS:
+		err = ptrace_whole_regset(child, engine, addr, 1,
+					  (*request == PTRACE_SETFPREGS));
+		break;
+
+	case PTRACE_SUNDETACH:
+		*request = PTRACE_DETACH;
+		break;
+
+	default:
+		break;
+	};
+	return err;
+}
+#endif	/* CONFIG_COMPAT */
+#endif /* CONFIG_PTRACE */
 
 asmlinkage void syscall_trace(struct pt_regs *regs, int syscall_exit_p)
 {
 	/* do the secure computing check first */
-	secure_computing(regs->u_regs[UREG_G1]);
+	if (!syscall_exit_p)
+		secure_computing(regs->u_regs[UREG_G1]);
 
 	if (unlikely(current->audit_context) && syscall_exit_p) {
 		unsigned long tstate = regs->tstate;
@@ -631,32 +785,14 @@ asmlinkage void syscall_trace(struct pt_regs *regs, int syscall_exit_p)
 		if (unlikely(tstate & (TSTATE_XCARRY | TSTATE_ICARRY)))
 			result = AUDITSC_FAILURE;
 
-		audit_syscall_exit(current, result, regs->u_regs[UREG_I0]);
+		audit_syscall_exit(result, regs->u_regs[UREG_I0]);
 	}
 
-	if (!(current->ptrace & PT_PTRACED))
-		goto out;
+	if (test_thread_flag(TIF_SYSCALL_TRACE))
+		tracehook_report_syscall(regs, syscall_exit_p);
 
-	if (!test_thread_flag(TIF_SYSCALL_TRACE))
-		goto out;
-
-	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-				 ? 0x80 : 0));
-
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
-	}
-
-out:
 	if (unlikely(current->audit_context) && !syscall_exit_p)
-		audit_syscall_entry(current,
-				    (test_thread_flag(TIF_32BIT) ?
+		audit_syscall_entry((test_thread_flag(TIF_32BIT) ?
 				     AUDIT_ARCH_SPARC :
 				     AUDIT_ARCH_SPARC64),
 				    regs->u_regs[UREG_G1],

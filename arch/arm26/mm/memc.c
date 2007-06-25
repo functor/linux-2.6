@@ -24,7 +24,7 @@
 
 #define MEMC_TABLE_SIZE (256*sizeof(unsigned long))
 
-kmem_cache_t *pte_cache, *pgd_cache;
+struct kmem_cache *pte_cache, *pgd_cache;
 int page_nr;
 
 /*
@@ -79,12 +79,6 @@ pgd_t *get_pgd_slow(struct mm_struct *mm)
 		goto no_pgd;
 
 	/*
-	 * This lock is here just to satisfy pmd_alloc and pte_lock
-         * FIXME: I bet we could avoid taking it pretty much altogether
-	 */
-	spin_lock(&mm->page_table_lock);
-
-	/*
 	 * On ARM, first page must always be allocated since it contains
 	 * the machine vectors.
 	 */
@@ -92,7 +86,7 @@ pgd_t *get_pgd_slow(struct mm_struct *mm)
 	if (!new_pmd)
 		goto no_pmd;
 
-	new_pte = pte_alloc_kernel(mm, new_pmd, 0);
+	new_pte = pte_alloc_map(mm, new_pmd, 0);
 	if (!new_pte)
 		goto no_pte;
 
@@ -101,6 +95,7 @@ pgd_t *get_pgd_slow(struct mm_struct *mm)
 	init_pte = pte_offset(init_pmd, 0);
 
 	set_pte(new_pte, *init_pte);
+	pte_unmap(new_pte);
 
 	/*
 	 * the page table entries are zeroed
@@ -112,23 +107,14 @@ pgd_t *get_pgd_slow(struct mm_struct *mm)
 	memcpy(new_pgd + FIRST_KERNEL_PGD_NR, init_pgd + FIRST_KERNEL_PGD_NR,
 		(PTRS_PER_PGD - FIRST_KERNEL_PGD_NR) * sizeof(pgd_t));
 
-	spin_unlock(&mm->page_table_lock);
-
 	/* update MEMC tables */
 	cpu_memc_update_all(new_pgd);
 	return new_pgd;
 
 no_pte:
-	spin_unlock(&mm->page_table_lock);
 	pmd_free(new_pmd);
-	free_pgd_slow(new_pgd);
-	return NULL;
-
 no_pmd:
-	spin_unlock(&mm->page_table_lock);
 	free_pgd_slow(new_pgd);
-	return NULL;
-
 no_pgd:
 	return NULL;
 }
@@ -176,12 +162,12 @@ void __init create_memmap_holes(struct meminfo *mi)
 {
 }
 
-static void pte_cache_ctor(void *pte, kmem_cache_t *cache, unsigned long flags)
+static void pte_cache_ctor(void *pte, struct kmem_cache *cache, unsigned long flags)
 {
 	memzero(pte, sizeof(pte_t) * PTRS_PER_PTE);
 }
 
-static void pgd_cache_ctor(void *pgd, kmem_cache_t *cache, unsigned long flags)
+static void pgd_cache_ctor(void *pgd, struct kmem_cache *cache, unsigned long flags)
 {
 	memzero(pgd + MEMC_TABLE_SIZE, USER_PTRS_PER_PGD * sizeof(pgd_t));
 }

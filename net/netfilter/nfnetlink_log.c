@@ -11,6 +11,10 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  *
+ * 2006-01-26 Harald Welte <laforge@netfilter.org>
+ * 	- Add optional local and global sequence number to detect lost
+ * 	  events from userspace
+ *
  */
 #include <linux/module.h>
 #include <linux/skbuff.h>
@@ -68,11 +72,14 @@ struct nfulnl_instance {
 	unsigned int nlbufsiz;		/* netlink buffer allocation size */
 	unsigned int qthreshold;	/* threshold of the queue */
 	u_int32_t copy_range;
+	u_int32_t seq;			/* instance-local sequential counter */
 	u_int16_t group_num;		/* number of this queue */
+	u_int16_t flags;
 	u_int8_t copy_mode;	
 };
 
 static DEFINE_RWLOCK(instances_lock);
+static atomic_t global_seq;
 
 #define INSTANCE_BUCKETS	16
 static struct hlist_head instance_table[INSTANCE_BUCKETS];
@@ -210,6 +217,9 @@ _instance_destroy2(struct nfulnl_instance *inst, int lock)
 
 	spin_lock_bh(&inst->lock);
 	if (inst->skb) {
+		/* timer "holds" one reference (we have one more) */
+		if (del_timer(&inst->timer))
+			instance_put(inst);
 		if (inst->qlen)
 			__nfulnl_send(inst);
 		if (inst->skb) {
@@ -310,6 +320,16 @@ nfulnl_set_qthresh(struct nfulnl_instance *inst, u_int32_t qthresh)
 	return 0;
 }
 
+static int
+nfulnl_set_flags(struct nfulnl_instance *inst, u_int16_t flags)
+{
+	spin_lock_bh(&inst->lock);
+	inst->flags = flags;
+	spin_unlock_bh(&inst->lock);
+
+	return 0;
+}
+
 static struct sk_buff *nfulnl_alloc_skb(unsigned int inst_size, 
 					unsigned int pkt_size)
 {
@@ -346,9 +366,6 @@ __nfulnl_send(struct nfulnl_instance *inst)
 {
 	int status;
 
-	if (timer_pending(&inst->timer))
-		del_timer(&inst->timer);
-
 	if (!inst->skb)
 		return 0;
 
@@ -378,11 +395,15 @@ static void nfulnl_timer(unsigned long data)
 	UDEBUG("timer function called, flushing buffer\n");
 
 	spin_lock_bh(&inst->lock);
+	if (timer_pending(&inst->timer))	/* is it always true or false here? */
+		del_timer(&inst->timer);
 	__nfulnl_send(inst);
-	instance_put(inst);
 	spin_unlock_bh(&inst->lock);
+	instance_put(inst);
 }
 
+/* This is an inline function, we don't really care about a long
+ * list of arguments */
 static inline int 
 __build_packet_message(struct nfulnl_instance *inst,
 			const struct sk_buff *skb, 
@@ -392,13 +413,13 @@ __build_packet_message(struct nfulnl_instance *inst,
 			const struct net_device *indev,
 			const struct net_device *outdev,
 			const struct nf_loginfo *li,
-			const char *prefix)
+			const char *prefix, unsigned int plen)
 {
 	unsigned char *old_tail;
 	struct nfulnl_msg_packet_hdr pmsg;
 	struct nlmsghdr *nlh;
 	struct nfgenmsg *nfmsg;
-	u_int32_t tmp_uint;
+	__be32 tmp_uint;
 
 	UDEBUG("entered\n");
 		
@@ -411,17 +432,13 @@ __build_packet_message(struct nfulnl_instance *inst,
 	nfmsg->version = NFNETLINK_V0;
 	nfmsg->res_id = htons(inst->group_num);
 
-	pmsg.hw_protocol	= htons(skb->protocol);
+	pmsg.hw_protocol	= skb->protocol;
 	pmsg.hook		= hooknum;
 
 	NFA_PUT(inst->skb, NFULA_PACKET_HDR, sizeof(pmsg), &pmsg);
 
-	if (prefix) {
-		int slen = strlen(prefix);
-		if (slen > NFULNL_PREFIXLEN)
-			slen = NFULNL_PREFIXLEN;
-		NFA_PUT(inst->skb, NFULA_PREFIX, slen, prefix);
-	}
+	if (prefix)
+		NFA_PUT(inst->skb, NFULA_PREFIX, plen, prefix);
 
 	if (indev) {
 		tmp_uint = htonl(indev->ifindex);
@@ -475,7 +492,7 @@ __build_packet_message(struct nfulnl_instance *inst,
 			 * for physical device (when called from ipv4) */
 			NFA_PUT(inst->skb, NFULA_IFINDEX_OUTDEV,
 				sizeof(tmp_uint), &tmp_uint);
-			if (skb->nf_bridge) {
+			if (skb->nf_bridge && skb->nf_bridge->physoutdev) {
 				tmp_uint = 
 				    htonl(skb->nf_bridge->physoutdev->ifindex);
 				NFA_PUT(inst->skb, NFULA_IFINDEX_PHYSOUTDEV,
@@ -485,18 +502,16 @@ __build_packet_message(struct nfulnl_instance *inst,
 #endif
 	}
 
-	if (skb->nfmark) {
-		tmp_uint = htonl(skb->nfmark);
+	if (skb->mark) {
+		tmp_uint = htonl(skb->mark);
 		NFA_PUT(inst->skb, NFULA_MARK, sizeof(tmp_uint), &tmp_uint);
 	}
 
 	if (indev && skb->dev && skb->dev->hard_header_parse) {
 		struct nfulnl_msg_packet_hw phw;
-
-		phw.hw_addrlen = 
-			skb->dev->hard_header_parse((struct sk_buff *)skb, 
+		int len = skb->dev->hard_header_parse((struct sk_buff *)skb,
 						    phw.hw_addr);
-		phw.hw_addrlen = htons(phw.hw_addrlen);
+		phw.hw_addrlen = htons(len);
 		NFA_PUT(inst->skb, NFULA_HWADDR, sizeof(phw), &phw);
 	}
 
@@ -513,12 +528,23 @@ __build_packet_message(struct nfulnl_instance *inst,
 	if (skb->sk) {
 		read_lock_bh(&skb->sk->sk_callback_lock);
 		if (skb->sk->sk_socket && skb->sk->sk_socket->file) {
-			u_int32_t uid = htonl(skb->sk->sk_socket->file->f_uid);
+			__be32 uid = htonl(skb->sk->sk_socket->file->f_uid);
 			/* need to unlock here since NFA_PUT may goto */
 			read_unlock_bh(&skb->sk->sk_callback_lock);
 			NFA_PUT(inst->skb, NFULA_UID, sizeof(uid), &uid);
 		} else
 			read_unlock_bh(&skb->sk->sk_callback_lock);
+	}
+
+	/* local sequence number */
+	if (inst->flags & NFULNL_CFG_F_SEQ) {
+		tmp_uint = htonl(inst->seq++);
+		NFA_PUT(inst->skb, NFULA_SEQ, sizeof(tmp_uint), &tmp_uint);
+	}
+	/* global sequence number */
+	if (inst->flags & NFULNL_CFG_F_SEQ_GLOBAL) {
+		tmp_uint = htonl(atomic_inc_return(&global_seq));
+		NFA_PUT(inst->skb, NFULA_SEQ_GLOBAL, sizeof(tmp_uint), &tmp_uint);
 	}
 
 	if (data_len) {
@@ -539,6 +565,7 @@ __build_packet_message(struct nfulnl_instance *inst,
 	}
 		
 	nlh->nlmsg_len = inst->skb->tail - old_tail;
+	inst->lastnlh = nlh;
 	return 0;
 
 nlmsg_failure:
@@ -576,6 +603,7 @@ nfulnl_log_packet(unsigned int pf,
 	const struct nf_loginfo *li;
 	unsigned int qthreshold;
 	unsigned int nlbufsiz;
+	unsigned int plen;
 
 	if (li_user && li_user->type == NF_LOG_TYPE_ULOG) 
 		li = li_user;
@@ -591,6 +619,10 @@ nfulnl_log_packet(unsigned int pf,
 		return;
 	}
 
+	plen = 0;
+	if (prefix)
+		plen = strlen(prefix) + 1;
+
 	/* all macros expand to constant values at compile time */
 	/* FIXME: do we want to make the size calculation conditional based on
 	 * what is actually present?  way more branches and checks, but more
@@ -605,13 +637,18 @@ nfulnl_log_packet(unsigned int pf,
 #endif
 		+ NFA_SPACE(sizeof(u_int32_t))	/* mark */
 		+ NFA_SPACE(sizeof(u_int32_t))	/* uid */
-		+ NFA_SPACE(NFULNL_PREFIXLEN)	/* prefix */
+		+ NFA_SPACE(plen)		/* prefix */
 		+ NFA_SPACE(sizeof(struct nfulnl_msg_packet_hw))
 		+ NFA_SPACE(sizeof(struct nfulnl_msg_packet_timestamp));
 
 	UDEBUG("initial size=%u\n", size);
 
 	spin_lock_bh(&inst->lock);
+
+	if (inst->flags & NFULNL_CFG_F_SEQ)
+		size += NFA_SPACE(sizeof(u_int32_t));
+	if (inst->flags & NFULNL_CFG_F_SEQ_GLOBAL)
+		size += NFA_SPACE(sizeof(u_int32_t));
 
 	qthreshold = inst->qthreshold;
 	/* per-rule qthreshold overrides per-instance */
@@ -658,6 +695,9 @@ nfulnl_log_packet(unsigned int pf,
 		 * enough room in the skb left. flush to userspace. */
 		UDEBUG("flushing old skb\n");
 
+		/* timer "holds" one reference (we have another one) */
+		if (del_timer(&inst->timer))
+			instance_put(inst);
 		__nfulnl_send(inst);
 
 		if (!(inst->skb = nfulnl_alloc_skb(nlbufsiz, size))) {
@@ -671,7 +711,7 @@ nfulnl_log_packet(unsigned int pf,
 	inst->qlen++;
 
 	__build_packet_message(inst, skb, data_len, pf,
-				hooknum, in, out, li, prefix);
+				hooknum, in, out, li, prefix, plen);
 
 	/* timer_pending always called within inst->lock, so there
 	 * is no chance of a race here */
@@ -680,15 +720,16 @@ nfulnl_log_packet(unsigned int pf,
 		inst->timer.expires = jiffies + (inst->flushtimeout*HZ/100);
 		add_timer(&inst->timer);
 	}
-	spin_unlock_bh(&inst->lock);
 
+unlock_and_release:
+	spin_unlock_bh(&inst->lock);
+	instance_put(inst);
 	return;
 
 alloc_failure:
-	spin_unlock_bh(&inst->lock);
-	instance_put(inst);
 	UDEBUG("error allocating skb\n");
 	/* FIXME: statistics */
+	goto unlock_and_release;
 }
 
 static int
@@ -742,10 +783,14 @@ static const int nfula_min[NFULA_MAX] = {
 	[NFULA_TIMESTAMP-1]	= sizeof(struct nfulnl_msg_packet_timestamp),
 	[NFULA_IFINDEX_INDEV-1]	= sizeof(u_int32_t),
 	[NFULA_IFINDEX_OUTDEV-1]= sizeof(u_int32_t),
+	[NFULA_IFINDEX_PHYSINDEV-1]	= sizeof(u_int32_t),
+	[NFULA_IFINDEX_PHYSOUTDEV-1]	= sizeof(u_int32_t),
 	[NFULA_HWADDR-1]	= sizeof(struct nfulnl_msg_packet_hw),
 	[NFULA_PAYLOAD-1]	= 0,
 	[NFULA_PREFIX-1]	= 0,
 	[NFULA_UID-1]		= sizeof(u_int32_t),
+	[NFULA_SEQ-1]		= sizeof(u_int32_t),
+	[NFULA_SEQ_GLOBAL-1]	= sizeof(u_int32_t),
 };
 
 static const int nfula_cfg_min[NFULA_CFG_MAX] = {
@@ -754,6 +799,7 @@ static const int nfula_cfg_min[NFULA_CFG_MAX] = {
 	[NFULA_CFG_TIMEOUT-1]	= sizeof(u_int32_t),
 	[NFULA_CFG_QTHRESH-1]	= sizeof(u_int32_t),
 	[NFULA_CFG_NLBUFSIZ-1]	= sizeof(u_int32_t),
+	[NFULA_CFG_FLAGS-1]	= sizeof(u_int16_t),
 };
 
 static int
@@ -820,6 +866,9 @@ nfulnl_recv_config(struct sock *ctnl, struct sk_buff *skb,
 			ret = -EINVAL;
 			break;
 		}
+
+		if (!inst)
+			goto out;
 	} else {
 		if (!inst) {
 			UDEBUG("no config command, and no instance for "
@@ -841,32 +890,39 @@ nfulnl_recv_config(struct sock *ctnl, struct sk_buff *skb,
 		params = NFA_DATA(nfula[NFULA_CFG_MODE-1]);
 
 		nfulnl_set_mode(inst, params->copy_mode,
-				ntohs(params->copy_range));
+				ntohl(params->copy_range));
 	}
 
 	if (nfula[NFULA_CFG_TIMEOUT-1]) {
-		u_int32_t timeout = 
-			*(u_int32_t *)NFA_DATA(nfula[NFULA_CFG_TIMEOUT-1]);
+		__be32 timeout =
+			*(__be32 *)NFA_DATA(nfula[NFULA_CFG_TIMEOUT-1]);
 
 		nfulnl_set_timeout(inst, ntohl(timeout));
 	}
 
 	if (nfula[NFULA_CFG_NLBUFSIZ-1]) {
-		u_int32_t nlbufsiz = 
-			*(u_int32_t *)NFA_DATA(nfula[NFULA_CFG_NLBUFSIZ-1]);
+		__be32 nlbufsiz =
+			*(__be32 *)NFA_DATA(nfula[NFULA_CFG_NLBUFSIZ-1]);
 
 		nfulnl_set_nlbufsiz(inst, ntohl(nlbufsiz));
 	}
 
 	if (nfula[NFULA_CFG_QTHRESH-1]) {
-		u_int32_t qthresh = 
-			*(u_int16_t *)NFA_DATA(nfula[NFULA_CFG_QTHRESH-1]);
+		__be32 qthresh =
+			*(__be32 *)NFA_DATA(nfula[NFULA_CFG_QTHRESH-1]);
 
 		nfulnl_set_qthresh(inst, ntohl(qthresh));
 	}
 
+	if (nfula[NFULA_CFG_FLAGS-1]) {
+		__be16 flags =
+			*(__be16 *)NFA_DATA(nfula[NFULA_CFG_FLAGS-1]);
+		nfulnl_set_flags(inst, ntohs(flags));
+	}
+
 out_put:
 	instance_put(inst);
+out:
 	return ret;
 }
 
@@ -993,17 +1049,13 @@ static struct file_operations nful_file_ops = {
 
 #endif /* PROC_FS */
 
-static int
-init_or_cleanup(int init)
+static int __init nfnetlink_log_init(void)
 {
 	int i, status = -ENOMEM;
 #ifdef CONFIG_PROC_FS
 	struct proc_dir_entry *proc_nful;
 #endif
 	
-	if (!init)
-		goto cleanup;
-
 	for (i = 0; i < INSTANCE_BUCKETS; i++)
 		INIT_HLIST_HEAD(&instance_table[i]);
 	
@@ -1026,30 +1078,25 @@ init_or_cleanup(int init)
 		goto cleanup_subsys;
 	proc_nful->proc_fops = &nful_file_ops;
 #endif
-
 	return status;
 
-cleanup:
-	nf_log_unregister_logger(&nfulnl_logger);
 #ifdef CONFIG_PROC_FS
-	remove_proc_entry("nfnetlink_log", proc_net_netfilter);
 cleanup_subsys:
-#endif
 	nfnetlink_subsys_unregister(&nfulnl_subsys);
+#endif
 cleanup_netlink_notifier:
 	netlink_unregister_notifier(&nfulnl_rtnl_notifier);
 	return status;
 }
 
-static int __init init(void)
+static void __exit nfnetlink_log_fini(void)
 {
-	
-	return init_or_cleanup(1);
-}
-
-static void __exit fini(void)
-{
-	init_or_cleanup(0);
+	nf_log_unregister_logger(&nfulnl_logger);
+#ifdef CONFIG_PROC_FS
+	remove_proc_entry("nfnetlink_log", proc_net_netfilter);
+#endif
+	nfnetlink_subsys_unregister(&nfulnl_subsys);
+	netlink_unregister_notifier(&nfulnl_rtnl_notifier);
 }
 
 MODULE_DESCRIPTION("netfilter userspace logging");
@@ -1057,5 +1104,5 @@ MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_NFNL_SUBSYS(NFNL_SUBSYS_ULOG);
 
-module_init(init);
-module_exit(fini);
+module_init(nfnetlink_log_init);
+module_exit(nfnetlink_log_fini);

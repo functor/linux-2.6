@@ -42,7 +42,8 @@
 
 
 /* special size referring to all the remaining space in a partition */
-#define SIZE_REMAINING 0xffffffff
+#define SIZE_REMAINING UINT_MAX
+#define OFFSET_CONTINUOUS UINT_MAX
 
 struct cmdline_mtd_partition {
 	struct cmdline_mtd_partition *next;
@@ -75,7 +76,7 @@ static struct mtd_partition * newpart(char *s,
 {
 	struct mtd_partition *parts;
 	unsigned long size;
-	unsigned long offset = 0;
+	unsigned long offset = OFFSET_CONTINUOUS;
 	char *name;
 	int name_len;
 	unsigned char *extra_mem;
@@ -162,13 +163,12 @@ static struct mtd_partition * newpart(char *s,
 		*num_parts = this_part + 1;
 		alloc_size = *num_parts * sizeof(struct mtd_partition) +
 			     extra_mem_size;
-		parts = kmalloc(alloc_size, GFP_KERNEL);
+		parts = kzalloc(alloc_size, GFP_KERNEL);
 		if (!parts)
 		{
 			printk(KERN_ERR ERRP "out of memory\n");
 			return NULL;
 		}
-		memset(parts, 0, alloc_size);
 		extra_mem = (unsigned char *)(parts + *num_parts);
 	}
 	/* enter this partition (offset will be calculated later if it is zero at this point) */
@@ -314,7 +314,7 @@ static int parse_cmdline_partitions(struct mtd_info *master,
 		{
 			for(i = 0, offset = 0; i < part->num_parts; i++)
 			{
-				if (!part->parts[i].offset)
+				if (part->parts[i].offset == OFFSET_CONTINUOUS)
 				  part->parts[i].offset = offset;
 				else
 				  offset = part->parts[i].offset;
@@ -345,7 +345,7 @@ static int parse_cmdline_partitions(struct mtd_info *master,
  *
  * This function needs to be visible for bootloaders.
  */
-int mtdpart_setup(char *s)
+static int mtdpart_setup(char *s)
 {
 	cmdline = s;
 	return 1;

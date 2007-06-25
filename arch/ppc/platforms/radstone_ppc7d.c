@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/radstone_ppc7d.c
- *
  * Board setup routines for the Radstone PPC7D boards.
  *
  * Author: James Chapman <jchapman@katalix.com>
@@ -20,7 +18,6 @@
  * SCSI / VGA.
  */
 
-#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -454,11 +451,11 @@ static void __init ppc7d_calibrate_decr(void)
  * Interrupt stuff
  *****************************************************************************/
 
-static irqreturn_t ppc7d_i8259_intr(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t ppc7d_i8259_intr(int irq, void *dev_id)
 {
 	u32 temp = mv64x60_read(&bh, MV64x60_GPP_INTR_CAUSE);
 	if (temp & (1 << 28)) {
-		i8259_irq(regs);
+		i8259_irq();
 		mv64x60_write(&bh, MV64x60_GPP_INTR_CAUSE, temp & (~(1 << 28)));
 		return IRQ_HANDLED;
 	}
@@ -539,13 +536,13 @@ static u32 ppc7d_irq_canonicalize(u32 irq)
 	return irq;
 }
 
-static int ppc7d_get_irq(struct pt_regs *regs)
+static int ppc7d_get_irq(void)
 {
 	int irq;
 
-	irq = mv64360_get_irq(regs);
+	irq = mv64360_get_irq();
 	if (irq == (mv64360_irq_base + MV64x60_IRQ_GPP28))
-		irq = i8259_irq(regs);
+		irq = i8259_irq();
 	return irq;
 }
 
@@ -685,11 +682,10 @@ ppc7d_fixup_i2c_pdata(struct platform_device *pdev)
 
 	pdata = pdev->dev.platform_data;
 	if (pdata == NULL) {
-		pdata = kmalloc(sizeof(*pdata), GFP_KERNEL);
+		pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 		if (pdata == NULL)
 			return;
 
-		memset(pdata, 0, sizeof(*pdata));
 		pdev->dev.platform_data = pdata;
 	}
 
@@ -712,7 +708,7 @@ ppc7d_fixup_i2c_pdata(struct platform_device *pdev)
 }
 #endif
 
-static int __init ppc7d_platform_notify(struct device *dev)
+static int ppc7d_platform_notify(struct device *dev)
 {
 	static struct {
 		char *bus_id;
@@ -1314,7 +1310,7 @@ static void ppc7d_init2(void)
 
 	/* Hook up i8259 interrupt which is connected to GPP28 */
 	request_irq(mv64360_irq_base + MV64x60_IRQ_GPP28, ppc7d_i8259_intr,
-		    SA_INTERRUPT, "I8259 (GPP28) interrupt", (void *)0);
+		    IRQF_DISABLED, "I8259 (GPP28) interrupt", (void *)0);
 
 	/* Configure MPP16 as watchdog NMI, MPP17 as watchdog WDE */
 	spin_lock_irqsave(&mv64x60_lock, flags);

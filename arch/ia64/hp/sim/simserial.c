@@ -16,7 +16,6 @@
  * 07/30/02 D. Mosberger	Replace sti()/cli() with explicit spinlocks & local irq masking
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
@@ -46,13 +45,8 @@
 #define KEYBOARD_INTR	3	/* must match with simulator! */
 
 #define NR_PORTS	1	/* only one port for now */
-#define SERIAL_INLINE	1
 
-#ifdef SERIAL_INLINE
-#define _INLINE_ inline
-#endif
-
-#define IRQ_T(info) ((info->flags & ASYNC_SHARE_IRQ) ? SA_SHIRQ : SA_INTERRUPT)
+#define IRQ_T(info) ((info->flags & ASYNC_SHARE_IRQ) ? IRQF_SHARED : IRQF_DISABLED)
 
 #define SSC_GETCHAR	21
 
@@ -98,7 +92,7 @@ static struct serial_uart_config uart_config[] = {
 	{ "ST16650V2", 32, UART_CLEAR_FIFO | UART_USE_FIFO |
 		  UART_STARTECH },
 	{ "TI16750", 64, UART_CLEAR_FIFO | UART_USE_FIFO},
-	{ 0, 0}
+	{ NULL, 0}
 };
 
 struct tty_driver *hp_simserial_driver;
@@ -136,7 +130,7 @@ static void rs_start(struct tty_struct *tty)
 #endif
 }
 
-static  void receive_chars(struct tty_struct *tty, struct pt_regs *regs)
+static  void receive_chars(struct tty_struct *tty)
 {
 	unsigned char ch;
 	static unsigned char seen_esc = 0;
@@ -158,7 +152,7 @@ static  void receive_chars(struct tty_struct *tty, struct pt_regs *regs)
 						ch = ia64_ssc(0, 0, 0, 0,
 							      SSC_GETCHAR);
 					while (!ch);
-					handle_sysrq(ch, regs, NULL);
+					handle_sysrq(ch, NULL);
 				}
 #endif
 				seen_esc = 0;
@@ -176,7 +170,7 @@ static  void receive_chars(struct tty_struct *tty, struct pt_regs *regs)
 /*
  * This is the serial driver's interrupt routine for a single port
  */
-static irqreturn_t rs_interrupt_single(int irq, void *dev_id, struct pt_regs * regs)
+static irqreturn_t rs_interrupt_single(int irq, void *dev_id)
 {
 	struct async_struct * info;
 
@@ -193,7 +187,7 @@ static irqreturn_t rs_interrupt_single(int irq, void *dev_id, struct pt_regs * r
 	 * pretty simple in our case, because we only get interrupts
 	 * on inbound traffic
 	 */
-	receive_chars(info->tty, regs);
+	receive_chars(info->tty);
 	return IRQ_HANDLED;
 }
 
@@ -215,7 +209,7 @@ static void do_serial_bh(void)
 }
 #endif
 
-static void do_softint(void *private_)
+static void do_softint(struct work_struct *private_)
 {
 	printk(KERN_ERR "simserial: do_softint called\n");
 }
@@ -237,7 +231,7 @@ static void rs_put_char(struct tty_struct *tty, unsigned char ch)
 	local_irq_restore(flags);
 }
 
-static _INLINE_ void transmit_chars(struct async_struct *info, int *intr_done)
+static void transmit_chars(struct async_struct *info, int *intr_done)
 {
 	int count;
 	unsigned long flags;
@@ -494,7 +488,7 @@ static int rs_ioctl(struct tty_struct *tty, struct file * file,
 
 #define RELEVANT_IFLAG(iflag) (iflag & (IGNBRK|BRKINT|IGNPAR|PARMRK|INPCK))
 
-static void rs_set_termios(struct tty_struct *tty, struct termios *old_termios)
+static void rs_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 {
 	unsigned int cflag = tty->termios->c_cflag;
 
@@ -561,7 +555,7 @@ static void shutdown(struct async_struct * info)
 
 		if (info->xmit.buf) {
 			free_page((unsigned long) info->xmit.buf);
-			info->xmit.buf = 0;
+			info->xmit.buf = NULL;
 		}
 
 		if (info->tty) set_bit(TTY_IO_ERROR, &info->tty->flags);
@@ -634,7 +628,7 @@ static void rs_close(struct tty_struct *tty, struct file * filp)
 	if (tty->driver->flush_buffer) tty->driver->flush_buffer(tty);
 	if (tty->ldisc.flush_buffer) tty->ldisc.flush_buffer(tty);
 	info->event = 0;
-	info->tty = 0;
+	info->tty = NULL;
 	if (info->blocked_open) {
 		if (info->close_delay)
 			schedule_timeout_interruptible(info->close_delay);
@@ -674,7 +668,7 @@ static void rs_hangup(struct tty_struct *tty)
 	info->event = 0;
 	state->count = 0;
 	info->flags &= ~ASYNC_NORMAL_ACTIVE;
-	info->tty = 0;
+	info->tty = NULL;
 	wake_up_interruptible(&info->open_wait);
 }
 
@@ -690,12 +684,11 @@ static int get_async_struct(int line, struct async_struct **ret_info)
 		*ret_info = sstate->info;
 		return 0;
 	}
-	info = kmalloc(sizeof(struct async_struct), GFP_KERNEL);
+	info = kzalloc(sizeof(struct async_struct), GFP_KERNEL);
 	if (!info) {
 		sstate->count--;
 		return -ENOMEM;
 	}
-	memset(info, 0, sizeof(struct async_struct));
 	init_waitqueue_head(&info->open_wait);
 	init_waitqueue_head(&info->close_wait);
 	init_waitqueue_head(&info->delta_msr_wait);
@@ -704,7 +697,7 @@ static int get_async_struct(int line, struct async_struct **ret_info)
 	info->flags = sstate->flags;
 	info->xmit_fifo_size = sstate->xmit_fifo_size;
 	info->line = line;
-	INIT_WORK(&info->work, do_softint, info);
+	INIT_WORK(&info->work, do_softint);
 	info->state = sstate;
 	if (sstate->info) {
 		kfree(info);
@@ -720,7 +713,7 @@ startup(struct async_struct *info)
 {
 	unsigned long flags;
 	int	retval=0;
-	irqreturn_t (*handler)(int, void *, struct pt_regs *);
+	irq_handler_t handler;
 	struct serial_state *state= info->state;
 	unsigned long page;
 
@@ -775,7 +768,7 @@ startup(struct async_struct *info)
 	/*
 	 * Insert serial port into IRQ chain.
 	 */
-	info->prev_port = 0;
+	info->prev_port = NULL;
 	info->next_port = IRQ_ports[state->irq];
 	if (info->next_port)
 		info->next_port->prev_port = info;
@@ -946,7 +939,7 @@ static inline void show_serial_version(void)
 	printk(KERN_INFO " no serial options enabled\n");
 }
 
-static struct tty_operations hp_ops = {
+static const struct tty_operations hp_ops = {
 	.open = rs_open,
 	.close = rs_close,
 	.write = rs_write,

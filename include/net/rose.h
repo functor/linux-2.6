@@ -49,14 +49,14 @@ enum {
 	ROSE_STATE_5			/* Deferred Call Acceptance */
 };
 
-#define ROSE_DEFAULT_T0			(180 * HZ)	/* Default T10 T20 value */
-#define ROSE_DEFAULT_T1			(200 * HZ)	/* Default T11 T21 value */
-#define ROSE_DEFAULT_T2			(180 * HZ)	/* Default T12 T22 value */
-#define	ROSE_DEFAULT_T3			(180 * HZ)	/* Default T13 T23 value */
-#define	ROSE_DEFAULT_HB			(5 * HZ)	/* Default Holdback value */
-#define	ROSE_DEFAULT_IDLE		(0 * 60 * HZ)	/* No Activity Timeout - none */
+#define ROSE_DEFAULT_T0			180000		/* Default T10 T20 value */
+#define ROSE_DEFAULT_T1			200000		/* Default T11 T21 value */
+#define ROSE_DEFAULT_T2			180000		/* Default T12 T22 value */
+#define	ROSE_DEFAULT_T3			180000		/* Default T13 T23 value */
+#define	ROSE_DEFAULT_HB			5000		/* Default Holdback value */
+#define	ROSE_DEFAULT_IDLE		0		/* No Activity Timeout - none */
 #define	ROSE_DEFAULT_ROUTING		1		/* Default routing flag */
-#define	ROSE_DEFAULT_FAIL_TIMEOUT	(120 * HZ)	/* Time until link considered usable */
+#define	ROSE_DEFAULT_FAIL_TIMEOUT	120000		/* Time until link considered usable */
 #define	ROSE_DEFAULT_MAXVC		50		/* Maximum number of VCs per neighbour */
 #define	ROSE_DEFAULT_WINDOW_SIZE	7		/* Default window size */
 
@@ -188,13 +188,13 @@ extern void rose_kick(struct sock *);
 extern void rose_enquiry_response(struct sock *);
 
 /* rose_route.c */
-extern struct rose_neigh *rose_loopback_neigh;
+extern struct rose_neigh rose_loopback_neigh;
 extern struct file_operations rose_neigh_fops;
 extern struct file_operations rose_nodes_fops;
 extern struct file_operations rose_routes_fops;
 
-extern int  rose_add_loopback_neigh(void);
-extern int  rose_add_loopback_node(rose_address *);
+extern void rose_add_loopback_neigh(void);
+extern int __must_check rose_add_loopback_node(rose_address *);
 extern void rose_del_loopback_node(rose_address *);
 extern void rose_rt_device_down(struct net_device *);
 extern void rose_link_device_down(struct net_device *);

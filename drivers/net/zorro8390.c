@@ -27,14 +27,23 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/zorro.h>
+#include <linux/jiffies.h>
 
 #include <asm/system.h>
 #include <asm/irq.h>
 #include <asm/amigaints.h>
 #include <asm/amigahw.h>
 
-#include "8390.h"
+#define EI_SHIFT(x)	(ei_local->reg_offset[x])
+#define ei_inb(port)   in_8(port)
+#define ei_outb(val,port)  out_8(port,val)
+#define ei_inb_p(port)   in_8(port)
+#define ei_outb_p(val,port)  out_8(port,val)
 
+static const char version[] =
+    "8390.c:v1.10cvs 9/23/94 Donald Becker (becker@cesdis.gsfc.nasa.gov)\n";
+
+#include "lib8390.c"
 
 #define DRV_NAME	"zorro8390"
 
@@ -113,7 +122,7 @@ static int __devinit zorro8390_init_one(struct zorro_dev *z,
 	    break;
     board = z->resource.start;
     ioaddr = board+cards[i].offset;
-    dev = alloc_ei_netdev();
+    dev = ____alloc_ei_netdev(0);
     if (!dev)
 	return -ENOMEM;
     SET_MODULE_OWNER(dev);
@@ -151,7 +160,7 @@ static int __devinit zorro8390_init(struct net_device *dev,
 	z_writeb(z_readb(ioaddr + NE_RESET), ioaddr + NE_RESET);
 
 	while ((z_readb(ioaddr + NE_EN0_ISR) & ENISR_RESET) == 0)
-	    if (jiffies - reset_start_time > 2*HZ/100) {
+	    if (time_after(jiffies, reset_start_time + 2*HZ/100)) {
 		printk(KERN_WARNING " not found (no reset ack).\n");
 		return -ENODEV;
 	    }
@@ -200,7 +209,7 @@ static int __devinit zorro8390_init(struct net_device *dev,
     dev->irq = IRQ_AMIGA_PORTS;
 
     /* Install the Interrupt handler */
-    i = request_irq(IRQ_AMIGA_PORTS, ei_interrupt, SA_SHIRQ, DRV_NAME, dev);
+    i = request_irq(IRQ_AMIGA_PORTS, __ei_interrupt, IRQF_SHARED, DRV_NAME, dev);
     if (i) return i;
 
     for(i = 0; i < ETHER_ADDR_LEN; i++) {
@@ -225,10 +234,10 @@ static int __devinit zorro8390_init(struct net_device *dev,
     dev->open = &zorro8390_open;
     dev->stop = &zorro8390_close;
 #ifdef CONFIG_NET_POLL_CONTROLLER
-    dev->poll_controller = ei_poll;
+    dev->poll_controller = __ei_poll;
 #endif
 
-    NS8390_init(dev, 0);
+    __NS8390_init(dev, 0);
     err = register_netdev(dev);
     if (err) {
 	free_irq(IRQ_AMIGA_PORTS, dev);
@@ -245,7 +254,7 @@ static int __devinit zorro8390_init(struct net_device *dev,
 
 static int zorro8390_open(struct net_device *dev)
 {
-    ei_open(dev);
+    __ei_open(dev);
     return 0;
 }
 
@@ -253,7 +262,7 @@ static int zorro8390_close(struct net_device *dev)
 {
     if (ei_debug > 1)
 	printk(KERN_DEBUG "%s: Shutting down ethercard.\n", dev->name);
-    ei_close(dev);
+    __ei_close(dev);
     return 0;
 }
 
@@ -273,7 +282,7 @@ static void zorro8390_reset_8390(struct net_device *dev)
 
     /* This check _should_not_ be necessary, omit eventually. */
     while ((z_readb(NE_BASE+NE_EN0_ISR) & ENISR_RESET) == 0)
-	if (jiffies - reset_start_time > 2*HZ/100) {
+	if (time_after(jiffies, reset_start_time + 2*HZ/100)) {
 	    printk(KERN_WARNING "%s: ne_reset_8390() did not complete.\n",
 		   dev->name);
 	    break;
@@ -400,11 +409,11 @@ static void zorro8390_block_output(struct net_device *dev, int count,
     dma_start = jiffies;
 
     while ((z_readb(NE_BASE + NE_EN0_ISR) & ENISR_RDC) == 0)
-	if (jiffies - dma_start > 2*HZ/100) {		/* 20ms */
+	if (time_after(jiffies, dma_start + 2*HZ/100)) {	/* 20ms */
 		printk(KERN_ERR "%s: timeout waiting for Tx RDC.\n",
 		       dev->name);
 		zorro8390_reset_8390(dev);
-		NS8390_init(dev,1);
+		__NS8390_init(dev,1);
 		break;
 	}
 
@@ -425,7 +434,7 @@ static void __devexit zorro8390_remove_one(struct zorro_dev *z)
 
 static int __init zorro8390_init_module(void)
 {
-    return zorro_module_init(&zorro8390_driver);
+    return zorro_register_driver(&zorro8390_driver);
 }
 
 static void __exit zorro8390_cleanup_module(void)

@@ -202,7 +202,7 @@ static void hp_sdc_take (int irq, void *dev_id, uint8_t status, uint8_t data) {
 	}
 }
 
-static irqreturn_t hp_sdc_isr(int irq, void *dev_id, struct pt_regs * regs) {
+static irqreturn_t hp_sdc_isr(int irq, void *dev_id) {
 	uint8_t status, data;
 
 	status = hp_sdc_status_in8();
@@ -253,7 +253,7 @@ static irqreturn_t hp_sdc_isr(int irq, void *dev_id, struct pt_regs * regs) {
 }
 
 
-static irqreturn_t hp_sdc_nmisr(int irq, void *dev_id, struct pt_regs * regs) {
+static irqreturn_t hp_sdc_nmisr(int irq, void *dev_id) {
 	int status;
 	
 	status = hp_sdc_status_in8();
@@ -310,7 +310,7 @@ static void hp_sdc_tasklet(unsigned long foo) {
 				 * in tasklet/bh context.
 				 */
 				if (curr->act.irqhook) 
-					curr->act.irqhook(0, 0, 0, 0);
+					curr->act.irqhook(0, NULL, 0, 0);
 			}
 			curr->actidx = curr->idx;
 			curr->idx++;
@@ -525,7 +525,7 @@ actdone:
 		up(curr->act.semaphore);
 	}
 	else if (act & HP_SDC_ACT_CALLBACK) {
-		curr->act.irqhook(0,0,0,0);
+		curr->act.irqhook(0,NULL,0,0);
 	}
 	if (curr->idx >= curr->endidx) { /* This transaction is over. */
 		if (act & HP_SDC_ACT_DEALLOC) kfree(curr);
@@ -764,7 +764,7 @@ MODULE_DEVICE_TABLE(parisc, hp_sdc_tbl);
 static int __init hp_sdc_init_hppa(struct parisc_device *d);
 
 static struct parisc_driver hp_sdc_driver = {
-	.name =		"HP SDC",
+	.name =		"hp_sdc",
 	.id_table =	hp_sdc_tbl,
 	.probe =	hp_sdc_init_hppa,
 };
@@ -875,9 +875,9 @@ static int __init hp_sdc_init_hppa(struct parisc_device *d)
 	hp_sdc.dev		= d;
 	hp_sdc.irq		= d->irq;
 	hp_sdc.nmi		= d->aux_irq;
-	hp_sdc.base_io		= d->hpa;
-	hp_sdc.data_io		= d->hpa + 0x800;
-	hp_sdc.status_io	= d->hpa + 0x801;
+	hp_sdc.base_io		= d->hpa.start;
+	hp_sdc.data_io		= d->hpa.start + 0x800;
+	hp_sdc.status_io	= d->hpa.start + 0x801;
 
 	return hp_sdc_init();
 }

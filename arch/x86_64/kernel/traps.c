@@ -6,15 +6,12 @@
  *
  *  Pentium III FXSR, SSE support
  *	Gareth Hughes <gareth@valinux.com>, May 2000
- *
- *  $Id: traps.c,v 1.36 2002/03/24 11:09:10 ak Exp $
  */
 
 /*
  * 'Traps.c' handles hardware traps and faults after we have saved some
  * state in 'entry.S'.
  */
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -26,14 +23,17 @@
 #include <linux/delay.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
+#include <linux/kallsyms.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/nmi.h>
 #include <linux/kprobes.h>
 #include <linux/kexec.h>
+#include <linux/unwind.h>
+#include <linux/uaccess.h>
+#include <linux/bug.h>
 
 #include <asm/system.h>
-#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/atomic.h>
 #include <asm/debugreg.h>
@@ -41,14 +41,13 @@
 #include <asm/i387.h>
 #include <asm/kdebug.h>
 #include <asm/processor.h>
-
+#include <asm/unwind.h>
 #include <asm/smp.h>
 #include <asm/pgalloc.h>
 #include <asm/pda.h>
 #include <asm/proto.h>
 #include <asm/nmi.h>
-
-extern struct gate_struct idt_table[256]; 
+#include <asm/stacktrace.h>
 
 asmlinkage void divide_error(void);
 asmlinkage void debug(void);
@@ -72,18 +71,23 @@ asmlinkage void alignment_check(void);
 asmlinkage void machine_check(void);
 asmlinkage void spurious_interrupt_bug(void);
 
-struct notifier_block *die_chain;
-static DEFINE_SPINLOCK(die_notifier_lock);
+ATOMIC_NOTIFIER_HEAD(die_chain);
+EXPORT_SYMBOL(die_chain);
+
+extern char last_sysfs_file[];
 
 int register_die_notifier(struct notifier_block *nb)
 {
-	int err = 0;
-	unsigned long flags;
-	spin_lock_irqsave(&die_notifier_lock, flags);
-	err = notifier_chain_register(&die_chain, nb);
-	spin_unlock_irqrestore(&die_notifier_lock, flags);
-	return err;
+	vmalloc_sync_all();
+	return atomic_notifier_chain_register(&die_chain, nb);
 }
+EXPORT_SYMBOL(register_die_notifier); /* used modular by kdb */
+
+int unregister_die_notifier(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_unregister(&die_chain, nb);
+}
+EXPORT_SYMBOL(unregister_die_notifier); /* used modular by kdb */
 
 static inline void conditional_sti(struct pt_regs *regs)
 {
@@ -102,38 +106,42 @@ static inline void preempt_conditional_cli(struct pt_regs *regs)
 {
 	if (regs->eflags & X86_EFLAGS_IF)
 		local_irq_disable();
+	/* Make sure to not schedule here because we could be running
+	   on an exception stack. */
 	preempt_enable_no_resched();
 }
 
-static int kstack_depth_to_print = 10;
+int kstack_depth_to_print = 12;
 
 #ifdef CONFIG_KALLSYMS
-#include <linux/kallsyms.h> 
-int printk_address(unsigned long address)
-{ 
+void printk_address(unsigned long address)
+{
 	unsigned long offset = 0, symsize;
 	const char *symname;
 	char *modname;
-	char *delim = ":"; 
+	char *delim = ":";
 	char namebuf[128];
 
-	symname = kallsyms_lookup(address, &symsize, &offset, &modname, namebuf); 
-	if (!symname) 
-		return printk("[<%016lx>]", address);
-	if (!modname) 
+	symname = kallsyms_lookup(address, &symsize, &offset,
+					&modname, namebuf);
+	if (!symname) {
+		printk(" [<%016lx>]\n", address);
+		return;
+	}
+	if (!modname)
 		modname = delim = ""; 		
-        return printk("<%016lx>{%s%s%s%s%+ld}",
-		      address,delim,modname,delim,symname,offset); 
-} 
+	printk(" [<%016lx>] %s%s%s%s+0x%lx/0x%lx\n",
+		address, delim, modname, delim, symname, offset, symsize);
+}
 #else
-int printk_address(unsigned long address)
-{ 
-	return printk("[<%016lx>]", address);
-} 
+void printk_address(unsigned long address)
+{
+	printk(" [<%016lx>]\n", address);
+}
 #endif
 
 static unsigned long *in_exception_stack(unsigned cpu, unsigned long stack,
-					unsigned *usedp, const char **idp)
+					unsigned *usedp, char **idp)
 {
 	static char ids[][8] = {
 		[DEBUG_STACK - 1] = "#DB",
@@ -147,32 +155,49 @@ static unsigned long *in_exception_stack(unsigned cpu, unsigned long stack,
 	};
 	unsigned k;
 
+	/*
+	 * Iterate over all exception stacks, and figure out whether
+	 * 'stack' is in one of them:
+	 */
 	for (k = 0; k < N_EXCEPTION_STACKS; k++) {
-		unsigned long end;
-
-		switch (k + 1) {
-#if DEBUG_STKSZ > EXCEPTION_STKSZ
-		case DEBUG_STACK:
-			end = cpu_pda(cpu)->debugstack + DEBUG_STKSZ;
-			break;
-#endif
-		default:
-			end = per_cpu(init_tss, cpu).ist[k];
-			break;
-		}
+		unsigned long end = per_cpu(orig_ist, cpu).ist[k];
+		/*
+		 * Is 'stack' above this exception frame's end?
+		 * If yes then skip to the next frame.
+		 */
 		if (stack >= end)
 			continue;
+		/*
+		 * Is 'stack' above this exception frame's start address?
+		 * If yes then we found the right frame.
+		 */
 		if (stack >= end - EXCEPTION_STKSZ) {
+			/*
+			 * Make sure we only iterate through an exception
+			 * stack once. If it comes up for the second time
+			 * then there's something wrong going on - just
+			 * break out and return NULL:
+			 */
 			if (*usedp & (1U << k))
 				break;
 			*usedp |= 1U << k;
 			*idp = ids[k];
 			return (unsigned long *)end;
 		}
+		/*
+		 * If this is a debug stack, and if it has a larger size than
+		 * the usual exception stacks, then 'stack' might still
+		 * be within the lower portion of the debug stack:
+		 */
 #if DEBUG_STKSZ > EXCEPTION_STKSZ
 		if (k == DEBUG_STACK - 1 && stack >= end - DEBUG_STKSZ) {
 			unsigned j = N_EXCEPTION_STACKS - 1;
 
+			/*
+			 * Black magic. A large debug stack is composed of
+			 * multiple exception stack entries, which we
+			 * iterate through now. Dont look:
+			 */
 			do {
 				++j;
 				end -= EXCEPTION_STKSZ;
@@ -189,6 +214,8 @@ static unsigned long *in_exception_stack(unsigned cpu, unsigned long stack,
 	return NULL;
 }
 
+#define MSG(txt) ops->warning(data, txt)
+
 /*
  * x86-64 can have upto three kernel stacks: 
  * process stack
@@ -196,25 +223,42 @@ static unsigned long *in_exception_stack(unsigned cpu, unsigned long stack,
  * severe exception (double fault, nmi, stack fault, debug, mce) hardware stack
  */
 
-void show_trace(unsigned long *stack)
+static inline int valid_stack_ptr(struct thread_info *tinfo, void *p)
 {
-	const unsigned cpu = safe_smp_processor_id();
-	unsigned long *irqstack_end = (unsigned long *)cpu_pda(cpu)->irqstackptr;
-	int i;
+	void *t = (void *)tinfo;
+        return p > t && p < t + THREAD_SIZE - 3;
+}
+
+void dump_trace(struct task_struct *tsk, struct pt_regs *regs,
+		unsigned long *stack,
+		struct stacktrace_ops *ops, void *data)
+{
+	const unsigned cpu = get_cpu();
+	unsigned long *irqstack_end = (unsigned long*)cpu_pda(cpu)->irqstackptr;
 	unsigned used = 0;
+	struct thread_info *tinfo;
 
-	printk("\nCall Trace:");
+	if (!tsk)
+		tsk = current;
 
+	if (!stack) {
+		unsigned long dummy;
+		stack = &dummy;
+		if (tsk && tsk != current)
+			stack = (unsigned long *)tsk->thread.rsp;
+	}
+
+	/*
+	 * Print function call entries within a stack. 'cond' is the
+	 * "end of stackframe" condition, that the 'stack++'
+	 * iteration will eventually trigger.
+	 */
 #define HANDLE_STACK(cond) \
 	do while (cond) { \
 		unsigned long addr = *stack++; \
-		if (kernel_text_address(addr)) { \
-			if (i > 50) { \
-				printk("\n       "); \
-				i = 0; \
-			} \
-			else \
-				i += printk(" "); \
+		/* Use unlocked access here because except for NMIs	\
+		   we should be already protected against module unloads */ \
+		if (__kernel_text_address(addr)) { \
 			/* \
 			 * If the address is either in the text segment of the \
 			 * kernel, or in the region which contains vmalloc'ed \
@@ -223,20 +267,31 @@ void show_trace(unsigned long *stack)
 			 * down the cause of the crash will be able to figure \
 			 * out the call path that was taken. \
 			 */ \
-			i += printk_address(addr); \
+			ops->address(data, addr);   \
 		} \
 	} while (0)
 
-	for(i = 11; ; ) {
-		const char *id;
+	/*
+	 * Print function call entries in all stacks, starting at the
+	 * current stack address. If the stacks consist of nested
+	 * exceptions
+	 */
+	for (;;) {
+		char *id;
 		unsigned long *estack_end;
 		estack_end = in_exception_stack(cpu, (unsigned long)stack,
 						&used, &id);
 
 		if (estack_end) {
-			i += printk(" <%s>", id);
+			if (ops->stack(data, id) < 0)
+				break;
 			HANDLE_STACK (stack < estack_end);
-			i += printk(" <EOE>");
+			ops->stack(data, "<EOE>");
+			/*
+			 * We link to the next stack via the
+			 * second-to-last pointer (index -2 to end) in the
+			 * exception stack:
+			 */
 			stack = (unsigned long *) estack_end[-2];
 			continue;
 		}
@@ -246,27 +301,77 @@ void show_trace(unsigned long *stack)
 				(IRQSTACKSIZE - 64) / sizeof(*irqstack);
 
 			if (stack >= irqstack && stack < irqstack_end) {
-				i += printk(" <IRQ>");
+				if (ops->stack(data, "IRQ") < 0)
+					break;
 				HANDLE_STACK (stack < irqstack_end);
+				/*
+				 * We link to the next stack (which would be
+				 * the process stack normally) the last
+				 * pointer (index -1 to end) in the IRQ stack:
+				 */
 				stack = (unsigned long *) (irqstack_end[-1]);
 				irqstack_end = NULL;
-				i += printk(" <EOI>");
+				ops->stack(data, "EOI");
 				continue;
 			}
 		}
 		break;
 	}
 
-	HANDLE_STACK (((long) stack & (THREAD_SIZE-1)) != 0);
+	/*
+	 * This handles the process stack:
+	 */
+	tinfo = task_thread_info(tsk);
+	HANDLE_STACK (valid_stack_ptr(tinfo, stack));
 #undef HANDLE_STACK
+	put_cpu();
+}
+EXPORT_SYMBOL(dump_trace);
+
+static void
+print_trace_warning_symbol(void *data, char *msg, unsigned long symbol)
+{
+	print_symbol(msg, symbol);
 	printk("\n");
 }
 
-void show_stack(struct task_struct *tsk, unsigned long * rsp)
+static void print_trace_warning(void *data, char *msg)
+{
+	printk("%s\n", msg);
+}
+
+static int print_trace_stack(void *data, char *name)
+{
+	printk(" <%s> ", name);
+	return 0;
+}
+
+static void print_trace_address(void *data, unsigned long addr)
+{
+	printk_address(addr);
+}
+
+static struct stacktrace_ops print_trace_ops = {
+	.warning = print_trace_warning,
+	.warning_symbol = print_trace_warning_symbol,
+	.stack = print_trace_stack,
+	.address = print_trace_address,
+};
+
+void
+show_trace(struct task_struct *tsk, struct pt_regs *regs, unsigned long *stack)
+{
+	printk("\nCall Trace:\n");
+	dump_trace(tsk, regs, stack, &print_trace_ops, NULL);
+	printk("\n");
+}
+
+static void
+_show_stack(struct task_struct *tsk, struct pt_regs *regs, unsigned long *rsp)
 {
 	unsigned long *stack;
 	int i;
-	const int cpu = safe_smp_processor_id();
+	const int cpu = smp_processor_id();
 	unsigned long *irqstack_end = (unsigned long *) (cpu_pda(cpu)->irqstackptr);
 	unsigned long *irqstack = (unsigned long *) (cpu_pda(cpu)->irqstackptr - IRQSTACKSIZE);
 
@@ -292,11 +397,16 @@ void show_stack(struct task_struct *tsk, unsigned long * rsp)
 			break;
 		}
 		if (i && ((i % 4) == 0))
-			printk("\n       ");
-		printk("%016lx ", *stack++);
+			printk("\n");
+		printk(" %016lx", *stack++);
 		touch_nmi_watchdog();
 	}
-	show_trace((unsigned long *)rsp);
+	show_trace(tsk, regs, rsp);
+}
+
+void show_stack(struct task_struct *tsk, unsigned long * rsp)
+{
+	_show_stack(tsk, NULL, rsp);
 }
 
 /*
@@ -305,7 +415,7 @@ void show_stack(struct task_struct *tsk, unsigned long * rsp)
 void dump_stack(void)
 {
 	unsigned long dummy;
-	show_trace(&dummy);
+	show_trace(NULL, NULL, &dummy);
 }
 
 EXPORT_SYMBOL(dump_stack);
@@ -315,7 +425,7 @@ void show_registers(struct pt_regs *regs)
 	int i;
 	int in_kernel = !user_mode(regs);
 	unsigned long rsp;
-	const int cpu = safe_smp_processor_id(); 
+	const int cpu = smp_processor_id();
 	struct task_struct *cur = cpu_pda(cpu)->pcurrent;
 
 		rsp = regs->rsp;
@@ -333,16 +443,15 @@ void show_registers(struct pt_regs *regs)
 	if (in_kernel) {
 
 		printk("Stack: ");
-		show_stack(NULL, (unsigned long*)rsp);
+		_show_stack(NULL, regs, (unsigned long*)rsp);
 
 		printk("\nCode: ");
-		if(regs->rip < PAGE_OFFSET)
+		if (regs->rip < PAGE_OFFSET)
 			goto bad;
 
-		for(i=0;i<20;i++)
-		{
+		for (i=0; i<20; i++) {
 			unsigned char c;
-			if(__get_user(c, &((unsigned char*)regs->rip)[i])) {
+			if (__get_user(c, &((unsigned char*)regs->rip)[i])) {
 bad:
 				printk(" Bad RIP value.");
 				break;
@@ -353,45 +462,34 @@ bad:
 	printk("\n");
 }	
 
-void handle_BUG(struct pt_regs *regs)
-{ 
-	struct bug_frame f;
-	long len;
-	const char *prefix = "";
+int is_valid_bugaddr(unsigned long rip)
+{
+	unsigned short ud2;
 
-	if (user_mode(regs))
-		return; 
-	if (__copy_from_user(&f, (const void __user *) regs->rip,
-			     sizeof(struct bug_frame)))
-		return; 
-	if (f.filename >= 0 ||
-	    f.ud2[0] != 0x0f || f.ud2[1] != 0x0b) 
-		return;
-	len = __strnlen_user((char *)(long)f.filename, PATH_MAX) - 1;
-	if (len < 0 || len >= PATH_MAX)
-		f.filename = (int)(long)"unmapped filename";
-	else if (len > 50) {
-		f.filename += len - 50;
-		prefix = "...";
-	}
-	printk("----------- [cut here ] --------- [please bite here ] ---------\n");
-	printk(KERN_ALERT "Kernel BUG at %s%.50s:%d\n", prefix, (char *)(long)f.filename, f.line);
-} 
+	if (__copy_from_user(&ud2, (const void __user *) rip, sizeof(ud2)))
+		return 0;
+
+	return ud2 == 0x0b0f;
+}
 
 #ifdef CONFIG_BUG
 void out_of_line_bug(void)
 { 
 	BUG(); 
 } 
+EXPORT_SYMBOL(out_of_line_bug);
 #endif
 
 static DEFINE_SPINLOCK(die_lock);
 static int die_owner = -1;
+static unsigned int die_nest_count;
 
 unsigned __kprobes long oops_begin(void)
 {
-	int cpu = safe_smp_processor_id();
+	int cpu = smp_processor_id();
 	unsigned long flags;
+
+	oops_enter();
 
 	/* racy, but better than risking deadlock. */
 	local_irq_save(flags);
@@ -401,6 +499,7 @@ unsigned __kprobes long oops_begin(void)
 		else
 			spin_lock(&die_lock);
 	}
+	die_nest_count++;
 	die_owner = cpu;
 	console_verbose();
 	bust_spinlocks(1);
@@ -411,9 +510,16 @@ void __kprobes oops_end(unsigned long flags)
 { 
 	die_owner = -1;
 	bust_spinlocks(0);
-	spin_unlock_irqrestore(&die_lock, flags);
+	die_nest_count--;
+	if (die_nest_count)
+		/* We still own the lock */
+		local_irq_restore(flags);
+	else
+		/* Nest count reaches zero, release the lock. */
+		spin_unlock_irqrestore(&die_lock, flags);
 	if (panic_on_oops)
-		panic("Oops");
+		panic("Fatal exception");
+	oops_exit();
 }
 
 void __kprobes __die(const char * str, struct pt_regs * regs, long err)
@@ -430,6 +536,9 @@ void __kprobes __die(const char * str, struct pt_regs * regs, long err)
 	printk("DEBUG_PAGEALLOC");
 #endif
 	printk("\n");
+#ifdef CONFIG_SYSFS
+	printk(KERN_ALERT "last sysfs file: %s\n", last_sysfs_file);
+#endif
 	notify_die(DIE_OOPS, str, regs, err, current->thread.trap_no, SIGSEGV);
 	show_registers(regs);
 	/* Executive summary in case the oops scrolled away */
@@ -444,13 +553,15 @@ void die(const char * str, struct pt_regs * regs, long err)
 {
 	unsigned long flags = oops_begin();
 
-	handle_BUG(regs);
+	if (!user_mode(regs))
+		report_bug(regs->rip);
+
 	__die(str, regs, err);
 	oops_end(flags);
 	do_exit(SIGSEGV); 
 }
 
-void __kprobes die_nmi(char *str, struct pt_regs *regs)
+void __kprobes die_nmi(char *str, struct pt_regs *regs, int do_panic)
 {
 	unsigned long flags = oops_begin();
 
@@ -458,14 +569,15 @@ void __kprobes die_nmi(char *str, struct pt_regs *regs)
 	 * We are in trouble anyway, lets at least try
 	 * to get a message out.
 	 */
-	printk(str, safe_smp_processor_id());
+	printk(str, smp_processor_id());
 	show_registers(regs);
 	if (kexec_should_crash(current))
 		crash_kexec(regs);
-	if (panic_on_timeout || panic_on_oops)
-		panic("nmi watchdog");
-	printk("console shuts up ...\n");
+	if (do_panic || panic_on_oops)
+		panic("Non maskable interrupt");
 	oops_end(flags);
+	nmi_exit();
+	local_irq_enable();
 	do_exit(SIGSEGV);
 }
 
@@ -475,17 +587,15 @@ static void __kprobes do_trap(int trapnr, int signr, char *str,
 {
 	struct task_struct *tsk = current;
 
-	conditional_sti(regs);
-
 	tsk->thread.error_code = error_code;
 	tsk->thread.trap_no = trapnr;
 
 	if (user_mode(regs)) {
 		if (exception_trace && unhandled_signal(tsk, signr))
 			printk(KERN_INFO
-			       "%s[%d] trap %s rip:%lx rsp:%lx error:%lx\n",
-			       tsk->comm, tsk->pid, str,
-			       regs->rip,regs->rsp,error_code); 
+			       "%s[%d:#%u] trap %s rip:%lx rsp:%lx error:%lx\n",
+			       tsk->comm, tsk->pid, tsk->xid, str,
+			       regs->rip, regs->rsp, error_code); 
 
 		if (info)
 			force_sig_info(signr, info, tsk);
@@ -499,9 +609,9 @@ static void __kprobes do_trap(int trapnr, int signr, char *str,
 	{	     
 		const struct exception_table_entry *fixup;
 		fixup = search_exception_tables(regs->rip);
-		if (fixup) {
+		if (fixup)
 			regs->rip = fixup->fixup;
-		} else	
+		else	
 			die(str, regs, error_code);
 		return;
 	}
@@ -513,6 +623,7 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) \
 							== NOTIFY_STOP) \
 		return; \
+	conditional_sti(regs);						\
 	do_trap(trapnr, signr, str, regs, error_code, NULL); \
 }
 
@@ -527,6 +638,7 @@ asmlinkage void do_##name(struct pt_regs * regs, long error_code) \
 	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) \
 							== NOTIFY_STOP) \
 		return; \
+	conditional_sti(regs);						\
 	do_trap(trapnr, signr, str, regs, error_code, &info); \
 }
 
@@ -540,7 +652,17 @@ DO_ERROR(10, SIGSEGV, "invalid TSS", invalid_TSS)
 DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, 0)
 DO_ERROR(18, SIGSEGV, "reserved", reserved)
-DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
+
+/* Runs on IST stack */
+asmlinkage void do_stack_segment(struct pt_regs *regs, long error_code)
+{
+	if (notify_die(DIE_TRAP, "stack segment", regs, error_code,
+			12, SIGBUS) == NOTIFY_STOP)
+		return;
+	preempt_conditional_sti(regs);
+	do_trap(12, SIGBUS, "stack segment", regs, error_code, NULL);
+	preempt_conditional_cli(regs);
+}
 
 asmlinkage void do_double_fault(struct pt_regs * regs, long error_code)
 {
@@ -572,9 +694,9 @@ asmlinkage void __kprobes do_general_protection(struct pt_regs * regs,
 	if (user_mode(regs)) {
 		if (exception_trace && unhandled_signal(tsk, SIGSEGV))
 			printk(KERN_INFO
-		       "%s[%d] general protection rip:%lx rsp:%lx error:%lx\n",
-			       tsk->comm, tsk->pid,
-			       regs->rip,regs->rsp,error_code); 
+		       "%s[%d:#%u] general protection rip:%lx rsp:%lx error:%lx\n",
+			       tsk->comm, tsk->pid, tsk->xid,
+			       regs->rip, regs->rsp, error_code); 
 
 		force_sig(SIGSEGV, tsk);
 		return;
@@ -598,8 +720,14 @@ asmlinkage void __kprobes do_general_protection(struct pt_regs * regs,
 static __kprobes void
 mem_parity_error(unsigned char reason, struct pt_regs * regs)
 {
-	printk("Uhhuh. NMI received. Dazed and confused, but trying to continue\n");
-	printk("You probably have a hardware problem with your RAM chips\n");
+	printk(KERN_EMERG "Uhhuh. NMI received for unknown reason %02x.\n",
+		reason);
+	printk(KERN_EMERG "You have some hardware problem, likely on the PCI bus.\n");
+
+	if (panic_on_unrecovered_nmi)
+		panic("NMI: Not continuing");
+
+	printk(KERN_EMERG "Dazed and confused, but trying to continue\n");
 
 	/* Clear and disable the memory parity error line. */
 	reason = (reason & 0xf) | 4;
@@ -622,9 +750,15 @@ io_check_error(unsigned char reason, struct pt_regs * regs)
 
 static __kprobes void
 unknown_nmi_error(unsigned char reason, struct pt_regs * regs)
-{	printk("Uhhuh. NMI received for unknown reason %02x.\n", reason);
-	printk("Dazed and confused, but trying to continue\n");
-	printk("Do you have a strange power saving mode enabled?\n");
+{
+	printk(KERN_EMERG "Uhhuh. NMI received for unknown reason %02x.\n",
+		reason);
+	printk(KERN_EMERG "Do you have a strange power saving mode enabled?\n");
+
+	if (panic_on_unrecovered_nmi)
+		panic("NMI: Not continuing");
+
+	printk(KERN_EMERG "Dazed and confused, but trying to continue\n");
 }
 
 /* Runs on IST stack. This code must keep interrupts off all the time.
@@ -644,17 +778,15 @@ asmlinkage __kprobes void default_do_nmi(struct pt_regs *regs)
 		if (notify_die(DIE_NMI_IPI, "nmi_ipi", regs, reason, 2, SIGINT)
 								== NOTIFY_STOP)
 			return;
-#ifdef CONFIG_X86_LOCAL_APIC
 		/*
 		 * Ok, so this is none of the documented NMI sources,
 		 * so it must be the NMI watchdog.
 		 */
-		if (nmi_watchdog > 0) {
-			nmi_watchdog_tick(regs,reason);
+		if (nmi_watchdog_tick(regs,reason))
 			return;
-		}
-#endif
-		unknown_nmi_error(reason, regs);
+		if (!do_nmi_callback(regs,cpu))
+			unknown_nmi_error(reason, regs);
+
 		return;
 	}
 	if (notify_die(DIE_NMI, "nmi", regs, reason, 2, SIGINT) == NOTIFY_STOP)
@@ -674,8 +806,9 @@ asmlinkage void __kprobes do_int3(struct pt_regs * regs, long error_code)
 	if (notify_die(DIE_INT3, "int3", regs, error_code, 3, SIGTRAP) == NOTIFY_STOP) {
 		return;
 	}
+	preempt_conditional_sti(regs);
 	do_trap(3, SIGTRAP, "int3", regs, error_code, NULL);
-	return;
+	preempt_conditional_cli(regs);
 }
 
 /* Help handler running on IST stack to switch back to user stack
@@ -737,14 +870,6 @@ asmlinkage void __kprobes do_debug(struct pt_regs * regs,
 		 */
                 if (!user_mode(regs))
                        goto clear_TF_reenable;
-		/*
-		 * Was the TF flag set by a debugger? If so, clear it now,
-		 * so that register information is correct.
-		 */
-		if (tsk->ptrace & PT_DTRACE) {
-			regs->eflags &= ~TF_MASK;
-			tsk->ptrace &= ~PT_DTRACE;
-		}
 	}
 
 	/* Ok, finally something we can handle */
@@ -938,6 +1063,7 @@ asmlinkage void math_state_restore(void)
 		init_fpu(me);
 	restore_fpu_checking(&me->thread.i387.fxsave);
 	task_thread_info(me)->status |= TS_USEDFPU;
+	me->fpu_counter++;
 }
 
 void __init trap_init(void)
@@ -976,18 +1102,21 @@ void __init trap_init(void)
 }
 
 
-/* Actual parsing is done early in setup.c. */
-static int __init oops_dummy(char *s)
+static int __init oops_setup(char *s)
 { 
-	panic_on_oops = 1;
-	return -1; 
+	if (!s)
+		return -EINVAL;
+	if (!strcmp(s, "panic"))
+		panic_on_oops = 1;
+	return 0;
 } 
-__setup("oops=", oops_dummy); 
+early_param("oops", oops_setup);
 
 static int __init kstack_setup(char *s)
 {
+	if (!s)
+		return -EINVAL;
 	kstack_depth_to_print = simple_strtoul(s,NULL,0);
 	return 0;
 }
-__setup("kstack=", kstack_setup);
-
+early_param("kstack", kstack_setup);

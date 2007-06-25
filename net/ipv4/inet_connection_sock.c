@@ -13,7 +13,6 @@
  *		2 of the License, or(at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/jhash.h>
 
@@ -326,6 +325,7 @@ struct dst_entry* inet_csk_route_req(struct sock *sk,
 				       { .sport = inet_sk(sk)->sport,
 					 .dport = ireq->rmt_port } } };
 
+	security_req_classify_flow(req, &fl);
 	if (ip_route_output_flow(&rt, &fl, sk, 0)) {
 		IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
 		return NULL;
@@ -340,10 +340,10 @@ struct dst_entry* inet_csk_route_req(struct sock *sk,
 
 EXPORT_SYMBOL_GPL(inet_csk_route_req);
 
-static inline u32 inet_synq_hash(const u32 raddr, const u16 rport,
-				 const u32 rnd, const u16 synq_hsize)
+static inline u32 inet_synq_hash(const __be32 raddr, const __be16 rport,
+				 const u32 rnd, const u32 synq_hsize)
 {
-	return jhash_2words(raddr, (u32)rport, rnd) & (synq_hsize - 1);
+	return jhash_2words((__force u32)raddr, (__force u32)rport, rnd) & (synq_hsize - 1);
 }
 
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
@@ -354,8 +354,8 @@ static inline u32 inet_synq_hash(const u32 raddr, const u16 rport,
 
 struct request_sock *inet_csk_search_req(const struct sock *sk,
 					 struct request_sock ***prevp,
-					 const __u16 rport, const __u32 raddr,
-					 const __u32 laddr)
+					 const __be16 rport, const __be32 raddr,
+					 const __be32 laddr)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;
@@ -508,6 +508,8 @@ struct sock *inet_csk_clone(struct sock *sk, const struct request_sock *req,
 
 		/* Deinitialize accept_queue to trap illegal accesses. */
 		memset(&newicsk->icsk_accept_queue, 0, sizeof(newicsk->icsk_accept_queue));
+
+		security_inet_csk_clone(newsk, req);
 	}
 	return newsk;
 }
@@ -646,3 +648,52 @@ void inet_csk_addr2sockaddr(struct sock *sk, struct sockaddr *uaddr)
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_addr2sockaddr);
+
+int inet_csk_ctl_sock_create(struct socket **sock, unsigned short family,
+			     unsigned short type, unsigned char protocol)
+{
+	int rc = sock_create_kern(family, type, protocol, sock);
+
+	if (rc == 0) {
+		(*sock)->sk->sk_allocation = GFP_ATOMIC;
+		inet_sk((*sock)->sk)->uc_ttl = -1;
+		/*
+		 * Unhash it so that IP input processing does not even see it,
+		 * we do not wish this socket to see incoming packets.
+		 */
+		(*sock)->sk->sk_prot->unhash((*sock)->sk);
+	}
+	return rc;
+}
+
+EXPORT_SYMBOL_GPL(inet_csk_ctl_sock_create);
+
+#ifdef CONFIG_COMPAT
+int inet_csk_compat_getsockopt(struct sock *sk, int level, int optname,
+			       char __user *optval, int __user *optlen)
+{
+	const struct inet_connection_sock *icsk = inet_csk(sk);
+
+	if (icsk->icsk_af_ops->compat_getsockopt != NULL)
+		return icsk->icsk_af_ops->compat_getsockopt(sk, level, optname,
+							    optval, optlen);
+	return icsk->icsk_af_ops->getsockopt(sk, level, optname,
+					     optval, optlen);
+}
+
+EXPORT_SYMBOL_GPL(inet_csk_compat_getsockopt);
+
+int inet_csk_compat_setsockopt(struct sock *sk, int level, int optname,
+			       char __user *optval, int optlen)
+{
+	const struct inet_connection_sock *icsk = inet_csk(sk);
+
+	if (icsk->icsk_af_ops->compat_setsockopt != NULL)
+		return icsk->icsk_af_ops->compat_setsockopt(sk, level, optname,
+							    optval, optlen);
+	return icsk->icsk_af_ops->setsockopt(sk, level, optname,
+					     optval, optlen);
+}
+
+EXPORT_SYMBOL_GPL(inet_csk_compat_setsockopt);
+#endif

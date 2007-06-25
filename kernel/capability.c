@@ -12,7 +12,7 @@
 #include <linux/module.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/vs_cvirt.h>
+#include <linux/vs_context.h>
 #include <asm/uaccess.h>
 #include <linux/vs_base.h>
 
@@ -48,7 +48,7 @@ asmlinkage long sys_capget(cap_user_header_t header, cap_user_data_t dataptr)
      int ret = 0;
      pid_t pid;
      __u32 version;
-     task_t *target;
+     struct task_struct *target;
      struct __user_cap_data_struct data;
 
      if (get_user(version, &header->version))
@@ -98,11 +98,13 @@ static inline int cap_set_pg(int pgrp, kernel_cap_t *effective,
 			      kernel_cap_t *inheritable,
 			      kernel_cap_t *permitted)
 {
-	task_t *g, *target;
+	struct task_struct *g, *target;
 	int ret = -EPERM;
 	int found = 0;
 
 	do_each_task_pid(pgrp, PIDTYPE_PGID, g) {
+		if (!vx_check(g->xid, VS_ADMIN_P | VS_IDENT))
+			continue;
 		target = g;
 		while_each_thread(g, target) {
 			if (!security_capset_check(target, effective,
@@ -130,12 +132,12 @@ static inline int cap_set_all(kernel_cap_t *effective,
 			       kernel_cap_t *inheritable,
 			       kernel_cap_t *permitted)
 {
-     task_t *g, *target;
+     struct task_struct *g, *target;
      int ret = -EPERM;
      int found = 0;
 
      do_each_thread(g, target) {
-             if (target == current || target->pid == 1)
+             if (target == current || is_init(target))
                      continue;
              found = 1;
 	     if (security_capset_check(target, effective, inheritable,
@@ -174,7 +176,7 @@ asmlinkage long sys_capset(cap_user_header_t header, const cap_user_data_t data)
 {
      kernel_cap_t inheritable, permitted, effective;
      __u32 version;
-     task_t *target;
+     struct task_struct *target;
      int ret;
      pid_t pid;
 
@@ -235,3 +237,23 @@ out:
 
      return ret;
 }
+
+int __capable(struct task_struct *t, int cap)
+{
+	if (security_capable(t, cap) == 0) {
+		t->flags |= PF_SUPERPRIV;
+		return 1;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(__capable);
+
+#include <linux/vserver/base.h>
+int capable(int cap)
+{
+	/* here for now so we don't require task locking */
+	if (vs_check_bit(VXC_CAP_MASK, cap) && !vx_mcaps(1L << cap))
+		return 0;
+	return __capable(current, cap);
+}
+EXPORT_SYMBOL(capable);

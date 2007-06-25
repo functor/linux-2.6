@@ -111,6 +111,13 @@ static struct dmi_system_id __initdata i8042_dmi_nomux_table[] = {
 		},
 	},
 	{
+		.ident = "Fujitsu Lifebook P7010",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU SIEMENS"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "0000000000"),
+		},
+	},
+	{
 		.ident = "Fujitsu Lifebook P5020D",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU"),
@@ -160,6 +167,13 @@ static struct dmi_system_id __initdata i8042_dmi_nomux_table[] = {
 		},
 	},
 	{
+		.ident = "Toshiba Equium A110",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "EQUIUM A110"),
+		},
+	},
+	{
 		.ident = "Alienware Sentia",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "ALIENWARE"),
@@ -180,6 +194,13 @@ static struct dmi_system_id __initdata i8042_dmi_nomux_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "VGN-FS115B"),
 		},
 	},
+	{
+		.ident = "Amoi M636/A737",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Amoi Electronics CO.,LTD."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "M636/A737 platform"),
+		},
+	},
 	{ }
 };
 
@@ -192,7 +213,9 @@ static struct dmi_system_id __initdata i8042_dmi_nomux_table[] = {
 #include <linux/pnp.h>
 
 static int i8042_pnp_kbd_registered;
+static unsigned int i8042_pnp_kbd_devices;
 static int i8042_pnp_aux_registered;
+static unsigned int i8042_pnp_aux_devices;
 
 static int i8042_pnp_command_reg;
 static int i8042_pnp_data_reg;
@@ -219,6 +242,7 @@ static int i8042_pnp_kbd_probe(struct pnp_dev *dev, const struct pnp_device_id *
 		strncat(i8042_pnp_kbd_name, pnp_dev_name(dev), sizeof(i8042_pnp_kbd_name));
 	}
 
+	i8042_pnp_kbd_devices++;
 	return 0;
 }
 
@@ -239,6 +263,7 @@ static int i8042_pnp_aux_probe(struct pnp_dev *dev, const struct pnp_device_id *
 		strncat(i8042_pnp_aux_name, pnp_dev_name(dev), sizeof(i8042_pnp_aux_name));
 	}
 
+	i8042_pnp_aux_devices++;
 	return 0;
 }
 
@@ -287,21 +312,23 @@ static void i8042_pnp_exit(void)
 
 static int __init i8042_pnp_init(void)
 {
-	int result_kbd = 0, result_aux = 0;
 	char kbd_irq_str[4] = { 0 }, aux_irq_str[4] = { 0 };
+	int err;
 
 	if (i8042_nopnp) {
 		printk(KERN_INFO "i8042: PNP detection disabled\n");
 		return 0;
 	}
 
-	if ((result_kbd = pnp_register_driver(&i8042_pnp_kbd_driver)) >= 0)
+	err = pnp_register_driver(&i8042_pnp_kbd_driver);
+	if (!err)
 		i8042_pnp_kbd_registered = 1;
 
-	if ((result_aux = pnp_register_driver(&i8042_pnp_aux_driver)) >= 0)
+	err = pnp_register_driver(&i8042_pnp_aux_driver);
+	if (!err)
 		i8042_pnp_aux_registered = 1;
 
-	if (result_kbd <= 0 && result_aux <= 0) {
+	if (!i8042_pnp_kbd_devices && !i8042_pnp_aux_devices) {
 		i8042_pnp_exit();
 #if defined(__ia64__)
 		return -ENODEV;
@@ -311,24 +338,24 @@ static int __init i8042_pnp_init(void)
 #endif
 	}
 
-	if (result_kbd > 0)
+	if (i8042_pnp_kbd_devices)
 		snprintf(kbd_irq_str, sizeof(kbd_irq_str),
 			"%d", i8042_pnp_kbd_irq);
-	if (result_aux > 0)
+	if (i8042_pnp_aux_devices)
 		snprintf(aux_irq_str, sizeof(aux_irq_str),
 			"%d", i8042_pnp_aux_irq);
 
 	printk(KERN_INFO "PNP: PS/2 Controller [%s%s%s] at %#x,%#x irq %s%s%s\n",
-		i8042_pnp_kbd_name, (result_kbd > 0 && result_aux > 0) ? "," : "",
+		i8042_pnp_kbd_name, (i8042_pnp_kbd_devices && i8042_pnp_aux_devices) ? "," : "",
 		i8042_pnp_aux_name,
 		i8042_pnp_data_reg, i8042_pnp_command_reg,
-		kbd_irq_str, (result_kbd > 0 && result_aux > 0) ? "," : "",
+		kbd_irq_str, (i8042_pnp_kbd_devices && i8042_pnp_aux_devices) ? "," : "",
 		aux_irq_str);
 
 #if defined(__ia64__)
-	if (result_kbd <= 0)
+	if (!i8042_pnp_kbd_devices)
 		i8042_nokbd = 1;
-	if (result_aux <= 0)
+	if (!i8042_pnp_aux_devices)
 		i8042_noaux = 1;
 #endif
 

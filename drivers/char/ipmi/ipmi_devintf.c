@@ -31,7 +31,6 @@
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/errno.h>
@@ -40,9 +39,8 @@
 #include <linux/poll.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
-#include <linux/devfs_fs_kernel.h>
 #include <linux/ipmi.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/compat.h>
@@ -55,7 +53,7 @@ struct ipmi_file_private
 	struct file          *file;
 	struct fasync_struct *fasync_queue;
 	wait_queue_head_t    wait;
-	struct semaphore     recv_sem;
+	struct mutex	     recv_mutex;
 	int                  default_retries;
 	unsigned int         default_retry_time_ms;
 };
@@ -90,7 +88,7 @@ static unsigned int ipmi_poll(struct file *file, poll_table *wait)
 
 	spin_lock_irqsave(&priv->recv_msg_lock, flags);
 
-	if (! list_empty(&(priv->recv_msgs)))
+	if (!list_empty(&(priv->recv_msgs)))
 		mask |= (POLLIN | POLLRDNORM);
 
 	spin_unlock_irqrestore(&priv->recv_msg_lock, flags);
@@ -141,7 +139,7 @@ static int ipmi_open(struct inode *inode, struct file *file)
 	INIT_LIST_HEAD(&(priv->recv_msgs));
 	init_waitqueue_head(&priv->wait);
 	priv->fasync_queue = NULL;
-	sema_init(&(priv->recv_sem), 1);
+	mutex_init(&priv->recv_mutex);
 
 	/* Use the low-level defaults. */
 	priv->default_retries = -1;
@@ -285,15 +283,15 @@ static int ipmi_ioctl(struct inode  *inode,
 			break;
 		}
 
-		/* We claim a semaphore because we don't want two
+		/* We claim a mutex because we don't want two
                    users getting something from the queue at a time.
                    Since we have to release the spinlock before we can
                    copy the data to the user, it's possible another
                    user will grab something from the queue, too.  Then
                    the messages might get out of order if something
                    fails and the message gets put back onto the
-                   queue.  This semaphore prevents that problem. */
-		down(&(priv->recv_sem));
+                   queue.  This mutex prevents that problem. */
+		mutex_lock(&priv->recv_mutex);
 
 		/* Grab the message off the list. */
 		spin_lock_irqsave(&(priv->recv_msg_lock), flags);
@@ -352,7 +350,7 @@ static int ipmi_ioctl(struct inode  *inode,
 			goto recv_putback_on_err;
 		}
 
-		up(&(priv->recv_sem));
+		mutex_unlock(&priv->recv_mutex);
 		ipmi_free_recv_msg(msg);
 		break;
 
@@ -362,11 +360,11 @@ static int ipmi_ioctl(struct inode  *inode,
 		spin_lock_irqsave(&(priv->recv_msg_lock), flags);
 		list_add(entry, &(priv->recv_msgs));
 		spin_unlock_irqrestore(&(priv->recv_msg_lock), flags);
-		up(&(priv->recv_sem));
+		mutex_unlock(&priv->recv_mutex);
 		break;
 
 	recv_err:
-		up(&(priv->recv_sem));
+		mutex_unlock(&priv->recv_mutex);
 		break;
 	}
 
@@ -379,7 +377,8 @@ static int ipmi_ioctl(struct inode  *inode,
 			break;
 		}
 
-		rv = ipmi_register_for_cmd(priv->user, val.netfn, val.cmd);
+		rv = ipmi_register_for_cmd(priv->user, val.netfn, val.cmd,
+					   IPMI_CHAN_ALL);
 		break;
 	}
 
@@ -392,7 +391,36 @@ static int ipmi_ioctl(struct inode  *inode,
 			break;
 		}
 
-		rv = ipmi_unregister_for_cmd(priv->user, val.netfn, val.cmd);
+		rv = ipmi_unregister_for_cmd(priv->user, val.netfn, val.cmd,
+					     IPMI_CHAN_ALL);
+		break;
+	}
+
+	case IPMICTL_REGISTER_FOR_CMD_CHANS:
+	{
+		struct ipmi_cmdspec_chans val;
+
+		if (copy_from_user(&val, arg, sizeof(val))) {
+			rv = -EFAULT;
+			break;
+		}
+
+		rv = ipmi_register_for_cmd(priv->user, val.netfn, val.cmd,
+					   val.chans);
+		break;
+	}
+
+	case IPMICTL_UNREGISTER_FOR_CMD_CHANS:
+	{
+		struct ipmi_cmdspec_chans val;
+
+		if (copy_from_user(&val, arg, sizeof(val))) {
+			rv = -EFAULT;
+			break;
+		}
+
+		rv = ipmi_unregister_for_cmd(priv->user, val.netfn, val.cmd,
+					     val.chans);
 		break;
 	}
 
@@ -566,6 +594,31 @@ static int ipmi_ioctl(struct inode  *inode,
 		}
 
 		rv = 0;
+		break;
+	}
+
+	case IPMICTL_GET_MAINTENANCE_MODE_CMD:
+	{
+		int mode;
+
+		mode = ipmi_get_maintenance_mode(priv->user);
+		if (copy_to_user(arg, &mode, sizeof(mode))) {
+			rv = -EFAULT;
+			break;
+		}
+		rv = 0;
+		break;
+	}
+
+	case IPMICTL_SET_MAINTENANCE_MODE_CMD:
+	{
+		int mode;
+
+		if (copy_from_user(&mode, arg, sizeof(mode))) {
+			rv = -EFAULT;
+			break;
+		}
+		rv = ipmi_set_maintenance_mode(priv->user, mode);
 		break;
 	}
 	}
@@ -745,7 +798,7 @@ static long compat_ipmi_ioctl(struct file *filep, unsigned int cmd,
 		if (copy_to_user(precv64, &recv64, sizeof(recv64)))
 			return -EFAULT;
 
-		rc = ipmi_ioctl(filep->f_dentry->d_inode, filep,
+		rc = ipmi_ioctl(filep->f_path.dentry->d_inode, filep,
 				((cmd == COMPAT_IPMICTL_RECEIVE_MSG)
 				 ? IPMICTL_RECEIVE_MSG
 				 : IPMICTL_RECEIVE_MSG_TRUNC),
@@ -762,12 +815,12 @@ static long compat_ipmi_ioctl(struct file *filep, unsigned int cmd,
 		return rc;
 	}
 	default:
-		return ipmi_ioctl(filep->f_dentry->d_inode, filep, cmd, arg);
+		return ipmi_ioctl(filep->f_path.dentry->d_inode, filep, cmd, arg);
 	}
 }
 #endif
 
-static struct file_operations ipmi_fops = {
+static const struct file_operations ipmi_fops = {
 	.owner		= THIS_MODULE,
 	.ioctl		= ipmi_ioctl,
 #ifdef CONFIG_COMPAT
@@ -781,7 +834,7 @@ static struct file_operations ipmi_fops = {
 
 #define DEVICE_NAME     "ipmidev"
 
-static int ipmi_major = 0;
+static int ipmi_major;
 module_param(ipmi_major, int, 0);
 MODULE_PARM_DESC(ipmi_major, "Sets the major number of the IPMI device.  By"
 		 " default, or if you set it to zero, it will choose the next"
@@ -789,22 +842,50 @@ MODULE_PARM_DESC(ipmi_major, "Sets the major number of the IPMI device.  By"
 		 " interface.  Other values will set the major device number"
 		 " to that value.");
 
+/* Keep track of the devices that are registered. */
+struct ipmi_reg_list {
+	dev_t            dev;
+	struct list_head link;
+};
+static LIST_HEAD(reg_list);
+static DEFINE_MUTEX(reg_list_mutex);
+
 static struct class *ipmi_class;
 
-static void ipmi_new_smi(int if_num)
+static void ipmi_new_smi(int if_num, struct device *device)
 {
 	dev_t dev = MKDEV(ipmi_major, if_num);
+	struct ipmi_reg_list *entry;
 
-	devfs_mk_cdev(dev, S_IFCHR | S_IRUSR | S_IWUSR,
-		      "ipmidev/%d", if_num);
+	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
+	if (!entry) {
+		printk(KERN_ERR "ipmi_devintf: Unable to create the"
+		       " ipmi class device link\n");
+		return;
+	}
+	entry->dev = dev;
 
-	class_device_create(ipmi_class, NULL, dev, NULL, "ipmi%d", if_num);
+	mutex_lock(&reg_list_mutex);
+	class_device_create(ipmi_class, NULL, dev, device, "ipmi%d", if_num);
+	list_add(&entry->link, &reg_list);
+	mutex_unlock(&reg_list_mutex);
 }
 
 static void ipmi_smi_gone(int if_num)
 {
-	class_device_destroy(ipmi_class, MKDEV(ipmi_major, if_num));
-	devfs_remove("ipmidev/%d", if_num);
+	dev_t dev = MKDEV(ipmi_major, if_num);
+	struct ipmi_reg_list *entry;
+
+	mutex_lock(&reg_list_mutex);
+	list_for_each_entry(entry, &reg_list, link) {
+		if (entry->dev == dev) {
+			list_del(&entry->link);
+			kfree(entry);
+			break;
+		}
+	}
+	class_device_destroy(ipmi_class, dev);
+	mutex_unlock(&reg_list_mutex);
 }
 
 static struct ipmi_smi_watcher smi_watcher =
@@ -840,8 +921,6 @@ static __init int init_ipmi_devintf(void)
 		ipmi_major = rv;
 	}
 
-	devfs_mk_dir(DEVICE_NAME);
-
 	rv = ipmi_smi_watcher_register(&smi_watcher);
 	if (rv) {
 		unregister_chrdev(ipmi_major, DEVICE_NAME);
@@ -856,9 +935,16 @@ module_init(init_ipmi_devintf);
 
 static __exit void cleanup_ipmi(void)
 {
+	struct ipmi_reg_list *entry, *entry2;
+	mutex_lock(&reg_list_mutex);
+	list_for_each_entry_safe(entry, entry2, &reg_list, link) {
+		list_del(&entry->link);
+		class_device_destroy(ipmi_class, entry->dev);
+		kfree(entry);
+	}
+	mutex_unlock(&reg_list_mutex);
 	class_destroy(ipmi_class);
 	ipmi_smi_watcher_unregister(&smi_watcher);
-	devfs_remove(DEVICE_NAME);
 	unregister_chrdev(ipmi_major, DEVICE_NAME);
 }
 module_exit(cleanup_ipmi);

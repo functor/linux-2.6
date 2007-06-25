@@ -49,7 +49,6 @@
  *
  */
  
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -61,6 +60,7 @@
 #include <linux/netdevice.h>
 #include <linux/if_packet.h>
 #include <linux/wireless.h>
+#include <linux/kernel.h>
 #include <linux/kmod.h>
 #include <net/ip.h>
 #include <net/protocol.h>
@@ -72,6 +72,7 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 #include <asm/page.h>
+#include <asm/cacheflush.h>
 #include <asm/io.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -200,9 +201,10 @@ struct packet_sock {
 #endif
 	struct packet_type	prot_hook;
 	spinlock_t		bind_lock;
-	char			running;	/* prot_hook is attached*/
+	unsigned int		running:1,	/* prot_hook is attached*/
+				auxdata:1;
 	int			ifindex;	/* bound device		*/
-	unsigned short		num;
+	__be16			num;
 #ifdef CONFIG_PACKET_MULTICAST
 	struct packet_mclist	*mclist;
 #endif
@@ -213,6 +215,16 @@ struct packet_sock {
 	unsigned int		pg_vec_len;
 #endif
 };
+
+struct packet_skb_cb {
+	unsigned int origlen;
+	union {
+		struct sockaddr_pkt pkt;
+		struct sockaddr_ll ll;
+	} sa;
+};
+
+#define PACKET_SKB_CB(__skb)	((struct packet_skb_cb *)((__skb)->cb))
 
 #ifdef CONFIG_PACKET_MMAP
 
@@ -252,12 +264,7 @@ static void packet_sock_destruct(struct sock *sk)
 }
 
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-struct proto_ops packet_ops;
-EXPORT_SYMBOL(packet_ops);
-#else
 static const
-#endif
 struct proto_ops packet_ops;
 
 #ifdef CONFIG_SOCK_PACKET
@@ -299,7 +306,7 @@ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct 
 	/* drop conntrack reference */
 	nf_reset(skb);
 
-	spkt = (struct sockaddr_pkt*)skb->cb;
+	spkt = &PACKET_SKB_CB(skb)->sa.pkt;
 
 	skb_push(skb, skb->data-skb->mac.raw);
 
@@ -338,7 +345,7 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	struct sockaddr_pkt *saddr=(struct sockaddr_pkt *)msg->msg_name;
 	struct sk_buff *skb;
 	struct net_device *dev;
-	unsigned short proto=0;
+	__be16 proto=0;
 	int err;
 	
 	/*
@@ -365,6 +372,10 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	if (dev == NULL)
 		goto out_unlock;
 	
+	err = -ENETDOWN;
+	if (!(dev->flags & IFF_UP))
+		goto out_unlock;
+
 	/*
 	 *	You may not queue a frame bigger than the mtu. This is the lowest level
 	 *	raw protocol and you must do your own fragmentation at this level.
@@ -413,10 +424,6 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		goto out_free;
 
-	err = -ENETDOWN;
-	if (!(dev->flags & IFF_UP))
-		goto out_free;
-
 	/*
 	 *	Now send it
 	 */
@@ -434,19 +441,16 @@ out_unlock:
 }
 #endif
 
-static inline unsigned run_filter(struct sk_buff *skb, struct sock *sk, unsigned res)
+static inline unsigned int run_filter(struct sk_buff *skb, struct sock *sk,
+				      unsigned int res)
 {
 	struct sk_filter *filter;
 
-	bh_lock_sock(sk);
-	filter = sk->sk_filter;
-	/*
-	 * Our caller already checked that filter != NULL but we need to
-	 * verify that under bh_lock_sock() to be safe
-	 */
-	if (likely(filter != NULL))
+	rcu_read_lock_bh();
+	filter = rcu_dereference(sk->sk_filter);
+	if (filter != NULL)
 		res = sk_run_filter(skb, filter->insns, filter->len);
-	bh_unlock_sock(sk);
+	rcu_read_unlock_bh();
 
 	return res;
 }
@@ -470,19 +474,13 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 	struct packet_sock *po;
 	u8 * skb_head = skb->data;
 	int skb_len = skb->len;
-	unsigned snaplen;
+	unsigned int snaplen, res;
 
 	if (skb->pkt_type == PACKET_LOOPBACK)
 		goto drop;
 
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
-
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-	if (vnet_active &&
-	    (int) sk->sk_xid > 0 && sk->sk_xid != skb->xid)
-		goto drop;
-#endif
 
 	skb->dev = dev;
 
@@ -504,13 +502,11 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 
 	snaplen = skb->len;
 
-	if (sk->sk_filter) {
-		unsigned res = run_filter(skb, sk, snaplen);
-		if (res == 0)
-			goto drop_n_restore;
-		if (snaplen > res)
-			snaplen = res;
-	}
+	res = run_filter(skb, sk, snaplen);
+	if (!res)
+		goto drop_n_restore;
+	if (snaplen > res)
+		snaplen = res;
 
 	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
 	    (unsigned)sk->sk_rcvbuf)
@@ -529,7 +525,10 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 		skb = nskb;
 	}
 
-	sll = (struct sockaddr_ll*)skb->cb;
+	BUILD_BUG_ON(sizeof(*PACKET_SKB_CB(skb)) + MAX_ADDR_LEN - 8 >
+		     sizeof(skb->cb));
+
+	sll = &PACKET_SKB_CB(skb)->sa.ll;
 	sll->sll_family = AF_PACKET;
 	sll->sll_hatype = dev->type;
 	sll->sll_protocol = skb->protocol;
@@ -539,6 +538,8 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 
 	if (dev->hard_header_parse)
 		sll->sll_halen = dev->hard_header_parse(skb, sll->sll_addr);
+
+	PACKET_SKB_CB(skb)->origlen = skb->len;
 
 	if (pskb_trim(skb, snaplen))
 		goto drop_n_acct;
@@ -582,7 +583,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 	struct tpacket_hdr *h;
 	u8 * skb_head = skb->data;
 	int skb_len = skb->len;
-	unsigned snaplen;
+	unsigned int snaplen, res;
 	unsigned long status = TP_STATUS_LOSING|TP_STATUS_USER;
 	unsigned short macoff, netoff;
 	struct sk_buff *copy_skb = NULL;
@@ -599,20 +600,19 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 		else if (skb->pkt_type == PACKET_OUTGOING) {
 			/* Special case: outgoing packets have ll header at head */
 			skb_pull(skb, skb->nh.raw - skb->data);
-			if (skb->ip_summed == CHECKSUM_HW)
-				status |= TP_STATUS_CSUMNOTREADY;
 		}
 	}
 
+	if (skb->ip_summed == CHECKSUM_PARTIAL)
+		status |= TP_STATUS_CSUMNOTREADY;
+
 	snaplen = skb->len;
 
-	if (sk->sk_filter) {
-		unsigned res = run_filter(skb, sk, snaplen);
-		if (res == 0)
-			goto drop_n_restore;
-		if (snaplen > res)
-			snaplen = res;
-	}
+	res = run_filter(skb, sk, snaplen);
+	if (!res)
+		goto drop_n_restore;
+	if (snaplen > res)
+		snaplen = res;
 
 	if (sk->sk_type == SOCK_DGRAM) {
 		macoff = netoff = TPACKET_ALIGN(TPACKET_HDRLEN) + 16;
@@ -639,8 +639,6 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 		if ((int)snaplen < 0)
 			snaplen = 0;
 	}
-	if (snaplen > skb->len-skb->data_len)
-		snaplen = skb->len-skb->data_len;
 
 	spin_lock(&sk->sk_receive_queue.lock);
 	h = (struct tpacket_hdr *)packet_lookup_frame(po, po->head);
@@ -657,7 +655,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 		status &= ~TP_STATUS_LOSING;
 	spin_unlock(&sk->sk_receive_queue.lock);
 
-	memcpy((u8*)h + macoff, skb->data, snaplen);
+	skb_copy_bits(skb, 0, (u8*)h + macoff, snaplen);
 
 	h->tp_len = skb->len;
 	h->tp_snaplen = snaplen;
@@ -681,7 +679,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 	sll->sll_ifindex = dev->ifindex;
 
 	h->tp_status = status;
-	mb();
+	smp_mb();
 
 	{
 		struct page *p_start, *p_end;
@@ -726,7 +724,7 @@ static int packet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	struct sockaddr_ll *saddr=(struct sockaddr_ll *)msg->msg_name;
 	struct sk_buff *skb;
 	struct net_device *dev;
-	unsigned short proto;
+	__be16 proto;
 	unsigned char *addr;
 	int ifindex, err, reserve = 0;
 
@@ -759,6 +757,10 @@ static int packet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	if (sock->type == SOCK_RAW)
 		reserve = dev->hard_header_len;
 
+	err = -ENETDOWN;
+	if (!(dev->flags & IFF_UP))
+		goto out_unlock;
+
 	err = -EMSGSIZE;
 	if (len > dev->mtu+reserve)
 		goto out_unlock;
@@ -790,10 +792,6 @@ static int packet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	skb->protocol = proto;
 	skb->dev = dev;
 	skb->priority = sk->sk_priority;
-
-	err = -ENETDOWN;
-	if (!(dev->flags & IFF_UP))
-		goto out_free;
 
 	/*
 	 *	Now send it
@@ -880,7 +878,7 @@ static int packet_release(struct socket *sock)
  *	Attach a packet hook.
  */
 
-static int packet_do_bind(struct sock *sk, struct net_device *dev, int protocol)
+static int packet_do_bind(struct sock *sk, struct net_device *dev, __be16 protocol)
 {
 	struct packet_sock *po = pkt_sk(sk);
 	/*
@@ -1005,6 +1003,7 @@ static int packet_create(struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	struct packet_sock *po;
+	__be16 proto = (__force __be16)protocol; /* weird, but documented */
 	int err;
 
 	if (!capable(CAP_NET_RAW))
@@ -1032,7 +1031,7 @@ static int packet_create(struct socket *sock, int protocol)
 
 	po = pkt_sk(sk);
 	sk->sk_family = PF_PACKET;
-	po->num = protocol;
+	po->num = proto;
 
 	sk->sk_destruct = packet_sock_destruct;
 	atomic_inc(&packet_socks_nr);
@@ -1049,8 +1048,8 @@ static int packet_create(struct socket *sock, int protocol)
 #endif
 	po->prot_hook.af_packet_priv = sk;
 
-	if (protocol) {
-		po->prot_hook.type = protocol;
+	if (proto) {
+		po->prot_hook.type = proto;
 		dev_add_pack(&po->prot_hook);
 		sock_hold(sk);
 		po->running = 1;
@@ -1112,7 +1111,7 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 	 *	it in now.
 	 */
 
-	sll = (struct sockaddr_ll*)skb->cb;
+	sll = &PACKET_SKB_CB(skb)->sa.ll;
 	if (sock->type == SOCK_PACKET)
 		msg->msg_namelen = sizeof(struct sockaddr_pkt);
 	else
@@ -1137,7 +1136,22 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 	sock_recv_timestamp(msg, sk, skb);
 
 	if (msg->msg_name)
-		memcpy(msg->msg_name, skb->cb, msg->msg_namelen);
+		memcpy(msg->msg_name, &PACKET_SKB_CB(skb)->sa,
+		       msg->msg_namelen);
+
+	if (pkt_sk(sk)->auxdata) {
+		struct tpacket_auxdata aux;
+
+		aux.tp_status = TP_STATUS_USER;
+		if (skb->ip_summed == CHECKSUM_PARTIAL)
+			aux.tp_status |= TP_STATUS_CSUMNOTREADY;
+		aux.tp_len = PACKET_SKB_CB(skb)->origlen;
+		aux.tp_snaplen = skb->len;
+		aux.tp_mac = 0;
+		aux.tp_net = skb->nh.raw - skb->data;
+
+		put_cmsg(msg, SOL_PACKET, PACKET_AUXDATA, sizeof(aux), &aux);
+	}
 
 	/*
 	 *	Free or return the buffer as appropriate. Again this
@@ -1337,6 +1351,7 @@ static int
 packet_setsockopt(struct socket *sock, int level, int optname, char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
+	struct packet_sock *po = pkt_sk(sk);
 	int ret;
 
 	if (level != SOL_PACKET)
@@ -1389,6 +1404,18 @@ packet_setsockopt(struct socket *sock, int level, int optname, char __user *optv
 		return 0;
 	}
 #endif
+	case PACKET_AUXDATA:
+	{
+		int val;
+
+		if (optlen < sizeof(val))
+			return -EINVAL;
+		if (copy_from_user(&val, optval, sizeof(val)))
+			return -EFAULT;
+
+		po->auxdata = !!val;
+		return 0;
+	}
 	default:
 		return -ENOPROTOOPT;
 	}
@@ -1398,8 +1425,11 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 			     char __user *optval, int __user *optlen)
 {
 	int len;
+	int val;
 	struct sock *sk = sock->sk;
 	struct packet_sock *po = pkt_sk(sk);
+	void *data;
+	struct tpacket_stats st;
 
 	if (level != SOL_PACKET)
 		return -ENOPROTOOPT;
@@ -1412,9 +1442,6 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 		
 	switch(optname)	{
 	case PACKET_STATISTICS:
-	{
-		struct tpacket_stats st;
-
 		if (len > sizeof(struct tpacket_stats))
 			len = sizeof(struct tpacket_stats);
 		spin_lock_bh(&sk->sk_receive_queue.lock);
@@ -1423,15 +1450,22 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 		spin_unlock_bh(&sk->sk_receive_queue.lock);
 		st.tp_packets += st.tp_drops;
 
-		if (copy_to_user(optval, &st, len))
-			return -EFAULT;
+		data = &st;
 		break;
-	}
+	case PACKET_AUXDATA:
+		if (len > sizeof(int))
+			len = sizeof(int);
+		val = po->auxdata;
+
+		data = &val;
+		break;
 	default:
 		return -ENOPROTOOPT;
 	}
 
 	if (put_user(len, optlen))
+		return -EFAULT;
+	if (copy_to_user(optval, data, len))
 		return -EFAULT;
 	return 0;
 }
@@ -1646,7 +1680,8 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req, int closing
 {
 	char **pg_vec = NULL;
 	struct packet_sock *po = pkt_sk(sk);
-	int was_running, num, order = 0;
+	int was_running, order = 0;
+	__be16 num;
 	int err = 0;
 	
 	if (req->tp_block_nr) {
@@ -1819,9 +1854,7 @@ static const struct proto_ops packet_ops_spkt = {
 };
 #endif
 
-#if !defined(CONFIG_VNET) && !defined(CONFIG_VNET_MODULE)
 static const
-#endif
 struct proto_ops packet_ops = {
 	.family =	PF_PACKET,
 	.owner =	THIS_MODULE,
@@ -1843,12 +1876,7 @@ struct proto_ops packet_ops = {
 	.sendpage =	sock_no_sendpage,
 };
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-struct net_proto_family packet_family_ops;
-EXPORT_SYMBOL(packet_family_ops);
-#else
 static
-#endif
 struct net_proto_family packet_family_ops = {
 	.family =	PF_PACKET,
 	.create =	packet_create,

@@ -263,8 +263,15 @@ static void scsi_host_dev_release(struct device *dev)
 		kthread_stop(shost->ehandler);
 	if (shost->work_q)
 		destroy_workqueue(shost->work_q);
+	if (shost->uspace_req_q) {
+		kfree(shost->uspace_req_q->queuedata);
+		scsi_free_queue(shost->uspace_req_q);
+	}
 
 	scsi_destroy_command_freelist(shost);
+	if (shost->bqt)
+		blk_free_tags(shost->bqt);
+
 	kfree(shost->shost_data);
 
 	if (parent)
@@ -294,25 +301,12 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 	if (sht->unchecked_isa_dma && privsize)
 		gfp_mask |= __GFP_DMA;
 
-        /* Check to see if this host has any error handling facilities */
-        if (!sht->eh_strategy_handler && !sht->eh_abort_handler &&
-	    !sht->eh_device_reset_handler && !sht->eh_bus_reset_handler &&
-            !sht->eh_host_reset_handler) {
-		printk(KERN_ERR "ERROR: SCSI host `%s' has no error handling\n"
-				"ERROR: This is not a safe way to run your "
-				        "SCSI host\n"
-				"ERROR: The error handling must be added to "
-				"this driver\n", sht->proc_name);
-		dump_stack();
-        }
-
-	shost = kmalloc(sizeof(struct Scsi_Host) + privsize, gfp_mask);
+	shost = kzalloc(sizeof(struct Scsi_Host) + privsize, gfp_mask);
 	if (!shost)
 		return NULL;
-	memset(shost, 0, sizeof(struct Scsi_Host) + privsize);
 
-	spin_lock_init(&shost->default_lock);
-	scsi_assign_lock(shost, &shost->default_lock);
+	shost->host_lock = &shost->default_lock;
+	spin_lock_init(shost->host_lock);
 	shost->shost_state = SHOST_CREATED;
 	INIT_LIST_HEAD(&shost->__devices);
 	INIT_LIST_HEAD(&shost->__targets);
@@ -500,7 +494,9 @@ EXPORT_SYMBOL(scsi_is_host_device);
  * @work:	Work to queue for execution.
  *
  * Return value:
- * 	0 on success / != 0 for error
+ * 	1 - work queued for execution
+ *	0 - work is already queued
+ *	-EINVAL - work queue doesn't exist
  **/
 int scsi_queue_work(struct Scsi_Host *shost, struct work_struct *work)
 {

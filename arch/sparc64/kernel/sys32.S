@@ -6,7 +6,6 @@
  * Copyright (C) 1998 Jakub Jelinek   (jj@ultra.linux.cz)
  */
 
-#include <linux/config.h>
 #include <asm/errno.h>
 
 /* NOTE: call as jump breaks return stack, we have to avoid that */
@@ -92,7 +91,6 @@ SIGN1(sys32_select, compat_sys_select, %o0)
 SIGN1(sys32_mkdir, sys_mkdir, %o1)
 SIGN3(sys32_futex, compat_sys_futex, %o1, %o2, %o5)
 SIGN1(sys32_sysfs, compat_sys_sysfs, %o0)
-SIGN3(sys32_ipc, compat_sys_ipc, %o1, %o2, %o3)
 SIGN2(sys32_sendfile, compat_sys_sendfile, %o0, %o1)
 SIGN2(sys32_sendfile64, compat_sys_sendfile64, %o0, %o1)
 SIGN1(sys32_prctl, sys_prctl, %o0)
@@ -136,6 +134,10 @@ SIGN1(sys32_getpeername, sys_getpeername, %o0)
 SIGN1(sys32_getsockname, sys_getsockname, %o0)
 SIGN2(sys32_ioprio_get, sys_ioprio_get, %o0, %o1)
 SIGN3(sys32_ioprio_set, sys_ioprio_set, %o0, %o1, %o2)
+SIGN2(sys32_splice, sys_splice, %o0, %o1)
+SIGN2(sys32_sync_file_range, compat_sync_file_range, %o0, %o5)
+SIGN2(sys32_tee, sys_tee, %o0, %o1)
+SIGN1(sys32_vmsplice, compat_sys_vmsplice, %o0)
 
 	.globl		sys32_mmap2
 sys32_mmap2:

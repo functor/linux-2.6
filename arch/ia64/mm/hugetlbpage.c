@@ -8,7 +8,6 @@
  * Feb, 2004: dynamic hugetlb page size via boot parameter
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
@@ -65,13 +64,21 @@ huge_pte_offset (struct mm_struct *mm, unsigned long addr)
 	return pte;
 }
 
+int huge_pmd_unshare(struct mm_struct *mm, unsigned long *addr, pte_t *ptep)
+{
+	return 0;
+}
+
 #define mk_pte_huge(entry) { pte_val(entry) |= _PAGE_P; }
 
 /*
- * This function checks for proper alignment of input addr and len parameters.
+ * Don't actually need to do any preparation, but need to make sure
+ * the address is in the right region.
  */
-int is_aligned_hugepage_range(unsigned long addr, unsigned long len)
+int prepare_hugepage_range(unsigned long addr, unsigned long len, pgoff_t pgoff)
 {
+	if (pgoff & (~HPAGE_MASK >> PAGE_SHIFT))
+		return -EINVAL;
 	if (len & ~HPAGE_MASK)
 		return -EINVAL;
 	if (addr & ~HPAGE_MASK)
@@ -112,8 +119,7 @@ void hugetlb_free_pgd_range(struct mmu_gather **tlb,
 			unsigned long floor, unsigned long ceiling)
 {
 	/*
-	 * This is called only when is_hugepage_only_range(addr,),
-	 * and it follows that is_hugepage_only_range(end,) also.
+	 * This is called to free hugetlb page tables.
 	 *
 	 * The offset of these addresses from the base of the hugetlb
 	 * region must be scaled down by HPAGE_SIZE/PAGE_SIZE so that
@@ -125,9 +131,9 @@ void hugetlb_free_pgd_range(struct mmu_gather **tlb,
 
 	addr = htlbpage_to_page(addr);
 	end  = htlbpage_to_page(end);
-	if (is_hugepage_only_range(tlb->mm, floor, HPAGE_SIZE))
+	if (REGION_NUMBER(floor) == RGN_HPAGE)
 		floor = htlbpage_to_page(floor);
-	if (is_hugepage_only_range(tlb->mm, ceiling, HPAGE_SIZE))
+	if (REGION_NUMBER(ceiling) == RGN_HPAGE)
 		ceiling = htlbpage_to_page(ceiling);
 
 	free_pgd_range(tlb, addr, end, floor, ceiling);

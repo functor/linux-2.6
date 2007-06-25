@@ -9,7 +9,6 @@
  * environment. Based heavily on sys_ia32.c and sys_sparc32.c.
  */
 
-#include <linux/config.h>
 #include <linux/compat.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -21,7 +20,6 @@
 #include <linux/times.h>
 #include <linux/utsname.h>
 #include <linux/time.h>
-#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -113,13 +111,14 @@ struct __sysctl_args32 {
 
 asmlinkage long sys32_sysctl(struct __sysctl_args32 __user *args)
 {
+#ifndef CONFIG_SYSCTL_SYSCALL
+	return -ENOSYS;
+#else
 	struct __sysctl_args32 tmp;
 	int error;
 	unsigned int oldlen32;
-	size_t oldlen, *oldlenp = NULL;
+	size_t oldlen, __user *oldlenp = NULL;
 	unsigned long addr = (((long __force)&args->__unused[0]) + 7) & ~7;
-	extern int do_sysctl(int *name, int nlen, void *oldval, size_t *oldlenp,
-	       void *newval, size_t newlen);
 
 	DBG(("sysctl32(%p)\n", args));
 
@@ -146,8 +145,9 @@ asmlinkage long sys32_sysctl(struct __sysctl_args32 __user *args)
 	}
 
 	lock_kernel();
-	error = do_sysctl((int *)(u64)tmp.name, tmp.nlen, (void *)(u64)tmp.oldval,
-			  oldlenp, (void *)(u64)tmp.newval, tmp.newlen);
+	error = do_sysctl((int __user *)(u64)tmp.name, tmp.nlen,
+			  (void __user *)(u64)tmp.oldval, oldlenp,
+			  (void __user *)(u64)tmp.newval, tmp.newlen);
 	unlock_kernel();
 	if (oldlenp) {
 		if (!error) {
@@ -159,10 +159,11 @@ asmlinkage long sys32_sysctl(struct __sysctl_args32 __user *args)
 					error = -EFAULT;
 			}
 		}
-		if (copy_to_user(&args->__unused[0], tmp.__unused, sizeof(tmp.__unused)))
+		if (copy_to_user(args->__unused, tmp.__unused, sizeof(tmp.__unused)))
 			error = -EFAULT;
 	}
 	return error;
+#endif
 }
 
 #endif /* CONFIG_SYSCTL */
@@ -203,11 +204,11 @@ static inline long get_ts32(struct timespec *o, struct compat_timeval __user *i)
 asmlinkage int
 sys32_gettimeofday(struct compat_timeval __user *tv, struct timezone __user *tz)
 {
-    extern void do_gettimeofday(struct timeval *tv);
+    extern void vx_gettimeofday(struct timeval *tv);
 
     if (tv) {
 	    struct timeval ktv;
-	    do_gettimeofday(&ktv);
+	    vx_gettimeofday(&ktv);
 	    if (put_compat_timeval(tv, &ktv))
 		    return -EFAULT;
     }
@@ -239,14 +240,19 @@ int sys32_settimeofday(struct compat_timeval __user *tv, struct timezone __user 
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *statbuf)
 {
+	compat_ino_t ino;
 	int err;
 
 	if (stat->size > MAX_NON_LFS || !new_valid_dev(stat->dev) ||
 	    !new_valid_dev(stat->rdev))
 		return -EOVERFLOW;
 
+	ino = stat->ino;
+	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
+		return -EOVERFLOW;
+
 	err  = put_user(new_encode_dev(stat->dev), &statbuf->st_dev);
-	err |= put_user(stat->ino, &statbuf->st_ino);
+	err |= put_user(ino, &statbuf->st_ino);
 	err |= put_user(stat->mode, &statbuf->st_mode);
 	err |= put_user(stat->nlink, &statbuf->st_nlink);
 	err |= put_user(0, &statbuf->st_reserved1);
@@ -307,23 +313,26 @@ struct readdir32_callback {
 
 #define ROUND_UP(x,a)	((__typeof__(x))(((unsigned long)(x) + ((a) - 1)) & ~((a) - 1)))
 #define NAME_OFFSET(de) ((int) ((de)->d_name - (char __user *) (de)))
-static int
-filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
-	   unsigned int d_type)
+static int filldir32 (void *__buf, const char *name, int namlen,
+			loff_t offset, u64 ino, unsigned int d_type)
 {
 	struct linux32_dirent __user * dirent;
 	struct getdents32_callback * buf = (struct getdents32_callback *) __buf;
 	int reclen = ROUND_UP(NAME_OFFSET(dirent) + namlen + 1, 4);
+	u32 d_ino;
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	dirent = buf->previous;
 	if (dirent)
 		put_user(offset, &dirent->d_off);
 	dirent = buf->current_dir;
 	buf->previous = dirent;
-	put_user(ino, &dirent->d_ino);
+	put_user(d_ino, &dirent->d_ino);
 	put_user(reclen, &dirent->d_reclen);
 	copy_to_user(dirent->d_name, name, namlen);
 	put_user(0, dirent->d_name + namlen);
@@ -367,18 +376,21 @@ out:
 	return error;
 }
 
-static int
-fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, ino_t ino,
-	      unsigned int d_type)
+static int fillonedir32(void * __buf, const char * name, int namlen,
+			loff_t offset, u64 ino, unsigned int d_type)
 {
 	struct readdir32_callback * buf = (struct readdir32_callback *) __buf;
 	struct old_linux32_dirent __user * dirent;
+	u32 d_ino;
 
 	if (buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	buf->count++;
 	dirent = buf->dirent;
-	put_user(ino, &dirent->d_ino);
+	put_user(d_ino, &dirent->d_ino);
 	put_user(offset, &dirent->d_offset);
 	put_user(namlen, &dirent->d_namlen);
 	copy_to_user(dirent->d_name, name, namlen);
@@ -567,63 +579,6 @@ asmlinkage int sys32_sendfile64(int out_fd, int in_fd, compat_loff_t __user *off
 }
 
 
-struct timex32 {
-	unsigned int modes;	/* mode selector */
-	int offset;		/* time offset (usec) */
-	int freq;		/* frequency offset (scaled ppm) */
-	int maxerror;		/* maximum error (usec) */
-	int esterror;		/* estimated error (usec) */
-	int status;		/* clock command/status */
-	int constant;		/* pll time constant */
-	int precision;		/* clock precision (usec) (read only) */
-	int tolerance;		/* clock frequency tolerance (ppm)
-				 * (read only)
-				 */
-	struct compat_timeval time;	/* (read only) */
-	int tick;		/* (modified) usecs between clock ticks */
-
-	int ppsfreq;           /* pps frequency (scaled ppm) (ro) */
-	int jitter;            /* pps jitter (us) (ro) */
-	int shift;              /* interval duration (s) (shift) (ro) */
-	int stabil;            /* pps stability (scaled ppm) (ro) */
-	int jitcnt;            /* jitter limit exceeded (ro) */
-	int calcnt;            /* calibration intervals (ro) */
-	int errcnt;            /* calibration errors (ro) */
-	int stbcnt;            /* stability limit exceeded (ro) */
-
-	int  :32; int  :32; int  :32; int  :32;
-	int  :32; int  :32; int  :32; int  :32;
-	int  :32; int  :32; int  :32; int  :32;
-};
-
-asmlinkage long sys32_adjtimex(struct timex32 __user *txc_p32)
-{
-	struct timex txc;
-	struct timex32 t32;
-	int ret;
-	extern int do_adjtimex(struct timex *txc);
-
-	if(copy_from_user(&t32, txc_p32, sizeof(struct timex32)))
-		return -EFAULT;
-#undef CP
-#define CP(x) txc.x = t32.x
-	CP(modes); CP(offset); CP(freq); CP(maxerror); CP(esterror);
-	CP(status); CP(constant); CP(precision); CP(tolerance);
-	CP(time.tv_sec); CP(time.tv_usec); CP(tick); CP(ppsfreq); CP(jitter);
-	CP(shift); CP(stabil); CP(jitcnt); CP(calcnt); CP(errcnt);
-	CP(stbcnt);
-	ret = do_adjtimex(&txc);
-#undef CP
-#define CP(x) t32.x = txc.x
-	CP(modes); CP(offset); CP(freq); CP(maxerror); CP(esterror);
-	CP(status); CP(constant); CP(precision); CP(tolerance);
-	CP(time.tv_sec); CP(time.tv_usec); CP(tick); CP(ppsfreq); CP(jitter);
-	CP(shift); CP(stabil); CP(jitcnt); CP(calcnt); CP(errcnt);
-	CP(stbcnt);
-	return copy_to_user(txc_p32, &t32, sizeof(struct timex32)) ? -EFAULT : ret;
-}
-
-
 struct sysinfo32 {
 	s32 uptime;
 	u32 loads[3];
@@ -657,7 +612,7 @@ asmlinkage int sys32_sysinfo(struct sysinfo32 __user *info)
 
 	do {
 		seq = read_seqbegin(&xtime_lock);
-		/* FIXME: requires vx virtualization */
+		/* TODO: requires vx virtualization */
 		val.uptime = jiffies / HZ;
 
 		val.loads[0] = avenrun[0] << (SI_LOAD_SHIFT - FSHIFT);

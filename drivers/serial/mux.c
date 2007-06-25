@@ -16,7 +16,6 @@
 **
 */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/tty.h>
 #include <linux/ioport.h>
@@ -51,7 +50,7 @@
 #define MUX_BREAK(status) ((status & 0xF000) == 0x2000)
 
 #define MUX_NR 256
-static unsigned int port_cnt = 0;
+static unsigned int port_cnt __read_mostly;
 static struct uart_port mux_ports[MUX_NR];
 
 static struct uart_driver mux_driver = {
@@ -231,7 +230,7 @@ static void mux_read(struct uart_port *port)
 				continue;
 		}
 
-		if (uart_handle_sysrq_char(port, data & 0xffu, NULL))
+		if (uart_handle_sysrq_char(port, data & 0xffu))
 			continue;
 
 		tty_insert_flip_char(tty, data & 0xFF, TTY_NORMAL);
@@ -274,8 +273,8 @@ static void mux_shutdown(struct uart_port *port)
  * The Serial Mux does not support this function.
  */
 static void
-mux_set_termios(struct uart_port *port, struct termios *termios,
-	        struct termios *old)
+mux_set_termios(struct uart_port *port, struct ktermios *termios,
+	        struct ktermios *old)
 {
 }
 
@@ -461,7 +460,7 @@ static int __init mux_probe(struct parisc_device *dev)
 		port->iobase	= 0;
 		port->mapbase	= dev->hpa.start + MUX_OFFSET +
 						(i * MUX_LINE_OFFSET);
-		port->membase	= ioremap(port->mapbase, MUX_LINE_OFFSET);
+		port->membase	= ioremap_nocache(port->mapbase, MUX_LINE_OFFSET);
 		port->iotype	= UPIO_MEM;
 		port->type	= PORT_MUX;
 		port->irq	= NO_IRQ;
@@ -522,6 +521,8 @@ static void __exit mux_exit(void)
 
 	for (i = 0; i < port_cnt; i++) {
 		uart_remove_one_port(&mux_driver, &mux_ports[i]);
+		if (mux_ports[i].membase)
+			iounmap(mux_ports[i].membase);
 	}
 
 	uart_unregister_driver(&mux_driver);

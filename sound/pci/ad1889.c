@@ -34,6 +34,7 @@
 
 #include <linux/init.h>
 #include <linux/pci.h>
+#include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/compiler.h>
@@ -240,14 +241,14 @@ ad1889_channel_reset(struct snd_ad1889 *chip, unsigned int channel)
 	}
 }
 
-static inline u16
+static u16
 snd_ad1889_ac97_read(struct snd_ac97 *ac97, unsigned short reg)
 {
 	struct snd_ad1889 *chip = ac97->private_data;
 	return ad1889_readw(chip, AD_AC97_BASE + reg);
 }
 
-static inline void
+static void
 snd_ad1889_ac97_write(struct snd_ac97 *ac97, unsigned short reg, unsigned short val)
 {
 	struct snd_ad1889 *chip = ac97->private_data;
@@ -595,9 +596,7 @@ static struct snd_pcm_ops snd_ad1889_capture_ops = {
 };
 
 static irqreturn_t
-snd_ad1889_interrupt(int irq, 
-		     void *dev_id, 
-		     struct pt_regs *regs)
+snd_ad1889_interrupt(int irq, void *dev_id)
 {
 	unsigned long st;
 	struct snd_ad1889 *chip = dev_id;
@@ -752,7 +751,7 @@ snd_ad1889_proc_init(struct snd_ad1889 *chip)
 	struct snd_info_entry *entry;
 
 	if (!snd_card_proc_new(chip->card, chip->card->driver, &entry))
-		snd_info_set_text_ops(entry, chip, 1024, snd_ad1889_proc_read);
+		snd_info_set_text_ops(entry, chip, snd_ad1889_proc_read);
 }
 
 static struct ac97_quirk ac97_quirks[] = {
@@ -859,7 +858,7 @@ snd_ad1889_free(struct snd_ad1889 *chip)
 	synchronize_irq(chip->irq);
 	
 	if (chip->irq >= 0)
-		free_irq(chip->irq, (void*)chip);
+		free_irq(chip->irq, chip);
 
 skip_hw:
 	if (chip->iobase)
@@ -872,7 +871,7 @@ skip_hw:
 	return 0;
 }
 
-static inline int
+static int
 snd_ad1889_dev_free(struct snd_device *device) 
 {
 	struct snd_ad1889 *chip = device->device_data;
@@ -909,10 +908,10 @@ snd_ad1889_create(struct snd_card *card,
 
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
-	
+
 	/* check PCI availability (32bit DMA) */
-	if (pci_set_dma_mask(pci, 0xffffffff) < 0 ||
-	    pci_set_consistent_dma_mask(pci, 0xffffffff) < 0) {
+	if (pci_set_dma_mask(pci, DMA_32BIT_MASK) < 0 ||
+	    pci_set_consistent_dma_mask(pci, DMA_32BIT_MASK) < 0) {
 		printk(KERN_ERR PFX "error setting 32-bit DMA mask.\n");
 		pci_disable_device(pci);
 		return -ENXIO;
@@ -946,7 +945,7 @@ snd_ad1889_create(struct snd_card *card,
 	spin_lock_init(&chip->lock);	/* only now can we call ad1889_free */
 
 	if (request_irq(pci->irq, snd_ad1889_interrupt,
-			SA_INTERRUPT|SA_SHIRQ, card->driver, (void*)chip)) {
+			IRQF_SHARED, card->driver, chip)) {
 		printk(KERN_ERR PFX "cannot obtain IRQ %d\n", pci->irq);
 		snd_ad1889_free(chip);
 		return -EBUSY;

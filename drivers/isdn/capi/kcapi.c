@@ -32,6 +32,7 @@
 #ifdef CONFIG_AVMB1_COMPAT
 #include <linux/b1lli.h>
 #endif
+#include <linux/mutex.h>
 
 static char *revision = "$Revision: 1.1.2.8 $";
 
@@ -66,7 +67,7 @@ LIST_HEAD(capi_drivers);
 DEFINE_RWLOCK(capi_drivers_list_lock);
 
 static DEFINE_RWLOCK(application_lock);
-static DECLARE_MUTEX(controller_sem);
+static DEFINE_MUTEX(controller_mutex);
 
 struct capi20_appl *capi_applications[CAPI_MAXAPPL];
 struct capi_ctr *capi_cards[CAPI_MAXCONTR];
@@ -207,9 +208,10 @@ static void notify_down(u32 contr)
 	}
 }
 
-static void notify_handler(void *data)
+static void notify_handler(struct work_struct *work)
 {
-	struct capi_notifier *np = data;
+	struct capi_notifier *np =
+		container_of(work, struct capi_notifier, work);
 
 	switch (np->cmd) {
 	case KCI_CONTRUP:
@@ -234,7 +236,7 @@ static int notify_push(unsigned int cmd, u32 controller, u16 applid, u32 ncci)
 	if (!np)
 		return -ENOMEM;
 
-	INIT_WORK(&np->work, notify_handler, np);
+	INIT_WORK(&np->work, notify_handler);
 	np->cmd = cmd;
 	np->controller = controller;
 	np->applid = applid;
@@ -247,10 +249,11 @@ static int notify_push(unsigned int cmd, u32 controller, u16 applid, u32 ncci)
 	
 /* -------- Receiver ------------------------------------------ */
 
-static void recv_handler(void *_ap)
+static void recv_handler(struct work_struct *work)
 {
 	struct sk_buff *skb;
-	struct capi20_appl *ap = (struct capi20_appl *) _ap;
+	struct capi20_appl *ap =
+		container_of(work, struct capi20_appl, recv_work);
 
 	if ((!ap) || (ap->release_in_progress))
 		return;
@@ -395,20 +398,20 @@ attach_capi_ctr(struct capi_ctr *card)
 {
 	int i;
 
-	down(&controller_sem);
+	mutex_lock(&controller_mutex);
 
 	for (i = 0; i < CAPI_MAXCONTR; i++) {
 		if (capi_cards[i] == NULL)
 			break;
 	}
 	if (i == CAPI_MAXCONTR) {
-		up(&controller_sem);
+		mutex_unlock(&controller_mutex);
 		printk(KERN_ERR "kcapi: out of controller slots\n");
 	   	return -EBUSY;
 	}
 	capi_cards[i] = card;
 
-	up(&controller_sem);
+	mutex_unlock(&controller_mutex);
 
 	card->nrecvctlpkt = 0;
 	card->nrecvdatapkt = 0;
@@ -526,18 +529,18 @@ u16 capi20_register(struct capi20_appl *ap)
 	ap->callback = NULL;
 	init_MUTEX(&ap->recv_sem);
 	skb_queue_head_init(&ap->recv_queue);
-	INIT_WORK(&ap->recv_work, recv_handler, (void *)ap);
+	INIT_WORK(&ap->recv_work, recv_handler);
 	ap->release_in_progress = 0;
 
 	write_unlock_irqrestore(&application_lock, flags);
 	
-	down(&controller_sem);
+	mutex_lock(&controller_mutex);
 	for (i = 0; i < CAPI_MAXCONTR; i++) {
 		if (!capi_cards[i] || capi_cards[i]->cardstate != CARD_RUNNING)
 			continue;
 		register_appl(capi_cards[i], applid, &ap->rparam);
 	}
-	up(&controller_sem);
+	mutex_unlock(&controller_mutex);
 
 	if (showcapimsgs & 1) {
 		printk(KERN_DEBUG "kcapi: appl %d up\n", applid);
@@ -560,13 +563,13 @@ u16 capi20_release(struct capi20_appl *ap)
 	capi_applications[ap->applid - 1] = NULL;
 	write_unlock_irqrestore(&application_lock, flags);
 
-	down(&controller_sem);
+	mutex_lock(&controller_mutex);
 	for (i = 0; i < CAPI_MAXCONTR; i++) {
 		if (!capi_cards[i] || capi_cards[i]->cardstate != CARD_RUNNING)
 			continue;
 		release_appl(capi_cards[i], ap->applid);
 	}
-	up(&controller_sem);
+	mutex_unlock(&controller_mutex);
 
 	flush_scheduled_work();
 	skb_queue_purge(&ap->recv_queue);

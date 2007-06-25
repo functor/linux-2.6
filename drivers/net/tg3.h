@@ -9,347 +9,6 @@
 #ifndef _T3_H
 #define _T3_H
 
-#if !defined(__iomem)
-#define __iomem
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5704S_2)
-#define PCI_DEVICE_ID_TIGON3_5704S_2	0x1649
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5705F)
-#define PCI_DEVICE_ID_TIGON3_5705F	0x166e
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5720)
-#define PCI_DEVICE_ID_TIGON3_5720	0x1658
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5721)
-#define PCI_DEVICE_ID_TIGON3_5721	0x1659
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5750)
-#define PCI_DEVICE_ID_TIGON3_5750	0x1676
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5751)
-#define PCI_DEVICE_ID_TIGON3_5751	0x1677
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5750M)
-#define PCI_DEVICE_ID_TIGON3_5750M	0x167c
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5751M)
-#define PCI_DEVICE_ID_TIGON3_5751M	0x167d
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5751F)
-#define PCI_DEVICE_ID_TIGON3_5751F	0x167e
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5789)
-#define	PCI_DEVICE_ID_TIGON3_5789	0x169d
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5753)
-#define PCI_DEVICE_ID_TIGON3_5753	0x16f7
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5753M)
-#define PCI_DEVICE_ID_TIGON3_5753M	0x16fd
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5753F)
-#define PCI_DEVICE_ID_TIGON3_5753F	0x16fe
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5781)
-#define PCI_DEVICE_ID_TIGON3_5781	0x16dd
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5752)
-#define PCI_DEVICE_ID_TIGON3_5752	0x1600
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5752M)
-#define PCI_DEVICE_ID_TIGON3_5752M	0x1601
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5714)
-#define PCI_DEVICE_ID_TIGON3_5714	0x1668
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5714S)
-#define PCI_DEVICE_ID_TIGON3_5714S	0x1669
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5780)
-#define PCI_DEVICE_ID_TIGON3_5780	0x166a
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5780S)
-#define PCI_DEVICE_ID_TIGON3_5780S	0x166b
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5715)
-#define PCI_DEVICE_ID_TIGON3_5715	0x1678
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5715S)
-#define PCI_DEVICE_ID_TIGON3_5715S	0x1679
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5754)
-#define PCI_DEVICE_ID_TIGON3_5754	0x167a
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5754M)
-#define PCI_DEVICE_ID_TIGON3_5754M	0x1672
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5755)
-#define PCI_DEVICE_ID_TIGON3_5755	0x167b
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5755M)
-#define PCI_DEVICE_ID_TIGON3_5755M	0x1673
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5786)
-#define PCI_DEVICE_ID_TIGON3_5786	0x169a
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5787M)
-#define PCI_DEVICE_ID_TIGON3_5787M	0x1693
-#endif
-
-#if !defined(PCI_DEVICE_ID_TIGON3_5787)
-#define PCI_DEVICE_ID_TIGON3_5787	0x169b
-#endif
-
-#if !defined(PCI_DEVICE_ID_APPLE_TIGON3)
-#define PCI_DEVICE_ID_APPLE_TIGON3	0x1645
-#endif
-
-#if !defined(PCI_DEVICE_ID_APPLE_UNI_N_PCI15)
-#define PCI_DEVICE_ID_APPLE_UNI_N_PCI15	0x002e
-#endif
-
-#if !defined(PCI_DEVICE_ID_VIA_8385_0)
-#define PCI_DEVICE_ID_VIA_8385_0	0x3188
-#endif
-
-#if !defined(PCI_DEVICE_ID_AMD_8131_BRIDGE)
-#define PCI_DEVICE_ID_AMD_8131_BRIDGE	0x7450
-#endif
-
-#if !defined(PCI_DEVICE_ID_SERVERWORKS_EPB)
-#define PCI_DEVICE_ID_SERVERWORKS_EPB	0x0103
-#endif
-
-#if !defined(PCI_VPD_ADDR)
-#define PCI_VPD_ADDR	2
-#define PCI_VPD_DATA	4
-#endif
-
-#ifndef NETDEV_TX_OK
-#define NETDEV_TX_OK 0
-#endif
-
-#ifndef NETDEV_TX_BUSY
-#define NETDEV_TX_BUSY 1
-#endif
-
-#ifndef NETDEV_TX_LOCKED
-#define NETDEV_TX_LOCKED -1
-#endif
-
-#ifdef NETIF_F_TSO
-#ifndef NETIF_F_GSO
-#define gso_size tso_size
-#endif
-#ifndef NETIF_F_TSO6
-#define NETIF_F_TSO6	0
-#endif
-#endif
-
-#ifndef DMA_64BIT_MASK
-#define DMA_64BIT_MASK ((u64) 0xffffffffffffffffULL)
-#define DMA_32BIT_MASK ((u64) 0x00000000ffffffffULL)
-#endif
-
-#ifndef DMA_40BIT_MASK
-#define DMA_40BIT_MASK ((u64) 0x000000ffffffffffULL)
-#endif
-
-#ifndef mmiowb
-#define mmiowb()
-#endif
-
-#ifndef PCI_D0
-typedef u32 pm_message_t;
-typedef u32 pci_power_t;
-#define PCI_D0		0
-#define PCI_D1		1
-#define PCI_D2		2
-#define PCI_D3hot	3
-#endif
-
-#ifndef WARN_ON
-#define WARN_ON(x)
-#endif
-
-#ifndef IRQ_RETVAL
-typedef void irqreturn_t;
-#define IRQ_RETVAL(x)
-#define IRQ_HANDLED
-#endif
-
-#ifndef IRQF_SHARED
-#define IRQF_SHARED SA_SHIRQ
-#endif
-
-#ifndef IRQF_SAMPLE_RANDOM
-#define IRQF_SAMPLE_RANDOM SA_SAMPLE_RANDOM
-#endif
-
-#if (LINUX_VERSION_CODE < 0x020604)
-#define MODULE_VERSION(version)
-#endif
-
-#if (LINUX_VERSION_CODE <= 0x020600)
-#define schedule_work(x)	schedule_task(x)
-#define work_struct		tq_struct
-#define INIT_WORK(x, y, z)	INIT_TQUEUE(x, y, z)
-#endif
-
-#ifndef ADVERTISE_PAUSE
-#define ADVERTISE_PAUSE_CAP		0x0400
-#endif
-#ifndef ADVERTISE_PAUSE_ASYM
-#define ADVERTISE_PAUSE_ASYM		0x0800
-#endif
-#ifndef LPA_PAUSE
-#define LPA_PAUSE_CAP			0x0400
-#endif
-#ifndef LPA_PAUSE_ASYM
-#define LPA_PAUSE_ASYM			0x0800
-#endif
-#ifndef MII_CTRL1000
-#define MII_CTRL1000			0x9
-#endif
-#ifndef BMCR_SPEED1000
-#define BMCR_SPEED1000			0x40
-#endif
-#ifndef ADVERTISE_1000XFULL
-#define ADVERTISE_1000XFULL		0x20
-#define ADVERTISE_1000XHALF		0x40
-#define ADVERTISE_1000XPAUSE		0x80
-#define ADVERTISE_1000XPSE_ASYM		0x100
-#define LPA_1000XFULL			0x20
-#define LPA_1000XHALF			0x40
-#define LPA_1000XPAUSE			0x80
-#define LPA_1000XPAUSE_ASYM		0x100
-#endif
-
-#if (LINUX_VERSION_CODE < 0x020605)
-#define pci_dma_sync_single_for_cpu(pdev, map, len, dir)	\
-	pci_dma_sync_single(pdev, map, len, dir)
-
-#define pci_dma_sync_single_for_device(pdev, map, len, dir)
-#endif
-
-#if (LINUX_VERSION_CODE < 0x020600)
-#define pci_get_device(x, y, z)	pci_find_device(x, y, z)
-#define pci_get_slot(x, y)	pci_find_slot((x)->number, y)
-#define pci_dev_put(x)
-#endif
-
-#if (LINUX_VERSION_CODE < 0x020547)
-#define pci_set_consistent_dma_mask(pdev, mask) (0)
-#endif
-
-#ifndef PCI_CAP_ID_EXP
-#define PCI_CAP_ID_EXP 0x10
-#endif
-
-#if (LINUX_VERSION_CODE < 0x020612)
-static inline struct sk_buff *netdev_alloc_skb(struct net_device *dev,
-		unsigned int length)
-{
-	struct sk_buff *skb = dev_alloc_skb(length);
-	if (skb)
-		skb->dev = dev;
-	return skb;
-}
-
-static inline void netif_tx_lock(struct net_device *dev)
-{
-	spin_lock(&dev->xmit_lock);
-	dev->xmit_lock_owner = smp_processor_id();
-}
-
-static inline void netif_tx_unlock(struct net_device *dev)
-{
-	dev->xmit_lock_owner = -1;
-	spin_unlock(&dev->xmit_lock);
-}
-
-#endif
-
-#if !defined(HAVE_NETDEV_PRIV) && (LINUX_VERSION_CODE != 0x020603) && (LINUX_VERSION_CODE != 0x020604) && (LINUX_VERSION_CODE != 0x20605)
-static inline void *netdev_priv(struct net_device *dev)
-{
-	return dev->priv;
-}
-#endif
-
-#ifdef OLD_NETIF
-static inline void netif_poll_disable(struct net_device *dev)
-{
-	while (test_and_set_bit(__LINK_STATE_RX_SCHED, &dev->state)) {
-		/* No hurry. */
-		current->state = TASK_INTERRUPTIBLE;
-		schedule_timeout(1);
-	}
-}
-
-static inline void netif_poll_enable(struct net_device *dev)
-{
-	clear_bit(__LINK_STATE_RX_SCHED, &dev->state);
-}
-
-static inline void netif_tx_disable(struct net_device *dev)
-{
-	spin_lock_bh(&dev->xmit_lock);
-	netif_stop_queue(dev);
-	spin_unlock_bh(&dev->xmit_lock);
-}
-
-#endif
-
-#if (LINUX_VERSION_CODE < 0x2060c)
-static inline int skb_header_cloned(struct sk_buff *skb) { return 0; }
-#endif
-
-#if (LINUX_VERSION_CODE >= 0x20418) && (LINUX_VERSION_CODE < 0x2060c)
-static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
-{
-	if (data)
-		dev->features |= NETIF_F_HW_CSUM;
-	else
-		dev->features &= ~NETIF_F_HW_CSUM;
-
-	return 0;
-}
-#endif
-
-#ifndef NETIF_F_LLTX
-#define NETIF_F_LLTX	0
-#endif
-
 #define TG3_64BIT_REG_HIGH		0x00UL
 #define TG3_64BIT_REG_LOW		0x04UL
 
@@ -364,6 +23,8 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define TG3_BDINFO_SIZE			0x10UL
 
 #define RX_COPY_THRESHOLD  		256
+
+#define TG3_RX_INTERNAL_RING_SZ_5906	32
 
 #define RX_STD_MAX_SIZE			1536
 #define RX_STD_MAX_SIZE_5705		512
@@ -470,6 +131,7 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define  CHIPREV_ID_5752_A0_HW		 0x5000
 #define  CHIPREV_ID_5752_A0		 0x6000
 #define  CHIPREV_ID_5752_A1		 0x6001
+#define  CHIPREV_ID_5906_A1		 0xc001
 #define  GET_ASIC_REV(CHIP_REV_ID)	((CHIP_REV_ID) >> 12)
 #define   ASIC_REV_5700			 0x07
 #define   ASIC_REV_5701			 0x00
@@ -482,6 +144,7 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define   ASIC_REV_5714			 0x09
 #define   ASIC_REV_5755			 0x0a
 #define   ASIC_REV_5787			 0x0b
+#define   ASIC_REV_5906			 0x0c
 #define  GET_CHIP_REV(CHIP_REV_ID)	((CHIP_REV_ID) >> 8)
 #define   CHIPREV_5700_AX		 0x70
 #define   CHIPREV_5700_BX		 0x71
@@ -987,7 +650,8 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define  SNDDATAI_SCTRL_FORCE_ZERO	 0x00000010
 #define SNDDATAI_STATSENAB		0x00000c0c
 #define SNDDATAI_STATSINCMASK		0x00000c10
-/* 0xc14 --> 0xc80 unused */
+#define ISO_PKT_TX			0x00000c20
+/* 0xc24 --> 0xc80 unused */
 #define SNDDATAI_COS_CNT_0		0x00000c80
 #define SNDDATAI_COS_CNT_1		0x00000c84
 #define SNDDATAI_COS_CNT_2		0x00000c88
@@ -1338,11 +1002,13 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define BUFMGR_MB_MACRX_LOW_WATER	0x00004414
 #define  DEFAULT_MB_MACRX_LOW_WATER	  0x00000020
 #define  DEFAULT_MB_MACRX_LOW_WATER_5705  0x00000010
+#define  DEFAULT_MB_MACRX_LOW_WATER_5906  0x00000004
 #define  DEFAULT_MB_MACRX_LOW_WATER_JUMBO 0x00000098
 #define  DEFAULT_MB_MACRX_LOW_WATER_JUMBO_5780 0x0000004b
 #define BUFMGR_MB_HIGH_WATER		0x00004418
 #define  DEFAULT_MB_HIGH_WATER		 0x00000060
 #define  DEFAULT_MB_HIGH_WATER_5705	 0x00000060
+#define  DEFAULT_MB_HIGH_WATER_5906	 0x00000010
 #define  DEFAULT_MB_HIGH_WATER_JUMBO	 0x0000017c
 #define  DEFAULT_MB_HIGH_WATER_JUMBO_5780 0x00000096
 #define BUFMGR_RX_MB_ALLOC_REQ		0x0000441c
@@ -1479,7 +1145,12 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define TX_CPU_STATE			0x00005404
 #define TX_CPU_PGMCTR			0x0000541c
 
+#define VCPU_STATUS			0x00005100
+#define  VCPU_STATUS_INIT_DONE		 0x04000000
+#define  VCPU_STATUS_DRV_RESET		 0x08000000
+
 /* Mailboxes */
+#define GRCMBOX_BASE			0x00005600
 #define GRCMBOX_INTERRUPT_0		0x00005800 /* 64-bit */
 #define GRCMBOX_INTERRUPT_1		0x00005808 /* 64-bit */
 #define GRCMBOX_INTERRUPT_2		0x00005810 /* 64-bit */
@@ -1679,8 +1350,7 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define  GRC_MISC_CFG_BOARD_ID_5788	0x00010000
 #define  GRC_MISC_CFG_BOARD_ID_5788M	0x00018000
 #define  GRC_MISC_CFG_BOARD_ID_AC91002A1 0x00018000
-#define  GRC_MISC_CFG_BOARD_ID_5754	0x00008000
-#define  GRC_MISC_CFG_BOARD_ID_5754M	0x0000c000
+#define  GRC_MISC_CFG_EPHY_IDDQ		0x00200000
 #define  GRC_MISC_CFG_KEEP_GPHY_POWER	0x04000000
 #define GRC_LOCAL_CTRL			0x00006808
 #define  GRC_LCLCTRL_INT_ACTIVE		0x00000001
@@ -1741,7 +1411,10 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define GRC_EEPROM_CTRL			0x00006840
 #define GRC_MDI_CTRL			0x00006844
 #define GRC_SEEPROM_DELAY		0x00006848
-/* 0x684c --> 0x6c00 unused */
+/* 0x684c --> 0x6890 unused */
+#define GRC_VCPU_EXT_CTRL		0x00006890
+#define GRC_VCPU_EXT_CTRL_HALT_CPU	 0x00400000
+#define GRC_VCPU_EXT_CTRL_DISABLE_WOL	 0x20000000
 #define GRC_FASTBOOT_PC			0x00006894	/* 5752, 5755, 5787 */
 
 /* 0x6c00 --> 0x7000 unused */
@@ -1828,9 +1501,17 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define NVRAM_WRITE1			0x00007028
 /* 0x702c --> 0x7400 unused */
 
-/* 0x7400 --> 0x8000 unused */
+/* 0x7400 --> 0x7c00 unused */
+#define PCIE_TRANSACTION_CFG		0x00007c04
+#define PCIE_TRANS_CFG_1SHOT_MSI	 0x20000000
+#define PCIE_TRANS_CFG_LOM		 0x00000020
+
 
 #define TG3_EEPROM_MAGIC		0x669955aa
+#define TG3_EEPROM_MAGIC_FW		0xa5000000
+#define TG3_EEPROM_MAGIC_FW_MSK		0xff000000
+#define TG3_EEPROM_MAGIC_HW		0xabcd
+#define TG3_EEPROM_MAGIC_HW_MSK		0xffff
 
 /* 32K Window into NIC internal memory */
 #define NIC_SRAM_WIN_BASE		0x00008000
@@ -1880,7 +1561,7 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define  FWCMD_NICDRV_FIX_DMAR		 0x00000005
 #define  FWCMD_NICDRV_FIX_DMAW		 0x00000006
 #define  FWCMD_NICDRV_ALIVE2		 0x0000000d
-#define  FWCMD_NICDRV_ALIVE_DETECT	 0x0000000e
+#define  FWCMD_NICDRV_ALIVE3		 0x0000000e
 #define NIC_SRAM_FW_CMD_LEN_MBOX	0x00000b7c
 #define NIC_SRAM_FW_CMD_DATA_MBOX	0x00000b80
 #define NIC_SRAM_FW_ASF_STATUS_MBOX	0x00000c00
@@ -1948,6 +1629,7 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define MII_TG3_DSP_RW_PORT		0x15 /* DSP coefficient read/write port */
 
 #define MII_TG3_DSP_ADDRESS		0x17 /* DSP address register */
+#define MII_TG3_EPHY_PTEST		0x17 /* 5906 PHY register */
 
 #define MII_TG3_AUX_CTRL		0x18 /* auxilliary control register */
 
@@ -1972,6 +1654,12 @@ static int tg3_set_tx_hw_csum(struct net_device *dev, u32 data)
 #define MII_TG3_INT_SPEEDCHG		0x0004
 #define MII_TG3_INT_DUPLEXCHG		0x0008
 #define MII_TG3_INT_ANEG_PAGE_RX	0x0400
+
+#define MII_TG3_EPHY_TEST		0x1f /* 5906 PHY register */
+#define MII_TG3_EPHY_SHADOW_EN		0x80
+
+#define MII_TG3_TEST1			0x1e
+#define MII_TG3_TEST1_TRIM_EN		0x0010
 
 /* There are two ways to manage the TX descriptors on the tigon3.
  * Either the descriptors are in host DMA'able memory, or they
@@ -2126,35 +1814,35 @@ struct tg3_internal_buffer_desc {
 
 #define TG3_HW_STATUS_SIZE		0x50
 struct tg3_hw_status {
-	volatile u32			status;
+	u32				status;
 #define SD_STATUS_UPDATED		0x00000001
 #define SD_STATUS_LINK_CHG		0x00000002
 #define SD_STATUS_ERROR			0x00000004
 
-	volatile u32			status_tag;
+	u32				status_tag;
 
 #ifdef __BIG_ENDIAN
-	volatile u16			rx_consumer;
-	volatile u16			rx_jumbo_consumer;
+	u16				rx_consumer;
+	u16				rx_jumbo_consumer;
 #else
-	volatile u16			rx_jumbo_consumer;
-	volatile u16			rx_consumer;
+	u16				rx_jumbo_consumer;
+	u16				rx_consumer;
 #endif
 
 #ifdef __BIG_ENDIAN
-	volatile u16			reserved;
-	volatile u16			rx_mini_consumer;
+	u16				reserved;
+	u16				rx_mini_consumer;
 #else
-	volatile u16			rx_mini_consumer;
-	volatile u16			reserved;
+	u16				rx_mini_consumer;
+	u16				reserved;
 #endif
 	struct {
 #ifdef __BIG_ENDIAN
-		volatile u16		tx_consumer;
-		volatile u16		rx_producer;
+		u16			tx_consumer;
+		u16			rx_producer;
 #else
-		volatile u16		rx_producer;
-		volatile u16		tx_consumer;
+		u16			rx_producer;
+		u16			tx_consumer;
 #endif
 	}				idx[16];
 };
@@ -2549,7 +2237,7 @@ struct tg3 {
 #define TG3_FLG2_PCI_EXPRESS		0x00000200
 #define TG3_FLG2_ASF_NEW_HANDSHAKE	0x00000400
 #define TG3_FLG2_HW_AUTONEG		0x00000800
-#define TG3_FLG2_PHY_JUST_INITTED	0x00001000
+#define TG3_FLG2_IS_NIC			0x00001000
 #define TG3_FLG2_PHY_SERDES		0x00002000
 #define TG3_FLG2_CAPACITIVE_COUPLING	0x00004000
 #define TG3_FLG2_FLASH			0x00008000
@@ -2571,6 +2259,7 @@ struct tg3 {
 #define TG3_FLG2_1SHOT_MSI		0x10000000
 #define TG3_FLG2_PHY_JITTER_BUG		0x20000000
 #define TG3_FLG2_NO_FWARE_REPORTED	0x40000000
+#define TG3_FLG2_PHY_ADJUST_TRIM	0x80000000
 
 	u32				split_mode_max_reqs;
 #define SPLIT_MODE_5704_MAX_REQ		3
@@ -2581,6 +2270,12 @@ struct tg3 {
 	u32				timer_offset;
 	u16				asf_counter;
 	u16				asf_multiplier;
+
+	/* 1 second counter for transient serdes link events */
+	u32				serdes_counter;
+#define SERDES_AN_TIMEOUT_5704S		2
+#define SERDES_PARALLEL_DET_TIMEOUT	1
+#define SERDES_AN_TIMEOUT_5714S		1
 
 	struct tg3_link_config		link_config;
 	struct tg3_bufmgr_config	bufmgr_config;
@@ -2602,7 +2297,6 @@ struct tg3 {
 	u8				pci_lat_timer;
 	u8				pci_hdr_type;
 	u8				pci_bist;
-	u32				pci_cfg_state[64 / sizeof(u32)];
 
 	int				pm_cap;
 	int				msi_cap;
@@ -2623,6 +2317,8 @@ struct tg3 {
 #define PHY_ID_BCM5780			0x60008350
 #define PHY_ID_BCM5755			0xbc050cc0
 #define PHY_ID_BCM5787			0xbc050ce0
+#define PHY_ID_BCM5756			0xbc050ed0
+#define PHY_ID_BCM5906			0xdc00ac40
 #define PHY_ID_BCM8002			0x60010140
 #define PHY_ID_INVALID			0xffffffff
 #define PHY_ID_REV_MASK			0x0000000f
@@ -2649,7 +2345,8 @@ struct tg3 {
 	 (X) == PHY_ID_BCM5705 || (X) == PHY_ID_BCM5750 || \
 	 (X) == PHY_ID_BCM5752 || (X) == PHY_ID_BCM5714 || \
 	 (X) == PHY_ID_BCM5780 || (X) == PHY_ID_BCM5787 || \
-	 (X) == PHY_ID_BCM5755 || (X) == PHY_ID_BCM8002)
+	 (X) == PHY_ID_BCM5755 || (X) == PHY_ID_BCM5756 || \
+	 (X) == PHY_ID_BCM5906 || (X) == PHY_ID_BCM8002)
 
 	struct tg3_hw_stats		*hw_stats;
 	dma_addr_t			stats_mapping;

@@ -38,8 +38,8 @@ static int ebt_log_check(const char *tablename, unsigned int hookmask,
 
 struct tcpudphdr
 {
-	uint16_t src;
-	uint16_t dst;
+	__be16 src;
+	__be16 dst;
 };
 
 struct arppayload
@@ -130,7 +130,7 @@ ebt_log_packet(unsigned int pf, unsigned int hooknum,
 		 * then log the ARP payload */
 		if (ah->ar_hrd == htons(1) &&
 		    ah->ar_hln == ETH_ALEN &&
-		    ah->ar_pln == sizeof(uint32_t)) {
+		    ah->ar_pln == sizeof(__be32)) {
 			struct arppayload _arpp, *ap;
 
 			ap = skb_header_pointer(skb, sizeof(_arph),
@@ -168,7 +168,7 @@ static void ebt_log(const struct sk_buff *skb, unsigned int hooknr,
 
 	if (info->bitmask & EBT_LOG_NFLOG)
 		nf_log_packet(PF_BRIDGE, hooknr, skb, in, out, &li,
-		              info->prefix);
+		              "%s", info->prefix);
 	else
 		ebt_log_packet(PF_BRIDGE, hooknr, skb, in, out, &li,
 		               info->prefix);
@@ -188,7 +188,7 @@ static struct nf_logger ebt_log_logger = {
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ebt_log_init(void)
 {
 	int ret;
 
@@ -205,12 +205,12 @@ static int __init init(void)
 	return 0;
 }
 
-static void __exit fini(void)
+static void __exit ebt_log_fini(void)
 {
 	nf_log_unregister_logger(&ebt_log_logger);
 	ebt_unregister_watcher(&log);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ebt_log_init);
+module_exit(ebt_log_fini);
 MODULE_LICENSE("GPL");

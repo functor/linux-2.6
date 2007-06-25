@@ -46,7 +46,7 @@ static int pcap_write(int fd, struct sk_buff **skb, struct uml_net_private *lp)
 	return(-EPERM);
 }
 
-static struct net_kern_info pcap_kern_info = {
+static const struct net_kern_info pcap_kern_info = {
 	.init			= pcap_init,
 	.protocol		= eth_protocol,
 	.read			= pcap_read,
@@ -76,7 +76,7 @@ int pcap_setup(char *str, char **mac_out, void *data)
 	if(host_if != NULL)
 		init->host_if = host_if;
 
-	for(i = 0; i < sizeof(options)/sizeof(options[0]); i++){
+	for(i = 0; i < ARRAY_SIZE(options); i++){
 		if(options[i] == NULL)
 			continue;
 		if(!strcmp(options[i], "promisc"))
@@ -106,18 +106,7 @@ static struct transport pcap_transport = {
 static int register_pcap(void)
 {
 	register_transport(&pcap_transport);
-	return(1);
+	return 0;
 }
 
-__initcall(register_pcap);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+late_initcall(register_pcap);

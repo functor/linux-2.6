@@ -7,6 +7,7 @@
 
 /* Kernel module implementing an IP set type: the iptree type */
 
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/ip.h>
 #include <linux/skbuff.h>
@@ -26,14 +27,21 @@
 
 #include <linux/netfilter_ipv4/ip_set_iptree.h>
 
+static int limit = MAX_RANGE;
+
 /* Garbage collection interval in seconds: */
 #define IPTREE_GC_TIME		5*60
 /* Sleep so many milliseconds before trying again 
  * to delete the gc timer at destroying/flushing a set */ 
 #define IPTREE_DESTROY_SLEEP	100
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,21)
+static struct kmem_cache *branch_cachep;
+static struct kmem_cache *leaf_cachep;
+#else
 static kmem_cache_t *branch_cachep;
 static kmem_cache_t *leaf_cachep;
+#endif
 
 #define ABCD(a,b,c,d,addrp) do {		\
 	a = ((unsigned char *)addrp)[3];	\
@@ -57,6 +65,9 @@ __testip(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 	struct ip_set_iptreec *ctree;
 	struct ip_set_iptreed *dtree;
 	unsigned char a,b,c,d;
+
+	if (!ip)
+		return -ERANGE;
 	
 	*hash_ip = ip;
 	ABCD(a, b, c, d, hash_ip);
@@ -134,6 +145,11 @@ __addip(struct ip_set *set, ip_set_ip_t ip, unsigned int timeout,
 	unsigned char a,b,c,d;
 	int ret = 0;
 	
+	if (!ip || map->elements > limit)
+		/* We could call the garbage collector
+		 * but it's probably overkill */
+		return -ERANGE;
+	
 	*hash_ip = ip;
 	ABCD(a, b, c, d, hash_ip);
 	DP("%u %u %u %u timeout %u", a, b, c, d, timeout);
@@ -148,6 +164,8 @@ __addip(struct ip_set *set, ip_set_ip_t ip, unsigned int timeout,
 	if (dtree->expires[d] == 0)
 		dtree->expires[d] = 1;
 	DP("%u %lu", d, dtree->expires[d]);
+	if (ret == 0)
+		map->elements++;
 	return ret;
 }
 
@@ -206,6 +224,9 @@ __delip(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 	struct ip_set_iptreed *dtree;
 	unsigned char a,b,c,d;
 	
+	if (!ip)
+		return -ERANGE;
+		
 	*hash_ip = ip;
 	ABCD(a, b, c, d, hash_ip);
 	DELIP_WALK(map, a, btree);
@@ -214,6 +235,7 @@ __delip(struct ip_set *set, ip_set_ip_t ip, ip_set_ip_t *hash_ip)
 
 	if (dtree->expires[d]) {
 		dtree->expires[d] = 0;
+		map->elements--;
 		return 0;
 	}
 	return -EEXIST;
@@ -279,9 +301,10 @@ static void ip_tree_gc(unsigned long ul_set)
 			    a, b, c, d,
 			    dtree->expires[d], jiffies);
 			if (map->timeout
-			    && time_before(dtree->expires[d], jiffies))
+			    && time_before(dtree->expires[d], jiffies)) {
 			    	dtree->expires[d] = 0;
-			else
+			    	map->elements--;
+			} else
 				k = 1;
 		}
 	}
@@ -362,6 +385,7 @@ static int create(struct ip_set *set, const void *data, size_t size)
 	}
 	memset(map, 0, sizeof(*map));
 	map->timeout = req->timeout;
+	map->elements = 0;
 	set->data = map;
 
 	init_gc_timer(set);
@@ -385,6 +409,7 @@ static void __flush(struct ip_set_iptree *map)
 	LOOP_WALK_END;
 	kmem_cache_free(branch_cachep, btree);
 	LOOP_WALK_END;
+	map->elements = 0;
 }
 
 static void destroy(struct ip_set *set)
@@ -500,6 +525,8 @@ static struct ip_set_type ip_set_iptree = {
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 MODULE_DESCRIPTION("iptree type of IP sets");
+module_param(limit, int, 0600);
+MODULE_PARM_DESC(limit, "maximal number of elements stored in the sets");
 
 static int __init init(void)
 {

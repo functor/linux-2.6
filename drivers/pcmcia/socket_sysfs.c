@@ -12,7 +12,6 @@
 #include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/major.h>
 #include <linux/errno.h>
@@ -25,6 +24,7 @@
 #include <linux/pm.h>
 #include <linux/pci.h>
 #include <linux/device.h>
+#include <linux/mutex.h>
 #include <asm/system.h>
 #include <asm/irq.h>
 
@@ -183,16 +183,16 @@ static ssize_t pccard_store_resource(struct class_device *dev, const char *buf, 
 		s->resource_setup_done = 1;
 	spin_unlock_irqrestore(&s->lock, flags);
 
-	down(&s->skt_sem);
+	mutex_lock(&s->skt_mutex);
 	if ((s->callback) &&
 	    (s->state & SOCKET_PRESENT) &&
 	    !(s->state & SOCKET_CARDBUS)) {
 		if (try_module_get(s->callback->owner)) {
-			s->callback->requery(s);
+			s->callback->requery(s, 0);
 			module_put(s->callback->owner);
 		}
 	}
-	up(&s->skt_sem);
+	mutex_unlock(&s->skt_mutex);
 
 	return count;
 }
@@ -298,7 +298,7 @@ static ssize_t pccard_store_cis(struct kobject *kobj, char *buf, loff_t off, siz
 {
 	struct pcmcia_socket *s = to_socket(container_of(kobj, struct class_device, kobj));
 	cisdump_t *cis;
-	ssize_t ret = count;
+	int error;
 
 	if (off)
 		return -EINVAL;
@@ -316,25 +316,22 @@ static ssize_t pccard_store_cis(struct kobject *kobj, char *buf, loff_t off, siz
 	cis->Length = count + 1;
 	memcpy(cis->Data, buf, count);
 
-	if (pcmcia_replace_cis(s, cis))
-		ret  = -EIO;
-
+	error = pcmcia_replace_cis(s, cis);
 	kfree(cis);
+	if (error)
+		return -EIO;
 
-	if (!ret) {
-		down(&s->skt_sem);
-		if ((s->callback) && (s->state & SOCKET_PRESENT) &&
-		    !(s->state & SOCKET_CARDBUS)) {
-			if (try_module_get(s->callback->owner)) {
-				s->callback->requery(s);
-				module_put(s->callback->owner);
-			}
+	mutex_lock(&s->skt_mutex);
+	if ((s->callback) && (s->state & SOCKET_PRESENT) &&
+	    !(s->state & SOCKET_CARDBUS)) {
+		if (try_module_get(s->callback->owner)) {
+			s->callback->requery(s, 1);
+			module_put(s->callback->owner);
 		}
-		up(&s->skt_sem);
 	}
+	mutex_unlock(&s->skt_mutex);
 
-
-	return (ret);
+	return count;
 }
 
 

@@ -9,6 +9,8 @@
  */
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
+#include <asm/cacheflush.h>
+#include <asm/addrspace.h>
 #include <asm/io.h>
 
 void *consistent_alloc(gfp_t gfp, size_t size, dma_addr_t *handle)
@@ -23,8 +25,10 @@ void *consistent_alloc(gfp_t gfp, size_t size, dma_addr_t *handle)
 	page = alloc_pages(gfp, order);
 	if (!page)
 		return NULL;
+	split_page(page, order);
 
 	ret = page_address(page);
+	memset(ret, 0, size);
 	*handle = virt_to_phys(ret);
 
 	/*
@@ -37,8 +41,6 @@ void *consistent_alloc(gfp_t gfp, size_t size, dma_addr_t *handle)
 	end  = page + (1 << order);
 
 	while (++page < end) {
-		set_page_count(page, 1);
-
 		/* Free any unused pages */
 		if (page >= free) {
 			__free_page(page);

@@ -15,10 +15,13 @@
 #include <linux/vmalloc.h>
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
+#include <linux/kthread.h>
 
 #include <linux/firmware.h>
 #include "base.h"
+
+#define to_dev(obj) container_of(obj, struct device, kobj)
 
 MODULE_AUTHOR("Manuel Estrada Sainz <ranty@debian.org>");
 MODULE_DESCRIPTION("Multi purpose firmware loading support");
@@ -32,11 +35,11 @@ enum {
 	FW_STATUS_READY_NOHOTPLUG,
 };
 
-static int loading_timeout = 10;	/* In seconds */
+static int loading_timeout = 60;	/* In seconds */
 
 /* fw_lock could be moved to 'struct firmware_priv' but since it is just
  * guarding for corner cases a global lock should be OK */
-static DECLARE_MUTEX(fw_lock);
+static DEFINE_MUTEX(fw_lock);
 
 struct firmware_priv {
 	char fw_id[FIRMWARE_NAME_MAX];
@@ -78,28 +81,26 @@ static ssize_t
 firmware_timeout_store(struct class *class, const char *buf, size_t count)
 {
 	loading_timeout = simple_strtol(buf, NULL, 10);
-	if (loading_timeout < 0)
+	if (loading_timeout <= 0)
 		loading_timeout = 0;
+	else if (loading_timeout < 60) {
+		if (printk_ratelimit())
+			printk(KERN_INFO
+			       "firmware_class: attempt to set timeout to %d\n",
+			       loading_timeout);
+		loading_timeout = 60;
+	}
 	return count;
 }
 
 static CLASS_ATTR(timeout, 0644, firmware_timeout_show, firmware_timeout_store);
 
-static void  fw_class_dev_release(struct class_device *class_dev);
-int firmware_class_uevent(struct class_device *dev, char **envp,
-			   int num_envp, char *buffer, int buffer_size);
+static void fw_dev_release(struct device *dev);
 
-static struct class firmware_class = {
-	.name		= "firmware",
-	.uevent	= firmware_class_uevent,
-	.release	= fw_class_dev_release,
-};
-
-int
-firmware_class_uevent(struct class_device *class_dev, char **envp,
-		       int num_envp, char *buffer, int buffer_size)
+static int firmware_uevent(struct device *dev, char **envp, int num_envp,
+			   char *buffer, int buffer_size)
 {
-	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
+	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
 	int i = 0, len = 0;
 
 	if (!test_bit(FW_STATUS_READY, &fw_priv->status))
@@ -116,17 +117,24 @@ firmware_class_uevent(struct class_device *class_dev, char **envp,
 	return 0;
 }
 
-static ssize_t
-firmware_loading_show(struct class_device *class_dev, char *buf)
+static struct class firmware_class = {
+	.name		= "firmware",
+	.dev_uevent	= firmware_uevent,
+	.dev_release	= fw_dev_release,
+};
+
+static ssize_t firmware_loading_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
 {
-	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
+	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
 	int loading = test_bit(FW_STATUS_LOADING, &fw_priv->status);
 	return sprintf(buf, "%d\n", loading);
 }
 
 /**
  * firmware_loading_store - set value in the 'loading' control file
- * @class_dev: class_device pointer
+ * @dev: device pointer
+ * @attr: device attribute pointer
  * @buf: buffer to scan for loading control value
  * @count: number of bytes in @buf
  *
@@ -136,18 +144,18 @@ firmware_loading_show(struct class_device *class_dev, char *buf)
  *	 0: Conclude the load and hand the data to the driver code.
  *	-1: Conclude the load with an error and discard any written data.
  **/
-static ssize_t
-firmware_loading_store(struct class_device *class_dev,
-		       const char *buf, size_t count)
+static ssize_t firmware_loading_store(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf, size_t count)
 {
-	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
+	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
 	int loading = simple_strtol(buf, NULL, 10);
 
 	switch (loading) {
 	case 1:
-		down(&fw_lock);
+		mutex_lock(&fw_lock);
 		if (!fw_priv->fw) {
-			up(&fw_lock);
+			mutex_unlock(&fw_lock);
 			break;
 		}
 		vfree(fw_priv->fw->data);
@@ -155,7 +163,7 @@ firmware_loading_store(struct class_device *class_dev,
 		fw_priv->fw->size = 0;
 		fw_priv->alloc_size = 0;
 		set_bit(FW_STATUS_LOADING, &fw_priv->status);
-		up(&fw_lock);
+		mutex_unlock(&fw_lock);
 		break;
 	case 0:
 		if (test_bit(FW_STATUS_LOADING, &fw_priv->status)) {
@@ -176,19 +184,18 @@ firmware_loading_store(struct class_device *class_dev,
 	return count;
 }
 
-static CLASS_DEVICE_ATTR(loading, 0644,
-			firmware_loading_show, firmware_loading_store);
+static DEVICE_ATTR(loading, 0644, firmware_loading_show, firmware_loading_store);
 
 static ssize_t
 firmware_data_read(struct kobject *kobj,
 		   char *buffer, loff_t offset, size_t count)
 {
-	struct class_device *class_dev = to_class_dev(kobj);
-	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
+	struct device *dev = to_dev(kobj);
+	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
 	struct firmware *fw;
 	ssize_t ret_count = count;
 
-	down(&fw_lock);
+	mutex_lock(&fw_lock);
 	fw = fw_priv->fw;
 	if (!fw || test_bit(FW_STATUS_DONE, &fw_priv->status)) {
 		ret_count = -ENODEV;
@@ -203,7 +210,7 @@ firmware_data_read(struct kobject *kobj,
 
 	memcpy(buffer, fw->data + offset, ret_count);
 out:
-	up(&fw_lock);
+	mutex_unlock(&fw_lock);
 	return ret_count;
 }
 
@@ -236,7 +243,7 @@ fw_realloc_buffer(struct firmware_priv *fw_priv, int min_size)
 
 /**
  * firmware_data_write - write method for firmware
- * @kobj: kobject for the class_device
+ * @kobj: kobject for the device
  * @buffer: buffer being written
  * @offset: buffer offset for write in total data store area
  * @count: buffer size
@@ -248,15 +255,15 @@ static ssize_t
 firmware_data_write(struct kobject *kobj,
 		    char *buffer, loff_t offset, size_t count)
 {
-	struct class_device *class_dev = to_class_dev(kobj);
-	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
+	struct device *dev = to_dev(kobj);
+	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
 	struct firmware *fw;
 	ssize_t retval;
 
 	if (!capable(CAP_SYS_RAWIO))
 		return -EPERM;
 
-	down(&fw_lock);
+	mutex_lock(&fw_lock);
 	fw = fw_priv->fw;
 	if (!fw || test_bit(FW_STATUS_DONE, &fw_priv->status)) {
 		retval = -ENODEV;
@@ -271,7 +278,7 @@ firmware_data_write(struct kobject *kobj,
 	fw->size = max_t(size_t, offset + count, fw->size);
 	retval = count;
 out:
-	up(&fw_lock);
+	mutex_unlock(&fw_lock);
 	return retval;
 }
 
@@ -282,13 +289,12 @@ static struct bin_attribute firmware_attr_data_tmpl = {
 	.write = firmware_data_write,
 };
 
-static void
-fw_class_dev_release(struct class_device *class_dev)
+static void fw_dev_release(struct device *dev)
 {
-	struct firmware_priv *fw_priv = class_get_devdata(class_dev);
+	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
 
 	kfree(fw_priv);
-	kfree(class_dev);
+	kfree(dev);
 
 	module_put(THIS_MODULE);
 }
@@ -300,26 +306,23 @@ firmware_class_timeout(u_long data)
 	fw_load_abort(fw_priv);
 }
 
-static inline void
-fw_setup_class_device_id(struct class_device *class_dev, struct device *dev)
+static inline void fw_setup_device_id(struct device *f_dev, struct device *dev)
 {
 	/* XXX warning we should watch out for name collisions */
-	strlcpy(class_dev->class_id, dev->bus_id, BUS_ID_SIZE);
+	strlcpy(f_dev->bus_id, dev->bus_id, BUS_ID_SIZE);
 }
 
-static int
-fw_register_class_device(struct class_device **class_dev_p,
-			 const char *fw_name, struct device *device)
+static int fw_register_device(struct device **dev_p, const char *fw_name,
+			      struct device *device)
 {
 	int retval;
 	struct firmware_priv *fw_priv = kzalloc(sizeof(*fw_priv),
 						GFP_KERNEL);
-	struct class_device *class_dev = kzalloc(sizeof(*class_dev),
-						 GFP_KERNEL);
+	struct device *f_dev = kzalloc(sizeof(*f_dev), GFP_KERNEL);
 
-	*class_dev_p = NULL;
+	*dev_p = NULL;
 
-	if (!fw_priv || !class_dev) {
+	if (!fw_priv || !f_dev) {
 		printk(KERN_ERR "%s: kmalloc failed\n", __FUNCTION__);
 		retval = -ENOMEM;
 		goto error_kfree;
@@ -333,55 +336,54 @@ fw_register_class_device(struct class_device **class_dev_p,
 	fw_priv->timeout.data = (u_long) fw_priv;
 	init_timer(&fw_priv->timeout);
 
-	fw_setup_class_device_id(class_dev, device);
-	class_dev->dev = device;
-	class_dev->class = &firmware_class;
-	class_set_devdata(class_dev, fw_priv);
-	retval = class_device_register(class_dev);
+	fw_setup_device_id(f_dev, device);
+	f_dev->parent = device;
+	f_dev->class = &firmware_class;
+	dev_set_drvdata(f_dev, fw_priv);
+	retval = device_register(f_dev);
 	if (retval) {
-		printk(KERN_ERR "%s: class_device_register failed\n",
+		printk(KERN_ERR "%s: device_register failed\n",
 		       __FUNCTION__);
 		goto error_kfree;
 	}
-	*class_dev_p = class_dev;
+	*dev_p = f_dev;
 	return 0;
 
 error_kfree:
 	kfree(fw_priv);
-	kfree(class_dev);
+	kfree(f_dev);
 	return retval;
 }
 
-static int
-fw_setup_class_device(struct firmware *fw, struct class_device **class_dev_p,
-		      const char *fw_name, struct device *device, int uevent)
+static int fw_setup_device(struct firmware *fw, struct device **dev_p,
+			   const char *fw_name, struct device *device,
+			   int uevent)
 {
-	struct class_device *class_dev;
+	struct device *f_dev;
 	struct firmware_priv *fw_priv;
 	int retval;
 
-	*class_dev_p = NULL;
-	retval = fw_register_class_device(&class_dev, fw_name, device);
+	*dev_p = NULL;
+	retval = fw_register_device(&f_dev, fw_name, device);
 	if (retval)
 		goto out;
 
 	/* Need to pin this module until class device is destroyed */
 	__module_get(THIS_MODULE);
 
-	fw_priv = class_get_devdata(class_dev);
+	fw_priv = dev_get_drvdata(f_dev);
 
 	fw_priv->fw = fw;
-	retval = sysfs_create_bin_file(&class_dev->kobj, &fw_priv->attr_data);
+	retval = sysfs_create_bin_file(&f_dev->kobj, &fw_priv->attr_data);
 	if (retval) {
 		printk(KERN_ERR "%s: sysfs_create_bin_file failed\n",
 		       __FUNCTION__);
 		goto error_unreg;
 	}
 
-	retval = class_device_create_file(class_dev,
-					  &class_device_attr_loading);
+	retval = device_create_file(f_dev, &dev_attr_loading);
 	if (retval) {
-		printk(KERN_ERR "%s: class_device_create_file failed\n",
+		printk(KERN_ERR "%s: device_create_file failed\n",
 		       __FUNCTION__);
 		goto error_unreg;
 	}
@@ -390,11 +392,11 @@ fw_setup_class_device(struct firmware *fw, struct class_device **class_dev_p,
                 set_bit(FW_STATUS_READY, &fw_priv->status);
         else
                 set_bit(FW_STATUS_READY_NOHOTPLUG, &fw_priv->status);
-	*class_dev_p = class_dev;
+	*dev_p = f_dev;
 	goto out;
 
 error_unreg:
-	class_device_unregister(class_dev);
+	device_unregister(f_dev);
 out:
 	return retval;
 }
@@ -403,7 +405,7 @@ static int
 _request_firmware(const struct firmware **firmware_p, const char *name,
 		 struct device *device, int uevent)
 {
-	struct class_device *class_dev;
+	struct device *f_dev;
 	struct firmware_priv *fw_priv;
 	struct firmware *firmware;
 	int retval;
@@ -419,12 +421,11 @@ _request_firmware(const struct firmware **firmware_p, const char *name,
 		goto out;
 	}
 
-	retval = fw_setup_class_device(firmware, &class_dev, name, device,
-				       uevent);
+	retval = fw_setup_device(firmware, &f_dev, name, device, uevent);
 	if (retval)
 		goto error_kfree_fw;
 
-	fw_priv = class_get_devdata(class_dev);
+	fw_priv = dev_get_drvdata(f_dev);
 
 	if (uevent) {
 		if (loading_timeout > 0) {
@@ -432,22 +433,22 @@ _request_firmware(const struct firmware **firmware_p, const char *name,
 			add_timer(&fw_priv->timeout);
 		}
 
-		kobject_uevent(&class_dev->kobj, KOBJ_ADD);
+		kobject_uevent(&f_dev->kobj, KOBJ_ADD);
 		wait_for_completion(&fw_priv->completion);
 		set_bit(FW_STATUS_DONE, &fw_priv->status);
 		del_timer_sync(&fw_priv->timeout);
 	} else
 		wait_for_completion(&fw_priv->completion);
 
-	down(&fw_lock);
+	mutex_lock(&fw_lock);
 	if (!fw_priv->fw->size || test_bit(FW_STATUS_ABORT, &fw_priv->status)) {
 		retval = -ENOENT;
 		release_firmware(fw_priv->fw);
 		*firmware_p = NULL;
 	}
 	fw_priv->fw = NULL;
-	up(&fw_lock);
-	class_device_unregister(class_dev);
+	mutex_unlock(&fw_lock);
+	device_unregister(f_dev);
 	goto out;
 
 error_kfree_fw:
@@ -493,25 +494,6 @@ release_firmware(const struct firmware *fw)
 	}
 }
 
-/**
- * register_firmware: - provide a firmware image for later usage
- * @name: name of firmware image file
- * @data: buffer pointer for the firmware image
- * @size: size of the data buffer area
- *
- *	Make sure that @data will be available by requesting firmware @name.
- *
- *	Note: This will not be possible until some kind of persistence
- *	is available.
- **/
-void
-register_firmware(const char *name, const u8 *data, size_t size)
-{
-	/* This is meaningless without firmware caching, so until we
-	 * decide if firmware caching is reasonable just leave it as a
-	 * noop */
-}
-
 /* Async support */
 struct firmware_work {
 	struct work_struct work;
@@ -533,7 +515,6 @@ request_firmware_work_func(void *arg)
 		WARN_ON(1);
 		return 0;
 	}
-	daemonize("%s/%s", "firmware", fw_work->name);
 	ret = _request_firmware(&fw, fw_work->name, fw_work->device,
 		fw_work->uevent);
 	if (ret < 0)
@@ -568,9 +549,9 @@ request_firmware_nowait(
 	const char *name, struct device *device, void *context,
 	void (*cont)(const struct firmware *fw, void *context))
 {
+	struct task_struct *task;
 	struct firmware_work *fw_work = kmalloc(sizeof (struct firmware_work),
 						GFP_ATOMIC);
-	int ret;
 
 	if (!fw_work)
 		return -ENOMEM;
@@ -588,14 +569,14 @@ request_firmware_nowait(
 		.uevent = uevent,
 	};
 
-	ret = kernel_thread(request_firmware_work_func, fw_work,
-			    CLONE_FS | CLONE_FILES);
+	task = kthread_run(request_firmware_work_func, fw_work,
+			    "firmware/%s", name);
 
-	if (ret < 0) {
+	if (IS_ERR(task)) {
 		fw_work->cont(NULL, fw_work->context);
 		module_put(fw_work->module);
 		kfree(fw_work);
-		return ret;
+		return PTR_ERR(task);
 	}
 	return 0;
 }
@@ -624,10 +605,9 @@ firmware_class_exit(void)
 	class_unregister(&firmware_class);
 }
 
-module_init(firmware_class_init);
+fs_initcall(firmware_class_init);
 module_exit(firmware_class_exit);
 
 EXPORT_SYMBOL(release_firmware);
 EXPORT_SYMBOL(request_firmware);
 EXPORT_SYMBOL(request_firmware_nowait);
-EXPORT_SYMBOL(register_firmware);

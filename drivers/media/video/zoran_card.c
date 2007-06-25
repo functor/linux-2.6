@@ -4,7 +4,7 @@
  * Media Labs LML33/LML33R10.
  *
  * This part handles card-specific data and detection
- * 
+ *
  * Copyright (C) 2000 Serguei Miridonov <mirsev@cicese.mx>
  *
  * Currently maintained by:
@@ -27,7 +27,8 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/config.h>
+#include <linux/delay.h>
+
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -38,6 +39,7 @@
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
 #include <linux/videodev.h>
+#include <media/v4l2-common.h>
 #include <linux/spinlock.h>
 #include <linux/sem.h>
 #include <linux/kmod.h>
@@ -47,6 +49,7 @@
 #include <linux/interrupt.h>
 #include <linux/video_decoder.h>
 #include <linux/video_encoder.h>
+#include <linux/mutex.h>
 
 #include <asm/io.h>
 
@@ -91,6 +94,11 @@ static int default_input = 0;	/* 0=Composite, 1=S-Video */
 module_param(default_input, int, 0);
 MODULE_PARM_DESC(default_input,
 		 "Default input (0=Composite, 1=S-Video, 2=Internal)");
+
+static int default_mux = 1;	/* 6 Eyes input selection */
+module_param(default_mux, int, 0);
+MODULE_PARM_DESC(default_mux,
+		 "Default 6 Eyes mux setting (Input selection)");
 
 static int default_norm = 0;	/* 0=PAL, 1=NTSC 2=SECAM */
 module_param(default_norm, int, 0);
@@ -300,6 +308,30 @@ lml33_init (struct zoran *zr)
 	GPIO(zr, 2, 1);		// Set Composite input/output
 }
 
+static void
+avs6eyes_init (struct zoran *zr)
+{
+	// AverMedia 6-Eyes original driver by Christer Weinigel
+
+	// Lifted straight from Christer's old driver and
+	// modified slightly by Martin Samuelsson.
+
+	int mux = default_mux; /* 1 = BT866, 7 = VID1 */
+
+	GPIO(zr, 4, 1); /* Bt866 SLEEP on */
+	udelay(2);
+
+	GPIO(zr, 0, 1); /* ZR36060 /RESET on */
+	GPIO(zr, 1, 0); /* ZR36060 /SLEEP on */
+	GPIO(zr, 2, mux & 1);   /* MUX S0 */
+	GPIO(zr, 3, 0); /* /FRAME on */
+	GPIO(zr, 4, 0); /* Bt866 SLEEP off */
+	GPIO(zr, 5, mux & 2);   /* MUX S1 */
+	GPIO(zr, 6, 0); /* ? */
+	GPIO(zr, 7, mux & 4);   /* MUX S2 */
+
+}
+
 static char *
 i2cid_to_modulename (u16 i2c_id)
 {
@@ -390,6 +422,14 @@ static struct tvnorm f60sqpixel_dc10 = { 780, 640, 0, 716, 525, 480, 12 };
 static struct tvnorm f50ccir601_lm33r10 = { 864, 720, 74+54, 804, 625, 576, 18 };
 static struct tvnorm f60ccir601_lm33r10 = { 858, 720, 56+54, 788, 525, 480, 16 };
 
+/* FIXME: The ks0127 seem incapable of swapping U and V, too, which is why I
+ * copy Maxim's left shift hack for the 6 Eyes.
+ *
+ * Christer's driver used the unshifted norms, though...
+ * /Sam  */
+static struct tvnorm f50ccir601_avs6eyes = { 864, 720, 74, 804, 625, 576, 18 };
+static struct tvnorm f60ccir601_avs6eyes = { 858, 720, 56, 788, 525, 480, 16 };
+
 static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 	{
 		.type = DC10_old,
@@ -418,6 +458,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { -1, 0 },
 		.vfe_pol = { 0, 0, 0, 0, 0, 0, 0, 0 },
 		.gws_not_connected = 0,
+		.input_mux = 0,
 		.init = &dc10_init,
 	}, {
 		.type = DC10_new,
@@ -444,6 +485,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { -1, 1},
 		.vfe_pol = { 1, 1, 1, 1, 0, 0, 0, 0 },
 		.gws_not_connected = 0,
+		.input_mux = 0,
 		.init = &dc10plus_init,
 	}, {
 		.type = DC10plus,
@@ -473,6 +515,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { -1, 1 },
 		.vfe_pol = { 1, 1, 1, 1, 0, 0, 0, 0 },
 		.gws_not_connected = 0,
+		.input_mux = 0,
 		.init = &dc10plus_init,
 	}, {
 		.type = DC30,
@@ -501,6 +544,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { -1, 0 },
 		.vfe_pol = { 0, 0, 0, 0, 0, 0, 0, 0 },
 		.gws_not_connected = 0,
+		.input_mux = 0,
 		.init = &dc10_init,
 	}, {
 		.type = DC30plus,
@@ -531,6 +575,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { -1, 0 },
 		.vfe_pol = { 0, 0, 0, 0, 0, 0, 0, 0 },
 		.gws_not_connected = 0,
+		.input_mux = 0,
 		.init = &dc10_init,
 	}, {
 		.type = LML33,
@@ -557,6 +602,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { 3, 1 },
 		.vfe_pol = { 1, 1, 0, 0, 0, 1, 0, 0 },
 		.gws_not_connected = 1,
+		.input_mux = 0,
 		.init = &lml33_init,
 	}, {
 		.type = LML33R10,
@@ -585,6 +631,7 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { 3, 1 },
 		.vfe_pol = { 1, 1, 0, 0, 0, 1, 0, 0 },
 		.gws_not_connected = 1,
+		.input_mux = 0,
 		.init = &lml33_init,
 	}, {
 		.type = BUZ,
@@ -613,8 +660,49 @@ static struct card_info zoran_cards[NUM_CARDS] __devinitdata = {
 		.gpcs = { 3, 1 },
 		.vfe_pol = { 1, 1, 0, 0, 0, 1, 0, 0 },
 		.gws_not_connected = 1,
+		.input_mux = 0,
 		.init = &buz_init,
+	}, {
+		.type = AVS6EYES,
+		.name = "6-Eyes",
+		/* AverMedia chose not to brand the 6-Eyes. Thus it
+		   can't be autodetected, and requires card=x. */
+		.vendor_id = -1,
+		.device_id = -1,
+		.i2c_decoder = I2C_DRIVERID_KS0127,
+		.i2c_encoder = I2C_DRIVERID_BT866,
+		.video_codec = CODEC_TYPE_ZR36060,
+
+		.inputs = 10,
+		.input = {
+			{ 0, "Composite 1" },
+			{ 1, "Composite 2" },
+			{ 2, "Composite 3" },
+			{ 4, "Composite 4" },
+			{ 5, "Composite 5" },
+			{ 6, "Composite 6" },
+			{ 8, "S-Video 1" },
+			{ 9, "S-Video 2" },
+			{10, "S-Video 3" },
+			{15, "YCbCr" }
+		},
+		.norms = 2,
+		.tvn = {
+			&f50ccir601_avs6eyes,
+			&f60ccir601_avs6eyes,
+			NULL
+		},
+		.jpeg_int = ZR36057_ISR_GIRQ1,
+		.vsync_int = ZR36057_ISR_GIRQ0,
+		.gpio = { 1, 0, 3, -1, -1, -1, -1, -1 },// Validity unknown /Sam
+		.gpio_pol = { 0, 0, 0, 0, 0, 0, 0, 0 }, // Validity unknown /Sam
+		.gpcs = { 3, 1 },			// Validity unknown /Sam
+		.vfe_pol = { 1, 0, 0, 0, 0, 1, 0, 0 },  // Validity unknown /Sam
+		.gws_not_connected = 1,
+		.input_mux = 1,
+		.init = &avs6eyes_init,
 	}
+
 };
 
 /*
@@ -673,7 +761,7 @@ zoran_i2c_client_register (struct i2c_client *client)
 		KERN_DEBUG "%s: i2c_client_register() - driver id = %d\n",
 		ZR_DEVNAME(zr), client->driver->id);
 
-	down(&zr->resource_lock);
+	mutex_lock(&zr->resource_lock);
 
 	if (zr->user > 0) {
 		/* we're already busy, so we keep a reference to
@@ -694,7 +782,7 @@ zoran_i2c_client_register (struct i2c_client *client)
 	}
 
 clientreg_unlock_and_return:
-	up(&zr->resource_lock);
+	mutex_unlock(&zr->resource_lock);
 
 	return res;
 }
@@ -707,7 +795,7 @@ zoran_i2c_client_unregister (struct i2c_client *client)
 
 	dprintk(2, KERN_DEBUG "%s: i2c_client_unregister()\n", ZR_DEVNAME(zr));
 
-	down(&zr->resource_lock);
+	mutex_lock(&zr->resource_lock);
 
 	if (zr->user > 0) {
 		res = -EBUSY;
@@ -722,7 +810,7 @@ zoran_i2c_client_unregister (struct i2c_client *client)
 		snprintf(ZR_DEVNAME(zr), sizeof(ZR_DEVNAME(zr)), "MJPEG[%d]", zr->id);
 	}
 clientunreg_unlock_and_return:
-	up(&zr->resource_lock);
+	mutex_unlock(&zr->resource_lock);
 	return res;
 }
 
@@ -732,7 +820,6 @@ static struct i2c_algo_bit_data zoran_i2c_bit_data_template = {
 	.getsda = zoran_i2c_getsda,
 	.getscl = zoran_i2c_getscl,
 	.udelay = 10,
-	.mdelay = 0,
 	.timeout = 100,
 };
 
@@ -762,7 +849,7 @@ zoran_register_i2c (struct zoran *zr)
 static void
 zoran_unregister_i2c (struct zoran *zr)
 {
-	i2c_bit_del_bus((&zr->i2c_adapter));
+	i2c_del_adapter(&zr->i2c_adapter);
 }
 
 /* Check a zoran_params struct for correctness, insert default params */
@@ -995,10 +1082,7 @@ test_interrupts (struct zoran *zr)
 static int __devinit
 zr36057_init (struct zoran *zr)
 {
-	u32 *mem;
-	void *vdev;
-	unsigned mem_needed;
-	int j;
+	int j, err;
 	int two = 2;
 	int zero = 0;
 
@@ -1049,19 +1133,16 @@ zr36057_init (struct zoran *zr)
 
 	/* allocate memory *before* doing anything to the hardware
 	 * in case allocation fails */
-	mem_needed = BUZ_NUM_STAT_COM * 4;
-	mem = kzalloc(mem_needed, GFP_KERNEL);
-	vdev = (void *) kmalloc(sizeof(struct video_device), GFP_KERNEL);
-	if (!mem || !vdev) {
+	zr->stat_com = kzalloc(BUZ_NUM_STAT_COM * 4, GFP_KERNEL);
+	zr->video_dev = kmalloc(sizeof(struct video_device), GFP_KERNEL);
+	if (!zr->stat_com || !zr->video_dev) {
 		dprintk(1,
 			KERN_ERR
 			"%s: zr36057_init() - kmalloc (STAT_COM) failed\n",
 			ZR_DEVNAME(zr));
-		kfree(vdev);
-		kfree(mem);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto exit_free;
 	}
-	zr->stat_com = mem;
 	for (j = 0; j < BUZ_NUM_STAT_COM; j++) {
 		zr->stat_com[j] = 1;	/* mark as unavailable to zr36057 */
 	}
@@ -1069,16 +1150,11 @@ zr36057_init (struct zoran *zr)
 	/*
 	 *   Now add the template and register the device unit.
 	 */
-	zr->video_dev = vdev;
 	memcpy(zr->video_dev, &zoran_template, sizeof(zoran_template));
 	strcpy(zr->video_dev->name, ZR_DEVNAME(zr));
-	if (video_register_device(zr->video_dev, VFL_TYPE_GRABBER,
-				  video_nr) < 0) {
-		zoran_unregister_i2c(zr);
-		kfree((void *) zr->stat_com);
-		kfree(vdev);
-		return -1;
-	}
+	err = video_register_device(zr->video_dev, VFL_TYPE_GRABBER, video_nr);
+	if (err < 0)
+		goto exit_unregister;
 
 	zoran_init_hardware(zr);
 	if (*zr_debug > 2)
@@ -1092,6 +1168,13 @@ zr36057_init (struct zoran *zr)
 	zr->zoran_proc = NULL;
 	zr->initialized = 1;
 	return 0;
+
+exit_unregister:
+	zoran_unregister_i2c(zr);
+exit_free:
+	kfree(zr->stat_com);
+	kfree(zr->video_dev);
+	return err;
 }
 
 static void
@@ -1121,7 +1204,7 @@ zoran_release (struct zoran *zr)
 	btwrite(0, ZR36057_SPGPPCR);
 	free_irq(zr->pci_dev->irq, zr);
 	/* unmap and free memory */
-	kfree((void *) zr->stat_com);
+	kfree(zr->stat_com);
 	zoran_proc_cleanup(zr);
 	iounmap(zr->zr36057_mem);
 	pci_disable_device(zr->pci_dev);
@@ -1195,9 +1278,7 @@ find_zr36057 (void)
 
 	zoran_num = 0;
 	while (zoran_num < BUZ_MAX &&
-	       (dev =
-		pci_find_device(PCI_VENDOR_ID_ZORAN,
-				PCI_DEVICE_ID_ZORAN_36057, dev)) != NULL) {
+	       (dev = pci_get_device(PCI_VENDOR_ID_ZORAN, PCI_DEVICE_ID_ZORAN_36057, dev)) != NULL) {
 		card_num = card[zoran_num];
 		zr = &zoran[zoran_num];
 		memset(zr, 0, sizeof(struct zoran));	// Just in case if previous cycle failed
@@ -1206,7 +1287,7 @@ find_zr36057 (void)
 		zr->id = zoran_num;
 		snprintf(ZR_DEVNAME(zr), sizeof(ZR_DEVNAME(zr)), "MJPEG[%u]", zr->id);
 		spin_lock_init(&zr->spinlock);
-		init_MUTEX(&zr->resource_lock);
+		mutex_init(&zr->resource_lock);
 		if (pci_enable_device(dev))
 			continue;
 		zr->zr36057_adr = pci_resource_start(zr->pci_dev, 0);
@@ -1296,7 +1377,7 @@ find_zr36057 (void)
 
 		result = request_irq(zr->pci_dev->irq,
 				     zoran_irq,
-				     SA_SHIRQ | SA_INTERRUPT,
+				     IRQF_SHARED | IRQF_DISABLED,
 				     ZR_DEVNAME(zr),
 				     (void *) zr);
 		if (result < 0) {
@@ -1458,7 +1539,8 @@ find_zr36057 (void)
 				goto zr_detach_vfe;
 			}
 		}
-
+		/* Success so keep the pci_dev referenced */
+		pci_dev_get(zr->pci_dev);
 		zoran_num++;
 		continue;
 
@@ -1480,6 +1562,9 @@ find_zr36057 (void)
 		iounmap(zr->zr36057_mem);
 		continue;
 	}
+	if (dev)	/* Clean up ref count on early exit */
+		pci_dev_put(dev);
+
 	if (zoran_num == 0) {
 		dprintk(1, KERN_INFO "No known MJPEG cards found.\n");
 	}
@@ -1537,10 +1622,10 @@ init_dc10_cards (void)
 	dprintk(5, KERN_DEBUG "Jotti is een held!\n");
 
 	/* some mainboards might not do PCI-PCI data transfer well */
-	if (pci_pci_problems & PCIPCI_FAIL) {
+	if (pci_pci_problems & (PCIPCI_FAIL|PCIAGP_FAIL|PCIPCI_ALIMAGIK)) {
 		dprintk(1,
 			KERN_WARNING
-			"%s: chipset may not support reliable PCI-PCI DMA\n",
+			"%s: chipset does not support reliable PCI-PCI DMA\n",
 			ZORAN_NAME);
 	}
 
@@ -1548,7 +1633,7 @@ init_dc10_cards (void)
 	for (i = 0; i < zoran_num; i++) {
 		struct zoran *zr = &zoran[i];
 
-		if (pci_pci_problems & PCIPCI_NATOMA && zr->revision <= 1) {
+		if ((pci_pci_problems & PCIPCI_NATOMA) && zr->revision <= 1) {
 			zr->jpg_buffers.need_contiguous = 1;
 			dprintk(1,
 				KERN_INFO

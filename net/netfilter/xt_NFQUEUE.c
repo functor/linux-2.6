@@ -28,80 +28,48 @@ target(struct sk_buff **pskb,
        const struct net_device *in,
        const struct net_device *out,
        unsigned int hooknum,
-       const void *targinfo,
-       void *userinfo)
+       const struct xt_target *target,
+       const void *targinfo)
 {
 	const struct xt_NFQ_info *tinfo = targinfo;
 
 	return NF_QUEUE_NR(tinfo->queuenum);
 }
 
-static int
-checkentry(const char *tablename,
-	   const void *entry,
-           void *targinfo,
-           unsigned int targinfosize,
-           unsigned int hook_mask)
-{
-	if (targinfosize != XT_ALIGN(sizeof(struct xt_NFQ_info))) {
-		printk(KERN_WARNING "NFQUEUE: targinfosize %u != %Zu\n",
-		       targinfosize,
-		       XT_ALIGN(sizeof(struct xt_NFQ_info)));
-		return 0;
-	}
-
-	return 1;
-}
-
-static struct xt_target ipt_NFQ_reg = {
-	.name		= "NFQUEUE",
-	.target		= target,
-	.checkentry	= checkentry,
-	.me		= THIS_MODULE,
+static struct xt_target xt_nfqueue_target[] = {
+	{
+		.name		= "NFQUEUE",
+		.family		= AF_INET,
+		.target		= target,
+		.targetsize	= sizeof(struct xt_NFQ_info),
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "NFQUEUE",
+		.family		= AF_INET6,
+		.target		= target,
+		.targetsize	= sizeof(struct xt_NFQ_info),
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "NFQUEUE",
+		.family		= NF_ARP,
+		.target		= target,
+		.targetsize	= sizeof(struct xt_NFQ_info),
+		.me		= THIS_MODULE,
+	},
 };
 
-static struct xt_target ip6t_NFQ_reg = {
-	.name		= "NFQUEUE",
-	.target		= target,
-	.checkentry	= checkentry,
-	.me		= THIS_MODULE,
-};
-
-static struct xt_target arpt_NFQ_reg = {
-	.name		= "NFQUEUE",
-	.target		= target,
-	.checkentry	= checkentry,
-	.me		= THIS_MODULE,
-};
-
-static int __init init(void)
+static int __init xt_nfqueue_init(void)
 {
-	int ret;
-	ret = xt_register_target(AF_INET, &ipt_NFQ_reg);
-	if (ret)
-		return ret;
-	ret = xt_register_target(AF_INET6, &ip6t_NFQ_reg);
-	if (ret)
-		goto out_ip;
-	ret = xt_register_target(NF_ARP, &arpt_NFQ_reg);
-	if (ret)
-		goto out_ip6;
-
-	return ret;
-out_ip6:
-	xt_unregister_target(AF_INET6, &ip6t_NFQ_reg);
-out_ip:
-	xt_unregister_target(AF_INET, &ipt_NFQ_reg);
-
-	return ret;
+	return xt_register_targets(xt_nfqueue_target,
+				   ARRAY_SIZE(xt_nfqueue_target));
 }
 
-static void __exit fini(void)
+static void __exit xt_nfqueue_fini(void)
 {
-	xt_unregister_target(NF_ARP, &arpt_NFQ_reg);
-	xt_unregister_target(AF_INET6, &ip6t_NFQ_reg);
-	xt_unregister_target(AF_INET, &ipt_NFQ_reg);
+	xt_unregister_targets(xt_nfqueue_target, ARRAY_SIZE(xt_nfqueue_target));
 }
 
-module_init(init);
-module_exit(fini);
+module_init(xt_nfqueue_init);
+module_exit(xt_nfqueue_fini);

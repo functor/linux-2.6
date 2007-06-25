@@ -26,7 +26,7 @@
  *	ERR_PTR(error).  In the end of sequence they return %NULL. ->show()
  *	returns 0 in case of success and negative number in case of error.
  */
-int seq_open(struct file *file, struct seq_operations *op)
+int seq_open(struct file *file, const struct seq_operations *op)
 {
 	struct seq_file *p = file->private_data;
 
@@ -37,7 +37,7 @@ int seq_open(struct file *file, struct seq_operations *op)
 		file->private_data = p;
 	}
 	memset(p, 0, sizeof(*p));
-	sema_init(&p->sem, 1);
+	mutex_init(&p->lock);
 	p->op = op;
 
 	/*
@@ -71,7 +71,7 @@ ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 	void *p;
 	int err = 0;
 
-	down(&m->sem);
+	mutex_lock(&m->lock);
 	/*
 	 * seq_file->op->..m_start/m_stop/m_next may do special actions
 	 * or optimisations based on the file->f_version, so we want to
@@ -164,7 +164,7 @@ Done:
 	else
 		*ppos += copied;
 	file->f_version = m->version;
-	up(&m->sem);
+	mutex_unlock(&m->lock);
 	return copied;
 Enomem:
 	err = -ENOMEM;
@@ -237,7 +237,7 @@ loff_t seq_lseek(struct file *file, loff_t offset, int origin)
 	struct seq_file *m = (struct seq_file *)file->private_data;
 	long long retval = -EINVAL;
 
-	down(&m->sem);
+	mutex_lock(&m->lock);
 	m->version = file->f_version;
 	switch (origin) {
 		case 1:
@@ -260,7 +260,7 @@ loff_t seq_lseek(struct file *file, loff_t offset, int origin)
 				}
 			}
 	}
-	up(&m->sem);
+	mutex_unlock(&m->lock);
 	file->f_version = m->version;
 	return retval;
 }
@@ -269,7 +269,7 @@ EXPORT_SYMBOL(seq_lseek);
 /**
  *	seq_release -	free the structures associated with sequential file.
  *	@file: file in question
- *	@inode: file->f_dentry->d_inode
+ *	@inode: file->f_path.dentry->d_inode
  *
  *	Frees the structures associated with sequential file; can be used
  *	as ->f_op->release() if you don't have private data to destroy.
@@ -408,7 +408,7 @@ EXPORT_SYMBOL(single_open);
 
 int single_release(struct inode *inode, struct file *file)
 {
-	struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
+	const struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
 	int res = seq_release(inode, file);
 	kfree(op);
 	return res;

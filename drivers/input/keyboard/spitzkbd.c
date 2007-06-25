@@ -30,6 +30,7 @@
 #define SCANCODE(r,c)		(((r)<<4) + (c) + 1)
 #define	NR_SCANCODES		((KB_ROWS<<4) + 1)
 
+#define SCAN_INTERVAL		(50) /* ms */
 #define HINGE_SCAN_INTERVAL	(150) /* ms */
 
 #define SPITZ_KEY_CALENDER	KEY_F1
@@ -52,8 +53,8 @@ static unsigned char spitzkbd_keycode[NR_SCANCODES] = {
 	KEY_LEFTCTRL, KEY_1, KEY_3, KEY_5, KEY_6, KEY_7, KEY_9, KEY_0, KEY_BACKSPACE, SPITZ_KEY_EXOK, SPITZ_KEY_EXCANCEL, 0, 0, 0, 0, 0,  /* 1-16 */
 	0, KEY_2, KEY_4, KEY_R, KEY_Y, KEY_8, KEY_I, KEY_O, KEY_P, SPITZ_KEY_EXJOGDOWN, SPITZ_KEY_EXJOGUP, 0, 0, 0, 0, 0, /* 17-32 */
 	KEY_TAB, KEY_Q, KEY_E, KEY_T, KEY_G, KEY_U, KEY_J, KEY_K, 0, 0, 0, 0, 0, 0, 0, 0,                                 /* 33-48 */
-	SPITZ_KEY_CALENDER, KEY_W, KEY_S, KEY_F, KEY_V, KEY_H, KEY_M, KEY_L, 0, KEY_RIGHTSHIFT, 0, 0, 0, 0, 0, 0,         /* 49-64 */
-	SPITZ_KEY_ADDRESS, KEY_A, KEY_D, KEY_C, KEY_B, KEY_N, KEY_DOT, 0, KEY_ENTER, KEY_LEFTSHIFT, 0, 0, 0, 0, 0, 0,	  /* 65-80 */
+	SPITZ_KEY_ADDRESS, KEY_W, KEY_S, KEY_F, KEY_V, KEY_H, KEY_M, KEY_L, 0, KEY_RIGHTSHIFT, 0, 0, 0, 0, 0, 0,         /* 49-64 */
+	SPITZ_KEY_CALENDER, KEY_A, KEY_D, KEY_C, KEY_B, KEY_N, KEY_DOT, 0, KEY_ENTER, KEY_LEFTSHIFT, 0, 0, 0, 0, 0, 0,	  /* 65-80 */
 	SPITZ_KEY_MAIL, KEY_Z, KEY_X, KEY_MINUS, KEY_SPACE, KEY_COMMA, 0, KEY_UP, 0, 0, SPITZ_KEY_FN, 0, 0, 0, 0, 0,      /* 81-96 */
 	KEY_SYSRQ, SPITZ_KEY_JAP1, SPITZ_KEY_JAP2, SPITZ_KEY_CANCEL, SPITZ_KEY_OK, SPITZ_KEY_MENU, KEY_LEFT, KEY_DOWN, KEY_RIGHT, 0, 0, 0, 0, 0, 0, 0  /* 97-112 */
 };
@@ -175,7 +176,7 @@ static inline int spitzkbd_get_row_status(int col)
  */
 
 /* Scan the hardware keyboard and push any changes up through the input layer */
-static void spitzkbd_scankeyboard(struct spitzkbd *spitzkbd_data, struct pt_regs *regs)
+static void spitzkbd_scankeyboard(struct spitzkbd *spitzkbd_data)
 {
 	unsigned int row, col, rowd;
 	unsigned long flags;
@@ -185,8 +186,6 @@ static void spitzkbd_scankeyboard(struct spitzkbd *spitzkbd_data, struct pt_regs
 		return;
 
 	spin_lock_irqsave(&spitzkbd_data->lock, flags);
-
-	input_regs(spitzkbd_data->input, regs);
 
 	num_pressed = 0;
 	for (col = 0; col < KB_COLS; col++) {
@@ -230,7 +229,7 @@ static void spitzkbd_scankeyboard(struct spitzkbd *spitzkbd_data, struct pt_regs
 
 	/* if any keys are pressed, enable the timer */
 	if (num_pressed)
-		mod_timer(&spitzkbd_data->timer, jiffies + msecs_to_jiffies(100));
+		mod_timer(&spitzkbd_data->timer, jiffies + msecs_to_jiffies(SCAN_INTERVAL));
 
 	spin_unlock_irqrestore(&spitzkbd_data->lock, flags);
 }
@@ -238,14 +237,14 @@ static void spitzkbd_scankeyboard(struct spitzkbd *spitzkbd_data, struct pt_regs
 /*
  * spitz keyboard interrupt handler.
  */
-static irqreturn_t spitzkbd_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t spitzkbd_interrupt(int irq, void *dev_id)
 {
 	struct spitzkbd *spitzkbd_data = dev_id;
 
 	if (!timer_pending(&spitzkbd_data->timer)) {
 		/** wait chattering delay **/
 		udelay(20);
-		spitzkbd_scankeyboard(spitzkbd_data, regs);
+		spitzkbd_scankeyboard(spitzkbd_data);
 	}
 
 	return IRQ_HANDLED;
@@ -258,7 +257,7 @@ static void spitzkbd_timer_callback(unsigned long data)
 {
 	struct spitzkbd *spitzkbd_data = (struct spitzkbd *) data;
 
-	spitzkbd_scankeyboard(spitzkbd_data, NULL);
+	spitzkbd_scankeyboard(spitzkbd_data);
 }
 
 /*
@@ -266,7 +265,7 @@ static void spitzkbd_timer_callback(unsigned long data)
  * We debounce the switches and pass them to the input system.
  */
 
-static irqreturn_t spitzkbd_hinge_isr(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t spitzkbd_hinge_isr(int irq, void *dev_id)
 {
 	struct spitzkbd *spitzkbd_data = dev_id;
 
@@ -287,6 +286,7 @@ static void spitzkbd_hinge_timer(unsigned long data)
 	unsigned long flags;
 
 	state = GPLR(SPITZ_GPIO_SWA) & (GPIO_bit(SPITZ_GPIO_SWA)|GPIO_bit(SPITZ_GPIO_SWB));
+	state |= (GPLR(SPITZ_GPIO_AK_INT) & GPIO_bit(SPITZ_GPIO_AK_INT));
 	if (state != sharpsl_hinge_state) {
 		hinge_count = 0;
 		sharpsl_hinge_state = state;
@@ -297,8 +297,9 @@ static void spitzkbd_hinge_timer(unsigned long data)
 	if (hinge_count >= HINGE_STABLE_COUNT) {
 		spin_lock_irqsave(&spitzkbd_data->lock, flags);
 
-		input_report_switch(spitzkbd_data->input, SW_0, ((GPLR(SPITZ_GPIO_SWA) & GPIO_bit(SPITZ_GPIO_SWA)) != 0));
-		input_report_switch(spitzkbd_data->input, SW_1, ((GPLR(SPITZ_GPIO_SWB) & GPIO_bit(SPITZ_GPIO_SWB)) != 0));
+		input_report_switch(spitzkbd_data->input, SW_LID, ((GPLR(SPITZ_GPIO_SWA) & GPIO_bit(SPITZ_GPIO_SWA)) != 0));
+		input_report_switch(spitzkbd_data->input, SW_TABLET_MODE, ((GPLR(SPITZ_GPIO_SWB) & GPIO_bit(SPITZ_GPIO_SWB)) != 0));
+		input_report_switch(spitzkbd_data->input, SW_HEADPHONE_INSERT, ((GPLR(SPITZ_GPIO_AK_INT) & GPIO_bit(SPITZ_GPIO_AK_INT)) != 0));
 		input_sync(spitzkbd_data->input);
 
 		spin_unlock_irqrestore(&spitzkbd_data->lock, flags);
@@ -345,17 +346,12 @@ static int __init spitzkbd_probe(struct platform_device *dev)
 {
 	struct spitzkbd *spitzkbd;
 	struct input_dev *input_dev;
-	int i;
+	int i, err = -ENOMEM;
 
 	spitzkbd = kzalloc(sizeof(struct spitzkbd), GFP_KERNEL);
-	if (!spitzkbd)
-		return -ENOMEM;
-
 	input_dev = input_allocate_device();
-	if (!input_dev) {
-		kfree(spitzkbd);
-		return -ENOMEM;
-	}
+	if (!spitzkbd || !input_dev)
+		goto fail;
 
 	platform_set_drvdata(dev, spitzkbd);
 	strcpy(spitzkbd->phys, "spitzkbd/input0");
@@ -395,10 +391,13 @@ static int __init spitzkbd_probe(struct platform_device *dev)
 	for (i = 0; i < ARRAY_SIZE(spitzkbd_keycode); i++)
 		set_bit(spitzkbd->keycode[i], input_dev->keybit);
 	clear_bit(0, input_dev->keybit);
-	set_bit(SW_0, input_dev->swbit);
-	set_bit(SW_1, input_dev->swbit);
+	set_bit(SW_LID, input_dev->swbit);
+	set_bit(SW_TABLET_MODE, input_dev->swbit);
+	set_bit(SW_HEADPHONE_INSERT, input_dev->swbit);
 
-	input_register_device(input_dev);
+	err = input_register_device(input_dev);
+	if (err)
+		goto fail;
 
 	mod_timer(&spitzkbd->htimer, jiffies + msecs_to_jiffies(HINGE_SCAN_INTERVAL));
 
@@ -406,7 +405,7 @@ static int __init spitzkbd_probe(struct platform_device *dev)
 	for (i = 0; i < SPITZ_KEY_SENSE_NUM; i++) {
 		pxa_gpio_mode(spitz_senses[i] | GPIO_IN);
 		if (request_irq(IRQ_GPIO(spitz_senses[i]), spitzkbd_interrupt,
-				SA_INTERRUPT|SA_TRIGGER_RISING,
+				IRQF_DISABLED|IRQF_TRIGGER_RISING,
 				"Spitzkbd Sense", spitzkbd))
 			printk(KERN_WARNING "spitzkbd: Can't get Sense IRQ: %d!\n", i);
 	}
@@ -421,21 +420,26 @@ static int __init spitzkbd_probe(struct platform_device *dev)
 	pxa_gpio_mode(SPITZ_GPIO_SWB | GPIO_IN);
 
 	request_irq(SPITZ_IRQ_GPIO_SYNC, spitzkbd_interrupt,
-		    SA_INTERRUPT | SA_TRIGGER_RISING | SA_TRIGGER_FALLING,
+		    IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 		    "Spitzkbd Sync", spitzkbd);
 	request_irq(SPITZ_IRQ_GPIO_ON_KEY, spitzkbd_interrupt,
-		    SA_INTERRUPT | SA_TRIGGER_RISING | SA_TRIGGER_FALLING,
+		    IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 		    "Spitzkbd PwrOn", spitzkbd);
 	request_irq(SPITZ_IRQ_GPIO_SWA, spitzkbd_hinge_isr,
-		    SA_INTERRUPT | SA_TRIGGER_RISING | SA_TRIGGER_FALLING,
+		    IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 		    "Spitzkbd SWA", spitzkbd);
 	request_irq(SPITZ_IRQ_GPIO_SWB, spitzkbd_hinge_isr,
-		    SA_INTERRUPT | SA_TRIGGER_RISING | SA_TRIGGER_FALLING,
+		    IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 		    "Spitzkbd SWB", spitzkbd);
-
-	printk(KERN_INFO "input: Spitz Keyboard Registered\n");
+	request_irq(SPITZ_IRQ_GPIO_AK_INT, spitzkbd_hinge_isr,
+		    IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+		    "Spitzkbd HP", spitzkbd);
 
 	return 0;
+
+ fail:	input_free_device(input_dev);
+	kfree(spitzkbd);
+	return err;
 }
 
 static int spitzkbd_remove(struct platform_device *dev)
@@ -450,6 +454,7 @@ static int spitzkbd_remove(struct platform_device *dev)
 	free_irq(SPITZ_IRQ_GPIO_ON_KEY, spitzkbd);
 	free_irq(SPITZ_IRQ_GPIO_SWA, spitzkbd);
 	free_irq(SPITZ_IRQ_GPIO_SWB, spitzkbd);
+	free_irq(SPITZ_IRQ_GPIO_AK_INT, spitzkbd);
 
 	del_timer_sync(&spitzkbd->htimer);
 	del_timer_sync(&spitzkbd->timer);
@@ -468,6 +473,7 @@ static struct platform_driver spitzkbd_driver = {
 	.resume		= spitzkbd_resume,
 	.driver		= {
 		.name	= "spitz-keyboard",
+		.owner	= THIS_MODULE,
 	},
 };
 

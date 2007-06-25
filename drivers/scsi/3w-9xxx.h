@@ -2,8 +2,9 @@
    3w-9xxx.h -- 3ware 9000 Storage Controller device driver for Linux.
 
    Written By: Adam Radford <linuxraid@amcc.com>
+   Modifications By: Tom Couch <linuxraid@amcc.com>
 
-   Copyright (C) 2004-2005 Applied Micro Circuits Corporation.
+   Copyright (C) 2004-2006 Applied Micro Circuits Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -287,11 +288,7 @@ static twa_message_type twa_error_table[] = {
 #define TW_STATUS_UNEXPECTED_BITS	       0x00F00000
 #define TW_STATUS_VALID_INTERRUPT              0x00DF0000
 
-/* RESPONSE QUEUE BIT DEFINITIONS */
-#define TW_RESPONSE_ID_MASK		       0x00000FF0
-
 /* PCI related defines */
-#define TW_NUMDEVICES 1
 #define TW_PCI_CLEAR_PARITY_ERRORS 0xc100
 #define TW_PCI_CLEAR_PCI_ABORT     0x2000
 
@@ -337,6 +334,7 @@ static twa_message_type twa_error_table[] = {
 #define TW_ALIGNMENT_9000                     4  /* 4 bytes */
 #define TW_ALIGNMENT_9000_SGL                 0x3
 #define TW_MAX_UNITS			      16
+#define TW_MAX_UNITS_9650SE		      32
 #define TW_INIT_MESSAGE_CREDITS		      0x100
 #define TW_INIT_COMMAND_PACKET_SIZE	      0x3
 #define TW_INIT_COMMAND_PACKET_SIZE_EXTENDED  0x6
@@ -356,7 +354,6 @@ static twa_message_type twa_error_table[] = {
 #define TW_MAX_RESPONSE_DRAIN		      256
 #define TW_MAX_AEN_DRAIN		      40
 #define TW_IN_RESET                           2
-#define TW_IN_CHRDEV_IOCTL                    3
 #define TW_IN_ATTENTION_LOOP		      4
 #define TW_MAX_SECTORS                        256
 #define TW_AEN_WAIT_TIME                      1000
@@ -419,6 +416,9 @@ static twa_message_type twa_error_table[] = {
 #ifndef PCI_DEVICE_ID_3WARE_9550SX
 #define PCI_DEVICE_ID_3WARE_9550SX 0x1003
 #endif
+#ifndef PCI_DEVICE_ID_3WARE_9650SE
+#define PCI_DEVICE_ID_3WARE_9650SE 0x1004
+#endif
 
 /* Bitmask macros to eliminate bitfields */
 
@@ -444,6 +444,7 @@ static twa_message_type twa_error_table[] = {
 #define TW_CONTROL_REG_ADDR(x) (x->base_addr)
 #define TW_STATUS_REG_ADDR(x) ((unsigned char __iomem *)x->base_addr + 0x4)
 #define TW_COMMAND_QUEUE_REG_ADDR(x) (sizeof(dma_addr_t) > 4 ? ((unsigned char __iomem *)x->base_addr + 0x20) : ((unsigned char __iomem *)x->base_addr + 0x8))
+#define TW_COMMAND_QUEUE_REG_ADDR_LARGE(x) ((unsigned char __iomem *)x->base_addr + 0x20)
 #define TW_RESPONSE_QUEUE_REG_ADDR(x) ((unsigned char __iomem *)x->base_addr + 0xC)
 #define TW_RESPONSE_QUEUE_REG_ADDR_LARGE(x) ((unsigned char __iomem *)x->base_addr + 0x30)
 #define TW_CLEAR_ALL_INTERRUPTS(x) (writel(TW_STATUS_VALID_INTERRUPT, TW_CONTROL_REG_ADDR(x)))
@@ -471,6 +472,7 @@ printk(KERN_WARNING "3w-9xxx: ERROR: (0x%02X:0x%04X): %s.\n",a,b,c); \
 #define TW_APACHE_MAX_SGL_LENGTH (sizeof(dma_addr_t) > 4 ? 72 : 109)
 #define TW_ESCALADE_MAX_SGL_LENGTH (sizeof(dma_addr_t) > 4 ? 41 : 62)
 #define TW_PADDING_LENGTH (sizeof(dma_addr_t) > 4 ? 8 : 0)
+#define TW_CPU_TO_SGL(x) (sizeof(dma_addr_t) > 4 ? cpu_to_le64(x) : cpu_to_le32(x))
 
 #pragma pack(1)
 
@@ -614,13 +616,6 @@ typedef union TAG_TW_Response_Queue {
 	u32 value;
 } TW_Response_Queue;
 
-typedef struct TAG_TW_Info {
-	char *buffer;
-	int length;
-	int offset;
-	int position;
-} TW_Info;
-
 /* Compatibility information structure */
 typedef struct TAG_TW_Compatibility_Info
 {
@@ -634,7 +629,12 @@ typedef struct TAG_TW_Compatibility_Info
 	unsigned short driver_srl_low;
 	unsigned short driver_branch_low;
 	unsigned short driver_build_low;
+	unsigned short fw_on_ctlr_srl;
+	unsigned short fw_on_ctlr_branch;
+	unsigned short fw_on_ctlr_build;
 } TW_Compatibility_Info;
+
+#pragma pack()
 
 typedef struct TAG_TW_Device_Extension {
 	u32                     __iomem *base_addr;
@@ -674,12 +674,8 @@ typedef struct TAG_TW_Device_Extension {
 	wait_queue_head_t	ioctl_wqueue;
 	struct mutex		ioctl_lock;
 	char			aen_clobber;
-	unsigned short		working_srl;
-	unsigned short		working_branch;
-	unsigned short		working_build;
+	TW_Compatibility_Info	tw_compat_info;
 } TW_Device_Extension;
-
-#pragma pack()
 
 #endif /* _3W_9XXX_H */
 

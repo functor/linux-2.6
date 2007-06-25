@@ -10,8 +10,6 @@
 #ifndef OP_COUNTER_H
 #define OP_COUNTER_H
 
-#define OP_MAX_COUNTER 5
-
 /* Per performance monitor configuration as set via
  * oprofilefs.
  */
@@ -24,6 +22,6 @@ struct op_counter_config {
 	unsigned long user;
 };
 
-extern struct op_counter_config counter_config[];
+extern struct op_counter_config *counter_config;
 
 #endif /* OP_COUNTER_H */

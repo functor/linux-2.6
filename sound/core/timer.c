@@ -25,6 +25,7 @@
 #include <linux/smp_lock.h>
 #include <linux/slab.h>
 #include <linux/time.h>
+#include <linux/mutex.h>
 #include <linux/moduleparam.h>
 #include <linux/string.h>
 #include <sound/core.h>
@@ -70,7 +71,7 @@ struct snd_timer_user {
 	struct timespec tstamp;		/* trigger tstamp */
 	wait_queue_head_t qchange_sleep;
 	struct fasync_struct *fasync;
-	struct semaphore tread_sem;
+	struct mutex tread_sem;
 };
 
 /* list of timers */
@@ -82,12 +83,12 @@ static LIST_HEAD(snd_timer_slave_list);
 /* lock for slave active lists */
 static DEFINE_SPINLOCK(slave_active_lock);
 
-static DECLARE_MUTEX(register_mutex);
+static DEFINE_MUTEX(register_mutex);
 
 static int snd_timer_free(struct snd_timer *timer);
 static int snd_timer_dev_free(struct snd_device *device);
 static int snd_timer_dev_register(struct snd_device *device);
-static int snd_timer_dev_unregister(struct snd_device *device);
+static int snd_timer_dev_disconnect(struct snd_device *device);
 
 static void snd_timer_reschedule(struct snd_timer * timer, unsigned long ticks_left);
 
@@ -252,10 +253,10 @@ int snd_timer_open(struct snd_timer_instance **ti,
 			snd_printd("invalid slave class %i\n", tid->dev_sclass);
 			return -EINVAL;
 		}
-		down(&register_mutex);
+		mutex_lock(&register_mutex);
 		timeri = snd_timer_instance_new(owner, NULL);
 		if (!timeri) {
-			up(&register_mutex);
+			mutex_unlock(&register_mutex);
 			return -ENOMEM;
 		}
 		timeri->slave_class = tid->dev_sclass;
@@ -263,37 +264,37 @@ int snd_timer_open(struct snd_timer_instance **ti,
 		timeri->flags |= SNDRV_TIMER_IFLG_SLAVE;
 		list_add_tail(&timeri->open_list, &snd_timer_slave_list);
 		snd_timer_check_slave(timeri);
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 		*ti = timeri;
 		return 0;
 	}
 
 	/* open a master instance */
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	timer = snd_timer_find(tid);
 #ifdef CONFIG_KMOD
 	if (timer == NULL) {
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 		snd_timer_request(tid);
-		down(&register_mutex);
+		mutex_lock(&register_mutex);
 		timer = snd_timer_find(tid);
 	}
 #endif
 	if (!timer) {
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 		return -ENODEV;
 	}
 	if (!list_empty(&timer->open_list_head)) {
 		timeri = list_entry(timer->open_list_head.next,
 				    struct snd_timer_instance, open_list);
 		if (timeri->flags & SNDRV_TIMER_IFLG_EXCLUSIVE) {
-			up(&register_mutex);
+			mutex_unlock(&register_mutex);
 			return -EBUSY;
 		}
 	}
 	timeri = snd_timer_instance_new(owner, timer);
 	if (!timeri) {
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 		return -ENOMEM;
 	}
 	timeri->slave_class = tid->dev_sclass;
@@ -302,7 +303,7 @@ int snd_timer_open(struct snd_timer_instance **ti,
 		timer->hw.open(timer);
 	list_add_tail(&timeri->open_list, &timer->open_list_head);
 	snd_timer_check_master(timeri);
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 	*ti = timeri;
 	return 0;
 }
@@ -333,9 +334,9 @@ int snd_timer_close(struct snd_timer_instance *timeri)
 			spin_lock_irq(&slave_active_lock);
 		}
 		spin_unlock_irq(&slave_active_lock);
-		down(&register_mutex);
+		mutex_lock(&register_mutex);
 		list_del(&timeri->open_list);
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 	} else {
 		timer = timeri->timer;
 		/* wait, until the active callback is finished */
@@ -346,7 +347,7 @@ int snd_timer_close(struct snd_timer_instance *timeri)
 			spin_lock_irq(&timer->lock);
 		}
 		spin_unlock_irq(&timer->lock);
-		down(&register_mutex);
+		mutex_lock(&register_mutex);
 		list_del(&timeri->open_list);
 		if (timer && list_empty(&timer->open_list_head) &&
 		    timer->hw.close)
@@ -362,7 +363,7 @@ int snd_timer_close(struct snd_timer_instance *timeri)
 			slave->timer = NULL;
 			spin_unlock_irq(&slave_active_lock);
 		}
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 	}
 	if (timeri->private_free)
 		timeri->private_free(timeri);
@@ -717,7 +718,7 @@ void snd_timer_interrupt(struct snd_timer * timer, unsigned long ticks_left)
 		}
 	}
 	if (timer->flags & SNDRV_TIMER_FLG_RESCHED)
-		snd_timer_reschedule(timer, ticks_left);
+		snd_timer_reschedule(timer, timer->sticks);
 	if (timer->running) {
 		if (timer->hw.flags & SNDRV_TIMER_HW_STOP) {
 			timer->hw.stop(timer);
@@ -772,7 +773,7 @@ int snd_timer_new(struct snd_card *card, char *id, struct snd_timer_id *tid,
 	static struct snd_device_ops ops = {
 		.dev_free = snd_timer_dev_free,
 		.dev_register = snd_timer_dev_register,
-		.dev_unregister = snd_timer_dev_unregister
+		.dev_disconnect = snd_timer_dev_disconnect,
 	};
 
 	snd_assert(tid != NULL, return -EINVAL);
@@ -812,6 +813,21 @@ int snd_timer_new(struct snd_card *card, char *id, struct snd_timer_id *tid,
 static int snd_timer_free(struct snd_timer *timer)
 {
 	snd_assert(timer != NULL, return -ENXIO);
+
+	mutex_lock(&register_mutex);
+	if (! list_empty(&timer->open_list_head)) {
+		struct list_head *p, *n;
+		struct snd_timer_instance *ti;
+		snd_printk(KERN_WARNING "timer %p is busy?\n", timer);
+		list_for_each_safe(p, n, &timer->open_list_head) {
+			list_del_init(p);
+			ti = list_entry(p, struct snd_timer_instance, open_list);
+			ti->timer = NULL;
+		}
+	}
+	list_del(&timer->device_list);
+	mutex_unlock(&register_mutex);
+
 	if (timer->private_free)
 		timer->private_free(timer);
 	kfree(timer);
@@ -836,7 +852,7 @@ static int snd_timer_dev_register(struct snd_device *dev)
 	    !timer->hw.resolution && timer->hw.c_resolution == NULL)
 	    	return -EINVAL;
 
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	list_for_each(p, &snd_timer_list) {
 		timer1 = list_entry(p, struct snd_timer, device_list);
 		if (timer1->tmr_class > timer->tmr_class)
@@ -858,38 +874,21 @@ static int snd_timer_dev_register(struct snd_device *dev)
 		if (timer1->tmr_subdevice < timer->tmr_subdevice)
 			continue;
 		/* conflicts.. */
-		up(&register_mutex);
+		mutex_unlock(&register_mutex);
 		return -EBUSY;
 	}
 	list_add_tail(&timer->device_list, p);
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 	return 0;
 }
 
-static int snd_timer_unregister(struct snd_timer *timer)
-{
-	struct list_head *p, *n;
-	struct snd_timer_instance *ti;
-
-	snd_assert(timer != NULL, return -ENXIO);
-	down(&register_mutex);
-	if (! list_empty(&timer->open_list_head)) {
-		snd_printk(KERN_WARNING "timer 0x%lx is busy?\n", (long)timer);
-		list_for_each_safe(p, n, &timer->open_list_head) {
-			list_del_init(p);
-			ti = list_entry(p, struct snd_timer_instance, open_list);
-			ti->timer = NULL;
-		}
-	}
-	list_del(&timer->device_list);
-	up(&register_mutex);
-	return snd_timer_free(timer);
-}
-
-static int snd_timer_dev_unregister(struct snd_device *device)
+static int snd_timer_dev_disconnect(struct snd_device *device)
 {
 	struct snd_timer *timer = device->device_data;
-	return snd_timer_unregister(timer);
+	mutex_lock(&register_mutex);
+	list_del_init(&timer->device_list);
+	mutex_unlock(&register_mutex);
+	return 0;
 }
 
 void snd_timer_notify(struct snd_timer *timer, int event, struct timespec *tstamp)
@@ -954,18 +953,12 @@ int snd_timer_global_register(struct snd_timer *timer)
 	return snd_timer_dev_register(&dev);
 }
 
-int snd_timer_global_unregister(struct snd_timer *timer)
-{
-	return snd_timer_unregister(timer);
-}
-
 /*
  *  System timer
  */
 
 struct snd_timer_system_private {
 	struct timer_list tlist;
-	struct timer * timer;
 	unsigned long last_expires;
 	unsigned long last_jiffies;
 	unsigned long correction;
@@ -977,7 +970,7 @@ static void snd_timer_s_function(unsigned long data)
 	struct snd_timer_system_private *priv = timer->private_data;
 	unsigned long jiff = jiffies;
 	if (time_after(jiff, priv->last_expires))
-		priv->correction = (long)jiff - (long)priv->last_expires;
+		priv->correction += (long)jiff - (long)priv->last_expires;
 	snd_timer_interrupt(timer, (long)jiff - (long)priv->last_jiffies);
 }
 
@@ -993,7 +986,7 @@ static int snd_timer_s_start(struct snd_timer * timer)
 		njiff++;
 	} else {
 		njiff += timer->sticks - priv->correction;
-		priv->correction -= timer->sticks;
+		priv->correction = 0;
 	}
 	priv->last_expires = priv->tlist.expires = njiff;
 	add_timer(&priv->tlist);
@@ -1012,6 +1005,7 @@ static int snd_timer_s_stop(struct snd_timer * timer)
 		timer->sticks = priv->last_expires - jiff;
 	else
 		timer->sticks = 1;
+	priv->correction = 0;
 	return 0;
 }
 
@@ -1061,12 +1055,11 @@ static int snd_timer_register_system(void)
 static void snd_timer_proc_read(struct snd_info_entry *entry,
 				struct snd_info_buffer *buffer)
 {
-	unsigned long flags;
 	struct snd_timer *timer;
 	struct snd_timer_instance *ti;
 	struct list_head *p, *q;
 
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	list_for_each(p, &snd_timer_list) {
 		timer = list_entry(p, struct snd_timer, device_list);
 		switch (timer->tmr_class) {
@@ -1095,7 +1088,6 @@ static void snd_timer_proc_read(struct snd_info_entry *entry,
 		if (timer->hw.flags & SNDRV_TIMER_HW_SLAVE)
 			snd_iprintf(buffer, " SLAVE");
 		snd_iprintf(buffer, "\n");
-		spin_lock_irqsave(&timer->lock, flags);
 		list_for_each(q, &timer->open_list_head) {
 			ti = list_entry(q, struct snd_timer_instance, open_list);
 			snd_iprintf(buffer, "  Client %s : %s\n",
@@ -1104,12 +1096,11 @@ static void snd_timer_proc_read(struct snd_info_entry *entry,
 						 SNDRV_TIMER_IFLG_RUNNING)
 				    ? "running" : "stopped");
 		}
-		spin_unlock_irqrestore(&timer->lock, flags);
 	}
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 }
 
-static struct snd_info_entry *snd_timer_proc_entry = NULL;
+static struct snd_info_entry *snd_timer_proc_entry;
 
 static void __init snd_timer_proc_init(void)
 {
@@ -1117,7 +1108,6 @@ static void __init snd_timer_proc_init(void)
 
 	entry = snd_info_create_module_entry(THIS_MODULE, "timers", NULL);
 	if (entry != NULL) {
-		entry->c.text.read_size = SNDRV_TIMER_DEVICES * 128;
 		entry->c.text.read = snd_timer_proc_read;
 		if (snd_info_register(entry) < 0) {
 			snd_info_free_entry(entry);
@@ -1129,7 +1119,7 @@ static void __init snd_timer_proc_init(void)
 
 static void __exit snd_timer_proc_done(void)
 {
-	snd_info_unregister(snd_timer_proc_entry);
+	snd_info_free_entry(snd_timer_proc_entry);
 }
 #else /* !CONFIG_PROC_FS */
 #define snd_timer_proc_init()
@@ -1270,7 +1260,7 @@ static int snd_timer_user_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 	spin_lock_init(&tu->qlock);
 	init_waitqueue_head(&tu->qchange_sleep);
-	init_MUTEX(&tu->tread_sem);
+	mutex_init(&tu->tread_sem);
 	tu->ticks = 1;
 	tu->queue_size = 128;
 	tu->queue = kmalloc(tu->queue_size * sizeof(struct snd_timer_read),
@@ -1326,7 +1316,7 @@ static int snd_timer_user_next_device(struct snd_timer_id __user *_tid)
 
 	if (copy_from_user(&id, _tid, sizeof(id)))
 		return -EFAULT;
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	if (id.dev_class < 0) {		/* first item */
 		if (list_empty(&snd_timer_list))
 			snd_timer_user_zero_id(&id);
@@ -1408,7 +1398,7 @@ static int snd_timer_user_next_device(struct snd_timer_id __user *_tid)
 			snd_timer_user_zero_id(&id);
 		}
 	}
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 	if (copy_to_user(_tid, &id, sizeof(*_tid)))
 		return -EFAULT;
 	return 0;
@@ -1433,7 +1423,7 @@ static int snd_timer_user_ginfo(struct file *file,
 	tid = ginfo->tid;
 	memset(ginfo, 0, sizeof(*ginfo));
 	ginfo->tid = tid;
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	t = snd_timer_find(&tid);
 	if (t != NULL) {
 		ginfo->card = t->card ? t->card->number : -1;
@@ -1452,7 +1442,7 @@ static int snd_timer_user_ginfo(struct file *file,
 	} else {
 		err = -ENODEV;
 	}
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 	if (err >= 0 && copy_to_user(_ginfo, ginfo, sizeof(*ginfo)))
 		err = -EFAULT;
 	kfree(ginfo);
@@ -1468,7 +1458,7 @@ static int snd_timer_user_gparams(struct file *file,
 
 	if (copy_from_user(&gparams, _gparams, sizeof(gparams)))
 		return -EFAULT;
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	t = snd_timer_find(&gparams.tid);
 	if (!t) {
 		err = -ENODEV;
@@ -1484,7 +1474,7 @@ static int snd_timer_user_gparams(struct file *file,
 	}
 	err = t->hw.set_period(t, gparams.period_num, gparams.period_den);
 _error:
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 	return err;
 }
 
@@ -1501,7 +1491,7 @@ static int snd_timer_user_gstatus(struct file *file,
 	tid = gstatus.tid;
 	memset(&gstatus, 0, sizeof(gstatus));
 	gstatus.tid = tid;
-	down(&register_mutex);
+	mutex_lock(&register_mutex);
 	t = snd_timer_find(&tid);
 	if (t != NULL) {
 		if (t->hw.c_resolution)
@@ -1518,7 +1508,7 @@ static int snd_timer_user_gstatus(struct file *file,
 	} else {
 		err = -ENODEV;
 	}
-	up(&register_mutex);
+	mutex_unlock(&register_mutex);
 	if (err >= 0 && copy_to_user(_gstatus, &gstatus, sizeof(gstatus)))
 		err = -EFAULT;
 	return err;
@@ -1533,7 +1523,7 @@ static int snd_timer_user_tselect(struct file *file,
 	int err = 0;
 
 	tu = file->private_data;
-	down(&tu->tread_sem);
+	mutex_lock(&tu->tread_sem);
 	if (tu->timeri) {
 		snd_timer_close(tu->timeri);
 		tu->timeri = NULL;
@@ -1577,7 +1567,7 @@ static int snd_timer_user_tselect(struct file *file,
 	}
 
       __err:
-      	up(&tu->tread_sem);
+      	mutex_unlock(&tu->tread_sem);
 	return err;
 }
 
@@ -1798,17 +1788,17 @@ static long snd_timer_user_ioctl(struct file *file, unsigned int cmd,
 	{
 		int xarg;
 
-		down(&tu->tread_sem);
+		mutex_lock(&tu->tread_sem);
 		if (tu->timeri)	{	/* too late */
-			up(&tu->tread_sem);
+			mutex_unlock(&tu->tread_sem);
 			return -EBUSY;
 		}
 		if (get_user(xarg, p)) {
-			up(&tu->tread_sem);
+			mutex_unlock(&tu->tread_sem);
 			return -EFAULT;
 		}
 		tu->tread = xarg ? 1 : 0;
-		up(&tu->tread_sem);
+		mutex_unlock(&tu->tread_sem);
 		return 0;
 	}
 	case SNDRV_TIMER_IOCTL_GINFO:
@@ -1985,7 +1975,7 @@ static void __exit alsa_timer_exit(void)
 	/* unregister the system timer */
 	list_for_each_safe(p, n, &snd_timer_list) {
 		struct snd_timer *timer = list_entry(p, struct snd_timer, device_list);
-		snd_timer_unregister(timer);
+		snd_timer_free(timer);
 	}
 	snd_timer_proc_done();
 #ifdef SNDRV_OSS_INFO_DEV_TIMERS
@@ -2008,5 +1998,4 @@ EXPORT_SYMBOL(snd_timer_notify);
 EXPORT_SYMBOL(snd_timer_global_new);
 EXPORT_SYMBOL(snd_timer_global_free);
 EXPORT_SYMBOL(snd_timer_global_register);
-EXPORT_SYMBOL(snd_timer_global_unregister);
 EXPORT_SYMBOL(snd_timer_interrupt);

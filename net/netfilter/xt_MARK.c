@@ -26,13 +26,13 @@ target_v0(struct sk_buff **pskb,
 	  const struct net_device *in,
 	  const struct net_device *out,
 	  unsigned int hooknum,
-	  const void *targinfo,
-	  void *userinfo)
+	  const struct xt_target *target,
+	  const void *targinfo)
 {
 	const struct xt_mark_target_info *markinfo = targinfo;
 
-	if((*pskb)->nfmark != markinfo->mark)
-		(*pskb)->nfmark = markinfo->mark;
+	if((*pskb)->mark != markinfo->mark)
+		(*pskb)->mark = markinfo->mark;
 
 	return XT_CONTINUE;
 }
@@ -42,8 +42,8 @@ target_v1(struct sk_buff **pskb,
 	  const struct net_device *in,
 	  const struct net_device *out,
 	  unsigned int hooknum,
-	  const void *targinfo,
-	  void *userinfo)
+	  const struct xt_target *target,
+	  const void *targinfo)
 {
 	const struct xt_mark_target_info_v1 *markinfo = targinfo;
 	int mark = 0;
@@ -54,16 +54,16 @@ target_v1(struct sk_buff **pskb,
 		break;
 		
 	case XT_MARK_AND:
-		mark = (*pskb)->nfmark & markinfo->mark;
+		mark = (*pskb)->mark & markinfo->mark;
 		break;
 		
 	case XT_MARK_OR:
-		mark = (*pskb)->nfmark | markinfo->mark;
+		mark = (*pskb)->mark | markinfo->mark;
 		break;
 	}
 
-	if((*pskb)->nfmark != mark)
-		(*pskb)->nfmark = mark;
+	if((*pskb)->mark != mark)
+		(*pskb)->mark = mark;
 
 	return XT_CONTINUE;
 }
@@ -72,52 +72,27 @@ target_v1(struct sk_buff **pskb,
 static int
 checkentry_v0(const char *tablename,
 	      const void *entry,
+	      const struct xt_target *target,
 	      void *targinfo,
-	      unsigned int targinfosize,
 	      unsigned int hook_mask)
 {
 	struct xt_mark_target_info *markinfo = targinfo;
-
-	if (targinfosize != XT_ALIGN(sizeof(struct xt_mark_target_info))) {
-		printk(KERN_WARNING "MARK: targinfosize %u != %Zu\n",
-		       targinfosize,
-		       XT_ALIGN(sizeof(struct xt_mark_target_info)));
-		return 0;
-	}
-
-	if (strcmp(tablename, "mangle") != 0) {
-		printk(KERN_WARNING "MARK: can only be called from \"mangle\" table, not \"%s\"\n", tablename);
-		return 0;
-	}
 
 	if (markinfo->mark > 0xffffffff) {
 		printk(KERN_WARNING "MARK: Only supports 32bit wide mark\n");
 		return 0;
 	}
-
 	return 1;
 }
 
 static int
 checkentry_v1(const char *tablename,
 	      const void *entry,
+	      const struct xt_target *target,
 	      void *targinfo,
-	      unsigned int targinfosize,
 	      unsigned int hook_mask)
 {
 	struct xt_mark_target_info_v1 *markinfo = targinfo;
-
-	if (targinfosize != XT_ALIGN(sizeof(struct xt_mark_target_info_v1))){
-		printk(KERN_WARNING "MARK: targinfosize %u != %Zu\n",
-		       targinfosize,
-		       XT_ALIGN(sizeof(struct xt_mark_target_info_v1)));
-		return 0;
-	}
-
-	if (strcmp(tablename, "mangle") != 0) {
-		printk(KERN_WARNING "MARK: can only be called from \"mangle\" table, not \"%s\"\n", tablename);
-		return 0;
-	}
 
 	if (markinfo->mode != XT_MARK_SET
 	    && markinfo->mode != XT_MARK_AND
@@ -126,66 +101,89 @@ checkentry_v1(const char *tablename,
 		       markinfo->mode);
 		return 0;
 	}
-
 	if (markinfo->mark > 0xffffffff) {
 		printk(KERN_WARNING "MARK: Only supports 32bit wide mark\n");
 		return 0;
 	}
-
 	return 1;
 }
 
-static struct xt_target ipt_mark_reg_v0 = {
-	.name		= "MARK",
-	.target		= target_v0,
-	.checkentry	= checkentry_v0,
-	.me		= THIS_MODULE,
-	.revision	= 0,
+#ifdef CONFIG_COMPAT
+struct compat_xt_mark_target_info_v1 {
+	compat_ulong_t	mark;
+	u_int8_t	mode;
+	u_int8_t	__pad1;
+	u_int16_t	__pad2;
 };
 
-static struct xt_target ipt_mark_reg_v1 = {
-	.name		= "MARK",
-	.target		= target_v1,
-	.checkentry	= checkentry_v1,
-	.me		= THIS_MODULE,
-	.revision	= 1,
-};
-
-static struct xt_target ip6t_mark_reg_v0 = {
-	.name		= "MARK",
-	.target		= target_v0,
-	.checkentry	= checkentry_v0,
-	.me		= THIS_MODULE,
-	.revision	= 0,
-};
-
-static int __init init(void)
+static void compat_from_user_v1(void *dst, void *src)
 {
-	int err;
-
-	err = xt_register_target(AF_INET, &ipt_mark_reg_v0);
-	if (err)
-		return err;
-
-	err = xt_register_target(AF_INET, &ipt_mark_reg_v1);
-	if (err)
-		xt_unregister_target(AF_INET, &ipt_mark_reg_v0);
-
-	err = xt_register_target(AF_INET6, &ip6t_mark_reg_v0);
-	if (err) {
-		xt_unregister_target(AF_INET, &ipt_mark_reg_v0);
-		xt_unregister_target(AF_INET, &ipt_mark_reg_v1);
-	}
-
-	return err;
+	struct compat_xt_mark_target_info_v1 *cm = src;
+	struct xt_mark_target_info_v1 m = {
+		.mark	= cm->mark,
+		.mode	= cm->mode,
+	};
+	memcpy(dst, &m, sizeof(m));
 }
 
-static void __exit fini(void)
+static int compat_to_user_v1(void __user *dst, void *src)
 {
-	xt_unregister_target(AF_INET, &ipt_mark_reg_v0);
-	xt_unregister_target(AF_INET, &ipt_mark_reg_v1);
-	xt_unregister_target(AF_INET6, &ip6t_mark_reg_v0);
+	struct xt_mark_target_info_v1 *m = src;
+	struct compat_xt_mark_target_info_v1 cm = {
+		.mark	= m->mark,
+		.mode	= m->mode,
+	};
+	return copy_to_user(dst, &cm, sizeof(cm)) ? -EFAULT : 0;
+}
+#endif /* CONFIG_COMPAT */
+
+static struct xt_target xt_mark_target[] = {
+	{
+		.name		= "MARK",
+		.family		= AF_INET,
+		.revision	= 0,
+		.checkentry	= checkentry_v0,
+		.target		= target_v0,
+		.targetsize	= sizeof(struct xt_mark_target_info),
+		.table		= "mangle",
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "MARK",
+		.family		= AF_INET,
+		.revision	= 1,
+		.checkentry	= checkentry_v1,
+		.target		= target_v1,
+		.targetsize	= sizeof(struct xt_mark_target_info_v1),
+#ifdef CONFIG_COMPAT
+		.compatsize	= sizeof(struct compat_xt_mark_target_info_v1),
+		.compat_from_user = compat_from_user_v1,
+		.compat_to_user	= compat_to_user_v1,
+#endif
+		.table		= "mangle",
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "MARK",
+		.family		= AF_INET6,
+		.revision	= 0,
+		.checkentry	= checkentry_v0,
+		.target		= target_v0,
+		.targetsize	= sizeof(struct xt_mark_target_info),
+		.table		= "mangle",
+		.me		= THIS_MODULE,
+	},
+};
+
+static int __init xt_mark_init(void)
+{
+	return xt_register_targets(xt_mark_target, ARRAY_SIZE(xt_mark_target));
 }
 
-module_init(init);
-module_exit(fini);
+static void __exit xt_mark_fini(void)
+{
+	xt_unregister_targets(xt_mark_target, ARRAY_SIZE(xt_mark_target));
+}
+
+module_init(xt_mark_init);
+module_exit(xt_mark_fini);

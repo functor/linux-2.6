@@ -4,11 +4,12 @@
 #include <asm/processor.h>
 #include <asm/msr.h>
 #include <asm/e820.h>
+#include <asm/mtrr.h>
 #include "cpu.h"
 
 #ifdef CONFIG_X86_OOSTORE
 
-static u32 __init power2(u32 x)
+static u32 __cpuinit power2(u32 x)
 {
 	u32 s=1;
 	while(s<=x)
@@ -21,7 +22,7 @@ static u32 __init power2(u32 x)
  *	Set up an actual MCR
  */
  
-static void __init centaur_mcr_insert(int reg, u32 base, u32 size, int key)
+static void __cpuinit centaur_mcr_insert(int reg, u32 base, u32 size, int key)
 {
 	u32 lo, hi;
 	
@@ -39,7 +40,7 @@ static void __init centaur_mcr_insert(int reg, u32 base, u32 size, int key)
  *	Shortcut: We know you can't put 4Gig of RAM on a winchip
  */
 
-static u32 __init ramtop(void)		/* 16388 */
+static u32 __cpuinit ramtop(void)		/* 16388 */
 {
 	int i;
 	u32 top = 0;
@@ -90,7 +91,7 @@ static u32 __init ramtop(void)		/* 16388 */
  *	Compute a set of MCR's to give maximum coverage
  */
 
-static int __init centaur_mcr_compute(int nr, int key)
+static int __cpuinit centaur_mcr_compute(int nr, int key)
 {
 	u32 mem = ramtop();
 	u32 root = power2(mem);
@@ -165,7 +166,7 @@ static int __init centaur_mcr_compute(int nr, int key)
 	return ct;
 }
 
-static void __init centaur_create_optimal_mcr(void)
+static void __cpuinit centaur_create_optimal_mcr(void)
 {
 	int i;
 	/*
@@ -188,7 +189,7 @@ static void __init centaur_create_optimal_mcr(void)
 		wrmsr(MSR_IDT_MCR0+i, 0, 0);
 }
 
-static void __init winchip2_create_optimal_mcr(void)
+static void __cpuinit winchip2_create_optimal_mcr(void)
 {
 	u32 lo, hi;
 	int i;
@@ -226,7 +227,7 @@ static void __init winchip2_create_optimal_mcr(void)
  *	Handle the MCR key on the Winchip 2.
  */
 
-static void __init winchip2_unprotect_mcr(void)
+static void __cpuinit winchip2_unprotect_mcr(void)
 {
 	u32 lo, hi;
 	u32 key;
@@ -238,7 +239,7 @@ static void __init winchip2_unprotect_mcr(void)
 	wrmsr(MSR_IDT_MCR_CTRL, lo, hi);
 }
 
-static void __init winchip2_protect_mcr(void)
+static void __cpuinit winchip2_protect_mcr(void)
 {
 	u32 lo, hi;
 	
@@ -256,7 +257,7 @@ static void __init winchip2_protect_mcr(void)
 #define RNG_ENABLED	(1 << 3)
 #define RNG_ENABLE	(1 << 6)	/* MSR_VIA_RNG */
 
-static void __init init_c3(struct cpuinfo_x86 *c)
+static void __cpuinit init_c3(struct cpuinfo_x86 *c)
 {
 	u32  lo, hi;
 
@@ -302,7 +303,7 @@ static void __init init_c3(struct cpuinfo_x86 *c)
 	display_cacheinfo(c);
 }
 
-static void __init init_centaur(struct cpuinfo_x86 *c)
+static void __cpuinit init_centaur(struct cpuinfo_x86 *c)
 {
 	enum {
 		ECX8=1<<1,
@@ -441,7 +442,7 @@ static void __init init_centaur(struct cpuinfo_x86 *c)
 	}
 }
 
-static unsigned int centaur_size_cache(struct cpuinfo_x86 * c, unsigned int size)
+static unsigned int __cpuinit centaur_size_cache(struct cpuinfo_x86 * c, unsigned int size)
 {
 	/* VIA C3 CPUs (670-68F) need further shifting. */
 	if ((c->x86 == 6) && ((c->x86_model == 7) || (c->x86_model == 8)))
@@ -456,7 +457,7 @@ static unsigned int centaur_size_cache(struct cpuinfo_x86 * c, unsigned int size
 	return size;
 }
 
-static struct cpu_dev centaur_cpu_dev __initdata = {
+static struct cpu_dev centaur_cpu_dev __cpuinitdata = {
 	.c_vendor	= "Centaur",
 	.c_ident	= { "CentaurHauls" },
 	.c_init		= init_centaur,

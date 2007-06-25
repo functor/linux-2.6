@@ -21,7 +21,7 @@
 #include <linux/netfilter_ipv4/ip_conntrack_core.h>
 #include <linux/netfilter_ipv4/ip_conntrack_protocol.h>
 
-unsigned int ip_ct_icmp_timeout = 30*HZ;
+unsigned int ip_ct_icmp_timeout __read_mostly = 30*HZ;
 
 #if 0
 #define DEBUGP printk
@@ -224,25 +224,14 @@ icmp_error(struct sk_buff *skb, enum ip_conntrack_info *ctinfo,
 	}
 
 	/* See ip_conntrack_proto_tcp.c */
-	if (hooknum != NF_IP_PRE_ROUTING)
-		goto checksum_skipped;
-
-	switch (skb->ip_summed) {
-	case CHECKSUM_HW:
-		if (!(u16)csum_fold(skb->csum)) 
-			break;
-		/* fall through */
-	case CHECKSUM_NONE:
-		skb->csum = 0;
-		if (__skb_checksum_complete(skb)) {
-			if (LOG_INVALID(IPPROTO_ICMP))
-				nf_log_packet(PF_INET, 0, skb, NULL, NULL, NULL,
-					      "ip_ct_icmp: bad ICMP checksum ");
-			return -NF_ACCEPT;
-		}
+	if (ip_conntrack_checksum && hooknum == NF_IP_PRE_ROUTING &&
+	    nf_ip_checksum(skb, hooknum, skb->nh.iph->ihl * 4, 0)) {
+		if (LOG_INVALID(IPPROTO_ICMP))
+			nf_log_packet(PF_INET, 0, skb, NULL, NULL, NULL,
+				      "ip_ct_icmp: bad ICMP checksum ");
+		return -NF_ACCEPT;
 	}
 
-checksum_skipped:
 	/*
 	 *	18 is the highest 'known' ICMP type. Anything else is a mystery
 	 *
@@ -272,7 +261,7 @@ checksum_skipped:
 static int icmp_tuple_to_nfattr(struct sk_buff *skb,
 				const struct ip_conntrack_tuple *t)
 {
-	NFA_PUT(skb, CTA_PROTO_ICMP_ID, sizeof(u_int16_t),
+	NFA_PUT(skb, CTA_PROTO_ICMP_ID, sizeof(__be16),
 		&t->src.u.icmp.id);
 	NFA_PUT(skb, CTA_PROTO_ICMP_TYPE, sizeof(u_int8_t),
 		&t->dst.u.icmp.type);
@@ -298,7 +287,7 @@ static int icmp_nfattr_to_tuple(struct nfattr *tb[],
 	tuple->dst.u.icmp.code =
 			*(u_int8_t *)NFA_DATA(tb[CTA_PROTO_ICMP_CODE-1]);
 	tuple->src.u.icmp.id =
-			*(u_int16_t *)NFA_DATA(tb[CTA_PROTO_ICMP_ID-1]);
+			*(__be16 *)NFA_DATA(tb[CTA_PROTO_ICMP_ID-1]);
 
 	if (tuple->dst.u.icmp.type >= sizeof(invmap)
 	    || !invmap[tuple->dst.u.icmp.type])

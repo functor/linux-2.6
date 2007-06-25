@@ -18,8 +18,6 @@ struct __kernel_sockaddr_storage {
 
 #if defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2)
 
-#include <linux/config.h>		/* for CONFIG_COMPAT */
-#include <linux/linkage.h>
 #include <asm/socket.h>			/* arch-dependent defines	*/
 #include <linux/sockios.h>		/* the SIOCxxx I/O controls	*/
 #include <linux/uio.h>			/* iovec support		*/
@@ -150,6 +148,7 @@ __KINLINE struct cmsghdr * cmsg_nxthdr (struct msghdr *__msg, struct cmsghdr *__
 
 #define	SCM_RIGHTS	0x01		/* rw: access rights (array of int) */
 #define SCM_CREDENTIALS 0x02		/* rw: struct ucred		*/
+#define SCM_SECURITY	0x03		/* rw: security label		*/
 
 struct ucred {
 	__u32	pid;
@@ -265,6 +264,7 @@ struct ucred {
 #define SOL_IPV6	41
 #define SOL_ICMPV6	58
 #define SOL_SCTP	132
+#define SOL_UDPLITE	136     /* UDP-Lite (RFC 3828) */
 #define SOL_RAW		255
 #define SOL_IPX		256
 #define SOL_AX25	257
@@ -283,11 +283,6 @@ struct ucred {
 #define SOL_NETLINK	270
 #define SOL_TIPC	271
 
-#if defined(CONFIG_VNET) || defined(CONFIG_VNET_MODULE)
-/* PlanetLab PL2525: reset the context ID of an existing socket */
-#define SO_SETXID	SO_PEERCRED
-#endif
-
 /* IPX options */
 #define IPX_TYPE	1
 
@@ -298,7 +293,7 @@ extern int memcpy_fromiovecend(unsigned char *kdata, struct iovec *iov,
 extern int csum_partial_copy_fromiovecend(unsigned char *kdata, 
 					  struct iovec *iov, 
 					  int offset, 
-					  unsigned int len, int *csump);
+					  unsigned int len, __wsum *csump);
 
 extern int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode);
 extern int memcpy_toiovec(struct iovec *v, unsigned char *kdata, int len);

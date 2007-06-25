@@ -64,7 +64,7 @@ static int slirp_write(int fd, struct sk_buff **skb,
 			       (struct slirp_data *) &lp->user));
 }
 
-struct net_kern_info slirp_kern_info = {
+const struct net_kern_info slirp_kern_info = {
 	.init			= slirp_init,
 	.protocol		= slirp_protocol,
 	.read			= slirp_read,
@@ -77,7 +77,7 @@ static int slirp_setup(char *str, char **mac_out, void *data)
 	int i=0;
 
 	*init = ((struct slirp_init)
-		{ argw :		{ { "slirp", NULL  } } });
+		{ .argw = { { "slirp", NULL  } } });
 
 	str = split_if_spec(str, mac_out, NULL);
 
@@ -116,18 +116,7 @@ static struct transport slirp_transport = {
 static int register_slirp(void)
 {
 	register_transport(&slirp_transport);
-	return(1);
+	return 0;
 }
 
-__initcall(register_slirp);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+late_initcall(register_slirp);

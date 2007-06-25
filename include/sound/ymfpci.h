@@ -269,9 +269,10 @@ struct snd_ymfpci_pcm {
 	enum snd_ymfpci_pcm_type type;
 	struct snd_pcm_substream *substream;
 	struct snd_ymfpci_voice *voices[2];	/* playback only */
-	unsigned int running: 1;
-	unsigned int output_front: 1;
-	unsigned int output_rear: 1;
+	unsigned int running: 1,
+	             output_front: 1,
+	             output_rear: 1,
+	             swap_rear: 1;
 	unsigned int update_pcm_vol;
 	u32 period_size;		/* cached from runtime->period_size */
 	u32 buffer_size;		/* cached from runtime->buffer_size */
@@ -285,7 +286,7 @@ struct snd_ymfpci {
 	int irq;
 
 	unsigned int device_id;	/* PCI device ID */
-	unsigned int rev;	/* PCI revision */
+	unsigned char rev;	/* PCI revision */
 	unsigned long reg_area_phys;
 	void __iomem *reg_area_virt;
 	struct resource *res_reg_area;

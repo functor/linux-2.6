@@ -10,7 +10,7 @@
 
 static int efs_readdir(struct file *, void *, filldir_t);
 
-struct file_operations efs_dir_operations = {
+const struct file_operations efs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= efs_readdir,
 };
@@ -20,7 +20,7 @@ struct inode_operations efs_dir_inode_operations = {
 };
 
 static int efs_readdir(struct file *filp, void *dirent, filldir_t filldir) {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct buffer_head *bh;
 
 	struct efs_dir		*dirblock;

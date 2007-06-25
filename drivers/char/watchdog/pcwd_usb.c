@@ -24,7 +24,6 @@
  *	http://www.berkprod.com/ or http://www.pcwatchdog.com/
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -42,6 +41,8 @@
 #include <linux/completion.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
+#include <linux/mutex.h>
+#include <linux/hid.h>		/* For HID_REQ_SET_REPORT & HID_DT_REPORT */
 
 
 #ifdef CONFIG_USB_DEBUG
@@ -109,10 +110,6 @@ MODULE_DEVICE_TABLE (usb, usb_pcwd_table);
 #define CMD_ENABLE_WATCHDOG		0x30	/* Enable / Disable Watchdog */
 #define CMD_DISABLE_WATCHDOG		CMD_ENABLE_WATCHDOG
 
-/* Some defines that I like to be somewhere else like include/linux/usb_hid.h */
-#define HID_REQ_SET_REPORT		0x09
-#define HID_DT_REPORT			(USB_TYPE_CLASS | 0x02)
-
 /* We can only use 1 card due to the /dev/watchdog restriction */
 static int cards_found;
 
@@ -143,7 +140,7 @@ struct usb_pcwd_private {
 static struct usb_pcwd_private *usb_pcwd_device;
 
 /* prevent races between open() and disconnect() */
-static DECLARE_MUTEX (disconnect_sem);
+static DEFINE_MUTEX(disconnect_mutex);
 
 /* local function prototypes */
 static int usb_pcwd_probe	(struct usb_interface *interface, const struct usb_device_id *id);
@@ -158,7 +155,7 @@ static struct usb_driver usb_pcwd_driver = {
 };
 
 
-static void usb_pcwd_intr_done(struct urb *urb, struct pt_regs *regs)
+static void usb_pcwd_intr_done(struct urb *urb)
 {
 	struct usb_pcwd_private *usb_pcwd = (struct usb_pcwd_private *)urb->context;
 	unsigned char *data = usb_pcwd->intr_buffer;
@@ -316,6 +313,19 @@ static int usb_pcwd_get_temperature(struct usb_pcwd_private *usb_pcwd, int *temp
 	return 0;
 }
 
+static int usb_pcwd_get_timeleft(struct usb_pcwd_private *usb_pcwd, int *time_left)
+{
+	unsigned char msb, lsb;
+
+	/* Read the time that's left before rebooting */
+	/* Note: if the board is not yet armed then we will read 0xFFFF */
+	usb_pcwd_send_command(usb_pcwd, CMD_READ_WATCHDOG_TIMEOUT, &msb, &lsb);
+
+	*time_left = (msb << 8) + lsb;
+
+	return 0;
+}
+
 /*
  *	/dev/watchdog handling
  */
@@ -421,8 +431,18 @@ static int usb_pcwd_ioctl(struct inode *inode, struct file *file,
 		case WDIOC_GETTIMEOUT:
 			return put_user(heartbeat, p);
 
+		case WDIOC_GETTIMELEFT:
+		{
+			int time_left;
+
+			if (usb_pcwd_get_timeleft(usb_pcwd_device, &time_left))
+				return -EFAULT;
+
+			return put_user(time_left, p);
+		}
+
 		default:
-			return -ENOIOCTLCMD;
+			return -ENOTTY;
 	}
 }
 
@@ -500,7 +520,7 @@ static int usb_pcwd_notify_sys(struct notifier_block *this, unsigned long code, 
  *	Kernel Interfaces
  */
 
-static struct file_operations usb_pcwd_fops = {
+static const struct file_operations usb_pcwd_fops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.write =	usb_pcwd_write,
@@ -515,7 +535,7 @@ static struct miscdevice usb_pcwd_miscdev = {
 	.fops =		&usb_pcwd_fops,
 };
 
-static struct file_operations usb_pcwd_temperature_fops = {
+static const struct file_operations usb_pcwd_temperature_fops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.read =		usb_pcwd_temperature_read,
@@ -538,8 +558,7 @@ static struct notifier_block usb_pcwd_notifier = {
  */
 static inline void usb_pcwd_delete (struct usb_pcwd_private *usb_pcwd)
 {
-	if (usb_pcwd->intr_urb != NULL)
-		usb_free_urb (usb_pcwd->intr_urb);
+	usb_free_urb(usb_pcwd->intr_urb);
 	if (usb_pcwd->intr_buffer != NULL)
 		usb_buffer_free(usb_pcwd->udev, usb_pcwd->intr_size,
 				usb_pcwd->intr_buffer, usb_pcwd->intr_dma);
@@ -612,7 +631,7 @@ static int usb_pcwd_probe(struct usb_interface *interface, const struct usb_devi
 	usb_pcwd->intr_size = (le16_to_cpu(endpoint->wMaxPacketSize) > 8 ? le16_to_cpu(endpoint->wMaxPacketSize) : 8);
 
 	/* set up the memory buffer's */
-	if (!(usb_pcwd->intr_buffer = usb_buffer_alloc(udev, usb_pcwd->intr_size, SLAB_ATOMIC, &usb_pcwd->intr_dma))) {
+	if (!(usb_pcwd->intr_buffer = usb_buffer_alloc(udev, usb_pcwd->intr_size, GFP_ATOMIC, &usb_pcwd->intr_dma))) {
 		printk(KERN_ERR PFX "Out of memory\n");
 		goto error;
 	}
@@ -704,7 +723,8 @@ err_out_misc_deregister:
 err_out_unregister_reboot:
 	unregister_reboot_notifier(&usb_pcwd_notifier);
 error:
-	usb_pcwd_delete (usb_pcwd);
+	if (usb_pcwd)
+		usb_pcwd_delete(usb_pcwd);
 	usb_pcwd_device = NULL;
 	return retval;
 }
@@ -723,7 +743,7 @@ static void usb_pcwd_disconnect(struct usb_interface *interface)
 	struct usb_pcwd_private *usb_pcwd;
 
 	/* prevent races with open() */
-	down (&disconnect_sem);
+	mutex_lock(&disconnect_mutex);
 
 	usb_pcwd = usb_get_intfdata (interface);
 	usb_set_intfdata (interface, NULL);
@@ -749,7 +769,7 @@ static void usb_pcwd_disconnect(struct usb_interface *interface)
 
 	cards_found--;
 
-	up (&disconnect_sem);
+	mutex_unlock(&disconnect_mutex);
 
 	printk(KERN_INFO PFX "USB PC Watchdog disconnected\n");
 }

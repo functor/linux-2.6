@@ -337,8 +337,7 @@ static int pppoe_rcv_core(struct sock *sk, struct sk_buff *skb)
 	if (sk->sk_state & PPPOX_BOUND) {
 		struct pppoe_hdr *ph = (struct pppoe_hdr *) skb->nh.raw;
 		int len = ntohs(ph->length);
-		skb_pull(skb, sizeof(struct pppoe_hdr));
-		skb_postpull_rcsum(skb, ph, sizeof(*ph));
+		skb_pull_rcsum(skb, sizeof(struct pppoe_hdr));
 		if (pskb_trim_rcsum(skb, len))
 			goto abort_kfree;
 
@@ -387,14 +386,14 @@ static int pppoe_rcv(struct sk_buff *skb,
 	if (!pskb_may_pull(skb, sizeof(struct pppoe_hdr)))
 		goto drop;
 
-	if (!(skb = skb_share_check(skb, GFP_ATOMIC))) 
+	if (!(skb = skb_share_check(skb, GFP_ATOMIC)))
 		goto out;
 
 	ph = (struct pppoe_hdr *) skb->nh.raw;
 
 	po = get_item((unsigned long) ph->sid, eth_hdr(skb)->h_source);
-	if (po != NULL) 
-		return sk_receive_skb(sk_pppox(po), skb);
+	if (po != NULL)
+		return sk_receive_skb(sk_pppox(po), skb, 0);
 drop:
 	kfree_skb(skb);
 out:
@@ -419,7 +418,7 @@ static int pppoe_disc_rcv(struct sk_buff *skb,
 	if (!pskb_may_pull(skb, sizeof(struct pppoe_hdr)))
 		goto abort;
 
-	if (!(skb = skb_share_check(skb, GFP_ATOMIC))) 
+	if (!(skb = skb_share_check(skb, GFP_ATOMIC)))
 		goto out;
 
 	ph = (struct pppoe_hdr *) skb->nh.raw;
@@ -747,7 +746,7 @@ static int pppoe_ioctl(struct socket *sock, unsigned int cmd,
 }
 
 
-static int pppoe_sendmsg(struct kiocb *iocb, struct socket *sock, 
+static int pppoe_sendmsg(struct kiocb *iocb, struct socket *sock,
 		  struct msghdr *m, size_t total_len)
 {
 	struct sk_buff *skb = NULL;
@@ -863,6 +862,9 @@ static int __pppoe_xmit(struct sock *sk, struct sk_buff *skb)
 		 * give dev_queue_xmit something it can free.
 		 */
 		skb2 = skb_clone(skb, GFP_ATOMIC);
+
+		if (skb2 == NULL)
+			goto abort;
 	}
 
 	ph = (struct pppoe_hdr *) skb_push(skb2, sizeof(struct pppoe_hdr));
@@ -906,8 +908,8 @@ static int pppoe_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 }
 
 
-static struct ppp_channel_ops pppoe_chan_ops = { 
-	.start_xmit = pppoe_xmit, 
+static struct ppp_channel_ops pppoe_chan_ops = {
+	.start_xmit = pppoe_xmit,
 };
 
 static int pppoe_recvmsg(struct kiocb *iocb, struct socket *sock,
@@ -1009,7 +1011,7 @@ static void *pppoe_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 		goto out;
 	}
 	po = v;
-	if (po->next) 
+	if (po->next)
 		po = po->next;
 	else {
 		int hash = hash_item(po->pppoe_pa.sid, po->pppoe_pa.remote);
@@ -1105,7 +1107,7 @@ static int __init pppoe_init(void)
 	err = pppoe_proc_init();
 	if (err)
 		goto out_unregister_pppox_proto;
-	
+
 	dev_add_pack(&pppoes_ptype);
 	dev_add_pack(&pppoed_ptype);
 	register_netdevice_notifier(&pppoe_notifier);

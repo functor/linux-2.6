@@ -13,7 +13,6 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/i2c.h>
-#include <linux/i2c-dev.h>
 #include <asm/semaphore.h>
 #include <asm/prom.h>
 #include <asm/smu.h>
@@ -234,15 +233,15 @@ static void wf_sat_create(struct i2c_adapter *adapter, struct device_node *dev)
 {
 	struct wf_sat *sat;
 	struct wf_sat_sensor *sens;
-	u32 *reg;
-	char *loc, *type;
+	const u32 *reg;
+	const char *loc, *type;
 	u8 addr, chip, core;
 	struct device_node *child;
 	int shift, cpu, index;
 	char *name;
 	int vsens[2], isens[2];
 
-	reg = (u32 *) get_property(dev, "reg", NULL);
+	reg = get_property(dev, "reg", NULL);
 	if (reg == NULL)
 		return;
 	addr = *reg;
@@ -269,7 +268,7 @@ static void wf_sat_create(struct i2c_adapter *adapter, struct device_node *dev)
 	isens[0] = isens[1] = -1;
 	child = NULL;
 	while ((child = of_get_next_child(dev, child)) != NULL) {
-		reg = (u32 *) get_property(child, "reg", NULL);
+		reg = get_property(child, "reg", NULL);
 		type = get_property(child, "device_type", NULL);
 		loc = get_property(child, "location", NULL);
 		if (reg == NULL || loc == NULL)
@@ -398,12 +397,7 @@ static int wf_sat_detach(struct i2c_client *client)
 
 static int __init sat_sensors_init(void)
 {
-	int err;
-
-	err = i2c_add_driver(&wf_sat_driver);
-	if (err < 0)
-		return err;
-	return 0;
+	return i2c_add_driver(&wf_sat_driver);
 }
 
 static void __exit sat_sensors_exit(void)

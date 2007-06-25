@@ -28,7 +28,6 @@
 
 #ifdef __KERNEL__
 
-#include <linux/config.h>
 #include <linux/mmzone.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
@@ -148,9 +147,10 @@ extern void mpol_rebind_policy(struct mempolicy *pol, const nodemask_t *new);
 extern void mpol_rebind_task(struct task_struct *tsk,
 					const nodemask_t *new);
 extern void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new);
+extern void mpol_fix_fork_child_flag(struct task_struct *p);
 #define set_cpuset_being_rebound(x) (cpuset_being_rebound = (x))
 
-#ifdef CONFIG_CPUSET
+#ifdef CONFIG_CPUSETS
 #define current_cpuset_is_being_rebound() \
 				(cpuset_being_rebound == current->cpuset)
 #else
@@ -162,9 +162,9 @@ extern struct zonelist *huge_zonelist(struct vm_area_struct *vma,
 		unsigned long addr);
 extern unsigned slab_node(struct mempolicy *policy);
 
-extern int policy_zone;
+extern enum zone_type policy_zone;
 
-static inline void check_highest_zone(int k)
+static inline void check_highest_zone(enum zone_type k)
 {
 	if (k > policy_zone)
 		policy_zone = k;
@@ -246,6 +246,10 @@ static inline void mpol_rebind_task(struct task_struct *tsk,
 }
 
 static inline void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new)
+{
+}
+
+static inline void mpol_fix_fork_child_flag(struct task_struct *p)
 {
 }
 

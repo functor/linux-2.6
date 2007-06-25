@@ -39,6 +39,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 
 /* How many retries on register read error */
 #define MAX_RETRIES	5
@@ -107,7 +108,7 @@ static struct i2c_driver w83l785ts_driver = {
 struct w83l785ts_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
 
@@ -221,7 +222,7 @@ static int w83l785ts_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* We can fill in the remaining client fields. */
 	strlcpy(new_client->name, "w83l785ts", I2C_NAME_SIZE);
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Default values in case the first read fails (unlikely). */
 	data->temp[1] = data->temp[0] = 0;
@@ -235,21 +236,30 @@ static int w83l785ts_detect(struct i2c_adapter *adapter, int address, int kind)
 	 * Nothing yet, assume it is already started.
 	 */
 
+	err = device_create_file(&new_client->dev,
+				 &sensor_dev_attr_temp1_input.dev_attr);
+	if (err)
+		goto exit_remove;
+
+	err = device_create_file(&new_client->dev,
+				 &sensor_dev_attr_temp1_max.dev_attr);
+	if (err)
+		goto exit_remove;
+
 	/* Register sysfs hooks */
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
+		goto exit_remove;
 	}
-
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_input.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_max.dev_attr);
 
 	return 0;
 
-exit_detach:
+exit_remove:
+	device_remove_file(&new_client->dev,
+			   &sensor_dev_attr_temp1_input.dev_attr);
+	device_remove_file(&new_client->dev,
+			   &sensor_dev_attr_temp1_max.dev_attr);
 	i2c_detach_client(new_client);
 exit_free:
 	kfree(data);
@@ -263,7 +273,10 @@ static int w83l785ts_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
-
+	device_remove_file(&client->dev,
+			   &sensor_dev_attr_temp1_input.dev_attr);
+	device_remove_file(&client->dev,
+			   &sensor_dev_attr_temp1_max.dev_attr);
 	if ((err = i2c_detach_client(client)))
 		return err;
 
@@ -299,7 +312,7 @@ static struct w83l785ts_data *w83l785ts_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct w83l785ts_data *data = i2c_get_clientdata(client);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (!data->valid || time_after(jiffies, data->last_updated + HZ * 2)) {
 		dev_dbg(&client->dev, "Updating w83l785ts data.\n");
@@ -312,7 +325,7 @@ static struct w83l785ts_data *w83l785ts_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

@@ -44,7 +44,7 @@
  * past 0.99 at all due to some boolean logic error. */
 #define AGPGART_VERSION_MAJOR 0
 #define AGPGART_VERSION_MINOR 101
-static struct agp_version agp_current_version =
+static const struct agp_version agp_current_version =
 {
 	.major = AGPGART_VERSION_MAJOR,
 	.minor = AGPGART_VERSION_MINOR,
@@ -228,7 +228,7 @@ static void agp_backend_cleanup(struct agp_bridge_data *bridge)
 struct agp_bridge_data *agp_alloc_bridge(void)
 {
 	struct agp_bridge_data *bridge;
-	
+
 	bridge = kzalloc(sizeof(*bridge), GFP_KERNEL);
 	if (!bridge)
 		return NULL;

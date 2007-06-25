@@ -20,7 +20,6 @@
 // #define	DEBUG			// error path messages, extra info
 // #define	VERBOSE			// more; success messages
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/init.h>
@@ -30,7 +29,7 @@
 #include <linux/workqueue.h>
 #include <linux/mii.h>
 #include <linux/usb.h>
-#include <linux/usb_cdc.h>
+#include <linux/usb/cdc.h>
 
 #include "usbnet.h"
 
@@ -39,6 +38,20 @@
  * RNDIS is NDIS remoted over USB.  It's a MSFT variant of CDC ACM ... of
  * course ACM was intended for modems, not Ethernet links!  USB's standard
  * for Ethernet links is "CDC Ethernet", which is significantly simpler.
+ *
+ * NOTE that Microsoft's "RNDIS 1.0" specification is incomplete.  Issues
+ * include:
+ *    - Power management in particular relies on information that's scattered
+ *	through other documentation, and which is incomplete or incorrect even
+ *	there.
+ *    - There are various undocumented protocol requirements, such as the
+ *	need to send unused garbage in control-OUT messages.
+ *    - In some cases, MS-Windows will emit undocumented requests; this
+ *	matters more to peripheral implementations than host ones.
+ *
+ * For these reasons and others, ** USE OF RNDIS IS STRONGLY DISCOURAGED ** in
+ * favor of such non-proprietary alternatives as CDC Ethernet or the newer (and
+ * currently rare) "Ethernet Emulation Model" (EEM).
  */
 
 /*
@@ -72,17 +85,17 @@ struct rndis_msg_hdr {
  */
 #define RNDIS_MSG_PACKET	ccpu2(0x00000001)	/* 1-N packets */
 #define RNDIS_MSG_INIT		ccpu2(0x00000002)
-#define RNDIS_MSG_INIT_C 	(RNDIS_MSG_INIT|RNDIS_MSG_COMPLETION)
+#define RNDIS_MSG_INIT_C	(RNDIS_MSG_INIT|RNDIS_MSG_COMPLETION)
 #define RNDIS_MSG_HALT		ccpu2(0x00000003)
 #define RNDIS_MSG_QUERY		ccpu2(0x00000004)
-#define RNDIS_MSG_QUERY_C 	(RNDIS_MSG_QUERY|RNDIS_MSG_COMPLETION)
+#define RNDIS_MSG_QUERY_C	(RNDIS_MSG_QUERY|RNDIS_MSG_COMPLETION)
 #define RNDIS_MSG_SET		ccpu2(0x00000005)
-#define RNDIS_MSG_SET_C 	(RNDIS_MSG_SET|RNDIS_MSG_COMPLETION)
+#define RNDIS_MSG_SET_C		(RNDIS_MSG_SET|RNDIS_MSG_COMPLETION)
 #define RNDIS_MSG_RESET		ccpu2(0x00000006)
-#define RNDIS_MSG_RESET_C 	(RNDIS_MSG_RESET|RNDIS_MSG_COMPLETION)
+#define RNDIS_MSG_RESET_C	(RNDIS_MSG_RESET|RNDIS_MSG_COMPLETION)
 #define RNDIS_MSG_INDICATE	ccpu2(0x00000007)
 #define RNDIS_MSG_KEEPALIVE	ccpu2(0x00000008)
-#define RNDIS_MSG_KEEPALIVE_C 	(RNDIS_MSG_KEEPALIVE|RNDIS_MSG_COMPLETION)
+#define RNDIS_MSG_KEEPALIVE_C	(RNDIS_MSG_KEEPALIVE|RNDIS_MSG_COMPLETION)
 
 /* codes for "status" field of completion messages */
 #define	RNDIS_STATUS_SUCCESS		ccpu2(0x00000000)
@@ -366,6 +379,7 @@ static int rndis_bind(struct usbnet *dev, struct usb_interface *intf)
 {
 	int			retval;
 	struct net_device	*net = dev->net;
+	struct cdc_state	*info = (void *) &dev->data;
 	union {
 		void			*buf;
 		struct rndis_msg_hdr	*header;
@@ -384,7 +398,7 @@ static int rndis_bind(struct usbnet *dev, struct usb_interface *intf)
 		return -ENOMEM;
 	retval = usbnet_generic_cdc_bind(dev, intf);
 	if (retval < 0)
-		goto done;
+		goto fail;
 
 	net->hard_header_len += sizeof (struct rndis_data_hdr);
 
@@ -399,10 +413,7 @@ static int rndis_bind(struct usbnet *dev, struct usb_interface *intf)
 	if (unlikely(retval < 0)) {
 		/* it might not even be an RNDIS device!! */
 		dev_err(&intf->dev, "RNDIS init failed, %d\n", retval);
-fail:
-		usb_driver_release_interface(driver_of(intf),
-			((struct cdc_state *)&(dev->data))->data);
-		goto done;
+		goto fail_and_release;
 	}
 	dev->hard_mtu = le32_to_cpu(u.init_c->max_transfer_size);
 	/* REVISIT:  peripheral "alignment" request is ignored ... */
@@ -418,7 +429,7 @@ fail:
 	retval = rndis_command(dev, u.header);
 	if (unlikely(retval < 0)) {
 		dev_err(&intf->dev, "rndis get ethaddr, %d\n", retval);
-		goto fail;
+		goto fail_and_release;
 	}
 	tmp = le32_to_cpu(u.get_c->offset);
 	if (unlikely((tmp + 8) > (1024 - ETH_ALEN)
@@ -426,7 +437,7 @@ fail:
 		dev_err(&intf->dev, "rndis ethaddr off %d len %d ?\n",
 			tmp, le32_to_cpu(u.get_c->len));
 		retval = -EDOM;
-		goto fail;
+		goto fail_and_release;
 	}
 	memcpy(net->dev_addr, tmp + (char *)&u.get_c->request_id, ETH_ALEN);
 
@@ -442,11 +453,18 @@ fail:
 	retval = rndis_command(dev, u.header);
 	if (unlikely(retval < 0)) {
 		dev_err(&intf->dev, "rndis set packet filter, %d\n", retval);
-		goto fail;
+		goto fail_and_release;
 	}
 
 	retval = 0;
-done:
+
+	kfree(u.buf);
+	return retval;
+
+fail_and_release:
+	usb_set_intfdata(info->data, NULL);
+	usb_driver_release_interface(driver_of(intf), info->data);
+fail:
 	kfree(u.buf);
 	return retval;
 }
@@ -456,7 +474,7 @@ static void rndis_unbind(struct usbnet *dev, struct usb_interface *intf)
 	struct rndis_halt	*halt;
 
 	/* try to clear any rndis state/activity (no i/o from stack!) */
-	halt = kcalloc(1, sizeof *halt, SLAB_KERNEL);
+	halt = kzalloc(sizeof *halt, GFP_KERNEL);
 	if (halt) {
 		halt->msg_type = RNDIS_MSG_HALT;
 		halt->msg_len = ccpu2(sizeof *halt);
@@ -596,13 +614,13 @@ static struct usb_driver rndis_driver = {
 
 static int __init rndis_init(void)
 {
- 	return usb_register(&rndis_driver);
+	return usb_register(&rndis_driver);
 }
 module_init(rndis_init);
 
 static void __exit rndis_exit(void)
 {
- 	usb_deregister(&rndis_driver);
+	usb_deregister(&rndis_driver);
 }
 module_exit(rndis_exit);
 

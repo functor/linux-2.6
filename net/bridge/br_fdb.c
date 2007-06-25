@@ -23,7 +23,7 @@
 #include <asm/atomic.h>
 #include "br_private.h"
 
-static kmem_cache_t *br_fdb_cache __read_mostly;
+static struct kmem_cache *br_fdb_cache __read_mostly;
 static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 		      const unsigned char *addr);
 
@@ -128,7 +128,10 @@ void br_fdb_cleanup(unsigned long _data)
 	mod_timer(&br->gc_timer, jiffies + HZ/10);
 }
 
-void br_fdb_delete_by_port(struct net_bridge *br, struct net_bridge_port *p)
+
+void br_fdb_delete_by_port(struct net_bridge *br,
+			   const struct net_bridge_port *p,
+			   int do_all)
 {
 	int i;
 
@@ -142,6 +145,8 @@ void br_fdb_delete_by_port(struct net_bridge *br, struct net_bridge_port *p)
 			if (f->dst != p) 
 				continue;
 
+			if (f->is_static && !do_all)
+				continue;
 			/*
 			 * if multiple ports all have the same device address
 			 * then when one port is deleted, assign
@@ -341,7 +346,6 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 	if (hold_time(br) == 0)
 		return;
 
-	rcu_read_lock();
 	fdb = fdb_find(head, addr);
 	if (likely(fdb)) {
 		/* attempt to update an entry for a local interface */
@@ -356,13 +360,12 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 			fdb->ageing_timer = jiffies;
 		}
 	} else {
-		spin_lock_bh(&br->hash_lock);
+		spin_lock(&br->hash_lock);
 		if (!fdb_find(head, addr))
 			fdb_create(head, source, addr, 0);
 		/* else  we lose race and someone else inserts
 		 * it first, don't bother updating
 		 */
-		spin_unlock_bh(&br->hash_lock);
+		spin_unlock(&br->hash_lock);
 	}
-	rcu_read_unlock();
 }

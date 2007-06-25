@@ -195,18 +195,18 @@
      */
 
 int dmasound_catchRadius = 0;
-MODULE_PARM(dmasound_catchRadius, "i");
+module_param(dmasound_catchRadius, int, 0);
 
 static unsigned int numWriteBufs = DEFAULT_N_BUFFERS;
-MODULE_PARM(numWriteBufs, "i");
+module_param(numWriteBufs, int, 0);
 static unsigned int writeBufSize = DEFAULT_BUFF_SIZE ;	/* in bytes */
-MODULE_PARM(writeBufSize, "i");
+module_param(writeBufSize, int, 0);
 
 #ifdef HAS_RECORD
 static unsigned int numReadBufs = DEFAULT_N_BUFFERS;
-MODULE_PARM(numReadBufs, "i");
+module_param(numReadBufs, int, 0);
 static unsigned int readBufSize = DEFAULT_BUFF_SIZE;	/* in bytes */
-MODULE_PARM(readBufSize, "i");
+module_param(readBufSize, int, 0);
 #endif
 
 MODULE_LICENSE("GPL");
@@ -1051,7 +1051,7 @@ static int sq_release(struct inode *inode, struct file *file)
 
 	if (file->f_mode & FMODE_WRITE) {
 		if (write_sq.busy)
-			rc = sq_fsync(file, file->f_dentry);
+			rc = sq_fsync(file, file->f_path.dentry);
 
 		sq_reset_output() ; /* make sure dma is stopped and all is quiet */
 		write_sq_release_buffers();
@@ -1217,7 +1217,7 @@ static int sq_ioctl(struct inode *inode, struct file *file, u_int cmd,
 		if ((file->f_mode & FMODE_READ) && dmasound.mach.record)
 			sq_reset_input() ;
 		if (file->f_mode & FMODE_WRITE) {
-			result = sq_fsync(file, file->f_dentry);
+			result = sq_fsync(file, file->f_path.dentry);
 			sq_reset_output() ;
 		}
 		/* if we are the shared resource owner then release them */

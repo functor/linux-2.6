@@ -6,9 +6,8 @@
 menu "Firmware Drivers"
 
 config EDD
-	tristate "BIOS Enhanced Disk Drive calls determine boot disk (EXPERIMENTAL)"
-	depends on EXPERIMENTAL
-	depends on !IA64
+	tristate "BIOS Enhanced Disk Drive calls determine boot disk"
+	depends on !IA64 && !XEN
 	help
 	  Say Y or M here if you want to enable BIOS Enhanced Disk Drive
 	  Services real mode BIOS calls to determine which disk
@@ -65,7 +64,7 @@ config DELL_RBU
 	help
 	 Say m if you want to have the option of updating the BIOS for your
 	 DELL system. Note you need a Dell OpenManage or Dell Update package (DUP)
-	 supporting application to comunicate with the BIOS regarding the new
+	 supporting application to communicate with the BIOS regarding the new
 	 image for the image update to take effect.
 	 See <file:Documentation/dell_rbu.txt> for more details on the driver.
 

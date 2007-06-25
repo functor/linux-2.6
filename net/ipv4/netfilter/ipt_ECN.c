@@ -27,32 +27,27 @@ MODULE_DESCRIPTION("iptables ECN modification module");
 static inline int
 set_ect_ip(struct sk_buff **pskb, const struct ipt_ECN_info *einfo)
 {
-	if (((*pskb)->nh.iph->tos & IPT_ECN_IP_MASK)
-	    != (einfo->ip_ect & IPT_ECN_IP_MASK)) {
-		u_int16_t diffs[2];
+	struct iphdr *iph = (*pskb)->nh.iph;
 
+	if ((iph->tos & IPT_ECN_IP_MASK) != (einfo->ip_ect & IPT_ECN_IP_MASK)) {
+		__u8 oldtos;
 		if (!skb_make_writable(pskb, sizeof(struct iphdr)))
 			return 0;
-
-		diffs[0] = htons((*pskb)->nh.iph->tos) ^ 0xFFFF;
-		(*pskb)->nh.iph->tos &= ~IPT_ECN_IP_MASK;
-		(*pskb)->nh.iph->tos |= (einfo->ip_ect & IPT_ECN_IP_MASK);
-		diffs[1] = htons((*pskb)->nh.iph->tos);
-		(*pskb)->nh.iph->check
-			= csum_fold(csum_partial((char *)diffs,
-						 sizeof(diffs),
-						 (*pskb)->nh.iph->check
-						 ^0xFFFF));
+		iph = (*pskb)->nh.iph;
+		oldtos = iph->tos;
+		iph->tos &= ~IPT_ECN_IP_MASK;
+		iph->tos |= (einfo->ip_ect & IPT_ECN_IP_MASK);
+		nf_csum_replace2(&iph->check, htons(oldtos), htons(iph->tos));
 	} 
 	return 1;
 }
 
 /* Return 0 if there was an error. */
 static inline int
-set_ect_tcp(struct sk_buff **pskb, const struct ipt_ECN_info *einfo, int inward)
+set_ect_tcp(struct sk_buff **pskb, const struct ipt_ECN_info *einfo)
 {
 	struct tcphdr _tcph, *tcph;
-	u_int16_t diffs[2];
+	__be16 oldval;
 
 	/* Not enought header? */
 	tcph = skb_header_pointer(*pskb, (*pskb)->nh.iph->ihl*4,
@@ -70,22 +65,14 @@ set_ect_tcp(struct sk_buff **pskb, const struct ipt_ECN_info *einfo, int inward)
 		return 0;
 	tcph = (void *)(*pskb)->nh.iph + (*pskb)->nh.iph->ihl*4;
 
-	if ((*pskb)->ip_summed == CHECKSUM_HW &&
-	    skb_checksum_help(*pskb, inward))
-		return 0;
-
-	diffs[0] = ((u_int16_t *)tcph)[6];
+	oldval = ((__be16 *)tcph)[6];
 	if (einfo->operation & IPT_ECN_OP_SET_ECE)
 		tcph->ece = einfo->proto.tcp.ece;
 	if (einfo->operation & IPT_ECN_OP_SET_CWR)
 		tcph->cwr = einfo->proto.tcp.cwr;
-	diffs[1] = ((u_int16_t *)tcph)[6];
-	diffs[0] = diffs[0] ^ 0xFFFF;
 
-	if ((*pskb)->ip_summed != CHECKSUM_UNNECESSARY)
-		tcph->check = csum_fold(csum_partial((char *)diffs,
-						     sizeof(diffs),
-						     tcph->check^0xFFFF));
+	nf_proto_csum_replace2(&tcph->check, *pskb,
+				oldval, ((__be16 *)tcph)[6], 0);
 	return 1;
 }
 
@@ -94,8 +81,8 @@ target(struct sk_buff **pskb,
        const struct net_device *in,
        const struct net_device *out,
        unsigned int hooknum,
-       const void *targinfo,
-       void *userinfo)
+       const struct xt_target *target,
+       const void *targinfo)
 {
 	const struct ipt_ECN_info *einfo = targinfo;
 
@@ -105,7 +92,7 @@ target(struct sk_buff **pskb,
 
 	if (einfo->operation & (IPT_ECN_OP_SET_ECE | IPT_ECN_OP_SET_CWR)
 	    && (*pskb)->nh.iph->protocol == IPPROTO_TCP)
-		if (!set_ect_tcp(pskb, einfo, (out == NULL)))
+		if (!set_ect_tcp(pskb, einfo))
 			return NF_DROP;
 
 	return IPT_CONTINUE;
@@ -114,24 +101,12 @@ target(struct sk_buff **pskb,
 static int
 checkentry(const char *tablename,
 	   const void *e_void,
+	   const struct xt_target *target,
            void *targinfo,
-           unsigned int targinfosize,
            unsigned int hook_mask)
 {
 	const struct ipt_ECN_info *einfo = (struct ipt_ECN_info *)targinfo;
 	const struct ipt_entry *e = e_void;
-
-	if (targinfosize != IPT_ALIGN(sizeof(struct ipt_ECN_info))) {
-		printk(KERN_WARNING "ECN: targinfosize %u != %Zu\n",
-		       targinfosize,
-		       IPT_ALIGN(sizeof(struct ipt_ECN_info)));
-		return 0;
-	}
-
-	if (strcmp(tablename, "mangle") != 0) {
-		printk(KERN_WARNING "ECN: can only be called from \"mangle\" table, not \"%s\"\n", tablename);
-		return 0;
-	}
 
 	if (einfo->operation & IPT_ECN_OP_MASK) {
 		printk(KERN_WARNING "ECN: unsupported ECN operation %x\n",
@@ -143,33 +118,33 @@ checkentry(const char *tablename,
 			einfo->ip_ect);
 		return 0;
 	}
-
 	if ((einfo->operation & (IPT_ECN_OP_SET_ECE|IPT_ECN_OP_SET_CWR))
 	    && (e->ip.proto != IPPROTO_TCP || (e->ip.invflags & IPT_INV_PROTO))) {
 		printk(KERN_WARNING "ECN: cannot use TCP operations on a "
 		       "non-tcp rule\n");
 		return 0;
 	}
-
 	return 1;
 }
 
 static struct ipt_target ipt_ecn_reg = {
 	.name		= "ECN",
 	.target		= target,
+	.targetsize	= sizeof(struct ipt_ECN_info),
+	.table		= "mangle",
 	.checkentry	= checkentry,
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ipt_ecn_init(void)
 {
 	return ipt_register_target(&ipt_ecn_reg);
 }
 
-static void __exit fini(void)
+static void __exit ipt_ecn_fini(void)
 {
 	ipt_unregister_target(&ipt_ecn_reg);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ipt_ecn_init);
+module_exit(ipt_ecn_fini);

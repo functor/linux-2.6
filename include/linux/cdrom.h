@@ -378,7 +378,6 @@ struct cdrom_generic_command
 #define CDC_MEDIA_CHANGED 	0x80    /* media changed */
 #define CDC_PLAY_AUDIO		0x100   /* audio functions */
 #define CDC_RESET               0x200   /* hard reset device */
-#define CDC_IOCTLS              0x400   /* driver has non-standard ioctls */
 #define CDC_DRIVE_STATUS        0x800   /* driver implements drive status */
 #define CDC_GENERIC_PACKET	0x1000	/* driver implements generic packets */
 #define CDC_CD_R		0x2000	/* drive is a CD-R */
@@ -750,7 +749,7 @@ struct request_sense {
 #define MRW_MODE_PC			0x03
 
 struct mrw_feature_desc {
-	__u16 feature_code;
+	__be16 feature_code;
 #if defined(__BIG_ENDIAN_BITFIELD)
 	__u8 reserved1		: 2;
 	__u8 feature_version	: 4;
@@ -777,7 +776,7 @@ struct mrw_feature_desc {
 
 /* cf. mmc4r02g.pdf 5.3.10 Random Writable Feature (0020h) pg 197 of 635 */
 struct rwrt_feature_desc {
-	__u16 feature_code;
+	__be16 feature_code;
 #if defined(__BIG_ENDIAN_BITFIELD)
 	__u8 reserved1		: 2;
 	__u8 feature_version	: 4;
@@ -804,7 +803,7 @@ struct rwrt_feature_desc {
 };
 
 typedef struct {
-	__u16 disc_information_length;
+	__be16 disc_information_length;
 #if defined(__BIG_ENDIAN_BITFIELD)
 	__u8 reserved1			: 3;
         __u8 erasable			: 1;
@@ -850,7 +849,7 @@ typedef struct {
 } disc_information;
 
 typedef struct {
-	__u16 track_information_length;
+	__be16 track_information_length;
 	__u8 track_lsb;
 	__u8 session_lsb;
 	__u8 reserved1;
@@ -881,12 +880,12 @@ typedef struct {
 	__u8 lra_v			: 1;
 	__u8 reserved3			: 6;
 #endif
-	__u32 track_start;
-	__u32 next_writable;
-	__u32 free_blocks;
-	__u32 fixed_packet_size;
-	__u32 track_size;
-	__u32 last_rec_address;
+	__be32 track_start;
+	__be32 next_writable;
+	__be32 free_blocks;
+	__be32 fixed_packet_size;
+	__be32 track_size;
+	__be32 last_rec_address;
 } track_information;
 
 struct feature_header {
@@ -897,12 +896,12 @@ struct feature_header {
 };
 
 struct mode_page_header {
-	__u16 mode_data_length;
+	__be16 mode_data_length;
 	__u8 medium_type;
 	__u8 reserved1;
 	__u8 reserved2;
 	__u8 reserved3;
-	__u16 desc_length;
+	__be16 desc_length;
 };
 
 #ifdef __KERNEL__
@@ -974,9 +973,7 @@ struct cdrom_device_ops {
 	int (*reset) (struct cdrom_device_info *);
 	/* play stuff */
 	int (*audio_ioctl) (struct cdrom_device_info *,unsigned int, void *);
-	/* dev-specific */
- 	int (*dev_ioctl) (struct cdrom_device_info *,
-			  unsigned int, unsigned long);
+
 /* driver specifications */
 	const int capability;   /* capability flags */
 	int n_minors;           /* number of active minor devices */
@@ -1109,7 +1106,7 @@ typedef struct {
 #endif
 	__u8 session_format;
 	__u8 reserved6;
-	__u32 packet_size;
+	__be32 packet_size;
 	__u16 audio_pause;
 	__u8 mcn[16];
 	__u8 isrc[16];
@@ -1154,7 +1151,7 @@ typedef struct {
 } rpc_state_t;
 
 struct event_header {
-	__u16 data_len;
+	__be16 data_len;
 #if defined(__BIG_ENDIAN_BITFIELD)
 	__u8 nea		: 1;
 	__u8 reserved1		: 4;

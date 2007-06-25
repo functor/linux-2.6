@@ -10,7 +10,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/console.h>
@@ -26,7 +25,7 @@
 #include <asm/uaccess.h>
 #include <asm/irq.h>
 
-#include <xtensa/simcall.h>
+#include <asm/platform/simcall.h>
 
 #include <linux/tty.h>
 #include <linux/tty_flip.h>

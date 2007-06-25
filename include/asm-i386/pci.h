@@ -1,7 +1,6 @@
 #ifndef __i386_PCI_H
 #define __i386_PCI_H
 
-#include <linux/config.h>
 
 #ifdef __KERNEL__
 #include <linux/mm.h>		/* for struct page */
@@ -43,6 +42,27 @@ int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq);
 
 struct pci_dev;
 
+#ifdef CONFIG_SWIOTLB
+
+
+/* On Xen we use SWIOTLB instead of blk-specific bounce buffers. */
+#define PCI_DMA_BUS_IS_PHYS	(0)
+
+#define DECLARE_PCI_UNMAP_ADDR(ADDR_NAME)	\
+	dma_addr_t ADDR_NAME;
+#define DECLARE_PCI_UNMAP_LEN(LEN_NAME)		\
+	__u32 LEN_NAME;
+#define pci_unmap_addr(PTR, ADDR_NAME)			\
+	((PTR)->ADDR_NAME)
+#define pci_unmap_addr_set(PTR, ADDR_NAME, VAL)		\
+	(((PTR)->ADDR_NAME) = (VAL))
+#define pci_unmap_len(PTR, LEN_NAME)			\
+	((PTR)->LEN_NAME)
+#define pci_unmap_len_set(PTR, LEN_NAME, VAL)		\
+	(((PTR)->LEN_NAME) = (VAL))
+
+#else
+
 /* The PCI address space does equal the physical memory
  * address space.  The networking and block device layers use
  * this boolean for bounce buffer decisions.
@@ -56,6 +76,8 @@ struct pci_dev;
 #define pci_unmap_addr_set(PTR, ADDR_NAME, VAL)	do { } while (0)
 #define pci_unmap_len(PTR, LEN_NAME)		(0)
 #define pci_unmap_len_set(PTR, LEN_NAME, VAL)	do { } while (0)
+
+#endif
 
 /* This is always fine. */
 #define pci_dac_dma_supported(pci_dev, mask)	(1)
@@ -111,10 +133,22 @@ static inline void pci_dma_burst_advice(struct pci_dev *pdev,
 
 #endif /* __KERNEL__ */
 
+#ifdef CONFIG_XEN_PCIDEV_FRONTEND
+#include <xen/pcifront.h>
+#endif /* CONFIG_XEN_PCIDEV_FRONTEND */
+
 /* implement the pci_ DMA API in terms of the generic device dma_ one */
 #include <asm-generic/pci-dma-compat.h>
 
 /* generic pci stuff */
 #include <asm-generic/pci.h>
 
+#ifdef CONFIG_XEN
+/* On Xen we have to scan all functions since Xen hides bridges from
+ * us.  If a bridge is at fn=0 and that slot has a multifunction
+ * device, we won't find the additional devices without scanning all
+ * functions. */
+#undef pcibios_scan_all_fns
+#define pcibios_scan_all_fns(a, b)	1
+#endif /* CONFIG_XEN */
 #endif /* __i386_PCI_H */

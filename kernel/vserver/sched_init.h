@@ -1,34 +1,41 @@
 
 static inline void vx_info_init_sched(struct _vx_sched *sched)
 {
-	int i;
+	static struct lock_class_key tokens_lock_key;
 
 	/* scheduling; hard code starting values as constants */
-	sched->fill_rate	= 1;
-	sched->interval		= 4;
+	sched->fill_rate[0]	= 1;
+	sched->interval[0]	= 4;
+	sched->fill_rate[1]	= 1;
+	sched->interval[1]	= 8;
+	sched->tokens		= HZ >> 2;
 	sched->tokens_min	= HZ >> 4;
 	sched->tokens_max	= HZ >> 1;
-	sched->jiffies		= jiffies;
 	sched->tokens_lock	= SPIN_LOCK_UNLOCKED;
+	sched->prio_bias	= 0;
 
-#ifdef CONFIG_VSERVER_ACB_SCHED
-	/* We can't set the "real" token count here because we don't have
-	 * access to the vx_info struct.  Do it later... */
-	for (i = 0; i < SCH_NUM_CLASSES; i++) {
-	    sched->state[i] = SCH_UNINITIALIZED;
-	}
-#endif
+	lockdep_set_class(&sched->tokens_lock, &tokens_lock_key);
+}
 
-	atomic_set(&sched->tokens, HZ >> 2);
-	sched->cpus_allowed	= CPU_MASK_ALL;
-	sched->priority_bias	= 0;
-	sched->vavavoom		= 0;
+static inline
+void vx_info_init_sched_pc(struct _vx_sched_pc *sched_pc, int cpu)
+{
+	sched_pc->fill_rate[0]	= 1;
+	sched_pc->interval[0]	= 4;
+	sched_pc->fill_rate[1]	= 1;
+	sched_pc->interval[1]	= 8;
+	sched_pc->tokens	= HZ >> 2;
+	sched_pc->tokens_min	= HZ >> 4;
+	sched_pc->tokens_max	= HZ >> 1;
+	sched_pc->prio_bias	= 0;
+	sched_pc->vavavoom	= 0;
+	sched_pc->token_time	= 0;
+	sched_pc->idle_time	= 0;
+	sched_pc->norm_time	= jiffies;
 
-	for_each_cpu(i) {
-		sched->cpu[i].user_ticks	= 0;
-		sched->cpu[i].sys_ticks		= 0;
-		sched->cpu[i].hold_ticks	= 0;
-	}
+	sched_pc->user_ticks = 0;
+	sched_pc->sys_ticks = 0;
+	sched_pc->hold_ticks = 0;
 }
 
 static inline void vx_info_exit_sched(struct _vx_sched *sched)
@@ -36,3 +43,8 @@ static inline void vx_info_exit_sched(struct _vx_sched *sched)
 	return;
 }
 
+static inline
+void vx_info_exit_sched_pc(struct _vx_sched_pc *sched_pc, int cpu)
+{
+	return;
+}

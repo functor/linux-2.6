@@ -31,7 +31,6 @@
 *******************************************************************************/
 
 #include <linux/compiler.h>
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/if_arp.h>
 #include <linux/in6.h>
@@ -68,7 +67,7 @@ static int ieee80211_networks_allocate(struct ieee80211_device *ieee)
 		return 0;
 
 	ieee->networks =
-	    kmalloc(MAX_NETWORK_COUNT * sizeof(struct ieee80211_network),
+	    kzalloc(MAX_NETWORK_COUNT * sizeof(struct ieee80211_network),
 		    GFP_KERNEL);
 	if (!ieee->networks) {
 		printk(KERN_WARNING "%s: Out of memory allocating beacons\n",
@@ -76,16 +75,31 @@ static int ieee80211_networks_allocate(struct ieee80211_device *ieee)
 		return -ENOMEM;
 	}
 
-	memset(ieee->networks, 0,
-	       MAX_NETWORK_COUNT * sizeof(struct ieee80211_network));
-
 	return 0;
+}
+
+void ieee80211_network_reset(struct ieee80211_network *network)
+{
+	if (!network)
+		return;
+
+	if (network->ibss_dfs) {
+		kfree(network->ibss_dfs);
+		network->ibss_dfs = NULL;
+	}
 }
 
 static inline void ieee80211_networks_free(struct ieee80211_device *ieee)
 {
+	int i;
+
 	if (!ieee->networks)
 		return;
+
+	for (i = 0; i < MAX_NETWORK_COUNT; i++)
+		if (ieee->networks[i].ibss_dfs)
+			kfree(ieee->networks[i].ibss_dfs);
+
 	kfree(ieee->networks);
 	ieee->networks = NULL;
 }
@@ -99,6 +113,21 @@ static void ieee80211_networks_initialize(struct ieee80211_device *ieee)
 	for (i = 0; i < MAX_NETWORK_COUNT; i++)
 		list_add_tail(&ieee->networks[i].list,
 			      &ieee->network_free_list);
+}
+
+static int ieee80211_change_mtu(struct net_device *dev, int new_mtu)
+{
+	if ((new_mtu < 68) || (new_mtu > IEEE80211_DATA_LEN))
+		return -EINVAL;
+	dev->mtu = new_mtu;
+	return 0;
+}
+
+static struct net_device_stats *ieee80211_generic_get_stats(
+	struct net_device *dev)
+{
+	struct ieee80211_device *ieee = netdev_priv(dev);
+	return &ieee->stats;
 }
 
 struct net_device *alloc_ieee80211(int sizeof_priv)
@@ -116,6 +145,11 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 	}
 	ieee = netdev_priv(dev);
 	dev->hard_start_xmit = ieee80211_xmit;
+	dev->change_mtu = ieee80211_change_mtu;
+
+	/* Drivers are free to override this if the generic implementation
+	 * does not meet their needs. */
+	dev->get_stats = ieee80211_generic_get_stats;
 
 	ieee->dev = dev;
 
@@ -195,7 +229,7 @@ void free_ieee80211(struct net_device *dev)
 
 static int debug = 0;
 u32 ieee80211_debug_level = 0;
-struct proc_dir_entry *ieee80211_proc = NULL;
+static struct proc_dir_entry *ieee80211_proc = NULL;
 
 static int show_debug_level(char *page, char **start, off_t offset,
 			    int count, int *eof, void *data)

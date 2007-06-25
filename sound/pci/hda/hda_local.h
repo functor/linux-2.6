@@ -30,9 +30,13 @@
 /* mono volume with index (index=0,1,...) (channel=1,2) */
 #define HDA_CODEC_VOLUME_MONO_IDX(xname, xcidx, nid, channel, xindex, direction) \
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, .index = xcidx,  \
+	  .access = SNDRV_CTL_ELEM_ACCESS_READWRITE | \
+	  	    SNDRV_CTL_ELEM_ACCESS_TLV_READ | \
+	  	    SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK, \
 	  .info = snd_hda_mixer_amp_volume_info, \
 	  .get = snd_hda_mixer_amp_volume_get, \
 	  .put = snd_hda_mixer_amp_volume_put, \
+	  .tlv = { .c = snd_hda_mixer_amp_tlv },		\
 	  .private_value = HDA_COMPOSE_AMP_VAL(nid, channel, xindex, direction) }
 /* stereo volume with index */
 #define HDA_CODEC_VOLUME_IDX(xname, xcidx, nid, xindex, direction) \
@@ -63,9 +67,15 @@
 int snd_hda_mixer_amp_volume_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo);
 int snd_hda_mixer_amp_volume_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
 int snd_hda_mixer_amp_volume_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
+int snd_hda_mixer_amp_tlv(struct snd_kcontrol *kcontrol, int op_flag, unsigned int size, unsigned int __user *tlv);
 int snd_hda_mixer_amp_switch_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo);
 int snd_hda_mixer_amp_switch_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
 int snd_hda_mixer_amp_switch_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
+/* lowlevel accessor with caching; use carefully */
+int snd_hda_codec_amp_read(struct hda_codec *codec, hda_nid_t nid, int ch,
+			   int direction, int index);
+int snd_hda_codec_amp_update(struct hda_codec *codec, hda_nid_t nid, int ch,
+			     int direction, int idx, int mask, int val);
 
 /* mono switch binding multiple inputs */
 #define HDA_BIND_MUTE_MONO(xname, nid, channel, indices, direction) \
@@ -130,6 +140,7 @@ struct hda_multi_out {
 	int num_dacs;		/* # of DACs, must be more than 1 */
 	hda_nid_t *dac_nids;	/* DAC list */
 	hda_nid_t hp_nid;	/* optional DAC for HP, 0 when not exists */
+	hda_nid_t extra_out_nid[3];	/* optional DACs, 0 when not exists */
 	hda_nid_t dig_out_nid;	/* digital out audio widget */
 	int max_channels;	/* currently supported analog channels */
 	int dig_out_used;	/* current usage of digital out (HDA_DIG_XXX) */
@@ -195,6 +206,7 @@ struct hda_bus_unsolicited {
 	/* workqueue */
 	struct workqueue_struct *workq;
 	struct work_struct work;
+	struct hda_bus *bus;
 };
 
 /*
@@ -216,8 +228,10 @@ extern const char *auto_pin_cfg_labels[AUTO_PIN_LAST];
 struct auto_pin_cfg {
 	int line_outs;
 	hda_nid_t line_out_pins[5]; /* sorted in the order of Front/Surr/CLFE/Side */
-	hda_nid_t speaker_pin;
-	hda_nid_t hp_pin;
+	int speaker_outs;
+	hda_nid_t speaker_pins[5];
+	int hp_outs;
+	hda_nid_t hp_pins[5];
 	hda_nid_t input_pins[AUTO_PIN_LAST];
 	hda_nid_t dig_out_pin;
 	hda_nid_t dig_in_pin;

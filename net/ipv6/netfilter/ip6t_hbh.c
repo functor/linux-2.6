@@ -19,15 +19,10 @@
 #include <linux/netfilter_ipv6/ip6_tables.h>
 #include <linux/netfilter_ipv6/ip6t_opts.h>
 
-#define HOPBYHOP	1
-
 MODULE_LICENSE("GPL");
-#if HOPBYHOP
-MODULE_DESCRIPTION("IPv6 HbH match");
-#else
-MODULE_DESCRIPTION("IPv6 DST match");
-#endif
+MODULE_DESCRIPTION("IPv6 opts match");
 MODULE_AUTHOR("Andras Kis-Szabo <kisza@sch.bme.hu>");
+MODULE_ALIAS("ip6t_dst");
 
 #if 0
 #define DEBUGP printk
@@ -55,6 +50,7 @@ static int
 match(const struct sk_buff *skb,
       const struct net_device *in,
       const struct net_device *out,
+      const struct xt_match *match,
       const void *matchinfo,
       int offset,
       unsigned int protoff,
@@ -71,11 +67,7 @@ match(const struct sk_buff *skb,
 	unsigned int optlen;
 	int err;
 
-#if HOPBYHOP
-	err = ipv6_find_hdr(skb, &ptr, NEXTHDR_HOP, NULL);
-#else
-	err = ipv6_find_hdr(skb, &ptr, NEXTHDR_DEST, NULL);
-#endif
+	err = ipv6_find_hdr(skb, &ptr, match->data, NULL);
 	if (err < 0) {
 		if (err != -ENOENT)
 			*hotdrop = 1;
@@ -184,45 +176,49 @@ match(const struct sk_buff *skb,
 static int
 checkentry(const char *tablename,
 	   const void *entry,
+	   const struct xt_match *match,
 	   void *matchinfo,
-	   unsigned int matchinfosize,
 	   unsigned int hook_mask)
 {
 	const struct ip6t_opts *optsinfo = matchinfo;
 
-	if (matchinfosize != IP6T_ALIGN(sizeof(struct ip6t_opts))) {
-		DEBUGP("ip6t_opts: matchsize %u != %u\n",
-		       matchinfosize, IP6T_ALIGN(sizeof(struct ip6t_opts)));
-		return 0;
-	}
 	if (optsinfo->invflags & ~IP6T_OPTS_INV_MASK) {
 		DEBUGP("ip6t_opts: unknown flags %X\n", optsinfo->invflags);
 		return 0;
 	}
-
 	return 1;
 }
 
-static struct ip6t_match opts_match = {
-#if HOPBYHOP
-	.name		= "hbh",
-#else
-	.name		= "dst",
-#endif
-	.match		= &match,
-	.checkentry	= &checkentry,
-	.me		= THIS_MODULE,
+static struct xt_match opts_match[] = {
+	{
+		.name		= "hbh",
+		.family		= AF_INET6,
+		.match		= match,
+		.matchsize	= sizeof(struct ip6t_opts),
+		.checkentry	= checkentry,
+		.me		= THIS_MODULE,
+		.data		= NEXTHDR_HOP,
+	},
+	{
+		.name		= "dst",
+		.family		= AF_INET6,
+		.match		= match,
+		.matchsize	= sizeof(struct ip6t_opts),
+		.checkentry	= checkentry,
+		.me		= THIS_MODULE,
+		.data		= NEXTHDR_DEST,
+	},
 };
 
-static int __init init(void)
+static int __init ip6t_hbh_init(void)
 {
-	return ip6t_register_match(&opts_match);
+	return xt_register_matches(opts_match, ARRAY_SIZE(opts_match));
 }
 
-static void __exit cleanup(void)
+static void __exit ip6t_hbh_fini(void)
 {
-	ip6t_unregister_match(&opts_match);
+	xt_unregister_matches(opts_match, ARRAY_SIZE(opts_match));
 }
 
-module_init(init);
-module_exit(cleanup);
+module_init(ip6t_hbh_init);
+module_exit(ip6t_hbh_fini);

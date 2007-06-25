@@ -93,8 +93,8 @@ enum kcs_states {
 				   state machine. */
 };
 
-#define MAX_KCS_READ_SIZE 80
-#define MAX_KCS_WRITE_SIZE 80
+#define MAX_KCS_READ_SIZE IPMI_MAX_MSG_LENGTH
+#define MAX_KCS_WRITE_SIZE IPMI_MAX_MSG_LENGTH
 
 /* Timeouts in microseconds. */
 #define IBF_RETRY_TIMEOUT 1000000
@@ -227,7 +227,7 @@ static inline int check_ibf(struct si_sm_data *kcs, unsigned char status,
 static inline int check_obf(struct si_sm_data *kcs, unsigned char status,
 			    long time)
 {
-	if (! GET_STATUS_OBF(status)) {
+	if (!GET_STATUS_OBF(status)) {
 		kcs->obf_timeout -= time;
 		if (kcs->obf_timeout < 0) {
 		    start_error_recovery(kcs, "OBF not ready in time");
@@ -261,12 +261,14 @@ static int start_kcs_transaction(struct si_sm_data *kcs, unsigned char *data,
 {
 	unsigned int i;
 
-	if ((size < 2) || (size > MAX_KCS_WRITE_SIZE)) {
-		return -1;
-	}
-	if ((kcs->state != KCS_IDLE) && (kcs->state != KCS_HOSED)) {
-		return -2;
-	}
+	if (size < 2)
+		return IPMI_REQ_LEN_INVALID_ERR;
+	if (size > MAX_KCS_WRITE_SIZE)
+		return IPMI_REQ_LEN_EXCEEDED_ERR;
+
+	if ((kcs->state != KCS_IDLE) && (kcs->state != KCS_HOSED))
+		return IPMI_NOT_IN_MY_STATE_ERR;
+
 	if (kcs_debug & KCS_DEBUG_MSG) {
 		printk(KERN_DEBUG "start_kcs_transaction -");
 		for (i = 0; i < size; i ++) {
@@ -407,7 +409,7 @@ static enum si_sm_result kcs_event(struct si_sm_data *kcs, long time)
 		}
 
 		if (state == KCS_READ_STATE) {
-			if (! check_obf(kcs, status, time))
+			if (!check_obf(kcs, status, time))
 				return SI_SM_CALL_WITH_DELAY;
 			read_next_byte(kcs);
 		} else {
@@ -447,7 +449,7 @@ static enum si_sm_result kcs_event(struct si_sm_data *kcs, long time)
 					     "Not in read state for error2");
 			break;
 		}
-		if (! check_obf(kcs, status, time))
+		if (!check_obf(kcs, status, time))
 			return SI_SM_CALL_WITH_DELAY;
 
 		clear_obf(kcs, status);
@@ -462,7 +464,7 @@ static enum si_sm_result kcs_event(struct si_sm_data *kcs, long time)
 			break;
 		}
 
-		if (! check_obf(kcs, status, time))
+		if (!check_obf(kcs, status, time))
 			return SI_SM_CALL_WITH_DELAY;
 
 		clear_obf(kcs, status);

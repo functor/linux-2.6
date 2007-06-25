@@ -15,7 +15,6 @@
  * This file handles the architecture-dependent parts of process handling..
  */
 
-#include <linux/config.h>
 #include <linux/compiler.h>
 #include <linux/cpu.h>
 #include <linux/errno.h>
@@ -46,7 +45,7 @@
 #include <asm/irq.h>
 #include <asm/timer.h>
 
-asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
+asmlinkage void ret_from_fork(void) asm ("ret_from_fork");
 
 /*
  * Return saved PC of a blocked thread. used in kernel/sched.
@@ -76,17 +75,17 @@ unsigned long thread_saved_pc(struct task_struct *tsk)
 /*
  * Need to know about CPUs going idle?
  */
-static struct notifier_block *idle_chain;
+static ATOMIC_NOTIFIER_HEAD(idle_chain);
 
 int register_idle_notifier(struct notifier_block *nb)
 {
-	return notifier_chain_register(&idle_chain, nb);
+	return atomic_notifier_chain_register(&idle_chain, nb);
 }
 EXPORT_SYMBOL(register_idle_notifier);
 
 int unregister_idle_notifier(struct notifier_block *nb)
 {
-	return notifier_chain_unregister(&idle_chain, nb);
+	return atomic_notifier_chain_unregister(&idle_chain, nb);
 }
 EXPORT_SYMBOL(unregister_idle_notifier);
 
@@ -95,7 +94,7 @@ void do_monitor_call(struct pt_regs *regs, long interruption_code)
 	/* disable monitor call class 0 */
 	__ctl_clear_bit(8, 15);
 
-	notifier_call_chain(&idle_chain, CPU_NOT_IDLE,
+	atomic_notifier_call_chain(&idle_chain, CPU_NOT_IDLE,
 			    (void *)(long) smp_processor_id());
 }
 
@@ -103,7 +102,7 @@ extern void s390_handle_mcck(void);
 /*
  * The idle loop on a S390...
  */
-void default_idle(void)
+static void default_idle(void)
 {
 	int cpu, rc;
 
@@ -116,7 +115,8 @@ void default_idle(void)
 		return;
 	}
 
-	rc = notifier_call_chain(&idle_chain, CPU_IDLE, (void *)(long) cpu);
+	rc = atomic_notifier_call_chain(&idle_chain,
+			CPU_IDLE, (void *)(long) cpu);
 	if (rc != NOTIFY_OK && rc != NOTIFY_DONE)
 		BUG();
 	if (rc != NOTIFY_OK) {
@@ -142,6 +142,7 @@ void default_idle(void)
 		return;
 	}
 
+	trace_hardirqs_on();
 	/* Wait for external, I/O or machine check interrupt. */
 	__load_psw_mask(PSW_KERNEL_BITS | PSW_MASK_WAIT |
 			PSW_MASK_IO | PSW_MASK_EXT);
@@ -171,12 +172,13 @@ void show_regs(struct pt_regs *regs)
 	show_registers(regs);
 	/* Show stack backtrace if pt_regs is from kernel mode */
 	if (!(regs->psw.mask & PSW_MASK_PSTATE))
-		show_trace(0,(unsigned long *) regs->gprs[15]);
+		show_trace(NULL, (unsigned long *) regs->gprs[15]);
 }
 
 extern void kernel_thread_starter(void);
 
-__asm__(".align 4\n"
+asm(
+	".align 4\n"
 	"kernel_thread_starter:\n"
 	"    la    2,0(10)\n"
 	"    basr  14,9\n"
@@ -196,7 +198,7 @@ int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 	regs.orig_gpr2 = -1;
 
 	/* Ok, create the new process.. */
-	return do_fork(flags | CLONE_VM | CLONE_UNTRACED,
+	return do_fork(flags | CLONE_VM | CLONE_UNTRACED | CLONE_KTHREAD,
 		       0, &regs, 0, NULL, NULL);
 }
 
@@ -330,9 +332,6 @@ asmlinkage long sys_execve(struct pt_regs regs)
         error = do_execve(filename, (char __user * __user *) regs.gprs[3],
 			  (char __user * __user *) regs.gprs[4], &regs);
 	if (error == 0) {
-		task_lock(current);
-		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
 		current->thread.fp_regs.fpc = 0;
 		if (MACHINE_HAS_IEEE)
 			asm volatile("sfpc %0,%0" : : "d" (0));

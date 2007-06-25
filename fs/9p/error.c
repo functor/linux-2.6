@@ -11,9 +11,8 @@
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  it under the terms of the GNU General Public License version 2
+ *  as published by the Free Software Foundation.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -28,7 +27,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/list.h>
@@ -85,6 +83,7 @@ int v9fs_errstr2errno(char *errstr, int len)
 
 	if (errno == 0) {
 		/* TODO: if error isn't found, add it dynamically */
+		errstr[len] = 0;
 		printk(KERN_ERR "%s: errstr :%s: not found\n", __FUNCTION__,
 		       errstr);
 		errno = 1;

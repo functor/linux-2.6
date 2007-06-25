@@ -39,8 +39,8 @@ ktrace_init(int zentries)
 void
 ktrace_uninit(void)
 {
-	kmem_cache_destroy(ktrace_hdr_zone);
-	kmem_cache_destroy(ktrace_ent_zone);
+	kmem_zone_destroy(ktrace_hdr_zone);
+	kmem_zone_destroy(ktrace_ent_zone);
 }
 
 /*
@@ -75,7 +75,7 @@ ktrace_alloc(int nentries, unsigned int __nocast sleep)
 							    sleep);
 	} else {
 		ktep = (ktrace_entry_t*)kmem_zalloc((nentries * sizeof(*ktep)),
-							    sleep);
+							    sleep | KM_LARGE);
 	}
 
 	if (ktep == NULL) {

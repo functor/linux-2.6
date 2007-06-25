@@ -17,7 +17,6 @@
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/delay.h>
-#include <linux/config.h>
 #include <linux/bootmem.h>
 #include <linux/smp_lock.h>
 #include <linux/kernel_stat.h>
@@ -31,18 +30,13 @@
 #include <asm/io_apic.h>
 
 #include <mach_apic.h>
+#include <mach_apicdef.h>
 #include <mach_mpparse.h>
 #include <bios_ebda.h>
 
 /* Have we found an MP table */
 int smp_found_config;
-unsigned int __initdata maxcpus = NR_CPUS;
-
-#ifdef CONFIG_HOTPLUG_CPU
-#define CPU_HOTPLUG_ENABLED	(1)
-#else
-#define CPU_HOTPLUG_ENABLED	(0)
-#endif
+unsigned int __cpuinitdata maxcpus = NR_CPUS;
 
 /*
  * Various Linux-internal data structures created from the
@@ -75,7 +69,7 @@ unsigned int def_to_bigsmp = 0;
 /* Processor that is doing the boot up */
 unsigned int boot_cpu_physical_apicid = -1U;
 /* Internal processor count */
-static unsigned int __devinitdata num_processors;
+unsigned int __cpuinitdata num_processors;
 
 /* Bitmask of physically existing CPUs */
 physid_mask_t phys_cpu_present_map;
@@ -108,25 +102,11 @@ static int __init mpf_checksum(unsigned char *mp, int len)
  */
 
 static int mpc_record; 
-static struct mpc_config_translation *translation_table[MAX_MPC_ENTRY] __initdata;
+static struct mpc_config_translation *translation_table[MAX_MPC_ENTRY] __cpuinitdata;
 
-#ifdef CONFIG_X86_NUMAQ
-static int MP_valid_apicid(int apicid, int version)
+static void __cpuinit MP_processor_info (struct mpc_config_processor *m)
 {
-	return hweight_long(apicid & 0xf) == 1 && (apicid >> 4) != 0xf;
-}
-#else
-static int MP_valid_apicid(int apicid, int version)
-{
-	if (version >= 0x14)
-		return apicid < 0xff;
-	else
-		return apicid < 0xf;
-}
-#endif
-
-static void __devinit MP_processor_info (struct mpc_config_processor *m)
-{
+#ifndef CONFIG_XEN
  	int ver, apicid;
 	physid_mask_t phys_cpu;
  	
@@ -190,12 +170,6 @@ static void __devinit MP_processor_info (struct mpc_config_processor *m)
 
 	ver = m->mpc_apicver;
 
-	if (!MP_valid_apicid(apicid, ver)) {
-		printk(KERN_WARNING "Processor #%d INVALID. (Max ID: %d).\n",
-			m->mpc_apicid, MAX_APICS);
-		return;
-	}
-
 	/*
 	 * Validate version
 	 */
@@ -223,9 +197,17 @@ static void __devinit MP_processor_info (struct mpc_config_processor *m)
 	}
 
 	cpu_set(num_processors, cpu_possible_map);
+#endif /* CONFIG_XEN */
 	num_processors++;
-
-	if (CPU_HOTPLUG_ENABLED || (num_processors > 8)) {
+#ifndef CONFIG_XEN
+	/*
+	 * Would be preferable to switch to bigsmp when CONFIG_HOTPLUG_CPU=y
+	 * but we need to work other dependencies like SMP_SUSPEND etc
+	 * before this can be done without some confusion.
+	 * if (CPU_HOTPLUG_ENABLED || num_processors > 8)
+	 *       - Ashok Raj <ashok.raj@intel.com>
+	 */
+	if (num_processors > 8) {
 		switch (boot_cpu_data.x86_vendor) {
 		case X86_VENDOR_INTEL:
 			if (!APIC_XAPIC(ver)) {
@@ -238,6 +220,7 @@ static void __devinit MP_processor_info (struct mpc_config_processor *m)
 		}
 	}
 	bios_cpu_apicid[num_processors - 1] = m->mpc_apicid;
+#endif /* CONFIG_XEN */
 }
 
 static void __init MP_bus_info (struct mpc_config_bus *m)
@@ -248,6 +231,15 @@ static void __init MP_bus_info (struct mpc_config_bus *m)
 	str[6] = 0;
 
 	mpc_oem_bus_info(m, str, translation_table[mpc_record]);
+
+#if MAX_MP_BUSSES < 256
+	if (m->mpc_busid >= MAX_MP_BUSSES) {
+		printk(KERN_WARNING "MP table busid value (%d) for bustype %s "
+			" is too large, max. supported is %d\n",
+			m->mpc_busid, str, MAX_MP_BUSSES - 1);
+		return;
+	}
+#endif
 
 	if (strncmp(str, BUSTYPE_ISA, sizeof(BUSTYPE_ISA)-1) == 0) {
 		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_ISA;
@@ -260,8 +252,6 @@ static void __init MP_bus_info (struct mpc_config_bus *m)
 		mp_current_pci_id++;
 	} else if (strncmp(str, BUSTYPE_MCA, sizeof(BUSTYPE_MCA)-1) == 0) {
 		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_MCA;
-	} else if (strncmp(str, BUSTYPE_NEC98, sizeof(BUSTYPE_NEC98)-1) == 0) {
-		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_NEC98;
 	} else {
 		printk(KERN_WARNING "Unknown bustype %s - ignoring\n", str);
 	}
@@ -307,19 +297,6 @@ static void __init MP_lintsrc_info (struct mpc_config_lintsrc *m)
 			m->mpc_irqtype, m->mpc_irqflag & 3,
 			(m->mpc_irqflag >> 2) &3, m->mpc_srcbusid,
 			m->mpc_srcbusirq, m->mpc_destapic, m->mpc_destapiclint);
-	/*
-	 * Well it seems all SMP boards in existence
-	 * use ExtINT/LVT1 == LINT0 and
-	 * NMI/LVT2 == LINT1 - the following check
-	 * will show us if this assumptions is false.
-	 * Until then we do not have to add baggage.
-	 */
-	if ((m->mpc_irqtype == mp_ExtINT) &&
-		(m->mpc_destapiclint != 0))
-			BUG();
-	if ((m->mpc_irqtype == mp_NMI) &&
-		(m->mpc_destapiclint != 1))
-			BUG();
 }
 
 #ifdef CONFIG_X86_NUMAQ
@@ -710,7 +687,11 @@ void __init get_smp_config (void)
 		 * Read the physical hardware table.  Anything here will
 		 * override the defaults.
 		 */
+#ifdef CONFIG_XEN
+		if (!smp_read_mpc(isa_bus_to_virt(mpf->mpf_physptr))) {
+#else
 		if (!smp_read_mpc(phys_to_virt(mpf->mpf_physptr))) {
+#endif
 			smp_found_config = 0;
 			printk(KERN_ERR "BIOS bug, MP table errors detected!...\n");
 			printk(KERN_ERR "... disabling SMP support. (tell your hw vendor)\n");
@@ -745,7 +726,11 @@ void __init get_smp_config (void)
 
 static int __init smp_scan_config (unsigned long base, unsigned long length)
 {
+#ifdef CONFIG_XEN
+	unsigned long *bp = isa_bus_to_virt(base);
+#else
 	unsigned long *bp = phys_to_virt(base);
+#endif
 	struct intel_mp_floating *mpf;
 
 	Dprintk("Scan SMP from %p for %ld bytes.\n", bp,length);
@@ -761,6 +746,7 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 				|| (mpf->mpf_specification == 4)) ) {
 
 			smp_found_config = 1;
+#ifndef CONFIG_XEN
 			printk(KERN_INFO "found SMP MP-table at %08lx\n",
 						virt_to_phys(mpf));
 			reserve_bootmem(virt_to_phys(mpf), PAGE_SIZE);
@@ -780,6 +766,10 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 					size = end - mpf->mpf_physptr;
 				reserve_bootmem(mpf->mpf_physptr, size);
 			}
+#else
+			printk(KERN_INFO "found SMP MP-table at %08lx\n",
+				((unsigned long)bp - (unsigned long)isa_bus_to_virt(base)) + base);
+#endif
 
 			mpf_found = mpf;
 			return 1;
@@ -792,7 +782,9 @@ static int __init smp_scan_config (unsigned long base, unsigned long length)
 
 void __init find_smp_config (void)
 {
+#ifndef CONFIG_XEN
 	unsigned int address;
+#endif
 
 	/*
 	 * FIXME: Linux assumes you have 640K of base ram..
@@ -823,10 +815,14 @@ void __init find_smp_config (void)
 	 * MP1.4 SPEC states to only scan first 1K of 4K EBDA.
 	 */
 
+#ifndef CONFIG_XEN
 	address = get_bios_ebda();
 	if (address)
 		smp_scan_config(address, 0x400);
+#endif
 }
+
+int es7000_plat;
 
 /* --------------------------------------------------------------------------
                             ACPI-based MP Configuration
@@ -834,9 +830,9 @@ void __init find_smp_config (void)
 
 #ifdef CONFIG_ACPI
 
-void __init mp_register_lapic_address (
-	u64			address)
+void __init mp_register_lapic_address(u64 address)
 {
+#ifndef CONFIG_XEN
 	mp_lapic_addr = (unsigned long) address;
 
 	set_fixmap_nocache(FIX_APIC_BASE, mp_lapic_addr);
@@ -845,15 +841,13 @@ void __init mp_register_lapic_address (
 		boot_cpu_physical_apicid = GET_APIC_ID(apic_read(APIC_ID));
 
 	Dprintk("Boot CPU = %d\n", boot_cpu_physical_apicid);
+#endif
 }
 
-
-void __devinit mp_register_lapic (
-	u8			id, 
-	u8			enabled)
+void __cpuinit mp_register_lapic (u8 id, u8 enabled)
 {
 	struct mpc_config_processor processor;
-	int			boot_cpu = 0;
+	int boot_cpu = 0;
 	
 	if (MAX_APICS - id <= 0) {
 		printk(KERN_WARNING "Processor #%d invalid (max %d)\n",
@@ -864,6 +858,7 @@ void __devinit mp_register_lapic (
 	if (id == boot_cpu_physical_apicid)
 		boot_cpu = 1;
 
+#ifndef CONFIG_XEN
 	processor.mpc_type = MP_PROCESSOR;
 	processor.mpc_apicid = id;
 	processor.mpc_apicver = GET_APIC_VERSION(apic_read(APIC_LVR));
@@ -874,6 +869,7 @@ void __devinit mp_register_lapic (
 	processor.mpc_featureflag = boot_cpu_data.x86_capability[0];
 	processor.mpc_reserved[0] = 0;
 	processor.mpc_reserved[1] = 0;
+#endif
 
 	MP_processor_info(&processor);
 }
@@ -890,11 +886,9 @@ static struct mp_ioapic_routing {
 	u32			pin_programmed[4];
 } mp_ioapic_routing[MAX_IO_APICS];
 
-
-static int mp_find_ioapic (
-	int			gsi)
+static int mp_find_ioapic (int gsi)
 {
-	int			i = 0;
+	int i = 0;
 
 	/* Find the IOAPIC that manages this GSI. */
 	for (i = 0; i < nr_ioapics; i++) {
@@ -907,15 +901,11 @@ static int mp_find_ioapic (
 
 	return -1;
 }
-	
 
-void __init mp_register_ioapic (
-	u8			id, 
-	u32			address,
-	u32			gsi_base)
+void __init mp_register_ioapic(u8 id, u32 address, u32 gsi_base)
 {
-	int			idx = 0;
-	int			tmpid;
+	int idx = 0;
+	int tmpid;
 
 	if (nr_ioapics >= MAX_IO_APICS) {
 		printk(KERN_ERR "ERROR: Max # of I/O APICs (%d) exceeded "
@@ -934,8 +924,11 @@ void __init mp_register_ioapic (
 	mp_ioapics[idx].mpc_flags = MPC_APIC_USABLE;
 	mp_ioapics[idx].mpc_apicaddr = address;
 
+#ifndef CONFIG_XEN
 	set_fixmap_nocache(FIX_IO_APIC_BASE_0 + idx, address);
-	if ((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) && (boot_cpu_data.x86 < 15))
+#endif
+	if ((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
+		&& !APIC_XAPIC(apic_version[boot_cpu_physical_apicid]))
 		tmpid = io_apic_get_unique_id(idx, id);
 	else
 		tmpid = id;
@@ -960,16 +953,10 @@ void __init mp_register_ioapic (
 		mp_ioapics[idx].mpc_apicver, mp_ioapics[idx].mpc_apicaddr,
 		mp_ioapic_routing[idx].gsi_base,
 		mp_ioapic_routing[idx].gsi_end);
-
-	return;
 }
 
-
-void __init mp_override_legacy_irq (
-	u8			bus_irq,
-	u8			polarity, 
-	u8			trigger, 
-	u32			gsi)
+void __init
+mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger, u32 gsi)
 {
 	struct mpc_config_intsrc intsrc;
 	int			ioapic = -1;
@@ -1007,17 +994,13 @@ void __init mp_override_legacy_irq (
 	mp_irqs[mp_irq_entries] = intsrc;
 	if (++mp_irq_entries == MAX_IRQ_SOURCES)
 		panic("Max # of irq sources exceeded!\n");
-
-	return;
 }
-
-int es7000_plat;
 
 void __init mp_config_acpi_legacy_irqs (void)
 {
 	struct mpc_config_intsrc intsrc;
-	int			i = 0;
-	int			ioapic = -1;
+	int i = 0;
+	int ioapic = -1;
 
 	/* 
 	 * Fabricate the legacy ISA bus (bus #31).
@@ -1086,12 +1069,12 @@ void __init mp_config_acpi_legacy_irqs (void)
 
 #define MAX_GSI_NUM	4096
 
-int mp_register_gsi (u32 gsi, int triggering, int polarity)
+int mp_register_gsi(u32 gsi, int triggering, int polarity)
 {
-	int			ioapic = -1;
-	int			ioapic_pin = 0;
-	int			idx, bit = 0;
-	static int		pci_irq = 16;
+	int ioapic = -1;
+	int ioapic_pin = 0;
+	int idx, bit = 0;
+	static int pci_irq = 16;
 	/*
 	 * Mapping between Global System Interrups, which
 	 * represent all possible interrupts, and IRQs
@@ -1142,7 +1125,17 @@ int mp_register_gsi (u32 gsi, int triggering, int polarity)
 		 */
 		int irq = gsi;
 		if (gsi < MAX_GSI_NUM) {
-			if (gsi > 15)
+			/*
+			 * Retain the VIA chipset work-around (gsi > 15), but
+			 * avoid a problem where the 8254 timer (IRQ0) is setup
+			 * via an override (so it's not on pin 0 of the ioapic),
+			 * and at the same time, the pin 0 interrupt is a PCI
+			 * type.  The gsi > 15 test could cause these two pins
+			 * to be shared as IRQ0, and they are not shareable.
+			 * So test for this condition, and if necessary, avoid
+			 * the pin collision.
+			 */
+			if (gsi > 15 || (gsi == 0 && !timer_uses_ioapic_pin_0))
 				gsi = pci_irq++;
 			/*
 			 * Don't assign IRQ used by ACPI SCI

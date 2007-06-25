@@ -10,39 +10,26 @@
 #include <asm/msr.h>
 #include <asm/mce.h>
 #include <asm/hw_irq.h>
-
-static DEFINE_PER_CPU(unsigned long, next_check);
+#include <asm/idle.h>
+#include <asm/therm_throt.h>
 
 asmlinkage void smp_thermal_interrupt(void)
 {
-	struct mce m;
+	__u64 msr_val;
 
 	ack_APIC_irq();
 
+	exit_idle();
 	irq_enter();
-	if (time_before(jiffies, __get_cpu_var(next_check)))
-		goto done;
 
-	__get_cpu_var(next_check) = jiffies + HZ*300;
-	memset(&m, 0, sizeof(m));
-	m.cpu = smp_processor_id();
-	m.bank = MCE_THERMAL_BANK;
-	rdtscll(m.tsc);
-	rdmsrl(MSR_IA32_THERM_STATUS, m.status);
-	if (m.status & 0x1) {
-		printk(KERN_EMERG
-			"CPU%d: Temperature above threshold, cpu clock throttled\n", m.cpu);
-		add_taint(TAINT_MACHINE_CHECK);
-	} else {
-		printk(KERN_EMERG "CPU%d: Temperature/speed normal\n", m.cpu);
-	}
+	rdmsrl(MSR_IA32_THERM_STATUS, msr_val);
+	if (therm_throt_process(msr_val & 1))
+		mce_log_therm_throt_event(smp_processor_id(), msr_val);
 
-	mce_log(&m);
-done:
 	irq_exit();
 }
 
-static void __init intel_init_thermal(struct cpuinfo_x86 *c)
+static void __cpuinit intel_init_thermal(struct cpuinfo_x86 *c)
 {
 	u32 l, h;
 	int tm2 = 0;
@@ -78,7 +65,7 @@ static void __init intel_init_thermal(struct cpuinfo_x86 *c)
 
 	h = THERMAL_APIC_VECTOR;
 	h |= (APIC_DM_FIXED | APIC_LVT_MASKED);
-	apic_write_around(APIC_LVTTHMR, h);
+	apic_write(APIC_LVTTHMR, h);
 
 	rdmsr(MSR_IA32_THERM_INTERRUPT, l, h);
 	wrmsr(MSR_IA32_THERM_INTERRUPT, l | 0x03, h);
@@ -87,13 +74,16 @@ static void __init intel_init_thermal(struct cpuinfo_x86 *c)
 	wrmsr(MSR_IA32_MISC_ENABLE, l | (1 << 3), h);
 
 	l = apic_read(APIC_LVTTHMR);
-	apic_write_around(APIC_LVTTHMR, l & ~APIC_LVT_MASKED);
+	apic_write(APIC_LVTTHMR, l & ~APIC_LVT_MASKED);
 	printk(KERN_INFO "CPU%d: Thermal monitoring enabled (%s)\n",
 		cpu, tm2 ? "TM2" : "TM1");
+
+	/* enable thermal throttle processing */
+	atomic_set(&therm_throt_en, 1);
 	return;
 }
 
-void __init mce_intel_feature_init(struct cpuinfo_x86 *c)
+void __cpuinit mce_intel_feature_init(struct cpuinfo_x86 *c)
 {
 	intel_init_thermal(c);
 }

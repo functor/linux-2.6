@@ -66,7 +66,6 @@ static const char version[] =
 #endif
 
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -155,7 +154,7 @@ MODULE_LICENSE("GPL");
 
 /*
  * The maximum number of processing loops allowed for each call to the
- * IRQ handler.  
+ * IRQ handler.
  */
 #define MAX_IRQ_LOOPS		8
 
@@ -211,19 +210,17 @@ struct smc_local {
 
 	/* work queue */
 	struct work_struct phy_configure;
+	struct net_device *dev;
 	int	work_pending;
 
 	spinlock_t lock;
-
-#ifdef SMC_CAN_USE_DATACS
-	u32	__iomem *datacs;
-#endif
 
 #ifdef SMC_USE_PXA_DMA
 	/* DMA needs the physical address of the chip */
 	u_long physaddr;
 #endif
 	void __iomem *base;
+	void __iomem *datacs;
 };
 
 #if SMC_DEBUG > 0
@@ -325,12 +322,12 @@ static void smc_reset(struct net_device *dev)
 	DBG(2, "%s: %s\n", dev->name, __FUNCTION__);
 
 	/* Disable all interrupts, block TX tasklet */
-	spin_lock(&lp->lock);
+	spin_lock_irq(&lp->lock);
 	SMC_SELECT_BANK(2);
 	SMC_SET_INT_MASK(0);
 	pending_skb = lp->pending_tx_skb;
 	lp->pending_tx_skb = NULL;
-	spin_unlock(&lp->lock);
+	spin_unlock_irq(&lp->lock);
 
 	/* free any pending tx skb */
 	if (pending_skb) {
@@ -452,12 +449,12 @@ static void smc_shutdown(struct net_device *dev)
 	DBG(2, "%s: %s\n", CARDNAME, __FUNCTION__);
 
 	/* no more interrupts for me */
-	spin_lock(&lp->lock);
+	spin_lock_irq(&lp->lock);
 	SMC_SELECT_BANK(2);
 	SMC_SET_INT_MASK(0);
 	pending_skb = lp->pending_tx_skb;
 	lp->pending_tx_skb = NULL;
-	spin_unlock(&lp->lock);
+	spin_unlock_irq(&lp->lock);
 	if (pending_skb)
 		dev_kfree_skb(pending_skb);
 
@@ -769,7 +766,7 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		/*
 		 * Allocation succeeded: push packet to the chip's own memory
 		 * immediately.
-		 */  
+		 */
 		smc_hardware_send_pkt((unsigned long)dev);
 	}
 
@@ -1118,10 +1115,11 @@ static void smc_phy_check_media(struct net_device *dev, int init)
  * of autonegotiation.)  If the RPC ANEG bit is cleared, the selection
  * is controlled by the RPC SPEED and RPC DPLX bits.
  */
-static void smc_phy_configure(void *data)
+static void smc_phy_configure(struct work_struct *work)
 {
-	struct net_device *dev = data;
-	struct smc_local *lp = netdev_priv(dev);
+	struct smc_local *lp =
+		container_of(work, struct smc_local, phy_configure);
+	struct net_device *dev = lp->dev;
 	void __iomem *ioaddr = lp->base;
 	int phyaddr = lp->mii.phy_id;
 	int my_phy_caps; /* My PHY capabilities */
@@ -1288,7 +1286,7 @@ static void smc_eph_interrupt(struct net_device *dev)
  * This is the main routine of the driver, to handle the device when
  * it needs some attention.
  */
-static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t smc_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
 	struct smc_local *lp = netdev_priv(dev);
@@ -1404,7 +1402,7 @@ static irqreturn_t smc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 static void smc_poll_controller(struct net_device *dev)
 {
 	disable_irq(dev->irq);
-	smc_interrupt(dev->irq, dev, NULL);
+	smc_interrupt(dev->irq, dev);
 	enable_irq(dev->irq);
 }
 #endif
@@ -1596,7 +1594,7 @@ smc_open(struct net_device *dev)
 
 	/* Configure the PHY, initialize the link state */
 	if (lp->phy_type != 0)
-		smc_phy_configure(dev);
+		smc_phy_configure(&lp->phy_configure);
 	else {
 		spin_lock_irq(&lp->lock);
 		smc_10bt_check_media(dev, 1);
@@ -1743,7 +1741,7 @@ static void smc_ethtool_setmsglevel(struct net_device *dev, u32 level)
 	lp->msg_enable = level;
 }
 
-static struct ethtool_ops smc_ethtool_ops = {
+static const struct ethtool_ops smc_ethtool_ops = {
 	.get_settings	= smc_ethtool_getsettings,
 	.set_settings	= smc_ethtool_setsettings,
 	.get_drvinfo	= smc_ethtool_getdrvinfo,
@@ -1976,7 +1974,8 @@ static int __init smc_probe(struct net_device *dev, void __iomem *ioaddr)
 #endif
 
 	tasklet_init(&lp->tx_task, smc_hardware_send_pkt, (unsigned long)dev);
-	INIT_WORK(&lp->phy_configure, smc_phy_configure, dev);
+	INIT_WORK(&lp->phy_configure, smc_phy_configure);
+	lp->dev = dev;
 	lp->mii.phy_id_mask = 0x1f;
 	lp->mii.reg_num_mask = 0x1f;
 	lp->mii.force_media = 0;
@@ -2104,9 +2103,8 @@ static int smc_enable_device(struct platform_device *pdev)
 	 * Set the appropriate byte/word mode.
 	 */
 	ecsr = readb(addr + (ECSR << SMC_IO_SHIFT)) & ~ECSR_IOIS8;
-#ifndef SMC_CAN_USE_16BIT
-	ecsr |= ECSR_IOIS8;
-#endif
+	if (!SMC_CAN_USE_16BIT)
+		ecsr |= ECSR_IOIS8;
 	writeb(ecsr, addr + (ECSR << SMC_IO_SHIFT));
 	local_irq_restore(flags);
 
@@ -2143,40 +2141,39 @@ static void smc_release_attrib(struct platform_device *pdev)
 		release_mem_region(res->start, ATTRIB_SIZE);
 }
 
-#ifdef SMC_CAN_USE_DATACS
-static void smc_request_datacs(struct platform_device *pdev, struct net_device *ndev)
+static inline void smc_request_datacs(struct platform_device *pdev, struct net_device *ndev)
 {
-	struct resource * res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "smc91x-data32");
-	struct smc_local *lp = netdev_priv(ndev);
+	if (SMC_CAN_USE_DATACS) {
+		struct resource * res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "smc91x-data32");
+		struct smc_local *lp = netdev_priv(ndev);
 
-	if (!res)
-		return;
+		if (!res)
+			return;
 
-	if(!request_mem_region(res->start, SMC_DATA_EXTENT, CARDNAME)) {
-		printk(KERN_INFO "%s: failed to request datacs memory region.\n", CARDNAME);
-		return;
+		if(!request_mem_region(res->start, SMC_DATA_EXTENT, CARDNAME)) {
+			printk(KERN_INFO "%s: failed to request datacs memory region.\n", CARDNAME);
+			return;
+		}
+
+		lp->datacs = ioremap(res->start, SMC_DATA_EXTENT);
 	}
-
-	lp->datacs = ioremap(res->start, SMC_DATA_EXTENT);
 }
 
 static void smc_release_datacs(struct platform_device *pdev, struct net_device *ndev)
 {
-	struct smc_local *lp = netdev_priv(ndev);
-	struct resource * res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "smc91x-data32");
+	if (SMC_CAN_USE_DATACS) {
+		struct smc_local *lp = netdev_priv(ndev);
+		struct resource * res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "smc91x-data32");
 
-	if (lp->datacs)
-		iounmap(lp->datacs);
+		if (lp->datacs)
+			iounmap(lp->datacs);
 
-	lp->datacs = NULL;
+		lp->datacs = NULL;
 
-	if (res)
-		release_mem_region(res->start, SMC_DATA_EXTENT);
+		if (res)
+			release_mem_region(res->start, SMC_DATA_EXTENT);
+	}
 }
-#else
-static void smc_request_datacs(struct platform_device *pdev, struct net_device *ndev) {}
-static void smc_release_datacs(struct platform_device *pdev, struct net_device *ndev) {}
-#endif
 
 /*
  * smc_init(void)
@@ -2221,6 +2218,10 @@ static int smc_drv_probe(struct platform_device *pdev)
 
 	ndev->dma = (unsigned char)-1;
 	ndev->irq = platform_get_irq(pdev, 0);
+	if (ndev->irq < 0) {
+		ret = -ENODEV;
+		goto out_free_netdev;
+	}
 
 	ret = smc_request_attrib(pdev);
 	if (ret)
@@ -2324,7 +2325,7 @@ static int smc_drv_resume(struct platform_device *dev)
 			smc_reset(ndev);
 			smc_enable(ndev);
 			if (lp->phy_type != 0)
-				smc_phy_configure(ndev);
+				smc_phy_configure(&lp->phy_configure);
 			netif_device_attach(ndev);
 		}
 	}
@@ -2346,7 +2347,7 @@ static int __init smc_init(void)
 #ifdef MODULE
 #ifdef CONFIG_ISA
 	if (io == -1)
-		printk(KERN_WARNING 
+		printk(KERN_WARNING
 			"%s: You shouldn't use auto-probing with insmod!\n",
 			CARDNAME);
 #endif

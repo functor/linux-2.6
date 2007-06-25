@@ -76,7 +76,9 @@ static inline void __save_init_fpu( struct task_struct *tsk )
 
 #define __unlazy_fpu( tsk ) do { \
 	if (task_thread_info(tsk)->status & TS_USEDFPU) \
-		save_init_fpu( tsk ); \
+		save_init_fpu( tsk ); 			\
+	else						\
+		tsk->fpu_counter = 0;			\
 } while (0)
 
 #define __clear_fpu( tsk )					\
@@ -118,6 +120,7 @@ static inline void save_init_fpu( struct task_struct *tsk )
 extern unsigned short get_fpu_cwd( struct task_struct *tsk );
 extern unsigned short get_fpu_swd( struct task_struct *tsk );
 extern unsigned short get_fpu_mxcsr( struct task_struct *tsk );
+extern asmlinkage void math_state_restore(void);
 
 /*
  * Signal frame handlers...
@@ -126,17 +129,12 @@ extern int save_i387( struct _fpstate __user *buf );
 extern int restore_i387( struct _fpstate __user *buf );
 
 /*
- * ptrace request handers...
+ * ptrace request handlers...
  */
-extern int get_fpregs( struct user_i387_struct __user *buf,
-		       struct task_struct *tsk );
-extern int set_fpregs( struct task_struct *tsk,
-		       struct user_i387_struct __user *buf );
+extern int get_fpregs(struct user_i387_struct *, struct task_struct *);
+extern int set_fpregs(struct task_struct *, const struct user_i387_struct *);
+extern void updated_fpxregs(struct task_struct *tsk);
 
-extern int get_fpxregs( struct user_fxsr_struct __user *buf,
-			struct task_struct *tsk );
-extern int set_fpxregs( struct task_struct *tsk,
-			struct user_fxsr_struct __user *buf );
 
 /*
  * FPU state for core dumps...

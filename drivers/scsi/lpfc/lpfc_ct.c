@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2005 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2006 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
@@ -131,6 +131,7 @@ lpfc_ct_unsol_event(struct lpfc_hba * phba,
 	}
 
 ct_unsol_event_exit_piocbq:
+	list_del(&head);
 	if (pmbuf) {
 		list_for_each_entry_safe(matp, next_matp, &pmbuf->list, list) {
 			lpfc_mbuf_free(phba, matp->virt, matp->phys);
@@ -187,7 +188,8 @@ lpfc_alloc_ct_rsp(struct lpfc_hba * phba, int cmdcode, struct ulp_bde64 * bpl,
 
 		if (!mp->virt) {
 			kfree(mp);
-			lpfc_free_ct_rsp(phba, mlist);
+			if (mlist)
+				lpfc_free_ct_rsp(phba, mlist);
 			return NULL;
 		}
 
@@ -260,8 +262,10 @@ lpfc_gen_req(struct lpfc_hba *phba, struct lpfc_dmabuf *bmp,
 	icmd->un.genreq64.w5.hcsw.Rctl = FC_UNSOL_CTL;
 	icmd->un.genreq64.w5.hcsw.Type = FC_COMMON_TRANSPORT_ULP;
 
-	if (!tmo)
-		tmo = (2 * phba->fc_ratov) + 1;
+	if (!tmo) {
+		 /* FC spec states we need 3 * ratov for CT requests */
+		tmo = (3 * phba->fc_ratov);
+	}
 	icmd->ulpTimeout = tmo;
 	icmd->ulpBdeCount = 1;
 	icmd->ulpLe = 1;
@@ -389,7 +393,11 @@ lpfc_ns_rsp(struct lpfc_hba * phba, struct lpfc_dmabuf * mp, uint32_t Size)
 nsout1:
 	list_del(&head);
 
-	/* Here we are finished in the case RSCN */
+	/*
+ 	 * The driver has cycled through all Nports in the RSCN payload.
+ 	 * Complete the handling by cleaning up and marking the
+ 	 * current driver state.
+ 	 */
 	if (phba->hba_state == LPFC_HBA_READY) {
 		lpfc_els_flush_rscn(phba);
 		spin_lock_irq(phba->host->host_lock);
@@ -449,6 +457,11 @@ lpfc_cmpl_ct_cmd_gid_ft(struct lpfc_hba * phba, struct lpfc_iocbq * cmdiocb,
 		CTrsp = (struct lpfc_sli_ct_request *) outp->virt;
 		if (CTrsp->CommandResponse.bits.CmdRsp ==
 		    be16_to_cpu(SLI_CT_RESPONSE_FS_ACC)) {
+			lpfc_printf_log(phba, KERN_INFO, LOG_DISCOVERY,
+					"%d:0208 NameServer Rsp "
+					"Data: x%x\n",
+					phba->brd_no,
+					phba->fc_flag);
 			lpfc_ns_rsp(phba, outp,
 				    (uint32_t) (irsp->un.genreq64.bdl.bdeSize));
 		} else if (CTrsp->CommandResponse.bits.CmdRsp ==
@@ -545,6 +558,14 @@ lpfc_cmpl_ct_cmd_rsnn_nn(struct lpfc_hba * phba, struct lpfc_iocbq * cmdiocb,
 	return;
 }
 
+static void
+lpfc_cmpl_ct_cmd_rff_id(struct lpfc_hba * phba, struct lpfc_iocbq * cmdiocb,
+			 struct lpfc_iocbq * rspiocb)
+{
+	lpfc_cmpl_ct_cmd_rft_id(phba, cmdiocb, rspiocb);
+	return;
+}
+
 void
 lpfc_get_hba_sym_node_name(struct lpfc_hba * phba, uint8_t * symbp)
 {
@@ -552,13 +573,9 @@ lpfc_get_hba_sym_node_name(struct lpfc_hba * phba, uint8_t * symbp)
 
 	lpfc_decode_firmware_rev(phba, fwrev, 0);
 
-	if (phba->Port[0]) {
-		sprintf(symbp, "Emulex %s Port %s FV%s DV%s", phba->ModelName,
-			phba->Port, fwrev, lpfc_release_version);
-	} else {
-		sprintf(symbp, "Emulex %s FV%s DV%s", phba->ModelName,
-			fwrev, lpfc_release_version);
-	}
+	sprintf(symbp, "Emulex %s FV%s DV%s", phba->ModelName,
+		fwrev, lpfc_release_version);
+	return;
 }
 
 /*
@@ -620,6 +637,8 @@ lpfc_ns_cmd(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp, int cmdcode)
 		bpl->tus.f.bdeSize = RNN_REQUEST_SZ;
 	else if (cmdcode == SLI_CTNS_RSNN_NN)
 		bpl->tus.f.bdeSize = RSNN_REQUEST_SZ;
+	else if (cmdcode == SLI_CTNS_RFF_ID)
+		bpl->tus.f.bdeSize = RFF_REQUEST_SZ;
 	else
 		bpl->tus.f.bdeSize = 0;
 	bpl->tus.w = le32_to_cpu(bpl->tus.w);
@@ -649,6 +668,17 @@ lpfc_ns_cmd(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp, int cmdcode)
 		CtReq->un.rft.PortId = be32_to_cpu(phba->fc_myDID);
 		CtReq->un.rft.fcpReg = 1;
 		cmpl = lpfc_cmpl_ct_cmd_rft_id;
+		break;
+
+	case SLI_CTNS_RFF_ID:
+		CtReq->CommandResponse.bits.CmdRsp =
+			be16_to_cpu(SLI_CTNS_RFF_ID);
+		CtReq->un.rff.PortId = be32_to_cpu(phba->fc_myDID);
+		CtReq->un.rff.feature_res = 0;
+		CtReq->un.rff.feature_tgt = 0;
+		CtReq->un.rff.type_code = FC_FCP_DATA;
+		CtReq->un.rff.feature_init = 1;
+		cmpl = lpfc_cmpl_ct_cmd_rff_id;
 		break;
 
 	case SLI_CTNS_RNN_ID:
@@ -925,8 +955,9 @@ lpfc_fdmi_cmd(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp, int cmdcode)
 			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh + size);
 			ae->ad.bits.AttrType = be16_to_cpu(OS_NAME_VERSION);
 			sprintf(ae->un.OsNameVersion, "%s %s %s",
-				system_utsname.sysname, system_utsname.release,
-				system_utsname.version);
+				init_utsname()->sysname,
+				init_utsname()->release,
+				init_utsname()->version);
 			len = strlen(ae->un.OsNameVersion);
 			len += (len & 3) ? (4 - (len & 3)) : 4;
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + len);
@@ -978,19 +1009,19 @@ lpfc_fdmi_cmd(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp, int cmdcode)
 			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) pab + size);
 			ae->ad.bits.AttrType = be16_to_cpu(SUPPORTED_SPEED);
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + 4);
-			if (FC_JEDEC_ID(vp->rev.biuRev) == VIPER_JEDEC_ID)
+
+			ae->un.SupportSpeed = 0;
+			if (phba->lmt & LMT_10Gb)
 				ae->un.SupportSpeed = HBA_PORTSPEED_10GBIT;
-			else if (FC_JEDEC_ID(vp->rev.biuRev) == HELIOS_JEDEC_ID)
-				ae->un.SupportSpeed = HBA_PORTSPEED_4GBIT;
-			else if ((FC_JEDEC_ID(vp->rev.biuRev) ==
-				  CENTAUR_2G_JEDEC_ID)
-				 || (FC_JEDEC_ID(vp->rev.biuRev) ==
-				     PEGASUS_JEDEC_ID)
-				 || (FC_JEDEC_ID(vp->rev.biuRev) ==
-				     THOR_JEDEC_ID))
-				ae->un.SupportSpeed = HBA_PORTSPEED_2GBIT;
-			else
-				ae->un.SupportSpeed = HBA_PORTSPEED_1GBIT;
+			if (phba->lmt & LMT_8Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_8GBIT;
+			if (phba->lmt & LMT_4Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_4GBIT;
+			if (phba->lmt & LMT_2Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_2GBIT;
+			if (phba->lmt & LMT_1Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_1GBIT;
+
 			pab->ab.EntryCnt++;
 			size += FOURBYTES + 4;
 
@@ -1044,7 +1075,7 @@ lpfc_fdmi_cmd(struct lpfc_hba * phba, struct lpfc_nodelist * ndlp, int cmdcode)
 							  size);
 				ae->ad.bits.AttrType = be16_to_cpu(HOST_NAME);
 				sprintf(ae->un.HostName, "%s",
-					system_utsname.nodename);
+					init_utsname()->nodename);
 				len = strlen(ae->un.HostName);
 				len += (len & 3) ? (4 - (len & 3)) : 4;
 				ae->ad.bits.AttrLen =
@@ -1130,20 +1161,14 @@ lpfc_fdmi_tmo_handler(struct lpfc_hba *phba)
 {
 	struct lpfc_nodelist *ndlp;
 
-	spin_lock_irq(phba->host->host_lock);
-	if (!(phba->work_hba_events & WORKER_FDMI_TMO)) {
-		spin_unlock_irq(phba->host->host_lock);
-		return;
-	}
 	ndlp = lpfc_findnode_did(phba, NLP_SEARCH_ALL, FDMI_DID);
 	if (ndlp) {
-		if (system_utsname.nodename[0] != '\0') {
+		if (init_utsname()->nodename[0] != '\0') {
 			lpfc_fdmi_cmd(phba, ndlp, SLI_MGMT_DHBA);
 		} else {
 			mod_timer(&phba->fc_fdmitmo, jiffies + HZ * 60);
 		}
 	}
-	spin_unlock_irq(phba->host->host_lock);
 	return;
 }
 

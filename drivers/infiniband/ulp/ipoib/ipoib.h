@@ -42,7 +42,6 @@
 #include <linux/netdevice.h>
 #include <linux/workqueue.h>
 #include <linux/pci.h>
-#include <linux/config.h>
 #include <linux/kref.h>
 #include <linux/if_infiniband.h>
 #include <linux/mutex.h>
@@ -65,6 +64,8 @@ enum {
 
 	IPOIB_RX_RING_SIZE 	  = 128,
 	IPOIB_TX_RING_SIZE 	  = 64,
+	IPOIB_MAX_QUEUE_SIZE	  = 8192,
+	IPOIB_MIN_QUEUE_SIZE	  = 2,
 
 	IPOIB_NUM_WC 		  = 4,
 
@@ -72,13 +73,14 @@ enum {
 	IPOIB_MAX_MCAST_QUEUE     = 3,
 
 	IPOIB_FLAG_OPER_UP 	  = 0,
-	IPOIB_FLAG_ADMIN_UP 	  = 1,
-	IPOIB_PKEY_ASSIGNED 	  = 2,
-	IPOIB_PKEY_STOP 	  = 3,
-	IPOIB_FLAG_SUBINTERFACE   = 4,
-	IPOIB_MCAST_RUN 	  = 5,
-	IPOIB_STOP_REAPER         = 6,
-	IPOIB_MCAST_STARTED       = 7,
+	IPOIB_FLAG_INITIALIZED    = 1,
+	IPOIB_FLAG_ADMIN_UP 	  = 2,
+	IPOIB_PKEY_ASSIGNED 	  = 3,
+	IPOIB_PKEY_STOP 	  = 4,
+	IPOIB_FLAG_SUBINTERFACE   = 5,
+	IPOIB_MCAST_RUN 	  = 6,
+	IPOIB_STOP_REAPER         = 7,
+	IPOIB_MCAST_STARTED       = 8,
 
 	IPOIB_MAX_BACKOFF_SECONDS = 16,
 
@@ -103,12 +105,12 @@ struct ipoib_mcast;
 
 struct ipoib_rx_buf {
 	struct sk_buff *skb;
-	dma_addr_t	mapping;
+	u64		mapping;
 };
 
 struct ipoib_tx_buf {
 	struct sk_buff *skb;
-	DECLARE_PCI_UNMAP_ADDR(mapping)
+	u64		mapping;
 };
 
 /*
@@ -134,11 +136,11 @@ struct ipoib_dev_priv {
 	struct list_head multicast_list;
 	struct rb_root multicast_tree;
 
-	struct work_struct pkey_task;
-	struct work_struct mcast_task;
+	struct delayed_work pkey_task;
+	struct delayed_work mcast_task;
 	struct work_struct flush_task;
 	struct work_struct restart_task;
-	struct work_struct ah_reap_task;
+	struct delayed_work ah_reap_task;
 
 	struct ib_device *ca;
 	u8            	  port;
@@ -210,6 +212,7 @@ struct ipoib_path {
 
 struct ipoib_neigh {
 	struct ipoib_ah    *ah;
+	union ib_gid        dgid;
 	struct sk_buff_head queue;
 
 	struct neighbour   *neighbour;
@@ -217,11 +220,20 @@ struct ipoib_neigh {
 	struct list_head    list;
 };
 
+/*
+ * We stash a pointer to our private neighbour information after our
+ * hardware address in neigh->ha.  The ALIGN() expression here makes
+ * sure that this pointer is stored aligned so that an unaligned
+ * load is not needed to dereference it.
+ */
 static inline struct ipoib_neigh **to_ipoib_neigh(struct neighbour *neigh)
 {
-	return (struct ipoib_neigh **) (neigh->ha + 24 -
-					(offsetof(struct neighbour, ha) & 4));
+	return (void*) neigh + ALIGN(offsetof(struct neighbour, ha) +
+				     INFINIBAND_ALEN, sizeof(void *));
 }
+
+struct ipoib_neigh *ipoib_neigh_alloc(struct neighbour *neigh);
+void ipoib_neigh_free(struct net_device *dev, struct ipoib_neigh *neigh);
 
 extern struct workqueue_struct *ipoib_workqueue;
 
@@ -242,28 +254,27 @@ int ipoib_add_pkey_attr(struct net_device *dev);
 
 void ipoib_send(struct net_device *dev, struct sk_buff *skb,
 		struct ipoib_ah *address, u32 qpn);
-void ipoib_reap_ah(void *dev_ptr);
+void ipoib_reap_ah(struct work_struct *work);
 
 void ipoib_flush_paths(struct net_device *dev);
 struct ipoib_dev_priv *ipoib_intf_alloc(const char *format);
 
 int ipoib_ib_dev_init(struct net_device *dev, struct ib_device *ca, int port);
-void ipoib_ib_dev_flush(void *dev);
+void ipoib_ib_dev_flush(struct work_struct *work);
 void ipoib_ib_dev_cleanup(struct net_device *dev);
 
 int ipoib_ib_dev_open(struct net_device *dev);
 int ipoib_ib_dev_up(struct net_device *dev);
-int ipoib_ib_dev_down(struct net_device *dev);
+int ipoib_ib_dev_down(struct net_device *dev, int flush);
 int ipoib_ib_dev_stop(struct net_device *dev);
 
 int ipoib_dev_init(struct net_device *dev, struct ib_device *ca, int port);
 void ipoib_dev_cleanup(struct net_device *dev);
 
-void ipoib_mcast_join_task(void *dev_ptr);
-void ipoib_mcast_send(struct net_device *dev, union ib_gid *mgid,
-		      struct sk_buff *skb);
+void ipoib_mcast_join_task(struct work_struct *work);
+void ipoib_mcast_send(struct net_device *dev, void *mgid, struct sk_buff *skb);
 
-void ipoib_mcast_restart_task(void *dev_ptr);
+void ipoib_mcast_restart_task(struct work_struct *work);
 int ipoib_mcast_start_thread(struct net_device *dev);
 int ipoib_mcast_stop_thread(struct net_device *dev, int flush);
 
@@ -301,7 +312,7 @@ void ipoib_event(struct ib_event_handler *handler,
 int ipoib_vlan_add(struct net_device *pdev, unsigned short pkey);
 int ipoib_vlan_delete(struct net_device *pdev, unsigned short pkey);
 
-void ipoib_pkey_poll(void *dev);
+void ipoib_pkey_poll(struct work_struct *work);
 int ipoib_pkey_dev_delay_open(struct net_device *dev);
 
 #ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
@@ -322,6 +333,10 @@ static inline void ipoib_unregister_debugfs(void) { }
 #define ipoib_warn(priv, format, arg...)		\
 	ipoib_printk(KERN_WARNING, priv, format , ## arg)
 
+extern int ipoib_sendq_size;
+extern int ipoib_recvq_size;
+
+extern struct ib_sa_client ipoib_sa_client;
 
 #ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
 extern int ipoib_debug_level;
@@ -355,15 +370,26 @@ extern int ipoib_debug_level;
 #endif /* CONFIG_INFINIBAND_IPOIB_DEBUG_DATA */
 
 
-#define IPOIB_GID_FMT		"%x:%x:%x:%x:%x:%x:%x:%x"
+#define IPOIB_GID_FMT		"%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:" \
+				"%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x"
 
-#define IPOIB_GID_ARG(gid)	be16_to_cpup((__be16 *) ((gid).raw +  0)), \
-				be16_to_cpup((__be16 *) ((gid).raw +  2)), \
-				be16_to_cpup((__be16 *) ((gid).raw +  4)), \
-				be16_to_cpup((__be16 *) ((gid).raw +  6)), \
-				be16_to_cpup((__be16 *) ((gid).raw +  8)), \
-				be16_to_cpup((__be16 *) ((gid).raw + 10)), \
-				be16_to_cpup((__be16 *) ((gid).raw + 12)), \
-				be16_to_cpup((__be16 *) ((gid).raw + 14))
+#define IPOIB_GID_RAW_ARG(gid)	((u8 *)(gid))[0], \
+				((u8 *)(gid))[1], \
+				((u8 *)(gid))[2], \
+				((u8 *)(gid))[3], \
+				((u8 *)(gid))[4], \
+				((u8 *)(gid))[5], \
+				((u8 *)(gid))[6], \
+				((u8 *)(gid))[7], \
+				((u8 *)(gid))[8], \
+				((u8 *)(gid))[9], \
+				((u8 *)(gid))[10],\
+				((u8 *)(gid))[11],\
+				((u8 *)(gid))[12],\
+				((u8 *)(gid))[13],\
+				((u8 *)(gid))[14],\
+				((u8 *)(gid))[15]
+
+#define IPOIB_GID_ARG(gid)	IPOIB_GID_RAW_ARG((gid).raw)
 
 #endif /* _IPOIB_H */

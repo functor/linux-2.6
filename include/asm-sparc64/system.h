@@ -2,12 +2,14 @@
 #ifndef __SPARC64_SYSTEM_H
 #define __SPARC64_SYSTEM_H
 
-#include <linux/config.h>
 #include <asm/ptrace.h>
 #include <asm/processor.h>
 #include <asm/visasm.h>
 
 #ifndef __ASSEMBLY__
+
+#include <linux/irqflags.h>
+
 /*
  * Sparc (general) CPU types
  */
@@ -73,59 +75,11 @@ do {	__asm__ __volatile__("ba,pt	%%xcc, 1f\n\t" \
 
 #endif
 
-#define setipl(__new_ipl) \
-	__asm__ __volatile__("wrpr	%0, %%pil"  : : "r" (__new_ipl) : "memory")
-
-#define local_irq_disable() \
-	__asm__ __volatile__("wrpr	15, %%pil" : : : "memory")
-
-#define local_irq_enable() \
-	__asm__ __volatile__("wrpr	0, %%pil" : : : "memory")
-
-#define getipl() \
-({ unsigned long retval; __asm__ __volatile__("rdpr	%%pil, %0" : "=r" (retval)); retval; })
-
-#define swap_pil(__new_pil) \
-({	unsigned long retval; \
-	__asm__ __volatile__("rdpr	%%pil, %0\n\t" \
-			     "wrpr	%1, %%pil" \
-			     : "=&r" (retval) \
-			     : "r" (__new_pil) \
-			     : "memory"); \
-	retval; \
-})
-
-#define read_pil_and_cli() \
-({	unsigned long retval; \
-	__asm__ __volatile__("rdpr	%%pil, %0\n\t" \
-			     "wrpr	15, %%pil" \
-			     : "=r" (retval) \
-			     : : "memory"); \
-	retval; \
-})
-
-#define local_save_flags(flags)		((flags) = getipl())
-#define local_irq_save(flags)		((flags) = read_pil_and_cli())
-#define local_irq_restore(flags)		setipl((flags))
-
-/* On sparc64 IRQ flags are the PIL register.  A value of zero
- * means all interrupt levels are enabled, any other value means
- * only IRQ levels greater than that value will be received.
- * Consequently this means that the lowest IRQ level is one.
- */
-#define irqs_disabled()		\
-({	unsigned long flags;	\
-	local_save_flags(flags);\
-	(flags > 0);		\
-})
-
 #define nop() 		__asm__ __volatile__ ("nop")
 
 #define read_barrier_depends()		do { } while(0)
 #define set_mb(__var, __value) \
 	do { __var = __value; membar_storeload_storestore(); } while(0)
-#define set_wmb(__var, __value) \
-	do { __var = __value; wmb(); } while(0)
 
 #ifdef CONFIG_SMP
 #define smp_mb()	mb()
@@ -209,9 +163,10 @@ do {	if (test_thread_flag(TIF_PERFCTR)) {				\
 	/* so that ASI is only written if it changes, think again. */	\
 	__asm__ __volatile__("wr %%g0, %0, %%asi"			\
 	: : "r" (__thread_flag_byte_ptr(task_thread_info(next))[TI_FLAG_BYTE_CURRENT_DS]));\
+	trap_block[current_thread_info()->cpu].thread =			\
+		task_thread_info(next);					\
 	__asm__ __volatile__(						\
 	"mov	%%g4, %%g7\n\t"						\
-	"wrpr	%%g0, 0x95, %%pstate\n\t"				\
 	"stx	%%i6, [%%sp + 2047 + 0x70]\n\t"				\
 	"stx	%%i7, [%%sp + 2047 + 0x78]\n\t"				\
 	"rdpr	%%wstate, %%o5\n\t"					\
@@ -225,14 +180,10 @@ do {	if (test_thread_flag(TIF_PERFCTR)) {				\
 	"ldx	[%%g6 + %3], %%o6\n\t"					\
 	"ldub	[%%g6 + %2], %%o5\n\t"					\
 	"ldub	[%%g6 + %4], %%o7\n\t"					\
-	"mov	%%g6, %%l2\n\t"						\
 	"wrpr	%%o5, 0x0, %%wstate\n\t"				\
 	"ldx	[%%sp + 2047 + 0x70], %%i6\n\t"				\
 	"ldx	[%%sp + 2047 + 0x78], %%i7\n\t"				\
-	"wrpr	%%g0, 0x94, %%pstate\n\t"				\
-	"mov	%%l2, %%g6\n\t"						\
 	"ldx	[%%g6 + %6], %%g4\n\t"					\
-	"wrpr	%%g0, 0x96, %%pstate\n\t"				\
 	"brz,pt %%o7, 1f\n\t"						\
 	" mov	%%g7, %0\n\t"						\
 	"b,a ret_from_syscall\n\t"					\

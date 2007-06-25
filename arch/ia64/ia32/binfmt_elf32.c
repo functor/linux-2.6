@@ -9,7 +9,6 @@
  * 04/13/01	D. Mosberger	dropped saving tssd in ar.k1---it's not needed
  * 09/14/01	D. Mosberger	fixed memory management for gdt/tss page
  */
-#include <linux/config.h>
 
 #include <linux/types.h>
 #include <linux/mm.h>
@@ -34,6 +33,9 @@
 extern void ia64_elf32_init (struct pt_regs *regs);
 
 static void elf32_set_personality (void);
+
+static unsigned long __attribute ((unused))
+randomize_stack_top(unsigned long stack_top);
 
 #define setup_arg_pages(bprm,tos,exec)		ia32_setup_arg_pages(bprm,exec)
 #define elf_map				elf32_map
@@ -89,7 +91,7 @@ ia64_elf32_init (struct pt_regs *regs)
 	 * it with privilege level 3 because the IVE uses non-privileged accesses to these
 	 * tables.  IA-32 segmentation is used to protect against IA-32 accesses to them.
 	 */
-	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	vma = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (vma) {
 		memset(vma, 0, sizeof(*vma));
 		vma->vm_mm = current->mm;
@@ -115,7 +117,7 @@ ia64_elf32_init (struct pt_regs *regs)
 	 * code is locked in specific gate page, which is pointed by pretcode
 	 * when setup_frame_ia32
 	 */
-	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	vma = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (vma) {
 		memset(vma, 0, sizeof(*vma));
 		vma->vm_mm = current->mm;
@@ -140,7 +142,7 @@ ia64_elf32_init (struct pt_regs *regs)
 	 * Install LDT as anonymous memory.  This gives us all-zero segment descriptors
 	 * until a task modifies them via modify_ldt().
 	 */
-	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	vma = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (vma) {
 		memset(vma, 0, sizeof(*vma));
 		vma->vm_mm = current->mm;
@@ -212,7 +214,7 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 		bprm->loader += stack_base;
 	bprm->exec += stack_base;
 
-	mpnt = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	mpnt = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (!mpnt)
 		return -ENOMEM;
 
@@ -265,7 +267,7 @@ elf32_set_personality (void)
 }
 
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long unused)
 {
 	unsigned long pgoff = (eppnt->p_vaddr) & ~IA32_PAGE_MASK;
 

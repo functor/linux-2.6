@@ -94,7 +94,7 @@ static inline void __read_lock(raw_rwlock_t *rw)
 #define __raw_read_lock(lock) \
 do {	unsigned long flags; \
 	local_irq_save(flags); \
-	__raw_read_lock(lock); \
+	__read_lock(lock); \
 	local_irq_restore(flags); \
 } while(0)
 
@@ -114,11 +114,11 @@ static inline void __read_unlock(raw_rwlock_t *rw)
 #define __raw_read_unlock(lock) \
 do {	unsigned long flags; \
 	local_irq_save(flags); \
-	__raw_read_unlock(lock); \
+	__read_unlock(lock); \
 	local_irq_restore(flags); \
 } while(0)
 
-extern __inline__ void __raw_write_lock(raw_rwlock_t *rw)
+static inline void __raw_write_lock(raw_rwlock_t *rw)
 {
 	register raw_rwlock_t *lp asm("g1");
 	lp = rw;
@@ -129,11 +129,63 @@ extern __inline__ void __raw_write_lock(raw_rwlock_t *rw)
 	: /* no outputs */
 	: "r" (lp)
 	: "g2", "g4", "memory", "cc");
+	*(volatile __u32 *)&lp->lock = ~0U;
 }
+
+static inline int __raw_write_trylock(raw_rwlock_t *rw)
+{
+	unsigned int val;
+
+	__asm__ __volatile__("ldstub [%1 + 3], %0"
+			     : "=r" (val)
+			     : "r" (&rw->lock)
+			     : "memory");
+
+	if (val == 0) {
+		val = rw->lock & ~0xff;
+		if (val)
+			((volatile u8*)&rw->lock)[3] = 0;
+		else
+			*(volatile u32*)&rw->lock = ~0U;
+	}
+
+	return (val == 0);
+}
+
+static inline int __read_trylock(raw_rwlock_t *rw)
+{
+	register raw_rwlock_t *lp asm("g1");
+	register int res asm("o0");
+	lp = rw;
+	__asm__ __volatile__(
+	"mov	%%o7, %%g4\n\t"
+	"call	___rw_read_try\n\t"
+	" ldstub	[%%g1 + 3], %%g2\n"
+	: "=r" (res)
+	: "r" (lp)
+	: "g2", "g4", "memory", "cc");
+	return res;
+}
+
+#define __raw_read_trylock(lock) \
+({	unsigned long flags; \
+	int res; \
+	local_irq_save(flags); \
+	res = __read_trylock(lock); \
+	local_irq_restore(flags); \
+	res; \
+})
 
 #define __raw_write_unlock(rw)	do { (rw)->lock = 0; } while(0)
 
 #define __raw_spin_lock_flags(lock, flags) __raw_spin_lock(lock)
+
+#define _raw_spin_relax(lock)	cpu_relax()
+#define _raw_read_relax(lock)	cpu_relax()
+#define _raw_write_relax(lock)	cpu_relax()
+
+#define __raw_read_can_lock(rw) (!((rw)->lock & 0xff))
+#define __raw_write_can_lock(rw) (!(rw)->lock)
 
 #endif /* !(__ASSEMBLY__) */
 

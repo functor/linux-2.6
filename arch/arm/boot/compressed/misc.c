@@ -20,24 +20,66 @@ unsigned int __machine_arch_type;
 
 #include <linux/string.h>
 
-#include <asm/arch/uncompress.h>
-
 #ifdef STANDALONE_DEBUG
 #define putstr printf
-#endif
+#else
+
+static void putstr(const char *ptr);
+
+#include <linux/compiler.h>
+#include <asm/arch/uncompress.h>
 
 #ifdef CONFIG_DEBUG_ICEDCC
-#define putstr icedcc_putstr
-#define putc icedcc_putc
 
-extern void icedcc_putc(int ch);
+#ifdef CONFIG_CPU_V6
 
-static void
-icedcc_putstr(const char *ptr)
+static void icedcc_putc(int ch)
 {
-	for (; *ptr != '\0'; ptr++) {
-		icedcc_putc(*ptr);
+	int status, i = 0x4000000;
+
+	do {
+		if (--i < 0)
+			return;
+
+		asm volatile ("mrc p14, 0, %0, c0, c1, 0" : "=r" (status));
+	} while (status & (1 << 29));
+
+	asm("mcr p14, 0, %0, c0, c5, 0" : : "r" (ch));
+}
+
+#else
+
+static void icedcc_putc(int ch)
+{
+	int status, i = 0x4000000;
+
+	do {
+		if (--i < 0)
+			return;
+
+		asm volatile ("mrc p14, 0, %0, c0, c0, 0" : "=r" (status));
+	} while (status & 2);
+
+	asm("mcr p14, 0, %0, c1, c0, 0" : : "r" (ch));
+}
+
+#endif
+
+#define putc(ch)	icedcc_putc(ch)
+#define flush()	do { } while (0)
+#endif
+
+static void putstr(const char *ptr)
+{
+	char c;
+
+	while ((c = *ptr++) != '\0') {
+		if (c == '\n')
+			putc('\r');
+		putc(c);
 	}
+
+	flush();
 }
 
 #endif

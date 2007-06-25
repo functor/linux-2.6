@@ -17,6 +17,7 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/spinlock.h>
+#include <linux/mutex.h>
 
 /* Possible states of device */
 enum {
@@ -44,6 +45,7 @@ struct loop_device {
 	struct loop_func_table *lo_encryption;
 	__u32           lo_init[2];
 	uid_t		lo_key_owner;	/* Who set the key */
+	xid_t		lo_xid;
 	int		(*ioctl)(struct loop_device *, int cmd, 
 				 unsigned long arg); 
 
@@ -58,10 +60,9 @@ struct loop_device {
 	struct bio 		*lo_bio;
 	struct bio		*lo_biotail;
 	int			lo_state;
-	struct completion	lo_done;
-	struct completion	lo_bh_done;
-	struct semaphore	lo_ctl_mutex;
-	int			lo_pending;
+	struct mutex		lo_ctl_mutex;
+	struct task_struct	*lo_thread;
+	wait_queue_head_t	lo_event;
 
 	request_queue_t		*lo_queue;
 };

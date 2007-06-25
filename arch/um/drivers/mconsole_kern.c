@@ -20,8 +20,9 @@
 #include "linux/namei.h"
 #include "linux/proc_fs.h"
 #include "linux/syscalls.h"
+#include "linux/list.h"
+#include "linux/mm.h"
 #include "linux/console.h"
-#include "linux/vs_cvirt.h"
 #include "asm/irq.h"
 #include "asm/uaccess.h"
 #include "user_util.h"
@@ -55,13 +56,13 @@ static struct notifier_block reboot_notifier = {
 
 static LIST_HEAD(mc_requests);
 
-static void mc_work_proc(void *unused)
+static void mc_work_proc(struct work_struct *unused)
 {
 	struct mconsole_entry *req;
 	unsigned long flags;
 
 	while(!list_empty(&mc_requests)){
-		local_save_flags(flags);
+		local_irq_save(flags);
 		req = list_entry(mc_requests.next, struct mconsole_entry,
 				 list);
 		list_del(&req->list);
@@ -71,26 +72,26 @@ static void mc_work_proc(void *unused)
 	}
 }
 
-static DECLARE_WORK(mconsole_work, mc_work_proc, NULL);
+static DECLARE_WORK(mconsole_work, mc_work_proc);
 
-static irqreturn_t mconsole_interrupt(int irq, void *dev_id,
-				      struct pt_regs *regs)
+static irqreturn_t mconsole_interrupt(int irq, void *dev_id)
 {
 	/* long to avoid size mismatch warnings from gcc */
 	long fd;
 	struct mconsole_entry *new;
-	struct mc_request req;
+	static struct mc_request req;	/* that's OK */
 
 	fd = (long) dev_id;
 	while (mconsole_get_request(fd, &req)){
 		if(req.cmd->context == MCONSOLE_INTR)
 			(*req.cmd->handler)(&req);
 		else {
-			new = kmalloc(sizeof(*new), GFP_ATOMIC);
+			new = kmalloc(sizeof(*new), GFP_NOWAIT);
 			if(new == NULL)
 				mconsole_reply(&req, "Out of memory", 1, 0);
 			else {
 				new->request = req;
+				new->request.regs = get_irq_regs()->regs;
 				list_add(&new->list, &mc_requests);
 			}
 		}
@@ -105,9 +106,9 @@ void mconsole_version(struct mc_request *req)
 {
 	char version[256];
 
-	sprintf(version, "%s %s %s %s %s", system_utsname.sysname,
-		system_utsname.nodename, system_utsname.release,
-		system_utsname.version, system_utsname.machine);
+	sprintf(version, "%s %s %s %s %s", utsname()->sysname,
+		utsname()->nodename, utsname()->release,
+		utsname()->version, utsname()->machine);
 	mconsole_reply(req, version, 0, 0);
 }
 
@@ -299,8 +300,6 @@ void mconsole_reboot(struct mc_request *req)
 	machine_restart(NULL);
 }
 
-extern void ctrl_alt_del(void);
-
 void mconsole_cad(struct mc_request *req)
 {
 	mconsole_reply(req, "", 0, 0);
@@ -316,9 +315,21 @@ void mconsole_stop(struct mc_request *req)
 {
 	deactivate_fd(req->originating_fd, MCONSOLE_IRQ);
 	os_set_fd_block(req->originating_fd, 1);
-	mconsole_reply(req, "", 0, 0);
-	while(mconsole_get_request(req->originating_fd, req)){
-		if(req->cmd->handler == mconsole_go) break;
+	mconsole_reply(req, "stopped", 0, 0);
+	while (mconsole_get_request(req->originating_fd, req)) {
+		if (req->cmd->handler == mconsole_go)
+			break;
+		if (req->cmd->handler == mconsole_stop) {
+			mconsole_reply(req, "Already stopped", 1, 0);
+			continue;
+		}
+		if (req->cmd->handler == mconsole_sysrq) {
+			struct pt_regs *old_regs;
+			old_regs = set_irq_regs((struct pt_regs *)&req->regs);
+			mconsole_sysrq(req);
+			set_irq_regs(old_regs);
+			continue;
+		}
 		(*req->cmd->handler)(req);
 	}
 	os_set_fd_block(req->originating_fd, 0);
@@ -348,6 +359,141 @@ static struct mc_device *mconsole_find_dev(char *name)
 	return(NULL);
 }
 
+#define UNPLUGGED_PER_PAGE \
+	((PAGE_SIZE - sizeof(struct list_head)) / sizeof(unsigned long))
+
+struct unplugged_pages {
+	struct list_head list;
+	void *pages[UNPLUGGED_PER_PAGE];
+};
+
+static unsigned long long unplugged_pages_count = 0;
+static struct list_head unplugged_pages = LIST_HEAD_INIT(unplugged_pages);
+static int unplug_index = UNPLUGGED_PER_PAGE;
+
+static int mem_config(char *str)
+{
+	unsigned long long diff;
+	int err = -EINVAL, i, add;
+	char *ret;
+
+	if(str[0] != '=')
+		goto out;
+
+	str++;
+	if(str[0] == '-')
+		add = 0;
+	else if(str[0] == '+'){
+		add = 1;
+	}
+	else goto out;
+
+	str++;
+	diff = memparse(str, &ret);
+	if(*ret != '\0')
+		goto out;
+
+	diff /= PAGE_SIZE;
+
+	for(i = 0; i < diff; i++){
+		struct unplugged_pages *unplugged;
+		void *addr;
+
+		if(add){
+			if(list_empty(&unplugged_pages))
+				break;
+
+			unplugged = list_entry(unplugged_pages.next,
+					       struct unplugged_pages, list);
+			if(unplug_index > 0)
+				addr = unplugged->pages[--unplug_index];
+			else {
+				list_del(&unplugged->list);
+				addr = unplugged;
+				unplug_index = UNPLUGGED_PER_PAGE;
+			}
+
+			free_page((unsigned long) addr);
+			unplugged_pages_count--;
+		}
+		else {
+			struct page *page;
+
+			page = alloc_page(GFP_ATOMIC);
+			if(page == NULL)
+				break;
+
+			unplugged = page_address(page);
+			if(unplug_index == UNPLUGGED_PER_PAGE){
+				list_add(&unplugged->list, &unplugged_pages);
+				unplug_index = 0;
+			}
+			else {
+				struct list_head *entry = unplugged_pages.next;
+				addr = unplugged;
+
+				unplugged = list_entry(entry,
+						       struct unplugged_pages,
+						       list);
+				unplugged->pages[unplug_index++] = addr;
+				err = os_drop_memory(addr, PAGE_SIZE);
+				if(err)
+					printk("Failed to release memory - "
+					       "errno = %d\n", err);
+			}
+
+			unplugged_pages_count++;
+		}
+	}
+
+	err = 0;
+out:
+	return err;
+}
+
+static int mem_get_config(char *name, char *str, int size, char **error_out)
+{
+	char buf[sizeof("18446744073709551615")];
+	int len = 0;
+
+	sprintf(buf, "%ld", uml_physmem);
+	CONFIG_CHUNK(str, size, len, buf, 1);
+
+	return len;
+}
+
+static int mem_id(char **str, int *start_out, int *end_out)
+{
+	*start_out = 0;
+	*end_out = 0;
+
+	return 0;
+}
+
+static int mem_remove(int n)
+{
+	return -EBUSY;
+}
+
+static struct mc_device mem_mc = {
+	.name		= "mem",
+	.config		= mem_config,
+	.get_config	= mem_get_config,
+	.id		= mem_id,
+	.remove		= mem_remove,
+};
+
+static int mem_mc_init(void)
+{
+	if(can_drop_memory())
+		mconsole_register_dev(&mem_mc);
+	else printk("Can't release memory to the host - memory hotplug won't "
+		    "be supported\n");
+	return 0;
+}
+
+__initcall(mem_mc_init);
+
 #define CONFIG_BUF_SIZE 64
 
 static void mconsole_get_config(int (*get_config)(char *, char *, int,
@@ -363,7 +509,7 @@ static void mconsole_get_config(int (*get_config)(char *, char *, int,
 	}
 
 	error = NULL;
-	size = sizeof(default_buf)/sizeof(default_buf[0]);
+	size = ARRAY_SIZE(default_buf);
 	buf = default_buf;
 
 	while(1){
@@ -464,6 +610,11 @@ out:
 	mconsole_reply(req, err_msg, err, 0);
 }
 
+struct mconsole_output {
+	struct list_head list;
+	struct mc_request *req;
+};
+
 static DEFINE_SPINLOCK(console_lock);
 static LIST_HEAD(clients);
 static char console_buf[MCONSOLE_MAX_DATA];
@@ -479,7 +630,7 @@ static void console_write(struct console *console, const char *string,
 		return;
 
 	while(1){
-		n = min(len, ARRAY_SIZE(console_buf) - console_index);
+		n = min((size_t) len, ARRAY_SIZE(console_buf) - console_index);
 		strncpy(&console_buf[console_index], string, n);
 		console_index += n;
 		string += n;
@@ -488,10 +639,10 @@ static void console_write(struct console *console, const char *string,
 			return;
 
 		list_for_each(ele, &clients){
-			struct mconsole_entry *entry;
+			struct mconsole_output *entry;
 
-			entry = list_entry(ele, struct mconsole_entry, list);
-			mconsole_reply_len(&entry->request, console_buf,
+			entry = list_entry(ele, struct mconsole_output, list);
+			mconsole_reply_len(entry->req, console_buf,
 					   console_index, 0, 1);
 		}
 
@@ -515,11 +666,10 @@ late_initcall(mc_add_console);
 static void with_console(struct mc_request *req, void (*proc)(void *),
 			 void *arg)
 {
-	struct mconsole_entry entry;
+	struct mconsole_output entry;
 	unsigned long flags;
 
-	INIT_LIST_HEAD(&entry.list);
-	entry.request = *req;
+	entry.req = req;
 	list_add(&entry.list, &clients);
 	spin_lock_irqsave(&console_lock, flags);
 
@@ -536,8 +686,7 @@ static void with_console(struct mc_request *req, void (*proc)(void *),
 static void sysrq_proc(void *arg)
 {
 	char *op = arg;
-
-	handle_sysrq(*op, &current->thread.regs, NULL);
+	handle_sysrq(*op, NULL);
 }
 
 void mconsole_sysrq(struct mc_request *req)
@@ -644,7 +793,7 @@ static int mconsole_init(void)
 	register_reboot_notifier(&reboot_notifier);
 
 	err = um_request_irq(MCONSOLE_IRQ, sock, IRQ_READ, mconsole_interrupt,
-			     SA_INTERRUPT | SA_SHIRQ | SA_SAMPLE_RANDOM,
+			     IRQF_DISABLED | IRQF_SHARED | IRQF_SAMPLE_RANDOM,
 			     "mconsole", (void *)sock);
 	if (err){
 		printk("Failed to get IRQ for management console\n");
@@ -763,7 +912,8 @@ static struct notifier_block panic_exit_notifier = {
 
 static int add_notifier(void)
 {
-	notifier_chain_register(&panic_notifier_list, &panic_exit_notifier);
+	atomic_notifier_chain_register(&panic_notifier_list,
+			&panic_exit_notifier);
 	return(0);
 }
 

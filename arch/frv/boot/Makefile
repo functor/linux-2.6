@@ -8,6 +8,8 @@
 # Copyright (C) 1995-2000 Russell King
 #
 
+targets := Image zImage bootpImage
+
 SYSTEM	=$(TOPDIR)/$(LINUX)
 
 ZTEXTADDR	 = 0x02080000
@@ -57,16 +59,15 @@ initrd:
 # installation
 #
 install: $(CONFIGURE) Image
-	sh ./install.sh $(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION) Image $(TOPDIR)/System.map "$(INSTALL_PATH)"
+	sh ./install.sh $(KERNELRELEASE) Image $(TOPDIR)/System.map "$(INSTALL_PATH)"
 
 zinstall: $(CONFIGURE) zImage
-	sh ./install.sh $(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION) zImage $(TOPDIR)/System.map "$(INSTALL_PATH)"
+	sh ./install.sh $(KERNELRELEASE) zImage $(TOPDIR)/System.map "$(INSTALL_PATH)"
 
 #
 # miscellany
 #
 mrproper clean:
-	$(RM) Image zImage bootpImage
 #	@$(MAKE) -C compressed clean
 #	@$(MAKE) -C bootp clean
 

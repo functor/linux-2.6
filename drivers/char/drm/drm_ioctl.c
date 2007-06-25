@@ -1,5 +1,5 @@
 /**
- * \file drm_ioctl.h 
+ * \file drm_ioctl.c
  * IOCTL processing for DRM
  *
  * \author Rickard E. (Rik) Faith <faith@valinux.com>
@@ -40,7 +40,7 @@
 
 /**
  * Get the bus id.
- * 
+ *
  * \param inode device inode.
  * \param filp file pointer.
  * \param cmd command.
@@ -50,12 +50,12 @@
  * Copies the bus id from drm_device::unique into user space.
  */
 int drm_getunique(struct inode *inode, struct file *filp,
-		   unsigned int cmd, unsigned long arg)
+		  unsigned int cmd, unsigned long arg)
 {
-	drm_file_t	 *priv	 = filp->private_data;
-	drm_device_t	 *dev	 = priv->head->dev;
-	drm_unique_t	 __user *argp = (void __user *)arg;
-	drm_unique_t	 u;
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->head->dev;
+	drm_unique_t __user *argp = (void __user *)arg;
+	drm_unique_t u;
 
 	if (copy_from_user(&u, argp, sizeof(u)))
 		return -EFAULT;
@@ -71,7 +71,7 @@ int drm_getunique(struct inode *inode, struct file *filp,
 
 /**
  * Set the bus id.
- * 
+ *
  * \param inode device inode.
  * \param filp file pointer.
  * \param cmd command.
@@ -84,34 +84,39 @@ int drm_getunique(struct inode *inode, struct file *filp,
  * version 1.1 or greater.
  */
 int drm_setunique(struct inode *inode, struct file *filp,
-		   unsigned int cmd, unsigned long arg)
+		  unsigned int cmd, unsigned long arg)
 {
-	drm_file_t	 *priv	 = filp->private_data;
-	drm_device_t	 *dev	 = priv->head->dev;
-	drm_unique_t	 u;
-	int		 domain, bus, slot, func, ret;
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->head->dev;
+	drm_unique_t u;
+	int domain, bus, slot, func, ret;
 
-	if (dev->unique_len || dev->unique) return -EBUSY;
+	if (dev->unique_len || dev->unique)
+		return -EBUSY;
 
-	if (copy_from_user(&u, (drm_unique_t __user *)arg, sizeof(u)))
+	if (copy_from_user(&u, (drm_unique_t __user *) arg, sizeof(u)))
 		return -EFAULT;
 
-	if (!u.unique_len || u.unique_len > 1024) return -EINVAL;
+	if (!u.unique_len || u.unique_len > 1024)
+		return -EINVAL;
 
 	dev->unique_len = u.unique_len;
-	dev->unique	= drm_alloc(u.unique_len + 1, DRM_MEM_DRIVER);
-	if(!dev->unique) return -ENOMEM;
+	dev->unique = drm_alloc(u.unique_len + 1, DRM_MEM_DRIVER);
+	if (!dev->unique)
+		return -ENOMEM;
 	if (copy_from_user(dev->unique, u.unique, dev->unique_len))
 		return -EFAULT;
 
 	dev->unique[dev->unique_len] = '\0';
 
-	dev->devname = drm_alloc(strlen(dev->driver->pci_driver.name) + strlen(dev->unique) + 2,
-				  DRM_MEM_DRIVER);
+	dev->devname =
+	    drm_alloc(strlen(dev->driver->pci_driver.name) +
+		      strlen(dev->unique) + 2, DRM_MEM_DRIVER);
 	if (!dev->devname)
 		return -ENOMEM;
 
-	sprintf(dev->devname, "%s@%s", dev->driver->pci_driver.name, dev->unique);
+	sprintf(dev->devname, "%s@%s", dev->driver->pci_driver.name,
+		dev->unique);
 
 	/* Return error if the busid submitted doesn't match the device's actual
 	 * busid.
@@ -121,40 +126,47 @@ int drm_setunique(struct inode *inode, struct file *filp,
 		return DRM_ERR(EINVAL);
 	domain = bus >> 8;
 	bus &= 0xff;
-	
-	if ((domain != dev->pci_domain) ||
-	    (bus != dev->pci_bus) ||
-	    (slot != dev->pci_slot) ||
-	    (func != dev->pci_func))
+
+	if ((domain != drm_get_pci_domain(dev)) ||
+	    (bus != dev->pdev->bus->number) ||
+	    (slot != PCI_SLOT(dev->pdev->devfn)) ||
+	    (func != PCI_FUNC(dev->pdev->devfn)))
 		return -EINVAL;
 
 	return 0;
 }
 
-static int
-drm_set_busid(drm_device_t *dev)
+static int drm_set_busid(drm_device_t * dev)
 {
-	if (dev->unique != NULL)
-		return EBUSY;
+	int len;
 
-	dev->unique_len = 20;
+	if (dev->unique != NULL)
+		return 0;
+
+	dev->unique_len = 40;
 	dev->unique = drm_alloc(dev->unique_len + 1, DRM_MEM_DRIVER);
 	if (dev->unique == NULL)
-		return ENOMEM;
+		return -ENOMEM;
 
-	snprintf(dev->unique, dev->unique_len, "pci:%04x:%02x:%02x.%d",
-		dev->pci_domain, dev->pci_bus, dev->pci_slot, dev->pci_func);
+	len = snprintf(dev->unique, dev->unique_len, "pci:%04x:%02x:%02x.%d",
+		       drm_get_pci_domain(dev), dev->pdev->bus->number,
+		       PCI_SLOT(dev->pdev->devfn),
+		       PCI_FUNC(dev->pdev->devfn));
 
-	dev->devname = drm_alloc(strlen(dev->driver->pci_driver.name) + dev->unique_len + 2,
-				DRM_MEM_DRIVER);
+	if (len > dev->unique_len)
+		DRM_ERROR("Unique buffer overflowed\n");
+
+	dev->devname =
+	    drm_alloc(strlen(dev->driver->pci_driver.name) + dev->unique_len +
+		      2, DRM_MEM_DRIVER);
 	if (dev->devname == NULL)
-		return ENOMEM;
+		return -ENOMEM;
 
-	sprintf(dev->devname, "%s@%s", dev->driver->pci_driver.name, dev->unique);
+	sprintf(dev->devname, "%s@%s", dev->driver->pci_driver.name,
+		dev->unique);
 
 	return 0;
 }
-
 
 /**
  * Get a mapping information.
@@ -163,56 +175,57 @@ drm_set_busid(drm_device_t *dev)
  * \param filp file pointer.
  * \param cmd command.
  * \param arg user argument, pointing to a drm_map structure.
- * 
+ *
  * \return zero on success or a negative number on failure.
  *
  * Searches for the mapping with the specified offset and copies its information
  * into userspace
  */
-int drm_getmap( struct inode *inode, struct file *filp,
-		 unsigned int cmd, unsigned long arg )
+int drm_getmap(struct inode *inode, struct file *filp,
+	       unsigned int cmd, unsigned long arg)
 {
-	drm_file_t   *priv = filp->private_data;
-	drm_device_t *dev  = priv->head->dev;
-	drm_map_t    __user *argp = (void __user *)arg;
-	drm_map_t    map;
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->head->dev;
+	drm_map_t __user *argp = (void __user *)arg;
+	drm_map_t map;
 	drm_map_list_t *r_list = NULL;
 	struct list_head *list;
-	int          idx;
-	int	     i;
+	int idx;
+	int i;
 
 	if (copy_from_user(&map, argp, sizeof(map)))
 		return -EFAULT;
 	idx = map.offset;
 
-	down(&dev->struct_sem);
+	mutex_lock(&dev->struct_mutex);
 	if (idx < 0) {
-		up(&dev->struct_sem);
+		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
 	}
 
 	i = 0;
 	list_for_each(list, &dev->maplist->head) {
-		if(i == idx) {
+		if (i == idx) {
 			r_list = list_entry(list, drm_map_list_t, head);
 			break;
 		}
 		i++;
 	}
-	if(!r_list || !r_list->map) {
-		up(&dev->struct_sem);
+	if (!r_list || !r_list->map) {
+		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
 	}
 
 	map.offset = r_list->map->offset;
-	map.size   = r_list->map->size;
-	map.type   = r_list->map->type;
-	map.flags  = r_list->map->flags;
-	map.handle = r_list->map->handle;
-	map.mtrr   = r_list->map->mtrr;
-	up(&dev->struct_sem);
+	map.size = r_list->map->size;
+	map.type = r_list->map->type;
+	map.flags = r_list->map->flags;
+	map.handle = (void *)(unsigned long)r_list->user_token;
+	map.mtrr = r_list->map->mtrr;
+	mutex_unlock(&dev->struct_mutex);
 
-	if (copy_to_user(argp, &map, sizeof(map))) return -EFAULT;
+	if (copy_to_user(argp, &map, sizeof(map)))
+		return -EFAULT;
 	return 0;
 }
 
@@ -223,83 +236,81 @@ int drm_getmap( struct inode *inode, struct file *filp,
  * \param filp file pointer.
  * \param cmd command.
  * \param arg user argument, pointing to a drm_client structure.
- * 
+ *
  * \return zero on success or a negative number on failure.
  *
  * Searches for the client with the specified index and copies its information
  * into userspace
  */
-int drm_getclient( struct inode *inode, struct file *filp,
-		    unsigned int cmd, unsigned long arg )
+int drm_getclient(struct inode *inode, struct file *filp,
+		  unsigned int cmd, unsigned long arg)
 {
-	drm_file_t   *priv = filp->private_data;
-	drm_device_t *dev  = priv->head->dev;
-	drm_client_t __user *argp = (void __user *)arg;
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->head->dev;
+	drm_client_t __user *argp = (drm_client_t __user *)arg;
 	drm_client_t client;
-	drm_file_t   *pt;
-	int          idx;
-	int          i;
+	drm_file_t *pt;
+	int idx;
+	int i;
 
 	if (copy_from_user(&client, argp, sizeof(client)))
 		return -EFAULT;
 	idx = client.idx;
-	down(&dev->struct_sem);
-	for (i = 0, pt = dev->file_first; i < idx && pt; i++, pt = pt->next)
-		;
+	mutex_lock(&dev->struct_mutex);
+	for (i = 0, pt = dev->file_first; i < idx && pt; i++, pt = pt->next) ;
 
 	if (!pt) {
-		up(&dev->struct_sem);
+		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
 	}
-	client.auth  = pt->authenticated;
-	client.pid   = pt->pid;
-	client.uid   = pt->uid;
+	client.auth = pt->authenticated;
+	client.pid = pt->pid;
+	client.uid = pt->uid;
 	client.magic = pt->magic;
-	client.iocs  = pt->ioctl_count;
-	up(&dev->struct_sem);
+	client.iocs = pt->ioctl_count;
+	mutex_unlock(&dev->struct_mutex);
 
-	if (copy_to_user((drm_client_t __user *)arg, &client, sizeof(client)))
+	if (copy_to_user(argp, &client, sizeof(client)))
 		return -EFAULT;
 	return 0;
 }
 
-/** 
- * Get statistics information. 
- * 
+/**
+ * Get statistics information.
+ *
  * \param inode device inode.
  * \param filp file pointer.
  * \param cmd command.
  * \param arg user argument, pointing to a drm_stats structure.
- * 
+ *
  * \return zero on success or a negative number on failure.
  */
-int drm_getstats( struct inode *inode, struct file *filp,
-		   unsigned int cmd, unsigned long arg )
+int drm_getstats(struct inode *inode, struct file *filp,
+		 unsigned int cmd, unsigned long arg)
 {
-	drm_file_t   *priv = filp->private_data;
-	drm_device_t *dev  = priv->head->dev;
-	drm_stats_t  stats;
-	int          i;
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->head->dev;
+	drm_stats_t stats;
+	int i;
 
 	memset(&stats, 0, sizeof(stats));
-	
-	down(&dev->struct_sem);
+
+	mutex_lock(&dev->struct_mutex);
 
 	for (i = 0; i < dev->counters; i++) {
 		if (dev->types[i] == _DRM_STAT_LOCK)
 			stats.data[i].value
-				= (dev->lock.hw_lock
-				   ? dev->lock.hw_lock->lock : 0);
-		else 
+			    = (dev->lock.hw_lock ? dev->lock.hw_lock->lock : 0);
+		else
 			stats.data[i].value = atomic_read(&dev->counts[i]);
-		stats.data[i].type  = dev->types[i];
+		stats.data[i].type = dev->types[i];
 	}
-	
+
 	stats.count = dev->counters;
 
-	up(&dev->struct_sem);
+	mutex_unlock(&dev->struct_mutex);
 
-	if (copy_to_user((drm_stats_t __user *)arg, &stats, sizeof(stats)))
+	if (copy_to_user((drm_stats_t __user *) arg, &stats, sizeof(stats)))
 		return -EFAULT;
 	return 0;
 }
@@ -322,38 +333,40 @@ int drm_setversion(DRM_IOCTL_ARGS)
 	drm_set_version_t retv;
 	int if_version;
 	drm_set_version_t __user *argp = (void __user *)data;
-	drm_version_t version;
+	int ret;
 
-	DRM_COPY_FROM_USER_IOCTL(sv, argp, sizeof(sv));
+	if (copy_from_user(&sv, argp, sizeof(sv)))
+		return -EFAULT;
 
-	memset(&version, 0, sizeof(version));
-
-	dev->driver->version(&version);
 	retv.drm_di_major = DRM_IF_MAJOR;
 	retv.drm_di_minor = DRM_IF_MINOR;
-	retv.drm_dd_major = version.version_major;
-	retv.drm_dd_minor = version.version_minor;
+	retv.drm_dd_major = dev->driver->major;
+	retv.drm_dd_minor = dev->driver->minor;
 
-	DRM_COPY_TO_USER_IOCTL(argp, retv, sizeof(sv));
+	if (copy_to_user(argp, &retv, sizeof(retv)))
+		return -EFAULT;
 
 	if (sv.drm_di_major != -1) {
 		if (sv.drm_di_major != DRM_IF_MAJOR ||
 		    sv.drm_di_minor < 0 || sv.drm_di_minor > DRM_IF_MINOR)
-			return EINVAL;
-		if_version = DRM_IF_VERSION(sv.drm_di_major, sv.drm_dd_minor);
-		dev->if_version = DRM_MAX(if_version, dev->if_version);
+			return -EINVAL;
+		if_version = DRM_IF_VERSION(sv.drm_di_major, sv.drm_di_minor);
+		dev->if_version = max(if_version, dev->if_version);
 		if (sv.drm_di_minor >= 1) {
 			/*
 			 * Version 1.1 includes tying of DRM to specific device
 			 */
-			drm_set_busid(dev);
+			ret = drm_set_busid(dev);
+			if (ret)
+				return ret;
 		}
 	}
 
 	if (sv.drm_dd_major != -1) {
-		if (sv.drm_dd_major != version.version_major ||
-		    sv.drm_dd_minor < 0 || sv.drm_dd_minor > version.version_minor)
-			return EINVAL;
+		if (sv.drm_dd_major != dev->driver->major ||
+		    sv.drm_dd_minor < 0
+		    || sv.drm_dd_minor > dev->driver->minor)
+			return -EINVAL;
 
 		if (dev->driver->set_version)
 			dev->driver->set_version(dev, &sv);
@@ -363,7 +376,7 @@ int drm_setversion(DRM_IOCTL_ARGS)
 
 /** No-op ioctl. */
 int drm_noop(struct inode *inode, struct file *filp, unsigned int cmd,
-	       unsigned long arg)
+	     unsigned long arg)
 {
 	DRM_DEBUG("\n");
 	return 0;

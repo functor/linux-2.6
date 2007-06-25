@@ -5,7 +5,6 @@
  * All other exports should be put directly after the definition.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/string.h>
@@ -15,6 +14,7 @@ EXPORT_SYMBOL(strlen);
 
 #include <asm/checksum.h>
 EXPORT_SYMBOL(ip_fast_csum);		/* hand-coded assembly */
+EXPORT_SYMBOL(csum_ipv6_magic);
 
 #include <asm/semaphore.h>
 EXPORT_SYMBOL(__down);
@@ -63,7 +63,7 @@ EXPORT_SYMBOL(__udivdi3);
 EXPORT_SYMBOL(__moddi3);
 EXPORT_SYMBOL(__umoddi3);
 
-#if defined(CONFIG_MD_RAID5) || defined(CONFIG_MD_RAID5_MODULE)
+#if defined(CONFIG_MD_RAID456) || defined(CONFIG_MD_RAID456_MODULE)
 extern void xor_ia64_2(void);
 extern void xor_ia64_3(void);
 extern void xor_ia64_4(void);
@@ -86,6 +86,9 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
 #include <asm/unwind.h>
 EXPORT_SYMBOL(unw_init_running);
 
+#include <linux/efi.h>
+EXPORT_SYMBOL_GPL(efi_mem_type);
+
 #ifdef ASM_SUPPORTED
 # ifdef CONFIG_SMP
 #  if (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
@@ -106,5 +109,9 @@ EXPORT_SYMBOL(ia64_spinlock_contention);
 # endif
 #endif
 
+#if defined(CONFIG_IA64_ESI) || defined(CONFIG_IA64_ESI_MODULE)
+extern void esi_call_phys (void);
+EXPORT_SYMBOL_GPL(esi_call_phys);
+#endif
 extern char ia64_ivt[];
 EXPORT_SYMBOL(ia64_ivt);

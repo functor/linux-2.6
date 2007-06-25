@@ -6,7 +6,6 @@
 
 /* 2.3.x zone allocator, 1999 Andrea Arcangeli <andrea@suse.de> */
 
-#include <linux/config.h>
 #include <linux/pagemap.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -21,7 +20,6 @@
 #include <linux/init.h>
 #include <linux/bootmem.h> /* max_low_pfn */
 #include <linux/vmalloc.h>
-#include <linux/pagemap.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -272,7 +270,7 @@ callback_init(void * kernel_end)
 void
 paging_init(void)
 {
-	unsigned long zones_size[MAX_NR_ZONES] = {0, 0, 0};
+	unsigned long zones_size[MAX_NR_ZONES] = {0, };
 	unsigned long dma_pfn, high_pfn;
 
 	dma_pfn = virt_to_phys((char *)MAX_DMA_ADDRESS) >> PAGE_SHIFT;
@@ -358,7 +356,7 @@ free_reserved_mem(void *start, void *end)
 	void *__start = start;
 	for (; __start < end; __start += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(__start));
-		set_page_count(virt_to_page(__start), 1);
+		init_page_count(virt_to_page(__start));
 		free_page((long)__start);
 		totalram_pages++;
 	}

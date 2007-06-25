@@ -19,14 +19,10 @@
 #include <net/route.h>
 #include <linux/bitops.h>
 
-#define ASSERT_READ_LOCK(x)
-#define ASSERT_WRITE_LOCK(x)
-
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/netfilter_ipv4/ip_nat.h>
 #include <linux/netfilter_ipv4/ip_nat_core.h>
 #include <linux/netfilter_ipv4/ip_nat_rule.h>
-#include <linux/netfilter_ipv4/listhelp.h>
 
 #if 0
 #define DEBUGP printk
@@ -103,8 +99,8 @@ static unsigned int ipt_snat_target(struct sk_buff **pskb,
 				    const struct net_device *in,
 				    const struct net_device *out,
 				    unsigned int hooknum,
-				    const void *targinfo,
-				    void *userinfo)
+				    const struct ipt_target *target,
+				    const void *targinfo)
 {
 	struct ip_conntrack *ct;
 	enum ip_conntrack_info ctinfo;
@@ -123,7 +119,7 @@ static unsigned int ipt_snat_target(struct sk_buff **pskb,
 }
 
 /* Before 2.6.11 we did implicit source NAT if required. Warn about change. */
-static void warn_if_extra_mangle(u32 dstip, u32 srcip)
+static void warn_if_extra_mangle(__be32 dstip, __be32 srcip)
 {
 	static int warned = 0;
 	struct flowi fl = { .nl_u = { .ip4_u = { .daddr = dstip } } };
@@ -145,8 +141,8 @@ static unsigned int ipt_dnat_target(struct sk_buff **pskb,
 				    const struct net_device *in,
 				    const struct net_device *out,
 				    unsigned int hooknum,
-				    const void *targinfo,
-				    void *userinfo)
+				    const struct ipt_target *target,
+				    const void *targinfo)
 {
 	struct ip_conntrack *ct;
 	enum ip_conntrack_info ctinfo;
@@ -170,8 +166,8 @@ static unsigned int ipt_dnat_target(struct sk_buff **pskb,
 
 static int ipt_snat_checkentry(const char *tablename,
 			       const void *entry,
+			       const struct ipt_target *target,
 			       void *targinfo,
-			       unsigned int targinfosize,
 			       unsigned int hook_mask)
 {
 	struct ip_nat_multi_range_compat *mr = targinfo;
@@ -181,30 +177,13 @@ static int ipt_snat_checkentry(const char *tablename,
 		printk("SNAT: multiple ranges no longer supported\n");
 		return 0;
 	}
-
-	if (targinfosize != IPT_ALIGN(sizeof(struct ip_nat_multi_range_compat))) {
-		DEBUGP("SNAT: Target size %u wrong for %u ranges\n",
-		       targinfosize, mr->rangesize);
-		return 0;
-	}
-
-	/* Only allow these for NAT. */
-	if (strcmp(tablename, "nat") != 0) {
-		DEBUGP("SNAT: wrong table %s\n", tablename);
-		return 0;
-	}
-
-	if (hook_mask & ~(1 << NF_IP_POST_ROUTING)) {
-		DEBUGP("SNAT: hook mask 0x%x bad\n", hook_mask);
-		return 0;
-	}
 	return 1;
 }
 
 static int ipt_dnat_checkentry(const char *tablename,
 			       const void *entry,
+			       const struct ipt_target *target,
 			       void *targinfo,
-			       unsigned int targinfosize,
 			       unsigned int hook_mask)
 {
 	struct ip_nat_multi_range_compat *mr = targinfo;
@@ -214,24 +193,6 @@ static int ipt_dnat_checkentry(const char *tablename,
 		printk("DNAT: multiple ranges no longer supported\n");
 		return 0;
 	}
-
-	if (targinfosize != IPT_ALIGN(sizeof(struct ip_nat_multi_range_compat))) {
-		DEBUGP("DNAT: Target size %u wrong for %u ranges\n",
-		       targinfosize, mr->rangesize);
-		return 0;
-	}
-
-	/* Only allow these for NAT. */
-	if (strcmp(tablename, "nat") != 0) {
-		DEBUGP("DNAT: wrong table %s\n", tablename);
-		return 0;
-	}
-
-	if (hook_mask & ~((1 << NF_IP_PRE_ROUTING) | (1 << NF_IP_LOCAL_OUT))) {
-		DEBUGP("DNAT: hook mask 0x%x bad\n", hook_mask);
-		return 0;
-	}
-	
 	return 1;
 }
 
@@ -244,7 +205,7 @@ alloc_null_binding(struct ip_conntrack *conntrack,
 	   per-proto parts (hence not IP_NAT_RANGE_PROTO_SPECIFIED).
 	   Use reply in case it's already been mangled (eg local packet).
 	*/
-	u_int32_t ip
+	__be32 ip
 		= (HOOK2MANIP(hooknum) == IP_NAT_MANIP_SRC
 		   ? conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip
 		   : conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip);
@@ -261,7 +222,7 @@ alloc_null_binding_confirmed(struct ip_conntrack *conntrack,
                              struct ip_nat_info *info,
                              unsigned int hooknum)
 {
-	u_int32_t ip
+	__be32 ip
 		= (HOOK2MANIP(hooknum) == IP_NAT_MANIP_SRC
 		   ? conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip
 		   : conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip);
@@ -286,7 +247,7 @@ int ip_nat_rule_find(struct sk_buff **pskb,
 {
 	int ret;
 
-	ret = ipt_do_table(pskb, hooknum, in, out, &nat_table, NULL);
+	ret = ipt_do_table(pskb, hooknum, in, out, &nat_table);
 
 	if (ret == NF_ACCEPT) {
 		if (!ip_nat_initialized(ct, HOOK2MANIP(hooknum)))
@@ -299,12 +260,18 @@ int ip_nat_rule_find(struct sk_buff **pskb,
 static struct ipt_target ipt_snat_reg = {
 	.name		= "SNAT",
 	.target		= ipt_snat_target,
+	.targetsize	= sizeof(struct ip_nat_multi_range_compat),
+	.table		= "nat",
+	.hooks		= 1 << NF_IP_POST_ROUTING,
 	.checkentry	= ipt_snat_checkentry,
 };
 
 static struct ipt_target ipt_dnat_reg = {
 	.name		= "DNAT",
 	.target		= ipt_dnat_target,
+	.targetsize	= sizeof(struct ip_nat_multi_range_compat),
+	.table		= "nat",
+	.hooks		= (1 << NF_IP_PRE_ROUTING) | (1 << NF_IP_LOCAL_OUT),
 	.checkentry	= ipt_dnat_checkentry,
 };
 

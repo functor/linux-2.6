@@ -28,7 +28,6 @@
  *	See net/ipx/ChangeLog.
  */
 
-#include <linux/config.h>
 #include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/if_arp.h>
@@ -84,13 +83,13 @@ DEFINE_SPINLOCK(ipx_interfaces_lock);
 struct ipx_interface *ipx_primary_net;
 struct ipx_interface *ipx_internal_net;
 
-extern int ipxrtr_add_route(__u32 network, struct ipx_interface *intrfc,
+extern int ipxrtr_add_route(__be32 network, struct ipx_interface *intrfc,
 			    unsigned char *node);
 extern void ipxrtr_del_routes(struct ipx_interface *intrfc);
 extern int ipxrtr_route_packet(struct sock *sk, struct sockaddr_ipx *usipx,
 			       struct iovec *iov, int len, int noblock);
 extern int ipxrtr_route_skb(struct sk_buff *skb);
-extern struct ipx_route *ipxrtr_lookup(__u32 net);
+extern struct ipx_route *ipxrtr_lookup(__be32 net);
 extern int ipxrtr_ioctl(unsigned int cmd, void __user *arg);
 
 #undef IPX_REFCNT_DEBUG
@@ -178,7 +177,7 @@ static void ipxitf_clear_primary_net(void)
 }
 
 static struct ipx_interface *__ipxitf_find_using_phys(struct net_device *dev,
-						      unsigned short datalink)
+						      __be16 datalink)
 {
 	struct ipx_interface *i;
 
@@ -191,7 +190,7 @@ out:
 }
 
 static struct ipx_interface *ipxitf_find_using_phys(struct net_device *dev,
-						    unsigned short datalink)
+						    __be16 datalink)
 {
 	struct ipx_interface *i;
 
@@ -203,7 +202,7 @@ static struct ipx_interface *ipxitf_find_using_phys(struct net_device *dev,
 	return i;
 }
 
-struct ipx_interface *ipxitf_find_using_net(__u32 net)
+struct ipx_interface *ipxitf_find_using_net(__be32 net)
 {
 	struct ipx_interface *i;
 
@@ -238,7 +237,7 @@ static void ipxitf_insert_socket(struct ipx_interface *intrfc, struct sock *sk)
 
 /* caller must hold intrfc->if_sklist_lock */
 static struct sock *__ipxitf_find_socket(struct ipx_interface *intrfc,
-					 unsigned short port)
+					 __be16 port)
 {
 	struct sock *s;
 	struct hlist_node *node;
@@ -253,7 +252,7 @@ found:
 
 /* caller must hold a reference to intrfc */
 static struct sock *ipxitf_find_socket(struct ipx_interface *intrfc,
-					unsigned short port)
+					__be16 port)
 {
 	struct sock *s;
 
@@ -269,7 +268,7 @@ static struct sock *ipxitf_find_socket(struct ipx_interface *intrfc,
 #ifdef CONFIG_IPX_INTERN
 static struct sock *ipxitf_find_internal_socket(struct ipx_interface *intrfc,
 						unsigned char *ipx_node,
-						unsigned short port)
+						__be16 port)
 {
 	struct sock *s;
 	struct hlist_node *node;
@@ -601,10 +600,10 @@ int ipxitf_send(struct ipx_interface *intrfc, struct sk_buff *skb, char *node)
 
 	/* see if we need to include the netnum in the route list */
 	if (IPX_SKB_CB(skb)->last_hop.index >= 0) {
-		u32 *last_hop = (u32 *)(((u8 *) skb->data) +
+		__be32 *last_hop = (__be32 *)(((u8 *) skb->data) +
 				sizeof(struct ipxhdr) +
 				IPX_SKB_CB(skb)->last_hop.index *
-				sizeof(u32));
+				sizeof(__be32));
 		*last_hop = IPX_SKB_CB(skb)->last_hop.netnum;
 		IPX_SKB_CB(skb)->last_hop.index = -1;
 	}
@@ -773,7 +772,7 @@ static void ipxitf_discover_netnum(struct ipx_interface *intrfc,
 		} else {
 			printk(KERN_WARNING "IPX: Network number collision "
 				"%lx\n        %s %s and %s %s\n",
-				(unsigned long) htonl(cb->ipx_source_net),
+				(unsigned long) ntohl(cb->ipx_source_net),
 				ipx_device_name(i),
 				ipx_frame_name(i->if_dlink_type),
 				ipx_device_name(intrfc),
@@ -813,7 +812,7 @@ static int ipxitf_pprop(struct ipx_interface *intrfc, struct sk_buff *skb)
 	int i, rc = -EINVAL;
 	struct ipx_interface *ifcs;
 	char *c;
-	u32 *l;
+	__be32 *l;
 
 	/* Illegal packet - too many hops or too short */
 	/* We decide to throw it away: no broadcasting, no local processing.
@@ -834,7 +833,7 @@ static int ipxitf_pprop(struct ipx_interface *intrfc, struct sk_buff *skb)
 		goto out;
 	
 	c = ((u8 *) ipx) + sizeof(struct ipxhdr);
-	l = (u32 *) c;
+	l = (__be32 *) c;
 
 	/* Don't broadcast packet if already seen this net */
 	for (i = 0; i < IPX_SKB_CB(skb)->ipx_tctrl; i++)
@@ -856,7 +855,7 @@ static int ipxitf_pprop(struct ipx_interface *intrfc, struct sk_buff *skb)
 		/* That aren't in the list */
 		if (ifcs == intrfc)
 			continue;
-		l = (__u32 *) c;
+		l = (__be32 *) c;
 		/* don't consider the last entry in the packet list,
 		 * it is our netnum, and it is not there yet */
 		for (i = 0; i < IPX_SKB_CB(skb)->ipx_tctrl; i++)
@@ -886,8 +885,8 @@ static void ipxitf_insert(struct ipx_interface *intrfc)
 		ipx_primary_net = intrfc;
 }
 
-static struct ipx_interface *ipxitf_alloc(struct net_device *dev, __u32 netnum,
-					  unsigned short dlink_type,
+static struct ipx_interface *ipxitf_alloc(struct net_device *dev, __be32 netnum,
+					  __be16 dlink_type,
 					  struct datalink_proto *dlink,
 					  unsigned char internal,
 					  int ipx_offset)
@@ -961,7 +960,7 @@ static __be16 ipx_map_frame_type(unsigned char type)
 static int ipxitf_create(struct ipx_interface_definition *idef)
 {
 	struct net_device *dev;
-	unsigned short dlink_type = 0;
+	__be16 dlink_type = 0;
 	struct datalink_proto *datalink = NULL;
 	struct ipx_interface *intrfc;
 	int rc;
@@ -1074,7 +1073,7 @@ out:
 static int ipxitf_delete(struct ipx_interface_definition *idef)
 {
 	struct net_device *dev = NULL;
-	unsigned short dlink_type = 0;
+	__be16 dlink_type = 0;
 	struct ipx_interface *intrfc;
 	int rc = 0;
 
@@ -1111,7 +1110,7 @@ out:
 }
 
 static struct ipx_interface *ipxitf_auto_create(struct net_device *dev,
-						unsigned short dlink_type)
+						__be16 dlink_type)
 {
 	struct ipx_interface *intrfc = NULL;
 	struct datalink_proto *datalink;
@@ -1123,7 +1122,7 @@ static struct ipx_interface *ipxitf_auto_create(struct net_device *dev,
 	if (dev->addr_len > IPX_NODE_LEN)
 		goto out;
 
-	switch (htons(dlink_type)) {
+	switch (ntohs(dlink_type)) {
 	case ETH_P_IPX:		datalink = pEII_datalink;	break;
 	case ETH_P_802_2:	datalink = p8022_datalink;	break;
 	case ETH_P_SNAP:	datalink = pSNAP_datalink;	break;
@@ -1274,7 +1273,7 @@ __be16 ipx_cksum(struct ipxhdr *packet, int length)
 	return (__force __be16)sum;
 }
 
-const char *ipx_frame_name(unsigned short frame)
+const char *ipx_frame_name(__be16 frame)
 {
 	char* rc = "None";
 
@@ -1409,7 +1408,7 @@ out:
 
 /* caller must hold a reference to intrfc */
 
-static unsigned short ipx_first_free_socketnum(struct ipx_interface *intrfc)
+static __be16 ipx_first_free_socketnum(struct ipx_interface *intrfc)
 {
 	unsigned short socketNum = intrfc->if_sknum;
 
@@ -1418,7 +1417,7 @@ static unsigned short ipx_first_free_socketnum(struct ipx_interface *intrfc)
 	if (socketNum < IPX_MIN_EPHEMERAL_SOCKET)
 		socketNum = IPX_MIN_EPHEMERAL_SOCKET;
 
-	while (__ipxitf_find_socket(intrfc, ntohs(socketNum)))
+	while (__ipxitf_find_socket(intrfc, htons(socketNum)))
 		if (socketNum > IPX_MAX_EPHEMERAL_SOCKET)
 			socketNum = IPX_MIN_EPHEMERAL_SOCKET;
 		else
@@ -1427,7 +1426,7 @@ static unsigned short ipx_first_free_socketnum(struct ipx_interface *intrfc)
 	spin_unlock_bh(&intrfc->if_sklist_lock);
 	intrfc->if_sknum = socketNum;
 
-	return ntohs(socketNum);
+	return htons(socketNum);
 }
 
 static int ipx_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
@@ -1481,7 +1480,7 @@ static int ipx_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 						ipxs->port)) {
 			SOCK_DEBUG(sk,
 				"IPX: bind failed because port %X in use.\n",
-				ntohs((int)addr->sipx_port));
+				ntohs(addr->sipx_port));
 			goto out_put;
 		}
 	} else {
@@ -1496,7 +1495,7 @@ static int ipx_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		if (ipxitf_find_socket(intrfc, addr->sipx_port)) {
 			SOCK_DEBUG(sk,
 				"IPX: bind failed because port %X in use.\n",
-				ntohs((int)addr->sipx_port));
+				ntohs(addr->sipx_port));
 			goto out_put;
 		}
 	}
@@ -1673,7 +1672,7 @@ static int ipx_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_ty
 	intrfc = ipxitf_find_using_phys(dev, pt->type);
 	if (!intrfc) {
 		if (ipxcfg_auto_create_interfaces &&
-		   ntohl(IPX_SKB_CB(skb)->ipx_dest_net)) {
+		   IPX_SKB_CB(skb)->ipx_dest_net) {
 			intrfc = ipxitf_auto_create(dev, pt->type);
 			if (intrfc)
 				ipxitf_hold(intrfc);
@@ -1903,6 +1902,29 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	return rc;
 }
 
+
+#ifdef CONFIG_COMPAT
+static int ipx_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	/*
+	 * These 4 commands use same structure on 32bit and 64bit.  Rest of IPX
+	 * commands is handled by generic ioctl code.  As these commands are
+	 * SIOCPROTOPRIVATE..SIOCPROTOPRIVATE+3, they cannot be handled by generic
+	 * code.
+	 */
+	switch (cmd) {
+	case SIOCAIPXITFCRT:
+	case SIOCAIPXPRISLT:
+	case SIOCIPXCFGDATA:
+	case SIOCIPXNCPCONN:
+		return ipx_ioctl(sock, cmd, arg);
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+#endif
+
+
 /*
  * Socket family declarations
  */
@@ -1924,6 +1946,9 @@ static const struct proto_ops SOCKOPS_WRAPPED(ipx_dgram_ops) = {
 	.getname	= ipx_getname,
 	.poll		= datagram_poll,
 	.ioctl		= ipx_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ipx_compat_ioctl,
+#endif
 	.listen		= sock_no_listen,
 	.shutdown	= sock_no_shutdown, /* FIXME: support shutdown */
 	.setsockopt	= ipx_setsockopt,
@@ -2010,19 +2035,27 @@ static void __exit ipx_proto_finito(void)
 
 	ipxitf_cleanup();
 
-	unregister_snap_client(pSNAP_datalink);
-	pSNAP_datalink = NULL;
+	if (pSNAP_datalink) {
+		unregister_snap_client(pSNAP_datalink);
+		pSNAP_datalink = NULL;
+	}
 
-	unregister_8022_client(p8022_datalink);
-	p8022_datalink = NULL;
+	if (p8022_datalink) {
+		unregister_8022_client(p8022_datalink);
+		p8022_datalink = NULL;
+	}
 
 	dev_remove_pack(&ipx_8023_packet_type);
-	destroy_8023_client(p8023_datalink);
-	p8023_datalink = NULL;
+	if (p8023_datalink) {
+		destroy_8023_client(p8023_datalink);
+		p8023_datalink = NULL;
+	}
 
 	dev_remove_pack(&ipx_dix_packet_type);
-	destroy_EII_client(pEII_datalink);
-	pEII_datalink = NULL;
+	if (pEII_datalink) {
+		destroy_EII_client(pEII_datalink);
+		pEII_datalink = NULL;
+	}
 
 	proto_unregister(&ipx_proto);
 	sock_unregister(ipx_family_ops.family);

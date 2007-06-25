@@ -11,6 +11,7 @@
 
 #include <linux/timer.h>
 #include <linux/sunrpc/types.h>
+#include <linux/rcupdate.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
@@ -85,7 +86,14 @@ struct rpc_task {
 	union {
 		struct work_struct	tk_work;	/* Async task work queue */
 		struct rpc_wait		tk_wait;	/* RPC wait */
+		struct rcu_head		tk_rcu;		/* for task deletion */
 	} u;
+
+	unsigned short		tk_timeouts;	/* maj timeouts */
+	size_t			tk_bytes_sent;	/* total bytes sent */
+	unsigned long		tk_start;	/* RPC task init timestamp */
+	long			tk_rtt;		/* round-trip time (jiffies) */
+
 #ifdef RPC_DEBUG
 	unsigned short		tk_pid;		/* debugging aid */
 #endif
@@ -121,7 +129,6 @@ struct rpc_call_ops {
  */
 #define RPC_TASK_ASYNC		0x0001		/* is an async task */
 #define RPC_TASK_SWAPPER	0x0002		/* is swapping in/out */
-#define RPC_TASK_CHILD		0x0008		/* is child of other task */
 #define RPC_CALL_MAJORSEEN	0x0020		/* major timeout seen */
 #define RPC_TASK_ROOTCREDS	0x0040		/* force root creds */
 #define RPC_TASK_DYNAMIC	0x0080		/* task was kmalloc'ed */
@@ -130,7 +137,6 @@ struct rpc_call_ops {
 #define RPC_TASK_NOINTR		0x0400		/* uninterruptible task */
 
 #define RPC_IS_ASYNC(t)		((t)->tk_flags & RPC_TASK_ASYNC)
-#define RPC_IS_CHILD(t)		((t)->tk_flags & RPC_TASK_CHILD)
 #define RPC_IS_SWAPPER(t)	((t)->tk_flags & RPC_TASK_SWAPPER)
 #define RPC_DO_ROOTOVERRIDE(t)	((t)->tk_flags & RPC_TASK_ROOTCREDS)
 #define RPC_ASSASSINATED(t)	((t)->tk_flags & RPC_TASK_KILLED)
@@ -174,13 +180,6 @@ struct rpc_call_ops {
 	} while (0)
 
 #define RPC_IS_ACTIVATED(t)	(test_bit(RPC_TASK_ACTIVE, &(t)->tk_runstate))
-#define rpc_set_active(t)	(set_bit(RPC_TASK_ACTIVE, &(t)->tk_runstate))
-#define rpc_clear_active(t)	\
-	do { \
-		smp_mb__before_clear_bit(); \
-		clear_bit(RPC_TASK_ACTIVE, &(t)->tk_runstate); \
-		smp_mb__after_clear_bit(); \
-	} while(0)
 
 /*
  * Task priorities.
@@ -203,6 +202,7 @@ struct rpc_wait_queue {
 	unsigned char		priority;		/* current priority */
 	unsigned char		count;			/* # task groups remaining serviced so far */
 	unsigned char		nr;			/* # tasks remaining for cookie */
+	unsigned short		qlen;			/* total # tasks waiting in queue */
 #ifdef RPC_DEBUG
 	const char *		name;
 #endif
@@ -217,7 +217,7 @@ struct rpc_wait_queue {
 
 #ifndef RPC_DEBUG
 # define RPC_WAITQ_INIT(var,qname) { \
-		.lock = SPIN_LOCK_UNLOCKED, \
+		.lock = __SPIN_LOCK_UNLOCKED(var.lock), \
 		.tasks = { \
 			[0] = LIST_HEAD_INIT(var.tasks[0]), \
 			[1] = LIST_HEAD_INIT(var.tasks[1]), \
@@ -226,7 +226,7 @@ struct rpc_wait_queue {
 	}
 #else
 # define RPC_WAITQ_INIT(var,qname) { \
-		.lock = SPIN_LOCK_UNLOCKED, \
+		.lock = __SPIN_LOCK_UNLOCKED(var.lock), \
 		.tasks = { \
 			[0] = LIST_HEAD_INIT(var.tasks[0]), \
 			[1] = LIST_HEAD_INIT(var.tasks[1]), \
@@ -246,16 +246,14 @@ struct rpc_task *rpc_new_task(struct rpc_clnt *, int flags,
 				const struct rpc_call_ops *ops, void *data);
 struct rpc_task *rpc_run_task(struct rpc_clnt *clnt, int flags,
 				const struct rpc_call_ops *ops, void *data);
-struct rpc_task *rpc_new_child(struct rpc_clnt *, struct rpc_task *parent);
 void		rpc_init_task(struct rpc_task *task, struct rpc_clnt *clnt,
 				int flags, const struct rpc_call_ops *ops,
 				void *data);
-void		rpc_release_task(struct rpc_task *);
+void		rpc_put_task(struct rpc_task *);
 void		rpc_exit_task(struct rpc_task *);
+void		rpc_release_calldata(const struct rpc_call_ops *, void *);
 void		rpc_killall_tasks(struct rpc_clnt *);
 int		rpc_execute(struct rpc_task *);
-void		rpc_run_child(struct rpc_task *parent, struct rpc_task *child,
-					rpc_action action);
 void		rpc_init_priority_wait_queue(struct rpc_wait_queue *, const char *);
 void		rpc_init_wait_queue(struct rpc_wait_queue *, const char *);
 void		rpc_sleep_on(struct rpc_wait_queue *, struct rpc_task *,
@@ -269,13 +267,13 @@ void *		rpc_malloc(struct rpc_task *, size_t);
 void		rpc_free(struct rpc_task *);
 int		rpciod_up(void);
 void		rpciod_down(void);
-void		rpciod_wake_up(void);
 int		__rpc_wait_for_completion_task(struct rpc_task *task, int (*)(void *));
 #ifdef RPC_DEBUG
 void		rpc_show_tasks(void);
 #endif
 int		rpc_init_mempool(void);
 void		rpc_destroy_mempool(void);
+extern struct workqueue_struct *rpciod_workqueue;
 
 static inline void rpc_exit(struct rpc_task *task, int status)
 {

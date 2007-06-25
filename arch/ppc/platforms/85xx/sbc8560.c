@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/85xx/sbc8560.c
- * 
  * Wind River SBC8560 board specific routines
  * 
  * Maintainer: Kumar Gala
@@ -13,7 +11,6 @@
  * option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -132,7 +129,7 @@ sbc8560_setup_arch(void)
 
 	mdata->irq[25] = MPC85xx_IRQ_EXT6;
 	mdata->irq[26] = MPC85xx_IRQ_EXT7;
-	mdata->irq[31] = -1;
+	mdata->irq[31] = PHY_POLL;
 
 	/* setup the board related information for the enet controllers */
 	pdata = (struct gianfar_platform_data *) ppc_sys_get_pdata(MPC85xx_TSEC1);

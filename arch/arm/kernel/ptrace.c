@@ -9,7 +9,6 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -634,6 +633,32 @@ static int ptrace_setwmmxregs(struct task_struct *tsk, void __user *ufp)
 
 #endif
 
+#ifdef CONFIG_CRUNCH
+/*
+ * Get the child Crunch state.
+ */
+static int ptrace_getcrunchregs(struct task_struct *tsk, void __user *ufp)
+{
+	struct thread_info *thread = task_thread_info(tsk);
+
+	crunch_task_disable(thread);  /* force it to ram */
+	return copy_to_user(ufp, &thread->crunchstate, CRUNCH_SIZE)
+		? -EFAULT : 0;
+}
+
+/*
+ * Set the child Crunch state.
+ */
+static int ptrace_setcrunchregs(struct task_struct *tsk, void __user *ufp)
+{
+	struct thread_info *thread = task_thread_info(tsk);
+
+	crunch_task_release(thread);  /* force a reload */
+	return copy_from_user(&thread->crunchstate, ufp, CRUNCH_SIZE)
+		? -EFAULT : 0;
+}
+#endif
+
 long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 {
 	unsigned long tmp;
@@ -765,6 +790,16 @@ long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 			child->ptrace_message = data;
 			break;
 
+#ifdef CONFIG_CRUNCH
+		case PTRACE_GETCRUNCHREGS:
+			ret = ptrace_getcrunchregs(child, (void __user *)data);
+			break;
+
+		case PTRACE_SETCRUNCHREGS:
+			ret = ptrace_setcrunchregs(child, (void __user *)data);
+			break;
+#endif
+
 		default:
 			ret = ptrace_request(child, request, addr, data);
 			break;
@@ -777,34 +812,18 @@ asmlinkage int syscall_trace(int why, struct pt_regs *regs, int scno)
 {
 	unsigned long ip;
 
-	if (!test_thread_flag(TIF_SYSCALL_TRACE))
-		return scno;
-	if (!(current->ptrace & PT_PTRACED))
-		return scno;
+	if (test_thread_flag(TIF_SYSCALL_TRACE)) {
+		/*
+		 * Save IP.  IP is used to denote syscall entry/exit:
+		 *  IP = 0 -> entry, = 1 -> exit
+		 */
+		ip = regs->ARM_ip;
+		regs->ARM_ip = why;
 
-	/*
-	 * Save IP.  IP is used to denote syscall entry/exit:
-	 *  IP = 0 -> entry, = 1 -> exit
-	 */
-	ip = regs->ARM_ip;
-	regs->ARM_ip = why;
+		tracehook_report_syscall(regs, why);
 
-	current->ptrace_message = scno;
-
-	/* the 0x80 provides a way for the tracing parent to distinguish
-	   between a syscall stop and SIGTRAP delivery */
-	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-				 ? 0x80 : 0));
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
+		regs->ARM_ip = ip;
 	}
-	regs->ARM_ip = ip;
 
-	return current->ptrace_message;
+	return scno;
 }

@@ -50,6 +50,21 @@
 #define HOST_FS 25
 #define HOST_GS 26
 
+/* Also defined in asm/ptrace-x86_64.h, but not in libc headers.  So, these
+ * are already defined for kernel code, but not for userspace code.
+ */
+#ifndef FS_BASE
+/* These aren't defined in ptrace.h, but exist in struct user_regs_struct,
+ * which is what x86_64 ptrace actually uses.
+ */
+#define FS_BASE (HOST_FS_BASE * sizeof(long))
+#define GS_BASE (HOST_GS_BASE * sizeof(long))
+#define DS (HOST_DS * sizeof(long))
+#define ES (HOST_ES * sizeof(long))
+#define FS (HOST_FS * sizeof(long))
+#define GS (HOST_GS * sizeof(long))
+#endif
+
 #define REGS_FS_BASE(r) ((r)[HOST_FS_BASE])
 #define REGS_GS_BASE(r) ((r)[HOST_GS_BASE])
 #define REGS_DS(r) ((r)[HOST_DS])
@@ -89,9 +104,8 @@ union uml_pt_regs {
 #endif
 #ifdef UML_CONFIG_MODE_SKAS
 	struct skas_regs {
-		/* XXX */
-		unsigned long regs[27];
-		unsigned long fp[65];
+		unsigned long regs[MAX_REG_NR];
+		unsigned long fp[HOST_FP_SIZE];
                 struct faultinfo faultinfo;
 		long syscall;
 		int is_user;
@@ -120,11 +134,16 @@ extern int mode_tt;
 #define UPT_R14(r) __CHOOSE_MODE(SC_R14(UPT_SC(r)), REGS_R14((r)->skas.regs))
 #define UPT_R15(r) __CHOOSE_MODE(SC_R15(UPT_SC(r)), REGS_R15((r)->skas.regs))
 #define UPT_CS(r) __CHOOSE_MODE(SC_CS(UPT_SC(r)), REGS_CS((r)->skas.regs))
+#define UPT_FS_BASE(r) \
+	__CHOOSE_MODE(SC_FS_BASE(UPT_SC(r)), REGS_FS_BASE((r)->skas.regs))
 #define UPT_FS(r) __CHOOSE_MODE(SC_FS(UPT_SC(r)), REGS_FS((r)->skas.regs))
+#define UPT_GS_BASE(r) \
+	__CHOOSE_MODE(SC_GS_BASE(UPT_SC(r)), REGS_GS_BASE((r)->skas.regs))
 #define UPT_GS(r) __CHOOSE_MODE(SC_GS(UPT_SC(r)), REGS_GS((r)->skas.regs))
 #define UPT_DS(r) __CHOOSE_MODE(SC_DS(UPT_SC(r)), REGS_DS((r)->skas.regs))
 #define UPT_ES(r) __CHOOSE_MODE(SC_ES(UPT_SC(r)), REGS_ES((r)->skas.regs))
 #define UPT_CS(r) __CHOOSE_MODE(SC_CS(UPT_SC(r)), REGS_CS((r)->skas.regs))
+#define UPT_SS(r) __CHOOSE_MODE(SC_SS(UPT_SC(r)), REGS_SS((r)->skas.regs))
 #define UPT_ORIG_RAX(r) \
 	__CHOOSE_MODE((r)->tt.orig_rax, REGS_ORIG_RAX((r)->skas.regs))
 
@@ -183,10 +202,13 @@ struct syscall_args {
                 case RBP: val = UPT_RBP(regs); break; \
                 case ORIG_RAX: val = UPT_ORIG_RAX(regs); break; \
                 case CS: val = UPT_CS(regs); break; \
+                case SS: val = UPT_SS(regs); break; \
+		case FS_BASE: val = UPT_FS_BASE(regs); break; \
+                case GS_BASE: val = UPT_GS_BASE(regs); break; \
                 case DS: val = UPT_DS(regs); break; \
                 case ES: val = UPT_ES(regs); break; \
-                case FS: val = UPT_FS(regs); break; \
-                case GS: val = UPT_GS(regs); break; \
+                case FS : val = UPT_FS (regs); break; \
+		case GS: val = UPT_GS(regs); break;	    \
                 case EFLAGS: val = UPT_EFLAGS(regs); break; \
                 default :  \
                         panic("Bad register in UPT_REG : %d\n", reg);  \
@@ -218,6 +240,9 @@ struct syscall_args {
                 case RBP: UPT_RBP(regs) = __upt_val; break; \
                 case ORIG_RAX: UPT_ORIG_RAX(regs) = __upt_val; break; \
                 case CS: UPT_CS(regs) = __upt_val; break; \
+                case SS: UPT_SS(regs) = __upt_val; break; \
+                case FS_BASE: UPT_FS_BASE(regs) = __upt_val; break; \
+                case GS_BASE: UPT_GS_BASE(regs) = __upt_val; break; \
                 case DS: UPT_DS(regs) = __upt_val; break; \
                 case ES: UPT_ES(regs) = __upt_val; break; \
                 case FS: UPT_FS(regs) = __upt_val; break; \
@@ -227,7 +252,7 @@ struct syscall_args {
                         panic("Bad register in UPT_SET : %d\n", reg);  \
 			break; \
                 } \
-                val; \
+                __upt_val; \
         })
 
 #define UPT_SET_SYSCALL_RETURN(r, res) \

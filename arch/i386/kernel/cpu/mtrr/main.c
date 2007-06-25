@@ -36,6 +36,7 @@
 #include <linux/pci.h>
 #include <linux/smp.h>
 #include <linux/cpu.h>
+#include <linux/mutex.h>
 
 #include <asm/mtrr.h>
 
@@ -47,7 +48,7 @@
 u32 num_var_ranges = 0;
 
 unsigned int *usage_table;
-static DECLARE_MUTEX(mtrr_sem);
+static DEFINE_MUTEX(mtrr_mutex);
 
 u32 size_or_mask, size_and_mask;
 
@@ -58,7 +59,11 @@ struct mtrr_ops * mtrr_if = NULL;
 static void set_mtrr(unsigned int reg, unsigned long base,
 		     unsigned long size, mtrr_type type);
 
+#ifndef CONFIG_X86_64
 extern int arr3_protected;
+#else
+#define arr3_protected 0
+#endif
 
 void set_mtrr_ops(struct mtrr_ops * ops)
 {
@@ -167,6 +172,13 @@ static void ipi_handler(void *info)
 
 #endif
 
+static inline int types_compatible(mtrr_type type1, mtrr_type type2) {
+	return type1 == MTRR_TYPE_UNCACHABLE ||
+	       type2 == MTRR_TYPE_UNCACHABLE ||
+	       (type1 == MTRR_TYPE_WRTHROUGH && type2 == MTRR_TYPE_WRBACK) ||
+	       (type1 == MTRR_TYPE_WRBACK && type2 == MTRR_TYPE_WRTHROUGH);
+}
+
 /**
  * set_mtrr - update mtrrs on all processors
  * @reg:	mtrr in question
@@ -262,8 +274,8 @@ static void set_mtrr(unsigned int reg, unsigned long base,
 
 /**
  *	mtrr_add_page - Add a memory type region
- *	@base: Physical base address of region in pages (4 KB)
- *	@size: Physical size of region in pages (4 KB)
+ *	@base: Physical base address of region in pages (in units of 4 kB!)
+ *	@size: Physical size of region in pages (4 kB)
  *	@type: Type of MTRR desired
  *	@increment: If this is true do usage counting on the region
  *
@@ -299,11 +311,9 @@ static void set_mtrr(unsigned int reg, unsigned long base,
 int mtrr_add_page(unsigned long base, unsigned long size, 
 		  unsigned int type, char increment)
 {
-	int i;
+	int i, replace, error;
 	mtrr_type ltype;
-	unsigned long lbase;
-	unsigned int lsize;
-	int error;
+	unsigned long lbase, lsize;
 
 	if (!mtrr_if)
 		return -ENXIO;
@@ -323,34 +333,47 @@ int mtrr_add_page(unsigned long base, unsigned long size,
 		return -ENOSYS;
 	}
 
+	if (!size) {
+		printk(KERN_WARNING "mtrr: zero sized request\n");
+		return -EINVAL;
+	}
+
 	if (base & size_or_mask || size & size_or_mask) {
 		printk(KERN_WARNING "mtrr: base or size exceeds the MTRR width\n");
 		return -EINVAL;
 	}
 
 	error = -EINVAL;
+	replace = -1;
 
 	/* No CPU hotplug when we change MTRR entries */
 	lock_cpu_hotplug();
 	/*  Search for existing MTRR  */
-	down(&mtrr_sem);
+	mutex_lock(&mtrr_mutex);
 	for (i = 0; i < num_var_ranges; ++i) {
 		mtrr_if->get(i, &lbase, &lsize, &ltype);
-		if (base >= lbase + lsize)
-			continue;
-		if ((base < lbase) && (base + size <= lbase))
+		if (!lsize || base > lbase + lsize - 1 || base + size - 1 < lbase)
 			continue;
 		/*  At this point we know there is some kind of overlap/enclosure  */
-		if ((base < lbase) || (base + size > lbase + lsize)) {
+		if (base < lbase || base + size - 1 > lbase + lsize - 1) {
+			if (base <= lbase && base + size - 1 >= lbase + lsize - 1) {
+				/*  New region encloses an existing region  */
+				if (type == ltype) {
+					replace = replace == -1 ? i : -2;
+					continue;
+				}
+				else if (types_compatible(type, ltype))
+					continue;
+			}
 			printk(KERN_WARNING
 			       "mtrr: 0x%lx000,0x%lx000 overlaps existing"
-			       " 0x%lx000,0x%x000\n", base, size, lbase,
+			       " 0x%lx000,0x%lx000\n", base, size, lbase,
 			       lsize);
 			goto out;
 		}
 		/*  New region is enclosed by an existing region  */
 		if (ltype != type) {
-			if (type == MTRR_TYPE_UNCACHABLE)
+			if (types_compatible(type, ltype))
 				continue;
 			printk (KERN_WARNING "mtrr: type mismatch for %lx000,%lx000 old: %s new: %s\n",
 			     base, size, mtrr_attrib_to_str(ltype),
@@ -363,15 +386,23 @@ int mtrr_add_page(unsigned long base, unsigned long size,
 		goto out;
 	}
 	/*  Search for an empty MTRR  */
-	i = mtrr_if->get_free_region(base, size);
+	i = mtrr_if->get_free_region(base, size, replace);
 	if (i >= 0) {
 		set_mtrr(i, base, size, type);
-		usage_table[i] = 1;
+		if (likely(replace < 0))
+			usage_table[i] = 1;
+		else {
+			usage_table[i] = usage_table[replace] + !!increment;
+			if (unlikely(replace != i)) {
+				set_mtrr(replace, 0, 0, 0);
+				usage_table[replace] = 0;
+			}
+		}
 	} else
 		printk(KERN_INFO "mtrr: no more MTRRs available\n");
 	error = i;
  out:
-	up(&mtrr_sem);
+	mutex_unlock(&mtrr_mutex);
 	unlock_cpu_hotplug();
 	return error;
 }
@@ -454,8 +485,7 @@ int mtrr_del_page(int reg, unsigned long base, unsigned long size)
 {
 	int i, max;
 	mtrr_type ltype;
-	unsigned long lbase;
-	unsigned int lsize;
+	unsigned long lbase, lsize;
 	int error = -EINVAL;
 
 	if (!mtrr_if)
@@ -464,7 +494,7 @@ int mtrr_del_page(int reg, unsigned long base, unsigned long size)
 	max = num_var_ranges;
 	/* No CPU hotplug when we change MTRR entries */
 	lock_cpu_hotplug();
-	down(&mtrr_sem);
+	mutex_lock(&mtrr_mutex);
 	if (reg < 0) {
 		/*  Search for existing MTRR  */
 		for (i = 0; i < max; ++i) {
@@ -503,7 +533,7 @@ int mtrr_del_page(int reg, unsigned long base, unsigned long size)
 		set_mtrr(reg, 0, 0, 0);
 	error = reg;
  out:
-	up(&mtrr_sem);
+	mutex_unlock(&mtrr_mutex);
 	unlock_cpu_hotplug();
 	return error;
 }
@@ -543,9 +573,11 @@ extern void centaur_init_mtrr(void);
 
 static void __init init_ifs(void)
 {
+#ifndef CONFIG_X86_64
 	amd_init_mtrr();
 	cyrix_init_mtrr();
 	centaur_init_mtrr();
+#endif
 }
 
 /* The suspend/resume methods are only for CPU without MTRR. CPU using generic
@@ -554,7 +586,7 @@ static void __init init_ifs(void)
 struct mtrr_value {
 	mtrr_type	ltype;
 	unsigned long	lbase;
-	unsigned int	lsize;
+	unsigned long	lsize;
 };
 
 static struct mtrr_value * mtrr_state;
@@ -564,10 +596,8 @@ static int mtrr_save(struct sys_device * sysdev, pm_message_t state)
 	int i;
 	int size = num_var_ranges * sizeof(struct mtrr_value);
 
-	mtrr_state = kmalloc(size,GFP_ATOMIC);
-	if (mtrr_state)
-		memset(mtrr_state,0,size);
-	else
+	mtrr_state = kzalloc(size,GFP_ATOMIC);
+	if (!mtrr_state)
 		return -ENOMEM;
 
 	for (i = 0; i < num_var_ranges; i++) {
@@ -685,7 +715,7 @@ void mtrr_ap_init(void)
 	if (!mtrr_if || !use_intel())
 		return;
 	/*
-	 * Ideally we should hold mtrr_sem here to avoid mtrr entries changed,
+	 * Ideally we should hold mtrr_mutex here to avoid mtrr entries changed,
 	 * but this routine will be called in cpu boot time, holding the lock
 	 * breaks it. This routine is called in two cases: 1.very earily time
 	 * of software resume, when there absolutely isn't mtrr entry changes;

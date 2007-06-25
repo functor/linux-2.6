@@ -4,7 +4,6 @@
  * in one page).  This script controls its layout.
  */
 
-#include <linux/config.h>
 
 #include <asm/system.h>
 
@@ -13,6 +12,7 @@ SECTIONS
   . = GATE_ADDR + SIZEOF_HEADERS;
 
   .hash				: { *(.hash) }				:readable
+  .gnu.hash			: { *(.gnu.hash) }
   .dynsym			: { *(.dynsym) }
   .dynstr			: { *(.dynstr) }
   .gnu.version			: { *(.gnu.version) }
@@ -43,6 +43,28 @@ SECTIONS
 				    __start_gate_brl_fsys_bubble_down_patchlist = .;
 				    *(.data.patch.brl_fsys_bubble_down)
 				    __end_gate_brl_fsys_bubble_down_patchlist = .;
+
+#ifdef CONFIG_XEN_IA64_VDSO_PARAVIRT
+				    __start_gate_running_on_xen_patchlist = .;
+				    *(.data.patch.running_on_xen)
+				    __end_gate_running_on_xen_patchlist = .;
+
+				    __start_gate_brl_xen_rsm_be_i_patchlist = .;
+				    *(.data.patch.brl_xen_rsm_be_i)
+				    __end_gate_brl_xen_rsm_be_i_patchlist = .;
+
+				    __start_gate_brl_xen_get_psr_patchlist = .;
+				    *(.data.patch.brl_xen_get_psr)
+				    __end_gate_brl_xen_get_psr_patchlist = .;
+
+				    __start_gate_brl_xen_ssm_i_0_patchlist = .;
+				    *(.data.patch.brl_xen_ssm_i_0)
+				    __end_gate_brl_xen_ssm_i_0_patchlist = .;
+
+				    __start_gate_brl_xen_ssm_i_1_patchlist = .;
+				    *(.data.patch.brl_xen_ssm_i_1)
+				    __end_gate_brl_xen_ssm_i_1_patchlist = .;
+#endif
   }									:readable
   .IA_64.unwind_info		: { *(.IA_64.unwind_info*) }
   .IA_64.unwind			: { *(.IA_64.unwind*) }			:readable :unwind
@@ -59,6 +81,7 @@ SECTIONS
 	*(.dynbss)
 	*(.bss .bss.* .gnu.linkonce.b.*)
 	*(__ex_table)
+	*(__mca_table)
   }
 }
 

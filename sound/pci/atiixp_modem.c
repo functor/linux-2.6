@@ -27,6 +27,7 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/moduleparam.h>
+#include <linux/mutex.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -255,7 +256,7 @@ struct atiixp_modem {
 	unsigned int codec_not_ready_bits;	/* for codec detection */
 
 	int spdif_over_aclink;		/* passed from the module option */
-	struct semaphore open_mutex;	/* playback open mutex */
+	struct mutex open_mutex;	/* playback open mutex */
 };
 
 
@@ -911,9 +912,9 @@ static int snd_atiixp_playback_open(struct snd_pcm_substream *substream)
 	struct atiixp_modem *chip = snd_pcm_substream_chip(substream);
 	int err;
 
-	down(&chip->open_mutex);
+	mutex_lock(&chip->open_mutex);
 	err = snd_atiixp_pcm_open(substream, &chip->dmas[ATI_DMA_PLAYBACK], 0);
-	up(&chip->open_mutex);
+	mutex_unlock(&chip->open_mutex);
 	if (err < 0)
 		return err;
 	return 0;
@@ -923,9 +924,9 @@ static int snd_atiixp_playback_close(struct snd_pcm_substream *substream)
 {
 	struct atiixp_modem *chip = snd_pcm_substream_chip(substream);
 	int err;
-	down(&chip->open_mutex);
+	mutex_lock(&chip->open_mutex);
 	err = snd_atiixp_pcm_close(substream, &chip->dmas[ATI_DMA_PLAYBACK]);
-	up(&chip->open_mutex);
+	mutex_unlock(&chip->open_mutex);
 	return err;
 }
 
@@ -1016,7 +1017,7 @@ static int __devinit snd_atiixp_pcm_new(struct atiixp_modem *chip)
 /*
  * interrupt handler
  */
-static irqreturn_t snd_atiixp_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t snd_atiixp_interrupt(int irq, void *dev_id)
 {
 	struct atiixp_modem *chip = dev_id;
 	unsigned int status;
@@ -1127,9 +1128,9 @@ static int snd_atiixp_suspend(struct pci_dev *pci, pm_message_t state)
 	snd_atiixp_aclink_down(chip);
 	snd_atiixp_chip_stop(chip);
 
-	pci_set_power_state(pci, PCI_D3hot);
 	pci_disable_device(pci);
 	pci_save_state(pci);
+	pci_set_power_state(pci, pci_choose_state(pci, state));
 	return 0;
 }
 
@@ -1139,9 +1140,14 @@ static int snd_atiixp_resume(struct pci_dev *pci)
 	struct atiixp_modem *chip = card->private_data;
 	int i;
 
-	pci_restore_state(pci);
-	pci_enable_device(pci);
 	pci_set_power_state(pci, PCI_D0);
+	pci_restore_state(pci);
+	if (pci_enable_device(pci) < 0) {
+		printk(KERN_ERR "atiixp-modem: pci_enable_device failed, "
+		       "disabling device\n");
+		snd_card_disconnect(card);
+		return -EIO;
+	}
 	pci_set_master(pci);
 
 	snd_atiixp_aclink_reset(chip);
@@ -1176,7 +1182,7 @@ static void __devinit snd_atiixp_proc_init(struct atiixp_modem *chip)
 	struct snd_info_entry *entry;
 
 	if (! snd_card_proc_new(chip->card, "atiixp-modem", &entry))
-		snd_info_set_text_ops(entry, chip, 1024, snd_atiixp_proc_read);
+		snd_info_set_text_ops(entry, chip, snd_atiixp_proc_read);
 }
 #else
 #define snd_atiixp_proc_init(chip)
@@ -1233,7 +1239,7 @@ static int __devinit snd_atiixp_create(struct snd_card *card,
 	}
 
 	spin_lock_init(&chip->reg_lock);
-	init_MUTEX(&chip->open_mutex);
+	mutex_init(&chip->open_mutex);
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
@@ -1250,7 +1256,7 @@ static int __devinit snd_atiixp_create(struct snd_card *card,
 		return -EIO;
 	}
 
-	if (request_irq(pci->irq, snd_atiixp_interrupt, SA_INTERRUPT|SA_SHIRQ,
+	if (request_irq(pci->irq, snd_atiixp_interrupt, IRQF_SHARED,
 			card->shortname, chip)) {
 		snd_printk(KERN_ERR "unable to grab IRQ %d\n", pci->irq);
 		snd_atiixp_free(chip);

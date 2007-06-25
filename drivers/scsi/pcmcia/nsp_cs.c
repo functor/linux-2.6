@@ -80,7 +80,6 @@ static int       free_ports = 0;
 module_param(free_ports, bool, 0);
 MODULE_PARM_DESC(free_ports, "Release IO ports after configuration? (default: 0 (=no))");
 
-/* /usr/src/linux/drivers/scsi/hosts.h */
 static struct scsi_host_template nsp_driver_template = {
 	.proc_name	         = "nsp_cs",
 	.proc_info		 = nsp_proc_info,
@@ -184,7 +183,7 @@ static void nsp_cs_dmessage(const char *func, int line, int mask, char *fmt, ...
  * Clenaup parameters and call done() functions.
  * You must be set SCpnt->result before call this function.
  */
-static void nsp_scsi_done(Scsi_Cmnd *SCpnt)
+static void nsp_scsi_done(struct scsi_cmnd *SCpnt)
 {
 	nsp_hw_data *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
 
@@ -193,7 +192,8 @@ static void nsp_scsi_done(Scsi_Cmnd *SCpnt)
 	SCpnt->scsi_done(SCpnt);
 }
 
-static int nsp_queuecommand(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *))
+static int nsp_queuecommand(struct scsi_cmnd *SCpnt,
+			    void (*done)(struct scsi_cmnd *))
 {
 #ifdef NSP_DEBUG
 	/*unsigned int host_id = SCpnt->device->host->this_id;*/
@@ -366,7 +366,7 @@ static int nsphw_init(nsp_hw_data *data)
 /*
  * Start selection phase
  */
-static int nsphw_start_selection(Scsi_Cmnd *SCpnt)
+static int nsphw_start_selection(struct scsi_cmnd *SCpnt)
 {
 	unsigned int  host_id	 = SCpnt->device->host->this_id;
 	unsigned int  base	 = SCpnt->device->host->io_port;
@@ -447,7 +447,7 @@ static struct nsp_sync_table nsp_sync_table_20M[] = {
 /*
  * setup synchronous data transfer mode
  */
-static int nsp_analyze_sdtr(Scsi_Cmnd *SCpnt)
+static int nsp_analyze_sdtr(struct scsi_cmnd *SCpnt)
 {
 	unsigned char	       target = scmd_id(SCpnt);
 //	unsigned char	       lun    = SCpnt->device->lun;
@@ -505,7 +505,7 @@ static int nsp_analyze_sdtr(Scsi_Cmnd *SCpnt)
 /*
  * start ninja hardware timer
  */
-static void nsp_start_timer(Scsi_Cmnd *SCpnt, int time)
+static void nsp_start_timer(struct scsi_cmnd *SCpnt, int time)
 {
 	unsigned int base = SCpnt->device->host->io_port;
 	nsp_hw_data *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
@@ -518,7 +518,8 @@ static void nsp_start_timer(Scsi_Cmnd *SCpnt, int time)
 /*
  * wait for bus phase change
  */
-static int nsp_negate_signal(Scsi_Cmnd *SCpnt, unsigned char mask, char *str)
+static int nsp_negate_signal(struct scsi_cmnd *SCpnt, unsigned char mask,
+			     char *str)
 {
 	unsigned int  base = SCpnt->device->host->io_port;
 	unsigned char reg;
@@ -545,9 +546,9 @@ static int nsp_negate_signal(Scsi_Cmnd *SCpnt, unsigned char mask, char *str)
 /*
  * expect Ninja Irq
  */
-static int nsp_expect_signal(Scsi_Cmnd	   *SCpnt,
-			     unsigned char  current_phase,
-			     unsigned char  mask)
+static int nsp_expect_signal(struct scsi_cmnd *SCpnt,
+			     unsigned char current_phase,
+			     unsigned char mask)
 {
 	unsigned int  base	 = SCpnt->device->host->io_port;
 	int	      time_out;
@@ -580,7 +581,7 @@ static int nsp_expect_signal(Scsi_Cmnd	   *SCpnt,
 /*
  * transfer SCSI message
  */
-static int nsp_xfer(Scsi_Cmnd *SCpnt, int phase)
+static int nsp_xfer(struct scsi_cmnd *SCpnt, int phase)
 {
 	unsigned int  base = SCpnt->device->host->io_port;
 	nsp_hw_data  *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
@@ -620,7 +621,7 @@ static int nsp_xfer(Scsi_Cmnd *SCpnt, int phase)
 /*
  * get extra SCSI data from fifo
  */
-static int nsp_dataphase_bypass(Scsi_Cmnd *SCpnt)
+static int nsp_dataphase_bypass(struct scsi_cmnd *SCpnt)
 {
 	nsp_hw_data *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
 	unsigned int count;
@@ -652,7 +653,7 @@ static int nsp_dataphase_bypass(Scsi_Cmnd *SCpnt)
 /*
  * accept reselection
  */
-static int nsp_reselected(Scsi_Cmnd *SCpnt)
+static int nsp_reselected(struct scsi_cmnd *SCpnt)
 {
 	unsigned int  base    = SCpnt->device->host->io_port;
 	unsigned int  host_id = SCpnt->device->host->this_id;
@@ -691,7 +692,7 @@ static int nsp_reselected(Scsi_Cmnd *SCpnt)
 /*
  * count how many data transferd
  */
-static int nsp_fifo_count(Scsi_Cmnd *SCpnt)
+static int nsp_fifo_count(struct scsi_cmnd *SCpnt)
 {
 	unsigned int base = SCpnt->device->host->io_port;
 	unsigned int count;
@@ -718,7 +719,7 @@ static int nsp_fifo_count(Scsi_Cmnd *SCpnt)
 /*
  * read data in DATA IN phase
  */
-static void nsp_pio_read(Scsi_Cmnd *SCpnt)
+static void nsp_pio_read(struct scsi_cmnd *SCpnt)
 {
 	unsigned int  base      = SCpnt->device->host->io_port;
 	unsigned long mmio_base = SCpnt->device->host->base;
@@ -813,7 +814,7 @@ static void nsp_pio_read(Scsi_Cmnd *SCpnt)
 /*
  * write data in DATA OUT phase
  */
-static void nsp_pio_write(Scsi_Cmnd *SCpnt)
+static void nsp_pio_write(struct scsi_cmnd *SCpnt)
 {
 	unsigned int  base      = SCpnt->device->host->io_port;
 	unsigned long mmio_base = SCpnt->device->host->base;
@@ -906,7 +907,7 @@ static void nsp_pio_write(Scsi_Cmnd *SCpnt)
 /*
  * setup synchronous/asynchronous data transfer mode
  */
-static int nsp_nexus(Scsi_Cmnd *SCpnt)
+static int nsp_nexus(struct scsi_cmnd *SCpnt)
 {
 	unsigned int   base   = SCpnt->device->host->io_port;
 	unsigned char  target = scmd_id(SCpnt);
@@ -949,11 +950,11 @@ static int nsp_nexus(Scsi_Cmnd *SCpnt)
 /*
  * interrupt handler
  */
-static irqreturn_t nspintr(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t nspintr(int irq, void *dev_id)
 {
 	unsigned int   base;
 	unsigned char  irq_status, irq_phase, phase;
-	Scsi_Cmnd     *tmpSC;
+	struct scsi_cmnd *tmpSC;
 	unsigned char  target, lun;
 	unsigned int  *sync_neg;
 	int            i, tmp;
@@ -1531,7 +1532,7 @@ nsp_proc_info(
 /*---------------------------------------------------------------*/
 
 /*
-static int nsp_eh_abort(Scsi_Cmnd *SCpnt)
+static int nsp_eh_abort(struct scsi_cmnd *SCpnt)
 {
 	nsp_dbg(NSP_DEBUG_BUSRESET, "SCpnt=0x%p", SCpnt);
 
@@ -1559,7 +1560,7 @@ static int nsp_bus_reset(nsp_hw_data *data)
 	return SUCCESS;
 }
 
-static int nsp_eh_bus_reset(Scsi_Cmnd *SCpnt)
+static int nsp_eh_bus_reset(struct scsi_cmnd *SCpnt)
 {
 	nsp_hw_data *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
 
@@ -1568,7 +1569,7 @@ static int nsp_eh_bus_reset(Scsi_Cmnd *SCpnt)
 	return nsp_bus_reset(data);
 }
 
-static int nsp_eh_host_reset(Scsi_Cmnd *SCpnt)
+static int nsp_eh_host_reset(struct scsi_cmnd *SCpnt)
 {
 	nsp_hw_data *data = (nsp_hw_data *)SCpnt->device->host->hostdata;
 
@@ -1593,11 +1594,11 @@ static int nsp_eh_host_reset(Scsi_Cmnd *SCpnt)
     configure the card at this point -- we wait until we receive a
     card insertion event.
 ======================================================================*/
-static int nsp_cs_attach(struct pcmcia_device *p_dev)
+static int nsp_cs_probe(struct pcmcia_device *link)
 {
 	scsi_info_t  *info;
-	dev_link_t   *link;
 	nsp_hw_data  *data = &nsp_data_base;
+	int ret;
 
 	nsp_dbg(NSP_DEBUG_INIT, "in");
 
@@ -1605,7 +1606,7 @@ static int nsp_cs_attach(struct pcmcia_device *p_dev)
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
 	if (info == NULL) { return -ENOMEM; }
 	memset(info, 0, sizeof(*info));
-	link = &info->link;
+	info->p_dev = link;
 	link->priv = info;
 	data->ScsiInfo = info;
 
@@ -1623,22 +1624,16 @@ static int nsp_cs_attach(struct pcmcia_device *p_dev)
 	/* Interrupt handler */
 	link->irq.Handler	 = &nspintr;
 	link->irq.Instance       = info;
-	link->irq.Attributes     |= (SA_SHIRQ | SA_SAMPLE_RANDOM);
+	link->irq.Attributes     |= IRQF_SHARED;
 
 	/* General socket configuration */
 	link->conf.Attributes	 = CONF_ENABLE_IRQ;
-	link->conf.Vcc		 = 50;
 	link->conf.IntType	 = INT_MEMORY_AND_IO;
-	link->conf.Present	 = PRESENT_OPTION;
 
-	link->handle = p_dev;
-	p_dev->instance = link;
-
-	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
-	nsp_cs_config(link);
+	ret = nsp_cs_config(link);
 
 	nsp_dbg(NSP_DEBUG_INIT, "link=0x%p", link);
-	return 0;
+	return ret;
 } /* nsp_cs_attach */
 
 
@@ -1648,16 +1643,12 @@ static int nsp_cs_attach(struct pcmcia_device *p_dev)
     structures are freed.  Otherwise, the structures will be freed
     when the device is released.
 ======================================================================*/
-static void nsp_cs_detach(struct pcmcia_device *p_dev)
+static void nsp_cs_detach(struct pcmcia_device *link)
 {
-	dev_link_t *link = dev_to_instance(p_dev);
-
 	nsp_dbg(NSP_DEBUG_INIT, "in, link=0x%p", link);
 
-	if (link->state & DEV_CONFIG) {
-		((scsi_info_t *)link->priv)->stop = 1;
-		nsp_cs_release(link);
-	}
+	((scsi_info_t *)link->priv)->stop = 1;
+	nsp_cs_release(link);
 
 	kfree(link->priv);
 	link->priv = NULL;
@@ -1672,9 +1663,9 @@ static void nsp_cs_detach(struct pcmcia_device *p_dev)
 #define CS_CHECK(fn, ret) \
 do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 /*====================================================================*/
-static void nsp_cs_config(dev_link_t *link)
+static int nsp_cs_config(struct pcmcia_device *link)
 {
-	client_handle_t	  handle = link->handle;
+	int		  ret;
 	scsi_info_t	 *info	 = link->priv;
 	tuple_t		  tuple;
 	cisparse_t	  parse;
@@ -1693,31 +1684,21 @@ static void nsp_cs_config(dev_link_t *link)
 
 	nsp_dbg(NSP_DEBUG_INIT, "in");
 
-	tuple.DesiredTuple    = CISTPL_CONFIG;
 	tuple.Attributes      = 0;
 	tuple.TupleData	      = tuple_data;
 	tuple.TupleDataMax    = sizeof(tuple_data);
 	tuple.TupleOffset     = 0;
-	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
-	CS_CHECK(GetTupleData,	pcmcia_get_tuple_data(handle, &tuple));
-	CS_CHECK(ParseTuple,	pcmcia_parse_tuple(handle, &tuple, &parse));
-	link->conf.ConfigBase = parse.config.base;
-	link->conf.Present    = parse.config.rmask[0];
-
-	/* Configure card */
-	link->state	      |= DEV_CONFIG;
 
 	/* Look up the current Vcc */
-	CS_CHECK(GetConfigurationInfo, pcmcia_get_configuration_info(handle, &conf));
-	link->conf.Vcc = conf.Vcc;
+	CS_CHECK(GetConfigurationInfo, pcmcia_get_configuration_info(link, &conf));
 
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
-	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(link, &tuple));
 	while (1) {
 		cistpl_cftable_entry_t *cfg = &(parse.cftable_entry);
 
-		if (pcmcia_get_tuple_data(handle, &tuple) != 0 ||
-				pcmcia_parse_tuple(handle, &tuple, &parse) != 0)
+		if (pcmcia_get_tuple_data(link, &tuple) != 0 ||
+				pcmcia_parse_tuple(link, &tuple, &parse) != 0)
 			goto next_entry;
 
 		if (cfg->flags & CISTPL_CFTABLE_DEFAULT) { dflt = *cfg; }
@@ -1743,10 +1724,10 @@ static void nsp_cs_config(dev_link_t *link)
 		}
 
 		if (cfg->vpp1.present & (1 << CISTPL_POWER_VNOM)) {
-			link->conf.Vpp1 = link->conf.Vpp2 =
+			link->conf.Vpp =
 				cfg->vpp1.param[CISTPL_POWER_VNOM] / 10000;
 		} else if (dflt.vpp1.present & (1 << CISTPL_POWER_VNOM)) {
-			link->conf.Vpp1 = link->conf.Vpp2 =
+			link->conf.Vpp =
 				dflt.vpp1.param[CISTPL_POWER_VNOM] / 10000;
 		}
 
@@ -1773,7 +1754,7 @@ static void nsp_cs_config(dev_link_t *link)
 				link->io.NumPorts2 = io->win[1].len;
 			}
 			/* This reserves IO space but doesn't actually enable it */
-			if (pcmcia_request_io(link->handle, &link->io) != 0)
+			if (pcmcia_request_io(link, &link->io) != 0)
 				goto next_entry;
 		}
 
@@ -1788,7 +1769,7 @@ static void nsp_cs_config(dev_link_t *link)
 				req.Size = 0x1000;
 			}
 			req.AccessSpeed = 0;
-			if (pcmcia_request_window(&link->handle, &req, &link->win) != 0)
+			if (pcmcia_request_window(&link, &req, &link->win) != 0)
 				goto next_entry;
 			map.Page = 0; map.CardOffset = mem->win[0].card_addr;
 			if (pcmcia_map_mem_page(link->win, &map) != 0)
@@ -1802,17 +1783,14 @@ static void nsp_cs_config(dev_link_t *link)
 
 	next_entry:
 		nsp_dbg(NSP_DEBUG_INIT, "next");
-
-		if (link->io.NumPorts1) {
-			pcmcia_release_io(link->handle, &link->io);
-		}
-		CS_CHECK(GetNextTuple, pcmcia_get_next_tuple(handle, &tuple));
+		pcmcia_disable_device(link);
+		CS_CHECK(GetNextTuple, pcmcia_get_next_tuple(link, &tuple));
 	}
 
 	if (link->conf.Attributes & CONF_ENABLE_IRQ) {
-		CS_CHECK(RequestIRQ, pcmcia_request_irq(link->handle, &link->irq));
+		CS_CHECK(RequestIRQ, pcmcia_request_irq(link, &link->irq));
 	}
-	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(handle, &link->conf));
+	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link, &link->conf));
 
 	if (free_ports) {
 		if (link->io.BasePort1) {
@@ -1854,16 +1832,19 @@ static void nsp_cs_config(dev_link_t *link)
 
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,74))
-	scsi_add_host (host, NULL);
+	ret = scsi_add_host (host, NULL);
+	if (ret)
+		goto cs_failed;
+
 	scsi_scan_host(host);
 
 	snprintf(info->node.dev_name, sizeof(info->node.dev_name), "scsi%d", host->host_no);
-	link->dev  = &info->node;
+	link->dev_node  = &info->node;
 	info->host = host;
 
 #else
 	nsp_dbg(NSP_DEBUG_INIT, "GET_SCSI_INFO");
-	tail = &link->dev;
+	tail = &link->dev_node;
 	info->ndev = 0;
 
 	nsp_dbg(NSP_DEBUG_INIT, "host=0x%p", host);
@@ -1908,11 +1889,10 @@ static void nsp_cs_config(dev_link_t *link)
 #endif
 
 	/* Finally, report what we've done */
-	printk(KERN_INFO "nsp_cs: index 0x%02x: Vcc %d.%d",
-	       link->conf.ConfigIndex,
-	       link->conf.Vcc/10, link->conf.Vcc%10);
-	if (link->conf.Vpp1) {
-		printk(", Vpp %d.%d", link->conf.Vpp1/10, link->conf.Vpp1%10);
+	printk(KERN_INFO "nsp_cs: index 0x%02x: ",
+	       link->conf.ConfigIndex);
+	if (link->conf.Vpp) {
+		printk(", Vpp %d.%d", link->conf.Vpp/10, link->conf.Vpp%10);
 	}
 	if (link->conf.Attributes & CONF_ENABLE_IRQ) {
 		printk(", irq %d", link->irq.AssignedIRQ);
@@ -1929,15 +1909,14 @@ static void nsp_cs_config(dev_link_t *link)
 		       req.Base+req.Size-1);
 	printk("\n");
 
-	link->state &= ~DEV_CONFIG_PENDING;
-	return;
+	return 0;
 
  cs_failed:
 	nsp_dbg(NSP_DEBUG_INIT, "config fail");
-	cs_error(link->handle, last_fn, last_ret);
+	cs_error(link, last_fn, last_ret);
 	nsp_cs_release(link);
 
-	return;
+	return -ENODEV;
 } /* nsp_cs_config */
 #undef CS_CHECK
 
@@ -1947,7 +1926,7 @@ static void nsp_cs_config(dev_link_t *link)
     device, and release the PCMCIA configuration.  If the device is
     still open, this will be postponed until it is closed.
 ======================================================================*/
-static void nsp_cs_release(dev_link_t *link)
+static void nsp_cs_release(struct pcmcia_device *link)
 {
 	scsi_info_t *info = link->priv;
 	nsp_hw_data *data = NULL;
@@ -1968,22 +1947,15 @@ static void nsp_cs_release(dev_link_t *link)
 #else
 	scsi_unregister_host(&nsp_driver_template);
 #endif
-	link->dev = NULL;
+	link->dev_node = NULL;
 
 	if (link->win) {
 		if (data != NULL) {
 			iounmap((void *)(data->MmioAddress));
 		}
-		pcmcia_release_window(link->win);
 	}
-	pcmcia_release_configuration(link->handle);
-	if (link->io.NumPorts1) {
-		pcmcia_release_io(link->handle, &link->io);
-	}
-	if (link->irq.AssignedIRQ) {
-		pcmcia_release_irq(link->handle, &link->irq);
-	}
-	link->state &= ~DEV_CONFIG;
+	pcmcia_disable_device(link);
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,2))
 	if (info->host != NULL) {
 		scsi_host_put(info->host);
@@ -1991,13 +1963,10 @@ static void nsp_cs_release(dev_link_t *link)
 #endif
 } /* nsp_cs_release */
 
-static int nsp_cs_suspend(struct pcmcia_device *dev)
+static int nsp_cs_suspend(struct pcmcia_device *link)
 {
-	dev_link_t *link = dev_to_instance(dev);
 	scsi_info_t *info = link->priv;
 	nsp_hw_data *data;
-
-	link->state |= DEV_SUSPEND;
 
 	nsp_dbg(NSP_DEBUG_INIT, "event: suspend");
 
@@ -2011,24 +1980,15 @@ static int nsp_cs_suspend(struct pcmcia_device *dev)
 
 	info->stop = 1;
 
-	if (link->state & DEV_CONFIG)
-		pcmcia_release_configuration(link->handle);
-
 	return 0;
 }
 
-static int nsp_cs_resume(struct pcmcia_device *dev)
+static int nsp_cs_resume(struct pcmcia_device *link)
 {
-	dev_link_t *link = dev_to_instance(dev);
 	scsi_info_t *info = link->priv;
 	nsp_hw_data *data;
 
 	nsp_dbg(NSP_DEBUG_INIT, "event: resume");
-
-	link->state &= ~DEV_SUSPEND;
-
-	if (link->state & DEV_CONFIG)
-		pcmcia_request_configuration(link->handle, &link->conf);
 
 	info->stop = 0;
 
@@ -2065,7 +2025,7 @@ static struct pcmcia_driver nsp_driver = {
 	.drv		= {
 		.name	= "nsp_cs",
 	},
-	.probe		= nsp_cs_attach,
+	.probe		= nsp_cs_probe,
 	.remove		= nsp_cs_detach,
 	.id_table	= nsp_cs_ids,
 	.suspend	= nsp_cs_suspend,
@@ -2098,19 +2058,7 @@ static int __init nsp_cs_init(void)
 static void __exit nsp_cs_exit(void)
 {
 	nsp_msg(KERN_INFO, "unloading...");
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,68))
 	pcmcia_unregister_driver(&nsp_driver);
-#else
-	unregister_pcmcia_driver(&dev_info);
-	/* XXX: this really needs to move into generic code.. */
-	while (dev_list != NULL) {
-		if (dev_list->state & DEV_CONFIG) {
-			nsp_cs_release(dev_list);
-		}
-		nsp_cs_detach(dev_list);
-	}
-#endif
 }
 
 

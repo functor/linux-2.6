@@ -7,7 +7,6 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/stddef.h>
@@ -18,7 +17,7 @@
 #include <linux/console.h>
 #include <linux/bootmem.h>
 #include <linux/seq_file.h>
-#include <linux/tty.h>
+#include <linux/screen_info.h>
 #include <linux/init.h>
 #include <linux/root_dev.h>
 #include <linux/cpu.h>
@@ -119,9 +118,24 @@ DEFINE_PER_CPU(struct cpuinfo_arm, cpu_data);
  * Standard memory resources
  */
 static struct resource mem_res[] = {
-	{ "Video RAM",   0,     0,     IORESOURCE_MEM			},
-	{ "Kernel text", 0,     0,     IORESOURCE_MEM			},
-	{ "Kernel data", 0,     0,     IORESOURCE_MEM			}
+	{
+		.name = "Video RAM",
+		.start = 0,
+		.end = 0,
+		.flags = IORESOURCE_MEM
+	},
+	{
+		.name = "Kernel text",
+		.start = 0,
+		.end = 0,
+		.flags = IORESOURCE_MEM
+	},
+	{
+		.name = "Kernel data",
+		.start = 0,
+		.end = 0,
+		.flags = IORESOURCE_MEM
+	}
 };
 
 #define video_ram   mem_res[0]
@@ -129,9 +143,24 @@ static struct resource mem_res[] = {
 #define kernel_data mem_res[2]
 
 static struct resource io_res[] = {
-	{ "reserved",    0x3bc, 0x3be, IORESOURCE_IO | IORESOURCE_BUSY },
-	{ "reserved",    0x378, 0x37f, IORESOURCE_IO | IORESOURCE_BUSY },
-	{ "reserved",    0x278, 0x27f, IORESOURCE_IO | IORESOURCE_BUSY }
+	{
+		.name = "reserved",
+		.start = 0x3bc,
+		.end = 0x3be,
+		.flags = IORESOURCE_IO | IORESOURCE_BUSY
+	},
+	{
+		.name = "reserved",
+		.start = 0x378,
+		.end = 0x37f,
+		.flags = IORESOURCE_IO | IORESOURCE_BUSY
+	},
+	{
+		.name = "reserved",
+		.start = 0x278,
+		.end = 0x27f,
+		.flags = IORESOURCE_IO | IORESOURCE_BUSY
+	}
 };
 
 #define lp0 io_res[0]
@@ -252,6 +281,9 @@ static void __init dump_cpu_info(int cpu)
 			dump_cache("cache", cpu, CACHE_ISIZE(info));
 		}
 	}
+
+	if (arch_is_coherent())
+		printk("Cache coherency enabled\n");
 }
 
 int cpu_architecture(void)
@@ -278,7 +310,7 @@ int cpu_architecture(void)
  * These functions re-use the assembly code in head.S, which
  * already provide the required functionality.
  */
-extern struct proc_info_list *lookup_processor_type(void);
+extern struct proc_info_list *lookup_processor_type(unsigned int);
 extern struct machine_desc *lookup_machine_type(unsigned int);
 
 static void __init setup_processor(void)
@@ -290,7 +322,7 @@ static void __init setup_processor(void)
 	 * types.  The linker builds this table for us from the
 	 * entries in arch/arm/mm/proc-*.S
 	 */
-	list = lookup_processor_type();
+	list = lookup_processor_type(processor_id);
 	if (!list) {
 		printk("CPU configuration botched (ID %08x), unable "
 		       "to continue.\n", processor_id);
@@ -312,13 +344,16 @@ static void __init setup_processor(void)
 	cpu_cache = *list->cache;
 #endif
 
-	printk("CPU: %s [%08x] revision %d (ARMv%s)\n",
+	printk("CPU: %s [%08x] revision %d (ARMv%s), cr=%08lx\n",
 	       cpu_name, processor_id, (int)processor_id & 15,
-	       proc_arch[cpu_architecture()]);
+	       proc_arch[cpu_architecture()], cr_alignment);
 
-	sprintf(system_utsname.machine, "%s%c", list->arch_name, ENDIANNESS);
+	sprintf(init_utsname()->machine, "%s%c", list->arch_name, ENDIANNESS);
 	sprintf(elf_platform, "%s%c", list->elf_name, ENDIANNESS);
 	elf_hwcap = list->elf_hwcap;
+#ifndef CONFIG_ARM_THUMB
+	elf_hwcap &= ~HWCAP_THUMB;
+#endif
 
 	cpu_proc_init();
 }
@@ -398,18 +433,21 @@ static void __init early_initrd(char **p)
 }
 __early_param("initrd=", early_initrd);
 
-static void __init add_memory(unsigned long start, unsigned long size)
+static void __init arm_add_memory(unsigned long start, unsigned long size)
 {
+	struct membank *bank;
+
 	/*
 	 * Ensure that start/size are aligned to a page boundary.
 	 * Size is appropriately rounded down, start is rounded up.
 	 */
 	size -= start & ~PAGE_MASK;
 
-	meminfo.bank[meminfo.nr_banks].start = PAGE_ALIGN(start);
-	meminfo.bank[meminfo.nr_banks].size  = size & PAGE_MASK;
-	meminfo.bank[meminfo.nr_banks].node  = PHYS_TO_NID(start);
-	meminfo.nr_banks += 1;
+	bank = &meminfo.bank[meminfo.nr_banks++];
+
+	bank->start = PAGE_ALIGN(start);
+	bank->size  = size & PAGE_MASK;
+	bank->node  = PHYS_TO_NID(start);
 }
 
 /*
@@ -436,7 +474,7 @@ static void __init early_mem(char **p)
 	if (**p == '@')
 		start = memparse(*p + 1, p);
 
-	add_memory(start, size);
+	arm_add_memory(start, size);
 }
 __early_param("mem=", early_mem);
 
@@ -578,7 +616,7 @@ static int __init parse_tag_mem32(const struct tag *tag)
 			tag->u.mem.start, tag->u.mem.size / 1024);
 		return -EINVAL;
 	}
-	add_memory(tag->u.mem.start, tag->u.mem.size);
+	arm_add_memory(tag->u.mem.start, tag->u.mem.size);
 	return 0;
 }
 
@@ -798,8 +836,8 @@ static int __init topology_init(void)
 {
 	int cpu;
 
-	for_each_cpu(cpu)
-		register_cpu(&per_cpu(cpu_data, cpu).cpu, cpu, NULL);
+	for_each_possible_cpu(cpu)
+		register_cpu(&per_cpu(cpu_data, cpu).cpu, cpu);
 
 	return 0;
 }
@@ -816,6 +854,8 @@ static const char *hwcap_str[] = {
 	"vfp",
 	"edsp",
 	"java",
+	"iwmmxt",
+	"crunch",
 	NULL
 };
 

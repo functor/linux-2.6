@@ -295,11 +295,11 @@ int do_rmdir(const char *file)
 	return(0);
 }
 
-int do_mknod(const char *file, int mode, int dev)
+int do_mknod(const char *file, int mode, unsigned int major, unsigned int minor)
 {
 	int err;
 
-	err = mknod(file, mode, dev);
+	err = mknod(file, mode, makedev(major, minor));
 	if(err) return(-errno);
 	return(0);
 }
@@ -360,7 +360,6 @@ int do_statfs(char *root, long *bsize_out, long long *blocks_out,
 	spare_out[2] = buf.f_spare[2];
 	spare_out[3] = buf.f_spare[3];
 	spare_out[4] = buf.f_spare[4];
-	spare_out[5] = buf.f_spare[5];
 	return(0);
 }
 

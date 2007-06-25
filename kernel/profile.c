@@ -13,7 +13,6 @@
  *	to resolve timer interrupt livelocks, William Irwin, Oracle, 2004
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/profile.h>
 #include <linux/bootmem.h>
@@ -23,8 +22,10 @@
 #include <linux/cpu.h>
 #include <linux/profile.h>
 #include <linux/highmem.h>
+#include <linux/mutex.h>
 #include <asm/sections.h>
 #include <asm/semaphore.h>
+#include <asm/irq_regs.h>
 
 struct profile_hit {
 	u32 pc, hits;
@@ -39,20 +40,34 @@ int (*timer_hook)(struct pt_regs *) __read_mostly;
 
 static atomic_t *prof_buffer;
 static unsigned long prof_len, prof_shift;
-static int prof_on __read_mostly;
+
+int prof_on __read_mostly;
+EXPORT_SYMBOL_GPL(prof_on);
+
 static cpumask_t prof_cpu_mask = CPU_MASK_ALL;
 #ifdef CONFIG_SMP
 static DEFINE_PER_CPU(struct profile_hit *[2], cpu_profile_hits);
 static DEFINE_PER_CPU(int, cpu_profile_flip);
-static DECLARE_MUTEX(profile_flip_mutex);
+static DEFINE_MUTEX(profile_flip_mutex);
 #endif /* CONFIG_SMP */
 
 static int __init profile_setup(char * str)
 {
 	static char __initdata schedstr[] = "schedule";
+	static char __initdata sleepstr[] = "sleep";
+	static char __initdata kvmstr[] = "kvm";
 	int par;
 
-	if (!strncmp(str, schedstr, strlen(schedstr))) {
+	if (!strncmp(str, sleepstr, strlen(sleepstr))) {
+		prof_on = SLEEP_PROFILING;
+		if (str[strlen(sleepstr)] == ',')
+			str += strlen(sleepstr) + 1;
+		if (get_option(&str, &par))
+			prof_shift = par;
+		printk(KERN_INFO
+			"kernel sleep profiling enabled (shift: %ld)\n",
+			prof_shift);
+	} else if (!strncmp(str, schedstr, strlen(schedstr))) {
 		prof_on = SCHED_PROFILING;
 		if (str[strlen(schedstr)] == ',')
 			str += strlen(schedstr) + 1;
@@ -60,6 +75,15 @@ static int __init profile_setup(char * str)
 			prof_shift = par;
 		printk(KERN_INFO
 			"kernel schedule profiling enabled (shift: %ld)\n",
+			prof_shift);
+	} else if (!strncmp(str, kvmstr, strlen(kvmstr))) {
+		prof_on = KVM_PROFILING;
+		if (str[strlen(kvmstr)] == ',')
+			str += strlen(kvmstr) + 1;
+		if (get_option(&str, &par))
+			prof_shift = par;
+		printk(KERN_INFO
+			"kernel KVM profiling enabled (shift: %ld)\n",
 			prof_shift);
 	} else if (get_option(&str, &par)) {
 		prof_shift = par;
@@ -86,71 +110,51 @@ void __init profile_init(void)
  
 #ifdef CONFIG_PROFILING
  
-static DECLARE_RWSEM(profile_rwsem);
-static DEFINE_RWLOCK(handoff_lock);
-static struct notifier_block * task_exit_notifier;
-static struct notifier_block * task_free_notifier;
-static struct notifier_block * munmap_notifier;
+static BLOCKING_NOTIFIER_HEAD(task_exit_notifier);
+static ATOMIC_NOTIFIER_HEAD(task_free_notifier);
+static BLOCKING_NOTIFIER_HEAD(munmap_notifier);
  
 void profile_task_exit(struct task_struct * task)
 {
-	down_read(&profile_rwsem);
-	notifier_call_chain(&task_exit_notifier, 0, task);
-	up_read(&profile_rwsem);
+	blocking_notifier_call_chain(&task_exit_notifier, 0, task);
 }
  
 int profile_handoff_task(struct task_struct * task)
 {
 	int ret;
-	read_lock(&handoff_lock);
-	ret = notifier_call_chain(&task_free_notifier, 0, task);
-	read_unlock(&handoff_lock);
+	ret = atomic_notifier_call_chain(&task_free_notifier, 0, task);
 	return (ret == NOTIFY_OK) ? 1 : 0;
 }
 
 void profile_munmap(unsigned long addr)
 {
-	down_read(&profile_rwsem);
-	notifier_call_chain(&munmap_notifier, 0, (void *)addr);
-	up_read(&profile_rwsem);
+	blocking_notifier_call_chain(&munmap_notifier, 0, (void *)addr);
 }
 
 int task_handoff_register(struct notifier_block * n)
 {
-	int err = -EINVAL;
-
-	write_lock(&handoff_lock);
-	err = notifier_chain_register(&task_free_notifier, n);
-	write_unlock(&handoff_lock);
-	return err;
+	return atomic_notifier_chain_register(&task_free_notifier, n);
 }
 
 int task_handoff_unregister(struct notifier_block * n)
 {
-	int err = -EINVAL;
-
-	write_lock(&handoff_lock);
-	err = notifier_chain_unregister(&task_free_notifier, n);
-	write_unlock(&handoff_lock);
-	return err;
+	return atomic_notifier_chain_unregister(&task_free_notifier, n);
 }
 
 int profile_event_register(enum profile_type type, struct notifier_block * n)
 {
 	int err = -EINVAL;
  
-	down_write(&profile_rwsem);
- 
 	switch (type) {
 		case PROFILE_TASK_EXIT:
-			err = notifier_chain_register(&task_exit_notifier, n);
+			err = blocking_notifier_chain_register(
+					&task_exit_notifier, n);
 			break;
 		case PROFILE_MUNMAP:
-			err = notifier_chain_register(&munmap_notifier, n);
+			err = blocking_notifier_chain_register(
+					&munmap_notifier, n);
 			break;
 	}
- 
-	up_write(&profile_rwsem);
  
 	return err;
 }
@@ -160,18 +164,17 @@ int profile_event_unregister(enum profile_type type, struct notifier_block * n)
 {
 	int err = -EINVAL;
  
-	down_write(&profile_rwsem);
- 
 	switch (type) {
 		case PROFILE_TASK_EXIT:
-			err = notifier_chain_unregister(&task_exit_notifier, n);
+			err = blocking_notifier_chain_unregister(
+					&task_exit_notifier, n);
 			break;
 		case PROFILE_MUNMAP:
-			err = notifier_chain_unregister(&munmap_notifier, n);
+			err = blocking_notifier_chain_unregister(
+					&munmap_notifier, n);
 			break;
 	}
 
-	up_write(&profile_rwsem);
 	return err;
 }
 
@@ -224,7 +227,8 @@ EXPORT_SYMBOL_GPL(profile_event_unregister);
  * positions to which hits are accounted during short intervals (e.g.
  * several seconds) is usually very small. Exclusion from buffer
  * flipping is provided by interrupt disablement (note that for
- * SCHED_PROFILING profile_hit() may be called from process context).
+ * SCHED_PROFILING or SLEEP_PROFILING profile_hit() may be called from
+ * process context).
  * The hash function is meant to be lightweight as opposed to strong,
  * and was vaguely inspired by ppc64 firmware-supported inverted
  * pagetable hash functions, but uses a full hashtable full of finite
@@ -243,7 +247,7 @@ static void profile_flip_buffers(void)
 {
 	int i, j, cpu;
 
-	down(&profile_flip_mutex);
+	mutex_lock(&profile_flip_mutex);
 	j = per_cpu(cpu_profile_flip, get_cpu());
 	put_cpu();
 	on_each_cpu(__profile_flip_buffers, NULL, 0, 1);
@@ -259,14 +263,14 @@ static void profile_flip_buffers(void)
 			hits[i].hits = hits[i].pc = 0;
 		}
 	}
-	up(&profile_flip_mutex);
+	mutex_unlock(&profile_flip_mutex);
 }
 
 static void profile_discard_flip_buffers(void)
 {
 	int i, cpu;
 
-	down(&profile_flip_mutex);
+	mutex_lock(&profile_flip_mutex);
 	i = per_cpu(cpu_profile_flip, get_cpu());
 	put_cpu();
 	on_each_cpu(__profile_flip_buffers, NULL, 0, 1);
@@ -274,10 +278,10 @@ static void profile_discard_flip_buffers(void)
 		struct profile_hit *hits = per_cpu(cpu_profile_hits, cpu)[i];
 		memset(hits, 0, NR_PROFILE_HIT*sizeof(struct profile_hit));
 	}
-	up(&profile_flip_mutex);
+	mutex_unlock(&profile_flip_mutex);
 }
 
-void profile_hit(int type, void *__pc)
+void profile_hits(int type, void *__pc, unsigned int nr_hits)
 {
 	unsigned long primary, secondary, flags, pc = (unsigned long)__pc;
 	int i, j, cpu;
@@ -294,21 +298,31 @@ void profile_hit(int type, void *__pc)
 		put_cpu();
 		return;
 	}
+	/*
+	 * We buffer the global profiler buffer into a per-CPU
+	 * queue and thus reduce the number of global (and possibly
+	 * NUMA-alien) accesses. The write-queue is self-coalescing:
+	 */
 	local_irq_save(flags);
 	do {
 		for (j = 0; j < PROFILE_GRPSZ; ++j) {
 			if (hits[i + j].pc == pc) {
-				hits[i + j].hits++;
+				hits[i + j].hits += nr_hits;
 				goto out;
 			} else if (!hits[i + j].hits) {
 				hits[i + j].pc = pc;
-				hits[i + j].hits = 1;
+				hits[i + j].hits = nr_hits;
 				goto out;
 			}
 		}
 		i = (i + secondary) & (NR_PROFILE_HIT - 1);
 	} while (i != primary);
-	atomic_inc(&prof_buffer[pc]);
+
+	/*
+	 * Add the current hit(s) and flush the write-queue out
+	 * to the global buffer:
+	 */
+	atomic_add(nr_hits, &prof_buffer[pc]);
 	for (i = 0; i < NR_PROFILE_HIT; ++i) {
 		atomic_add(hits[i].hits, &prof_buffer[hits[i].pc]);
 		hits[i].pc = hits[i].hits = 0;
@@ -318,7 +332,6 @@ out:
 	put_cpu();
 }
 
-#ifdef CONFIG_HOTPLUG_CPU
 static int __devinit profile_cpu_callback(struct notifier_block *info,
 					unsigned long action, void *__cpu)
 {
@@ -330,13 +343,17 @@ static int __devinit profile_cpu_callback(struct notifier_block *info,
 		node = cpu_to_node(cpu);
 		per_cpu(cpu_profile_flip, cpu) = 0;
 		if (!per_cpu(cpu_profile_hits, cpu)[1]) {
-			page = alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO, 0);
+			page = alloc_pages_node(node,
+					GFP_KERNEL | __GFP_ZERO | GFP_THISNODE,
+					0);
 			if (!page)
 				return NOTIFY_BAD;
 			per_cpu(cpu_profile_hits, cpu)[1] = page_address(page);
 		}
 		if (!per_cpu(cpu_profile_hits, cpu)[0]) {
-			page = alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO, 0);
+			page = alloc_pages_node(node,
+					GFP_KERNEL | __GFP_ZERO | GFP_THISNODE,
+					0);
 			if (!page)
 				goto out_free;
 			per_cpu(cpu_profile_hits, cpu)[0] = page_address(page);
@@ -367,24 +384,28 @@ static int __devinit profile_cpu_callback(struct notifier_block *info,
 	}
 	return NOTIFY_OK;
 }
-#endif /* CONFIG_HOTPLUG_CPU */
 #else /* !CONFIG_SMP */
 #define profile_flip_buffers()		do { } while (0)
 #define profile_discard_flip_buffers()	do { } while (0)
+#define profile_cpu_callback		NULL
 
-void profile_hit(int type, void *__pc)
+void profile_hits(int type, void *__pc, unsigned int nr_hits)
 {
 	unsigned long pc;
 
 	if (prof_on != type || !prof_buffer)
 		return;
 	pc = ((unsigned long)__pc - (unsigned long)_stext) >> prof_shift;
-	atomic_inc(&prof_buffer[min(pc, prof_len - 1)]);
+	atomic_add(nr_hits, &prof_buffer[min(pc, prof_len - 1)]);
 }
 #endif /* !CONFIG_SMP */
 
-void profile_tick(int type, struct pt_regs *regs)
+EXPORT_SYMBOL_GPL(profile_hits);
+
+void profile_tick(int type)
 {
+	struct pt_regs *regs = get_irq_regs();
+
 	if (type == CPU_PROFILING && timer_hook)
 		timer_hook(regs);
 	if (!user_mode(regs) && cpu_isset(smp_processor_id(), prof_cpu_mask))
@@ -413,7 +434,7 @@ static int prof_cpu_mask_write_proc (struct file *file, const char __user *buffe
 	unsigned long full_count = count, err;
 	cpumask_t new_value;
 
-	err = cpumask_parse(buffer, count, new_value);
+	err = cpumask_parse_user(buffer, count, new_value);
 	if (err)
 		return err;
 
@@ -456,7 +477,8 @@ read_profile(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 	read = 0;
 
 	while (p < sizeof(unsigned int) && count > 0) {
-		put_user(*((char *)(&sample_step)+p),buf);
+		if (put_user(*((char *)(&sample_step)+p),buf))
+			return -EFAULT;
 		buf++; p++; count--; read++;
 	}
 	pnt = (char *)prof_buffer + p - sizeof(atomic_t);
@@ -494,7 +516,7 @@ static ssize_t write_profile(struct file *file, const char __user *buf,
 	return count;
 }
 
-static struct file_operations proc_profile_operations = {
+static const struct file_operations proc_profile_operations = {
 	.read		= read_profile,
 	.write		= write_profile,
 };
@@ -512,12 +534,16 @@ static int __init create_hash_tables(void)
 		int node = cpu_to_node(cpu);
 		struct page *page;
 
-		page = alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO, 0);
+		page = alloc_pages_node(node,
+				GFP_KERNEL | __GFP_ZERO | GFP_THISNODE,
+				0);
 		if (!page)
 			goto out_cleanup;
 		per_cpu(cpu_profile_hits, cpu)[1]
 				= (struct profile_hit *)page_address(page);
-		page = alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO, 0);
+		page = alloc_pages_node(node,
+				GFP_KERNEL | __GFP_ZERO | GFP_THISNODE,
+				0);
 		if (!page)
 			goto out_cleanup;
 		per_cpu(cpu_profile_hits, cpu)[0]

@@ -248,8 +248,8 @@ struct snd_cs4231 {
 	unsigned int c_dma_size;
 
 	spinlock_t reg_lock;
-	struct semaphore mce_mutex;
-	struct semaphore open_mutex;
+	struct mutex mce_mutex;
+	struct mutex open_mutex;
 
 	int (*rate_constraint) (struct snd_pcm_runtime *runtime);
 	void (*set_playback_format) (struct snd_cs4231 *chip, struct snd_pcm_hw_params *hw_params, unsigned char pdfr);
@@ -273,7 +273,7 @@ unsigned char snd_cs4236_ext_in(struct snd_cs4231 *chip, unsigned char reg);
 void snd_cs4231_mce_up(struct snd_cs4231 *chip);
 void snd_cs4231_mce_down(struct snd_cs4231 *chip);
 
-irqreturn_t snd_cs4231_interrupt(int irq, void *dev_id, struct pt_regs *regs);
+irqreturn_t snd_cs4231_interrupt(int irq, void *dev_id);
 
 const char *snd_cs4231_chip_id(struct snd_cs4231 *chip);
 

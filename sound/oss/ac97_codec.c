@@ -55,7 +55,7 @@
 #include <linux/pci.h>
 #include <linux/ac97_codec.h>
 #include <asm/uaccess.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
 
 #define CODEC_ID_BUFSZ 14
 
@@ -304,7 +304,7 @@ static const unsigned int ac97_oss_rm[] = {
 
 static LIST_HEAD(codecs);
 static LIST_HEAD(codec_drivers);
-static DECLARE_MUTEX(codec_sem);
+static DEFINE_MUTEX(codec_mutex);
 
 /* reads the given OSS mixer from the ac97 the caller must have insured that the ac97 knows
    about that given mixer, and should be holding a spinlock for the card */
@@ -769,9 +769,9 @@ void ac97_release_codec(struct ac97_codec *codec)
 {
 	/* Remove from the list first, we don't want to be
 	   "rediscovered" */
-	down(&codec_sem);
+	mutex_lock(&codec_mutex);
 	list_del(&codec->list);
-	up(&codec_sem);
+	mutex_unlock(&codec_mutex);
 	/*
 	 *	The driver needs to deal with internal
 	 *	locking to avoid accidents here. 
@@ -889,7 +889,7 @@ int ac97_probe_codec(struct ac97_codec *codec)
 	 *	callbacks.
 	 */
 	 
-	down(&codec_sem);
+	mutex_lock(&codec_mutex);
 	list_add(&codec->list, &codecs);
 
 	list_for_each(l, &codec_drivers) {
@@ -903,7 +903,7 @@ int ac97_probe_codec(struct ac97_codec *codec)
 		}
 	}
 
-	up(&codec_sem);
+	mutex_unlock(&codec_mutex);
 	return 1;
 }
 
@@ -1399,109 +1399,20 @@ unsigned int ac97_set_adc_rate(struct ac97_codec *codec, unsigned int rate)
 
 EXPORT_SYMBOL(ac97_set_adc_rate);
 
-int ac97_save_state(struct ac97_codec *codec)
-{
-	return 0;	
-}
-
-EXPORT_SYMBOL(ac97_save_state);
-
-int ac97_restore_state(struct ac97_codec *codec)
-{
-	int i;
-	unsigned int left, right, val;
-
-	for (i = 0; i < SOUND_MIXER_NRDEVICES; i++) {
-		if (!supported_mixer(codec, i)) 
-			continue;
-
-		val = codec->mixer_state[i];
-		right = val >> 8;
-		left = val  & 0xff;
-		codec->write_mixer(codec, i, left, right);
-	}
-	return 0;
-}
-
-EXPORT_SYMBOL(ac97_restore_state);
-
-/**
- *	ac97_register_driver	-	register a codec helper
- *	@driver: Driver handler
- *
- *	Register a handler for codecs matching the codec id. The handler
- *	attach function is called for all present codecs and will be 
- *	called when new codecs are discovered.
- */
- 
-int ac97_register_driver(struct ac97_driver *driver)
-{
-	struct list_head *l;
-	struct ac97_codec *c;
-	
-	down(&codec_sem);
-	INIT_LIST_HEAD(&driver->list);
-	list_add(&driver->list, &codec_drivers);
-	
-	list_for_each(l, &codecs)
-	{
-		c = list_entry(l, struct ac97_codec, list);
-		if(c->driver != NULL || ((c->model ^ driver->codec_id) & driver->codec_mask))
-			continue;
-		if(driver->probe(c, driver))
-			continue;
-		c->driver = driver;
-	}
-	up(&codec_sem);
-	return 0;
-}
-
-EXPORT_SYMBOL_GPL(ac97_register_driver);
-
-/**
- *	ac97_unregister_driver	-	unregister a codec helper
- *	@driver: Driver handler
- *
- *	Unregister a handler for codecs matching the codec id. The handler
- *	remove function is called for all matching codecs.
- */
- 
-void ac97_unregister_driver(struct ac97_driver *driver)
-{
-	struct list_head *l;
-	struct ac97_codec *c;
-	
-	down(&codec_sem);
-	list_del_init(&driver->list);
-
-	list_for_each(l, &codecs)
-	{
-		c = list_entry(l, struct ac97_codec, list);
-		if (c->driver == driver) {
-			driver->remove(c, driver);
-			c->driver = NULL;
-		}
-	}
-	
-	up(&codec_sem);
-}
-
-EXPORT_SYMBOL_GPL(ac97_unregister_driver);
-
 static int swap_headphone(int remove_master)
 {
 	struct list_head *l;
 	struct ac97_codec *c;
 	
 	if (remove_master) {
-		down(&codec_sem);
+		mutex_lock(&codec_mutex);
 		list_for_each(l, &codecs)
 		{
 			c = list_entry(l, struct ac97_codec, list);
 			if (supported_mixer(c, SOUND_MIXER_PHONEOUT))
 				c->supported_mixers &= ~SOUND_MASK_PHONEOUT;
 		}
-		up(&codec_sem);
+		mutex_unlock(&codec_mutex);
 	} else
 		ac97_hw[SOUND_MIXER_PHONEOUT].offset = AC97_MASTER_VOL_STEREO;
 

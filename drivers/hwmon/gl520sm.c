@@ -29,6 +29,8 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
+#include <linux/sysfs.h>
 
 /* Type of the extra sensor */
 static unsigned short extra_sensor_type;
@@ -121,7 +123,7 @@ static struct i2c_driver gl520_driver = {
 struct gl520_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid;		/* zero until the following fields are valid */
 	unsigned long last_updated;	/* in jiffies */
 
@@ -189,54 +191,28 @@ static DEVICE_ATTR(type##item, S_IRUGO, get_##type##0##item, NULL);
 #define sysfs_vid(n) \
 sysfs_ro_n(cpu, n, _vid, GL520_REG_VID_INPUT)
 
-#define device_create_file_vid(client, n) \
-device_create_file(&client->dev, &dev_attr_cpu##n##_vid)
-
 #define sysfs_in(n) \
 sysfs_ro_n(in, n, _input, GL520_REG_IN##n##INPUT) \
 sysfs_rw_n(in, n, _min, GL520_REG_IN##n##_MIN) \
 sysfs_rw_n(in, n, _max, GL520_REG_IN##n##_MAX) \
-
-#define device_create_file_in(client, n) \
-({device_create_file(&client->dev, &dev_attr_in##n##_input); \
-device_create_file(&client->dev, &dev_attr_in##n##_min); \
-device_create_file(&client->dev, &dev_attr_in##n##_max);})
 
 #define sysfs_fan(n) \
 sysfs_ro_n(fan, n, _input, GL520_REG_FAN_INPUT) \
 sysfs_rw_n(fan, n, _min, GL520_REG_FAN_MIN) \
 sysfs_rw_n(fan, n, _div, GL520_REG_FAN_DIV)
 
-#define device_create_file_fan(client, n) \
-({device_create_file(&client->dev, &dev_attr_fan##n##_input); \
-device_create_file(&client->dev, &dev_attr_fan##n##_min); \
-device_create_file(&client->dev, &dev_attr_fan##n##_div);})
-
 #define sysfs_fan_off(n) \
 sysfs_rw_n(fan, n, _off, GL520_REG_FAN_OFF) \
-
-#define device_create_file_fan_off(client, n) \
-device_create_file(&client->dev, &dev_attr_fan##n##_off)
 
 #define sysfs_temp(n) \
 sysfs_ro_n(temp, n, _input, GL520_REG_TEMP##n##_INPUT) \
 sysfs_rw_n(temp, n, _max, GL520_REG_TEMP##n##_MAX) \
 sysfs_rw_n(temp, n, _max_hyst, GL520_REG_TEMP##n##_MAX_HYST)
 
-#define device_create_file_temp(client, n) \
-({device_create_file(&client->dev, &dev_attr_temp##n##_input); \
-device_create_file(&client->dev, &dev_attr_temp##n##_max); \
-device_create_file(&client->dev, &dev_attr_temp##n##_max_hyst);})
-
 #define sysfs_alarms() \
 sysfs_ro(alarms, , GL520_REG_ALARMS) \
 sysfs_rw(beep_enable, , GL520_REG_BEEP_ENABLE) \
 sysfs_rw(beep_mask, , GL520_REG_BEEP_MASK)
-
-#define device_create_file_alarms(client) \
-({device_create_file(&client->dev, &dev_attr_alarms); \
-device_create_file(&client->dev, &dev_attr_beep_enable); \
-device_create_file(&client->dev, &dev_attr_beep_mask);})
 
 
 sysfs_vid(0)
@@ -303,7 +279,7 @@ static ssize_t set_in_min(struct i2c_client *client, struct gl520_data *data, co
 	long v = simple_strtol(buf, NULL, 10);
 	u8 r;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (n == 0)
 		r = VDD_TO_REG(v);
@@ -317,7 +293,7 @@ static ssize_t set_in_min(struct i2c_client *client, struct gl520_data *data, co
 	else
 		gl520_write_value(client, reg, r);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -331,7 +307,7 @@ static ssize_t set_in_max(struct i2c_client *client, struct gl520_data *data, co
 	else
 		r = IN_TO_REG(v);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	data->in_max[n] = r;
 
@@ -340,7 +316,7 @@ static ssize_t set_in_max(struct i2c_client *client, struct gl520_data *data, co
 	else
 		gl520_write_value(client, reg, r);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -373,7 +349,7 @@ static ssize_t set_fan_min(struct i2c_client *client, struct gl520_data *data, c
 	unsigned long v = simple_strtoul(buf, NULL, 10);
 	u8 r;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	r = FAN_TO_REG(v, data->fan_div[n - 1]);
 	data->fan_min[n - 1] = r;
 
@@ -390,7 +366,7 @@ static ssize_t set_fan_min(struct i2c_client *client, struct gl520_data *data, c
 	data->beep_mask &= data->alarm_mask;
 	gl520_write_value(client, GL520_REG_BEEP_MASK, data->beep_mask);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -409,7 +385,7 @@ static ssize_t set_fan_div(struct i2c_client *client, struct gl520_data *data, c
 		return -EINVAL;
 	}
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->fan_div[n - 1] = r;
 
 	if (n == 1)
@@ -417,7 +393,7 @@ static ssize_t set_fan_div(struct i2c_client *client, struct gl520_data *data, c
 	else
 		gl520_write_value(client, reg, (gl520_read_value(client, reg) & ~0x30) | (r << 4));
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -425,10 +401,10 @@ static ssize_t set_fan_off(struct i2c_client *client, struct gl520_data *data, c
 {
 	u8 r = simple_strtoul(buf, NULL, 10)?1:0;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->fan_off = r;
 	gl520_write_value(client, reg, (gl520_read_value(client, reg) & ~0x0c) | (r << 2));
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -454,10 +430,10 @@ static ssize_t set_temp_max(struct i2c_client *client, struct gl520_data *data, 
 {
 	long v = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
-	data->temp_max[n - 1] = TEMP_TO_REG(v);;
+	mutex_lock(&data->update_lock);
+	data->temp_max[n - 1] = TEMP_TO_REG(v);
 	gl520_write_value(client, reg, data->temp_max[n - 1]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -465,10 +441,10 @@ static ssize_t set_temp_max_hyst(struct i2c_client *client, struct gl520_data *d
 {
 	long v = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_max_hyst[n - 1] = TEMP_TO_REG(v);
 	gl520_write_value(client, reg, data->temp_max_hyst[n - 1]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -491,10 +467,10 @@ static ssize_t set_beep_enable(struct i2c_client *client, struct gl520_data *dat
 {
 	u8 r = simple_strtoul(buf, NULL, 10)?0:1;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->beep_enable = !r;
 	gl520_write_value(client, reg, (gl520_read_value(client, reg) & ~0x04) | (r << 2));
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -502,13 +478,66 @@ static ssize_t set_beep_mask(struct i2c_client *client, struct gl520_data *data,
 {
 	u8 r = simple_strtoul(buf, NULL, 10);
 	
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	r &= data->alarm_mask;
 	data->beep_mask = r;
 	gl520_write_value(client, reg, r);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
+
+static struct attribute *gl520_attributes[] = {
+	&dev_attr_cpu0_vid.attr,
+
+	&dev_attr_in0_input.attr,
+	&dev_attr_in0_min.attr,
+	&dev_attr_in0_max.attr,
+	&dev_attr_in1_input.attr,
+	&dev_attr_in1_min.attr,
+	&dev_attr_in1_max.attr,
+	&dev_attr_in2_input.attr,
+	&dev_attr_in2_min.attr,
+	&dev_attr_in2_max.attr,
+	&dev_attr_in3_input.attr,
+	&dev_attr_in3_min.attr,
+	&dev_attr_in3_max.attr,
+
+	&dev_attr_fan1_input.attr,
+	&dev_attr_fan1_min.attr,
+	&dev_attr_fan1_div.attr,
+	&dev_attr_fan1_off.attr,
+	&dev_attr_fan2_input.attr,
+	&dev_attr_fan2_min.attr,
+	&dev_attr_fan2_div.attr,
+
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp1_max.attr,
+	&dev_attr_temp1_max_hyst.attr,
+
+	&dev_attr_alarms.attr,
+	&dev_attr_beep_enable.attr,
+	&dev_attr_beep_mask.attr,
+	NULL
+};
+
+static const struct attribute_group gl520_group = {
+	.attrs = gl520_attributes,
+};
+
+static struct attribute *gl520_attributes_opt[] = {
+	&dev_attr_in4_input.attr,
+	&dev_attr_in4_min.attr,
+	&dev_attr_in4_max.attr,
+
+	&dev_attr_temp2_input.attr,
+	&dev_attr_temp2_max.attr,
+	&dev_attr_temp2_max_hyst.attr,
+	NULL
+};
+
+static const struct attribute_group gl520_group_opt = {
+	.attrs = gl520_attributes_opt,
+};
 
 
 /*
@@ -561,7 +590,7 @@ static int gl520_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* Fill in the remaining client fields */
 	strlcpy(new_client->name, "gl520sm", I2C_NAME_SIZE);
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -571,33 +600,39 @@ static int gl520_detect(struct i2c_adapter *adapter, int address, int kind)
 	gl520_init_client(new_client);
 
 	/* Register sysfs hooks */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &gl520_group)))
+		goto exit_detach;
+
+	if (data->two_temps) {
+		if ((err = device_create_file(&new_client->dev,
+					      &dev_attr_temp2_input))
+		 || (err = device_create_file(&new_client->dev,
+					      &dev_attr_temp2_max))
+		 || (err = device_create_file(&new_client->dev,
+					      &dev_attr_temp2_max_hyst)))
+			goto exit_remove_files;
+	} else {
+		if ((err = device_create_file(&new_client->dev,
+					      &dev_attr_in4_input))
+		 || (err = device_create_file(&new_client->dev,
+					      &dev_attr_in4_min))
+		 || (err = device_create_file(&new_client->dev,
+					      &dev_attr_in4_max)))
+			goto exit_remove_files;
+	}
+
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
+		goto exit_remove_files;
 	}
-
-	device_create_file_vid(new_client, 0);
-
-	device_create_file_in(new_client, 0);
-	device_create_file_in(new_client, 1);
-	device_create_file_in(new_client, 2);
-	device_create_file_in(new_client, 3);
-	if (!data->two_temps)
-		device_create_file_in(new_client, 4);
-
-	device_create_file_fan(new_client, 1);
-	device_create_file_fan(new_client, 2);
-	device_create_file_fan_off(new_client, 1);
-
-	device_create_file_temp(new_client, 1);
-	if (data->two_temps)
-		device_create_file_temp(new_client, 2);
-
-	device_create_file_alarms(new_client);
 
 	return 0;
 
+exit_remove_files:
+	sysfs_remove_group(&new_client->dev.kobj, &gl520_group);
+	sysfs_remove_group(&new_client->dev.kobj, &gl520_group_opt);
 exit_detach:
 	i2c_detach_client(new_client);
 exit_free:
@@ -651,6 +686,8 @@ static int gl520_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &gl520_group);
+	sysfs_remove_group(&client->dev.kobj, &gl520_group_opt);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -685,7 +722,7 @@ static struct gl520_data *gl520_update_device(struct device *dev)
 	struct gl520_data *data = i2c_get_clientdata(client);
 	int val;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + 2 * HZ) || !data->valid) {
 
@@ -750,7 +787,7 @@ static struct gl520_data *gl520_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

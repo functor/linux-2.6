@@ -4,8 +4,9 @@
  *  Copyright (C) 2004-2005 Pierre Ossman, All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or (at
+ * your option) any later version.
  *
  *
  * Warning!
@@ -21,7 +22,6 @@
  * - On APIC systems the FIFO empty interrupt is sometimes lost.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -42,17 +42,12 @@
 #include "wbsd.h"
 
 #define DRIVER_NAME "wbsd"
-#define DRIVER_VERSION "1.5"
+#define DRIVER_VERSION "1.6"
 
-#ifdef CONFIG_MMC_DEBUG
 #define DBG(x...) \
-	printk(KERN_DEBUG DRIVER_NAME ": " x)
+	pr_debug(DRIVER_NAME ": " x)
 #define DBGF(f, x...) \
-	printk(KERN_DEBUG DRIVER_NAME " [%s()]: " f, __func__ , ##x)
-#else
-#define DBG(x...)	do { } while (0)
-#define DBGF(x...)	do { } while (0)
-#endif
+	pr_debug(DRIVER_NAME " [%s()]: " f, __func__ , ##x)
 
 /*
  * Device resources
@@ -667,14 +662,14 @@ static void wbsd_prepare_data(struct wbsd_host *host, struct mmc_data *data)
 	unsigned long dmaflags;
 
 	DBGF("blksz %04x blks %04x flags %08x\n",
-		1 << data->blksz_bits, data->blocks, data->flags);
+		data->blksz, data->blocks, data->flags);
 	DBGF("tsac %d ms nsac %d clk\n",
 		data->timeout_ns / 1000000, data->timeout_clks);
 
 	/*
 	 * Calculate size.
 	 */
-	host->size = data->blocks << data->blksz_bits;
+	host->size = data->blocks * data->blksz;
 
 	/*
 	 * Check timeout values for overflow.
@@ -701,12 +696,12 @@ static void wbsd_prepare_data(struct wbsd_host *host, struct mmc_data *data)
 	 * Two bytes are needed for each data line.
 	 */
 	if (host->bus_width == MMC_BUS_WIDTH_1) {
-		blksize = (1 << data->blksz_bits) + 2;
+		blksize = data->blksz + 2;
 
 		wbsd_write_index(host, WBSD_IDX_PBSMSB, (blksize >> 4) & 0xF0);
 		wbsd_write_index(host, WBSD_IDX_PBSLSB, blksize & 0xFF);
 	} else if (host->bus_width == MMC_BUS_WIDTH_4) {
-		blksize = (1 << data->blksz_bits) + 2 * 4;
+		blksize = data->blksz + 2 * 4;
 
 		wbsd_write_index(host, WBSD_IDX_PBSMSB,
 			((blksize >> 4) & 0xF0) | WBSD_DATA_WIDTH);
@@ -936,10 +931,6 @@ static void wbsd_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	struct wbsd_host *host = mmc_priv(mmc);
 	u8 clk, setup, pwr;
 
-	DBGF("clock %uHz busmode %u powermode %u cs %u Vdd %u width %u\n",
-		ios->clock, ios->bus_mode, ios->power_mode, ios->chip_select,
-		ios->vdd, ios->bus_width);
-
 	spin_lock_bh(&host->lock);
 
 	/*
@@ -1030,7 +1021,7 @@ static int wbsd_get_ro(struct mmc_host *mmc)
 	return csr & WBSD_WRPT;
 }
 
-static struct mmc_host_ops wbsd_ops = {
+static const struct mmc_host_ops wbsd_ops = {
 	.request	= wbsd_request,
 	.set_ios	= wbsd_set_ios,
 	.get_ro		= wbsd_get_ro,
@@ -1265,7 +1256,7 @@ end:
  * Interrupt handling
  */
 
-static irqreturn_t wbsd_irq(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t wbsd_irq(int irq, void *dev_id)
 {
 	struct wbsd_host *host = dev_id;
 	int isr;
@@ -1333,7 +1324,7 @@ static int __devinit wbsd_alloc_mmc(struct device *dev)
 	mmc->f_min = 375000;
 	mmc->f_max = 24000000;
 	mmc->ocr_avail = MMC_VDD_32_33 | MMC_VDD_33_34;
-	mmc->caps = MMC_CAP_4_BIT_DATA;
+	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_MULTIWRITE | MMC_CAP_BYTEBLOCK;
 
 	spin_lock_init(&host->lock);
 
@@ -1449,13 +1440,13 @@ static int __devinit wbsd_scan(struct wbsd_host *host)
 
 static int __devinit wbsd_request_region(struct wbsd_host *host, int base)
 {
-	if (io & 0x7)
+	if (base & 0x7)
 		return -EINVAL;
 
 	if (!request_region(base, 8, DRIVER_NAME))
 		return -EIO;
 
-	host->base = io;
+	host->base = base;
 
 	return 0;
 }
@@ -1497,7 +1488,7 @@ static void __devinit wbsd_request_dma(struct wbsd_host *host, int dma)
 	/*
 	 * Translate the address to a physical address.
 	 */
-	host->dma_addr = dma_map_single(host->mmc->dev, host->dma_buffer,
+	host->dma_addr = dma_map_single(mmc_dev(host->mmc), host->dma_buffer,
 		WBSD_DMA_SIZE, DMA_BIDIRECTIONAL);
 
 	/*
@@ -1521,7 +1512,7 @@ kfree:
 	 */
 	BUG_ON(1);
 
-	dma_unmap_single(host->mmc->dev, host->dma_addr,
+	dma_unmap_single(mmc_dev(host->mmc), host->dma_addr,
 		WBSD_DMA_SIZE, DMA_BIDIRECTIONAL);
 	host->dma_addr = (dma_addr_t)NULL;
 
@@ -1539,7 +1530,7 @@ err:
 static void __devexit wbsd_release_dma(struct wbsd_host *host)
 {
 	if (host->dma_addr) {
-		dma_unmap_single(host->mmc->dev, host->dma_addr,
+		dma_unmap_single(mmc_dev(host->mmc), host->dma_addr,
 			WBSD_DMA_SIZE, DMA_BIDIRECTIONAL);
 	}
 	kfree(host->dma_buffer);
@@ -1563,7 +1554,7 @@ static int __devinit wbsd_request_irq(struct wbsd_host *host, int irq)
 	 * Allocate interrupt.
 	 */
 
-	ret = request_irq(irq, wbsd_irq, SA_SHIRQ, DRIVER_NAME, host);
+	ret = request_irq(irq, wbsd_irq, IRQF_SHARED, DRIVER_NAME, host);
 	if (ret)
 		return ret;
 
@@ -1783,7 +1774,7 @@ static int __devinit wbsd_init(struct device *dev, int base, int irq, int dma,
 	/*
 	 * Request resources.
 	 */
-	ret = wbsd_request_resources(host, io, irq, dma);
+	ret = wbsd_request_resources(host, base, irq, dma);
 	if (ret) {
 		wbsd_release_resources(host);
 		wbsd_free_mmc(dev);
@@ -1871,6 +1862,7 @@ static void __devexit wbsd_shutdown(struct device *dev, int pnp)
 
 static int __devinit wbsd_probe(struct platform_device *dev)
 {
+	/* Use the module parameters for resources */
 	return wbsd_init(&dev->dev, io, irq, dma, 0);
 }
 

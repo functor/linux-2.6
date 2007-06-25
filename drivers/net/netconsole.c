@@ -60,7 +60,6 @@ static struct netpoll np = {
 	.local_port = 6665,
 	.remote_port = 6666,
 	.remote_mac = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
-	.drop = netpoll_queue,
 };
 static int configured = 0;
 
@@ -87,6 +86,7 @@ static void write_msg(struct console *con, const char *msg, unsigned int len)
 }
 
 static struct console netconsole = {
+	.name = "netcon",
 	.flags = CON_ENABLED | CON_PRINTBUFFER,
 	.write = write_msg
 };
@@ -94,23 +94,26 @@ static struct console netconsole = {
 static int option_setup(char *opt)
 {
 	configured = !netpoll_parse_options(&np, opt);
-	return 0;
+	return 1;
 }
 
 __setup("netconsole=", option_setup);
 
 static int init_netconsole(void)
 {
+	int err;
+
 	if(strlen(config))
 		option_setup(config);
 
 	if(!configured) {
 		printk("netconsole: not configured, aborting\n");
-		return -EINVAL;
+		return 0;
 	}
 
-	if(netpoll_setup(&np))
-		return -EINVAL;
+	err = netpoll_setup(&np);
+	if (err)
+		return err;
 
 	register_console(&netconsole);
 	printk(KERN_INFO "netconsole: network logging started\n");

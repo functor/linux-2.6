@@ -278,7 +278,7 @@ mv64xxx_i2c_do_action(struct mv64xxx_i2c_data *drv_data)
 }
 
 static int
-mv64xxx_i2c_intr(int irq, void *dev_id, struct pt_regs *regs)
+mv64xxx_i2c_intr(int irq, void *dev_id)
 {
 	struct mv64xxx_i2c_data	*drv_data = dev_id;
 	unsigned long	flags;
@@ -431,7 +431,7 @@ mv64xxx_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	return num;
 }
 
-static struct i2c_algorithm mv64xxx_i2c_algo = {
+static const struct i2c_algorithm mv64xxx_i2c_algo = {
 	.master_xfer = mv64xxx_i2c_xfer,
 	.functionality = mv64xxx_i2c_functionality,
 };
@@ -516,6 +516,10 @@ mv64xxx_i2c_probe(struct platform_device *pd)
 	drv_data->freq_m = pdata->freq_m;
 	drv_data->freq_n = pdata->freq_n;
 	drv_data->irq = platform_get_irq(pd, 0);
+	if (drv_data->irq < 0) {
+		rc = -ENXIO;
+		goto exit_unmap_regs;
+	}
 	drv_data->adapter.id = I2C_HW_MV64XXX;
 	drv_data->adapter.algo = &mv64xxx_i2c_algo;
 	drv_data->adapter.owner = THIS_MODULE;

@@ -21,7 +21,6 @@
  */
 
 #include <linux/fs.h>
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/ptrace.h>
 #include <linux/unistd.h>
@@ -116,6 +115,10 @@ void cpu_idle (void)
 
 void machine_restart(char *__unused)
 {
+#if defined(CONFIG_PLAT_MAPPI3)
+	outw(1, (unsigned long)PLD_REBOOT);
+#endif
+
 	printk("Please push reset button!\n");
 	while (1)
 		cpu_relax();
@@ -171,7 +174,7 @@ void show_regs(struct pt_regs * regs)
 	  regs->acc1h, regs->acc1l);
 #elif defined(CONFIG_ISA_M32R2) || defined(CONFIG_ISA_M32R)
 	printk("ACCH[%08lx]:ACCL[%08lx]\n", \
-	  regs->acch, regs->accl);
+	  regs->acc0h, regs->acc0l);
 #else
 #error unknown isa configuration
 #endif
@@ -208,8 +211,8 @@ int kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	regs.psw = M32R_PSW_BIE;
 
 	/* Ok, create the new process. */
-	return do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0, &regs, 0, NULL,
-		NULL);
+	return do_fork(flags | CLONE_VM | CLONE_UNTRACED | CLONE_KTHREAD,
+		0, &regs, 0, NULL, NULL);
 }
 
 /*

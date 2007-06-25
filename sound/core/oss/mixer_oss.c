@@ -988,13 +988,12 @@ static int snd_mixer_oss_build_input(struct snd_mixer_oss *mixer, struct snd_mix
 	if (ptr->index == 0 && (kctl = snd_mixer_oss_test_id(mixer, "Capture Source", 0)) != NULL) {
 		struct snd_ctl_elem_info *uinfo;
 
-		uinfo = kmalloc(sizeof(*uinfo), GFP_KERNEL);
+		uinfo = kzalloc(sizeof(*uinfo), GFP_KERNEL);
 		if (! uinfo) {
 			up_read(&mixer->card->controls_rwsem);
 			return -ENOMEM;
 		}
 			
-		memset(uinfo, 0, sizeof(*uinfo));
 		if (kctl->info(kctl, uinfo)) {
 			up_read(&mixer->card->controls_rwsem);
 			return 0;
@@ -1024,7 +1023,7 @@ static int snd_mixer_oss_build_input(struct snd_mixer_oss *mixer, struct snd_mix
 	}
 	up_read(&mixer->card->controls_rwsem);
 	if (slot.present != 0) {
-		pslot = (struct slot *)kmalloc(sizeof(slot), GFP_KERNEL);
+		pslot = kmalloc(sizeof(slot), GFP_KERNEL);
 		if (! pslot)
 			return -ENOMEM;
 		*pslot = slot;
@@ -1095,7 +1094,7 @@ static void snd_mixer_oss_proc_read(struct snd_info_entry *entry,
 	struct snd_mixer_oss *mixer = entry->private_data;
 	int i;
 
-	down(&mixer->reg_mutex);
+	mutex_lock(&mixer->reg_mutex);
 	for (i = 0; i < SNDRV_OSS_MAX_MIXERS; i++) {
 		struct slot *p;
 
@@ -1110,7 +1109,7 @@ static void snd_mixer_oss_proc_read(struct snd_info_entry *entry,
 		else
 			snd_iprintf(buffer, "\"\" 0\n");
 	}
-	up(&mixer->reg_mutex);
+	mutex_unlock(&mixer->reg_mutex);
 }
 
 static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
@@ -1134,9 +1133,9 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 		cptr = snd_info_get_str(str, cptr, sizeof(str));
 		if (! *str) {
 			/* remove the entry */
-			down(&mixer->reg_mutex);
+			mutex_lock(&mixer->reg_mutex);
 			mixer_slot_clear(&mixer->slots[ch]);
-			up(&mixer->reg_mutex);
+			mutex_unlock(&mixer->reg_mutex);
 			continue;
 		}
 		snd_info_get_str(idxstr, cptr, sizeof(idxstr));
@@ -1145,7 +1144,7 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 			snd_printk(KERN_ERR "mixer_oss: invalid index %d\n", idx);
 			continue;
 		}
-		down(&mixer->reg_mutex);
+		mutex_lock(&mixer->reg_mutex);
 		slot = (struct slot *)mixer->slots[ch].private_data;
 		if (slot && slot->assigned &&
 		    slot->assigned->index == idx && ! strcmp(slot->assigned->name, str))
@@ -1168,7 +1167,7 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 			kfree(tbl);
 		}
 	__unlock:
-		up(&mixer->reg_mutex);
+		mutex_unlock(&mixer->reg_mutex);
 	}
 }
 
@@ -1182,9 +1181,7 @@ static void snd_mixer_oss_proc_init(struct snd_mixer_oss *mixer)
 		return;
 	entry->content = SNDRV_INFO_CONTENT_TEXT;
 	entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-	entry->c.text.read_size = 8192;
 	entry->c.text.read = snd_mixer_oss_proc_read;
-	entry->c.text.write_size = 8192;
 	entry->c.text.write = snd_mixer_oss_proc_write;
 	entry->private_data = mixer;
 	if (snd_info_register(entry) < 0) {
@@ -1196,10 +1193,8 @@ static void snd_mixer_oss_proc_init(struct snd_mixer_oss *mixer)
 
 static void snd_mixer_oss_proc_done(struct snd_mixer_oss *mixer)
 {
-	if (mixer->proc_entry) {
-		snd_info_unregister(mixer->proc_entry);
-		mixer->proc_entry = NULL;
-	}
+	snd_info_free_entry(mixer->proc_entry);
+	mixer->proc_entry = NULL;
 }
 #else /* !CONFIG_PROC_FS */
 #define snd_mixer_oss_proc_init(mix)
@@ -1288,7 +1283,7 @@ static int snd_mixer_oss_notify_handler(struct snd_card *card, int cmd)
 		mixer = kcalloc(2, sizeof(*mixer), GFP_KERNEL);
 		if (mixer == NULL)
 			return -ENOMEM;
-		init_MUTEX(&mixer->reg_mutex);
+		mutex_init(&mixer->reg_mutex);
 		sprintf(name, "mixer%i%i", card->number, 0);
 		if ((err = snd_register_oss_device(SNDRV_OSS_DEVICE_TYPE_MIXER,
 						   card, 0,
@@ -1315,21 +1310,19 @@ static int snd_mixer_oss_notify_handler(struct snd_card *card, int cmd)
 		card->mixer_oss = mixer;
 		snd_mixer_oss_build(mixer);
 		snd_mixer_oss_proc_init(mixer);
-	} else if (cmd == SND_MIXER_OSS_NOTIFY_DISCONNECT) {
-		mixer = card->mixer_oss;
-		if (mixer == NULL || !mixer->oss_dev_alloc)
-			return 0;
-		snd_unregister_oss_device(SNDRV_OSS_DEVICE_TYPE_MIXER, mixer->card, 0);
-		mixer->oss_dev_alloc = 0;
-	} else {		/* free */
+	} else {
 		mixer = card->mixer_oss;
 		if (mixer == NULL)
 			return 0;
+		if (mixer->oss_dev_alloc) {
 #ifdef SNDRV_OSS_INFO_DEV_MIXERS
-		snd_oss_info_unregister(SNDRV_OSS_INFO_DEV_MIXERS, mixer->card->number);
+			snd_oss_info_unregister(SNDRV_OSS_INFO_DEV_MIXERS, mixer->card->number);
 #endif
-		if (mixer->oss_dev_alloc)
 			snd_unregister_oss_device(SNDRV_OSS_DEVICE_TYPE_MIXER, mixer->card, 0);
+			mixer->oss_dev_alloc = 0;
+		}
+		if (cmd == SND_MIXER_OSS_NOTIFY_DISCONNECT)
+			return 0;
 		snd_mixer_oss_proc_done(mixer);
 		return snd_mixer_oss_free1(mixer);
 	}

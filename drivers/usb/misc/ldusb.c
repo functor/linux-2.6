@@ -27,12 +27,12 @@
  * V0.13 (mh) Added support for LD X-Ray and Machine Test System
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 
 #include <asm/uaccess.h>
 #include <linux/input.h>
@@ -172,7 +172,7 @@ struct ld_usb {
 };
 
 /* prevent races between open() and disconnect() */
-static DECLARE_MUTEX(disconnect_sem);
+static DEFINE_MUTEX(disconnect_mutex);
 
 static struct usb_driver ld_usb_driver;
 
@@ -212,7 +212,7 @@ static void ld_usb_delete(struct ld_usb *dev)
 /**
  *	ld_usb_interrupt_in_callback
  */
-static void ld_usb_interrupt_in_callback(struct urb *urb, struct pt_regs *regs)
+static void ld_usb_interrupt_in_callback(struct urb *urb)
 {
 	struct ld_usb *dev = urb->context;
 	size_t *actual_buffer;
@@ -264,7 +264,7 @@ exit:
 /**
  *	ld_usb_interrupt_out_callback
  */
-static void ld_usb_interrupt_out_callback(struct urb *urb, struct pt_regs *regs)
+static void ld_usb_interrupt_out_callback(struct urb *urb)
 {
 	struct ld_usb *dev = urb->context;
 
@@ -293,7 +293,7 @@ static int ld_usb_open(struct inode *inode, struct file *file)
 	nonseekable_open(inode, file);
 	subminor = iminor(inode);
 
-	down(&disconnect_sem);
+	mutex_lock(&disconnect_mutex);
 
 	interface = usb_find_interface(&ld_usb_driver, subminor);
 
@@ -355,7 +355,7 @@ unlock_exit:
 	up(&dev->sem);
 
 unlock_disconnect_exit:
-	up(&disconnect_sem);
+	mutex_unlock(&disconnect_mutex);
 
 	return retval;
 }
@@ -589,7 +589,7 @@ exit:
 }
 
 /* file operations needed when we register this driver */
-static struct file_operations ld_usb_fops = {
+static const struct file_operations ld_usb_fops = {
 	.owner =	THIS_MODULE,
 	.read  =	ld_usb_read,
 	.write =	ld_usb_write,
@@ -626,12 +626,11 @@ static int ld_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 
 	/* allocate memory for our device state and intialize it */
 
-	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (dev == NULL) {
 		dev_err(&intf->dev, "Out of memory\n");
 		goto exit;
 	}
-	memset(dev, 0x00, sizeof(*dev));
 	init_MUTEX(&dev->sem);
 	dev->intf = intf;
 	init_waitqueue_head(&dev->read_wait);
@@ -658,15 +657,11 @@ static int ld_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 	for (i = 0; i < iface_desc->desc.bNumEndpoints; ++i) {
 		endpoint = &iface_desc->endpoint[i].desc;
 
-		if (((endpoint->bEndpointAddress & USB_ENDPOINT_DIR_MASK) == USB_DIR_IN) &&
-		    ((endpoint->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) == USB_ENDPOINT_XFER_INT)) {
+		if (usb_endpoint_is_int_in(endpoint))
 			dev->interrupt_in_endpoint = endpoint;
-		}
 
-		if (((endpoint->bEndpointAddress & USB_ENDPOINT_DIR_MASK) == USB_DIR_OUT) &&
-		    ((endpoint->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) == USB_ENDPOINT_XFER_INT)) {
+		if (usb_endpoint_is_int_out(endpoint))
 			dev->interrupt_out_endpoint = endpoint;
-		}
 	}
 	if (dev->interrupt_in_endpoint == NULL) {
 		dev_err(&intf->dev, "Interrupt in endpoint not found\n");
@@ -741,7 +736,7 @@ static void ld_usb_disconnect(struct usb_interface *intf)
 	struct ld_usb *dev;
 	int minor;
 
-	down(&disconnect_sem);
+	mutex_lock(&disconnect_mutex);
 
 	dev = usb_get_intfdata(intf);
 	usb_set_intfdata(intf, NULL);
@@ -762,7 +757,7 @@ static void ld_usb_disconnect(struct usb_interface *intf)
 		up(&dev->sem);
 	}
 
-	up(&disconnect_sem);
+	mutex_unlock(&disconnect_mutex);
 
 	dev_info(&intf->dev, "LD USB Device #%d now disconnected\n",
 		 (minor - USB_LD_MINOR_BASE));

@@ -32,10 +32,6 @@ config DEBUG_USER
 	      8 - SIGSEGV faults
 	     16 - SIGBUS faults
 
-config DEBUG_WAITQ
-	bool "Wait queue debugging"
-	depends on DEBUG_KERNEL
-
 config DEBUG_ERRORS
 	bool "Verbose kernel error messages"
 	depends on DEBUG_KERNEL
@@ -101,7 +97,7 @@ config DEBUG_S3C2410_UART
 	help
 	  Choice for UART for kernel low-level using S3C2410 UARTS,
 	  should be between zero and two. The port must have been
-	  initalised by the boot-loader before use.
+	  initialised by the boot-loader before use.
 
 	  The uncompressor code port configuration is now handled
 	  by CONFIG_S3C2410_LOWLEVEL_UART_PORT.

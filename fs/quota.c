@@ -17,10 +17,7 @@
 #include <linux/buffer_head.h>
 #include <linux/capability.h>
 #include <linux/quotaops.h>
-#include <linux/major.h>
-#include <linux/blkdev.h>
-#include <linux/vs_base.h>
-#include <linux/vserver/debug.h>
+#include <linux/vs_context.h>
 
 /* Check validity of generic quotactl commands */
 static int generic_quotactl_valid(struct super_block *sb, int type, int cmd, qid_t id)
@@ -174,10 +171,10 @@ static void quota_sync_sb(struct super_block *sb, int type)
 
 	/* Now when everything is written we can discard the pagecache so
 	 * that userspace sees the changes. We need i_mutex and so we could
-	 * not do it inside dqonoff_sem. Moreover we need to be carefull
+	 * not do it inside dqonoff_mutex. Moreover we need to be carefull
 	 * about races with quotaoff() (that is the reason why we have own
 	 * reference to inode). */
-	down(&sb_dqopt(sb)->dqonoff_sem);
+	mutex_lock(&sb_dqopt(sb)->dqonoff_mutex);
 	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
 		discard[cnt] = NULL;
 		if (type != -1 && cnt != type)
@@ -186,7 +183,7 @@ static void quota_sync_sb(struct super_block *sb, int type)
 			continue;
 		discard[cnt] = igrab(sb_dqopt(sb)->files[cnt]);
 	}
-	up(&sb_dqopt(sb)->dqonoff_sem);
+	mutex_unlock(&sb_dqopt(sb)->dqonoff_mutex);
 	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
 		if (discard[cnt]) {
 			mutex_lock(&discard[cnt]->i_mutex);
@@ -344,7 +341,10 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id, void
 #if defined(CONFIG_BLK_DEV_VROOT) || defined(CONFIG_BLK_DEV_VROOT_MODULE)
 
 #include <linux/vroot.h>
+#include <linux/major.h>
+#include <linux/module.h>
 #include <linux/kallsyms.h>
+#include <linux/vserver/debug.h>
 
 static vroot_grb_func *vroot_get_real_bdev = NULL;
 
@@ -379,6 +379,50 @@ EXPORT_SYMBOL(unregister_vroot_grb);
 #endif
 
 /*
+ * look up a superblock on which quota ops will be performed
+ * - use the name of a block device to find the superblock thereon
+ */
+static inline struct super_block *quotactl_block(const char __user *special)
+{
+#ifdef CONFIG_BLOCK
+	struct block_device *bdev;
+	struct super_block *sb;
+	char *tmp = getname(special);
+
+	if (IS_ERR(tmp))
+		return ERR_PTR(PTR_ERR(tmp));
+	bdev = lookup_bdev(tmp);
+	putname(tmp);
+	if (IS_ERR(bdev))
+		return ERR_PTR(PTR_ERR(bdev));
+#if defined(CONFIG_BLK_DEV_VROOT) || defined(CONFIG_BLK_DEV_VROOT_MODULE)
+	if (bdev && bdev->bd_inode &&
+			imajor(bdev->bd_inode) == VROOT_MAJOR) {
+		struct block_device *bdnew = (void *)-EINVAL;
+
+		if (vroot_get_real_bdev)
+			bdnew = vroot_get_real_bdev(bdev);
+		else
+			vxdprintk(VXD_CBIT(misc, 0),
+					"vroot_get_real_bdev not set");
+		bdput(bdev);
+		if (IS_ERR(bdnew))
+			return ERR_PTR(PTR_ERR(bdnew));
+		bdev = bdnew;
+	}
+#endif
+	sb = get_super(bdev);
+	bdput(bdev);
+	if (!sb)
+		return ERR_PTR(-ENODEV);
+
+	return sb;
+#else
+	return ERR_PTR(-ENODEV);
+#endif
+}
+
+/*
  * This is the system call interface. This communicates with
  * the user-level programs. Currently this only supports diskquota
  * calls. Maybe we need to add the process quotas etc. in the future,
@@ -388,42 +432,15 @@ asmlinkage long sys_quotactl(unsigned int cmd, const char __user *special, qid_t
 {
 	uint cmds, type;
 	struct super_block *sb = NULL;
-	struct block_device *bdev;
-	char *tmp;
 	int ret;
 
 	cmds = cmd >> SUBCMDSHIFT;
 	type = cmd & SUBCMDMASK;
 
 	if (cmds != Q_SYNC || special) {
-		tmp = getname(special);
-		if (IS_ERR(tmp))
-			return PTR_ERR(tmp);
-		bdev = lookup_bdev(tmp);
-		putname(tmp);
-		if (IS_ERR(bdev))
-			return PTR_ERR(bdev);
-#if defined(CONFIG_BLK_DEV_VROOT) || defined(CONFIG_BLK_DEV_VROOT_MODULE)
-		if (bdev && bdev->bd_inode &&
-			imajor(bdev->bd_inode) == VROOT_MAJOR) {
-			struct block_device *bdnew = (void *)-EINVAL;
-
-			if (vroot_get_real_bdev)
-				bdnew = vroot_get_real_bdev(bdev);
-			else
-				vxdprintk(VXD_CBIT(misc, 0),
-					"vroot_get_real_bdev not set");
-
-			bdput(bdev);
-			if (IS_ERR(bdnew))
-				return PTR_ERR(bdnew);
-			bdev = bdnew;
-		}
-#endif
-		sb = get_super(bdev);
-		bdput(bdev);
-		if (!sb)
-			return -ENODEV;
+		sb = quotactl_block(special);
+		if (IS_ERR(sb))
+			return PTR_ERR(sb);
 	}
 
 	ret = check_quotactl_valid(sb, type, cmds, id);

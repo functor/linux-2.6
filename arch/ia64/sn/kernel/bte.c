@@ -6,7 +6,6 @@
  * Copyright (c) 2000-2006 Silicon Graphics, Inc.  All Rights Reserved.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/sn/nodepda.h>
 #include <asm/sn/addrs.h>
@@ -36,7 +35,7 @@ static struct bteinfo_s *bte_if_on_node(nasid_t nasid, int interface)
 	nodepda_t *tmp_nodepda;
 
 	if (nasid_to_cnodeid(nasid) == -1)
-		return (struct bteinfo_s *)NULL;;
+		return (struct bteinfo_s *)NULL;
 
 	tmp_nodepda = NODEPDA(nasid_to_cnodeid(nasid));
 	return &tmp_nodepda->bte_if[interface];
@@ -278,8 +277,7 @@ bte_result_t bte_unaligned_copy(u64 src, u64 dest, u64 len, u64 mode)
 	}
 
 	/* temporary buffer used during unaligned transfers */
-	bteBlock_unaligned = kmalloc(len + 3 * L1_CACHE_BYTES,
-				     GFP_KERNEL | GFP_DMA);
+	bteBlock_unaligned = kmalloc(len + 3 * L1_CACHE_BYTES, GFP_KERNEL);
 	if (bteBlock_unaligned == NULL) {
 		return BTEFAIL_NOTAVAIL;
 	}

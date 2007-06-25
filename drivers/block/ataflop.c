@@ -271,7 +271,7 @@ unsigned char *DMABuffer;			  /* buffer for writes */
 static unsigned long PhysDMABuffer;   /* physical address */
 
 static int UseTrackbuffer = -1;		  /* Do track buffering? */
-MODULE_PARM(UseTrackbuffer, "i");
+module_param(UseTrackbuffer, int, 0);
 
 unsigned char *TrackBuffer;			  /* buffer for reads */
 static unsigned long PhysTrackBuffer; /* physical address */
@@ -296,7 +296,7 @@ static int MotorOn = 0, MotorOffTrys;
 static int IsFormatting = 0, FormatError;
 
 static int UserSteprate[FD_MAX_UNITS] = { -1, -1 };
-MODULE_PARM(UserSteprate, "1-" __MODULE_STRING(FD_MAX_UNITS) "i");
+module_param_array(UserSteprate, int, NULL, 0);
 
 /* Synchronization of FDC access. */
 static volatile int fdc_busy = 0;
@@ -342,7 +342,7 @@ static void fd_select_drive( int drive );
 static void fd_deselect( void );
 static void fd_motor_off_timer( unsigned long dummy );
 static void check_change( unsigned long dummy );
-static irqreturn_t floppy_irq (int irq, void *dummy, struct pt_regs *fp);
+static irqreturn_t floppy_irq (int irq, void *dummy);
 static void fd_error( void );
 static int do_format(int drive, int type, struct atari_format_descr *desc);
 static void do_fd_action( int drive );
@@ -573,7 +573,7 @@ static inline void copy_buffer(void *from, void *to)
 
 static void (*FloppyIRQHandler)( int status ) = NULL;
 
-static irqreturn_t floppy_irq (int irq, void *dummy, struct pt_regs *fp)
+static irqreturn_t floppy_irq (int irq, void *dummy)
 {
 	unsigned char status;
 	void (*handler)( int );

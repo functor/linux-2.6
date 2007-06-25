@@ -86,7 +86,7 @@ static int dvb_device_open(struct inode *inode, struct file *file)
 
 	if (dvbdev && dvbdev->fops) {
 		int err = 0;
-		struct file_operations *old_fops;
+		const struct file_operations *old_fops;
 
 		file->private_data = dvbdev;
 		old_fops = file->f_op;
@@ -200,10 +200,11 @@ int dvb_register_device(struct dvb_adapter *adap, struct dvb_device **pdvbdev,
 			const struct dvb_device *template, void *priv, int type)
 {
 	struct dvb_device *dvbdev;
+	struct file_operations *dvbdevfops;
+
 	int id;
 
-	if (mutex_lock_interruptible(&dvbdev_register_lock))
-		return -ERESTARTSYS;
+	mutex_lock(&dvbdev_register_lock);
 
 	if ((id = dvbdev_get_free_id (adap, type)) < 0) {
 		mutex_unlock(&dvbdev_register_lock);
@@ -219,24 +220,30 @@ int dvb_register_device(struct dvb_adapter *adap, struct dvb_device **pdvbdev,
 		return -ENOMEM;
 	}
 
-	mutex_unlock(&dvbdev_register_lock);
+	dvbdevfops = kzalloc(sizeof(struct file_operations), GFP_KERNEL);
+
+	if (!dvbdevfops) {
+		kfree (dvbdev);
+		mutex_unlock(&dvbdev_register_lock);
+		return -ENOMEM;
+	}
 
 	memcpy(dvbdev, template, sizeof(struct dvb_device));
 	dvbdev->type = type;
 	dvbdev->id = id;
 	dvbdev->adapter = adap;
 	dvbdev->priv = priv;
+	dvbdev->fops = dvbdevfops;
 
+	memcpy(dvbdev->fops, template->fops, sizeof(struct file_operations));
 	dvbdev->fops->owner = adap->module;
 
 	list_add_tail (&dvbdev->list_head, &adap->device_list);
 
-	devfs_mk_cdev(MKDEV(DVB_MAJOR, nums2minor(adap->num, type, id)),
-			S_IFCHR | S_IRUSR | S_IWUSR,
-			"dvb/adapter%d/%s%d", adap->num, dnames[type], id);
+	mutex_unlock(&dvbdev_register_lock);
 
 	class_device_create(dvb_class, NULL, MKDEV(DVB_MAJOR, nums2minor(adap->num, type, id)),
-			    NULL, "dvb%d.%s%d", adap->num, dnames[type], id);
+			    adap->device, "dvb%d.%s%d", adap->num, dnames[type], id);
 
 	dprintk("DVB: register adapter%d/%s%d @ minor: %i (0x%02x)\n",
 		adap->num, dnames[type], id, nums2minor(adap->num, type, id),
@@ -252,13 +259,11 @@ void dvb_unregister_device(struct dvb_device *dvbdev)
 	if (!dvbdev)
 		return;
 
-	devfs_remove("dvb/adapter%d/%s%d", dvbdev->adapter->num,
-			dnames[dvbdev->type], dvbdev->id);
-
 	class_device_destroy(dvb_class, MKDEV(DVB_MAJOR, nums2minor(dvbdev->adapter->num,
 					dvbdev->type, dvbdev->id)));
 
 	list_del (&dvbdev->list_head);
+	kfree (dvbdev->fops);
 	kfree (dvbdev);
 }
 EXPORT_SYMBOL(dvb_unregister_device);
@@ -285,12 +290,11 @@ skip:
 }
 
 
-int dvb_register_adapter(struct dvb_adapter *adap, const char *name, struct module *module)
+int dvb_register_adapter(struct dvb_adapter *adap, const char *name, struct module *module, struct device *device)
 {
 	int num;
 
-	if (mutex_lock_interruptible(&dvbdev_register_lock))
-		return -ERESTARTSYS;
+	mutex_lock(&dvbdev_register_lock);
 
 	if ((num = dvbdev_get_free_adapter_num ()) < 0) {
 		mutex_unlock(&dvbdev_register_lock);
@@ -302,10 +306,10 @@ int dvb_register_adapter(struct dvb_adapter *adap, const char *name, struct modu
 
 	printk ("DVB: registering new adapter (%s).\n", name);
 
-	devfs_mk_dir("dvb/adapter%d", num);
 	adap->num = num;
 	adap->name = name;
 	adap->module = module;
+	adap->device = device;
 
 	list_add_tail (&adap->list_head, &dvb_adapter_list);
 
@@ -318,10 +322,7 @@ EXPORT_SYMBOL(dvb_register_adapter);
 
 int dvb_unregister_adapter(struct dvb_adapter *adap)
 {
-	devfs_remove("dvb/adapter%d", adap->num);
-
-	if (mutex_lock_interruptible(&dvbdev_register_lock))
-		return -ERESTARTSYS;
+	mutex_lock(&dvbdev_register_lock);
 	list_del (&adap->list_head);
 	mutex_unlock(&dvbdev_register_lock);
 	return 0;
@@ -409,8 +410,6 @@ static int __init init_dvbdev(void)
 		goto error;
 	}
 
-	devfs_mk_dir("dvb");
-
 	dvb_class = class_create(THIS_MODULE, "dvb");
 	if (IS_ERR(dvb_class)) {
 		retval = PTR_ERR(dvb_class);
@@ -427,7 +426,6 @@ error:
 
 static void __exit exit_dvbdev(void)
 {
-	devfs_remove("dvb");
 	class_destroy(dvb_class);
 	cdev_del(&dvb_device_cdev);
 	unregister_chrdev_region(MKDEV(DVB_MAJOR, 0), MAX_DVB_MINORS);

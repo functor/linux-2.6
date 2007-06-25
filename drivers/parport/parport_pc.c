@@ -3,7 +3,7 @@
  * Authors: Phil Blundell <philb@gnu.org>
  *          Tim Waugh <tim@cyberelk.demon.co.uk>
  *	    Jose Renau <renau@acm.org>
- *          David Campbell <campbell@torque.net>
+ *          David Campbell
  *          Andrea Arcangeli
  *
  * based on work by Grant Guenther <grant@torque.net> and Phil Blundell.
@@ -42,7 +42,6 @@
  * but rather will start at port->base_hi.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sched.h>
@@ -97,7 +96,7 @@ static struct superio_struct {	/* For Super-IO chips autodetection */
 	int io;
 	int irq;
 	int dma;
-} superios[NR_SUPERIOS] __devinitdata = { {0,},};
+} superios[NR_SUPERIOS] = { {0,},};
 
 static int user_specified;
 #if defined(CONFIG_PARPORT_PC_SUPERIO) || \
@@ -271,9 +270,9 @@ static int clear_epp_timeout(struct parport *pb)
  * of these are in parport_pc.h.
  */
 
-static irqreturn_t parport_pc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t parport_pc_interrupt(int irq, void *dev_id)
 {
-	parport_generic_irq(irq, (struct parport *) dev_id, regs);
+	parport_generic_irq(irq, (struct parport *) dev_id);
 	/* FIXME! Was it really ours? */
 	return IRQ_HANDLED;
 }
@@ -1557,7 +1556,7 @@ static int __devinit get_superio_dma (struct parport *p)
 	return PARPORT_DMA_NONE;
 }
 
-static int __devinit get_superio_irq (struct parport *p)
+static int get_superio_irq (struct parport *p)
 {
 	int i=0;
         while( (superios[i].io != p->base) && (i<NR_SUPERIOS))
@@ -1579,7 +1578,7 @@ static int __devinit get_superio_irq (struct parport *p)
  *                         this shall always be the case!)
  *
  */
-static int __devinit parport_SPP_supported(struct parport *pb)
+static int parport_SPP_supported(struct parport *pb)
 {
 	unsigned char r, w;
 
@@ -1660,7 +1659,7 @@ static int __devinit parport_SPP_supported(struct parport *pb)
  * two bits of ECR aren't writable, so we check by writing ECR and
  * reading it back to see if it's what we expect.
  */
-static int __devinit parport_ECR_present(struct parport *pb)
+static int parport_ECR_present(struct parport *pb)
 {
 	struct parport_pc_private *priv = pb->private_data;
 	unsigned char r = 0xc;
@@ -1712,7 +1711,7 @@ static int __devinit parport_ECR_present(struct parport *pb)
  * be misdetected here is rather academic. 
  */
 
-static int __devinit parport_PS2_supported(struct parport *pb)
+static int parport_PS2_supported(struct parport *pb)
 {
 	int ok = 0;
   
@@ -1868,7 +1867,7 @@ static int __devinit parport_ECP_supported(struct parport *pb)
 }
 #endif
 
-static int __devinit parport_ECPPS2_supported(struct parport *pb)
+static int parport_ECPPS2_supported(struct parport *pb)
 {
 	const struct parport_pc_private *priv = pb->private_data;
 	int result;
@@ -1886,7 +1885,7 @@ static int __devinit parport_ECPPS2_supported(struct parport *pb)
 
 /* EPP mode detection  */
 
-static int __devinit parport_EPP_supported(struct parport *pb)
+static int parport_EPP_supported(struct parport *pb)
 {
 	const struct parport_pc_private *priv = pb->private_data;
 
@@ -1931,7 +1930,7 @@ static int __devinit parport_EPP_supported(struct parport *pb)
 	return 1;
 }
 
-static int __devinit parport_ECPEPP_supported(struct parport *pb)
+static int parport_ECPEPP_supported(struct parport *pb)
 {
 	struct parport_pc_private *priv = pb->private_data;
 	int result;
@@ -1976,7 +1975,7 @@ static int __devinit parport_ECPPS2_supported(struct parport *pb){return 0;}
 /* --- IRQ detection -------------------------------------- */
 
 /* Only if supports ECP mode */
-static int __devinit programmable_irq_support(struct parport *pb)
+static int programmable_irq_support(struct parport *pb)
 {
 	int irq, intrLine;
 	unsigned char oecr = inb (ECONTROL (pb));
@@ -1993,7 +1992,7 @@ static int __devinit programmable_irq_support(struct parport *pb)
 	return irq;
 }
 
-static int __devinit irq_probe_ECP(struct parport *pb)
+static int irq_probe_ECP(struct parport *pb)
 {
 	int i;
 	unsigned long irqs;
@@ -2021,7 +2020,7 @@ static int __devinit irq_probe_ECP(struct parport *pb)
  * This detection seems that only works in National Semiconductors
  * This doesn't work in SMC, LGS, and Winbond 
  */
-static int __devinit irq_probe_EPP(struct parport *pb)
+static int irq_probe_EPP(struct parport *pb)
 {
 #ifndef ADVANCED_DETECT
 	return PARPORT_IRQ_NONE;
@@ -2060,7 +2059,7 @@ static int __devinit irq_probe_EPP(struct parport *pb)
 #endif /* Advanced detection */
 }
 
-static int __devinit irq_probe_SPP(struct parport *pb)
+static int irq_probe_SPP(struct parport *pb)
 {
 	/* Don't even try to do this. */
 	return PARPORT_IRQ_NONE;
@@ -2073,7 +2072,7 @@ static int __devinit irq_probe_SPP(struct parport *pb)
  * When ECP is available we can autoprobe for IRQs.
  * NOTE: If we can autoprobe it, we can register the IRQ.
  */
-static int __devinit parport_irq_probe(struct parport *pb)
+static int parport_irq_probe(struct parport *pb)
 {
 	struct parport_pc_private *priv = pb->private_data;
 
@@ -2748,6 +2747,7 @@ enum parport_pc_pci_cards {
 	titan_1284p2,
 	avlab_1p,
 	avlab_2p,
+	oxsemi_952,
 	oxsemi_954,
 	oxsemi_840,
 	aks_0100,
@@ -2779,7 +2779,7 @@ static struct parport_pc_pci {
 	/* If set, this is called after probing for ports.  If 'failed'
 	 * is non-zero we couldn't use any of the ports. */
 	void (*postinit_hook) (struct pci_dev *pdev, int failed);
-} cards[] __devinitdata = {
+} cards[] = {
 	/* siig_1p_10x */		{ 1, { { 2, 3 }, } },
 	/* siig_2p_10x */		{ 2, { { 2, 3 }, { 4, 5 }, } },
 	/* siig_1p_20x */		{ 1, { { 0, 1 }, } },
@@ -2823,6 +2823,7 @@ static struct parport_pc_pci {
 	/* avlab_2p		*/	{ 2, { { 0, 1}, { 2, 3 },} },
 	/* The Oxford Semi cards are unusual: 954 doesn't support ECP,
 	 * and 840 locks up if you write 1 to bit 2! */
+	/* oxsemi_952 */		{ 1, { { 0, 1 }, } },
 	/* oxsemi_954 */		{ 1, { { 0, -1 }, } },
 	/* oxsemi_840 */		{ 1, { { 0, -1 }, } },
 	/* aks_0100 */                  { 1, { { 0, -1 }, } },
@@ -2896,6 +2897,8 @@ static const struct pci_device_id parport_pc_pci_tbl[] = {
 	/* PCI_VENDOR_ID_AVLAB/Intek21 has another bunch of cards ...*/
 	{ 0x14db, 0x2120, PCI_ANY_ID, PCI_ANY_ID, 0, 0, avlab_1p}, /* AFAVLAB_TK9902 */
 	{ 0x14db, 0x2121, PCI_ANY_ID, PCI_ANY_ID, 0, 0, avlab_2p},
+	{ PCI_VENDOR_ID_OXSEMI, PCI_DEVICE_ID_OXSEMI_16PCI952PP,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, oxsemi_952 },
 	{ PCI_VENDOR_ID_OXSEMI, PCI_DEVICE_ID_OXSEMI_16PCI954PP,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, oxsemi_954 },
 	{ PCI_VENDOR_ID_OXSEMI, PCI_DEVICE_ID_OXSEMI_12PCI840,
@@ -3126,9 +3129,9 @@ parport_pc_find_isa_ports (int autoirq, int autodma)
  * autoirq is PARPORT_IRQ_NONE, PARPORT_IRQ_AUTO, or PARPORT_IRQ_PROBEONLY
  * autodma is PARPORT_DMA_NONE or PARPORT_DMA_AUTO
  */
-static int __init parport_pc_find_ports (int autoirq, int autodma)
+static void __init parport_pc_find_ports (int autoirq, int autodma)
 {
-	int count = 0, r;
+	int count = 0, err;
 
 #ifdef CONFIG_PARPORT_PC_SUPERIO
 	detect_and_report_winbond ();
@@ -3140,23 +3143,17 @@ static int __init parport_pc_find_ports (int autoirq, int autodma)
 
 	/* PnP ports, skip detection if SuperIO already found them */
 	if (!count) {
-		r = pnp_register_driver (&parport_pc_pnp_driver);
-		if (r >= 0) {
+		err = pnp_register_driver (&parport_pc_pnp_driver);
+		if (!err)
 			pnp_registered_parport = 1;
-			count += r;
-		}
 	}
 
 	/* ISA ports and whatever (see asm/parport.h). */
-	count += parport_pc_find_nonpci_ports (autoirq, autodma);
+	parport_pc_find_nonpci_ports (autoirq, autodma);
 
-	r = pci_register_driver (&parport_pc_pci_driver);
-	if (r)
-		return r;
-	pci_registered_parport = 1;
-	count += 1;
-
-	return count;
+	err = pci_register_driver (&parport_pc_pci_driver);
+	if (!err)
+		pci_registered_parport = 1;
 }
 
 /*
@@ -3381,8 +3378,6 @@ __setup("parport_init_mode=",parport_init_mode_setup);
 
 static int __init parport_pc_init(void)
 {
-	int count = 0;
-
 	if (parse_parport_params())
 		return -EINVAL;
 
@@ -3395,12 +3390,11 @@ static int __init parport_pc_init(void)
 				break;
 			if ((io_hi[i]) == PARPORT_IOHI_AUTO)
 			       io_hi[i] = 0x400 + io[i];
-			if (parport_pc_probe_port(io[i], io_hi[i],
-						  irqval[i], dmaval[i], NULL))
-				count++;
+			parport_pc_probe_port(io[i], io_hi[i],
+						  irqval[i], dmaval[i], NULL);
 		}
 	} else
-		count += parport_pc_find_ports (irqval[0], dmaval[0]);
+		parport_pc_find_ports (irqval[0], dmaval[0]);
 
 	return 0;
 }

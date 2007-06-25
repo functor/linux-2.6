@@ -6,7 +6,7 @@
  *
  * Complete PPP frames without encoding/decoding are exchanged between
  * the channel driver and the device driver.
- * 
+ *
  * The async map IOCTL codes are implemented to keep the user mode
  * applications happy if they call them. Synchronous PPP does not use
  * the async maps.
@@ -108,7 +108,7 @@ static void
 ppp_print_hex (register __u8 * out, const __u8 * in, int count)
 {
 	register __u8 next_ch;
-	static char hex[] = "0123456789ABCDEF";
+	static const char hex[] = "0123456789ABCDEF";
 
 	while (count-- > 0) {
 		next_ch = *in++;

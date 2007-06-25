@@ -195,6 +195,22 @@ static struct usbmix_name_map linex_map[] = {
 	{ 0 } /* terminator */
 };
 
+static struct usbmix_name_map maya44_map[] = {
+	/* 1: IT line */
+	{ 2, "Line Playback" }, /* FU */
+	/* 3: IT line */
+	{ 4, "Line Playback" }, /* FU */
+	/* 5: IT pcm playback */
+	/* 6: MU */
+	{ 7, "Master Playback" }, /* FU */
+	/* 8: OT speaker */
+	/* 9: IT line */
+	{ 10, "Line Capture" }, /* FU */
+	/* 11: MU */
+	/* 12: OT pcm capture */
+	{ }
+};
+
 /* Section "justlink_map" below added by James Courtier-Dutton <James@superbug.demon.co.uk>
  * sourced from Maplin Electronics (http://www.maplin.co.uk), part number A56AK
  * Part has 2 connectors that act as a single output. (TOSLINK Optical for digital out, and 3.5mm Jack for Analogue out.)
@@ -216,6 +232,26 @@ static struct usbmix_name_map justlink_map[] = {
 	/* 0xb: MU (w/o controls) */
 	{ 0xc, NULL }, /* Mic feedback Mute/volume (No capture inputs on device) */
 	{ 0 } /* terminator */
+};
+
+/* TerraTec Aureon 5.1 MkII USB */
+static struct usbmix_name_map aureon_51_2_map[] = {
+	/* 1: IT USB */
+	/* 2: IT Mic */
+	/* 3: IT Line */
+	/* 4: IT SPDIF */
+	/* 5: OT SPDIF */
+	/* 6: OT Speaker */
+	/* 7: OT USB */
+	{ 8, "Capture Source" }, /* SU */
+	{ 9, "Master Playback" }, /* FU */
+	{ 10, "Mic Capture" }, /* FU */
+	{ 11, "Line Capture" }, /* FU */
+	{ 12, "IEC958 In Capture" }, /* FU */
+	{ 13, "Mic Playback" }, /* FU */
+	{ 14, "Line Playback" }, /* FU */
+	/* 15: MU */
+	{} /* terminator */
 };
 
 /*
@@ -253,8 +289,16 @@ static struct usbmix_ctl_map usbmix_ctl_maps[] = {
 		.ignore_ctl_error = 1,
 	},
 	{
+		.id = USB_ID(0x0a92, 0x0091),
+		.map = maya44_map,
+	},
+	{
 		.id = USB_ID(0x0c45, 0x1158),
 		.map = justlink_map,
+	},
+	{
+		.id = USB_ID(0x0ccd, 0x0028),
+		.map = aureon_51_2_map,
 	},
 	{ 0 } /* terminator */
 };

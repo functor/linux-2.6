@@ -7,7 +7,6 @@
 #include <linux/elfcore.h>
 #include <linux/in6.h>
 #include <linux/interrupt.h>
-#include <linux/config.h>
 
 #include <asm/setup.h>
 #include <asm/machdep.h>
@@ -39,7 +38,7 @@ EXPORT_SYMBOL(ip_fast_csum);
 EXPORT_SYMBOL(kernel_thread);
 
 /* Networking helper routines. */
-EXPORT_SYMBOL(csum_partial_copy);
+EXPORT_SYMBOL(csum_partial_copy_nocheck);
 
 /* The following are special because they're not called
    explicitly (the C compiler generates them).  Fortunately,
@@ -55,8 +54,6 @@ EXPORT_SYMBOL(__down_failed);
 EXPORT_SYMBOL(__down_failed_interruptible);
 EXPORT_SYMBOL(__down_failed_trylock);
 EXPORT_SYMBOL(__up_wakeup);
-
-EXPORT_SYMBOL(get_wchan);
 
 /*
  * libgcc functions - functions that are used internally by the

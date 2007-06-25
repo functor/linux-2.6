@@ -1,6 +1,4 @@
 /*
- * arch/ppc/platforms/mpc8260_pci9.c
- *
  * Workaround for device erratum PCI 9.
  * See Motorola's "XPC826xA Family Device Errata Reference."
  * The erratum applies to all 8260 family Hip4 processors.  It is scheduled 
@@ -17,7 +15,6 @@
  * or implied.
  */
 #include <linux/kernel.h>
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/types.h>
@@ -342,20 +339,6 @@ void insl(unsigned port, void *buf, int nl)
 	idma_pci9_read((u8 *)buf, (u8 *)addr, nl*sizeof(u32), sizeof(u32), 0);
 }
 
-void insw_ns(unsigned port, void *buf, int ns)
-{
-	u8 *addr = (u8 *)(port + _IO_BASE);
-
-	idma_pci9_read((u8 *)buf, (u8 *)addr, ns*sizeof(u16), sizeof(u16), 0);
-}
-
-void insl_ns(unsigned port, void *buf, int nl)
-{
-	u8 *addr = (u8 *)(port + _IO_BASE);
-
-	idma_pci9_read((u8 *)buf, (u8 *)addr, nl*sizeof(u32), sizeof(u32), 0);
-}
-
 void *memcpy_fromio(void *dest, unsigned long src, size_t count)
 {
 	unsigned long pa = iopa((unsigned long) src);
@@ -376,8 +359,6 @@ EXPORT_SYMBOL(inl);
 EXPORT_SYMBOL(insb);
 EXPORT_SYMBOL(insw);
 EXPORT_SYMBOL(insl);
-EXPORT_SYMBOL(insw_ns);
-EXPORT_SYMBOL(insl_ns);
 EXPORT_SYMBOL(memcpy_fromio);
 
 #endif	/* ifdef CONFIG_8260_PCI9 */

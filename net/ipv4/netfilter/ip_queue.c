@@ -35,6 +35,7 @@
 #include <linux/sysctl.h>
 #include <linux/proc_fs.h>
 #include <linux/security.h>
+#include <linux/mutex.h>
 #include <net/sock.h>
 #include <net/route.h>
 
@@ -51,17 +52,17 @@ struct ipq_queue_entry {
 
 typedef int (*ipq_cmpfn)(struct ipq_queue_entry *, unsigned long);
 
-static unsigned char copy_mode = IPQ_COPY_NONE;
-static unsigned int queue_maxlen = IPQ_QMAX_DEFAULT;
+static unsigned char copy_mode __read_mostly = IPQ_COPY_NONE;
+static unsigned int queue_maxlen __read_mostly = IPQ_QMAX_DEFAULT;
 static DEFINE_RWLOCK(queue_lock);
-static int peer_pid;
-static unsigned int copy_range;
+static int peer_pid __read_mostly;
+static unsigned int copy_range __read_mostly;
 static unsigned int queue_total;
 static unsigned int queue_dropped = 0;
 static unsigned int queue_user_dropped = 0;
-static struct sock *ipqnl;
+static struct sock *ipqnl __read_mostly;
 static LIST_HEAD(queue_list);
-static DECLARE_MUTEX(ipqnl_sem);
+static DEFINE_MUTEX(ipqnl_mutex);
 
 static void
 ipq_issue_verdict(struct ipq_queue_entry *entry, int verdict)
@@ -207,9 +208,9 @@ ipq_build_packet_message(struct ipq_queue_entry *entry, int *errp)
 		break;
 	
 	case IPQ_COPY_PACKET:
-		if (entry->skb->ip_summed == CHECKSUM_HW &&
-		    (*errp = skb_checksum_help(entry->skb,
-		                               entry->info->outdev == NULL))) {
+		if ((entry->skb->ip_summed == CHECKSUM_PARTIAL ||
+		     entry->skb->ip_summed == CHECKSUM_COMPLETE) &&
+		    (*errp = skb_checksum_help(entry->skb))) {
 			read_unlock_bh(&queue_lock);
 			return NULL;
 		}
@@ -242,7 +243,7 @@ ipq_build_packet_message(struct ipq_queue_entry *entry, int *errp)
 	pmsg->data_len        = data_len;
 	pmsg->timestamp_sec   = entry->skb->tstamp.off_sec;
 	pmsg->timestamp_usec  = entry->skb->tstamp.off_usec;
-	pmsg->mark            = entry->skb->nfmark;
+	pmsg->mark            = entry->skb->mark;
 	pmsg->hook            = entry->info->hook;
 	pmsg->hw_protocol     = entry->skb->protocol;
 	
@@ -350,9 +351,10 @@ ipq_mangle_ipv4(ipq_verdict_msg_t *v, struct ipq_queue_entry *e)
 	if (v->data_len < sizeof(*user_iph))
 		return 0;
 	diff = v->data_len - e->skb->len;
-	if (diff < 0)
-		skb_trim(e->skb, v->data_len);
-	else if (diff > 0) {
+	if (diff < 0) {
+		if (pskb_trim(e->skb, v->data_len))
+			return -ENOMEM;
+	} else if (diff > 0) {
 		if (v->data_len > 0xFFFF)
 			return -EINVAL;
 		if (diff > skb_tailroom(e->skb)) {
@@ -456,11 +458,19 @@ dev_cmp(struct ipq_queue_entry *entry, unsigned long ifindex)
 	if (entry->info->indev)
 		if (entry->info->indev->ifindex == ifindex)
 			return 1;
-			
 	if (entry->info->outdev)
 		if (entry->info->outdev->ifindex == ifindex)
 			return 1;
-
+#ifdef CONFIG_BRIDGE_NETFILTER
+	if (entry->skb->nf_bridge) {
+		if (entry->skb->nf_bridge->physindev &&
+		    entry->skb->nf_bridge->physindev->ifindex == ifindex)
+			return 1;
+		if (entry->skb->nf_bridge->physoutdev &&
+		    entry->skb->nf_bridge->physoutdev->ifindex == ifindex)
+		    	return 1;
+	}
+#endif
 	return 0;
 }
 
@@ -506,7 +516,7 @@ ipq_rcv_skb(struct sk_buff *skb)
 	if (type <= IPQM_BASE)
 		return;
 		
-	if (security_netlink_recv(skb))
+	if (security_netlink_recv(skb, CAP_NET_ADMIN))
 		RCV_SKB_FAIL(-EPERM);
 	
 	write_lock_bh(&queue_lock);
@@ -539,7 +549,7 @@ ipq_rcv_sk(struct sock *sk, int len)
 	struct sk_buff *skb;
 	unsigned int qlen;
 
-	down(&ipqnl_sem);
+	mutex_lock(&ipqnl_mutex);
 			
 	for (qlen = skb_queue_len(&sk->sk_receive_queue); qlen; qlen--) {
 		skb = skb_dequeue(&sk->sk_receive_queue);
@@ -547,7 +557,7 @@ ipq_rcv_sk(struct sock *sk, int len)
 		kfree_skb(skb);
 	}
 		
-	up(&ipqnl_sem);
+	mutex_unlock(&ipqnl_mutex);
 }
 
 static int
@@ -661,15 +671,11 @@ static struct nf_queue_handler nfqh = {
 	.outfn	= &ipq_enqueue_packet,
 };
 
-static int
-init_or_cleanup(int init)
+static int __init ip_queue_init(void)
 {
 	int status = -ENOMEM;
 	struct proc_dir_entry *proc;
 	
-	if (!init)
-		goto cleanup;
-
 	netlink_register_notifier(&ipq_nl_notifier);
 	ipqnl = netlink_kernel_create(NETLINK_FIREWALL, 0, ipq_rcv_sk,
 				      THIS_MODULE);
@@ -696,11 +702,6 @@ init_or_cleanup(int init)
 	}
 	return status;
 
-cleanup:
-	nf_unregister_queue_handlers(&nfqh);
-	synchronize_net();
-	ipq_flush(NF_DROP);
-	
 cleanup_sysctl:
 	unregister_sysctl_table(ipq_sysctl_header);
 	unregister_netdevice_notifier(&ipq_dev_notifier);
@@ -708,28 +709,34 @@ cleanup_sysctl:
 	
 cleanup_ipqnl:
 	sock_release(ipqnl->sk_socket);
-	down(&ipqnl_sem);
-	up(&ipqnl_sem);
+	mutex_lock(&ipqnl_mutex);
+	mutex_unlock(&ipqnl_mutex);
 	
 cleanup_netlink_notifier:
 	netlink_unregister_notifier(&ipq_nl_notifier);
 	return status;
 }
 
-static int __init init(void)
+static void __exit ip_queue_fini(void)
 {
-	
-	return init_or_cleanup(1);
-}
+	nf_unregister_queue_handlers(&nfqh);
+	synchronize_net();
+	ipq_flush(NF_DROP);
 
-static void __exit fini(void)
-{
-	init_or_cleanup(0);
+	unregister_sysctl_table(ipq_sysctl_header);
+	unregister_netdevice_notifier(&ipq_dev_notifier);
+	proc_net_remove(IPQ_PROC_FS_NAME);
+
+	sock_release(ipqnl->sk_socket);
+	mutex_lock(&ipqnl_mutex);
+	mutex_unlock(&ipqnl_mutex);
+
+	netlink_unregister_notifier(&ipq_nl_notifier);
 }
 
 MODULE_DESCRIPTION("IPv4 packet queue handler");
 MODULE_AUTHOR("James Morris <jmorris@intercode.com.au>");
 MODULE_LICENSE("GPL");
 
-module_init(init);
-module_exit(fini);
+module_init(ip_queue_init);
+module_exit(ip_queue_fini);

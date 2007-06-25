@@ -15,8 +15,8 @@ target(struct sk_buff **pskb,
        const struct net_device *in,
        const struct net_device *out,
        unsigned int hooknum,
-       const void *targinfo,
-       void *userinfo)
+       const struct xt_target *target,
+       const void *targinfo)
 {
 	/* Previously seen (loopback)? Ignore. */
 	if ((*pskb)->nfct != NULL)
@@ -33,60 +33,33 @@ target(struct sk_buff **pskb,
 	return XT_CONTINUE;
 }
 
-static int
-checkentry(const char *tablename,
-	   const void *entry,
-           void *targinfo,
-           unsigned int targinfosize,
-           unsigned int hook_mask)
-{
-	if (targinfosize != 0) {
-		printk(KERN_WARNING "NOTRACK: targinfosize %u != 0\n",
-		       targinfosize);
-		return 0;
-	}
-
-	if (strcmp(tablename, "raw") != 0) {
-		printk(KERN_WARNING "NOTRACK: can only be called from \"raw\" table, not \"%s\"\n", tablename);
-		return 0;
-	}
-
-	return 1;
-}
-
-static struct xt_target notrack_reg = { 
-	.name = "NOTRACK", 
-	.target = target, 
-	.checkentry = checkentry,
-	.me = THIS_MODULE,
-};
-static struct xt_target notrack6_reg = { 
-	.name = "NOTRACK", 
-	.target = target, 
-	.checkentry = checkentry,
-	.me = THIS_MODULE,
+static struct xt_target xt_notrack_target[] = {
+	{
+		.name		= "NOTRACK",
+		.family		= AF_INET,
+		.target		= target,
+		.table		= "raw",
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "NOTRACK",
+		.family		= AF_INET6,
+		.target		= target,
+		.table		= "raw",
+		.me		= THIS_MODULE,
+	},
 };
 
-static int __init init(void)
+static int __init xt_notrack_init(void)
 {
-	int ret;
-
-	ret = xt_register_target(AF_INET, &notrack_reg);
-	if (ret)
-		return ret;
-
-	ret = xt_register_target(AF_INET6, &notrack6_reg);
-	if (ret)
-		xt_unregister_target(AF_INET, &notrack_reg);
-
-	return ret;
+	return xt_register_targets(xt_notrack_target,
+				   ARRAY_SIZE(xt_notrack_target));
 }
 
-static void __exit fini(void)
+static void __exit xt_notrack_fini(void)
 {
-	xt_unregister_target(AF_INET6, &notrack6_reg);
-	xt_unregister_target(AF_INET, &notrack_reg);
+	xt_unregister_targets(xt_notrack_target, ARRAY_SIZE(xt_notrack_target));
 }
 
-module_init(init);
-module_exit(fini);
+module_init(xt_notrack_init);
+module_exit(xt_notrack_fini);

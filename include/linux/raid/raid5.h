@@ -135,6 +135,7 @@ struct stripe_head {
 	atomic_t		count;			/* nr of active thread/requests */
 	spinlock_t		lock;
 	int			bm_seq;	/* sequence number for bitmap flushes */
+	int			disks;			/* disks in stripe */
 	struct r5dev {
 		struct bio	req;
 		struct bio_vec	vec;
@@ -156,6 +157,7 @@ struct stripe_head {
 #define	R5_ReadError	8	/* seen a read error here recently */
 #define	R5_ReWrite	9	/* have tried to over-write the readerror */
 
+#define	R5_Expanded	10	/* This block now has post-expand data */
 /*
  * Write method
  */
@@ -174,7 +176,9 @@ struct stripe_head {
 #define	STRIPE_DELAYED		6
 #define	STRIPE_DEGRADED		7
 #define	STRIPE_BIT_DELAY	8
-
+#define	STRIPE_EXPANDING	9
+#define	STRIPE_EXPAND_SOURCE	10
+#define	STRIPE_EXPAND_READY	11
 /*
  * Plugging:
  *
@@ -191,8 +195,9 @@ struct stripe_head {
  * it to the count of prereading stripes.
  * When write is initiated, or the stripe refcnt == 0 (just in case) we
  * clear the PREREAD_ACTIVE flag and decrement the count
- * Whenever the delayed queue is empty and the device is not plugged, we
- * move any strips from delayed to handle and clear the DELAYED flag and set PREREAD_ACTIVE.
+ * Whenever the 'handle' queue is empty and the device is not plugged, we
+ * move any strips from delayed to handle and clear the DELAYED flag and set
+ * PREREAD_ACTIVE.
  * In stripe_handle, if we find pre-reading is necessary, we do it if
  * PREREAD_ACTIVE is set, else we set DELAYED which will send it to the delayed queue.
  * HANDLE gets cleared if stripe_handle leave nothing locked.
@@ -208,16 +213,32 @@ struct raid5_private_data {
 	mddev_t			*mddev;
 	struct disk_info	*spare;
 	int			chunk_size, level, algorithm;
-	int			raid_disks, working_disks, failed_disks;
+	int			max_degraded;
+	int			raid_disks;
 	int			max_nr_stripes;
+
+	/* used during an expand */
+	sector_t		expand_progress;	/* MaxSector when no expand happening */
+	sector_t		expand_lo; /* from here up to expand_progress it out-of-bounds
+					    * as we haven't flushed the metadata yet
+					    */
+	int			previous_raid_disks;
 
 	struct list_head	handle_list; /* stripes needing handling */
 	struct list_head	delayed_list; /* stripes that have plugged requests */
 	struct list_head	bitmap_list; /* stripes delaying awaiting bitmap update */
+	struct bio		*retry_read_aligned; /* currently retrying aligned bios   */
+	struct bio		*retry_read_aligned_list; /* aligned bios retry list  */
 	atomic_t		preread_active_stripes; /* stripes with scheduled io */
+	atomic_t		active_aligned_reads;
 
-	char			cache_name[20];
-	kmem_cache_t		*slab_cache; /* for allocating stripes */
+	atomic_t		reshape_stripes; /* stripes with pending writes for reshape */
+	/* unfortunately we need two cache names as we temporarily have
+	 * two caches.
+	 */
+	int			active_name;
+	char			cache_name[2][20];
+	struct kmem_cache		*slab_cache; /* for allocating stripes */
 
 	int			seq_flush, seq_write;
 	int			quiesce;
@@ -238,9 +259,10 @@ struct raid5_private_data {
 	wait_queue_head_t	wait_for_overlap;
 	int			inactive_blocked;	/* release of inactive stripes blocked,
 							 * waiting for 25% to be free
-							 */        
+							 */
+	int			pool_size; /* number of disks in stripeheads in pool */
 	spinlock_t		device_lock;
-	struct disk_info	disks[0];
+	struct disk_info	*disks;
 };
 
 typedef struct raid5_private_data raid5_conf_t;

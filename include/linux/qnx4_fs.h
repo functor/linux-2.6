@@ -11,6 +11,7 @@
 #define _LINUX_QNX4_FS_H
 
 #include <linux/qnxtypes.h>
+#include <linux/magic.h>
 
 #define QNX4_ROOT_INO 1
 
@@ -25,7 +26,6 @@
 
 #define QNX4_I_MAP_SLOTS	8
 #define QNX4_Z_MAP_SLOTS	64
-#define QNX4_SUPER_MAGIC	0x002f	/* qnx4 fs detection */
 #define QNX4_VALID_FS		0x0001	/* Clean fs. */
 #define QNX4_ERROR_FS		0x0002	/* fs has errors. */
 #define QNX4_BLOCK_SIZE         0x200	/* blocksize of 512 bytes */
@@ -118,8 +118,8 @@ extern struct buffer_head *qnx4_bread(struct inode *, int, int);
 
 extern struct inode_operations qnx4_file_inode_operations;
 extern struct inode_operations qnx4_dir_inode_operations;
-extern struct file_operations qnx4_file_operations;
-extern struct file_operations qnx4_dir_operations;
+extern const struct file_operations qnx4_file_operations;
+extern const struct file_operations qnx4_dir_operations;
 extern int qnx4_is_free(struct super_block *sb, long block);
 extern int qnx4_set_bitmap(struct super_block *sb, long block, int busy);
 extern int qnx4_create(struct inode *inode, struct dentry *dentry, int mode, struct nameidata *nd);

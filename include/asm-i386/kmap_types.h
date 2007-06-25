@@ -1,7 +1,6 @@
 #ifndef _ASM_KMAP_TYPES_H
 #define _ASM_KMAP_TYPES_H
 
-#include <linux/config.h>
 
 #ifdef CONFIG_DEBUG_HIGHMEM
 # define D(n) __KM_FENCE_##n ,
@@ -23,7 +22,12 @@ D(9)	KM_IRQ0,
 D(10)	KM_IRQ1,
 D(11)	KM_SOFTIRQ0,
 D(12)	KM_SOFTIRQ1,
+#ifdef CONFIG_XEN
+D(13)	KM_SWIOTLB,
+D(14)	KM_TYPE_NR
+#else
 D(13)	KM_TYPE_NR
+#endif
 };
 
 #undef D

@@ -4,17 +4,14 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/utsname.h>
 #include <linux/mman.h>
 #include <linux/smp_lock.h>
 #include <linux/notifier.h>
-#include <linux/kmod.h>
 #include <linux/reboot.h>
 #include <linux/prctl.h>
-#include <linux/init.h>
 #include <linux/highuid.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -31,12 +28,12 @@
 #include <linux/tty.h>
 #include <linux/signal.h>
 #include <linux/cn_proc.h>
-#include <linux/vs_base.h>
-#include <linux/vs_cvirt.h>
+#include <linux/getcpu.h>
 
 #include <linux/compat.h>
 #include <linux/syscalls.h>
 #include <linux/kprobes.h>
+#include <linux/vs_pid.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -59,6 +56,12 @@
 #endif
 #ifndef GET_FPEXC_CTL
 # define GET_FPEXC_CTL(a,b)	(-EINVAL)
+#endif
+#ifndef GET_ENDIAN
+# define GET_ENDIAN(a,b)	(-EINVAL)
+#endif
+#ifndef SET_ENDIAN
+# define SET_ENDIAN(a,b)	(-EINVAL)
 #endif
 
 /*
@@ -90,7 +93,8 @@ EXPORT_SYMBOL(fs_overflowgid);
  */
 
 int C_A_D = 1;
-int cad_pid = 1;
+struct pid *cad_pid;
+EXPORT_SYMBOL(cad_pid);
 
 /*
  *	Notifier list for kernel code which wants to be called
@@ -98,99 +102,435 @@ int cad_pid = 1;
  *	and the like. 
  */
 
-static struct notifier_block *reboot_notifier_list;
-static DEFINE_RWLOCK(notifier_lock);
+static BLOCKING_NOTIFIER_HEAD(reboot_notifier_list);
 
-/**
- *	notifier_chain_register	- Add notifier to a notifier chain
- *	@list: Pointer to root list pointer
- *	@n: New entry in notifier chain
- *
- *	Adds a notifier to a notifier chain.
- *
- *	Currently always returns zero.
+/*
+ *	Notifier chain core routines.  The exported routines below
+ *	are layered on top of these, with appropriate locking added.
  */
- 
-int notifier_chain_register(struct notifier_block **list, struct notifier_block *n)
+
+static int notifier_chain_register(struct notifier_block **nl,
+		struct notifier_block *n)
 {
-	write_lock(&notifier_lock);
-	while(*list)
-	{
-		if(n->priority > (*list)->priority)
+	while ((*nl) != NULL) {
+		if (n->priority > (*nl)->priority)
 			break;
-		list= &((*list)->next);
+		nl = &((*nl)->next);
 	}
-	n->next = *list;
-	*list=n;
-	write_unlock(&notifier_lock);
+	n->next = *nl;
+	rcu_assign_pointer(*nl, n);
 	return 0;
 }
 
-EXPORT_SYMBOL(notifier_chain_register);
-
-/**
- *	notifier_chain_unregister - Remove notifier from a notifier chain
- *	@nl: Pointer to root list pointer
- *	@n: New entry in notifier chain
- *
- *	Removes a notifier from a notifier chain.
- *
- *	Returns zero on success, or %-ENOENT on failure.
- */
- 
-int notifier_chain_unregister(struct notifier_block **nl, struct notifier_block *n)
+static int notifier_chain_unregister(struct notifier_block **nl,
+		struct notifier_block *n)
 {
-	write_lock(&notifier_lock);
-	while((*nl)!=NULL)
-	{
-		if((*nl)==n)
-		{
-			*nl=n->next;
-			write_unlock(&notifier_lock);
+	while ((*nl) != NULL) {
+		if ((*nl) == n) {
+			rcu_assign_pointer(*nl, n->next);
 			return 0;
 		}
-		nl=&((*nl)->next);
+		nl = &((*nl)->next);
 	}
-	write_unlock(&notifier_lock);
 	return -ENOENT;
 }
 
-EXPORT_SYMBOL(notifier_chain_unregister);
-
-/**
- *	notifier_call_chain - Call functions in a notifier chain
- *	@n: Pointer to root pointer of notifier chain
- *	@val: Value passed unmodified to notifier function
- *	@v: Pointer passed unmodified to notifier function
- *
- *	Calls each function in a notifier chain in turn.
- *
- *	If the return value of the notifier can be and'd
- *	with %NOTIFY_STOP_MASK, then notifier_call_chain
- *	will return immediately, with the return value of
- *	the notifier function which halted execution.
- *	Otherwise, the return value is the return value
- *	of the last notifier function called.
- */
- 
-int __kprobes notifier_call_chain(struct notifier_block **n, unsigned long val, void *v)
+static int __kprobes notifier_call_chain(struct notifier_block **nl,
+		unsigned long val, void *v)
 {
-	int ret=NOTIFY_DONE;
-	struct notifier_block *nb = *n;
+	int ret = NOTIFY_DONE;
+	struct notifier_block *nb, *next_nb;
 
-	while(nb)
-	{
-		ret=nb->notifier_call(nb,val,v);
-		if(ret&NOTIFY_STOP_MASK)
-		{
-			return ret;
-		}
-		nb=nb->next;
+	nb = rcu_dereference(*nl);
+	while (nb) {
+		next_nb = rcu_dereference(nb->next);
+		ret = nb->notifier_call(nb, val, v);
+		if ((ret & NOTIFY_STOP_MASK) == NOTIFY_STOP_MASK)
+			break;
+		nb = next_nb;
 	}
 	return ret;
 }
 
-EXPORT_SYMBOL(notifier_call_chain);
+/*
+ *	Atomic notifier chain routines.  Registration and unregistration
+ *	use a spinlock, and call_chain is synchronized by RCU (no locks).
+ */
+
+/**
+ *	atomic_notifier_chain_register - Add notifier to an atomic notifier chain
+ *	@nh: Pointer to head of the atomic notifier chain
+ *	@n: New entry in notifier chain
+ *
+ *	Adds a notifier to an atomic notifier chain.
+ *
+ *	Currently always returns zero.
+ */
+
+int atomic_notifier_chain_register(struct atomic_notifier_head *nh,
+		struct notifier_block *n)
+{
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&nh->lock, flags);
+	ret = notifier_chain_register(&nh->head, n);
+	spin_unlock_irqrestore(&nh->lock, flags);
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(atomic_notifier_chain_register);
+
+/**
+ *	atomic_notifier_chain_unregister - Remove notifier from an atomic notifier chain
+ *	@nh: Pointer to head of the atomic notifier chain
+ *	@n: Entry to remove from notifier chain
+ *
+ *	Removes a notifier from an atomic notifier chain.
+ *
+ *	Returns zero on success or %-ENOENT on failure.
+ */
+int atomic_notifier_chain_unregister(struct atomic_notifier_head *nh,
+		struct notifier_block *n)
+{
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&nh->lock, flags);
+	ret = notifier_chain_unregister(&nh->head, n);
+	spin_unlock_irqrestore(&nh->lock, flags);
+	synchronize_rcu();
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(atomic_notifier_chain_unregister);
+
+/**
+ *	atomic_notifier_call_chain - Call functions in an atomic notifier chain
+ *	@nh: Pointer to head of the atomic notifier chain
+ *	@val: Value passed unmodified to notifier function
+ *	@v: Pointer passed unmodified to notifier function
+ *
+ *	Calls each function in a notifier chain in turn.  The functions
+ *	run in an atomic context, so they must not block.
+ *	This routine uses RCU to synchronize with changes to the chain.
+ *
+ *	If the return value of the notifier can be and'ed
+ *	with %NOTIFY_STOP_MASK then atomic_notifier_call_chain
+ *	will return immediately, with the return value of
+ *	the notifier function which halted execution.
+ *	Otherwise the return value is the return value
+ *	of the last notifier function called.
+ */
+ 
+int __kprobes atomic_notifier_call_chain(struct atomic_notifier_head *nh,
+		unsigned long val, void *v)
+{
+	int ret;
+
+	rcu_read_lock();
+	ret = notifier_call_chain(&nh->head, val, v);
+	rcu_read_unlock();
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(atomic_notifier_call_chain);
+
+/*
+ *	Blocking notifier chain routines.  All access to the chain is
+ *	synchronized by an rwsem.
+ */
+
+/**
+ *	blocking_notifier_chain_register - Add notifier to a blocking notifier chain
+ *	@nh: Pointer to head of the blocking notifier chain
+ *	@n: New entry in notifier chain
+ *
+ *	Adds a notifier to a blocking notifier chain.
+ *	Must be called in process context.
+ *
+ *	Currently always returns zero.
+ */
+ 
+int blocking_notifier_chain_register(struct blocking_notifier_head *nh,
+		struct notifier_block *n)
+{
+	int ret;
+
+	/*
+	 * This code gets used during boot-up, when task switching is
+	 * not yet working and interrupts must remain disabled.  At
+	 * such times we must not call down_write().
+	 */
+	if (unlikely(system_state == SYSTEM_BOOTING))
+		return notifier_chain_register(&nh->head, n);
+
+	down_write(&nh->rwsem);
+	ret = notifier_chain_register(&nh->head, n);
+	up_write(&nh->rwsem);
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(blocking_notifier_chain_register);
+
+/**
+ *	blocking_notifier_chain_unregister - Remove notifier from a blocking notifier chain
+ *	@nh: Pointer to head of the blocking notifier chain
+ *	@n: Entry to remove from notifier chain
+ *
+ *	Removes a notifier from a blocking notifier chain.
+ *	Must be called from process context.
+ *
+ *	Returns zero on success or %-ENOENT on failure.
+ */
+int blocking_notifier_chain_unregister(struct blocking_notifier_head *nh,
+		struct notifier_block *n)
+{
+	int ret;
+
+	/*
+	 * This code gets used during boot-up, when task switching is
+	 * not yet working and interrupts must remain disabled.  At
+	 * such times we must not call down_write().
+	 */
+	if (unlikely(system_state == SYSTEM_BOOTING))
+		return notifier_chain_unregister(&nh->head, n);
+
+	down_write(&nh->rwsem);
+	ret = notifier_chain_unregister(&nh->head, n);
+	up_write(&nh->rwsem);
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(blocking_notifier_chain_unregister);
+
+/**
+ *	blocking_notifier_call_chain - Call functions in a blocking notifier chain
+ *	@nh: Pointer to head of the blocking notifier chain
+ *	@val: Value passed unmodified to notifier function
+ *	@v: Pointer passed unmodified to notifier function
+ *
+ *	Calls each function in a notifier chain in turn.  The functions
+ *	run in a process context, so they are allowed to block.
+ *
+ *	If the return value of the notifier can be and'ed
+ *	with %NOTIFY_STOP_MASK then blocking_notifier_call_chain
+ *	will return immediately, with the return value of
+ *	the notifier function which halted execution.
+ *	Otherwise the return value is the return value
+ *	of the last notifier function called.
+ */
+ 
+int blocking_notifier_call_chain(struct blocking_notifier_head *nh,
+		unsigned long val, void *v)
+{
+	int ret = NOTIFY_DONE;
+
+	/*
+	 * We check the head outside the lock, but if this access is
+	 * racy then it does not matter what the result of the test
+	 * is, we re-check the list after having taken the lock anyway:
+	 */
+	if (rcu_dereference(nh->head)) {
+		down_read(&nh->rwsem);
+		ret = notifier_call_chain(&nh->head, val, v);
+		up_read(&nh->rwsem);
+	}
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(blocking_notifier_call_chain);
+
+/*
+ *	Raw notifier chain routines.  There is no protection;
+ *	the caller must provide it.  Use at your own risk!
+ */
+
+/**
+ *	raw_notifier_chain_register - Add notifier to a raw notifier chain
+ *	@nh: Pointer to head of the raw notifier chain
+ *	@n: New entry in notifier chain
+ *
+ *	Adds a notifier to a raw notifier chain.
+ *	All locking must be provided by the caller.
+ *
+ *	Currently always returns zero.
+ */
+
+int raw_notifier_chain_register(struct raw_notifier_head *nh,
+		struct notifier_block *n)
+{
+	return notifier_chain_register(&nh->head, n);
+}
+
+EXPORT_SYMBOL_GPL(raw_notifier_chain_register);
+
+/**
+ *	raw_notifier_chain_unregister - Remove notifier from a raw notifier chain
+ *	@nh: Pointer to head of the raw notifier chain
+ *	@n: Entry to remove from notifier chain
+ *
+ *	Removes a notifier from a raw notifier chain.
+ *	All locking must be provided by the caller.
+ *
+ *	Returns zero on success or %-ENOENT on failure.
+ */
+int raw_notifier_chain_unregister(struct raw_notifier_head *nh,
+		struct notifier_block *n)
+{
+	return notifier_chain_unregister(&nh->head, n);
+}
+
+EXPORT_SYMBOL_GPL(raw_notifier_chain_unregister);
+
+/**
+ *	raw_notifier_call_chain - Call functions in a raw notifier chain
+ *	@nh: Pointer to head of the raw notifier chain
+ *	@val: Value passed unmodified to notifier function
+ *	@v: Pointer passed unmodified to notifier function
+ *
+ *	Calls each function in a notifier chain in turn.  The functions
+ *	run in an undefined context.
+ *	All locking must be provided by the caller.
+ *
+ *	If the return value of the notifier can be and'ed
+ *	with %NOTIFY_STOP_MASK then raw_notifier_call_chain
+ *	will return immediately, with the return value of
+ *	the notifier function which halted execution.
+ *	Otherwise the return value is the return value
+ *	of the last notifier function called.
+ */
+
+int raw_notifier_call_chain(struct raw_notifier_head *nh,
+		unsigned long val, void *v)
+{
+	return notifier_call_chain(&nh->head, val, v);
+}
+
+EXPORT_SYMBOL_GPL(raw_notifier_call_chain);
+
+/*
+ *	SRCU notifier chain routines.    Registration and unregistration
+ *	use a mutex, and call_chain is synchronized by SRCU (no locks).
+ */
+
+/**
+ *	srcu_notifier_chain_register - Add notifier to an SRCU notifier chain
+ *	@nh: Pointer to head of the SRCU notifier chain
+ *	@n: New entry in notifier chain
+ *
+ *	Adds a notifier to an SRCU notifier chain.
+ *	Must be called in process context.
+ *
+ *	Currently always returns zero.
+ */
+
+int srcu_notifier_chain_register(struct srcu_notifier_head *nh,
+		struct notifier_block *n)
+{
+	int ret;
+
+	/*
+	 * This code gets used during boot-up, when task switching is
+	 * not yet working and interrupts must remain disabled.  At
+	 * such times we must not call mutex_lock().
+	 */
+	if (unlikely(system_state == SYSTEM_BOOTING))
+		return notifier_chain_register(&nh->head, n);
+
+	mutex_lock(&nh->mutex);
+	ret = notifier_chain_register(&nh->head, n);
+	mutex_unlock(&nh->mutex);
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(srcu_notifier_chain_register);
+
+/**
+ *	srcu_notifier_chain_unregister - Remove notifier from an SRCU notifier chain
+ *	@nh: Pointer to head of the SRCU notifier chain
+ *	@n: Entry to remove from notifier chain
+ *
+ *	Removes a notifier from an SRCU notifier chain.
+ *	Must be called from process context.
+ *
+ *	Returns zero on success or %-ENOENT on failure.
+ */
+int srcu_notifier_chain_unregister(struct srcu_notifier_head *nh,
+		struct notifier_block *n)
+{
+	int ret;
+
+	/*
+	 * This code gets used during boot-up, when task switching is
+	 * not yet working and interrupts must remain disabled.  At
+	 * such times we must not call mutex_lock().
+	 */
+	if (unlikely(system_state == SYSTEM_BOOTING))
+		return notifier_chain_unregister(&nh->head, n);
+
+	mutex_lock(&nh->mutex);
+	ret = notifier_chain_unregister(&nh->head, n);
+	mutex_unlock(&nh->mutex);
+	synchronize_srcu(&nh->srcu);
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(srcu_notifier_chain_unregister);
+
+/**
+ *	srcu_notifier_call_chain - Call functions in an SRCU notifier chain
+ *	@nh: Pointer to head of the SRCU notifier chain
+ *	@val: Value passed unmodified to notifier function
+ *	@v: Pointer passed unmodified to notifier function
+ *
+ *	Calls each function in a notifier chain in turn.  The functions
+ *	run in a process context, so they are allowed to block.
+ *
+ *	If the return value of the notifier can be and'ed
+ *	with %NOTIFY_STOP_MASK then srcu_notifier_call_chain
+ *	will return immediately, with the return value of
+ *	the notifier function which halted execution.
+ *	Otherwise the return value is the return value
+ *	of the last notifier function called.
+ */
+
+int srcu_notifier_call_chain(struct srcu_notifier_head *nh,
+		unsigned long val, void *v)
+{
+	int ret;
+	int idx;
+
+	idx = srcu_read_lock(&nh->srcu);
+	ret = notifier_call_chain(&nh->head, val, v);
+	srcu_read_unlock(&nh->srcu, idx);
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(srcu_notifier_call_chain);
+
+/**
+ *	srcu_init_notifier_head - Initialize an SRCU notifier head
+ *	@nh: Pointer to head of the srcu notifier chain
+ *
+ *	Unlike other sorts of notifier heads, SRCU notifier heads require
+ *	dynamic initialization.  Be sure to call this routine before
+ *	calling any of the other SRCU notifier routines for this head.
+ *
+ *	If an SRCU notifier head is deallocated, it must first be cleaned
+ *	up by calling srcu_cleanup_notifier_head().  Otherwise the head's
+ *	per-cpu data (used by the SRCU mechanism) will leak.
+ */
+
+void srcu_init_notifier_head(struct srcu_notifier_head *nh)
+{
+	mutex_init(&nh->mutex);
+	if (init_srcu_struct(&nh->srcu) < 0)
+		BUG();
+	nh->head = NULL;
+}
+
+EXPORT_SYMBOL_GPL(srcu_init_notifier_head);
 
 /**
  *	register_reboot_notifier - Register function to be called at reboot time
@@ -199,13 +539,13 @@ EXPORT_SYMBOL(notifier_call_chain);
  *	Registers a function with the list of functions
  *	to be called at reboot time.
  *
- *	Currently always returns zero, as notifier_chain_register
+ *	Currently always returns zero, as blocking_notifier_chain_register
  *	always returns zero.
  */
  
 int register_reboot_notifier(struct notifier_block * nb)
 {
-	return notifier_chain_register(&reboot_notifier_list, nb);
+	return blocking_notifier_chain_register(&reboot_notifier_list, nb);
 }
 
 EXPORT_SYMBOL(register_reboot_notifier);
@@ -222,24 +562,10 @@ EXPORT_SYMBOL(register_reboot_notifier);
  
 int unregister_reboot_notifier(struct notifier_block * nb)
 {
-	return notifier_chain_unregister(&reboot_notifier_list, nb);
+	return blocking_notifier_chain_unregister(&reboot_notifier_list, nb);
 }
 
 EXPORT_SYMBOL(unregister_reboot_notifier);
-
-#ifndef CONFIG_SECURITY
-int capable(int cap)
-{
-	if (vx_check_bit(VXC_CAP_MASK, cap) && !vx_mcaps(1L << cap))
-		return 0;
-        if (cap_raised(current->cap_effective, cap)) {
-	       current->flags |= PF_SUPERPRIV;
-	       return 1;
-        }
-        return 0;
-}
-EXPORT_SYMBOL(capable);
-#endif
 
 static int set_one_prio(struct task_struct *p, int niceval, int error)
 {
@@ -298,6 +624,8 @@ asmlinkage long sys_setpriority(int which, int who, int niceval)
 			if (!who)
 				who = process_group(current);
 			do_each_task_pid(who, PIDTYPE_PGID, p) {
+				if (!vx_check(p->xid, VS_ADMIN_P | VS_IDENT))
+					continue;
 				error = set_one_prio(p, niceval, error);
 			} while_each_task_pid(who, PIDTYPE_PGID, p);
 			break;
@@ -355,6 +683,8 @@ asmlinkage long sys_getpriority(int which, int who)
 			if (!who)
 				who = process_group(current);
 			do_each_task_pid(who, PIDTYPE_PGID, p) {
+				if (!vx_check(p->xid, VS_ADMIN_P | VS_IDENT))
+					continue;
 				niceval = 20 - task_nice(p);
 				if (niceval > retval)
 					retval = niceval;
@@ -400,9 +730,9 @@ void emergency_restart(void)
 }
 EXPORT_SYMBOL_GPL(emergency_restart);
 
-void kernel_restart_prepare(char *cmd)
+static void kernel_restart_prepare(char *cmd)
 {
-	notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
+	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
 	system_state = SYSTEM_RESTART;
 	device_shutdown();
 }
@@ -418,12 +748,10 @@ void kernel_restart_prepare(char *cmd)
 void kernel_restart(char *cmd)
 {
 	kernel_restart_prepare(cmd);
-	if (!cmd) {
+	if (!cmd)
 		printk(KERN_EMERG "Restarting system.\n");
-	} else {
+	else
 		printk(KERN_EMERG "Restarting system with command '%s'.\n", cmd);
-	}
-	printk(".\n");
 	machine_restart(cmd);
 }
 EXPORT_SYMBOL_GPL(kernel_restart);
@@ -434,25 +762,23 @@ EXPORT_SYMBOL_GPL(kernel_restart);
  *	Move into place and start executing a preloaded standalone
  *	executable.  If nothing was preloaded return an error.
  */
-void kernel_kexec(void)
+static void kernel_kexec(void)
 {
 #ifdef CONFIG_KEXEC
 	struct kimage *image;
 	image = xchg(&kexec_image, NULL);
-	if (!image) {
+	if (!image)
 		return;
-	}
 	kernel_restart_prepare(NULL);
 	printk(KERN_EMERG "Starting new kernel\n");
 	machine_shutdown();
 	machine_kexec(image);
 #endif
 }
-EXPORT_SYMBOL_GPL(kernel_kexec);
 
 void kernel_shutdown_prepare(enum system_states state)
 {
-	notifier_call_chain(&reboot_notifier_list,
+	blocking_notifier_call_chain(&reboot_notifier_list,
 		(state == SYSTEM_HALT)?SYS_HALT:SYS_POWER_OFF, NULL);
 	system_state = state;
 	device_shutdown();
@@ -516,7 +842,7 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 	if ((cmd == LINUX_REBOOT_CMD_POWER_OFF) && !pm_power_off)
 		cmd = LINUX_REBOOT_CMD_HALT;
 
-	if (!vx_check(0, VX_ADMIN|VX_WATCH))
+	if (!vx_check(0, VS_ADMIN|VS_WATCH))
 		return vs_reboot(cmd, arg);
 
 	lock_kernel();
@@ -577,7 +903,7 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 	return 0;
 }
 
-static void deferred_cad(void *dummy)
+static void deferred_cad(struct work_struct *dummy)
 {
 	kernel_restart(NULL);
 }
@@ -589,15 +915,14 @@ static void deferred_cad(void *dummy)
  */
 void ctrl_alt_del(void)
 {
-	static DECLARE_WORK(cad_work, deferred_cad, NULL);
+	static DECLARE_WORK(cad_work, deferred_cad);
 
 	if (C_A_D)
 		schedule_work(&cad_work);
 	else
-		kill_proc(cad_pid, SIGINT, 1);
+		kill_cad_pid(SIGINT, 1);
 }
 	
-
 /*
  * Unprivileged users may change the real gid to the effective gid
  * or vice versa.  (BSD-style)
@@ -642,12 +967,10 @@ asmlinkage long sys_setregid(gid_t rgid, gid_t egid)
 		    (current->sgid == egid) ||
 		    capable(CAP_SETGID))
 			new_egid = egid;
-		else {
+		else
 			return -EPERM;
-		}
 	}
-	if (new_egid != old_egid)
-	{
+	if (new_egid != old_egid) {
 		current->mm->dumpable = suid_dumpable;
 		smp_wmb();
 	}
@@ -676,19 +999,14 @@ asmlinkage long sys_setgid(gid_t gid)
 	if (retval)
 		return retval;
 
-	if (capable(CAP_SETGID))
-	{
-		if(old_egid != gid)
-		{
+	if (capable(CAP_SETGID)) {
+		if (old_egid != gid) {
 			current->mm->dumpable = suid_dumpable;
 			smp_wmb();
 		}
 		current->gid = current->egid = current->sgid = current->fsgid = gid;
-	}
-	else if ((gid == current->gid) || (gid == current->sgid))
-	{
-		if(old_egid != gid)
-		{
+	} else if ((gid == current->gid) || (gid == current->sgid)) {
+		if (old_egid != gid) {
 			current->mm->dumpable = suid_dumpable;
 			smp_wmb();
 		}
@@ -719,8 +1037,7 @@ static int set_user(uid_t new_ruid, int dumpclear)
 
 	switch_uid(new_user);
 
-	if(dumpclear)
-	{
+	if (dumpclear) {
 		current->mm->dumpable = suid_dumpable;
 		smp_wmb();
 	}
@@ -776,8 +1093,7 @@ asmlinkage long sys_setreuid(uid_t ruid, uid_t euid)
 	if (new_ruid != old_ruid && set_user(new_ruid, new_euid != old_euid) < 0)
 		return -EAGAIN;
 
-	if (new_euid != old_euid)
-	{
+	if (new_euid != old_euid) {
 		current->mm->dumpable = suid_dumpable;
 		smp_wmb();
 	}
@@ -809,14 +1125,14 @@ asmlinkage long sys_setreuid(uid_t ruid, uid_t euid)
 asmlinkage long sys_setuid(uid_t uid)
 {
 	int old_euid = current->euid;
-	int old_ruid, old_suid, new_ruid, new_suid;
+	int old_ruid, old_suid, new_suid;
 	int retval;
 
 	retval = security_task_setuid(uid, (uid_t)-1, (uid_t)-1, LSM_SETID_ID);
 	if (retval)
 		return retval;
 
-	old_ruid = new_ruid = current->uid;
+	old_ruid = current->uid;
 	old_suid = current->suid;
 	new_suid = old_suid;
 	
@@ -827,8 +1143,7 @@ asmlinkage long sys_setuid(uid_t uid)
 	} else if ((uid != current->uid) && (uid != new_suid))
 		return -EPERM;
 
-	if (old_euid != uid)
-	{
+	if (old_euid != uid) {
 		current->mm->dumpable = suid_dumpable;
 		smp_wmb();
 	}
@@ -873,8 +1188,7 @@ asmlinkage long sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 			return -EAGAIN;
 	}
 	if (euid != (uid_t) -1) {
-		if (euid != current->euid)
-		{
+		if (euid != current->euid) {
 			current->mm->dumpable = suid_dumpable;
 			smp_wmb();
 		}
@@ -924,8 +1238,7 @@ asmlinkage long sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 			return -EPERM;
 	}
 	if (egid != (gid_t) -1) {
-		if (egid != current->egid)
-		{
+		if (egid != current->egid) {
 			current->mm->dumpable = suid_dumpable;
 			smp_wmb();
 		}
@@ -970,10 +1283,8 @@ asmlinkage long sys_setfsuid(uid_t uid)
 
 	if (uid == current->uid || uid == current->euid ||
 	    uid == current->suid || uid == current->fsuid || 
-	    capable(CAP_SETUID))
-	{
-		if (uid != old_fsuid)
-		{
+	    capable(CAP_SETUID)) {
+		if (uid != old_fsuid) {
 			current->mm->dumpable = suid_dumpable;
 			smp_wmb();
 		}
@@ -1001,10 +1312,8 @@ asmlinkage long sys_setfsgid(gid_t gid)
 
 	if (gid == current->gid || gid == current->egid ||
 	    gid == current->sgid || gid == current->fsgid || 
-	    capable(CAP_SETGID))
-	{
-		if (gid != old_fsgid)
-		{
+	    capable(CAP_SETGID)) {
+		if (gid != old_fsgid) {
 			current->mm->dumpable = suid_dumpable;
 			smp_wmb();
 		}
@@ -1025,69 +1334,24 @@ asmlinkage long sys_times(struct tms __user * tbuf)
 	 */
 	if (tbuf) {
 		struct tms tmp;
+		struct task_struct *tsk = current;
+		struct task_struct *t;
 		cputime_t utime, stime, cutime, cstime;
 
-#ifdef CONFIG_SMP
-		if (thread_group_empty(current)) {
-			/*
-			 * Single thread case without the use of any locks.
-			 *
-			 * We may race with release_task if two threads are
-			 * executing. However, release task first adds up the
-			 * counters (__exit_signal) before  removing the task
-			 * from the process tasklist (__unhash_process).
-			 * __exit_signal also acquires and releases the
-			 * siglock which results in the proper memory ordering
-			 * so that the list modifications are always visible
-			 * after the counters have been updated.
-			 *
-			 * If the counters have been updated by the second thread
-			 * but the thread has not yet been removed from the list
-			 * then the other branch will be executing which will
-			 * block on tasklist_lock until the exit handling of the
-			 * other task is finished.
-			 *
-			 * This also implies that the sighand->siglock cannot
-			 * be held by another processor. So we can also
-			 * skip acquiring that lock.
-			 */
-			utime = cputime_add(current->signal->utime, current->utime);
-			stime = cputime_add(current->signal->utime, current->stime);
-			cutime = current->signal->cutime;
-			cstime = current->signal->cstime;
-		} else
-#endif
-		{
+		spin_lock_irq(&tsk->sighand->siglock);
+		utime = tsk->signal->utime;
+		stime = tsk->signal->stime;
+		t = tsk;
+		do {
+			utime = cputime_add(utime, t->utime);
+			stime = cputime_add(stime, t->stime);
+			t = next_thread(t);
+		} while (t != tsk);
 
-			/* Process with multiple threads */
-			struct task_struct *tsk = current;
-			struct task_struct *t;
+		cutime = tsk->signal->cutime;
+		cstime = tsk->signal->cstime;
+		spin_unlock_irq(&tsk->sighand->siglock);
 
-			read_lock(&tasklist_lock);
-			utime = tsk->signal->utime;
-			stime = tsk->signal->stime;
-			t = tsk;
-			do {
-				utime = cputime_add(utime, t->utime);
-				stime = cputime_add(stime, t->stime);
-				t = next_thread(t);
-			} while (t != tsk);
-
-			/*
-			 * While we have tasklist_lock read-locked, no dying thread
-			 * can be updating current->signal->[us]time.  Instead,
-			 * we got their counts included in the live thread loop.
-			 * However, another thread can come in right now and
-			 * do a wait call that updates current->signal->c[us]time.
-			 * To make sure we always see that pair updated atomically,
-			 * we take the siglock around fetching them.
-			 */
-			spin_lock_irq(&tsk->sighand->siglock);
-			cutime = tsk->signal->cutime;
-			cstime = tsk->signal->cstime;
-			spin_unlock_irq(&tsk->sighand->siglock);
-			read_unlock(&tasklist_lock);
-		}
 		tmp.tms_utime = cputime_to_clock_t(utime);
 		tmp.tms_stime = cputime_to_clock_t(stime);
 		tmp.tms_cutime = cputime_to_clock_t(cutime);
@@ -1141,9 +1405,9 @@ asmlinkage long sys_setpgid(pid_t pid, pid_t pgid)
 	if (!thread_group_leader(p))
 		goto out;
 
-	if (p->real_parent == group_leader) {
+	if (p->parent == group_leader) {
 		err = -EPERM;
-		if (p->signal->session != group_leader->signal->session)
+		if (process_session(p) != process_session(group_leader))
 			goto out;
 		err = -EACCES;
 		if (p->did_exec)
@@ -1159,16 +1423,13 @@ asmlinkage long sys_setpgid(pid_t pid, pid_t pgid)
 		goto out;
 
 	if (pgid != pid) {
-		struct task_struct *p;
+		struct task_struct *g =
+			find_task_by_pid_type(PIDTYPE_PGID, rpgid);
 
-		do_each_task_pid(rpgid, PIDTYPE_PGID, p) {
-			if (p->signal->session == group_leader->signal->session)
-				goto ok_pgid;
-		} while_each_task_pid(rpgid, PIDTYPE_PGID, p);
-		goto out;
+		if (!g || process_session(g) != process_session(group_leader))
+			goto out;
 	}
 
-ok_pgid:
 	err = security_task_setpgid(p, rpgid);
 	if (err)
 		goto out;
@@ -1188,9 +1449,9 @@ out:
 
 asmlinkage long sys_getpgid(pid_t pid)
 {
-	if (!pid) {
+	if (!pid)
 		return vx_rmap_pid(process_group(current));
-	} else {
+	else {
 		int retval;
 		struct task_struct *p;
 
@@ -1220,9 +1481,9 @@ asmlinkage long sys_getpgrp(void)
 
 asmlinkage long sys_getsid(pid_t pid)
 {
-	if (!pid) {
-		return current->signal->session;
-	} else {
+	if (!pid)
+		return process_session(current);
+	else {
 		int retval;
 		struct task_struct *p;
 
@@ -1230,10 +1491,10 @@ asmlinkage long sys_getsid(pid_t pid)
 		p = find_task_by_pid(pid);
 
 		retval = -ESRCH;
-		if(p) {
+		if (p) {
 			retval = security_task_getsid(p);
 			if (!retval)
-				retval = p->signal->session;
+				retval = process_session(p);
 		}
 		read_unlock(&tasklist_lock);
 		return retval;
@@ -1243,24 +1504,37 @@ asmlinkage long sys_getsid(pid_t pid)
 asmlinkage long sys_setsid(void)
 {
 	struct task_struct *group_leader = current->group_leader;
-	struct pid *pid;
+	pid_t session;
 	int err = -EPERM;
 
-	down(&tty_sem);
 	write_lock_irq(&tasklist_lock);
 
-	pid = find_pid(PIDTYPE_PGID, group_leader->pid);
-	if (pid)
+	/* Fail if I am already a session leader */
+	if (group_leader->signal->leader)
+		goto out;
+
+	session = group_leader->pid;
+	/* Fail if a process group id already exists that equals the
+	 * proposed session id.
+	 *
+	 * Don't check if session id == 1 because kernel threads use this
+	 * session id and so the check will always fail and make it so
+	 * init cannot successfully call setsid.
+	 */
+	if (session > 1 && find_task_by_pid_type(PIDTYPE_PGID, session))
 		goto out;
 
 	group_leader->signal->leader = 1;
-	__set_special_pids(group_leader->pid, group_leader->pid);
+	__set_special_pids(session, session);
+
+	spin_lock(&group_leader->sighand->siglock);
 	group_leader->signal->tty = NULL;
 	group_leader->signal->tty_old_pgrp = 0;
+	spin_unlock(&group_leader->sighand->siglock);
+
 	err = process_group(group_leader);
 out:
 	write_unlock_irq(&tasklist_lock);
-	up(&tty_sem);
 	return err;
 }
 
@@ -1287,9 +1561,9 @@ struct group_info *groups_alloc(int gidsetsize)
 	group_info->nblocks = nblocks;
 	atomic_set(&group_info->usage, 1);
 
-	if (gidsetsize <= NGROUPS_SMALL) {
+	if (gidsetsize <= NGROUPS_SMALL)
 		group_info->blocks[0] = group_info->small_block;
-	} else {
+	else {
 		for (i = 0; i < nblocks; i++) {
 			gid_t *b;
 			b = (void *)__get_free_page(GFP_USER);
@@ -1345,7 +1619,7 @@ static int groups_to_user(gid_t __user *grouplist,
 /* fill a group_info from a user-space array - it must be allocated already */
 static int groups_from_user(struct group_info *group_info,
     gid_t __user *grouplist)
- {
+{
 	int i;
 	int count = group_info->ngroups;
 
@@ -1394,7 +1668,7 @@ static void groups_sort(struct group_info *group_info)
 /* a simple bsearch */
 int groups_search(struct group_info *group_info, gid_t grp)
 {
-	int left, right;
+	unsigned int left, right;
 
 	if (!group_info)
 		return 0;
@@ -1402,7 +1676,7 @@ int groups_search(struct group_info *group_info, gid_t grp)
 	left = 0;
 	right = group_info->ngroups;
 	while (left < right) {
-		int mid = (left+right)/2;
+		unsigned int mid = (left+right)/2;
 		int cmp = grp - GROUP_AT(group_info, mid);
 		if (cmp > 0)
 			left = mid + 1;
@@ -1452,7 +1726,6 @@ asmlinkage long sys_getgroups(int gidsetsize, gid_t __user *grouplist)
 		return -EINVAL;
 
 	/* no need to grab task_lock here; it cannot change */
-	get_group_info(current->group_info);
 	i = current->group_info->ngroups;
 	if (gidsetsize) {
 		if (i > gidsetsize) {
@@ -1465,7 +1738,6 @@ asmlinkage long sys_getgroups(int gidsetsize, gid_t __user *grouplist)
 		}
 	}
 out:
-	put_group_info(current->group_info);
 	return i;
 }
 
@@ -1505,11 +1777,8 @@ asmlinkage long sys_setgroups(int gidsetsize, gid_t __user *grouplist)
 int in_group_p(gid_t grp)
 {
 	int retval = 1;
-	if (grp != current->fsgid) {
-		get_group_info(current->group_info);
+	if (grp != current->fsgid)
 		retval = groups_search(current->group_info, grp);
-		put_group_info(current->group_info);
-	}
 	return retval;
 }
 
@@ -1518,11 +1787,8 @@ EXPORT_SYMBOL(in_group_p);
 int in_egroup_p(gid_t grp)
 {
 	int retval = 1;
-	if (grp != current->egid) {
-		get_group_info(current->group_info);
+	if (grp != current->egid)
 		retval = groups_search(current->group_info, grp);
-		put_group_info(current->group_info);
-	}
 	return retval;
 }
 
@@ -1537,7 +1803,7 @@ asmlinkage long sys_newuname(struct new_utsname __user * name)
 	int errno = 0;
 
 	down_read(&uts_sem);
-	if (copy_to_user(name, vx_new_utsname(), sizeof *name))
+	if (copy_to_user(name, utsname(), sizeof *name))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1555,10 +1821,8 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		char *ptr = vx_new_uts(nodename);
-
-		memcpy(ptr, tmp, len);
-		ptr[len] = 0;
+		memcpy(utsname()->nodename, tmp, len);
+		utsname()->nodename[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1570,17 +1834,15 @@ asmlinkage long sys_sethostname(char __user *name, int len)
 asmlinkage long sys_gethostname(char __user *name, int len)
 {
 	int i, errno;
-	char *ptr;
 
 	if (len < 0)
 		return -EINVAL;
 	down_read(&uts_sem);
-	ptr = vx_new_uts(nodename);
-	i = 1 + strlen(ptr);
+	i = 1 + strlen(utsname()->nodename);
 	if (i > len)
 		i = len;
 	errno = 0;
-	if (copy_to_user(name, ptr, i))
+	if (copy_to_user(name, utsname()->nodename, i))
 		errno = -EFAULT;
 	up_read(&uts_sem);
 	return errno;
@@ -1605,10 +1867,8 @@ asmlinkage long sys_setdomainname(char __user *name, int len)
 	down_write(&uts_sem);
 	errno = -EFAULT;
 	if (!copy_from_user(tmp, name, len)) {
-		char *ptr = vx_new_uts(domainname);
-
-		memcpy(ptr, tmp, len);
-		ptr[len] = 0;
+		memcpy(utsname()->domainname, tmp, len);
+		utsname()->domainname[len] = 0;
 		errno = 0;
 	}
 	up_write(&uts_sem);
@@ -1643,9 +1903,9 @@ asmlinkage long sys_old_getrlimit(unsigned int resource, struct rlimit __user *r
 	task_lock(current->group_leader);
 	x = current->signal->rlim[resource];
 	task_unlock(current->group_leader);
-	if(x.rlim_cur > 0x7FFFFFFF)
+	if (x.rlim_cur > 0x7FFFFFFF)
 		x.rlim_cur = 0x7FFFFFFF;
-	if(x.rlim_max > 0x7FFFFFFF)
+	if (x.rlim_max > 0x7FFFFFFF)
 		x.rlim_max = 0x7FFFFFFF;
 	return copy_to_user(rlim, &x, sizeof(x))?-EFAULT:0;
 }
@@ -1655,20 +1915,21 @@ asmlinkage long sys_old_getrlimit(unsigned int resource, struct rlimit __user *r
 asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
 {
 	struct rlimit new_rlim, *old_rlim;
+	unsigned long it_prof_secs;
 	int retval;
 
 	if (resource >= RLIM_NLIMITS)
 		return -EINVAL;
-	if(copy_from_user(&new_rlim, rlim, sizeof(*rlim)))
+	if (copy_from_user(&new_rlim, rlim, sizeof(*rlim)))
 		return -EFAULT;
-       if (new_rlim.rlim_cur > new_rlim.rlim_max)
-               return -EINVAL;
+	if (new_rlim.rlim_cur > new_rlim.rlim_max)
+		return -EINVAL;
 	old_rlim = current->signal->rlim + resource;
 	if ((new_rlim.rlim_max > old_rlim->rlim_max) &&
 	    !vx_capable(CAP_SYS_RESOURCE, VXC_SET_RLIMIT))
 		return -EPERM;
 	if (resource == RLIMIT_NOFILE && new_rlim.rlim_max > NR_OPEN)
-			return -EPERM;
+		return -EPERM;
 
 	retval = security_task_setrlimit(resource, &new_rlim);
 	if (retval)
@@ -1678,10 +1939,20 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
 	*old_rlim = new_rlim;
 	task_unlock(current->group_leader);
 
-	if (resource == RLIMIT_CPU && new_rlim.rlim_cur != RLIM_INFINITY &&
-	    (cputime_eq(current->signal->it_prof_expires, cputime_zero) ||
-	     new_rlim.rlim_cur <= cputime_to_secs(
-		     current->signal->it_prof_expires))) {
+	if (resource != RLIMIT_CPU)
+		goto out;
+
+	/*
+	 * RLIMIT_CPU handling.   Note that the kernel fails to return an error
+	 * code if it rejected the user's attempt to set RLIMIT_CPU.  This is a
+	 * very long-standing error, and fixing it now risks breakage of
+	 * applications, so we live with it
+	 */
+	if (new_rlim.rlim_cur == RLIM_INFINITY)
+		goto out;
+
+	it_prof_secs = cputime_to_secs(current->signal->it_prof_expires);
+	if (it_prof_secs == 0 || new_rlim.rlim_cur <= it_prof_secs) {
 		unsigned long rlim_cur = new_rlim.rlim_cur;
 		cputime_t cputime;
 
@@ -1697,12 +1968,11 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
 		cputime = secs_to_cputime(rlim_cur);
 		read_lock(&tasklist_lock);
 		spin_lock_irq(&current->sighand->siglock);
-		set_process_cpu_timer(current, CPUCLOCK_PROF,
-				      &cputime, NULL);
+		set_process_cpu_timer(current, CPUCLOCK_PROF, &cputime, NULL);
 		spin_unlock_irq(&current->sighand->siglock);
 		read_unlock(&tasklist_lock);
 	}
-
+out:
 	return 0;
 }
 
@@ -1714,9 +1984,6 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
  * a lot simpler!  (Which we're not doing right now because we're not
  * measuring them yet).
  *
- * This expects to be called with tasklist_lock read-locked or better,
- * and the siglock not locked.  It may momentarily take the siglock.
- *
  * When sampling multiple threads for RUSAGE_SELF, under SMP we might have
  * races with threads incrementing their own counters.  But since word
  * reads are atomic, we either get new values or old values and we don't
@@ -1724,6 +1991,22 @@ asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit __user *rlim)
  * the c* fields from p->signal from races with exit.c updating those
  * fields when reaping, so a sample either gets all the additions of a
  * given child after it's reaped, or none so this sample is before reaping.
+ *
+ * Locking:
+ * We need to take the siglock for CHILDEREN, SELF and BOTH
+ * for  the cases current multithreaded, non-current single threaded
+ * non-current multithreaded.  Thread traversal is now safe with
+ * the siglock held.
+ * Strictly speaking, we donot need to take the siglock if we are current and
+ * single threaded,  as no one else can take our signal_struct away, no one
+ * else can  reap the  children to update signal->c* counters, and no one else
+ * can race with the signal-> fields. If we do not take any lock, the
+ * signal-> fields could be read out of order while another thread was just
+ * exiting. So we should  place a read memory barrier when we avoid the lock.
+ * On the writer side,  write memory barrier is implied in  __exit_signal
+ * as __exit_signal releases  the siglock spinlock after updating the signal->
+ * fields. But we don't do this yet to keep things simple.
+ *
  */
 
 static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
@@ -1733,23 +2016,23 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 	cputime_t utime, stime;
 
 	memset((char *) r, 0, sizeof *r);
-
-	if (unlikely(!p->signal))
-		return;
-
 	utime = stime = cputime_zero;
+
+	rcu_read_lock();
+	if (!lock_task_sighand(p, &flags)) {
+		rcu_read_unlock();
+		return;
+	}
 
 	switch (who) {
 		case RUSAGE_BOTH:
 		case RUSAGE_CHILDREN:
-			spin_lock_irqsave(&p->sighand->siglock, flags);
 			utime = p->signal->cutime;
 			stime = p->signal->cstime;
 			r->ru_nvcsw = p->signal->cnvcsw;
 			r->ru_nivcsw = p->signal->cnivcsw;
 			r->ru_minflt = p->signal->cmin_flt;
 			r->ru_majflt = p->signal->cmaj_flt;
-			spin_unlock_irqrestore(&p->sighand->siglock, flags);
 
 			if (who == RUSAGE_CHILDREN)
 				break;
@@ -1777,6 +2060,9 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 			BUG();
 	}
 
+	unlock_task_sighand(p, &flags);
+	rcu_read_unlock();
+
 	cputime_to_timeval(utime, &r->ru_utime);
 	cputime_to_timeval(stime, &r->ru_stime);
 }
@@ -1784,9 +2070,7 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 int getrusage(struct task_struct *p, int who, struct rusage __user *ru)
 {
 	struct rusage r;
-	read_lock(&tasklist_lock);
 	k_getrusage(p, who, &r);
-	read_unlock(&tasklist_lock);
 	return copy_to_user(ru, &r, sizeof(r)) ? -EFAULT : 0;
 }
 
@@ -1893,9 +2177,46 @@ asmlinkage long sys_prctl(int option, unsigned long arg2, unsigned long arg3,
 				return -EFAULT;
 			return 0;
 		}
+		case PR_GET_ENDIAN:
+			error = GET_ENDIAN(current, arg2);
+			break;
+		case PR_SET_ENDIAN:
+			error = SET_ENDIAN(current, arg2);
+			break;
+
 		default:
 			error = -EINVAL;
 			break;
 	}
 	return error;
+}
+
+asmlinkage long sys_getcpu(unsigned __user *cpup, unsigned __user *nodep,
+	   		   struct getcpu_cache __user *cache)
+{
+	int err = 0;
+	int cpu = raw_smp_processor_id();
+	if (cpup)
+		err |= put_user(cpu, cpup);
+	if (nodep)
+		err |= put_user(cpu_to_node(cpu), nodep);
+	if (cache) {
+		/*
+		 * The cache is not needed for this implementation,
+		 * but make sure user programs pass something
+		 * valid. vsyscall implementations can instead make
+		 * good use of the cache. Only use t0 and t1 because
+		 * these are available in both 32bit and 64bit ABI (no
+		 * need for a compat_getcpu). 32bit has enough
+		 * padding
+		 */
+		unsigned long t0, t1;
+		get_user(t0, &cache->blob[0]);
+		get_user(t1, &cache->blob[1]);
+		t0++;
+		t1++;
+		put_user(t0, &cache->blob[0]);
+		put_user(t1, &cache->blob[1]);
+	}
+	return err ? -EFAULT : 0;
 }

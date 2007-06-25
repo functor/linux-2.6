@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2004 Topspin Communications.  All rights reserved.
  * Copyright (c) 2005 Voltaire, Inc.  All rights reserved.
+ * Copyright (c) 2006 Intel Corporation.  All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -36,7 +37,10 @@
 #ifndef IB_SA_H
 #define IB_SA_H
 
+#include <linux/completion.h>
 #include <linux/compiler.h>
+
+#include <asm/atomic.h>
 
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_mad.h>
@@ -79,8 +83,8 @@ enum {
 };
 
 enum ib_sa_selector {
-	IB_SA_GTE  = 0,
-	IB_SA_LTE  = 1,
+	IB_SA_GT   = 0,
+	IB_SA_LT   = 1,
 	IB_SA_EQ   = 2,
 	/*
 	 * The meaning of "best" depends on the attribute: for
@@ -90,34 +94,6 @@ enum ib_sa_selector {
 	 */
 	IB_SA_BEST = 3
 };
-
-enum ib_sa_rate {
-	IB_SA_RATE_2_5_GBPS = 2,
-	IB_SA_RATE_5_GBPS   = 5,
-	IB_SA_RATE_10_GBPS  = 3,
-	IB_SA_RATE_20_GBPS  = 6,
-	IB_SA_RATE_30_GBPS  = 4,
-	IB_SA_RATE_40_GBPS  = 7,
-	IB_SA_RATE_60_GBPS  = 8,
-	IB_SA_RATE_80_GBPS  = 9,
-	IB_SA_RATE_120_GBPS = 10
-};
-
-static inline int ib_sa_rate_enum_to_int(enum ib_sa_rate rate)
-{
-	switch (rate) {
-	case IB_SA_RATE_2_5_GBPS: return  1;
-	case IB_SA_RATE_5_GBPS:   return  2;
-	case IB_SA_RATE_10_GBPS:  return  4;
-	case IB_SA_RATE_20_GBPS:  return  8;
-	case IB_SA_RATE_30_GBPS:  return 12;
-	case IB_SA_RATE_40_GBPS:  return 16;
-	case IB_SA_RATE_60_GBPS:  return 24;
-	case IB_SA_RATE_80_GBPS:  return 32;
-	case IB_SA_RATE_120_GBPS: return 48;
-	default: 	          return -1;
-	}
-}
 
 /*
  * Structures for SA records are named "struct ib_sa_xxx_rec."  No
@@ -278,11 +254,28 @@ struct ib_sa_service_rec {
 	u64		data64[2];
 };
 
+struct ib_sa_client {
+	atomic_t users;
+	struct completion comp;
+};
+
+/**
+ * ib_sa_register_client - Register an SA client.
+ */
+void ib_sa_register_client(struct ib_sa_client *client);
+
+/**
+ * ib_sa_unregister_client - Deregister an SA client.
+ * @client: Client object to deregister.
+ */
+void ib_sa_unregister_client(struct ib_sa_client *client);
+
 struct ib_sa_query;
 
 void ib_sa_cancel_query(int id, struct ib_sa_query *query);
 
-int ib_sa_path_rec_get(struct ib_device *device, u8 port_num,
+int ib_sa_path_rec_get(struct ib_sa_client *client,
+		       struct ib_device *device, u8 port_num,
 		       struct ib_sa_path_rec *rec,
 		       ib_sa_comp_mask comp_mask,
 		       int timeout_ms, gfp_t gfp_mask,
@@ -292,7 +285,8 @@ int ib_sa_path_rec_get(struct ib_device *device, u8 port_num,
 		       void *context,
 		       struct ib_sa_query **query);
 
-int ib_sa_mcmember_rec_query(struct ib_device *device, u8 port_num,
+int ib_sa_mcmember_rec_query(struct ib_sa_client *client,
+			     struct ib_device *device, u8 port_num,
 			     u8 method,
 			     struct ib_sa_mcmember_rec *rec,
 			     ib_sa_comp_mask comp_mask,
@@ -303,7 +297,8 @@ int ib_sa_mcmember_rec_query(struct ib_device *device, u8 port_num,
 			     void *context,
 			     struct ib_sa_query **query);
 
-int ib_sa_service_rec_query(struct ib_device *device, u8 port_num,
+int ib_sa_service_rec_query(struct ib_sa_client *client,
+			 struct ib_device *device, u8 port_num,
 			 u8 method,
 			 struct ib_sa_service_rec *rec,
 			 ib_sa_comp_mask comp_mask,
@@ -316,6 +311,7 @@ int ib_sa_service_rec_query(struct ib_device *device, u8 port_num,
 
 /**
  * ib_sa_mcmember_rec_set - Start an MCMember set query
+ * @client:SA client
  * @device:device to send query on
  * @port_num: port number to send query on
  * @rec:MCMember Record to send in query
@@ -339,7 +335,8 @@ int ib_sa_service_rec_query(struct ib_device *device, u8 port_num,
  * cancel the query.
  */
 static inline int
-ib_sa_mcmember_rec_set(struct ib_device *device, u8 port_num,
+ib_sa_mcmember_rec_set(struct ib_sa_client *client,
+		       struct ib_device *device, u8 port_num,
 		       struct ib_sa_mcmember_rec *rec,
 		       ib_sa_comp_mask comp_mask,
 		       int timeout_ms, gfp_t gfp_mask,
@@ -349,7 +346,7 @@ ib_sa_mcmember_rec_set(struct ib_device *device, u8 port_num,
 		       void *context,
 		       struct ib_sa_query **query)
 {
-	return ib_sa_mcmember_rec_query(device, port_num,
+	return ib_sa_mcmember_rec_query(client, device, port_num,
 					IB_MGMT_METHOD_SET,
 					rec, comp_mask,
 					timeout_ms, gfp_mask, callback,
@@ -358,6 +355,7 @@ ib_sa_mcmember_rec_set(struct ib_device *device, u8 port_num,
 
 /**
  * ib_sa_mcmember_rec_delete - Start an MCMember delete query
+ * @client:SA client
  * @device:device to send query on
  * @port_num: port number to send query on
  * @rec:MCMember Record to send in query
@@ -381,7 +379,8 @@ ib_sa_mcmember_rec_set(struct ib_device *device, u8 port_num,
  * cancel the query.
  */
 static inline int
-ib_sa_mcmember_rec_delete(struct ib_device *device, u8 port_num,
+ib_sa_mcmember_rec_delete(struct ib_sa_client *client,
+			  struct ib_device *device, u8 port_num,
 			  struct ib_sa_mcmember_rec *rec,
 			  ib_sa_comp_mask comp_mask,
 			  int timeout_ms, gfp_t gfp_mask,
@@ -391,12 +390,19 @@ ib_sa_mcmember_rec_delete(struct ib_device *device, u8 port_num,
 			  void *context,
 			  struct ib_sa_query **query)
 {
-	return ib_sa_mcmember_rec_query(device, port_num,
+	return ib_sa_mcmember_rec_query(client, device, port_num,
 					IB_SA_METHOD_DELETE,
 					rec, comp_mask,
 					timeout_ms, gfp_mask, callback,
 					context, query);
 }
 
+/**
+ * ib_init_ah_from_path - Initialize address handle attributes based on an SA
+ *   path record.
+ */
+int ib_init_ah_from_path(struct ib_device *device, u8 port_num,
+			 struct ib_sa_path_rec *rec,
+			 struct ib_ah_attr *ah_attr);
 
 #endif /* IB_SA_H */

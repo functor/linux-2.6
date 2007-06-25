@@ -18,6 +18,7 @@
 #include <linux/compiler.h>
 #include <linux/string.h>
 #include <linux/timer.h>
+#include <linux/poll.h>
 
 #include <net/inet_sock.h>
 #include <net/request_sock.h>
@@ -45,13 +46,19 @@ struct inet_connection_sock_af_ops {
 				      struct request_sock *req,
 				      struct dst_entry *dst);
 	int	    (*remember_stamp)(struct sock *sk);
-	__u16	    net_header_len;
+	u16	    net_header_len;
+	u16	    sockaddr_len;
 	int	    (*setsockopt)(struct sock *sk, int level, int optname, 
 				  char __user *optval, int optlen);
 	int	    (*getsockopt)(struct sock *sk, int level, int optname, 
 				  char __user *optval, int __user *optlen);
+	int	    (*compat_setsockopt)(struct sock *sk,
+				int level, int optname,
+				char __user *optval, int optlen);
+	int	    (*compat_getsockopt)(struct sock *sk,
+				int level, int optname,
+				char __user *optval, int __user *optlen);
 	void	    (*addr2sockaddr)(struct sock *sk, struct sockaddr *);
-	int sockaddr_len;
 };
 
 /** inet_connection_sock - INET connection oriented sock
@@ -72,6 +79,7 @@ struct inet_connection_sock_af_ops {
  * @icsk_probes_out:	   unanswered 0 window probes
  * @icsk_ext_hdr_len:	   Network protocol overhead (IP/IPv6 options)
  * @icsk_ack:		   Delayed ACK control data
+ * @icsk_mtup;		   MTU probing control data
  */
 struct inet_connection_sock {
 	/* inet_sock has to be the first member! */
@@ -104,6 +112,16 @@ struct inet_connection_sock {
 		__u16		  last_seg_size; /* Size of last incoming segment	   */
 		__u16		  rcv_mss;	 /* MSS used for delayed ACK decisions	   */ 
 	} icsk_ack;
+	struct {
+		int		  enabled;
+
+		/* Range of MTUs to search */
+		int		  search_high;
+		int		  search_low;
+
+		/* Information on the current probe. */
+		int		  probe_size;
+	} icsk_mtup;
 	u32			  icsk_ca_priv[16];
 #define ICSK_CA_PRIV_SIZE	(16 * sizeof(u32))
 };
@@ -130,7 +148,8 @@ extern struct sock *inet_csk_clone(struct sock *sk,
 enum inet_csk_ack_state_t {
 	ICSK_ACK_SCHED	= 1,
 	ICSK_ACK_TIMER  = 2,
-	ICSK_ACK_PUSHED = 4
+	ICSK_ACK_PUSHED = 4,
+	ICSK_ACK_PUSHED2 = 8
 };
 
 extern void inet_csk_init_xmit_timers(struct sock *sk,
@@ -220,9 +239,9 @@ extern struct sock *inet_csk_accept(struct sock *sk, int flags, int *err);
 
 extern struct request_sock *inet_csk_search_req(const struct sock *sk,
 						struct request_sock ***prevp,
-						const __u16 rport,
-						const __u32 raddr,
-						const __u32 laddr);
+						const __be16 rport,
+						const __be32 raddr,
+						const __be32 laddr);
 extern int inet_csk_bind_conflict(const struct sock *sk,
 				  const struct inet_bind_bucket *tb);
 extern int inet_csk_get_port(struct inet_hashinfo *hashinfo,
@@ -310,4 +329,13 @@ extern void inet_csk_listen_stop(struct sock *sk);
 
 extern void inet_csk_addr2sockaddr(struct sock *sk, struct sockaddr *uaddr);
 
+extern int inet_csk_ctl_sock_create(struct socket **sock,
+				    unsigned short family,
+				    unsigned short type,
+				    unsigned char protocol);
+
+extern int inet_csk_compat_getsockopt(struct sock *sk, int level, int optname,
+				      char __user *optval, int __user *optlen);
+extern int inet_csk_compat_setsockopt(struct sock *sk, int level, int optname,
+				      char __user *optval, int optlen);
 #endif /* _INET_CONNECTION_SOCK_H */

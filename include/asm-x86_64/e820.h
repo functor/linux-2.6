@@ -19,12 +19,8 @@
 
 #define E820_RAM	1
 #define E820_RESERVED	2
-#define E820_ACPI	3 /* usable as RAM once ACPI tables have been read */
+#define E820_ACPI	3
 #define E820_NVS	4
-
-#define HIGH_MEMORY	(1024*1024)
-
-#define LOWMEMSIZE()	(0x9f000)
 
 #ifndef __ASSEMBLY__
 struct e820entry {
@@ -45,19 +41,29 @@ extern void add_memory_region(unsigned long start, unsigned long size,
 extern void setup_memory_region(void);
 extern void contig_e820_setup(void); 
 extern unsigned long e820_end_of_ram(void);
+#ifdef CONFIG_XEN
+extern void e820_reserve_resources(struct e820entry *e820, int nr_map);
+#else
 extern void e820_reserve_resources(void);
+#endif
+extern void e820_mark_nosave_regions(void);
 extern void e820_print_map(char *who);
-extern int e820_mapped(unsigned long start, unsigned long end, unsigned type);
+extern int e820_any_mapped(unsigned long start, unsigned long end, unsigned type);
+extern int e820_all_mapped(unsigned long start, unsigned long end, unsigned type);
 
-extern void e820_bootmem_free(pg_data_t *pgdat, unsigned long start,unsigned long end);
+#ifdef CONFIG_XEN
+extern void e820_setup_gap(struct e820entry *e820, int nr_map);
+#else
 extern void e820_setup_gap(void);
-extern unsigned long e820_hole_size(unsigned long start_pfn,
-				    unsigned long end_pfn);
+#endif
+extern void e820_register_active_regions(int nid,
+				unsigned long start_pfn, unsigned long end_pfn);
 
-extern void __init parse_memopt(char *p, char **end);
-extern void __init parse_memmapopt(char *p, char **end);
+extern void finish_e820_parsing(void);
 
 extern struct e820map e820;
+
+extern unsigned ebda_addr, ebda_size;
 #endif/*!__ASSEMBLY__*/
 
 #endif/*__E820_HEADER*/

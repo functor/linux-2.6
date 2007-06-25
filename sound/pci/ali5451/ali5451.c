@@ -33,6 +33,7 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/moduleparam.h>
+#include <linux/dma-mapping.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/info.h>
@@ -48,7 +49,7 @@ MODULE_SUPPORTED_DEVICE("{{ALI,M5451,pci},{ALI,M5451}}");
 static int index = SNDRV_DEFAULT_IDX1;	/* Index */
 static char *id = SNDRV_DEFAULT_STR1;	/* ID for this card */
 static int pcm_channels = 32;
-static int spdif = 0;
+static int spdif;
 
 module_param(index, int, 0444);
 MODULE_PARM_DESC(index, "Index value for ALI M5451 PCI Audio.");
@@ -1046,9 +1047,7 @@ static void snd_ali_interrupt(struct snd_ali * codec)
 }
 
 
-static irqreturn_t snd_ali_card_interrupt(int irq,
-				   void *dev_id,
-				   struct pt_regs *regs)
+static irqreturn_t snd_ali_card_interrupt(int irq, void *dev_id)
 {
 	struct snd_ali 	*codec = dev_id;
 
@@ -2033,8 +2032,10 @@ static int ali_suspend(struct pci_dev *pci, pm_message_t state)
 	outl(0xffffffff, ALI_REG(chip, ALI_STOP));
 
 	spin_unlock_irq(&chip->reg_lock);
+
 	pci_disable_device(pci);
 	pci_save_state(pci);
+	pci_set_power_state(pci, pci_choose_state(pci, state));
 	return 0;
 }
 
@@ -2049,8 +2050,15 @@ static int ali_resume(struct pci_dev *pci)
 	if (! im)
 		return 0;
 
+	pci_set_power_state(pci, PCI_D0);
 	pci_restore_state(pci);
-	pci_enable_device(pci);
+	if (pci_enable_device(pci) < 0) {
+		printk(KERN_ERR "ali5451: pci_enable_device failed, "
+		       "disabling device\n");
+		snd_card_disconnect(card);
+		return -EIO;
+	}
+	pci_set_master(pci);
 
 	spin_lock_irq(&chip->reg_lock);
 	
@@ -2087,7 +2095,7 @@ static int snd_ali_free(struct snd_ali * codec)
 		snd_ali_disable_address_interrupt(codec);
 	if (codec->irq >= 0) {
 		synchronize_irq(codec->irq);
-		free_irq(codec->irq, (void *)codec);
+		free_irq(codec->irq, codec);
 	}
 	if (codec->port)
 		pci_release_regions(codec->pci);
@@ -2172,7 +2180,7 @@ static void __devinit snd_ali_proc_init(struct snd_ali *codec)
 {
 	struct snd_info_entry *entry;
 	if(!snd_card_proc_new(codec->card, "ali5451", &entry))
-		snd_info_set_text_ops(entry, codec, 1024, snd_ali_proc_read);
+		snd_info_set_text_ops(entry, codec, snd_ali_proc_read);
 }
 
 static int __devinit snd_ali_resources(struct snd_ali *codec)
@@ -2184,7 +2192,8 @@ static int __devinit snd_ali_resources(struct snd_ali *codec)
 		return err;
 	codec->port = pci_resource_start(codec->pci, 0);
 
-	if (request_irq(codec->pci->irq, snd_ali_card_interrupt, SA_INTERRUPT|SA_SHIRQ, "ALI 5451", (void *)codec)) {
+	if (request_irq(codec->pci->irq, snd_ali_card_interrupt,
+			IRQF_SHARED, "ALI 5451", codec)) {
 		snd_printk(KERN_ERR "Unable to request irq.\n");
 		return -EBUSY;
 	}
@@ -2220,8 +2229,8 @@ static int __devinit snd_ali_create(struct snd_card *card,
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
 	/* check, if we can restrict PCI DMA transfers to 31 bits */
-	if (pci_set_dma_mask(pci, 0x7fffffff) < 0 ||
-	    pci_set_consistent_dma_mask(pci, 0x7fffffff) < 0) {
+	if (pci_set_dma_mask(pci, DMA_31BIT_MASK) < 0 ||
+	    pci_set_consistent_dma_mask(pci, DMA_31BIT_MASK) < 0) {
 		snd_printk(KERN_ERR "architecture does not support 31bit PCI busmaster DMA\n");
 		pci_disable_device(pci);
 		return -ENXIO;

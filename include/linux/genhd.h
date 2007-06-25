@@ -9,13 +9,9 @@
  *		<drew@colorado.edu>
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
-#include <linux/major.h>
-#include <linux/device.h>
-#include <linux/smp.h>
-#include <linux/string.h>
-#include <linux/fs.h>
+
+#ifdef CONFIG_BLOCK
 
 enum {
 /* These three have identical behaviour; use the second one if DOS FDISK gets
@@ -61,6 +57,12 @@ struct partition {
 #endif
 
 #ifdef __KERNEL__
+#include <linux/major.h>
+#include <linux/device.h>
+#include <linux/smp.h>
+#include <linux/string.h>
+#include <linux/fs.h>
+
 struct partition {
 	unsigned char boot_ind;		/* 0x80 - active */
 	unsigned char head;		/* starting head */
@@ -78,8 +80,12 @@ struct hd_struct {
 	sector_t start_sect;
 	sector_t nr_sects;
 	struct kobject kobj;
+	struct kobject *holder_dir;
 	unsigned ios[2], sectors[2];	/* READs and WRITEs */
 	int policy, partno;
+#ifdef CONFIG_FAIL_MAKE_REQUEST
+	int make_it_fail;
+#endif
 };
 
 #define GENHD_FL_REMOVABLE			1
@@ -87,14 +93,15 @@ struct hd_struct {
 #define GENHD_FL_CD				8
 #define GENHD_FL_UP				16
 #define GENHD_FL_SUPPRESS_PARTITION_INFO	32
+#define GENHD_FL_FAIL				64
 
 struct disk_stats {
-	unsigned sectors[2];		/* READs and WRITEs */
-	unsigned ios[2];
-	unsigned merges[2];
-	unsigned ticks[2];
-	unsigned io_ticks;
-	unsigned time_in_queue;
+	unsigned long sectors[2];	/* READs and WRITEs */
+	unsigned long ios[2];
+	unsigned long merges[2];
+	unsigned long ticks[2];
+	unsigned long io_ticks;
+	unsigned long time_in_queue;
 };
 	
 struct gendisk {
@@ -104,16 +111,17 @@ struct gendisk {
                                          * disks that can't be partitioned. */
 	char disk_name[32];		/* name of major driver */
 	struct hd_struct **part;	/* [indexed by minor] */
+	int part_uevent_suppress;
 	struct block_device_operations *fops;
 	struct request_queue *queue;
 	void *private_data;
 	sector_t capacity;
 
 	int flags;
-	char devfs_name[64];		/* devfs crap */
-	int number;			/* more of the same */
 	struct device *driverfs_dev;
 	struct kobject kobj;
+	struct kobject *holder_dir;
+	struct kobject *slave_dir;
 
 	struct timer_rand_state *random;
 	int policy;
@@ -149,22 +157,16 @@ struct disk_attribute {
 ({									\
 	typeof(gendiskp->dkstats->field) res = 0;			\
 	int i;								\
-	for (i=0; i < NR_CPUS; i++) {					\
-		if (!cpu_possible(i))					\
-			continue;					\
+	for_each_possible_cpu(i)					\
 		res += per_cpu_ptr(gendiskp->dkstats, i)->field;	\
-	}								\
 	res;								\
 })
 
 static inline void disk_stat_set_all(struct gendisk *gendiskp, int value)	{
 	int i;
-	for (i=0; i < NR_CPUS; i++) {
-		if (cpu_possible(i)) {
-			memset(per_cpu_ptr(gendiskp->dkstats, i), value,	
-					sizeof (struct disk_stats));
-		}
-	}
+	for_each_possible_cpu(i)
+		memset(per_cpu_ptr(gendiskp->dkstats, i), value,
+				sizeof (struct disk_stats));
 }		
 				
 #else
@@ -420,6 +422,8 @@ static inline struct block_device *bdget_disk(struct gendisk *disk, int index)
 {
 	return bdget(MKDEV(disk->major, disk->first_minor) + index);
 }
+
+#endif
 
 #endif
 

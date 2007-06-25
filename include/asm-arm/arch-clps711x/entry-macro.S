@@ -1,5 +1,5 @@
 /*
- * include/asm-arm/arch-CLPS711x/entry-macro.S
+ * include/asm-arm/arch-clps711x/entry-macro.S
  *
  * Low-level IRQ helper macros for CLPS711X-based platforms
  *
@@ -7,6 +7,7 @@
  * License version 2. This program is licensed "as is" without any
  * warranty of any kind, whether express or implied.
  */
+#include <asm/hardware.h>
 #include <asm/hardware/clps7111.h>
 
 		.macro	disable_fiq

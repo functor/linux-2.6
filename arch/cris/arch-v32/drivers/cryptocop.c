@@ -2051,7 +2051,6 @@ static void cryptocop_job_queue_close(void)
 	spin_lock_irqsave(&cryptocop_process_lock, process_flags);
 
 	/* Empty the job queue. */
-	spin_lock_irqsave(&cryptocop_process_lock, process_flags);
 	for (i = 0; i < cryptocop_prio_no_prios; i++){
 		if (!list_empty(&(cryptocop_job_queues[i].jobs))){
 			list_for_each_safe(node, tmp, &(cryptocop_job_queues[i].jobs)) {
@@ -2302,7 +2301,7 @@ static int cryptocop_job_setup(struct cryptocop_prio_job **pj, struct cryptocop_
 
 static int cryptocop_open(struct inode *inode, struct file *filp)
 {
-	int p = MINOR(inode->i_rdev);
+	int p = iminor(inode);
 
 	if (p != CRYPTOCOP_MINOR) return -EINVAL;
 
@@ -2944,7 +2943,7 @@ static int cryptocop_ioctl_process(struct inode *inode, struct file *filp, unsig
 		int spdl_err;
 		/* Mark output pages dirty. */
 		spdl_err = set_page_dirty_lock(outpages[i]);
-		DEBUG(if (spdl_err)printk("cryptocop_ioctl_process: set_page_dirty_lock returned %d\n", spdl_err));
+		DEBUG(if (spdl_err < 0)printk("cryptocop_ioctl_process: set_page_dirty_lock returned %d\n", spdl_err));
 	}
 	for (i = 0; i < nooutpages; i++){
 		put_page(outpages[i]);

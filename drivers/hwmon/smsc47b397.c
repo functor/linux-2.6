@@ -35,6 +35,7 @@
 #include <linux/hwmon.h>
 #include <linux/err.h>
 #include <linux/init.h>
+#include <linux/mutex.h>
 #include <asm/io.h>
 
 /* Address is autodetected, there is no default value */
@@ -92,9 +93,9 @@ static u8 smsc47b397_reg_temp[] = {0x25, 0x26, 0x27, 0x80};
 struct smsc47b397_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore lock;
+	struct mutex lock;
 
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	unsigned long last_updated; /* in jiffies */
 	int valid;
 
@@ -108,10 +109,10 @@ static int smsc47b397_read_value(struct i2c_client *client, u8 reg)
 	struct smsc47b397_data *data = i2c_get_clientdata(client);
 	int res;
 
-	down(&data->lock);
+	mutex_lock(&data->lock);
 	outb(reg, client->addr);
 	res = inb_p(client->addr + 1);
-	up(&data->lock);
+	mutex_unlock(&data->lock);
 	return res;
 }
 
@@ -121,7 +122,7 @@ static struct smsc47b397_data *smsc47b397_update_device(struct device *dev)
 	struct smsc47b397_data *data = i2c_get_clientdata(client);
 	int i;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ) || !data->valid) {
 		dev_dbg(&client->dev, "starting device update...\n");
@@ -144,7 +145,7 @@ static struct smsc47b397_data *smsc47b397_update_device(struct device *dev)
 		dev_dbg(&client->dev, "... device update complete\n");
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }
@@ -175,9 +176,6 @@ sysfs_temp(2);
 sysfs_temp(3);
 sysfs_temp(4);
 
-#define device_create_file_temp(client, num) \
-	device_create_file(&client->dev, &dev_attr_temp##num##_input)
-
 /* FAN: 1 RPM/bit
    REG: count of 90kHz pulses / revolution */
 static int fan_from_reg(u16 reg)
@@ -204,8 +202,22 @@ sysfs_fan(2);
 sysfs_fan(3);
 sysfs_fan(4);
 
-#define device_create_file_fan(client, num) \
-	device_create_file(&client->dev, &dev_attr_fan##num##_input)
+static struct attribute *smsc47b397_attributes[] = {
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp2_input.attr,
+	&dev_attr_temp3_input.attr,
+	&dev_attr_temp4_input.attr,
+	&dev_attr_fan1_input.attr,
+	&dev_attr_fan2_input.attr,
+	&dev_attr_fan3_input.attr,
+	&dev_attr_fan4_input.attr,
+
+	NULL
+};
+
+static const struct attribute_group smsc47b397_group = {
+	.attrs = smsc47b397_attributes,
+};
 
 static int smsc47b397_detach_client(struct i2c_client *client)
 {
@@ -213,6 +225,7 @@ static int smsc47b397_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &smsc47b397_group);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -227,6 +240,7 @@ static int smsc47b397_detect(struct i2c_adapter *adapter);
 
 static struct i2c_driver smsc47b397_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "smsc47b397",
 	},
 	.attach_adapter	= smsc47b397_detect,
@@ -254,36 +268,31 @@ static int smsc47b397_detect(struct i2c_adapter *adapter)
 	new_client = &data->client;
 	i2c_set_clientdata(new_client, data);
 	new_client->addr = address;
-	init_MUTEX(&data->lock);
+	mutex_init(&data->lock);
 	new_client->adapter = adapter;
 	new_client->driver = &smsc47b397_driver;
 	new_client->flags = 0;
 
 	strlcpy(new_client->name, "smsc47b397", I2C_NAME_SIZE);
 
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	if ((err = i2c_attach_client(new_client)))
 		goto error_free;
 
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &smsc47b397_group)))
+		goto error_detach;
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto error_detach;
+		goto error_remove;
 	}
-
-	device_create_file_temp(new_client, 1);
-	device_create_file_temp(new_client, 2);
-	device_create_file_temp(new_client, 3);
-	device_create_file_temp(new_client, 4);
-
-	device_create_file_fan(new_client, 1);
-	device_create_file_fan(new_client, 2);
-	device_create_file_fan(new_client, 3);
-	device_create_file_fan(new_client, 4);
 
 	return 0;
 
+error_remove:
+	sysfs_remove_group(&new_client->dev.kobj, &smsc47b397_group);
 error_detach:
 	i2c_detach_client(new_client);
 error_free:

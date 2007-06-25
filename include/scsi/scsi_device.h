@@ -4,6 +4,7 @@
 #include <linux/device.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/workqueue.h>
 #include <asm/atomic.h>
 
 struct request_queue;
@@ -73,7 +74,6 @@ struct scsi_device {
 	unsigned sector_size;	/* size in bytes */
 
 	void *hostdata;		/* available to low-level driver */
-	char devfs_name[256];	/* devfs junk */
 	char type;
 	char scsi_level;
 	char inq_periph_qual;	/* PQ from INQUIRY data */	
@@ -138,6 +138,8 @@ struct scsi_device {
 	struct device		sdev_gendev;
 	struct class_device	sdev_classdev;
 
+	struct execute_work	ew; /* used to get process context on put */
+
 	enum scsi_device_state sdev_state;
 	unsigned long		sdev_data[0];
 } __attribute__((aligned(sizeof(unsigned long))));
@@ -154,6 +156,11 @@ struct scsi_device {
 #define scmd_printk(prefix, scmd, fmt, a...)	\
 	dev_printk(prefix, &(scmd)->device->sdev_gendev, fmt, ##a)
 
+enum scsi_target_state {
+	STARGET_RUNNING = 1,
+	STARGET_DEL,
+};
+
 /*
  * scsi_target: representation of a scsi target, for now, this is only
  * used for single_lun devices. If no one has active IO to the target,
@@ -168,8 +175,13 @@ struct scsi_target {
 	unsigned int		channel;
 	unsigned int		id; /* target id ... replace
 				     * scsi_device.id eventually */
-	unsigned long		create:1; /* signal that it needs to be added */
+	unsigned int		create:1; /* signal that it needs to be added */
+	unsigned int		pdt_1f_for_no_lun;	/* PDT = 0x1f */
+						/* means no lun present */
+
 	char			scsi_level;
+	struct execute_work	ew;
+	enum scsi_target_state	state;
 	void 			*hostdata; /* available to low-level driver */
 	unsigned long		starget_data[0]; /* for the transport */
 	/* starget_data must be the last element!!!! */
@@ -211,13 +223,13 @@ extern struct scsi_device *__scsi_iterate_devices(struct Scsi_Host *,
 						  struct scsi_device *);
 
 /**
- * shost_for_each_device  -  iterate over all devices of a host
- * @sdev:	iterator
- * @host:	host whiches devices we want to iterate over
+ * shost_for_each_device - iterate over all devices of a host
+ * @sdev: the &struct scsi_device to use as a cursor
+ * @shost: the &struct scsi_host to iterate over
  *
- * This traverses over each devices of @shost.  The devices have
- * a reference that must be released by scsi_host_put when breaking
- * out of the loop.
+ * Iterator that returns each device attached to @shost.  This loop
+ * takes a reference on each device and releases it at the end.  If
+ * you break out of the loop, you must call scsi_device_put(sdev).
  */
 #define shost_for_each_device(sdev, shost) \
 	for ((sdev) = __scsi_iterate_devices((shost), NULL); \
@@ -225,17 +237,17 @@ extern struct scsi_device *__scsi_iterate_devices(struct Scsi_Host *,
 	     (sdev) = __scsi_iterate_devices((shost), (sdev)))
 
 /**
- * __shost_for_each_device  -  iterate over all devices of a host (UNLOCKED)
- * @sdev:	iterator
- * @host:	host whiches devices we want to iterate over
+ * __shost_for_each_device - iterate over all devices of a host (UNLOCKED)
+ * @sdev: the &struct scsi_device to use as a cursor
+ * @shost: the &struct scsi_host to iterate over
  *
- * This traverses over each devices of @shost.  It does _not_ take a
- * reference on the scsi_device, thus it the whole loop must be protected
- * by shost->host_lock.
+ * Iterator that returns each device attached to @shost.  It does _not_
+ * take a reference on the scsi_device, so the whole loop must be
+ * protected by shost->host_lock.
  *
- * Note:  The only reason why drivers would want to use this is because
- * they're need to access the device list in irq context.  Otherwise you
- * really want to use shost_for_each_device instead.
+ * Note: The only reason to use this is because you need to access the
+ * device list in interrupt context.  Otherwise you really want to use
+ * shost_for_each_device instead.
  */
 #define __shost_for_each_device(sdev, shost) \
 	list_for_each_entry((sdev), &((shost)->__devices), siblings)
@@ -249,6 +261,11 @@ extern int scsi_mode_sense(struct scsi_device *sdev, int dbd, int modepage,
 			   unsigned char *buffer, int len, int timeout,
 			   int retries, struct scsi_mode_data *data,
 			   struct scsi_sense_hdr *);
+extern int scsi_mode_select(struct scsi_device *sdev, int pf, int sp,
+			    int modepage, unsigned char *buffer, int len,
+			    int timeout, int retries,
+			    struct scsi_mode_data *data,
+			    struct scsi_sense_hdr *);
 extern int scsi_test_unit_ready(struct scsi_device *sdev, int timeout,
 				int retries);
 extern int scsi_device_set_state(struct scsi_device *sdev,
@@ -280,6 +297,11 @@ extern int scsi_execute_async(struct scsi_device *sdev,
 			      int timeout, int retries, void *privdata,
 			      void (*done)(void *, char *, int, int),
 			      gfp_t gfp);
+
+static inline int __must_check scsi_device_reprobe(struct scsi_device *sdev)
+{
+	return device_reprobe(&sdev->sdev_gendev);
+}
 
 static inline unsigned int sdev_channel(struct scsi_device *sdev)
 {

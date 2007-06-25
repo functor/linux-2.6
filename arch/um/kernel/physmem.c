@@ -9,6 +9,7 @@
 #include "linux/vmalloc.h"
 #include "linux/bootmem.h"
 #include "linux/module.h"
+#include "linux/pfn.h"
 #include "asm/types.h"
 #include "asm/pgtable.h"
 #include "kern_util.h"
@@ -68,7 +69,7 @@ static void insert_phys_mapping(struct phys_desc *desc)
 		panic("Physical remapping for %p already present",
 		      desc->virt);
 
-	rb_link_node(&desc->rb, (*n)->rb_parent, n);
+	rb_link_node(&desc->rb, rb_parent(*n), n);
 	rb_insert_color(&desc->rb, &phys_mappings);
 }
 
@@ -225,7 +226,7 @@ EXPORT_SYMBOL(physmem_forget_descriptor);
 EXPORT_SYMBOL(physmem_remove_mapping);
 EXPORT_SYMBOL(physmem_subst_mapping);
 
-void arch_free_page(struct page *page, int order)
+int arch_free_page(struct page *page, int order)
 {
 	void *virt;
 	int i;
@@ -234,6 +235,8 @@ void arch_free_page(struct page *page, int order)
 		virt = __va(page_to_phys(page + i));
 		physmem_remove_mapping(virt);
 	}
+
+	return 0;
 }
 
 int is_remapped(void *virt)
@@ -279,7 +282,7 @@ int init_maps(unsigned long physmem, unsigned long iomem, unsigned long highmem)
 
 	for(i = 0; i < total_pages; i++){
 		p = &map[i];
-		set_page_count(p, 0);
+		memset(p, 0, sizeof(struct page));
 		SetPageReserved(p);
 		INIT_LIST_HEAD(&p->lru);
 	}
@@ -316,9 +319,7 @@ void map_memory(unsigned long virt, unsigned long phys, unsigned long len,
 	}
 }
 
-#define PFN_UP(x) (((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
-
-extern int __syscall_stub_start, __binary_start;
+extern int __syscall_stub_start;
 
 void setup_physmem(unsigned long start, unsigned long reserve_end,
 		   unsigned long len, unsigned long long highmem)
@@ -408,6 +409,8 @@ unsigned long find_iomem(char *driver, unsigned long *len_out)
 			*len_out = region->size;
 			return(region->virt);
 		}
+
+		region = region->next;
 	}
 
 	return(0);

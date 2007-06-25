@@ -248,11 +248,10 @@ static struct pcie_device* alloc_pcie_device(struct pci_dev *parent,
 {
 	struct pcie_device *device;
 
-	device = kmalloc(sizeof(struct pcie_device), GFP_KERNEL);
+	device = kzalloc(sizeof(struct pcie_device), GFP_KERNEL);
 	if (!device)
 		return NULL;
 
-	memset(device, 0, sizeof(struct pcie_device));
 	pcie_device_init(parent, device, port_type, service_type, irq,irq_mode);
 	printk(KERN_DEBUG "Allocate Port Service[%s]\n", device->device.bus_id);
 	return device;
@@ -340,8 +339,7 @@ static int suspend_iter(struct device *dev, void *data)
 
 int pcie_port_device_suspend(struct pci_dev *dev, pm_message_t state)
 {
-	device_for_each_child(&dev->dev, &state, suspend_iter);
-	return 0;
+	return device_for_each_child(&dev->dev, &state, suspend_iter);
 }
 
 static int resume_iter(struct device *dev, void *data)
@@ -359,8 +357,7 @@ static int resume_iter(struct device *dev, void *data)
 
 int pcie_port_device_resume(struct pci_dev *dev)
 {
-	device_for_each_child(&dev->dev, NULL, resume_iter);
-	return 0;
+	return device_for_each_child(&dev->dev, NULL, resume_iter);
 }
 #endif
 
@@ -403,9 +400,9 @@ void pcie_port_device_remove(struct pci_dev *dev)
 		pci_disable_msi(dev);
 }
 
-void pcie_port_bus_register(void)
+int pcie_port_bus_register(void)
 {
-	bus_register(&pcie_port_bus_type);
+	return bus_register(&pcie_port_bus_type);
 }
 
 void pcie_port_bus_unregister(void)

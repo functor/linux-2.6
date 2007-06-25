@@ -4,16 +4,16 @@
  *
  *   This program is free software;  you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or 
+ *   the Free Software Foundation; either version 2 of the License, or
  *   (at your option) any later version.
- * 
+ *
  *   This program is distributed in the hope that it will be useful,
  *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
  *   the GNU General Public License for more details.
  *
  *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software 
+ *   along with this program;  if not, write to the Free Software
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
@@ -56,7 +56,7 @@ static inline void __lock_metapage(struct metapage *mp)
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		if (metapage_locked(mp)) {
 			unlock_page(mp->page);
-			schedule();
+			io_schedule();
 			lock_page(mp->page);
 		}
 	} while (trylock_metapage(mp));
@@ -74,7 +74,7 @@ static inline void lock_metapage(struct metapage *mp)
 }
 
 #define METAPOOL_MIN_PAGES 32
-static kmem_cache_t *metapage_cache;
+static struct kmem_cache *metapage_cache;
 static mempool_t *metapage_mempool;
 
 #define MPS_PER_PAGE (PAGE_CACHE_SIZE >> L2PSIZE)
@@ -104,10 +104,9 @@ static inline int insert_metapage(struct page *page, struct metapage *mp)
 	if (PagePrivate(page))
 		a = mp_anchor(page);
 	else {
-		a = kmalloc(sizeof(struct meta_anchor), GFP_NOFS);
+		a = kzalloc(sizeof(struct meta_anchor), GFP_NOFS);
 		if (!a)
 			return -ENOMEM;
-		memset(a, 0, sizeof(struct meta_anchor));
 		set_page_private(page, (unsigned long)a);
 		SetPagePrivate(page);
 		kmap(page);
@@ -181,7 +180,7 @@ static inline void remove_metapage(struct page *page, struct metapage *mp)
 
 #endif
 
-static void init_once(void *foo, kmem_cache_t *cachep, unsigned long flags)
+static void init_once(void *foo, struct kmem_cache *cachep, unsigned long flags)
 {
 	struct metapage *mp = (struct metapage *)foo;
 
@@ -221,8 +220,8 @@ int __init metapage_init(void)
 	if (metapage_cache == NULL)
 		return -ENOMEM;
 
-	metapage_mempool = mempool_create(METAPOOL_MIN_PAGES, mempool_alloc_slab,
-					  mempool_free_slab, metapage_cache);
+	metapage_mempool = mempool_create_slab_pool(METAPOOL_MIN_PAGES,
+						    metapage_cache);
 
 	if (metapage_mempool == NULL) {
 		kmem_cache_destroy(metapage_cache);
@@ -258,7 +257,7 @@ static sector_t metapage_get_blocks(struct inode *inode, sector_t lblock,
 	int rc = 0;
 	int xflag;
 	s64 xaddr;
-	sector_t file_blocks = (inode->i_size + inode->i_blksize - 1) >>
+	sector_t file_blocks = (inode->i_size + inode->i_sb->s_blocksize - 1) >>
 			       inode->i_blkbits;
 
 	if (lblock >= file_blocks)
@@ -462,7 +461,7 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 				goto add_failed;
 		if (!bio->bi_size)
 			goto dump_bio;
-		
+
 		submit_bio(WRITE, bio);
 	}
 	if (redirty)
@@ -569,17 +568,16 @@ static int metapage_releasepage(struct page *page, gfp_t gfp_mask)
 	return ret;
 }
 
-static int metapage_invalidatepage(struct page *page, unsigned long offset)
+static void metapage_invalidatepage(struct page *page, unsigned long offset)
 {
 	BUG_ON(offset);
 
-	if (PageWriteback(page))
-		return 0;
+	BUG_ON(PageWriteback(page));
 
-	return metapage_releasepage(page, 0);
+	metapage_releasepage(page, 0);
 }
 
-struct address_space_operations jfs_metapage_aops = {
+const struct address_space_operations jfs_metapage_aops = {
 	.readpage	= metapage_readpage,
 	.writepage	= metapage_writepage,
 	.sync_page	= block_sync_page,
@@ -634,10 +632,9 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 		}
 		SetPageUptodate(page);
 	} else {
-		page = read_cache_page(mapping, page_index,
-			    (filler_t *)mapping->a_ops->readpage, NULL);
+		page = read_mapping_page(mapping, page_index, NULL);
 		if (IS_ERR(page) || !PageUptodate(page)) {
-			jfs_err("read_cache_page failed!");
+			jfs_err("read_mapping_page failed!");
 			return NULL;
 		}
 		lock_page(page);
@@ -651,7 +648,7 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 			jfs_err("logical_size = %d, size = %d",
 				mp->logical_size, size);
 			dump_stack();
-			goto unlock; 
+			goto unlock;
 		}
 		mp->count++;
 		lock_metapage(mp);
@@ -661,7 +658,7 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 					  "__get_metapage: using a "
 					  "discarded metapage");
 				discard_metapage(mp);
-				goto unlock; 
+				goto unlock;
 			}
 			clear_bit(META_discard, &mp->flag);
 		}
@@ -767,22 +764,9 @@ void release_metapage(struct metapage * mp)
 	} else if (mp->lsn)	/* discard_metapage doesn't remove it */
 		remove_from_logsync(mp);
 
-#if MPS_PER_PAGE == 1
-	/*
-	 * If we know this is the only thing in the page, we can throw
-	 * the page out of the page cache.  If pages are larger, we
-	 * don't want to do this.
-	 */
-
-	/* Retest mp->count since we may have released page lock */
-	if (test_bit(META_discard, &mp->flag) && !mp->count) {
-		clear_page_dirty(page);
-		ClearPageUptodate(page);
-	}
-#else
 	/* Try to keep metapages from using up too much memory */
 	drop_metapage(page, mp);
-#endif
+
 	unlock_page(page);
 	page_cache_release(page);
 }

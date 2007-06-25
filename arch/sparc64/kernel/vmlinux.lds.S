@@ -13,6 +13,7 @@ SECTIONS
   . = 0x4000;
   .text 0x0000000000404000 :
   {
+    _text = .;
     *(.text)
     SCHED_TEXT
     LOCK_TEXT
@@ -57,19 +58,29 @@ SECTIONS
   __setup_end = .;
   __initcall_start = .;
   .initcall.init : {
-	*(.initcall1.init) 
-	*(.initcall2.init) 
-	*(.initcall3.init) 
-	*(.initcall4.init) 
-	*(.initcall5.init) 
-	*(.initcall6.init) 
-	*(.initcall7.init)
+	INITCALLS
   }
   __initcall_end = .;
   __con_initcall_start = .;
   .con_initcall.init : { *(.con_initcall.init) }
   __con_initcall_end = .;
   SECURITY_INIT
+  . = ALIGN(4);
+  __tsb_ldquad_phys_patch = .;
+  .tsb_ldquad_phys_patch : { *(.tsb_ldquad_phys_patch) }
+  __tsb_ldquad_phys_patch_end = .;
+  __tsb_phys_patch = .;
+  .tsb_phys_patch : { *(.tsb_phys_patch) }
+  __tsb_phys_patch_end = .;
+  __cpuid_patch = .;
+  .cpuid_patch : { *(.cpuid_patch) }
+  __cpuid_patch_end = .;
+  __sun4v_1insn_patch = .;
+  .sun4v_1insn_patch : { *(.sun4v_1insn_patch) }
+  __sun4v_1insn_patch_end = .;
+  __sun4v_2insn_patch = .;
+  .sun4v_2insn_patch : { *(.sun4v_2insn_patch) }
+  __sun4v_2insn_patch_end = .;
   . = ALIGN(8192); 
   __initramfs_start = .;
   .init.ramfs : { *(.init.ramfs) }

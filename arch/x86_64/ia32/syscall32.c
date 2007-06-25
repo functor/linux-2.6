@@ -15,12 +15,17 @@
 #include <asm/tlbflush.h>
 #include <asm/ia32_unistd.h>
 
+#ifdef USE_INT80
+extern unsigned char syscall32_int80[], syscall32_int80_end[];
+#endif
 extern unsigned char syscall32_syscall[], syscall32_syscall_end[];
 extern unsigned char syscall32_sysenter[], syscall32_sysenter_end[];
 extern int sysctl_vsyscall32;
 
 char *syscall32_page; 
+#ifndef USE_INT80
 static int use_sysenter = -1;
+#endif
 
 static struct page *
 syscall32_nopage(struct vm_area_struct *vma, unsigned long adr, int *type)
@@ -43,14 +48,16 @@ static struct vm_operations_struct syscall32_vm_ops = {
 struct linux_binprm;
 
 /* Setup a VMA at program startup for the vsyscall page */
-int syscall32_setup_pages(struct linux_binprm *bprm, int exstack)
+int syscall32_setup_pages(struct linux_binprm *bprm, int exstack,
+			  unsigned long start_code,
+			  unsigned long interp_map_address)
 {
 	int npages = (VSYSCALL32_END - VSYSCALL32_BASE) >> PAGE_SHIFT;
 	struct vm_area_struct *vma;
 	struct mm_struct *mm = current->mm;
 	int ret;
 
-	vma = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	vma = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (!vma)
 		return -ENOMEM;
 
@@ -60,6 +67,13 @@ int syscall32_setup_pages(struct linux_binprm *bprm, int exstack)
 	vma->vm_end = VSYSCALL32_END;
 	/* MAYWRITE to allow gdb to COW and set breakpoints */
 	vma->vm_flags = VM_READ|VM_EXEC|VM_MAYREAD|VM_MAYEXEC|VM_MAYWRITE;
+	/*
+	 * Make sure the vDSO gets into every core dump.
+	 * Dumping its contents makes post-mortem fully interpretable later
+	 * without matching up the same kernel and hardware config to see
+	 * what PC values meant.
+	 */
+	vma->vm_flags |= VM_ALWAYSDUMP;
 	vma->vm_flags |= mm->def_flags;
 	vma->vm_page_prot = protection_map[vma->vm_flags & 7];
 	vma->vm_ops = &syscall32_vm_ops;
@@ -76,11 +90,27 @@ int syscall32_setup_pages(struct linux_binprm *bprm, int exstack)
 	return 0;
 }
 
+const char *arch_vma_name(struct vm_area_struct *vma)
+{
+	if (vma->vm_start == VSYSCALL32_BASE &&
+	    vma->vm_mm && vma->vm_mm->task_size == IA32_PAGE_OFFSET)
+		return "[vdso]";
+	return NULL;
+}
+
 static int __init init_syscall32(void)
 { 
 	syscall32_page = (void *)get_zeroed_page(GFP_KERNEL); 
 	if (!syscall32_page) 
 		panic("Cannot allocate syscall32 page"); 
+
+#ifdef USE_INT80
+	/*
+	 * At this point we use int 0x80.
+	 */
+	memcpy(syscall32_page, syscall32_int80,
+	       syscall32_int80_end - syscall32_int80);
+#else
  	if (use_sysenter > 0) {
  		memcpy(syscall32_page, syscall32_sysenter,
  		       syscall32_sysenter_end - syscall32_sysenter);
@@ -88,14 +118,20 @@ static int __init init_syscall32(void)
   		memcpy(syscall32_page, syscall32_syscall,
   		       syscall32_syscall_end - syscall32_syscall);
   	}	
+#endif
 	return 0;
 } 
-	
-__initcall(init_syscall32); 
+
+/*
+ * This must be done early in case we have an initrd containing 32-bit
+ * binaries (e.g., hotplug). This could be pushed upstream to arch/x86_64.
+ */	
+core_initcall(init_syscall32); 
 
 /* May not be __init: called during resume */
 void syscall32_cpu_init(void)
 {
+#ifndef USE_INT80
 	if (use_sysenter < 0)
  		use_sysenter = (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL);
 
@@ -106,4 +142,5 @@ void syscall32_cpu_init(void)
 	checking_wrmsrl(MSR_IA32_SYSENTER_EIP, (u64)ia32_sysenter_target);
 
 	wrmsrl(MSR_CSTAR, ia32_cstar_target);
+#endif
 }

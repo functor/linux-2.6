@@ -6,9 +6,10 @@
 #ifndef _i386_SETUP_H
 #define _i386_SETUP_H
 
-#define PFN_UP(x)	(((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
-#define PFN_DOWN(x)	((x) >> PAGE_SHIFT)
-#define PFN_PHYS(x)	((x) << PAGE_SHIFT)
+#define COMMAND_LINE_SIZE 256
+
+#ifdef __KERNEL__
+#include <linux/pfn.h>
 
 /*
  * Reserved space for vmalloc and iomap - defined in asm/page.h
@@ -17,7 +18,6 @@
 #define MAX_NONPAE_PFN	(1 << 20)
 
 #define PARAM_SIZE 4096
-#define COMMAND_LINE_SIZE 256
 
 #define OLD_CL_MAGIC_ADDR	0x90020
 #define OLD_CL_MAGIC		0xA33F
@@ -53,14 +53,38 @@ extern unsigned char boot_params[PARAM_SIZE];
 #define AUX_DEVICE_INFO (*(unsigned char *) (PARAM+0x1FF))
 #define LOADER_TYPE (*(unsigned char *) (PARAM+0x210))
 #define KERNEL_START (*(unsigned long *) (PARAM+0x214))
+#ifdef CONFIG_XEN
+#define INITRD_START (__pa(xen_start_info->mod_start))
+#define INITRD_SIZE (xen_start_info->mod_len)
+#define EDID_INFO   (*(struct edid_info *) (PARAM+0x440))
+#else
 #define INITRD_START (*(unsigned long *) (PARAM+0x218))
 #define INITRD_SIZE (*(unsigned long *) (PARAM+0x21c))
 #define EDID_INFO   (*(struct edid_info *) (PARAM+0x140))
+#endif /* CONFIG_XEN */
 #define EDD_NR     (*(unsigned char *) (PARAM+EDDNR))
 #define EDD_MBR_SIG_NR (*(unsigned char *) (PARAM+EDD_MBR_SIG_NR_BUF))
 #define EDD_MBR_SIGNATURE ((unsigned int *) (PARAM+EDD_MBR_SIG_BUF))
 #define EDD_BUF     ((struct edd_info *) (PARAM+EDDBUF))
 
+/*
+ * Do NOT EVER look at the BIOS memory size location.
+ * It does not work on many machines.
+ */
+#define LOWMEMSIZE()	(0x9f000)
+
+struct e820entry;
+
+char * __init machine_specific_memory_setup(void);
+char *memory_setup(void);
+
+int __init copy_e820_map(struct e820entry * biosmap, int nr_map);
+int __init sanitize_e820_map(struct e820entry * biosmap, char * pnr_map);
+void __init add_memory_region(unsigned long long start,
+			      unsigned long long size, int type);
+
 #endif /* __ASSEMBLY__ */
+
+#endif  /*  __KERNEL__  */
 
 #endif /* _i386_SETUP_H */

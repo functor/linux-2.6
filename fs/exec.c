@@ -22,7 +22,6 @@
  * formats. 
  */
 
-#include <linux/config.h>
 #include <linux/slab.h>
 #include <linux/file.h>
 #include <linux/mman.h>
@@ -39,18 +38,19 @@
 #include <linux/binfmts.h>
 #include <linux/swap.h>
 #include <linux/utsname.h>
+#include <linux/pid_namespace.h>
 #include <linux/module.h>
 #include <linux/namei.h>
 #include <linux/proc_fs.h>
-#include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/mount.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/rmap.h>
-#include <linux/acct.h>
+#include <linux/tsacct_kern.h>
 #include <linux/cn_proc.h>
+#include <linux/audit.h>
 #include <linux/vs_memory.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -60,7 +60,7 @@
 #endif
 
 int core_uses_pid;
-char core_pattern[65] = "core";
+char core_pattern[128] = "core";
 int suid_dumpable = 0;
 
 EXPORT_SYMBOL(suid_dumpable);
@@ -129,7 +129,7 @@ asmlinkage long sys_uselib(const char __user * library)
 	struct nameidata nd;
 	int error;
 
-	error = __user_path_lookup_open(library, LOOKUP_FOLLOW, &nd, FMODE_READ);
+	error = __user_path_lookup_open(library, LOOKUP_FOLLOW, &nd, FMODE_READ|FMODE_EXEC);
 	if (error)
 		goto out;
 
@@ -406,7 +406,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 		bprm->loader += stack_base;
 	bprm->exec += stack_base;
 
-	mpnt = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
+	mpnt = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (!mpnt)
 		return -ENOMEM;
 
@@ -480,7 +480,7 @@ struct file *open_exec(const char *name)
 	int err;
 	struct file *file;
 
-	err = path_lookup_open(AT_FDCWD, name, LOOKUP_FOLLOW, &nd, FMODE_READ);
+	err = path_lookup_open(AT_FDCWD, name, LOOKUP_FOLLOW, &nd, FMODE_READ|FMODE_EXEC);
 	file = ERR_PTR(err);
 
 	if (!err) {
@@ -489,8 +489,6 @@ struct file *open_exec(const char *name)
 		if (!(nd.mnt->mnt_flags & MNT_NOEXEC) &&
 		    S_ISREG(inode->i_mode)) {
 			int err = vfs_permission(&nd, MAY_EXEC);
-			if (!err && !(inode->i_mode & 0111))
-				err = -EACCES;
 			file = ERR_PTR(err);
 			if (!err) {
 				file = nameidata_to_filp(&nd, O_RDONLY);
@@ -564,7 +562,7 @@ static int exec_mmap(struct mm_struct *mm)
 	arch_pick_mmap_layout(mm);
 	if (old_mm) {
 		up_read(&old_mm->mmap_sem);
-		if (active_mm != old_mm) BUG();
+		BUG_ON(active_mm != old_mm);
 		mmput(old_mm);
 		return 0;
 	}
@@ -600,7 +598,7 @@ static int de_thread(struct task_struct *tsk)
 	if (!newsighand)
 		return -ENOMEM;
 
-	if (thread_group_empty(current))
+	if (thread_group_empty(tsk))
 		goto no_thread_group;
 
 	/*
@@ -619,14 +617,23 @@ static int de_thread(struct task_struct *tsk)
 		kmem_cache_free(sighand_cachep, newsighand);
 		return -EAGAIN;
 	}
-	zap_other_threads(current);
+
+	/*
+	 * child_reaper ignores SIGKILL, change it now.
+	 * Reparenting needs write_lock on tasklist_lock,
+	 * so it is safe to do it under read_lock.
+	 */
+	if (unlikely(tsk->group_leader == child_reaper(tsk)))
+		tsk->nsproxy->pid_ns->child_reaper = tsk;
+
+	zap_other_threads(tsk);
 	read_unlock(&tasklist_lock);
 
 	/*
 	 * Account for the thread group leader hanging around:
 	 */
 	count = 1;
-	if (!thread_group_leader(current)) {
+	if (!thread_group_leader(tsk)) {
 		count = 2;
 		/*
 		 * The SIGALRM timer survives the exec, but needs to point
@@ -635,14 +642,14 @@ static int de_thread(struct task_struct *tsk)
 		 * synchronize with any firing (by calling del_timer_sync)
 		 * before we can safely let the old group leader die.
 		 */
-		sig->real_timer.data = current;
+		sig->tsk = tsk;
 		spin_unlock_irq(lock);
 		if (hrtimer_cancel(&sig->real_timer))
 			hrtimer_restart(&sig->real_timer);
 		spin_lock_irq(lock);
 	}
 	while (atomic_read(&sig->count) > count) {
-		sig->group_exit_task = current;
+		sig->group_exit_task = tsk;
 		sig->notify_count = count;
 		__set_current_state(TASK_UNINTERRUPTIBLE);
 		spin_unlock_irq(lock);
@@ -658,76 +665,60 @@ static int de_thread(struct task_struct *tsk)
 	 * do is to wait for the thread group leader to become inactive,
 	 * and to assume its PID:
 	 */
-	if (!thread_group_leader(current)) {
-		struct task_struct *parent;
-		struct dentry *proc_dentry1, *proc_dentry2;
-		unsigned long ptrace;
-
+	if (!thread_group_leader(tsk)) {
 		/*
 		 * Wait for the thread group leader to be a zombie.
 		 * It should already be zombie at this point, most
 		 * of the time.
 		 */
-		leader = current->group_leader;
+		leader = tsk->group_leader;
 		while (leader->exit_state != EXIT_ZOMBIE)
 			yield();
 
-		spin_lock(&leader->proc_lock);
-		spin_lock(&current->proc_lock);
-		proc_dentry1 = proc_pid_unhash(current);
-		proc_dentry2 = proc_pid_unhash(leader);
+		/*
+		 * The only record we have of the real-time age of a
+		 * process, regardless of execs it's done, is start_time.
+		 * All the past CPU time is accumulated in signal_struct
+		 * from sister threads now dead.  But in this non-leader
+		 * exec, nothing survives from the original leader thread,
+		 * whose birth marks the true age of this process now.
+		 * When we take on its identity by switching to its PID, we
+		 * also take its birthdate (always earlier than our own).
+		 */
+		tsk->start_time = leader->start_time;
+
 		write_lock_irq(&tasklist_lock);
 
-		BUG_ON(leader->tgid != current->tgid);
-		BUG_ON(current->pid == current->tgid);
+		BUG_ON(leader->tgid != tsk->tgid);
+		BUG_ON(tsk->pid == tsk->tgid);
 		/*
 		 * An exec() starts a new thread group with the
 		 * TGID of the previous thread group. Rehash the
 		 * two threads with a switched PID, and release
 		 * the former thread group leader:
 		 */
-		ptrace = leader->ptrace;
-		parent = leader->parent;
-		if (unlikely(ptrace) && unlikely(parent == current)) {
-			/*
-			 * Joker was ptracing his own group leader,
-			 * and now he wants to be his own parent!
-			 * We can't have that.
-			 */
-			ptrace = 0;
-		}
 
-		ptrace_unlink(current);
-		ptrace_unlink(leader);
-		remove_parent(current);
-		remove_parent(leader);
+		/* Become a process group leader with the old leader's pid.
+		 * The old leader becomes a thread of the this thread group.
+		 * Note: The old leader also uses this pid until release_task
+		 *       is called.  Odd but simple and correct.
+		 */
+		detach_pid(tsk, PIDTYPE_PID);
+		tsk->pid = leader->pid;
+		attach_pid(tsk, PIDTYPE_PID,  tsk->pid);
+		transfer_pid(leader, tsk, PIDTYPE_PGID);
+		transfer_pid(leader, tsk, PIDTYPE_SID);
+		list_replace_rcu(&leader->tasks, &tsk->tasks);
 
-		switch_exec_pids(leader, current);
+		tsk->group_leader = tsk;
+		leader->group_leader = tsk;
 
-		current->parent = current->real_parent = leader->real_parent;
-		leader->parent = leader->real_parent = child_reaper;
-		current->group_leader = current;
-		leader->group_leader = leader;
-
-		add_parent(current, current->parent);
-		add_parent(leader, leader->parent);
-		if (ptrace) {
-			current->ptrace = ptrace;
-			__ptrace_link(current, parent);
-		}
-
-		list_del(&current->tasks);
-		list_add_tail(&current->tasks, &init_task.tasks);
-		current->exit_signal = SIGCHLD;
+		tsk->exit_signal = SIGCHLD;
 
 		BUG_ON(leader->exit_state != EXIT_ZOMBIE);
 		leader->exit_state = EXIT_DEAD;
 
 		write_unlock_irq(&tasklist_lock);
-		spin_unlock(&leader->proc_lock);
-		spin_unlock(&current->proc_lock);
-		proc_pid_flush(proc_dentry1);
-		proc_pid_flush(proc_dentry2);
         }
 
 	/*
@@ -754,16 +745,15 @@ no_thread_group:
 		/*
 		 * Move our state over to newsighand and switch it in.
 		 */
-		spin_lock_init(&newsighand->siglock);
 		atomic_set(&newsighand->count, 1);
 		memcpy(newsighand->action, oldsighand->action,
 		       sizeof(newsighand->action));
 
 		write_lock_irq(&tasklist_lock);
 		spin_lock(&oldsighand->siglock);
-		spin_lock(&newsighand->siglock);
+		spin_lock_nested(&newsighand->siglock, SINGLE_DEPTH_NESTING);
 
-		rcu_assign_pointer(current->sighand, newsighand);
+		rcu_assign_pointer(tsk->sighand, newsighand);
 		recalc_sigpending();
 
 		spin_unlock(&newsighand->siglock);
@@ -771,10 +761,10 @@ no_thread_group:
 		write_unlock_irq(&tasklist_lock);
 
 		if (atomic_dec_and_test(&oldsighand->count))
-			sighand_free(oldsighand);
+			kmem_cache_free(sighand_cachep, oldsighand);
 	}
 
-	BUG_ON(!thread_group_leader(current));
+	BUG_ON(!thread_group_leader(tsk));
 	return 0;
 }
 	
@@ -795,7 +785,7 @@ static void flush_old_files(struct files_struct * files)
 		j++;
 		i = j * __NFDBITS;
 		fdt = files_fdtable(files);
-		if (i >= fdt->max_fds || i >= fdt->max_fdset)
+		if (i >= fdt->max_fds)
 			break;
 		set = fdt->close_on_exec->fds_bits[j];
 		if (!set)
@@ -862,7 +852,6 @@ int flush_old_exec(struct linux_binprm * bprm)
 	bprm->mm = NULL;		/* We're using it now */
 
 	/* This is the point of no return */
-	steal_locks(files);
 	put_files_struct(files);
 
 	current->sas_ss_sp = current->sas_ss_size = 0;
@@ -912,8 +901,7 @@ int flush_old_exec(struct linux_binprm * bprm)
 	return 0;
 
 mmap_failed:
-	put_files_struct(current->files);
-	current->files = files;
+	reset_files_struct(current, files);
 out:
 	return retval;
 }
@@ -927,23 +915,17 @@ EXPORT_SYMBOL(flush_old_exec);
 int prepare_binprm(struct linux_binprm *bprm)
 {
 	int mode;
-	struct inode * inode = bprm->file->f_dentry->d_inode;
+	struct inode * inode = bprm->file->f_path.dentry->d_inode;
 	int retval;
 
 	mode = inode->i_mode;
-	/*
-	 * Check execute perms again - if the caller has CAP_DAC_OVERRIDE,
-	 * generic_permission lets a non-executable through
-	 */
-	if (!(mode & 0111))	/* with at least _one_ execute bit set */
-		return -EACCES;
 	if (bprm->file->f_op == NULL)
 		return -EACCES;
 
 	bprm->e_uid = current->euid;
 	bprm->e_gid = current->egid;
 
-	if(!(bprm->file->f_vfsmnt->mnt_flags & MNT_NOSUID)) {
+	if(!(bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)) {
 		/* Set-uid? */
 		if (mode & S_ISUID) {
 			current->personality &= ~PER_CLEAR_ON_SETID;
@@ -975,13 +957,7 @@ EXPORT_SYMBOL(prepare_binprm);
 
 static int unsafe_exec(struct task_struct *p)
 {
-	int unsafe = 0;
-	if (p->ptrace & PT_PTRACED) {
-		if (p->ptrace & PT_PTRACE_CAP)
-			unsafe |= LSM_UNSAFE_PTRACE_CAP;
-		else
-			unsafe |= LSM_UNSAFE_PTRACE;
-	}
+	int unsafe = tracehook_unsafe_exec(p);
 	if (atomic_read(&p->fs->count) > 1 ||
 	    atomic_read(&p->files->count) > 1 ||
 	    atomic_read(&p->sighand->count) > 1)
@@ -1082,6 +1058,11 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 	/* kernel module loader fixup */
 	/* so we don't try to load run modprobe in kernel space. */
 	set_fs(USER_DS);
+
+	retval = audit_bprm(bprm);
+	if (retval)
+		return retval;
+
 	retval = -ENOENT;
 	for (try=0; try<2; try++) {
 		read_lock(&binfmt_lock);
@@ -1101,6 +1082,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 				bprm->file = NULL;
 				current->did_exec = 1;
 				proc_exec_connector(current);
+				tracehook_report_exec(bprm, regs);
 				return retval;
 			}
 			read_lock(&binfmt_lock);
@@ -1146,10 +1128,9 @@ int do_execve(char * filename,
 	int i;
 
 	retval = -ENOMEM;
-	bprm = kmalloc(sizeof(*bprm), GFP_KERNEL);
+	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if (!bprm)
 		goto out_ret;
-	memset(bprm, 0, sizeof(*bprm));
 
 	file = open_exec(filename);
 	retval = PTR_ERR(file);
@@ -1262,13 +1243,17 @@ EXPORT_SYMBOL(set_binfmt);
  * name into corename, which must have space for at least
  * CORENAME_MAX_SIZE bytes plus one byte for the zero terminator.
  */
-static void format_corename(char *corename, const char *pattern, long signr)
+static int format_corename(char *corename, const char *pattern, long signr)
 {
 	const char *pat_ptr = pattern;
 	char *out_ptr = corename;
 	char *const out_end = corename + CORENAME_MAX_SIZE;
 	int rc;
 	int pid_in_pattern = 0;
+	int ispipe = 0;
+
+	if (*pattern == '|')
+		ispipe = 1;
 
 	/* Repeat as long as we have more pattern to process and more output
 	   space */
@@ -1323,7 +1308,7 @@ static void format_corename(char *corename, const char *pattern, long signr)
 			/* UNIX time of coredump */
 			case 't': {
 				struct timeval tv;
-				do_gettimeofday(&tv);
+				vx_gettimeofday(&tv);
 				rc = snprintf(out_ptr, out_end - out_ptr,
 					      "%lu", tv.tv_sec);
 				if (rc > out_end - out_ptr)
@@ -1335,7 +1320,7 @@ static void format_corename(char *corename, const char *pattern, long signr)
 			case 'h':
 				down_read(&uts_sem);
 				rc = snprintf(out_ptr, out_end - out_ptr,
-					      "%s", vx_new_uts(nodename));
+					      "%s", utsname()->nodename);
 				up_read(&uts_sem);
 				if (rc > out_end - out_ptr)
 					goto out;
@@ -1359,8 +1344,8 @@ static void format_corename(char *corename, const char *pattern, long signr)
 	 *
 	 * If core_pattern does not include a %p (as is the default)
 	 * and core_uses_pid is set, then .%pid will be appended to
-	 * the filename */
-	if (!pid_in_pattern
+	 * the filename. Do not do this for piped commands. */
+	if (!ispipe && !pid_in_pattern
             && (core_uses_pid || atomic_read(&current->mm->mm_users) != 1)) {
 		rc = snprintf(out_ptr, out_end - out_ptr,
 			      ".%d", current->tgid);
@@ -1368,71 +1353,107 @@ static void format_corename(char *corename, const char *pattern, long signr)
 			goto out;
 		out_ptr += rc;
 	}
-      out:
+out:
 	*out_ptr = 0;
+	return ispipe;
 }
 
-static void zap_threads (struct mm_struct *mm)
+static void zap_process(struct task_struct *start)
+{
+	struct task_struct *t;
+
+	start->signal->flags = SIGNAL_GROUP_EXIT;
+	start->signal->group_stop_count = 0;
+
+	t = start;
+	do {
+		if (t != current && t->mm) {
+			t->mm->core_waiters++;
+			sigaddset(&t->pending.signal, SIGKILL);
+			signal_wake_up(t, 1);
+		}
+	} while ((t = next_thread(t)) != start);
+}
+
+static inline int zap_threads(struct task_struct *tsk, struct mm_struct *mm,
+				int exit_code)
 {
 	struct task_struct *g, *p;
+	unsigned long flags;
+	int err = -EAGAIN;
+
+	spin_lock_irq(&tsk->sighand->siglock);
+	if (!(tsk->signal->flags & SIGNAL_GROUP_EXIT)) {
+		tsk->signal->group_exit_code = exit_code;
+		zap_process(tsk);
+		err = 0;
+	}
+	spin_unlock_irq(&tsk->sighand->siglock);
+	if (err)
+		return err;
+
+	if (atomic_read(&mm->mm_users) == mm->core_waiters + 1)
+		goto done;
+
+	rcu_read_lock();
+	for_each_process(g) {
+		if (g == tsk->group_leader)
+			continue;
+
+		p = g;
+		do {
+			if (p->mm) {
+				if (p->mm == mm) {
+					/*
+					 * p->sighand can't disappear, but
+					 * may be changed by de_thread()
+					 */
+					lock_task_sighand(p, &flags);
+					zap_process(p);
+					unlock_task_sighand(p, &flags);
+				}
+				break;
+			}
+		} while ((p = next_thread(p)) != g);
+	}
+	rcu_read_unlock();
+done:
+	return mm->core_waiters;
+}
+
+static int coredump_wait(int exit_code)
+{
 	struct task_struct *tsk = current;
-	struct completion *vfork_done = tsk->vfork_done;
-	int traced = 0;
+	struct mm_struct *mm = tsk->mm;
+	struct completion startup_done;
+	struct completion *vfork_done;
+	int core_waiters;
+
+	init_completion(&mm->core_done);
+	init_completion(&startup_done);
+	mm->core_startup_done = &startup_done;
+
+	core_waiters = zap_threads(tsk, mm, exit_code);
+	up_write(&mm->mmap_sem);
+
+	if (unlikely(core_waiters < 0))
+		goto fail;
 
 	/*
 	 * Make sure nobody is waiting for us to release the VM,
 	 * otherwise we can deadlock when we wait on each other
 	 */
+	vfork_done = tsk->vfork_done;
 	if (vfork_done) {
 		tsk->vfork_done = NULL;
 		complete(vfork_done);
 	}
 
-	read_lock(&tasklist_lock);
-	do_each_thread(g,p)
-		if (mm == p->mm && p != tsk) {
-			force_sig_specific(SIGKILL, p);
-			mm->core_waiters++;
-			if (unlikely(p->ptrace) &&
-			    unlikely(p->parent->mm == mm))
-				traced = 1;
-		}
-	while_each_thread(g,p);
-
-	read_unlock(&tasklist_lock);
-
-	if (unlikely(traced)) {
-		/*
-		 * We are zapping a thread and the thread it ptraces.
-		 * If the tracee went into a ptrace stop for exit tracing,
-		 * we could deadlock since the tracer is waiting for this
-		 * coredump to finish.  Detach them so they can both die.
-		 */
-		write_lock_irq(&tasklist_lock);
-		do_each_thread(g,p) {
-			if (mm == p->mm && p != tsk &&
-			    p->ptrace && p->parent->mm == mm) {
-				__ptrace_detach(p, 0);
-			}
-		} while_each_thread(g,p);
-		write_unlock_irq(&tasklist_lock);
-	}
-}
-
-static void coredump_wait(struct mm_struct *mm)
-{
-	DECLARE_COMPLETION(startup_done);
-	int core_waiters;
-
-	mm->core_startup_done = &startup_done;
-
-	zap_threads(mm);
-	core_waiters = mm->core_waiters;
-	up_write(&mm->mmap_sem);
-
 	if (core_waiters)
 		wait_for_completion(&startup_done);
+fail:
 	BUG_ON(mm->core_waiters);
+	return core_waiters;
 }
 
 int do_coredump(long signr, int exit_code, struct pt_regs * regs)
@@ -1445,6 +1466,7 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	int retval = 0;
 	int fsuid = current->fsuid;
 	int flag = 0;
+	int ispipe = 0;
 
 	binfmt = current->binfmt;
 	if (!binfmt || !binfmt->core_dump)
@@ -1466,22 +1488,9 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	}
 	mm->dumpable = 0;
 
-	retval = -EAGAIN;
-	spin_lock_irq(&current->sighand->siglock);
-	if (!(current->signal->flags & SIGNAL_GROUP_EXIT)) {
-		current->signal->flags = SIGNAL_GROUP_EXIT;
-		current->signal->group_exit_code = exit_code;
-		current->signal->group_stop_count = 0;
-		retval = 0;
-	}
-	spin_unlock_irq(&current->sighand->siglock);
-	if (retval) {
-		up_write(&mm->mmap_sem);
+	retval = coredump_wait(exit_code);
+	if (retval < 0)
 		goto fail;
-	}
-
-	init_completion(&mm->core_done);
-	coredump_wait(mm);
 
 	/*
 	 * Clear any false indication of pending signals that might
@@ -1497,24 +1506,36 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	 * uses lock_kernel()
 	 */
  	lock_kernel();
-	format_corename(corename, core_pattern, signr);
+	ispipe = format_corename(corename, core_pattern, signr);
 	unlock_kernel();
-	file = filp_open(corename, O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE | flag, 0600);
+ 	if (ispipe) {
+		/* SIGPIPE can happen, but it's just never processed */
+ 		if(call_usermodehelper_pipe(corename+1, NULL, NULL, &file)) {
+ 			printk(KERN_INFO "Core dump to %s pipe failed\n",
+			       corename);
+ 			goto fail_unlock;
+ 		}
+ 	} else
+ 		file = filp_open(corename,
+				 O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE | flag,
+				 0600);
 	if (IS_ERR(file))
 		goto fail_unlock;
-	inode = file->f_dentry->d_inode;
+	inode = file->f_path.dentry->d_inode;
 	if (inode->i_nlink > 1)
 		goto close_fail;	/* multiple links - don't dump */
-	if (d_unhashed(file->f_dentry))
+	if (!ispipe && d_unhashed(file->f_path.dentry))
 		goto close_fail;
 
-	if (!S_ISREG(inode->i_mode))
+	/* AK: actually i see no reason to not allow this for named pipes etc.,
+	   but keep the previous behaviour for now. */
+	if (!ispipe && !S_ISREG(inode->i_mode))
 		goto close_fail;
 	if (!file->f_op)
 		goto close_fail;
 	if (!file->f_op->write)
 		goto close_fail;
-	if (do_truncate(file->f_dentry, 0, 0, file) != 0)
+	if (!ispipe && do_truncate(file->f_path.dentry, 0, 0, file) != 0)
 		goto close_fail;
 
 	retval = binfmt->core_dump(signr, regs, file);

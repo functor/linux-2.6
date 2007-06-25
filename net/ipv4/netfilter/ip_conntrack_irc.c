@@ -22,7 +22,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/netfilter.h>
 #include <linux/ip.h>
@@ -115,6 +114,7 @@ static int help(struct sk_buff **pskb,
 	u_int16_t dcc_port;
 	int i, ret = NF_ACCEPT;
 	char *addr_beg_p, *addr_end_p;
+	typeof(ip_nat_irc_hook) ip_nat_irc;
 
 	DEBUGP("entered\n");
 
@@ -219,14 +219,16 @@ static int help(struct sk_buff **pskb,
 				    IPPROTO_TCP }});
 			exp->mask = ((struct ip_conntrack_tuple)
 				{ { 0, { 0 } },
-				  { 0xFFFFFFFF, { .tcp = { 0xFFFF } }, 0xFF }});
+				  { htonl(0xFFFFFFFF),
+					{ .tcp = { htons(0xFFFF) } }, 0xFF }});
 			exp->expectfn = NULL;
 			exp->flags = 0;
-			if (ip_nat_irc_hook)
-				ret = ip_nat_irc_hook(pskb, ctinfo, 
-						      addr_beg_p - ib_ptr,
-						      addr_end_p - addr_beg_p,
-						      exp);
+			ip_nat_irc = rcu_dereference(ip_nat_irc_hook);
+			if (ip_nat_irc)
+				ret = ip_nat_irc(pskb, ctinfo,
+						 addr_beg_p - ib_ptr,
+						 addr_end_p - addr_beg_p,
+						 exp);
 			else if (ip_conntrack_expect_related(exp) != 0)
 				ret = NF_DROP;
 			ip_conntrack_expect_put(exp);
@@ -242,9 +244,9 @@ static int help(struct sk_buff **pskb,
 static struct ip_conntrack_helper irc_helpers[MAX_PORTS];
 static char irc_names[MAX_PORTS][sizeof("irc-65535")];
 
-static void fini(void);
+static void ip_conntrack_irc_fini(void);
 
-static int __init init(void)
+static int __init ip_conntrack_irc_init(void)
 {
 	int i, ret;
 	struct ip_conntrack_helper *hlpr;
@@ -267,7 +269,7 @@ static int __init init(void)
 		hlpr = &irc_helpers[i];
 		hlpr->tuple.src.u.tcp.port = htons(ports[i]);
 		hlpr->tuple.dst.protonum = IPPROTO_TCP;
-		hlpr->mask.src.u.tcp.port = 0xFFFF;
+		hlpr->mask.src.u.tcp.port = htons(0xFFFF);
 		hlpr->mask.dst.protonum = 0xFF;
 		hlpr->max_expected = max_dcc_channels;
 		hlpr->timeout = dcc_timeout;
@@ -288,7 +290,7 @@ static int __init init(void)
 		if (ret) {
 			printk("ip_conntrack_irc: ERROR registering port %d\n",
 				ports[i]);
-			fini();
+			ip_conntrack_irc_fini();
 			return -EBUSY;
 		}
 	}
@@ -297,7 +299,7 @@ static int __init init(void)
 
 /* This function is intentionally _NOT_ defined as __exit, because 
  * it is needed by the init function */
-static void fini(void)
+static void ip_conntrack_irc_fini(void)
 {
 	int i;
 	for (i = 0; i < ports_c; i++) {
@@ -308,5 +310,5 @@ static void fini(void)
 	kfree(irc_buffer);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ip_conntrack_irc_init);
+module_exit(ip_conntrack_irc_fini);

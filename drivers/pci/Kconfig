@@ -5,28 +5,41 @@ config PCI_MSI
 	bool "Message Signaled Interrupts (MSI and MSI-X)"
 	depends on PCI
 	depends on (X86_LOCAL_APIC && X86_IO_APIC) || IA64
+	depends on !XEN
 	help
 	   This allows device drivers to enable MSI (Message Signaled
 	   Interrupts).  Message Signaled Interrupts enable a device to
 	   generate an interrupt using an inbound Memory Write on its
 	   PCI bus instead of asserting a device IRQ pin.
 
+	   Use of PCI MSI interrupts can be disabled at kernel boot time
+	   by using the 'pci=nomsi' option.  This disables MSI for the
+	   entire system.
+
 	   If you don't know what to do here, say N.
 
-config PCI_LEGACY_PROC
-	bool "Legacy /proc/pci interface"
-	depends on PCI
-	---help---
-	  This feature enables a procfs file -- /proc/pci -- that provides a 
-	  summary of PCI devices in the system. 
+config PCI_MULTITHREAD_PROBE
+	bool "PCI Multi-threaded probe (EXPERIMENTAL)"
+	depends on PCI && EXPERIMENTAL && BROKEN
+	help
+	  Say Y here if you want the PCI core to spawn a new thread for
+	  every PCI device that is probed.  This can cause a huge
+	  speedup in boot times on multiprocessor machines, and even a
+	  smaller speedup on single processor machines.
 
-	  This feature has been deprecated as of v2.5.53, in favor of using the 
-	  tool lspci(8). This feature may be removed at a future date. 
+	  But it can also cause lots of bad things to happen.  A number
+	  of PCI drivers cannot properly handle running in this way,
+	  some will just not work properly at all, while others might
+	  decide to blow up power supplies with a huge load all at once,
+	  so use this option at your own risk.
 
-	  lspci can provide the same data, as well as much more. lspci is a part of
-	  the pci-utils package, which should be installed by your distribution. 
-	  See <file:Documentation/Changes> for information on where to get the latest
-	  version. 
+	  It is very unwise to use this option if you are not using a
+	  boot process that can handle devices being created in any
+	  order.  A program that can create persistent block and network
+	  device names (like udev) is a good idea if you wish to use
+	  this option.
+
+	  Again, use this option at your own risk, you have been warned!
 
 	  When in doubt, say N.
 
@@ -40,3 +53,11 @@ config PCI_DEBUG
 
 	  When in doubt, say N.
 
+config HT_IRQ
+	bool "Interrupts on hypertransport devices"
+	default y
+	depends on PCI && X86_LOCAL_APIC && X86_IO_APIC && !XEN
+	help
+	   This allows native hypertransport devices to use interrupts.
+
+	   If unsure say Y.

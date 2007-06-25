@@ -37,6 +37,8 @@
 #include <linux/init.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
+#include <linux/sysfs.h>
 
 /*
  * Addresses to scan
@@ -89,8 +91,8 @@ static int fscpos_attach_adapter(struct i2c_adapter *adapter);
 static int fscpos_detect(struct i2c_adapter *adapter, int address, int kind);
 static int fscpos_detach_client(struct i2c_client *client);
 
-static int fscpos_read_value(struct i2c_client *client, u8 register);
-static int fscpos_write_value(struct i2c_client *client, u8 register, u8 value);
+static int fscpos_read_value(struct i2c_client *client, u8 reg);
+static int fscpos_write_value(struct i2c_client *client, u8 reg, u8 value);
 static struct fscpos_data *fscpos_update_device(struct device *dev);
 static void fscpos_init_client(struct i2c_client *client);
 
@@ -114,7 +116,7 @@ static struct i2c_driver fscpos_driver = {
 struct fscpos_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid; 		/* 0 until following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -208,13 +210,13 @@ static ssize_t set_fan_ripple(struct i2c_client *client, struct fscpos_data
 		return -EINVAL;
 	}
 	
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	/* bits 2..7 reserved => mask with 0x03 */
 	data->fan_ripple[nr - 1] &= ~0x03;
 	data->fan_ripple[nr - 1] |= v;
 	
 	fscpos_write_value(client, reg, data->fan_ripple[nr - 1]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -232,10 +234,10 @@ static ssize_t set_pwm(struct i2c_client *client, struct fscpos_data *data,
 	if (v < 0) v = 0;
 	if (v > 255) v = 255;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->pwm[nr - 1] = v;
 	fscpos_write_value(client, reg, data->pwm[nr - 1]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -278,11 +280,11 @@ static ssize_t set_wdog_control(struct i2c_client *client, struct fscpos_data
 	/* bits 0..3 reserved => mask with 0xf0 */
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0xf0;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->wdog_control &= ~0xf0;
 	data->wdog_control |= v;
 	fscpos_write_value(client, reg, data->wdog_control);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -304,10 +306,10 @@ static ssize_t set_wdog_state(struct i2c_client *client, struct fscpos_data
 		return -EINVAL;
 	}
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->wdog_state &= ~v;
 	fscpos_write_value(client, reg, v);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -321,10 +323,10 @@ static ssize_t set_wdog_preset(struct i2c_client *client, struct fscpos_data
 {
 	unsigned long v = simple_strtoul(buf, NULL, 10) & 0xff;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->wdog_preset = v;
 	fscpos_write_value(client, reg, data->wdog_preset);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -431,6 +433,44 @@ static DEVICE_ATTR(in0_input, S_IRUGO, show_volt_12, NULL);
 static DEVICE_ATTR(in1_input, S_IRUGO, show_volt_5, NULL);
 static DEVICE_ATTR(in2_input, S_IRUGO, show_volt_batt, NULL);
 
+static struct attribute *fscpos_attributes[] = {
+	&dev_attr_event.attr,
+	&dev_attr_in0_input.attr,
+	&dev_attr_in1_input.attr,
+	&dev_attr_in2_input.attr,
+
+	&dev_attr_wdog_control.attr,
+	&dev_attr_wdog_preset.attr,
+	&dev_attr_wdog_state.attr,
+
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp1_status.attr,
+	&dev_attr_temp1_reset.attr,
+	&dev_attr_temp2_input.attr,
+	&dev_attr_temp2_status.attr,
+	&dev_attr_temp2_reset.attr,
+	&dev_attr_temp3_input.attr,
+	&dev_attr_temp3_status.attr,
+	&dev_attr_temp3_reset.attr,
+
+	&dev_attr_fan1_input.attr,
+	&dev_attr_fan1_status.attr,
+	&dev_attr_fan1_ripple.attr,
+	&dev_attr_pwm1.attr,
+	&dev_attr_fan2_input.attr,
+	&dev_attr_fan2_status.attr,
+	&dev_attr_fan2_ripple.attr,
+	&dev_attr_pwm2.attr,
+	&dev_attr_fan3_input.attr,
+	&dev_attr_fan3_status.attr,
+	&dev_attr_fan3_ripple.attr,
+	NULL
+};
+
+static const struct attribute_group fscpos_group = {
+	.attrs = fscpos_attributes,
+};
+
 static int fscpos_attach_adapter(struct i2c_adapter *adapter)
 {
 	if (!(adapter->class & I2C_CLASS_HWMON))
@@ -483,7 +523,7 @@ static int fscpos_detect(struct i2c_adapter *adapter, int address, int kind)
 	strlcpy(new_client->name, "fscpos", I2C_NAME_SIZE);
 
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -496,42 +536,19 @@ static int fscpos_detect(struct i2c_adapter *adapter, int address, int kind)
 	dev_info(&new_client->dev, "Found fscpos chip, rev %u\n", data->revision);
 
 	/* Register sysfs hooks */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &fscpos_group)))
+		goto exit_detach;
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
+		goto exit_remove_files;
 	}
-
-	device_create_file(&new_client->dev, &dev_attr_event);
-	device_create_file(&new_client->dev, &dev_attr_in0_input);
-	device_create_file(&new_client->dev, &dev_attr_in1_input);
-	device_create_file(&new_client->dev, &dev_attr_in2_input);
-	device_create_file(&new_client->dev, &dev_attr_wdog_control);
-	device_create_file(&new_client->dev, &dev_attr_wdog_preset);
-	device_create_file(&new_client->dev, &dev_attr_wdog_state);
-	device_create_file(&new_client->dev, &dev_attr_temp1_input);
-	device_create_file(&new_client->dev, &dev_attr_temp1_status);
-	device_create_file(&new_client->dev, &dev_attr_temp1_reset);
-	device_create_file(&new_client->dev, &dev_attr_temp2_input);
-	device_create_file(&new_client->dev, &dev_attr_temp2_status);
-	device_create_file(&new_client->dev, &dev_attr_temp2_reset);
-	device_create_file(&new_client->dev, &dev_attr_temp3_input);
-	device_create_file(&new_client->dev, &dev_attr_temp3_status);
-	device_create_file(&new_client->dev, &dev_attr_temp3_reset);
-	device_create_file(&new_client->dev, &dev_attr_fan1_input);
-	device_create_file(&new_client->dev, &dev_attr_fan1_status);
-	device_create_file(&new_client->dev, &dev_attr_fan1_ripple);
-	device_create_file(&new_client->dev, &dev_attr_pwm1);
-	device_create_file(&new_client->dev, &dev_attr_fan2_input);
-	device_create_file(&new_client->dev, &dev_attr_fan2_status);
-	device_create_file(&new_client->dev, &dev_attr_fan2_ripple);
-	device_create_file(&new_client->dev, &dev_attr_pwm2);
-	device_create_file(&new_client->dev, &dev_attr_fan3_input);
-	device_create_file(&new_client->dev, &dev_attr_fan3_status);
-	device_create_file(&new_client->dev, &dev_attr_fan3_ripple);
 
 	return 0;
 
+exit_remove_files:
+	sysfs_remove_group(&new_client->dev.kobj, &fscpos_group);
 exit_detach:
 	i2c_detach_client(new_client);
 exit_free:
@@ -546,6 +563,7 @@ static int fscpos_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &fscpos_group);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -579,7 +597,7 @@ static struct fscpos_data *fscpos_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct fscpos_data *data = i2c_get_clientdata(client);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + 2 * HZ) || !data->valid) {
 		int i;
@@ -625,7 +643,7 @@ static struct fscpos_data *fscpos_update_device(struct device *dev)
 		data->last_updated = jiffies;
 		data->valid = 1;
 	}
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return data;
 }
 

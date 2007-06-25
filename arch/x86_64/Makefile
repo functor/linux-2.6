@@ -24,35 +24,59 @@
 LDFLAGS		:= -m elf_x86_64
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 LDFLAGS_vmlinux :=
-
 CHECKFLAGS      += -D__x86_64__ -m64
 
+cflags-y	:=
+cflags-kernel-y	:=
 cflags-$(CONFIG_MK8) += $(call cc-option,-march=k8)
 cflags-$(CONFIG_MPSC) += $(call cc-option,-march=nocona)
-CFLAGS += $(cflags-y)
+# gcc doesn't support -march=core2 yet as of gcc 4.3, but I hope it
+# will eventually. Use -mtune=generic as fallback
+cflags-$(CONFIG_MCORE2) += \
+	$(call cc-option,-march=core2,$(call cc-option,-mtune=generic))
+cflags-$(CONFIG_GENERIC_CPU) += $(call cc-option,-mtune=generic)
 
-CFLAGS += -m64
-CFLAGS += -mno-red-zone
-CFLAGS += -mcmodel=kernel
-CFLAGS += -pipe
+cppflags-$(CONFIG_XEN) += \
+	-D__XEN_INTERFACE_VERSION__=$(CONFIG_XEN_INTERFACE_VERSION)
+CPPFLAGS += $(cppflags-y)
+
+cflags-y += -m64
+cflags-y += -mno-red-zone
+cflags-y += -mcmodel=kernel
+cflags-y += -pipe
+cflags-kernel-$(CONFIG_REORDER) += -ffunction-sections
 # this makes reading assembly source easier, but produces worse code
 # actually it makes the kernel smaller too.
-CFLAGS += -fno-reorder-blocks	
-CFLAGS += -Wno-sign-compare
-ifneq ($(CONFIG_UNWIND_INFO),y)
-CFLAGS += -fno-asynchronous-unwind-tables
-endif
+cflags-y += -fno-reorder-blocks
+cflags-y += -Wno-sign-compare
+cflags-y += -fno-asynchronous-unwind-tables
 ifneq ($(CONFIG_DEBUG_INFO),y)
 # -fweb shrinks the kernel a bit, but the difference is very small
 # it also messes up debugging, so don't use it for now.
-#CFLAGS += $(call cc-option,-fweb)
+#cflags-y += $(call cc-option,-fweb)
 endif
 # -funit-at-a-time shrinks the kernel .text considerably
 # unfortunately it makes reading oopses harder.
-CFLAGS += $(call cc-option,-funit-at-a-time)
+cflags-y += $(call cc-option,-funit-at-a-time)
 # prevent gcc from generating any FP code by mistake
-CFLAGS += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
+cflags-y += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
+# this works around some issues with generating unwind tables in older gccs
+# newer gccs do it by default
+cflags-y += -maccumulate-outgoing-args
 
+# do binutils support CFI?
+cflags-y += $(call as-instr,.cfi_startproc\n.cfi_endproc,-DCONFIG_AS_CFI=1,)
+AFLAGS += $(call as-instr,.cfi_startproc\n.cfi_endproc,-DCONFIG_AS_CFI=1,)
+
+# is .cfi_signal_frame supported too?
+cflags-y += $(call as-instr,.cfi_startproc\n.cfi_signal_frame\n.cfi_endproc,-DCONFIG_AS_CFI_SIGNAL_FRAME=1,)
+AFLAGS += $(call as-instr,.cfi_startproc\n.cfi_signal_frame\n.cfi_endproc,-DCONFIG_AS_CFI_SIGNAL_FRAME=1,)
+
+cflags-$(CONFIG_CC_STACKPROTECTOR) += $(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-x86_64-has-stack-protector.sh "$(CC)" -fstack-protector )
+cflags-$(CONFIG_CC_STACKPROTECTOR_ALL) += $(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-x86_64-has-stack-protector.sh "$(CC)" -fstack-protector-all )
+
+CFLAGS += $(cflags-y)
+CFLAGS_KERNEL += $(cflags-kernel-y)
 AFLAGS += -m64
 
 head-y := arch/x86_64/kernel/head.o arch/x86_64/kernel/head64.o arch/x86_64/kernel/init_task.o
@@ -67,9 +91,24 @@ drivers-$(CONFIG_OPROFILE)		+= arch/x86_64/oprofile/
 
 boot := arch/x86_64/boot
 
-.PHONY: bzImage bzlilo install archmrproper \
-	fdimage fdimage144 fdimage288 archclean
+PHONY += bzImage bzlilo install archmrproper \
+	 fdimage fdimage144 fdimage288 isoimage archclean
 
+ifdef CONFIG_XEN
+CPPFLAGS := -Iinclude$(if $(KBUILD_SRC),2)/asm/mach-xen $(CPPFLAGS)
+head-y := arch/x86_64/kernel/head-xen.o arch/x86_64/kernel/head64.o arch/x86_64/kernel/init_task.o
+LDFLAGS_vmlinux := -e _start
+boot := arch/i386/boot-xen
+.PHONY: vmlinuz
+#Default target when executing "make"
+all: vmlinuz
+
+vmlinuz: vmlinux
+	$(Q)$(MAKE) $(build)=$(boot) $@
+
+install:
+	$(Q)$(MAKE) $(build)=$(boot) XENGUEST=$(XENGUEST) $@
+else
 #Default target when executing "make"
 all: bzImage
 
@@ -85,11 +124,12 @@ bzlilo: vmlinux
 bzdisk: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) zdisk
 
-fdimage fdimage144 fdimage288: vmlinux
+fdimage fdimage144 fdimage288 isoimage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) $@
 
 install:
 	$(Q)$(MAKE) $(build)=$(boot) BOOTIMAGE=$(BOOTIMAGE) $@ 
+endif
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
@@ -97,11 +137,16 @@ archclean:
 define archhelp
   echo  '* bzImage	- Compressed kernel image (arch/$(ARCH)/boot/bzImage)'
   echo  '  install	- Install kernel using'
-  echo  '                  (your) ~/bin/installkernel or'
-  echo  '                  (distribution) /sbin/installkernel or'
-  echo  '        	  install to $$(INSTALL_PATH) and run lilo'
+  echo  '		   (your) ~/bin/installkernel or'
+  echo  '		   (distribution) /sbin/installkernel or'
+  echo  '		   install to $$(INSTALL_PATH) and run lilo'
+  echo  '  bzdisk       - Create a boot floppy in /dev/fd0'
+  echo  '  fdimage      - Create a boot floppy image'
+  echo  '  isoimage     - Create a boot CD-ROM image'
 endef
 
-CLEAN_FILES += arch/$(ARCH)/boot/fdimage arch/$(ARCH)/boot/mtools.conf
+CLEAN_FILES += arch/$(ARCH)/boot/fdimage \
+	       arch/$(ARCH)/boot/image.iso \
+	       arch/$(ARCH)/boot/mtools.conf
 
 

@@ -8,7 +8,6 @@
  * Copyright (C) 1999,2000 Anton Blanchard (anton@samba.org)
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -403,7 +402,7 @@ void srmmu_nocache_calcsize(void)
 	srmmu_nocache_end = SRMMU_NOCACHE_VADDR + srmmu_nocache_size;
 }
 
-void srmmu_nocache_init(void)
+void __init srmmu_nocache_init(void)
 {
 	unsigned int bitmap_bits;
 	pgd_t *pgd;
@@ -1302,7 +1301,12 @@ void __init srmmu_paging_init(void)
 
 	flush_cache_all();
 	srmmu_set_ctable_ptr((unsigned long)srmmu_ctx_table_phys);
+#ifdef CONFIG_SMP
+	/* Stop from hanging here... */
+	local_flush_tlb_all();
+#else
 	flush_tlb_all();
+#endif
 	poke_srmmu();
 
 #ifdef CONFIG_SUN_IO
@@ -1419,6 +1423,7 @@ static void __init init_vac_layout(void)
 				max_size = vac_cache_size;
 			if(vac_line_size < min_line_size)
 				min_line_size = vac_line_size;
+			//FIXME: cpus not contiguous!!
 			cpu++;
 			if (cpu >= NR_CPUS || !cpu_online(cpu))
 				break;
@@ -2130,6 +2135,13 @@ static unsigned long srmmu_pte_to_pgoff(pte_t pte)
 	return pte_val(pte) >> SRMMU_PTE_FILE_SHIFT;
 }
 
+static pgprot_t srmmu_pgprot_noncached(pgprot_t prot)
+{
+	prot &= ~__pgprot(SRMMU_CACHE);
+
+	return prot;
+}
+
 /* Load up routines and constants for sun4m and sun4d mmu */
 void __init ld_mmu_srmmu(void)
 {
@@ -2150,9 +2162,9 @@ void __init ld_mmu_srmmu(void)
 	BTFIXUPSET_INT(page_readonly, pgprot_val(SRMMU_PAGE_RDONLY));
 	BTFIXUPSET_INT(page_kernel, pgprot_val(SRMMU_PAGE_KERNEL));
 	page_kernel = pgprot_val(SRMMU_PAGE_KERNEL);
-	pg_iobits = SRMMU_VALID | SRMMU_WRITE | SRMMU_REF;
 
 	/* Functions */
+	BTFIXUPSET_CALL(pgprot_noncached, srmmu_pgprot_noncached, BTFIXUPCALL_NORM);
 #ifndef CONFIG_SMP	
 	BTFIXUPSET_CALL(___xchg32, ___xchg32_sun4md, BTFIXUPCALL_SWAPG1G2);
 #endif
@@ -2163,7 +2175,7 @@ void __init ld_mmu_srmmu(void)
 
 	BTFIXUPSET_CALL(pte_pfn, srmmu_pte_pfn, BTFIXUPCALL_NORM);
 	BTFIXUPSET_CALL(pmd_page, srmmu_pmd_page, BTFIXUPCALL_NORM);
-	BTFIXUPSET_CALL(pgd_page, srmmu_pgd_page, BTFIXUPCALL_NORM);
+	BTFIXUPSET_CALL(pgd_page_vaddr, srmmu_pgd_page, BTFIXUPCALL_NORM);
 
 	BTFIXUPSET_SETHI(none_mask, 0xF0000000);
 

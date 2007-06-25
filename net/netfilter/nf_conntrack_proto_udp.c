@@ -22,13 +22,15 @@
 #include <linux/ipv6.h>
 #include <net/ip6_checksum.h>
 #include <net/checksum.h>
+
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6.h>
-#include <net/netfilter/nf_conntrack_protocol.h>
+#include <net/netfilter/nf_conntrack_l4proto.h>
+#include <net/netfilter/nf_conntrack_ecache.h>
 
-unsigned int nf_ct_udp_timeout = 30*HZ;
-unsigned int nf_ct_udp_timeout_stream = 180*HZ;
+static unsigned int nf_ct_udp_timeout __read_mostly = 30*HZ;
+static unsigned int nf_ct_udp_timeout_stream __read_mostly = 180*HZ;
 
 static int udp_pkt_to_tuple(const struct sk_buff *skb,
 			     unsigned int dataoff,
@@ -103,8 +105,7 @@ static int udp_new(struct nf_conn *conntrack, const struct sk_buff *skb,
 static int udp_error(struct sk_buff *skb, unsigned int dataoff,
 		     enum ip_conntrack_info *ctinfo,
 		     int pf,
-		     unsigned int hooknum,
-		     int (*csum)(const struct sk_buff *, unsigned int))
+		     unsigned int hooknum)
 {
 	unsigned int udplen = skb->len - dataoff;
 	struct udphdr _hdr, *hdr;
@@ -132,13 +133,12 @@ static int udp_error(struct sk_buff *skb, unsigned int dataoff,
 
 	/* Checksum invalid? Ignore.
 	 * We skip checking packets on the outgoing path
-	 * because the semantic of CHECKSUM_HW is different there
-	 * and moreover root might send raw packets.
+	 * because the checksum is assumed to be correct.
 	 * FIXME: Source route IP option packets --RR */
-	if (((pf == PF_INET && hooknum == NF_IP_PRE_ROUTING) ||
-	     (pf == PF_INET6 && hooknum == NF_IP6_PRE_ROUTING))
-	    && skb->ip_summed != CHECKSUM_UNNECESSARY
-	    && csum(skb, dataoff)) {
+	if (nf_conntrack_checksum &&
+	    ((pf == PF_INET && hooknum == NF_IP_PRE_ROUTING) ||
+	     (pf == PF_INET6 && hooknum == NF_IP6_PRE_ROUTING)) &&
+	    nf_checksum(skb, hooknum, dataoff, IPPROTO_UDP, pf)) {
 		if (LOG_INVALID(IPPROTO_UDP))
 			nf_log_packet(pf, 0, skb, NULL, NULL, NULL,
 				"nf_ct_udp: bad UDP checksum ");
@@ -148,48 +148,59 @@ static int udp_error(struct sk_buff *skb, unsigned int dataoff,
 	return NF_ACCEPT;
 }
 
-static int csum4(const struct sk_buff *skb, unsigned int dataoff)
-{
-	return csum_tcpudp_magic(skb->nh.iph->saddr, skb->nh.iph->daddr,
-				 skb->len - dataoff, IPPROTO_UDP,
-				 skb->ip_summed == CHECKSUM_HW ? skb->csum
-				 : skb_checksum(skb, dataoff,
-						skb->len - dataoff, 0));
-}
+#ifdef CONFIG_SYSCTL
+static unsigned int udp_sysctl_table_users;
+static struct ctl_table_header *udp_sysctl_header;
+static struct ctl_table udp_sysctl_table[] = {
+	{
+		.ctl_name	= NET_NF_CONNTRACK_UDP_TIMEOUT,
+		.procname	= "nf_conntrack_udp_timeout",
+		.data		= &nf_ct_udp_timeout,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec_jiffies,
+	},
+	{
+		.ctl_name	= NET_NF_CONNTRACK_UDP_TIMEOUT_STREAM,
+		.procname	= "nf_conntrack_udp_timeout_stream",
+		.data		= &nf_ct_udp_timeout_stream,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec_jiffies,
+	},
+	{
+		.ctl_name	= 0
+	}
+};
+#ifdef CONFIG_NF_CONNTRACK_PROC_COMPAT
+static struct ctl_table udp_compat_sysctl_table[] = {
+	{
+		.ctl_name	= NET_IPV4_NF_CONNTRACK_UDP_TIMEOUT,
+		.procname	= "ip_conntrack_udp_timeout",
+		.data		= &nf_ct_udp_timeout,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec_jiffies,
+	},
+	{
+		.ctl_name	= NET_IPV4_NF_CONNTRACK_UDP_TIMEOUT_STREAM,
+		.procname	= "ip_conntrack_udp_timeout_stream",
+		.data		= &nf_ct_udp_timeout_stream,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec_jiffies,
+	},
+	{
+		.ctl_name	= 0
+	}
+};
+#endif /* CONFIG_NF_CONNTRACK_PROC_COMPAT */
+#endif /* CONFIG_SYSCTL */
 
-static int csum6(const struct sk_buff *skb, unsigned int dataoff)
-{
-	return csum_ipv6_magic(&skb->nh.ipv6h->saddr, &skb->nh.ipv6h->daddr,
-			       skb->len - dataoff, IPPROTO_UDP,
-			       skb->ip_summed == CHECKSUM_HW
-			       ? csum_sub(skb->csum,
-					  skb_checksum(skb, 0, dataoff, 0))
-			       : skb_checksum(skb, dataoff, skb->len - dataoff,
-					      0));
-}
-
-static int udp_error4(struct sk_buff *skb,
-		      unsigned int dataoff,
-		      enum ip_conntrack_info *ctinfo,
-		      int pf,
-		      unsigned int hooknum)
-{
-	return udp_error(skb, dataoff, ctinfo, pf, hooknum, csum4);
-}
-
-static int udp_error6(struct sk_buff *skb,
-		      unsigned int dataoff,
-		      enum ip_conntrack_info *ctinfo,
-		      int pf,
-		      unsigned int hooknum)
-{
-	return udp_error(skb, dataoff, ctinfo, pf, hooknum, csum6);
-}
-
-struct nf_conntrack_protocol nf_conntrack_protocol_udp4 =
+struct nf_conntrack_l4proto nf_conntrack_l4proto_udp4 =
 {
 	.l3proto		= PF_INET,
-	.proto			= IPPROTO_UDP,
+	.l4proto		= IPPROTO_UDP,
 	.name			= "udp",
 	.pkt_to_tuple		= udp_pkt_to_tuple,
 	.invert_tuple		= udp_invert_tuple,
@@ -197,18 +208,27 @@ struct nf_conntrack_protocol nf_conntrack_protocol_udp4 =
 	.print_conntrack	= udp_print_conntrack,
 	.packet			= udp_packet,
 	.new			= udp_new,
-	.error			= udp_error4,
+	.error			= udp_error,
 #if defined(CONFIG_NF_CT_NETLINK) || \
     defined(CONFIG_NF_CT_NETLINK_MODULE)
 	.tuple_to_nfattr	= nf_ct_port_tuple_to_nfattr,
 	.nfattr_to_tuple	= nf_ct_port_nfattr_to_tuple,
 #endif
+#ifdef CONFIG_SYSCTL
+	.ctl_table_users	= &udp_sysctl_table_users,
+	.ctl_table_header	= &udp_sysctl_header,
+	.ctl_table		= udp_sysctl_table,
+#ifdef CONFIG_NF_CONNTRACK_PROC_COMPAT
+	.ctl_compat_table	= udp_compat_sysctl_table,
+#endif
+#endif
 };
+EXPORT_SYMBOL_GPL(nf_conntrack_l4proto_udp4);
 
-struct nf_conntrack_protocol nf_conntrack_protocol_udp6 =
+struct nf_conntrack_l4proto nf_conntrack_l4proto_udp6 =
 {
 	.l3proto		= PF_INET6,
-	.proto			= IPPROTO_UDP,
+	.l4proto		= IPPROTO_UDP,
 	.name			= "udp",
 	.pkt_to_tuple		= udp_pkt_to_tuple,
 	.invert_tuple		= udp_invert_tuple,
@@ -216,13 +236,16 @@ struct nf_conntrack_protocol nf_conntrack_protocol_udp6 =
 	.print_conntrack	= udp_print_conntrack,
 	.packet			= udp_packet,
 	.new			= udp_new,
-	.error			= udp_error6,
+	.error			= udp_error,
 #if defined(CONFIG_NF_CT_NETLINK) || \
     defined(CONFIG_NF_CT_NETLINK_MODULE)
 	.tuple_to_nfattr	= nf_ct_port_tuple_to_nfattr,
 	.nfattr_to_tuple	= nf_ct_port_nfattr_to_tuple,
 #endif
+#ifdef CONFIG_SYSCTL
+	.ctl_table_users	= &udp_sysctl_table_users,
+	.ctl_table_header	= &udp_sysctl_header,
+	.ctl_table		= udp_sysctl_table,
+#endif
 };
-
-EXPORT_SYMBOL(nf_conntrack_protocol_udp4);
-EXPORT_SYMBOL(nf_conntrack_protocol_udp6);
+EXPORT_SYMBOL_GPL(nf_conntrack_l4proto_udp6);

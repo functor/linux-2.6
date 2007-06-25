@@ -30,7 +30,6 @@
 #undef DEBUG
 #undef DEBUG_LOW
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/sched.h>
 #include <linux/init.h>
@@ -231,6 +230,14 @@ static u8 kw_i2c_wait_interrupt(struct pmac_i2c_host_kw *host)
 	return isr;
 }
 
+static void kw_i2c_do_stop(struct pmac_i2c_host_kw *host, int result)
+{
+	kw_write_reg(reg_control, KW_I2C_CTL_STOP);
+	host->state = state_stop;
+	host->result = result;
+}
+
+
 static void kw_i2c_handle_interrupt(struct pmac_i2c_host_kw *host, u8 isr)
 {
 	u8 ack;
@@ -246,42 +253,36 @@ static void kw_i2c_handle_interrupt(struct pmac_i2c_host_kw *host, u8 isr)
 	}
 
 	if (isr == 0) {
+		printk(KERN_WARNING "low_i2c: Timeout in i2c transfer"
+		       " on keywest !\n");
 		if (host->state != state_stop) {
-			DBG_LOW("KW: Timeout !\n");
-			host->result = -EIO;
-			goto stop;
+			kw_i2c_do_stop(host, -EIO);
+			return;
 		}
-		if (host->state == state_stop) {
-			ack = kw_read_reg(reg_status);
-			if (ack & KW_I2C_STAT_BUSY)
-				kw_write_reg(reg_status, 0);
-			host->state = state_idle;
-			kw_write_reg(reg_ier, 0x00);
-			if (!host->polled)
-				complete(&host->complete);
-		}
+		ack = kw_read_reg(reg_status);
+		if (ack & KW_I2C_STAT_BUSY)
+			kw_write_reg(reg_status, 0);
+		host->state = state_idle;
+		kw_write_reg(reg_ier, 0x00);
+		if (!host->polled)
+			complete(&host->complete);
 		return;
 	}
 
 	if (isr & KW_I2C_IRQ_ADDR) {
 		ack = kw_read_reg(reg_status);
 		if (host->state != state_addr) {
-			kw_write_reg(reg_isr, KW_I2C_IRQ_ADDR);
 			WRONG_STATE("KW_I2C_IRQ_ADDR"); 
-			host->result = -EIO;
-			goto stop;
+			kw_i2c_do_stop(host, -EIO);
 		}
 		if ((ack & KW_I2C_STAT_LAST_AAK) == 0) {
-			host->result = -ENODEV;
-			DBG_LOW("KW: NAK on address\n");
+			host->result = -ENXIO;
 			host->state = state_stop;
-			return;
+			DBG_LOW("KW: NAK on address\n");
 		} else {
-			if (host->len == 0) {
-				kw_write_reg(reg_isr, KW_I2C_IRQ_ADDR);
-				goto stop;
-			}
-			if (host->rw) {
+			if (host->len == 0)
+				kw_i2c_do_stop(host, 0);
+			else if (host->rw) {
 				host->state = state_read;
 				if (host->len > 1)
 					kw_write_reg(reg_control,
@@ -308,25 +309,19 @@ static void kw_i2c_handle_interrupt(struct pmac_i2c_host_kw *host, u8 isr)
 			ack = kw_read_reg(reg_status);
 			if ((ack & KW_I2C_STAT_LAST_AAK) == 0) {
 				DBG_LOW("KW: nack on data write\n");
-				host->result = -EIO;
-				goto stop;
+				host->result = -EFBIG;
+				host->state = state_stop;
 			} else if (host->len) {
 				kw_write_reg(reg_data, *(host->data++));
 				host->len--;
-			} else {
-				kw_write_reg(reg_control, KW_I2C_CTL_STOP);
-				host->state = state_stop;
-				host->result = 0;
-			}
-			kw_write_reg(reg_isr, KW_I2C_IRQ_DATA);
+			} else
+				kw_i2c_do_stop(host, 0);
 		} else {
-			kw_write_reg(reg_isr, KW_I2C_IRQ_DATA);
 			WRONG_STATE("KW_I2C_IRQ_DATA"); 
-			if (host->state != state_stop) {
-				host->result = -EIO;
-				goto stop;
-			}
+			if (host->state != state_stop)
+				kw_i2c_do_stop(host, -EIO);
 		}
+		kw_write_reg(reg_isr, KW_I2C_IRQ_DATA);
 	}
 
 	if (isr & KW_I2C_IRQ_STOP) {
@@ -340,18 +335,14 @@ static void kw_i2c_handle_interrupt(struct pmac_i2c_host_kw *host, u8 isr)
 			complete(&host->complete);
 	}
 
+	/* Below should only happen in manual mode which we don't use ... */
 	if (isr & KW_I2C_IRQ_START)
 		kw_write_reg(reg_isr, KW_I2C_IRQ_START);
 
-	return;
- stop:
-	kw_write_reg(reg_control, KW_I2C_CTL_STOP);	
-	host->state = state_stop;
-	return;
 }
 
 /* Interrupt handler */
-static irqreturn_t kw_i2c_irq(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t kw_i2c_irq(int irq, void *dev_id)
 {
 	struct pmac_i2c_host_kw *host = dev_id;
 	unsigned long flags;
@@ -486,7 +477,8 @@ static int kw_i2c_xfer(struct pmac_i2c_bus *bus, u8 addrdir, int subsize,
 static struct pmac_i2c_host_kw *__init kw_i2c_host_init(struct device_node *np)
 {
 	struct pmac_i2c_host_kw *host;
-	u32			*psteps, *prate, *addrp, steps;
+	const u32		*psteps, *prate, *addrp;
+	u32			steps;
 
 	host = kzalloc(sizeof(struct pmac_i2c_host_kw), GFP_KERNEL);
 	if (host == NULL) {
@@ -499,7 +491,7 @@ static struct pmac_i2c_host_kw *__init kw_i2c_host_init(struct device_node *np)
 	 * on all i2c keywest nodes so far ... we would have to fallback
 	 * to macio parsing if that wasn't the case
 	 */
-	addrp = (u32 *)get_property(np, "AAPL,address", NULL);
+	addrp = get_property(np, "AAPL,address", NULL);
 	if (addrp == NULL) {
 		printk(KERN_ERR "low_i2c: Can't find address for %s\n",
 		       np->full_name);
@@ -513,13 +505,13 @@ static struct pmac_i2c_host_kw *__init kw_i2c_host_init(struct device_node *np)
 	host->timeout_timer.function = kw_i2c_timeout;
 	host->timeout_timer.data = (unsigned long)host;
 
-	psteps = (u32 *)get_property(np, "AAPL,address-step", NULL);
+	psteps = get_property(np, "AAPL,address-step", NULL);
 	steps = psteps ? (*psteps) : 0x10;
 	for (host->bsteps = 0; (steps & 0x01) == 0; host->bsteps++)
 		steps >>= 1;
 	/* Select interface rate */
 	host->speed = KW_I2C_MODE_25KHZ;
-	prate = (u32 *)get_property(np, "AAPL,i2c-rate", NULL);
+	prate = get_property(np, "AAPL,i2c-rate", NULL);
 	if (prate) switch(*prate) {
 	case 100:
 		host->speed = KW_I2C_MODE_100KHZ;
@@ -531,10 +523,11 @@ static struct pmac_i2c_host_kw *__init kw_i2c_host_init(struct device_node *np)
 		host->speed = KW_I2C_MODE_25KHZ;
 		break;
 	}	
-	if (np->n_intrs > 0)
-		host->irq = np->intrs[0].line;
-	else
-		host->irq = NO_IRQ;
+	host->irq = irq_of_parse_and_map(np, 0);
+	if (host->irq == NO_IRQ)
+		printk(KERN_WARNING
+		       "low_i2c: Failed to map interrupt for %s\n",
+		       np->full_name);
 
 	host->base = ioremap((*addrp), 0x1000);
 	if (host->base == NULL) {
@@ -544,11 +537,11 @@ static struct pmac_i2c_host_kw *__init kw_i2c_host_init(struct device_node *np)
 		return NULL;
 	}
 
-	/* Make sure IRA is disabled */
+	/* Make sure IRQ is disabled */
 	kw_write_reg(reg_ier, 0);
 
 	/* Request chip interrupt */
-	if (request_irq(host->irq, kw_i2c_irq, SA_SHIRQ, "keywest i2c", host))
+	if (request_irq(host->irq, kw_i2c_irq, 0, "keywest i2c", host))
 		host->irq = NO_IRQ;
 
 	printk(KERN_INFO "KeyWest i2c @0x%08x irq %d %s\n",
@@ -626,8 +619,8 @@ static void __init kw_i2c_probe(void)
 		} else {
 			for (child = NULL;
 			     (child = of_get_next_child(np, child)) != NULL;) {
-				u32 *reg =
-					(u32 *)get_property(child, "reg", NULL);
+				const u32 *reg = get_property(child,
+						"reg", NULL);
 				if (reg == NULL)
 					continue;
 				kw_i2c_add(host, np, child, *reg);
@@ -889,7 +882,7 @@ static void __init smu_i2c_probe(void)
 {
 	struct device_node *controller, *busnode;
 	struct pmac_i2c_bus *bus;
-	u32 *reg;
+	const u32 *reg;
 	int sz;
 
 	if (!smu_present())
@@ -912,7 +905,7 @@ static void __init smu_i2c_probe(void)
 		if (strcmp(busnode->type, "i2c") &&
 		    strcmp(busnode->type, "i2c-bus"))
 			continue;
-		reg = (u32 *)get_property(busnode, "reg", NULL);
+		reg = get_property(busnode, "reg", NULL);
 		if (reg == NULL)
 			continue;
 
@@ -956,9 +949,8 @@ struct pmac_i2c_bus *pmac_i2c_find_bus(struct device_node *node)
 		list_for_each_entry(bus, &pmac_i2c_busses, link) {
 			if (p == bus->busnode) {
 				if (prev && bus->flags & pmac_i2c_multibus) {
-					u32 *reg;
-					reg = (u32 *)get_property(prev, "reg",
-								  NULL);
+					const u32 *reg;
+					reg = get_property(prev, "reg", NULL);
 					if (!reg)
 						continue;
 					if (((*reg) >> 8) != bus->channel)
@@ -979,7 +971,7 @@ EXPORT_SYMBOL_GPL(pmac_i2c_find_bus);
 
 u8 pmac_i2c_get_dev_addr(struct device_node *device)
 {
-	u32 *reg = (u32 *)get_property(device, "reg", NULL);
+	const u32 *reg = get_property(device, "reg", NULL);
 
 	if (reg == NULL)
 		return 0;
@@ -1165,6 +1157,7 @@ EXPORT_SYMBOL_GPL(pmac_i2c_xfer);
 /* some quirks for platform function decoding */
 enum {
 	pmac_i2c_quirk_invmask = 0x00000001u,
+	pmac_i2c_quirk_skip = 0x00000002u,
 };
 
 static void pmac_i2c_devscan(void (*callback)(struct device_node *dev,
@@ -1180,6 +1173,15 @@ static void pmac_i2c_devscan(void (*callback)(struct device_node *dev,
 		/* XXX Study device-tree's & apple drivers are get the quirks
 		 * right !
 		 */
+		/* Workaround: It seems that running the clockspreading
+		 * properties on the eMac will cause lockups during boot.
+		 * The machine seems to work fine without that. So for now,
+		 * let's make sure i2c-hwclock doesn't match about "imic"
+		 * clocks and we'll figure out if we really need to do
+		 * something special about those later.
+		 */
+		{ "i2c-hwclock", "imic5002", pmac_i2c_quirk_skip },
+		{ "i2c-hwclock", "imic5003", pmac_i2c_quirk_skip },
 		{ "i2c-hwclock", NULL, pmac_i2c_quirk_invmask },
 		{ "i2c-cpu-voltage", NULL, 0},
 		{  "temp-monitor", NULL, 0 },
@@ -1206,6 +1208,8 @@ static void pmac_i2c_devscan(void (*callback)(struct device_node *dev,
 				if (p->compatible &&
 				    !device_is_compatible(np, p->compatible))
 					continue;
+				if (p->quirks & pmac_i2c_quirk_skip)
+					break;
 				callback(np, p->quirks);
 				break;
 			}
@@ -1456,6 +1460,9 @@ int __init pmac_i2c_init(void)
 	if (i2c_inited)
 		return 0;
 	i2c_inited = 1;
+
+	if (!machine_is(powermac))
+		return 0;
 
 	/* Probe keywest-i2c busses */
 	kw_i2c_probe();

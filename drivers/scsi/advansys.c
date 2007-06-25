@@ -371,7 +371,7 @@
 
      1.5 (8/8/96):
          1. Add support for ABP-940U (PCI Ultra) adapter.
-         2. Add support for IRQ sharing by setting the SA_SHIRQ flag for
+         2. Add support for IRQ sharing by setting the IRQF_SHARED flag for
             request_irq and supplying a dev_id pointer to both request_irq()
             and free_irq().
          3. In AscSearchIOPortAddr11() restore a call to check_region() which
@@ -504,9 +504,9 @@
          3. For v2.1.93 and newer kernels use CONFIG_PCI and new PCI BIOS
             access functions.
          4. Update board serial number printing.
-         5. Try allocating an IRQ both with and without the SA_INTERRUPT
+         5. Try allocating an IRQ both with and without the IRQF_DISABLED
             flag set to allow IRQ sharing with drivers that do not set
-            the SA_INTERRUPT flag. Also display a more descriptive error
+            the IRQF_DISABLED flag. Also display a more descriptive error
             message if request_irq() fails.
          6. Update to latest Asc and Adv Libraries.
 
@@ -754,7 +754,6 @@
  * --- Linux Include Files
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 
 #if defined(CONFIG_X86) && !defined(CONFIG_ISA)
@@ -3882,7 +3881,7 @@ typedef struct asc_board {
     /*
      * The following fields are used only for Wide Boards.
      */
-    void                 *ioremap_addr;         /* I/O Memory remap address. */
+    void                 __iomem *ioremap_addr; /* I/O Memory remap address. */
     ushort               ioport;                /* I/O Port address. */
     ADV_CARR_T           *orig_carrp;           /* ADV_CARR_T memory block. */
     adv_req_t            *orig_reqp;            /* adv_req_t memory block. */
@@ -3952,7 +3951,7 @@ typedef struct _PCI_CONFIG_SPACE_
 
 /* Number of boards detected in system. */
 STATIC int asc_board_count = 0;
-STATIC struct Scsi_Host    *asc_host[ASC_NUM_BOARD_SUPPORTED] = { 0 };
+STATIC struct Scsi_Host    *asc_host[ASC_NUM_BOARD_SUPPORTED] = { NULL };
 
 /* Overrun buffer used by all narrow boards. */
 STATIC uchar overrun_buf[ASC_OVERRUN_BSIZE] = { 0 };
@@ -4000,7 +3999,7 @@ STATIC PortAddr     _asc_def_iop_base[];
  * advansys.h contains function prototypes for functions global to Linux.
  */
 
-STATIC irqreturn_t advansys_interrupt(int, void *, struct pt_regs *);
+STATIC irqreturn_t advansys_interrupt(int, void *);
 STATIC int	  advansys_slave_configure(struct scsi_device *);
 STATIC void       asc_scsi_done_list(struct scsi_cmnd *);
 STATIC int        asc_execute_scsi_cmnd(struct scsi_cmnd *);
@@ -5192,19 +5191,19 @@ advansys_detect(struct scsi_host_template *tpnt)
             /* Register IRQ Number. */
             ASC_DBG1(2, "advansys_detect: request_irq() %d\n", shp->irq);
            /*
-            * If request_irq() fails with the SA_INTERRUPT flag set,
-            * then try again without the SA_INTERRUPT flag set. This
+            * If request_irq() fails with the IRQF_DISABLED flag set,
+            * then try again without the IRQF_DISABLED flag set. This
             * allows IRQ sharing to work even with other drivers that
-            * do not set the SA_INTERRUPT flag.
+            * do not set the IRQF_DISABLED flag.
             *
-            * If SA_INTERRUPT is not set, then interrupts are enabled
+            * If IRQF_DISABLED is not set, then interrupts are enabled
             * before the driver interrupt function is called.
             */
             if (((ret = request_irq(shp->irq, advansys_interrupt,
-                            SA_INTERRUPT | (share_irq == TRUE ? SA_SHIRQ : 0),
+                            IRQF_DISABLED | (share_irq == TRUE ? IRQF_SHARED : 0),
                             "advansys", boardp)) != 0) &&
                 ((ret = request_irq(shp->irq, advansys_interrupt,
-                            (share_irq == TRUE ? SA_SHIRQ : 0),
+                            (share_irq == TRUE ? IRQF_SHARED : 0),
                             "advansys", boardp)) != 0))
             {
                 if (ret == -EBUSY) {
@@ -5998,7 +5997,7 @@ static struct scsi_host_template driver_template = {
  * an AdvanSys adapter.
  */
 STATIC irqreturn_t
-advansys_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+advansys_interrupt(int irq, void *dev_id)
 {
     ulong           flags;
     int             i;
@@ -6622,7 +6621,7 @@ adv_build_req(asc_board_t *boardp, struct scsi_cmnd *scp,
 	        dma_map_single(dev, scp->request_buffer,
 			       scp->request_bufflen, scp->sc_data_direction);
 	} else {
-	    scsiqp->vdata_addr = 0;
+	    scsiqp->vdata_addr = NULL;
 	    scp->SCp.dma_handle = 0;
 	}
 	scsiqp->data_addr = cpu_to_le32(scp->SCp.dma_handle);
@@ -12363,7 +12362,7 @@ AscInitFromEEP(ASC_DVC_VAR *asc_dvc)
                 ASC_PRINT1(
 "AscInitFromEEP: Failed to re-write EEPROM with %d errors.\n", i);
         } else {
-                ASC_PRINT("AscInitFromEEP: Succesfully re-wrote EEPROM.");
+                ASC_PRINT("AscInitFromEEP: Successfully re-wrote EEPROM.\n");
         }
     }
     return (warn_code);
@@ -18216,6 +18215,7 @@ AdvInquiryHandling(
 }
 MODULE_LICENSE("Dual BSD/GPL");
 
+#ifdef CONFIG_PCI
 /* PCI Devices supported by this driver */
 static struct pci_device_id advansys_pci_tbl[] __devinitdata = {
 	{ PCI_VENDOR_ID_ASP, PCI_DEVICE_ID_ASP_1200A,
@@ -18233,4 +18233,4 @@ static struct pci_device_id advansys_pci_tbl[] __devinitdata = {
 	{ }
 };
 MODULE_DEVICE_TABLE(pci, advansys_pci_tbl);
-
+#endif /* CONFIG_PCI */

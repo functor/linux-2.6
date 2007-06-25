@@ -22,7 +22,6 @@
  *  2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/init.h>
@@ -36,7 +35,7 @@
 DEFINE_PER_CPU(struct ppc64_tlb_batch, ppc64_tlb_batch);
 
 /* This is declared as we are using the more or less generic
- * include/asm-ppc64/tlb.h file -- tgall
+ * include/asm-powerpc/tlb.h file -- tgall
  */
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 DEFINE_PER_CPU(struct pte_freelist_batch *, pte_freelist_cur);
@@ -131,7 +130,7 @@ void hpte_update(struct mm_struct *mm, unsigned long addr,
 {
 	struct ppc64_tlb_batch *batch = &__get_cpu_var(ppc64_tlb_batch);
 	unsigned long vsid;
-	unsigned int psize = mmu_virtual_psize;
+	unsigned int psize;
 	int i;
 
 	i = batch->index;
@@ -147,8 +146,10 @@ void hpte_update(struct mm_struct *mm, unsigned long addr,
 		psize = mmu_huge_psize;
 #else
 		BUG();
+		psize = pte_pagesize_index(pte); /* shutup gcc */
 #endif
-	}
+	} else
+		psize = pte_pagesize_index(pte);
 
 	/*
 	 * This can happen when we are in the middle of a TLB batch and

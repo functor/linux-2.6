@@ -149,7 +149,7 @@ static int sgi_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs,
 			err = i2c_write(adap, p->buf, p->len);
 	}
 
-	return err;
+	return (err < 0) ? err : i;
 }
 
 static u32 sgi_func(struct i2c_adapter *adap)
@@ -157,9 +157,7 @@ static u32 sgi_func(struct i2c_adapter *adap)
 	return I2C_FUNC_SMBUS_EMUL;
 }
 
-static struct i2c_algorithm sgi_algo = {
-	.name		= "SGI algorithm",
-	.id		= I2C_ALGO_SGI,
+static const struct i2c_algorithm sgi_algo = {
 	.master_xfer	= sgi_xfer,
 	.functionality	= sgi_func,
 };
@@ -169,20 +167,11 @@ static struct i2c_algorithm sgi_algo = {
  */
 int i2c_sgi_add_bus(struct i2c_adapter *adap)
 {
-	adap->id |= sgi_algo.id;
 	adap->algo = &sgi_algo;
 
 	return i2c_add_adapter(adap);
 }
-
-
-int i2c_sgi_del_bus(struct i2c_adapter *adap)
-{
-	return i2c_del_adapter(adap);
-}
-
 EXPORT_SYMBOL(i2c_sgi_add_bus);
-EXPORT_SYMBOL(i2c_sgi_del_bus);
 
 MODULE_AUTHOR("Ladislav Michl <ladis@linux-mips.org>");
 MODULE_DESCRIPTION("I2C-Bus SGI algorithm");

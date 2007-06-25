@@ -8,6 +8,7 @@
 #include <linux/pci.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
+#include <linux/dmi.h>
 
 #include <asm/acpi.h>
 #include <asm/segment.h>
@@ -16,13 +17,10 @@
 
 #include "pci.h"
 
-#ifdef CONFIG_PCI_BIOS
-extern  void pcibios_sort(void);
-#endif
-
 unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2 |
-				PCI_PROBE_MMCONF;
+				0; /* PCI_PROBE_MMCONF */
 
+static int pci_bf_sort;
 int pci_routeirq;
 int pcibios_last_bus = -1;
 unsigned long pirq_table_addr;
@@ -120,10 +118,87 @@ void __devinit  pcibios_fixup_bus(struct pci_bus *b)
 	pci_read_bridge_bases(b);
 }
 
+/*
+ * Only use DMI information to set this if nothing was passed
+ * on the kernel command line (which was parsed earlier).
+ */
+
+static int __devinit set_bf_sort(struct dmi_system_id *d)
+{
+	if (pci_bf_sort == pci_bf_sort_default) {
+		pci_bf_sort = pci_dmi_bf;
+		printk(KERN_INFO "PCI: %s detected, enabling pci=bfsort.\n", d->ident);
+	}
+	return 0;
+}
+
+/*
+ * Enable renumbering of PCI bus# ranges to reach all PCI busses (Cardbus)
+ */
+#ifdef __i386__
+static int __devinit assign_all_busses(struct dmi_system_id *d)
+{
+	pci_probe |= PCI_ASSIGN_ALL_BUSSES;
+	printk(KERN_INFO "%s detected: enabling PCI bus# renumbering"
+			" (pci=assign-busses)\n", d->ident);
+	return 0;
+}
+#endif
+
+static struct dmi_system_id __devinitdata pciprobe_dmi_table[] = {
+#ifdef __i386__
+/*
+ * Laptops which need pci=assign-busses to see Cardbus cards
+ */
+	{
+		.callback = assign_all_busses,
+		.ident = "Samsung X20 Laptop",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Samsung Electronics"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "SX20S"),
+		},
+	},
+#endif		/* __i386__ */
+	{
+		.callback = set_bf_sort,
+		.ident = "Dell PowerEdge 1950",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "PowerEdge 1950"),
+		},
+	},
+	{
+		.callback = set_bf_sort,
+		.ident = "Dell PowerEdge 1955",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "PowerEdge 1955"),
+		},
+	},
+	{
+		.callback = set_bf_sort,
+		.ident = "Dell PowerEdge 2900",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "PowerEdge 2900"),
+		},
+	},
+	{
+		.callback = set_bf_sort,
+		.ident = "Dell PowerEdge 2950",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "PowerEdge 2950"),
+		},
+	},
+	{}
+};
 
 struct pci_bus * __devinit pcibios_scan_root(int busnum)
 {
 	struct pci_bus *bus = NULL;
+
+	dmi_check_system(pciprobe_dmi_table);
 
 	while ((bus = pci_find_next_bus(bus)) != NULL) {
 		if (bus->number == busnum) {
@@ -161,6 +236,8 @@ static int __init pcibios_init(void)
 
 	pcibios_resource_survey();
 
+	if (pci_bf_sort >= pci_force_bf)
+		pci_sort_breadthfirst();
 #ifdef CONFIG_PCI_BIOS
 	if ((pci_probe & PCI_BIOS_SORT) && !(pci_probe & PCI_NO_SORT))
 		pcibios_sort();
@@ -174,6 +251,12 @@ char * __devinit  pcibios_setup(char *str)
 {
 	if (!strcmp(str, "off")) {
 		pci_probe = 0;
+		return NULL;
+	} else if (!strcmp(str, "bfsort")) {
+		pci_bf_sort = pci_force_bf;
+		return NULL;
+	} else if (!strcmp(str, "nobfsort")) {
+		pci_bf_sort = pci_force_nobf;
 		return NULL;
 	}
 #ifdef CONFIG_PCI_BIOS
@@ -209,9 +292,17 @@ char * __devinit  pcibios_setup(char *str)
 		pci_probe &= ~PCI_PROBE_MMCONF;
 		return NULL;
 	}
+	else if (!strcmp(str, "mmconf")) {
+		pci_probe |= PCI_PROBE_MMCONF;
+		return NULL;
+	}
 #endif
 	else if (!strcmp(str, "noacpi")) {
 		acpi_noirq_set();
+		return NULL;
+	}
+	else if (!strcmp(str, "noearly")) {
+		pci_probe |= PCI_PROBE_NOEARLY;
 		return NULL;
 	}
 #ifndef CONFIG_X86_VISWS

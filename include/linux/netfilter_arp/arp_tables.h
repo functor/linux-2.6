@@ -46,11 +46,11 @@ struct arpt_arp {
 	struct arpt_devaddr_info tgt_devaddr;
 
 	/* ARP operation code. */
-	u_int16_t arpop, arpop_mask;
+	__be16 arpop, arpop_mask;
 
 	/* ARP hardware address and protocol address format. */
-	u_int16_t arhrd, arhrd_mask;
-	u_int16_t arpro, arpro_mask;
+	__be16 arhrd, arhrd_mask;
+	__be16 arpro, arpro_mask;
 
 	/* The protocol address length is only accepted if it is 4
 	 * so there is no use in offering a way to do filtering on it.
@@ -65,35 +65,8 @@ struct arpt_arp {
 	u_int16_t invflags;
 };
 
-struct arpt_entry_target
-{
-	union {
-		struct {
-			u_int16_t target_size;
-
-			/* Used by userspace */
-			char name[ARPT_FUNCTION_MAXNAMELEN-1];
-			u_int8_t revision;
-		} user;
-		struct {
-			u_int16_t target_size;
-
-			/* Used inside the kernel */
-			struct arpt_target *target;
-		} kernel;
-
-		/* Total length */
-		u_int16_t target_size;
-	} u;
-
-	unsigned char data[0];
-};
-
-struct arpt_standard_target
-{
-	struct arpt_entry_target target;
-	int verdict;
-};
+#define arpt_entry_target xt_entry_target
+#define arpt_standard_target xt_standard_target
 
 /* Values for "flag" field in struct arpt_ip (general arp structure).
  * No flags defined yet.
@@ -139,19 +112,20 @@ struct arpt_entry
  * New IP firewall options for [gs]etsockopt at the RAW IP level.
  * Unlike BSD Linux inherits IP options so you don't have to use a raw
  * socket for this. Instead we check rights in the calls.
+ *
+ * ATTENTION: check linux/in.h before adding new number here.
  */
-#define ARPT_CTL_OFFSET		32
-#define ARPT_BASE_CTL		(XT_BASE_CTL+ARPT_CTL_OFFSET)
+#define ARPT_BASE_CTL		96
 
-#define ARPT_SO_SET_REPLACE		(XT_SO_SET_REPLACE+ARPT_CTL_OFFSET)
-#define ARPT_SO_SET_ADD_COUNTERS	(XT_SO_SET_ADD_COUNTERS+ARPT_CTL_OFFSET)
-#define ARPT_SO_SET_MAX			(XT_SO_SET_MAX+ARPT_CTL_OFFSET)
+#define ARPT_SO_SET_REPLACE		(ARPT_BASE_CTL)
+#define ARPT_SO_SET_ADD_COUNTERS	(ARPT_BASE_CTL + 1)
+#define ARPT_SO_SET_MAX			ARPT_SO_SET_ADD_COUNTERS
 
-#define ARPT_SO_GET_INFO		(XT_SO_GET_INFO+ARPT_CTL_OFFSET)
-#define ARPT_SO_GET_ENTRIES		(XT_SO_GET_ENTRIES+ARPT_CTL_OFFSET)
-/* #define ARPT_SO_GET_REVISION_MATCH	XT_SO_GET_REVISION_MATCH  */
-#define ARPT_SO_GET_REVISION_TARGET	(XT_SO_GET_REVISION_TARGET+ARPT_CTL_OFFSET)
-#define ARPT_SO_GET_MAX			(XT_SO_GET_REVISION_TARGET+ARPT_CTL_OFFSET)
+#define ARPT_SO_GET_INFO		(ARPT_BASE_CTL)
+#define ARPT_SO_GET_ENTRIES		(ARPT_BASE_CTL + 1)
+/* #define ARPT_SO_GET_REVISION_MATCH	(APRT_BASE_CTL + 2) */
+#define ARPT_SO_GET_REVISION_TARGET	(ARPT_BASE_CTL + 3)
+#define ARPT_SO_GET_MAX			(ARPT_SO_GET_REVISION_TARGET)
 
 /* CONTINUE verdict for targets */
 #define ARPT_CONTINUE XT_CONTINUE
@@ -216,6 +190,7 @@ struct arpt_replace
 
 /* The argument to ARPT_SO_ADD_COUNTERS. */
 #define arpt_counters_info xt_counters_info
+#define arpt_counters xt_counters
 
 /* The argument to ARPT_SO_GET_ENTRIES. */
 struct arpt_get_entries
@@ -263,8 +238,10 @@ static __inline__ struct arpt_entry_target *arpt_get_target(struct arpt_entry *e
  */
 #ifdef __KERNEL__
 
-#define arpt_register_target(tgt) xt_register_target(NF_ARP, tgt)
-#define arpt_unregister_target(tgt) xt_unregister_target(NF_ARP, tgt)
+#define arpt_register_target(tgt) 	\
+({	(tgt)->family = NF_ARP;		\
+ 	xt_register_target(tgt); })
+#define arpt_unregister_target(tgt) xt_unregister_target(tgt)
 
 extern int arpt_register_table(struct arpt_table *table,
 			       const struct arpt_replace *repl);
@@ -273,8 +250,7 @@ extern unsigned int arpt_do_table(struct sk_buff **pskb,
 				  unsigned int hook,
 				  const struct net_device *in,
 				  const struct net_device *out,
-				  struct arpt_table *table,
-				  void *userdata);
+				  struct arpt_table *table);
 
 #define ARPT_ALIGN(s) (((s) + (__alignof__(struct arpt_entry)-1)) & ~(__alignof__(struct arpt_entry)-1))
 #endif /*__KERNEL__*/

@@ -12,7 +12,6 @@
  *  'linux/arch/arm/lib/traps.S'.  Mostly a debugging aid, but will probably
  *  kill the offending process.
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/spinlock.h>
@@ -28,6 +27,7 @@
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/traps.h>
+#include <asm/io.h>
 
 #include "ptrace.h"
 #include "signal.h"
@@ -192,7 +192,7 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 	if (tsk != current)
 		fp = thread_saved_fp(tsk);
 	else
-		asm("mov%? %0, fp" : "=r" (fp));
+		asm("mov %0, fp" : "=r" (fp) : : "cc");
 
 	c_backtrace(fp, 0x10);
 	barrier();
@@ -206,8 +206,8 @@ static void __die(const char *str, int err, struct thread_info *thread, struct p
 	printk("Internal error: %s: %x [#%d]\n", str, err, ++die_counter);
 	print_modules();
 	__show_regs(regs);
-	printk("Process %s (pid: %d, stack limit = 0x%p)\n",
-		tsk->comm, tsk->pid, thread + 1);
+	printk("Process %s (pid: %d:#%u, stack limit = 0x%p)\n",
+		tsk->comm, tsk->pid, tsk->xid, thread + 1);
 
 	if (!user_mode(regs) || in_interrupt()) {
 		dump_mem("Stack: ", regs->ARM_sp,
@@ -233,11 +233,8 @@ NORET_TYPE void die(const char *str, struct pt_regs *regs, int err)
 	bust_spinlocks(0);
 	spin_unlock_irq(&die_lock);
 
-	if (panic_on_oops) {
-		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
-		ssleep(5);
+	if (panic_on_oops)
 		panic("Fatal exception");
-	}
 
 	do_exit(SIGSEGV);
 }
@@ -506,7 +503,7 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 		if (!pmd_present(*pmd))
 			goto bad_access;
 		pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
-		if (!pte_present(*pte) || !pte_write(*pte)) {
+		if (!pte_present(*pte) || !pte_dirty(*pte)) {
 			pte_unmap_unlock(pte, ptl);
 			goto bad_access;
 		}
@@ -635,12 +632,9 @@ baddataabort(int code, unsigned long instr, struct pt_regs *regs)
 	notify_die("unknown data abort code", regs, &info, instr, 0);
 }
 
-void __attribute__((noreturn)) __bug(const char *file, int line, void *data)
+void __attribute__((noreturn)) __bug(const char *file, int line)
 {
-	printk(KERN_CRIT"kernel BUG at %s:%d!", file, line);
-	if (data)
-		printk(" - extra data = %p", data);
-	printk("\n");
+	printk(KERN_CRIT"kernel BUG at %s:%d!\n", file, line);
 	*(int *)0 = 0;
 
 	/* Avoid "noreturn function does return" */
@@ -688,6 +682,7 @@ EXPORT_SYMBOL(abort);
 
 void __init trap_init(void)
 {
+	unsigned long vectors = CONFIG_VECTORS_BASE;
 	extern char __stubs_start[], __stubs_end[];
 	extern char __vectors_start[], __vectors_end[];
 	extern char __kuser_helper_start[], __kuser_helper_end[];
@@ -698,9 +693,9 @@ void __init trap_init(void)
 	 * into the vector page, mapped at 0xffff0000, and ensure these
 	 * are visible to the instruction stream.
 	 */
-	memcpy((void *)0xffff0000, __vectors_start, __vectors_end - __vectors_start);
-	memcpy((void *)0xffff0200, __stubs_start, __stubs_end - __stubs_start);
-	memcpy((void *)0xffff1000 - kuser_sz, __kuser_helper_start, kuser_sz);
+	memcpy((void *)vectors, __vectors_start, __vectors_end - __vectors_start);
+	memcpy((void *)vectors + 0x200, __stubs_start, __stubs_end - __stubs_start);
+	memcpy((void *)vectors + 0x1000 - kuser_sz, __kuser_helper_start, kuser_sz);
 
 	/*
 	 * Copy signal return handlers into the vector page, and
@@ -709,6 +704,6 @@ void __init trap_init(void)
 	memcpy((void *)KERN_SIGRETURN_CODE, sigreturn_codes,
 	       sizeof(sigreturn_codes));
 
-	flush_icache_range(0xffff0000, 0xffff0000 + PAGE_SIZE);
+	flush_icache_range(vectors, vectors + PAGE_SIZE);
 	modify_domain(DOMAIN_USER, DOMAIN_CLIENT);
 }

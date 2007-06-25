@@ -48,10 +48,8 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 /* No need to check for cross device links since server will do that
    BB note DFS case in future though (when we may have to check) */
 
-	down(&inode->i_sb->s_vfs_rename_sem);
 	fromName = build_path_from_dentry(old_file);
 	toName = build_path_from_dentry(direntry);
-	up(&inode->i_sb->s_vfs_rename_sem);
 	if((fromName == NULL) || (toName == NULL)) {
 		rc = -ENOMEM;
 		goto cifs_hl_exit;
@@ -67,21 +65,34 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 					cifs_sb_target->local_nls, 
 					cifs_sb_target->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
-		if(rc == -EIO)
+		if((rc == -EIO) || (rc == -EINVAL))
 			rc = -EOPNOTSUPP;  
 	}
 
-/* if (!rc)     */
-	{
-		/*   renew_parental_timestamps(old_file);
-		   inode->i_nlink++;
-		   mark_inode_dirty(inode);
-		   d_instantiate(direntry, inode); */
-		/* BB add call to either mark inode dirty or refresh its data and timestamp to current time */
+	d_drop(direntry);	/* force new lookup from server of target */
+
+	/* if source file is cached (oplocked) revalidate will not go to server
+	   until the file is closed or oplock broken so update nlinks locally */
+	if(old_file->d_inode) {
+		cifsInode = CIFS_I(old_file->d_inode);
+		if(rc == 0) {
+			old_file->d_inode->i_nlink++;
+			old_file->d_inode->i_ctime = CURRENT_TIME;
+			/* parent dir timestamps will update from srv
+			within a second, would it really be worth it
+			to set the parent dir cifs inode time to zero
+			to force revalidate (faster) for it too? */
+		}
+		/* if not oplocked will force revalidate to get info 
+		   on source file from srv */
+		cifsInode->time = 0;
+
+                /* Will update parent dir timestamps from srv within a second.
+		   Would it really be worth it to set the parent dir (cifs
+		   inode) time field to zero to force revalidate on parent
+		   directory faster ie 
+			CIFS_I(inode)->time = 0;  */
 	}
-	d_drop(direntry);	/* force new lookup from server */
-	cifsInode = CIFS_I(old_file->d_inode);
-	cifsInode->time = 0;	/* will force revalidate to go get info when needed */
 
 cifs_hl_exit:
 	kfree(fromName);
@@ -103,9 +114,7 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 
 	xid = GetXid();
 
-	down(&direntry->d_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
-	up(&direntry->d_sb->s_vfs_rename_sem);
 
 	if (!full_path)
 		goto out_no_free;
@@ -164,16 +173,14 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
 
-	down(&inode->i_sb->s_vfs_rename_sem);
 	full_path = build_path_from_dentry(direntry);
-	up(&inode->i_sb->s_vfs_rename_sem);
 
 	if(full_path == NULL) {
 		FreeXid(xid);
 		return -ENOMEM;
 	}
 
-	cFYI(1, ("Full path: %s ", full_path));
+	cFYI(1, ("Full path: %s", full_path));
 	cFYI(1, ("symname is %s", symname));
 
 	/* BB what if DFS and this volume is on different share? BB */
@@ -192,8 +199,7 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 						 inode->i_sb,xid);
 
 		if (rc != 0) {
-			cFYI(1,
-			     ("Create symlink worked but get_inode_info failed with rc = %d ",
+			cFYI(1, ("Create symlink ok, getinodeinfo fail rc = %d",
 			      rc));
 		} else {
 			if (pTcon->nocase)
@@ -232,9 +238,9 @@ cifs_readlink(struct dentry *direntry, char __user *pBuffer, int buflen)
 
 /* BB would it be safe against deadlock to grab this sem 
       even though rename itself grabs the sem and calls lookup? */
-/*       down(&inode->i_sb->s_vfs_rename_sem);*/
+/*       mutex_lock(&inode->i_sb->s_vfs_rename_mutex);*/
 	full_path = build_path_from_dentry(direntry);
-/*       up(&inode->i_sb->s_vfs_rename_sem);*/
+/*       mutex_unlock(&inode->i_sb->s_vfs_rename_mutex);*/
 
 	if(full_path == NULL) {
 		FreeXid(xid);
@@ -261,7 +267,11 @@ cifs_readlink(struct dentry *direntry, char __user *pBuffer, int buflen)
 				tmpbuffer,
 				len - 1,
 				cifs_sb->local_nls);
-	else {
+	else if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UNX_EMUL) {
+		cERROR(1,("SFU style symlinks not implemented yet"));
+		/* add open and read as in fs/cifs/inode.c */
+	
+	} else {
 		rc = CIFSSMBOpen(xid, pTcon, full_path, FILE_OPEN, GENERIC_READ,
 				OPEN_REPARSE_POINT,&fid, &oplock, NULL, 
 				cifs_sb->local_nls, 
@@ -295,7 +305,7 @@ cifs_readlink(struct dentry *direntry, char __user *pBuffer, int buflen)
 					else {
 						cFYI(1,("num referral: %d",num_referrals));
 						if(referrals) {
-							cFYI(1,("referral string: %s ",referrals));
+							cFYI(1,("referral string: %s",referrals));
 							strncpy(tmpbuffer, referrals, len-1);                            
 						}
 					}

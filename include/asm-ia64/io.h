@@ -32,7 +32,7 @@
  */
 #define IO_SPACE_LIMIT		0xffffffffffffffffUL
 
-#define MAX_IO_SPACES_BITS		4
+#define MAX_IO_SPACES_BITS		8
 #define MAX_IO_SPACES			(1UL << MAX_IO_SPACES_BITS)
 #define IO_SPACE_BITS			24
 #define IO_SPACE_SIZE			(1UL << IO_SPACE_BITS)
@@ -66,9 +66,11 @@ extern unsigned int num_io_spaces;
 #define PIO_RESERVED		__IA64_UNCACHED_OFFSET
 #define HAVE_ARCH_PIO_SIZE
 
+#include <asm/hypervisor.h>
 #include <asm/intrinsics.h>
 #include <asm/machvec.h>
 #include <asm/page.h>
+#include <asm/privop.h>
 #include <asm/system.h>
 #include <asm-generic/iomap.h>
 
@@ -88,16 +90,49 @@ phys_to_virt (unsigned long address)
 }
 
 #define ARCH_HAS_VALID_PHYS_ADDR_RANGE
-extern int valid_phys_addr_range (unsigned long addr, size_t *count); /* efi.c */
-extern int valid_mmap_phys_addr_range (unsigned long addr, size_t *count);
+extern u64 kern_mem_attribute (unsigned long phys_addr, unsigned long size);
+extern int valid_phys_addr_range (unsigned long addr, size_t count); /* efi.c */
+extern int valid_mmap_phys_addr_range (unsigned long pfn, size_t count);
 
 /*
  * The following two macros are deprecated and scheduled for removal.
  * Please use the PCI-DMA interface defined in <asm/pci.h> instead.
  */
+#ifndef CONFIG_XEN
 #define bus_to_virt	phys_to_virt
 #define virt_to_bus	virt_to_phys
 #define page_to_bus	page_to_phys
+#define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
+#define page_to_pseudophys(page)	page_to_phys(page)
+#else /* CONFIG_XEN */
+#define bus_to_virt(bus)	\
+	phys_to_virt(machine_to_phys_for_dma(bus))
+#define virt_to_bus(virt)	\
+	phys_to_machine_for_dma(virt_to_phys(virt))
+#define page_to_bus(page)	\
+	phys_to_machine_for_dma(page_to_pseudophys(page))
+
+#define page_to_pseudophys(page) \
+	((dma_addr_t)page_to_pfn(page) << PAGE_SHIFT)
+
+/*
+ * Drivers that use page_to_phys() for bus addresses are broken.
+ * This includes:
+ * drivers/ide/cris/ide-cris.c
+ * drivers/scsi/dec_esp.c
+ */
+#define page_to_phys(page)	(page_to_pseudophys(page))
+#define bvec_to_bus(bv)		(page_to_bus((bv)->bv_page) + \
+				(unsigned long) (bv)->bv_offset)
+#define bio_to_pseudophys(bio)	(page_to_pseudophys(bio_page((bio))) +	\
+				 (unsigned long) bio_offset((bio)))
+#define bvec_to_pseudophys(bv)  (page_to_pseudophys((bv)->bv_page) +	\
+				 (unsigned long) (bv)->bv_offset)
+#define BIOVEC_PHYS_MERGEABLE(vec1, vec2)				\
+	(((bvec_to_bus((vec1)) + (vec1)->bv_len) == bvec_to_bus((vec2))) && \
+	 ((bvec_to_pseudophys((vec1)) + (vec1)->bv_len) ==		\
+	  bvec_to_pseudophys((vec2))))
+#endif /* CONFIG_XEN */
 
 # endif /* KERNEL */
 
@@ -416,26 +451,20 @@ __writeq (unsigned long val, volatile void __iomem *addr)
 # define outl_p		outl
 #endif
 
-/*
- * An "address" in IO memory space is not clearly either an integer or a pointer. We will
- * accept both, thus the casts.
- *
- * On ia-64, we access the physical I/O memory space through the uncached kernel region.
- */
-static inline void __iomem *
-ioremap (unsigned long offset, unsigned long size)
-{
-	return (void __iomem *) (__IA64_UNCACHED_OFFSET | (offset));
-}
+# ifdef __KERNEL__
+
+extern void __iomem * ioremap(unsigned long offset, unsigned long size);
+extern void __iomem * ioremap_nocache (unsigned long offset, unsigned long size);
 
 static inline void
 iounmap (volatile void __iomem *addr)
 {
 }
 
-#define ioremap_nocache(o,s)	ioremap(o,s)
-
-# ifdef __KERNEL__
+/* Use normal IO mappings for DMI */
+#define dmi_ioremap ioremap
+#define dmi_iounmap(x,l) iounmap(x)
+#define dmi_alloc(l) kmalloc(l, GFP_ATOMIC)
 
 /*
  * String version of IO memory access ops:

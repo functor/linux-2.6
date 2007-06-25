@@ -1,6 +1,6 @@
 /* key.c: basic authentication token and access key management
  *
- * Copyright (C) 2004 Red Hat, Inc. All Rights Reserved.
+ * Copyright (C) 2004-6 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -11,15 +11,16 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/poison.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/security.h>
 #include <linux/workqueue.h>
+#include <linux/random.h>
 #include <linux/err.h>
 #include "internal.h"
 
-static kmem_cache_t	*key_jar;
-static key_serial_t	key_serial_next = 3;
+static struct kmem_cache	*key_jar;
 struct rb_root		key_serial_tree; /* tree of keys indexed by serial */
 DEFINE_SPINLOCK(key_serial_lock);
 
@@ -29,8 +30,8 @@ DEFINE_SPINLOCK(key_user_lock);
 static LIST_HEAD(key_types_list);
 static DECLARE_RWSEM(key_types_sem);
 
-static void key_cleanup(void *data);
-static DECLARE_WORK(key_cleanup_task, key_cleanup, NULL);
+static void key_cleanup(struct work_struct *work);
+static DECLARE_WORK(key_cleanup_task, key_cleanup);
 
 /* we serialise key instantiation and link */
 DECLARE_RWSEM(key_construction_sem);
@@ -169,23 +170,25 @@ static void __init __key_insert_serial(struct key *key)
 /*****************************************************************************/
 /*
  * assign a key the next unique serial number
- * - we work through all the serial numbers between 2 and 2^31-1 in turn and
- *   then wrap
+ * - these are assigned randomly to avoid security issues through covert
+ *   channel problems
  */
 static inline void key_alloc_serial(struct key *key)
 {
 	struct rb_node *parent, **p;
 	struct key *xkey;
 
+	/* propose a random serial number and look for a hole for it in the
+	 * serial number tree */
+	do {
+		get_random_bytes(&key->serial, sizeof(key->serial));
+
+		key->serial >>= 1; /* negative numbers are not permitted */
+	} while (key->serial < 3);
+
 	spin_lock(&key_serial_lock);
 
-	/* propose a likely serial number and look for a hole for it in the
-	 * serial number tree */
-	key->serial = key_serial_next;
-	if (key->serial < 3)
-		key->serial = 3;
-	key_serial_next = key->serial + 1;
-
+attempt_insertion:
 	parent = NULL;
 	p = &key_serial_tree.rb_node;
 
@@ -200,39 +203,32 @@ static inline void key_alloc_serial(struct key *key)
 		else
 			goto serial_exists;
 	}
-	goto insert_here;
-
-	/* we found a key with the proposed serial number - walk the tree from
-	 * that point looking for the next unused serial number */
- serial_exists:
-	for (;;) {
-		key->serial = key_serial_next;
-		if (key->serial < 2)
-			key->serial = 2;
-		key_serial_next = key->serial + 1;
-
-		if (!parent->rb_parent)
-			p = &key_serial_tree.rb_node;
-		else if (parent->rb_parent->rb_left == parent)
-			p = &parent->rb_parent->rb_left;
-		else
-			p = &parent->rb_parent->rb_right;
-
-		parent = rb_next(parent);
-		if (!parent)
-			break;
-
-		xkey = rb_entry(parent, struct key, serial_node);
-		if (key->serial < xkey->serial)
-			goto insert_here;
-	}
 
 	/* we've found a suitable hole - arrange for this key to occupy it */
- insert_here:
 	rb_link_node(&key->serial_node, parent, p);
 	rb_insert_color(&key->serial_node, &key_serial_tree);
 
 	spin_unlock(&key_serial_lock);
+	return;
+
+	/* we found a key with the proposed serial number - walk the tree from
+	 * that point looking for the next unused serial number */
+serial_exists:
+	for (;;) {
+		key->serial++;
+		if (key->serial < 3) {
+			key->serial = 3;
+			goto attempt_insertion;
+		}
+
+		parent = rb_next(parent);
+		if (!parent)
+			goto attempt_insertion;
+
+		xkey = rb_entry(parent, struct key, serial_node);
+		if (key->serial < xkey->serial)
+			goto attempt_insertion;
+	}
 
 } /* end key_alloc_serial() */
 
@@ -247,8 +243,8 @@ static inline void key_alloc_serial(struct key *key)
  *   instantiate the key or discard it before returning
  */
 struct key *key_alloc(struct key_type *type, const char *desc,
-		      uid_t uid, gid_t gid, key_perm_t perm,
-		      int not_in_quota)
+		      uid_t uid, gid_t gid, struct task_struct *ctx,
+		      key_perm_t perm, unsigned long flags)
 {
 	struct key_user *user = NULL;
 	struct key *key;
@@ -269,12 +265,14 @@ struct key *key_alloc(struct key_type *type, const char *desc,
 
 	/* check that the user's quota permits allocation of another key and
 	 * its description */
-	if (!not_in_quota) {
+	if (!(flags & KEY_ALLOC_NOT_IN_QUOTA)) {
 		spin_lock(&user->lock);
-		if (user->qnkeys + 1 >= KEYQUOTA_MAX_KEYS &&
-		    user->qnbytes + quotalen >= KEYQUOTA_MAX_BYTES
-		    )
-			goto no_quota;
+		if (!(flags & KEY_ALLOC_QUOTA_OVERRUN)) {
+			if (user->qnkeys + 1 >= KEYQUOTA_MAX_KEYS ||
+			    user->qnbytes + quotalen >= KEYQUOTA_MAX_BYTES
+			    )
+				goto no_quota;
+		}
 
 		user->qnkeys++;
 		user->qnbytes += quotalen;
@@ -282,16 +280,14 @@ struct key *key_alloc(struct key_type *type, const char *desc,
 	}
 
 	/* allocate and initialise the key and its description */
-	key = kmem_cache_alloc(key_jar, SLAB_KERNEL);
+	key = kmem_cache_alloc(key_jar, GFP_KERNEL);
 	if (!key)
 		goto no_memory_2;
 
 	if (desc) {
-		key->description = kmalloc(desclen, GFP_KERNEL);
+		key->description = kmemdup(desc, desclen, GFP_KERNEL);
 		if (!key->description)
 			goto no_memory_3;
-
-		memcpy(key->description, desc, desclen);
 	}
 
 	atomic_set(&key->usage, 1);
@@ -308,7 +304,7 @@ struct key *key_alloc(struct key_type *type, const char *desc,
 	key->payload.data = NULL;
 	key->security = NULL;
 
-	if (!not_in_quota)
+	if (!(flags & KEY_ALLOC_NOT_IN_QUOTA))
 		key->flags |= 1 << KEY_FLAG_IN_QUOTA;
 
 	memset(&key->type_data, 0, sizeof(key->type_data));
@@ -318,7 +314,7 @@ struct key *key_alloc(struct key_type *type, const char *desc,
 #endif
 
 	/* let the security module know about the key */
-	ret = security_key_alloc(key);
+	ret = security_key_alloc(key, ctx, flags);
 	if (ret < 0)
 		goto security_error;
 
@@ -332,7 +328,7 @@ error:
 security_error:
 	kfree(key->description);
 	kmem_cache_free(key_jar, key);
-	if (!not_in_quota) {
+	if (!(flags & KEY_ALLOC_NOT_IN_QUOTA)) {
 		spin_lock(&user->lock);
 		user->qnkeys--;
 		user->qnbytes -= quotalen;
@@ -345,7 +341,7 @@ security_error:
 no_memory_3:
 	kmem_cache_free(key_jar, key);
 no_memory_2:
-	if (!not_in_quota) {
+	if (!(flags & KEY_ALLOC_NOT_IN_QUOTA)) {
 		spin_lock(&user->lock);
 		user->qnkeys--;
 		user->qnbytes -= quotalen;
@@ -549,7 +545,7 @@ EXPORT_SYMBOL(key_negate_and_link);
  * do cleaning up in process context so that we don't have to disable
  * interrupts all over the place
  */
-static void key_cleanup(void *data)
+static void key_cleanup(struct work_struct *work)
 {
 	struct rb_node *_n;
 	struct key *key;
@@ -761,7 +757,7 @@ key_ref_t key_create_or_update(key_ref_t keyring_ref,
 			       const char *description,
 			       const void *payload,
 			       size_t plen,
-			       int not_in_quota)
+			       unsigned long flags)
 {
 	struct key_type *ktype;
 	struct key *keyring, *key = NULL;
@@ -799,12 +795,16 @@ key_ref_t key_create_or_update(key_ref_t keyring_ref,
 		goto error_3;
 	}
 
-	/* search for an existing key of the same type and description in the
-	 * destination keyring
+	/* if it's possible to update this type of key, search for an existing
+	 * key of the same type and description in the destination keyring and
+	 * update that instead if possible
 	 */
-	key_ref = __keyring_search_one(keyring_ref, ktype, description, 0);
-	if (!IS_ERR(key_ref))
-		goto found_matching_key;
+	if (ktype->update) {
+		key_ref = __keyring_search_one(keyring_ref, ktype, description,
+					       0);
+		if (!IS_ERR(key_ref))
+			goto found_matching_key;
+	}
 
 	/* decide on the permissions we want */
 	perm = KEY_POS_VIEW | KEY_POS_SEARCH | KEY_POS_LINK | KEY_POS_SETATTR;
@@ -818,7 +818,7 @@ key_ref_t key_create_or_update(key_ref_t keyring_ref,
 
 	/* allocate a new key */
 	key = key_alloc(ktype, description, current->fsuid, current->fsgid,
-			perm, not_in_quota);
+			current, perm, flags);
 	if (IS_ERR(key)) {
 		key_ref = ERR_PTR(PTR_ERR(key));
 		goto error_3;
@@ -903,6 +903,10 @@ void key_revoke(struct key *key)
 	 * it */
 	down_write(&key->sem);
 	set_bit(KEY_FLAG_REVOKED, &key->flags);
+
+	if (key->type->revoke)
+		key->type->revoke(key);
+
 	up_write(&key->sem);
 
 } /* end key_revoke() */
@@ -978,7 +982,7 @@ void unregister_key_type(struct key_type *ktype)
 		if (key->type == ktype) {
 			if (ktype->destroy)
 				ktype->destroy(key);
-			memset(&key->payload, 0xbd, sizeof(key->payload));
+			memset(&key->payload, KEY_DESTROY, sizeof(key->payload));
 		}
 	}
 

@@ -1,7 +1,7 @@
 /*
 	drivers/net/tulip/pnic2.c
 
-	Maintained by Jeff Garzik <jgarzik@pobox.com>
+	Maintained by Valerie Henson <val_henson@linux.intel.com>
 	Copyright 2000,2001  The Linux Kernel Team
 	Written/copyright 1994-2001 by Donald Becker.
         Modified to hep support PNIC_II by Kevin B. Hendricks
@@ -199,7 +199,7 @@ void pnic2_lnk_change(struct net_device *dev, int csr5)
 	               /* negotiation ended successfully */
 
 	               /* get the link partners reply and mask out all but
-                        * bits 24-21 which show the partners capabilites
+                        * bits 24-21 which show the partners capabilities
                         * and match those to what we advertised
                         *
                         * then begin to interpret the results of the negotiation.

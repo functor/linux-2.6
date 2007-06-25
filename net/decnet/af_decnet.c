@@ -99,7 +99,6 @@ Version 0.0.6    2.1.110   07-aug-98   Eduardo Marcelo Serrat
                                        dn_bind fixes
 *******************************************************************************/
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/types.h>
@@ -131,6 +130,7 @@ Version 0.0.6    2.1.110   07-aug-98   Eduardo Marcelo Serrat
 #include <linux/poll.h>
 #include <net/neighbour.h>
 #include <net/dst.h>
+#include <net/fib_rules.h>
 #include <net/dn.h>
 #include <net/dn_nsp.h>
 #include <net/dn_dev.h>
@@ -166,13 +166,13 @@ static struct hlist_head *dn_find_list(struct sock *sk)
 	if (scp->addr.sdn_flags & SDF_WILD)
 		return hlist_empty(&dn_wild_sk) ? &dn_wild_sk : NULL;
 
-	return &dn_sk_hash[scp->addrloc & DN_SK_HASH_MASK];
+	return &dn_sk_hash[dn_ntohs(scp->addrloc) & DN_SK_HASH_MASK];
 }
 
 /* 
  * Valid ports are those greater than zero and not already in use.
  */
-static int check_port(unsigned short port)
+static int check_port(__le16 port)
 {
 	struct sock *sk;
 	struct hlist_node *node;
@@ -180,7 +180,7 @@ static int check_port(unsigned short port)
 	if (port == 0)
 		return -1;
 
-	sk_for_each(sk, node, &dn_sk_hash[port & DN_SK_HASH_MASK]) {
+	sk_for_each(sk, node, &dn_sk_hash[dn_ntohs(port) & DN_SK_HASH_MASK]) {
 		struct dn_scp *scp = DN_SK(sk);
 		if (scp->addrloc == port)
 			return -1;
@@ -194,12 +194,12 @@ static unsigned short port_alloc(struct sock *sk)
 static unsigned short port = 0x2000;
 	unsigned short i_port = port;
 
-	while(check_port(++port) != 0) {
+	while(check_port(dn_htons(++port)) != 0) {
 		if (port == i_port)
 			return 0;
 	}
 
-	scp->addrloc = port;
+	scp->addrloc = dn_htons(port);
 
 	return 1;
 }
@@ -418,7 +418,7 @@ struct sock *dn_find_by_skb(struct sk_buff *skb)
 	struct dn_scp *scp;
 
 	read_lock(&dn_hash_lock);
-	sk_for_each(sk, node, &dn_sk_hash[cb->dst_port & DN_SK_HASH_MASK]) {
+	sk_for_each(sk, node, &dn_sk_hash[dn_ntohs(cb->dst_port) & DN_SK_HASH_MASK]) {
 		scp = DN_SK(sk);
 		if (cb->src != dn_saddr2dn(&scp->peer))
 			continue;
@@ -661,7 +661,7 @@ disc_reject:
 	}
 }
 
-char *dn_addr2asc(dn_address addr, char *buf)
+char *dn_addr2asc(__u16 addr, char *buf)
 {
 	unsigned short node, area;
 
@@ -801,7 +801,7 @@ static int dn_auto_bind(struct socket *sock)
 	/* End of compatibility stuff */
 
 	scp->addr.sdn_add.a_len = dn_htons(2);
-	rv = dn_dev_bind_default((dn_address *)scp->addr.sdn_add.a_addr);
+	rv = dn_dev_bind_default((__le16 *)scp->addr.sdn_add.a_addr);
 	if (rv == 0) {
 		rv = dn_hash_sock(sk);
 		if (rv)
@@ -1016,13 +1016,14 @@ static void dn_access_copy(struct sk_buff *skb, struct accessdata_dn *acc)
 
 static void dn_user_copy(struct sk_buff *skb, struct optdata_dn *opt)
 {
-        unsigned char *ptr = skb->data;
-        
-        opt->opt_optl   = *ptr++;
-        opt->opt_status = 0;
-        memcpy(opt->opt_data, ptr, opt->opt_optl);
-        skb_pull(skb, opt->opt_optl + 1);
+	unsigned char *ptr = skb->data;
+	u16 len = *ptr++; /* yes, it's 8bit on the wire */
 
+	BUG_ON(len > 16); /* we've checked the contents earlier */
+	opt->opt_optl   = dn_htons(len);
+	opt->opt_status = 0;
+	memcpy(opt->opt_data, ptr, len);
+	skb_pull(skb, len + 1);
 }
 
 static struct sk_buff *dn_wait_for_connect(struct sock *sk, long *timeo)
@@ -1121,8 +1122,8 @@ static int dn_accept(struct socket *sock, struct socket *newsock, int flags)
 
 	skb_pull(skb, dn_username2sockaddr(skb->data, skb->len, &(DN_SK(newsk)->addr), &type));
 	skb_pull(skb, dn_username2sockaddr(skb->data, skb->len, &(DN_SK(newsk)->peer), &type));
-	*(dn_address *)(DN_SK(newsk)->peer.sdn_add.a_addr) = cb->src;
-	*(dn_address *)(DN_SK(newsk)->addr.sdn_add.a_addr) = cb->dst;
+	*(__le16 *)(DN_SK(newsk)->peer.sdn_add.a_addr) = cb->src;
+	*(__le16 *)(DN_SK(newsk)->addr.sdn_add.a_addr) = cb->dst;
 
 	menuver = *skb->data;
 	skb_pull(skb, 1);
@@ -1178,8 +1179,10 @@ static int dn_getname(struct socket *sock, struct sockaddr *uaddr,int *uaddr_len
 	if (peer) {
 		if ((sock->state != SS_CONNECTED && 
 		     sock->state != SS_CONNECTING) && 
-		    scp->accept_mode == ACC_IMMED)
+		    scp->accept_mode == ACC_IMMED) {
+		    	release_sock(sk);
 			return -ENOTCONN;
+		}
 
 		memcpy(sa, &scp->peer, sizeof(struct sockaddr_dn));
 	} else {
@@ -1365,7 +1368,7 @@ static int __dn_setsockopt(struct socket *sock, int level,int optname, char __us
 			if (optlen != sizeof(struct optdata_dn))
 				return -EINVAL;
 
-			if (u.opt.opt_optl > 16)
+			if (dn_ntohs(u.opt.opt_optl) > 16)
 				return -EINVAL;
 
 			memcpy(&scp->conndata_out, &u.opt, optlen);
@@ -1378,7 +1381,7 @@ static int __dn_setsockopt(struct socket *sock, int level,int optname, char __us
 			if (optlen != sizeof(struct optdata_dn))
 				return -EINVAL;
 
-			if (u.opt.opt_optl > 16)
+			if (dn_ntohs(u.opt.opt_optl) > 16)
 				return -EINVAL;
 
 			memcpy(&scp->discdata_out, &u.opt, optlen);
@@ -1693,7 +1696,7 @@ static int dn_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (rv)
 		goto out;
 
-	if (flags & ~(MSG_PEEK|MSG_OOB|MSG_WAITALL|MSG_DONTWAIT|MSG_NOSIGNAL)) {
+	if (flags & ~(MSG_CMSG_COMPAT|MSG_PEEK|MSG_OOB|MSG_WAITALL|MSG_DONTWAIT|MSG_NOSIGNAL)) {
 		rv = -EOPNOTSUPP;
 		goto out;
 	}

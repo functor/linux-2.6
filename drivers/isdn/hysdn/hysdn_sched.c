@@ -11,7 +11,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/kernel.h>
@@ -30,7 +29,8 @@
 /* to keep the data until later.                                             */
 /*****************************************************************************/
 int
-hysdn_sched_rx(hysdn_card * card, uchar * buf, word len, word chan)
+hysdn_sched_rx(hysdn_card *card, unsigned char *buf, unsigned short len,
+			unsigned short chan)
 {
 
 	switch (chan) {
@@ -72,7 +72,9 @@ hysdn_sched_rx(hysdn_card * card, uchar * buf, word len, word chan)
 /* sending.                                                                  */
 /*****************************************************************************/
 int
-hysdn_sched_tx(hysdn_card * card, uchar * buf, word volatile *len, word volatile *chan, word maxlen)
+hysdn_sched_tx(hysdn_card *card, unsigned char *buf,
+		unsigned short volatile *len, unsigned short volatile *chan,
+		unsigned short maxlen)
 {
 	struct sk_buff *skb;
 
@@ -145,30 +147,25 @@ hysdn_sched_tx(hysdn_card * card, uchar * buf, word volatile *len, word volatile
 /* are to be sent and this happens very seldom.                              */
 /*****************************************************************************/
 int
-hysdn_tx_cfgline(hysdn_card * card, uchar * line, word chan)
+hysdn_tx_cfgline(hysdn_card *card, unsigned char *line, unsigned short chan)
 {
 	int cnt = 50;		/* timeout intervalls */
-	ulong flags;
+	unsigned long flags;
 
 	if (card->debug_flags & LOG_SCHED_ASYN)
 		hysdn_addlog(card, "async tx-cfg chan=%d len=%d", chan, strlen(line) + 1);
 
-	save_flags(flags);
-	cli();
 	while (card->async_busy) {
-		sti();
 
 		if (card->debug_flags & LOG_SCHED_ASYN)
 			hysdn_addlog(card, "async tx-cfg delayed");
 
 		msleep_interruptible(20);		/* Timeout 20ms */
-		if (!--cnt) {
-			restore_flags(flags);
+		if (!--cnt)
 			return (-ERR_ASYNC_TIME);	/* timed out */
-		}
-		cli();
 	}			/* wait for buffer to become free */
 
+	spin_lock_irqsave(&card->hysdn_lock, flags);
 	strcpy(card->async_data, line);
 	card->async_len = strlen(line) + 1;
 	card->async_channel = chan;
@@ -176,29 +173,22 @@ hysdn_tx_cfgline(hysdn_card * card, uchar * line, word chan)
 
 	/* now queue the task */
 	schedule_work(&card->irq_queue);
-	sti();
+	spin_unlock_irqrestore(&card->hysdn_lock, flags);
 
 	if (card->debug_flags & LOG_SCHED_ASYN)
 		hysdn_addlog(card, "async tx-cfg data queued");
 
 	cnt++;			/* short delay */
-	cli();
 
 	while (card->async_busy) {
-		sti();
 
 		if (card->debug_flags & LOG_SCHED_ASYN)
 			hysdn_addlog(card, "async tx-cfg waiting for tx-ready");
 
 		msleep_interruptible(20);		/* Timeout 20ms */
-		if (!--cnt) {
-			restore_flags(flags);
+		if (!--cnt)
 			return (-ERR_ASYNC_TIME);	/* timed out */
-		}
-		cli();
 	}			/* wait for buffer to become free again */
-
-	restore_flags(flags);
 
 	if (card->debug_flags & LOG_SCHED_ASYN)
 		hysdn_addlog(card, "async tx-cfg data send");
