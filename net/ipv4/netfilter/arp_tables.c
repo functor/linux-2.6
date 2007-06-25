@@ -9,7 +9,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
@@ -22,7 +21,7 @@
 #include <linux/init.h>
 
 #include <asm/uaccess.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
 
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter_arp/arp_tables.h>
@@ -57,8 +56,6 @@ do {								\
 #define ARP_NF_ASSERT(x)
 #endif
 
-#include <linux/netfilter_ipv4/listhelp.h>
-
 static inline int arp_devaddr_compare(const struct arpt_devaddr_info *ap,
 				      char *hdr_addr, int len)
 {
@@ -83,7 +80,7 @@ static inline int arp_packet_match(const struct arphdr *arphdr,
 {
 	char *arpptr = (char *)(arphdr + 1);
 	char *src_devaddr, *tgt_devaddr;
-	u32 src_ipaddr, tgt_ipaddr;
+	__be32 src_ipaddr, tgt_ipaddr;
 	int i, ret;
 
 #define FWINV(bool,invflg) ((bool) ^ !!(arpinfo->invflags & invflg))
@@ -208,8 +205,8 @@ static unsigned int arpt_error(struct sk_buff **pskb,
 			       const struct net_device *in,
 			       const struct net_device *out,
 			       unsigned int hooknum,
-			       const void *targinfo,
-			       void *userinfo)
+			       const struct xt_target *target,
+			       const void *targinfo)
 {
 	if (net_ratelimit())
 		printk("arp_tables: error: '%s'\n", (char *)targinfo);
@@ -226,8 +223,7 @@ unsigned int arpt_do_table(struct sk_buff **pskb,
 			   unsigned int hook,
 			   const struct net_device *in,
 			   const struct net_device *out,
-			   struct arpt_table *table,
-			   void *userdata)
+			   struct arpt_table *table)
 {
 	static const char nulldevname[IFNAMSIZ];
 	unsigned int verdict = NF_DROP;
@@ -301,8 +297,8 @@ unsigned int arpt_do_table(struct sk_buff **pskb,
 				verdict = t->u.kernel.target->target(pskb,
 								     in, out,
 								     hook,
-								     t->data,
-								     userdata);
+								     t->u.kernel.target,
+								     t->data);
 
 				/* Target might have changed stuff. */
 				arp = (*pskb)->nh.arph;
@@ -362,6 +358,7 @@ static int mark_source_chains(struct xt_table_info *newinfo,
 		for (;;) {
 			struct arpt_standard_target *t
 				= (void *)arpt_get_target(e);
+			int visited = e->comefrom & (1 << hook);
 
 			if (e->comefrom & (1 << NF_ARP_NUMHOOKS)) {
 				printk("arptables: loop hook %u pos %u %08X.\n",
@@ -372,12 +369,19 @@ static int mark_source_chains(struct xt_table_info *newinfo,
 				|= ((1 << hook) | (1 << NF_ARP_NUMHOOKS));
 
 			/* Unconditional return/END. */
-			if (e->target_offset == sizeof(struct arpt_entry)
+			if ((e->target_offset == sizeof(struct arpt_entry)
 			    && (strcmp(t->target.u.user.name,
 				       ARPT_STANDARD_TARGET) == 0)
 			    && t->verdict < 0
-			    && unconditional(&e->arp)) {
+			    && unconditional(&e->arp)) || visited) {
 				unsigned int oldpos, size;
+
+				if (t->verdict < -NF_MAX_VERDICT - 1) {
+					duprintf("mark_source_chains: bad "
+						"negative verdict (%i)\n",
+								t->verdict);
+					return 0;
+				}
 
 				/* Return: backtrack through the last
 				 * big jump.
@@ -408,6 +412,14 @@ static int mark_source_chains(struct xt_table_info *newinfo,
 				if (strcmp(t->target.u.user.name,
 					   ARPT_STANDARD_TARGET) == 0
 				    && newpos >= 0) {
+					if (newpos > newinfo->size -
+						sizeof(struct arpt_entry)) {
+						duprintf("mark_source_chains: "
+							"bad verdict (%i)\n",
+								newpos);
+						return 0;
+					}
+
 					/* This a jump; chase it. */
 					duprintf("Jump rule %u -> %u\n",
 						 pos, newpos);
@@ -430,8 +442,6 @@ static int mark_source_chains(struct xt_table_info *newinfo,
 static inline int standard_check(const struct arpt_entry_target *t,
 				 unsigned int max_offset)
 {
-	struct arpt_standard_target *targ = (void *)t;
-
 	/* Check standard info. */
 	if (t->u.target_size
 	    != ARPT_ALIGN(sizeof(struct arpt_standard_target))) {
@@ -441,18 +451,6 @@ static inline int standard_check(const struct arpt_entry_target *t,
 		return 0;
 	}
 
-	if (targ->verdict >= 0
-	    && targ->verdict > max_offset - sizeof(struct arpt_entry)) {
-		duprintf("arpt_standard_check: bad verdict (%i)\n",
-			 targ->verdict);
-		return 0;
-	}
-
-	if (targ->verdict < -NF_MAX_VERDICT - 1) {
-		duprintf("arpt_standard_check: bad negative verdict (%i)\n",
-			 targ->verdict);
-		return 0;
-	}
 	return 1;
 }
 
@@ -470,7 +468,13 @@ static inline int check_entry(struct arpt_entry *e, const char *name, unsigned i
 		return -EINVAL;
 	}
 
+	if (e->target_offset + sizeof(struct arpt_entry_target) > e->next_offset)
+		return -EINVAL;
+
 	t = arpt_get_target(e);
+	if (e->target_offset + t->u.target_size > e->next_offset)
+		return -EINVAL;
+
 	target = try_then_request_module(xt_find_target(NF_ARP, t->u.user.name,
 							t->u.user.revision),
 					 "arpt_%s", t->u.user.name);
@@ -481,26 +485,29 @@ static inline int check_entry(struct arpt_entry *e, const char *name, unsigned i
 	}
 	t->u.kernel.target = target;
 
+	ret = xt_check_target(target, NF_ARP, t->u.target_size - sizeof(*t),
+			      name, e->comefrom, 0, 0);
+	if (ret)
+		goto err;
+
 	if (t->u.kernel.target == &arpt_standard_target) {
 		if (!standard_check(t, size)) {
 			ret = -EINVAL;
-			goto out;
+			goto err;
 		}
 	} else if (t->u.kernel.target->checkentry
-		   && !t->u.kernel.target->checkentry(name, e, t->data,
-						      t->u.target_size
-						      - sizeof(*t),
+		   && !t->u.kernel.target->checkentry(name, e, target, t->data,
 						      e->comefrom)) {
-		module_put(t->u.kernel.target->me);
 		duprintf("arp_tables: check failed for `%s'.\n",
 			 t->u.kernel.target->name);
 		ret = -EINVAL;
-		goto out;
+		goto err;
 	}
 
 	(*i)++;
 	return 0;
-
+err:
+	module_put(t->u.kernel.target->me);
 out:
 	return ret;
 }
@@ -556,8 +563,7 @@ static inline int cleanup_entry(struct arpt_entry *e, unsigned int *i)
 
 	t = arpt_get_target(e);
 	if (t->u.kernel.target->destroy)
-		t->u.kernel.target->destroy(t->data,
-					    t->u.target_size - sizeof(*t));
+		t->u.kernel.target->destroy(t->u.kernel.target, t->data);
 	module_put(t->u.kernel.target->me);
 	return 0;
 }
@@ -635,12 +641,12 @@ static int translate_table(const char *name,
 
 	if (ret != 0) {
 		ARPT_ENTRY_ITERATE(entry0, newinfo->size,
-				   cleanup_entry, &i);
+				cleanup_entry, &i);
 		return ret;
 	}
 
 	/* And one copy for every other CPU */
-	for_each_cpu(i) {
+	for_each_possible_cpu(i) {
 		if (newinfo->entries[i] && newinfo->entries[i] != entry0)
 			memcpy(newinfo->entries[i], entry0, newinfo->size);
 	}
@@ -690,7 +696,7 @@ static void get_counters(const struct xt_table_info *t,
 			   counters,
 			   &i);
 
-	for_each_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		if (cpu == curcpu)
 			continue;
 		i = 0;
@@ -1114,7 +1120,8 @@ int arpt_register_table(struct arpt_table *table,
 		return ret;
 	}
 
-	if (xt_register_table(table, &bootstrap, newinfo) != 0) {
+	ret = xt_register_table(table, &bootstrap, newinfo);
+	if (ret != 0) {
 		xt_free_table_info(newinfo);
 		return ret;
 	}
@@ -1139,11 +1146,15 @@ void arpt_unregister_table(struct arpt_table *table)
 /* The built-in targets: standard (NULL) and error. */
 static struct arpt_target arpt_standard_target = {
 	.name		= ARPT_STANDARD_TARGET,
+	.targetsize	= sizeof(int),
+	.family		= NF_ARP,
 };
 
 static struct arpt_target arpt_error_target = {
 	.name		= ARPT_ERROR_TARGET,
 	.target		= arpt_error,
+	.targetsize	= ARPT_FUNCTION_MAXNAMELEN,
+	.family		= NF_ARP,
 };
 
 static struct nf_sockopt_ops arpt_sockopts = {
@@ -1156,30 +1167,45 @@ static struct nf_sockopt_ops arpt_sockopts = {
 	.get		= do_arpt_get_ctl,
 };
 
-static int __init init(void)
+static int __init arp_tables_init(void)
 {
 	int ret;
 
-	xt_proto_init(NF_ARP);
+	ret = xt_proto_init(NF_ARP);
+	if (ret < 0)
+		goto err1;
 
 	/* Noone else will be downing sem now, so we won't sleep */
-	xt_register_target(NF_ARP, &arpt_standard_target);
-	xt_register_target(NF_ARP, &arpt_error_target);
+	ret = xt_register_target(&arpt_standard_target);
+	if (ret < 0)
+		goto err2;
+	ret = xt_register_target(&arpt_error_target);
+	if (ret < 0)
+		goto err3;
 
 	/* Register setsockopt */
 	ret = nf_register_sockopt(&arpt_sockopts);
-	if (ret < 0) {
-		duprintf("Unable to register sockopts.\n");
-		return ret;
-	}
+	if (ret < 0)
+		goto err4;
 
 	printk("arp_tables: (C) 2002 David S. Miller\n");
 	return 0;
+
+err4:
+	xt_unregister_target(&arpt_error_target);
+err3:
+	xt_unregister_target(&arpt_standard_target);
+err2:
+	xt_proto_fini(NF_ARP);
+err1:
+	return ret;
 }
 
-static void __exit fini(void)
+static void __exit arp_tables_fini(void)
 {
 	nf_unregister_sockopt(&arpt_sockopts);
+	xt_unregister_target(&arpt_error_target);
+	xt_unregister_target(&arpt_standard_target);
 	xt_proto_fini(NF_ARP);
 }
 
@@ -1187,5 +1213,5 @@ EXPORT_SYMBOL(arpt_register_table);
 EXPORT_SYMBOL(arpt_unregister_table);
 EXPORT_SYMBOL(arpt_do_table);
 
-module_init(init);
-module_exit(fini);
+module_init(arp_tables_init);
+module_exit(arp_tables_fini);

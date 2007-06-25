@@ -14,7 +14,7 @@ typedef struct { unsigned long a,b; } __attribute__((aligned(16))) xmm_store_t;
 	preempt_disable();			\
 	if (!(current_thread_info()->status & TS_USEDFPU))	\
 		clts();				\
-	__asm__ __volatile__ ( 			\
+	asm volatile (				\
 		"movups %%xmm0,(%1)	;\n\t"	\
 		"movups %%xmm1,0x10(%1)	;\n\t"	\
 		"movups %%xmm2,0x20(%1)	;\n\t"	\

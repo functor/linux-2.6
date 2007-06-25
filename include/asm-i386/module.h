@@ -6,9 +6,14 @@ struct mod_arch_specific
 {
 };
 
+#define MODULES_ARE_ELF32
 #define Elf_Shdr Elf32_Shdr
 #define Elf_Sym Elf32_Sym
 #define Elf_Ehdr Elf32_Ehdr
+#define Elf_Rel Elf32_Rel
+#define Elf_Rela Elf32_Rela
+#define ELF_R_TYPE(X)	ELF32_R_TYPE(X)
+#define ELF_R_SYM(X)	ELF32_R_SYM(X)
 
 #ifdef CONFIG_M386
 #define MODULE_PROC_FAMILY "386 "
@@ -20,6 +25,8 @@ struct mod_arch_specific
 #define MODULE_PROC_FAMILY "586TSC "
 #elif defined CONFIG_M586MMX
 #define MODULE_PROC_FAMILY "586MMX "
+#elif defined CONFIG_MCORE2
+#define MODULE_PROC_FAMILY "CORE2 "
 #elif defined CONFIG_M686
 #define MODULE_PROC_FAMILY "686 "
 #elif defined CONFIG_MPENTIUMII
@@ -60,18 +67,12 @@ struct mod_arch_specific
 #error unknown processor family
 #endif
 
-#ifdef CONFIG_REGPARM
-#define MODULE_REGPARM "REGPARM "
-#else
-#define MODULE_REGPARM ""
-#endif
-
 #ifdef CONFIG_4KSTACKS
 #define MODULE_STACKSIZE "4KSTACKS "
 #else
 #define MODULE_STACKSIZE ""
 #endif
 
-#define MODULE_ARCH_VERMAGIC MODULE_PROC_FAMILY MODULE_REGPARM MODULE_STACKSIZE
+#define MODULE_ARCH_VERMAGIC MODULE_PROC_FAMILY MODULE_STACKSIZE
 
 #endif /* _ASM_I386_MODULE_H */

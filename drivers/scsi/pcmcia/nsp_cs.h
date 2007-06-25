@@ -225,7 +225,7 @@
 /*====================================================================*/
 
 typedef struct scsi_info_t {
-	dev_link_t             link;
+	struct pcmcia_device	*p_dev;
 	struct Scsi_Host      *host;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,74))
 	dev_node_t             node;
@@ -266,7 +266,7 @@ typedef struct _nsp_hw_data {
 
 	int           TimerCount;
 	int           SelectionTimeOut;
-	Scsi_Cmnd    *CurrentSC;
+	struct scsi_cmnd *CurrentSC;
 	//int           CurrnetTarget;
 
 	int           FifoCount;
@@ -297,8 +297,8 @@ typedef struct _nsp_hw_data {
 
 /* Card service functions */
 static void        nsp_cs_detach (struct pcmcia_device *p_dev);
-static void        nsp_cs_release(dev_link_t *link);
-static void        nsp_cs_config (dev_link_t *link);
+static void        nsp_cs_release(struct pcmcia_device *link);
+static int        nsp_cs_config (struct pcmcia_device *link);
 
 /* Linux SCSI subsystem specific functions */
 static struct Scsi_Host *nsp_detect     (struct scsi_host_template *sht);
@@ -319,34 +319,38 @@ static        int        nsp_proc_info  (
 					 int     hostno,
 #endif
 					 int     inout);
-static        int        nsp_queuecommand(Scsi_Cmnd *SCpnt, void (* done)(Scsi_Cmnd *SCpnt));
+static int nsp_queuecommand(struct scsi_cmnd *SCpnt,
+			    void (* done)(struct scsi_cmnd *SCpnt));
 
 /* Error handler */
-/*static int nsp_eh_abort       (Scsi_Cmnd *SCpnt);*/
-/*static int nsp_eh_device_reset(Scsi_Cmnd *SCpnt);*/
-static int nsp_eh_bus_reset    (Scsi_Cmnd *SCpnt);
-static int nsp_eh_host_reset   (Scsi_Cmnd *SCpnt);
+/*static int nsp_eh_abort       (struct scsi_cmnd *SCpnt);*/
+/*static int nsp_eh_device_reset(struct scsi_cmnd *SCpnt);*/
+static int nsp_eh_bus_reset    (struct scsi_cmnd *SCpnt);
+static int nsp_eh_host_reset   (struct scsi_cmnd *SCpnt);
 static int nsp_bus_reset       (nsp_hw_data *data);
 
 /* */
 static int  nsphw_init           (nsp_hw_data *data);
-static int  nsphw_start_selection(Scsi_Cmnd *SCpnt);
-static void nsp_start_timer      (Scsi_Cmnd *SCpnt, int time);
-static int  nsp_fifo_count       (Scsi_Cmnd *SCpnt);
-static void nsp_pio_read         (Scsi_Cmnd *SCpnt);
-static void nsp_pio_write        (Scsi_Cmnd *SCpnt);
-static int  nsp_nexus            (Scsi_Cmnd *SCpnt);
-static void nsp_scsi_done        (Scsi_Cmnd *SCpnt);
-static int  nsp_analyze_sdtr     (Scsi_Cmnd *SCpnt);
-static int  nsp_negate_signal    (Scsi_Cmnd *SCpnt, unsigned char mask, char *str);
-static int  nsp_expect_signal    (Scsi_Cmnd *SCpnt, unsigned char current_phase, unsigned char  mask);
-static int  nsp_xfer             (Scsi_Cmnd *SCpnt, int phase);
-static int  nsp_dataphase_bypass (Scsi_Cmnd *SCpnt);
-static int  nsp_reselected       (Scsi_Cmnd *SCpnt);
+static int  nsphw_start_selection(struct scsi_cmnd *SCpnt);
+static void nsp_start_timer      (struct scsi_cmnd *SCpnt, int time);
+static int  nsp_fifo_count       (struct scsi_cmnd *SCpnt);
+static void nsp_pio_read         (struct scsi_cmnd *SCpnt);
+static void nsp_pio_write        (struct scsi_cmnd *SCpnt);
+static int  nsp_nexus            (struct scsi_cmnd *SCpnt);
+static void nsp_scsi_done        (struct scsi_cmnd *SCpnt);
+static int  nsp_analyze_sdtr     (struct scsi_cmnd *SCpnt);
+static int  nsp_negate_signal    (struct scsi_cmnd *SCpnt,
+				  unsigned char mask, char *str);
+static int  nsp_expect_signal    (struct scsi_cmnd *SCpnt,
+				  unsigned char current_phase,
+				  unsigned char  mask);
+static int  nsp_xfer             (struct scsi_cmnd *SCpnt, int phase);
+static int  nsp_dataphase_bypass (struct scsi_cmnd *SCpnt);
+static int  nsp_reselected       (struct scsi_cmnd *SCpnt);
 static struct Scsi_Host *nsp_detect(struct scsi_host_template *sht);
 
 /* Interrupt handler */
-//static irqreturn_t nspintr(int irq, void *dev_id, struct pt_regs *regs);
+//static irqreturn_t nspintr(int irq, void *dev_id);
 
 /* Module entry point*/
 static int  __init nsp_cs_init(void);
@@ -355,8 +359,8 @@ static void __exit nsp_cs_exit(void);
 
 /* Debug */
 #ifdef NSP_DEBUG
-static void show_command (Scsi_Cmnd *SCpnt);
-static void show_phase   (Scsi_Cmnd *SCpnt);
+static void show_command (struct scsi_cmnd *SCpnt);
+static void show_phase   (struct scsi_cmnd *SCpnt);
 static void show_busphase(unsigned char stat);
 static void show_message (nsp_hw_data *data);
 #else
@@ -450,7 +454,7 @@ static inline struct Scsi_Host *scsi_host_hn_get(unsigned short hostno)
 	return host;
 }
 
-static void cs_error(client_handle_t handle, int func, int ret)
+static void cs_error(struct pcmcia_device *handle, int func, int ret)
 {
 	error_info_t err = { func, ret };
 	pcmcia_report_error(handle, &err);

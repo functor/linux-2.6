@@ -9,7 +9,7 @@ enum sock_acc_field {
 	VXA_SOCK_INET6,
 	VXA_SOCK_PACKET,
 	VXA_SOCK_OTHER,
-	VXA_SOCK_SIZE   /* array size */
+	VXA_SOCK_SIZE	/* array size */
 };
 
-#endif /* _VX_CACCT_H */
+#endif	/* _VX_CACCT_H */

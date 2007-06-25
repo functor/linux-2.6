@@ -34,7 +34,11 @@
 #include <net/protocol.h>
 #include <net/checksum.h>
 #include <linux/netfilter_ipv4.h>
+#ifdef CONFIG_NF_NAT_NEEDED
+#include <net/netfilter/nf_nat_rule.h>
+#else
 #include <linux/netfilter_ipv4/ip_nat_rule.h>
+#endif
 #include <linux/netfilter_ipv4/ipt_SAME.h>
 
 MODULE_LICENSE("GPL");
@@ -50,8 +54,8 @@ MODULE_DESCRIPTION("iptables special SNAT module for consistent sourceip");
 static int
 same_check(const char *tablename,
 	      const void *e,
+	      const struct xt_target *target,
 	      void *targinfo,
-	      unsigned int targinfosize,
 	      unsigned int hook_mask)
 {
 	unsigned int count, countess, rangeip, index = 0;
@@ -59,18 +63,6 @@ same_check(const char *tablename,
 
 	mr->ipnum = 0;
 
-	if (strcmp(tablename, "nat") != 0) {
-		DEBUGP("same_check: bad table `%s'.\n", tablename);
-		return 0;
-	}
-	if (targinfosize != IPT_ALIGN(sizeof(*mr))) {
-		DEBUGP("same_check: size %u.\n", targinfosize);
-		return 0;
-	}
-	if (hook_mask & ~(1 << NF_IP_PRE_ROUTING | 1 << NF_IP_POST_ROUTING)) {
-		DEBUGP("same_check: bad hooks %x.\n", hook_mask);
-		return 0;
-	}
 	if (mr->rangesize < 1) {
 		DEBUGP("same_check: need at least one dest range.\n");
 		return 0;
@@ -127,8 +119,7 @@ same_check(const char *tablename,
 }
 
 static void 
-same_destroy(void *targinfo,
-		unsigned int targinfosize)
+same_destroy(const struct xt_target *target, void *targinfo)
 {
 	struct ipt_same_info *mr = targinfo;
 
@@ -143,12 +134,13 @@ same_target(struct sk_buff **pskb,
 		const struct net_device *in,
 		const struct net_device *out,
 		unsigned int hooknum,
-		const void *targinfo,
-		void *userinfo)
+		const struct xt_target *target,
+		const void *targinfo)
 {
 	struct ip_conntrack *ct;
 	enum ip_conntrack_info ctinfo;
-	u_int32_t tmpip, aindex, new_ip;
+	u_int32_t tmpip, aindex;
+	__be32 new_ip;
 	const struct ipt_same_info *same = targinfo;
 	struct ip_nat_range newrange;
 	const struct ip_conntrack_tuple *t;
@@ -164,11 +156,17 @@ same_target(struct sk_buff **pskb,
 	   Here we calculate the index in same->iparray which
 	   holds the ipaddress we should use */
 	
+#ifdef CONFIG_NF_NAT_NEEDED
+	tmpip = ntohl(t->src.u3.ip);
+
+	if (!(same->info & IPT_SAME_NODST))
+		tmpip += ntohl(t->dst.u3.ip);
+#else
 	tmpip = ntohl(t->src.ip);
 
 	if (!(same->info & IPT_SAME_NODST))
 		tmpip += ntohl(t->dst.ip);
-	
+#endif
 	aindex = tmpip % same->ipnum;
 
 	new_ip = htonl(same->iparray[aindex]);
@@ -191,21 +189,24 @@ same_target(struct sk_buff **pskb,
 static struct ipt_target same_reg = { 
 	.name		= "SAME",
 	.target		= same_target,
+	.targetsize	= sizeof(struct ipt_same_info),
+	.table		= "nat",
+	.hooks		= (1 << NF_IP_PRE_ROUTING | 1 << NF_IP_POST_ROUTING),
 	.checkentry	= same_check,
 	.destroy	= same_destroy,
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ipt_same_init(void)
 {
 	return ipt_register_target(&same_reg);
 }
 
-static void __exit fini(void)
+static void __exit ipt_same_fini(void)
 {
 	ipt_unregister_target(&same_reg);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ipt_same_init);
+module_exit(ipt_same_fini);
 

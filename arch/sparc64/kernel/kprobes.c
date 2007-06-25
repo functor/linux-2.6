@@ -3,12 +3,13 @@
  * Copyright (C) 2004 David S. Miller <davem@davemloft.net>
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
+#include <linux/module.h>
 #include <asm/kdebug.h>
 #include <asm/signal.h>
 #include <asm/cacheflush.h>
+#include <asm/uaccess.h>
 
 /* We do not have hardware single-stepping on sparc64.
  * So we implement software single-stepping with breakpoint
@@ -44,7 +45,11 @@ DEFINE_PER_CPU(struct kprobe_ctlblk, kprobe_ctlblk);
 int __kprobes arch_prepare_kprobe(struct kprobe *p)
 {
 	p->ainsn.insn[0] = *p->addr;
+	flushi(&p->ainsn.insn[0]);
+
 	p->ainsn.insn[1] = BREAKPOINT_INSTRUCTION_2;
+	flushi(&p->ainsn.insn[1]);
+
 	p->opcode = *p->addr;
 	return 0;
 }
@@ -61,7 +66,7 @@ void __kprobes arch_disarm_kprobe(struct kprobe *p)
 	flushi(p->addr);
 }
 
-static inline void save_previous_kprobe(struct kprobe_ctlblk *kcb)
+static void __kprobes save_previous_kprobe(struct kprobe_ctlblk *kcb)
 {
 	kcb->prev_kprobe.kp = kprobe_running();
 	kcb->prev_kprobe.status = kcb->kprobe_status;
@@ -69,7 +74,7 @@ static inline void save_previous_kprobe(struct kprobe_ctlblk *kcb)
 	kcb->prev_kprobe.orig_tstate_pil = kcb->kprobe_orig_tstate_pil;
 }
 
-static inline void restore_previous_kprobe(struct kprobe_ctlblk *kcb)
+static void __kprobes restore_previous_kprobe(struct kprobe_ctlblk *kcb)
 {
 	__get_cpu_var(current_kprobe) = kcb->prev_kprobe.kp;
 	kcb->kprobe_status = kcb->prev_kprobe.status;
@@ -77,7 +82,7 @@ static inline void restore_previous_kprobe(struct kprobe_ctlblk *kcb)
 	kcb->kprobe_orig_tstate_pil = kcb->prev_kprobe.orig_tstate_pil;
 }
 
-static inline void set_current_kprobe(struct kprobe *p, struct pt_regs *regs,
+static void __kprobes set_current_kprobe(struct kprobe *p, struct pt_regs *regs,
 				struct kprobe_ctlblk *kcb)
 {
 	__get_cpu_var(current_kprobe) = p;
@@ -85,7 +90,7 @@ static inline void set_current_kprobe(struct kprobe *p, struct pt_regs *regs,
 	kcb->kprobe_orig_tstate_pil = (regs->tstate & TSTATE_PIL);
 }
 
-static inline void prepare_singlestep(struct kprobe *p, struct pt_regs *regs,
+static void __kprobes prepare_singlestep(struct kprobe *p, struct pt_regs *regs,
 			struct kprobe_ctlblk *kcb)
 {
 	regs->tstate |= TSTATE_PIL;
@@ -184,16 +189,19 @@ no_kprobe:
 /* If INSN is a relative control transfer instruction,
  * return the corrected branch destination value.
  *
- * The original INSN location was REAL_PC, it actually
- * executed at PC and produced destination address NPC.
+ * regs->tpc and regs->tnpc still hold the values of the
+ * program counters at the time of trap due to the execution
+ * of the BREAKPOINT_INSTRUCTION_2 at p->ainsn.insn[1]
+ * 
  */
-static unsigned long __kprobes relbranch_fixup(u32 insn, unsigned long real_pc,
-					       unsigned long pc,
-					       unsigned long npc)
+static unsigned long __kprobes relbranch_fixup(u32 insn, struct kprobe *p,
+					       struct pt_regs *regs)
 {
+	unsigned long real_pc = (unsigned long) p->addr;
+
 	/* Branch not taken, no mods necessary.  */
-	if (npc == pc + 0x4UL)
-		return real_pc + 0x4UL;
+	if (regs->tnpc == regs->tpc + 0x4UL)
+		return real_pc + 0x8UL;
 
 	/* The three cases are call, branch w/prediction,
 	 * and traditional branch.
@@ -201,14 +209,21 @@ static unsigned long __kprobes relbranch_fixup(u32 insn, unsigned long real_pc,
 	if ((insn & 0xc0000000) == 0x40000000 ||
 	    (insn & 0xc1c00000) == 0x00400000 ||
 	    (insn & 0xc1c00000) == 0x00800000) {
+		unsigned long ainsn_addr;
+
+		ainsn_addr = (unsigned long) &p->ainsn.insn[0];
+
 		/* The instruction did all the work for us
 		 * already, just apply the offset to the correct
 		 * instruction location.
 		 */
-		return (real_pc + (npc - pc));
+		return (real_pc + (regs->tnpc - ainsn_addr));
 	}
 
-	return real_pc + 0x4UL;
+	/* It is jmpl or some other absolute PC modification instruction,
+	 * leave NPC as-is.
+	 */
+	return regs->tnpc;
 }
 
 /* If INSN is an instruction which writes it's PC location
@@ -219,12 +234,12 @@ static void __kprobes retpc_fixup(struct pt_regs *regs, u32 insn,
 {
 	unsigned long *slot = NULL;
 
-	/* Simplest cast is call, which always uses %o7 */
+	/* Simplest case is 'call', which always uses %o7 */
 	if ((insn & 0xc0000000) == 0x40000000) {
 		slot = &regs->u_regs[UREG_I7];
 	}
 
-	/* Jmpl encodes the register inside of the opcode */
+	/* 'jmpl' encodes the register inside of the opcode */
 	if ((insn & 0xc1f80000) == 0x81c00000) {
 		unsigned long rd = ((insn >> 25) & 0x1f);
 
@@ -246,11 +261,11 @@ static void __kprobes retpc_fixup(struct pt_regs *regs, u32 insn,
 
 /*
  * Called after single-stepping.  p->addr is the address of the
- * instruction whose first byte has been replaced by the breakpoint
+ * instruction which has been replaced by the breakpoint
  * instruction.  To avoid the SMP problems that can occur when we
  * temporarily put back the original opcode to single-step, we
  * single-stepped a copy of the instruction.  The address of this
- * copy is p->ainsn.insn.
+ * copy is &p->ainsn.insn[0].
  *
  * This function prepares to return from the post-single-step
  * breakpoint trap.
@@ -260,18 +275,18 @@ static void __kprobes resume_execution(struct kprobe *p,
 {
 	u32 insn = p->ainsn.insn[0];
 
+	regs->tnpc = relbranch_fixup(insn, p, regs);
+
+	/* This assignment must occur after relbranch_fixup() */
 	regs->tpc = kcb->kprobe_orig_tnpc;
-	regs->tnpc = relbranch_fixup(insn,
-				     (unsigned long) p->addr,
-				     (unsigned long) &p->ainsn.insn[0],
-				     regs->tnpc);
+
 	retpc_fixup(regs, insn, (unsigned long) p->addr);
 
 	regs->tstate = ((regs->tstate & ~TSTATE_PIL) |
 			kcb->kprobe_orig_tstate_pil);
 }
 
-static inline int post_kprobe_handler(struct pt_regs *regs)
+static int __kprobes post_kprobe_handler(struct pt_regs *regs)
 {
 	struct kprobe *cur = kprobe_running();
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
@@ -298,20 +313,72 @@ out:
 	return 1;
 }
 
-static inline int kprobe_fault_handler(struct pt_regs *regs, int trapnr)
+static int __kprobes kprobe_fault_handler(struct pt_regs *regs, int trapnr)
 {
 	struct kprobe *cur = kprobe_running();
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
+	const struct exception_table_entry *entry;
 
-	if (cur->fault_handler && cur->fault_handler(cur, regs, trapnr))
-		return 1;
-
-	if (kcb->kprobe_status & KPROBE_HIT_SS) {
-		resume_execution(cur, regs, kcb);
-
-		reset_current_kprobe();
+	switch(kcb->kprobe_status) {
+	case KPROBE_HIT_SS:
+	case KPROBE_REENTER:
+		/*
+		 * We are here because the instruction being single
+		 * stepped caused a page fault. We reset the current
+		 * kprobe and the tpc points back to the probe address
+		 * and allow the page fault handler to continue as a
+		 * normal page fault.
+		 */
+		regs->tpc = (unsigned long)cur->addr;
+		regs->tnpc = kcb->kprobe_orig_tnpc;
+		regs->tstate = ((regs->tstate & ~TSTATE_PIL) |
+				kcb->kprobe_orig_tstate_pil);
+		if (kcb->kprobe_status == KPROBE_REENTER)
+			restore_previous_kprobe(kcb);
+		else
+			reset_current_kprobe();
 		preempt_enable_no_resched();
+		break;
+	case KPROBE_HIT_ACTIVE:
+	case KPROBE_HIT_SSDONE:
+		/*
+		 * We increment the nmissed count for accounting,
+		 * we can also use npre/npostfault count for accouting
+		 * these specific fault cases.
+		 */
+		kprobes_inc_nmissed_count(cur);
+
+		/*
+		 * We come here because instructions in the pre/post
+		 * handler caused the page_fault, this could happen
+		 * if handler tries to access user space by
+		 * copy_from_user(), get_user() etc. Let the
+		 * user-specified handler try to fix it first.
+		 */
+		if (cur->fault_handler && cur->fault_handler(cur, regs, trapnr))
+			return 1;
+
+		/*
+		 * In case the user-specified fault handler returned
+		 * zero, try to fix up.
+		 */
+
+		entry = search_exception_tables(regs->tpc);
+		if (entry) {
+			regs->tpc = entry->fixup;
+			regs->tnpc = regs->tpc + 4;
+			return 1;
+		}
+
+		/*
+		 * fixup_exception() could not handle it,
+		 * Let do_page_fault() fix it.
+		 */
+		break;
+	default:
+		break;
 	}
+
 	return 0;
 }
 
@@ -323,6 +390,9 @@ int __kprobes kprobe_exceptions_notify(struct notifier_block *self,
 {
 	struct die_args *args = (struct die_args *)data;
 	int ret = NOTIFY_DONE;
+
+	if (args->regs && user_mode(args->regs))
+		return ret;
 
 	switch (val) {
 	case DIE_DEBUG:
@@ -374,16 +444,7 @@ int __kprobes setjmp_pre_handler(struct kprobe *p, struct pt_regs *regs)
 	struct jprobe *jp = container_of(p, struct jprobe, kp);
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
 
-	kcb->jprobe_saved_regs_location = regs;
 	memcpy(&(kcb->jprobe_saved_regs), regs, sizeof(*regs));
-
-	/* Save a whole stack frame, this gets arguments
-	 * pushed onto the stack after using up all the
-	 * arg registers.
-	 */
-	memcpy(&(kcb->jprobe_saved_stack),
-	       (char *) (regs->u_regs[UREG_FP] + STACK_BIAS),
-	       sizeof(kcb->jprobe_saved_stack));
 
 	regs->tpc  = (unsigned long) jp->entry;
 	regs->tnpc = ((unsigned long) jp->entry) + 0x4UL;
@@ -394,10 +455,19 @@ int __kprobes setjmp_pre_handler(struct kprobe *p, struct pt_regs *regs)
 
 void __kprobes jprobe_return(void)
 {
-	__asm__ __volatile__(
-		".globl	jprobe_return_trap_instruction\n"
+	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
+	register unsigned long orig_fp asm("g1");
+
+	orig_fp = kcb->jprobe_saved_regs.u_regs[UREG_FP];
+	__asm__ __volatile__("\n"
+"1:	cmp		%%sp, %0\n\t"
+	"blu,a,pt	%%xcc, 1b\n\t"
+	" restore\n\t"
+	".globl		jprobe_return_trap_instruction\n"
 "jprobe_return_trap_instruction:\n\t"
-		"ta 0x70");
+	"ta		0x70"
+	: /* no outputs */
+	: "r" (orig_fp));
 }
 
 extern void jprobe_return_trap_instruction(void);
@@ -410,26 +480,7 @@ int __kprobes longjmp_break_handler(struct kprobe *p, struct pt_regs *regs)
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
 
 	if (addr == (u32 *) jprobe_return_trap_instruction) {
-		if (kcb->jprobe_saved_regs_location != regs) {
-			printk("JPROBE: Current regs (%p) does not match "
-			       "saved regs (%p).\n",
-			       regs, kcb->jprobe_saved_regs_location);
-			printk("JPROBE: Saved registers\n");
-			__show_regs(kcb->jprobe_saved_regs_location);
-			printk("JPROBE: Current registers\n");
-			__show_regs(regs);
-			BUG();
-		}
-		/* Restore old register state.  Do pt_regs
-		 * first so that UREG_FP is the original one for
-		 * the stack frame restore.
-		 */
 		memcpy(regs, &(kcb->jprobe_saved_regs), sizeof(*regs));
-
-		memcpy((char *) (regs->u_regs[UREG_FP] + STACK_BIAS),
-		       &(kcb->jprobe_saved_stack),
-		       sizeof(kcb->jprobe_saved_stack));
-
 		preempt_enable_no_resched();
 		return 1;
 	}

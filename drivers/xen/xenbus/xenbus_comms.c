@@ -41,13 +41,13 @@
 
 static int xenbus_irq;
 
-extern void xenbus_probe(void *);
+extern void xenbus_probe(struct work_struct *);
 extern int xenstored_ready;
-static DECLARE_WORK(probe_work, xenbus_probe, NULL);
+static DECLARE_WORK(probe_work, xenbus_probe);
 
 DECLARE_WAIT_QUEUE_HEAD(xb_waitq);
 
-static irqreturn_t wake_waiting(int irq, void *unused, struct pt_regs *regs)
+static irqreturn_t wake_waiting(int irq, void *unused)
 {
 	if (unlikely(xenstored_ready == 0)) {
 		xenstored_ready = 1;

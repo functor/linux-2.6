@@ -27,7 +27,7 @@ void foo(void)
         DEFINE(TASK_EUID, offsetof(struct task_struct, euid));
         DEFINE(TASK_GID, offsetof(struct task_struct, gid));
         DEFINE(TASK_EGID, offsetof(struct task_struct, egid));
-        DEFINE(TASK_REAL_PARENT, offsetof(struct task_struct, real_parent));
+        DEFINE(TASK_PARENT, offsetof(struct task_struct, parent));
         DEFINE(TASK_GROUP_LEADER, offsetof(struct task_struct, group_leader));
         DEFINE(TASK_TGID, offsetof(struct task_struct, tgid));
         BLANK();
@@ -36,6 +36,7 @@ void foo(void)
 	DEFINE(PT_PTRACED, PT_PTRACED);
 	DEFINE(CLONE_VM, CLONE_VM);
 	DEFINE(CLONE_UNTRACED, CLONE_UNTRACED);
+	DEFINE(CLONE_KTHREAD, CLONE_KTHREAD);
 	DEFINE(SIGCHLD, SIGCHLD);
 	BLANK();
 

@@ -8,7 +8,6 @@
  * Carsten Langgaard, carstenl@mips.com
  * Copyright (C) 2002 MIPS Technologies, Inc.  All rights reserved.
  */
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -27,10 +26,27 @@ extern void build_tlb_refill_handler(void);
  */
 #define UNIQUE_ENTRYHI(idx) (CKSEG0 + ((idx) << (PAGE_SHIFT + 1)))
 
-/* CP0 hazard avoidance. */
-#define BARRIER __asm__ __volatile__(".set noreorder\n\t" \
-				     "nop; nop; nop; nop; nop; nop;\n\t" \
-				     ".set reorder\n\t")
+/* Atomicity and interruptability */
+#ifdef CONFIG_MIPS_MT_SMTC
+
+#include <asm/smtc.h>
+#include <asm/mipsmtregs.h>
+
+#define ENTER_CRITICAL(flags) \
+	{ \
+	unsigned int mvpflags; \
+	local_irq_save(flags);\
+	mvpflags = dvpe()
+#define EXIT_CRITICAL(flags) \
+	evpe(mvpflags); \
+	local_irq_restore(flags); \
+	}
+#else
+
+#define ENTER_CRITICAL(flags) local_irq_save(flags)
+#define EXIT_CRITICAL(flags) local_irq_restore(flags)
+
+#endif /* CONFIG_MIPS_MT_SMTC */
 
 void local_flush_tlb_all(void)
 {
@@ -38,7 +54,7 @@ void local_flush_tlb_all(void)
 	unsigned long old_ctx;
 	int entry;
 
-	local_irq_save(flags);
+	ENTER_CRITICAL(flags);
 	/* Save old context and create impossible VPN2 value */
 	old_ctx = read_c0_entryhi();
 	write_c0_entrylo0(0);
@@ -57,7 +73,7 @@ void local_flush_tlb_all(void)
 	}
 	tlbw_use_hazard();
 	write_c0_entryhi(old_ctx);
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 }
 
 /* All entries common to a mm share an asid.  To effectively flush
@@ -87,9 +103,9 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		unsigned long flags;
 		int size;
 
+		ENTER_CRITICAL(flags);
 		size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
 		size = (size + 1) >> 1;
-		local_irq_save(flags);
 		if (size <= current_cpu_data.tlbsize/2) {
 			int oldpid = read_c0_entryhi();
 			int newpid = cpu_asid(cpu, mm);
@@ -104,7 +120,7 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 				start += (PAGE_SIZE << 1);
 				mtc0_tlbw_hazard();
 				tlb_probe();
-				BARRIER;
+				tlb_probe_hazard();
 				idx = read_c0_index();
 				write_c0_entrylo0(0);
 				write_c0_entrylo1(0);
@@ -120,7 +136,7 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		} else {
 			drop_mmu_context(mm, cpu);
 		}
-		local_irq_restore(flags);
+		EXIT_CRITICAL(flags);
 	}
 }
 
@@ -129,9 +145,9 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	unsigned long flags;
 	int size;
 
+	ENTER_CRITICAL(flags);
 	size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
 	size = (size + 1) >> 1;
-	local_irq_save(flags);
 	if (size <= current_cpu_data.tlbsize / 2) {
 		int pid = read_c0_entryhi();
 
@@ -146,7 +162,7 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 			start += (PAGE_SIZE << 1);
 			mtc0_tlbw_hazard();
 			tlb_probe();
-			BARRIER;
+			tlb_probe_hazard();
 			idx = read_c0_index();
 			write_c0_entrylo0(0);
 			write_c0_entrylo1(0);
@@ -162,7 +178,7 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	} else {
 		local_flush_tlb_all();
 	}
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 }
 
 void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
@@ -175,12 +191,12 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 
 		newpid = cpu_asid(cpu, vma->vm_mm);
 		page &= (PAGE_MASK << 1);
-		local_irq_save(flags);
+		ENTER_CRITICAL(flags);
 		oldpid = read_c0_entryhi();
 		write_c0_entryhi(page | newpid);
 		mtc0_tlbw_hazard();
 		tlb_probe();
-		BARRIER;
+		tlb_probe_hazard();
 		idx = read_c0_index();
 		write_c0_entrylo0(0);
 		write_c0_entrylo1(0);
@@ -194,7 +210,7 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 
 	finish:
 		write_c0_entryhi(oldpid);
-		local_irq_restore(flags);
+		EXIT_CRITICAL(flags);
 	}
 }
 
@@ -207,13 +223,13 @@ void local_flush_tlb_one(unsigned long page)
 	unsigned long flags;
 	int oldpid, idx;
 
-	local_irq_save(flags);
+	ENTER_CRITICAL(flags);
 	oldpid = read_c0_entryhi();
 	page &= (PAGE_MASK << 1);
 	write_c0_entryhi(page);
 	mtc0_tlbw_hazard();
 	tlb_probe();
-	BARRIER;
+	tlb_probe_hazard();
 	idx = read_c0_index();
 	write_c0_entrylo0(0);
 	write_c0_entrylo1(0);
@@ -226,7 +242,7 @@ void local_flush_tlb_one(unsigned long page)
 	}
 	write_c0_entryhi(oldpid);
 
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 }
 
 /*
@@ -249,7 +265,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	if (current->active_mm != vma->vm_mm)
 		return;
 
-	local_irq_save(flags);
+	ENTER_CRITICAL(flags);
 
 	pid = read_c0_entryhi() & ASID_MASK;
 	address &= (PAGE_MASK << 1);
@@ -257,7 +273,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	pgdp = pgd_offset(vma->vm_mm, address);
 	mtc0_tlbw_hazard();
 	tlb_probe();
-	BARRIER;
+	tlb_probe_hazard();
 	pudp = pud_offset(pgdp, address);
 	pmdp = pmd_offset(pudp, address);
 	idx = read_c0_index();
@@ -277,7 +293,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	else
 		tlb_write_indexed();
 	tlbw_use_hazard();
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 }
 
 #if 0
@@ -291,14 +307,14 @@ static void r4k_update_mmu_cache_hwbug(struct vm_area_struct * vma,
 	pte_t *ptep;
 	int idx;
 
-	local_irq_save(flags);
+	ENTER_CRITICAL(flags);
 	address &= (PAGE_MASK << 1);
 	asid = read_c0_entryhi() & ASID_MASK;
 	write_c0_entryhi(address | asid);
 	pgdp = pgd_offset(vma->vm_mm, address);
 	mtc0_tlbw_hazard();
 	tlb_probe();
-	BARRIER;
+	tlb_probe_hazard();
 	pmdp = pmd_offset(pgdp, address);
 	idx = read_c0_index();
 	ptep = pte_offset_map(pmdp, address);
@@ -310,7 +326,7 @@ static void r4k_update_mmu_cache_hwbug(struct vm_area_struct * vma,
 	else
 		tlb_write_indexed();
 	tlbw_use_hazard();
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 }
 #endif
 
@@ -322,14 +338,14 @@ void __init add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	unsigned long old_pagemask;
 	unsigned long old_ctx;
 
-	local_irq_save(flags);
+	ENTER_CRITICAL(flags);
 	/* Save old context and create impossible VPN2 value */
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
 	wired = read_c0_wired();
 	write_c0_wired(wired + 1);
 	write_c0_index(wired);
-	BARRIER;
+	tlbw_use_hazard();	/* What is the hazard here? */
 	write_c0_pagemask(pagemask);
 	write_c0_entryhi(entryhi);
 	write_c0_entrylo0(entrylo0);
@@ -339,10 +355,10 @@ void __init add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	tlbw_use_hazard();
 
 	write_c0_entryhi(old_ctx);
-	BARRIER;
+	tlbw_use_hazard();	/* What is the hazard here? */
 	write_c0_pagemask(old_pagemask);
 	local_flush_tlb_all();
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 }
 
 /*
@@ -362,7 +378,7 @@ __init int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 	unsigned long old_pagemask;
 	unsigned long old_ctx;
 
-	local_irq_save(flags);
+	ENTER_CRITICAL(flags);
 	/* Save old context and create impossible VPN2 value */
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
@@ -386,7 +402,7 @@ __init int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 	write_c0_entryhi(old_ctx);
 	write_c0_pagemask(old_pagemask);
 out:
-	local_irq_restore(flags);
+	EXIT_CRITICAL(flags);
 	return ret;
 }
 
@@ -402,6 +418,14 @@ static void __init probe_tlb(unsigned long config)
 	 */
 	if ((c->processor_id & 0xff0000) == PRID_COMP_LEGACY)
 		return;
+#ifdef CONFIG_MIPS_MT_SMTC
+	/*
+	 * If TLB is shared in SMTC system, total size already
+	 * has been calculated and written into cpu_data tlbsize
+	 */
+	if((smtc_status & SMTC_TLB_SHARED) == SMTC_TLB_SHARED)
+		return;
+#endif /* CONFIG_MIPS_MT_SMTC */
 
 	reg = read_c0_config1();
 	if (!((config >> 7) & 3))
@@ -409,6 +433,15 @@ static void __init probe_tlb(unsigned long config)
 
 	c->tlbsize = ((reg >> 25) & 0x3f) + 1;
 }
+
+static int __initdata ntlb = 0;
+static int __init set_ntlb(char *str)
+{
+	get_option(&str, &ntlb);
+	return 1;
+}
+
+__setup("ntlb=", set_ntlb);
 
 void __init tlb_init(void)
 {
@@ -424,8 +457,23 @@ void __init tlb_init(void)
 	probe_tlb(config);
 	write_c0_pagemask(PM_DEFAULT_MASK);
 	write_c0_wired(0);
+	write_c0_framemask(0);
 	temp_tlb_entry = current_cpu_data.tlbsize - 1;
+
+        /* From this point on the ARC firmware is dead.  */
 	local_flush_tlb_all();
+
+	/* Did I tell you that ARC SUCKS?  */
+
+	if (ntlb) {
+		if (ntlb > 1 && ntlb <= current_cpu_data.tlbsize) {
+			int wired = current_cpu_data.tlbsize - ntlb;
+			write_c0_wired(wired);
+			write_c0_index(wired-1);
+			printk ("Restricting TLB to %d entries\n", ntlb);
+		} else
+			printk("Ignoring invalid argument ntlb=%d\n", ntlb);
+	}
 
 	build_tlb_refill_handler();
 }

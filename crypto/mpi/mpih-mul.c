@@ -428,10 +428,9 @@ mpihelp_mul_karatsuba_case( mpi_ptr_t prodp,
 	}
 	else {
 	    if( !ctx->next ) {
-		ctx->next = kmalloc( sizeof *ctx, GFP_KERNEL );
+		ctx->next = kzalloc( sizeof *ctx, GFP_KERNEL );
 		if (!ctx->next)
 			return -ENOMEM;
-		memset(ctx->next, 0, sizeof(ctx));
 	    }
 	    if (mpihelp_mul_karatsuba_case( ctx->tspace,
 					    vp, vsize,

@@ -23,24 +23,30 @@ static inline void tracehook_enable_single_step(struct task_struct *tsk)
 {
 	struct pt_regs *pt = task_pt_regs(tsk);
 	ia64_psr(pt)->ss = 1;
+	set_tsk_thread_flag(tsk, TIF_SINGLESTEP);
 }
 
 static inline void tracehook_disable_single_step(struct task_struct *tsk)
 {
 	struct pt_regs *pt = task_pt_regs(tsk);
 	ia64_psr(pt)->ss = 0;
+	if (ia64_psr(pt)->tb == 0)
+		clear_tsk_thread_flag(tsk, TIF_SINGLESTEP);
 }
 
 static inline void tracehook_enable_block_step(struct task_struct *tsk)
 {
 	struct pt_regs *pt = task_pt_regs(tsk);
 	ia64_psr(pt)->tb = 1;
+	set_tsk_thread_flag(tsk, TIF_SINGLESTEP);
 }
 
 static inline void tracehook_disable_block_step(struct task_struct *tsk)
 {
 	struct pt_regs *pt = task_pt_regs(tsk);
 	ia64_psr(pt)->tb = 0;
+	if (ia64_psr(pt)->ss == 0)
+		clear_tsk_thread_flag(tsk, TIF_SINGLESTEP);
 }
 
 static inline void tracehook_enable_syscall_trace(struct task_struct *tsk)
@@ -61,21 +67,23 @@ static inline int tracehook_single_step_enabled(struct task_struct *tsk)
 
 static inline void tracehook_abort_syscall(struct pt_regs *regs)
 {
-	regs->r15 = -1L;
+	if (IS_IA32_PROCESS(regs))
+		regs->r1 = -1UL;
+	else
+		regs->r15 = -1UL;
 }
 
 extern const struct utrace_regset_view utrace_ia64_native;
 static inline const struct utrace_regset_view *
 utrace_native_view(struct task_struct *tsk)
 {
-#if 0 //CONFIG_IA32_SUPPORT
+#ifdef CONFIG_IA32_SUPPORT
 	extern const struct utrace_regset_view utrace_ia32_view;
-
-	struct pt_regs *pt = task_pt_regs(tsk);
-	if (pt->cr_ipsr & IA64_PSR_IS)
+	if (IS_IA32_PROCESS(task_pt_regs(tsk)))
 		return &utrace_ia32_view;
 #endif
 	return &utrace_ia64_native;
 }
 
-#endif
+
+#endif	/* asm/tracehook.h */

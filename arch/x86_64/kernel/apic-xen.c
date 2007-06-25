@@ -25,16 +25,21 @@
 #include <linux/kernel_stat.h>
 #include <linux/sysdev.h>
 #include <linux/module.h>
+#include <linux/ioport.h>
 
 #include <asm/atomic.h>
 #include <asm/smp.h>
 #include <asm/mtrr.h>
 #include <asm/mpspec.h>
-#include <asm/desc.h>
-#include <asm/arch_hooks.h>
-#include <asm/hpet.h>
+#include <asm/pgalloc.h>
+#include <asm/mach_apic.h>
+#include <asm/nmi.h>
 #include <asm/idle.h>
+#include <asm/proto.h>
+#include <asm/timex.h>
+#include <asm/apic.h>
 
+int apic_mapped;
 int apic_verbosity;
 
 /*
@@ -62,19 +67,21 @@ int setup_profiling_timer(unsigned int multiplier)
 	return -EINVAL;
 }
 
-void smp_local_timer_interrupt(struct pt_regs *regs)
+void smp_local_timer_interrupt(void)
 {
-	profile_tick(CPU_PROFILING, regs);
+	profile_tick(CPU_PROFILING);
 #ifndef CONFIG_XEN
 #ifdef CONFIG_SMP
-		update_process_times(user_mode(regs));
+	update_process_times(user_mode(get_irq_regs()));
 #endif
+	if (apic_runs_main_timer > 1 && smp_processor_id() == boot_cpu_id)
+		main_timer_handler();
 #endif
 	/*
 	 * We take the 'long' return path, and there every subsystem
 	 * grabs the appropriate locks (kernel lock/ irq lock).
 	 *
-	 * we might want to decouple profiling from the 'long path',
+	 * We might want to decouple profiling from the 'long path',
 	 * and do the profiling totally in assembly.
 	 *
 	 * Currently this isn't too much of an issue (performance wise),
@@ -92,6 +99,8 @@ void smp_local_timer_interrupt(struct pt_regs *regs)
  */
 void smp_apic_timer_interrupt(struct pt_regs *regs)
 {
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
 	/*
 	 * the NMI deadlock-detector uses this.
 	 */
@@ -109,8 +118,9 @@ void smp_apic_timer_interrupt(struct pt_regs *regs)
 	 */
 	exit_idle();
 	irq_enter();
-	smp_local_timer_interrupt(regs);
+	smp_local_timer_interrupt();
 	irq_exit();
+	set_irq_regs(old_regs);
 }
 
 /*
@@ -180,7 +190,7 @@ asmlinkage void smp_error_interrupt(void)
 	irq_exit();
 }
 
-int disable_apic;
+int disable_apic; 
 
 /*
  * This initializes the IO-APIC and APIC hardware if this is
@@ -188,11 +198,58 @@ int disable_apic;
  */
 int __init APIC_init_uniprocessor (void)
 {
-#ifdef CONFIG_X86_IO_APIC
-	if (smp_found_config)
-		if (!skip_ioapic_setup && nr_ioapics)
-			setup_IO_APIC();
-#endif
+	if (smp_found_config && !skip_ioapic_setup && nr_ioapics)
+		setup_IO_APIC();
+	return 0;
+}
 
+#ifndef CONFIG_XEN
+static __init int setup_disableapic(char *str) 
+{ 
+	disable_apic = 1;
+	clear_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability);
+	return 0;
+}
+early_param("disableapic", setup_disableapic);
+
+/* same as disableapic, for compatibility */
+static __init int setup_nolapic(char *str) 
+{ 
+	return setup_disableapic(str);
+} 
+early_param("nolapic", setup_nolapic);
+
+static __init int setup_noapictimer(char *str) 
+{ 
+	if (str[0] != ' ' && str[0] != 0)
+		return 0;
+	disable_apic_timer = 1;
+	return 1;
+} 
+
+static __init int setup_apicmaintimer(char *str)
+{
+	apic_runs_main_timer = 1;
+	nohpet = 1;
 	return 1;
 }
+__setup("apicmaintimer", setup_apicmaintimer);
+
+static __init int setup_noapicmaintimer(char *str)
+{
+	apic_runs_main_timer = -1;
+	return 1;
+}
+__setup("noapicmaintimer", setup_noapicmaintimer);
+
+static __init int setup_apicpmtimer(char *s)
+{
+	apic_calibrate_pmtmr = 1;
+	notsc_setup(NULL);
+	return setup_apicmaintimer(NULL);
+}
+__setup("apicpmtimer", setup_apicpmtimer);
+
+__setup("noapictimer", setup_noapictimer); 
+
+#endif

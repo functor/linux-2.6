@@ -33,20 +33,6 @@ static u32 omap2_clksel_get_divisor(struct clk *clk);
 #define RATE_IN_242X	(1 << 0)
 #define RATE_IN_243X	(1 << 1)
 
-/* Memory timings */
-#define M_DDR		1
-#define M_LOCK_CTRL	(1 << 2)
-#define M_UNLOCK	0
-#define M_LOCK		1
-
-struct memory_timings {
-	u32 m_type;		/* ddr = 1, sdr = 0 */
-	u32 dll_mode;		/* use lock mode = 1, unlock mode = 0 */
-	u32 slow_dll_ctrl;	/* unlock mode, dll value for slow speed */
-	u32 fast_dll_ctrl;	/* unlock mode, dll value for fast speed */
-	u32 base_cs;		/* base chip select to use for calculations */
-};
-
 /* Key dividers which make up a PRCM set. Ratio's for a PRCM are mandated.
  * xtal_speed, dpll_speed, mpu_speed, CM_CLKSEL_MPU,CM_CLKSEL_DSP
  * CM_CLKSEL_GFX, CM_CLKSEL1_CORE, CM_CLKSEL1_PLL CM_CLKSEL2_PLL, CM_CLKSEL_MDM
@@ -574,7 +560,7 @@ static struct clk osc_ck = {		/* (*12, *13, 19.2, *26, 38.4)MHz */
 	.name		= "osc_ck",
 	.rate		= 26000000,		/* fixed up in clock init */
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X |
-				RATE_FIXED | ALWAYS_ENABLED | RATE_PROPAGATES,
+				RATE_FIXED | RATE_PROPAGATES,
 };
 
 /* With out modem likely 12MHz, with modem likely 13MHz */
@@ -729,6 +715,16 @@ static struct clk sys_clkout2 = {
 	.enable_bit	= 15,
 	.rate_offset	= 11,
 	.recalc		= &omap2_clksel_recalc,
+};
+
+static struct clk emul_ck = {
+	.name		= "emul_ck",
+	.parent		= &func_54m_ck,
+	.flags		= CLOCK_IN_OMAP242X,
+	.enable_reg	= (void __iomem *)&PRCM_CLKEMUL_CTRL,
+	.enable_bit	= 0,
+	.recalc		= &omap2_propagate_rate,
+
 };
 
 /*
@@ -1066,7 +1062,7 @@ static struct clk gpt2_ick = {
 	.parent		= &l4_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_ICLKEN1_CORE,	/* Bit4 */
-	.enable_bit	= 0,
+	.enable_bit	= 4,
 	.recalc		= &omap2_followparent_recalc,
 };
 
@@ -1372,7 +1368,8 @@ static struct clk mcbsp5_fck = {
 };
 
 static struct clk mcspi1_ick = {
-	.name		= "mcspi1_ick",
+	.name		= "mcspi_ick",
+	.id		= 1,
 	.parent		= &l4_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_ICLKEN1_CORE,
@@ -1381,7 +1378,8 @@ static struct clk mcspi1_ick = {
 };
 
 static struct clk mcspi1_fck = {
-	.name		= "mcspi1_fck",
+	.name		= "mcspi_fck",
+	.id		= 1,
 	.parent		= &func_48m_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_FCLKEN1_CORE,
@@ -1390,7 +1388,8 @@ static struct clk mcspi1_fck = {
 };
 
 static struct clk mcspi2_ick = {
-	.name		= "mcspi2_ick",
+	.name		= "mcspi_ick",
+	.id		= 2,
 	.parent		= &l4_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_ICLKEN1_CORE,
@@ -1399,7 +1398,8 @@ static struct clk mcspi2_ick = {
 };
 
 static struct clk mcspi2_fck = {
-	.name		= "mcspi2_fck",
+	.name		= "mcspi_fck",
+	.id		= 2,
 	.parent		= &func_48m_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_FCLKEN1_CORE,
@@ -1408,7 +1408,8 @@ static struct clk mcspi2_fck = {
 };
 
 static struct clk mcspi3_ick = {
-	.name		= "mcspi3_ick",
+	.name		= "mcspi_ick",
+	.id		= 3,
 	.parent		= &l4_ck,
 	.flags		= CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_ICLKEN2_CORE,
@@ -1417,7 +1418,8 @@ static struct clk mcspi3_ick = {
 };
 
 static struct clk mcspi3_fck = {
-	.name		= "mcspi3_fck",
+	.name		= "mcspi_fck",
+	.id		= 3,
 	.parent		= &func_48m_ck,
 	.flags		= CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_FCLKEN2_CORE,
@@ -1702,7 +1704,8 @@ static struct clk hdq_fck = {
 };
 
 static struct clk i2c2_ick = {
-	.name		= "i2c2_ick",
+	.name		= "i2c_ick",
+	.id		= 2,
 	.parent		= &l4_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_ICLKEN1_CORE,
@@ -1711,7 +1714,8 @@ static struct clk i2c2_ick = {
 };
 
 static struct clk i2c2_fck = {
-	.name		= "i2c2_fck",
+	.name		= "i2c_fck",
+	.id		= 2,
 	.parent		= &func_12m_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_FCLKEN1_CORE,
@@ -1729,7 +1733,8 @@ static struct clk i2chs2_fck = {
 };
 
 static struct clk i2c1_ick = {
-	.name		= "i2c1_ick",
+	.name		= "i2c_ick",
+	.id		= 1,
 	.parent		= &l4_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_ICLKEN1_CORE,
@@ -1738,7 +1743,8 @@ static struct clk i2c1_ick = {
 };
 
 static struct clk i2c1_fck = {
-	.name		= "i2c1_fck",
+	.name		= "i2c_fck",
+	.id		= 1,
 	.parent		= &func_12m_ck,
 	.flags		= CLOCK_IN_OMAP242X | CLOCK_IN_OMAP243X,
 	.enable_reg	= (void __iomem *)&CM_FCLKEN1_CORE,
@@ -1971,6 +1977,7 @@ static struct clk *onchip_clks[] = {
 	&wdt1_osc_ck,
 	&sys_clkout,
 	&sys_clkout2,
+	&emul_ck,
 	/* mpu domain clocks */
 	&mpu_ck,
 	/* dsp domain clocks */

@@ -32,6 +32,7 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
+#include <asm/mmu_context.h>
 
 static int load_aout32_binary(struct linux_binprm *, struct pt_regs * regs);
 static int load_aout32_library(struct file*);
@@ -209,7 +210,7 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	if ((N_MAGIC(ex) != ZMAGIC && N_MAGIC(ex) != OMAGIC &&
 	     N_MAGIC(ex) != QMAGIC && N_MAGIC(ex) != NMAGIC) ||
 	    N_TRSIZE(ex) || N_DRSIZE(ex) ||
-	    bprm->file->f_dentry->d_inode->i_size < ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
+	    bprm->file->f_path.dentry->d_inode->i_size < ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
 		return -ENOEXEC;
 	}
 
@@ -239,6 +240,8 @@ static int load_aout32_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		(current->mm->start_data = N_DATADDR(ex));
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
+	current->mm->free_area_cache = current->mm->mmap_base;
+	current->mm->cached_hole_size = 0;
 
 	current->mm->mmap = NULL;
 	compute_creds(bprm);
@@ -330,18 +333,9 @@ beyond_if:
 
 	current->mm->start_stack =
 		(unsigned long) create_aout32_tables((char __user *)bprm->p, bprm);
-	if (!(orig_thr_flags & _TIF_32BIT)) {
-		unsigned long pgd_cache = get_pgd_cache(current->mm->pgd);
+	tsb_context_switch(current->mm);
 
-		__asm__ __volatile__("stxa\t%0, [%1] %2\n\t"
-				     "membar #Sync"
-				     : /* no outputs */
-				     : "r" (pgd_cache),
-				       "r" (TSB_REG), "i" (ASI_DMMU));
-	}
 	start_thread32(regs, ex.a_entry, current->mm->start_stack);
-	if (current->ptrace & PT_PTRACED)
-		send_sig(SIGTRAP, current, 0);
 	return 0;
 }
 
@@ -354,7 +348,7 @@ static int load_aout32_library(struct file *file)
 	int retval;
 	struct exec ex;
 
-	inode = file->f_dentry->d_inode;
+	inode = file->f_path.dentry->d_inode;
 
 	retval = -ENOEXEC;
 	error = kernel_read(file, 0, (char *) &ex, sizeof(ex));

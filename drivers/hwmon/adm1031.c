@@ -28,6 +28,7 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 
 /* Following macros takes channel parameter starting from 0 to 2 */
 #define ADM1031_REG_FAN_SPEED(nr)	(0x08 + (nr))
@@ -70,7 +71,7 @@ typedef u8 auto_chan_table_t[8][2];
 struct adm1031_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	int chip_type;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
@@ -262,10 +263,10 @@ set_fan_auto_channel(struct device *dev, const char *buf, size_t count, int nr)
 
 	old_fan_mode = data->conf1;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	
 	if ((ret = get_fan_auto_nearest(data, nr, val, data->conf1, &reg))) {
-		up(&data->update_lock);
+		mutex_unlock(&data->update_lock);
 		return ret;
 	}
 	if (((data->conf1 = FAN_CHAN_TO_REG(reg, data->conf1)) & ADM1031_CONF1_AUTO_MODE) ^ 
@@ -288,7 +289,7 @@ set_fan_auto_channel(struct device *dev, const char *buf, size_t count, int nr)
 	}
 	data->conf1 = FAN_CHAN_TO_REG(reg, data->conf1);
 	adm1031_write_value(client, ADM1031_REG_CONF1, data->conf1);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -329,11 +330,11 @@ set_auto_temp_min(struct device *dev, const char *buf, size_t count, int nr)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->auto_temp[nr] = AUTO_TEMP_MIN_TO_REG(val, data->auto_temp[nr]);
 	adm1031_write_value(client, ADM1031_REG_AUTO_TEMP(nr),
 			    data->auto_temp[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static ssize_t show_auto_temp_max(struct device *dev, char *buf, int nr)
@@ -349,11 +350,11 @@ set_auto_temp_max(struct device *dev, const char *buf, size_t count, int nr)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_max[nr] = AUTO_TEMP_MAX_TO_REG(val, data->auto_temp[nr], data->pwm[nr]);
 	adm1031_write_value(client, ADM1031_REG_AUTO_TEMP(nr),
 			    data->temp_max[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -405,11 +406,11 @@ set_pwm(struct device *dev, const char *buf, size_t count, int nr)
 	int val = simple_strtol(buf, NULL, 10);
 	int reg;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	if ((data->conf1 & ADM1031_CONF1_AUTO_MODE) && 
 	    (((val>>4) & 0xf) != 5)) {
 		/* In automatic mode, the only PWM accepted is 33% */
-		up(&data->update_lock);
+		mutex_unlock(&data->update_lock);
 		return -EINVAL;
 	}
 	data->pwm[nr] = PWM_TO_REG(val);
@@ -417,7 +418,7 @@ set_pwm(struct device *dev, const char *buf, size_t count, int nr)
 	adm1031_write_value(client, ADM1031_REG_PWM,
 			    nr ? ((data->pwm[nr] << 4) & 0xf0) | (reg & 0xf)
 			    : (data->pwm[nr] & 0xf) | (reg & 0xf0));
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -511,7 +512,7 @@ set_fan_min(struct device *dev, const char *buf, size_t count, int nr)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	if (val) {
 		data->fan_min[nr] = 
 			FAN_TO_REG(val, FAN_DIV_FROM_REG(data->fan_div[nr]));
@@ -519,7 +520,7 @@ set_fan_min(struct device *dev, const char *buf, size_t count, int nr)
 		data->fan_min[nr] = 0xff;
 	}
 	adm1031_write_value(client, ADM1031_REG_FAN_MIN(nr), data->fan_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static ssize_t
@@ -540,7 +541,7 @@ set_fan_div(struct device *dev, const char *buf, size_t count, int nr)
 	if (tmp == 0xff)
 		return -EINVAL;
 	
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	old_div = FAN_DIV_FROM_REG(data->fan_div[nr]);
 	data->fan_div[nr] = (tmp & 0xC0) | (0x3f & data->fan_div[nr]);
 	new_min = data->fan_min[nr] * old_div / 
@@ -553,7 +554,7 @@ set_fan_div(struct device *dev, const char *buf, size_t count, int nr)
 			    data->fan_div[nr]);
 	adm1031_write_value(client, ADM1031_REG_FAN_MIN(nr), 
 			    data->fan_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -627,11 +628,11 @@ set_temp_min(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtol(buf, NULL, 10);
 	val = SENSORS_LIMIT(val, -55000, nr == 0 ? 127750 : 127875);
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_min[nr] = TEMP_TO_REG(val);
 	adm1031_write_value(client, ADM1031_REG_TEMP_MIN(nr),
 			    data->temp_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static ssize_t
@@ -643,11 +644,11 @@ set_temp_max(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtol(buf, NULL, 10);
 	val = SENSORS_LIMIT(val, -55000, nr == 0 ? 127750 : 127875);
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_max[nr] = TEMP_TO_REG(val);
 	adm1031_write_value(client, ADM1031_REG_TEMP_MAX(nr),
 			    data->temp_max[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static ssize_t
@@ -659,11 +660,11 @@ set_temp_crit(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtol(buf, NULL, 10);
 	val = SENSORS_LIMIT(val, -55000, nr == 0 ? 127750 : 127875);
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_crit[nr] = TEMP_TO_REG(val);
 	adm1031_write_value(client, ADM1031_REG_TEMP_CRIT(nr),
 			    data->temp_crit[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -729,6 +730,61 @@ static int adm1031_attach_adapter(struct i2c_adapter *adapter)
 	return i2c_probe(adapter, &addr_data, adm1031_detect);
 }
 
+static struct attribute *adm1031_attributes[] = {
+	&dev_attr_fan1_input.attr,
+	&dev_attr_fan1_div.attr,
+	&dev_attr_fan1_min.attr,
+	&dev_attr_pwm1.attr,
+	&dev_attr_auto_fan1_channel.attr,
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp1_min.attr,
+	&dev_attr_temp1_max.attr,
+	&dev_attr_temp1_crit.attr,
+	&dev_attr_temp2_input.attr,
+	&dev_attr_temp2_min.attr,
+	&dev_attr_temp2_max.attr,
+	&dev_attr_temp2_crit.attr,
+
+	&dev_attr_auto_temp1_off.attr,
+	&dev_attr_auto_temp1_min.attr,
+	&dev_attr_auto_temp1_max.attr,
+
+	&dev_attr_auto_temp2_off.attr,
+	&dev_attr_auto_temp2_min.attr,
+	&dev_attr_auto_temp2_max.attr,
+
+	&dev_attr_auto_fan1_min_pwm.attr,
+
+	&dev_attr_alarms.attr,
+
+	NULL
+};
+
+static const struct attribute_group adm1031_group = {
+	.attrs = adm1031_attributes,
+};
+
+static struct attribute *adm1031_attributes_opt[] = {
+	&dev_attr_fan2_input.attr,
+	&dev_attr_fan2_div.attr,
+	&dev_attr_fan2_min.attr,
+	&dev_attr_pwm2.attr,
+	&dev_attr_auto_fan2_channel.attr,
+	&dev_attr_temp3_input.attr,
+	&dev_attr_temp3_min.attr,
+	&dev_attr_temp3_max.attr,
+	&dev_attr_temp3_crit.attr,
+	&dev_attr_auto_temp3_off.attr,
+	&dev_attr_auto_temp3_min.attr,
+	&dev_attr_auto_temp3_max.attr,
+	&dev_attr_auto_fan2_min_pwm.attr,
+	NULL
+};
+
+static const struct attribute_group adm1031_group_opt = {
+	.attrs = adm1031_attributes_opt,
+};
+
 /* This function is called by i2c_probe */
 static int adm1031_detect(struct i2c_adapter *adapter, int address, int kind)
 {
@@ -778,7 +834,7 @@ static int adm1031_detect(struct i2c_adapter *adapter, int address, int kind)
 
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -788,57 +844,26 @@ static int adm1031_detect(struct i2c_adapter *adapter, int address, int kind)
 	adm1031_init_client(new_client);
 
 	/* Register sysfs hooks */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &adm1031_group)))
+		goto exit_detach;
+
+	if (kind == adm1031) {
+		if ((err = sysfs_create_group(&new_client->dev.kobj,
+						&adm1031_group_opt)))
+			goto exit_remove;
+	}
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
-	}
-
-	device_create_file(&new_client->dev, &dev_attr_fan1_input);
-	device_create_file(&new_client->dev, &dev_attr_fan1_div);
-	device_create_file(&new_client->dev, &dev_attr_fan1_min);
-	device_create_file(&new_client->dev, &dev_attr_pwm1);
-	device_create_file(&new_client->dev, &dev_attr_auto_fan1_channel);
-	device_create_file(&new_client->dev, &dev_attr_temp1_input);
-	device_create_file(&new_client->dev, &dev_attr_temp1_min);
-	device_create_file(&new_client->dev, &dev_attr_temp1_max);
-	device_create_file(&new_client->dev, &dev_attr_temp1_crit);
-	device_create_file(&new_client->dev, &dev_attr_temp2_input);
-	device_create_file(&new_client->dev, &dev_attr_temp2_min);
-	device_create_file(&new_client->dev, &dev_attr_temp2_max);
-	device_create_file(&new_client->dev, &dev_attr_temp2_crit);
-
-	device_create_file(&new_client->dev, &dev_attr_auto_temp1_off);
-	device_create_file(&new_client->dev, &dev_attr_auto_temp1_min);
-	device_create_file(&new_client->dev, &dev_attr_auto_temp1_max);
-
-	device_create_file(&new_client->dev, &dev_attr_auto_temp2_off);
-	device_create_file(&new_client->dev, &dev_attr_auto_temp2_min);
-	device_create_file(&new_client->dev, &dev_attr_auto_temp2_max);
-
-	device_create_file(&new_client->dev, &dev_attr_auto_fan1_min_pwm);
-
-	device_create_file(&new_client->dev, &dev_attr_alarms);
-
-	if (kind == adm1031) {
-		device_create_file(&new_client->dev, &dev_attr_fan2_input);
-		device_create_file(&new_client->dev, &dev_attr_fan2_div);
-		device_create_file(&new_client->dev, &dev_attr_fan2_min);
-		device_create_file(&new_client->dev, &dev_attr_pwm2);
-		device_create_file(&new_client->dev,
-				   &dev_attr_auto_fan2_channel);
-		device_create_file(&new_client->dev, &dev_attr_temp3_input);
-		device_create_file(&new_client->dev, &dev_attr_temp3_min);
-		device_create_file(&new_client->dev, &dev_attr_temp3_max);
-		device_create_file(&new_client->dev, &dev_attr_temp3_crit);
-		device_create_file(&new_client->dev, &dev_attr_auto_temp3_off);
-		device_create_file(&new_client->dev, &dev_attr_auto_temp3_min);
-		device_create_file(&new_client->dev, &dev_attr_auto_temp3_max);
-		device_create_file(&new_client->dev, &dev_attr_auto_fan2_min_pwm);
+		goto exit_remove;
 	}
 
 	return 0;
 
+exit_remove:
+	sysfs_remove_group(&new_client->dev.kobj, &adm1031_group);
+	sysfs_remove_group(&new_client->dev.kobj, &adm1031_group_opt);
 exit_detach:
 	i2c_detach_client(new_client);
 exit_free:
@@ -853,6 +878,8 @@ static int adm1031_detach_client(struct i2c_client *client)
 	int ret;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &adm1031_group);
+	sysfs_remove_group(&client->dev.kobj, &adm1031_group_opt);
 	if ((ret = i2c_detach_client(client)) != 0) {
 		return ret;
 	}
@@ -891,7 +918,7 @@ static struct adm1031_data *adm1031_update_device(struct device *dev)
 	struct adm1031_data *data = i2c_get_clientdata(client);
 	int chan;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
@@ -965,7 +992,7 @@ static struct adm1031_data *adm1031_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

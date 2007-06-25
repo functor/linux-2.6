@@ -4,30 +4,6 @@
 
 #include <linux/mount.h>
 
-#define NFS_PAGE_WRITING	0
-#define NFS_PAGE_CACHED		1
-
-#define PageNfsBit(bit, page)		test_bit(bit, &(page)->private)
-
-#define SetPageNfsBit(bit, page)		\
-do {						\
-	SetPagePrivate((page));			\
-	set_bit(bit, &(page)->private);		\
-} while(0)
-
-#define ClearPageNfsBit(bit, page)		\
-do {						\
-	clear_bit(bit, &(page)->private);	\
-} while(0)
-
-#define PageNfsWriting(page)		PageNfsBit(NFS_PAGE_WRITING, (page))
-#define SetPageNfsWriting(page)		SetPageNfsBit(NFS_PAGE_WRITING, (page))
-#define ClearPageNfsWriting(page)	ClearPageNfsBit(NFS_PAGE_WRITING, (page))
-
-#define PageNfsCached(page)		PageNfsBit(NFS_PAGE_CACHED, (page))
-#define SetPageNfsCached(page)		SetPageNfsBit(NFS_PAGE_CACHED, (page))
-#define ClearPageNfsCached(page)	ClearPageNfsBit(NFS_PAGE_CACHED, (page))
-
 struct nfs_string;
 struct nfs_mount_data;
 struct nfs4_mount_data;
@@ -50,11 +26,6 @@ struct nfs_clone_mount {
 	struct sockaddr_in *addr;
 	rpc_authflavor_t authflavor;
 };
-
-/*
- * include filesystem caching stuff here
- */
-#include "fscache.h"
 
 /* client.c */
 extern struct rpc_program nfs_program;
@@ -122,15 +93,15 @@ extern void nfs_destroy_directcache(void);
 /* nfs2xdr.c */
 extern int nfs_stat_to_errno(int);
 extern struct rpc_procinfo nfs_procedures[];
-extern u32 * nfs_decode_dirent(u32 *, struct nfs_entry *, int);
+extern __be32 * nfs_decode_dirent(__be32 *, struct nfs_entry *, int);
 
 /* nfs3xdr.c */
 extern struct rpc_procinfo nfs3_procedures[];
-extern u32 *nfs3_decode_dirent(u32 *, struct nfs_entry *, int);
+extern __be32 *nfs3_decode_dirent(__be32 *, struct nfs_entry *, int);
 
 /* nfs4xdr.c */
 #ifdef CONFIG_NFS_V4
-extern u32 *nfs4_decode_dirent(u32 *p, struct nfs_entry *entry, int plus);
+extern __be32 *nfs4_decode_dirent(__be32 *p, struct nfs_entry *entry, int plus);
 #endif
 
 /* nfs4proc.c */
@@ -141,6 +112,9 @@ extern int nfs4_proc_fs_locations(struct inode *dir, struct dentry *dentry,
 				  struct nfs4_fs_locations *fs_locations,
 				  struct page *page);
 #endif
+
+/* dir.c */
+extern int nfs_access_cache_shrinker(int nr_to_scan, gfp_t gfp_mask);
 
 /* inode.c */
 extern struct inode *nfs_alloc_inode(struct super_block *sb);
@@ -178,9 +152,6 @@ extern int nfs4_path_walk(struct nfs_server *server,
 			  struct nfs_fh *mntfh,
 			  const char *path);
 #endif
-
-/* read.c */
-extern int nfs_readpage_async(struct nfs_open_context *, struct inode *, struct page *);
 
 /*
  * Determine the device name as a string
@@ -245,4 +216,22 @@ void nfs_super_set_maxbytes(struct super_block *sb, __u64 maxfilesize)
 	sb->s_maxbytes = (loff_t)maxfilesize;
 	if (sb->s_maxbytes > MAX_LFS_FILESIZE || sb->s_maxbytes <= 0)
 		sb->s_maxbytes = MAX_LFS_FILESIZE;
+}
+
+/*
+ * Determine the number of bytes of data the page contains
+ */
+static inline
+unsigned int nfs_page_length(struct page *page)
+{
+	loff_t i_size = i_size_read(page->mapping->host);
+
+	if (i_size > 0) {
+		pgoff_t end_index = (i_size - 1) >> PAGE_CACHE_SHIFT;
+		if (page->index < end_index)
+			return PAGE_CACHE_SIZE;
+		if (page->index == end_index)
+			return ((i_size - 1) & ~PAGE_CACHE_MASK) + 1;
+	}
+	return 0;
 }

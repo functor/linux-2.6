@@ -17,7 +17,7 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 59 Temple Place Suite 330, Boston, MA 02111-1307, USA.
  */
-#include <asm/io.h>
+#include <linux/io.h>
 #include <linux/dmi.h>
 #include <linux/init.h>
 #include <linux/input.h>
@@ -94,7 +94,7 @@ static void call_bios(struct regs *regs)
 
 static ssize_t __init locate_wistron_bios(void __iomem *base)
 {
-	static const unsigned char __initdata signature[] =
+	static unsigned char __initdata signature[] =
 		{ 0x42, 0x21, 0x55, 0x30 };
 	ssize_t offset;
 
@@ -248,13 +248,10 @@ static int __init dmi_matched(struct dmi_system_id *dmi)
 
 	keymap = dmi->driver_data;
 	for (key = keymap; key->type != KE_END; key++) {
-		if (key->type == KE_WIFI) {
+		if (key->type == KE_WIFI)
 			have_wifi = 1;
-			break;
-		} else if (key->type == KE_BLUETOOTH) {
+		else if (key->type == KE_BLUETOOTH)
 			have_bluetooth = 1;
-			break;
-		}
 	}
 	return 1;
 }
@@ -268,6 +265,27 @@ static struct key_entry keymap_fs_amilo_pro_v2000[] = {
 	{ KE_KEY,  0x11, KEY_PROG1 },
 	{ KE_KEY,  0x12, KEY_PROG2 },
 	{ KE_WIFI, 0x30, 0 },
+	{ KE_KEY,  0x31, KEY_MAIL },
+	{ KE_KEY,  0x36, KEY_WWW },
+	{ KE_END,  0 }
+};
+
+static struct key_entry keymap_fujitsu_n3510[] = {
+	{ KE_KEY, 0x11, KEY_PROG1 },
+	{ KE_KEY, 0x12, KEY_PROG2 },
+	{ KE_KEY, 0x36, KEY_WWW },
+	{ KE_KEY, 0x31, KEY_MAIL },
+	{ KE_KEY, 0x71, KEY_STOPCD },
+	{ KE_KEY, 0x72, KEY_PLAYPAUSE },
+	{ KE_KEY, 0x74, KEY_REWIND },
+	{ KE_KEY, 0x78, KEY_FORWARD },
+	{ KE_END, 0 }
+};
+
+static struct key_entry keymap_wistron_ms2111[] = {
+	{ KE_KEY,  0x11, KEY_PROG1 },
+	{ KE_KEY,  0x12, KEY_PROG2 },
+	{ KE_KEY,  0x13, KEY_PROG3 },
 	{ KE_KEY,  0x31, KEY_MAIL },
 	{ KE_KEY,  0x36, KEY_WWW },
 	{ KE_END,  0 }
@@ -306,12 +324,23 @@ static struct key_entry keymap_acer_travelmate_240[] = {
 	{ KE_END, 0 }
 };
 
+static struct key_entry keymap_aopen_1559as[] = {
+	{ KE_KEY,  0x01, KEY_HELP },
+	{ KE_KEY,  0x06, KEY_PROG3 },
+	{ KE_KEY,  0x11, KEY_PROG1 },
+	{ KE_KEY,  0x12, KEY_PROG2 },
+	{ KE_WIFI, 0x30, 0 },
+	{ KE_KEY,  0x31, KEY_MAIL },
+	{ KE_KEY,  0x36, KEY_WWW },
+	{ KE_END,  0 },
+};
+
 /*
  * If your machine is not here (which is currently rather likely), please send
  * a list of buttons and their key codes (reported when loading this module
  * with force=1) and the output of dmidecode to $MODULE_AUTHOR.
  */
-static struct dmi_system_id dmi_ids[] = {
+static struct dmi_system_id dmi_ids[] __initdata = {
 	{
 		.callback = dmi_matched,
 		.ident = "Fujitsu-Siemens Amilo Pro V2000",
@@ -320,6 +349,24 @@ static struct dmi_system_id dmi_ids[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "AMILO Pro V2000"),
 		},
 		.driver_data = keymap_fs_amilo_pro_v2000
+	},
+	{
+		.callback = dmi_matched,
+		.ident = "Fujitsu-Siemens Amilo M7400",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU SIEMENS"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "AMILO M        "),
+		},
+		.driver_data = keymap_fs_amilo_pro_v2000
+	},
+	{
+		.callback = dmi_matched,
+		.ident = "Fujitsu N3510",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "N3510"),
+		},
+		.driver_data = keymap_fujitsu_n3510
 	},
 	{
 		.callback = dmi_matched,
@@ -338,6 +385,33 @@ static struct dmi_system_id dmi_ids[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "TravelMate 240"),
 		},
 		.driver_data = keymap_acer_travelmate_240
+	},
+	{
+		.callback = dmi_matched,
+		.ident = "Acer TravelMate 2424NWXCi",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "TravelMate 2420"),
+		},
+		.driver_data = keymap_acer_travelmate_240
+	},
+	{
+		.callback = dmi_matched,
+		.ident = "AOpen 1559AS",
+		.matches = {
+			DMI_MATCH(DMI_PRODUCT_NAME, "E2U"),
+			DMI_MATCH(DMI_BOARD_NAME, "E2U"),
+		},
+		.driver_data = keymap_aopen_1559as
+	},
+	{
+		.callback = dmi_matched,
+		.ident = "Medion MD 9783",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "MEDIONNB"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "MD 9783"),
+		},
+		.driver_data = keymap_wistron_ms2111
 	},
 	{ NULL, }
 };

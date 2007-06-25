@@ -1,6 +1,12 @@
 #ifndef _I386_PGTABLE_3LEVEL_DEFS_H
 #define _I386_PGTABLE_3LEVEL_DEFS_H
 
+#ifdef CONFIG_XEN
+#define HAVE_SHARED_KERNEL_PMD 0
+#else
+#define HAVE_SHARED_KERNEL_PMD 1
+#endif
+
 /*
  * PGDIR_SHIFT determines what a top-level page table entry can map
  */

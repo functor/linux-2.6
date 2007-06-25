@@ -1261,7 +1261,7 @@ int bond_alb_xmit(struct sk_buff *skb, struct net_device *bond_dev)
 	struct ethhdr *eth_data;
 	struct alb_bond_info *bond_info = &(BOND_ALB_INFO(bond));
 	struct slave *tx_slave = NULL;
-	static u32 ip_bcast = 0xffffffff;
+	static const u32 ip_bcast = 0xffffffff;
 	int hash_size = 0;
 	int do_tx_balance = 1;
 	u32 hash_index = 0;
@@ -1433,7 +1433,7 @@ void bond_alb_monitor(struct bonding *bond)
 		 * write lock to protect from other code that also
 		 * sets the promiscuity.
 		 */
-		write_lock(&bond->curr_slave_lock);
+		write_lock_bh(&bond->curr_slave_lock);
 
 		if (bond_info->primary_is_promisc &&
 		    (++bond_info->rlb_promisc_timeout_counter >= RLB_PROMISC_TIMEOUT)) {
@@ -1448,7 +1448,7 @@ void bond_alb_monitor(struct bonding *bond)
 			bond_info->primary_is_promisc = 0;
 		}
 
-		write_unlock(&bond->curr_slave_lock);
+		write_unlock_bh(&bond->curr_slave_lock);
 
 		if (bond_info->rlb_rebalance) {
 			bond_info->rlb_rebalance = 0;

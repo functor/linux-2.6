@@ -1,4 +1,4 @@
-/* Copyright (c) 2004 Coraid, Inc.  See COPYING for GPL terms. */
+/* Copyright (c) 2006 Coraid, Inc.  See COPYING for GPL terms. */
 /*
  * aoenet.c
  * Ethernet portion of AoE driver
@@ -74,7 +74,7 @@ set_aoe_iflist(const char __user *user_str, size_t size)
 		return -EINVAL;
 
 	if (copy_from_user(aoe_iflist, user_str, size)) {
-		printk(KERN_INFO "aoe: %s: copy from user failed\n", __FUNCTION__);
+		printk(KERN_INFO "aoe: copy from user failed\n");
 		return -EFAULT;
 	}
 	aoe_iflist[size] = 0x00;
@@ -90,18 +90,6 @@ mac_addr(char addr[6])
 	memcpy(p + 2, addr, 6);	/* (sizeof addr != 6) */
 
 	return __be64_to_cpu(n);
-}
-
-static struct sk_buff *
-skb_check(struct sk_buff *skb)
-{
-	if (skb_is_nonlinear(skb))
-	if ((skb = skb_share_check(skb, GFP_ATOMIC)))
-	if (skb_linearize(skb, GFP_ATOMIC) < 0) {
-		dev_kfree_skb(skb);
-		return NULL;
-	}
-	return skb;
 }
 
 void
@@ -125,14 +113,13 @@ aoenet_rcv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, 
 	struct aoe_hdr *h;
 	u32 n;
 
-	skb = skb_check(skb);
-	if (!skb)
+	skb = skb_share_check(skb, GFP_ATOMIC);
+	if (skb == NULL)
 		return 0;
-
+	if (skb_linearize(skb))
+		goto exit;
 	if (!is_aoe_netif(ifp))
 		goto exit;
-
-	//skb->len += ETH_HLEN;	/* (1) */
 	skb_push(skb, ETH_HLEN);	/* (1) */
 
 	h = (struct aoe_hdr *) skb->mac.raw;
@@ -145,8 +132,7 @@ aoenet_rcv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, 
 		if (n > NECODES)
 			n = 0;
 		if (net_ratelimit())
-			printk(KERN_ERR "aoe: aoenet_rcv: error packet from %d.%d; "
-			       "ecode=%d '%s'\n",
+			printk(KERN_ERR "aoe: error packet from %d.%d; ecode=%d '%s'\n",
 			       be16_to_cpu(h->major), h->minor, 
 			       h->err, aoe_errlist[n]);
 		goto exit;
@@ -160,7 +146,7 @@ aoenet_rcv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, 
 		aoecmd_cfg_rsp(skb);
 		break;
 	default:
-		printk(KERN_INFO "aoe: aoenet_rcv: unknown cmd %d\n", h->cmd);
+		printk(KERN_INFO "aoe: unknown cmd %d\n", h->cmd);
 	}
 exit:
 	dev_kfree_skb(skb);

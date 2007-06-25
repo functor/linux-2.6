@@ -21,31 +21,32 @@
 #ifndef __ASM_ARCH_UNCOMPRESS_H
 #define __ASM_ARCH_UNCOMPRESS_H
 
-#include <asm/arch/hardware.h>
+#include <asm/hardware.h>
+#include <asm/arch/at91_dbgu.h>
 
 /*
  * The following code assumes the serial port has already been
- * initialized by the bootloader.  We search for the first enabled
- * port in the most probable order.  If you didn't setup a port in
+ * initialized by the bootloader.  If you didn't setup a port in
  * your bootloader then nothing will appear (which might be desired).
  *
  * This does not append a newline
  */
-static void putstr(const char *s)
+static void putc(int c)
 {
 	void __iomem *sys = (void __iomem *) AT91_BASE_SYS;	/* physical address */
 
-	while (*s) {
-		while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXRDY)) { barrier(); }
-		__raw_writel(*s, sys + AT91_DBGU_THR);
-		if (*s == '\n')	{
-			while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXRDY)) { barrier(); }
-			__raw_writel('\r', sys + AT91_DBGU_THR);
-		}
-		s++;
-	}
+	while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXRDY))
+		barrier();
+	__raw_writel(c, sys + AT91_DBGU_THR);
+}
+
+static inline void flush(void)
+{
+	void __iomem *sys = (void __iomem *) AT91_BASE_SYS;	/* physical address */
+
 	/* wait for transmission to complete */
-	while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXEMPTY)) { barrier(); }
+	while (!(__raw_readl(sys + AT91_DBGU_SR) & AT91_DBGU_TXEMPTY))
+		barrier();
 }
 
 #define arch_decomp_setup()

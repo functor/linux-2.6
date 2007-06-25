@@ -68,7 +68,7 @@ struct port_table_attribute {
 	int			index;
 };
 
-static inline int ibdev_is_alive(const struct ib_device *dev) 
+static inline int ibdev_is_alive(const struct ib_device *dev)
 {
 	return dev->reg_state == IB_DEV_REGISTERED;
 }
@@ -112,7 +112,7 @@ static ssize_t state_show(struct ib_port *p, struct port_attribute *unused,
 		return ret;
 
 	return sprintf(buf, "%d: %s\n", attr.state,
-		       attr.state >= 0 && attr.state <= ARRAY_SIZE(state_name) ?
+		       attr.state >= 0 && attr.state < ARRAY_SIZE(state_name) ?
 		       state_name[attr.state] : "UNKNOWN");
 }
 
@@ -336,7 +336,7 @@ static ssize_t show_pma_counter(struct ib_port *p, struct port_attribute *attr,
 	switch (width) {
 	case 4:
 		ret = sprintf(buf, "%u\n", (out_mad->data[40 + offset / 8] >>
-					    (offset % 4)) & 0xf);
+					    (4 - (offset % 8))) & 0xf);
 		break;
 	case 8:
 		ret = sprintf(buf, "%u\n", out_mad->data[40 + offset / 8]);
@@ -472,8 +472,10 @@ alloc_group_attrs(ssize_t (*show)(struct ib_port *,
 			goto err;
 
 		if (snprintf(element->name, sizeof(element->name),
-			     "%d", i) >= sizeof(element->name))
+			     "%d", i) >= sizeof(element->name)) {
+			kfree(element);
 			goto err;
+		}
 
 		element->attr.attr.name  = element->name;
 		element->attr.attr.mode  = S_IRUGO;
@@ -587,10 +589,11 @@ static ssize_t show_node_type(struct class_device *cdev, char *buf)
 		return -ENODEV;
 
 	switch (dev->node_type) {
-	case IB_NODE_CA:     return sprintf(buf, "%d: CA\n", dev->node_type);
-	case IB_NODE_SWITCH: return sprintf(buf, "%d: switch\n", dev->node_type);
-	case IB_NODE_ROUTER: return sprintf(buf, "%d: router\n", dev->node_type);
-	default:             return sprintf(buf, "%d: <unknown>\n", dev->node_type);
+	case RDMA_NODE_IB_CA:	  return sprintf(buf, "%d: CA\n", dev->node_type);
+	case RDMA_NODE_RNIC:	  return sprintf(buf, "%d: RNIC\n", dev->node_type);
+	case RDMA_NODE_IB_SWITCH: return sprintf(buf, "%d: switch\n", dev->node_type);
+	case RDMA_NODE_IB_ROUTER: return sprintf(buf, "%d: router\n", dev->node_type);
+	default:		  return sprintf(buf, "%d: <unknown>\n", dev->node_type);
 	}
 }
 
@@ -628,14 +631,42 @@ static ssize_t show_node_guid(struct class_device *cdev, char *buf)
 		       be16_to_cpu(((__be16 *) &dev->node_guid)[3]));
 }
 
+static ssize_t show_node_desc(struct class_device *cdev, char *buf)
+{
+	struct ib_device *dev = container_of(cdev, struct ib_device, class_dev);
+
+	return sprintf(buf, "%.64s\n", dev->node_desc);
+}
+
+static ssize_t set_node_desc(struct class_device *cdev, const char *buf,
+			      size_t count)
+{
+	struct ib_device *dev = container_of(cdev, struct ib_device, class_dev);
+	struct ib_device_modify desc = {};
+	int ret;
+
+	if (!dev->modify_device)
+		return -EIO;
+
+	memcpy(desc.node_desc, buf, min_t(int, count, 64));
+	ret = ib_modify_device(dev, IB_DEVICE_MODIFY_NODE_DESC, &desc);
+	if (ret)
+		return ret;
+
+	return count;
+}
+
 static CLASS_DEVICE_ATTR(node_type, S_IRUGO, show_node_type, NULL);
 static CLASS_DEVICE_ATTR(sys_image_guid, S_IRUGO, show_sys_image_guid, NULL);
 static CLASS_DEVICE_ATTR(node_guid, S_IRUGO, show_node_guid, NULL);
+static CLASS_DEVICE_ATTR(node_desc, S_IRUGO | S_IWUSR, show_node_desc,
+			 set_node_desc);
 
 static struct class_device_attribute *ib_class_attributes[] = {
 	&class_device_attr_node_type,
 	&class_device_attr_sys_image_guid,
-	&class_device_attr_node_guid
+	&class_device_attr_node_guid,
+	&class_device_attr_node_desc
 };
 
 static struct class ib_class = {
@@ -678,7 +709,7 @@ int ib_device_register_sysfs(struct ib_device *device)
 	if (ret)
 		goto err_put;
 
-	if (device->node_type == IB_NODE_SWITCH) {
+	if (device->node_type == RDMA_NODE_IB_SWITCH) {
 		ret = add_port(device, 0);
 		if (ret)
 			goto err_put;

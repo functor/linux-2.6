@@ -65,7 +65,7 @@ static int etap_write(int fd, struct sk_buff **skb, struct uml_net_private *lp)
 	return(net_send(fd, (*skb)->data, (*skb)->len));
 }
 
-struct net_kern_info ethertap_kern_info = {
+const struct net_kern_info ethertap_kern_info = {
 	.init			= etap_init,
 	.protocol		= eth_protocol,
 	.read			= etap_read,
@@ -102,18 +102,7 @@ static struct transport ethertap_transport = {
 static int register_ethertap(void)
 {
 	register_transport(&ethertap_transport);
-	return(1);
+	return 0;
 }
 
-__initcall(register_ethertap);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+late_initcall(register_ethertap);

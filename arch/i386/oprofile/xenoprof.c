@@ -177,7 +177,7 @@ done:
 }
 
 static irqreturn_t 
-xenoprof_ovf_interrupt(int irq, void * dev_id, struct pt_regs * regs)
+xenoprof_ovf_interrupt(int irq, void * dev_id)
 {
 	struct xenoprof_buf * buf;
 	int cpu;

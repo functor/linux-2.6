@@ -48,7 +48,7 @@ do {								\
 	size_t __n = (N);					\
 	uint8_t *__p = (uint8_t *)(PTR);			\
 	count_and_csum((C), __p, __n);				\
-	crypto_digest_update_kernel((C)->digest, __p, __n);	\
+	crypto_hash_update_kernel(&(C)->hash, __p, __n);	\
 } while(0)
 
 #define crypto_digest_update_val(C,VAL)				\
@@ -56,7 +56,7 @@ do {								\
 	size_t __n = sizeof(VAL);				\
 	uint8_t *__p = (uint8_t *)&(VAL);			\
 	count_and_csum((C), __p, __n);				\
-	crypto_digest_update_kernel((C)->digest, __p, __n);	\
+	crypto_hash_update_kernel(&(C)->hash, __p, __n);	\
 } while(0)
 
 static int module_verify_canonicalise(struct module_verify_data *mvdata);
@@ -73,7 +73,13 @@ static int extract_elf_rel(struct module_verify_data *mvdata,
 
 static int signedonly;
 
-/*****************************************************************************/
+static int __init sign_setup(char *str)
+{
+	signedonly = 1;
+	return 0;
+}
+__setup("enforcemodulesig", sign_setup);
+
 /*
  * verify a module's signature
  */
@@ -113,13 +119,13 @@ int module_verify_signature(struct module_verify_data *mvdata)
 	/* grab an SHA1 transformation context
 	 * - !!! if this tries to load the sha1.ko module, we will deadlock!!!
 	 */
-	mvdata->digest = crypto_alloc_tfm2("sha1", 0, 1);
-	if (!mvdata->digest) {
+	mvdata->hash.tfm = crypto_hash_cast(crypto_alloc_tfm2("sha1", 0, 1));
+	if (!mvdata->hash.tfm) {
 		printk("Couldn't load module - SHA1 transform unavailable\n");
 		return -EPERM;
 	}
 
-	crypto_digest_init(mvdata->digest);
+	crypto_hash_init(&mvdata->hash);
 
 #ifdef MODSIGN_DEBUG
 	mvdata->xcsum = 0;
@@ -200,28 +206,39 @@ int module_verify_signature(struct module_verify_data *mvdata)
 	       mvdata->signed_size, mvdata->xcsum);
 
 	/* do the actual signature verification */
-	i = ksign_verify_signature(sig, sig_size, mvdata->digest);
+	ret = ksign_verify_signature(sig, sig_size, mvdata->hash.tfm);
 
-	_debug("verify-sig : %d\n", i);
+	_debug("verify-sig : %d\n", ret);
 
-	if (i == 0)
-		i = 1;
-	return i;
+	switch (ret) {
+	case 0:			/* good signature */
+		ret = 1;
+		break;
+	case -EKEYREJECTED:	/* signature mismatch or number format error */
+		printk(KERN_ERR "Module signature verification failed\n");
+		break;
+	case -ENOKEY:		/* signed, but we don't have the public key */
+		printk(KERN_ERR "Module signed with unknown public key\n");
+		break;
+	default:		/* other error (probably ENOMEM) */
+		break;
+	}
 
- format_error:
-	crypto_free_tfm(mvdata->digest);
+	return ret;
+
+format_error:
+	crypto_free_hash(mvdata->hash.tfm);
+	printk(KERN_ERR "Module format error encountered\n");
 	return -ELIBBAD;
 
 	/* deal with the case of an unsigned module */
- no_signature:
+no_signature:
  	if (!signedonly)
 		return 0;
-	printk("An attempt to load unsigned module was rejected\n");
-	return -EPERM;
+	printk(KERN_ERR "An attempt to load unsigned module was rejected\n");
+	return -EKEYREJECTED;
+}
 
-} /* end module_verify_signature() */
-
-/*****************************************************************************/
 /*
  * canonicalise the section table index numbers
  */
@@ -277,12 +294,10 @@ static int module_verify_canonicalise(struct module_verify_data *mvdata)
 		mvdata->canonmap[mvdata->canonlist[loop]] = loop + 1;
 
 	return 0;
+}
 
-} /* end module_verify_canonicalise() */
-
-/*****************************************************************************/
 /*
- * extract a RELA table
+ * extract an ELF RELA table
  * - need to canonicalise the entries in case section addition/removal has
  *   rearranged the symbol table and the section table
  */
@@ -357,11 +372,12 @@ static int extract_elf_rela(struct module_verify_data *mvdata,
 	       mvdata->signed_size, mvdata->csum, sh_name, nrels);
 
 	return 0;
-} /* end extract_elf_rela() */
+}
 
-/*****************************************************************************/
 /*
- *
+ * extract an ELF REL table
+ * - need to canonicalise the entries in case section addition/removal has
+ *   rearranged the symbol table and the section table
  */
 static int extract_elf_rel(struct module_verify_data *mvdata,
 			   int secix,
@@ -431,11 +447,4 @@ static int extract_elf_rel(struct module_verify_data *mvdata,
 	       mvdata->signed_size, mvdata->csum, sh_name, nrels);
 
 	return 0;
-} /* end extract_elf_rel() */
-
-static int __init sign_setup(char *str)
-{
-	signedonly = 1;
-	return 0;
 }
-__setup("enforcemodulesig", sign_setup);

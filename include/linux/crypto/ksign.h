@@ -16,7 +16,7 @@
 
 #ifdef CONFIG_CRYPTO_SIGNATURE
 extern int ksign_verify_signature(const char *sig, unsigned sig_size,
-				  struct crypto_tfm *sha1);
+				  struct crypto_hash *sha1);
 #endif
 
 #endif /* _LINUX_CRYPTO_KSIGN_H */

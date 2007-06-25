@@ -8,7 +8,6 @@
  * Copyright (c) 2002, Trond Myklebust <trond.myklebust@fys.uio.no>
  *
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -34,7 +33,7 @@ static int rpc_mount_count;
 static struct file_system_type rpc_pipe_fs_type;
 
 
-static kmem_cache_t *rpc_inode_cachep __read_mostly;
+static struct kmem_cache *rpc_inode_cachep __read_mostly;
 
 #define RPC_UPCALL_TIMEOUT (30*HZ)
 
@@ -55,10 +54,11 @@ static void rpc_purge_list(struct rpc_inode *rpci, struct list_head *head,
 }
 
 static void
-rpc_timeout_upcall_queue(void *data)
+rpc_timeout_upcall_queue(struct work_struct *work)
 {
 	LIST_HEAD(free_list);
-	struct rpc_inode *rpci = (struct rpc_inode *)data;
+	struct rpc_inode *rpci =
+		container_of(work, struct rpc_inode, queue_timeout.work);
 	struct inode *inode = &rpci->vfs_inode;
 	void (*destroy_msg)(struct rpc_pipe_msg *);
 
@@ -91,7 +91,8 @@ rpc_queue_upcall(struct inode *inode, struct rpc_pipe_msg *msg)
 		res = 0;
 	} else if (rpci->flags & RPC_PIPE_WAIT_FOR_OPEN) {
 		if (list_empty(&rpci->pipe))
-			schedule_delayed_work(&rpci->queue_timeout,
+			queue_delayed_work(rpciod_workqueue,
+					&rpci->queue_timeout,
 					RPC_UPCALL_TIMEOUT);
 		list_add_tail(&msg->list, &rpci->pipe);
 		rpci->pipelen += msg->len;
@@ -132,7 +133,7 @@ rpc_close_pipes(struct inode *inode)
 		if (ops->release_pipe)
 			ops->release_pipe(inode);
 		cancel_delayed_work(&rpci->queue_timeout);
-		flush_scheduled_work();
+		flush_workqueue(rpciod_workqueue);
 	}
 	rpc_inode_setowner(inode, NULL);
 	mutex_unlock(&inode->i_mutex);
@@ -142,7 +143,7 @@ static struct inode *
 rpc_alloc_inode(struct super_block *sb)
 {
 	struct rpc_inode *rpci;
-	rpci = (struct rpc_inode *)kmem_cache_alloc(rpc_inode_cachep, SLAB_KERNEL);
+	rpci = (struct rpc_inode *)kmem_cache_alloc(rpc_inode_cachep, GFP_KERNEL);
 	if (!rpci)
 		return NULL;
 	return &rpci->vfs_inode;
@@ -213,7 +214,7 @@ out:
 static ssize_t
 rpc_pipe_read(struct file *filp, char __user *buf, size_t len, loff_t *offset)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct rpc_inode *rpci = RPC_I(inode);
 	struct rpc_pipe_msg *msg;
 	int res = 0;
@@ -256,7 +257,7 @@ out_unlock:
 static ssize_t
 rpc_pipe_write(struct file *filp, const char __user *buf, size_t len, loff_t *offset)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct rpc_inode *rpci = RPC_I(inode);
 	int res;
 
@@ -274,7 +275,7 @@ rpc_pipe_poll(struct file *filp, struct poll_table_struct *wait)
 	struct rpc_inode *rpci;
 	unsigned int mask = 0;
 
-	rpci = RPC_I(filp->f_dentry->d_inode);
+	rpci = RPC_I(filp->f_path.dentry->d_inode);
 	poll_wait(filp, &rpci->waitq, wait);
 
 	mask = POLLOUT | POLLWRNORM;
@@ -289,7 +290,7 @@ static int
 rpc_pipe_ioctl(struct inode *ino, struct file *filp,
 		unsigned int cmd, unsigned long arg)
 {
-	struct rpc_inode *rpci = RPC_I(filp->f_dentry->d_inode);
+	struct rpc_inode *rpci = RPC_I(filp->f_path.dentry->d_inode);
 	int len;
 
 	switch (cmd) {
@@ -327,10 +328,8 @@ rpc_show_info(struct seq_file *m, void *v)
 	seq_printf(m, "RPC server: %s\n", clnt->cl_server);
 	seq_printf(m, "service: %s (%d) version %d\n", clnt->cl_protname,
 			clnt->cl_prog, clnt->cl_vers);
-	seq_printf(m, "address: %u.%u.%u.%u\n",
-			NIPQUAD(clnt->cl_xprt->addr.sin_addr.s_addr));
-	seq_printf(m, "protocol: %s\n",
-			clnt->cl_xprt->prot == IPPROTO_UDP ? "udp" : "tcp");
+	seq_printf(m, "address: %s\n", rpc_peeraddr2str(clnt, RPC_DISPLAY_ADDR));
+	seq_printf(m, "protocol: %s\n", rpc_peeraddr2str(clnt, RPC_DISPLAY_PROTO));
 	return 0;
 }
 
@@ -394,7 +393,7 @@ enum {
  */
 struct rpc_filelist {
 	char *name;
-	struct file_operations *i_fop;
+	const struct file_operations *i_fop;
 	int mode;
 };
 
@@ -434,14 +433,17 @@ static struct rpc_filelist authfiles[] = {
 	},
 };
 
-static int
-rpc_get_mount(void)
+struct vfsmount *rpc_get_mount(void)
 {
-	return simple_pin_fs("rpc_pipefs", &rpc_mount, &rpc_mount_count);
+	int err;
+
+	err = simple_pin_fs(&rpc_pipe_fs_type, &rpc_mount, &rpc_mount_count);
+	if (err != 0)
+		return ERR_PTR(err);
+	return rpc_mount;
 }
 
-static void
-rpc_put_mount(void)
+void rpc_put_mount(void)
 {
 	simple_release_fs(&rpc_mount, &rpc_mount_count);
 }
@@ -451,12 +453,13 @@ rpc_lookup_parent(char *path, struct nameidata *nd)
 {
 	if (path[0] == '\0')
 		return -ENOENT;
-	if (rpc_get_mount()) {
+	nd->mnt = rpc_get_mount();
+	if (IS_ERR(nd->mnt)) {
 		printk(KERN_WARNING "%s: %s failed to mount "
 			       "pseudofilesystem \n", __FILE__, __FUNCTION__);
-		return -ENODEV;
+		return PTR_ERR(nd->mnt);
 	}
-	nd->mnt = mntget(rpc_mount);
+	mntget(nd->mnt);
 	nd->dentry = dget(rpc_mount->mnt_root);
 	nd->last_type = LAST_ROOT;
 	nd->flags = LOOKUP_PARENT;
@@ -486,14 +489,13 @@ rpc_get_inode(struct super_block *sb, int mode)
 		return NULL;
 	inode->i_mode = mode;
 	inode->i_uid = inode->i_gid = 0;
-	inode->i_blksize = PAGE_CACHE_SIZE;
 	inode->i_blocks = 0;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	switch(mode & S_IFMT) {
 		case S_IFDIR:
 			inode->i_fop = &simple_dir_operations;
 			inode->i_op = &simple_dir_inode_operations;
-			inode->i_nlink++;
+			inc_nlink(inode);
 		default:
 			break;
 	}
@@ -511,7 +513,7 @@ rpc_depopulate(struct dentry *parent)
 	struct dentry *dentry, *dvec[10];
 	int n = 0;
 
-	mutex_lock(&dir->i_mutex);
+	mutex_lock_nested(&dir->i_mutex, I_MUTEX_CHILD);
 repeat:
 	spin_lock(&dcache_lock);
 	list_for_each_safe(pos, next, &parent->d_subdirs) {
@@ -535,6 +537,7 @@ repeat:
 				rpc_close_pipes(dentry->d_inode);
 				simple_unlink(dir, dentry);
 			}
+			inode_dir_notify(dir, DN_DELETE);
 			dput(dentry);
 		} while (n);
 		goto repeat;
@@ -569,7 +572,7 @@ rpc_populate(struct dentry *parent,
 		if (private)
 			rpc_inode_setowner(inode, private);
 		if (S_ISDIR(mode))
-			dir->i_nlink++;
+			inc_nlink(dir);
 		d_add(dentry, inode);
 	}
 	mutex_unlock(&dir->i_mutex);
@@ -591,9 +594,8 @@ __rpc_mkdir(struct inode *dir, struct dentry *dentry)
 		goto out_err;
 	inode->i_ino = iunique(dir->i_sb, 100);
 	d_instantiate(dentry, inode);
-	dir->i_nlink++;
+	inc_nlink(dir);
 	inode_dir_notify(dir, DN_CREATE);
-	rpc_get_mount();
 	return 0;
 out_err:
 	printk(KERN_WARNING "%s: %s failed to allocate inode for dentry %s\n",
@@ -607,30 +609,25 @@ __rpc_rmdir(struct inode *dir, struct dentry *dentry)
 	int error;
 
 	shrink_dcache_parent(dentry);
-	if (dentry->d_inode)
-		rpc_close_pipes(dentry->d_inode);
+	if (d_unhashed(dentry))
+		return 0;
 	if ((error = simple_rmdir(dir, dentry)) != 0)
 		return error;
 	if (!error) {
 		inode_dir_notify(dir, DN_DELETE);
 		d_drop(dentry);
-		rpc_put_mount();
 	}
 	return 0;
 }
 
 static struct dentry *
-rpc_lookup_negative(char *path, struct nameidata *nd)
+rpc_lookup_create(struct dentry *parent, const char *name, int len)
 {
+	struct inode *dir = parent->d_inode;
 	struct dentry *dentry;
-	struct inode *dir;
-	int error;
 
-	if ((error = rpc_lookup_parent(path, nd)) != 0)
-		return ERR_PTR(error);
-	dir = nd->dentry->d_inode;
-	mutex_lock(&dir->i_mutex);
-	dentry = lookup_one_len(nd->last.name, nd->dentry, nd->last.len);
+	mutex_lock_nested(&dir->i_mutex, I_MUTEX_PARENT);
+	dentry = lookup_one_len(name, parent, len);
 	if (IS_ERR(dentry))
 		goto out_err;
 	if (dentry->d_inode) {
@@ -641,7 +638,20 @@ rpc_lookup_negative(char *path, struct nameidata *nd)
 	return dentry;
 out_err:
 	mutex_unlock(&dir->i_mutex);
-	rpc_release_path(nd);
+	return dentry;
+}
+
+static struct dentry *
+rpc_lookup_negative(char *path, struct nameidata *nd)
+{
+	struct dentry *dentry;
+	int error;
+
+	if ((error = rpc_lookup_parent(path, nd)) != 0)
+		return ERR_PTR(error);
+	dentry = rpc_lookup_create(nd->dentry, nd->last.name, nd->last.len);
+	if (IS_ERR(dentry))
+		rpc_release_path(nd);
 	return dentry;
 }
 
@@ -665,6 +675,7 @@ rpc_mkdir(char *path, struct rpc_clnt *rpc_client)
 			RPCAUTH_info, RPCAUTH_EOF);
 	if (error)
 		goto err_depopulate;
+	dget(dentry);
 out:
 	mutex_unlock(&dir->i_mutex);
 	rpc_release_path(&nd);
@@ -681,44 +692,35 @@ err_dput:
 }
 
 int
-rpc_rmdir(char *path)
+rpc_rmdir(struct dentry *dentry)
 {
-	struct nameidata nd;
-	struct dentry *dentry;
+	struct dentry *parent;
 	struct inode *dir;
 	int error;
 
-	if ((error = rpc_lookup_parent(path, &nd)) != 0)
-		return error;
-	dir = nd.dentry->d_inode;
-	mutex_lock(&dir->i_mutex);
-	dentry = lookup_one_len(nd.last.name, nd.dentry, nd.last.len);
-	if (IS_ERR(dentry)) {
-		error = PTR_ERR(dentry);
-		goto out_release;
-	}
+	parent = dget_parent(dentry);
+	dir = parent->d_inode;
+	mutex_lock_nested(&dir->i_mutex, I_MUTEX_PARENT);
 	rpc_depopulate(dentry);
 	error = __rpc_rmdir(dir, dentry);
 	dput(dentry);
-out_release:
 	mutex_unlock(&dir->i_mutex);
-	rpc_release_path(&nd);
+	dput(parent);
 	return error;
 }
 
 struct dentry *
-rpc_mkpipe(char *path, void *private, struct rpc_pipe_ops *ops, int flags)
+rpc_mkpipe(struct dentry *parent, const char *name, void *private, struct rpc_pipe_ops *ops, int flags)
 {
-	struct nameidata nd;
 	struct dentry *dentry;
 	struct inode *dir, *inode;
 	struct rpc_inode *rpci;
 
-	dentry = rpc_lookup_negative(path, &nd);
+	dentry = rpc_lookup_create(parent, name, strlen(name));
 	if (IS_ERR(dentry))
 		return dentry;
-	dir = nd.dentry->d_inode;
-	inode = rpc_get_inode(dir->i_sb, S_IFSOCK | S_IRUSR | S_IWUSR);
+	dir = parent->d_inode;
+	inode = rpc_get_inode(dir->i_sb, S_IFIFO | S_IRUSR | S_IWUSR);
 	if (!inode)
 		goto err_dput;
 	inode->i_ino = iunique(dir->i_sb, 100);
@@ -729,45 +731,40 @@ rpc_mkpipe(char *path, void *private, struct rpc_pipe_ops *ops, int flags)
 	rpci->flags = flags;
 	rpci->ops = ops;
 	inode_dir_notify(dir, DN_CREATE);
+	dget(dentry);
 out:
 	mutex_unlock(&dir->i_mutex);
-	rpc_release_path(&nd);
 	return dentry;
 err_dput:
 	dput(dentry);
 	dentry = ERR_PTR(-ENOMEM);
-	printk(KERN_WARNING "%s: %s() failed to create pipe %s (errno = %d)\n",
-			__FILE__, __FUNCTION__, path, -ENOMEM);
+	printk(KERN_WARNING "%s: %s() failed to create pipe %s/%s (errno = %d)\n",
+			__FILE__, __FUNCTION__, parent->d_name.name, name,
+			-ENOMEM);
 	goto out;
 }
 
 int
-rpc_unlink(char *path)
+rpc_unlink(struct dentry *dentry)
 {
-	struct nameidata nd;
-	struct dentry *dentry;
+	struct dentry *parent;
 	struct inode *dir;
-	int error;
+	int error = 0;
 
-	if ((error = rpc_lookup_parent(path, &nd)) != 0)
-		return error;
-	dir = nd.dentry->d_inode;
-	mutex_lock(&dir->i_mutex);
-	dentry = lookup_one_len(nd.last.name, nd.dentry, nd.last.len);
-	if (IS_ERR(dentry)) {
-		error = PTR_ERR(dentry);
-		goto out_release;
-	}
-	d_drop(dentry);
-	if (dentry->d_inode) {
-		rpc_close_pipes(dentry->d_inode);
-		error = simple_unlink(dir, dentry);
+	parent = dget_parent(dentry);
+	dir = parent->d_inode;
+	mutex_lock_nested(&dir->i_mutex, I_MUTEX_PARENT);
+	if (!d_unhashed(dentry)) {
+		d_drop(dentry);
+		if (dentry->d_inode) {
+			rpc_close_pipes(dentry->d_inode);
+			error = simple_unlink(dir, dentry);
+		}
+		inode_dir_notify(dir, DN_DELETE);
 	}
 	dput(dentry);
-	inode_dir_notify(dir, DN_DELETE);
-out_release:
 	mutex_unlock(&dir->i_mutex);
-	rpc_release_path(&nd);
+	dput(parent);
 	return error;
 }
 
@@ -812,11 +809,11 @@ out:
 	return -ENOMEM;
 }
 
-static struct super_block *
+static int
 rpc_get_sb(struct file_system_type *fs_type,
-		int flags, const char *dev_name, void *data)
+		int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_single(fs_type, flags, data, rpc_fill_super);
+	return get_sb_single(fs_type, flags, data, rpc_fill_super, mnt);
 }
 
 static struct file_system_type rpc_pipe_fs_type = {
@@ -827,7 +824,7 @@ static struct file_system_type rpc_pipe_fs_type = {
 };
 
 static void
-init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
+init_once(void * foo, struct kmem_cache * cachep, unsigned long flags)
 {
 	struct rpc_inode *rpci = (struct rpc_inode *) foo;
 
@@ -841,7 +838,8 @@ init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 		INIT_LIST_HEAD(&rpci->pipe);
 		rpci->pipelen = 0;
 		init_waitqueue_head(&rpci->waitq);
-		INIT_WORK(&rpci->queue_timeout, rpc_timeout_upcall_queue, rpci);
+		INIT_DELAYED_WORK(&rpci->queue_timeout,
+				    rpc_timeout_upcall_queue);
 		rpci->ops = NULL;
 	}
 }
@@ -849,9 +847,10 @@ init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 int register_rpc_pipefs(void)
 {
 	rpc_inode_cachep = kmem_cache_create("rpc_inode_cache",
-                                             sizeof(struct rpc_inode),
-                                             0, SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
-                                             init_once, NULL);
+				sizeof(struct rpc_inode),
+				0, (SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|
+						SLAB_MEM_SPREAD),
+				init_once, NULL);
 	if (!rpc_inode_cachep)
 		return -ENOMEM;
 	register_filesystem(&rpc_pipe_fs_type);
@@ -860,7 +859,6 @@ int register_rpc_pipefs(void)
 
 void unregister_rpc_pipefs(void)
 {
-	if (kmem_cache_destroy(rpc_inode_cachep))
-		printk(KERN_WARNING "RPC: unable to free inode cache\n");
+	kmem_cache_destroy(rpc_inode_cachep);
 	unregister_filesystem(&rpc_pipe_fs_type);
 }

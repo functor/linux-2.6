@@ -8,7 +8,6 @@
  * Copyright (C) 1999-2000 VA Linux Systems
  * Copyright (C) 1999-2000 Walt Drummond <drummond@valinux.com>
  */
-#include <linux/config.h>
 
 #include <linux/cpu.h>
 #include <linux/init.h>
@@ -30,9 +29,7 @@
 #include <asm/sections.h>
 #include <asm/system.h>
 
-extern unsigned long wall_jiffies;
-
-#define TIME_KEEPER_ID	0	/* smp_processor_id() of time-keeper */
+volatile int time_keeper_id = 0; /* smp_processor_id() of time-keeper */
 
 #ifdef CONFIG_IA64_DEBUG_IRQ
 
@@ -48,7 +45,7 @@ static struct time_interpolator itc_interpolator = {
 };
 
 static irqreturn_t
-timer_interrupt (int irq, void *dev_id, struct pt_regs *regs)
+timer_interrupt (int irq, void *dev_id)
 {
 	unsigned long new_itm;
 
@@ -56,7 +53,7 @@ timer_interrupt (int irq, void *dev_id, struct pt_regs *regs)
 		return IRQ_HANDLED;
 	}
 
-	platform_timer_interrupt(irq, dev_id, regs);
+	platform_timer_interrupt(irq, dev_id);
 
 	new_itm = local_cpu_data->itm_next;
 
@@ -64,14 +61,14 @@ timer_interrupt (int irq, void *dev_id, struct pt_regs *regs)
 		printk(KERN_ERR "Oops: timer tick before it's due (itc=%lx,itm=%lx)\n",
 		       ia64_get_itc(), new_itm);
 
-	profile_tick(CPU_PROFILING, regs);
+	profile_tick(CPU_PROFILING);
 
 	while (1) {
-		update_process_times(user_mode(regs));
+		update_process_times(user_mode(get_irq_regs()));
 
 		new_itm += local_cpu_data->itm_delta;
 
-		if (smp_processor_id() == TIME_KEEPER_ID) {
+		if (smp_processor_id() == time_keeper_id) {
 			/*
 			 * Here we are in the timer irq handler. We have irqs locally
 			 * disabled, but we don't know if the timer_bh is running on
@@ -79,7 +76,7 @@ timer_interrupt (int irq, void *dev_id, struct pt_regs *regs)
 			 * xtime_lock.
 			 */
 			write_seqlock(&xtime_lock);
-			do_timer(regs);
+			do_timer(1);
 			local_cpu_data->itm_next = new_itm;
 			write_sequnlock(&xtime_lock);
 		} else
@@ -87,6 +84,12 @@ timer_interrupt (int irq, void *dev_id, struct pt_regs *regs)
 
 		if (time_after(new_itm, ia64_get_itc()))
 			break;
+
+		/*
+		 * Allow IPIs to interrupt the timer loop.
+		 */
+		local_irq_enable();
+		local_irq_disable();
 	}
 
 	do {
@@ -188,7 +191,7 @@ ia64_init_itm (void)
 	itc_freq = (platform_base_freq*itc_ratio.num)/itc_ratio.den;
 
 	local_cpu_data->itm_delta = (itc_freq + HZ/2) / HZ;
-	printk(KERN_DEBUG "CPU %d: base freq=%lu.%03luMHz, ITC ratio=%lu/%lu, "
+	printk(KERN_DEBUG "CPU %d: base freq=%lu.%03luMHz, ITC ratio=%u/%u, "
 	       "ITC freq=%lu.%03luMHz", smp_processor_id(),
 	       platform_base_freq / 1000000, (platform_base_freq / 1000) % 1000,
 	       itc_ratio.num, itc_ratio.den, itc_freq / 1000000, (itc_freq / 1000) % 1000);
@@ -232,9 +235,14 @@ ia64_init_itm (void)
 
 static struct irqaction timer_irqaction = {
 	.handler =	timer_interrupt,
-	.flags =	SA_INTERRUPT,
+	.flags =	IRQF_DISABLED,
 	.name =		"timer"
 };
+
+void __devinit ia64_disable_timer(void)
+{
+	ia64_set_itv(1 << 16);
+}
 
 void __init
 time_init (void)

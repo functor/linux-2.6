@@ -62,9 +62,9 @@ mpi_mulpowm( MPI res, MPI *basearray, MPI *exparray, MPI m)
 	if (!t)	  { printk("mpi_mulpowm: assert(t) failed\n"); BUG(); }
 	if (k>=10) { printk("mpi_mulpowm: assert(k<10) failed\n"); BUG(); }
 
-	G = kmalloc( (1<<k) * sizeof *G, GFP_KERNEL );
+	G = kzalloc( (1<<k) * sizeof *G, GFP_KERNEL );
 	if (!G) goto nomem;
-	memset(G,0,(1<<k) * sizeof *G);
+
 	/* and calculate */
 	tmp =  mpi_alloc( mpi_get_nlimbs(m)+1 ); if (!tmp) goto nomem;
 	if (mpi_set_ui( res, 1 ) < 0) goto nomem;

@@ -209,7 +209,7 @@ struct snd_gf1_mem {
 	struct snd_gf1_bank_info banks_16[4];
 	struct snd_gf1_mem_block *first;
 	struct snd_gf1_mem_block *last;
-	struct semaphore memory_mutex;
+	struct mutex memory_mutex;
 };
 
 struct snd_gf1_dma_block {
@@ -467,8 +467,8 @@ struct snd_gus_card {
 	spinlock_t dma_lock;
 	spinlock_t pcm_volume_level_lock;
 	spinlock_t uart_cmd_lock;
-	struct semaphore dma_mutex;
-	struct semaphore register_mutex;
+	struct mutex dma_mutex;
+	struct mutex register_mutex;
 };
 
 /* I/O functions for GF1/InterWave chip - gus_io.c */
@@ -638,7 +638,7 @@ int snd_gus_initialize(struct snd_gus_card * gus);
 
 /* gus_irq.c */
 
-irqreturn_t snd_gus_interrupt(int irq, void *dev_id, struct pt_regs *regs);
+irqreturn_t snd_gus_interrupt(int irq, void *dev_id);
 #ifdef CONFIG_SND_DEBUG
 void snd_gus_irq_profile_init(struct snd_gus_card *gus);
 #endif

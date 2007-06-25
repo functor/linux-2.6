@@ -24,13 +24,11 @@
 #include "init.h"
 #include "kern_constants.h"
 
-extern char __binary_start;
-
 /* Changed during early boot */
 unsigned long *empty_zero_page = NULL;
 unsigned long *empty_bad_page = NULL;
 pgd_t swapper_pg_dir[PTRS_PER_PGD];
-unsigned long highmem;
+unsigned long long highmem;
 int kmalloc_ok = 0;
 
 static unsigned long brk_end;
@@ -57,7 +55,7 @@ static void setup_highmem(unsigned long highmem_start,
 	for(i = 0; i < highmem_len >> PAGE_SHIFT; i++){
 		page = &mem_map[highmem_pfn + i];
 		ClearPageReserved(page);
-		set_page_count(page, 1);
+		init_page_count(page);
 		__free_page(page);
 	}
 }
@@ -65,8 +63,6 @@ static void setup_highmem(unsigned long highmem_start,
 
 void mem_init(void)
 {
-	unsigned long start;
-
 	max_low_pfn = (high_physmem - uml_physmem) >> PAGE_SHIFT;
 
         /* clear the zero-page */
@@ -81,17 +77,12 @@ void mem_init(void)
 	free_bootmem(__pa(brk_end), uml_reserved - brk_end);
 	uml_reserved = brk_end;
 
-	/* Fill in any hole at the start of the binary */
-	start = (unsigned long) &__binary_start & PAGE_MASK;
-	if(uml_physmem != start){
-		map_memory(uml_physmem, __pa(uml_physmem), start - uml_physmem,
-			   1, 1, 0);
-	}
-
 	/* this will put all low memory onto the freelists */
 	totalram_pages = free_all_bootmem();
+#ifdef CONFIG_HIGHMEM
 	totalhigh_pages = highmem >> PAGE_SHIFT;
 	totalram_pages += totalhigh_pages;
+#endif
 	num_physpages = totalram_pages;
 	max_pfn = totalram_pages;
 	printk(KERN_INFO "Memory: %luk available\n", 
@@ -232,10 +223,14 @@ void paging_init(void)
 
 	empty_zero_page = (unsigned long *) alloc_bootmem_low_pages(PAGE_SIZE);
 	empty_bad_page = (unsigned long *) alloc_bootmem_low_pages(PAGE_SIZE);
-	for(i=0;i<sizeof(zones_size)/sizeof(zones_size[0]);i++) 
+	for(i = 0; i < ARRAY_SIZE(zones_size); i++)
 		zones_size[i] = 0;
-	zones_size[ZONE_DMA] = (end_iomem >> PAGE_SHIFT) - (uml_physmem >> PAGE_SHIFT);
+
+	zones_size[ZONE_NORMAL] = (end_iomem >> PAGE_SHIFT) -
+		(uml_physmem >> PAGE_SHIFT);
+#ifdef CONFIG_HIGHMEM
 	zones_size[ZONE_HIGHMEM] = highmem >> PAGE_SHIFT;
+#endif
 	free_area_init(zones_size);
 
 	/*
@@ -296,7 +291,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 			(end - start) >> 10);
 	for (; start < end; start += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(start));
-		set_page_count(virt_to_page(start), 1);
+		init_page_count(virt_to_page(start));
 		free_page(start);
 		totalram_pages++;
 	}

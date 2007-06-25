@@ -12,7 +12,11 @@
  *	access the videoram directly without any black magic.
  */
 
-#define VGA_MAP_MEM(x) (unsigned long)phys_to_virt(x)
+#ifdef CONFIG_XEN
+#define VGA_MAP_MEM(x,s) (unsigned long)isa_bus_to_virt(x)
+#else
+#define VGA_MAP_MEM(x,s) (unsigned long)phys_to_virt(x)
+#endif
 
 #define vga_readb(x) (*(x))
 #define vga_writeb(x,y) (*(y) = (x))

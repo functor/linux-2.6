@@ -177,16 +177,17 @@ void fastcall send_IPI_self(int vector)
 /*
  * This is only used on smaller machines.
  */
-void send_IPI_mask_bitmask(cpumask_t mask, int vector)
+void send_IPI_mask_bitmask(cpumask_t cpumask, int vector)
 {
+	unsigned long mask = cpus_addr(cpumask)[0];
 	unsigned long flags;
 	unsigned int cpu;
 
 	local_irq_save(flags);
-	WARN_ON(cpus_addr(mask)[0] & ~cpus_addr(cpu_online_map)[0]);
+	WARN_ON(mask & ~cpus_addr(cpu_online_map)[0]);
 
 	for (cpu = 0; cpu < NR_CPUS; ++cpu) {
-		if (cpu_isset(cpu, mask)) {
+		if (cpu_isset(cpu, cpumask)) {
 			__send_IPI_one(cpu, vector);
 		}
 	}
@@ -419,7 +420,7 @@ void flush_tlb_page(struct vm_area_struct * vma, unsigned long va)
 	if (current->active_mm == mm) {
 		if(current->mm)
 			__flush_tlb_one(va);
-		else
+		 else
 		 	leave_mm(smp_processor_id());
 	}
 
@@ -592,7 +593,6 @@ void smp_send_stop(void)
 irqreturn_t smp_reschedule_interrupt(int irq, void *dev_id,
 				     struct pt_regs *regs)
 {
-
 	return IRQ_HANDLED;
 }
 

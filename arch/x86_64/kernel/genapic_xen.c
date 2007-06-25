@@ -71,6 +71,20 @@ static cpumask_t xen_target_cpus(void)
 	return cpu_online_map;
 }
 
+static cpumask_t xen_vector_allocation_domain(int cpu)
+{
+	/* Careful. Some cpus do not strictly honor the set of cpus
+	 * specified in the interrupt destination when using lowest
+	 * priority interrupt delivery mode.
+	 *
+	 * In particular there was a hyperthreading cpu observed to
+	 * deliver interrupts to the wrong hyperthread when only one
+	 * hyperthread was specified in the interrupt desitination.
+	 */
+	cpumask_t domain = { { [0] = APIC_ALL_CPUS, } };
+	return domain;
+}
+
 /*
  * Set up the logical destination ID.
  * Do nothing, not called now.
@@ -162,8 +176,8 @@ struct genapic apic_xen =  {
 	.int_delivery_mode = dest_LowestPrio,
 #endif
 	.int_dest_mode = (APIC_DEST_LOGICAL != 0),
-	.int_delivery_dest = APIC_DEST_LOGICAL | APIC_DM_LOWEST,
 	.target_cpus = xen_target_cpus,
+	.vector_allocation_domain = xen_vector_allocation_domain,
 #ifdef CONFIG_XEN_PRIVILEGED_GUEST
 	.apic_id_registered = xen_apic_id_registered,
 #endif

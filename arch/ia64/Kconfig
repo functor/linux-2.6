@@ -11,6 +11,7 @@ menu "Processor type and features"
 
 config IA64
 	bool
+	select ATA_NONSTANDARD if ATA
 	default y
 	help
 	  The Itanium Processor Family is Intel's 64-bit successor to
@@ -34,11 +35,27 @@ config RWSEM_XCHGADD_ALGORITHM
 	bool
 	default y
 
+config ARCH_HAS_ILOG2_U32
+	bool
+	default n
+
+config ARCH_HAS_ILOG2_U64
+	bool
+	default n
+
+config GENERIC_FIND_NEXT_BIT
+	bool
+	default y
+
 config GENERIC_CALIBRATE_DELAY
 	bool
 	default y
 
 config TIME_INTERPOLATION
+	bool
+	default y
+
+config DMI
 	bool
 	default y
 
@@ -50,6 +67,20 @@ config GENERIC_IOMAP
 	bool
 	default y
 
+config XEN
+	bool "Xen hypervisor support"
+	default y
+	help
+	  Enable Xen hypervisor support.  Resulting kernel runs
+	  both as a guest OS on Xen and natively on hardware.
+
+config XEN_IA64_VDSO_PARAVIRT
+	bool
+	depends on XEN && !ITANIUM
+	default y
+	help
+	  vDSO paravirtualization
+
 config SCHED_NO_NO_OMIT_FRAME_POINTER
 	bool
 	default y
@@ -58,7 +89,7 @@ config IA64_UNCACHED_ALLOCATOR
 	bool
 	select GENERIC_ALLOCATOR
 
-config DMA_IS_DMA32
+config AUDIT_ARCH
 	bool
 	default y
 
@@ -69,6 +100,7 @@ choice
 config IA64_GENERIC
 	bool "generic"
 	select ACPI
+	select PCI
 	select NUMA
 	select ACPI_NUMA
 	help
@@ -244,7 +276,7 @@ config NR_CPUS
 	int "Maximum number of CPUs (2-1024)"
 	range 2 1024
 	depends on SMP
-	default "64"
+	default "1024"
 	help
 	  You should set this to the number of CPUs in your system, but
 	  keep in mind that a kernel compiled for, e.g., 2 CPUs will boot but
@@ -268,11 +300,29 @@ config ARCH_ENABLE_MEMORY_HOTPLUG
 config SCHED_SMT
 	bool "SMT scheduler support"
 	depends on SMP
-	default off
 	help
 	  Improves the CPU scheduler's decision making when dealing with
 	  Intel IA64 chips with MultiThreading at a cost of slightly increased
 	  overhead in some places. If unsure say N here.
+
+config PERMIT_BSP_REMOVE
+	bool "Support removal of Bootstrap Processor"
+	depends on HOTPLUG_CPU
+	default n
+	---help---
+	Say Y here if your platform SAL will support removal of BSP with HOTPLUG_CPU
+	support. 
+
+config FORCE_CPEI_RETARGET
+	bool "Force assumption that CPEI can be re-targetted"
+	depends on PERMIT_BSP_REMOVE
+	default n
+	---help---
+	Say Y if you need to force the assumption that CPEI can be re-targetted to
+	any cpu in the system. This hint is available via ACPI 3.0 specifications.
+	Tiger4 systems are capable of re-directing CPEI to any CPU other than BSP.
+	This option it useful to enable this feature on older BIOS's as well.
+	You can also enable this by using boot command line option force_cpei=1.
 
 config PREEMPT
 	bool "Preemptible Kernel"
@@ -314,10 +364,24 @@ config NUMA
 	bool "NUMA support"
 	depends on !IA64_HP_SIM && !FLATMEM
 	default y if IA64_SGI_SN2
+	select ACPI_NUMA if ACPI
 	help
 	  Say Y to compile the kernel to support NUMA (Non-Uniform Memory
 	  Access).  This option is for configuring high-end multiprocessor
 	  server systems.  If in doubt, say N.
+
+config NODES_SHIFT
+	int "Max num nodes shift(3-10)"
+	range 3 10
+	default "10"
+	depends on NEED_MULTIPLE_NODES
+	help
+	  This option specifies the maximum number of nodes in your SSI system.
+	  MAX_NUMNODES will be 2^(This value).
+	  If in doubt, use the default.
+
+config ARCH_POPULATES_NODE_MAP
+	def_bool y
 
 # VIRTUAL_MEM_MAP and FLAT_NODE_MEM_MAP are functionally equivalent.
 # VIRTUAL_MEM_MAP has been retained for historical reasons.
@@ -339,6 +403,10 @@ config HOLES_IN_ZONE
 config HAVE_ARCH_EARLY_PFN_TO_NID
 	def_bool y
 	depends on NEED_MULTIPLE_NODES
+
+config HAVE_ARCH_NODEDATA_EXTENSION
+	def_bool y
+	depends on NUMA
 
 config IA32_SUPPORT
 	bool "Support for Linux/x86 binaries"
@@ -379,6 +447,39 @@ config IA64_PALINFO
 config SGI_SN
 	def_bool y if (IA64_SGI_SN2 || IA64_GENERIC)
 
+config IA64_ESI
+	bool "ESI (Extensible SAL Interface) support"
+	help
+	  If you say Y here, support is built into the kernel to
+	  make ESI calls.  ESI calls are used to support vendor-specific
+	  firmware extensions, such as the ability to inject memory-errors
+	  for test-purposes.  If you're unsure, say N.
+
+source "drivers/sn/Kconfig"
+
+config KEXEC
+	bool "kexec system call (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && !IA64_HP_SIM && (!SMP || HOTPLUG_CPU)
+	help
+	  kexec is a system call that implements the ability to shutdown your
+	  current kernel, and to start another kernel.  It is like a reboot
+	  but it is indepedent of the system firmware.   And like a reboot
+	  you can start any kernel with it, not just Linux.
+
+	  The name comes from the similiarity to the exec system call.
+
+	  It is an ongoing process to be certain the hardware in a machine
+	  is properly shutdown, so do not be surprised if this code does not
+	  initially work for you.  It may help to enable device hotplugging
+	  support.  As of this writing the exact hardware interface is
+	  strongly in flux, so no good recommendation can be made.
+
+config CRASH_DUMP
+	  bool "kernel crash dumps (EXPERIMENTAL)"
+	  depends on EXPERIMENTAL && IA64_MCA_RECOVERY && !IA64_HP_SIM && (!SMP || HOTPLUG_CPU)
+	  help
+	    Generate crash dump after being started by kexec.
+
 source "drivers/firmware/Kconfig"
 
 source "fs/Kconfig.binfmt"
@@ -413,6 +514,23 @@ config PCI_DOMAINS
 	bool
 	default PCI
 
+config XEN_PCIDEV_FRONTEND
+	bool "Xen PCI Frontend"
+	depends on PCI && XEN
+	default y
+	help
+	  The PCI device frontend driver allows the kernel to import arbitrary
+	  PCI devices from a PCI backend to support PCI driver domains.
+
+config XEN_PCIDEV_FE_DEBUG
+	bool "Xen PCI Frontend Debugging"
+	depends on XEN_PCIDEV_FRONTEND
+	default n
+	help
+	  Enables some debug statements within the PCI Frontend.
+
+source "drivers/pci/pcie/Kconfig"
+
 source "drivers/pci/Kconfig"
 
 source "drivers/pci/hotplug/Kconfig"
@@ -426,6 +544,15 @@ endif
 source "net/Kconfig"
 
 source "drivers/Kconfig"
+
+config MSPEC
+	tristate "Memory special operations driver"
+	depends on IA64
+	select IA64_UNCACHED_ALLOCATOR
+	help
+	  If you have an ia64 and you want to enable memory special
+	  operations support (formerly known as fetchop), say Y here,
+	  otherwise say N.
 
 source "fs/Kconfig"
 
@@ -447,6 +574,10 @@ config GENERIC_PENDING_IRQ
 	depends on GENERIC_HARDIRQS && SMP
 	default y
 
+config IRQ_PER_CPU
+	bool
+	default y
+
 source "arch/ia64/hp/sim/Kconfig"
 
 menu "Instrumentation Support"
@@ -456,7 +587,7 @@ source "arch/ia64/oprofile/Kconfig"
 
 config KPROBES
 	bool "Kprobes (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && MODULES
+	depends on KALLSYMS && EXPERIMENTAL && MODULES
 	help
 	  Kprobes allows you to trap at almost any kernel address and
 	  execute a callback function.  register_kprobe() establishes
@@ -472,3 +603,34 @@ source "kernel/vserver/Kconfig"
 source "security/Kconfig"
 
 source "crypto/Kconfig"
+
+#
+# override default values of drivers/xen/Kconfig
+#
+if XEN
+config XEN_UTIL
+	default n
+
+config HAVE_ARCH_ALLOC_SKB
+	default y
+
+config HAVE_ARCH_DEV_ALLOC_SKB
+	default y
+
+config XEN_BALLOON
+	default y
+
+config XEN_SKBUFF
+	default y
+
+config XEN_DEVMEM
+	default n
+
+config XEN_REBOOT
+	default y
+
+config XEN_SMPBOOT
+	default n
+endif
+
+source "drivers/xen/Kconfig"

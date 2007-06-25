@@ -3,12 +3,13 @@
  * Thanks to Ben LaHaise for precious feedback.
  */ 
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/highmem.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/kernel.h>
+#include <asm/sections.h>
 #include <asm/uaccess.h>
 #include <asm/processor.h>
 #include <asm/tlbflush.h>
@@ -51,6 +52,13 @@ static struct page *split_large_page(unsigned long address, pgprot_t prot,
 	if (!base) 
 		return NULL;
 
+	/*
+	 * page_private is used to track the number of entries in
+	 * the page table page that have non standard attributes.
+	 */
+	SetPagePrivate(base);
+	page_private(base) = 0;
+
 	address = __pa(address);
 	addr = address & LARGE_PAGE_MASK; 
 	pbase = (pte_t *)page_address(base);
@@ -61,11 +69,17 @@ static struct page *split_large_page(unsigned long address, pgprot_t prot,
 	return base;
 } 
 
-static void flush_kernel_map(void *dummy) 
+static void flush_kernel_map(void *arg)
 { 
-	/* Could use CLFLUSH here if the CPU supports it (Hammer,P4) */
-	if (boot_cpu_data.x86_model >= 4) 
+	unsigned long adr = (unsigned long)arg;
+
+	if (adr && cpu_has_clflush) {
+		int i;
+		for (i = 0; i < PAGE_SIZE; i += boot_cpu_data.x86_clflush_size)
+			asm volatile("clflush (%0)" :: "r" (adr + i));
+	} else if (boot_cpu_data.x86_model >= 4)
 		wbinvd();
+
 	/* Flush all to work around Errata in early athlons regarding 
 	 * large page flushing. 
 	 */
@@ -78,7 +92,7 @@ static void set_pmd_pte(pte_t *kpte, unsigned long address, pte_t pte)
 	unsigned long flags;
 
 	set_pte_atomic(kpte, pte); 	/* change init_mm */
-	if (PTRS_PER_PMD > 1)
+	if (HAVE_SHARED_KERNEL_PMD)
 		return;
 
 	spin_lock_irqsave(&pgd_lock, flags);
@@ -124,6 +138,12 @@ __change_page_attr(struct page *page, pgprot_t prot)
 	BUG_ON(PageHighMem(page));
 	address = (unsigned long)page_address(page);
 
+	if (address >= (unsigned long)__start_rodata && address <= (unsigned long)__end_rodata &&
+		(pgprot_val(prot) & _PAGE_RW)) {
+		pgprot_val(prot) &= ~(_PAGE_RW);
+		add_taint(TAINT_MACHINE_CHECK);
+	}
+
 	kpte = lookup_address(address);
 	if (!kpte)
 		return -EINVAL;
@@ -143,11 +163,12 @@ __change_page_attr(struct page *page, pgprot_t prot)
 				return -ENOMEM;
 			set_pmd_pte(kpte,address,mk_pte(split, ref_prot));
 			kpte_page = split;
-		}	
-		get_page(kpte_page);
+		}
+		page_private(kpte_page)++;
 	} else if ((pte_val(*kpte) & _PAGE_PSE) == 0) { 
 		set_pte_atomic(kpte, mk_pte(page, PAGE_KERNEL));
-		__put_page(kpte_page);
+		BUG_ON(page_private(kpte_page) == 0);
+		page_private(kpte_page)--;
 	} else
 		BUG();
 
@@ -157,10 +178,8 @@ __change_page_attr(struct page *page, pgprot_t prot)
 	 * replace it with a largepage.
 	 */
 	if (!PageReserved(kpte_page)) {
-		/* memleak and potential failed 2M page regeneration */
-		BUG_ON(!page_count(kpte_page));
-
-		if (cpu_has_pse && (page_count(kpte_page) == 1)) {
+		if (cpu_has_pse && (page_private(kpte_page) == 0)) {
+			ClearPagePrivate(kpte_page);
 			list_add(&kpte_page->lru, &df_list);
 			revert_page(kpte_page, address);
 		}
@@ -168,9 +187,9 @@ __change_page_attr(struct page *page, pgprot_t prot)
 	return 0;
 } 
 
-static inline void flush_map(void)
+static inline void flush_map(void *adr)
 {
-	on_each_cpu(flush_kernel_map, NULL, 1, 1);
+	on_each_cpu(flush_kernel_map, adr, 1, 1);
 }
 
 /*
@@ -203,19 +222,23 @@ int change_page_attr(struct page *page, int numpages, pgprot_t prot)
 }
 
 void global_flush_tlb(void)
-{ 
-	LIST_HEAD(l);
+{
+	struct list_head l;
 	struct page *pg, *next;
 
 	BUG_ON(irqs_disabled());
 
 	spin_lock_irq(&cpa_lock);
-	list_splice_init(&df_list, &l);
+	list_replace_init(&df_list, &l);
 	spin_unlock_irq(&cpa_lock);
-	flush_map();
-	list_for_each_entry_safe(pg, next, &l, lru)
+	if (!cpu_has_clflush)
+		flush_map(0);
+	list_for_each_entry_safe(pg, next, &l, lru) {
+		if (cpu_has_clflush)
+			flush_map(page_address(pg));
 		__free_page(pg);
-} 
+	}
+}
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 void kernel_map_pages(struct page *page, int numpages, int enable)
@@ -223,8 +246,8 @@ void kernel_map_pages(struct page *page, int numpages, int enable)
 	if (PageHighMem(page))
 		return;
 	if (!enable)
-		mutex_debug_check_no_locks_freed(page_address(page),
-						 numpages * PAGE_SIZE);
+		debug_check_no_locks_freed(page_address(page),
+					   numpages * PAGE_SIZE);
 
 	/* the return value is ignored - the calls cannot fail,
 	 * large pages are disabled at boot time.

@@ -86,7 +86,7 @@ static const int multicast_filter_limit = 32;
 #define RESPONSE_RING_SIZE	(RESPONSE_ENTRIES * sizeof(struct resp_desc))
 
 /* The 3XP will preload and remove 64 entries from the free buffer
- * list, and we need one entry to keep the ring from wrapping, so 
+ * list, and we need one entry to keep the ring from wrapping, so
  * to keep this a power of two, we use 128 entries.
  */
 #define RXFREE_ENTRIES		128
@@ -100,8 +100,8 @@ static const int multicast_filter_limit = 32;
 #define PKT_BUF_SZ		1536
 
 #define DRV_MODULE_NAME		"typhoon"
-#define DRV_MODULE_VERSION 	"1.5.7"
-#define DRV_MODULE_RELDATE	"05/01/07"
+#define DRV_MODULE_VERSION 	"1.5.8"
+#define DRV_MODULE_RELDATE	"06/11/09"
 #define PFX			DRV_MODULE_NAME ": "
 #define ERR_PFX			KERN_ERR PFX
 
@@ -117,6 +117,7 @@ static const int multicast_filter_limit = 32;
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/mm.h>
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/ethtool.h>
@@ -127,14 +128,13 @@ static const int multicast_filter_limit = 32;
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <linux/in6.h>
-#include <asm/checksum.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
 
 #include "typhoon.h"
 #include "typhoon-firmware.h"
 
-static char version[] __devinitdata =
+static const char version[] __devinitdata =
     "typhoon.c: version " DRV_MODULE_VERSION " (" DRV_MODULE_RELDATE ")\n";
 
 MODULE_AUTHOR("David Dillow <dave@thedillows.org>");
@@ -178,7 +178,7 @@ enum typhoon_cards {
 };
 
 /* directly indexed by enum typhoon_cards, above */
-static struct typhoon_card_info typhoon_card_info[] __devinitdata = {
+static const struct typhoon_card_info typhoon_card_info[] __devinitdata = {
 	{ "3Com Typhoon (3C990-TX)",
 		TYPHOON_CRYPTO_NONE},
 	{ "3Com Typhoon (3CR990-TX-95)",
@@ -208,7 +208,7 @@ static struct typhoon_card_info typhoon_card_info[] __devinitdata = {
 };
 
 /* Notes on the new subsystem numbering scheme:
- * bits 0-1 indicate crypto capabilites: (0) variable, (1) DES, or (2) 3DES
+ * bits 0-1 indicate crypto capabilities: (0) variable, (1) DES, or (2) 3DES
  * bit 4 indicates if this card has secured firmware (we don't support it)
  * bit 8 indicates if this is a (0) copper or (1) fiber card
  * bits 12-16 indicate card type: (0) client and (1) server
@@ -269,7 +269,7 @@ struct rxbuff_ent {
 
 struct typhoon {
 	/* Tx cache line section */
-	struct transmit_ring 	txLoRing	____cacheline_aligned;	
+	struct transmit_ring 	txLoRing	____cacheline_aligned;
 	struct pci_dev *	tx_pdev;
 	void __iomem		*tx_ioaddr;
 	u32			txlo_dma_addr;
@@ -333,14 +333,10 @@ enum state_values {
 #define TYPHOON_RESET_TIMEOUT_NOSLEEP	((6 * 1000000) / TYPHOON_UDELAY)
 #define TYPHOON_WAIT_TIMEOUT		((1000000 / 2) / TYPHOON_UDELAY)
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 5, 28)
-#define typhoon_synchronize_irq(x) synchronize_irq()
-#else
 #define typhoon_synchronize_irq(x) synchronize_irq(x)
-#endif
 
 #if defined(NETIF_F_TSO)
-#define skb_tso_size(x)		(skb_shinfo(x)->tso_size)
+#define skb_tso_size(x)		(skb_shinfo(x)->gso_size)
 #define TSO_NUM_DESCRIPTORS	2
 #define TSO_OFFLOAD_ON		TYPHOON_OFFLOAD_TCP_SEGMENT
 #else
@@ -788,7 +784,7 @@ typhoon_start_tx(struct sk_buff *skb, struct net_device *dev)
 	/* we have two rings to choose from, but we only use txLo for now
 	 * If we start using the Hi ring as well, we'll need to update
 	 * typhoon_stop_runtime(), typhoon_interrupt(), typhoon_num_free_tx(),
-	 * and TXHI_ENTIRES to match, as well as update the TSO code below
+	 * and TXHI_ENTRIES to match, as well as update the TSO code below
 	 * to get the right DMA address
 	 */
 	txRing = &tp->txLoRing;
@@ -805,7 +801,7 @@ typhoon_start_tx(struct sk_buff *skb, struct net_device *dev)
 	 * If problems develop with TSO, check this first.
 	 */
 	numDesc = skb_shinfo(skb)->nr_frags + 1;
-	if(skb_tso_size(skb))
+	if (skb_is_gso(skb))
 		numDesc++;
 
 	/* When checking for free space in the ring, we need to also
@@ -830,7 +826,7 @@ typhoon_start_tx(struct sk_buff *skb, struct net_device *dev)
 	first_txd->addrHi = (u64)((unsigned long) skb) >> 32;
 	first_txd->processFlags = 0;
 
-	if(skb->ip_summed == CHECKSUM_HW) {
+	if(skb->ip_summed == CHECKSUM_PARTIAL) {
 		/* The 3XP will figure out if this is UDP/TCP */
 		first_txd->processFlags |= TYPHOON_TX_PF_TCP_CHKSUM;
 		first_txd->processFlags |= TYPHOON_TX_PF_UDP_CHKSUM;
@@ -845,7 +841,7 @@ typhoon_start_tx(struct sk_buff *skb, struct net_device *dev)
 				TYPHOON_TX_PF_VLAN_TAG_SHIFT);
 	}
 
-	if(skb_tso_size(skb)) {
+	if (skb_is_gso(skb)) {
 		first_txd->processFlags |= TYPHOON_TX_PF_TCP_SEGMENT;
 		first_txd->numDesc++;
 
@@ -937,8 +933,6 @@ typhoon_set_rx_mode(struct net_device *dev)
 
 	filter = TYPHOON_RX_FILTER_DIRECTED | TYPHOON_RX_FILTER_BROADCAST;
 	if(dev->flags & IFF_PROMISC) {
-		printk(KERN_NOTICE "%s: Promiscuous mode enabled.\n",
-		       dev->name);
 		filter |= TYPHOON_RX_FILTER_PROMISCOUS;
 	} else if((dev->mc_count > multicast_filter_limit) ||
 		  (dev->flags & IFF_ALLMULTI)) {
@@ -1073,7 +1067,7 @@ typhoon_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 		} else {
 			u32 sleep_ver = xp_resp[0].parm2;
 			snprintf(info->fw_version, 32, "%02x.%03x.%03x",
-				 sleep_ver >> 24, (sleep_ver >> 12) & 0xfff, 
+				 sleep_ver >> 24, (sleep_ver >> 12) & 0xfff,
 				 sleep_ver & 0xfff);
 		}
 	}
@@ -1243,7 +1237,7 @@ typhoon_get_ringparam(struct net_device *dev, struct ethtool_ringparam *ering)
 	ering->tx_pending = TXLO_ENTRIES - 1;
 }
 
-static struct ethtool_ops typhoon_ethtool_ops = {
+static const struct ethtool_ops typhoon_ethtool_ops = {
 	.get_settings		= typhoon_get_settings,
 	.set_settings		= typhoon_set_settings,
 	.get_drvinfo		= typhoon_get_drvinfo,
@@ -1832,7 +1826,7 @@ typhoon_poll(struct net_device *dev, int *total_budget)
 }
 
 static irqreturn_t
-typhoon_interrupt(int irq, void *dev_instance, struct pt_regs *rgs)
+typhoon_interrupt(int irq, void *dev_instance)
 {
 	struct net_device *dev = (struct net_device *) dev_instance;
 	struct typhoon *tp = dev->priv;
@@ -2131,7 +2125,7 @@ typhoon_open(struct net_device *dev)
 		goto out_sleep;
 	}
 
-	err = request_irq(dev->irq, &typhoon_interrupt, SA_SHIRQ,
+	err = request_irq(dev->irq, &typhoon_interrupt, IRQF_SHARED,
 				dev->name, dev);
 	if(err < 0)
 		goto out_sleep;
@@ -2154,7 +2148,7 @@ out_sleep:
 		goto out;
 	}
 
-	if(typhoon_sleep(tp, PCI_D3hot, 0) < 0) 
+	if(typhoon_sleep(tp, PCI_D3hot, 0) < 0)
 		printk(KERN_ERR "%s: unable to go back to sleep\n", dev->name);
 
 out:
@@ -2568,9 +2562,10 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	pci_set_drvdata(pdev, dev);
 
-	printk(KERN_INFO "%s: %s at %s 0x%lx, ",
+	printk(KERN_INFO "%s: %s at %s 0x%llx, ",
 	       dev->name, typhoon_card_info[card_id].name,
-	       use_mmio ? "MMIO" : "IO", pci_resource_start(pdev, use_mmio));
+	       use_mmio ? "MMIO" : "IO",
+	       (unsigned long long)pci_resource_start(pdev, use_mmio));
 	for(i = 0; i < 5; i++)
 		printk("%2.2x:", dev->dev_addr[i]);
 	printk("%2.2x\n", dev->dev_addr[i]);
@@ -2601,7 +2596,7 @@ typhoon_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 			"(%u:%04x)\n", dev->name, xp_resp[0].numDesc,
 			le32_to_cpu(xp_resp[0].parm2));
 	}
-		
+
 	return 0;
 
 error_out_reset:
@@ -2659,7 +2654,7 @@ static struct pci_driver typhoon_driver = {
 static int __init
 typhoon_init(void)
 {
-	return pci_module_init(&typhoon_driver);
+	return pci_register_driver(&typhoon_driver);
 }
 
 static void __exit

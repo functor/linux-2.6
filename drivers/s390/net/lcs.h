@@ -23,11 +23,6 @@ do {                                       \
 } while (0)
 
 /**
- * some more definitions for debug or output stuff
- */
-#define PRINTK_HEADER		" lcs: "
-
-/**
  *	sysfs related stuff
  */
 #define CARD_FROM_DEV(cdev) \
@@ -73,13 +68,17 @@ do {                                       \
 /**
  * LCS sense byte definitions
  */
+#define LCS_SENSE_BYTE_0 		0
+#define LCS_SENSE_BYTE_1 		1
+#define LCS_SENSE_BYTE_2 		2
+#define LCS_SENSE_BYTE_3 		3
 #define LCS_SENSE_INTERFACE_DISCONNECT	0x01
 #define LCS_SENSE_EQUIPMENT_CHECK	0x10
 #define LCS_SENSE_BUS_OUT_CHECK		0x20
 #define LCS_SENSE_INTERVENTION_REQUIRED 0x40
 #define LCS_SENSE_CMD_REJECT		0x80
-#define LCS_SENSE_RESETTING_EVENT	0x0080
-#define LCS_SENSE_DEVICE_ONLINE		0x0020
+#define LCS_SENSE_RESETTING_EVENT	0x80
+#define LCS_SENSE_DEVICE_ONLINE		0x20
 
 /**
  * LCS packet type definitions
@@ -123,22 +122,22 @@ do {                                       \
  * LCS Buffer states
  */
 enum lcs_buffer_states {
-	BUF_STATE_EMPTY,	/* buffer is empty */
-	BUF_STATE_LOCKED,	/* buffer is locked, don't touch */
-	BUF_STATE_READY,	/* buffer is ready for read/write */
-	BUF_STATE_PROCESSED,
+	LCS_BUF_STATE_EMPTY,	/* buffer is empty */
+	LCS_BUF_STATE_LOCKED,	/* buffer is locked, don't touch */
+	LCS_BUF_STATE_READY,	/* buffer is ready for read/write */
+	LCS_BUF_STATE_PROCESSED,
 };
 
 /**
  * LCS Channel State Machine declarations
  */
 enum lcs_channel_states {
-	CH_STATE_INIT,
-	CH_STATE_HALTED,
-	CH_STATE_STOPPED,
-	CH_STATE_RUNNING,
-	CH_STATE_SUSPENDED,
-	CH_STATE_CLEARED,
+	LCS_CH_STATE_INIT,
+	LCS_CH_STATE_HALTED,
+	LCS_CH_STATE_STOPPED,
+	LCS_CH_STATE_RUNNING,
+	LCS_CH_STATE_SUSPENDED,
+	LCS_CH_STATE_CLEARED,
 };
 
 /**
@@ -152,10 +151,9 @@ enum lcs_dev_states {
 
 enum lcs_threads {
 	LCS_SET_MC_THREAD 	= 1,
-	LCS_STARTLAN_THREAD	= 2,
-	LCS_STOPLAN_THREAD	= 4,
-	LCS_STARTUP_THREAD	= 8,
+	LCS_RECOVERY_THREAD 	= 2,
 };
+
 /**
  * LCS struct declarations
  */
@@ -166,7 +164,7 @@ struct lcs_header {
 }  __attribute__ ((packed));
 
 struct lcs_ip_mac_pair {
-	__u32  ip_addr;
+	__be32  ip_addr;
 	__u8   mac_addr[LCS_MAC_LENGTH];
 	__u8   reserved[2];
 }  __attribute__ ((packed));
@@ -284,8 +282,9 @@ struct lcs_card {
 	enum lcs_dev_states state;
 	struct net_device *dev;
 	struct net_device_stats stats;
-	unsigned short (*lan_type_trans)(struct sk_buff *skb,
+	__be16 (*lan_type_trans)(struct sk_buff *skb,
 					 struct net_device *dev);
+	struct ccwgroup_device *gdev;
 	struct lcs_channel read;
 	struct lcs_channel write;
 	struct lcs_buffer *tx_buffer;

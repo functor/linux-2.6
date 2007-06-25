@@ -14,6 +14,8 @@
 #ifndef __V850_PAGE_H__
 #define __V850_PAGE_H__
 
+#ifdef __KERNEL__
+
 #include <asm/machdep.h>
 
 
@@ -32,7 +34,6 @@
 #endif
 
 
-#ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
 #define STRICT_MM_TYPECHECKS
@@ -111,8 +112,7 @@ typedef unsigned long pgprot_t;
 #define page_to_virt(page) \
   ((((page) - mem_map) << PAGE_SHIFT) + PAGE_OFFSET)
 
-#define pfn_to_page(pfn)	virt_to_page (pfn_to_virt (pfn))
-#define page_to_pfn(page)	virt_to_pfn (page_to_virt (page))
+#define ARCH_PFN_OFFSET		(PAGE_OFFSET >> PAGE_SHIFT)
 #define pfn_valid(pfn)	        ((pfn) < max_mapnr)
 
 #define	virt_addr_valid(kaddr)						\
@@ -123,8 +123,11 @@ typedef unsigned long pgprot_t;
 #define __va(x)		     ((void *)__phys_to_virt ((unsigned long)(x)))
 
 
-#endif /* KERNEL */
-
+#include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
+
+#define devmem_is_allowed(x) 1
+
+#endif /* KERNEL */
 
 #endif /* __V850_PAGE_H__ */

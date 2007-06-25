@@ -82,7 +82,6 @@
 
 #define IDEFLOPPY_VERSION "0.99.newide"
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -98,6 +97,7 @@
 #include <linux/cdrom.h>
 #include <linux/ide.h>
 #include <linux/bitops.h>
+#include <linux/mutex.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
@@ -517,7 +517,7 @@ typedef struct {
 	u8		reserved[4];
 } idefloppy_mode_parameter_header_t;
 
-static DECLARE_MUTEX(idefloppy_ref_sem);
+static DEFINE_MUTEX(idefloppy_ref_mutex);
 
 #define to_ide_floppy(obj) container_of(obj, struct ide_floppy_obj, kref)
 
@@ -528,11 +528,11 @@ static struct ide_floppy_obj *ide_floppy_get(struct gendisk *disk)
 {
 	struct ide_floppy_obj *floppy = NULL;
 
-	down(&idefloppy_ref_sem);
+	mutex_lock(&idefloppy_ref_mutex);
 	floppy = ide_floppy_g(disk);
 	if (floppy)
 		kref_get(&floppy->kref);
-	up(&idefloppy_ref_sem);
+	mutex_unlock(&idefloppy_ref_mutex);
 	return floppy;
 }
 
@@ -540,9 +540,9 @@ static void ide_floppy_release(struct kref *);
 
 static void ide_floppy_put(struct ide_floppy_obj *floppy)
 {
-	down(&idefloppy_ref_sem);
+	mutex_lock(&idefloppy_ref_mutex);
 	kref_put(&floppy->kref, ide_floppy_release);
-	up(&idefloppy_ref_sem);
+	mutex_unlock(&idefloppy_ref_mutex);
 }
 
 /*
@@ -588,7 +588,7 @@ static int idefloppy_do_end_request(ide_drive_t *drive, int uptodate, int nsecs)
 	/* Why does this happen? */
 	if (!rq)
 		return 0;
-	if (!(rq->flags & REQ_SPECIAL)) { //if (!IDEFLOPPY_RQ_CMD (rq->cmd)) {
+	if (!blk_special_request(rq)) {
 		/* our real local end request function */
 		ide_end_request(drive, uptodate, nsecs);
 		return 0;
@@ -689,7 +689,7 @@ static void idefloppy_queue_pc_head (ide_drive_t *drive,idefloppy_pc_t *pc,struc
 
 	ide_init_drive_cmd(rq);
 	rq->buffer = (char *) pc;
-	rq->flags = REQ_SPECIAL;	//rq->cmd = IDEFLOPPY_PC_RQ;
+	rq->cmd_type = REQ_TYPE_SPECIAL;
 	rq->rq_disk = floppy->disk;
 	(void) ide_do_drive_cmd(drive, rq, ide_preempt);
 }
@@ -838,7 +838,7 @@ static ide_startstop_t idefloppy_pc_intr (ide_drive_t *drive)
 			"transferred\n", pc->actually_transferred);
 		clear_bit(PC_DMA_IN_PROGRESS, &pc->flags);
 
-		local_irq_enable();
+		local_irq_enable_in_hardirq();
 
 		if (status.b.check || test_bit(PC_DMA_ERROR, &pc->flags)) {
 			/* Error detected */
@@ -897,8 +897,7 @@ static ide_startstop_t idefloppy_pc_intr (ide_drive_t *drive)
 					"to send us more data than expected "
 					"- discarding data\n");
 				idefloppy_discard_data(drive,bcount.all);
-				if (HWGROUP(drive)->handler != NULL)
-					BUG();
+				BUG_ON(HWGROUP(drive)->handler != NULL);
 				ide_set_handler(drive,
 						&idefloppy_pc_intr,
 						IDEFLOPPY_WAIT_CMD,
@@ -931,8 +930,7 @@ static ide_startstop_t idefloppy_pc_intr (ide_drive_t *drive)
 	pc->actually_transferred += bcount.all;
 	pc->current_position += bcount.all;
 
-	if (HWGROUP(drive)->handler != NULL)
-		BUG();
+	BUG_ON(HWGROUP(drive)->handler != NULL);
 	ide_set_handler(drive, &idefloppy_pc_intr, IDEFLOPPY_WAIT_CMD, NULL);		/* And set the interrupt handler again */
 	return ide_started;
 }
@@ -959,8 +957,7 @@ static ide_startstop_t idefloppy_transfer_pc (ide_drive_t *drive)
 				"issuing a packet command\n");
 		return ide_do_reset(drive);
 	}
-	if (HWGROUP(drive)->handler != NULL)
-		BUG();
+	BUG_ON(HWGROUP(drive)->handler != NULL);
 	/* Set the interrupt routine */
 	ide_set_handler(drive, &idefloppy_pc_intr, IDEFLOPPY_WAIT_CMD, NULL);
 	/* Send the actual packet */
@@ -1016,8 +1013,7 @@ static ide_startstop_t idefloppy_transfer_pc1 (ide_drive_t *drive)
 	 * 40 and 50msec work well. idefloppy_pc_intr will not be actually
 	 * used until after the packet is moved in about 50 msec.
 	 */
-	if (HWGROUP(drive)->handler != NULL)
-		BUG();
+	BUG_ON(HWGROUP(drive)->handler != NULL);
 	ide_set_handler(drive, 
 	  &idefloppy_pc_intr, 		/* service routine for packet command */
 	  floppy->ticks,		/* wait this long before "failing" */
@@ -1254,7 +1250,7 @@ static void idefloppy_create_rw_cmd (idefloppy_floppy_t *floppy, idefloppy_pc_t 
 	pc->callback = &idefloppy_rw_callback;
 	pc->rq = rq;
 	pc->b_count = cmd == READ ? 0 : rq->bio->bi_size;
-	if (rq->flags & REQ_RW)
+	if (rq->cmd_flags & REQ_RW)
 		set_bit(PC_WRITING, &pc->flags);
 	pc->buffer = NULL;
 	pc->request_transfer = pc->buffer_size = blocks * floppy->block_size;
@@ -1285,9 +1281,8 @@ static ide_startstop_t idefloppy_do_request (ide_drive_t *drive, struct request 
 	idefloppy_pc_t *pc;
 	unsigned long block = (unsigned long)block_s;
 
-	debug_log(KERN_INFO "rq_status: %d, dev: %s, flags: %lx, errors: %d\n",
-			rq->rq_status,
-			rq->rq_disk ? rq->rq_disk->disk_name ? "?",
+	debug_log(KERN_INFO "dev: %s, flags: %lx, errors: %d\n",
+			rq->rq_disk ? rq->rq_disk->disk_name : "?",
 			rq->flags, rq->errors);
 	debug_log(KERN_INFO "sector: %ld, nr_sectors: %ld, "
 			"current_nr_sectors: %d\n", (long)rq->sector,
@@ -1307,7 +1302,7 @@ static ide_startstop_t idefloppy_do_request (ide_drive_t *drive, struct request 
 		idefloppy_do_end_request(drive, 0, 0);
 		return ide_stopped;
 	}
-	if (rq->flags & REQ_CMD) {
+	if (blk_fs_request(rq)) {
 		if (((long)rq->sector % floppy->bs_factor) ||
 		    (rq->nr_sectors % floppy->bs_factor)) {
 			printk("%s: unsupported r/w request size\n",
@@ -1317,9 +1312,9 @@ static ide_startstop_t idefloppy_do_request (ide_drive_t *drive, struct request 
 		}
 		pc = idefloppy_next_pc_storage(drive);
 		idefloppy_create_rw_cmd(floppy, pc, rq, block);
-	} else if (rq->flags & REQ_SPECIAL) {
+	} else if (blk_special_request(rq)) {
 		pc = (idefloppy_pc_t *) rq->buffer;
-	} else if (rq->flags & REQ_BLOCK_PC) {
+	} else if (blk_pc_request(rq)) {
 		pc = idefloppy_next_pc_storage(drive);
 		if (idefloppy_blockpc_cmd(floppy, pc, rq)) {
 			idefloppy_do_end_request(drive, 0, 0);
@@ -1347,7 +1342,7 @@ static int idefloppy_queue_pc_tail (ide_drive_t *drive,idefloppy_pc_t *pc)
 
 	ide_init_drive_cmd (&rq);
 	rq.buffer = (char *) pc;
-	rq.flags = REQ_SPECIAL;		//	rq.cmd = IDEFLOPPY_PC_RQ;
+	rq.cmd_type = REQ_TYPE_SPECIAL;
 	rq.rq_disk = floppy->disk;
 
 	return ide_do_drive_cmd(drive, &rq, ide_wait);
@@ -1640,7 +1635,7 @@ static int idefloppy_begin_format(ide_drive_t *drive, int __user *arg)
 /*
 ** Get ATAPI_FORMAT_UNIT progress indication.
 **
-** Userland gives a pointer to an int.  The int is set to a progresss
+** Userland gives a pointer to an int.  The int is set to a progress
 ** indicator 0-65536, with 65536=100%.
 **
 ** If the drive does not support format progress indication, we just check
@@ -2152,7 +2147,7 @@ static int ide_floppy_probe(ide_drive_t *drive)
 		printk("ide-floppy: passing drive %s to ide-scsi emulation.\n", drive->name);
 		goto failed;
 	}
-	if ((floppy = (idefloppy_floppy_t *) kzalloc (sizeof (idefloppy_floppy_t), GFP_KERNEL)) == NULL) {
+	if ((floppy = kzalloc(sizeof (idefloppy_floppy_t), GFP_KERNEL)) == NULL) {
 		printk (KERN_ERR "ide-floppy: %s: Can't allocate a floppy structure\n", drive->name);
 		goto failed;
 	}
@@ -2179,7 +2174,6 @@ static int ide_floppy_probe(ide_drive_t *drive)
 
 	g->minors = 1 << PARTN_BITS;
 	g->driverfs_dev = &drive->gendev;
-	strcpy(g->devfs_name, drive->devfs_name);
 	g->flags = drive->removable ? GENHD_FL_REMOVABLE : 0;
 	g->fops = &idefloppy_ops;
 	drive->attach = 1;

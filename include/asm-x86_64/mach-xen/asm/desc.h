@@ -9,65 +9,14 @@
 
 #include <linux/string.h>
 #include <linux/smp.h>
+#include <asm/desc_defs.h>
 
 #include <asm/segment.h>
 #include <asm/mmu.h>
 
-// 8 byte segment descriptor
-struct desc_struct { 
-	u16 limit0;
-	u16 base0;
-	unsigned base1 : 8, type : 4, s : 1, dpl : 2, p : 1;
-	unsigned limit : 4, avl : 1, l : 1, d : 1, g : 1, base2 : 8;
-} __attribute__((packed)); 
-
-struct n_desc_struct { 
-	unsigned int a,b;
-}; 	
-
-enum { 
-	GATE_INTERRUPT = 0xE, 
-	GATE_TRAP = 0xF, 	
-	GATE_CALL = 0xC,
-}; 	
-
-// 16byte gate
-struct gate_struct {          
-	u16 offset_low;
-	u16 segment; 
-	unsigned ist : 3, zero0 : 5, type : 5, dpl : 2, p : 1;
-	u16 offset_middle;
-	u32 offset_high;
-	u32 zero1; 
-} __attribute__((packed));
-
-#define PTR_LOW(x) ((unsigned long)(x) & 0xFFFF) 
-#define PTR_MIDDLE(x) (((unsigned long)(x) >> 16) & 0xFFFF)
-#define PTR_HIGH(x) ((unsigned long)(x) >> 32)
-
-enum { 
-	DESC_TSS = 0x9,
-	DESC_LDT = 0x2,
-}; 
-
-// LDT or TSS descriptor in the GDT. 16 bytes.
-struct ldttss_desc { 
-	u16 limit0;
-	u16 base0;
-	unsigned base1 : 8, type : 5, dpl : 2, p : 1;
-	unsigned limit1 : 4, zero0 : 3, g : 1, base2 : 8;
-	u32 base3;
-	u32 zero1; 
-} __attribute__((packed)); 
-
-struct desc_ptr {
-	unsigned short size;
-	unsigned long address;
-} __attribute__((packed)) ;
+extern struct desc_struct cpu_gdt_table[GDT_ENTRIES];
 
 extern struct desc_ptr idt_descr, cpu_gdt_descr[NR_CPUS];
-
-extern struct desc_struct cpu_gdt_table[GDT_ENTRIES];
 
 #define load_TR_desc() asm volatile("ltr %w0"::"r" (GDT_ENTRY_TSS*8))
 #define load_LDT_desc() asm volatile("lldt %w0"::"r" (GDT_ENTRY_LDT*8))
@@ -166,7 +115,7 @@ static inline void set_tss_desc(unsigned cpu, void *addr)
 	 * -1? seg base+limit should be pointing to the address of the
 	 * last valid byte
 	 */
-	set_tssldt_descriptor(&cpu_gdt(cpu)[GDT_ENTRY_TSS], 
+	set_tssldt_descriptor(&cpu_gdt(cpu)[GDT_ENTRY_TSS],
 		(unsigned long)addr, DESC_TSS,
 		IO_BITMAP_OFFSET + IO_BITMAP_BYTES + sizeof(unsigned long) - 1);
 } 

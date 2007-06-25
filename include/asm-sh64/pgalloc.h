@@ -41,7 +41,7 @@ static inline void pgd_init(unsigned long page)
 static inline pgd_t *get_pgd_slow(void)
 {
 	unsigned int pgd_size = (USER_PTRS_PER_PGD * sizeof(pgd_t));
-	pgd_t *ret = (pgd_t *)kmalloc(pgd_size, GFP_KERNEL);
+	pgd_t *ret = kmalloc(pgd_size, GFP_KERNEL);
 	return ret;
 }
 
@@ -166,22 +166,6 @@ static __inline__ void pmd_free(pmd_t *pmd)
 #define pgd_alloc(mm)		get_pgd_fast()
 
 extern int do_check_pgt_cache(int, int);
-
-static inline void set_pgdir(unsigned long address, pgd_t entry)
-{
-	struct task_struct * p;
-	pgd_t *pgd;
-
-	read_lock(&tasklist_lock);
-	for_each_process(p) {
-		if (!p->mm)
-			continue;
-		*pgd_offset(p->mm,address) = entry;
-	}
-	read_unlock(&tasklist_lock);
-	for (pgd = (pgd_t *)pgd_quicklist; pgd; pgd = (pgd_t *)*(unsigned long *)pgd)
-		pgd[address >> PGDIR_SHIFT] = entry;
-}
 
 #define pmd_populate_kernel(mm, pmd, pte) \
 	set_pmd(pmd, __pmd(_PAGE_TABLE + (unsigned long) (pte)))

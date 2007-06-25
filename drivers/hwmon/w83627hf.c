@@ -28,6 +28,7 @@
     w83627hf	9	3	2	3	0x20	0x5ca3	no	yes(LPC)
     w83627thf	7	3	3	3	0x90	0x5ca3	no	yes(LPC)
     w83637hf	7	3	3	3	0x80	0x5ca3	no	yes(LPC)
+    w83687thf	7	3	3	3	0x90	0x5ca3	no	yes(LPC)
     w83697hf	8	2	2	2	0x60	0x5ca3	no	yes(LPC)
 
     For other winbond chips, and for i2c support in the above chips,
@@ -46,6 +47,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 #include <asm/io.h>
 #include "lm75.h"
 
@@ -62,7 +64,7 @@ MODULE_PARM_DESC(force_i2c,
 static unsigned short address;
 
 /* Insmod parameters */
-enum chips { any_chip, w83627hf, w83627thf, w83697hf, w83637hf };
+enum chips { any_chip, w83627hf, w83627thf, w83697hf, w83637hf, w83687thf };
 
 static int reset;
 module_param(reset, bool, 0);
@@ -99,6 +101,10 @@ static int VAL;		/* The value to read/write */
 #define W83627THF_GPIO5_EN	0x30 /* w83627thf only */
 #define W83627THF_GPIO5_IOSR	0xf3 /* w83627thf only */
 #define W83627THF_GPIO5_DR	0xf4 /* w83627thf only */
+
+#define W83687THF_VID_EN	0x29 /* w83687thf only */
+#define W83687THF_VID_CFG	0xF0 /* w83687thf only */
+#define W83687THF_VID_DATA	0xF1 /* w83687thf only */
 
 static inline void
 superio_outb(int reg, int val)
@@ -138,6 +144,7 @@ superio_exit(void)
 #define W627THF_DEVID 0x82
 #define W697_DEVID 0x60
 #define W637_DEVID 0x70
+#define W687THF_DEVID 0x85
 #define WINB_ACT_REG 0x30
 #define WINB_BASE_REG 0x60
 /* Constants specified below */
@@ -201,11 +208,11 @@ superio_exit(void)
 #define W83627HF_REG_PWM1 0x5A
 #define W83627HF_REG_PWM2 0x5B
 
-#define W83627THF_REG_PWM1		0x01	/* 697HF and 637HF too */
-#define W83627THF_REG_PWM2		0x03	/* 697HF and 637HF too */
-#define W83627THF_REG_PWM3		0x11	/* 637HF too */
+#define W83627THF_REG_PWM1		0x01	/* 697HF/637HF/687THF too */
+#define W83627THF_REG_PWM2		0x03	/* 697HF/637HF/687THF too */
+#define W83627THF_REG_PWM3		0x11	/* 637HF/687THF too */
 
-#define W83627THF_REG_VRM_OVT_CFG 	0x18	/* 637HF too */
+#define W83627THF_REG_VRM_OVT_CFG 	0x18	/* 637HF/687THF too */
 
 static const u8 regpwm_627hf[] = { W83627HF_REG_PWM1, W83627HF_REG_PWM2 };
 static const u8 regpwm[] = { W83627THF_REG_PWM1, W83627THF_REG_PWM2,
@@ -285,10 +292,10 @@ static inline u8 DIV_TO_REG(long val)
 struct w83627hf_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore lock;
+	struct mutex lock;
 	enum chips type;
 
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -318,21 +325,21 @@ struct w83627hf_data {
 				   Default = 3435.
 				   Other Betas unimplemented */
 	u8 vrm;
-	u8 vrm_ovt;		/* Register value, 627thf & 637hf only */
+	u8 vrm_ovt;		/* Register value, 627THF/637HF/687THF only */
 };
 
 
 static int w83627hf_detect(struct i2c_adapter *adapter);
 static int w83627hf_detach_client(struct i2c_client *client);
 
-static int w83627hf_read_value(struct i2c_client *client, u16 register);
-static int w83627hf_write_value(struct i2c_client *client, u16 register,
-			       u16 value);
+static int w83627hf_read_value(struct i2c_client *client, u16 reg);
+static int w83627hf_write_value(struct i2c_client *client, u16 reg, u16 value);
 static struct w83627hf_data *w83627hf_update_device(struct device *dev);
 static void w83627hf_init_client(struct i2c_client *client);
 
 static struct i2c_driver w83627hf_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "w83627hf",
 	},
 	.attach_adapter	= w83627hf_detect,
@@ -360,12 +367,12 @@ store_in_##reg (struct device *dev, const char *buf, size_t count, int nr) \
 	 \
 	val = simple_strtoul(buf, NULL, 10); \
 	 \
-	down(&data->update_lock); \
+	mutex_lock(&data->update_lock); \
 	data->in_##reg[nr] = IN_TO_REG(val); \
 	w83627hf_write_value(client, W83781D_REG_IN_##REG(nr), \
 			    data->in_##reg[nr]); \
 	 \
-	up(&data->update_lock); \
+	mutex_unlock(&data->update_lock); \
 	return count; \
 }
 store_in_reg(MIN, min)
@@ -413,7 +420,8 @@ static ssize_t show_in_0(struct w83627hf_data *data, char *buf, u8 reg)
 	long in0;
 
 	if ((data->vrm_ovt & 0x01) &&
-		(w83627thf == data->type || w83637hf == data->type))
+		(w83627thf == data->type || w83637hf == data->type
+		 || w83687thf == data->type))
 
 		/* use VRM9 calculation */
 		in0 = (long)((reg * 488 + 70000 + 50) / 100);
@@ -451,10 +459,11 @@ static ssize_t store_regs_in_min0(struct device *dev, struct device_attribute *a
 
 	val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	
 	if ((data->vrm_ovt & 0x01) &&
-		(w83627thf == data->type || w83637hf == data->type))
+		(w83627thf == data->type || w83637hf == data->type
+		 || w83687thf == data->type))
 
 		/* use VRM9 calculation */
 		data->in_min[0] =
@@ -465,7 +474,7 @@ static ssize_t store_regs_in_min0(struct device *dev, struct device_attribute *a
 		data->in_min[0] = IN_TO_REG(val);
 
 	w83627hf_write_value(client, W83781D_REG_IN_MIN(0), data->in_min[0]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -478,10 +487,11 @@ static ssize_t store_regs_in_max0(struct device *dev, struct device_attribute *a
 
 	val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if ((data->vrm_ovt & 0x01) &&
-		(w83627thf == data->type || w83637hf == data->type))
+		(w83627thf == data->type || w83637hf == data->type
+		 || w83687thf == data->type))
 		
 		/* use VRM9 calculation */
 		data->in_max[0] =
@@ -492,7 +502,7 @@ static ssize_t store_regs_in_max0(struct device *dev, struct device_attribute *a
 		data->in_max[0] = IN_TO_REG(val);
 
 	w83627hf_write_value(client, W83781D_REG_IN_MAX(0), data->in_max[0]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -501,13 +511,6 @@ static DEVICE_ATTR(in0_min, S_IRUGO | S_IWUSR,
 	show_regs_in_min0, store_regs_in_min0);
 static DEVICE_ATTR(in0_max, S_IRUGO | S_IWUSR,
 	show_regs_in_max0, store_regs_in_max0);
-
-#define device_create_file_in(client, offset) \
-do { \
-device_create_file(&client->dev, &dev_attr_in##offset##_input); \
-device_create_file(&client->dev, &dev_attr_in##offset##_min); \
-device_create_file(&client->dev, &dev_attr_in##offset##_max); \
-} while (0)
 
 #define show_fan_reg(reg) \
 static ssize_t show_##reg (struct device *dev, char *buf, int nr) \
@@ -529,13 +532,13 @@ store_fan_min(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->fan_min[nr - 1] =
 	    FAN_TO_REG(val, DIV_FROM_REG(data->fan_div[nr - 1]));
 	w83627hf_write_value(client, W83781D_REG_FAN_MIN(nr),
 			    data->fan_min[nr - 1]);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -566,12 +569,6 @@ sysfs_fan_min_offset(2);
 sysfs_fan_offset(3);
 sysfs_fan_min_offset(3);
 
-#define device_create_file_fan(client, offset) \
-do { \
-device_create_file(&client->dev, &dev_attr_fan##offset##_input); \
-device_create_file(&client->dev, &dev_attr_fan##offset##_min); \
-} while (0)
-
 #define show_temp_reg(reg) \
 static ssize_t show_##reg (struct device *dev, char *buf, int nr) \
 { \
@@ -597,7 +594,7 @@ store_temp_##reg (struct device *dev, const char *buf, size_t count, int nr) \
 	 \
 	val = simple_strtoul(buf, NULL, 10); \
 	 \
-	down(&data->update_lock); \
+	mutex_lock(&data->update_lock); \
 	 \
 	if (nr >= 2) {	/* TEMP2 and TEMP3 */ \
 		data->temp_##reg##_add[nr-2] = LM75_TEMP_TO_REG(val); \
@@ -609,7 +606,7 @@ store_temp_##reg (struct device *dev, const char *buf, size_t count, int nr) \
 			data->temp_##reg); \
 	} \
 	 \
-	up(&data->update_lock); \
+	mutex_unlock(&data->update_lock); \
 	return count; \
 }
 store_temp_reg(OVER, max);
@@ -646,13 +643,6 @@ sysfs_temp_offsets(1);
 sysfs_temp_offsets(2);
 sysfs_temp_offsets(3);
 
-#define device_create_file_temp(client, offset) \
-do { \
-device_create_file(&client->dev, &dev_attr_temp##offset##_input); \
-device_create_file(&client->dev, &dev_attr_temp##offset##_max); \
-device_create_file(&client->dev, &dev_attr_temp##offset##_max_hyst); \
-} while (0)
-
 static ssize_t
 show_vid_reg(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -660,8 +650,6 @@ show_vid_reg(struct device *dev, struct device_attribute *attr, char *buf)
 	return sprintf(buf, "%ld\n", (long) vid_from_reg(data->vid, data->vrm));
 }
 static DEVICE_ATTR(cpu0_vid, S_IRUGO, show_vid_reg, NULL);
-#define device_create_file_vid(client) \
-device_create_file(&client->dev, &dev_attr_cpu0_vid)
 
 static ssize_t
 show_vrm_reg(struct device *dev, struct device_attribute *attr, char *buf)
@@ -682,8 +670,6 @@ store_vrm_reg(struct device *dev, struct device_attribute *attr, const char *buf
 	return count;
 }
 static DEVICE_ATTR(vrm, S_IRUGO | S_IWUSR, show_vrm_reg, store_vrm_reg);
-#define device_create_file_vrm(client) \
-device_create_file(&client->dev, &dev_attr_vrm)
 
 static ssize_t
 show_alarms_reg(struct device *dev, struct device_attribute *attr, char *buf)
@@ -692,8 +678,6 @@ show_alarms_reg(struct device *dev, struct device_attribute *attr, char *buf)
 	return sprintf(buf, "%ld\n", (long) data->alarms);
 }
 static DEVICE_ATTR(alarms, S_IRUGO, show_alarms_reg, NULL);
-#define device_create_file_alarms(client) \
-device_create_file(&client->dev, &dev_attr_alarms)
 
 #define show_beep_reg(REG, reg) \
 static ssize_t show_beep_##reg (struct device *dev, struct device_attribute *attr, char *buf) \
@@ -718,7 +702,7 @@ store_beep_reg(struct device *dev, const char *buf, size_t count,
 
 	val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (update_mask == BEEP_MASK) {	/* We are storing beep_mask */
 		data->beep_mask = BEEP_MASK_TO_REG(val);
@@ -736,7 +720,7 @@ store_beep_reg(struct device *dev, const char *buf, size_t count,
 	w83627hf_write_value(client, W83781D_REG_BEEP_INTS2,
 			    val2 | data->beep_enable << 7);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -756,12 +740,6 @@ static DEVICE_ATTR(beep_##reg, S_IRUGO | S_IWUSR, \
 sysfs_beep(ENABLE, enable);
 sysfs_beep(MASK, mask);
 
-#define device_create_file_beep(client) \
-do { \
-device_create_file(&client->dev, &dev_attr_beep_enable); \
-device_create_file(&client->dev, &dev_attr_beep_mask); \
-} while (0)
-
 static ssize_t
 show_fan_div_reg(struct device *dev, char *buf, int nr)
 {
@@ -772,7 +750,7 @@ show_fan_div_reg(struct device *dev, char *buf, int nr)
 
 /* Note: we save and restore the fan minimum here, because its value is
    determined in part by the fan divisor.  This follows the principle of
-   least suprise; the user doesn't expect the fan minimum to change just
+   least surprise; the user doesn't expect the fan minimum to change just
    because the divisor changed. */
 static ssize_t
 store_fan_div_reg(struct device *dev, const char *buf, size_t count, int nr)
@@ -783,7 +761,7 @@ store_fan_div_reg(struct device *dev, const char *buf, size_t count, int nr)
 	u8 reg;
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	/* Save fan_min */
 	min = FAN_FROM_REG(data->fan_min[nr],
@@ -805,7 +783,7 @@ store_fan_div_reg(struct device *dev, const char *buf, size_t count, int nr)
 	data->fan_min[nr] = FAN_TO_REG(min, DIV_FROM_REG(data->fan_div[nr]));
 	w83627hf_write_value(client, W83781D_REG_FAN_MIN(nr+1), data->fan_min[nr]);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -827,11 +805,6 @@ sysfs_fan_div(1);
 sysfs_fan_div(2);
 sysfs_fan_div(3);
 
-#define device_create_file_fan_div(client, offset) \
-do { \
-device_create_file(&client->dev, &dev_attr_fan##offset##_div); \
-} while (0)
-
 static ssize_t
 show_pwm_reg(struct device *dev, char *buf, int nr)
 {
@@ -848,7 +821,7 @@ store_pwm_reg(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (data->type == w83627thf) {
 		/* bits 0-3 are reserved  in 627THF */
@@ -865,7 +838,7 @@ store_pwm_reg(struct device *dev, const char *buf, size_t count, int nr)
 				     data->pwm[nr - 1]);
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -886,11 +859,6 @@ sysfs_pwm(1);
 sysfs_pwm(2);
 sysfs_pwm(3);
 
-#define device_create_file_pwm(client, offset) \
-do { \
-device_create_file(&client->dev, &dev_attr_pwm##offset); \
-} while (0)
-
 static ssize_t
 show_sensor_reg(struct device *dev, char *buf, int nr)
 {
@@ -907,7 +875,7 @@ store_sensor_reg(struct device *dev, const char *buf, size_t count, int nr)
 
 	val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	switch (val) {
 	case 1:		/* PII/Celeron diode */
@@ -941,7 +909,7 @@ store_sensor_reg(struct device *dev, const char *buf, size_t count, int nr)
 		break;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -962,12 +930,6 @@ sysfs_sensor(1);
 sysfs_sensor(2);
 sysfs_sensor(3);
 
-#define device_create_file_sensor(client, offset) \
-do { \
-device_create_file(&client->dev, &dev_attr_temp##offset##_type); \
-} while (0)
-
-
 static int __init w83627hf_find(int sioaddr, unsigned short *addr)
 {
 	u16 val;
@@ -980,7 +942,8 @@ static int __init w83627hf_find(int sioaddr, unsigned short *addr)
 	if(val != W627_DEVID &&
 	   val != W627THF_DEVID &&
 	   val != W697_DEVID &&
-	   val != W637_DEVID) {
+	   val != W637_DEVID &&
+	   val != W687THF_DEVID) {
 		superio_exit();
 		return -ENODEV;
 	}
@@ -997,6 +960,85 @@ static int __init w83627hf_find(int sioaddr, unsigned short *addr)
 	superio_exit();
 	return 0;
 }
+
+static struct attribute *w83627hf_attributes[] = {
+	&dev_attr_in0_input.attr,
+	&dev_attr_in0_min.attr,
+	&dev_attr_in0_max.attr,
+	&dev_attr_in2_input.attr,
+	&dev_attr_in2_min.attr,
+	&dev_attr_in2_max.attr,
+	&dev_attr_in3_input.attr,
+	&dev_attr_in3_min.attr,
+	&dev_attr_in3_max.attr,
+	&dev_attr_in4_input.attr,
+	&dev_attr_in4_min.attr,
+	&dev_attr_in4_max.attr,
+	&dev_attr_in7_input.attr,
+	&dev_attr_in7_min.attr,
+	&dev_attr_in7_max.attr,
+	&dev_attr_in8_input.attr,
+	&dev_attr_in8_min.attr,
+	&dev_attr_in8_max.attr,
+
+	&dev_attr_fan1_input.attr,
+	&dev_attr_fan1_min.attr,
+	&dev_attr_fan1_div.attr,
+	&dev_attr_fan2_input.attr,
+	&dev_attr_fan2_min.attr,
+	&dev_attr_fan2_div.attr,
+
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp1_max.attr,
+	&dev_attr_temp1_max_hyst.attr,
+	&dev_attr_temp1_type.attr,
+	&dev_attr_temp2_input.attr,
+	&dev_attr_temp2_max.attr,
+	&dev_attr_temp2_max_hyst.attr,
+	&dev_attr_temp2_type.attr,
+
+	&dev_attr_alarms.attr,
+	&dev_attr_beep_enable.attr,
+	&dev_attr_beep_mask.attr,
+
+	&dev_attr_pwm1.attr,
+	&dev_attr_pwm2.attr,
+
+	NULL
+};
+
+static const struct attribute_group w83627hf_group = {
+	.attrs = w83627hf_attributes,
+};
+
+static struct attribute *w83627hf_attributes_opt[] = {
+	&dev_attr_in1_input.attr,
+	&dev_attr_in1_min.attr,
+	&dev_attr_in1_max.attr,
+	&dev_attr_in5_input.attr,
+	&dev_attr_in5_min.attr,
+	&dev_attr_in5_max.attr,
+	&dev_attr_in6_input.attr,
+	&dev_attr_in6_min.attr,
+	&dev_attr_in6_max.attr,
+
+	&dev_attr_fan3_input.attr,
+	&dev_attr_fan3_min.attr,
+	&dev_attr_fan3_div.attr,
+
+	&dev_attr_temp3_input.attr,
+	&dev_attr_temp3_max.attr,
+	&dev_attr_temp3_max_hyst.attr,
+	&dev_attr_temp3_type.attr,
+
+	&dev_attr_pwm3.attr,
+
+	NULL
+};
+
+static const struct attribute_group w83627hf_group_opt = {
+	.attrs = w83627hf_attributes_opt,
+};
 
 static int w83627hf_detect(struct i2c_adapter *adapter)
 {
@@ -1034,6 +1076,8 @@ static int w83627hf_detect(struct i2c_adapter *adapter)
 		kind = w83627thf;
 	else if(val == W637_DEVID)
 		kind = w83637hf;
+	else if (val == W687THF_DEVID)
+		kind = w83687thf;
 	else {
 		dev_info(&adapter->dev,
 			 "Unsupported chip (dev_id=0x%02X).\n", val);
@@ -1057,7 +1101,7 @@ static int w83627hf_detect(struct i2c_adapter *adapter)
 	new_client = &data->client;
 	i2c_set_clientdata(new_client, data);
 	new_client->addr = address;
-	init_MUTEX(&data->lock);
+	mutex_init(&data->lock);
 	new_client->adapter = adapter;
 	new_client->driver = &w83627hf_driver;
 	new_client->flags = 0;
@@ -1071,13 +1115,15 @@ static int w83627hf_detect(struct i2c_adapter *adapter)
 		client_name = "w83697hf";
 	} else if (kind == w83637hf) {
 		client_name = "w83637hf";
+	} else if (kind == w83687thf) {
+		client_name = "w83687thf";
 	}
 
 	/* Fill in the remaining client fields and put into the global list */
 	strlcpy(new_client->name, client_name, I2C_NAME_SIZE);
 	data->type = kind;
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -1093,62 +1139,72 @@ static int w83627hf_detect(struct i2c_adapter *adapter)
 	data->fan_min[1] = w83627hf_read_value(new_client, W83781D_REG_FAN_MIN(2));
 	data->fan_min[2] = w83627hf_read_value(new_client, W83781D_REG_FAN_MIN(3));
 
-	/* Register sysfs hooks */
+	/* Register common device attributes */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &w83627hf_group)))
+		goto ERROR3;
+
+	/* Register chip-specific device attributes */
+	if (kind == w83627hf || kind == w83697hf)
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_in5_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in5_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in5_max))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in6_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in6_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in6_max)))
+			goto ERROR4;
+
+	if (kind != w83697hf)
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_in1_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in1_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in1_max))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan3_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan3_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan3_div))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_max))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_max_hyst))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_type)))
+			goto ERROR4;
+
+	if (kind != w83697hf && data->vid != 0xff)
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_cpu0_vid))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_vrm)))
+			goto ERROR4;
+
+	if (kind == w83627thf || kind == w83637hf || kind == w83687thf)
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_pwm3)))
+			goto ERROR4;
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto ERROR3;
+		goto ERROR4;
 	}
-
-	device_create_file_in(new_client, 0);
-	if (kind != w83697hf)
-		device_create_file_in(new_client, 1);
-	device_create_file_in(new_client, 2);
-	device_create_file_in(new_client, 3);
-	device_create_file_in(new_client, 4);
-	if (kind != w83627thf && kind != w83637hf) {
-		device_create_file_in(new_client, 5);
-		device_create_file_in(new_client, 6);
-	}
-	device_create_file_in(new_client, 7);
-	device_create_file_in(new_client, 8);
-
-	device_create_file_fan(new_client, 1);
-	device_create_file_fan(new_client, 2);
-	if (kind != w83697hf)
-		device_create_file_fan(new_client, 3);
-
-	device_create_file_temp(new_client, 1);
-	device_create_file_temp(new_client, 2);
-	if (kind != w83697hf)
-		device_create_file_temp(new_client, 3);
-
-	if (kind != w83697hf && data->vid != 0xff) {
-		device_create_file_vid(new_client);
-		device_create_file_vrm(new_client);
-	}
-
-	device_create_file_fan_div(new_client, 1);
-	device_create_file_fan_div(new_client, 2);
-	if (kind != w83697hf)
-		device_create_file_fan_div(new_client, 3);
-
-	device_create_file_alarms(new_client);
-
-	device_create_file_beep(new_client);
-
-	device_create_file_pwm(new_client, 1);
-	device_create_file_pwm(new_client, 2);
-	if (kind == w83627thf || kind == w83637hf)
-		device_create_file_pwm(new_client, 3);
-
-	device_create_file_sensor(new_client, 1);
-	device_create_file_sensor(new_client, 2);
-	if (kind != w83697hf)
-		device_create_file_sensor(new_client, 3);
 
 	return 0;
 
+      ERROR4:
+	sysfs_remove_group(&new_client->dev.kobj, &w83627hf_group);
+	sysfs_remove_group(&new_client->dev.kobj, &w83627hf_group_opt);
       ERROR3:
 	i2c_detach_client(new_client);
       ERROR2:
@@ -1165,6 +1221,9 @@ static int w83627hf_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+
+	sysfs_remove_group(&client->dev.kobj, &w83627hf_group);
+	sysfs_remove_group(&client->dev.kobj, &w83627hf_group_opt);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -1187,7 +1246,7 @@ static int w83627hf_read_value(struct i2c_client *client, u16 reg)
 	struct w83627hf_data *data = i2c_get_clientdata(client);
 	int res, word_sized;
 
-	down(&data->lock);
+	mutex_lock(&data->lock);
 	word_sized = (((reg & 0xff00) == 0x100)
 		   || ((reg & 0xff00) == 0x200))
 		  && (((reg & 0x00ff) == 0x50)
@@ -1213,7 +1272,7 @@ static int w83627hf_read_value(struct i2c_client *client, u16 reg)
 		       client->addr + W83781D_ADDR_REG_OFFSET);
 		outb_p(0, client->addr + W83781D_DATA_REG_OFFSET);
 	}
-	up(&data->lock);
+	mutex_unlock(&data->lock);
 	return res;
 }
 
@@ -1247,12 +1306,39 @@ exit:
 	return res;
 }
 
+static int w83687thf_read_vid(struct i2c_client *client)
+{
+	int res = 0xff;
+
+	superio_enter();
+	superio_select(W83627HF_LD_HWM);
+
+	/* Make sure these GPIO pins are enabled */
+	if (!(superio_inb(W83687THF_VID_EN) & (1 << 2))) {
+		dev_dbg(&client->dev, "VID disabled, no VID function\n");
+		goto exit;
+	}
+
+	/* Make sure the pins are configured for input */
+	if (!(superio_inb(W83687THF_VID_CFG) & (1 << 4))) {
+		dev_dbg(&client->dev, "VID configured as output, "
+			"no VID function\n");
+		goto exit;
+	}
+
+	res = superio_inb(W83687THF_VID_DATA) & 0x3f;
+
+exit:
+	superio_exit();
+	return res;
+}
+
 static int w83627hf_write_value(struct i2c_client *client, u16 reg, u16 value)
 {
 	struct w83627hf_data *data = i2c_get_clientdata(client);
 	int word_sized;
 
-	down(&data->lock);
+	mutex_lock(&data->lock);
 	word_sized = (((reg & 0xff00) == 0x100)
 		   || ((reg & 0xff00) == 0x200))
 		  && (((reg & 0x00ff) == 0x53)
@@ -1277,7 +1363,7 @@ static int w83627hf_write_value(struct i2c_client *client, u16 reg, u16 value)
 		       client->addr + W83781D_ADDR_REG_OFFSET);
 		outb_p(0, client->addr + W83781D_DATA_REG_OFFSET);
 	}
-	up(&data->lock);
+	mutex_unlock(&data->lock);
 	return 0;
 }
 
@@ -1324,10 +1410,13 @@ static void w83627hf_init_client(struct i2c_client *client)
 		data->vid = (lo & 0x0f) | ((hi & 0x01) << 4);
 	} else if (w83627thf == data->type) {
 		data->vid = w83627thf_read_gpio5(client);
+	} else if (w83687thf == data->type) {
+		data->vid = w83687thf_read_vid(client);
 	}
 
 	/* Read VRM & OVT Config only once */
-	if (w83627thf == data->type || w83637hf == data->type) {
+	if (w83627thf == data->type || w83637hf == data->type
+	 || w83687thf == data->type) {
 		data->vrm_ovt = 
 			w83627hf_read_value(client, W83627THF_REG_VRM_OVT_CFG);
 	}
@@ -1387,14 +1476,14 @@ static struct w83627hf_data *w83627hf_update_device(struct device *dev)
 	struct w83627hf_data *data = i2c_get_clientdata(client);
 	int i;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
 		for (i = 0; i <= 8; i++) {
 			/* skip missing sensors */
 			if (((data->type == w83697hf) && (i == 1)) ||
-			    ((data->type == w83627thf || data->type == w83637hf)
+			    ((data->type != w83627hf && data->type != w83697hf)
 			    && (i == 5 || i == 6)))
 				continue;
 			data->in[i] =
@@ -1470,7 +1559,7 @@ static struct w83627hf_data *w83627hf_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

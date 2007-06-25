@@ -12,7 +12,6 @@
 #ifndef _ASM_IO_H
 #define _ASM_IO_H
 
-#include <linux/config.h>
 #include <linux/compiler.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -40,56 +39,13 @@
  * hardware.  An example use would be for flash memory that's used for
  * execute in place.
  */
-# define __raw_ioswabb(x)	(x)
-# define __raw_ioswabw(x)	(x)
-# define __raw_ioswabl(x)	(x)
-# define __raw_ioswabq(x)	(x)
-# define ____raw_ioswabq(x)	(x)
+# define __raw_ioswabb(a,x)	(x)
+# define __raw_ioswabw(a,x)	(x)
+# define __raw_ioswabl(a,x)	(x)
+# define __raw_ioswabq(a,x)	(x)
+# define ____raw_ioswabq(a,x)	(x)
 
-/*
- * Sane hardware offers swapping of PCI/ISA I/O space accesses in hardware;
- * less sane hardware forces software to fiddle with this...
- *
- * Regardless, if the host bus endianness mismatches that of PCI/ISA, then
- * you can't have the numerical value of data and byte addresses within
- * multibyte quantities both preserved at the same time.  Hence two
- * variations of functions: non-prefixed ones that preserve the value
- * and prefixed ones that preserve byte addresses.  The latters are
- * typically used for moving raw data between a peripheral and memory (cf.
- * string I/O functions), hence the "__mem_" prefix.
- */
-#if defined(CONFIG_SWAP_IO_SPACE)
-
-# define ioswabb(x)		(x)
-# define __mem_ioswabb(x)	(x)
-# ifdef CONFIG_SGI_IP22
-/*
- * IP22 seems braindead enough to swap 16bits values in hardware, but
- * not 32bits.  Go figure... Can't tell without documentation.
- */
-#  define ioswabw(x)		(x)
-#  define __mem_ioswabw(x)	le16_to_cpu(x)
-# else
-#  define ioswabw(x)		le16_to_cpu(x)
-#  define __mem_ioswabw(x)	(x)
-# endif
-# define ioswabl(x)		le32_to_cpu(x)
-# define __mem_ioswabl(x)	(x)
-# define ioswabq(x)		le64_to_cpu(x)
-# define __mem_ioswabq(x)	(x)
-
-#else
-
-# define ioswabb(x)		(x)
-# define __mem_ioswabb(x)	(x)
-# define ioswabw(x)		(x)
-# define __mem_ioswabw(x)	cpu_to_le16(x)
-# define ioswabl(x)		(x)
-# define __mem_ioswabl(x)	cpu_to_le32(x)
-# define ioswabq(x)		(x)
-# define __mem_ioswabq(x)	cpu_to_le32(x)
-
-#endif
+/* ioswab[bwlq], __mem_ioswab[bwlq] are defined in mangle-port.h */
 
 #define IO_SPACE_LIMIT 0xffff
 
@@ -157,7 +113,7 @@ static inline void set_io_port_base(unsigned long base)
  *     almost all conceivable cases a device driver should not be using
  *     this function
  */
-static inline unsigned long virt_to_phys(volatile void * address)
+static inline unsigned long virt_to_phys(volatile const void *address)
 {
 	return (unsigned long)address - PAGE_OFFSET;
 }
@@ -216,7 +172,7 @@ extern unsigned long isa_slot_offset;
 #define page_to_phys(page)	((dma_addr_t)page_to_pfn(page) << PAGE_SHIFT)
 
 extern void __iomem * __ioremap(phys_t offset, phys_t size, unsigned long flags);
-extern void __iounmap(volatile void __iomem *addr);
+extern void __iounmap(const volatile void __iomem *addr);
 
 static inline void __iomem * __ioremap_mode(phys_t offset, unsigned long size,
 	unsigned long flags)
@@ -323,7 +279,7 @@ static inline void __iomem * __ioremap_mode(phys_t offset, unsigned long size,
 #define ioremap_uncached_accelerated(offset, size)			\
 	__ioremap_mode((offset), (size), _CACHE_UNCACHED_ACCELERATED)
 
-static inline void iounmap(volatile void __iomem *addr)
+static inline void iounmap(const volatile void __iomem *addr)
 {
 #define __IS_KSEG1(addr) (((unsigned long)(addr) & ~0x1fffffffUL) == CKSEG1)
 
@@ -346,7 +302,7 @@ static inline void pfx##write##bwlq(type val,				\
 									\
 	__mem = (void *)__swizzle_addr_##bwlq((unsigned long)(mem));	\
 									\
-	__val = pfx##ioswab##bwlq(val);					\
+	__val = pfx##ioswab##bwlq(__mem, val);				\
 									\
 	if (sizeof(type) != sizeof(u64) || sizeof(u64) == sizeof(long))	\
 		*__mem = __val;						\
@@ -401,7 +357,7 @@ static inline type pfx##read##bwlq(const volatile void __iomem *mem)	\
 		BUG();							\
 	}								\
 									\
-	return pfx##ioswab##bwlq(__val);				\
+	return pfx##ioswab##bwlq(__mem, __val);				\
 }
 
 #define __BUILD_IOPORT_SINGLE(pfx, bwlq, type, p, slow)			\
@@ -411,10 +367,9 @@ static inline void pfx##out##bwlq##p(type val, unsigned long port)	\
 	volatile type *__addr;						\
 	type __val;							\
 									\
-	port = __swizzle_addr_##bwlq(port);				\
-	__addr = (void *)(mips_io_port_base + port);			\
+	__addr = (void *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
 									\
-	__val = pfx##ioswab##bwlq(val);					\
+	__val = pfx##ioswab##bwlq(__addr, val);				\
 									\
 	/* Really, we want this to be atomic */				\
 	BUILD_BUG_ON(sizeof(type) > sizeof(unsigned long));		\
@@ -428,15 +383,14 @@ static inline type pfx##in##bwlq##p(unsigned long port)			\
 	volatile type *__addr;						\
 	type __val;							\
 									\
-	port = __swizzle_addr_##bwlq(port);				\
-	__addr = (void *)(mips_io_port_base + port);			\
+	__addr = (void *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
 									\
 	BUILD_BUG_ON(sizeof(type) > sizeof(unsigned long));		\
 									\
 	__val = *__addr;						\
 	slow;								\
 									\
-	return pfx##ioswab##bwlq(__val);				\
+	return pfx##ioswab##bwlq(__addr, __val);			\
 }
 
 #define __BUILD_MEMORY_PFX(bus, bwlq, type)				\
@@ -601,50 +555,11 @@ extern void pci_iounmap(struct pci_dev *dev, void __iomem *);
  */
 #define __ISA_IO_base ((char *)(isa_slot_offset))
 
-#define isa_readb(a)		readb(__ISA_IO_base + (a))
-#define isa_readw(a)		readw(__ISA_IO_base + (a))
-#define isa_readl(a)		readl(__ISA_IO_base + (a))
-#define isa_readq(a)		readq(__ISA_IO_base + (a))
-#define isa_writeb(b,a)		writeb(b,__ISA_IO_base + (a))
-#define isa_writew(w,a)		writew(w,__ISA_IO_base + (a))
-#define isa_writel(l,a)		writel(l,__ISA_IO_base + (a))
-#define isa_writeq(q,a)		writeq(q,__ISA_IO_base + (a))
-#define isa_memset_io(a,b,c)	memset_io(__ISA_IO_base + (a),(b),(c))
-#define isa_memcpy_fromio(a,b,c) memcpy_fromio((a),__ISA_IO_base + (b),(c))
-#define isa_memcpy_toio(a,b,c)	memcpy_toio(__ISA_IO_base + (a),(b),(c))
-
 /*
  * We don't have csum_partial_copy_fromio() yet, so we cheat here and
  * just copy it. The net code will then do the checksum later.
  */
 #define eth_io_copy_and_sum(skb,src,len,unused) memcpy_fromio((skb)->data,(src),(len))
-#define isa_eth_io_copy_and_sum(a,b,c,d) eth_copy_and_sum((a),(b),(c),(d))
-
-/*
- *     check_signature         -       find BIOS signatures
- *     @io_addr: mmio address to check
- *     @signature:  signature block
- *     @length: length of signature
- *
- *     Perform a signature comparison with the mmio address io_addr. This
- *     address should have been obtained by ioremap.
- *     Returns 1 on a match.
- */
-static inline int check_signature(char __iomem *io_addr,
-	const unsigned char *signature, int length)
-{
-	int retval = 0;
-	do {
-		if (readb(io_addr) != *signature)
-			goto out;
-		io_addr++;
-		signature++;
-		length--;
-	} while (length);
-	retval = 1;
-out:
-	return retval;
-}
 
 /*
  * The caches on some architectures aren't dma-coherent and have need to

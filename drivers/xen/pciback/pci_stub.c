@@ -848,13 +848,20 @@ static int __init pcistub_init(void)
 	err = pci_register_driver(&pciback_pci_driver);
 	if (err < 0)
 		goto out;
-
-	driver_create_file(&pciback_pci_driver.driver, &driver_attr_new_slot);
-	driver_create_file(&pciback_pci_driver.driver,
-			   &driver_attr_remove_slot);
-	driver_create_file(&pciback_pci_driver.driver, &driver_attr_slots);
-	driver_create_file(&pciback_pci_driver.driver, &driver_attr_quirks);
-	driver_create_file(&pciback_pci_driver.driver, &driver_attr_permissive);
+	err = driver_create_file(&pciback_pci_driver.driver, &driver_attr_new_slot);
+	if (err < 0)
+		goto out;
+	err = driver_create_file(&pciback_pci_driver.driver,
+				 &driver_attr_remove_slot);
+	if (err < 0)
+		goto out;
+	err = driver_create_file(&pciback_pci_driver.driver, &driver_attr_slots);
+	if (err < 0)
+		goto out;
+	err = driver_create_file(&pciback_pci_driver.driver, &driver_attr_quirks);
+	if (err < 0)
+		goto out;
+	err = driver_create_file(&pciback_pci_driver.driver, &driver_attr_permissive);
 
       out:
 	return err;

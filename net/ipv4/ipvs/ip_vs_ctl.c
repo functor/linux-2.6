@@ -34,6 +34,7 @@
 
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
+#include <linux/mutex.h>
 
 #include <net/ip.h>
 #include <net/route.h>
@@ -44,7 +45,7 @@
 #include <net/ip_vs.h>
 
 /* semaphore for IPVS sockopts. And, [gs]etsockopt may sleep. */
-static DECLARE_MUTEX(__ip_vs_mutex);
+static DEFINE_MUTEX(__ip_vs_mutex);
 
 /* lock for service table */
 static DEFINE_RWLOCK(__ip_vs_svc_lock);
@@ -220,10 +221,10 @@ static void update_defense_level(void)
  *	Timer for checking the defense
  */
 #define DEFENSE_TIMER_PERIOD	1*HZ
-static void defense_work_handler(void *data);
-static DECLARE_WORK(defense_work, defense_work_handler, NULL);
+static void defense_work_handler(struct work_struct *work);
+static DECLARE_DELAYED_WORK(defense_work, defense_work_handler);
 
-static void defense_work_handler(void *data)
+static void defense_work_handler(struct work_struct *work)
 {
 	update_defense_level();
 	if (atomic_read(&ip_vs_dropentry))
@@ -282,7 +283,7 @@ static atomic_t ip_vs_nullsvc_counter = ATOMIC_INIT(0);
  *	Returns hash value for virtual service
  */
 static __inline__ unsigned
-ip_vs_svc_hashkey(unsigned proto, __u32 addr, __u16 port)
+ip_vs_svc_hashkey(unsigned proto, __be32 addr, __be16 port)
 {
 	register unsigned porth = ntohs(port);
 
@@ -364,7 +365,7 @@ static int ip_vs_svc_unhash(struct ip_vs_service *svc)
  *	Get service by {proto,addr,port} in the service table.
  */
 static __inline__ struct ip_vs_service *
-__ip_vs_service_get(__u16 protocol, __u32 vaddr, __u16 vport)
+__ip_vs_service_get(__u16 protocol, __be32 vaddr, __be16 vport)
 {
 	unsigned hash;
 	struct ip_vs_service *svc;
@@ -409,7 +410,7 @@ static __inline__ struct ip_vs_service *__ip_vs_svc_fwm_get(__u32 fwmark)
 }
 
 struct ip_vs_service *
-ip_vs_service_get(__u32 fwmark, __u16 protocol, __u32 vaddr, __u16 vport)
+ip_vs_service_get(__u32 fwmark, __u16 protocol, __be32 vaddr, __be16 vport)
 {
 	struct ip_vs_service *svc;
 
@@ -479,7 +480,7 @@ __ip_vs_unbind_svc(struct ip_vs_dest *dest)
 /*
  *	Returns hash value for real service
  */
-static __inline__ unsigned ip_vs_rs_hashkey(__u32 addr, __u16 port)
+static __inline__ unsigned ip_vs_rs_hashkey(__be32 addr, __be16 port)
 {
 	register unsigned porth = ntohs(port);
 
@@ -530,7 +531,7 @@ static int ip_vs_rs_unhash(struct ip_vs_dest *dest)
  *	Lookup real service by <proto,addr,port> in the real service table.
  */
 struct ip_vs_dest *
-ip_vs_lookup_real_service(__u16 protocol, __u32 daddr, __u16 dport)
+ip_vs_lookup_real_service(__u16 protocol, __be32 daddr, __be16 dport)
 {
 	unsigned hash;
 	struct ip_vs_dest *dest;
@@ -561,7 +562,7 @@ ip_vs_lookup_real_service(__u16 protocol, __u32 daddr, __u16 dport)
  *	Lookup destination by {addr,port} in the given service
  */
 static struct ip_vs_dest *
-ip_vs_lookup_dest(struct ip_vs_service *svc, __u32 daddr, __u16 dport)
+ip_vs_lookup_dest(struct ip_vs_service *svc, __be32 daddr, __be16 dport)
 {
 	struct ip_vs_dest *dest;
 
@@ -590,7 +591,7 @@ ip_vs_lookup_dest(struct ip_vs_service *svc, __u32 daddr, __u16 dport)
  *  scheduling.
  */
 static struct ip_vs_dest *
-ip_vs_trash_get_dest(struct ip_vs_service *svc, __u32 daddr, __u16 dport)
+ip_vs_trash_get_dest(struct ip_vs_service *svc, __be32 daddr, __be16 dport)
 {
 	struct ip_vs_dest *dest, *nxt;
 
@@ -734,12 +735,11 @@ ip_vs_new_dest(struct ip_vs_service *svc, struct ip_vs_dest_user *udest,
 	if (atype != RTN_LOCAL && atype != RTN_UNICAST)
 		return -EINVAL;
 
-	dest = kmalloc(sizeof(struct ip_vs_dest), GFP_ATOMIC);
+	dest = kzalloc(sizeof(struct ip_vs_dest), GFP_ATOMIC);
 	if (dest == NULL) {
 		IP_VS_ERR("ip_vs_new_dest: kmalloc failed.\n");
 		return -ENOMEM;
 	}
-	memset(dest, 0, sizeof(struct ip_vs_dest));
 
 	dest->protocol = svc->protocol;
 	dest->vaddr = svc->addr;
@@ -773,8 +773,8 @@ static int
 ip_vs_add_dest(struct ip_vs_service *svc, struct ip_vs_dest_user *udest)
 {
 	struct ip_vs_dest *dest;
-	__u32 daddr = udest->addr;
-	__u16 dport = udest->port;
+	__be32 daddr = udest->addr;
+	__be16 dport = udest->port;
 	int ret;
 
 	EnterFunction(2);
@@ -879,8 +879,8 @@ static int
 ip_vs_edit_dest(struct ip_vs_service *svc, struct ip_vs_dest_user *udest)
 {
 	struct ip_vs_dest *dest;
-	__u32 daddr = udest->addr;
-	__u16 dport = udest->port;
+	__be32 daddr = udest->addr;
+	__be16 dport = udest->port;
 
 	EnterFunction(2);
 
@@ -991,8 +991,8 @@ static int
 ip_vs_del_dest(struct ip_vs_service *svc,struct ip_vs_dest_user *udest)
 {
 	struct ip_vs_dest *dest;
-	__u32 daddr = udest->addr;
-	__u16 dport = udest->port;
+	__be32 daddr = udest->addr;
+	__be16 dport = udest->port;
 
 	EnterFunction(2);
 
@@ -1049,14 +1049,12 @@ ip_vs_add_service(struct ip_vs_service_user *u, struct ip_vs_service **svc_p)
 		goto out_mod_dec;
 	}
 
-	svc = (struct ip_vs_service *)
-		kmalloc(sizeof(struct ip_vs_service), GFP_ATOMIC);
+	svc = kzalloc(sizeof(struct ip_vs_service), GFP_ATOMIC);
 	if (svc == NULL) {
 		IP_VS_DBG(1, "ip_vs_add_service: kmalloc failed.\n");
 		ret = -ENOMEM;
 		goto out_err;
 	}
-	memset(svc, 0, sizeof(struct ip_vs_service));
 
 	/* I'm the first user of the service */
 	atomic_set(&svc->usecnt, 1);
@@ -1796,7 +1794,7 @@ static int ip_vs_info_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
 	int rc = -ENOMEM;
-	struct ip_vs_iter *s = kmalloc(sizeof(*s), GFP_KERNEL);
+	struct ip_vs_iter *s = kzalloc(sizeof(*s), GFP_KERNEL);
 
 	if (!s)
 		goto out;
@@ -1807,7 +1805,6 @@ static int ip_vs_info_open(struct inode *inode, struct file *file)
 
 	seq	     = file->private_data;
 	seq->private = s;
-	memset(s, 0, sizeof(*s));
 out:
 	return rc;
 out_kfree:
@@ -1950,7 +1947,7 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 	/* increase the module use count */
 	ip_vs_use_count_inc();
 
-	if (down_interruptible(&__ip_vs_mutex)) {
+	if (mutex_lock_interruptible(&__ip_vs_mutex)) {
 		ret = -ERESTARTSYS;
 		goto out_dec;
 	}
@@ -2041,7 +2038,7 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		ip_vs_service_put(svc);
 
   out_unlock:
-	up(&__ip_vs_mutex);
+	mutex_unlock(&__ip_vs_mutex);
   out_dec:
 	/* decrease the module use count */
 	ip_vs_use_count_dec();
@@ -2211,7 +2208,7 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	if (copy_from_user(arg, user, get_arglen[GET_CMDID(cmd)]) != 0)
 		return -EFAULT;
 
-	if (down_interruptible(&__ip_vs_mutex))
+	if (mutex_lock_interruptible(&__ip_vs_mutex))
 		return -ERESTARTSYS;
 
 	switch (cmd) {
@@ -2330,7 +2327,7 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	}
 
   out:
-	up(&__ip_vs_mutex);
+	mutex_unlock(&__ip_vs_mutex);
 	return ret;
 }
 

@@ -1,6 +1,6 @@
 
 /*
- * drivers/mtd/maps/svme182.c
+ * drivers/mtd/maps/dmv182.c
  *
  * Flash map driver for the Dy4 SVME182 board
  *
@@ -16,7 +16,6 @@
  * option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/types.h>
@@ -99,7 +98,7 @@ static struct mtd_info *this_mtd;
 static int __init init_svme182(void)
 {
 	struct mtd_partition *partitions;
-	int num_parts = sizeof(svme182_partitions) / sizeof(struct mtd_partition);
+	int num_parts = ARRAY_SIZE(svme182_partitions);
 
 	partitions = svme182_partitions;
 

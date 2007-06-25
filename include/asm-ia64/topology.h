@@ -23,6 +23,11 @@
 #define PENALTY_FOR_NODE_WITH_CPUS 255
 
 /*
+ * Distance above which we begin to use zone reclaim
+ */
+#define RECLAIM_DISTANCE 15
+
+/*
  * Returns the number of the node containing CPU 'cpu'
  */
 #define cpu_to_node(cpu) (int)(cpu_to_node_map[cpu])
@@ -54,6 +59,7 @@ void build_cpu_to_node_map(void);
 #define SD_CPU_INIT (struct sched_domain) {		\
 	.span			= CPU_MASK_NONE,	\
 	.parent			= NULL,			\
+	.child			= NULL,			\
 	.groups			= NULL,			\
 	.min_interval		= 1,			\
 	.max_interval		= 4,			\
@@ -79,6 +85,7 @@ void build_cpu_to_node_map(void);
 #define SD_NODE_INIT (struct sched_domain) {		\
 	.span			= CPU_MASK_NONE,	\
 	.parent			= NULL,			\
+	.child			= NULL,			\
 	.groups			= NULL,			\
 	.min_interval		= 8,			\
 	.max_interval		= 8*(min(num_online_cpus(), 32)), \
@@ -94,6 +101,7 @@ void build_cpu_to_node_map(void);
 	.flags			= SD_LOAD_BALANCE	\
 				| SD_BALANCE_EXEC	\
 				| SD_BALANCE_FORK	\
+				| SD_SERIALIZE		\
 				| SD_WAKE_BALANCE,	\
 	.last_balance		= jiffies,		\
 	.balance_interval	= 64,			\
@@ -107,6 +115,7 @@ void build_cpu_to_node_map(void);
 #define topology_core_id(cpu)			(cpu_data(cpu)->core_id)
 #define topology_core_siblings(cpu)		(cpu_core_map[cpu])
 #define topology_thread_siblings(cpu)		(cpu_sibling_map[cpu])
+#define smt_capable() 				(smp_num_siblings > 1)
 #endif
 
 #include <asm-generic/topology.h>

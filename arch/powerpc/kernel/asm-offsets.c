@@ -13,7 +13,6 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -41,9 +40,10 @@
 #ifdef CONFIG_PPC64
 #include <asm/paca.h>
 #include <asm/lppaca.h>
-#include <asm/iseries/hv_lp_event.h>
 #include <asm/cache.h>
 #include <asm/compat.h>
+#include <asm/mmu.h>
+#include <asm/hvcall.h>
 #endif
 
 #define DEFINE(sym, val) \
@@ -59,7 +59,6 @@ int main(void)
 	DEFINE(AUDITCONTEXT, offsetof(struct task_struct, audit_context));
 #else
 	DEFINE(THREAD_INFO, offsetof(struct task_struct, thread_info));
-	DEFINE(PTRACE, offsetof(struct task_struct, ptrace));
 #endif /* CONFIG_PPC64 */
 
 	DEFINE(KSP, offsetof(struct thread_struct, ksp));
@@ -80,7 +79,6 @@ int main(void)
 	DEFINE(LAST_SYSCALL, offsetof(struct thread_struct, last_syscall));
 #if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
 	DEFINE(THREAD_DBCR0, offsetof(struct thread_struct, dbcr0));
-	DEFINE(PT_PTRACED, PT_PTRACED);
 #endif
 #ifdef CONFIG_SPE
 	DEFINE(THREAD_EVR0, offsetof(struct thread_struct, evr[0]));
@@ -91,6 +89,7 @@ int main(void)
 #endif /* CONFIG_PPC64 */
 
 	DEFINE(TI_FLAGS, offsetof(struct thread_info, flags));
+	DEFINE(TI_LOCAL_FLAGS, offsetof(struct thread_info, local_flags));
 	DEFINE(TI_PREEMPT, offsetof(struct thread_info, preempt_count));
 	DEFINE(TI_TASK, offsetof(struct thread_info, task));
 #ifdef CONFIG_PPC32
@@ -105,8 +104,6 @@ int main(void)
 	DEFINE(ICACHEL1LINESIZE, offsetof(struct ppc64_caches, iline_size));
 	DEFINE(ICACHEL1LOGLINESIZE, offsetof(struct ppc64_caches, log_iline_size));
 	DEFINE(ICACHEL1LINESPERPAGE, offsetof(struct ppc64_caches, ilines_per_page));
-	DEFINE(PLATFORM_LPAR, PLATFORM_LPAR);
-
 	/* paca */
 	DEFINE(PACA_SIZE, sizeof(struct paca_struct));
 	DEFINE(PACAPACAINDEX, offsetof(struct paca_struct, paca_index));
@@ -119,13 +116,13 @@ int main(void)
 	DEFINE(PACASTABRR, offsetof(struct paca_struct, stab_rr));
 	DEFINE(PACAR1, offsetof(struct paca_struct, saved_r1));
 	DEFINE(PACATOC, offsetof(struct paca_struct, kernel_toc));
-	DEFINE(PACAPROCENABLED, offsetof(struct paca_struct, proc_enabled));
+	DEFINE(PACASOFTIRQEN, offsetof(struct paca_struct, soft_enabled));
+	DEFINE(PACAHARDIRQEN, offsetof(struct paca_struct, hard_enabled));
 	DEFINE(PACASLBCACHE, offsetof(struct paca_struct, slb_cache));
 	DEFINE(PACASLBCACHEPTR, offsetof(struct paca_struct, slb_cache_ptr));
 	DEFINE(PACACONTEXTID, offsetof(struct paca_struct, context.id));
-#ifdef CONFIG_PPC_64K_PAGES
-	DEFINE(PACAPGDIR, offsetof(struct paca_struct, pgdir));
-#endif
+	DEFINE(PACACONTEXTSLLP, offsetof(struct paca_struct, context.sllp));
+	DEFINE(PACAVMALLOCSLLP, offsetof(struct paca_struct, vmalloc_sllp));
 #ifdef CONFIG_HUGETLB_PAGE
 	DEFINE(PACALOWHTLBAREAS, offsetof(struct paca_struct, context.low_htlb_areas));
 	DEFINE(PACAHIGHHTLBAREAS, offsetof(struct paca_struct, context.high_htlb_areas));
@@ -136,11 +133,21 @@ int main(void)
 	DEFINE(PACAEMERGSP, offsetof(struct paca_struct, emergency_sp));
 	DEFINE(PACALPPACAPTR, offsetof(struct paca_struct, lppaca_ptr));
 	DEFINE(PACAHWCPUID, offsetof(struct paca_struct, hw_cpu_id));
+	DEFINE(PACA_STARTPURR, offsetof(struct paca_struct, startpurr));
+	DEFINE(PACA_USER_TIME, offsetof(struct paca_struct, user_time));
+	DEFINE(PACA_SYSTEM_TIME, offsetof(struct paca_struct, system_time));
+	DEFINE(PACA_SLBSHADOWPTR, offsetof(struct paca_struct, slb_shadow_ptr));
+	DEFINE(PACA_DATA_OFFSET, offsetof(struct paca_struct, data_offset));
 
+	DEFINE(SLBSHADOW_STACKVSID,
+	       offsetof(struct slb_shadow, save_area[SLB_NUM_BOLTED - 1].vsid));
+	DEFINE(SLBSHADOW_STACKESID,
+	       offsetof(struct slb_shadow, save_area[SLB_NUM_BOLTED - 1].esid));
 	DEFINE(LPPACASRR0, offsetof(struct lppaca, saved_srr0));
 	DEFINE(LPPACASRR1, offsetof(struct lppaca, saved_srr1));
 	DEFINE(LPPACAANYINT, offsetof(struct lppaca, int_dword.any_int));
 	DEFINE(LPPACADECRINT, offsetof(struct lppaca, int_dword.fields.decr_int));
+	DEFINE(SLBSHADOW_SAVEAREA, offsetof(struct slb_shadow, save_area));
 #endif /* CONFIG_PPC64 */
 
 	/* RTAS */
@@ -159,6 +166,12 @@ int main(void)
 	/* Create extra stack space for SRR0 and SRR1 when calling prom/rtas. */
 	DEFINE(PROM_FRAME_SIZE, STACK_FRAME_OVERHEAD + sizeof(struct pt_regs) + 16);
 	DEFINE(RTAS_FRAME_SIZE, STACK_FRAME_OVERHEAD + sizeof(struct pt_regs) + 16);
+
+	/* hcall statistics */
+	DEFINE(HCALL_STAT_SIZE, sizeof(struct hcall_stats));
+	DEFINE(HCALL_STAT_CALLS, offsetof(struct hcall_stats, num_calls));
+	DEFINE(HCALL_STAT_TB, offsetof(struct hcall_stats, tb_total));
+	DEFINE(HCALL_STAT_PURR, offsetof(struct hcall_stats, purr_total));
 #endif /* CONFIG_PPC64 */
 	DEFINE(GPR0, STACK_FRAME_OVERHEAD+offsetof(struct pt_regs, gpr[0]));
 	DEFINE(GPR1, STACK_FRAME_OVERHEAD+offsetof(struct pt_regs, gpr[1]));
@@ -229,6 +242,7 @@ int main(void)
 
 	DEFINE(CLONE_VM, CLONE_VM);
 	DEFINE(CLONE_UNTRACED, CLONE_UNTRACED);
+	DEFINE(CLONE_KTHREAD, CLONE_KTHREAD);
 
 #ifndef CONFIG_PPC64
 	DEFINE(MM_PGD, offsetof(struct mm_struct, pgd));
@@ -240,6 +254,7 @@ int main(void)
 	DEFINE(CPU_SPEC_PVR_VALUE, offsetof(struct cpu_spec, pvr_value));
 	DEFINE(CPU_SPEC_FEATURES, offsetof(struct cpu_spec, cpu_features));
 	DEFINE(CPU_SPEC_SETUP, offsetof(struct cpu_spec, cpu_setup));
+	DEFINE(CPU_SPEC_RESTORE, offsetof(struct cpu_spec, cpu_restore));
 
 #ifndef CONFIG_PPC64
 	DEFINE(pbe_address, offsetof(struct pbe, address));
@@ -287,5 +302,8 @@ int main(void)
 	DEFINE(NSEC_PER_SEC, NSEC_PER_SEC);
 	DEFINE(CLOCK_REALTIME_RES, TICK_NSEC);
 
+#ifdef CONFIG_BUG
+	DEFINE(BUG_ENTRY_SIZE, sizeof(struct bug_entry));
+#endif
 	return 0;
 }

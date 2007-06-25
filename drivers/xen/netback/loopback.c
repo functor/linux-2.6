@@ -55,6 +55,8 @@
 #include <net/xfrm.h>		/* secpath_reset() */
 #include <asm/hypervisor.h>	/* is_initial_xendomain() */
 
+#include "../../../net/core/kmap_skb.h"
+
 static int nloopbacks = -1;
 module_param(nloopbacks, int, 0);
 MODULE_PARM_DESC(nloopbacks, "Number of netback-loopback devices to create");
@@ -147,7 +149,7 @@ static int loopback_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	np->stats.rx_bytes += skb->len;
 	np->stats.rx_packets++;
 
-	if (skb->ip_summed == CHECKSUM_HW) {
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
 		/* Defer checksum calculation. */
 		skb->proto_csum_blank = 1;
 		/* Must be a local packet: assert its integrity. */

@@ -56,30 +56,8 @@
 #define ACPI_ENABLE_IRQS()  local_irq_enable()
 #define ACPI_FLUSH_CPU_CACHE()	wbinvd()
 
-
-static inline int
-__acpi_acquire_global_lock (unsigned int *lock)
-{
-	unsigned int old, new, val;
-	do {
-		old = *lock;
-		new = (((old & ~0x3) + 2) + ((old >> 1) & 0x1));
-		val = cmpxchg(lock, old, new);
-	} while (unlikely (val != old));
-	return (new < 3) ? -1 : 0;
-}
-
-static inline int
-__acpi_release_global_lock (unsigned int *lock)
-{
-	unsigned int old, new, val;
-	do {
-		old = *lock;
-		new = old & ~0x3;
-		val = cmpxchg(lock, old, new);
-	} while (unlikely (val != old));
-	return old & 0x1;
-}
+int __acpi_acquire_global_lock(unsigned int *lock);
+int __acpi_release_global_lock(unsigned int *lock);
 
 #define ACPI_ACQUIRE_GLOBAL_LOCK(GLptr, Acq) \
 	((Acq) = __acpi_acquire_global_lock((unsigned int *) GLptr))
@@ -103,6 +81,12 @@ __acpi_release_global_lock (unsigned int *lock)
         :"=r"(n_hi), "=r"(n_lo)     \
         :"0"(n_hi), "1"(n_lo))
 
+#ifdef CONFIG_X86_IO_APIC
+extern void check_acpi_pci(void);
+#else
+static inline void check_acpi_pci(void) { }
+#endif
+
 #ifdef CONFIG_ACPI 
 extern int acpi_lapic;
 extern int acpi_ioapic;
@@ -125,25 +109,8 @@ static inline void disable_acpi(void)
 extern int acpi_gsi_to_irq(u32 gsi, unsigned int *irq);
 
 #ifdef CONFIG_X86_IO_APIC
-extern int skip_ioapic_setup;
 extern int acpi_skip_timer_override;
-
-extern void check_acpi_pci(void);
-
-static inline void disable_ioapic_setup(void)
-{
-	skip_ioapic_setup = 1;
-}
-
-static inline int ioapic_setup_disabled(void)
-{
-	return skip_ioapic_setup;
-}
-
-#else
-static inline void disable_ioapic_setup(void) { }
-static inline void check_acpi_pci(void) { }
-
+extern int acpi_use_timer_override;
 #endif
 
 static inline void acpi_noirq_set(void) { acpi_noirq = 1; }

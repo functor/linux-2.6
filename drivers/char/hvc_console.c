@@ -22,7 +22,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#include <linux/config.h>
 #include <linux/console.h>
 #include <linux/cpumask.h>
 #include <linux/init.h>
@@ -39,8 +38,11 @@
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/delay.h>
+#include <linux/freezer.h>
+
 #include <asm/uaccess.h>
-#include <asm/hvconsole.h>
+
+#include "hvc_console.h"
 
 #define HVC_MAJOR	229
 #define HVC_MINOR	0
@@ -54,17 +56,14 @@
 #define HVC_CLOSE_WAIT (HZ/100) /* 1/10 of a second */
 
 /*
- * The Linux TTY code does not support dynamic addition of tty derived devices
- * so we need to know how many tty devices we might need when space is allocated
- * for the tty device.  Since this driver supports hotplug of vty adapters we
- * need to make sure we have enough allocated.
+ * These sizes are most efficient for vio, because they are the
+ * native transfer size. We could make them selectable in the
+ * future to better deal with backends that want other buffer sizes.
  */
-#define HVC_ALLOC_TTY_ADAPTERS	8
-
 #define N_OUTBUF	16
 #define N_INBUF		16
 
-#define __ALIGNED__	__attribute__((__aligned__(8)))
+#define __ALIGNED__ __attribute__((__aligned__(sizeof(long))))
 
 static struct tty_driver *hvc_driver;
 static struct task_struct *hvc_task;
@@ -82,7 +81,8 @@ struct hvc_struct {
 	struct tty_struct *tty;
 	unsigned int count;
 	int do_wakeup;
-	char outbuf[N_OUTBUF] __ALIGNED__;
+	char *outbuf;
+	int outbuf_size;
 	int n_outbuf;
 	uint32_t vtermno;
 	struct hv_ops *ops;
@@ -154,7 +154,7 @@ static uint32_t vtermnos[MAX_NR_HVC_CONSOLES] =
 
 void hvc_console_print(struct console *co, const char *b, unsigned count)
 {
-	char c[16] __ALIGNED__;
+	char c[N_OUTBUF] __ALIGNED__;
 	unsigned i = 0, n = 0;
 	int r, donecr = 0, index = co->index;
 
@@ -295,7 +295,7 @@ static int hvc_poll(struct hvc_struct *hp);
  * NOTE: This API isn't used if the console adapter doesn't support interrupts.
  * In this case the console is poll driven.
  */
-static irqreturn_t hvc_handle_interrupt(int irq, void *dev_instance, struct pt_regs *regs)
+static irqreturn_t hvc_handle_interrupt(int irq, void *dev_instance)
 {
 	/* if hvc_poll request a repoll, then kick the hvcd thread */
 	if (hvc_poll(dev_instance))
@@ -321,10 +321,8 @@ static int hvc_open(struct tty_struct *tty, struct file * filp)
 	struct kobject *kobjp;
 
 	/* Auto increments kobject reference if found. */
-	if (!(hp = hvc_get_by_index(tty->index))) {
-		printk(KERN_WARNING "hvc_console: tty open failed, no vty associated with tty.\n");
+	if (!(hp = hvc_get_by_index(tty->index)))
 		return -ENODEV;
-	}
 
 	spin_lock_irqsave(&hp->lock, flags);
 	/* Check and then increment for fast path open. */
@@ -348,7 +346,7 @@ static int hvc_open(struct tty_struct *tty, struct file * filp)
 	spin_unlock_irqrestore(&hp->lock, flags);
 	/* check error, fallback to non-irq */
 	if (irq != NO_IRQ)
-		rc = request_irq(irq, hvc_handle_interrupt, SA_INTERRUPT, "hvc_console", hp);
+		rc = request_irq(irq, hvc_handle_interrupt, IRQF_DISABLED, "hvc_console", hp);
 
 	/*
 	 * If the request_irq() fails and we return an error.  The tty layer
@@ -473,8 +471,10 @@ static void hvc_push(struct hvc_struct *hp)
 
 	n = hp->ops->put_chars(hp->vtermno, hp->outbuf, hp->n_outbuf);
 	if (n <= 0) {
-		if (n == 0)
+		if (n == 0) {
+			hp->do_wakeup = 1;
 			return;
+		}
 		/* throw away output on error; this happens when
 		   there is no session connected to the vterm. */
 		hp->n_outbuf = 0;
@@ -486,11 +486,18 @@ static void hvc_push(struct hvc_struct *hp)
 		hp->do_wakeup = 1;
 }
 
-static inline int __hvc_write_kernel(struct hvc_struct *hp,
-				   const unsigned char *buf, int count)
+static int hvc_write(struct tty_struct *tty, const unsigned char *buf, int count)
 {
+	struct hvc_struct *hp = tty->driver_data;
 	unsigned long flags;
 	int rsize, written = 0;
+
+	/* This write was probably executed during a tty close. */
+	if (!hp)
+		return -EPIPE;
+
+	if (hp->count <= 0)
+		return -EIO;
 
 	spin_lock_irqsave(&hp->lock, flags);
 
@@ -498,7 +505,7 @@ static inline int __hvc_write_kernel(struct hvc_struct *hp,
 	if (hp->n_outbuf > 0)
 		hvc_push(hp);
 
-	while (count > 0 && (rsize = N_OUTBUF - hp->n_outbuf) > 0) {
+	while (count > 0 && (rsize = hp->outbuf_size - hp->n_outbuf) > 0) {
 		if (rsize > count)
 			rsize = count;
 		memcpy(hp->outbuf + hp->n_outbuf, buf, rsize);
@@ -510,26 +517,8 @@ static inline int __hvc_write_kernel(struct hvc_struct *hp,
 	}
 	spin_unlock_irqrestore(&hp->lock, flags);
 
-	return written;
-}
-static int hvc_write(struct tty_struct *tty, const unsigned char *buf, int count)
-{
-	struct hvc_struct *hp = tty->driver_data;
-	int written;
-
-	/* This write was probably executed during a tty close. */
-	if (!hp)
-		return -EPIPE;
-
-	if (hp->count <= 0)
-		return -EIO;
-
-	written = __hvc_write_kernel(hp, buf, count);
-
 	/*
 	 * Racy, but harmless, kick thread if there is still pending data.
-	 * There really is nothing wrong with kicking the thread, even if there
-	 * is no buffered data.
 	 */
 	if (hp->n_outbuf)
 		hvc_kick();
@@ -549,7 +538,7 @@ static int hvc_write_room(struct tty_struct *tty)
 	if (!hp)
 		return -1;
 
-	return N_OUTBUF - hp->n_outbuf;
+	return hp->outbuf_size - hp->n_outbuf;
 }
 
 static int hvc_chars_in_buffer(struct tty_struct *tty)
@@ -563,7 +552,6 @@ static int hvc_chars_in_buffer(struct tty_struct *tty)
 
 #define HVC_POLL_READ	0x00000001
 #define HVC_POLL_WRITE	0x00000002
-#define HVC_POLL_QUICK	0x00000004
 
 static int hvc_poll(struct hvc_struct *hp)
 {
@@ -578,6 +566,7 @@ static int hvc_poll(struct hvc_struct *hp)
 	/* Push pending writes */
 	if (hp->n_outbuf > 0)
 		hvc_push(hp);
+
 	/* Reschedule us if still some write pending */
 	if (hp->n_outbuf > 0)
 		poll_mask |= HVC_POLL_WRITE;
@@ -614,6 +603,13 @@ static int hvc_poll(struct hvc_struct *hp)
 				spin_unlock_irqrestore(&hp->lock, flags);
 				tty_hangup(tty);
 				spin_lock_irqsave(&hp->lock, flags);
+			} else if ( n == -EAGAIN ) {
+				/*
+				 * Some back-ends can only ensure a certain min
+				 * num of bytes read, which may be > 'count'.
+				 * Let the tty clear the flip buff to make room.
+				 */
+				poll_mask |= HVC_POLL_READ;
 			}
 			break;
 		}
@@ -626,7 +622,7 @@ static int hvc_poll(struct hvc_struct *hp)
 					sysrq_pressed = 1;
 					continue;
 				} else if (sysrq_pressed) {
-					handle_sysrq(buf[i], NULL, tty);
+					handle_sysrq(buf[i], tty);
 					sysrq_pressed = 0;
 					continue;
 				}
@@ -635,16 +631,7 @@ static int hvc_poll(struct hvc_struct *hp)
 			tty_insert_flip_char(tty, buf[i], 0);
 		}
 
-		/*
-		 * Account for the total amount read in one loop, and if above
-		 * 64 bytes, we do a quick schedule loop to let the tty grok
-		 * the data and eventually throttle us.
-		 */
 		read_total += n;
-		if (read_total >= 64) {
-			poll_mask |= HVC_POLL_QUICK;
-			break;
-		}
 	}
  throttled:
 	/* Wakeup write queue if necessary */
@@ -693,7 +680,7 @@ int khvcd(void *unused)
 			poll_mask |= HVC_POLL_READ;
 		if (hvc_kicked)
 			continue;
-		if (poll_mask & HVC_POLL_QUICK) {
+		if (poll_mask & HVC_POLL_WRITE) {
 			yield();
 			continue;
 		}
@@ -710,7 +697,7 @@ int khvcd(void *unused)
 	return 0;
 }
 
-static struct tty_operations hvc_ops = {
+static const struct tty_operations hvc_ops = {
 	.open = hvc_open,
 	.close = hvc_close,
 	.write = hvc_write,
@@ -742,12 +729,13 @@ static struct kobj_type hvc_kobj_type = {
 };
 
 struct hvc_struct __devinit *hvc_alloc(uint32_t vtermno, int irq,
-					struct hv_ops *ops)
+					struct hv_ops *ops, int outbuf_size)
 {
 	struct hvc_struct *hp;
 	int i;
 
-	hp = kmalloc(sizeof(*hp), GFP_KERNEL);
+	hp = kmalloc(ALIGN(sizeof(*hp), sizeof(long)) + outbuf_size,
+			GFP_KERNEL);
 	if (!hp)
 		return ERR_PTR(-ENOMEM);
 
@@ -756,6 +744,8 @@ struct hvc_struct __devinit *hvc_alloc(uint32_t vtermno, int irq,
 	hp->vtermno = vtermno;
 	hp->irq = irq;
 	hp->ops = ops;
+	hp->outbuf_size = outbuf_size;
+	hp->outbuf = &((char *)hp)[ALIGN(sizeof(*hp), sizeof(long))];
 
 	kobject_init(&hp->kobj);
 	hp->kobj.ktype = &hvc_kobj_type;
@@ -768,7 +758,8 @@ struct hvc_struct __devinit *hvc_alloc(uint32_t vtermno, int irq,
 	 * see if this vterm id matches one registered for console.
 	 */
 	for (i=0; i < MAX_NR_HVC_CONSOLES; i++)
-		if (vtermnos[i] == hp->vtermno)
+		if (vtermnos[i] == hp->vtermno &&
+		    cons_ops[i] == hp->ops)
 			break;
 
 	/* no matching slot, just use a counter */
@@ -824,34 +815,37 @@ EXPORT_SYMBOL(hvc_remove);
  * interfaces start to become available. */
 int __init hvc_init(void)
 {
+	struct tty_driver *drv;
+
 	/* We need more than hvc_count adapters due to hotplug additions. */
-	hvc_driver = alloc_tty_driver(HVC_ALLOC_TTY_ADAPTERS);
-	if (!hvc_driver)
+	drv = alloc_tty_driver(HVC_ALLOC_TTY_ADAPTERS);
+	if (!drv)
 		return -ENOMEM;
 
-	hvc_driver->owner = THIS_MODULE;
-	hvc_driver->devfs_name = "hvc/";
-	hvc_driver->driver_name = "hvc";
-	hvc_driver->name = "hvc";
-	hvc_driver->major = HVC_MAJOR;
-	hvc_driver->minor_start = HVC_MINOR;
-	hvc_driver->type = TTY_DRIVER_TYPE_SYSTEM;
-	hvc_driver->init_termios = tty_std_termios;
-	hvc_driver->flags = TTY_DRIVER_REAL_RAW;
-	tty_set_operations(hvc_driver, &hvc_ops);
+	drv->owner = THIS_MODULE;
+	drv->driver_name = "hvc";
+	drv->name = "hvc";
+	drv->major = HVC_MAJOR;
+	drv->minor_start = HVC_MINOR;
+	drv->type = TTY_DRIVER_TYPE_SYSTEM;
+	drv->init_termios = tty_std_termios;
+	drv->flags = TTY_DRIVER_REAL_RAW;
+	tty_set_operations(drv, &hvc_ops);
 
 	/* Always start the kthread because there can be hotplug vty adapters
 	 * added later. */
 	hvc_task = kthread_run(khvcd, NULL, "khvcd");
 	if (IS_ERR(hvc_task)) {
 		panic("Couldn't create kthread for console.\n");
-		put_tty_driver(hvc_driver);
+		put_tty_driver(drv);
 		return -EIO;
 	}
 
-	if (tty_register_driver(hvc_driver))
+	if (tty_register_driver(drv))
 		panic("Couldn't register hvc console driver\n");
 
+	mb();
+	hvc_driver = drv;
 	return 0;
 }
 module_init(hvc_init);

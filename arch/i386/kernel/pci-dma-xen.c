@@ -15,11 +15,15 @@
 #include <linux/version.h>
 #include <asm/io.h>
 #include <xen/balloon.h>
+#include <asm/swiotlb.h>
 #include <asm/tlbflush.h>
 #include <asm-i386/mach-xen/asm/swiotlb.h>
 #include <asm/bug.h>
 
 #ifdef __x86_64__
+#include <asm/proto.h>
+#include <asm/calgary.h>
+
 int iommu_merge __read_mostly = 0;
 EXPORT_SYMBOL(iommu_merge);
 
@@ -58,6 +62,8 @@ void __init pci_iommu_alloc(void)
 
 #ifdef CONFIG_CALGARY_IOMMU
 #include <asm/calgary.h>
+	/* shut up compiler */
+	use_calgary = use_calgary;
 	detect_calgary();
 #endif
 
@@ -66,10 +72,22 @@ void __init pci_iommu_alloc(void)
 #endif
 }
 
-__init int iommu_setup(char *p)
+static int __init pci_iommu_init(void)
 {
-    return 1;
+#ifdef CONFIG_CALGARY_IOMMU
+	calgary_iommu_init();
+#endif
+
+#ifdef CONFIG_IOMMU
+	gart_iommu_init();
+#endif
+
+	no_iommu_init();
+	return 0;
 }
+
+/* Must execute after PCI subsystem */
+fs_initcall(pci_iommu_init);
 #endif
 
 struct dma_coherent_mem {
@@ -95,8 +113,7 @@ dma_map_sg(struct device *hwdev, struct scatterlist *sg, int nents,
 {
 	int i, rc;
 
-	if (direction == DMA_NONE)
-		BUG();
+	BUG_ON(!valid_dma_direction(direction));
 	WARN_ON(nents == 0 || sg[0].length == 0);
 
 	if (swiotlb) {
@@ -122,7 +139,7 @@ void
 dma_unmap_sg(struct device *hwdev, struct scatterlist *sg, int nents,
 	     enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	BUG_ON(!valid_dma_direction(direction));
 	if (swiotlb)
 		swiotlb_unmap_sg(hwdev, sg, nents, direction);
 }
@@ -141,7 +158,7 @@ dma_map_page(struct device *dev, struct page *page, unsigned long offset,
 {
 	dma_addr_t dma_addr;
 
-	BUG_ON(direction == DMA_NONE);
+	BUG_ON(!valid_dma_direction(direction));
 
 	if (swiotlb) {
 		dma_addr = swiotlb_map_page(
@@ -159,7 +176,7 @@ void
 dma_unmap_page(struct device *dev, dma_addr_t dma_address, size_t size,
 	       enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	BUG_ON(!valid_dma_direction(direction));
 	if (swiotlb)
 		swiotlb_unmap_page(dev, dma_address, size, direction);
 }
@@ -218,8 +235,8 @@ void *dma_alloc_coherent(struct device *dev, size_t size,
 	ret = (void *)vstart;
 
 	if (ret != NULL) {
-		/* NB. Hardcode 31 address bits for now: aacraid limitation. */
-		if (xen_create_contiguous_region(vstart, order, 31) != 0) {
+		if (xen_create_contiguous_region(vstart, order,
+						 IO_TLB_DMA_BITS) != 0) {
 			free_pages(vstart, order);
 			return NULL;
 		}
@@ -251,7 +268,7 @@ EXPORT_SYMBOL(dma_free_coherent);
 int dma_declare_coherent_memory(struct device *dev, dma_addr_t bus_addr,
 				dma_addr_t device_addr, size_t size, int flags)
 {
-	void __iomem *mem_base;
+	void __iomem *mem_base = NULL;
 	int pages = size >> PAGE_SHIFT;
 	int bitmap_size = (pages + 31)/32;
 
@@ -268,14 +285,12 @@ int dma_declare_coherent_memory(struct device *dev, dma_addr_t bus_addr,
 	if (!mem_base)
 		goto out;
 
-	dev->dma_mem = kmalloc(sizeof(struct dma_coherent_mem), GFP_KERNEL);
+	dev->dma_mem = kzalloc(sizeof(struct dma_coherent_mem), GFP_KERNEL);
 	if (!dev->dma_mem)
 		goto out;
-	memset(dev->dma_mem, 0, sizeof(struct dma_coherent_mem));
-	dev->dma_mem->bitmap = kmalloc(bitmap_size, GFP_KERNEL);
+	dev->dma_mem->bitmap = kzalloc(bitmap_size, GFP_KERNEL);
 	if (!dev->dma_mem->bitmap)
 		goto free1_out;
-	memset(dev->dma_mem->bitmap, 0, bitmap_size);
 
 	dev->dma_mem->virt_base = mem_base;
 	dev->dma_mem->device_base = device_addr;
@@ -290,6 +305,8 @@ int dma_declare_coherent_memory(struct device *dev, dma_addr_t bus_addr,
  free1_out:
 	kfree(dev->dma_mem->bitmap);
  out:
+	if (mem_base)
+		iounmap(mem_base);
 	return 0;
 }
 EXPORT_SYMBOL(dma_declare_coherent_memory);
@@ -332,8 +349,7 @@ dma_map_single(struct device *dev, void *ptr, size_t size,
 {
 	dma_addr_t dma;
 
-	if (direction == DMA_NONE)
-		BUG();
+	BUG_ON(!valid_dma_direction(direction));
 	WARN_ON(size == 0);
 
 	if (swiotlb) {
@@ -353,8 +369,7 @@ void
 dma_unmap_single(struct device *dev, dma_addr_t dma_addr, size_t size,
 		 enum dma_data_direction direction)
 {
-	if (direction == DMA_NONE)
-		BUG();
+	BUG_ON(!valid_dma_direction(direction));
 	if (swiotlb)
 		swiotlb_unmap_single(dev, dma_addr, size, direction);
 }

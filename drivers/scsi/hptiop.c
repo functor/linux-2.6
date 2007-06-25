@@ -15,7 +15,6 @@
  *
  * For more information, visit http://www.highpoint-tech.com
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -432,7 +431,7 @@ void hptiop_iop_request_callback(struct hptiop_hba *hba, u32 tag)
 	writel(tag, &hba->iop->outbound_queue);
 }
 
-static irqreturn_t hptiop_intr(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t hptiop_intr(int irq, void *dev_id)
 {
 	struct hptiop_hba  *hba = dev_id;
 	int  handled;
@@ -773,7 +772,7 @@ static int __devinit hptiop_probe(struct pci_dev *pcidev,
 
 	pci_set_drvdata(pcidev, host);
 
-	if (request_irq(pcidev->irq, hptiop_intr, SA_SHIRQ,
+	if (request_irq(pcidev->irq, hptiop_intr, IRQF_SHARED,
 					driver_name, hba)) {
 		printk(KERN_ERR "scsi%d: request irq %d failed\n",
 					hba->host->host_no, pcidev->irq);

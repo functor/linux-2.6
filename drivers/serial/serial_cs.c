@@ -41,6 +41,7 @@
 #include <linux/string.h>
 #include <linux/timer.h>
 #include <linux/serial_core.h>
+#include <linux/delay.h>
 #include <linux/major.h>
 #include <asm/io.h>
 #include <asm/system.h>
@@ -79,31 +80,27 @@ module_param(buggy_uart, int, 0444);
 
 /* Table of multi-port card ID's */
 
-struct multi_id {
-	u_short manfid;
-	u_short prodid;
+struct serial_quirk {
+	unsigned int manfid;
+	unsigned int prodid;
 	int multi;		/* 1 = multifunction, > 1 = # ports */
+	void (*config)(struct pcmcia_device *);
+	void (*setup)(struct pcmcia_device *, struct uart_port *);
+	void (*wakeup)(struct pcmcia_device *);
+	int (*post)(struct pcmcia_device *);
 };
-
-static const struct multi_id multi_id[] = {
-	{ MANFID_OMEGA,   PRODID_OMEGA_QSP_100,         4 },
-	{ MANFID_QUATECH, PRODID_QUATECH_DUAL_RS232,    2 },
-	{ MANFID_QUATECH, PRODID_QUATECH_DUAL_RS232_D1, 2 },
-	{ MANFID_QUATECH, PRODID_QUATECH_QUAD_RS232,    4 },
-	{ MANFID_SOCKET,  PRODID_SOCKET_DUAL_RS232,     2 },
-	{ MANFID_INTEL,   PRODID_INTEL_DUAL_RS232,      2 },
-	{ MANFID_NATINST, PRODID_NATINST_QUAD_RS232,    4 }
-};
-#define MULTI_COUNT (sizeof(multi_id)/sizeof(struct multi_id))
 
 struct serial_info {
-	dev_link_t		link;
+	struct pcmcia_device	*p_dev;
 	int			ndev;
 	int			multi;
 	int			slave;
 	int			manfid;
+	int			prodid;
+	int			c950ctrl;
 	dev_node_t		node[4];
 	int			line[4];
+	const struct serial_quirk *quirk;
 };
 
 struct serial_cfg_mem {
@@ -112,8 +109,163 @@ struct serial_cfg_mem {
 	u_char buf[256];
 };
 
+/*
+ * vers_1 5.0, "Brain Boxes", "2-Port RS232 card", "r6"
+ * manfid 0x0160, 0x0104
+ * This card appears to have a 14.7456MHz clock.
+ */
+static void quirk_setup_brainboxes_0104(struct pcmcia_device *link, struct uart_port *port)
+{
+	port->uartclk = 14745600;
+}
 
-static void serial_config(dev_link_t * link);
+static int quirk_post_ibm(struct pcmcia_device *link)
+{
+	conf_reg_t reg = { 0, CS_READ, 0x800, 0 };
+	int last_ret, last_fn;
+
+	last_ret = pcmcia_access_configuration_register(link, &reg);
+	if (last_ret) {
+		last_fn = AccessConfigurationRegister;
+		goto cs_failed;
+	}
+	reg.Action = CS_WRITE;
+	reg.Value = reg.Value | 1;
+	last_ret = pcmcia_access_configuration_register(link, &reg);
+	if (last_ret) {
+		last_fn = AccessConfigurationRegister;
+		goto cs_failed;
+	}
+	return 0;
+
+ cs_failed:
+	cs_error(link, last_fn, last_ret);
+	return -ENODEV;
+}
+
+/*
+ * Nokia cards are not really multiport cards.  Shouldn't this
+ * be handled by setting the quirk entry .multi = 0 | 1 ?
+ */
+static void quirk_config_nokia(struct pcmcia_device *link)
+{
+	struct serial_info *info = link->priv;
+
+	if (info->multi > 1)
+		info->multi = 1;
+}
+
+static void quirk_wakeup_oxsemi(struct pcmcia_device *link)
+{
+	struct serial_info *info = link->priv;
+
+	outb(12, info->c950ctrl + 1);
+}
+
+/* request_region? oxsemi branch does no request_region too... */
+/*
+ * This sequence is needed to properly initialize MC45 attached to OXCF950.
+ * I tried decreasing these msleep()s, but it worked properly (survived
+ * 1000 stop/start operations) with these timeouts (or bigger).
+ */
+static void quirk_wakeup_possio_gcc(struct pcmcia_device *link)
+{
+	struct serial_info *info = link->priv;
+	unsigned int ctrl = info->c950ctrl;
+
+	outb(0xA, ctrl + 1);
+	msleep(100);
+	outb(0xE, ctrl + 1);
+	msleep(300);
+	outb(0xC, ctrl + 1);
+	msleep(100);
+	outb(0xE, ctrl + 1);
+	msleep(200);
+	outb(0xF, ctrl + 1);
+	msleep(100);
+	outb(0xE, ctrl + 1);
+	msleep(100);
+	outb(0xC, ctrl + 1);
+}
+
+/*
+ * Socket Dual IO: this enables irq's for second port
+ */
+static void quirk_config_socket(struct pcmcia_device *link)
+{
+	struct serial_info *info = link->priv;
+
+	if (info->multi) {
+		link->conf.Present |= PRESENT_EXT_STATUS;
+		link->conf.ExtStatus = ESR_REQ_ATTN_ENA;
+	}
+}
+
+static const struct serial_quirk quirks[] = {
+	{
+		.manfid	= 0x0160,
+		.prodid	= 0x0104,
+		.multi	= -1,
+		.setup	= quirk_setup_brainboxes_0104,
+	}, {
+		.manfid	= MANFID_IBM,
+		.prodid	= ~0,
+		.multi	= -1,
+		.post	= quirk_post_ibm,
+	}, {
+		.manfid	= MANFID_INTEL,
+		.prodid	= PRODID_INTEL_DUAL_RS232,
+		.multi	= 2,
+	}, {
+		.manfid	= MANFID_NATINST,
+		.prodid	= PRODID_NATINST_QUAD_RS232,
+		.multi	= 4,
+	}, {
+		.manfid	= MANFID_NOKIA,
+		.prodid	= ~0,
+		.multi	= -1,
+		.config	= quirk_config_nokia,
+	}, {
+		.manfid	= MANFID_OMEGA,
+		.prodid	= PRODID_OMEGA_QSP_100,
+		.multi	= 4,
+	}, {
+		.manfid	= MANFID_OXSEMI,
+		.prodid	= ~0,
+		.multi	= -1,
+		.wakeup	= quirk_wakeup_oxsemi,
+	}, {
+		.manfid	= MANFID_POSSIO,
+		.prodid	= PRODID_POSSIO_GCC,
+		.multi	= -1,
+		.wakeup	= quirk_wakeup_possio_gcc,
+	}, {
+		.manfid	= MANFID_QUATECH,
+		.prodid	= PRODID_QUATECH_DUAL_RS232,
+		.multi	= 2,
+	}, {
+		.manfid	= MANFID_QUATECH,
+		.prodid	= PRODID_QUATECH_DUAL_RS232_D1,
+		.multi	= 2,
+	}, {
+		.manfid	= MANFID_QUATECH,
+		.prodid	= PRODID_QUATECH_QUAD_RS232,
+		.multi	= 4,
+	}, {
+		.manfid	= MANFID_SOCKET,
+		.prodid	= PRODID_SOCKET_DUAL_RS232,
+		.multi	= 2,
+		.config	= quirk_config_socket,
+	}, {
+		.manfid	= MANFID_SOCKET,
+		.prodid	= ~0,
+		.multi	= -1,
+		.config	= quirk_config_socket,
+	}
+};
+
+
+static int serial_config(struct pcmcia_device * link);
 
 
 /*======================================================================
@@ -123,68 +275,46 @@ static void serial_config(dev_link_t * link);
     
 ======================================================================*/
 
-static void serial_remove(dev_link_t *link)
+static void serial_remove(struct pcmcia_device *link)
 {
 	struct serial_info *info = link->priv;
 	int i;
-
-	link->state &= ~DEV_PRESENT;
 
 	DEBUG(0, "serial_release(0x%p)\n", link);
 
 	/*
 	 * Recheck to see if the device is still configured.
 	 */
-	if (info->link.state & DEV_CONFIG) {
-		for (i = 0; i < info->ndev; i++)
-			serial8250_unregister_port(info->line[i]);
+	for (i = 0; i < info->ndev; i++)
+		serial8250_unregister_port(info->line[i]);
 
-		info->link.dev = NULL;
+	info->p_dev->dev_node = NULL;
 
-		if (!info->slave) {
-			pcmcia_release_configuration(info->link.handle);
-			pcmcia_release_io(info->link.handle, &info->link.io);
-			pcmcia_release_irq(info->link.handle, &info->link.irq);
-		}
-
-		info->link.state &= ~DEV_CONFIG;
-	}
+	if (!info->slave)
+		pcmcia_disable_device(link);
 }
 
-static int serial_suspend(struct pcmcia_device *dev)
+static int serial_suspend(struct pcmcia_device *link)
 {
-	dev_link_t *link = dev_to_instance(dev);
-	link->state |= DEV_SUSPEND;
+	struct serial_info *info = link->priv;
+	int i;
 
-	if (link->state & DEV_CONFIG) {
-		struct serial_info *info = link->priv;
-		int i;
-
-		for (i = 0; i < info->ndev; i++)
-			serial8250_suspend_port(info->line[i]);
-
-		if (!info->slave)
-			pcmcia_release_configuration(link->handle);
-	}
+	for (i = 0; i < info->ndev; i++)
+		serial8250_suspend_port(info->line[i]);
 
 	return 0;
 }
 
-static int serial_resume(struct pcmcia_device *dev)
+static int serial_resume(struct pcmcia_device *link)
 {
-	dev_link_t *link = dev_to_instance(dev);
-	link->state &= ~DEV_SUSPEND;
+	struct serial_info *info = link->priv;
+	int i;
 
-	if (DEV_OK(link)) {
-		struct serial_info *info = link->priv;
-		int i;
+	for (i = 0; i < info->ndev; i++)
+		serial8250_resume_port(info->line[i]);
 
-		if (!info->slave)
-			pcmcia_request_configuration(link->handle, &link->conf);
-
-		for (i = 0; i < info->ndev; i++)
-			serial8250_resume_port(info->line[i]);
-	}
+	if (info->quirk && info->quirk->wakeup)
+		info->quirk->wakeup(link);
 
 	return 0;
 }
@@ -197,10 +327,9 @@ static int serial_resume(struct pcmcia_device *dev)
 
 ======================================================================*/
 
-static int serial_probe(struct pcmcia_device *p_dev)
+static int serial_probe(struct pcmcia_device *link)
 {
 	struct serial_info *info;
-	dev_link_t *link;
 
 	DEBUG(0, "serial_attach()\n");
 
@@ -209,7 +338,7 @@ static int serial_probe(struct pcmcia_device *p_dev)
 	if (!info)
 		return -ENOMEM;
 	memset(info, 0, sizeof (*info));
-	link = &info->link;
+	info->p_dev = link;
 	link->priv = info;
 
 	link->io.Attributes1 = IO_DATA_PATH_WIDTH_8;
@@ -223,12 +352,7 @@ static int serial_probe(struct pcmcia_device *p_dev)
 	}
 	link->conf.IntType = INT_MEMORY_AND_IO;
 
-	link->handle = p_dev;
-	p_dev->instance = link;
-	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
-	serial_config(link);
-
-	return 0;
+	return serial_config(link);
 }
 
 /*======================================================================
@@ -240,9 +364,8 @@ static int serial_probe(struct pcmcia_device *p_dev)
 
 ======================================================================*/
 
-static void serial_detach(struct pcmcia_device *p_dev)
+static void serial_detach(struct pcmcia_device *link)
 {
-	dev_link_t *link = dev_to_instance(p_dev);
 	struct serial_info *info = link->priv;
 
 	DEBUG(0, "serial_detach(0x%p)\n", link);
@@ -263,7 +386,7 @@ static void serial_detach(struct pcmcia_device *p_dev)
 
 /*====================================================================*/
 
-static int setup_serial(client_handle_t handle, struct serial_info * info,
+static int setup_serial(struct pcmcia_device *handle, struct serial_info * info,
 			kio_addr_t iobase, int irq)
 {
 	struct uart_port port;
@@ -277,6 +400,10 @@ static int setup_serial(client_handle_t handle, struct serial_info * info,
 	port.dev = &handle_to_dev(handle);
 	if (buggy_uart)
 		port.flags |= UPF_BUGGY_UART;
+
+	if (info->quirk && info->quirk->setup)
+		info->quirk->setup(handle, &port);
+
 	line = serial8250_register_port(&port);
 	if (line < 0) {
 		printk(KERN_NOTICE "serial_cs: serial8250_register_port() at "
@@ -298,7 +425,7 @@ static int setup_serial(client_handle_t handle, struct serial_info * info,
 /*====================================================================*/
 
 static int
-first_tuple(client_handle_t handle, tuple_t * tuple, cisparse_t * parse)
+first_tuple(struct pcmcia_device *handle, tuple_t * tuple, cisparse_t * parse)
 {
 	int i;
 	i = pcmcia_get_first_tuple(handle, tuple);
@@ -311,7 +438,7 @@ first_tuple(client_handle_t handle, tuple_t * tuple, cisparse_t * parse)
 }
 
 static int
-next_tuple(client_handle_t handle, tuple_t * tuple, cisparse_t * parse)
+next_tuple(struct pcmcia_device *handle, tuple_t * tuple, cisparse_t * parse)
 {
 	int i;
 	i = pcmcia_get_next_tuple(handle, tuple);
@@ -325,11 +452,10 @@ next_tuple(client_handle_t handle, tuple_t * tuple, cisparse_t * parse)
 
 /*====================================================================*/
 
-static int simple_config(dev_link_t *link)
+static int simple_config(struct pcmcia_device *link)
 {
 	static const kio_addr_t base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
 	static const int size_table[2] = { 8, 16 };
-	client_handle_t handle = link->handle;
 	struct serial_info *info = link->priv;
 	struct serial_cfg_mem *cfg_mem;
 	tuple_t *tuple;
@@ -350,7 +476,7 @@ static int simple_config(dev_link_t *link)
 	buf = cfg_mem->buf;
 
 	/* If the card is already configured, look up the port and irq */
-	i = pcmcia_get_configuration_info(handle, &config);
+	i = pcmcia_get_configuration_info(link, &config);
 	if ((i == CS_SUCCESS) && (config.Attributes & CONF_VALID_CLIENT)) {
 		kio_addr_t port = 0;
 		if ((config.BasePort2 != 0) && (config.NumPorts2 == 8)) {
@@ -363,10 +489,9 @@ static int simple_config(dev_link_t *link)
 		}
 		if (info->slave) {
 			kfree(cfg_mem);
-			return setup_serial(handle, info, port, config.AssignedIRQ);
+			return setup_serial(link, info, port, config.AssignedIRQ);
 		}
 	}
-	link->conf.Vcc = config.Vcc;
 
 	/* First pass: look for a config entry that looks normal. */
 	tuple->TupleData = (cisdata_t *) buf;
@@ -377,12 +502,12 @@ static int simple_config(dev_link_t *link)
 	/* Two tries: without IO aliases, then with aliases */
 	for (s = 0; s < 2; s++) {
 		for (try = 0; try < 2; try++) {
-			i = first_tuple(handle, tuple, parse);
+			i = first_tuple(link, tuple, parse);
 			while (i != CS_NO_MORE_ITEMS) {
 				if (i != CS_SUCCESS)
 					goto next_entry;
 				if (cf->vpp1.present & (1 << CISTPL_POWER_VNOM))
-					link->conf.Vpp1 = link->conf.Vpp2 =
+					link->conf.Vpp =
 					    cf->vpp1.param[CISTPL_POWER_VNOM] / 10000;
 				if ((cf->io.nwin > 0) && (cf->io.win[0].len == size_table[s]) &&
 					    (cf->io.win[0].base != 0)) {
@@ -390,19 +515,19 @@ static int simple_config(dev_link_t *link)
 					link->io.BasePort1 = cf->io.win[0].base;
 					link->io.IOAddrLines = (try == 0) ?
 					    16 : cf->io.flags & CISTPL_IO_LINES_MASK;
-					i = pcmcia_request_io(link->handle, &link->io);
+					i = pcmcia_request_io(link, &link->io);
 					if (i == CS_SUCCESS)
 						goto found_port;
 				}
 next_entry:
-				i = next_tuple(handle, tuple, parse);
+				i = next_tuple(link, tuple, parse);
 			}
 		}
 	}
 	/* Second pass: try to find an entry that isn't picky about
 	   its base address, then try to grab any standard serial port
 	   address, and finally try to get any free port. */
-	i = first_tuple(handle, tuple, parse);
+	i = first_tuple(link, tuple, parse);
 	while (i != CS_NO_MORE_ITEMS) {
 		if ((i == CS_SUCCESS) && (cf->io.nwin > 0) &&
 		    ((cf->io.flags & CISTPL_IO_LINES_MASK) <= 3)) {
@@ -410,50 +535,55 @@ next_entry:
 			for (j = 0; j < 5; j++) {
 				link->io.BasePort1 = base[j];
 				link->io.IOAddrLines = base[j] ? 16 : 3;
-				i = pcmcia_request_io(link->handle, &link->io);
+				i = pcmcia_request_io(link, &link->io);
 				if (i == CS_SUCCESS)
 					goto found_port;
 			}
 		}
-		i = next_tuple(handle, tuple, parse);
+		i = next_tuple(link, tuple, parse);
 	}
 
       found_port:
 	if (i != CS_SUCCESS) {
 		printk(KERN_NOTICE
 		       "serial_cs: no usable port range found, giving up\n");
-		cs_error(link->handle, RequestIO, i);
+		cs_error(link, RequestIO, i);
 		kfree(cfg_mem);
 		return -1;
 	}
 
-	i = pcmcia_request_irq(link->handle, &link->irq);
+	i = pcmcia_request_irq(link, &link->irq);
 	if (i != CS_SUCCESS) {
-		cs_error(link->handle, RequestIRQ, i);
+		cs_error(link, RequestIRQ, i);
 		link->irq.AssignedIRQ = 0;
 	}
 	if (info->multi && (info->manfid == MANFID_3COM))
 		link->conf.ConfigIndex &= ~(0x08);
-	i = pcmcia_request_configuration(link->handle, &link->conf);
+
+	/*
+	 * Apply any configuration quirks.
+	 */
+	if (info->quirk && info->quirk->config)
+		info->quirk->config(link);
+
+	i = pcmcia_request_configuration(link, &link->conf);
 	if (i != CS_SUCCESS) {
-		cs_error(link->handle, RequestConfiguration, i);
+		cs_error(link, RequestConfiguration, i);
 		kfree(cfg_mem);
 		return -1;
 	}
 	kfree(cfg_mem);
-	return setup_serial(handle, info, link->io.BasePort1, link->irq.AssignedIRQ);
+	return setup_serial(link, info, link->io.BasePort1, link->irq.AssignedIRQ);
 }
 
-static int multi_config(dev_link_t * link)
+static int multi_config(struct pcmcia_device * link)
 {
-	client_handle_t handle = link->handle;
 	struct serial_info *info = link->priv;
 	struct serial_cfg_mem *cfg_mem;
 	tuple_t *tuple;
 	u_char *buf;
 	cisparse_t *parse;
 	cistpl_cftable_entry_t *cf;
-	config_info_t config;
 	int i, rc, base2 = 0;
 
 	cfg_mem = kmalloc(sizeof(struct serial_cfg_mem), GFP_KERNEL);
@@ -464,14 +594,6 @@ static int multi_config(dev_link_t * link)
 	cf = &parse->cftable_entry;
 	buf = cfg_mem->buf;
 
-	i = pcmcia_get_configuration_info(handle, &config);
-	if (i != CS_SUCCESS) {
-		cs_error(handle, GetConfigurationInfo, i);
-		rc = -1;
-		goto free_cfg_mem;
-	}
-	link->conf.Vcc = config.Vcc;
-
 	tuple->TupleData = (cisdata_t *) buf;
 	tuple->TupleOffset = 0;
 	tuple->TupleDataMax = 255;
@@ -480,7 +602,7 @@ static int multi_config(dev_link_t * link)
 
 	/* First, look for a generic full-sized window */
 	link->io.NumPorts1 = info->multi * 8;
-	i = first_tuple(handle, tuple, parse);
+	i = first_tuple(link, tuple, parse);
 	while (i != CS_NO_MORE_ITEMS) {
 		/* The quad port cards have bad CIS's, so just look for a
 		   window larger than 8 ports and assume it will be right */
@@ -490,19 +612,19 @@ static int multi_config(dev_link_t * link)
 			link->io.BasePort1 = cf->io.win[0].base;
 			link->io.IOAddrLines =
 			    cf->io.flags & CISTPL_IO_LINES_MASK;
-			i = pcmcia_request_io(link->handle, &link->io);
+			i = pcmcia_request_io(link, &link->io);
 			base2 = link->io.BasePort1 + 8;
 			if (i == CS_SUCCESS)
 				break;
 		}
-		i = next_tuple(handle, tuple, parse);
+		i = next_tuple(link, tuple, parse);
 	}
 
 	/* If that didn't work, look for two windows */
 	if (i != CS_SUCCESS) {
 		link->io.NumPorts1 = link->io.NumPorts2 = 8;
 		info->multi = 2;
-		i = first_tuple(handle, tuple, parse);
+		i = first_tuple(link, tuple, parse);
 		while (i != CS_NO_MORE_ITEMS) {
 			if ((i == CS_SUCCESS) && (cf->io.nwin == 2)) {
 				link->conf.ConfigIndex = cf->index;
@@ -510,62 +632,74 @@ static int multi_config(dev_link_t * link)
 				link->io.BasePort2 = cf->io.win[1].base;
 				link->io.IOAddrLines =
 				    cf->io.flags & CISTPL_IO_LINES_MASK;
-				i = pcmcia_request_io(link->handle, &link->io);
+				i = pcmcia_request_io(link, &link->io);
 				base2 = link->io.BasePort2;
 				if (i == CS_SUCCESS)
 					break;
 			}
-			i = next_tuple(handle, tuple, parse);
+			i = next_tuple(link, tuple, parse);
 		}
 	}
 
 	if (i != CS_SUCCESS) {
-		cs_error(link->handle, RequestIO, i);
+		cs_error(link, RequestIO, i);
 		rc = -1;
 		goto free_cfg_mem;
 	}
 
-	i = pcmcia_request_irq(link->handle, &link->irq);
+	i = pcmcia_request_irq(link, &link->irq);
 	if (i != CS_SUCCESS) {
 		printk(KERN_NOTICE
 		       "serial_cs: no usable port range found, giving up\n");
-		cs_error(link->handle, RequestIRQ, i);
+		cs_error(link, RequestIRQ, i);
 		link->irq.AssignedIRQ = 0;
 	}
-	/* Socket Dual IO: this enables irq's for second port */
-	if (info->multi && (info->manfid == MANFID_SOCKET)) {
-		link->conf.Present |= PRESENT_EXT_STATUS;
-		link->conf.ExtStatus = ESR_REQ_ATTN_ENA;
-	}
-	i = pcmcia_request_configuration(link->handle, &link->conf);
+
+	/*
+	 * Apply any configuration quirks.
+	 */
+	if (info->quirk && info->quirk->config)
+		info->quirk->config(link);
+
+	i = pcmcia_request_configuration(link, &link->conf);
 	if (i != CS_SUCCESS) {
-		cs_error(link->handle, RequestConfiguration, i);
+		cs_error(link, RequestConfiguration, i);
 		rc = -1;
 		goto free_cfg_mem;
 	}
 
 	/* The Oxford Semiconductor OXCF950 cards are in fact single-port:
-	   8 registers are for the UART, the others are extra registers */
-	if (info->manfid == MANFID_OXSEMI) {
+	 * 8 registers are for the UART, the others are extra registers.
+	 * Siemen's MC45 PCMCIA (Possio's GCC) is OXCF950 based too.
+	 */
+	if (info->manfid == MANFID_OXSEMI || (info->manfid == MANFID_POSSIO &&
+				info->prodid == PRODID_POSSIO_GCC)) {
+		int err;
+
 		if (cf->index == 1 || cf->index == 3) {
-			setup_serial(handle, info, base2, link->irq.AssignedIRQ);
-			outb(12, link->io.BasePort1 + 1);
+			err = setup_serial(link, info, base2,
+					link->irq.AssignedIRQ);
+			base2 = link->io.BasePort1;
 		} else {
-			setup_serial(handle, info, link->io.BasePort1, link->irq.AssignedIRQ);
-			outb(12, base2 + 1);
+			err = setup_serial(link, info, link->io.BasePort1,
+					link->irq.AssignedIRQ);
 		}
+		info->c950ctrl = base2;
+
+		/*
+		 * FIXME: We really should wake up the port prior to
+		 * handing it over to the serial layer.
+		 */
+		if (info->quirk && info->quirk->wakeup)
+			info->quirk->wakeup(link);
+
 		rc = 0;
 		goto free_cfg_mem;
 	}
 
-	setup_serial(handle, info, link->io.BasePort1, link->irq.AssignedIRQ);
-	/* The Nokia cards are not really multiport cards */
-	if (info->manfid == MANFID_NOKIA) {
-		rc = 0;
-		goto free_cfg_mem;
-	}
+	setup_serial(link, info, link->io.BasePort1, link->irq.AssignedIRQ);
 	for (i = 0; i < info->multi - 1; i++)
-		setup_serial(handle, info, base2 + (8 * i),
+		setup_serial(link, info, base2 + (8 * i),
 				link->irq.AssignedIRQ);
 	rc = 0;
 free_cfg_mem:
@@ -581,16 +715,15 @@ free_cfg_mem:
 
 ======================================================================*/
 
-void serial_config(dev_link_t * link)
+static int serial_config(struct pcmcia_device * link)
 {
-	client_handle_t handle = link->handle;
 	struct serial_info *info = link->priv;
 	struct serial_cfg_mem *cfg_mem;
 	tuple_t *tuple;
 	u_char *buf;
 	cisparse_t *parse;
 	cistpl_cftable_entry_t *cf;
-	int i, last_ret, last_fn;
+	int i;
 
 	DEBUG(0, "serial_config(0x%p)\n", link);
 
@@ -607,45 +740,35 @@ void serial_config(dev_link_t * link)
 	tuple->TupleOffset = 0;
 	tuple->TupleDataMax = 255;
 	tuple->Attributes = 0;
-	/* Get configuration register information */
-	tuple->DesiredTuple = CISTPL_CONFIG;
-	last_ret = first_tuple(handle, tuple, parse);
-	if (last_ret != CS_SUCCESS) {
-		last_fn = ParseTuple;
-		goto cs_failed;
-	}
-	link->conf.ConfigBase = parse->config.base;
-	link->conf.Present = parse->config.rmask[0];
-
-	/* Configure card */
-	link->state |= DEV_CONFIG;
 
 	/* Is this a compliant multifunction card? */
 	tuple->DesiredTuple = CISTPL_LONGLINK_MFC;
 	tuple->Attributes = TUPLE_RETURN_COMMON | TUPLE_RETURN_LINK;
-	info->multi = (first_tuple(handle, tuple, parse) == CS_SUCCESS);
+	info->multi = (first_tuple(link, tuple, parse) == CS_SUCCESS);
 
 	/* Is this a multiport card? */
 	tuple->DesiredTuple = CISTPL_MANFID;
-	if (first_tuple(handle, tuple, parse) == CS_SUCCESS) {
-		info->manfid = parse->manfid.manf;
-		for (i = 0; i < MULTI_COUNT; i++)
-			if ((info->manfid == multi_id[i].manfid) &&
-			    (parse->manfid.card == multi_id[i].prodid))
-				break;
-		if (i < MULTI_COUNT)
-			info->multi = multi_id[i].multi;
-	}
+	info->manfid = link->manf_id;
+	info->prodid = link->card_id;
+
+	for (i = 0; i < ARRAY_SIZE(quirks); i++)
+		if ((quirks[i].manfid == ~0 ||
+		     quirks[i].manfid == info->manfid) &&
+		    (quirks[i].prodid == ~0 ||
+		     quirks[i].prodid == info->prodid)) {
+			info->quirk = &quirks[i];
+			break;
+		}
 
 	/* Another check for dual-serial cards: look for either serial or
 	   multifunction cards that ask for appropriate IO port ranges */
 	tuple->DesiredTuple = CISTPL_FUNCID;
 	if ((info->multi == 0) &&
-	    ((first_tuple(handle, tuple, parse) != CS_SUCCESS) ||
-	     (parse->funcid.func == CISTPL_FUNCID_MULTI) ||
-	     (parse->funcid.func == CISTPL_FUNCID_SERIAL))) {
+	    (link->has_func_id) &&
+	    ((link->func_id == CISTPL_FUNCID_MULTI) ||
+	     (link->func_id == CISTPL_FUNCID_SERIAL))) {
 		tuple->DesiredTuple = CISTPL_CFTABLE_ENTRY;
-		if (first_tuple(handle, tuple, parse) == CS_SUCCESS) {
+		if (first_tuple(link, tuple, parse) == CS_SUCCESS) {
 			if ((cf->io.nwin == 1) && (cf->io.win[0].len % 8 == 0))
 				info->multi = cf->io.win[0].len >> 3;
 			if ((cf->io.nwin == 2) && (cf->io.win[0].len == 8) &&
@@ -653,6 +776,12 @@ void serial_config(dev_link_t * link)
 				info->multi = 2;
 		}
 	}
+
+	/*
+	 * Apply any multi-port quirk.
+	 */
+	if (info->quirk && info->quirk->multi != -1)
+		info->multi = info->quirk->multi;
 
 	if (info->multi > 1)
 		multi_config(link);
@@ -662,33 +791,22 @@ void serial_config(dev_link_t * link)
 	if (info->ndev == 0)
 		goto failed;
 
-	if (info->manfid == MANFID_IBM) {
-		conf_reg_t reg = { 0, CS_READ, 0x800, 0 };
-		last_ret = pcmcia_access_configuration_register(link->handle, &reg);
-		if (last_ret) {
-			last_fn = AccessConfigurationRegister;
-			goto cs_failed;
-		}
-		reg.Action = CS_WRITE;
-		reg.Value = reg.Value | 1;
-		last_ret = pcmcia_access_configuration_register(link->handle, &reg);
-		if (last_ret) {
-			last_fn = AccessConfigurationRegister;
-			goto cs_failed;
-		}
-	}
+	/*
+	 * Apply any post-init quirk.  FIXME: This should really happen
+	 * before we register the port, since it might already be in use.
+	 */
+	if (info->quirk && info->quirk->post)
+		if (info->quirk->post(link))
+			goto failed;
 
-	link->dev = &info->node[0];
-	link->state &= ~DEV_CONFIG_PENDING;
+	link->dev_node = &info->node[0];
 	kfree(cfg_mem);
-	return;
+	return 0;
 
- cs_failed:
-	cs_error(link->handle, last_fn, last_ret);
  failed:
 	serial_remove(link);
-	link->state &= ~DEV_CONFIG_PENDING;
 	kfree(cfg_mem);
+	return -ENODEV;
 }
 
 static struct pcmcia_device_id serial_ids[] = {
@@ -739,6 +857,7 @@ static struct pcmcia_device_id serial_ids[] = {
 	PCMCIA_MFC_DEVICE_PROD_ID1(1, "Motorola MARQUIS", 0xf03e4e77),
 	PCMCIA_MFC_DEVICE_PROD_ID2(1, "FAX/Modem/Ethernet Combo Card ", 0x1ed59302),
 	PCMCIA_DEVICE_MANF_CARD(0x0089, 0x0301),
+	PCMCIA_DEVICE_MANF_CARD(0x00a4, 0x0276),
 	PCMCIA_DEVICE_MANF_CARD(0x0101, 0x0039),
 	PCMCIA_DEVICE_MANF_CARD(0x0104, 0x0006),
 	PCMCIA_DEVICE_MANF_CARD(0x0105, 0x410a),
@@ -757,6 +876,7 @@ static struct pcmcia_device_id serial_ids[] = {
 	PCMCIA_DEVICE_PROD_ID14("MEGAHERTZ", "PCMCIA MODEM", 0xf510db04, 0xbd6c43ef),
 	PCMCIA_DEVICE_PROD_ID124("TOSHIBA", "T144PF", "PCMCIA MODEM", 0xb4585a1a, 0x7271409c, 0xbd6c43ef),
 	PCMCIA_DEVICE_PROD_ID123("FUJITSU", "FC14F ", "MBH10213", 0x6ee5a3d8, 0x30ead12b, 0xb00f05a0),
+	PCMCIA_DEVICE_PROD_ID123("Novatel Wireless", "Merlin UMTS Modem", "U630", 0x32607776, 0xd9e73b13, 0xe87332e),
 	PCMCIA_DEVICE_PROD_ID13("MEGAHERTZ", "V.34 PCMCIA MODEM", 0xf510db04, 0xbb2cce4a),
 	PCMCIA_DEVICE_PROD_ID12("Brain Boxes", "Bluetooth PC Card", 0xee138382, 0xd4ce9b02),
 	PCMCIA_DEVICE_PROD_ID12("CIRRUS LOGIC", "FAX MODEM", 0xe625f451, 0xcecd6dfa),
@@ -791,6 +911,31 @@ static struct pcmcia_device_id serial_ids[] = {
 	PCMCIA_DEVICE_CIS_PROD_ID12("ADVANTECH", "COMpad-32/85B-4", 0x96913a85, 0xcec8f102, "COMpad4.cis"),
 	PCMCIA_DEVICE_CIS_PROD_ID123("ADVANTECH", "COMpad-32/85", "1.0", 0x96913a85, 0x8fbe92ae, 0x0877b627, "COMpad2.cis"),
 	PCMCIA_DEVICE_CIS_PROD_ID2("RS-COM 2P", 0xad20b156, "RS-COM-2P.cis"),
+	PCMCIA_DEVICE_CIS_MANF_CARD(0x0013, 0x0000, "GLOBETROTTER.cis"),
+	PCMCIA_DEVICE_PROD_ID12("ELAN DIGITAL SYSTEMS LTD, c1997.","SERIAL CARD: SL100  1.00.",0x19ca78af,0xf964f42b),
+	PCMCIA_DEVICE_PROD_ID12("ELAN DIGITAL SYSTEMS LTD, c1997.","SERIAL CARD: SL100",0x19ca78af,0x71d98e83),
+	PCMCIA_DEVICE_PROD_ID12("ELAN DIGITAL SYSTEMS LTD, c1997.","SERIAL CARD: SL232  1.00.",0x19ca78af,0x69fb7490),
+	PCMCIA_DEVICE_PROD_ID12("ELAN DIGITAL SYSTEMS LTD, c1997.","SERIAL CARD: SL232",0x19ca78af,0xb6bc0235),
+	PCMCIA_DEVICE_PROD_ID12("ELAN DIGITAL SYSTEMS LTD, c2000.","SERIAL CARD: CF232",0x63f2e0bd,0xb9e175d3),
+	PCMCIA_DEVICE_PROD_ID12("ELAN DIGITAL SYSTEMS LTD, c2000.","SERIAL CARD: CF232-5",0x63f2e0bd,0xfce33442),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: CF232",0x3beb8cf2,0x171e7190),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: CF232-5",0x3beb8cf2,0x20da4262),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: CF428",0x3beb8cf2,0xea5dd57d),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: CF500",0x3beb8cf2,0xd77255fa),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: IC232",0x3beb8cf2,0x6a709903),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: SL232",0x3beb8cf2,0x18430676),
+	PCMCIA_DEVICE_PROD_ID12("Elan","Serial Port: XL232",0x3beb8cf2,0x6f933767),
+	PCMCIA_MFC_DEVICE_PROD_ID12(0,"Elan","Serial Port: CF332",0x3beb8cf2,0x16dc1ba7),
+	PCMCIA_MFC_DEVICE_PROD_ID12(0,"Elan","Serial Port: SL332",0x3beb8cf2,0x19816c41),
+	PCMCIA_MFC_DEVICE_PROD_ID12(0,"Elan","Serial Port: SL385",0x3beb8cf2,0x64112029),
+	PCMCIA_MFC_DEVICE_PROD_ID12(0,"Elan","Serial Port: SL432",0x3beb8cf2,0x1cce7ac4),
+	PCMCIA_MFC_DEVICE_PROD_ID12(0,"Elan","Serial+Parallel Port: SP230",0x3beb8cf2,0xdb9e58bc),
+	PCMCIA_MFC_DEVICE_PROD_ID12(1,"Elan","Serial Port: CF332",0x3beb8cf2,0x16dc1ba7),
+	PCMCIA_MFC_DEVICE_PROD_ID12(1,"Elan","Serial Port: SL332",0x3beb8cf2,0x19816c41),
+	PCMCIA_MFC_DEVICE_PROD_ID12(1,"Elan","Serial Port: SL385",0x3beb8cf2,0x64112029),
+	PCMCIA_MFC_DEVICE_PROD_ID12(1,"Elan","Serial Port: SL432",0x3beb8cf2,0x1cce7ac4),
+	PCMCIA_MFC_DEVICE_PROD_ID12(2,"Elan","Serial Port: SL432",0x3beb8cf2,0x1cce7ac4),
+	PCMCIA_MFC_DEVICE_PROD_ID12(3,"Elan","Serial Port: SL432",0x3beb8cf2,0x1cce7ac4),
 	/* too generic */
 	/* PCMCIA_MFC_DEVICE_MANF_CARD(0, 0x0160, 0x0002), */
 	/* PCMCIA_MFC_DEVICE_MANF_CARD(1, 0x0160, 0x0002), */

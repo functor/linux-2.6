@@ -28,18 +28,6 @@ static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *
 	set_pmd(pmd, __pmd(_PAGE_TABLE | __pa(pte)));
 }
 
-static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd, struct page *pte)
-{
-	if (unlikely((mm)->context.pinned)) {
-		BUG_ON(HYPERVISOR_update_va_mapping(
-			       (unsigned long)__va(page_to_pfn(pte) << PAGE_SHIFT),
-			       pfn_pte(page_to_pfn(pte), PAGE_KERNEL_RO), 0));
-		set_pmd(pmd, __pmd(_PAGE_TABLE | (page_to_pfn(pte) << PAGE_SHIFT)));
-	} else {
-		*(pmd) = __pmd(_PAGE_TABLE | (page_to_pfn(pte) << PAGE_SHIFT));
-	}
-}
-
 static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 {
 	if (unlikely((mm)->context.pinned)) {
@@ -72,6 +60,18 @@ static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
 	}
 }
 
+static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd, struct page *pte)
+{
+	if (unlikely((mm)->context.pinned)) {
+		BUG_ON(HYPERVISOR_update_va_mapping(
+			       (unsigned long)__va(page_to_pfn(pte) << PAGE_SHIFT),
+			       pfn_pte(page_to_pfn(pte), PAGE_KERNEL_RO), 0));
+		set_pmd(pmd, __pmd(_PAGE_TABLE | (page_to_pfn(pte) << PAGE_SHIFT)));
+	} else {
+		*(pmd) = __pmd(_PAGE_TABLE | (page_to_pfn(pte) << PAGE_SHIFT));
+	}
+}
+
 static inline void pmd_free(pmd_t *pmd)
 {
 	pte_t *ptep = virt_to_ptep(pmd);
@@ -85,19 +85,17 @@ static inline void pmd_free(pmd_t *pmd)
 	free_page((unsigned long)pmd);
 }
 
-static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
+static inline pmd_t *pmd_alloc_one (struct mm_struct *mm, unsigned long addr)
 {
-        pmd_t *pmd = (pmd_t *) get_zeroed_page(GFP_KERNEL|__GFP_REPEAT);
-        return pmd;
+	return (pmd_t *)get_zeroed_page(GFP_KERNEL|__GFP_REPEAT);
 }
 
 static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
-        pud_t *pud = (pud_t *) get_zeroed_page(GFP_KERNEL|__GFP_REPEAT);
-        return pud;
+	return (pud_t *)get_zeroed_page(GFP_KERNEL|__GFP_REPEAT);
 }
 
-static inline void pud_free(pud_t *pud)
+static inline void pud_free (pud_t *pud)
 {
 	pte_t *ptep = virt_to_ptep(pud);
 

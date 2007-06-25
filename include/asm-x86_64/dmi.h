@@ -5,6 +5,10 @@
 
 extern void *dmi_ioremap(unsigned long addr, unsigned long size);
 extern void dmi_iounmap(void *addr, unsigned long size);
+#ifdef CONFIG_XEN
+extern void *bt_ioremap(unsigned long addr, unsigned long size);
+extern void bt_iounmap(void *addr, unsigned long size);
+#endif
 
 #define DMI_MAX_DATA 2048
 
@@ -21,7 +25,12 @@ static inline void *dmi_alloc(unsigned len)
 	return dmi_alloc_data + idx;
 }
 
+#ifdef CONFIG_XEN
+#define dmi_ioremap bt_ioremap
+#define dmi_iounmap bt_iounmap
+#else
 #define dmi_ioremap early_ioremap
 #define dmi_iounmap early_iounmap
+#endif
 
 #endif

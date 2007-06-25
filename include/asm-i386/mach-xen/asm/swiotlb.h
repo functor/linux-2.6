@@ -32,6 +32,9 @@ extern void swiotlb_unmap_page(struct device *hwdev, dma_addr_t dma_address,
 extern int swiotlb_dma_supported(struct device *hwdev, u64 mask);
 extern void swiotlb_init(void);
 
+/* Width of DMA addresses in the IO TLB. 30 bits is a b44 limitation. */
+#define IO_TLB_DMA_BITS 30
+
 #ifdef CONFIG_SWIOTLB
 extern int swiotlb;
 #else

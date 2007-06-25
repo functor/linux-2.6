@@ -6,7 +6,6 @@
  * Copyright (C) 1997 Olaf Kirch <okir@monad.swb.de>
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 
 #include <linux/types.h>
@@ -34,11 +33,8 @@ EXPORT_SYMBOL(rpciod_down);
 EXPORT_SYMBOL(rpciod_up);
 EXPORT_SYMBOL(rpc_new_task);
 EXPORT_SYMBOL(rpc_wake_up_status);
-EXPORT_SYMBOL(rpc_release_task);
 
 /* RPC client functions */
-EXPORT_SYMBOL(rpc_create_client);
-EXPORT_SYMBOL(rpc_new_client);
 EXPORT_SYMBOL(rpc_clone_client);
 EXPORT_SYMBOL(rpc_bind_new_program);
 EXPORT_SYMBOL(rpc_destroy_client);
@@ -58,7 +54,6 @@ EXPORT_SYMBOL(rpc_queue_upcall);
 EXPORT_SYMBOL(rpc_mkpipe);
 
 /* Client transport */
-EXPORT_SYMBOL(xprt_create_proto);
 EXPORT_SYMBOL(xprt_set_timeout);
 
 /* Client credential cache */
@@ -74,6 +69,8 @@ EXPORT_SYMBOL(put_rpccred);
 /* RPC server stuff */
 EXPORT_SYMBOL(svc_create);
 EXPORT_SYMBOL(svc_create_thread);
+EXPORT_SYMBOL(svc_create_pooled);
+EXPORT_SYMBOL(svc_set_num_threads);
 EXPORT_SYMBOL(svc_exit_thread);
 EXPORT_SYMBOL(svc_destroy);
 EXPORT_SYMBOL(svc_drop);
@@ -105,8 +102,6 @@ EXPORT_SYMBOL(auth_unix_lookup);
 EXPORT_SYMBOL(cache_check);
 EXPORT_SYMBOL(cache_flush);
 EXPORT_SYMBOL(cache_purge);
-EXPORT_SYMBOL(cache_fresh);
-EXPORT_SYMBOL(cache_init);
 EXPORT_SYMBOL(cache_register);
 EXPORT_SYMBOL(cache_unregister);
 EXPORT_SYMBOL(qword_add);
@@ -142,6 +137,9 @@ EXPORT_SYMBOL(nlm_debug);
 
 extern int register_rpc_pipefs(void);
 extern void unregister_rpc_pipefs(void);
+extern struct cache_detail ip_map_cache;
+extern int init_socket_xprt(void);
+extern void cleanup_socket_xprt(void);
 
 static int __init
 init_sunrpc(void)
@@ -158,8 +156,8 @@ init_sunrpc(void)
 #ifdef CONFIG_PROC_FS
 	rpc_proc_init();
 #endif
-	cache_register(&auth_domain_cache);
 	cache_register(&ip_map_cache);
+	init_socket_xprt();
 out:
 	return err;
 }
@@ -167,10 +165,9 @@ out:
 static void __exit
 cleanup_sunrpc(void)
 {
+	cleanup_socket_xprt();
 	unregister_rpc_pipefs();
 	rpc_destroy_mempool();
-	if (cache_unregister(&auth_domain_cache))
-		printk(KERN_ERR "sunrpc: failed to unregister auth_domain cache\n");
 	if (cache_unregister(&ip_map_cache))
 		printk(KERN_ERR "sunrpc: failed to unregister ip_map cache\n");
 #ifdef RPC_DEBUG

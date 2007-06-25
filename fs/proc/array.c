@@ -52,7 +52,6 @@
  *			 :  base.c too.
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/time.h>
@@ -74,10 +73,11 @@
 #include <linux/file.h>
 #include <linux/times.h>
 #include <linux/cpuset.h>
+#include <linux/tracehook.h>
 #include <linux/rcupdate.h>
+#include <linux/delayacct.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -137,10 +137,9 @@ static const char *task_state_array[] = {
 	"D (disk sleep)",	/*  2 */
 	"T (stopped)",		/*  4 */
 	"T (tracing stop)",	/*  8 */
-	"Z (zombie)",		/* 16 */
-	"X (dead)",		/* 32 */
-	"N (noninteractive)",	/* 64 */
-	"H (on hold)"		/* 128 */
+	"H (on hold)",		/* 16 */
+	"Z (zombie)",		/* 32 */
+	"X (dead)",		/* 64 */
 };
 
 static inline const char * get_task_state(struct task_struct *tsk)
@@ -164,16 +163,20 @@ static inline const char * get_task_state(struct task_struct *tsk)
 
 static inline char * task_state(struct task_struct *p, char *buffer)
 {
+	struct task_struct *tracer;
+	pid_t pid, ptgid, tracer_pid, tgid;
 	struct group_info *group_info;
 	int g;
 	struct fdtable *fdt = NULL;
-	pid_t pid, ptgid, tppid, tgid;
 
-	read_lock(&tasklist_lock);
+	rcu_read_lock();
+	tracer = tracehook_tracer_task(p);
+	tracer_pid = tracer == NULL ? 0 : tracer->pid;
 	tgid = vx_map_tgid(p->tgid);
 	pid = vx_map_pid(p->pid);
-	ptgid = vx_map_pid(p->group_leader->real_parent->tgid);
-	tppid = vx_map_pid(p->parent->pid);
+	ptgid = vx_map_pid(pid_alive(p) ?
+		rcu_dereference(p->parent)->tgid : 0);
+
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
 		"SleepAVG:\t%lu%%\n"
@@ -186,12 +189,11 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		get_task_state(p),
 		(p->sleep_avg/1024)*100/(1020000000/1024),
 		tgid, pid, (pid > 1) ? ptgid : 0,
-		pid_alive(p) && p->ptrace ? tppid : 0,
+		tracer_pid,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
-	read_unlock(&tasklist_lock);
+
 	task_lock(p);
-	rcu_read_lock();
 	if (p->files)
 		fdt = files_fdtable(p->files);
 	buffer += sprintf(buffer,
@@ -254,6 +256,7 @@ static void collect_sigign_sigcatch(struct task_struct *p, sigset_t *ign,
 
 static inline char * task_sig(struct task_struct *p, char *buffer)
 {
+	unsigned long flags;
 	sigset_t pending, shpending, blocked, ignored, caught;
 	int num_threads = 0;
 	unsigned long qsize = 0;
@@ -265,10 +268,8 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 	sigemptyset(&ignored);
 	sigemptyset(&caught);
 
-	/* Gather all the data with the appropriate locks held */
-	read_lock(&tasklist_lock);
-	if (p->sighand) {
-		spin_lock_irq(&p->sighand->siglock);
+	rcu_read_lock();
+	if (lock_task_sighand(p, &flags)) {
 		pending = p->pending.signal;
 		shpending = p->signal->shared_pending.signal;
 		blocked = p->blocked;
@@ -276,9 +277,9 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 		num_threads = atomic_read(&p->signal->count);
 		qsize = atomic_read(&p->user->sigpending);
 		qlim = p->signal->rlim[RLIMIT_SIGPENDING].rlim_cur;
-		spin_unlock_irq(&p->sighand->siglock);
+		unlock_task_sighand(p, &flags);
 	}
-	read_unlock(&tasklist_lock);
+	rcu_read_unlock();
 
 	buffer += sprintf(buffer, "Threads:\t%d\n", num_threads);
 	buffer += sprintf(buffer, "SigQ:\t%lu/%lu\n", qsize, qlim);
@@ -295,12 +296,15 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 
 static inline char *task_cap(struct task_struct *p, char *buffer)
 {
-    return buffer + sprintf(buffer, "CapInh:\t%016x\n"
-			    "CapPrm:\t%016x\n"
-			    "CapEff:\t%016x\n",
-			    cap_t(p->cap_inheritable),
-			    cap_t(p->cap_permitted),
-			    cap_t(p->cap_effective));
+	struct vx_info *vxi = p->vx_info;
+
+	return buffer + sprintf(buffer,
+		"CapInh:\t%016x\n"
+		"CapPrm:\t%016x\n"
+		"CapEff:\t%016x\n",
+		(unsigned)vx_info_mbcap(vxi, p->cap_inheritable),
+		(unsigned)vx_info_mbcap(vxi, p->cap_permitted),
+		(unsigned)vx_info_mbcap(vxi, p->cap_effective));
 }
 
 int proc_pid_status(struct task_struct *task, char * buffer)
@@ -325,7 +329,7 @@ int proc_pid_status(struct task_struct *task, char * buffer)
 	buffer = task_cap(task, buffer);
 	buffer = cpuset_task_status_allowed(task, buffer);
 
-	if (task_vx_flags(task, VXF_INFO_HIDE, 0))
+	if (task_vx_flags(task, VXF_HIDE_VINFO, 0))
 		goto skip;
 #ifdef	CONFIG_VSERVER_LEGACY
 	buffer += sprintf (buffer,"s_context: %d\n", vx_task_xid(task));
@@ -378,7 +382,7 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	sigset_t sigign, sigcatch;
 	char state;
 	int res;
-	pid_t pid, ppid, pgid = -1, sid = -1;
+	pid_t pid = 0, ppid = 0, pgid = -1, sid = -1;
 	int num_threads = 0;
 	struct mm_struct *mm;
 	unsigned long long start_time;
@@ -386,9 +390,8 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	unsigned long  min_flt = 0,  maj_flt = 0;
 	cputime_t cutime, cstime, utime, stime;
 	unsigned long rsslim = 0;
-	DEFINE_KTIME(it_real_value);
-	struct task_struct *t;
 	char tcomm[sizeof(task->comm)];
+	unsigned long flags;
 
 	state = *get_task_state(task);
 	vsize = eip = esp = 0;
@@ -404,15 +407,28 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	sigemptyset(&sigign);
 	sigemptyset(&sigcatch);
 	cutime = cstime = utime = stime = cputime_zero;
-	read_lock(&tasklist_lock);
-	if (task->sighand) {
-		spin_lock_irq(&task->sighand->siglock);
-		num_threads = atomic_read(&task->signal->count);
+
+	rcu_read_lock();
+	if (lock_task_sighand(task, &flags)) {
+		struct signal_struct *sig = task->signal;
+
+		if (sig->tty) {
+			tty_pgrp = sig->tty->pgrp;
+			tty_nr = new_encode_dev(tty_devnum(sig->tty));
+		}
+
+		num_threads = atomic_read(&sig->count);
 		collect_sigign_sigcatch(task, &sigign, &sigcatch);
+
+		cmin_flt = sig->cmin_flt;
+		cmaj_flt = sig->cmaj_flt;
+		cutime = sig->cutime;
+		cstime = sig->cstime;
+		rsslim = sig->rlim[RLIMIT_RSS].rlim_cur;
 
 		/* add up live thread stats at the group level */
 		if (whole) {
-			t = task;
+			struct task_struct *t = task;
 			do {
 				min_flt += t->min_flt;
 				maj_flt += t->maj_flt;
@@ -420,39 +436,29 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 				stime = cputime_add(stime, t->stime);
 				t = next_thread(t);
 			} while (t != task);
+
+			min_flt += sig->min_flt;
+			maj_flt += sig->maj_flt;
+			utime = cputime_add(utime, sig->utime);
+			stime = cputime_add(stime, sig->stime);
 		}
 
-		spin_unlock_irq(&task->sighand->siglock);
+		sid = signal_session(sig);
+		pid = vx_info_map_pid(task->vx_info, task->pid);
+		pgid = vx_info_map_pid(task->vx_info, process_group(task));
+		ppid = (pid > 1) ? vx_info_map_tgid(task->vx_info,
+			rcu_dereference(task->parent)->tgid) : 0;
+
+		unlock_task_sighand(task, &flags);
 	}
-	if (task->signal) {
-		if (task->signal->tty) {
-			tty_pgrp = task->signal->tty->pgrp;
-			tty_nr = new_encode_dev(tty_devnum(task->signal->tty));
-		}
-		pgid = process_group(task);
-		sid = task->signal->session;
-		cmin_flt = task->signal->cmin_flt;
-		cmaj_flt = task->signal->cmaj_flt;
-		cutime = task->signal->cutime;
-		cstime = task->signal->cstime;
-		rsslim = task->signal->rlim[RLIMIT_RSS].rlim_cur;
-		if (whole) {
-			min_flt += task->signal->min_flt;
-			maj_flt += task->signal->maj_flt;
-			utime = cputime_add(utime, task->signal->utime);
-			stime = cputime_add(stime, task->signal->stime);
-		}
-		it_real_value = task->signal->real_timer.expires;
+	rcu_read_unlock();
+
+	if (!whole || num_threads<2) {
+		wchan = 0;
+		if (current->uid == task->uid || current->euid == task->uid ||
+				capable(CAP_SYS_NICE))
+			wchan = get_wchan(task);
 	}
-	pid = vx_info_map_pid(task->vx_info, pid_alive(task) ? task->pid : 0);
-	ppid = (!(pid > 1)) ? 0 : vx_info_map_tgid(task->vx_info,
-		task->group_leader->real_parent->tgid);
-	pgid = vx_info_map_pid(task->vx_info, pgid);
-
-	read_unlock(&tasklist_lock);
-
-	if (!whole || num_threads<2)
-		wchan = get_wchan(task);
 	if (!whole) {
 		min_flt = task->min_flt;
 		maj_flt = task->maj_flt;
@@ -484,8 +490,8 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 	}
 
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
-%lu %lu %lu %lu %lu %ld %ld %ld %ld %d %ld %llu %lu %ld %lu %lu %lu %lu %lu \
-%lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu\n",
+%lu %lu %lu %lu %lu %ld %ld %ld %ld %d 0 %llu %lu %ld %lu %lu %lu %lu %lu \
+%lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu %llu\n",
 		pid,
 		tcomm,
 		state,
@@ -506,7 +512,6 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		priority,
 		nice,
 		num_threads,
-		(long) ktime_to_clock_t(it_real_value),
 		start_time,
 		vsize,
 		mm ? get_mm_rss(mm) : 0,
@@ -530,7 +535,8 @@ static int do_task_stat(struct task_struct *task, char * buffer, int whole)
 		task->exit_signal,
 		task_cpu(task),
 		task->rt_priority,
-		task->policy);
+		task->policy,
+		(unsigned long long)delayacct_blkio_ticks(task));
 	if(mm)
 		mmput(mm);
 	return res;

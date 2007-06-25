@@ -1,5 +1,5 @@
 /*
- * drivers/char/rng/ixp4xx-rng.c
+ * drivers/char/hw_random/ixp4xx-rng.c
  *
  * RNG driver for Intel IXP4xx family of NPUs
  *
@@ -64,7 +64,7 @@ static void __exit ixp4xx_rng_exit(void)
 	iounmap(rng_base);
 }
 
-subsys_initcall(ixp4xx_rng_init);
+module_init(ixp4xx_rng_init);
 module_exit(ixp4xx_rng_exit);
 
 MODULE_AUTHOR("Deepak Saxena <dsaxena@plexity.net>");

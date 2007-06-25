@@ -32,7 +32,6 @@
  * $Id: mthca_mcg.c 1349 2004-12-16 21:09:43Z roland $
  */
 
-#include <linux/init.h>
 #include <linux/string.h>
 #include <linux/slab.h>
 
@@ -187,7 +186,7 @@ int mthca_multicast_attach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 
 	for (i = 0; i < MTHCA_QP_PER_MGM; ++i)
 		if (mgm->qp[i] == cpu_to_be32(ibqp->qp_num | (1 << 31))) {
-			mthca_dbg(dev, "QP %06x already a member of MGM\n", 
+			mthca_dbg(dev, "QP %06x already a member of MGM\n",
 				  ibqp->qp_num);
 			err = 0;
 			goto out;
@@ -371,7 +370,7 @@ int mthca_multicast_detach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 	return err;
 }
 
-int __devinit mthca_init_mcg_table(struct mthca_dev *dev)
+int mthca_init_mcg_table(struct mthca_dev *dev)
 {
 	int err;
 	int table_size = dev->limits.num_mgms + dev->limits.num_amgms;
@@ -388,7 +387,7 @@ int __devinit mthca_init_mcg_table(struct mthca_dev *dev)
 	return 0;
 }
 
-void __devexit mthca_cleanup_mcg_table(struct mthca_dev *dev)
+void mthca_cleanup_mcg_table(struct mthca_dev *dev)
 {
 	mthca_alloc_cleanup(&dev->mcg_table.alloc);
 }

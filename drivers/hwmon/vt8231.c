@@ -35,6 +35,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 #include <asm/io.h>
 
 static int force_addr;
@@ -148,7 +149,7 @@ static inline u8 FAN_TO_REG(long rpm, int div)
 
 struct vt8231_data {
 	struct i2c_client client;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	struct class_device *class_dev;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
@@ -223,10 +224,10 @@ static ssize_t set_in_min(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_min[nr] = SENSORS_LIMIT(((val * 958) / 10000) + 3, 0, 255);
 	vt8231_write_value(client, regvoltmin[nr], data->in_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -239,10 +240,10 @@ static ssize_t set_in_max(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_max[nr] = SENSORS_LIMIT(((val * 958) / 10000) + 3, 0, 255);
 	vt8231_write_value(client, regvoltmax[nr], data->in_max[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -281,11 +282,11 @@ static ssize_t set_in5_min(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_min[5] = SENSORS_LIMIT(((val * 958 * 34) / (10000 * 54)) + 3,
 					0, 255);
 	vt8231_write_value(client, regvoltmin[5], data->in_min[5]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -296,11 +297,11 @@ static ssize_t set_in5_max(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_max[5] = SENSORS_LIMIT(((val * 958 * 34) / (10000 * 54)) + 3,
 					0, 255);
 	vt8231_write_value(client, regvoltmax[5], data->in_max[5]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -351,10 +352,10 @@ static ssize_t set_temp0_max(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_max[0] = SENSORS_LIMIT((val + 500) / 1000, 0, 255);
 	vt8231_write_value(client, regtempmax[0], data->temp_max[0]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static ssize_t set_temp0_min(struct device *dev, struct device_attribute *attr,
@@ -364,10 +365,10 @@ static ssize_t set_temp0_min(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_min[0] = SENSORS_LIMIT((val + 500) / 1000, 0, 255);
 	vt8231_write_value(client, regtempmin[0], data->temp_min[0]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -407,10 +408,10 @@ static ssize_t set_temp_max(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_max[nr] = SENSORS_LIMIT(TEMP_MAXMIN_TO_REG(val), 0, 255);
 	vt8231_write_value(client, regtempmax[nr], data->temp_max[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static ssize_t set_temp_min(struct device *dev, struct device_attribute *attr,
@@ -422,10 +423,10 @@ static ssize_t set_temp_min(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	int val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_min[nr] = SENSORS_LIMIT(TEMP_MAXMIN_TO_REG(val), 0, 255);
 	vt8231_write_value(client, regtempmin[nr], data->temp_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -449,37 +450,6 @@ define_temperature_sysfs(3);
 define_temperature_sysfs(4);
 define_temperature_sysfs(5);
 define_temperature_sysfs(6);
-
-#define CFG_INFO_TEMP(id)	{ &sensor_dev_attr_temp##id##_input.dev_attr, \
-				&sensor_dev_attr_temp##id##_max_hyst.dev_attr, \
-				&sensor_dev_attr_temp##id##_max.dev_attr }
-#define CFG_INFO_VOLT(id)	{ &sensor_dev_attr_in##id##_input.dev_attr, \
-				&sensor_dev_attr_in##id##_min.dev_attr, \
-				&sensor_dev_attr_in##id##_max.dev_attr }
-
-struct str_device_attr_table {
-	struct device_attribute *input;
-	struct device_attribute *min;
-	struct device_attribute *max;
-};
-
-static struct str_device_attr_table cfg_info_temp[] = {
-	{ &dev_attr_temp1_input, &dev_attr_temp1_max_hyst, &dev_attr_temp1_max },
-	CFG_INFO_TEMP(2),
-	CFG_INFO_TEMP(3),
-	CFG_INFO_TEMP(4),
-	CFG_INFO_TEMP(5),
-	CFG_INFO_TEMP(6)
-};
-
-static struct str_device_attr_table cfg_info_volt[] = {
-	CFG_INFO_VOLT(0),
-	CFG_INFO_VOLT(1),
-	CFG_INFO_VOLT(2),
-	CFG_INFO_VOLT(3),
-	CFG_INFO_VOLT(4),
-	{ &dev_attr_in5_input, &dev_attr_in5_min, &dev_attr_in5_max }
-};
 
 /* Fans */
 static ssize_t show_fan(struct device *dev, struct device_attribute *attr,
@@ -520,10 +490,10 @@ static ssize_t set_fan_min(struct device *dev, struct device_attribute *attr,
 	struct vt8231_data *data = i2c_get_clientdata(client);
 	int val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->fan_min[nr] = FAN_TO_REG(val, DIV_FROM_REG(data->fan_div[nr]));
 	vt8231_write_value(client, VT8231_REG_FAN_MIN(nr), data->fan_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -539,7 +509,7 @@ static ssize_t set_fan_div(struct device *dev, struct device_attribute *attr,
 	long min = FAN_FROM_REG(data->fan_min[nr],
 				 DIV_FROM_REG(data->fan_div[nr]));
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	switch (val) {
 	case 1: data->fan_div[nr] = 0; break;
 	case 2: data->fan_div[nr] = 1; break;
@@ -548,7 +518,7 @@ static ssize_t set_fan_div(struct device *dev, struct device_attribute *attr,
 	default:
 		dev_err(&client->dev, "fan_div value %ld not supported."
 		        "Choose one of 1, 2, 4 or 8!\n", val);
-		up(&data->update_lock);
+		mutex_unlock(&data->update_lock);
 		return -EINVAL;
 	}
 
@@ -558,7 +528,7 @@ static ssize_t set_fan_div(struct device *dev, struct device_attribute *attr,
 
 	old = (old & 0x0f) | (data->fan_div[1] << 6) | (data->fan_div[0] << 4);
 	vt8231_write_value(client, VT8231_REG_FANDIV, old);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -584,8 +554,110 @@ static ssize_t show_alarms(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR(alarms, S_IRUGO, show_alarms, NULL);
 
+static struct attribute *vt8231_attributes_temps[6][4] = {
+	{
+		&dev_attr_temp1_input.attr,
+		&dev_attr_temp1_max_hyst.attr,
+		&dev_attr_temp1_max.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_temp2_input.dev_attr.attr,
+		&sensor_dev_attr_temp2_max_hyst.dev_attr.attr,
+		&sensor_dev_attr_temp2_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_temp3_input.dev_attr.attr,
+		&sensor_dev_attr_temp3_max_hyst.dev_attr.attr,
+		&sensor_dev_attr_temp3_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_temp4_input.dev_attr.attr,
+		&sensor_dev_attr_temp4_max_hyst.dev_attr.attr,
+		&sensor_dev_attr_temp4_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_temp5_input.dev_attr.attr,
+		&sensor_dev_attr_temp5_max_hyst.dev_attr.attr,
+		&sensor_dev_attr_temp5_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_temp6_input.dev_attr.attr,
+		&sensor_dev_attr_temp6_max_hyst.dev_attr.attr,
+		&sensor_dev_attr_temp6_max.dev_attr.attr,
+		NULL
+	}
+};
+
+static const struct attribute_group vt8231_group_temps[6] = {
+	{ .attrs = vt8231_attributes_temps[0] },
+	{ .attrs = vt8231_attributes_temps[1] },
+	{ .attrs = vt8231_attributes_temps[2] },
+	{ .attrs = vt8231_attributes_temps[3] },
+	{ .attrs = vt8231_attributes_temps[4] },
+	{ .attrs = vt8231_attributes_temps[5] },
+};
+
+static struct attribute *vt8231_attributes_volts[6][4] = {
+	{
+		&sensor_dev_attr_in0_input.dev_attr.attr,
+		&sensor_dev_attr_in0_min.dev_attr.attr,
+		&sensor_dev_attr_in0_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_in1_input.dev_attr.attr,
+		&sensor_dev_attr_in1_min.dev_attr.attr,
+		&sensor_dev_attr_in1_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_in2_input.dev_attr.attr,
+		&sensor_dev_attr_in2_min.dev_attr.attr,
+		&sensor_dev_attr_in2_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_in3_input.dev_attr.attr,
+		&sensor_dev_attr_in3_min.dev_attr.attr,
+		&sensor_dev_attr_in3_max.dev_attr.attr,
+		NULL
+	}, {
+		&sensor_dev_attr_in4_input.dev_attr.attr,
+		&sensor_dev_attr_in4_min.dev_attr.attr,
+		&sensor_dev_attr_in4_max.dev_attr.attr,
+		NULL
+	}, {
+		&dev_attr_in5_input.attr,
+		&dev_attr_in5_min.attr,
+		&dev_attr_in5_max.attr,
+		NULL
+	}
+};
+
+static const struct attribute_group vt8231_group_volts[6] = {
+	{ .attrs = vt8231_attributes_volts[0] },
+	{ .attrs = vt8231_attributes_volts[1] },
+	{ .attrs = vt8231_attributes_volts[2] },
+	{ .attrs = vt8231_attributes_volts[3] },
+	{ .attrs = vt8231_attributes_volts[4] },
+	{ .attrs = vt8231_attributes_volts[5] },
+};
+
+static struct attribute *vt8231_attributes[] = {
+	&sensor_dev_attr_fan1_input.dev_attr.attr,
+	&sensor_dev_attr_fan2_input.dev_attr.attr,
+	&sensor_dev_attr_fan1_min.dev_attr.attr,
+	&sensor_dev_attr_fan2_min.dev_attr.attr,
+	&sensor_dev_attr_fan1_div.dev_attr.attr,
+	&sensor_dev_attr_fan2_div.dev_attr.attr,
+	&dev_attr_alarms.attr,
+	NULL
+};
+
+static const struct attribute_group vt8231_group = {
+	.attrs = vt8231_attributes,
+};
+
 static struct i2c_driver vt8231_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "vt8231",
 	},
 	.attach_adapter	= vt8231_detect,
@@ -660,7 +732,7 @@ int vt8231_detect(struct i2c_adapter *adapter)
 	/* Fill in the remaining client fields and put into the global list */
 	strlcpy(client->name, "vt8231", I2C_NAME_SIZE);
 
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(client)))
@@ -669,43 +741,43 @@ int vt8231_detect(struct i2c_adapter *adapter)
 	vt8231_init_client(client);
 
 	/* Register sysfs hooks */
-	data->class_dev = hwmon_device_register(&client->dev);
-	if (IS_ERR(data->class_dev)) {
-		err = PTR_ERR(data->class_dev);
+	if ((err = sysfs_create_group(&client->dev.kobj, &vt8231_group)))
 		goto exit_detach;
-	}
 
 	/* Must update device information to find out the config field */
 	data->uch_config = vt8231_read_value(client, VT8231_REG_UCH_CONFIG);
 
-	for (i = 0; i < ARRAY_SIZE(cfg_info_temp); i++) {
+	for (i = 0; i < ARRAY_SIZE(vt8231_group_temps); i++) {
 		if (ISTEMP(i, data->uch_config)) {
-			device_create_file(&client->dev,
-					   cfg_info_temp[i].input);
-			device_create_file(&client->dev, cfg_info_temp[i].max);
-			device_create_file(&client->dev, cfg_info_temp[i].min);
+			if ((err = sysfs_create_group(&client->dev.kobj,
+					&vt8231_group_temps[i])))
+				goto exit_remove_files;
 		}
 	}
 
-	for (i = 0; i < ARRAY_SIZE(cfg_info_volt); i++) {
+	for (i = 0; i < ARRAY_SIZE(vt8231_group_volts); i++) {
 		if (ISVOLT(i, data->uch_config)) {
-			device_create_file(&client->dev,
-					   cfg_info_volt[i].input);
-			device_create_file(&client->dev, cfg_info_volt[i].max);
-			device_create_file(&client->dev, cfg_info_volt[i].min);
+			if ((err = sysfs_create_group(&client->dev.kobj,
+					&vt8231_group_volts[i])))
+				goto exit_remove_files;
 		}
 	}
 
-	device_create_file(&client->dev, &sensor_dev_attr_fan1_input.dev_attr);
-	device_create_file(&client->dev, &sensor_dev_attr_fan2_input.dev_attr);
-	device_create_file(&client->dev, &sensor_dev_attr_fan1_min.dev_attr);
-	device_create_file(&client->dev, &sensor_dev_attr_fan2_min.dev_attr);
-	device_create_file(&client->dev, &sensor_dev_attr_fan1_div.dev_attr);
-	device_create_file(&client->dev, &sensor_dev_attr_fan2_div.dev_attr);
-
-	device_create_file(&client->dev, &dev_attr_alarms);
+	data->class_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->class_dev)) {
+		err = PTR_ERR(data->class_dev);
+		goto exit_remove_files;
+	}
 	return 0;
 
+exit_remove_files:
+	for (i = 0; i < ARRAY_SIZE(vt8231_group_volts); i++)
+		sysfs_remove_group(&client->dev.kobj, &vt8231_group_volts[i]);
+
+	for (i = 0; i < ARRAY_SIZE(vt8231_group_temps); i++)
+		sysfs_remove_group(&client->dev.kobj, &vt8231_group_temps[i]);
+
+	sysfs_remove_group(&client->dev.kobj, &vt8231_group);
 exit_detach:
 	i2c_detach_client(client);
 exit_free:
@@ -718,9 +790,17 @@ exit_release:
 static int vt8231_detach_client(struct i2c_client *client)
 {
 	struct vt8231_data *data = i2c_get_clientdata(client);
-	int err;
+	int err, i;
 
 	hwmon_device_unregister(data->class_dev);
+
+	for (i = 0; i < ARRAY_SIZE(vt8231_group_volts); i++)
+		sysfs_remove_group(&client->dev.kobj, &vt8231_group_volts[i]);
+
+	for (i = 0; i < ARRAY_SIZE(vt8231_group_temps); i++)
+		sysfs_remove_group(&client->dev.kobj, &vt8231_group_temps[i]);
+
+	sysfs_remove_group(&client->dev.kobj, &vt8231_group);
 
 	if ((err = i2c_detach_client(client))) {
 		return err;
@@ -745,7 +825,7 @@ static struct vt8231_data *vt8231_update_device(struct device *dev)
 	int i;
 	u16 low;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
@@ -804,7 +884,7 @@ static struct vt8231_data *vt8231_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

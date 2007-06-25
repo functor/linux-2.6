@@ -10,7 +10,6 @@
  * 15-Mar-2000:   Added NF_REPEAT --RR.
  * 08-May-2003:	  Internal logging interface added by Jozsef Kadlecsik.
  */
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/netfilter.h>
 #include <net/protocol.h>
@@ -27,12 +26,35 @@
 
 #include "nf_internals.h"
 
+static DEFINE_SPINLOCK(afinfo_lock);
+
+struct nf_afinfo *nf_afinfo[NPROTO] __read_mostly;
+EXPORT_SYMBOL(nf_afinfo);
+
+int nf_register_afinfo(struct nf_afinfo *afinfo)
+{
+	spin_lock(&afinfo_lock);
+	rcu_assign_pointer(nf_afinfo[afinfo->family], afinfo);
+	spin_unlock(&afinfo_lock);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(nf_register_afinfo);
+
+void nf_unregister_afinfo(struct nf_afinfo *afinfo)
+{
+	spin_lock(&afinfo_lock);
+	rcu_assign_pointer(nf_afinfo[afinfo->family], NULL);
+	spin_unlock(&afinfo_lock);
+	synchronize_rcu();
+}
+EXPORT_SYMBOL_GPL(nf_unregister_afinfo);
+
 /* In this code, we can be waiting indefinitely for userspace to
  * service a packet if a hook returns NF_QUEUE.  We could keep a count
  * of skbuffs queued for userspace, and not deregister a hook unless
  * this is zero, but that sucks.  Now, we simply check when the
  * packets come back: if the hook is gone, the packet is discarded. */
-struct list_head nf_hooks[NPROTO][NF_MAX_HOOKS];
+struct list_head nf_hooks[NPROTO][NF_MAX_HOOKS] __read_mostly;
 EXPORT_SYMBOL(nf_hooks);
 static DEFINE_SPINLOCK(nf_hook_lock);
 
@@ -62,6 +84,34 @@ void nf_unregister_hook(struct nf_hook_ops *reg)
 	synchronize_net();
 }
 EXPORT_SYMBOL(nf_unregister_hook);
+
+int nf_register_hooks(struct nf_hook_ops *reg, unsigned int n)
+{
+	unsigned int i;
+	int err = 0;
+
+	for (i = 0; i < n; i++) {
+		err = nf_register_hook(&reg[i]);
+		if (err)
+			goto err;
+	}
+	return err;
+
+err:
+	if (i > 0)
+		nf_unregister_hooks(reg, i);
+	return err;
+}
+EXPORT_SYMBOL(nf_register_hooks);
+
+void nf_unregister_hooks(struct nf_hook_ops *reg, unsigned int n)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++)
+		nf_unregister_hook(&reg[i]);
+}
+EXPORT_SYMBOL(nf_unregister_hooks);
 
 unsigned int nf_iterate(struct list_head *head,
 			struct sk_buff **skb,
@@ -132,7 +182,7 @@ next_hook:
 		ret = -EPERM;
 	} else if ((verdict & NF_VERDICT_MASK)  == NF_QUEUE) {
 		NFDEBUG("nf_hook: Verdict = QUEUE.\n");
-		if (!nf_queue(pskb, elem, pf, hook, indev, outdev, okfn,
+		if (!nf_queue(*pskb, elem, pf, hook, indev, outdev, okfn,
 			      verdict >> NF_VERDICT_BITS))
 			goto next_hook;
 	}
@@ -172,6 +222,21 @@ copy_skb:
 }
 EXPORT_SYMBOL(skb_make_writable);
 
+void nf_proto_csum_replace4(__sum16 *sum, struct sk_buff *skb,
+			    __be32 from, __be32 to, int pseudohdr)
+{
+	__be32 diff[] = { ~from, to };
+	if (skb->ip_summed != CHECKSUM_PARTIAL) {
+		*sum = csum_fold(csum_partial((char *)diff, sizeof(diff),
+				~csum_unfold(*sum)));
+		if (skb->ip_summed == CHECKSUM_COMPLETE && pseudohdr)
+			skb->csum = ~csum_partial((char *)diff, sizeof(diff),
+						~skb->csum);
+	} else if (pseudohdr)
+		*sum = ~csum_fold(csum_partial((char *)diff, sizeof(diff),
+				csum_unfold(*sum)));
+}
+EXPORT_SYMBOL(nf_proto_csum_replace4);
 
 /* This does not belong here, but locally generated errors need it if connection
    tracking in use: without this, connection may not be in hash table, and hence

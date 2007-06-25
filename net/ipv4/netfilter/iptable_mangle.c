@@ -10,7 +10,6 @@
  *
  * Extended to all five netfilter hooks by Brad Chapman & Harald Welte
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/netdevice.h>
@@ -120,7 +119,7 @@ ipt_route_hook(unsigned int hook,
 	 const struct net_device *out,
 	 int (*okfn)(struct sk_buff *))
 {
-	return ipt_do_table(pskb, hook, in, out, &packet_mangler, NULL);
+	return ipt_do_table(pskb, hook, in, out, &packet_mangler);
 }
 
 static unsigned int
@@ -132,8 +131,8 @@ ipt_local_hook(unsigned int hook,
 {
 	unsigned int ret;
 	u_int8_t tos;
-	u_int32_t saddr, daddr;
-	unsigned long nfmark;
+	__be32 saddr, daddr;
+	u_int32_t mark;
 
 	/* root is playing with raw sockets. */
 	if ((*pskb)->len < sizeof(struct iphdr)
@@ -144,21 +143,20 @@ ipt_local_hook(unsigned int hook,
 	}
 
 	/* Save things which could affect route */
-	nfmark = (*pskb)->nfmark;
+	mark = (*pskb)->mark;
 	saddr = (*pskb)->nh.iph->saddr;
 	daddr = (*pskb)->nh.iph->daddr;
 	tos = (*pskb)->nh.iph->tos;
 
-	ret = ipt_do_table(pskb, hook, in, out, &packet_mangler, NULL);
+	ret = ipt_do_table(pskb, hook, in, out, &packet_mangler);
 	/* Reroute for ANY change. */
 	if (ret != NF_DROP && ret != NF_STOLEN && ret != NF_QUEUE
 	    && ((*pskb)->nh.iph->saddr != saddr
 		|| (*pskb)->nh.iph->daddr != daddr
-#ifdef CONFIG_IP_ROUTE_FWMARK
-		|| (*pskb)->nfmark != nfmark
-#endif
+		|| (*pskb)->mark != mark
 		|| (*pskb)->nh.iph->tos != tos))
-		return ip_route_me_harder(pskb) == 0 ? ret : NF_DROP;
+		if (ip_route_me_harder(pskb, RTN_UNSPEC))
+			ret = NF_DROP;
 
 	return ret;
 }
@@ -201,7 +199,7 @@ static struct nf_hook_ops ipt_ops[] = {
 	},
 };
 
-static int __init init(void)
+static int __init iptable_mangle_init(void)
 {
 	int ret;
 
@@ -211,51 +209,22 @@ static int __init init(void)
 		return ret;
 
 	/* Register hooks */
-	ret = nf_register_hook(&ipt_ops[0]);
+	ret = nf_register_hooks(ipt_ops, ARRAY_SIZE(ipt_ops));
 	if (ret < 0)
 		goto cleanup_table;
 
-	ret = nf_register_hook(&ipt_ops[1]);
-	if (ret < 0)
-		goto cleanup_hook0;
-
-	ret = nf_register_hook(&ipt_ops[2]);
-	if (ret < 0)
-		goto cleanup_hook1;
-
-	ret = nf_register_hook(&ipt_ops[3]);
-	if (ret < 0)
-		goto cleanup_hook2;
-
-	ret = nf_register_hook(&ipt_ops[4]);
-	if (ret < 0)
-		goto cleanup_hook3;
-
 	return ret;
 
- cleanup_hook3:
-        nf_unregister_hook(&ipt_ops[3]);
- cleanup_hook2:
-        nf_unregister_hook(&ipt_ops[2]);
- cleanup_hook1:
-	nf_unregister_hook(&ipt_ops[1]);
- cleanup_hook0:
-	nf_unregister_hook(&ipt_ops[0]);
  cleanup_table:
 	ipt_unregister_table(&packet_mangler);
-
 	return ret;
 }
 
-static void __exit fini(void)
+static void __exit iptable_mangle_fini(void)
 {
-	unsigned int i;
-
-	for (i = 0; i < sizeof(ipt_ops)/sizeof(struct nf_hook_ops); i++)
-		nf_unregister_hook(&ipt_ops[i]);
-
+	nf_unregister_hooks(ipt_ops, ARRAY_SIZE(ipt_ops));
 	ipt_unregister_table(&packet_mangler);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(iptable_mangle_init);
+module_exit(iptable_mangle_fini);

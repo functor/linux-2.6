@@ -10,12 +10,11 @@
  *
  *  Copyright (c) 2003,2004 Freescale Semiconductor, Inc.
  *
- *  This software may be used and distributed according to 
- *  the terms of the GNU Public License, Version 2, incorporated herein 
+ *  This software may be used and distributed according to
+ *  the terms of the GNU Public License, Version 2, incorporated herein
  *  by reference.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -203,7 +202,7 @@ static int gfar_gsettings(struct net_device *dev, struct ethtool_cmd *cmd)
 
 	if (NULL == phydev)
 		return -ENODEV;
-	
+
 	cmd->maxtxpkt = priv->txcount;
 	cmd->maxrxpkt = priv->rxcount;
 
@@ -282,7 +281,7 @@ static unsigned int gfar_ticks2usecs(struct gfar_private *priv, unsigned int tic
 static int gfar_gcoalesce(struct net_device *dev, struct ethtool_coalesce *cvals)
 {
 	struct gfar_private *priv = netdev_priv(dev);
-	
+
 	if (!(priv->einfo->device_flags & FSL_GIANFAR_DEV_HAS_COALESCE))
 		return -EOPNOTSUPP;
 
@@ -455,10 +454,14 @@ static int gfar_sringparam(struct net_device *dev, struct ethtool_ringparam *rva
 
 		/* Halt TX and RX, and process the frames which
 		 * have already been received */
-		spin_lock_irqsave(&priv->lock, flags);
+		spin_lock_irqsave(&priv->txlock, flags);
+		spin_lock(&priv->rxlock);
+
 		gfar_halt(dev);
 		gfar_clean_rx_ring(dev, priv->rx_ring_size);
-		spin_unlock_irqrestore(&priv->lock, flags);
+
+		spin_unlock(&priv->rxlock);
+		spin_unlock_irqrestore(&priv->txlock, flags);
 
 		/* Now we take down the rings to rebuild them */
 		stop_gfar(dev);
@@ -488,10 +491,14 @@ static int gfar_set_rx_csum(struct net_device *dev, uint32_t data)
 
 		/* Halt TX and RX, and process the frames which
 		 * have already been received */
-		spin_lock_irqsave(&priv->lock, flags);
+		spin_lock_irqsave(&priv->txlock, flags);
+		spin_lock(&priv->rxlock);
+
 		gfar_halt(dev);
 		gfar_clean_rx_ring(dev, priv->rx_ring_size);
-		spin_unlock_irqrestore(&priv->lock, flags);
+
+		spin_unlock(&priv->rxlock);
+		spin_unlock_irqrestore(&priv->txlock, flags);
 
 		/* Now we take down the rings to rebuild them */
 		stop_gfar(dev);
@@ -523,7 +530,7 @@ static int gfar_set_tx_csum(struct net_device *dev, uint32_t data)
 	if (!(priv->einfo->device_flags & FSL_GIANFAR_DEV_HAS_CSUM))
 		return -EOPNOTSUPP;
 
-	spin_lock_irqsave(&priv->lock, flags);
+	spin_lock_irqsave(&priv->txlock, flags);
 	gfar_halt(dev);
 
 	if (data)
@@ -532,7 +539,7 @@ static int gfar_set_tx_csum(struct net_device *dev, uint32_t data)
 		dev->features &= ~NETIF_F_IP_CSUM;
 
 	gfar_start(dev);
-	spin_unlock_irqrestore(&priv->lock, flags);
+	spin_unlock_irqrestore(&priv->txlock, flags);
 
 	return 0;
 }
@@ -548,19 +555,19 @@ static uint32_t gfar_get_tx_csum(struct net_device *dev)
 }
 
 static uint32_t gfar_get_msglevel(struct net_device *dev)
-{       
+{
 	struct gfar_private *priv = netdev_priv(dev);
 	return priv->msg_enable;
-}       
-        
+}
+
 static void gfar_set_msglevel(struct net_device *dev, uint32_t data)
-{       
+{
 	struct gfar_private *priv = netdev_priv(dev);
 	priv->msg_enable = data;
 }
 
 
-struct ethtool_ops gfar_ethtool_ops = {
+const struct ethtool_ops gfar_ethtool_ops = {
 	.get_settings = gfar_gsettings,
 	.set_settings = gfar_ssettings,
 	.get_drvinfo = gfar_gdrvinfo,

@@ -22,6 +22,8 @@ enum {
 	ND_OPT_PREFIX_INFO = 3,		/* RFC2461 */
 	ND_OPT_REDIRECT_HDR = 4,	/* RFC2461 */
 	ND_OPT_MTU = 5,			/* RFC2461 */
+	__ND_OPT_ARRAY_MAX,
+	ND_OPT_ROUTE_INFO = 24,		/* RFC4191 */
 	__ND_OPT_MAX
 };
 
@@ -35,7 +37,6 @@ enum {
 
 #ifdef __KERNEL__
 
-#include <linux/config.h>
 #include <linux/compiler.h>
 #include <linux/icmpv6.h>
 #include <linux/in6.h>
@@ -65,8 +66,8 @@ struct rs_msg {
 
 struct ra_msg {
         struct icmp6hdr		icmph;
-	__u32			reachable_time;
-	__u32			retrans_timer;
+	__be32			reachable_time;
+	__be32			retrans_timer;
 };
 
 struct nd_opt_hdr {

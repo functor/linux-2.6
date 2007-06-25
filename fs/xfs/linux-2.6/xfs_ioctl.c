@@ -23,7 +23,6 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
-#include "xfs_dir.h"
 #include "xfs_dir2.h"
 #include "xfs_alloc.h"
 #include "xfs_dmapi.h"
@@ -31,7 +30,6 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
-#include "xfs_dir_sf.h"
 #include "xfs_attr_sf.h"
 #include "xfs_dir2_sf.h"
 #include "xfs_dinode.h"
@@ -78,7 +76,7 @@ xfs_find_handle(
 	xfs_handle_t		handle;
 	xfs_fsop_handlereq_t	hreq;
 	struct inode		*inode;
-	struct vnode		*vp;
+	bhv_vnode_t		*vp;
 
 	if (copy_from_user(&hreq, arg, sizeof(hreq)))
 		return -XFS_ERROR(EFAULT);
@@ -109,9 +107,9 @@ xfs_find_handle(
 		if (!file)
 		    return -EBADF;
 
-		ASSERT(file->f_dentry);
-		ASSERT(file->f_dentry->d_inode);
-		inode = igrab(file->f_dentry->d_inode);
+		ASSERT(file->f_path.dentry);
+		ASSERT(file->f_path.dentry->d_inode);
+		inode = igrab(file->f_path.dentry->d_inode);
 		fput(file);
 		break;
 	}
@@ -138,7 +136,7 @@ xfs_find_handle(
 	}
 
 	/* we need the vnode */
-	vp = LINVFS_GET_VP(inode);
+	vp = vn_from_inode(inode);
 
 	/* now we can grab the fsid */
 	memcpy(&handle.ha_fsid, vp->v_vfsp->vfs_altfsid, sizeof(xfs_fsid_t));
@@ -192,7 +190,7 @@ xfs_vget_fsop_handlereq(
 	xfs_mount_t		*mp,
 	struct inode		*parinode,	/* parent inode pointer    */
 	xfs_fsop_handlereq_t	*hreq,
-	vnode_t			**vp,
+	bhv_vnode_t		**vp,
 	struct inode		**inode)
 {
 	void			__user *hanp;
@@ -202,7 +200,7 @@ xfs_vget_fsop_handlereq(
 	xfs_handle_t		handle;
 	xfs_inode_t		*ip;
 	struct inode		*inodep;
-	vnode_t			*vpp;
+	bhv_vnode_t		*vpp;
 	xfs_ino_t		ino;
 	__u32			igen;
 	int			error;
@@ -256,7 +254,7 @@ xfs_vget_fsop_handlereq(
 	}
 
 	vpp = XFS_ITOV(ip);
-	inodep = LINVFS_GET_IP(vpp);
+	inodep = vn_to_inode(vpp);
 	xfs_iunlock(ip, XFS_ILOCK_SHARED);
 
 	*vp = vpp;
@@ -277,7 +275,7 @@ xfs_open_by_handle(
 	struct file		*filp;
 	struct inode		*inode;
 	struct dentry		*dentry;
-	vnode_t			*vp;
+	bhv_vnode_t		*vp;
 	xfs_fsop_handlereq_t	hreq;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -335,16 +333,19 @@ xfs_open_by_handle(
 	}
 
 	/* Ensure umount returns EBUSY on umounts while this file is open. */
-	mntget(parfilp->f_vfsmnt);
+	mntget(parfilp->f_path.mnt);
 
 	/* Create file pointer. */
-	filp = dentry_open(dentry, parfilp->f_vfsmnt, hreq.oflags);
+	filp = dentry_open(dentry, parfilp->f_path.mnt, hreq.oflags);
 	if (IS_ERR(filp)) {
 		put_unused_fd(new_fd);
 		return -XFS_ERROR(-PTR_ERR(filp));
 	}
-	if (inode->i_mode & S_IFREG)
-		filp->f_op = &linvfs_invis_file_operations;
+	if (inode->i_mode & S_IFREG) {
+		/* invisible operation should not change atime */
+		filp->f_flags |= O_NOATIME;
+		filp->f_op = &xfs_invis_file_operations;
+	}
 
 	fd_install(new_fd, filp);
 	return new_fd;
@@ -362,7 +363,7 @@ xfs_readlink_by_handle(
 	struct uio		auio;
 	struct inode		*inode;
 	xfs_fsop_handlereq_t	hreq;
-	vnode_t			*vp;
+	bhv_vnode_t		*vp;
 	__u32			olen;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -393,9 +394,11 @@ xfs_readlink_by_handle(
 	auio.uio_segflg	= UIO_USERSPACE;
 	auio.uio_resid	= olen;
 
-	VOP_READLINK(vp, &auio, IO_INVIS, NULL, error);
-
+	error = bhv_vop_readlink(vp, &auio, IO_INVIS, NULL);
 	VN_RELE(vp);
+	if (error)
+		return -error;
+
 	return (olen - auio.uio_resid);
 }
 
@@ -411,7 +414,7 @@ xfs_fssetdm_by_handle(
 	xfs_fsop_setdm_handlereq_t dmhreq;
 	struct inode		*inode;
 	bhv_desc_t		*bdp;
-	vnode_t			*vp;
+	bhv_vnode_t		*vp;
 
 	if (!capable(CAP_MKNOD))
 		return -XFS_ERROR(EPERM);
@@ -452,7 +455,7 @@ xfs_attrlist_by_handle(
 	attrlist_cursor_kern_t	*cursor;
 	xfs_fsop_attrlist_handlereq_t al_hreq;
 	struct inode		*inode;
-	vnode_t			*vp;
+	bhv_vnode_t		*vp;
 	char			*kbuf;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -472,8 +475,8 @@ xfs_attrlist_by_handle(
 		goto out_vn_rele;
 
 	cursor = (attrlist_cursor_kern_t *)&al_hreq.pos;
-	VOP_ATTR_LIST(vp, kbuf, al_hreq.buflen, al_hreq.flags,
-			cursor, NULL, error);
+	error = bhv_vop_attr_list(vp, kbuf, al_hreq.buflen, al_hreq.flags,
+					cursor, NULL);
 	if (error)
 		goto out_kfree;
 
@@ -490,7 +493,7 @@ xfs_attrlist_by_handle(
 
 STATIC int
 xfs_attrmulti_attr_get(
-	struct vnode		*vp,
+	bhv_vnode_t		*vp,
 	char			*name,
 	char			__user *ubuf,
 	__uint32_t		*len,
@@ -505,7 +508,7 @@ xfs_attrmulti_attr_get(
 	if (!kbuf)
 		return ENOMEM;
 
-	VOP_ATTR_GET(vp, name, kbuf, len, flags, NULL, error);
+	error = bhv_vop_attr_get(vp, name, kbuf, len, flags, NULL);
 	if (error)
 		goto out_kfree;
 
@@ -519,7 +522,7 @@ xfs_attrmulti_attr_get(
 
 STATIC int
 xfs_attrmulti_attr_set(
-	struct vnode		*vp,
+	bhv_vnode_t		*vp,
 	char			*name,
 	const char		__user *ubuf,
 	__uint32_t		len,
@@ -542,7 +545,7 @@ xfs_attrmulti_attr_set(
 	if (copy_from_user(kbuf, ubuf, len))
 		goto out_kfree;
 			
-	VOP_ATTR_SET(vp, name, kbuf, len, flags, NULL, error);
+	error = bhv_vop_attr_set(vp, name, kbuf, len, flags, NULL);
 
  out_kfree:
 	kfree(kbuf);
@@ -551,20 +554,15 @@ xfs_attrmulti_attr_set(
 
 STATIC int
 xfs_attrmulti_attr_remove(
-	struct vnode		*vp,
+	bhv_vnode_t		*vp,
 	char			*name,
 	__uint32_t		flags)
 {
-	int			error;
-
-
 	if (IS_RDONLY(&vp->v_inode))
 		return -EROFS;
 	if (IS_IMMUTABLE(&vp->v_inode) || IS_APPEND(&vp->v_inode))
 		return EPERM;
-
-	VOP_ATTR_REMOVE(vp, name, flags, NULL, error);
-	return error;
+	return bhv_vop_attr_remove(vp, name, flags, NULL);
 }
 
 STATIC int
@@ -578,7 +576,7 @@ xfs_attrmulti_by_handle(
 	xfs_attr_multiop_t	*ops;
 	xfs_fsop_attrmulti_handlereq_t am_hreq;
 	struct inode		*inode;
-	vnode_t			*vp;
+	bhv_vnode_t		*vp;
 	unsigned int		i, size;
 	char			*attr_name;
 
@@ -658,7 +656,7 @@ xfs_attrmulti_by_handle(
 STATIC int
 xfs_ioc_space(
 	bhv_desc_t		*bdp,
-	vnode_t			*vp,
+	struct inode		*inode,
 	struct file		*filp,
 	int			flags,
 	unsigned int		cmd,
@@ -682,7 +680,7 @@ xfs_ioc_fsgeometry(
 
 STATIC int
 xfs_ioc_xattr(
-	vnode_t			*vp,
+	bhv_vnode_t		*vp,
 	xfs_inode_t		*ip,
 	struct file		*filp,
 	unsigned int		cmd,
@@ -711,11 +709,11 @@ xfs_ioctl(
 	void			__user *arg)
 {
 	int			error;
-	vnode_t			*vp;
+	bhv_vnode_t		*vp;
 	xfs_inode_t		*ip;
 	xfs_mount_t		*mp;
 
-	vp = LINVFS_GET_VP(inode);
+	vp = vn_from_inode(inode);
 
 	vn_trace_entry(vp, "xfs_ioctl", (inst_t *)__return_address);
 
@@ -740,7 +738,7 @@ xfs_ioctl(
 		    !capable(CAP_SYS_ADMIN))
 			return -EPERM;
 
-		return xfs_ioc_space(bdp, vp, filp, ioflags, cmd, arg);
+		return xfs_ioc_space(bdp, inode, filp, ioflags, cmd, arg);
 
 	case XFS_IOC_DIOINFO: {
 		struct dioattr	da;
@@ -768,6 +766,8 @@ xfs_ioctl(
 		return xfs_ioc_fsgeometry(mp, arg);
 
 	case XFS_IOC_GETVERSION:
+		return put_user(inode->i_generation, (int __user *)arg);
+
 	case XFS_IOC_GETXFLAGS:
 	case XFS_IOC_SETXFLAGS:
 	case XFS_IOC_FSGETXATTR:
@@ -962,7 +962,7 @@ xfs_ioctl(
 STATIC int
 xfs_ioc_space(
 	bhv_desc_t		*bdp,
-	vnode_t			*vp,
+	struct inode		*inode,
 	struct file		*filp,
 	int			ioflags,
 	unsigned int		cmd,
@@ -972,13 +972,13 @@ xfs_ioc_space(
 	int			attr_flags = 0;
 	int			error;
 
-	if (vp->v_inode.i_flags & (S_IMMUTABLE|S_APPEND))
+	if (inode->i_flags & (S_IMMUTABLE|S_APPEND))
 		return -XFS_ERROR(EPERM);
 
 	if (!(filp->f_mode & FMODE_WRITE))
 		return -XFS_ERROR(EBADF);
 
-	if (!VN_ISREG(vp))
+	if (!S_ISREG(inode->i_mode))
 		return -XFS_ERROR(EINVAL);
 
 	if (copy_from_user(&bf, arg, sizeof(bf)))
@@ -1159,112 +1159,129 @@ xfs_di2lxflags(
 
 STATIC int
 xfs_ioc_xattr(
-	vnode_t			*vp,
+	bhv_vnode_t		*vp,
 	xfs_inode_t		*ip,
 	struct file		*filp,
 	unsigned int		cmd,
 	void			__user *arg)
 {
 	struct fsxattr		fa;
-	vattr_t			va;
-	int			error;
+	struct bhv_vattr	*vattr;
+	int			error = 0;
 	int			attr_flags;
 	unsigned int		flags;
 
+	vattr = kmalloc(sizeof(*vattr), GFP_KERNEL);
+	if (unlikely(!vattr))
+		return -ENOMEM;
+
 	switch (cmd) {
 	case XFS_IOC_FSGETXATTR: {
-		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE | \
-			     XFS_AT_NEXTENTS | XFS_AT_PROJID;
-		VOP_GETATTR(vp, &va, 0, NULL, error);
-		if (error)
-			return -error;
+		vattr->va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE | \
+				 XFS_AT_NEXTENTS | XFS_AT_PROJID;
+		error = bhv_vop_getattr(vp, vattr, 0, NULL);
+		if (unlikely(error)) {
+			error = -error;
+			break;
+		}
 
-		fa.fsx_xflags	= va.va_xflags;
-		fa.fsx_extsize	= va.va_extsize;
-		fa.fsx_nextents = va.va_nextents;
-		fa.fsx_projid	= va.va_projid;
+		fa.fsx_xflags	= vattr->va_xflags;
+		fa.fsx_extsize	= vattr->va_extsize;
+		fa.fsx_nextents = vattr->va_nextents;
+		fa.fsx_projid	= vattr->va_projid;
 
-		if (copy_to_user(arg, &fa, sizeof(fa)))
-			return -XFS_ERROR(EFAULT);
-		return 0;
+		if (copy_to_user(arg, &fa, sizeof(fa))) {
+			error = -EFAULT;
+			break;
+		}
+		break;
 	}
 
 	case XFS_IOC_FSSETXATTR: {
-		if (copy_from_user(&fa, arg, sizeof(fa)))
-			return -XFS_ERROR(EFAULT);
+		if (copy_from_user(&fa, arg, sizeof(fa))) {
+			error = -EFAULT;
+			break;
+		}
 
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
 
-		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE | XFS_AT_PROJID;
-		va.va_xflags  = fa.fsx_xflags;
-		va.va_extsize = fa.fsx_extsize;
-		va.va_projid  = fa.fsx_projid;
+		vattr->va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE | XFS_AT_PROJID;
+		vattr->va_xflags  = fa.fsx_xflags;
+		vattr->va_extsize = fa.fsx_extsize;
+		vattr->va_projid  = fa.fsx_projid;
 
-		VOP_SETATTR(vp, &va, attr_flags, NULL, error);
-		if (!error)
-			vn_revalidate(vp);	/* update Linux inode flags */
-		return -error;
+		error = bhv_vop_setattr(vp, vattr, attr_flags, NULL);
+		if (likely(!error))
+			__vn_revalidate(vp, vattr);	/* update flags */
+		error = -error;
+		break;
 	}
 
 	case XFS_IOC_FSGETXATTRA: {
-		va.va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE | \
-			     XFS_AT_ANEXTENTS | XFS_AT_PROJID;
-		VOP_GETATTR(vp, &va, 0, NULL, error);
-		if (error)
-			return -error;
+		vattr->va_mask = XFS_AT_XFLAGS | XFS_AT_EXTSIZE | \
+				 XFS_AT_ANEXTENTS | XFS_AT_PROJID;
+		error = bhv_vop_getattr(vp, vattr, 0, NULL);
+		if (unlikely(error)) {
+			error = -error;
+			break;
+		}
 
-		fa.fsx_xflags	= va.va_xflags;
-		fa.fsx_extsize	= va.va_extsize;
-		fa.fsx_nextents = va.va_anextents;
-		fa.fsx_projid	= va.va_projid;
+		fa.fsx_xflags	= vattr->va_xflags;
+		fa.fsx_extsize	= vattr->va_extsize;
+		fa.fsx_nextents = vattr->va_anextents;
+		fa.fsx_projid	= vattr->va_projid;
 
-		if (copy_to_user(arg, &fa, sizeof(fa)))
-			return -XFS_ERROR(EFAULT);
-		return 0;
+		if (copy_to_user(arg, &fa, sizeof(fa))) {
+			error = -EFAULT;
+			break;
+		}
+		break;
 	}
 
 	case XFS_IOC_GETXFLAGS: {
 		flags = xfs_di2lxflags(ip->i_d.di_flags);
 		if (copy_to_user(arg, &flags, sizeof(flags)))
-			return -XFS_ERROR(EFAULT);
-		return 0;
+			error = -EFAULT;
+		break;
 	}
 
 	case XFS_IOC_SETXFLAGS: {
-		if (copy_from_user(&flags, arg, sizeof(flags)))
-			return -XFS_ERROR(EFAULT);
+		if (copy_from_user(&flags, arg, sizeof(flags))) {
+			error = -EFAULT;
+			break;
+		}
 
 		if (flags & ~(LINUX_XFLAG_IMMUTABLE | LINUX_XFLAG_APPEND | \
 			      LINUX_XFLAG_NOATIME | LINUX_XFLAG_NODUMP | \
-			      LINUX_XFLAG_SYNC))
-			return -XFS_ERROR(EOPNOTSUPP);
+			      LINUX_XFLAG_SYNC)) {
+			error = -EOPNOTSUPP;
+			break;
+		}
 
 		attr_flags = 0;
 		if (filp->f_flags & (O_NDELAY|O_NONBLOCK))
 			attr_flags |= ATTR_NONBLOCK;
 
-		va.va_mask = XFS_AT_XFLAGS;
-		va.va_xflags = xfs_merge_ioc_xflags(flags,
-				xfs_ip2xflags(ip));
+		vattr->va_mask = XFS_AT_XFLAGS;
+		vattr->va_xflags = xfs_merge_ioc_xflags(flags,
+							xfs_ip2xflags(ip));
 
-		VOP_SETATTR(vp, &va, attr_flags, NULL, error);
-		if (!error)
-			vn_revalidate(vp);	/* update Linux inode flags */
-		return -error;
-	}
-
-	case XFS_IOC_GETVERSION: {
-		flags = LINVFS_GET_IP(vp)->i_generation;
-		if (copy_to_user(arg, &flags, sizeof(flags)))
-			return -XFS_ERROR(EFAULT);
-		return 0;
+		error = bhv_vop_setattr(vp, vattr, attr_flags, NULL);
+		if (likely(!error))
+			__vn_revalidate(vp, vattr);	/* update flags */
+		error = -error;
+		break;
 	}
 
 	default:
-		return -ENOTTY;
+		error = -ENOTTY;
+		break;
 	}
+
+	kfree(vattr);
+	return error;
 }
 
 STATIC int

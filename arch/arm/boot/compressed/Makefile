@@ -50,12 +50,12 @@ ifeq ($(CONFIG_ARCH_AT91RM9200),y)
 OBJS		+= head-at91rm9200.o
 endif
 
-ifeq ($(CONFIG_DEBUG_ICEDCC),y)
-OBJS            += ice-dcc.o
-endif
-
 ifeq ($(CONFIG_CPU_BIG_ENDIAN),y)
+ifeq ($(CONFIG_CPU_CP15),y)
 OBJS		+= big-endian.o
+else
+# The endian should be set by h/w design.
+endif
 endif
 
 #

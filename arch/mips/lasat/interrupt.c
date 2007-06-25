@@ -27,57 +27,29 @@
 #include <asm/bootinfo.h>
 #include <asm/irq.h>
 #include <asm/lasat/lasatint.h>
+#include <asm/time.h>
 #include <asm/gdb-stub.h>
 
 static volatile int *lasat_int_status = NULL;
 static volatile int *lasat_int_mask = NULL;
 static volatile int lasat_int_mask_shift;
 
-extern asmlinkage void lasatIRQ(void);
-
 void disable_lasat_irq(unsigned int irq_nr)
 {
-	unsigned long flags;
-
-	local_irq_save(flags);
 	*lasat_int_mask &= ~(1 << irq_nr) << lasat_int_mask_shift;
-	local_irq_restore(flags);
 }
 
 void enable_lasat_irq(unsigned int irq_nr)
 {
-	unsigned long flags;
-
-	local_irq_save(flags);
 	*lasat_int_mask |= (1 << irq_nr) << lasat_int_mask_shift;
-	local_irq_restore(flags);
 }
 
-static unsigned int startup_lasat_irq(unsigned int irq)
-{
-	enable_lasat_irq(irq);
-
-	return 0; /* never anything pending */
-}
-
-#define shutdown_lasat_irq	disable_lasat_irq
-
-#define mask_and_ack_lasat_irq disable_lasat_irq
-
-static void end_lasat_irq(unsigned int irq)
-{
-	if (!(irq_desc[irq].status & (IRQ_DISABLED|IRQ_INPROGRESS)))
-		enable_lasat_irq(irq);
-}
-
-static struct hw_interrupt_type lasat_irq_type = {
+static struct irq_chip lasat_irq_type = {
 	.typename = "Lasat",
-	.startup = startup_lasat_irq,
-	.shutdown = shutdown_lasat_irq,
-	.enable = enable_lasat_irq,
-	.disable = disable_lasat_irq,
-	.ack = mask_and_ack_lasat_irq,
-	.end = end_lasat_irq,
+	.ack = disable_lasat_irq,
+	.mask = disable_lasat_irq,
+	.mask_ack = disable_lasat_irq,
+	.unmask = enable_lasat_irq,
 };
 
 static inline int ls1bit32(unsigned int x)
@@ -109,10 +81,16 @@ static unsigned long get_int_status_200(void)
 	return int_status;
 }
 
-void lasat_hw0_irqdispatch(struct pt_regs *regs)
+asmlinkage void plat_irq_dispatch(void)
 {
 	unsigned long int_status;
+	unsigned int cause = read_c0_cause();
 	int irq;
+
+	if (cause & CAUSEF_IP7) {	/* R4000 count / compare IRQ */
+		ll_timer_interrupt(7);
+		return;
+	}
 
 	int_status = get_int_status();
 
@@ -120,7 +98,7 @@ void lasat_hw0_irqdispatch(struct pt_regs *regs)
 	if (int_status) {
 		irq = ls1bit32(int_status);
 
-		do_IRQ(irq, regs);
+		do_IRQ(irq);
 	}
 }
 
@@ -147,13 +125,6 @@ void __init arch_init_irq(void)
 		panic("arch_init_irq: mips_machtype incorrect");
 	}
 
-	/* Now safe to set the exception vector. */
-	set_except_vector(0, lasatIRQ);
-
-	for (i = 0; i <= LASATINT_END; i++) {
-		irq_desc[i].status	= IRQ_DISABLED;
-		irq_desc[i].action	= 0;
-		irq_desc[i].depth	= 1;
-		irq_desc[i].handler	= &lasat_irq_type;
-	}
+	for (i = 0; i <= LASATINT_END; i++)
+		set_irq_chip_and_handler(i, &lasat_irq_type, handle_level_irq);
 }

@@ -3,14 +3,14 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 1995, 96, 97, 98, 99, 2000, 01, 02 by Ralf Baechle
+ * Copyright (C) 1995-99, 2000- 02, 06 Ralf Baechle <ralf@linux-mips.org>
  * Copyright (C) 2001 MIPS Technologies, Inc.
  * Copyright (C) 2004 Thiemo Seufer
  */
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <asm/asm.h>
 #include <asm/asmmacro.h>
+#include <asm/irqflags.h>
 #include <asm/mipsregs.h>
 #include <asm/regdef.h>
 #include <asm/stackframe.h>
@@ -28,6 +28,7 @@
 NESTED(handle_sys, PT_SIZE, sp)
 	.set	noat
 	SAVE_SOME
+	TRACE_IRQS_ON_RELOAD
 	STI
 	.set	at
 
@@ -497,7 +498,7 @@ einval:	li	v0, -EINVAL
 	sys	sys_sched_get_priority_min 1
 	sys	sys_sched_rr_get_interval 2	/* 4165 */
 	sys	sys_nanosleep,		2
-	sys	sys_mremap,		4
+	sys	sys_mremap,		5
 	sys	sys_accept		3
 	sys	sys_bind		3
 	sys	sys_connect		3	/* 4170 */
@@ -569,8 +570,19 @@ einval:	li	v0, -EINVAL
 	sys	sys_tkill		2
 	sys	sys_sendfile64		5
 	sys	sys_futex		6
+#ifdef CONFIG_MIPS_MT_FPAFF
+	/*
+	 * For FPU affinity scheduling on MIPS MT processors, we need to
+	 * intercept sys_sched_xxxaffinity() calls until we get a proper hook
+	 * in kernel/sched.c.  Considered only temporary we only support these
+	 * hooks for the 32-bit kernel - there is no MIPS64 MT processor atm.
+	 */
+	sys	mipsmt_sys_sched_setaffinity	3
+	sys	mipsmt_sys_sched_getaffinity	3
+#else
 	sys	sys_sched_setaffinity	3
 	sys	sys_sched_getaffinity	3	/* 4240 */
+#endif /* CONFIG_MIPS_MT_FPAFF */
 	sys	sys_io_setup		2
 	sys	sys_io_destroy		1
 	sys	sys_io_getevents	5
@@ -634,6 +646,16 @@ einval:	li	v0, -EINVAL
 	sys	sys_pselect6		6
 	sys	sys_ppoll		5
 	sys	sys_unshare		1
+	sys	sys_splice		4
+	sys	sys_sync_file_range	7	/* 4305 */
+	sys	sys_tee			4
+	sys	sys_vmsplice		4
+	sys	sys_move_pages		6
+	sys	sys_set_robust_list	2
+	sys	sys_get_robust_list	3	/* 4310 */
+	sys	sys_kexec_load		4
+	sys	sys_getcpu		3
+	sys	sys_epoll_pwait		6
 	.endm
 
 	/* We pre-compute the number of _instruction_ bytes needed to

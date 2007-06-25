@@ -12,7 +12,6 @@
 #ifndef __ASM_CPU_INFO_H
 #define __ASM_CPU_INFO_H
 
-#include <linux/config.h>
 #include <asm/cache.h>
 
 #ifdef CONFIG_SGI_IP27
@@ -23,12 +22,12 @@
  * Descriptor for a cache
  */
 struct cache_desc {
-	unsigned short linesz;	/* Size of line in bytes */
-	unsigned short ways;	/* Number of ways */
-	unsigned short sets;	/* Number of lines per set */
 	unsigned int waysize;	/* Bytes per way */
-	unsigned int waybit;	/* Bits to select in a cache set */
-	unsigned int flags;	/* Flags describing cache properties */
+	unsigned short sets;	/* Number of lines per set */
+	unsigned char ways;	/* Number of ways */
+	unsigned char linesz;	/* Size of line in bytes */
+	unsigned char waybit;	/* Bits to select in a cache set */
+	unsigned char flags;	/* Flags describing cache properties */
 };
 
 /*
@@ -73,6 +72,16 @@ struct cpuinfo_mips {
 	struct cache_desc	dcache;	/* Primary D or combined I/D cache */
 	struct cache_desc	scache;	/* Secondary cache */
 	struct cache_desc	tcache;	/* Tertiary/split secondary cache */
+#if defined(CONFIG_MIPS_MT_SMTC)
+	/*
+	 * In the MIPS MT "SMTC" model, each TC is considered
+	 * to be a "CPU" for the purposes of scheduling, but
+	 * exception resources, ASID spaces, etc, are common
+	 * to all TCs within the same VPE.
+	 */
+	int			vpe_id;  /* Virtual Processor number */
+	int			tc_id;   /* Thread Context number */
+#endif /* CONFIG_MIPS_MT */
 	void 			*data;	/* Additional data */
 } __attribute__((aligned(SMP_CACHE_BYTES)));
 

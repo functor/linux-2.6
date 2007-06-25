@@ -5,7 +5,7 @@
  * Copyright (C) 1999	Frodo Looijaard <frodol@dds.nl>
  *			Philip Edelbrock <phil@netroedge.com>
  * Copyright (C) 2003	Michiel Rook <michiel@grendelproject.nl>
- * Copyright (C) 2005	Grant Coady <gcoady@gmail.com> with valuable
+ * Copyright (C) 2005	Grant Coady <gcoady.lk@gmail.com> with valuable
  * 				guidance from Jean Delvare
  *
  * Driver supports	Analog Devices		ADM9240
@@ -49,6 +49,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 
 /* Addresses to scan */
 static unsigned short normal_i2c[] = { 0x2c, 0x2d, 0x2e, 0x2f,
@@ -150,7 +151,7 @@ struct adm9240_data {
 	enum chips type;
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid;
 	unsigned long last_updated_measure;
 	unsigned long last_updated_config;
@@ -195,11 +196,11 @@ static ssize_t set_max(struct device *dev, struct device_attribute *devattr,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_max[attr->index] = TEMP_TO_REG(val);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_TEMP_MAX(attr->index),
 			data->temp_max[attr->index]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -246,11 +247,11 @@ static ssize_t set_in_min(struct device *dev,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_min[attr->index] = IN_TO_REG(val, attr->index);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_IN_MIN(attr->index),
 			data->in_min[attr->index]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -263,11 +264,11 @@ static ssize_t set_in_max(struct device *dev,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtoul(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_max[attr->index] = IN_TO_REG(val, attr->index);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_IN_MAX(attr->index),
 			data->in_max[attr->index]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -350,7 +351,7 @@ static ssize_t set_fan_min(struct device *dev,
 	int nr = attr->index;
 	u8 new_div;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (!val) {
 		data->fan_min[nr] = 255;
@@ -390,7 +391,7 @@ static ssize_t set_fan_min(struct device *dev,
 	i2c_smbus_write_byte_data(client, ADM9240_REG_FAN_MIN(nr),
 			data->fan_min[nr]);
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -439,10 +440,10 @@ static ssize_t set_aout(struct device *dev,
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	unsigned long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->aout = AOUT_TO_REG(val);
 	i2c_smbus_write_byte_data(client, ADM9240_REG_ANALOG_OUT, data->aout);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static DEVICE_ATTR(aout_output, S_IRUGO | S_IWUSR, show_aout, set_aout);
@@ -463,6 +464,45 @@ static ssize_t chassis_clear(struct device *dev,
 	return count;
 }
 static DEVICE_ATTR(chassis_clear, S_IWUSR, NULL, chassis_clear);
+
+static struct attribute *adm9240_attributes[] = {
+	&sensor_dev_attr_in0_input.dev_attr.attr,
+	&sensor_dev_attr_in0_min.dev_attr.attr,
+	&sensor_dev_attr_in0_max.dev_attr.attr,
+	&sensor_dev_attr_in1_input.dev_attr.attr,
+	&sensor_dev_attr_in1_min.dev_attr.attr,
+	&sensor_dev_attr_in1_max.dev_attr.attr,
+	&sensor_dev_attr_in2_input.dev_attr.attr,
+	&sensor_dev_attr_in2_min.dev_attr.attr,
+	&sensor_dev_attr_in2_max.dev_attr.attr,
+	&sensor_dev_attr_in3_input.dev_attr.attr,
+	&sensor_dev_attr_in3_min.dev_attr.attr,
+	&sensor_dev_attr_in3_max.dev_attr.attr,
+	&sensor_dev_attr_in4_input.dev_attr.attr,
+	&sensor_dev_attr_in4_min.dev_attr.attr,
+	&sensor_dev_attr_in4_max.dev_attr.attr,
+	&sensor_dev_attr_in5_input.dev_attr.attr,
+	&sensor_dev_attr_in5_min.dev_attr.attr,
+	&sensor_dev_attr_in5_max.dev_attr.attr,
+	&dev_attr_temp1_input.attr,
+	&sensor_dev_attr_temp1_max.dev_attr.attr,
+	&sensor_dev_attr_temp1_max_hyst.dev_attr.attr,
+	&sensor_dev_attr_fan1_input.dev_attr.attr,
+	&sensor_dev_attr_fan1_div.dev_attr.attr,
+	&sensor_dev_attr_fan1_min.dev_attr.attr,
+	&sensor_dev_attr_fan2_input.dev_attr.attr,
+	&sensor_dev_attr_fan2_div.dev_attr.attr,
+	&sensor_dev_attr_fan2_min.dev_attr.attr,
+	&dev_attr_alarms.attr,
+	&dev_attr_aout_output.attr,
+	&dev_attr_chassis_clear.attr,
+	&dev_attr_cpu0_vid.attr,
+	NULL
+};
+
+static const struct attribute_group adm9240_group = {
+	.attrs = adm9240_attributes,
+};
 
 
 /*** sensor chip detect and driver install ***/
@@ -539,7 +579,7 @@ static int adm9240_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* fill in the remaining client fields and attach */
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->type = kind;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	if ((err = i2c_attach_client(new_client)))
 		goto exit_free;
@@ -547,72 +587,19 @@ static int adm9240_detect(struct i2c_adapter *adapter, int address, int kind)
 	adm9240_init_client(new_client);
 
 	/* populate sysfs filesystem */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &adm9240_group)))
+		goto exit_detach;
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
+		goto exit_remove;
 	}
-
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in0_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in0_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in0_max.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in1_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in1_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in1_max.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in2_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in2_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in2_max.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in3_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in3_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in3_max.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in4_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in4_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in4_max.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in5_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in5_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_in5_max.dev_attr);
-	device_create_file(&new_client->dev, &dev_attr_temp1_input);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_temp1_max.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_temp1_max_hyst.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_fan1_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_fan1_div.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_fan1_min.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_fan2_input.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_fan2_div.dev_attr);
-	device_create_file(&new_client->dev,
-			&sensor_dev_attr_fan2_min.dev_attr);
-	device_create_file(&new_client->dev, &dev_attr_alarms);
-	device_create_file(&new_client->dev, &dev_attr_aout_output);
-	device_create_file(&new_client->dev, &dev_attr_chassis_clear);
-	device_create_file(&new_client->dev, &dev_attr_cpu0_vid);
 
 	return 0;
 
+exit_remove:
+	sysfs_remove_group(&new_client->dev.kobj, &adm9240_group);
 exit_detach:
 	i2c_detach_client(new_client);
 exit_free:
@@ -634,6 +621,7 @@ static int adm9240_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &adm9240_group);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -691,7 +679,7 @@ static struct adm9240_data *adm9240_update_device(struct device *dev)
 	struct adm9240_data *data = i2c_get_clientdata(client);
 	int i;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	/* minimum measurement cycle: 1.75 seconds */
 	if (time_after(jiffies, data->last_updated_measure + (HZ * 7 / 4))
@@ -771,7 +759,7 @@ static struct adm9240_data *adm9240_update_device(struct device *dev)
 		data->last_updated_config = jiffies;
 		data->valid = 1;
 	}
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return data;
 }
 
@@ -786,7 +774,7 @@ static void __exit sensors_adm9240_exit(void)
 }
 
 MODULE_AUTHOR("Michiel Rook <michiel@grendelproject.nl>, "
-		"Grant Coady <gcoady@gmail.com> and others");
+		"Grant Coady <gcoady.lk@gmail.com> and others");
 MODULE_DESCRIPTION("ADM9240/DS1780/LM81 driver");
 MODULE_LICENSE("GPL");
 

@@ -161,7 +161,6 @@
 #include <linux/hdreg.h>
 #include <linux/genhd.h>
 #include <linux/ioport.h>
-#include <linux/devfs_fs_kernel.h>
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -514,7 +513,7 @@ static inline void write_cmd(unsigned char cmd)
 	outb(cmd, sony_cd_cmd_reg);
 }
 
-static irqreturn_t cdu31a_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t cdu31a_interrupt(int irq, void *dev_id)
 {
 	unsigned char val;
 
@@ -1339,8 +1338,10 @@ static void do_cdu31a_request(request_queue_t * q)
 		}
 
 		/* WTF??? */
-		if (!(req->flags & REQ_CMD))
+		if (!blk_fs_request(req)) {
+			end_request(req, 0);
 			continue;
+		}
 		if (rq_data_dir(req) == WRITE) {
 			end_request(req, 0);
 			continue;
@@ -2668,7 +2669,7 @@ static int scd_audio_ioctl(struct cdrom_device_info *cdi,
 	return retval;
 }
 
-static int scd_dev_ioctl(struct cdrom_device_info *cdi,
+static int scd_read_audio(struct cdrom_device_info *cdi,
 			 unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
@@ -2894,11 +2895,10 @@ static struct cdrom_device_ops scd_dops = {
 	.get_mcn		= scd_get_mcn,
 	.reset			= scd_reset,
 	.audio_ioctl		= scd_audio_ioctl,
-	.dev_ioctl		= scd_dev_ioctl,
 	.capability		= CDC_OPEN_TRAY | CDC_CLOSE_TRAY | CDC_LOCK |
 				  CDC_SELECT_SPEED | CDC_MULTI_SESSION |
 				  CDC_MCN | CDC_MEDIA_CHANGED | CDC_PLAY_AUDIO |
-				  CDC_RESET | CDC_IOCTLS | CDC_DRIVE_STATUS,
+				  CDC_RESET | CDC_DRIVE_STATUS,
 	.n_minors		= 1,
 };
 
@@ -2935,6 +2935,9 @@ static int scd_block_ioctl(struct inode *inode, struct file *file,
 			break;
 		case CDROMCLOSETRAY:
 			retval = scd_tray_move(&scd_info, 0);
+			break;
+		case CDROMREADAUDIO:
+			retval = scd_read_audio(&scd_info, CDROMREADAUDIO, arg);
 			break;
 		default:
 			retval = cdrom_ioctl(file, &scd_info, inode, cmd, arg);
@@ -3140,7 +3143,7 @@ int __init cdu31a_init(void)
 
 	if (cdu31a_irq > 0) {
 		if (request_irq
-		    (cdu31a_irq, cdu31a_interrupt, SA_INTERRUPT,
+		    (cdu31a_irq, cdu31a_interrupt, IRQF_DISABLED,
 		     "cdu31a", NULL)) {
 			printk(KERN_WARNING PFX "Unable to grab IRQ%d for "
 					"the CDU31A driver\n", cdu31a_irq);

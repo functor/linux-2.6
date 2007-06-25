@@ -17,7 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/init.h>
-#include <linux/config.h>
 #include <linux/isdn/capiutil.h>
 
 /* from CAPI2.0 DDK AVM Berlin GmbH */
@@ -647,7 +646,7 @@ char *capi_cmd2str(u8 cmd, u8 subcmd)
 	return mnames[command_2_index(cmd, subcmd)];
 }
 
-
+#if 0
 /*-------------------------------------------------------*/
 /*-------------------------------------------------------*/
 
@@ -849,6 +848,18 @@ char *capi_cmsg2str(_cmsg * cmsg)
 	protocol_message_2_pars(cmsg, 1);
 	return buf;
 }
+#else
+
+char *capi_message2str(u8 * msg)
+{
+	return "capi_message2str not implemented";
+}       
+
+char *capi_cmsg2str(_cmsg * cmsg)
+{
+	return "capi_cmsg2str not implemented";
+}       
+#endif
 
 EXPORT_SYMBOL(capi_cmsg2message);
 EXPORT_SYMBOL(capi_message2cmsg);

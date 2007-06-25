@@ -27,7 +27,6 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
-#include "xfs_dir.h"
 #include "xfs_dir2.h"
 #include "xfs_dmapi.h"
 #include "xfs_mount.h"
@@ -35,7 +34,6 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
-#include "xfs_dir_sf.h"
 #include "xfs_dir2_sf.h"
 #include "xfs_attr_sf.h"
 #include "xfs_dinode.h"
@@ -93,7 +91,6 @@ STATIC int xfs_attr_refillstate(xfs_da_state_t *state);
 /*
  * Routines to manipulate out-of-line attribute values.
  */
-STATIC int xfs_attr_rmtval_get(xfs_da_args_t *args);
 STATIC int xfs_attr_rmtval_set(xfs_da_args_t *args);
 STATIC int xfs_attr_rmtval_remove(xfs_da_args_t *args);
 
@@ -182,7 +179,7 @@ xfs_attr_get(bhv_desc_t *bdp, const char *name, char *value, int *valuelenp,
 	return(error);
 }
 
-STATIC int
+int
 xfs_attr_set_int(xfs_inode_t *dp, const char *name, int namelen,
 		 char *value, int valuelen, int flags)
 {
@@ -202,18 +199,14 @@ xfs_attr_set_int(xfs_inode_t *dp, const char *name, int namelen,
 		return (error);
 
 	/*
-	 * Determine space new attribute will use, and if it would be
-	 * "local" or "remote" (note: local != inline).
-	 */
-	size = xfs_attr_leaf_newentsize(namelen, valuelen,
-					mp->m_sb.sb_blocksize, &local);
-
-	/*
 	 * If the inode doesn't have an attribute fork, add one.
 	 * (inode must not be locked when we call this routine)
 	 */
 	if (XFS_IFORK_Q(dp) == 0) {
-		if ((error = xfs_bmap_add_attrfork(dp, size, rsvd)))
+		int sf_size = sizeof(xfs_attr_sf_hdr_t) +
+			      XFS_ATTR_SF_ENTSIZE_BYNAME(namelen, valuelen);
+
+		if ((error = xfs_bmap_add_attrfork(dp, sf_size, rsvd)))
 			return(error);
 	}
 
@@ -233,6 +226,13 @@ xfs_attr_set_int(xfs_inode_t *dp, const char *name, int namelen,
 	args.whichfork = XFS_ATTR_FORK;
 	args.addname = 1;
 	args.oknoent = 1;
+
+	/*
+	 * Determine space new attribute will use, and if it would be
+	 * "local" or "remote" (note: local != inline).
+	 */
+	size = xfs_attr_leaf_newentsize(namelen, valuelen,
+					mp->m_sb.sb_blocksize, &local);
 
 	nblks = XFS_DAENTER_SPACE_RES(mp, XFS_ATTR_FORK);
 	if (local) {
@@ -294,7 +294,7 @@ xfs_attr_set_int(xfs_inode_t *dp, const char *name, int namelen,
 	xfs_trans_ihold(args.trans, dp);
 
 	/*
-	 * If the attribute list is non-existant or a shortform list,
+	 * If the attribute list is non-existent or a shortform list,
 	 * upgrade it to a single-leaf-block attribute list.
 	 */
 	if ((dp->i_d.di_aformat == XFS_DINODE_FMT_LOCAL) ||
@@ -442,7 +442,7 @@ xfs_attr_set(bhv_desc_t *bdp, const char *name, char *value, int valuelen, int f
  * Generic handler routine to remove a name from an attribute list.
  * Transitions attribute list from Btree to shortform as necessary.
  */
-STATIC int
+int
 xfs_attr_remove_int(xfs_inode_t *dp, const char *name, int namelen, int flags)
 {
 	xfs_da_args_t	args;
@@ -593,6 +593,110 @@ xfs_attr_remove(bhv_desc_t *bdp, const char *name, int flags, struct cred *cred)
 	return xfs_attr_remove_int(dp, name, namelen, flags);
 }
 
+int								/* error */
+xfs_attr_list_int(xfs_attr_list_context_t *context)
+{
+	int error;
+	xfs_inode_t *dp = context->dp;
+
+	/*
+	 * Decide on what work routines to call based on the inode size.
+	 */
+	if (XFS_IFORK_Q(dp) == 0 ||
+	    (dp->i_d.di_aformat == XFS_DINODE_FMT_EXTENTS &&
+	     dp->i_d.di_anextents == 0)) {
+		error = 0;
+	} else if (dp->i_d.di_aformat == XFS_DINODE_FMT_LOCAL) {
+		error = xfs_attr_shortform_list(context);
+	} else if (xfs_bmap_one_block(dp, XFS_ATTR_FORK)) {
+		error = xfs_attr_leaf_list(context);
+	} else {
+		error = xfs_attr_node_list(context);
+	}
+	return error;
+}
+
+#define	ATTR_ENTBASESIZE		/* minimum bytes used by an attr */ \
+	(((struct attrlist_ent *) 0)->a_name - (char *) 0)
+#define	ATTR_ENTSIZE(namelen)		/* actual bytes used by an attr */ \
+	((ATTR_ENTBASESIZE + (namelen) + 1 + sizeof(u_int32_t)-1) \
+	 & ~(sizeof(u_int32_t)-1))
+
+/*
+ * Format an attribute and copy it out to the user's buffer.
+ * Take care to check values and protect against them changing later,
+ * we may be reading them directly out of a user buffer.
+ */
+/*ARGSUSED*/
+STATIC int
+xfs_attr_put_listent(xfs_attr_list_context_t *context, attrnames_t *namesp,
+		     char *name, int namelen,
+		     int valuelen, char *value)
+{
+	attrlist_ent_t *aep;
+	int arraytop;
+
+	ASSERT(!(context->flags & ATTR_KERNOVAL));
+	ASSERT(context->count >= 0);
+	ASSERT(context->count < (ATTR_MAX_VALUELEN/8));
+	ASSERT(context->firstu >= sizeof(*context->alist));
+	ASSERT(context->firstu <= context->bufsize);
+
+	arraytop = sizeof(*context->alist) +
+			context->count * sizeof(context->alist->al_offset[0]);
+	context->firstu -= ATTR_ENTSIZE(namelen);
+	if (context->firstu < arraytop) {
+		xfs_attr_trace_l_c("buffer full", context);
+		context->alist->al_more = 1;
+		context->seen_enough = 1;
+		return 1;
+	}
+
+	aep = (attrlist_ent_t *)&(((char *)context->alist)[ context->firstu ]);
+	aep->a_valuelen = valuelen;
+	memcpy(aep->a_name, name, namelen);
+	aep->a_name[ namelen ] = 0;
+	context->alist->al_offset[ context->count++ ] = context->firstu;
+	context->alist->al_count = context->count;
+	xfs_attr_trace_l_c("add", context);
+	return 0;
+}
+
+STATIC int
+xfs_attr_kern_list(xfs_attr_list_context_t *context, attrnames_t *namesp,
+		     char *name, int namelen,
+		     int valuelen, char *value)
+{
+	char *offset;
+	int arraytop;
+
+	ASSERT(context->count >= 0);
+
+	arraytop = context->count + namesp->attr_namelen + namelen + 1;
+	if (arraytop > context->firstu) {
+		context->count = -1;	/* insufficient space */
+		return 1;
+	}
+	offset = (char *)context->alist + context->count;
+	strncpy(offset, namesp->attr_name, namesp->attr_namelen);
+	offset += namesp->attr_namelen;
+	strncpy(offset, name, namelen);			/* real name */
+	offset += namelen;
+	*offset = '\0';
+	context->count += namesp->attr_namelen + namelen + 1;
+	return 0;
+}
+
+/*ARGSUSED*/
+STATIC int
+xfs_attr_kern_list_sizes(xfs_attr_list_context_t *context, attrnames_t *namesp,
+		     char *name, int namelen,
+		     int valuelen, char *value)
+{
+	context->count += namesp->attr_namelen + namelen + 1;
+	return 0;
+}
+
 /*
  * Generate a list of extended attribute names and optionally
  * also value lengths.  Positive return value follows the XFS
@@ -617,13 +721,13 @@ xfs_attr_list(bhv_desc_t *bdp, char *buffer, int bufsize, int flags,
 		return(XFS_ERROR(EINVAL));
 	if ((cursor->initted == 0) &&
 	    (cursor->hashval || cursor->blkno || cursor->offset))
-		return(XFS_ERROR(EINVAL));
+		return XFS_ERROR(EINVAL);
 
 	/*
 	 * Check for a properly aligned buffer.
 	 */
 	if (((long)buffer) & (sizeof(int)-1))
-		return(XFS_ERROR(EFAULT));
+		return XFS_ERROR(EFAULT);
 	if (flags & ATTR_KERNOVAL)
 		bufsize = 0;
 
@@ -636,53 +740,47 @@ xfs_attr_list(bhv_desc_t *bdp, char *buffer, int bufsize, int flags,
 	context.dupcnt = 0;
 	context.resynch = 1;
 	context.flags = flags;
-	if (!(flags & ATTR_KERNAMELS)) {
+	context.seen_enough = 0;
+	context.alist = (attrlist_t *)buffer;
+	context.put_value = 0;
+
+	if (flags & ATTR_KERNAMELS) {
+		context.bufsize = bufsize;
+		context.firstu = context.bufsize;
+		if (flags & ATTR_KERNOVAL)
+			context.put_listent = xfs_attr_kern_list_sizes;
+		else
+			context.put_listent = xfs_attr_kern_list;
+	} else {
 		context.bufsize = (bufsize & ~(sizeof(int)-1));  /* align */
 		context.firstu = context.bufsize;
-		context.alist = (attrlist_t *)buffer;
 		context.alist->al_count = 0;
 		context.alist->al_more = 0;
 		context.alist->al_offset[0] = context.bufsize;
-	}
-	else {
-		context.bufsize = bufsize;
-		context.firstu = context.bufsize;
-		context.alist = (attrlist_t *)buffer;
+		context.put_listent = xfs_attr_put_listent;
 	}
 
 	if (XFS_FORCED_SHUTDOWN(dp->i_mount))
-		return (EIO);
+		return EIO;
 
 	xfs_ilock(dp, XFS_ILOCK_SHARED);
-	/*
-	 * Decide on what work routines to call based on the inode size.
-	 */
 	xfs_attr_trace_l_c("syscall start", &context);
-	if (XFS_IFORK_Q(dp) == 0 ||
-	    (dp->i_d.di_aformat == XFS_DINODE_FMT_EXTENTS &&
-	     dp->i_d.di_anextents == 0)) {
-		error = 0;
-	} else if (dp->i_d.di_aformat == XFS_DINODE_FMT_LOCAL) {
-		error = xfs_attr_shortform_list(&context);
-	} else if (xfs_bmap_one_block(dp, XFS_ATTR_FORK)) {
-		error = xfs_attr_leaf_list(&context);
-	} else {
-		error = xfs_attr_node_list(&context);
-	}
+
+	error = xfs_attr_list_int(&context);
+
 	xfs_iunlock(dp, XFS_ILOCK_SHARED);
 	xfs_attr_trace_l_c("syscall end", &context);
 
-	if (!(context.flags & (ATTR_KERNOVAL|ATTR_KERNAMELS))) {
-		ASSERT(error >= 0);
-	}
-	else {	/* must return negated buffer size or the error */
+	if (context.flags & (ATTR_KERNOVAL|ATTR_KERNAMELS)) {
+		/* must return negated buffer size or the error */
 		if (context.count < 0)
 			error = XFS_ERROR(ERANGE);
 		else
 			error = -context.count;
-	}
+	} else
+		ASSERT(error >= 0);
 
-	return(error);
+	return error;
 }
 
 int								/* error */
@@ -1124,20 +1222,19 @@ xfs_attr_leaf_list(xfs_attr_list_context_t *context)
 	context->cursor->blkno = 0;
 	error = xfs_da_read_buf(NULL, context->dp, 0, -1, &bp, XFS_ATTR_FORK);
 	if (error)
-		return(error);
+		return XFS_ERROR(error);
 	ASSERT(bp != NULL);
 	leaf = bp->data;
-	if (unlikely(INT_GET(leaf->hdr.info.magic, ARCH_CONVERT)
-						!= XFS_ATTR_LEAF_MAGIC)) {
+	if (unlikely(be16_to_cpu(leaf->hdr.info.magic) != XFS_ATTR_LEAF_MAGIC)) {
 		XFS_CORRUPTION_ERROR("xfs_attr_leaf_list", XFS_ERRLEVEL_LOW,
 				     context->dp->i_mount, leaf);
 		xfs_da_brelse(NULL, bp);
-		return(XFS_ERROR(EFSCORRUPTED));
+		return XFS_ERROR(EFSCORRUPTED);
 	}
 
-	(void)xfs_attr_leaf_list_int(bp, context);
+	error = xfs_attr_leaf_list_int(bp, context);
 	xfs_da_brelse(NULL, bp);
-	return(0);
+	return XFS_ERROR(error);
 }
 
 
@@ -1541,8 +1638,8 @@ xfs_attr_node_removename(xfs_da_args_t *args)
 						     XFS_ATTR_FORK);
 		if (error)
 			goto out;
-		ASSERT(INT_GET(((xfs_attr_leafblock_t *)
-				      bp->data)->hdr.info.magic, ARCH_CONVERT)
+		ASSERT(be16_to_cpu(((xfs_attr_leafblock_t *)
+				      bp->data)->hdr.info.magic)
 						       == XFS_ATTR_LEAF_MAGIC);
 
 		if ((forkoff = xfs_attr_shortform_allfit(bp, dp))) {
@@ -1585,7 +1682,7 @@ out:
  * Fill in the disk block numbers in the state structure for the buffers
  * that are attached to the state structure.
  * This is done so that we can quickly reattach ourselves to those buffers
- * after some set of transaction commit's has released these buffers.
+ * after some set of transaction commits have released these buffers.
  */
 STATIC int
 xfs_attr_fillstate(xfs_da_state_t *state)
@@ -1632,7 +1729,7 @@ xfs_attr_fillstate(xfs_da_state_t *state)
 /*
  * Reattach the buffers to the state structure based on the disk block
  * numbers stored in the state structure.
- * This is done after some set of transaction commit's has released those
+ * This is done after some set of transaction commits have released those
  * buffers from our grip.
  */
 STATIC int
@@ -1763,7 +1860,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 			return(error);
 		if (bp) {
 			node = bp->data;
-			switch (INT_GET(node->hdr.info.magic, ARCH_CONVERT)) {
+			switch (be16_to_cpu(node->hdr.info.magic)) {
 			case XFS_DA_NODE_MAGIC:
 				xfs_attr_trace_l_cn("wrong blk", context, node);
 				xfs_da_brelse(NULL, bp);
@@ -1771,18 +1868,14 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				break;
 			case XFS_ATTR_LEAF_MAGIC:
 				leaf = bp->data;
-				if (cursor->hashval >
-				    INT_GET(leaf->entries[
-					 INT_GET(leaf->hdr.count,
-						ARCH_CONVERT)-1].hashval,
-							ARCH_CONVERT)) {
+				if (cursor->hashval > be32_to_cpu(leaf->entries[
+				    be16_to_cpu(leaf->hdr.count)-1].hashval)) {
 					xfs_attr_trace_l_cl("wrong blk",
 							   context, leaf);
 					xfs_da_brelse(NULL, bp);
 					bp = NULL;
 				} else if (cursor->hashval <=
-					     INT_GET(leaf->entries[0].hashval,
-							ARCH_CONVERT)) {
+					     be32_to_cpu(leaf->entries[0].hashval)) {
 					xfs_attr_trace_l_cl("maybe wrong blk",
 							   context, leaf);
 					xfs_da_brelse(NULL, bp);
@@ -1817,10 +1910,10 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				return(XFS_ERROR(EFSCORRUPTED));
 			}
 			node = bp->data;
-			if (INT_GET(node->hdr.info.magic, ARCH_CONVERT)
+			if (be16_to_cpu(node->hdr.info.magic)
 							== XFS_ATTR_LEAF_MAGIC)
 				break;
-			if (unlikely(INT_GET(node->hdr.info.magic, ARCH_CONVERT)
+			if (unlikely(be16_to_cpu(node->hdr.info.magic)
 							!= XFS_DA_NODE_MAGIC)) {
 				XFS_CORRUPTION_ERROR("xfs_attr_node_list(3)",
 						     XFS_ERRLEVEL_LOW,
@@ -1830,19 +1923,17 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 				return(XFS_ERROR(EFSCORRUPTED));
 			}
 			btree = node->btree;
-			for (i = 0;
-				i < INT_GET(node->hdr.count, ARCH_CONVERT);
+			for (i = 0; i < be16_to_cpu(node->hdr.count);
 								btree++, i++) {
 				if (cursor->hashval
-						<= INT_GET(btree->hashval,
-							    ARCH_CONVERT)) {
-					cursor->blkno = INT_GET(btree->before, ARCH_CONVERT);
+						<= be32_to_cpu(btree->hashval)) {
+					cursor->blkno = be32_to_cpu(btree->before);
 					xfs_attr_trace_l_cb("descending",
 							    context, btree);
 					break;
 				}
 			}
-			if (i == INT_GET(node->hdr.count, ARCH_CONVERT)) {
+			if (i == be16_to_cpu(node->hdr.count)) {
 				xfs_da_brelse(NULL, bp);
 				return(0);
 			}
@@ -1858,7 +1949,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 	 */
 	for (;;) {
 		leaf = bp->data;
-		if (unlikely(INT_GET(leaf->hdr.info.magic, ARCH_CONVERT)
+		if (unlikely(be16_to_cpu(leaf->hdr.info.magic)
 						!= XFS_ATTR_LEAF_MAGIC)) {
 			XFS_CORRUPTION_ERROR("xfs_attr_node_list(4)",
 					     XFS_ERRLEVEL_LOW,
@@ -1867,9 +1958,13 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
 			return(XFS_ERROR(EFSCORRUPTED));
 		}
 		error = xfs_attr_leaf_list_int(bp, context);
-		if (error || !leaf->hdr.info.forw)
-			break;	/* not really an error, buffer full or EOF */
-		cursor->blkno = INT_GET(leaf->hdr.info.forw, ARCH_CONVERT);
+		if (error) {
+			xfs_da_brelse(NULL, bp);
+			return error;
+		}
+		if (context->seen_enough || leaf->hdr.info.forw == 0)
+			break;
+		cursor->blkno = be32_to_cpu(leaf->hdr.info.forw);
 		xfs_da_brelse(NULL, bp);
 		error = xfs_da_read_buf(NULL, context->dp, cursor->blkno, -1,
 					      &bp, XFS_ATTR_FORK);
@@ -1895,7 +1990,7 @@ xfs_attr_node_list(xfs_attr_list_context_t *context)
  * Read the value associated with an attribute from the out-of-line buffer
  * that we stored it in.
  */
-STATIC int
+int
 xfs_attr_rmtval_get(xfs_da_args_t *args)
 {
 	xfs_bmbt_irec_t map[ATTR_RMTVALUE_MAPSIZE];
@@ -1917,7 +2012,7 @@ xfs_attr_rmtval_get(xfs_da_args_t *args)
 		error = xfs_bmapi(args->trans, args->dp, (xfs_fileoff_t)lblkno,
 				  args->rmtblkcnt,
 				  XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
-				  NULL, 0, map, &nmap, NULL);
+				  NULL, 0, map, &nmap, NULL, NULL);
 		if (error)
 			return(error);
 		ASSERT(nmap >= 1);
@@ -1995,7 +2090,7 @@ xfs_attr_rmtval_set(xfs_da_args_t *args)
 				  XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA |
 							XFS_BMAPI_WRITE,
 				  args->firstblock, args->total, &map, &nmap,
-				  args->flist);
+				  args->flist, NULL);
 		if (!error) {
 			error = xfs_bmap_finish(&args->trans, args->flist,
 						*args->firstblock, &committed);
@@ -2046,7 +2141,8 @@ xfs_attr_rmtval_set(xfs_da_args_t *args)
 		error = xfs_bmapi(NULL, dp, (xfs_fileoff_t)lblkno,
 				  args->rmtblkcnt,
 				  XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
-				  args->firstblock, 0, &map, &nmap, NULL);
+				  args->firstblock, 0, &map, &nmap,
+				  NULL, NULL);
 		if (error) {
 			return(error);
 		}
@@ -2111,7 +2207,7 @@ xfs_attr_rmtval_remove(xfs_da_args_t *args)
 					args->rmtblkcnt,
 					XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
 					args->firstblock, 0, &map, &nmap,
-					args->flist);
+					args->flist, NULL);
 		if (error) {
 			return(error);
 		}
@@ -2149,7 +2245,8 @@ xfs_attr_rmtval_remove(xfs_da_args_t *args)
 		XFS_BMAP_INIT(args->flist, args->firstblock);
 		error = xfs_bunmapi(args->trans, args->dp, lblkno, blkcnt,
 				    XFS_BMAPI_ATTRFORK | XFS_BMAPI_METADATA,
-				    1, args->firstblock, args->flist, &done);
+				    1, args->firstblock, args->flist,
+				    NULL, &done);
 		if (!error) {
 			error = xfs_bmap_finish(&args->trans, args->flist,
 						*args->firstblock, &committed);
@@ -2232,9 +2329,10 @@ xfs_attr_trace_l_cn(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)INT_GET(node->hdr.count, ARCH_CONVERT),
-		(__psunsigned_t)INT_GET(node->btree[0].hashval, ARCH_CONVERT),
-		(__psunsigned_t)INT_GET(node->btree[INT_GET(node->hdr.count, ARCH_CONVERT)-1].hashval, ARCH_CONVERT));
+		(__psunsigned_t)be16_to_cpu(node->hdr.count),
+		(__psunsigned_t)be32_to_cpu(node->btree[0].hashval),
+		(__psunsigned_t)be32_to_cpu(node->btree[
+				    be16_to_cpu(node->hdr.count)-1].hashval));
 }
 
 /*
@@ -2261,8 +2359,8 @@ xfs_attr_trace_l_cb(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)INT_GET(btree->hashval, ARCH_CONVERT),
-		(__psunsigned_t)INT_GET(btree->before, ARCH_CONVERT),
+		(__psunsigned_t)be32_to_cpu(btree->hashval),
+		(__psunsigned_t)be32_to_cpu(btree->before),
 		(__psunsigned_t)NULL);
 }
 
@@ -2290,9 +2388,10 @@ xfs_attr_trace_l_cl(char *where, struct xfs_attr_list_context *context,
 				: 0,
 		(__psunsigned_t)context->dupcnt,
 		(__psunsigned_t)context->flags,
-		(__psunsigned_t)INT_GET(leaf->hdr.count, ARCH_CONVERT),
-		(__psunsigned_t)INT_GET(leaf->entries[0].hashval, ARCH_CONVERT),
-		(__psunsigned_t)INT_GET(leaf->entries[INT_GET(leaf->hdr.count, ARCH_CONVERT)-1].hashval, ARCH_CONVERT));
+		(__psunsigned_t)be16_to_cpu(leaf->hdr.count),
+		(__psunsigned_t)be32_to_cpu(leaf->entries[0].hashval),
+		(__psunsigned_t)be32_to_cpu(leaf->entries[
+				be16_to_cpu(leaf->hdr.count)-1].hashval));
 }
 
 /*
@@ -2327,56 +2426,56 @@ xfs_attr_trace_enter(int type, char *where,
 
 STATIC int
 posix_acl_access_set(
-	vnode_t	*vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vset(vp, data, size, _ACL_TYPE_ACCESS);
 }
 
 STATIC int
 posix_acl_access_remove(
-	struct vnode *vp, char *name, int xflags)
+	bhv_vnode_t *vp, char *name, int xflags)
 {
 	return xfs_acl_vremove(vp, _ACL_TYPE_ACCESS);
 }
 
 STATIC int
 posix_acl_access_get(
-	vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vget(vp, data, size, _ACL_TYPE_ACCESS);
 }
 
 STATIC int
 posix_acl_access_exists(
-	vnode_t *vp)
+	bhv_vnode_t *vp)
 {
 	return xfs_acl_vhasacl_access(vp);
 }
 
 STATIC int
 posix_acl_default_set(
-	vnode_t	*vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vset(vp, data, size, _ACL_TYPE_DEFAULT);
 }
 
 STATIC int
 posix_acl_default_get(
-	vnode_t *vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	return xfs_acl_vget(vp, data, size, _ACL_TYPE_DEFAULT);
 }
 
 STATIC int
 posix_acl_default_remove(
-	struct vnode *vp, char *name, int xflags)
+	bhv_vnode_t *vp, char *name, int xflags)
 {
 	return xfs_acl_vremove(vp, _ACL_TYPE_DEFAULT);
 }
 
 STATIC int
 posix_acl_default_exists(
-	vnode_t *vp)
+	bhv_vnode_t *vp)
 {
 	return xfs_acl_vhasacl_default(vp);
 }
@@ -2409,21 +2508,18 @@ STATIC struct attrnames *attr_system_names[] =
 
 STATIC int
 attr_generic_set(
-	struct vnode *vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
-	int 	error;
-
-	VOP_ATTR_SET(vp, name, data, size, xflags, NULL, error);
-	return -error;
+	return -bhv_vop_attr_set(vp, name, data, size, xflags, NULL);
 }
 
 STATIC int
 attr_generic_get(
-	struct vnode *vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	int	error, asize = size;
 
-	VOP_ATTR_GET(vp, name, data, &asize, xflags, NULL, error);
+	error = bhv_vop_attr_get(vp, name, data, &asize, xflags, NULL);
 	if (!error)
 		return asize;
 	return -error;
@@ -2431,12 +2527,9 @@ attr_generic_get(
 
 STATIC int
 attr_generic_remove(
-	struct vnode *vp, char *name, int xflags)
+	bhv_vnode_t *vp, char *name, int xflags)
 {
-	int	error;
-
-	VOP_ATTR_REMOVE(vp, name, xflags, NULL, error);
-	return -error;
+	return -bhv_vop_attr_remove(vp, name, xflags, NULL);
 }
 
 STATIC int
@@ -2464,7 +2557,7 @@ attr_generic_listadd(
 
 STATIC int
 attr_system_list(
-	struct vnode		*vp,
+	bhv_vnode_t		*vp,
 	void			*data,
 	size_t			size,
 	ssize_t			*result)
@@ -2486,12 +2579,12 @@ attr_system_list(
 
 int
 attr_generic_list(
-	struct vnode *vp, void *data, size_t size, int xflags, ssize_t *result)
+	bhv_vnode_t *vp, void *data, size_t size, int xflags, ssize_t *result)
 {
 	attrlist_cursor_kern_t	cursor = { 0 };
 	int			error;
 
-	VOP_ATTR_LIST(vp, data, size, xflags, &cursor, NULL, error);
+	error = bhv_vop_attr_list(vp, data, size, xflags, &cursor, NULL);
 	if (error > 0)
 		return -error;
 	*result = -error;
@@ -2519,10 +2612,10 @@ attr_lookup_namespace(
  */
 STATIC int
 attr_user_capable(
-	struct vnode	*vp,
+	bhv_vnode_t	*vp,
 	cred_t		*cred)
 {
-	struct inode	*inode = LINVFS_GET_IP(vp);
+	struct inode	*inode = vn_to_inode(vp);
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
@@ -2537,10 +2630,10 @@ attr_user_capable(
 
 STATIC int
 attr_trusted_capable(
-	struct vnode	*vp,
+	bhv_vnode_t	*vp,
 	cred_t		*cred)
 {
-	struct inode	*inode = LINVFS_GET_IP(vp);
+	struct inode	*inode = vn_to_inode(vp);
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
@@ -2551,7 +2644,7 @@ attr_trusted_capable(
 
 STATIC int
 attr_secure_capable(
-	struct vnode	*vp,
+	bhv_vnode_t	*vp,
 	cred_t		*cred)
 {
 	return -ENOSECURITY;
@@ -2559,7 +2652,7 @@ attr_secure_capable(
 
 STATIC int
 attr_system_set(
-	struct vnode *vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	attrnames_t	*namesp;
 	int		error;
@@ -2578,7 +2671,7 @@ attr_system_set(
 
 STATIC int
 attr_system_get(
-	struct vnode *vp, char *name, void *data, size_t size, int xflags)
+	bhv_vnode_t *vp, char *name, void *data, size_t size, int xflags)
 {
 	attrnames_t	*namesp;
 
@@ -2590,7 +2683,7 @@ attr_system_get(
 
 STATIC int
 attr_system_remove(
-	struct vnode *vp, char *name, int xflags)
+	bhv_vnode_t *vp, char *name, int xflags)
 {
 	attrnames_t	*namesp;
 

@@ -26,6 +26,7 @@
 #include <asm/dma.h>
 #include <asm/uaccess.h>
 #include <xen/interface/memory.h>
+#include <asm-i386/mach-xen/asm/swiotlb.h>
 
 int swiotlb;
 EXPORT_SYMBOL(swiotlb);
@@ -46,9 +47,6 @@ EXPORT_SYMBOL(swiotlb);
  * controllable.
  */
 #define IO_TLB_SHIFT 11
-
-/* Width of DMA addresses in the IO TLB. 31 bits is an aacraid limitation. */
-#define IO_TLB_DMA_BITS 31
 
 int swiotlb_force;
 static char *iotlb_virt_start;
@@ -634,7 +632,7 @@ void
 swiotlb_unmap_page(struct device *hwdev, dma_addr_t dma_address,
 		   size_t size, enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	BUG_ON(!valid_dma_direction(direction));
 	if (in_swiotlb_aperture(dma_address))
 		unmap_single(hwdev, bus_to_virt(dma_address), size, direction);
 }

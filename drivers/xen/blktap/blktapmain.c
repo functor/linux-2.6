@@ -48,6 +48,7 @@
 #include <linux/major.h>
 #include <linux/gfp.h>
 #include <linux/poll.h>
+#include <linux/init.h>
 #include <asm/tlbflush.h>
 
 #define MAX_TAP_DEV 100     /*the maximum number of tapdisk ring devices    */
@@ -97,6 +98,8 @@ int setup_xen_class(void)
          ((_req) * BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE) +        \
          ((_seg) * PAGE_SIZE))
 static int blkif_reqs = MAX_PENDING_REQS;
+module_param(blkif_reqs, int, 0);
+
 static int mmap_pages = MMAP_PAGES;
 
 #define RING_PAGES 1 /* BLKTAP - immediately before the mmap area, we
@@ -133,13 +136,6 @@ typedef struct domid_translate {
 
 static domid_translate_t  translate_domid[MAX_TAP_DEV];
 static tap_blkif_t *tapfds[MAX_TAP_DEV];
-
-static int __init set_blkif_reqs(char *str)
-{
-	get_option(&str, &blkif_reqs);
-	return 1;
-}
-__setup("blkif_reqs=", set_blkif_reqs);
 
 /* Run-time switchable: /sys/module/blktap/parameters/ */
 static unsigned int log_stats = 0;
@@ -844,28 +840,31 @@ static void fast_flush_area(pending_req_t *req, int k_idx, int u_idx, int
 		uvaddr = MMAP_VADDR(info->user_vstart, u_idx, i);
 
 		khandle = &pending_handle(mmap_idx, k_idx, i);
-		if (BLKTAP_INVALID_HANDLE(khandle)) {
-			WPRINTK("BLKTAP_INVALID_HANDLE\n");
-			continue;
-		}
-		gnttab_set_unmap_op(&unmap[invcount], 
-				    idx_to_kaddr(mmap_idx, k_idx, i), 
-				    GNTMAP_host_map, khandle->kernel);
-		invcount++;
 
-		if (create_lookup_pte_addr(
-		    info->vma->vm_mm,
-		    MMAP_VADDR(info->user_vstart, u_idx, i), 
-		    &ptep) !=0) {
-			WPRINTK("Couldn't get a pte addr!\n");
-			return;
+		if (khandle->kernel != 0xFFFF) {
+			gnttab_set_unmap_op(&unmap[invcount],
+					    idx_to_kaddr(mmap_idx, k_idx, i),
+					    GNTMAP_host_map, khandle->kernel);
+			invcount++;
 		}
 
-		gnttab_set_unmap_op(&unmap[invcount], 
-			ptep, GNTMAP_host_map,
-			khandle->user);
-		invcount++;
-            
+		if (khandle->user != 0xFFFF) {
+			if (create_lookup_pte_addr(
+				info->vma->vm_mm,
+				MMAP_VADDR(info->user_vstart, u_idx, i),
+				&ptep) !=0) {
+				WPRINTK("Couldn't get a pte addr!\n");
+				return;
+			}
+
+			gnttab_set_unmap_op(&unmap[invcount], ptep,
+				GNTMAP_host_map |
+				GNTMAP_application_map |
+				GNTMAP_contains_pte,
+				khandle->user);
+			invcount++;
+		}
+
 		BLKTAP_INVALIDATE_HANDLE(khandle);
 	}
 	ret = HYPERVISOR_grant_table_op(
@@ -1014,7 +1013,7 @@ static void blkif_notify_work(blkif_t *blkif)
 	wake_up(&blkif->wq);
 }
 
-irqreturn_t tap_blkif_be_int(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t tap_blkif_be_int(int irq, void *dev_id)
 {
 	blkif_notify_work(dev_id);
 	return IRQ_HANDLED;
@@ -1029,7 +1028,7 @@ static int print_dbug = 1;
 static int do_block_io_op(blkif_t *blkif)
 {
 	blkif_back_ring_t *blk_ring = &blkif->blk_ring;
-	blkif_request_t *req;
+	blkif_request_t req;
 	pending_req_t *pending_req;
 	RING_IDX rc, rp;
 	int more_to_do = 0;
@@ -1081,24 +1080,24 @@ static int do_block_io_op(blkif_t *blkif)
 			break;
 		}
 
-		req = RING_GET_REQUEST(blk_ring, rc);
+		memcpy(&req, RING_GET_REQUEST(blk_ring, rc), sizeof(req));
 		blk_ring->req_cons = ++rc; /* before make_response() */	
 
-		switch (req->operation) {
+		switch (req.operation) {
 		case BLKIF_OP_READ:
 			blkif->st_rd_req++;
-			dispatch_rw_block_io(blkif, req, pending_req);
+			dispatch_rw_block_io(blkif, &req, pending_req);
 			break;
 
 		case BLKIF_OP_WRITE:
 			blkif->st_wr_req++;
-			dispatch_rw_block_io(blkif, req, pending_req);
+			dispatch_rw_block_io(blkif, &req, pending_req);
 			break;
 
 		default:
 			WPRINTK("unknown operation [%d]\n",
-				req->operation);
-			make_response(blkif, req->id, req->operation,
+				req.operation);
+			make_response(blkif, req.id, req.operation,
 				      BLKIF_RSP_ERROR);
 			free_req(pending_req);
 			break;
@@ -1127,9 +1126,10 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 	int usr_idx = GET_NEXT_REQ(info->idx_map);
 	uint16_t mmap_idx = pending_req->mem_idx;
 
-	/*Check we have space on user ring - should never fail*/
-	if(usr_idx == INVALID_REQ) goto fail_flush;
-	
+	/* Check we have space on user ring - should never fail. */
+	if (usr_idx == INVALID_REQ)
+		goto fail_response;
+
 	/* Check that number of segments is sane. */
 	nseg = req->nr_segments;
 	if ( unlikely(nseg == 0) || 
@@ -1194,8 +1194,6 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 					     uvaddr, &ptep);
 		if (ret) {
 			WPRINTK("Couldn't get a pte addr!\n");
-			fast_flush_area(pending_req, pending_idx, usr_idx, 
-					blkif->dev_num);
 			goto fail_flush;
 		}
 
@@ -1223,19 +1221,25 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 		if (unlikely(map[i].status != 0)) {
 			WPRINTK("invalid kernel buffer -- "
 				"could not remap it\n");
-			goto fail_flush;
+			ret |= 1;
+			map[i].handle = 0xFFFF;
 		}
 
 		if (unlikely(map[i+1].status != 0)) {
 			WPRINTK("invalid user buffer -- "
 				"could not remap it\n");
-			goto fail_flush;
+			ret |= 1;
+			map[i+1].handle = 0xFFFF;
 		}
 
 		pending_handle(mmap_idx, pending_idx, i/2).kernel 
 			= map[i].handle;
 		pending_handle(mmap_idx, pending_idx, i/2).user   
 			= map[i+1].handle;
+
+		if (ret)
+			continue;
+
 		set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
 			FOREIGN_FRAME(map[i].dev_bus_addr >> PAGE_SHIFT));
 		offset = (uvaddr - info->vma->vm_start) >> PAGE_SHIFT;
@@ -1243,6 +1247,10 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 		((struct page **)info->vma->vm_private_data)[offset] =
 			pg;
 	}
+
+	if (ret)
+		goto fail_flush;
+
 	/* Mark mapped pages as reserved: */
 	for (i = 0; i < req->nr_segments; i++) {
 		unsigned long kvaddr;

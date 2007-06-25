@@ -14,7 +14,6 @@
  * environment.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/sysctl.h>
@@ -25,7 +24,6 @@
 #include <linux/resource.h>
 #include <linux/times.h>
 #include <linux/utsname.h>
-#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -46,6 +44,7 @@
 #include <linux/eventpoll.h>
 #include <linux/personality.h>
 #include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/stat.h>
 #include <linux/ipc.h>
 #include <linux/capability.h>
@@ -127,6 +126,7 @@ sys32_execve (char __user *name, compat_uptr_t __user *argv, compat_uptr_t __use
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 {
+	compat_ino_t ino;
 	int err;
 
 	if ((u64) stat->size > MAX_NON_LFS ||
@@ -134,11 +134,15 @@ int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 	    !old_valid_dev(stat->rdev))
 		return -EOVERFLOW;
 
+	ino = stat->ino;
+	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
+		return -EOVERFLOW;
+
 	if (clear_user(ubuf, sizeof(*ubuf)))
 		return -EFAULT;
 
 	err  = __put_user(old_encode_dev(stat->dev), &ubuf->st_dev);
-	err |= __put_user(stat->ino, &ubuf->st_ino);
+	err |= __put_user(ino, &ubuf->st_ino);
 	err |= __put_user(stat->mode, &ubuf->st_mode);
 	err |= __put_user(stat->nlink, &ubuf->st_nlink);
 	err |= __put_user(high2lowuid(stat->uid), &ubuf->st_uid);
@@ -232,7 +236,7 @@ mmap_subpage (struct file *file, unsigned long start, unsigned long end, int pro
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		/* read the file contents */
-		inode = file->f_dentry->d_inode;
+		inode = file->f_path.dentry->d_inode;
 		if (!inode->i_fop || !file->f_op->read
 		    || ((*file->f_op->read)(file, (char __user *) start, end - start, &off) < 0))
 		{
@@ -251,7 +255,7 @@ mmap_subpage (struct file *file, unsigned long start, unsigned long end, int pro
 }
 
 /* SLAB cache for partial_page structures */
-kmem_cache_t *partial_page_cachep;
+struct kmem_cache *partial_page_cachep;
 
 /*
  * init partial_page_list.
@@ -834,7 +838,7 @@ emulate_mmap (struct file *file, unsigned long start, unsigned long len, int pro
 
 	if (!is_congruent) {
 		/* read the file contents */
-		inode = file->f_dentry->d_inode;
+		inode = file->f_path.dentry->d_inode;
 		if (!inode->i_fop || !file->f_op->read
 		    || ((*file->f_op->read)(file, (char __user *) pstart, pend - pstart, &poff)
 			< 0))
@@ -1166,19 +1170,7 @@ put_tv32 (struct compat_timeval __user *o, struct timeval *i)
 asmlinkage unsigned long
 sys32_alarm (unsigned int seconds)
 {
-	struct itimerval it_new, it_old;
-	unsigned int oldalarm;
-
-	it_new.it_interval.tv_sec = it_new.it_interval.tv_usec = 0;
-	it_new.it_value.tv_sec = seconds;
-	it_new.it_value.tv_usec = 0;
-	do_setitimer(ITIMER_REAL, &it_new, &it_old);
-	oldalarm = it_old.it_value.tv_sec;
-	/* ehhh.. We can't return 0 if we have an alarm pending.. */
-	/* And we'd better return too much than too little anyway */
-	if (it_old.it_value.tv_usec)
-		oldalarm++;
-	return oldalarm;
+	return alarm_setitimer(seconds);
 }
 
 /* Translations due to time_t size differences.  Which affects all
@@ -1191,7 +1183,7 @@ sys32_gettimeofday (struct compat_timeval __user *tv, struct timezone __user *tz
 {
 	if (tv) {
 		struct timeval ktv;
-		do_gettimeofday(&ktv);
+		vx_gettimeofday(&ktv);
 		if (put_tv32(tv, &ktv))
 			return -EFAULT;
 	}
@@ -1236,16 +1228,20 @@ struct readdir32_callback {
 };
 
 static int
-filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
+filldir32 (void *__buf, const char *name, int namlen, loff_t offset, u64 ino,
 	   unsigned int d_type)
 {
 	struct compat_dirent __user * dirent;
 	struct getdents32_callback * buf = (struct getdents32_callback *) __buf;
 	int reclen = ROUND_UP(offsetof(struct compat_dirent, d_name) + namlen + 1, 4);
+	u32 d_ino;
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	buf->error = -EFAULT;	/* only used if we fail.. */
 	dirent = buf->previous;
 	if (dirent)
@@ -1253,7 +1249,7 @@ filldir32 (void *__buf, const char *name, int namlen, loff_t offset, ino_t ino,
 			return -EFAULT;
 	dirent = buf->current_dir;
 	buf->previous = dirent;
-	if (put_user(ino, &dirent->d_ino)
+	if (put_user(d_ino, &dirent->d_ino)
 	    || put_user(reclen, &dirent->d_reclen)
 	    || copy_to_user(dirent->d_name, name, namlen)
 	    || put_user(0, dirent->d_name + namlen))
@@ -1301,17 +1297,21 @@ out:
 }
 
 static int
-fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, ino_t ino,
+fillonedir32 (void * __buf, const char * name, int namlen, loff_t offset, u64 ino,
 	      unsigned int d_type)
 {
 	struct readdir32_callback * buf = (struct readdir32_callback *) __buf;
 	struct old_linux32_dirent __user * dirent;
+	u32 d_ino;
 
 	if (buf->count)
 		return -EINVAL;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino)
+		return -EOVERFLOW;
 	buf->count++;
 	dirent = buf->dirent;
-	if (put_user(ino, &dirent->d_ino)
+	if (put_user(d_ino, &dirent->d_ino)
 	    || put_user(offset, &dirent->d_offset)
 	    || put_user(namlen, &dirent->d_namlen)
 	    || copy_to_user(dirent->d_name, name, namlen)
@@ -1431,25 +1431,6 @@ asmlinkage long
 sys32_waitpid (int pid, unsigned int *stat_addr, int options)
 {
 	return compat_sys_wait4(pid, stat_addr, options, NULL);
-}
-
-static unsigned int
-ia32_peek (struct task_struct *child, unsigned long addr, unsigned int *val)
-{
-	size_t copied;
-	unsigned int ret;
-
-	copied = access_process_vm(child, addr, val, sizeof(*val), 0);
-	return (copied != sizeof(ret)) ? -EIO : 0;
-}
-
-static unsigned int
-ia32_poke (struct task_struct *child, unsigned long addr, unsigned int val)
-{
-
-	if (access_process_vm(child, addr, &val, sizeof(val), 1) != sizeof(val))
-		return -EIO;
-	return 0;
 }
 
 /*
@@ -1749,6 +1730,7 @@ restore_ia32_fpxstate (struct task_struct *tsk, struct ia32_user_fxsr_struct __u
 	return 0;
 }
 
+#if 0				/* XXX */
 asmlinkage long
 sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 {
@@ -1856,9 +1838,11 @@ sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 					    compat_ptr(data));
 		break;
 
+#if 0				/* XXX */
 	      case PTRACE_GETEVENTMSG:   
 		ret = put_user(child->ptrace_message, (unsigned int __user *) compat_ptr(data));
 		break;
+#endif
 
 	      case PTRACE_SYSCALL:	/* continue, stop after next syscall */
 	      case PTRACE_CONT:		/* restart after signal. */
@@ -1879,6 +1863,519 @@ sys32_ptrace (int request, pid_t pid, unsigned int addr, unsigned int data)
 	unlock_kernel();
 	return ret;
 }
+#endif
+
+#ifdef CONFIG_UTRACE
+typedef struct utrace_get {
+	void *kbuf;
+	void __user *ubuf;
+} utrace_get_t;
+
+typedef struct utrace_set {
+	const void *kbuf;
+	const void __user *ubuf;
+} utrace_set_t;
+
+typedef struct utrace_getset {
+	struct task_struct *target;
+	const struct utrace_regset *regset;
+	union {
+		utrace_get_t get;
+		utrace_set_t set;
+	} u;
+	unsigned int pos;
+	unsigned int count;
+	int ret;
+} utrace_getset_t;
+
+static void getfpreg(struct task_struct *task, int regno,int *val)
+{
+	switch (regno / sizeof(int)) {
+		case 0: *val = task->thread.fcr & 0xffff; break;
+		case 1: *val = task->thread.fsr & 0xffff; break;
+		case 2: *val = (task->thread.fsr>>16) & 0xffff; break;
+		case 3: *val = task->thread.fir; break;
+		case 4: *val = (task->thread.fir>>32) & 0xffff; break;
+		case 5: *val = task->thread.fdr; break;
+		case 6: *val = (task->thread.fdr >> 32) & 0xffff; break;
+	}
+}
+
+static void setfpreg(struct task_struct *task, int regno, int val)
+{
+	switch (regno / sizeof(int)) {
+		case 0:
+			task->thread.fcr = (task->thread.fcr & (~0x1f3f))
+				| (val & 0x1f3f);
+			break;
+		case 1:
+			task->thread.fsr = (task->thread.fsr & (~0xffff)) | val;
+			break;
+		case 2:
+			task->thread.fsr = (task->thread.fsr & (~0xffff0000))
+				| (val << 16);
+			break;
+		case 3:
+			task->thread.fir = (task->thread.fir & (~0xffffffff)) | val;
+			break;
+		case 5:
+			task->thread.fdr = (task->thread.fdr & (~0xffffffff)) | val;
+			break;
+	}
+}
+
+static void access_fpreg_ia32(int regno, void *reg,
+		struct pt_regs *pt, struct switch_stack *sw,
+		int tos, int write)
+{
+	void *f;
+
+	if ((regno += tos) >= 8)
+		regno -= 8;
+	if (regno <= 4)
+		f = &pt->f8 + regno;
+	else if (regno <= 7)
+		f = &sw->f12 + (regno - 4);
+	else {
+		printk(" regno must be less than 7 \n");
+		 return;
+	}
+
+	if (write)
+		memcpy(f, reg, sizeof(struct _fpreg_ia32));
+	else
+		memcpy(reg, f, sizeof(struct _fpreg_ia32));
+}
+
+static void do_fpregs_get(struct unw_frame_info *info, void *arg)
+{
+	utrace_getset_t *dst = arg;
+	struct task_struct *task = dst->target;
+	struct pt_regs *pt;
+	int start, end, tos;
+	char buf[80];
+
+	if (dst->count == 0 || unw_unwind_to_user(info) < 0)
+		return;
+	if (dst->pos < 7 * sizeof(int)) {
+		end = min((dst->pos + dst->count), (unsigned int)(7 * sizeof(int)));
+		for (start = dst->pos; start < end; start += sizeof(int))
+			getfpreg(task, start,(int *)( buf + start));
+		dst->ret = utrace_regset_copyout(&dst->pos, &dst->count,
+				&dst->u.get.kbuf, &dst->u.get.ubuf, buf,
+				0, 7 * sizeof(int));
+		if (dst->ret || dst->count == 0)
+			return;
+	}
+	if (dst->pos < sizeof(struct ia32_user_i387_struct)) {
+		pt = task_pt_regs(task);
+		tos = (task->thread.fsr >> 11) & 7;
+		end = min(dst->pos + dst->count,
+				(unsigned int)(sizeof(struct ia32_user_i387_struct)));
+		start = (dst->pos - 7 * sizeof(int)) / sizeof(struct _fpreg_ia32);
+		end = (end - 7 * sizeof(int)) / sizeof(struct _fpreg_ia32);
+		for (; start < end; start++)
+			access_fpreg_ia32(start, (struct _fpreg_ia32 *)buf + start,
+					pt, info->sw, tos, 0);
+		dst->ret = utrace_regset_copyout(&dst->pos, &dst->count,
+				&dst->u.get.kbuf, &dst->u.get.ubuf,
+				buf, 7 * sizeof(int),
+				sizeof(struct ia32_user_i387_struct));
+		if (dst->ret || dst->count == 0)
+			return;
+	}
+}
+
+static void do_fpregs_set(struct unw_frame_info *info, void *arg)
+{
+	utrace_getset_t *dst = arg;
+	struct task_struct *task = dst->target;
+	struct pt_regs *pt;
+	char buf[80];
+	int end, start, tos;
+
+	if (dst->count == 0 || unw_unwind_to_user(info) < 0)
+		return;
+
+	if (dst->pos < 7 * sizeof(int)) {
+		start = dst->pos;
+		dst->ret = utrace_regset_copyin(&dst->pos, &dst->count,
+				&dst->u.set.kbuf, &dst->u.set.ubuf, buf,
+				0, 7 * sizeof(int));
+		if (dst->ret)
+			return;
+		for (; start < dst->pos; start += sizeof(int))
+			setfpreg(task, start, *((int*)(buf + start)));
+		if (dst->count == 0)
+			return;
+	}
+	if (dst->pos < sizeof(struct ia32_user_i387_struct)) {
+		start = (dst->pos - 7 * sizeof(int)) / sizeof(struct _fpreg_ia32);
+		dst->ret = utrace_regset_copyin(&dst->pos, &dst->count,
+				&dst->u.set.kbuf, &dst->u.set.ubuf,
+				buf, 7 * sizeof(int),
+				sizeof(struct ia32_user_i387_struct));
+		if (dst->ret)
+			return;
+		pt = task_pt_regs(task);
+		tos = (task->thread.fsr >> 11) & 7;
+		end = (dst->pos - 7 * sizeof(int)) / sizeof(struct _fpreg_ia32);
+		for (; start < end; start++)
+			access_fpreg_ia32(start, (struct _fpreg_ia32 *)buf + start,
+					pt, info->sw, tos, 0);
+		if (dst->count == 0)
+			return;
+	}
+}
+
+#define OFFSET(member) ((int)(offsetof(struct ia32_user_fxsr_struct, member)))
+static void getfpxreg(struct task_struct *task, int start, int end, char *buf)
+{
+	int min_val;
+
+	min_val = min(end, OFFSET(fop));
+	while (start < min_val) {
+		if (start == OFFSET(cwd))
+			*((short *)buf) = task->thread.fcr & 0xffff;
+		else if (start == OFFSET(swd))
+			*((short *)buf) = task->thread.fsr & 0xffff;
+		else if (start == OFFSET(twd))
+			*((short *)buf) = (task->thread.fsr>>16) & 0xffff;
+		buf += 2;
+		start += 2;
+	}
+	/* skip fop element */
+	if (start == OFFSET(fop)) {
+		start += 2;
+		buf += 2;
+	}
+	while (start < end) {
+		if (start == OFFSET(fip))
+			*((int *)buf) = task->thread.fir;
+		else if (start == OFFSET(fcs))
+			*((int *)buf) = (task->thread.fir>>32) & 0xffff;
+		else if (start == OFFSET(foo))
+			*((int *)buf) = task->thread.fdr;
+		else if (start == OFFSET(fos))
+			*((int *)buf) = (task->thread.fdr>>32) & 0xffff;
+		else if (start == OFFSET(mxcsr))
+			*((int *)buf) = ((task->thread.fcr>>32) & 0xff80)
+					 | ((task->thread.fsr>>32) & 0x3f);
+		buf += 4;
+		start += 4;
+	}
+}
+
+static void setfpxreg(struct task_struct *task, int start, int end, char *buf)
+{
+	int min_val, num32;
+	short num;
+	unsigned long num64;
+
+	min_val = min(end, OFFSET(fop));
+	while (start < min_val) {
+		num = *((short *)buf);
+		if (start == OFFSET(cwd)) {
+			task->thread.fcr = (task->thread.fcr & (~0x1f3f))
+						| (num & 0x1f3f);
+		} else if (start == OFFSET(swd)) {
+			task->thread.fsr = (task->thread.fsr & (~0xffff)) | num;
+		} else if (start == OFFSET(twd)) {
+			task->thread.fsr = (task->thread.fsr & (~0xffff0000)) | num;
+		}
+		buf += 2;
+		start += 2;
+	}
+	/* skip fop element */
+	if (start == OFFSET(fop)) {
+		start += 2;
+		buf += 2;
+	}
+	while (start < end) {
+		num32 = *((int *)buf);
+		if (start == OFFSET(fip))
+			task->thread.fir = (task->thread.fir & (~0xffffffff))
+						 | num32;
+		else if (start == OFFSET(foo))
+			task->thread.fdr = (task->thread.fdr & (~0xffffffff))
+						 | num32;
+		else if (start == OFFSET(mxcsr)) {
+			num64 = num32 & 0xff10;
+			task->thread.fcr = (task->thread.fcr & (~0xff1000000000UL))
+						 | (num64<<32);
+			num64 = num32 & 0x3f;
+			task->thread.fsr = (task->thread.fsr & (~0x3f00000000UL))
+						 | (num64<<32);
+		}
+		buf += 4;
+		start += 4;
+	}
+}
+
+static void do_fpxregs_get(struct unw_frame_info *info, void *arg)
+{
+	utrace_getset_t *dst = arg;
+	struct task_struct *task = dst->target;
+	struct pt_regs *pt;
+	char buf[128];
+	int start, end, tos;
+
+	if (dst->count == 0 || unw_unwind_to_user(info) < 0)
+		return;
+	if (dst->pos < OFFSET(st_space[0])) {
+		end = min(dst->pos + dst->count, (unsigned int)32);
+		getfpxreg(task, dst->pos, end, buf);
+		dst->ret = utrace_regset_copyout(&dst->pos, &dst->count,
+				&dst->u.get.kbuf, &dst->u.get.ubuf, buf,
+				0, OFFSET(st_space[0]));
+		if (dst->ret || dst->count == 0)
+			return;
+	}
+	if (dst->pos < OFFSET(xmm_space[0])) {
+		pt = task_pt_regs(task);
+		tos = (task->thread.fsr >> 11) & 7;
+		end = min(dst->pos + dst->count,
+				(unsigned int)OFFSET(xmm_space[0]));
+		start = (dst->pos - OFFSET(st_space[0])) / 16;
+		end = (end - OFFSET(st_space[0])) / 16;
+		for (; start < end; start++)
+			access_fpreg_ia32(start, buf + 16 * start, pt,
+						info->sw, tos, 0);
+		dst->ret = utrace_regset_copyout(&dst->pos, &dst->count,
+				&dst->u.get.kbuf, &dst->u.get.ubuf,
+				buf, OFFSET(st_space[0]), OFFSET(xmm_space[0]));
+		if (dst->ret || dst->count == 0)
+			return;
+	}
+	if (dst->pos < OFFSET(padding[0]))
+		dst->ret = utrace_regset_copyout(&dst->pos, &dst->count,
+				&dst->u.get.kbuf, &dst->u.get.ubuf,
+				&info->sw->f16, OFFSET(xmm_space[0]),
+				OFFSET(padding[0]));
+}
+
+static void do_fpxregs_set(struct unw_frame_info *info, void *arg)
+{
+	utrace_getset_t *dst = arg;
+	struct task_struct *task = dst->target;
+	char buf[128];
+	int start, end;
+
+	if (dst->count == 0 || unw_unwind_to_user(info) < 0)
+		return;
+
+	if (dst->pos < OFFSET(st_space[0])) {
+		start = dst->pos;
+		dst->ret = utrace_regset_copyin(&dst->pos, &dst->count,
+				&dst->u.set.kbuf, &dst->u.set.ubuf,
+				buf, 0, OFFSET(st_space[0]));
+		if (dst->ret)
+			return;
+		setfpxreg(task, start, dst->pos, buf);
+		if (dst->count == 0)
+			return;
+	}
+	if (dst->pos < OFFSET(xmm_space[0])) {
+		struct pt_regs *pt;
+		int tos;
+		pt = task_pt_regs(task);
+		tos = (task->thread.fsr >> 11) & 7;
+		start = (dst->pos - OFFSET(st_space[0])) / 16;
+		dst->ret = utrace_regset_copyin(&dst->pos, &dst->count,
+				&dst->u.set.kbuf, &dst->u.set.ubuf,
+				buf, OFFSET(st_space[0]), OFFSET(xmm_space[0]));
+		if (dst->ret)
+			return;
+		end = (dst->pos - OFFSET(st_space[0])) / 16;
+		for (; start < end; start++)
+			access_fpreg_ia32(start, buf + 16 * start, pt, info->sw,
+						 tos, 1);
+		if (dst->count == 0)
+			return;
+	}
+	if (dst->pos < OFFSET(padding[0]))
+		dst->ret = utrace_regset_copyin(&dst->pos, &dst->count,
+				&dst->u.set.kbuf, &dst->u.set.ubuf,
+				&info->sw->f16, OFFSET(xmm_space[0]),
+				 OFFSET(padding[0]));
+}
+#undef OFFSET
+
+static int do_regset_call(void (*call)(struct unw_frame_info *, void *),
+		struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		const void *kbuf, const void __user *ubuf)
+{
+	utrace_getset_t info = { .target = target, .regset = regset,
+		.pos = pos, .count = count,
+		.u.set = { .kbuf = kbuf, .ubuf = ubuf },
+		.ret = 0 };
+
+	if (target == current)
+		unw_init_running(call, &info);
+	else {
+		struct unw_frame_info ufi;
+		memset(&ufi, 0, sizeof(ufi));
+		unw_init_from_blocked_task(&ufi, target);
+		(*call)(&ufi, &info);
+	}
+
+	return info.ret;
+}
+
+static int ia32_fpregs_get(struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		void *kbuf, void __user *ubuf)
+{
+	return do_regset_call(do_fpregs_get, target, regset, pos, count, kbuf, ubuf);
+}
+
+static int ia32_fpregs_set(struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		const void *kbuf, const void __user *ubuf)
+{
+	return do_regset_call(do_fpregs_set, target, regset, pos, count, kbuf, ubuf);
+}
+
+static int ia32_fpxregs_get(struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		void *kbuf, void __user *ubuf)
+{
+	return do_regset_call(do_fpxregs_get, target, regset, pos, count, kbuf, ubuf);
+}
+
+static int ia32_fpxregs_set(struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		const void *kbuf, const void __user *ubuf)
+{
+	return do_regset_call(do_fpxregs_set, target, regset, pos, count, kbuf, ubuf);
+}
+
+static int ia32_genregs_get(struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		void *kbuf, void __user *ubuf)
+{
+	if (kbuf) {
+		u32 *kp = kbuf;
+		while (count > 0) {
+			*kp++ = getreg(target, pos);
+			pos += 4;
+			count -= 4;
+		}
+	} else {
+		u32 __user *up = ubuf;
+		while (count > 0) {
+			if (__put_user(getreg(target, pos), up++))
+				return -EFAULT;
+			pos += 4;
+			count -= 4;
+		}
+	}
+	return 0;
+}
+
+static int ia32_genregs_set(struct task_struct *target,
+		const struct utrace_regset *regset,
+		unsigned int pos, unsigned int count,
+		const void *kbuf, const void __user *ubuf)
+{
+	int ret = 0;
+
+	if (kbuf) {
+		const u32 *kp = kbuf;
+		while (!ret && count > 0) {
+			putreg(target, pos, *kp++);
+			pos += 4;
+			count -= 4;
+		}
+	} else {
+		const u32 __user *up = ubuf;
+		u32 val;
+		while (!ret && count > 0) {
+			ret = __get_user(val, up++);
+			if (!ret)
+				putreg(target, pos, val);
+			pos += 4;
+			count -= 4;
+		}
+	}
+	return ret;
+}
+
+/*
+ * This should match arch/i386/kernel/ptrace.c:native_regsets.
+ * XXX ioperm? vm86?
+ */
+static const struct utrace_regset ia32_regsets[] = {
+	{
+		.n = sizeof(struct user_regs_struct32)/4,
+		.size = 4, .align = 4,
+		.get = ia32_genregs_get, .set = ia32_genregs_set
+	},
+	{
+		.n = sizeof(struct ia32_user_i387_struct) / 4,
+		.size = 4, .align = 4,
+		.get = ia32_fpregs_get, .set = ia32_fpregs_set
+	},
+	{
+		.n = sizeof(struct ia32_user_fxsr_struct) / 4,
+		.size = 4, .align = 4,
+		.get = ia32_fpxregs_get, .set = ia32_fpxregs_set
+	},
+};
+
+const struct utrace_regset_view utrace_ia32_view = {
+	.name = "i386", .e_machine = EM_386,
+	.regsets = ia32_regsets, .n = ARRAY_SIZE(ia32_regsets)
+};
+EXPORT_SYMBOL_GPL(utrace_ia32_view);
+#endif
+
+#ifdef CONFIG_PTRACE
+/*
+ * This matches the arch/i386/kernel/ptrace.c definitions.
+ */
+
+static const struct ptrace_layout_segment ia32_uarea[] = {
+	{0, sizeof(struct user_regs_struct32), 0, 0},
+	{0, 0, -1, 0}
+};
+
+fastcall int arch_compat_ptrace(compat_long_t *request,
+		struct task_struct *child,
+		struct utrace_attached_engine *engine,
+		compat_ulong_t addr, compat_ulong_t data,
+		compat_long_t *retval)
+{
+	switch (*request) {
+		case PTRACE_PEEKUSR:
+			return ptrace_compat_peekusr(child, engine, ia32_uarea,
+					addr, data);
+		case PTRACE_POKEUSR:
+			return ptrace_compat_pokeusr(child, engine, ia32_uarea,
+					addr, data);
+		case IA32_PTRACE_GETREGS:
+			return ptrace_whole_regset(child, engine, data, 0, 0);
+		case IA32_PTRACE_SETREGS:
+			return ptrace_whole_regset(child, engine, data, 0, 1);
+		case IA32_PTRACE_GETFPREGS:
+			return ptrace_whole_regset(child, engine, data, 1, 0);
+		case IA32_PTRACE_SETFPREGS:
+			return ptrace_whole_regset(child, engine, data, 1, 1);
+		case IA32_PTRACE_GETFPXREGS:
+			return ptrace_whole_regset(child, engine, data, 2, 0);
+		case IA32_PTRACE_SETFPXREGS:
+			return ptrace_whole_regset(child, engine, data, 2, 1);
+	}
+	return -ENOSYS;
+}
+#endif
 
 typedef struct {
 	unsigned int	ss_sp;
@@ -1956,7 +2453,7 @@ struct sysctl32 {
 	unsigned int	__unused[4];
 };
 
-#ifdef CONFIG_SYSCTL
+#ifdef CONFIG_SYSCTL_SYSCALL
 asmlinkage long
 sys32_sysctl (struct sysctl32 __user *args)
 {
@@ -2602,79 +3099,5 @@ sys32_setresgid(compat_gid_t rgid, compat_gid_t egid,
 	segid = (egid == (compat_gid_t)-1) ? ((gid_t)-1) : ((gid_t)egid);
 	ssgid = (sgid == (compat_gid_t)-1) ? ((gid_t)-1) : ((gid_t)sgid);
 	return sys_setresgid(srgid, segid, ssgid);
-}
-
-/* Handle adjtimex compatibility. */
-
-struct timex32 {
-	u32 modes;
-	s32 offset, freq, maxerror, esterror;
-	s32 status, constant, precision, tolerance;
-	struct compat_timeval time;
-	s32 tick;
-	s32 ppsfreq, jitter, shift, stabil;
-	s32 jitcnt, calcnt, errcnt, stbcnt;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-};
-
-extern int do_adjtimex(struct timex *);
-
-asmlinkage long
-sys32_adjtimex(struct timex32 *utp)
-{
-	struct timex txc;
-	int ret;
-
-	memset(&txc, 0, sizeof(struct timex));
-
-	if(get_user(txc.modes, &utp->modes) ||
-	   __get_user(txc.offset, &utp->offset) ||
-	   __get_user(txc.freq, &utp->freq) ||
-	   __get_user(txc.maxerror, &utp->maxerror) ||
-	   __get_user(txc.esterror, &utp->esterror) ||
-	   __get_user(txc.status, &utp->status) ||
-	   __get_user(txc.constant, &utp->constant) ||
-	   __get_user(txc.precision, &utp->precision) ||
-	   __get_user(txc.tolerance, &utp->tolerance) ||
-	   __get_user(txc.time.tv_sec, &utp->time.tv_sec) ||
-	   __get_user(txc.time.tv_usec, &utp->time.tv_usec) ||
-	   __get_user(txc.tick, &utp->tick) ||
-	   __get_user(txc.ppsfreq, &utp->ppsfreq) ||
-	   __get_user(txc.jitter, &utp->jitter) ||
-	   __get_user(txc.shift, &utp->shift) ||
-	   __get_user(txc.stabil, &utp->stabil) ||
-	   __get_user(txc.jitcnt, &utp->jitcnt) ||
-	   __get_user(txc.calcnt, &utp->calcnt) ||
-	   __get_user(txc.errcnt, &utp->errcnt) ||
-	   __get_user(txc.stbcnt, &utp->stbcnt))
-		return -EFAULT;
-
-	ret = do_adjtimex(&txc);
-
-	if(put_user(txc.modes, &utp->modes) ||
-	   __put_user(txc.offset, &utp->offset) ||
-	   __put_user(txc.freq, &utp->freq) ||
-	   __put_user(txc.maxerror, &utp->maxerror) ||
-	   __put_user(txc.esterror, &utp->esterror) ||
-	   __put_user(txc.status, &utp->status) ||
-	   __put_user(txc.constant, &utp->constant) ||
-	   __put_user(txc.precision, &utp->precision) ||
-	   __put_user(txc.tolerance, &utp->tolerance) ||
-	   __put_user(txc.time.tv_sec, &utp->time.tv_sec) ||
-	   __put_user(txc.time.tv_usec, &utp->time.tv_usec) ||
-	   __put_user(txc.tick, &utp->tick) ||
-	   __put_user(txc.ppsfreq, &utp->ppsfreq) ||
-	   __put_user(txc.jitter, &utp->jitter) ||
-	   __put_user(txc.shift, &utp->shift) ||
-	   __put_user(txc.stabil, &utp->stabil) ||
-	   __put_user(txc.jitcnt, &utp->jitcnt) ||
-	   __put_user(txc.calcnt, &utp->calcnt) ||
-	   __put_user(txc.errcnt, &utp->errcnt) ||
-	   __put_user(txc.stbcnt, &utp->stbcnt))
-		ret = -EFAULT;
-
-	return ret;
 }
 #endif /* NOTYET */

@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2005 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2006 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
@@ -42,14 +42,14 @@
 #define FCELSSIZE             1024	/* maximum ELS transfer size */
 
 #define LPFC_FCP_RING            0	/* ring 0 for FCP initiator commands */
-#define LPFC_IP_RING             1	/* ring 1 for IP commands */
+#define LPFC_EXTRA_RING          1	/* ring 1 for other protocols */
 #define LPFC_ELS_RING            2	/* ring 2 for ELS commands */
 #define LPFC_FCP_NEXT_RING       3
 
 #define SLI2_IOCB_CMD_R0_ENTRIES    172	/* SLI-2 FCP command ring entries */
 #define SLI2_IOCB_RSP_R0_ENTRIES    134	/* SLI-2 FCP response ring entries */
-#define SLI2_IOCB_CMD_R1_ENTRIES      4	/* SLI-2 IP command ring entries */
-#define SLI2_IOCB_RSP_R1_ENTRIES      4	/* SLI-2 IP response ring entries */
+#define SLI2_IOCB_CMD_R1_ENTRIES      4	/* SLI-2 extra command ring entries */
+#define SLI2_IOCB_RSP_R1_ENTRIES      4	/* SLI-2 extra response ring entries */
 #define SLI2_IOCB_CMD_R1XTRA_ENTRIES 36	/* SLI-2 extra FCP cmd ring entries */
 #define SLI2_IOCB_RSP_R1XTRA_ENTRIES 52	/* SLI-2 extra FCP rsp ring entries */
 #define SLI2_IOCB_CMD_R2_ENTRIES     20	/* SLI-2 ELS command ring entries */
@@ -121,6 +121,20 @@ struct lpfc_sli_ct_request {
 
 			uint32_t rsvd[7];
 		} rft;
+		struct rff {
+			uint32_t PortId;
+			uint8_t reserved[2];
+#ifdef __BIG_ENDIAN_BITFIELD
+			uint8_t feature_res:6;
+			uint8_t feature_init:1;
+			uint8_t feature_tgt:1;
+#else  /*  __LITTLE_ENDIAN_BITFIELD */
+			uint8_t feature_tgt:1;
+			uint8_t feature_init:1;
+			uint8_t feature_res:6;
+#endif
+			uint8_t type_code;     /* type=8 for FCP */
+		} rff;
 		struct rnn {
 			uint32_t PortId;	/* For RNN_ID requests */
 			uint8_t wwnn[8];
@@ -136,6 +150,7 @@ struct lpfc_sli_ct_request {
 #define  SLI_CT_REVISION        1
 #define  GID_REQUEST_SZ         (sizeof(struct lpfc_sli_ct_request) - 260)
 #define  RFT_REQUEST_SZ         (sizeof(struct lpfc_sli_ct_request) - 228)
+#define  RFF_REQUEST_SZ         (sizeof(struct lpfc_sli_ct_request) - 235)
 #define  RNN_REQUEST_SZ         (sizeof(struct lpfc_sli_ct_request) - 252)
 #define  RSNN_REQUEST_SZ        (sizeof(struct lpfc_sli_ct_request))
 
@@ -225,6 +240,7 @@ struct lpfc_sli_ct_request {
 #define  SLI_CTNS_RNN_ID      0x0213
 #define  SLI_CTNS_RCS_ID      0x0214
 #define  SLI_CTNS_RFT_ID      0x0217
+#define  SLI_CTNS_RFF_ID      0x021F
 #define  SLI_CTNS_RSPN_ID     0x0218
 #define  SLI_CTNS_RPT_ID      0x021A
 #define  SLI_CTNS_RIP_NN      0x0235
@@ -449,15 +465,19 @@ struct serv_parm {	/* Structure is in Big Endian format */
 #define ELS_CMD_RRQ       0x12000000
 #define ELS_CMD_PRLI      0x20100014
 #define ELS_CMD_PRLO      0x21100014
+#define ELS_CMD_PRLO_ACC  0x02100014
 #define ELS_CMD_PDISC     0x50000000
 #define ELS_CMD_FDISC     0x51000000
 #define ELS_CMD_ADISC     0x52000000
 #define ELS_CMD_FARP      0x54000000
 #define ELS_CMD_FARPR     0x55000000
+#define ELS_CMD_RPS       0x56000000
+#define ELS_CMD_RPL       0x57000000
 #define ELS_CMD_FAN       0x60000000
 #define ELS_CMD_RSCN      0x61040000
 #define ELS_CMD_SCR       0x62000000
 #define ELS_CMD_RNID      0x78000000
+#define ELS_CMD_LIRR      0x7A000000
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 #define ELS_CMD_MASK      0xffff
 #define ELS_RSP_MASK      0xff
@@ -481,15 +501,19 @@ struct serv_parm {	/* Structure is in Big Endian format */
 #define ELS_CMD_RRQ       0x12
 #define ELS_CMD_PRLI      0x14001020
 #define ELS_CMD_PRLO      0x14001021
+#define ELS_CMD_PRLO_ACC  0x14001002
 #define ELS_CMD_PDISC     0x50
 #define ELS_CMD_FDISC     0x51
 #define ELS_CMD_ADISC     0x52
 #define ELS_CMD_FARP      0x54
 #define ELS_CMD_FARPR     0x55
+#define ELS_CMD_RPS       0x56
+#define ELS_CMD_RPL       0x57
 #define ELS_CMD_FAN       0x60
 #define ELS_CMD_RSCN      0x0461
 #define ELS_CMD_SCR       0x62
 #define ELS_CMD_RNID      0x78
+#define ELS_CMD_LIRR      0x7A
 #endif
 
 /*
@@ -758,12 +782,40 @@ typedef struct _RNID {		/* Structure is in Big Endian format */
 	} un;
 } RNID;
 
-typedef struct _RRQ {		/* Structure is in Big Endian format */
-	uint32_t SID;
-	uint16_t Oxid;
-	uint16_t Rxid;
-	uint8_t resv[32];	/* optional association hdr */
-} RRQ;
+typedef struct  _RPS {  	/* Structure is in Big Endian format */
+	union {
+		uint32_t portNum;
+		struct lpfc_name portName;
+	} un;
+} RPS;
+
+typedef struct  _RPS_RSP {	/* Structure is in Big Endian format */
+	uint16_t rsvd1;
+	uint16_t portStatus;
+	uint32_t linkFailureCnt;
+	uint32_t lossSyncCnt;
+	uint32_t lossSignalCnt;
+	uint32_t primSeqErrCnt;
+	uint32_t invalidXmitWord;
+	uint32_t crcCnt;
+} RPS_RSP;
+
+typedef struct  _RPL {  	/* Structure is in Big Endian format */
+	uint32_t maxsize;
+	uint32_t index;
+} RPL;
+
+typedef struct  _PORT_NUM_BLK {
+	uint32_t portNum;
+	uint32_t portID;
+	struct lpfc_name portName;
+} PORT_NUM_BLK;
+
+typedef struct  _RPL_RSP { 	/* Structure is in Big Endian format */
+	uint32_t listLen;
+	uint32_t index;
+	PORT_NUM_BLK port_num_blk;
+} RPL_RSP;
 
 /* This is used for RSCN command */
 typedef struct _D_ID {		/* Structure is in Big Endian format */
@@ -804,7 +856,6 @@ typedef struct _ELS_PKT {	/* Structure is in Big Endian format */
 		FARP farp;	/* Payload for FARP/ACC */
 		FAN fan;	/* Payload for FAN */
 		SCR scr;	/* Payload for SCR/ACC */
-		RRQ rrq;	/* Payload for RRQ */
 		RNID rnid;	/* Payload for RNID */
 		uint8_t pad[128 - 4];	/* Pad out to payload of 128 bytes */
 	} un;
@@ -1054,12 +1105,6 @@ typedef struct {
 #define PCI_DEVICE_ID_ZEPHYR_SCSP   0xfe11
 #define PCI_DEVICE_ID_ZEPHYR_DCSP   0xfe12
 
-#define PCI_SUBSYSTEM_ID_LP11000S      0xfc11
-#define PCI_SUBSYSTEM_ID_LP11002S      0xfc12
-#define PCI_SUBSYSTEM_ID_LPE11000S     0xfc21
-#define PCI_SUBSYSTEM_ID_LPE11002S     0xfc22
-#define PCI_SUBSYSTEM_ID_LPE11010S     0xfc2A
-
 #define JEDEC_ID_ADDRESS            0x0080001c
 #define FIREFLY_JEDEC_ID            0x1ACC
 #define SUPERFLY_JEDEC_ID           0x0020
@@ -1200,7 +1245,9 @@ typedef struct {		/* FireFly BIU registers */
 #define MBX_SET_MASK        0x20
 #define MBX_SET_SLIM        0x21
 #define MBX_UNREG_D_ID      0x23
+#define MBX_KILL_BOARD      0x24
 #define MBX_CONFIG_FARP     0x25
+#define MBX_BEACON          0x2A
 
 #define MBX_LOAD_AREA       0x81
 #define MBX_RUN_BIU_DIAG64  0x84
@@ -1247,6 +1294,10 @@ typedef struct {		/* FireFly BIU registers */
 #define CMD_FCP_IREAD_CX        0x1B
 #define CMD_FCP_ICMND_CR        0x1C
 #define CMD_FCP_ICMND_CX        0x1D
+#define CMD_FCP_TSEND_CX        0x1F
+#define CMD_FCP_TRECEIVE_CX     0x21
+#define CMD_FCP_TRSP_CX	        0x23
+#define CMD_FCP_AUTO_TRSP_CX    0x29
 
 #define CMD_ADAPTER_MSG         0x20
 #define CMD_ADAPTER_DUMP        0x22
@@ -1273,6 +1324,9 @@ typedef struct {		/* FireFly BIU registers */
 #define CMD_FCP_IREAD64_CX      0x9B
 #define CMD_FCP_ICMND64_CR      0x9C
 #define CMD_FCP_ICMND64_CX      0x9D
+#define CMD_FCP_TSEND64_CX      0x9F
+#define CMD_FCP_TRECEIVE64_CX   0xA1
+#define CMD_FCP_TRSP64_CX       0xA3
 
 #define CMD_GEN_REQUEST64_CR    0xC2
 #define CMD_GEN_REQUEST64_CX    0xC3
@@ -1504,6 +1558,7 @@ typedef struct {
 
 #define FLAGS_TOPOLOGY_FAILOVER      0x0400	/* Bit 10 */
 #define FLAGS_LINK_SPEED             0x0800	/* Bit 11 */
+#define FLAGS_IMED_ABORT             0x04000	/* Bit 14 */
 
 	uint32_t link_speed;
 #define LINK_SPEED_AUTO 0       /* Auto selection */
@@ -1676,13 +1731,13 @@ typedef struct {
 	uint32_t rttov;
 	uint32_t altov;
 	uint32_t lmt;
-#define LMT_RESERVED    0x0    /* Not used */
-#define LMT_266_10bit   0x1    /* 265.625 Mbaud 10 bit iface  */
-#define LMT_532_10bit   0x2    /* 531.25  Mbaud 10 bit iface  */
-#define LMT_1063_20bit  0x3    /* 1062.5   Mbaud 20 bit iface */
-#define LMT_1063_10bit  0x4    /* 1062.5   Mbaud 10 bit iface */
-#define LMT_2125_10bit  0x8    /* 2125     Mbaud 10 bit iface */
-#define LMT_4250_10bit  0x40   /* 4250     Mbaud 10 bit iface */
+#define LMT_RESERVED  0x000    /* Not used */
+#define LMT_1Gb       0x004
+#define LMT_2Gb       0x008
+#define LMT_4Gb       0x040
+#define LMT_8Gb       0x080
+#define LMT_10Gb      0x100
+
 
 	uint32_t rsvd2;
 	uint32_t rsvd3;

@@ -11,7 +11,7 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/types.h>
-#include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
@@ -23,9 +23,9 @@
 #include <linux/compiler.h>
 #include <linux/module.h>
 #include <linux/kprobes.h>
+#include <linux/uaccess.h>
 
 #include <asm/system.h>
-#include <asm/uaccess.h>
 #include <asm/pgalloc.h>
 #include <asm/smp.h>
 #include <asm/tlbflush.h>
@@ -40,8 +40,7 @@
 #define PF_RSVD	(1<<3)
 #define PF_INSTR	(1<<4)
 
-#ifdef CONFIG_KPROBES
-ATOMIC_NOTIFIER_HEAD(notify_page_fault_chain);
+static ATOMIC_NOTIFIER_HEAD(notify_page_fault_chain);
 
 /* Hook to register for page fault notifications */
 int register_page_fault_notifier(struct notifier_block *nb)
@@ -49,11 +48,13 @@ int register_page_fault_notifier(struct notifier_block *nb)
 	vmalloc_sync_all();
 	return atomic_notifier_chain_register(&notify_page_fault_chain, nb);
 }
+EXPORT_SYMBOL_GPL(register_page_fault_notifier);
 
 int unregister_page_fault_notifier(struct notifier_block *nb)
 {
 	return atomic_notifier_chain_unregister(&notify_page_fault_chain, nb);
 }
+EXPORT_SYMBOL_GPL(unregister_page_fault_notifier);
 
 static inline int notify_page_fault(enum die_val val, const char *str,
 			struct pt_regs *regs, long err, int trap, int sig)
@@ -67,13 +68,6 @@ static inline int notify_page_fault(enum die_val val, const char *str,
 	};
 	return atomic_notifier_call_chain(&notify_page_fault_chain, val, &args);
 }
-#else
-static inline int notify_page_fault(enum die_val val, const char *str,
-			struct pt_regs *regs, long err, int trap, int sig)
-{
-	return NOTIFY_DONE;
-}
-#endif
 
 void bust_spinlocks(int yes)
 {
@@ -111,7 +105,7 @@ static noinline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 	if (error_code & PF_INSTR)
 		return 0;
 	
-	instr = (unsigned char *)convert_rip_to_linear(current, regs);
+	instr = (unsigned char __user *)convert_rip_to_linear(current, regs);
 	max_instr = instr + 15;
 
 	if (user_mode(regs) && instr >= (unsigned char *)TASK_SIZE64)
@@ -122,7 +116,7 @@ static noinline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 		unsigned char instr_hi;
 		unsigned char instr_lo;
 
-		if (__get_user(opcode, instr))
+		if (probe_kernel_address(instr, opcode))
 			break; 
 
 		instr_hi = opcode & 0xf0; 
@@ -160,7 +154,7 @@ static noinline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 		case 0x00:
 			/* Prefetch instruction is 0x0F0D or 0x0F18 */
 			scan_more = 0;
-			if (__get_user(opcode, instr)) 
+			if (probe_kernel_address(instr, opcode))
 				break;
 			prefetch = (instr_lo == 0xF) &&
 				(opcode == 0x0D || opcode == 0x18);
@@ -176,7 +170,7 @@ static noinline int is_prefetch(struct pt_regs *regs, unsigned long addr,
 static int bad_address(void *p) 
 { 
 	unsigned long dummy;
-	return __get_user(dummy, (unsigned long *)p);
+	return probe_kernel_address((unsigned long *)p, dummy);
 } 
 
 void dump_pagetable(unsigned long address)
@@ -248,9 +242,9 @@ static int is_errata93(struct pt_regs *regs, unsigned long address)
 
 int unhandled_signal(struct task_struct *tsk, int sig)
 {
-	if (tsk->pid == 1)
+	if (is_init(tsk))
 		return 1;
-	if (tsk->ptrace & PT_PTRACED)
+	if (tracehook_consider_fatal_signal(tsk, sig))
 		return 0;
 	return (tsk->sighand->action[sig-1].sa.sa_handler == SIG_IGN) ||
 		(tsk->sighand->action[sig-1].sa.sa_handler == SIG_DFL);
@@ -300,7 +294,7 @@ static int vmalloc_fault(unsigned long address)
 	if (pgd_none(*pgd))
 		set_pgd(pgd, *pgd_ref);
 	else
-		BUG_ON(pgd_page(*pgd) != pgd_page(*pgd_ref));
+		BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_ref));
 
 	/* Below here mismatches are bugs because these lower tables
 	   are shared */
@@ -309,7 +303,7 @@ static int vmalloc_fault(unsigned long address)
 	pud_ref = pud_offset(pgd_ref, address);
 	if (pud_none(*pud_ref))
 		return -1;
-	if (pud_none(*pud) || pud_page(*pud) != pud_page(*pud_ref))
+	if (pud_none(*pud) || pud_page_vaddr(*pud) != pud_page_vaddr(*pud_ref))
 		BUG();
 	pmd = pmd_offset(pud, address);
 	pmd_ref = pmd_offset(pud_ref, address);
@@ -530,7 +524,7 @@ good_area:
 		case PF_PROT:		/* read, present */
 			goto bad_area;
 		case 0:			/* read, not present */
-			if (!(vma->vm_flags & (VM_READ | VM_EXEC)))
+			if (!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE)))
 				goto bad_area;
 	}
 
@@ -580,10 +574,10 @@ bad_area_nosemaphore:
 
 		if (exception_trace && unhandled_signal(tsk, SIGSEGV)) {
 			printk(
-		       "%s%s[%d]: segfault at %016lx rip %016lx rsp %016lx error %lx\n",
+		       "%s%s[%d:#%u]: segfault at %016lx rip %016lx rsp %016lx error %lx\n",
 					tsk->pid > 1 ? KERN_INFO : KERN_EMERG,
-					tsk->comm, tsk->pid, address, regs->rip,
-					regs->rsp, error_code);
+					tsk->comm, tsk->pid, tsk->xid, address,
+					regs->rip, regs->rsp, error_code);
 		}
        
 		tsk->thread.cr2 = address;
@@ -646,11 +640,12 @@ no_context:
  */
 out_of_memory:
 	up_read(&mm->mmap_sem);
-	if (current->pid == 1) { 
+	if (is_init(current)) {
 		yield();
 		goto again;
 	}
-	printk("VM: killing process %s\n", tsk->comm);
+	printk("VM: killing process %s(%d:#%u)\n",
+		tsk->comm, tsk->pid, tsk->xid);
 	if (error_code & 4)
 		do_exit(SIGKILL);
 	goto no_context;
@@ -701,7 +696,7 @@ void vmalloc_sync_all(void)
 				if (pgd_none(*pgd))
 					set_pgd(pgd, *pgd_ref);
 				else
-					BUG_ON(pgd_page(*pgd) != pgd_page(*pgd_ref));
+					BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_ref));
 			}
 			spin_unlock(&pgd_lock);
 			set_bit(pgd_index(address), insync);

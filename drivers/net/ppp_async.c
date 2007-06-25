@@ -30,6 +30,7 @@
 #include <linux/ppp_channel.h>
 #include <linux/spinlock.h>
 #include <linux/init.h>
+#include <linux/jiffies.h>
 #include <asm/uaccess.h>
 #include <asm/string.h>
 
@@ -124,8 +125,8 @@ static struct ppp_channel_ops async_ops = {
  * way to fix this is to use a rwlock in the tty struct, but for now
  * we use a single global rwlock for all ttys in ppp line discipline.
  *
- * FIXME: this is no longer true. The _close path for the ldisc is 
- * now guaranteed to be sane. 
+ * FIXME: this is no longer true. The _close path for the ldisc is
+ * now guaranteed to be sane.
  */
 static DEFINE_RWLOCK(disc_data_lock);
 
@@ -276,7 +277,7 @@ ppp_asynctty_write(struct tty_struct *tty, struct file *file,
  * Called in process context only. May be re-entered by multiple
  * ioctl calling threads.
  */
- 
+
 static int
 ppp_asynctty_ioctl(struct tty_struct *tty, struct file *file,
 		   unsigned int cmd, unsigned long arg)
@@ -570,7 +571,7 @@ ppp_async_encode(struct asyncppp *ap)
 		 * character if necessary.
 		 */
 		if (islcp || flag_time == 0
-		    || jiffies - ap->last_xmit >= flag_time)
+		    || time_after_eq(jiffies, ap->last_xmit + flag_time))
 			*buf++ = PPP_FLAG;
 		ap->last_xmit = jiffies;
 		fcs = PPP_INITFCS;
@@ -801,9 +802,9 @@ process_input_packet(struct asyncppp *ap)
 
 	/* check for address/control and protocol compression */
 	p = skb->data;
-	if (p[0] == PPP_ALLSTATIONS && p[1] == PPP_UI) {
+	if (p[0] == PPP_ALLSTATIONS) {
 		/* chop off address/control */
-		if (skb->len < 3)
+		if (p[1] != PPP_UI || skb->len < 3)
 			goto err;
 		p = skb_pull(skb, 2);
 	}

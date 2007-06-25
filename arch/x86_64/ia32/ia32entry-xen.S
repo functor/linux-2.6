@@ -92,7 +92,7 @@ ENTRY(ia32_sysenter_target)
 	CFI_REGISTER	rsp,rbp
 	__swapgs 
 	movq	%gs:pda_kernelstack, %rsp
-	addq	$(PDA_STACKOFFSET),%rsp
+	addq	$(PDA_STACKOFFSET),%rsp	
 	/*
 	 * No need to follow this irqs on/off section: the syscall
 	 * disabled irqs, here we enable it straight after entry:
@@ -162,7 +162,7 @@ sysenter_do_call:
 	XEN_UNBLOCK_EVENTS(%r11)		
 	__sti		/* sti only takes effect after the next instruction */
 	/* sysexit */
-	.byte	0xf, 0x35  /* TBD */
+	.byte	0xf, 0x35
 
 sysenter_tracesys:
 	CFI_RESTORE_STATE
@@ -266,7 +266,7 @@ cstar_do_call:
 	movl RSP-ARGOFFSET(%rsp),%esp
 	CFI_RESTORE rsp
 	__swapgs
-	sysretl  /* TBD */
+	sysretl
 	
 cstar_tracesys:	
 	CFI_RESTORE_STATE
@@ -335,7 +335,6 @@ ENTRY(ia32_syscall)
 	pushq %rax
 	CFI_ADJUST_CFA_OFFSET 8
 	cld
-/* 1:	jmp 1b	 */
 	/* note the registers are not zero extended to the sf.
 	   this could be a problem. */
 	SAVE_ARGS 0,0,1
@@ -444,7 +443,7 @@ ia32_sys_call_table:
 	.quad sys_setuid16
 	.quad sys_getuid16
 	.quad compat_sys_stime	/* stime */		/* 25 */
-	.quad sys32_ptrace	/* ptrace */
+	.quad compat_sys_ptrace	/* ptrace */
 	.quad sys_alarm
 	.quad sys_fstat	/* (old)fstat */
 	.quad sys_pause
@@ -748,4 +747,5 @@ ia32_sys_call_table:
 	.quad sys_tee
 	.quad compat_sys_vmsplice
 	.quad compat_sys_move_pages
+	.quad sys_getcpu
 ia32_syscall_end:		

@@ -6,8 +6,6 @@
  *  Copyright (C) 2000 Karsten Keil <kkeil@suse.de>
  *  Copyright (C) 2001,2002 Andi Kleen <ak@suse.de>
  *
- *  $Id: head.S,v 1.49 2002/03/19 17:39:25 ak Exp $
- *
  *  Jun Nakajima <jun.nakajima@intel.com>
  *    Modified for Xen                                
  */
@@ -110,22 +108,22 @@ gdt:
 
 /* The TLS descriptors are currently at a different place compared to i386.
    Hopefully nobody expects them at a fixed place (Wine?) */
-
+	
 ENTRY(cpu_gdt_table)
 	.quad	0x0000000000000000	/* NULL descriptor */
 	.quad	0x0			/* unused */
 	.quad	0x00af9a000000ffff	/* __KERNEL_CS */
 	.quad	0x00cf92000000ffff	/* __KERNEL_DS */
 	.quad	0x00cffa000000ffff	/* __USER32_CS */
-	.quad	0x00cff2000000ffff	/* __USER_DS, __USER32_DS  */
+	.quad	0x00cff2000000ffff	/* __USER_DS, __USER32_DS  */		
 	.quad	0x00affa000000ffff	/* __USER_CS */
 	.quad	0x00cf9a000000ffff	/* __KERNEL32_CS */
 	.quad	0,0			/* TSS */
 	.quad	0,0			/* LDT */
-	.quad   0,0,0			/* three TLS descriptors */
-	.quad	0			/* unused */
-gdt_end:
-	/* asm/segment.h:GDT_ENTRIES must match this */
+	.quad   0,0,0			/* three TLS descriptors */ 
+	.quad	0x0000f40000000000	/* node/CPU stored in limit */
+gdt_end:	
+	/* asm/segment.h:GDT_ENTRIES must match this */	
 	/* This should be a multiple of the cache line size */
 	/* GDTs of other CPUs are now dynamically allocated */
 

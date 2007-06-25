@@ -276,7 +276,7 @@
 #define __NR_rtas		255
 #define __NR_sys_debug_setcontext 256
 #define __NR_vserver		257
-/* 258 currently unused */
+#define __NR_migrate_pages	258
 #define __NR_mbind		259
 #define __NR_get_mempolicy	260
 #define __NR_set_mempolicy	261
@@ -301,127 +301,39 @@
 #define __NR_pselect6		280
 #define __NR_ppoll		281
 #define __NR_unshare		282
-
-#define __NR_syscalls		283
+#define __NR_splice		283
+#define __NR_tee		284
+#define __NR_vmsplice		285
+#define __NR_openat		286
+#define __NR_mkdirat		287
+#define __NR_mknodat		288
+#define __NR_fchownat		289
+#define __NR_futimesat		290
+#ifdef __powerpc64__
+#define __NR_newfstatat		291
+#else
+#define __NR_fstatat64		291
+#endif
+#define __NR_unlinkat		292
+#define __NR_renameat		293
+#define __NR_linkat		294
+#define __NR_symlinkat		295
+#define __NR_readlinkat		296
+#define __NR_fchmodat		297
+#define __NR_faccessat		298
+#define __NR_get_robust_list	299
+#define __NR_set_robust_list	300
+#define __NR_move_pages		301
 
 #ifdef __KERNEL__
+
+#define __NR_syscalls		302
+
 #define __NR__exit __NR_exit
 #define NR_syscalls	__NR_syscalls
-#endif
 
 #ifndef __ASSEMBLY__
 
-/* On powerpc a system call basically clobbers the same registers like a
- * function call, with the exception of LR (which is needed for the
- * "sc; bnslr" sequence) and CR (where only CR0.SO is clobbered to signal
- * an error return status).
- */
-
-#define __syscall_nr(nr, type, name, args...)				\
-	unsigned long __sc_ret, __sc_err;				\
-	{								\
-		register unsigned long __sc_0  __asm__ ("r0");		\
-		register unsigned long __sc_3  __asm__ ("r3");		\
-		register unsigned long __sc_4  __asm__ ("r4");		\
-		register unsigned long __sc_5  __asm__ ("r5");		\
-		register unsigned long __sc_6  __asm__ ("r6");		\
-		register unsigned long __sc_7  __asm__ ("r7");		\
-		register unsigned long __sc_8  __asm__ ("r8");		\
-									\
-		__sc_loadargs_##nr(name, args);				\
-		__asm__ __volatile__					\
-			("sc           \n\t"				\
-			 "mfcr %0      "				\
-			: "=&r" (__sc_0),				\
-			  "=&r" (__sc_3),  "=&r" (__sc_4),		\
-			  "=&r" (__sc_5),  "=&r" (__sc_6),		\
-			  "=&r" (__sc_7),  "=&r" (__sc_8)		\
-			: __sc_asm_input_##nr				\
-			: "cr0", "ctr", "memory",			\
-			  "r9", "r10","r11", "r12");			\
-		__sc_ret = __sc_3;					\
-		__sc_err = __sc_0;					\
-	}								\
-	if (__sc_err & 0x10000000)					\
-	{								\
-		errno = __sc_ret;					\
-		__sc_ret = -1;						\
-	}								\
-	return (type) __sc_ret
-
-#define __sc_loadargs_0(name, dummy...)					\
-	__sc_0 = __NR_##name
-#define __sc_loadargs_1(name, arg1)					\
-	__sc_loadargs_0(name);						\
-	__sc_3 = (unsigned long) (arg1)
-#define __sc_loadargs_2(name, arg1, arg2)				\
-	__sc_loadargs_1(name, arg1);					\
-	__sc_4 = (unsigned long) (arg2)
-#define __sc_loadargs_3(name, arg1, arg2, arg3)				\
-	__sc_loadargs_2(name, arg1, arg2);				\
-	__sc_5 = (unsigned long) (arg3)
-#define __sc_loadargs_4(name, arg1, arg2, arg3, arg4)			\
-	__sc_loadargs_3(name, arg1, arg2, arg3);			\
-	__sc_6 = (unsigned long) (arg4)
-#define __sc_loadargs_5(name, arg1, arg2, arg3, arg4, arg5)		\
-	__sc_loadargs_4(name, arg1, arg2, arg3, arg4);			\
-	__sc_7 = (unsigned long) (arg5)
-#define __sc_loadargs_6(name, arg1, arg2, arg3, arg4, arg5, arg6)	\
-	__sc_loadargs_5(name, arg1, arg2, arg3, arg4, arg5);		\
-	__sc_8 = (unsigned long) (arg6)
-
-#define __sc_asm_input_0 "0" (__sc_0)
-#define __sc_asm_input_1 __sc_asm_input_0, "1" (__sc_3)
-#define __sc_asm_input_2 __sc_asm_input_1, "2" (__sc_4)
-#define __sc_asm_input_3 __sc_asm_input_2, "3" (__sc_5)
-#define __sc_asm_input_4 __sc_asm_input_3, "4" (__sc_6)
-#define __sc_asm_input_5 __sc_asm_input_4, "5" (__sc_7)
-#define __sc_asm_input_6 __sc_asm_input_5, "6" (__sc_8)
-
-#define _syscall0(type,name)						\
-type name(void)								\
-{									\
-	__syscall_nr(0, type, name);					\
-}
-
-#define _syscall1(type,name,type1,arg1)					\
-type name(type1 arg1)							\
-{									\
-	__syscall_nr(1, type, name, arg1);				\
-}
-
-#define _syscall2(type,name,type1,arg1,type2,arg2)			\
-type name(type1 arg1, type2 arg2)					\
-{									\
-	__syscall_nr(2, type, name, arg1, arg2);			\
-}
-
-#define _syscall3(type,name,type1,arg1,type2,arg2,type3,arg3)		\
-type name(type1 arg1, type2 arg2, type3 arg3)				\
-{									\
-	__syscall_nr(3, type, name, arg1, arg2, arg3);			\
-}
-
-#define _syscall4(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4) \
-type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4)		\
-{									\
-	__syscall_nr(4, type, name, arg1, arg2, arg3, arg4);		\
-}
-
-#define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,type5,arg5) \
-type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5)	\
-{									\
-	__syscall_nr(5, type, name, arg1, arg2, arg3, arg4, arg5);	\
-}
-#define _syscall6(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,type5,arg5,type6,arg6) \
-type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg6) \
-{									\
-	__syscall_nr(6, type, name, arg1, arg2, arg3, arg4, arg5, arg6); \
-}
-
-#ifdef __KERNEL__
-
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/compiler.h>
 #include <linux/linkage.h>
@@ -454,63 +366,16 @@ type name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, type5 arg5, type6 arg6
 #ifdef CONFIG_PPC64
 #define __ARCH_WANT_COMPAT_SYS_TIME
 #define __ARCH_WANT_COMPAT_SYS_RT_SIGSUSPEND
+#define __ARCH_WANT_SYS_NEWFSTATAT
 #endif
-
-/*
- * System call prototypes.
- */
-#ifdef __KERNEL_SYSCALLS__
-extern pid_t setsid(void);
-extern int write(int fd, const char *buf, off_t count);
-extern int read(int fd, char *buf, off_t count);
-extern off_t lseek(int fd, off_t offset, int count);
-extern int dup(int fd);
-extern int execve(const char *file, char **argv, char **envp);
-extern int open(const char *file, int flag, int mode);
-extern int close(int fd);
-extern pid_t waitpid(pid_t pid, int *wait_stat, int options);
-#endif /* __KERNEL_SYSCALLS__ */
-
-/*
- * Functions that implement syscalls.
- */
-unsigned long sys_mmap(unsigned long addr, size_t len, unsigned long prot,
-		       unsigned long flags, unsigned long fd, off_t offset);
-unsigned long sys_mmap2(unsigned long addr, size_t len,
-			unsigned long prot, unsigned long flags,
-			unsigned long fd, unsigned long pgoff);
-struct pt_regs;
-int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
-		unsigned long a3, unsigned long a4, unsigned long a5,
-		struct pt_regs *regs);
-int sys_clone(unsigned long clone_flags, unsigned long usp,
-		int __user *parent_tidp, void __user *child_threadptr,
-		int __user *child_tidp, int p6, struct pt_regs *regs);
-int sys_fork(unsigned long p1, unsigned long p2, unsigned long p3,
-		unsigned long p4, unsigned long p5, unsigned long p6,
-		struct pt_regs *regs);
-int sys_vfork(unsigned long p1, unsigned long p2, unsigned long p3,
-		unsigned long p4, unsigned long p5, unsigned long p6,
-		struct pt_regs *regs);
-int sys_pipe(int __user *fildes);
-struct sigaction;
-long sys_rt_sigaction(int sig, const struct sigaction __user *act,
-		      struct sigaction __user *oact, size_t sigsetsize);
 
 /*
  * "Conditional" syscalls
- *
- * What we want is __attribute__((weak,alias("sys_ni_syscall"))),
- * but it doesn't work on all toolchains, so we just do it by hand
  */
-#ifdef CONFIG_PPC32
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
-#else
-#define cond_syscall(x) asm(".weak\t." #x "\n\t.set\t." #x ",.sys_ni_syscall")
-#endif
-
-#endif		/* __KERNEL__ */
+#define cond_syscall(x) \
+	asmlinkage long x (void) __attribute__((weak,alias("sys_ni_syscall")))
 
 #endif		/* __ASSEMBLY__ */
+#endif		/* __KERNEL__ */
 
 #endif /* _ASM_PPC_UNISTD_H_ */

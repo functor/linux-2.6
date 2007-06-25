@@ -69,7 +69,9 @@ void show_mem(void)
 	printk(KERN_INFO "%lu pages writeback\n",
 					global_page_state(NR_WRITEBACK));
 	printk(KERN_INFO "%lu pages mapped\n", global_page_state(NR_FILE_MAPPED));
-	printk(KERN_INFO "%lu pages slab\n", global_page_state(NR_SLAB));
+	printk(KERN_INFO "%lu pages slab\n",
+		global_page_state(NR_SLAB_RECLAIMABLE) +
+		global_page_state(NR_SLAB_UNRECLAIMABLE));
 	printk(KERN_INFO "%lu pages pagetables\n",
 					global_page_state(NR_PAGETABLE));
 }
@@ -101,8 +103,11 @@ static void set_pte_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 		return;
 	}
 	pte = pte_offset_kernel(pmd, vaddr);
-	/* <pfn,flags> stored as-is, to permit clearing entries */
-	set_pte(pte, pfn_pte(pfn, flags));
+	if (pgprot_val(flags))
+		/* <pfn,flags> stored as-is, to permit clearing entries */
+		set_pte(pte, pfn_pte(pfn, flags));
+	else
+		pte_clear(&init_mm, vaddr, pte);
 
 	/*
 	 * It's enough to flush this one mapping.
@@ -184,9 +189,11 @@ void set_pmd_pfn(unsigned long vaddr, unsigned long pfn, pgprot_t flags)
 	__flush_tlb_one(vaddr);
 }
 
-static int nr_fixmaps = 0;
+static int fixmaps;
+#ifndef CONFIG_COMPAT_VDSO
 unsigned long __FIXADDR_TOP = (HYPERVISOR_VIRT_START - 2 * PAGE_SIZE);
 EXPORT_SYMBOL(__FIXADDR_TOP);
+#endif
 
 void __set_fixmap (enum fixed_addresses idx, maddr_t phys, pgprot_t flags)
 {
@@ -207,12 +214,30 @@ void __set_fixmap (enum fixed_addresses idx, maddr_t phys, pgprot_t flags)
 		set_pte_pfn_ma(address, phys >> PAGE_SHIFT, flags);
 		break;
 	}
-	nr_fixmaps++;
+	fixmaps++;
+}
+
+/**
+ * reserve_top_address - reserves a hole in the top of kernel address space
+ * @reserve - size of hole to reserve
+ *
+ * Can be used to relocate the fixmap area and poke a hole in the top
+ * of kernel address space to make room for a hypervisor.
+ */
+void reserve_top_address(unsigned long reserve)
+{
+	BUG_ON(fixmaps > 0);
+#ifdef CONFIG_COMPAT_VDSO
+	BUG_ON(reserve != 0);
+#else
+	__FIXADDR_TOP = -reserve - PAGE_SIZE;
+	__VMALLOC_RESERVE += reserve;
+#endif
 }
 
 void set_fixaddr_top(unsigned long top)
 {
-	BUG_ON(nr_fixmaps > 0);
+	BUG_ON(fixmaps > 0);
 	__FIXADDR_TOP = top - PAGE_SIZE;
 }
 
@@ -254,7 +279,7 @@ void pte_free(struct page *pte)
 	__free_page(pte);
 }
 
-void pmd_ctor(void *pmd, kmem_cache_t *cache, unsigned long flags)
+void pmd_ctor(void *pmd, struct kmem_cache *cache, unsigned long flags)
 {
 	memset(pmd, 0, PTRS_PER_PMD*sizeof(pmd_t));
 }
@@ -294,7 +319,7 @@ static inline void pgd_list_del(pgd_t *pgd)
 		set_page_private(next, (unsigned long)pprev);
 }
 
-void pgd_ctor(void *pgd, kmem_cache_t *cache, unsigned long unused)
+void pgd_ctor(void *pgd, struct kmem_cache *cache, unsigned long unused)
 {
 	unsigned long flags;
 
@@ -315,7 +340,7 @@ void pgd_ctor(void *pgd, kmem_cache_t *cache, unsigned long unused)
 }
 
 /* never called when PTRS_PER_PMD > 1 */
-void pgd_dtor(void *pgd, kmem_cache_t *cache, unsigned long unused)
+void pgd_dtor(void *pgd, struct kmem_cache *cache, unsigned long unused)
 {
 	unsigned long flags; /* can be called from interrupt context */
 

@@ -13,7 +13,7 @@
  *    Copyright (C) 2001 Helge Deller <deller at parisc-linux.org>
  *    Copyright (C) 2000-2001 Thomas Bogendoerfer <tsbogend at parisc-linux.org>
  *    Copyright (C) 2002 Randolph Chung <tausq with parisc-linux.org>
- *
+ *    Copyright (C) 2005-2006 Kyle McMartin <kyle at parisc-linux.org>
  *
  *    This program is free software; you can redistribute it and/or modify
  *    it under the terms of the GNU General Public License as published by
@@ -132,7 +132,7 @@
 	ENTRY_SAME(socketpair)
 	ENTRY_SAME(setpgid)
 	ENTRY_SAME(send)
-	ENTRY_SAME(newuname)
+	ENTRY_OURS(newuname)
 	ENTRY_SAME(umask)		/* 60 */
 	ENTRY_SAME(chroot)
 	ENTRY_SAME(ustat)
@@ -207,7 +207,7 @@
 	/* struct sockaddr... */
 	ENTRY_SAME(recvfrom)
 	/* struct timex contains longs */
-	ENTRY_DIFF(adjtimex)
+	ENTRY_COMP(adjtimex)
 	ENTRY_SAME(mprotect)		/* 125 */
 	/* old_sigset_t forced to 32 bits.  Beware glibc sigset_t */
 	ENTRY_COMP(sigprocmask)
@@ -221,7 +221,7 @@
 	ENTRY_SAME(fchdir)
 	ENTRY_SAME(bdflush)
 	ENTRY_SAME(sysfs)		/* 135 */
-	ENTRY_SAME(personality)
+	ENTRY_OURS(personality)
 	ENTRY_SAME(ni_syscall)	/* for afs_syscall */
 	ENTRY_SAME(setfsuid)
 	ENTRY_SAME(setfsgid)
@@ -287,7 +287,7 @@
 	ENTRY_SAME(chown)		/* 180 */
 	/* setsockopt() used by iptables: SO_SET_REPLACE/SO_SET_ADD_COUNTERS */
 	ENTRY_COMP(setsockopt)
-	ENTRY_SAME(getsockopt)
+	ENTRY_COMP(getsockopt)
 	ENTRY_COMP(sendmsg)
 	ENTRY_COMP(recvmsg)
 	ENTRY_SAME(semop)		/* 185 */
@@ -393,5 +393,11 @@
 	ENTRY_SAME(readlinkat)		/* 285 */
 	ENTRY_SAME(fchmodat)
 	ENTRY_SAME(faccessat)
+	ENTRY_SAME(unshare)
+	ENTRY_COMP(set_robust_list)
+	ENTRY_COMP(get_robust_list)	/* 290 */
+	ENTRY_SAME(splice)
+	ENTRY_OURS(sync_file_range)
+	ENTRY_SAME(tee)
 	/* Nothing yet */
 

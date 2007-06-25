@@ -1,14 +1,14 @@
-cmd_scripts/kconfig/kxgettext.o := gcc -Wp,-MD,scripts/kconfig/.kxgettext.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer     -c -o scripts/kconfig/kxgettext.o scripts/kconfig/kxgettext.c
+cmd_scripts/kconfig/kxgettext.o := gcc -Wp,-MD,scripts/kconfig/.kxgettext.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer   -I/usr/include/ncurses -DCURSES_LOC="<ncurses.h>" -DLOCALE  -c -o scripts/kconfig/kxgettext.o scripts/kconfig/kxgettext.c
 
 deps_scripts/kconfig/kxgettext.o := \
   scripts/kconfig/kxgettext.c \
   /usr/include/stdlib.h \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
-  /usr/include/gnu/stubs.h \
   /usr/include/bits/wordsize.h \
+  /usr/include/gnu/stubs.h \
   /usr/include/gnu/stubs-32.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stddef.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/stddef.h \
   /usr/include/sys/types.h \
   /usr/include/bits/types.h \
   /usr/include/bits/typesizes.h \
@@ -34,11 +34,11 @@ deps_scripts/kconfig/kxgettext.o := \
   /usr/include/wchar.h \
   /usr/include/bits/wchar.h \
   /usr/include/gconv.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/stdarg.h \
   /usr/include/bits/stdio_lim.h \
   /usr/include/bits/sys_errlist.h \
   /usr/include/bits/stdio.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/stdbool.h \
   /usr/include/libintl.h \
   /usr/include/locale.h \
   /usr/include/bits/locale.h \

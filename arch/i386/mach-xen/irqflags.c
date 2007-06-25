@@ -40,7 +40,6 @@ void raw_local_irq_restore(unsigned long flags)
 		preempt_enable();
 	} else
 		preempt_enable_no_resched();
-
 }
 EXPORT_SYMBOL(raw_local_irq_restore);
 
@@ -69,19 +68,9 @@ void raw_local_irq_enable(void)
 }
 EXPORT_SYMBOL(raw_local_irq_enable);
 
-/* Cannot use preempt_enable() here as we would recurse in preempt_sched(). */
-int raw_irqs_disabled(void)
-{
-	struct vcpu_info *_vcpu;
-	int disabled;
-
-	preempt_disable();
-	_vcpu = &HYPERVISOR_shared_info->vcpu_info[__vcpu_id];
-	disabled = (_vcpu->evtchn_upcall_mask != 0);
-	preempt_enable_no_resched();
-	return disabled;
-}
-EXPORT_SYMBOL(raw_irqs_disabled);
+/*
+ * For spinlocks, etc.:
+ */
 
 unsigned long __raw_local_irq_save(void)
 {
@@ -97,3 +86,18 @@ unsigned long __raw_local_irq_save(void)
 	return flags;
 }
 EXPORT_SYMBOL(__raw_local_irq_save);
+
+/* Cannot use preempt_enable() here as we would recurse in preempt_sched(). */
+int raw_irqs_disabled(void)
+{
+	struct vcpu_info *_vcpu;
+	int disabled;
+
+	preempt_disable();
+	_vcpu = &HYPERVISOR_shared_info->vcpu_info[__vcpu_id];
+	disabled = (_vcpu->evtchn_upcall_mask != 0);
+	preempt_enable_no_resched();
+
+	return disabled;
+}
+EXPORT_SYMBOL(raw_irqs_disabled);

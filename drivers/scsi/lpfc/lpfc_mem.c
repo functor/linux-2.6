@@ -38,18 +38,6 @@
 #define LPFC_MBUF_POOL_SIZE     64      /* max elements in MBUF safety pool */
 #define LPFC_MEM_POOL_SIZE      64      /* max elem in non-DMA safety pool */
 
-static void *
-lpfc_pool_kmalloc(gfp_t gfp_flags, void *data)
-{
-	return kmalloc((unsigned long)data, gfp_flags);
-}
-
-static void
-lpfc_pool_kfree(void *obj, void *data)
-{
-	kfree(obj);
-}
-
 int
 lpfc_mem_alloc(struct lpfc_hba * phba)
 {
@@ -68,6 +56,9 @@ lpfc_mem_alloc(struct lpfc_hba * phba)
 
 	pool->elements = kmalloc(sizeof(struct lpfc_dmabuf) *
 					 LPFC_MBUF_POOL_SIZE, GFP_KERNEL);
+	if (!pool->elements)
+		goto fail_free_lpfc_mbuf_pool;
+
 	pool->max_count = 0;
 	pool->current_count = 0;
 	for ( i = 0; i < LPFC_MBUF_POOL_SIZE; i++) {
@@ -79,15 +70,13 @@ lpfc_mem_alloc(struct lpfc_hba * phba)
 		pool->current_count++;
 	}
 
-	phba->mbox_mem_pool = mempool_create(LPFC_MEM_POOL_SIZE,
-				lpfc_pool_kmalloc, lpfc_pool_kfree,
-				(void *)(unsigned long)sizeof(LPFC_MBOXQ_t));
+	phba->mbox_mem_pool = mempool_create_kmalloc_pool(LPFC_MEM_POOL_SIZE,
+							 sizeof(LPFC_MBOXQ_t));
 	if (!phba->mbox_mem_pool)
 		goto fail_free_mbuf_pool;
 
-	phba->nlp_mem_pool = mempool_create(LPFC_MEM_POOL_SIZE,
-			lpfc_pool_kmalloc, lpfc_pool_kfree,
-			(void *)(unsigned long)sizeof(struct lpfc_nodelist));
+	phba->nlp_mem_pool = mempool_create_kmalloc_pool(LPFC_MEM_POOL_SIZE,
+						sizeof(struct lpfc_nodelist));
 	if (!phba->nlp_mem_pool)
 		goto fail_free_mbox_pool;
 
@@ -96,10 +85,11 @@ lpfc_mem_alloc(struct lpfc_hba * phba)
  fail_free_mbox_pool:
 	mempool_destroy(phba->mbox_mem_pool);
  fail_free_mbuf_pool:
-	while (--i)
+	while (i--)
 		pci_pool_free(phba->lpfc_mbuf_pool, pool->elements[i].virt,
 						 pool->elements[i].phys);
 	kfree(pool->elements);
+ fail_free_lpfc_mbuf_pool:
 	pci_pool_destroy(phba->lpfc_mbuf_pool);
  fail_free_dma_buf_pool:
 	pci_pool_destroy(phba->lpfc_scsi_dma_buf_pool);
@@ -147,6 +137,11 @@ lpfc_mem_free(struct lpfc_hba * phba)
 
 	pci_pool_destroy(phba->lpfc_scsi_dma_buf_pool);
 	pci_pool_destroy(phba->lpfc_mbuf_pool);
+
+	/* Free the iocb lookup array */
+	kfree(psli->iocbq_lookup);
+	psli->iocbq_lookup = NULL;
+
 }
 
 void *

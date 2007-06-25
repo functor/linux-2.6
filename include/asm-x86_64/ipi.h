@@ -49,8 +49,12 @@ static inline int __prepare_ICR2 (unsigned int mask)
 	return SET_APIC_DEST_FIELD(mask);
 }
 
+
 static inline void __send_IPI_shortcut(unsigned int shortcut, int vector, unsigned int dest)
 {
+#ifdef CONFIG_XEN_UNPRIVILEGED_GUEST
+	BUG();
+#else
 	/*
 	 * Subtle. In the case of the 'never do double writes' workaround
 	 * we have to lock out interrupts to be safe.  As we don't care
@@ -74,6 +78,7 @@ static inline void __send_IPI_shortcut(unsigned int shortcut, int vector, unsign
 	 * Send the IPI. The write to APIC_ICR fires this off.
 	 */
 	apic_write(APIC_ICR, cfg);
+#endif /* !CONFIG_XEN_UNPRIVILEGED_GUEST */
 }
 
 

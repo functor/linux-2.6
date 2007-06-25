@@ -27,6 +27,8 @@
 #include <linux/coda_cache.h>
 #include <linux/coda_proc.h>
 
+#include "coda_int.h"
+
 /* dir inode-ops */
 static int coda_create(struct inode *dir, struct dentry *new, int mode, struct nameidata *nd);
 static struct dentry *coda_lookup(struct inode *dir, struct dentry *target, struct nameidata *nd);
@@ -50,7 +52,6 @@ static int coda_dentry_delete(struct dentry *);
 /* support routines */
 static int coda_venus_readdir(struct file *filp, filldir_t filldir,
 			      void *dirent, struct dentry *dir);
-int coda_fsync(struct file *, struct dentry *dentry, int datasync);
 
 /* same as fs/bad_inode.c */
 static int coda_return_EIO(void)
@@ -81,7 +82,7 @@ struct inode_operations coda_dir_inode_operations =
 	.setattr	= coda_setattr,
 };
 
-struct file_operations coda_dir_operations = {
+const struct file_operations coda_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
 	.readdir	= coda_readdir,
@@ -303,7 +304,7 @@ static int coda_link(struct dentry *source_de, struct inode *dir_inode,
 	coda_dir_changed(dir_inode, 0);
 	atomic_inc(&inode->i_count);
 	d_instantiate(de, inode);
-	inode->i_nlink++;
+	inc_nlink(inode);
         
 out:
 	unlock_kernel();
@@ -366,7 +367,7 @@ int coda_unlink(struct inode *dir, struct dentry *de)
         }
 
 	coda_dir_changed(dir, 0);
-	de->d_inode->i_nlink--;
+	drop_nlink(de->d_inode);
 	unlock_kernel();
 
         return 0;
@@ -393,7 +394,7 @@ int coda_rmdir(struct inode *dir, struct dentry *de)
         }
 
 	coda_dir_changed(dir, -1);
-	de->d_inode->i_nlink--;
+	drop_nlink(de->d_inode);
 	d_delete(de);
 	unlock_kernel();
 
@@ -440,7 +441,7 @@ static int coda_rename(struct inode *old_dir, struct dentry *old_dentry,
 /* file operations for directories */
 int coda_readdir(struct file *coda_file, void *dirent, filldir_t filldir)
 {
-	struct dentry *coda_dentry = coda_file->f_dentry;
+	struct dentry *coda_dentry = coda_file->f_path.dentry;
 	struct coda_file_info *cfi;
 	struct file *host_file;
 	struct inode *host_inode;
@@ -452,7 +453,7 @@ int coda_readdir(struct file *coda_file, void *dirent, filldir_t filldir)
 
 	coda_vfs_stat.readdir++;
 
-	host_inode = host_file->f_dentry->d_inode;
+	host_inode = host_file->f_path.dentry->d_inode;
 	mutex_lock(&host_inode->i_mutex);
 	host_file->f_pos = coda_file->f_pos;
 
@@ -512,7 +513,7 @@ static int coda_venus_readdir(struct file *filp, filldir_t filldir,
 	ino_t ino;
 	int ret, i;
 
-	vdir = (struct venus_dirent *)kmalloc(sizeof(*vdir), GFP_KERNEL);
+	vdir = kmalloc(sizeof(*vdir), GFP_KERNEL);
 	if (!vdir) return -ENOMEM;
 
 	i = filp->f_pos;
@@ -543,14 +544,14 @@ static int coda_venus_readdir(struct file *filp, filldir_t filldir,
 		/* catch truncated reads */
 		if (ret < vdir_size || ret < vdir_size + vdir->d_namlen) {
 			printk("coda_venus_readdir: short read: %ld\n",
-			       filp->f_dentry->d_inode->i_ino);
+			       filp->f_path.dentry->d_inode->i_ino);
 			ret = -EBADF;
 			break;
 		}
 		/* validate whether the directory file actually makes sense */
 		if (vdir->d_reclen < vdir_size + vdir->d_namlen) {
 			printk("coda_venus_readdir: Invalid dir: %ld\n",
-			       filp->f_dentry->d_inode->i_ino);
+			       filp->f_path.dentry->d_inode->i_ino);
 			ret = -EBADF;
 			break;
 		}

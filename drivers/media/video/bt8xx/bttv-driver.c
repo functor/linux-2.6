@@ -156,6 +156,36 @@ static ssize_t show_card(struct class_device *cd, char *buf)
 static CLASS_DEVICE_ATTR(card, S_IRUGO, show_card, NULL);
 
 /* ----------------------------------------------------------------------- */
+/* dvb auto-load setup                                                     */
+#if defined(CONFIG_MODULES) && defined(MODULE)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20)
+static void request_module_async(void *ptr)
+{
+#else
+static void request_module_async(struct work_struct *work)
+{
+#endif
+	request_module("dvb-bt8xx");
+}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
+#define request_modules(dev)
+#else
+static void request_modules(struct bttv *dev)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20)
+	INIT_WORK(&dev->request_module_wk, request_module_async, (void*)dev);
+#else
+	INIT_WORK(&dev->request_module_wk, request_module_async);
+#endif
+	schedule_work(&dev->request_module_wk);
+}
+#endif
+#else
+#define request_modules(dev)
+#endif /* CONFIG_MODULES */
+
+/* ----------------------------------------------------------------------- */
 /* static data                                                             */
 
 /* special timing tables from conexant... */
@@ -1793,7 +1823,7 @@ static int bttv_common_ioctls(struct bttv *btv, unsigned int cmd, void *arg)
 		memset(i,0,sizeof(*i));
 		i->index    = n;
 		i->type     = V4L2_INPUT_TYPE_CAMERA;
-		i->audioset = 0;
+		i->audioset = 1;
 		if (i->index == bttv_tvcards[btv->c.type].tuner) {
 			sprintf(i->name, "Television");
 			i->type  = V4L2_INPUT_TYPE_TUNER;
@@ -2431,6 +2461,14 @@ static int bttv_do_ioctl(struct inode *inode, struct file *file,
 		fbuf->bytesperline  = btv->fbuf.fmt.bytesperline;
 		if (fh->ovfmt)
 			fbuf->depth = fh->ovfmt->depth;
+		else {
+			if (fbuf->width)
+				fbuf->depth   = ((fbuf->bytesperline<<3)
+						  + (fbuf->width-1) )
+						  /fbuf->width;
+			else
+				fbuf->depth = 0;
+		}
 		return 0;
 	}
 	case VIDIOCSFBUF:
@@ -3745,7 +3783,7 @@ bttv_irq_switch_vbi(struct bttv *btv)
 	spin_unlock(&btv->s_lock);
 }
 
-static irqreturn_t bttv_irq(int irq, void *dev_id, struct pt_regs * regs)
+static irqreturn_t bttv_irq(int irq, void *dev_id)
 {
 	u32 stat,astat;
 	u32 dstat;
@@ -4042,8 +4080,8 @@ static int __devinit bttv_probe(struct pci_dev *dev,
 	       (unsigned long long)pci_resource_start(dev,0));
 	schedule();
 
-	btv->bt848_mmio=ioremap(pci_resource_start(dev,0), 0x1000);
-	if (NULL == ioremap(pci_resource_start(dev,0), 0x1000)) {
+	btv->bt848_mmio = ioremap(pci_resource_start(dev, 0), 0x1000);
+	if (NULL == btv->bt848_mmio) {
 		printk("bttv%d: ioremap() failed\n", btv->c.nr);
 		result = -EIO;
 		goto fail1;
@@ -4124,9 +4162,11 @@ static int __devinit bttv_probe(struct pci_dev *dev,
 		set_input(btv,0);
 	}
 
-	/* add subdevices */
-	if (bttv_tvcards[btv->c.type].has_dvb)
+	/* add subdevices and autoload dvb-bt8xx if needed */
+	if (bttv_tvcards[btv->c.type].has_dvb) {
 		bttv_sub_add_device(&btv->c, "dvb");
+		request_modules(btv);
+	}
 
 	bttv_input_init(btv);
 
@@ -4186,6 +4226,7 @@ static void __devexit bttv_remove(struct pci_dev *pci_dev)
 	return;
 }
 
+#ifdef CONFIG_PM
 static int bttv_suspend(struct pci_dev *pci_dev, pm_message_t state)
 {
 	struct bttv *btv = pci_get_drvdata(pci_dev);
@@ -4266,6 +4307,7 @@ static int bttv_resume(struct pci_dev *pci_dev)
 	spin_unlock_irqrestore(&btv->s_lock,flags);
 	return 0;
 }
+#endif
 
 static struct pci_device_id bttv_pci_tbl[] = {
 	{PCI_VENDOR_ID_BROOKTREE, PCI_DEVICE_ID_BT848,
@@ -4286,8 +4328,10 @@ static struct pci_driver bttv_pci_driver = {
 	.id_table = bttv_pci_tbl,
 	.probe    = bttv_probe,
 	.remove   = __devexit_p(bttv_remove),
+#ifdef CONFIG_PM
 	.suspend  = bttv_suspend,
 	.resume   = bttv_resume,
+#endif
 };
 
 static int bttv_init_module(void)

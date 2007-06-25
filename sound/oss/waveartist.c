@@ -1,5 +1,5 @@
 /*
- * linux/drivers/sound/waveartist.c
+ * linux/sound/oss/waveartist.c
  *
  * The low level driver for the RWA010 Rockwell Wave Artist
  * codec chip used in the Rebel.com NetWinder.
@@ -35,7 +35,6 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
@@ -834,7 +833,7 @@ static struct audio_driver waveartist_audio_driver = {
 
 
 static irqreturn_t
-waveartist_intr(int irq, void *dev_id, struct pt_regs *regs)
+waveartist_intr(int irq, void *dev_id)
 {
 	wavnc_info *devc = (wavnc_info *)dev_id;
 	int	   irqstatus, status;
@@ -1268,7 +1267,7 @@ static int __init waveartist_init(wavnc_info *devc)
 	conf_printf2(dev_name, devc->hw.io_base, devc->hw.irq,
 		     devc->hw.dma, devc->hw.dma2);
 
-	portc = (wavnc_port_info *)kmalloc(sizeof(wavnc_port_info), GFP_KERNEL);
+	portc = kmalloc(sizeof(wavnc_port_info), GFP_KERNEL);
 	if (portc == NULL)
 		goto nomem;
 
@@ -2028,8 +2027,8 @@ __setup("waveartist=", setup_waveartist);
 #endif
 
 MODULE_DESCRIPTION("Rockwell WaveArtist RWA-010 sound driver");
-MODULE_PARM(io, "i");		/* IO base */
-MODULE_PARM(irq, "i");		/* IRQ */
-MODULE_PARM(dma, "i");		/* DMA */
-MODULE_PARM(dma2, "i");		/* DMA2 */
+module_param(io, int, 0);		/* IO base */
+module_param(irq, int, 0);		/* IRQ */
+module_param(dma, int, 0);		/* DMA */
+module_param(dma2, int, 0);		/* DMA2 */
 MODULE_LICENSE("GPL");

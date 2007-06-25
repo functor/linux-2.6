@@ -186,7 +186,7 @@ static void __init pmagbbfb_screen_setup(struct fb_info *info)
 static void __init pmagbbfb_osc_setup(struct fb_info *info)
 {
 	static unsigned int pmagbbfb_freqs[] __initdata = {
-		130808, 119843, 104000, 92980, 74367, 72800,
+		130808, 119843, 104000, 92980, 74370, 72800,
 		69197, 66000, 65000, 50350, 36000, 32000, 25175
 	};
 	struct pmagbbfb_par *par = info->par;
@@ -228,7 +228,7 @@ static void __init pmagbbfb_osc_setup(struct fb_info *info)
 
 	freq1 = (par->osc0 * count1 + count0 / 2) / count0;
 	par->osc1 = freq1;
-	for (i = 0; i < sizeof(pmagbbfb_freqs) / sizeof(*pmagbbfb_freqs); i++)
+	for (i = 0; i < ARRAY_SIZE(pmagbbfb_freqs); i++)
 		if (freq1 >= pmagbbfb_freqs[i] -
 			     (pmagbbfb_freqs[i] + 128) / 256 &&
 		    freq1 <= pmagbbfb_freqs[i] +

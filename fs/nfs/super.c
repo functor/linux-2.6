@@ -44,7 +44,7 @@
 #include <linux/vfs.h>
 #include <linux/inet.h>
 #include <linux/nfs_xdr.h>
-#include <linux/vserver/xid.h>
+#include <linux/vs_tag.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -71,7 +71,7 @@ static struct file_system_type nfs_fs_type = {
 	.name		= "nfs",
 	.get_sb		= nfs_get_sb,
 	.kill_sb	= nfs_kill_super,
-	.fs_flags	= FS_ODD_RENAME|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
+	.fs_flags	= FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
 
 struct file_system_type nfs_xdev_fs_type = {
@@ -79,7 +79,7 @@ struct file_system_type nfs_xdev_fs_type = {
 	.name		= "nfs",
 	.get_sb		= nfs_xdev_get_sb,
 	.kill_sb	= nfs_kill_super,
-	.fs_flags	= FS_ODD_RENAME|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
+	.fs_flags	= FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
 
 static struct super_operations nfs_sops = {
@@ -107,7 +107,7 @@ static struct file_system_type nfs4_fs_type = {
 	.name		= "nfs4",
 	.get_sb		= nfs4_get_sb,
 	.kill_sb	= nfs4_kill_super,
-	.fs_flags	= FS_ODD_RENAME|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
+	.fs_flags	= FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
 
 struct file_system_type nfs4_xdev_fs_type = {
@@ -115,7 +115,7 @@ struct file_system_type nfs4_xdev_fs_type = {
 	.name		= "nfs4",
 	.get_sb		= nfs4_xdev_get_sb,
 	.kill_sb	= nfs4_kill_super,
-	.fs_flags	= FS_ODD_RENAME|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
+	.fs_flags	= FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
 
 struct file_system_type nfs4_referral_fs_type = {
@@ -123,7 +123,7 @@ struct file_system_type nfs4_referral_fs_type = {
 	.name		= "nfs4",
 	.get_sb		= nfs4_referral_get_sb,
 	.kill_sb	= nfs4_kill_super,
-	.fs_flags	= FS_ODD_RENAME|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
+	.fs_flags	= FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
 
 static struct super_operations nfs4_sops = {
@@ -137,6 +137,8 @@ static struct super_operations nfs4_sops = {
 	.show_stats	= nfs_show_stats,
 };
 #endif
+
+static struct shrinker *acl_shrinker;
 
 /*
  * Register the NFS filesystems
@@ -157,6 +159,7 @@ int __init register_nfs_fs(void)
 	if (ret < 0)
 		goto error_2;
 #endif
+	acl_shrinker = set_shrinker(DEFAULT_SEEKS, nfs_access_cache_shrinker);
 	return 0;
 
 #ifdef CONFIG_NFS_V4
@@ -174,6 +177,8 @@ error_0:
  */
 void __exit unregister_nfs_fs(void)
 {
+	if (acl_shrinker != NULL)
+		remove_shrinker(acl_shrinker);
 #ifdef CONFIG_NFS_V4
 	unregister_filesystem(&nfs4_fs_type);
 	nfs_unregister_sysctl();
@@ -286,8 +291,7 @@ static void nfs_show_mount_options(struct seq_file *m, struct nfs_server *nfss, 
 		{ NFS_MOUNT_NOAC, ",noac", "" },
 		{ NFS_MOUNT_NONLM, ",nolock", "" },
 		{ NFS_MOUNT_NOACL, ",noacl", "" },
-		{ NFS_MOUNT_FSCACHE, ",fsc", "" },
-		{ NFS_MOUNT_TAGXID, ",tagxid", ""},
+		{ NFS_MOUNT_TAGGED, ",tag", "" },
 		{ 0, NULL, NULL }
 	};
 	const struct proc_nfs_info *nfs_infop;
@@ -468,11 +472,13 @@ static int nfs_validate_mount_data(struct nfs_mount_data *data,
 						data->version);
 				return -EINVAL;
 			}
-			/* Fill in pseudoflavor for mount version < 5 */
-			data->pseudoflavor = RPC_AUTH_UNIX;
 		case 5:
 			memset(data->context, 0, sizeof(data->context));
 	}
+
+	/* Set the pseudoflavor */
+	if (!(data->flags & NFS_MOUNT_SECFLAVOUR))
+		data->pseudoflavor = RPC_AUTH_UNIX;
 
 #ifndef CONFIG_NFS_V3
 	/* If NFSv3 is not compiled in, return -EPROTONOSUPPORT */
@@ -527,9 +533,6 @@ static inline void nfs_initialise_sb(struct super_block *sb)
 
 	if (server->flags & NFS_MOUNT_NOAC)
 		sb->s_flags |= MS_SYNCHRONOUS;
-
-	if (server->flags & NFS_MOUNT_TAGXID)
-		sb->s_flags |= MS_TAGXID;
 
 	nfs_super_set_maxbytes(sb, server->maxfilesize);
 }
@@ -831,6 +834,9 @@ static int nfs4_get_sb(struct file_system_type *fs_type,
 				__FUNCTION__);
 		return -EINVAL;
 	}
+	/* RFC3530: The default port for NFS is 2049 */
+	if (addr.sin_port == 0)
+		addr.sin_port = htons(NFS_PORT);
 
 	/* Grab the authentication type */
 	authflavour = RPC_AUTH_UNIX;

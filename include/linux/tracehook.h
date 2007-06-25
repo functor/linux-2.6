@@ -1,6 +1,14 @@
 /*
  * Tracing hooks
  *
+ * Copyright (C) 2006, 2007 Red Hat, Inc.  All rights reserved.
+ *
+ * This copyrighted material is made available to anyone wishing to use,
+ * modify, copy, or redistribute it subject to the terms and conditions
+ * of the GNU General Public License v.2.
+ *
+ * Red Hat Author: Roland McGrath.
+ *
  * This file defines hook entry points called by core code where
  * user tracing/debugging support might need to do something.
  * These entry points are called tracehook_*.  Each hook declared below
@@ -20,6 +28,7 @@
 
 #include <linux/sched.h>
 #include <linux/uaccess.h>
+#include <linux/utrace.h>
 struct linux_binprm;
 struct pt_regs;
 
@@ -301,10 +310,6 @@ utrace_regset_copyin_ignore(unsigned int *pos, unsigned int *count,
  ***
  ***/
 
-#ifdef CONFIG_UTRACE
-#include <linux/utrace.h>
-#endif
-
 
 /*
  * Called in copy_process when setting up the copied task_struct,
@@ -312,10 +317,7 @@ utrace_regset_copyin_ignore(unsigned int *pos, unsigned int *count,
  */
 static inline void tracehook_init_task(struct task_struct *child)
 {
-#ifdef CONFIG_UTRACE
-	child->utrace_flags = 0;
-	child->utrace = NULL;
-#endif
+	utrace_init_task(child);
 }
 
 /*
@@ -324,11 +326,9 @@ static inline void tracehook_init_task(struct task_struct *child)
  */
 static inline void tracehook_release_task(struct task_struct *p)
 {
-#ifdef CONFIG_UTRACE
 	smp_mb();
-	if (p->utrace != NULL)
+	if (tsk_utrace_struct(p) != NULL)
 		utrace_release_task(p);
-#endif
 }
 
 /*
@@ -339,10 +339,7 @@ static inline void tracehook_release_task(struct task_struct *p)
  */
 static inline int tracehook_check_released(struct task_struct *p)
 {
-#ifdef CONFIG_UTRACE
-	return unlikely(p->utrace != NULL);
-#endif
-	return 0;
+	return unlikely(tsk_utrace_struct(p) != NULL);
 }
 
 /*
@@ -353,11 +350,7 @@ static inline int tracehook_check_released(struct task_struct *p)
 static inline int tracehook_notify_cldstop(struct task_struct *tsk,
 					   const siginfo_t *info)
 {
-#ifdef CONFIG_UTRACE
-	if (tsk->utrace_flags & UTRACE_ACTION_NOREAP)
-		return 1;
-#endif
-	return 0;
+	return (tsk_utrace_flags(tsk) & UTRACE_ACTION_NOREAP);
 }
 
 /*
@@ -371,14 +364,11 @@ static inline int tracehook_notify_cldstop(struct task_struct *tsk,
 static inline int tracehook_notify_death(struct task_struct *tsk,
 					 int *noreap, void **death_cookie)
 {
-	*death_cookie = NULL;
-#ifdef CONFIG_UTRACE
-	*death_cookie = tsk->utrace;
-	if (tsk->utrace_flags & UTRACE_ACTION_NOREAP) {
+	*death_cookie = tsk_utrace_struct(tsk);
+	if (tsk_utrace_flags(tsk) & UTRACE_ACTION_NOREAP) {
 		*noreap = 1;
 		return 1;
 	}
-#endif
 	*noreap = 0;
 	return 0;
 }
@@ -391,11 +381,8 @@ static inline int tracehook_notify_death(struct task_struct *tsk,
 static inline int tracehook_consider_fatal_signal(struct task_struct *tsk,
 						  int sig)
 {
-#ifdef CONFIG_UTRACE
-	return (tsk->utrace_flags & (UTRACE_EVENT(SIGNAL_TERM)
-				     | UTRACE_EVENT(SIGNAL_CORE)));
-#endif
-	return 0;
+	return (tsk_utrace_flags(tsk) & (UTRACE_EVENT(SIGNAL_TERM)
+					 | UTRACE_EVENT(SIGNAL_CORE)));
 }
 
 /*
@@ -407,10 +394,7 @@ static inline int tracehook_consider_fatal_signal(struct task_struct *tsk,
 static inline int tracehook_consider_ignored_signal(struct task_struct *tsk,
 						    int sig, void *handler)
 {
-#ifdef CONFIG_UTRACE
-	return (tsk->utrace_flags & UTRACE_EVENT(SIGNAL_IGN));
-#endif
-	return 0;
+	return (tsk_utrace_flags(tsk) & UTRACE_EVENT(SIGNAL_IGN));
 }
 
 
@@ -421,10 +405,7 @@ static inline int tracehook_consider_ignored_signal(struct task_struct *tsk,
  */
 static inline int tracehook_induce_sigpending(struct task_struct *tsk)
 {
-#ifdef CONFIG_UTRACE
-	return unlikely(tsk->utrace_flags & UTRACE_ACTION_QUIESCE);
-#endif
-	return 0;
+	return unlikely(tsk_utrace_flags(tsk) & UTRACE_ACTION_QUIESCE);
 }
 
 /*
@@ -439,10 +420,8 @@ static inline int tracehook_get_signal(struct task_struct *tsk,
 				       siginfo_t *info,
 				       struct k_sigaction *return_ka)
 {
-#ifdef CONFIG_UTRACE
-	if (unlikely(tsk->utrace_flags))
+	if (unlikely(tsk_utrace_flags(tsk)))
 		return utrace_get_signal(tsk, regs, info, return_ka);
-#endif
 	return 0;
 }
 
@@ -455,21 +434,8 @@ static inline int tracehook_get_signal(struct task_struct *tsk,
  */
 static inline int tracehook_finish_stop(int last_one)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & UTRACE_EVENT(JCTL))
+	if (tsk_utrace_flags(current) & UTRACE_EVENT(JCTL))
 		return utrace_report_jctl(CLD_STOPPED);
-#endif
-
-	return 0;
-}
-
-/*
- * Called with tasklist_lock held for reading, for an event notification stop.
- * We are already in TASK_TRACED.  Return zero to go back to running,
- * or nonzero to actually stop until resumed.
- */
-static inline int tracehook_stop_now(void)
-{
 	return 0;
 }
 
@@ -481,10 +447,7 @@ static inline int tracehook_stop_now(void)
  */
 static inline int tracehook_inhibit_wait_stopped(struct task_struct *child)
 {
-#ifdef CONFIG_UTRACE
-	return (child->utrace_flags & UTRACE_ACTION_NOREAP);
-#endif
-	return 0;
+	return (tsk_utrace_flags(child) & UTRACE_ACTION_NOREAP);
 }
 
 /*
@@ -494,10 +457,7 @@ static inline int tracehook_inhibit_wait_stopped(struct task_struct *child)
  */
 static inline int tracehook_inhibit_wait_zombie(struct task_struct *child)
 {
-#ifdef CONFIG_UTRACE
-	return (child->utrace_flags & UTRACE_ACTION_NOREAP);
-#endif
-	return 0;
+	return (tsk_utrace_flags(child) & UTRACE_ACTION_NOREAP);
 }
 
 /*
@@ -507,10 +467,7 @@ static inline int tracehook_inhibit_wait_zombie(struct task_struct *child)
  */
 static inline int tracehook_inhibit_wait_continued(struct task_struct *child)
 {
-#ifdef CONFIG_UTRACE
-	return (child->utrace_flags & UTRACE_ACTION_NOREAP);
-#endif
-	return 0;
+	return (tsk_utrace_flags(child) & UTRACE_ACTION_NOREAP);
 }
 
 
@@ -520,10 +477,8 @@ static inline int tracehook_inhibit_wait_continued(struct task_struct *child)
  */
 static inline int tracehook_unsafe_exec(struct task_struct *tsk)
 {
-#ifdef CONFIG_UTRACE
-	if (tsk->utrace_flags)
+	if (tsk_utrace_flags(tsk))
 		return utrace_unsafe_exec(tsk);
-#endif
 	return 0;
 }
 
@@ -539,10 +494,8 @@ static inline int tracehook_unsafe_exec(struct task_struct *tsk)
  */
 static inline struct task_struct *tracehook_tracer_task(struct task_struct *p)
 {
-#ifdef CONFIG_UTRACE
-	if (p->utrace_flags)
+	if (tsk_utrace_flags(p))
 		return utrace_tracer_task(p);
-#endif
 	return NULL;
 }
 
@@ -554,10 +507,8 @@ static inline int tracehook_allow_access_process_vm(struct task_struct *tsk)
 {
 	if (tsk == current)
 		return 1;
-#ifdef CONFIG_UTRACE
-	if (tsk->utrace_flags)
+	if (tsk_utrace_flags(tsk))
 		return utrace_allow_access_process_vm(tsk);
-#endif
 	return 0;
 }
 
@@ -582,11 +533,20 @@ static inline int tracehook_allow_access_process_vm(struct task_struct *tsk)
 static inline void tracehook_report_death(struct task_struct *tsk,
 					  int exit_state, void *death_cookie)
 {
-#ifdef CONFIG_UTRACE
 	smp_mb();
-	if (tsk->utrace_flags & (UTRACE_EVENT(DEATH) | UTRACE_ACTION_QUIESCE))
+	if (tsk_utrace_flags(tsk) & (UTRACE_EVENT(DEATH)
+				     | UTRACE_ACTION_QUIESCE))
 		utrace_report_death(tsk, death_cookie);
-#endif
+}
+
+/*
+ * This is called when tracehook_inhibit_wait_zombie(p) returned true
+ * and a previously delayed group_leader is now eligible for reaping.
+ * It's called from release_task, with no locks held, and p is not current.
+ */
+static inline void tracehook_report_delayed_group_leader(struct task_struct *p)
+{
+	utrace_report_delayed_group_leader(p);
 }
 
 /*
@@ -594,12 +554,10 @@ static inline void tracehook_report_death(struct task_struct *tsk,
  * The freshly initialized register state can be seen and changed here.
  */
 static inline void tracehook_report_exec(struct linux_binprm *bprm,
-				    struct pt_regs *regs)
+					 struct pt_regs *regs)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & UTRACE_EVENT(EXEC))
+	if (tsk_utrace_flags(current) & UTRACE_EVENT(EXEC))
 		utrace_report_exec(bprm, regs);
-#endif
 }
 
 /*
@@ -608,10 +566,8 @@ static inline void tracehook_report_exec(struct linux_binprm *bprm,
  */
 static inline void tracehook_report_exit(long *exit_code)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & UTRACE_EVENT(EXIT))
+	if (tsk_utrace_flags(current) & UTRACE_EVENT(EXIT))
 		utrace_report_exit(exit_code);
-#endif
 }
 
 /*
@@ -626,28 +582,23 @@ static inline void tracehook_report_exit(long *exit_code)
 static inline void tracehook_report_clone(unsigned long clone_flags,
 					  struct task_struct *child)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & UTRACE_EVENT(CLONE))
+	if (tsk_utrace_flags(current) & UTRACE_EVENT(CLONE))
 		utrace_report_clone(clone_flags, child);
-#endif
 }
 
 /*
  * Called after the child has started running, shortly after
- * tracehook_report_clone.  This is just before the clone/fork syscall
- * returns, or blocks for vfork child completion if (clone_flags &
- * CLONE_VFORK).  The child pointer may be invalid if a self-reaping
- * child died and tracehook_report_clone took no action to prevent it
- * from self-reaping.
+ * tracehook_report_clone.  This is just before the clone/fork syscall returns,
+ * or blocks for vfork child completion if (clone_flags & CLONE_VFORK).
+ * The child pointer may be invalid if a self-reaping child died and
+ * tracehook_report_clone took no action to prevent it from self-reaping.
  */
 static inline void tracehook_report_clone_complete(unsigned long clone_flags,
 						   pid_t pid,
 						   struct task_struct *child)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & UTRACE_ACTION_QUIESCE)
+	if (tsk_utrace_flags(current) & UTRACE_ACTION_QUIESCE)
 		utrace_quiescent(current, NULL);
-#endif
 }
 
 /*
@@ -659,10 +610,8 @@ static inline void tracehook_report_clone_complete(unsigned long clone_flags,
 static inline void tracehook_report_vfork_done(struct task_struct *child,
 					       pid_t child_pid)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & UTRACE_EVENT(VFORK_DONE))
+	if (tsk_utrace_flags(current) & UTRACE_EVENT(VFORK_DONE))
 		utrace_report_vfork_done(child_pid);
-#endif
 }
 
 /*
@@ -670,11 +619,9 @@ static inline void tracehook_report_vfork_done(struct task_struct *child,
  */
 static inline void tracehook_report_syscall(struct pt_regs *regs, int is_exit)
 {
-#ifdef CONFIG_UTRACE
-	if (current->utrace_flags & (is_exit ? UTRACE_EVENT(SYSCALL_EXIT)
-				     : UTRACE_EVENT(SYSCALL_ENTRY)))
+	if (tsk_utrace_flags(current) & (is_exit ? UTRACE_EVENT(SYSCALL_EXIT)
+					 : UTRACE_EVENT(SYSCALL_ENTRY)))
 		utrace_report_syscall(regs, is_exit);
-#endif
 }
 
 /*
@@ -694,13 +641,11 @@ static inline void tracehook_report_handle_signal(int sig,
 						  const sigset_t *oldset,
 						  struct pt_regs *regs)
 {
-#ifdef CONFIG_UTRACE
 	struct task_struct *tsk = current;
-	if ((tsk->utrace_flags & UTRACE_EVENT_SIGNAL_ALL)
-	    && (tsk->utrace_flags & (UTRACE_ACTION_SINGLESTEP
-				     | UTRACE_ACTION_BLOCKSTEP)))
+	if ((tsk_utrace_flags(tsk) & UTRACE_EVENT_SIGNAL_ALL)
+	    && (tsk_utrace_flags(tsk) & (UTRACE_ACTION_SINGLESTEP
+					 | UTRACE_ACTION_BLOCKSTEP)))
 		utrace_signal_handler_singlestep(tsk, regs);
-#endif
 }
 
 

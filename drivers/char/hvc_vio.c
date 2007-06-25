@@ -31,9 +31,13 @@
 
 #include <linux/types.h>
 #include <linux/init.h>
+
 #include <asm/hvconsole.h>
 #include <asm/vio.h>
 #include <asm/prom.h>
+#include <asm/firmware.h>
+
+#include "hvc_console.h"
 
 char hvc_driver_name[] = "hvc_console";
 
@@ -47,6 +51,14 @@ static int filtered_get_chars(uint32_t vtermno, char *buf, int count)
 {
 	unsigned long got;
 	int i;
+
+	/*
+	 * Vio firmware will read up to SIZE_VIO_GET_CHARS at its own discretion
+	 * so we play safe and avoid the situation where got > count which could
+	 * overload the flip buffer.
+	 */
+	if (count < SIZE_VIO_GET_CHARS)
+		return -EAGAIN;
 
 	got = hvc_get_chars(vtermno, buf, count);
 
@@ -79,7 +91,8 @@ static int __devinit hvc_vio_probe(struct vio_dev *vdev,
 	if (!vdev || !id)
 		return -EPERM;
 
-	hp = hvc_alloc(vdev->unit_address, vdev->irq, &hvc_get_put_ops);
+	hp = hvc_alloc(vdev->unit_address, vdev->irq, &hvc_get_put_ops,
+			MAX_VIO_PUT_CHARS);
 	if (IS_ERR(hp))
 		return PTR_ERR(hp);
 	dev_set_drvdata(&vdev->dev, hp);
@@ -108,6 +121,9 @@ static int hvc_vio_init(void)
 {
 	int rc;
 
+	if (firmware_has_feature(FW_FEATURE_ISERIES))
+		return -EIO;
+
 	/* Register as a vio device to receive callbacks */
 	rc = vio_register_driver(&hvc_vio_driver);
 
@@ -129,7 +145,7 @@ static int hvc_find_vtys(void)
 
 	for (vty = of_find_node_by_name(NULL, "vty"); vty != NULL;
 			vty = of_find_node_by_name(vty, "vty")) {
-		uint32_t *vtermno;
+		const uint32_t *vtermno;
 
 		/* We have statically defined space for only a certain number
 		 * of console adapters.
@@ -137,7 +153,7 @@ static int hvc_find_vtys(void)
 		if (num_found >= MAX_NR_HVC_CONSOLES)
 			break;
 
-		vtermno = (uint32_t *)get_property(vty, "reg", NULL);
+		vtermno = get_property(vty, "reg", NULL);
 		if (!vtermno)
 			continue;
 

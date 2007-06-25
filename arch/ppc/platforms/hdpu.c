@@ -1,7 +1,4 @@
-
 /*
- * arch/ppc/platforms/hdpu_setup.c
- *
  * Board setup routines for the Sky Computers HDPU Compute Blade.
  *
  * Written by Brian Waite <waite@skycomputers.com>
@@ -15,7 +12,6 @@
  * option) any later version.
  */
 
-#include <linux/config.h>
 
 #include <linux/pci.h>
 #include <linux/delay.h>
@@ -319,11 +315,10 @@ static void __init hdpu_fixup_eth_pdata(struct platform_device *pd)
 	struct mv643xx_eth_platform_data *eth_pd;
 	eth_pd = pd->dev.platform_data;
 
-	eth_pd->port_serial_control =
-	    mv64x60_read(&bh, MV643XX_ETH_PORT_SERIAL_CONTROL_REG(pd->id) & ~1);
-
 	eth_pd->force_phy_addr = 1;
 	eth_pd->phy_addr = pd->id;
+	eth_pd->speed = SPEED_100;
+	eth_pd->duplex = DUPLEX_FULL;
 	eth_pd->tx_queue_size = 400;
 	eth_pd->rx_queue_size = 800;
 }
@@ -354,7 +349,7 @@ static void __init hdpu_fixup_cpustate_pdata(struct platform_device *pd)
 }
 #endif
 
-static int __init hdpu_platform_notify(struct device *dev)
+static int hdpu_platform_notify(struct device *dev)
 {
 	static struct {
 		char *bus_id;
@@ -664,8 +659,7 @@ static void __init hdpu_map_io(void)
 char hdpu_smp0[] = "SMP Cpu #0";
 char hdpu_smp1[] = "SMP Cpu #1";
 
-static irqreturn_t hdpu_smp_cpu0_int_handler(int irq, void *dev_id,
-					     struct pt_regs *regs)
+static irqreturn_t hdpu_smp_cpu0_int_handler(int irq, void *dev_id)
 {
 	volatile unsigned int doorbell;
 
@@ -675,22 +669,21 @@ static irqreturn_t hdpu_smp_cpu0_int_handler(int irq, void *dev_id,
 	mv64x60_write(&bh, MV64360_CPU0_DOORBELL_CLR, doorbell);
 
 	if (doorbell & 1) {
-		smp_message_recv(0, regs);
+		smp_message_recv(0);
 	}
 	if (doorbell & 2) {
-		smp_message_recv(1, regs);
+		smp_message_recv(1);
 	}
 	if (doorbell & 4) {
-		smp_message_recv(2, regs);
+		smp_message_recv(2);
 	}
 	if (doorbell & 8) {
-		smp_message_recv(3, regs);
+		smp_message_recv(3);
 	}
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t hdpu_smp_cpu1_int_handler(int irq, void *dev_id,
-					     struct pt_regs *regs)
+static irqreturn_t hdpu_smp_cpu1_int_handler(int irq, void *dev_id)
 {
 	volatile unsigned int doorbell;
 
@@ -700,16 +693,16 @@ static irqreturn_t hdpu_smp_cpu1_int_handler(int irq, void *dev_id,
 	mv64x60_write(&bh, MV64360_CPU1_DOORBELL_CLR, doorbell);
 
 	if (doorbell & 1) {
-		smp_message_recv(0, regs);
+		smp_message_recv(0);
 	}
 	if (doorbell & 2) {
-		smp_message_recv(1, regs);
+		smp_message_recv(1);
 	}
 	if (doorbell & 4) {
-		smp_message_recv(2, regs);
+		smp_message_recv(2);
 	}
 	if (doorbell & 8) {
-		smp_message_recv(3, regs);
+		smp_message_recv(3);
 	}
 	return IRQ_HANDLED;
 }
@@ -842,7 +835,7 @@ static void smp_hdpu_setup_cpu(int cpu_nr)
 		mv64x60_write(&bh, MV64360_CPU0_DOORBELL_CLR, 0xff);
 		mv64x60_write(&bh, MV64360_CPU0_DOORBELL_MASK, 0xff);
 		request_irq(60, hdpu_smp_cpu0_int_handler,
-			    SA_INTERRUPT, hdpu_smp0, 0);
+			    IRQF_DISABLED, hdpu_smp0, 0);
 	}
 
 	if (cpu_nr == 1) {
@@ -862,7 +855,7 @@ static void smp_hdpu_setup_cpu(int cpu_nr)
 		mv64x60_write(&bh, MV64360_CPU1_DOORBELL_CLR, 0x0);
 		mv64x60_write(&bh, MV64360_CPU1_DOORBELL_MASK, 0xff);
 		request_irq(28, hdpu_smp_cpu1_int_handler,
-			    SA_INTERRUPT, hdpu_smp1, 0);
+			    IRQF_DISABLED, hdpu_smp1, 0);
 	}
 
 }

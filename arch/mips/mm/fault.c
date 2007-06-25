@@ -60,6 +60,10 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long write,
 	 */
 	if (unlikely(address >= VMALLOC_START && address <= VMALLOC_END))
 		goto vmalloc_fault;
+#ifdef MODULE_START
+	if (unlikely(address >= MODULE_START && address < MODULE_END))
+		goto vmalloc_fault;
+#endif
 
 	/*
 	 * If we're in an interrupt or have no user
@@ -89,7 +93,7 @@ good_area:
 		if (!(vma->vm_flags & VM_WRITE))
 			goto bad_area;
 	} else {
-		if (!(vma->vm_flags & (VM_READ | VM_EXEC)))
+		if (!(vma->vm_flags & (VM_READ | VM_WRITE | VM_EXEC)))
 			goto bad_area;
 	}
 
@@ -157,7 +161,6 @@ no_context:
 	 * Oops. The kernel tried to access some bad page. We'll have to
 	 * terminate things with extreme prejudice.
 	 */
-
 	bust_spinlocks(1);
 
 	printk(KERN_ALERT "CPU %d Unable to handle kernel paging request at "
@@ -172,12 +175,13 @@ no_context:
  */
 out_of_memory:
 	up_read(&mm->mmap_sem);
-	if (tsk->pid == 1) {
+	if (is_init(tsk)) {
 		yield();
 		down_read(&mm->mmap_sem);
 		goto survive;
 	}
-	printk("VM: killing process %s\n", tsk->comm);
+	printk("VM: killing process %s(%d:#%u)\n",
+		tsk->comm, tsk->pid, tsk->xid);
 	if (user_mode(regs))
 		do_exit(SIGKILL);
 	goto no_context;
@@ -188,11 +192,20 @@ do_sigbus:
 	/* Kernel mode? Handle exceptions or die */
 	if (!user_mode(regs))
 		goto no_context;
-
+	else
 	/*
 	 * Send a sigbus, regardless of whether we were in kernel
 	 * or user mode.
 	 */
+#if 0
+		printk("do_page_fault() #3: sending SIGBUS to %s for "
+		       "invalid %s\n%0*lx (epc == %0*lx, ra == %0*lx)\n",
+		       tsk->comm,
+		       write ? "write access to" : "read access from",
+		       field, address,
+		       field, (unsigned long) regs->cp0_epc,
+		       field, (unsigned long) regs->regs[31]);
+#endif
 	tsk->thread.cp0_badvaddr = address;
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
@@ -201,7 +214,6 @@ do_sigbus:
 	force_sig_info(SIGBUS, &info, tsk);
 
 	return;
-
 vmalloc_fault:
 	{
 		/*

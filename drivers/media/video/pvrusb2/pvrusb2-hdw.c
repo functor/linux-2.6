@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/firmware.h>
 #include <linux/videodev2.h>
+#include <media/v4l2-common.h>
 #include <asm/semaphore.h>
 #include "pvrusb2.h"
 #include "pvrusb2-std.h"
@@ -38,9 +39,7 @@
 
 struct usb_device_id pvr2_device_table[] = {
 	[PVR2_HDW_TYPE_29XXX] = { USB_DEVICE(0x2040, 0x2900) },
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
 	[PVR2_HDW_TYPE_24XXX] = { USB_DEVICE(0x2040, 0x2400) },
-#endif
 	{ }
 };
 
@@ -48,9 +47,7 @@ MODULE_DEVICE_TABLE(usb, pvr2_device_table);
 
 static const char *pvr2_device_names[] = {
 	[PVR2_HDW_TYPE_29XXX] = "WinTV PVR USB2 Model Category 29xxxx",
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
 	[PVR2_HDW_TYPE_24XXX] = "WinTV PVR USB2 Model Category 24xxxx",
-#endif
 };
 
 struct pvr2_string_table {
@@ -58,14 +55,12 @@ struct pvr2_string_table {
 	unsigned int cnt;
 };
 
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
 // Names of other client modules to request for 24xxx model hardware
 static const char *pvr2_client_24xxx[] = {
 	"cx25840",
 	"tuner",
 	"wm8775",
 };
-#endif
 
 // Names of other client modules to request for 29xxx model hardware
 static const char *pvr2_client_29xxx[] = {
@@ -79,12 +74,10 @@ static struct pvr2_string_table pvr2_client_lists[] = {
 		pvr2_client_29xxx,
 		sizeof(pvr2_client_29xxx)/sizeof(pvr2_client_29xxx[0]),
 	},
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
 	[PVR2_HDW_TYPE_24XXX] = {
 		pvr2_client_24xxx,
 		sizeof(pvr2_client_24xxx)/sizeof(pvr2_client_24xxx[0]),
 	},
-#endif
 };
 
 static struct pvr2_hdw *unit_pointers[PVR_NUM] = {[ 0 ... PVR_NUM-1 ] = NULL};
@@ -221,11 +214,12 @@ static const struct pvr2_mpeg_ids mpeg_ids[] = {
 };
 #define MPEGDEF_COUNT (sizeof(mpeg_ids)/sizeof(mpeg_ids[0]))
 
-static const char *control_values_srate[] = {
-	[PVR2_CVAL_SRATE_48]   = "48KHz",
-	[PVR2_CVAL_SRATE_44_1] = "44.1KHz",
-};
 
+static const char *control_values_srate[] = {
+	[V4L2_MPEG_AUDIO_SAMPLING_FREQ_44100]   = "44.1 kHz",
+	[V4L2_MPEG_AUDIO_SAMPLING_FREQ_48000]   = "48 kHz",
+	[V4L2_MPEG_AUDIO_SAMPLING_FREQ_32000]   = "32 kHz",
+};
 
 
 
@@ -362,29 +356,27 @@ static int ctrl_freq_set(struct pvr2_ctrl *cptr,int m,int v)
 	return 0;
 }
 
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
-static int ctrl_hres_max_get(struct pvr2_ctrl *cptr,int *vp)
+static int ctrl_vres_max_get(struct pvr2_ctrl *cptr,int *vp)
 {
-	/* If we're dealing with a 24xxx device, force the horizontal
-	   maximum to be 720 no matter what, since we can't get the device
-	   to work properly with any other value.  Otherwise just return
-	   the normal value. */
-	*vp = cptr->info->def.type_int.max_value;
-	if (cptr->hdw->hdw_type == PVR2_HDW_TYPE_24XXX) *vp = 720;
+	/* Actual maximum depends on the video standard in effect. */
+	if (cptr->hdw->std_mask_cur & V4L2_STD_525_60) {
+		*vp = 480;
+	} else {
+		*vp = 576;
+	}
 	return 0;
 }
 
-static int ctrl_hres_min_get(struct pvr2_ctrl *cptr,int *vp)
+static int ctrl_vres_min_get(struct pvr2_ctrl *cptr,int *vp)
 {
-	/* If we're dealing with a 24xxx device, force the horizontal
-	   minimum to be 720 no matter what, since we can't get the device
-	   to work properly with any other value.  Otherwise just return
-	   the normal value. */
-	*vp = cptr->info->def.type_int.min_value;
-	if (cptr->hdw->hdw_type == PVR2_HDW_TYPE_24XXX) *vp = 720;
+	/* Actual minimum depends on device type. */
+	if (cptr->hdw->hdw_type == PVR2_HDW_TYPE_24XXX) {
+		*vp = 75;
+	} else {
+		*vp = 17;
+	}
 	return 0;
 }
-#endif
 
 static int ctrl_cx2341x_is_dirty(struct pvr2_ctrl *cptr)
 {
@@ -743,25 +735,23 @@ static const struct pvr2_ctl_info control_defs[] = {
 		.internal_id = PVR2_CID_HRES,
 		.default_value = 720,
 		DEFREF(res_hor),
-		DEFINT(320,720),
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
-		/* Hook in check for clamp on horizontal resolution in
-		   order to avoid unsolved problem involving cx25840. */
-		.get_max_value = ctrl_hres_max_get,
-		.get_min_value = ctrl_hres_min_get,
-#endif
+		DEFINT(19,720),
 	},{
 		.desc = "Vertical capture resolution",
 		.name = "resolution_ver",
 		.internal_id = PVR2_CID_VRES,
 		.default_value = 480,
 		DEFREF(res_ver),
-		DEFINT(200,625),
+		DEFINT(17,576),
+		/* Hook in check for video standard and adjust maximum
+		   depending on the standard. */
+		.get_max_value = ctrl_vres_max_get,
+		.get_min_value = ctrl_vres_min_get,
 	},{
 		.v4l_id = V4L2_CID_MPEG_AUDIO_SAMPLING_FREQ,
-		.desc = "Sample rate",
+		.default_value = V4L2_MPEG_AUDIO_SAMPLING_FREQ_48000,
+		.desc = "Audio Sampling Frequency",
 		.name = "srate",
-		.default_value = PVR2_CVAL_SRATE_48,
 		DEFREF(srate),
 		DEFENUM(control_values_srate),
 	},{
@@ -965,22 +955,18 @@ static int pvr2_upload_firmware1(struct pvr2_hdw *hdw)
 	static const char *fw_files_29xxx[] = {
 		"v4l-pvrusb2-29xxx-01.fw",
 	};
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
 	static const char *fw_files_24xxx[] = {
 		"v4l-pvrusb2-24xxx-01.fw",
 	};
-#endif
 	static const struct pvr2_string_table fw_file_defs[] = {
 		[PVR2_HDW_TYPE_29XXX] = {
 			fw_files_29xxx,
 			sizeof(fw_files_29xxx)/sizeof(fw_files_29xxx[0]),
 		},
-#ifdef CONFIG_VIDEO_PVRUSB2_24XXX
 		[PVR2_HDW_TYPE_24XXX] = {
 			fw_files_24xxx,
 			sizeof(fw_files_24xxx)/sizeof(fw_files_24xxx[0]),
 		},
-#endif
 	};
 	hdw->fw1_state = FW1_STATE_FAILED; // default result
 
@@ -1055,7 +1041,7 @@ int pvr2_upload_firmware2(struct pvr2_hdw *hdw)
 {
 	const struct firmware *fw_entry = NULL;
 	void  *fw_ptr;
-	unsigned int pipe, fw_len, fw_done;
+	unsigned int pipe, fw_len, fw_done, bcnt, icnt;
 	int actual_length;
 	int ret = 0;
 	int fwidx;
@@ -1107,11 +1093,11 @@ int pvr2_upload_firmware2(struct pvr2_hdw *hdw)
 
 	fw_len = fw_entry->size;
 
-	if (fw_len % FIRMWARE_CHUNK_SIZE) {
+	if (fw_len % sizeof(u32)) {
 		pvr2_trace(PVR2_TRACE_ERROR_LEGS,
 			   "size of %s firmware"
-			   " must be a multiple of 8192B",
-			   fw_files[fwidx]);
+			   " must be a multiple of %zu bytes",
+			   fw_files[fwidx],sizeof(u32));
 		release_firmware(fw_entry);
 		return -1;
 	}
@@ -1126,18 +1112,21 @@ int pvr2_upload_firmware2(struct pvr2_hdw *hdw)
 
 	pipe = usb_sndbulkpipe(hdw->usb_dev, PVR2_FIRMWARE_ENDPOINT);
 
-	for (fw_done = 0 ; (fw_done < fw_len) && !ret ;
-	     fw_done += FIRMWARE_CHUNK_SIZE ) {
-		int i;
-		memcpy(fw_ptr, fw_entry->data + fw_done, FIRMWARE_CHUNK_SIZE);
-		/* Usbsnoop log  shows that we must swap bytes... */
-		for (i = 0; i < FIRMWARE_CHUNK_SIZE/4 ; i++)
-			((u32 *)fw_ptr)[i] = ___swab32(((u32 *)fw_ptr)[i]);
+	fw_done = 0;
+	for (fw_done = 0; fw_done < fw_len;) {
+		bcnt = fw_len - fw_done;
+		if (bcnt > FIRMWARE_CHUNK_SIZE) bcnt = FIRMWARE_CHUNK_SIZE;
+		memcpy(fw_ptr, fw_entry->data + fw_done, bcnt);
+		/* Usbsnoop log shows that we must swap bytes... */
+		for (icnt = 0; icnt < bcnt/4 ; icnt++)
+			((u32 *)fw_ptr)[icnt] =
+				___swab32(((u32 *)fw_ptr)[icnt]);
 
-		ret |= usb_bulk_msg(hdw->usb_dev, pipe, fw_ptr,
-				    FIRMWARE_CHUNK_SIZE,
+		ret |= usb_bulk_msg(hdw->usb_dev, pipe, fw_ptr,bcnt,
 				    &actual_length, HZ);
-		ret |= (actual_length != FIRMWARE_CHUNK_SIZE);
+		ret |= (actual_length != bcnt);
+		if (ret) break;
+		fw_done += bcnt;
 	}
 
 	trace_firmware("upload of %s : %i / %i ",
@@ -1941,8 +1930,8 @@ struct pvr2_hdw *pvr2_hdw_create(struct usb_interface *intf,
 	return hdw;
  fail:
 	if (hdw) {
-		if (hdw->ctl_read_urb) usb_free_urb(hdw->ctl_read_urb);
-		if (hdw->ctl_write_urb) usb_free_urb(hdw->ctl_write_urb);
+		usb_free_urb(hdw->ctl_read_urb);
+		usb_free_urb(hdw->ctl_write_urb);
 		if (hdw->ctl_read_buffer) kfree(hdw->ctl_read_buffer);
 		if (hdw->ctl_write_buffer) kfree(hdw->ctl_write_buffer);
 		if (hdw->controls) kfree(hdw->controls);
@@ -2267,11 +2256,14 @@ static int pvr2_hdw_commit_ctl_internal(struct pvr2_hdw *hdw)
 	}
 
 	if (hdw->std_dirty ||
+	    hdw->enc_stale ||
+	    hdw->srate_dirty ||
+	    hdw->res_ver_dirty ||
+	    hdw->res_hor_dirty ||
 	    0) {
 		/* If any of this changes, then the encoder needs to be
 		   reconfigured, and we need to reset the stream. */
 		stale_subsys_mask |= (1<<PVR2_SUBSYS_B_ENC_CFG);
-		stale_subsys_mask |= hdw->subsys_stream_mask;
 	}
 
 	if (hdw->srate_dirty) {
@@ -2537,7 +2529,7 @@ void pvr2_hdw_v4l_store_minor_number(struct pvr2_hdw *hdw,int v)
 }
 
 
-static void pvr2_ctl_write_complete(struct urb *urb, struct pt_regs *regs)
+static void pvr2_ctl_write_complete(struct urb *urb)
 {
 	struct pvr2_hdw *hdw = urb->context;
 	hdw->ctl_write_pend_flag = 0;
@@ -2546,7 +2538,7 @@ static void pvr2_ctl_write_complete(struct urb *urb, struct pt_regs *regs)
 }
 
 
-static void pvr2_ctl_read_complete(struct urb *urb, struct pt_regs *regs)
+static void pvr2_ctl_read_complete(struct urb *urb)
 {
 	struct pvr2_hdw *hdw = urb->context;
 	hdw->ctl_read_pend_flag = 0;
@@ -2560,12 +2552,10 @@ static void pvr2_ctl_timeout(unsigned long data)
 	struct pvr2_hdw *hdw = (struct pvr2_hdw *)data;
 	if (hdw->ctl_write_pend_flag || hdw->ctl_read_pend_flag) {
 		hdw->ctl_timeout_flag = !0;
-		if (hdw->ctl_write_pend_flag && hdw->ctl_write_urb) {
+		if (hdw->ctl_write_pend_flag)
 			usb_unlink_urb(hdw->ctl_write_urb);
-		}
-		if (hdw->ctl_read_pend_flag && hdw->ctl_read_urb) {
+		if (hdw->ctl_read_pend_flag)
 			usb_unlink_urb(hdw->ctl_read_urb);
-		}
 	}
 }
 
@@ -3114,6 +3104,42 @@ static int pvr2_hdw_get_eeprom_addr(struct pvr2_hdw *hdw)
 		result = hdw->cmd_buffer[0];
 	} while(0); LOCK_GIVE(hdw->ctl_lock);
 	return result;
+}
+
+
+int pvr2_hdw_register_access(struct pvr2_hdw *hdw,
+			     u32 chip_id,unsigned long reg_id,
+			     int setFl,u32 *val_ptr)
+{
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	struct list_head *item;
+	struct pvr2_i2c_client *cp;
+	struct v4l2_register req;
+	int stat = 0;
+	int okFl = 0;
+
+	req.i2c_id = chip_id;
+	req.reg = reg_id;
+	if (setFl) req.val = *val_ptr;
+	mutex_lock(&hdw->i2c_list_lock); do {
+		list_for_each(item,&hdw->i2c_clients) {
+			cp = list_entry(item,struct pvr2_i2c_client,list);
+			if (cp->client->driver->id != chip_id) continue;
+			stat = pvr2_i2c_client_cmd(
+				cp,(setFl ? VIDIOC_INT_S_REGISTER :
+				    VIDIOC_INT_G_REGISTER),&req);
+			if (!setFl) *val_ptr = req.val;
+			okFl = !0;
+			break;
+		}
+	} while (0); mutex_unlock(&hdw->i2c_list_lock);
+	if (okFl) {
+		return stat;
+	}
+	return -EINVAL;
+#else
+	return -ENOSYS;
+#endif
 }
 
 

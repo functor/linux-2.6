@@ -108,7 +108,7 @@ static int i830_mmap_buffers(struct file *filp, struct vm_area_struct *vma)
 	unlock_kernel();
 
 	if (io_remap_pfn_range(vma, vma->vm_start,
-			       VM_OFFSET(vma) >> PAGE_SHIFT,
+			       vma->vm_pgoff,
 			       vma->vm_end - vma->vm_start, vma->vm_page_prot))
 		return -EAGAIN;
 	return 0;
@@ -128,7 +128,7 @@ static int i830_map_buffer(drm_buf_t * buf, struct file *filp)
 	drm_device_t *dev = priv->head->dev;
 	drm_i830_buf_priv_t *buf_priv = buf->dev_private;
 	drm_i830_private_t *dev_priv = dev->dev_private;
-	struct file_operations *old_fops;
+	const struct file_operations *old_fops;
 	unsigned long virtual;
 	int retcode = 0;
 
@@ -146,7 +146,7 @@ static int i830_map_buffer(drm_buf_t * buf, struct file *filp)
 	if (IS_ERR((void *)virtual)) {	/* ugh */
 		/* Real error */
 		DRM_ERROR("mmap error\n");
-		retcode = virtual;
+		retcode = PTR_ERR((void *)virtual);
 		buf_priv->virtual = NULL;
 	} else {
 		buf_priv->virtual = (void __user *)virtual;

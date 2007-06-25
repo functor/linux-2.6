@@ -14,12 +14,14 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/bootmem.h>
+#include <linux/ctype.h>
 #include <asm/page.h>
+#include <asm/pgtable.h>
 #include <asm/ebcdic.h>
 #include <asm/errno.h>
 #include <asm/extmem.h>
 #include <asm/cpcmd.h>
-#include <linux/ctype.h>
+#include <asm/setup.h>
 
 #define DCSS_DEBUG	/* Debug messages on/off */
 
@@ -77,14 +79,10 @@ struct dcss_segment {
 	int segcnt;
 };
 
-static DEFINE_SPINLOCK(dcss_lock);
+static DEFINE_MUTEX(dcss_lock);
 static struct list_head dcss_list = LIST_HEAD_INIT(dcss_list);
 static char *segtype_string[] = { "SW", "EW", "SR", "ER", "SN", "EN", "SC",
 					"EW/EN-MIXED" };
-
-extern struct {
-	unsigned long addr, size, type;
-} memory_chunk[MEMORY_CHUNKS];
 
 /*
  * Create the 8 bytes, ebcdic VM segment name from
@@ -117,7 +115,7 @@ segment_by_name (char *name)
 	struct list_head *l;
 	struct dcss_segment *tmp, *retval = NULL;
 
-	assert_spin_locked(&dcss_lock);
+	BUG_ON(!mutex_is_locked(&dcss_lock));
 	dcss_mkname (name, dcss_name);
 	list_for_each (l, &dcss_list) {
 		tmp = list_entry (l, struct dcss_segment, list);
@@ -142,17 +140,17 @@ dcss_diag (__u8 func, void *parameter,
 
 	rx = (unsigned long) parameter;
 	ry = (unsigned long) func;
-	__asm__ __volatile__(
+	asm volatile(
 #ifdef CONFIG_64BIT
-		"   sam31\n" // switch to 31 bit
-		"   diag    %0,%1,0x64\n"
-		"   sam64\n" // switch back to 64 bit
+		"	sam31\n"
+		"	diag	%0,%1,0x64\n"
+		"	sam64\n"
 #else
-		"   diag    %0,%1,0x64\n"
+		"	diag	%0,%1,0x64\n"
 #endif
-		"   ipm     %2\n"
-		"   srl     %2,28\n"
-		: "+d" (rx), "+d" (ry), "=d" (rc) : : "cc" );
+		"	ipm	%2\n"
+		"	srl	%2,28\n"
+		: "+d" (rx), "+d" (ry), "=d" (rc) : : "cc");
 	*ret1 = rx;
 	*ret2 = ry;
 	return rc;
@@ -192,6 +190,7 @@ query_segment_type (struct dcss_segment *seg)
 	diag_cc = dcss_diag (DCSS_SEGEXT, qin, &dummy, &vmrc);
 
 	if (diag_cc > 1) {
+		PRINT_WARN ("segment_type: diag returned error %ld\n", vmrc);
 		rc = dcss_diag_translate_rc (vmrc);
 		goto out_free;
 	}
@@ -240,65 +239,6 @@ query_segment_type (struct dcss_segment *seg)
 }
 
 /*
- * check if the given segment collides with guest storage.
- * returns 1 if this is the case, 0 if no collision was found
- */
-static int
-segment_overlaps_storage(struct dcss_segment *seg)
-{
-	int i;
-
-	for (i=0; i < MEMORY_CHUNKS && memory_chunk[i].size > 0; i++) {
-		if (memory_chunk[i].type != 0)
-			continue;
-		if ((memory_chunk[i].addr >> 20) > (seg->end >> 20))
-			continue;
-		if (((memory_chunk[i].addr + memory_chunk[i].size - 1) >> 20)
-				< (seg->start_addr >> 20))
-			continue;
-		return 1;
-	}
-	return 0;
-}
-
-/*
- * check if segment collides with other segments that are currently loaded
- * returns 1 if this is the case, 0 if no collision was found
- */
-static int
-segment_overlaps_others (struct dcss_segment *seg)
-{
-	struct list_head *l;
-	struct dcss_segment *tmp;
-
-	assert_spin_locked(&dcss_lock);
-	list_for_each(l, &dcss_list) {
-		tmp = list_entry(l, struct dcss_segment, list);
-		if ((tmp->start_addr >> 20) > (seg->end >> 20))
-			continue;
-		if ((tmp->end >> 20) < (seg->start_addr >> 20))
-			continue;
-		if (seg == tmp)
-			continue;
-		return 1;
-	}
-	return 0;
-}
-
-/*
- * check if segment exceeds the kernel mapping range (detected or set via mem=)
- * returns 1 if this is the case, 0 if segment fits into the range
- */
-static inline int
-segment_exceeds_range (struct dcss_segment *seg)
-{
-	int seg_last_pfn = (seg->end) >> PAGE_SHIFT;
-	if (seg_last_pfn > max_pfn)
-		return 1;
-	return 0;
-}
-
-/*
  * get info about a segment
  * possible return values:
  * -ENOSYS  : we are not running on VM
@@ -343,24 +283,26 @@ __segment_load (char *name, int do_nonshared, unsigned long *addr, unsigned long
 	rc = query_segment_type (seg);
 	if (rc < 0)
 		goto out_free;
-	if (segment_exceeds_range(seg)) {
-		PRINT_WARN ("segment_load: not loading segment %s - exceeds"
-				" kernel mapping range\n",name);
-		rc = -ERANGE;
+
+	rc = add_shared_memory(seg->start_addr, seg->end - seg->start_addr + 1);
+
+	switch (rc) {
+	case 0:
+		break;
+	case -ENOSPC:
+		PRINT_WARN("segment_load: not loading segment %s - overlaps "
+			   "storage/segment\n", name);
+		goto out_free;
+	case -ERANGE:
+		PRINT_WARN("segment_load: not loading segment %s - exceeds "
+			   "kernel mapping range\n", name);
+		goto out_free;
+	default:
+		PRINT_WARN("segment_load: not loading segment %s (rc: %d)\n",
+			   name, rc);
 		goto out_free;
 	}
-	if (segment_overlaps_storage(seg)) {
-		PRINT_WARN ("segment_load: not loading segment %s - overlaps"
-				" storage\n",name);
-		rc = -ENOSPC;
-		goto out_free;
-	}
-	if (segment_overlaps_others(seg)) {
-		PRINT_WARN ("segment_load: not loading segment %s - overlaps"
-				" other segments\n",name);
-		rc = -EBUSY;
-		goto out_free;
-	}
+
 	if (do_nonshared)
 		dcss_command = DCSS_LOADNSR;
 	else
@@ -374,7 +316,7 @@ __segment_load (char *name, int do_nonshared, unsigned long *addr, unsigned long
 		rc = dcss_diag_translate_rc (seg->end);
 		dcss_diag(DCSS_PURGESEG, seg->dcss_name,
 				&seg->start_addr, &seg->end);
-		goto out_free;
+		goto out_shared;
 	}
 	seg->do_nonshared = do_nonshared;
 	atomic_set(&seg->ref_count, 1);
@@ -393,6 +335,8 @@ __segment_load (char *name, int do_nonshared, unsigned long *addr, unsigned long
 				(void*)seg->start_addr, (void*)seg->end,
 				segtype_string[seg->vm_segtype]);
 	goto out;
+ out_shared:
+	remove_shared_memory(seg->start_addr, seg->end - seg->start_addr + 1);
  out_free:
 	kfree(seg);
  out:
@@ -428,7 +372,7 @@ segment_load (char *name, int do_nonshared, unsigned long *addr,
 	if (!MACHINE_IS_VM)
 		return -ENOSYS;
 
-	spin_lock (&dcss_lock);
+	mutex_lock(&dcss_lock);
 	seg = segment_by_name (name);
 	if (seg == NULL)
 		rc = __segment_load (name, do_nonshared, addr, end);
@@ -443,7 +387,7 @@ segment_load (char *name, int do_nonshared, unsigned long *addr,
 			rc    = -EPERM;
 		}
 	}
-	spin_unlock (&dcss_lock);
+	mutex_unlock(&dcss_lock);
 	return rc;
 }
 
@@ -466,7 +410,7 @@ segment_modify_shared (char *name, int do_nonshared)
 	unsigned long dummy;
 	int dcss_command, rc, diag_cc;
 
-	spin_lock (&dcss_lock);
+	mutex_lock(&dcss_lock);
 	seg = segment_by_name (name);
 	if (seg == NULL) {
 		rc = -EINVAL;
@@ -507,7 +451,7 @@ segment_modify_shared (char *name, int do_nonshared)
 		  &dummy, &dummy);
 	kfree(seg);
  out_unlock:
-	spin_unlock(&dcss_lock);
+	mutex_unlock(&dcss_lock);
 	return rc;
 }
 
@@ -525,21 +469,21 @@ segment_unload(char *name)
 	if (!MACHINE_IS_VM)
 		return;
 
-	spin_lock(&dcss_lock);
+	mutex_lock(&dcss_lock);
 	seg = segment_by_name (name);
 	if (seg == NULL) {
 		PRINT_ERR ("could not find segment %s in segment_unload, "
 				"please report to linux390@de.ibm.com\n",name);
 		goto out_unlock;
 	}
-	if (atomic_dec_return(&seg->ref_count) == 0) {
-		list_del(&seg->list);
-		dcss_diag(DCSS_PURGESEG, seg->dcss_name,
-			  &dummy, &dummy);
-		kfree(seg);
-	}
+	if (atomic_dec_return(&seg->ref_count) != 0)
+		goto out_unlock;
+	remove_shared_memory(seg->start_addr, seg->end - seg->start_addr + 1);
+	list_del(&seg->list);
+	dcss_diag(DCSS_PURGESEG, seg->dcss_name, &dummy, &dummy);
+	kfree(seg);
 out_unlock:
-	spin_unlock(&dcss_lock);
+	mutex_unlock(&dcss_lock);
 }
 
 /*
@@ -553,17 +497,18 @@ segment_save(char *name)
 	int endpfn = 0;
 	char cmd1[160];
 	char cmd2[80];
-	int i;
+	int i, response;
 
 	if (!MACHINE_IS_VM)
 		return;
 
-	spin_lock(&dcss_lock);
+	mutex_lock(&dcss_lock);
 	seg = segment_by_name (name);
 
 	if (seg == NULL) {
-		PRINT_ERR ("could not find segment %s in segment_save, please report to linux390@de.ibm.com\n",name);
-		return;
+		PRINT_ERR("could not find segment %s in segment_save, please "
+			  "report to linux390@de.ibm.com\n", name);
+		goto out;
 	}
 
 	startpfn = seg->start_addr >> PAGE_SHIFT;
@@ -576,9 +521,21 @@ segment_save(char *name)
 			segtype_string[seg->range[i].start & 0xff]);
 	}
 	sprintf(cmd2, "SAVESEG %s", name);
-	cpcmd(cmd1, NULL, 0, NULL);
-	cpcmd(cmd2, NULL, 0, NULL);
-	spin_unlock(&dcss_lock);
+	response = 0;
+	cpcmd(cmd1, NULL, 0, &response);
+	if (response) {
+		PRINT_ERR("segment_save: DEFSEG failed with response code %i\n",
+			  response);
+		goto out;
+	}
+	cpcmd(cmd2, NULL, 0, &response);
+	if (response) {
+		PRINT_ERR("segment_save: SAVESEG failed with response code %i\n",
+			  response);
+		goto out;
+	}
+out:
+	mutex_unlock(&dcss_lock);
 }
 
 EXPORT_SYMBOL(segment_load);

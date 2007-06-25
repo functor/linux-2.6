@@ -1,5 +1,5 @@
 /*
- * sound/sb_mixer.c
+ * sound/oss/sb_mixer.c
  *
  * The low level mixer driver for the Sound Blaster compatible cards.
  */
@@ -273,13 +273,13 @@ int sb_common_mixer_set(sb_devc * devc, int dev, int left, int right)
 	int regoffs;
 	unsigned char val;
 
+	if ((dev < 0) || (dev >= devc->iomap_sz))
+		return -EINVAL;
+
 	regoffs = (*devc->iomap)[dev][LEFT_CHN].regno;
 
 	if (regoffs == 0)
 		return -EINVAL;
-
-	if ((dev < 0) || (dev >= devc->iomap_sz))
-	    return -EINVAL;
 
 	val = sb_getmixer(devc, regoffs);
 	change_bits(devc, &val, dev, LEFT_CHN, left);
@@ -734,7 +734,7 @@ int sb_mixer_init(sb_devc * devc, struct module *owner)
 	if (m == -1)
 		return 0;
 
-	mixer_devs[m] = (struct mixer_operations *)kmalloc(sizeof(struct mixer_operations), GFP_KERNEL);
+	mixer_devs[m] = kmalloc(sizeof(struct mixer_operations), GFP_KERNEL);
 	if (mixer_devs[m] == NULL)
 	{
 		printk(KERN_ERR "sb_mixer: Can't allocate memory\n");

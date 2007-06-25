@@ -64,8 +64,8 @@ static int setup_blkring(struct xenbus_device *, struct blkfront_info *);
 
 static void kick_pending_request_queues(struct blkfront_info *);
 
-static irqreturn_t blkif_int(int irq, void *dev_id, struct pt_regs *ptregs);
-static void blkif_restart_queue(void *arg);
+static irqreturn_t blkif_int(int irq, void *dev_id);
+static void blkif_restart_queue(struct work_struct *work);
 static void blkif_recover(struct blkfront_info *);
 static void blkif_completion(struct blk_shadow *);
 static void blkif_free(struct blkfront_info *, int);
@@ -100,7 +100,7 @@ static int blkfront_probe(struct xenbus_device *dev,
 	info->xbdev = dev;
 	info->vdevice = vdevice;
 	info->connected = BLKIF_STATE_DISCONNECTED;
-	INIT_WORK(&info->work, blkif_restart_queue, (void *)info);
+	INIT_WORK(&info->work, blkif_restart_queue);
 
 	for (i = 0; i < BLK_RING_SIZE; i++)
 		info->shadow[i].req.id = i+1;
@@ -294,7 +294,8 @@ static void backend_changed(struct xenbus_device *dev,
  */
 static void connect(struct blkfront_info *info)
 {
-	unsigned long sectors, sector_size;
+	unsigned long long sectors;
+	unsigned long sector_size;
 	unsigned int binfo;
 	int err;
 
@@ -305,7 +306,7 @@ static void connect(struct blkfront_info *info)
 	DPRINTK("blkfront.c:connect:%s.\n", info->xbdev->otherend);
 
 	err = xenbus_gather(XBT_NIL, info->xbdev->otherend,
-			    "sectors", "%lu", &sectors,
+			    "sectors", "%llu", &sectors,
 			    "info", "%u", &binfo,
 			    "sector-size", "%lu", &sector_size,
 			    NULL);
@@ -348,7 +349,7 @@ static void blkfront_closing(struct xenbus_device *dev)
 	DPRINTK("blkfront_closing: %s removed\n", dev->nodename);
 
 	if (info->rq == NULL)
-		return;
+		goto out;
 
 	spin_lock_irqsave(&blkif_io_lock, flags);
 	/* No more blkif_request(). */
@@ -362,6 +363,7 @@ static void blkfront_closing(struct xenbus_device *dev)
 
 	xlvbd_del(info);
 
+out:
 	xenbus_frontend_closed(dev);
 }
 
@@ -418,9 +420,10 @@ static void kick_pending_request_queues(struct blkfront_info *info)
 	}
 }
 
-static void blkif_restart_queue(void *arg)
+static void blkif_restart_queue(struct work_struct *work)
 {
-	struct blkfront_info *info = (struct blkfront_info *)arg;
+	struct blkfront_info *info = container_of(work, struct blkfront_info, work);
+
 	spin_lock_irq(&blkif_io_lock);
 	if (info->connected == BLKIF_STATE_CONNECTED)
 		kick_pending_request_queues(info);
@@ -614,9 +617,9 @@ void do_blkif_request(request_queue_t *rq)
 		if (RING_FULL(&info->ring))
 			goto wait;
 
-		DPRINTK("do_blk_req %p: cmd %p, sec %lx, "
+		DPRINTK("do_blk_req %p: cmd %p, sec %llx, "
 			"(%u/%li) buffer:%p [%s]\n",
-			req, req->cmd, req->sector, req->current_nr_sectors,
+			req, req->cmd, (u64)req->sector, req->current_nr_sectors,
 			req->nr_sectors, req->buffer,
 			rq_data_dir(req) ? "write" : "read");
 
@@ -638,7 +641,7 @@ void do_blkif_request(request_queue_t *rq)
 }
 
 
-static irqreturn_t blkif_int(int irq, void *dev_id, struct pt_regs *ptregs)
+static irqreturn_t blkif_int(int irq, void *dev_id)
 {
 	struct request *req;
 	blkif_response_t *bret;

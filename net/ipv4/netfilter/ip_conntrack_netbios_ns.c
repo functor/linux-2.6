@@ -21,6 +21,7 @@
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
+#include <linux/if_addr.h>
 #include <linux/in.h>
 #include <linux/ip.h>
 #include <net/route.h>
@@ -47,7 +48,7 @@ static int help(struct sk_buff **pskb,
 	struct iphdr *iph = (*pskb)->nh.iph;
 	struct rtable *rt = (struct rtable *)(*pskb)->dst;
 	struct in_device *in_dev;
-	u_int32_t mask = 0;
+	__be32 mask = 0;
 
 	/* we're only interested in locally generated packets */
 	if ((*pskb)->sk == NULL)
@@ -77,12 +78,12 @@ static int help(struct sk_buff **pskb,
 		goto out;
 
 	exp->tuple                = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
-	exp->tuple.src.u.udp.port = ntohs(NMBD_PORT);
+	exp->tuple.src.u.udp.port = htons(NMBD_PORT);
 
 	exp->mask.src.ip          = mask;
-	exp->mask.src.u.udp.port  = 0xFFFF;
-	exp->mask.dst.ip          = 0xFFFFFFFF;
-	exp->mask.dst.u.udp.port  = 0xFFFF;
+	exp->mask.src.u.udp.port  = htons(0xFFFF);
+	exp->mask.dst.ip          = htonl(0xFFFFFFFF);
+	exp->mask.dst.u.udp.port  = htons(0xFFFF);
 	exp->mask.dst.protonum    = 0xFF;
 
 	exp->expectfn             = NULL;
@@ -114,7 +115,7 @@ static struct ip_conntrack_helper helper = {
 		.src = {
 			.u = {
 				.udp = {
-					.port	= 0xFFFF,
+					.port	= __constant_htons(0xFFFF),
 				}
 			}
 		},
@@ -127,16 +128,16 @@ static struct ip_conntrack_helper helper = {
 	.help			= help,
 };
 
-static int __init init(void)
+static int __init ip_conntrack_netbios_ns_init(void)
 {
 	helper.timeout = timeout;
 	return ip_conntrack_helper_register(&helper);
 }
 
-static void __exit fini(void)
+static void __exit ip_conntrack_netbios_ns_fini(void)
 {
 	ip_conntrack_helper_unregister(&helper);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ip_conntrack_netbios_ns_init);
+module_exit(ip_conntrack_netbios_ns_fini);

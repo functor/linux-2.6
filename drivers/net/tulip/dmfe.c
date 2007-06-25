@@ -50,7 +50,7 @@
     forget to unmap PCI mapped skbs.
 
     Alan Cox <alan@redhat.com>
-    Added new PCI identifiers provided by Clear Zhang at ALi 
+    Added new PCI identifiers provided by Clear Zhang at ALi
     for their 1563 ethernet device.
 
     TODO
@@ -298,9 +298,9 @@ static int dmfe_start_xmit(struct sk_buff *, struct DEVICE *);
 static int dmfe_stop(struct DEVICE *);
 static struct net_device_stats * dmfe_get_stats(struct DEVICE *);
 static void dmfe_set_filter_mode(struct DEVICE *);
-static struct ethtool_ops netdev_ethtool_ops;
+static const struct ethtool_ops netdev_ethtool_ops;
 static u16 read_srom_word(long ,int);
-static irqreturn_t dmfe_interrupt(int , void *, struct pt_regs *);
+static irqreturn_t dmfe_interrupt(int , void *);
 #ifdef CONFIG_NET_POLL_CONTROLLER
 static void poll_dmfe (struct net_device *dev);
 #endif
@@ -506,7 +506,7 @@ static int dmfe_open(struct DEVICE *dev)
 
 	DMFE_DBUG(0, "dmfe_open", 0);
 
-	ret = request_irq(dev->irq, &dmfe_interrupt, SA_SHIRQ, dev->name, dev);
+	ret = request_irq(dev->irq, &dmfe_interrupt, IRQF_SHARED, dev->name, dev);
 	if (ret)
 		return ret;
 
@@ -735,7 +735,7 @@ static int dmfe_stop(struct DEVICE *dev)
  *	receive the packet to upper layer, free the transmitted packet
  */
 
-static irqreturn_t dmfe_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t dmfe_interrupt(int irq, void *dev_id)
 {
 	struct DEVICE *dev = dev_id;
 	struct dmfe_board_info *db = netdev_priv(dev);
@@ -806,7 +806,7 @@ static void poll_dmfe (struct net_device *dev)
 	/* disable_irq here is not very nice, but with the lockless
 	   interrupt handler we have no other choice. */
 	disable_irq(dev->irq);
-	dmfe_interrupt (dev->irq, dev, NULL);
+	dmfe_interrupt (dev->irq, dev);
 	enable_irq(dev->irq);
 }
 #endif
@@ -1048,7 +1048,7 @@ static void netdev_get_drvinfo(struct net_device *dev,
 			dev->base_addr, dev->irq);
 }
 
-static struct ethtool_ops netdev_ethtool_ops = {
+static const struct ethtool_ops netdev_ethtool_ops = {
 	.get_drvinfo		= netdev_get_drvinfo,
 };
 
@@ -2039,7 +2039,7 @@ static int __init dmfe_init_module(void)
 	if (HPNA_NoiseFloor > 15)
 		HPNA_NoiseFloor = 0;
 
-	rc = pci_module_init(&dmfe_driver);
+	rc = pci_register_driver(&dmfe_driver);
 	if (rc < 0)
 		return rc;
 

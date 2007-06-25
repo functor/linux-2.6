@@ -31,10 +31,9 @@ static inline void __prepare_arch_switch(void)
 	 * are always kernel segments while inside the kernel. Must
 	 * happen before reload of cr3/ldt (i.e., not in __switch_to).
 	 */
-	asm volatile ( "mov %%fs,%0 ; mov %%gs,%1"
-		: "=m" (current->thread.fs),
-		  "=m" (current->thread.gs));
-	asm volatile ( "movl %0,%%fs ; movl %0,%%gs"
+	asm volatile ( "mov %%fs,%0"
+		: "=m" (current->thread.fs));
+	asm volatile ( "movl %0,%%fs"
 		: : "r" (0) );
 }
 
@@ -70,7 +69,7 @@ static inline void switch_mm(struct mm_struct *prev,
 		 * load the LDT, if the LDT is different:
 		 */
 		if (unlikely(prev->context.ldt != next->context.ldt)) {
-			/* load_LDT_nolock(&next->context, cpu) */
+			/* load_LDT_nolock(&next->context) */
 			op->cmd = MMUEXT_SET_LDT;
 			op->arg1.linear_addr = (unsigned long)next->context.ldt;
 			op->arg2.nr_ents     = next->context.size;
@@ -89,14 +88,14 @@ static inline void switch_mm(struct mm_struct *prev,
 			 * tlb flush IPI delivery. We must reload %cr3.
 			 */
 			load_cr3(next->pgd);
-			load_LDT_nolock(&next->context, cpu);
+			load_LDT_nolock(&next->context);
 		}
 	}
 #endif
 }
 
-#define deactivate_mm(tsk, mm) \
-	asm("movl %0,%%fs ; movl %0,%%gs": :"r" (0))
+#define deactivate_mm(tsk, mm)			\
+	asm("movl %0,%%fs": :"r" (0));
 
 static inline void activate_mm(struct mm_struct *prev, struct mm_struct *next)
 {

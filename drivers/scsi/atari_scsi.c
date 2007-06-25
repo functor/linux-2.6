@@ -65,7 +65,6 @@
 
 
 
-#include <linux/config.h>
 #include <linux/module.h>
 
 #define NDEBUG (0)
@@ -195,8 +194,8 @@ static int falcon_classify_cmd( Scsi_Cmnd *cmd );
 static unsigned long atari_dma_xfer_len( unsigned long wanted_len,
                                          Scsi_Cmnd *cmd, int write_flag );
 #endif
-static irqreturn_t scsi_tt_intr( int irq, void *dummy, struct pt_regs *fp);
-static irqreturn_t scsi_falcon_intr( int irq, void *dummy, struct pt_regs *fp);
+static irqreturn_t scsi_tt_intr( int irq, void *dummy);
+static irqreturn_t scsi_falcon_intr( int irq, void *dummy);
 static void falcon_release_lock_if_possible( struct NCR5380_hostdata *
                                              hostdata );
 static void falcon_get_lock( void );
@@ -239,17 +238,17 @@ static int atari_read_overruns = 0;
 #endif
 
 static int setup_can_queue = -1;
-MODULE_PARM(setup_can_queue, "i");
+module_param(setup_can_queue, int, 0);
 static int setup_cmd_per_lun = -1;
-MODULE_PARM(setup_cmd_per_lun, "i");
+module_param(setup_cmd_per_lun, int, 0);
 static int setup_sg_tablesize = -1;
-MODULE_PARM(setup_sg_tablesize, "i");
+module_param(setup_sg_tablesize, int, 0);
 #ifdef SUPPORT_TAGS
 static int setup_use_tagged_queuing = -1;
-MODULE_PARM(setup_use_tagged_queuing, "i");
+module_param(setup_use_tagged_queuing, int, 0);
 #endif
 static int setup_hostid = -1;
-MODULE_PARM(setup_hostid, "i");
+module_param(setup_hostid, int, 0);
 
 
 #if defined(CONFIG_TT_DMA_EMUL)
@@ -286,7 +285,7 @@ static int scsi_dma_is_ignored_buserr( unsigned char dma_stat )
  * end-of-DMA, both SCSI ints are triggered simultaneously, so the NCR int has
  * to clear the DMA int pending bit before it allows other level 6 interrupts.
  */
-static void scsi_dma_buserr (int irq, void *dummy, struct pt_regs *fp)
+static void scsi_dma_buserr (int irq, void *dummy)
 {
 	unsigned char	dma_stat = tt_scsi_dma.dma_ctrl;
 
@@ -315,7 +314,7 @@ static void scsi_dma_buserr (int irq, void *dummy, struct pt_regs *fp)
 #endif
 
 
-static irqreturn_t scsi_tt_intr (int irq, void *dummy, struct pt_regs *fp)
+static irqreturn_t scsi_tt_intr (int irq, void *dummy)
 {
 #ifdef REAL_DMA
 	int dma_stat;
@@ -407,7 +406,7 @@ static irqreturn_t scsi_tt_intr (int irq, void *dummy, struct pt_regs *fp)
 }
 
 
-static irqreturn_t scsi_falcon_intr (int irq, void *dummy, struct pt_regs *fp)
+static irqreturn_t scsi_falcon_intr (int irq, void *dummy)
 {
 #ifdef REAL_DMA
 	int dma_stat;

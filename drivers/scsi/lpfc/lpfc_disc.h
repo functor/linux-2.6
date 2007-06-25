@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2005 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2006 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
@@ -28,18 +28,23 @@
  * This is used by Fibre Channel protocol to support FCP.
  */
 
+/* worker thread events */
+enum lpfc_work_type {
+	LPFC_EVT_ONLINE,
+	LPFC_EVT_OFFLINE,
+	LPFC_EVT_WARM_START,
+	LPFC_EVT_KILL,
+	LPFC_EVT_ELS_RETRY,
+};
+
 /* structure used to queue event to the discovery tasklet */
 struct lpfc_work_evt {
 	struct list_head      evt_listp;
 	void                * evt_arg1;
 	void                * evt_arg2;
-	uint32_t              evt;
+	enum lpfc_work_type   evt;
 };
 
-#define LPFC_EVT_NODEV_TMO	0x1
-#define LPFC_EVT_ONLINE		0x2
-#define LPFC_EVT_OFFLINE	0x3
-#define LPFC_EVT_ELS_RETRY	0x4
 
 struct lpfc_nodelist {
 	struct list_head nlp_listp;
@@ -56,6 +61,7 @@ struct lpfc_nodelist {
 
 	uint16_t        nlp_rpi;
 	uint16_t        nlp_state;		/* state transition indicator */
+	uint16_t        nlp_prev_state;		/* state transition indicator */
 	uint16_t        nlp_xri;		/* output exchange id for RPI */
 	uint16_t        nlp_sid;		/* scsi id */
 #define NLP_NO_SID		0xffff
@@ -67,11 +73,9 @@ struct lpfc_nodelist {
 #define NLP_FCP_2_DEVICE   0x10			/* FCP-2 device */
 
 	struct timer_list   nlp_delayfunc;	/* Used for delayed ELS cmds */
-	struct timer_list   nlp_tmofunc;	/* Used for nodev tmo */
 	struct fc_rport *rport;			/* Corresponding FC transport
 						   port structure */
 	struct lpfc_hba      *nlp_phba;
-	struct lpfc_work_evt nodev_timeout_evt;
 	struct lpfc_work_evt els_retry_evt;
 	unsigned long last_ramp_up_time;        /* jiffy of last ramp up */
 	unsigned long last_q_full_time;		/* jiffy of last queue full */
@@ -95,7 +99,6 @@ struct lpfc_nodelist {
 #define NLP_LOGO_SND       0x100	/* sent LOGO request for this entry */
 #define NLP_RNID_SND       0x400	/* sent RNID request for this entry */
 #define NLP_ELS_SND_MASK   0x7e0	/* sent ELS request for this entry */
-#define NLP_NODEV_TMO      0x10000	/* nodev timeout is running for node */
 #define NLP_DELAY_TMO      0x20000	/* delay timeout is running for node */
 #define NLP_NPR_2B_DISC    0x40000	/* node is included in num_disc_nodes */
 #define NLP_RCV_PLOGI      0x80000	/* Rcv'ed PLOGI from remote system */
@@ -106,6 +109,7 @@ struct lpfc_nodelist {
 #define NLP_NPR_ADISC      0x2000000	/* Issue ADISC when dq'ed from
 					   NPR list */
 #define NLP_DELAY_REMOVE   0x4000000	/* Defer removal till end of DSM */
+#define NLP_NODEV_REMOVE   0x8000000	/* Defer removal till discovery ends */
 
 /* Defines for list searchs */
 #define NLP_SEARCH_MAPPED    0x1	/* search mapped */
@@ -161,7 +165,7 @@ struct lpfc_nodelist {
  */
 /*
  * For a Link Down, all nodes on the ADISC, PLOGI, unmapped or mapped
- * lists will receive a DEVICE_RECOVERY event. If the linkdown or nodev timers
+ * lists will receive a DEVICE_RECOVERY event. If the linkdown or devloss timers
  * expire, all effected nodes will receive a DEVICE_RM event.
  */
 /*

@@ -4,9 +4,8 @@
  *  Copyright (C) 2005 by Eric Van Hensbergen <ericvh@gmail.com>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  it under the terms of the GNU General Public License version 2
+ *  as published by the Free Software Foundation.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -30,6 +29,8 @@
 struct v9fs_fid {
 	struct list_head list;	 /* list of fids associated with a dentry */
 	struct list_head active; /* XXX - debug */
+
+	struct semaphore lock;
 
 	u32 fid;
 	unsigned char fidopen;	  /* set when fid is opened */
@@ -56,3 +57,6 @@ struct v9fs_fid *v9fs_fid_get_created(struct dentry *);
 void v9fs_fid_destroy(struct v9fs_fid *fid);
 struct v9fs_fid *v9fs_fid_create(struct v9fs_session_info *, int fid);
 int v9fs_fid_insert(struct v9fs_fid *fid, struct dentry *dentry);
+struct v9fs_fid *v9fs_fid_clone(struct dentry *dentry);
+void v9fs_fid_clunk(struct v9fs_session_info *v9ses, struct v9fs_fid *fid);
+

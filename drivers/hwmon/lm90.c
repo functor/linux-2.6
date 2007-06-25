@@ -1,7 +1,7 @@
 /*
  * lm90.c - Part of lm_sensors, Linux kernel modules for hardware
  *          monitoring
- * Copyright (C) 2003-2005  Jean Delvare <khali@linux-fr.org>
+ * Copyright (C) 2003-2006  Jean Delvare <khali@linux-fr.org>
  *
  * Based on the lm83 driver. The LM90 is a sensor chip made by National
  * Semiconductor. It reports up to two temperatures (its own plus up to
@@ -78,6 +78,8 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
+#include <linux/sysfs.h>
 
 /*
  * Addresses to scan
@@ -201,7 +203,7 @@ static struct i2c_driver lm90_driver = {
 struct lm90_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
 	int kind;
@@ -247,13 +249,13 @@ static ssize_t set_temp8(struct device *dev, struct device_attribute *devattr,
 	long val = simple_strtol(buf, NULL, 10);
 	int nr = attr->index;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	if (data->kind == adt7461)
 		data->temp8[nr] = TEMP1_TO_REG_ADT7461(val);
 	else
 		data->temp8[nr] = TEMP1_TO_REG(val);
 	i2c_smbus_write_byte_data(client, reg[nr - 1], data->temp8[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -281,7 +283,7 @@ static ssize_t set_temp11(struct device *dev, struct device_attribute *devattr,
 	long val = simple_strtol(buf, NULL, 10);
 	int nr = attr->index;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	if (data->kind == adt7461)
 		data->temp11[nr] = TEMP2_TO_REG_ADT7461(val);
 	else
@@ -290,7 +292,7 @@ static ssize_t set_temp11(struct device *dev, struct device_attribute *devattr,
 				  data->temp11[nr] >> 8);
 	i2c_smbus_write_byte_data(client, reg[(nr - 1) * 2 + 1],
 				  data->temp11[nr] & 0xff);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -311,11 +313,11 @@ static ssize_t set_temphyst(struct device *dev, struct device_attribute *dummy,
 	long val = simple_strtol(buf, NULL, 10);
 	long hyst;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	hyst = TEMP1_FROM_REG(data->temp8[3]) - val;
 	i2c_smbus_write_byte_data(client, LM90_REG_W_TCRIT_HYST,
 				  HYST_TO_REG(hyst));
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 
@@ -324,6 +326,16 @@ static ssize_t show_alarms(struct device *dev, struct device_attribute *dummy,
 {
 	struct lm90_data *data = lm90_update_device(dev);
 	return sprintf(buf, "%d\n", data->alarms);
+}
+
+static ssize_t show_alarm(struct device *dev, struct device_attribute
+			  *devattr, char *buf)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct lm90_data *data = lm90_update_device(dev);
+	int bitnr = attr->index;
+
+	return sprintf(buf, "%d\n", (data->alarms >> bitnr) & 1);
 }
 
 static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp8, NULL, 0);
@@ -343,7 +355,44 @@ static SENSOR_DEVICE_ATTR(temp2_crit, S_IWUSR | S_IRUGO, show_temp8,
 static SENSOR_DEVICE_ATTR(temp1_crit_hyst, S_IWUSR | S_IRUGO, show_temphyst,
 	set_temphyst, 3);
 static SENSOR_DEVICE_ATTR(temp2_crit_hyst, S_IRUGO, show_temphyst, NULL, 4);
+
+/* Individual alarm files */
+static SENSOR_DEVICE_ATTR(temp1_crit_alarm, S_IRUGO, show_alarm, NULL, 0);
+static SENSOR_DEVICE_ATTR(temp2_crit_alarm, S_IRUGO, show_alarm, NULL, 1);
+static SENSOR_DEVICE_ATTR(temp2_input_fault, S_IRUGO, show_alarm, NULL, 2);
+static SENSOR_DEVICE_ATTR(temp2_min_alarm, S_IRUGO, show_alarm, NULL, 3);
+static SENSOR_DEVICE_ATTR(temp2_max_alarm, S_IRUGO, show_alarm, NULL, 4);
+static SENSOR_DEVICE_ATTR(temp1_min_alarm, S_IRUGO, show_alarm, NULL, 5);
+static SENSOR_DEVICE_ATTR(temp1_max_alarm, S_IRUGO, show_alarm, NULL, 6);
+/* Raw alarm file for compatibility */
 static DEVICE_ATTR(alarms, S_IRUGO, show_alarms, NULL);
+
+static struct attribute *lm90_attributes[] = {
+	&sensor_dev_attr_temp1_input.dev_attr.attr,
+	&sensor_dev_attr_temp2_input.dev_attr.attr,
+	&sensor_dev_attr_temp1_min.dev_attr.attr,
+	&sensor_dev_attr_temp2_min.dev_attr.attr,
+	&sensor_dev_attr_temp1_max.dev_attr.attr,
+	&sensor_dev_attr_temp2_max.dev_attr.attr,
+	&sensor_dev_attr_temp1_crit.dev_attr.attr,
+	&sensor_dev_attr_temp2_crit.dev_attr.attr,
+	&sensor_dev_attr_temp1_crit_hyst.dev_attr.attr,
+	&sensor_dev_attr_temp2_crit_hyst.dev_attr.attr,
+
+	&sensor_dev_attr_temp1_crit_alarm.dev_attr.attr,
+	&sensor_dev_attr_temp2_crit_alarm.dev_attr.attr,
+	&sensor_dev_attr_temp2_input_fault.dev_attr.attr,
+	&sensor_dev_attr_temp2_min_alarm.dev_attr.attr,
+	&sensor_dev_attr_temp2_max_alarm.dev_attr.attr,
+	&sensor_dev_attr_temp1_min_alarm.dev_attr.attr,
+	&sensor_dev_attr_temp1_max_alarm.dev_attr.attr,
+	&dev_attr_alarms.attr,
+	NULL
+};
+
+static const struct attribute_group lm90_group = {
+	.attrs = lm90_attributes,
+};
 
 /* pec used for ADM1032 only */
 static ssize_t show_pec(struct device *dev, struct device_attribute *dummy,
@@ -558,7 +607,7 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 	strlcpy(new_client->name, name, I2C_NAME_SIZE);
 	data->valid = 0;
 	data->kind = kind;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -568,39 +617,25 @@ static int lm90_detect(struct i2c_adapter *adapter, int address, int kind)
 	lm90_init_client(new_client);
 
 	/* Register sysfs hooks */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &lm90_group)))
+		goto exit_detach;
+	if (new_client->flags & I2C_CLIENT_PEC) {
+		if ((err = device_create_file(&new_client->dev,
+					      &dev_attr_pec)))
+			goto exit_remove_files;
+	}
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
+		goto exit_remove_files;
 	}
-
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_input.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp2_input.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_min.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp2_min.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_max.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp2_max.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_crit.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp2_crit.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp1_crit_hyst.dev_attr);
-	device_create_file(&new_client->dev,
-			   &sensor_dev_attr_temp2_crit_hyst.dev_attr);
-	device_create_file(&new_client->dev, &dev_attr_alarms);
-
-	if (new_client->flags & I2C_CLIENT_PEC)
-		device_create_file(&new_client->dev, &dev_attr_pec);
 
 	return 0;
 
+exit_remove_files:
+	sysfs_remove_group(&new_client->dev.kobj, &lm90_group);
+	device_remove_file(&new_client->dev, &dev_attr_pec);
 exit_detach:
 	i2c_detach_client(new_client);
 exit_free:
@@ -633,6 +668,8 @@ static int lm90_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &lm90_group);
+	device_remove_file(&client->dev, &dev_attr_pec);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -646,7 +683,7 @@ static struct lm90_data *lm90_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm90_data *data = i2c_get_clientdata(client);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ * 2) || !data->valid) {
 		u8 oldh, newh, l;
@@ -692,7 +729,7 @@ static struct lm90_data *lm90_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

@@ -77,7 +77,6 @@ void copy_page(void *, void *);
 
 #define alloc_zeroed_user_highpage(vma, vaddr) alloc_page_vma(GFP_HIGHUSER | __GFP_ZERO, vma, vaddr)
 #define __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE
-
 /*
  * These are used to make use of C type-checking..
  */
@@ -145,7 +144,7 @@ static inline pgd_t __pgd(unsigned long x)
 #define __PHYSICAL_START	((unsigned long)CONFIG_PHYSICAL_START)
 #define __START_KERNEL		(__START_KERNEL_map + __PHYSICAL_START)
 #define __START_KERNEL_map	0xffffffff80000000UL
-#define __PAGE_OFFSET           0xffff880000000000UL	
+#define __PAGE_OFFSET           0xffff880000000000UL
 
 #else
 #define __PHYSICAL_START	CONFIG_PHYSICAL_START
@@ -170,6 +169,12 @@ static inline pgd_t __pgd(unsigned long x)
 
 #define KERNEL_TEXT_SIZE  (40UL*1024*1024)
 #define KERNEL_TEXT_START 0xffffffff80000000UL 
+
+#ifndef __ASSEMBLY__
+
+#include <asm/bug.h>
+
+#endif /* __ASSEMBLY__ */
 
 #define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
 

@@ -4,7 +4,6 @@
  *	(c) 1999--2000 Martin Mares <mj@ucw.cz>
  */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
@@ -95,13 +94,25 @@ static struct irq_routing_table * __init pirq_find_routing_table(void)
 	u8 *addr;
 	struct irq_routing_table *rt;
 
+#ifdef CONFIG_XEN
+	if (!is_initial_xendomain())
+		return NULL;
+#endif
 	if (pirq_table_addr) {
+#ifdef CONFIG_XEN
+		rt = pirq_check_routing_table((u8 *) isa_bus_to_virt(pirq_table_addr));
+#else
 		rt = pirq_check_routing_table((u8 *) __va(pirq_table_addr));
+#endif
 		if (rt)
 			return rt;
 		printk(KERN_WARNING "PCI: PIRQ table NOT found at pirqaddr\n");
 	}
+#ifdef CONFIG_XEN
+	for(addr = (u8 *) isa_bus_to_virt(0xf0000); addr < (u8 *) isa_bus_to_virt(0x100000); addr += 16) {
+#else
 	for(addr = (u8 *) __va(0xf0000); addr < (u8 *) __va(0x100000); addr += 16) {
+#endif
 		rt = pirq_check_routing_table(addr);
 		if (rt)
 			return rt;
@@ -198,14 +209,14 @@ static void write_config_nybble(struct pci_dev *router, unsigned offset, unsigne
  */
 static int pirq_ali_get(struct pci_dev *router, struct pci_dev *dev, int pirq)
 {
-	static unsigned char irqmap[16] = { 0, 9, 3, 10, 4, 5, 7, 6, 1, 11, 0, 12, 0, 14, 0, 15 };
+	static const unsigned char irqmap[16] = { 0, 9, 3, 10, 4, 5, 7, 6, 1, 11, 0, 12, 0, 14, 0, 15 };
 
 	return irqmap[read_config_nybble(router, 0x48, pirq-1)];
 }
 
 static int pirq_ali_set(struct pci_dev *router, struct pci_dev *dev, int pirq, int irq)
 {
-	static unsigned char irqmap[16] = { 0, 8, 0, 2, 4, 5, 7, 6, 0, 1, 3, 9, 11, 0, 13, 15 };
+	static const unsigned char irqmap[16] = { 0, 8, 0, 2, 4, 5, 7, 6, 0, 1, 3, 9, 11, 0, 13, 15 };
 	unsigned int val = irqmap[irq];
 		
 	if (val) {
@@ -256,13 +267,13 @@ static int pirq_via_set(struct pci_dev *router, struct pci_dev *dev, int pirq, i
  */
 static int pirq_via586_get(struct pci_dev *router, struct pci_dev *dev, int pirq)
 {
-	static unsigned int pirqmap[5] = { 3, 2, 5, 1, 1 };
+	static const unsigned int pirqmap[5] = { 3, 2, 5, 1, 1 };
 	return read_config_nybble(router, 0x55, pirqmap[pirq-1]);
 }
 
 static int pirq_via586_set(struct pci_dev *router, struct pci_dev *dev, int pirq, int irq)
 {
-	static unsigned int pirqmap[5] = { 3, 2, 5, 1, 1 };
+	static const unsigned int pirqmap[5] = { 3, 2, 5, 1, 1 };
 	write_config_nybble(router, 0x55, pirqmap[pirq-1], irq);
 	return 1;
 }
@@ -274,13 +285,13 @@ static int pirq_via586_set(struct pci_dev *router, struct pci_dev *dev, int pirq
  */
 static int pirq_ite_get(struct pci_dev *router, struct pci_dev *dev, int pirq)
 {
-	static unsigned char pirqmap[4] = { 1, 0, 2, 3 };
+	static const unsigned char pirqmap[4] = { 1, 0, 2, 3 };
 	return read_config_nybble(router,0x43, pirqmap[pirq-1]);
 }
 
 static int pirq_ite_set(struct pci_dev *router, struct pci_dev *dev, int pirq, int irq)
 {
-	static unsigned char pirqmap[4] = { 1, 0, 2, 3 };
+	static const unsigned char pirqmap[4] = { 1, 0, 2, 3 };
 	write_config_nybble(router, 0x43, pirqmap[pirq-1], irq);
 	return 1;
 }
@@ -505,7 +516,7 @@ static int pirq_bios_set(struct pci_dev *router, struct pci_dev *dev, int pirq, 
 
 static __init int intel_router_probe(struct irq_router *r, struct pci_dev *router, u16 device)
 {
-	static struct pci_device_id pirq_440gx[] = {
+	static struct pci_device_id __initdata pirq_440gx[] = {
 		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443GX_0) },
 		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443GX_2) },
 		{ },
@@ -594,7 +605,9 @@ static __init int via_router_probe(struct irq_router *r,
 	case PCI_DEVICE_ID_VIA_82C596:
 	case PCI_DEVICE_ID_VIA_82C686:
 	case PCI_DEVICE_ID_VIA_8231:
+	case PCI_DEVICE_ID_VIA_8233A:
 	case PCI_DEVICE_ID_VIA_8235:
+	case PCI_DEVICE_ID_VIA_8237:
 		/* FIXME: add new ones for 8233/5 */
 		r->name = "VIA";
 		r->get = pirq_via_get;
@@ -763,7 +776,7 @@ static void __init pirq_find_router(struct irq_router *r)
 	DBG(KERN_DEBUG "PCI: Attempting to find IRQ router for %04x:%04x\n",
 	    rt->rtr_vendor, rt->rtr_device);
 
-	pirq_router_dev = pci_find_slot(rt->rtr_bus, rt->rtr_devfn);
+	pirq_router_dev = pci_get_bus_and_slot(rt->rtr_bus, rt->rtr_devfn);
 	if (!pirq_router_dev) {
 		DBG(KERN_DEBUG "PCI: Interrupt router not found at "
 			"%02x:%02x\n", rt->rtr_bus, rt->rtr_devfn);
@@ -783,6 +796,8 @@ static void __init pirq_find_router(struct irq_router *r)
 		pirq_router_dev->vendor,
 		pirq_router_dev->device,
 		pci_name(pirq_router_dev));
+
+	/* The device remains referenced for the kernel lifetime */
 }
 
 static struct irq_info *pirq_get_info(struct pci_dev *dev)
@@ -869,7 +884,7 @@ static int pcibios_lookup_irq(struct pci_dev *dev, int assign)
 		for (i = 0; i < 16; i++) {
 			if (!(mask & (1 << i)))
 				continue;
-			if (pirq_penalty[i] < pirq_penalty[newirq] && can_request_irq(i, SA_SHIRQ))
+			if (pirq_penalty[i] < pirq_penalty[newirq] && can_request_irq(i, IRQF_SHARED))
 				newirq = i;
 		}
 	}
@@ -884,6 +899,7 @@ static int pcibios_lookup_irq(struct pci_dev *dev, int assign)
 	((!(pci_probe & PCI_USE_PIRQ_MASK)) || ((1 << irq) & mask)) ) {
 		DBG(" -> got IRQ %d\n", irq);
 		msg = "Found";
+		eisa_set_level_irq(irq);
 	} else if (newirq && r->set && (dev->class >> 8) != PCI_CLASS_DISPLAY_VGA) {
 		DBG(" -> assigning IRQ %d", newirq);
 		if (r->set(pirq_router_dev, dev, pirq, newirq)) {
@@ -985,10 +1001,6 @@ static void __init pcibios_fixup_irqs(void)
 							pci_name(bridge), 'A' + pin, irq);
 				}
 				if (irq >= 0) {
-					if (use_pci_vector() &&
-						!platform_legacy_irq(irq))
-						irq = IO_APIC_VECTOR(irq);
-
 					printk(KERN_INFO "PCI->APIC IRQ transform: %s[%c] -> IRQ %d\n",
 						pci_name(dev), 'A' + pin, irq);
 					dev->irq = irq;
@@ -1149,10 +1161,6 @@ static int pirq_enable_irq(struct pci_dev *dev)
 			}
 			dev = temp_dev;
 			if (irq >= 0) {
-#ifdef CONFIG_PCI_MSI
-				if (!platform_legacy_irq(irq))
-					irq = IO_APIC_VECTOR(irq);
-#endif
 				printk(KERN_INFO "PCI->APIC IRQ transform: %s[%c] -> IRQ %d\n",
 					pci_name(dev), 'A' + pin, irq);
 				dev->irq = irq;
@@ -1172,34 +1180,4 @@ static int pirq_enable_irq(struct pci_dev *dev)
 		       'A' + pin, pci_name(dev), msg);
 	}
 	return 0;
-}
-
-int pci_vector_resources(int last, int nr_released)
-{
-	int count = nr_released;
-
-	int next = last;
-	int offset = (last % 8);
-
-	while (next < FIRST_SYSTEM_VECTOR) {
-		next += 8;
-#ifdef CONFIG_X86_64
-		if (next == IA32_SYSCALL_VECTOR)
-			continue;
-#else
-		if (next == SYSCALL_VECTOR)
-			continue;
-#endif
-		count++;
-		if (next >= FIRST_SYSTEM_VECTOR) {
-			if (offset%8) {
-				next = FIRST_DEVICE_VECTOR + offset;
-				offset++;
-				continue;
-			}
-			count--;
-		}
-	}
-
-	return count;
 }

@@ -1,8 +1,7 @@
-#include <linux/config.h>
 #include <asm/asm-offsets.h>
 #include <asm-generic/vmlinux.lds.h>
 
-#undef mips		/* CPP really sucks for this job  */
+#undef mips
 #define mips mips
 OUTPUT_ARCH(mips)
 ENTRY(kernel_entry)
@@ -51,6 +50,16 @@ SECTIONS
   /* writeable */
   .data : {			/* Data */
     . = . + DATAOFFSET;		/* for CONFIG_MAPPED_KERNEL */
+    /*
+     * This ALIGN is needed as a workaround for a bug a gcc bug upto 4.1 which
+     * limits the maximum alignment to at most 32kB and results in the following
+     * warning:
+     *
+     *  CC      arch/mips/kernel/init_task.o
+     * arch/mips/kernel/init_task.c:30: warning: alignment of ‘init_thread_union’
+     * is greater than maximum object file alignment.  Using 32768
+     */
+    . = ALIGN(_PAGE_SIZE);
     *(.data.init_task)
 
     *(.data)
@@ -92,13 +101,7 @@ SECTIONS
 
   __initcall_start = .;
   .initcall.init : {
-	*(.initcall1.init)
-	*(.initcall2.init)
-	*(.initcall3.init)
-	*(.initcall4.init)
-	*(.initcall5.init)
-	*(.initcall6.init)
-	*(.initcall7.init)
+	INITCALLS
   }
   __initcall_end = .;
 
@@ -109,6 +112,7 @@ SECTIONS
     /* .exit.text is discarded at runtime, not link time, to deal with
      references from .rodata */
   .exit.text : { *(.exit.text) }
+  .exit.data : { *(.exit.data) }
   . = ALIGN(_PAGE_SIZE);
   __initramfs_start = .;
   .init.ramfs : { *(.init.ramfs) }
@@ -136,7 +140,6 @@ SECTIONS
 
   /* Sections to be discarded */
   /DISCARD/ : {
-        *(.exit.data)
         *(.exitcall.exit)
 
 	/* ABI crap starts here */
@@ -151,23 +154,13 @@ SECTIONS
 
   /* This is the MIPS specific mdebug section.  */
   .mdebug : { *(.mdebug) }
-  /* These are needed for ELF backends which have not yet been
-     converted to the new style linker.  */
-  .stab 0 : { *(.stab) }
-  .stabstr 0 : { *(.stabstr) }
-  /* DWARF debug sections.
-     Symbols in the .debug DWARF section are relative to the beginning of the
-     section so we begin .debug at 0.  It's not clear yet what needs to happen
-     for the others.   */
-  .debug          0 : { *(.debug) }
-  .debug_srcinfo  0 : { *(.debug_srcinfo) }
-  .debug_aranges  0 : { *(.debug_aranges) }
-  .debug_pubnames 0 : { *(.debug_pubnames) }
-  .debug_sfnames  0 : { *(.debug_sfnames) }
-  .line           0 : { *(.line) }
+
+  STABS_DEBUG
+
+  DWARF_DEBUG
+
   /* These must appear regardless of  .  */
   .gptab.sdata : { *(.gptab.data) *(.gptab.sdata) }
   .gptab.sbss : { *(.gptab.bss) *(.gptab.sbss) }
-  .comment : { *(.comment) }
   .note : { *(.note) }
 }

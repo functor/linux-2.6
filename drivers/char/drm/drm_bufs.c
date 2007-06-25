@@ -65,43 +65,29 @@ static drm_map_list_t *drm_find_matching_map(drm_device_t *dev,
 	return NULL;
 }
 
-/*
- * Used to allocate 32-bit handles for mappings.
- */
-#define START_RANGE 0x10000000
-#define END_RANGE 0x40000000
-
-#ifdef _LP64
-static __inline__ unsigned int HandleID(unsigned long lhandle,
-					drm_device_t *dev)
+static int drm_map_handle(drm_device_t *dev, drm_hash_item_t *hash,
+			  unsigned long user_token, int hashed_handle)
 {
-	static unsigned int map32_handle = START_RANGE;
-	unsigned int hash;
-
-	if (lhandle & 0xffffffff00000000) {
-		hash = map32_handle;
-		map32_handle += PAGE_SIZE;
-		if (map32_handle > END_RANGE)
-			map32_handle = START_RANGE;
-	} else
-		hash = lhandle;
-
-	while (1) {
-		drm_map_list_t *_entry;
-		list_for_each_entry(_entry, &dev->maplist->head, head) {
-			if (_entry->user_token == hash)
-				break;
-		}
-		if (&_entry->head == &dev->maplist->head)
-			return hash;
-
-		hash += PAGE_SIZE;
-		map32_handle += PAGE_SIZE;
-	}
-}
+	int use_hashed_handle;
+#if (BITS_PER_LONG == 64)
+	use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
+#elif (BITS_PER_LONG == 32)
+	use_hashed_handle = hashed_handle;
 #else
-# define HandleID(x,dev) (unsigned int)(x)
+#error Unsupported long size. Neither 64 nor 32 bits.
 #endif
+
+	if (!use_hashed_handle) {
+		int ret;
+		hash->key = user_token;
+		ret = drm_ht_insert_item(&dev->map_hash, hash);
+		if (ret != -EINVAL)
+			return ret;
+	}
+	return drm_ht_just_insert_please(&dev->map_hash, hash,
+					 user_token, 32 - PAGE_SHIFT - 3,
+					 PAGE_SHIFT, DRM_MAP_HASH_OFFSET);
+}
 
 /**
  * Ioctl to specify a range of memory that is available for mapping by a non-root process.
@@ -123,6 +109,8 @@ static int drm_addmap_core(drm_device_t * dev, unsigned int offset,
 	drm_map_t *map;
 	drm_map_list_t *list;
 	drm_dma_handle_t *dmah;
+	unsigned long user_token;
+	int ret;
 
 	map = drm_alloc(sizeof(*map), DRM_MEM_MAPS);
 	if (!map)
@@ -249,6 +237,8 @@ static int drm_addmap_core(drm_device_t * dev, unsigned int offset,
 
 	list = drm_alloc(sizeof(*list), DRM_MEM_MAPS);
 	if (!list) {
+		if (map->type == _DRM_REGISTERS)
+			drm_ioremapfree(map->handle, map->size, dev);
 		drm_free(map, sizeof(*map), DRM_MEM_MAPS);
 		return -EINVAL;
 	}
@@ -257,11 +247,22 @@ static int drm_addmap_core(drm_device_t * dev, unsigned int offset,
 
 	mutex_lock(&dev->struct_mutex);
 	list_add(&list->head, &dev->maplist->head);
+
 	/* Assign a 32-bit handle */
 	/* We do it here so that dev->struct_mutex protects the increment */
-	list->user_token = HandleID(map->type == _DRM_SHM
-				    ? (unsigned long)map->handle
-				    : map->offset, dev);
+	user_token = (map->type == _DRM_SHM) ? (unsigned long)map->handle :
+		map->offset;
+	ret = drm_map_handle(dev, &list->hash, user_token, 0);
+	if (ret) {
+		if (map->type == _DRM_REGISTERS)
+			drm_ioremapfree(map->handle, map->size, dev);
+		drm_free(map, sizeof(*map), DRM_MEM_MAPS);
+		drm_free(list, sizeof(*list), DRM_MEM_MAPS);
+		mutex_unlock(&dev->struct_mutex);
+		return ret;
+	}
+
+	list->user_token = list->hash.key;
 	mutex_unlock(&dev->struct_mutex);
 
 	*maplist = list;
@@ -346,6 +347,7 @@ int drm_rmmap_locked(drm_device_t *dev, drm_local_map_t *map)
 
 		if (r_list->map == map) {
 			list_del(list);
+			drm_ht_remove_key(&dev->map_hash, r_list->user_token);
 			drm_free(list, sizeof(*list), DRM_MEM_MAPS);
 			break;
 		}
@@ -386,7 +388,6 @@ int drm_rmmap_locked(drm_device_t *dev, drm_local_map_t *map)
 
 	return 0;
 }
-EXPORT_SYMBOL(drm_rmmap_locked);
 
 int drm_rmmap(drm_device_t *dev, drm_local_map_t *map)
 {
@@ -398,7 +399,6 @@ int drm_rmmap(drm_device_t *dev, drm_local_map_t *map)
 
 	return ret;
 }
-EXPORT_SYMBOL(drm_rmmap);
 
 /* The rmmap ioctl appears to be unnecessary.  All mappings are torn down on
  * the last close of the device, and this is necessary for cleanup when things
@@ -443,8 +443,10 @@ int drm_rmmap_ioctl(struct inode *inode, struct file *filp,
 		return -EINVAL;
 	}
 
-	if (!map)
+	if (!map) {
+		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
+	}
 
 	/* Register and framebuffer maps are permanent */
 	if ((map->type == _DRM_REGISTERS) || (map->type == _DRM_FRAME_BUFFER)) {
@@ -474,8 +476,7 @@ static void drm_cleanup_buf_error(drm_device_t * dev, drm_buf_entry_t * entry)
 	if (entry->seg_count) {
 		for (i = 0; i < entry->seg_count; i++) {
 			if (entry->seglist[i]) {
-				drm_free_pages(entry->seglist[i],
-					       entry->page_order, DRM_MEM_DMA);
+				drm_pci_free(dev, entry->seglist[i]);
 			}
 		}
 		drm_free(entry->seglist,
@@ -678,7 +679,7 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 	int total;
 	int page_order;
 	drm_buf_entry_t *entry;
-	unsigned long page;
+	drm_dma_handle_t *dmah;
 	drm_buf_t *buf;
 	int alignment;
 	unsigned long offset;
@@ -781,8 +782,10 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 	page_count = 0;
 
 	while (entry->buf_count < count) {
-		page = drm_alloc_pages(page_order, DRM_MEM_DMA);
-		if (!page) {
+		
+		dmah = drm_pci_alloc(dev, PAGE_SIZE << page_order, 0x1000, 0xfffffffful);
+		
+		if (!dmah) {
 			/* Set count correctly so we free the proper amount. */
 			entry->buf_count = count;
 			entry->seg_count = count;
@@ -794,13 +797,13 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 			atomic_dec(&dev->buf_alloc);
 			return -ENOMEM;
 		}
-		entry->seglist[entry->seg_count++] = page;
+		entry->seglist[entry->seg_count++] = dmah;
 		for (i = 0; i < (1 << page_order); i++) {
 			DRM_DEBUG("page %d @ 0x%08lx\n",
 				  dma->page_count + page_count,
-				  page + PAGE_SIZE * i);
+				  (unsigned long)dmah->vaddr + PAGE_SIZE * i);
 			temp_pagelist[dma->page_count + page_count++]
-			    = page + PAGE_SIZE * i;
+				= (unsigned long)dmah->vaddr + PAGE_SIZE * i;
 		}
 		for (offset = 0;
 		     offset + size <= total && entry->buf_count < count;
@@ -811,7 +814,8 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 			buf->order = order;
 			buf->used = 0;
 			buf->offset = (dma->byte_count + byte_count + offset);
-			buf->address = (void *)(page + offset);
+			buf->address = (void *)(dmah->vaddr + offset);
+			buf->bus_address = dmah->busaddr + offset;
 			buf->next = NULL;
 			buf->waiting = 0;
 			buf->pending = 0;
@@ -882,6 +886,9 @@ int drm_addbufs_pci(drm_device_t * dev, drm_buf_desc_t * request)
 
 	request->count = entry->buf_count;
 	request->size = size;
+
+	if (request->flags & _DRM_PCI_BUFFER_RO)
+		dma->flags = _DRM_DMA_USE_PCI_RO;
 
 	atomic_dec(&dev->buf_alloc);
 	return 0;
@@ -1051,7 +1058,7 @@ static int drm_addbufs_sg(drm_device_t * dev, drm_buf_desc_t * request)
 	return 0;
 }
 
-int drm_addbufs_fb(drm_device_t * dev, drm_buf_desc_t * request)
+static int drm_addbufs_fb(drm_device_t * dev, drm_buf_desc_t * request)
 {
 	drm_device_dma_t *dma = dev->dma;
 	drm_buf_entry_t *entry;
@@ -1210,7 +1217,6 @@ int drm_addbufs_fb(drm_device_t * dev, drm_buf_desc_t * request)
 	atomic_dec(&dev->buf_alloc);
 	return 0;
 }
-EXPORT_SYMBOL(drm_addbufs_fb);
 
 
 /**
@@ -1468,9 +1474,10 @@ int drm_freebufs(struct inode *inode, struct file *filp,
  * \param arg pointer to a drm_buf_map structure.
  * \return zero on success or a negative number on failure.
  *
- * Maps the AGP or SG buffer region with do_mmap(), and copies information
- * about each buffer into user space. The PCI buffers are already mapped on the
- * addbufs_pci() call.
+ * Maps the AGP, SG or PCI buffer region with do_mmap(), and copies information
+ * about each buffer into user space. For PCI buffers, it calls do_mmap() with
+ * offset equal to 0, which drm_mmap() interpretes as PCI buffers and calls
+ * drm_mmap_dma().
  */
 int drm_mapbufs(struct inode *inode, struct file *filp,
 		unsigned int cmd, unsigned long arg)

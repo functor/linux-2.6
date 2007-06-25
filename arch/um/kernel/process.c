@@ -1,410 +1,484 @@
-/* 
+/*
  * Copyright (C) 2000, 2001, 2002 Jeff Dike (jdike@karaya.com)
+ * Copyright 2003 PathScale, Inc.
  * Licensed under the GPL
  */
 
-#include <stdio.h>
-#include <unistd.h>
-#include <signal.h>
-#include <sched.h>
-#include <errno.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <setjmp.h>
-#include <sys/time.h>
-#include <sys/wait.h>
-#include <sys/mman.h>
-#include <asm/unistd.h>
-#include <asm/page.h>
+#include "linux/kernel.h"
+#include "linux/sched.h"
+#include "linux/interrupt.h"
+#include "linux/string.h"
+#include "linux/mm.h"
+#include "linux/slab.h"
+#include "linux/utsname.h"
+#include "linux/fs.h"
+#include "linux/utime.h"
+#include "linux/smp_lock.h"
+#include "linux/module.h"
+#include "linux/init.h"
+#include "linux/capability.h"
+#include "linux/vmalloc.h"
+#include "linux/spinlock.h"
+#include "linux/proc_fs.h"
+#include "linux/ptrace.h"
+#include "linux/random.h"
+#include "linux/personality.h"
+#include "asm/unistd.h"
+#include "asm/mman.h"
+#include "asm/segment.h"
+#include "asm/stat.h"
+#include "asm/pgtable.h"
+#include "asm/processor.h"
+#include "asm/tlbflush.h"
+#include "asm/uaccess.h"
+#include "asm/user.h"
 #include "user_util.h"
 #include "kern_util.h"
-#include "user.h"
-#include "process.h"
+#include "kern.h"
 #include "signal_kern.h"
-#include "signal_user.h"
-#include "sysdep/ptrace.h"
-#include "sysdep/sigcontext.h"
-#include "irq_user.h"
-#include "ptrace_user.h"
-#include "time_user.h"
 #include "init.h"
+#include "irq_user.h"
+#include "mem_user.h"
+#include "tlb.h"
+#include "frame_kern.h"
+#include "sigcontext.h"
 #include "os.h"
-#include "uml-config.h"
-#include "choose-mode.h"
 #include "mode.h"
-#ifdef UML_CONFIG_MODE_SKAS
-#include "skas.h"
-#include "skas_ptrace.h"
-#include "registers.h"
-#endif
+#include "mode_kern.h"
+#include "choose-mode.h"
+#include "um_malloc.h"
 
-void init_new_thread_stack(void *sig_stack, void (*usr1_handler)(int))
+/* This is a per-cpu array.  A processor only modifies its entry and it only
+ * cares about its entry, so it's OK if another processor is modifying its
+ * entry.
+ */
+struct cpu_task cpu_tasks[NR_CPUS] = { [0 ... NR_CPUS - 1] = { -1, NULL } };
+
+int external_pid(void *t)
 {
-	int flags = 0, pages;
+	struct task_struct *task = t ? t : current;
 
-	if(sig_stack != NULL){
-		pages = (1 << UML_CONFIG_KERNEL_STACK_ORDER);
-		set_sigstack(sig_stack, pages * page_size());
-		flags = SA_ONSTACK;
+	return(CHOOSE_MODE_PROC(external_pid_tt, external_pid_skas, task));
+}
+
+int pid_to_processor_id(int pid)
+{
+	int i;
+
+	for(i = 0; i < ncpus; i++){
+		if(cpu_tasks[i].pid == pid) return(i);
 	}
-	if(usr1_handler) set_handler(SIGUSR1, usr1_handler, flags, -1);
+	return(-1);
 }
 
-void init_new_thread_signals(int altstack)
+void free_stack(unsigned long stack, int order)
 {
-	int flags = altstack ? SA_ONSTACK : 0;
-
-	set_handler(SIGSEGV, (__sighandler_t) sig_handler, flags,
-		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGTRAP, (__sighandler_t) sig_handler, flags, 
-		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGFPE, (__sighandler_t) sig_handler, flags, 
-		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGILL, (__sighandler_t) sig_handler, flags, 
-		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGBUS, (__sighandler_t) sig_handler, flags, 
-		    SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	set_handler(SIGUSR2, (__sighandler_t) sig_handler, 
-		    flags, SIGUSR1, SIGIO, SIGWINCH, SIGALRM, SIGVTALRM, -1);
-	signal(SIGHUP, SIG_IGN);
-
-	init_irq_signals(altstack);
+	free_pages(stack, order);
 }
 
-struct tramp {
-	int (*tramp)(void *);
-	void *tramp_data;
-	unsigned long temp_stack;
-	int flags;
+unsigned long alloc_stack(int order, int atomic)
+{
+	unsigned long page;
+	gfp_t flags = GFP_KERNEL;
+
+	if (atomic)
+		flags = GFP_ATOMIC;
+	page = __get_free_pages(flags, order);
+	if(page == 0)
+		return(0);
+	stack_protections(page);
+	return(page);
+}
+
+int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
+{
 	int pid;
-};
 
-/* See above for why sigkill is here */
-
-int sigkill = SIGKILL;
-
-int outer_tramp(void *arg)
-{
-	struct tramp *t;
-	int sig = sigkill;
-
-	t = arg;
-	t->pid = clone(t->tramp, (void *) t->temp_stack + page_size()/2,
-		       t->flags, t->tramp_data);
-	if(t->pid > 0) wait_for_stop(t->pid, SIGSTOP, PTRACE_CONT, NULL);
-	kill(os_getpid(), sig);
-	_exit(0);
-}
-
-int start_fork_tramp(void *thread_arg, unsigned long temp_stack, 
-		     int clone_flags, int (*tramp)(void *))
-{
-	struct tramp arg;
-	unsigned long sp;
-	int new_pid, status, err;
-
-	/* The trampoline will run on the temporary stack */
-	sp = stack_sp(temp_stack);
-
-	clone_flags |= CLONE_FILES | SIGCHLD;
-
-	arg.tramp = tramp;
-	arg.tramp_data = thread_arg;
-	arg.temp_stack = temp_stack;
-	arg.flags = clone_flags;
-
-	/* Start the process and wait for it to kill itself */
-	new_pid = clone(outer_tramp, (void *) sp, clone_flags, &arg);
-	if(new_pid < 0)
-		return(new_pid);
-
-	CATCH_EINTR(err = waitpid(new_pid, &status, 0));
-	if(err < 0)
-		panic("Waiting for outer trampoline failed - errno = %d",
-		      errno);
-
-	if(!WIFSIGNALED(status) || (WTERMSIG(status) != SIGKILL))
-		panic("outer trampoline didn't exit with SIGKILL, "
-		      "status = %d", status);
-
-	return(arg.pid);
-}
-
-static int ptrace_child(void)
-{
-	int ret;
-	int pid = os_getpid(), ppid = getppid();
-	int sc_result;
-
-	if(ptrace(PTRACE_TRACEME, 0, 0, 0) < 0){
-		perror("ptrace");
-		os_kill_process(pid, 0);
-	}
-	os_stop_process(pid);
-
-	/*This syscall will be intercepted by the parent. Don't call more than
-	 * once, please.*/
-	sc_result = os_getpid();
-
-	if (sc_result == pid)
-		ret = 1; /*Nothing modified by the parent, we are running
-			   normally.*/
-	else if (sc_result == ppid)
-		ret = 0; /*Expected in check_ptrace and check_sysemu when they
-			   succeed in modifying the stack frame*/
-	else
-		ret = 2; /*Serious trouble! This could be caused by a bug in
-			   host 2.6 SKAS3/2.6 patch before release -V6, together
-			   with a bug in the UML code itself.*/
-	_exit(ret);
-}
-
-static int start_ptraced_child(void)
-{
-	int pid, n, status;
-	
-	pid = fork();
-	if(pid == 0)
-		ptrace_child();
-
+	current->thread.request.u.thread.proc = fn;
+	current->thread.request.u.thread.arg = arg;
+	pid = do_fork(CLONE_VM | CLONE_UNTRACED | flags, 0,
+		      &current->thread.regs, 0, NULL, NULL);
 	if(pid < 0)
-		panic("check_ptrace : fork failed, errno = %d", errno);
-	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
-	if(n < 0)
-		panic("check_ptrace : wait failed, errno = %d", errno);
-	if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGSTOP))
-		panic("check_ptrace : expected SIGSTOP, got status = %d",
-		      status);
-
+		panic("do_fork failed in kernel_thread, errno = %d", pid);
 	return(pid);
 }
 
-/* When testing for SYSEMU support, if it is one of the broken versions, we must
- * just avoid using sysemu, not panic, but only if SYSEMU features are broken.
- * So only for SYSEMU features we test mustpanic, while normal host features
- * must work anyway!*/
-static int stop_ptraced_child(int pid, int exitcode, int mustexit)
+void set_current(void *t)
 {
-	int status, n, ret = 0;
+	struct task_struct *task = t;
 
-	if(ptrace(PTRACE_CONT, pid, 0, 0) < 0)
-		panic("stop_ptraced_child : ptrace failed, errno = %d", errno);
-	CATCH_EINTR(n = waitpid(pid, &status, 0));
-	if(!WIFEXITED(status) || (WEXITSTATUS(status) != exitcode)) {
-		int exit_with = WEXITSTATUS(status);
-		if (exit_with == 2)
-			printk("check_ptrace : child exited with status 2. "
-			       "Serious trouble happening! Try updating your "
-			       "host skas patch!\nDisabling SYSEMU support.");
-		printk("check_ptrace : child exited with exitcode %d, while "
-		      "expecting %d; status 0x%x", exit_with,
-		      exitcode, status);
-		if (mustexit)
-			panic("\n");
-		else
-			printk("\n");
-		ret = -1;
-	}
-
-	return ret;
+	cpu_tasks[task_thread_info(task)->cpu] = ((struct cpu_task)
+		{ external_pid(task), task });
 }
 
-static int force_sysemu_disabled = 0;
-
-static int __init nosysemu_cmd_param(char *str, int* add)
+void *_switch_to(void *prev, void *next, void *last)
 {
-	force_sysemu_disabled = 1;
-	return 0;
+	struct task_struct *from = prev;
+	struct task_struct *to= next;
+
+	to->thread.prev_sched = from;
+	set_current(to);
+
+	do {
+		current->thread.saved_task = NULL ;
+		CHOOSE_MODE_PROC(switch_to_tt, switch_to_skas, prev, next);
+		if(current->thread.saved_task)
+			show_regs(&(current->thread.regs));
+		next= current->thread.saved_task;
+		prev= current;
+	} while(current->thread.saved_task);
+
+	return(current->thread.prev_sched);
+
 }
 
-__uml_setup("nosysemu", nosysemu_cmd_param,
-		"nosysemu\n"
-		"    Turns off syscall emulation patch for ptrace (SYSEMU) on.\n"
-		"    SYSEMU is a performance-patch introduced by Laurent Vivier. It changes\n"
-		"    behaviour of ptrace() and helps reducing host context switch rate.\n"
-		"    To make it working, you need a kernel patch for your host, too.\n"
-		"    See http://perso.wanadoo.fr/laurent.vivier/UML/ for further information.\n\n");
-
-static void __init check_sysemu(void)
+void interrupt_end(void)
 {
-	int pid, syscall, n, status, count=0;
-
-	printk("Checking syscall emulation patch for ptrace...");
-	sysemu_supported = 0;
-	pid = start_ptraced_child();
-
-	if(ptrace(PTRACE_SYSEMU, pid, 0, 0) < 0)
-		goto fail;
-
-	CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
-	if (n < 0)
-		panic("check_sysemu : wait failed, errno = %d", errno);
-	if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
-		panic("check_sysemu : expected SIGTRAP, "
-		      "got status = %d", status);
-
-	n = ptrace(PTRACE_POKEUSR, pid, PT_SYSCALL_RET_OFFSET,
-		   os_getpid());
-	if(n < 0)
-		panic("check_sysemu : failed to modify system "
-		      "call return, errno = %d", errno);
-
-	if (stop_ptraced_child(pid, 0, 0) < 0)
-		goto fail_stopped;
-
-	sysemu_supported = 1;
-	printk("OK\n");
-	set_using_sysemu(!force_sysemu_disabled);
-
-	printk("Checking advanced syscall emulation patch for ptrace...");
-	pid = start_ptraced_child();
-	while(1){
-		count++;
-		if(ptrace(PTRACE_SYSEMU_SINGLESTEP, pid, 0, 0) < 0)
-			goto fail;
-		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
-		if(n < 0)
-			panic("check_ptrace : wait failed, errno = %d", errno);
-		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP))
-			panic("check_ptrace : expected (SIGTRAP|SYSCALL_TRAP), "
-			      "got status = %d", status);
-
-		syscall = ptrace(PTRACE_PEEKUSR, pid, PT_SYSCALL_NR_OFFSET,
-				 0);
-		if(syscall == __NR_getpid){
-			if (!count)
-				panic("check_ptrace : SYSEMU_SINGLESTEP doesn't singlestep");
-			n = ptrace(PTRACE_POKEUSR, pid, PT_SYSCALL_RET_OFFSET,
-				   os_getpid());
-			if(n < 0)
-				panic("check_sysemu : failed to modify system "
-				      "call return, errno = %d", errno);
-			break;
-		}
-	}
-	if (stop_ptraced_child(pid, 0, 0) < 0)
-		goto fail_stopped;
-
-	sysemu_supported = 2;
-	printk("OK\n");
-
-	if ( !force_sysemu_disabled )
-		set_using_sysemu(sysemu_supported);
-	return;
-
-fail:
-	stop_ptraced_child(pid, 1, 0);
-fail_stopped:
-	printk("missing\n");
+	if(need_resched()) schedule();
+	if(test_tsk_thread_flag(current, TIF_SIGPENDING)) do_signal();
 }
 
-void __init check_ptrace(void)
+void release_thread(struct task_struct *task)
 {
-	int pid, syscall, n, status;
-
-	printk("Checking that ptrace can change system call numbers...");
-	pid = start_ptraced_child();
-
-	if (ptrace(PTRACE_OLDSETOPTIONS, pid, 0, (void *)PTRACE_O_TRACESYSGOOD) < 0)
-		panic("check_ptrace: PTRACE_SETOPTIONS failed, errno = %d", errno);
-
-	while(1){
-		if(ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
-			panic("check_ptrace : ptrace failed, errno = %d", 
-			      errno);
-		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
-		if(n < 0)
-			panic("check_ptrace : wait failed, errno = %d", errno);
-		if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGTRAP + 0x80))
-			panic("check_ptrace : expected SIGTRAP + 0x80, "
-			      "got status = %d", status);
-		
-		syscall = ptrace(PTRACE_PEEKUSR, pid, PT_SYSCALL_NR_OFFSET,
-				 0);
-		if(syscall == __NR_getpid){
-			n = ptrace(PTRACE_POKEUSR, pid, PT_SYSCALL_NR_OFFSET,
-				   __NR_getppid);
-			if(n < 0)
-				panic("check_ptrace : failed to modify system "
-				      "call, errno = %d", errno);
-			break;
-		}
-	}
-	stop_ptraced_child(pid, 0, 1);
-	printk("OK\n");
-	check_sysemu();
+	CHOOSE_MODE(release_thread_tt(task), release_thread_skas(task));
 }
 
-int run_kernel_thread(int (*fn)(void *), void *arg, void **jmp_ptr)
+void exit_thread(void)
 {
-	sigjmp_buf buf;
-	int n;
-
-	*jmp_ptr = &buf;
-	n = sigsetjmp(buf, 1);
-	if(n != 0)
-		return(n);
-	(*fn)(arg);
-	return(0);
+	unprotect_stack((unsigned long) current_thread);
 }
 
-void forward_pending_sigio(int target)
+void *get_current(void)
 {
-	sigset_t sigs;
-
-	if(sigpending(&sigs)) 
-		panic("forward_pending_sigio : sigpending failed");
-	if(sigismember(&sigs, SIGIO))
-		kill(target, SIGIO);
+	return(current);
 }
 
-#ifdef UML_CONFIG_MODE_SKAS
-static inline int check_skas3_ptrace_support(void)
+int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
+		unsigned long stack_top, struct task_struct * p,
+		struct pt_regs *regs)
 {
-	struct ptrace_faultinfo fi;
-	int pid, n, ret = 1;
+	int ret;
 
-	printf("Checking for the skas3 patch in the host...");
-	pid = start_ptraced_child();
+	p->thread = (struct thread_struct) INIT_THREAD;
+	ret = CHOOSE_MODE_PROC(copy_thread_tt, copy_thread_skas, nr,
+				clone_flags, sp, stack_top, p, regs);
 
-	n = ptrace(PTRACE_FAULTINFO, pid, 0, &fi);
-	if (n < 0) {
-		if(errno == EIO)
-			printf("not found\n");
-		else {
-			perror("not found");
-		}
-		ret = 0;
-	} else {
-		printf("found\n");
-	}
-
-	init_registers(pid);
-	stop_ptraced_child(pid, 1, 1);
-
-	return(ret);
-}
-
-int can_do_skas(void)
-{
-	int ret = 1;
-
-	printf("Checking for /proc/mm...");
-	if (os_access("/proc/mm", OS_ACC_W_OK) < 0) {
-		printf("not found\n");
-		ret = 0;
+	if (ret || !current->thread.forking)
 		goto out;
-	} else {
-		printf("found\n");
-	}
 
-	ret = check_skas3_ptrace_support();
+	clear_flushed_tls(p);
+
+	/*
+	 * Set a new TLS for the child thread?
+	 */
+	if (clone_flags & CLONE_SETTLS)
+		ret = arch_copy_tls(p);
+
 out:
 	return ret;
 }
-#else
-int can_do_skas(void)
+
+void initial_thread_cb(void (*proc)(void *), void *arg)
 {
+	int save_kmalloc_ok = kmalloc_ok;
+
+	kmalloc_ok = 0;
+	CHOOSE_MODE_PROC(initial_thread_cb_tt, initial_thread_cb_skas, proc,
+			 arg);
+	kmalloc_ok = save_kmalloc_ok;
+}
+
+unsigned long stack_sp(unsigned long page)
+{
+	return(page + PAGE_SIZE - sizeof(void *));
+}
+
+int current_pid(void)
+{
+	return(current->pid);
+}
+
+void default_idle(void)
+{
+	CHOOSE_MODE(uml_idle_timer(), (void) 0);
+
+	while(1){
+		/* endless idle loop with no priority at all */
+
+		/*
+		 * although we are an idle CPU, we do not want to
+		 * get into the scheduler unnecessarily.
+		 */
+		if(need_resched())
+			schedule();
+
+		idle_sleep(10);
+	}
+}
+
+void cpu_idle(void)
+{
+	CHOOSE_MODE(init_idle_tt(), init_idle_skas());
+}
+
+int page_size(void)
+{
+	return(PAGE_SIZE);
+}
+
+void *um_virt_to_phys(struct task_struct *task, unsigned long addr,
+		      pte_t *pte_out)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	pte_t ptent;
+
+	if(task->mm == NULL)
+		return(ERR_PTR(-EINVAL));
+	pgd = pgd_offset(task->mm, addr);
+	if(!pgd_present(*pgd))
+		return(ERR_PTR(-EINVAL));
+
+	pud = pud_offset(pgd, addr);
+	if(!pud_present(*pud))
+		return(ERR_PTR(-EINVAL));
+
+	pmd = pmd_offset(pud, addr);
+	if(!pmd_present(*pmd))
+		return(ERR_PTR(-EINVAL));
+
+	pte = pte_offset_kernel(pmd, addr);
+	ptent = *pte;
+	if(!pte_present(ptent))
+		return(ERR_PTR(-EINVAL));
+
+	if(pte_out != NULL)
+		*pte_out = ptent;
+	return((void *) (pte_val(ptent) & PAGE_MASK) + (addr & ~PAGE_MASK));
+}
+
+char *current_cmd(void)
+{
+#if defined(CONFIG_SMP) || defined(CONFIG_HIGHMEM)
+	return("(Unknown)");
+#else
+	void *addr = um_virt_to_phys(current, current->mm->arg_start, NULL);
+	return IS_ERR(addr) ? "(Unknown)": __va((unsigned long) addr);
+#endif
+}
+
+void force_sigbus(void)
+{
+	printk(KERN_ERR "Killing pid %d because of a lack of memory\n",
+	       current->pid);
+	lock_kernel();
+	sigaddset(&current->pending.signal, SIGBUS);
+	recalc_sigpending();
+	current->flags |= PF_SIGNALED;
+	do_exit(SIGBUS | 0x80);
+}
+
+void dump_thread(struct pt_regs *regs, struct user *u)
+{
+}
+
+void enable_hlt(void)
+{
+	panic("enable_hlt");
+}
+
+EXPORT_SYMBOL(enable_hlt);
+
+void disable_hlt(void)
+{
+	panic("disable_hlt");
+}
+
+EXPORT_SYMBOL(disable_hlt);
+
+void *um_kmalloc(int size)
+{
+	return kmalloc(size, GFP_KERNEL);
+}
+
+void *um_kmalloc_atomic(int size)
+{
+	return kmalloc(size, GFP_ATOMIC);
+}
+
+void *um_vmalloc(int size)
+{
+	return vmalloc(size);
+}
+
+void *um_vmalloc_atomic(int size)
+{
+	return __vmalloc(size, GFP_ATOMIC | __GFP_HIGHMEM, PAGE_KERNEL);
+}
+
+int __cant_sleep(void) {
+	return in_atomic() || irqs_disabled() || in_interrupt();
+	/* Is in_interrupt() really needed? */
+}
+
+unsigned long get_fault_addr(void)
+{
+	return((unsigned long) current->thread.fault_addr);
+}
+
+EXPORT_SYMBOL(get_fault_addr);
+
+void not_implemented(void)
+{
+	printk(KERN_DEBUG "Something isn't implemented in here\n");
+}
+
+EXPORT_SYMBOL(not_implemented);
+
+int user_context(unsigned long sp)
+{
+	unsigned long stack;
+
+	stack = sp & (PAGE_MASK << CONFIG_KERNEL_STACK_ORDER);
+	return(stack != (unsigned long) current_thread);
+}
+
+extern exitcall_t __uml_exitcall_begin, __uml_exitcall_end;
+
+void do_uml_exitcalls(void)
+{
+	exitcall_t *call;
+
+	call = &__uml_exitcall_end;
+	while (--call >= &__uml_exitcall_begin)
+		(*call)();
+}
+
+char *uml_strdup(char *string)
+{
+	return kstrdup(string, GFP_KERNEL);
+}
+
+int copy_to_user_proc(void __user *to, void *from, int size)
+{
+	return(copy_to_user(to, from, size));
+}
+
+int copy_from_user_proc(void *to, void __user *from, int size)
+{
+	return(copy_from_user(to, from, size));
+}
+
+int clear_user_proc(void __user *buf, int size)
+{
+	return(clear_user(buf, size));
+}
+
+int strlen_user_proc(char __user *str)
+{
+	return(strlen_user(str));
+}
+
+int smp_sigio_handler(void)
+{
+#ifdef CONFIG_SMP
+	int cpu = current_thread->cpu;
+	IPI_handler(cpu);
+	if(cpu != 0)
+		return(1);
+#endif
 	return(0);
+}
+
+int cpu(void)
+{
+	return(current_thread->cpu);
+}
+
+static atomic_t using_sysemu = ATOMIC_INIT(0);
+int sysemu_supported;
+
+void set_using_sysemu(int value)
+{
+	if (value > sysemu_supported)
+		return;
+	atomic_set(&using_sysemu, value);
+}
+
+int get_using_sysemu(void)
+{
+	return atomic_read(&using_sysemu);
+}
+
+static int proc_read_sysemu(char *buf, char **start, off_t offset, int size,int *eof, void *data)
+{
+	if (snprintf(buf, size, "%d\n", get_using_sysemu()) < size) /*No overflow*/
+		*eof = 1;
+
+	return strlen(buf);
+}
+
+static int proc_write_sysemu(struct file *file,const char __user *buf, unsigned long count,void *data)
+{
+	char tmp[2];
+
+	if (copy_from_user(tmp, buf, 1))
+		return -EFAULT;
+
+	if (tmp[0] >= '0' && tmp[0] <= '2')
+		set_using_sysemu(tmp[0] - '0');
+	return count; /*We use the first char, but pretend to write everything*/
+}
+
+int __init make_proc_sysemu(void)
+{
+	struct proc_dir_entry *ent;
+	if (!sysemu_supported)
+		return 0;
+
+	ent = create_proc_entry("sysemu", 0600, &proc_root);
+
+	if (ent == NULL)
+	{
+		printk(KERN_WARNING "Failed to register /proc/sysemu\n");
+		return(0);
+	}
+
+	ent->read_proc  = proc_read_sysemu;
+	ent->write_proc = proc_write_sysemu;
+
+	return 0;
+}
+
+late_initcall(make_proc_sysemu);
+
+int singlestepping(void * t)
+{
+	struct task_struct *task = t ? t : current;
+
+	if ( ! (task->ptrace & PT_DTRACE) )
+		return(0);
+
+	if (task->thread.singlestep_syscall)
+		return(1);
+
+	return 2;
+}
+
+/*
+ * Only x86 and x86_64 have an arch_align_stack().
+ * All other arches have "#define arch_align_stack(x) (x)"
+ * in their asm/system.h
+ * As this is included in UML from asm-um/system-generic.h,
+ * we can use it to behave as the subarch does.
+ */
+#ifndef arch_align_stack
+unsigned long arch_align_stack(unsigned long sp)
+{
+	if (!(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
+		sp -= get_random_int() % 8192;
+	return sp & ~0xf;
 }
 #endif

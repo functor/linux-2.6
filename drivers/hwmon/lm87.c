@@ -60,6 +60,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 
 /*
  * Addresses to scan
@@ -176,7 +177,7 @@ static struct i2c_driver lm87_driver = {
 struct lm87_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* In jiffies */
 
@@ -253,11 +254,11 @@ static void set_in_min(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_min[nr] = IN_TO_REG(val, data->in_scale[nr]);
 	lm87_write_value(client, nr<6 ? LM87_REG_IN_MIN(nr) :
 			 LM87_REG_AIN_MIN(nr-6), data->in_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 }
 
 static void set_in_max(struct device *dev, const char *buf, int nr)
@@ -266,11 +267,11 @@ static void set_in_max(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->in_max[nr] = IN_TO_REG(val, data->in_scale[nr]);
 	lm87_write_value(client, nr<6 ? LM87_REG_IN_MAX(nr) :
 			 LM87_REG_AIN_MAX(nr-6), data->in_max[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 }
 
 #define set_in(offset) \
@@ -327,10 +328,10 @@ static void set_temp_low(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_low[nr] = TEMP_TO_REG(val);
 	lm87_write_value(client, LM87_REG_TEMP_LOW[nr], data->temp_low[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 }
 
 static void set_temp_high(struct device *dev, const char *buf, int nr)
@@ -339,10 +340,10 @@ static void set_temp_high(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->temp_high[nr] = TEMP_TO_REG(val);
 	lm87_write_value(client, LM87_REG_TEMP_HIGH[nr], data->temp_high[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 }
 
 #define set_temp(offset) \
@@ -411,16 +412,16 @@ static void set_fan_min(struct device *dev, const char *buf, int nr)
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->fan_min[nr] = FAN_TO_REG(val,
 			    FAN_DIV_FROM_REG(data->fan_div[nr]));
 	lm87_write_value(client, LM87_REG_FAN_MIN(nr), data->fan_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 }
 
 /* Note: we save and restore the fan minimum here, because its value is
    determined in part by the fan clock divider.  This follows the principle
-   of least suprise; the user doesn't expect the fan minimum to change just
+   of least surprise; the user doesn't expect the fan minimum to change just
    because the divider changed. */
 static ssize_t set_fan_div(struct device *dev, const char *buf,
 		size_t count, int nr)
@@ -431,7 +432,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	unsigned long min;
 	u8 reg;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	min = FAN_FROM_REG(data->fan_min[nr],
 			   FAN_DIV_FROM_REG(data->fan_div[nr]));
 
@@ -441,7 +442,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	case 4: data->fan_div[nr] = 2; break;
 	case 8: data->fan_div[nr] = 3; break;
 	default:
-		up(&data->update_lock);
+		mutex_unlock(&data->update_lock);
 		return -EINVAL;
 	}
 
@@ -459,7 +460,7 @@ static ssize_t set_fan_div(struct device *dev, const char *buf,
 	data->fan_min[nr] = FAN_TO_REG(min, val);
 	lm87_write_value(client, LM87_REG_FAN_MIN(nr),
 			 data->fan_min[nr]);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return count;
 }
@@ -522,10 +523,10 @@ static ssize_t set_aout(struct device *dev, struct device_attribute *attr, const
 	struct lm87_data *data = i2c_get_clientdata(client);
 	long val = simple_strtol(buf, NULL, 10);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 	data->aout = AOUT_TO_REG(val);
 	lm87_write_value(client, LM87_REG_AOUT, data->aout);
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 	return count;
 }
 static DEVICE_ATTR(aout_output, S_IRUGO | S_IWUSR, show_aout, set_aout);
@@ -540,6 +541,78 @@ static int lm87_attach_adapter(struct i2c_adapter *adapter)
 		return 0;
 	return i2c_probe(adapter, &addr_data, lm87_detect);
 }
+
+static struct attribute *lm87_attributes[] = {
+	&dev_attr_in1_input.attr,
+	&dev_attr_in1_min.attr,
+	&dev_attr_in1_max.attr,
+	&dev_attr_in2_input.attr,
+	&dev_attr_in2_min.attr,
+	&dev_attr_in2_max.attr,
+	&dev_attr_in3_input.attr,
+	&dev_attr_in3_min.attr,
+	&dev_attr_in3_max.attr,
+	&dev_attr_in4_input.attr,
+	&dev_attr_in4_min.attr,
+	&dev_attr_in4_max.attr,
+
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp1_max.attr,
+	&dev_attr_temp1_min.attr,
+	&dev_attr_temp1_crit.attr,
+	&dev_attr_temp2_input.attr,
+	&dev_attr_temp2_max.attr,
+	&dev_attr_temp2_min.attr,
+	&dev_attr_temp2_crit.attr,
+
+	&dev_attr_alarms.attr,
+	&dev_attr_aout_output.attr,
+
+	NULL
+};
+
+static const struct attribute_group lm87_group = {
+	.attrs = lm87_attributes,
+};
+
+static struct attribute *lm87_attributes_opt[] = {
+	&dev_attr_in6_input.attr,
+	&dev_attr_in6_min.attr,
+	&dev_attr_in6_max.attr,
+
+	&dev_attr_fan1_input.attr,
+	&dev_attr_fan1_min.attr,
+	&dev_attr_fan1_div.attr,
+
+	&dev_attr_in7_input.attr,
+	&dev_attr_in7_min.attr,
+	&dev_attr_in7_max.attr,
+
+	&dev_attr_fan2_input.attr,
+	&dev_attr_fan2_min.attr,
+	&dev_attr_fan2_div.attr,
+
+	&dev_attr_temp3_input.attr,
+	&dev_attr_temp3_max.attr,
+	&dev_attr_temp3_min.attr,
+	&dev_attr_temp3_crit.attr,
+
+	&dev_attr_in0_input.attr,
+	&dev_attr_in0_min.attr,
+	&dev_attr_in0_max.attr,
+	&dev_attr_in5_input.attr,
+	&dev_attr_in5_min.attr,
+	&dev_attr_in5_max.attr,
+
+	&dev_attr_cpu0_vid.attr,
+	&dev_attr_vrm.attr,
+
+	NULL
+};
+
+static const struct attribute_group lm87_group_opt = {
+	.attrs = lm87_attributes_opt,
+};
 
 /*
  * The following function does more than just detection. If detection
@@ -589,7 +662,7 @@ static int lm87_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* We can fill in the remaining client fields */
 	strlcpy(new_client->name, "lm87", I2C_NAME_SIZE);
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -608,77 +681,90 @@ static int lm87_detect(struct i2c_adapter *adapter, int address, int kind)
 	data->in_scale[7] = 1875;
 
 	/* Register sysfs hooks */
-	data->class_dev = hwmon_device_register(&new_client->dev);
-	if (IS_ERR(data->class_dev)) {
-		err = PTR_ERR(data->class_dev);
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &lm87_group)))
 		goto exit_detach;
-	}
-
-	device_create_file(&new_client->dev, &dev_attr_in1_input);
-	device_create_file(&new_client->dev, &dev_attr_in1_min);
-	device_create_file(&new_client->dev, &dev_attr_in1_max);
-	device_create_file(&new_client->dev, &dev_attr_in2_input);
-	device_create_file(&new_client->dev, &dev_attr_in2_min);
-	device_create_file(&new_client->dev, &dev_attr_in2_max);
-	device_create_file(&new_client->dev, &dev_attr_in3_input);
-	device_create_file(&new_client->dev, &dev_attr_in3_min);
-	device_create_file(&new_client->dev, &dev_attr_in3_max);
-	device_create_file(&new_client->dev, &dev_attr_in4_input);
-	device_create_file(&new_client->dev, &dev_attr_in4_min);
-	device_create_file(&new_client->dev, &dev_attr_in4_max);
 
 	if (data->channel & CHAN_NO_FAN(0)) {
-		device_create_file(&new_client->dev, &dev_attr_in6_input);
-		device_create_file(&new_client->dev, &dev_attr_in6_min);
-		device_create_file(&new_client->dev, &dev_attr_in6_max);
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_in6_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in6_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in6_max)))
+			goto exit_remove;
 	} else {
-		device_create_file(&new_client->dev, &dev_attr_fan1_input);
-		device_create_file(&new_client->dev, &dev_attr_fan1_min);
-		device_create_file(&new_client->dev, &dev_attr_fan1_div);
-	}
-	if (data->channel & CHAN_NO_FAN(1)) {
-		device_create_file(&new_client->dev, &dev_attr_in7_input);
-		device_create_file(&new_client->dev, &dev_attr_in7_min);
-		device_create_file(&new_client->dev, &dev_attr_in7_max);
-	} else {
-		device_create_file(&new_client->dev, &dev_attr_fan2_input);
-		device_create_file(&new_client->dev, &dev_attr_fan2_min);
-		device_create_file(&new_client->dev, &dev_attr_fan2_div);
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_fan1_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan1_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan1_div)))
+			goto exit_remove;
 	}
 
-	device_create_file(&new_client->dev, &dev_attr_temp1_input);
-	device_create_file(&new_client->dev, &dev_attr_temp1_max);
-	device_create_file(&new_client->dev, &dev_attr_temp1_min);
-	device_create_file(&new_client->dev, &dev_attr_temp1_crit);
-	device_create_file(&new_client->dev, &dev_attr_temp2_input);
-	device_create_file(&new_client->dev, &dev_attr_temp2_max);
-	device_create_file(&new_client->dev, &dev_attr_temp2_min);
-	device_create_file(&new_client->dev, &dev_attr_temp2_crit);
+	if (data->channel & CHAN_NO_FAN(1)) {
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_in7_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in7_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in7_max)))
+			goto exit_remove;
+	} else {
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_fan2_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan2_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_fan2_div)))
+			goto exit_remove;
+	}
 
 	if (data->channel & CHAN_TEMP3) {
-		device_create_file(&new_client->dev, &dev_attr_temp3_input);
-		device_create_file(&new_client->dev, &dev_attr_temp3_max);
-		device_create_file(&new_client->dev, &dev_attr_temp3_min);
-		device_create_file(&new_client->dev, &dev_attr_temp3_crit);
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_max))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_temp3_crit)))
+			goto exit_remove;
 	} else {
-		device_create_file(&new_client->dev, &dev_attr_in0_input);
-		device_create_file(&new_client->dev, &dev_attr_in0_min);
-		device_create_file(&new_client->dev, &dev_attr_in0_max);
-		device_create_file(&new_client->dev, &dev_attr_in5_input);
-		device_create_file(&new_client->dev, &dev_attr_in5_min);
-		device_create_file(&new_client->dev, &dev_attr_in5_max);
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_in0_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in0_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in0_max))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in5_input))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in5_min))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_in5_max)))
+			goto exit_remove;
 	}
 
 	if (!(data->channel & CHAN_NO_VID)) {
-		device_create_file(&new_client->dev, &dev_attr_cpu0_vid);
-		device_create_file(&new_client->dev, &dev_attr_vrm);
+		if ((err = device_create_file(&new_client->dev,
+					&dev_attr_cpu0_vid))
+		 || (err = device_create_file(&new_client->dev,
+					&dev_attr_vrm)))
+			goto exit_remove;
 	}
 
-	device_create_file(&new_client->dev, &dev_attr_alarms);
-	device_create_file(&new_client->dev, &dev_attr_aout_output);
+	data->class_dev = hwmon_device_register(&new_client->dev);
+	if (IS_ERR(data->class_dev)) {
+		err = PTR_ERR(data->class_dev);
+		goto exit_remove;
+	}
 
 	return 0;
 
+exit_remove:
+	sysfs_remove_group(&new_client->dev.kobj, &lm87_group);
+	sysfs_remove_group(&new_client->dev.kobj, &lm87_group_opt);
 exit_detach:
 	i2c_detach_client(new_client);
 exit_free:
@@ -731,6 +817,8 @@ static int lm87_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &lm87_group);
+	sysfs_remove_group(&client->dev.kobj, &lm87_group_opt);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -744,7 +832,7 @@ static struct lm87_data *lm87_update_device(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm87_data *data = i2c_get_clientdata(client);
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ) || !data->valid) {
 		int i, j;
@@ -813,7 +901,7 @@ static struct lm87_data *lm87_update_device(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

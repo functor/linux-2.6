@@ -185,24 +185,6 @@ static int vfat_valid_longname(const unsigned char *name, unsigned int len)
 		return -EINVAL;
 	if (len >= 256)
 		return -ENAMETOOLONG;
-
-	/* MS-DOS "device special files" */
-	if (len == 3 || (len > 3 && name[3] == '.')) {	/* basename == 3 */
-		if (!strnicmp(name, "aux", 3) ||
-		    !strnicmp(name, "con", 3) ||
-		    !strnicmp(name, "nul", 3) ||
-		    !strnicmp(name, "prn", 3))
-			return -EINVAL;
-	}
-	if (len == 4 || (len > 4 && name[4] == '.')) {	/* basename == 4 */
-		/* "com1", "com2", ... */
-		if ('1' <= name[3] && name[3] <= '9') {
-			if (!strnicmp(name, "com", 3) ||
-			    !strnicmp(name, "lpt", 3))
-				return -EINVAL;
-		}
-	}
-
 	return 0;
 }
 
@@ -800,9 +782,9 @@ static int vfat_rmdir(struct inode *dir, struct dentry *dentry)
 	err = fat_remove_entries(dir, &sinfo);	/* and releases bh */
 	if (err)
 		goto out;
-	dir->i_nlink--;
+	drop_nlink(dir);
 
-	inode->i_nlink = 0;
+	clear_nlink(inode);
 	inode->i_mtime = inode->i_atime = CURRENT_TIME_SEC;
 	fat_detach(inode);
 out:
@@ -826,7 +808,7 @@ static int vfat_unlink(struct inode *dir, struct dentry *dentry)
 	err = fat_remove_entries(dir, &sinfo);	/* and releases bh */
 	if (err)
 		goto out;
-	inode->i_nlink = 0;
+	clear_nlink(inode);
 	inode->i_mtime = inode->i_atime = CURRENT_TIME_SEC;
 	fat_detach(inode);
 out:
@@ -855,7 +837,7 @@ static int vfat_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	if (err)
 		goto out_free;
 	dir->i_version++;
-	dir->i_nlink++;
+	inc_nlink(dir);
 
 	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
 	brelse(sinfo.bh);
@@ -948,9 +930,9 @@ static int vfat_rename(struct inode *old_dir, struct dentry *old_dentry,
 			if (err)
 				goto error_dotdot;
 		}
-		old_dir->i_nlink--;
+		drop_nlink(old_dir);
 		if (!new_inode)
- 			new_dir->i_nlink++;
+ 			inc_nlink(new_dir);
 	}
 
 	err = fat_remove_entries(old_dir, &old_sinfo);	/* and releases bh */
@@ -965,10 +947,9 @@ static int vfat_rename(struct inode *old_dir, struct dentry *old_dentry,
 		mark_inode_dirty(old_dir);
 
 	if (new_inode) {
+		drop_nlink(new_inode);
 		if (is_dir)
-			new_inode->i_nlink -= 2;
-		else
-			new_inode->i_nlink--;
+			drop_nlink(new_inode);
 		new_inode->i_ctime = ts;
 	}
 out:
@@ -1023,6 +1004,7 @@ static struct inode_operations vfat_dir_inode_operations = {
 	.rmdir		= vfat_rmdir,
 	.rename		= vfat_rename,
 	.setattr	= fat_notify_change,
+	.getattr	= fat_getattr,
 };
 
 static int vfat_fill_super(struct super_block *sb, void *data, int silent)
@@ -1041,11 +1023,12 @@ static int vfat_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 }
 
-static struct super_block *vfat_get_sb(struct file_system_type *fs_type,
-				       int flags, const char *dev_name,
-				       void *data)
+static int vfat_get_sb(struct file_system_type *fs_type,
+		       int flags, const char *dev_name,
+		       void *data, struct vfsmount *mnt)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, vfat_fill_super);
+	return get_sb_bdev(fs_type, flags, dev_name, data, vfat_fill_super,
+			   mnt);
 }
 
 static struct file_system_type vfat_fs_type = {

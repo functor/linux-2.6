@@ -1,5 +1,5 @@
 /*
- * sound/ad1848.c
+ * sound/oss/ad1848.c
  *
  * The low level driver for the AD1848/CS4248 codec chip which
  * is used for example in the MS Sound System.
@@ -41,7 +41,6 @@
  *		Tested. Believed fully functional.
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -196,6 +195,7 @@ static void     ad1848_halt(int dev);
 static void     ad1848_halt_input(int dev);
 static void     ad1848_halt_output(int dev);
 static void     ad1848_trigger(int dev, int bits);
+static irqreturn_t adintr(int irq, void *dev_id);
 
 #ifndef EXCLUDE_TIMERS
 static int ad1848_tmr_install(int dev);
@@ -1992,7 +1992,7 @@ int ad1848_init (char *name, struct resource *ports, int irq, int dma_playback,
 			devc->audio_flags |= DMA_DUPLEX;
 	}
 
-	portc = (ad1848_port_info *) kmalloc(sizeof(ad1848_port_info), GFP_KERNEL);
+	portc = kmalloc(sizeof(ad1848_port_info), GFP_KERNEL);
 	if(portc==NULL) {
 		release_region(devc->base, 4);
 		return -1;
@@ -2026,7 +2026,8 @@ int ad1848_init (char *name, struct resource *ports, int irq, int dma_playback,
 	if (irq > 0)
 	{
 		devc->dev_no = my_dev;
-		if (request_irq(devc->irq, adintr, 0, devc->name, (void *)my_dev) < 0)
+		if (request_irq(devc->irq, adintr, 0, devc->name,
+				(void *)(long)my_dev) < 0)
 		{
 			printk(KERN_WARNING "ad1848: Unable to allocate IRQ\n");
 			/* Don't free it either then.. */
@@ -2175,7 +2176,7 @@ void ad1848_unload(int io_base, int irq, int dma_playback, int dma_capture, int 
 		if (!share_dma)
 		{
 			if (devc->irq > 0) /* There is no point in freeing irq, if it wasn't allocated */
-				free_irq(devc->irq, (void *)devc->dev_no);
+				free_irq(devc->irq, (void *)(long)devc->dev_no);
 
 			sound_free_dma(dma_playback);
 
@@ -2195,7 +2196,7 @@ void ad1848_unload(int io_base, int irq, int dma_playback, int dma_capture, int 
 		printk(KERN_ERR "ad1848: Can't find device to be unloaded. Base=%x\n", io_base);
 }
 
-irqreturn_t adintr(int irq, void *dev_id, struct pt_regs *dummy)
+static irqreturn_t adintr(int irq, void *dev_id)
 {
 	unsigned char status;
 	ad1848_info *devc;
@@ -2204,7 +2205,7 @@ irqreturn_t adintr(int irq, void *dev_id, struct pt_regs *dummy)
 	unsigned char c930_stat = 0;
 	int cnt = 0;
 
-	dev = (int)dev_id;
+	dev = (long)dev_id;
 	devc = (ad1848_info *) audio_devs[dev]->devc;
 
 interrupt_again:		/* Jump back here if int status doesn't reset */
@@ -2802,7 +2803,6 @@ EXPORT_SYMBOL(ad1848_detect);
 EXPORT_SYMBOL(ad1848_init);
 EXPORT_SYMBOL(ad1848_unload);
 EXPORT_SYMBOL(ad1848_control);
-EXPORT_SYMBOL(adintr);
 EXPORT_SYMBOL(probe_ms_sound);
 EXPORT_SYMBOL(attach_ms_sound);
 EXPORT_SYMBOL(unload_ms_sound);
@@ -2900,7 +2900,8 @@ static struct pnp_dev *activate_dev(char *devname, char *resname, struct pnp_dev
 	return(dev);
 }
 
-static struct pnp_dev *ad1848_init_generic(struct pnp_card *bus, struct address_info *hw_config, int slot)
+static struct pnp_dev __init *ad1848_init_generic(struct pnp_card *bus,
+				struct address_info *hw_config, int slot)
 {
 
 	/* Configure Audio device */

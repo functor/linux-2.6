@@ -128,12 +128,14 @@ static struct hc_driver ohci_ep93xx_hc_driver = {
 	.flags			= HCD_USB11 | HCD_MEMORY,
 	.start			= ohci_ep93xx_start,
 	.stop			= ohci_stop,
+	.shutdown		= ohci_shutdown,
 	.urb_enqueue		= ohci_urb_enqueue,
 	.urb_dequeue		= ohci_urb_dequeue,
 	.endpoint_disable	= ohci_endpoint_disable,
 	.get_frame_number	= ohci_get_frame,
 	.hub_status_data	= ohci_hub_status_data,
 	.hub_control		= ohci_hub_control,
+	.hub_irq_enable		= ohci_rhsc_enable,
 #ifdef CONFIG_PM
 	.bus_suspend		= ohci_bus_suspend,
 	.bus_resume		= ohci_bus_resume,
@@ -167,7 +169,7 @@ static int ohci_hcd_ep93xx_drv_remove(struct platform_device *pdev)
 static int ohci_hcd_ep93xx_drv_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
-	struct ochi_hcd *ohci = hcd_to_ohci(hcd);
+	struct ohci_hcd *ohci = hcd_to_ohci(hcd);
 
 	if (time_before(jiffies, ohci->next_statechange))
 		msleep(5);
@@ -202,6 +204,7 @@ static int ohci_hcd_ep93xx_drv_resume(struct platform_device *pdev)
 static struct platform_driver ohci_hcd_ep93xx_driver = {
 	.probe		= ohci_hcd_ep93xx_drv_probe,
 	.remove		= ohci_hcd_ep93xx_drv_remove,
+	.shutdown	= usb_hcd_platform_shutdown,
 #ifdef CONFIG_PM
 	.suspend	= ohci_hcd_ep93xx_drv_suspend,
 	.resume		= ohci_hcd_ep93xx_drv_resume,

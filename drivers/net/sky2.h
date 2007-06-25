@@ -4,6 +4,8 @@
 #ifndef _SKY2_H
 #define _SKY2_H
 
+#define ETH_JUMBO_MTU		9000	/* Maximum MTU supported */
+
 /* PCI config registers */
 enum {
 	PCI_DEV_REG1	= 0x40,
@@ -214,6 +216,8 @@ enum csr_regs {
 enum {
 	Y2_VMAIN_AVAIL	= 1<<17,/* VMAIN available (YUKON-2 only) */
 	Y2_VAUX_AVAIL	= 1<<16,/* VAUX available (YUKON-2 only) */
+	Y2_HW_WOL_ON	= 1<<15,/* HW WOL On  (Yukon-EC Ultra A1 only) */
+	Y2_HW_WOL_OFF	= 1<<14,/* HW WOL On  (Yukon-EC Ultra A1 only) */
 	Y2_ASF_ENABLE	= 1<<13,/* ASF Unit Enable (YUKON-2 only) */
 	Y2_ASF_DISABLE	= 1<<12,/* ASF Unit Disable (YUKON-2 only) */
 	Y2_CLK_RUN_ENA	= 1<<11,/* CLK_RUN Enable  (YUKON-2 only) */
@@ -278,13 +282,11 @@ enum {
 	Y2_IS_CHK_TXS1	= 1<<1,		/* Descriptor error TXS 1 */
 	Y2_IS_CHK_TXA1	= 1<<0,		/* Descriptor error TXA 1 */
 
-	Y2_IS_BASE	= Y2_IS_HW_ERR | Y2_IS_STAT_BMU |
-			  Y2_IS_POLL_CHK | Y2_IS_TWSI_RDY |
-			  Y2_IS_IRQ_SW | Y2_IS_TIMINT,
-	Y2_IS_PORT_1	= Y2_IS_IRQ_PHY1 | Y2_IS_IRQ_MAC1 |
-			  Y2_IS_CHK_RX1 | Y2_IS_CHK_TXA1 | Y2_IS_CHK_TXS1,
-	Y2_IS_PORT_2	= Y2_IS_IRQ_PHY2 | Y2_IS_IRQ_MAC2 |
-			  Y2_IS_CHK_RX2 | Y2_IS_CHK_TXA2 | Y2_IS_CHK_TXS2,
+	Y2_IS_BASE	= Y2_IS_HW_ERR | Y2_IS_STAT_BMU,
+	Y2_IS_PORT_1	= Y2_IS_IRQ_PHY1 | Y2_IS_IRQ_MAC1
+		          | Y2_IS_CHK_TXA1 | Y2_IS_CHK_RX1,
+	Y2_IS_PORT_2	= Y2_IS_IRQ_PHY2 | Y2_IS_IRQ_MAC2
+			  | Y2_IS_CHK_TXA2 | Y2_IS_CHK_RX2,
 };
 
 /*	B2_IRQM_HWE_MSK	32 bit	IRQ Moderation HW Error Mask */
@@ -380,6 +382,14 @@ enum {
 	CHIP_REV_YU_EC_A1    = 0,  /* Chip Rev. for Yukon-EC A1/A0 */
 	CHIP_REV_YU_EC_A2    = 1,  /* Chip Rev. for Yukon-EC A2 */
 	CHIP_REV_YU_EC_A3    = 2,  /* Chip Rev. for Yukon-EC A3 */
+
+	CHIP_REV_YU_EC_U_A0  = 1,
+	CHIP_REV_YU_EC_U_A1  = 2,
+	CHIP_REV_YU_EC_U_B0  = 3,
+
+	CHIP_REV_YU_FE_A1    = 1,
+	CHIP_REV_YU_FE_A2    = 2,
+
 };
 
 /*	B2_Y2_CLK_GATE	 8 bit	Clock Gating (Yukon-2 only) */
@@ -598,7 +608,7 @@ enum {
 	PHY_ADDR_MARV	= 0,
 };
 
-#define RB_ADDR(offs, queue) (B16_RAM_REGS + (queue) + (offs))
+#define RB_ADDR(offs, queue) ((u16) B16_RAM_REGS + (queue) + (offs))
 
 
 enum {
@@ -670,6 +680,7 @@ enum {
 			  BMU_FIFO_ENA | BMU_OP_ON,
 
 	BMU_WM_DEFAULT = 0x600,
+	BMU_WM_PEX     = 0x80,
 };
 
 /* Tx BMU Control / Status Registers (Yukon-2) */
@@ -1050,7 +1061,7 @@ enum {
 	PHY_M_PC_EN_DET_PLUS	= 3<<8, /* Energy Detect Plus (Mode 2) */
 };
 
-#define PHY_M_PC_MDI_XMODE(x)	(((x)<<5) & PHY_M_PC_MDIX_MSK)
+#define PHY_M_PC_MDI_XMODE(x)	(((u16)(x)<<5) & PHY_M_PC_MDIX_MSK)
 
 enum {
 	PHY_M_PC_MAN_MDI	= 0, /* 00 = Manual MDI configuration */
@@ -1146,13 +1157,13 @@ enum {
 	PHY_M_EC_TX_TIM_CT  = 1<<1, /* RGMII Tx Timing Control */
 	PHY_M_EC_TRANS_DIS  = 1<<0, /* Transmitter Disable (88E1111 only) */};
 
-#define PHY_M_EC_M_DSC(x)	((x)<<10 & PHY_M_EC_M_DSC_MSK)
+#define PHY_M_EC_M_DSC(x)	((u16)(x)<<10 & PHY_M_EC_M_DSC_MSK)
 					/* 00=1x; 01=2x; 10=3x; 11=4x */
-#define PHY_M_EC_S_DSC(x)	((x)<<8 & PHY_M_EC_S_DSC_MSK)
+#define PHY_M_EC_S_DSC(x)	((u16)(x)<<8 & PHY_M_EC_S_DSC_MSK)
 					/* 00=dis; 01=1x; 10=2x; 11=3x */
-#define PHY_M_EC_DSC_2(x)	((x)<<9 & PHY_M_EC_M_DSC_MSK2)
+#define PHY_M_EC_DSC_2(x)	((u16)(x)<<9 & PHY_M_EC_M_DSC_MSK2)
 					/* 000=1x; 001=2x; 010=3x; 011=4x */
-#define PHY_M_EC_MAC_S(x)	((x)<<4 & PHY_M_EC_MAC_S_MSK)
+#define PHY_M_EC_MAC_S(x)	((u16)(x)<<4 & PHY_M_EC_MAC_S_MSK)
 					/* 01X=0; 110=2.5; 111=25 (MHz) */
 
 /* for Yukon-2 Gigabit Ethernet PHY (88E1112 only) */
@@ -1163,7 +1174,7 @@ enum {
 };
 /* !!! Errata in spec. (1 = disable) */
 
-#define PHY_M_PC_DSC(x)			(((x)<<12) & PHY_M_PC_DSC_MSK)
+#define PHY_M_PC_DSC(x)			(((u16)(x)<<12) & PHY_M_PC_DSC_MSK)
 											/* 100=5x; 101=6x; 110=7x; 111=8x */
 enum {
 	MAC_TX_CLK_0_MHZ	= 2,
@@ -1193,7 +1204,7 @@ enum {
 	PHY_M_LEDC_TX_C_MSB	= 1<<0, /* Tx Control (MSB, 88E1111 only) */
 };
 
-#define PHY_M_LED_PULS_DUR(x)	(((x)<<12) & PHY_M_LEDC_PULS_MSK)
+#define PHY_M_LED_PULS_DUR(x)	(((u16)(x)<<12) & PHY_M_LEDC_PULS_MSK)
 
 /*****  PHY_MARV_PHY_STAT (page 3)16 bit r/w	Polarity Control Reg. *****/
 enum {
@@ -1223,7 +1234,7 @@ enum {
 	PULS_1300MS	= 7,/* 1.3 s to 2.7 s */
 };
 
-#define PHY_M_LED_BLINK_RT(x)	(((x)<<8) & PHY_M_LEDC_BL_R_MSK)
+#define PHY_M_LED_BLINK_RT(x)	(((u16)(x)<<8) & PHY_M_LEDC_BL_R_MSK)
 
 enum {
 	BLINK_42MS	= 0,/* 42 ms */
@@ -1233,21 +1244,18 @@ enum {
 	BLINK_670MS	= 4,/* 670 ms */
 };
 
-/*****  PHY_MARV_LED_OVER	16 bit r/w	Manual LED Override Reg *****/
-#define PHY_M_LED_MO_SGMII(x)	((x)<<14) /* Bit 15..14:  SGMII AN Timer */
-										/* Bit 13..12:	reserved */
-#define PHY_M_LED_MO_DUP(x)	((x)<<10) /* Bit 11..10:  Duplex */
-#define PHY_M_LED_MO_10(x)	((x)<<8) /* Bit  9.. 8:  Link 10 */
-#define PHY_M_LED_MO_100(x)	((x)<<6) /* Bit  7.. 6:  Link 100 */
-#define PHY_M_LED_MO_1000(x)	((x)<<4) /* Bit  5.. 4:  Link 1000 */
-#define PHY_M_LED_MO_RX(x)	((x)<<2) /* Bit  3.. 2:  Rx */
-#define PHY_M_LED_MO_TX(x)	((x)<<0) /* Bit  1.. 0:  Tx */
-
+/**** PHY_MARV_LED_OVER    16 bit r/w LED control */
 enum {
-	MO_LED_NORM	= 0,
-	MO_LED_BLINK	= 1,
-	MO_LED_OFF	= 2,
-	MO_LED_ON	= 3,
+	PHY_M_LED_MO_DUP  = 3<<10,/* Bit 11..10:  Duplex */
+	PHY_M_LED_MO_10	  = 3<<8, /* Bit  9.. 8:  Link 10 */
+	PHY_M_LED_MO_100  = 3<<6, /* Bit  7.. 6:  Link 100 */
+	PHY_M_LED_MO_1000 = 3<<4, /* Bit  5.. 4:  Link 1000 */
+	PHY_M_LED_MO_RX	  = 3<<2, /* Bit  3.. 2:  Rx */
+	PHY_M_LED_MO_TX	  = 3<<0, /* Bit  1.. 0:  Tx */
+
+	PHY_M_LED_ALL	  = PHY_M_LED_MO_DUP | PHY_M_LED_MO_10 
+			    | PHY_M_LED_MO_100 | PHY_M_LED_MO_1000
+			    | PHY_M_LED_MO_RX,
 };
 
 /*****  PHY_MARV_EXT_CTRL_2	16 bit r/w	Ext. PHY Specific Ctrl 2 *****/
@@ -1284,9 +1292,9 @@ enum {
 	PHY_M_FELP_LED0_MSK = 0xf, /* Bit  3.. 0: LED0 Mask (SPEED) */
 };
 
-#define PHY_M_FELP_LED2_CTRL(x)	(((x)<<8) & PHY_M_FELP_LED2_MSK)
-#define PHY_M_FELP_LED1_CTRL(x)	(((x)<<4) & PHY_M_FELP_LED1_MSK)
-#define PHY_M_FELP_LED0_CTRL(x)	(((x)<<0) & PHY_M_FELP_LED0_MSK)
+#define PHY_M_FELP_LED2_CTRL(x)	(((u16)(x)<<8) & PHY_M_FELP_LED2_MSK)
+#define PHY_M_FELP_LED1_CTRL(x)	(((u16)(x)<<4) & PHY_M_FELP_LED1_MSK)
+#define PHY_M_FELP_LED0_CTRL(x)	(((u16)(x)<<0) & PHY_M_FELP_LED0_MSK)
 
 enum {
 	LED_PAR_CTRL_COLX	= 0x00,
@@ -1383,24 +1391,23 @@ enum {
 	GM_SMI_CTRL	= 0x0080,	/* 16 bit r/w	SMI Control Register */
 	GM_SMI_DATA	= 0x0084,	/* 16 bit r/w	SMI Data Register */
 	GM_PHY_ADDR	= 0x0088,	/* 16 bit r/w	GPHY Address Register */
+/* MIB Counters */
+	GM_MIB_CNT_BASE	= 0x0100,	/* Base Address of MIB Counters */
+	GM_MIB_CNT_END	= 0x025C,	/* Last MIB counter */
 };
 
-/* MIB Counters */
-#define GM_MIB_CNT_BASE	0x0100		/* Base Address of MIB Counters */
-#define GM_MIB_CNT_SIZE	44		/* Number of MIB Counters */
-#define GM_MIB_CNT_END	0x025C		/* Last MIB counter */
 
 /*
  * MIB Counters base address definitions (low word) -
  * use offset 4 for access to high word	(32 bit r/o)
  */
 enum {
-	GM_RXF_UC_OK  = GM_MIB_CNT_BASE + 0,	/* Unicast Frames Received OK */
+	GM_RXF_UC_OK    = GM_MIB_CNT_BASE + 0,	/* Unicast Frames Received OK */
 	GM_RXF_BC_OK	= GM_MIB_CNT_BASE + 8,	/* Broadcast Frames Received OK */
 	GM_RXF_MPAUSE	= GM_MIB_CNT_BASE + 16,	/* Pause MAC Ctrl Frames Received */
 	GM_RXF_MC_OK	= GM_MIB_CNT_BASE + 24,	/* Multicast Frames Received OK */
 	GM_RXF_FCS_ERR	= GM_MIB_CNT_BASE + 32,	/* Rx Frame Check Seq. Error */
-	/* GM_MIB_CNT_BASE + 40:	reserved */
+
 	GM_RXO_OK_LO	= GM_MIB_CNT_BASE + 48,	/* Octets Received OK Low */
 	GM_RXO_OK_HI	= GM_MIB_CNT_BASE + 56,	/* Octets Received OK High */
 	GM_RXO_ERR_LO	= GM_MIB_CNT_BASE + 64,	/* Octets Received Invalid Low */
@@ -1408,37 +1415,36 @@ enum {
 	GM_RXF_SHT	= GM_MIB_CNT_BASE + 80,	/* Frames <64 Byte Received OK */
 	GM_RXE_FRAG	= GM_MIB_CNT_BASE + 88,	/* Frames <64 Byte Received with FCS Err */
 	GM_RXF_64B	= GM_MIB_CNT_BASE + 96,	/* 64 Byte Rx Frame */
-	GM_RXF_127B	= GM_MIB_CNT_BASE + 104,	/* 65-127 Byte Rx Frame */
-	GM_RXF_255B	= GM_MIB_CNT_BASE + 112,	/* 128-255 Byte Rx Frame */
-	GM_RXF_511B	= GM_MIB_CNT_BASE + 120,	/* 256-511 Byte Rx Frame */
-	GM_RXF_1023B	= GM_MIB_CNT_BASE + 128,	/* 512-1023 Byte Rx Frame */
-	GM_RXF_1518B	= GM_MIB_CNT_BASE + 136,	/* 1024-1518 Byte Rx Frame */
-	GM_RXF_MAX_SZ	= GM_MIB_CNT_BASE + 144,	/* 1519-MaxSize Byte Rx Frame */
-	GM_RXF_LNG_ERR	= GM_MIB_CNT_BASE + 152,	/* Rx Frame too Long Error */
-	GM_RXF_JAB_PKT	= GM_MIB_CNT_BASE + 160,	/* Rx Jabber Packet Frame */
-	/* GM_MIB_CNT_BASE + 168:	reserved */
-	GM_RXE_FIFO_OV	= GM_MIB_CNT_BASE + 176,	/* Rx FIFO overflow Event */
-	/* GM_MIB_CNT_BASE + 184:	reserved */
-	GM_TXF_UC_OK	= GM_MIB_CNT_BASE + 192,	/* Unicast Frames Xmitted OK */
-	GM_TXF_BC_OK	= GM_MIB_CNT_BASE + 200,	/* Broadcast Frames Xmitted OK */
-	GM_TXF_MPAUSE	= GM_MIB_CNT_BASE + 208,	/* Pause MAC Ctrl Frames Xmitted */
-	GM_TXF_MC_OK	= GM_MIB_CNT_BASE + 216,	/* Multicast Frames Xmitted OK */
-	GM_TXO_OK_LO	= GM_MIB_CNT_BASE + 224,	/* Octets Transmitted OK Low */
-	GM_TXO_OK_HI	= GM_MIB_CNT_BASE + 232,	/* Octets Transmitted OK High */
-	GM_TXF_64B	= GM_MIB_CNT_BASE + 240,	/* 64 Byte Tx Frame */
-	GM_TXF_127B	= GM_MIB_CNT_BASE + 248,	/* 65-127 Byte Tx Frame */
-	GM_TXF_255B	= GM_MIB_CNT_BASE + 256,	/* 128-255 Byte Tx Frame */
-	GM_TXF_511B	= GM_MIB_CNT_BASE + 264,	/* 256-511 Byte Tx Frame */
-	GM_TXF_1023B	= GM_MIB_CNT_BASE + 272,	/* 512-1023 Byte Tx Frame */
-	GM_TXF_1518B	= GM_MIB_CNT_BASE + 280,	/* 1024-1518 Byte Tx Frame */
-	GM_TXF_MAX_SZ	= GM_MIB_CNT_BASE + 288,	/* 1519-MaxSize Byte Tx Frame */
+	GM_RXF_127B	= GM_MIB_CNT_BASE + 104,/* 65-127 Byte Rx Frame */
+	GM_RXF_255B	= GM_MIB_CNT_BASE + 112,/* 128-255 Byte Rx Frame */
+	GM_RXF_511B	= GM_MIB_CNT_BASE + 120,/* 256-511 Byte Rx Frame */
+	GM_RXF_1023B	= GM_MIB_CNT_BASE + 128,/* 512-1023 Byte Rx Frame */
+	GM_RXF_1518B	= GM_MIB_CNT_BASE + 136,/* 1024-1518 Byte Rx Frame */
+	GM_RXF_MAX_SZ	= GM_MIB_CNT_BASE + 144,/* 1519-MaxSize Byte Rx Frame */
+	GM_RXF_LNG_ERR	= GM_MIB_CNT_BASE + 152,/* Rx Frame too Long Error */
+	GM_RXF_JAB_PKT	= GM_MIB_CNT_BASE + 160,/* Rx Jabber Packet Frame */
 
-	GM_TXF_COL	= GM_MIB_CNT_BASE + 304,	/* Tx Collision */
-	GM_TXF_LAT_COL	= GM_MIB_CNT_BASE + 312,	/* Tx Late Collision */
-	GM_TXF_ABO_COL	= GM_MIB_CNT_BASE + 320,	/* Tx aborted due to Exces. Col. */
-	GM_TXF_MUL_COL	= GM_MIB_CNT_BASE + 328,	/* Tx Multiple Collision */
-	GM_TXF_SNG_COL	= GM_MIB_CNT_BASE + 336,	/* Tx Single Collision */
-	GM_TXE_FIFO_UR	= GM_MIB_CNT_BASE + 344,	/* Tx FIFO Underrun Event */
+	GM_RXE_FIFO_OV	= GM_MIB_CNT_BASE + 176,/* Rx FIFO overflow Event */
+	GM_TXF_UC_OK	= GM_MIB_CNT_BASE + 192,/* Unicast Frames Xmitted OK */
+	GM_TXF_BC_OK	= GM_MIB_CNT_BASE + 200,/* Broadcast Frames Xmitted OK */
+	GM_TXF_MPAUSE	= GM_MIB_CNT_BASE + 208,/* Pause MAC Ctrl Frames Xmitted */
+	GM_TXF_MC_OK	= GM_MIB_CNT_BASE + 216,/* Multicast Frames Xmitted OK */
+	GM_TXO_OK_LO	= GM_MIB_CNT_BASE + 224,/* Octets Transmitted OK Low */
+	GM_TXO_OK_HI	= GM_MIB_CNT_BASE + 232,/* Octets Transmitted OK High */
+	GM_TXF_64B	= GM_MIB_CNT_BASE + 240,/* 64 Byte Tx Frame */
+	GM_TXF_127B	= GM_MIB_CNT_BASE + 248,/* 65-127 Byte Tx Frame */
+	GM_TXF_255B	= GM_MIB_CNT_BASE + 256,/* 128-255 Byte Tx Frame */
+	GM_TXF_511B	= GM_MIB_CNT_BASE + 264,/* 256-511 Byte Tx Frame */
+	GM_TXF_1023B	= GM_MIB_CNT_BASE + 272,/* 512-1023 Byte Tx Frame */
+	GM_TXF_1518B	= GM_MIB_CNT_BASE + 280,/* 1024-1518 Byte Tx Frame */
+	GM_TXF_MAX_SZ	= GM_MIB_CNT_BASE + 288,/* 1519-MaxSize Byte Tx Frame */
+
+	GM_TXF_COL	= GM_MIB_CNT_BASE + 304,/* Tx Collision */
+	GM_TXF_LAT_COL	= GM_MIB_CNT_BASE + 312,/* Tx Late Collision */
+	GM_TXF_ABO_COL	= GM_MIB_CNT_BASE + 320,/* Tx aborted due to Exces. Col. */
+	GM_TXF_MUL_COL	= GM_MIB_CNT_BASE + 328,/* Tx Multiple Collision */
+	GM_TXF_SNG_COL	= GM_MIB_CNT_BASE + 336,/* Tx Single Collision */
+	GM_TXE_FIFO_UR	= GM_MIB_CNT_BASE + 344,/* Tx FIFO Underrun Event */
 };
 
 /* GMAC Bit Definitions */
@@ -1487,7 +1493,7 @@ enum {
 	GM_TXCR_FORCE_JAM	= 1<<15, /* Bit 15:	Force Jam / Flow-Control */
 	GM_TXCR_CRC_DIS		= 1<<14, /* Bit 14:	Disable insertion of CRC */
 	GM_TXCR_PAD_DIS		= 1<<13, /* Bit 13:	Disable padding of packets */
-	GM_TXCR_COL_THR_MSK	= 1<<10, /* Bit 12..10:	Collision Threshold */
+	GM_TXCR_COL_THR_MSK	= 7<<10, /* Bit 12..10:	Collision Threshold */
 };
 
 #define TX_COL_THR(x)		(((x)<<10) & GM_TXCR_COL_THR_MSK)
@@ -1544,8 +1550,8 @@ enum {
 	GM_SMI_CT_BUSY		= 1<<3,	/* Bit  3:	Busy (Operation in progress) */
 };
 
-#define GM_SMI_CT_PHY_AD(x)	(((x)<<11) & GM_SMI_CT_PHY_A_MSK)
-#define GM_SMI_CT_REG_AD(x)	(((x)<<6) & GM_SMI_CT_REG_A_MSK)
+#define GM_SMI_CT_PHY_AD(x)	(((u16)(x)<<11) & GM_SMI_CT_PHY_A_MSK)
+#define GM_SMI_CT_REG_AD(x)	(((u16)(x)<<6) & GM_SMI_CT_REG_A_MSK)
 
 /*	GM_PHY_ADDR				16 bit r/w	GPHY Address Register */
 enum {
@@ -1755,7 +1761,6 @@ enum {
 	INIT_SUM= 1<<3,
 	LOCK_SUM= 1<<4,
 	INS_VLAN= 1<<5,
-	FRC_STAT= 1<<6,
 	EOP	= 1<<7,
 };
 
@@ -1791,21 +1796,9 @@ enum {
 	OP_TXINDEXLE	= 0x68,
 };
 
-/* Yukon 2 hardware interface
- * Not tested on big endian
- */
+/* Yukon 2 hardware interface */
 struct sky2_tx_le {
-	union {
-		__le32	addr;
-		struct {
-			__le16	offset;
-			__le16	start;
-		} csum  __attribute((packed));
-		struct {
-			__le16	size;
-			__le16	rsvd;
-		} tso  __attribute((packed));
-	} tx;
+	__le32	addr;
 	__le16	length;	/* also vlan tag or checksum start */
 	u8	ctrl;
 	u8	opcode;
@@ -1816,7 +1809,7 @@ struct sky2_rx_le {
 	__le16	length;
 	u8	ctrl;
 	u8	opcode;
-} __attribute((packed));;
+} __attribute((packed));
 
 struct sky2_status_le {
 	__le32	status;	/* also checksum */
@@ -1828,12 +1821,21 @@ struct sky2_status_le {
 struct tx_ring_info {
 	struct sk_buff	*skb;
 	DECLARE_PCI_UNMAP_ADDR(mapaddr);
-	u16		idx;
+	DECLARE_PCI_UNMAP_ADDR(maplen);
 };
 
-struct ring_info {
+struct rx_ring_info {
 	struct sk_buff	*skb;
-	dma_addr_t	mapaddr;
+	dma_addr_t	data_addr;
+	DECLARE_PCI_UNMAP_ADDR(data_size);
+	dma_addr_t	frag_addr[ETH_JUMBO_MTU >> PAGE_SHIFT];
+};
+
+enum flow_control {
+	FC_NONE	= 0,
+	FC_TX	= 1,
+	FC_RX	= 2,
+	FC_BOTH	= 3,
 };
 
 struct sky2_port {
@@ -1841,25 +1843,26 @@ struct sky2_port {
 	struct net_device    *netdev;
 	unsigned	     port;
 	u32		     msg_enable;
+	spinlock_t	     phy_lock;
 
-	spinlock_t	     tx_lock  ____cacheline_aligned_in_smp;
 	struct tx_ring_info  *tx_ring;
 	struct sky2_tx_le    *tx_le;
 	u16		     tx_cons;		/* next le to check */
 	u16		     tx_prod;		/* next le to use */
 	u32		     tx_addr64;
 	u16		     tx_pending;
-	u16		     tx_last_put;
 	u16		     tx_last_mss;
+	u32		     tx_tcpsum;
 
-	struct ring_info     *rx_ring ____cacheline_aligned_in_smp;
+	struct rx_ring_info  *rx_ring ____cacheline_aligned_in_smp;
 	struct sky2_rx_le    *rx_le;
 	u32		     rx_addr64;
 	u16		     rx_next;		/* next re to check */
 	u16		     rx_put;		/* next le index to use */
 	u16		     rx_pending;
-	u16		     rx_last_put;
-	u16		     rx_bufsize;
+	u16		     rx_data_size;
+	u16		     rx_nfrags;
+
 #ifdef SKY2_VLAN_TAG_USED
 	u16		     rx_tag;
 	struct vlan_group    *vlgrp;
@@ -1867,27 +1870,22 @@ struct sky2_port {
 
 	dma_addr_t	     rx_le_map;
 	dma_addr_t	     tx_le_map;
-	u32		     advertising;	/* ADVERTISED_ bits */
+	u16		     advertising;	/* ADVERTISED_ bits */
 	u16		     speed;	/* SPEED_1000, SPEED_100, ... */
 	u8		     autoneg;	/* AUTONEG_ENABLE, AUTONEG_DISABLE */
 	u8		     duplex;	/* DUPLEX_HALF, DUPLEX_FULL */
-	u8		     rx_pause;
-	u8		     tx_pause;
 	u8		     rx_csum;
-	u8		     wol;
+ 	enum flow_control    flow_mode;
+ 	enum flow_control    flow_status;
 
 	struct net_device_stats net_stats;
 
-	struct work_struct   phy_task;
-	struct semaphore     phy_sema;
 };
 
 struct sky2_hw {
 	void __iomem  	     *regs;
 	struct pci_dev	     *pdev;
 	struct net_device    *dev[2];
-	spinlock_t	     hw_lock;
-	u32		     intr_mask;
 
 	int		     pm_cap;
 	u8	     	     chip_id;
@@ -1898,6 +1896,11 @@ struct sky2_hw {
 	struct sky2_status_le *st_le;
 	u32		     st_idx;
 	dma_addr_t   	     st_dma;
+
+	struct timer_list    idle_timer;
+	struct work_struct   restart_work;
+	int		     msi;
+	wait_queue_head_t    msi_wait;
 };
 
 static inline int sky2_is_copper(const struct sky2_hw *hw)

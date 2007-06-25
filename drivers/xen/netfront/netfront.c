@@ -117,7 +117,7 @@ static inline int netif_needs_gso(struct net_device *dev, struct sk_buff *skb)
 {
         return skb_is_gso(skb) &&
                (!skb_gso_ok(skb, dev->features) ||
-                unlikely(skb->ip_summed != CHECKSUM_HW));
+                unlikely(skb->ip_summed != CHECKSUM_PARTIAL));
 }
 #else
 #define netif_needs_gso(dev, skb)	0
@@ -245,7 +245,7 @@ static void network_tx_buf_gc(struct net_device *);
 static void network_alloc_rx_buffers(struct net_device *);
 static int send_fake_arp(struct net_device *);
 
-static irqreturn_t netif_int(int irq, void *dev_id, struct pt_regs *ptregs);
+static irqreturn_t netif_int(int irq, void *dev_id);
 
 #ifdef CONFIG_SYSFS
 static int xennet_sysfs_addif(struct net_device *netdev);
@@ -925,7 +925,7 @@ static int network_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	tx->flags = 0;
 	extra = NULL;
 
-	if (skb->ip_summed == CHECKSUM_HW) /* local packet? */
+	if (skb->ip_summed == CHECKSUM_PARTIAL) /* local packet? */
 		tx->flags |= NETTXF_csum_blank | NETTXF_data_validated;
 #ifdef CONFIG_XEN
 	if (skb->proto_data_valid) /* remote but checksummed? */
@@ -980,7 +980,7 @@ static int network_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
-static irqreturn_t netif_int(int irq, void *dev_id, struct pt_regs *ptregs)
+static irqreturn_t netif_int(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
 	struct netfront_info *np = netdev_priv(dev);
@@ -2127,12 +2127,18 @@ static int __init netif_init(void)
 module_init(netif_init);
 
 
+/* it's currently not sane to remove this driver */
+#if 0
 static void __exit netif_exit(void)
 {
+	if (is_initial_xendomain())
+		return;
+
 	unregister_inetaddr_notifier(&notifier_inetdev);
 
 	return xenbus_unregister_driver(&netfront);
 }
 module_exit(netif_exit);
+#endif
 
 MODULE_LICENSE("Dual BSD/GPL");

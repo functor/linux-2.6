@@ -23,7 +23,6 @@
 #include <asm/errno.h>
 #include "local.h"
 
-/*****************************************************************************/
 /*
  * perform DSA algorithm signature verification
  */
@@ -37,8 +36,7 @@ int DSA_verify(const MPI datahash, const MPI sig[], const MPI pkey[])
 
 	if (!datahash ||
 	    !sig[0] || !sig[1] ||
-	    !pkey[0] || !pkey[1] || !pkey[2] || !pkey[3]
-	    )
+	    !pkey[0] || !pkey[1] || !pkey[2] || !pkey[3])
 		return -EINVAL;
 
 	p = pkey[0];	/* prime */
@@ -50,12 +48,12 @@ int DSA_verify(const MPI datahash, const MPI sig[], const MPI pkey[])
 
 	if (!(mpi_cmp_ui(r, 0) > 0 && mpi_cmp(r, q) < 0)) {
 		printk("DSA_verify assertion failed [0 < r < q]\n");
-		return -EPERM;
+		return -EKEYREJECTED;
 	}
 
 	if (!(mpi_cmp_ui(s, 0) > 0 && mpi_cmp(s, q) < 0)) {
 		printk("DSA_verify assertion failed [0 < s < q]\n");
-		return -EPERM;
+		return -EKEYREJECTED;
 	}
 
 	rc = -ENOMEM;
@@ -87,12 +85,12 @@ int DSA_verify(const MPI datahash, const MPI sig[], const MPI pkey[])
 	if (mpi_fdiv_r(v, v, q) < 0)
 		goto cleanup;
 
-	rc = mpi_cmp(v, r) == 0 ? 0 : -EPERM;
+	rc = (mpi_cmp(v, r) == 0) ? 0 : -EKEYREJECTED;
 
- cleanup:
+cleanup:
 	mpi_free(w);
 	mpi_free(u1);
 	mpi_free(u2);
 	mpi_free(v);
 	return rc;
-} /* end DSA_verify() */
+}

@@ -19,7 +19,13 @@
  * Leave one empty page between vmalloc'ed areas and
  * the start of the fixmap.
  */
+#ifndef CONFIG_COMPAT_VDSO
 extern unsigned long __FIXADDR_TOP;
+#else
+#define __FIXADDR_TOP  0xfffff000
+#define FIXADDR_USER_START	__fix_to_virt(FIX_VDSO)
+#define FIXADDR_USER_END	__fix_to_virt(FIX_VDSO - 1)
+#endif
 
 #ifndef __ASSEMBLY__
 #include <linux/kernel.h>
@@ -99,6 +105,7 @@ enum fixed_addresses {
 extern void __set_fixmap(enum fixed_addresses idx,
 					maddr_t phys, pgprot_t flags);
 
+extern void reserve_top_address(unsigned long reserve);
 extern void set_fixaddr_top(unsigned long top);
 
 #define set_fixmap(idx, phys) \

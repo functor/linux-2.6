@@ -20,13 +20,16 @@
 #include <asm/desc.h>
 #include <asm/arch_hooks.h>
 #include <asm/pgalloc.h>
+#if defined(__i386__)
+#include <asm/pda.h>
+#endif
 #include <xen/evtchn.h>
 #include <xen/interface/vcpu.h>
 #include <xen/cpu_hotplug.h>
 #include <xen/xenbus.h>
 
-extern irqreturn_t smp_reschedule_interrupt(int, void *, struct pt_regs *);
-extern irqreturn_t smp_call_function_interrupt(int, void *, struct pt_regs *);
+extern irqreturn_t smp_reschedule_interrupt(int, void *);
+extern irqreturn_t smp_call_function_interrupt(int, void *);
 
 extern void local_setup_timer(unsigned int cpu);
 extern void local_teardown_timer(unsigned int cpu);
@@ -75,8 +78,6 @@ EXPORT_SYMBOL(cpu_core_map);
 #if defined(__i386__)
 u8 x86_cpu_to_apicid[NR_CPUS] = { [0 ... NR_CPUS-1] = 0xff };
 EXPORT_SYMBOL(x86_cpu_to_apicid);
-#elif !defined(CONFIG_X86_IO_APIC)
-unsigned int maxcpus = NR_CPUS;
 #endif
 
 void __init prefill_possible_map(void)
@@ -145,9 +146,24 @@ static void xen_smp_intr_exit(unsigned int cpu)
 }
 #endif
 
+#ifdef __i386__
+static inline void set_kernel_gs(void)
+{
+	/* Set %gs for this CPU's PDA.  Memory clobber is to create a
+	   barrier with respect to any PDA operations, so the compiler
+	   doesn't move any before here. */
+	asm volatile ("mov %0, %%gs" : : "r" (__KERNEL_PDA) : "memory");
+}
+#endif
+
 void cpu_bringup(void)
 {
+#ifdef __i386__
+	set_kernel_gs();
+	secondary_cpu_init();
+#else
 	cpu_init();
+#endif
 	touch_softlockup_watchdog();
 	preempt_disable();
 	local_irq_enable();
@@ -259,6 +275,11 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	}
 
 	for_each_possible_cpu (cpu) {
+#ifdef __i386__
+		struct i386_pda *pda;
+		struct desc_struct *gdt;
+#endif
+
 		if (cpu == 0)
 			continue;
 
@@ -275,6 +296,22 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		}
 		gdt_descr->size = GDT_SIZE;
 		memcpy((void *)gdt_descr->address, cpu_gdt_table, GDT_SIZE);
+#ifdef __i386__
+		gdt = (struct desc_struct *)gdt_descr->address;
+		pda = kmalloc_node(sizeof(*pda), GFP_KERNEL, cpu_to_node(cpu));
+
+		if (unlikely(!pda)) {
+			printk(KERN_CRIT "CPU%d failed to allocate PDA\n",
+			       cpu);
+			continue;
+		}
+		cpu_pda(cpu) = pda;
+		cpu_pda(cpu)->cpu_number = cpu;
+		pack_descriptor((u32 *)&gdt[GDT_ENTRY_PDA].a,
+				(u32 *)&gdt[GDT_ENTRY_PDA].b,
+				(unsigned long)pda, sizeof(*pda) - 1,
+				0x80 | DESCTYPE_S | 0x2, 0); /* present read-write data segment */
+#endif
 		make_page_readonly(
 			(void *)gdt_descr->address,
 			XENFEAT_writable_descriptor_tables);
@@ -289,8 +326,8 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		if (IS_ERR(idle))
 			panic("failed fork for CPU %d", cpu);
 
-#ifdef __x86_64__
 		cpu_pda(cpu)->pcurrent = idle;
+#ifdef __x86_64__
 		cpu_pda(cpu)->cpunumber = cpu;
 		clear_ti_thread_flag(idle->thread_info, TIF_FORK);
 #endif
@@ -309,17 +346,17 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 
 	init_xenbus_allowed_cpumask();
 
-#ifdef CONFIG_X86_IO_APIC
 	/*
 	 * Here we can be sure that there is an IO-APIC in the system. Let's
 	 * go and set it up:
 	 */
+#ifdef CONFIG_X86_IO_APIC
 	if (!skip_ioapic_setup && nr_ioapics)
 		setup_IO_APIC();
 #endif
 }
 
-void __devinit smp_prepare_boot_cpu(void)
+void __init smp_prepare_boot_cpu(void)
 {
 }
 
@@ -393,7 +430,7 @@ void __cpu_die(unsigned int cpu)
 
 #endif /* CONFIG_HOTPLUG_CPU */
 
-int __devinit __cpu_up(unsigned int cpu)
+int __cpuinit __cpu_up(unsigned int cpu)
 {
 	int rc;
 
@@ -421,7 +458,22 @@ void __init smp_cpus_done(unsigned int max_cpus)
 {
 }
 
-#ifndef CONFIG_X86_LOCAL_APIC
+#ifdef CONFIG_X86_MPPARSE
+/*
+ * If the BIOS enumerates physical processors before logical,
+ * maxcpus=N at enumeration-time can be used to disable HT.
+ */
+static int __init parse_maxcpus(char *arg)
+{
+	extern unsigned int maxcpus;
+
+	maxcpus = simple_strtoul(arg, NULL, 0);
+	return 0;
+}
+early_param("maxcpus", parse_maxcpus);
+#endif
+
+#if defined(CONFIG_XEN_UNPRIVILEGED_GUEST) && defined(CONFIG_X86_32)
 int setup_profiling_timer(unsigned int multiplier)
 {
 	return -EINVAL;

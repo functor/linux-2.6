@@ -13,7 +13,6 @@
  * or implied.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -121,13 +120,14 @@ struct map_info redwood_flash_map = {
 };
 
 
-#define NUM_REDWOOD_FLASH_PARTITIONS \
-	(sizeof(redwood_flash_partitions)/sizeof(redwood_flash_partitions[0]))
+#define NUM_REDWOOD_FLASH_PARTITIONS ARRAY_SIZE(redwood_flash_partitions)
 
 static struct mtd_info *redwood_mtd;
 
 int __init init_redwood_flash(void)
 {
+	int err;
+
 	printk(KERN_NOTICE "redwood: flash mapping: %x at %x\n",
 			WINDOW_SIZE, WINDOW_ADDR);
 
@@ -143,11 +143,18 @@ int __init init_redwood_flash(void)
 
 	if (redwood_mtd) {
 		redwood_mtd->owner = THIS_MODULE;
-		return add_mtd_partitions(redwood_mtd,
+		err = add_mtd_partitions(redwood_mtd,
 				redwood_flash_partitions,
 				NUM_REDWOOD_FLASH_PARTITIONS);
+		if (err) {
+			printk("init_redwood_flash: add_mtd_partitions failed\n");
+			iounmap(redwood_flash_map.virt);
+		}
+		return err;
+
 	}
 
+	iounmap(redwood_flash_map.virt);
 	return -ENXIO;
 }
 

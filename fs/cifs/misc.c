@@ -71,11 +71,8 @@ sesInfoAlloc(void)
 {
 	struct cifsSesInfo *ret_buf;
 
-	ret_buf =
-	    (struct cifsSesInfo *) kmalloc(sizeof (struct cifsSesInfo),
-					   GFP_KERNEL);
+	ret_buf = kzalloc(sizeof (struct cifsSesInfo), GFP_KERNEL);
 	if (ret_buf) {
-		memset(ret_buf, 0, sizeof (struct cifsSesInfo));
 		write_lock(&GlobalSMBSeslock);
 		atomic_inc(&sesInfoAllocCount);
 		ret_buf->status = CifsNew;
@@ -102,6 +99,7 @@ sesInfoFree(struct cifsSesInfo *buf_to_free)
 	kfree(buf_to_free->serverDomain);
 	kfree(buf_to_free->serverNOS);
 	kfree(buf_to_free->password);
+	kfree(buf_to_free->domainName);
 	kfree(buf_to_free);
 }
 
@@ -109,11 +107,8 @@ struct cifsTconInfo *
 tconInfoAlloc(void)
 {
 	struct cifsTconInfo *ret_buf;
-	ret_buf =
-	    (struct cifsTconInfo *) kmalloc(sizeof (struct cifsTconInfo),
-					    GFP_KERNEL);
+	ret_buf = kzalloc(sizeof (struct cifsTconInfo), GFP_KERNEL);
 	if (ret_buf) {
-		memset(ret_buf, 0, sizeof (struct cifsTconInfo));
 		write_lock(&GlobalSMBSeslock);
 		atomic_inc(&tconInfoAllocCount);
 		list_add(&ret_buf->cifsConnectionList,
@@ -154,7 +149,7 @@ cifs_buf_get(void)
    albeit slightly larger than necessary and maxbuffersize 
    defaults to this and can not be bigger */
 	ret_buf =
-	    (struct smb_hdr *) mempool_alloc(cifs_req_poolp, SLAB_KERNEL | SLAB_NOFS);
+	    (struct smb_hdr *) mempool_alloc(cifs_req_poolp, GFP_KERNEL | GFP_NOFS);
 
 	/* clear the first few header bytes */
 	/* for most paths, more is cleared in header_assemble */
@@ -193,7 +188,7 @@ cifs_small_buf_get(void)
    albeit slightly larger than necessary and maxbuffersize 
    defaults to this and can not be bigger */
 	ret_buf =
-	    (struct smb_hdr *) mempool_alloc(cifs_sm_req_poolp, SLAB_KERNEL | SLAB_NOFS);
+	    (struct smb_hdr *) mempool_alloc(cifs_sm_req_poolp, GFP_KERNEL | GFP_NOFS);
 	if (ret_buf) {
 	/* No need to clear memory here, cleared in header assemble */
 	/*	memset(ret_buf, 0, sizeof(struct smb_hdr) + 27);*/
@@ -390,7 +385,7 @@ header_assemble(struct smb_hdr *buffer, char smb_command /* command */ ,
 	return;
 }
 
-int
+static int
 checkSMBhdr(struct smb_hdr *smb, __u16 mid)
 {
 	/* Make sure that this really is an SMB, that it is a response, 
@@ -419,43 +414,64 @@ checkSMBhdr(struct smb_hdr *smb, __u16 mid)
 }
 
 int
-checkSMB(struct smb_hdr *smb, __u16 mid, int length)
+checkSMB(struct smb_hdr *smb, __u16 mid, unsigned int length)
 {
 	__u32 len = smb->smb_buf_length;
 	__u32 clc_len;  /* calculated length */
-	cFYI(0,
-	     ("Entering checkSMB with Length: %x, smb_buf_length: %x",
-	      length, len));
-	if (((unsigned int)length < 2 + sizeof (struct smb_hdr)) ||
-	    (len > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE - 4)) {
-		if ((unsigned int)length < 2 + sizeof (struct smb_hdr)) {
-			if (((unsigned int)length >= 
-				sizeof (struct smb_hdr) - 1)
-			    && (smb->Status.CifsError != 0)) {
-				smb->WordCount = 0;
-				return 0;	/* some error cases do not return wct and bcc */
-			} else {
-				cERROR(1, ("Length less than smb header size"));
-			}
+	cFYI(0, ("checkSMB Length: 0x%x, smb_buf_length: 0x%x", length, len));
 
+	if (length < 2 + sizeof (struct smb_hdr)) {
+		if ((length >= sizeof (struct smb_hdr) - 1)
+			    && (smb->Status.CifsError != 0)) {
+			smb->WordCount = 0;
+			/* some error cases do not return wct and bcc */
+			return 0;
+		} else if ((length == sizeof(struct smb_hdr) + 1) && 
+				(smb->WordCount == 0)) {
+			char * tmp = (char *)smb;
+			/* Need to work around a bug in two servers here */
+			/* First, check if the part of bcc they sent was zero */
+			if (tmp[sizeof(struct smb_hdr)] == 0) {
+				/* some servers return only half of bcc
+				 * on simple responses (wct, bcc both zero)
+				 * in particular have seen this on
+				 * ulogoffX and FindClose. This leaves
+				 * one byte of bcc potentially unitialized
+				 */
+				/* zero rest of bcc */
+				tmp[sizeof(struct smb_hdr)+1] = 0;
+				return 0;
+			}
+			cERROR(1,("rcvd invalid byte count (bcc)"));
+		} else {
+			cERROR(1, ("Length less than smb header size"));
 		}
-		if (len > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE - 4)
-			cERROR(1,
-			       ("smb_buf_length greater than MaxBufSize"));
-		cERROR(1,
-		       ("bad smb detected. Illegal length. mid=%d",
-			smb->Mid));
+		return 1;
+	}
+	if (len > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE - 4) {
+		cERROR(1, ("smb length greater than MaxBufSize, mid=%d",
+				   smb->Mid));
 		return 1;
 	}
 
 	if (checkSMBhdr(smb, mid))
 		return 1;
 	clc_len = smbCalcSize_LE(smb);
-	if ((4 + len != clc_len)
-	    || (4 + len != (unsigned int)length)) {
-		cERROR(1, ("Calculated size 0x%x vs actual length 0x%x",
-				clc_len, 4 + len));
-		cERROR(1, ("bad smb size detected for Mid=%d", smb->Mid));
+
+	if(4 + len != length) {
+		cERROR(1, ("Length read does not match RFC1001 length %d",len));
+		return 1;
+	}
+
+	if (4 + len != clc_len) {
+		/* check if bcc wrapped around for large read responses */
+		if((len > 64 * 1024) && (len > clc_len)) {
+			/* check if lengths match mod 64K */
+			if(((4 + len) & 0xFFFF) == (clc_len & 0xFFFF))
+				return 0; /* bcc wrapped */			
+		}
+		cFYI(1, ("Calculated size %d vs length %d mismatch for mid %d",
+				clc_len, 4 + len, smb->Mid));
 		/* Windows XP can return a few bytes too much, presumably
 		an illegal pad, at the end of byte range lock responses 
 		so we allow for that three byte pad, as long as actual
@@ -469,8 +485,11 @@ checkSMB(struct smb_hdr *smb, __u16 mid, int length)
 		wct and bcc to minimum size and drop the t2 parms and data */
 		if((4+len > clc_len) && (len <= clc_len + 512))
 			return 0;
-		else
+		else {
+			cERROR(1, ("RFC1001 size %d bigger than SMB for Mid=%d",
+					len, smb->Mid));
 			return 1;
+		}
 	}
 	return 0;
 }
@@ -493,11 +512,12 @@ is_valid_oplock_break(struct smb_hdr *buf, struct TCP_Server_Info *srv)
 		if(pSMBr->ByteCount > sizeof(struct file_notify_information)) {
 			data_offset = le32_to_cpu(pSMBr->DataOffset);
 
-			pnotify = (struct file_notify_information *)((char *)&pSMBr->hdr.Protocol
-				+ data_offset);
-			cFYI(1,("dnotify on %s with action: 0x%x",pnotify->FileName,
+			pnotify = (struct file_notify_information *)
+				((char *)&pSMBr->hdr.Protocol + data_offset);
+			cFYI(1,("dnotify on %s Action: 0x%x",pnotify->FileName,
 				pnotify->Action));  /* BB removeme BB */
-	             /*   cifs_dump_mem("Received notify Data is: ",buf,sizeof(struct smb_hdr)+60); */
+	             /*   cifs_dump_mem("Rcvd notify Data: ",buf,
+				sizeof(struct smb_hdr)+60); */
 			return TRUE;
 		}
 		if(pSMBr->hdr.Status.CifsError) {

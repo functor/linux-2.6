@@ -11,7 +11,6 @@
 #ifndef _ASM_IA64_NUMA_H
 #define _ASM_IA64_NUMA_H
 
-#include <linux/config.h>
 
 #ifdef CONFIG_NUMA
 
@@ -23,7 +22,7 @@
 
 #include <asm/mmzone.h>
 
-extern u8 cpu_to_node_map[NR_CPUS] __cacheline_aligned;
+extern u16 cpu_to_node_map[NR_CPUS] __cacheline_aligned;
 extern cpumask_t node_to_cpu_mask[MAX_NUMNODES] __cacheline_aligned;
 
 /* Stuff below this line could be architecture independent */
@@ -65,7 +64,13 @@ extern int paddr_to_nid(unsigned long paddr);
 
 #define local_nodeid (cpu_to_node_map[smp_processor_id()])
 
+extern void map_cpu_to_node(int cpu, int nid);
+extern void unmap_cpu_from_node(int cpu, int nid);
+
+
 #else /* !CONFIG_NUMA */
+#define map_cpu_to_node(cpu, nid)	do{}while(0)
+#define unmap_cpu_from_node(cpu, nid)	do{}while(0)
 
 #define paddr_to_nid(addr)	0
 

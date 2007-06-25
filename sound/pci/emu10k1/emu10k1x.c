@@ -33,6 +33,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
+#include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/moduleparam.h>
 #include <sound/core.h>
@@ -234,7 +235,7 @@ struct emu10k1x {
 	struct resource *res_port;
 	int irq;
 
-	unsigned int revision;		/* chip revision */
+	unsigned char revision;		/* chip revision */
 	unsigned int serial;            /* serial number */
 	unsigned short model;		/* subsystem id */
 
@@ -759,7 +760,7 @@ static int snd_emu10k1x_free(struct emu10k1x *chip)
 
 	// release the irq
 	if (chip->irq >= 0)
-		free_irq(chip->irq, (void *)chip);
+		free_irq(chip->irq, chip);
 
 	// release the DMA
 	if (chip->dma_buffer.area) {
@@ -779,8 +780,7 @@ static int snd_emu10k1x_dev_free(struct snd_device *device)
 	return snd_emu10k1x_free(chip);
 }
 
-static irqreturn_t snd_emu10k1x_interrupt(int irq, void *dev_id,
-					  struct pt_regs *regs)
+static irqreturn_t snd_emu10k1x_interrupt(int irq, void *dev_id)
 {
 	unsigned int status;
 
@@ -893,24 +893,24 @@ static int __devinit snd_emu10k1x_create(struct snd_card *card,
 	static struct snd_device_ops ops = {
 		.dev_free = snd_emu10k1x_dev_free,
 	};
-  
+
 	*rchip = NULL;
-  
+
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
-	if (pci_set_dma_mask(pci, 0x0fffffff) < 0 ||
-	    pci_set_consistent_dma_mask(pci, 0x0fffffff) < 0) {
+	if (pci_set_dma_mask(pci, DMA_28BIT_MASK) < 0 ||
+	    pci_set_consistent_dma_mask(pci, DMA_28BIT_MASK) < 0) {
 		snd_printk(KERN_ERR "error to set 28bit mask DMA\n");
 		pci_disable_device(pci);
 		return -ENXIO;
 	}
-  
+
 	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
 	if (chip == NULL) {
 		pci_disable_device(pci);
 		return -ENOMEM;
 	}
-  
+
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
@@ -927,8 +927,7 @@ static int __devinit snd_emu10k1x_create(struct snd_card *card,
 	}
 
 	if (request_irq(pci->irq, snd_emu10k1x_interrupt,
-			SA_INTERRUPT|SA_SHIRQ, "EMU10K1X",
-			(void *)chip)) {
+			IRQF_SHARED, "EMU10K1X", chip)) {
 		snd_printk(KERN_ERR "emu10k1x: cannot grab irq %d\n", pci->irq);
 		snd_emu10k1x_free(chip);
 		return -EBUSY;
@@ -943,7 +942,7 @@ static int __devinit snd_emu10k1x_create(struct snd_card *card,
 
 	pci_set_master(pci);
 	/* read revision & serial */
-	pci_read_config_byte(pci, PCI_REVISION_ID, (char *)&chip->revision);
+	pci_read_config_byte(pci, PCI_REVISION_ID, &chip->revision);
 	pci_read_config_dword(pci, PCI_SUBSYSTEM_VENDOR_ID, &chip->serial);
 	pci_read_config_word(pci, PCI_SUBSYSTEM_ID, &chip->model);
 	snd_printk(KERN_INFO "Model %04x Rev %08x Serial %08x\n", chip->model,
@@ -1054,8 +1053,7 @@ static int __devinit snd_emu10k1x_proc_init(struct emu10k1x * emu)
 	struct snd_info_entry *entry;
 	
 	if(! snd_card_proc_new(emu->card, "emu10k1x_regs", &entry)) {
-		snd_info_set_text_ops(entry, emu, 1024, snd_emu10k1x_proc_reg_read);
-		entry->c.text.write_size = 64;
+		snd_info_set_text_ops(entry, emu, snd_emu10k1x_proc_reg_read);
 		entry->c.text.write = snd_emu10k1x_proc_reg_write;
 		entry->mode |= S_IWUSR;
 		entry->private_data = emu;
@@ -1286,7 +1284,7 @@ static void snd_emu10k1x_midi_interrupt(struct emu10k1x *emu, unsigned int statu
 	do_emu10k1x_midi_interrupt(emu, &emu->midi, status);
 }
 
-static void snd_emu10k1x_midi_cmd(struct emu10k1x * emu,
+static int snd_emu10k1x_midi_cmd(struct emu10k1x * emu,
 				  struct emu10k1x_midi *midi, unsigned char cmd, int ack)
 {
 	unsigned long flags;
@@ -1312,11 +1310,14 @@ static void snd_emu10k1x_midi_cmd(struct emu10k1x * emu,
 		ok = 1;
 	}
 	spin_unlock_irqrestore(&midi->input_lock, flags);
-	if (!ok)
+	if (!ok) {
 		snd_printk(KERN_ERR "midi_cmd: 0x%x failed at 0x%lx (status = 0x%x, data = 0x%x)!!!\n",
 			   cmd, emu->port,
 			   mpu401_read_stat(emu, midi),
 			   mpu401_read_data(emu, midi));
+		return 1;
+	}
+	return 0;
 }
 
 static int snd_emu10k1x_midi_input_open(struct snd_rawmidi_substream *substream)
@@ -1332,12 +1333,17 @@ static int snd_emu10k1x_midi_input_open(struct snd_rawmidi_substream *substream)
 	midi->substream_input = substream;
 	if (!(midi->midi_mode & EMU10K1X_MIDI_MODE_OUTPUT)) {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
-		snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 1);
-		snd_emu10k1x_midi_cmd(emu, midi, MPU401_ENTER_UART, 1);
+		if (snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 1))
+			goto error_out;
+		if (snd_emu10k1x_midi_cmd(emu, midi, MPU401_ENTER_UART, 1))
+			goto error_out;
 	} else {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
 	}
 	return 0;
+
+error_out:
+	return -EIO;
 }
 
 static int snd_emu10k1x_midi_output_open(struct snd_rawmidi_substream *substream)
@@ -1353,12 +1359,17 @@ static int snd_emu10k1x_midi_output_open(struct snd_rawmidi_substream *substream
 	midi->substream_output = substream;
 	if (!(midi->midi_mode & EMU10K1X_MIDI_MODE_INPUT)) {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
-		snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 1);
-		snd_emu10k1x_midi_cmd(emu, midi, MPU401_ENTER_UART, 1);
+		if (snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 1))
+			goto error_out;
+		if (snd_emu10k1x_midi_cmd(emu, midi, MPU401_ENTER_UART, 1))
+			goto error_out;
 	} else {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
 	}
 	return 0;
+
+error_out:
+	return -EIO;
 }
 
 static int snd_emu10k1x_midi_input_close(struct snd_rawmidi_substream *substream)
@@ -1366,6 +1377,7 @@ static int snd_emu10k1x_midi_input_close(struct snd_rawmidi_substream *substream
 	struct emu10k1x *emu;
 	struct emu10k1x_midi *midi = substream->rmidi->private_data;
 	unsigned long flags;
+	int err = 0;
 
 	emu = midi->emu;
 	snd_assert(emu, return -ENXIO);
@@ -1375,11 +1387,11 @@ static int snd_emu10k1x_midi_input_close(struct snd_rawmidi_substream *substream
 	midi->substream_input = NULL;
 	if (!(midi->midi_mode & EMU10K1X_MIDI_MODE_OUTPUT)) {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
-		snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 0);
+		err = snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 0);
 	} else {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
 	}
-	return 0;
+	return err;
 }
 
 static int snd_emu10k1x_midi_output_close(struct snd_rawmidi_substream *substream)
@@ -1387,6 +1399,7 @@ static int snd_emu10k1x_midi_output_close(struct snd_rawmidi_substream *substrea
 	struct emu10k1x *emu;
 	struct emu10k1x_midi *midi = substream->rmidi->private_data;
 	unsigned long flags;
+	int err = 0;
 
 	emu = midi->emu;
 	snd_assert(emu, return -ENXIO);
@@ -1396,11 +1409,11 @@ static int snd_emu10k1x_midi_output_close(struct snd_rawmidi_substream *substrea
 	midi->substream_output = NULL;
 	if (!(midi->midi_mode & EMU10K1X_MIDI_MODE_INPUT)) {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
-		snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 0);
+		err = snd_emu10k1x_midi_cmd(emu, midi, MPU401_RESET, 0);
 	} else {
 		spin_unlock_irqrestore(&midi->open_lock, flags);
 	}
-	return 0;
+	return err;
 }
 
 static void snd_emu10k1x_midi_input_trigger(struct snd_rawmidi_substream *substream, int up)
@@ -1611,12 +1624,7 @@ static struct pci_driver driver = {
 // initialization of the module
 static int __init alsa_card_emu10k1x_init(void)
 {
-	int err;
-
-	if ((err = pci_register_driver(&driver)) > 0)
-		return err;
-
-	return 0;
+	return pci_register_driver(&driver);
 }
 
 // clean up the module

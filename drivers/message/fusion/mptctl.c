@@ -4,7 +4,7 @@
  *      For use with LSI Logic PCI chip/adapters
  *      running LSI Logic Fusion MPT (Message Passing Technology) firmware.
  *
- *  Copyright (c) 1999-2005 LSI Logic Corporation
+ *  Copyright (c) 1999-2007 LSI Logic Corporation
  *  (mailto:mpt_linux_developer@lsil.com)
  *
  */
@@ -66,7 +66,7 @@
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_tcq.h>
 
-#define COPYRIGHT	"Copyright (c) 1999-2005 LSI Logic Corporation"
+#define COPYRIGHT	"Copyright (c) 1999-2007 LSI Logic Corporation"
 #define MODULEAUTHOR	"LSI Logic Corporation"
 #include "mptbase.h"
 #include "mptctl.h"
@@ -79,6 +79,7 @@
 MODULE_AUTHOR(MODULEAUTHOR);
 MODULE_DESCRIPTION(my_NAME);
 MODULE_LICENSE("GPL");
+MODULE_VERSION(my_VERSION);
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
@@ -140,7 +141,7 @@ static int  mptctl_ioc_reset(MPT_ADAPTER *ioc, int reset_phase);
  * Event Handler function
  */
 static int mptctl_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *pEvReply);
-struct fasync_struct *async_queue=NULL;
+static struct fasync_struct *async_queue=NULL;
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -497,7 +498,7 @@ mptctl_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *pEvReply)
 	 if (event == 0x21 ) {
 		ioc->aen_event_read_flag=1;
 		dctlprintk(("Raised SIGIO to application\n"));
-		devtprintk(("Raised SIGIO to application\n"));
+		devtverboseprintk(("Raised SIGIO to application\n"));
 		kill_fasync(&async_queue, SIGIO, POLL_IN);
 		return 1;
 	 }
@@ -515,7 +516,7 @@ mptctl_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *pEvReply)
 	if (ioc->events && (ioc->eventTypes & ( 1 << event))) {
 		ioc->aen_event_read_flag=1;
 		dctlprintk(("Raised SIGIO to application\n"));
-		devtprintk(("Raised SIGIO to application\n"));
+		devtverboseprintk(("Raised SIGIO to application\n"));
 		kill_fasync(&async_queue, SIGIO, POLL_IN);
 	}
 	return 1;
@@ -2332,7 +2333,7 @@ done_free_mem:
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/* Prototype Routine for the HP HOST INFO command.
+/* Prototype Routine for the HOST INFO command.
  *
  * Outputs:	None.
  * Return:	0 if successful
@@ -2568,7 +2569,7 @@ mptctl_hp_hostinfo(unsigned long arg, unsigned int data_size)
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/* Prototype Routine for the HP TARGET INFO command.
+/* Prototype Routine for the TARGET INFO command.
  *
  * Outputs:	None.
  * Return:	0 if successful
@@ -2968,7 +2969,7 @@ static int __init mptctl_init(void)
 	}
 
 	if (mpt_event_register(mptctl_id, mptctl_event_process) == 0) {
-		devtprintk((KERN_INFO MYNAM
+		devtverboseprintk((KERN_INFO MYNAM
 		  ": Registered for IOC event notifications\n"));
 	}
 

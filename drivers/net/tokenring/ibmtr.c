@@ -197,7 +197,7 @@ static void 	open_sap(unsigned char type, struct net_device *dev);
 static void 	tok_set_multicast_list(struct net_device *dev);
 static int 	tok_send_packet(struct sk_buff *skb, struct net_device *dev);
 static int 	tok_close(struct net_device *dev);
-static irqreturn_t tok_interrupt(int irq, void *dev_id, struct pt_regs *regs);
+static irqreturn_t tok_interrupt(int irq, void *dev_id);
 static void 	initial_tok_int(struct net_device *dev);
 static void 	tr_tx(struct net_device *dev);
 static void 	tr_rx(struct net_device *dev);
@@ -845,6 +845,8 @@ static int tok_init_card(struct net_device *dev)
 	struct tok_info *ti;
 	short PIOaddr;
 	unsigned long i;
+	wait_queue_t __wait;
+	init_waitqueue_entry(&__wait, current);
 
 	PIOaddr = dev->base_addr;
 	ti = (struct tok_info *) dev->priv;
@@ -856,13 +858,18 @@ static int tok_init_card(struct net_device *dev)
 
 	schedule_timeout_uninterruptible(TR_RST_TIME); /* wait 50ms */
 
+	add_wait_queue(&ti->wait_for_reset, &__wait);
+	set_current_state(TASK_UNINTERRUPTIBLE);
 	outb(0, PIOaddr + ADAPTRESETREL);
 #ifdef ENABLE_PAGING
 	if (ti->page_mask)
 		writeb(SRPR_ENABLE_PAGING,ti->mmio+ACA_OFFSET+ACA_RW+SRPR_EVEN);
 #endif
 	writeb(INT_ENABLE, ti->mmio + ACA_OFFSET + ACA_SET + ISRP_EVEN);
-	i = sleep_on_timeout(&ti->wait_for_reset, 4 * HZ);
+	#warning pci posting bug
+	i = schedule_timeout(4 * HZ);
+	current->state = TASK_RUNNING;
+	remove_wait_queue(&ti->wait_for_reset, &__wait);
 	return i? 0 : -EAGAIN;
 }
 
@@ -1166,7 +1173,7 @@ static void dir_open_adapter (struct net_device *dev)
 
 /******************************************************************************/
 
-static irqreturn_t tok_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t tok_interrupt(int irq, void *dev_id)
 {
 	unsigned char status;
 	/*  unsigned char status_even ; */
@@ -1178,7 +1185,7 @@ static irqreturn_t tok_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	dev = dev_id;
 #if TR_VERBOSE
-	DPRINTK("Int from tok_driver, dev : %p irq%d regs=%p\n", dev,irq,regs);
+	DPRINTK("Int from tok_driver, dev : %p irq%d\n", dev,irq);
 #endif
 	ti = (struct tok_info *) dev->priv;
 	if (ti->sram_phys & 1)
@@ -1826,7 +1833,7 @@ static void tr_rx(struct net_device *dev)
 	skb->protocol = tr_type_trans(skb, dev);
 	if (IPv4_p) {
 		skb->csum = chksum;
-		skb->ip_summed = 1;
+		skb->ip_summed = CHECKSUM_COMPLETE;
 	}
 	netif_rx(skb);
 	dev->last_rx = jiffies;

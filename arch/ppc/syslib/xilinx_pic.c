@@ -1,6 +1,4 @@
 /*
- * arch/ppc/syslib/xilinx_pic.c
- *
  * Interrupt controller driver for Xilinx Virtex-II Pro.
  *
  * Author: MontaVista Software, Inc.
@@ -15,7 +13,7 @@
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <asm/io.h>
-#include <asm/xparameters.h>
+#include <platforms/4xx/xparameters/xparameters.h>
 #include <asm/ibm4xx.h>
 #include <asm/machdep.h>
 
@@ -88,7 +86,7 @@ static struct hw_interrupt_type xilinx_intc = {
 };
 
 int
-xilinx_pic_get_irq(struct pt_regs *regs)
+xilinx_pic_get_irq(void)
 {
 	int irq;
 
@@ -145,7 +143,7 @@ ppc4xx_pic_init(void)
 	ppc_md.get_irq = xilinx_pic_get_irq;
 
 	for (i = 0; i < NR_IRQS; ++i) {
-		irq_desc[i].handler = &xilinx_intc;
+		irq_desc[i].chip = &xilinx_intc;
 
 		if (XPAR_INTC_0_KIND_OF_INTR & (0x00000001 << i))
 			irq_desc[i].status &= ~IRQ_LEVEL;

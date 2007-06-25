@@ -9,7 +9,6 @@
 #ifndef _SPARC_MOSTEK_H
 #define _SPARC_MOSTEK_H
 
-#include <linux/config.h>
 #include <asm/idprom.h>
 #include <asm/io.h>
 
@@ -88,7 +87,7 @@ extern void __iomem *mstk48t02_regs;
 #define	MSTK_DOW_MASK	0x07
 #define	MSTK_DOM_MASK	0x3f
 #define	MSTK_MONTH_MASK	0x1f
-#define	MSTK_YEAR_MASK	0xff
+#define	MSTK_YEAR_MASK	0xffU
 
 /* Binary coded decimal conversion macros. */
 #define MSTK_REGVAL_TO_DECIMAL(x)  (((x) & 0x0F) + 0x0A * ((x) >> 0x04))

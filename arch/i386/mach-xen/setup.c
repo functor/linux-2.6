@@ -151,4 +151,11 @@ void __init machine_specific_arch_setup(void)
  **/
 void __init pre_setup_arch_hook(void)
 {
+	int max_cmdline;
+
+	if ((max_cmdline = MAX_GUEST_CMDLINE) > COMMAND_LINE_SIZE)
+		max_cmdline = COMMAND_LINE_SIZE;
+	memcpy(saved_command_line, xen_start_info->cmd_line, max_cmdline);
+	/* Save unparsed command line copy for /proc/cmdline */
+	saved_command_line[max_cmdline-1] = '\0';
 }

@@ -29,7 +29,6 @@
 #define BusLogic_DriverVersion		"2.1.16"
 #define BusLogic_DriverDate		"18 July 2002"
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -41,6 +40,8 @@
 #include <linux/stat.h>
 #include <linux/pci.h>
 #include <linux/spinlock.h>
+#include <linux/jiffies.h>
+#include <linux/dma-mapping.h>
 #include <scsi/scsicam.h>
 
 #include <asm/dma.h>
@@ -661,7 +662,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 	   particular standard ISA I/O Address need not be probed.
 	 */
 	PrimaryProbeInfo->IO_Address = 0;
-	while ((PCI_Device = pci_find_device(PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_MULTIMASTER, PCI_Device)) != NULL) {
+	while ((PCI_Device = pci_get_device(PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_MULTIMASTER, PCI_Device)) != NULL) {
 		struct BusLogic_HostAdapter *HostAdapter = PrototypeHostAdapter;
 		struct BusLogic_PCIHostAdapterInformation PCIHostAdapterInformation;
 		enum BusLogic_ISACompatibleIOPort ModifyIOAddressRequest;
@@ -676,7 +677,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 		if (pci_enable_device(PCI_Device))
 			continue;
 
-		if (pci_set_dma_mask(PCI_Device, (u64) 0xffffffff))
+		if (pci_set_dma_mask(PCI_Device, DMA_32BIT_MASK ))
 			continue;
 
 		Bus = PCI_Device->bus->number;
@@ -761,7 +762,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 			PrimaryProbeInfo->Bus = Bus;
 			PrimaryProbeInfo->Device = Device;
 			PrimaryProbeInfo->IRQ_Channel = IRQ_Channel;
-			PrimaryProbeInfo->PCI_Device = PCI_Device;
+			PrimaryProbeInfo->PCI_Device = pci_dev_get(PCI_Device);
 			PCIMultiMasterCount++;
 		} else if (BusLogic_ProbeInfoCount < BusLogic_MaxHostAdapters) {
 			struct BusLogic_ProbeInfo *ProbeInfo = &BusLogic_ProbeInfoList[BusLogic_ProbeInfoCount++];
@@ -772,7 +773,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 			ProbeInfo->Bus = Bus;
 			ProbeInfo->Device = Device;
 			ProbeInfo->IRQ_Channel = IRQ_Channel;
-			ProbeInfo->PCI_Device = PCI_Device;
+			ProbeInfo->PCI_Device = pci_dev_get(PCI_Device);
 			NonPrimaryPCIMultiMasterCount++;
 			PCIMultiMasterCount++;
 		} else
@@ -822,7 +823,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 	   noting the PCI bus location and assigned IRQ Channel.
 	 */
 	PCI_Device = NULL;
-	while ((PCI_Device = pci_find_device(PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_MULTIMASTER_NC, PCI_Device)) != NULL) {
+	while ((PCI_Device = pci_get_device(PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_MULTIMASTER_NC, PCI_Device)) != NULL) {
 		unsigned char Bus;
 		unsigned char Device;
 		unsigned int IRQ_Channel;
@@ -831,7 +832,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 		if (pci_enable_device(PCI_Device))
 			continue;
 
-		if (pci_set_dma_mask(PCI_Device, (u64) 0xffffffff))
+		if (pci_set_dma_mask(PCI_Device, DMA_32BIT_MASK))
 			continue;
 
 		Bus = PCI_Device->bus->number;
@@ -849,7 +850,7 @@ static int __init BusLogic_InitializeMultiMasterProbeInfo(struct BusLogic_HostAd
 				ProbeInfo->Bus = Bus;
 				ProbeInfo->Device = Device;
 				ProbeInfo->IRQ_Channel = IRQ_Channel;
-				ProbeInfo->PCI_Device = PCI_Device;
+				ProbeInfo->PCI_Device = pci_dev_get(PCI_Device);
 				break;
 			}
 		}
@@ -873,7 +874,7 @@ static int __init BusLogic_InitializeFlashPointProbeInfo(struct BusLogic_HostAda
 	/*
 	   Interrogate PCI Configuration Space for any FlashPoint Host Adapters.
 	 */
-	while ((PCI_Device = pci_find_device(PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_FLASHPOINT, PCI_Device)) != NULL) {
+	while ((PCI_Device = pci_get_device(PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_FLASHPOINT, PCI_Device)) != NULL) {
 		unsigned char Bus;
 		unsigned char Device;
 		unsigned int IRQ_Channel;
@@ -885,7 +886,7 @@ static int __init BusLogic_InitializeFlashPointProbeInfo(struct BusLogic_HostAda
 		if (pci_enable_device(PCI_Device))
 			continue;
 
-		if (pci_set_dma_mask(PCI_Device, (u64) 0xffffffff))
+		if (pci_set_dma_mask(PCI_Device, DMA_32BIT_MASK))
 			continue;
 
 		Bus = PCI_Device->bus->number;
@@ -922,7 +923,7 @@ static int __init BusLogic_InitializeFlashPointProbeInfo(struct BusLogic_HostAda
 			ProbeInfo->Bus = Bus;
 			ProbeInfo->Device = Device;
 			ProbeInfo->IRQ_Channel = IRQ_Channel;
-			ProbeInfo->PCI_Device = PCI_Device;
+			ProbeInfo->PCI_Device = pci_dev_get(PCI_Device);
 			FlashPointCount++;
 		} else
 			BusLogic_Warning("BusLogic: Too many Host Adapters " "detected\n", NULL);
@@ -1843,7 +1844,7 @@ static boolean __init BusLogic_AcquireResources(struct BusLogic_HostAdapter *Hos
 	/*
 	   Acquire shared access to the IRQ Channel.
 	 */
-	if (request_irq(HostAdapter->IRQ_Channel, BusLogic_InterruptHandler, SA_SHIRQ, HostAdapter->FullModelName, HostAdapter) < 0) {
+	if (request_irq(HostAdapter->IRQ_Channel, BusLogic_InterruptHandler, IRQF_SHARED, HostAdapter->FullModelName, HostAdapter) < 0) {
 		BusLogic_Error("UNABLE TO ACQUIRE IRQ CHANNEL %d - DETACHING\n", HostAdapter, HostAdapter->IRQ_Channel);
 		return false;
 	}
@@ -1889,6 +1890,7 @@ static void BusLogic_ReleaseResources(struct BusLogic_HostAdapter *HostAdapter)
 	 */
 	if (HostAdapter->MailboxSpace)
 		pci_free_consistent(HostAdapter->PCI_Device, HostAdapter->MailboxSize, HostAdapter->MailboxSpace, HostAdapter->MailboxSpaceHandle);
+	pci_dev_put(HostAdapter->PCI_Device);
 	HostAdapter->MailboxSpace = NULL;
 	HostAdapter->MailboxSpaceHandle = 0;
 	HostAdapter->MailboxSize = 0;
@@ -2175,6 +2177,7 @@ static int __init BusLogic_init(void)
 {
 	int BusLogicHostAdapterCount = 0, DriverOptionsIndex = 0, ProbeIndex;
 	struct BusLogic_HostAdapter *PrototypeHostAdapter;
+	int ret = 0;
 
 #ifdef MODULE
 	if (BusLogic)
@@ -2183,21 +2186,21 @@ static int __init BusLogic_init(void)
 
 	if (BusLogic_ProbeOptions.NoProbe)
 		return -ENODEV;
-	BusLogic_ProbeInfoList = (struct BusLogic_ProbeInfo *)
-	    kmalloc(BusLogic_MaxHostAdapters * sizeof(struct BusLogic_ProbeInfo), GFP_ATOMIC);
+	BusLogic_ProbeInfoList =
+	    kzalloc(BusLogic_MaxHostAdapters * sizeof(struct BusLogic_ProbeInfo), GFP_KERNEL);
 	if (BusLogic_ProbeInfoList == NULL) {
 		BusLogic_Error("BusLogic: Unable to allocate Probe Info List\n", NULL);
 		return -ENOMEM;
 	}
-	memset(BusLogic_ProbeInfoList, 0, BusLogic_MaxHostAdapters * sizeof(struct BusLogic_ProbeInfo));
-	PrototypeHostAdapter = (struct BusLogic_HostAdapter *)
-	    kmalloc(sizeof(struct BusLogic_HostAdapter), GFP_ATOMIC);
+
+	PrototypeHostAdapter =
+	    kzalloc(sizeof(struct BusLogic_HostAdapter), GFP_KERNEL);
 	if (PrototypeHostAdapter == NULL) {
 		kfree(BusLogic_ProbeInfoList);
 		BusLogic_Error("BusLogic: Unable to allocate Prototype " "Host Adapter\n", NULL);
 		return -ENOMEM;
 	}
-	memset(PrototypeHostAdapter, 0, sizeof(struct BusLogic_HostAdapter));
+
 #ifdef MODULE
 	if (BusLogic != NULL)
 		BusLogic_Setup(BusLogic);
@@ -2281,25 +2284,49 @@ static int __init BusLogic_init(void)
 		   perform Target Device Inquiry.
 		 */
 		if (BusLogic_ReadHostAdapterConfiguration(HostAdapter) &&
-		    BusLogic_ReportHostAdapterConfiguration(HostAdapter) && BusLogic_AcquireResources(HostAdapter) && BusLogic_CreateInitialCCBs(HostAdapter) && BusLogic_InitializeHostAdapter(HostAdapter) && BusLogic_TargetDeviceInquiry(HostAdapter)) {
+		    BusLogic_ReportHostAdapterConfiguration(HostAdapter) &&
+		    BusLogic_AcquireResources(HostAdapter) &&
+		    BusLogic_CreateInitialCCBs(HostAdapter) &&
+		    BusLogic_InitializeHostAdapter(HostAdapter) &&
+		    BusLogic_TargetDeviceInquiry(HostAdapter)) {
 			/*
 			   Initialization has been completed successfully.  Release and
 			   re-register usage of the I/O Address range so that the Model
 			   Name of the Host Adapter will appear, and initialize the SCSI
 			   Host structure.
 			 */
-			release_region(HostAdapter->IO_Address, HostAdapter->AddressCount);
-			if (!request_region(HostAdapter->IO_Address, HostAdapter->AddressCount, HostAdapter->FullModelName)) {
-				printk(KERN_WARNING "BusLogic: Release and re-register of " "port 0x%04lx failed \n", (unsigned long) HostAdapter->IO_Address);
+			release_region(HostAdapter->IO_Address,
+				       HostAdapter->AddressCount);
+			if (!request_region(HostAdapter->IO_Address,
+					    HostAdapter->AddressCount,
+					    HostAdapter->FullModelName)) {
+				printk(KERN_WARNING
+					"BusLogic: Release and re-register of "
+					"port 0x%04lx failed \n",
+					(unsigned long)HostAdapter->IO_Address);
 				BusLogic_DestroyCCBs(HostAdapter);
 				BusLogic_ReleaseResources(HostAdapter);
 				list_del(&HostAdapter->host_list);
 				scsi_host_put(Host);
+				ret = -ENOMEM;
 			} else {
-				BusLogic_InitializeHostStructure(HostAdapter, Host);
-				scsi_add_host(Host, HostAdapter->PCI_Device ? &HostAdapter->PCI_Device->dev : NULL);
-				scsi_scan_host(Host);
-				BusLogicHostAdapterCount++;
+				BusLogic_InitializeHostStructure(HostAdapter,
+								 Host);
+				if (scsi_add_host(Host, HostAdapter->PCI_Device
+						? &HostAdapter->PCI_Device->dev
+						  : NULL)) {
+					printk(KERN_WARNING
+					       "BusLogic: scsi_add_host()"
+					       "failed!\n");
+					BusLogic_DestroyCCBs(HostAdapter);
+					BusLogic_ReleaseResources(HostAdapter);
+					list_del(&HostAdapter->host_list);
+					scsi_host_put(Host);
+					ret = -ENODEV;
+				} else {
+					scsi_scan_host(Host);
+					BusLogicHostAdapterCount++;
+				}
 			}
 		} else {
 			/*
@@ -2314,12 +2341,13 @@ static int __init BusLogic_init(void)
 			BusLogic_ReleaseResources(HostAdapter);
 			list_del(&HostAdapter->host_list);
 			scsi_host_put(Host);
+			ret = -ENODEV;
 		}
 	}
 	kfree(PrototypeHostAdapter);
 	kfree(BusLogic_ProbeInfoList);
 	BusLogic_ProbeInfoList = NULL;
-	return 0;
+	return ret;
 }
 
 
@@ -2625,7 +2653,7 @@ static void BusLogic_ProcessCompletedCCBs(struct BusLogic_HostAdapter *HostAdapt
   Adapters.
 */
 
-static irqreturn_t BusLogic_InterruptHandler(int IRQ_Channel, void *DeviceIdentifier, struct pt_regs *InterruptRegisters)
+static irqreturn_t BusLogic_InterruptHandler(int IRQ_Channel, void *DeviceIdentifier)
 {
 	struct BusLogic_HostAdapter *HostAdapter = (struct BusLogic_HostAdapter *) DeviceIdentifier;
 	unsigned long ProcessorFlags;
@@ -2896,7 +2924,7 @@ static int BusLogic_QueueCommand(struct scsi_cmnd *Command, void (*CompletionRou
 		 */
 		if (HostAdapter->ActiveCommands[TargetID] == 0)
 			HostAdapter->LastSequencePoint[TargetID] = jiffies;
-		else if (jiffies - HostAdapter->LastSequencePoint[TargetID] > 4 * HZ) {
+		else if (time_after(jiffies, HostAdapter->LastSequencePoint[TargetID] + 4 * HZ)) {
 			HostAdapter->LastSequencePoint[TargetID] = jiffies;
 			QueueTag = BusLogic_OrderedQueueTag;
 		}
@@ -2953,6 +2981,7 @@ static int BusLogic_QueueCommand(struct scsi_cmnd *Command, void (*CompletionRou
 }
 
 
+#if 0
 /*
   BusLogic_AbortCommand aborts Command if possible.
 */
@@ -3023,6 +3052,7 @@ static int BusLogic_AbortCommand(struct scsi_cmnd *Command)
 	return SUCCESS;
 }
 
+#endif
 /*
   BusLogic_ResetHostAdapter resets Host Adapter if possible, marking all
   currently executing SCSI Commands as having been Reset.
@@ -3569,6 +3599,17 @@ static void __exit BusLogic_exit(void)
 }
 
 __setup("BusLogic=", BusLogic_Setup);
+
+static struct pci_device_id BusLogic_pci_tbl[] __devinitdata = {
+	{ PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_MULTIMASTER,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_MULTIMASTER_NC,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ PCI_VENDOR_ID_BUSLOGIC, PCI_DEVICE_ID_BUSLOGIC_FLASHPOINT,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ }
+};
+MODULE_DEVICE_TABLE(pci, BusLogic_pci_tbl);
 
 module_init(BusLogic_init);
 module_exit(BusLogic_exit);

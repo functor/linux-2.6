@@ -43,7 +43,7 @@ static __init int find_northbridge(void)
 int __init k8_scan_nodes(unsigned long start, unsigned long end)
 { 
 	unsigned long prevbase;
-	struct node nodes[8];
+	struct bootnode nodes[8];
 	int nodeid, i, nb; 
 	unsigned char nodeids[8];
 	int found = 0;
@@ -53,6 +53,9 @@ int __init k8_scan_nodes(unsigned long start, unsigned long end)
 	unsigned dualcore = 0;
 
 	nodes_clear(nodes_parsed);
+
+	if (!early_pci_allowed())
+		return -1;
 
 	nb = find_northbridge(); 
 	if (nb < 0) 
@@ -146,6 +149,9 @@ int __init k8_scan_nodes(unsigned long start, unsigned long end)
 		
 		nodes[nodeid].start = base; 
 		nodes[nodeid].end = limit;
+		e820_register_active_regions(nodeid,
+				nodes[nodeid].start >> PAGE_SHIFT,
+				nodes[nodeid].end >> PAGE_SHIFT);
 
 		prevbase = base;
 

@@ -10,7 +10,6 @@
  * Released under the GPL
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -31,6 +30,7 @@
 #include <linux/mii.h>
 #include <linux/ethtool.h>
 #include <linux/bitops.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/8xx_immap.h>
 #include <asm/pgtable.h>
@@ -38,7 +38,6 @@
 #include <asm/irq.h>
 #include <asm/uaccess.h>
 #include <asm/commproc.h>
-#include <asm/dma-mapping.h>
 
 #include "fec_8xx.h"
 
@@ -55,11 +54,11 @@ MODULE_AUTHOR("Pantelis Antoniou <panto@intracom.gr>");
 MODULE_DESCRIPTION("Motorola 8xx FEC ethernet driver");
 MODULE_LICENSE("GPL");
 
-MODULE_PARM(fec_8xx_debug, "i");
+int fec_8xx_debug = -1;		/* -1 == use FEC_8XX_DEF_MSG_ENABLE as value */
+module_param(fec_8xx_debug, int, 0);
 MODULE_PARM_DESC(fec_8xx_debug,
 		 "FEC 8xx bitmapped debugging message enable value");
 
-int fec_8xx_debug = -1;		/* -1 == use FEC_8XX_DEF_MSG_ENABLE as value */
 
 /*************************************************/
 
@@ -709,7 +708,7 @@ static void fec_enet_tx(struct net_device *dev)
  * This is called from the MPC core interrupt.
  */
 static irqreturn_t
-fec_enet_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+fec_enet_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
 	struct fec_enet_private *fep;
@@ -769,7 +768,7 @@ fec_enet_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 /* This interrupt occurs when the PHY detects a link change. */
 static irqreturn_t
-fec_mii_link_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+fec_mii_link_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
 	struct fec_enet_private *fep;
@@ -1035,20 +1034,20 @@ static void fec_set_msglevel(struct net_device *dev, __u32 value)
 	fep->msg_enable = value;
 }
 
-static struct ethtool_ops fec_ethtool_ops = {
-	.get_drvinfo = fec_get_drvinfo,
-	.get_regs_len = fec_get_regs_len,
-	.get_settings = fec_get_settings,
-	.set_settings = fec_set_settings,
-	.nway_reset = fec_nway_reset,
-	.get_link = ethtool_op_get_link,
-	.get_msglevel = fec_get_msglevel,
-	.set_msglevel = fec_set_msglevel,
-	.get_tx_csum = ethtool_op_get_tx_csum,
-	.set_tx_csum = ethtool_op_set_tx_csum,	/* local! */
-	.get_sg = ethtool_op_get_sg,
-	.set_sg = ethtool_op_set_sg,
-	.get_regs = fec_get_regs,
+static const struct ethtool_ops fec_ethtool_ops = {
+	.get_drvinfo	= fec_get_drvinfo,
+	.get_regs_len	= fec_get_regs_len,
+	.get_settings	= fec_get_settings,
+	.set_settings	= fec_set_settings,
+	.nway_reset	= fec_nway_reset,
+	.get_link	= ethtool_op_get_link,
+	.get_msglevel	= fec_get_msglevel,
+	.set_msglevel	= fec_set_msglevel,
+	.get_tx_csum	= ethtool_op_get_tx_csum,
+	.set_tx_csum	= ethtool_op_set_tx_csum,	/* local! */
+	.get_sg		= ethtool_op_get_sg,
+	.set_sg		= ethtool_op_set_sg,
+	.get_regs	= fec_get_regs,
 };
 
 static int fec_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)

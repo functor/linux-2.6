@@ -5,7 +5,7 @@
 #include <linux/types.h>
 
 #define NETLINK_ROUTE		0	/* Routing/device hook				*/
-#define NETLINK_W1		1	/* 1-wire subsystem				*/
+#define NETLINK_UNUSED		1	/* Unused number				*/
 #define NETLINK_USERSOCK	2	/* Reserved for user mode socket protocols 	*/
 #define NETLINK_FIREWALL	3	/* Firewalling hook				*/
 #define NETLINK_INET_DIAG	4	/* INET socket monitoring			*/
@@ -21,6 +21,8 @@
 #define NETLINK_DNRTMSG		14	/* DECnet routing messages */
 #define NETLINK_KOBJECT_UEVENT	15	/* Kernel messages to userspace */
 #define NETLINK_GENERIC		16
+/* leave room for NETLINK_DM (DM Events) */
+#define NETLINK_SCSITRANSPORT	18	/* SCSI Transports */
 
 #define MAX_LINKS 32		
 
@@ -139,10 +141,10 @@ struct netlink_skb_parms
 {
 	struct ucred		creds;		/* Skb credentials	*/
 	__u32			pid;
-	__u32			dst_pid;
 	__u32			dst_group;
 	kernel_cap_t		eff_cap;
 	__u32			loginuid;	/* Login (audit) uid */
+	__u32			sid;		/* SELinux security id */
 };
 
 #define NETLINK_CB(skb)		(*(struct netlink_skb_parms*)&((skb)->cb))
@@ -151,6 +153,7 @@ struct netlink_skb_parms
 
 extern struct sock *netlink_kernel_create(int unit, unsigned int groups, void (*input)(struct sock *sk, int len), struct module *module);
 extern void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err);
+extern int netlink_has_listeners(struct sock *sk, unsigned int group);
 extern int netlink_unicast(struct sock *ssk, struct sk_buff *skb, __u32 pid, int nonblock);
 extern int netlink_broadcast(struct sock *ssk, struct sk_buff *skb, __u32 pid,
 			     __u32 group, gfp_t allocation);
@@ -170,6 +173,7 @@ int netlink_sendskb(struct sock *sk, struct sk_buff *skb, int protocol);
  */
 #define NLMSG_GOODORDER 0
 #define NLMSG_GOODSIZE (SKB_MAX_ORDER(0, NLMSG_GOODORDER))
+#define NLMSG_DEFAULT_SIZE (NLMSG_GOODSIZE - NLMSG_HDRLEN)
 
 
 struct netlink_callback

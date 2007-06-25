@@ -110,7 +110,7 @@ void show_mem(void)
  */
 void __init paging_init(void)
 {
-	unsigned long zones_size[MAX_NR_ZONES] = {0, 0, 0};
+	unsigned long zones_size[MAX_NR_ZONES] = {0, };
 
 	pgd_init((unsigned long)swapper_pg_dir);
 	pgd_init((unsigned long)swapper_pg_dir +
@@ -173,7 +173,7 @@ void free_initmem(void)
 	addr = (unsigned long)(&__init_begin);
 	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(addr));
-		set_page_count(virt_to_page(addr), 1);
+		init_page_count(virt_to_page(addr));
 		free_page(addr);
 		totalram_pages++;
 	}
@@ -186,7 +186,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 	unsigned long p;
 	for (p = start; p < end; p += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(p));
-		set_page_count(virt_to_page(p), 1);
+		init_page_count(virt_to_page(p));
 		free_page(p);
 		totalram_pages++;
 	}

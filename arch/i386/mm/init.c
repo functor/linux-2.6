@@ -6,7 +6,6 @@
  *  Support of BIGMEM added by Gerhard Wichert, Siemens AG, July 1999
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -23,12 +22,14 @@
 #include <linux/init.h>
 #include <linux/highmem.h>
 #include <linux/pagemap.h>
+#include <linux/poison.h>
 #include <linux/bootmem.h>
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include <linux/efi.h>
 #include <linux/memory_hotplug.h>
 #include <linux/initrd.h>
+#include <linux/cpumask.h>
 
 #include <asm/processor.h>
 #include <asm/system.h>
@@ -191,8 +192,6 @@ static inline int page_kills_ppro(unsigned long pagenr)
 	return 0;
 }
 
-extern int is_available_memory(efi_memory_desc_t *);
-
 int page_is_ram(unsigned long pagenr)
 {
 	int i;
@@ -232,6 +231,27 @@ int page_is_ram(unsigned long pagenr)
 	return 0;
 }
 
+/*
+ * devmem_is_allowed() checks to see if /dev/mem access to a certain address is
+ * valid. The argument is a physical page number.
+ *
+ *
+ * On x86, access has to be given to the first megabyte of ram because that area
+ * contains bios code and data regions used by X and dosemu and similar apps.
+ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
+ * mmio resources as well as potential bios/acpi data regions.
+ */
+int devmem_is_allowed(unsigned long pagenr)
+{
+   if (pagenr <= 256)
+       return 1;
+   if (!page_is_ram(pagenr))
+       return 1;
+   return 0;
+}
+
+EXPORT_SYMBOL_GPL(page_is_ram);
+
 #ifdef CONFIG_HIGHMEM
 pte_t *kmap_pte;
 pgprot_t kmap_prot;
@@ -270,7 +290,7 @@ static void __init permanent_kmaps_init(pgd_t *pgd_base)
 
 static void __meminit free_new_highpage(struct page *page)
 {
-	set_page_count(page, 1);
+	init_page_count(page);
 	__free_page(page);
 	totalhigh_pages++;
 }
@@ -284,7 +304,7 @@ void __init add_one_highpage_init(struct page *page, int pfn, int bad_ppro)
 		SetPageReserved(page);
 }
 
-static int add_one_highpage_hotplug(struct page *page, unsigned long pfn)
+static int __meminit add_one_highpage_hotplug(struct page *page, unsigned long pfn)
 {
 	free_new_highpage(page);
 	totalram_pages++;
@@ -301,7 +321,7 @@ static int add_one_highpage_hotplug(struct page *page, unsigned long pfn)
  * has been added dynamically that would be
  * onlined here is in HIGHMEM
  */
-void online_page(struct page *page)
+void __meminit online_page(struct page *page)
 {
 	ClearPageReserved(page);
 	add_one_highpage_hotplug(page, page_to_pfn(page));
@@ -384,7 +404,7 @@ static void __init pagetable_init (void)
 #endif
 }
 
-#ifdef CONFIG_SOFTWARE_SUSPEND
+#if defined(CONFIG_SOFTWARE_SUSPEND) || defined(CONFIG_ACPI_SLEEP)
 /*
  * Swap suspend & friends need this for resume because things like the intel-agp
  * driver might have split up a kernel 4MB mapping.
@@ -432,18 +452,25 @@ u64 __supported_pte_mask __read_mostly = ~_PAGE_NX;
  * Control non executable mappings.
  *
  * on      Enable
- * off     Disable
+ * off     Disable (disables exec-shield too)
  */
-void __init noexec_setup(const char *str)
+static int __init noexec_setup(char *str)
 {
-	if (!strncmp(str, "on",2) && cpu_has_nx) {
-		__supported_pte_mask |= _PAGE_NX;
-		disable_nx = 0;
-	} else if (!strncmp(str,"off",3)) {
+	if (!str || !strcmp(str, "on")) {
+		if (cpu_has_nx) {
+			__supported_pte_mask |= _PAGE_NX;
+			disable_nx = 0;
+		}
+	} else if (!strcmp(str,"off")) {
 		disable_nx = 1;
 		__supported_pte_mask &= ~_PAGE_NX;
-	}
+		exec_shield = 0;
+	} else
+		return -EINVAL;
+
+	return 0;
 }
+early_param("noexec", noexec_setup);
 
 int nx_enabled = 0;
 #ifdef CONFIG_X86_PAE
@@ -486,6 +513,7 @@ int __init set_kernel_exec(unsigned long vaddr, int enable)
 		pte->pte_high &= ~(1 << (_PAGE_BIT_NX - 32));
 	else
 		pte->pte_high |= 1 << (_PAGE_BIT_NX - 32);
+	pte_update_defer(&init_mm, vaddr, pte);
 	__flush_tlb_all();
 out:
 	return ret;
@@ -506,7 +534,10 @@ void __init paging_init(void)
 	set_nx();
 	if (nx_enabled)
 		printk("NX (Execute Disable) protection: active\n");
+	else
 #endif
+	if (exec_shield)
+		printk("Using x86 segment limits to approximate NX protection\n");
 
 	pagetable_init();
 
@@ -551,18 +582,6 @@ static void __init test_wp_bit(void)
 	}
 }
 
-static void __init set_max_mapnr_init(void)
-{
-#ifdef CONFIG_HIGHMEM
-	num_physpages = highend_pfn;
-#else
-	num_physpages = max_low_pfn;
-#endif
-#ifdef CONFIG_FLATMEM
-	max_mapnr = num_physpages;
-#endif
-}
-
 static struct kcore_list kcore_mem, kcore_vmalloc; 
 
 void __init mem_init(void)
@@ -573,8 +592,7 @@ void __init mem_init(void)
 	int bad_ppro;
 
 #ifdef CONFIG_FLATMEM
-	if (!mem_map)
-		BUG();
+	BUG_ON(!mem_map);
 #endif
 	
 	bad_ppro = ppro_with_ram_bug();
@@ -589,14 +607,6 @@ void __init mem_init(void)
 	}
 #endif
  
-	set_max_mapnr_init();
-
-#ifdef CONFIG_HIGHMEM
-	high_memory = (void *) __va(highstart_pfn * PAGE_SIZE - 1) + 1;
-#else
-	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE - 1) + 1;
-#endif
-
 	/* this will put all low memory onto the freelists */
 	totalram_pages += free_all_bootmem();
 
@@ -628,6 +638,48 @@ void __init mem_init(void)
 		(unsigned long) (totalhigh_pages << (PAGE_SHIFT-10))
 	       );
 
+#if 1 /* double-sanity-check paranoia */
+	printk("virtual kernel memory layout:\n"
+	       "    fixmap  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+#ifdef CONFIG_HIGHMEM
+	       "    pkmap   : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+#endif
+	       "    vmalloc : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+	       "    lowmem  : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+	       "      .init : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+	       "      .data : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+	       "      .text : 0x%08lx - 0x%08lx   (%4ld kB)\n",
+	       FIXADDR_START, FIXADDR_TOP,
+	       (FIXADDR_TOP - FIXADDR_START) >> 10,
+
+#ifdef CONFIG_HIGHMEM
+	       PKMAP_BASE, PKMAP_BASE+LAST_PKMAP*PAGE_SIZE,
+	       (LAST_PKMAP*PAGE_SIZE) >> 10,
+#endif
+
+	       VMALLOC_START, VMALLOC_END,
+	       (VMALLOC_END - VMALLOC_START) >> 20,
+
+	       (unsigned long)__va(0), (unsigned long)high_memory,
+	       ((unsigned long)high_memory - (unsigned long)__va(0)) >> 20,
+
+	       (unsigned long)&__init_begin, (unsigned long)&__init_end,
+	       ((unsigned long)&__init_end - (unsigned long)&__init_begin) >> 10,
+
+	       (unsigned long)&_etext, (unsigned long)&_edata,
+	       ((unsigned long)&_edata - (unsigned long)&_etext) >> 10,
+
+	       (unsigned long)&_text, (unsigned long)&_etext,
+	       ((unsigned long)&_etext - (unsigned long)&_text) >> 10);
+
+#ifdef CONFIG_HIGHMEM
+	BUG_ON(PKMAP_BASE+LAST_PKMAP*PAGE_SIZE > FIXADDR_START);
+	BUG_ON(VMALLOC_END                     > PKMAP_BASE);
+#endif
+	BUG_ON(VMALLOC_START                   > VMALLOC_END);
+	BUG_ON((unsigned long)high_memory      > VMALLOC_START);
+#endif /* double-sanity-check paranoia */
+
 #ifdef CONFIG_X86_PAE
 	if (!cpu_has_pae)
 		panic("cannot execute a PAE-enabled kernel on a PAE-less CPU!");
@@ -646,16 +698,11 @@ void __init mem_init(void)
 #endif
 }
 
-/*
- * this is for the non-NUMA, single node SMP system case.
- * Specifically, in the case of x86, we will always add
- * memory to the highmem for now.
- */
-#ifndef CONFIG_NEED_MULTIPLE_NODES
-int add_memory(u64 start, u64 size)
+#ifdef CONFIG_MEMORY_HOTPLUG
+int arch_add_memory(int nid, u64 start, u64 size)
 {
-	struct pglist_data *pgdata = &contig_page_data;
-	struct zone *zone = pgdata->node_zones + MAX_NR_ZONES-1;
+	struct pglist_data *pgdata = NODE_DATA(nid);
+	struct zone *zone = pgdata->node_zones + ZONE_HIGHMEM;
 	unsigned long start_pfn = start >> PAGE_SHIFT;
 	unsigned long nr_pages = size >> PAGE_SHIFT;
 
@@ -666,10 +713,11 @@ int remove_memory(u64 start, u64 size)
 {
 	return -EINVAL;
 }
+EXPORT_SYMBOL_GPL(remove_memory);
 #endif
 
-kmem_cache_t *pgd_cache;
-kmem_cache_t *pmd_cache;
+struct kmem_cache *pgd_cache;
+struct kmem_cache *pmd_cache;
 
 void __init pgtable_cache_init(void)
 {
@@ -720,33 +768,17 @@ static int noinline do_test_wp_bit(void)
 	return flag;
 }
 
-void free_initmem(void)
-{
-	unsigned long addr;
-
-	addr = (unsigned long)(&__init_begin);
-	for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
-		ClearPageReserved(virt_to_page(addr));
-		set_page_count(virt_to_page(addr), 1);
-		memset((void *)addr, 0xcc, PAGE_SIZE);
-		free_page(addr);
-		totalram_pages++;
-	}
-	printk (KERN_INFO "Freeing unused kernel memory: %dk freed\n", (__init_end - __init_begin) >> 10);
-}
-
 #ifdef CONFIG_DEBUG_RODATA
 
-extern char __start_rodata, __end_rodata;
 void mark_rodata_ro(void)
 {
-	unsigned long addr = (unsigned long)&__start_rodata;
+	unsigned long addr = (unsigned long)__start_rodata;
 
-	for (; addr < (unsigned long)&__end_rodata; addr += PAGE_SIZE)
+	for (; addr < (unsigned long)__end_rodata; addr += PAGE_SIZE)
 		change_page_attr(virt_to_page(addr), 1, PAGE_KERNEL_RO);
 
-	printk ("Write protecting the kernel read-only data: %luk\n",
-			(unsigned long)(&__end_rodata - &__start_rodata) >> 10);
+	printk("Write protecting the kernel read-only data: %uk\n",
+			(__end_rodata - __start_rodata) >> 10);
 
 	/*
 	 * change_page_attr() requires a global_flush_tlb() call after it.
@@ -758,17 +790,31 @@ void mark_rodata_ro(void)
 }
 #endif
 
+void free_init_pages(char *what, unsigned long begin, unsigned long end)
+{
+	unsigned long addr;
+
+	for (addr = begin; addr < end; addr += PAGE_SIZE) {
+		ClearPageReserved(virt_to_page(addr));
+		init_page_count(virt_to_page(addr));
+		memset((void *)addr, POISON_FREE_INITMEM, PAGE_SIZE);
+		free_page(addr);
+		totalram_pages++;
+	}
+	printk(KERN_INFO "Freeing %s: %ldk freed\n", what, (end - begin) >> 10);
+}
+
+void free_initmem(void)
+{
+	free_init_pages("unused kernel memory",
+			(unsigned long)(&__init_begin),
+			(unsigned long)(&__init_end));
+}
 
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
-	if (start < end)
-		printk (KERN_INFO "Freeing initrd memory: %ldk freed\n", (end - start) >> 10);
-	for (; start < end; start += PAGE_SIZE) {
-		ClearPageReserved(virt_to_page(start));
-		set_page_count(virt_to_page(start), 1);
-		free_page(start);
-		totalram_pages++;
-	}
+	free_init_pages("initrd memory", start, end);
 }
 #endif
+

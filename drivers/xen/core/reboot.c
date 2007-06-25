@@ -5,6 +5,7 @@
 #include <linux/unistd.h>
 #include <linux/module.h>
 #include <linux/reboot.h>
+#include <linux/syscalls.h>
 #include <linux/sysrq.h>
 #include <linux/stringify.h>
 #include <asm/irq.h>
@@ -78,8 +79,8 @@ EXPORT_SYMBOL(machine_power_off);
 
 /* Ignore multiple shutdown requests. */
 static int shutting_down = SHUTDOWN_INVALID;
-static void __shutdown_handler(void *unused);
-static DECLARE_WORK(shutdown_work, __shutdown_handler, NULL);
+static void __shutdown_handler(struct work_struct *work);
+static DECLARE_DELAYED_WORK(shutdown_work, __shutdown_handler);
 
 #if defined(__i386__) || defined(__x86_64__)
 
@@ -222,7 +223,7 @@ static int shutdown_process(void *__unused)
 
 	if ((shutting_down == SHUTDOWN_POWEROFF) ||
 	    (shutting_down == SHUTDOWN_HALT)) {
-		if (execve("/sbin/poweroff", poweroff_argv, envp) < 0) {
+		if (kernel_execve("/sbin/poweroff", poweroff_argv, envp) < 0) {
 			sys_reboot(LINUX_REBOOT_MAGIC1,
 				   LINUX_REBOOT_MAGIC2,
 				   LINUX_REBOOT_CMD_POWER_OFF,
@@ -249,7 +250,7 @@ static int kthread_create_on_cpu(int (*f)(void *arg),
 	return 0;
 }
 
-static void __shutdown_handler(void *unused)
+static void __shutdown_handler(struct work_struct *unused)
 {
 	int err;
 
@@ -309,7 +310,7 @@ static void shutdown_handler(struct xenbus_watch *watch,
 	}
 
 	if (shutting_down != SHUTDOWN_INVALID)
-		schedule_work(&shutdown_work);
+		schedule_delayed_work(&shutdown_work, 0);
 
 	kfree(str);
 }
@@ -341,7 +342,7 @@ static void sysrq_handler(struct xenbus_watch *watch, const char **vec,
 
 #ifdef CONFIG_MAGIC_SYSRQ
 	if (sysrq_key != '\0')
-		handle_sysrq(sysrq_key, NULL, NULL);
+		handle_sysrq(sysrq_key, NULL);
 #endif
 }
 

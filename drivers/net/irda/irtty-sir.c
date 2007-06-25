@@ -33,6 +33,7 @@
 #include <asm/uaccess.h>
 #include <linux/smp_lock.h>
 #include <linux/delay.h>
+#include <linux/mutex.h>
 
 #include <net/irda/irda.h>
 #include <net/irda/irda_device.h>
@@ -116,7 +117,7 @@ static int irtty_change_speed(struct sir_dev *dev, unsigned speed)
 {
 	struct sirtty_cb *priv = dev->priv;
 	struct tty_struct *tty;
-        struct termios old_termios;
+        struct ktermios old_termios;
 	int cflag;
 
 	IRDA_ASSERT(priv != NULL, return -1;);
@@ -317,7 +318,7 @@ static void irtty_write_wakeup(struct tty_struct *tty)
 
 static inline void irtty_stop_receiver(struct tty_struct *tty, int stop)
 {
-	struct termios old_termios;
+	struct ktermios old_termios;
 	int cflag;
 
 	lock_kernel();
@@ -338,7 +339,7 @@ static inline void irtty_stop_receiver(struct tty_struct *tty, int stop)
 /*****************************************************************/
 
 /* serialize ldisc open/close with sir_dev */
-static DECLARE_MUTEX(irtty_sem);
+static DEFINE_MUTEX(irtty_mutex);
 
 /* notifier from sir_dev when irda% device gets opened (ifup) */
 
@@ -348,11 +349,11 @@ static int irtty_start_dev(struct sir_dev *dev)
 	struct tty_struct *tty;
 
 	/* serialize with ldisc open/close */
-	down(&irtty_sem);
+	mutex_lock(&irtty_mutex);
 
 	priv = dev->priv;
 	if (unlikely(!priv || priv->magic!=IRTTY_MAGIC)) {
-		up(&irtty_sem);
+		mutex_unlock(&irtty_mutex);
 		return -ESTALE;
 	}
 
@@ -363,7 +364,7 @@ static int irtty_start_dev(struct sir_dev *dev)
 	/* Make sure we can receive more data */
 	irtty_stop_receiver(tty, FALSE);
 
-	up(&irtty_sem);
+	mutex_unlock(&irtty_mutex);
 	return 0;
 }
 
@@ -375,11 +376,11 @@ static int irtty_stop_dev(struct sir_dev *dev)
 	struct tty_struct *tty;
 
 	/* serialize with ldisc open/close */
-	down(&irtty_sem);
+	mutex_lock(&irtty_mutex);
 
 	priv = dev->priv;
 	if (unlikely(!priv || priv->magic!=IRTTY_MAGIC)) {
-		up(&irtty_sem);
+		mutex_unlock(&irtty_mutex);
 		return -ESTALE;
 	}
 
@@ -390,7 +391,7 @@ static int irtty_stop_dev(struct sir_dev *dev)
 	if (tty->driver->stop)
 		tty->driver->stop(tty);
 
-	up(&irtty_sem);
+	mutex_unlock(&irtty_mutex);
 
 	return 0;
 }
@@ -514,13 +515,13 @@ static int irtty_open(struct tty_struct *tty)
 	priv->dev = dev;
 
 	/* serialize with start_dev - in case we were racing with ifup */
-	down(&irtty_sem);
+	mutex_lock(&irtty_mutex);
 
 	dev->priv = priv;
 	tty->disc_data = priv;
 	tty->receive_room = 65536;
 
-	up(&irtty_sem);
+	mutex_unlock(&irtty_mutex);
 
 	IRDA_DEBUG(0, "%s - %s: irda line discipline opened\n", __FUNCTION__, tty->name);
 

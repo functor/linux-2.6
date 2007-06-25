@@ -2,6 +2,17 @@
 
 	.section ".init.data","aw"
 
+#ifdef USE_INT80
+
+	.globl syscall32_int80
+	.globl syscall32_int80_end
+
+syscall32_int80:
+	.incbin "arch/x86_64/ia32/vsyscall-int80.so"
+syscall32_int80_end:
+
+#endif
+
 	.globl syscall32_syscall
 	.globl syscall32_syscall_end
 

@@ -76,8 +76,7 @@ typedef enum {
 /*
  * signature record
  */
-struct ksign_signature
-{
+struct ksign_signature {
 	uint32_t	keyid[2];		/* 64 bit keyid */
 	time_t		timestamp;		/* signature made */
 	uint8_t		version;
@@ -93,8 +92,7 @@ extern void ksign_free_signature(struct ksign_signature *sig);
 /*
  * public key record
  */
-struct ksign_public_key
-{
+struct ksign_public_key {
 	struct list_head link;
 	atomic_t	count;			/* ref count */
 	time_t		timestamp;		/* key made */
@@ -123,8 +121,7 @@ extern struct ksign_public_key *ksign_get_public_key(const uint32_t *keyid);
 /*
  * user ID record
  */
-struct ksign_user_id
-{
+struct ksign_user_id {
 	int		len;			/* length of the name */
 	char		name[0];
 };
@@ -152,12 +149,12 @@ extern int DSA_verify(const MPI datahash, const MPI sig[], const MPI pkey[]);
  * - we _know_ the data is locked into kernel memory, so we don't want to have
  *   to kmap() it
  */
-static inline void SHA1_putc(struct crypto_tfm *sha1, uint8_t ch)
+static inline void SHA1_putc(struct hash_desc *sha1, uint8_t ch)
 {
-	crypto_digest_update_kernel(sha1, &ch, 1);
+	crypto_hash_update_kernel(sha1, &ch, 1);
 }
 
-static inline void SHA1_write(struct crypto_tfm *sha1, const void *s, size_t n)
+static inline void SHA1_write(struct hash_desc *sha1, const void *s, size_t n)
 {
-	crypto_digest_update_kernel(sha1, s, n);
+	crypto_hash_update_kernel(sha1, s, n);
 }

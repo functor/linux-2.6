@@ -49,6 +49,10 @@
  * - contrarily to some pages in DS_1869.PDF the rates can be set
  *   independently.
  *
+ * - Zoom Video is implemented by sharing the FM DAC, thus the user can
+ *   have either FM playback or Video playback but not both simultaneously.
+ *   The Video Playback Switch mixer control toggles this choice.
+ *
  * BUGS:
  *
  * - There is a major trouble I noted:
@@ -63,7 +67,16 @@
  *
  */
 
-
+/*
+ * ES1879 NOTES:
+ * - When Zoom Video is enabled (reg 0x71 bit 6 toggled on) the PCM playback
+ *   seems to be effected (speaker_test plays a lower frequency). Can't find
+ *   anything in the datasheet to account for this, so a Video Playback Switch
+ *   control has been included to allow ZV to be enabled only when necessary.
+ *   Then again on at least one test system the 0x71 bit 6 enable bit is not 
+ *   needed for ZV, so maybe the datasheet is entirely wrong here.
+ */
+ 
 #include <sound/driver.h>
 #include <linux/init.h>
 #include <linux/err.h>
@@ -72,6 +85,8 @@
 #include <linux/pnp.h>
 #include <linux/isapnp.h>
 #include <linux/moduleparam.h>
+#include <linux/delay.h>
+
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <sound/core.h>
@@ -148,7 +163,7 @@ struct snd_audiodrive {
 #define ES18XX_DUPLEX_SAME 0x0010	/* Playback and record must share the same rate */
 #define ES18XX_NEW_RATE	0x0020	/* More precise rate setting */
 #define ES18XX_AUXB	0x0040	/* AuxB mixer control */
-#define ES18XX_HWV	0x0080	/* Has hardware volume */
+#define ES18XX_HWV	0x0080	/* Has seperate hardware volume mixer controls*/
 #define ES18XX_MONO	0x0100	/* Mono_in mixer control */
 #define ES18XX_I2S	0x0200	/* I2S mixer control */
 #define ES18XX_MUTEREC	0x0400	/* Record source can be muted */
@@ -739,7 +754,7 @@ static int snd_es18xx_playback_trigger(struct snd_pcm_substream *substream,
 		return snd_es18xx_playback2_trigger(chip, substream, cmd);
 }
 
-static irqreturn_t snd_es18xx_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t snd_es18xx_interrupt(int irq, void *dev_id)
 {
 	struct snd_es18xx *chip = dev_id;
 	unsigned char status;
@@ -784,13 +799,16 @@ static irqreturn_t snd_es18xx_interrupt(int irq, void *dev_id, struct pt_regs *r
 
 	/* MPU */
 	if ((status & MPU_IRQ) && chip->rmidi)
-		snd_mpu401_uart_interrupt(irq, chip->rmidi->private_data, regs);
+		snd_mpu401_uart_interrupt(irq, chip->rmidi->private_data);
 
 	/* Hardware volume */
 	if (status & HWV_IRQ) {
-		int split = snd_es18xx_mixer_read(chip, 0x64) & 0x80;
-		snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE, &chip->hw_switch->id);
-		snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE, &chip->hw_volume->id);
+		int split = 0;
+		if (chip->caps & ES18XX_HWV) {
+			split = snd_es18xx_mixer_read(chip, 0x64) & 0x80;
+			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE, &chip->hw_switch->id);
+			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE, &chip->hw_volume->id);
+		}
 		if (!split) {
 			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE, &chip->master_switch->id);
 			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE, &chip->master_volume->id);
@@ -939,37 +957,118 @@ static int snd_es18xx_capture_close(struct snd_pcm_substream *substream)
  *  MIXER part
  */
 
+/* Record source mux routines:
+ * Depending on the chipset this mux switches between 4, 5, or 8 possible inputs.
+ * bit table for the 4/5 source mux:
+ * reg 1C:
+ *  b2 b1 b0   muxSource
+ *   x  0  x   microphone
+ *   0  1  x   CD
+ *   1  1  0   line
+ *   1  1  1   mixer
+ * if it's "mixer" and it's a 5 source mux chipset then reg 7A bit 3 determines
+ * either the play mixer or the capture mixer.
+ *
+ * "map4Source" translates from source number to reg bit pattern
+ * "invMap4Source" translates from reg bit pattern to source number
+ */
+
 static int snd_es18xx_info_mux(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
 {
-	static char *texts[8] = {
+	static char *texts4Source[4] = {
+		"Mic", "CD", "Line", "Master"
+	};
+	static char *texts5Source[5] = {
+		"Mic", "CD", "Line", "Master", "Mix"
+	};
+	static char *texts8Source[8] = {
 		"Mic", "Mic Master", "CD", "AOUT",
 		"Mic1", "Mix", "Line", "Master"
 	};
+	struct snd_es18xx *chip = snd_kcontrol_chip(kcontrol);
 
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
 	uinfo->count = 1;
-	uinfo->value.enumerated.items = 8;
-	if (uinfo->value.enumerated.item > 7)
-		uinfo->value.enumerated.item = 7;
-	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	switch (chip->version) {
+	case 0x1868:
+	case 0x1878:
+		uinfo->value.enumerated.items = 4;
+		if (uinfo->value.enumerated.item > 3)
+			uinfo->value.enumerated.item = 3;
+		strcpy(uinfo->value.enumerated.name, texts4Source[uinfo->value.enumerated.item]);
+		break;
+	case 0x1887:
+	case 0x1888:
+		uinfo->value.enumerated.items = 5;
+		if (uinfo->value.enumerated.item > 4)
+			uinfo->value.enumerated.item = 4;
+		strcpy(uinfo->value.enumerated.name, texts5Source[uinfo->value.enumerated.item]);
+		break;
+	case 0x1869: /* DS somewhat contradictory for 1869: could be be 5 or 8 */
+	case 0x1879:
+		uinfo->value.enumerated.items = 8;
+		if (uinfo->value.enumerated.item > 7)
+			uinfo->value.enumerated.item = 7;
+		strcpy(uinfo->value.enumerated.name, texts8Source[uinfo->value.enumerated.item]);
+		break;
+	default:
+		return -EINVAL;
+	}
 	return 0;
 }
 
 static int snd_es18xx_get_mux(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
+	static unsigned char invMap4Source[8] = {0, 0, 1, 1, 0, 0, 2, 3};
 	struct snd_es18xx *chip = snd_kcontrol_chip(kcontrol);
-	ucontrol->value.enumerated.item[0] = snd_es18xx_mixer_read(chip, 0x1c) & 0x07;
+	int muxSource = snd_es18xx_mixer_read(chip, 0x1c) & 0x07;
+	if (!(chip->version == 0x1869 || chip->version == 0x1879)) {
+		muxSource = invMap4Source[muxSource];
+		if (muxSource==3 && 
+		    (chip->version == 0x1887 || chip->version == 0x1888) &&
+		    (snd_es18xx_mixer_read(chip, 0x7a) & 0x08)
+		) 
+			muxSource = 4;
+	}
+	ucontrol->value.enumerated.item[0] = muxSource;
 	return 0;
 }
 
 static int snd_es18xx_put_mux(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
+	static unsigned char map4Source[4] = {0, 2, 6, 7};
 	struct snd_es18xx *chip = snd_kcontrol_chip(kcontrol);
 	unsigned char val = ucontrol->value.enumerated.item[0];
-	
-	if (val > 7)
+	unsigned char retVal = 0;
+
+	switch (chip->version) {
+ /* 5 source chips */
+	case 0x1887:
+	case 0x1888:
+		if (val > 4)
+			return -EINVAL;
+		if (val == 4) {
+			retVal = snd_es18xx_mixer_bits(chip, 0x7a, 0x08, 0x08) != 0x08;
+			val = 3;
+		} else
+			retVal = snd_es18xx_mixer_bits(chip, 0x7a, 0x08, 0x00) != 0x00;
+ /* 4 source chips */
+	case 0x1868:
+	case 0x1878:
+		if (val > 3)
+			return -EINVAL;
+		val = map4Source[val];
+		break;
+ /* 8 source chips */
+	case 0x1869:
+	case 0x1879:
+		if (val > 7)
+			return -EINVAL;
+		break;
+	default:
 		return -EINVAL;
-	return snd_es18xx_mixer_bits(chip, 0x1c, 0x07, val) != val;
+	}
+	return (snd_es18xx_mixer_bits(chip, 0x1c, 0x07, val) != val) || retVal;
 }
 
 static int snd_es18xx_info_spatializer_enable(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
@@ -1191,19 +1290,22 @@ static int snd_es18xx_put_double(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 	return change;
 }
 
+/* Mixer controls
+ * These arrays contain setup data for mixer controls.
+ * 
+ * The controls that are universal to all chipsets are fully initialized
+ * here.
+ */
 static struct snd_kcontrol_new snd_es18xx_base_controls[] = {
 ES18XX_DOUBLE("Master Playback Volume", 0, 0x60, 0x62, 0, 0, 63, 0),
 ES18XX_DOUBLE("Master Playback Switch", 0, 0x60, 0x62, 6, 6, 1, 1),
 ES18XX_DOUBLE("Line Playback Volume", 0, 0x3e, 0x3e, 4, 0, 15, 0),
 ES18XX_DOUBLE("CD Playback Volume", 0, 0x38, 0x38, 4, 0, 15, 0),
 ES18XX_DOUBLE("FM Playback Volume", 0, 0x36, 0x36, 4, 0, 15, 0),
-ES18XX_DOUBLE("Mono Playback Volume", 0, 0x6d, 0x6d, 4, 0, 15, 0),
 ES18XX_DOUBLE("Mic Playback Volume", 0, 0x1a, 0x1a, 4, 0, 15, 0),
 ES18XX_DOUBLE("Aux Playback Volume", 0, 0x3a, 0x3a, 4, 0, 15, 0),
-ES18XX_SINGLE("PC Speaker Playback Volume", 0, 0x3c, 0, 7, 0),
 ES18XX_SINGLE("Record Monitor", 0, 0xa8, 3, 1, 0),
 ES18XX_DOUBLE("Capture Volume", 0, 0xb4, 0xb4, 4, 0, 15, 0),
-ES18XX_SINGLE("Capture Switch", 0, 0x1c, 4, 1, 1),
 {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "Capture Source",
@@ -1213,17 +1315,35 @@ ES18XX_SINGLE("Capture Switch", 0, 0x1c, 4, 1, 1),
 }
 };
 
-static struct snd_kcontrol_new snd_es18xx_mono_in_control = 
-ES18XX_DOUBLE("Mono Input Playback Volume", 0, 0x6d, 0x6d, 4, 0, 15, 0);
-
 static struct snd_kcontrol_new snd_es18xx_recmix_controls[] = {
 ES18XX_DOUBLE("PCM Capture Volume", 0, 0x69, 0x69, 4, 0, 15, 0),
 ES18XX_DOUBLE("Mic Capture Volume", 0, 0x68, 0x68, 4, 0, 15, 0),
 ES18XX_DOUBLE("Line Capture Volume", 0, 0x6e, 0x6e, 4, 0, 15, 0),
 ES18XX_DOUBLE("FM Capture Volume", 0, 0x6b, 0x6b, 4, 0, 15, 0),
-ES18XX_DOUBLE("Mono Capture Volume", 0, 0x6f, 0x6f, 4, 0, 15, 0),
 ES18XX_DOUBLE("CD Capture Volume", 0, 0x6a, 0x6a, 4, 0, 15, 0),
 ES18XX_DOUBLE("Aux Capture Volume", 0, 0x6c, 0x6c, 4, 0, 15, 0)
+};
+
+/*
+ * The chipset specific mixer controls
+ */
+static struct snd_kcontrol_new snd_es18xx_opt_speaker =
+	ES18XX_SINGLE("PC Speaker Playback Volume", 0, 0x3c, 0, 7, 0);
+
+static struct snd_kcontrol_new snd_es18xx_opt_1869[] = {
+ES18XX_SINGLE("Capture Switch", 0, 0x1c, 4, 1, 1),
+ES18XX_SINGLE("Video Playback Switch", 0, 0x7f, 0, 1, 0),
+ES18XX_DOUBLE("Mono Playback Volume", 0, 0x6d, 0x6d, 4, 0, 15, 0),
+ES18XX_DOUBLE("Mono Capture Volume", 0, 0x6f, 0x6f, 4, 0, 15, 0)
+};
+
+static struct snd_kcontrol_new snd_es18xx_opt_1878 =
+	ES18XX_DOUBLE("Video Playback Volume", 0, 0x68, 0x68, 4, 0, 15, 0);
+
+static struct snd_kcontrol_new snd_es18xx_opt_1879[] = {
+ES18XX_SINGLE("Video Playback Switch", 0, 0x71, 6, 1, 0),
+ES18XX_DOUBLE("Video Playback Volume", 0, 0x6d, 0x6d, 4, 0, 15, 0),
+ES18XX_DOUBLE("Video Capture Volume", 0, 0x6f, 0x6f, 4, 0, 15, 0)
 };
 
 static struct snd_kcontrol_new snd_es18xx_pcm1_controls[] = {
@@ -1270,7 +1390,6 @@ static struct snd_kcontrol_new snd_es18xx_hw_volume_controls[] = {
 ES18XX_SINGLE("Hardware Master Volume Split", 0, 0x64, 7, 1, 0),
 };
 
-#if 0
 static int __devinit snd_es18xx_config_read(struct snd_es18xx *chip, unsigned char reg)
 {
 	int data;
@@ -1281,7 +1400,6 @@ static int __devinit snd_es18xx_config_read(struct snd_es18xx *chip, unsigned ch
         spin_unlock_irqrestore(&chip->ctrl_lock, flags);
 	return data;
 }
-#endif
 
 static void __devinit snd_es18xx_config_write(struct snd_es18xx *chip, 
 					      unsigned char reg, unsigned char data)
@@ -1427,6 +1545,17 @@ static int __devinit snd_es18xx_initialize(struct snd_es18xx *chip)
 		snd_es18xx_mixer_write(chip, 0x58, 0x94);
 		snd_es18xx_mixer_write(chip, 0x5a, 0x80);
 	}
+	/* Flip the "enable I2S" bits for those chipsets that need it */
+	switch (chip->version) {
+	case 0x1879:
+		//Leaving I2S enabled on the 1879 screws up the PCM playback (rate effected somehow)
+		//so a Switch control has been added to toggle this 0x71 bit on/off:
+		//snd_es18xx_mixer_bits(chip, 0x71, 0x40, 0x40);
+		/* Note: we fall through on purpose here. */
+	case 0x1878:
+		snd_es18xx_config_write(chip, 0x29, snd_es18xx_config_read(chip, 0x29) | 0x40);
+		break;
+	}
 	/* Mute input source */
 	if (chip->caps & ES18XX_MUTEREC)
 		mask = 0x10;
@@ -1476,11 +1605,14 @@ static int __devinit snd_es18xx_identify(struct snd_es18xx *chip)
 	}
 			
         outb(0x40, chip->port + 0x04);
+	udelay(10);
 	hi = inb(chip->port + 0x05);
+	udelay(10);
 	lo = inb(chip->port + 0x05);
 	if (hi != lo) {
 		chip->version = hi << 8 | lo;
 		chip->ctrl_port = inb(chip->port + 0x05) << 8;
+		udelay(10);
 		chip->ctrl_port += inb(chip->port + 0x05);
 
 		if ((chip->res_ctrl_port = request_region(chip->ctrl_port, 8, "ES18xx - CTRL")) == NULL) {
@@ -1519,22 +1651,22 @@ static int __devinit snd_es18xx_probe(struct snd_es18xx *chip)
 
 	switch (chip->version) {
 	case 0x1868:
-		chip->caps = ES18XX_DUPLEX_MONO | ES18XX_DUPLEX_SAME | ES18XX_CONTROL | ES18XX_HWV;
+		chip->caps = ES18XX_DUPLEX_MONO | ES18XX_DUPLEX_SAME | ES18XX_CONTROL;
 		break;
 	case 0x1869:
 		chip->caps = ES18XX_PCM2 | ES18XX_SPATIALIZER | ES18XX_RECMIX | ES18XX_NEW_RATE | ES18XX_AUXB | ES18XX_MONO | ES18XX_MUTEREC | ES18XX_CONTROL | ES18XX_HWV;
 		break;
 	case 0x1878:
-		chip->caps = ES18XX_DUPLEX_MONO | ES18XX_DUPLEX_SAME | ES18XX_I2S | ES18XX_CONTROL | ES18XX_HWV;
+		chip->caps = ES18XX_DUPLEX_MONO | ES18XX_DUPLEX_SAME | ES18XX_I2S | ES18XX_CONTROL;
 		break;
 	case 0x1879:
 		chip->caps = ES18XX_PCM2 | ES18XX_SPATIALIZER | ES18XX_RECMIX | ES18XX_NEW_RATE | ES18XX_AUXB | ES18XX_I2S | ES18XX_CONTROL | ES18XX_HWV;
 		break;
 	case 0x1887:
-		chip->caps = ES18XX_PCM2 | ES18XX_RECMIX | ES18XX_AUXB | ES18XX_DUPLEX_SAME | ES18XX_HWV;
+		chip->caps = ES18XX_PCM2 | ES18XX_RECMIX | ES18XX_AUXB | ES18XX_DUPLEX_SAME;
 		break;
 	case 0x1888:
-		chip->caps = ES18XX_PCM2 | ES18XX_RECMIX | ES18XX_AUXB | ES18XX_DUPLEX_SAME | ES18XX_HWV;
+		chip->caps = ES18XX_PCM2 | ES18XX_RECMIX | ES18XX_AUXB | ES18XX_DUPLEX_SAME;
 		break;
 	default:
 		snd_printk(KERN_ERR "[0x%lx] unsupported chip ES%x\n",
@@ -1705,7 +1837,7 @@ static int __devinit snd_es18xx_new_device(struct snd_card *card,
 		return -EBUSY;
 	}
 
-	if (request_irq(irq, snd_es18xx_interrupt, SA_INTERRUPT, "ES18xx", (void *) chip)) {
+	if (request_irq(irq, snd_es18xx_interrupt, IRQF_DISABLED, "ES18xx", (void *) chip)) {
 		snd_es18xx_free(chip);
 		snd_printk(KERN_ERR PFX "unable to grap IRQ %d\n", irq);
 		return -EBUSY;
@@ -1778,10 +1910,6 @@ static int __devinit snd_es18xx_mixer(struct snd_es18xx *chip)
 		}
 	}
 
-	if (chip->caps & ES18XX_MONO) {
-		if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_es18xx_mono_in_control, chip))) < 0)
-			return err;
-	}
 	if (chip->caps & ES18XX_RECMIX) {
 		for (idx = 0; idx < ARRAY_SIZE(snd_es18xx_recmix_controls); idx++) {
 			if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_es18xx_recmix_controls[idx], chip))) < 0)
@@ -1817,6 +1945,36 @@ static int __devinit snd_es18xx_mixer(struct snd_es18xx *chip)
 			if ((err = snd_ctl_add(card, kctl)) < 0)
 				return err;
 			
+		}
+	}
+	/* finish initializing other chipset specific controls
+	 */
+	if (chip->version != 0x1868) {
+		err = snd_ctl_add(card, snd_ctl_new1(&snd_es18xx_opt_speaker,
+						     chip));
+		if (err < 0)
+			return err;
+	}
+	if (chip->version == 0x1869) {
+		for (idx = 0; idx < ARRAY_SIZE(snd_es18xx_opt_1869); idx++) {
+			err = snd_ctl_add(card,
+					  snd_ctl_new1(&snd_es18xx_opt_1869[idx],
+						       chip));
+			if (err < 0)
+				return err;
+		}
+	} else if (chip->version == 0x1878) {
+		err = snd_ctl_add(card, snd_ctl_new1(&snd_es18xx_opt_1878,
+						     chip));
+		if (err < 0)
+			return err;
+	} else if (chip->version == 0x1879) {
+		for (idx = 0; idx < ARRAY_SIZE(snd_es18xx_opt_1879); idx++) {
+			err = snd_ctl_add(card,
+					  snd_ctl_new1(&snd_es18xx_opt_1879[idx],
+						       chip));
+			if (err < 0)
+				return err;
 		}
 	}
 	return 0;
@@ -1880,7 +2038,80 @@ MODULE_PARM_DESC(dma2, "DMA 2 # for ES18xx driver.");
 static struct platform_device *platform_devices[SNDRV_CARDS];
 
 #ifdef CONFIG_PNP
-static int pnp_registered;
+static int pnp_registered, pnpc_registered;
+
+static struct pnp_device_id snd_audiodrive_pnpbiosids[] = {
+	{ .id = "ESS1869" },
+	{ .id = "" }		/* end */
+};
+
+MODULE_DEVICE_TABLE(pnp, snd_audiodrive_pnpbiosids);
+
+/* PnP main device initialization */
+static int __devinit snd_audiodrive_pnp_init_main(int dev, struct pnp_dev *pdev,
+						  struct pnp_resource_table *cfg)
+{
+	int err;
+
+	pnp_init_resource_table(cfg);
+	if (port[dev] != SNDRV_AUTO_PORT)
+		pnp_resource_change(&cfg->port_resource[0], port[dev], 16);
+	if (fm_port[dev] != SNDRV_AUTO_PORT)
+		pnp_resource_change(&cfg->port_resource[1], fm_port[dev], 4);
+	if (mpu_port[dev] != SNDRV_AUTO_PORT)
+		pnp_resource_change(&cfg->port_resource[2], mpu_port[dev], 2);
+	if (dma1[dev] != SNDRV_AUTO_DMA)
+		pnp_resource_change(&cfg->dma_resource[0], dma1[dev], 1);
+	if (dma2[dev] != SNDRV_AUTO_DMA)
+		pnp_resource_change(&cfg->dma_resource[1], dma2[dev], 1);
+	if (irq[dev] != SNDRV_AUTO_IRQ)
+		pnp_resource_change(&cfg->irq_resource[0], irq[dev], 1);
+	if (pnp_device_is_isapnp(pdev)) {
+		err = pnp_manual_config_dev(pdev, cfg, 0);
+		if (err < 0)
+			snd_printk(KERN_ERR PFX "PnP manual resources are invalid, using auto config\n");
+	}
+	err = pnp_activate_dev(pdev);
+	if (err < 0) {
+		snd_printk(KERN_ERR PFX "PnP configure failure (out of resources?)\n");
+		return -EBUSY;
+	}
+	/* ok. hack using Vendor-Defined Card-Level registers */
+	/* skip csn and logdev initialization - already done in isapnp_configure */
+	if (pnp_device_is_isapnp(pdev)) {
+		isapnp_cfg_begin(isapnp_card_number(pdev), isapnp_csn_number(pdev));
+		isapnp_write_byte(0x27, pnp_irq(pdev, 0));	/* Hardware Volume IRQ Number */
+		if (mpu_port[dev] != SNDRV_AUTO_PORT)
+			isapnp_write_byte(0x28, pnp_irq(pdev, 0)); /* MPU-401 IRQ Number */
+		isapnp_write_byte(0x72, pnp_irq(pdev, 0));	/* second IRQ */
+		isapnp_cfg_end();
+	}
+	port[dev] = pnp_port_start(pdev, 0);
+	fm_port[dev] = pnp_port_start(pdev, 1);
+	mpu_port[dev] = pnp_port_start(pdev, 2);
+	dma1[dev] = pnp_dma(pdev, 0);
+	dma2[dev] = pnp_dma(pdev, 1);
+	irq[dev] = pnp_irq(pdev, 0);
+	snd_printdd("PnP ES18xx: port=0x%lx, fm port=0x%lx, mpu port=0x%lx\n", port[dev], fm_port[dev], mpu_port[dev]);
+	snd_printdd("PnP ES18xx: dma1=%i, dma2=%i, irq=%i\n", dma1[dev], dma2[dev], irq[dev]);
+	return 0;
+}
+
+static int __devinit snd_audiodrive_pnp(int dev, struct snd_audiodrive *acard,
+					struct pnp_dev *pdev)
+{
+	struct pnp_resource_table * cfg = kmalloc(sizeof(struct pnp_resource_table), GFP_KERNEL);
+
+	if (!cfg)
+		return -ENOMEM;
+	acard->dev = pdev;
+	if (snd_audiodrive_pnp_init_main(dev, acard->dev, cfg) < 0) {
+		kfree(cfg);
+		return -EBUSY;
+	}
+	kfree(cfg);
+	return 0;
+}
 
 static struct pnp_card_device_id snd_audiodrive_pnpids[] = {
 	/* ESS 1868 (integrated on Compaq dual P-Pro motherboard and Genius 18PnP 3D) */
@@ -1903,13 +2134,11 @@ static struct pnp_card_device_id snd_audiodrive_pnpids[] = {
 
 MODULE_DEVICE_TABLE(pnp_card, snd_audiodrive_pnpids);
 
-static int __devinit snd_audiodrive_pnp(int dev, struct snd_audiodrive *acard,
+static int __devinit snd_audiodrive_pnpc(int dev, struct snd_audiodrive *acard,
 					struct pnp_card_link *card,
 					const struct pnp_card_device_id *id)
 {
-	struct pnp_dev *pdev;
 	struct pnp_resource_table * cfg = kmalloc(sizeof(struct pnp_resource_table), GFP_KERNEL);
-	int err;
 
 	if (!cfg)
 		return -ENOMEM;
@@ -1924,57 +2153,17 @@ static int __devinit snd_audiodrive_pnp(int dev, struct snd_audiodrive *acard,
 		return -EBUSY;
 	}
 	/* Control port initialization */
-	err = pnp_activate_dev(acard->devc);
-	if (err < 0) {
-		snd_printk(KERN_ERR PFX "PnP control configure failure (out of resources?)\n");
+	if (pnp_activate_dev(acard->devc) < 0) {
 		kfree(cfg);
+		snd_printk(KERN_ERR PFX "PnP control configure failure (out of resources?)\n");
 		return -EAGAIN;
 	}
-	snd_printdd("pnp: port=0x%lx\n", pnp_port_start(acard->devc, 0));
-	/* PnP initialization */
-	pdev = acard->dev;
-	pnp_init_resource_table(cfg);
-	if (port[dev] != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[0], port[dev], 16);
-	if (fm_port[dev] != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[1], fm_port[dev], 4);
-	if (mpu_port[dev] != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[2], mpu_port[dev], 2);
-	if (dma1[dev] != SNDRV_AUTO_DMA)
-		pnp_resource_change(&cfg->dma_resource[0], dma1[dev], 1);
-	if (dma2[dev] != SNDRV_AUTO_DMA)
-		pnp_resource_change(&cfg->dma_resource[1], dma2[dev], 1);
-	if (irq[dev] != SNDRV_AUTO_IRQ)
-		pnp_resource_change(&cfg->irq_resource[0], irq[dev], 1);
-	err = pnp_manual_config_dev(pdev, cfg, 0);
-	if (err < 0)
-		snd_printk(KERN_ERR PFX "PnP manual resources are invalid, using auto config\n");
-	err = pnp_activate_dev(pdev);
-	if (err < 0) {
-		snd_printk(KERN_ERR PFX "PnP configure failure (out of resources?)\n");
+	snd_printdd("pnp: port=0x%llx\n",
+			(unsigned long long)pnp_port_start(acard->devc, 0));
+	if (snd_audiodrive_pnp_init_main(dev, acard->dev, cfg) < 0) {
 		kfree(cfg);
 		return -EBUSY;
 	}
-	/* ok. hack using Vendor-Defined Card-Level registers */
-	/* skip csn and logdev initialization - already done in isapnp_configure */
-	if (pnp_device_is_isapnp(pdev)) {
-		isapnp_cfg_begin(isapnp_card_number(pdev), isapnp_csn_number(pdev));
-		isapnp_write_byte(0x27, pnp_irq(pdev, 0));	/* Hardware Volume IRQ Number */
-		if (mpu_port[dev] != SNDRV_AUTO_PORT)
-			isapnp_write_byte(0x28, pnp_irq(pdev, 0)); /* MPU-401 IRQ Number */
-		isapnp_write_byte(0x72, pnp_irq(pdev, 0));	/* second IRQ */
-		isapnp_cfg_end();
-	} else {
-		snd_printk(KERN_ERR PFX "unable to install ISA PnP hack, expect malfunction\n");
-	}
-	port[dev] = pnp_port_start(pdev, 0);
-	fm_port[dev] = pnp_port_start(pdev, 1);
-	mpu_port[dev] = pnp_port_start(pdev, 2);
-	dma1[dev] = pnp_dma(pdev, 0);
-	dma2[dev] = pnp_dma(pdev, 1);
-	irq[dev] = pnp_irq(pdev, 0);
-	snd_printdd("PnP ES18xx: port=0x%lx, fm port=0x%lx, mpu port=0x%lx\n", port[dev], fm_port[dev], mpu_port[dev]);
-	snd_printdd("PnP ES18xx: dma1=%i, dma2=%i, irq=%i\n", dma1[dev], dma2[dev], irq[dev]);
 	kfree(cfg);
 	return 0;
 }
@@ -2048,7 +2237,7 @@ static int __devinit snd_audiodrive_probe(struct snd_card *card, int dev)
 	return snd_card_register(card);
 }
 
-static int __init snd_es18xx_nonpnp_probe1(int dev, struct platform_device *devptr)
+static int __devinit snd_es18xx_nonpnp_probe1(int dev, struct platform_device *devptr)
 {
 	struct snd_card *card;
 	int err;
@@ -2065,7 +2254,7 @@ static int __init snd_es18xx_nonpnp_probe1(int dev, struct platform_device *devp
 	return 0;
 }
 
-static int __init snd_es18xx_nonpnp_probe(struct platform_device *pdev)
+static int __devinit snd_es18xx_nonpnp_probe(struct platform_device *pdev)
 {
 	int dev = pdev->id;
 	int err;
@@ -2141,7 +2330,71 @@ static struct platform_driver snd_es18xx_nonpnp_driver = {
 
 
 #ifdef CONFIG_PNP
-static int __devinit snd_audiodrive_pnp_detect(struct pnp_card_link *pcard,
+static unsigned int __devinitdata es18xx_pnp_devices;
+
+static int __devinit snd_audiodrive_pnp_detect(struct pnp_dev *pdev,
+					    const struct pnp_device_id *id)
+{
+	static int dev;
+	int err;
+	struct snd_card *card;
+
+	if (pnp_device_is_isapnp(pdev))
+		return -ENOENT;	/* we have another procedure - card */
+	for (; dev < SNDRV_CARDS; dev++) {
+		if (enable[dev] && isapnp[dev])
+			break;
+	}
+	if (dev >= SNDRV_CARDS)
+		return -ENODEV;
+
+	card = snd_es18xx_card_new(dev);
+	if (! card)
+		return -ENOMEM;
+	if ((err = snd_audiodrive_pnp(dev, card->private_data, pdev)) < 0) {
+		snd_card_free(card);
+		return err;
+	}
+	snd_card_set_dev(card, &pdev->dev);
+	if ((err = snd_audiodrive_probe(card, dev)) < 0) {
+		snd_card_free(card);
+		return err;
+	}
+	pnp_set_drvdata(pdev, card);
+	dev++;
+	es18xx_pnp_devices++;
+	return 0;
+}
+
+static void __devexit snd_audiodrive_pnp_remove(struct pnp_dev * pdev)
+{
+	snd_card_free(pnp_get_drvdata(pdev));
+	pnp_set_drvdata(pdev, NULL);
+}
+
+#ifdef CONFIG_PM
+static int snd_audiodrive_pnp_suspend(struct pnp_dev *pdev, pm_message_t state)
+{
+	return snd_es18xx_suspend(pnp_get_drvdata(pdev), state);
+}
+static int snd_audiodrive_pnp_resume(struct pnp_dev *pdev)
+{
+	return snd_es18xx_resume(pnp_get_drvdata(pdev));
+}
+#endif
+
+static struct pnp_driver es18xx_pnp_driver = {
+	.name = "es18xx-pnpbios",
+	.id_table = snd_audiodrive_pnpbiosids,
+	.probe = snd_audiodrive_pnp_detect,
+	.remove = __devexit_p(snd_audiodrive_pnp_remove),
+#ifdef CONFIG_PM
+	.suspend = snd_audiodrive_pnp_suspend,
+	.resume = snd_audiodrive_pnp_resume,
+#endif
+};
+
+static int __devinit snd_audiodrive_pnpc_detect(struct pnp_card_link *pcard,
 					       const struct pnp_card_device_id *pid)
 {
 	static int dev;
@@ -2159,7 +2412,7 @@ static int __devinit snd_audiodrive_pnp_detect(struct pnp_card_link *pcard,
 	if (! card)
 		return -ENOMEM;
 
-	if ((res = snd_audiodrive_pnp(dev, card->private_data, pcard, pid)) < 0) {
+	if ((res = snd_audiodrive_pnpc(dev, card->private_data, pcard, pid)) < 0) {
 		snd_card_free(card);
 		return res;
 	}
@@ -2171,22 +2424,23 @@ static int __devinit snd_audiodrive_pnp_detect(struct pnp_card_link *pcard,
 
 	pnp_set_card_drvdata(pcard, card);
 	dev++;
+	es18xx_pnp_devices++;
 	return 0;
 }
 
-static void __devexit snd_audiodrive_pnp_remove(struct pnp_card_link * pcard)
+static void __devexit snd_audiodrive_pnpc_remove(struct pnp_card_link * pcard)
 {
 	snd_card_free(pnp_get_card_drvdata(pcard));
 	pnp_set_card_drvdata(pcard, NULL);
 }
 
 #ifdef CONFIG_PM
-static int snd_audiodrive_pnp_suspend(struct pnp_card_link *pcard, pm_message_t state)
+static int snd_audiodrive_pnpc_suspend(struct pnp_card_link *pcard, pm_message_t state)
 {
 	return snd_es18xx_suspend(pnp_get_card_drvdata(pcard), state);
 }
 
-static int snd_audiodrive_pnp_resume(struct pnp_card_link *pcard)
+static int snd_audiodrive_pnpc_resume(struct pnp_card_link *pcard)
 {
 	return snd_es18xx_resume(pnp_get_card_drvdata(pcard));
 }
@@ -2197,11 +2451,11 @@ static struct pnp_card_driver es18xx_pnpc_driver = {
 	.flags = PNP_DRIVER_RES_DISABLE,
 	.name = "es18xx",
 	.id_table = snd_audiodrive_pnpids,
-	.probe = snd_audiodrive_pnp_detect,
-	.remove = __devexit_p(snd_audiodrive_pnp_remove),
+	.probe = snd_audiodrive_pnpc_detect,
+	.remove = __devexit_p(snd_audiodrive_pnpc_remove),
 #ifdef CONFIG_PM
-	.suspend	= snd_audiodrive_pnp_suspend,
-	.resume		= snd_audiodrive_pnp_resume,
+	.suspend	= snd_audiodrive_pnpc_suspend,
+	.resume		= snd_audiodrive_pnpc_resume,
 #endif
 };
 #endif /* CONFIG_PNP */
@@ -2211,8 +2465,10 @@ static void __init_or_module snd_es18xx_unregister_all(void)
 	int i;
 
 #ifdef CONFIG_PNP
-	if (pnp_registered)
+	if (pnpc_registered)
 		pnp_unregister_card_driver(&es18xx_pnpc_driver);
+	if (pnp_registered)
+		pnp_unregister_driver(&es18xx_pnp_driver);
 #endif
 	for (i = 0; i < ARRAY_SIZE(platform_devices); ++i)
 		platform_device_unregister(platform_devices[i]);
@@ -2226,40 +2482,40 @@ static int __init alsa_card_es18xx_init(void)
 	if ((err = platform_driver_register(&snd_es18xx_nonpnp_driver)) < 0)
 		return err;
 
-	for (i = 0; i < SNDRV_CARDS && enable[i]; i++) {
+	for (i = 0; i < SNDRV_CARDS; i++) {
 		struct platform_device *device;
-		if (is_isapnp_selected(i))
+		if (! enable[i] || is_isapnp_selected(i))
 			continue;
 		device = platform_device_register_simple(ES18XX_DRIVER,
 							 i, NULL, 0);
-		if (IS_ERR(device)) {
-			err = PTR_ERR(device);
-			goto errout;
+		if (IS_ERR(device))
+	       		continue;
+		if (!platform_get_drvdata(device)) {
+			platform_device_unregister(device);
+			continue;
 		}
 		platform_devices[i] = device;
 		cards++;
 	}
 
 #ifdef CONFIG_PNP
-	i = pnp_register_card_driver(&es18xx_pnpc_driver);
-	if (i >= 0) {
+	err = pnp_register_driver(&es18xx_pnp_driver);
+	if (!err)
 		pnp_registered = 1;
-		cards += i;
-	}
+	err = pnp_register_card_driver(&es18xx_pnpc_driver);
+	if (!err)
+		pnpc_registered = 1;
+	cards += es18xx_pnp_devices;
 #endif
 
 	if(!cards) {
 #ifdef MODULE
 		snd_printk(KERN_ERR "ESS AudioDrive ES18xx soundcard not found or device busy\n");
 #endif
-		err = -ENODEV;
-		goto errout;
+		snd_es18xx_unregister_all();
+		return -ENODEV;
 	}
 	return 0;
-
- errout:
-	snd_es18xx_unregister_all();
-	return err;
 }
 
 static void __exit alsa_card_es18xx_exit(void)

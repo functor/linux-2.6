@@ -67,7 +67,7 @@ static DEFINE_SPINLOCK(ntfs_cb_lock);
 /**
  * allocate_compression_buffers - allocate the decompression buffers
  *
- * Caller has to hold the ntfs_lock semaphore.
+ * Caller has to hold the ntfs_lock mutex.
  *
  * Return 0 on success or -ENOMEM if the allocations failed.
  */
@@ -84,7 +84,7 @@ int allocate_compression_buffers(void)
 /**
  * free_compression_buffers - free the decompression buffers
  *
- * Caller has to hold the ntfs_lock semaphore.
+ * Caller has to hold the ntfs_lock mutex.
  */
 void free_compression_buffers(void)
 {
@@ -600,7 +600,7 @@ do_next_cb:
 	rl = NULL;
 	for (vcn = start_vcn, start_vcn += cb_clusters; vcn < start_vcn;
 			vcn++) {
-		BOOL is_retry = FALSE;
+		bool is_retry = false;
 
 		if (!rl) {
 lock_retry_remap:
@@ -626,7 +626,7 @@ lock_retry_remap:
 				break;
 			if (is_retry || lcn != LCN_RL_NOT_MAPPED)
 				goto rl_err;
-			is_retry = TRUE;
+			is_retry = true;
 			/*
 			 * Attempt to map runlist, dropping lock for the
 			 * duration.

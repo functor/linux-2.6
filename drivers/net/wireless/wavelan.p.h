@@ -98,11 +98,7 @@
  * characteristics of the hardware.  Applications such as mobile IP may
  * take advantage of it.
  *
- * You will need to enable the CONFIG_NET_RADIO define in the kernel
- * configuration to enable the wireless extensions (this is the one
- * giving access to the radio network device choice).
- *
- * It might also be a good idea as well to fetch the wireless tools to
+ * It might be a good idea as well to fetch the wireless tools to
  * configure the device and play a bit.
  */
 
@@ -646,8 +642,7 @@ static int
 /* ---------------------- INTERRUPT HANDLING ---------------------- */
 static irqreturn_t
 	wavelan_interrupt(int,		/* interrupt handler */
-			  void *,
-			  struct pt_regs *);
+			  void *);
 static void
 	wavelan_watchdog(struct net_device *);	/* transmission watchdog */
 /* ------------------- CONFIGURATION CALLBACKS ------------------- */

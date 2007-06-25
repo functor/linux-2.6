@@ -1,5 +1,4 @@
 #include "local.h"
-
 #include "key.h"
 
 static int __init ksign_init(void)

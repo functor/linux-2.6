@@ -97,10 +97,9 @@ int mpi_resize(MPI a, unsigned nlimbs)
 		kfree(a->d);
 		a->d = p;
 	} else {
-		a->d = kmalloc( nlimbs * sizeof(mpi_limb_t), GFP_KERNEL);
+		a->d = kzalloc( nlimbs * sizeof(mpi_limb_t), GFP_KERNEL);
 		if (!a->d)
 			return -ENOMEM;
-		memset(a->d, 0, nlimbs * sizeof(mpi_limb_t) );
 	}
 	a->alloced = nlimbs;
 	return 0;

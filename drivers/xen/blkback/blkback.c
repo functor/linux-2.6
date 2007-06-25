@@ -279,7 +279,7 @@ static void blkif_notify_work(blkif_t *blkif)
 	wake_up(&blkif->wq);
 }
 
-irqreturn_t blkif_be_int(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t blkif_be_int(int irq, void *dev_id)
 {
 	blkif_notify_work(dev_id);
 	return IRQ_HANDLED;
@@ -294,7 +294,7 @@ irqreturn_t blkif_be_int(int irq, void *dev_id, struct pt_regs *regs)
 static int do_block_io_op(blkif_t *blkif)
 {
 	blkif_back_ring_t *blk_ring = &blkif->blk_ring;
-	blkif_request_t *req;
+	blkif_request_t req;
 	pending_req_t *pending_req;
 	RING_IDX rc, rp;
 	int more_to_do = 0;
@@ -312,22 +312,22 @@ static int do_block_io_op(blkif_t *blkif)
 			break;
 		}
 
-		req = RING_GET_REQUEST(blk_ring, rc);
+		memcpy(&req, RING_GET_REQUEST(blk_ring, rc), sizeof(req));
 		blk_ring->req_cons = ++rc; /* before make_response() */
 
-		switch (req->operation) {
+		switch (req.operation) {
 		case BLKIF_OP_READ:
 			blkif->st_rd_req++;
-			dispatch_rw_block_io(blkif, req, pending_req);
+			dispatch_rw_block_io(blkif, &req, pending_req);
 			break;
 		case BLKIF_OP_WRITE:
 			blkif->st_wr_req++;
-			dispatch_rw_block_io(blkif, req, pending_req);
+			dispatch_rw_block_io(blkif, &req, pending_req);
 			break;
 		default:
 			DPRINTK("error: unknown block io operation [%d]\n",
-				req->operation);
-			make_response(blkif, req->id, req->operation,
+				req.operation);
+			make_response(blkif, req.id, req.operation,
 				      BLKIF_RSP_ERROR);
 			free_req(pending_req);
 			break;
@@ -376,7 +376,7 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 			req->seg[i].first_sect + 1;
 
 		if ((req->seg[i].last_sect >= (PAGE_SIZE >> 9)) ||
-		    (seg[i].nsec <= 0))
+		    (req->seg[i].last_sect < req->seg[i].first_sect))
 			goto fail_response;
 		preq.nr_sects += seg[i].nsec;
 
@@ -393,16 +393,24 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 	for (i = 0; i < nseg; i++) {
 		if (unlikely(map[i].status != 0)) {
 			DPRINTK("invalid buffer -- could not remap it\n");
-			goto fail_flush;
+			map[i].handle = BLKBACK_INVALID_HANDLE;
+			ret |= 1;
 		}
 
 		pending_handle(pending_req, i) = map[i].handle;
+
+		if (ret)
+			continue;
+
 		set_phys_to_machine(__pa(vaddr(
 			pending_req, i)) >> PAGE_SHIFT,
 			FOREIGN_FRAME(map[i].dev_bus_addr >> PAGE_SHIFT));
 		seg[i].buf  = map[i].dev_bus_addr | 
 			(req->seg[i].first_sect << 9);
 	}
+
+	if (ret)
+		goto fail_flush;
 
 	if (vbd_translate(&preq, blkif, operation) != 0) {
 		DPRINTK("access denied: %s of [%llu,%llu] on dev=%04x\n", 

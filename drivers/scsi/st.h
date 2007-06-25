@@ -31,7 +31,6 @@ struct st_request {
 
 /* The tape buffer descriptor. */
 struct st_buffer {
-	unsigned char in_use;
 	unsigned char dma;	/* DMA-able buffer */
 	unsigned char do_dio;   /* direct i/o set up? */
 	int buffer_size;
@@ -118,7 +117,8 @@ struct scsi_tape {
 	unsigned char cln_sense_value;
 	unsigned char cln_sense_mask;
 	unsigned char use_pf;			/* Set Page Format bit in all mode selects? */
-	unsigned char try_dio;			/* try direct i/o? */
+	unsigned char try_dio;			/* try direct i/o in general? */
+	unsigned char try_dio_now;		/* try direct i/o before next close? */
 	unsigned char c_algo;			/* compression algorithm */
 	unsigned char pos_unknown;			/* after reset position unknown */
 	int tape_type;

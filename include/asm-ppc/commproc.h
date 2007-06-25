@@ -17,7 +17,6 @@
 #ifndef __CPM_8XX__
 #define __CPM_8XX__
 
-#include <linux/config.h>
 #include <asm/8xx_immap.h>
 #include <asm/ptrace.h>
 
@@ -35,6 +34,7 @@
 #define CPM_CR_INIT_TX		((ushort)0x0002)
 #define CPM_CR_HUNT_MODE	((ushort)0x0003)
 #define CPM_CR_STOP_TX		((ushort)0x0004)
+#define CPM_CR_GRA_STOP_TX	((ushort)0x0005)
 #define CPM_CR_RESTART_TX	((ushort)0x0006)
 #define CPM_CR_CLOSE_RX_BD	((ushort)0x0007)
 #define CPM_CR_SET_GADDR	((ushort)0x0008)
@@ -690,8 +690,7 @@ typedef struct risc_timer_pram {
 #define CICR_IEN		((uint)0x00000080)	/* Int. enable */
 #define CICR_SPS		((uint)0x00000001)	/* SCC Spread */
 
-extern void cpm_install_handler(int vec,
-		void (*handler)(void *, struct pt_regs *regs), void *dev_id);
+extern void cpm_install_handler(int vec, void (*handler)(void *), void *dev_id);
 extern void cpm_free_handler(int vec);
 
 #endif /* __CPM_8XX__ */

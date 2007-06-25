@@ -19,9 +19,9 @@
 #include <linux/mman.h>
 #include <linux/file.h>
 #include <linux/utsname.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 #include <asm/ipc.h>
 
 /*
@@ -41,14 +41,13 @@ asmlinkage int sys_pipe(unsigned long __user * fildes)
 	return error;
 }
 
-/* common code for old and new mmaps */
-static inline long do_mmap2(
-	unsigned long addr, unsigned long len,
-	unsigned long prot, unsigned long flags,
-	unsigned long fd, unsigned long pgoff)
+asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
+			  unsigned long prot, unsigned long flags,
+			  unsigned long fd, unsigned long pgoff)
 {
 	int error = -EBADF;
-	struct file * file = NULL;
+	struct file *file = NULL;
+	struct mm_struct *mm = current->mm;
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 	if (!(flags & MAP_ANONYMOUS)) {
@@ -57,21 +56,14 @@ static inline long do_mmap2(
 			goto out;
 	}
 
-	down_write(&current->mm->mmap_sem);
+	down_write(&mm->mmap_sem);
 	error = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
-	up_write(&current->mm->mmap_sem);
+	up_write(&mm->mmap_sem);
 
 	if (file)
 		fput(file);
 out:
 	return error;
-}
-
-asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
-	unsigned long prot, unsigned long flags,
-	unsigned long fd, unsigned long pgoff)
-{
-	return do_mmap2(addr, len, prot, flags, fd, pgoff);
 }
 
 /*
@@ -102,7 +94,8 @@ asmlinkage int old_mmap(struct mmap_arg_struct __user *arg)
 	if (a.offset & ~PAGE_MASK)
 		goto out;
 
-	err = do_mmap2(a.addr, a.len, a.prot, a.flags, a.fd, a.offset >> PAGE_SHIFT);
+	err = sys_mmap2(a.addr, a.len, a.prot, a.flags,
+			a.fd, a.offset >> PAGE_SHIFT);
 out:
 	return err;
 }
@@ -218,7 +211,7 @@ asmlinkage int sys_uname(struct old_utsname __user * name)
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
-	err=copy_to_user(name, vx_new_utsname(), sizeof (*name));
+	err = copy_to_user(name, utsname(), sizeof (*name));
 	up_read(&uts_sem);
 	return err?-EFAULT:0;
 }
@@ -226,7 +219,6 @@ asmlinkage int sys_uname(struct old_utsname __user * name)
 asmlinkage int sys_olduname(struct oldold_utsname __user * name)
 {
 	int error;
-	struct new_utsname *ptr;
 
 	if (!name)
 		return -EFAULT;
@@ -235,21 +227,39 @@ asmlinkage int sys_olduname(struct oldold_utsname __user * name)
   
   	down_read(&uts_sem);
 	
-	ptr = vx_new_utsname();
-	error = __copy_to_user(&name->sysname,ptr->sysname,__OLD_UTS_LEN);
-	error |= __put_user(0,name->sysname+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->nodename,ptr->nodename,__OLD_UTS_LEN);
-	error |= __put_user(0,name->nodename+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->release,ptr->release,__OLD_UTS_LEN);
-	error |= __put_user(0,name->release+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->version,ptr->version,__OLD_UTS_LEN);
-	error |= __put_user(0,name->version+__OLD_UTS_LEN);
-	error |= __copy_to_user(&name->machine,ptr->machine,__OLD_UTS_LEN);
-	error |= __put_user(0,name->machine+__OLD_UTS_LEN);
+	error = __copy_to_user(&name->sysname, &utsname()->sysname,
+			       __OLD_UTS_LEN);
+	error |= __put_user(0, name->sysname + __OLD_UTS_LEN);
+	error |= __copy_to_user(&name->nodename, &utsname()->nodename,
+				__OLD_UTS_LEN);
+	error |= __put_user(0, name->nodename + __OLD_UTS_LEN);
+	error |= __copy_to_user(&name->release, &utsname()->release,
+				__OLD_UTS_LEN);
+	error |= __put_user(0, name->release + __OLD_UTS_LEN);
+	error |= __copy_to_user(&name->version, &utsname()->version,
+				__OLD_UTS_LEN);
+	error |= __put_user(0, name->version + __OLD_UTS_LEN);
+	error |= __copy_to_user(&name->machine, &utsname()->machine,
+				__OLD_UTS_LEN);
+	error |= __put_user(0, name->machine + __OLD_UTS_LEN);
 	
 	up_read(&uts_sem);
 	
 	error = error ? -EFAULT : 0;
 
 	return error;
+}
+
+
+/*
+ * Do a system call from kernel instead of calling sys_execve so we
+ * end up with proper pt_regs.
+ */
+int kernel_execve(const char *filename, char *const argv[], char *const envp[])
+{
+	long __res;
+	asm volatile ("push %%ebx ; movl %2,%%ebx ; int $0x80 ; pop %%ebx"
+	: "=a" (__res)
+	: "0" (__NR_execve),"ri" (filename),"c" (argv), "d" (envp) : "memory");
+	return __res;
 }

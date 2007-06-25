@@ -23,6 +23,7 @@
 #include <sound/driver.h>
 #include <sound/core.h>
 #include <sound/control.h>
+#include <sound/tlv.h>
 #include "vxpocket.h"
 
 #define MIC_LEVEL_MIN	0
@@ -52,23 +53,28 @@ static int vx_mic_level_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
 {
 	struct vx_core *_chip = snd_kcontrol_chip(kcontrol);
 	struct snd_vxpocket *chip = (struct snd_vxpocket *)_chip;
-	down(&_chip->mixer_mutex);
+	mutex_lock(&_chip->mixer_mutex);
 	if (chip->mic_level != ucontrol->value.integer.value[0]) {
 		vx_set_mic_level(_chip, ucontrol->value.integer.value[0]);
 		chip->mic_level = ucontrol->value.integer.value[0];
-		up(&_chip->mixer_mutex);
+		mutex_unlock(&_chip->mixer_mutex);
 		return 1;
 	}
-	up(&_chip->mixer_mutex);
+	mutex_unlock(&_chip->mixer_mutex);
 	return 0;
 }
 
+static DECLARE_TLV_DB_SCALE(db_scale_mic, -21, 3, 0);
+
 static struct snd_kcontrol_new vx_control_mic_level = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
+	.access =	(SNDRV_CTL_ELEM_ACCESS_READWRITE |
+			 SNDRV_CTL_ELEM_ACCESS_TLV_READ),
 	.name =		"Mic Capture Volume",
 	.info =		vx_mic_level_info,
 	.get =		vx_mic_level_get,
 	.put =		vx_mic_level_put,
+	.tlv = { .p = db_scale_mic },
 };
 
 /*
@@ -95,14 +101,14 @@ static int vx_mic_boost_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
 {
 	struct vx_core *_chip = snd_kcontrol_chip(kcontrol);
 	struct snd_vxpocket *chip = (struct snd_vxpocket *)_chip;
-	down(&_chip->mixer_mutex);
+	mutex_lock(&_chip->mixer_mutex);
 	if (chip->mic_level != ucontrol->value.integer.value[0]) {
 		vx_set_mic_boost(_chip, ucontrol->value.integer.value[0]);
 		chip->mic_level = ucontrol->value.integer.value[0];
-		up(&_chip->mixer_mutex);
+		mutex_unlock(&_chip->mixer_mutex);
 		return 1;
 	}
-	up(&_chip->mixer_mutex);
+	mutex_unlock(&_chip->mixer_mutex);
 	return 0;
 }
 

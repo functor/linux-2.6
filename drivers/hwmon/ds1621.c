@@ -28,6 +28,8 @@
 #include <linux/i2c.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
+#include <linux/sysfs.h>
 #include "lm75.h"
 
 /* Addresses to scan */
@@ -72,7 +74,7 @@ MODULE_PARM_DESC(polarity, "Output's polarity: 0 = active high, 1 = active low")
 struct ds1621_data {
 	struct i2c_client client;
 	struct class_device *class_dev;
-	struct semaphore update_lock;
+	struct mutex update_lock;
 	char valid;			/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
@@ -156,10 +158,10 @@ static ssize_t set_temp_##suffix(struct device *dev, struct device_attribute *at
 	struct ds1621_data *data = ds1621_update_client(dev);		\
 	u16 val = LM75_TEMP_TO_REG(simple_strtoul(buf, NULL, 10));	\
 									\
-	down(&data->update_lock);					\
+	mutex_lock(&data->update_lock);					\
 	data->value = val;						\
 	ds1621_write_value(client, reg, data->value);			\
-	up(&data->update_lock);						\
+	mutex_unlock(&data->update_lock);				\
 	return count;							\
 }
 
@@ -176,6 +178,18 @@ static DEVICE_ATTR(alarms, S_IRUGO, show_alarms, NULL);
 static DEVICE_ATTR(temp1_input, S_IRUGO , show_temp, NULL);
 static DEVICE_ATTR(temp1_min, S_IWUSR | S_IRUGO , show_temp_min, set_temp_min);
 static DEVICE_ATTR(temp1_max, S_IWUSR | S_IRUGO, show_temp_max, set_temp_max);
+
+static struct attribute *ds1621_attributes[] = {
+	&dev_attr_temp1_input.attr,
+	&dev_attr_temp1_min.attr,
+	&dev_attr_temp1_max.attr,
+	&dev_attr_alarms.attr,
+	NULL
+};
+
+static const struct attribute_group ds1621_group = {
+	.attrs = ds1621_attributes,
+};
 
 
 static int ds1621_attach_adapter(struct i2c_adapter *adapter)
@@ -242,7 +256,7 @@ static int ds1621_detect(struct i2c_adapter *adapter, int address,
 	/* Fill in remaining client fields and put it into the global list */
 	strlcpy(new_client->name, "ds1621", I2C_NAME_SIZE);
 	data->valid = 0;
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Tell the I2C layer a new client has arrived */
 	if ((err = i2c_attach_client(new_client)))
@@ -252,21 +266,19 @@ static int ds1621_detect(struct i2c_adapter *adapter, int address,
 	ds1621_init_client(new_client);
 
 	/* Register sysfs hooks */
+	if ((err = sysfs_create_group(&new_client->dev.kobj, &ds1621_group)))
+		goto exit_detach;
+
 	data->class_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->class_dev)) {
 		err = PTR_ERR(data->class_dev);
-		goto exit_detach;
+		goto exit_remove_files;
 	}
 
-	device_create_file(&new_client->dev, &dev_attr_alarms);
-	device_create_file(&new_client->dev, &dev_attr_temp1_input);
-	device_create_file(&new_client->dev, &dev_attr_temp1_min);
-	device_create_file(&new_client->dev, &dev_attr_temp1_max);
-	
 	return 0;
 
-/* OK, this is not exactly good programming practice, usually. But it is
-   very code-efficient in this case. */
+      exit_remove_files:
+	sysfs_remove_group(&new_client->dev.kobj, &ds1621_group);
       exit_detach:
 	i2c_detach_client(new_client);
       exit_free:
@@ -281,6 +293,7 @@ static int ds1621_detach_client(struct i2c_client *client)
 	int err;
 
 	hwmon_device_unregister(data->class_dev);
+	sysfs_remove_group(&client->dev.kobj, &ds1621_group);
 
 	if ((err = i2c_detach_client(client)))
 		return err;
@@ -297,7 +310,7 @@ static struct ds1621_data *ds1621_update_client(struct device *dev)
 	struct ds1621_data *data = i2c_get_clientdata(client);
 	u8 new_conf;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
 	    || !data->valid) {
@@ -327,7 +340,7 @@ static struct ds1621_data *ds1621_update_client(struct device *dev)
 		data->valid = 1;
 	}
 
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 
 	return data;
 }

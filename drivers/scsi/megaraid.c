@@ -45,6 +45,7 @@
 #include <linux/interrupt.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/dma-mapping.h>
 #include <scsi/scsicam.h>
 
 #include "scsi.h"
@@ -72,10 +73,10 @@ static unsigned short int max_mbox_busy_wait = MBOX_BUSY_WAIT;
 module_param(max_mbox_busy_wait, ushort, 0);
 MODULE_PARM_DESC(max_mbox_busy_wait, "Maximum wait for mailbox in microseconds if busy (default=MBOX_BUSY_WAIT=10)");
 
-#define RDINDOOR(adapter)		readl((adapter)->base + 0x20)
-#define RDOUTDOOR(adapter)		readl((adapter)->base + 0x2C)
-#define WRINDOOR(adapter,value)		writel(value, (adapter)->base + 0x20)
-#define WROUTDOOR(adapter,value)	writel(value, (adapter)->base + 0x2C)
+#define RDINDOOR(adapter)	readl((adapter)->mmio_base + 0x20)
+#define RDOUTDOOR(adapter)	readl((adapter)->mmio_base + 0x2C)
+#define WRINDOOR(adapter,value)	 writel(value, (adapter)->mmio_base + 0x20)
+#define WROUTDOOR(adapter,value) writel(value, (adapter)->mmio_base + 0x2C)
 
 /*
  * Global variables
@@ -523,7 +524,7 @@ mega_build_cmd(adapter_t *adapter, Scsi_Cmnd *cmd, int *busy)
 	 * filter the internal and ioctl commands
 	 */
 	if((cmd->cmnd[0] == MEGA_INTERNAL_CMD)) {
-		return cmd->buffer;
+		return cmd->request_buffer;
 	}
 
 
@@ -1255,14 +1256,13 @@ bug_blocked_mailbox:
  * megaraid_isr_iomapped()
  * @irq - irq
  * @devp - pointer to our soft state
- * @regs - unused
  *
  * Interrupt service routine for io-mapped controllers.
  * Find out if our device is interrupting. If yes, acknowledge the interrupt
  * and service the completed commands.
  */
 static irqreturn_t
-megaraid_isr_iomapped(int irq, void *devp, struct pt_regs *regs)
+megaraid_isr_iomapped(int irq, void *devp)
 {
 	adapter_t	*adapter = devp;
 	unsigned long	flags;
@@ -1332,14 +1332,13 @@ megaraid_isr_iomapped(int irq, void *devp, struct pt_regs *regs)
  * megaraid_isr_memmapped()
  * @irq - irq
  * @devp - pointer to our soft state
- * @regs - unused
  *
  * Interrupt service routine for memory-mapped controllers.
  * Find out if our device is interrupting. If yes, acknowledge the interrupt
  * and service the completed commands.
  */
 static irqreturn_t
-megaraid_isr_memmapped(int irq, void *devp, struct pt_regs *regs)
+megaraid_isr_memmapped(int irq, void *devp)
 {
 	adapter_t	*adapter = devp;
 	unsigned long	flags;
@@ -1387,7 +1386,8 @@ megaraid_isr_memmapped(int irq, void *devp, struct pt_regs *regs)
 
 		handled = 1;
 
-		while( RDINDOOR(adapter) & 0x02 ) cpu_relax();
+		while( RDINDOOR(adapter) & 0x02 )
+			cpu_relax();
 
 		mega_cmd_done(adapter, completed, nstatus, status);
 
@@ -1827,7 +1827,7 @@ mega_build_sglist(adapter_t *adapter, scb_t *scb, u32 *buf, u32 *len)
 
 	scb->dma_type = MEGA_SGLIST;
 
-	if( sgcnt > adapter->sglen ) BUG();
+	BUG_ON(sgcnt > adapter->sglen);
 
 	*len = 0;
 
@@ -2094,7 +2094,7 @@ make_local_pdev(adapter_t *adapter, struct pci_dev **pdev)
 
 	memcpy(*pdev, adapter->dev, sizeof(struct pci_dev));
 
-	if( pci_set_dma_mask(*pdev, 0xffffffff) != 0 ) {
+	if( pci_set_dma_mask(*pdev, DMA_32BIT_MASK) != 0 ) {
 		kfree(*pdev);
 		return -1;
 	}
@@ -2821,9 +2821,7 @@ mega_print_inquiry(char *page, char *scsi_inq)
 
 	i = scsi_inq[0] & 0x1f;
 
-	len += sprintf(page+len, "  Type:   %s ",
-		i < MAX_SCSI_DEVICE_CODE ? scsi_device_types[i] :
-		   "Unknown          ");
+	len += sprintf(page+len, "  Type:   %s ", scsi_device_type(i));
 
 	len += sprintf(page+len,
 	"                 ANSI SCSI revision: %02x", scsi_inq[2] & 0x07);
@@ -3657,8 +3655,9 @@ megadev_ioctl(struct inode *inode, struct file *filep, unsigned int cmd,
 			 * Send the request sense data also, irrespective of
 			 * whether the user has asked for it or not.
 			 */
-			copy_to_user(upthru->reqsensearea,
-					pthru->reqsensearea, 14);
+			if (copy_to_user(upthru->reqsensearea,
+					pthru->reqsensearea, 14))
+				rval = -EFAULT;
 
 freemem_and_return:
 			if( pthru->dataxferlen ) {
@@ -4470,7 +4469,6 @@ mega_internal_command(adapter_t *adapter, megacmd_t *mc, mega_passthru *pthru)
 {
 	Scsi_Cmnd	*scmd;
 	struct	scsi_device *sdev;
-	unsigned long	flags = 0;
 	scb_t	*scb;
 	int	rval;
 
@@ -4492,7 +4490,7 @@ mega_internal_command(adapter_t *adapter, megacmd_t *mc, mega_passthru *pthru)
 	scmd->device = sdev;
 
 	scmd->device->host = adapter->host;
-	scmd->buffer = (void *)scb;
+	scmd->request_buffer = (void *)scb;
 	scmd->cmnd[0] = MEGA_INTERNAL_CMD;
 
 	scb->state |= SCB_ACTIVE;
@@ -4671,6 +4669,8 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		host->host_no, mega_baseport, irq);
 
 	adapter->base = mega_baseport;
+	if (flag & BOARD_MEMMAP)
+		adapter->mmio_base = (void __iomem *) mega_baseport;
 
 	INIT_LIST_HEAD(&adapter->free_list);
 	INIT_LIST_HEAD(&adapter->pending_list);
@@ -4714,7 +4714,7 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (request_irq(irq, (adapter->flag & BOARD_MEMMAP) ?
 				megaraid_isr_memmapped : megaraid_isr_iomapped,
-					SA_SHIRQ, "megaraid", adapter)) {
+					IRQF_SHARED, "megaraid", adapter)) {
 		printk(KERN_WARNING
 			"megaraid: Couldn't register IRQ %d!\n", irq);
 		goto out_free_scb_list;
@@ -4859,10 +4859,10 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* Set the Mode of addressing to 64 bit if we can */
 	if ((adapter->flag & BOARD_64BIT) && (sizeof(dma_addr_t) == 8)) {
-		pci_set_dma_mask(pdev, 0xffffffffffffffffULL);
+		pci_set_dma_mask(pdev, DMA_64BIT_MASK);
 		adapter->has_64bit_addr = 1;
 	} else  {
-		pci_set_dma_mask(pdev, 0xffffffff);
+		pci_set_dma_mask(pdev, DMA_32BIT_MASK);
 		adapter->has_64bit_addr = 0;
 	}
 		

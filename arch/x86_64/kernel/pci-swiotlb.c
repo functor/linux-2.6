@@ -3,15 +3,19 @@
 #include <linux/pci.h>
 #include <linux/cache.h>
 #include <linux/module.h>
-#include <asm/dma-mapping.h>
+#include <linux/dma-mapping.h>
+
 #include <asm/proto.h>
 #include <asm/swiotlb.h>
 #include <asm/dma.h>
 
+#ifndef CONFIG_XEN
 int swiotlb __read_mostly;
 EXPORT_SYMBOL(swiotlb);
+#endif
 
 struct dma_mapping_ops swiotlb_dma_ops = {
+#ifndef CONFIG_XEN
 	.mapping_error = swiotlb_dma_mapping_error,
 	.alloc_coherent = swiotlb_alloc_coherent,
 	.free_coherent = swiotlb_free_coherent,
@@ -26,17 +30,27 @@ struct dma_mapping_ops swiotlb_dma_ops = {
 	.map_sg = swiotlb_map_sg,
 	.unmap_sg = swiotlb_unmap_sg,
 	.dma_supported = NULL,
+#endif
 };
 
 void pci_swiotlb_init(void)
 {
+#ifdef CONFIG_XEN
+	swiotlb_init();
+	if (swiotlb) {
+		printk(KERN_INFO "PCI-DMA: Using software bounce buffering for IO (SWIOTLB)\n");
+		dma_ops = &swiotlb_dma_ops;
+	}
+#else
 	/* don't initialize swiotlb if iommu=off (no_iommu=1) */
-	if (!iommu_aperture && !no_iommu &&
-	    (end_pfn > MAX_DMA32_PFN || force_iommu))
+	if (!iommu_detected && !no_iommu && end_pfn > MAX_DMA32_PFN)
 	       swiotlb = 1;
+	if (swiotlb_force)
+		swiotlb = 1;
 	if (swiotlb) {
 		printk(KERN_INFO "PCI-DMA: Using software bounce buffering for IO (SWIOTLB)\n");
 		swiotlb_init();
 		dma_ops = &swiotlb_dma_ops;
 	}
+#endif /* CONFIG_XEN */
 }

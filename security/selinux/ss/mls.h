@@ -8,7 +8,14 @@
  *
  *	Support for enhanced MLS infrastructure.
  *
- * Copyright (C) 2004-2005 Trusted Computer Solutions, Inc.
+ * Copyright (C) 2004-2006 Trusted Computer Solutions, Inc.
+ */
+/*
+ * Updated: Hewlett-Packard <paul.moore@hp.com>
+ *
+ *      Added support to import/export the MLS label from NetLabel
+ *
+ * (c) Copyright Hewlett-Packard Development Company, L.P., 2006
  */
 
 #ifndef _SS_MLS_H_
@@ -27,6 +34,8 @@ int mls_context_to_sid(char oldc,
 		       struct sidtab *s,
 		       u32 def_sid);
 
+int mls_from_string(char *str, struct context *context, gfp_t gfp_mask);
+
 int mls_convert_context(struct policydb *oldp,
 			struct policydb *newp,
 			struct context *context);
@@ -39,6 +48,38 @@ int mls_compute_sid(struct context *scontext,
 
 int mls_setup_user_range(struct context *fromcon, struct user_datum *user,
                          struct context *usercon);
+
+#ifdef CONFIG_NETLABEL
+void mls_export_netlbl_lvl(struct context *context,
+			   struct netlbl_lsm_secattr *secattr);
+void mls_import_netlbl_lvl(struct context *context,
+			   struct netlbl_lsm_secattr *secattr);
+int mls_export_netlbl_cat(struct context *context,
+			  struct netlbl_lsm_secattr *secattr);
+int mls_import_netlbl_cat(struct context *context,
+			  struct netlbl_lsm_secattr *secattr);
+#else
+static inline void mls_export_netlbl_lvl(struct context *context,
+					 struct netlbl_lsm_secattr *secattr)
+{
+	return;
+}
+static inline void mls_import_netlbl_lvl(struct context *context,
+					 struct netlbl_lsm_secattr *secattr)
+{
+	return;
+}
+static inline int mls_export_netlbl_cat(struct context *context,
+					struct netlbl_lsm_secattr *secattr)
+{
+	return -ENOMEM;
+}
+static inline int mls_import_netlbl_cat(struct context *context,
+					struct netlbl_lsm_secattr *secattr)
+{
+	return -ENOMEM;
+}
+#endif
 
 #endif	/* _SS_MLS_H */
 

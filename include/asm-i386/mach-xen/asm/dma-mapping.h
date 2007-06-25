@@ -1,15 +1,12 @@
 #ifndef _ASM_I386_DMA_MAPPING_H
 #define _ASM_I386_DMA_MAPPING_H
 
-/*
- * IOMMU interface. See Documentation/DMA-mapping.txt and DMA-API.txt for
- * documentation.
- */
-
 #include <linux/mm.h>
+
 #include <asm/cache.h>
 #include <asm/io.h>
 #include <asm/scatterlist.h>
+#include <asm/bug.h>
 #include <asm/swiotlb.h>
 
 static inline int
@@ -47,10 +44,9 @@ extern void
 dma_unmap_single(struct device *dev, dma_addr_t dma_addr, size_t size,
 		 enum dma_data_direction direction);
 
-extern int dma_map_sg(struct device *hwdev, struct scatterlist *sg,
-		      int nents, enum dma_data_direction direction);
-extern void dma_unmap_sg(struct device *hwdev, struct scatterlist *sg,
-			 int nents, enum dma_data_direction direction);
+extern int
+dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
+	   enum dma_data_direction direction);
 
 extern dma_addr_t
 dma_map_page(struct device *dev, struct page *page, unsigned long offset,
@@ -59,6 +55,10 @@ dma_map_page(struct device *dev, struct page *page, unsigned long offset,
 extern void
 dma_unmap_page(struct device *dev, dma_addr_t dma_address, size_t size,
 	       enum dma_data_direction direction);
+
+extern void
+dma_unmap_sg(struct device *dev, struct scatterlist *sg, int nhwentries,
+	     enum dma_data_direction direction);
 
 extern void
 dma_sync_single_for_cpu(struct device *dev, dma_addr_t dma_handle, size_t size,
@@ -127,10 +127,10 @@ dma_get_cache_alignment(void)
 	return (1 << INTERNODE_CACHE_SHIFT);
 }
 
-#define dma_is_consistent(d)	(1)
+#define dma_is_consistent(d, h)	(1)
 
 static inline void
-dma_cache_sync(void *vaddr, size_t size,
+dma_cache_sync(struct device *dev, void *vaddr, size_t size,
 	       enum dma_data_direction direction)
 {
 	flush_write_buffers();

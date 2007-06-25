@@ -40,7 +40,6 @@
 
 #include "udfdecl.h"    
 
-#include <linux/config.h>
 #include <linux/blkdev.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
@@ -91,13 +90,13 @@ static void udf_load_partdesc(struct super_block *, struct buffer_head *);
 static void udf_open_lvid(struct super_block *);
 static void udf_close_lvid(struct super_block *);
 static unsigned int udf_count_free(struct super_block *);
-static int udf_statfs(struct super_block *, struct kstatfs *);
+static int udf_statfs(struct dentry *, struct kstatfs *);
 
 /* UDF filesystem type */
-static struct super_block *udf_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int udf_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, udf_fill_super);
+	return get_sb_bdev(fs_type, flags, dev_name, data, udf_fill_super, mnt);
 }
 
 static struct file_system_type udf_fstype = {
@@ -108,14 +107,21 @@ static struct file_system_type udf_fstype = {
 	.fs_flags	= FS_REQUIRES_DEV,
 };
 
-static kmem_cache_t * udf_inode_cachep;
+static struct kmem_cache * udf_inode_cachep;
 
 static struct inode *udf_alloc_inode(struct super_block *sb)
 {
 	struct udf_inode_info *ei;
-	ei = (struct udf_inode_info *)kmem_cache_alloc(udf_inode_cachep, SLAB_KERNEL);
+	ei = (struct udf_inode_info *)kmem_cache_alloc(udf_inode_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
+
+	ei->i_unique = 0;
+	ei->i_lenExtents = 0;
+	ei->i_next_alloc_block = 0;
+	ei->i_next_alloc_goal = 0;
+	ei->i_strat4096 = 0;
+
 	return &ei->vfs_inode;
 }
 
@@ -124,7 +130,7 @@ static void udf_destroy_inode(struct inode *inode)
 	kmem_cache_free(udf_inode_cachep, UDF_I(inode));
 }
 
-static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
+static void init_once(void * foo, struct kmem_cache * cachep, unsigned long flags)
 {
 	struct udf_inode_info *ei = (struct udf_inode_info *) foo;
 
@@ -140,7 +146,8 @@ static int init_inodecache(void)
 {
 	udf_inode_cachep = kmem_cache_create("udf_inode_cache",
 					     sizeof(struct udf_inode_info),
-					     0, SLAB_RECLAIM_ACCOUNT,
+					     0, (SLAB_RECLAIM_ACCOUNT|
+						SLAB_MEM_SPREAD),
 					     init_once, NULL);
 	if (udf_inode_cachep == NULL)
 		return -ENOMEM;
@@ -149,8 +156,7 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
-	if (kmem_cache_destroy(udf_inode_cachep))
-		printk(KERN_INFO "udf_inode_cache: not all structures were freed\n");
+	kmem_cache_destroy(udf_inode_cachep);
 }
 
 /* Superblock operations */
@@ -559,7 +565,7 @@ udf_vrs(struct super_block *sb, int silent)
 
 		if (vsd->stdIdent[0] == 0)
 		{
-			udf_release_data(bh);
+			brelse(bh);
 			break;
 		}
 		else if (!strncmp(vsd->stdIdent, VSD_STD_ID_CD001, VSD_STD_ID_LEN))
@@ -592,7 +598,7 @@ udf_vrs(struct super_block *sb, int silent)
 		}
 		else if (!strncmp(vsd->stdIdent, VSD_STD_ID_TEA01, VSD_STD_ID_LEN))
 		{
-			udf_release_data(bh);
+			brelse(bh);
 			break;
 		}
 		else if (!strncmp(vsd->stdIdent, VSD_STD_ID_NSR02, VSD_STD_ID_LEN))
@@ -603,7 +609,7 @@ udf_vrs(struct super_block *sb, int silent)
 		{
 			nsr03 = sector;
 		}
-		udf_release_data(bh);
+		brelse(bh);
 	}
 
 	if (nsr03)
@@ -660,8 +666,7 @@ udf_find_anchor(struct super_block *sb)
 		 *     lastblock
 		 *  however, if the disc isn't closed, it could be 512 */
 
-		for (i=0; (!lastblock && i<sizeof(last)/sizeof(int)); i++)
-		{
+		for (i = 0; !lastblock && i < ARRAY_SIZE(last); i++) {
 			if (last[i] < 0 || !(bh = sb_bread(sb, last[i])))
 			{
 				ident = location = 0;
@@ -670,9 +675,9 @@ udf_find_anchor(struct super_block *sb)
 			{
 				ident = le16_to_cpu(((tag *)bh->b_data)->tagIdent);
 				location = le32_to_cpu(((tag *)bh->b_data)->tagLocation);
-				udf_release_data(bh);
+				brelse(bh);
 			}
-	
+
 			if (ident == TAG_IDENT_AVDP)
 			{
 				if (location == last[i] - UDF_SB_SESSION(sb))
@@ -705,7 +710,7 @@ udf_find_anchor(struct super_block *sb)
 				{
 					ident = le16_to_cpu(((tag *)bh->b_data)->tagIdent);
 					location = le32_to_cpu(((tag *)bh->b_data)->tagLocation);
-					udf_release_data(bh);
+					brelse(bh);
 				}
 	
 				if (ident == TAG_IDENT_AVDP &&
@@ -724,7 +729,7 @@ udf_find_anchor(struct super_block *sb)
 					{
 						ident = le16_to_cpu(((tag *)bh->b_data)->tagIdent);
 						location = le32_to_cpu(((tag *)bh->b_data)->tagLocation);
-						udf_release_data(bh);
+						brelse(bh);
 					}
 	
 					if (ident == TAG_IDENT_AVDP &&
@@ -746,15 +751,14 @@ udf_find_anchor(struct super_block *sb)
 		{
 			ident = le16_to_cpu(((tag *)bh->b_data)->tagIdent);
 			location = le32_to_cpu(((tag *)bh->b_data)->tagLocation);
-			udf_release_data(bh);
+			brelse(bh);
 
 			if (ident == TAG_IDENT_AVDP && location == 256)
 				UDF_SET_FLAG(sb, UDF_FLAG_VARCONV);
 		}
 	}
 
-	for (i=0; i<sizeof(UDF_SB_ANCHOR(sb))/sizeof(int); i++)
-	{
+	for (i = 0; i < ARRAY_SIZE(UDF_SB_ANCHOR(sb)); i++) {
 		if (UDF_SB_ANCHOR(sb)[i])
 		{
 			if (!(bh = udf_read_tagged(sb,
@@ -764,7 +768,7 @@ udf_find_anchor(struct super_block *sb)
 			}
 			else
 			{
-				udf_release_data(bh);
+				brelse(bh);
 				if ((ident != TAG_IDENT_AVDP) && (i ||
 					(ident != TAG_IDENT_FE && ident != TAG_IDENT_EFE)))
 				{
@@ -793,7 +797,7 @@ udf_find_fileset(struct super_block *sb, kernel_lb_addr *fileset, kernel_lb_addr
 			return 1;
 		else if (ident != TAG_IDENT_FSD)
 		{
-			udf_release_data(bh);
+			brelse(bh);
 			return 1;
 		}
 			
@@ -832,7 +836,7 @@ udf_find_fileset(struct super_block *sb, kernel_lb_addr *fileset, kernel_lb_addr
 						newfileset.logicalBlockNum += 1 +
 							((le32_to_cpu(sp->numOfBytes) + sizeof(struct spaceBitmapDesc) - 1)
 								>> sb->s_blocksize_bits);
-						udf_release_data(bh);
+						brelse(bh);
 						break;
 					}
 					case TAG_IDENT_FSD:
@@ -843,7 +847,7 @@ udf_find_fileset(struct super_block *sb, kernel_lb_addr *fileset, kernel_lb_addr
 					default:
 					{
 						newfileset.logicalBlockNum ++;
-						udf_release_data(bh);
+						brelse(bh);
 						bh = NULL;
 						break;
 					}
@@ -863,7 +867,7 @@ udf_find_fileset(struct super_block *sb, kernel_lb_addr *fileset, kernel_lb_addr
 
 		UDF_SB_PARTITION(sb) = fileset->partitionReferenceNum;
 		udf_load_fileset(sb, bh, root);
-		udf_release_data(bh);
+		brelse(bh);
 		return 0;
 	}
 	return 1;
@@ -1081,7 +1085,7 @@ udf_load_logicalvol(struct super_block *sb, struct buffer_head * bh, kernel_lb_a
 						if (ident != 0 ||
 							strncmp(st->sparingIdent.ident, UDF_ID_SPARING, strlen(UDF_ID_SPARING)))
 						{
-							udf_release_data(UDF_SB_TYPESPAR(sb,i).s_spar_map[j]);
+							brelse(UDF_SB_TYPESPAR(sb,i).s_spar_map[j]);
 							UDF_SB_TYPESPAR(sb,i).s_spar_map[j] = NULL;
 						}
 					}
@@ -1135,12 +1139,12 @@ udf_load_logicalvolint(struct super_block *sb, kernel_extent_ad loc)
 			udf_load_logicalvolint(sb, leea_to_cpu(UDF_SB_LVID(sb)->nextIntegrityExt));
 		
 		if (UDF_SB_LVIDBH(sb) != bh)
-			udf_release_data(bh);
+			brelse(bh);
 		loc.extLength -= sb->s_blocksize;
 		loc.extLocation ++;
 	}
 	if (UDF_SB_LVIDBH(sb) != bh)
-		udf_release_data(bh);
+		brelse(bh);
 }
 
 /*
@@ -1243,7 +1247,7 @@ udf_process_sequence(struct super_block *sb, long block, long lastblock, kernel_
 					done = 1;
 				break;
 		}
-		udf_release_data(bh);
+		brelse(bh);
 	}
 	for (i=0; i<VDS_POS_LENGTH; i++)
 	{
@@ -1265,10 +1269,10 @@ udf_process_sequence(struct super_block *sb, long block, long lastblock, kernel_
 					gd = (struct generic_desc *)bh2->b_data;
 					if (ident == TAG_IDENT_PD)
 						udf_load_partdesc(sb, bh2);
-					udf_release_data(bh2);
+					brelse(bh2);
 				}
 			}
-			udf_release_data(bh);
+			brelse(bh);
 		}
 	}
 
@@ -1313,8 +1317,7 @@ udf_load_partition(struct super_block *sb, kernel_lb_addr *fileset)
 	if (!sb)
 		return 1;
 
-	for (i=0; i<sizeof(UDF_SB_ANCHOR(sb))/sizeof(int); i++)
-	{
+	for (i = 0; i < ARRAY_SIZE(UDF_SB_ANCHOR(sb)); i++) {
 		if (UDF_SB_ANCHOR(sb)[i] && (bh = udf_read_tagged(sb,
 			UDF_SB_ANCHOR(sb)[i], UDF_SB_ANCHOR(sb)[i], &ident)))
 		{
@@ -1325,14 +1328,14 @@ udf_load_partition(struct super_block *sb, kernel_lb_addr *fileset)
 			main_e = le32_to_cpu( anchor->mainVolDescSeqExt.extLength );
 			main_e = main_e >> sb->s_blocksize_bits;
 			main_e += main_s;
-	
+
 			/* Locate the reserve sequence */
 			reserve_s = le32_to_cpu(anchor->reserveVolDescSeqExt.extLocation);
 			reserve_e = le32_to_cpu(anchor->reserveVolDescSeqExt.extLength);
 			reserve_e = reserve_e >> sb->s_blocksize_bits;
 			reserve_e += reserve_s;
 
-			udf_release_data(bh);
+			brelse(bh);
 
 			/* Process the main & reserve sequences */
 			/* responsible for finding the PartitionDesc(s) */
@@ -1344,12 +1347,10 @@ udf_load_partition(struct super_block *sb, kernel_lb_addr *fileset)
 		}
 	}
 
-	if (i == sizeof(UDF_SB_ANCHOR(sb))/sizeof(int))
-	{
+	if (i == ARRAY_SIZE(UDF_SB_ANCHOR(sb))) {
 		udf_debug("No Anchor block found\n");
 		return 1;
-	}
-	else
+	} else
 		udf_debug("Using anchor in block %d\n", UDF_SB_ANCHOR(sb)[i]);
 
 	for (i=0; i<UDF_SB_NUMPARTS(sb); i++)
@@ -1404,12 +1405,14 @@ udf_load_partition(struct super_block *sb, kernel_lb_addr *fileset)
 
 					pos = udf_block_map(UDF_SB_VAT(sb), 0);
 					bh = sb_bread(sb, pos);
+					if (!bh)
+						return 1;
 					UDF_SB_TYPEVIRT(sb,i).s_start_offset =
 						le16_to_cpu(((struct virtualAllocationTable20 *)bh->b_data + udf_ext0_offset(UDF_SB_VAT(sb)))->lengthHeader) +
 							udf_ext0_offset(UDF_SB_VAT(sb));
 					UDF_SB_TYPEVIRT(sb,i).s_num_entries = (UDF_SB_VAT(sb)->i_size -
 						UDF_SB_TYPEVIRT(sb,i).s_start_offset) >> 2;
-					udf_release_data(bh);
+					brelse(bh);
 				}
 				UDF_SB_PARTROOT(sb,i) = udf_get_pblock(sb, 0, i, 0);
 				UDF_SB_PARTLEN(sb,i) = UDF_SB_PARTLEN(sb,ino.partitionReferenceNum);
@@ -1515,7 +1518,7 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 	sb->s_fs_info = sbi;
 	memset(UDF_SB(sb), 0x00, sizeof(struct udf_sb_info));
 
-	init_MUTEX(&sbi->s_alloc_sem);
+	mutex_init(&sbi->s_alloc_mutex);
 
 	if (!udf_parse_options((char *)options, &uopt))
 		goto error_out;
@@ -1620,6 +1623,11 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 		goto error_out;
 	}
 
+	if (UDF_SB_PARTFLAGS(sb, UDF_SB_PARTITION(sb)) & UDF_PART_FLAG_READ_ONLY) {
+		printk("UDF-fs: Partition marked readonly; forcing readonly mount\n");
+		sb->s_flags |= MS_RDONLY;
+	}
+
 	if ( udf_find_fileset(sb, &fileset, &rootdir) )
 	{
 		printk("UDF-fs: No fileset found\n");
@@ -1657,7 +1665,7 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 		iput(inode);
 		goto error_out;
 	}
-	sb->s_maxbytes = 1<<30;
+	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	return 0;
 
 error_out:
@@ -1676,7 +1684,7 @@ error_out:
 		if (UDF_SB_PARTTYPE(sb, UDF_SB_PARTITION(sb)) == UDF_SPARABLE_MAP15)
 		{
 			for (i=0; i<4; i++)
-				udf_release_data(UDF_SB_TYPESPAR(sb, UDF_SB_PARTITION(sb)).s_spar_map[i]);
+				brelse(UDF_SB_TYPESPAR(sb, UDF_SB_PARTITION(sb)).s_spar_map[i]);
 		}
 	}
 #ifdef CONFIG_UDF_NLS
@@ -1685,7 +1693,7 @@ error_out:
 #endif
 	if (!(sb->s_flags & MS_RDONLY))
 		udf_close_lvid(sb);
-	udf_release_data(UDF_SB_LVIDBH(sb));
+	brelse(UDF_SB_LVIDBH(sb));
 	UDF_SB_FREE(sb);
 	kfree(sbi);
 	sb->s_fs_info = NULL;
@@ -1703,7 +1711,7 @@ void udf_error(struct super_block *sb, const char *function,
 		sb->s_dirt = 1;
 	}
 	va_start(args, fmt);
-	vsprintf(error_buf, fmt, args);
+	vsnprintf(error_buf, sizeof(error_buf), fmt, args);
 	va_end(args);
 	printk (KERN_CRIT "UDF-fs error (device %s): %s: %s\n",
 		sb->s_id, function, error_buf);
@@ -1715,7 +1723,7 @@ void udf_warning(struct super_block *sb, const char *function,
 	va_list args;
 
 	va_start (args, fmt);
-	vsprintf(error_buf, fmt, args);
+	vsnprintf(error_buf, sizeof(error_buf), fmt, args);
 	va_end(args);
 	printk(KERN_WARNING "UDF-fs warning (device %s): %s: %s\n",
 		sb->s_id, function, error_buf);
@@ -1754,7 +1762,7 @@ udf_put_super(struct super_block *sb)
 		if (UDF_SB_PARTTYPE(sb, UDF_SB_PARTITION(sb)) == UDF_SPARABLE_MAP15)
 		{
 			for (i=0; i<4; i++)
-				udf_release_data(UDF_SB_TYPESPAR(sb, UDF_SB_PARTITION(sb)).s_spar_map[i]);
+				brelse(UDF_SB_TYPESPAR(sb, UDF_SB_PARTITION(sb)).s_spar_map[i]);
 		}
 	}
 #ifdef CONFIG_UDF_NLS
@@ -1763,7 +1771,7 @@ udf_put_super(struct super_block *sb)
 #endif
 	if (!(sb->s_flags & MS_RDONLY))
 		udf_close_lvid(sb);
-	udf_release_data(UDF_SB_LVIDBH(sb));
+	brelse(UDF_SB_LVIDBH(sb));
 	UDF_SB_FREE(sb);
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
@@ -1783,8 +1791,10 @@ udf_put_super(struct super_block *sb)
  *	Written, tested, and released.
  */
 static int
-udf_statfs(struct super_block *sb, struct kstatfs *buf)
+udf_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
+	struct super_block *sb = dentry->d_sb;
+
 	buf->f_type = UDF_SUPER_MAGIC;
 	buf->f_bsize = sb->s_blocksize;
 	buf->f_blocks = UDF_SB_PARTLEN(sb, UDF_SB_PARTITION(sb));
@@ -1831,7 +1841,7 @@ udf_count_free_bitmap(struct super_block *sb, struct udf_bitmap *bitmap)
 	}
 	else if (ident != TAG_IDENT_SBD)
 	{
-		udf_release_data(bh);
+		brelse(bh);
 		printk(KERN_ERR "udf: udf_count_free failed\n");
 		goto out;
 	}
@@ -1853,7 +1863,7 @@ udf_count_free_bitmap(struct super_block *sb, struct udf_bitmap *bitmap)
 		}
 		if ( bytes )
 		{
-			udf_release_data(bh);
+			brelse(bh);
 			newblock = udf_get_lb_pblock(sb, loc, ++block);
 			bh = udf_tread(sb, newblock);
 			if (!bh)
@@ -1865,7 +1875,7 @@ udf_count_free_bitmap(struct super_block *sb, struct udf_bitmap *bitmap)
 			ptr = (uint8_t *)bh->b_data;
 		}
 	}
-	udf_release_data(bh);
+	brelse(bh);
 
 out:
 	unlock_kernel();
@@ -1877,21 +1887,20 @@ static unsigned int
 udf_count_free_table(struct super_block *sb, struct inode * table)
 {
 	unsigned int accum = 0;
-	uint32_t extoffset, elen;
-	kernel_lb_addr bloc, eloc;
+	uint32_t elen;
+	kernel_lb_addr eloc;
 	int8_t etype;
-	struct buffer_head *bh = NULL;
+	struct extent_position epos;
 
 	lock_kernel();
 
-	bloc = UDF_I_LOCATION(table);
-	extoffset = sizeof(struct unallocSpaceEntry);
+	epos.block = UDF_I_LOCATION(table);
+	epos.offset = sizeof(struct unallocSpaceEntry);
+	epos.bh = NULL;
 
-	while ((etype = udf_next_aext(table, &bloc, &extoffset, &eloc, &elen, &bh, 1)) != -1)
-	{
+	while ((etype = udf_next_aext(table, &epos, &eloc, &elen, 1)) != -1)
 		accum += (elen >> table->i_sb->s_blocksize_bits);
-	}
-	udf_release_data(bh);
+	brelse(epos.bh);
 
 	unlock_kernel();
 

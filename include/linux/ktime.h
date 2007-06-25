@@ -56,7 +56,12 @@ typedef union {
 #endif
 } ktime_t;
 
-#define KTIME_MAX			(~((u64)1 << 63))
+#define KTIME_MAX			((s64)~((u64)1 << 63))
+#if (BITS_PER_LONG == 64)
+# define KTIME_SEC_MAX			(KTIME_MAX / NSEC_PER_SEC)
+#else
+# define KTIME_SEC_MAX			LONG_MAX
+#endif
 
 /*
  * ktime_t definitions when using the 64-bit scalar representation:
@@ -64,12 +69,8 @@ typedef union {
 
 #if (BITS_PER_LONG == 64) || defined(CONFIG_KTIME_SCALAR)
 
-/* Define a ktime_t variable and initialize it to zero: */
-#define DEFINE_KTIME(kt)		ktime_t kt = { .tv64 = 0 }
-
 /**
  * ktime_set - Set a ktime_t variable from a seconds/nanoseconds value
- *
  * @secs:	seconds to set
  * @nsecs:	nanoseconds to set
  *
@@ -77,6 +78,10 @@ typedef union {
  */
 static inline ktime_t ktime_set(const long secs, const unsigned long nsecs)
 {
+#if (BITS_PER_LONG == 64)
+	if (unlikely(secs >= KTIME_SEC_MAX))
+		return (ktime_t){ .tv64 = KTIME_MAX };
+#endif
 	return (ktime_t) { .tv64 = (s64)secs * NSEC_PER_SEC + (s64)nsecs };
 }
 
@@ -113,9 +118,6 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
 /* Map the ktime_t to timeval conversion to ns_to_timeval function */
 #define ktime_to_timeval(kt)		ns_to_timeval((kt).tv64)
 
-/* Map the ktime_t to clock_t conversion to the inline in jiffies.h: */
-#define ktime_to_clock_t(kt)		nsec_to_clock_t((kt).tv64)
-
 /* Convert ktime_t to nanoseconds - NOP in the scalar storage format: */
 #define ktime_to_ns(kt)			((kt).tv64)
 
@@ -136,9 +138,6 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
  *   tv.sec < 0 and 0 >= tv.nsec < NSEC_PER_SEC
  */
 
-/* Define a ktime_t variable and initialize it to zero: */
-#define DEFINE_KTIME(kt)		ktime_t kt = { .tv64 = 0 }
-
 /* Set a ktime_t variable to a value in sec/nsec representation: */
 static inline ktime_t ktime_set(const long secs, const unsigned long nsecs)
 {
@@ -147,7 +146,6 @@ static inline ktime_t ktime_set(const long secs, const unsigned long nsecs)
 
 /**
  * ktime_sub - subtract two ktime_t variables
- *
  * @lhs:	minuend
  * @rhs:	subtrahend
  *
@@ -166,7 +164,6 @@ static inline ktime_t ktime_sub(const ktime_t lhs, const ktime_t rhs)
 
 /**
  * ktime_add - add two ktime_t variables
- *
  * @add1:	addend1
  * @add2:	addend2
  *
@@ -193,7 +190,6 @@ static inline ktime_t ktime_add(const ktime_t add1, const ktime_t add2)
 
 /**
  * ktime_add_ns - Add a scalar nanoseconds value to a ktime_t variable
- *
  * @kt:		addend
  * @nsec:	the scalar nsec value to add
  *
@@ -203,7 +199,6 @@ extern ktime_t ktime_add_ns(const ktime_t kt, u64 nsec);
 
 /**
  * timespec_to_ktime - convert a timespec to ktime_t format
- *
  * @ts:		the timespec variable to convert
  *
  * Returns a ktime_t variable with the converted timespec value
@@ -216,7 +211,6 @@ static inline ktime_t timespec_to_ktime(const struct timespec ts)
 
 /**
  * timeval_to_ktime - convert a timeval to ktime_t format
- *
  * @tv:		the timeval variable to convert
  *
  * Returns a ktime_t variable with the converted timeval value
@@ -229,7 +223,6 @@ static inline ktime_t timeval_to_ktime(const struct timeval tv)
 
 /**
  * ktime_to_timespec - convert a ktime_t variable to timespec format
- *
  * @kt:		the ktime_t variable to convert
  *
  * Returns the timespec representation of the ktime value
@@ -242,7 +235,6 @@ static inline struct timespec ktime_to_timespec(const ktime_t kt)
 
 /**
  * ktime_to_timeval - convert a ktime_t variable to timeval format
- *
  * @kt:		the ktime_t variable to convert
  *
  * Returns the timeval representation of the ktime value
@@ -255,25 +247,14 @@ static inline struct timeval ktime_to_timeval(const ktime_t kt)
 }
 
 /**
- * ktime_to_clock_t - convert a ktime_t variable to clock_t format
- * @kt:		the ktime_t variable to convert
- *
- * Returns a clock_t variable with the converted value
- */
-static inline clock_t ktime_to_clock_t(const ktime_t kt)
-{
-	return nsec_to_clock_t( (u64) kt.tv.sec * NSEC_PER_SEC + kt.tv.nsec);
-}
-
-/**
  * ktime_to_ns - convert a ktime_t variable to scalar nanoseconds
  * @kt:		the ktime_t variable to convert
  *
  * Returns the scalar nanoseconds representation of kt
  */
-static inline u64 ktime_to_ns(const ktime_t kt)
+static inline s64 ktime_to_ns(const ktime_t kt)
 {
-	return (u64) kt.tv.sec * NSEC_PER_SEC + kt.tv.nsec;
+	return (s64) kt.tv.sec * NSEC_PER_SEC + kt.tv.nsec;
 }
 
 #endif

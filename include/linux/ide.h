@@ -6,7 +6,6 @@
  *  Copyright (C) 1994-2002  Linus Torvalds & authors
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/hdreg.h>
@@ -252,7 +251,8 @@ static inline void ide_std_init_ports(hw_regs_t *hw,
 
 #include <asm/ide.h>
 
-#ifndef MAX_HWIFS
+#if !defined(MAX_HWIFS) || defined(CONFIG_EMBEDDED)
+#undef MAX_HWIFS
 #define MAX_HWIFS	CONFIG_IDE_MAX_HWIFS
 #endif
 
@@ -553,7 +553,6 @@ typedef struct ide_drive_s {
 	struct hd_driveid	*id;	/* drive model identification info */
 	struct proc_dir_entry *proc;	/* /proc/ide/ directory entry */
 	struct ide_settings_s *settings;/* /proc/ide/ drive settings */
-	char		devfs_name[64];	/* devfs crap */
 
 	struct hwif_s		*hwif;	/* actually (ide_hwif_t *) */
 
@@ -573,6 +572,7 @@ typedef struct ide_drive_s {
 	u8	waiting_for_dma;	/* dma currently in progress */
 	u8	unmask;			/* okay to unmask other irqs */
 	u8	bswap;			/* byte swap data */
+	u8	noflush;		/* don't attempt flushes */
 	u8	dsc_overlap;		/* DSC overlap */
 	u8	nice1;			/* give potential excess bandwidth */
 
@@ -607,6 +607,7 @@ typedef struct ide_drive_s {
         u8	init_speed;	/* transfer rate set at boot */
         u8	pio_speed;      /* unused by core, used by some drivers for fallback from DMA */
         u8	current_speed;	/* current transfer rate set */
+	u8	desired_speed;	/* desired transfer rate set */
         u8	dn;		/* now wide spread use */
         u8	wcache;		/* status of write cache */
 	u8	acoustic;	/* acoustic management */
@@ -631,6 +632,7 @@ typedef struct ide_drive_s {
 	unsigned int	usage;		/* current "open()" count for drive */
 	unsigned int	failures;	/* current failure count */
 	unsigned int	max_failures;	/* maximum allowed failure count */
+	u64		probed_capacity;/* initial reported media capacity (ide-cd only currently) */
 
 	u64		capacity64;	/* total number of sectors */
 
@@ -726,6 +728,7 @@ typedef struct hwif_s {
 	int (*ide_dma_on)(ide_drive_t *drive);
 	int (*ide_dma_off_quietly)(ide_drive_t *drive);
 	int (*ide_dma_test_irq)(ide_drive_t *drive);
+	void (*ide_dma_clear_irq)(ide_drive_t *drive);
 	int (*ide_dma_host_on)(ide_drive_t *drive);
 	int (*ide_dma_host_off)(ide_drive_t *drive);
 	int (*ide_dma_lostirq)(ide_drive_t *drive);
@@ -773,11 +776,12 @@ typedef struct hwif_s {
 	unsigned long	dma_status;	/* dma status register */
 	unsigned long	dma_vendor3;	/* dma vendor 3 register */
 	unsigned long	dma_prdtable;	/* actual prd table address */
-	unsigned long	dma_base2;	/* extended base addr for dma ports */
 
-	unsigned	dma_extra;	/* extra addr for dma ports */
 	unsigned long	config_data;	/* for use by chipset-specific code */
 	unsigned long	select_data;	/* for use by chipset-specific code */
+
+	unsigned long	extra_base;	/* extra addr for dma ports */
+	unsigned	extra_ports;	/* number of extra dma ports */
 
 	unsigned	noprobe    : 1;	/* don't probe for this interface */
 	unsigned	present    : 1;	/* this interface exists */
@@ -792,6 +796,8 @@ typedef struct hwif_s {
 	unsigned	no_dsc     : 1;	/* 0 default, 1 dsc_overlap disabled */
 	unsigned	auto_poll  : 1; /* supports nop auto-poll */
 	unsigned	sg_mapped  : 1;	/* sg_table and sg_nents are ready */
+	unsigned	no_io_32bit : 1; /* 1 = can not do 32-bit IO ops */
+	unsigned	err_stops_fifo : 1; /* 1=data FIFO is cleared by an error */
 
 	struct device	gendev;
 	struct completion gendev_rel_comp; /* To deal with device release() */
@@ -799,8 +805,6 @@ typedef struct hwif_s {
 	void		*hwif_data;	/* extra hwif data */
 
 	unsigned dma;
-
-	void (*led_act)(void *data, int rw);
 } ____cacheline_internodealigned_in_smp ide_hwif_t;
 
 /*
@@ -821,6 +825,9 @@ typedef struct hwgroup_s {
 	unsigned int sleeping	: 1;
 		/* BOOL: polling active & poll_timeout field valid */
 	unsigned int polling	: 1;
+	 	/* BOOL: in a polling reset situation. Must not trigger another reset yet */
+	unsigned int resetting  : 1;
+
 		/* current drive */
 	ide_drive_t *drive;
 		/* ptr to current hwif in linked-list */
@@ -1005,6 +1012,8 @@ extern	ide_hwif_t	ide_hwifs[];		/* master data repository */
 extern int noautodma;
 
 extern int ide_end_request (ide_drive_t *drive, int uptodate, int nrsecs);
+int ide_end_dequeued_request(ide_drive_t *drive, struct request *rq,
+			     int uptodate, int nr_sectors);
 
 /*
  * This is used on exit from the driver to designate the next irq handler
@@ -1176,7 +1185,7 @@ extern void ide_stall_queue(ide_drive_t *drive, unsigned long timeout);
 
 extern int ide_spin_wait_hwgroup(ide_drive_t *);
 extern void ide_timer_expiry(unsigned long);
-extern irqreturn_t ide_intr(int irq, void *dev_id, struct pt_regs *regs);
+extern irqreturn_t ide_intr(int irq, void *dev_id);
 extern void do_ide_request(request_queue_t *);
 
 void ide_init_disk(struct gendisk *, ide_drive_t *);
@@ -1186,7 +1195,6 @@ extern int ideprobe_init(void);
 extern void ide_scan_pcibus(int scan_direction) __init;
 extern int __ide_pci_register_driver(struct pci_driver *driver, struct module *owner);
 #define ide_pci_register_driver(d) __ide_pci_register_driver(d, THIS_MODULE)
-extern void ide_pci_unregister_driver(struct pci_driver *driver);
 void ide_pci_setup_ports(struct pci_dev *, struct ide_pci_device_s *, int, ata_index_t *);
 extern void ide_setup_pci_noise (struct pci_dev *dev, struct ide_pci_device_s *d);
 
@@ -1219,7 +1227,6 @@ typedef struct ide_pci_enablebit_s {
 enum {
 	/* Uses ISA control ports not PCI ones. */
 	IDEPCI_FLAG_ISA_PORTS		= (1 << 0),
-	IDEPCI_FLAG_FORCE_PDC		= (1 << 1),
 };
 
 typedef struct ide_pci_device_s {
@@ -1357,7 +1364,7 @@ extern struct semaphore ide_cfg_sem;
  * ide_drive_t->hwif: constant, no locking
  */
 
-#define local_irq_set(flags)	do { local_save_flags((flags)); local_irq_enable(); } while (0)
+#define local_irq_set(flags)	do { local_save_flags((flags)); local_irq_enable_in_hardirq(); } while (0)
 
 extern struct bus_type ide_bus_type;
 

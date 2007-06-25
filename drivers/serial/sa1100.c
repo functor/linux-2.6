@@ -24,7 +24,6 @@
  *  $Id: sa1100.c,v 1.50 2002/07/29 14:41:04 rmk Exp $
  *
  */
-#include <linux/config.h>
 
 #if defined(CONFIG_SERIAL_SA1100_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
@@ -191,7 +190,7 @@ static void sa1100_enable_ms(struct uart_port *port)
 }
 
 static void
-sa1100_rx_chars(struct sa1100_port *sport, struct pt_regs *regs)
+sa1100_rx_chars(struct sa1100_port *sport)
 {
 	struct tty_struct *tty = sport->port.info->tty;
 	unsigned int status, ch, flg;
@@ -229,7 +228,7 @@ sa1100_rx_chars(struct sa1100_port *sport, struct pt_regs *regs)
 #endif
 		}
 
-		if (uart_handle_sysrq_char(&sport->port, ch, regs))
+		if (uart_handle_sysrq_char(&sport->port, ch))
 			goto ignore_char;
 
 		uart_insert_char(&sport->port, status, UTSR1_TO_SM(UTSR1_ROR), ch, flg);
@@ -282,7 +281,7 @@ static void sa1100_tx_chars(struct sa1100_port *sport)
 		sa1100_stop_tx(&sport->port);
 }
 
-static irqreturn_t sa1100_int(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t sa1100_int(int irq, void *dev_id)
 {
 	struct sa1100_port *sport = dev_id;
 	unsigned int status, pass_counter = 0;
@@ -295,7 +294,7 @@ static irqreturn_t sa1100_int(int irq, void *dev_id, struct pt_regs *regs)
 			/* Clear the receiver idle bit, if set */
 			if (status & UTSR0_RID)
 				UART_PUT_UTSR0(sport, UTSR0_RID);
-			sa1100_rx_chars(sport, regs);
+			sa1100_rx_chars(sport);
 		}
 
 		/* Clear the relevant break bits */
@@ -409,8 +408,8 @@ static void sa1100_shutdown(struct uart_port *port)
 }
 
 static void
-sa1100_set_termios(struct uart_port *port, struct termios *termios,
-		   struct termios *old)
+sa1100_set_termios(struct uart_port *port, struct ktermios *termios,
+		   struct ktermios *old)
 {
 	struct sa1100_port *sport = (struct sa1100_port *)port;
 	unsigned long flags;
@@ -689,6 +688,14 @@ void __init sa1100_register_uart(int idx, int port)
 
 
 #ifdef CONFIG_SERIAL_SA1100_CONSOLE
+static void sa1100_console_putchar(struct uart_port *port, int ch)
+{
+	struct sa1100_port *sport = (struct sa1100_port *)port;
+
+	while (!(UART_GET_UTSR1(sport) & UTSR1_TNF))
+		barrier();
+	UART_PUT_CHAR(sport, ch);
+}
 
 /*
  * Interrupts are disabled on entering
@@ -697,7 +704,7 @@ static void
 sa1100_console_write(struct console *co, const char *s, unsigned int count)
 {
 	struct sa1100_port *sport = &sa1100_ports[co->index];
-	unsigned int old_utcr3, status, i;
+	unsigned int old_utcr3, status;
 
 	/*
 	 *	First, save UTCR3 and then disable interrupts
@@ -706,21 +713,7 @@ sa1100_console_write(struct console *co, const char *s, unsigned int count)
 	UART_PUT_UTCR3(sport, (old_utcr3 & ~(UTCR3_RIE | UTCR3_TIE)) |
 				UTCR3_TXE);
 
-	/*
-	 *	Now, do each character
-	 */
-	for (i = 0; i < count; i++) {
-		do {
-			status = UART_GET_UTSR1(sport);
-		} while (!(status & UTSR1_TNF));
-		UART_PUT_CHAR(sport, s[i]);
-		if (s[i] == '\n') {
-			do {
-				status = UART_GET_UTSR1(sport);
-			} while (!(status & UTSR1_TNF));
-			UART_PUT_CHAR(sport, '\r');
-		}
-	}
+	uart_console_write(&sport->port, s, count, sa1100_console_putchar);
 
 	/*
 	 *	Finally, wait for transmitter to become empty
@@ -822,7 +815,6 @@ static struct uart_driver sa1100_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "ttySA",
 	.dev_name		= "ttySA",
-	.devfs_name		= "ttySA",
 	.major			= SERIAL_SA1100_MAJOR,
 	.minor			= MINOR_START,
 	.nr			= NR_PORTS,

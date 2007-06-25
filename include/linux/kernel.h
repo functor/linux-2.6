@@ -13,11 +13,12 @@
 #include <linux/types.h>
 #include <linux/compiler.h>
 #include <linux/bitops.h>
+#include <linux/log2.h>
 #include <asm/byteorder.h>
 #include <asm/bug.h>
 
 extern const char linux_banner[];
-extern const char vx_linux_banner[];
+extern const char linux_proc_banner[];
 
 #define INT_MAX		((int)(~0U>>1))
 #define INT_MIN		(-INT_MAX - 1)
@@ -25,11 +26,19 @@ extern const char vx_linux_banner[];
 #define LONG_MAX	((long)(~0UL>>1))
 #define LONG_MIN	(-LONG_MAX - 1)
 #define ULONG_MAX	(~0UL)
+#define LLONG_MAX	((long long)(~0ULL>>1))
+#define LLONG_MIN	(-LLONG_MAX - 1)
+#define ULLONG_MAX	(~0ULL)
 
 #define STACK_MAGIC	0xdeadbeef
 
+#define ALIGN(x,a)		__ALIGN_MASK(x,(typeof(x))(a)-1)
+#define __ALIGN_MASK(x,mask)	(((x)+(mask))&~(mask))
+
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))
+#define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
+#define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
+#define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
 
 #define	KERN_EMERG	"<0>"	/* system is unusable			*/
 #define	KERN_ALERT	"<1>"	/* action must be taken immediately	*/
@@ -58,7 +67,7 @@ struct user;
  * context (spinlock, irq-handler, ...).
  *
  * This is a useful debugging help to be able to catch problems early and not
- * be biten later when the calling function happens to sleep when it is not
+ * be bitten later when the calling function happens to sleep when it is not
  * supposed to.
  */
 #ifdef CONFIG_PREEMPT_VOLUNTARY
@@ -76,7 +85,7 @@ extern int cond_resched(void);
 # define might_sleep() do { might_resched(); } while (0)
 #endif
 
-#define might_sleep_if(cond) do { if (unlikely(cond)) might_sleep(); } while (0)
+#define might_sleep_if(cond) do { if (cond) might_sleep(); } while (0)
 
 #define abs(x) ({				\
 		int __x = (x);			\
@@ -88,10 +97,13 @@ extern int cond_resched(void);
 		(__x < 0) ? -__x : __x;		\
 	})
 
-extern struct notifier_block *panic_notifier_list;
+extern struct atomic_notifier_head panic_notifier_list;
 extern long (*panic_blink)(long time);
 NORET_TYPE void panic(const char * fmt, ...)
 	__attribute__ ((NORET_AND format (printf, 1, 2)));
+extern void oops_enter(void);
+extern void oops_exit(void);
+extern int oops_may_print(void);
 fastcall NORET_TYPE void do_exit(long error_code)
 	ATTRIB_NORET;
 NORET_TYPE void complete_and_exit(struct completion *, long)
@@ -112,6 +124,8 @@ extern int scnprintf(char * buf, size_t size, const char * fmt, ...)
 	__attribute__ ((format (printf, 3, 4)));
 extern int vscnprintf(char *buf, size_t size, const char *fmt, va_list args)
 	__attribute__ ((format (printf, 3, 0)));
+extern char *kasprintf(gfp_t gfp, const char *fmt, ...)
+	__attribute__ ((format (printf, 2, 3)));
 
 extern int sscanf(const char *, const char *, ...)
 	__attribute__ ((format (scanf, 2, 3)));
@@ -122,6 +136,7 @@ extern int get_option(char **str, int *pint);
 extern char *get_options(const char *str, int nints, int *ints);
 extern unsigned long long memparse(char *ptr, char **retptr);
 
+extern int core_kernel_text(unsigned long addr);
 extern int __kernel_text_address(unsigned long addr);
 extern int kernel_text_address(unsigned long addr);
 extern int session_of_pgrp(int pgrp);
@@ -144,21 +159,10 @@ static inline int printk(const char *s, ...) { return 0; }
 
 unsigned long int_sqrt(unsigned long);
 
-static inline int __attribute_pure__ long_log2(unsigned long x)
-{
-	int r = 0;
-	for (x >>= 1; x > 0; x >>= 1)
-		r++;
-	return r;
-}
-
-static inline unsigned long __attribute_const__ roundup_pow_of_two(unsigned long x)
-{
-	return (1UL << fls(x - 1));
-}
-
 extern int printk_ratelimit(void);
 extern int __printk_ratelimit(int ratelimit_jiffies, int ratelimit_burst);
+extern bool printk_timed_ratelimit(unsigned long *caller_jiffies,
+				unsigned int interval_msec);
 
 static inline void console_silent(void)
 {
@@ -173,8 +177,9 @@ static inline void console_verbose(void)
 
 extern void bust_spinlocks(int yes);
 extern int oops_in_progress;		/* If set, an oops, panic(), BUG() or die() is in progress */
-extern __deprecated_for_modules int panic_timeout;
+extern int panic_timeout;
 extern int panic_on_oops;
+extern int panic_on_unrecovered_nmi;
 extern int tainted;
 extern const char *print_tainted(void);
 extern void add_taint(unsigned);
@@ -199,11 +204,14 @@ extern enum system_states {
 extern void dump_stack(void);
 
 #ifdef DEBUG
+/* If you are writing a driver, please use dev_dbg instead */
 #define pr_debug(fmt,arg...) \
 	printk(KERN_DEBUG fmt,##arg)
 #else
-#define pr_debug(fmt,arg...) \
-	do { } while (0)
+static inline int __attribute__ ((format (printf, 1, 2))) pr_debug(const char * fmt, ...)
+{
+	return 0;
+}
 #endif
 
 #define pr_info(fmt,arg...) \
@@ -327,7 +335,20 @@ struct sysinfo {
 /* Force a compilation error if condition is true */
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 
+/* Force a compilation error if condition is true, but also produce a
+   result (of value 0 and type size_t), so the expression can be used
+   e.g. in a structure initializer (or where-ever else comma expressions
+   aren't permitted). */
+#define BUILD_BUG_ON_ZERO(e) (sizeof(char[1 - 2 * !!(e)]) - 1)
+
 /* Trap pasters of __FUNCTION__ at compile-time */
 #define __FUNCTION__ (__func__)
+
+/* This helps us to avoid #ifdef CONFIG_NUMA */
+#ifdef CONFIG_NUMA
+#define NUMA_BUILD 1
+#else
+#define NUMA_BUILD 0
+#endif
 
 #endif

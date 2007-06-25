@@ -14,12 +14,12 @@
  * warranty of any kind, whether express or implied.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/serial.h>
 #include <linux/tty.h>
 #include <linux/bitops.h>
@@ -204,15 +204,16 @@ unsigned long ixp2000_gettimeoffset (void)
 	return offset / ticks_per_usec;
 }
 
-static int ixp2000_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static int ixp2000_timer_interrupt(int irq, void *dev_id)
 {
 	write_seqlock(&xtime_lock);
 
 	/* clear timer 1 */
 	ixp2000_reg_wrb(IXP2000_T1_CLR, 1);
 
-	while ((next_jiffy_time - *missing_jiffy_timer_csr) > ticks_per_jiffy) {
-		timer_tick(regs);
+	while ((signed long)(next_jiffy_time - *missing_jiffy_timer_csr)
+							>= ticks_per_jiffy) {
+		timer_tick();
 		next_jiffy_time -= ticks_per_jiffy;
 	}
 
@@ -223,7 +224,7 @@ static int ixp2000_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 static struct irqaction ixp2000_timer_irq = {
 	.name		= "IXP2000 Timer Tick",
-	.flags		= SA_INTERRUPT | SA_TIMER,
+	.flags		= IRQF_DISABLED | IRQF_TIMER,
 	.handler	= ixp2000_timer_interrupt,
 };
 
@@ -288,8 +289,6 @@ void gpio_line_config(int line, int direction)
 
 	local_irq_save(flags);
 	if (direction == GPIO_OUT) {
-		irq_desc[line + IRQ_IXP2000_GPIO0].valid = 0;
-
 		/* if it's an output, it ain't an interrupt anymore */
 		GPIO_IRQ_falling_edge &= ~(1 << line);
 		GPIO_IRQ_rising_edge &= ~(1 << line);
@@ -303,12 +302,13 @@ void gpio_line_config(int line, int direction)
 	}
 	local_irq_restore(flags);
 }
+EXPORT_SYMBOL(gpio_line_config);
 
 
 /*************************************************************************
  * IRQ handling IXP2000
  *************************************************************************/
-static void ixp2000_GPIO_irq_handler(unsigned int irq, struct irqdesc *desc, struct pt_regs *regs)
+static void ixp2000_GPIO_irq_handler(unsigned int irq, struct irq_desc *desc)
 {                               
 	int i;
 	unsigned long status = *IXP2000_GPIO_INST;
@@ -316,7 +316,7 @@ static void ixp2000_GPIO_irq_handler(unsigned int irq, struct irqdesc *desc, str
 	for (i = 0; i <= 7; i++) {
 		if (status & (1<<i)) {
 			desc = irq_desc + i + IRQ_IXP2000_GPIO0;
-			desc_handle_irq(i + IRQ_IXP2000_GPIO0, desc, regs);
+			desc_handle_irq(i + IRQ_IXP2000_GPIO0, desc);
 		}
 	}
 }
@@ -351,11 +351,6 @@ static int ixp2000_GPIO_irq_type(unsigned int irq, unsigned int type)
 		GPIO_IRQ_level_high &= ~(1 << line);
 	update_gpio_int_csrs();
 
-	/*
-	 * Finally, mark the corresponding IRQ as valid.
-	 */
-	irq_desc[irq].valid = 1;
-
 	return 0;
 }
 
@@ -378,7 +373,7 @@ static void ixp2000_GPIO_irq_unmask(unsigned int irq)
 	ixp2000_reg_write(IXP2000_GPIO_INSR, (1 << (irq - IRQ_IXP2000_GPIO0)));
 }
 
-static struct irqchip ixp2000_GPIO_irq_chip = {
+static struct irq_chip ixp2000_GPIO_irq_chip = {
 	.ack		= ixp2000_GPIO_irq_mask_ack,
 	.mask		= ixp2000_GPIO_irq_mask,
 	.unmask		= ixp2000_GPIO_irq_unmask,
@@ -406,7 +401,7 @@ static void ixp2000_pci_irq_unmask(unsigned int irq)
 /*
  * Error interrupts. These are used extensively by the microengine drivers
  */
-static void ixp2000_err_irq_handler(unsigned int irq, struct irqdesc *desc,  struct pt_regs *regs)
+static void ixp2000_err_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	int i;
 	unsigned long status = *IXP2000_IRQ_ERR_STATUS;
@@ -414,7 +409,7 @@ static void ixp2000_err_irq_handler(unsigned int irq, struct irqdesc *desc,  str
 	for(i = 31; i >= 0; i--) {
 		if(status & (1 << i)) {
 			desc = irq_desc + IRQ_IXP2000_DRAM0_MIN_ERR + i;
-			desc->handle(IRQ_IXP2000_DRAM0_MIN_ERR + i, desc, regs);
+			desc_handle_irq(IRQ_IXP2000_DRAM0_MIN_ERR + i, desc);
 		}
 	}
 }
@@ -431,13 +426,13 @@ static void ixp2000_err_irq_unmask(unsigned int irq)
 			(1 << (irq - IRQ_IXP2000_DRAM0_MIN_ERR)));
 }
 
-static struct irqchip ixp2000_err_irq_chip = {
+static struct irq_chip ixp2000_err_irq_chip = {
 	.ack	= ixp2000_err_irq_mask,
 	.mask	= ixp2000_err_irq_mask,
 	.unmask	= ixp2000_err_irq_unmask
 };
 
-static struct irqchip ixp2000_pci_irq_chip = {
+static struct irq_chip ixp2000_pci_irq_chip = {
 	.ack	= ixp2000_pci_irq_mask,
 	.mask	= ixp2000_pci_irq_mask,
 	.unmask	= ixp2000_pci_irq_unmask
@@ -453,7 +448,7 @@ static void ixp2000_irq_unmask(unsigned int irq)
 	ixp2000_reg_write(IXP2000_IRQ_ENABLE_SET, (1 << irq));
 }
 
-static struct irqchip ixp2000_irq_chip = {
+static struct irq_chip ixp2000_irq_chip = {
 	.ack	= ixp2000_irq_mask,
 	.mask	= ixp2000_irq_mask,
 	.unmask	= ixp2000_irq_unmask
@@ -489,7 +484,7 @@ void __init ixp2000_init_irq(void)
 	for (irq = IRQ_IXP2000_SOFT_INT; irq <= IRQ_IXP2000_THDB3; irq++) {
 		if ((1 << irq) & IXP2000_VALID_IRQ_MASK) {
 			set_irq_chip(irq, &ixp2000_irq_chip);
-			set_irq_handler(irq, do_level_IRQ);
+			set_irq_handler(irq, handle_level_irq);
 			set_irq_flags(irq, IRQF_VALID);
 		} else set_irq_flags(irq, 0);
 	}
@@ -498,7 +493,7 @@ void __init ixp2000_init_irq(void)
 		if((1 << (irq - IRQ_IXP2000_DRAM0_MIN_ERR)) &
 				IXP2000_VALID_ERR_IRQ_MASK) {
 			set_irq_chip(irq, &ixp2000_err_irq_chip);
-			set_irq_handler(irq, do_level_IRQ);
+			set_irq_handler(irq, handle_level_irq);
 			set_irq_flags(irq, IRQF_VALID);
 		}
 		else
@@ -506,14 +501,10 @@ void __init ixp2000_init_irq(void)
 	}
 	set_irq_chained_handler(IRQ_IXP2000_ERRSUM, ixp2000_err_irq_handler);
 
-	/*
-	 * GPIO IRQs are invalid until someone sets the interrupt mode
-	 * by calling set_irq_type().
-	 */
 	for (irq = IRQ_IXP2000_GPIO0; irq <= IRQ_IXP2000_GPIO7; irq++) {
 		set_irq_chip(irq, &ixp2000_GPIO_irq_chip);
-		set_irq_handler(irq, do_level_IRQ);
-		set_irq_flags(irq, 0);
+		set_irq_handler(irq, handle_level_irq);
+		set_irq_flags(irq, IRQF_VALID);
 	}
 	set_irq_chained_handler(IRQ_IXP2000_GPIO, ixp2000_GPIO_irq_handler);
 
@@ -525,7 +516,7 @@ void __init ixp2000_init_irq(void)
 	ixp2000_reg_write(IXP2000_IRQ_ENABLE_SET, (1 << IRQ_IXP2000_PCI));
 	for (irq = IRQ_IXP2000_PCIA; irq <= IRQ_IXP2000_PCIB; irq++) {
 		set_irq_chip(irq, &ixp2000_pci_irq_chip);
-		set_irq_handler(irq, do_level_IRQ);
+		set_irq_handler(irq, handle_level_irq);
 		set_irq_flags(irq, IRQF_VALID);
 	}
 }

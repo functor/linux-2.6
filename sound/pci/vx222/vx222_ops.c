@@ -24,8 +24,11 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
+#include <linux/mutex.h>
+
 #include <sound/core.h>
 #include <sound/control.h>
+#include <sound/tlv.h>
 #include <asm/io.h>
 #include "vx222.h"
 
@@ -843,6 +846,8 @@ static void vx2_set_input_level(struct snd_vx222 *chip)
 
 #define MIC_LEVEL_MAX	0xff
 
+static DECLARE_TLV_DB_SCALE(db_scale_mic, -6450, 50, 0);
+
 /*
  * controls API for input levels
  */
@@ -861,10 +866,10 @@ static int vx_input_level_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 {
 	struct vx_core *_chip = snd_kcontrol_chip(kcontrol);
 	struct snd_vx222 *chip = (struct snd_vx222 *)_chip;
-	down(&_chip->mixer_mutex);
+	mutex_lock(&_chip->mixer_mutex);
 	ucontrol->value.integer.value[0] = chip->input_level[0];
 	ucontrol->value.integer.value[1] = chip->input_level[1];
-	up(&_chip->mixer_mutex);
+	mutex_unlock(&_chip->mixer_mutex);
 	return 0;
 }
 
@@ -872,16 +877,16 @@ static int vx_input_level_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 {
 	struct vx_core *_chip = snd_kcontrol_chip(kcontrol);
 	struct snd_vx222 *chip = (struct snd_vx222 *)_chip;
-	down(&_chip->mixer_mutex);
+	mutex_lock(&_chip->mixer_mutex);
 	if (chip->input_level[0] != ucontrol->value.integer.value[0] ||
 	    chip->input_level[1] != ucontrol->value.integer.value[1]) {
 		chip->input_level[0] = ucontrol->value.integer.value[0];
 		chip->input_level[1] = ucontrol->value.integer.value[1];
 		vx2_set_input_level(chip);
-		up(&_chip->mixer_mutex);
+		mutex_unlock(&_chip->mixer_mutex);
 		return 1;
 	}
-	up(&_chip->mixer_mutex);
+	mutex_unlock(&_chip->mixer_mutex);
 	return 0;
 }
 
@@ -907,31 +912,37 @@ static int vx_mic_level_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
 {
 	struct vx_core *_chip = snd_kcontrol_chip(kcontrol);
 	struct snd_vx222 *chip = (struct snd_vx222 *)_chip;
-	down(&_chip->mixer_mutex);
+	mutex_lock(&_chip->mixer_mutex);
 	if (chip->mic_level != ucontrol->value.integer.value[0]) {
 		chip->mic_level = ucontrol->value.integer.value[0];
 		vx2_set_input_level(chip);
-		up(&_chip->mixer_mutex);
+		mutex_unlock(&_chip->mixer_mutex);
 		return 1;
 	}
-	up(&_chip->mixer_mutex);
+	mutex_unlock(&_chip->mixer_mutex);
 	return 0;
 }
 
 static struct snd_kcontrol_new vx_control_input_level = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
+	.access =	(SNDRV_CTL_ELEM_ACCESS_READWRITE |
+			 SNDRV_CTL_ELEM_ACCESS_TLV_READ),
 	.name =		"Capture Volume",
 	.info =		vx_input_level_info,
 	.get =		vx_input_level_get,
 	.put =		vx_input_level_put,
+	.tlv = { .p = db_scale_mic },
 };
 
 static struct snd_kcontrol_new vx_control_mic_level = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
+	.access =	(SNDRV_CTL_ELEM_ACCESS_READWRITE |
+			 SNDRV_CTL_ELEM_ACCESS_TLV_READ),
 	.name =		"Mic Capture Volume",
 	.info =		vx_mic_level_info,
 	.get =		vx_mic_level_get,
 	.put =		vx_mic_level_put,
+	.tlv = { .p = db_scale_mic },
 };
 
 /*

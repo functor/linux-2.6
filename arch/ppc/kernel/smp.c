@@ -8,7 +8,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sched.h>
@@ -85,7 +84,7 @@ smp_message_pass(int target, int msg)
 /*
  * Common functions
  */
-void smp_message_recv(int msg, struct pt_regs *regs)
+void smp_message_recv(int msg)
 {
 	atomic_inc(&ipi_recv);
 
@@ -101,7 +100,7 @@ void smp_message_recv(int msg, struct pt_regs *regs)
 		break;
 #ifdef CONFIG_XMON
 	case PPC_MSG_XMON_BREAK:
-		xmon(regs);
+		xmon(get_irq_regs());
 		break;
 #endif /* CONFIG_XMON */
 	default:
@@ -311,7 +310,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	/* Backup CPU 0 state */
 	__save_cpu_setup();
 
-	for_each_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		if (cpu == smp_processor_id())
 			continue;
 		/* create a process for the processor */

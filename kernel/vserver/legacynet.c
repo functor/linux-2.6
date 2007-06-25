@@ -5,7 +5,7 @@
  *  Virtual Server: Legacy Network Funtions
  *
  *  Copyright (C) 2001-2003  Jacques Gelinas
- *  Copyright (C) 2003-2005  Herbert Pötzl
+ *  Copyright (C) 2003-2007  Herbert Pötzl
  *
  *  V0.01  broken out from legacy.c
  *
@@ -15,7 +15,7 @@
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vserver/legacy.h>
-#include <linux/namespace.h>
+// #include <linux/mnt_namespace.h>
 #include <linux/err.h>
 
 #include <asm/errno.h>

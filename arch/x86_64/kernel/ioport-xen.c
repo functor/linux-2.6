@@ -23,13 +23,12 @@
 static void set_bitmap(unsigned long *bitmap, unsigned int base, unsigned int extent, int new_value)
 {
 	int i;
-
-	if (new_value)
-		for (i = base; i < base + extent; i++)
-			__set_bit(i, bitmap);
-	else
-		for (i = base; i < base + extent; i++)
-			clear_bit(i, bitmap);
+		if (new_value)
+		for (i = base; i < base + extent; i++) 
+			__set_bit(i, bitmap); 
+		else
+		for (i = base; i < base + extent; i++) 
+			clear_bit(i, bitmap); 
 }
 
 /*
@@ -58,6 +57,7 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 
 		memset(bitmap, 0xff, IO_BITMAP_BYTES);
 		t->io_bitmap_ptr = bitmap;
+		set_thread_flag(TIF_IO_BITMAP);
 
 		set_iobitmap.bitmap   = (char *)bitmap;
 		set_iobitmap.nr_ports = IO_BITMAP_BITS;
@@ -76,23 +76,23 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
  *
  */
 
-asmlinkage long sys_iopl(unsigned int new_iopl, struct pt_regs *regs)
+asmlinkage long sys_iopl(unsigned int level, struct pt_regs *regs)
 {
-	unsigned int old_iopl = current->thread.iopl;
+	unsigned int old = current->thread.iopl;
 	struct physdev_set_iopl set_iopl;
 
-	if (new_iopl > 3)
+	if (level > 3)
 		return -EINVAL;
-
-	/* Need "raw I/O" privileges for direct port access. */
-	if ((new_iopl > old_iopl) && !capable(CAP_SYS_RAWIO))
-		return -EPERM;
-
+	/* Trying to gain more privileges? */
+	if (level > old) {
+		if (!capable(CAP_SYS_RAWIO))
+			return -EPERM;
+	}
 	/* Change our version of the privilege levels. */
-	current->thread.iopl = new_iopl;
+	current->thread.iopl = level;
 
 	/* Force the change at ring 0. */
-	set_iopl.iopl = (new_iopl == 0) ? 1 : new_iopl;
+	set_iopl.iopl = (level == 0) ? 1 : level;
 	HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl);
 
 	return 0;

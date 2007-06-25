@@ -163,13 +163,14 @@ typedef struct xfs_bmbt_irec
 /*
  * Key structure for non-leaf levels of the tree.
  */
-typedef struct xfs_bmbt_key
-{
-	xfs_dfiloff_t	br_startoff;	/* starting file offset */
+typedef struct xfs_bmbt_key {
+	__be64		br_startoff;	/* starting file offset */
 } xfs_bmbt_key_t, xfs_bmdr_key_t;
 
-typedef xfs_dfsbno_t xfs_bmbt_ptr_t, xfs_bmdr_ptr_t;	/* btree pointer type */
-					/* btree block header type */
+/* btree pointer type */
+typedef __be64 xfs_bmbt_ptr_t, xfs_bmdr_ptr_t;
+
+/* btree block header type */
 typedef struct xfs_btree_lblock xfs_bmbt_block_t;
 
 #define XFS_BUF_TO_BMBT_BLOCK(bp)	((xfs_bmbt_block_t *)XFS_BUF_PTR(bp))
@@ -371,14 +372,6 @@ extern int xfs_bmbt_get_rec(struct xfs_btree_cur *, xfs_fileoff_t *,
 				xfs_fsblock_t *, xfs_filblks_t *,
 				xfs_exntst_t *, int *);
 #endif
-
-/*
- * Search an extent list for the extent which includes block
- * bno.
- */
-xfs_bmbt_rec_t *xfs_bmap_do_search_extents(xfs_bmbt_rec_t *,
-			xfs_extnum_t, xfs_extnum_t, xfs_fileoff_t, int *,
-			xfs_extnum_t *, xfs_bmbt_irec_t *, xfs_bmbt_irec_t *);
 
 #endif	/* __KERNEL__ */
 

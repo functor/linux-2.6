@@ -35,6 +35,8 @@
 #include <linux/slab.h>
 #include <linux/gameport.h>
 #include <linux/moduleparam.h>
+#include <linux/mutex.h>
+
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/pcm.h>
@@ -379,7 +381,7 @@ MODULE_PARM_DESC(lineio, "Line In to Rear Out (0 = auto, 1 = force).");
 
 struct ensoniq {
 	spinlock_t reg_lock;
-	struct semaphore src_mutex;
+	struct mutex src_mutex;
 
 	int irq;
 
@@ -442,7 +444,7 @@ struct ensoniq {
 #endif
 };
 
-static irqreturn_t snd_audiopci_interrupt(int irq, void *dev_id, struct pt_regs *regs);
+static irqreturn_t snd_audiopci_interrupt(int irq, void *dev_id);
 
 static struct pci_device_id snd_audiopci_ids[] = {
 #ifdef CHIP1370
@@ -609,7 +611,7 @@ static void snd_es1371_codec_write(struct snd_ac97 *ac97,
 	struct ensoniq *ensoniq = ac97->private_data;
 	unsigned int t, x;
 
-	down(&ensoniq->src_mutex);
+	mutex_lock(&ensoniq->src_mutex);
 	for (t = 0; t < POLL_COUNT; t++) {
 		if (!(inl(ES_REG(ensoniq, 1371_CODEC)) & ES_1371_CODEC_WIP)) {
 			/* save the current state for latter */
@@ -634,11 +636,11 @@ static void snd_es1371_codec_write(struct snd_ac97 *ac97,
 			/* restore SRC reg */
 			snd_es1371_wait_src_ready(ensoniq);
 			outl(x, ES_REG(ensoniq, 1371_SMPRATE));
-			up(&ensoniq->src_mutex);
+			mutex_unlock(&ensoniq->src_mutex);
 			return;
 		}
 	}
-	up(&ensoniq->src_mutex);
+	mutex_unlock(&ensoniq->src_mutex);
 	snd_printk(KERN_ERR "codec write timeout at 0x%lx [0x%x]\n",
 		   ES_REG(ensoniq, 1371_CODEC), inl(ES_REG(ensoniq, 1371_CODEC)));
 }
@@ -650,7 +652,7 @@ static unsigned short snd_es1371_codec_read(struct snd_ac97 *ac97,
 	unsigned int t, x, fail = 0;
 
       __again:
-	down(&ensoniq->src_mutex);
+	mutex_lock(&ensoniq->src_mutex);
 	for (t = 0; t < POLL_COUNT; t++) {
 		if (!(inl(ES_REG(ensoniq, 1371_CODEC)) & ES_1371_CODEC_WIP)) {
 			/* save the current state for latter */
@@ -683,11 +685,11 @@ static unsigned short snd_es1371_codec_read(struct snd_ac97 *ac97,
 			/* now wait for the stinkin' data (RDY) */
 			for (t = 0; t < POLL_COUNT; t++) {
 				if ((x = inl(ES_REG(ensoniq, 1371_CODEC))) & ES_1371_CODEC_RDY) {
-					up(&ensoniq->src_mutex);
+					mutex_unlock(&ensoniq->src_mutex);
 					return ES_1371_CODEC_READ(x);
 				}
 			}
-			up(&ensoniq->src_mutex);
+			mutex_unlock(&ensoniq->src_mutex);
 			if (++fail > 10) {
 				snd_printk(KERN_ERR "codec read timeout (final) "
 					   "at 0x%lx, reg = 0x%x [0x%x]\n",
@@ -698,7 +700,7 @@ static unsigned short snd_es1371_codec_read(struct snd_ac97 *ac97,
 			goto __again;
 		}
 	}
-	up(&ensoniq->src_mutex);
+	mutex_unlock(&ensoniq->src_mutex);
 	snd_printk(KERN_ERR "es1371: codec read timeout at 0x%lx [0x%x]\n",
 		   ES_REG(ensoniq, 1371_CODEC), inl(ES_REG(ensoniq, 1371_CODEC)));
 	return 0;
@@ -717,7 +719,7 @@ static void snd_es1371_adc_rate(struct ensoniq * ensoniq, unsigned int rate)
 {
 	unsigned int n, truncm, freq, result;
 
-	down(&ensoniq->src_mutex);
+	mutex_lock(&ensoniq->src_mutex);
 	n = rate / 3000;
 	if ((1 << n) & ((1 << 15) | (1 << 13) | (1 << 11) | (1 << 9)))
 		n--;
@@ -742,14 +744,14 @@ static void snd_es1371_adc_rate(struct ensoniq * ensoniq, unsigned int rate)
 	snd_es1371_src_write(ensoniq, ES_SMPREG_ADC + ES_SMPREG_VFREQ_FRAC, freq & 0x7fff);
 	snd_es1371_src_write(ensoniq, ES_SMPREG_VOL_ADC, n << 8);
 	snd_es1371_src_write(ensoniq, ES_SMPREG_VOL_ADC + 1, n << 8);
-	up(&ensoniq->src_mutex);
+	mutex_unlock(&ensoniq->src_mutex);
 }
 
 static void snd_es1371_dac1_rate(struct ensoniq * ensoniq, unsigned int rate)
 {
 	unsigned int freq, r;
 
-	down(&ensoniq->src_mutex);
+	mutex_lock(&ensoniq->src_mutex);
 	freq = ((rate << 15) + 1500) / 3000;
 	r = (snd_es1371_wait_src_ready(ensoniq) & (ES_1371_SRC_DISABLE |
 						   ES_1371_DIS_P2 | ES_1371_DIS_R1)) |
@@ -763,14 +765,14 @@ static void snd_es1371_dac1_rate(struct ensoniq * ensoniq, unsigned int rate)
 	r = (snd_es1371_wait_src_ready(ensoniq) & (ES_1371_SRC_DISABLE |
 						   ES_1371_DIS_P2 | ES_1371_DIS_R1));
 	outl(r, ES_REG(ensoniq, 1371_SMPRATE));
-	up(&ensoniq->src_mutex);
+	mutex_unlock(&ensoniq->src_mutex);
 }
 
 static void snd_es1371_dac2_rate(struct ensoniq * ensoniq, unsigned int rate)
 {
 	unsigned int freq, r;
 
-	down(&ensoniq->src_mutex);
+	mutex_lock(&ensoniq->src_mutex);
 	freq = ((rate << 15) + 1500) / 3000;
 	r = (snd_es1371_wait_src_ready(ensoniq) & (ES_1371_SRC_DISABLE |
 						   ES_1371_DIS_P1 | ES_1371_DIS_R1)) |
@@ -785,7 +787,7 @@ static void snd_es1371_dac2_rate(struct ensoniq * ensoniq, unsigned int rate)
 	r = (snd_es1371_wait_src_ready(ensoniq) & (ES_1371_SRC_DISABLE |
 						   ES_1371_DIS_P1 | ES_1371_DIS_R1));
 	outl(r, ES_REG(ensoniq, 1371_SMPRATE));
-	up(&ensoniq->src_mutex);
+	mutex_unlock(&ensoniq->src_mutex);
 }
 
 #endif /* CHIP1371 */
@@ -1913,7 +1915,7 @@ static void __devinit snd_ensoniq_proc_init(struct ensoniq * ensoniq)
 	struct snd_info_entry *entry;
 
 	if (! snd_card_proc_new(ensoniq->card, "audiopci", &entry))
-		snd_info_set_text_ops(entry, ensoniq, 1024, snd_ensoniq_proc_read);
+		snd_info_set_text_ops(entry, ensoniq, snd_ensoniq_proc_read);
 }
 
 /*
@@ -2061,11 +2063,19 @@ static int snd_ensoniq_suspend(struct pci_dev *pci, pm_message_t state)
 #ifdef CHIP1371	
 	snd_ac97_suspend(ensoniq->u.es1371.ac97);
 #else
+	/* try to reset AK4531 */
+	outw(ES_1370_CODEC_WRITE(AK4531_RESET, 0x02), ES_REG(ensoniq, 1370_CODEC));
+	inw(ES_REG(ensoniq, 1370_CODEC));
+	udelay(100);
+	outw(ES_1370_CODEC_WRITE(AK4531_RESET, 0x03), ES_REG(ensoniq, 1370_CODEC));
+	inw(ES_REG(ensoniq, 1370_CODEC));
+	udelay(100);
 	snd_ak4531_suspend(ensoniq->u.es1370.ak4531);
 #endif	
-	pci_set_power_state(pci, PCI_D3hot);
+
 	pci_disable_device(pci);
 	pci_save_state(pci);
+	pci_set_power_state(pci, pci_choose_state(pci, state));
 	return 0;
 }
 
@@ -2074,9 +2084,14 @@ static int snd_ensoniq_resume(struct pci_dev *pci)
 	struct snd_card *card = pci_get_drvdata(pci);
 	struct ensoniq *ensoniq = card->private_data;
 
-	pci_restore_state(pci);
-	pci_enable_device(pci);
 	pci_set_power_state(pci, PCI_D0);
+	pci_restore_state(pci);
+	if (pci_enable_device(pci) < 0) {
+		printk(KERN_ERR DRIVER_NAME ": pci_enable_device failed, "
+		       "disabling device\n");
+		snd_card_disconnect(card);
+		return -EIO;
+	}
 	pci_set_master(pci);
 
 	snd_ensoniq_chip_init(ensoniq);
@@ -2116,7 +2131,7 @@ static int __devinit snd_ensoniq_create(struct snd_card *card,
 		return -ENOMEM;
 	}
 	spin_lock_init(&ensoniq->reg_lock);
-	init_MUTEX(&ensoniq->src_mutex);
+	mutex_init(&ensoniq->src_mutex);
 	ensoniq->card = card;
 	ensoniq->pci = pci;
 	ensoniq->irq = -1;
@@ -2126,7 +2141,7 @@ static int __devinit snd_ensoniq_create(struct snd_card *card,
 		return err;
 	}
 	ensoniq->port = pci_resource_start(pci, 0);
-	if (request_irq(pci->irq, snd_audiopci_interrupt, SA_INTERRUPT|SA_SHIRQ,
+	if (request_irq(pci->irq, snd_audiopci_interrupt, IRQF_SHARED,
 			"Ensoniq AudioPCI", ensoniq)) {
 		snd_printk(KERN_ERR "unable to grab IRQ %d\n", pci->irq);
 		snd_ensoniq_free(ensoniq);
@@ -2395,7 +2410,7 @@ static int __devinit snd_ensoniq_midi(struct ensoniq * ensoniq, int device,
  *  Interrupt handler
  */
 
-static irqreturn_t snd_audiopci_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t snd_audiopci_interrupt(int irq, void *dev_id)
 {
 	struct ensoniq *ensoniq = dev_id;
 	unsigned int status, sctrl;

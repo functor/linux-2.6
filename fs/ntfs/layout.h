@@ -142,13 +142,13 @@ typedef le32 NTFS_RECORD_TYPE;
  * operator! (-8
  */
 
-static inline BOOL __ntfs_is_magic(le32 x, NTFS_RECORD_TYPE r)
+static inline bool __ntfs_is_magic(le32 x, NTFS_RECORD_TYPE r)
 {
 	return (x == r);
 }
 #define ntfs_is_magic(x, m)	__ntfs_is_magic(x, magic_##m)
 
-static inline BOOL __ntfs_is_magicp(le32 *p, NTFS_RECORD_TYPE r)
+static inline bool __ntfs_is_magicp(le32 *p, NTFS_RECORD_TYPE r)
 {
 	return (*p == r);
 }
@@ -323,7 +323,7 @@ typedef le64 leMFT_REF;
 #define MREF_LE(x)	((unsigned long)(le64_to_cpu(x) & MFT_REF_MASK_CPU))
 #define MSEQNO_LE(x)	((u16)((le64_to_cpu(x) >> 48) & 0xffff))
 
-#define IS_ERR_MREF(x)	(((x) & 0x0000800000000000ULL) ? 1 : 0)
+#define IS_ERR_MREF(x)	(((x) & 0x0000800000000000ULL) ? true : false)
 #define ERR_MREF(x)	((u64)((s64)(x)))
 #define MREF_ERR(x)	((int)((s64)(x)))
 
@@ -769,7 +769,7 @@ typedef struct {
 				compressed.  (This effectively limits the
 				compression unit size to be a power of two
 				clusters.)  WinNT4 only uses a value of 4.
-				Sparse files also have this set to 4. */
+				Sparse files have this set to 0 on XPSP2. */
 /* 35*/			u8 reserved[5];		/* Align to 8-byte boundary. */
 /* The sizes below are only used when lowest_vcn is zero, as otherwise it would
    be difficult to keep them up-to-date.*/
@@ -801,13 +801,16 @@ typedef struct {
 typedef ATTR_RECORD ATTR_REC;
 
 /*
- * File attribute flags (32-bit).
+ * File attribute flags (32-bit) appearing in the file_attributes fields of the
+ * STANDARD_INFORMATION attribute of MFT_RECORDs and the FILENAME_ATTR
+ * attributes of MFT_RECORDs and directory index entries.
+ *
+ * All of the below flags appear in the directory index entries but only some
+ * appear in the STANDARD_INFORMATION attribute whilst only some others appear
+ * in the FILENAME_ATTR attribute of MFT_RECORDs.  Unless otherwise stated the
+ * flags appear in all of the above.
  */
 enum {
-	/*
-	 * The following flags are only present in the STANDARD_INFORMATION
-	 * attribute (in the field file_attributes).
-	 */
 	FILE_ATTR_READONLY		= const_cpu_to_le32(0x00000001),
 	FILE_ATTR_HIDDEN		= const_cpu_to_le32(0x00000002),
 	FILE_ATTR_SYSTEM		= const_cpu_to_le32(0x00000004),
@@ -839,18 +842,14 @@ enum {
 	   F_A_COMPRESSED, and F_A_ENCRYPTED and preserves the rest.  This mask
 	   is used to to obtain all flags that are valid for setting. */
 	/*
-	 * The following flag is only present in the FILE_NAME attribute (in
-	 * the field file_attributes).
+	 * The flag FILE_ATTR_DUP_FILENAME_INDEX_PRESENT is present in all
+	 * FILENAME_ATTR attributes but not in the STANDARD_INFORMATION
+	 * attribute of an mft record.
 	 */
 	FILE_ATTR_DUP_FILE_NAME_INDEX_PRESENT	= const_cpu_to_le32(0x10000000),
 	/* Note, this is a copy of the corresponding bit from the mft record,
 	   telling us whether this is a directory or not, i.e. whether it has
 	   an index root attribute or not. */
-	/*
-	 * The following flag is present both in the STANDARD_INFORMATION
-	 * attribute and in the FILE_NAME attribute (in the field
-	 * file_attributes).
-	 */
 	FILE_ATTR_DUP_VIEW_INDEX_PRESENT	= const_cpu_to_le32(0x20000000),
 	/* Note, this is a copy of the corresponding bit from the mft record,
 	   telling us whether this file has a view index present (eg. object id
@@ -891,7 +890,7 @@ typedef struct {
 					   Windows this is only updated when
 					   accessed if some time delta has
 					   passed since the last update. Also,
-					   last access times updates can be
+					   last access time updates can be
 					   disabled altogether for speed. */
 /* 32*/	FILE_ATTR_FLAGS file_attributes; /* Flags describing the file. */
 /* 36*/	union {
@@ -1076,16 +1075,21 @@ typedef struct {
 /* 20*/	sle64 last_access_time;		/* Time this mft record was last
 					   accessed. */
 /* 28*/	sle64 allocated_size;		/* Byte size of on-disk allocated space
-					   for the data attribute.  So for
-					   normal $DATA, this is the
+					   for the unnamed data attribute.  So
+					   for normal $DATA, this is the
 					   allocated_size from the unnamed
 					   $DATA attribute and for compressed
 					   and/or sparse $DATA, this is the
 					   compressed_size from the unnamed
-					   $DATA attribute.  NOTE: This is a
-					   multiple of the cluster size. */
-/* 30*/	sle64 data_size;		/* Byte size of actual data in data
-					   attribute. */
+					   $DATA attribute.  For a directory or
+					   other inode without an unnamed $DATA
+					   attribute, this is always 0.  NOTE:
+					   This is a multiple of the cluster
+					   size. */
+/* 30*/	sle64 data_size;		/* Byte size of actual data in unnamed
+					   data attribute.  For a directory or
+					   other inode without an unnamed $DATA
+					   attribute, this is always 0. */
 /* 38*/	FILE_ATTR_FLAGS file_attributes;	/* Flags describing the file. */
 /* 3c*/	union {
 	/* 3c*/	struct {

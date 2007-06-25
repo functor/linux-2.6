@@ -31,10 +31,11 @@
 
 #include <linux/types.h>
 #include <linux/pci.h>
+#include <linux/pci_hotplug.h>
 #include <linux/delay.h>
 #include <linux/sched.h>		/* signal_pending() */
 #include <linux/pcieport_if.h>
-#include "pci_hotplug.h"
+#include <linux/mutex.h>
 
 #define MY_NAME	"pciehp"
 
@@ -49,12 +50,6 @@ extern int pciehp_force;
 #define info(format, arg...) printk(KERN_INFO "%s: " format, MY_NAME , ## arg)
 #define warn(format, arg...) printk(KERN_WARNING "%s: " format, MY_NAME , ## arg)
 
-struct hotplug_params {
-	u8 cache_line_size;
-	u8 latency_timer;
-	u8 enable_serr;
-	u8 enable_perr;
-};
 
 struct slot {
 	struct slot *next;
@@ -96,7 +91,8 @@ struct php_ctlr_state_s {
 #define MAX_EVENTS		10
 struct controller {
 	struct controller *next;
-	struct semaphore crit_sect;	/* critical section semaphore */
+	struct mutex crit_sect;		/* critical section mutex */
+	struct mutex ctrl_lock;		/* controller lock */
 	struct php_ctlr_state_s *hpc_ctlr_handle; /* HPC controller handle */
 	int num_slots;			/* Number of slots on ctlr */
 	int slot_num_inc;		/* 1 or -1 */
@@ -171,10 +167,10 @@ struct controller {
  * error Messages
  */
 #define msg_initialization_err	"Initialization failure, error=%d\n"
-#define msg_button_on		"PCI slot #%d - powering on due to button press.\n"
-#define msg_button_off		"PCI slot #%d - powering off due to button press.\n"
-#define msg_button_cancel	"PCI slot #%d - action canceled due to button press.\n"
-#define msg_button_ignore	"PCI slot #%d - button press ignored.  (action in progress...)\n"
+#define msg_button_on		"PCI slot #%s - powering on due to button press.\n"
+#define msg_button_off		"PCI slot #%s - powering off due to button press.\n"
+#define msg_button_cancel	"PCI slot #%s - action canceled due to button press.\n"
+#define msg_button_ignore	"PCI slot #%s - button press ignored.  (action in progress...)\n"
 
 /* controller functions */
 extern int	pciehp_event_start_thread	(void);
@@ -191,9 +187,6 @@ extern u8	pciehp_handle_power_fault	(u8 hp_slot, void *inst_id);
 /* pci functions */
 extern int	pciehp_configure_device		(struct slot *p_slot);
 extern int	pciehp_unconfigure_device	(struct slot *p_slot);
-extern int	pciehp_get_hp_hw_control_from_firmware(struct pci_dev *dev);
-extern void	pciehp_get_hp_params_from_firmware(struct pci_dev *dev,
-	       	struct hotplug_params *hpp);
 
 
 
@@ -285,4 +278,24 @@ struct hpc_ops {
 	int	(*check_lnk_status)	(struct controller *ctrl);
 };
 
+
+#ifdef CONFIG_ACPI
+#include <acpi/acpi.h>
+#include <acpi/acpi_bus.h>
+#include <acpi/actypes.h>
+#include <linux/pci-acpi.h>
+
+#define pciehp_get_hp_hw_control_from_firmware(dev) \
+	pciehp_acpi_get_hp_hw_control_from_firmware(dev)
+static inline int pciehp_get_hp_params_from_firmware(struct pci_dev *dev,
+			struct hotplug_params *hpp)
+{
+	if (ACPI_FAILURE(acpi_get_hp_params_from_firmware(dev->bus, hpp)))
+		return -ENODEV;
+	return 0;
+}
+#else
+#define pciehp_get_hp_hw_control_from_firmware(dev) 	0
+#define pciehp_get_hp_params_from_firmware(dev, hpp)    (-ENODEV)
+#endif 				/* CONFIG_ACPI */
 #endif				/* _PCIEHP_H */

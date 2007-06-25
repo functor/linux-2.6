@@ -11,7 +11,6 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  */
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
@@ -39,15 +38,40 @@ static void r3081_wait(void)
 
 static void r39xx_wait(void)
 {
-	unsigned long cfg = read_c0_conf();
-	write_c0_conf(cfg | TX39_CONF_HALT);
+	local_irq_disable();
+	if (!need_resched())
+		write_c0_conf(read_c0_conf() | TX39_CONF_HALT);
+	local_irq_enable();
 }
 
+/*
+ * There is a race when WAIT instruction executed with interrupt
+ * enabled.
+ * But it is implementation-dependent wheter the pipelie restarts when
+ * a non-enabled interrupt is requested.
+ */
 static void r4k_wait(void)
 {
-	__asm__(".set\tmips3\n\t"
-		"wait\n\t"
-		".set\tmips0");
+	__asm__("	.set	mips3			\n"
+		"	wait				\n"
+		"	.set	mips0			\n");
+}
+
+/*
+ * This variant is preferable as it allows testing need_resched and going to
+ * sleep depending on the outcome atomically.  Unfortunately the "It is
+ * implementation-dependent whether the pipeline restarts when a non-enabled
+ * interrupt is requested" restriction in the MIPS32/MIPS64 architecture makes
+ * using this version a gamble.
+ */
+static void r4k_wait_irqoff(void)
+{
+	local_irq_disable();
+	if (!need_resched())
+		__asm__("	.set	mips3		\n"
+			"	wait			\n"
+			"	.set	mips0		\n");
+	local_irq_enable();
 }
 
 /* The Au1xxx wait is available only if using 32khz counter or
@@ -57,17 +81,17 @@ int allow_au1k_wait;
 static void au1k_wait(void)
 {
 	/* using the wait instruction makes CP0 counter unusable */
-	__asm__(".set mips3\n\t"
-		"cache 0x14, 0(%0)\n\t"
-		"cache 0x14, 32(%0)\n\t"
-		"sync\n\t"
-		"nop\n\t"
-		"wait\n\t"
-		"nop\n\t"
-		"nop\n\t"
-		"nop\n\t"
-		"nop\n\t"
-		".set mips0\n\t"
+	__asm__("	.set	mips3			\n"
+		"	cache	0x14, 0(%0)		\n"
+		"	cache	0x14, 32(%0)		\n"
+		"	sync				\n"
+		"	nop				\n"
+		"	wait				\n"
+		"	nop				\n"
+		"	nop				\n"
+		"	nop				\n"
+		"	nop				\n"
+		"	.set	mips0			\n"
 		: : "r" (au1k_wait));
 }
 
@@ -86,9 +110,8 @@ static inline void check_wait(void)
 {
 	struct cpuinfo_mips *c = &current_cpu_data;
 
-	printk("Checking for 'wait' instruction... ");
 	if (nowait) {
-		printk (" disabled.\n");
+		printk("Wait instruction disabled.\n");
 		return;
 	}
 
@@ -96,11 +119,9 @@ static inline void check_wait(void)
 	case CPU_R3081:
 	case CPU_R3081E:
 		cpu_wait = r3081_wait;
-		printk(" available.\n");
 		break;
 	case CPU_TX3927:
 		cpu_wait = r39xx_wait;
-		printk(" available.\n");
 		break;
 	case CPU_R4200:
 /*	case CPU_R4300: */
@@ -111,8 +132,6 @@ static inline void check_wait(void)
 	case CPU_R5000:
 	case CPU_NEVADA:
 	case CPU_RM7000:
-	case CPU_RM9000:
-	case CPU_TX49XX:
 	case CPU_4KC:
 	case CPU_4KEC:
 	case CPU_4KSC:
@@ -121,23 +140,26 @@ static inline void check_wait(void)
 	case CPU_24K:
 	case CPU_25KF:
 	case CPU_34K:
+	case CPU_74K:
  	case CPU_PR4450:
 		cpu_wait = r4k_wait;
-		printk(" available.\n");
+		break;
+	case CPU_TX49XX:
+		cpu_wait = r4k_wait_irqoff;
 		break;
 	case CPU_AU1000:
 	case CPU_AU1100:
 	case CPU_AU1500:
 	case CPU_AU1550:
 	case CPU_AU1200:
-		if (allow_au1k_wait) {
+		if (allow_au1k_wait)
 			cpu_wait = au1k_wait;
-			printk(" available.\n");
-		} else
-			printk(" unavailable.\n");
+		break;
+	case CPU_RM9000:
+		if ((c->processor_id & 0x00ff) >= 0x40)
+			cpu_wait = r4k_wait;
 		break;
 	default:
-		printk(" unavailable.\n");
 		break;
 	}
 }
@@ -291,7 +313,7 @@ static inline void cpu_probe_legacy(struct cpuinfo_mips *c)
 		 * for documentation.  Commented out because it shares
 		 * it's c0_prid id number with the TX3900.
 		 */
- 		c->cputype = CPU_R4650;
+		c->cputype = CPU_R4650;
 	 	c->isa_level = MIPS_CPU_ISA_III;
 		c->options = R4K_OPTS | MIPS_CPU_FPU | MIPS_CPU_LLSC;
 	        c->tlbsize = 48;
@@ -432,6 +454,15 @@ static inline void cpu_probe_legacy(struct cpuinfo_mips *c)
 		             MIPS_CPU_LLSC;
 		c->tlbsize = 64;
 		break;
+	case PRID_IMP_R14000:
+		c->cputype = CPU_R14000;
+		c->isa_level = MIPS_CPU_ISA_IV;
+		c->options = MIPS_CPU_TLB | MIPS_CPU_4K_CACHE | MIPS_CPU_4KEX |
+		             MIPS_CPU_FPU | MIPS_CPU_32FPR |
+			     MIPS_CPU_COUNTER | MIPS_CPU_WATCH |
+		             MIPS_CPU_LLSC;
+		c->tlbsize = 64;
+		break;
 	}
 }
 
@@ -450,7 +481,7 @@ static inline unsigned int decode_config0(struct cpuinfo_mips *c)
 	isa = (config0 & MIPS_CONF_AT) >> 13;
 	switch (isa) {
 	case 0:
-		switch ((config0 >> 10) & 7) {
+		switch ((config0 & MIPS_CONF_AR) >> 10) {
 		case 0:
 			c->isa_level = MIPS_CPU_ISA_M32R1;
 			break;
@@ -462,7 +493,7 @@ static inline unsigned int decode_config0(struct cpuinfo_mips *c)
 		}
 		break;
 	case 2:
-		switch ((config0 >> 10) & 7) {
+		switch ((config0 & MIPS_CONF_AR) >> 10) {
 		case 0:
 			c->isa_level = MIPS_CPU_ISA_M64R1;
 			break;
@@ -539,7 +570,7 @@ static inline unsigned int decode_config3(struct cpuinfo_mips *c)
 	return config3 & MIPS_CONF_M;
 }
 
-static inline void decode_configs(struct cpuinfo_mips *c)
+static void __init decode_configs(struct cpuinfo_mips *c)
 {
 	/* MIPS32 or MIPS64 compliant CPU.  */
 	c->options = MIPS_CPU_4KEX | MIPS_CPU_4K_CACHE | MIPS_CPU_COUNTER |
@@ -587,11 +618,12 @@ static inline void cpu_probe_mips(struct cpuinfo_mips *c)
 		break;
 	case PRID_IMP_25KF:
 		c->cputype = CPU_25KF;
-		/* Probe for L2 cache */
-		c->scache.flags &= ~MIPS_CACHE_NOT_PRESENT;
 		break;
 	case PRID_IMP_34K:
 		c->cputype = CPU_34K;
+		break;
+	case PRID_IMP_74K:
+		c->cputype = CPU_74K;
 		break;
 	}
 }
@@ -604,7 +636,7 @@ static inline void cpu_probe_alchemy(struct cpuinfo_mips *c)
 	case PRID_IMP_AU1_REV2:
 		switch ((c->processor_id >> 24) & 0xff) {
 		case 0:
- 			c->cputype = CPU_AU1000;
+			c->cputype = CPU_AU1000;
 			break;
 		case 1:
 			c->cputype = CPU_AU1500;
@@ -642,7 +674,7 @@ static inline void cpu_probe_sibyte(struct cpuinfo_mips *c)
 	case PRID_IMP_SB1:
 		c->cputype = CPU_SB1;
 		/* FPU in pass1 is known to have issues. */
-		if ((c->processor_id & 0xff) < 0x20)
+		if ((c->processor_id & 0xff) < 0x02)
 			c->options &= ~(MIPS_CPU_FPU | MIPS_CPU_32FPR);
 		break;
 	case PRID_IMP_SB1A:
@@ -705,7 +737,7 @@ __init void cpu_probe(void)
 		break;
  	case PRID_COMP_PHILIPS:
 		cpu_probe_philips(c);
- 		break;
+		break;
 	default:
 		c->cputype = CPU_UNKNOWN;
 	}

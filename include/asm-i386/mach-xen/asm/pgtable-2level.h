@@ -1,8 +1,6 @@
 #ifndef _I386_PGTABLE_2LEVEL_H
 #define _I386_PGTABLE_2LEVEL_H
 
-#include <asm-generic/pgtable-nopmd.h>
-
 #define pte_ERROR(e) \
 	printk("%s:%d: bad pte %08lx.\n", __FILE__, __LINE__, (e).pte_low)
 #define pgd_ERROR(e) \
@@ -13,6 +11,7 @@
  * within a page table are directly modified.  Thus, the following
  * hook is made available.
  */
+#ifndef CONFIG_PARAVIRT
 #define set_pte(pteptr, pteval) (*(pteptr) = pteval)
 
 #define set_pte_at(_mm,addr,ptep,pteval) do {				\
@@ -20,30 +19,21 @@
 	    HYPERVISOR_update_va_mapping((addr), (pteval), 0))		\
 		set_pte((ptep), (pteval));				\
 } while (0)
-
-#define set_pte_at_sync(_mm,addr,ptep,pteval) do {			\
-	if (((_mm) != current->mm && (_mm) != &init_mm) ||		\
-	    HYPERVISOR_update_va_mapping((addr), (pteval), UVMF_INVLPG)) { \
-		set_pte((ptep), (pteval));				\
-		xen_invlpg((addr));					\
-	}								\
-} while (0)
+#define set_pmd(pmdptr, pmdval) xen_l2_entry_update((pmdptr), (pmdval))
+#endif
 
 #define set_pte_atomic(pteptr, pteval) set_pte(pteptr,pteval)
-
-#define set_pmd(pmdptr, pmdval) xen_l2_entry_update((pmdptr), (pmdval))
+#define set_pte_present(mm,addr,ptep,pteval) set_pte_at(mm,addr,ptep,pteval)
 
 #define pte_clear(mm,addr,xp)	do { set_pte_at(mm, addr, xp, __pte(0)); } while (0)
 #define pmd_clear(xp)	do { set_pmd(xp, __pmd(0)); } while (0)
 
-#define ptep_get_and_clear(mm,addr,xp)	__pte_ma(xchg(&(xp)->pte_low, 0))
-#define pte_same(a, b)		((a).pte_low == (b).pte_low)
-#define pte_mfn(_pte) ((_pte).pte_low >> PAGE_SHIFT)
-#define pte_pfn(_pte) mfn_to_local_pfn(pte_mfn(_pte))
+#define raw_ptep_get_and_clear(xp)	__pte_ma(xchg(&(xp)->pte_low, 0))
 
-#define pte_page(_pte) pfn_to_page(pte_pfn(_pte))
-
+#define pte_mfn(_pte) 		((_pte).pte_low >> PAGE_SHIFT)
+#define pte_page(x)		pfn_to_page(pte_pfn(x))
 #define pte_none(x)		(!(x).pte_low)
+#define pte_pfn(x) 		mfn_to_local_pfn(pte_mfn(x))
 #define pfn_pte(pfn, prot)	__pte(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
 #define pfn_pmd(pfn, prot)	__pmd(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
 

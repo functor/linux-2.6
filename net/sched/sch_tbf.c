@@ -12,7 +12,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -177,9 +176,9 @@ static int tbf_requeue(struct sk_buff *skb, struct Qdisc* sch)
 static unsigned int tbf_drop(struct Qdisc* sch)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
-	unsigned int len;
+	unsigned int len = 0;
 
-	if ((len = q->qdisc->ops->drop(q->qdisc)) != 0) {
+	if (q->qdisc->ops->drop && (len = q->qdisc->ops->drop(q->qdisc)) != 0) {
 		sch->q.qlen--;
 		sch->qstats.drops++;
 	}
@@ -251,7 +250,7 @@ static struct sk_buff *tbf_dequeue(struct Qdisc* sch)
 
 		if (q->qdisc->ops->requeue(skb, q->qdisc) != NET_XMIT_SUCCESS) {
 			/* When requeue fails skb is dropped */
-			sch->q.qlen--;
+			qdisc_tree_decrease_qlen(q->qdisc, 1);
 			sch->qstats.drops++;
 		}
 
@@ -274,12 +273,14 @@ static void tbf_reset(struct Qdisc* sch)
 	del_timer(&q->wd_timer);
 }
 
-static struct Qdisc *tbf_create_dflt_qdisc(struct net_device *dev, u32 limit)
+static struct Qdisc *tbf_create_dflt_qdisc(struct Qdisc *sch, u32 limit)
 {
-	struct Qdisc *q = qdisc_create_dflt(dev, &bfifo_qdisc_ops);
+	struct Qdisc *q;
         struct rtattr *rta;
 	int ret;
 
+	q = qdisc_create_dflt(sch->dev, &bfifo_qdisc_ops,
+			      TC_H_MAKE(sch->handle, 1));
 	if (q) {
 		rta = kmalloc(RTA_LENGTH(sizeof(struct tc_fifo_qopt)), GFP_KERNEL);
 		if (rta) {
@@ -341,13 +342,16 @@ static int tbf_change(struct Qdisc* sch, struct rtattr *opt)
 	if (max_size < 0)
 		goto done;
 
-	if (q->qdisc == &noop_qdisc) {
-		if ((child = tbf_create_dflt_qdisc(sch->dev, qopt->limit)) == NULL)
+	if (qopt->limit > 0) {
+		if ((child = tbf_create_dflt_qdisc(sch, qopt->limit)) == NULL)
 			goto done;
 	}
 
 	sch_tree_lock(sch);
-	if (child) q->qdisc = child;
+	if (child) {
+		qdisc_tree_decrease_qlen(q->qdisc, q->qdisc->q.qlen);
+		qdisc_destroy(xchg(&q->qdisc, child));
+	}
 	q->limit = qopt->limit;
 	q->mtu = qopt->mtu;
 	q->max_size = max_size;
@@ -449,8 +453,8 @@ static int tbf_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
 
 	sch_tree_lock(sch);
 	*old = xchg(&q->qdisc, new);
+	qdisc_tree_decrease_qlen(*old, (*old)->q.qlen);
 	qdisc_reset(*old);
-	sch->q.qlen = 0;
 	sch_tree_unlock(sch);
 
 	return 0;

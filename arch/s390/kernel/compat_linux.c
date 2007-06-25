@@ -16,7 +16,6 @@
  */
 
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/fs.h> 
@@ -26,7 +25,6 @@
 #include <linux/resource.h>
 #include <linux/times.h>
 #include <linux/utsname.h>
-#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -297,6 +295,7 @@ static inline long put_tv32(struct compat_timeval __user *o, struct timeval *i)
  *
  * This is really horribly ugly.
  */
+#ifdef CONFIG_SYSVIPC
 asmlinkage long sys32_ipc(u32 call, int first, int second, int third, u32 ptr)
 {
 	if (call >> 16)		/* hack for backward compatibility */
@@ -340,6 +339,7 @@ asmlinkage long sys32_ipc(u32 call, int first, int second, int third, u32 ptr)
 
 	return -ENOSYS;
 }
+#endif
 
 asmlinkage long sys32_truncate64(const char __user * path, unsigned long high, unsigned long low)
 {
@@ -359,9 +359,14 @@ asmlinkage long sys32_ftruncate64(unsigned int fd, unsigned long high, unsigned 
 
 int cp_compat_stat(struct kstat *stat, struct compat_stat __user *statbuf)
 {
+	compat_ino_t ino;
 	int err;
 
 	if (!old_valid_dev(stat->dev) || !old_valid_dev(stat->rdev))
+		return -EOVERFLOW;
+
+	ino = stat->ino;
+	if (sizeof(ino) < sizeof(stat->ino) && ino != stat->ino)
 		return -EOVERFLOW;
 
 	err = put_user(old_encode_dev(stat->dev), &statbuf->st_dev);
@@ -411,7 +416,7 @@ asmlinkage long sys32_sysinfo(struct sysinfo32 __user *info)
 	mm_segment_t old_fs = get_fs ();
 	
 	set_fs (KERNEL_DS);
-	ret = sys_sysinfo(&s);
+	ret = sys_sysinfo((struct sysinfo __user *) &s);
 	set_fs (old_fs);
 	err = put_user (s.uptime, &info->uptime);
 	err |= __put_user (s.loads[0], &info->loads[0]);
@@ -440,7 +445,7 @@ asmlinkage long sys32_sched_rr_get_interval(compat_pid_t pid,
 	mm_segment_t old_fs = get_fs ();
 	
 	set_fs (KERNEL_DS);
-	ret = sys_sched_rr_get_interval(pid, &t);
+	ret = sys_sched_rr_get_interval(pid, (struct timespec __user *) &t);
 	set_fs (old_fs);
 	if (put_compat_timespec(&t, interval))
 		return -EFAULT;
@@ -466,7 +471,10 @@ asmlinkage long sys32_rt_sigprocmask(int how, compat_sigset_t __user *set,
 		}
 	}
 	set_fs (KERNEL_DS);
-	ret = sys_rt_sigprocmask(how, set ? &s : NULL, oset ? &s : NULL, sigsetsize);
+	ret = sys_rt_sigprocmask(how,
+				 set ? (sigset_t __user *) &s : NULL,
+				 oset ? (sigset_t __user *) &s : NULL,
+				 sigsetsize);
 	set_fs (old_fs);
 	if (ret) return ret;
 	if (oset) {
@@ -491,7 +499,7 @@ asmlinkage long sys32_rt_sigpending(compat_sigset_t __user *set,
 	mm_segment_t old_fs = get_fs();
 		
 	set_fs (KERNEL_DS);
-	ret = sys_rt_sigpending(&s, sigsetsize);
+	ret = sys_rt_sigpending((sigset_t __user *) &s, sigsetsize);
 	set_fs (old_fs);
 	if (!ret) {
 		switch (_NSIG_WORDS) {
@@ -516,7 +524,7 @@ sys32_rt_sigqueueinfo(int pid, int sig, compat_siginfo_t __user *uinfo)
 	if (copy_siginfo_from_user32(&info, uinfo))
 		return -EFAULT;
 	set_fs (KERNEL_DS);
-	ret = sys_rt_sigqueueinfo(pid, sig, &info);
+	ret = sys_rt_sigqueueinfo(pid, sig, (siginfo_t __user *) &info);
 	set_fs (old_fs);
 	return ret;
 }
@@ -539,14 +547,8 @@ sys32_execve(struct pt_regs regs)
 				 compat_ptr(regs.gprs[4]), &regs);
 	if (error == 0)
 	{
-		task_lock(current);
-		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
 		current->thread.fp_regs.fpc=0;
-		__asm__ __volatile__
-		        ("sr  0,0\n\t"
-		         "sfpc 0,0\n\t"
-			 : : :"0");
+		asm volatile("sfpc %0,0" : : "d" (0));
 	}
         putname(filename);
 out:
@@ -595,7 +597,7 @@ asmlinkage long sys32_gettimeofday(struct compat_timeval __user *tv, struct time
 {
 	if (tv) {
 		struct timeval ktv;
-		do_gettimeofday(&ktv);
+		vx_gettimeofday(&ktv);
 		if (put_tv32(tv, &ktv))
 			return -EFAULT;
 	}
@@ -676,7 +678,8 @@ asmlinkage long sys32_sendfile(int out_fd, int in_fd, compat_off_t __user *offse
 		return -EFAULT;
 		
 	set_fs(KERNEL_DS);
-	ret = sys_sendfile(out_fd, in_fd, offset ? &of : NULL, count);
+	ret = sys_sendfile(out_fd, in_fd,
+			   offset ? (off_t __user *) &of : NULL, count);
 	set_fs(old_fs);
 	
 	if (offset && put_user(of, offset))
@@ -696,7 +699,8 @@ asmlinkage long sys32_sendfile64(int out_fd, int in_fd,
 		return -EFAULT;
 		
 	set_fs(KERNEL_DS);
-	ret = sys_sendfile64(out_fd, in_fd, offset ? &lof : NULL, count);
+	ret = sys_sendfile64(out_fd, in_fd,
+			     offset ? (loff_t __user *) &lof : NULL, count);
 	set_fs(old_fs);
 	
 	if (offset && put_user(lof, offset))
@@ -705,80 +709,7 @@ asmlinkage long sys32_sendfile64(int out_fd, int in_fd,
 	return ret;
 }
 
-/* Handle adjtimex compatibility. */
-
-struct timex32 {
-	u32 modes;
-	s32 offset, freq, maxerror, esterror;
-	s32 status, constant, precision, tolerance;
-	struct compat_timeval time;
-	s32 tick;
-	s32 ppsfreq, jitter, shift, stabil;
-	s32 jitcnt, calcnt, errcnt, stbcnt;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-};
-
-extern int do_adjtimex(struct timex *);
-
-asmlinkage long sys32_adjtimex(struct timex32 __user *utp)
-{
-	struct timex txc;
-	int ret;
-
-	memset(&txc, 0, sizeof(struct timex));
-
-	if(get_user(txc.modes, &utp->modes) ||
-	   __get_user(txc.offset, &utp->offset) ||
-	   __get_user(txc.freq, &utp->freq) ||
-	   __get_user(txc.maxerror, &utp->maxerror) ||
-	   __get_user(txc.esterror, &utp->esterror) ||
-	   __get_user(txc.status, &utp->status) ||
-	   __get_user(txc.constant, &utp->constant) ||
-	   __get_user(txc.precision, &utp->precision) ||
-	   __get_user(txc.tolerance, &utp->tolerance) ||
-	   __get_user(txc.time.tv_sec, &utp->time.tv_sec) ||
-	   __get_user(txc.time.tv_usec, &utp->time.tv_usec) ||
-	   __get_user(txc.tick, &utp->tick) ||
-	   __get_user(txc.ppsfreq, &utp->ppsfreq) ||
-	   __get_user(txc.jitter, &utp->jitter) ||
-	   __get_user(txc.shift, &utp->shift) ||
-	   __get_user(txc.stabil, &utp->stabil) ||
-	   __get_user(txc.jitcnt, &utp->jitcnt) ||
-	   __get_user(txc.calcnt, &utp->calcnt) ||
-	   __get_user(txc.errcnt, &utp->errcnt) ||
-	   __get_user(txc.stbcnt, &utp->stbcnt))
-		return -EFAULT;
-
-	ret = do_adjtimex(&txc);
-
-	if(put_user(txc.modes, &utp->modes) ||
-	   __put_user(txc.offset, &utp->offset) ||
-	   __put_user(txc.freq, &utp->freq) ||
-	   __put_user(txc.maxerror, &utp->maxerror) ||
-	   __put_user(txc.esterror, &utp->esterror) ||
-	   __put_user(txc.status, &utp->status) ||
-	   __put_user(txc.constant, &utp->constant) ||
-	   __put_user(txc.precision, &utp->precision) ||
-	   __put_user(txc.tolerance, &utp->tolerance) ||
-	   __put_user(txc.time.tv_sec, &utp->time.tv_sec) ||
-	   __put_user(txc.time.tv_usec, &utp->time.tv_usec) ||
-	   __put_user(txc.tick, &utp->tick) ||
-	   __put_user(txc.ppsfreq, &utp->ppsfreq) ||
-	   __put_user(txc.jitter, &utp->jitter) ||
-	   __put_user(txc.shift, &utp->shift) ||
-	   __put_user(txc.stabil, &utp->stabil) ||
-	   __put_user(txc.jitcnt, &utp->jitcnt) ||
-	   __put_user(txc.calcnt, &utp->calcnt) ||
-	   __put_user(txc.errcnt, &utp->errcnt) ||
-	   __put_user(txc.stbcnt, &utp->stbcnt))
-		ret = -EFAULT;
-
-	return ret;
-}
-
-#ifdef CONFIG_SYSCTL
+#ifdef CONFIG_SYSCTL_SYSCALL
 struct __sysctl_args32 {
 	u32 name;
 	int nlen;
@@ -823,7 +754,9 @@ asmlinkage long sys32_sysctl(struct __sysctl_args32 __user *args)
 			    put_user(oldlen, (u32 __user *)compat_ptr(tmp.oldlenp)))
 				error = -EFAULT;
 		}
-		copy_to_user(args->__unused, tmp.__unused, sizeof(tmp.__unused));
+		if (copy_to_user(args->__unused, tmp.__unused,
+				 sizeof(tmp.__unused)))
+			error = -EFAULT;
 	}
 	return error;
 }

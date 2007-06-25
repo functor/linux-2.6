@@ -34,7 +34,7 @@
 #define POWERDOWN_TIMEOUT	120
 
 /*
- * Blink frequency during reboot grace period and when paniced.
+ * Blink frequency during reboot grace period and when panicked.
  */
 #define POWERDOWN_FREQ		(HZ / 4)
 #define PANIC_FREQ		(HZ / 8)
@@ -123,7 +123,8 @@ static inline void power_button(void)
 	if (machine_state & MACHINE_PANICED)
 		return;
 
-	if ((machine_state & MACHINE_SHUTTING_DOWN) || kill_proc(1,SIGINT,1)) {
+	if ((machine_state & MACHINE_SHUTTING_DOWN) ||
+			kill_cad_pid(SIGINT, 1)) {
 		/* No init process or button pressed twice.  */
 		sgi_machine_power_off();
 	}
@@ -168,7 +169,7 @@ static inline void volume_down_button(unsigned long data)
 	}
 }
 
-static irqreturn_t panel_int(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t panel_int(int irq, void *dev_id)
 {
 	unsigned int buttons;
 
@@ -238,7 +239,7 @@ static int __init reboot_setup(void)
 	request_irq(SGI_PANEL_IRQ, panel_int, 0, "Front Panel", NULL);
 	init_timer(&blink_timer);
 	blink_timer.function = blink_timeout;
-	notifier_chain_register(&panic_notifier_list, &panic_block);
+	atomic_notifier_chain_register(&panic_notifier_list, &panic_block);
 
 	return 0;
 }

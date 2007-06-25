@@ -41,6 +41,7 @@ fi
 
 # strip out only the sections that we care about
 scripts/modsign/mod-extract $verbose $module $module.out || exit $?
+# dd if=/dev/zero of=$module.out bs=1 count=1 # inject fault
 
 # sign the sections
 gpg --no-greeting $KEYFLAGS -b $module.out || exit $?

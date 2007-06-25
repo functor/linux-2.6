@@ -691,7 +691,7 @@ void cx2341x_fill_defaults(struct cx2341x_mpeg_params *p)
 	.video_luma_spatial_filter_type = V4L2_MPEG_CX2341X_VIDEO_LUMA_SPATIAL_FILTER_TYPE_1D_HOR,
 	.video_chroma_spatial_filter_type = V4L2_MPEG_CX2341X_VIDEO_CHROMA_SPATIAL_FILTER_TYPE_1D_HOR,
 	.video_temporal_filter_mode = V4L2_MPEG_CX2341X_VIDEO_TEMPORAL_FILTER_MODE_MANUAL,
-	.video_temporal_filter = 0,
+	.video_temporal_filter = 8,
 	.video_median_filter_type = V4L2_MPEG_CX2341X_VIDEO_MEDIAN_FILTER_TYPE_OFF,
 	.video_luma_median_filter_top = 255,
 	.video_luma_median_filter_bottom = 0,
@@ -731,6 +731,7 @@ int cx2341x_update(void *priv, cx2341x_mbox_func func,
 	};
 
 	int err = 0;
+	u16 temporal = new->video_temporal_filter;
 
 	cx2341x_api(priv, func, CX2341X_ENC_SET_OUTPUT_PORT, 2, new->port, 0);
 
@@ -750,6 +751,18 @@ int cx2341x_update(void *priv, cx2341x_mbox_func func,
 		}
 		err = cx2341x_api(priv, func, CX2341X_ENC_SET_FRAME_SIZE, 2, h, w);
 		if (err) return err;
+	}
+
+	if (new->width != 720 || new->height != (new->is_50hz ? 576 : 480)) {
+		/* Adjust temporal filter if necessary. The problem with the temporal
+		   filter is that it works well with full resolution capturing, but
+		   not when the capture window is scaled (the filter introduces
+		   a ghosting effect). So if the capture window is scaled, then
+		   force the filter to 0.
+
+		   For full resolution the filter really improves the video
+		   quality, especially if the original video quality is suboptimal. */
+		temporal = 0;
 	}
 
 	if (old == NULL || old->stream_type != new->stream_type) {
@@ -815,9 +828,9 @@ int cx2341x_update(void *priv, cx2341x_mbox_func func,
 	}
 	if (old == NULL ||
 		old->video_spatial_filter != new->video_spatial_filter ||
-		old->video_temporal_filter != new->video_temporal_filter) {
+		old->video_temporal_filter != temporal) {
 		err = cx2341x_api(priv, func, CX2341X_ENC_SET_DNR_FILTER_PROPS, 2,
-			new->video_spatial_filter, new->video_temporal_filter);
+			new->video_spatial_filter, temporal);
 		if (err) return err;
 	}
 	if (old == NULL || old->video_temporal_decimation != new->video_temporal_decimation) {
@@ -850,11 +863,15 @@ invalid:
 void cx2341x_log_status(struct cx2341x_mpeg_params *p, const char *prefix)
 {
 	int is_mpeg1 = p->video_encoding == V4L2_MPEG_VIDEO_ENCODING_MPEG_1;
+	int temporal = p->video_temporal_filter;
 
 	/* Stream */
 	printk(KERN_INFO "%s: Stream: %s\n",
 		prefix,
 		cx2341x_menu_item(p, V4L2_CID_MPEG_STREAM_TYPE));
+	printk(KERN_INFO "%s: VBI Format: %s\n",
+		prefix,
+		cx2341x_menu_item(p, V4L2_CID_MPEG_STREAM_VBI_FMT));
 
 	/* Video */
 	printk(KERN_INFO "%s: Video:  %dx%d, %d fps\n",
@@ -903,10 +920,13 @@ void cx2341x_log_status(struct cx2341x_mpeg_params *p, const char *prefix)
 		cx2341x_menu_item(p, V4L2_CID_MPEG_CX2341X_VIDEO_LUMA_SPATIAL_FILTER_TYPE),
 		cx2341x_menu_item(p, V4L2_CID_MPEG_CX2341X_VIDEO_CHROMA_SPATIAL_FILTER_TYPE),
 		p->video_spatial_filter);
+	if (p->width != 720 || p->height != (p->is_50hz ? 576 : 480)) {
+		temporal = 0;
+	}
 	printk(KERN_INFO "%s: Temporal Filter: %s, %d\n",
 		prefix,
 		cx2341x_menu_item(p, V4L2_CID_MPEG_CX2341X_VIDEO_TEMPORAL_FILTER_MODE),
-		p->video_temporal_filter);
+		temporal);
 	printk(KERN_INFO "%s: Median Filter:   %s, Luma [%d, %d], Chroma [%d, %d]\n",
 		prefix,
 		cx2341x_menu_item(p, V4L2_CID_MPEG_CX2341X_VIDEO_MEDIAN_FILTER_TYPE),

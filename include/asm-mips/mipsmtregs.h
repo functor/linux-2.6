@@ -165,7 +165,7 @@
 
 #ifndef __ASSEMBLY__
 
-extern void mips_mt_regdump(void);
+extern void mips_mt_regdump(unsigned long previous_mvpcontrol_value);
 
 static inline unsigned int dvpe(void)
 {
@@ -234,7 +234,7 @@ static inline void __raw_emt(void)
 	__asm__ __volatile__(
 	"	.set	noreorder					\n"
 	"	.set	mips32r2					\n"
-	"	emt							\n"
+	"	.word	0x41600be1			# emt		\n"
 	"	ehb							\n"
 	"	.set	mips0						\n"
 	"	.set	reorder");
@@ -282,8 +282,11 @@ static inline void ehb(void)
 									\
 	__asm__ __volatile__(						\
 	"	.set	push					\n"	\
+	"	.set	noat					\n"	\
 	"	.set	mips32r2				\n"	\
-	"	mftgpr	%0," #rt "				\n"	\
+	"	# mftgpr $1," #rt "				\n"	\
+	"	.word	0x41000820 | (" #rt " << 16)		\n"	\
+	"	move	%0, $1					\n"	\
 	"	.set	pop					\n"	\
 	: "=r" (__res));						\
 									\
@@ -295,9 +298,7 @@ static inline void ehb(void)
 	unsigned long __res;						\
 									\
 	__asm__ __volatile__(						\
-	".set noat\n\t"							\
-	"mftr\t%0, " #rt ", " #u ", " #sel "\n\t"			\
-	".set at\n\t"							\
+	"	mftr	%0, " #rt ", " #u ", " #sel "		\n"	\
 	: "=r" (__res));						\
 									\
 	__res;								\
@@ -351,6 +352,8 @@ do {									\
 #define write_vpe_c0_vpecontrol(val)	mttc0(1, 1, val)
 #define read_vpe_c0_vpeconf0()		mftc0(1, 2)
 #define write_vpe_c0_vpeconf0(val)	mttc0(1, 2, val)
+#define read_vpe_c0_count()		mftc0(9, 0)
+#define write_vpe_c0_count(val)		mttc0(9, 0, val)
 #define read_vpe_c0_status()		mftc0(12, 0)
 #define write_vpe_c0_status(val)	mttc0(12, 0, val)
 #define read_vpe_c0_cause()		mftc0(13, 0)
@@ -364,6 +367,9 @@ do {									\
 #define read_vpe_c0_ebase()		mftc0(15,1)
 #define write_vpe_c0_ebase(val)		mttc0(15, 1, val)
 #define write_vpe_c0_compare(val)	mttc0(11, 0, val)
+#define read_vpe_c0_badvaddr()		mftc0(8, 0)
+#define read_vpe_c0_epc()		mftc0(14, 0)
+#define write_vpe_c0_epc(val)		mttc0(14, 0, val)
 
 
 /* TC */

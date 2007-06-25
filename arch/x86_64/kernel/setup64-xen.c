@@ -31,7 +31,7 @@
 #include <asm/hypervisor.h>
 #endif
 
-char x86_boot_params[BOOT_PARAM_SIZE] __initdata = {0,};
+char x86_boot_params[BOOT_PARAM_SIZE] __initdata;
 
 cpumask_t cpu_initialized __cpuinitdata = CPU_MASK_NONE;
 
@@ -40,7 +40,7 @@ EXPORT_SYMBOL(_cpu_pda);
 struct x8664_pda boot_cpu_pda[NR_CPUS] __cacheline_aligned;
 
 #ifndef CONFIG_X86_NO_IDT
-struct desc_ptr idt_descr = { 256 * 16 - 1, (unsigned long) idt_table }; 
+struct desc_ptr idt_descr = { 256 * 16 - 1, (unsigned long) idt_table };
 #endif
 
 char boot_cpu_stack[IRQSTACKSIZE] __attribute__((section(".bss.page_aligned")));
@@ -48,23 +48,6 @@ char boot_cpu_stack[IRQSTACKSIZE] __attribute__((section(".bss.page_aligned")));
 unsigned long __supported_pte_mask __read_mostly = ~0UL;
 EXPORT_SYMBOL(__supported_pte_mask);
 static int do_not_nx __cpuinitdata = 0;
-
-/* noexec=on|off
-Control non executable mappings for 64bit processes.
-
-on	Enable(default)
-off	Disable
-*/ 
-void __init nonx_setup(char *str)
-{
-	if (!strncmp(str, "on", 2)) {
-                __supported_pte_mask |= _PAGE_NX; 
- 		do_not_nx = 0; 
-	} else if (!strncmp(str, "off", 3)) {
-		do_not_nx = 1;
-		__supported_pte_mask &= ~_PAGE_NX;
-        }
-}
 
 /*
  * Great future plan:
@@ -81,12 +64,9 @@ void __init setup_per_cpu_areas(void)
 #endif
 
 	/* Copy section for each CPU (we discard the original) */
-	size = ALIGN(__per_cpu_end - __per_cpu_start, SMP_CACHE_BYTES);
-#ifdef CONFIG_MODULES
-	if (size < PERCPU_ENOUGH_ROOM)
-		size = PERCPU_ENOUGH_ROOM;
-#endif
+	size = PERCPU_ENOUGH_ROOM;
 
+	printk(KERN_INFO "PERCPU: Allocating %lu bytes of per cpu data\n", size);
 	for_each_cpu_mask (i, cpu_possible_map) {
 		char *ptr;
 
@@ -148,7 +128,10 @@ void pda_init(int cpu)
 	/* Setup up data that may be needed in __get_free_pages early */
 	asm volatile("movl %0,%%fs ; movl %0,%%gs" :: "r" (0)); 
 #ifndef CONFIG_XEN
+	/* Memory clobbers used to order PDA accessed */
+	mb();
 	wrmsrl(MSR_GS_BASE, pda);
+	mb();
 #else
 	HYPERVISOR_set_segment_base(SEGBASE_GS_KERNEL, (unsigned long)pda);
 #endif
@@ -213,6 +196,8 @@ void __cpuinit check_efer(void)
         }       
 }
 
+unsigned long kernel_eflags;
+
 /*
  * cpu_init() initializes state that is per-CPU. Some data is already
  * initialized (naturally) in the bootstrap process, such as the GDT
@@ -228,7 +213,7 @@ void __cpuinit cpu_init (void)
 	struct orig_ist *orig_ist = &per_cpu(orig_ist, cpu);
 	unsigned long v; 
 	char *estacks = NULL; 
-	unsigned i;
+	int i;
 #endif
 	struct task_struct *me;
 
@@ -277,28 +262,17 @@ void __cpuinit cpu_init (void)
 	 * set up and load the per-CPU TSS
 	 */
 	for (v = 0; v < N_EXCEPTION_STACKS; v++) {
+		static const unsigned int order[N_EXCEPTION_STACKS] = {
+			[0 ... N_EXCEPTION_STACKS - 1] = EXCEPTION_STACK_ORDER,
+			[DEBUG_STACK - 1] = DEBUG_STACK_ORDER
+		};
 		if (cpu) {
-			static const unsigned int order[N_EXCEPTION_STACKS] = {
-				[0 ... N_EXCEPTION_STACKS - 1] = EXCEPTION_STACK_ORDER,
-				[DEBUG_STACK - 1] = DEBUG_STACK_ORDER
-			};
-
 			estacks = (char *)__get_free_pages(GFP_ATOMIC, order[v]);
 			if (!estacks)
 				panic("Cannot allocate exception stack %ld %d\n",
 				      v, cpu); 
 		}
-		switch (v + 1) {
-#if DEBUG_STKSZ > EXCEPTION_STKSZ
-		case DEBUG_STACK:
-			cpu_pda(cpu)->debugstack = (unsigned long)estacks;
-			estacks += DEBUG_STKSZ;
-			break;
-#endif
-		default:
-			estacks += EXCEPTION_STKSZ;
-			break;
-		}
+		estacks += PAGE_SIZE << order[v];
 		orig_ist->ist[v] = t->ist[v] = (unsigned long)estacks;
 	}
 
@@ -337,4 +311,6 @@ void __cpuinit cpu_init (void)
 	set_debugreg(0UL, 7);
 
 	fpu_init(); 
+
+	raw_local_save_flags(kernel_eflags);
 }

@@ -19,9 +19,9 @@
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
  * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * JEFF HARTMANN, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
- * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+ * JEFF HARTMANN, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
  * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  */
@@ -53,7 +53,7 @@ enum aper_size_type {
 struct gatt_mask {
 	unsigned long mask;
 	u32 type;
-	/* totally device specific, for integrated chipsets that 
+	/* totally device specific, for integrated chipsets that
 	 * might have different types of memory masks.  For other
 	 * devices this will probably be ignored */
 };
@@ -104,8 +104,7 @@ struct agp_bridge_driver {
 	void (*agp_enable)(struct agp_bridge_data *, u32);
 	void (*cleanup)(void);
 	void (*tlb_flush)(struct agp_memory *);
-	unsigned long (*mask_memory)(struct agp_bridge_data *,
-		unsigned long, int);
+	unsigned long (*mask_memory)(struct agp_bridge_data *, unsigned long, int);
 	void (*cache_flush)(void);
 	int (*create_gatt_table)(struct agp_bridge_data *);
 	int (*free_gatt_table)(struct agp_bridge_data *);
@@ -118,7 +117,7 @@ struct agp_bridge_driver {
 };
 
 struct agp_bridge_data {
-	struct agp_version *version;
+	const struct agp_version *version;
 	struct agp_bridge_driver *driver;
 	struct vm_operations_struct *vm_ops;
 	void *previous_size;
@@ -226,6 +225,10 @@ struct agp_bridge_data {
 #define I810_GMS_DISABLE	0x00000000
 #define I810_PGETBL_CTL		0x2020
 #define I810_PGETBL_ENABLED	0x00000001
+#define I965_PGETBL_SIZE_MASK	0x0000000e
+#define I965_PGETBL_SIZE_512KB	(0 << 1)
+#define I965_PGETBL_SIZE_256KB	(1 << 1)
+#define I965_PGETBL_SIZE_128KB	(2 << 1)
 #define I810_DRAM_CTL		0x3000
 #define I810_DRAM_ROW_0		0x00000001
 #define I810_DRAM_ROW_0_SDRAM	0x00000001

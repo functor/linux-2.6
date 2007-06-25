@@ -11,8 +11,8 @@
 
 static DEFINE_MUTEX(mtrr_mutex);
 
-void generic_get_mtrr(unsigned int reg, unsigned long *base,
-		      unsigned int *size, mtrr_type * type)
+static void generic_get_mtrr(unsigned int reg, unsigned long *base,
+			     unsigned long *size, mtrr_type * type)
 {
 	dom0_op_t op;
 
@@ -34,6 +34,7 @@ struct mtrr_ops *mtrr_if = &generic_mtrr_ops;
 unsigned int num_var_ranges;
 unsigned int *usage_table;
 
+/*  This function returns the number of variable MTRRs  */
 static void __init set_num_var_ranges(void)
 {
 	dom0_op_t op;
@@ -114,8 +115,7 @@ int mtrr_del_page(int reg, unsigned long base, unsigned long size)
 {
 	unsigned i;
 	mtrr_type ltype;
-	unsigned long lbase;
-	unsigned int lsize;
+	unsigned long lbase, lsize;
 	int error = -EINVAL;
 	dom0_op_t op;
 

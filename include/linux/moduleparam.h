@@ -63,6 +63,9 @@ struct kparam_array
    not there, read bits mean it's readable, write bits mean it's
    writable. */
 #define __module_param_call(prefix, name, set, get, arg, perm)		\
+	/* Default value instead of permissions? */			\
+	static int __param_perm_check_##name __attribute__((unused)) =	\
+	BUILD_BUG_ON_ZERO((perm) < 0 || (perm) > 0777 || ((perm) & 2));	\
 	static char __param_str_##name[] = prefix #name;		\
 	static struct kernel_param const __param_##name			\
 	__attribute_used__						\
@@ -161,13 +164,6 @@ extern int param_array_get(char *buffer, struct kernel_param *kp);
 
 extern int param_set_copystring(const char *val, struct kernel_param *kp);
 extern int param_get_string(char *buffer, struct kernel_param *kp);
-
-int param_array(const char *name,
-		const char *val,
-		unsigned int min, unsigned int max,
-		void *elem, int elemsize,
-		int (*set)(const char *, struct kernel_param *kp),
-		int *num);
 
 /* for exporting parameters in /sys/parameters */
 

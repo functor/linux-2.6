@@ -2,7 +2,7 @@
 # Kernel configuration targets
 # These targets are used from top-level makefile
 
-.PHONY: oldconfig xconfig gconfig menuconfig config silentoldconfig update-po-config
+PHONY += oldconfig xconfig gconfig menuconfig config silentoldconfig update-po-config
 
 xconfig: $(obj)/qconf
 	$< arch/$(ARCH)/Kconfig
@@ -11,7 +11,6 @@ gconfig: $(obj)/gconf
 	$< arch/$(ARCH)/Kconfig
 
 menuconfig: $(obj)/mconf
-	$(Q)$(MAKE) $(build)=scripts/kconfig/lxdialog
 	$< arch/$(ARCH)/Kconfig
 
 config: $(obj)/conf
@@ -22,6 +21,9 @@ oldconfig: $(obj)/conf
 
 silentoldconfig: $(obj)/conf
 	$< -s arch/$(ARCH)/Kconfig
+
+nonint_oldconfig: scripts/kconfig/conf
+	./scripts/kconfig/conf -b arch/$(ARCH)/Kconfig
 
 update-po-config: $(obj)/kxgettext
 	xgettext --default-domain=linux \
@@ -42,7 +44,7 @@ update-po-config: $(obj)/kxgettext
 	$(Q)rm -f arch/um/Kconfig_arch
 	$(Q)rm -f scripts/kconfig/linux_*.pot scripts/kconfig/config.pot
 
-.PHONY: randconfig allyesconfig allnoconfig allmodconfig defconfig
+PHONY += randconfig allyesconfig allnoconfig allmodconfig defconfig
 
 randconfig: $(obj)/conf
 	$< -r arch/$(ARCH)/Kconfig
@@ -74,11 +76,29 @@ help:
 	@echo  '  xconfig	  - Update current config utilising a QT based front-end'
 	@echo  '  gconfig	  - Update current config utilising a GTK based front-end'
 	@echo  '  oldconfig	  - Update current config utilising a provided .config as base'
+	@echo  '  silentoldconfig - Same as oldconfig, but quietly'
 	@echo  '  randconfig	  - New config with random answer to all options'
 	@echo  '  defconfig	  - New config with default answer to all options'
 	@echo  '  allmodconfig	  - New config selecting modules when possible'
 	@echo  '  allyesconfig	  - New config where all options are accepted with yes'
-	@echo  '  allnoconfig	  - New minimal config'
+	@echo  '  allnoconfig	  - New config where all options are answered with no'
+
+# lxdialog stuff
+check-lxdialog  := $(srctree)/$(src)/lxdialog/check-lxdialog.sh
+
+# Use reursively expanded variables so we do not call gcc unless
+# we really need to do so. (Do not call gcc as part of make mrproper)
+HOST_EXTRACFLAGS = $(shell $(CONFIG_SHELL) $(check-lxdialog) -ccflags)
+HOST_LOADLIBES   = $(shell $(CONFIG_SHELL) $(check-lxdialog) -ldflags $(HOSTCC))
+
+HOST_EXTRACFLAGS += -DLOCALE
+
+PHONY += $(obj)/dochecklxdialog
+$(obj)/dochecklxdialog:
+	$(Q)$(CONFIG_SHELL) $(check-lxdialog) -check $(HOSTCC) $(HOST_LOADLIBES)
+
+always := dochecklxdialog
+
 
 # ===========================================================================
 # Shared Makefile for the various kconfig executables:
@@ -91,10 +111,18 @@ help:
 #         Based on GTK which needs to be installed to compile it
 # object files used by all kconfig flavours
 
-hostprogs-y	:= conf mconf qconf gconf kxgettext
+lxdialog := lxdialog/checklist.o lxdialog/util.o lxdialog/inputbox.o
+lxdialog += lxdialog/textbox.o lxdialog/yesno.o lxdialog/menubox.o
+
 conf-objs	:= conf.o  zconf.tab.o
-mconf-objs	:= mconf.o zconf.tab.o
+mconf-objs	:= mconf.o zconf.tab.o $(lxdialog)
 kxgettext-objs	:= kxgettext.o zconf.tab.o
+
+hostprogs-y := conf qconf gconf kxgettext
+
+ifeq ($(MAKECMDGOALS),menuconfig)
+	hostprogs-y += mconf
+endif
 
 ifeq ($(MAKECMDGOALS),xconfig)
 	qconf-target := 1
@@ -115,7 +143,6 @@ endif
 
 clean-files	:= lkc_defs.h qconf.moc .tmp_qtcheck \
 		   .tmp_gtkcheck zconf.tab.c lex.zconf.c zconf.hash.c
-subdir- += lxdialog
 
 # Needed for systems without gettext
 KBUILD_HAVE_NLS := $(shell \

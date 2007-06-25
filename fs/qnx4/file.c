@@ -12,24 +12,23 @@
  * 27-06-1998 by Frank Denis : file overwriting.
  */
 
-#include <linux/config.h>
-#include <linux/types.h>
 #include <linux/fs.h>
-#include <linux/time.h>
 #include <linux/qnx4_fs.h>
 
 /*
  * We have mostly NULL's here: the current defaults are ok for
  * the qnx4 filesystem.
  */
-struct file_operations qnx4_file_operations =
+const struct file_operations qnx4_file_operations =
 {
 	.llseek		= generic_file_llseek,
-	.read		= generic_file_read,
+	.read		= do_sync_read,
+	.aio_read	= generic_file_aio_read,
 	.mmap		= generic_file_mmap,
 	.sendfile	= generic_file_sendfile,
 #ifdef CONFIG_QNX4FS_RW
-	.write		= generic_file_write,
+	.write		= do_sync_write,
+	.aio_write	= generic_file_aio_write,
 	.fsync		= qnx4_sync_file,
 #endif
 };

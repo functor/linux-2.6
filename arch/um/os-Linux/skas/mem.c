@@ -48,7 +48,7 @@ int multi_op_count = 0;
 static inline long do_syscall_stub(struct mm_id * mm_idp, void **addr)
 {
 	unsigned long regs[MAX_REG_NR];
-	int n;
+	int n, i;
 	long ret, offset;
 	unsigned long * data;
 	unsigned long * syscall;
@@ -66,9 +66,13 @@ static inline long do_syscall_stub(struct mm_id * mm_idp, void **addr)
 		 (unsigned long) &__syscall_stub_start);
 
 	n = ptrace_setregs(pid, regs);
-	if(n < 0)
+	if(n < 0){
+		printk("Registers - \n");
+		for(i = 0; i < MAX_REG_NR; i++)
+			printk("\t%d\t0x%lx\n", i, regs[i]);
 		panic("do_syscall_stub : PTRACE_SETREGS failed, errno = %d\n",
-		      n);
+		      -n);
+	}
 
 	wait_stub_done(pid, 0, "do_syscall_stub");
 
@@ -82,8 +86,8 @@ static inline long do_syscall_stub(struct mm_id * mm_idp, void **addr)
 	if (offset) {
 		data = (unsigned long *)(mm_idp->stack +
 					 offset - UML_CONFIG_STUB_DATA);
-		printk("do_syscall_stub : ret = %d, offset = %d, "
-		       "data = 0x%x\n", ret, offset, data);
+		printk("do_syscall_stub : ret = %ld, offset = %ld, "
+		       "data = %p\n", ret, offset, data);
 		syscall = (unsigned long *)((unsigned long)data + data[0]);
 		printk("do_syscall_stub: syscall %ld failed, return value = "
 		       "0x%lx, expected return value = 0x%lx\n",

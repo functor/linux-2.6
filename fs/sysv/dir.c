@@ -20,7 +20,7 @@
 
 static int sysv_readdir(struct file *, void *, filldir_t);
 
-struct file_operations sysv_dir_operations = {
+const struct file_operations sysv_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= sysv_readdir,
 	.fsync		= sysv_sync_file,
@@ -53,8 +53,7 @@ static int dir_commit_chunk(struct page *page, unsigned from, unsigned to)
 static struct page * dir_get_page(struct inode *dir, unsigned long n)
 {
 	struct address_space *mapping = dir->i_mapping;
-	struct page *page = read_cache_page(mapping, n,
-				(filler_t*)mapping->a_ops->readpage, NULL);
+	struct page *page = read_mapping_page(mapping, n, NULL);
 	if (!IS_ERR(page)) {
 		wait_on_page_locked(page);
 		kmap(page);
@@ -71,7 +70,7 @@ fail:
 static int sysv_readdir(struct file * filp, void * dirent, filldir_t filldir)
 {
 	unsigned long pos = filp->f_pos;
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct super_block *sb = inode->i_sb;
 	unsigned offset = pos & ~PAGE_CACHE_MASK;
 	unsigned long n = pos >> PAGE_CACHE_SHIFT;
@@ -253,8 +252,7 @@ int sysv_delete_entry(struct sysv_dir_entry *de, struct page *page)
 
 	lock_page(page);
 	err = mapping->a_ops->prepare_write(NULL, page, from, to);
-	if (err)
-		BUG();
+	BUG_ON(err);
 	de->inode = 0;
 	err = dir_commit_chunk(page, from, to);
 	dir_put_page(page);
@@ -353,8 +351,7 @@ void sysv_set_link(struct sysv_dir_entry *de, struct page *page,
 
 	lock_page(page);
 	err = page->mapping->a_ops->prepare_write(NULL, page, from, to);
-	if (err)
-		BUG();
+	BUG_ON(err);
 	de->inode = cpu_to_fs16(SYSV_SB(inode->i_sb), inode->i_ino);
 	err = dir_commit_chunk(page, from, to);
 	dir_put_page(page);

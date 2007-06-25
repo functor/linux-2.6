@@ -18,7 +18,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -140,7 +139,7 @@ static void free_sec(unsigned long start, unsigned long end, const char *name)
 
 	while (start < end) {
 		ClearPageReserved(virt_to_page(start));
-		set_page_count(virt_to_page(start), 1);
+		init_page_count(virt_to_page(start));
 		free_page(start);
 		cnt++;
 		start += PAGE_SIZE;
@@ -172,7 +171,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 
 	for (; start < end; start += PAGE_SIZE) {
 		ClearPageReserved(virt_to_page(start));
-		set_page_count(virt_to_page(start), 1);
+		init_page_count(virt_to_page(start));
 		free_page(start);
 		totalram_pages++;
 	}
@@ -359,8 +358,8 @@ void __init do_init_bootmem(void)
  */
 void __init paging_init(void)
 {
-	unsigned long zones_size[MAX_NR_ZONES], i;
-
+	unsigned long start_pfn, end_pfn;
+	unsigned long max_zone_pfns[MAX_NR_ZONES];
 #ifdef CONFIG_HIGHMEM
 	map_page(PKMAP_BASE, 0, 0);	/* XXX gross */
 	pkmap_page_table = pte_offset_kernel(pmd_offset(pgd_offset_k
@@ -370,19 +369,19 @@ void __init paging_init(void)
 			(KMAP_FIX_BEGIN), KMAP_FIX_BEGIN), KMAP_FIX_BEGIN);
 	kmap_prot = PAGE_KERNEL;
 #endif /* CONFIG_HIGHMEM */
+	/* All pages are DMA-able so we put them all in the DMA zone. */
+	start_pfn = __pa(PAGE_OFFSET) >> PAGE_SHIFT;
+	end_pfn = start_pfn + (total_memory >> PAGE_SHIFT);
+	add_active_range(0, start_pfn, end_pfn);
 
-	/*
-	 * All pages are DMA-able so we put them all in the DMA zone.
-	 */
-	zones_size[ZONE_DMA] = total_lowmem >> PAGE_SHIFT;
-	for (i = 1; i < MAX_NR_ZONES; i++)
-		zones_size[i] = 0;
-
+	memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
 #ifdef CONFIG_HIGHMEM
-	zones_size[ZONE_HIGHMEM] = (total_memory - total_lowmem) >> PAGE_SHIFT;
+	max_zone_pfns[ZONE_DMA] = total_lowmem >> PAGE_SHIFT;
+	max_zone_pfns[ZONE_HIGHMEM] = total_memory >> PAGE_SHIFT;
+#else
+	max_zone_pfns[ZONE_DMA] = total_memory >> PAGE_SHIFT;
 #endif /* CONFIG_HIGHMEM */
-
-	free_area_init(zones_size);
+	free_area_init_nodes(max_zone_pfns);
 }
 
 void __init mem_init(void)
@@ -412,14 +411,6 @@ void __init mem_init(void)
 	}
 #endif /* CONFIG_BLK_DEV_INITRD */
 
-#ifdef CONFIG_PPC_OF
-	/* mark the RTAS pages as reserved */
-	if ( rtas_data )
-		for (addr = (ulong)__va(rtas_data);
-		     addr < PAGE_ALIGN((ulong)__va(rtas_data)+rtas_size) ;
-		     addr += PAGE_SIZE)
-			SetPageReserved(virt_to_page(addr));
-#endif
 	for (addr = PAGE_OFFSET; addr < (unsigned long)high_memory;
 	     addr += PAGE_SIZE) {
 		if (!PageReserved(virt_to_page(addr)))
@@ -441,7 +432,7 @@ void __init mem_init(void)
 			struct page *page = mem_map + pfn;
 
 			ClearPageReserved(page);
-			set_page_count(page, 1);
+			init_page_count(page);
 			__free_page(page);
 			totalhigh_pages++;
 		}
@@ -494,11 +485,6 @@ set_phys_avail(unsigned long total_memory)
 				  initrd_end - initrd_start, 1);
 	}
 #endif /* CONFIG_BLK_DEV_INITRD */
-#ifdef CONFIG_PPC_OF
-	/* remove the RTAS pages from the available memory */
-	if (rtas_data)
-		mem_pieces_remove(&phys_avail, rtas_data, rtas_size, 1);
-#endif
 }
 
 /* Mark some memory as reserved by removing it from phys_avail. */
@@ -596,7 +582,7 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 		mm = (address < TASK_SIZE)? vma->vm_mm: &init_mm;
 		pmd = pmd_offset(pgd_offset(mm, address), address);
 		if (!pmd_none(*pmd))
-			add_hash_page(mm->context, address, pmd_val(*pmd));
+			add_hash_page(mm->context.id, address, pmd_val(*pmd));
 	}
 #endif
 }

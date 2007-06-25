@@ -10,6 +10,7 @@
 
 #include <linux/module.h>
 #include <linux/skbuff.h>
+#include <linux/netfilter_bridge.h>
 #include <linux/netfilter/xt_physdev.h>
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter_bridge.h>
@@ -26,6 +27,7 @@ static int
 match(const struct sk_buff *skb,
       const struct net_device *in,
       const struct net_device *out,
+      const struct xt_match *match,
       const void *matchinfo,
       int offset,
       unsigned int protoff,
@@ -102,54 +104,58 @@ match_outdev:
 static int
 checkentry(const char *tablename,
 		       const void *ip,
+		       const struct xt_match *match,
 		       void *matchinfo,
-		       unsigned int matchsize,
 		       unsigned int hook_mask)
 {
 	const struct xt_physdev_info *info = matchinfo;
 
-	if (matchsize != XT_ALIGN(sizeof(struct xt_physdev_info)))
-		return 0;
 	if (!(info->bitmask & XT_PHYSDEV_OP_MASK) ||
 	    info->bitmask & ~XT_PHYSDEV_OP_MASK)
 		return 0;
+	if (info->bitmask & XT_PHYSDEV_OP_OUT &&
+	    (!(info->bitmask & XT_PHYSDEV_OP_BRIDGED) ||
+	     info->invert & XT_PHYSDEV_OP_BRIDGED) &&
+	    hook_mask & ((1 << NF_IP_LOCAL_OUT) | (1 << NF_IP_FORWARD) |
+	                 (1 << NF_IP_POST_ROUTING))) {
+		printk(KERN_WARNING "physdev match: using --physdev-out in the "
+		       "OUTPUT, FORWARD and POSTROUTING chains for non-bridged "
+		       "traffic is not supported anymore.\n");
+		if (hook_mask & (1 << NF_IP_LOCAL_OUT))
+			return 0;
+	}
 	return 1;
 }
 
-static struct xt_match physdev_match = {
-	.name		= "physdev",
-	.match		= &match,
-	.checkentry	= &checkentry,
-	.me		= THIS_MODULE,
+static struct xt_match xt_physdev_match[] = {
+	{
+		.name		= "physdev",
+		.family		= AF_INET,
+		.checkentry	= checkentry,
+		.match		= match,
+		.matchsize	= sizeof(struct xt_physdev_info),
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "physdev",
+		.family		= AF_INET6,
+		.checkentry	= checkentry,
+		.match		= match,
+		.matchsize	= sizeof(struct xt_physdev_info),
+		.me		= THIS_MODULE,
+	},
 };
 
-static struct xt_match physdev6_match = {
-	.name		= "physdev",
-	.match		= &match,
-	.checkentry	= &checkentry,
-	.me		= THIS_MODULE,
-};
-
-static int __init init(void)
+static int __init xt_physdev_init(void)
 {
-	int ret;
-
-	ret = xt_register_match(AF_INET, &physdev_match);
-	if (ret < 0)
-		return ret;
-
-	ret = xt_register_match(AF_INET6, &physdev6_match);
-	if (ret < 0)
-		xt_unregister_match(AF_INET, &physdev_match);
-
-	return ret;
+	return xt_register_matches(xt_physdev_match,
+				   ARRAY_SIZE(xt_physdev_match));
 }
 
-static void __exit fini(void)
+static void __exit xt_physdev_fini(void)
 {
-	xt_unregister_match(AF_INET, &physdev_match);
-	xt_unregister_match(AF_INET6, &physdev6_match);
+	xt_unregister_matches(xt_physdev_match, ARRAY_SIZE(xt_physdev_match));
 }
 
-module_init(init);
-module_exit(fini);
+module_init(xt_physdev_init);
+module_exit(xt_physdev_fini);

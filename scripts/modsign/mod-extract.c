@@ -106,7 +106,6 @@ void usage(void)
 	exit(2);
 }
 
-/*****************************************************************************/
 /*
  *
  */
@@ -195,10 +194,8 @@ int main(int argc, char **argv)
 	}
 
 	return 0;
+}
 
-} /* end main() */
-
-/*****************************************************************************/
 /*
  * extract a RELA table
  * - need to canonicalise the entries in case section addition/removal has
@@ -266,10 +263,8 @@ void extract_elf64_rela(const void *buffer, int secix, int targetix,
 	}
 
 	verbose("%02x %4d %s [canon]\n", csum, secix, sh_name);
+}
 
-} /* end extract_elf64_rela() */
-
-/*****************************************************************************/
 /*
  * extract a REL table
  * - need to canonicalise the entries in case section addition/removal has
@@ -335,10 +330,8 @@ void extract_elf64_rel(const void *buffer, int secix, int targetix,
 	}
 
 	verbose("%02x %4d %s [canon]\n", csum, secix, sh_name);
+}
 
-} /* end extract_elf64_rel() */
-
-/*****************************************************************************/
 /*
  * extract the data from a 64-bit module
  */
@@ -368,6 +361,8 @@ void extract_elf64(void *buffer, size_t len, Elf64_Ehdr *hdr)
 
 	symbols = NULL;
 	strings = NULL;
+	nstrings = 0;
+	nsyms = 0;
 
 	for (loop = 1; loop < shnum; loop++) {
 		const char *sh_name = secstrings + get32(&sections[loop].sh_name);
@@ -543,10 +538,8 @@ void extract_elf64(void *buffer, size_t len, Elf64_Ehdr *hdr)
 
 	verbose("%08lx         (%lu bytes csum 0x%02x)\n",
 		ftell(outfd), ftell(outfd), xcsum);
+}
 
-} /* end extract_elf64() */
-
-/*****************************************************************************/
 /*
  * extract a RELA table
  * - need to canonicalise the entries in case section addition/removal has
@@ -614,10 +607,8 @@ void extract_elf32_rela(const void *buffer, int secix, int targetix,
 	}
 
 	verbose("%02x %4d %s [canon]\n", csum, secix, sh_name);
+}
 
-} /* end extract_elf32_rela() */
-
-/*****************************************************************************/
 /*
  * extract a REL table
  * - need to canonicalise the entries in case section addition/removal has
@@ -672,7 +663,7 @@ void extract_elf32_rel(const void *buffer, int secix, int targetix,
 		/* canonicalise the section used by the symbol */
 		if (st_shndx > SHN_UNDEF && st_shndx < nsects)
 			set16(&relocation.st_shndx, canonmap[st_shndx]);
-		
+
 		write_out_val(relocation);
 
 		/* undefined symbols must be named if referenced */
@@ -683,10 +674,8 @@ void extract_elf32_rel(const void *buffer, int secix, int targetix,
 	}
 
 	verbose("%02x %4d %s [canon]\n", csum, secix, sh_name);
+}
 
-} /* end extract_elf32_rel() */
-
-/*****************************************************************************/
 /*
  * extract the data from a 32-bit module
  */
@@ -716,6 +705,8 @@ void extract_elf32(void *buffer, size_t len, Elf32_Ehdr *hdr)
 
 	symbols = NULL;
 	strings = NULL;
+	nstrings = 0;
+	nsyms = 0;
 
 	for (loop = 1; loop < shnum; loop++) {
 		const char *sh_name = secstrings + get32(&sections[loop].sh_name);
@@ -896,5 +887,4 @@ void extract_elf32(void *buffer, size_t len, Elf32_Ehdr *hdr)
 
 	verbose("%08lx         (%lu bytes csum 0x%02x)\n",
 		ftell(outfd), ftell(outfd), xcsum);
-
-} /* end extract_elf32() */
+}

@@ -39,7 +39,7 @@
  *  25 - APM BIOS support 
  *
  *  26 - ESPFIX small SS
- *  27 - unused
+ *  27 - PDA				[ per-cpu private data area ]
  *  28 - unused
  *  29 - unused
  *  30 - unused
@@ -74,6 +74,9 @@
 #define GDT_ENTRY_ESPFIX_SS		(GDT_ENTRY_KERNEL_BASE + 14)
 #define __ESPFIX_SS (GDT_ENTRY_ESPFIX_SS * 8)
 
+#define GDT_ENTRY_PDA			(GDT_ENTRY_KERNEL_BASE + 15)
+#define __KERNEL_PDA (GDT_ENTRY_PDA * 8)
+
 #define GDT_ENTRY_DOUBLEFAULT_TSS	31
 
 /*
@@ -82,6 +85,15 @@
 #define GDT_ENTRIES 32
 
 #define GDT_SIZE (GDT_ENTRIES * 8)
+
+/* Matches __KERNEL_CS and __USER_CS (they must be 2 entries apart) */
+#ifdef CONFIG_XEN
+#define SEGMENT_IS_FLAT_CODE(x)  ((x) == __USER_CS || (x) == (__KERNEL_CS | get_kernel_rpl()))
+#else
+#define SEGMENT_IS_FLAT_CODE(x)  (((x) & 0xec) == GDT_ENTRY_KERNEL_CS * 8)
+#endif
+/* Matches PNP_CS32 and PNP_CS16 (they must be consecutive) */
+#define SEGMENT_IS_PNP_CODE(x)   (((x) & 0xf4) == GDT_ENTRY_PNPBIOS_BASE * 8)
 
 /* Simple and small GDT entries for booting only */
 
@@ -112,4 +124,22 @@
  */
 #define IDT_ENTRIES 256
 
+/* Bottom two bits of selector give the ring privilege level */
+#define SEGMENT_RPL_MASK	0x3
+/* Bit 2 is table indicator (LDT/GDT) */
+#define SEGMENT_TI_MASK		0x4
+
+/* User mode is privilege level 3 */
+#define USER_RPL		0x3
+/* LDT segment has TI set, GDT has it cleared */
+#define SEGMENT_LDT		0x4
+#define SEGMENT_GDT		0x0
+
+#ifndef CONFIG_PARAVIRT
+#ifdef CONFIG_XEN
+#define get_kernel_rpl()   (xen_feature(XENFEAT_supervisor_mode_kernel)?0:1)
+#else
+#define get_kernel_rpl()  0
+#endif /* CONFIG_XEN */
+#endif
 #endif

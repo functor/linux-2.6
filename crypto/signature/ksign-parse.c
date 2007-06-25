@@ -1,4 +1,4 @@
-/* parse-packet.c  - read packets
+/* parse packet data
  * Copyright (C) 1998, 1999, 2000, 2001 Free Software Foundation, Inc.
  *
  * This file is part of GnuPG.
@@ -55,14 +55,13 @@ void ksign_free_signature(struct ksign_signature *sig)
 {
 	int i;
 
-	if (!sig)
-		return;
-
-	for (i = 0; i < DSA_NSIG; i++)
-		mpi_free(sig->data[i]);
-	kfree(sig->hashed_data);
-	kfree(sig->unhashed_data);
-	kfree(sig);
+	if (sig) {
+		for (i = 0; i < DSA_NSIG; i++)
+			mpi_free(sig->data[i]);
+		kfree(sig->hashed_data);
+		kfree(sig->unhashed_data);
+		kfree(sig);
+	}
 }
 
 void ksign_free_public_key(struct ksign_public_key *pk)
@@ -78,15 +77,13 @@ void ksign_free_public_key(struct ksign_public_key *pk)
 
 void ksign_free_user_id(struct ksign_user_id *uid)
 {
-	if (uid)
-		kfree(uid);
+	kfree(uid);
 }
 
-/*****************************************************************************/
 /*
  *
  */
-static void ksign_calc_pk_keyid(struct crypto_tfm *sha1,
+static void ksign_calc_pk_keyid(struct hash_desc *sha1,
 				struct ksign_public_key *pk)
 {
 	unsigned n;
@@ -97,7 +94,7 @@ static void ksign_calc_pk_keyid(struct crypto_tfm *sha1,
 	int i;
 	int npkey = DSA_NPKEY;
 
-	crypto_digest_init(sha1);
+	crypto_hash_init(sha1);
 
 	n = pk->version < 4 ? 8 : 6;
 	for (i = 0; i < npkey; i++) {
@@ -110,7 +107,7 @@ static void ksign_calc_pk_keyid(struct crypto_tfm *sha1,
 	SHA1_putc(sha1, n >> 8);   /* 2 uint8_t length header */
 	SHA1_putc(sha1, n);
 
-	if( pk->version < 4)
+	if (pk->version < 4)
 		SHA1_putc(sha1, 3);
 	else
 		SHA1_putc(sha1, 4);
@@ -125,7 +122,8 @@ static void ksign_calc_pk_keyid(struct crypto_tfm *sha1,
 		uint16_t a16;
 
 		if( pk->expiredate )
-			a16 = (uint16_t) ((pk->expiredate - pk->timestamp) / 86400L);
+			a16 = (uint16_t)
+				((pk->expiredate - pk->timestamp) / 86400L);
 		else
 			a16 = 0;
 		SHA1_putc(sha1, a16 >> 8);
@@ -140,10 +138,8 @@ static void ksign_calc_pk_keyid(struct crypto_tfm *sha1,
 		SHA1_write(sha1, pp[i], nn[i]);
 		kfree(pp[i]);
 	}
+}
 
-} /* end ksign_calc_pk_keyid() */
-
-/*****************************************************************************/
 /*
  * parse a user ID embedded in a signature
  */
@@ -174,9 +170,8 @@ static int ksign_parse_user_id(const uint8_t *datap, const uint8_t *endp,
 
 	ksign_free_user_id(uid);
 	return rc;
-} /* end ksign_parse_user_id() */
+}
 
-/*****************************************************************************/
 /*
  * extract a public key embedded in a signature
  */
@@ -185,9 +180,9 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 			   ksign_public_key_actor_t pkfnx, void *fnxdata)
 {
 	struct ksign_public_key *pk;
-	struct crypto_tfm *sha1_tfm;
+	struct hash_desc sha1;
 	unsigned long timestamp, expiredate;
-	uint8_t sha1[SHA1_DIGEST_SIZE];
+	uint8_t hash[SHA1_DIGEST_SIZE];
 	int i, version;
 	int is_v4 = 0;
 	int rc = 0;
@@ -211,9 +206,9 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 	}
 
 	timestamp = read_32(&datap);
-	if (is_v4)
+	if (is_v4) {
 		expiredate = 0; /* have to get it from the selfsignature */
-	else {
+	} else {
 		unsigned short ndays;
 		ndays = read_16(&datap);
 		if (ndays)
@@ -229,11 +224,10 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 	}
 
 	/* extract the stuff from the DSA public key */
-	pk = kmalloc(sizeof(struct ksign_public_key), GFP_KERNEL);
+	pk = kzalloc(sizeof(struct ksign_public_key), GFP_KERNEL);
 	if (!pk)
 		return -ENOMEM;
 
-	memset(pk, 0, sizeof(struct ksign_public_key));
 	atomic_set(&pk->count, 1);
 	pk->timestamp	= timestamp;
 	pk->expiredate	= expiredate;
@@ -248,29 +242,29 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 
 	rc = -ENOMEM;
 
-	sha1_tfm = crypto_alloc_tfm2("sha1", 0, 1);
-	if (!sha1_tfm)
+	sha1.tfm = crypto_hash_cast(crypto_alloc_tfm2("sha1", 0, 1));
+	if (!sha1.tfm)
 		goto cleanup;
+	sha1.flags = 0;
 
-	ksign_calc_pk_keyid(sha1_tfm, pk);
-	crypto_digest_final(sha1_tfm, sha1);
-	crypto_free_tfm(sha1_tfm);
+	ksign_calc_pk_keyid(&sha1, pk);
+	crypto_hash_final(&sha1, hash);
+	crypto_free_hash(sha1.tfm);
 
-	pk->keyid[0] = sha1[12] << 24 | sha1[13] << 16 | sha1[14] << 8 | sha1[15];
-	pk->keyid[1] = sha1[16] << 24 | sha1[17] << 16 | sha1[18] << 8 | sha1[19];
+	pk->keyid[0] = hash[12] << 24 | hash[13] << 16 | hash[14] << 8 | hash[15];
+	pk->keyid[1] = hash[16] << 24 | hash[17] << 16 | hash[18] << 8 | hash[19];
 
 	rc = 0;
 	if (pkfnx)
 		rc = pkfnx(pk, fnxdata);
 
- cleanup:
+cleanup:
 	ksign_put_public_key(pk);
 	return rc;
-} /* end ksign_parse_key() */
+}
 
-/*****************************************************************************/
 /*
- *
+ * find an element representing the issuer
  */
 static const uint8_t *ksign_find_sig_issuer(const uint8_t *buffer)
 {
@@ -290,8 +284,7 @@ static const uint8_t *ksign_find_sig_issuer(const uint8_t *buffer)
 				goto too_short;
 			n = read_32(&buffer);
 			buflen -= 4;
-		}
-		else if (n >= 192) {
+		} else if (n >= 192) {
 			if(buflen < 2)
 				goto too_short;
 			n = ((n - 192) << 8) + *buffer + 192;
@@ -303,9 +296,10 @@ static const uint8_t *ksign_find_sig_issuer(const uint8_t *buffer)
 			goto too_short;
 
 		type = *buffer & 0x7f;
-		if (!(++seq > 0))
+		if (!(++seq > 0)) {
 			;
-		else if (type == SIGSUBPKT_ISSUER) { /* found */
+		} else if (type == SIGSUBPKT_ISSUER) {
+			/* found */
 			buffer++;
 			n--;
 			if (n > buflen || n < 8)
@@ -317,11 +311,10 @@ static const uint8_t *ksign_find_sig_issuer(const uint8_t *buffer)
 		buflen -= n;
 	}
 
- too_short:
+too_short:
 	return NULL; /* end of subpackets; not found */
-} /* end ksign_find_sig_issuer() */
+}
 
-/*****************************************************************************/
 /*
  * extract signature data embedded in a signature
  */
@@ -347,16 +340,16 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 	case 2:
 		break;
 	default:
-		printk("ksign: signature packet with unknown version %d\n", version);
+		printk("ksign: signature packet with unknown version %d\n",
+		       version);
 		return 0;
 	}
 
 	/* store information */
-	sig = kmalloc(sizeof(*sig), GFP_KERNEL);
+	sig = kzalloc(sizeof(*sig), GFP_KERNEL);
 	if (!sig)
 		return -ENOMEM;
 
-	memset(sig, 0, sizeof(*sig));
 	sig->version = version;
 
 	if (!is_v4)
@@ -380,15 +373,18 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 	}
 
 	rc = -EBADMSG;
-	if (is_v4) { /* read subpackets */
+	if (is_v4) {
+		/* read subpackets */
 		n = read_16(&datap); /* length of hashed data */
 		if (n > 10000) {
-			printk("ksign: signature packet: hashed data too long\n");
+			printk("ksign: signature packet:"
+			       " hashed data too long\n");
 			goto leave;
 		}
 		if (n) {
 			if ((size_t)(endp - datap) < n) {
-				printk("ksign: signature packet: available data too short\n");
+				printk("ksign: signature packet:"
+				       " available data too short\n");
 				goto leave;
 			}
 			sig->hashed_data = kmalloc(n + 2, GFP_KERNEL);
@@ -404,12 +400,14 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 
 		n = read_16(&datap); /* length of unhashed data */
 		if (n > 10000) {
-			printk("ksign: signature packet: unhashed data too long\n");
+			printk("ksign: signature packet:"
+			       " unhashed data too long\n");
 			goto leave;
 		}
 		if (n) {
 			if ((size_t) (endp - datap) < n) {
-				printk("ksign: signature packet: available data too short\n");
+				printk("ksign: signature packet:"
+				       " available data too short\n");
 				goto leave;
 			}
 			sig->unhashed_data = kmalloc(n + 2, GFP_KERNEL);
@@ -438,9 +436,9 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 		p = ksign_find_sig_issuer(sig->hashed_data);
 		if (!p)
 			p = ksign_find_sig_issuer(sig->unhashed_data);
-		if (!p)
+		if (!p) {
 			printk("ksign: signature packet without issuer\n");
-		else {
+		} else {
 			sig->keyid[0] = buffer_to_u32(p);
 			sig->keyid[1] = buffer_to_u32(p + 4);
 		}
@@ -461,12 +459,11 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 			rc = 0;
 	}
 
- leave:
+leave:
 	ksign_free_signature(sig);
 	return rc;
-} /* end ksign_parse_signature() */
+}
 
-/*****************************************************************************/
 /*
  * parse the next packet and call appropriate handler function for known types
  * - returns:
@@ -514,8 +511,7 @@ static int ksign_parse_one_packet(const uint8_t **datap,
 
 		if (c < 192) {
 			pktlen = c;
-		}
-		else if (c < 224) {
+		} else if (c < 224) {
 			pktlen = (c - 192) * 256;
 			if (*datap >= endp) {
 				printk("ksign: 2nd length uint8_t missing\n");
@@ -524,28 +520,24 @@ static int ksign_parse_one_packet(const uint8_t **datap,
 			c = *(*datap)++;
 			hdr[hdrlen++] = c;
 			pktlen += c + 192;
-		}
-		else if (c == 255) {
+		} else if (c == 255) {
 			if (*datap + 3 >= endp) {
 				printk("ksign: 4 uint8_t length invalid\n");
 				goto leave;
 			}
-			pktlen  = (hdr[hdrlen++] = *(*datap)++ << 24	);
-			pktlen |= (hdr[hdrlen++] = *(*datap)++ << 16	);
-			pktlen |= (hdr[hdrlen++] = *(*datap)++ <<  8	);
-			pktlen |= (hdr[hdrlen++] = *(*datap)++ <<  0	);
-		}
-		else {
+			pktlen  = (hdr[hdrlen++] = *(*datap)++ << 24);
+			pktlen |= (hdr[hdrlen++] = *(*datap)++ << 16);
+			pktlen |= (hdr[hdrlen++] = *(*datap)++ <<  8);
+			pktlen |= (hdr[hdrlen++] = *(*datap)++ <<  0);
+		} else {
 			pktlen = 0;/* to indicate partial length */
 		}
-	}
-	else {
+	} else {
 		pkttype = (ctb >> 2) & 0xf;
 		lenuint8_ts = ((ctb & 3) == 3) ? 0 : (1 << (ctb & 3));
 		if( !lenuint8_ts ) {
 			pktlen = 0; /* don't know the value */
-		}
-		else {
+		} else {
 			if (*datap + lenuint8_ts > endp) {
 				printk("ksign: length uint8_ts missing\n");
 				goto leave;
@@ -565,13 +557,16 @@ static int ksign_parse_one_packet(const uint8_t **datap,
 	/* deal with the next packet appropriately */
 	switch (pkttype) {
 	case PKT_PUBLIC_KEY:
-		rc = ksign_parse_key(*datap, *datap + pktlen, hdr, hdrlen, pkfnx, data);
+		rc = ksign_parse_key(*datap, *datap + pktlen, hdr, hdrlen,
+				     pkfnx, data);
 		break;
 	case PKT_SIGNATURE:
-		rc = ksign_parse_signature(*datap, *datap + pktlen, sigfnx, data);
+		rc = ksign_parse_signature(*datap, *datap + pktlen,
+					   sigfnx, data);
 		break;
 	case PKT_USER_ID:
-		rc = ksign_parse_user_id(*datap, *datap + pktlen, uidfnx, data);
+		rc = ksign_parse_user_id(*datap, *datap + pktlen,
+					 uidfnx, data);
 		break;
 	default:
 		rc = 0; /* unknown packet */
@@ -579,11 +574,10 @@ static int ksign_parse_one_packet(const uint8_t **datap,
 	}
 
 	*datap += pktlen;
- leave:
+leave:
 	return rc;
-} /* end ksign_parse_one_packet() */
+}
 
-/*****************************************************************************/
 /*
  * parse the contents of a packet buffer, passing the signature, public key and
  * user ID to the caller's callback functions
@@ -606,4 +600,4 @@ int ksign_parse_packets(const uint8_t *buf,
 	} while (rc == 0 && datap < endp);
 
 	return rc;
-} /* end ksign_parse_packets() */
+}

@@ -22,6 +22,7 @@
  */
 
 #include <linux/errno.h>
+#include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
@@ -91,10 +92,12 @@ static void ntfs_end_buffer_async_read(struct buffer_head *bh, int uptodate)
 			ofs = 0;
 			if (file_ofs < init_size)
 				ofs = init_size - file_ofs;
+			local_irq_save(flags);
 			kaddr = kmap_atomic(page, KM_BIO_SRC_IRQ);
 			memset(kaddr + bh_offset(bh) + ofs, 0,
 					bh->b_size - ofs);
 			kunmap_atomic(kaddr, KM_BIO_SRC_IRQ);
+			local_irq_restore(flags);
 			flush_dcache_page(page);
 		}
 	} else {
@@ -142,11 +145,13 @@ static void ntfs_end_buffer_async_read(struct buffer_head *bh, int uptodate)
 		recs = PAGE_CACHE_SIZE / rec_size;
 		/* Should have been verified before we got here... */
 		BUG_ON(!recs);
+		local_irq_save(flags);
 		kaddr = kmap_atomic(page, KM_BIO_SRC_IRQ);
 		for (i = 0; i < recs; i++)
 			post_read_mst_fixup((NTFS_RECORD*)(kaddr +
 					i * rec_size), rec_size);
 		kunmap_atomic(kaddr, KM_BIO_SRC_IRQ);
+		local_irq_restore(flags);
 		flush_dcache_page(page);
 		if (likely(page_uptodate && !PageError(page)))
 			SetPageUptodate(page);
@@ -253,7 +258,7 @@ static int ntfs_read_block(struct page *page)
 		bh->b_bdev = vol->sb->s_bdev;
 		/* Is the block within the allowed limits? */
 		if (iblock < lblock) {
-			BOOL is_retry = FALSE;
+			bool is_retry = false;
 
 			/* Convert iblock into corresponding vcn and offset. */
 			vcn = (VCN)iblock << blocksize_bits >>
@@ -291,7 +296,7 @@ lock_retry_remap:
 				goto handle_hole;
 			/* If first try and runlist unmapped, map and retry. */
 			if (!is_retry && lcn == LCN_RL_NOT_MAPPED) {
-				is_retry = TRUE;
+				is_retry = true;
 				/*
 				 * Attempt to map runlist, dropping lock for
 				 * the duration.
@@ -557,7 +562,7 @@ static int ntfs_write_block(struct page *page, struct writeback_control *wbc)
 	unsigned long flags;
 	unsigned int blocksize, vcn_ofs;
 	int err;
-	BOOL need_end_writeback;
+	bool need_end_writeback;
 	unsigned char blocksize_bits;
 
 	vi = page->mapping->host;
@@ -625,7 +630,7 @@ static int ntfs_write_block(struct page *page, struct writeback_control *wbc)
 	rl = NULL;
 	err = 0;
 	do {
-		BOOL is_retry = FALSE;
+		bool is_retry = false;
 
 		if (unlikely(block >= dblock)) {
 			/*
@@ -767,7 +772,7 @@ lock_retry_remap:
 		}
 		/* If first try and runlist unmapped, map and retry. */
 		if (!is_retry && lcn == LCN_RL_NOT_MAPPED) {
-			is_retry = TRUE;
+			is_retry = true;
 			/*
 			 * Attempt to map runlist, dropping lock for
 			 * the duration.
@@ -873,12 +878,12 @@ lock_retry_remap:
 	set_page_writeback(page);	/* Keeps try_to_free_buffers() away. */
 
 	/* Submit the prepared buffers for i/o. */
-	need_end_writeback = TRUE;
+	need_end_writeback = true;
 	do {
 		struct buffer_head *next = bh->b_this_page;
 		if (buffer_async_write(bh)) {
 			submit_bh(WRITE, bh);
-			need_end_writeback = FALSE;
+			need_end_writeback = false;
 		}
 		bh = next;
 	} while (bh != head);
@@ -931,7 +936,7 @@ static int ntfs_write_mst_block(struct page *page,
 	runlist_element *rl;
 	int i, nr_locked_nis, nr_recs, nr_bhs, max_bhs, bhs_per_rec, err, err2;
 	unsigned bh_size, rec_size_bits;
-	BOOL sync, is_mft, page_is_dirty, rec_is_dirty;
+	bool sync, is_mft, page_is_dirty, rec_is_dirty;
 	unsigned char bh_size_bits;
 
 	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, page index "
@@ -974,10 +979,10 @@ static int ntfs_write_mst_block(struct page *page,
 
 	rl = NULL;
 	err = err2 = nr_bhs = nr_recs = nr_locked_nis = 0;
-	page_is_dirty = rec_is_dirty = FALSE;
+	page_is_dirty = rec_is_dirty = false;
 	rec_start_bh = NULL;
 	do {
-		BOOL is_retry = FALSE;
+		bool is_retry = false;
 
 		if (likely(block < rec_block)) {
 			if (unlikely(block >= dblock)) {
@@ -1008,10 +1013,10 @@ static int ntfs_write_mst_block(struct page *page,
 			}
 			if (!buffer_dirty(bh)) {
 				/* Clean records are not written out. */
-				rec_is_dirty = FALSE;
+				rec_is_dirty = false;
 				continue;
 			}
-			rec_is_dirty = TRUE;
+			rec_is_dirty = true;
 			rec_start_bh = bh;
 		}
 		/* Need to map the buffer if it is not mapped already. */
@@ -1052,7 +1057,7 @@ lock_retry_remap:
 				 */
 				if (!is_mft && !is_retry &&
 						lcn == LCN_RL_NOT_MAPPED) {
-					is_retry = TRUE;
+					is_retry = true;
 					/*
 					 * Attempt to map runlist, dropping
 					 * lock for the duration.
@@ -1062,7 +1067,7 @@ lock_retry_remap:
 					if (likely(!err2))
 						goto lock_retry_remap;
 					if (err2 == -ENOMEM)
-						page_is_dirty = TRUE;
+						page_is_dirty = true;
 					lcn = err2;
 				} else {
 					err2 = -EIO;
@@ -1144,7 +1149,7 @@ lock_retry_remap:
 				 * means we need to redirty the page before
 				 * returning.
 				 */
-				page_is_dirty = TRUE;
+				page_is_dirty = true;
 				/*
 				 * Remove the buffers in this mft record from
 				 * the list of buffers to write.
@@ -1277,18 +1282,18 @@ unm_done:
 		
 		tni = locked_nis[nr_locked_nis];
 		/* Get the base inode. */
-		down(&tni->extent_lock);
+		mutex_lock(&tni->extent_lock);
 		if (tni->nr_extents >= 0)
 			base_tni = tni;
 		else {
 			base_tni = tni->ext.base_ntfs_ino;
 			BUG_ON(!base_tni);
 		}
-		up(&tni->extent_lock);
+		mutex_unlock(&tni->extent_lock);
 		ntfs_debug("Unlocking %s inode 0x%lx.",
 				tni == base_tni ? "base" : "extent",
 				tni->mft_no);
-		up(&tni->mrec_lock);
+		mutex_unlock(&tni->mrec_lock);
 		atomic_dec(&tni->count);
 		iput(VFS_I(base_tni));
 	}
@@ -1529,7 +1534,6 @@ err_out:
 				"error %i.", err);
 		SetPageError(page);
 		NVolSetErrors(ni->vol);
-		make_bad_inode(vi);
 	}
 	unlock_page(page);
 	if (ctx)
@@ -1544,20 +1548,23 @@ err_out:
 /**
  * ntfs_aops - general address space operations for inodes and attributes
  */
-struct address_space_operations ntfs_aops = {
+const struct address_space_operations ntfs_aops = {
 	.readpage	= ntfs_readpage,	/* Fill page with data. */
 	.sync_page	= block_sync_page,	/* Currently, just unplugs the
 						   disk request queue. */
 #ifdef NTFS_RW
 	.writepage	= ntfs_writepage,	/* Write dirty page to disk. */
 #endif /* NTFS_RW */
+	.migratepage	= buffer_migrate_page,	/* Move a page cache page from
+						   one physical page to an
+						   other. */
 };
 
 /**
  * ntfs_mst_aops - general address space operations for mst protecteed inodes
  *		   and attributes
  */
-struct address_space_operations ntfs_mst_aops = {
+const struct address_space_operations ntfs_mst_aops = {
 	.readpage	= ntfs_readpage,	/* Fill page with data. */
 	.sync_page	= block_sync_page,	/* Currently, just unplugs the
 						   disk request queue. */
@@ -1567,6 +1574,9 @@ struct address_space_operations ntfs_mst_aops = {
 						   without touching the buffers
 						   belonging to the page. */
 #endif /* NTFS_RW */
+	.migratepage	= buffer_migrate_page,	/* Move a page cache page from
+						   one physical page to an
+						   other. */
 };
 
 #ifdef NTFS_RW

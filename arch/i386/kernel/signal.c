@@ -19,8 +19,9 @@
 #include <linux/stddef.h>
 #include <linux/personality.h>
 #include <linux/suspend.h>
-#include <linux/ptrace.h>
+#include <linux/tracehook.h>
 #include <linux/elf.h>
+#include <linux/binfmts.h>
 #include <asm/processor.h>
 #include <asm/ucontext.h>
 #include <asm/uaccess.h>
@@ -123,11 +124,12 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc, int *peax
 	  err |= __get_user(tmp, &sc->seg);				\
 	  loadsegment(seg,tmp); }
 
-#define	FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_OF | X86_EFLAGS_DF | \
+#define	FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_RF |		 \
+			 X86_EFLAGS_OF | X86_EFLAGS_DF |		 \
 			 X86_EFLAGS_TF | X86_EFLAGS_SF | X86_EFLAGS_ZF | \
 			 X86_EFLAGS_AF | X86_EFLAGS_PF | X86_EFLAGS_CF)
 
-	GET_SEG(gs);
+	COPY_SEG(gs);
 	GET_SEG(fs);
 	COPY_SEG(es);
 	COPY_SEG(ds);
@@ -243,9 +245,7 @@ setup_sigcontext(struct sigcontext __user *sc, struct _fpstate __user *fpstate,
 {
 	int tmp, err = 0;
 
-	tmp = 0;
-	savesegment(gs, tmp);
-	err |= __put_user(tmp, (unsigned int __user *)&sc->gs);
+	err |= __put_user(regs->xgs, (unsigned int __user *)&sc->gs);
 	savesegment(fs, tmp);
 	err |= __put_user(tmp, (unsigned int __user *)&sc->fs);
 
@@ -350,7 +350,10 @@ static int setup_frame(int sig, struct k_sigaction *ka,
 			goto give_sigsegv;
 	}
 
-	restorer = &__kernel_sigreturn;
+	if (current->binfmt->hasvdso)
+		restorer = (void *)VDSO_SYM(&__kernel_sigreturn);
+	else
+		restorer = (void *)&frame->retcode;
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 
@@ -383,16 +386,6 @@ static int setup_frame(int sig, struct k_sigaction *ka,
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-
-	/*
-	 * Clear TF when entering the signal handler, but
-	 * notify any tracer that was single-stepping it.
-	 * The tracer may want to single-step inside the
-	 * handler too.
-	 */
-	regs->eflags &= ~TF_MASK;
-	if (test_thread_flag(TIF_SINGLESTEP))
-		ptrace_notify(SIGTRAP);
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -446,7 +439,7 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 		goto give_sigsegv;
 
 	/* Set up to return from userspace.  */
-	restorer = &__kernel_rt_sigreturn;
+	restorer = (void *)VDSO_SYM(&__kernel_rt_sigreturn);
 	if (ka->sa.sa_flags & SA_RESTORER)
 		restorer = ka->sa.sa_restorer;
 	err |= __put_user(restorer, &frame->pretcode);
@@ -477,16 +470,6 @@ static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-
-	/*
-	 * Clear TF when entering the signal handler, but
-	 * notify any tracer that was single-stepping it.
-	 * The tracer may want to single-step inside the
-	 * handler too.
-	 */
-	regs->eflags &= ~TF_MASK;
-	if (test_thread_flag(TIF_SINGLESTEP))
-		ptrace_notify(SIGTRAP);
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -532,14 +515,12 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	}
 
 	/*
-	 * If TF is set due to a debugger (PT_DTRACE), clear the TF flag so
+	 * If TF is set due to a debugger (TIF_FORCED_TF), clear the TF flag so
 	 * that register information in the sigcontext is correct.
 	 */
 	if (unlikely(regs->eflags & TF_MASK)
-	    && likely(current->ptrace & PT_DTRACE)) {
-		current->ptrace &= ~PT_DTRACE;
+	    && likely(test_and_clear_thread_flag(TIF_FORCED_TF)))
 		regs->eflags &= ~TF_MASK;
-	}
 
 	/* Set up the stack frame */
 	if (ka->sa.sa_flags & SA_SIGINFO)
@@ -554,6 +535,15 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 			sigaddset(&current->blocked,sig);
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
+
+		/*
+		 * Clear TF when entering the signal handler, but
+		 * notify any tracer that was single-stepping it.
+		 * The tracer may want to single-step inside the
+		 * handler too.
+		 */
+		regs->eflags &= ~TF_MASK;
+		tracehook_report_handle_signal(sig, ka, oldset, regs);
 	}
 
 	return ret;
@@ -581,9 +571,6 @@ static void fastcall do_signal(struct pt_regs *regs)
 	 */
 	if (!user_mode(regs))
 		return;
-
-	if (try_to_freeze())
-		goto no_signal;
 
 	if (test_thread_flag(TIF_RESTORE_SIGMASK))
 		oldset = &current->saved_sigmask;
@@ -613,7 +600,6 @@ static void fastcall do_signal(struct pt_regs *regs)
 		return;
 	}
 
-no_signal:
 	/* Did we come from a system call? */
 	if (regs->orig_eax >= 0) {
 		/* Restart the system call - no handlers present */

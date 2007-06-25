@@ -27,7 +27,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/miscdevice.h>
@@ -181,7 +180,7 @@ static int sc1200wdt_ioctl(struct inode *inode, struct file *file, unsigned int 
 
 	switch (cmd) {
 		default:
-			return -ENOIOCTLCMD;	/* Keep Pavel Machek amused ;) */
+			return -ENOTTY;
 
 		case WDIOC_GETSUPPORT:
 			if (copy_to_user(argp, &ident, sizeof ident))
@@ -293,7 +292,7 @@ static struct notifier_block sc1200wdt_notifier =
 	.notifier_call =	sc1200wdt_notify_sys,
 };
 
-static struct file_operations sc1200wdt_fops =
+static const struct file_operations sc1200wdt_fops =
 {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,

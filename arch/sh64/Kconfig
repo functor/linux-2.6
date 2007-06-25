@@ -21,6 +21,14 @@ config RWSEM_GENERIC_SPINLOCK
 	bool
 	default y
 
+config GENERIC_FIND_NEXT_BIT
+	bool
+	default y
+
+config GENERIC_HWEIGHT
+	bool
+	default y
+
 config GENERIC_CALIBRATE_DELAY
 	bool
 	default y
@@ -30,6 +38,14 @@ config RWSEM_XCHGADD_ALGORITHM
 
 config GENERIC_ISA_DMA
 	bool
+
+config ARCH_HAS_ILOG2_U32
+	bool
+	default n
+
+config ARCH_HAS_ILOG2_U64
+	bool
+	default n
 
 source init/Kconfig
 

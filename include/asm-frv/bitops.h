@@ -14,7 +14,6 @@
 #ifndef _ASM_BITOPS_H
 #define _ASM_BITOPS_H
 
-#include <linux/config.h>
 #include <linux/compiler.h>
 #include <asm/byteorder.h>
 #include <asm/system.h>
@@ -22,20 +21,7 @@
 
 #ifdef __KERNEL__
 
-/*
- * ffz = Find First Zero in word. Undefined if no zero exists,
- * so code should check against ~0UL first..
- */
-static inline unsigned long ffz(unsigned long word)
-{
-	unsigned long result = 0;
-
-	while (word & 1) {
-		result++;
-		word >>= 1;
-	}
-	return result;
-}
+#include <asm-generic/bitops/ffz.h>
 
 /*
  * clear_bit() doesn't provide any barrier for the compiler.
@@ -171,171 +157,158 @@ static inline int __test_bit(int nr, const volatile void * addr)
  __constant_test_bit((nr),(addr)) : \
  __test_bit((nr),(addr)))
 
-extern int find_next_bit(const unsigned long *addr, int size, int offset);
+#include <asm-generic/bitops/find.h>
 
-#define find_first_bit(addr, size) find_next_bit(addr, size, 0)
-
-#define find_first_zero_bit(addr, size) \
-        find_next_zero_bit((addr), (size), 0)
-
-static inline int find_next_zero_bit(const void *addr, int size, int offset)
-{
-	const unsigned long *p = ((const unsigned long *) addr) + (offset >> 5);
-	unsigned long result = offset & ~31UL;
-	unsigned long tmp;
-
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 31UL;
-	if (offset) {
-		tmp = *(p++);
-		tmp |= ~0UL >> (32-offset);
-		if (size < 32)
-			goto found_first;
-		if (~tmp)
-			goto found_middle;
-		size -= 32;
-		result += 32;
-	}
-	while (size & ~31UL) {
-		if (~(tmp = *(p++)))
-			goto found_middle;
-		result += 32;
-		size -= 32;
-	}
-	if (!size)
-		return result;
-	tmp = *p;
-
-found_first:
-	tmp |= ~0UL << size;
-found_middle:
-	return result + ffz(tmp);
-}
-
-#define ffs(x) generic_ffs(x)
-#define __ffs(x) (ffs(x) - 1)
-
-/*
- * fls: find last bit set.
+/**
+ * fls - find last bit set
+ * @x: the word to search
+ *
+ * This is defined the same way as ffs:
+ * - return 32..1 to indicate bit 31..0 most significant bit set
+ * - return 0 to indicate no bits set
  */
 #define fls(x)						\
 ({							\
 	int bit;					\
 							\
-	asm("scan %1,gr0,%0" : "=r"(bit) : "r"(x));	\
+	asm("	subcc	%1,gr0,gr0,icc0		\n"	\
+	    "	ckne	icc0,cc4		\n"	\
+	    "	cscan.p	%1,gr0,%0	,cc4,#1	\n"	\
+	    "	csub	%0,%0,%0	,cc4,#0	\n"	\
+	    "   csub    %2,%0,%0	,cc4,#1	\n"	\
+	    : "=&r"(bit)				\
+	    : "r"(x), "r"(32)				\
+	    : "icc0", "cc4"				\
+	    );						\
 							\
-	bit ? 33 - bit : bit;				\
+	bit;						\
 })
-#define fls64(x)   generic_fls64(x)
 
-/*
- * Every architecture must define this function. It's the fastest
- * way of searching a 140-bit bitmap where the first 100 bits are
- * unlikely to be set. It's guaranteed that at least one of the 140
- * bits is cleared.
+/**
+ * fls64 - find last bit set in a 64-bit value
+ * @n: the value to search
+ *
+ * This is defined the same way as ffs:
+ * - return 64..1 to indicate bit 63..0 most significant bit set
+ * - return 0 to indicate no bits set
  */
-static inline int sched_find_first_bit(const unsigned long *b)
+static inline __attribute__((const))
+int fls64(u64 n)
 {
-	if (unlikely(b[0]))
-		return __ffs(b[0]);
-	if (unlikely(b[1]))
-		return __ffs(b[1]) + 32;
-	if (unlikely(b[2]))
-		return __ffs(b[2]) + 64;
-	if (b[3])
-		return __ffs(b[3]) + 96;
-	return __ffs(b[4]) + 128;
+	union {
+		u64 ll;
+		struct { u32 h, l; };
+	} _;
+	int bit, x, y;
+
+	_.ll = n;
+
+	asm("	subcc.p		%3,gr0,gr0,icc0		\n"
+	    "	subcc		%4,gr0,gr0,icc1		\n"
+	    "	ckne		icc0,cc4		\n"
+	    "	ckne		icc1,cc5		\n"
+	    "	norcr		cc4,cc5,cc6		\n"
+	    "	csub.p		%0,%0,%0	,cc6,1	\n"
+	    "	orcr		cc5,cc4,cc4		\n"
+	    "	andcr		cc4,cc5,cc4		\n"
+	    "	cscan.p		%3,gr0,%0	,cc4,0	\n"
+	    "   setlos		#64,%1			\n"
+	    "	cscan.p		%4,gr0,%0	,cc4,1	\n"
+	    "   setlos		#32,%2			\n"
+	    "	csub.p		%1,%0,%0	,cc4,0	\n"
+	    "	csub		%2,%0,%0	,cc4,1	\n"
+	    : "=&r"(bit), "=r"(x), "=r"(y)
+	    : "0r"(_.h), "r"(_.l)
+	    : "icc0", "icc1", "cc4", "cc5", "cc6"
+	    );
+	return bit;
+
 }
 
-
-/*
- * hweightN: returns the hamming weight (i.e. the number
- * of bits set) of a N-bit word
+/**
+ * ffs - find first bit set
+ * @x: the word to search
+ *
+ * - return 32..1 to indicate bit 31..0 most least significant bit set
+ * - return 0 to indicate no bits set
  */
-
-#define hweight32(x) generic_hweight32(x)
-#define hweight16(x) generic_hweight16(x)
-#define hweight8(x) generic_hweight8(x)
-
-#define ext2_set_bit(nr, addr)		test_and_set_bit  ((nr) ^ 0x18, (addr))
-#define ext2_clear_bit(nr, addr)	test_and_clear_bit((nr) ^ 0x18, (addr))
-
-#define ext2_set_bit_atomic(lock,nr,addr)	ext2_set_bit((nr), addr)
-#define ext2_clear_bit_atomic(lock,nr,addr)	ext2_clear_bit((nr), addr)
-
-static inline int ext2_test_bit(int nr, const volatile void * addr)
+static inline __attribute__((const))
+int ffs(int x)
 {
-	const volatile unsigned char *ADDR = (const unsigned char *) addr;
-	int mask;
-
-	ADDR += nr >> 3;
-	mask = 1 << (nr & 0x07);
-	return ((mask & *ADDR) != 0);
-}
-
-#define ext2_find_first_zero_bit(addr, size) \
-        ext2_find_next_zero_bit((addr), (size), 0)
-
-static inline unsigned long ext2_find_next_zero_bit(const void *addr,
-						    unsigned long size,
-						    unsigned long offset)
-{
-	const unsigned long *p = ((const unsigned long *) addr) + (offset >> 5);
-	unsigned long result = offset & ~31UL;
-	unsigned long tmp;
-
-	if (offset >= size)
-		return size;
-	size -= result;
-	offset &= 31UL;
-	if(offset) {
-		/* We hold the little endian value in tmp, but then the
-		 * shift is illegal. So we could keep a big endian value
-		 * in tmp, like this:
-		 *
-		 * tmp = __swab32(*(p++));
-		 * tmp |= ~0UL >> (32-offset);
-		 *
-		 * but this would decrease preformance, so we change the
-		 * shift:
-		 */
-		tmp = *(p++);
-		tmp |= __swab32(~0UL >> (32-offset));
-		if(size < 32)
-			goto found_first;
-		if(~tmp)
-			goto found_middle;
-		size -= 32;
-		result += 32;
-	}
-	while(size & ~31UL) {
-		if(~(tmp = *(p++)))
-			goto found_middle;
-		result += 32;
-		size -= 32;
-	}
-	if(!size)
-		return result;
-	tmp = *p;
-
-found_first:
-	/* tmp is little endian, so we would have to swab the shift,
-	 * see above. But then we have to swab tmp below for ffz, so
-	 * we might as well do this here.
+	/* Note: (x & -x) gives us a mask that is the least significant
+	 * (rightmost) 1-bit of the value in x.
 	 */
-	return result + ffz(__swab32(tmp) | (~0UL << size));
-found_middle:
-	return result + ffz(__swab32(tmp));
+	return fls(x & -x);
 }
 
-/* Bitmap functions for the minix filesystem.  */
-#define minix_test_and_set_bit(nr,addr)		ext2_set_bit(nr,addr)
-#define minix_set_bit(nr,addr)			ext2_set_bit(nr,addr)
-#define minix_test_and_clear_bit(nr,addr)	ext2_clear_bit(nr,addr)
-#define minix_test_bit(nr,addr)			ext2_test_bit(nr,addr)
-#define minix_find_first_zero_bit(addr,size)	ext2_find_first_zero_bit(addr,size)
+/**
+ * __ffs - find first bit set
+ * @x: the word to search
+ *
+ * - return 31..0 to indicate bit 31..0 most least significant bit set
+ * - if no bits are set in x, the result is undefined
+ */
+static inline __attribute__((const))
+int __ffs(unsigned long x)
+{
+	int bit;
+	asm("scan %1,gr0,%0" : "=r"(bit) : "r"(x & -x));
+	return 31 - bit;
+}
+
+/*
+ * special slimline version of fls() for calculating ilog2_u32()
+ * - note: no protection against n == 0
+ */
+#define ARCH_HAS_ILOG2_U32
+static inline __attribute__((const))
+int __ilog2_u32(u32 n)
+{
+	int bit;
+	asm("scan %1,gr0,%0" : "=r"(bit) : "r"(n));
+	return 31 - bit;
+}
+
+/*
+ * special slimline version of fls64() for calculating ilog2_u64()
+ * - note: no protection against n == 0
+ */
+#define ARCH_HAS_ILOG2_U64
+static inline __attribute__((const))
+int __ilog2_u64(u64 n)
+{
+	union {
+		u64 ll;
+		struct { u32 h, l; };
+	} _;
+	int bit, x, y;
+
+	_.ll = n;
+
+	asm("	subcc		%3,gr0,gr0,icc0		\n"
+	    "	ckeq		icc0,cc4		\n"
+	    "	cscan.p		%3,gr0,%0	,cc4,0	\n"
+	    "   setlos		#63,%1			\n"
+	    "	cscan.p		%4,gr0,%0	,cc4,1	\n"
+	    "   setlos		#31,%2			\n"
+	    "	csub.p		%1,%0,%0	,cc4,0	\n"
+	    "	csub		%2,%0,%0	,cc4,1	\n"
+	    : "=&r"(bit), "=r"(x), "=r"(y)
+	    : "0r"(_.h), "r"(_.l)
+	    : "icc0", "cc4"
+	    );
+	return bit;
+}
+
+#include <asm-generic/bitops/sched.h>
+#include <asm-generic/bitops/hweight.h>
+
+#include <asm-generic/bitops/ext2-non-atomic.h>
+
+#define ext2_set_bit_atomic(lock,nr,addr)	test_and_set_bit  ((nr) ^ 0x18, (addr))
+#define ext2_clear_bit_atomic(lock,nr,addr)	test_and_clear_bit((nr) ^ 0x18, (addr))
+
+#include <asm-generic/bitops/minix-le.h>
 
 #endif /* __KERNEL__ */
 

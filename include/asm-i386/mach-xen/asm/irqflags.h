@@ -10,12 +10,13 @@
 #ifndef _ASM_IRQFLAGS_H
 #define _ASM_IRQFLAGS_H
 
+#ifdef CONFIG_PARAVIRT
+#include <asm/paravirt.h>
+#else
 #ifndef __ASSEMBLY__
 
-#define raw_local_save_flags(flags) \
-		do { (flags) = __raw_local_save_flags(); } while (0)
-
 unsigned long __raw_local_save_flags(void);
+
 void raw_local_irq_restore(unsigned long flags);
 void raw_local_irq_disable(void);
 void raw_local_irq_enable(void);
@@ -32,20 +33,35 @@ void raw_safe_halt(void);
  */
 void halt(void);
 
+/*
+ * For spinlocks, etc:
+ */
+unsigned long __raw_local_irq_save(void);
+
+#else
+#define DISABLE_INTERRUPTS(clobbers)	GET_VCPU_INFO				; \
+					__DISABLE_INTERRUPTS
+#define ENABLE_INTERRUPTS(clobbers)	GET_VCPU_INFO				; \
+					__ENABLE_INTERRUPTS
+#define ENABLE_INTERRUPTS_SYSEXIT	NET_DONE_YET
+#define INTERRUPT_RETURN		iret
+#define GET_CR0_INTO_EAX		NOT_DONE_YET
+#endif /* __ASSEMBLY__ */
+#endif /* CONFIG_PARAVIRT */
+
+#ifndef __ASSEMBLY__
+#define raw_local_save_flags(flags) \
+		do { (flags) = __raw_local_save_flags(); } while (0)
+
+#define raw_local_irq_save(flags) \
+		do { (flags) = __raw_local_irq_save(); } while (0)
+
 static inline int raw_irqs_disabled_flags(unsigned long flags)
 {
 	return flags != 0;
 }
 
 int raw_irqs_disabled(void);
-
-/*
- * For spinlocks, etc:
- */
-unsigned long __raw_local_irq_save(void);
-#define raw_local_irq_save(flags) \
-		do { (flags) = __raw_local_irq_save(); } while (0)
-
 #endif /* __ASSEMBLY__ */
 
 /*

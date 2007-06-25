@@ -23,7 +23,6 @@
  * bootup setup stuff..
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
@@ -71,6 +70,7 @@
 #include <asm/pmac_feature.h>
 #include <asm/time.h>
 #include <asm/of_device.h>
+#include <asm/of_platform.h>
 #include <asm/mmu_context.h>
 #include <asm/iommu.h>
 #include <asm/smu.h>
@@ -86,11 +86,10 @@ int ppc_override_l2cr = 0;
 int ppc_override_l2cr_value;
 int has_l2cache = 0;
 
-int pmac_newworld = 1;
+int pmac_newworld;
 
 static int current_root_goodness = -1;
 
-extern int pmac_newworld;
 extern struct machdep_calls pmac_md;
 
 #define DEFAULT_ROOT_DEVICE Root_SDA1	/* sda1 - slightly silly choice */
@@ -118,7 +117,7 @@ extern struct smp_ops_t core99_smp_ops;
 static void pmac_show_cpuinfo(struct seq_file *m)
 {
 	struct device_node *np;
-	char *pp;
+	const char *pp;
 	int plen;
 	int mbmodel;
 	unsigned int mbflags;
@@ -136,12 +135,12 @@ static void pmac_show_cpuinfo(struct seq_file *m)
 	seq_printf(m, "machine\t\t: ");
 	np = of_find_node_by_path("/");
 	if (np != NULL) {
-		pp = (char *) get_property(np, "model", NULL);
+		pp = get_property(np, "model", NULL);
 		if (pp != NULL)
 			seq_printf(m, "%s\n", pp);
 		else
 			seq_printf(m, "PowerMac\n");
-		pp = (char *) get_property(np, "compatible", &plen);
+		pp = get_property(np, "compatible", &plen);
 		if (pp != NULL) {
 			seq_printf(m, "motherboard\t:");
 			while (plen > 0) {
@@ -165,10 +164,8 @@ static void pmac_show_cpuinfo(struct seq_file *m)
 	if (np == NULL)
 		np = of_find_node_by_type(NULL, "cache");
 	if (np != NULL) {
-		unsigned int *ic = (unsigned int *)
-			get_property(np, "i-cache-size", NULL);
-		unsigned int *dc = (unsigned int *)
-			get_property(np, "d-cache-size", NULL);
+		const unsigned int *ic = get_property(np, "i-cache-size", NULL);
+		const unsigned int *dc = get_property(np, "d-cache-size", NULL);
 		seq_printf(m, "L2 cache\t:");
 		has_l2cache = 1;
 		if (get_property(np, "cache-unified", NULL) != 0 && dc) {
@@ -256,7 +253,7 @@ static void __init l2cr_init(void)
 		if (np == 0)
 			np = find_type_devices("cpu");
 		if (np != 0) {
-			unsigned int *l2cr = (unsigned int *)
+			const unsigned int *l2cr =
 				get_property(np, "l2cr-value", NULL);
 			if (l2cr != 0) {
 				ppc_override_l2cr = 1;
@@ -279,7 +276,7 @@ static void __init l2cr_init(void)
 static void __init pmac_setup_arch(void)
 {
 	struct device_node *cpu, *ic;
-	int *fp;
+	const int *fp;
 	unsigned long pvr;
 
 	pvr = PVR_VER(mfspr(SPRN_PVR));
@@ -289,7 +286,7 @@ static void __init pmac_setup_arch(void)
 	loops_per_jiffy = 50000000 / HZ;
 	cpu = of_find_node_by_type(NULL, "cpu");
 	if (cpu != NULL) {
-		fp = (int *) get_property(cpu, "clock-frequency", NULL);
+		fp = get_property(cpu, "clock-frequency", NULL);
 		if (fp != NULL) {
 			if (pvr >= 0x30 && pvr < 0x80)
 				/* PPC970 etc. */
@@ -308,9 +305,10 @@ static void __init pmac_setup_arch(void)
 	for (ic = NULL; (ic = of_find_all_nodes(ic)) != NULL; )
 		if (get_property(ic, "interrupt-controller", NULL))
 			break;
-	pmac_newworld = (ic != NULL);
-	if (ic)
+	if (ic) {
+		pmac_newworld = 1;
 		of_node_put(ic);
+	}
 
 	/* Lookup PCI hosts */
 	pmac_pci_init();
@@ -350,6 +348,13 @@ static void __init pmac_setup_arch(void)
 		smp_ops = &psurge_smp_ops;
 #endif
 #endif /* CONFIG_SMP */
+
+#ifdef CONFIG_ADB
+	if (strstr(cmd_line, "adb_sync")) {
+		extern int __adb_probe_sync;
+		__adb_probe_sync = 1;
+	}
+#endif /* CONFIG_ADB */
 }
 
 char *bootpath;
@@ -357,7 +362,7 @@ char *bootdevice;
 void *boot_host;
 int boot_target;
 int boot_part;
-extern dev_t boot_dev;
+static dev_t boot_dev;
 
 #ifdef CONFIG_SCSI
 void __init note_scsi_host(struct device_node *node, void *host)
@@ -451,7 +456,7 @@ static int pmac_pm_finish(suspend_state_t state)
 	printk(KERN_DEBUG "%s(%d)\n", __FUNCTION__, state);
 
 	/* Restore userland MMU context */
-	set_context(current->active_mm->context, current->active_mm->pgd);
+	set_context(current->active_mm->context.id, current->active_mm->pgd);
 
 	return 0;
 }
@@ -588,42 +593,11 @@ pmac_halt(void)
 	pmac_power_off();
 }
 
-#ifdef CONFIG_PPC32
-void __init pmac_init(void)
-{
-	/* isa_io_base gets set in pmac_pci_init */
-	isa_mem_base = PMAC_ISA_MEM_BASE;
-	pci_dram_offset = PMAC_PCI_DRAM_OFFSET;
-	ISA_DMA_THRESHOLD = ~0L;
-	DMA_MODE_READ = 1;
-	DMA_MODE_WRITE = 2;
-
-	ppc_md = pmac_md;
-
-#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_IDE_MODULE)
-#ifdef CONFIG_BLK_DEV_IDE_PMAC
-        ppc_ide_md.ide_init_hwif	= pmac_ide_init_hwif_ports;
-        ppc_ide_md.default_io_base	= pmac_ide_get_base;
-#endif /* CONFIG_BLK_DEV_IDE_PMAC */
-#endif /* defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_IDE_MODULE) */
-
-	if (ppc_md.progress) ppc_md.progress("pmac_init(): exit", 0);
-
-}
-#endif
-
 /* 
  * Early initialization.
  */
 static void __init pmac_init_early(void)
 {
-#ifdef CONFIG_PPC64
-	/* Initialize hash table, from now on, we can take hash faults
-	 * and call ioremap
-	 */
-	hpte_init_native();
-#endif
-
 	/* Enable early btext debug if requested */
 	if (strstr(cmd_line, "btextdbg")) {
 		udbg_adb_init_early();
@@ -638,9 +612,6 @@ static void __init pmac_init_early(void)
 	udbg_adb_init(!!strstr(cmd_line, "btextdbg"));
 
 #ifdef CONFIG_PPC64
-	/* Setup interrupt mapping options */
-	ppc64_interrupt_controller = IC_OPEN_PIC;
-
 	iommu_init_early_dart();
 #endif
 }
@@ -657,6 +628,12 @@ static int pmac_check_legacy_ioport(unsigned int baseport)
 static int __init pmac_declare_of_platform_devices(void)
 {
 	struct device_node *np;
+
+	if (machine_is(chrp))
+		return -1;
+
+	if (!machine_is(powermac))
+		return 0;
 
 	np = of_find_node_by_name(NULL, "valkyrie");
 	if (np)
@@ -678,12 +655,15 @@ device_initcall(pmac_declare_of_platform_devices);
 /*
  * Called very early, MMU is off, device-tree isn't unflattened
  */
-static int __init pmac_probe(int platform)
+static int __init pmac_probe(void)
 {
-#ifdef CONFIG_PPC64
-	if (platform != PLATFORM_POWERMAC)
+	unsigned long root = of_get_flat_dt_root();
+
+	if (!of_flat_dt_is_compatible(root, "Power Macintosh") &&
+	    !of_flat_dt_is_compatible(root, "MacRISC"))
 		return 0;
 
+#ifdef CONFIG_PPC64
 	/*
 	 * On U3, the DART (iommu) must be allocated now since it
 	 * has an impact on htab_initialize (due to the large page it
@@ -691,7 +671,24 @@ static int __init pmac_probe(int platform)
 	 * part of the cacheable linar mapping
 	 */
 	alloc_dart_table();
+
+	hpte_init_native();
 #endif
+
+#ifdef CONFIG_PPC32
+	/* isa_io_base gets set in pmac_pci_init */
+	ISA_DMA_THRESHOLD = ~0L;
+	DMA_MODE_READ = 1;
+	DMA_MODE_WRITE = 2;
+
+#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_IDE_MODULE)
+#ifdef CONFIG_BLK_DEV_IDE_PMAC
+        ppc_ide_md.ide_init_hwif	= pmac_ide_init_hwif_ports;
+        ppc_ide_md.default_io_base	= pmac_ide_get_base;
+#endif /* CONFIG_BLK_DEV_IDE_PMAC */
+#endif /* defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_IDE_MODULE) */
+
+#endif /* CONFIG_PPC32 */
 
 #ifdef CONFIG_PMAC_SMU
 	/*
@@ -721,17 +718,15 @@ static int pmac_pci_probe_mode(struct pci_bus *bus)
 }
 #endif
 
-struct machdep_calls __initdata pmac_md = {
-#if defined(CONFIG_HOTPLUG_CPU) && defined(CONFIG_PPC64)
-	.cpu_die		= generic_mach_cpu_die,
-#endif
+define_machine(powermac) {
+	.name			= "PowerMac",
 	.probe			= pmac_probe,
 	.setup_arch		= pmac_setup_arch,
 	.init_early		= pmac_init_early,
 	.show_cpuinfo		= pmac_show_cpuinfo,
 	.init_IRQ		= pmac_pic_init,
 	.get_irq		= NULL,	/* changed later */
-	.pcibios_fixup		= pmac_pcibios_fixup,
+	.pci_irq_fixup		= pmac_pci_irq_fixup,
 	.restart		= pmac_restart,
 	.power_off		= pmac_power_off,
 	.halt			= pmac_halt,
@@ -745,7 +740,7 @@ struct machdep_calls __initdata pmac_md = {
 	.progress		= udbg_progress,
 #ifdef CONFIG_PPC64
 	.pci_probe_mode		= pmac_pci_probe_mode,
-	.idle_loop		= native_idle,
+	.power_save		= power4_idle,
 	.enable_pmcs		= power4_enable_pmcs,
 #ifdef CONFIG_KEXEC
 	.machine_kexec		= default_machine_kexec,
@@ -757,5 +752,8 @@ struct machdep_calls __initdata pmac_md = {
 	.pcibios_enable_device_hook = pmac_pci_enable_device_hook,
 	.pcibios_after_init	= pmac_pcibios_after_init,
 	.phys_mem_access_prot	= pci_phys_mem_access_prot,
+#endif
+#if defined(CONFIG_HOTPLUG_CPU) && defined(CONFIG_PPC64)
+	.cpu_die		= generic_mach_cpu_die,
 #endif
 };

@@ -24,6 +24,7 @@ static int
 match(const struct sk_buff *skb,
       const struct net_device *in,
       const struct net_device *out,
+      const struct xt_match *match,
       const void *matchinfo,
       int offset,
       unsigned int protoff,
@@ -44,53 +45,55 @@ match(const struct sk_buff *skb,
 }
 
 static int check(const char *tablename,
-		 const void *ip,
+		 const void *inf,
+		 const struct xt_match *match,
 		 void *matchinfo,
-		 unsigned int matchsize,
 		 unsigned int hook_mask)
 {
-	if (matchsize != XT_ALIGN(sizeof(struct xt_state_info)))
+	if (nf_ct_l3proto_try_module_get(match->family) < 0) {
+		printk(KERN_WARNING "can't load conntrack support for "
+				    "proto=%d\n", match->family);
 		return 0;
-
+	}
 	return 1;
 }
 
-static struct xt_match state_match = {
-	.name		= "state",
-	.match		= &match,
-	.checkentry	= &check,
-	.me		= THIS_MODULE,
-};
-
-static struct xt_match state6_match = {
-	.name		= "state",
-	.match		= &match,
-	.checkentry	= &check,
-	.me		= THIS_MODULE,
-};
-
-static int __init init(void)
+static void
+destroy(const struct xt_match *match, void *matchinfo)
 {
-	int ret;
-
-	need_conntrack();
-
-	ret = xt_register_match(AF_INET, &state_match);
-	if (ret < 0)
-		return ret;
-
-	ret = xt_register_match(AF_INET6, &state6_match);
-	if (ret < 0)
-		xt_unregister_match(AF_INET,&state_match);
-
-	return ret;
+	nf_ct_l3proto_module_put(match->family);
 }
 
-static void __exit fini(void)
+static struct xt_match xt_state_match[] = {
+	{
+		.name		= "state",
+		.family		= AF_INET,
+		.checkentry	= check,
+		.match		= match,
+		.destroy	= destroy,
+		.matchsize	= sizeof(struct xt_state_info),
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "state",
+		.family		= AF_INET6,
+		.checkentry	= check,
+		.match		= match,
+		.destroy	= destroy,
+		.matchsize	= sizeof(struct xt_state_info),
+		.me		= THIS_MODULE,
+	},
+};
+
+static int __init xt_state_init(void)
 {
-	xt_unregister_match(AF_INET, &state_match);
-	xt_unregister_match(AF_INET6, &state6_match);
+	return xt_register_matches(xt_state_match, ARRAY_SIZE(xt_state_match));
 }
 
-module_init(init);
-module_exit(fini);
+static void __exit xt_state_fini(void)
+{
+	xt_unregister_matches(xt_state_match, ARRAY_SIZE(xt_state_match));
+}
+
+module_init(xt_state_init);
+module_exit(xt_state_fini);

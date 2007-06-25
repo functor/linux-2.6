@@ -107,6 +107,7 @@ static inline unsigned long long pte_val_ma(pte_t x)
 	return (unsigned long long)x.pte_high << 32 | x.pte_low;
 }
 #define HPAGE_SHIFT	21
+#include <asm-generic/pgtable-nopud.h>
 #else
 typedef struct { unsigned long pte_low; } pte_t;
 typedef struct { unsigned long pgd; } pgd_t;
@@ -128,6 +129,7 @@ static inline unsigned long pgd_val(pgd_t x)
 	return ret;
 }
 #define HPAGE_SHIFT	22
+#include <asm-generic/pgtable-nopmd.h>
 #endif
 #define PTE_MASK	PAGE_MASK
 
@@ -178,12 +180,9 @@ extern int page_is_ram(unsigned long pagenr);
 
 #ifdef __ASSEMBLY__
 #define __PAGE_OFFSET		CONFIG_PAGE_OFFSET
-#define __PHYSICAL_START	CONFIG_PHYSICAL_START
 #else
 #define __PAGE_OFFSET		((unsigned long)CONFIG_PAGE_OFFSET)
-#define __PHYSICAL_START	((unsigned long)CONFIG_PHYSICAL_START)
 #endif
-#define __KERNEL_START		(__PAGE_OFFSET + __PHYSICAL_START)
 
 #ifdef CONFIG_XEN_COMPAT_030002
 #undef LOAD_OFFSET
@@ -194,6 +193,9 @@ extern int page_is_ram(unsigned long pagenr);
 #define VMALLOC_RESERVE		((unsigned long)__VMALLOC_RESERVE)
 #define MAXMEM			(__FIXADDR_TOP-__PAGE_OFFSET-__VMALLOC_RESERVE)
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
+/* __pa_symbol should be used for C visible symbols.
+   This seems to be the official gcc blessed way to do such arithmetic. */
+#define __pa_symbol(x)          __pa(RELOC_HIDE((unsigned long)(x),0))
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
 #ifdef CONFIG_FLATMEM
@@ -216,7 +218,9 @@ extern int page_is_ram(unsigned long pagenr);
 #include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
 
+#ifndef CONFIG_COMPAT_VDSO
 #define __HAVE_ARCH_GATE_AREA 1
+#endif
 #endif /* __KERNEL__ */
 
 #endif /* _I386_PAGE_H */

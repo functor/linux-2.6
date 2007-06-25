@@ -62,9 +62,14 @@
 /* shift to put page number into pte */
 #define PTE_RPN_SHIFT	(17)
 
-#define __real_pte(e,p)		((real_pte_t)(e))
-#define __rpte_to_pte(r)	(r)
-#define __rpte_to_hidx(r,index)	(pte_val((r)) >> 12)
+#ifdef STRICT_MM_TYPECHECKS
+#define __real_pte(e,p)		((real_pte_t){(e)})
+#define __rpte_to_pte(r)	((r).pte)
+#else
+#define __real_pte(e,p)		(e)
+#define __rpte_to_pte(r)	(__pte(r))
+#endif
+#define __rpte_to_hidx(r,index)	(pte_val(__rpte_to_pte(r)) >> 12)
 
 #define pte_iterate_hashed_subpages(rpte, psize, va, index, shift)       \
 	do {							         \
@@ -72,6 +77,8 @@
 		shift = mmu_psize_defs[psize].shift;		         \
 
 #define pte_iterate_hashed_end() } while(0)
+
+#define pte_pagesize_index(pte)	MMU_PAGE_4K
 
 /*
  * 4-level page tables related bits
@@ -81,10 +88,11 @@
 #define pgd_bad(pgd)		(pgd_val(pgd) == 0)
 #define pgd_present(pgd)	(pgd_val(pgd) != 0)
 #define pgd_clear(pgdp)		(pgd_val(*(pgdp)) = 0)
-#define pgd_page(pgd)		(pgd_val(pgd) & ~PGD_MASKED_BITS)
+#define pgd_page_vaddr(pgd)	(pgd_val(pgd) & ~PGD_MASKED_BITS)
+#define pgd_page(pgd)		virt_to_page(pgd_page_vaddr(pgd))
 
 #define pud_offset(pgdp, addr)	\
-  (((pud_t *) pgd_page(*(pgdp))) + \
+  (((pud_t *) pgd_page_vaddr(*(pgdp))) + \
     (((addr) >> PUD_SHIFT) & (PTRS_PER_PUD - 1)))
 
 #define pud_ERROR(e) \

@@ -254,7 +254,7 @@ static int fixed_mdio_register_device(int number, int speed, int duplex)
 		goto device_create_fail;
 	}
 
-	phydev->irq = -1;
+	phydev->irq = PHY_IGNORE_INTERRUPT;
 	phydev->dev.bus = &mdio_bus_type;
 
 	if(number)
@@ -288,8 +288,12 @@ static int fixed_mdio_register_device(int number, int speed, int duplex)
 		goto probe_fail;
 	}
 
-	device_bind_driver(&phydev->dev);
+	err = device_bind_driver(&phydev->dev);
+
 	up_write(&phydev->dev.bus->subsys.rwsem);
+
+	if (err)
+		goto probe_fail;
 
 	return 0;
 
@@ -312,8 +316,10 @@ MODULE_LICENSE("GPL");
 
 static int __init fixed_init(void)
 {
+#if 0
 	int ret;
 	int duplex = 0;
+#endif
 
 	/* register on the bus... Not expected to be matched with anything there... */
 	phy_driver_register(&fixed_mdio_driver);
@@ -334,14 +340,16 @@ static int __init fixed_init(void)
 	*/
 
 #ifdef CONFIG_FIXED_MII_DUPLEX
+#if 0
 	duplex = 1;
+#endif
 #endif
 
 #ifdef CONFIG_FIXED_MII_100_FDX
 	fixed_mdio_register_device(0, 100, 1);
 #endif
 
-#ifdef CONFIX_FIXED_MII_10_FDX
+#ifdef CONFIG_FIXED_MII_10_FDX
 	fixed_mdio_register_device(0, 10, 1);
 #endif
 	return 0;

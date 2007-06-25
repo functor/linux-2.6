@@ -5,12 +5,12 @@
  * FIXME: LOCKING !!!
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 
 #include <asm/semaphore.h>
 #include <asm/prom.h>
@@ -545,7 +545,8 @@ struct pmf_device {
 };
 
 static LIST_HEAD(pmf_devices);
-static spinlock_t pmf_lock = SPIN_LOCK_UNLOCKED;
+static DEFINE_SPINLOCK(pmf_lock);
+static DEFINE_MUTEX(pmf_irq_mutex);
 
 static void pmf_release_device(struct kref *kref)
 {
@@ -812,14 +813,15 @@ struct pmf_function *__pmf_find_function(struct device_node *target,
 	struct pmf_device *dev;
 	struct pmf_function *func, *result = NULL;
 	char fname[64];
-	u32 *prop, ph;
+	const u32 *prop;
+	u32 ph;
 
 	/*
 	 * Look for a "platform-*" function reference. If we can't find
 	 * one, then we fallback to a direct call attempt
 	 */
 	snprintf(fname, 63, "platform-%s", name);
-	prop = (u32 *)get_property(target, fname, NULL);
+	prop = get_property(target, fname, NULL);
 	if (prop == NULL)
 		goto find_it;
 	ph = *prop;
@@ -864,15 +866,24 @@ int pmf_register_irq_client(struct device_node *target,
 
 	spin_lock_irqsave(&pmf_lock, flags);
 	func = __pmf_find_function(target, name, PMF_FLAGS_INT_GEN);
-	if (func == NULL) {
-		spin_unlock_irqrestore(&pmf_lock, flags);
+	if (func)
+		func = pmf_get_function(func);
+	spin_unlock_irqrestore(&pmf_lock, flags);
+	if (func == NULL)
 		return -ENODEV;
-	}
+
+	/* guard against manipulations of list */
+	mutex_lock(&pmf_irq_mutex);
 	if (list_empty(&func->irq_clients))
 		func->dev->handlers->irq_enable(func);
+
+	/* guard against pmf_do_irq while changing list */
+	spin_lock_irqsave(&pmf_lock, flags);
 	list_add(&client->link, &func->irq_clients);
-	client->func = func;
 	spin_unlock_irqrestore(&pmf_lock, flags);
+
+	client->func = func;
+	mutex_unlock(&pmf_irq_mutex);
 
 	return 0;
 }
@@ -885,12 +896,19 @@ void pmf_unregister_irq_client(struct pmf_irq_client *client)
 
 	BUG_ON(func == NULL);
 
-	spin_lock_irqsave(&pmf_lock, flags);
+	/* guard against manipulations of list */
+	mutex_lock(&pmf_irq_mutex);
 	client->func = NULL;
+
+	/* guard against pmf_do_irq while changing list */
+	spin_lock_irqsave(&pmf_lock, flags);
 	list_del(&client->link);
+	spin_unlock_irqrestore(&pmf_lock, flags);
+
 	if (list_empty(&func->irq_clients))
 		func->dev->handlers->irq_disable(func);
-	spin_unlock_irqrestore(&pmf_lock, flags);
+	mutex_unlock(&pmf_irq_mutex);
+	pmf_put_function(func);
 }
 EXPORT_SYMBOL_GPL(pmf_unregister_irq_client);
 

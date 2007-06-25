@@ -96,6 +96,9 @@ __asm__ __volatile__ ("movw %%dx,%1\n\t" \
 #define savesegment(seg, value) \
 	asm volatile("mov %%" #seg ",%0":"=rm" (value))
 
+#ifdef CONFIG_PARAVIRT
+#include <asm/paravirt.h>
+#else
 #define read_cr0() ({ \
 	unsigned int __dummy; \
 	__asm__ __volatile__( \
@@ -143,19 +146,20 @@ __asm__ __volatile__ ("movw %%dx,%1\n\t" \
 		: "=r" (__dummy): "0" (0));	      \
 	__dummy;				      \
 })
-
 #define write_cr4(x) \
 	__asm__ __volatile__("movl %0,%%cr4": :"r" (x))
-/*
- * Clear and set 'TS' bit respectively
- */
-#define clts() (HYPERVISOR_fpu_taskswitch(0))
-#define stts() (HYPERVISOR_fpu_taskswitch(1))
-
-#endif	/* __KERNEL__ */
 
 #define wbinvd() \
 	__asm__ __volatile__ ("wbinvd": : :"memory")
+
+/* Clear the 'TS' bit */
+#define clts() (HYPERVISOR_fpu_taskswitch(0))
+#endif/* CONFIG_PARAVIRT */
+
+/* Set the 'TS' bit */
+#define stts() (HYPERVISOR_fpu_taskswitch(1))
+
+#endif	/* __KERNEL__ */
 
 static inline unsigned long get_limit(unsigned long segment)
 {
@@ -274,6 +278,9 @@ static inline unsigned long __xchg(unsigned long x, volatile void * ptr, int siz
 #define cmpxchg(ptr,o,n)\
 	((__typeof__(*(ptr)))__cmpxchg((ptr),(unsigned long)(o),\
 					(unsigned long)(n),sizeof(*(ptr))))
+#define sync_cmpxchg(ptr,o,n)\
+	((__typeof__(*(ptr)))__sync_cmpxchg((ptr),(unsigned long)(o),\
+					(unsigned long)(n),sizeof(*(ptr))))
 #endif
 
 static inline unsigned long __cmpxchg(volatile void *ptr, unsigned long old,
@@ -295,6 +302,39 @@ static inline unsigned long __cmpxchg(volatile void *ptr, unsigned long old,
 		return prev;
 	case 4:
 		__asm__ __volatile__(LOCK_PREFIX "cmpxchgl %1,%2"
+				     : "=a"(prev)
+				     : "r"(new), "m"(*__xg(ptr)), "0"(old)
+				     : "memory");
+		return prev;
+	}
+	return old;
+}
+
+/*
+ * Always use locked operations when touching memory shared with a
+ * hypervisor, since the system may be SMP even if the guest kernel
+ * isn't.
+ */
+static inline unsigned long __sync_cmpxchg(volatile void *ptr,
+					    unsigned long old,
+					    unsigned long new, int size)
+{
+	unsigned long prev;
+	switch (size) {
+	case 1:
+		__asm__ __volatile__("lock; cmpxchgb %b1,%2"
+				     : "=a"(prev)
+				     : "q"(new), "m"(*__xg(ptr)), "0"(old)
+				     : "memory");
+		return prev;
+	case 2:
+		__asm__ __volatile__("lock; cmpxchgw %w1,%2"
+				     : "=a"(prev)
+				     : "r"(new), "m"(*__xg(ptr)), "0"(old)
+				     : "memory");
+		return prev;
+	case 4:
+		__asm__ __volatile__("lock; cmpxchgl %1,%2"
 				     : "=a"(prev)
 				     : "r"(new), "m"(*__xg(ptr)), "0"(old)
 				     : "memory");

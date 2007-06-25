@@ -56,60 +56,9 @@ struct ip6t_ip6 {
 	u_int8_t invflags;
 };
 
-/* FIXME: If alignment in kernel different from userspace? --RR */
-struct ip6t_entry_match
-{
-	union {
-		struct {
-			u_int16_t match_size;
-
-			/* Used by userspace */
-			char name[IP6T_FUNCTION_MAXNAMELEN-1];
-			u_int8_t revision;
-		} user;
-		struct {
-			u_int16_t match_size;
-
-			/* Used inside the kernel */
-			struct ip6t_match *match;
-		} kernel;
-
-		/* Total length */
-		u_int16_t match_size;
-	} u;
-
-	unsigned char data[0];
-};
-
-struct ip6t_entry_target
-{
-	union {
-		struct {
-			u_int16_t target_size;
-
-			/* Used by userspace */
-			char name[IP6T_FUNCTION_MAXNAMELEN-1];
-			u_int8_t revision;
-		} user;
-		struct {
-			u_int16_t target_size;
-
-			/* Used inside the kernel */
-			struct ip6t_target *target;
-		} kernel;
-
-		/* Total length */
-		u_int16_t target_size;
-	} u;
-
-	unsigned char data[0];
-};
-
-struct ip6t_standard_target
-{
-	struct ip6t_entry_target target;
-	int verdict;
-};
+#define ip6t_entry_match xt_entry_match
+#define ip6t_entry_target xt_entry_target
+#define ip6t_standard_target xt_standard_target
 
 #define ip6t_counters	xt_counters
 
@@ -158,18 +107,21 @@ struct ip6t_entry
 /*
  * New IP firewall options for [gs]etsockopt at the RAW IP level.
  * Unlike BSD Linux inherits IP options so you don't have to use
- * a raw socket for this. Instead we check rights in the calls. */
-#define IP6T_BASE_CTL			XT_BASE_CTL
+ * a raw socket for this. Instead we check rights in the calls.
+ *
+ * ATTENTION: check linux/in6.h before adding new number here.
+ */
+#define IP6T_BASE_CTL			64
 
-#define IP6T_SO_SET_REPLACE		XT_SO_SET_REPLACE
-#define IP6T_SO_SET_ADD_COUNTERS	XT_SO_SET_ADD_COUNTERS
-#define IP6T_SO_SET_MAX			XT_SO_SET_MAX
+#define IP6T_SO_SET_REPLACE		(IP6T_BASE_CTL)
+#define IP6T_SO_SET_ADD_COUNTERS	(IP6T_BASE_CTL + 1)
+#define IP6T_SO_SET_MAX			IP6T_SO_SET_ADD_COUNTERS
 
-#define IP6T_SO_GET_INFO		XT_SO_GET_INFO
-#define IP6T_SO_GET_ENTRIES		XT_SO_GET_ENTRIES
-#define	IP6T_SO_GET_REVISION_MATCH	XT_SO_GET_REVISION_MATCH
-#define	IP6T_SO_GET_REVISION_TARGET	XT_SO_GET_REVISION_TARGET
-#define IP6T_SO_GET_MAX			XT_SO_GET_REVISION_TARGET
+#define IP6T_SO_GET_INFO		(IP6T_BASE_CTL)
+#define IP6T_SO_GET_ENTRIES		(IP6T_BASE_CTL + 1)
+#define IP6T_SO_GET_REVISION_MATCH	(IP6T_BASE_CTL + 4)
+#define IP6T_SO_GET_REVISION_TARGET	(IP6T_BASE_CTL + 5)
+#define IP6T_SO_GET_MAX			IP6T_SO_GET_REVISION_TARGET
 
 /* CONTINUE verdict for targets */
 #define IP6T_CONTINUE XT_CONTINUE
@@ -334,11 +286,15 @@ ip6t_get_target(struct ip6t_entry *e)
 #include <linux/init.h>
 extern void ip6t_init(void) __init;
 
-#define ip6t_register_target(tgt) xt_register_target(AF_INET6, tgt)
-#define ip6t_unregister_target(tgt) xt_unregister_target(AF_INET6, tgt)
+#define ip6t_register_target(tgt) 		\
+({	(tgt)->family = AF_INET6;		\
+ 	xt_register_target(tgt); })
+#define ip6t_unregister_target(tgt) xt_unregister_target(tgt)
 
-#define ip6t_register_match(match) xt_register_match(AF_INET6, match)
-#define ip6t_unregister_match(match) xt_unregister_match(AF_INET6, match)
+#define ip6t_register_match(match)		\
+({	(match)->family = AF_INET6;		\
+	xt_register_match(match); })
+#define ip6t_unregister_match(match) xt_unregister_match(match)
 
 extern int ip6t_register_table(struct ip6t_table *table,
 			       const struct ip6t_replace *repl);
@@ -347,8 +303,7 @@ extern unsigned int ip6t_do_table(struct sk_buff **pskb,
 				  unsigned int hook,
 				  const struct net_device *in,
 				  const struct net_device *out,
-				  struct ip6t_table *table,
-				  void *userdata);
+				  struct ip6t_table *table);
 
 /* Check for an extension */
 extern int ip6t_ext_hdr(u8 nexthdr);

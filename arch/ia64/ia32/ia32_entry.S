@@ -236,7 +236,7 @@ ia32_syscall_table:
 	data8 sys_setuid	/* 16-bit version */
 	data8 sys_getuid	/* 16-bit version */
 	data8 compat_sys_stime    /* 25 */
-	data8 sys32_ptrace
+	data8 compat_sys_ptrace
 	data8 sys32_alarm
 	data8 sys_ni_syscall
 	data8 sys32_pause
@@ -334,7 +334,7 @@ ia32_syscall_table:
 	data8 sys_setdomainname
 	data8 sys32_newuname
 	data8 sys32_modify_ldt
-	data8 sys_ni_syscall	/* adjtimex */
+	data8 compat_sys_adjtimex
 	data8 sys32_mprotect	  /* 125 */
 	data8 compat_sys_sigprocmask
 	data8 sys_ni_syscall	/* create_module */

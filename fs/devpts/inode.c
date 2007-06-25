@@ -18,13 +18,16 @@
 #include <linux/mount.h>
 #include <linux/tty.h>
 #include <linux/devpts_fs.h>
+#include <linux/parser.h>
+#include <linux/vs_base.h>
 
 
 static int devpts_permission(struct inode *inode, int mask, struct nameidata *nd)
 {
 	int ret = -EACCES;
 
-	if (vx_check(inode->i_xid, VX_IDENT))
+	/* devpts is xid tagged */
+	if (vx_check((xid_t)inode->i_tag, VS_WATCH_P|VS_IDENT))
 		ret = generic_permission(inode, mask, NULL);
 	return ret;
 }
@@ -44,46 +47,68 @@ static struct {
 	umode_t mode;
 } config = {.mode = 0600};
 
+enum {
+	Opt_uid, Opt_gid, Opt_mode,
+	Opt_err
+};
+
+static match_table_t tokens = {
+	{Opt_uid, "uid=%u"},
+	{Opt_gid, "gid=%u"},
+	{Opt_mode, "mode=%o"},
+	{Opt_err, NULL}
+};
+
 static int devpts_remount(struct super_block *sb, int *flags, char *data)
 {
-	int setuid = 0;
-	int setgid = 0;
-	uid_t uid = 0;
-	gid_t gid = 0;
-	umode_t mode = 0600;
-	char *this_char;
+	char *p;
 
-	this_char = NULL;
-	while ((this_char = strsep(&data, ",")) != NULL) {
-		int n;
-		char dummy;
-		if (!*this_char)
+	config.setuid  = 0;
+	config.setgid  = 0;
+	config.uid     = 0;
+	config.gid     = 0;
+	config.mode    = 0600;
+
+	while ((p = strsep(&data, ",")) != NULL) {
+		substring_t args[MAX_OPT_ARGS];
+		int token;
+		int option;
+
+		if (!*p)
 			continue;
-		if (sscanf(this_char, "uid=%i%c", &n, &dummy) == 1) {
-			setuid = 1;
-			uid = n;
-		} else if (sscanf(this_char, "gid=%i%c", &n, &dummy) == 1) {
-			setgid = 1;
-			gid = n;
-		} else if (sscanf(this_char, "mode=%o%c", &n, &dummy) == 1)
-			mode = n & ~S_IFMT;
-		else {
-			printk("devpts: called with bogus options\n");
+
+		token = match_token(p, tokens, args);
+		switch (token) {
+		case Opt_uid:
+			if (match_int(&args[0], &option))
+				return -EINVAL;
+			config.uid = option;
+			config.setuid = 1;
+			break;
+		case Opt_gid:
+			if (match_int(&args[0], &option))
+				return -EINVAL;
+			config.gid = option;
+			config.setgid = 1;
+			break;
+		case Opt_mode:
+			if (match_octal(&args[0], &option))
+				return -EINVAL;
+			config.mode = option & ~S_IFMT;
+			break;
+		default:
+			printk(KERN_ERR "devpts: called with bogus options\n");
 			return -EINVAL;
 		}
 	}
-	config.setuid  = setuid;
-	config.setgid  = setgid;
-	config.uid     = uid;
-	config.gid     = gid;
-	config.mode    = mode;
 
 	return 0;
 }
 
 static int devpts_filter(struct dentry *de)
 {
-	return vx_check(de->d_inode->i_xid, VX_IDENT);
+	/* devpts is xid tagged */
+	return vx_check((xid_t)de->d_inode->i_tag, VS_WATCH_P|VS_IDENT);
 }
 
 static int devpts_readdir(struct file * filp, void * dirent, filldir_t filldir)
@@ -121,13 +146,13 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_ino = 1;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	inode->i_blocks = 0;
-	inode->i_blksize = 1024;
 	inode->i_uid = inode->i_gid = 0;
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR;
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &devpts_dir_operations;
 	inode->i_nlink = 2;
-	inode->i_xid = vx_current_xid();
+	/* devpts is xid tagged */
+	inode->i_tag = (tag_t)vx_current_xid();
 
 	devpts_root = s->s_root = d_alloc_root(inode);
 	if (s->s_root)
@@ -139,10 +164,10 @@ fail:
 	return -ENOMEM;
 }
 
-static struct super_block *devpts_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int devpts_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
-	return get_sb_single(fs_type, flags, data, devpts_fill_super);
+	return get_sb_single(fs_type, flags, data, devpts_fill_super, mnt);
 }
 
 static struct file_system_type devpts_fs_type = {
@@ -181,14 +206,14 @@ int devpts_pty_new(struct tty_struct *tty)
 		return -ENOMEM;
 
 	inode->i_ino = number+2;
-	inode->i_blksize = 1024;
 	inode->i_uid = config.setuid ? config.uid : current->fsuid;
 	inode->i_gid = config.setgid ? config.gid : current->fsgid;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	init_special_inode(inode, S_IFCHR|config.mode, device);
-	inode->i_xid = vx_current_xid();
+	/* devpts is xid tagged */
+	inode->i_tag = (tag_t)vx_current_xid();
 	inode->i_op = &devpts_file_inode_operations;
-	inode->u.generic_ip = tty;
+	inode->i_private = tty;
 
 	dentry = get_node(number);
 	if (!IS_ERR(dentry) && !dentry->d_inode)
@@ -207,7 +232,7 @@ struct tty_struct *devpts_get_tty(int number)
 	tty = NULL;
 	if (!IS_ERR(dentry)) {
 		if (dentry->d_inode)
-			tty = dentry->d_inode->u.generic_ip;
+			tty = dentry->d_inode->i_private;
 		dput(dentry);
 	}
 

@@ -61,7 +61,7 @@ asmlinkage long sys_time(time_t __user * tloc)
 	time_t i;
 	struct timeval tv;
 
-	do_gettimeofday(&tv);
+	vx_gettimeofday(&tv);
 	i = tv.tv_sec;
 
 	if (tloc) {
@@ -92,7 +92,7 @@ asmlinkage long sys_stime(time_t __user *tptr)
 	if (err)
 		return err;
 
-	do_settimeofday(&tv);
+	vx_settimeofday(&tv);
 	return 0;
 }
 
@@ -102,7 +102,7 @@ asmlinkage long sys_gettimeofday(struct timeval __user *tv, struct timezone __us
 {
 	if (likely(tv != NULL)) {
 		struct timeval ktv;
-		do_gettimeofday(&ktv);
+		vx_gettimeofday(&ktv);
 		if (copy_to_user(tv, &ktv, sizeof(ktv)))
 			return -EFAULT;
 	}
@@ -176,7 +176,7 @@ int do_sys_settimeofday(struct timespec *tv, struct timezone *tz)
 		/* SMP safe, again the code in arch/foo/time.c should
 		 * globally block out interrupts when it runs.
 		 */
-		return do_settimeofday(tv);
+		return vx_settimeofday(tv);
 	}
 	return 0;
 }
@@ -200,206 +200,6 @@ asmlinkage long sys_settimeofday(struct timeval __user *tv,
 	}
 
 	return do_sys_settimeofday(tv ? &new_ts : NULL, tz ? &new_tz : NULL);
-}
-
-long pps_offset;		/* pps time offset (us) */
-long pps_jitter = MAXTIME;	/* time dispersion (jitter) (us) */
-
-long pps_freq;			/* frequency offset (scaled ppm) */
-long pps_stabil = MAXFREQ;	/* frequency dispersion (scaled ppm) */
-
-long pps_valid = PPS_VALID;	/* pps signal watchdog counter */
-
-int pps_shift = PPS_SHIFT;	/* interval duration (s) (shift) */
-
-long pps_jitcnt;		/* jitter limit exceeded */
-long pps_calcnt;		/* calibration intervals */
-long pps_errcnt;		/* calibration errors */
-long pps_stbcnt;		/* stability limit exceeded */
-
-/* hook for a loadable hardpps kernel module */
-void (*hardpps_ptr)(struct timeval *);
-
-/* we call this to notify the arch when the clock is being
- * controlled.  If no such arch routine, do nothing.
- */
-void __attribute__ ((weak)) notify_arch_cmos_timer(void)
-{
-	return;
-}
-
-/* adjtimex mainly allows reading (and writing, if superuser) of
- * kernel time-keeping variables. used by xntpd.
- */
-int do_adjtimex(struct timex *txc)
-{
-        long ltemp, mtemp, save_adjust;
-	int result;
-
-	/* In order to modify anything, you gotta be super-user! */
-	if (txc->modes && !capable(CAP_SYS_TIME))
-		return -EPERM;
-		
-	/* Now we validate the data before disabling interrupts */
-
-	if ((txc->modes & ADJ_OFFSET_SINGLESHOT) == ADJ_OFFSET_SINGLESHOT)
-	  /* singleshot must not be used with any other mode bits */
-		if (txc->modes != ADJ_OFFSET_SINGLESHOT)
-			return -EINVAL;
-
-	if (txc->modes != ADJ_OFFSET_SINGLESHOT && (txc->modes & ADJ_OFFSET))
-	  /* adjustment Offset limited to +- .512 seconds */
-		if (txc->offset <= - MAXPHASE || txc->offset >= MAXPHASE )
-			return -EINVAL;	
-
-	/* if the quartz is off by more than 10% something is VERY wrong ! */
-	if (txc->modes & ADJ_TICK)
-		if (txc->tick <  900000/USER_HZ ||
-		    txc->tick > 1100000/USER_HZ)
-			return -EINVAL;
-
-	write_seqlock_irq(&xtime_lock);
-	result = time_state;	/* mostly `TIME_OK' */
-
-	/* Save for later - semantics of adjtime is to return old value */
-	save_adjust = time_next_adjust ? time_next_adjust : time_adjust;
-
-#if 0	/* STA_CLOCKERR is never set yet */
-	time_status &= ~STA_CLOCKERR;		/* reset STA_CLOCKERR */
-#endif
-	/* If there are input parameters, then process them */
-	if (txc->modes)
-	{
-	    if (txc->modes & ADJ_STATUS)	/* only set allowed bits */
-		time_status =  (txc->status & ~STA_RONLY) |
-			      (time_status & STA_RONLY);
-
-	    if (txc->modes & ADJ_FREQUENCY) {	/* p. 22 */
-		if (txc->freq > MAXFREQ || txc->freq < -MAXFREQ) {
-		    result = -EINVAL;
-		    goto leave;
-		}
-		time_freq = txc->freq - pps_freq;
-	    }
-
-	    if (txc->modes & ADJ_MAXERROR) {
-		if (txc->maxerror < 0 || txc->maxerror >= NTP_PHASE_LIMIT) {
-		    result = -EINVAL;
-		    goto leave;
-		}
-		time_maxerror = txc->maxerror;
-	    }
-
-	    if (txc->modes & ADJ_ESTERROR) {
-		if (txc->esterror < 0 || txc->esterror >= NTP_PHASE_LIMIT) {
-		    result = -EINVAL;
-		    goto leave;
-		}
-		time_esterror = txc->esterror;
-	    }
-
-	    if (txc->modes & ADJ_TIMECONST) {	/* p. 24 */
-		if (txc->constant < 0) {	/* NTP v4 uses values > 6 */
-		    result = -EINVAL;
-		    goto leave;
-		}
-		time_constant = txc->constant;
-	    }
-
-	    if (txc->modes & ADJ_OFFSET) {	/* values checked earlier */
-		if (txc->modes == ADJ_OFFSET_SINGLESHOT) {
-		    /* adjtime() is independent from ntp_adjtime() */
-		    if ((time_next_adjust = txc->offset) == 0)
-			 time_adjust = 0;
-		}
-		else if ( time_status & (STA_PLL | STA_PPSTIME) ) {
-		    ltemp = (time_status & (STA_PPSTIME | STA_PPSSIGNAL)) ==
-		            (STA_PPSTIME | STA_PPSSIGNAL) ?
-		            pps_offset : txc->offset;
-
-		    /*
-		     * Scale the phase adjustment and
-		     * clamp to the operating range.
-		     */
-		    if (ltemp > MAXPHASE)
-		        time_offset = MAXPHASE << SHIFT_UPDATE;
-		    else if (ltemp < -MAXPHASE)
-			time_offset = -(MAXPHASE << SHIFT_UPDATE);
-		    else
-		        time_offset = ltemp << SHIFT_UPDATE;
-
-		    /*
-		     * Select whether the frequency is to be controlled
-		     * and in which mode (PLL or FLL). Clamp to the operating
-		     * range. Ugly multiply/divide should be replaced someday.
-		     */
-
-		    if (time_status & STA_FREQHOLD || time_reftime == 0)
-		        time_reftime = xtime.tv_sec;
-		    mtemp = xtime.tv_sec - time_reftime;
-		    time_reftime = xtime.tv_sec;
-		    if (time_status & STA_FLL) {
-		        if (mtemp >= MINSEC) {
-			    ltemp = (time_offset / mtemp) << (SHIFT_USEC -
-							      SHIFT_UPDATE);
-			    time_freq += shift_right(ltemp, SHIFT_KH);
-			} else /* calibration interval too short (p. 12) */
-				result = TIME_ERROR;
-		    } else {	/* PLL mode */
-		        if (mtemp < MAXSEC) {
-			    ltemp *= mtemp;
-			    time_freq += shift_right(ltemp,(time_constant +
-						       time_constant +
-						       SHIFT_KF - SHIFT_USEC));
-			} else /* calibration interval too long (p. 12) */
-				result = TIME_ERROR;
-		    }
-		    time_freq = min(time_freq, time_tolerance);
-		    time_freq = max(time_freq, -time_tolerance);
-		} /* STA_PLL || STA_PPSTIME */
-	    } /* txc->modes & ADJ_OFFSET */
-	    if (txc->modes & ADJ_TICK) {
-		tick_usec = txc->tick;
-		tick_nsec = TICK_USEC_TO_NSEC(tick_usec);
-	    }
-	} /* txc->modes */
-leave:	if ((time_status & (STA_UNSYNC|STA_CLOCKERR)) != 0
-	    || ((time_status & (STA_PPSFREQ|STA_PPSTIME)) != 0
-		&& (time_status & STA_PPSSIGNAL) == 0)
-	    /* p. 24, (b) */
-	    || ((time_status & (STA_PPSTIME|STA_PPSJITTER))
-		== (STA_PPSTIME|STA_PPSJITTER))
-	    /* p. 24, (c) */
-	    || ((time_status & STA_PPSFREQ) != 0
-		&& (time_status & (STA_PPSWANDER|STA_PPSERROR)) != 0))
-	    /* p. 24, (d) */
-		result = TIME_ERROR;
-	
-	if ((txc->modes & ADJ_OFFSET_SINGLESHOT) == ADJ_OFFSET_SINGLESHOT)
-	    txc->offset	   = save_adjust;
-	else {
-	    txc->offset = shift_right(time_offset, SHIFT_UPDATE);
-	}
-	txc->freq	   = time_freq + pps_freq;
-	txc->maxerror	   = time_maxerror;
-	txc->esterror	   = time_esterror;
-	txc->status	   = time_status;
-	txc->constant	   = time_constant;
-	txc->precision	   = time_precision;
-	txc->tolerance	   = time_tolerance;
-	txc->tick	   = tick_usec;
-	txc->ppsfreq	   = pps_freq;
-	txc->jitter	   = pps_jitter >> PPS_AVG;
-	txc->shift	   = pps_shift;
-	txc->stabil	   = pps_stabil;
-	txc->jitcnt	   = pps_jitcnt;
-	txc->calcnt	   = pps_calcnt;
-	txc->errcnt	   = pps_errcnt;
-	txc->stbcnt	   = pps_stbcnt;
-	write_sequnlock_irq(&xtime_lock);
-	do_gettimeofday(&txc->time);
-	notify_arch_cmos_timer();
-	return(result);
 }
 
 asmlinkage long sys_adjtimex(struct timex __user *txc_p)
@@ -437,7 +237,7 @@ EXPORT_SYMBOL(current_kernel_time);
  * current_fs_time - Return FS time
  * @sb: Superblock.
  *
- * Return the current time truncated to the time granuality supported by
+ * Return the current time truncated to the time granularity supported by
  * the fs.
  */
 struct timespec current_fs_time(struct super_block *sb)
@@ -448,11 +248,11 @@ struct timespec current_fs_time(struct super_block *sb)
 EXPORT_SYMBOL(current_fs_time);
 
 /**
- * timespec_trunc - Truncate timespec to a granuality
+ * timespec_trunc - Truncate timespec to a granularity
  * @t: Timespec
- * @gran: Granuality in ns.
+ * @gran: Granularity in ns.
  *
- * Truncate a timespec to a granuality. gran must be smaller than a second.
+ * Truncate a timespec to a granularity. gran must be smaller than a second.
  * Always rounds down.
  *
  * This function should be only used for timestamps returned by
@@ -550,6 +350,7 @@ EXPORT_SYMBOL(do_gettimeofday);
 
 
 #else
+#ifndef CONFIG_GENERIC_TIME
 /*
  * Simulate gettimeofday using do_gettimeofday which only allows a timeval
  * and therefore only yields usec accuracy
@@ -558,11 +359,12 @@ void getnstimeofday(struct timespec *tv)
 {
 	struct timeval x;
 
-	do_gettimeofday(&x);
+	vx_gettimeofday(&x);
 	tv->tv_sec = x.tv_sec;
 	tv->tv_nsec = x.tv_usec * NSEC_PER_USEC;
 }
 EXPORT_SYMBOL_GPL(getnstimeofday);
+#endif
 #endif
 
 /* Converts Gregorian date to seconds since 1970-01-01 00:00:00.
@@ -637,7 +439,7 @@ void set_normalized_timespec(struct timespec *ts, time_t sec, long nsec)
  *
  * Returns the timespec representation of the nsec parameter.
  */
-struct timespec ns_to_timespec(const nsec_t nsec)
+struct timespec ns_to_timespec(const s64 nsec)
 {
 	struct timespec ts;
 
@@ -657,7 +459,7 @@ struct timespec ns_to_timespec(const nsec_t nsec)
  *
  * Returns the timeval representation of the nsec parameter.
  */
-struct timeval ns_to_timeval(const nsec_t nsec)
+struct timeval ns_to_timeval(const s64 nsec)
 {
 	struct timespec ts = ns_to_timespec(nsec);
 	struct timeval tv;

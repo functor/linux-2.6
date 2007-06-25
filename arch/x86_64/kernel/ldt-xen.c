@@ -64,6 +64,7 @@ static int alloc_ldt(mm_context_t *pc, unsigned mincount, int reload)
 		cpumask_t mask;
 
 		preempt_disable();
+		mask = cpumask_of_cpu(smp_processor_id());
 #endif
 		make_pages_readonly(
 			pc->ldt,
@@ -71,7 +72,6 @@ static int alloc_ldt(mm_context_t *pc, unsigned mincount, int reload)
 			XENFEAT_writable_descriptor_tables);
 		load_LDT(pc);
 #ifdef CONFIG_SMP
-		mask = cpumask_of_cpu(smp_processor_id());
 		if (!cpus_equal(current->mm->cpu_vm_mask, mask))
 			smp_call_function(flush_ldt, NULL, 1, 1);
 		preempt_enable();
@@ -114,6 +114,7 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 
 	memset(&mm->context, 0, sizeof(mm->context));
 	init_MUTEX(&mm->context.sem);
+	mm->context.size = 0;
 	old_mm = current->mm;
 	if (old_mm && old_mm->context.size > 0) {
 		down(&old_mm->context.sem);

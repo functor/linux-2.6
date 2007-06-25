@@ -2,7 +2,6 @@
 #ifndef _PPC_MACHDEP_H
 #define _PPC_MACHDEP_H
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kexec.h>
 
@@ -19,6 +18,18 @@ struct pci_dev;
 struct seq_file;
 struct file;
 
+/*
+ * This is for compatibility with ARCH=powerpc.
+ */
+#define machine_is(x)	__MACHINE_IS_##x
+#define __MACHINE_IS_powermac	0
+#define __MACHINE_IS_chrp	0
+#ifdef CONFIG_PPC_PREP
+#define __MACHINE_IS_prep	1
+#else
+#define __MACHINE_IS_prep	0
+#endif
+
 /* We export this macro for external modules like Alsa to know if
  * ppc_md.feature_call is implemented or not
  */
@@ -32,7 +43,7 @@ struct machdep_calls {
 	/* Optional, may be NULL. */
 	unsigned int	(*irq_canonicalize)(unsigned int irq);
 	void		(*init_IRQ)(void);
-	int		(*get_irq)(struct pt_regs *);
+	int		(*get_irq)(void);
 	
 	/* A general init function, called by ppc_init in init/main.c.
 	   May be NULL. DEPRECATED ! */
@@ -44,7 +55,7 @@ struct machdep_calls {
 	void		(*power_off)(void);
 	void		(*halt)(void);
 
-	void		(*idle)(void);
+	void		(*idle_loop)(void);
 	void		(*power_save)(void);
 
 	long		(*time_init)(void); /* Optional, may be NULL */
@@ -103,9 +114,6 @@ struct machdep_calls {
 						unsigned long pfn,
 						unsigned long size,
 						pgprot_t vma_prot);
-
-	/* this is for modules, since _machine can be a define -- Cort */
-	int ppc_machine;
 
 	/* Motherboard/chipset features. This is a kind of general purpose
 	 * hook used to control some machine specific features (like reset

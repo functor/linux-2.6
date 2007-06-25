@@ -27,32 +27,42 @@
 static int uninorth_rev;
 static int is_u3;
 
+static char __devinitdata *aperture = NULL;
 
 static int uninorth_fetch_size(void)
 {
-	int i;
-	u32 temp;
-	struct aper_size_info_32 *values;
+	int i, size = 0;
+	struct aper_size_info_32 *values =
+	    A_SIZE_32(agp_bridge->driver->aperture_sizes);
 
-	pci_read_config_dword(agp_bridge->dev, UNI_N_CFG_GART_BASE, &temp);
-	temp &= ~(0xfffff000);
-	values = A_SIZE_32(agp_bridge->driver->aperture_sizes);
+	if (aperture) {
+		char *save = aperture;
 
-	for (i = 0; i < agp_bridge->driver->num_aperture_sizes; i++) {
-		if (temp == values[i].size_value) {
-			agp_bridge->previous_size =
-			    agp_bridge->current_size = (void *) (values + i);
-			agp_bridge->aperture_size_idx = i;
-			return values[i].size;
+		size = memparse(aperture, &aperture) >> 20;
+		aperture = save;
+
+		for (i = 0; i < agp_bridge->driver->num_aperture_sizes; i++)
+			if (size == values[i].size)
+				break;
+
+		if (i == agp_bridge->driver->num_aperture_sizes) {
+			printk(KERN_ERR PFX "Invalid aperture size, using"
+			       " default\n");
+			size = 0;
+			aperture = NULL;
 		}
 	}
 
-	agp_bridge->previous_size =
-	    agp_bridge->current_size = (void *) (values + 1);
-	agp_bridge->aperture_size_idx = 1;
-	return values[1].size;
+	if (!size) {
+		for (i = 0; i < agp_bridge->driver->num_aperture_sizes; i++)
+			if (values[i].size == 32)
+				break;
+	}
 
-	return 0;
+	agp_bridge->previous_size =
+	    agp_bridge->current_size = (void *)(values + i);
+	agp_bridge->aperture_size_idx = i;
+	return values[i].size;
 }
 
 static void uninorth_tlbflush(struct agp_memory *mem)
@@ -95,12 +105,12 @@ static void uninorth_cleanup(void)
 static int uninorth_configure(void)
 {
 	struct aper_size_info_32 *current_size;
-	
+
 	current_size = A_SIZE_32(agp_bridge->current_size);
 
 	printk(KERN_INFO PFX "configuring for size idx: %d\n",
 	       current_size->size_value);
-	
+
 	/* aperture size and gatt addr */
 	pci_write_config_dword(agp_bridge->dev,
 		UNI_N_CFG_GART_BASE,
@@ -127,7 +137,7 @@ static int uninorth_configure(void)
 				       UNI_N_CFG_GART_DUMMY_PAGE,
 				       agp_bridge->scratch_page_real >> 12);
 	}
-	
+
 	return 0;
 }
 
@@ -162,7 +172,7 @@ static int uninorth_insert_memory(struct agp_memory *mem, off_t pg_start,
 	}
 	(void)in_le32((volatile u32*)&agp_bridge->gatt_table[pg_start]);
 	mb();
-	flush_dcache_range((unsigned long)&agp_bridge->gatt_table[pg_start], 
+	flush_dcache_range((unsigned long)&agp_bridge->gatt_table[pg_start],
 		(unsigned long)&agp_bridge->gatt_table[pg_start + mem->page_count]);
 
 	uninorth_tlbflush(mem);
@@ -235,7 +245,7 @@ static void uninorth_agp_enable(struct agp_bridge_data *bridge, u32 mode)
 
 	command = agp_collect_device_status(bridge, mode, status);
 	command |= PCI_AGP_COMMAND_AGP;
-	
+
 	if (uninorth_rev == 0x21) {
 		/*
 		 * Darwin disable AGP 4x on this revision, thus we
@@ -329,7 +339,7 @@ static int agp_uninorth_suspend(struct pci_dev *pdev)
 	/* turn off AGP on the bridge */
 	agp = pci_find_capability(pdev, PCI_CAP_ID_AGP);
 	pci_read_config_dword(pdev, agp + PCI_AGP_COMMAND, &cmd);
-	bridge->dev_private_data = (void *)cmd;
+	bridge->dev_private_data = (void *)(long)cmd;
 	if (cmd & PCI_AGP_COMMAND_AGP) {
 		printk("uninorth-agp: disabling AGP on bridge %s\n",
 				pci_name(pdev));
@@ -351,7 +361,7 @@ static int agp_uninorth_resume(struct pci_dev *pdev)
 	if (bridge == NULL)
 		return -ENODEV;
 
-	command = (u32)bridge->dev_private_data;
+	command = (long)bridge->dev_private_data;
 	bridge->dev_private_data = NULL;
 	if (!(command & PCI_AGP_COMMAND_AGP))
 		return 0;
@@ -456,7 +466,7 @@ static struct aper_size_info_32 uninorth_sizes[7] =
 	{256, 65536, 6, 64},
 	{128, 32768, 5, 32},
 	{64, 16384, 4, 16},
-#endif	
+#endif
 	{32, 8192, 3, 8},
 	{16, 4096, 2, 4},
 	{8, 2048, 1, 2},
@@ -601,8 +611,8 @@ static int __devinit agp_uninorth_probe(struct pci_dev *pdev,
 		uninorth_node = of_find_node_by_name(NULL, "u3");
 	}
 	if (uninorth_node) {
-		int *revprop = (int *)
-			get_property(uninorth_node, "device-rev", NULL);
+		const int *revprop = get_property(uninorth_node,
+				"device-rev", NULL);
 		if (revprop != NULL)
 			uninorth_rev = *revprop & 0x3f;
 		of_node_put(uninorth_node);
@@ -682,6 +692,12 @@ static void __exit agp_uninorth_cleanup(void)
 
 module_init(agp_uninorth_init);
 module_exit(agp_uninorth_cleanup);
+
+module_param(aperture, charp, 0);
+MODULE_PARM_DESC(aperture,
+		 "Aperture size, must be power of two between 4MB and an\n"
+		 "\t\tupper limit specific to the UniNorth revision.\n"
+		 "\t\tDefault: 32M");
 
 MODULE_AUTHOR("Ben Herrenschmidt & Paul Mackerras");
 MODULE_LICENSE("GPL");

@@ -51,6 +51,7 @@ char *xenbus_strstate(enum xenbus_state state)
 	};
 	return (state < ARRAY_SIZE(name)) ? name[state] : "INVALID";
 }
+EXPORT_SYMBOL_GPL(xenbus_strstate);
 
 int xenbus_watch_path(struct xenbus_device *dev, const char *path,
 		      struct xenbus_watch *watch,

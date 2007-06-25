@@ -14,7 +14,7 @@
 #include <asm/hypervisor.h>
 
 /* Referenced in netback.c. */
-/*static*/ kmem_cache_t *skbuff_cachep;
+/*static*/ struct kmem_cache *skbuff_cachep;
 EXPORT_SYMBOL(skbuff_cachep);
 
 /* Allow up to 64kB or page-sized packets (whichever is greater). */
@@ -23,18 +23,18 @@ EXPORT_SYMBOL(skbuff_cachep);
 #else
 #define MAX_SKBUFF_ORDER 0
 #endif
-static kmem_cache_t *skbuff_order_cachep[MAX_SKBUFF_ORDER + 1];
+static struct kmem_cache *skbuff_order_cachep[MAX_SKBUFF_ORDER + 1];
 
 static struct {
 	int size;
-	kmem_cache_t *cachep;
+	struct kmem_cache *cachep;
 } skbuff_small[] = { { 512, NULL }, { 2048, NULL } };
 
 struct sk_buff *__alloc_skb(unsigned int length, gfp_t gfp_mask,
-			    int fclone)
+			    int fclone, int node)
 {
 	int order, i;
-	kmem_cache_t *cachep;
+	struct kmem_cache *cachep;
 
 	length = SKB_DATA_ALIGN(length) + sizeof(struct skb_shared_info);
 
@@ -78,7 +78,7 @@ struct sk_buff *__dev_alloc_skb(unsigned int length, gfp_t gfp_mask)
 	return skb;
 }
 
-static void skbuff_ctor(void *buf, kmem_cache_t *cachep, unsigned long unused)
+static void skbuff_ctor(void *buf, struct kmem_cache *cachep, unsigned long unused)
 {
 	int order = 0;
 
@@ -93,7 +93,7 @@ static void skbuff_ctor(void *buf, kmem_cache_t *cachep, unsigned long unused)
 	scrub_pages(buf, 1 << order);
 }
 
-static void skbuff_dtor(void *buf, kmem_cache_t *cachep, unsigned long unused)
+static void skbuff_dtor(void *buf, struct kmem_cache *cachep, unsigned long unused)
 {
 	int order = 0;
 

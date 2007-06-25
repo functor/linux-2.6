@@ -26,6 +26,7 @@
 #include <linux/netlink.h>
 #include <linux/moduleparam.h>
 #include <linux/connector.h>
+#include <linux/mutex.h>
 
 #include <net/sock.h>
 
@@ -41,7 +42,7 @@ module_param(cn_val, uint, 0);
 MODULE_PARM_DESC(cn_idx, "Connector's main device idx.");
 MODULE_PARM_DESC(cn_val, "Connector's main device val.");
 
-static DECLARE_MUTEX(notify_lock);
+static DEFINE_MUTEX(notify_lock);
 static LIST_HEAD(notify_list);
 
 static struct cn_dev cdev;
@@ -97,6 +98,9 @@ int cn_netlink_send(struct cn_msg *msg, u32 __group, gfp_t gfp_mask)
 		group = __group;
 	}
 
+	if (!netlink_has_listeners(dev->nls, group))
+		return -ESRCH;
+
 	size = NLMSG_SPACE(sizeof(*msg) + msg->len);
 
 	skb = alloc_skb(size, gfp_mask);
@@ -111,28 +115,27 @@ int cn_netlink_send(struct cn_msg *msg, u32 __group, gfp_t gfp_mask)
 
 	NETLINK_CB(skb).dst_group = group;
 
-	netlink_broadcast(dev->nls, skb, 0, group, gfp_mask);
-
-	return 0;
+	return netlink_broadcast(dev->nls, skb, 0, group, gfp_mask);
 
 nlmsg_failure:
 	kfree_skb(skb);
 	return -EINVAL;
 }
+EXPORT_SYMBOL_GPL(cn_netlink_send);
 
 /*
  * Callback helper - queues work and setup destructor for given data.
  */
 static int cn_call_callback(struct cn_msg *msg, void (*destruct_data)(void *), void *data)
 {
-	struct cn_callback_entry *__cbq;
+	struct cn_callback_entry *__cbq, *__new_cbq;
 	struct cn_dev *dev = &cdev;
 	int err = -ENODEV;
 
 	spin_lock_bh(&dev->cbdev->queue_lock);
 	list_for_each_entry(__cbq, &dev->cbdev->queue_list, callback_entry) {
 		if (cn_cb_equal(&__cbq->id.id, &msg->id)) {
-			if (likely(!test_bit(0, &__cbq->work.pending) &&
+			if (likely(!work_pending(&__cbq->work) &&
 					__cbq->data.ddata == NULL)) {
 				__cbq->data.callback_priv = msg;
 
@@ -140,36 +143,32 @@ static int cn_call_callback(struct cn_msg *msg, void (*destruct_data)(void *), v
 				__cbq->data.destruct_data = destruct_data;
 
 				if (queue_work(dev->cbdev->cn_queue,
-						&__cbq->work))
+							&__cbq->work))
 					err = 0;
 			} else {
-				struct work_struct *w;
 				struct cn_callback_data *d;
 				
-				w = kzalloc(sizeof(*w) + sizeof(*d), GFP_ATOMIC);
-				if (w) {
-					d = (struct cn_callback_data *)(w+1);
-
+				err = -ENOMEM;
+				__new_cbq = kzalloc(sizeof(struct cn_callback_entry), GFP_ATOMIC);
+				if (__new_cbq) {
+					d = &__new_cbq->data;
 					d->callback_priv = msg;
 					d->callback = __cbq->data.callback;
 					d->ddata = data;
 					d->destruct_data = destruct_data;
-					d->free = w;
+					d->free = __new_cbq;
 
-					INIT_LIST_HEAD(&w->entry);
-					w->pending = 0;
-					w->func = &cn_queue_wrapper;
-					w->data = d;
-					init_timer(&w->timer);
-					
-					if (queue_work(dev->cbdev->cn_queue, w))
+					INIT_WORK(&__new_cbq->work,
+							&cn_queue_wrapper);
+
+					if (queue_work(dev->cbdev->cn_queue,
+						    &__new_cbq->work))
 						err = 0;
 					else {
-						kfree(w);
+						kfree(__new_cbq);
 						err = -EINVAL;
 					}
-				} else
-					err = -ENOMEM;
+				}
 			}
 			break;
 		}
@@ -259,7 +258,7 @@ static void cn_notify(struct cb_id *id, u32 notify_event)
 {
 	struct cn_ctl_entry *ent;
 
-	down(&notify_lock);
+	mutex_lock(&notify_lock);
 	list_for_each_entry(ent, &notify_list, notify_entry) {
 		int i;
 		struct cn_notify_req *req;
@@ -292,7 +291,7 @@ static void cn_notify(struct cb_id *id, u32 notify_event)
 			cn_netlink_send(&m, ctl->group, GFP_KERNEL);
 		}
 	}
-	up(&notify_lock);
+	mutex_unlock(&notify_lock);
 }
 
 /*
@@ -306,6 +305,9 @@ int cn_add_callback(struct cb_id *id, char *name, void (*callback)(void *))
 	int err;
 	struct cn_dev *dev = &cdev;
 
+	if (!cn_already_initialized)
+		return -EAGAIN;
+
 	err = cn_queue_add_callback(dev->cbdev, name, id, callback);
 	if (err)
 		return err;
@@ -314,6 +316,7 @@ int cn_add_callback(struct cb_id *id, char *name, void (*callback)(void *))
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(cn_add_callback);
 
 /*
  * Callback remove routing - removes callback
@@ -330,6 +333,7 @@ void cn_del_callback(struct cb_id *id)
 	cn_queue_del_callback(dev->cbdev, id);
 	cn_notify(id, 1);
 }
+EXPORT_SYMBOL_GPL(cn_del_callback);
 
 /*
  * Checks two connector's control messages to be the same.
@@ -406,14 +410,14 @@ static void cn_callback(void *data)
 	if (ctl->group == 0) {
 		struct cn_ctl_entry *n;
 
-		down(&notify_lock);
+		mutex_lock(&notify_lock);
 		list_for_each_entry_safe(ent, n, &notify_list, notify_entry) {
 			if (cn_ctl_msg_equals(ent->msg, ctl)) {
 				list_del(&ent->notify_entry);
 				kfree(ent);
 			}
 		}
-		up(&notify_lock);
+		mutex_unlock(&notify_lock);
 
 		return;
 	}
@@ -428,12 +432,12 @@ static void cn_callback(void *data)
 
 	memcpy(ent->msg, ctl, size - sizeof(*ent));
 
-	down(&notify_lock);
+	mutex_lock(&notify_lock);
 	list_add(&ent->notify_entry, &notify_list);
-	up(&notify_lock);
+	mutex_unlock(&notify_lock);
 }
 
-static int __init cn_init(void)
+static int __devinit cn_init(void)
 {
 	struct cn_dev *dev = &cdev;
 	int err;
@@ -454,21 +458,22 @@ static int __init cn_init(void)
 			sock_release(dev->nls->sk_socket);
 		return -EINVAL;
 	}
+	
+	cn_already_initialized = 1;
 
 	err = cn_add_callback(&dev->id, "connector", &cn_callback);
 	if (err) {
+		cn_already_initialized = 0;
 		cn_queue_free_dev(dev->cbdev);
 		if (dev->nls->sk_socket)
 			sock_release(dev->nls->sk_socket);
 		return -EINVAL;
 	}
 
-	cn_already_initialized = 1;
-
 	return 0;
 }
 
-static void __exit cn_fini(void)
+static void __devexit cn_fini(void)
 {
 	struct cn_dev *dev = &cdev;
 
@@ -480,9 +485,5 @@ static void __exit cn_fini(void)
 		sock_release(dev->nls->sk_socket);
 }
 
-module_init(cn_init);
+subsys_initcall(cn_init);
 module_exit(cn_fini);
-
-EXPORT_SYMBOL_GPL(cn_add_callback);
-EXPORT_SYMBOL_GPL(cn_del_callback);
-EXPORT_SYMBOL_GPL(cn_netlink_send);

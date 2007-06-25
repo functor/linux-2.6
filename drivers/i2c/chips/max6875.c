@@ -31,7 +31,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
-#include <asm/semaphore.h>
+#include <linux/mutex.h>
 
 /* Do not scan - the MAX6875 access method will write to some EEPROM chips */
 static unsigned short normal_i2c[] = {I2C_CLIENT_END};
@@ -54,7 +54,7 @@ I2C_CLIENT_INSMOD_1(max6875);
 /* Each client has this additional data */
 struct max6875_data {
 	struct i2c_client	client;
-	struct semaphore	update_lock;
+	struct mutex		update_lock;
 
 	u32			valid;
 	u8			data[USER_EEPROM_SIZE];
@@ -83,7 +83,7 @@ static void max6875_update_slice(struct i2c_client *client, int slice)
 	if (slice >= USER_EEPROM_SLICES)
 		return;
 
-	down(&data->update_lock);
+	mutex_lock(&data->update_lock);
 
 	buf = &data->data[slice << SLICE_BITS];
 
@@ -122,7 +122,7 @@ static void max6875_update_slice(struct i2c_client *client, int slice)
 		data->valid |= (1 << slice);
 	}
 exit_up:
-	up(&data->update_lock);
+	mutex_unlock(&data->update_lock);
 }
 
 static ssize_t max6875_read(struct kobject *kobj, char *buf, loff_t off,
@@ -196,11 +196,10 @@ static int max6875_detect(struct i2c_adapter *adapter, int address, int kind)
 	real_client->driver = &max6875_driver;
 	real_client->flags = 0;
 	strlcpy(real_client->name, "max6875", I2C_NAME_SIZE);
-	init_MUTEX(&data->update_lock);
+	mutex_init(&data->update_lock);
 
 	/* Init fake client data */
-	/* set the client data to the i2c_client so that it will get freed */
-	i2c_set_clientdata(fake_client, fake_client);
+	i2c_set_clientdata(fake_client, NULL);
 	fake_client->addr = address | 1;
 	fake_client->adapter = adapter;
 	fake_client->driver = &max6875_driver;
@@ -214,13 +213,17 @@ static int max6875_detect(struct i2c_adapter *adapter, int address, int kind)
 		goto exit_kfree2;
 
 	if ((err = i2c_attach_client(fake_client)) != 0)
-		goto exit_detach;
+		goto exit_detach1;
 
-	sysfs_create_bin_file(&real_client->dev.kobj, &user_eeprom_attr);
+	err = sysfs_create_bin_file(&real_client->dev.kobj, &user_eeprom_attr);
+	if (err)
+		goto exit_detach2;
 
 	return 0;
 
-exit_detach:
+exit_detach2:
+	i2c_detach_client(fake_client);
+exit_detach1:
 	i2c_detach_client(real_client);
 exit_kfree2:
 	kfree(fake_client);
@@ -229,14 +232,24 @@ exit_kfree1:
 	return err;
 }
 
+/* Will be called for both the real client and the fake client */
 static int max6875_detach_client(struct i2c_client *client)
 {
 	int err;
+	struct max6875_data *data = i2c_get_clientdata(client);
+
+	/* data is NULL for the fake client */
+	if (data)
+		sysfs_remove_bin_file(&client->dev.kobj, &user_eeprom_attr);
 
 	err = i2c_detach_client(client);
 	if (err)
 		return err;
-	kfree(i2c_get_clientdata(client));
+
+	if (data)		/* real client */
+		kfree(data);
+	else			/* fake client */
+		kfree(client);
 	return 0;
 }
 

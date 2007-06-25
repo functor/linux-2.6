@@ -64,14 +64,14 @@ static void mainstone_unmask_irq(unsigned int irq)
 	MST_INTMSKENA = (mainstone_irq_enabled |= (1 << mainstone_irq));
 }
 
-static struct irqchip mainstone_irq_chip = {
+static struct irq_chip mainstone_irq_chip = {
+	.name		= "FPGA",
 	.ack		= mainstone_mask_irq,
 	.mask		= mainstone_mask_irq,
 	.unmask		= mainstone_unmask_irq,
 };
 
-static void mainstone_irq_handler(unsigned int irq, struct irqdesc *desc,
-				  struct pt_regs *regs)
+static void mainstone_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	unsigned long pending = MST_INTSETCLR & mainstone_irq_enabled;
 	do {
@@ -79,7 +79,7 @@ static void mainstone_irq_handler(unsigned int irq, struct irqdesc *desc,
 		if (likely(pending)) {
 			irq = MAINSTONE_IRQ(0) + __ffs(pending);
 			desc = irq_desc + irq;
-			desc_handle_irq(irq, desc, regs);
+			desc_handle_irq(irq, desc);
 		}
 		pending = MST_INTSETCLR & mainstone_irq_enabled;
 	} while (pending);
@@ -94,8 +94,11 @@ static void __init mainstone_init_irq(void)
 	/* setup extra Mainstone irqs */
 	for(irq = MAINSTONE_IRQ(0); irq <= MAINSTONE_IRQ(15); irq++) {
 		set_irq_chip(irq, &mainstone_irq_chip);
-		set_irq_handler(irq, do_level_IRQ);
-		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
+		set_irq_handler(irq, handle_level_irq);
+		if (irq == MAINSTONE_IRQ(10) || irq == MAINSTONE_IRQ(14))
+			set_irq_flags(irq, IRQF_VALID | IRQF_PROBE | IRQF_NOAUTOEN);
+		else
+			set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 	set_irq_flags(MAINSTONE_IRQ(8), 0);
 	set_irq_flags(MAINSTONE_IRQ(12), 0);
@@ -157,14 +160,14 @@ static struct platform_device smc91x_device = {
 	.resource	= smc91x_resources,
 };
 
-static int mst_audio_startup(snd_pcm_substream_t *substream, void *priv)
+static int mst_audio_startup(struct snd_pcm_substream *substream, void *priv)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		MST_MSCWR2 &= ~MST_MSCWR2_AC97_SPKROFF;
 	return 0;
 }
 
-static void mst_audio_shutdown(snd_pcm_substream_t *substream, void *priv)
+static void mst_audio_shutdown(struct snd_pcm_substream *substream, void *priv)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		MST_MSCWR2 |= MST_MSCWR2_AC97_SPKROFF;
@@ -275,7 +278,7 @@ static void mainstone_backlight_power(int on)
 	}
 }
 
-static struct pxafb_mach_info toshiba_ltm04c380k __initdata = {
+static struct pxafb_mode_info toshiba_ltm04c380k_mode = {
 	.pixclock		= 50000,
 	.xres			= 640,
 	.yres			= 480,
@@ -287,12 +290,9 @@ static struct pxafb_mach_info toshiba_ltm04c380k __initdata = {
 	.upper_margin		= 0,
 	.lower_margin		= 0,
 	.sync			= FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,
-	.lccr0			= LCCR0_Act,
-	.lccr3			= LCCR3_PCP,
-	.pxafb_backlight_power	= mainstone_backlight_power,
 };
 
-static struct pxafb_mach_info toshiba_ltm035a776c __initdata = {
+static struct pxafb_mode_info toshiba_ltm035a776c_mode = {
 	.pixclock		= 110000,
 	.xres			= 240,
 	.yres			= 320,
@@ -304,12 +304,16 @@ static struct pxafb_mach_info toshiba_ltm035a776c __initdata = {
 	.upper_margin		= 1,
 	.lower_margin		= 10,
 	.sync			= FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,
+};
+
+static struct pxafb_mach_info mainstone_pxafb_info = {
+	.num_modes      	= 1,
 	.lccr0			= LCCR0_Act,
 	.lccr3			= LCCR3_PCP,
 	.pxafb_backlight_power	= mainstone_backlight_power,
 };
 
-static int mainstone_mci_init(struct device *dev, irqreturn_t (*mstone_detect_int)(int, void *, struct pt_regs *), void *data)
+static int mainstone_mci_init(struct device *dev, irq_handler_t mstone_detect_int, void *data)
 {
 	int err;
 
@@ -328,7 +332,7 @@ static int mainstone_mci_init(struct device *dev, irqreturn_t (*mstone_detect_in
 	 */
 	MST_MSCWR1 &= ~MST_MSCWR1_MS_SEL;
 
-	err = request_irq(MAINSTONE_MMC_IRQ, mstone_detect_int, SA_INTERRUPT,
+	err = request_irq(MAINSTONE_MMC_IRQ, mstone_detect_int, IRQF_DISABLED,
 			     "MMC card detect", data);
 	if (err) {
 		printk(KERN_ERR "mainstone_mci_init: MMC/SD: can't request MMC card detect IRQ\n");
@@ -444,9 +448,11 @@ static void __init mainstone_init(void)
 	/* reading Mainstone's "Virtual Configuration Register"
 	   might be handy to select LCD type here */
 	if (0)
-		set_pxa_fb_info(&toshiba_ltm04c380k);
+		mainstone_pxafb_info.modes = &toshiba_ltm04c380k_mode;
 	else
-		set_pxa_fb_info(&toshiba_ltm035a776c);
+		mainstone_pxafb_info.modes = &toshiba_ltm035a776c_mode;
+
+	set_pxa_fb_info(&mainstone_pxafb_info);
 
 	pxa_set_mci_info(&mainstone_mci_platform_data);
 	pxa_set_ficp_info(&mainstone_ficp_platform_data);
@@ -490,6 +496,7 @@ static void __init mainstone_map_io(void)
 MACHINE_START(MAINSTONE, "Intel HCDDBBVA0 Development Platform (aka Mainstone)")
 	/* Maintainer: MontaVista Software Inc. */
 	.phys_io	= 0x40000000,
+	.boot_params	= 0xa0000100,	/* BLOB boot parameter setting */
 	.io_pg_offst	= (io_p2v(0x40000000) >> 18) & 0xfffc,
 	.map_io		= mainstone_map_io,
 	.init_irq	= mainstone_init_irq,

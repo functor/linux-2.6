@@ -10,7 +10,7 @@ RELEASE_NAME =	$(ROOT)-$(VERSION)
 
 CC = gcc
 
-INCLUDES = 
+INCLUDES =
 CFLAGS = -g -O -Wall
 
 OBJS =	mod-extract.o

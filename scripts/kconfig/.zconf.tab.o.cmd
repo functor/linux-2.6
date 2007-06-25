@@ -1,19 +1,19 @@
-cmd_scripts/kconfig/zconf.tab.o := gcc -Wp,-MD,scripts/kconfig/.zconf.tab.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer    -Iscripts/kconfig -c -o scripts/kconfig/zconf.tab.o scripts/kconfig/zconf.tab.c
+cmd_scripts/kconfig/zconf.tab.o := gcc -Wp,-MD,scripts/kconfig/.zconf.tab.o.d -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer   -I/usr/include/ncurses -DCURSES_LOC="<ncurses.h>" -DLOCALE -Iscripts/kconfig -c -o scripts/kconfig/zconf.tab.o scripts/kconfig/zconf.tab.c
 
 deps_scripts/kconfig/zconf.tab.o := \
   scripts/kconfig/zconf.tab.c \
   /usr/include/ctype.h \
   /usr/include/features.h \
   /usr/include/sys/cdefs.h \
-  /usr/include/gnu/stubs.h \
   /usr/include/bits/wordsize.h \
+  /usr/include/gnu/stubs.h \
   /usr/include/gnu/stubs-32.h \
   /usr/include/bits/types.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stddef.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/stddef.h \
   /usr/include/bits/typesizes.h \
   /usr/include/endian.h \
   /usr/include/bits/endian.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stdarg.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/stdarg.h \
   /usr/include/stdio.h \
   /usr/include/libio.h \
   /usr/include/_G_config.h \
@@ -36,7 +36,7 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/string.h \
   /usr/include/bits/string.h \
   /usr/include/bits/string2.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/stdbool.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/stdbool.h \
   scripts/kconfig/lkc.h \
     $(wildcard include/config/list.h) \
   scripts/kconfig/expr.h \
@@ -50,8 +50,10 @@ deps_scripts/kconfig/zconf.tab.o := \
   /usr/include/bits/errno.h \
   /usr/include/linux/errno.h \
   /usr/include/asm/errno.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/limits.h \
-  /usr/lib/gcc/i386-redhat-linux/4.0.2/include/syslimits.h \
+  /usr/include/asm-generic/errno.h \
+  /usr/include/asm-generic/errno-base.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/limits.h \
+  /usr/lib/gcc/i386-redhat-linux/4.1.1/include/syslimits.h \
   /usr/include/limits.h \
   /usr/include/bits/posix1_lim.h \
   /usr/include/bits/local_lim.h \

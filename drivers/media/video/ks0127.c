@@ -712,13 +712,13 @@ static int ks0127_command(struct i2c_client *client,
 		*iarg = 0;
 		status = ks0127_read(ks, KS_STAT);
 		if (!(status & 0x20))		 /* NOVID not set */
-			*iarg = (*iarg & DECODER_STATUS_GOOD);
+			*iarg = (*iarg | DECODER_STATUS_GOOD);
 		if ((status & 0x01))		      /* CLOCK set */
-			*iarg = (*iarg & DECODER_STATUS_COLOR);
+			*iarg = (*iarg | DECODER_STATUS_COLOR);
 		if ((status & 0x08))		   /* PALDET set */
-			*iarg = (*iarg & DECODER_STATUS_PAL);
+			*iarg = (*iarg | DECODER_STATUS_PAL);
 		else
-			*iarg = (*iarg & DECODER_STATUS_NTSC);
+			*iarg = (*iarg | DECODER_STATUS_NTSC);
 		break;
 
 	//Catch any unknown command
@@ -832,8 +832,7 @@ static int ks0127_detach(struct i2c_client *client)
 static int __devinit ks0127_init_module(void)
 {
 	init_reg_defaults();
-	i2c_add_driver(&i2c_driver_ks0127);
-	return 0;
+	return i2c_add_driver(&i2c_driver_ks0127);
 }
 
 static void __devexit ks0127_cleanup_module(void)

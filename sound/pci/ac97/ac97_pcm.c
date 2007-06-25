@@ -27,6 +27,8 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/mutex.h>
+
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/control.h>
@@ -206,7 +208,7 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
 		mask = AC97_SC_SPSR_MASK;
 	}
 
-	down(&ac97->reg_mutex);
+	mutex_lock(&ac97->reg_mutex);
 	old = snd_ac97_read(ac97, reg) & mask;
 	if (old != bits) {
 		snd_ac97_update_bits_nolock(ac97, AC97_EXTENDED_STATUS, AC97_EA_SPDIF, 0);
@@ -231,7 +233,7 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
 		ac97->spdif_status = sbits;
 	}
 	snd_ac97_update_bits_nolock(ac97, AC97_EXTENDED_STATUS, AC97_EA_SPDIF, AC97_EA_SPDIF);
-	up(&ac97->reg_mutex);
+	mutex_unlock(&ac97->reg_mutex);
 	return 0;
 }
 
@@ -267,6 +269,7 @@ int snd_ac97_set_rate(struct snd_ac97 *ac97, int reg, unsigned int rate)
 			return -EINVAL;
 	}
 
+	snd_ac97_update_power(ac97, reg, 1);
 	switch (reg) {
 	case AC97_PCM_MIC_ADC_RATE:
 		if ((ac97->regs[AC97_EXTENDED_STATUS] & AC97_EA_VRM) == 0)	/* MIC VRA */
@@ -314,6 +317,8 @@ int snd_ac97_set_rate(struct snd_ac97 *ac97, int reg, unsigned int rate)
 	}
 	return 0;
 }
+
+EXPORT_SYMBOL(snd_ac97_set_rate);
 
 static unsigned short get_pslots(struct snd_ac97 *ac97, unsigned char *rate_table, unsigned short *spdif_slots)
 {
@@ -548,6 +553,8 @@ int snd_ac97_pcm_assign(struct snd_ac97_bus *bus,
 	return 0;
 }
 
+EXPORT_SYMBOL(snd_ac97_pcm_assign);
+
 /**
  * snd_ac97_pcm_open - opens the given AC97 pcm
  * @pcm: the ac97 pcm instance
@@ -600,6 +607,7 @@ int snd_ac97_pcm_open(struct ac97_pcm *pcm, unsigned int rate,
 			goto error;
 		}
 	}
+	pcm->cur_dbl = r;
 	spin_unlock_irq(&pcm->bus->bus_lock);
 	for (i = 3; i < 12; i++) {
 		if (!(slots & (1 << i)))
@@ -631,6 +639,8 @@ int snd_ac97_pcm_open(struct ac97_pcm *pcm, unsigned int rate,
 	return err;
 }
 
+EXPORT_SYMBOL(snd_ac97_pcm_open);
+
 /**
  * snd_ac97_pcm_close - closes the given AC97 pcm
  * @pcm: the ac97 pcm instance
@@ -643,6 +653,21 @@ int snd_ac97_pcm_close(struct ac97_pcm *pcm)
 	unsigned short slots = pcm->aslots;
 	int i, cidx;
 
+#ifdef CONFIG_SND_AC97_POWER_SAVE
+	int r = pcm->cur_dbl;
+	for (i = 3; i < 12; i++) {
+		if (!(slots & (1 << i)))
+			continue;
+		for (cidx = 0; cidx < 4; cidx++) {
+			if (pcm->r[r].rslots[cidx] & (1 << i)) {
+				int reg = get_slot_reg(pcm, cidx, i, r);
+				snd_ac97_update_power(pcm->r[r].codec[cidx],
+						      reg, 0);
+			}
+		}
+	}
+#endif
+
 	bus = pcm->bus;
 	spin_lock_irq(&pcm->bus->bus_lock);
 	for (i = 3; i < 12; i++) {
@@ -652,9 +677,12 @@ int snd_ac97_pcm_close(struct ac97_pcm *pcm)
 			bus->used_slots[pcm->stream][cidx] &= ~(1 << i);
 	}
 	pcm->aslots = 0;
+	pcm->cur_dbl = 0;
 	spin_unlock_irq(&pcm->bus->bus_lock);
 	return 0;
 }
+
+EXPORT_SYMBOL(snd_ac97_pcm_close);
 
 static int double_rate_hw_constraint_rate(struct snd_pcm_hw_params *params,
 					  struct snd_pcm_hw_rule *rule)
@@ -707,3 +735,5 @@ int snd_ac97_pcm_double_rate_rules(struct snd_pcm_runtime *runtime)
 				  SNDRV_PCM_HW_PARAM_RATE, -1);
 	return err;
 }
+
+EXPORT_SYMBOL(snd_ac97_pcm_double_rate_rules);

@@ -1,5 +1,13 @@
 /*
- * User Debugging Data & Event Rendezvous
+ * utrace infrastructure interface for debugging user processes
+ *
+ * Copyright (C) 2006, 2007 Red Hat, Inc.  All rights reserved.
+ *
+ * This copyrighted material is made available to anyone wishing to use,
+ * modify, copy, or redistribute it subject to the terms and conditions
+ * of the GNU General Public License v.2.
+ *
+ * Red Hat Author: Roland McGrath.
  *
  * This interface allows for notification of interesting events in a thread.
  * It also mediates access to thread state such as registers.
@@ -38,9 +46,11 @@
 #include <linux/list.h>
 #include <linux/rcupdate.h>
 #include <linux/signal.h>
+#include <linux/sched.h>
 
 struct linux_binprm;
 struct pt_regs;
+struct utrace;
 struct utrace_regset;
 struct utrace_regset_view;
 
@@ -167,6 +177,8 @@ enum utrace_events {
 #define UTRACE_ATTACH_MATCH_MASK	0x000f
 
 
+#ifdef CONFIG_UTRACE
+
 /*
  * Per-thread structure task_struct.utrace points to.
  *
@@ -190,16 +202,13 @@ struct utrace
 			struct utrace_signal *signal;
 		} live;
 		struct {
-			int notified;
-			int reap;
+			unsigned long flags;
 		} exit;
 	} u;
 
 	struct list_head engines;
 	spinlock_t lock;
 };
-#define utrace_lock(utrace)	spin_lock(&(utrace)->lock)
-#define utrace_unlock(utrace)	spin_unlock(&(utrace)->lock)
 
 
 /*
@@ -208,7 +217,7 @@ struct utrace
  * The task itself never has to worry about engines detaching while
  * it's doing event callbacks.  These structures are freed only when
  * the task is quiescent.  For other parties, the list is protected
- * by RCU and utrace_lock.
+ * by RCU and utrace->lock.
  */
 struct utrace_attached_engine
 {
@@ -334,6 +343,17 @@ struct utrace_engine_ops
 	 * by its parent, or self-reap immediately.  Though the actual
 	 * reaping may happen in parallel, a report_reap callback will
 	 * always be ordered after a report_death callback.
+	 *
+	 * If UTRACE_ACTION_NOREAP is in force and this was a group_leader
+	 * dying with other threads still in the group (delayed_group_leader),
+	 * then there can be a second report_death callback later when the
+	 * group_leader is no longer delayed.  This second callback can be
+	 * made from another thread's context, but it will always be
+	 * serialized after the first report_death callback and before the
+	 * report_reap callback.  It's possible that delayed_group_leader will
+	 * already be true by the time it can be checked inside the first
+	 * report_death callback made at the time of death, but that a second
+	 * callback will be made almost immediately thereafter.
 	 */
 	u32 (*report_death)(struct utrace_attached_engine *engine,
 			    struct task_struct *tsk);
@@ -416,11 +436,16 @@ struct utrace_attached_engine *utrace_attach(struct task_struct *target,
  *
  * If the target thread is not already quiescent, then a callback to this
  * engine might be in progress or about to start on another CPU.  If it's
- * quiescent when utrace_detach is called, then after return it's guaranteed
- * that no more callbacks to the ops vector will be done.
+ * quiescent when utrace_detach is called, then after successful return
+ * it's guaranteed that no more callbacks to the ops vector will be done.
+ * The only exception is SIGKILL (and exec by another thread in the group),
+ * which breaks quiescence and can cause asynchronous DEATH and/or REAP
+ * callbacks even when UTRACE_ACTION_QUIESCE is set.  In that event,
+ * utrace_detach fails with -ESRCH or -EALREADY to indicate that the
+ * report_reap or report_death callbacks have begun or will run imminently.
  */
-void utrace_detach(struct task_struct *target,
-		   struct utrace_attached_engine *engine);
+int utrace_detach(struct task_struct *target,
+		  struct utrace_attached_engine *engine);
 
 /*
  * Change the flags for a tracing engine.
@@ -429,10 +454,25 @@ void utrace_detach(struct task_struct *target,
  * this will cause a report_quiesce callback soon, maybe immediately.
  * If UTRACE_ACTION_QUIESCE was set before and is no longer set by
  * any engine, this will wake the thread up.
+ *
+ * This fails with -EALREADY and does nothing if you try to clear
+ * UTRACE_EVENT(DEATH) when the report_death callback may already have
+ * begun, if you try to clear UTRACE_EVENT(REAP) when the report_reap
+ * callback may already have begun, if you try to newly set
+ * UTRACE_ACTION_NOREAP when the target may already have sent its
+ * parent SIGCHLD, or if you try to newly set UTRACE_EVENT(DEATH),
+ * UTRACE_EVENT(QUIESCE), or UTRACE_ACTION_QUIESCE, when the target is
+ * already dead or dying.  It can fail with -ESRCH when the target has
+ * already been detached (including forcible detach on reaping).  If
+ * the target was quiescent before the call, then after a successful
+ * call, no event callbacks not requested in the new flags will be
+ * made, and a report_quiesce callback will always be made if
+ * requested.  These rules provide for coherent synchronization based
+ * on quiescence, even when SIGKILL is breaking quiescence.
  */
-void utrace_set_flags(struct task_struct *target,
-		      struct utrace_attached_engine *engine,
-		      unsigned long flags);
+int utrace_set_flags(struct task_struct *target,
+		     struct utrace_attached_engine *engine,
+		     unsigned long flags);
 
 /*
  * Cause a specified signal delivery in the target thread, which must be
@@ -472,6 +512,7 @@ void utrace_report_clone(unsigned long clone_flags, struct task_struct *child);
 void utrace_report_vfork_done(pid_t child_pid);
 void utrace_report_exit(long *exit_code);
 void utrace_report_death(struct task_struct *, struct utrace *);
+void utrace_report_delayed_group_leader(struct task_struct *);
 int utrace_report_jctl(int type);
 void utrace_report_exec(struct linux_binprm *bprm, struct pt_regs *regs);
 void utrace_report_syscall(struct pt_regs *regs, int is_exit);
@@ -480,5 +521,114 @@ int utrace_allow_access_process_vm(struct task_struct *);
 int utrace_unsafe_exec(struct task_struct *);
 void utrace_signal_handler_singlestep(struct task_struct *, struct pt_regs *);
 
+/*
+ * <linux/tracehook.h> uses these accessors to avoid #ifdef CONFIG_UTRACE.
+ */
+static inline unsigned long tsk_utrace_flags(struct task_struct *tsk)
+{
+	return tsk->utrace_flags;
+}
+static inline struct utrace *tsk_utrace_struct(struct task_struct *tsk)
+{
+	return tsk->utrace;
+}
+static inline void utrace_init_task(struct task_struct *child)
+{
+	child->utrace_flags = 0;
+	child->utrace = NULL;
+}
+
+#else  /* !CONFIG_UTRACE */
+
+static unsigned long tsk_utrace_flags(struct task_struct *tsk)
+{
+	return 0;
+}
+static struct utrace *tsk_utrace_struct(struct task_struct *tsk)
+{
+	return NULL;
+}
+static inline void utrace_init_task(struct task_struct *child)
+{
+}
+
+/*
+ * The calls to these should all be in if (0) and optimized out entirely.
+ * We have stubs here only so tracehook.h doesn't need to #ifdef them
+ * to avoid external references in case of unoptimized compilation.
+ */
+static inline int utrace_quiescent(struct task_struct *tsk, void *ignored)
+{
+	BUG();
+	return 0;
+}
+static inline void utrace_release_task(struct task_struct *tsk)
+{
+	BUG();
+}
+static inline int utrace_get_signal(struct task_struct *tsk,
+				    struct pt_regs *regs,
+				    siginfo_t *info, struct k_sigaction *ka)
+{
+	BUG();
+	return 0;
+}
+static inline void utrace_report_clone(unsigned long clone_flags,
+				       struct task_struct *child)
+{
+	BUG();
+}
+static inline void utrace_report_vfork_done(pid_t child_pid)
+{
+	BUG();
+}
+static inline void utrace_report_exit(long *exit_code)
+{
+	BUG();
+}
+static inline void utrace_report_death(struct task_struct *tsk, void *ignored)
+{
+	BUG();
+}
+static inline void utrace_report_delayed_group_leader(struct task_struct *tsk)
+{
+	BUG();
+}
+static inline int utrace_report_jctl(int type)
+{
+	BUG();
+	return 0;
+}
+static inline void utrace_report_exec(struct linux_binprm *bprm,
+				      struct pt_regs *regs)
+{
+	BUG();
+}
+static inline void utrace_report_syscall(struct pt_regs *regs, int is_exit)
+{
+	BUG();
+}
+static inline struct task_struct *utrace_tracer_task(struct task_struct *tsk)
+{
+	BUG();
+	return NULL;
+}
+static inline int utrace_allow_access_process_vm(struct task_struct *tsk)
+{
+	BUG();
+	return 0;
+}
+static inline int utrace_unsafe_exec(struct task_struct *tsk)
+{
+	BUG();
+	return 0;
+}
+static inline void utrace_signal_handler_singlestep(struct task_struct *tsk,
+						    struct pt_regs *regs)
+{
+	BUG();
+}
+
+#endif  /* CONFIG_UTRACE */
 
 #endif	/* linux/utrace.h */

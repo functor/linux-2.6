@@ -1,6 +1,7 @@
 #ifndef _CSS_H
 #define _CSS_H
 
+#include <linux/mutex.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 
@@ -44,11 +45,11 @@ struct pgid {
 	union {
 		__u8 fc;   	/* SPID function code */
 		struct path_state ps;	/* SNID path state */
-	} inf;
+	} __attribute__ ((packed)) inf;
 	union {
 		__u32 cpu_addr	: 16;	/* CPU address */
 		struct extended_cssid ext_cssid;
-	} pgid_high;
+	} __attribute__ ((packed)) pgid_high;
 	__u32 cpu_id	: 24;	/* CPU identification */
 	__u32 cpu_model : 16;	/* CPU model */
 	__u32 tod_high;		/* high word TOD clock */
@@ -72,12 +73,13 @@ struct senseid {
 }  __attribute__ ((packed,aligned(4)));
 
 struct ccw_device_private {
+	struct ccw_device *cdev;
+	struct subchannel *sch;
 	int state;		/* device state */
 	atomic_t onoff;
 	unsigned long registered;
-	__u16 devno;		/* device number */
-	__u16 sch_no;		/* subchannel number */
-	__u8 ssid;              /* subchannel set id */
+	struct ccw_dev_id dev_id;	/* device id */
+	struct subchannel_id schid;	/* subchannel number */
 	__u8 imask;		/* lpm mask for SNID/SID/SPGID */
 	int iretry;		/* retry counter SNID/SID/SPGID */
 	struct {
@@ -94,12 +96,13 @@ struct ccw_device_private {
 		unsigned int donotify:1;    /* call notify function */
 		unsigned int recog_done:1;  /* dev. recog. complete */
 		unsigned int fake_irb:1;    /* deliver faked irb */
+		unsigned int intretry:1;    /* retry internal operation */
 	} __attribute__((packed)) flags;
 	unsigned long intparm;	/* user interruption parameter */
 	struct qdio_irq *qdio_data;
 	struct irb irb;		/* device status */
 	struct senseid senseid;	/* SenseID info */
-	struct pgid pgid;	/* path group ID */
+	struct pgid pgid[8];	/* path group IDs per chpid*/
 	struct ccw1 iccws[2];	/* ccws for SNID/SID/SPGID commands */
 	struct work_struct kick_work;
 	wait_queue_head_t wait_q;
@@ -135,6 +138,8 @@ extern struct bus_type css_bus_type;
 extern struct css_driver io_subchannel_driver;
 
 extern int css_probe_device(struct subchannel_id);
+extern int css_sch_device_register(struct subchannel *);
+extern void css_sch_device_unregister(struct subchannel *);
 extern struct subchannel * get_subchannel_by_schid(struct subchannel_id);
 extern int css_init_done;
 extern int for_each_subchannel(int(*fn)(struct subchannel_id, void *), void *);
@@ -150,6 +155,13 @@ struct channel_subsystem {
 	struct channel_path *chps[__MAX_CHPID + 1];
 	struct device device;
 	struct pgid global_pgid;
+	struct mutex mutex;
+	/* channel measurement related */
+	int cm_enabled;
+	void *cub_addr1;
+	void *cub_addr2;
+	/* for orphaned ccw devices */
+	struct subchannel *pseudo_subchannel;
 };
 #define to_css(dev) container_of(dev, struct channel_subsystem, device)
 
@@ -163,7 +175,9 @@ void device_trigger_reprobe(struct subchannel *);
 
 /* Helper functions for vary on/off. */
 int device_is_online(struct subchannel *);
-void device_set_waiting(struct subchannel *);
+void device_kill_io(struct subchannel *);
+void device_set_intretry(struct subchannel *sch);
+int device_trigger_verify(struct subchannel *sch);
 
 /* Machine check helper function. */
 void device_kill_pending_timer(struct subchannel *);
@@ -175,6 +189,11 @@ void css_clear_subchannel_slow_list(void);
 int css_slow_subchannels_exist(void);
 extern int need_rescan;
 
+int sch_is_pseudo_sch(struct subchannel *);
+
 extern struct workqueue_struct *slow_path_wq;
 extern struct work_struct slow_path_work;
+
+int subchannel_add_files (struct device *);
+extern struct attribute_group *subch_attr_groups[];
 #endif

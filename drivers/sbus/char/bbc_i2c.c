@@ -187,19 +187,20 @@ static int wait_for_pin(struct bbc_i2c_bus *bp, u8 *status)
 	bp->waiting = 1;
 	add_wait_queue(&bp->wq, &wait);
 	while (limit-- > 0) {
-		u8 val;
+		unsigned long val;
 
-		set_current_state(TASK_INTERRUPTIBLE);
-		*status = val = readb(bp->i2c_control_regs + 0);
-		if ((val & I2C_PCF_PIN) == 0) {
+		val = wait_event_interruptible_timeout(
+				bp->wq,
+				(((*status = readb(bp->i2c_control_regs + 0))
+				  & I2C_PCF_PIN) == 0),
+				msecs_to_jiffies(250));
+		if (val > 0) {
 			ret = 0;
 			break;
 		}
-		msleep_interruptible(250);
 	}
 	remove_wait_queue(&bp->wq, &wait);
 	bp->waiting = 0;
-	current->state = TASK_RUNNING;
 
 	return ret;
 }
@@ -331,7 +332,7 @@ EXPORT_SYMBOL(bbc_i2c_readb);
 EXPORT_SYMBOL(bbc_i2c_write_buf);
 EXPORT_SYMBOL(bbc_i2c_read_buf);
 
-static irqreturn_t bbc_i2c_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t bbc_i2c_interrupt(int irq, void *dev_id)
 {
 	struct bbc_i2c_bus *bp = dev_id;
 
@@ -340,7 +341,7 @@ static irqreturn_t bbc_i2c_interrupt(int irq, void *dev_id, struct pt_regs *regs
 	 */
 	if (bp->waiting &&
 	    !(readb(bp->i2c_control_regs + 0x0) & I2C_PCF_PIN))
-		wake_up(&bp->wq);
+		wake_up_interruptible(&bp->wq);
 
 	return IRQ_HANDLED;
 }
@@ -377,7 +378,7 @@ static int __init attach_one_i2c(struct linux_ebus_device *edev, int index)
 	bp->waiting = 0;
 	init_waitqueue_head(&bp->wq);
 	if (request_irq(edev->irqs[0], bbc_i2c_interrupt,
-			SA_SHIRQ, "bbc_i2c", bp))
+			IRQF_SHARED, "bbc_i2c", bp))
 		goto fail;
 
 	bp->index = index;
@@ -423,7 +424,7 @@ static int __init bbc_present(void)
 
 	for_each_ebus(ebus) {
 		for_each_ebusdev(edev, ebus) {
-			if (!strcmp(edev->prom_name, "bbc"))
+			if (!strcmp(edev->prom_node->name, "bbc"))
 				return 1;
 		}
 	}
@@ -440,12 +441,13 @@ static int __init bbc_i2c_init(void)
 	struct linux_ebus_device *edev = NULL;
 	int err, index = 0;
 
-	if (tlb_type != cheetah || !bbc_present())
+	if ((tlb_type != cheetah && tlb_type != cheetah_plus) ||
+	    !bbc_present())
 		return -ENODEV;
 
 	for_each_ebus(ebus) {
 		for_each_ebusdev(edev, ebus) {
-			if (!strcmp(edev->prom_name, "i2c")) {
+			if (!strcmp(edev->prom_node->name, "i2c")) {
 				if (!attach_one_i2c(edev, index))
 					index++;
 			}
@@ -486,3 +488,4 @@ static void bbc_i2c_cleanup(void)
 
 module_init(bbc_i2c_init);
 module_exit(bbc_i2c_cleanup);
+MODULE_LICENSE("GPL");

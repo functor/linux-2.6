@@ -4,18 +4,35 @@
 #include <linux/mm.h>
 #include <asm/processor.h>
 
+static inline unsigned long get_cr3(void)
+{
+	unsigned long cr3;
+	asm volatile("mov %%cr3,%0" : "=r" (cr3));
+	return machine_to_phys(cr3);
+}
+
+static inline void set_cr3(unsigned long cr3)
+{
+	BUG();
+	/* What the hell is this supposed to do: JQ */
+	asm volatile("mov %0,%%cr3" :: "r" (cr3) : "memory");
+}
+
 #define __flush_tlb()	xen_tlb_flush()
 
-/*
- * Global pages have to be flushed a bit differently. Not a real
- * performance problem because this does not happen often.
- */
-#define __flush_tlb_global()	xen_tlb_flush()
+static inline unsigned long get_cr4(void)
+{
+	unsigned long cr4;
+	asm volatile("mov %%cr4,%0" : "=r" (cr4));
+	return cr4;
+}
 
+static inline void set_cr4(unsigned long cr4)
+{
+	asm volatile("mov %0,%%cr4" :: "r" (cr4) : "memory");
+}
 
-extern unsigned long pgkern_mask;
-
-#define __flush_tlb_all() __flush_tlb_global()
+#define __flush_tlb_all() xen_tlb_flush()
 
 #define __flush_tlb_one(addr)	xen_invlpg((unsigned long)addr)
 

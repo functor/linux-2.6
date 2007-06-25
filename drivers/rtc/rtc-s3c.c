@@ -46,7 +46,7 @@ static unsigned int tick_count;
 
 /* IRQ Handlers */
 
-static irqreturn_t s3c_rtc_alarmirq(int irq, void *id, struct pt_regs *r)
+static irqreturn_t s3c_rtc_alarmirq(int irq, void *id)
 {
 	struct rtc_device *rdev = id;
 
@@ -54,7 +54,7 @@ static irqreturn_t s3c_rtc_alarmirq(int irq, void *id, struct pt_regs *r)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t s3c_rtc_tickirq(int irq, void *id, struct pt_regs *r)
+static irqreturn_t s3c_rtc_tickirq(int irq, void *id)
 {
 	struct rtc_device *rdev = id;
 
@@ -190,6 +190,8 @@ static int s3c_rtc_getalarm(struct device *dev, struct rtc_wkalrm *alrm)
 	alm_tm->tm_year = readb(base + S3C2410_ALMYEAR);
 
 	alm_en = readb(base + S3C2410_RTCALM);
+
+	alrm->enabled = (alm_en & S3C2410_RTCALM_ALMEN) ? 1 : 0;
 
 	pr_debug("read alarm %02x %02x.%02x.%02x %02x/%02x/%02x\n",
 		 alm_en,
@@ -331,11 +333,7 @@ static int s3c_rtc_ioctl(struct device *dev,
 
 static int s3c_rtc_proc(struct device *dev, struct seq_file *seq)
 {
-	unsigned int rtcalm = readb(s3c_rtc_base + S3C2410_RTCALM);
 	unsigned int ticnt = readb(s3c_rtc_base + S3C2410_TICNT);
-
-	seq_printf(seq, "alarm_IRQ\t: %s\n",
-		   (rtcalm & S3C2410_RTCALM_ALMEN) ? "yes" : "no" );
 
 	seq_printf(seq, "periodic_IRQ\t: %s\n",
 		     (ticnt & S3C2410_TICNT_ENABLE) ? "yes" : "no" );
@@ -386,7 +384,7 @@ static void s3c_rtc_release(struct device *dev)
 	free_irq(s3c_rtc_tickno, rtc_dev);
 }
 
-static struct rtc_class_ops s3c_rtcops = {
+static const struct rtc_class_ops s3c_rtcops = {
 	.open		= s3c_rtc_open,
 	.release	= s3c_rtc_release,
 	.ioctl		= s3c_rtc_ioctl,

@@ -3,7 +3,6 @@
  */
 
 #include <asm-generic/vmlinux.lds.h>
-#include <linux/config.h>
 
 #ifndef CONFIG_64BIT
 OUTPUT_FORMAT("elf32-s390", "elf32-s390", "elf32-s390")
@@ -25,6 +24,7 @@ SECTIONS
 	*(.text)
 	SCHED_TEXT
 	LOCK_TEXT
+	KPROBES_TEXT
 	*(.fixup)
 	*(.gnu.warning)
 	} = 0x0700
@@ -58,9 +58,11 @@ SECTIONS
   . = ALIGN(4096);
   .data.page_aligned : { *(.data.idt) }
 
-  . = ALIGN(32);
+  . = ALIGN(256);
   .data.cacheline_aligned : { *(.data.cacheline_aligned) }
 
+  . = ALIGN(256);
+  .data.read_mostly : { *(.data.read_mostly) }
   _edata = .;			/* End of data section */
 
   . = ALIGN(8192);		/* init_task */
@@ -81,13 +83,7 @@ SECTIONS
   __setup_end = .;
   __initcall_start = .;
   .initcall.init : {
-	*(.initcall1.init) 
-	*(.initcall2.init) 
-	*(.initcall3.init) 
-	*(.initcall4.init) 
-	*(.initcall5.init) 
-	*(.initcall6.init) 
-	*(.initcall7.init)
+	INITCALLS
   }
   __initcall_end = .;
   __con_initcall_start = .;
@@ -116,7 +112,7 @@ SECTIONS
 
   /* Sections to be discarded */
   /DISCARD/ : {
-	*(.exitcall.exit)
+	*(.exit.text) *(.exit.data) *(.exitcall.exit)
 	}
 
   /* Stabs debugging sections.  */

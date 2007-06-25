@@ -41,7 +41,7 @@
 #define __NR_capset		 22 /* Linux Specific				   */
 #define __NR_setuid              23 /* Implemented via setreuid in SunOS           */
 #define __NR_getuid              24 /* Common                                      */
-/* #define __NR_time alias	 25    ENOSYS under SunOS			   */
+#define __NR_vmsplice	         25 /* ENOSYS under SunOS			   */
 #define __NR_ptrace              26 /* Common                                      */
 #define __NR_alarm               27 /* Implemented via setitimer in SunOS          */
 #define __NR_sigaltstack	 28 /* Common					   */
@@ -250,7 +250,7 @@
 #ifdef __KERNEL__
 #define __NR_time		231 /* Linux sparc32                               */
 #endif
-/* #define __NR_oldstat         232    Linux Specific                              */
+#define __NR_splice             232 /* Linux Specific                              */
 #define __NR_stime              233 /* Linux Specific                              */
 #define __NR_statfs64           234 /* Linux Specific                              */
 #define __NR_fstatfs64          235 /* Linux Specific                              */
@@ -273,7 +273,7 @@
 #define __NR_getsid             252
 #define __NR_fdatasync          253
 #define __NR_nfsservctl         254
-#define __NR_aplib              255
+#define __NR_sync_file_range	255
 #define __NR_clock_settime	256
 #define __NR_clock_gettime	257
 #define __NR_clock_getres	258
@@ -298,7 +298,7 @@
 #define __NR_mq_notify		277
 #define __NR_mq_getsetattr	278
 #define __NR_waitid		279
-/*#define __NR_sys_setaltroot	280 available (was setaltroot) */
+#define __NR_tee		280
 #define __NR_add_key		281
 #define __NR_request_key	282
 #define __NR_keyctl		283
@@ -318,174 +318,20 @@
 #define __NR_pselect6		297
 #define __NR_ppoll		298
 #define __NR_unshare		299
+#define __NR_set_robust_list	300
+#define __NR_get_robust_list	301
+#define __NR_migrate_pages	302
 
-/* WARNING: You MAY NOT add syscall numbers larger than 299, since
- *          all of the syscall tables in the Sparc kernel are
- *          sized to have 299 entries (starting at zero).  Therefore
- *          find a free slot in the 0-299 range.
- */
-
-#define _syscall0(type,name) \
-type name(void) \
-{ \
-long __res; \
-register long __g1 __asm__ ("g1") = __NR_##name; \
-__asm__ __volatile__ ("t 0x6d\n\t" \
-		      "sub %%g0, %%o0, %0\n\t" \
-		      "movcc %%xcc, %%o0, %0\n\t" \
-		      : "=r" (__res)\
-		      : "r" (__g1) \
-		      : "o0", "cc"); \
-if (__res >= 0) \
-    return (type) __res; \
-errno = -__res; \
-return -1; \
-}
-
-#define _syscall1(type,name,type1,arg1) \
-type name(type1 arg1) \
-{ \
-long __res; \
-register long __g1 __asm__ ("g1") = __NR_##name; \
-register long __o0 __asm__ ("o0") = (long)(arg1); \
-__asm__ __volatile__ ("t 0x6d\n\t" \
-		      "sub %%g0, %%o0, %0\n\t" \
-		      "movcc %%xcc, %%o0, %0\n\t" \
-		      : "=r" (__res), "=&r" (__o0) \
-		      : "1" (__o0), "r" (__g1) \
-		      : "cc"); \
-if (__res >= 0) \
-	return (type) __res; \
-errno = -__res; \
-return -1; \
-}
-
-#define _syscall2(type,name,type1,arg1,type2,arg2) \
-type name(type1 arg1,type2 arg2) \
-{ \
-long __res; \
-register long __g1 __asm__ ("g1") = __NR_##name; \
-register long __o0 __asm__ ("o0") = (long)(arg1); \
-register long __o1 __asm__ ("o1") = (long)(arg2); \
-__asm__ __volatile__ ("t 0x6d\n\t" \
-		      "sub %%g0, %%o0, %0\n\t" \
-		      "movcc %%xcc, %%o0, %0\n\t" \
-		      : "=r" (__res), "=&r" (__o0) \
-		      : "1" (__o0), "r" (__o1), "r" (__g1) \
-		      : "cc"); \
-if (__res >= 0) \
-	return (type) __res; \
-errno = -__res; \
-return -1; \
-}
-
-#define _syscall3(type,name,type1,arg1,type2,arg2,type3,arg3) \
-type name(type1 arg1,type2 arg2,type3 arg3) \
-{ \
-long __res; \
-register long __g1 __asm__ ("g1") = __NR_##name; \
-register long __o0 __asm__ ("o0") = (long)(arg1); \
-register long __o1 __asm__ ("o1") = (long)(arg2); \
-register long __o2 __asm__ ("o2") = (long)(arg3); \
-__asm__ __volatile__ ("t 0x6d\n\t" \
-		      "sub %%g0, %%o0, %0\n\t" \
-		      "movcc %%xcc, %%o0, %0\n\t" \
-		      : "=r" (__res), "=&r" (__o0) \
-		      : "1" (__o0), "r" (__o1), "r" (__o2), "r" (__g1) \
-		      : "cc"); \
-if (__res>=0) \
-	return (type) __res; \
-errno = -__res; \
-return -1; \
-}
-
-#define _syscall4(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4) \
-type name (type1 arg1, type2 arg2, type3 arg3, type4 arg4) \
-{ \
-long __res; \
-register long __g1 __asm__ ("g1") = __NR_##name; \
-register long __o0 __asm__ ("o0") = (long)(arg1); \
-register long __o1 __asm__ ("o1") = (long)(arg2); \
-register long __o2 __asm__ ("o2") = (long)(arg3); \
-register long __o3 __asm__ ("o3") = (long)(arg4); \
-__asm__ __volatile__ ("t 0x6d\n\t" \
-		      "sub %%g0, %%o0, %0\n\t" \
-		      "movcc %%xcc, %%o0, %0\n\t" \
-		      : "=r" (__res), "=&r" (__o0) \
-		      : "1" (__o0), "r" (__o1), "r" (__o2), "r" (__o3), "r" (__g1) \
-		      : "cc"); \
-if (__res>=0) \
-	return (type) __res; \
-errno = -__res; \
-return -1; \
-} 
-
-#define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4, \
-	  type5,arg5) \
-type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5) \
-{ \
-long __res; \
-register long __g1 __asm__ ("g1") = __NR_##name; \
-register long __o0 __asm__ ("o0") = (long)(arg1); \
-register long __o1 __asm__ ("o1") = (long)(arg2); \
-register long __o2 __asm__ ("o2") = (long)(arg3); \
-register long __o3 __asm__ ("o3") = (long)(arg4); \
-register long __o4 __asm__ ("o4") = (long)(arg5); \
-__asm__ __volatile__ ("t 0x6d\n\t" \
-		      "sub %%g0, %%o0, %0\n\t" \
-		      "movcc %%xcc, %%o0, %0\n\t" \
-		      : "=r" (__res), "=&r" (__o0) \
-		      : "1" (__o0), "r" (__o1), "r" (__o2), "r" (__o3), "r" (__o4), "r" (__g1) \
-		      : "cc"); \
-if (__res>=0) \
-	return (type) __res; \
-errno = -__res; \
-return -1; \
-}
-#ifdef __KERNEL_SYSCALLS__
-
-#include <linux/compiler.h>
-#include <linux/types.h>
-
-/*
- * we need this inline - forking from kernel space will result
- * in NO COPY ON WRITE (!!!), until an execve is executed. This
- * is no problem, but for the stack. This is handled by not letting
- * main() use the stack at all after fork(). Thus, no function
- * calls - which means inline code for fork too, as otherwise we
- * would use the stack upon exit from 'fork()'.
- *
- * Actually only pause and fork are needed inline, so that there
- * won't be any messing with the stack from main(), but we define
- * some others too.
- */
-#define __NR__exit __NR_exit
-static __inline__ _syscall0(pid_t,setsid)
-static __inline__ _syscall3(int,write,int,fd,__const__ char *,buf,off_t,count)
-static __inline__ _syscall3(int,read,int,fd,char *,buf,off_t,count)
-static __inline__ _syscall3(off_t,lseek,int,fd,off_t,offset,int,count)
-static __inline__ _syscall1(int,dup,int,fd)
-static __inline__ _syscall3(int,execve,__const__ char *,file,char **,argv,char **,envp)
-static __inline__ _syscall3(int,open,__const__ char *,file,int,flag,int,mode)
-static __inline__ _syscall1(int,close,int,fd)
-static __inline__ _syscall3(pid_t,waitpid,pid_t,pid,int *,wait_stat,int,options)
-
-#include <linux/linkage.h>
-
-asmlinkage unsigned long sys_mmap(
-				unsigned long addr, unsigned long len,
-				unsigned long prot, unsigned long flags,
-				unsigned long fd, unsigned long off);
-struct sigaction;
-asmlinkage long sys_rt_sigaction(int sig,
-				const struct sigaction __user *act,
-				struct sigaction __user *oact,
-				void __user *restorer,
-				size_t sigsetsize);
-
-#endif /* __KERNEL_SYSCALLS__ */
+#define NR_SYSCALLS		303
 
 #ifdef __KERNEL__
+
+/* WARNING: You MAY NOT add syscall numbers larger than 302, since
+ *          all of the syscall tables in the Sparc kernel are
+ *          sized to have 302 entries (starting at zero).  Therefore
+ *          find a free slot in the 0-302 range.
+ */
+
 /* sysconf options, for SunOS compatibility */
 #define   _SC_ARG_MAX             1
 #define   _SC_CHILD_MAX           2
@@ -519,7 +365,6 @@ asmlinkage long sys_rt_sigaction(int sig,
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #define __ARCH_WANT_SYS_RT_SIGSUSPEND
 #define __ARCH_WANT_COMPAT_SYS_RT_SIGSUSPEND
-#endif
 
 /*
  * "Conditional" syscalls
@@ -529,4 +374,5 @@ asmlinkage long sys_rt_sigaction(int sig,
  */
 #define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
 
+#endif /* __KERNEL__ */
 #endif /* _SPARC64_UNISTD_H */

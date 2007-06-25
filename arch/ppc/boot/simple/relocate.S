@@ -1,6 +1,4 @@
 /*
- * arch/ppc/boot/simple/relocate.S
- *
  * This is the common part of the loader relocation and initialization
  * process.  All of the board/processor specific initialization is
  * done before we get here.
@@ -15,7 +13,6 @@
  * or implied.
  */
 
-#include <linux/config.h>
 #include <asm/cache.h>
 #include <asm/ppc_asm.h>
 
@@ -157,8 +154,8 @@ do_relocate_out:
 
 start_ldr:
 /* Clear all of BSS and set up stack for C calls */
-	lis	r3,edata@h
-	ori	r3,r3,edata@l
+	lis	r3,__bss_start@h
+	ori	r3,r3,__bss_start@l
 	lis	r4,end@h
 	ori	r4,r4,end@l
 	subi	r3,r3,4
@@ -166,7 +163,7 @@ start_ldr:
 	li	r0,0
 50:	stwu	r0,4(r3)
 	cmpw	cr0,r3,r4
-	bne	50b
+	blt	50b
 90:	mr	r9,r1		/* Save old stack pointer (in case it matters) */
 	lis	r1,.stack@h
 	ori	r1,r1,.stack@l
@@ -196,7 +193,7 @@ start_ldr:
 	/*
 	 * Start at the begining.
 	 */
-#ifdef CONFIG_PPC_MULTIPLATFORM
+#ifdef CONFIG_PPC_PREP
 	li	r9,0xc
 	mtlr	r9
 	/* tell kernel we're prep, by putting 0xdeadc0de at KERNELLOAD,

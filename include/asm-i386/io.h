@@ -1,7 +1,6 @@
 #ifndef _ASM_IO_H
 #define _ASM_IO_H
 
-#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/compiler.h>
 
@@ -219,50 +218,11 @@ static inline void memcpy_toio(volatile void __iomem *dst, const void *src, int 
  */
 #define __ISA_IO_base ((char __iomem *)(PAGE_OFFSET))
 
-#define isa_readb(a) readb(__ISA_IO_base + (a))
-#define isa_readw(a) readw(__ISA_IO_base + (a))
-#define isa_readl(a) readl(__ISA_IO_base + (a))
-#define isa_writeb(b,a) writeb(b,__ISA_IO_base + (a))
-#define isa_writew(w,a) writew(w,__ISA_IO_base + (a))
-#define isa_writel(l,a) writel(l,__ISA_IO_base + (a))
-#define isa_memset_io(a,b,c)		memset_io(__ISA_IO_base + (a),(b),(c))
-#define isa_memcpy_fromio(a,b,c)	memcpy_fromio((a),__ISA_IO_base + (b),(c))
-#define isa_memcpy_toio(a,b,c)		memcpy_toio(__ISA_IO_base + (a),(b),(c))
-
-
 /*
  * Again, i386 does not require mem IO specific function.
  */
 
 #define eth_io_copy_and_sum(a,b,c,d)		eth_copy_and_sum((a),(void __force *)(b),(c),(d))
-#define isa_eth_io_copy_and_sum(a,b,c,d)	eth_copy_and_sum((a),(void __force *)(__ISA_IO_base + (b)),(c),(d))
-
-/**
- *	check_signature		-	find BIOS signatures
- *	@io_addr: mmio address to check 
- *	@signature:  signature block
- *	@length: length of signature
- *
- *	Perform a signature comparison with the mmio address io_addr. This
- *	address should have been obtained by ioremap.
- *	Returns 1 on a match.
- */
- 
-static inline int check_signature(volatile void __iomem * io_addr,
-	const unsigned char *signature, int length)
-{
-	int retval = 0;
-	do {
-		if (readb(io_addr) != *signature)
-			goto out;
-		io_addr++;
-		signature++;
-		length--;
-	} while (length);
-	retval = 1;
-out:
-	return retval;
-}
 
 /*
  *	Cache management
@@ -296,11 +256,11 @@ static inline void flush_write_buffers(void)
 
 #endif /* __KERNEL__ */
 
-#ifdef SLOW_IO_BY_JUMPING
-#define __SLOW_DOWN_IO "jmp 1f; 1: jmp 1f; 1:"
+#if defined(CONFIG_PARAVIRT)
+#include <asm/paravirt.h>
 #else
+
 #define __SLOW_DOWN_IO "outb %%al,$0x80;"
-#endif
 
 static inline void slow_down_io(void) {
 	__asm__ __volatile__(
@@ -310,6 +270,8 @@ static inline void slow_down_io(void) {
 #endif
 		: : );
 }
+
+#endif
 
 #ifdef CONFIG_X86_NUMAQ
 extern void *xquad_portio;    /* Where the IO area was mapped */

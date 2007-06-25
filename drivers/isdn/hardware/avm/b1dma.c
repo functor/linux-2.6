@@ -9,7 +9,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
@@ -39,7 +38,7 @@ MODULE_AUTHOR("Carsten Paeth");
 MODULE_LICENSE("GPL");
 
 static int suppress_pollack = 0;
-MODULE_PARM(suppress_pollack, "0-1i");
+module_param(suppress_pollack, bool, 0);
 
 /* ------------------------------------------------------------- */
 
@@ -629,7 +628,7 @@ static void b1dma_handle_interrupt(avmcard *card)
 	spin_unlock(&card->lock);
 }
 
-irqreturn_t b1dma_interrupt(int interrupt, void *devptr, struct pt_regs *regs)
+irqreturn_t b1dma_interrupt(int interrupt, void *devptr)
 {
 	avmcard *card = devptr;
 

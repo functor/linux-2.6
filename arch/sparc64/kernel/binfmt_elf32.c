@@ -84,7 +84,6 @@ typedef struct {
 
 #include <asm/processor.h>
 #include <linux/module.h>
-#include <linux/config.h>
 #include <linux/elfcore.h>
 #include <linux/compat.h>
 
@@ -142,7 +141,6 @@ cputime_to_compat_timeval(const cputime_t cputime, struct compat_timeval *value)
 	value->tv_sec = jiffies / HZ;
 }
 
-#define elf_addr_t	u32
 #undef start_thread
 #define start_thread start_thread32
 #define init_elf_binfmt init_elf32_binfmt
@@ -153,7 +151,9 @@ MODULE_AUTHOR("Eric Youngdale, David S. Miller, Jakub Jelinek");
 #undef MODULE_DESCRIPTION
 #undef MODULE_AUTHOR
 
+#include <asm/a.out.h>
+
 #undef TASK_SIZE
-#define TASK_SIZE 0xf0000000
+#define TASK_SIZE STACK_TOP32
 
 #include "../../../fs/binfmt_elf.c"

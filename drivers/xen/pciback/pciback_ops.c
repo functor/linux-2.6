@@ -25,7 +25,6 @@ void pciback_reset_device(struct pci_dev *dev)
 
 		pci_write_config_word(dev, PCI_COMMAND, 0);
 
-		dev->is_enabled = 0;
 		dev->is_busmaster = 0;
 	} else {
 		pci_read_config_word(dev, PCI_COMMAND, &cmd);
@@ -44,16 +43,16 @@ static inline void test_and_schedule_op(struct pciback_device *pdev)
 	 * already processing a request */
 	if (test_bit(_XEN_PCIF_active, (unsigned long *)&pdev->sh_info->flags)
 	    && !test_and_set_bit(_PDEVF_op_active, &pdev->flags))
-		schedule_work(&pdev->op_work);
+		schedule_delayed_work(&pdev->op_work, 0);
 }
 
 /* Performing the configuration space reads/writes must not be done in atomic
  * context because some of the pci_* functions can sleep (mostly due to ACPI
  * use of semaphores). This function is intended to be called from a work
  * queue in process context taking a struct pciback_device as a parameter */
-void pciback_do_op(void *data)
+void pciback_do_op(struct work_struct *work)
 {
-	struct pciback_device *pdev = data;
+	struct pciback_device *pdev = container_of(work, struct pciback_device, op_work.work);
 	struct pci_dev *dev;
 	struct xen_pci_op *op = &pdev->sh_info->op;
 
@@ -85,7 +84,7 @@ void pciback_do_op(void *data)
 	test_and_schedule_op(pdev);
 }
 
-irqreturn_t pciback_handle_event(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t pciback_handle_event(int irq, void *dev_id)
 {
 	struct pciback_device *pdev = dev_id;
 

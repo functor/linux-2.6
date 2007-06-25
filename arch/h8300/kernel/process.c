@@ -22,7 +22,6 @@
  * This file handles the architecture-dependent parts of process handling..
  */
 
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/sched.h>
@@ -54,7 +53,7 @@ asmlinkage void ret_from_fork(void);
  * The idle loop on an H8/300..
  */
 #if !defined(CONFIG_H8300H_SIM) && !defined(CONFIG_H8S_SIM)
-void default_idle(void)
+static void default_idle(void)
 {
 	local_irq_disable();
 	if (!need_resched()) {
@@ -65,7 +64,7 @@ void default_idle(void)
 		local_irq_enable();
 }
 #else
-void default_idle(void)
+static void default_idle(void)
 {
 	cpu_relax();
 }
@@ -135,7 +134,7 @@ int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 
 	fs = get_fs();
 	set_fs (KERNEL_DS);
-	clone_arg = flags | CLONE_VM;
+	clone_arg = flags | CLONE_VM | CLONE_KTHREAD;
 	__asm__("mov.l sp,er3\n\t"
 		"sub.l er2,er2\n\t"
 		"mov.l %2,er1\n\t"

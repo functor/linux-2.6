@@ -20,7 +20,6 @@
  * This should be fixed.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/fs.h> 
@@ -30,7 +29,6 @@
 #include <linux/resource.h>
 #include <linux/times.h>
 #include <linux/utsname.h>
-#include <linux/timex.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -62,7 +60,7 @@
 #include <linux/highuid.h>
 #include <linux/vmalloc.h>
 #include <linux/fsnotify.h>
-#include <linux/vs_cvirt.h>
+#include <linux/sysctl.h>
 #include <asm/mman.h>
 #include <asm/types.h>
 #include <asm/uaccess.h>
@@ -78,6 +76,8 @@
 
 int cp_compat_stat(struct kstat *kbuf, struct compat_stat __user *ubuf)
 {
+	compat_ino_t ino;
+
 	typeof(ubuf->st_uid) uid = 0;
 	typeof(ubuf->st_gid) gid = 0;
 	SET_UID(uid, kbuf->uid);
@@ -86,9 +86,12 @@ int cp_compat_stat(struct kstat *kbuf, struct compat_stat __user *ubuf)
 		return -EOVERFLOW;
 	if (kbuf->size >= 0x7fffffff)
 		return -EOVERFLOW;
+	ino = kbuf->ino;
+	if (sizeof(ino) < sizeof(kbuf->ino) && ino != kbuf->ino)
+		return -EOVERFLOW;
 	if (!access_ok(VERIFY_WRITE, ubuf, sizeof(struct compat_stat)) ||
 	    __put_user (old_encode_dev(kbuf->dev), &ubuf->st_dev) ||
-	    __put_user (kbuf->ino, &ubuf->st_ino) ||
+	    __put_user (ino, &ubuf->st_ino) ||
 	    __put_user (kbuf->mode, &ubuf->st_mode) ||
 	    __put_user (kbuf->nlink, &ubuf->st_nlink) ||
 	    __put_user (uid, &ubuf->st_uid) ||
@@ -392,7 +395,9 @@ sys32_rt_sigprocmask(int how, compat_sigset_t __user *set,
 		}
 	}
 	set_fs (KERNEL_DS);
-	ret = sys_rt_sigprocmask(how, set ? &s : NULL, oset ? &s : NULL,
+	ret = sys_rt_sigprocmask(how,
+				 set ? (sigset_t __user *)&s : NULL,
+				 oset ? (sigset_t __user *)&s : NULL,
 				 sigsetsize); 
 	set_fs (old_fs);
 	if (ret) return ret;
@@ -431,24 +436,12 @@ put_tv32(struct compat_timeval __user *o, struct timeval *i)
 	return err; 
 }
 
-extern int do_setitimer(int which, struct itimerval *, struct itimerval *);
+extern unsigned int alarm_setitimer(unsigned int seconds);
 
 asmlinkage long
 sys32_alarm(unsigned int seconds)
 {
-	struct itimerval it_new, it_old;
-	unsigned int oldalarm;
-
-	it_new.it_interval.tv_sec = it_new.it_interval.tv_usec = 0;
-	it_new.it_value.tv_sec = seconds;
-	it_new.it_value.tv_usec = 0;
-	do_setitimer(ITIMER_REAL, &it_new, &it_old);
-	oldalarm = it_old.it_value.tv_sec;
-	/* ehhh.. We can't return 0 if we have an alarm pending.. */
-	/* And we'd better return too much than too little anyway */
-	if (it_old.it_value.tv_usec)
-		oldalarm++;
-	return oldalarm;
+	return alarm_setitimer(seconds);
 }
 
 /* Translations due to time_t size differences.  Which affects all
@@ -461,7 +454,7 @@ sys32_gettimeofday(struct compat_timeval __user *tv, struct timezone __user *tz)
 {
 	if (tv) {
 		struct timeval ktv;
-		do_gettimeofday(&ktv);
+		vx_gettimeofday(&ktv);
 		if (put_tv32(tv, &ktv))
 			return -EFAULT;
 	}
@@ -522,19 +515,6 @@ sys32_waitpid(compat_pid_t pid, unsigned int *stat_addr, int options)
 	return compat_sys_wait4(pid, stat_addr, options, NULL);
 }
 
-int sys32_ni_syscall(int call)
-{ 
-	struct task_struct *me = current;
-	static char lastcomm[sizeof(me->comm)];
-
-	if (strncmp(lastcomm, me->comm, sizeof(lastcomm))) {
-		printk(KERN_INFO "IA32 syscall %d from %s not implemented\n",
-		       call, me->comm);
-		strncpy(lastcomm, me->comm, sizeof(lastcomm));
-	} 
-	return -ENOSYS;	       
-} 
-
 /* 32-bit timeval and related flotsam.  */
 
 asmlinkage long
@@ -569,7 +549,7 @@ sys32_sysinfo(struct sysinfo32 __user *info)
 	int bitcount = 0;
 	
 	set_fs (KERNEL_DS);
-	ret = sys_sysinfo(&s);
+	ret = sys_sysinfo((struct sysinfo __user *)&s);
 	set_fs (old_fs);
 
         /* Check to see if any memory value is too large for 32-bit and scale
@@ -617,7 +597,7 @@ sys32_sched_rr_get_interval(compat_pid_t pid, struct compat_timespec __user *int
 	mm_segment_t old_fs = get_fs ();
 	
 	set_fs (KERNEL_DS);
-	ret = sys_sched_rr_get_interval(pid, &t);
+	ret = sys_sched_rr_get_interval(pid, (struct timespec __user *)&t);
 	set_fs (old_fs);
 	if (put_compat_timespec(&t, interval))
 		return -EFAULT;
@@ -633,7 +613,7 @@ sys32_rt_sigpending(compat_sigset_t __user *set, compat_size_t sigsetsize)
 	mm_segment_t old_fs = get_fs();
 		
 	set_fs (KERNEL_DS);
-	ret = sys_rt_sigpending(&s, sigsetsize);
+	ret = sys_rt_sigpending((sigset_t __user *)&s, sigsetsize);
 	set_fs (old_fs);
 	if (!ret) {
 		switch (_NSIG_WORDS) {
@@ -658,7 +638,7 @@ sys32_rt_sigqueueinfo(int pid, int sig, compat_siginfo_t __user *uinfo)
 	if (copy_siginfo_from_user32(&info, uinfo))
 		return -EFAULT;
 	set_fs (KERNEL_DS);
-	ret = sys_rt_sigqueueinfo(pid, sig, &info);
+	ret = sys_rt_sigqueueinfo(pid, sig, (siginfo_t __user *)&info);
 	set_fs (old_fs);
 	return ret;
 }
@@ -673,7 +653,7 @@ sys32_pause(void)
 }
 
 
-#ifdef CONFIG_SYSCTL
+#ifdef CONFIG_SYSCTL_SYSCALL
 struct sysctl_ia32 {
 	unsigned int	name;
 	int		nlen;
@@ -694,9 +674,6 @@ sys32_sysctl(struct sysctl_ia32 __user *args32)
 	size_t oldlen;
 	int __user *namep;
 	long ret;
-	extern int do_sysctl(int *name, int nlen, void *oldval, size_t *oldlenp,
-		     void *newval, size_t newlen);
-
 
 	if (copy_from_user(&a32, args32, sizeof (a32)))
 		return -EFAULT;
@@ -720,7 +697,8 @@ sys32_sysctl(struct sysctl_ia32 __user *args32)
 
 	set_fs(KERNEL_DS);
 	lock_kernel();
-	ret = do_sysctl(namep, a32.nlen, oldvalp, &oldlen, newvalp, (size_t) a32.newlen);
+	ret = do_sysctl(namep, a32.nlen, oldvalp, (size_t __user *)&oldlen,
+			newvalp, (size_t) a32.newlen);
 	unlock_kernel();
 	set_fs(old_fs);
 
@@ -771,88 +749,13 @@ sys32_sendfile(int out_fd, int in_fd, compat_off_t __user *offset, s32 count)
 		return -EFAULT;
 		
 	set_fs(KERNEL_DS);
-	ret = sys_sendfile(out_fd, in_fd, offset ? &of : NULL, count);
+	ret = sys_sendfile(out_fd, in_fd, offset ? (off_t __user *)&of : NULL,
+			   count);
 	set_fs(old_fs);
 	
 	if (offset && put_user(of, offset))
 		return -EFAULT;
 		
-	return ret;
-}
-
-/* Handle adjtimex compatibility. */
-
-struct timex32 {
-	u32 modes;
-	s32 offset, freq, maxerror, esterror;
-	s32 status, constant, precision, tolerance;
-	struct compat_timeval time;
-	s32 tick;
-	s32 ppsfreq, jitter, shift, stabil;
-	s32 jitcnt, calcnt, errcnt, stbcnt;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-	s32  :32; s32  :32; s32  :32; s32  :32;
-};
-
-extern int do_adjtimex(struct timex *);
-
-asmlinkage long
-sys32_adjtimex(struct timex32 __user *utp)
-{
-	struct timex txc;
-	int ret;
-
-	memset(&txc, 0, sizeof(struct timex));
-
-	if (!access_ok(VERIFY_READ, utp, sizeof(struct timex32)) ||
-	   __get_user(txc.modes, &utp->modes) ||
-	   __get_user(txc.offset, &utp->offset) ||
-	   __get_user(txc.freq, &utp->freq) ||
-	   __get_user(txc.maxerror, &utp->maxerror) ||
-	   __get_user(txc.esterror, &utp->esterror) ||
-	   __get_user(txc.status, &utp->status) ||
-	   __get_user(txc.constant, &utp->constant) ||
-	   __get_user(txc.precision, &utp->precision) ||
-	   __get_user(txc.tolerance, &utp->tolerance) ||
-	   __get_user(txc.time.tv_sec, &utp->time.tv_sec) ||
-	   __get_user(txc.time.tv_usec, &utp->time.tv_usec) ||
-	   __get_user(txc.tick, &utp->tick) ||
-	   __get_user(txc.ppsfreq, &utp->ppsfreq) ||
-	   __get_user(txc.jitter, &utp->jitter) ||
-	   __get_user(txc.shift, &utp->shift) ||
-	   __get_user(txc.stabil, &utp->stabil) ||
-	   __get_user(txc.jitcnt, &utp->jitcnt) ||
-	   __get_user(txc.calcnt, &utp->calcnt) ||
-	   __get_user(txc.errcnt, &utp->errcnt) ||
-	   __get_user(txc.stbcnt, &utp->stbcnt))
-		return -EFAULT;
-
-	ret = do_adjtimex(&txc);
-
-	if (!access_ok(VERIFY_WRITE, utp, sizeof(struct timex32)) ||
-	   __put_user(txc.modes, &utp->modes) ||
-	   __put_user(txc.offset, &utp->offset) ||
-	   __put_user(txc.freq, &utp->freq) ||
-	   __put_user(txc.maxerror, &utp->maxerror) ||
-	   __put_user(txc.esterror, &utp->esterror) ||
-	   __put_user(txc.status, &utp->status) ||
-	   __put_user(txc.constant, &utp->constant) ||
-	   __put_user(txc.precision, &utp->precision) ||
-	   __put_user(txc.tolerance, &utp->tolerance) ||
-	   __put_user(txc.time.tv_sec, &utp->time.tv_sec) ||
-	   __put_user(txc.time.tv_usec, &utp->time.tv_usec) ||
-	   __put_user(txc.tick, &utp->tick) ||
-	   __put_user(txc.ppsfreq, &utp->ppsfreq) ||
-	   __put_user(txc.jitter, &utp->jitter) ||
-	   __put_user(txc.shift, &utp->shift) ||
-	   __put_user(txc.stabil, &utp->stabil) ||
-	   __put_user(txc.jitcnt, &utp->jitcnt) ||
-	   __put_user(txc.calcnt, &utp->calcnt) ||
-	   __put_user(txc.errcnt, &utp->errcnt) ||
-	   __put_user(txc.stbcnt, &utp->stbcnt))
-		ret = -EFAULT;
-
 	return ret;
 }
 
@@ -882,38 +785,40 @@ asmlinkage long sys32_mmap2(unsigned long addr, unsigned long len,
 
 asmlinkage long sys32_olduname(struct oldold_utsname __user * name)
 {
-	int error;
-	struct new_utsname *ptr;
+	int err;
 
 	if (!name)
 		return -EFAULT;
-	if (!access_ok(VERIFY_WRITE,name,sizeof(struct oldold_utsname)))
+	if (!access_ok(VERIFY_WRITE, name, sizeof(struct oldold_utsname)))
 		return -EFAULT;
   
   	down_read(&uts_sem);
-	
-	ptr = vx_new_utsname();
-	error = __copy_to_user(&name->sysname,ptr->sysname,__OLD_UTS_LEN);
-	 __put_user(0,name->sysname+__OLD_UTS_LEN);
-	 __copy_to_user(&name->nodename,ptr->nodename,__OLD_UTS_LEN);
-	 __put_user(0,name->nodename+__OLD_UTS_LEN);
-	 __copy_to_user(&name->release,ptr->release,__OLD_UTS_LEN);
-	 __put_user(0,name->release+__OLD_UTS_LEN);
-	 __copy_to_user(&name->version,ptr->version,__OLD_UTS_LEN);
-	 __put_user(0,name->version+__OLD_UTS_LEN);
-	 { 
-		 char *arch = "x86_64";
-		 if (personality(current->personality) == PER_LINUX32)
-			 arch = "i686";
+
+	err = __copy_to_user(&name->sysname,&utsname()->sysname,
+				__OLD_UTS_LEN);
+	err |= __put_user(0,name->sysname+__OLD_UTS_LEN);
+	err |= __copy_to_user(&name->nodename,&utsname()->nodename,
+				__OLD_UTS_LEN);
+	err |= __put_user(0,name->nodename+__OLD_UTS_LEN);
+	err |= __copy_to_user(&name->release,&utsname()->release,
+				__OLD_UTS_LEN);
+	err |= __put_user(0,name->release+__OLD_UTS_LEN);
+	err |= __copy_to_user(&name->version,&utsname()->version,
+				__OLD_UTS_LEN);
+	err |= __put_user(0,name->version+__OLD_UTS_LEN);
+	{
+		char *arch = "x86_64";
+		if (personality(current->personality) == PER_LINUX32)
+			arch = "i686";
 		 
-		 __copy_to_user(&name->machine,arch,strlen(arch)+1);
-	 }
-	
-	 up_read(&uts_sem);
-	 
-	 error = error ? -EFAULT : 0;
-	 
-	 return error;
+		err |= __copy_to_user(&name->machine, arch, strlen(arch)+1);
+	}
+
+	up_read(&uts_sem);
+
+	err = err ? -EFAULT : 0;
+
+	return err;
 }
 
 long sys32_uname(struct old_utsname __user * name)
@@ -922,7 +827,7 @@ long sys32_uname(struct old_utsname __user * name)
 	if (!name)
 		return -EFAULT;
 	down_read(&uts_sem);
-	err=copy_to_user(name, vx_new_utsname(), sizeof (*name));
+	err = copy_to_user(name, utsname(), sizeof (*name));
 	up_read(&uts_sem);
 	if (personality(current->personality) == PER_LINUX32) 
 		err |= copy_to_user(&name->machine, "i686", 5);
@@ -937,7 +842,7 @@ long sys32_ustat(unsigned dev, struct ustat32 __user *u32p)
 	
 	seg = get_fs(); 
 	set_fs(KERNEL_DS); 
-	ret = sys_ustat(dev,&u); 
+	ret = sys_ustat(dev, (struct ustat __user *)&u);
 	set_fs(seg);
 	if (ret >= 0) { 
 		if (!access_ok(VERIFY_WRITE,u32p,sizeof(struct ustat32)) || 
@@ -961,11 +866,6 @@ asmlinkage long sys32_execve(char __user *name, compat_uptr_t __user *argv,
 	if (IS_ERR(filename))
 		return error;
 	error = compat_do_execve(filename, argv, envp, regs);
-	if (error == 0) {
-		task_lock(current);
-		current->ptrace &= ~PT_DTRACE;
-		task_unlock(current);
-	}
 	putname(filename);
 	return error;
 }
@@ -1008,7 +908,7 @@ long sys32_vm86_warning(void)
 	struct task_struct *me = current;
 	static char lastcomm[sizeof(me->comm)];
 	if (strncmp(lastcomm, me->comm, sizeof(lastcomm))) {
-		printk(KERN_INFO "%s: vm86 mode not supported on 64 bit kernel\n",
+		compat_printk(KERN_INFO "%s: vm86 mode not supported on 64 bit kernel\n",
 		       me->comm);
 		strncpy(lastcomm, me->comm, sizeof(lastcomm));
 	} 
@@ -1021,13 +921,3 @@ long sys32_lookup_dcookie(u32 addr_low, u32 addr_high,
 	return sys_lookup_dcookie(((u64)addr_high << 32) | addr_low, buf, len);
 }
 
-static int __init ia32_init (void)
-{
-	printk("IA32 emulation $Id: sys_ia32.c,v 1.32 2002/03/24 13:02:28 ak Exp $\n");  
-	return 0;
-}
-
-__initcall(ia32_init);
-
-extern unsigned long ia32_sys_call_table[];
-EXPORT_SYMBOL(ia32_sys_call_table);

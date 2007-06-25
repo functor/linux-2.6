@@ -4,15 +4,20 @@
 #include <linux/mm.h>
 #include <asm/processor.h>
 
-#define __flush_tlb() xen_tlb_flush()
-#define __flush_tlb_global() xen_tlb_flush()
+#ifdef CONFIG_PARAVIRT
+#include <asm/paravirt.h>
+#else
+#define __flush_tlb() __native_flush_tlb()
+#define __flush_tlb_global() __native_flush_tlb_global()
+#define __flush_tlb_single(addr) __native_flush_tlb_single(addr)
+#endif
+
+#define __native_flush_tlb() xen_tlb_flush()
+#define __native_flush_tlb_global() xen_tlb_flush()
+#define __native_flush_tlb_single(addr) xen_invlpg(addr)
 #define __flush_tlb_all() xen_tlb_flush()
 
-extern unsigned long pgkern_mask;
-
 #define cpu_has_invlpg	(boot_cpu_data.x86 > 3)
-
-#define __flush_tlb_single(addr) xen_invlpg(addr)
 
 #define __flush_tlb_one(addr) __flush_tlb_single(addr)
 

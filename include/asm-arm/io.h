@@ -63,7 +63,7 @@ extern void __raw_readsl(const void __iomem *addr, void *data, int longlen);
  */
 extern void __iomem * __ioremap_pfn(unsigned long, unsigned long, size_t, unsigned long);
 extern void __iomem * __ioremap(unsigned long, size_t, unsigned long);
-extern void __iounmap(void __iomem *addr);
+extern void __iounmap(volatile void __iomem *addr);
 
 /*
  * Bad read/write accesses...
@@ -74,14 +74,6 @@ extern void __readwrite_bug(const char *fn);
  * Now, pick up the machine-defined IO definitions
  */
 #include <asm/arch/io.h>
-
-#ifdef __io_pci
-#warning machine class uses buggy __io_pci
-#endif
-#if defined(__arch_putb) || defined(__arch_putw) || defined(__arch_putl) || \
-    defined(__arch_getb) || defined(__arch_getw) || defined(__arch_getl)
-#warning machine class uses old __arch_putw or __arch_getw
-#endif
 
 /*
  *  IO port access primitives
@@ -193,23 +185,6 @@ extern void _memset_io(volatile void __iomem *, int, size_t);
 #define eth_io_copy_and_sum(s,c,l,b) \
 				eth_copy_and_sum((s),__mem_pci(c),(l),(b))
 
-static inline int
-check_signature(void __iomem *io_addr, const unsigned char *signature,
-		int length)
-{
-	int retval = 0;
-	do {
-		if (readb(io_addr) != *signature)
-			goto out;
-		io_addr++;
-		signature++;
-		length--;
-	} while (length);
-	retval = 1;
-out:
-	return retval;
-}
-
 #elif !defined(readb)
 
 #define readb(c)			(__readwrite_bug("readb"),0)
@@ -224,42 +199,6 @@ out:
 #define check_signature(io,sig,len)	(0)
 
 #endif	/* __mem_pci */
-
-/*
- * If this architecture has ISA IO, then define the isa_read/isa_write
- * macros.
- */
-#ifdef __mem_isa
-
-#define isa_readb(addr)			__raw_readb(__mem_isa(addr))
-#define isa_readw(addr)			__raw_readw(__mem_isa(addr))
-#define isa_readl(addr)			__raw_readl(__mem_isa(addr))
-#define isa_writeb(val,addr)		__raw_writeb(val,__mem_isa(addr))
-#define isa_writew(val,addr)		__raw_writew(val,__mem_isa(addr))
-#define isa_writel(val,addr)		__raw_writel(val,__mem_isa(addr))
-#define isa_memset_io(a,b,c)		_memset_io(__mem_isa(a),(b),(c))
-#define isa_memcpy_fromio(a,b,c)	_memcpy_fromio((a),__mem_isa(b),(c))
-#define isa_memcpy_toio(a,b,c)		_memcpy_toio(__mem_isa((a)),(b),(c))
-
-#define isa_eth_io_copy_and_sum(a,b,c,d) \
-				eth_copy_and_sum((a),__mem_isa(b),(c),(d))
-
-#else	/* __mem_isa */
-
-#define isa_readb(addr)			(__readwrite_bug("isa_readb"),0)
-#define isa_readw(addr)			(__readwrite_bug("isa_readw"),0)
-#define isa_readl(addr)			(__readwrite_bug("isa_readl"),0)
-#define isa_writeb(val,addr)		__readwrite_bug("isa_writeb")
-#define isa_writew(val,addr)		__readwrite_bug("isa_writew")
-#define isa_writel(val,addr)		__readwrite_bug("isa_writel")
-#define isa_memset_io(a,b,c)		__readwrite_bug("isa_memset_io")
-#define isa_memcpy_fromio(a,b,c)	__readwrite_bug("isa_memcpy_fromio")
-#define isa_memcpy_toio(a,b,c)		__readwrite_bug("isa_memcpy_toio")
-
-#define isa_eth_io_copy_and_sum(a,b,c,d) \
-				__readwrite_bug("isa_eth_io_copy_and_sum")
-
-#endif	/* __mem_isa */
 
 /*
  * ioremap and friends.
@@ -316,6 +255,10 @@ extern void pci_iounmap(struct pci_dev *dev, void __iomem *addr);
 #define BIOVEC_MERGEABLE(vec1, vec2)	\
 	((bvec_to_phys((vec1)) + (vec1)->bv_len) == bvec_to_phys((vec2)))
 
+#define ARCH_HAS_VALID_PHYS_ADDR_RANGE
+extern int valid_phys_addr_range(unsigned long addr, size_t size);
+extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
+
 /*
  * Convert a physical pointer to a virtual kernel pointer for /dev/mem
  * access
@@ -326,6 +269,13 @@ extern void pci_iounmap(struct pci_dev *dev, void __iomem *addr);
  * Convert a virtual cached pointer to an uncached pointer
  */
 #define xlate_dev_kmem_ptr(p)	p
+
+/*
+ * Register ISA memory and port locations for glibc iopl/inb/outb
+ * emulation.
+ */
+extern void register_isa_ports(unsigned int mmio, unsigned int io,
+			       unsigned int io_shift);
 
 #endif	/* __KERNEL__ */
 #endif	/* __ASM_ARM_IO_H */

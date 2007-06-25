@@ -1,5 +1,5 @@
 /*
- * linux/arch/arm/mach-sa1100/sa1111.c
+ * linux/arch/arm/common/sa1111.c
  *
  * SA1111 support
  *
@@ -14,7 +14,6 @@
  * All initialization functions provided here are intended to be called
  * from machine specific code with proper arguments when required.
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -26,6 +25,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/dma-mapping.h>
+#include <linux/clk.h>
 
 #include <asm/hardware.h>
 #include <asm/mach-types.h>
@@ -35,10 +35,6 @@
 #include <asm/sizes.h>
 
 #include <asm/hardware/sa1111.h>
-
-#ifdef CONFIG_ARCH_PXA
-#include <asm/arch/pxa-regs.h>
-#endif
 
 extern void __init sa1110_mb_enable(void);
 
@@ -51,6 +47,7 @@ extern void __init sa1110_mb_enable(void);
  */
 struct sa1111 {
 	struct device	*dev;
+	struct clk	*clk;
 	unsigned long	phys;
 	int		irq;
 	spinlock_t	lock;
@@ -150,10 +147,10 @@ void __init sa1111_adjust_zones(int node, unsigned long *size, unsigned long *ho
  * will call us again if there are more interrupts to process.
  */
 static void
-sa1111_irq_handler(unsigned int irq, struct irqdesc *desc, struct pt_regs *regs)
+sa1111_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	unsigned int stat0, stat1, i;
-	void __iomem *base = desc->data;
+	void __iomem *base = get_irq_data(irq);
 
 	stat0 = sa1111_readl(base + SA1111_INTSTATCLR0);
 	stat1 = sa1111_readl(base + SA1111_INTSTATCLR1);
@@ -165,17 +162,17 @@ sa1111_irq_handler(unsigned int irq, struct irqdesc *desc, struct pt_regs *regs)
 	sa1111_writel(stat1, base + SA1111_INTSTATCLR1);
 
 	if (stat0 == 0 && stat1 == 0) {
-		do_bad_IRQ(irq, desc, regs);
+		do_bad_IRQ(irq, desc);
 		return;
 	}
 
 	for (i = IRQ_SA1111_START; stat0; i++, stat0 >>= 1)
 		if (stat0 & 1)
-			do_edge_IRQ(i, irq_desc + i, regs);
+			handle_edge_irq(i, irq_desc + i);
 
 	for (i = IRQ_SA1111_START + 32; stat1; i++, stat1 >>= 1)
 		if (stat1 & 1)
-			do_edge_IRQ(i, irq_desc + i, regs);
+			handle_edge_irq(i, irq_desc + i);
 
 	/* For level-based interrupts */
 	desc->chip->unmask(irq);
@@ -190,7 +187,7 @@ static void sa1111_ack_irq(unsigned int irq)
 
 static void sa1111_mask_lowirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ie0;
 
 	ie0 = sa1111_readl(mapbase + SA1111_INTEN0);
@@ -200,7 +197,7 @@ static void sa1111_mask_lowirq(unsigned int irq)
 
 static void sa1111_unmask_lowirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ie0;
 
 	ie0 = sa1111_readl(mapbase + SA1111_INTEN0);
@@ -218,7 +215,7 @@ static void sa1111_unmask_lowirq(unsigned int irq)
 static int sa1111_retrigger_lowirq(unsigned int irq)
 {
 	unsigned int mask = SA1111_IRQMASK_LO(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ip0;
 	int i;
 
@@ -239,7 +236,7 @@ static int sa1111_retrigger_lowirq(unsigned int irq)
 static int sa1111_type_lowirq(unsigned int irq, unsigned int flags)
 {
 	unsigned int mask = SA1111_IRQMASK_LO(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ip0;
 
 	if (flags == IRQT_PROBE)
@@ -262,7 +259,7 @@ static int sa1111_type_lowirq(unsigned int irq, unsigned int flags)
 static int sa1111_wake_lowirq(unsigned int irq, unsigned int on)
 {
 	unsigned int mask = SA1111_IRQMASK_LO(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long we0;
 
 	we0 = sa1111_readl(mapbase + SA1111_WAKEEN0);
@@ -275,7 +272,8 @@ static int sa1111_wake_lowirq(unsigned int irq, unsigned int on)
 	return 0;
 }
 
-static struct irqchip sa1111_low_chip = {
+static struct irq_chip sa1111_low_chip = {
+	.name		= "SA1111-l",
 	.ack		= sa1111_ack_irq,
 	.mask		= sa1111_mask_lowirq,
 	.unmask		= sa1111_unmask_lowirq,
@@ -286,7 +284,7 @@ static struct irqchip sa1111_low_chip = {
 
 static void sa1111_mask_highirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ie1;
 
 	ie1 = sa1111_readl(mapbase + SA1111_INTEN1);
@@ -296,7 +294,7 @@ static void sa1111_mask_highirq(unsigned int irq)
 
 static void sa1111_unmask_highirq(unsigned int irq)
 {
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ie1;
 
 	ie1 = sa1111_readl(mapbase + SA1111_INTEN1);
@@ -314,7 +312,7 @@ static void sa1111_unmask_highirq(unsigned int irq)
 static int sa1111_retrigger_highirq(unsigned int irq)
 {
 	unsigned int mask = SA1111_IRQMASK_HI(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ip1;
 	int i;
 
@@ -335,7 +333,7 @@ static int sa1111_retrigger_highirq(unsigned int irq)
 static int sa1111_type_highirq(unsigned int irq, unsigned int flags)
 {
 	unsigned int mask = SA1111_IRQMASK_HI(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long ip1;
 
 	if (flags == IRQT_PROBE)
@@ -358,7 +356,7 @@ static int sa1111_type_highirq(unsigned int irq, unsigned int flags)
 static int sa1111_wake_highirq(unsigned int irq, unsigned int on)
 {
 	unsigned int mask = SA1111_IRQMASK_HI(irq);
-	void __iomem *mapbase = get_irq_chipdata(irq);
+	void __iomem *mapbase = get_irq_chip_data(irq);
 	unsigned long we1;
 
 	we1 = sa1111_readl(mapbase + SA1111_WAKEEN1);
@@ -371,7 +369,8 @@ static int sa1111_wake_highirq(unsigned int irq, unsigned int on)
 	return 0;
 }
 
-static struct irqchip sa1111_high_chip = {
+static struct irq_chip sa1111_high_chip = {
+	.name		= "SA1111-h",
 	.ack		= sa1111_ack_irq,
 	.mask		= sa1111_mask_highirq,
 	.unmask		= sa1111_unmask_highirq,
@@ -411,15 +410,15 @@ static void sa1111_setup_irq(struct sa1111 *sachip)
 
 	for (irq = IRQ_GPAIN0; irq <= SSPROR; irq++) {
 		set_irq_chip(irq, &sa1111_low_chip);
-		set_irq_chipdata(irq, irqbase);
-		set_irq_handler(irq, do_edge_IRQ);
+		set_irq_chip_data(irq, irqbase);
+		set_irq_handler(irq, handle_edge_irq);
 		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 
 	for (irq = AUDXMTDMADONEA; irq <= IRQ_S1_BVD1_STSCHG; irq++) {
 		set_irq_chip(irq, &sa1111_high_chip);
-		set_irq_chipdata(irq, irqbase);
-		set_irq_handler(irq, do_edge_IRQ);
+		set_irq_chip_data(irq, irqbase);
+		set_irq_handler(irq, handle_edge_irq);
 		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 
@@ -451,19 +450,7 @@ static void sa1111_wake(struct sa1111 *sachip)
 
 	spin_lock_irqsave(&sachip->lock, flags);
 
-#ifdef CONFIG_ARCH_SA1100
-	/*
-	 * First, set up the 3.6864MHz clock on GPIO 27 for the SA-1111:
-	 * (SA-1110 Developer's Manual, section 9.1.2.1)
-	 */
-	GAFR |= GPIO_32_768kHz;
-	GPDR |= GPIO_32_768kHz;
-	TUCR = TUCR_3_6864MHz;
-#elif CONFIG_ARCH_PXA
-	pxa_gpio_mode(GPIO11_3_6MHz_MD);
-#else
-#error missing clock setup
-#endif
+	clk_enable(sachip->clk);
 
 	/*
 	 * Turn VCO on, and disable PLL Bypass.
@@ -555,12 +542,11 @@ sa1111_init_one_child(struct sa1111 *sachip, struct resource *parent,
 	struct sa1111_dev *dev;
 	int ret;
 
-	dev = kmalloc(sizeof(struct sa1111_dev), GFP_KERNEL);
+	dev = kzalloc(sizeof(struct sa1111_dev), GFP_KERNEL);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto out;
 	}
-	memset(dev, 0, sizeof(struct sa1111_dev));
 
 	snprintf(dev->dev.bus_id, sizeof(dev->dev.bus_id),
 		 "%4.4lx", info->offset);
@@ -632,14 +618,18 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 {
 	struct sa1111 *sachip;
 	unsigned long id;
-	unsigned int has_devs, val;
+	unsigned int has_devs;
 	int i, ret = -ENODEV;
 
-	sachip = kmalloc(sizeof(struct sa1111), GFP_KERNEL);
+	sachip = kzalloc(sizeof(struct sa1111), GFP_KERNEL);
 	if (!sachip)
 		return -ENOMEM;
 
-	memset(sachip, 0, sizeof(struct sa1111));
+	sachip->clk = clk_get(me, "GPIO27_CLK");
+	if (!sachip->clk) {
+		ret = PTR_ERR(sachip->clk);
+		goto err_free;
+	}
 
 	spin_lock_init(&sachip->lock);
 
@@ -656,7 +646,7 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 	sachip->base = ioremap(mem->start, PAGE_SIZE * 2);
 	if (!sachip->base) {
 		ret = -ENOMEM;
-		goto out;
+		goto err_clkput;
 	}
 
 	/*
@@ -666,7 +656,7 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 	if ((id & SKID_ID_MASK) != SKID_SA1111_ID) {
 		printk(KERN_DEBUG "SA1111 not detected: ID = %08lx\n", id);
 		ret = -ENODEV;
-		goto unmap;
+		goto err_unmap;
 	}
 
 	printk(KERN_INFO "SA1111 Microprocessor Companion Chip: "
@@ -679,6 +669,9 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 	sa1111_wake(sachip);
 
 #ifdef CONFIG_ARCH_SA1100
+	{
+	unsigned int val;
+
 	/*
 	 * The SDRAM configuration of the SA1110 and the SA1111 must
 	 * match.  This is very important to ensure that SA1111 accesses
@@ -702,6 +695,7 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 	 * Enable the SA1110 memory bus request and grant signals.
 	 */
 	sa1110_mb_enable();
+	}
 #endif
 
 	/*
@@ -726,9 +720,11 @@ __sa1111_probe(struct device *me, struct resource *mem, int irq)
 
 	return 0;
 
- unmap:
+ err_unmap:
 	iounmap(sachip->base);
- out:
+ err_clkput:
+	clk_put(sachip->clk);
+ err_free:
 	kfree(sachip);
 	return ret;
 }
@@ -751,6 +747,8 @@ static void __sa1111_remove(struct sa1111 *sachip)
 	sa1111_writel(0, irqbase + SA1111_WAKEEN0);
 	sa1111_writel(0, irqbase + SA1111_WAKEEN1);
 
+	clk_disable(sachip->clk);
+
 	if (sachip->irq != NO_IRQ) {
 		set_irq_chained_handler(sachip->irq, NULL);
 		set_irq_data(sachip->irq, NULL);
@@ -759,6 +757,7 @@ static void __sa1111_remove(struct sa1111 *sachip)
 	}
 
 	iounmap(sachip->base);
+	clk_put(sachip->clk);
 	kfree(sachip);
 }
 
@@ -857,6 +856,8 @@ static int sa1111_suspend(struct platform_device *dev, pm_message_t state)
 	sa1111_writel(0, sachip->base + SA1111_SKPWM0);
 	sa1111_writel(0, sachip->base + SA1111_SKPWM1);
 
+	clk_disable(sachip->clk);
+
 	spin_unlock_irqrestore(&sachip->lock, flags);
 
 	return 0;
@@ -943,6 +944,8 @@ static int sa1111_probe(struct platform_device *pdev)
 	if (!mem)
 		return -EINVAL;
 	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return -ENXIO;
 
 	return __sa1111_probe(&pdev->dev, mem, irq);
 }

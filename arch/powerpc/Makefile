@@ -20,6 +20,7 @@ CROSS32_COMPILE ?=
 CROSS32CC		:= $(CROSS32_COMPILE)gcc
 CROSS32AS		:= $(CROSS32_COMPILE)as
 CROSS32LD		:= $(CROSS32_COMPILE)ld
+CROSS32AR		:= $(CROSS32_COMPILE)ar
 CROSS32OBJCOPY		:= $(CROSS32_COMPILE)objcopy
 
 ifeq ($(HAS_BIARCH),y)
@@ -28,10 +29,11 @@ CROSS32CC	:= $(CC) -m32
 CROSS32AS	:= $(AS) -a32
 CROSS32LD	:= $(LD) -m elf32ppc
 CROSS32OBJCOPY	:= $(OBJCOPY)
+CROSS32AR	:= $(AR)
 endif
 endif
 
-export CROSS32CC CROSS32AS CROSS32LD CROSS32OBJCOPY
+export CROSS32CC CROSS32AS CROSS32LD CROSS32AR CROSS32OBJCOPY
 
 KBUILD_DEFCONFIG := $(shell uname -m)_defconfig
 
@@ -104,7 +106,10 @@ ifndef CONFIG_FSL_BOOKE
 CFLAGS		+= -mstring
 endif
 
-cpu-as-$(CONFIG_PPC64BRIDGE)	+= -Wa,-mppc64bridge
+ifeq ($(CONFIG_6xx),y)
+CFLAGS		+= -mcpu=powerpc
+endif
+
 cpu-as-$(CONFIG_4xx)		+= -Wa,-m405
 cpu-as-$(CONFIG_6xx)		+= -Wa,-maltivec
 cpu-as-$(CONFIG_POWER4)		+= -Wa,-maltivec
@@ -129,13 +134,8 @@ core-y				+= arch/powerpc/kernel/ \
 				   arch/powerpc/lib/ \
 				   arch/powerpc/sysdev/ \
 				   arch/powerpc/platforms/
-core-$(CONFIG_PPC32)		+= arch/ppc/kernel/
-core-$(CONFIG_MATH_EMULATION)	+= arch/ppc/math-emu/
+core-$(CONFIG_MATH_EMULATION)	+= arch/powerpc/math-emu/
 core-$(CONFIG_XMON)		+= arch/powerpc/xmon/
-core-$(CONFIG_APUS)		+= arch/ppc/amiga/
-drivers-$(CONFIG_8xx)		+= arch/ppc/8xx_io/
-drivers-$(CONFIG_4xx)		+= arch/ppc/4xx_io/
-drivers-$(CONFIG_CPM2)		+= arch/ppc/8260_io/
 
 drivers-$(CONFIG_OPROFILE)	+= arch/powerpc/oprofile/
 
@@ -148,9 +148,9 @@ all: $(KBUILD_IMAGE)
 
 CPPFLAGS_vmlinux.lds	:= -Upowerpc
 
-BOOT_TARGETS = zImage zImage.initrd znetboot znetboot.initrd vmlinux.sm uImage
+BOOT_TARGETS = zImage zImage.initrd uImage
 
-.PHONY: $(BOOT_TARGETS)
+PHONY += $(BOOT_TARGETS)
 
 boot := arch/$(ARCH)/boot
 

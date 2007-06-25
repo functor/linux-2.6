@@ -60,7 +60,7 @@
 #include <asm/uaccess.h>
 #include <asm/processor.h>
 #include <asm/timer.h>
-#include <asm/sections.h>
+#include <asm/time.h>
 
 #include "mach_time.h"
 
@@ -73,20 +73,9 @@
 #include <xen/evtchn.h>
 #include <xen/interface/vcpu.h>
 
-#if defined (__i386__)
 #include <asm/i8259.h>
-#endif
 
 int pit_latch_buggy;              /* extern */
-
-#if defined(__x86_64__)
-unsigned long vxtime_hz = PIT_TICK_RATE;
-struct vxtime_data __vxtime __section_vxtime;   /* for vsyscalls */
-volatile unsigned long __jiffies __section_jiffies = INITIAL_JIFFIES;
-unsigned long __wall_jiffies __section_wall_jiffies = INITIAL_JIFFIES;
-struct timespec __xtime __section_xtime;
-struct timezone __sys_tz __section_sys_tz;
-#endif
 
 #define USEC_PER_TICK (USEC_PER_SEC / HZ)
 #define NSEC_PER_TICK (NSEC_PER_SEC / HZ)
@@ -97,8 +86,6 @@ struct timezone __sys_tz __section_sys_tz;
 
 unsigned int cpu_khz;	/* Detected as we calibrate the TSC */
 EXPORT_SYMBOL(cpu_khz);
-
-extern unsigned long wall_jiffies;
 
 DEFINE_SPINLOCK(rtc_lock);
 EXPORT_SYMBOL(rtc_lock);
@@ -191,16 +178,13 @@ struct timer_opts timer_tsc = {
 static inline u64 scale_delta(u64 delta, u32 mul_frac, int shift)
 {
 	u64 product;
-#ifdef __i386__
 	u32 tmp1, tmp2;
-#endif
 
 	if (shift < 0)
 		delta >>= -shift;
 	else
 		delta <<= shift;
 
-#ifdef __i386__
 	__asm__ (
 		"mul  %5       ; "
 		"mov  %4,%%eax ; "
@@ -211,22 +195,15 @@ static inline u64 scale_delta(u64 delta, u32 mul_frac, int shift)
 		"adc  %5,%%edx ; "
 		: "=A" (product), "=r" (tmp1), "=r" (tmp2)
 		: "a" ((u32)delta), "1" ((u32)(delta >> US_SCALE)), "2" (mul_frac) );
-#else
-	__asm__ (
-		"mul %%rdx ; shrd $32,%%rdx,%%rax"
-		: "=a" (product) : "0" (delta), "d" ((u64)mul_frac) );
-#endif
 
 	return product;
 }
 
-#if defined (__i386__)
 int read_current_timer(unsigned long *timer_val)
 {
 	rdtscl(*timer_val);
 	return 0;
 }
-#endif
 
 void init_cpu_khz(void)
 {
@@ -262,11 +239,10 @@ static void __update_wallclock(time_t sec, long nsec)
 	time_t wtm_sec, xtime_sec;
 	u64 tmp, wc_nsec;
 
-	/* Adjust wall-clock time base based on wall_jiffies ticks. */
+	/* Adjust wall-clock time base based on jiffies ticks. */
 	wc_nsec = processed_system_time;
 	wc_nsec += sec * (u64)NSEC_PER_SEC;
 	wc_nsec += nsec;
-	wc_nsec -= (jiffies - wall_jiffies) * (u64)NS_PER_TICK;
 
 	/* Split wallclock base into seconds and nanoseconds. */
 	tmp = wc_nsec;
@@ -383,13 +359,10 @@ void do_gettimeofday(struct timeval *tv)
 	shadow = &per_cpu(shadow_time, cpu);
 
 	do {
-		unsigned long lost;
-
 		local_time_version = shadow->version;
 		seq = read_seqbegin(&xtime_lock);
 
 		usec = get_usec_offset(shadow);
-		lost = jiffies - wall_jiffies;
 
 		/*
 		 * If time_adjust is negative then NTP is slowing the clock
@@ -399,12 +372,7 @@ void do_gettimeofday(struct timeval *tv)
 		if (unlikely(time_adjust < 0)) {
 			max_ntp_tick = (USEC_PER_SEC / HZ) - tickadj;
 			usec = min(usec, max_ntp_tick);
-
-			if (lost)
-				usec += lost * max_ntp_tick;
 		}
-		else if (unlikely(lost))
-			usec += lost * (USEC_PER_SEC / HZ);
 
 		sec = xtime.tv_sec;
 		usec += (xtime.tv_nsec / NSEC_PER_USEC);
@@ -507,7 +475,7 @@ static void sync_xen_wallclock(unsigned long dummy)
 	write_seqlock_irq(&xtime_lock);
 
 	sec  = xtime.tv_sec;
-	nsec = xtime.tv_nsec + ((jiffies - wall_jiffies) * (u64)NS_PER_TICK);
+	nsec = xtime.tv_nsec;
 	__normalize_time(&sec, &nsec);
 
 	op.cmd = DOM0_SETTIME;
@@ -534,10 +502,7 @@ static int set_rtc_mmss(unsigned long nowtime)
 
 	/* gets recalled with irq locally disabled */
 	spin_lock_irqsave(&rtc_lock, flags);
-	if (efi_enabled)
-		retval = efi_set_rtc_mmss(nowtime);
-	else
-		retval = mach_set_rtc_mmss(nowtime);
+	retval = set_wallclock(nowtime);
 	spin_unlock_irqrestore(&rtc_lock, flags);
 
 	return retval;
@@ -574,37 +539,35 @@ unsigned long long sched_clock(void)
 	return monotonic_clock();
 }
 
-#if defined(CONFIG_SMP) && defined(CONFIG_FRAME_POINTER)
 unsigned long profile_pc(struct pt_regs *regs)
 {
 	unsigned long pc = instruction_pointer(regs);
 
-#ifdef __x86_64__
-	/* Assume the lock function has either no stack frame or only a single word.
-	   This checks if the address on the stack looks like a kernel text address.
-	   There is a small window for false hits, but in that case the tick
-	   is just accounted to the spinlock function.
-	   Better would be to write these functions in assembler again
-	   and check exactly. */
+#ifdef CONFIG_SMP
 	if (!user_mode_vm(regs) && in_lock_functions(pc)) {
-		char *v = *(char **)regs->rsp;
-		if ((v >= _stext && v <= _etext) ||
-			(v >= _sinittext && v <= _einittext) ||
-			(v >= (char *)MODULES_VADDR  && v <= (char *)MODULES_END))
-			return (unsigned long)v;
-		return ((unsigned long *)regs->rsp)[1];
-	}
-#else
-	if (!user_mode_vm(regs) && in_lock_functions(pc))
+#ifdef CONFIG_FRAME_POINTER
 		return *(unsigned long *)(regs->ebp + 4);
+#else
+		unsigned long *sp;
+		if ((regs->xcs & 3) == 0)
+			sp = (unsigned long *)&regs->esp;
+		else
+			sp = (unsigned long *)regs->esp;
+		/* Return address is either directly at stack pointer
+		   or above a saved eflags. Eflags has bits 22-31 zero,
+		   kernel addresses don't. */
+ 		if (sp[0] >> 22)
+			return sp[0];
+		if (sp[1] >> 22)
+			return sp[1];
 #endif
-
+	}
+#endif
 	return pc;
 }
 EXPORT_SYMBOL(profile_pc);
-#endif
 
-irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t timer_interrupt(int irq, void *dev_id)
 {
 	s64 delta, delta_cpu, stolen, blocked;
 	u64 sched_time;
@@ -658,7 +621,7 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	while (delta >= NS_PER_TICK) {
 		delta -= NS_PER_TICK;
 		processed_system_time += NS_PER_TICK;
-		do_timer(regs);
+		do_timer(1);
 	}
 
 	if (shadow_tv_version != HYPERVISOR_shared_info->wc_version) {
@@ -702,17 +665,21 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	if (delta_cpu > 0) {
 		do_div(delta_cpu, NS_PER_TICK);
 		per_cpu(processed_system_time, cpu) += delta_cpu * NS_PER_TICK;
-		if (user_mode(regs))
+		if (user_mode(get_irq_regs()))
 			account_user_time(current, (cputime_t)delta_cpu);
 		else
 			account_system_time(current, HARDIRQ_OFFSET,
 					    (cputime_t)delta_cpu);
 	}
 
+	/* Offlined for more than a few seconds? Avoid lockup warnings. */
+	if (stolen > 5*HZ)
+		touch_softlockup_watchdog();
+
 	/* Local timer processing (see update_process_times()). */
 	run_local_timers();
 	if (rcu_pending(cpu))
-		rcu_check_callbacks(cpu, user_mode(regs));
+		rcu_check_callbacks(cpu, user_mode(get_irq_regs()));
 	scheduler_tick();
 	run_posix_cpu_timers(current);
 
@@ -744,10 +711,7 @@ unsigned long get_cmos_time(void)
 
 	spin_lock_irqsave(&rtc_lock, flags);
 
-	if (efi_enabled)
-		retval = efi_get_time();
-	else
-		retval = mach_get_cmos_time();
+	retval = get_wallclock();
 
 	spin_unlock_irqrestore(&rtc_lock, flags);
 
@@ -805,16 +769,19 @@ void notify_arch_cmos_timer(void)
 	mod_timer(&sync_xen_wallclock_timer, jiffies + 1);
 }
 
-static long clock_cmos_diff, sleep_start;
+static long clock_cmos_diff;
+static unsigned long sleep_start;
 
 static int timer_suspend(struct sys_device *dev, pm_message_t state)
 {
 	/*
 	 * Estimate time zone so that set_time can update the clock
 	 */
-	clock_cmos_diff = -get_cmos_time();
+	unsigned long ctime =  get_cmos_time();
+
+	clock_cmos_diff = -ctime;
 	clock_cmos_diff += get_seconds();
-	sleep_start = get_cmos_time();
+	sleep_start = ctime;
 	return 0;
 }
 
@@ -822,19 +789,27 @@ static int timer_resume(struct sys_device *dev)
 {
 	unsigned long flags;
 	unsigned long sec;
-	unsigned long sleep_length;
+	unsigned long ctime = get_cmos_time();
+	long sleep_length = (ctime - sleep_start) * HZ;
+
+	if (sleep_length < 0) {
+		printk(KERN_WARNING "CMOS clock skew detected in timer resume!\n");
+		/* The time after the resume must not be earlier than the time
+		 * before the suspend or some nasty things will happen
+		 */
+		sleep_length = 0;
+		ctime = sleep_start;
+	}
 
 #ifdef CONFIG_HPET_TIMER
 	if (is_hpet_enabled())
 		hpet_reenable();
 #endif
-	sec = get_cmos_time() + clock_cmos_diff;
-	sleep_length = (get_cmos_time() - sleep_start) * HZ;
+	sec = ctime + clock_cmos_diff;
 	write_seqlock_irqsave(&xtime_lock, flags);
 	xtime.tv_sec = sec;
 	xtime.tv_nsec = 0;
 	jiffies_64 += sleep_length;
-	wall_jiffies += sleep_length;
 	write_sequnlock_irqrestore(&xtime_lock, flags);
 	touch_softlockup_watchdog();
 	return 0;
@@ -876,7 +851,8 @@ static void __init hpet_time_init(void)
 	if ((hpet_enable() >= 0) && hpet_use_timer) {
 		printk("Using HPET for base-timer\n");
 	}
-	time_init_hook();
+
+	do_time_init();
 }
 #endif
 
@@ -920,14 +896,6 @@ void __init time_init(void)
 	init_cpu_khz();
 	printk(KERN_INFO "Xen reported: %u.%03u MHz processor.\n",
 	       cpu_khz / 1000, cpu_khz % 1000);
-
-#if defined(__x86_64__)
-	vxtime.mode = VXTIME_TSC;
-	vxtime.quot = (1000000L << US_SCALE) / vxtime_hz;
-	vxtime.tsc_quot = (1000L << US_SCALE) / cpu_khz;
-	sync_core();
-	rdtscll(vxtime.last_tsc);
-#endif
 
 	/* Cannot request_irq() until kmem is initialised. */
 	late_time_init = setup_cpu0_timer_irq;

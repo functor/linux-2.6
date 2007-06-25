@@ -1,6 +1,10 @@
 #ifndef _ASM_IA64_PGALLOC_H
 #define _ASM_IA64_PGALLOC_H
 
+#define arch_add_exec_range(mm, limit)		do { ; } while (0)
+#define arch_flush_exec_range(mm)		do { ; } while (0)
+#define arch_remove_exec_range(mm, limit)	do { ; } while (0)
+
 /*
  * This file contains the functions and defines necessary to allocate
  * page tables.
@@ -13,7 +17,6 @@
  * Copyright (C) 2000, Goutham Rao <goutham.rao@intel.com>
  */
 
-#include <linux/config.h>
 
 #include <linux/compiler.h>
 #include <linux/mm.h>
@@ -61,7 +64,7 @@ static inline void *pgtable_quicklist_alloc(void)
 static inline void pgtable_quicklist_free(void *pgtable_entry)
 {
 #ifdef CONFIG_NUMA
-	unsigned long nid = page_to_nid(virt_to_page(pgtable_entry));
+	int nid = page_to_nid(virt_to_page(pgtable_entry));
 
 	if (unlikely(nid != numa_node_id())) {
 		free_page((unsigned long)pgtable_entry);
@@ -126,7 +129,11 @@ static inline void pmd_free(pmd_t * pmd)
 static inline void
 pmd_populate(struct mm_struct *mm, pmd_t * pmd_entry, struct page *pte)
 {
+#ifndef CONFIG_XEN
 	pmd_val(*pmd_entry) = page_to_phys(pte);
+#else
+	pmd_val(*pmd_entry) = page_to_pseudophys(pte);
+#endif
 }
 
 static inline void

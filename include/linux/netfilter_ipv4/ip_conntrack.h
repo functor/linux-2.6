@@ -4,12 +4,12 @@
 #include <linux/netfilter/nf_conntrack_common.h>
 
 #ifdef __KERNEL__
-#include <linux/config.h>
 #include <linux/netfilter_ipv4/ip_conntrack_tuple.h>
 #include <linux/bitops.h>
 #include <linux/compiler.h>
 #include <asm/atomic.h>
 
+#include <linux/timer.h>
 #include <linux/netfilter_ipv4/ip_conntrack_tcp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_icmp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_proto_gre.h>
@@ -29,6 +29,7 @@ union ip_conntrack_expect_proto {
 };
 
 /* Add protocol helper include file here */
+#include <linux/netfilter_ipv4/ip_conntrack_h323.h>
 #include <linux/netfilter_ipv4/ip_conntrack_pptp.h>
 #include <linux/netfilter_ipv4/ip_conntrack_amanda.h>
 #include <linux/netfilter_ipv4/ip_conntrack_ftp.h>
@@ -37,6 +38,7 @@ union ip_conntrack_expect_proto {
 /* per conntrack: application helper private data */
 union ip_conntrack_help {
 	/* insert conntrack helper private data (master) here */
+	struct ip_ct_h323_master ct_h323_info;
 	struct ip_ct_pptp_master ct_pptp_info;
 	struct ip_ct_ftp_master ct_ftp_info;
 	struct ip_ct_irc_master ct_irc_info;
@@ -119,6 +121,10 @@ struct ip_conntrack
 	u_int32_t mark;
 #endif
 
+#ifdef CONFIG_IP_NF_CONNTRACK_SECMARK
+	u_int32_t secmark;
+#endif
+
 	/* Traversed often, so hopefully in different cacheline to top */
 	/* These are my tuples; original and reply */
 	struct ip_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
@@ -152,6 +158,7 @@ struct ip_conntrack_expect
 	unsigned int flags;
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED
+	__be32 saved_ip;
 	/* This is the original per-proto part, used to map the
 	 * expected connection the way the recipient expects. */
 	union ip_conntrack_manip_proto saved_proto;
@@ -271,7 +278,7 @@ extern struct ip_conntrack_expect *
 __ip_conntrack_expect_find(const struct ip_conntrack_tuple *tuple);
 
 extern struct ip_conntrack_expect *
-ip_conntrack_expect_find(const struct ip_conntrack_tuple *tuple);
+ip_conntrack_expect_find_get(const struct ip_conntrack_tuple *tuple);
 
 extern struct ip_conntrack_tuple_hash *
 __ip_conntrack_find(const struct ip_conntrack_tuple *tuple,
@@ -291,6 +298,7 @@ static inline int is_dying(struct ip_conntrack *ct)
 }
 
 extern unsigned int ip_conntrack_htable_size;
+extern int ip_conntrack_checksum;
  
 #define CONNTRACK_STAT_INC(count) (__get_cpu_var(ip_conntrack_stat).count++)
 
@@ -306,29 +314,30 @@ DECLARE_PER_CPU(struct ip_conntrack_ecache, ip_conntrack_ecache);
 
 #define CONNTRACK_ECACHE(x)	(__get_cpu_var(ip_conntrack_ecache).x)
  
-extern struct notifier_block *ip_conntrack_chain;
-extern struct notifier_block *ip_conntrack_expect_chain;
+extern struct atomic_notifier_head ip_conntrack_chain;
+extern struct atomic_notifier_head ip_conntrack_expect_chain;
 
 static inline int ip_conntrack_register_notifier(struct notifier_block *nb)
 {
-	return notifier_chain_register(&ip_conntrack_chain, nb);
+	return atomic_notifier_chain_register(&ip_conntrack_chain, nb);
 }
 
 static inline int ip_conntrack_unregister_notifier(struct notifier_block *nb)
 {
-	return notifier_chain_unregister(&ip_conntrack_chain, nb);
+	return atomic_notifier_chain_unregister(&ip_conntrack_chain, nb);
 }
 
 static inline int 
 ip_conntrack_expect_register_notifier(struct notifier_block *nb)
 {
-	return notifier_chain_register(&ip_conntrack_expect_chain, nb);
+	return atomic_notifier_chain_register(&ip_conntrack_expect_chain, nb);
 }
 
 static inline int
 ip_conntrack_expect_unregister_notifier(struct notifier_block *nb)
 {
-	return notifier_chain_unregister(&ip_conntrack_expect_chain, nb);
+	return atomic_notifier_chain_unregister(&ip_conntrack_expect_chain,
+			nb);
 }
 
 extern void ip_ct_deliver_cached_events(const struct ip_conntrack *ct);
@@ -353,14 +362,14 @@ static inline void ip_conntrack_event(enum ip_conntrack_events event,
 				      struct ip_conntrack *ct)
 {
 	if (is_confirmed(ct) && !is_dying(ct))
-		notifier_call_chain(&ip_conntrack_chain, event, ct);
+		atomic_notifier_call_chain(&ip_conntrack_chain, event, ct);
 }
 
 static inline void 
 ip_conntrack_expect_event(enum ip_conntrack_expect_events event,
 			  struct ip_conntrack_expect *exp)
 {
-	notifier_call_chain(&ip_conntrack_expect_chain, event, exp);
+	atomic_notifier_call_chain(&ip_conntrack_expect_chain, event, exp);
 }
 #else /* CONFIG_IP_NF_CONNTRACK_EVENTS */
 static inline void ip_conntrack_event_cache(enum ip_conntrack_events event, 

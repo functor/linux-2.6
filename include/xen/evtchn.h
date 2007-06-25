@@ -55,21 +55,21 @@
  */
 extern int bind_evtchn_to_irqhandler(
 	unsigned int evtchn,
-	irqreturn_t (*handler)(int, void *, struct pt_regs *),
+	irq_handler_t handler,
 	unsigned long irqflags,
 	const char *devname,
 	void *dev_id);
 extern int bind_virq_to_irqhandler(
 	unsigned int virq,
 	unsigned int cpu,
-	irqreturn_t (*handler)(int, void *, struct pt_regs *),
+	irq_handler_t handler,
 	unsigned long irqflags,
 	const char *devname,
 	void *dev_id);
 extern int bind_ipi_to_irqhandler(
 	unsigned int ipi,
 	unsigned int cpu,
-	irqreturn_t (*handler)(int, void *, struct pt_regs *),
+	irq_handler_t handler,
 	unsigned long irqflags,
 	const char *devname,
 	void *dev_id);

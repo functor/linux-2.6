@@ -7,9 +7,8 @@
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
  *
  *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  it under the terms of the GNU General Public License version 2
+ *  as published by the Free Software Foundation.
  *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -27,12 +26,12 @@
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
+#include <linux/sched.h>
 #include <linux/file.h>
 #include <linux/stat.h>
 #include <linux/string.h>
 #include <linux/smp_lock.h>
 #include <linux/inet.h>
-#include <linux/version.h>
 #include <linux/list.h>
 #include <asm/uaccess.h>
 #include <linux/idr.h>
@@ -56,46 +55,22 @@ int v9fs_file_open(struct inode *inode, struct file *file)
 	struct v9fs_fid *vfid;
 	struct v9fs_fcall *fcall = NULL;
 	int omode;
-	int fid = V9FS_NOFID;
 	int err;
 
 	dprintk(DEBUG_VFS, "inode: %p file: %p \n", inode, file);
 
-	vfid = v9fs_fid_lookup(file->f_dentry);
-	if (!vfid) {
-		dprintk(DEBUG_ERROR, "Couldn't resolve fid from dentry\n");
-		return -EBADF;
-	}
+	vfid = v9fs_fid_clone(file->f_path.dentry);
+	if (IS_ERR(vfid))
+		return PTR_ERR(vfid);
 
-	fid = v9fs_get_idpool(&v9ses->fidpool);
-	if (fid < 0) {
-			eprintk(KERN_WARNING, "newfid fails!\n");
-			return -ENOSPC;
-		}
-
-	err = v9fs_t_walk(v9ses, vfid->fid, fid, NULL, NULL);
-	if (err < 0) {
-			dprintk(DEBUG_ERROR, "rewalk didn't work\n");
-		goto put_fid;
-	}
-
-	vfid = kmalloc(sizeof(struct v9fs_fid), GFP_KERNEL);
-	if (vfid == NULL) {
-		dprintk(DEBUG_ERROR, "out of memory\n");
-		goto clunk_fid;
-		}
-
-		/* TODO: do special things for O_EXCL, O_NOFOLLOW, O_SYNC */
-		/* translate open mode appropriately */
 	omode = v9fs_uflags2omode(file->f_flags);
-	err = v9fs_t_open(v9ses, fid, omode, &fcall);
+	err = v9fs_t_open(v9ses, vfid->fid, omode, &fcall);
 	if (err < 0) {
 		PRINT_FCALL_ERROR("open failed", fcall);
-		goto destroy_vfid;
+		goto Clunk_Fid;
 	}
 
 	file->private_data = vfid;
-	vfid->fid = fid;
 	vfid->fidopen = 1;
 	vfid->fidclunked = 0;
 	vfid->iounit = fcall->params.ropen.iounit;
@@ -106,15 +81,9 @@ int v9fs_file_open(struct inode *inode, struct file *file)
 
 	return 0;
 
-destroy_vfid:
-	v9fs_fid_destroy(vfid);
-
-clunk_fid:
-	v9fs_t_clunk(v9ses, fid);
-
-put_fid:
-	v9fs_put_idpool(fid, &v9ses->fidpool);
-		kfree(fcall);
+Clunk_Fid:
+	v9fs_fid_clunk(v9ses, vfid);
+	kfree(fcall);
 
 	return err;
 }
@@ -131,7 +100,7 @@ put_fid:
 static int v9fs_file_lock(struct file *filp, int cmd, struct file_lock *fl)
 {
 	int res = 0;
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 
 	dprintk(DEBUG_VFS, "filp: %p lock: %p\n", filp, fl);
 
@@ -159,7 +128,7 @@ static ssize_t
 v9fs_file_read(struct file *filp, char __user * data, size_t count,
 	       loff_t * offset)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct v9fs_session_info *v9ses = v9fs_inode2v9ses(inode);
 	struct v9fs_fid *v9f = filp->private_data;
 	struct v9fs_fcall *fcall = NULL;
@@ -223,7 +192,7 @@ static ssize_t
 v9fs_file_write(struct file *filp, const char __user * data,
 		size_t count, loff_t * offset)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct v9fs_session_info *v9ses = v9fs_inode2v9ses(inode);
 	struct v9fs_fid *v9fid = filp->private_data;
 	struct v9fs_fcall *fcall;
@@ -269,7 +238,7 @@ v9fs_file_write(struct file *filp, const char __user * data,
 	return total;
 }
 
-struct file_operations v9fs_file_operations = {
+const struct file_operations v9fs_file_operations = {
 	.llseek = generic_file_llseek,
 	.read = v9fs_file_read,
 	.write = v9fs_file_write,

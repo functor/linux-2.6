@@ -46,15 +46,13 @@ static DEFINE_SPINLOCK(rose_neigh_list_lock);
 static struct rose_route *rose_route_list;
 static DEFINE_SPINLOCK(rose_route_list_lock);
 
-struct rose_neigh *rose_loopback_neigh;
-
-static void rose_remove_neigh(struct rose_neigh *);
+struct rose_neigh rose_loopback_neigh;
 
 /*
  *	Add a new route to a node, and in the process add the node and the
  *	neighbour if it is new.
  */
-static int rose_add_node(struct rose_route_struct *rose_route,
+static int __must_check rose_add_node(struct rose_route_struct *rose_route,
 	struct net_device *dev)
 {
 	struct rose_node  *rose_node, *rose_tmpn, *rose_tmpp;
@@ -235,11 +233,8 @@ static void rose_remove_neigh(struct rose_neigh *rose_neigh)
 
 	skb_queue_purge(&rose_neigh->queue);
 
-	spin_lock_bh(&rose_neigh_list_lock);
-
 	if ((s = rose_neigh_list) == rose_neigh) {
 		rose_neigh_list = rose_neigh->next;
-		spin_unlock_bh(&rose_neigh_list_lock);
 		kfree(rose_neigh->digipeat);
 		kfree(rose_neigh);
 		return;
@@ -248,7 +243,6 @@ static void rose_remove_neigh(struct rose_neigh *rose_neigh)
 	while (s != NULL && s->next != NULL) {
 		if (s->next == rose_neigh) {
 			s->next = rose_neigh->next;
-			spin_unlock_bh(&rose_neigh_list_lock);
 			kfree(rose_neigh->digipeat);
 			kfree(rose_neigh);
 			return;
@@ -256,7 +250,6 @@ static void rose_remove_neigh(struct rose_neigh *rose_neigh)
 
 		s = s->next;
 	}
-	spin_unlock_bh(&rose_neigh_list_lock);
 }
 
 /*
@@ -368,33 +361,30 @@ out:
 /*
  *	Add the loopback neighbour.
  */
-int rose_add_loopback_neigh(void)
+void rose_add_loopback_neigh(void)
 {
-	if ((rose_loopback_neigh = kmalloc(sizeof(struct rose_neigh), GFP_ATOMIC)) == NULL)
-		return -ENOMEM;
+	struct rose_neigh *sn = &rose_loopback_neigh;
 
-	rose_loopback_neigh->callsign  = null_ax25_address;
-	rose_loopback_neigh->digipeat  = NULL;
-	rose_loopback_neigh->ax25      = NULL;
-	rose_loopback_neigh->dev       = NULL;
-	rose_loopback_neigh->count     = 0;
-	rose_loopback_neigh->use       = 0;
-	rose_loopback_neigh->dce_mode  = 1;
-	rose_loopback_neigh->loopback  = 1;
-	rose_loopback_neigh->number    = rose_neigh_no++;
-	rose_loopback_neigh->restarted = 1;
+	sn->callsign  = null_ax25_address;
+	sn->digipeat  = NULL;
+	sn->ax25      = NULL;
+	sn->dev       = NULL;
+	sn->count     = 0;
+	sn->use       = 0;
+	sn->dce_mode  = 1;
+	sn->loopback  = 1;
+	sn->number    = rose_neigh_no++;
+	sn->restarted = 1;
 
-	skb_queue_head_init(&rose_loopback_neigh->queue);
+	skb_queue_head_init(&sn->queue);
 
-	init_timer(&rose_loopback_neigh->ftimer);
-	init_timer(&rose_loopback_neigh->t0timer);
+	init_timer(&sn->ftimer);
+	init_timer(&sn->t0timer);
 
 	spin_lock_bh(&rose_neigh_list_lock);
-	rose_loopback_neigh->next = rose_neigh_list;
-	rose_neigh_list           = rose_loopback_neigh;
+	sn->next = rose_neigh_list;
+	rose_neigh_list           = sn;
 	spin_unlock_bh(&rose_neigh_list_lock);
-
-	return 0;
 }
 
 /*
@@ -403,7 +393,7 @@ int rose_add_loopback_neigh(void)
 int rose_add_loopback_node(rose_address *address)
 {
 	struct rose_node *rose_node;
-	unsigned int err = 0;
+	int err = 0;
 
 	spin_lock_bh(&rose_node_list_lock);
 
@@ -428,18 +418,18 @@ int rose_add_loopback_node(rose_address *address)
 	rose_node->mask         = 10;
 	rose_node->count        = 1;
 	rose_node->loopback     = 1;
-	rose_node->neighbour[0] = rose_loopback_neigh;
+	rose_node->neighbour[0] = &rose_loopback_neigh;
 
 	/* Insert at the head of list. Address is always mask=10 */
 	rose_node->next = rose_node_list;
 	rose_node_list  = rose_node;
 
-	rose_loopback_neigh->count++;
+	rose_loopback_neigh.count++;
 
 out:
 	spin_unlock_bh(&rose_node_list_lock);
 
-	return 0;
+	return err;
 }
 
 /*
@@ -465,7 +455,7 @@ void rose_del_loopback_node(rose_address *address)
 
 	rose_remove_node(rose_node);
 
-	rose_loopback_neigh->count--;
+	rose_loopback_neigh.count--;
 
 out:
 	spin_unlock_bh(&rose_node_list_lock);

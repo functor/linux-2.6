@@ -24,7 +24,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
-#include <linux/config.h>
 #include <linux/linkage.h>
 #include <asm/assembler.h>
 #include <asm/hardware.h>
@@ -42,15 +41,25 @@
 
 	.text
 
-	/* s3c2410_cpu_suspend
+	/* s3c2410_cpu_save
 	 *
-	 * put the cpu into sleep mode
+	 * save enough of the CPU state to allow us to re-start
+	 * pm.c code. as we store items like the sp/lr, we will
+	 * end up returning from this function when the cpu resumes
+	 * so the return value is set to mark this.
+	 *
+	 * This arangement means we avoid having to flush the cache
+	 * from this code.
 	 *
 	 * entry:
-	 *	r0 = sleep save block
+	 *	r0 = pointer to save block
+	 *
+	 * exit:
+	 *	r0 = 0 => we stored everything
+	 *	     1 => resumed from sleep
 	*/
 
-ENTRY(s3c2410_cpu_suspend)
+ENTRY(s3c2410_cpu_save)
 	stmfd	sp!, { r4 - r12, lr }
 
 	@@ store co-processor registers
@@ -59,47 +68,18 @@ ENTRY(s3c2410_cpu_suspend)
 	mrc	p15, 0, r5, c13, c0, 0	@ PID
 	mrc	p15, 0, r6, c3, c0, 0	@ Domain ID
 	mrc	p15, 0, r7, c2, c0, 0	@ translation table base address
-	mrc	p15, 0, r8, c2, c0, 0	@ auxiliary control register
-	mrc	p15, 0, r9, c1, c0, 0	@ control register
+	mrc	p15, 0, r8, c1, c0, 0	@ control register
 
 	stmia	r0, { r4 - r13 }
 
-	@@ flush the caches to ensure everything is back out to
-	@@ SDRAM before the core powers down
-
-	bl	arm920_flush_kern_cache_all
-
-	@@ prepare cpu to sleep
-
-	ldr	r4, =S3C2410_REFRESH
-	ldr	r5, =S3C24XX_MISCCR
-	ldr	r6, =S3C2410_CLKCON
-	ldr	r7, [ r4 ]		@ get REFRESH (and ensure in TLB)
-	ldr	r8, [ r5 ]		@ get MISCCR (and ensure in TLB)
-	ldr	r9, [ r6 ]		@ get CLKCON (and ensure in TLB)
-
-	orr	r7, r7, #S3C2410_REFRESH_SELF	@ SDRAM sleep command
-	orr	r8, r8, #S3C2410_MISCCR_SDSLEEP @ SDRAM power-down signals
-	orr	r9, r9, #S3C2410_CLKCON_POWER	@ power down command
-
-	teq	pc, #0			@ first as a trial-run to load cache
-	bl	s3c2410_do_sleep
-	teq	r0, r0			@ now do it for real
-	b	s3c2410_do_sleep	@
-
-	@@ align next bit of code to cache line
-	.align	8
-s3c2410_do_sleep:
-	streq	r7, [ r4 ]			@ SDRAM sleep command
-	streq	r8, [ r5 ]			@ SDRAM power-down config
-	streq	r9, [ r6 ]			@ CPU sleep
-1:	beq	1b
-	mov	pc, r14
+	mov	r0, #0
+	ldmfd	sp, { r4 - r12, pc }
 
 	@@ return to the caller, after having the MMU
 	@@ turned on, this restores the last bits from the
 	@@ stack
 resume_with_mmu:
+	mov	r0, #1
 	ldmfd	sp!, { r4 - r12, pc }
 
 	.ltorg
@@ -127,7 +107,7 @@ s3c2410_sleep_save_phys:
 	*/
 
 ENTRY(s3c2410_cpu_resume)
-	mov	r0, #PSR_I_BIT | PSR_F_BIT | MODE_SVC
+	mov	r0, #PSR_I_BIT | PSR_F_BIT | SVC_MODE
 	msr	cpsr_c, r0
 
 	@@ load UART to allow us to print the two characters for
@@ -165,7 +145,6 @@ ENTRY(s3c2410_cpu_resume)
 	mcr	p15, 0, r5, c13, c0, 0		@ PID
 	mcr	p15, 0, r6, c3, c0, 0		@ Domain ID
 	mcr	p15, 0, r7, c2, c0, 0		@ translation table base
-	mcr	p15, 0, r8, c1, c1, 0		@ auxilliary control
 
 #ifdef CONFIG_DEBUG_RESUME
 	mov	r3, #'R'
@@ -173,7 +152,7 @@ ENTRY(s3c2410_cpu_resume)
 #endif
 
 	ldr	r2, =resume_with_mmu
-	mcr	p15, 0, r9, c1, c0, 0		@ turn on MMU, etc
+	mcr	p15, 0, r8, c1, c0, 0		@ turn on MMU, etc
 	nop					@ second-to-last before mmu
 	mov	pc, r2				@ go back to virtual address
 

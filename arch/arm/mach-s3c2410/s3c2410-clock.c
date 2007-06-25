@@ -1,4 +1,4 @@
-/* linux/arch/arm/mach-s3c2410/clock.c
+/* linux/arch/arm/mach-s3c2410/s3c2410-clock.c
  *
  * Copyright (c) 2006 Simtec Electronics
  *	Ben Dooks <ben@simtec.co.uk>
@@ -30,13 +30,18 @@
 #include <linux/clk.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
+#include <linux/serial_core.h>
+
+#include <asm/mach/map.h>
 
 #include <asm/hardware.h>
 #include <asm/io.h>
 
+#include <asm/arch/regs-serial.h>
 #include <asm/arch/regs-clock.h>
 #include <asm/arch/regs-gpio.h>
 
+#include "s3c2410.h"
 #include "clock.h"
 #include "cpu.h"
 

@@ -16,7 +16,6 @@
  * of bit shift manipulations to send and receive packets on the
  * serial bus */
 
-#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/completion.h>
 #include <linux/sched.h>
@@ -106,15 +105,20 @@ voyager_module_t *voyager_cat_list;
 
 /* the I/O port assignments for the VIC and QIC */
 static struct resource vic_res = {
-	"Voyager Interrupt Controller", 0xFC00, 0xFC6F };
+	.name	= "Voyager Interrupt Controller",
+	.start	= 0xFC00,
+	.end	= 0xFC6F
+};
 static struct resource qic_res = {
-	"Quad Interrupt Controller", 0xFC70, 0xFCFF };
+	.name	= "Quad Interrupt Controller",
+	.start	= 0xFC70,
+	.end	= 0xFCFF
+};
 
 /* This function is used to pack a data bit stream inside a message.
  * It writes num_bits of the data buffer in msg starting at start_bit.
  * Note: This function assumes that any unused bit in the data stream
  * is set to zero so that the ors will work correctly */
-#define BITS_PER_BYTE 8
 static void
 cat_pack(__u8 *msg, const __u16 start_bit, __u8 *data, const __u16 num_bits)
 {
@@ -772,7 +776,7 @@ voyager_cat_init(void)
 		for(asic=0; asic < (*modpp)->num_asics; asic++) {
 			int j;
 			voyager_asic_t *asicp = *asicpp 
-				= kmalloc(sizeof(voyager_asic_t), GFP_KERNEL); /*&voyager_asic_storage[asic_count++];*/
+				= kzalloc(sizeof(voyager_asic_t), GFP_KERNEL); /*&voyager_asic_storage[asic_count++];*/
 			voyager_sp_table_t *sp_table;
 			voyager_at_t *asic_table;
 			voyager_jtt_t *jtag_table;
@@ -781,7 +785,6 @@ voyager_cat_init(void)
 				printk("**WARNING** kmalloc failure in cat_init\n");
 				continue;
 			}
-			memset(asicp, 0, sizeof(voyager_asic_t));
 			asicpp = &(asicp->next);
 			asicp->asic_location = asic;
 			sp_table = (voyager_sp_table_t *)(eprom_buf + sp_offset);
@@ -847,8 +850,7 @@ voyager_cat_init(void)
 #endif
 
 		{
-			struct resource *res = kmalloc(sizeof(struct resource),GFP_KERNEL);
-			memset(res, 0, sizeof(struct resource));
+			struct resource *res = kzalloc(sizeof(struct resource),GFP_KERNEL);
 			res->name = kmalloc(128, GFP_KERNEL);
 			sprintf((char *)res->name, "Voyager %s Quad CPI", cat_module_name(i));
 			res->start = qic_addr;

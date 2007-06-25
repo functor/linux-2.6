@@ -68,8 +68,7 @@ static int rtc_update_alarm(struct rtc_time *alrm)
 	return ret;
 }
 
-static irqreturn_t sa1100_rtc_interrupt(int irq, void *dev_id,
-		struct pt_regs *regs)
+static irqreturn_t sa1100_rtc_interrupt(int irq, void *dev_id)
 {
 	struct platform_device *pdev = to_platform_device(dev_id);
 	struct rtc_device *rtc = platform_get_drvdata(pdev);
@@ -106,8 +105,7 @@ static irqreturn_t sa1100_rtc_interrupt(int irq, void *dev_id,
 
 static int rtc_timer1_count;
 
-static irqreturn_t timer1_interrupt(int irq, void *dev_id,
-		struct pt_regs *regs)
+static irqreturn_t timer1_interrupt(int irq, void *dev_id)
 {
 	struct platform_device *pdev = to_platform_device(dev_id);
 	struct rtc_device *rtc = platform_get_drvdata(pdev);
@@ -291,9 +289,7 @@ static int sa1100_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 
 static int sa1100_rtc_proc(struct device *dev, struct seq_file *seq)
 {
-	seq_printf(seq, "trim/divider\t: 0x%08lx\n", RTTR);
-	seq_printf(seq, "alarm_IRQ\t: %s\n",
-			(RTSR & RTSR_ALE) ? "yes" : "no" );
+	seq_printf(seq, "trim/divider\t: 0x%08x\n", (u32) RTTR);
 	seq_printf(seq, "update_IRQ\t: %s\n",
 			(RTSR & RTSR_HZE) ? "yes" : "no");
 	seq_printf(seq, "periodic_IRQ\t: %s\n",
@@ -303,7 +299,7 @@ static int sa1100_rtc_proc(struct device *dev, struct seq_file *seq)
 	return 0;
 }
 
-static struct rtc_class_ops sa1100_rtc_ops = {
+static const struct rtc_class_ops sa1100_rtc_ops = {
 	.open = sa1100_rtc_open,
 	.read_callback = sa1100_rtc_read_callback,
 	.release = sa1100_rtc_release,

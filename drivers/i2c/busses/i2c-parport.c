@@ -138,7 +138,6 @@ static struct i2c_algo_bit_data parport_algo_data = {
 	.getsda		= parport_getsda,
 	.getscl		= parport_getscl,
 	.udelay		= 60,
-	.mdelay		= 60,
 	.timeout	= HZ,
 }; 
 
@@ -219,7 +218,7 @@ static void i2c_parport_detach (struct parport *port)
 			if (adapter_parm[type].init.val)
 				line_set(port, 0, &adapter_parm[type].init);
 				
-			i2c_bit_del_bus(&adapter->adapter);
+			i2c_del_adapter(&adapter->adapter);
 			parport_unregister_device(adapter->pdev);
 			if (prev)
 				prev->next = adapter->next;
@@ -241,9 +240,14 @@ static struct parport_driver i2c_parport_driver = {
 
 static int __init i2c_parport_init(void)
 {
-	if (type < 0 || type >= ARRAY_SIZE(adapter_parm)) {
+	if (type < 0) {
+		printk(KERN_WARNING "i2c-parport: adapter type unspecified\n");
+		return -ENODEV;
+	}
+
+	if (type >= ARRAY_SIZE(adapter_parm)) {
 		printk(KERN_WARNING "i2c-parport: invalid type (%d)\n", type);
-		type = 0;
+		return -ENODEV;
 	}
 
 	return parport_register_driver(&i2c_parport_driver);

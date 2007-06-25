@@ -23,7 +23,7 @@ static struct fuse_conn *fuse_ctl_file_conn_get(struct file *file)
 {
 	struct fuse_conn *fc;
 	mutex_lock(&fuse_mutex);
-	fc = file->f_dentry->d_inode->i_private;
+	fc = file->f_path.dentry->d_inode->i_private;
 	if (fc)
 		fc = fuse_conn_get(fc);
 	mutex_unlock(&fuse_mutex);
@@ -116,7 +116,7 @@ int fuse_ctl_add_conn(struct fuse_conn *fc)
 		return 0;
 
 	parent = fuse_control_sb->s_root;
-	parent->d_inode->i_nlink++;
+	inc_nlink(parent->d_inode);
 	sprintf(name, "%llu", (unsigned long long) fc->id);
 	parent = fuse_ctl_add_dentry(parent, fc, name, S_IFDIR | 0500, 2,
 				     &simple_dir_inode_operations,
@@ -193,8 +193,12 @@ static int fuse_ctl_get_sb(struct file_system_type *fs_type, int flags,
 
 static void fuse_ctl_kill_sb(struct super_block *sb)
 {
+	struct fuse_conn *fc;
+
 	mutex_lock(&fuse_mutex);
 	fuse_control_sb = NULL;
+	list_for_each_entry(fc, &fuse_conn_list, entry)
+		fc->ctl_ndents = 0;
 	mutex_unlock(&fuse_mutex);
 
 	kill_litter_super(sb);

@@ -20,13 +20,13 @@ MODULE_DESCRIPTION("IP tables TTL modification module");
 MODULE_LICENSE("GPL");
 
 static unsigned int 
-ipt_ttl_target(struct sk_buff **pskb, const struct net_device *in, 
-		const struct net_device *out, unsigned int hooknum, 
-		const void *targinfo, void *userinfo)
+ipt_ttl_target(struct sk_buff **pskb,
+	       const struct net_device *in, const struct net_device *out,
+	       unsigned int hooknum, const struct xt_target *target,
+	       const void *targinfo)
 {
 	struct iphdr *iph;
 	const struct ipt_TTL_info *info = targinfo;
-	u_int16_t diffs[2];
 	int new_ttl;
 
 	if (!skb_make_writable(pskb, (*pskb)->len))
@@ -54,12 +54,9 @@ ipt_ttl_target(struct sk_buff **pskb, const struct net_device *in,
 	}
 
 	if (new_ttl != iph->ttl) {
-		diffs[0] = htons(((unsigned)iph->ttl) << 8) ^ 0xFFFF;
+		nf_csum_replace2(&iph->check, htons(iph->ttl << 8),
+					      htons(new_ttl << 8));
 		iph->ttl = new_ttl;
-		diffs[1] = htons(((unsigned)iph->ttl) << 8);
-		iph->check = csum_fold(csum_partial((char *)diffs,
-						    sizeof(diffs),
-						    iph->check^0xFFFF));
 	}
 
 	return IPT_CONTINUE;
@@ -67,53 +64,40 @@ ipt_ttl_target(struct sk_buff **pskb, const struct net_device *in,
 
 static int ipt_ttl_checkentry(const char *tablename,
 		const void *e,
+		const struct xt_target *target,
 		void *targinfo,
-		unsigned int targinfosize,
 		unsigned int hook_mask)
 {
 	struct ipt_TTL_info *info = targinfo;
-
-	if (targinfosize != IPT_ALIGN(sizeof(struct ipt_TTL_info))) {
-		printk(KERN_WARNING "ipt_TTL: targinfosize %u != %Zu\n",
-				targinfosize,
-				IPT_ALIGN(sizeof(struct ipt_TTL_info)));
-		return 0;
-	}
-
-	if (strcmp(tablename, "mangle")) {
-		printk(KERN_WARNING "ipt_TTL: can only be called from "
-			"\"mangle\" table, not \"%s\"\n", tablename);
-		return 0;
-	}
 
 	if (info->mode > IPT_TTL_MAXMODE) {
 		printk(KERN_WARNING "ipt_TTL: invalid or unknown Mode %u\n", 
 			info->mode);
 		return 0;
 	}
-
 	if ((info->mode != IPT_TTL_SET) && (info->ttl == 0))
 		return 0;
-
 	return 1;
 }
 
 static struct ipt_target ipt_TTL = { 
 	.name 		= "TTL",
 	.target 	= ipt_ttl_target, 
+	.targetsize	= sizeof(struct ipt_TTL_info),
+	.table		= "mangle",
 	.checkentry 	= ipt_ttl_checkentry, 
 	.me 		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ipt_ttl_init(void)
 {
 	return ipt_register_target(&ipt_TTL);
 }
 
-static void __exit fini(void)
+static void __exit ipt_ttl_fini(void)
 {
 	ipt_unregister_target(&ipt_TTL);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ipt_ttl_init);
+module_exit(ipt_ttl_fini);

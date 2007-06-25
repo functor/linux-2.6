@@ -8,7 +8,6 @@
  * #defines from the assembly-language output.
  */
 
-#include <linux/config.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -38,7 +37,6 @@ main(void)
 	DEFINE(THREAD, offsetof(struct task_struct, thread));
 	DEFINE(THREAD_INFO, offsetof(struct task_struct, thread_info));
 	DEFINE(MM, offsetof(struct task_struct, mm));
-	DEFINE(PTRACE, offsetof(struct task_struct, ptrace));
 	DEFINE(KSP, offsetof(struct thread_struct, ksp));
 	DEFINE(PGDIR, offsetof(struct thread_struct, pgdir));
 	DEFINE(LAST_SYSCALL, offsetof(struct thread_struct, last_syscall));
@@ -48,7 +46,6 @@ main(void)
 	DEFINE(THREAD_FPSCR, offsetof(struct thread_struct, fpscr));
 #if defined(CONFIG_4xx) || defined(CONFIG_BOOKE)
 	DEFINE(THREAD_DBCR0, offsetof(struct thread_struct, dbcr0));
-	DEFINE(PT_PTRACED, PT_PTRACED);
 #endif
 #ifdef CONFIG_ALTIVEC
 	DEFINE(THREAD_VR0, offsetof(struct thread_struct, vr[0]));
@@ -122,6 +119,7 @@ main(void)
 	DEFINE(TRAP, STACK_FRAME_OVERHEAD+offsetof(struct pt_regs, trap));
 	DEFINE(CLONE_VM, CLONE_VM);
 	DEFINE(CLONE_UNTRACED, CLONE_UNTRACED);
+	DEFINE(CLONE_KTHREAD, CLONE_KTHREAD);
 	DEFINE(MM_PGD, offsetof(struct mm_struct, pgd));
 
 	/* About the CPU features table */
@@ -134,6 +132,7 @@ main(void)
 	DEFINE(TI_TASK, offsetof(struct thread_info, task));
 	DEFINE(TI_EXECDOMAIN, offsetof(struct thread_info, exec_domain));
 	DEFINE(TI_FLAGS, offsetof(struct thread_info, flags));
+	DEFINE(TI_LOCAL_FLAGS, offsetof(struct thread_info, local_flags));
 	DEFINE(TI_CPU, offsetof(struct thread_info, cpu));
 	DEFINE(TI_PREEMPT, offsetof(struct thread_info, preempt_count));
 

@@ -9,19 +9,19 @@
 
 extern asmlinkage void qemu_handle_int(void);
 
-asmlinkage void do_qemu_int(struct pt_regs *regs)
+asmlinkage void plat_irq_dispatch(void)
 {
 	unsigned int pending = read_c0_status() & read_c0_cause();
 
 	if (pending & 0x8000) {
-		ll_timer_interrupt(Q_COUNT_COMPARE_IRQ, regs);
+		ll_timer_interrupt(Q_COUNT_COMPARE_IRQ);
 		return;
 	}
 	if (pending & 0x0400) {
 		int irq = i8259_irq();
 
 		if (likely(irq >= 0))
-			do_IRQ(irq, regs);
+			do_IRQ(irq);
 
 		return;
 	}
@@ -29,7 +29,6 @@ asmlinkage void do_qemu_int(struct pt_regs *regs)
 
 void __init arch_init_irq(void)
 {
-	set_except_vector(0, qemu_handle_int);
 	mips_hpt_frequency = QEMU_C0_COUNTER_CLOCK;		/* 100MHz */
 
 	init_i8259_irqs();

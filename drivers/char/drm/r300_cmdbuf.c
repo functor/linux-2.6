@@ -214,13 +214,13 @@ void r300_init_reg_flags(void)
 	ADD_RANGE(0x4F54, 1);
 
 	ADD_RANGE(R300_TX_FILTER_0, 16);
-	ADD_RANGE(R300_TX_UNK1_0, 16);
+	ADD_RANGE(R300_TX_FILTER1_0, 16);
 	ADD_RANGE(R300_TX_SIZE_0, 16);
 	ADD_RANGE(R300_TX_FORMAT_0, 16);
 	ADD_RANGE(R300_TX_PITCH_0, 16);
 	/* Texture offset is dangerous and needs more checking */
 	ADD_RANGE_MARK(R300_TX_OFFSET_0, 16, MARK_CHECK_OFFSET);
-	ADD_RANGE(R300_TX_UNK4_0, 16);
+	ADD_RANGE(R300_TX_CHROMA_KEY_0, 16);
 	ADD_RANGE(R300_TX_BORDER_COLOR_0, 16);
 
 	/* Sporadic registers used as primitives are emitted */
@@ -240,24 +240,6 @@ static __inline__ int r300_check_range(unsigned reg, int count)
 		if (r300_reg_flags[i] != MARK_SAFE)
 			return 1;
 	return 0;
-}
-
-  /* we expect offsets passed to the framebuffer to be either within video memory or
-     within AGP space */
-static __inline__ int r300_check_offset(drm_radeon_private_t *dev_priv,
-					u32 offset)
-{
-	/* we realy want to check against end of video aperture
-	   but this value is not being kept.
-	   This code is correct for now (does the same thing as the
-	   code that sets MC_FB_LOCATION) in radeon_cp.c */
-	if ((offset >= dev_priv->fb_location) &&
-	    (offset < dev_priv->gart_vm_start))
-		return 0;
-	if ((offset >= dev_priv->gart_vm_start) &&
-	    (offset < dev_priv->gart_vm_start + dev_priv->gart_size))
-		return 0;
-	return 1;
 }
 
 static __inline__ int r300_emit_carefully_checked_packet0(drm_radeon_private_t *
@@ -288,7 +270,7 @@ static __inline__ int r300_emit_carefully_checked_packet0(drm_radeon_private_t *
 		case MARK_SAFE:
 			break;
 		case MARK_CHECK_OFFSET:
-			if (r300_check_offset(dev_priv, (u32) values[i])) {
+			if (!radeon_check_offset(dev_priv, (u32) values[i])) {
 				DRM_ERROR
 				    ("Offset failed range check (reg=%04x sz=%d)\n",
 				     reg, sz);
@@ -450,7 +432,7 @@ static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 	i = 1;
 	while ((k < narrays) && (i < (count + 1))) {
 		i++;		/* skip attribute field */
-		if (r300_check_offset(dev_priv, payload[i])) {
+		if (!radeon_check_offset(dev_priv, payload[i])) {
 			DRM_ERROR
 			    ("Offset failed range check (k=%d i=%d) while processing 3D_LOAD_VBPNTR packet.\n",
 			     k, i);
@@ -461,7 +443,7 @@ static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 		if (k == narrays)
 			break;
 		/* have one more to process, they come in pairs */
-		if (r300_check_offset(dev_priv, payload[i])) {
+		if (!radeon_check_offset(dev_priv, payload[i])) {
 			DRM_ERROR
 			    ("Offset failed range check (k=%d i=%d) while processing 3D_LOAD_VBPNTR packet.\n",
 			     k, i);
@@ -490,6 +472,7 @@ static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 
 	return 0;
 }
+
 static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 					     drm_radeon_kcmd_buffer_t *cmdbuf)
 {
@@ -505,7 +488,7 @@ static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 		if (cmd[1] & (RADEON_GMC_SRC_PITCH_OFFSET_CNTL 
 			      | RADEON_GMC_DST_PITCH_OFFSET_CNTL)) {
 			offset = cmd[2] << 10;
-			ret = r300_check_offset(dev_priv, offset);
+			ret = !radeon_check_offset(dev_priv, offset);
 			if (ret) {
 				DRM_ERROR("Invalid bitblt first offset is %08X\n", offset);
 				return DRM_ERR(EINVAL);
@@ -515,13 +498,43 @@ static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 		if ((cmd[1] & RADEON_GMC_SRC_PITCH_OFFSET_CNTL) &&
 		    (cmd[1] & RADEON_GMC_DST_PITCH_OFFSET_CNTL)) {
 			offset = cmd[3] << 10;
-			ret = r300_check_offset(dev_priv, offset);
+			ret = !radeon_check_offset(dev_priv, offset);
 			if (ret) {
 				DRM_ERROR("Invalid bitblt second offset is %08X\n", offset);
 				return DRM_ERR(EINVAL);
 			}
 			
 		}
+	}
+
+	BEGIN_RING(count+2);
+	OUT_RING(cmd[0]);
+	OUT_RING_TABLE((int *)(cmdbuf->buf + 4), count + 1);
+	ADVANCE_RING();
+
+	cmdbuf->buf += (count+2)*4;
+	cmdbuf->bufsz -= (count+2)*4;
+
+	return 0;
+}
+
+static __inline__ int r300_emit_indx_buffer(drm_radeon_private_t *dev_priv,
+					     drm_radeon_kcmd_buffer_t *cmdbuf)
+{
+	u32 *cmd = (u32 *) cmdbuf->buf;
+	int count, ret;
+	RING_LOCALS;
+
+	count=(cmd[0]>>16) & 0x3fff;
+
+	if ((cmd[1] & 0x8000ffff) != 0x80000810) {
+		DRM_ERROR("Invalid indx_buffer reg address %08X\n", cmd[1]);
+		return DRM_ERR(EINVAL);
+	}
+	ret = !radeon_check_offset(dev_priv, cmd[2]);
+	if (ret) {
+		DRM_ERROR("Invalid indx_buffer offset is %08X\n", cmd[2]);
+		return DRM_ERR(EINVAL);
 	}
 
 	BEGIN_RING(count+2);
@@ -575,10 +588,11 @@ static __inline__ int r300_emit_raw_packet3(drm_radeon_private_t *dev_priv,
 	case RADEON_CNTL_BITBLT_MULTI:
 		return r300_emit_bitblt_multi(dev_priv, cmdbuf);
 
+	case RADEON_CP_INDX_BUFFER:	/* DRAW_INDX_2 without INDX_BUFFER seems to lock up the gpu */
+		return r300_emit_indx_buffer(dev_priv, cmdbuf);
 	case RADEON_CP_3D_DRAW_IMMD_2:	/* triggers drawing using in-packet vertex data */
 	case RADEON_CP_3D_DRAW_VBUF_2:	/* triggers drawing of vertex buffers setup elsewhere */
 	case RADEON_CP_3D_DRAW_INDX_2:	/* triggers drawing using indices to vertex buffer */
-	case RADEON_CP_INDX_BUFFER:	/* DRAW_INDX_2 without INDX_BUFFER seems to lock up the gpu */
 	case RADEON_WAIT_FOR_IDLE:
 	case RADEON_CP_NOP:
 		/* these packets are safe */
@@ -699,6 +713,64 @@ static void r300_discard_buffer(drm_device_t * dev, drm_buf_t * buf)
 	buf_priv->age = ++dev_priv->sarea_priv->last_dispatch;
 	buf->pending = 1;
 	buf->used = 0;
+}
+
+static int r300_scratch(drm_radeon_private_t *dev_priv,
+			drm_radeon_kcmd_buffer_t *cmdbuf,
+			drm_r300_cmd_header_t header)
+{
+	u32 *ref_age_base;
+	u32 i, buf_idx, h_pending;
+	RING_LOCALS;
+	
+	if (cmdbuf->bufsz < 
+	    (sizeof(u64) + header.scratch.n_bufs * sizeof(buf_idx))) {
+		return DRM_ERR(EINVAL);
+	}
+	
+	if (header.scratch.reg >= 5) {
+		return DRM_ERR(EINVAL);
+	}
+	
+	dev_priv->scratch_ages[header.scratch.reg]++;
+	
+	ref_age_base =  (u32 *)(unsigned long)*((uint64_t *)cmdbuf->buf);
+	
+	cmdbuf->buf += sizeof(u64);
+	cmdbuf->bufsz -= sizeof(u64);
+	
+	for (i=0; i < header.scratch.n_bufs; i++) {
+		buf_idx = *(u32 *)cmdbuf->buf;
+		buf_idx *= 2; /* 8 bytes per buf */
+		
+		if (DRM_COPY_TO_USER(ref_age_base + buf_idx, &dev_priv->scratch_ages[header.scratch.reg], sizeof(u32))) {
+			return DRM_ERR(EINVAL);
+		}
+					
+		if (DRM_COPY_FROM_USER(&h_pending, ref_age_base + buf_idx + 1, sizeof(u32))) {
+			return DRM_ERR(EINVAL);
+		}
+					
+		if (h_pending == 0) {
+			return DRM_ERR(EINVAL);
+		}
+					
+		h_pending--;
+						
+		if (DRM_COPY_TO_USER(ref_age_base + buf_idx + 1, &h_pending, sizeof(u32))) {
+			return DRM_ERR(EINVAL);
+		}
+					
+		cmdbuf->buf += sizeof(buf_idx);
+		cmdbuf->bufsz -= sizeof(buf_idx);
+	}
+	
+	BEGIN_RING(2);
+	OUT_RING(CP_PACKET0(RADEON_SCRATCH_REG0 + header.scratch.reg * 4, 0));
+	OUT_RING(dev_priv->scratch_ages[header.scratch.reg]);
+	ADVANCE_RING();
+	
+	return 0;
 }
 
 /**
@@ -838,6 +910,15 @@ int r300_do_cp_cmdbuf(drm_device_t *dev,
 			}
 			break;
 
+		case R300_CMD_SCRATCH:
+			DRM_DEBUG("R300_CMD_SCRATCH\n");
+			ret = r300_scratch(dev_priv, cmdbuf, header);
+			if (ret) {
+				DRM_ERROR("r300_scratch failed\n");
+				goto cleanup;
+			}
+			break;
+			
 		default:
 			DRM_ERROR("bad cmd_type %i at %p\n",
 				  header.header.cmd_type,

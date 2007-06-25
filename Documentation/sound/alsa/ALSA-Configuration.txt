@@ -57,11 +57,6 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 		- Default: 1
 		- For auto-loading more than one card, specify this
 		  option together with snd-card-X aliases.
-    device_mode
-		- permission mask for dynamic sound device filesystem
-		- This is available only when DEVFS is enabled
-		- Default: 0666
-		- E.g.: device_mode=0660
 
   
   Module snd-pcm-oss
@@ -119,6 +114,34 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 		  identifying the card
     enable  	- enable card
 		- Default: enabled, for PCI and ISA PnP cards
+
+  Module snd-adlib
+  ----------------
+
+    Module for AdLib FM cards.
+
+    port	- port # for OPL chip
+
+    This module supports multiple cards. It does not support autoprobe, so
+    the port must be specified. For actual AdLib FM cards it will be 0x388.
+    Note that this card does not have PCM support and no mixer; only FM
+    synthesis.
+
+    Make sure you have "sbiload" from the alsa-tools package available and,
+    after loading the module, find out the assigned ALSA sequencer port
+    number through "sbiload -l". Example output:
+
+      Port     Client name                       Port name
+      64:0     OPL2 FM synth                     OPL2 FM Port
+
+    Load the std.sb and drums.sb patches also supplied by sbiload:
+
+      sbiload -p 64:0 std.sb drums.sb
+
+    If you use this driver to drive an OPL3, you can use std.o3 and drums.o3
+    instead. To have the card produce sound, use aplaymidi from alsa-utils:
+
+      aplaymidi -p 64:0 foo.mid
 
   Module snd-ad1816a
   ------------------
@@ -187,6 +210,15 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
     fm_port	- port # for OPL3 FM (PnP setup)
     
     This module supports multiple cards, autoprobe and PnP.
+
+    The power-management is supported.
+
+  Module snd-als300
+  -----------------
+
+    Module for  Avance Logic ALS300 and ALS300+
+
+    This module supports multiple cards.
 
     The power-management is supported.
 
@@ -329,7 +361,9 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     Module for C-Media CMI8338 and 8738 PCI sound cards.
 
-    mpu_port	- 0x300,0x310,0x320,0x330, 0 = disable (default)
+    mpu_port	- 0x300,0x310,0x320,0x330 = legacy port,
+		  1 = integrated PCI port,
+		  0 = disable (default)
     fm_port     - 0x388 (default), 0 = disable (default)
     soft_ac3    - Software-conversion of raw SPDIF packets (model 033 only)
                   (default = 1)
@@ -431,7 +465,7 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     Module for multifunction CS5535 companion PCI device
 
-    This module supports multiple cards.
+    The power-management is supported.
 
   Module snd-darla20
   ------------------
@@ -537,6 +571,8 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     This module supports multiple cards and autoprobe.
     
+    The power-management is supported.
+
   Module snd-ens1371
   ------------------
 
@@ -550,6 +586,8 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     This module supports multiple cards and autoprobe.
     
+    The power-management is supported.
+
   Module snd-es968
   ----------------
 
@@ -706,11 +744,16 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
   Module snd-hda-intel
   --------------------
 
-    Module for Intel HD Audio (ICH6, ICH6M, ICH7), ATI SB450,
-	       VIA VT8251/VT8237A
+    Module for Intel HD Audio (ICH6, ICH6M, ESB2, ICH7, ICH8),
+		ATI SB450, SB600, RS600,
+		VIA VT8251/VT8237A,
+		SIS966, ULI M5461
 
     model	- force the model name
     position_fix - Fix DMA pointer (0 = auto, 1 = none, 2 = POSBUF, 3 = FIFO size)
+    single_cmd  - Use single immediate commands to communicate with
+		codecs (for debugging only)
+    enable_msi	- Enable Message Signaled Interrupt (MSI) (default = off)
 
     This module supports one card and autoprobe.
 
@@ -731,16 +774,58 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 	  6stack-digout	6-jack with a SPDIF out
 	  w810		3-jack
 	  z71v		3-jack (HP shared SPDIF)
-	  asus		3-jack
+	  asus		3-jack (ASUS Mobo)
+	  asus-w1v	ASUS W1V
+	  asus-dig	ASUS with SPDIF out
+	  asus-dig2	ASUS with SPDIF out (using GPIO2)
 	  uniwill	3-jack
 	  F1734		2-jack
+	  lg		LG laptop (m1 express dual)
+	  lg-lw		LG LW20/LW25 laptop
+	  tcl		TCL S700
+	  clevo		Clevo laptops (m520G, m665n)
 	  test		for testing/debugging purpose, almost all controls can be
 			adjusted.  Appearing only when compiled with
 			$CONFIG_SND_DEBUG=y
+	  auto		auto-config reading BIOS (default)
 
 	ALC260
 	  hp		HP machines
+	  hp-3013	HP machines (3013-variant)
 	  fujitsu	Fujitsu S7020
+	  acer		Acer TravelMate
+	  basic		fixed pin assignment (old default model)
+	  auto		auto-config reading BIOS (default)
+
+	ALC262
+	  fujitsu	Fujitsu Laptop
+	  hp-bpc	HP xw4400/6400/8400/9400 laptops
+	  benq		Benq ED8
+	  basic		fixed pin assignment w/o SPDIF
+	  auto		auto-config reading BIOS (default)
+
+	ALC882/885
+	  3stack-dig	3-jack with SPDIF I/O
+	  6stck-dig	6-jack digital with SPDIF I/O
+	  arima		Arima W820Di1
+	  auto		auto-config reading BIOS (default)
+
+	ALC883/888
+	  3stack-dig	3-jack with SPDIF I/O
+	  6stack-dig	6-jack digital with SPDIF I/O
+	  3stack-6ch    3-jack 6-channel
+	  3stack-6ch-dig 3-jack 6-channel with SPDIF I/O
+	  6stack-dig-demo  6-jack digital for Intel demo board
+	  acer		Acer laptops (Travelmate 3012WTMi, Aspire 5600, etc)
+	  auto		auto-config reading BIOS (default)
+
+	ALC861/660
+	  3stack	3-jack
+	  3stack-dig	3-jack with SPDIF I/O
+	  6stack-dig	6-jack with SPDIF I/O
+	  3stack-660	3-jack (for ALC660)
+	  uniwill-m31	Uniwill M31 laptop
+	  auto		auto-config reading BIOS (default)
 
 	CMI9880
 	  minimal	3-jack in back
@@ -749,6 +834,40 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 	  full_dig	6-jack in back, 2-jack in front, SPDIF I/O
 	  allout	5-jack in back, 2-jack in front, SPDIF out
 	  auto		auto-config reading BIOS (default)
+
+	AD1981
+	  basic		3-jack (default)
+	  hp		HP nx6320
+	  thinkpad	Lenovo Thinkpad T60/X60/Z60
+
+	AD1986A
+	  6stack	6-jack, separate surrounds (default)
+	  3stack	3-stack, shared surrounds
+	  laptop	2-channel only (FSC V2060, Samsung M50)
+	  laptop-eapd	2-channel with EAPD (Samsung R65, ASUS A6J)
+
+	AD1988
+	  6stack	6-jack
+	  6stack-dig	ditto with SPDIF
+	  3stack	3-jack
+	  3stack-dig	ditto with SPDIF
+	  laptop	3-jack with hp-jack automute
+	  laptop-dig	ditto with SPDIF
+	  auto		auto-config reading BIOS (default)
+
+	STAC9200/9205/9220/9221/9254
+	  ref		Reference board
+	  3stack	D945 3stack
+	  5stack	D945 5stack + SPDIF
+
+	STAC9227/9228/9229/927x
+	  ref		Reference board
+	  3stack	D965 3stack
+	  5stack	D965 5stack + SPDIF
+
+	STAC9872
+	  vaio		Setup for VAIO FE550G/SZ110
+	  vaio-ar Setup for VAIO AR
 
     If the default configuration doesn't work and one of the above
     matches with your device, report it together with the PCI
@@ -763,6 +882,17 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 	    (Usually SD_LPLIB register is more accurate than the
 	    position buffer.)
 
+    NB: If you get many "azx_get_response timeout" messages at
+    loading, it's likely a problem of interrupts (e.g. ACPI irq
+    routing).  Try to boot with options like "pci=noacpi".  Also, you
+    can try "single_cmd=1" module option.  This will switch the
+    communication method between HDA controller and codecs to the
+    single immediate commands instead of CORB/RIRB.  Basically, the
+    single command mode is provided only for BIOS, and you won't get
+    unsolicited events, too.  But, at least, this works independently
+    from the irq.  Remember this is a last resort, and should be
+    avoided as much as possible...
+    
     The power-management is supported.
 
   Module snd-hdsp
@@ -825,7 +955,7 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 		  dmx6fire, dsp24, dsp24_value, dsp24_71, ez8,
 		  phase88, mediastation
     omni	- Omni I/O support for MidiMan M-Audio Delta44/66
-    cs8427_timeout - reset timeout for the CS8427 chip (S/PDIF transciever)
+    cs8427_timeout - reset timeout for the CS8427 chip (S/PDIF transceiver)
                      in msec resolution, default value is 500 (0.5 sec)
 
     This module supports multiple cards and autoprobe. Note: The consumer part
@@ -842,6 +972,7 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
   ------------------
 
     Module for Envy24HT (VT/ICE1724), Envy24PT (VT1720) based PCI sound cards.
+			* MidiMan M Audio Revolution 5.1
 			* MidiMan M Audio Revolution 7.1
 			* AMP Ltd AUDIO2000
 			* TerraTec Aureon 5.1 Sky
@@ -850,6 +981,7 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 			* TerraTec Phase 22
 			* TerraTec Phase 28
 			* AudioTrak Prodigy 7.1
+			* AudioTrak Prodigy 7.1LT
 			* AudioTrak Prodigy 192
 			* Pontis MS300
 			* Albatron K8X800 Pro II 
@@ -860,9 +992,9 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 			* Shuttle SN25P
 
     model       - Use the given board model, one of the following:
-		  revo71, amp2000, prodigy71, prodigy192, aureon51,
-		  aureon71, universe, k8x800, phase22, phase28, ms300,
-		  av710
+		  revo51, revo71, amp2000, prodigy71, prodigy71lt,
+		  prodigy192, aureon51, aureon71, universe,
+		  k8x800, phase22, phase28, ms300, av710
 
     This module supports multiple cards and autoprobe.
 
@@ -1031,14 +1163,31 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     The power-management is supported.
 
-    Module snd-mia
-    ---------------
-  
-      Module for Echoaudio Mia
-  
-      This module supports multiple cards.
-      The driver requires the firmware loader support on kernel.
-  
+  Module snd-mia
+  ---------------
+
+    Module for Echoaudio Mia
+
+    This module supports multiple cards.
+    The driver requires the firmware loader support on kernel.
+
+  Module snd-miro
+  ---------------
+
+    Module for Miro soundcards: miroSOUND PCM 1 pro, 
+				miroSOUND PCM 12,
+				miroSOUND PCM 20 Radio.
+
+    port	- Port # (0x530,0x604,0xe80,0xf40)
+    irq		- IRQ # (5,7,9,10,11)
+    dma1	- 1st dma # (0,1,3)
+    dma2	- 2nd dma # (0,1)
+    mpu_port	- MPU-401 port # (0x300,0x310,0x320,0x330)
+    mpu_irq	- MPU-401 irq # (5,7,9,10)
+    fm_port	- FM Port # (0x388)
+    wss		- enable WSS mode
+    ide		- enable onboard ide support
+
   Module snd-mixart
   -----------------
 
@@ -1085,6 +1234,14 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
     
     Module supports only 1 card.  This module has no enable option.
 
+  Module snd-mts64
+  ----------------
+
+    Module for Ego Systems (ESI) Miditerminal 4140
+
+    This module supports multiple devices.
+    Requires parport (CONFIG_PARPORT).
+
   Module snd-nm256
   ----------------
 
@@ -1106,8 +1263,8 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     Note: on some notebooks the buffer address cannot be detected
     automatically, or causes hang-up during initialization.
-    In such a case, specify the buffer top address explicity via
-    buffer_top option.
+    In such a case, specify the buffer top address explicitly via
+    the buffer_top option.
     For example,
       Sony F250: buffer_top=0x25a800
       Sony F270: buffer_top=0x272800
@@ -1235,6 +1392,20 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
     For ARM architecture only.
 
     The power-management is supported.
+
+  Module snd-riptide
+  ------------------
+
+    Module for Conexant Riptide chip
+
+      joystick_port	- Joystick port # (default: 0x200)
+      mpu_port		- MPU401 port # (default: 0x330)
+      opl3_port		- OPL3 port # (default: 0x388)
+
+    This module supports multiple cards.
+    The driver requires the firmware loader support on kernel.
+    You need to install the firmware file "riptide.hex" to the standard
+    firmware path (e.g. /lib/firmware).
 
   Module snd-rme32
   ----------------
@@ -1449,6 +1620,9 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     vid             - Vendor ID for the device (optional)
     pid             - Product ID for the device (optional)
+    device_setup    - Device specific magic number (optional)
+                    - Influence depends on the device
+                    - Default: 0x0000 
 
     This module supports multiple devices, autoprobe and hotplugging.
 
@@ -1595,9 +1769,7 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
 
     About capture IBL, see the description of snd-vx222 module.
 
-    Note: the driver is build only when CONFIG_ISA is set.
-    
-    Note2: snd-vxp440 driver is merged to snd-vxpocket driver since
+    Note: snd-vxp440 driver is merged to snd-vxpocket driver since
            ALSA 1.0.10.
 
     The power-management is supported.
@@ -1623,8 +1795,6 @@ Prior to version 0.9.0rc4 options had a 'snd_' prefix. This was removed.
   --------------------
 
     Module for Sound Core PDAudioCF sound card.
-
-    Note: the driver is build only when CONFIG_ISA is set.
 
     The power-management is supported.
 
@@ -1712,7 +1882,7 @@ options snd-ens1371 index=1
 # OSS/Free portion
 alias sound-slot-0 snd-interwave
 alias sound-slot-1 snd-ens1371
------ /etc/moprobe.conf
+----- /etc/modprobe.conf
 
 In this example, the interwave card is always loaded as the first card
 (index 0) and ens1371 as the second (index 1).
@@ -1738,21 +1908,6 @@ playback, respectively.
 
 Please note that the device mapping above may be varied via the module
 options of snd-pcm-oss module.
-
-
-DEVFS support
-=============
-
-The ALSA driver fully supports the devfs extension.
-You should add lines below to your devfsd.conf file:
-
-LOOKUP snd MODLOAD ACTION snd
-REGISTER ^sound/.* PERMISSIONS root.audio 660
-REGISTER ^snd/.* PERMISSIONS root.audio 660
-
-Warning: These lines assume that you have the audio group in your system.
-         Otherwise replace audio word with another group name (root for
-         example).
 
 
 Proc interfaces (/proc/asound)

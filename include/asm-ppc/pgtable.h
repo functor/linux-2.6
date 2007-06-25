@@ -4,7 +4,6 @@
 
 #include <asm-generic/4level-fixup.h>
 
-#include <linux/config.h>
 
 #ifndef __ASSEMBLY__
 #include <linux/sched.h>
@@ -12,6 +11,7 @@
 #include <asm/processor.h>		/* For TASK_SIZE */
 #include <asm/mmu.h>
 #include <asm/page.h>
+#include <asm/io.h>			/* For sub-arch specific PPC_PIN_SIZE */
 struct mm_struct;
 
 extern unsigned long va_to_phys(unsigned long address);
@@ -127,9 +127,8 @@ extern unsigned long ioremap_bot, ioremap_base;
  * of RAM.  -- Cort
  */
 #define VMALLOC_OFFSET (0x1000000) /* 16M */
-#ifdef CONFIG_44x
-#include <asm/ibm44x.h>
-#define VMALLOC_START (((_ALIGN((long)high_memory, PPC44x_PIN_SIZE) + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1)))
+#ifdef PPC_PIN_SIZE
+#define VMALLOC_START (((_ALIGN((long)high_memory, PPC_PIN_SIZE) + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1)))
 #else
 #define VMALLOC_START ((((long)high_memory + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1)))
 #endif
@@ -527,7 +526,7 @@ static inline int pgd_bad(pgd_t pgd)		{ return 0; }
 static inline int pgd_present(pgd_t pgd)	{ return 1; }
 #define pgd_clear(xp)				do { } while (0)
 
-#define pgd_page(pgd) \
+#define pgd_page_vaddr(pgd) \
 	((unsigned long) __va(pgd_val(pgd) & PAGE_MASK))
 
 /*
@@ -663,7 +662,7 @@ static inline int __ptep_test_and_clear_young(unsigned int context, unsigned lon
 	return (old & _PAGE_ACCESSED) != 0;
 }
 #define ptep_test_and_clear_young(__vma, __addr, __ptep) \
-	__ptep_test_and_clear_young((__vma)->vm_mm->context, __addr, __ptep)
+	__ptep_test_and_clear_young((__vma)->vm_mm->context.id, __addr, __ptep)
 
 #define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_DIRTY
 static inline int ptep_test_and_clear_dirty(struct vm_area_struct *vma,
@@ -721,12 +720,12 @@ extern pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
  * of the pte page.  -- paulus
  */
 #ifndef CONFIG_BOOKE
-#define pmd_page_kernel(pmd)	\
+#define pmd_page_vaddr(pmd)	\
 	((unsigned long) __va(pmd_val(pmd) & PAGE_MASK))
 #define pmd_page(pmd)		\
 	(mem_map + (pmd_val(pmd) >> PAGE_SHIFT))
 #else
-#define pmd_page_kernel(pmd)	\
+#define pmd_page_vaddr(pmd)	\
 	((unsigned long) (pmd_val(pmd) & PAGE_MASK))
 #define pmd_page(pmd)		\
 	(mem_map + (__pa(pmd_val(pmd)) >> PAGE_SHIFT))
@@ -749,7 +748,7 @@ static inline pmd_t * pmd_offset(pgd_t * dir, unsigned long address)
 #define pte_index(address)		\
 	(((address) >> PAGE_SHIFT) & (PTRS_PER_PTE - 1))
 #define pte_offset_kernel(dir, addr)	\
-	((pte_t *) pmd_page_kernel(*(dir)) + pte_index(addr))
+	((pte_t *) pmd_page_vaddr(*(dir)) + pte_index(addr))
 #define pte_offset_map(dir, addr)		\
 	((pte_t *) kmap_atomic(pmd_page(*(dir)), KM_PTE0) + pte_index(addr))
 #define pte_offset_map_nested(dir, addr)	\
@@ -837,7 +836,8 @@ static inline int io_remap_pfn_range(struct vm_area_struct *vma,
  */
 #define pgtable_cache_init()	do { } while (0)
 
-extern int get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep);
+extern int get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep,
+		      pmd_t **pmdp);
 
 #include <asm-generic/pgtable.h>
 

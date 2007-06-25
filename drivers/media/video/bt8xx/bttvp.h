@@ -384,6 +384,9 @@ struct bttv {
 
 	unsigned int users;
 	struct bttv_fh init;
+
+	/* used to make dvb-bt8xx autoloadable */
+	struct work_struct request_module_wk;
 };
 
 /* our devices */

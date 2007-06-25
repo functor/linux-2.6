@@ -216,6 +216,11 @@ static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page
 		tx39_blast_icache_page_indexed(page);
 }
 
+static void local_tx39_flush_data_cache_page(void * addr)
+{
+	tx39_blast_dcache_page(addr);
+}
+
 static void tx39_flush_data_cache_page(unsigned long addr)
 {
 	tx39_blast_dcache_page(addr);
@@ -241,33 +246,6 @@ static void tx39_flush_icache_range(unsigned long start, unsigned long end)
 		write_c0_conf(config);
 		local_irq_restore(flags);
 	}
-}
-
-/*
- * Ok, this seriously sucks.  We use them to flush a user page but don't
- * know the virtual address, so we have to blast away the whole icache
- * which is significantly more expensive than the real thing.  Otoh we at
- * least know the kernel address of the page so we can flush it
- * selectivly.
- */
-static void tx39_flush_icache_page(struct vm_area_struct *vma, struct page *page)
-{
-	unsigned long addr;
-	/*
-	 * If there's no context yet, or the page isn't executable, no icache
-	 * flush is needed.
-	 */
-	if (!(vma->vm_flags & VM_EXEC))
-		return;
-
-	addr = (unsigned long) page_address(page);
-	tx39_blast_dcache_page(addr);
-
-	/*
-	 * We're not sure of the virtual address(es) involved here, so
-	 * we have to flush the entire I-cache.
-	 */
-	tx39_blast_icache();
 }
 
 static void tx39_dma_cache_wback_inv(unsigned long addr, unsigned long size)
@@ -377,10 +355,10 @@ void __init tx39_cache_init(void)
 		flush_cache_mm		= (void *) tx39h_flush_icache_all;
 		flush_cache_range	= (void *) tx39h_flush_icache_all;
 		flush_cache_page	= (void *) tx39h_flush_icache_all;
-		flush_icache_page	= (void *) tx39h_flush_icache_all;
 		flush_icache_range	= (void *) tx39h_flush_icache_all;
 
 		flush_cache_sigtramp	= (void *) tx39h_flush_icache_all;
+		local_flush_data_cache_page	= (void *) tx39h_flush_icache_all;
 		flush_data_cache_page	= (void *) tx39h_flush_icache_all;
 
 		_dma_cache_wback_inv	= tx39h_dma_cache_wback_inv;
@@ -402,10 +380,10 @@ void __init tx39_cache_init(void)
 		flush_cache_mm = tx39_flush_cache_mm;
 		flush_cache_range = tx39_flush_cache_range;
 		flush_cache_page = tx39_flush_cache_page;
-		flush_icache_page = tx39_flush_icache_page;
 		flush_icache_range = tx39_flush_icache_range;
 
 		flush_cache_sigtramp = tx39_flush_cache_sigtramp;
+		local_flush_data_cache_page = local_tx39_flush_data_cache_page;
 		flush_data_cache_page = tx39_flush_data_cache_page;
 
 		_dma_cache_wback_inv = tx39_dma_cache_wback_inv;

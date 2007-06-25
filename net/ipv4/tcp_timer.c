@@ -23,14 +23,14 @@
 #include <linux/module.h>
 #include <net/tcp.h>
 
-int sysctl_tcp_syn_retries = TCP_SYN_RETRIES; 
-int sysctl_tcp_synack_retries = TCP_SYNACK_RETRIES; 
-int sysctl_tcp_keepalive_time = TCP_KEEPALIVE_TIME;
-int sysctl_tcp_keepalive_probes = TCP_KEEPALIVE_PROBES;
-int sysctl_tcp_keepalive_intvl = TCP_KEEPALIVE_INTVL;
-int sysctl_tcp_retries1 = TCP_RETR1;
-int sysctl_tcp_retries2 = TCP_RETR2;
-int sysctl_tcp_orphan_retries;
+int sysctl_tcp_syn_retries __read_mostly = TCP_SYN_RETRIES;
+int sysctl_tcp_synack_retries __read_mostly = TCP_SYNACK_RETRIES;
+int sysctl_tcp_keepalive_time __read_mostly = TCP_KEEPALIVE_TIME;
+int sysctl_tcp_keepalive_probes __read_mostly = TCP_KEEPALIVE_PROBES;
+int sysctl_tcp_keepalive_intvl __read_mostly = TCP_KEEPALIVE_INTVL;
+int sysctl_tcp_retries1 __read_mostly = TCP_RETR1;
+int sysctl_tcp_retries2 __read_mostly = TCP_RETR2;
+int sysctl_tcp_orphan_retries __read_mostly;
 
 static void tcp_write_timer(unsigned long);
 static void tcp_delack_timer(unsigned long);
@@ -119,8 +119,10 @@ static int tcp_orphan_retries(struct sock *sk, int alive)
 /* A write timeout has occurred. Process the after effects. */
 static int tcp_write_timeout(struct sock *sk)
 {
-	const struct inet_connection_sock *icsk = inet_csk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
 	int retry_until;
+	int mss;
 
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
 		if (icsk->icsk_retransmits)
@@ -128,25 +130,19 @@ static int tcp_write_timeout(struct sock *sk)
 		retry_until = icsk->icsk_syn_retries ? : sysctl_tcp_syn_retries;
 	} else {
 		if (icsk->icsk_retransmits >= sysctl_tcp_retries1) {
-			/* NOTE. draft-ietf-tcpimpl-pmtud-01.txt requires pmtu black
-			   hole detection. :-(
-
-			   It is place to make it. It is not made. I do not want
-			   to make it. It is disgusting. It does not work in any
-			   case. Let me to cite the same draft, which requires for
-			   us to implement this:
-
-   "The one security concern raised by this memo is that ICMP black holes
-   are often caused by over-zealous security administrators who block
-   all ICMP messages.  It is vitally important that those who design and
-   deploy security systems understand the impact of strict filtering on
-   upper-layer protocols.  The safest web site in the world is worthless
-   if most TCP implementations cannot transfer data from it.  It would
-   be far nicer to have all of the black holes fixed rather than fixing
-   all of the TCP implementations."
-
-                           Golden words :-).
-		   */
+			/* Black hole detection */
+			if (sysctl_tcp_mtu_probing) {
+				if (!icsk->icsk_mtup.enabled) {
+					icsk->icsk_mtup.enabled = 1;
+					tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
+				} else {
+					mss = min(sysctl_tcp_base_mss,
+					          tcp_mtu_to_mss(sk, icsk->icsk_mtup.search_low)/2);
+					mss = max(mss, 68 - tp->tcp_header_len);
+					icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, mss);
+					tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
+				}
+			}
 
 			dst_negative_advice(&sk->sk_dst_cache);
 		}
@@ -301,7 +297,7 @@ static void tcp_retransmit_timer(struct sock *sk)
 		if (net_ratelimit()) {
 			struct inet_sock *inet = inet_sk(sk);
 			printk(KERN_DEBUG "TCP: Treason uncloaked! Peer %u.%u.%u.%u:%u/%u shrinks window %u:%u. Repaired.\n",
-			       NIPQUAD(inet->daddr), htons(inet->dport),
+			       NIPQUAD(inet->daddr), ntohs(inet->dport),
 			       inet->num, tp->snd_una, tp->snd_nxt);
 		}
 #endif

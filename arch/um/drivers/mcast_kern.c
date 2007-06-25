@@ -61,7 +61,7 @@ static int mcast_write(int fd, struct sk_buff **skb,
 				 (struct mcast_data *) &lp->user);
 }
 
-static struct net_kern_info mcast_kern_info = {
+static const struct net_kern_info mcast_kern_info = {
 	.init			= mcast_init,
 	.protocol		= eth_protocol,
 	.read			= mcast_read,
@@ -124,18 +124,7 @@ static struct transport mcast_transport = {
 static int register_mcast(void)
 {
 	register_transport(&mcast_transport);
-	return(1);
+	return 0;
 }
 
-__initcall(register_mcast);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+late_initcall(register_mcast);

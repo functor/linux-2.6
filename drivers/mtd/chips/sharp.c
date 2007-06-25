@@ -64,7 +64,7 @@
 
 #undef AUTOUNLOCK  /* automatically unlocks blocks before erasing */
 
-struct mtd_info *sharp_probe(struct map_info *);
+static struct mtd_info *sharp_probe(struct map_info *);
 
 static int sharp_probe_map(struct map_info *map,struct mtd_info *mtd);
 
@@ -96,7 +96,6 @@ struct sharp_info{
 	struct flchip chips[1];
 };
 
-struct mtd_info *sharp_probe(struct map_info *map);
 static void sharp_destroy(struct mtd_info *mtd);
 
 static struct mtd_chip_driver sharp_chipdrv = {
@@ -107,23 +106,21 @@ static struct mtd_chip_driver sharp_chipdrv = {
 };
 
 
-struct mtd_info *sharp_probe(struct map_info *map)
+static struct mtd_info *sharp_probe(struct map_info *map)
 {
 	struct mtd_info *mtd = NULL;
 	struct sharp_info *sharp = NULL;
 	int width;
 
-	mtd = kmalloc(sizeof(*mtd), GFP_KERNEL);
+	mtd = kzalloc(sizeof(*mtd), GFP_KERNEL);
 	if(!mtd)
 		return NULL;
 
-	sharp = kmalloc(sizeof(*sharp), GFP_KERNEL);
+	sharp = kzalloc(sizeof(*sharp), GFP_KERNEL);
 	if(!sharp) {
 		kfree(mtd);
 		return NULL;
 	}
-
-	memset(mtd, 0, sizeof(*mtd));
 
 	width = sharp_probe_map(map,mtd);
 	if(!width){
@@ -141,9 +138,9 @@ struct mtd_info *sharp_probe(struct map_info *map)
 	mtd->suspend = sharp_suspend;
 	mtd->resume = sharp_resume;
 	mtd->flags = MTD_CAP_NORFLASH;
+	mtd->writesize = 1;
 	mtd->name = map->name;
 
-	memset(sharp, 0, sizeof(*sharp));
 	sharp->chipshift = 23;
 	sharp->numchips = 1;
 	sharp->chips[0].start = 0;
@@ -581,7 +578,7 @@ static void sharp_destroy(struct mtd_info *mtd)
 
 }
 
-int __init sharp_probe_init(void)
+static int __init sharp_probe_init(void)
 {
 	printk("MTD Sharp chip driver <ds@lineo.com>\n");
 

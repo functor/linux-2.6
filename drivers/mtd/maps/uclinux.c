@@ -10,7 +10,6 @@
 
 /****************************************************************************/
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/init.h>
@@ -37,7 +36,7 @@ struct mtd_partition uclinux_romfs[] = {
 	{ .name = "ROMfs" }
 };
 
-#define	NUM_PARTITIONS	(sizeof(uclinux_romfs) / sizeof(uclinux_romfs[0]))
+#define	NUM_PARTITIONS	ARRAY_SIZE(uclinux_romfs)
 
 /****************************************************************************/
 

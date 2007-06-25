@@ -110,7 +110,7 @@ int vbd_create(blkif_t *blkif, blkif_vdev_t vdevice, unsigned major,
 	       unsigned minor, int readonly);
 void vbd_free(struct vbd *vbd);
 
-unsigned long vbd_size(struct vbd *vbd);
+unsigned long long vbd_size(struct vbd *vbd);
 unsigned int vbd_info(struct vbd *vbd);
 unsigned long vbd_secsize(struct vbd *vbd);
 
@@ -127,7 +127,7 @@ void blkif_interface_init(void);
 
 void blkif_xenbus_init(void);
 
-irqreturn_t blkif_be_int(int irq, void *dev_id, struct pt_regs *regs);
+irqreturn_t blkif_be_int(int irq, void *dev_id);
 int blkif_schedule(void *arg);
 
 #endif /* __BLKIF__BACKEND__COMMON_H__ */

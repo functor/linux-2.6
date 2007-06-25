@@ -68,8 +68,7 @@ struct xfs_mount_args {
 						 * enforcement */
 #define XFSMNT_PQUOTAENF	0x00000040	/* IRIX project quota limit
 						 * enforcement */
-#define XFSMNT_NOATIME		0x00000100	/* don't modify access
-						 * times on reads */
+#define XFSMNT_QUIET		0x00000080	/* don't report mount errors */
 #define XFSMNT_NOALIGN		0x00000200	/* don't allocate at
 						 * stripe boundaries*/
 #define XFSMNT_RETERR		0x00000400	/* return error to user */
@@ -100,7 +99,7 @@ struct xfs_mount_args {
  */
 #define XFSMNT2_COMPAT_IOSIZE	0x00000001	/* don't report large preferred
 						 * I/O size in stat(2) */
-#define XFSMNT2_TAGXID		0x80000000	/* context xid tagging */
+#define XFSMNT2_TAGGED		0x80000000	/* context tagging */
 
 
 #endif	/* __XFS_CLNT_H__ */

@@ -6,9 +6,10 @@
 #include <linux/linkage.h>
 #include <asm/segment.h>
 #include <asm/page.h>
+#include <asm/boot.h>
 #include <asm/thread_info.h>
 #include <asm/asm-offsets.h>
-#include <xen/interface/arch-x86_32.h>
+#include <xen/interface/xen.h>
 #include <xen/interface/elfnote.h>
 
 /*
@@ -27,8 +28,17 @@
 #define VIRT_ENTRY_OFFSET 0x0
 .org VIRT_ENTRY_OFFSET
 ENTRY(startup_32)
+
+#ifdef CONFIG_PARAVIRT
+        movl %cs, %eax
+        testl $0x3, %eax
+        jnz startup_paravirt
+#endif
+
 	movl %esi,xen_start_info
 	cld
+
+	call setup_pda
 
 	/* Set up the stack pointer */
 	movl $(init_thread_union+THREAD_SIZE),%esp
@@ -55,15 +65,59 @@ ENTRY(startup_32)
 
 	movb $1,X86_HARD_MATH
 
-	xorl %eax,%eax			# Clear FS/GS and LDT
+	xorl %eax,%eax			# Clear FS and LDT
 	movl %eax,%fs
-	movl %eax,%gs
+
+	movl $(__KERNEL_PDA),%eax
+	mov  %eax,%gs
+
 	cld			# gcc2 wants the direction flag cleared at all times
 
 	call start_kernel
 L6:
 	jmp L6			# main should never return here, but
 				# just in case, we know what happens.
+
+/*
+ * Point the GDT at this CPU's PDA.  This will be
+ * cpu_gdt_table and boot_pda.
+ */
+setup_pda:
+	/* get the PDA pointer */
+	movl $boot_pda, %eax
+
+	/* slot the PDA address into the GDT */
+	mov $cpu_gdt_table, %ecx
+	mov %ax, (__KERNEL_PDA+0+2)(%ecx)		/* base & 0x0000ffff */
+	shr $16, %eax
+	mov %al, (__KERNEL_PDA+4+0)(%ecx)		/* base & 0x00ff0000 */
+	mov %ah, (__KERNEL_PDA+4+3)(%ecx)		/* base & 0xff000000 */
+
+	# %esi still points to start_info, and no registers
+	# need to be preserved.
+
+	movl XEN_START_mfn_list(%esi), %ebx
+	movl $(cpu_gdt_table - __PAGE_OFFSET), %eax
+	shrl $PAGE_SHIFT, %eax
+	movl (%ebx,%eax,4), %ecx
+	pushl %ecx			# frame number for set_gdt below
+
+	xorl %esi, %esi
+	xorl %edx, %edx
+	shldl $PAGE_SHIFT, %ecx, %edx
+	shll $PAGE_SHIFT, %ecx
+	orl $0x61, %ecx
+	movl $cpu_gdt_table, %ebx
+	movl $__HYPERVISOR_update_va_mapping, %eax
+	int $0x82
+
+	movl $(PAGE_SIZE_asm / 8), %ecx
+	movl %esp, %ebx
+	movl $__HYPERVISOR_set_gdt, %eax
+	int $0x82
+
+	popl %ecx
+	ret
 
 #define HYPERCALL_PAGE_OFFSET 0x1000
 .org HYPERCALL_PAGE_OFFSET
@@ -87,10 +141,41 @@ ENTRY(empty_zero_page)
  * This starts the data section.
  */
 .data
+ENTRY(start_pda)
+	.long boot_pda
+
+#ifdef CONFIG_PARAVIRT
+startup_paravirt:
+	cld
+ 	movl $(init_thread_union+THREAD_SIZE),%esp
+
+	/* We take pains to preserve all the regs. */
+	pushl	%edx
+	pushl	%ecx
+	pushl	%eax
+
+	/* paravirt.o is last in link, and that probe fn never returns */
+	pushl	$__start_paravirtprobe
+1:
+	movl	0(%esp), %eax
+	pushl	(%eax)
+	movl	8(%esp), %eax
+	call	*(%esp)
+	popl	%eax
+
+	movl	4(%esp), %eax
+	movl	8(%esp), %ecx
+	movl	12(%esp), %edx
+
+	addl	$4, (%esp)
+	jmp	1b
+#endif
 
 /*
  * The Global Descriptor Table contains 28 quadwords, per-CPU.
  */
+	.section .data.page_aligned, "aw"
+	.align PAGE_SIZE_asm
 ENTRY(cpu_gdt_table)
 	.quad 0x0000000000000000	/* NULL descriptor */
 	.quad 0x0000000000000000	/* 0x0b reserved */
@@ -132,12 +217,13 @@ ENTRY(cpu_gdt_table)
 	.quad 0x0000000000000000	/* 0xc0 APM CS 16 code (16 bit) */
 	.quad 0x0000000000000000	/* 0xc8 APM DS    data */
 
-	.quad 0x0000000000000000	/* 0xd0 - ESPFIX 16-bit SS */
-	.quad 0x0000000000000000	/* 0xd8 - unused */
+	.quad 0x0000000000000000	/* 0xd0 - ESPFIX SS */
+	.quad 0x00cf92000000ffff	/* 0xd8 - PDA */
 	.quad 0x0000000000000000	/* 0xe0 - unused */
 	.quad 0x0000000000000000	/* 0xe8 - unused */
 	.quad 0x0000000000000000	/* 0xf0 - unused */
 	.quad 0x0000000000000000	/* 0xf8 - GDT entry 31: double-fault TSS */
+	.align PAGE_SIZE_asm
 
 #ifdef CONFIG_XEN_COMPAT_030002
 /*
@@ -162,9 +248,9 @@ ENTRY(cpu_gdt_table)
 	.ascii	",ELF_PADDR_OFFSET=0x"
 		utoa __PAGE_OFFSET
 	.ascii	",VIRT_ENTRY=0x"
-		utoa (__PAGE_OFFSET + __PHYSICAL_START + VIRT_ENTRY_OFFSET)
+		utoa (__PAGE_OFFSET + LOAD_PHYSICAL_ADDR + VIRT_ENTRY_OFFSET)
 	.ascii	",HYPERCALL_PAGE=0x"
-		utoa ((__PHYSICAL_START+HYPERCALL_PAGE_OFFSET)>>PAGE_SHIFT)
+		utoa ((LOAD_PHYSICAL_ADDR+HYPERCALL_PAGE_OFFSET)>>PAGE_SHIFT)
 	.ascii  ",FEATURES=writable_page_tables"
 	.ascii	         "|writable_descriptor_tables"
 	.ascii	         "|auto_translated_physmap"

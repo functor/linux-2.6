@@ -9,7 +9,6 @@
  *
  *  Common directory handling for ADFS
  */
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/adfs_fs.h>
@@ -29,7 +28,7 @@ static DEFINE_RWLOCK(adfs_dir_lock);
 static int
 adfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct super_block *sb = inode->i_sb;
 	struct adfs_dir_ops *ops = ADFS_SB(sb)->s_dir;
 	struct object_info obj;
@@ -196,7 +195,7 @@ out:
 	return ret;
 }
 
-struct file_operations adfs_dir_operations = {
+const struct file_operations adfs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= adfs_readdir,
 	.fsync		= file_fsync,

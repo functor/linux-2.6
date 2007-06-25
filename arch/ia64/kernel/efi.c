@@ -8,6 +8,8 @@
  * Copyright (C) 1999-2003 Hewlett-Packard Co.
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  *	Stephane Eranian <eranian@hpl.hp.com>
+ * (c) Copyright 2006 Hewlett-Packard Development Company, L.P.
+ *	Bjorn Helgaas <bjorn.helgaas@hp.com>
  *
  * All EFI Runtime Services are not implemented yet as EFI only
  * supports physical mode addressing on SoftSDV. This is to be fixed
@@ -18,13 +20,13 @@
  * Goutham Rao: <goutham.rao@intel.com>
  *	Skip non-WB memory and ignore empty memory ranges.
  */
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/time.h>
 #include <linux/efi.h>
+#include <linux/kexec.h>
 
 #include <asm/io.h>
 #include <asm/kregs.h>
@@ -40,7 +42,7 @@ extern efi_status_t efi_call_phys (void *, ...);
 struct efi efi;
 EXPORT_SYMBOL(efi);
 static efi_runtime_services_t *runtime;
-static unsigned long mem_limit = ~0UL, max_addr = ~0UL;
+static unsigned long mem_limit = ~0UL, max_addr = ~0UL, min_addr = 0UL;
 
 #define efi_call_virt(f, args...)	(*(f))(args)
 
@@ -223,7 +225,7 @@ efi_gettimeofday (struct timespec *ts)
 }
 
 static int
-is_available_memory (efi_memory_desc_t *md)
+is_memory_available (efi_memory_desc_t *md)
 {
 	if (!(md->attribute & EFI_MEMORY_WB))
 		return 0;
@@ -420,6 +422,8 @@ efi_init (void)
 			mem_limit = memparse(cp + 4, &cp);
 		} else if (memcmp(cp, "max_addr=", 9) == 0) {
 			max_addr = GRANULEROUNDDOWN(memparse(cp + 9, &cp));
+		} else if (memcmp(cp, "min_addr=", 9) == 0) {
+			min_addr = GRANULEROUNDDOWN(memparse(cp + 9, &cp));
 		} else {
 			while (*cp != ' ' && *cp)
 				++cp;
@@ -427,6 +431,8 @@ efi_init (void)
 				++cp;
 		}
 	}
+	if (min_addr != 0UL)
+		printk(KERN_INFO "Ignoring memory below %luMB\n", min_addr >> 20);
 	if (max_addr != ~0UL)
 		printk(KERN_INFO "Ignoring memory above %luMB\n", max_addr >> 20);
 
@@ -458,24 +464,33 @@ efi_init (void)
 	printk(KERN_INFO "EFI v%u.%.02u by %s:",
 	       efi.systab->hdr.revision >> 16, efi.systab->hdr.revision & 0xffff, vendor);
 
+	efi.mps        = EFI_INVALID_TABLE_ADDR;
+	efi.acpi       = EFI_INVALID_TABLE_ADDR;
+	efi.acpi20     = EFI_INVALID_TABLE_ADDR;
+	efi.smbios     = EFI_INVALID_TABLE_ADDR;
+	efi.sal_systab = EFI_INVALID_TABLE_ADDR;
+	efi.boot_info  = EFI_INVALID_TABLE_ADDR;
+	efi.hcdp       = EFI_INVALID_TABLE_ADDR;
+	efi.uga        = EFI_INVALID_TABLE_ADDR;
+
 	for (i = 0; i < (int) efi.systab->nr_tables; i++) {
 		if (efi_guidcmp(config_tables[i].guid, MPS_TABLE_GUID) == 0) {
-			efi.mps = __va(config_tables[i].table);
+			efi.mps = config_tables[i].table;
 			printk(" MPS=0x%lx", config_tables[i].table);
 		} else if (efi_guidcmp(config_tables[i].guid, ACPI_20_TABLE_GUID) == 0) {
-			efi.acpi20 = __va(config_tables[i].table);
+			efi.acpi20 = config_tables[i].table;
 			printk(" ACPI 2.0=0x%lx", config_tables[i].table);
 		} else if (efi_guidcmp(config_tables[i].guid, ACPI_TABLE_GUID) == 0) {
-			efi.acpi = __va(config_tables[i].table);
+			efi.acpi = config_tables[i].table;
 			printk(" ACPI=0x%lx", config_tables[i].table);
 		} else if (efi_guidcmp(config_tables[i].guid, SMBIOS_TABLE_GUID) == 0) {
-			efi.smbios = __va(config_tables[i].table);
+			efi.smbios = config_tables[i].table;
 			printk(" SMBIOS=0x%lx", config_tables[i].table);
 		} else if (efi_guidcmp(config_tables[i].guid, SAL_SYSTEM_TABLE_GUID) == 0) {
-			efi.sal_systab = __va(config_tables[i].table);
+			efi.sal_systab = config_tables[i].table;
 			printk(" SALsystab=0x%lx", config_tables[i].table);
 		} else if (efi_guidcmp(config_tables[i].guid, HCDP_TABLE_GUID) == 0) {
-			efi.hcdp = __va(config_tables[i].table);
+			efi.hcdp = config_tables[i].table;
 			printk(" HCDP=0x%lx", config_tables[i].table);
 		}
 	}
@@ -613,6 +628,18 @@ efi_get_iobase (void)
 	return 0;
 }
 
+static struct kern_memdesc *
+kern_memory_descriptor (unsigned long phys_addr)
+{
+	struct kern_memdesc *md;
+
+	for (md = kern_memmap; md->start != ~0UL; md++) {
+		if (phys_addr - md->start < (md->num_pages << EFI_PAGE_SHIFT))
+			 return md;
+	}
+	return NULL;
+}
+
 static efi_memory_desc_t *
 efi_memory_descriptor (unsigned long phys_addr)
 {
@@ -630,27 +657,7 @@ efi_memory_descriptor (unsigned long phys_addr)
 		if (phys_addr - md->phys_addr < (md->num_pages << EFI_PAGE_SHIFT))
 			 return md;
 	}
-	return 0;
-}
-
-static int
-efi_memmap_has_mmio (void)
-{
-	void *efi_map_start, *efi_map_end, *p;
-	efi_memory_desc_t *md;
-	u64 efi_desc_size;
-
-	efi_map_start = __va(ia64_boot_param->efi_memmap);
-	efi_map_end   = efi_map_start + ia64_boot_param->efi_memmap_size;
-	efi_desc_size = ia64_boot_param->efi_memdesc_size;
-
-	for (p = efi_map_start; p < efi_map_end; p += efi_desc_size) {
-		md = p;
-
-		if (md->type == EFI_MEMORY_MAPPED_IO)
-			return 1;
-	}
-	return 0;
+	return NULL;
 }
 
 u32
@@ -674,72 +681,125 @@ efi_mem_attributes (unsigned long phys_addr)
 }
 EXPORT_SYMBOL(efi_mem_attributes);
 
-/*
- * Determines whether the memory at phys_addr supports the desired
- * attribute (WB, UC, etc).  If this returns 1, the caller can safely
- * access *size bytes at phys_addr with the specified attribute.
- */
-static int
-efi_mem_attribute_range (unsigned long phys_addr, unsigned long *size, u64 attr)
+u64
+efi_mem_attribute (unsigned long phys_addr, unsigned long size)
 {
+	unsigned long end = phys_addr + size;
 	efi_memory_desc_t *md = efi_memory_descriptor(phys_addr);
-	unsigned long md_end;
+	u64 attr;
 
-	if (!md || (md->attribute & attr) != attr)
+	if (!md)
 		return 0;
 
+	/*
+	 * EFI_MEMORY_RUNTIME is not a memory attribute; it just tells
+	 * the kernel that firmware needs this region mapped.
+	 */
+	attr = md->attribute & ~EFI_MEMORY_RUNTIME;
 	do {
-		md_end = efi_md_end(md);
-		if (phys_addr + *size <= md_end)
-			return 1;
+		unsigned long md_end = efi_md_end(md);
+
+		if (end <= md_end)
+			return attr;
 
 		md = efi_memory_descriptor(md_end);
-		if (!md || (md->attribute & attr) != attr) {
-			*size = md_end - phys_addr;
-			return 1;
-		}
+		if (!md || (md->attribute & ~EFI_MEMORY_RUNTIME) != attr)
+			return 0;
 	} while (md);
 	return 0;
 }
 
-/*
- * For /dev/mem, we only allow read & write system calls to access
- * write-back memory, because read & write don't allow the user to
- * control access size.
- */
-int
-valid_phys_addr_range (unsigned long phys_addr, unsigned long *size)
+u64
+kern_mem_attribute (unsigned long phys_addr, unsigned long size)
 {
-	return efi_mem_attribute_range(phys_addr, size, EFI_MEMORY_WB);
-}
-
-/*
- * We allow mmap of anything in the EFI memory map that supports
- * either write-back or uncacheable access.  For uncacheable regions,
- * the supported access sizes are system-dependent, and the user is
- * responsible for using the correct size.
- *
- * Note that this doesn't currently allow access to hot-added memory,
- * because that doesn't appear in the boot-time EFI memory map.
- */
-int
-valid_mmap_phys_addr_range (unsigned long phys_addr, unsigned long *size)
-{
-	if (efi_mem_attribute_range(phys_addr, size, EFI_MEMORY_WB))
-		return 1;
-
-	if (efi_mem_attribute_range(phys_addr, size, EFI_MEMORY_UC))
-		return 1;
+	unsigned long end = phys_addr + size;
+	struct kern_memdesc *md;
+	u64 attr;
 
 	/*
-	 * Some firmware doesn't report MMIO regions in the EFI memory map.
-	 * The Intel BigSur (a.k.a. HP i2000) has this problem.  In this
-	 * case, we can't use the EFI memory map to validate mmap requests.
+	 * This is a hack for ioremap calls before we set up kern_memmap.
+	 * Maybe we should do efi_memmap_init() earlier instead.
 	 */
-	if (!efi_memmap_has_mmio())
-		return 1;
+	if (!kern_memmap) {
+		attr = efi_mem_attribute(phys_addr, size);
+		if (attr & EFI_MEMORY_WB)
+			return EFI_MEMORY_WB;
+		return 0;
+	}
 
+	md = kern_memory_descriptor(phys_addr);
+	if (!md)
+		return 0;
+
+	attr = md->attribute;
+	do {
+		unsigned long md_end = kmd_end(md);
+
+		if (end <= md_end)
+			return attr;
+
+		md = kern_memory_descriptor(md_end);
+		if (!md || md->attribute != attr)
+			return 0;
+	} while (md);
 	return 0;
+}
+EXPORT_SYMBOL(kern_mem_attribute);
+
+int
+valid_phys_addr_range (unsigned long phys_addr, unsigned long size)
+{
+	u64 attr;
+
+	/*
+	 * /dev/mem reads and writes use copy_to_user(), which implicitly
+	 * uses a granule-sized kernel identity mapping.  It's really
+	 * only safe to do this for regions in kern_memmap.  For more
+	 * details, see Documentation/ia64/aliasing.txt.
+	 */
+	attr = kern_mem_attribute(phys_addr, size);
+	if (attr & EFI_MEMORY_WB || attr & EFI_MEMORY_UC)
+		return 1;
+	return 0;
+}
+
+int
+valid_mmap_phys_addr_range (unsigned long pfn, unsigned long size)
+{
+	/*
+	 * MMIO regions are often missing from the EFI memory map.
+	 * We must allow mmap of them for programs like X, so we
+	 * currently can't do any useful validation.
+	 */
+	return 1;
+}
+
+pgprot_t
+phys_mem_access_prot(struct file *file, unsigned long pfn, unsigned long size,
+		     pgprot_t vma_prot)
+{
+	unsigned long phys_addr = pfn << PAGE_SHIFT;
+	u64 attr;
+
+	/*
+	 * For /dev/mem mmap, we use user mappings, but if the region is
+	 * in kern_memmap (and hence may be covered by a kernel mapping),
+	 * we must use the same attribute as the kernel mapping.
+	 */
+	attr = kern_mem_attribute(phys_addr, size);
+	if (attr & EFI_MEMORY_WB)
+		return pgprot_cacheable(vma_prot);
+	else if (attr & EFI_MEMORY_UC)
+		return pgprot_noncached(vma_prot);
+
+	/*
+	 * Some chipsets don't support UC access to memory.  If
+	 * WB is supported, we prefer that.
+	 */
+	if (efi_mem_attribute(phys_addr, size) & EFI_MEMORY_WB)
+		return pgprot_cacheable(vma_prot);
+
+	return pgprot_noncached(vma_prot);
 }
 
 int __init
@@ -832,14 +892,15 @@ find_memmap_space (void)
 			}
 			contig_high = GRANULEROUNDDOWN(contig_high);
 		}
-		if (!is_available_memory(md) || md->type == EFI_LOADER_DATA)
+		if (!is_memory_available(md) || md->type == EFI_LOADER_DATA)
 			continue;
 
 		/* Round ends inward to granule boundaries */
 		as = max(contig_low, md->phys_addr);
 		ae = min(contig_high, efi_md_end(md));
 
-		/* keep within max_addr= command line arg */
+		/* keep within max_addr= and min_addr= command line arg */
+		as = max(as, min_addr);
 		ae = min(ae, max_addr);
 		if (ae <= as)
 			continue;
@@ -868,7 +929,7 @@ find_memmap_space (void)
 void
 efi_memmap_init(unsigned long *s, unsigned long *e)
 {
-	struct kern_memdesc *k, *prev = 0;
+	struct kern_memdesc *k, *prev = NULL;
 	u64	contig_low=0, contig_high=0;
 	u64	as, ae, lim;
 	void *efi_map_start, *efi_map_end, *p, *q;
@@ -907,7 +968,7 @@ efi_memmap_init(unsigned long *s, unsigned long *e)
 			}
 			contig_high = GRANULEROUNDDOWN(contig_high);
 		}
-		if (!is_available_memory(md))
+		if (!is_memory_available(md))
 			continue;
 
 		/*
@@ -949,7 +1010,8 @@ efi_memmap_init(unsigned long *s, unsigned long *e)
 		} else
 			ae = efi_md_end(md);
 
-		/* keep within max_addr= command line arg */
+		/* keep within max_addr= and min_addr= command line arg */
+		as = max(as, min_addr);
 		ae = min(ae, max_addr);
 		if (ae <= as)
 			continue;
@@ -1061,6 +1123,58 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 			 */
 			insert_resource(res, code_resource);
 			insert_resource(res, data_resource);
+#ifdef CONFIG_KEXEC
+                        insert_resource(res, &efi_memmap_res);
+                        insert_resource(res, &boot_param_res);
+			if (crashk_res.end > crashk_res.start)
+				insert_resource(res, &crashk_res);
+#endif
 		}
 	}
 }
+
+#ifdef CONFIG_KEXEC
+/* find a block of memory aligned to 64M exclude reserved regions
+   rsvd_regions are sorted
+ */
+unsigned long
+kdump_find_rsvd_region (unsigned long size,
+		struct rsvd_region *r, int n)
+{
+  int i;
+  u64 start, end;
+  u64 alignment = 1UL << _PAGE_SIZE_64M;
+  void *efi_map_start, *efi_map_end, *p;
+  efi_memory_desc_t *md;
+  u64 efi_desc_size;
+
+  efi_map_start = __va(ia64_boot_param->efi_memmap);
+  efi_map_end   = efi_map_start + ia64_boot_param->efi_memmap_size;
+  efi_desc_size = ia64_boot_param->efi_memdesc_size;
+
+  for (p = efi_map_start; p < efi_map_end; p += efi_desc_size) {
+	  md = p;
+	  if (!efi_wb(md))
+		  continue;
+	  start = ALIGN(md->phys_addr, alignment);
+	  end = efi_md_end(md);
+	  for (i = 0; i < n; i++) {
+		if (__pa(r[i].start) >= start && __pa(r[i].end) < end) {
+			if (__pa(r[i].start) > start + size)
+				return start;
+			start = ALIGN(__pa(r[i].end), alignment);
+			if (i < n-1 && __pa(r[i+1].start) < start + size)
+				continue;
+			else
+				break;
+		}
+	  }
+	  if (end > start + size)
+		return start;
+  }
+
+  printk(KERN_WARNING "Cannot reserve 0x%lx byte of memory for crashdump\n",
+	size);
+  return ~0UL;
+}
+#endif

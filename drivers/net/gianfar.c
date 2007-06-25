@@ -9,7 +9,7 @@
  * Author: Andy Fleming
  * Maintainer: Kumar Gala
  *
- * Copyright (c) 2002-2004 Freescale Semiconductor, Inc.
+ * Copyright (c) 2002-2006 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute  it and/or modify it
  * under  the terms of  the GNU General  Public License as published by the
@@ -64,7 +64,6 @@
  *  The driver then cleans up the buffer.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/string.h>
@@ -120,9 +119,9 @@ struct sk_buff *gfar_new_skb(struct net_device *dev, struct rxbd8 *bdp);
 static struct net_device_stats *gfar_get_stats(struct net_device *dev);
 static int gfar_set_mac_address(struct net_device *dev);
 static int gfar_change_mtu(struct net_device *dev, int new_mtu);
-static irqreturn_t gfar_error(int irq, void *dev_id, struct pt_regs *regs);
-static irqreturn_t gfar_transmit(int irq, void *dev_id, struct pt_regs *regs);
-static irqreturn_t gfar_interrupt(int irq, void *dev_id, struct pt_regs *regs);
+static irqreturn_t gfar_error(int irq, void *dev_id);
+static irqreturn_t gfar_transmit(int irq, void *dev_id);
+static irqreturn_t gfar_interrupt(int irq, void *dev_id);
 static void adjust_link(struct net_device *dev);
 static void init_registers(struct net_device *dev);
 static int init_phy(struct net_device *dev);
@@ -134,6 +133,9 @@ static void gfar_set_hash_for_addr(struct net_device *dev, u8 *addr);
 #ifdef CONFIG_GFAR_NAPI
 static int gfar_poll(struct net_device *dev, int *budget);
 #endif
+#ifdef CONFIG_NET_POLL_CONTROLLER
+static void gfar_netpoll(struct net_device *dev);
+#endif
 int gfar_clean_rx_ring(struct net_device *dev, int rx_work_limit);
 static int gfar_process_frame(struct net_device *dev, struct sk_buff *skb, int length);
 static void gfar_vlan_rx_register(struct net_device *netdev,
@@ -144,7 +146,7 @@ void gfar_start(struct net_device *dev);
 static void gfar_clear_exact_match(struct net_device *dev);
 static void gfar_set_mac_for_addr(struct net_device *dev, int num, u8 *addr);
 
-extern struct ethtool_ops gfar_ethtool_ops;
+extern const struct ethtool_ops gfar_ethtool_ops;
 
 MODULE_AUTHOR("Freescale Semiconductor, Inc");
 MODULE_DESCRIPTION("Gianfar Ethernet Driver");
@@ -193,8 +195,12 @@ static int gfar_probe(struct platform_device *pdev)
 		priv->interruptTransmit = platform_get_irq_byname(pdev, "tx");
 		priv->interruptReceive = platform_get_irq_byname(pdev, "rx");
 		priv->interruptError = platform_get_irq_byname(pdev, "error");
+		if (priv->interruptTransmit < 0 || priv->interruptReceive < 0 || priv->interruptError < 0)
+			goto regs_fail;
 	} else {
 		priv->interruptTransmit = platform_get_irq(pdev, 0);
+		if (priv->interruptTransmit < 0)
+			goto regs_fail;
 	}
 
 	/* get a pointer to the register memory */
@@ -206,7 +212,8 @@ static int gfar_probe(struct platform_device *pdev)
 		goto regs_fail;
 	}
 
-	spin_lock_init(&priv->lock);
+	spin_lock_init(&priv->txlock);
+	spin_lock_init(&priv->rxlock);
 
 	platform_set_drvdata(pdev, dev);
 
@@ -255,6 +262,9 @@ static int gfar_probe(struct platform_device *pdev)
 #ifdef CONFIG_GFAR_NAPI
 	dev->poll = gfar_poll;
 	dev->weight = GFAR_DEV_WEIGHT;
+#endif
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	dev->poll_controller = gfar_netpoll;
 #endif
 	dev->stop = gfar_close;
 	dev->get_stats = gfar_get_stats;
@@ -388,6 +398,38 @@ static int gfar_remove(struct platform_device *pdev)
 }
 
 
+/* Reads the controller's registers to determine what interface
+ * connects it to the PHY.
+ */
+static phy_interface_t gfar_get_interface(struct net_device *dev)
+{
+	struct gfar_private *priv = netdev_priv(dev);
+	u32 ecntrl = gfar_read(&priv->regs->ecntrl);
+
+	if (ecntrl & ECNTRL_SGMII_MODE)
+		return PHY_INTERFACE_MODE_SGMII;
+
+	if (ecntrl & ECNTRL_TBI_MODE) {
+		if (ecntrl & ECNTRL_REDUCED_MODE)
+			return PHY_INTERFACE_MODE_RTBI;
+		else
+			return PHY_INTERFACE_MODE_TBI;
+	}
+
+	if (ecntrl & ECNTRL_REDUCED_MODE) {
+		if (ecntrl & ECNTRL_REDUCED_MII_MODE)
+			return PHY_INTERFACE_MODE_RMII;
+		else
+			return PHY_INTERFACE_MODE_RGMII;
+	}
+
+	if (priv->einfo->device_flags & FSL_GIANFAR_DEV_HAS_GIGABIT)
+		return PHY_INTERFACE_MODE_GMII;
+
+	return PHY_INTERFACE_MODE_MII;
+}
+
+
 /* Initializes driver's PHY state, and attaches to the PHY.
  * Returns 0 on success.
  */
@@ -399,6 +441,7 @@ static int init_phy(struct net_device *dev)
 		SUPPORTED_1000baseT_Full : 0;
 	struct phy_device *phydev;
 	char phy_id[BUS_ID_SIZE];
+	phy_interface_t interface;
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;
@@ -406,7 +449,9 @@ static int init_phy(struct net_device *dev)
 
 	snprintf(phy_id, BUS_ID_SIZE, PHY_ID_FMT, priv->einfo->bus_id, priv->einfo->phy_id);
 
-	phydev = phy_connect(dev, phy_id, &adjust_link, 0);
+	interface = gfar_get_interface(dev);
+
+	phydev = phy_connect(dev, phy_id, &adjust_link, 0, interface);
 
 	if (IS_ERR(phydev)) {
 		printk(KERN_ERR "%s: Could not attach to PHY\n", dev->name);
@@ -511,11 +556,13 @@ void stop_gfar(struct net_device *dev)
 	phy_stop(priv->phydev);
 
 	/* Lock it down */
-	spin_lock_irqsave(&priv->lock, flags);
+	spin_lock_irqsave(&priv->txlock, flags);
+	spin_lock(&priv->rxlock);
 
 	gfar_halt(dev);
 
-	spin_unlock_irqrestore(&priv->lock, flags);
+	spin_unlock(&priv->rxlock);
+	spin_unlock_irqrestore(&priv->txlock, flags);
 
 	/* Free the IRQs */
 	if (priv->einfo->device_flags & FSL_GIANFAR_DEV_HAS_MULTI_INTR) {
@@ -601,13 +648,14 @@ void gfar_start(struct net_device *dev)
 	tempval |= DMACTRL_INIT_SETTINGS;
 	gfar_write(&priv->regs->dmactrl, tempval);
 
-	/* Clear THLT, so that the DMA starts polling now */
-	gfar_write(&regs->tstat, TSTAT_CLEAR_THALT);
-
 	/* Make sure we aren't stopped */
 	tempval = gfar_read(&priv->regs->dmactrl);
 	tempval &= ~(DMACTRL_GRS | DMACTRL_GTS);
 	gfar_write(&priv->regs->dmactrl, tempval);
+
+	/* Clear THLT/RHLT, so that the DMA starts polling now */
+	gfar_write(&regs->tstat, TSTAT_CLEAR_THALT);
+	gfar_write(&regs->rstat, RSTAT_CLEAR_RHALT);
 
 	/* Unmask the interrupts we look for */
 	gfar_write(&regs->imask, IMASK_DEFAULT);
@@ -924,12 +972,13 @@ static int gfar_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct txfcb *fcb = NULL;
 	struct txbd8 *txbdp;
 	u16 status;
+	unsigned long flags;
 
 	/* Update transmit stats */
 	priv->stats.tx_bytes += skb->len;
 
 	/* Lock priv now */
-	spin_lock_irq(&priv->lock);
+	spin_lock_irqsave(&priv->txlock, flags);
 
 	/* Point at the first free tx descriptor */
 	txbdp = priv->cur_tx;
@@ -939,7 +988,7 @@ static int gfar_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	/* Set up checksumming */
 	if (likely((dev->features & NETIF_F_IP_CSUM)
-			&& (CHECKSUM_HW == skb->ip_summed))) {
+			&& (CHECKSUM_PARTIAL == skb->ip_summed))) {
 		fcb = gfar_add_fcb(skb, txbdp);
 		status |= TXBD_TOE;
 		gfar_tx_checksum(skb, fcb);
@@ -1000,7 +1049,7 @@ static int gfar_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	gfar_write(&priv->regs->tstat, TSTAT_CLEAR_THALT);
 
 	/* Unlock priv */
-	spin_unlock_irq(&priv->lock);
+	spin_unlock_irqrestore(&priv->txlock, flags);
 
 	return 0;
 }
@@ -1045,7 +1094,7 @@ static void gfar_vlan_rx_register(struct net_device *dev,
 	unsigned long flags;
 	u32 tempval;
 
-	spin_lock_irqsave(&priv->lock, flags);
+	spin_lock_irqsave(&priv->rxlock, flags);
 
 	priv->vlgrp = grp;
 
@@ -1055,7 +1104,7 @@ static void gfar_vlan_rx_register(struct net_device *dev,
 		tempval |= TCTRL_VLINS;
 
 		gfar_write(&priv->regs->tctrl, tempval);
-		
+
 		/* Enable VLAN tag extraction */
 		tempval = gfar_read(&priv->regs->rctrl);
 		tempval |= RCTRL_VLEX;
@@ -1072,7 +1121,7 @@ static void gfar_vlan_rx_register(struct net_device *dev,
 		gfar_write(&priv->regs->rctrl, tempval);
 	}
 
-	spin_unlock_irqrestore(&priv->lock, flags);
+	spin_unlock_irqrestore(&priv->rxlock, flags);
 }
 
 
@@ -1081,12 +1130,12 @@ static void gfar_vlan_rx_kill_vid(struct net_device *dev, uint16_t vid)
 	struct gfar_private *priv = netdev_priv(dev);
 	unsigned long flags;
 
-	spin_lock_irqsave(&priv->lock, flags);
+	spin_lock_irqsave(&priv->rxlock, flags);
 
 	if (priv->vlgrp)
 		priv->vlgrp->vlan_devices[vid] = NULL;
 
-	spin_unlock_irqrestore(&priv->lock, flags);
+	spin_unlock_irqrestore(&priv->rxlock, flags);
 }
 
 
@@ -1165,7 +1214,7 @@ static void gfar_timeout(struct net_device *dev)
 }
 
 /* Interrupt Handler for Transmit complete */
-static irqreturn_t gfar_transmit(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t gfar_transmit(int irq, void *dev_id)
 {
 	struct net_device *dev = (struct net_device *) dev_id;
 	struct gfar_private *priv = netdev_priv(dev);
@@ -1175,7 +1224,7 @@ static irqreturn_t gfar_transmit(int irq, void *dev_id, struct pt_regs *regs)
 	gfar_write(&priv->regs->ievent, IEVENT_TX_MASK);
 
 	/* Lock priv */
-	spin_lock(&priv->lock);
+	spin_lock(&priv->txlock);
 	bdp = priv->dirty_tx;
 	while ((bdp->status & TXBD_READY) == 0) {
 		/* If dirty_tx and cur_tx are the same, then either the */
@@ -1220,7 +1269,7 @@ static irqreturn_t gfar_transmit(int irq, void *dev_id, struct pt_regs *regs)
 	else
 		gfar_write(&priv->regs->txic, 0);
 
-	spin_unlock(&priv->lock);
+	spin_unlock(&priv->txlock);
 
 	return IRQ_HANDLED;
 }
@@ -1297,13 +1346,14 @@ static inline void count_errors(unsigned short status, struct gfar_private *priv
 	}
 }
 
-irqreturn_t gfar_receive(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t gfar_receive(int irq, void *dev_id)
 {
 	struct net_device *dev = (struct net_device *) dev_id;
 	struct gfar_private *priv = netdev_priv(dev);
-
 #ifdef CONFIG_GFAR_NAPI
 	u32 tempval;
+#else
+	unsigned long flags;
 #endif
 
 	/* Clear IEVENT, so rx interrupt isn't called again
@@ -1326,7 +1376,7 @@ irqreturn_t gfar_receive(int irq, void *dev_id, struct pt_regs *regs)
 	}
 #else
 
-	spin_lock(&priv->lock);
+	spin_lock_irqsave(&priv->rxlock, flags);
 	gfar_clean_rx_ring(dev, priv->rx_ring_size);
 
 	/* If we are coalescing interrupts, update the timer */
@@ -1337,7 +1387,7 @@ irqreturn_t gfar_receive(int irq, void *dev_id, struct pt_regs *regs)
 	else
 		gfar_write(&priv->regs->rxic, 0);
 
-	spin_unlock(&priv->lock);
+	spin_unlock_irqrestore(&priv->rxlock, flags);
 #endif
 
 	return IRQ_HANDLED;
@@ -1486,13 +1536,6 @@ int gfar_clean_rx_ring(struct net_device *dev, int rx_work_limit)
 	/* Update the current rxbd pointer to be the next one */
 	priv->cur_rx = bdp;
 
-	/* If no packets have arrived since the
-	 * last one we processed, clear the IEVENT RX and
-	 * BSY bits so that another interrupt won't be
-	 * generated when we set IMASK */
-	if (bdp->status & RXBD_EMPTY)
-		gfar_write(&priv->regs->ievent, IEVENT_RX_MASK);
-
 	return howmany;
 }
 
@@ -1512,7 +1555,7 @@ static int gfar_poll(struct net_device *dev, int *budget)
 	rx_work_limit -= howmany;
 	*budget -= howmany;
 
-	if (rx_work_limit >= 0) {
+	if (rx_work_limit > 0) {
 		netif_rx_complete(dev);
 
 		/* Clear the halt bit in RSTAT */
@@ -1529,12 +1572,40 @@ static int gfar_poll(struct net_device *dev, int *budget)
 			gfar_write(&priv->regs->rxic, 0);
 	}
 
-	return (rx_work_limit < 0) ? 1 : 0;
+	/* Return 1 if there's more work to do */
+	return (rx_work_limit > 0) ? 0 : 1;
+}
+#endif
+
+#ifdef CONFIG_NET_POLL_CONTROLLER
+/*
+ * Polling 'interrupt' - used by things like netconsole to send skbs
+ * without having to re-enable interrupts. It's not called while
+ * the interrupt routine is executing.
+ */
+static void gfar_netpoll(struct net_device *dev)
+{
+	struct gfar_private *priv = netdev_priv(dev);
+
+	/* If the device has multiple interrupts, run tx/rx */
+	if (priv->einfo->device_flags & FSL_GIANFAR_DEV_HAS_MULTI_INTR) {
+		disable_irq(priv->interruptTransmit);
+		disable_irq(priv->interruptReceive);
+		disable_irq(priv->interruptError);
+		gfar_interrupt(priv->interruptTransmit, dev);
+		enable_irq(priv->interruptError);
+		enable_irq(priv->interruptReceive);
+		enable_irq(priv->interruptTransmit);
+	} else {
+		disable_irq(priv->interruptTransmit);
+		gfar_interrupt(priv->interruptTransmit, dev);
+		enable_irq(priv->interruptTransmit);
+	}
 }
 #endif
 
 /* The interrupt handler for devices with one interrupt */
-static irqreturn_t gfar_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t gfar_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
 	struct gfar_private *priv = netdev_priv(dev);
@@ -1547,11 +1618,11 @@ static irqreturn_t gfar_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	/* Check for reception */
 	if ((events & IEVENT_RXF0) || (events & IEVENT_RXB0))
-		gfar_receive(irq, dev_id, regs);
+		gfar_receive(irq, dev_id);
 
 	/* Check for transmit completion */
 	if ((events & IEVENT_TXF) || (events & IEVENT_TXB))
-		gfar_transmit(irq, dev_id, regs);
+		gfar_transmit(irq, dev_id);
 
 	/* Update error statistics */
 	if (events & IEVENT_TXE) {
@@ -1575,7 +1646,7 @@ static irqreturn_t gfar_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		priv->stats.rx_errors++;
 		priv->extra_stats.rx_bsy++;
 
-		gfar_receive(irq, dev_id, regs);
+		gfar_receive(irq, dev_id);
 
 #ifndef CONFIG_GFAR_NAPI
 		/* Clear the halt bit in RSTAT */
@@ -1625,7 +1696,7 @@ static void adjust_link(struct net_device *dev)
 	struct phy_device *phydev = priv->phydev;
 	int new_state = 0;
 
-	spin_lock_irqsave(&priv->lock, flags);
+	spin_lock_irqsave(&priv->txlock, flags);
 	if (phydev->link) {
 		u32 tempval = gfar_read(&regs->maccfg2);
 		u32 ecntrl = gfar_read(&regs->ecntrl);
@@ -1690,7 +1761,7 @@ static void adjust_link(struct net_device *dev)
 	if (new_state && netif_msg_link(priv))
 		phy_print_status(phydev);
 
-	spin_unlock_irqrestore(&priv->lock, flags);
+	spin_unlock_irqrestore(&priv->txlock, flags);
 }
 
 /* Update the hash table based on the current list of multicast
@@ -1705,9 +1776,6 @@ static void gfar_set_multi(struct net_device *dev)
 	u32 tempval;
 
 	if(dev->flags & IFF_PROMISC) {
-		if (netif_msg_drv(priv))
-			printk(KERN_INFO "%s: Entering promiscuous mode.\n",
-					dev->name);
 		/* Set RCTRL to PROM */
 		tempval = gfar_read(&regs->rctrl);
 		tempval |= RCTRL_PROM;
@@ -1718,7 +1786,7 @@ static void gfar_set_multi(struct net_device *dev)
 		tempval &= ~(RCTRL_PROM);
 		gfar_write(&regs->rctrl, tempval);
 	}
-	
+
 	if(dev->flags & IFF_ALLMULTI) {
 		/* Set the hash to rx all multicast frames */
 		gfar_write(&regs->igaddr0, 0xffffffff);
@@ -1857,7 +1925,7 @@ static void gfar_set_mac_for_addr(struct net_device *dev, int num, u8 *addr)
 }
 
 /* GFAR error interrupt handler */
-static irqreturn_t gfar_error(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t gfar_error(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
 	struct gfar_private *priv = netdev_priv(dev);
@@ -1898,7 +1966,7 @@ static irqreturn_t gfar_error(int irq, void *dev_id, struct pt_regs *regs)
 		priv->stats.rx_errors++;
 		priv->extra_stats.rx_bsy++;
 
-		gfar_receive(irq, dev_id, regs);
+		gfar_receive(irq, dev_id);
 
 #ifndef CONFIG_GFAR_NAPI
 		/* Clear the halt bit in RSTAT */
@@ -1954,7 +2022,7 @@ static int __init gfar_init(void)
 
 	if (err)
 		gfar_mdio_exit();
-	
+
 	return err;
 }
 

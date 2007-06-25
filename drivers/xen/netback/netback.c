@@ -139,12 +139,12 @@ static inline void maybe_schedule_tx_action(void)
 
 /*
  * A gross way of confirming the origin of an skb data page. The slab
- * allocator abuses a field in the page struct to cache the kmem_cache_t ptr.
+ * allocator abuses a field in the page struct to cache the struct kmem_cache ptr.
  */
 static inline int is_xen_skb(struct sk_buff *skb)
 {
-	extern kmem_cache_t *skbuff_cachep;
-	kmem_cache_t *cp = (kmem_cache_t *)virt_to_page(skb->head)->lru.next;
+	extern struct kmem_cache *skbuff_cachep;
+	struct kmem_cache *cp = (struct kmem_cache *)virt_to_page(skb->head)->lru.next;
 	return (cp == skbuff_cachep);
 }
 
@@ -265,6 +265,13 @@ static inline int netbk_queue_full(netif_t *netif)
 	       ((netif->rx.rsp_prod_pvt + NET_RX_RING_SIZE - peek) < needed);
 }
 
+static void tx_queue_callback(unsigned long data)
+{
+	netif_t *netif = (netif_t *)data;
+	if (netif_schedulable(netif->dev))
+		netif_wake_queue(netif->dev);
+}
+
 int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	netif_t *netif = netdev_priv(dev);
@@ -272,20 +279,13 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	BUG_ON(skb->dev != dev);
 
 	/* Drop the packet if the target domain has no receive buffers. */
-	if (unlikely(!netif_running(dev) || !netif_carrier_ok(dev)))
+	if (unlikely(!netif_schedulable(dev) || netbk_queue_full(netif)))
 		goto drop;
 
-	if (unlikely(netbk_queue_full(netif))) {
-		/* Not a BUG_ON() -- misbehaving netfront can trigger this. */
-		if (netbk_can_queue(dev))
-			DPRINTK("Queue full but not stopped!\n");
-		goto drop;
-	}
-
-	/* Copy the packet here if it's destined for a flipping
-	   interface but isn't flippable (e.g. extra references to
-	   data)
-	*/
+	/*
+	 * Copy the packet here if it's destined for a flipping interface
+	 * but isn't flippable (e.g. extra references to data).
+	 */
 	if (!netif->copying_receiver && !is_flippable_skb(skb)) {
 		struct sk_buff *nskb = netbk_copy_skb(skb);
 		if ( unlikely(nskb == NULL) )
@@ -306,8 +306,19 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		netif->rx.sring->req_event = netif->rx_req_cons_peek +
 			netbk_max_required_rx_slots(netif);
 		mb(); /* request notification /then/ check & stop the queue */
-		if (netbk_queue_full(netif))
+		if (netbk_queue_full(netif)) {
 			netif_stop_queue(dev);
+			/*
+			 * Schedule 500ms timeout to restart the queue, thus
+			 * ensuring that an inactive queue will be drained.
+			 * Packets will be immediately be dropped until more
+			 * receive buffers become available (see
+			 * netbk_queue_full() check above).
+			 */
+			netif->tx_queue_timeout.data = (unsigned long)netif;
+			netif->tx_queue_timeout.function = tx_queue_callback;
+			__mod_timer(&netif->tx_queue_timeout, jiffies + HZ/2);
+		}
 	}
 
 	skb_queue_tail(&rx_queue, skb);
@@ -484,7 +495,7 @@ static int netbk_check_gop(int nr_frags, domid_t domid,
 			copy_op = npo->copy + npo->copy_cons++;
 			if (copy_op->status != GNTST_okay) {
 				DPRINTK("Bad status %d from copy to DOM%d.\n",
-					gop->status, domid);
+					copy_op->status, domid);
 				status = NETIF_RSP_ERROR;
 			}
 		} else {
@@ -666,7 +677,7 @@ static void net_rx_action(unsigned long unused)
 		id = meta[npo.meta_cons].id;
 		flags = nr_frags ? NETRXF_more_data : 0;
 
-		if (skb->ip_summed == CHECKSUM_HW) /* local packet? */
+		if (skb->ip_summed == CHECKSUM_PARTIAL) /* local packet? */
 			flags |= NETRXF_csum_blank | NETRXF_data_validated;
 		else if (skb->proto_data_valid) /* remote but checksummed? */
 			flags |= NETRXF_data_validated;
@@ -707,6 +718,7 @@ static void net_rx_action(unsigned long unused)
 		}
 
 		if (netif_queue_stopped(netif->dev) &&
+		    netif_schedulable(netif->dev) &&
 		    !netbk_queue_full(netif))
 			netif_wake_queue(netif->dev);
 
@@ -764,8 +776,7 @@ static void add_to_net_schedule_list_tail(netif_t *netif)
 
 	spin_lock_irq(&net_schedule_list_lock);
 	if (!__on_net_schedule_list(netif) &&
-	    likely(netif_running(netif->dev) &&
-		   netif_carrier_ok(netif->dev))) {
+	    likely(netif_schedulable(netif->dev))) {
 		list_add_tail(&netif->list, &net_schedule_list);
 		netif_get(netif);
 	}
@@ -804,7 +815,7 @@ void netif_deschedule_work(netif_t *netif)
 
 static void tx_add_credit(netif_t *netif)
 {
-	unsigned long max_burst;
+	unsigned long max_burst, max_credit;
 
 	/*
 	 * Allow a burst big enough to transmit a jumbo packet of up to 128kB.
@@ -814,9 +825,12 @@ static void tx_add_credit(netif_t *netif)
 	max_burst = min(max_burst, 131072UL);
 	max_burst = max(max_burst, netif->credit_bytes);
 
-	netif->remaining_credit = min(netif->remaining_credit +
-				      netif->credit_bytes,
-				      max_burst);
+	/* Take care that adding a new chunk of credit doesn't wrap to zero. */
+	max_credit = netif->remaining_credit + netif->credit_bytes;
+	if (max_credit < netif->remaining_credit)
+		max_credit = ULONG_MAX; /* wrapped: clamp to ULONG_MAX */
+
+	netif->remaining_credit = min(max_credit, max_burst);
 }
 
 static void tx_credit_callback(unsigned long data)
@@ -1352,14 +1366,14 @@ static void netif_page_release(struct page *page)
 	netif_idx_release(page->index);
 }
 
-irqreturn_t netif_be_int(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t netif_be_int(int irq, void *dev_id)
 {
 	netif_t *netif = dev_id;
 
 	add_to_net_schedule_list_tail(netif);
 	maybe_schedule_tx_action();
 
-	if (netif_queue_stopped(netif->dev) && !netbk_queue_full(netif))
+	if (netif_schedulable(netif->dev) && !netbk_queue_full(netif))
 		netif_wake_queue(netif->dev);
 
 	return IRQ_HANDLED;
@@ -1419,7 +1433,7 @@ static netif_rx_response_t *make_rx_response(netif_t *netif,
 }
 
 #ifdef NETBE_DEBUG_INTERRUPT
-static irqreturn_t netif_be_dbg(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t netif_be_dbg(int irq, void *dev_id)
 {
 	struct list_head *ent;
 	netif_t *netif;

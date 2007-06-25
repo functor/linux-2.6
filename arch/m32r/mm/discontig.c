@@ -6,13 +6,13 @@
  *  Copyright (c) 2003  Hitoshi Yamamoto
  */
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/bootmem.h>
 #include <linux/mmzone.h>
 #include <linux/initrd.h>
 #include <linux/nodemask.h>
 #include <linux/module.h>
+#include <linux/pfn.h>
 
 #include <asm/setup.h>
 
@@ -105,9 +105,7 @@ unsigned long __init setup_memory(void)
 		if (INITRD_START + INITRD_SIZE <= PFN_PHYS(max_low_pfn)) {
 			reserve_bootmem_node(NODE_DATA(0), INITRD_START,
 				INITRD_SIZE);
-			initrd_start = INITRD_START ?
-				INITRD_START + PAGE_OFFSET : 0;
-
+			initrd_start = INITRD_START + PAGE_OFFSET;
 			initrd_end = initrd_start + INITRD_SIZE;
 			printk("initrd:start[%08lx],size[%08lx]\n",
 				initrd_start, INITRD_SIZE);
@@ -136,12 +134,6 @@ unsigned long __init zone_sizes_init(void)
 	unsigned long holes = 0;
 	int nid, i;
 	mem_prof_t *mp;
-
-	pgdat_list = NULL;
-	for (nid = num_online_nodes() - 1 ; nid >= 0 ; nid--) {
-		NODE_DATA(nid)->pgdat_next = pgdat_list;
-		pgdat_list = NODE_DATA(nid);
-	}
 
 	for_each_online_node(nid) {
 		mp = &mem_prof[nid];

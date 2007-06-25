@@ -1,363 +1,217 @@
-/* 
+/*
  * Copyright (C) 2002 Jeff Dike (jdike@karaya.com)
  * Licensed under the GPL
  */
 
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <signal.h>
-#include <setjmp.h>
-#include <sched.h>
-#include <sys/wait.h>
-#include <sys/mman.h>
-#include <sys/user.h>
-#include <asm/unistd.h>
-#include "user.h"
-#include "ptrace_user.h"
-#include "time_user.h"
-#include "sysdep/ptrace.h"
-#include "user_util.h"
+#include "linux/sched.h"
+#include "linux/slab.h"
+#include "linux/ptrace.h"
+#include "linux/proc_fs.h"
+#include "linux/file.h"
+#include "linux/errno.h"
+#include "linux/init.h"
+#include "asm/uaccess.h"
+#include "asm/atomic.h"
 #include "kern_util.h"
 #include "skas.h"
-#include "sysdep/sigcontext.h"
 #include "os.h"
-#include "proc_mm.h"
-#include "skas_ptrace.h"
-#include "chan_user.h"
-#include "signal_user.h"
+#include "user_util.h"
+#include "tlb.h"
+#include "kern.h"
+#include "mode.h"
 #include "registers.h"
-#include "process.h"
 
-int is_skas_winch(int pid, int fd, void *data)
+void switch_to_skas(void *prev, void *next)
 {
-        if(pid != os_getpgrp())
-		return(0);
+	struct task_struct *from, *to;
 
-	register_winch_irq(-1, fd, -1, data);
-	return(1);
+	from = prev;
+	to = next;
+
+	/* XXX need to check runqueues[cpu].idle */
+	if(current->pid == 0)
+		switch_timers(0);
+
+	switch_threads(&from->thread.mode.skas.switch_buf,
+		       &to->thread.mode.skas.switch_buf);
+
+	arch_switch_to_skas(current->thread.prev_sched, current);
+
+	if(current->pid == 0)
+		switch_timers(1);
 }
 
-void get_skas_faultinfo(int pid, struct faultinfo * fi)
+extern void schedule_tail(struct task_struct *prev);
+
+/* This is called magically, by its address being stuffed in a jmp_buf
+ * and being longjmp-d to.
+ */
+void new_thread_handler(void)
 {
-	int err;
+	int (*fn)(void *), n;
+	void *arg;
 
-        err = ptrace(PTRACE_FAULTINFO, pid, 0, fi);
-	if(err)
-                panic("get_skas_faultinfo - PTRACE_FAULTINFO failed, "
-                      "errno = %d\n", errno);
+	if(current->thread.prev_sched != NULL)
+		schedule_tail(current->thread.prev_sched);
+	current->thread.prev_sched = NULL;
 
-        /* Special handling for i386, which has different structs */
-        if (sizeof(struct ptrace_faultinfo) < sizeof(struct faultinfo))
-                memset((char *)fi + sizeof(struct ptrace_faultinfo), 0,
-                       sizeof(struct faultinfo) -
-                       sizeof(struct ptrace_faultinfo));
+	fn = current->thread.request.u.thread.proc;
+	arg = current->thread.request.u.thread.arg;
+
+	/* The return value is 1 if the kernel thread execs a process,
+	 * 0 if it just exits
+	 */
+	n = run_kernel_thread(fn, arg, &current->thread.exec_buf);
+	if(n == 1){
+		/* Handle any immediate reschedules or signals */
+		interrupt_end();
+		userspace(&current->thread.regs.regs);
+	}
+	else do_exit(0);
 }
 
-static void handle_segv(int pid, union uml_pt_regs * regs)
+void release_thread_skas(struct task_struct *task)
 {
-        get_skas_faultinfo(pid, &regs->skas.faultinfo);
-        segv(regs->skas.faultinfo, 0, 1, NULL);
 }
 
-/*To use the same value of using_sysemu as the caller, ask it that value (in local_using_sysemu)*/
-static void handle_trap(int pid, union uml_pt_regs *regs, int local_using_sysemu)
+/* Called magically, see new_thread_handler above */
+void fork_handler(void)
 {
-	int err, status;
+	force_flush_all();
+	if(current->thread.prev_sched == NULL)
+		panic("blech");
 
-	/* Mark this as a syscall */
-	UPT_SYSCALL_NR(regs) = PT_SYSCALL_NR(regs->skas.regs);
+	schedule_tail(current->thread.prev_sched);
 
-	if (!local_using_sysemu)
-	{
-		err = ptrace(PTRACE_POKEUSR, pid, PT_SYSCALL_NR_OFFSET, __NR_getpid);
-		if(err < 0)
-			panic("handle_trap - nullifying syscall failed errno = %d\n",
-			      errno);
+	/* XXX: if interrupt_end() calls schedule, this call to
+	 * arch_switch_to_skas isn't needed. We could want to apply this to
+	 * improve performance. -bb */
+	arch_switch_to_skas(current->thread.prev_sched, current);
 
-		err = ptrace(PTRACE_SYSCALL, pid, 0, 0);
-		if(err < 0)
-			panic("handle_trap - continuing to end of syscall failed, "
-			      "errno = %d\n", errno);
+	current->thread.prev_sched = NULL;
 
-		CATCH_EINTR(err = waitpid(pid, &status, WUNTRACED));
-		if((err < 0) || !WIFSTOPPED(status) ||
-		   (WSTOPSIG(status) != SIGTRAP + 0x80))
-			panic("handle_trap - failed to wait at end of syscall, "
-			      "errno = %d, status = %d\n", errno, status);
+/* Handle any immediate reschedules or signals */
+	interrupt_end();
+
+	userspace(&current->thread.regs.regs);
+}
+
+int copy_thread_skas(int nr, unsigned long clone_flags, unsigned long sp,
+		     unsigned long stack_top, struct task_struct * p,
+		     struct pt_regs *regs)
+{
+	void (*handler)(void);
+
+	if(current->thread.forking){
+	  	memcpy(&p->thread.regs.regs.skas, &regs->regs.skas,
+		       sizeof(p->thread.regs.regs.skas));
+		REGS_SET_SYSCALL_RETURN(p->thread.regs.regs.skas.regs, 0);
+		if(sp != 0) REGS_SP(p->thread.regs.regs.skas.regs) = sp;
+
+		handler = fork_handler;
+
+		arch_copy_thread(&current->thread.arch, &p->thread.arch);
+	}
+	else {
+		init_thread_registers(&p->thread.regs.regs);
+		p->thread.request.u.thread = current->thread.request.u.thread;
+		handler = new_thread_handler;
 	}
 
-	handle_syscall(regs);
-}
-
-static int userspace_tramp(void *arg)
-{
-	init_new_thread_signals(0);
-	enable_timer();
-	ptrace(PTRACE_TRACEME, 0, 0, 0);
-	os_stop_process(os_getpid());
+	new_thread(task_stack_page(p), &p->thread.mode.skas.switch_buf,
+		   handler);
 	return(0);
 }
 
-/* Each element set once, and only accessed by a single processor anyway */
-#undef NR_CPUS
-#define NR_CPUS 1
-int userspace_pid[NR_CPUS];
-
-void start_userspace(int cpu)
+int new_mm(unsigned long stack)
 {
-	void *stack;
-	unsigned long sp;
-	int pid, status, n;
+	int fd;
 
-	stack = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
-		     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if(stack == MAP_FAILED)
-		panic("start_userspace : mmap failed, errno = %d", errno);
-	sp = (unsigned long) stack + PAGE_SIZE - sizeof(void *);
+	fd = os_open_file("/proc/mm", of_cloexec(of_write(OPENFLAGS())), 0);
+	if(fd < 0)
+		return(fd);
 
-	pid = clone(userspace_tramp, (void *) sp, 
-		    CLONE_FILES | CLONE_VM | SIGCHLD, NULL);
-	if(pid < 0)
-		panic("start_userspace : clone failed, errno = %d", errno);
+	if(skas_needs_stub)
+		map_stub_pages(fd, CONFIG_STUB_CODE, CONFIG_STUB_DATA, stack);
 
-	do {
-		CATCH_EINTR(n = waitpid(pid, &status, WUNTRACED));
-		if(n < 0)
-			panic("start_userspace : wait failed, errno = %d", 
-			      errno);
-	} while(WIFSTOPPED(status) && (WSTOPSIG(status) == SIGVTALRM));
-
-	if(!WIFSTOPPED(status) || (WSTOPSIG(status) != SIGSTOP))
-		panic("start_userspace : expected SIGSTOP, got status = %d",
-		      status);
-
-	if (ptrace(PTRACE_OLDSETOPTIONS, pid, NULL, (void *)PTRACE_O_TRACESYSGOOD) < 0)
-		panic("start_userspace : PTRACE_SETOPTIONS failed, errno=%d\n",
-		      errno);
-
-	if(munmap(stack, PAGE_SIZE) < 0)
-		panic("start_userspace : munmap failed, errno = %d\n", errno);
-
-	userspace_pid[cpu] = pid;
+	return(fd);
 }
 
-void userspace(union uml_pt_regs *regs)
+void init_idle_skas(void)
 {
-	int err, status, op, pid = userspace_pid[0];
-	int local_using_sysemu; /*To prevent races if using_sysemu changes under us.*/
-
-	while(1){
-		restore_registers(pid, regs);
-
-		/* Now we set local_using_sysemu to be used for one loop */
-		local_using_sysemu = get_using_sysemu();
-
-		op = SELECT_PTRACE_OPERATION(local_using_sysemu, singlestepping(NULL));
-
-		err = ptrace(op, pid, 0, 0);
-		if(err)
-			panic("userspace - could not resume userspace process, "
-			      "pid=%d, ptrace operation = %d, errno = %d\n",
-			      op, errno);
-
-		CATCH_EINTR(err = waitpid(pid, &status, WUNTRACED));
-		if(err < 0)
-			panic("userspace - waitpid failed, errno = %d\n", 
-			      errno);
-
-		regs->skas.is_user = 1;
-		save_registers(pid, regs);
-		UPT_SYSCALL_NR(regs) = -1; /* Assume: It's not a syscall */
-
-		if(WIFSTOPPED(status)){
-		  	switch(WSTOPSIG(status)){
-			case SIGSEGV:
-                                handle_segv(pid, regs);
-				break;
-			case SIGTRAP + 0x80:
-			        handle_trap(pid, regs, local_using_sysemu);
-				break;
-			case SIGTRAP:
-				relay_signal(SIGTRAP, regs);
-				break;
-			case SIGIO:
-			case SIGVTALRM:
-			case SIGILL:
-			case SIGBUS:
-			case SIGFPE:
-			case SIGWINCH:
-                                user_signal(WSTOPSIG(status), regs, pid);
-				break;
-			default:
-			        printk("userspace - child stopped with signal "
-				       "%d\n", WSTOPSIG(status));
-			}
-			interrupt_end();
-
-			/* Avoid -ERESTARTSYS handling in host */
-			PT_SYSCALL_NR(regs->skas.regs) = -1;
-		}
-	}
-}
-#define INIT_JMP_NEW_THREAD 0
-#define INIT_JMP_REMOVE_SIGSTACK 1
-#define INIT_JMP_CALLBACK 2
-#define INIT_JMP_HALT 3
-#define INIT_JMP_REBOOT 4
-
-void new_thread(void *stack, void **switch_buf_ptr, void **fork_buf_ptr,
-		void (*handler)(int))
-{
-	unsigned long flags;
-	sigjmp_buf switch_buf, fork_buf;
-
-	*switch_buf_ptr = &switch_buf;
-	*fork_buf_ptr = &fork_buf;
-
-	/* Somewhat subtle - siglongjmp restores the signal mask before doing
-	 * the longjmp.  This means that when jumping from one stack to another
-	 * when the target stack has interrupts enabled, an interrupt may occur
-	 * on the source stack.  This is bad when starting up a process because
-	 * it's not supposed to get timer ticks until it has been scheduled.
-	 * So, we disable interrupts around the sigsetjmp to ensure that
-	 * they can't happen until we get back here where they are safe.
-	 */
-	flags = get_signals();
-	block_signals();
-	if(sigsetjmp(fork_buf, 1) == 0)
-		new_thread_proc(stack, handler);
-
-	remove_sigstack();
-
-	set_signals(flags);
+	cpu_tasks[current_thread->cpu].pid = os_getpid();
+	default_idle();
 }
 
-void thread_wait(void *sw, void *fb)
+extern void start_kernel(void);
+
+static int start_kernel_proc(void *unused)
 {
-	sigjmp_buf buf, **switch_buf = sw, *fork_buf;
-
-	*switch_buf = &buf;
-	fork_buf = fb;
-	if(sigsetjmp(buf, 1) == 0)
-		siglongjmp(*fork_buf, INIT_JMP_REMOVE_SIGSTACK);
-}
-
-void switch_threads(void *me, void *next)
-{
-	sigjmp_buf my_buf, **me_ptr = me, *next_buf = next;
-	
-	*me_ptr = &my_buf;
-	if(sigsetjmp(my_buf, 1) == 0)
-		siglongjmp(*next_buf, 1);
-}
-
-static sigjmp_buf initial_jmpbuf;
-
-/* XXX Make these percpu */
-static void (*cb_proc)(void *arg);
-static void *cb_arg;
-static sigjmp_buf *cb_back;
-
-int start_idle_thread(void *stack, void *switch_buf_ptr, void **fork_buf_ptr)
-{
-	sigjmp_buf **switch_buf = switch_buf_ptr;
-	int n;
-
-	set_handler(SIGWINCH, (__sighandler_t) sig_handler,
-		    SA_ONSTACK | SA_RESTART, SIGUSR1, SIGIO, SIGALRM,
-		    SIGVTALRM, -1);
-
-	*fork_buf_ptr = &initial_jmpbuf;
-	n = sigsetjmp(initial_jmpbuf, 1);
-        switch(n){
-        case INIT_JMP_NEW_THREAD:
-                new_thread_proc((void *) stack, new_thread_handler);
-                break;
-        case INIT_JMP_REMOVE_SIGSTACK:
-                remove_sigstack();
-                break;
-        case INIT_JMP_CALLBACK:
-		(*cb_proc)(cb_arg);
-		siglongjmp(*cb_back, 1);
-                break;
-        case INIT_JMP_HALT:
-		kmalloc_ok = 0;
-		return(0);
-        case INIT_JMP_REBOOT:
-		kmalloc_ok = 0;
-		return(1);
-        default:
-                panic("Bad sigsetjmp return in start_idle_thread - %d\n", n);
-	}
-	siglongjmp(**switch_buf, 1);
-}
-
-void remove_sigstack(void)
-{
-	stack_t stack = ((stack_t) { .ss_flags	= SS_DISABLE,
-				     .ss_sp	= NULL,
-				     .ss_size	= 0 });
-
-	if(sigaltstack(&stack, NULL) != 0)
-		panic("disabling signal stack failed, errno = %d\n", errno);
-}
-
-void initial_thread_cb_skas(void (*proc)(void *), void *arg)
-{
-	sigjmp_buf here;
-
-	cb_proc = proc;
-	cb_arg = arg;
-	cb_back = &here;
+	int pid;
 
 	block_signals();
-	if(sigsetjmp(here, 1) == 0)
-		siglongjmp(initial_jmpbuf, INIT_JMP_CALLBACK);
-	unblock_signals();
+	pid = os_getpid();
 
-	cb_proc = NULL;
-	cb_arg = NULL;
-	cb_back = NULL;
+	cpu_tasks[0].pid = pid;
+	cpu_tasks[0].task = current;
+#ifdef CONFIG_SMP
+	cpu_online_map = cpumask_of_cpu(0);
+#endif
+	start_kernel();
+	return(0);
 }
 
-void halt_skas(void)
+extern int userspace_pid[];
+
+int start_uml_skas(void)
 {
-	block_signals();
-	siglongjmp(initial_jmpbuf, INIT_JMP_HALT);
+	if(proc_mm)
+		userspace_pid[0] = start_userspace(0);
+
+	init_new_thread_signals();
+
+	init_task.thread.request.u.thread.proc = start_kernel_proc;
+	init_task.thread.request.u.thread.arg = NULL;
+	return(start_idle_thread(task_stack_page(&init_task),
+				 &init_task.thread.mode.skas.switch_buf));
 }
 
-void reboot_skas(void)
+int external_pid_skas(struct task_struct *task)
 {
-	block_signals();
-	siglongjmp(initial_jmpbuf, INIT_JMP_REBOOT);
+#warning Need to look up userspace_pid by cpu
+	return(userspace_pid[0]);
 }
 
-void switch_mm_skas(int mm_fd)
+int thread_pid_skas(struct task_struct *task)
 {
-	int err;
-
-#warning need cpu pid in switch_mm_skas
-	err = ptrace(PTRACE_SWITCH_MM, userspace_pid[0], 0, mm_fd);
-	if(err)
-		panic("switch_mm_skas - PTRACE_SWITCH_MM failed, errno = %d\n",
-		      errno);
+#warning Need to look up userspace_pid by cpu
+	return(userspace_pid[0]);
 }
 
 void kill_off_processes_skas(void)
 {
+	if(proc_mm)
 #warning need to loop over userspace_pids in kill_off_processes_skas
-	os_kill_ptraced_process(userspace_pid[0], 1);
+		os_kill_ptraced_process(userspace_pid[0], 1);
+	else {
+		struct task_struct *p;
+		int pid, me;
+
+		me = os_getpid();
+		for_each_process(p){
+			if(p->mm == NULL)
+				continue;
+
+			pid = p->mm->context.skas.id.u.pid;
+			os_kill_ptraced_process(pid, 1);
+		}
+	}
 }
 
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+unsigned long current_stub_stack(void)
+{
+	if(current->mm == NULL)
+		return(0);
+
+	return(current->mm->context.skas.id.stack);
+}

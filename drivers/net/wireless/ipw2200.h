@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright(c) 2003 - 2005 Intel Corporation. All rights reserved.
+  Copyright(c) 2003 - 2006 Intel Corporation. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms of version 2 of the GNU General Public License as
@@ -31,8 +31,8 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/config.h>
 #include <linux/init.h>
+#include <linux/mutex.h>
 
 #include <linux/pci.h>
 #include <linux/netdevice.h>
@@ -46,6 +46,7 @@
 #include <linux/firmware.h>
 #include <linux/wireless.h>
 #include <linux/dma-mapping.h>
+#include <linux/jiffies.h>
 #include <asm/io.h>
 
 #include <net/ieee80211.h>
@@ -244,8 +245,10 @@ enum connection_manager_assoc_states {
 #define HOST_NOTIFICATION_S36_MEASUREMENT_REFUSED       31
 
 #define HOST_NOTIFICATION_STATUS_BEACON_MISSING         1
-#define IPW_MB_DISASSOCIATE_THRESHOLD_DEFAULT           24
+#define IPW_MB_ROAMING_THRESHOLD_MIN                    1
 #define IPW_MB_ROAMING_THRESHOLD_DEFAULT                8
+#define IPW_MB_ROAMING_THRESHOLD_MAX                    30
+#define IPW_MB_DISASSOCIATE_THRESHOLD_DEFAULT           3*IPW_MB_ROAMING_THRESHOLD_DEFAULT
 #define IPW_REAL_RATE_RX_PACKET_THRESHOLD               300
 
 #define MACADRR_BYTE_LEN                     6
@@ -616,13 +619,16 @@ struct notif_tgi_tx_key {
 	u8 reserved;
 } __attribute__ ((packed));
 
+#define SILENCE_OVER_THRESH (1)
+#define SILENCE_UNDER_THRESH (2)
+
 struct notif_link_deterioration {
 	struct ipw_cmd_stats stats;
 	u8 rate;
 	u8 modulation;
 	struct rate_histogram histogram;
-	u8 reserved1;
-	u16 reserved2;
+	u8 silence_notification_type;	/* SILENCE_OVER/UNDER_THRESH */
+	u16 silence_count;
 } __attribute__ ((packed));
 
 struct notif_association {
@@ -707,7 +713,6 @@ struct ipw_rx_packet {
 
 struct ipw_rx_mem_buffer {
 	dma_addr_t dma_addr;
-	struct ipw_rx_buffer *rxb;
 	struct sk_buff *skb;
 	struct list_head list;
 };				/* Not transferred over network, so not  __attribute__ ((packed)) */
@@ -780,9 +785,9 @@ struct ipw_sys_config {
 	u8 enable_cts_to_self;
 	u8 enable_multicast_filtering;
 	u8 bt_coexist_collision_thr;
-	u8 reserved2;
+	u8 silence_threshold;
 	u8 accept_all_mgmt_bcpr;
-	u8 accept_all_mgtm_frames;
+	u8 accept_all_mgmt_frames;
 	u8 pass_noise_stats_to_host;
 	u8 reserved3;
 } __attribute__ ((packed));
@@ -852,7 +857,7 @@ struct ipw_scan_request_ext {
 	u16 dwell_time[IPW_SCAN_TYPES];
 } __attribute__ ((packed));
 
-extern inline u8 ipw_get_scan_type(struct ipw_scan_request_ext *scan, u8 index)
+static inline u8 ipw_get_scan_type(struct ipw_scan_request_ext *scan, u8 index)
 {
 	if (index % 2)
 		return scan->scan_type[index / 2] & 0x0F;
@@ -860,7 +865,7 @@ extern inline u8 ipw_get_scan_type(struct ipw_scan_request_ext *scan, u8 index)
 		return (scan->scan_type[index / 2] & 0xF0) >> 4;
 }
 
-extern inline void ipw_set_scan_type(struct ipw_scan_request_ext *scan,
+static inline void ipw_set_scan_type(struct ipw_scan_request_ext *scan,
 				     u8 index, u8 scan_type)
 {
 	if (index % 2)
@@ -1115,16 +1120,69 @@ struct ipw_fw_error {
 	u8 payload[0];
 } __attribute__ ((packed));
 
+#ifdef CONFIG_IPW2200_PROMISCUOUS
+
+enum ipw_prom_filter {
+	IPW_PROM_CTL_HEADER_ONLY = (1 << 0),
+	IPW_PROM_MGMT_HEADER_ONLY = (1 << 1),
+	IPW_PROM_DATA_HEADER_ONLY = (1 << 2),
+	IPW_PROM_ALL_HEADER_ONLY = 0xf, /* bits 0..3 */
+	IPW_PROM_NO_TX = (1 << 4),
+	IPW_PROM_NO_RX = (1 << 5),
+	IPW_PROM_NO_CTL = (1 << 6),
+	IPW_PROM_NO_MGMT = (1 << 7),
+	IPW_PROM_NO_DATA = (1 << 8),
+};
+
+struct ipw_priv;
+struct ipw_prom_priv {
+	struct ipw_priv *priv;
+	struct ieee80211_device *ieee;
+	enum ipw_prom_filter filter;
+	int tx_packets;
+	int rx_packets;
+};
+#endif
+
+#if defined(CONFIG_IPW2200_RADIOTAP) || defined(CONFIG_IPW2200_PROMISCUOUS)
+/* Magic struct that slots into the radiotap header -- no reason
+ * to build this manually element by element, we can write it much
+ * more efficiently than we can parse it. ORDER MATTERS HERE
+ *
+ * When sent to us via the simulated Rx interface in sysfs, the entire
+ * structure is provided regardless of any bits unset.
+ */
+struct ipw_rt_hdr {
+	struct ieee80211_radiotap_header rt_hdr;
+	u64 rt_tsf;      /* TSF */
+	u8 rt_flags;	/* radiotap packet flags */
+	u8 rt_rate;	/* rate in 500kb/s */
+	u16 rt_channel;	/* channel in mhz */
+	u16 rt_chbitmask;	/* channel bitfield */
+	s8 rt_dbmsignal;	/* signal in dbM, kluged to signed */
+	s8 rt_dbmnoise;
+	u8 rt_antenna;	/* antenna number */
+	u8 payload[0];  /* payload... */
+} __attribute__ ((packed));
+#endif
+
 struct ipw_priv {
 	/* ieee device used by generic ieee processing code */
 	struct ieee80211_device *ieee;
 
 	spinlock_t lock;
-	struct semaphore sem;
+	spinlock_t irq_lock;
+	struct mutex mutex;
 
 	/* basic pci-network driver stuff */
 	struct pci_dev *pci_dev;
 	struct net_device *net_dev;
+
+#ifdef CONFIG_IPW2200_PROMISCUOUS
+	/* Promiscuous mode */
+	struct ipw_prom_priv *prom_priv;
+	struct net_device *prom_net_dev;
+#endif
 
 	/* pci hardware address support */
 	void __iomem *hw_base;
@@ -1146,11 +1204,9 @@ struct ipw_priv {
 	u32 config;
 	u32 capability;
 
-	u8 last_rx_rssi;
-	u8 last_noise;
 	struct average average_missed_beacons;
-	struct average average_rssi;
-	struct average average_noise;
+	s16 exp_avg_rssi;
+	s16 exp_avg_noise;
 	u32 port_type;
 	int rx_bufs_min;	  /**< minimum number of bufs in Rx queue */
 	int rx_pend_max;	  /**< maximum pending buffers for one IRQ */
@@ -1234,20 +1290,21 @@ struct ipw_priv {
 
 	struct workqueue_struct *workqueue;
 
-	struct work_struct adhoc_check;
+	struct delayed_work adhoc_check;
 	struct work_struct associate;
 	struct work_struct disassociate;
 	struct work_struct system_config;
 	struct work_struct rx_replenish;
-	struct work_struct request_scan;
+	struct delayed_work request_scan;
+  	struct work_struct request_passive_scan;
 	struct work_struct adapter_restart;
-	struct work_struct rf_kill;
+	struct delayed_work rf_kill;
 	struct work_struct up;
 	struct work_struct down;
-	struct work_struct gather_stats;
+	struct delayed_work gather_stats;
 	struct work_struct abort_scan;
 	struct work_struct roam;
-	struct work_struct scan_check;
+	struct delayed_work scan_check;
 	struct work_struct link_up;
 	struct work_struct link_down;
 
@@ -1262,9 +1319,9 @@ struct ipw_priv {
 	u32 led_ofdm_on;
 	u32 led_ofdm_off;
 
-	struct work_struct led_link_on;
-	struct work_struct led_link_off;
-	struct work_struct led_act_off;
+	struct delayed_work led_link_on;
+	struct delayed_work led_link_off;
+	struct delayed_work led_act_off;
 	struct work_struct merge_networks;
 
 	struct ipw_cmd_log *cmdlog;
@@ -1301,13 +1358,41 @@ struct ipw_priv {
 
 /* debug macros */
 
-#ifdef CONFIG_IPW2200_DEBUG
+/* Debug and printf string expansion helpers for printing bitfields */
+#define BIT_FMT8 "%c%c%c%c-%c%c%c%c"
+#define BIT_FMT16 BIT_FMT8 ":" BIT_FMT8
+#define BIT_FMT32 BIT_FMT16 " " BIT_FMT16
+
+#define BITC(x,y) (((x>>y)&1)?'1':'0')
+#define BIT_ARG8(x) \
+BITC(x,7),BITC(x,6),BITC(x,5),BITC(x,4),\
+BITC(x,3),BITC(x,2),BITC(x,1),BITC(x,0)
+
+#define BIT_ARG16(x) \
+BITC(x,15),BITC(x,14),BITC(x,13),BITC(x,12),\
+BITC(x,11),BITC(x,10),BITC(x,9),BITC(x,8),\
+BIT_ARG8(x)
+
+#define BIT_ARG32(x) \
+BITC(x,31),BITC(x,30),BITC(x,29),BITC(x,28),\
+BITC(x,27),BITC(x,26),BITC(x,25),BITC(x,24),\
+BITC(x,23),BITC(x,22),BITC(x,21),BITC(x,20),\
+BITC(x,19),BITC(x,18),BITC(x,17),BITC(x,16),\
+BIT_ARG16(x)
+
+
 #define IPW_DEBUG(level, fmt, args...) \
 do { if (ipw_debug_level & (level)) \
   printk(KERN_DEBUG DRV_NAME": %c %s " fmt, \
          in_interrupt() ? 'I' : 'U', __FUNCTION__ , ## args); } while (0)
+
+#ifdef CONFIG_IPW2200_DEBUG
+#define IPW_LL_DEBUG(level, fmt, args...) \
+do { if (ipw_debug_level & (level)) \
+  printk(KERN_DEBUG DRV_NAME": %c %s " fmt, \
+         in_interrupt() ? 'I' : 'U', __FUNCTION__ , ## args); } while (0)
 #else
-#define IPW_DEBUG(level, fmt, args...) do {} while (0)
+#define IPW_LL_DEBUG(level, fmt, args...) do {} while (0)
 #endif				/* CONFIG_IPW2200_DEBUG */
 
 /*
@@ -1377,41 +1462,33 @@ do { if (ipw_debug_level & (level)) \
 
 #define IPW_DEBUG_WX(f, a...)     IPW_DEBUG(IPW_DL_WX, f, ## a)
 #define IPW_DEBUG_SCAN(f, a...)   IPW_DEBUG(IPW_DL_SCAN, f, ## a)
-#define IPW_DEBUG_STATUS(f, a...) IPW_DEBUG(IPW_DL_STATUS, f, ## a)
-#define IPW_DEBUG_TRACE(f, a...)  IPW_DEBUG(IPW_DL_TRACE, f, ## a)
-#define IPW_DEBUG_RX(f, a...)     IPW_DEBUG(IPW_DL_RX, f, ## a)
-#define IPW_DEBUG_TX(f, a...)     IPW_DEBUG(IPW_DL_TX, f, ## a)
-#define IPW_DEBUG_ISR(f, a...)    IPW_DEBUG(IPW_DL_ISR, f, ## a)
+#define IPW_DEBUG_TRACE(f, a...)  IPW_LL_DEBUG(IPW_DL_TRACE, f, ## a)
+#define IPW_DEBUG_RX(f, a...)     IPW_LL_DEBUG(IPW_DL_RX, f, ## a)
+#define IPW_DEBUG_TX(f, a...)     IPW_LL_DEBUG(IPW_DL_TX, f, ## a)
+#define IPW_DEBUG_ISR(f, a...)    IPW_LL_DEBUG(IPW_DL_ISR, f, ## a)
 #define IPW_DEBUG_MANAGEMENT(f, a...) IPW_DEBUG(IPW_DL_MANAGE, f, ## a)
-#define IPW_DEBUG_LED(f, a...) IPW_DEBUG(IPW_DL_LED, f, ## a)
-#define IPW_DEBUG_WEP(f, a...)    IPW_DEBUG(IPW_DL_WEP, f, ## a)
-#define IPW_DEBUG_HC(f, a...) IPW_DEBUG(IPW_DL_HOST_COMMAND, f, ## a)
-#define IPW_DEBUG_FRAG(f, a...) IPW_DEBUG(IPW_DL_FRAG, f, ## a)
-#define IPW_DEBUG_FW(f, a...) IPW_DEBUG(IPW_DL_FW, f, ## a)
+#define IPW_DEBUG_LED(f, a...) IPW_LL_DEBUG(IPW_DL_LED, f, ## a)
+#define IPW_DEBUG_WEP(f, a...)    IPW_LL_DEBUG(IPW_DL_WEP, f, ## a)
+#define IPW_DEBUG_HC(f, a...) IPW_LL_DEBUG(IPW_DL_HOST_COMMAND, f, ## a)
+#define IPW_DEBUG_FRAG(f, a...) IPW_LL_DEBUG(IPW_DL_FRAG, f, ## a)
+#define IPW_DEBUG_FW(f, a...) IPW_LL_DEBUG(IPW_DL_FW, f, ## a)
 #define IPW_DEBUG_RF_KILL(f, a...) IPW_DEBUG(IPW_DL_RF_KILL, f, ## a)
 #define IPW_DEBUG_DROP(f, a...) IPW_DEBUG(IPW_DL_DROP, f, ## a)
-#define IPW_DEBUG_IO(f, a...) IPW_DEBUG(IPW_DL_IO, f, ## a)
-#define IPW_DEBUG_ORD(f, a...) IPW_DEBUG(IPW_DL_ORD, f, ## a)
-#define IPW_DEBUG_FW_INFO(f, a...) IPW_DEBUG(IPW_DL_FW_INFO, f, ## a)
+#define IPW_DEBUG_IO(f, a...) IPW_LL_DEBUG(IPW_DL_IO, f, ## a)
+#define IPW_DEBUG_ORD(f, a...) IPW_LL_DEBUG(IPW_DL_ORD, f, ## a)
+#define IPW_DEBUG_FW_INFO(f, a...) IPW_LL_DEBUG(IPW_DL_FW_INFO, f, ## a)
 #define IPW_DEBUG_NOTIF(f, a...) IPW_DEBUG(IPW_DL_NOTIF, f, ## a)
 #define IPW_DEBUG_STATE(f, a...) IPW_DEBUG(IPW_DL_STATE | IPW_DL_ASSOC | IPW_DL_INFO, f, ## a)
 #define IPW_DEBUG_ASSOC(f, a...) IPW_DEBUG(IPW_DL_ASSOC | IPW_DL_INFO, f, ## a)
-#define IPW_DEBUG_STATS(f, a...) IPW_DEBUG(IPW_DL_STATS, f, ## a)
-#define IPW_DEBUG_MERGE(f, a...) IPW_DEBUG(IPW_DL_MERGE, f, ## a)
-#define IPW_DEBUG_QOS(f, a...)   IPW_DEBUG(IPW_DL_QOS, f, ## a)
+#define IPW_DEBUG_STATS(f, a...) IPW_LL_DEBUG(IPW_DL_STATS, f, ## a)
+#define IPW_DEBUG_MERGE(f, a...) IPW_LL_DEBUG(IPW_DL_MERGE, f, ## a)
+#define IPW_DEBUG_QOS(f, a...)   IPW_LL_DEBUG(IPW_DL_QOS, f, ## a)
 
 #include <linux/ctype.h>
 
 /*
 * Register bit definitions
 */
-
-/* Dino control registers bits */
-
-#define DINO_ENABLE_SYSTEM 0x80
-#define DINO_ENABLE_CS     0x40
-#define DINO_RXFIFO_DATA   0x01
-#define DINO_CONTROL_REG   0x00200000
 
 #define IPW_INTA_RW       0x00000008
 #define IPW_INTA_MASK_R   0x0000000C
@@ -1459,6 +1536,11 @@ do { if (ipw_debug_level & (level)) \
 #define IPW_DOMAIN_0_END 0x1000
 #define CLX_MEM_BAR_SIZE 0x1000
 
+/* Dino/baseband control registers bits */
+
+#define DINO_ENABLE_SYSTEM 0x80	/* 1 = baseband processor on, 0 = reset */
+#define DINO_ENABLE_CS     0x40	/* 1 = enable ucode load */
+#define DINO_RXFIFO_DATA   0x01	/* 1 = data available */
 #define IPW_BASEBAND_CONTROL_STATUS	0X00200000
 #define IPW_BASEBAND_TX_FIFO_WRITE	0X00200004
 #define IPW_BASEBAND_RX_FIFO_READ	0X00200004
@@ -1567,12 +1649,17 @@ do { if (ipw_debug_level & (level)) \
 #define EEPROM_BSS_CHANNELS_BG  (GET_EEPROM_ADDR(0x2c,LSB))	/* 2 bytes  */
 #define EEPROM_HW_VERSION       (GET_EEPROM_ADDR(0x72,LSB))	/* 2 bytes  */
 
-/* NIC type as found in the one byte EEPROM_NIC_TYPE  offset*/
+/* NIC type as found in the one byte EEPROM_NIC_TYPE offset */
 #define EEPROM_NIC_TYPE_0 0
 #define EEPROM_NIC_TYPE_1 1
 #define EEPROM_NIC_TYPE_2 2
 #define EEPROM_NIC_TYPE_3 3
 #define EEPROM_NIC_TYPE_4 4
+
+/* Bluetooth Coexistence capabilities as found in EEPROM_SKU_CAPABILITY */
+#define EEPROM_SKU_CAP_BT_CHANNEL_SIG  0x01	/* we can tell BT our channel # */
+#define EEPROM_SKU_CAP_BT_PRIORITY     0x02	/* BT can take priority over us */
+#define EEPROM_SKU_CAP_BT_OOB          0x04	/* we can signal BT out-of-band */
 
 #define FW_MEM_REG_LOWER_BOUND          0x00300000
 #define FW_MEM_REG_EEPROM_ACCESS        (FW_MEM_REG_LOWER_BOUND + 0x40)
@@ -1658,9 +1745,10 @@ enum {
 	IPW_FW_ERROR_FATAL_ERROR
 };
 
-#define AUTH_OPEN       0
-#define AUTH_SHARED_KEY 1
-#define AUTH_IGNORE     3
+#define AUTH_OPEN	0
+#define AUTH_SHARED_KEY	1
+#define AUTH_LEAP	2
+#define AUTH_IGNORE	3
 
 #define HC_ASSOCIATE      0
 #define HC_REASSOCIATE    1
@@ -1860,30 +1948,40 @@ struct host_cmd {
 	u8 cmd;
 	u8 len;
 	u16 reserved;
-	u32 param[TFD_CMD_IMMEDIATE_PAYLOAD_LENGTH];
+	u32 *param;
+} __attribute__ ((packed));
+
+struct cmdlog_host_cmd {
+	u8 cmd;
+	u8 len;
+	u16 reserved;
+	char param[124];
 } __attribute__ ((packed));
 
 struct ipw_cmd_log {
 	unsigned long jiffies;
 	int retcode;
-	struct host_cmd cmd;
+	struct cmdlog_host_cmd cmd;
 };
 
-#define CFG_BT_COEXISTENCE_MIN                  0x00
-#define CFG_BT_COEXISTENCE_DEFER                0x02
-#define CFG_BT_COEXISTENCE_KILL                 0x04
-#define CFG_BT_COEXISTENCE_WME_OVER_BT          0x08
-#define CFG_BT_COEXISTENCE_OOB                  0x10
-#define CFG_BT_COEXISTENCE_MAX                  0xFF
-#define CFG_BT_COEXISTENCE_DEF                  0x80	/* read Bt from EEPROM */
+/* SysConfig command parameters ... */
+/* bt_coexistence param */
+#define CFG_BT_COEXISTENCE_SIGNAL_CHNL  0x01	/* tell BT our chnl # */
+#define CFG_BT_COEXISTENCE_DEFER        0x02	/* defer our Tx if BT traffic */
+#define CFG_BT_COEXISTENCE_KILL         0x04	/* kill our Tx if BT traffic */
+#define CFG_BT_COEXISTENCE_WME_OVER_BT  0x08	/* multimedia extensions */
+#define CFG_BT_COEXISTENCE_OOB          0x10	/* signal BT via out-of-band */
 
-#define CFG_CTS_TO_ITSELF_ENABLED_MIN	0x0
-#define CFG_CTS_TO_ITSELF_ENABLED_MAX	0x1
+/* clear-to-send to self param */
+#define CFG_CTS_TO_ITSELF_ENABLED_MIN	0x00
+#define CFG_CTS_TO_ITSELF_ENABLED_MAX	0x01
 #define CFG_CTS_TO_ITSELF_ENABLED_DEF	CFG_CTS_TO_ITSELF_ENABLED_MIN
 
-#define CFG_SYS_ANTENNA_BOTH                      0x000
-#define CFG_SYS_ANTENNA_A                         0x001
-#define CFG_SYS_ANTENNA_B                         0x003
+/* Antenna diversity param (h/w can select best antenna, based on signal) */
+#define CFG_SYS_ANTENNA_BOTH            0x00	/* NIC selects best antenna */
+#define CFG_SYS_ANTENNA_A               0x01	/* force antenna A */
+#define CFG_SYS_ANTENNA_B               0x03	/* force antenna B */
+#define CFG_SYS_ANTENNA_SLOW_DIV        0x02	/* consider background noise */
 
 /*
  * The definitions below were lifted off the ipw2100 driver, which only
@@ -1898,28 +1996,5 @@ struct ipw_cmd_log {
 #define IPW_IBSS_11B_DEFAULT_MASK   0x87ff
 
 #define IPW_MAX_CONFIG_RETRIES 10
-
-static inline u32 frame_hdr_len(struct ieee80211_hdr_4addr *hdr)
-{
-	u32 retval;
-	u16 fc;
-
-	retval = sizeof(struct ieee80211_hdr_3addr);
-	fc = le16_to_cpu(hdr->frame_ctl);
-
-	/*
-	 * Function     ToDS    FromDS
-	 * IBSS         0       0
-	 * To AP        1       0
-	 * From AP      0       1
-	 * WDS (bridge) 1       1
-	 *
-	 * Only WDS frames use Address4 among them. --YZ
-	 */
-	if (!(fc & IEEE80211_FCTL_TODS) || !(fc & IEEE80211_FCTL_FROMDS))
-		retval -= ETH_ALEN;
-
-	return retval;
-}
 
 #endif				/* __ipw2200_h__ */

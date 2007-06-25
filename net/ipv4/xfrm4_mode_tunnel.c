@@ -33,10 +33,9 @@ static inline void ipip_ecn_decapsulate(struct sk_buff *skb)
  * On exit, skb->h will be set to the start of the payload to be processed
  * by x->type->output and skb->nh will be set to the top IP header.
  */
-static int xfrm4_tunnel_output(struct sk_buff *skb)
+static int xfrm4_tunnel_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb->dst;
-	struct xfrm_state *x = dst->xfrm;
 	struct iphdr *iph, *top_iph;
 	int flags;
 
@@ -85,6 +84,7 @@ static int xfrm4_tunnel_input(struct xfrm_state *x, struct sk_buff *skb)
 	    (err = pskb_expand_head(skb, 0, 0, GFP_ATOMIC)))
 		goto out;
 
+	iph = skb->nh.iph;
 	if (x->props.flags & XFRM_STATE_DECAP_DSCP)
 		ipv4_copy_dscp(iph, skb->h.ipiph);
 	if (!(x->props.flags & XFRM_STATE_NOECN))

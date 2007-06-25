@@ -4,6 +4,7 @@
 
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/dmi.h>
 #include "pci.h"
 
 /*
@@ -18,8 +19,10 @@ int pci_conf1_read(unsigned int seg, unsigned int bus,
 {
 	unsigned long flags;
 
-	if (!value || (bus > 255) || (devfn > 255) || (reg > 255))
+	if ((bus > 255) || (devfn > 255) || (reg > 255)) {
+		*value = -1;
 		return -EINVAL;
+	}
 
 	spin_lock_irqsave(&pci_config_lock, flags);
 
@@ -91,8 +94,10 @@ static int pci_conf2_read(unsigned int seg, unsigned int bus,
 	unsigned long flags;
 	int dev, fn;
 
-	if (!value || (bus > 255) || (devfn > 255) || (reg > 255))
+	if ((bus > 255) || (devfn > 255) || (reg > 255)) {
+		*value = -1;
 		return -EINVAL;
+	}
 
 	dev = PCI_SLOT(devfn);
 	fn = PCI_FUNC(devfn);
@@ -188,6 +193,10 @@ static int __init pci_sanity_check(struct pci_raw_ops *o)
 
 	if (pci_probe & PCI_NO_CHECKS)
 		return 1;
+	/* Assume Type 1 works for newer systems.
+	   This handles machines that don't have anything on PCI Bus 0. */
+	if (dmi_get_year(DMI_BIOS_DATE) >= 2001)
+		return 1;
 
 	for (devfn = 0; devfn < 0x100; devfn++) {
 		if (o->read(0, 0, devfn, PCI_CLASS_DEVICE, 2, &x))
@@ -245,7 +254,18 @@ static int __init pci_check_type2(void)
 	return works;
 }
 
-static int __init pci_direct_init(void)
+void __init pci_direct_init(int type)
+{
+	if (type == 0)
+		return;
+	printk(KERN_INFO "PCI: Using configuration type %d\n", type);
+	if (type == 1)
+		raw_pci_ops = &pci_direct_conf1;
+	else
+		raw_pci_ops = &pci_direct_conf2;
+}
+
+int __init pci_direct_probe(void)
 {
 	struct resource *region, *region2;
 
@@ -255,19 +275,16 @@ static int __init pci_direct_init(void)
 	if (!region)
 		goto type2;
 
-	if (pci_check_type1()) {
-		printk(KERN_INFO "PCI: Using configuration type 1\n");
-		raw_pci_ops = &pci_direct_conf1;
-		return 0;
-	}
+	if (pci_check_type1())
+		return 1;
 	release_resource(region);
 
  type2:
 	if ((pci_probe & PCI_PROBE_CONF2) == 0)
-		goto out;
+		return 0;
 	region = request_region(0xCF8, 4, "PCI conf2");
 	if (!region)
-		goto out;
+		return 0;
 	region2 = request_region(0xC000, 0x1000, "PCI conf2");
 	if (!region2)
 		goto fail2;
@@ -275,15 +292,11 @@ static int __init pci_direct_init(void)
 	if (pci_check_type2()) {
 		printk(KERN_INFO "PCI: Using configuration type 2\n");
 		raw_pci_ops = &pci_direct_conf2;
-		return 0;
+		return 2;
 	}
 
 	release_resource(region2);
  fail2:
 	release_resource(region);
-
- out:
 	return 0;
 }
-
-arch_initcall(pci_direct_init);

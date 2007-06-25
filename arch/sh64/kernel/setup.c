@@ -36,10 +36,9 @@
 #include <linux/slab.h>
 #include <linux/user.h>
 #include <linux/a.out.h>
-#include <linux/tty.h>
+#include <linux/screen_info.h>
 #include <linux/ioport.h>
 #include <linux/delay.h>
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/seq_file.h>
 #include <linux/blkdev.h>
@@ -48,6 +47,7 @@
 #include <linux/root_dev.h>
 #include <linux/cpu.h>
 #include <linux/initrd.h>
+#include <linux/pfn.h>
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -243,9 +243,7 @@ void __init setup_arch(char **cmdline_p)
 		if (INITRD_START + INITRD_SIZE <= (PFN_PHYS(last_pfn))) {
 		        reserve_bootmem_node(NODE_DATA(0), INITRD_START + __MEMORY_START, INITRD_SIZE);
 
-			initrd_start =
-			  (long) INITRD_START ? INITRD_START + PAGE_OFFSET +  __MEMORY_START : 0;
-
+			initrd_start = (long) INITRD_START + PAGE_OFFSET + __MEMORY_START;
 			initrd_end = initrd_start + INITRD_SIZE;
 		} else {
 			printk("initrd extends beyond end of memory "
@@ -308,7 +306,7 @@ static struct cpu cpu[1];
 
 static int __init topology_init(void)
 {
-	return register_cpu(cpu, 0, NULL);
+	return register_cpu(cpu, 0);
 }
 
 subsys_initcall(topology_init);

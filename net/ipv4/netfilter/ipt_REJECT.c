@@ -12,7 +12,6 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/ip.h>
@@ -39,76 +38,16 @@ MODULE_DESCRIPTION("iptables REJECT target module");
 #define DEBUGP(format, args...)
 #endif
 
-static inline struct rtable *route_reverse(struct sk_buff *skb, 
-					   struct tcphdr *tcph, int hook)
-{
-	struct iphdr *iph = skb->nh.iph;
-	struct dst_entry *odst;
-	struct flowi fl = {};
-	struct rtable *rt;
-
-	/* We don't require ip forwarding to be enabled to be able to
-	 * send a RST reply for bridged traffic. */
-	if (hook != NF_IP_FORWARD
-#ifdef CONFIG_BRIDGE_NETFILTER
-	    || (skb->nf_bridge && skb->nf_bridge->mask & BRNF_BRIDGED)
-#endif
-	   ) {
-		fl.nl_u.ip4_u.daddr = iph->saddr;
-		if (hook == NF_IP_LOCAL_IN)
-			fl.nl_u.ip4_u.saddr = iph->daddr;
-		fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
-
-		if (ip_route_output_key(&rt, &fl) != 0)
-			return NULL;
-	} else {
-		/* non-local src, find valid iif to satisfy
-		 * rp-filter when calling ip_route_input. */
-		fl.nl_u.ip4_u.daddr = iph->daddr;
-		if (ip_route_output_key(&rt, &fl) != 0)
-			return NULL;
-
-		odst = skb->dst;
-		if (ip_route_input(skb, iph->saddr, iph->daddr,
-		                   RT_TOS(iph->tos), rt->u.dst.dev) != 0) {
-			dst_release(&rt->u.dst);
-			return NULL;
-		}
-		dst_release(&rt->u.dst);
-		rt = (struct rtable *)skb->dst;
-		skb->dst = odst;
-
-		fl.nl_u.ip4_u.daddr = iph->saddr;
-		fl.nl_u.ip4_u.saddr = iph->daddr;
-		fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
-	}
-
-	if (rt->u.dst.error) {
-		dst_release(&rt->u.dst);
-		return NULL;
-	}
-
-	fl.proto = IPPROTO_TCP;
-	fl.fl_ip_sport = tcph->dest;
-	fl.fl_ip_dport = tcph->source;
-
-	xfrm_lookup((struct dst_entry **)&rt, &fl, NULL, 0);
-
-	return rt;
-}
-
 /* Send RST reply */
 static void send_reset(struct sk_buff *oldskb, int hook)
 {
 	struct sk_buff *nskb;
 	struct iphdr *iph = oldskb->nh.iph;
 	struct tcphdr _otcph, *oth, *tcph;
-	struct rtable *rt;
-	u_int16_t tmp_port;
-	u_int32_t tmp_addr;
-	unsigned int tcplen;
+	__be16 tmp_port;
+	__be32 tmp_addr;
 	int needs_ack;
-	int hh_len;
+	unsigned int addr_type;
 
 	/* IP header checks: fragment. */
 	if (oldskb->nh.iph->frag_off & htons(IP_OFFSET))
@@ -124,40 +63,25 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 		return;
 
 	/* Check checksum */
-	tcplen = oldskb->len - iph->ihl * 4;
-	if (((hook != NF_IP_LOCAL_IN && oldskb->ip_summed != CHECKSUM_HW) ||
-	     (hook == NF_IP_LOCAL_IN &&
-	      oldskb->ip_summed != CHECKSUM_UNNECESSARY)) &&
-	    csum_tcpudp_magic(iph->saddr, iph->daddr, tcplen, IPPROTO_TCP,
-	                      oldskb->ip_summed == CHECKSUM_HW ? oldskb->csum :
-	                      skb_checksum(oldskb, iph->ihl * 4, tcplen, 0)))
+	if (nf_ip_checksum(oldskb, hook, iph->ihl * 4, IPPROTO_TCP))
 		return;
-
-	if ((rt = route_reverse(oldskb, oth, hook)) == NULL)
-		return;
-
-	hh_len = LL_RESERVED_SPACE(rt->u.dst.dev);
 
 	/* We need a linear, writeable skb.  We also need to expand
 	   headroom in case hh_len of incoming interface < hh_len of
 	   outgoing interface */
-	nskb = skb_copy_expand(oldskb, hh_len, skb_tailroom(oldskb),
+	nskb = skb_copy_expand(oldskb, LL_MAX_HEADER, skb_tailroom(oldskb),
 			       GFP_ATOMIC);
-	if (!nskb) {
-		dst_release(&rt->u.dst);
+	if (!nskb)
 		return;
-	}
-
-	dst_release(nskb->dst);
-	nskb->dst = &rt->u.dst;
 
 	/* This packet will not be the same as the other: clear nf fields */
 	nf_reset(nskb);
-	nskb->nfmark = 0;
-#ifdef CONFIG_BRIDGE_NETFILTER
-	nf_bridge_put(nskb->nf_bridge);
-	nskb->nf_bridge = NULL;
-#endif
+	nskb->mark = 0;
+	skb_init_secmark(nskb);
+
+	skb_shinfo(nskb)->gso_size = 0;
+	skb_shinfo(nskb)->gso_segs = 0;
+	skb_shinfo(nskb)->gso_type = 0;
 
 	tcph = (struct tcphdr *)((u_int32_t*)nskb->nh.iph + nskb->nh.iph->ihl);
 
@@ -202,11 +126,25 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 				   csum_partial((char *)tcph,
 						sizeof(struct tcphdr), 0));
 
-	/* Adjust IP TTL, DF */
-	nskb->nh.iph->ttl = dst_metric(nskb->dst, RTAX_HOPLIMIT);
 	/* Set DF, id = 0 */
 	nskb->nh.iph->frag_off = htons(IP_DF);
 	nskb->nh.iph->id = 0;
+
+	addr_type = RTN_UNSPEC;
+	if (hook != NF_IP_FORWARD
+#ifdef CONFIG_BRIDGE_NETFILTER
+	    || (nskb->nf_bridge && nskb->nf_bridge->mask & BRNF_BRIDGED)
+#endif
+	   )
+		addr_type = RTN_LOCAL;
+
+	if (ip_route_me_harder(&nskb, addr_type))
+		goto free_nskb;
+
+	nskb->ip_summed = CHECKSUM_NONE;
+
+	/* Adjust IP TTL */
+	nskb->nh.iph->ttl = dst_metric(nskb->dst, RTAX_HOPLIMIT);
 
 	/* Adjust IP checksum */
 	nskb->nh.iph->check = 0;
@@ -236,8 +174,8 @@ static unsigned int reject(struct sk_buff **pskb,
 			   const struct net_device *in,
 			   const struct net_device *out,
 			   unsigned int hooknum,
-			   const void *targinfo,
-			   void *userinfo)
+			   const struct xt_target *target,
+			   const void *targinfo)
 {
 	const struct ipt_reject_info *reject = targinfo;
 
@@ -283,29 +221,12 @@ static unsigned int reject(struct sk_buff **pskb,
 
 static int check(const char *tablename,
 		 const void *e_void,
+		 const struct xt_target *target,
 		 void *targinfo,
-		 unsigned int targinfosize,
 		 unsigned int hook_mask)
 {
  	const struct ipt_reject_info *rejinfo = targinfo;
 	const struct ipt_entry *e = e_void;
-
- 	if (targinfosize != IPT_ALIGN(sizeof(struct ipt_reject_info))) {
-  		DEBUGP("REJECT: targinfosize %u != 0\n", targinfosize);
-  		return 0;
-  	}
-
-	/* Only allow these for packet filtering. */
-	if (strcmp(tablename, "filter") != 0) {
-		DEBUGP("REJECT: bad table `%s'.\n", tablename);
-		return 0;
-	}
-	if ((hook_mask & ~((1 << NF_IP_LOCAL_IN)
-			   | (1 << NF_IP_FORWARD)
-			   | (1 << NF_IP_LOCAL_OUT))) != 0) {
-		DEBUGP("REJECT: bad hook mask %X\n", hook_mask);
-		return 0;
-	}
 
 	if (rejinfo->with == IPT_ICMP_ECHOREPLY) {
 		printk("REJECT: ECHOREPLY no longer supported.\n");
@@ -318,26 +239,29 @@ static int check(const char *tablename,
 			return 0;
 		}
 	}
-
 	return 1;
 }
 
 static struct ipt_target ipt_reject_reg = {
 	.name		= "REJECT",
 	.target		= reject,
+	.targetsize	= sizeof(struct ipt_reject_info),
+	.table		= "filter",
+	.hooks		= (1 << NF_IP_LOCAL_IN) | (1 << NF_IP_FORWARD) |
+			  (1 << NF_IP_LOCAL_OUT),
 	.checkentry	= check,
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ipt_reject_init(void)
 {
 	return ipt_register_target(&ipt_reject_reg);
 }
 
-static void __exit fini(void)
+static void __exit ipt_reject_fini(void)
 {
 	ipt_unregister_target(&ipt_reject_reg);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ipt_reject_init);
+module_exit(ipt_reject_fini);

@@ -26,6 +26,9 @@
 static LIST_HEAD(keyring);
 static DECLARE_RWSEM(keyring_sem);
 
+/*
+ * handle a public key element parsed from the keyring blob
+ */
 static int add_keyblock_key(struct ksign_public_key *pk, void *data)
 {
 	printk("- Added public key %X%X\n", pk->keyid[0], pk->keyid[1]);
@@ -46,15 +49,17 @@ static int add_keyblock_key(struct ksign_public_key *pk, void *data)
 	return 0;
 }
 
+/*
+ * handle a user ID element parsed from the keyring blob
+ */
 static int add_keyblock_uid(struct ksign_user_id *uid, void *data)
 {
 	printk("- User ID: %s\n", uid->name);
 	return 1;
 }
 
-/*****************************************************************************/
 /*
- *
+ * add the keys from a ASN.1 encoded blob into the keyring
  */
 int ksign_load_keyring_from_buffer(const void *buffer, size_t size)
 {
@@ -66,11 +71,10 @@ int ksign_load_keyring_from_buffer(const void *buffer, size_t size)
 			       add_keyblock_key,
 			       add_keyblock_uid,
 			       NULL);
-} /* end ksign_load_keyring_from_buffer() */
+}
 
-/*****************************************************************************/
 /*
- *
+ * find a public key by ID
  */
 struct ksign_public_key *ksign_get_public_key(const uint32_t *keyid)
 {
@@ -87,15 +91,13 @@ struct ksign_public_key *ksign_get_public_key(const uint32_t *keyid)
 
 	pk = NULL;
 
- found:
+found:
 	up_read(&keyring_sem);
-
 	return pk;
-} /* end ksign_get_public_key() */
+}
 
-/*****************************************************************************/
 /*
- * clear the public key keyring
+ * clear the public-key keyring
  */
 void ksign_clear_keyring(void)
 {
@@ -111,4 +113,4 @@ void ksign_clear_keyring(void)
 	}
 
 	up_write(&keyring_sem);
-} /* end ksign_clear_keyring() */
+}

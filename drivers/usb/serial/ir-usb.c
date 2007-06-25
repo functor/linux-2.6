@@ -46,7 +46,6 @@
  *	initial version released.
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -58,7 +57,7 @@
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
-#include "usb-serial.h"
+#include <linux/usb/serial.h>
 
 /*
  * Version Information
@@ -106,9 +105,9 @@ static int  ir_startup (struct usb_serial *serial);
 static int  ir_open (struct usb_serial_port *port, struct file *filep);
 static void ir_close (struct usb_serial_port *port, struct file *filep);
 static int  ir_write (struct usb_serial_port *port, const unsigned char *buf, int count);
-static void ir_write_bulk_callback (struct urb *urb, struct pt_regs *regs);
-static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs);
-static void ir_set_termios (struct usb_serial_port *port, struct termios *old_termios);
+static void ir_write_bulk_callback (struct urb *urb);
+static void ir_read_bulk_callback (struct urb *urb);
+static void ir_set_termios (struct usb_serial_port *port, struct ktermios *old_termios);
 
 static u8 ir_baud = 0;
 static u8 ir_xbof = 0;
@@ -184,10 +183,9 @@ static struct irda_class_desc *irda_usb_find_class_desc(struct usb_device *dev, 
 	struct irda_class_desc *desc;
 	int ret;
 		
-	desc = kmalloc(sizeof (struct irda_class_desc), GFP_KERNEL);
+	desc = kzalloc(sizeof (struct irda_class_desc), GFP_KERNEL);
 	if (desc == NULL) 
 		return NULL;
-	memset(desc, 0, sizeof(struct irda_class_desc));
 	
 	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev,0),
 			IU_REQ_GET_CLASS_DESC,
@@ -344,14 +342,14 @@ static int ir_write (struct usb_serial_port *port, const unsigned char *buf, int
 	if (count == 0)
 		return 0;
 
-	spin_lock(&port->lock);
+	spin_lock_bh(&port->lock);
 	if (port->write_urb_busy) {
-		spin_unlock(&port->lock);
+		spin_unlock_bh(&port->lock);
 		dbg("%s - already writing", __FUNCTION__);
 		return 0;
 	}
 	port->write_urb_busy = 1;
-	spin_unlock(&port->lock);
+	spin_unlock_bh(&port->lock);
 
 	transfer_buffer = port->write_urb->transfer_buffer;
 	transfer_size = min(count, port->bulk_out_size - 1);
@@ -390,7 +388,7 @@ static int ir_write (struct usb_serial_port *port, const unsigned char *buf, int
 	return result;
 }
 
-static void ir_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
+static void ir_write_bulk_callback (struct urb *urb)
 {
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
 
@@ -409,10 +407,10 @@ static void ir_write_bulk_callback (struct urb *urb, struct pt_regs *regs)
 		urb->actual_length,
 		urb->transfer_buffer);
 
-	schedule_work(&port->work);
+	usb_serial_port_softint(port);
 }
 
-static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
+static void ir_read_bulk_callback (struct urb *urb)
 {
 	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
 	struct tty_struct *tty;
@@ -454,8 +452,7 @@ static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 			tty = port->tty;
 
 			/*
-			 *	FIXME: must not do this in IRQ context,
-			 *	must honour TTY_DONT_FLIP
+			 *	FIXME: must not do this in IRQ context
 			 */
 			tty->ldisc.receive_buf(
 				tty,
@@ -500,7 +497,7 @@ static void ir_read_bulk_callback (struct urb *urb, struct pt_regs *regs)
 	return;
 }
 
-static void ir_set_termios (struct usb_serial_port *port, struct termios *old_termios)
+static void ir_set_termios (struct usb_serial_port *port, struct ktermios *old_termios)
 {
 	unsigned char *transfer_buffer;
 	unsigned int cflag;

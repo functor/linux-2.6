@@ -27,13 +27,13 @@
 
 static struct dma_channel {
 	char *name;
-	void (*irq_handler)(int, void *, struct pt_regs *);
+	void (*irq_handler)(int, void *);
 	void *data;
 } dma_channels[PXA_DMA_CHANNELS];
 
 
 int pxa_request_dma (char *name, pxa_dma_prio prio,
-			 void (*irq_handler)(int, void *, struct pt_regs *),
+			 void (*irq_handler)(int, void *),
 		 	 void *data)
 {
 	unsigned long flags;
@@ -45,23 +45,16 @@ int pxa_request_dma (char *name, pxa_dma_prio prio,
 
 	local_irq_save(flags);
 
-	/* try grabbing a DMA channel with the requested priority */
-	for (i = prio; i < prio + PXA_DMA_NBCH(prio); i++) {
-		if (!dma_channels[i].name) {
-			found = 1;
-			break;
-		}
-	}
-
-	if (!found) {
-		/* requested prio group is full, try hier priorities */
-		for (i = prio-1; i >= 0; i--) {
+	do {
+		/* try grabbing a DMA channel with the requested priority */
+		pxa_for_each_dma_prio (i, prio) {
 			if (!dma_channels[i].name) {
 				found = 1;
 				break;
 			}
 		}
-	}
+		/* if requested prio group is full, try a hier priority */
+	} while (!found && prio--);
 
 	if (found) {
 		DCSR(i) = DCSR_STARTINTR|DCSR_ENDINTR|DCSR_BUSERR;
@@ -94,7 +87,7 @@ void pxa_free_dma (int dma_ch)
 	local_irq_restore(flags);
 }
 
-static irqreturn_t dma_irq_handler(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t dma_irq_handler(int irq, void *dev_id)
 {
 	int i, dint = DINT;
 
@@ -102,7 +95,7 @@ static irqreturn_t dma_irq_handler(int irq, void *dev_id, struct pt_regs *regs)
 		if (dint & (1 << i)) {
 			struct dma_channel *channel = &dma_channels[i];
 			if (channel->name && channel->irq_handler) {
-				channel->irq_handler(i, channel->data, regs);
+				channel->irq_handler(i, channel->data);
 			} else {
 				/*
 				 * IRQ for an unregistered DMA channel:

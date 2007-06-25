@@ -54,7 +54,18 @@ static cpumask_t timer_bcast_ipi;
 /*
  * Knob to control our willingness to enable the local APIC.
  */
-int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
+static int enable_local_apic __initdata = 0; /* -1=force-disable, +1=force-enable */
+
+static inline void lapic_disable(void)
+{
+	enable_local_apic = -1;
+	clear_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability);
+}
+
+static inline void lapic_enable(void)
+{
+	enable_local_apic = 1;
+}
 
 /*
  * Debug level
@@ -97,6 +108,43 @@ void ack_bad_irq(unsigned int irq)
 		ack_APIC_irq();
 }
 
+#ifndef CONFIG_XEN
+void __init apic_intr_init(void)
+{
+#ifdef CONFIG_SMP
+	smp_intr_init();
+#endif
+	/* self generated IPI for local APIC timer */
+	set_intr_gate(LOCAL_TIMER_VECTOR, apic_timer_interrupt);
+
+	/* IPI vectors for APIC spurious and error interrupts */
+	set_intr_gate(SPURIOUS_APIC_VECTOR, spurious_interrupt);
+	set_intr_gate(ERROR_APIC_VECTOR, error_interrupt);
+
+	/* thermal monitor LVT interrupt */
+#ifdef CONFIG_X86_MCE_P4THERMAL
+	set_intr_gate(THERMAL_APIC_VECTOR, thermal_interrupt);
+#endif
+}
+
+/* Using APIC to generate smp_local_timer_interrupt? */
+int using_apic_timer __read_mostly = 0;
+
+static int enabled_via_apicbase;
+
+void enable_NMI_through_LVT0 (void * dummy)
+{
+	unsigned int v, ver;
+
+	ver = apic_read(APIC_LVR);
+	ver = GET_APIC_VERSION(ver);
+	v = APIC_DM_NMI;			/* unmask and set to NMI */
+	if (!APIC_INTEGRATED(ver))		/* 82489DX */
+		v |= APIC_LVT_LEVEL_TRIGGER;
+	apic_write_around(APIC_LVT0, v);
+}
+#endif /* !CONFIG_XEN */
+
 int get_physical_broadcast(void)
 {
 	if (modern_apic())
@@ -107,7 +155,7 @@ int get_physical_broadcast(void)
 
 #ifndef CONFIG_XEN
 #ifndef CONFIG_SMP
-static void up_apic_timer_interrupt_call(struct pt_regs *regs)
+static void up_apic_timer_interrupt_call(void)
 {
 	int cpu = smp_processor_id();
 
@@ -116,11 +164,11 @@ static void up_apic_timer_interrupt_call(struct pt_regs *regs)
 	 */
 	per_cpu(irq_stat, cpu).apic_timer_irqs++;
 
-	smp_local_timer_interrupt(regs);
+	smp_local_timer_interrupt();
 }
 #endif
 
-void smp_send_timer_broadcast_ipi(struct pt_regs *regs)
+void smp_send_timer_broadcast_ipi(void)
 {
 	cpumask_t mask;
 
@@ -133,7 +181,7 @@ void smp_send_timer_broadcast_ipi(struct pt_regs *regs)
 		 * We can directly call the apic timer interrupt handler
 		 * in UP case. Minus all irq related functions
 		 */
-		up_apic_timer_interrupt_call(regs);
+		up_apic_timer_interrupt_call();
 #endif
 	}
 }
@@ -158,3 +206,18 @@ int __init APIC_init_uniprocessor (void)
 
 	return 0;
 }
+
+static int __init parse_lapic(char *arg)
+{
+	lapic_enable();
+	return 0;
+}
+early_param("lapic", parse_lapic);
+
+static int __init parse_nolapic(char *arg)
+{
+	lapic_disable();
+	return 0;
+}
+early_param("nolapic", parse_nolapic);
+

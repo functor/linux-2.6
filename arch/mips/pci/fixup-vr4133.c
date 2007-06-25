@@ -1,5 +1,5 @@
 /*
- * arch/mips/vr41xx/nec-cmbvr4133/pci_fixup.c
+ * arch/mips/pci/fixup-vr4133.c
  *
  * The NEC CMB-VR4133 Board specific PCI fixups.
  *
@@ -15,7 +15,6 @@
  * Author: Manish Lachwani (mlachwani@mvista.com)
  *
  */
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/pci.h>
 
@@ -45,7 +44,7 @@ int pcibios_plat_dev_init(struct pci_dev *dev)
 
 	/*
 	 * we have to open the bridges' windows down to 0 because otherwise
- 	 * we cannot access ISA south bridge I/O registers that get mapped from
+	 * we cannot access ISA south bridge I/O registers that get mapped from
 	 * 0. for example, 8259 PIC would be unaccessible without that
 	 */
 	if(dev->vendor == PCI_VENDOR_ID_INTEL && dev->device == PCI_DEVICE_ID_INTEL_S21152BB) {

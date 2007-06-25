@@ -28,7 +28,7 @@
 #include <linux/netfilter/x_tables.h>
 
 #define IPT_FUNCTION_MAXNAMELEN XT_FUNCTION_MAXNAMELEN
-#define IPT_TABLE_MAXNAMELEN XT_FUNCTION_MAXNAMELEN
+#define IPT_TABLE_MAXNAMELEN XT_TABLE_MAXNAMELEN
 #define ipt_match xt_match
 #define ipt_target xt_target
 #define ipt_table xt_table
@@ -52,61 +52,9 @@ struct ipt_ip {
 	u_int8_t invflags;
 };
 
-struct ipt_entry_match
-{
-	union {
-		struct {
-			u_int16_t match_size;
-
-			/* Used by userspace */
-			char name[IPT_FUNCTION_MAXNAMELEN-1];
-
-			u_int8_t revision;
-		} user;
-		struct {
-			u_int16_t match_size;
-
-			/* Used inside the kernel */
-			struct ipt_match *match;
-		} kernel;
-
-		/* Total length */
-		u_int16_t match_size;
-	} u;
-
-	unsigned char data[0];
-};
-
-struct ipt_entry_target
-{
-	union {
-		struct {
-			u_int16_t target_size;
-
-			/* Used by userspace */
-			char name[IPT_FUNCTION_MAXNAMELEN-1];
-
-			u_int8_t revision;
-		} user;
-		struct {
-			u_int16_t target_size;
-
-			/* Used inside the kernel */
-			struct ipt_target *target;
-		} kernel;
-
-		/* Total length */
-		u_int16_t target_size;
-	} u;
-
-	unsigned char data[0];
-};
-
-struct ipt_standard_target
-{
-	struct ipt_entry_target target;
-	int verdict;
-};
+#define ipt_entry_match xt_entry_match
+#define ipt_entry_target xt_entry_target
+#define ipt_standard_target xt_standard_target
 
 #define ipt_counters xt_counters
 
@@ -153,18 +101,21 @@ struct ipt_entry
 /*
  * New IP firewall options for [gs]etsockopt at the RAW IP level.
  * Unlike BSD Linux inherits IP options so you don't have to use a raw
- * socket for this. Instead we check rights in the calls. */
-#define IPT_BASE_CTL		XT_BASE_CTL
+ * socket for this. Instead we check rights in the calls.
+ *
+ * ATTENTION: check linux/in.h before adding new number here.
+ */
+#define IPT_BASE_CTL		64
 
-#define IPT_SO_SET_REPLACE	XT_SO_SET_REPLACE
-#define IPT_SO_SET_ADD_COUNTERS	XT_SO_SET_ADD_COUNTERS
-#define IPT_SO_SET_MAX		XT_SO_SET_MAX
+#define IPT_SO_SET_REPLACE	(IPT_BASE_CTL)
+#define IPT_SO_SET_ADD_COUNTERS	(IPT_BASE_CTL + 1)
+#define IPT_SO_SET_MAX		IPT_SO_SET_ADD_COUNTERS
 
-#define IPT_SO_GET_INFO			XT_SO_GET_INFO
-#define IPT_SO_GET_ENTRIES		XT_SO_GET_ENTRIES
-#define IPT_SO_GET_REVISION_MATCH	XT_SO_GET_REVISION_MATCH
-#define IPT_SO_GET_REVISION_TARGET	XT_SO_GET_REVISION_TARGET
-#define IPT_SO_GET_MAX			XT_SO_GET_REVISION_TARGET
+#define IPT_SO_GET_INFO			(IPT_BASE_CTL)
+#define IPT_SO_GET_ENTRIES		(IPT_BASE_CTL + 1)
+#define IPT_SO_GET_REVISION_MATCH	(IPT_BASE_CTL + 2)
+#define IPT_SO_GET_REVISION_TARGET	(IPT_BASE_CTL + 3)
+#define IPT_SO_GET_MAX			IPT_SO_GET_REVISION_TARGET
 
 #define IPT_CONTINUE XT_CONTINUE
 #define IPT_RETURN XT_RETURN
@@ -321,11 +272,15 @@ ipt_get_target(struct ipt_entry *e)
 #include <linux/init.h>
 extern void ipt_init(void) __init;
 
-#define ipt_register_target(tgt) xt_register_target(AF_INET, tgt)
-#define ipt_unregister_target(tgt) xt_unregister_target(AF_INET, tgt)
+#define ipt_register_target(tgt) 	\
+({	(tgt)->family = AF_INET;	\
+ 	xt_register_target(tgt); })
+#define ipt_unregister_target(tgt) xt_unregister_target(tgt)
 
-#define ipt_register_match(mtch) xt_register_match(AF_INET, mtch)
-#define ipt_unregister_match(mtch) xt_unregister_match(AF_INET, mtch)
+#define ipt_register_match(mtch) 	\
+({	(mtch)->family = AF_INET;	\
+	xt_register_match(mtch); })
+#define ipt_unregister_match(mtch) xt_unregister_match(mtch)
 
 //#define ipt_register_table(tbl, repl) xt_register_table(AF_INET, tbl, repl)
 //#define ipt_unregister_table(tbl) xt_unregister_table(AF_INET, tbl)
@@ -360,9 +315,26 @@ extern unsigned int ipt_do_table(struct sk_buff **pskb,
 				 unsigned int hook,
 				 const struct net_device *in,
 				 const struct net_device *out,
-				 struct ipt_table *table,
-				 void *userdata);
+				 struct ipt_table *table);
 
 #define IPT_ALIGN(s) XT_ALIGN(s)
+
+#ifdef CONFIG_COMPAT
+#include <net/compat.h>
+
+struct compat_ipt_entry
+{
+	struct ipt_ip ip;
+	compat_uint_t nfcache;
+	u_int16_t target_offset;
+	u_int16_t next_offset;
+	compat_uint_t comefrom;
+	struct compat_xt_counters counters;
+	unsigned char elems[0];
+};
+
+#define COMPAT_IPT_ALIGN(s) 	COMPAT_XT_ALIGN(s)
+
+#endif /* CONFIG_COMPAT */
 #endif /*__KERNEL__*/
 #endif /* _IPTABLES_H */

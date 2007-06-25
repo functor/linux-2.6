@@ -13,7 +13,6 @@
 
 #include <asm/delay.h>
 #include <asm/tsc.h>
-#include <asm/delay.h>
 #include <asm/io.h>
 
 #include "mach_timer.h"
@@ -25,7 +24,7 @@
  */
 unsigned int tsc_khz;
 
-int tsc_disable __cpuinitdata = 0;
+int tsc_disable;
 
 #ifdef CONFIG_X86_TSC
 static int __init tsc_setup(char *str)
@@ -194,7 +193,7 @@ int recalibrate_cpu_khz(void)
 
 EXPORT_SYMBOL(recalibrate_cpu_khz);
 
-void tsc_init(void)
+void __init tsc_init(void)
 {
 	if (!cpu_has_tsc || tsc_disable)
 		return;
@@ -219,7 +218,7 @@ static unsigned int cpufreq_delayed_issched = 0;
 static unsigned int cpufreq_init = 0;
 static struct work_struct cpufreq_delayed_get_work;
 
-static void handle_cpufreq_delayed_get(void *v)
+static void handle_cpufreq_delayed_get(struct work_struct *work)
 {
 	unsigned int cpu;
 
@@ -308,7 +307,7 @@ static int __init cpufreq_tsc(void)
 {
 	int ret;
 
-	INIT_WORK(&cpufreq_delayed_get_work, handle_cpufreq_delayed_get, NULL);
+	INIT_WORK(&cpufreq_delayed_get_work, handle_cpufreq_delayed_get);
 	ret = cpufreq_register_notifier(&time_cpufreq_notifier_block,
 					CPUFREQ_TRANSITION_NOTIFIER);
 	if (!ret)
@@ -351,8 +350,8 @@ static int tsc_update_callback(void)
 	int change = 0;
 
 	/* check to see if we should switch to the safe clocksource: */
-	if (clocksource_tsc.rating != 50 && check_tsc_unstable()) {
-		clocksource_tsc.rating = 50;
+	if (clocksource_tsc.rating != 0 && check_tsc_unstable()) {
+		clocksource_tsc.rating = 0;
 		clocksource_reselect();
 		change = 1;
 	}
@@ -463,7 +462,7 @@ static int __init init_tsc_clocksource(void)
 							clocksource_tsc.shift);
 		/* lower the rating if we already know its unstable: */
 		if (check_tsc_unstable())
-			clocksource_tsc.rating = 50;
+			clocksource_tsc.rating = 0;
 
 		init_timer(&verify_tsc_freq_timer);
 		verify_tsc_freq_timer.function = verify_tsc_freq;

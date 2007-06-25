@@ -4,16 +4,16 @@
  *
  *   This program is free software;  you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or 
+ *   the Free Software Foundation; either version 2 of the License, or
  *   (at your option) any later version.
- * 
+ *
  *   This program is distributed in the hope that it will be useful,
  *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
  *   the GNU General Public License for more details.
  *
  *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software 
+ *   along with this program;  if not, write to the Free Software
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
@@ -46,9 +46,10 @@
 #include <linux/vmalloc.h>
 #include <linux/smp_lock.h>
 #include <linux/completion.h>
-#include <linux/suspend.h>
+#include <linux/freezer.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/kthread.h>
 #include "jfs_incore.h"
 #include "jfs_inode.h"
 #include "jfs_filsys.h"
@@ -121,8 +122,7 @@ static DEFINE_SPINLOCK(jfsTxnLock);
 #define LAZY_LOCK(flags)	spin_lock_irqsave(&TxAnchor.LazyLock, flags)
 #define LAZY_UNLOCK(flags) spin_unlock_irqrestore(&TxAnchor.LazyLock, flags)
 
-DECLARE_WAIT_QUEUE_HEAD(jfs_sync_thread_wait);
-DECLARE_WAIT_QUEUE_HEAD(jfs_commit_thread_wait);
+static DECLARE_WAIT_QUEUE_HEAD(jfs_commit_thread_wait);
 static int jfs_commit_thread_waking;
 
 /*
@@ -135,7 +135,7 @@ static inline void TXN_SLEEP_DROP_LOCK(wait_queue_head_t * event)
 	add_wait_queue(event, &wait);
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	TXN_UNLOCK();
-	schedule();
+	io_schedule();
 	current->state = TASK_RUNNING;
 	remove_wait_queue(event, &wait);
 }
@@ -207,7 +207,7 @@ static lid_t txLockAlloc(void)
 	if ((++TxAnchor.tlocksInUse > TxLockHWM) && (jfs_tlocks_low == 0)) {
 		jfs_info("txLockAlloc tlocks low");
 		jfs_tlocks_low = 1;
-		wake_up(&jfs_sync_thread_wait);
+		wake_up_process(jfsSyncThread);
 	}
 
 	return lid;
@@ -282,7 +282,7 @@ int txInit(void)
 	TxLockVHWM = (nTxLock * 8) / 10;
 
 	size = sizeof(struct tblock) * nTxBlock;
-	TxBlock = (struct tblock *) vmalloc(size);
+	TxBlock = vmalloc(size);
 	if (TxBlock == NULL)
 		return -ENOMEM;
 
@@ -307,7 +307,7 @@ int txInit(void)
 	 * tlock id = 0 is reserved.
 	 */
 	size = sizeof(struct tlock) * nTxLock;
-	TxLock = (struct tlock *) vmalloc(size);
+	TxLock = vmalloc(size);
 	if (TxLock == NULL) {
 		vfree(TxBlock);
 		return -ENOMEM;
@@ -842,7 +842,7 @@ struct tlock *txLock(tid_t tid, struct inode *ip, struct metapage * mp,
 	TXN_UNLOCK();
 	release_metapage(mp);
 	TXN_LOCK();
-	xtid = tlck->tid;	/* reaquire after dropping TXN_LOCK */
+	xtid = tlck->tid;	/* reacquire after dropping TXN_LOCK */
 
 	jfs_info("txLock: in waitLock, tid = %d, xtid = %d, lid = %d",
 		 tid, xtid, lid);
@@ -2026,8 +2026,6 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 		 * truncate entry XAD[twm == next - 1]:
 		 */
 		if (twm == next - 1) {
-			struct pxd_lock *pxdlock;
-
 			/* format a maplock for txUpdateMap() to update bmap
 			 * to free truncated delta extent of the truncated
 			 * entry XAD[next - 1];
@@ -2393,7 +2391,7 @@ static void txUpdateMap(struct tblock * tblk)
 	 * unlock mapper/write lock
 	 */
 	if (tblk->xflag & COMMIT_CREATE) {
-		diUpdatePMap(ipimap, tblk->ino, FALSE, tblk);
+		diUpdatePMap(ipimap, tblk->ino, false, tblk);
 		/* update persistent block allocation map
 		 * for the allocation of inode extent;
 		 */
@@ -2403,7 +2401,7 @@ static void txUpdateMap(struct tblock * tblk)
 		txAllocPMap(ipimap, (struct maplock *) & pxdlock, tblk);
 	} else if (tblk->xflag & COMMIT_DELETE) {
 		ip = tblk->u.ip;
-		diUpdatePMap(ipimap, ip->i_ino, TRUE, tblk);
+		diUpdatePMap(ipimap, ip->i_ino, true, tblk);
 		iput(ip);
 	}
 }
@@ -2451,7 +2449,7 @@ static void txAllocPMap(struct inode *ip, struct maplock * maplock,
 			if (xad->flag & (XAD_NEW | XAD_EXTENDED)) {
 				xaddr = addressXAD(xad);
 				xlen = lengthXAD(xad);
-				dbUpdatePMap(ipbmap, FALSE, xaddr,
+				dbUpdatePMap(ipbmap, false, xaddr,
 					     (s64) xlen, tblk);
 				xad->flag &= ~(XAD_NEW | XAD_EXTENDED);
 				jfs_info("allocPMap: xaddr:0x%lx xlen:%d",
@@ -2462,7 +2460,7 @@ static void txAllocPMap(struct inode *ip, struct maplock * maplock,
 		pxdlock = (struct pxd_lock *) maplock;
 		xaddr = addressPXD(&pxdlock->pxd);
 		xlen = lengthPXD(&pxdlock->pxd);
-		dbUpdatePMap(ipbmap, FALSE, xaddr, (s64) xlen, tblk);
+		dbUpdatePMap(ipbmap, false, xaddr, (s64) xlen, tblk);
 		jfs_info("allocPMap: xaddr:0x%lx xlen:%d", (ulong) xaddr, xlen);
 	} else {		/* (maplock->flag & mlckALLOCPXDLIST) */
 
@@ -2471,7 +2469,7 @@ static void txAllocPMap(struct inode *ip, struct maplock * maplock,
 		for (n = 0; n < pxdlistlock->count; n++, pxd++) {
 			xaddr = addressPXD(pxd);
 			xlen = lengthPXD(pxd);
-			dbUpdatePMap(ipbmap, FALSE, xaddr, (s64) xlen,
+			dbUpdatePMap(ipbmap, false, xaddr, (s64) xlen,
 				     tblk);
 			jfs_info("allocPMap: xaddr:0x%lx xlen:%d",
 				 (ulong) xaddr, xlen);
@@ -2513,7 +2511,7 @@ void txFreeMap(struct inode *ip,
 				if (!(xad->flag & XAD_NEW)) {
 					xaddr = addressXAD(xad);
 					xlen = lengthXAD(xad);
-					dbUpdatePMap(ipbmap, TRUE, xaddr,
+					dbUpdatePMap(ipbmap, true, xaddr,
 						     (s64) xlen, tblk);
 					jfs_info("freePMap: xaddr:0x%lx "
 						 "xlen:%d",
@@ -2524,7 +2522,7 @@ void txFreeMap(struct inode *ip,
 			pxdlock = (struct pxd_lock *) maplock;
 			xaddr = addressPXD(&pxdlock->pxd);
 			xlen = lengthPXD(&pxdlock->pxd);
-			dbUpdatePMap(ipbmap, TRUE, xaddr, (s64) xlen,
+			dbUpdatePMap(ipbmap, true, xaddr, (s64) xlen,
 				     tblk);
 			jfs_info("freePMap: xaddr:0x%lx xlen:%d",
 				 (ulong) xaddr, xlen);
@@ -2535,7 +2533,7 @@ void txFreeMap(struct inode *ip,
 			for (n = 0; n < pxdlistlock->count; n++, pxd++) {
 				xaddr = addressPXD(pxd);
 				xlen = lengthPXD(pxd);
-				dbUpdatePMap(ipbmap, TRUE, xaddr,
+				dbUpdatePMap(ipbmap, true, xaddr,
 					     (s64) xlen, tblk);
 				jfs_info("freePMap: xaddr:0x%lx xlen:%d",
 					 (ulong) xaddr, xlen);
@@ -2743,10 +2741,6 @@ int jfs_lazycommit(void *arg)
 	unsigned long flags;
 	struct jfs_sb_info *sbi;
 
-	daemonize("jfsCommit");
-
-	complete(&jfsIOwait);
-
 	do {
 		LAZY_LOCK(flags);
 		jfs_commit_thread_waking = 0;	/* OK to wake another thread */
@@ -2806,13 +2800,13 @@ int jfs_lazycommit(void *arg)
 			current->state = TASK_RUNNING;
 			remove_wait_queue(&jfs_commit_thread_wait, &wq);
 		}
-	} while (!jfs_stop_threads);
+	} while (!kthread_should_stop());
 
 	if (!list_empty(&TxAnchor.unlock_queue))
 		jfs_err("jfs_lazycommit being killed w/pending transactions!");
 	else
 		jfs_info("jfs_lazycommit being killed\n");
-	complete_and_exit(&jfsIOwait, 0);
+	return 0;
 }
 
 void txLazyUnlock(struct tblock * tblk)
@@ -2876,10 +2870,10 @@ restart:
 		 */
 		TXN_UNLOCK();
 		tid = txBegin(ip->i_sb, COMMIT_INODE | COMMIT_FORCE);
-		down(&jfs_ip->commit_sem);
+		mutex_lock(&jfs_ip->commit_mutex);
 		txCommit(tid, 1, &ip, 0);
 		txEnd(tid);
-		up(&jfs_ip->commit_sem);
+		mutex_unlock(&jfs_ip->commit_mutex);
 		/*
 		 * Just to be safe.  I don't know how
 		 * long we can run without blocking
@@ -2932,10 +2926,6 @@ int jfs_sync(void *arg)
 	int rc;
 	tid_t tid;
 
-	daemonize("jfsSync");
-
-	complete(&jfsIOwait);
-
 	do {
 		/*
 		 * write each inode on the anonymous inode list
@@ -2952,7 +2942,7 @@ int jfs_sync(void *arg)
 				 * Inode is being freed
 				 */
 				list_del_init(&jfs_ip->anon_inode_list);
-			} else if (! down_trylock(&jfs_ip->commit_sem)) {
+			} else if (mutex_trylock(&jfs_ip->commit_mutex)) {
 				/*
 				 * inode will be removed from anonymous list
 				 * when it is committed
@@ -2961,7 +2951,7 @@ int jfs_sync(void *arg)
 				tid = txBegin(ip->i_sb, COMMIT_INODE);
 				rc = txCommit(tid, 1, &ip, 0);
 				txEnd(tid);
-				up(&jfs_ip->commit_sem);
+				mutex_unlock(&jfs_ip->commit_mutex);
 
 				iput(ip);
 				/*
@@ -2971,7 +2961,7 @@ int jfs_sync(void *arg)
 				cond_resched();
 				TXN_LOCK();
 			} else {
-				/* We can't get the commit semaphore.  It may
+				/* We can't get the commit mutex.  It may
 				 * be held by a thread waiting for tlock's
 				 * so let's not block here.  Save it to
 				 * put back on the anon_list.
@@ -2996,19 +2986,15 @@ int jfs_sync(void *arg)
 			TXN_UNLOCK();
 			refrigerator();
 		} else {
-			DECLARE_WAITQUEUE(wq, current);
-
-			add_wait_queue(&jfs_sync_thread_wait, &wq);
 			set_current_state(TASK_INTERRUPTIBLE);
 			TXN_UNLOCK();
 			schedule();
 			current->state = TASK_RUNNING;
-			remove_wait_queue(&jfs_sync_thread_wait, &wq);
 		}
-	} while (!jfs_stop_threads);
+	} while (!kthread_should_stop());
 
 	jfs_info("jfs_sync being killed");
-	complete_and_exit(&jfsIOwait, 0);
+	return 0;
 }
 
 #if defined(CONFIG_PROC_FS) && defined(CONFIG_JFS_DEBUG)

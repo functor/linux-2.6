@@ -19,8 +19,8 @@ static int ebt_filter_mark(const struct sk_buff *skb,
 	struct ebt_mark_m_info *info = (struct ebt_mark_m_info *) data;
 
 	if (info->bitmask & EBT_MARK_OR)
-		return !(!!(skb->nfmark & info->mask) ^ info->invert);
-	return !(((skb->nfmark & info->mask) == info->mark) ^ info->invert);
+		return !(!!(skb->mark & info->mask) ^ info->invert);
+	return !(((skb->mark & info->mask) == info->mark) ^ info->invert);
 }
 
 static int ebt_mark_check(const char *tablename, unsigned int hookmask,
@@ -47,16 +47,16 @@ static struct ebt_match filter_mark =
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ebt_mark_m_init(void)
 {
 	return ebt_register_match(&filter_mark);
 }
 
-static void __exit fini(void)
+static void __exit ebt_mark_m_fini(void)
 {
 	ebt_unregister_match(&filter_mark);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ebt_mark_m_init);
+module_exit(ebt_mark_m_fini);
 MODULE_LICENSE("GPL");

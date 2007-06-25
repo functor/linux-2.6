@@ -168,12 +168,6 @@ static inline void clear_in_cr4 (unsigned long mask)
 
 
 /*
- * Bus types
- */
-#define MCA_bus 0
-#define MCA_bus__is_a_macro
-
-/*
  * User space process size. 47bits minus one guard page.
  */
 #define TASK_SIZE64	(0x800000000000UL - 4096)
@@ -484,6 +478,16 @@ static inline void __mwait(unsigned long eax, unsigned long ecx)
 		".byte 0x0f,0x01,0xc9;"
 		: :"a" (eax), "c" (ecx));
 }
+
+static inline void __sti_mwait(unsigned long eax, unsigned long ecx)
+{
+	/* "mwait %eax,%ecx;" */
+	asm volatile(
+		"sti; .byte 0x0f,0x01,0xc9;"
+		: :"a" (eax), "c" (ecx));
+}
+
+extern void mwait_idle_with_hints(unsigned long eax, unsigned long ecx);
 
 #define stack_current() \
 ({								\

@@ -1,8 +1,6 @@
 #ifndef _I386_PGTABLE_3LEVEL_H
 #define _I386_PGTABLE_3LEVEL_H
 
-#include <asm-generic/pgtable-nopud.h>
-
 /*
  * Intel Physical Address Extension (PAE) Mode - three-level page
  * tables on PPro+ CPUs.
@@ -44,6 +42,7 @@ static inline int pte_exec_kernel(pte_t pte)
 	return pte_x(pte);
 }
 
+#ifndef CONFIG_PARAVIRT
 /* Rules for using set_pte: the pte being assigned *must* be
  * either not present or in a state where the hardware will
  * not attempt to update the pte.  In places where this is
@@ -62,11 +61,27 @@ static inline void set_pte(pte_t *ptep, pte_t pte)
 }
 # define set_pte_atomic(pteptr,pteval) \
 		set_64bit((unsigned long long *)(pteptr),pte_val_ma(pteval))
+
+/*
+ * Since this is only called on user PTEs, and the page fault handler
+ * must handle the already racy situation of simultaneous page faults,
+ * we are justified in merely clearing the PTE present bit, followed
+ * by a set.  The ordering here is important.
+ */
+static inline void set_pte_present(struct mm_struct *mm, unsigned long addr, pte_t *ptep, pte_t pte)
+{
+	ptep->pte_low = 0;
+	smp_wmb();
+	ptep->pte_high = pte.pte_high;
+	smp_wmb();
+	ptep->pte_low = pte.pte_low;
+}
 #else
 /* no writable pagetables */
 # define set_pte(pteptr,pteval)				\
 		xen_l1_entry_update((pteptr), (pteval))
 # define set_pte_atomic(pteptr,pteval) set_pte(pteptr,pteval)
+# define set_pte_pressent(mm,addr,ptep,pte) set_pte_at(mm,addr,ptep,pteval)
 #endif
 
 #define set_pte_at(_mm,addr,ptep,pteval) do {				\
@@ -75,37 +90,10 @@ static inline void set_pte(pte_t *ptep, pte_t pte)
 		set_pte((ptep), (pteval));				\
 } while (0)
 
-#define set_pte_at_sync(_mm,addr,ptep,pteval) do {			\
-	if (((_mm) != current->mm && (_mm) != &init_mm) ||		\
-	    HYPERVISOR_update_va_mapping((addr), (pteval), UVMF_INVLPG)) { \
-		set_pte((ptep), (pteval));				\
-		xen_invlpg((addr));					\
-	}								\
-} while (0)
-
 #define set_pmd(pmdptr,pmdval)				\
 		xen_l2_entry_update((pmdptr), (pmdval))
 #define set_pud(pudptr,pudval) \
 		xen_l3_entry_update((pudptr), (pudval))
-
-/*
- * Pentium-II erratum A13: in PAE mode we explicitly have to flush
- * the TLB via cr3 if the top-level pgd is changed...
- * We do not let the generic code free and clear pgd entries due to
- * this erratum.
- */
-static inline void pud_clear (pud_t * pud) { }
-
-#define pud_page(pud) \
-((struct page *) __va(pud_val(pud) & PAGE_MASK))
-
-#define pud_page_kernel(pud) \
-((unsigned long) __va(pud_val(pud) & PAGE_MASK))
-
-
-/* Find an entry in the second-level page table.. */
-#define pmd_offset(pud, address) ((pmd_t *) pud_page(*(pud)) + \
-			pmd_index(address))
 
 /*
  * For PTEs and PDEs, we must clear the P-bit first when clearing a page table
@@ -121,7 +109,7 @@ static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *pt
 
 #define pmd_clear(xp)	do { set_pmd(xp, __pmd(0)); } while (0)
 
-static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+static inline pte_t raw_ptep_get_and_clear(pte_t *ptep)
 {
 	pte_t res;
 
@@ -132,7 +120,28 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 
 	return res;
 }
+#endif
 
+/*
+ * Pentium-II erratum A13: in PAE mode we explicitly have to flush
+ * the TLB via cr3 if the top-level pgd is changed...
+ * We do not let the generic code free and clear pgd entries due to
+ * this erratum.
+ */
+static inline void pud_clear (pud_t * pud) { }
+
+#define pud_page(pud) \
+((struct page *) __va(pud_val(pud) & PAGE_MASK))
+
+#define pud_page_vaddr(pud) \
+((unsigned long) __va(pud_val(pud) & PAGE_MASK))
+
+
+/* Find an entry in the second-level page table.. */
+#define pmd_offset(pud, address) ((pmd_t *) pud_page(*(pud)) + \
+			pmd_index(address))
+
+#define __HAVE_ARCH_PTE_SAME
 static inline int pte_same(pte_t a, pte_t b)
 {
 	return a.pte_low == b.pte_low && a.pte_high == b.pte_high;

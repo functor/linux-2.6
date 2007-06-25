@@ -17,6 +17,16 @@
  *  Registration of PCI drivers and handling of hot-pluggable devices.
  */
 
+/* multithreaded probe logic */
+static int pci_multithread_probe =
+#ifdef CONFIG_PCI_MULTITHREAD_PROBE
+	1;
+#else
+	0;
+#endif
+__module_param_call("", pci_multithread_probe, param_set_bool, param_get_bool, &pci_multithread_probe, 0644);
+
+
 /*
  * Dynamic device IDs are disabled for !CONFIG_HOTPLUG
  */
@@ -46,6 +56,7 @@ store_new_id(struct device_driver *driver, const char *buf, size_t count)
 		subdevice=PCI_ANY_ID, class=0, class_mask=0;
 	unsigned long driver_data=0;
 	int fields=0;
+	int retval = 0;
 
 	fields = sscanf(buf, "%x %x %x %x %x %x %lux",
 			&vendor, &device, &subvendor, &subdevice,
@@ -53,11 +64,10 @@ store_new_id(struct device_driver *driver, const char *buf, size_t count)
 	if (fields < 0)
 		return -EINVAL;
 
-	dynid = kmalloc(sizeof(*dynid), GFP_KERNEL);
+	dynid = kzalloc(sizeof(*dynid), GFP_KERNEL);
 	if (!dynid)
 		return -ENOMEM;
 
-	memset(dynid, 0, sizeof(*dynid));
 	INIT_LIST_HEAD(&dynid->node);
 	dynid->id.vendor = vendor;
 	dynid->id.device = device;
@@ -73,10 +83,12 @@ store_new_id(struct device_driver *driver, const char *buf, size_t count)
 	spin_unlock(&pdrv->dynids.lock);
 
 	if (get_driver(&pdrv->driver)) {
-		driver_attach(&pdrv->driver);
+		retval = driver_attach(&pdrv->driver);
 		put_driver(&pdrv->driver);
 	}
 
+	if (retval)
+		return retval;
 	return count;
 }
 static DRIVER_ATTR(new_id, S_IWUSR, NULL, store_new_id);
@@ -138,11 +150,9 @@ const struct pci_device_id *pci_match_id(const struct pci_device_id *ids,
 }
 
 /**
- * pci_match_device - Tell if a PCI device structure has a matching
- *                    PCI device id structure
- * @ids: array of PCI device id structures to search in
- * @dev: the PCI device structure to match against
+ * pci_match_device - Tell if a PCI device structure has a matching PCI device id structure
  * @drv: the PCI driver to match against
+ * @dev: the PCI device structure to match against
  *
  * Used by a driver to check whether a PCI device present in the
  * system is in its list of supported devices.  Returns the matching
@@ -151,14 +161,9 @@ const struct pci_device_id *pci_match_id(const struct pci_device_id *ids,
 const struct pci_device_id *pci_match_device(struct pci_driver *drv,
 					     struct pci_dev *dev)
 {
-	const struct pci_device_id *id;
 	struct pci_dynid *dynid;
 
-	id = pci_match_id(drv->id_table, dev);
-	if (id)
-		return id;
-
-	/* static ids didn't match, lets look at the dynamic ones */
+	/* Look at the dynamic ids first, before the static ones */
 	spin_lock(&drv->dynids.lock);
 	list_for_each_entry(dynid, &drv->dynids.list, node) {
 		if (pci_match_one_device(&dynid->id, dev)) {
@@ -167,7 +172,8 @@ const struct pci_device_id *pci_match_device(struct pci_driver *drv,
 		}
 	}
 	spin_unlock(&drv->dynids.lock);
-	return NULL;
+
+	return pci_match_id(drv->id_table, dev);
 }
 
 static int pci_call_probe(struct pci_driver *drv, struct pci_dev *dev,
@@ -254,6 +260,13 @@ static int pci_device_remove(struct device * dev)
 	}
 
 	/*
+	 * If the device is still on, set the power state as "unknown",
+	 * since it might change by the next time we load the driver.
+	 */
+	if (pci_dev->current_state == PCI_D0)
+		pci_dev->current_state = PCI_UNKNOWN;
+
+	/*
 	 * We would love to complain here if pci_dev->is_enabled is set, that
 	 * the driver should have called pci_disable_device(), but the
 	 * unfortunate fact is there are too many odd BIOS and bridge setups
@@ -272,42 +285,78 @@ static int pci_device_suspend(struct device * dev, pm_message_t state)
 	struct pci_driver * drv = pci_dev->driver;
 	int i = 0;
 
-	if (drv && drv->suspend)
+	if (drv && drv->suspend) {
 		i = drv->suspend(pci_dev, state);
-	else
+		suspend_report_result(drv->suspend, i);
+	} else {
 		pci_save_state(pci_dev);
+		/*
+		 * mark its power state as "unknown", since we don't know if
+		 * e.g. the BIOS will change its device state when we suspend.
+		 */
+		if (pci_dev->current_state == PCI_D0)
+			pci_dev->current_state = PCI_UNKNOWN;
+	}
 	return i;
 }
 
+static int pci_device_suspend_late(struct device * dev, pm_message_t state)
+{
+	struct pci_dev * pci_dev = to_pci_dev(dev);
+	struct pci_driver * drv = pci_dev->driver;
+	int i = 0;
+
+	if (drv && drv->suspend_late) {
+		i = drv->suspend_late(pci_dev, state);
+		suspend_report_result(drv->suspend_late, i);
+	}
+	return i;
+}
 
 /*
  * Default resume method for devices that have no driver provided resume,
  * or not even a driver at all.
  */
-static void pci_default_resume(struct pci_dev *pci_dev)
+static int pci_default_resume(struct pci_dev *pci_dev)
 {
-	int retval;
+	int retval = 0;
 
 	/* restore the PCI config space */
 	pci_restore_state(pci_dev);
 	/* if the device was enabled before suspend, reenable */
-	if (pci_dev->is_enabled)
-		retval = pci_enable_device(pci_dev);
+	if (atomic_read(&pci_dev->enable_cnt))
+		retval = __pci_enable_device(pci_dev);
 	/* if the device was busmaster before the suspend, make it busmaster again */
 	if (pci_dev->is_busmaster)
 		pci_set_master(pci_dev);
+
+	return retval;
 }
 
 static int pci_device_resume(struct device * dev)
 {
+	int error;
 	struct pci_dev * pci_dev = to_pci_dev(dev);
 	struct pci_driver * drv = pci_dev->driver;
 
 	if (drv && drv->resume)
-		drv->resume(pci_dev);
+		error = drv->resume(pci_dev);
 	else
-		pci_default_resume(pci_dev);
-	return 0;
+		error = pci_default_resume(pci_dev);
+	return error;
+}
+
+static int pci_device_resume_early(struct device * dev)
+{
+	int error = 0;
+	struct pci_dev * pci_dev = to_pci_dev(dev);
+	struct pci_driver * drv = pci_dev->driver;
+
+	pci_fixup_device(pci_fixup_resume, pci_dev);
+
+	if (drv && drv->resume_early)
+		error = drv->resume_early(pci_dev);
+	return error;
 }
 
 static void pci_device_shutdown(struct device *dev)
@@ -380,25 +429,25 @@ int __pci_register_driver(struct pci_driver *drv, struct module *owner)
 	/* initialize common driver fields */
 	drv->driver.name = drv->name;
 	drv->driver.bus = &pci_bus_type;
-	/* FIXME, once all of the existing PCI drivers have been fixed to set
-	 * the pci shutdown function, this test can go away. */
-	if (!drv->driver.shutdown)
-		drv->driver.shutdown = pci_device_shutdown;
-	else
-		printk(KERN_WARNING "Warning: PCI driver %s has a struct "
-			"device_driver shutdown method, please update!\n",
-			drv->name);
 	drv->driver.owner = owner;
 	drv->driver.kobj.ktype = &pci_driver_kobj_type;
+
+	if (pci_multithread_probe)
+		drv->driver.multithread_probe = pci_multithread_probe;
+	else
+		drv->driver.multithread_probe = drv->multithread_probe;
 
 	spin_lock_init(&drv->dynids.lock);
 	INIT_LIST_HEAD(&drv->dynids.list);
 
 	/* register with core */
 	error = driver_register(&drv->driver);
+	if (error)
+		return error;
 
-	if (!error)
-		error = pci_create_newid_file(drv);
+	error = pci_create_newid_file(drv);
+	if (error)
+		driver_unregister(&drv->driver);
 
 	return error;
 }
@@ -514,7 +563,10 @@ struct bus_type pci_bus_type = {
 	.probe		= pci_device_probe,
 	.remove		= pci_device_remove,
 	.suspend	= pci_device_suspend,
+	.suspend_late	= pci_device_suspend_late,
+	.resume_early	= pci_device_resume_early,
 	.resume		= pci_device_resume,
+	.shutdown	= pci_device_shutdown,
 	.dev_attrs	= pci_dev_attrs,
 };
 

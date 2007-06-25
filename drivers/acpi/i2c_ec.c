@@ -293,7 +293,7 @@ static u32 acpi_ec_smb_func(struct i2c_adapter *adapter)
 		I2C_FUNC_SMBUS_I2C_BLOCK | I2C_FUNC_SMBUS_HWPEC_CALC);
 }
 
-static struct i2c_algorithm acpi_ec_smbus_algorithm = {
+static const struct i2c_algorithm acpi_ec_smbus_algorithm = {
 	.smbus_xfer = acpi_ec_smb_access,
 	.functionality = acpi_ec_smb_func,
 };
@@ -309,18 +309,16 @@ static int acpi_ec_hc_add(struct acpi_device *device)
 		return -EINVAL;
 	}
 
-	ec_hc = kmalloc(sizeof(struct acpi_ec_hc), GFP_KERNEL);
+	ec_hc = kzalloc(sizeof(struct acpi_ec_hc), GFP_KERNEL);
 	if (!ec_hc) {
 		return -ENOMEM;
 	}
-	memset(ec_hc, 0, sizeof(struct acpi_ec_hc));
 
-	smbus = kmalloc(sizeof(struct acpi_ec_smbus), GFP_KERNEL);
+	smbus = kzalloc(sizeof(struct acpi_ec_smbus), GFP_KERNEL);
 	if (!smbus) {
 		kfree(ec_hc);
 		return -ENOMEM;
 	}
-	memset(smbus, 0, sizeof(struct acpi_ec_smbus));
 
 	ec_hc->handle = device->handle;
 	strcpy(acpi_device_name(device), ACPI_EC_HC_DEVICE_NAME);
@@ -393,7 +391,7 @@ static void __exit acpi_ec_hc_exit(void)
 
 struct acpi_ec_hc *acpi_get_ec_hc(struct acpi_device *device)
 {
-	return ((struct acpi_ec_hc *)acpi_driver_data(device->parent));
+	return acpi_driver_data(device->parent);
 }
 
 EXPORT_SYMBOL(acpi_get_ec_hc);

@@ -320,6 +320,9 @@ void refresh_cpu_vm_stats(int cpu)
 	for_each_zone(zone) {
 		struct per_cpu_pageset *pcp;
 
+		if (!populated_zone(zone))
+			continue;
+
 		pcp = zone_pcp(zone, cpu);
 
 		for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++)
@@ -367,7 +370,7 @@ void zone_statistics(struct zonelist *zonelist, struct zone *z)
 		__inc_zone_state(z, NUMA_MISS);
 		__inc_zone_state(zonelist->zones[0], NUMA_FOREIGN);
 	}
-	if (z->zone_pgdat == NODE_DATA(numa_node_id()))
+	if (z->node == numa_node_id())
 		__inc_zone_state(z, NUMA_LOCAL);
 	else
 		__inc_zone_state(z, NUMA_OTHER);
@@ -427,24 +430,41 @@ static int frag_show(struct seq_file *m, void *arg)
 	return 0;
 }
 
-struct seq_operations fragmentation_op = {
+const struct seq_operations fragmentation_op = {
 	.start	= frag_start,
 	.next	= frag_next,
 	.stop	= frag_stop,
 	.show	= frag_show,
 };
 
-static char *vmstat_text[] = {
+#ifdef CONFIG_ZONE_DMA32
+#define TEXT_FOR_DMA32(xx) xx "_dma32",
+#else
+#define TEXT_FOR_DMA32(xx)
+#endif
+
+#ifdef CONFIG_HIGHMEM
+#define TEXT_FOR_HIGHMEM(xx) xx "_high",
+#else
+#define TEXT_FOR_HIGHMEM(xx)
+#endif
+
+#define TEXTS_FOR_ZONES(xx) xx "_dma", TEXT_FOR_DMA32(xx) xx "_normal", \
+					TEXT_FOR_HIGHMEM(xx)
+
+static const char * const vmstat_text[] = {
 	/* Zoned VM counters */
 	"nr_anon_pages",
 	"nr_mapped",
 	"nr_file_pages",
-	"nr_slab",
+	"nr_slab_reclaimable",
+	"nr_slab_unreclaimable",
 	"nr_page_table_pages",
 	"nr_dirty",
 	"nr_writeback",
 	"nr_unstable",
 	"nr_bounce",
+	"nr_vmscan_write",
 
 #ifdef CONFIG_NUMA
 	"numa_hit",
@@ -461,10 +481,7 @@ static char *vmstat_text[] = {
 	"pswpin",
 	"pswpout",
 
-	"pgalloc_dma",
-	"pgalloc_dma32",
-	"pgalloc_normal",
-	"pgalloc_high",
+	TEXTS_FOR_ZONES("pgalloc")
 
 	"pgfree",
 	"pgactivate",
@@ -473,25 +490,10 @@ static char *vmstat_text[] = {
 	"pgfault",
 	"pgmajfault",
 
-	"pgrefill_dma",
-	"pgrefill_dma32",
-	"pgrefill_normal",
-	"pgrefill_high",
-
-	"pgsteal_dma",
-	"pgsteal_dma32",
-	"pgsteal_normal",
-	"pgsteal_high",
-
-	"pgscan_kswapd_dma",
-	"pgscan_kswapd_dma32",
-	"pgscan_kswapd_normal",
-	"pgscan_kswapd_high",
-
-	"pgscan_direct_dma",
-	"pgscan_direct_dma32",
-	"pgscan_direct_normal",
-	"pgscan_direct_high",
+	TEXTS_FOR_ZONES("pgrefill")
+	TEXTS_FOR_ZONES("pgsteal")
+	TEXTS_FOR_ZONES("pgscan_kswapd")
+	TEXTS_FOR_ZONES("pgscan_direct")
 
 	"pginodesteal",
 	"slabs_scanned",
@@ -595,7 +597,7 @@ static int zoneinfo_show(struct seq_file *m, void *arg)
 	return 0;
 }
 
-struct seq_operations zoneinfo_op = {
+const struct seq_operations zoneinfo_op = {
 	.start	= frag_start, /* iterate over all zones. The same as in
 			       * fragmentation. */
 	.next	= frag_next,
@@ -658,7 +660,7 @@ static void vmstat_stop(struct seq_file *m, void *arg)
 	m->private = NULL;
 }
 
-struct seq_operations vmstat_op = {
+const struct seq_operations vmstat_op = {
 	.start	= vmstat_start,
 	.next	= vmstat_next,
 	.stop	= vmstat_stop,
@@ -677,13 +679,13 @@ static int __cpuinit vmstat_cpuup_callback(struct notifier_block *nfb,
 		void *hcpu)
 {
 	switch (action) {
-		case CPU_UP_PREPARE:
-		case CPU_UP_CANCELED:
-		case CPU_DEAD:
-			refresh_zone_stat_thresholds();
-			break;
-		default:
-			break;
+	case CPU_UP_PREPARE:
+	case CPU_UP_CANCELED:
+	case CPU_DEAD:
+		refresh_zone_stat_thresholds();
+		break;
+	default:
+		break;
 	}
 	return NOTIFY_OK;
 }

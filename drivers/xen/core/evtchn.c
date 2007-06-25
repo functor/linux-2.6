@@ -373,7 +373,7 @@ static void unbind_from_irq(unsigned int irq)
 
 int bind_evtchn_to_irqhandler(
 	unsigned int evtchn,
-	irqreturn_t (*handler)(int, void *, struct pt_regs *),
+	irq_handler_t handler,
 	unsigned long irqflags,
 	const char *devname,
 	void *dev_id)
@@ -395,7 +395,7 @@ EXPORT_SYMBOL_GPL(bind_evtchn_to_irqhandler);
 int bind_virq_to_irqhandler(
 	unsigned int virq,
 	unsigned int cpu,
-	irqreturn_t (*handler)(int, void *, struct pt_regs *),
+	irq_handler_t handler,
 	unsigned long irqflags,
 	const char *devname,
 	void *dev_id)
@@ -417,7 +417,7 @@ EXPORT_SYMBOL_GPL(bind_virq_to_irqhandler);
 int bind_ipi_to_irqhandler(
 	unsigned int ipi,
 	unsigned int cpu,
-	irqreturn_t (*handler)(int, void *, struct pt_regs *),
+	irq_handler_t handler,
 	unsigned long irqflags,
 	const char *devname,
 	void *dev_id)
@@ -472,7 +472,7 @@ static void set_affinity_irq(unsigned irq, cpumask_t dest)
 	rebind_irq_to_cpu(irq, tcpu);
 }
 
-static int retrigger(unsigned int irq)
+static int retrigger_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 	shared_info_t *s = HYPERVISOR_shared_info;
@@ -486,7 +486,7 @@ static int retrigger(unsigned int irq)
  * Interface to generic handling in irq.c
  */
 
-static unsigned int startup_dynirq(unsigned int irq)
+static unsigned int startup_dynirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -495,15 +495,7 @@ static unsigned int startup_dynirq(unsigned int irq)
 	return 0;
 }
 
-static void shutdown_dynirq(unsigned int irq)
-{
-	int evtchn = evtchn_from_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		mask_evtchn(evtchn);
-}
-
-static void enable_dynirq(unsigned int irq)
+static void unmask_dynirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -511,7 +503,7 @@ static void enable_dynirq(unsigned int irq)
 		unmask_evtchn(evtchn);
 }
 
-static void disable_dynirq(unsigned int irq)
+static void mask_dynirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -519,7 +511,7 @@ static void disable_dynirq(unsigned int irq)
 		mask_evtchn(evtchn);
 }
 
-static void ack_dynirq(unsigned int irq)
+static void ack_dynirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -531,7 +523,7 @@ static void ack_dynirq(unsigned int irq)
 	}
 }
 
-static void end_dynirq(unsigned int irq)
+static void ack_dynirq_quirk_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -539,18 +531,17 @@ static void end_dynirq(unsigned int irq)
 		unmask_evtchn(evtchn);
 }
 
-static struct hw_interrupt_type dynirq_type = {
-	.typename	= "Dynamic-irq",
-	.startup	= startup_dynirq,
-	.shutdown	= shutdown_dynirq,
-	.enable		= enable_dynirq,
-	.disable	= disable_dynirq,
-	.ack		= ack_dynirq,
-	.end		= end_dynirq,
+static struct irq_chip dynirq_chip = {
+	.name		= "Dynamic-irq",
+	.startup	= startup_dynirq_vector,
+	.mask		= mask_dynirq_vector,
+	.unmask		= unmask_dynirq_vector,
+	.ack		= ack_dynirq_vector,
+	.eoi		= ack_dynirq_quirk_vector,
 #ifdef CONFIG_SMP
 	.set_affinity	= set_affinity_irq,
 #endif
-	.retrigger	= retrigger,
+	.retrigger	= retrigger_vector,
 };
 
 static inline void pirq_unmask_notify(int pirq)
@@ -576,7 +567,7 @@ static inline void pirq_query_unmask(int pirq)
  */
 #define probing_irq(_irq) (irq_desc[(_irq)].action == NULL)
 
-static unsigned int startup_pirq(unsigned int irq)
+static unsigned int startup_pirq_vector(unsigned int irq)
 {
 	struct evtchn_bind_pirq bind_pirq;
 	int evtchn = evtchn_from_irq(irq);
@@ -608,26 +599,7 @@ static unsigned int startup_pirq(unsigned int irq)
 	return 0;
 }
 
-static void shutdown_pirq(unsigned int irq)
-{
-	struct evtchn_close close;
-	int evtchn = evtchn_from_irq(irq);
-
-	if (!VALID_EVTCHN(evtchn))
-		return;
-
-	mask_evtchn(evtchn);
-
-	close.port = evtchn;
-	if (HYPERVISOR_event_channel_op(EVTCHNOP_close, &close) != 0)
-		BUG();
-
-	bind_evtchn_to_cpu(evtchn, 0);
-	evtchn_to_irq[evtchn] = -1;
-	irq_info[irq] = IRQ_UNBOUND;
-}
-
-static void enable_pirq(unsigned int irq)
+static void unmask_pirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -637,7 +609,7 @@ static void enable_pirq(unsigned int irq)
 	}
 }
 
-static void disable_pirq(unsigned int irq)
+static void mask_pirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -645,7 +617,7 @@ static void disable_pirq(unsigned int irq)
 		mask_evtchn(evtchn);
 }
 
-static void ack_pirq(unsigned int irq)
+static void ack_pirq_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -657,7 +629,7 @@ static void ack_pirq(unsigned int irq)
 	}
 }
 
-static void end_pirq(unsigned int irq)
+static void ack_pirq_quirk_vector(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -667,18 +639,17 @@ static void end_pirq(unsigned int irq)
 	}
 }
 
-static struct hw_interrupt_type pirq_type = {
-	.typename	= "Phys-irq",
-	.startup	= startup_pirq,
-	.shutdown	= shutdown_pirq,
-	.enable		= enable_pirq,
-	.disable	= disable_pirq,
-	.ack		= ack_pirq,
-	.end		= end_pirq,
+static struct  irq_chip pirq_chip = {
+	.name		= "Phys-irq",
+	.startup	= startup_pirq_vector,
+	.mask		= mask_pirq_vector,
+	.unmask		= unmask_pirq_vector,
+	.ack		= ack_pirq_vector,
+	.eoi		= ack_pirq_quirk_vector,
 #ifdef CONFIG_SMP
 	.set_affinity	= set_affinity_irq,
 #endif
-	.retrigger	= retrigger,
+	.retrigger	= retrigger_vector,
 };
 
 int irq_ignore_unhandled(unsigned int irq)
@@ -846,7 +817,8 @@ void __init xen_init_IRQ(void)
 		irq_desc[dynirq_to_irq(i)].status  = IRQ_DISABLED;
 		irq_desc[dynirq_to_irq(i)].action  = NULL;
 		irq_desc[dynirq_to_irq(i)].depth   = 1;
-		irq_desc[dynirq_to_irq(i)].chip    = &dynirq_type;
+		set_irq_chip_and_handler_name(dynirq_to_irq(i), &dynirq_chip,
+					      handle_level_irq, "level");
 	}
 
 	/* Phys IRQ space is statically bound (1:1 mapping). Nail refcnts. */
@@ -862,6 +834,7 @@ void __init xen_init_IRQ(void)
 		irq_desc[pirq_to_irq(i)].status  = IRQ_DISABLED;
 		irq_desc[pirq_to_irq(i)].action  = NULL;
 		irq_desc[pirq_to_irq(i)].depth   = 1;
-		irq_desc[pirq_to_irq(i)].chip    = &pirq_type;
+		set_irq_chip_and_handler_name(pirq_to_irq(i), &pirq_chip,
+					      handle_level_irq, "level");
 	}
 }

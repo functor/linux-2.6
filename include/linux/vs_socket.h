@@ -1,13 +1,15 @@
-#ifndef _VX_VS_SOCKET_H
-#define _VX_VS_SOCKET_H
+#ifndef _VS_SOCKET_H
+#define _VS_SOCKET_H
 
 #include "vserver/debug.h"
+#include "vserver/base.h"
+#include "vserver/cacct.h"
+#include "vserver/context.h"
 
 
 /* socket accounting */
 
 #include <linux/socket.h>
-#include <linux/vserver/cacct.h>
 
 static inline int vx_sock_type(int family)
 {
@@ -36,8 +38,8 @@ static inline void __vx_acc_sock(struct vx_info *vxi,
 	if (vxi) {
 		int type = vx_sock_type(family);
 
-		atomic_inc(&vxi->cacct.sock[type][pos].count);
-		atomic_add(size, &vxi->cacct.sock[type][pos].total);
+		atomic_long_inc(&vxi->cacct.sock[type][pos].count);
+		atomic_long_add(size, &vxi->cacct.sock[type][pos].total);
 	}
 }
 

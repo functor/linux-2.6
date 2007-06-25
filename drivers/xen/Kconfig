@@ -187,7 +187,7 @@ config XEN_FRAMEBUFFER
 
 config XEN_KEYBOARD
 	tristate "Keyboard-device frontend driver"
-	depends on XEN
+	depends on XEN && XEN_FRAMEBUFFER && INPUT
 	default y
 	help
 	  The keyboard-device frontend driver allows the kernel to create a

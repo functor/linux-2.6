@@ -433,7 +433,7 @@ static void l1m_debug(struct FsmInst *fi, char *fmt, ...)
 	char buf[256];
 	
 	va_start(args, fmt);
-	vsprintf(buf, fmt, args);
+	vsnprintf(buf, sizeof(buf), fmt, args);
 	DBG(DBG_L1M, "%s", buf);
 	va_end(args);
 }
@@ -476,12 +476,10 @@ static void isac_fill_fifo(struct isac *isac)
 	unsigned char cmd;
 	u_char *ptr;
 
-	if (!isac->tx_skb)
-		BUG();
+	BUG_ON(!isac->tx_skb);
 
 	count = isac->tx_skb->len;
-	if (count <= 0)
-		BUG();
+	BUG_ON(count <= 0);
 
 	DBG(DBG_IRQ, "count %d", count);
 
@@ -859,8 +857,7 @@ void isac_d_l2l1(struct hisax_if *hisax_d_if, int pr, void *arg)
 			dev_kfree_skb(skb);
 			break;
 		}
-		if (isac->tx_skb)
-			BUG();
+		BUG_ON(isac->tx_skb);
 
 		isac->tx_skb = skb;
 		isac_fill_fifo(isac);

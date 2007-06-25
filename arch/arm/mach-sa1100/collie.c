@@ -11,12 +11,12 @@
  * published by the Free Software Foundation.
  *
  * ChangeLog:
- *  03-06-2004 John Lenz <jelenz@wisc.edu>
+ *  2006 Pavel Machek <pavel@suse.cz>
+ *  03-06-2004 John Lenz <lenz@cs.wisc.edu>
  *  06-04-2002 Chris Larson <kergoth@digitalnemesis.net>
  *  04-16-2001 Lineo Japan,Inc. ...
  */
 
-#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/tty.h>
@@ -40,6 +40,7 @@
 #include <asm/hardware/scoop.h>
 #include <asm/mach/sharpsl_param.h>
 #include <asm/hardware/locomo.h>
+#include <asm/arch/mcp.h>
 
 #include "generic.h"
 
@@ -66,6 +67,92 @@ struct platform_device colliescoop_device = {
 	.resource	= collie_scoop_resources,
 };
 
+static struct scoop_pcmcia_dev collie_pcmcia_scoop[] = {
+{
+       .dev        = &colliescoop_device.dev,
+       .irq        = COLLIE_IRQ_GPIO_CF_IRQ,
+       .cd_irq     = COLLIE_IRQ_GPIO_CF_CD,
+       .cd_irq_str = "PCMCIA0 CD",
+},
+};
+
+static struct scoop_pcmcia_config collie_pcmcia_config = {
+	.devs         = &collie_pcmcia_scoop[0],
+	.num_devs     = 1,
+};
+
+
+static struct mcp_plat_data collie_mcp_data = {
+	.mccr0          = MCCR0_ADM | MCCR0_ExtClk,
+	.sclk_rate      = 9216000,
+};
+
+#ifdef CONFIG_SHARP_LOCOMO
+/*
+ * low-level UART features.
+ */
+struct platform_device collie_locomo_device;
+
+static void collie_uart_set_mctrl(struct uart_port *port, u_int mctrl)
+{
+ 	if (mctrl & TIOCM_RTS)
+		locomo_gpio_write(&collie_locomo_device.dev, LOCOMO_GPIO_RTS, 0);
+ 	else
+		locomo_gpio_write(&collie_locomo_device.dev, LOCOMO_GPIO_RTS, 1);
+
+ 	if (mctrl & TIOCM_DTR)
+		locomo_gpio_write(&collie_locomo_device.dev, LOCOMO_GPIO_DTR, 0);
+ 	else
+		locomo_gpio_write(&collie_locomo_device.dev, LOCOMO_GPIO_DTR, 1);
+}
+
+static u_int collie_uart_get_mctrl(struct uart_port *port)
+{
+	int ret = TIOCM_CD;
+	unsigned int r;
+
+	r = locomo_gpio_read_output(&collie_locomo_device.dev, LOCOMO_GPIO_CTS & LOCOMO_GPIO_DSR);
+	if (r == -ENODEV)
+		return ret;
+	if (r & LOCOMO_GPIO_CTS)
+		ret |= TIOCM_CTS;
+	if (r & LOCOMO_GPIO_DSR)
+		ret |= TIOCM_DSR;
+
+	return ret;
+}
+
+static struct sa1100_port_fns collie_port_fns __initdata = {
+	.set_mctrl	= collie_uart_set_mctrl,
+	.get_mctrl	= collie_uart_get_mctrl,
+};
+
+static int collie_uart_probe(struct locomo_dev *dev)
+{
+	return 0;
+}
+
+static int collie_uart_remove(struct locomo_dev *dev)
+{
+	return 0;
+}
+
+static struct locomo_driver collie_uart_driver = {
+	.drv = {
+		.name = "collie_uart",
+	},
+	.devid	= LOCOMO_DEVID_UART,
+	.probe	= collie_uart_probe,
+	.remove	= collie_uart_remove,
+};
+
+static int __init collie_uart_init(void) {
+	return locomo_driver_register(&collie_uart_driver);
+}
+device_initcall(collie_uart_init);
+
+#endif
+
 
 static struct resource locomo_resources[] = {
 	[0] = {
@@ -80,7 +167,7 @@ static struct resource locomo_resources[] = {
 	},
 };
 
-static struct platform_device locomo_device = {
+struct platform_device collie_locomo_device = {
 	.name		= "locomo",
 	.id		= 0,
 	.num_resources	= ARRAY_SIZE(locomo_resources),
@@ -88,7 +175,7 @@ static struct platform_device locomo_device = {
 };
 
 static struct platform_device *devices[] __initdata = {
-	&locomo_device,
+	&collie_locomo_device,
 	&colliescoop_device,
 };
 
@@ -159,6 +246,8 @@ static void __init collie_init(void)
 	GPDR |= GPIO_32_768kHz;
 	TUCR  = TUCR_32_768kHz;
 
+	platform_scoop_config = &collie_pcmcia_config;
+
 	ret = platform_add_devices(devices, ARRAY_SIZE(devices));
 	if (ret) {
 		printk(KERN_WARNING "collie: Unable to register LoCoMo device\n");
@@ -166,6 +255,7 @@ static void __init collie_init(void)
 
 	sa11x0_set_flash_data(&collie_flash_data, collie_flash_resources,
 			      ARRAY_SIZE(collie_flash_resources));
+	sa11x0_set_mcp_data(&collie_mcp_data);
 
 	sharpsl_save_param();
 }
@@ -188,6 +278,12 @@ static void __init collie_map_io(void)
 {
 	sa1100_map_io();
 	iotable_init(collie_io_desc, ARRAY_SIZE(collie_io_desc));
+
+#ifdef CONFIG_SHARP_LOCOMO
+	sa1100_register_uart_fns(&collie_port_fns);
+#endif
+	sa1100_register_uart(0, 3);
+	sa1100_register_uart(1, 1);
 }
 
 MACHINE_START(COLLIE, "Sharp-Collie")

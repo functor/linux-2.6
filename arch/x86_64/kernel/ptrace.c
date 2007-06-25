@@ -13,12 +13,14 @@
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/errno.h>
+#include <linux/tracehook.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
 #include <linux/security.h>
 #include <linux/audit.h>
 #include <linux/seccomp.h>
 #include <linux/signal.h>
+#include <linux/module.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -30,6 +32,7 @@
 #include <asm/desc.h>
 #include <asm/proto.h>
 #include <asm/ia32.h>
+#include <asm/prctl.h>
 
 /*
  * does not yet catch signals sent when the child dies.
@@ -116,17 +119,17 @@ unsigned long convert_rip_to_linear(struct task_struct *child, struct pt_regs *r
 	return addr;
 }
 
-static int is_at_popf(struct task_struct *child, struct pt_regs *regs)
+static int is_setting_trap_flag(struct task_struct *child, struct pt_regs *regs)
 {
 	int i, copied;
-	unsigned char opcode[16];
+	unsigned char opcode[15];
 	unsigned long addr = convert_rip_to_linear(child, regs);
 
 	copied = access_process_vm(child, addr, opcode, sizeof(opcode), 0);
 	for (i = 0; i < copied; i++) {
 		switch (opcode[i]) {
-		/* popf */
-		case 0x9d:
+		/* popf and iret */
+		case 0x9d: case 0xcf:
 			return 1;
 
 			/* CHECKME: 64 65 */
@@ -138,14 +141,17 @@ static int is_at_popf(struct task_struct *child, struct pt_regs *regs)
 		case 0x26: case 0x2e:
 		case 0x36: case 0x3e:
 		case 0x64: case 0x65:
-		case 0xf0: case 0xf2: case 0xf3:
+		case 0xf2: case 0xf3:
 			continue;
 
-		/* REX prefixes */
 		case 0x40 ... 0x4f:
+			if (regs->cs != __USER_CS)
+				/* 32-bit mode: register increment */
+				return 0;
+			/* 64-bit mode: REX prefix */
 			continue;
 
-			/* CHECKME: f0, f2, f3 */
+			/* CHECKME: f2, f3 */
 
 		/*
 		 * pushf: NOTE! We should probably not let
@@ -162,7 +168,7 @@ static int is_at_popf(struct task_struct *child, struct pt_regs *regs)
 	return 0;
 }
 
-static void set_singlestep(struct task_struct *child)
+void tracehook_enable_single_step(struct task_struct *child)
 {
 	struct pt_regs *regs = task_pt_regs(child);
 
@@ -186,25 +192,22 @@ static void set_singlestep(struct task_struct *child)
 	 * ..but if TF is changed by the instruction we will trace,
 	 * don't mark it as being "us" that set it, so that we
 	 * won't clear it by hand later.
-	 *
-	 * AK: this is not enough, LAHF and IRET can change TF in user space too.
 	 */
-	if (is_at_popf(child, regs))
+	if (is_setting_trap_flag(child, regs))
 		return;
 
-	child->ptrace |= PT_DTRACE;
+	set_tsk_thread_flag(child, TIF_FORCED_TF);
 }
 
-static void clear_singlestep(struct task_struct *child)
+void tracehook_disable_single_step(struct task_struct *child)
 {
 	/* Always clear TIF_SINGLESTEP... */
 	clear_tsk_thread_flag(child, TIF_SINGLESTEP);
 
 	/* But touch TF only if it was set by us.. */
-	if (child->ptrace & PT_DTRACE) {
+	if (test_and_clear_tsk_thread_flag(child, TIF_FORCED_TF)) {
 		struct pt_regs *regs = task_pt_regs(child);
 		regs->eflags &= ~TRAP_FLAG;
-		child->ptrace &= ~PT_DTRACE;
 	}
 }
 
@@ -215,7 +218,7 @@ static void clear_singlestep(struct task_struct *child)
  */
 void ptrace_disable(struct task_struct *child)
 { 
-	clear_singlestep(child);
+	tracehook_disable_single_step(child);
 }
 
 static int putreg(struct task_struct *child,
@@ -268,16 +271,12 @@ static int putreg(struct task_struct *child,
 			tmp = get_stack_long(child, EFL_OFFSET); 
 			tmp &= ~FLAG_MASK; 
 			value |= tmp;
+			clear_tsk_thread_flag(child, TIF_FORCED_TF);
 			break;
 		case offsetof(struct user_regs_struct,cs): 
 			if ((value & 3) != 3)
 				return -EIO;
 			value &= 0xffff;
-			break;
-		case offsetof(struct user_regs_struct, rip):
-			/* Check if the new RIP address is canonical */
-			if (value >= TASK_SIZE_OF(child))
-				return -EIO;
 			break;
 	}
 	put_stack_long(child, regno - sizeof(struct pt_regs), value);
@@ -305,312 +304,444 @@ static unsigned long getreg(struct task_struct *child, unsigned long regno)
 			val = get_stack_long(child, regno);
 			if (test_tsk_thread_flag(child, TIF_IA32))
 				val &= 0xffffffff;
+			if (regno == (offsetof(struct user_regs_struct, eflags)
+				      - sizeof(struct pt_regs))
+			    && test_tsk_thread_flag(child, TIF_FORCED_TF))
+				val &= ~X86_EFLAGS_TF;
 			return val;
 	}
 
 }
 
-long arch_ptrace(struct task_struct *child, long request, long addr, long data)
+static int
+genregs_get(struct task_struct *target,
+	    const struct utrace_regset *regset,
+	    unsigned int pos, unsigned int count,
+	    void *kbuf, void __user *ubuf)
 {
-	long i, ret;
-	unsigned ui;
-
-	switch (request) {
-	/* when I and D space are separate, these will need to be fixed. */
-	case PTRACE_PEEKTEXT: /* read word at location addr. */ 
-	case PTRACE_PEEKDATA: {
-		unsigned long tmp;
-		int copied;
-
-		copied = access_process_vm(child, addr, &tmp, sizeof(tmp), 0);
-		ret = -EIO;
-		if (copied != sizeof(tmp))
-			break;
-		ret = put_user(tmp,(unsigned long __user *) data);
-		break;
+	if (kbuf) {
+		unsigned long *kp = kbuf;
+		while (count > 0) {
+			*kp++ = getreg(target, pos);
+			pos += sizeof(long);
+			count -= sizeof(long);
+		}
+	}
+	else {
+		unsigned long __user *up = ubuf;
+		while (count > 0) {
+			if (__put_user(getreg(target, pos), up++))
+				return -EFAULT;
+			pos += sizeof(long);
+			count -= sizeof(long);
+		}
 	}
 
-	/* read the word at location addr in the USER area. */
-	case PTRACE_PEEKUSR: {
-		unsigned long tmp;
+	return 0;
+}
 
-		ret = -EIO;
-		if ((addr & 7) ||
-		    addr > sizeof(struct user) - 7)
-			break;
+static int
+genregs_set(struct task_struct *target,
+	    const struct utrace_regset *regset,
+	    unsigned int pos, unsigned int count,
+	    const void *kbuf, const void __user *ubuf)
+{
+	int ret = 0;
 
-		switch (addr) { 
-		case 0 ... sizeof(struct user_regs_struct) - sizeof(long):
-			tmp = getreg(child, addr);
-			break;
-		case offsetof(struct user, u_debugreg[0]):
-			tmp = child->thread.debugreg0;
-			break;
-		case offsetof(struct user, u_debugreg[1]):
-			tmp = child->thread.debugreg1;
-			break;
-		case offsetof(struct user, u_debugreg[2]):
-			tmp = child->thread.debugreg2;
-			break;
-		case offsetof(struct user, u_debugreg[3]):
-			tmp = child->thread.debugreg3;
-			break;
-		case offsetof(struct user, u_debugreg[6]):
-			tmp = child->thread.debugreg6;
-			break;
-		case offsetof(struct user, u_debugreg[7]):
-			tmp = child->thread.debugreg7;
-			break;
-		default:
-			tmp = 0;
-			break;
+	if (kbuf) {
+		const unsigned long *kp = kbuf;
+		while (!ret && count > 0) {
+			ret = putreg(target, pos, *kp++);
+			pos += sizeof(long);
+			count -= sizeof(long);
 		}
-		ret = put_user(tmp,(unsigned long __user *) data);
-		break;
+	}
+	else {
+		int ret = 0;
+		const unsigned long __user *up = ubuf;
+		while (!ret && count > 0) {
+			unsigned long val;
+			ret = __get_user(val, up++);
+			if (!ret)
+				ret = putreg(target, pos, val);
+			pos += sizeof(long);
+			count -= sizeof(long);
+		}
 	}
 
-	/* when I and D space are separate, this will have to be fixed. */
-	case PTRACE_POKETEXT: /* write the word at location addr. */
-	case PTRACE_POKEDATA:
-		ret = 0;
-		if (access_process_vm(child, addr, &data, sizeof(data), 1) == sizeof(data))
-			break;
-		ret = -EIO;
-		break;
-
-	case PTRACE_POKEUSR: /* write the word at location addr in the USER area */
-	{
-		int dsize = test_tsk_thread_flag(child, TIF_IA32) ? 3 : 7;
-		ret = -EIO;
-		if ((addr & 7) ||
-		    addr > sizeof(struct user) - 7)
-			break;
-
-		switch (addr) { 
-		case 0 ... sizeof(struct user_regs_struct) - sizeof(long):
-			ret = putreg(child, addr, data);
-			break;
-		/* Disallows to set a breakpoint into the vsyscall */
-		case offsetof(struct user, u_debugreg[0]):
-			if (data >= TASK_SIZE_OF(child) - dsize) break;
-			child->thread.debugreg0 = data;
-			ret = 0;
-			break;
-		case offsetof(struct user, u_debugreg[1]):
-			if (data >= TASK_SIZE_OF(child) - dsize) break;
-			child->thread.debugreg1 = data;
-			ret = 0;
-			break;
-		case offsetof(struct user, u_debugreg[2]):
-			if (data >= TASK_SIZE_OF(child) - dsize) break;
-			child->thread.debugreg2 = data;
-			ret = 0;
-			break;
-		case offsetof(struct user, u_debugreg[3]):
-			if (data >= TASK_SIZE_OF(child) - dsize) break;
-			child->thread.debugreg3 = data;
-			ret = 0;
-			break;
-		case offsetof(struct user, u_debugreg[6]):
-				  if (data >> 32)
-				break; 
-			child->thread.debugreg6 = data;
-			ret = 0;
-			break;
-		case offsetof(struct user, u_debugreg[7]):
-			/* See arch/i386/kernel/ptrace.c for an explanation of
-			 * this awkward check.*/
-				  data &= ~DR_CONTROL_RESERVED;
-				  for(i=0; i<4; i++)
-					  if ((0x5454 >> ((data >> (16 + 4*i)) & 0xf)) & 1)
-					break;
-			if (i == 4) {
-				child->thread.debugreg7 = data;
-			  ret = 0;
-		  }
-		  break;
-		}
-		break;
-	}
-	case PTRACE_SYSCALL: /* continue and stop at next (return from) syscall */
-	case PTRACE_CONT:    /* restart after signal. */
-
-		ret = -EIO;
-		if (!valid_signal(data))
-			break;
-		if (request == PTRACE_SYSCALL)
-			set_tsk_thread_flag(child,TIF_SYSCALL_TRACE);
-		else
-			clear_tsk_thread_flag(child,TIF_SYSCALL_TRACE);
-		clear_tsk_thread_flag(child, TIF_SINGLESTEP);
-		child->exit_code = data;
-		/* make sure the single step bit is not set. */
-		clear_singlestep(child);
-		wake_up_process(child);
-		ret = 0;
-		break;
-
-#ifdef CONFIG_IA32_EMULATION
-		/* This makes only sense with 32bit programs. Allow a
-		   64bit debugger to fully examine them too. Better
-		   don't use it against 64bit processes, use
-		   PTRACE_ARCH_PRCTL instead. */
-	case PTRACE_SET_THREAD_AREA: {
-		struct user_desc __user *p;
-		int old; 
-		p = (struct user_desc __user *)data;
-		get_user(old,  &p->entry_number); 
-		put_user(addr, &p->entry_number);
-		ret = do_set_thread_area(&child->thread, p);
-		put_user(old,  &p->entry_number); 
-		break;
-	case PTRACE_GET_THREAD_AREA:
-		p = (struct user_desc __user *)data;
-		get_user(old,  &p->entry_number); 
-		put_user(addr, &p->entry_number);
-		ret = do_get_thread_area(&child->thread, p);
-		put_user(old,  &p->entry_number); 
-		break;
-	} 
-#endif
-		/* normal 64bit interface to access TLS data. 
-		   Works just like arch_prctl, except that the arguments
-		   are reversed. */
-	case PTRACE_ARCH_PRCTL: 
-		ret = do_arch_prctl(child, data, addr);
-		break;
-
-/*
- * make the child exit.  Best I can do is send it a sigkill. 
- * perhaps it should be put in the status that it wants to 
- * exit.
- */
-	case PTRACE_KILL:
-		ret = 0;
-		if (child->exit_state == EXIT_ZOMBIE)	/* already dead */
-			break;
-		clear_tsk_thread_flag(child, TIF_SINGLESTEP);
-		child->exit_code = SIGKILL;
-		/* make sure the single step bit is not set. */
-		clear_singlestep(child);
-		wake_up_process(child);
-		break;
-
-	case PTRACE_SINGLESTEP:    /* set the trap flag. */
-		ret = -EIO;
-		if (!valid_signal(data))
-			break;
-		clear_tsk_thread_flag(child,TIF_SYSCALL_TRACE);
-		set_singlestep(child);
-		child->exit_code = data;
-		/* give it a chance to run. */
-		wake_up_process(child);
-		ret = 0;
-		break;
-
-	case PTRACE_DETACH:
-		/* detach a process that was attached. */
-		ret = ptrace_detach(child, data);
-		break;
-
-	case PTRACE_GETREGS: { /* Get all gp regs from the child. */
-	  	if (!access_ok(VERIFY_WRITE, (unsigned __user *)data,
-			       sizeof(struct user_regs_struct))) {
-			ret = -EIO;
-			break;
-		}
-		ret = 0;
-		for (ui = 0; ui < sizeof(struct user_regs_struct); ui += sizeof(long)) {
-			ret |= __put_user(getreg(child, ui),(unsigned long __user *) data);
-			data += sizeof(long);
-		}
-		break;
-	}
-
-	case PTRACE_SETREGS: { /* Set all gp regs in the child. */
-		unsigned long tmp;
-	  	if (!access_ok(VERIFY_READ, (unsigned __user *)data,
-			       sizeof(struct user_regs_struct))) {
-			ret = -EIO;
-			break;
-		}
-		ret = 0;
-		for (ui = 0; ui < sizeof(struct user_regs_struct); ui += sizeof(long)) {
-			ret |= __get_user(tmp, (unsigned long __user *) data);
-			putreg(child, ui, tmp);
-			data += sizeof(long);
-		}
-		break;
-	}
-
-	case PTRACE_GETFPREGS: { /* Get the child extended FPU state. */
-		if (!access_ok(VERIFY_WRITE, (unsigned __user *)data,
-			       sizeof(struct user_i387_struct))) {
-			ret = -EIO;
-			break;
-		}
-		ret = get_fpregs((struct user_i387_struct __user *)data, child);
-		break;
-	}
-
-	case PTRACE_SETFPREGS: { /* Set the child extended FPU state. */
-		if (!access_ok(VERIFY_READ, (unsigned __user *)data,
-			       sizeof(struct user_i387_struct))) {
-			ret = -EIO;
-			break;
-		}
-		set_stopped_child_used_math(child);
-		ret = set_fpregs(child, (struct user_i387_struct __user *)data);
-		break;
-	}
-
-	default:
-		ret = ptrace_request(child, request, addr, data);
-		break;
-	}
 	return ret;
 }
 
-static void syscall_trace(struct pt_regs *regs)
+
+static int
+dbregs_active(struct task_struct *tsk, const struct utrace_regset *regset)
+{
+	if (tsk->thread.debugreg6 | tsk->thread.debugreg7)
+		return 8;
+	return 0;
+}
+
+static int
+dbregs_get(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   void *kbuf, void __user *ubuf)
+{
+	for (pos >>= 3, count >>= 3; count > 0; --count, ++pos) {
+		unsigned long val;
+
+		/*
+		 * The hardware updates the status register on a debug trap,
+		 * but do_debug (traps.c) saves it for us when that happens.
+		 * So whether the target is current or not, debugregN is good.
+		 */
+		val = 0;
+		switch (pos) {
+		case 0:	val = target->thread.debugreg0; break;
+		case 1:	val = target->thread.debugreg1; break;
+		case 2:	val = target->thread.debugreg2; break;
+		case 3:	val = target->thread.debugreg3; break;
+		case 6:	val = target->thread.debugreg6; break;
+		case 7:	val = target->thread.debugreg7; break;
+		}
+
+		if (kbuf) {
+			*(unsigned long *) kbuf = val;
+			kbuf += sizeof(unsigned long);
+		}
+		else {
+			if (__put_user(val, (unsigned long __user *) ubuf))
+				return -EFAULT;
+			ubuf += sizeof(unsigned long);
+		}
+	}
+
+	return 0;
+}
+
+static int
+dbregs_set(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   const void *kbuf, const void __user *ubuf)
 {
 
-#if 0
-	printk("trace %s rip %lx rsp %lx rax %d origrax %d caller %lx tiflags %x ptrace %x\n",
-	       current->comm,
-	       regs->rip, regs->rsp, regs->rax, regs->orig_rax, __builtin_return_address(0),
-	       current_thread_info()->flags, current->ptrace); 
-#endif
+	unsigned long maxaddr = TASK_SIZE_OF(target);
+	maxaddr -= test_tsk_thread_flag(target, TIF_IA32) ? 3 : 7;
 
-	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-				? 0x80 : 0));
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
+	for (pos >>= 3, count >>= 3; count > 0; --count, ++pos) {
+		unsigned long val;
+		unsigned int i;
+
+		if (kbuf) {
+			val = *(const unsigned long *) kbuf;
+			kbuf += sizeof(unsigned long);
+		}
+		else {
+			if (__get_user(val, (unsigned long __user *) ubuf))
+				return -EFAULT;
+			ubuf += sizeof(unsigned long);
+		}
+
+		switch (pos) {
+#define SET_DBREG(n)							\
+			target->thread.debugreg##n = val;		\
+			if (target == current)				\
+				set_debugreg(target->thread.debugreg##n, n)
+
+		case 0:
+			if (val >= maxaddr)
+				return -EIO;
+			SET_DBREG(0);
+			break;
+		case 1:
+			if (val >= maxaddr)
+				return -EIO;
+			SET_DBREG(1);
+			break;
+		case 2:
+			if (val >= maxaddr)
+				return -EIO;
+			SET_DBREG(2);
+			break;
+		case 3:
+			if (val >= maxaddr)
+				return -EIO;
+			SET_DBREG(3);
+			break;
+		case 4:
+		case 5:
+			if (val != 0)
+				return -EIO;
+			break;
+		case 6:
+			if (val >> 32)
+				return -EIO;
+			SET_DBREG(6);
+			break;
+		case 7:
+			/*
+			 * See arch/i386/kernel/ptrace.c for an explanation
+			 * of this awkward check.
+			 */
+			val &= ~DR_CONTROL_RESERVED;
+			for (i = 0; i < 4; i++)
+				if ((0x5554 >> ((val >> (16 + 4*i)) & 0xf))
+				    & 1)
+					return -EIO;
+			if (val)
+			  	set_tsk_thread_flag(target, TIF_DEBUG);
+			else
+			  	clear_tsk_thread_flag(target, TIF_DEBUG);
+			SET_DBREG(7);
+			break;
+#undef	SET_DBREG
+		}
 	}
+
+	return 0;
 }
+
+
+static int
+fpregs_active(struct task_struct *target, const struct utrace_regset *regset)
+{
+	return tsk_used_math(target) ? regset->n : 0;
+}
+
+static int
+fpregs_get(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   void *kbuf, void __user *ubuf)
+{
+	if (tsk_used_math(target)) {
+		if (target == current)
+			unlazy_fpu(target);
+	} 
+	else
+		init_fpu(target);
+
+	return utrace_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				     &target->thread.i387.fxsave, 0, -1);
+}
+
+static int
+fpregs_set(struct task_struct *target,
+	   const struct utrace_regset *regset,
+	   unsigned int pos, unsigned int count,
+	   const void *kbuf, const void __user *ubuf)
+{
+	int ret;
+
+	if (tsk_used_math(target)) {
+		if (target == current)
+			unlazy_fpu(target);
+	}
+	else if (pos == 0 && count == sizeof(struct user_i387_struct))
+		set_stopped_child_used_math(target);
+	else
+		init_fpu(target);
+
+	ret = utrace_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				   &target->thread.i387.fxsave, 0, -1);
+
+	target->thread.i387.fxsave.mxcsr &= mxcsr_feature_mask;
+
+	return ret;
+}
+
+static int
+fsgs_active(struct task_struct *tsk, const struct utrace_regset *regset)
+{
+	if (tsk->thread.gsindex == GS_TLS_SEL || tsk->thread.gs)
+		return 2;
+	if (tsk->thread.fsindex == FS_TLS_SEL || tsk->thread.fs)
+		return 1;
+	return 0;
+}
+
+static inline u32 read_32bit_tls(struct task_struct *t, int tls)
+{
+	struct desc_struct *desc = (void *)t->thread.tls_array;
+	desc += tls;
+	return desc->base0 |
+		(((u32)desc->base1) << 16) |
+		(((u32)desc->base2) << 24);
+}
+
+static int
+fsgs_get(struct task_struct *target,
+	 const struct utrace_regset *regset,
+	 unsigned int pos, unsigned int count,
+	 void *kbuf, void __user *ubuf)
+{
+	const unsigned long *kaddr = kbuf;
+	const unsigned long __user *uaddr = ubuf;
+	unsigned long addr;
+
+	/*
+	 * XXX why the MSR reads here?
+	 * Can anything change the MSRs without changing thread.fs first?
+	 */
+	if (pos == 0) {		/* FS */
+		if (kaddr)
+			addr = *kaddr++;
+		else if (__get_user(addr, uaddr++))
+			return -EFAULT;
+		if (target->thread.fsindex == FS_TLS_SEL)
+			addr = read_32bit_tls(target, FS_TLS);
+		else if (target == current) {
+			rdmsrl(MSR_FS_BASE, addr);
+		}
+		else
+			addr = target->thread.fs;
+	}
+
+	if (count > sizeof(unsigned long)) { /* GS */
+		if (kaddr)
+			addr = *kaddr;
+		else if (__get_user(addr, uaddr))
+			return -EFAULT;
+		if (target->thread.fsindex == GS_TLS_SEL)
+			addr = read_32bit_tls(target, GS_TLS);
+		else if (target == current) {
+			rdmsrl(MSR_GS_BASE, addr);
+		}
+		else
+			addr = target->thread.fs;
+	}
+
+	return 0;
+}
+
+static int
+fsgs_set(struct task_struct *target,
+	 const struct utrace_regset *regset,
+	 unsigned int pos, unsigned int count,
+	 const void *kbuf, const void __user *ubuf)
+{
+	const unsigned long *kaddr = kbuf;
+	const unsigned long __user *uaddr = ubuf;
+	unsigned long addr;
+	int ret = 0;
+
+	if (pos == 0) {		/* FS */
+		if (kaddr)
+			addr = *kaddr++;
+		else if (__get_user(addr, uaddr++))
+			return -EFAULT;
+		ret = do_arch_prctl(target, ARCH_SET_FS, addr);
+	}
+
+	if (!ret && count > sizeof(unsigned long)) { /* GS */
+		if (kaddr)
+			addr = *kaddr;
+		else if (__get_user(addr, uaddr))
+			return -EFAULT;
+		ret = do_arch_prctl(target, ARCH_SET_GS, addr);
+	}
+
+	return ret;
+}
+
+
+/*
+ * These are our native regset flavors.
+ * XXX ioperm? vm86?
+ */
+static const struct utrace_regset native_regsets[] = {
+	{
+		.n = sizeof(struct user_regs_struct)/8, .size = 8, .align = 8,
+		.get = genregs_get, .set = genregs_set
+	},
+	{
+		.n = sizeof(struct user_i387_struct) / sizeof(long),
+		.size = sizeof(long), .align = sizeof(long),
+		.active = fpregs_active,
+		.get = fpregs_get, .set = fpregs_set
+	},
+	{
+		.n = 2, .size = sizeof(long), .align = sizeof(long),
+		.active = fsgs_active,
+		.get = fsgs_get, .set = fsgs_set
+	},
+	{
+		.n = 8, .size = sizeof(long), .align = sizeof(long),
+		.active = dbregs_active,
+		.get = dbregs_get, .set = dbregs_set
+	},
+};
+
+const struct utrace_regset_view utrace_x86_64_native = {
+	.name = "x86-64", .e_machine = EM_X86_64,
+	.regsets = native_regsets, .n = ARRAY_SIZE(native_regsets)
+};
+EXPORT_SYMBOL_GPL(utrace_x86_64_native);
+
+
+#ifdef CONFIG_PTRACE
+static const struct ptrace_layout_segment x86_64_uarea[] = {
+	{0, sizeof(struct user_regs_struct), 0, 0},
+	{sizeof(struct user_regs_struct),
+	 offsetof(struct user, u_debugreg[0]), -1, 0},
+	{offsetof(struct user, u_debugreg[0]),
+	 offsetof(struct user, u_debugreg[8]), 3, 0},
+	{0, 0, -1, 0}
+};
+
+int arch_ptrace(long *req, struct task_struct *child,
+		struct utrace_attached_engine *engine,
+		unsigned long addr, unsigned long data, long *val)
+{
+	switch (*req) {
+	case PTRACE_PEEKUSR:
+		return ptrace_peekusr(child, engine, x86_64_uarea, addr, data);
+	case PTRACE_POKEUSR:
+		return ptrace_pokeusr(child, engine, x86_64_uarea, addr, data);
+	case PTRACE_GETREGS:
+		return ptrace_whole_regset(child, engine, data, 0, 0);
+	case PTRACE_SETREGS:
+		return ptrace_whole_regset(child, engine, data, 0, 1);
+	case PTRACE_GETFPREGS:
+		return ptrace_whole_regset(child, engine, data, 1, 0);
+	case PTRACE_SETFPREGS:
+		return ptrace_whole_regset(child, engine, data, 1, 1);
+#ifdef CONFIG_IA32_EMULATION
+	case PTRACE_GET_THREAD_AREA:
+	case PTRACE_SET_THREAD_AREA:
+		return ptrace_onereg_access(child, engine,
+					    &utrace_ia32_view, 3,
+					    addr, (void __user *)data,
+					    *req == PTRACE_SET_THREAD_AREA);
+#endif
+		/* normal 64bit interface to access TLS data.
+		   Works just like arch_prctl, except that the arguments
+		   are reversed. */
+	case PTRACE_ARCH_PRCTL:
+		return do_arch_prctl(child, data, addr);
+	}
+	return -ENOSYS;
+}
+#endif	/* CONFIG_PTRACE */
+
 
 asmlinkage void syscall_trace_enter(struct pt_regs *regs)
 {
 	/* do the secure computing check first */
 	secure_computing(regs->orig_rax);
 
-	if (test_thread_flag(TIF_SYSCALL_TRACE)
-	    && (current->ptrace & PT_PTRACED))
-		syscall_trace(regs);
+	if (test_thread_flag(TIF_SYSCALL_TRACE))
+		tracehook_report_syscall(regs, 0);
 
 	if (unlikely(current->audit_context)) {
 		if (test_thread_flag(TIF_IA32)) {
-			audit_syscall_entry(current, AUDIT_ARCH_I386,
+			audit_syscall_entry(AUDIT_ARCH_I386,
 					    regs->orig_rax,
 					    regs->rbx, regs->rcx,
 					    regs->rdx, regs->rsi);
 		} else {
-			audit_syscall_entry(current, AUDIT_ARCH_X86_64,
+			audit_syscall_entry(AUDIT_ARCH_X86_64,
 					    regs->orig_rax,
 					    regs->rdi, regs->rsi,
 					    regs->rdx, regs->r10);
@@ -621,10 +752,13 @@ asmlinkage void syscall_trace_enter(struct pt_regs *regs)
 asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 {
 	if (unlikely(current->audit_context))
-		audit_syscall_exit(current, AUDITSC_RESULT(regs->rax), regs->rax);
+		audit_syscall_exit(AUDITSC_RESULT(regs->rax), regs->rax);
 
-	if ((test_thread_flag(TIF_SYSCALL_TRACE)
-	     || test_thread_flag(TIF_SINGLESTEP))
-	    && (current->ptrace & PT_PTRACED))
-		syscall_trace(regs);
+	if (test_thread_flag(TIF_SYSCALL_TRACE))
+		tracehook_report_syscall(regs, 1);
+
+	if (test_thread_flag(TIF_SINGLESTEP)) {
+		force_sig(SIGTRAP, current); /* XXX */
+		tracehook_report_syscall_step(regs);
+	}
 }

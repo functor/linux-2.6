@@ -25,7 +25,6 @@
  +---------------------------------------------------------------------------*/
 
 #include <linux/signal.h>
-#include <linux/ptrace.h>
 
 #include <asm/uaccess.h>
 #include <asm/desc.h>
@@ -211,9 +210,8 @@ asmlinkage void math_emulate(long arg)
       if ( code_limit < code_base ) code_limit = 0xffffffff;
     }
 
-  FPU_lookahead = 1;
-  if (current->ptrace & PT_PTRACED)
-    FPU_lookahead = 0;
+  /* Don't run ahead if single-stepping.  */
+  FPU_lookahead = (FPU_EFLAGS & X86_EFLAGS_TF) == 0;
 
   if ( !valid_prefix(&byte1, (u_char __user **)&FPU_EIP,
 		     &addr_modes.override) )
@@ -742,7 +740,8 @@ int save_i387_soft(void *s387, struct _fpstate __user * buf)
   S387->fcs &= ~0xf8000000;
   S387->fos |= 0xffff0000;
 #endif /* PECULIAR_486 */
-  __copy_to_user(d, &S387->cwd, 7*4);
+  if (__copy_to_user(d, &S387->cwd, 7*4))
+    return -1;
   RE_ENTRANT_CHECK_ON;
 
   d += 7*4;

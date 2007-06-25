@@ -5,8 +5,6 @@
  *  Copyright (C) 2000 Pavel Machek <pavel@suse.cz>
  *  Copyright (C) 2000 Karsten Keil <kkeil@suse.de>
  *  Copyright (C) 2001,2002 Andi Kleen <ak@suse.de>
- *
- *  $Id: head.S,v 1.49 2002/03/19 17:39:25 ak Exp $
  */
 
 
@@ -26,6 +24,7 @@
  */
 
 	.text
+	.section .bootstrap.text
 	.code32
 	.globl startup_32
 /* %bx:	 1 if coming from smp trampoline on secondary cpu */ 
@@ -186,13 +185,18 @@ startup_64:
 	
 	/* Finally jump to run C code and to be on real kernel address
 	 * Since we are running on identity-mapped space we have to jump
-	 * to the full 64bit address , this is only possible as indirect
-	 * jump
+	 * to the full 64bit address, this is only possible as indirect
+	 * jump.  In addition we need to ensure %cs is set so we make this
+	 * a far return.
 	 */
 	movq	initial_code(%rip),%rax
-	jmp	*%rax
+	pushq	$0		# fake return address to stop unwinder
+	pushq	$__KERNEL_CS	# set correct cs
+	pushq	%rax		# target address in negative space
+	lretq
 
-	/* SMP bootup changes these two */	
+	/* SMP bootup changes these two */
+	.align	8
 	.globl	initial_code
 initial_code:
 	.quad	x86_64_start_kernel
@@ -237,7 +241,7 @@ ENTRY(no_long_mode)
 .org 0xf00
 	.globl pGDT32
 pGDT32:
-	.word	gdt_end-cpu_gdt_table
+	.word	gdt_end-cpu_gdt_table-1
 	.long	cpu_gdt_table-__START_KERNEL_map
 
 .org 0xf10	
@@ -293,8 +297,6 @@ NEXT_PAGE(level2_kernel_pgt)
 	/* Module mapping starts here */
 	.fill	492,8,0
 
-NEXT_PAGE(empty_zero_page)
-
 NEXT_PAGE(level3_physmem_pgt)
 	.quad	phys_level2_kernel_pgt | 0x007	/* so that __va works even before pagetable_init */
 	.fill	511,8,0
@@ -337,7 +339,7 @@ ENTRY(boot_level4_pgt)
 	.align 16
 	.globl cpu_gdt_descr
 cpu_gdt_descr:
-	.word	gdt_end-cpu_gdt_table
+	.word	gdt_end-cpu_gdt_table-1
 gdt:
 	.quad	cpu_gdt_table
 #ifdef CONFIG_SMP
@@ -352,7 +354,8 @@ gdt:
  * Also sysret mandates a special GDT layout 
  */
 		 		
-.align PAGE_SIZE
+	.section .data.page_aligned, "aw"
+	.align PAGE_SIZE
 
 /* The TLS descriptors are currently at a different place compared to i386.
    Hopefully nobody expects them at a fixed place (Wine?) */
@@ -369,7 +372,7 @@ ENTRY(cpu_gdt_table)
 	.quad	0,0			/* TSS */
 	.quad	0,0			/* LDT */
 	.quad   0,0,0			/* three TLS descriptors */ 
-	.quad	0			/* unused */
+	.quad	0x0000f40000000000	/* node/CPU stored in limit */
 gdt_end:	
 	/* asm/segment.h:GDT_ENTRIES must match this */	
 	/* This should be a multiple of the cache line size */
@@ -378,9 +381,12 @@ gdt_end:
 	/* zero the remaining page */
 	.fill PAGE_SIZE / 8 - GDT_ENTRIES,8,0
 
-ENTRY(idt_table)	
-	.rept   256
-	.quad   0
-	.quad 	0
-	.endr
+	.section .bss, "aw", @nobits
+	.align L1_CACHE_BYTES
+ENTRY(idt_table)
+	.skip 256 * 16
 
+	.section .bss.page_aligned, "aw", @nobits
+	.align PAGE_SIZE
+ENTRY(empty_zero_page)
+	.skip PAGE_SIZE

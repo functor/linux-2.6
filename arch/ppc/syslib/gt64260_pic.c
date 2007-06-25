@@ -1,6 +1,4 @@
 /*
- * arch/ppc/syslib/gt64260_pic.c
- *
  * Interrupt controller support for Galileo's GT64260.
  *
  * Author: Chris Zankel <source@mvista.com>
@@ -100,7 +98,7 @@ gt64260_init_irq(void)
 
 	/* use the gt64260 for all (possible) interrupt sources */
 	for (i = gt64260_irq_base; i < (gt64260_irq_base + 96); i++)
-		irq_desc[i].handler = &gt64260_pic;
+		irq_desc[i].chip = &gt64260_pic;
 
 	if (ppc_md.progress)
 		ppc_md.progress("gt64260_init_irq: exit", 0x0);
@@ -112,9 +110,6 @@ gt64260_init_irq(void)
  *  This function returns the lowest interrupt number of all interrupts that
  *  are currently asserted.
  *
- * Input Variable(s):
- *  struct pt_regs*	not used
- *
  * Output Variable(s):
  *  None.
  *
@@ -122,7 +117,7 @@ gt64260_init_irq(void)
  *  int	<interrupt number> or -2 (bogus interrupt)
  */
 int
-gt64260_get_irq(struct pt_regs *regs)
+gt64260_get_irq(void)
 {
 	int irq;
 	int irq_gpp;
@@ -231,7 +226,7 @@ gt64260_mask_irq(unsigned int irq)
 }
 
 static irqreturn_t
-gt64260_cpu_error_int_handler(int irq, void *dev_id, struct pt_regs *regs)
+gt64260_cpu_error_int_handler(int irq, void *dev_id)
 {
 	printk(KERN_ERR "gt64260_cpu_error_int_handler: %s 0x%08x\n",
 		"Error on CPU interface - Cause regiser",
@@ -252,7 +247,7 @@ gt64260_cpu_error_int_handler(int irq, void *dev_id, struct pt_regs *regs)
 }
 
 static irqreturn_t
-gt64260_pci_error_int_handler(int irq, void *dev_id, struct pt_regs *regs)
+gt64260_pci_error_int_handler(int irq, void *dev_id)
 {
 	u32 val;
 	unsigned int pci_bus = (unsigned int)dev_id;
@@ -299,7 +294,7 @@ gt64260_register_hdlrs(void)
 
 	/* Register CPU interface error interrupt handler */
 	if ((rc = request_irq(MV64x60_IRQ_CPU_ERR,
-		gt64260_cpu_error_int_handler, SA_INTERRUPT, CPU_INTR_STR, 0)))
+		gt64260_cpu_error_int_handler, IRQF_DISABLED, CPU_INTR_STR, 0)))
 		printk(KERN_WARNING "Can't register cpu error handler: %d", rc);
 
 	mv64x60_write(&bh, MV64x60_CPU_ERR_MASK, 0);
@@ -307,7 +302,7 @@ gt64260_register_hdlrs(void)
 
 	/* Register PCI 0 error interrupt handler */
 	if ((rc = request_irq(MV64360_IRQ_PCI0, gt64260_pci_error_int_handler,
-		    SA_INTERRUPT, PCI0_INTR_STR, (void *)0)))
+		    IRQF_DISABLED, PCI0_INTR_STR, (void *)0)))
 		printk(KERN_WARNING "Can't register pci 0 error handler: %d",
 			rc);
 
@@ -316,7 +311,7 @@ gt64260_register_hdlrs(void)
 
 	/* Register PCI 1 error interrupt handler */
 	if ((rc = request_irq(MV64360_IRQ_PCI1, gt64260_pci_error_int_handler,
-		    SA_INTERRUPT, PCI1_INTR_STR, (void *)1)))
+		    IRQF_DISABLED, PCI1_INTR_STR, (void *)1)))
 		printk(KERN_WARNING "Can't register pci 1 error handler: %d",
 			rc);
 

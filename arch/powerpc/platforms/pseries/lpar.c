@@ -21,7 +21,6 @@
 
 #undef DEBUG_LOW
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
 #include <linux/console.h>
@@ -49,11 +48,10 @@
 #define DBG_LOW(fmt...) do { } while(0)
 #endif
 
-/* in pSeries_hvCall.S */
+/* in hvCall.S */
 EXPORT_SYMBOL(plpar_hcall);
-EXPORT_SYMBOL(plpar_hcall_4out);
+EXPORT_SYMBOL(plpar_hcall9);
 EXPORT_SYMBOL(plpar_hcall_norets);
-EXPORT_SYMBOL(plpar_hcall_8arg_2ret);
 
 extern void pSeries_find_serial_port(void);
 
@@ -72,7 +70,7 @@ static void udbg_hvsi_putc(char c)
 
 	do {
 		rc = plpar_put_term_char(vtermno, sizeof(packet), packet);
-	} while (rc == H_Busy);
+	} while (rc == H_BUSY);
 }
 
 static long hvsi_udbg_buf_len;
@@ -85,7 +83,7 @@ static int udbg_hvsi_getc_poll(void)
 
 	if (hvsi_udbg_buf_len == 0) {
 		rc = plpar_get_term_char(vtermno, &hvsi_udbg_buf_len, hvsi_udbg_buf);
-		if (rc != H_Success || hvsi_udbg_buf[0] != 0xff) {
+		if (rc != H_SUCCESS || hvsi_udbg_buf[0] != 0xff) {
 			/* bad read or non-data packet */
 			hvsi_udbg_buf_len = 0;
 		} else {
@@ -139,7 +137,7 @@ static void udbg_putcLP(char c)
 	buf[0] = c;
 	do {
 		rc = plpar_put_term_char(vtermno, 1, buf);
-	} while(rc == H_Busy);
+	} while(rc == H_BUSY);
 }
 
 /* Buffered chars getc */
@@ -158,7 +156,7 @@ static int udbg_getc_pollLP(void)
 		/* get some more chars. */
 		inbuflen = 0;
 		rc = plpar_get_term_char(vtermno, &inbuflen, buf);
-		if (rc != H_Success)
+		if (rc != H_SUCCESS)
 			inbuflen = 0;	/* otherwise inbuflen is garbage */
 	}
 	if (inbuflen <= 0 || inbuflen > 16) {
@@ -204,20 +202,20 @@ void __init udbg_init_debug_lpar(void)
 void __init find_udbg_vterm(void)
 {
 	struct device_node *stdout_node;
-	u32 *termno;
-	char *name;
+	const u32 *termno;
+	const char *name;
 	int add_console;
 
 	/* find the boot console from /chosen/stdout */
 	if (!of_chosen)
 		return;
-	name = (char *)get_property(of_chosen, "linux,stdout-path", NULL);
+	name = get_property(of_chosen, "linux,stdout-path", NULL);
 	if (name == NULL)
 		return;
 	stdout_node = of_find_node_by_path(name);
 	if (!stdout_node)
 		return;
-	name = (char *)get_property(stdout_node, "name", NULL);
+	name = get_property(stdout_node, "name", NULL);
 	if (!name) {
 		printk(KERN_WARNING "stdout node missing 'name' property!\n");
 		goto out;
@@ -228,7 +226,7 @@ void __init find_udbg_vterm(void)
 	/* Check if it's a virtual terminal */
 	if (strncmp(name, "vty", 3) != 0)
 		goto out;
-	termno = (u32 *)get_property(stdout_node, "reg", NULL);
+	termno = get_property(stdout_node, "reg", NULL);
 	if (termno == NULL)
 		goto out;
 	vtermno = termno[0];
@@ -254,21 +252,37 @@ out:
 void vpa_init(int cpu)
 {
 	int hwcpu = get_hard_smp_processor_id(cpu);
-	unsigned long vpa = __pa(&lppaca[cpu]);
+	unsigned long addr;
 	long ret;
 
 	if (cpu_has_feature(CPU_FTR_ALTIVEC))
 		lppaca[cpu].vmxregs_in_use = 1;
 
-	ret = register_vpa(hwcpu, vpa);
+	addr = __pa(&lppaca[cpu]);
+	ret = register_vpa(hwcpu, addr);
 
-	if (ret)
+	if (ret) {
 		printk(KERN_ERR "WARNING: vpa_init: VPA registration for "
 				"cpu %d (hw %d) of area %lx returns %ld\n",
-				cpu, hwcpu, vpa, ret);
+				cpu, hwcpu, addr, ret);
+		return;
+	}
+	/*
+	 * PAPR says this feature is SLB-Buffer but firmware never
+	 * reports that.  All SPLPAR support SLB shadow buffer.
+	 */
+	addr = __pa(&slb_shadow[cpu]);
+	if (firmware_has_feature(FW_FEATURE_SPLPAR)) {
+		ret = register_slb_shadow(hwcpu, addr);
+		if (ret)
+			printk(KERN_ERR
+			       "WARNING: vpa_init: SLB shadow buffer "
+			       "registration for cpu %d (hw %d) of area %lx "
+			       "returns %ld\n", cpu, hwcpu, addr, ret);
+	}
 }
 
-long pSeries_lpar_hpte_insert(unsigned long hpte_group,
+static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
  			      unsigned long va, unsigned long pa,
  			      unsigned long rflags, unsigned long vflags,
  			      int psize)
@@ -277,7 +291,6 @@ long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	unsigned long flags;
 	unsigned long slot;
 	unsigned long hpte_v, hpte_r;
-	unsigned long dummy0, dummy1;
 
 	if (!(vflags & HPTE_V_BOLTED))
 		DBG_LOW("hpte_insert(group=%lx, va=%016lx, pa=%016lx, "
@@ -302,9 +315,8 @@ long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	if (rflags & (_PAGE_GUARDED|_PAGE_NO_CACHE))
 		hpte_r &= ~_PAGE_COHERENT;
 
-	lpar_rc = plpar_hcall(H_ENTER, flags, hpte_group, hpte_v,
-			      hpte_r, &slot, &dummy0, &dummy1);
-	if (unlikely(lpar_rc == H_PTEG_Full)) {
+	lpar_rc = plpar_pte_enter(flags, hpte_group, hpte_v, hpte_r, &slot);
+	if (unlikely(lpar_rc == H_PTEG_FULL)) {
 		if (!(vflags & HPTE_V_BOLTED))
 			DBG_LOW(" full\n");
 		return -1;
@@ -315,7 +327,7 @@ long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	 * will fail. However we must catch the failure in hash_page
 	 * or we will loop forever, so return -2 in this case.
 	 */
-	if (unlikely(lpar_rc != H_Success)) {
+	if (unlikely(lpar_rc != H_SUCCESS)) {
 		if (!(vflags & HPTE_V_BOLTED))
 			DBG_LOW(" lpar err %d\n", lpar_rc);
 		return -2;
@@ -346,9 +358,9 @@ static long pSeries_lpar_hpte_remove(unsigned long hpte_group)
 		/* don't remove a bolted entry */
 		lpar_rc = plpar_pte_remove(H_ANDCOND, hpte_group + slot_offset,
 					   (0x1UL << 4), &dummy1, &dummy2);
-		if (lpar_rc == H_Success)
+		if (lpar_rc == H_SUCCESS)
 			return i;
-		BUG_ON(lpar_rc != H_Not_Found);
+		BUG_ON(lpar_rc != H_NOT_FOUND);
 
 		slot_offset++;
 		slot_offset &= 0x7;
@@ -391,14 +403,14 @@ static long pSeries_lpar_hpte_updatepp(unsigned long slot,
 
 	lpar_rc = plpar_pte_protect(flags, slot, want_v & HPTE_V_AVPN);
 
-	if (lpar_rc == H_Not_Found) {
+	if (lpar_rc == H_NOT_FOUND) {
 		DBG_LOW("not found !\n");
 		return -1;
 	}
 
 	DBG_LOW("ok\n");
 
-	BUG_ON(lpar_rc != H_Success);
+	BUG_ON(lpar_rc != H_SUCCESS);
 
 	return 0;
 }
@@ -417,7 +429,7 @@ static unsigned long pSeries_lpar_hpte_getword0(unsigned long slot)
 
 	lpar_rc = plpar_pte_read(flags, slot, &dword0, &dummy_word1);
 
-	BUG_ON(lpar_rc != H_Success);
+	BUG_ON(lpar_rc != H_SUCCESS);
 
 	return dword0;
 }
@@ -468,7 +480,7 @@ static void pSeries_lpar_hpte_updateboltedpp(unsigned long newpp,
 	flags = newpp & 7;
 	lpar_rc = plpar_pte_protect(flags, slot, 0);
 
-	BUG_ON(lpar_rc != H_Success);
+	BUG_ON(lpar_rc != H_SUCCESS);
 }
 
 static void pSeries_lpar_hpte_invalidate(unsigned long slot, unsigned long va,
@@ -484,17 +496,17 @@ static void pSeries_lpar_hpte_invalidate(unsigned long slot, unsigned long va,
 	want_v = hpte_encode_v(va, psize);
 	lpar_rc = plpar_pte_remove(H_AVPN, slot, want_v & HPTE_V_AVPN,
 				   &dummy1, &dummy2);
-	if (lpar_rc == H_Not_Found)
+	if (lpar_rc == H_NOT_FOUND)
 		return;
 
-	BUG_ON(lpar_rc != H_Success);
+	BUG_ON(lpar_rc != H_SUCCESS);
 }
 
 /*
  * Take a spinlock around flushes to avoid bouncing the hypervisor tlbie
  * lock.
  */
-void pSeries_lpar_flush_hash_range(unsigned long number, int local)
+static void pSeries_lpar_flush_hash_range(unsigned long number, int local)
 {
 	int i;
 	unsigned long flags = 0;
@@ -512,7 +524,7 @@ void pSeries_lpar_flush_hash_range(unsigned long number, int local)
 		spin_unlock_irqrestore(&pSeries_lpar_tlbie_lock, flags);
 }
 
-void hpte_init_lpar(void)
+void __init hpte_init_lpar(void)
 {
 	ppc_md.hpte_invalidate	= pSeries_lpar_hpte_invalidate;
 	ppc_md.hpte_updatepp	= pSeries_lpar_hpte_updatepp;
@@ -521,6 +533,4 @@ void hpte_init_lpar(void)
 	ppc_md.hpte_remove	= pSeries_lpar_hpte_remove;
 	ppc_md.flush_hash_range	= pSeries_lpar_flush_hash_range;
 	ppc_md.hpte_clear_all   = pSeries_lpar_hptab_clear;
-
-	htab_finish_init();
 }

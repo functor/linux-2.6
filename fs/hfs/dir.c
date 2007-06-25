@@ -53,7 +53,7 @@ done:
  */
 static int hfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
-	struct inode *inode = filp->f_dentry->d_inode;
+	struct inode *inode = filp->f_path.dentry->d_inode;
 	struct super_block *sb = inode->i_sb;
 	int len, err;
 	char strbuf[HFS_MAX_NAMELEN];
@@ -246,7 +246,7 @@ static int hfs_unlink(struct inode *dir, struct dentry *dentry)
 	if (res)
 		return res;
 
-	inode->i_nlink--;
+	drop_nlink(inode);
 	hfs_delete_inode(inode);
 	inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
@@ -273,7 +273,7 @@ static int hfs_rmdir(struct inode *dir, struct dentry *dentry)
 	res = hfs_cat_delete(inode->i_ino, dir, &dentry->d_name);
 	if (res)
 		return res;
-	inode->i_nlink = 0;
+	clear_nlink(inode);
 	inode->i_ctime = CURRENT_TIME_SEC;
 	hfs_delete_inode(inode);
 	mark_inode_dirty(inode);
@@ -313,7 +313,7 @@ static int hfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	return res;
 }
 
-struct file_operations hfs_dir_operations = {
+const struct file_operations hfs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= hfs_readdir,
 	.llseek		= generic_file_llseek,

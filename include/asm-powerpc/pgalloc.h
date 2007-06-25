@@ -11,18 +11,25 @@
 #include <linux/cpumask.h>
 #include <linux/percpu.h>
 
-extern kmem_cache_t *pgtable_cache[];
+extern struct kmem_cache *pgtable_cache[];
 
 #ifdef CONFIG_PPC_64K_PAGES
 #define PTE_CACHE_NUM	0
 #define PMD_CACHE_NUM	1
 #define PGD_CACHE_NUM	2
+#define HUGEPTE_CACHE_NUM 3
 #else
 #define PTE_CACHE_NUM	0
 #define PMD_CACHE_NUM	1
 #define PUD_CACHE_NUM	1
 #define PGD_CACHE_NUM	0
+#define HUGEPTE_CACHE_NUM 2
 #endif
+
+/* Dummy functions since we don't support execshield on ppc */
+#define arch_add_exec_range(mm, limit) do { ; } while (0)
+#define arch_flush_exec_range(mm)      do { ; } while (0)
+#define arch_remove_exec_range(mm, limit) do { ; } while (0)
 
 /*
  * This program is free software; you can redistribute it and/or
@@ -115,7 +122,7 @@ static inline void pte_free(struct page *ptepage)
 	pte_free_kernel(page_address(ptepage));
 }
 
-#define PGF_CACHENUM_MASK	0xf
+#define PGF_CACHENUM_MASK	0x3
 
 typedef struct pgtable_free {
 	unsigned long val;

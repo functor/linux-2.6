@@ -1,7 +1,6 @@
 #ifndef __x8664_PCI_H
 #define __x8664_PCI_H
 
-#include <linux/config.h>
 #include <asm/io.h>
 
 #ifdef __KERNEL__
@@ -40,8 +39,8 @@ int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq);
 #include <asm/scatterlist.h>
 #include <linux/string.h>
 #include <asm/page.h>
-#include <linux/dma-mapping.h> /* for have_iommu */
 
+extern void pci_iommu_alloc(void);
 extern int iommu_setup(char *opt);
 
 /* The PCI address space does equal the physical memory
@@ -53,7 +52,7 @@ extern int iommu_setup(char *opt);
  */
 #define PCI_DMA_BUS_IS_PHYS (dma_ops->is_phys)
 
-#ifdef CONFIG_GART_IOMMU
+#if defined(CONFIG_IOMMU) || defined(CONFIG_CALGARY_IOMMU)
 
 /*
  * x86-64 always supports DAC, but sometimes it is useful to force
@@ -62,6 +61,23 @@ extern int iommu_setup(char *opt);
  */
 extern int iommu_sac_force;
 #define pci_dac_dma_supported(pci_dev, mask)	(!iommu_sac_force)
+
+#define DECLARE_PCI_UNMAP_ADDR(ADDR_NAME)	\
+	dma_addr_t ADDR_NAME;
+#define DECLARE_PCI_UNMAP_LEN(LEN_NAME)		\
+	__u32 LEN_NAME;
+#define pci_unmap_addr(PTR, ADDR_NAME)			\
+	((PTR)->ADDR_NAME)
+#define pci_unmap_addr_set(PTR, ADDR_NAME, VAL)		\
+	(((PTR)->ADDR_NAME) = (VAL))
+#define pci_unmap_len(PTR, LEN_NAME)			\
+	((PTR)->LEN_NAME)
+#define pci_unmap_len_set(PTR, LEN_NAME, VAL)		\
+	(((PTR)->LEN_NAME) = (VAL))
+
+#elif defined(CONFIG_SWIOTLB)
+
+#define pci_dac_dma_supported(pci_dev, mask)    1
 
 #define DECLARE_PCI_UNMAP_ADDR(ADDR_NAME)	\
 	dma_addr_t ADDR_NAME;
@@ -145,6 +161,15 @@ static inline void pcibios_add_platform_entries(struct pci_dev *dev)
 /* generic pci stuff */
 #ifdef CONFIG_PCI
 #include <asm-generic/pci.h>
+#endif
+
+#ifdef CONFIG_XEN
+/* On Xen we have to scan all functions since Xen hides bridges from
+ * us.  If a bridge is at fn=0 and that slot has a multifunction
+ * device, we won't find the additional devices without scanning all
+ * functions. */
+#undef pcibios_scan_all_fns
+#define pcibios_scan_all_fns(a, b)	1
 #endif
 
 #endif /* __x8664_PCI_H */

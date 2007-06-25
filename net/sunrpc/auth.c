@@ -13,7 +13,7 @@
 #include <linux/errno.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/spinlock.h>
-#include <linux/vserver/xid.h>
+#include <linux/vs_tag.h>
 
 #ifdef RPC_DEBUG
 # define RPCDBG_FACILITY	RPCDBG_AUTH
@@ -65,14 +65,26 @@ rpcauth_create(rpc_authflavor_t pseudoflavor, struct rpc_clnt *clnt)
 	struct rpc_authops	*ops;
 	u32			flavor = pseudoflavor_to_flavor(pseudoflavor);
 
-	if (flavor >= RPC_AUTH_MAXFLAVOR || !(ops = auth_flavors[flavor]))
-		return ERR_PTR(-EINVAL);
+	auth = ERR_PTR(-EINVAL);
+	if (flavor >= RPC_AUTH_MAXFLAVOR)
+		goto out;
+
+	/* FIXME - auth_flavors[] really needs an rw lock,
+	 * and module refcounting. */
+#ifdef CONFIG_KMOD
+	if ((ops = auth_flavors[flavor]) == NULL)
+		request_module("rpc-auth-%u", flavor);
+#endif
+	if ((ops = auth_flavors[flavor]) == NULL)
+		goto out;
 	auth = ops->create(clnt, pseudoflavor);
 	if (IS_ERR(auth))
 		return auth;
 	if (clnt->cl_auth)
 		rpcauth_destroy(clnt->cl_auth);
 	clnt->cl_auth = auth;
+
+out:
 	return auth;
 }
 
@@ -252,7 +264,7 @@ rpcauth_lookupcred(struct rpc_auth *auth, int flags)
 	struct auth_cred acred = {
 		.uid = current->fsuid,
 		.gid = current->fsgid,
-		.xid = vx_current_xid(),
+		.tag = dx_current_tag(),
 		.group_info = current->group_info,
 	};
 	struct rpc_cred *ret;
@@ -272,7 +284,7 @@ rpcauth_bindcred(struct rpc_task *task)
 	struct auth_cred acred = {
 		.uid = current->fsuid,
 		.gid = current->fsgid,
-		.xid = vx_current_xid(),
+		.tag = dx_current_tag(),
 		.group_info = current->group_info,
 	};
 	struct rpc_cred *ret;
@@ -322,8 +334,8 @@ rpcauth_unbindcred(struct rpc_task *task)
 	task->tk_msg.rpc_cred = NULL;
 }
 
-u32 *
-rpcauth_marshcred(struct rpc_task *task, u32 *p)
+__be32 *
+rpcauth_marshcred(struct rpc_task *task, __be32 *p)
 {
 	struct rpc_cred	*cred = task->tk_msg.rpc_cred;
 
@@ -333,8 +345,8 @@ rpcauth_marshcred(struct rpc_task *task, u32 *p)
 	return cred->cr_ops->crmarshal(task, p);
 }
 
-u32 *
-rpcauth_checkverf(struct rpc_task *task, u32 *p)
+__be32 *
+rpcauth_checkverf(struct rpc_task *task, __be32 *p)
 {
 	struct rpc_cred	*cred = task->tk_msg.rpc_cred;
 
@@ -346,7 +358,7 @@ rpcauth_checkverf(struct rpc_task *task, u32 *p)
 
 int
 rpcauth_wrap_req(struct rpc_task *task, kxdrproc_t encode, void *rqstp,
-		u32 *data, void *obj)
+		__be32 *data, void *obj)
 {
 	struct rpc_cred *cred = task->tk_msg.rpc_cred;
 
@@ -360,7 +372,7 @@ rpcauth_wrap_req(struct rpc_task *task, kxdrproc_t encode, void *rqstp,
 
 int
 rpcauth_unwrap_resp(struct rpc_task *task, kxdrproc_t decode, void *rqstp,
-		u32 *data, void *obj)
+		__be32 *data, void *obj)
 {
 	struct rpc_cred *cred = task->tk_msg.rpc_cred;
 

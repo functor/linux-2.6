@@ -12,14 +12,6 @@
 #include <linux/msdos_fs.h>
 #include <linux/smp_lock.h>
 
-/* MS-DOS "device special files" */
-static const unsigned char *reserved_names[] = {
-	"CON     ", "PRN     ", "NUL     ", "AUX     ",
-	"LPT1    ", "LPT2    ", "LPT3    ", "LPT4    ",
-	"COM1    ", "COM2    ", "COM3    ", "COM4    ",
-	NULL
-};
-
 /* Characters that are undesirable in an MS-DOS file name */
 static unsigned char bad_chars[] = "*?<>|\"";
 static unsigned char bad_if_strict_pc[] = "+=,; ";
@@ -40,7 +32,6 @@ static int msdos_format_name(const unsigned char *name, int len,
 	 */
 {
 	unsigned char *walk;
-	const unsigned char **reserved;
 	unsigned char c;
 	int space;
 
@@ -127,11 +118,7 @@ static int msdos_format_name(const unsigned char *name, int len,
 	}
 	while (walk - res < MSDOS_NAME)
 		*walk++ = ' ';
-	if (!opts->atari)
-		/* GEMDOS is less stupid and has no reserved names */
-		for (reserved = reserved_names; *reserved; reserved++)
-			if (!strncmp(res, *reserved, 8))
-				return -EINVAL;
+
 	return 0;
 }
 
@@ -293,7 +280,7 @@ static int msdos_create(struct inode *dir, struct dentry *dentry, int mode,
 			struct nameidata *nd)
 {
 	struct super_block *sb = dir->i_sb;
-	struct inode *inode;
+	struct inode *inode = NULL;
 	struct fat_slot_info sinfo;
 	struct timespec ts;
 	unsigned char msdos_name[MSDOS_NAME];
@@ -329,6 +316,8 @@ static int msdos_create(struct inode *dir, struct dentry *dentry, int mode,
 	d_instantiate(dentry, inode);
 out:
 	unlock_kernel();
+	if (!err)
+		err = fat_flush_inodes(sb, dir, inode);
 	return err;
 }
 
@@ -354,13 +343,15 @@ static int msdos_rmdir(struct inode *dir, struct dentry *dentry)
 	err = fat_remove_entries(dir, &sinfo);	/* and releases bh */
 	if (err)
 		goto out;
-	dir->i_nlink--;
+	drop_nlink(dir);
 
-	inode->i_nlink = 0;
+	clear_nlink(inode);
 	inode->i_ctime = CURRENT_TIME_SEC;
 	fat_detach(inode);
 out:
 	unlock_kernel();
+	if (!err)
+		err = fat_flush_inodes(inode->i_sb, dir, inode);
 
 	return err;
 }
@@ -398,7 +389,7 @@ static int msdos_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	err = msdos_add_entry(dir, msdos_name, 1, is_hid, cluster, &ts, &sinfo);
 	if (err)
 		goto out_free;
-	dir->i_nlink++;
+	inc_nlink(dir);
 
 	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
 	brelse(sinfo.bh);
@@ -414,6 +405,7 @@ static int msdos_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	d_instantiate(dentry, inode);
 
 	unlock_kernel();
+	fat_flush_inodes(sb, dir, inode);
 	return 0;
 
 out_free:
@@ -438,11 +430,13 @@ static int msdos_unlink(struct inode *dir, struct dentry *dentry)
 	err = fat_remove_entries(dir, &sinfo);	/* and releases bh */
 	if (err)
 		goto out;
-	inode->i_nlink = 0;
+	clear_nlink(inode);
 	inode->i_ctime = CURRENT_TIME_SEC;
 	fat_detach(inode);
 out:
 	unlock_kernel();
+	if (!err)
+		err = fat_flush_inodes(inode->i_sb, dir, inode);
 
 	return err;
 }
@@ -555,9 +549,9 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 			if (err)
 				goto error_dotdot;
 		}
-		old_dir->i_nlink--;
+		drop_nlink(old_dir);
 		if (!new_inode)
-			new_dir->i_nlink++;
+			inc_nlink(new_dir);
 	}
 
 	err = fat_remove_entries(old_dir, &old_sinfo);	/* and releases bh */
@@ -572,10 +566,9 @@ static int do_msdos_rename(struct inode *old_dir, unsigned char *old_name,
 		mark_inode_dirty(old_dir);
 
 	if (new_inode) {
+		drop_nlink(new_inode);
 		if (is_dir)
-			new_inode->i_nlink -= 2;
-		else
-			new_inode->i_nlink--;
+			drop_nlink(new_inode);
 		new_inode->i_ctime = ts;
 	}
 out:
@@ -648,6 +641,8 @@ static int msdos_rename(struct inode *old_dir, struct dentry *old_dentry,
 			      new_dir, new_msdos_name, new_dentry, is_hid);
 out:
 	unlock_kernel();
+	if (!err)
+		err = fat_flush_inodes(old_dir->i_sb, old_dir, new_dir);
 	return err;
 }
 
@@ -659,6 +654,7 @@ static struct inode_operations msdos_dir_inode_operations = {
 	.rmdir		= msdos_rmdir,
 	.rename		= msdos_rename,
 	.setattr	= fat_notify_change,
+	.getattr	= fat_getattr,
 };
 
 static int msdos_fill_super(struct super_block *sb, void *data, int silent)
@@ -674,11 +670,12 @@ static int msdos_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 }
 
-static struct super_block *msdos_get_sb(struct file_system_type *fs_type,
-					int flags, const char *dev_name,
-					void *data)
+static int msdos_get_sb(struct file_system_type *fs_type,
+			int flags, const char *dev_name,
+			void *data, struct vfsmount *mnt)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, msdos_fill_super);
+	return get_sb_bdev(fs_type, flags, dev_name, data, msdos_fill_super,
+			   mnt);
 }
 
 static struct file_system_type msdos_fs_type = {

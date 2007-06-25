@@ -30,6 +30,7 @@
 enum devicetype {
 	DEVICE_ZD1211  = 0,
 	DEVICE_ZD1211B = 1,
+	DEVICE_INSTALLER = 2,
 };
 
 enum endpoints {
@@ -236,5 +237,7 @@ int zd_usb_iowrite16v(struct zd_usb *usb, const struct zd_ioreq16 *ioreqs,
 	              unsigned int count);
 
 int zd_usb_rfwrite(struct zd_usb *usb, u32 value, u8 bits);
+
+extern struct workqueue_struct *zd_workqueue;
 
 #endif /* _ZD_USB_H */

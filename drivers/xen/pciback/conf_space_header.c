@@ -20,12 +20,13 @@ struct pci_bar_info {
 
 static int command_write(struct pci_dev *dev, int offset, u16 value, void *data)
 {
-	if (!dev->is_enabled && is_enable_cmd(value)) {
+	if (!atomic_read(&dev->enable_cnt) && is_enable_cmd(value)) {
 		if (unlikely(verbose_request))
 			printk(KERN_DEBUG "pciback: %s: enable\n",
 			       pci_name(dev));
-		pci_enable_device(dev);
-	} else if (dev->is_enabled && !is_enable_cmd(value)) {
+		if (pci_enable_device(dev))
+			return -ENODEV;
+	} else if (atomic_read(&dev->enable_cnt) && !is_enable_cmd(value)) {
 		if (unlikely(verbose_request))
 			printk(KERN_DEBUG "pciback: %s: disable\n",
 			       pci_name(dev));
@@ -44,7 +45,8 @@ static int command_write(struct pci_dev *dev, int offset, u16 value, void *data)
 			printk(KERN_DEBUG
 			       "pciback: %s: enable memory-write-invalidate\n",
 			       pci_name(dev));
-		pci_set_mwi(dev);
+		if (pci_set_mwi(dev))
+			return -EINVAL;
 	}
 
 	return pci_write_config_word(dev, offset, value);

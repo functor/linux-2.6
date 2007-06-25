@@ -53,12 +53,11 @@ unsigned long pci_dram_offset = 0;
 
 
 #ifdef CONFIG_PCI
-static void mpc86xx_8259_cascade(unsigned int irq, struct irq_desc *desc,
-				 struct pt_regs *regs)
+static void mpc86xx_8259_cascade(unsigned int irq, struct irq_desc *desc)
 {
-	unsigned int cascade_irq = i8259_irq(regs);
+	unsigned int cascade_irq = i8259_irq();
 	if (cascade_irq != NO_IRQ)
-		generic_handle_irq(cascade_irq, regs);
+		generic_handle_irq(cascade_irq);
 	desc->chip->eoi(irq);
 }
 #endif	/* CONFIG_PCI */
@@ -347,9 +346,9 @@ mpc86xx_hpcn_setup_arch(void)
 
 	np = of_find_node_by_type(NULL, "cpu");
 	if (np != 0) {
-		unsigned int *fp;
+		const unsigned int *fp;
 
-		fp = (int *)get_property(np, "clock-frequency", NULL);
+		fp = get_property(np, "clock-frequency", NULL);
 		if (fp != 0)
 			loops_per_jiffy = *fp / HZ;
 		else
@@ -396,15 +395,6 @@ mpc86xx_hpcn_show_cpuinfo(struct seq_file *m)
 
 	seq_printf(m, "SVR\t\t: 0x%x\n", svid);
 	seq_printf(m, "Memory\t\t: %d MB\n", memsize / (1024 * 1024));
-}
-
-
-void __init mpc86xx_hpcn_pcibios_fixup(void)
-{
-	struct pci_dev *dev = NULL;
-
-	for_each_pci_dev(dev)
-		pci_read_irq_line(dev);
 }
 
 
@@ -462,7 +452,6 @@ define_machine(mpc86xx_hpcn) {
 	.setup_arch		= mpc86xx_hpcn_setup_arch,
 	.init_IRQ		= mpc86xx_hpcn_init_irq,
 	.show_cpuinfo		= mpc86xx_hpcn_show_cpuinfo,
-	.pcibios_fixup		= mpc86xx_hpcn_pcibios_fixup,
 	.get_irq		= mpic_get_irq,
 	.restart		= mpc86xx_restart,
 	.time_init		= mpc86xx_time_init,

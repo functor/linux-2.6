@@ -5,6 +5,7 @@
  */
 #include <linux/types.h>
 #include <asm/page.h>
+#include <asm/ptrace.h>
 
 #define COMPAT_USER_HZ	100
 
@@ -32,6 +33,7 @@ typedef struct {
 	s32	val[2];
 } compat_fsid_t;
 typedef s32		compat_timer_t;
+typedef s32		compat_key_t;
 
 typedef s32		compat_int_t;
 typedef s32		compat_long_t;
@@ -128,20 +130,89 @@ typedef u32		compat_sigset_word;
  */
 typedef u32		compat_uptr_t;
 
-static inline void *compat_ptr(compat_uptr_t uptr)
+static inline void __user *compat_ptr(compat_uptr_t uptr)
 {
-	return (void *)(long)uptr;
+	return (void __user *)(long)uptr;
 }
 
-static inline void *compat_alloc_user_space(long len)
+static inline compat_uptr_t ptr_to_compat(void __user *uptr)
+{
+	return (u32)(unsigned long)uptr;
+}
+
+static inline void __user *compat_alloc_user_space(long len)
 {
 	struct pt_regs *regs = (struct pt_regs *)
 		((unsigned long) current_thread_info() + THREAD_SIZE - 32) - 1;
 
-	return (void *) (regs->regs[29] - len);
+	return (void __user *) (regs->regs[29] - len);
 }
-#if defined (__MIPSEL__)
-#define __COMPAT_ENDIAN_SWAP__ 	1
+
+struct compat_ipc64_perm {
+	compat_key_t key;
+	__compat_uid32_t uid;
+	__compat_gid32_t gid;
+	__compat_uid32_t cuid;
+	__compat_gid32_t cgid;
+	compat_mode_t mode;
+	unsigned short seq;
+	unsigned short __pad2;
+	compat_ulong_t __unused1;
+	compat_ulong_t __unused2;
+};
+
+struct compat_semid64_ds {
+	struct compat_ipc64_perm sem_perm;
+	compat_time_t	sem_otime;
+	compat_time_t	sem_ctime;
+	compat_ulong_t	sem_nsems;
+	compat_ulong_t	__unused1;
+	compat_ulong_t	__unused2;
+};
+
+struct compat_msqid64_ds {
+	struct compat_ipc64_perm msg_perm;
+#ifndef CONFIG_CPU_LITTLE_ENDIAN
+	compat_ulong_t	__unused1;
 #endif
+	compat_time_t	msg_stime;
+#ifdef CONFIG_CPU_LITTLE_ENDIAN
+	compat_ulong_t	__unused1;
+#endif
+#ifndef CONFIG_CPU_LITTLE_ENDIAN
+	compat_ulong_t	__unused2;
+#endif
+	compat_time_t	msg_rtime;
+#ifdef CONFIG_CPU_LITTLE_ENDIAN
+	compat_ulong_t	__unused2;
+#endif
+#ifndef CONFIG_CPU_LITTLE_ENDIAN
+	compat_ulong_t	__unused3;
+#endif
+	compat_time_t	msg_ctime;
+#ifdef CONFIG_CPU_LITTLE_ENDIAN
+	compat_ulong_t	__unused3;
+#endif
+	compat_ulong_t	msg_cbytes;
+	compat_ulong_t	msg_qnum;
+	compat_ulong_t	msg_qbytes;
+	compat_pid_t	msg_lspid;
+	compat_pid_t	msg_lrpid;
+	compat_ulong_t	__unused4;
+	compat_ulong_t	__unused5;
+};
+
+struct compat_shmid64_ds {
+	struct compat_ipc64_perm shm_perm;
+	compat_size_t	shm_segsz;
+	compat_time_t	shm_atime;
+	compat_time_t	shm_dtime;
+	compat_time_t	shm_ctime;
+	compat_pid_t	shm_cpid;
+	compat_pid_t	shm_lpid;
+	compat_ulong_t	shm_nattch;
+	compat_ulong_t	__unused1;
+	compat_ulong_t	__unused2;
+};
 
 #endif /* _ASM_COMPAT_H */

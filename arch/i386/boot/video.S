@@ -11,8 +11,6 @@
  *
  */
 
-#include <linux/config.h> /* for CONFIG_VIDEO_* */
-
 /* Enable autodetection of SVGA adapters and modes. */
 #undef CONFIG_VIDEO_SVGA
 
@@ -97,6 +95,7 @@
 #define PARAM_VESAPM_OFF	0x30
 #define PARAM_LFB_PAGES		0x32
 #define PARAM_VESA_ATTRIB	0x34
+#define PARAM_CAPABILITIES	0x36
 
 /* Define DO_STORE according to CONFIG_VIDEO_RETAIN */
 #ifdef CONFIG_VIDEO_RETAIN
@@ -126,8 +125,12 @@ video:	pushw	%ds		# We use different segments
 	call	mode_set			# Set the mode
 	jc	vid1
 
+#if 0
 	leaw	badmdt, %si			# Invalid mode ID
 	call	prtstr
+#else
+	jmp	vid1
+#endif /* CONFIG_VIDEO_IGNORE_BAD_MODE */
 vid2:	call	mode_menu
 vid1:
 #ifdef CONFIG_VIDEO_RETAIN
@@ -232,6 +235,10 @@ mopar_gr:
 	xorl	%eax, %eax
 	movw	18(%di), %ax
 	movl	%eax, %fs:(PARAM_LFB_SIZE)
+
+# store mode capabilities
+	movl 10(%di), %eax
+	movl %eax, %fs:(PARAM_CAPABILITIES)
 
 # switching the DAC to 8-bit is for <= 8 bpp only
 	movw	%fs:(PARAM_LFB_DEPTH), %ax
@@ -568,6 +575,16 @@ setr1:	lodsw
 	jmp	_m_s
 
 check_vesa:
+#ifdef CONFIG_FIRMWARE_EDID
+	leaw	modelist+1024, %di
+	movw	$0x4f00, %ax
+	int	$0x10
+	cmpw	$0x004f, %ax
+	jnz	setbad
+
+	movw	4(%di), %ax
+	movw	%ax, vbe_version
+#endif
 	leaw	modelist+1024, %di
 	subb	$VIDEO_FIRST_VESA>>8, %bh
 	movw	%bx, %cx			# Get mode information structure
@@ -1924,6 +1941,7 @@ skip10:	movb	%ah, %al
 	ret
 
 store_edid:
+#ifdef CONFIG_FIRMWARE_EDID
 	pushw	%es				# just save all registers
 	pushw	%ax
 	pushw	%bx
@@ -1941,6 +1959,25 @@ store_edid:
 	rep
 	stosl
 
+	cmpw	$0x0200, vbe_version		# only do EDID on >= VBE2.0
+	jl	no_edid
+
+	pushw   %es				# save ES
+	xorw    %di, %di                        # Report Capability
+	pushw   %di
+	popw    %es                             # ES:DI must be 0:0
+	movw	$0x4f15, %ax
+	xorw	%bx, %bx
+	xorw	%cx, %cx
+	int	$0x10
+	popw    %es                             # restore ES
+
+	cmpb    $0x00, %ah                      # call successful
+	jne     no_edid
+
+	cmpb    $0x4f, %al                      # function supported
+	jne     no_edid
+
 	movw	$0x4f15, %ax                    # do VBE/DDC
 	movw	$0x01, %bx
 	movw	$0x00, %cx
@@ -1948,12 +1985,14 @@ store_edid:
 	movw	$0x140, %di
 	int	$0x10
 
+no_edid:
 	popw	%di				# restore all registers
 	popw	%dx
 	popw	%cx
 	popw	%bx
 	popw	%ax
 	popw	%es
+#endif
 	ret
 
 # VIDEO_SELECT-only variables
@@ -1965,6 +2004,7 @@ do_restore:	.byte	0	# Screen contents altered during mode change
 svga_prefix:	.byte	VIDEO_FIRST_BIOS>>8	# Default prefix for BIOS modes
 graphic_mode:	.byte	0	# Graphic mode with a linear frame buffer
 dac_size:	.byte	6	# DAC bit depth
+vbe_version:	.word	0	# VBE bios version
 
 # Status messages
 keymsg:		.ascii	"Press <RETURN> to see video modes available, "

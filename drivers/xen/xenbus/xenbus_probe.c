@@ -620,8 +620,13 @@ static int xenbus_probe_node(struct xen_bus_type *bus,
 	if (err)
 		goto fail;
 
-	device_create_file(&xendev->dev, &dev_attr_nodename);
-	device_create_file(&xendev->dev, &dev_attr_devtype);
+	err = device_create_file(&xendev->dev, &dev_attr_nodename);
+	if (err)
+		goto fail;
+
+	err = device_create_file(&xendev->dev, &dev_attr_devtype);
+	if (err)
+		goto fail;
 
 	return 0;
 fail:
@@ -930,7 +935,7 @@ void unregister_xenstore_notifier(struct notifier_block *nb)
 EXPORT_SYMBOL_GPL(unregister_xenstore_notifier);
 
 
-void xenbus_probe(void *unused)
+void xenbus_probe(struct work_struct *unused)
 {
 	BUG_ON((xenstored_ready <= 0));
 
@@ -998,8 +1003,12 @@ static int __init xenbus_probe_init(void)
 		return -ENODEV;
 
 	/* Register ourselves with the kernel bus subsystem */
-	bus_register(&xenbus_frontend.bus);
-	bus_register(&xenbus_backend.bus);
+	err = bus_register(&xenbus_frontend.bus);
+	if (err)
+		goto err_frontend_bus;
+	err = bus_register(&xenbus_backend.bus);
+	if (err)
+		goto err_backend_bus;
 
 	/*
 	 * Domain0 doesn't have a store_evtchn or store_mfn yet.
@@ -1009,8 +1018,10 @@ static int __init xenbus_probe_init(void)
 
 		/* Allocate page. */
 		page = get_zeroed_page(GFP_KERNEL);
-		if (!page)
-			return -ENOMEM;
+		if (!page) {
+			err = -ENOMEM;
+			goto err_nomem;
+		}
 
 		xen_store_mfn = xen_start_info->store_mfn =
 			pfn_to_mfn(virt_to_phys((void *)page) >>
@@ -1069,8 +1080,12 @@ static int __init xenbus_probe_init(void)
 	}
 
 	/* Register ourselves with the kernel device subsystem */
-	device_register(&xenbus_frontend.dev);
-	device_register(&xenbus_backend.dev);
+	err = device_register(&xenbus_frontend.dev);
+	if (err)
+		goto err;
+	err = device_register(&xenbus_backend.dev);
+	if (err)
+		goto err;
 
 	if (!is_initial_xendomain())
 		xenbus_probe(NULL);
@@ -1086,7 +1101,11 @@ static int __init xenbus_probe_init(void)
 	 * must exist because front/backend drivers will use them when they are
 	 * registered.
 	 */
-
+ err_nomem:
+	bus_unregister(&xenbus_frontend.bus);
+ err_backend_bus:
+	bus_unregister(&xenbus_frontend.bus);
+ err_frontend_bus:
 	return err;
 }
 

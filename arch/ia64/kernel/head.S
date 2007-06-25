@@ -19,7 +19,6 @@
  *   Support for CPU Hotplug
  */
 
-#include <linux/config.h>
 
 #include <asm/asmmacro.h>
 #include <asm/fpu.h>
@@ -198,6 +197,11 @@ start_ap:
 	;;
 	srlz.i
 	;;
+ {
+	flushrs				// must be first insn in group
+	srlz.i
+ }
+	;;
 	/*
 	 * Save the region registers, predicate before they get clobbered
 	 */
@@ -362,6 +366,12 @@ start_ap:
 (isBP)	movl r2=ia64_boot_param
 	;;
 (isBP)	st8 [r2]=r28		// save the address of the boot param area passed by the bootloader
+
+#ifdef CONFIG_XEN
+	//  Note: isBP is used by the subprogram.
+	br.call.sptk.many rp=early_xen_setup
+	;;
+#endif
 
 #ifdef CONFIG_SMP
 (isAP)	br.call.sptk.many rp=start_secondary
@@ -854,7 +864,6 @@ END(__ia64_init_fpu)
  */
 GLOBAL_ENTRY(ia64_switch_mode_phys)
  {
-	alloc r2=ar.pfs,0,0,0,0
 	rsm psr.i | psr.ic		// disable interrupts and interrupt collection
 	mov r15=ip
  }
@@ -903,7 +912,6 @@ END(ia64_switch_mode_phys)
  */
 GLOBAL_ENTRY(ia64_switch_mode_virt)
  {
-	alloc r2=ar.pfs,0,0,0,0
 	rsm psr.i | psr.ic		// disable interrupts and interrupt collection
 	mov r15=ip
  }

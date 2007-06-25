@@ -136,9 +136,13 @@
  */
 #define TO_PHYS(x)		(TO_PHYS_MASK & (x))
 #define TO_CAC(x)		(CAC_BASE     | TO_PHYS(x))
+#ifdef CONFIG_SGI_SN
 #define TO_AMO(x)		(AMO_BASE     | TO_PHYS(x))
 #define TO_GET(x)		(GET_BASE     | TO_PHYS(x))
-
+#else
+#define TO_AMO(x)		({ BUG(); x; })
+#define TO_GET(x)		({ BUG(); x; })
+#endif
 
 /*
  * Covert from processor physical address to II/TIO physical address:
@@ -283,5 +287,13 @@
 #define REMOTE_HUB_L(n, a)		HUB_L(REMOTE_HUB_ADDR((n), (a)))
 #define REMOTE_HUB_S(n, a, d)		HUB_S(REMOTE_HUB_ADDR((n), (a)), (d))
 
+/*
+ * Coretalk address breakdown
+ */
+#define CTALK_NASID_SHFT		40
+#define CTALK_NASID_MASK		(0x3FFFULL << CTALK_NASID_SHFT)
+#define CTALK_CID_SHFT			38
+#define CTALK_CID_MASK			(0x3ULL << CTALK_CID_SHFT)
+#define CTALK_NODE_OFFSET		0x3FFFFFFFFF
 
 #endif /* _ASM_IA64_SN_ADDRS_H */

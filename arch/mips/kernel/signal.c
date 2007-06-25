@@ -7,7 +7,6 @@
  * Copyright (C) 1994 - 2000  Ralf Baechle
  * Copyright (C) 1999, 2000 Silicon Graphics, Inc.
  */
-#include <linux/config.h>
 #include <linux/cache.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -100,8 +99,8 @@ _sys_rt_sigsuspend(nabi_no_regargs struct pt_regs regs)
 }
 
 #ifdef CONFIG_TRAD_SIGNALS
-asmlinkage int sys_sigaction(int sig, const struct sigaction *act,
-	struct sigaction *oact)
+asmlinkage int sys_sigaction(int sig, const struct sigaction __user *act,
+	struct sigaction __user *oact)
 {
 	struct k_sigaction new_ka, old_ka;
 	int ret;
@@ -331,7 +330,7 @@ int setup_rt_frame(struct k_sigaction * ka, struct pt_regs *regs,
 	/* Create the ucontext.  */
 	err |= __put_user(0, &frame->rs_uc.uc_flags);
 	err |= __put_user(NULL, &frame->rs_uc.uc_link);
-	err |= __put_user((void *)current->sas_ss_sp,
+	err |= __put_user((void __user *)current->sas_ss_sp,
 	                  &frame->rs_uc.uc_stack.ss_sp);
 	err |= __put_user(sas_ss_flags(regs->regs[29]),
 	                  &frame->rs_uc.uc_stack.ss_flags);
@@ -425,14 +424,10 @@ void do_signal(struct pt_regs *regs)
 	if (!user_mode(regs))
 		return;
 
-	if (try_to_freeze())
-		goto no_signal;
-
 	if (test_thread_flag(TIF_RESTORE_SIGMASK))
 		oldset = &current->saved_sigmask;
 	else
 		oldset = &current->blocked;
-
 
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 	if (signr > 0) {
@@ -447,9 +442,10 @@ void do_signal(struct pt_regs *regs)
 			if (test_thread_flag(TIF_RESTORE_SIGMASK))
 				clear_thread_flag(TIF_RESTORE_SIGMASK);
 		}
+
+		return;
 	}
 
-no_signal:
 	/*
 	 * Who's code doesn't conform to the restartable syscall convention
 	 * dies here!!!  The li instruction, a single machine instruction,
@@ -467,6 +463,7 @@ no_signal:
 			regs->regs[7] = regs->regs[26];
 			regs->cp0_epc -= 4;
 		}
+		regs->regs[0] = 0;	/* Don't deal with this again.  */
 	}
 
 	/*

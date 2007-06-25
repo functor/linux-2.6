@@ -13,7 +13,6 @@
  * Rewritten extensively for controller-driven IRQ support
  * by Maciej W. Rozycki.
  */
-#include <linux/config.h>
 
 #include <asm/addrspace.h>
 #include <asm/asm.h>
@@ -36,7 +35,7 @@
 		.text
 		.set	noreorder
 /*
- * decstation_handle_int: Interrupt handler for DECstations
+ * plat_irq_dispatch: Interrupt handler for DECstations
  *
  * We follow the model in the Indy interrupt code by David Miller, where he
  * says: a lot of complication here is taken away because:
@@ -125,11 +124,7 @@
  * just take another exception, big deal.
  */
 		.align	5
-		NESTED(decstation_handle_int, PT_SIZE, ra)
-		.set	noat
-		SAVE_ALL
-		CLI				# TEST: interrupts should be off
-		.set	at
+		NESTED(plat_irq_dispatch, PT_SIZE, ra)
 		.set	noreorder
 
 		/*
@@ -269,10 +264,10 @@
 		 srlv	t3,t1,t2
 
 handle_it:
-		jal	do_IRQ
-		 move	a1,sp
-
-		j	ret_from_irq
+		LONG_L	s0, TI_REGS($28)
+		LONG_S	sp, TI_REGS($28)
+		PTR_LA	ra, ret_from_irq
+		j	dec_irq_dispatch
 		 nop
 
 #ifdef CONFIG_32BIT
@@ -282,9 +277,10 @@ fpu:
 #endif
 
 spurious:
+		PTR_LA	ra, _ret_from_irq
 		j	spurious_interrupt
 		 nop
-		END(decstation_handle_int)
+		END(plat_irq_dispatch)
 
 /*
  * Generic unimplemented interrupt routines -- cpu_mask_nr_tbl

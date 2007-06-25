@@ -1,4 +1,3 @@
-#include "linux/config.h"
 #include "linux/kernel.h"
 #include "linux/stddef.h"
 #include "linux/init.h"
@@ -61,7 +60,7 @@ static int slip_write(int fd, struct sk_buff **skb,
 			       (struct slip_data *) &lp->user));
 }
 
-struct net_kern_info slip_kern_info = {
+const struct net_kern_info slip_kern_info = {
 	.init			= slip_init,
 	.protocol		= slip_protocol,
 	.read			= slip_read,
@@ -93,18 +92,7 @@ static struct transport slip_transport = {
 static int register_slip(void)
 {
 	register_transport(&slip_transport);
-	return(1);
+	return 0;
 }
 
-__initcall(register_slip);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */
+late_initcall(register_slip);

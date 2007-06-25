@@ -8,12 +8,14 @@
 #ifndef __LINUX_LOCKDEP_H
 #define __LINUX_LOCKDEP_H
 
+struct task_struct;
+
+#ifdef CONFIG_LOCKDEP
+
 #include <linux/linkage.h>
 #include <linux/list.h>
 #include <linux/debug_locks.h>
 #include <linux/stacktrace.h>
-
-#ifdef CONFIG_LOCKDEP
 
 /*
  * Lock-class usage-state bits:
@@ -193,7 +195,6 @@ extern void lockdep_free_key_range(void *start, unsigned long size);
 
 extern void lockdep_off(void);
 extern void lockdep_on(void);
-extern int lockdep_internal(void);
 
 /*
  * These methods are used by specific locking variants (spinlocks,
@@ -216,6 +217,9 @@ extern void lockdep_init_map(struct lockdep_map *lock, const char *name,
 		lockdep_init_map(&(lock)->dep_map, name, key, 0)
 #define lockdep_set_class_and_subclass(lock, key, sub) \
 		lockdep_init_map(&(lock)->dep_map, #key, key, sub)
+#define lockdep_set_subclass(lock, sub)	\
+		lockdep_init_map(&(lock)->dep_map, #lock, \
+				 (lock)->dep_map.key, sub)
 
 /*
  * Acquire a lock.
@@ -240,6 +244,8 @@ extern void lock_release(struct lockdep_map *lock, int nested,
 
 # define INIT_LOCKDEP				.lockdep_recursion = 0,
 
+#define lockdep_depth(tsk)	((tsk)->lockdep_depth)
+
 #else /* !LOCKDEP */
 
 static inline void lockdep_off(void)
@@ -248,11 +254,6 @@ static inline void lockdep_off(void)
 
 static inline void lockdep_on(void)
 {
-}
-
-static inline int lockdep_internal(void)
-{
-	return 0;
 }
 
 # define lock_acquire(l, s, t, r, c, i)		do { } while (0)
@@ -265,6 +266,8 @@ static inline int lockdep_internal(void)
 		do { (void)(key); } while (0)
 #define lockdep_set_class_and_subclass(lock, key, sub) \
 		do { (void)(key); } while (0)
+#define lockdep_set_subclass(lock, sub)		do { } while (0)
+
 # define INIT_LOCKDEP
 # define lockdep_reset()		do { debug_locks = 1; } while (0)
 # define lockdep_free_key_range(start, size)	do { } while (0)
@@ -272,20 +275,33 @@ static inline int lockdep_internal(void)
  * The class key takes no space if lockdep is disabled:
  */
 struct lock_class_key { };
+
+#define lockdep_depth(tsk)	(0)
+
 #endif /* !LOCKDEP */
 
 #if defined(CONFIG_TRACE_IRQFLAGS) && defined(CONFIG_GENERIC_HARDIRQS)
 extern void early_init_irq_lock_class(void);
 #else
-# define early_init_irq_lock_class()		do { } while (0)
+static inline void early_init_irq_lock_class(void)
+{
+}
 #endif
 
 #ifdef CONFIG_TRACE_IRQFLAGS
 extern void early_boot_irqs_off(void);
 extern void early_boot_irqs_on(void);
+extern void print_irqtrace_events(struct task_struct *curr);
 #else
-# define early_boot_irqs_off()			do { } while (0)
-# define early_boot_irqs_on()			do { } while (0)
+static inline void early_boot_irqs_off(void)
+{
+}
+static inline void early_boot_irqs_on(void)
+{
+}
+static inline void print_irqtrace_events(struct task_struct *curr)
+{
+}
 #endif
 
 /*

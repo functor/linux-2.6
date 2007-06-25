@@ -3,6 +3,7 @@
  * Peter Gutmann, and placed in the public domain.
  */
 
+#include <asm/unaligned.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/cryptohash.h>
@@ -41,7 +42,7 @@ void sha_transform(__u32 *digest, const char *in, __u32 *W)
 	__u32 a, b, c, d, e, t, i;
 
 	for (i = 0; i < 16; i++)
-		W[i] = be32_to_cpu(((const __be32 *)in)[i]);
+		W[i] = be32_to_cpu(get_unaligned((const __be32 *)in+i));
 
 	for (i = 0; i < 64; i++)
 		W[i+16] = rol32(W[i+13] ^ W[i+8] ^ W[i+2] ^ W[i], 1);

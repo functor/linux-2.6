@@ -27,7 +27,6 @@
 #include <asm/processor.h>
 
 #include <linux/timex.h>
-#include <linux/config.h>
 
 #include <asm/fixmap.h>
 
@@ -89,6 +88,7 @@
  * then 32 bit HPET counter wrapsaround in less than 0.5 sec.
  */
 #define HPET_MIN_PERIOD (100000UL)
+#define HPET_TICK_RATE  (HZ * 100000UL)
 
 extern unsigned long hpet_tick;  	/* hpet clks count per tick */
 extern unsigned long hpet_address;	/* hpet memory map physical address */
@@ -108,7 +108,7 @@ extern int hpet_set_alarm_time(unsigned char hrs, unsigned char min, unsigned ch
 extern int hpet_set_periodic_freq(unsigned long freq);
 extern int hpet_rtc_dropped_irq(void);
 extern int hpet_rtc_timer_init(void);
-extern irqreturn_t hpet_rtc_interrupt(int irq, void *dev_id, struct pt_regs *regs);
+extern irqreturn_t hpet_rtc_interrupt(int irq, void *dev_id);
 #endif /* CONFIG_HPET_EMULATE_RTC */
 #endif /* CONFIG_HPET_TIMER */
 #endif /* _I386_HPET_H */

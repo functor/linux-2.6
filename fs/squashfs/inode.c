@@ -2245,13 +2245,13 @@ static void __exit exit_squashfs_fs(void)
 }
 
 
-static kmem_cache_t * squashfs_inode_cachep;
+static struct kmem_cache *squashfs_inode_cachep;
 
 
 static struct inode *squashfs_alloc_inode(struct super_block *sb)
 {
 	struct squashfs_inode_info *ei;
-	ei = kmem_cache_alloc(squashfs_inode_cachep, SLAB_KERNEL);
+	ei = kmem_cache_alloc(squashfs_inode_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
 	return &ei->vfs_inode;
@@ -2264,7 +2264,7 @@ static void squashfs_destroy_inode(struct inode *inode)
 }
 
 
-static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
+static void init_once(void * foo, struct kmem_cache *cachep, unsigned long flags)
 {
 	struct squashfs_inode_info *ei = foo;
 

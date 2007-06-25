@@ -20,8 +20,8 @@
 #include <linux/module.h>
 
 struct tcpudphdr {
-	uint16_t src;
-	uint16_t dst;
+	__be16 src;
+	__be16 dst;
 };
 
 static int ebt_filter_ip(const struct sk_buff *skb, const struct net_device *in,
@@ -112,16 +112,16 @@ static struct ebt_match filter_ip =
 	.me		= THIS_MODULE,
 };
 
-static int __init init(void)
+static int __init ebt_ip_init(void)
 {
 	return ebt_register_match(&filter_ip);
 }
 
-static void __exit fini(void)
+static void __exit ebt_ip_fini(void)
 {
 	ebt_unregister_match(&filter_ip);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(ebt_ip_init);
+module_exit(ebt_ip_fini);
 MODULE_LICENSE("GPL");

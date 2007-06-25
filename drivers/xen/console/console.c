@@ -57,32 +57,31 @@
 #include <xen/interface/event_channel.h>
 #include <asm/hypervisor.h>
 #include <xen/evtchn.h>
-#include <xen/xencons.h>
 #include <xen/xenbus.h>
+#include <xen/xencons.h>
 
 /*
  * Modes:
  *  'xencons=off'  [XC_OFF]:     Console is disabled.
  *  'xencons=tty'  [XC_TTY]:     Console attached to '/dev/tty[0-9]+'.
  *  'xencons=ttyS' [XC_SERIAL]:  Console attached to '/dev/ttyS[0-9]+'.
- *  'xencons=xvc'  [XC_XVC]:     Console attached to '/dev/xvc[0-9]+'.
+ *  'xencons=xvc'  [XC_XVC]:     Console attached to '/dev/xvc0'.
  *                 [XC_DEFAULT]: DOM0 -> XC_SERIAL ; all others -> XC_TTY.
  * 
  * NB. In mode XC_TTY, we create dummy consoles for tty2-63. This suppresses
  * warnings from standard distro startup scripts.
  */
-static enum { XC_OFF, XC_DEFAULT, XC_TTY, XC_SERIAL, XC_XVC } 
-    xc_mode = XC_DEFAULT;
+static enum {
+	XC_OFF, XC_DEFAULT, XC_TTY, XC_SERIAL, XC_XVC
+} xc_mode = XC_DEFAULT;
 static int xc_num = -1;
 
-/* If we are in XC_XVC mode (a virtual console at /dev/xvcX), we need to
- * comply with Lanana and use a minor under the low density serial major.
- */
-#define XEN_XVC_MINOR 187
+/* /dev/xvc0 device number allocated by lanana.org. */
+#define XEN_XVC_MAJOR 204
+#define XEN_XVC_MINOR 191
 
 #ifdef CONFIG_MAGIC_SYSRQ
 static unsigned long sysrq_requested;
-extern int sysrq_enabled;
 #endif
 
 static int __init xencons_setup(char *str)
@@ -90,34 +89,23 @@ static int __init xencons_setup(char *str)
 	char *q;
 	int n;
 
-	if (!strncmp(str, "ttyS", 4))
+	if (!strncmp(str, "ttyS", 4)) {
 		xc_mode = XC_SERIAL;
-	else if (!strncmp(str, "tty", 3))
+		str += 4;
+	} else if (!strncmp(str, "tty", 3)) {
 		xc_mode = XC_TTY;
-	else if (!strncmp(str, "xvc", 3))
+		str += 3;
+	} else if (!strncmp(str, "xvc", 3)) {
 		xc_mode = XC_XVC;
-	else if (!strncmp(str, "off", 3))
+		str += 3;
+	} else if (!strncmp(str, "off", 3)) {
 		xc_mode = XC_OFF;
-
-	switch (xc_mode) {
-	case XC_SERIAL:
-		n = simple_strtol(str+4, &q, 10);
-		if (q > (str + 4))
-			xc_num = n;
-		break;
-	case XC_TTY:
-		n = simple_strtol(str+3, &q, 10);
-		if (q > (str + 3))
-			xc_num = n;
-		break;
-	case XC_XVC:
-		n = simple_strtol(str+3, &q, 10);
-		if (q > (str + 3))
-			xc_num = n;
-		break;
-	default:
-		break;
+		str += 3;
 	}
+
+	n = simple_strtol(str, &q, 10);
+	if (q != str)
+		xc_num = n;
 
 	return 1;
 }
@@ -326,16 +314,16 @@ void dom0_init_screen_info(const struct dom0_vga_console_info *info)
 /******************** User-space console driver (/dev/console) ************/
 
 #define DRV(_d)         (_d)
-#define DUMMY_TTY(_tty) ((xc_mode != XC_SERIAL) && (xc_mode != XC_XVC) && \
+#define DUMMY_TTY(_tty) ((xc_mode == XC_TTY) &&		\
 			 ((_tty)->index != (xc_num - 1)))
 
-static struct termios *xencons_termios[MAX_NR_CONSOLES];
-static struct termios *xencons_termios_locked[MAX_NR_CONSOLES];
+static struct ktermios *xencons_termios[MAX_NR_CONSOLES];
+static struct ktermios *xencons_termios_locked[MAX_NR_CONSOLES];
 static struct tty_struct *xencons_tty;
 static int xencons_priv_irq;
 static char x_char;
 
-void xencons_rx(char *buf, unsigned len, struct pt_regs *regs)
+void xencons_rx(char *buf, unsigned len)
 {
 	int           i;
 	unsigned long flags;
@@ -346,7 +334,7 @@ void xencons_rx(char *buf, unsigned len, struct pt_regs *regs)
 
 	for (i = 0; i < len; i++) {
 #ifdef CONFIG_MAGIC_SYSRQ
-		if (sysrq_enabled) {
+		if (sysrq_on()) {
 			if (buf[i] == '\x0f') { /* ^O */
 				sysrq_requested = jiffies;
 				continue; /* don't print the sysrq key */
@@ -358,7 +346,7 @@ void xencons_rx(char *buf, unsigned len, struct pt_regs *regs)
 					spin_unlock_irqrestore(
 						&xencons_lock, flags);
 					handle_sysrq(
-						buf[i], regs, xencons_tty);
+						buf[i], xencons_tty);
 					spin_lock_irqsave(
 						&xencons_lock, flags);
 					continue;
@@ -423,14 +411,13 @@ void xencons_tx(void)
 }
 
 /* Privileged receive callback and transmit kicker. */
-static irqreturn_t xencons_priv_interrupt(int irq, void *dev_id,
-					  struct pt_regs *regs)
+static irqreturn_t xencons_priv_interrupt(int irq, void *dev_id)
 {
 	static char rbuf[16];
 	int         l;
 
 	while ((l = HYPERVISOR_console_io(CONSOLEIO_read, 16, rbuf)) > 0)
-		xencons_rx(rbuf, l, regs);
+		xencons_rx(rbuf, l);
 
 	xencons_tx();
 
@@ -649,9 +636,8 @@ static int __init xencons_init(void)
 			return rc;
 	}
 
-	xencons_driver = alloc_tty_driver(((xc_mode == XC_SERIAL) || 
-					   (xc_mode == XC_XVC)) ?
-					  1 : MAX_NR_CONSOLES);
+	xencons_driver = alloc_tty_driver((xc_mode == XC_TTY) ?
+					  MAX_NR_CONSOLES : 1);
 	if (xencons_driver == NULL)
 		return -ENOMEM;
 
@@ -666,19 +652,23 @@ static int __init xencons_init(void)
 	DRV(xencons_driver)->termios         = xencons_termios;
 	DRV(xencons_driver)->termios_locked  = xencons_termios_locked;
 
-	if (xc_mode == XC_SERIAL) {
-		DRV(xencons_driver)->name        = "ttyS";
-		DRV(xencons_driver)->minor_start = 64 + xc_num;
-		DRV(xencons_driver)->name_base   = 0 + xc_num;
-	} else if (xc_mode == XC_XVC) {
+	switch (xc_mode) {
+	case XC_XVC:
 		DRV(xencons_driver)->name        = "xvc";
-		DRV(xencons_driver)->major       = 250; /* FIXME: until lanana approves for 204:187 */
+		DRV(xencons_driver)->major       = XEN_XVC_MAJOR;
 		DRV(xencons_driver)->minor_start = XEN_XVC_MINOR;
 		DRV(xencons_driver)->name_base   = xc_num;
-	} else {
+		break;
+	case XC_SERIAL:
+		DRV(xencons_driver)->name        = "ttyS";
+		DRV(xencons_driver)->minor_start = 64 + xc_num;
+		DRV(xencons_driver)->name_base   = xc_num;
+		break;
+	default:
 		DRV(xencons_driver)->name        = "tty";
 		DRV(xencons_driver)->minor_start = 1;
 		DRV(xencons_driver)->name_base   = 1;
+		break;
 	}
 
 	tty_set_operations(xencons_driver, &xencons_ops);
@@ -707,18 +697,13 @@ static int __init xencons_init(void)
 	printk("Xen virtual console successfully installed as %s%d\n",
 	       DRV(xencons_driver)->name, xc_num);
 
-        /* Don't need to check about graphical fb for domain 0 */
-        if (is_initial_xendomain())
-	  return 0;
-
-	rc = 0;
-	if (xenbus_scanf(XBT_NIL, "console", "use_graphics", "%d", &rc) < 0)
-		printk(KERN_ERR "Unable to read console/use_graphics\n");
-	if (rc == 0) {
-               /* FIXME: this is ugly */
-	       unregister_console(&kcons_info);
-	       kcons_info.flags |= CON_CONSDEV;
-	       register_console(&kcons_info);
+        /* Check about framebuffer messing up the console */
+        if (!is_initial_xendomain() &&
+	    !xenbus_exists(XBT_NIL, "device", "vfb")) {
+		/* FIXME: this is ugly */
+		unregister_console(&kcons_info);
+		kcons_info.flags |= CON_CONSDEV;
+		register_console(&kcons_info);
 	}
 
 	return 0;

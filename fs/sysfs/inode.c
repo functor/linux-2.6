@@ -12,11 +12,12 @@
 #include <linux/namei.h>
 #include <linux/backing-dev.h>
 #include <linux/capability.h>
+#include <linux/errno.h>
 #include "sysfs.h"
 
 extern struct super_block * sysfs_sb;
 
-static struct address_space_operations sysfs_aops = {
+static const struct address_space_operations sysfs_aops = {
 	.readpage	= simple_readpage,
 	.prepare_write	= simple_prepare_write,
 	.commit_write	= simple_commit_write
@@ -54,11 +55,10 @@ int sysfs_setattr(struct dentry * dentry, struct iattr * iattr)
 
 	if (!sd_iattr) {
 		/* setting attributes for the first time, allocate now */
-		sd_iattr = kmalloc(sizeof(struct iattr), GFP_KERNEL);
+		sd_iattr = kzalloc(sizeof(struct iattr), GFP_KERNEL);
 		if (!sd_iattr)
 			return -ENOMEM;
 		/* assign default attributes */
-		memset(sd_iattr, 0, sizeof(struct iattr));
 		sd_iattr->ia_mode = sd->s_mode;
 		sd_iattr->ia_uid = 0;
 		sd_iattr->ia_gid = 0;
@@ -110,15 +110,26 @@ static inline void set_inode_attr(struct inode * inode, struct iattr * iattr)
 	inode->i_ctime = iattr->ia_ctime;
 }
 
+
+/*
+ * sysfs has a different i_mutex lock order behavior for i_mutex than other
+ * filesystems; sysfs i_mutex is called in many places with subsystem locks
+ * held. At the same time, many of the VFS locking rules do not apply to
+ * sysfs at all (cross directory rename for example). To untangle this mess
+ * (which gives false positives in lockdep), we're giving sysfs inodes their
+ * own class for i_mutex.
+ */
+static struct lock_class_key sysfs_inode_imutex_key;
+
 struct inode * sysfs_new_inode(mode_t mode, struct sysfs_dirent * sd)
 {
 	struct inode * inode = new_inode(sysfs_sb);
 	if (inode) {
-		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
 		inode->i_mapping->a_ops = &sysfs_aops;
 		inode->i_mapping->backing_dev_info = &sysfs_backing_dev_info;
 		inode->i_op = &sysfs_inode_operations;
+		lockdep_set_class(&inode->i_mutex, &sysfs_inode_imutex_key);
 
 		if (sd->s_iattr) {
 			/* sysfs_dirent has non-default attributes
@@ -176,8 +187,7 @@ const unsigned char * sysfs_get_name(struct sysfs_dirent *sd)
 	struct bin_attribute * bin_attr;
 	struct sysfs_symlink  * sl;
 
-	if (!sd || !sd->s_element)
-		BUG();
+	BUG_ON(!sd || !sd->s_element);
 
 	switch (sd->s_type) {
 		case SYSFS_DIR:
@@ -224,17 +234,18 @@ void sysfs_drop_dentry(struct sysfs_dirent * sd, struct dentry * parent)
 	}
 }
 
-void sysfs_hash_and_remove(struct dentry * dir, const char * name)
+int sysfs_hash_and_remove(struct dentry * dir, const char * name)
 {
 	struct sysfs_dirent * sd;
 	struct sysfs_dirent * parent_sd;
+	int found = 0;
 
 	if (!dir)
-		return;
+		return -ENOENT;
 
 	if (dir->d_inode == NULL)
 		/* no inode means this hasn't been made visible yet */
-		return;
+		return -ENOENT;
 
 	parent_sd = dir->d_fsdata;
 	mutex_lock(&dir->d_inode->i_mutex);
@@ -245,8 +256,11 @@ void sysfs_hash_and_remove(struct dentry * dir, const char * name)
 			list_del_init(&sd->s_sibling);
 			sysfs_drop_dentry(sd, dir);
 			sysfs_put(sd);
+			found = 1;
 			break;
 		}
 	}
 	mutex_unlock(&dir->d_inode->i_mutex);
+
+	return found ? 0 : -ENOENT;
 }
