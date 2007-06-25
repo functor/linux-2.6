@@ -17,7 +17,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 16
+%define sublevel 20
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
 %define release 38.vs_2_0_3_rc1.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
