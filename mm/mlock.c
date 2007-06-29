@@ -10,7 +10,6 @@
 #include <linux/mm.h>
 #include <linux/mempolicy.h>
 #include <linux/syscalls.h>
-#include <linux/vs_base.h>
 #include <linux/vs_memory.h>
 
 

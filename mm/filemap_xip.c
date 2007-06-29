@@ -13,7 +13,6 @@
 #include <linux/module.h>
 #include <linux/uio.h>
 #include <linux/rmap.h>
-#include <linux/vs_base.h>
 #include <linux/vs_memory.h>
 #include <asm/tlbflush.h>
 #include "filemap.h"

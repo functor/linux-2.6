@@ -18,13 +18,11 @@
 #include <linux/highmem.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/vs_base.h>
 #include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-
 
 static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
 {

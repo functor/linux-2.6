@@ -27,8 +27,6 @@
 #include <linux/personality.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
-#include <linux/vs_base.h>
-#include <linux/vs_memory.h>
 
 #include <asm/uaccess.h>
 #include <asm/tlb.h>
