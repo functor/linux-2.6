@@ -264,8 +264,7 @@ static void packet_sock_destruct(struct sock *sk)
 }
 
 
-static const
-struct proto_ops packet_ops;
+static const struct proto_ops packet_ops;
 
 #ifdef CONFIG_SOCK_PACKET
 static const struct proto_ops packet_ops_spkt;
@@ -1854,8 +1853,7 @@ static const struct proto_ops packet_ops_spkt = {
 };
 #endif
 
-static const
-struct proto_ops packet_ops = {
+static const struct proto_ops packet_ops = {
 	.family =	PF_PACKET,
 	.owner =	THIS_MODULE,
 	.release =	packet_release,
@@ -1876,8 +1874,7 @@ struct proto_ops packet_ops = {
 	.sendpage =	sock_no_sendpage,
 };
 
-static
-struct net_proto_family packet_family_ops = {
+static struct net_proto_family packet_family_ops = {
 	.family =	PF_PACKET,
 	.create =	packet_create,
 	.owner	=	THIS_MODULE,
