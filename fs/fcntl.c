@@ -18,7 +18,6 @@
 #include <linux/ptrace.h>
 #include <linux/signal.h>
 #include <linux/rcupdate.h>
-#include <linux/vs_base.h>
 #include <linux/vs_limit.h>
 
 #include <asm/poll.h>

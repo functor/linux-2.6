@@ -41,7 +41,6 @@
 #include <linux/proc_fs.h>
 #include <linux/vs_context.h>
 #include <asm/uaccess.h>
-#include <linux/vs_base.h>
 
 
 void get_filesystem(struct file_system_type *fs);
