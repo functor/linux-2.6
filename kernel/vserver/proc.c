@@ -19,10 +19,10 @@
 #include <linux/errno.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vs_cvirt.h>
+
 #include <linux/vserver/switch.h>
 #include <linux/vserver/global.h>
 

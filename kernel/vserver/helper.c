@@ -13,7 +13,6 @@
 #include <linux/kmod.h>
 #include <linux/sched.h>
 #include <linux/reboot.h>
-#include <linux/vs_base.h>
 #include <linux/vs_context.h>
 #include <linux/vs_network.h>
 #include <linux/vserver/signal.h>

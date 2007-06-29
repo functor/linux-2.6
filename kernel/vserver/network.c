@@ -18,7 +18,6 @@
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
 #include <net/tcp.h>
-#include <linux/vserver/network_cmd.h>
 
 #include <asm/errno.h>
 #include <linux/vserver/base.h>

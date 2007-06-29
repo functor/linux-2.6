@@ -14,7 +14,6 @@
 #include <linux/syscalls.h>
 #include <linux/vs_context.h>
 #include <asm/uaccess.h>
-#include <linux/vs_base.h>
 
 unsigned securebits = SECUREBITS_DEFAULT; /* systemwide security settings */
 kernel_cap_t cap_bset = CAP_INIT_EFF_SET;

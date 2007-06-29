@@ -15,11 +15,10 @@
 #include <linux/namei.h>
 #include <linux/statfs.h>
 #include <linux/compat.h>
-#include <linux/vs_base.h>
+#include <linux/vserver/switch.h>
 #include <linux/vs_context.h>
 #include <linux/vs_tag.h>
 #include <linux/vs_dlimit.h>
-#include <linux/vserver/switch.h>
 #include <linux/vserver/dlimit_cmd.h>
 
 #include <asm/errno.h>
