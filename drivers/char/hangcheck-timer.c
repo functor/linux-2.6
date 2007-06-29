@@ -58,7 +58,7 @@
 
 static int hangcheck_tick = DEFAULT_IOFENCE_TICK;
 static int hangcheck_margin = DEFAULT_IOFENCE_MARGIN;
-static int hangcheck_reboot = 1;  /* Defaults to reboot */
+static int hangcheck_reboot;  /* Defaults to not reboot */
 static int hangcheck_dump_tasks;  /* Defaults to not dumping SysRQ T */
 
 /* options - modular */
