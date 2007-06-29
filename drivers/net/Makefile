@@ -2,10 +2,6 @@
 # Makefile for the Linux network (ethercard) device drivers.
 #
 
-ifeq ($(CONFIG_ISDN_PPP),y)
-  obj-$(CONFIG_ISDN) += slhc.o
-endif
-
 obj-$(CONFIG_E1000) += e1000/
 obj-$(CONFIG_IBM_EMAC) += ibm_emac/
 obj-$(CONFIG_IXGB) += ixgb/
