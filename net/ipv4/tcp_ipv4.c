@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id$
+ * Version:	$Id: tcp_ipv4.c,v 1.240 2002/02/01 22:01:04 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -1655,7 +1655,6 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 
 process:
-
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
 
