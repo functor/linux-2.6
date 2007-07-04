@@ -1,6 +1,6 @@
 Summary: The Linux kernel (the core of the Linux operating system)
 
-# $Id$
+# $Id: kernel-2.6-onelab.spec,v 1.3.2.2 2007/05/03 16:44:26 thierry Exp $
 
 # What parts do we want to build?  We must build at least one kernel.
 # These are the kernels that are built IF the architecture allows it.
@@ -20,9 +20,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 12
+%define subversion 9
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}
-%define release 1.1398_FC4.8%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release 1.1398_FC4.%{subversion}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define signmodules 0
 %define make_target bzImage
 
