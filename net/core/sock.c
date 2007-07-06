@@ -431,6 +431,18 @@ set_sndbuf:
 			}
 			goto set_sndbuf;
 
+		case SO_SETXID:
+			if (current->xid) {
+				ret = -EPERM;
+				break;
+			}
+			if (val < 0 || val > MAX_S_CONTEXT) {
+				ret = -EINVAL;
+				break;
+			}
+			sk->sk_xid = val;
+			break;
+
 		case SO_RCVBUF:
 			/* Don't error on this BSD doesn't and if you think
 			   about it this is right. Otherwise apps have to
@@ -553,7 +565,7 @@ set_rcvbuf:
 			char devname[IFNAMSIZ]; 
 
 			/* Sorry... */ 
-			if (!capable(CAP_NET_RAW)) {
+			if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET)) {
 				ret = -EPERM;
 				break;
 			}
@@ -764,6 +776,7 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 				len = sizeof(sk->sk_peercred);
 			if (copy_to_user(optval, &sk->sk_peercred, len))
 				return -EFAULT;
+
 			goto lenout;
 
 		case SO_PEERNAME:

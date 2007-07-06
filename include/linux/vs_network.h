@@ -178,6 +178,12 @@ static inline void exit_nx_info(struct task_struct *p)
 }
 
 
+#ifdef CONFIG_NETWORK_SECMARK
+#define skb_tag secmark
+#else
+#define skb_tag mark
+#endif
+
 #else
 #warning duplicate inclusion
 #endif

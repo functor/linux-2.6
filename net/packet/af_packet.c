@@ -79,6 +79,7 @@
 #include <linux/poll.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/vs_network.h>
 
 #ifdef CONFIG_INET
 #include <net/inet_common.h>
@@ -444,6 +445,15 @@ static inline unsigned int run_filter(struct sk_buff *skb, struct sock *sk,
 				      unsigned int res)
 {
 	struct sk_filter *filter;
+	struct nx_info *nxi = sk->sk_nx_info;
+	int tag = skb->skb_tag;
+
+	vxdprintk(VXD_CBIT(net, 8),
+		"run_filter: %p[#%u] #%d %d",
+		nxi, nxi?nxi->nx_id:0, tag, res);
+	
+	if (nxi && !((tag == 1) || (nxi->nx_id == tag)))
+		return 0;
 
 	rcu_read_lock_bh();
 	filter = rcu_dereference(sk->sk_filter);
@@ -1005,7 +1015,7 @@ static int packet_create(struct socket *sock, int protocol)
 	__be16 proto = (__force __be16)protocol; /* weird, but documented */
 	int err;
 
-	if (!capable(CAP_NET_RAW))
+	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
 		return -EPERM;
 	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW
 #ifdef CONFIG_SOCK_PACKET

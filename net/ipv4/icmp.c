@@ -701,8 +701,8 @@ static void icmp_unreach(struct sk_buff *skb)
 	read_lock(&raw_v4_lock);
 	if ((raw_sk = sk_head(&raw_v4_htable[hash])) != NULL) {
 		while ((raw_sk = __raw_v4_lookup(raw_sk, protocol, iph->daddr,
-						 iph->saddr,
-						 skb->dev->ifindex)) != NULL) {
+						 iph->saddr, skb->dev->ifindex,
+						 skb->skb_tag)) != NULL) {
 			raw_err(raw_sk, skb, info);
 			raw_sk = sk_next(raw_sk);
 			iph = (struct iphdr *)skb->data;

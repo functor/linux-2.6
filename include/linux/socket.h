@@ -283,6 +283,8 @@ struct ucred {
 #define SOL_NETLINK	270
 #define SOL_TIPC	271
 
+#define SO_SETXID	SO_PEERCRED
+
 /* IPX options */
 #define IPX_TYPE	1
 

@@ -26,6 +26,13 @@
 #define NXF_INIT_SET		(NXF_STATE_ADMIN)
 
 
+/* network caps */
+
+#define NXC_RAW_ICMP		0x00000100
+#define NXC_RAW_SOCKET		0x00000200
+#define NXC_RAW_SEND		0x00000400
+
+
 /* address types */
 
 #define NXA_TYPE_IPV4		1

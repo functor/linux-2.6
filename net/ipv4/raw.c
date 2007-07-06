@@ -113,8 +113,17 @@ static inline int raw_addr_match (
 	struct nx_info *nxi,
 	uint32_t addr,
 	uint32_t saddr,
-	uint32_t baddr)
+	uint32_t baddr,
+	uint32_t tag)
 {
+	vxdprintk(VXD_CBIT(net, 8),
+		"raw_addr_match: %p[#%u] #%d"
+		" %u.%u.%u.%u/%u.%u.%u.%u/%u.%u.%u.%u",
+		nxi, nxi?nxi->nx_id:0, tag,
+		NIPQUAD(addr), NIPQUAD(saddr), NIPQUAD(baddr));
+	
+	if (nxi && !((tag == 1) || (nxi->nx_id == tag)))
+		return 0;
 	if (addr && (saddr == addr || baddr == addr))
 		return 1;
 	if (!saddr)
@@ -124,7 +133,7 @@ static inline int raw_addr_match (
 
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 			     __be32 raddr, __be32 laddr,
-			     int dif)
+			     int dif, int tag)
 {
 	struct hlist_node *node;
 
@@ -134,7 +143,7 @@ struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 		if (inet->num == num 					&&
 		    !(inet->daddr && inet->daddr != raddr) 		&&
 		    raw_addr_match(sk->sk_nx_info, laddr,
-			inet->rcv_saddr, inet->rcv_saddr2)		&&
+			inet->rcv_saddr, inet->rcv_saddr2, tag)		&&
 		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
 			goto found; /* gotcha */
 	}
@@ -183,7 +192,7 @@ int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 		goto out;
 	sk = __raw_v4_lookup(__sk_head(head), iph->protocol,
 			     iph->saddr, iph->daddr,
-			     skb->dev->ifindex);
+			     skb->dev->ifindex, skb->skb_tag);
 
 	while (sk) {
 		delivered = 1;
@@ -196,7 +205,7 @@ int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 		}
 		sk = __raw_v4_lookup(sk_next(sk), iph->protocol,
 				     iph->saddr, iph->daddr,
-				     skb->dev->ifindex);
+				     skb->dev->ifindex, skb->skb_tag);
 	}
 out:
 	read_unlock(&raw_v4_lock);
@@ -335,7 +344,7 @@ static int raw_send_hdrinc(struct sock *sk, void *from, size_t length,
 	}
 
 	err = -EPERM;
-	if (!nx_check(0, VS_ADMIN) && !capable(CAP_NET_RAW)
+	if (!nx_check(0, VS_ADMIN) && !nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET)
 		&& (!addr_in_nx_info(sk->sk_nx_info, iph->saddr)))
 		goto error_free;
 
