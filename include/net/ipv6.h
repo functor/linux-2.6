@@ -260,6 +260,7 @@ struct ipv6_txoptions *ipv6_fixup_options(struct ipv6_txoptions *opt_space,
 					  struct ipv6_txoptions *opt);
 
 extern int ipv6_opt_accepted(struct sock *sk, struct sk_buff *skb);
+extern int ipv6_dev_in_nx_info6(struct net_device *dev, struct nx_info *nxi);
 
 extern int ip6_frag_nqueues;
 extern atomic_t ip6_frag_mem;

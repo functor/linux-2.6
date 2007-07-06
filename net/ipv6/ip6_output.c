@@ -38,7 +38,6 @@
 #include <linux/in6.h>
 #include <linux/tcp.h>
 #include <linux/route.h>
-#include <linux/module.h>
 
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv6.h>
@@ -856,7 +855,8 @@ static int ip6_dst_lookup_tail(struct sock *sk,
 		goto out_err_release;
 
 	if (ipv6_addr_any(&fl->fl6_src)) {
-		err = ipv6_get_saddr(*dst, &fl->fl6_dst, &fl->fl6_src);
+		err = ipv6_get_saddr(*dst, &fl->fl6_dst, &fl->fl6_src, sk->sk_nx_info);
+
 		if (err)
 			goto out_err_release;
 	}

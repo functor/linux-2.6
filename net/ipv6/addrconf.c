@@ -917,7 +917,7 @@ static int inline ipv6_saddr_label(const struct in6_addr *addr, int type)
 }
 
 int ipv6_dev_get_saddr(struct net_device *daddr_dev,
-		       struct in6_addr *daddr, struct in6_addr *saddr)
+		       struct in6_addr *daddr, struct in6_addr *saddr, struct nx_info *nxi)
 {
 	struct ipv6_saddr_score hiscore;
 	struct inet6_ifaddr *ifa_result = NULL;
@@ -961,6 +961,11 @@ int ipv6_dev_get_saddr(struct net_device *daddr_dev,
 			struct ipv6_saddr_score score;
 
 			score.addr_type = __ipv6_addr_type(&ifa->addr);
+
+			/* Linux-VServer: only take into account addresses
+			   available in guest context! */
+			if (!addr6_in_nx_info(nxi, &ifa->addr))
+				continue;
 
 			/* Rule 0:
 			 * - Tentative Address (RFC2462 section 5.4)
@@ -1172,9 +1177,9 @@ record_it:
 
 
 int ipv6_get_saddr(struct dst_entry *dst,
-		   struct in6_addr *daddr, struct in6_addr *saddr)
+		   struct in6_addr *daddr, struct in6_addr *saddr, struct nx_info *nxi)
 {
-	return ipv6_dev_get_saddr(dst ? ip6_dst_idev(dst)->dev : NULL, daddr, saddr);
+	return ipv6_dev_get_saddr(dst ? ip6_dst_idev(dst)->dev : NULL, daddr, saddr, nxi);
 }
 
 
@@ -1277,26 +1282,48 @@ int ipv6_rcv_saddr_equal(const struct sock *sk, const struct sock *sk2)
 	int addr_type = ipv6_addr_type(sk_rcv_saddr6);
 	int addr_type2 = sk2_rcv_saddr6 ? ipv6_addr_type(sk2_rcv_saddr6) : IPV6_ADDR_MAPPED;
 
-	if (!sk2_rcv_saddr && !sk_ipv6only)
-		return 1;
+	if (sk->sk_nid != sk2->sk_nid) {
+		// either socket is in host context and bound to everything
+		if (sk->sk_nx_info == NULL && addr_type == IPV6_ADDR_ANY && !(sk_ipv6only && addr_type2 == IPV6_ADDR_MAPPED))
+			return 1;
+		if (sk2->sk_nx_info == NULL && addr_type2 == IPV6_ADDR_ANY && !(sk2_ipv6only && addr_type == IPV6_ADDR_MAPPED))
+			return 1;
+		// If both addresses are equal
+		if (sk2_rcv_saddr6 && ipv6_addr_equal(sk_rcv_saddr6, sk2_rcv_saddr6))
+			return 1;
+		// If one socket bound to everything and the addr bound by other socket is in first context
+		if (addr_type2 == IPV6_ADDR_ANY && !(addr_type == IPV6_ADDR_ANY || addr_type == IPV6_ADDR_MAPPED) &&
+		    addr6_in_nx_info(sk2->sk_nx_info, sk_rcv_saddr6))
+			return 1;
+		if (addr_type == IPV6_ADDR_ANY && !(addr_type2 == IPV6_ADDR_ANY || addr_type2 == IPV6_ADDR_MAPPED) &&
+		    sk2_rcv_saddr6 && addr6_in_nx_info(sk->sk_nx_info, sk2_rcv_saddr6))
+			return 1;
+		// both sockets are in guests and bound to everything with addr-overlap between guests
+		if (sk->sk_nx_info && sk2->sk_nx_info && addr_type == IPV6_ADDR_ANY && addr_type2 == IPV6_ADDR_ANY &&
+		    nx_addr6_conflict(sk->sk_nx_info, sk2->sk_nx_info))
+			return 1;
+		// TODO: handle the IPv4 addresses mapped in IPv6 completely...
+	} else {
+		if (!sk2_rcv_saddr && !sk_ipv6only)
+			return 1;
 
-	if (addr_type2 == IPV6_ADDR_ANY &&
-	    !(sk2_ipv6only && addr_type == IPV6_ADDR_MAPPED))
-		return 1;
+		if (addr_type2 == IPV6_ADDR_ANY &&
+		    !(sk2_ipv6only && addr_type == IPV6_ADDR_MAPPED))
+			return 1;
 
-	if (addr_type == IPV6_ADDR_ANY &&
-	    !(sk_ipv6only && addr_type2 == IPV6_ADDR_MAPPED))
-		return 1;
+		if (addr_type == IPV6_ADDR_ANY &&
+		    !(sk_ipv6only && addr_type2 == IPV6_ADDR_MAPPED))
+			return 1;
 
-	if (sk2_rcv_saddr6 &&
-	    ipv6_addr_equal(sk_rcv_saddr6, sk2_rcv_saddr6))
-		return 1;
+		if (sk2_rcv_saddr6 &&
+		    ipv6_addr_equal(sk_rcv_saddr6, sk2_rcv_saddr6))
+			return 1;
 
-	if (addr_type == IPV6_ADDR_MAPPED &&
-	    !sk2_ipv6only &&
-	    (!sk2_rcv_saddr || !sk_rcv_saddr || sk_rcv_saddr == sk2_rcv_saddr))
-		return 1;
-
+		if (addr_type == IPV6_ADDR_MAPPED &&
+		    !sk2_ipv6only &&
+		    (!sk2_rcv_saddr || !sk_rcv_saddr || sk_rcv_saddr == sk2_rcv_saddr))
+			return 1;
+	}
 	return 0;
 }
 
@@ -2744,8 +2771,9 @@ static int if6_seq_show(struct seq_file *seq, void *v)
 {
 	struct inet6_ifaddr *ifp = (struct inet6_ifaddr *)v;
 
-	/* no ipv6 inside a vserver for now */
-	if (nx_check(0, VS_ADMIN|VS_WATCH))
+ 	/* Only addresses visible to vserver context */
+ 	if (nx_check(0, VS_ADMIN|VS_WATCH) ||
+ 		addr6_in_nx_info(current_nx_info(), &ifp->addr))
 		seq_printf(seq,
 		   NIP6_SEQFMT " %02x %02x %02x %02x %8s\n",
 		   NIP6(ifp->addr),
@@ -3218,8 +3246,8 @@ static int inet6_dump_addr(struct sk_buff *skb, struct netlink_callback *cb,
 	struct ifmcaddr6 *ifmca;
 	struct ifacaddr6 *ifaca;
 
-	/* no ipv6 inside a vserver for now */
-	if (skb->sk && skb->sk->sk_vx_info)
+	/* no ipv6 inside a vserver if no addr set */
+	if (skb->sk && skb->sk->sk_nx_info && skb->sk->sk_nx_info->nbipv6 == 0)
 		return skb->len;
 
 	s_idx = cb->args[0];
@@ -3242,6 +3270,8 @@ static int inet6_dump_addr(struct sk_buff *skb, struct netlink_callback *cb,
 			     ifa = ifa->if_next, ip_idx++) {
 				if (ip_idx < s_ip_idx)
 					continue;
+				if (skb->sk && skb->sk->sk_nx_info && !addr6_in_nx_info(skb->sk->sk_nx_info, &ifa->addr))
+					continue; /* Skip addresses not in nx */
 				if ((err = inet6_fill_ifaddr(skb, ifa, 
 				    NETLINK_CB(cb->skb).pid, 
 				    cb->nlh->nlmsg_seq, RTM_NEWADDR,
@@ -3255,6 +3285,8 @@ static int inet6_dump_addr(struct sk_buff *skb, struct netlink_callback *cb,
 			     ifmca = ifmca->next, ip_idx++) {
 				if (ip_idx < s_ip_idx)
 					continue;
+				if (skb->sk && skb->sk->sk_nx_info && !addr6_in_nx_info(skb->sk->sk_nx_info, &ifmca->mca_addr))
+					continue; /* Skip addresses not in nx */
 				if ((err = inet6_fill_ifmcaddr(skb, ifmca, 
 				    NETLINK_CB(cb->skb).pid, 
 				    cb->nlh->nlmsg_seq, RTM_GETMULTICAST,
@@ -3268,6 +3300,8 @@ static int inet6_dump_addr(struct sk_buff *skb, struct netlink_callback *cb,
 			     ifaca = ifaca->aca_next, ip_idx++) {
 				if (ip_idx < s_ip_idx)
 					continue;
+				if (skb->sk && skb->sk->sk_nx_info && !addr6_in_nx_info(skb->sk->sk_nx_info, &ifaca->aca_addr))
+					continue; /* Skip addresses not in nx */
 				if ((err = inet6_fill_ifacaddr(skb, ifaca, 
 				    NETLINK_CB(cb->skb).pid, 
 				    cb->nlh->nlmsg_seq, RTM_GETANYCAST,
@@ -3494,13 +3528,15 @@ static int inet6_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	struct net_device *dev;
 	struct inet6_dev *idev;
 
-	/* no ipv6 inside a vserver for now */
-	if (skb->sk && skb->sk->sk_vx_info)
+	/* no ipv6 inside a vserver if no addr set */
+	if (skb->sk && skb->sk->sk_nx_info && skb->sk->sk_nx_info->nbipv6 == 0)
 		return skb->len;
 
 	read_lock(&dev_base_lock);
 	for (dev=dev_base, idx=0; dev; dev = dev->next, idx++) {
 		if (idx < s_idx)
+			continue;
+		if (skb->sk && skb->sk->sk_nx_info && !ipv6_dev_in_nx_info6(dev, skb->sk->sk_nx_info))
 			continue;
 		if ((idev = in6_dev_get(dev)) == NULL)
 			continue;

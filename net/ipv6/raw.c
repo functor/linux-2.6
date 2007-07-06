@@ -103,7 +103,8 @@ struct sock *__raw_v6_lookup(struct sock *sk, unsigned short num,
 				continue;
 
 			if (!ipv6_addr_any(&np->rcv_saddr)) {
-				if (ipv6_addr_equal(&np->rcv_saddr, loc_addr))
+				if (ipv6_addr_equal(&np->rcv_saddr, loc_addr) &&
+					addr6_in_nx_info(sk->sk_nx_info, loc_addr))
 					goto found;
 				if (is_multicast &&
 				    inet6_mc_check(sk, loc_addr, rmt_addr))
@@ -261,7 +262,19 @@ static int rawv6_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 				goto out;
 			}
 		}
-		
+
+			/* VServer: Only accept if we have the address available */
+		if (sk->sk_nx_info && !addr6_in_nx_info(sk->sk_nx_info, &addr->sin6_addr)) {
+			vxdprintk(VXD_CBIT(net, 3), "rawv6_bind(" NIP6_FMT ", %d): EADDRNOTAVAIL",
+			    NIP6(addr->sin6_addr), sk->sk_nx_info->nx_id);
+			err = -EADDRNOTAVAIL;
+			if (dev)
+				dev_put(dev);
+			goto out;
+		} else
+			vxdprintk(VXD_CBIT(net, 3), "rawv6_bind(" NIP6_FMT ", %d): PASS",
+			    NIP6(addr->sin6_addr), sk->sk_nx_info ? sk->sk_nx_info->nx_id : 0);
+
 		/* ipv4 addr of the socket is invalid.  Only the
 		 * unspecified and mapped address have a v4 equivalent.
 		 */
@@ -585,6 +598,11 @@ static int rawv6_send_hdrinc(struct sock *sk, void *from, int length,
 	if (err)
 		goto error_fault;
 
+	err = -EPERM;
+	if (!nx_check(0, VS_ADMIN) && !capable(CAP_NET_RAW)
+		&& (!addr6_in_nx_info(sk->sk_nx_info, &iph->saddr)))
+		goto error_free;
+
 	IP6_INC_STATS(rt->rt6i_idev, IPSTATS_MIB_OUTREQUESTS);
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
 		      dst_output);
@@ -597,6 +615,7 @@ out:
 
 error_fault:
 	err = -EFAULT;
+error_free:
 	kfree_skb(skb);
 error:
 	IP6_INC_STATS(rt->rt6i_idev, IPSTATS_MIB_OUTDISCARDS);

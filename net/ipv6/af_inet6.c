@@ -39,6 +39,7 @@
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
 #include <linux/init.h>
+#include <linux/vs_context.h>
 
 #include <linux/inet.h>
 #include <linux/netdevice.h>
@@ -147,9 +148,11 @@ lookup_protocol:
 	}
 
 	err = -EPERM;
+	if ((protocol == IPPROTO_ICMPV6) && vx_ccaps(VXC_RAW_ICMP))
+		goto override;
 	if (answer->capability > 0 && !capable(answer->capability))
 		goto out_rcu_unlock;
-
+override:
 	sock->ops = answer->ops;
 	answer_prot = answer->prot;
 	answer_no_check = answer->no_check;
@@ -233,6 +236,8 @@ lookup_protocol:
 		}
 	}
 out:
+	vxdprintk(VXD_CBIT(net, 4), "inet6_create(%p, %d): %d",
+	    sock, protocol, err);
 	return err;
 out_rcu_unlock:
 	rcu_read_unlock();
@@ -305,6 +310,18 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 					goto out;
 				}
 			}
+
+			/* VServer: Only accept if we have the address available */
+			if (sk->sk_nx_info && !addr6_in_nx_info(sk->sk_nx_info, &addr->sin6_addr)) {
+				vxdprintk(VXD_CBIT(net, 3), "inet6_bind(" NIP6_FMT ", %d): EADDRNOTAVAIL",
+				    NIP6(addr->sin6_addr), sk->sk_nx_info->nx_id);
+				err = -EADDRNOTAVAIL;
+				if (dev)
+					dev_put(dev);
+				goto out;
+			} else
+				vxdprintk(VXD_CBIT(net, 3), "inet6_bind(" NIP6_FMT ", %d): PASS",
+				    NIP6(addr->sin6_addr), sk->sk_nx_info ? sk->sk_nx_info->nx_id : 0);
 
 			/* ipv4 addr of the socket is invalid.  Only the
 			 * unspecified and mapped address have a v4 equivalent.
@@ -692,6 +709,31 @@ int ipv6_opt_accepted(struct sock *sk, struct sk_buff *skb)
 
 EXPORT_SYMBOL_GPL(ipv6_opt_accepted);
 
+int ipv6_dev_in_nx_info6(struct net_device *dev, struct nx_info *nxi) {
+	int ret = 0;
+
+	if (nxi->nbipv6 > 0) {
+		struct inet6_dev *in_dev;
+		struct inet6_ifaddr **ifap;
+		struct inet6_ifaddr *ifa;
+
+		in_dev = in6_dev_get(dev);
+		if (in_dev) {
+			for (ifap = &in_dev->addr_list; (ifa = *ifap) != NULL;
+				ifap = &ifa->if_next) {
+				if (addr6_in_nx_info(nxi, &(ifa->addr))) {
+					ret = 1;
+					break;
+				}
+			}
+			in6_dev_put(in_dev);
+		}
+	}
+	return ret;
+}
+
+EXPORT_SYMBOL_GPL(ipv6_dev_in_nx_info6);
+
 int
 snmp6_mib_init(void *ptr[2], size_t mibsize, size_t mibalign)
 {
@@ -759,6 +801,17 @@ static void cleanup_ipv6_mibs(void)
 	snmp6_mib_free((void **)udp_stats_in6);
 	snmp6_mib_free((void **)udplite_stats_in6);
 }
+
+#ifdef CONFIG_IPV6_MODULE
+static void vc_net_register_init(void)
+{
+	struct nx_ipv6_mod mymod = {
+		.dev_in_nx_info6 = ipv6_dev_in_nx_info6,
+		.owner = THIS_MODULE
+	};
+	vc_net_register_ipv6(&mymod);
+}
+#endif
 
 static int __init inet6_init(void)
 {
@@ -877,6 +930,11 @@ static int __init inet6_init(void)
 	tcpv6_init();
 
 	ipv6_packet_init();
+
+#ifdef CONFIG_IPV6_MODULE
+	vc_net_register_init();
+#endif
+
 	err = 0;
 out:
 	return err;
@@ -930,6 +988,9 @@ static void __exit inet6_exit(void)
 {
 	/* First of all disallow new sockets creation. */
 	sock_unregister(PF_INET6);
+#ifdef CONFIG_IPV6_MODULE
+	vc_net_unregister_ipv6();
+#endif
 #ifdef CONFIG_PROC_FS
 	if6_proc_exit();
 	ac6_proc_exit();

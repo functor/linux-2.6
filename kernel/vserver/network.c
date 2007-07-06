@@ -439,6 +439,27 @@ out:
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+
+#include <net/addrconf.h>
+
+int nx_addr6_conflict(struct nx_info *nxi, struct nx_info *nxi2)
+{
+	vxdprintk(VXD_CBIT(net, 2), "nx_addr6_conflict(%u,%u)",
+	    nxi ? nxi->nx_id : 0, nxi2 ? nxi2->nx_id : 0);
+
+	if (nxi && nxi2 && nxi->nbipv6 > 0 && nxi2->nbipv6 > 0) {
+		int i = 0;
+		for (i = 0; i < nxi->nbipv6; i++)
+			if (addr6_in_nx_info(nxi2, &(nxi->ipv6[i])))
+				return 1;
+	}
+	return 0;
+}
+
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
+
 int ifa_in_nx_info(struct in_ifaddr *ifa, struct nx_info *nxi)
 {
 	if (!nxi)
@@ -448,11 +469,86 @@ int ifa_in_nx_info(struct in_ifaddr *ifa, struct nx_info *nxi)
 	return addr_in_nx_info(nxi, ifa->ifa_local);
 }
 
+#ifdef CONFIG_IPV6_MODULE
+
+struct nx_ipv6_mod vc_net_ipv6 = {
+	.dev_in_nx_info6 = NULL,
+	.owner = NULL
+};
+
+#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT)
+static atomic_t nx_ipv6mod_lockct = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(nx_ipv6mod_lock);
+
+/* The strategy is: modifications of vc_net_ipv6 are short, do not
+   sleep and veeery rare, but read access should be free of any exclusive
+   locks. (copied from socket.c)
+   This should prevent any possible issues with module unloading!
+ */
+
+static void nx_ipv6mod_write_lock(void)
+{
+	spin_lock(&nx_ipv6mod_lock);
+	while (atomic_read(&nx_ipv6mod_lockct) != 0) {
+		spin_unlock(&nx_ipv6mod_lock);
+
+		yield();
+
+		spin_lock(&nx_ipv6mod_lock);
+	}
+}
+
+static __inline__ void nx_ipv6mod_write_unlock(void)
+{
+	spin_unlock(&nx_ipv6mod_lock);
+}
+
+static __inline__ void nx_ipv6mod_read_lock(void)
+{
+	atomic_inc(&nx_ipv6mod_lockct);
+	spin_unlock_wait(&nx_ipv6mod_lock);
+}
+
+static __inline__ void nx_ipv6mod_read_unlock(void)
+{
+	atomic_dec(&nx_ipv6mod_lockct);
+}
+
+#else
+#define nx_ipv6mod_write_lock() do { } while(0)
+#define nx_ipv6mod_write_unlock() do { } while(0)
+#define nx_ipv6mod_read_lock() do { } while(0)
+#define nx_ipv6mod_read_unlock() do { } while(0)
+#endif
+
+void vc_net_register_ipv6(struct nx_ipv6_mod *modv6) {
+	nx_ipv6mod_write_lock();
+	memcpy(&vc_net_ipv6, modv6, sizeof(struct nx_ipv6_mod));
+	nx_ipv6mod_write_unlock();
+}
+
+void vc_net_unregister_ipv6() {
+	nx_ipv6mod_write_lock();
+	memset(&vc_net_ipv6, 0, sizeof(struct nx_ipv6_mod));
+	nx_ipv6mod_write_unlock();
+}
+
+inline int dev_in_nx_info6(struct net_device *dev, struct nx_info *nxi) {
+	nx_ipv6mod_read_lock();
+	if (try_module_get(vc_net_ipv6.owner)) {
+		if (vc_net_ipv6.dev_in_nx_info6)
+			return vc_net_ipv6.dev_in_nx_info6(dev, nxi);
+		else
+			return 0;
+		module_put(vc_net_ipv6.owner);
+	} else
+		return 0;
+	nx_ipv6mod_read_unlock();
+}
+#endif
+
 int dev_in_nx_info(struct net_device *dev, struct nx_info *nxi)
 {
-	struct in_device *in_dev;
-	struct in_ifaddr **ifap;
-	struct in_ifaddr *ifa;
 	int ret = 0;
 
 	if (!nxi)
@@ -460,18 +556,33 @@ int dev_in_nx_info(struct net_device *dev, struct nx_info *nxi)
 
 	if (!dev)
 		goto out;
-	in_dev = in_dev_get(dev);
-	if (!in_dev)
-		goto out;
 
-	for (ifap = &in_dev->ifa_list; (ifa = *ifap) != NULL;
-		ifap = &ifa->ifa_next) {
-		if (addr_in_nx_info(nxi, ifa->ifa_local)) {
-			ret = 1;
-			break;
+	if (nxi->nbipv4 > 0) {
+		struct in_device *in_dev;
+		struct in_ifaddr **ifap;
+		struct in_ifaddr *ifa;
+
+		in_dev = in_dev_get(dev);
+		if (in_dev) {
+			for (ifap = &in_dev->ifa_list; (ifa = *ifap) != NULL;
+					ifap = &ifa->ifa_next) {
+				if (addr_in_nx_info(nxi, ifa->ifa_local)) {
+					ret = 1;
+					break;
+				}
+			}
+			in_dev_put(in_dev);
 		}
 	}
-	in_dev_put(in_dev);
+
+#if defined(CONFIG_IPV6_MODULE)
+	if (ret == 0)
+		ret = dev_in_nx_info6(dev, nxi);
+#elif defined(CONFIG_IPV6)
+	if (ret == 0)
+		ret = ipv6_dev_in_nx_info6(dev, nxi);
+#endif
+
 out:
 	return ret;
 }
@@ -488,8 +599,8 @@ static inline int __addr_in_socket(const struct sock *sk, uint32_t addr)
 	uint32_t saddr = inet_rcv_saddr(sk);
 
 	vxdprintk(VXD_CBIT(net, 5),
-		"__addr_in_socket(%p,%d.%d.%d.%d) %p:%d.%d.%d.%d %p;%lx",
-		sk, VXD_QUAD(addr), nxi, VXD_QUAD(saddr), sk->sk_socket,
+		"__addr_in_socket(%p," NIPQUAD_FMT ") %p:" NIPQUAD_FMT " %p;%lx",
+		sk, NIPQUAD(addr), nxi, NIPQUAD(saddr), sk->sk_socket,
 		(sk->sk_socket?sk->sk_socket->flags:0));
 
 	if (saddr) {
@@ -508,8 +619,8 @@ static inline int __addr_in_socket(const struct sock *sk, uint32_t addr)
 int nx_addr_conflict(struct nx_info *nxi, uint32_t addr, const struct sock *sk)
 {
 	vxdprintk(VXD_CBIT(net, 2),
-		"nx_addr_conflict(%p,%p) %d.%d,%d.%d",
-		nxi, sk, VXD_QUAD(addr));
+		"nx_addr_conflict(%p,%p) " NIPQUAD_FMT,
+		nxi, sk, NIPQUAD(addr));
 
 	if (addr) {
 		/* check real address */
@@ -645,6 +756,40 @@ int vc_net_migrate(struct nx_info *nxi, void __user *data)
 	return nx_migrate_task(current, nxi);
 }
 
+/*
+ * Lookup address/mask pair in list of v4 addresses
+ * Returns position if found, -1 if not found
+ */
+int vc_net_find_v4(const struct nx_info *nxi, uint32_t addr, uint32_t mask)
+{
+	int ret = nxi->nbipv4 - 1;
+	while (ret >= 0) {
+		if (nxi->ipv4[ret] == addr && nxi->mask[ret] == mask)
+			break;
+		else
+			ret--;
+	}
+	return ret;
+}
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+/*
+ * Lookup address/prefix pair list of v6 addresses
+ * Returns position if found, -1 if not found
+ */
+int vc_net_find_v6(const struct nx_info *nxi, const struct in6_addr *addr, int prefix)
+{
+	int ret = nxi->nbipv6 - 1;
+	while (ret >= 0) {
+		if (memcmp(&(nxi->ipv6[ret]), addr, sizeof(struct in6_addr)) == 0 && nxi->prefix6[ret] == prefix)
+			break;
+		else
+			ret--;
+	}
+	return ret;
+}
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
+
 int vc_net_add(struct nx_info *nxi, void __user *data)
 {
 	struct vcmd_net_addr_v0 vc_data;
@@ -659,6 +804,14 @@ int vc_net_add(struct nx_info *nxi, void __user *data)
 			return -EINVAL;
 		break;
 
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	case NXA_TYPE_IPV6:
+		/* Note: all 4 items of IP and MASK must be set, but its 1 IPv6 address  */
+		if ((vc_data.count != 1))
+			return -EINVAL;
+		break;
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
+
 	default:
 		break;
 	}
@@ -666,20 +819,50 @@ int vc_net_add(struct nx_info *nxi, void __user *data)
 	switch (vc_data.type) {
 	case NXA_TYPE_IPV4:
 		index = 0;
+		ret = 0;
 		while ((index < vc_data.count) &&
 			((pos = nxi->nbipv4) < NB_IPV4ROOT)) {
-			nxi->ipv4[pos] = vc_data.ip[index];
-			nxi->mask[pos] = vc_data.mask[index];
+			if (vc_net_find_v4(nxi, vc_data.ip[index].s_addr, vc_data.mask[index].s_addr) == -1) {
+				/* Only add if address is new */
+				vxdprintk(VXD_CBIT(nid, 1), "vc_net_add(%d, data[%d]): " NIPQUAD_FMT,
+					nxi->nx_id, index, NIPQUAD(vc_data.ip[index].s_addr));
+				nxi->ipv4[pos] = vc_data.ip[index].s_addr;
+				nxi->mask[pos] = vc_data.mask[index].s_addr;
+				nxi->nbipv4++;
+				ret++;
+			} else
+				vxdprintk(VXD_CBIT(nid, 1), "vc_net_add(%d, data[%d]): " NIPQUAD_FMT " EXISTS",
+					nxi->nx_id, index, NIPQUAD(vc_data.ip[index].s_addr));
 			index++;
-			nxi->nbipv4++;
 		}
 		ret = index;
 		break;
 
 	case NXA_TYPE_IPV4|NXA_MOD_BCAST:
-		nxi->v4_bcast = vc_data.ip[0];
+		nxi->v4_bcast = vc_data.ip[0].s_addr;
 		ret = 1;
 		break;
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	case NXA_TYPE_IPV6:
+		index = 0;
+		ret = 0;
+		while (nxi->nbipv6 < NB_IPV6ROOT && index < vc_data.count) {
+			if (vc_net_find_v6(nxi, &vc_data.ip6, vc_data.prefix) == -1) {
+				/* Only add if address is new */
+				vxdprintk(VXD_CBIT(nid, 1), "vc_net_add(%d, data[%d]): " NIP6_FMT,
+					nxi->nx_id, index, NIP6(vc_data.ip6));
+				nxi->ipv6[nxi->nbipv6] = vc_data.ip6;
+				nxi->prefix6[nxi->nbipv6] = vc_data.prefix;
+				nxi->nbipv6++;
+				ret++;
+			} else
+				vxdprintk(VXD_CBIT(nid, 1), "vc_net_add(%d, data[%d]): " NIP6_FMT " EXISTS",
+					nxi->nx_id, index, NIP6(vc_data.ip6));
+			index++;
+		}
+		break;
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
 
 	default:
 		ret = -EINVAL;
@@ -691,19 +874,68 @@ int vc_net_add(struct nx_info *nxi, void __user *data)
 int vc_net_remove(struct nx_info * nxi, void __user *data)
 {
 	struct vcmd_net_addr_v0 vc_data;
+	int index, pos, ret = 0;
 
 	if (data && copy_from_user (&vc_data, data, sizeof(vc_data)))
 		return -EFAULT;
 
 	switch (vc_data.type) {
 	case NXA_TYPE_ANY:
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+		ret = nxi->nbipv6;
+		nxi->nbipv6 = 0;
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
+		ret += nxi->nbipv4;
 		nxi->nbipv4 = 0;
 		break;
 
+	case NXA_TYPE_IPV4:
+		index = 0;
+		ret = 0;
+		while (index < vc_data.count) {
+			pos = vc_net_find_v4(nxi, vc_data.ip[index].s_addr, vc_data.mask[index].s_addr);
+			if (pos >= 0) {
+				nxi->nbipv4--;
+				ret++;
+				vxdprintk(VXD_CBIT(nid, 1), "vc_net_remove(%d, data[%d]): " NIPQUAD_FMT,
+						nxi->nx_id, index, NIPQUAD(vc_data.ip[index].s_addr));
+			}
+			while (pos >= 0 && pos < nxi->nbipv4) {
+				nxi->ipv4[pos] = nxi->ipv4[pos+1];
+				nxi->mask[pos] = nxi->mask[pos+1];
+				pos++;
+			}
+			index++;
+		}
+		break;
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	case NXA_TYPE_IPV6:
+		index = 0;
+		ret = 0;
+		while (index < vc_data.count) {
+			pos = vc_net_find_v6(nxi, &(vc_data.ip6), vc_data.prefix);
+			if (pos >= 0) {
+				nxi->nbipv6--;
+				ret++;
+				vxdprintk(VXD_CBIT(nid, 1), "vc_net_remove(%d, data[%d]): " NIP6_FMT " EXISTS",
+						nxi->nx_id, index, NIP6(vc_data.ip6));
+			}
+			while (pos >= 0 && pos < nxi->nbipv6) {
+				nxi->ipv6[pos] = nxi->ipv6[pos+1];
+				nxi->prefix6[pos] = nxi->prefix6[pos+1];
+				pos++;
+			}
+			index++;
+		}
+		break;
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
+
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
-	return 0;
+	return ret;
 }
 
 int vc_get_nflags(struct nx_info *nxi, void __user *data)
@@ -770,3 +1002,10 @@ int vc_set_ncaps(struct nx_info *nxi, void __user *data)
 EXPORT_SYMBOL_GPL(free_nx_info);
 EXPORT_SYMBOL_GPL(unhash_nx_info);
 
+#ifdef CONFIG_IPV6_MODULE
+EXPORT_SYMBOL_GPL(nx_addr6_conflict);
+EXPORT_SYMBOL_GPL(vc_net_register_ipv6);
+EXPORT_SYMBOL_GPL(vc_net_unregister_ipv6);
+#elif defined(CONFIG_IPV6)
+EXPORT_SYMBOL_GPL(nx_addr6_conflict);
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */

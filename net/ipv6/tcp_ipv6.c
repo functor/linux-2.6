@@ -160,8 +160,19 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
   	 *	connect() to INADDR_ANY means loopback (BSD'ism).
   	 */
   	
-  	if(ipv6_addr_any(&usin->sin6_addr))
-		usin->sin6_addr.s6_addr[15] = 0x1; 
+	if(ipv6_addr_any(&usin->sin6_addr)) {
+		if (sk->sk_nx_info) {
+			if (sk->sk_nx_info->nbipv6) {
+				/* Linux-VServer: redirects to first IPv6 address set for guest
+				   TODO: search for existing loopback address in guest context... */
+				usin->sin6_addr = sk->sk_nx_info->ipv6[0];
+				vxdprintk(VXD_CBIT(net, 4), "tcp_v6_connect(dest ::1 redirected to: " NIP6_FMT ", %d)",
+						NIP6(usin->sin6_addr), sk->sk_nx_info->nx_id);
+			} else
+				return -ENETUNREACH;
+		} else
+			usin->sin6_addr.s6_addr[15] = 0x1;
+	}
 
 	addr_type = ipv6_addr_type(&usin->sin6_addr);
 

@@ -102,6 +102,26 @@ hit:
 }
 EXPORT_SYMBOL(__inet6_lookup_established);
 
+/*
+ *      Check if a given address matches for an inet socket
+ *
+ *      nxi:    the socket's nx_info if any
+ *      addr:   to be verified address
+ *      saddr:  socket addresses
+ */
+static inline int inet6_addr_match(
+	struct nx_info *nxi,
+	const struct in6_addr *addr,
+	const struct in6_addr *saddr)
+{
+	if ((addr->s6_addr32[0] || addr->s6_addr32[1] || addr->s6_addr32[2] || addr->s6_addr32[3]) &&
+			memcmp(saddr,addr, sizeof(struct in6_addr)) == 0)
+		return 1;
+	if (!(saddr->s6_addr32[0] || saddr->s6_addr32[1] || saddr->s6_addr32[2] || saddr->s6_addr32[3]))
+		return addr6_in_nx_info(nxi, addr);
+	return 0;
+}
+
 struct sock *inet6_lookup_listener(struct inet_hashinfo *hashinfo,
 				   const struct in6_addr *daddr,
 				   const unsigned short hnum, const int dif)
@@ -126,6 +146,10 @@ struct sock *inet6_lookup_listener(struct inet_hashinfo *hashinfo,
 				if (sk->sk_bound_dev_if != dif)
 					continue;
 				score++;
+			}
+			if (!inet6_addr_match(sk->sk_nx_info, daddr, &(np->rcv_saddr))) {
+				/* No, this address is not available for guest */
+				continue;
 			}
 			if (score == 3) {
 				result = sk;

@@ -9,7 +9,7 @@
 #define NX_DYNAMIC_ID	((uint32_t)-1)		/* id for dynamic context */
 
 #define NB_IPV4ROOT	16
-
+#define NB_IPV6ROOT	16
 
 /* network flags */
 
@@ -49,7 +49,9 @@
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
 #include <asm/atomic.h>
-
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#include <linux/in6.h>
+#endif
 
 struct nx_info {
 	struct hlist_node nx_hlist;	/* linked list of nxinfos */
@@ -70,10 +72,29 @@ struct nx_info {
 					/* Used to select the proper source */
 					/* address for sockets */
 	__u32 v4_bcast;			/* Broadcast address to receive UDP  */
-
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	int nbipv6;
+	struct in6_addr ipv6[NB_IPV6ROOT];	/* equivalent to ipv4, but for IPv6 */
+	int prefix6[NB_IPV6ROOT];	/* IPv6 prefix length (in bits) */
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
 	char nx_name[65];		/* network context name */
 };
 
+struct net_device;
+
+#ifdef CONFIG_IPV6_MODULE
+
+struct nx_ipv6_mod {
+	struct module   *owner;
+	/* Function to check if dev in network context through IPv6 address */
+	int (*dev_in_nx_info6)(struct net_device *dev, struct nx_info *nxi);
+};
+
+extern void vc_net_register_ipv6(struct nx_ipv6_mod *modv6);
+
+extern void vc_net_unregister_ipv6(void);
+
+#endif
 
 /* status flags */
 
@@ -111,7 +132,6 @@ extern int nx_migrate_task(struct task_struct *, struct nx_info *);
 extern long vs_net_change(struct nx_info *, unsigned int);
 
 struct in_ifaddr;
-struct net_device;
 
 #ifdef CONFIG_INET
 int ifa_in_nx_info(struct in_ifaddr *, struct nx_info *);

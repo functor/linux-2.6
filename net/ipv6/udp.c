@@ -58,6 +58,17 @@ static inline int udp_v6_get_port(struct sock *sk, unsigned short snum)
 	return udp_get_port(sk, snum, ipv6_rcv_saddr_equal);
 }
 
+static inline int udp_v6_in_list(struct nx_info *nx_info, struct in6_addr *addr)
+{
+	int n = nx_info->nbipv6;
+	int i;
+
+	for (i=0; i<n; i++)
+		if (ipv6_addr_equal(&nx_info->ipv6[i], addr))
+			return 1;
+	return 0;
+}
+
 static struct sock *__udp6_lib_lookup(struct in6_addr *saddr, __be16 sport,
 				      struct in6_addr *daddr, __be16 dport,
 				      int dif, struct hlist_head udptable[])
@@ -83,6 +94,11 @@ static struct sock *__udp6_lib_lookup(struct in6_addr *saddr, __be16 sport,
 				if (!ipv6_addr_equal(&np->rcv_saddr, daddr))
 					continue;
 				score++;
+			} else if (sk->sk_nx_info) {
+				if (udp_v6_in_list(sk->sk_nx_info, daddr))
+					score++;
+				else
+					continue;
 			}
 			if (!ipv6_addr_any(&np->daddr)) {
 				if (!ipv6_addr_equal(&np->daddr, saddr))

@@ -35,11 +35,26 @@ struct  vcmd_net_create {
 #define VCMD_net_add		VC_CMD(NETALT, 1, 0)
 #define VCMD_net_remove		VC_CMD(NETALT, 2, 0)
 
+#ifdef __KERNEL__
+#include <linux/in.h>
+#include <linux/in6.h>
+#else
+#include <arpa/inet.h>
+#endif /* __KERNEL__ */
+
 struct	vcmd_net_addr_v0 {
 	uint16_t type;
 	uint16_t count;
-	uint32_t ip[4];
-	uint32_t mask[4];
+	union {
+		struct {
+			struct in_addr ip[4];
+			struct in_addr mask[4];
+		};
+		struct {
+			struct in6_addr ip6;
+			uint32_t prefix;
+		};
+	};
 	/* more to come */
 };
 

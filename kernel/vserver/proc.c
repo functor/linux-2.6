@@ -187,6 +187,13 @@ int proc_nxi_info (struct nx_info *nxi, char *buffer)
 			"%d:\t" NIPQUAD_FMT "/" NIPQUAD_FMT "\n", i,
 			NIPQUAD(nxi->ipv4[i]), NIPQUAD(nxi->mask[i]));
 	}
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	for (i=0; i<nxi->nbipv6;i++) {
+		length += sprintf(buffer + length,
+			"%d:\t" NIP6_FMT "/%d\n", i,
+			NIP6(nxi->ipv6[i]), nxi->prefix6[i]);
+	}
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
 	return length;
 }
 

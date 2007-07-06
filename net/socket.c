@@ -94,6 +94,7 @@
 #include <linux/netfilter.h>
 #include <linux/vs_base.h>
 #include <linux/vs_socket.h>
+#include <linux/vs_network.h>
 
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
@@ -1096,9 +1097,14 @@ static int __sock_create(int family, int type, int protocol,
 	if (type < 0 || type >= SOCK_MAX)
 		return -EINVAL;
 
-	/* disable IPv6 inside vservers for now */
-	if (family == PF_INET6 && !nx_check(0, VS_ADMIN))
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	/* disable IPv6 inside vservers that have no IPv6 address configured */
+	if (family == PF_INET6 && current_nx_info() && current_nx_info()->nbipv6 == 0) {
+		vxdprintk(VXD_CBIT(net, 4), "__sock_create(%d, %d, %d, %p, %d): EAFNOSUPPORT",
+		    family, type, protocol, res, kern);
 		return -EAFNOSUPPORT;
+	}
+#endif
 
 	/* Compatibility.
 

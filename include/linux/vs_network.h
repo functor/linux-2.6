@@ -162,6 +162,9 @@ static inline int addr_in_nx_info(struct nx_info *nxi, uint32_t addr)
 		return 1;
 
 	n = nxi->nbipv4;
+	/* Special case accept anything if addr[0] == ::
+	 * FIXME either accept this on any position or adjust address
+	 * addition in kernel/vserver/network.c */
 	if (n && (nxi->ipv4[0] == 0))
 		return 1;
 	for (i=0; i<n; i++) {
@@ -177,6 +180,34 @@ static inline void exit_nx_info(struct task_struct *p)
 		release_nx_info(p->nx_info, p);
 }
 
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+
+#include <net/ipv6.h>
+
+static inline int addr6_in_nx_info(struct nx_info *nxi, const struct in6_addr *addr)
+{
+	int n,i;
+
+	if (!nxi)
+		return 1;
+
+	n = nxi->nbipv6;
+	/* Special case accept anything if addr[0] == :: 
+	 * FIXME either accept this on any position or adjust address
+	 * addition in kernel/vserver/network.c */
+	if (n && nxi->ipv6[0].s6_addr32[0] == 0 && nxi->ipv6[0].s6_addr32[1] == 0 &&
+			nxi->ipv6[0].s6_addr32[2] == 0 && nxi->ipv6[0].s6_addr32[3] == 0)
+		return 1;
+	for (i=0; i<n; i++) {
+		if (ipv6_addr_equal(&(nxi->ipv6[i]), addr))
+			return 1;
+	}
+	return 0;
+}
+
+extern int nx_addr6_conflict(struct nx_info *nxi, struct nx_info *nix2);
+
+#endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
 
 #ifdef CONFIG_NETWORK_SECMARK
 #define skb_tag secmark
