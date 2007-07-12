@@ -15,6 +15,7 @@
 #include <linux/namei.h>
 #include <linux/mount.h>
 #include <linux/parser.h>
+#include <linux/file.h>
 #include <linux/compat.h>
 #include <linux/vserver/inode.h>
 #include <linux/vserver/inode_cmd.h>
@@ -121,6 +122,30 @@ int vc_get_iattr_x32(uint32_t id, void __user *data)
 }
 
 #endif	/* CONFIG_COMPAT */
+
+
+int vc_fget_iattr(uint32_t fd, void __user *data)
+{
+	struct file *filp;
+	struct vcmd_ctx_fiattr_v0 vc_data = { .xid = -1 };
+	int ret;
+
+	if (copy_from_user (&vc_data, data, sizeof(vc_data)))
+		return -EFAULT;
+
+	filp = fget(fd);
+	if (!filp || !filp->f_dentry || !filp->f_dentry->d_inode)
+		return -EBADF;
+
+	ret = __vc_get_iattr(filp->f_dentry->d_inode,
+		&vc_data.xid, &vc_data.flags, &vc_data.mask);
+
+	fput(filp);
+
+	if (copy_to_user (data, &vc_data, sizeof(vc_data)))
+		ret = -EFAULT;
+	return ret;
+}
 
 
 static int __vc_set_iattr(struct dentry *de, uint32_t *tag, uint32_t *flags, uint32_t *mask)
@@ -249,35 +274,28 @@ int vc_set_iattr_x32(uint32_t id, void __user *data)
 
 #endif	/* CONFIG_COMPAT */
 
-/* required by PLK */
-int vc_iattr_ioctl(struct dentry *de, unsigned int cmd, unsigned long arg)
+int vc_fset_iattr(uint32_t fd, void __user *data)
 {
-	void __user *data = (void __user *)arg;
-	struct vcmd_ctx_iattr_v1 vc_data;
+	struct file *filp;
+	struct vcmd_ctx_fiattr_v0 vc_data;
 	int ret;
 
-	/*
-	 * I don't think we need any dget/dput pairs in here as long as
-	 * this function is always called from sys_ioctl i.e., de is
-         * a field of a struct file that is guaranteed not to be freed.
-	 */
-	if (cmd == FIOC_SETIATTR) {
-		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_LINUX_IMMUTABLE))
-			return -EPERM;
-		if (copy_from_user (&vc_data, data, sizeof(vc_data)))
-			return -EFAULT;
-		ret = __vc_set_iattr(de,
-			&vc_data.xid, &vc_data.flags, &vc_data.mask);
-	}
-	else {
-		if (!vx_check(0, VS_ADMIN))
-			return -ENOSYS;
-		ret = __vc_get_iattr(de->d_inode,
-			&vc_data.xid, &vc_data.flags, &vc_data.mask);
-	}
+	if (!capable(CAP_LINUX_IMMUTABLE))
+		return -EPERM;
+	if (copy_from_user(&vc_data, data, sizeof(vc_data)))
+		return -EFAULT;
 
-	if (!ret && copy_to_user (data, &vc_data, sizeof(vc_data)))
-		ret = -EFAULT;
+	filp = fget(fd);
+	if (!filp || !filp->f_dentry || !filp->f_dentry->d_inode)
+		return -EBADF;
+
+	ret = __vc_set_iattr(filp->f_dentry, &vc_data.xid,
+		&vc_data.flags, &vc_data.mask);
+
+	fput(filp);
+
+	if (copy_to_user(data, &vc_data, sizeof(vc_data)))
+		return -EFAULT;
 	return ret;
 }
 
