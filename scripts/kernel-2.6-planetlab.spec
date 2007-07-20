@@ -294,7 +294,7 @@ BuildKernel() {
     # create a clean copy in BUILD/ (for backward compatibility with
     # other RPMs that bootstrap off of the kernel build)
     cd $RPM_BUILD_DIR
-    rm -rf linux-%{kversion}$Flavour
+    rm -rf linux-%{_target_cpu}-%{kversion}$Flavour
     cp -rl kernel-%{kversion}/vanilla linux-%{_target_cpu}-%{kversion}$Flavour
     cd linux-%{_target_cpu}-%{kversion}$Flavour
 
