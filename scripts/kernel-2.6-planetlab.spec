@@ -467,14 +467,24 @@ mkdir -p $RPM_BUILD_ROOT/boot
 BuildKernel %make_target %kernel_arch
 %endif
 
-%if %{buildsmp} && "%{_target_cpu}" == "i686"
+%if "%{_target_cpu}" == "i686"
+%if %{buildsmp} 
 BuildKernel %make_target %kernel_arch smp
-BuildKernel linux um uml
-BuildKernel vmlinuz %kernel_arch xenU
 %endif
 
-%if %{buildsmp} && "%{_target_cpu}" == "x86_64"
+%if %{builduml}
+BuildKernel linux um uml
+%endif
+
+%if %{buildxen}
+BuildKernel vmlinuz %kernel_arch xenU
+%endif
+%endif
+
+%if "%{_target_cpu}" == "x86_64"
+%if %{buildsmp} 
 BuildKernel %make_target %kernel_arch smp
+%endif
 %endif
 
 ###
