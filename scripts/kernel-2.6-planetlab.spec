@@ -680,7 +680,8 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %verify(not mtime) /usr/src/kernels/%{KVERREL}-%{_target_cpu}
 %endif
 
-%if %{buildsmp} && "%{_target_cpu}" == "i686"
+%if %{buildsmp} 
+%if "%{_target_cpu}" == "i686" || "%{_target_cpu}" == "x86_64"
 %files smp
 %defattr(-,root,root)
 /%{image_install_path}/vmlinuz-%{KVERREL}smp
@@ -697,6 +698,7 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %defattr(-,root,root)
 %verify(not mtime) /usr/src/kernels/%{KVERREL}-smp-%{_target_cpu}
 /usr/src/kernels/%{KVERREL}smp-%{_target_cpu}
+%endif
 %endif
 
 %if %{builduml} && "%{_target_cpu}" == "i686"
