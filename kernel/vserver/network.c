@@ -909,6 +909,11 @@ int vc_net_remove(struct nx_info * nxi, void __user *data)
 		}
 		break;
 
+	case NXA_TYPE_IPV4|NXA_MOD_ALL:
+		ret = nxi->nbipv4;
+		nxi->nbipv4 = 0;
+		break;
+
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	case NXA_TYPE_IPV6:
 		index = 0;
@@ -928,6 +933,11 @@ int vc_net_remove(struct nx_info * nxi, void __user *data)
 			}
 			index++;
 		}
+		break;
+
+	case NXA_TYPE_IPV6|NXA_MOD_ALL:
+		ret = nxi->nbipv6;
+		nxi->nbipv6 = 0;
 		break;
 #endif /* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
 
