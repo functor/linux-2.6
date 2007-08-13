@@ -534,16 +534,17 @@ void vc_net_unregister_ipv6() {
 }
 
 inline int dev_in_nx_info6(struct net_device *dev, struct nx_info *nxi) {
+	int ret = 0;
+
 	nx_ipv6mod_read_lock();
 	if (try_module_get(vc_net_ipv6.owner)) {
 		if (vc_net_ipv6.dev_in_nx_info6)
-			return vc_net_ipv6.dev_in_nx_info6(dev, nxi);
-		else
-			return 0;
+			ret = vc_net_ipv6.dev_in_nx_info6(dev, nxi);
 		module_put(vc_net_ipv6.owner);
-	} else
-		return 0;
+	}
 	nx_ipv6mod_read_unlock();
+
+	return ret;
 }
 #endif
 
