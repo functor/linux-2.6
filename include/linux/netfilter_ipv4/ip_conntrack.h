@@ -104,6 +104,9 @@ struct ip_conntrack
 	/* Storage reserved for other modules: */
 	union ip_conntrack_proto proto;
 
+	/* PLANETLAB. VNET-specific */
+	xid_t xid[IP_CT_DIR_MAX];
+
 	union ip_conntrack_help help;
 
 #ifdef CONFIG_IP_NF_NAT_NEEDED

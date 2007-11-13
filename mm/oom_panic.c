@@ -9,7 +9,7 @@
  *
  * Mark Huang <mlhuang@cs.princeton.edu>
  *
- * $Id$
+ * $Id: oom_panic.c,v 1.1 2004/10/01 17:54:48 mlhuang Exp $
  */
 
 #include <linux/mm.h>

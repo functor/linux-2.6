@@ -138,13 +138,13 @@ target_v1(struct sk_buff **pskb,
 		}
 
 		if (connection_sk) {
-			/* XXX:
+#ifdef REQUIRESFIXFROMSAPAN
 			connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
 			ct->xid[!dir]=connection_sk->sk_xid;
-			*/
-			connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = connection_sk->sk_xid;
+			/*connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = connection_sk->sk_xid;*/
 			if (connection_sk->sk_xid != 0) 
 				mark = connection_sk->sk_xid;
+#endif
 			if (connection_sk != (*pskb)->sk)
 				sock_put(connection_sk);
 		}

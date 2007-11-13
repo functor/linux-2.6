@@ -720,6 +720,8 @@ init_conntrack(struct ip_conntrack_tuple *tuple,
 
 	/* Overload tuple linked list to put us in unconfirmed list. */
 	list_add(&conntrack->tuplehash[IP_CT_DIR_ORIGINAL].list, &unconfirmed);
+	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
+	conntrack->xid[IP_CT_DIR_REPLY] = -1;
 
 	write_unlock_bh(&ip_conntrack_lock);
 
