@@ -4,8 +4,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # These are the kernels that are built IF the architecture allows it.
 
 %define buildup 1
-# we now build smp by default when doing buildup
-%define buildsmp 0
 %define builduml 0
 %define buildxen 0
 %define builddoc 0
@@ -18,13 +16,21 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 20
+%define sublevel 22
+%define patchlevel 12
 %define kversion 2.6.%{sublevel}
-%define rpmversion 2.6.%{sublevel}
-%define release 1.2949.fc6.vs2.2.0.1.0%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
+
+%define vsversion 2.3.0.29
+
+%define specrelease 1
+
+%define release vs%{vsversion}.%{specrelease}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+
+%{!?pldistro:%global pldistro planetlab}
+
 %define signmodules 0
 %define make_target bzImage
-
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
 
 # Override generic defaults with per-arch defaults
@@ -69,10 +75,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
 
-Vendor: PlanetLab
-Packager: PlanetLab Central <support@planet-lab.org>
-Distribution: PlanetLab 3.0
-URL: http://cvs.planet-lab.org/cvs/linux-2.6
+URL: http://svn.planet-lab.org/wiki/linux-2.6
 
 Name: kernel
 Group: System Environment/Kernel
@@ -83,6 +86,8 @@ ExclusiveOS: Linux
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
 Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
+Provides: kernel-smp = %{rpmversion}-%{release}
+Provides: kernel-smp-%{_target_cpu} = %{rpmversion}-%{release}
 Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
@@ -103,6 +108,38 @@ BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
 
+Source10: kernel-%{kversion}-i586-%{pldistro}.config
+Source11: kernel-%{kversion}-i686-%{pldistro}.config
+Source12: kernel-%{kversion}-x86_64-%{pldistro}.config
+%if %{builduml}
+Source20: kernel-%{kversion}-i686-uml-%{pldidstro}.config
+%endif
+%if %{buildxen}
+Source30: kernel-%{kversion}-i686-xenU-%{pldistro}.config
+%endif
+
+# Mainline patches
+%if "0%{patchlevel}"
+Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
+%endif
+
+# These are patches picked up from Fedora/RHEL
+Patch100: linux-2.6-100-build-nonintconfig.patch
+
+# Linux-VServer
+Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
+
+# IP sets
+Patch250: linux-2.6-250-ipsets.patch
+
+# PlanetLab
+Patch500: linux-2.6-500-vserver-filesharing.patch
+Patch510: linux-2.6-510-ipod.patch
+Patch520: linux-2.6-520-vnet+.patch
+Patch530: linux-2.6-530-built-by-support.patch
+Patch540: linux-2.6-540-oom-kill.patch
+Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
+
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
 %description
@@ -116,6 +153,8 @@ Summary: Development package for building kernel modules to match the kernel.
 Group: System Environment/Kernel
 AutoReqProv: no
 Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}
+Provides: kernel-smp-devel = %{rpmversion}-%{release}
+Provides: kernel-smp-devel-%{_target_cpu} = %{rpmversion}-%{release}
 Prereq: /usr/bin/find
 
 %description devel
@@ -134,45 +173,6 @@ device drivers shipped with it are documented in these files.
 
 You'll want to install this package if you need a reference to the
 options that can be passed to Linux kernel modules at load time.
-
-%package smp
-Summary: The Linux kernel compiled for SMP machines.
-
-Group: System Environment/Kernel
-Provides: kernel = %{version}
-Provides: kernel-drm = 4.3.0
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}smp
-Prereq: %{kernel_prereq}
-Conflicts: %{kernel_dot_org_conflicts}
-Conflicts: %{package_conflicts}
-Conflicts: %{nptl_conflicts}
-# upto and including kernel 2.4.9 rpms, the 4Gb+ kernel was called kernel-enterprise
-# now that the smp kernel offers this capability, obsolete the old kernel
-Obsoletes: kernel-enterprise < 2.4.10
-# We can't let RPM do the dependencies automatic because it'll then pick up
-# a correct but undesirable perl dependency from the module headers which
-# isn't required for the kernel proper to function
-AutoReqProv: no
-
-%description smp
-This package includes a SMP version of the Linux kernel. It is
-required only on machines with two or more CPUs as well as machines with
-hyperthreading technology.
-
-Install the kernel-smp package if your machine uses two or more CPUs.
-
-%package smp-devel
-Summary: Development package for building kernel modules to match the SMP kernel.
-Group: System Environment/Kernel
-Provides: kernel-smp-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}smp
-Provides: kernel-devel = %{rpmversion}-%{release}smp
-AutoReqProv: no
-Prereq: /usr/bin/find
-
-%description smp-devel
-This package provides kernel headers and makefiles sufficient to build modules
-against the SMP kernel package.
 
 %package xenU
 Summary: The Linux kernel compiled for unprivileged Xen guest VMs
@@ -263,14 +263,54 @@ necessary dependencies to make rpm and yum happy.
 if [ ! -d kernel-%{kversion}/vanilla ]; then
   # Ok, first time we do a make prep.
   rm -f pax_global_header
-%setup -q -n %{name}-%{version} -c
+%setup -q -n %{name}-%{kversion} -c
   mv linux-%{kversion} vanilla
 else
   # We already have a vanilla dir.
   cd kernel-%{kversion}
 fi
 
-cd vanilla
+KERNEL_PREVIOUS=vanilla
+# Dark RPM-magic to apply each patch to a hardlinked copy of the tree.
+%define ApplyPatch() \
+  rm -fr linux-%{kversion}-%1				\
+  cp -al $KERNEL_PREVIOUS linux-%{kversion}-%1		\
+  patchflag=-p1						\
+  test "%2" != "%%2" && patchflag="%2"			\
+  PATCH="%{expand:%{PATCH%1}}"				\
+  if test ! -e "$PATCH"; then				\
+    echo "Patch %1 does not exist!"			\
+    exit 1						\
+  fi							\
+  case "$PATCH" in					\
+    *.bz2)  bzcat "$PATCH";;				\
+    *.gz)   zcat "$PATCH";;				\
+    *)      cat "$PATCH";;				\
+  esac | patch -F1 -s -d linux-%{kversion}-%1 $patchflag \
+  KERNEL_PREVIOUS=linux-%{kversion}-%1
+
+# This is where the patches get applied
+%if "0%{patchlevel}"
+%ApplyPatch 0
+%endif
+
+%ApplyPatch 100
+
+%ApplyPatch 200
+
+%ApplyPatch 250
+
+%ApplyPatch 500
+%ApplyPatch 510
+%ApplyPatch 520
+%ApplyPatch 530
+%ApplyPatch 540
+%ApplyPatch 550
+
+
+ln -sf $KERNEL_PREVIOUS linux-%{kversion}
+cd linux-%{kversion}
+
 
 # make sure the kernel has the sublevel we know it has. This looks weird
 # but for -pre and -rc versions we need it since we only want to use
@@ -292,20 +332,17 @@ BuildKernel() {
     Arch=$2
     Flavour=$3
 
-    # create a clean copy in BUILD/ (for backward compatibility with
-    # other RPMs that bootstrap off of the kernel build)
-    cd $RPM_BUILD_DIR
     rm -rf linux-%{_target_cpu}-%{kversion}$Flavour
-    cp -rl kernel-%{kversion}/vanilla linux-%{_target_cpu}-%{kversion}$Flavour
+    cp -rl linux-%{kversion}/ linux-%{_target_cpu}-%{kversion}$Flavour
     cd linux-%{_target_cpu}-%{kversion}$Flavour
 
     # Pick the right config file for the kernel we're building
     if [ -n "$Flavour" ] ; then
-      Config=kernel-%{kversion}-%{_target_cpu}-$Flavour-planetlab.config
+      Config=kernel-%{kversion}-%{_target_cpu}-$Flavour-%{pldistro}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-$Flavour-%{_target_cpu}
       DevelLink=/usr/src/kernels/%{KVERREL}$Flavour-%{_target_cpu}
     else
-      Config=kernel-%{kversion}-%{_target_cpu}-planetlab.config
+      Config=kernel-%{kversion}-%{_target_cpu}-%{pldistro}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-%{_target_cpu}
       DevelLink=
     fi
@@ -314,12 +351,12 @@ BuildKernel() {
     echo BUILDING A KERNEL FOR $Flavour %{_target_cpu}...
 
     # make sure EXTRAVERSION says what we want it to say
-    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = -%{release}$Flavour/" Makefile
+    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = %{?patchlevel:.%{patchlevel}}-%{release}$Flavour/" Makefile
 
     # and now to start the build process
 
     make -s mrproper
-    cp configs/$Config .config
+    cp %{_sourcedir}/$Config .config
 
     #Arch=`head -1 .config | cut -b 3-`
     echo USING ARCH=$Arch
@@ -468,23 +505,13 @@ mkdir -p $RPM_BUILD_ROOT/boot
 BuildKernel %make_target %kernel_arch
 %endif
 
-%if "%{_target_cpu}" == "i686"
-%if %{buildsmp} 
-BuildKernel %make_target %kernel_arch smp
-%endif
-
+%ifarch i686
 %if %{builduml}
 BuildKernel linux um uml
 %endif
 
 %if %{buildxen}
 BuildKernel vmlinuz %kernel_arch xenU
-%endif
-%endif
-
-%if "%{_target_cpu}" == "x86_64"
-%if %{buildsmp} 
-BuildKernel %make_target %kernel_arch smp
 %endif
 %endif
 
@@ -536,15 +563,9 @@ rm -rf $RPM_BUILD_ROOT
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 exit 0
 
-%pre smp
-/sbin/modprobe loop 2> /dev/null > /dev/null  || :
-exit 0
-
 %post
-if [ `uname -i` == "x86_64" ]; then
-  if [ -f /etc/sysconfig/kernel ]; then
-    /bin/sed -i -e 's/^DEFAULTKERNEL=kernel-smp$/DEFAULTKERNEL=kernel/' /etc/sysconfig/kernel
-  fi
+if [ -f /etc/sysconfig/kernel ]; then
+  /bin/sed -i -e 's/^DEFAULTKERNEL=kernel-smp$/DEFAULTKERNEL=kernel/' /etc/sysconfig/kernel
 fi
 
 # trick mkinitrd in case the current environment does not have device mapper
@@ -570,8 +591,11 @@ fi
 # make some useful links
 pushd /boot > /dev/null ; {
 	ln -sf config-%{KVERREL} config
+	ln -sf config-%{KVERREL} configsmp
 	ln -sf initrd-%{KVERREL}.img initrd-boot
+	ln -sf initrd-%{KVERREL}.img initrd-bootsmp
 	ln -sf vmlinuz-%{KVERREL} kernel-boot
+	ln -sf vmlinuz-%{KVERREL} kernel-bootsmp
 }
 popd > /dev/null
 
@@ -583,47 +607,6 @@ touch /etc/planetlab/update-reboot
 [ -f /etc/sysconfig/kernel ] && . /etc/sysconfig/kernel
 if [ "$HARDLINK" != "no" -a -x /usr/sbin/hardlink ] ; then
   pushd /usr/src/kernels/%{KVERREL}-%{_target_cpu} > /dev/null
-  /usr/bin/find . -type f | while read f; do hardlink -c /usr/src/kernels/*FC*/$f $f ; done
-  popd > /dev/null
-fi
-
-%post smp
-# trick mkinitrd in case the current environment does not have device mapper
-rootdev=$(awk '/^[ \t]*[^#]/ { if ($2 == "/") { print $1; }}' /etc/fstab)
-if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
-    if [ ! -f $rootdev ]; then
-	fake_root_lvm=1
-	mkdir -p $(dirname $rootdev)
-	touch $rootdev
-    fi
-fi
-
-[ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade %{rpmversion}-%{release}smp
-#/sbin/new-kernel-pkg --package kernel-smp --mkinitrd --depmod --install %{KVERREL}smp
-# Older modutils do not support --package option
-/sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}smp
-
-# remove fake handle
-if [ -n "$fake_root_lvm" ]; then
-    rm -f $rootdev
-fi
-
-# make some useful links
-pushd /boot > /dev/null ; {
-	ln -sf config-%{KVERREL}smp configsmp
-	ln -sf initrd-%{KVERREL}smp.img initrd-bootsmp
-	ln -sf vmlinuz-%{KVERREL}smp kernel-bootsmp
-}
-popd > /dev/null
-
-# ask for a reboot
-mkdir -p /etc/planetlab
-touch /etc/planetlab/update-reboot
-
-%post smp-devel
-[ -f /etc/sysconfig/kernel ] && . /etc/sysconfig/kernel
-if [ "$HARDLINK" != "no" -a -x /usr/sbin/hardlink ] ; then
-  pushd /usr/src/kernels/%{KVERREL}-smp-%{_target_cpu} > /dev/null
   /usr/bin/find . -type f | while read f; do hardlink -c /usr/src/kernels/*FC*/$f $f ; done
   popd > /dev/null
 fi
@@ -646,10 +629,6 @@ depmod -ae %{KVERREL}uml
 %preun
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
 /sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}
-
-%preun smp
-/sbin/modprobe loop 2> /dev/null > /dev/null  || :
-/sbin/new-kernel-pkg --rminitrd --rmmoddep --remove %{KVERREL}smp
 
 %preun xenU
 /sbin/modprobe loop 2> /dev/null > /dev/null  || :
@@ -679,27 +658,6 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %files devel
 %defattr(-,root,root)
 %verify(not mtime) /usr/src/kernels/%{KVERREL}-%{_target_cpu}
-%endif
-
-%if %{buildsmp} 
-%if "%{_target_cpu}" == "i686" || "%{_target_cpu}" == "x86_64"
-%files smp
-%defattr(-,root,root)
-/%{image_install_path}/vmlinuz-%{KVERREL}smp
-/boot/System.map-%{KVERREL}smp
-/boot/config-%{KVERREL}smp
-%dir /lib/modules/%{KVERREL}smp
-/lib/modules/%{KVERREL}smp/kernel
-/lib/modules/%{KVERREL}smp/build
-/lib/modules/%{KVERREL}smp/source
-/lib/modules/%{KVERREL}smp/extra
-/lib/modules/%{KVERREL}smp/updates
-
-%files smp-devel
-%defattr(-,root,root)
-%verify(not mtime) /usr/src/kernels/%{KVERREL}-smp-%{_target_cpu}
-/usr/src/kernels/%{KVERREL}smp-%{_target_cpu}
-%endif
 %endif
 
 %if %{builduml} && "%{_target_cpu}" == "i686"

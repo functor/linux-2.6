@@ -1,0 +1,12 @@
+diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl06/include/linux/fs.h linux-2.6.22.10-vs2.3.0.29-pl07/include/linux/fs.h
+--- linux-2.6.22.10-vs2.3.0.29-pl06/include/linux/fs.h	2007-10-29 21:23:59.000000000 -0400
++++ linux-2.6.22.10-vs2.3.0.29-pl07/include/linux/fs.h	2007-11-15 09:56:54.000000000 -0500
+@@ -22,7 +22,7 @@
+ /* Fixed constants first: */
+ #undef NR_OPEN
+ #define NR_OPEN (1024*1024)	/* Absolute upper limit on fd num */
+-#define INR_OPEN 1024		/* Initial setting for nfile rlimits */
++#define INR_OPEN 4096		/* Initial setting for nfile rlimits */
+ 
+ #define BLOCK_SIZE_BITS 10
+ #define BLOCK_SIZE (1<<BLOCK_SIZE_BITS)

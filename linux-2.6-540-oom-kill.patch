@@ -1,0 +1,135 @@
+diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl05/init/Kconfig linux-2.6.22.10-vs2.3.0.29-pl06/init/Kconfig
+--- linux-2.6.22.10-vs2.3.0.29-pl05/init/Kconfig	2007-09-29 08:11:49.000000000 -0400
++++ linux-2.6.22.10-vs2.3.0.29-pl06/init/Kconfig	2007-11-14 17:09:01.000000000 -0500
+@@ -281,6 +281,23 @@ config LOG_BUF_SHIFT
+ 		     13 =>  8 KB
+ 		     12 =>  4 KB
+ 
++config OOM_PANIC
++	bool "OOM Panic"
++	default y
++	---help---
++	  This option enables panic() to be called when a system is out of
++	  memory. This feature along with /proc/sys/kernel/panic allows a
++	  different behavior on out-of-memory conditions when the standard
++	  behavior (killing processes in an attempt to recover) does not
++	  make sense.
++
++	  If unsure, say N.
++
++config OOM_KILL
++	bool
++	depends on !OOM_PANIC
++	default y
++
+ config CPUSETS
+ 	bool "Cpuset support"
+ 	depends on SMP
+diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl05/mm/oom_kill.c linux-2.6.22.10-vs2.3.0.29-pl06/mm/oom_kill.c
+--- linux-2.6.22.10-vs2.3.0.29-pl05/mm/oom_kill.c	2007-10-29 21:23:59.000000000 -0400
++++ linux-2.6.22.10-vs2.3.0.29-pl06/mm/oom_kill.c	2007-11-14 17:09:01.000000000 -0500
+@@ -169,6 +169,11 @@ unsigned long badness(struct task_struct
+ 	return points;
+ }
+ 
++#if defined(CONFIG_OOM_PANIC) && defined(CONFIG_OOM_KILLER)
++#warning Only define OOM_PANIC or OOM_KILLER; not both
++#endif
++
++#ifdef CONFIG_OOM_KILLER
+ /*
+  * Types of limitations to the nodes from which allocations may occur
+  */
+@@ -481,3 +486,37 @@ out:
+ 	if (!test_thread_flag(TIF_MEMDIE))
+ 		schedule_timeout_uninterruptible(1);
+ }
++#endif /* CONFIG_OOM_KILLER */
++
++#ifdef CONFIG_OOM_PANIC
++/**
++ * out_of_memory - panic if the system out of memory?
++ */
++void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask, int order)
++{
++	/*
++	 * oom_lock protects out_of_memory()'s static variables.
++	 * It's a global lock; this is not performance-critical.
++	 */
++	static spinlock_t oom_lock = SPIN_LOCK_UNLOCKED;
++	static unsigned long count;
++
++	spin_lock(&oom_lock);
++
++	/*
++	 * If we have gotten only a few failures,
++	 * we're not really oom. 
++	 */
++	if (++count >= 10) {
++		/*
++		 * Ok, really out of memory. Panic.
++		 */
++
++		printk("oom-killer: gfp_mask=0x%x\n", gfp_mask);
++		show_free_areas();
++
++		panic("Out Of Memory");
++	}
++	spin_unlock(&oom_lock);
++}
++#endif /*  CONFIG_OOM_PANIC */
+diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl05/mm/oom_panic.c linux-2.6.22.10-vs2.3.0.29-pl06/mm/oom_panic.c
+--- linux-2.6.22.10-vs2.3.0.29-pl05/mm/oom_panic.c	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22.10-vs2.3.0.29-pl06/mm/oom_panic.c	2007-11-14 17:09:01.000000000 -0500
+@@ -0,0 +1,51 @@
++/* 
++ * Just panic() instead of the default behavior of selecting processes
++ * for death.
++ *
++ * Based on
++ * Modular OOM handlers for 2.6.4 (C) 2003,2004 Tvrtko A. Ursulin
++ * and
++ * linux/mm/oom_kill.c (C) 1998,2000 Rik van Riel.
++ *
++ * Mark Huang <mlhuang@cs.princeton.edu>
++ *
++ * $Id: oom_panic.c,v 1.1 2004/10/01 17:54:48 mlhuang Exp $
++ */
++
++#include <linux/mm.h>
++#include <linux/sched.h>
++#include <linux/swap.h>
++
++/**
++ * out_of_memory - is the system out of memory?
++ */
++void out_of_memory(int gfp_mask)
++{
++	/*
++	 * oom_lock protects out_of_memory()'s static variables.
++	 * It's a global lock; this is not performance-critical.
++	 */
++	static spinlock_t oom_lock = SPIN_LOCK_UNLOCKED;
++	static unsigned long count;
++
++	spin_lock(&oom_lock);
++
++	/*
++	 * If we have gotten only a few failures,
++	 * we're not really oom. 
++	 */
++	if (++count < 10)
++		goto out_unlock;
++
++	/*
++	 * Ok, really out of memory. Panic.
++	 */
++
++	printk("oom-killer: gfp_mask=0x%x\n", gfp_mask);
++	show_free_areas();
++
++	panic("Out Of Memory");
++
++out_unlock:
++	spin_unlock(&oom_lock);
++}
