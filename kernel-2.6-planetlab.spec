@@ -308,6 +308,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 550
 
 
+rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}
 cd linux-%{kversion}
 
