@@ -123,6 +123,8 @@ Source30: kernel-%{kversion}-i686-xenU-%{pldistro}.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
+Patch010: linux-2.6-010-e1000e.patch
+
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
 
@@ -293,6 +295,8 @@ KERNEL_PREVIOUS=vanilla
 %if "0%{patchlevel}"
 %ApplyPatch 0
 %endif
+
+%ApplyPatch 10
 
 %ApplyPatch 100
 
