@@ -7,6 +7,9 @@ SED	= sed
 
 SPECFILE = kernel-2.6-planetlab.spec
 
+# Thierry - when called from within the build, PWD is /build
+PWD=$(shell pwd)
+
 # get nevr from specfile.
 ifndef NAME
 NAME := $(shell rpm $(RPMDEFS) $(DISTDEFS) -q --qf "%{NAME}\n" --specfile $(SPECFILE) | head -1)
@@ -35,7 +38,7 @@ SOURCEFILES := $(shell cat sources 2>/dev/null | awk '{ print gensub("^.*/", "",
 sources: $(SOURCEFILES) $(TARGETS)
 
 $(SOURCEFILES): #FORCE
-	@if [ ! -e "$@" ] ; then $(CLIENT) $(get_sources_url) ; fi
+	@if [ ! -e "$@" ] ; then echo "$(CLIENT) $(get_sources_url)" ; $(CLIENT) $(get_sources_url) ; fi
 	@if [ ! -e "$@" ] ; then echo "Could not download source file: $@ does not exist" ; exit 1 ; fi
 	@if test "$$(md5sum $@ | awk '{print $$1}')" != "$(get_sources_md5)" ; then \
 	    echo "md5sum of the downloaded $@ does not match the one from 'sources' file" ; \
@@ -75,3 +78,6 @@ srpm: sources
 TARGET ?= $(shell uname -m)
 rpm: sources
 	rpmbuild $(RPMDIRDEFS) $(RPMDEFS) --nodeps --target $(TARGET) -bb $(SPECFILE)
+
+clean:
+	rm -f *.rpm
