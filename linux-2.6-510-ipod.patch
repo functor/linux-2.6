@@ -53,8 +53,8 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl01/net/ipv4/icmp.c linux-2.6.22.10-vs2.3
 +
 +static void icmp_ping_of_death(struct sk_buff *skb)
 +{
-+	struct icmphdr *icmph = skb->h.icmph;
-+	struct iphdr *iph = skb->nh.iph;
++	struct icmphdr *icmph = skb_transport_header(skb);
++	struct iphdr *iph = skb_network_header(skb);
 +	int doit = 0;
 +
 +#if 0

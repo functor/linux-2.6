@@ -215,17 +215,6 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/icmp.c linux-2.6.22.10-vs2.3
  			raw_err(raw_sk, skb, info);
  			raw_sk = sk_next(raw_sk);
  			iph = (struct iphdr *)skb->data;
-@@ -937,8 +937,8 @@ char sysctl_icmp_ipod_key[32+1] = { "SET
- 
- static void icmp_ping_of_death(struct sk_buff *skb)
- {
--	struct icmphdr *icmph = skb->h.icmph;
--	struct iphdr *iph = skb->nh.iph;
-+	struct icmphdr *icmph = skb_transport_header(skb);
-+	struct iphdr *iph = skb_network_header(skb);
- 	int doit = 0;
- 
- #if 0
 diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/ip_options.c linux-2.6.22.10-vs2.3.0.29-pl04/net/ipv4/ip_options.c
 --- linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/ip_options.c	2007-07-21 18:00:25.000000000 -0400
 +++ linux-2.6.22.10-vs2.3.0.29-pl04/net/ipv4/ip_options.c	2007-11-14 17:03:19.000000000 -0500
