@@ -23,6 +23,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define vsversion 2.3.0.29
 
+# Will go away when VServer supports NetNS in mainline. Currently, it must be 
+# updated every time the PL kernel is updated.
+%define vini_pl_patch 551
+
 %define specrelease 1
 
 %define release vs%{vsversion}.%{specrelease}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
@@ -300,6 +304,11 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 10
 %ApplyPatch 20
 
+# NetNS patch for VINI
+%if 0%{?_with_netns}
+%ApplyPatch 30
+%endif
+
 %ApplyPatch 100
 
 %ApplyPatch 200
@@ -313,6 +322,12 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 540
 %ApplyPatch 550
 
+# NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
+# break with later patches.
+
+%if 0%{?_with_netns}
+%ApplyPatch %vini_pl_patch
+%endif
 
 rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}
