@@ -20,7 +20,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define patchlevel 14
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
-%define with_netns 1
 
 %define vsversion 2.3.0.29
 
