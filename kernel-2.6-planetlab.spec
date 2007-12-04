@@ -25,7 +25,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
-%define vini_pl_patch 551
+%define vini_pl_patch 561
 
 %define specrelease 1
 
@@ -147,6 +147,7 @@ Patch520: linux-2.6-520-vnet+.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
+Patch560: linux-2.6-560-mmconf.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -322,6 +323,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 530
 %ApplyPatch 540
 %ApplyPatch 550
+%ApplyPatch 560
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
