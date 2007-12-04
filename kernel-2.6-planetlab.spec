@@ -20,6 +20,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define patchlevel 14
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
+%define with_netns 1
 
 %define vsversion 2.3.0.29
 
@@ -129,6 +130,7 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 
 Patch010: linux-2.6-010-e1000e.patch
 Patch020: linux-2.6-020-build-id.patch
+Patch030: linux-2.6-030-netns.patch
 
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
