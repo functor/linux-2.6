@@ -305,7 +305,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 20
 
 # NetNS patch for VINI
-%if 0%{?_with_netns}
+%if 0%{?with_netns}
 %ApplyPatch 30
 %endif
 
@@ -325,7 +325,7 @@ KERNEL_PREVIOUS=vanilla
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
 
-%if 0%{?_with_netns}
+%if 0%{?with_netns}
 %ApplyPatch %vini_pl_patch
 %endif
 
