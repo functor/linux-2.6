@@ -1,0 +1,55 @@
+diff -Nurp linux-2.6.22-560/fs/ext2/super.c linux-2.6.22-570/fs/ext2/super.c
+--- linux-2.6.22-560/fs/ext2/super.c	2007-12-04 14:51:22.000000000 -0500
++++ linux-2.6.22-570/fs/ext2/super.c	2007-12-05 16:19:17.000000000 -0500
+@@ -350,6 +350,7 @@ static match_table_t tokens = {
+ 	{Opt_noacl, "noacl"},
+ 	{Opt_xip, "xip"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_grpquota, "grpquota"},
+diff -Nurp linux-2.6.22-560/fs/ext3/super.c linux-2.6.22-570/fs/ext3/super.c
+--- linux-2.6.22-560/fs/ext3/super.c	2007-12-04 14:51:22.000000000 -0500
++++ linux-2.6.22-570/fs/ext3/super.c	2007-12-05 16:19:02.000000000 -0500
+@@ -725,6 +725,7 @@ static match_table_t tokens = {
+ 	{Opt_usrquota, "usrquota"},
+ 	{Opt_barrier, "barrier=%u"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_err, NULL},
+diff -Nurp linux-2.6.22-560/fs/ext4/super.c linux-2.6.22-570/fs/ext4/super.c
+--- linux-2.6.22-560/fs/ext4/super.c	2007-12-04 14:51:22.000000000 -0500
++++ linux-2.6.22-570/fs/ext4/super.c	2007-12-05 16:19:32.000000000 -0500
+@@ -777,6 +777,7 @@ static match_table_t tokens = {
+ 	{Opt_barrier, "barrier=%u"},
+ 	{Opt_extents, "extents"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_err, NULL},
+diff -Nurp linux-2.6.22-560/fs/jffs2/super.c linux-2.6.22-570/fs/jffs2/super.c
+--- linux-2.6.22-560/fs/jffs2/super.c	2007-12-04 14:51:22.000000000 -0500
++++ linux-2.6.22-570/fs/jffs2/super.c	2007-12-05 16:20:28.000000000 -0500
+@@ -82,6 +82,7 @@ enum {
+ 
+ static match_table_t tokens = {
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_err, NULL}
+ };
+diff -Nurp linux-2.6.22-560/fs/ocfs2/super.c linux-2.6.22-570/fs/ocfs2/super.c
+--- linux-2.6.22-560/fs/ocfs2/super.c	2007-12-04 14:51:23.000000000 -0500
++++ linux-2.6.22-570/fs/ocfs2/super.c	2007-12-05 16:21:04.000000000 -0500
+@@ -156,6 +156,7 @@ static match_table_t tokens = {
+ 	{Opt_data_writeback, "data=writeback"},
+ 	{Opt_atime_quantum, "atime_quantum=%u"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_err, NULL}

@@ -148,6 +148,7 @@ Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
+Patch570: linux-2.6-570-tagxid.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -324,6 +325,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 540
 %ApplyPatch 550
 %ApplyPatch 560
+%ApplyPatch 570
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
