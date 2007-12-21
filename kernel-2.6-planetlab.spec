@@ -10,6 +10,8 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 # Versions of various parts
 
+%define _with_netns 1
+
 #
 # Polite request for people who spin their own kernel rpms:
 # please modify the "release" field in a way that identifies
@@ -307,11 +309,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 10
 %ApplyPatch 20
 
-# NetNS patch for VINI
-%if 0%{?with_netns}
-%ApplyPatch 30
-%endif
-
 %ApplyPatch 100
 
 %ApplyPatch 200
@@ -327,12 +324,14 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 560
 %ApplyPatch 570
 
+# 
+%if 0%{?_with_netns}
+%ApplyPatch 590
+%ApplyPatch 591
+%endif
+
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
-
-%if 0%{?with_netns}
-%ApplyPatch %vini_pl_patch
-%endif
 
 rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}
