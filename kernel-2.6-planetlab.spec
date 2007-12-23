@@ -151,8 +151,7 @@ Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
-Patch590: linux-2.6-590-trellis-mm1.patch
-Patch591: linux-2.6-591-trellis-netns.patch
+Patch590: trellis.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -329,7 +328,6 @@ KERNEL_PREVIOUS=vanilla
 # 
 %if 0%{?_with_netns}
 %ApplyPatch 590
-%ApplyPatch 591
 %endif
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
