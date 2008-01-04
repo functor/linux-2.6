@@ -112,14 +112,14 @@ BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
 
-Source10: kernel-%{kversion}-i586-%{pldistro}.config
-Source11: kernel-%{kversion}-i686-%{pldistro}.config
-Source12: kernel-%{kversion}-x86_64-%{pldistro}.config
+Source10: %{pldistro}-%{kversion}-i586.config
+Source11: %{pldistro}-%{kversion}-i686.config
+Source12: %{pldistro}-%{kversion}-x86_64.config
 %if %{builduml}
-Source20: kernel-%{kversion}-i686-uml-%{pldidstro}.config
+Source20: %{pldistro}-%{kversion}-i686-uml.config
 %endif
 %if %{buildxen}
-Source30: kernel-%{kversion}-i686-xenU-%{pldistro}.config
+Source30: %{pldistro}-%{kversion}-i686-xenU.config
 %endif
 
 # Mainline patches
@@ -365,11 +365,11 @@ BuildKernel() {
 
     # Pick the right config file for the kernel we're building
     if [ -n "$Flavour" ] ; then
-      Config=kernel-%{kversion}-%{_target_cpu}-$Flavour-%{pldistro}.config
+      Config=%{pldistro}-%{kversion}-%{_target_cpu}-$Flavour.config
       DevelDir=/usr/src/kernels/%{KVERREL}-$Flavour-%{_target_cpu}
       DevelLink=/usr/src/kernels/%{KVERREL}$Flavour-%{_target_cpu}
     else
-      Config=kernel-%{kversion}-%{_target_cpu}-%{pldistro}.config
+      Config=%{pldistro}-%{kversion}-%{_target_cpu}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-%{_target_cpu}
       DevelLink=
     fi
