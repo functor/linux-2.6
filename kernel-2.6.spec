@@ -1,3 +1,8 @@
+#
+# $Id$
+#
+%define url $URL$
+
 Summary: The Linux kernel (the core of the Linux operating system)
 
 # What parts do we want to build?  We must build at least one kernel.
@@ -27,9 +32,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-%define specrelease 1
+# for module-tag.py  use -s sublevel
+%define name linux-2.6
+%define taglevel 1
 
-%define release vs%{vsversion}.%{specrelease}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
 %{!?pldistro:%global pldistro planetlab}
 
@@ -79,7 +86,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
 
-URL: http://svn.planet-lab.org/wiki/linux-2.6
+Vendor: PlanetLab
+Packager: PlanetLab Central <support@planet-lab.org>
+Distribution: PlanetLab %{plrelease}
+URL: %(echo %{url} | cut -d ' ' -f 2)
 
 Name: kernel
 Group: System Environment/Kernel
