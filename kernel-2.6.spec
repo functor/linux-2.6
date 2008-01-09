@@ -15,6 +15,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 # Versions of various parts
 
+# for module-tag.py - sublevel is used for the version (middle) part of tag names
+%define name linux-2.6
+%define module_version_varname sublevel
+%define taglevel 1
+
 #
 # Polite request for people who spin their own kernel rpms:
 # please modify the "release" field in a way that identifies
@@ -31,10 +36,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
-
-# for module-tag.py  use -s sublevel
-%define name linux-2.6
-%define taglevel 1
 
 %define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
