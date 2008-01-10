@@ -104,3 +104,42 @@ index 1818c50..d988f5d 100644
  			  $(filter-out FORCE,$^)
  
  $(modules): %.ko :%.o %.mod.o FORCE
+
+
+
+From: Roland McGrath <roland@redhat.com>
+Date: Thu, 19 Jul 2007 08:48:37 +0000 (-0700)
+Subject: x86_64: Put allocated ELF notes in read-only data segment
+X-Git-Tag: v2.6.23-rc1~393
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=2e1d5b8f24a887caded5ae3ceb2f341d4fbd1861
+
+x86_64: Put allocated ELF notes in read-only data segment
+
+This changes the x86_64 linker script to use the asm-generic NOTES macro so
+that ELF note sections with SHF_ALLOC set are linked into the kernel image
+along with other read-only data.  The PT_NOTE also points to their location.
+
+This paves the way for putting useful build-time information into ELF notes
+that can be found easily later in a kernel memory dump.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+Cc: Andi Kleen <ak@suse.de>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/x86_64/kernel/vmlinux.lds.S b/arch/x86_64/kernel/vmlinux.lds.S
+index 2259069..5c57ea4 100644
+--- a/arch/x86_64/kernel/vmlinux.lds.S
++++ b/arch/x86_64/kernel/vmlinux.lds.S
+@@ -48,7 +48,9 @@ SECTIONS
+   __ex_table : AT(ADDR(__ex_table) - LOAD_OFFSET) { *(__ex_table) }
+   __stop___ex_table = .;
+ 
+-  BUG_TABLE
++  NOTES :text :note
++
++  BUG_TABLE :text
+ 
+   RODATA
+ 
