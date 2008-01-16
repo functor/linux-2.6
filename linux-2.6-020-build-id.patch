@@ -143,3 +143,73 @@ index 2259069..5c57ea4 100644
  
    RODATA
  
+
+
+
+From: Roland McGrath <roland@redhat.com>
+Date: Thu, 19 Jul 2007 08:48:36 +0000 (-0700)
+Subject: i386: Put allocated ELF notes in read-only data segment
+X-Git-Tag: v2.6.23-rc1~394
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=cbe87121f1545bb3e98ae114519bf0c4db27d6ab
+
+i386: Put allocated ELF notes in read-only data segment
+
+This changes the i386 linker script and the asm-generic macro it uses so that
+ELF note sections with SHF_ALLOC set are linked into the kernel image along
+with other read-only data.  The PT_NOTE also points to their location.
+
+This paves the way for putting useful build-time information into ELF notes
+that can be found easily later in a kernel memory dump.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+Cc: Andi Kleen <ak@suse.de>
+Cc: Paul Mackerras <paulus@samba.org>
+Cc: Benjamin Herrenschmidt <benh@kernel.crashing.org>
+Cc: Richard Henderson <rth@twiddle.net>
+Cc: Ivan Kokshaysky <ink@jurassic.park.msu.ru>
+Cc: Martin Schwidefsky <schwidefsky@de.ibm.com>
+Cc: Heiko Carstens <heiko.carstens@de.ibm.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/i386/kernel/vmlinux.lds.S b/arch/i386/kernel/vmlinux.lds.S
+index 4dc44b8..7d72cce 100644
+--- a/arch/i386/kernel/vmlinux.lds.S
++++ b/arch/i386/kernel/vmlinux.lds.S
+@@ -60,7 +60,9 @@ SECTIONS
+   	__stop___ex_table = .;
+   }
+ 
+-  BUG_TABLE
++  NOTES :text :note
++
++  BUG_TABLE :text
+ 
+   . = ALIGN(4);
+   .tracedata : AT(ADDR(.tracedata) - LOAD_OFFSET) {
+@@ -208,6 +210,4 @@ SECTIONS
+   STABS_DEBUG
+ 
+   DWARF_DEBUG
+-
+-  NOTES
+ }
+diff --git a/include/asm-generic/vmlinux.lds.h b/include/asm-generic/vmlinux.lds.h
+index a2b09ed..0240e05 100644
+--- a/include/asm-generic/vmlinux.lds.h
++++ b/include/asm-generic/vmlinux.lds.h
+@@ -224,7 +224,11 @@
+ 	}
+ 
+ #define NOTES								\
+-	.notes : { *(.note.*) } :note
++	.notes : AT(ADDR(.notes) - LOAD_OFFSET) {			\
++		VMLINUX_SYMBOL(__start_notes) = .;			\
++		*(.note.*)						\
++		VMLINUX_SYMBOL(__stop_notes) = .;			\
++	}
+ 
+ #define INITCALLS							\
+   	*(.initcall0.init)						\
+
