@@ -151,7 +151,7 @@ Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
-Patch590: trellis.patch
+Patch590: linux-2.6-590-trellis-mm1-netns.patch
 Patch591: linux-2.6-591-unshare-netns.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
