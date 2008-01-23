@@ -154,8 +154,6 @@ Patch570: linux-2.6-570-tagxid.patch
 Patch590: linux-2.6-590-trellis-mm1-netns.patch
 Patch591: linux-2.6-591-unshare-netns.patch
 
-BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
-
 %description
 The kernel package contains the Linux kernel (vmlinuz), the core of any
 Linux operating system.  The kernel handles the basic functions
