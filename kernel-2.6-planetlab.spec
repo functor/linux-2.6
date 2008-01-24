@@ -153,6 +153,7 @@ Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch590: linux-2.6-590-trellis-mm1-netns.patch
 Patch591: linux-2.6-591-unshare-netns.patch
+Patch592: linux-2.6-592-ztun-sb.patch
 
 %description
 The kernel package contains the Linux kernel (vmlinuz), the core of any
@@ -328,6 +329,7 @@ KERNEL_PREVIOUS=vanilla
 %if 0%{?_with_netns}
 %ApplyPatch 590
 %ApplyPatch 591
+%ApplyPatch 592
 %endif
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
