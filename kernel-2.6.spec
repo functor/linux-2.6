@@ -161,6 +161,12 @@ Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 
+# See also the file named 'sources' here for the related checksums
+%define mac80211_version 10.0.4
+Patch600: http://intellinuxwireless.org/mac80211/downloads/mac80211-%{mac80211_version}.tgz
+%define iwlwifi_version 1.2.23
+Patch601: http://intellinuxwireless.org/iwlwifi/downloads/iwlwifi-%{iwlwifi_version}.tgz
+
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
 %description
@@ -345,6 +351,18 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch %vini_pl_patch
 %endif
 
+# Run the mac80211 stuff in the kernel tree holding the last patch
+tar -xzf %{expand:%{PATCH600}}
+pushd mac80211-%{mac80211_version}
+mac80211_makeflags="KSRC=../$KERNEL_PREVIOUS"
+make $mac80211_makeflags modified
+make $mac80211_makeflags source
+make $mac80211_makeflags patch_kernel
+popd
+
+# Untar iwlwifi in the same place - needs to be compiled later
+tar -xzf %{expand:%{PATCH601}}
+
 rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}
 cd linux-%{kversion}
@@ -403,6 +421,10 @@ BuildKernel() {
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 
+    # build the iwlwifi driver
+    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
+         KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour
+
     # Start installing the results
 
 %if "%{_enable_debug_packages}" == "1"
@@ -423,6 +445,9 @@ BuildKernel() {
 
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer
     make -s ARCH=$Arch INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install KERNELRELEASE=$KernelVer
+    # install iwlwifi
+    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
+         KMISC=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless install
 
     # And save the headers/makefiles etc for building modules against
     #
