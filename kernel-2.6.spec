@@ -162,6 +162,8 @@ Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 
 # See also the file named 'sources' here for the related checksums
+# NOTE. iwlwifi should be in-kernel starting from 2.6.24
+# see http://bughost.org/bugzilla/show_bug.cgi?id=1584
 %define mac80211_version 10.0.4
 Patch600: http://intellinuxwireless.org/mac80211/downloads/mac80211-%{mac80211_version}.tgz
 %define iwlwifi_version 1.2.23
