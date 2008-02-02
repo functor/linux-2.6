@@ -320,7 +320,7 @@ KERNEL_PREVIOUS=vanilla
   KERNEL_PREVIOUS=linux-%{kversion}-%1
 
 # This is where the patches get applied
-%if "0%{patchlevel}"
+%if 0%{?patchlevel}
 %ApplyPatch 0
 %endif
 
@@ -356,7 +356,7 @@ KERNEL_PREVIOUS=vanilla
 %endif
 
 # Run the mac80211 stuff in the kernel tree holding the last patch
-tar -xzf %{expand:%{PATCH600}}
+tar -xzf %{PATCH600}
 pushd mac80211-%{mac80211_version}
 mac80211_makeflags="KSRC=../$KERNEL_PREVIOUS"
 make $mac80211_makeflags modified
@@ -365,7 +365,7 @@ make $mac80211_makeflags patch_kernel
 popd
 
 # Untar iwlwifi in the same place - needs to be compiled later
-tar -xzf %{expand:%{PATCH601}}
+tar -xzf %{PATCH601}
 # the install target is broken: first it does not pass the right -b flag to depmod
 # second we do not need to invoke depmod at this stage anyway
 # let's add our own patch/stuff in this Makefile for manual install later on
