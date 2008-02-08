@@ -1,7 +1,7 @@
-diff -Nurp linux-2.6.22-510/include/linux/netfilter/xt_MARK.h linux-2.6.22-520/include/linux/netfilter/xt_MARK.h
---- linux-2.6.22-510/include/linux/netfilter/xt_MARK.h	2006-06-17 21:49:35.000000000 -0400
-+++ linux-2.6.22-520/include/linux/netfilter/xt_MARK.h	2007-12-03 15:11:08.000000000 -0500
-@@ -11,6 +11,7 @@ enum {
+diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_MARK.h linux-2.6.22-520/include/linux/netfilter/xt_MARK.h
+--- linux-2.6.22-510/include/linux/netfilter/xt_MARK.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter/xt_MARK.h	2008-02-02 04:52:17.000000000 -0500
+@@ -11,6 +11,7 @@
  	XT_MARK_SET=0,
  	XT_MARK_AND,
  	XT_MARK_OR,
@@ -9,9 +9,9 @@ diff -Nurp linux-2.6.22-510/include/linux/netfilter/xt_MARK.h linux-2.6.22-520/i
  };
  
  struct xt_mark_target_info_v1 {
-diff -Nurp linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h
+diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h
 --- linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h	2007-12-03 15:11:08.000000000 -0500
++++ linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h	2008-02-02 04:52:17.000000000 -0500
 @@ -0,0 +1,14 @@
 +#ifndef _XT_SETXID_H_target
 +#define _XT_SETXID_H_target
@@ -27,26 +27,20 @@ diff -Nurp linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h linux-2.6.22-520
 +};
 +
 +#endif /*_XT_SETXID_H_target*/
-diff -Nurp linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h
---- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h	2006-06-17 21:49:35.000000000 -0400
-+++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h	2007-12-03 15:11:08.000000000 -0500
-@@ -9,9 +9,10 @@
- #define ipt_mark_target_info xt_mark_target_info
- 
- /* Version 1 */
--#define IPT_MARK_SET	XT_MARK_SET
--#define IPT_MARK_AND	XT_MARK_AND
--#define	IPT_MARK_OR	XT_MARK_OR
-+#define IPT_MARK_SET		XT_MARK_SET
-+#define IPT_MARK_AND		XT_MARK_AND
-+#define	IPT_MARK_OR		XT_MARK_OR
+diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h
+--- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h	2008-02-02 04:52:17.000000000 -0500
+@@ -12,6 +12,7 @@
+ #define IPT_MARK_SET	XT_MARK_SET
+ #define IPT_MARK_AND	XT_MARK_AND
+ #define	IPT_MARK_OR	XT_MARK_OR
 +#define IPT_MARK_COPYXID	XT_MARK_COPYXID
  
  #define ipt_mark_target_info_v1 xt_mark_target_info_v1
  
-diff -Nurp linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h
+diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h
 --- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h	2007-12-03 15:11:08.000000000 -0500
++++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h	2008-02-02 04:52:17.000000000 -0500
 @@ -0,0 +1,13 @@
 +#ifndef _IPT_SETXID_H_target
 +#define _IPT_SETXID_H_target
@@ -61,10 +55,10 @@ diff -Nurp linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.
 +#define ipt_setxid_target_info_v1 xt_setxid_target_info_v1
 +
 +#endif /*_IPT_SETXID_H_target*/
-diff -Nurp linux-2.6.22-510/include/linux/skbuff.h linux-2.6.22-520/include/linux/skbuff.h
---- linux-2.6.22-510/include/linux/skbuff.h	2007-07-21 18:00:24.000000000 -0400
-+++ linux-2.6.22-520/include/linux/skbuff.h	2007-12-03 15:20:15.000000000 -0500
-@@ -302,6 +302,7 @@ struct sk_buff {
+diff -Nurb linux-2.6.22-510/include/linux/skbuff.h linux-2.6.22-520/include/linux/skbuff.h
+--- linux-2.6.22-510/include/linux/skbuff.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/linux/skbuff.h	2008-02-02 04:52:17.000000000 -0500
+@@ -302,6 +302,7 @@
  #endif
  
  	__u32			mark;
@@ -72,10 +66,10 @@ diff -Nurp linux-2.6.22-510/include/linux/skbuff.h linux-2.6.22-520/include/linu
  
  	sk_buff_data_t		transport_header;
  	sk_buff_data_t		network_header;
-diff -Nurp linux-2.6.22-510/include/linux/socket.h linux-2.6.22-520/include/linux/socket.h
---- linux-2.6.22-510/include/linux/socket.h	2007-07-21 18:00:24.000000000 -0400
-+++ linux-2.6.22-520/include/linux/socket.h	2007-12-03 15:11:08.000000000 -0500
-@@ -288,6 +288,8 @@ struct ucred {
+diff -Nurb linux-2.6.22-510/include/linux/socket.h linux-2.6.22-520/include/linux/socket.h
+--- linux-2.6.22-510/include/linux/socket.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/linux/socket.h	2008-02-02 04:52:17.000000000 -0500
+@@ -288,6 +288,8 @@
  #define SOL_TIPC	271
  #define SOL_RXRPC	272
  
@@ -84,10 +78,10 @@ diff -Nurp linux-2.6.22-510/include/linux/socket.h linux-2.6.22-520/include/linu
  /* IPX options */
  #define IPX_TYPE	1
  
-diff -Nurp linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/include/linux/vserver/network.h
---- linux-2.6.22-510/include/linux/vserver/network.h	2007-12-03 15:10:48.000000000 -0500
-+++ linux-2.6.22-520/include/linux/vserver/network.h	2007-12-03 15:11:08.000000000 -0500
-@@ -44,6 +44,8 @@ static inline uint64_t __nxf_init_set(vo
+diff -Nurb linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/include/linux/vserver/network.h
+--- linux-2.6.22-510/include/linux/vserver/network.h	2008-02-02 04:52:13.000000000 -0500
++++ linux-2.6.22-520/include/linux/vserver/network.h	2008-02-02 04:52:17.000000000 -0500
+@@ -44,6 +44,8 @@
  /* network caps */
  
  #define NXC_RAW_ICMP		0x00000100
@@ -96,10 +90,10 @@ diff -Nurp linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/inc
  
  
  /* address types */
-diff -Nurp linux-2.6.22-510/include/net/netfilter/nf_conntrack.h linux-2.6.22-520/include/net/netfilter/nf_conntrack.h
---- linux-2.6.22-510/include/net/netfilter/nf_conntrack.h	2007-07-21 18:00:24.000000000 -0400
-+++ linux-2.6.22-520/include/net/netfilter/nf_conntrack.h	2007-12-03 15:11:08.000000000 -0500
-@@ -131,6 +131,9 @@ struct nf_conn
+diff -Nurb linux-2.6.22-510/include/net/netfilter/nf_conntrack.h linux-2.6.22-520/include/net/netfilter/nf_conntrack.h
+--- linux-2.6.22-510/include/net/netfilter/nf_conntrack.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/net/netfilter/nf_conntrack.h	2008-02-02 04:52:17.000000000 -0500
+@@ -131,6 +131,9 @@
  	/* Storage reserved for other modules: */
  	union nf_conntrack_proto proto;
  
@@ -109,10 +103,10 @@ diff -Nurp linux-2.6.22-510/include/net/netfilter/nf_conntrack.h linux-2.6.22-52
  	/* features dynamically at the end: helper, nat (both optional) */
  	char data[0];
  };
-diff -Nurp linux-2.6.22-510/include/net/raw.h linux-2.6.22-520/include/net/raw.h
---- linux-2.6.22-510/include/net/raw.h	2007-05-04 09:55:46.000000000 -0400
-+++ linux-2.6.22-520/include/net/raw.h	2007-12-03 15:11:08.000000000 -0500
-@@ -36,7 +36,7 @@ extern rwlock_t raw_v4_lock;
+diff -Nurb linux-2.6.22-510/include/net/raw.h linux-2.6.22-520/include/net/raw.h
+--- linux-2.6.22-510/include/net/raw.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/net/raw.h	2008-02-02 04:52:17.000000000 -0500
+@@ -36,7 +36,7 @@
  
  extern struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
  				    __be32 raddr, __be32 laddr,
@@ -121,9 +115,9 @@ diff -Nurp linux-2.6.22-510/include/net/raw.h linux-2.6.22-520/include/net/raw.h
  
  extern int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash);
  
-diff -Nurp linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
---- linux-2.6.22-510/net/core/skbuff.c	2007-07-21 18:00:25.000000000 -0400
-+++ linux-2.6.22-520/net/core/skbuff.c	2007-12-03 15:11:08.000000000 -0500
+diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
+--- linux-2.6.22-510/net/core/skbuff.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/core/skbuff.c	2008-02-02 04:52:17.000000000 -0500
 @@ -56,6 +56,7 @@
  #include <linux/rtnetlink.h>
  #include <linux/init.h>
@@ -132,7 +126,7 @@ diff -Nurp linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  
  #include <net/protocol.h>
  #include <net/dst.h>
-@@ -174,6 +175,7 @@ struct sk_buff *__alloc_skb(unsigned int
+@@ -174,6 +175,7 @@
  	skb->data = data;
  	skb_reset_tail_pointer(skb);
  	skb->end = skb->tail + size;
@@ -140,7 +134,7 @@ diff -Nurp linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
-@@ -443,6 +445,8 @@ struct sk_buff *skb_clone(struct sk_buff
+@@ -443,6 +445,8 @@
  	C(tail);
  	C(end);
  
@@ -149,7 +143,7 @@ diff -Nurp linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	atomic_inc(&(skb_shinfo(skb)->dataref));
  	skb->cloned = 1;
  
-@@ -492,6 +496,7 @@ static void copy_skb_header(struct sk_bu
+@@ -492,6 +496,7 @@
  	new->tc_index	= old->tc_index;
  #endif
  	skb_copy_secmark(new, old);
@@ -157,10 +151,10 @@ diff -Nurp linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	atomic_set(&new->users, 1);
  	skb_shinfo(new)->gso_size = skb_shinfo(old)->gso_size;
  	skb_shinfo(new)->gso_segs = skb_shinfo(old)->gso_segs;
-diff -Nurp linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
---- linux-2.6.22-510/net/core/sock.c	2007-12-03 15:10:56.000000000 -0500
-+++ linux-2.6.22-520/net/core/sock.c	2007-12-03 15:11:08.000000000 -0500
-@@ -444,6 +444,19 @@ set_sndbuf:
+diff -Nurb linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
+--- linux-2.6.22-510/net/core/sock.c	2008-02-02 04:52:13.000000000 -0500
++++ linux-2.6.22-520/net/core/sock.c	2008-02-02 04:52:17.000000000 -0500
+@@ -444,6 +444,19 @@
  		}
  		goto set_sndbuf;
  
@@ -180,7 +174,7 @@ diff -Nurp linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
  	case SO_RCVBUF:
  		/* Don't error on this BSD doesn't and if you think
  		   about it this is right. Otherwise apps have to
-@@ -573,7 +586,7 @@ set_rcvbuf:
+@@ -573,7 +586,7 @@
  		char devname[IFNAMSIZ];
  
  		/* Sorry... */
@@ -189,10 +183,10 @@ diff -Nurp linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
  			ret = -EPERM;
  			break;
  		}
-diff -Nurp linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet.c
---- linux-2.6.22-510/net/ipv4/af_inet.c	2007-12-03 15:10:56.000000000 -0500
-+++ linux-2.6.22-520/net/ipv4/af_inet.c	2007-12-03 15:11:08.000000000 -0500
-@@ -178,6 +178,8 @@ static int inet_autobind(struct sock *sk
+diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet.c
+--- linux-2.6.22-510/net/ipv4/af_inet.c	2008-02-02 04:52:13.000000000 -0500
++++ linux-2.6.22-520/net/ipv4/af_inet.c	2008-02-02 04:52:17.000000000 -0500
+@@ -178,6 +178,8 @@
  			return -EAGAIN;
  		}
  		inet->sport = htons(inet->num);
@@ -201,10 +195,10 @@ diff -Nurp linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet
  	}
  	release_sock(sk);
  	return 0;
-diff -Nurp linux-2.6.22-510/net/ipv4/icmp.c linux-2.6.22-520/net/ipv4/icmp.c
---- linux-2.6.22-510/net/ipv4/icmp.c	2007-12-03 15:11:06.000000000 -0500
-+++ linux-2.6.22-520/net/ipv4/icmp.c	2007-12-03 15:11:08.000000000 -0500
-@@ -709,7 +709,7 @@ static void icmp_unreach(struct sk_buff 
+diff -Nurb linux-2.6.22-510/net/ipv4/icmp.c linux-2.6.22-520/net/ipv4/icmp.c
+--- linux-2.6.22-510/net/ipv4/icmp.c	2008-02-02 04:52:16.000000000 -0500
++++ linux-2.6.22-520/net/ipv4/icmp.c	2008-02-02 04:52:17.000000000 -0500
+@@ -709,7 +709,7 @@
  	if ((raw_sk = sk_head(&raw_v4_htable[hash])) != NULL) {
  		while ((raw_sk = __raw_v4_lookup(raw_sk, protocol, iph->daddr,
  						 iph->saddr,
@@ -213,10 +207,10 @@ diff -Nurp linux-2.6.22-510/net/ipv4/icmp.c linux-2.6.22-520/net/ipv4/icmp.c
  			raw_err(raw_sk, skb, info);
  			raw_sk = sk_next(raw_sk);
  			iph = (struct iphdr *)skb->data;
-diff -Nurp linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_options.c
---- linux-2.6.22-510/net/ipv4/ip_options.c	2007-07-21 18:00:25.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/ip_options.c	2007-12-03 15:11:08.000000000 -0500
-@@ -409,7 +409,7 @@ int ip_options_compile(struct ip_options
+diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_options.c
+--- linux-2.6.22-510/net/ipv4/ip_options.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/ipv4/ip_options.c	2008-02-02 04:52:17.000000000 -0500
+@@ -409,7 +409,7 @@
  					optptr[2] += 8;
  					break;
  				      default:
@@ -225,7 +219,7 @@ diff -Nurp linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  						pp_ptr = optptr + 3;
  						goto error;
  					}
-@@ -445,7 +445,7 @@ int ip_options_compile(struct ip_options
+@@ -445,7 +445,7 @@
  				opt->router_alert = optptr - iph;
  			break;
  		      case IPOPT_CIPSO:
@@ -234,7 +228,7 @@ diff -Nurp linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  				pp_ptr = optptr;
  				goto error;
  			}
-@@ -458,7 +458,7 @@ int ip_options_compile(struct ip_options
+@@ -458,7 +458,7 @@
  		      case IPOPT_SEC:
  		      case IPOPT_SID:
  		      default:
@@ -243,10 +237,10 @@ diff -Nurp linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  				pp_ptr = optptr;
  				goto error;
  			}
-diff -Nurp linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c
---- linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c	2007-12-03 15:10:26.000000000 -0500
-+++ linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c	2007-12-03 15:11:08.000000000 -0500
-@@ -49,6 +49,8 @@ static void dump_packet(const struct nf_
+diff -Nurb linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c
+--- linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c	2008-02-02 04:52:09.000000000 -0500
++++ linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c	2008-02-02 04:52:17.000000000 -0500
+@@ -49,6 +49,8 @@
  	else
  		logflags = NF_LOG_MASK;
  
@@ -255,10 +249,10 @@ diff -Nurp linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ip
  	ih = skb_header_pointer(skb, iphoff, sizeof(_iph), &_iph);
  	if (ih == NULL) {
  		printk("TRUNCATED");
-diff -Nurp linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
---- linux-2.6.22-510/net/ipv4/raw.c	2007-12-03 15:10:56.000000000 -0500
-+++ linux-2.6.22-520/net/ipv4/raw.c	2007-12-03 15:11:08.000000000 -0500
-@@ -103,7 +103,7 @@ static void raw_v4_unhash(struct sock *s
+diff -Nurb linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
+--- linux-2.6.22-510/net/ipv4/raw.c	2008-02-02 04:52:13.000000000 -0500
++++ linux-2.6.22-520/net/ipv4/raw.c	2008-02-02 04:52:17.000000000 -0500
+@@ -103,7 +103,7 @@
  
  struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
  			     __be32 raddr, __be32 laddr,
@@ -267,7 +261,7 @@ diff -Nurp linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  {
  	struct hlist_node *node;
  
-@@ -112,6 +112,7 @@ struct sock *__raw_v4_lookup(struct sock
+@@ -112,6 +112,7 @@
  
  		if (inet->num == num 					&&
  		    !(inet->daddr && inet->daddr != raddr) 		&&
@@ -275,7 +269,7 @@ diff -Nurp linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  		    v4_sock_addr_match(sk->sk_nx_info, inet, laddr)	&&
  		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
  			goto found; /* gotcha */
-@@ -161,7 +162,7 @@ int raw_v4_input(struct sk_buff *skb, st
+@@ -161,7 +162,7 @@
  		goto out;
  	sk = __raw_v4_lookup(__sk_head(head), iph->protocol,
  			     iph->saddr, iph->daddr,
@@ -284,7 +278,7 @@ diff -Nurp linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  
  	while (sk) {
  		delivered = 1;
-@@ -174,7 +175,7 @@ int raw_v4_input(struct sk_buff *skb, st
+@@ -174,7 +175,7 @@
  		}
  		sk = __raw_v4_lookup(sk_next(sk), iph->protocol,
  				     iph->saddr, iph->daddr,
@@ -293,7 +287,7 @@ diff -Nurp linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  	}
  out:
  	read_unlock(&raw_v4_lock);
-@@ -315,7 +316,7 @@ static int raw_send_hdrinc(struct sock *
+@@ -315,7 +316,7 @@
  	}
  
  	err = -EPERM;
@@ -302,10 +296,10 @@ diff -Nurp linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  		sk->sk_nx_info &&
  		!v4_addr_in_nx_info(sk->sk_nx_info, iph->saddr, NXA_MASK_BIND))
  		goto error_free;
-diff -Nurp linux-2.6.22-510/net/netfilter/Kconfig linux-2.6.22-520/net/netfilter/Kconfig
---- linux-2.6.22-510/net/netfilter/Kconfig	2007-07-21 18:00:27.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/Kconfig	2007-12-03 15:11:08.000000000 -0500
-@@ -389,6 +389,13 @@ config NETFILTER_XT_TARGET_TCPMSS
+diff -Nurb linux-2.6.22-510/net/netfilter/Kconfig linux-2.6.22-520/net/netfilter/Kconfig
+--- linux-2.6.22-510/net/netfilter/Kconfig	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/Kconfig	2008-02-02 04:52:17.000000000 -0500
+@@ -389,6 +389,13 @@
  
  	  To compile it as a module, choose M here.  If unsure, say N.
  
@@ -319,10 +313,10 @@ diff -Nurp linux-2.6.22-510/net/netfilter/Kconfig linux-2.6.22-520/net/netfilter
  config NETFILTER_XT_MATCH_COMMENT
  	tristate  '"comment" match support'
  	depends on NETFILTER_XTABLES
-diff -Nurp linux-2.6.22-510/net/netfilter/Makefile linux-2.6.22-520/net/netfilter/Makefile
---- linux-2.6.22-510/net/netfilter/Makefile	2007-07-21 17:58:59.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/Makefile	2007-12-03 15:11:08.000000000 -0500
-@@ -37,6 +37,7 @@ obj-$(CONFIG_NF_CONNTRACK_TFTP) += nf_co
+diff -Nurb linux-2.6.22-510/net/netfilter/Makefile linux-2.6.22-520/net/netfilter/Makefile
+--- linux-2.6.22-510/net/netfilter/Makefile	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/Makefile	2008-02-02 04:52:17.000000000 -0500
+@@ -37,6 +37,7 @@
  obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
  
  # targets
@@ -330,10 +324,10 @@ diff -Nurp linux-2.6.22-510/net/netfilter/Makefile linux-2.6.22-520/net/netfilte
  obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CONNMARK) += xt_CONNMARK.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_DSCP) += xt_DSCP.o
-diff -Nurp linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/net/netfilter/nf_conntrack_core.c
---- linux-2.6.22-510/net/netfilter/nf_conntrack_core.c	2007-07-21 18:00:27.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/nf_conntrack_core.c	2007-12-03 15:11:08.000000000 -0500
-@@ -726,6 +726,8 @@ init_conntrack(const struct nf_conntrack
+diff -Nurb linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/net/netfilter/nf_conntrack_core.c
+--- linux-2.6.22-510/net/netfilter/nf_conntrack_core.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/nf_conntrack_core.c	2008-02-02 04:52:17.000000000 -0500
+@@ -726,6 +726,8 @@
  
  	/* Overload tuple linked list to put us in unconfirmed list. */
  	list_add(&conntrack->tuplehash[IP_CT_DIR_ORIGINAL].list, &unconfirmed);
@@ -342,9 +336,9 @@ diff -Nurp linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/n
  
  	write_unlock_bh(&nf_conntrack_lock);
  
-diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilter/xt_MARK.c
---- linux-2.6.22-510/net/netfilter/xt_MARK.c	2007-07-21 17:59:00.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2007-12-03 15:11:08.000000000 -0500
+diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilter/xt_MARK.c
+--- linux-2.6.22-510/net/netfilter/xt_MARK.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-02-08 06:20:11.000000000 -0500
 @@ -5,13 +5,18 @@
   * This program is free software; you can redistribute it and/or modify
   * it under the terms of the GNU General Public License version 2 as
@@ -364,7 +358,7 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  #include <linux/netfilter/x_tables.h>
  #include <linux/netfilter/xt_MARK.h>
  
-@@ -21,6 +26,48 @@ MODULE_DESCRIPTION("ip[6]tables MARK mod
+@@ -21,6 +26,48 @@
  MODULE_ALIAS("ipt_MARK");
  MODULE_ALIAS("ip6t_MARK");
  
@@ -413,7 +407,7 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  static unsigned int
  target_v0(struct sk_buff **pskb,
  	  const struct net_device *in,
-@@ -44,7 +91,7 @@ target_v1(struct sk_buff **pskb,
+@@ -44,7 +91,7 @@
  	  const void *targinfo)
  {
  	const struct xt_mark_target_info_v1 *markinfo = targinfo;
@@ -422,7 +416,7 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  
  	switch (markinfo->mode) {
  	case XT_MARK_SET:
-@@ -58,9 +105,52 @@ target_v1(struct sk_buff **pskb,
+@@ -58,8 +105,49 @@
  	case XT_MARK_OR:
  		mark = (*pskb)->mark | markinfo->mark;
  		break;
@@ -456,13 +450,11 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +		}
 +
 +		if (connection_sk) {
-+#ifdef REQUIRESFIXFROMSAPAN
 +			connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
 +			ct->xid[!dir]=connection_sk->sk_xid;
-+			/*connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = connection_sk->sk_xid;*/
++			connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = connection_sk->sk_xid;
 +			if (connection_sk->sk_xid != 0) 
 +				mark = connection_sk->sk_xid;
-+#endif
 +			if (connection_sk != (*pskb)->sk)
 +				sock_put(connection_sk);
 +		}
@@ -470,13 +462,11 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +		}
  	}
  
--	(*pskb)->mark = mark;
 +	if (mark != -1)
-+		(*pskb)->mark = mark;
+ 	(*pskb)->mark = mark;
  	return XT_CONTINUE;
  }
- 
-@@ -92,7 +182,8 @@ checkentry_v1(const char *tablename,
+@@ -92,7 +180,8 @@
  
  	if (markinfo->mode != XT_MARK_SET
  	    && markinfo->mode != XT_MARK_AND
@@ -486,9 +476,9 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  		printk(KERN_WARNING "MARK: unknown mode %u\n",
  		       markinfo->mode);
  		return 0;
-diff -Nurp linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfilter/xt_SETXID.c
+diff -Nurb linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfilter/xt_SETXID.c
 --- linux-2.6.22-510/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2007-12-03 15:11:08.000000000 -0500
++++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2008-02-02 04:52:17.000000000 -0500
 @@ -0,0 +1,79 @@
 +#include <linux/module.h>
 +#include <linux/skbuff.h>
@@ -569,9 +559,9 @@ diff -Nurp linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfi
 +
 +module_init(init);
 +module_exit(fini);
-diff -Nurp linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
---- linux-2.6.22-510/net/packet/af_packet.c	2007-07-21 18:00:27.000000000 -0400
-+++ linux-2.6.22-520/net/packet/af_packet.c	2007-12-03 15:11:08.000000000 -0500
+diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
+--- linux-2.6.22-510/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/packet/af_packet.c	2008-02-02 04:52:17.000000000 -0500
 @@ -78,6 +78,7 @@
  #include <linux/poll.h>
  #include <linux/module.h>
@@ -580,7 +570,7 @@ diff -Nurp linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/a
  
  #ifdef CONFIG_INET
  #include <net/inet_common.h>
-@@ -420,6 +421,10 @@ static inline unsigned int run_filter(st
+@@ -420,6 +421,10 @@
  				      unsigned int res)
  {
  	struct sk_filter *filter;
@@ -591,7 +581,7 @@ diff -Nurp linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/a
  
  	rcu_read_lock_bh();
  	filter = rcu_dereference(sk->sk_filter);
-@@ -984,7 +989,7 @@ static int packet_create(struct socket *
+@@ -984,7 +989,7 @@
  	__be16 proto = (__force __be16)protocol; /* weird, but documented */
  	int err;
  
