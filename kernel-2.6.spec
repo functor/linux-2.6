@@ -148,6 +148,7 @@ Patch100: linux-2.6-100-build-nonintconfig.patch
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch210: linux-2.6-210-vserver-cpu-sched.patch
+Patch220: linux-2.6-220-lback-feat02.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -336,6 +337,7 @@ KERNEL_PREVIOUS=vanilla
 
 %ApplyPatch 200
 %ApplyPatch 210
+%ApplyPatch 220
 
 %ApplyPatch 250
 
