@@ -154,7 +154,6 @@ Patch570: linux-2.6-570-tagxid.patch
 Patch590: linux-2.6-590-trellis-mm1-netns.patch
 Patch591: linux-2.6-591-unshare-netns.patch
 Patch592: linux-2.6-592-ztun-sb.patch
-Patch593: linux-2.6-593-egre.patch
 
 %description
 The kernel package contains the Linux kernel (vmlinuz), the core of any
