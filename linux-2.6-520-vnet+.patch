@@ -496,7 +496,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/n
  
 diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilter/xt_MARK.c
 --- linux-2.6.22-510/net/netfilter/xt_MARK.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-02-20 04:13:13.000000000 -0500
++++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-02-20 06:56:29.000000000 -0500
 @@ -5,13 +5,18 @@
   * This program is free software; you can redistribute it and/or modify
   * it under the terms of the GNU General Public License version 2 as
@@ -574,7 +574,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  
  	switch (markinfo->mode) {
  	case XT_MARK_SET:
-@@ -58,8 +105,48 @@
+@@ -58,8 +105,58 @@
  	case XT_MARK_OR:
  		mark = (*pskb)->mark | markinfo->mark;
  		break;
@@ -587,12 +587,13 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +		struct nf_conn *ct = nf_ct_get((*pskb), &ctinfo);
 +		extern struct inet_hashinfo tcp_hashinfo;
 +		enum ip_conntrack_dir dir;
-+
 +		if (!ct) 
 +			break;
++
 +		dir = CTINFO2DIR(ctinfo);
 +		u_int32_t src_ip = ct->tuplehash[dir].tuple.src.u3.ip;
 +		u_int16_t src_port = get_src_port(&ct->tuplehash[dir].tuple);
++		u_int16_t proto = ct->tuplehash[dir].tuple.dst.protonum;
 +
 +		u_int32_t ip;
 +		u_int16_t port;
@@ -601,29 +602,38 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +		ip = ct->tuplehash[dir].tuple.dst.u3.ip;
 +		port = get_dst_port(&ct->tuplehash[dir].tuple);
 +
-+		if ((*pskb)->sk) 
-+			connection_sk = (*pskb)->sk;
-+		else {
-+			connection_sk = inet_lookup(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
-+		}
++		if (proto == 1) {
++			if (((*pskb)->mark!=-1) && (*pskb)->mark)
++				ct->xid[0]=(*pskb)->mark;
++			if (ct->xid[0]) 
++				mark = ct->xid[0];
 +
-+		if (connection_sk) {
-+			connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
-+			ct->xid[!dir]=connection_sk->sk_xid;
-+			if (connection_sk->sk_xid != 0) 
-+				mark = connection_sk->sk_xid;
-+			if (connection_sk != (*pskb)->sk)
-+				sock_put(connection_sk);
 +		}
-+		break;
-+		}
++		else if (proto == 6) {
++				if ((*pskb)->sk) 
++					connection_sk = (*pskb)->sk;
++				else {
++					connection_sk = inet_lookup(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
++				}
++
++				if (connection_sk) {
++					connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
++					ct->xid[!dir]=connection_sk->sk_xid;
++					if (connection_sk->sk_xid != 0) 
++						mark = connection_sk->sk_xid;
++					if (connection_sk != (*pskb)->sk)
++						sock_put(connection_sk);
++				}
++				break;
++				}
++			      }
  	}
  
 +	if (mark != -1)
  	(*pskb)->mark = mark;
  	return XT_CONTINUE;
  }
-@@ -92,7 +179,8 @@
+@@ -92,7 +189,8 @@
  
  	if (markinfo->mode != XT_MARK_SET
  	    && markinfo->mode != XT_MARK_AND
@@ -633,144 +643,10 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  		printk(KERN_WARNING "MARK: unknown mode %u\n",
  		       markinfo->mode);
  		return 0;
-diff -Nurb linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfilter/xt_SETXID.c
---- linux-2.6.22-510/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2008-02-20 04:13:13.000000000 -0500
-@@ -0,0 +1,79 @@
-+#include <linux/module.h>
-+#include <linux/skbuff.h>
-+#include <linux/ip.h>
-+#include <net/checksum.h>
-+#include <linux/vs_network.h>
-+
-+#include <linux/netfilter/x_tables.h>
-+#include <linux/netfilter/xt_SETXID.h>
-+
-+MODULE_LICENSE("GPL");
-+MODULE_AUTHOR("");
-+MODULE_DESCRIPTION("");
-+MODULE_ALIAS("ipt_SETXID");
-+
-+static unsigned int
-+target_v1(struct sk_buff **pskb,
-+	  const struct net_device *in,
-+	  const struct net_device *out,
-+	  unsigned int hooknum,
-+	  const struct xt_target *target,
-+	  const void *targinfo)
-+{
-+	const struct xt_setxid_target_info_v1 *setxidinfo = targinfo;
-+
-+	switch (setxidinfo->mode) {
-+	case XT_SET_PACKET_XID:
-+		 (*pskb)->skb_tag = setxidinfo->mark;
-+		break;
-+	}
-+	return XT_CONTINUE;
-+}
-+
-+
-+static int
-+checkentry_v1(const char *tablename,
-+	      const void *entry,
-+	      const struct xt_target *target,
-+	      void *targinfo,
-+	      unsigned int hook_mask)
-+{
-+	struct xt_setxid_target_info_v1 *setxidinfo = targinfo;
-+
-+	if (setxidinfo->mode != XT_SET_PACKET_XID) {
-+		printk(KERN_WARNING "SETXID: unknown mode %u\n",
-+		       setxidinfo->mode);
-+		return 0;
-+	}
-+
-+	return 1;
-+}
-+
-+static struct xt_target xt_setxid_target[] = {
-+	{
-+		.name		= "SETXID",
-+		.family		= AF_INET,
-+		.revision	= 1,
-+		.checkentry	= checkentry_v1,
-+		.target		= target_v1,
-+		.targetsize	= sizeof(struct xt_setxid_target_info_v1),
-+		.table		= "mangle",
-+		.me		= THIS_MODULE,
-+	}
-+};
-+
-+static int __init init(void)
-+{
-+	int err;
-+
-+	err = xt_register_targets(xt_setxid_target, ARRAY_SIZE(xt_setxid_target));
-+	return err;
-+}
-+
-+static void __exit fini(void)
-+{
-+	xt_unregister_targets(xt_setxid_target, ARRAY_SIZE(xt_setxid_target));
-+}
-+
-+module_init(init);
-+module_exit(fini);
-diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
---- linux-2.6.22-510/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/packet/af_packet.c	2008-02-20 04:13:13.000000000 -0500
-@@ -78,6 +78,7 @@
- #include <linux/poll.h>
- #include <linux/module.h>
- #include <linux/init.h>
-+#include <linux/vs_network.h>
- 
- #ifdef CONFIG_INET
- #include <net/inet_common.h>
-@@ -324,6 +325,9 @@
- 	__be16 proto=0;
- 	int err;
- 
-+	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
-+		return -EPERM;
-+
- 	/*
- 	 *	Get and verify the address.
- 	 */
-@@ -420,6 +424,10 @@
- 				      unsigned int res)
- {
- 	struct sk_filter *filter;
-+	int tag = skb->skb_tag;
-+
-+	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag))
-+		return 0;
- 
- 	rcu_read_lock_bh();
- 	filter = rcu_dereference(sk->sk_filter);
-@@ -711,6 +719,9 @@
- 	unsigned char *addr;
- 	int ifindex, err, reserve = 0;
- 
-+	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
-+		return -EPERM;
-+
- 	/*
- 	 *	Get and verify the address.
- 	 */
-@@ -984,7 +995,7 @@
- 	__be16 proto = (__force __be16)protocol; /* weird, but documented */
- 	int err;
- 
--	if (!capable(CAP_NET_RAW))
-+	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET))
- 		return -EPERM;
- 	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
- 	    sock->type != SOCK_PACKET)
-diff -Nurb linux-2.6.22-510/xt_MARK.c linux-2.6.22-520/xt_MARK.c
---- linux-2.6.22-510/xt_MARK.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/xt_MARK.c	2008-02-20 05:14:06.000000000 -0500
-@@ -0,0 +1,282 @@
+diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c.orig linux-2.6.22-520/net/netfilter/xt_MARK.c.orig
+--- linux-2.6.22-510/net/netfilter/xt_MARK.c.orig	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-520/net/netfilter/xt_MARK.c.orig	2008-02-20 06:54:56.000000000 -0500
+@@ -0,0 +1,284 @@
 +/* This is a module which is used for setting the NFMARK field of an skb. */
 +
 +/* (C) 1999-2001 Marc Boucher <marc@mbsi.ca>
@@ -887,7 +763,6 @@ diff -Nurb linux-2.6.22-510/xt_MARK.c linux-2.6.22-520/xt_MARK.c
 +		struct nf_conn *ct = nf_ct_get((*pskb), &ctinfo);
 +		extern struct inet_hashinfo tcp_hashinfo;
 +		enum ip_conntrack_dir dir;
-+
 +		if (!ct) 
 +			break;
 +
@@ -904,8 +779,11 @@ diff -Nurb linux-2.6.22-510/xt_MARK.c linux-2.6.22-520/xt_MARK.c
 +		port = get_dst_port(&ct->tuplehash[dir].tuple);
 +
 +		if (proto == 1) {
-+			ct->xid[!dir]=(*pskb)->mark;
-+			if (ct->xid[dir]) mark = ct->xid[dir];
++			if (((*pskb)->mark!=-1) && (*pskb)->mark)
++				ct->xid[0]=(*pskb)->mark;
++			if (ct->xid[0]) 
++				mark = ct->xid[0];
++			printk(KERN_CRIT "%d %d\n",ct->xid[0],(*pskb)->mark);
 +
 +		}
 +		else if (proto == 6) {
@@ -1053,3 +931,137 @@ diff -Nurb linux-2.6.22-510/xt_MARK.c linux-2.6.22-520/xt_MARK.c
 +
 +module_init(xt_mark_init);
 +module_exit(xt_mark_fini);
+diff -Nurb linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfilter/xt_SETXID.c
+--- linux-2.6.22-510/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2008-02-20 04:13:13.000000000 -0500
+@@ -0,0 +1,79 @@
++#include <linux/module.h>
++#include <linux/skbuff.h>
++#include <linux/ip.h>
++#include <net/checksum.h>
++#include <linux/vs_network.h>
++
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_SETXID.h>
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("");
++MODULE_DESCRIPTION("");
++MODULE_ALIAS("ipt_SETXID");
++
++static unsigned int
++target_v1(struct sk_buff **pskb,
++	  const struct net_device *in,
++	  const struct net_device *out,
++	  unsigned int hooknum,
++	  const struct xt_target *target,
++	  const void *targinfo)
++{
++	const struct xt_setxid_target_info_v1 *setxidinfo = targinfo;
++
++	switch (setxidinfo->mode) {
++	case XT_SET_PACKET_XID:
++		 (*pskb)->skb_tag = setxidinfo->mark;
++		break;
++	}
++	return XT_CONTINUE;
++}
++
++
++static int
++checkentry_v1(const char *tablename,
++	      const void *entry,
++	      const struct xt_target *target,
++	      void *targinfo,
++	      unsigned int hook_mask)
++{
++	struct xt_setxid_target_info_v1 *setxidinfo = targinfo;
++
++	if (setxidinfo->mode != XT_SET_PACKET_XID) {
++		printk(KERN_WARNING "SETXID: unknown mode %u\n",
++		       setxidinfo->mode);
++		return 0;
++	}
++
++	return 1;
++}
++
++static struct xt_target xt_setxid_target[] = {
++	{
++		.name		= "SETXID",
++		.family		= AF_INET,
++		.revision	= 1,
++		.checkentry	= checkentry_v1,
++		.target		= target_v1,
++		.targetsize	= sizeof(struct xt_setxid_target_info_v1),
++		.table		= "mangle",
++		.me		= THIS_MODULE,
++	}
++};
++
++static int __init init(void)
++{
++	int err;
++
++	err = xt_register_targets(xt_setxid_target, ARRAY_SIZE(xt_setxid_target));
++	return err;
++}
++
++static void __exit fini(void)
++{
++	xt_unregister_targets(xt_setxid_target, ARRAY_SIZE(xt_setxid_target));
++}
++
++module_init(init);
++module_exit(fini);
+diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
+--- linux-2.6.22-510/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/packet/af_packet.c	2008-02-20 04:13:13.000000000 -0500
+@@ -78,6 +78,7 @@
+ #include <linux/poll.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
++#include <linux/vs_network.h>
+ 
+ #ifdef CONFIG_INET
+ #include <net/inet_common.h>
+@@ -324,6 +325,9 @@
+ 	__be16 proto=0;
+ 	int err;
+ 
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
++		return -EPERM;
++
+ 	/*
+ 	 *	Get and verify the address.
+ 	 */
+@@ -420,6 +424,10 @@
+ 				      unsigned int res)
+ {
+ 	struct sk_filter *filter;
++	int tag = skb->skb_tag;
++
++	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag))
++		return 0;
+ 
+ 	rcu_read_lock_bh();
+ 	filter = rcu_dereference(sk->sk_filter);
+@@ -711,6 +719,9 @@
+ 	unsigned char *addr;
+ 	int ifindex, err, reserve = 0;
+ 
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
++		return -EPERM;
++
+ 	/*
+ 	 *	Get and verify the address.
+ 	 */
+@@ -984,7 +995,7 @@
+ 	__be16 proto = (__force __be16)protocol; /* weird, but documented */
+ 	int err;
+ 
+-	if (!capable(CAP_NET_RAW))
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET))
+ 		return -EPERM;
+ 	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
+ 	    sock->type != SOCK_PACKET)
