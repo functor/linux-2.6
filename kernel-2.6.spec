@@ -163,6 +163,7 @@ Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
+Patch590: linux-2.6-590-chopstix-intern.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -351,6 +352,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 560
 %ApplyPatch 570
 %ApplyPatch 580
+%ApplyPatch 590
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
