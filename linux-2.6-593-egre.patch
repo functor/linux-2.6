@@ -1,9 +1,9 @@
-diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
+diff -Nurp linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 --- linux-2.6.22-592/drivers/net/gre.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-593/drivers/net/gre.c	2008-02-13 19:40:19.000000000 -0500
++++ linux-2.6.22-593/drivers/net/gre.c	2008-02-28 13:51:50.000000000 -0500
 @@ -0,0 +1,1634 @@
 +/*
-+ *	Linux NET3:	GRE over IP protocol decoder. 
++ *	Linux NET3:	GRE over IP protocol decoder.
 + *
 + *	Authors: Alexey Kuznetsov (kuznet@ms2.inr.ac.ru)
 + *
@@ -70,7 +70,7 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +   solution, but it supposes maintaing new variable in ALL
 +   skb, even if no tunneling is used.
 +
-+   Current solution: t->recursion lock breaks dead loops. It looks 
++   Current solution: t->recursion lock breaks dead loops. It looks
 +   like dev->tbusy flag, but I preferred new variable, because
 +   the semantics is different. One day, when hard_start_xmit
 +   will be multithreaded we will have to use skb->encapsulation.
@@ -643,7 +643,7 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +		if (flags == 0 &&
 +		    skb->protocol == htons(ETH_P_WCCP)) {
 +			skb->protocol = htons(ETH_P_IP);
-+			if ((*(h + offset) & 0xF0) != 0x40) 
++			if ((*(h + offset) & 0xF0) != 0x40)
 +				offset += 4;
 +		}
 +
@@ -786,14 +786,14 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +		else
 +			goto tx_error;
 +	}
-+	
++
 +	tos = tiph->tos;
 +	if (tos&1) {
 +		if (skb->protocol == htons(ETH_P_IP))
 +			tos = old_iph->tos;
 +		tos &= ~1;
 +	}
-+	
++
 +	{
 +		struct flowi fl = { .fl_net = &init_net,
 +				    .oif = tunnel->parms.link,
@@ -870,7 +870,7 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +		struct sk_buff *new_skb = skb_realloc_headroom(skb, max_headroom);
 +		if (!new_skb) {
 +			ip_rt_put(rt);
-+  			stats->tx_dropped++;
++			stats->tx_dropped++;
 +			dev_kfree_skb(skb);
 +			tunnel->recursion--;
 +			return 0;
@@ -1335,7 +1335,7 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +   so that I had to set ARPHRD_IPGRE to a random value.
 +   I have an impression, that Cisco could make something similar,
 +   but this feature is apparently missing in IOS<=11.2(8).
-+   
++
 +   I set up 10.66.66/24 and fec0:6666:6666::0/96 as virtual networks
 +   with broadcast 224.66.66.66. If you have access to mbone, play with me :-)
 +
@@ -1367,9 +1367,9 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +	p[1]		= htons(type);
 +
 +	/*
-+	 *	Set the source hardware address. 
++	 *	Set the source hardware address.
 +	 */
-+	 
++
 +	if (saddr)
 +		memcpy(&iph->saddr, saddr, 4);
 +
@@ -1379,7 +1379,7 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +	}
 +	if (iph->daddr && !MULTICAST(iph->daddr))
 +		return t->hlen;
-+	
++
 +	return -t->hlen;
 +}
 +
@@ -1636,9 +1636,9 @@ diff -Nurb linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +module_init(ipgre_init);
 +module_exit(ipgre_fini);
 +MODULE_LICENSE("GPL");
-diff -Nurb linux-2.6.22-592/drivers/net/Makefile linux-2.6.22-593/drivers/net/Makefile
---- linux-2.6.22-592/drivers/net/Makefile	2008-02-13 15:29:36.000000000 -0500
-+++ linux-2.6.22-593/drivers/net/Makefile	2008-02-13 15:32:42.000000000 -0500
+diff -Nurp linux-2.6.22-592/drivers/net/Makefile linux-2.6.22-593/drivers/net/Makefile
+--- linux-2.6.22-592/drivers/net/Makefile	2008-02-28 13:51:47.000000000 -0500
++++ linux-2.6.22-593/drivers/net/Makefile	2008-02-28 13:51:50.000000000 -0500
 @@ -2,6 +2,7 @@
  # Makefile for the Linux network (ethercard) device drivers.
  #
@@ -1647,9 +1647,9 @@ diff -Nurb linux-2.6.22-592/drivers/net/Makefile linux-2.6.22-593/drivers/net/Ma
  obj-y +=ztun.o shortbridge.o
  obj-$(CONFIG_E1000) += e1000/
  obj-$(CONFIG_E1000E) += e1000e/
-diff -Nurb linux-2.6.22-592/include/linux/if_ether.h linux-2.6.22-593/include/linux/if_ether.h
+diff -Nurp linux-2.6.22-592/include/linux/if_ether.h linux-2.6.22-593/include/linux/if_ether.h
 --- linux-2.6.22-592/include/linux/if_ether.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-593/include/linux/if_ether.h	2008-02-13 15:36:53.000000000 -0500
++++ linux-2.6.22-593/include/linux/if_ether.h	2008-02-28 13:51:50.000000000 -0500
 @@ -56,6 +56,7 @@
  #define ETH_P_DIAG      0x6005          /* DEC Diagnostics              */
  #define ETH_P_CUST      0x6006          /* DEC Customer use             */
@@ -1658,10 +1658,10 @@ diff -Nurb linux-2.6.22-592/include/linux/if_ether.h linux-2.6.22-593/include/li
  #define ETH_P_RARP      0x8035		/* Reverse Addr Res packet	*/
  #define ETH_P_ATALK	0x809B		/* Appletalk DDP		*/
  #define ETH_P_AARP	0x80F3		/* Appletalk AARP		*/
-diff -Nurb linux-2.6.22-592/include/linux/if_tunnel.h linux-2.6.22-593/include/linux/if_tunnel.h
+diff -Nurp linux-2.6.22-592/include/linux/if_tunnel.h linux-2.6.22-593/include/linux/if_tunnel.h
 --- linux-2.6.22-592/include/linux/if_tunnel.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-593/include/linux/if_tunnel.h	2008-02-13 15:38:04.000000000 -0500
-@@ -25,6 +25,7 @@
++++ linux-2.6.22-593/include/linux/if_tunnel.h	2008-02-28 13:51:50.000000000 -0500
+@@ -25,6 +25,7 @@ struct ip_tunnel_parm
  	__be16			o_flags;
  	__be32			i_key;
  	__be32			o_key;
@@ -1669,3 +1669,481 @@ diff -Nurb linux-2.6.22-592/include/linux/if_tunnel.h linux-2.6.22-593/include/l
  	struct iphdr		iph;
  };
  
+diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
+--- linux-2.6.22-592/net/ipv4/ip_gre.c	2008-02-28 13:51:40.000000000 -0500
++++ linux-2.6.22-593/net/ipv4/ip_gre.c	2008-02-28 14:05:12.000000000 -0500
+@@ -25,6 +25,7 @@
+ #include <linux/init.h>
+ #include <linux/in6.h>
+ #include <linux/inetdevice.h>
++#include <linux/etherdevice.h>   /**XXX added XXX */
+ #include <linux/igmp.h>
+ #include <linux/netfilter_ipv4.h>
+ #include <linux/if_ether.h>
+@@ -46,6 +47,8 @@
+ #include <net/ip6_route.h>
+ #endif
+ 
++//#define GRE_DEBUG 1
++
+ /*
+    Problems & solutions
+    --------------------
+@@ -116,7 +119,8 @@
+  */
+ 
+ static int ipgre_tunnel_init(struct net_device *dev);
+-static void ipgre_tunnel_setup(struct net_device *dev);
++static void ipgre_ip_tunnel_setup(struct net_device *dev);
++static void ipgre_eth_tunnel_setup(struct net_device *dev);
+ 
+ /* Fallback tunnel: no source, no destination, no key, no options */
+ 
+@@ -243,6 +247,7 @@ static struct ip_tunnel * ipgre_tunnel_l
+ 	__be32 remote = parms->iph.daddr;
+ 	__be32 local = parms->iph.saddr;
+ 	__be32 key = parms->i_key;
++	__be16 proto = parms->proto_type;
+ 	struct ip_tunnel *t, **tp, *nt;
+ 	struct net_device *dev;
+ 	char name[IFNAMSIZ];
+@@ -256,6 +261,8 @@ static struct ip_tunnel * ipgre_tunnel_l
+ 	if (!create)
+ 		return NULL;
+ 
++	printk(KERN_CRIT "Adding tunnel %s with key %d\n", parms->name, ntohl(key));
++
+ 	if (parms->name[0])
+ 		strlcpy(name, parms->name, IFNAMSIZ);
+ 	else {
+@@ -268,8 +275,21 @@ static struct ip_tunnel * ipgre_tunnel_l
+ 		if (i==100)
+ 			goto failed;
+ 	}
++	
++	/* Tunnel creation: check payload type and call appropriate
++	 * function */
++	switch (proto)
++	{
++	    case ETH_P_IP:
++		dev = alloc_netdev(sizeof(*t), name, ipgre_ip_tunnel_setup);
++		break;
++	    case ETH_P_ETH:
++		dev = alloc_netdev(sizeof(*t), name, ipgre_eth_tunnel_setup);
++		break;
++	    default:
++		return NULL;
++	}
+ 
+-	dev = alloc_netdev(sizeof(*t), name, ipgre_tunnel_setup);
+ 	if (!dev)
+ 	  return NULL;
+ 
+@@ -562,6 +582,7 @@ static int ipgre_rcv(struct sk_buff *skb
+ 	u32    seqno = 0;
+ 	struct ip_tunnel *tunnel;
+ 	int    offset = 4;
++	__be16 proto;
+ 
+ 	if (skb->dev->nd_net != &init_net) {
+ 		kfree_skb(skb);
+@@ -574,6 +595,11 @@ static int ipgre_rcv(struct sk_buff *skb
+ 	h = skb->data;
+ 	flags = *(__be16*)h;
+ 
++#ifdef GRE_DEBUG
++	printk(KERN_DEBUG "gre.c [601] src:%x dst:%x  proto:%d %x", iph->saddr, iph->daddr, iph->protocol, skb->data);
++#endif	
++	proto = ntohs(*(__be16*)(h+2)); /* XXX added XXX */
++	
+ 	if (flags&(GRE_CSUM|GRE_KEY|GRE_ROUTING|GRE_SEQ|GRE_VERSION)) {
+ 		/* - Version must be 0.
+ 		   - We do not support routing headers.
+@@ -625,7 +651,28 @@ static int ipgre_rcv(struct sk_buff *skb
+ 		__pskb_pull(skb, offset);
+ 		skb_reset_network_header(skb);
+ 		skb_postpull_rcsum(skb, skb_transport_header(skb), offset);
+-		skb->pkt_type = PACKET_HOST;
++		if(proto == ETH_P_ETH)
++		  {
++#ifdef GRE_DEBUG
++		    unsigned char* tmp_hdr = skb->data;
++		    printk(KERN_DEBUG "gre.c [658] %x %x %x %x %x %x\tskb %x\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
++#endif		    
++		    skb->protocol = eth_type_trans(skb, tunnel->dev);
++
++		    /* XXX added these lines to make arp work? XXX */
++ 		    /*skb->mac.raw = skb->data;*/
++ 		    skb->network_header = skb->network_header + ETH_HLEN;
++		    /* XXX added these lines to make arp work? XXX */
++
++#ifdef GRE_DEBUG
++		    tmp_hdr = skb->data;
++		    printk(KERN_DEBUG "gre.c [669] %x %x %x %x %x %x\tskb %x\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
++ 		    printk(KERN_ALERT "gre.c [671] received ethernet on gre %x %x\n",skb->protocol, ((skb->nh).iph)->protocol); 
++#endif
++		    memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
++		  }
++		else
++		  skb->pkt_type = PACKET_HOST;
+ #ifdef CONFIG_NET_IPGRE_BROADCAST
+ 		if (MULTICAST(iph->daddr)) {
+ 			/* Looped back packet, drop it! */
+@@ -671,7 +718,7 @@ drop_nolock:
+ 	return(0);
+ }
+ 
+-static int ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
++static int ipgre_ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+ 	struct ip_tunnel *tunnel = netdev_priv(dev);
+ 	struct net_device_stats *stats = &tunnel->stat;
+@@ -904,6 +951,231 @@ tx_error:
+ 	return 0;
+ }
+ 
++static int ipgre_eth_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
++{
++	struct ip_tunnel *tunnel = netdev_priv(dev);
++	struct net_device_stats *stats = &tunnel->stat;
++	struct iphdr *old_iph = ip_hdr(skb);
++	struct iphdr *tiph = &tunnel->parms.iph;
++	u8     tos;
++	__be16 df;
++	struct rtable *rt;     		/* Route to the other host */
++	struct net_device *tdev;	/* Device to other host */
++	int    gre_hlen = tunnel->hlen; /* XXX changed XXX*/
++	//struct etheriphdr  *ethiph;
++	struct iphdr  *iph;		/* Our new IP header */
++	int    max_headroom;		/* The extra header space needed */
++	int    mtu;
++
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:972 Starting xmit\n");
++#endif
++
++	if (tunnel->recursion++) {
++		stats->collisions++;
++		goto tx_error;
++	}
++
++	/* Need valid non-multicast daddr.  */
++	if (tiph->daddr == 0 || MULTICAST(tiph->daddr))
++		goto tx_error;
++
++	tos = tiph->tos;
++	if (tos&1) {
++		if (skb->protocol == htons(ETH_P_IP))
++			tos = old_iph->tos;
++		tos &= ~1;
++	}
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:991 Passed tos assignment.\n");
++#endif
++
++
++	{
++		struct flowi fl = { .fl_net = &init_net,
++		    		    .oif = tunnel->parms.link,
++				    .nl_u = { .ip4_u =
++					      { .daddr = tiph->daddr,
++						.saddr = tiph->saddr,
++						.tos = RT_TOS(tos) } },
++				    .proto = IPPROTO_GRE };
++		if (ip_route_output_key(&rt, &fl)) {
++			stats->tx_carrier_errors++;
++			goto tx_error_icmp;
++		}
++	}
++	tdev = rt->u.dst.dev;
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1006 Passed the route retrieval\n");
++#endif
++	if (tdev == dev) {
++		ip_rt_put(rt);
++		stats->collisions++;
++		goto tx_error;
++	}
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1018 Passed tdev collision check.\n");
++#endif
++
++	/* Check MTU stuff if kernel panic */
++	df = tiph->frag_off;
++	if (df)
++		mtu = dst_mtu(&rt->u.dst) - tunnel->hlen;
++	else
++		mtu = skb->dst ? dst_mtu(skb->dst) : dev->mtu;
++/*
++	if (skb->dst)
++		skb->dst->ops->update_pmtu(skb->dst, mtu);
++	 XXX */
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1032 Passed the pmtu setting.\n");
++#endif
++
++	if (skb->protocol == htons(ETH_P_IP)) {
++		df |= (old_iph->frag_off&htons(IP_DF));
++
++		if ((old_iph->frag_off & htons(IP_DF)) &&
++		    mtu < ntohs(old_iph->tot_len)) {
++			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED, htonl(mtu));
++			ip_rt_put(rt);
++			goto tx_error;
++		}
++	}
++#ifdef CONFIG_IPV6
++	else if (skb->protocol == htons(ETH_P_IPV6)) {
++		struct rt6_info *rt6 = (struct rt6_info*)skb->dst;
++
++		if (rt6 && mtu < dst_mtu(skb->dst) && mtu >= IPV6_MIN_MTU) {
++			if (tiph->daddr || rt6->rt6i_dst.plen == 128) {
++				rt6->rt6i_flags |= RTF_MODIFIED;
++				skb->dst->metrics[RTAX_MTU-1] = mtu;
++			}
++		}
++
++		/* @@@ Is this correct?  */
++		if (mtu >= IPV6_MIN_MTU && mtu < skb->len - tunnel->hlen + gre_hlen) {
++			icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu, dev);
++			ip_rt_put(rt);
++			goto tx_error;
++		}
++	}
++#endif
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1065 Passed the fragmentation check.\n");
++#endif
++
++	if (tunnel->err_count > 0) {
++		if (jiffies - tunnel->err_time < IPTUNNEL_ERR_TIMEO) {
++			tunnel->err_count--;
++			dst_link_failure(skb);
++		} else
++			tunnel->err_count = 0;
++	}
++
++	max_headroom = LL_RESERVED_SPACE(tdev) + gre_hlen;
++
++	if (skb_headroom(skb) < max_headroom || skb_cloned(skb) || skb_shared(skb)) {
++		struct sk_buff *new_skb = skb_realloc_headroom(skb, max_headroom);
++		if (!new_skb) {
++			ip_rt_put(rt);
++  			stats->tx_dropped++;
++			dev_kfree_skb(skb);
++			tunnel->recursion--;
++			return 0;
++		}
++		if (skb->sk)
++			skb_set_owner_w(new_skb, skb->sk);
++		dev_kfree_skb(skb);
++		skb = new_skb;
++		old_iph = ip_hdr(skb);
++	}
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1094 Passed the headroom calculation\n");
++#endif
++
++
++/* 	XXX skb->h.raw = skb->nh.raw; XXX */
++//	skb->h.raw = skb->mac.raw;
++	skb->transport_header = skb->mac_header; // Added by valas
++	
++	skb_push(skb, gre_hlen);
++	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
++	dst_release(skb->dst);
++	skb->dst = &rt->u.dst;
++
++	/*
++	 *	Push down and install the etherip header.
++	 */
++
++	iph			=	ip_hdr(skb);
++	iph->version		=	4;
++	iph->ihl		=	sizeof(struct iphdr) >> 2;
++	iph->frag_off		=	df;
++	iph->protocol		=	IPPROTO_GRE;
++	iph->tos		=	ipgre_ecn_encapsulate(tos, old_iph, skb);
++	iph->daddr		=	rt->rt_dst;
++	iph->saddr		=	rt->rt_src;
++
++/* 	ethiph->version		=	htons(ETHERIP_VERSION); */
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1121 Passed outer IP header construction.\n");
++#endif
++
++	if ((iph->ttl = tiph->ttl) == 0) {
++		if (skb->protocol == htons(ETH_P_IP))
++			iph->ttl = old_iph->ttl;
++#ifdef CONFIG_IPV6
++		else if (skb->protocol == htons(ETH_P_IPV6))
++			iph->ttl = ((struct ipv6hdr*)old_iph)->hop_limit;
++#endif
++		else
++			iph->ttl = dst_metric(&rt->u.dst, RTAX_HOPLIMIT);
++	}
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1006 Passed the TTL check.\n");
++#endif
++
++	((__be16*)(iph+1))[0] = tunnel->parms.o_flags;
++	((__be16*)(iph+1))[1] = htons(tunnel->parms.proto_type);
++
++	if (tunnel->parms.o_flags&(GRE_KEY|GRE_CSUM|GRE_SEQ)) {
++		__be32 *ptr = (__be32*)(((u8*)iph) + tunnel->hlen - 4);
++
++		if (tunnel->parms.o_flags&GRE_SEQ) {
++			++tunnel->o_seqno;
++			*ptr = htonl(tunnel->o_seqno);
++			ptr--;
++		}
++		if (tunnel->parms.o_flags&GRE_KEY) {
++			*ptr = tunnel->parms.o_key;
++			ptr--;
++		}
++		if (tunnel->parms.o_flags&GRE_CSUM) {
++			*ptr = 0;
++			*(__sum16*)ptr = ip_compute_csum((void*)(iph+1), skb->len - sizeof(struct iphdr));
++		}
++	}
++#ifdef GRE_DEBUG
++	printk(KERN_ALERT "gre.c:1006 Passed the tunnel transmit.\n");
++#endif
++
++	nf_reset(skb);
++
++	IPTUNNEL_XMIT();
++	tunnel->recursion--;
++	return 0;
++
++tx_error_icmp:
++	dst_link_failure(skb);
++
++tx_error:
++	stats->tx_errors++;
++	dev_kfree_skb(skb);
++	tunnel->recursion--;
++	return 0;
++}
++
++
+ static int
+ ipgre_tunnel_ioctl (struct net_device *dev, struct ifreq *ifr, int cmd)
+ {
+@@ -911,6 +1183,8 @@ ipgre_tunnel_ioctl (struct net_device *d
+ 	struct ip_tunnel_parm p;
+ 	struct ip_tunnel *t;
+ 
++        printk(KERN_ALERT "1174 GRE: entering gre ioctl. command is: %d\n", cmd);
++
+ 	switch (cmd) {
+ 	case SIOCGETTUNNEL:
+ 		t = NULL;
+@@ -952,7 +1226,7 @@ ipgre_tunnel_ioctl (struct net_device *d
+ 			p.o_key = 0;
+ 
+ 		t = ipgre_tunnel_locate(&p, cmd == SIOCADDTUNNEL);
+-
++		if (t) printk(KERN_ALERT "1174 GRE: proto %s %x\n", p.name, p.proto_type);
+ 		if (dev != ipgre_fb_tunnel_dev && cmd == SIOCCHGTUNNEL) {
+ 			if (t != NULL) {
+ 				if (t->dev != dev) {
+@@ -968,6 +1242,12 @@ ipgre_tunnel_ioctl (struct net_device *d
+ 					nflags = IFF_BROADCAST;
+ 				else if (p.iph.daddr)
+ 					nflags = IFF_POINTOPOINT;
++				
++				/* XXX:Set back IFF_BROADCAST if
++				 * transporting ethernet */
++				printk(KERN_ALERT "1193 GRE: proto %s %d\n", p.name, p.proto_type);
++				if (p.proto_type == ETH_P_ETH)
++				    	nflags = IFF_BROADCAST;
+ 
+ 				if ((dev->flags^nflags)&(IFF_POINTOPOINT|IFF_BROADCAST)) {
+ 					err = -EINVAL;
+@@ -978,6 +1258,8 @@ ipgre_tunnel_ioctl (struct net_device *d
+ 				t->parms.iph.daddr = p.iph.daddr;
+ 				t->parms.i_key = p.i_key;
+ 				t->parms.o_key = p.o_key;
++				/* XXX:Copy in the protocol field */
++				t->parms.proto_type = p.proto_type;
+ 				memcpy(dev->dev_addr, &p.iph.saddr, 4);
+ 				memcpy(dev->broadcast, &p.iph.daddr, 4);
+ 				ipgre_tunnel_link(t);
+@@ -1139,12 +1421,12 @@ static int ipgre_close(struct net_device
+ 
+ #endif
+ 
+-static void ipgre_tunnel_setup(struct net_device *dev)
++static void ipgre_ip_tunnel_setup(struct net_device *dev)
+ {
+ 	SET_MODULE_OWNER(dev);
+ 	dev->uninit		= ipgre_tunnel_uninit;
+ 	dev->destructor 	= free_netdev;
+-	dev->hard_start_xmit	= ipgre_tunnel_xmit;
++	dev->hard_start_xmit	= ipgre_ip_tunnel_xmit;
+ 	dev->get_stats		= ipgre_tunnel_get_stats;
+ 	dev->do_ioctl		= ipgre_tunnel_ioctl;
+ 	dev->change_mtu		= ipgre_tunnel_change_mtu;
+@@ -1157,6 +1439,36 @@ static void ipgre_tunnel_setup(struct ne
+ 	dev->addr_len		= 4;
+ }
+ 
++/* Tunnel setup for ipgre_eth */
++static void ipgre_eth_tunnel_setup(struct net_device *dev)
++{
++	SET_MODULE_OWNER(dev);
++	ether_setup(dev);
++
++	dev->uninit		= ipgre_tunnel_uninit;
++	dev->destructor 	= free_netdev;
++	dev->hard_start_xmit	= ipgre_eth_tunnel_xmit;
++	dev->get_stats		= ipgre_tunnel_get_stats;
++	dev->do_ioctl		= ipgre_tunnel_ioctl;
++	dev->change_mtu		= ipgre_tunnel_change_mtu;
++
++	dev->type		= ARPHRD_IPGRE;
++	dev->hard_header_len	= ETH_HLEN + sizeof(struct iphdr) + 4;
++	dev->mtu		= ETH_DATA_LEN - sizeof(struct iphdr) - 4;
++	dev->flags		= 0;
++	dev->tx_queue_len	= 0;
++	random_ether_addr(dev->dev_addr);
++
++#ifdef GRE_DEBUG
++	unsigned char* d = dev->dev_addr;
++	printk(KERN_ALERT "Here is the address we got:%x%x%x%x%x%x\n",d[0],d[1],d[2],d[3],d[4],d[5]);
++#endif	
++
++	dev->iflink		= 0;
++	dev->addr_len		= 4;
++}
++
++
+ static int ipgre_tunnel_init(struct net_device *dev)
+ {
+ 	struct net_device *tdev = NULL;
+@@ -1191,7 +1503,14 @@ static int ipgre_tunnel_init(struct net_
+ 			ip_rt_put(rt);
+ 		}
+ 
+-		dev->flags |= IFF_POINTOPOINT;
++		if (tunnel->parms.proto_type == ETH_P_ETH)
++		{
++		    dev->flags |= IFF_BROADCAST;
++		}
++		else
++		{
++			dev->flags |= IFF_POINTOPOINT;
++		}
+ 
+ #ifdef CONFIG_NET_IPGRE_BROADCAST
+ 		if (MULTICAST(iph->daddr)) {
+@@ -1270,7 +1589,7 @@ static int __init ipgre_init(void)
+ 	}
+ 
+ 	ipgre_fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel), "gre0",
+-					   ipgre_tunnel_setup);
++					   ipgre_ip_tunnel_setup);
+ 	if (!ipgre_fb_tunnel_dev) {
+ 		err = -ENOMEM;
+ 		goto err1;
