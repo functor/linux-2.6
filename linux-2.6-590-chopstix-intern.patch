@@ -1,6 +1,24 @@
+diff -Nurb linux-2.6.22-580/arch/i386/Kconfig linux-2.6.22-590/arch/i386/Kconfig
+--- linux-2.6.22-580/arch/i386/Kconfig	2008-02-27 14:59:40.000000000 -0500
++++ linux-2.6.22-590/arch/i386/Kconfig	2008-02-28 07:55:57.000000000 -0500
+@@ -1217,6 +1217,14 @@
+ 
+ source "arch/i386/oprofile/Kconfig"
+ 
++config CHOPSTIX
++	bool "Chopstix (PlanetLab)"
++	depends on MODULES && OPROFILE
++	help
++	  Chopstix allows you to monitor various events by summarizing them
++	  in lossy data structures and transferring these data structures
++	  into user space. If in doubt, say "N".
++
+ config KPROBES
+ 	bool "Kprobes (EXPERIMENTAL)"
+ 	depends on KALLSYMS && EXPERIMENTAL && MODULES
 diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drivers/oprofile/cpu_buffer.c
 --- linux-2.6.22-580/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2008-02-27 13:53:47.000000000 -0500
++++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2008-02-28 07:40:16.000000000 -0500
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -9,10 +27,12 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
   
  #include "event_buffer.h"
  #include "cpu_buffer.h"
-@@ -143,6 +144,14 @@
+@@ -143,6 +144,17 @@
  		b->head_pos = 0;
  }
  
++#ifdef CONFIG_CHOPSTIX
++
 +struct event_spec {
 +	unsigned int pc;
 +	unsigned long dcookie;
@@ -20,11 +40,12 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
 +};
 +
 +extern void (*rec_event)(void *,unsigned int);
++#endif
 +
  static inline void
  add_sample(struct oprofile_cpu_buffer * cpu_buf,
             unsigned long pc, unsigned long event)
-@@ -151,6 +160,7 @@
+@@ -151,6 +163,7 @@
  	entry->eip = pc;
  	entry->event = event;
  	increment_head(cpu_buf);
@@ -32,10 +53,12 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
  }
  
  static inline void
-@@ -237,12 +247,66 @@
+@@ -237,12 +250,75 @@
  	oprofile_end_trace(cpu_buf);
  }
  
++#ifdef CONFIG_CHOPSTIX
++
 +static int proc_pid_cmdline(struct task_struct *task, char * buffer)
 +{
 +	int res = 0;
@@ -72,6 +95,7 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
 +out:
 +	return res;
 +}
++#endif
 +
 +
 +
@@ -81,6 +105,7 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
  	unsigned long pc = profile_pc(regs);
 +	int res=0;
  
++#ifdef CONFIG_CHOPSTIX
 +	if (rec_event) {
 +		struct event esig;
 +		struct event_spec espec;
@@ -96,12 +121,17 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
 +	else {
  	oprofile_add_ext_sample(pc, regs, event, is_kernel);
 +	}
++#else
++ 	oprofile_add_ext_sample(pc, regs, event, is_kernel);
++#endif
++
++
  }
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
 diff -Nurb linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
---- linux-2.6.22-580/fs/exec.c	2008-02-27 13:46:38.000000000 -0500
-+++ linux-2.6.22-590/fs/exec.c	2008-02-27 13:49:58.000000000 -0500
+--- linux-2.6.22-580/fs/exec.c	2008-02-27 14:59:40.000000000 -0500
++++ linux-2.6.22-590/fs/exec.c	2008-02-28 07:40:48.000000000 -0500
 @@ -52,6 +52,7 @@
  #include <linux/audit.h>
  #include <linux/signalfd.h>
@@ -110,20 +140,22 @@ diff -Nurb linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
  
  #include <asm/uaccess.h>
  #include <asm/mmu_context.h>
-@@ -488,6 +489,10 @@
+@@ -488,6 +489,12 @@
  
  	if (!err) {
  		struct inode *inode = nd.dentry->d_inode;
++#ifdef CONFIG_CHOPSTIX
 +		unsigned long cookie;
 +		if (!nd.dentry->d_cookie)
 +			get_dcookie(nd.dentry, nd.mnt, &cookie);
++#endif
 +
  		file = ERR_PTR(-EACCES);
  		if (!(nd.mnt->mnt_flags & MNT_NOEXEC) &&
  		    S_ISREG(inode->i_mode)) {
 diff -Nurb linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linux/arrays.h
 --- linux-2.6.22-580/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-590/include/linux/arrays.h	2008-02-27 13:48:29.000000000 -0500
++++ linux-2.6.22-590/include/linux/arrays.h	2008-02-27 14:59:52.000000000 -0500
 @@ -0,0 +1,35 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
@@ -161,32 +193,38 @@ diff -Nurb linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linu
 +};
 +#endif
 diff -Nurb linux-2.6.22-580/include/linux/sched.h linux-2.6.22-590/include/linux/sched.h
---- linux-2.6.22-580/include/linux/sched.h	2008-02-27 13:46:40.000000000 -0500
-+++ linux-2.6.22-590/include/linux/sched.h	2008-02-27 13:48:29.000000000 -0500
-@@ -849,7 +849,7 @@
+--- linux-2.6.22-580/include/linux/sched.h	2008-02-27 14:59:41.000000000 -0500
++++ linux-2.6.22-590/include/linux/sched.h	2008-02-28 07:41:28.000000000 -0500
+@@ -849,7 +849,11 @@
  	unsigned int btrace_seq;
  #endif
  	unsigned long sleep_avg;
--	unsigned long long timestamp, last_ran;
++#ifdef CONFIG_CHOPSTIX
 +	unsigned long long timestamp, last_ran, last_interrupted, last_ran_j;
++#else
+ 	unsigned long long timestamp, last_ran;
++#endif
  	unsigned long long sched_time; /* sched_clock time spent running */
  	enum sleep_type sleep_type;
  
 diff -Nurb linux-2.6.22-580/kernel/fork.c linux-2.6.22-590/kernel/fork.c
---- linux-2.6.22-580/kernel/fork.c	2008-02-27 13:46:40.000000000 -0500
-+++ linux-2.6.22-590/kernel/fork.c	2008-02-27 13:48:29.000000000 -0500
-@@ -197,6 +197,8 @@
+--- linux-2.6.22-580/kernel/fork.c	2008-02-27 14:59:41.000000000 -0500
++++ linux-2.6.22-590/kernel/fork.c	2008-02-28 07:42:09.000000000 -0500
+@@ -197,6 +197,11 @@
  	tsk->btrace_seq = 0;
  #endif
  	tsk->splice_pipe = NULL;
 +	//tsk->cmdline[0]='\0';
++#ifdef CONFIG_CHOPSTIX
 +	tsk->last_interrupted = 0;
++	tsk->last_ran_j = 0;
++#endif
  	return tsk;
  }
  
 diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
---- linux-2.6.22-580/kernel/sched.c	2008-02-27 13:46:40.000000000 -0500
-+++ linux-2.6.22-590/kernel/sched.c	2008-02-27 14:08:26.000000000 -0500
+--- linux-2.6.22-580/kernel/sched.c	2008-02-27 14:59:41.000000000 -0500
++++ linux-2.6.22-590/kernel/sched.c	2008-02-28 07:45:45.000000000 -0500
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -204,20 +242,21 @@ diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
  #include <linux/vs_sched.h>
  #include <linux/vs_cvirt.h>
  
-@@ -3608,6 +3609,8 @@
+@@ -3608,6 +3609,7 @@
  
  #endif
  
-+extern void (*rec_event)(void *,unsigned int);
 +
  static inline int interactive_sleep(enum sleep_type sleep_type)
  {
  	return (sleep_type == SLEEP_INTERACTIVE ||
-@@ -3617,16 +3620,51 @@
+@@ -3617,16 +3619,54 @@
  /*
   * schedule() is the main scheduler function.
   */
 +
++#ifdef CONFIG_CHOPSTIX
++extern void (*rec_event)(void *,unsigned int);
 +struct event_spec {
 +	unsigned long pc;
 +	unsigned long dcookie;
@@ -250,6 +289,7 @@ diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
 +        return 0;
 +}
 +/* CHOPSTIX */
++#endif
 +
  asmlinkage void __sched schedule(void)
  {
@@ -266,7 +306,7 @@ diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
  
  	/*
  	 * Test if we are atomic.  Since do_exit() needs to call into
-@@ -3680,6 +3718,7 @@
+@@ -3680,6 +3720,7 @@
  	switch_count = &prev->nivcsw;
  	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
  		switch_count = &prev->nvcsw;
@@ -274,22 +314,25 @@ diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
  		if (unlikely((prev->state & TASK_INTERRUPTIBLE) &&
  				unlikely(signal_pending(prev))))
  			prev->state = TASK_RUNNING;
-@@ -3689,6 +3728,9 @@
+@@ -3689,6 +3730,11 @@
  				vx_uninterruptible_inc(prev);
  			}
  			deactivate_task(prev, rq);
++#ifdef CONFIG_CHOPSTIX
 +			if (prev->state & TASK_INTERRUPTIBLE) {
 +				prev->last_interrupted=jiffies;
 +			}
++#endif
  		}
  	}
  
-@@ -3763,8 +3805,44 @@
+@@ -3763,8 +3809,45 @@
  	prev->sleep_avg -= run_time;
  	if ((long)prev->sleep_avg <= 0)
  		prev->sleep_avg = 0;
 +	
  	prev->timestamp = prev->last_ran = now;
++#ifdef CONFIG_CHOPSTIX
  
 +	/* CHOPSTIX */
 +
@@ -325,37 +368,17 @@ diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
 +		/* make sure the counters are loaded in the order we want them to show up*/ 
 +		(*rec_event)(&event, diff);
 +	}
-+
++#endif
  	sched_info_switch(prev, next);
  	if (likely(prev != next)) {
  		next->timestamp = next->last_ran = now;
-@@ -7275,3 +7353,7 @@
+@@ -7275,3 +7358,9 @@
  }
  
  #endif
 +
++#ifdef CONFIG_CHOPSTIX
 +void (*rec_event)(void *,unsigned int);
 +EXPORT_SYMBOL(rec_event);
 +EXPORT_SYMBOL(in_sched_functions);
-diff -Nurb linux-2.6.22-580/kernel/sched.c.rej linux-2.6.22-590/kernel/sched.c.rej
---- linux-2.6.22-580/kernel/sched.c.rej	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-590/kernel/sched.c.rej	2008-02-27 13:48:29.000000000 -0500
-@@ -0,0 +1,18 @@
-+***************
-+*** 56,61 ****
-+  
-+  #include <asm/tlb.h>
-+  #include <asm/unistd.h>
-+  
-+  /*
-+   * Scheduler clock - returns current time in nanosec units.
-+--- 56,64 ----
-+  
-+  #include <asm/tlb.h>
-+  #include <asm/unistd.h>
-++ #include <linux/arrays.h>
-++ 
-++ 
-+  
-+  /*
-+   * Scheduler clock - returns current time in nanosec units.
++#endif
