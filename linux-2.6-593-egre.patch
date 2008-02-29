@@ -1,7 +1,7 @@
 diff -Nurp linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 --- linux-2.6.22-592/drivers/net/gre.c	1969-12-31 19:00:00.000000000 -0500
 +++ linux-2.6.22-593/drivers/net/gre.c	2008-02-28 13:51:50.000000000 -0500
-@@ -0,0 +1,1634 @@
+@@ -0,0 +1,1632 @@
 +/*
 + *	Linux NET3:	GRE over IP protocol decoder.
 + *
@@ -1094,11 +1094,9 @@ diff -Nurp linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +#endif
 +
 +
-+/* 	XXX skb->h.raw = skb->nh.raw; XXX */
-+//	skb->h.raw = skb->mac.raw;
 +	skb->transport_header = skb->mac_header; // Added by valas
-+	
 +	skb_push(skb, gre_hlen);
++	skb_reset_network_header(skb);
 +	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 +	dst_release(skb->dst);
 +	skb->dst = &rt->u.dst;
@@ -1670,8 +1668,8 @@ diff -Nurp linux-2.6.22-592/include/linux/if_tunnel.h linux-2.6.22-593/include/l
  };
  
 diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
---- linux-2.6.22-592/net/ipv4/ip_gre.c	2008-02-28 13:51:40.000000000 -0500
-+++ linux-2.6.22-593/net/ipv4/ip_gre.c	2008-02-28 14:05:12.000000000 -0500
+--- linux-2.6.22-592/net/ipv4/ip_gre.c	2008-02-29 16:37:50.000000000 -0500
++++ linux-2.6.22-593/net/ipv4/ip_gre.c	2008-02-29 17:22:06.000000000 -0500
 @@ -25,6 +25,7 @@
  #include <linux/init.h>
  #include <linux/in6.h>
@@ -2061,16 +2059,22 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  
  				if ((dev->flags^nflags)&(IFF_POINTOPOINT|IFF_BROADCAST)) {
  					err = -EINVAL;
-@@ -978,6 +1258,8 @@ ipgre_tunnel_ioctl (struct net_device *d
+@@ -978,8 +1258,12 @@ ipgre_tunnel_ioctl (struct net_device *d
  				t->parms.iph.daddr = p.iph.daddr;
  				t->parms.i_key = p.i_key;
  				t->parms.o_key = p.o_key;
+-				memcpy(dev->dev_addr, &p.iph.saddr, 4);
+-				memcpy(dev->broadcast, &p.iph.daddr, 4);
 +				/* XXX:Copy in the protocol field */
 +				t->parms.proto_type = p.proto_type;
- 				memcpy(dev->dev_addr, &p.iph.saddr, 4);
- 				memcpy(dev->broadcast, &p.iph.daddr, 4);
++				if (t->parms.proto_type != ETH_P_ETH) {
++					memcpy(dev->dev_addr, &p.iph.saddr, 4);
++					memcpy(dev->broadcast, &p.iph.daddr, 4);
++				}
  				ipgre_tunnel_link(t);
-@@ -1139,12 +1421,12 @@ static int ipgre_close(struct net_device
+ 				netdev_state_change(dev);
+ 			}
+@@ -1139,12 +1423,12 @@ static int ipgre_close(struct net_device
  
  #endif
  
@@ -2085,7 +2089,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  	dev->get_stats		= ipgre_tunnel_get_stats;
  	dev->do_ioctl		= ipgre_tunnel_ioctl;
  	dev->change_mtu		= ipgre_tunnel_change_mtu;
-@@ -1157,6 +1439,36 @@ static void ipgre_tunnel_setup(struct ne
+@@ -1157,6 +1441,36 @@ static void ipgre_tunnel_setup(struct ne
  	dev->addr_len		= 4;
  }
  
@@ -2122,7 +2126,20 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  static int ipgre_tunnel_init(struct net_device *dev)
  {
  	struct net_device *tdev = NULL;
-@@ -1191,7 +1503,14 @@ static int ipgre_tunnel_init(struct net_
+@@ -1172,8 +1486,10 @@ static int ipgre_tunnel_init(struct net_
+ 	tunnel->dev = dev;
+ 	strcpy(tunnel->parms.name, dev->name);
+ 
+-	memcpy(dev->dev_addr, &tunnel->parms.iph.saddr, 4);
+-	memcpy(dev->broadcast, &tunnel->parms.iph.daddr, 4);
++	if (tunnel->parms.proto_type != ETH_P_ETH) {
++		memcpy(dev->dev_addr, &tunnel->parms.iph.saddr, 4);
++		memcpy(dev->broadcast, &tunnel->parms.iph.daddr, 4);
++	}
+ 
+ 	/* Guess output device to choose reasonable mtu and hard_header_len */
+ 
+@@ -1191,7 +1507,14 @@ static int ipgre_tunnel_init(struct net_
  			ip_rt_put(rt);
  		}
  
@@ -2138,7 +2155,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  
  #ifdef CONFIG_NET_IPGRE_BROADCAST
  		if (MULTICAST(iph->daddr)) {
-@@ -1270,7 +1589,7 @@ static int __init ipgre_init(void)
+@@ -1270,7 +1593,7 @@ static int __init ipgre_init(void)
  	}
  
  	ipgre_fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel), "gre0",
