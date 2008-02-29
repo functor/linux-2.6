@@ -1,0 +1,52 @@
+diff -Nurb linux-2.6.22-592/net/core/net-sysfs.c linux-2.6.22-594/net/core/net-sysfs.c
+--- linux-2.6.22-592/net/core/net-sysfs.c	2008-02-29 08:45:15.000000000 -0500
++++ linux-2.6.22-594/net/core/net-sysfs.c	2008-02-29 08:55:47.000000000 -0500
+@@ -190,6 +190,40 @@
+ 	return netdev_store(device, attr, buf, len, change_mtu);
+ }
+ 
++static ssize_t show_new_ns_pid(struct class_device *cd, char *buf)
++{
++	return -EPERM;
++}
++static int change_new_ns_pid(struct net_device *dev, unsigned long new_ns_pid)
++{
++	struct task_struct *tsk;
++	int err;
++	struct net *net;
++	/* Look up the network namespace */
++	err = -ESRCH;
++	rcu_read_lock();
++	tsk = find_task_by_real_pid(new_ns_pid);
++	if (tsk) {
++		task_lock(tsk);
++		if (tsk->nsproxy) {
++			err = 0;
++			net = get_net(tsk->nsproxy->net_ns);
++		}
++		task_unlock(tsk);
++	}
++	rcu_read_unlock();
++	/* If I found a network namespace move the device */
++	if (!err) {
++		err = dev_change_net_namespace(dev, net, NULL);
++		put_net(net);
++	}
++	return err;
++}
++static ssize_t store_new_ns_pid(struct class_device *cd, const char *buf, size_t len)
++{
++	return netdev_store(cd, buf, len, change_new_ns_pid);
++}
++
+ NETDEVICE_SHOW(flags, fmt_hex);
+ 
+ static int change_flags(struct net_device *dev, unsigned long new_flags)
+@@ -249,6 +283,7 @@
+ 	__ATTR(tx_queue_len, S_IRUGO | S_IWUSR, show_tx_queue_len,
+ 	       store_tx_queue_len),
+ 	__ATTR(weight, S_IRUGO | S_IWUSR, show_weight, store_weight),
++	__ATTR(new_ns_pid, S_IWUSR, show_new_ns_pid, store_new_ns_pid),
+ 	{}
+ };
+ 

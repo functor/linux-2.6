@@ -155,6 +155,7 @@ Patch590: linux-2.6-590-trellis-mm1-netns.patch
 Patch591: linux-2.6-591-unshare-netns.patch
 Patch592: linux-2.6-592-ztun-sb.patch
 Patch593: linux-2.6-593-egre.patch
+Patch594: linux-2.6-594-new_ns_pid.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -334,6 +335,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 591
 %ApplyPatch 592
 %ApplyPatch 593
+%ApplyPatch 594
 %endif
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
