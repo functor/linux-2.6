@@ -14,11 +14,11 @@ diff -Nurb linux-2.6.22-593/net/core/net-sysfs.c linux-2.6.22-594/net/core/net-s
 +{
 +	struct task_struct *tsk;
 +	int err;
-+	struct net *net;
++	struct net *net=NULL;
 +	/* Look up the network namespace */
 +	err = -ESRCH;
 +	rcu_read_lock();
-+	tsk = find_task_by_real_pid(new_ns_pid);
++	tsk = find_task_by_pid(new_ns_pid);
 +	if (tsk) {
 +		task_lock(tsk);
 +		if (tsk->nsproxy) {
