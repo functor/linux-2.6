@@ -1684,7 +1684,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  #include <net/ip6_route.h>
  #endif
  
-+//#define GRE_DEBUG 1
++#define GRE_DEBUG 1
 +
  /*
     Problems & solutions
@@ -1752,7 +1752,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  	flags = *(__be16*)h;
  
 +#ifdef GRE_DEBUG
-+	printk(KERN_DEBUG "gre.c [601] src:%x dst:%x  proto:%d %x", iph->saddr, iph->daddr, iph->protocol, skb->data);
++	printk(KERN_DEBUG "gre.c [601] src:%x dst:%x  proto:%d %p", iph->saddr, iph->daddr, iph->protocol, skb->data);
 +#endif	
 +	proto = ntohs(*(__be16*)(h+2)); /* XXX added XXX */
 +	
@@ -1768,7 +1768,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +		  {
 +#ifdef GRE_DEBUG
 +		    unsigned char* tmp_hdr = skb->data;
-+		    printk(KERN_DEBUG "gre.c [658] %x %x %x %x %x %x\tskb %x\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
++		    printk(KERN_DEBUG "gre.c [658] %x %x %x %x %x %x\tskb %p\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
 +#endif		    
 +		    skb->protocol = eth_type_trans(skb, tunnel->dev);
 +
@@ -1779,8 +1779,8 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +
 +#ifdef GRE_DEBUG
 +		    tmp_hdr = skb->data;
-+		    printk(KERN_DEBUG "gre.c [669] %x %x %x %x %x %x\tskb %x\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
-+ 		    printk(KERN_ALERT "gre.c [671] received ethernet on gre %x %x\n",skb->protocol, ((skb->nh).iph)->protocol); 
++		    printk(KERN_DEBUG "gre.c [669] %x %x %x %x %x %x\tskb %p\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
++ 		    printk(KERN_ALERT "gre.c [671] received ethernet on gre %x\n",skb->protocol); 
 +#endif
 +		    memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
 +		  }
@@ -2102,20 +2102,20 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +	dev->do_ioctl		= ipgre_tunnel_ioctl;
 +	dev->change_mtu		= ipgre_tunnel_change_mtu;
 +
-+	dev->type		= ARPHRD_IPGRE;
++	dev->type		= ARPHRD_ETHER;
 +	dev->hard_header_len	= ETH_HLEN + sizeof(struct iphdr) + 4;
 +	dev->mtu		= ETH_DATA_LEN - sizeof(struct iphdr) - 4;
 +	dev->flags		= 0;
 +	dev->tx_queue_len	= 0;
++	dev->iflink		= 0;
++	dev->addr_len		= 6;
++
 +	random_ether_addr(dev->dev_addr);
 +
 +#ifdef GRE_DEBUG
-+	unsigned char* d = dev->dev_addr;
-+	printk(KERN_ALERT "Here is the address we got:%x%x%x%x%x%x\n",d[0],d[1],d[2],d[3],d[4],d[5]);
++	{ unsigned char* d = dev->dev_addr;
++	printk(KERN_ALERT "Here is the address we got:%x%x%x%x%x%x\n",d[0],d[1],d[2],d[3],d[4],d[5]); }
 +#endif	
-+
-+	dev->iflink		= 0;
-+	dev->addr_len		= 4;
 +}
 +
 +
