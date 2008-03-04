@@ -1682,7 +1682,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  #include <net/ip6_route.h>
  #endif
  
-+#define GRE_DEBUG 1
++//#define GRE_DEBUG 1
 +
  /*
     Problems & solutions
@@ -1796,7 +1796,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  {
  	struct ip_tunnel *tunnel = netdev_priv(dev);
  	struct net_device_stats *stats = &tunnel->stat;
-@@ -904,6 +951,231 @@ tx_error:
+@@ -904,6 +951,228 @@ tx_error:
  	return 0;
  }
  
@@ -1942,12 +1942,9 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +	printk(KERN_ALERT "gre.c:1094 Passed the headroom calculation\n");
 +#endif
 +
-+
-+/* 	XXX skb->h.raw = skb->nh.raw; XXX */
-+//	skb->h.raw = skb->mac.raw;
-+	skb->transport_header = skb->mac_header; // Added by valas
-+	
++	skb->transport_header = skb->data;
 +	skb_push(skb, gre_hlen);
++	skb_reset_network_header(skb);
 +	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 +	dst_release(skb->dst);
 +	skb->dst = &rt->u.dst;
@@ -2089,7 +2086,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  	dev->get_stats		= ipgre_tunnel_get_stats;
  	dev->do_ioctl		= ipgre_tunnel_ioctl;
  	dev->change_mtu		= ipgre_tunnel_change_mtu;
-@@ -1157,6 +1441,36 @@ static void ipgre_tunnel_setup(struct ne
+@@ -1157,6 +1441,35 @@ static void ipgre_tunnel_setup(struct ne
  	dev->addr_len		= 4;
  }
  
@@ -2097,6 +2094,8 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +static void ipgre_eth_tunnel_setup(struct net_device *dev)
 +{
 +	SET_MODULE_OWNER(dev);
++
++       // Set default values for Ethernet device
 +	ether_setup(dev);
 +
 +	dev->uninit		= ipgre_tunnel_uninit;
@@ -2106,13 +2105,10 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +	dev->do_ioctl		= ipgre_tunnel_ioctl;
 +	dev->change_mtu		= ipgre_tunnel_change_mtu;
 +
-+	dev->type		= ARPHRD_ETHER;
-+	dev->hard_header_len	= ETH_HLEN + sizeof(struct iphdr) + 4;
-+	dev->mtu		= ETH_DATA_LEN - sizeof(struct iphdr) - 4;
-+	dev->flags		= 0;
++	dev->hard_header_len	= LL_MAX_HEADER + ETH_HLEN + sizeof(struct iphdr) + 4;
++	dev->mtu		= ETH_DATA_LEN - ETH_HLEN - sizeof(struct iphdr) - 4;
 +	dev->tx_queue_len	= 0;
 +	dev->iflink		= 0;
-+	dev->addr_len		= 6;
 +
 +	random_ether_addr(dev->dev_addr);
 +
