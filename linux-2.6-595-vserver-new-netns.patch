@@ -1,0 +1,56 @@
+--- linux-2.6.22-590/kernel/vserver/space.c.orig	2008-02-29 09:01:28.000000000 -0500
++++ linux-2.6.22-590/kernel/vserver/space.c	2008-03-06 15:47:26.000000000 -0500
+@@ -15,6 +15,7 @@
+ #include <linux/utsname.h>
+ #include <linux/nsproxy.h>
+ #include <linux/err.h>
++#include <net/net_namespace.h>
+ #include <asm/uaccess.h>
+ 
+ #include <linux/vs_context.h>
+@@ -54,6 +55,7 @@
+ 	struct mnt_namespace *old_ns;
+ 	struct uts_namespace *old_uts;
+ 	struct ipc_namespace *old_ipc;
++	struct net *old_net;
+ 	struct nsproxy *nsproxy;
+ 
+ 	nsproxy = copy_nsproxy(old_nsproxy);
+@@ -83,6 +85,17 @@
+ 			get_ipc_ns(nsproxy->ipc_ns);
+ 	} else
+ 		old_ipc = NULL;
++	
++	if (mask & CLONE_NEWNET) {
++		old_net = nsproxy->net_ns;
++		nsproxy->net_ns = new_nsproxy->net_ns;
++		if (nsproxy->net_ns) {
++			get_net(nsproxy->net_ns);
++ 		    	printk(KERN_ALERT "Cloning network namespace\n"); 
++		}	
++	} else
++		old_net = NULL;
++
+ 
+ 	if (old_ns)
+ 		put_mnt_ns(old_ns);
+@@ -90,6 +101,9 @@
+ 		put_uts_ns(old_uts);
+ 	if (old_ipc)
+ 		put_ipc_ns(old_ipc);
++	if (old_net)
++		put_net(old_net);
++
+ out:
+ 	return nsproxy;
+ }
+@@ -250,7 +264,8 @@
+ 
+ int vc_enter_space(struct vx_info *vxi, void __user *data)
+ {
+-	struct vcmd_space_mask vc_data = { .mask = 0 };
++	/* Ask dhozac how to pass this flag from user space - Sapan*/
++	struct vcmd_space_mask vc_data = { .mask = CLONE_NEWNET };
+ 
+ 	if (data && copy_from_user(&vc_data, data, sizeof(vc_data)))
+ 		return -EFAULT;
