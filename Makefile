@@ -5,7 +5,7 @@ AWK	= awk
 MD5SUM	= md5sum
 SED	= sed
 
-SPECFILE = kernel-2.6-planetlab.spec
+SPECFILE = kernel-2.6.spec
 
 # Thierry - when called from within the build, PWD is /build
 PWD=$(shell pwd)
