@@ -602,14 +602,14 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +		ip = ct->tuplehash[dir].tuple.dst.u3.ip;
 +		port = get_dst_port(&ct->tuplehash[dir].tuple);
 +
-+		if (proto == 1) {
++		if (proto == 1 || proto == 17) {
 +			if (((*pskb)->mark!=-1) && (*pskb)->mark)
 +				ct->xid[0]=(*pskb)->mark;
 +			if (ct->xid[0]) 
 +				mark = ct->xid[0];
 +
 +		}
-+		else if (proto == 6) {
++		else if (proto == 6) { 
 +				if ((*pskb)->sk) 
 +					connection_sk = (*pskb)->sk;
 +				else {
