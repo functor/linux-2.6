@@ -756,7 +756,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c.orig linux-2.6.22-520/net/ne
 +
 +	case XT_MARK_COPYXID: {
 +		enum ip_conntrack_info ctinfo;
-+		struct sock *connection_sk;
++		struct sock *connection_sk=NULL;
 +		int dif;
 +
 +		struct nf_conn *ct = nf_ct_get((*pskb), &ctinfo);
