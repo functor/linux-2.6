@@ -616,7 +616,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +					connection_sk = inet_lookup(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
 +				}
 +				*/
-+			conncetion_sk = (*pskb)->sk;
++			connection_sk = (*pskb)->sk;
 +
 +				if (connection_sk) {
 +					connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
