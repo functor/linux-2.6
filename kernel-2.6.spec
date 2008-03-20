@@ -303,7 +303,7 @@ KERNEL_PREVIOUS=vanilla
     *.bz2)  bzcat "$PATCH";;				\
     *.gz)   zcat "$PATCH";;				\
     *)      cat "$PATCH";;				\
-  esac | patch -F1 -s -d linux-%{kversion}-%1 $patchflag \
+  esac | patch -s -d linux-%{kversion}-%1 $patchflag \
   KERNEL_PREVIOUS=linux-%{kversion}-%1
 
 # This is where the patches get applied
