@@ -1,15 +1,15 @@
 diff -Nurb linux-2.6.22-594/arch/i386/kernel/syscall_table.S linux-2.6.22-595/arch/i386/kernel/syscall_table.S
---- linux-2.6.22-594/arch/i386/kernel/syscall_table.S	2008-03-20 13:29:27.000000000 -0400
-+++ linux-2.6.22-595/arch/i386/kernel/syscall_table.S	2008-03-20 13:32:56.000000000 -0400
+--- linux-2.6.22-594/arch/i386/kernel/syscall_table.S	2008-03-21 15:19:20.000000000 -0400
++++ linux-2.6.22-595/arch/i386/kernel/syscall_table.S	2008-03-21 15:19:27.000000000 -0400
 @@ -326,3 +326,4 @@
  	.long sys_revokeat
  	.long sys_frevoke		/* 325 */
  	.long sys_fallocate
 +	.long sys_set_space		
 diff -Nurb linux-2.6.22-594/kernel/nsproxy.c linux-2.6.22-595/kernel/nsproxy.c
---- linux-2.6.22-594/kernel/nsproxy.c	2008-03-20 13:29:30.000000000 -0400
-+++ linux-2.6.22-595/kernel/nsproxy.c	2008-03-20 14:28:05.000000000 -0400
-@@ -23,11 +23,55 @@
+--- linux-2.6.22-594/kernel/nsproxy.c	2008-03-21 15:19:21.000000000 -0400
++++ linux-2.6.22-595/kernel/nsproxy.c	2008-03-21 15:26:13.000000000 -0400
+@@ -23,11 +23,59 @@
  #include <linux/pid_namespace.h>
  #include <linux/vserver/global.h>
  #include <linux/vserver/debug.h>
@@ -58,6 +58,10 @@ diff -Nurb linux-2.6.22-594/kernel/nsproxy.c linux-2.6.22-595/kernel/nsproxy.c
 +			atomic_dec(&fs_cur->count);
 +			put_nsproxy(proxy_cur);
 +		}
++		else {
++			printk(KERN_ALERT "Invalid process id\n");
++			return -EINVAL;
++		}
 +	}
 +	return ret;
 +}
@@ -66,8 +70,8 @@ diff -Nurb linux-2.6.22-594/kernel/nsproxy.c linux-2.6.22-595/kernel/nsproxy.c
  {
  	struct nsproxy *ns = tsk->nsproxy;
 diff -Nurb linux-2.6.22-594/kernel/vserver/space.c linux-2.6.22-595/kernel/vserver/space.c
---- linux-2.6.22-594/kernel/vserver/space.c	2008-03-20 13:29:31.000000000 -0400
-+++ linux-2.6.22-595/kernel/vserver/space.c	2008-03-20 14:01:00.000000000 -0400
+--- linux-2.6.22-594/kernel/vserver/space.c	2008-03-21 15:19:25.000000000 -0400
++++ linux-2.6.22-595/kernel/vserver/space.c	2008-03-21 15:19:27.000000000 -0400
 @@ -141,7 +141,7 @@
  }
  
@@ -115,8 +119,8 @@ diff -Nurb linux-2.6.22-594/kernel/vserver/space.c linux-2.6.22-595/kernel/vserv
  
  int vc_set_space(struct vx_info *vxi, void __user *data)
 diff -Nurb linux-2.6.22-594/net/core/dev.c linux-2.6.22-595/net/core/dev.c
---- linux-2.6.22-594/net/core/dev.c	2008-03-20 13:29:32.000000000 -0400
-+++ linux-2.6.22-595/net/core/dev.c	2008-03-20 14:27:05.000000000 -0400
+--- linux-2.6.22-594/net/core/dev.c	2008-03-21 15:19:25.000000000 -0400
++++ linux-2.6.22-595/net/core/dev.c	2008-03-21 15:19:27.000000000 -0400
 @@ -2207,7 +2207,7 @@
  
  	total = 0;
@@ -138,8 +142,8 @@ diff -Nurb linux-2.6.22-594/net/core/dev.c linux-2.6.22-595/net/core/dev.c
  
  	seq_printf(seq, "%6s:%8lu %7lu %4lu %4lu %4lu %5lu %10lu %9lu "
 diff -Nurb linux-2.6.22-594/net/core/net_namespace.c linux-2.6.22-595/net/core/net_namespace.c
---- linux-2.6.22-594/net/core/net_namespace.c	2008-03-20 13:29:30.000000000 -0400
-+++ linux-2.6.22-595/net/core/net_namespace.c	2008-03-20 14:27:05.000000000 -0400
+--- linux-2.6.22-594/net/core/net_namespace.c	2008-03-21 15:19:21.000000000 -0400
++++ linux-2.6.22-595/net/core/net_namespace.c	2008-03-21 15:19:27.000000000 -0400
 @@ -112,10 +112,12 @@
  		ops = list_entry(ptr, struct pernet_operations, list);
  		if (ops->init) {
@@ -155,8 +159,8 @@ diff -Nurb linux-2.6.22-594/net/core/net_namespace.c linux-2.6.22-595/net/core/n
  	return error;
  out_undo:
 diff -Nurb linux-2.6.22-594/net/socket.c linux-2.6.22-595/net/socket.c
---- linux-2.6.22-594/net/socket.c	2008-03-20 13:29:30.000000000 -0400
-+++ linux-2.6.22-595/net/socket.c	2008-03-20 14:27:05.000000000 -0400
+--- linux-2.6.22-594/net/socket.c	2008-03-21 15:19:24.000000000 -0400
++++ linux-2.6.22-595/net/socket.c	2008-03-21 15:19:27.000000000 -0400
 @@ -1122,12 +1122,17 @@
  	if (type < 0 || type >= SOCK_MAX)
  		return -EINVAL;
