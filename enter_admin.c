@@ -25,7 +25,8 @@ int get_slice_xid(char *slice_name) {
 	char slicepath[PATHLEN];
 	FILE *fp;
 	int xid;
-	snprintf(slicepath, sizeof(slicepath), "/etc/vservers/%s/context");
+	snprintf(slicepath, sizeof(slicepath), "/etc/vservers/%s/context",
+		 slice_name);
 
 	if ((fp = fopen(slicepath, "r")) == NULL) {
 		printf("Could not open %s\n", slicepath);	
@@ -45,7 +46,7 @@ int verify_ownership(int pid, int arg_xid) {
 	char procpath[PATHLEN];
 	FILE *fp;
 	int xid;
-	snprintf(procpath, sizeof(procpath), "/proc/%d/vinfo");
+	snprintf(procpath, sizeof(procpath), "/proc/%d/vinfo", pid);
 
 	if ((fp = fopen(procpath, "r")) == NULL) {
 		printf("Could not open %s\n", procpath);	
