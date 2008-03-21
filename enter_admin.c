@@ -1,3 +1,9 @@
+/* enter_admin.c	Vsys script to switch a vserver into admin mode in which it has access 
+ * 			to the Internet. Install in /vsys and invoke as echo $$ > /vsys/enter_admin.in
+ * 			from within the slice.
+ * 			3/21/2008	Sapan Bhatia
+ */
+
 #include <sys/syscall.h>
 #include <stdio.h>
 #include <stdlib.h>
