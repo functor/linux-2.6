@@ -1,6 +1,6 @@
 diff -Nurb linux-2.6.22-580/arch/i386/Kconfig linux-2.6.22-590/arch/i386/Kconfig
---- linux-2.6.22-580/arch/i386/Kconfig	2008-02-27 14:59:40.000000000 -0500
-+++ linux-2.6.22-590/arch/i386/Kconfig	2008-02-28 07:55:57.000000000 -0500
+--- linux-2.6.22-580/arch/i386/Kconfig	2008-03-21 18:07:23.000000000 -0400
++++ linux-2.6.22-590/arch/i386/Kconfig	2008-03-21 18:07:50.000000000 -0400
 @@ -1217,6 +1217,14 @@
  
  source "arch/i386/oprofile/Kconfig"
@@ -18,7 +18,7 @@ diff -Nurb linux-2.6.22-580/arch/i386/Kconfig linux-2.6.22-590/arch/i386/Kconfig
  	depends on KALLSYMS && EXPERIMENTAL && MODULES
 diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drivers/oprofile/cpu_buffer.c
 --- linux-2.6.22-580/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2008-02-28 07:40:16.000000000 -0500
++++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2008-03-21 18:07:50.000000000 -0400
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -130,8 +130,8 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
 diff -Nurb linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
---- linux-2.6.22-580/fs/exec.c	2008-02-27 14:59:40.000000000 -0500
-+++ linux-2.6.22-590/fs/exec.c	2008-02-28 07:40:48.000000000 -0500
+--- linux-2.6.22-580/fs/exec.c	2008-03-21 18:07:24.000000000 -0400
++++ linux-2.6.22-590/fs/exec.c	2008-03-21 18:07:50.000000000 -0400
 @@ -52,6 +52,7 @@
  #include <linux/audit.h>
  #include <linux/signalfd.h>
@@ -155,7 +155,7 @@ diff -Nurb linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
  		    S_ISREG(inode->i_mode)) {
 diff -Nurb linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linux/arrays.h
 --- linux-2.6.22-580/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-590/include/linux/arrays.h	2008-02-27 14:59:52.000000000 -0500
++++ linux-2.6.22-590/include/linux/arrays.h	2008-03-21 18:07:50.000000000 -0400
 @@ -0,0 +1,35 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
@@ -193,23 +193,22 @@ diff -Nurb linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linu
 +};
 +#endif
 diff -Nurb linux-2.6.22-580/include/linux/sched.h linux-2.6.22-590/include/linux/sched.h
---- linux-2.6.22-580/include/linux/sched.h	2008-02-27 14:59:41.000000000 -0500
-+++ linux-2.6.22-590/include/linux/sched.h	2008-02-28 07:41:28.000000000 -0500
-@@ -849,7 +849,11 @@
- 	unsigned int btrace_seq;
+--- linux-2.6.22-580/include/linux/sched.h	2008-03-21 18:07:27.000000000 -0400
++++ linux-2.6.22-590/include/linux/sched.h	2008-03-24 15:32:53.000000000 -0400
+@@ -850,6 +850,10 @@
  #endif
  	unsigned long sleep_avg;
-+#ifdef CONFIG_CHOPSTIX
-+	unsigned long long timestamp, last_ran, last_interrupted, last_ran_j;
-+#else
  	unsigned long long timestamp, last_ran;
++#ifdef CONFIG_CHOPSTIX
++	unsigned long last_interrupted, last_ran_j;
 +#endif
++
  	unsigned long long sched_time; /* sched_clock time spent running */
  	enum sleep_type sleep_type;
  
 diff -Nurb linux-2.6.22-580/kernel/fork.c linux-2.6.22-590/kernel/fork.c
---- linux-2.6.22-580/kernel/fork.c	2008-02-27 14:59:41.000000000 -0500
-+++ linux-2.6.22-590/kernel/fork.c	2008-02-28 07:42:09.000000000 -0500
+--- linux-2.6.22-580/kernel/fork.c	2008-03-21 18:07:28.000000000 -0400
++++ linux-2.6.22-590/kernel/fork.c	2008-03-21 18:07:50.000000000 -0400
 @@ -197,6 +197,11 @@
  	tsk->btrace_seq = 0;
  #endif
@@ -223,8 +222,8 @@ diff -Nurb linux-2.6.22-580/kernel/fork.c linux-2.6.22-590/kernel/fork.c
  }
  
 diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
---- linux-2.6.22-580/kernel/sched.c	2008-02-27 14:59:41.000000000 -0500
-+++ linux-2.6.22-590/kernel/sched.c	2008-02-28 07:45:45.000000000 -0500
+--- linux-2.6.22-580/kernel/sched.c	2008-03-21 18:07:28.000000000 -0400
++++ linux-2.6.22-590/kernel/sched.c	2008-03-21 18:07:50.000000000 -0400
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
