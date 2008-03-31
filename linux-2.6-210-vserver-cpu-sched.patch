@@ -1,15 +1,16 @@
 diff -Nurp linux-2.6.22-200/kernel/vserver/sched.c linux-2.6.22-210/kernel/vserver/sched.c
---- linux-2.6.22-200/kernel/vserver/sched.c	2008-02-01 10:44:49.000000000 -0500
-+++ linux-2.6.22-210/kernel/vserver/sched.c	2008-02-01 11:14:33.000000000 -0500
-@@ -89,6 +89,7 @@ int vx_tokens_recalc(struct _vx_sched_pc
- #ifdef	CONFIG_VSERVER_HARDCPU
- 		delta_min[0] = delta - integral;
+--- linux-2.6.22-200/kernel/vserver/sched.c	2008-03-20 17:15:35.000000000 -0400
++++ linux-2.6.22-210/kernel/vserver/sched.c	2008-03-31 17:55:55.000000000 -0400
+@@ -91,7 +91,7 @@ int vx_tokens_recalc(struct _vx_sched_pc
  		vxd_check_range(delta_min[0], 0, sched_pc->interval[0]);
-+		delta = integral;
  #endif
  		/* advance time */
- 		sched_pc->norm_time += delta;
-@@ -161,10 +162,12 @@ on_hold:
+-		sched_pc->norm_time += delta;
++		sched_pc->norm_time += integral;
+ 
+ 		/* add tokens */
+ 		sched_pc->tokens += tokens;
+@@ -161,10 +161,12 @@ on_hold:
  	/* next interval? */
  	if (!sched_pc->fill_rate[0])
  		delta_min[0] = HZ;
@@ -25,4 +26,20 @@ diff -Nurp linux-2.6.22-200/kernel/vserver/sched.c linux-2.6.22-210/kernel/vserv
 +	} else 
  		delta_min[0] = sched_pc->interval[0] - delta_min[0];
  	vxd_check_range(delta_min[0], 0, INT_MAX);
+ 
+@@ -175,10 +177,12 @@ on_hold:
+ 	/* next interval? */
+ 	if (!sched_pc->fill_rate[1])
+ 		delta_min[1] = HZ;
+-	else if (tokens > sched_pc->fill_rate[1])
++	else if (tokens > sched_pc->fill_rate[1]) {
+ 		delta_min[1] += sched_pc->interval[1] *
+-			tokens / sched_pc->fill_rate[1];
+-	else
++			tokens / sched_pc->fill_rate[1] - delta_min[1];
++		if (tokens % sched_pc->fill_rate[1]) 
++			delta_min[1] += sched_pc->interval[1];
++	} else
+ 		delta_min[1] = sched_pc->interval[1] - delta_min[1];
+ 	vxd_check_range(delta_min[1], 0, INT_MAX);
  
