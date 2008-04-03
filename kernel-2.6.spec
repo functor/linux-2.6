@@ -141,6 +141,7 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 Patch010: linux-2.6-010-e1000e.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
+Patch040: linux-2.6-040-i_mutex-check.patch
 
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
@@ -333,6 +334,7 @@ KERNEL_PREVIOUS=vanilla
 %if 0%{?with_netns}
 %ApplyPatch 30
 %endif
+%ApplyPatch 40
 
 %ApplyPatch 100
 
