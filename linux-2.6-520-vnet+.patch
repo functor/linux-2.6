@@ -348,7 +348,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/n
  
 diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilter/xt_MARK.c
 --- linux-2.6.22-510/net/netfilter/xt_MARK.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-04-04 13:53:21.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-04-04 17:27:41.000000000 -0400
 @@ -5,13 +5,18 @@
   * This program is free software; you can redistribute it and/or modify
   * it under the terms of the GNU General Public License version 2 as
@@ -466,20 +466,20 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +							      connection_sk = (*pskb)->sk;
 +							      sock_hold(connection_sk);
 +						      }
-+						      else {
-+							      connection_sk = inet_lookup(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
-+						      }
++						      else 
++							      connection_sk = inet_lookup_established(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
++						              
 +
 +						      if (connection_sk) {
-+							      bh_lock_sock(connection_sk);
++							      if (connection_sk->sk_state == TCP_TIME_WAIT) {
++								      inet_twsk_put(inet_twsk(connection_sk));
++								      break;
++							      }
 +							      connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
 +							      ct->xid[!dir]=connection_sk->sk_xid;
 +							      if (connection_sk->sk_xid != 0) 
 +								      mark = connection_sk->sk_xid;
-+							      bh_unlock_sock(connection_sk);
-+							      if (connection_sk->sk_state == TCP_TIME_WAIT)
-+								      inet_twsk_put(inet_twsk(connection_sk));
-+							      else
++							      							      else
 +								      sock_put(connection_sk);
 +						      }
 +					      }
