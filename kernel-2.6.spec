@@ -153,12 +153,17 @@ Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
-Patch590: linux-2.6-590-trellis-mm1-netns.patch
-Patch591: linux-2.6-591-unshare-netns.patch
-Patch592: linux-2.6-592-ztun-sb.patch
-Patch593: linux-2.6-593-egre.patch
-Patch594: linux-2.6-594-new_ns_pid.patch
-Patch595: linux-2.6-595-vserver-setspace.patch
+Patch580: linux-2.6-580-show-proc-virt.patch 
+Patch590: linux-2.6-590-chopstix-intern.patch
+
+# VINI
+Patch700: linux-2.6-700-trellis-mm1-netns.patch
+Patch710: linux-2.6-710-unshare-netns.patch
+Patch720: linux-2.6-720-ztun-sb.patch
+Patch730: linux-2.6-730-egre.patch
+Patch740: linux-2.6-740-new_ns_pid.patch
+Patch750: linux-2.6-750-vserver-setspace.patch
+
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
 %description
@@ -332,15 +337,17 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 550
 %ApplyPatch 560
 %ApplyPatch 570
+%ApplyPatch 580
+%ApplyPatch 590
 
 # 
 %if 0%{?_with_netns}
-%ApplyPatch 590
-%ApplyPatch 591
-%ApplyPatch 592
-%ApplyPatch 593
-%ApplyPatch 594
-%ApplyPatch 595
+%ApplyPatch 700
+%ApplyPatch 710
+%ApplyPatch 720
+%ApplyPatch 730
+%ApplyPatch 740
+%ApplyPatch 750
 %endif
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
