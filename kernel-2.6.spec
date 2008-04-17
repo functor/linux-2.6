@@ -163,6 +163,7 @@ Patch720: linux-2.6-720-ztun-sb.patch
 Patch730: linux-2.6-730-egre.patch
 Patch740: linux-2.6-740-new_ns_pid.patch
 Patch750: linux-2.6-750-vserver-setspace.patch
+Patch760: linux-2.6-760-unshare-netns-fix.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -348,6 +349,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 730
 %ApplyPatch 740
 %ApplyPatch 750
+%ApplyPatch 760
 %endif
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
