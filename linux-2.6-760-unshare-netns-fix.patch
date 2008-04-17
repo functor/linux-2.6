@@ -1,0 +1,154 @@
+diff -Nurb linux-2.6.22-600/kernel/fork.c linux-2.6.22-601/kernel/fork.c
+--- linux-2.6.22-600/kernel/fork.c	2008-03-28 11:22:20.000000000 -0600
++++ linux-2.6.22-601/kernel/fork.c	2008-03-28 11:22:25.000000000 -0600
+@@ -1673,7 +1673,7 @@
+ 	/* Return -EINVAL for all unsupported flags */
+ 	err = -EINVAL;
+ 	if (unshare_flags & ~(CLONE_THREAD|CLONE_FS|CLONE_NEWNS|CLONE_SIGHAND|
+-				CLONE_VM|CLONE_FILES|CLONE_SYSVSEM|
++				CLONE_VM|CLONE_FILES|CLONE_SYSVSEM|CLONE_NEWNET|
+ 				CLONE_NEWUTS|CLONE_NEWIPC|CLONE_NEWUSER))
+ 		goto bad_unshare_out;
+ 
+diff -Nurb linux-2.6.22-600/kernel/nsproxy.c linux-2.6.22-601/kernel/nsproxy.c
+--- linux-2.6.22-600/kernel/nsproxy.c	2008-03-28 11:22:23.000000000 -0600
++++ linux-2.6.22-601/kernel/nsproxy.c	2008-03-28 11:22:25.000000000 -0600
+@@ -91,12 +91,14 @@
+ {
+ 	struct nsproxy *ns;
+ 
+-	ns = kmemdup(orig, sizeof(struct nsproxy), GFP_KERNEL);
+-	if (ns)
++	ns = kmem_cache_alloc(nsproxy_cachep, GFP_KERNEL);
++	if (ns) {
++		memcpy(ns, orig, sizeof(struct nsproxy));
+ 		atomic_set(&ns->count, 1);
+ 	vxdprintk(VXD_CBIT(space, 2), "clone_nsproxy(%p[%u] = %p[1]",
+ 		orig, atomic_read(&orig->count), ns);
+ 	atomic_inc(&vs_global_nsproxy);
++	}
+ 	return ns;
+ }
+ 
+@@ -120,36 +122,46 @@
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	new_nsp->mnt_ns = copy_mnt_ns(flags, orig->mnt_ns, new_fs);
+-	if (IS_ERR(new_nsp->mnt_ns))
++	if (IS_ERR(new_nsp->mnt_ns)) {
++		err = PTR_ERR(new_nsp->mnt_ns);
+ 		goto out_ns;
++	}
+ 
+ 	new_nsp->uts_ns = copy_utsname(flags, orig->uts_ns);
+-	if (IS_ERR(new_nsp->uts_ns))
++	if (IS_ERR(new_nsp->uts_ns)) {
++		err = PTR_ERR(new_nsp->uts_ns);
+ 		goto out_uts;
++	}
+ 
+ 	new_nsp->ipc_ns = copy_ipcs(flags, orig->ipc_ns);
+-	if (IS_ERR(new_nsp->ipc_ns))
++	if (IS_ERR(new_nsp->ipc_ns)) {
++		err = PTR_ERR(new_nsp->ipc_ns);
+ 		goto out_ipc;
++	}
+ 
+ 	new_nsp->pid_ns = copy_pid_ns(flags, orig->pid_ns);
+-	if (IS_ERR(new_nsp->pid_ns))
++	if (IS_ERR(new_nsp->pid_ns)) {
++		err = PTR_ERR(new_nsp->pid_ns);
+ 		goto out_pid;
++	}
+ 
+ 	new_nsp->user_ns = copy_user_ns(flags, orig->user_ns);
+-	if (IS_ERR(new_nsp->user_ns))
++	if (IS_ERR(new_nsp->user_ns)) {
++		err = PTR_ERR(new_nsp->user_ns);
+ 		goto out_user;
++	}
+ 
+ 	new_nsp->net_ns = copy_net_ns(flags, orig->net_ns);
+-	if (IS_ERR(new_nsp->net_ns))
++	if (IS_ERR(new_nsp->net_ns)) {
++		err = PTR_ERR(new_nsp->net_ns);
+ 		goto out_net;
++	}
+ 
+ 	return new_nsp;
+ 
+ out_net:
+ 	if (new_nsp->user_ns)
+ 		put_user_ns(new_nsp->user_ns);
+-	if (new_nsp->net_ns)
+- 		put_net(new_nsp->net_ns);
+ out_user:
+ 	if (new_nsp->pid_ns)
+ 		put_pid_ns(new_nsp->pid_ns);
+@@ -190,6 +202,8 @@
+ 			get_ipc_ns(ns->ipc_ns);
+ 		if (ns->pid_ns)
+ 			get_pid_ns(ns->pid_ns);
++		if (ns->net_ns)
++			get_net(ns->net_ns);
+ 	}
+ 	return ns;
+ }
+@@ -258,8 +272,10 @@
+ 		put_ipc_ns(ns->ipc_ns);
+ 	if (ns->pid_ns)
+ 		put_pid_ns(ns->pid_ns);
++	if (ns->net_ns)
++		put_net(ns->net_ns);
+ 	atomic_dec(&vs_global_nsproxy);
+-	kfree(ns);
++	kmem_cache_free(nsproxy_cachep, ns);
+ }
+ 
+ /*
+diff -Nurb linux-2.6.22-600/kernel/vserver/space.c linux-2.6.22-601/kernel/vserver/space.c
+--- linux-2.6.22-600/kernel/vserver/space.c	2008-03-28 11:22:23.000000000 -0600
++++ linux-2.6.22-601/kernel/vserver/space.c	2008-03-28 11:22:25.000000000 -0600
+@@ -15,6 +15,7 @@
+ #include <linux/utsname.h>
+ #include <linux/nsproxy.h>
+ #include <linux/err.h>
++#include <net/net_namespace.h>
+ #include <asm/uaccess.h>
+ 
+ #include <linux/vs_context.h>
+@@ -55,6 +56,7 @@
+ 	struct mnt_namespace *old_ns;
+ 	struct uts_namespace *old_uts;
+ 	struct ipc_namespace *old_ipc;
++	struct net *old_net;
+ 	struct nsproxy *nsproxy;
+ 
+ 	nsproxy = copy_nsproxy(old_nsproxy);
+@@ -85,12 +87,26 @@
+ 	} else
+ 		old_ipc = NULL;
+ 
++	if (mask & CLONE_NEWNET) {
++		old_net = nsproxy->net_ns;
++		nsproxy->net_ns = new_nsproxy->net_ns;
++		if (nsproxy->net_ns) {
++			get_net(nsproxy->net_ns);
++ 		    	printk(KERN_ALERT "Cloning network namespace\n"); 
++		}	
++	} else
++		old_net = NULL;
++
++
+ 	if (old_ns)
+ 		put_mnt_ns(old_ns);
+ 	if (old_uts)
+ 		put_uts_ns(old_uts);
+ 	if (old_ipc)
+ 		put_ipc_ns(old_ipc);
++	if (old_net)
++		put_net(old_net);
++
+ out:
+ 	return nsproxy;
+ }
