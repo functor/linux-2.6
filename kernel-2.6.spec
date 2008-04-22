@@ -13,6 +13,12 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define buildxen 0
 %define builddoc 0
 
+# default is to not build this - to override, use something like
+# kernel-SPECVARS := iwlwifi=1 
+# rpm does not seem to have a syntax for defining overridable defaults
+# any better solution would be more than welcome.
+%define build_iwlwifi %{?iwlwifi:1}%{!?iwlwifi:0}
+
 # Versions of various parts
 
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
@@ -169,10 +175,12 @@ Patch620: linux-2.6-620-kdb.patch
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
 # see http://bughost.org/bugzilla/show_bug.cgi?id=1584
+%if %{build_iwlwifi}
 %define mac80211_version 10.0.4
 Patch600: http://intellinuxwireless.org/mac80211/downloads/mac80211-%{mac80211_version}.tgz
-%define iwlwifi_version 1.2.23
+%define iwlwifi_version 1.2.25
 Patch601: http://intellinuxwireless.org/iwlwifi/downloads/iwlwifi-%{iwlwifi_version}.tgz
+%endif
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -363,26 +371,28 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch %vini_pl_patch
 %endif
 
+%if %{build_iwlwifi}
 # Run the mac80211 stuff in the kernel tree holding the last patch
-# tar -xzf %{PATCH600}
-# pushd mac80211-%{mac80211_version}
-# mac80211_makeflags="KSRC=../$KERNEL_PREVIOUS"
-# make $mac80211_makeflags modified
-# make $mac80211_makeflags source
-# make $mac80211_makeflags patch_kernel
-# popd
+tar -xzf %{PATCH600}
+pushd mac80211-%{mac80211_version}
+mac80211_makeflags="KSRC=../$KERNEL_PREVIOUS"
+make $mac80211_makeflags modified
+make $mac80211_makeflags source
+make $mac80211_makeflags patch_kernel
+popd
 
 # Untar iwlwifi in the same place - needs to be compiled later
-# tar -xzf %{PATCH601}
+tar -xzf %{PATCH601}
 # the install target is broken: first it does not pass the right -b flag to depmod
 # second we do not need to invoke depmod at this stage anyway
 # let's add our own patch/stuff in this Makefile for manual install later on
-# pushd iwlwifi-%{iwlwifi_version}
-# cat >> Makefile <<EOF
-# module-list:
-# 	@echo \$(addprefix \$(DIR),\$(addsuffix .ko,\$(list-m)))
-# EOF
-# popd
+pushd iwlwifi-%{iwlwifi_version}
+cat >> Makefile <<EOF
+module-list:
+	@echo \$(addprefix \$(DIR),\$(addsuffix .ko,\$(list-m)))
+EOF
+popd
+%endif
 
 rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}
@@ -442,9 +452,11 @@ BuildKernel() {
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 
+%if %{build_iwlwifi}
     # build the iwlwifi driver
-#     make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
-#         KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour
+    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
+      KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour
+%endif
 
     # Start installing the results
 
@@ -467,17 +479,19 @@ BuildKernel() {
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer
     make -s ARCH=$Arch INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install KERNELRELEASE=$KernelVer
 
+%if %{build_iwlwifi}
     # install iwlwifi
 #    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
 #         KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour \
 #        KMISC=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless install
-#    pushd %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version}
-#    iwlwifi_dest=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless
+    pushd %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version}
+    iwlwifi_dest=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless
     # get the list and location of modules to install - no need to pass KSRC nor anything, let's keep it simple
-#    iwlwifi_modules=$(make --no-print-directory module-list)
-#    install -d $iwlwifi_dest
-#    install -m 644 -c $iwlwifi_modules $iwlwifi_dest
-#    popd
+    iwlwifi_modules=$(make --no-print-directory module-list)
+    install -d $iwlwifi_dest
+    install -m 644 -c $iwlwifi_modules $iwlwifi_dest
+    popd
+%endif
 
     # And save the headers/makefiles etc for building modules against
     #
