@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 1
+%define taglevel 2
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -826,6 +826,11 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Wed Apr 23 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-2
+- Includes changes from Sapan/Andy regarding the scheduler and vnet bugs.
+- Should be safe to try a second deployment.
+- 
+
 * Tue Jul 11 2006 Dave Jones <davej@redhat.com> [2.6.17-1.2142_FC4]
 - 2.6.17.4
 - Disable split pagetable lock.
