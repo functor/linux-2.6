@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 2
+%define taglevel 3
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -826,6 +826,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Thu Apr 24 2008 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-3
+- Fix bug with looping in schedule()
+
 * Wed Apr 23 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-2
 - Includes changes from Sapan/Andy regarding the scheduler and vnet bugs.
 - Should be safe to try a second deployment.
