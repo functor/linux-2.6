@@ -1,6 +1,6 @@
 diff -Nurb linux-2.6.22-580/arch/i386/Kconfig linux-2.6.22-590/arch/i386/Kconfig
---- linux-2.6.22-580/arch/i386/Kconfig	2008-04-29 17:04:54.000000000 -0400
-+++ linux-2.6.22-590/arch/i386/Kconfig	2008-04-29 17:05:11.000000000 -0400
+--- linux-2.6.22-580/arch/i386/Kconfig	2008-04-30 09:29:26.000000000 -0400
++++ linux-2.6.22-590/arch/i386/Kconfig	2008-04-30 09:29:41.000000000 -0400
 @@ -1217,6 +1217,14 @@
  
  source "arch/i386/oprofile/Kconfig"
@@ -17,8 +17,8 @@ diff -Nurb linux-2.6.22-580/arch/i386/Kconfig linux-2.6.22-590/arch/i386/Kconfig
  	bool "Kprobes (EXPERIMENTAL)"
  	depends on KALLSYMS && EXPERIMENTAL && MODULES
 diff -Nurb linux-2.6.22-580/block/ll_rw_blk.c linux-2.6.22-590/block/ll_rw_blk.c
---- linux-2.6.22-580/block/ll_rw_blk.c	2008-04-29 17:04:51.000000000 -0400
-+++ linux-2.6.22-590/block/ll_rw_blk.c	2008-04-29 17:05:11.000000000 -0400
+--- linux-2.6.22-580/block/ll_rw_blk.c	2008-04-30 09:29:21.000000000 -0400
++++ linux-2.6.22-590/block/ll_rw_blk.c	2008-04-30 09:29:41.000000000 -0400
 @@ -30,6 +30,7 @@
  #include <linux/cpu.h>
  #include <linux/blktrace_api.h>
@@ -68,7 +68,7 @@ diff -Nurb linux-2.6.22-580/block/ll_rw_blk.c linux-2.6.22-590/block/ll_rw_blk.c
  }
 diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drivers/oprofile/cpu_buffer.c
 --- linux-2.6.22-580/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2008-04-29 17:05:11.000000000 -0400
++++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2008-04-30 09:29:41.000000000 -0400
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -134,7 +134,7 @@ diff -Nurb linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drive
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
 diff -Nurb linux-2.6.22-580/fs/bio.c linux-2.6.22-590/fs/bio.c
 --- linux-2.6.22-580/fs/bio.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/fs/bio.c	2008-04-29 17:05:11.000000000 -0400
++++ linux-2.6.22-590/fs/bio.c	2008-04-30 09:29:41.000000000 -0400
 @@ -27,6 +27,7 @@
  #include <linux/workqueue.h>
  #include <linux/blktrace_api.h>
@@ -192,8 +192,8 @@ diff -Nurb linux-2.6.22-580/fs/bio.c linux-2.6.22-590/fs/bio.c
  		bio->bi_end_io(bio, bytes_done, error);
  }
 diff -Nurb linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
---- linux-2.6.22-580/fs/exec.c	2008-04-29 17:04:54.000000000 -0400
-+++ linux-2.6.22-590/fs/exec.c	2008-04-29 17:05:11.000000000 -0400
+--- linux-2.6.22-580/fs/exec.c	2008-04-30 09:29:26.000000000 -0400
++++ linux-2.6.22-590/fs/exec.c	2008-04-30 09:29:41.000000000 -0400
 @@ -38,7 +38,7 @@
  #include <linux/binfmts.h>
  #include <linux/swap.h>
@@ -237,7 +237,7 @@ diff -Nurb linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
  	read_unlock(&tasklist_lock);
 diff -Nurb linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linux/arrays.h
 --- linux-2.6.22-580/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-590/include/linux/arrays.h	2008-04-29 17:05:11.000000000 -0400
++++ linux-2.6.22-590/include/linux/arrays.h	2008-04-30 09:29:41.000000000 -0400
 @@ -0,0 +1,36 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
@@ -276,8 +276,8 @@ diff -Nurb linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linu
 +};
 +#endif
 diff -Nurb linux-2.6.22-580/include/linux/mutex.h linux-2.6.22-590/include/linux/mutex.h
---- linux-2.6.22-580/include/linux/mutex.h	2008-04-30 09:19:15.000000000 -0400
-+++ linux-2.6.22-590/include/linux/mutex.h	2008-04-29 17:09:49.000000000 -0400
+--- linux-2.6.22-580/include/linux/mutex.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-590/include/linux/mutex.h	2008-04-30 09:45:43.000000000 -0400
 @@ -53,6 +53,10 @@
  	struct thread_info	*owner;
  	const char 		*name;
@@ -287,11 +287,11 @@ diff -Nurb linux-2.6.22-580/include/linux/mutex.h linux-2.6.22-590/include/linux
 +	struct thread_info	*owner;
 +#endif
  #endif
- 
  #ifdef CONFIG_DEBUG_LOCK_ALLOC
+ 	struct lockdep_map	dep_map;
 diff -Nurb linux-2.6.22-580/include/linux/sched.h linux-2.6.22-590/include/linux/sched.h
---- linux-2.6.22-580/include/linux/sched.h	2008-04-29 17:04:54.000000000 -0400
-+++ linux-2.6.22-590/include/linux/sched.h	2008-04-29 17:05:11.000000000 -0400
+--- linux-2.6.22-580/include/linux/sched.h	2008-04-30 09:29:26.000000000 -0400
++++ linux-2.6.22-590/include/linux/sched.h	2008-04-30 09:29:41.000000000 -0400
 @@ -850,6 +850,10 @@
  #endif
  	unsigned long sleep_avg;
@@ -305,7 +305,7 @@ diff -Nurb linux-2.6.22-580/include/linux/sched.h linux-2.6.22-590/include/linux
  
 diff -Nurb linux-2.6.22-580/kernel/mutex.c linux-2.6.22-590/kernel/mutex.c
 --- linux-2.6.22-580/kernel/mutex.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/kernel/mutex.c	2008-04-29 17:05:11.000000000 -0400
++++ linux-2.6.22-590/kernel/mutex.c	2008-04-30 09:29:41.000000000 -0400
 @@ -18,6 +18,16 @@
  #include <linux/spinlock.h>
  #include <linux/interrupt.h>
@@ -420,8 +420,8 @@ diff -Nurb linux-2.6.22-580/kernel/mutex.c linux-2.6.22-590/kernel/mutex.c
  	}
  
 diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
---- linux-2.6.22-580/kernel/sched.c	2008-04-29 17:04:54.000000000 -0400
-+++ linux-2.6.22-590/kernel/sched.c	2008-04-30 09:14:33.000000000 -0400
+--- linux-2.6.22-580/kernel/sched.c	2008-04-30 09:29:26.000000000 -0400
++++ linux-2.6.22-590/kernel/sched.c	2008-04-30 09:29:41.000000000 -0400
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -586,8 +586,8 @@ diff -Nurb linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
 +EXPORT_SYMBOL(in_sched_functions);
 +#endif
 diff -Nurb linux-2.6.22-580/mm/slab.c linux-2.6.22-590/mm/slab.c
---- linux-2.6.22-580/mm/slab.c	2008-04-29 17:04:54.000000000 -0400
-+++ linux-2.6.22-590/mm/slab.c	2008-04-29 17:05:11.000000000 -0400
+--- linux-2.6.22-580/mm/slab.c	2008-04-30 09:29:26.000000000 -0400
++++ linux-2.6.22-590/mm/slab.c	2008-04-30 09:29:41.000000000 -0400
 @@ -110,11 +110,13 @@
  #include	<linux/fault-inject.h>
  #include	<linux/rtmutex.h>
