@@ -1,0 +1,15 @@
+diff -Nurp linux-2.6.22-630/net/netlink/af_netlink.c linux-2.6.22-640/net/netlink/af_netlink.c
+--- linux-2.6.22-630/net/netlink/af_netlink.c	2008-04-09 18:46:27.000000000 +0200
++++ linux-2.6.22-640/net/netlink/af_netlink.c	2008-05-05 19:20:02.000000000 +0200
+@@ -426,6 +426,11 @@ static int netlink_create(struct socket 
+ 	if (protocol<0 || protocol >= MAX_LINKS)
+ 		return -EPROTONOSUPPORT;
+ 
++#ifndef CONFIG_AUDIT
++	if (protocol == NETLINK_AUDIT)
++		return -EPROTONOSUPPORT;
++#endif
++
+ 	netlink_lock_table();
+ #ifdef CONFIG_KMOD
+ 	if (!nl_table[protocol].registered) {
