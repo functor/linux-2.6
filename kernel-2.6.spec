@@ -366,6 +366,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 590
 %ApplyPatch 620
 %ApplyPatch 630
+%ApplyPatch 640
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
