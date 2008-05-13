@@ -130,7 +130,7 @@ diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	skb->data = data;
  	skb_reset_tail_pointer(skb);
  	skb->end = skb->tail + size;
-+	skb->skb_tag = nx_current_nid();
++	if (unlikely(in_softirq())) skb->skb_tag = nx_current_nid();
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
@@ -191,7 +191,7 @@ diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet
  		}
  		inet->sport = htons(inet->num);
 +		sk->sk_xid = vx_current_xid();
-+		sk->sk_nid = nx_current_nid();
++		if (unlikely(in_softirq())) sk->sk_nid = nx_current_nid();
  	}
  	release_sock(sk);
  	return 0;
