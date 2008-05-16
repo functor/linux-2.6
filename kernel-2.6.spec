@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 6
+%define taglevel 7
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -828,6 +828,10 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Fri May 16 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-7
+- Bringing this fix in for tcpdump and  ping
+- 
+
 * Fri May 09 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-6
 - Updated configuration to include COW again.
 - 
