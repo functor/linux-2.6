@@ -218,7 +218,7 @@ diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	skb->data = data;
  	skb_reset_tail_pointer(skb);
  	skb->end = skb->tail + size;
-+	if (!in_interrupt()) skb->skb_tag = nx_current_nid(); else skb->skb_tag = -1;
++	if (!in_interrupt()) skb->skb_tag = nx_current_nid(); else skb->skb_tag = 0;
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
