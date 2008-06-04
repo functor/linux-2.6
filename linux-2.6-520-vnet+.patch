@@ -1,6 +1,6 @@
 diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_MARK.h linux-2.6.22-520/include/linux/netfilter/xt_MARK.h
 --- linux-2.6.22-510/include/linux/netfilter/xt_MARK.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/linux/netfilter/xt_MARK.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter/xt_MARK.h	2008-05-28 15:29:54.000000000 -0400
 @@ -11,6 +11,7 @@
  	XT_MARK_SET=0,
  	XT_MARK_AND,
@@ -11,7 +11,7 @@ diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_MARK.h linux-2.6.22-520/i
  struct xt_mark_target_info_v1 {
 diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h
 --- linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h	2008-05-28 15:29:54.000000000 -0400
 @@ -0,0 +1,14 @@
 +#ifndef _XT_SETXID_H_target
 +#define _XT_SETXID_H_target
@@ -29,7 +29,7 @@ diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h linux-2.6.22-520
 +#endif /*_XT_SETXID_H_target*/
 diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h
 --- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h	2008-05-28 15:29:54.000000000 -0400
 @@ -12,6 +12,7 @@
  #define IPT_MARK_SET	XT_MARK_SET
  #define IPT_MARK_AND	XT_MARK_AND
@@ -40,7 +40,7 @@ diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.22
  
 diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h
 --- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h	2008-05-28 15:29:54.000000000 -0400
 @@ -0,0 +1,13 @@
 +#ifndef _IPT_SETXID_H_target
 +#define _IPT_SETXID_H_target
@@ -57,7 +57,7 @@ diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.
 +#endif /*_IPT_SETXID_H_target*/
 diff -Nurb linux-2.6.22-510/include/linux/skbuff.h linux-2.6.22-520/include/linux/skbuff.h
 --- linux-2.6.22-510/include/linux/skbuff.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/linux/skbuff.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/linux/skbuff.h	2008-05-28 15:29:54.000000000 -0400
 @@ -302,6 +302,7 @@
  #endif
  
@@ -68,7 +68,7 @@ diff -Nurb linux-2.6.22-510/include/linux/skbuff.h linux-2.6.22-520/include/linu
  	sk_buff_data_t		network_header;
 diff -Nurb linux-2.6.22-510/include/linux/socket.h linux-2.6.22-520/include/linux/socket.h
 --- linux-2.6.22-510/include/linux/socket.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/linux/socket.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/linux/socket.h	2008-05-28 15:29:54.000000000 -0400
 @@ -288,6 +288,8 @@
  #define SOL_TIPC	271
  #define SOL_RXRPC	272
@@ -79,8 +79,8 @@ diff -Nurb linux-2.6.22-510/include/linux/socket.h linux-2.6.22-520/include/linu
  #define IPX_TYPE	1
  
 diff -Nurb linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/include/linux/vserver/network.h
---- linux-2.6.22-510/include/linux/vserver/network.h	2008-05-05 00:06:36.000000000 -0400
-+++ linux-2.6.22-520/include/linux/vserver/network.h	2008-05-05 00:06:39.000000000 -0400
+--- linux-2.6.22-510/include/linux/vserver/network.h	2008-05-28 15:29:44.000000000 -0400
++++ linux-2.6.22-520/include/linux/vserver/network.h	2008-05-28 15:29:54.000000000 -0400
 @@ -47,6 +47,8 @@
  #define NXC_TUN_CREATE		0x00000001
  
@@ -92,20 +92,20 @@ diff -Nurb linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/inc
  /* address types */
 diff -Nurb linux-2.6.22-510/include/net/netfilter/nf_conntrack.h linux-2.6.22-520/include/net/netfilter/nf_conntrack.h
 --- linux-2.6.22-510/include/net/netfilter/nf_conntrack.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/net/netfilter/nf_conntrack.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/net/netfilter/nf_conntrack.h	2008-06-04 11:07:28.000000000 -0400
 @@ -131,6 +131,9 @@
  	/* Storage reserved for other modules: */
  	union nf_conntrack_proto proto;
  
 +	/* PLANETLAB. VNET-specific */
-+	xid_t xid[IP_CT_DIR_MAX];
++	int xid[IP_CT_DIR_MAX];
 +
  	/* features dynamically at the end: helper, nat (both optional) */
  	char data[0];
  };
 diff -Nurb linux-2.6.22-510/include/net/raw.h linux-2.6.22-520/include/net/raw.h
 --- linux-2.6.22-510/include/net/raw.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/net/raw.h	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/include/net/raw.h	2008-05-28 15:29:54.000000000 -0400
 @@ -36,7 +36,7 @@
  
  extern struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
@@ -117,7 +117,7 @@ diff -Nurb linux-2.6.22-510/include/net/raw.h linux-2.6.22-520/include/net/raw.h
  
 diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
 --- linux-2.6.22-510/net/core/skbuff.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/core/skbuff.c	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/core/skbuff.c	2008-06-04 11:09:31.000000000 -0400
 @@ -56,6 +56,7 @@
  #include <linux/rtnetlink.h>
  #include <linux/init.h>
@@ -130,7 +130,7 @@ diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	skb->data = data;
  	skb_reset_tail_pointer(skb);
  	skb->end = skb->tail + size;
-+	if (!in_interrupt()) skb->skb_tag = nx_current_nid();
++	if (!in_interrupt()) skb->skb_tag = nx_current_nid(); else skb->skb_tag = -1;
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
@@ -152,8 +152,8 @@ diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	skb_shinfo(new)->gso_size = skb_shinfo(old)->gso_size;
  	skb_shinfo(new)->gso_segs = skb_shinfo(old)->gso_segs;
 diff -Nurb linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
---- linux-2.6.22-510/net/core/sock.c	2008-05-05 00:06:36.000000000 -0400
-+++ linux-2.6.22-520/net/core/sock.c	2008-05-05 00:06:39.000000000 -0400
+--- linux-2.6.22-510/net/core/sock.c	2008-05-28 15:29:44.000000000 -0400
++++ linux-2.6.22-520/net/core/sock.c	2008-05-28 15:29:54.000000000 -0400
 @@ -444,6 +444,19 @@
  		}
  		goto set_sndbuf;
@@ -184,14 +184,14 @@ diff -Nurb linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
  			break;
  		}
 diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet.c
---- linux-2.6.22-510/net/ipv4/af_inet.c	2008-05-05 00:06:36.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/af_inet.c	2008-05-05 00:06:39.000000000 -0400
+--- linux-2.6.22-510/net/ipv4/af_inet.c	2008-05-28 15:29:44.000000000 -0400
++++ linux-2.6.22-520/net/ipv4/af_inet.c	2008-05-28 15:29:54.000000000 -0400
 @@ -178,6 +178,8 @@
  			return -EAGAIN;
  		}
  		inet->sport = htons(inet->num);
 +		sk->sk_xid = vx_current_xid();
-+		if (!in_interrupt()) sk->sk_nid = nx_current_nid();
++		if (!in_interrupt()) sk->sk_nid = nx_current_nid(); else sk->sk_nid=0;
  	}
  	release_sock(sk);
  	return 0;
@@ -206,8 +206,8 @@ diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet
  		goto out_rcu_unlock;
  override:
 diff -Nurb linux-2.6.22-510/net/ipv4/icmp.c linux-2.6.22-520/net/ipv4/icmp.c
---- linux-2.6.22-510/net/ipv4/icmp.c	2008-05-05 00:06:39.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/icmp.c	2008-05-05 00:06:39.000000000 -0400
+--- linux-2.6.22-510/net/ipv4/icmp.c	2008-05-28 15:29:51.000000000 -0400
++++ linux-2.6.22-520/net/ipv4/icmp.c	2008-05-28 15:29:54.000000000 -0400
 @@ -709,7 +709,7 @@
  	if ((raw_sk = sk_head(&raw_v4_htable[hash])) != NULL) {
  		while ((raw_sk = __raw_v4_lookup(raw_sk, protocol, iph->daddr,
@@ -219,7 +219,7 @@ diff -Nurb linux-2.6.22-510/net/ipv4/icmp.c linux-2.6.22-520/net/ipv4/icmp.c
  			iph = (struct iphdr *)skb->data;
 diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_options.c
 --- linux-2.6.22-510/net/ipv4/ip_options.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/ip_options.c	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/ipv4/ip_options.c	2008-05-28 15:29:54.000000000 -0400
 @@ -409,7 +409,7 @@
  					optptr[2] += 8;
  					break;
@@ -248,8 +248,8 @@ diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  				goto error;
  			}
 diff -Nurb linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c
---- linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c	2008-05-05 00:06:26.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c	2008-05-05 00:06:39.000000000 -0400
+--- linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c	2008-05-28 15:29:27.000000000 -0400
++++ linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c	2008-05-28 15:29:54.000000000 -0400
 @@ -49,6 +49,8 @@
  	else
  		logflags = NF_LOG_MASK;
@@ -260,8 +260,8 @@ diff -Nurb linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ip
  	if (ih == NULL) {
  		printk("TRUNCATED");
 diff -Nurb linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
---- linux-2.6.22-510/net/ipv4/raw.c	2008-05-05 00:06:36.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/raw.c	2008-05-05 00:06:39.000000000 -0400
+--- linux-2.6.22-510/net/ipv4/raw.c	2008-05-28 15:29:44.000000000 -0400
++++ linux-2.6.22-520/net/ipv4/raw.c	2008-05-28 15:29:54.000000000 -0400
 @@ -103,7 +103,7 @@
  
  struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
@@ -308,7 +308,7 @@ diff -Nurb linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  		goto error_free;
 diff -Nurb linux-2.6.22-510/net/netfilter/Kconfig linux-2.6.22-520/net/netfilter/Kconfig
 --- linux-2.6.22-510/net/netfilter/Kconfig	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/Kconfig	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/Kconfig	2008-05-28 15:29:54.000000000 -0400
 @@ -389,6 +389,13 @@
  
  	  To compile it as a module, choose M here.  If unsure, say N.
@@ -325,7 +325,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/Kconfig linux-2.6.22-520/net/netfilter
  	depends on NETFILTER_XTABLES
 diff -Nurb linux-2.6.22-510/net/netfilter/Makefile linux-2.6.22-520/net/netfilter/Makefile
 --- linux-2.6.22-510/net/netfilter/Makefile	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/Makefile	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/Makefile	2008-05-28 15:29:54.000000000 -0400
 @@ -37,6 +37,7 @@
  obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
  
@@ -336,7 +336,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/Makefile linux-2.6.22-520/net/netfilte
  obj-$(CONFIG_NETFILTER_XT_TARGET_DSCP) += xt_DSCP.o
 diff -Nurb linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/net/netfilter/nf_conntrack_core.c
 --- linux-2.6.22-510/net/netfilter/nf_conntrack_core.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/nf_conntrack_core.c	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/nf_conntrack_core.c	2008-05-28 15:29:54.000000000 -0400
 @@ -726,6 +726,8 @@
  
  	/* Overload tuple linked list to put us in unconfirmed list. */
@@ -348,7 +348,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/n
  
 diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilter/xt_MARK.c
 --- linux-2.6.22-510/net/netfilter/xt_MARK.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-05-09 16:59:26.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-06-04 11:05:07.000000000 -0400
 @@ -5,13 +5,18 @@
   * This program is free software; you can redistribute it and/or modify
   * it under the terms of the GNU General Public License version 2 as
@@ -417,7 +417,16 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  static unsigned int
  target_v0(struct sk_buff **pskb,
  	  const struct net_device *in,
-@@ -44,7 +91,19 @@
+@@ -35,6 +82,8 @@
+ 	return XT_CONTINUE;
+ }
+ 
++extern DEFINE_PER_CPU(int, sknid_elevator);
++
+ static unsigned int
+ target_v1(struct sk_buff **pskb,
+ 	  const struct net_device *in,
+@@ -44,7 +93,20 @@
  	  const void *targinfo)
  {
  	const struct xt_mark_target_info_v1 *markinfo = targinfo;
@@ -428,6 +437,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +      struct nf_conn *ct;
 +      extern struct inet_hashinfo tcp_hashinfo;
 +      enum ip_conntrack_dir dir;
++      int *curtag;
 +      u_int32_t src_ip;
 +      u_int32_t dst_ip;
 +      u_int16_t proto, src_port;
@@ -438,7 +448,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  
  	switch (markinfo->mode) {
  	case XT_MARK_SET:
-@@ -58,8 +117,63 @@
+@@ -58,13 +120,77 @@
  	case XT_MARK_OR:
  		mark = (*pskb)->mark | markinfo->mark;
  		break;
@@ -459,16 +469,23 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +					      ip = ct->tuplehash[dir].tuple.dst.u3.ip;
 +					      port = get_dst_port(&ct->tuplehash[dir].tuple);
 +
-+
-+
 +					      if (proto == 1 || proto == 17) {
-+					      					     /* Temporary hack for robustness against wrong xid values */
-+						      if (((*pskb)->mark!=-1) && (*pskb)->mark && ct->xid[0]==-1 && (hooknum != NF_IP_LOCAL_IN))
-+							      ct->xid[0]=(*pskb)->mark;
-+						      if (ct->xid[0]) 
-+							      mark = ct->xid[0];
++						      if ((*pskb)->mark>0) /* The packet is marked, it's going out */
++						      {
++							      if (ct->xid[0]>0 && ct->xid[0]!=(*pskb)->mark && hooknum==NF_IP_LOCAL_IN) {
++								      /* Neil Spring's bug. */
++									printk(KERN_CRIT "Neil Spring's bug\n");
++								      	break;
++							      }
++							      else
++								      ct->xid[0]=(*pskb)->mark;
++						      }
 +
++						      if (ct->xid[0] > 0) {
++							      mark = ct->xid[0];
  	}
+ 
++					      }
 +					      else if (proto == 6) { 
 +						      if ((*pskb)->sk) {
 +							      connection_sk = (*pskb)->sk;
@@ -477,20 +494,16 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +						      else 
 +							      connection_sk = inet_lookup_established(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
 +						              
- 
++
 +						      if (connection_sk) {
 +							      if (connection_sk->sk_state == TCP_TIME_WAIT) {
 +								      inet_twsk_put(inet_twsk(connection_sk));
 +								      break;
 +							      }
 +							      connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
-+							      ct->xid[!dir]=connection_sk->sk_xid;
-+							      if (connection_sk->sk_xid != 0) 
-+								      mark = connection_sk->sk_xid;
-+							      else if (hooknum == NF_IP_LOCAL_IN) {
-+								      /* Neutralize packets in incognito */
-+								      mark = -1;
-+							      }
++							      ct->xid[!dir]=connection_sk->sk_nid;
++							      if (connection_sk->sk_nid != 0) 
++								      mark = connection_sk->sk_nid;
 +							      sock_put(connection_sk);
 +						      }
 +						      else 
@@ -498,11 +511,23 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
 +					      }
 +					      break;
 +	}
-+	if (mark != -1)
++	if (mark != -1) {
  	(*pskb)->mark = mark;
++	}
++
++	curtag=&__get_cpu_var(sknid_elevator);
++	if (mark > 0 && *curtag==-2) 
++	{
++		*curtag = mark;
++	}
  	return XT_CONTINUE;
  }
-@@ -92,7 +206,8 @@
+ 
+-
+ static int
+ checkentry_v0(const char *tablename,
+ 	      const void *entry,
+@@ -92,7 +218,8 @@
  
  	if (markinfo->mode != XT_MARK_SET
  	    && markinfo->mode != XT_MARK_AND
@@ -514,7 +539,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilt
  		return 0;
 diff -Nurb linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfilter/xt_SETXID.c
 --- linux-2.6.22-510/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2008-05-28 15:29:54.000000000 -0400
 @@ -0,0 +1,79 @@
 +#include <linux/module.h>
 +#include <linux/skbuff.h>
@@ -597,7 +622,7 @@ diff -Nurb linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfi
 +module_exit(fini);
 diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
 --- linux-2.6.22-510/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/packet/af_packet.c	2008-05-05 00:06:39.000000000 -0400
++++ linux-2.6.22-520/net/packet/af_packet.c	2008-06-04 11:05:54.000000000 -0400
 @@ -78,6 +78,7 @@
  #include <linux/poll.h>
  #include <linux/module.h>
@@ -616,28 +641,40 @@ diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/a
  	/*
  	 *	Get and verify the address.
  	 */
-@@ -420,6 +424,10 @@
+@@ -416,10 +420,22 @@
+ 	return err;
+ }
+ 
++extern DEFINE_PER_CPU(int, sknid_elevator);
+ static inline unsigned int run_filter(struct sk_buff *skb, struct sock *sk,
  				      unsigned int res)
  {
  	struct sk_filter *filter;
 +	int tag = skb->skb_tag;
++	int *elevator=&__get_cpu_var(sknid_elevator);
 +
-+	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag))
++	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
++		*elevator=-2;
 +		return 0;
++	}
++	else if (!sk->sk_nx_info && *elevator) {
++		/* Root has already seen this packet */
++		return 0;
++	}
  
  	rcu_read_lock_bh();
  	filter = rcu_dereference(sk->sk_filter);
-@@ -711,6 +719,9 @@
+@@ -711,6 +727,9 @@
  	unsigned char *addr;
  	int ifindex, err, reserve = 0;
  
-+	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND)) 
 +		return -EPERM;
 +
  	/*
  	 *	Get and verify the address.
  	 */
-@@ -984,7 +995,7 @@
+@@ -984,7 +1003,7 @@
  	__be16 proto = (__force __be16)protocol; /* weird, but documented */
  	int err;
  
