@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 7
+%define taglevel 8
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -828,6 +828,15 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Sat Jun 07 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-8
+- * Partial fix for the UDP-packet-pollution problem
+- * Support for PF_PACKET sockets
+- * Support for SOCK_PACKET sockets
+- * Disabled Chopstix with mutexes
+- * Tested VNET+ under heavy loads
+- 
+- 
+
 * Fri May 16 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-7
 - Bringing this fix in for tcpdump and  ping
 - 
