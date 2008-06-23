@@ -1,7 +1,8 @@
---- linux-2.6.22-630/kernel/sched.c.orig	2008-04-23 17:09:21.000000000 -0400
-+++ linux-2.6.22-630/kernel/sched.c	2008-04-23 17:10:23.000000000 -0400
-@@ -3656,6 +3656,10 @@
- /* CHOPSTIX */
+diff -Nurp linux-2.6.22-620/kernel/sched.c linux-2.6.22-630/kernel/sched.c
+--- linux-2.6.22-620/kernel/sched.c	2008-06-23 17:20:25.000000000 -0400
++++ linux-2.6.22-630/kernel/sched.c	2008-06-23 18:08:14.000000000 -0400
+@@ -3635,6 +3635,10 @@ struct event_spec {
+ };
  #endif
  
 +/* Bypass the vx_unhold infinite loop */
@@ -11,7 +12,7 @@
  asmlinkage void __sched schedule(void)
  {
  	struct task_struct *prev, *next;
-@@ -3740,14 +3744,22 @@
+@@ -3722,14 +3726,40 @@ need_resched_nonpreemptible:
  
  	cpu = smp_processor_id();
  	vx_set_rq_time(rq, jiffies);
@@ -29,7 +30,25 @@
  			goto try_unhold;
 +		}
 +		else if (merry==10) {
-+			BUG();
++			printk(KERN_EMERG "merry==10!\n");
++			if (list_empty(&rq->hold_queue))
++				printk(KERN_EMERG "hold queue is empty\n");
++			else {
++				struct list_head *l, *n;
++				printk(KERN_EMERG "rq->norm_time = %lu, rq->idle_time = %lu\n", rq->norm_time, rq->idle_time);
++				list_for_each_safe(l, n, &rq->hold_queue) {
++					struct task_struct *p;
++					struct _vx_sched_pc *sched_pc;
++					struct vx_info *vxi;
++
++					p = list_entry(l, struct task_struct, run_list);
++					vxi = p->vx_info;
++					sched_pc = &vx_per_cpu(vxi, sched_pc, cpu);
++
++					printk(KERN_EMERG "%u: sched_pc->norm_time = %lu, sched_pc->idle_time = %lu\n", vxi->vx_id,
++						sched_pc->norm_time, sched_pc->idle_time);
++				}
++			}
 +		}
 +
  
