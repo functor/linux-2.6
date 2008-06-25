@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 8
+%define taglevel 9
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -830,6 +830,10 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Wed Jun 25 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-9
+- Enable the hangcheck timer driver, and build it in to the kernel.
+- Dump relevant data on the scheduler bug instead of BUGing.
+
 * Sat Jun 07 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-8
 - * Partial fix for the UDP-packet-pollution problem
 - * Support for PF_PACKET sockets
