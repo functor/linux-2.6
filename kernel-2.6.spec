@@ -173,6 +173,7 @@ Patch590: linux-2.6-590-chopstix-intern.patch
 Patch620: linux-2.6-620-kdb.patch
 Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
+Patch650: linux-2.6-650-hangcheck-reboot.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -367,6 +368,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 620
 %ApplyPatch 630
 %ApplyPatch 640
+%ApplyPatch 650
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.

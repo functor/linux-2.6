@@ -1,0 +1,12 @@
+diff -Nurp linux-2.6.22-640/drivers/char/hangcheck-timer.c linux-2.6.22-650/drivers/char/hangcheck-timer.c
+--- linux-2.6.22-640/drivers/char/hangcheck-timer.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-650/drivers/char/hangcheck-timer.c	2008-06-25 14:44:10.000000000 -0400
+@@ -57,7 +57,7 @@
+ 
+ static int hangcheck_tick = DEFAULT_IOFENCE_TICK;
+ static int hangcheck_margin = DEFAULT_IOFENCE_MARGIN;
+-static int hangcheck_reboot;  /* Defaults to not reboot */
++static int hangcheck_reboot = 1;  /* Defaults to reboot */
+ static int hangcheck_dump_tasks;  /* Defaults to not dumping SysRQ T */
+ 
+ /* options - modular */
