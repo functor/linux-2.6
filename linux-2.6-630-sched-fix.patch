@@ -1,19 +1,65 @@
+diff -Nurp linux-2.6.22-620/fs/proc/proc_misc.c linux-2.6.22-630/fs/proc/proc_misc.c
+--- linux-2.6.22-620/fs/proc/proc_misc.c	2008-06-25 14:49:41.000000000 -0400
++++ linux-2.6.22-630/fs/proc/proc_misc.c	2008-07-08 16:12:39.000000000 -0400
+@@ -779,6 +779,34 @@ static const struct file_operations proc
+ };
+ #endif
+ 
++extern char debug_630_dumped[4087];
++static int show_debug_630(struct seq_file *p, void *v)
++{
++	seq_printf(p, "%s\n", debug_630_dumped);
++	return 0;
++}
++
++static int debug_630_open(struct inode *inode, struct file *filp)
++{
++	int res;
++	struct seq_file *m;
++
++	res = single_open(filp, show_debug_630, NULL);
++	if (!res) {
++		m = filp->private_data;
++		m->buf = kmalloc(4096, GFP_KERNEL);
++		m->size = 4096;
++	}
++	return res;
++}
++
++static const struct file_operations proc_debug_630_operations = {
++	.open = debug_630_open,
++	.read = seq_read,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
+ struct proc_dir_entry *proc_root_kcore;
+ 
+ void create_seq_entry(char *name, mode_t mode, const struct file_operations *f)
+@@ -871,4 +899,6 @@ void __init proc_misc_init(void)
+ 			entry->proc_fops = &proc_sysrq_trigger_operations;
+ 	}
+ #endif
++
++	create_seq_entry("debug_630", 0, &proc_debug_630_operations);
+ }
 diff -Nurp linux-2.6.22-620/kernel/sched.c linux-2.6.22-630/kernel/sched.c
---- linux-2.6.22-620/kernel/sched.c	2008-06-23 17:20:25.000000000 -0400
-+++ linux-2.6.22-630/kernel/sched.c	2008-06-24 11:28:41.000000000 -0400
-@@ -3635,6 +3635,11 @@ struct event_spec {
+--- linux-2.6.22-620/kernel/sched.c	2008-06-25 14:49:41.000000000 -0400
++++ linux-2.6.22-630/kernel/sched.c	2008-07-07 16:29:49.000000000 -0400
+@@ -3635,6 +3635,12 @@ struct event_spec {
  };
  #endif
  
 +/* Bypass the vx_unhold infinite loop */
 +unsigned int merry;
-+static int debug_630_dumped = 0;
++char debug_630_dumped[4087] = { [0] = '\0' };
 +EXPORT_SYMBOL(merry);
++EXPORT_SYMBOL(debug_630_dumped);
 +
  asmlinkage void __sched schedule(void)
  {
  	struct task_struct *prev, *next;
-@@ -3722,14 +3727,42 @@ need_resched_nonpreemptible:
+@@ -3722,14 +3728,43 @@ need_resched_nonpreemptible:
  
  	cpu = smp_processor_id();
  	vx_set_rq_time(rq, jiffies);
@@ -30,14 +76,15 @@ diff -Nurp linux-2.6.22-620/kernel/sched.c linux-2.6.22-630/kernel/sched.c
 +			merry++;
  			goto try_unhold;
 +		}
-+		else if (merry==10 && !debug_630_dumped) {
-+			debug_630_dumped = 1;
-+			printk(KERN_EMERG "merry==10!\n");
++		else if (merry==10 && !*debug_630_dumped) {
++			char *ptr = debug_630_dumped;
++#define append(...)	ptr += snprintf(ptr, ((debug_630_dumped + sizeof(debug_630_dumped)) - ptr), __VA_ARGS__)
++
 +			if (list_empty(&rq->hold_queue))
-+				printk(KERN_EMERG "hold queue is empty\n");
++				append("hold queue is empty\n");
 +			else {
 +				struct list_head *l, *n;
-+				printk(KERN_EMERG "rq->norm_time = %lu, rq->idle_time = %lu, rq->idle_skip = %d\n",
++				append("rq->norm_time = %lu, rq->idle_time = %lu, rq->idle_skip = %d\n",
 +					rq->norm_time, rq->idle_time, rq->idle_skip);
 +				list_for_each_safe(l, n, &rq->hold_queue) {
 +					struct task_struct *p;
@@ -48,12 +95,12 @@ diff -Nurp linux-2.6.22-620/kernel/sched.c linux-2.6.22-630/kernel/sched.c
 +					vxi = p->vx_info;
 +					sched_pc = &vx_per_cpu(vxi, sched_pc, cpu);
 +
-+					printk(KERN_EMERG "%u: sched_pc->norm_time = %lu, sched_pc->idle_time = %lu\n", vxi->vx_id,
++					append("%u: sched_pc->norm_time = %lu, sched_pc->idle_time = %lu\n", vxi->vx_id,
 +						sched_pc->norm_time, sched_pc->idle_time);
 +				}
 +			}
++			*ptr = '\0';
 +		}
-+
  
  		idle_balance(cpu, rq);
  		if (!rq->nr_running) {
