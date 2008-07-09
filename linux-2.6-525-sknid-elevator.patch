@@ -1,0 +1,185 @@
+diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
+--- linux-2.6.22-510/net/core/dev.c	2008-06-06 17:07:48.000000000 -0400
++++ linux-2.6.22-520/net/core/dev.c	2008-06-06 17:07:56.000000000 -0400
+@@ -1803,6 +1803,7 @@
+  * the ingress scheduler, you just cant add policies on ingress.
+  *
+  */
++
+ static int ing_filter(struct sk_buff *skb)
+ {
+ 	struct Qdisc *q;
+@@ -1832,13 +1833,20 @@
+ }
+ #endif
+ 
++/* The code already makes the assumption that packet handlers run
++ * sequentially on the same CPU. -Sapan */
++DEFINE_PER_CPU(int, sknid_elevator);
++
+ int netif_receive_skb(struct sk_buff *skb)
+ {
+ 	struct packet_type *ptype, *pt_prev;
+ 	struct net_device *orig_dev;
+ 	int ret = NET_RX_DROP;
++	int *cur_elevator=&__get_cpu_var(sknid_elevator);
+ 	__be16 type;
+ 
++	*cur_elevator = 0;
++
+ 	/* if we've gotten here through NAPI, check netpoll */
+ 	if (skb->dev->poll && netpoll_rx(skb))
+ 		return NET_RX_DROP;
+@@ -1873,8 +1881,9 @@
+ 
+ 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
+ 		if (!ptype->dev || ptype->dev == skb->dev) {
+-			if (pt_prev)
++			if (pt_prev) {
+ 				ret = deliver_skb(skb, pt_prev, orig_dev);
++			}
+ 			pt_prev = ptype;
+ 		}
+ 	}
+@@ -1912,8 +1921,22 @@
+ 		}
+ 	}
+ 
++	/* We don't want the packet handlers to throw the packet away
++	 * if we want the taps to treat it again - Sapan */
++	if (*cur_elevator) {
++		atomic_inc(&skb->users);
++	}
++
+ 	if (pt_prev) {
+ 		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
++			if (*cur_elevator > 0) {
++				skb->skb_tag = *cur_elevator;
++				list_for_each_entry_rcu(ptype, &ptype_all, list) {
++					if (!ptype->dev || ptype->dev == skb->dev) {
++							ret = deliver_skb(skb, ptype, orig_dev);
++					}
++				}
++			}
+ 	} else {
+ 		kfree_skb(skb);
+ 		/* Jamal, now you will not able to escape explaining
+@@ -1922,6 +1945,13 @@
+ 		ret = NET_RX_DROP;
+ 	}
+ 
++	if (*cur_elevator) {
++		/* We have a packet */
++		kfree_skb(skb);
++	}
++
++	*cur_elevator=0;
++
+ out:
+ 	rcu_read_unlock();
+ 	return ret;
+@@ -3780,6 +3810,7 @@
+ EXPORT_SYMBOL(net_enable_timestamp);
+ EXPORT_SYMBOL(net_disable_timestamp);
+ EXPORT_SYMBOL(dev_get_flags);
++EXPORT_PER_CPU_SYMBOL(sknid_elevator);
+ 
+ #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
+ EXPORT_SYMBOL(br_handle_frame_hook);
+diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
+--- linux-2.6.22-510/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/packet/af_packet.c	2008-06-07 18:30:41.000000000 -0400
+@@ -78,6 +78,7 @@
+ #include <linux/poll.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
++#include <linux/vs_network.h>
+ 
+ #ifdef CONFIG_INET
+ #include <net/inet_common.h>
+@@ -246,10 +247,13 @@
+ 
+ static const struct proto_ops packet_ops_spkt;
+ 
++extern DEFINE_PER_CPU(int, sknid_elevator);
+ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct packet_type *pt, struct net_device *orig_dev)
+ {
+ 	struct sock *sk;
+ 	struct sockaddr_pkt *spkt;
++	int tag = skb->skb_tag;
++	int *elevator=&__get_cpu_var(sknid_elevator);
+ 
+ 	/*
+ 	 *	When we registered the protocol we saved the socket in the data
+@@ -269,6 +273,22 @@
+ 	 *	so that this procedure is noop.
+ 	 */
+ 
++	/* 
++	 * (18:05:41) daniel_hozac: where?
++	 * (18:05:58) daniel_hozac: we already have filters on PF_PACKET, don't we?
++	 * (18:05:58) er: in packet_rcv_skpt
++	 * (18:07:33) daniel_hozac: oh, that's evil. 
++	 */
++
++	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
++		*elevator=-2;
++		goto out;
++	}
++	else if (!sk->sk_nx_info && *elevator) {
++		/* Root has already seen this packet */
++		goto out;
++	}
++
+ 	if (skb->pkt_type == PACKET_LOOPBACK)
+ 		goto out;
+ 
+@@ -324,6 +344,9 @@
+ 	__be16 proto=0;
+ 	int err;
+ 
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
++		return -EPERM;
++
+ 	/*
+ 	 *	Get and verify the address.
+ 	 */
+@@ -420,6 +443,17 @@
+ 				      unsigned int res)
+ {
+ 	struct sk_filter *filter;
++	int tag = skb->skb_tag;
++	int *elevator=&__get_cpu_var(sknid_elevator);
++
++	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
++		*elevator=-2;
++		return 0;
++	}
++	else if (!sk->sk_nx_info && *elevator) {
++		/* Root has already seen this packet */
++		return 0;
++	}
+ 
+ 	rcu_read_lock_bh();
+ 	filter = rcu_dereference(sk->sk_filter);
+@@ -711,6 +745,9 @@
+ 	unsigned char *addr;
+ 	int ifindex, err, reserve = 0;
+ 
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND)) 
++		return -EPERM;
++
+ 	/*
+ 	 *	Get and verify the address.
+ 	 */
+@@ -984,8 +1021,9 @@
+ 	__be16 proto = (__force __be16)protocol; /* weird, but documented */
+ 	int err;
+ 
+-	if (!capable(CAP_NET_RAW))
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET))
+ 		return -EPERM;
++		
+ 	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
+ 	    sock->type != SOCK_PACKET)
+ 		return -ESOCKTNOSUPPORT;

@@ -1,0 +1,382 @@
+diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_MARK.h linux-2.6.22-520/include/linux/netfilter/xt_MARK.h
+--- linux-2.6.22-510/include/linux/netfilter/xt_MARK.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter/xt_MARK.h	2008-06-06 17:07:56.000000000 -0400
+@@ -11,6 +11,7 @@
+ 	XT_MARK_SET=0,
+ 	XT_MARK_AND,
+ 	XT_MARK_OR,
++	XT_MARK_COPYXID,
+ };
+ 
+ struct xt_mark_target_info_v1 {
+diff -Nurb linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h
+--- linux-2.6.22-510/include/linux/netfilter/xt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-520/include/linux/netfilter/xt_SETXID.h	2008-06-06 17:07:56.000000000 -0400
+@@ -0,0 +1,14 @@
++#ifndef _XT_SETXID_H_target
++#define _XT_SETXID_H_target
++
++/* Version 1 */
++enum {
++	XT_SET_PACKET_XID=0
++};
++
++struct xt_setxid_target_info_v1 {
++	unsigned long mark;
++	u_int8_t mode;
++};
++
++#endif /*_XT_SETXID_H_target*/
+diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h
+--- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_MARK.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_MARK.h	2008-06-06 17:07:56.000000000 -0400
+@@ -12,6 +12,7 @@
+ #define IPT_MARK_SET	XT_MARK_SET
+ #define IPT_MARK_AND	XT_MARK_AND
+ #define	IPT_MARK_OR	XT_MARK_OR
++#define IPT_MARK_COPYXID	XT_MARK_COPYXID
+ 
+ #define ipt_mark_target_info_v1 xt_mark_target_info_v1
+ 
+diff -Nurb linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h
+--- linux-2.6.22-510/include/linux/netfilter_ipv4/ipt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-520/include/linux/netfilter_ipv4/ipt_SETXID.h	2008-06-06 17:07:56.000000000 -0400
+@@ -0,0 +1,13 @@
++#ifndef _IPT_SETXID_H_target
++#define _IPT_SETXID_H_target
++
++/* Backwards compatibility for old userspace */
++
++#include <linux/netfilter/xt_SETXID.h>
++
++/* Version 1 */
++#define IPT_SET_PACKET_XID	XT_SET_PACKET_XID
++
++#define ipt_setxid_target_info_v1 xt_setxid_target_info_v1
++
++#endif /*_IPT_SETXID_H_target*/
+diff -Nurb linux-2.6.22-510/include/net/netfilter/nf_conntrack.h linux-2.6.22-520/include/net/netfilter/nf_conntrack.h
+--- linux-2.6.22-510/include/net/netfilter/nf_conntrack.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/include/net/netfilter/nf_conntrack.h	2008-06-06 17:07:56.000000000 -0400
+@@ -131,6 +131,9 @@
+ 	/* Storage reserved for other modules: */
+ 	union nf_conntrack_proto proto;
+ 
++	/* PLANETLAB. VNET-specific */
++	int xid[IP_CT_DIR_MAX];
++
+ 	/* features dynamically at the end: helper, nat (both optional) */
+ 	char data[0];
+ };
+diff -Nurb linux-2.6.22-510/net/netfilter/Kconfig linux-2.6.22-520/net/netfilter/Kconfig
+--- linux-2.6.22-510/net/netfilter/Kconfig	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/Kconfig	2008-06-06 17:07:56.000000000 -0400
+@@ -389,6 +389,13 @@
+ 
+ 	  To compile it as a module, choose M here.  If unsure, say N.
+ 
++config NETFILTER_XT_TARGET_SETXID
++	tristate '"SETXID" target support'
++	depends on NETFILTER_XTABLES
++	help
++	  This option adds a `SETXID' target, which allows you to alter the
++	  xid of a socket.
++
+ config NETFILTER_XT_MATCH_COMMENT
+ 	tristate  '"comment" match support'
+ 	depends on NETFILTER_XTABLES
+diff -Nurb linux-2.6.22-510/net/netfilter/Makefile linux-2.6.22-520/net/netfilter/Makefile
+--- linux-2.6.22-510/net/netfilter/Makefile	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/Makefile	2008-06-06 17:07:56.000000000 -0400
+@@ -37,6 +37,7 @@
+ obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
+ 
+ # targets
++obj-$(CONFIG_NETFILTER_XT_TARGET_SETXID) += xt_SETXID.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_CONNMARK) += xt_CONNMARK.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_DSCP) += xt_DSCP.o
+diff -Nurb linux-2.6.22-510/net/netfilter/nf_conntrack_core.c linux-2.6.22-520/net/netfilter/nf_conntrack_core.c
+--- linux-2.6.22-510/net/netfilter/nf_conntrack_core.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/nf_conntrack_core.c	2008-06-06 17:07:56.000000000 -0400
+@@ -726,6 +726,8 @@
+ 
+ 	/* Overload tuple linked list to put us in unconfirmed list. */
+ 	list_add(&conntrack->tuplehash[IP_CT_DIR_ORIGINAL].list, &unconfirmed);
++	conntrack->xid[IP_CT_DIR_ORIGINAL] = -1;
++	conntrack->xid[IP_CT_DIR_REPLY] = -1;
+ 
+ 	write_unlock_bh(&nf_conntrack_lock);
+
+diff -Nurb linux-2.6.22-510/net/netfilter/xt_MARK.c linux-2.6.22-520/net/netfilter/xt_MARK.c
+--- linux-2.6.22-510/net/netfilter/xt_MARK.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-520/net/netfilter/xt_MARK.c	2008-06-07 17:55:26.000000000 -0400
+@@ -5,13 +5,18 @@
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+  * published by the Free Software Foundation.
++ *
+  */
+ 
+ #include <linux/module.h>
++#include <linux/version.h>
+ #include <linux/skbuff.h>
+ #include <linux/ip.h>
+ #include <net/checksum.h>
++#include <net/route.h>
++#include <net/inet_hashtables.h>
+ 
++#include <net/netfilter/nf_conntrack.h>
+ #include <linux/netfilter/x_tables.h>
+ #include <linux/netfilter/xt_MARK.h>
+ 
+@@ -21,6 +26,48 @@
+ MODULE_ALIAS("ipt_MARK");
+ MODULE_ALIAS("ip6t_MARK");
+ 
++static inline u_int16_t
++get_dst_port(struct nf_conntrack_tuple *tuple)
++{
++	switch (tuple->dst.protonum) {
++	case IPPROTO_GRE:
++		/* XXX Truncate 32-bit GRE key to 16 bits */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
++		return tuple->dst.u.gre.key;
++#else
++		return htons(ntohl(tuple->dst.u.gre.key));
++#endif  
++	case IPPROTO_ICMP:
++		/* Bind on ICMP echo ID */
++		return tuple->src.u.icmp.id;
++	case IPPROTO_TCP:
++		return tuple->dst.u.tcp.port;
++	case IPPROTO_UDP:
++		return tuple->dst.u.udp.port;
++	default:
++		return tuple->dst.u.all;
++	}
++}
++
++static inline u_int16_t
++get_src_port(struct nf_conntrack_tuple *tuple)
++{
++	switch (tuple->dst.protonum) {
++	case IPPROTO_GRE:
++		/* XXX Truncate 32-bit GRE key to 16 bits */
++		return htons(ntohl(tuple->src.u.gre.key));
++	case IPPROTO_ICMP:
++		/* Bind on ICMP echo ID */
++		return tuple->src.u.icmp.id;
++	case IPPROTO_TCP:
++		return tuple->src.u.tcp.port;
++	case IPPROTO_UDP:
++		return tuple->src.u.udp.port;
++	default:
++		return tuple->src.u.all;
++	}
++}
++
+ static unsigned int
+ target_v0(struct sk_buff **pskb,
+ 	  const struct net_device *in,
+@@ -35,6 +82,8 @@
+ 	return XT_CONTINUE;
+ }
+ 
++extern DEFINE_PER_CPU(int, sknid_elevator);
++
+ static unsigned int
+ target_v1(struct sk_buff **pskb,
+ 	  const struct net_device *in,
+@@ -44,7 +93,20 @@
+ 	  const void *targinfo)
+ {
+ 	const struct xt_mark_target_info_v1 *markinfo = targinfo;
+-	int mark = 0;
++	enum ip_conntrack_info ctinfo;
++      struct sock *connection_sk;
++      int dif;
++      struct nf_conn *ct;
++      extern struct inet_hashinfo tcp_hashinfo;
++      enum ip_conntrack_dir dir;
++      int *curtag;
++      u_int32_t src_ip;
++      u_int32_t dst_ip;
++      u_int16_t proto, src_port;
++      u_int32_t ip;
++      u_int16_t port;
++
++	int mark = -1;
+ 
+ 	switch (markinfo->mode) {
+ 	case XT_MARK_SET:
+@@ -58,13 +120,74 @@
+ 	case XT_MARK_OR:
+ 		mark = (*pskb)->mark | markinfo->mark;
+ 		break;
++
++		case XT_MARK_COPYXID: 
++					      
++					      ct = nf_ct_get((*pskb), &ctinfo);
++					      if (!ct) 
++						      break;
++
++					      dir = CTINFO2DIR(ctinfo);
++					      src_ip = ct->tuplehash[dir].tuple.src.u3.ip;
++					      dst_ip = ct->tuplehash[dir].tuple.dst.u3.ip;
++					      src_port = get_src_port(&ct->tuplehash[dir].tuple);
++					      proto = ct->tuplehash[dir].tuple.dst.protonum;
++
++					      dif = ((struct rtable *)(*pskb)->dst)->rt_iif;
++					      ip = ct->tuplehash[dir].tuple.dst.u3.ip;
++					      port = get_dst_port(&ct->tuplehash[dir].tuple);
++
++					      if (proto == 1 || proto == 17) {
++						      if ((*pskb)->mark>0) /* The packet is marked, it's going out */
++						      {
++								//if (ct->xid[0]>0 && ct->xid[0]!=(*pskb)->mark)
++									/*printk(KERN_CRIT "xt_MARK log: %d/%d/%d/%d\n",ct->xid[0],(*pskb)->mark,hooknum==NF_IP_LOCAL_IN,proto);*/
++
++								ct->xid[0]=(*pskb)->mark;
+ 	}
+ 
++						      if (ct->xid[0] > 0) {
++							      mark = ct->xid[0];
++						      }
++
++					      }
++					      else if (proto == 6) { 
++						      if ((*pskb)->sk) {
++							      connection_sk = (*pskb)->sk;
++							      sock_hold(connection_sk);
++						      }
++						      else 
++							      connection_sk = inet_lookup_established(&tcp_hashinfo, src_ip, src_port, ip, port, dif);
++						              
++
++						      if (connection_sk) {
++							      if (connection_sk->sk_state == TCP_TIME_WAIT) {
++								      inet_twsk_put(inet_twsk(connection_sk));
++								      break;
++							      }
++							      connection_sk->sk_peercred.gid = connection_sk->sk_peercred.uid = ct->xid[dir];
++							      ct->xid[!dir]=connection_sk->sk_nid;
++							      if (connection_sk->sk_nid != 0) 
++								      mark = connection_sk->sk_nid;
++							      sock_put(connection_sk);
++						      }
++						      else 
++							      mark = -1 ; 
++					      }
++					      break;
++	}
++	if (mark != -1) {
+ 	(*pskb)->mark = mark;
++	}
++
++	curtag=&__get_cpu_var(sknid_elevator);
++	if (mark > 0 && *curtag==-2) 
++	{
++		*curtag = mark;
++	}
+ 	return XT_CONTINUE;
+ }
+ 
+-
+ static int
+ checkentry_v0(const char *tablename,
+ 	      const void *entry,
+@@ -92,7 +215,8 @@
+ 
+ 	if (markinfo->mode != XT_MARK_SET
+ 	    && markinfo->mode != XT_MARK_AND
+-	    && markinfo->mode != XT_MARK_OR) {
++	    && markinfo->mode != XT_MARK_OR
++	    && markinfo->mode != XT_MARK_COPYXID) {
+ 		printk(KERN_WARNING "MARK: unknown mode %u\n",
+ 		       markinfo->mode);
+ 		return 0;
+diff -Nurb linux-2.6.22-510/net/netfilter/xt_SETXID.c linux-2.6.22-520/net/netfilter/xt_SETXID.c
+--- linux-2.6.22-510/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-520/net/netfilter/xt_SETXID.c	2008-06-06 17:07:56.000000000 -0400
+@@ -0,0 +1,79 @@
++#include <linux/module.h>
++#include <linux/skbuff.h>
++#include <linux/ip.h>
++#include <net/checksum.h>
++#include <linux/vs_network.h>
++
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_SETXID.h>
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("");
++MODULE_DESCRIPTION("");
++MODULE_ALIAS("ipt_SETXID");
++
++static unsigned int
++target_v1(struct sk_buff **pskb,
++	  const struct net_device *in,
++	  const struct net_device *out,
++	  unsigned int hooknum,
++	  const struct xt_target *target,
++	  const void *targinfo)
++{
++	const struct xt_setxid_target_info_v1 *setxidinfo = targinfo;
++
++	switch (setxidinfo->mode) {
++	case XT_SET_PACKET_XID:
++		 (*pskb)->skb_tag = setxidinfo->mark;
++		break;
++	}
++	return XT_CONTINUE;
++}
++
++
++static int
++checkentry_v1(const char *tablename,
++	      const void *entry,
++	      const struct xt_target *target,
++	      void *targinfo,
++	      unsigned int hook_mask)
++{
++	struct xt_setxid_target_info_v1 *setxidinfo = targinfo;
++
++	if (setxidinfo->mode != XT_SET_PACKET_XID) {
++		printk(KERN_WARNING "SETXID: unknown mode %u\n",
++		       setxidinfo->mode);
++		return 0;
++	}
++
++	return 1;
++}
++
++static struct xt_target xt_setxid_target[] = {
++	{
++		.name		= "SETXID",
++		.family		= AF_INET,
++		.revision	= 1,
++		.checkentry	= checkentry_v1,
++		.target		= target_v1,
++		.targetsize	= sizeof(struct xt_setxid_target_info_v1),
++		.table		= "mangle",
++		.me		= THIS_MODULE,
++	}
++};
++
++static int __init init(void)
++{
++	int err;
++
++	err = xt_register_targets(xt_setxid_target, ARRAY_SIZE(xt_setxid_target));
++	return err;
++}
++
++static void __exit fini(void)
++{
++	xt_unregister_targets(xt_setxid_target, ARRAY_SIZE(xt_setxid_target));
++}
++
++module_init(init);
++module_exit(fini);
+

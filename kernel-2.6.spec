@@ -163,6 +163,11 @@ Patch250: linux-2.6-250-ipsets.patch
 Patch500: linux-2.6-500-vserver-filesharing.patch
 Patch510: linux-2.6-510-ipod.patch
 Patch520: linux-2.6-520-vnet+.patch
+Patch521: linux-2.6-521-packet-tagging.patch
+Patch522: linux-2.6-522-iptables-connection-tagging.patch
+Patch523: linux-2.6-523-raw-sockets.patch
+Patch524: linux-2.6-524-peercred.patch
+Patch525: linux-2.6-525-sknid-elevator.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
@@ -357,7 +362,14 @@ KERNEL_PREVIOUS=vanilla
 
 %ApplyPatch 500
 %ApplyPatch 510
-%ApplyPatch 520
+
+# VNET+ series
+%ApplyPatch 521
+%ApplyPatch 522
+%ApplyPatch 523
+%ApplyPatch 524
+%ApplyPatch 525
+
 %ApplyPatch 530
 %ApplyPatch 540
 %ApplyPatch 550
