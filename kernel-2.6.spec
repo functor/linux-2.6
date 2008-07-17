@@ -159,6 +159,9 @@ Patch210: linux-2.6-210-vserver-cpu-sched.patch
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
 
+# Support for libertas olpc driver
+Patch300: linux-2.6-300-olpc.patch
+
 # PlanetLab
 Patch500: linux-2.6-500-vserver-filesharing.patch
 Patch510: linux-2.6-510-ipod.patch
@@ -360,6 +363,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 210
 
 %ApplyPatch 250
+%ApplyPatch 300
 
 %ApplyPatch 500
 %ApplyPatch 510
