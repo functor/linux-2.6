@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 12
+%define taglevel 13
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -844,6 +844,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Mon Jul 21 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-13
+- fix for tcpdump/tcp payloads
+
 * Tue Jul 15 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-12
 - * Bugfix in tuntap
 - * Attempt to fix TCP-payload-related problems with tcpdump
