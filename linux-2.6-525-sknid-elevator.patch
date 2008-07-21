@@ -1,6 +1,15 @@
-diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
---- linux-2.6.22-510/net/core/dev.c	2008-06-06 17:07:48.000000000 -0400
-+++ linux-2.6.22-520/net/core/dev.c	2008-06-06 17:07:56.000000000 -0400
+diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
+--- linux-2.6.22-524/net/core/dev.c	2008-07-15 11:39:32.000000000 -0400
++++ linux-2.6.22-525/net/core/dev.c	2008-07-21 15:20:43.000000000 -0400
+@@ -1131,7 +1131,7 @@
+ 		if ((ptype->dev == dev || !ptype->dev) &&
+ 		    (ptype->af_packet_priv == NULL ||
+ 		     (struct sock *)ptype->af_packet_priv != skb->sk)) {
+-			struct sk_buff *skb2= skb_clone(skb, GFP_ATOMIC);
++			struct sk_buff *skb2 = skb_clone(skb, GFP_ATOMIC);
+ 			if (!skb2)
+ 				break;
+ 
 @@ -1803,6 +1803,7 @@
   * the ingress scheduler, you just cant add policies on ingress.
   *
@@ -9,7 +18,7 @@ diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
  static int ing_filter(struct sk_buff *skb)
  {
  	struct Qdisc *q;
-@@ -1832,13 +1833,20 @@
+@@ -1832,13 +1833,21 @@
  }
  #endif
  
@@ -23,6 +32,7 @@ diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
  	struct net_device *orig_dev;
  	int ret = NET_RX_DROP;
 +	int *cur_elevator=&__get_cpu_var(sknid_elevator);
++	struct sk_buff *skb2;
  	__be16 type;
  
 +	*cur_elevator = 0;
@@ -30,7 +40,7 @@ diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
  	/* if we've gotten here through NAPI, check netpoll */
  	if (skb->dev->poll && netpoll_rx(skb))
  		return NET_RX_DROP;
-@@ -1873,8 +1881,9 @@
+@@ -1873,8 +1882,9 @@
  
  	list_for_each_entry_rcu(ptype, &ptype_all, list) {
  		if (!ptype->dev || ptype->dev == skb->dev) {
@@ -41,44 +51,49 @@ diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
  			pt_prev = ptype;
  		}
  	}
-@@ -1912,8 +1921,22 @@
- 		}
- 	}
+@@ -1902,6 +1912,14 @@
+ 	if (!skb)
+ 		goto out;
  
 +	/* We don't want the packet handlers to throw the packet away
 +	 * if we want the taps to treat it again - Sapan */
 +	if (*cur_elevator) {
-+		atomic_inc(&skb->users);
++		skb2 = skb_copy(skb,GFP_ATOMIC);
++		if (!skb2) *cur_elevator=0;
 +	}
 +
++
+ 	type = skb->protocol;
+ 	list_for_each_entry_rcu(ptype, &ptype_base[ntohs(type)&15], list) {
+ 		if (ptype->type == type &&
+@@ -1914,6 +1932,7 @@
+ 
  	if (pt_prev) {
  		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
-+			if (*cur_elevator > 0) {
-+				skb->skb_tag = *cur_elevator;
-+				list_for_each_entry_rcu(ptype, &ptype_all, list) {
-+					if (!ptype->dev || ptype->dev == skb->dev) {
-+							ret = deliver_skb(skb, ptype, orig_dev);
-+					}
-+				}
-+			}
++		
  	} else {
  		kfree_skb(skb);
  		/* Jamal, now you will not able to escape explaining
-@@ -1922,6 +1945,13 @@
+@@ -1922,6 +1941,18 @@
  		ret = NET_RX_DROP;
  	}
  
 +	if (*cur_elevator) {
++		skb2->skb_tag = *cur_elevator;
++		list_for_each_entry_rcu(ptype, &ptype_all, list) {
++			if (!ptype->dev || ptype->dev == skb2->dev) {
++				ret = deliver_skb(skb2, ptype, orig_dev);
++			}
++		}
 +		/* We have a packet */
-+		kfree_skb(skb);
++		kfree_skb(skb2);
 +	}
-+
 +	*cur_elevator=0;
 +
  out:
  	rcu_read_unlock();
  	return ret;
-@@ -3780,6 +3810,7 @@
+@@ -3780,6 +3811,7 @@
  EXPORT_SYMBOL(net_enable_timestamp);
  EXPORT_SYMBOL(net_disable_timestamp);
  EXPORT_SYMBOL(dev_get_flags);
@@ -86,9 +101,9 @@ diff -Nurb linux-2.6.22-510/net/core/dev.c linux-2.6.22-520/net/core/dev.c
  
  #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
  EXPORT_SYMBOL(br_handle_frame_hook);
-diff -Nurb linux-2.6.22-510/net/packet/af_packet.c linux-2.6.22-520/net/packet/af_packet.c
---- linux-2.6.22-510/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/packet/af_packet.c	2008-06-07 18:30:41.000000000 -0400
+diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/af_packet.c
+--- linux-2.6.22-524/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-525/net/packet/af_packet.c	2008-07-15 11:40:11.000000000 -0400
 @@ -78,6 +78,7 @@
  #include <linux/poll.h>
  #include <linux/module.h>
