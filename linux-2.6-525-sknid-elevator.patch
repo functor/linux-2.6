@@ -1,6 +1,6 @@
 diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
 --- linux-2.6.22-524/net/core/dev.c	2008-07-15 11:39:32.000000000 -0400
-+++ linux-2.6.22-525/net/core/dev.c	2008-07-21 15:20:43.000000000 -0400
++++ linux-2.6.22-525/net/core/dev.c	2008-07-21 16:22:33.000000000 -0400
 @@ -1131,7 +1131,7 @@
  		if ((ptype->dev == dev || !ptype->dev) &&
  		    (ptype->af_packet_priv == NULL ||
@@ -74,26 +74,29 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  	} else {
  		kfree_skb(skb);
  		/* Jamal, now you will not able to escape explaining
-@@ -1922,6 +1941,18 @@
+@@ -1922,6 +1941,21 @@
  		ret = NET_RX_DROP;
  	}
  
-+	if (*cur_elevator) {
++	if (*cur_elevator>0) {
 +		skb2->skb_tag = *cur_elevator;
 +		list_for_each_entry_rcu(ptype, &ptype_all, list) {
 +			if (!ptype->dev || ptype->dev == skb2->dev) {
 +				ret = deliver_skb(skb2, ptype, orig_dev);
 +			}
 +		}
++	}
++	if (*cur_elevator) {
 +		/* We have a packet */
 +		kfree_skb(skb2);
 +	}
++
 +	*cur_elevator=0;
 +
  out:
  	rcu_read_unlock();
  	return ret;
-@@ -3780,6 +3811,7 @@
+@@ -3780,6 +3814,7 @@
  EXPORT_SYMBOL(net_enable_timestamp);
  EXPORT_SYMBOL(net_disable_timestamp);
  EXPORT_SYMBOL(dev_get_flags);
