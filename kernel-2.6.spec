@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 13
+%define taglevel 14
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -846,6 +846,10 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Wed Jul 23 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-14
+- added fix to process visibility so when ncontext/vcontext  run netstat in
+- xid=1, it can see all ports &  processes.
+
 * Mon Jul 21 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-13
 - fix for tcpdump/tcp payloads
 
