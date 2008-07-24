@@ -163,7 +163,6 @@ Patch250: linux-2.6-250-ipsets.patch
 # PlanetLab
 Patch500: linux-2.6-500-vserver-filesharing.patch
 Patch510: linux-2.6-510-ipod.patch
-Patch520: linux-2.6-520-vnet+.patch
 Patch521: linux-2.6-521-packet-tagging.patch
 Patch522: linux-2.6-522-iptables-connection-tagging.patch
 Patch523: linux-2.6-523-raw-sockets.patch
