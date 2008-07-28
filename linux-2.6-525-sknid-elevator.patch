@@ -1,7 +1,16 @@
 diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
---- linux-2.6.22-524/net/core/dev.c	2008-07-15 11:39:32.000000000 -0400
-+++ linux-2.6.22-525/net/core/dev.c	2008-07-21 16:22:33.000000000 -0400
-@@ -1131,7 +1131,7 @@
+--- linux-2.6.22-524/net/core/dev.c	2008-07-21 16:44:33.000000000 -0400
++++ linux-2.6.22-525/net/core/dev.c	2008-07-27 22:02:10.000000000 -0400
+@@ -97,6 +97,8 @@
+ #include <linux/proc_fs.h>
+ #include <linux/seq_file.h>
+ #include <linux/stat.h>
++#include <linux/ip.h>
++#include <linux/tcp.h>
+ #include <linux/if_bridge.h>
+ #include <net/dst.h>
+ #include <net/pkt_sched.h>
+@@ -1131,7 +1133,7 @@
  		if ((ptype->dev == dev || !ptype->dev) &&
  		    (ptype->af_packet_priv == NULL ||
  		     (struct sock *)ptype->af_packet_priv != skb->sk)) {
@@ -10,7 +19,7 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  			if (!skb2)
  				break;
  
-@@ -1803,6 +1803,7 @@
+@@ -1803,6 +1805,7 @@
   * the ingress scheduler, you just cant add policies on ingress.
   *
   */
@@ -18,13 +27,13 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  static int ing_filter(struct sk_buff *skb)
  {
  	struct Qdisc *q;
-@@ -1832,13 +1833,21 @@
+@@ -1832,13 +1835,21 @@
  }
  #endif
  
 +/* The code already makes the assumption that packet handlers run
 + * sequentially on the same CPU. -Sapan */
-+DEFINE_PER_CPU(int, sknid_elevator);
++DEFINE_PER_CPU(int, sknid_elevator) = 0;
 +
  int netif_receive_skb(struct sk_buff *skb)
  {
@@ -40,8 +49,11 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  	/* if we've gotten here through NAPI, check netpoll */
  	if (skb->dev->poll && netpoll_rx(skb))
  		return NET_RX_DROP;
-@@ -1873,8 +1882,9 @@
+@@ -1871,10 +1882,12 @@
+ 	}
+ #endif
  
++	skb2 = skb_clone(skb, GFP_ATOMIC);
  	list_for_each_entry_rcu(ptype, &ptype_all, list) {
  		if (!ptype->dev || ptype->dev == skb->dev) {
 -			if (pt_prev)
@@ -51,22 +63,34 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  			pt_prev = ptype;
  		}
  	}
-@@ -1902,6 +1912,14 @@
- 	if (!skb)
- 		goto out;
+@@ -1891,6 +1904,7 @@
  
-+	/* We don't want the packet handlers to throw the packet away
-+	 * if we want the taps to treat it again - Sapan */
-+	if (*cur_elevator) {
-+		skb2 = skb_copy(skb,GFP_ATOMIC);
-+		if (!skb2) *cur_elevator=0;
+ 	if (ret == TC_ACT_SHOT || (ret == TC_ACT_STOLEN)) {
+ 		kfree_skb(skb);
++		kfree_skb(skb2);
+ 		goto out;
+ 	}
+ 
+@@ -1899,8 +1913,17 @@
+ #endif
+ 
+ 	skb = handle_bridge(skb, &pt_prev, &ret, orig_dev);
+-	if (!skb)
++	if (!skb) {
++		kfree_skb(skb2);
+ 		goto out;
 +	}
 +
++	/* We don't want the packet handlers to throw the packet away
++	 * if we want the taps to treat it again - Sapan */
++	if (!skb2) {
++		*cur_elevator = 0;
++	}
 +
+ 
  	type = skb->protocol;
  	list_for_each_entry_rcu(ptype, &ptype_base[ntohs(type)&15], list) {
- 		if (ptype->type == type &&
-@@ -1914,6 +1932,7 @@
+@@ -1914,6 +1937,7 @@
  
  	if (pt_prev) {
  		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
@@ -74,19 +98,27 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  	} else {
  		kfree_skb(skb);
  		/* Jamal, now you will not able to escape explaining
-@@ -1922,6 +1941,21 @@
+@@ -1922,6 +1946,29 @@
  		ret = NET_RX_DROP;
  	}
  
-+	if (*cur_elevator>0) {
++	if ((*cur_elevator)>0) {
 +		skb2->skb_tag = *cur_elevator;
 +		list_for_each_entry_rcu(ptype, &ptype_all, list) {
-+			if (!ptype->dev || ptype->dev == skb2->dev) {
++			if ((!ptype->dev || ptype->dev == skb2->dev) && (ptype->sknid_elevator)) {
++				ret = deliver_skb(skb2, ptype, orig_dev);
++			}
++		}
++		type = skb2->protocol;
++		list_for_each_entry_rcu(ptype, &ptype_base[ntohs(type)&15], list) {
++			if (ptype->type == type &&
++			    (!ptype->dev || ptype->dev == skb2->dev) && (ptype->sknid_elevator)) {
 +				ret = deliver_skb(skb2, ptype, orig_dev);
 +			}
 +		}
 +	}
-+	if (*cur_elevator) {
++
++	if (skb2) {
 +		/* We have a packet */
 +		kfree_skb(skb2);
 +	}
@@ -96,7 +128,7 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  out:
  	rcu_read_unlock();
  	return ret;
-@@ -3780,6 +3814,7 @@
+@@ -3780,6 +3827,7 @@
  EXPORT_SYMBOL(net_enable_timestamp);
  EXPORT_SYMBOL(net_disable_timestamp);
  EXPORT_SYMBOL(dev_get_flags);
@@ -106,7 +138,7 @@ diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
  EXPORT_SYMBOL(br_handle_frame_hook);
 diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/af_packet.c
 --- linux-2.6.22-524/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-525/net/packet/af_packet.c	2008-07-15 11:40:11.000000000 -0400
++++ linux-2.6.22-525/net/packet/af_packet.c	2008-07-27 22:02:22.000000000 -0400
 @@ -78,6 +78,7 @@
  #include <linux/poll.h>
  #include <linux/module.h>
@@ -115,21 +147,61 @@ diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/a
  
  #ifdef CONFIG_INET
  #include <net/inet_common.h>
-@@ -246,10 +247,13 @@
+@@ -246,10 +247,53 @@
  
  static const struct proto_ops packet_ops_spkt;
  
 +extern DEFINE_PER_CPU(int, sknid_elevator);
++
++static inline unsigned int slice_check_and_elevate(struct sk_buff *skb, struct sock *sk) {
++	/* This mechanism is quite involved, and caused us a lot of pain
++	 * including crashes and packet loss during the 4.2 rollout. This
++	 * function decides if a slice is allowed to see a given packet.
++	 * Unfortunately, the first time it is invoked for a packet it does not
++	 * have enough information to make this call, since xt_MARK has not had
++	 * a chance to tag it with the slice id.  There is also no way of
++	 * passing state between xt_MARK and this function through a packet --
++	 * because the skb gets cloned quite a few times between these two
++	 * points.  I'd rather not use skb_shared_info because it's treated as
++	 * a blob of memory, and so it would be quite hard to maintain.
++	 *
++	 * What we do is to keep a global variable (per CPU) that transfers the
++	 * required state between xt_MARK and af_packet.c. As an optimization,
++	 * this state transfer and the step that follows is only executed for
++	 * packets that first get dropped here. When we drop a packet, we mark
++	 * it for 'elevation' (that's what this trick is called). When xt_MARK
++	 * tags the packet with the right slice, it intercepts this mark and
++	 * sets the value of sknid_elevator. Next, the packet is sent back here
++	 * for a second round, this time with the xid tag set.
++	 */
++
++	int *elevator=&__get_cpu_var(sknid_elevator);
++	int tag = skb->skb_tag;
++
++	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
++		if (skb->pkt_type==PACKET_HOST) {
++			*elevator=-2; /* Rejecting this packet. Mark it for elevation in xt_MARK */
++		}
++		return 0;
++	}
++	else if (!sk->sk_nx_info && (*elevator>0)) {
++		/* Root has already seen this packet once, since it has been elevated */
++		return 0;
++	}
++
++	return 1;
++}
++
  static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct packet_type *pt, struct net_device *orig_dev)
  {
  	struct sock *sk;
  	struct sockaddr_pkt *spkt;
 +	int tag = skb->skb_tag;
-+	int *elevator=&__get_cpu_var(sknid_elevator);
++
  
  	/*
  	 *	When we registered the protocol we saved the socket in the data
-@@ -269,6 +273,22 @@
+@@ -269,6 +313,16 @@
  	 *	so that this procedure is noop.
  	 */
  
@@ -140,19 +212,13 @@ diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/a
 +	 * (18:07:33) daniel_hozac: oh, that's evil. 
 +	 */
 +
-+	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
-+		*elevator=-2;
-+		goto out;
-+	}
-+	else if (!sk->sk_nx_info && *elevator) {
-+		/* Root has already seen this packet */
-+		goto out;
-+	}
++	if (!slice_check_and_elevate(skb, sk))
++		return 0;
 +
  	if (skb->pkt_type == PACKET_LOOPBACK)
  		goto out;
  
-@@ -324,6 +344,9 @@
+@@ -324,6 +378,9 @@
  	__be16 proto=0;
  	int err;
  
@@ -162,25 +228,24 @@ diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/a
  	/*
  	 *	Get and verify the address.
  	 */
-@@ -420,6 +443,17 @@
+@@ -416,11 +473,16 @@
+ 	return err;
+ }
+ 
++
++
+ static inline unsigned int run_filter(struct sk_buff *skb, struct sock *sk,
  				      unsigned int res)
  {
  	struct sk_filter *filter;
-+	int tag = skb->skb_tag;
-+	int *elevator=&__get_cpu_var(sknid_elevator);
-+
-+	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
-+		*elevator=-2;
-+		return 0;
-+	}
-+	else if (!sk->sk_nx_info && *elevator) {
-+		/* Root has already seen this packet */
-+		return 0;
-+	}
  
++	if (!slice_check_and_elevate(skb, sk)) 
++		return 0;
++
  	rcu_read_lock_bh();
  	filter = rcu_dereference(sk->sk_filter);
-@@ -711,6 +745,9 @@
+ 	if (filter != NULL)
+@@ -711,6 +773,9 @@
  	unsigned char *addr;
  	int ifindex, err, reserve = 0;
  
@@ -190,7 +255,15 @@ diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/a
  	/*
  	 *	Get and verify the address.
  	 */
-@@ -984,8 +1021,9 @@
+@@ -880,6 +945,7 @@
+ 
+ 	po->num = protocol;
+ 	po->prot_hook.type = protocol;
++	po->prot_hook.sknid_elevator = 1;
+ 	po->prot_hook.dev = dev;
+ 
+ 	po->ifindex = dev ? dev->ifindex : 0;
+@@ -984,8 +1050,9 @@
  	__be16 proto = (__force __be16)protocol; /* weird, but documented */
  	int err;
  
@@ -201,3 +274,11 @@ diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/a
  	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
  	    sock->type != SOCK_PACKET)
  		return -ESOCKTNOSUPPORT;
+@@ -1016,6 +1083,7 @@
+ 
+ 	spin_lock_init(&po->bind_lock);
+ 	po->prot_hook.func = packet_rcv;
++	po->prot_hook.sknid_elevator = 1;
+ 
+ 	if (sock->type == SOCK_PACKET)
+ 		po->prot_hook.func = packet_rcv_spkt;
