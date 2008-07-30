@@ -103,7 +103,7 @@ diff -Nurb linux-2.6.22-525/drivers/net/vnet_tun.c linux-2.6.22-526/drivers/net/
 +	else {
 +		if (in_interrupt() && print_once) {
 +			print_once=0;
-+			printk(KERN_EMERG "vnet_tun: get-sk_xid called in interrupt context!\n");
++			printk(KERN_EMERG "vnet_tun: get-sk_xid called in interrupt context! Stephen: Don't Panic.\n");
 +		}
 +		return current->xid;
 +	}
