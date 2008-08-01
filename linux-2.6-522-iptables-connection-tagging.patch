@@ -269,7 +269,7 @@ diff -Nurb linux-2.6.22-521/net/netfilter/xt_MARK.c linux-2.6.22-522/net/netfilt
 +				      ct->xid[dir]=connection_sk->sk_nid;
 +			      }
 +
-+			      if (mark==-1 && (connection_sk->sk_nid != 0))
++			      if (mark==-1 && (ct->xid[dir] != 0))
 +				      mark = ct->xid[dir];
 +
 +
