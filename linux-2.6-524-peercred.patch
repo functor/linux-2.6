@@ -12,3 +12,13 @@ diff -Nurb linux-2.6.22-510/include/linux/socket.h linux-2.6.22-520/include/linu
  
 
 
+--- linux-i686-2.6.22/net/core/sock.c.orig	2008-07-28 16:36:26.000000000 -0400
++++ linux-i686-2.6.22/net/core/sock.c	2008-08-01 11:32:44.000000000 -0400
+@@ -455,6 +455,7 @@
+ 		}
+ 		sk->sk_xid = val;
+ 		sk->sk_nid = val;
++		sk->sk_peercred.uid = sk->sk_peercred.gid = val;
+ 		break;
+ 
+ 	case SO_RCVBUF:
