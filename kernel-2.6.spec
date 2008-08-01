@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 20
+%define taglevel 21
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -847,6 +847,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Fri Aug 01 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-21
+- Codemux calls setsockopt/SO_PEERCRED to set peer credentials on a socket, so that the connections it proxies to its clients are tagged for PlanetFlow. This hunk got lost somewhere along the way.
+
 * Thu Jul 31 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-20
 - Removed a debugging statement. Shows up a lot in the debug logs.
 
