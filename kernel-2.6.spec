@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 22
+%define taglevel 23
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -847,6 +847,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Mon Aug 04 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-23
+- Fixed a bug in my previous commit.
+
 * Mon Aug 04 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-22
 - * 1 fix for using udp/listening sockets via raw
 - * 1 fix to help codemux divide traffic in PlanetFlow
