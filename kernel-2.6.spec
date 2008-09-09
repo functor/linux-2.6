@@ -144,6 +144,9 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
+%if "%{distroname}" == "f9"
+Patch001: linux-2.6-001-gcc43.patch
+%endif
 Patch010: linux-2.6-010-e1000e.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
@@ -345,6 +348,10 @@ KERNEL_PREVIOUS=vanilla
 # This is where the patches get applied
 %if 0%{?patchlevel}
 %ApplyPatch 0
+%endif
+
+%if "%{distroname}" == "f9"
+%ApplyPatch 1
 %endif
 
 %ApplyPatch 10

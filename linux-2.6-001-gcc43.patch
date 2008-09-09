@@ -1,0 +1,16 @@
+see http://www.mail-archive.com/devel@lists.laptop.org/msg10626.html
+--- a/arch/i386/Makefile	2008-09-09 12:15:51.000000000 +0200
++++ b/arch/i386/Makefile	2008-09-09 12:16:26.000000000 +0200
+@@ -34,7 +34,11 @@ CHECKFLAGS	+= -D__i386__
+ CFLAGS += -pipe -msoft-float -mregparm=3 -freg-struct-return
+ 
+ # prevent gcc from keeping the stack 16 byte aligned
+-CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
++#CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
++CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2,)
++
++CFLAGS += $(call cc-option,-fno-tree-scev-cprop,)
++
+ 
+ # CPU-specific tuning. Anything which can be shared with UML should go here.
+ include $(srctree)/arch/i386/Makefile.cpu
