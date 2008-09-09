@@ -144,9 +144,6 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
-%if "%{distroname}" == "f9"
-Patch001: linux-2.6-001-gcc43.patch
-%endif
 Patch010: linux-2.6-010-e1000e.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
@@ -185,6 +182,9 @@ Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
+%if "%{distroname}" == "f9"
+Patch670: linux-2.6-670-gcc43.patch
+%endif
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -350,10 +350,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%if "%{distroname}" == "f9"
-%ApplyPatch 1
-%endif
-
 %ApplyPatch 10
 %ApplyPatch 20
 
@@ -395,6 +391,10 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
+%if "%{distroname}" == "f9"
+%ApplyPatch 670
+%endif
+
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
