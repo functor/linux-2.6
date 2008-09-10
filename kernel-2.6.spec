@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 25
+%define taglevel 26
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -856,6 +856,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Wed Sep 10 2008 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-26
+- patch for building on f9/gcc-4.3, no functional change on other distros
+
 * Sun Aug 17 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-25
 - FUSE support.
 
