@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 27
+%define taglevel 28
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -856,6 +856,10 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Wed Sep 17 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-28
+- Recovering a hunk that I accidentally ommited out of the last commit. Should not entail retesting, because the commits
+- were unrelated.
+
 * Sun Sep 14 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-27
 - Fixing the accounting issue that causes certain connections to be misaccounted, and that causes NM/peercreds to
 - intermittently break.
