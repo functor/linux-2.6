@@ -129,7 +129,6 @@ BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
 
-Source10: %{pldistro}-%{kversion}-i586.config
 Source11: %{pldistro}-%{kversion}-i686.config
 Source12: %{pldistro}-%{kversion}-x86_64.config
 %if %{builduml}
