@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 28
+%define taglevel 29
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -855,6 +855,10 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Thu Oct 02 2008 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-29
+- added drivers for OPTION's globetrotter (gt 3g+ emea) umts cards
+- + cleanup outdated configs
+
 * Wed Sep 17 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-28
 - Recovering a hunk that I accidentally ommited out of the last commit. Should not entail retesting, because the commits
 - were unrelated.
