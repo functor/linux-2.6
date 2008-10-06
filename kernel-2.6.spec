@@ -158,7 +158,6 @@ Patch590: linux-2.6-590-chopstix-intern.patch
 
 # VINI
 Patch700: linux-2.6-700-trellis-mm1-netns.patch
-Patch710: linux-2.6-710-unshare-netns.patch
 Patch720: linux-2.6-720-ztun-sb.patch
 Patch730: linux-2.6-730-egre.patch
 Patch740: linux-2.6-740-new_ns_pid.patch
@@ -344,7 +343,6 @@ KERNEL_PREVIOUS=vanilla
 # 
 %if 0%{?_with_netns}
 %ApplyPatch 700
-%ApplyPatch 710
 %ApplyPatch 720
 %ApplyPatch 730
 %ApplyPatch 740
