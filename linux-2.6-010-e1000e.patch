@@ -17349,8 +17349,8 @@ diff -Nurp linux-2.6.22-0/drivers/net/e1000e/ethtool.c linux-2.6.22-10/drivers/n
 +#endif /* SIOCETHTOOL */
 diff -Nurp linux-2.6.22-0/drivers/net/e1000e/kcompat.c linux-2.6.22-10/drivers/net/e1000e/kcompat.c
 --- linux-2.6.22-0/drivers/net/e1000e/kcompat.c	1970-01-01 01:00:00.000000000 +0100
-+++ linux-2.6.22-10/drivers/net/e1000e/kcompat.c	2008-10-14 01:51:32.000000000 +0200
-@@ -0,0 +1,318 @@
++++ linux-2.6.22-10/drivers/net/e1000e/kcompat.c	2008-11-10 17:29:35.000000000 +0100
+@@ -0,0 +1,319 @@
 +/*******************************************************************************
 +
 +  Intel PRO/1000 Linux driver
@@ -17380,6 +17380,7 @@ diff -Nurp linux-2.6.22-0/drivers/net/e1000e/kcompat.c linux-2.6.22-10/drivers/n
 +*******************************************************************************/
 +
 +
++#define DRIVER_E1000E
 +
 +#ifdef DRIVER_E1000E
 +#include "e1000.h"
@@ -18844,8 +18845,8 @@ diff -Nurp linux-2.6.22-0/drivers/net/e1000e/kcompat_ethtool.c linux-2.6.22-10/d
 +
 diff -Nurp linux-2.6.22-0/drivers/net/e1000e/kcompat.h linux-2.6.22-10/drivers/net/e1000e/kcompat.h
 --- linux-2.6.22-0/drivers/net/e1000e/kcompat.h	1970-01-01 01:00:00.000000000 +0100
-+++ linux-2.6.22-10/drivers/net/e1000e/kcompat.h	2008-10-14 01:51:32.000000000 +0200
-@@ -0,0 +1,1627 @@
++++ linux-2.6.22-10/drivers/net/e1000e/kcompat.h	2008-11-10 17:29:48.000000000 +0100
+@@ -0,0 +1,1629 @@
 +/*******************************************************************************
 +
 +  Intel PRO/1000 Linux driver
@@ -18896,6 +18897,8 @@ diff -Nurp linux-2.6.22-0/drivers/net/e1000e/kcompat.h linux-2.6.22-10/drivers/n
 +#include <linux/udp.h>
 +#include <linux/mii.h>
 +#include <asm/io.h>
++
++#define DRIVER_E1000E
 +
 +/* NAPI enable/disable flags here */
 +
