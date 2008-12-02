@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 30
+%define taglevel 31
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -859,6 +859,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Tue Dec 02 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-31
+- add patches for m-lab and drl
+
 * Tue Nov 11 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-30
 - Use Intel's e1000e driver.
 
