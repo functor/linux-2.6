@@ -181,7 +181,7 @@ Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
-%if "%{distroname}" == "f9"
+%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
 Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
@@ -392,7 +392,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
-%if "%{distroname}" == "f9"
+%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
 %ApplyPatch 670
 %endif
 %ApplyPatch 680
