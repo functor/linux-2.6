@@ -432,7 +432,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 526
 %ApplyPatch 527
 %ApplyPatch 528
-
 %ApplyPatch 530
 %ApplyPatch 540
 %ApplyPatch 550
@@ -450,6 +449,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 670
 %endif
 %ApplyPatch 680
+%ApplyPatch 690
 %ApplyPatch 700
 %ApplyPatch 710
 %ApplyPatch 720
