@@ -162,13 +162,6 @@ Patch250: linux-2.6-250-ipsets.patch
 # PlanetLab
 Patch500: linux-2.6-500-vserver-filesharing.patch
 Patch510: linux-2.6-510-ipod.patch
-Patch521: linux-2.6-521-packet-tagging.patch
-Patch522: linux-2.6-522-iptables-connection-tagging.patch
-Patch523: linux-2.6-523-raw-sockets.patch
-Patch524: linux-2.6-524-peercred.patch
-Patch525: linux-2.6-525-sknid-elevator.patch
-Patch526: linux-2.6-526-tun-tap.patch
-Patch527: linux-2.6-527-iptables-classify-add-mark.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
@@ -186,6 +179,7 @@ Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
+Patch700: linux-2.6-700-fperm.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -371,15 +365,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 500
 %ApplyPatch 510
 
-# VNET+ series
-%ApplyPatch 521
-%ApplyPatch 522
-%ApplyPatch 523
-%ApplyPatch 524
-%ApplyPatch 525
-%ApplyPatch 526
-%ApplyPatch 527
-
 %ApplyPatch 530
 %ApplyPatch 540
 %ApplyPatch 550
@@ -397,6 +382,7 @@ KERNEL_PREVIOUS=vanilla
 %endif
 %ApplyPatch 680
 %ApplyPatch 690
+%ApplyPatch 700
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may

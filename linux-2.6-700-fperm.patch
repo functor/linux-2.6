@@ -1,0 +1,377 @@
+diff -Nurp linux-2.6.22-690/fs/attr.c linux-2.6.22-700/fs/attr.c
+--- linux-2.6.22-690/fs/attr.c	2009-01-08 18:12:22.000000000 +0100
++++ linux-2.6.22-700/fs/attr.c	2009-01-08 18:59:11.000000000 +0100
+@@ -17,6 +17,7 @@
+ #include <linux/proc_fs.h>
+ #include <linux/devpts_fs.h>
+ #include <linux/vs_base.h>
++#include <linux/vs_tag.h>
+ 
+ /* Taken over from the old code... */
+ 
+@@ -59,26 +60,9 @@ int inode_change_ok(struct inode *inode,
+ 			goto error;
+ 	}
+ 
+-	/* Check for evil vserver activity */
+-	if (vx_check(0, VS_ADMIN))
+-		goto fine;
+-
+-	if (IS_BARRIER(inode)) {
+-		vxwprintk_task(1, "messing with the barrier.");
++	if (dx_permission(inode, MAY_WRITE))
+ 		goto error;
+-	}
+-	switch (inode->i_sb->s_magic) {
+-		case PROC_SUPER_MAGIC:
+-			/* maybe allow that in the future? */
+-			vxwprintk_task(1, "messing with the procfs.");
+-			goto error;
+-		case DEVPTS_SUPER_MAGIC:
+-			/* devpts is xid tagged */
+-			if (vx_check((xid_t)inode->i_tag, VS_IDENT))
+-				goto fine;
+-			vxwprintk_task(1, "messing with the devpts.");
+-			goto error;
+-	}
++
+ fine:
+ 	retval = 0;
+ error:
+diff -Nurp linux-2.6.22-690/fs/namei.c linux-2.6.22-700/fs/namei.c
+--- linux-2.6.22-690/fs/namei.c	2009-01-08 18:12:22.000000000 +0100
++++ linux-2.6.22-700/fs/namei.c	2009-01-08 18:33:41.000000000 +0100
+@@ -233,26 +233,74 @@ int generic_permission(struct inode *ino
+ 
+ static inline int dx_barrier(struct inode *inode)
+ {
+-	if (IS_BARRIER(inode) && !vx_check(0, VS_ADMIN)) {
++	if (IS_BARRIER(inode) && !vx_check(0, VS_ADMIN | VS_WATCH)) {
+ 		vxwprintk_task(1, "did hit the barrier.");
+ 		return 1;
+ 	}
+ 	return 0;
+ }
+ 
+-static inline int dx_permission(struct inode *inode, int mask, struct nameidata *nd)
++static inline int __dx_permission(struct inode *inode, int mask)
+ {
+ 	if (dx_barrier(inode))
+ 		return -EACCES;
+-	if (dx_notagcheck(nd) ||
+-	    dx_check(inode->i_tag, DX_HOSTID|DX_ADMIN|DX_WATCH|DX_IDENT))
+-		return 0;
+ 
+-	vxwprintk_task(1, "denied access to %p[#%d,%lu] »%s«.",
+-		inode, inode->i_tag, inode->i_ino, vxd_cond_path(nd));
++	if (inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC) {
++		/* devpts is xid tagged */
++		if (S_ISDIR(inode->i_mode) ||
++		    vx_check((xid_t)inode->i_tag, VS_IDENT | VS_WATCH_P))
++			return 0;
++	}
++	else if (inode->i_sb->s_magic == PROC_SUPER_MAGIC) {
++		struct proc_dir_entry *de = PDE(inode);
++
++		if (de && !vx_hide_check(0, de->vx_flags))
++			goto out;
++
++		if ((mask & (MAY_WRITE | MAY_APPEND))) {
++			struct pid *pid;
++			struct task_struct *tsk;
++
++			if (vx_check(0, VS_ADMIN | VS_WATCH_P) ||
++			    vx_flags(VXF_STATE_SETUP, 0) ||
++			    vx_ccaps(VXC_PROC_WRITE))
++				return 0;
++
++			pid = PROC_I(inode)->pid;
++			if (!pid)
++				goto out;
++
++			tsk = pid_task(pid, PIDTYPE_PID);
++			vxdprintk(VXD_CBIT(tag, 0), "accessing %p[#%u]",
++				tsk, (tsk ? vx_task_xid(tsk) : 0));
++			if (tsk && vx_check(vx_task_xid(tsk), VS_IDENT | VS_WATCH_P))
++				return 0;
++		}
++		else
++			return 0;
++	}
++	else {
++		if (dx_notagcheck(inode->i_sb) ||
++		    dx_check(inode->i_tag, DX_HOSTID | DX_ADMIN | DX_WATCH |
++			     DX_IDENT))
++			return 0;
++	}
++
++out:
+ 	return -EACCES;
+ }
+ 
++int dx_permission(struct inode *inode, int mask)
++{
++	int ret = __dx_permission(inode, mask);
++	if (unlikely(ret)) {
++		vxwprintk_task(1, "denied %x access to %s:%p[#%d,%lu]",
++			mask, inode->i_sb->s_id, inode, inode->i_tag,
++			inode->i_ino);
++	}
++	return ret;
++}
++
+ int permission(struct inode *inode, int mask, struct nameidata *nd)
+ {
+ 	umode_t mode = inode->i_mode;
+@@ -284,14 +332,13 @@ int permission(struct inode *inode, int 
+ 			(nd && nd->mnt && (nd->mnt->mnt_flags & MNT_NOEXEC))))
+ 		return -EACCES;
+ 
++	retval = dx_permission(inode, mask);
++	if (retval)
++		return retval;
++
+ 	/* Ordinary permission routines do not understand MAY_APPEND. */
+ 	submask = mask & ~MAY_APPEND;
+ 
+-	if ((inode->i_sb->s_magic != DEVPTS_SUPER_MAGIC) &&
+-		(inode->i_sb->s_magic != PROC_SUPER_MAGIC) &&
+-		(retval = dx_permission(inode, mask, nd)))
+-		return retval;
+-
+ 	if (inode->i_op && inode->i_op->permission)
+ 		retval = inode->i_op->permission(inode, submask, nd);
+ 	else
+@@ -817,27 +864,18 @@ static int do_lookup(struct nameidata *n
+ 	if (!inode)
+ 		goto done;
+ 
+-	if (inode->i_sb->s_magic == PROC_SUPER_MAGIC) {
+-		struct proc_dir_entry *de = PDE(inode);
++	if (__dx_permission(inode, MAY_ACCESS))
++		goto hidden;
+ 
+-		if (de && !vx_hide_check(0, de->vx_flags))
+-			goto hidden;
+-	} else if (inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC) {
+-		if (!vx_check((xid_t)inode->i_tag, VS_WATCH_P | VS_IDENT))
+-			goto hidden;
+-	} else {
+-		if (!dx_notagcheck(nd) && !dx_check(inode->i_tag,
+-			DX_WATCH | DX_ADMIN | DX_HOSTID | DX_IDENT))
+-			goto hidden;
+-	}
+ done:
+ 	path->mnt = mnt;
+ 	path->dentry = dentry;
+ 	__follow_mount(path);
+ 	return 0;
+ hidden:
+-	vxwprintk_task(1, "did lookup hidden %p[#%d,%lu] »%s«.",
+-		inode, inode->i_tag, inode->i_ino, vxd_path(dentry, mnt));
++	vxwprintk_task(1, "did lookup hidden %s:%p[#%d,%lu] »%s«.",
++		inode->i_sb->s_id, inode, inode->i_tag, inode->i_ino,
++		vxd_path(dentry, mnt));
+ 	dput(dentry);
+ 	return -ENOENT;
+ 
+diff -Nurp linux-2.6.22-690/fs/namespace.c linux-2.6.22-700/fs/namespace.c
+--- linux-2.6.22-690/fs/namespace.c	2009-01-08 18:12:22.000000000 +0100
++++ linux-2.6.22-700/fs/namespace.c	2009-01-08 18:59:35.000000000 +0100
+@@ -1470,9 +1470,7 @@ long do_mount(char *dev_name, char *dir_
+ 	if (data_page)
+ 		((char *)data_page)[PAGE_SIZE - 1] = 0;
+ 
+-	retval = dx_parse_tag(data_page, &tag, 1);
+-	if (retval) {
+-		mnt_flags |= retval;
++	if (dx_parse_tag(data_page, &tag, 1, &mnt_flags, &flags)) {
+ 		/* FIXME: bind and re-mounts get the tag flag? */
+ 		if (flags & (MS_BIND|MS_REMOUNT))
+ 			flags |= MS_TAGID;
+diff -Nurp linux-2.6.22-690/include/linux/fs.h linux-2.6.22-700/include/linux/fs.h
+--- linux-2.6.22-690/include/linux/fs.h	2009-01-08 18:12:34.000000000 +0100
++++ linux-2.6.22-700/include/linux/fs.h	2009-01-08 18:42:32.000000000 +0100
+@@ -60,6 +60,7 @@ extern int dir_notify_enable;
+ #define MAY_WRITE 2
+ #define MAY_READ 4
+ #define MAY_APPEND 8
++#define MAY_ACCESS 16
+ 
+ #define FMODE_READ 1
+ #define FMODE_WRITE 2
+@@ -125,6 +126,7 @@ extern int dir_notify_enable;
+ #define MS_RELATIME	(1<<21)	/* Update atime relative to mtime/ctime. */
+ #define MS_TAGGED	(1<<24) /* use generic inode tagging */
+ #define MS_TAGID	(1<<25) /* use specific tag for this mount */
++#define MS_NOTAGCHECK	(1<<26) /* don't check tags */
+ #define MS_ACTIVE	(1<<30)
+ #define MS_NOUSER	(1<<31)
+ 
+diff -Nurp linux-2.6.22-690/include/linux/mount.h linux-2.6.22-700/include/linux/mount.h
+--- linux-2.6.22-690/include/linux/mount.h	2009-01-08 18:12:23.000000000 +0100
++++ linux-2.6.22-700/include/linux/mount.h	2009-01-08 18:41:37.000000000 +0100
+@@ -40,7 +40,6 @@ struct mnt_namespace;
+ 
+ #define MNT_TAGID	0x10000
+ #define MNT_NOTAG	0x20000
+-#define MNT_NOTAGCHECK	0x40000
+ 
+ struct vfsmount {
+ 	struct list_head mnt_hash;
+diff -Nurp linux-2.6.22-690/include/linux/vserver/context.h linux-2.6.22-700/include/linux/vserver/context.h
+--- linux-2.6.22-690/include/linux/vserver/context.h	2009-01-08 18:12:24.000000000 +0100
++++ linux-2.6.22-700/include/linux/vserver/context.h	2009-01-08 18:49:20.000000000 +0100
+@@ -73,6 +73,8 @@
+ 
+ #define VXC_KTHREAD		0x01000000
+ 
++#define VXC_PROC_WRITE		0x80000000ULL
++
+ 
+ #ifdef	__KERNEL__
+ 
+diff -Nurp linux-2.6.22-690/include/linux/vserver/tag.h linux-2.6.22-700/include/linux/vserver/tag.h
+--- linux-2.6.22-690/include/linux/vserver/tag.h	2009-01-08 18:12:24.000000000 +0100
++++ linux-2.6.22-700/include/linux/vserver/tag.h	2009-01-08 18:41:14.000000000 +0100
+@@ -125,10 +125,11 @@ struct peer_tag {
+ 	int32_t nid;
+ };
+ 
+-#define dx_notagcheck(nd) \
+-	((nd) && (nd)->mnt && ((nd)->mnt->mnt_flags & MNT_NOTAGCHECK))
++#define dx_notagcheck(sb) \
++	((sb) && ((sb)->s_flags & MS_NOTAGCHECK))
+ 
+-int dx_parse_tag(char *string, tag_t *tag, int remove);
++int dx_parse_tag(char *string, tag_t *tag, int remove, int *mnt_flags,
++	         unsigned long *flags);
+ 
+ #ifdef	CONFIG_PROPAGATE
+ 
+diff -Nurp linux-2.6.22-690/include/linux/vs_tag.h linux-2.6.22-700/include/linux/vs_tag.h
+--- linux-2.6.22-690/include/linux/vs_tag.h	2009-01-08 18:12:24.000000000 +0100
++++ linux-2.6.22-700/include/linux/vs_tag.h	2009-01-08 18:37:43.000000000 +0100
+@@ -38,6 +38,9 @@ static inline int __dx_check(tag_t cid, 
+ 		((mode & DX_HOSTID) && (id == 0)));
+ }
+ 
++struct inode;
++int dx_permission(struct inode *inode, int mask);
++
+ #else
+ #warning duplicate inclusion
+ #endif
+diff -Nurp linux-2.6.22-690/kernel/vserver/inode.c linux-2.6.22-700/kernel/vserver/inode.c
+--- linux-2.6.22-690/kernel/vserver/inode.c	2009-01-08 18:12:31.000000000 +0100
++++ linux-2.6.22-700/kernel/vserver/inode.c	2009-01-08 19:16:55.000000000 +0100
+@@ -325,56 +325,69 @@ static void __dx_parse_remove(char *stri
+ 	}
+ }
+ 
+-static inline
+-int __dx_parse_tag(char *string, tag_t *tag, int remove)
++int dx_parse_tag(char *string, tag_t *tag, int remove, int *mnt_flags,
++		 unsigned long *flags)
+ {
++	int set = 0;
+ 	substring_t args[MAX_OPT_ARGS];
+ 	int token, option = 0;
++	char *s, *p, *opts;
+ 
+ 	if (!string)
+ 		return 0;
++	s = kstrdup(string, GFP_KERNEL | GFP_ATOMIC);
++	if (!s)
++		return 0;
+ 
+-	token = match_token(string, tokens, args);
+-
+-	vxdprintk(VXD_CBIT(tag, 7),
+-		"dx_parse_tag(»%s«): %d:#%d",
+-		string, token, option);
+-
+-	switch (token) {
+-	case Opt_tag:
+-		if (tag)
+-			*tag = 0;
+-		if (remove)
+-			__dx_parse_remove(string, "tag");
+-		return MNT_TAGID;
+-	case Opt_notag:
+-		if (remove)
+-			__dx_parse_remove(string, "notag");
+-		return MNT_NOTAG;
+-	case Opt_notagcheck:
+-		if (remove)
+-			__dx_parse_remove(string, "notagcheck");
+-		return MNT_NOTAGCHECK;
+-	case Opt_tagid:
+-		if (tag && !match_int(args, &option))
+-			*tag = option;
+-		if (remove)
+-			__dx_parse_remove(string, "tagid");
+-		return MNT_TAGID;
+-	}
+-	return 0;
+-}
+-
+-int dx_parse_tag(char *string, tag_t *tag, int remove)
+-{
+-	int retval, flags = 0;
+ #ifdef CONFIG_VSERVER_FILESHARING
+-	flags |= MNT_NOTAGCHECK;
++	*flags |= MS_NOTAGCHECK;
+ #endif
+ 
+-	while ((retval = __dx_parse_tag(string, tag, remove)))
+-		flags |= retval;
+-	return flags;
++	opts = s;
++	while ((p = strsep(&opts, ",")) != NULL) {
++		token = match_token(p, tokens, args);
++
++		vxdprintk(VXD_CBIT(tag, 7),
++			"dx_parse_tag(»%s«): %d:#%d",
++			p, token, option);
++
++		switch (token) {
++#ifdef CONFIG_PROPAGATE
++		case Opt_tag:
++			if (tag)
++				*tag = 0;
++			if (remove)
++				__dx_parse_remove(s, "tag");
++			*mnt_flags |= MNT_TAGID;
++			set |= MNT_TAGID;
++			break;
++		case Opt_notag:
++			if (remove)
++				__dx_parse_remove(s, "notag");
++			*mnt_flags |= MNT_NOTAG;
++			set |= MNT_NOTAG;
++			break;
++		case Opt_tagid:
++			if (tag && !match_int(args, &option))
++				*tag = option;
++			if (remove)
++				__dx_parse_remove(s, "tagid");
++			*mnt_flags |= MNT_TAGID;
++			set |= MNT_TAGID;
++			break;
++#endif
++		case Opt_notagcheck:
++			if (remove)
++				__dx_parse_remove(s, "notagcheck");
++			*flags |= MS_NOTAGCHECK;
++			set |= MS_NOTAGCHECK;
++			break;
++		}
++	}
++	if (set)
++		strcpy(string, s);
++	kfree(s);
++	return set;
+ }
+ 
+ #ifdef	CONFIG_PROPAGATE
