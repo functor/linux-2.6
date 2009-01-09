@@ -49,6 +49,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define vini_pl_patch 561
 
 %define requiresreboot 0
+%define release vs%{vsversion}.%{taglevel}.mlab%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
 %define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define packagerelease %{kernelrelease}
