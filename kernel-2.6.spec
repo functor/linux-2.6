@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 32
+%define taglevel 0
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -32,7 +32,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 22
+%define sublevel 27
 %define patchlevel 19
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
@@ -1089,3 +1089,5 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 - Sync with FC5's 2.6.16 kernel.
 - Update Tux & Exec-shield to latest.
 
+
+%define module_current_branch 22
