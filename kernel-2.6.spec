@@ -43,7 +43,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-%define release vs%{vsversion}.%{taglevel}.mlab%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release vs%{vsversion}.%{taglevel}.2.mlab%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
 %{!?pldistro:%global pldistro planetlab}
 
@@ -184,7 +184,6 @@ Patch660: linux-2.6-660-nmi-watchdog-default.patch
 %if "%{distroname}" == "f9" || "%{distroname}" == "f10"
 Patch670: linux-2.6-670-gcc43.patch
 %endif
-Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-fperm.patch
 
@@ -396,7 +395,6 @@ KERNEL_PREVIOUS=vanilla
 %if "%{distroname}" == "f9" || "%{distroname}" == "f10"
 %ApplyPatch 670
 %endif
-%ApplyPatch 680
 %ApplyPatch 690
 %ApplyPatch 700
 
