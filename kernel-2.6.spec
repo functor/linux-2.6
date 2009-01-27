@@ -1,3 +1,8 @@
+#
+# $Id$
+#
+%define url $URL$
+
 Summary: The Linux kernel (the core of the Linux operating system)
 
 # What parts do we want to build?  We must build at least one kernel.
@@ -8,9 +13,18 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define buildxen 0
 %define builddoc 0
 
+# default is to not build this - to override, use something like
+# kernel-SPECVARS := iwlwifi=1 
+# rpm does not seem to have a syntax for defining overridable defaults
+# any better solution would be more than welcome.
+%define build_iwlwifi %{?iwlwifi:1}%{!?iwlwifi:0}
+
 # Versions of various parts
 
-%define _with_netns 1
+# for module-tag.py - sublevel is used for the version (middle) part of tag names
+%define name linux-2.6
+%define module_version_varname sublevel
+%define taglevel 0
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -18,22 +32,20 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # that the kernel isn't the stock distribution kernel, for example by
 # adding some text to the end of the version number.
 #
-%define sublevel 22
-%define patchlevel 14
+%define sublevel 27
+%define patchlevel 19
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
-%define vsversion 2.3.0.32
+%define vsversion 2.3.0.34
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-%define specrelease 1
+%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
-%define release vs%{vsversion}.%{specrelease}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
-
-%{!?pldistro:%global pldistro trellis}
+%{!?pldistro:%global pldistro planetlab}
 
 %define signmodules 0
 %define make_target bzImage
@@ -81,7 +93,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
 
-URL: http://svn.planet-lab.org/wiki/linux-2.6
+Vendor: PlanetLab
+Packager: PlanetLab Central <support@planet-lab.org>
+Distribution: PlanetLab %{plrelease}
+URL: %(echo %{url} | cut -d ' ' -f 2)
 
 Name: kernel
 Group: System Environment/Kernel
@@ -114,14 +129,13 @@ BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
 
-Source10: kernel-%{kversion}-i586-%{pldistro}.config
-Source11: kernel-%{kversion}-i686-%{pldistro}.config
-Source12: kernel-%{kversion}-x86_64-%{pldistro}.config
+Source11: %{pldistro}-%{kversion}-i686.config
+Source12: %{pldistro}-%{kversion}-x86_64.config
 %if %{builduml}
-Source20: kernel-%{kversion}-i686-uml-%{pldidstro}.config
+Source20: %{pldistro}-%{kversion}-i686-uml.config
 %endif
 %if %{buildxen}
-Source30: kernel-%{kversion}-i686-xenU-%{pldistro}.config
+Source30: %{pldistro}-%{kversion}-i686-xenU.config
 %endif
 
 # Mainline patches
@@ -132,6 +146,7 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 Patch010: linux-2.6-010-e1000e.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
+Patch040: linux-2.6-040-i_mutex-check.patch
 
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
@@ -139,7 +154,7 @@ Patch100: linux-2.6-100-build-nonintconfig.patch
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch210: linux-2.6-210-vserver-cpu-sched.patch
-Patch220: linux-2.6-220-lback-feat02.diff
+Patch220: delta-ptrace-fix01.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -147,22 +162,40 @@ Patch250: linux-2.6-250-ipsets.patch
 # PlanetLab
 Patch500: linux-2.6-500-vserver-filesharing.patch
 Patch510: linux-2.6-510-ipod.patch
-Patch520: linux-2.6-520-vnet+.patch
+Patch521: linux-2.6-521-packet-tagging.patch
+Patch522: linux-2.6-522-iptables-connection-tagging.patch
+Patch523: linux-2.6-523-raw-sockets.patch
+Patch524: linux-2.6-524-peercred.patch
+Patch525: linux-2.6-525-sknid-elevator.patch
+Patch526: linux-2.6-526-tun-tap.patch
+Patch527: linux-2.6-527-iptables-classify-add-mark.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
-Patch580: linux-2.6-580-show-proc-virt.patch 
+Patch580: linux-2.6-580-show-proc-virt.patch
 Patch590: linux-2.6-590-chopstix-intern.patch
+Patch620: linux-2.6-620-kdb.patch
+Patch630: linux-2.6-630-sched-fix.patch
+Patch640: linux-2.6-640-netlink-audit-hack.patch
+Patch650: linux-2.6-650-hangcheck-reboot.patch
+Patch660: linux-2.6-660-nmi-watchdog-default.patch
+%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
+Patch670: linux-2.6-670-gcc43.patch
+%endif
+Patch680: linux-2.6-680-htb-hysteresis-tso.patch
+Patch690: linux-2.6-690-web100.patch
 
-# VINI
-Patch700: linux-2.6-700-trellis-mm1-netns.patch
-Patch720: linux-2.6-720-ztun-sb.patch
-Patch730: linux-2.6-730-egre.patch
-Patch740: linux-2.6-740-new_ns_pid.patch
-Patch750: linux-2.6-750-vserver-setspace.patch
-Patch760: linux-2.6-760-unshare-netns-fix.patch
+# See also the file named 'sources' here for the related checksums
+# NOTE. iwlwifi should be in-kernel starting from 2.6.24
+# see http://bughost.org/bugzilla/show_bug.cgi?id=1584
+%if %{build_iwlwifi}
+%define mac80211_version 10.0.4
+Patch600: http://intellinuxwireless.org/mac80211/downloads/mac80211-%{mac80211_version}.tgz
+%define iwlwifi_version 1.2.25
+Patch601: http://intellinuxwireless.org/iwlwifi/downloads/iwlwifi-%{iwlwifi_version}.tgz
+%endif
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -310,16 +343,22 @@ KERNEL_PREVIOUS=vanilla
     *.bz2)  bzcat "$PATCH";;				\
     *.gz)   zcat "$PATCH";;				\
     *)      cat "$PATCH";;				\
-  esac | patch -s -d linux-%{kversion}-%1 $patchflag \
+  esac | patch -F1 -s -d linux-%{kversion}-%1 $patchflag \
   KERNEL_PREVIOUS=linux-%{kversion}-%1
 
 # This is where the patches get applied
-%if "0%{patchlevel}"
+%if 0%{?patchlevel}
 %ApplyPatch 0
 %endif
 
 %ApplyPatch 10
 %ApplyPatch 20
+
+# NetNS patch for VINI
+%if 0%{?with_netns}
+%ApplyPatch 30
+%endif
+%ApplyPatch 40
 
 %ApplyPatch 100
 
@@ -331,7 +370,16 @@ KERNEL_PREVIOUS=vanilla
 
 %ApplyPatch 500
 %ApplyPatch 510
-%ApplyPatch 520
+
+# VNET+ series
+%ApplyPatch 521
+%ApplyPatch 522
+%ApplyPatch 523
+%ApplyPatch 524
+%ApplyPatch 525
+%ApplyPatch 526
+%ApplyPatch 527
+
 %ApplyPatch 530
 %ApplyPatch 540
 %ApplyPatch 550
@@ -339,19 +387,47 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 570
 %ApplyPatch 580
 %ApplyPatch 590
-
-# 
-%if 0%{?_with_netns}
-%ApplyPatch 700
-%ApplyPatch 720
-%ApplyPatch 730
-%ApplyPatch 740
-%ApplyPatch 750
-%ApplyPatch 760
+%ApplyPatch 620
+%ApplyPatch 630
+%ApplyPatch 640
+%ApplyPatch 650
+%ApplyPatch 660
+%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
+%ApplyPatch 670
 %endif
+%ApplyPatch 680
+%ApplyPatch 690
+
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
+
+%if 0%{?with_netns}
+%ApplyPatch %vini_pl_patch
+%endif
+
+%if %{build_iwlwifi}
+# Run the mac80211 stuff in the kernel tree holding the last patch
+tar -xzf %{PATCH600}
+pushd mac80211-%{mac80211_version}
+mac80211_makeflags="KSRC=../$KERNEL_PREVIOUS"
+make $mac80211_makeflags modified
+make $mac80211_makeflags source
+make $mac80211_makeflags patch_kernel
+popd
+
+# Untar iwlwifi in the same place - needs to be compiled later
+tar -xzf %{PATCH601}
+# the install target is broken: first it does not pass the right -b flag to depmod
+# second we do not need to invoke depmod at this stage anyway
+# let's add our own patch/stuff in this Makefile for manual install later on
+pushd iwlwifi-%{iwlwifi_version}
+cat >> Makefile <<EOF
+module-list:
+	@echo \$(addprefix \$(DIR),\$(addsuffix .ko,\$(list-m)))
+EOF
+popd
+%endif
 
 rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}
@@ -384,11 +460,11 @@ BuildKernel() {
 
     # Pick the right config file for the kernel we're building
     if [ -n "$Flavour" ] ; then
-      Config=kernel-%{kversion}-%{_target_cpu}-$Flavour-%{pldistro}.config
+      Config=%{pldistro}-%{kversion}-%{_target_cpu}-$Flavour.config
       DevelDir=/usr/src/kernels/%{KVERREL}-$Flavour-%{_target_cpu}
       DevelLink=/usr/src/kernels/%{KVERREL}$Flavour-%{_target_cpu}
     else
-      Config=kernel-%{kversion}-%{_target_cpu}-%{pldistro}.config
+      Config=%{pldistro}-%{kversion}-%{_target_cpu}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-%{_target_cpu}
       DevelLink=
     fi
@@ -411,6 +487,12 @@ BuildKernel() {
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 
+%if %{build_iwlwifi}
+    # build the iwlwifi driver
+    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
+      KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour
+%endif
+
     # Start installing the results
 
 %if "%{_enable_debug_packages}" == "1"
@@ -431,6 +513,20 @@ BuildKernel() {
 
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer
     make -s ARCH=$Arch INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install KERNELRELEASE=$KernelVer
+
+%if %{build_iwlwifi}
+    # install iwlwifi
+#    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
+#         KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour \
+#        KMISC=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless install
+    pushd %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version}
+    iwlwifi_dest=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless
+    # get the list and location of modules to install - no need to pass KSRC nor anything, let's keep it simple
+    iwlwifi_modules=$(make --no-print-directory module-list)
+    install -d $iwlwifi_dest
+    install -m 644 -c $iwlwifi_modules $iwlwifi_dest
+    popd
+%endif
 
     # And save the headers/makefiles etc for building modules against
     #
@@ -763,6 +859,123 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Thu Jan 08 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-32
+- support building on fedora 10
+
+* Tue Dec 02 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-31
+- add patches for m-lab and drl
+
+* Tue Nov 11 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-30
+- Use Intel's e1000e driver.
+
+* Thu Oct 02 2008 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-29
+- added drivers for OPTION's globetrotter (gt 3g+ emea) umts cards
+- + cleanup outdated configs
+
+* Wed Sep 17 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-28
+- Recovering a hunk that I accidentally ommited out of the last commit. Should not entail retesting, because the commits
+- were unrelated.
+
+* Sun Sep 14 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-27
+- Fixing the accounting issue that causes certain connections to be misaccounted, and that causes NM/peercreds to
+- intermittently break.
+
+* Wed Sep 10 2008 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-26
+- patch for building on f9/gcc-4.3, no functional change on other distros
+
+* Sun Aug 17 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-25
+- FUSE support.
+
+* Tue Aug 12 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-24
+- Enable nmi watchdog by default.
+
+* Mon Aug 04 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-23
+- Fixed a bug in my previous commit.
+
+* Mon Aug 04 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-22
+- * 1 fix for using udp/listening sockets via raw
+- * 1 fix to help codemux divide traffic in PlanetFlow
+
+* Fri Aug 01 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-21
+- Codemux calls setsockopt/SO_PEERCRED to set peer credentials on a socket, so that the connections it proxies to its clients are tagged for PlanetFlow. This hunk got lost somewhere along the way.
+
+* Thu Jul 31 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-20
+- Removed a debugging statement. Shows up a lot in the debug logs.
+
+* Wed Jul 30 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-19
+- Unbroke peercred setting.
+
+* Mon Jul 28 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-18
+- Now you can write your own TCP using packet sockets. As a side effect, tcptraceroute runs to completion including the
+- last hop.
+
+* Mon Jul 28 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-17
+- Optimize packet socket support to eliminate a packet copy.
+
+* Sun Jul 27 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-16
+- Missed this header file, which broke the compile.
+- I'll be doing another tag to include an optimization I left out of this version. This version is for Build only.
+
+* Sun Jul 27 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-15
+- Fixes to tcpdump-related problems reported recently.
+
+* Wed Jul 23 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-14
+- added fix to process visibility so when ncontext/vcontext  run netstat in
+- xid=1, it can see all ports &  processes.
+
+* Mon Jul 21 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-13
+- fix for tcpdump/tcp payloads
+
+* Tue Jul 15 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-12
+- * Bugfix in tuntap
+- * Attempt to fix TCP-payload-related problems with tcpdump
+
+* Wed Jul 09 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-11
+- * Split up VNET+ module into its component patches
+- * Added tun/tap support
+
+* Tue Jul 08 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-10
+- Filling a statically allocated buffer cannot fail, right?
+
+* Wed Jun 25 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-9
+- Enable the hangcheck timer driver, and build it in to the kernel.
+- Dump relevant data on the scheduler bug instead of BUGing.
+
+* Sat Jun 07 2008 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-8
+- * Partial fix for the UDP-packet-pollution problem
+- * Support for PF_PACKET sockets
+- * Support for SOCK_PACKET sockets
+- * Disabled Chopstix with mutexes
+- * Tested VNET+ under heavy loads
+- 
+- 
+
+* Fri May 16 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-7
+- Bringing this fix in for tcpdump and  ping
+- 
+
+* Fri May 09 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-6
+- Updated configuration to include COW again.
+- 
+- Patches from Sapan to fix ping losses.
+- 
+- Still need help with tcpdump traffic.
+- 
+
+* Tue May 06 2008 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-5
+- Patch needs to be applied.
+
+* Mon May 05 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-4
+- 
+
+* Thu Apr 24 2008 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-3
+- Fix bug with looping in schedule()
+
+* Wed Apr 23 2008 Stephen Soltesz <soltesz@cs.princeton.edu> - linux-2.6-22-2
+- Includes changes from Sapan/Andy regarding the scheduler and vnet bugs.
+- Should be safe to try a second deployment.
+- 
+
 * Tue Jul 11 2006 Dave Jones <davej@redhat.com> [2.6.17-1.2142_FC4]
 - 2.6.17.4
 - Disable split pagetable lock.
@@ -876,3 +1089,5 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 - Sync with FC5's 2.6.16 kernel.
 - Update Tux & Exec-shield to latest.
 
+
+%define module_current_branch 22

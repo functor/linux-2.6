@@ -1,0 +1,12 @@
+diff -Nurp linux-2.6.22.19-vs2.3.0.34.8/kernel/ptrace.c linux-2.6.22.19-vs2.3.0.34.9/kernel/ptrace.c
+--- linux-2.6.22.19-vs2.3.0.34.8/kernel/ptrace.c	2008-03-15 08:16:10.000000000 -0400
++++ linux-2.6.22.19-vs2.3.0.34.9/kernel/ptrace.c	2008-07-23 12:32:11.000000000 -0400
+@@ -146,7 +146,7 @@ static int may_attach(struct task_struct
+ 		dumpable = task->mm->dumpable;
+ 	if (!dumpable && !capable(CAP_SYS_PTRACE))
+ 		return -EPERM;
+-	if (!vx_check(task->xid, VS_ADMIN_P|VS_IDENT))
++	if (!vx_check(task->xid, VS_WATCH_P | VS_IDENT))
+ 		return -EPERM;
+ 	if (!vx_check(task->xid, VS_IDENT) &&
+ 		!task_vx_flags(task, VXF_STATE_ADMIN, 0))

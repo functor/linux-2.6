@@ -1,0 +1,254 @@
+diff -Nurb linux-2.6.22-524/include/linux/netdevice.h linux-2.6.22-525/include/linux/netdevice.h
+--- linux-2.6.22-524/include/linux/netdevice.h	2008-07-27 22:06:14.000000000 -0400
++++ linux-2.6.22-525/include/linux/netdevice.h	2008-07-27 22:17:30.000000000 -0400
+@@ -562,6 +562,7 @@
+ struct packet_type {
+ 	__be16			type;	/* This is really htons(ether_type). */
+ 	struct net_device	*dev;	/* NULL is wildcarded here	     */
++	unsigned char 		sknid_elevator; 
+ 	int			(*func) (struct sk_buff *,
+ 					 struct net_device *,
+ 					 struct packet_type *,
+diff -Nurb linux-2.6.22-524/net/core/dev.c linux-2.6.22-525/net/core/dev.c
+--- linux-2.6.22-524/net/core/dev.c	2008-07-27 22:06:20.000000000 -0400
++++ linux-2.6.22-525/net/core/dev.c	2008-07-28 09:26:45.000000000 -0400
+@@ -97,6 +97,8 @@
+ #include <linux/proc_fs.h>
+ #include <linux/seq_file.h>
+ #include <linux/stat.h>
++#include <linux/ip.h>
++#include <linux/tcp.h>
+ #include <linux/if_bridge.h>
+ #include <net/dst.h>
+ #include <net/pkt_sched.h>
+@@ -1131,7 +1133,7 @@
+ 		if ((ptype->dev == dev || !ptype->dev) &&
+ 		    (ptype->af_packet_priv == NULL ||
+ 		     (struct sock *)ptype->af_packet_priv != skb->sk)) {
+-			struct sk_buff *skb2= skb_clone(skb, GFP_ATOMIC);
++			struct sk_buff *skb2 = skb_clone(skb, GFP_ATOMIC);
+ 			if (!skb2)
+ 				break;
+ 
+@@ -1803,6 +1805,7 @@
+  * the ingress scheduler, you just cant add policies on ingress.
+  *
+  */
++
+ static int ing_filter(struct sk_buff *skb)
+ {
+ 	struct Qdisc *q;
+@@ -1832,13 +1835,20 @@
+ }
+ #endif
+ 
++/* The code already makes the assumption that packet handlers run
++ * sequentially on the same CPU. -Sapan */
++DEFINE_PER_CPU(int, sknid_elevator) = 0;
++
+ int netif_receive_skb(struct sk_buff *skb)
+ {
+ 	struct packet_type *ptype, *pt_prev;
+ 	struct net_device *orig_dev;
+ 	int ret = NET_RX_DROP;
++	int *cur_elevator=&__get_cpu_var(sknid_elevator);
+ 	__be16 type;
+ 
++	*cur_elevator = 0;
++
+ 	/* if we've gotten here through NAPI, check netpoll */
+ 	if (skb->dev->poll && netpoll_rx(skb))
+ 		return NET_RX_DROP;
+@@ -1873,8 +1883,9 @@
+ 
+ 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
+ 		if (!ptype->dev || ptype->dev == skb->dev) {
+-			if (pt_prev)
++			if (pt_prev) {
+ 				ret = deliver_skb(skb, pt_prev, orig_dev);
++			}
+ 			pt_prev = ptype;
+ 		}
+ 	}
+@@ -1913,7 +1924,27 @@
+ 	}
+ 
+ 	if (pt_prev) {
++		/* At this point, cur_elevator may be -2 or a positive value, in
++		 * case a previous protocol handler marked it */
++		if (*cur_elevator) {
++			atomic_inc(&skb->users);
++		}
++		
+ 		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
++
++		if ((*cur_elevator)>0) {
++			skb->skb_tag = *cur_elevator;
++			list_for_each_entry_rcu(ptype, &ptype_all, list) {
++				if ((!ptype->dev || ptype->dev == skb->dev) && (ptype->sknid_elevator)) {
++					ret = deliver_skb(skb, ptype, orig_dev);
++				}
++			}
++		}
++
++		if (*cur_elevator) {
++			/* We have a packet */
++			kfree_skb(skb);
++		}
+ 	} else {
+ 		kfree_skb(skb);
+ 		/* Jamal, now you will not able to escape explaining
+@@ -3780,6 +3811,7 @@
+ EXPORT_SYMBOL(net_enable_timestamp);
+ EXPORT_SYMBOL(net_disable_timestamp);
+ EXPORT_SYMBOL(dev_get_flags);
++EXPORT_PER_CPU_SYMBOL(sknid_elevator);
+ 
+ #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
+ EXPORT_SYMBOL(br_handle_frame_hook);
+diff -Nurb linux-2.6.22-524/net/packet/af_packet.c linux-2.6.22-525/net/packet/af_packet.c
+--- linux-2.6.22-524/net/packet/af_packet.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-525/net/packet/af_packet.c	2008-07-27 22:06:27.000000000 -0400
+@@ -78,6 +78,7 @@
+ #include <linux/poll.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
++#include <linux/vs_network.h>
+ 
+ #ifdef CONFIG_INET
+ #include <net/inet_common.h>
+@@ -246,10 +247,53 @@
+ 
+ static const struct proto_ops packet_ops_spkt;
+ 
++extern DEFINE_PER_CPU(int, sknid_elevator);
++
++static inline unsigned int slice_check_and_elevate(struct sk_buff *skb, struct sock *sk) {
++	/* This mechanism is quite involved, and caused us a lot of pain
++	 * including crashes and packet loss during the 4.2 rollout. This
++	 * function decides if a slice is allowed to see a given packet.
++	 * Unfortunately, the first time it is invoked for a packet it does not
++	 * have enough information to make this call, since xt_MARK has not had
++	 * a chance to tag it with the slice id.  There is also no way of
++	 * passing state between xt_MARK and this function through a packet --
++	 * because the skb gets cloned quite a few times between these two
++	 * points.  I'd rather not use skb_shared_info because it's treated as
++	 * a blob of memory, and so it would be quite hard to maintain.
++	 *
++	 * What we do is to keep a global variable (per CPU) that transfers the
++	 * required state between xt_MARK and af_packet.c. As an optimization,
++	 * this state transfer and the step that follows is only executed for
++	 * packets that first get dropped here. When we drop a packet, we mark
++	 * it for 'elevation' (that's what this trick is called). When xt_MARK
++	 * tags the packet with the right slice, it intercepts this mark and
++	 * sets the value of sknid_elevator. Next, the packet is sent back here
++	 * for a second round, this time with the xid tag set.
++	 */
++
++	int *elevator=&__get_cpu_var(sknid_elevator);
++	int tag = skb->skb_tag;
++
++	if (sk->sk_nx_info && !(tag == 1 || sk->sk_nid == tag)) {
++		if (skb->pkt_type==PACKET_HOST) {
++			*elevator=-2; /* Rejecting this packet. Mark it for elevation in xt_MARK */
++		}
++		return 0;
++	}
++	else if (!sk->sk_nx_info && (*elevator>0)) {
++		/* Root has already seen this packet once, since it has been elevated */
++		return 0;
++	}
++
++	return 1;
++}
++
+ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct packet_type *pt, struct net_device *orig_dev)
+ {
+ 	struct sock *sk;
+ 	struct sockaddr_pkt *spkt;
++	int tag = skb->skb_tag;
++
+ 
+ 	/*
+ 	 *	When we registered the protocol we saved the socket in the data
+@@ -269,6 +313,16 @@
+ 	 *	so that this procedure is noop.
+ 	 */
+ 
++	/* 
++	 * (18:05:41) daniel_hozac: where?
++	 * (18:05:58) daniel_hozac: we already have filters on PF_PACKET, don't we?
++	 * (18:05:58) er: in packet_rcv_skpt
++	 * (18:07:33) daniel_hozac: oh, that's evil. 
++	 */
++
++	if (!slice_check_and_elevate(skb, sk))
++		return 0;
++
+ 	if (skb->pkt_type == PACKET_LOOPBACK)
+ 		goto out;
+ 
+@@ -324,6 +378,9 @@
+ 	__be16 proto=0;
+ 	int err;
+ 
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND))
++		return -EPERM;
++
+ 	/*
+ 	 *	Get and verify the address.
+ 	 */
+@@ -416,11 +473,16 @@
+ 	return err;
+ }
+ 
++
++
+ static inline unsigned int run_filter(struct sk_buff *skb, struct sock *sk,
+ 				      unsigned int res)
+ {
+ 	struct sk_filter *filter;
+ 
++	if (!slice_check_and_elevate(skb, sk)) 
++		return 0;
++
+ 	rcu_read_lock_bh();
+ 	filter = rcu_dereference(sk->sk_filter);
+ 	if (filter != NULL)
+@@ -711,6 +773,9 @@
+ 	unsigned char *addr;
+ 	int ifindex, err, reserve = 0;
+ 
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SEND)) 
++		return -EPERM;
++
+ 	/*
+ 	 *	Get and verify the address.
+ 	 */
+@@ -880,6 +945,7 @@
+ 
+ 	po->num = protocol;
+ 	po->prot_hook.type = protocol;
++	po->prot_hook.sknid_elevator = 1;
+ 	po->prot_hook.dev = dev;
+ 
+ 	po->ifindex = dev ? dev->ifindex : 0;
+@@ -984,8 +1050,9 @@
+ 	__be16 proto = (__force __be16)protocol; /* weird, but documented */
+ 	int err;
+ 
+-	if (!capable(CAP_NET_RAW))
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET))
+ 		return -EPERM;
++		
+ 	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
+ 	    sock->type != SOCK_PACKET)
+ 		return -ESOCKTNOSUPPORT;
+@@ -1016,6 +1083,7 @@
+ 
+ 	spin_lock_init(&po->bind_lock);
+ 	po->prot_hook.func = packet_rcv;
++	po->prot_hook.sknid_elevator = 1;
+ 
+ 	if (sock->type == SOCK_PACKET)
+ 		po->prot_hook.func = packet_rcv_spkt;
