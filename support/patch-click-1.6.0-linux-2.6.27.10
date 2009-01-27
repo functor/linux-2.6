@@ -27,16 +27,6 @@
  # include <net/checksum.h>
  # include <linux/in.h>
  #else
---- click-1.6.0-27/include/click/glue.hh.orig	2007-09-12 18:24:50.000000000 -0400
-+++ click-1.6.0-27/include/click/glue.hh	2009-01-27 10:12:52.000000000 -0500
-@@ -15,6 +15,7 @@
- # endif
- # include <click/cxxprotect.h>
- CLICK_CXX_PROTECT
-+#include <linux/autoconf.h>
- # ifdef WANT_MOD_USE_COUNT
- #  define __NO_VERSION__
- #  include <linux/module.h>
 --- click-1.6.0-27/include/click/packet.hh.orig	2007-09-07 16:11:26.000000000 -0400
 +++ click-1.6.0-27/include/click/packet.hh	2009-01-27 10:13:43.000000000 -0500
 @@ -452,7 +452,7 @@
@@ -129,15 +119,23 @@
  }
  
 --- click-1.6.0-27/include/click/config-linuxmodule.h.orig	2009-01-19 15:07:24.000000000 -0500
-+++ click-1.6.0-27/include/click/config-linuxmodule.h	2009-01-20 22:30:23.000000000 -0500
-@@ -87,12 +87,13 @@
++++ click-1.6.0-27/include/click/config-linuxmodule.h	2009-01-27 12:30:56.000000000 -0500
+@@ -27,7 +27,7 @@
+ #define HAVE_FAST_CHECKSUM 1
+ 
+ /* Define if 'int64_t' is typedefed to 'long' in linuxmodule. */
+-#define HAVE_INT64_IS_LONG_LINUXMODULE 1
++/* #undef HAVE_INT64_IS_LONG_LINUXMODULE */
+ 
+ /* Define if 'int64_t' is typedefed to 'long long' in linuxmodule. */
+ #define HAVE_INT64_IS_LONG_LONG_LINUXMODULE 1
+@@ -87,12 +87,10 @@
  #endif
  
  /* Include integer type definitions. */
-+# include <linux/autoconf.h>
- #if !HAVE_LINUXMODULE_2_6
+-#if !HAVE_LINUXMODULE_2_6
  # include <linux/autoconf.h>
- #endif
+-#endif
  #include <linux/types.h>
  typedef ptrdiff_t intptr_t;
 -typedef unsigned long uintptr_t; /* XXX? */
@@ -145,23 +143,36 @@
  
  /* Define HAVE_INT64_IS_LONG based on HAVE_INT64_IS_LONG_LINUXMODULE. */
  #ifdef HAVE_INT64_IS_LONG_LINUXMODULE
-@@ -114,11 +115,11 @@
- #ifdef __cplusplus
- 
- /* Declare operator new. */
--void *operator new(size_t) throw ();
--void *operator new[](size_t) throw ();
-+void *operator new(unsigned int) throw ();
-+void *operator new[](unsigned int) throw ();
- 
- /* Provide placement new. */
--inline void *operator new(size_t, void *v) { return v; }
-+inline void *operator new(unsigned int, void *v) { return v; }
- #define HAVE_PLACEMENT_NEW 1
- 
- /* Define macros that surround Click declarations. */
 --- click-1.6.0-27/linuxmodule/Makefile.orig	2009-01-19 15:15:55.000000000 -0500
-+++ click-1.6.0-27/linuxmodule/Makefile	2009-01-20 10:22:39.000000000 -0500
++++ click-1.6.0-27/linuxmodule/Makefile	2009-01-27 12:21:58.000000000 -0500
+@@ -5,12 +5,12 @@
+ subdir := linuxmodule
+ conf_auxdir = $(top_srcdir)
+ 
+-prefix = /usr/local
+-exec_prefix = ${prefix}
+-bindir = /usr/local/bin
+-sbindir = /usr/local/sbin
+-libdir = /usr/local/lib
+-linuxdir = /d/kernels/linux-2.6.27.10-click
++prefix = /d/click/click-1.6.0-27/inst
++exec_prefix = /d/click/click-1.6.0-27/inst
++bindir = /d/click/click-1.6.0-27/inst/bin
++sbindir = /d/click/click-1.6.0-27/inst/sbin
++libdir = /d/click/click-1.6.0-27/inst/lib
++linuxdir = /d/kernels/linux-2.6.27.10-click/
+ 
+ LIB_CXX_OBJS = string.o straccum.o nameinfo.o \
+ 	bitvector.o vectorv.o templatei.o bighashmap_arena.o \
+@@ -53,7 +53,7 @@
+ ##########################################################################
+ ## LINUX 2.6								##
+ 
+-KERNELPATH = /d/kernels/linux-2.6.27.10-click
++KERNELPATH = /d/kernels/linux-2.6.27.10-click/
+ 
+ ifeq ($(KBUILD_EXTMOD),)
+ top_srcdir := ..
 @@ -95,7 +95,7 @@
  
  CLICKDEFS = -DHAVE_CONFIG_H 
@@ -171,15 +182,15 @@
  
  CXXCOMPILE = $(CLICKCXX) $(LINUXCFLAGS) $(CLICKCPPFLAGS) $(CLICKCFLAGS) \
  	$(CLICKCXXFLAGS) $(CLICKDEFS) $(CLICKINCLUDES) $(CLICKDEPCFLAGS)
-@@ -177,7 +177,7 @@
- 
- CC = gcc -w -W -Wall
- CPP = gcc -W -Wall -E
--CXX = g++ -w -W -Wall -fno-exceptions -fno-rtti  -D__SMP__
-+CXX = g++ -w -W -fno-exceptions -fno-rtti  -D__SMP__
- CXXCPP = g++ -W -Wall  -E
- LD = ld
- STRIP = strip
+@@ -270,7 +270,7 @@
+ 	@/bin/rm -f elements.conf
+ 	@$(MAKE) elements.conf
+ elements.conf: $(top_builddir)/config.status $(top_builddir)/click-buildtool
+-	echo "linuxmodule  app aqm ethernet icmp ip standard tcpudp" | $(top_builddir)/click-buildtool findelem -r linuxmodule -p $(top_srcdir) > elements.conf
++	echo "linuxmodule  app aqm ethernet icmp ip standard tcpudp test" | $(top_builddir)/click-buildtool findelem -r linuxmodule -p $(top_srcdir) > elements.conf
+ $(ELEMENTSCONF).mk: $(ELEMENTSCONF).conf $(top_builddir)/click-buildtool
+ 	$(CLICK_ELEM2MAKE) -x "$(STD_ELEMENT_OBJS)" < $(ELEMENTSCONF).conf > $(ELEMENTSCONF).mk
+ $(ELEMENTSCONF).cc: $(ELEMENTSCONF).conf $(top_builddir)/click-buildtool
 --- click-1.6.0-27/linuxmodule/sched.cc.orig	2007-08-28 19:01:58.000000000 -0400
 +++ click-1.6.0-27/linuxmodule/sched.cc	2009-01-26 16:55:57.000000000 -0500
 @@ -228,7 +228,7 @@
@@ -242,6 +253,17 @@
      return 0;
  }
  
+--- click-1.6.0-27/linuxmodule/Makefile.in.orig	2007-09-12 18:26:17.000000000 -0400
++++ click-1.6.0-27/linuxmodule/Makefile.in	2009-01-27 12:21:27.000000000 -0500
+@@ -95,7 +95,7 @@
+ 
+ CLICKDEFS = @DEFS@ 
+ CLICKINCLUDES = -I$(top_builddir)/include -I$(top_srcdir)/include \
+-	-I$(srcdir) -I$(top_srcdir) -I$(linuxdir)/include
++	-I$(srcdir) -I$(top_srcdir) -I$(linuxdir)/include -I$(linuxdir)/include/asm/mach-default
+ 
+ CXXCOMPILE = $(CLICKCXX) $(LINUXCFLAGS) $(CLICKCPPFLAGS) $(CLICKCFLAGS) \
+ 	$(CLICKCXXFLAGS) $(CLICKDEFS) $(CLICKINCLUDES) $(CLICKDEPCFLAGS)
 --- click-1.6.0-27/elements/linuxmodule/tohost.cc.orig	2007-08-31 11:21:55.000000000 -0400
 +++ click-1.6.0-27/elements/linuxmodule/tohost.cc	2009-01-26 16:52:00.000000000 -0500
 @@ -143,7 +143,7 @@
@@ -393,3 +415,23 @@
      if (dev && (dev->type == ARPHRD_ETHER || dev->type == ARPHRD_80211)) {
  	memcpy(store, dev->dev_addr, 6);
  	dev_put(dev);
+--- click-1.6.0-27/configure.in.orig	2007-09-18 16:40:01.000000000 -0400
++++ click-1.6.0-27/configure.in	2009-01-27 12:14:10.000000000 -0500
+@@ -12,6 +12,7 @@
+ dnl legally binding.
+ 
+ AC_INIT(click, 1.6.0)
++set +x +v
+ AC_PREREQ(2.50)
+ AC_CONFIG_HEADER(include/click/config.h:config.h.in include/click/pathvars.h:pathvars.h.in include/click/config-bsdmodule.h:config-bsdmodule.h.in include/click/config-linuxmodule.h:config-linuxmodule.h.in include/click/config-ns.h:config-ns.h.in include/click/config-userlevel.h:config-userlevel.h.in)
+ 
+@@ -848,8 +849,7 @@
+     SAVE_CXX="$CXX"
+     CXX="$KERNEL_CXX"
+     saveflags="$CPPFLAGS"
+-    CPPFLAGS="$saveflags -D__KERNEL__ -I$linuxdir/include $LINUX_CFLAGS"
+-
++    CPPFLAGS="$saveflags -D__KERNEL__ -I$linuxdir/include -I$linuxdir/include/asm/mach-default $LINUX_CFLAGS" 
+ 
+     # CLICK_LINUXMODULE_PROLOGUE()
+     AC_DEFUN([CLICK_LINUXMODULE_PROLOGUE], [[#if HAVE_LINUXMODULE_2_6
