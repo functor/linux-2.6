@@ -1,0 +1,395 @@
+--- click-1.6.0-27/lib/ino.cc.orig	2007-09-11 15:39:22.000000000 -0400
++++ click-1.6.0-27/lib/ino.cc	2009-01-20 22:34:50.000000000 -0500
+@@ -34,6 +34,16 @@
+     _generation = 0;
+ }
+ 
++#define DT_UNKNOWN      0
++#define DT_FIFO         1
++#define DT_CHR          2
++#define DT_DIR          4
++#define DT_BLK          6
++#define DT_REG          8
++#define DT_LNK          10
++#define DT_SOCK         12
++#define DT_WHT          14
++
+ void
+ ClickIno::cleanup()
+ {
+--- click-1.6.0-27/include/clicknet/ip.h.orig	2007-07-16 19:47:50.000000000 -0400
++++ click-1.6.0-27/include/clicknet/ip.h	2009-01-19 16:01:43.000000000 -0500
+@@ -5,6 +5,7 @@
+ #include <click/cxxprotect.h>
+ CLICK_CXX_PROTECT
+ #if CLICK_LINUXMODULE
++#include <linux/autoconf.h>
+ # include <net/checksum.h>
+ # include <linux/in.h>
+ #else
+--- click-1.6.0-27/include/click/glue.hh.orig	2007-09-12 18:24:50.000000000 -0400
++++ click-1.6.0-27/include/click/glue.hh	2009-01-27 10:12:52.000000000 -0500
+@@ -15,6 +15,7 @@
+ # endif
+ # include <click/cxxprotect.h>
+ CLICK_CXX_PROTECT
++#include <linux/autoconf.h>
+ # ifdef WANT_MOD_USE_COUNT
+ #  define __NO_VERSION__
+ #  include <linux/module.h>
+--- click-1.6.0-27/include/click/packet.hh.orig	2007-09-07 16:11:26.000000000 -0400
++++ click-1.6.0-27/include/click/packet.hh	2009-01-27 10:13:43.000000000 -0500
+@@ -452,7 +452,7 @@
+ Packet::mac_header() const
+ {
+ #if CLICK_LINUXMODULE
+-    return skb()->mac.raw;
++    return skb_mac_header(skb());
+ #else
+     return _mac;
+ #endif
+@@ -462,7 +462,7 @@
+ Packet::network_header() const
+ {
+ #if CLICK_LINUXMODULE
+-    return skb()->nh.raw;
++    return skb_network_header(skb());
+ #else
+     return _nh;
+ #endif
+@@ -472,7 +472,7 @@
+ Packet::transport_header() const
+ {
+ #if CLICK_LINUXMODULE
+-    return skb()->h.raw;
++    return skb_transport_header(skb());
+ #else
+     return _h;
+ #endif
+@@ -567,7 +567,7 @@
+ # if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 13)
+     memcpy(&skb()->stamp, &timestamp, 8);
+ # else
+-    skb_set_timestamp(skb(), &timestamp.timeval());
++    memcpy(&skb()->tstamp, &timestamp, 8);
+ # endif
+ #else
+     _timestamp = timestamp;
+@@ -904,7 +904,7 @@
+ Packet::set_mac_header(const unsigned char *h)
+ {
+ #if CLICK_LINUXMODULE	/* Linux kernel module */
+-    skb()->mac.raw = const_cast<unsigned char *>(h);
++    skb()->mac_header = const_cast<unsigned char *>(h);
+ #else				/* User-space and BSD kernel module */
+     _mac = const_cast<unsigned char *>(h);
+ #endif
+@@ -914,8 +914,8 @@
+ Packet::set_mac_header(const unsigned char *h, uint32_t len)
+ {
+ #if CLICK_LINUXMODULE	/* Linux kernel module */
+-    skb()->mac.raw = const_cast<unsigned char *>(h);
+-    skb()->nh.raw = const_cast<unsigned char *>(h) + len;
++    skb()->mac_header = const_cast<unsigned char *>(h);
++    skb()->network_header = const_cast<unsigned char *>(h) + len;
+ #else				/* User-space and BSD kernel module */
+     _mac = const_cast<unsigned char *>(h);
+     _nh = const_cast<unsigned char *>(h) + len;
+@@ -956,8 +956,8 @@
+ Packet::set_network_header(const unsigned char *h, uint32_t len)
+ {
+ #if CLICK_LINUXMODULE	/* Linux kernel module */
+-    skb()->nh.raw = const_cast<unsigned char *>(h);
+-    skb()->h.raw = const_cast<unsigned char *>(h) + len;
++    skb()->network_header = const_cast<unsigned char *>(h);
++    skb()->transport_header = const_cast<unsigned char *>(h) + len;
+ #else				/* User-space and BSD kernel module */
+     _nh = const_cast<unsigned char *>(h);
+     _h = const_cast<unsigned char *>(h) + len;
+@@ -968,7 +968,7 @@
+ Packet::set_network_header_length(uint32_t len)
+ {
+ #if CLICK_LINUXMODULE	/* Linux kernel module */
+-    skb()->h.raw = skb()->nh.raw + len;
++    skb()->transport_header = skb()->network_header + len;
+ #else				/* User-space and BSD kernel module */
+     _h = _nh + len;
+ #endif
+@@ -1076,9 +1076,9 @@
+   _h += (_h ? shift : 0);
+ #else
+   struct sk_buff *mskb = skb();
+-  mskb->mac.raw += (mskb->mac.raw ? shift : 0);
+-  mskb->nh.raw += (mskb->nh.raw ? shift : 0);
+-  mskb->h.raw += (mskb->h.raw ? shift : 0);
++  mskb->mac_header += (mskb->mac_header ? shift : 0);
++  mskb->network_header += (mskb->network_header ? shift : 0);
++  mskb->transport_header += (mskb->transport_header ? shift : 0);
+ #endif
+ }
+ 
+--- click-1.6.0-27/include/click/config-linuxmodule.h.orig	2009-01-19 15:07:24.000000000 -0500
++++ click-1.6.0-27/include/click/config-linuxmodule.h	2009-01-20 22:30:23.000000000 -0500
+@@ -87,12 +87,13 @@
+ #endif
+ 
+ /* Include integer type definitions. */
++# include <linux/autoconf.h>
+ #if !HAVE_LINUXMODULE_2_6
+ # include <linux/autoconf.h>
+ #endif
+ #include <linux/types.h>
+ typedef ptrdiff_t intptr_t;
+-typedef unsigned long uintptr_t; /* XXX? */
++//typedef unsigned long uintptr_t; /* XXX? */
+ 
+ /* Define HAVE_INT64_IS_LONG based on HAVE_INT64_IS_LONG_LINUXMODULE. */
+ #ifdef HAVE_INT64_IS_LONG_LINUXMODULE
+@@ -114,11 +115,11 @@
+ #ifdef __cplusplus
+ 
+ /* Declare operator new. */
+-void *operator new(size_t) throw ();
+-void *operator new[](size_t) throw ();
++void *operator new(unsigned int) throw ();
++void *operator new[](unsigned int) throw ();
+ 
+ /* Provide placement new. */
+-inline void *operator new(size_t, void *v) { return v; }
++inline void *operator new(unsigned int, void *v) { return v; }
+ #define HAVE_PLACEMENT_NEW 1
+ 
+ /* Define macros that surround Click declarations. */
+--- click-1.6.0-27/linuxmodule/Makefile.orig	2009-01-19 15:15:55.000000000 -0500
++++ click-1.6.0-27/linuxmodule/Makefile	2009-01-20 10:22:39.000000000 -0500
+@@ -95,7 +95,7 @@
+ 
+ CLICKDEFS = -DHAVE_CONFIG_H 
+ CLICKINCLUDES = -I$(top_builddir)/include -I$(top_srcdir)/include \
+-	-I$(srcdir) -I$(top_srcdir) -I$(linuxdir)/include
++	-I$(srcdir) -I$(top_srcdir) -I$(linuxdir)/include -I$(linuxdir)/include/asm/mach-default
+ 
+ CXXCOMPILE = $(CLICKCXX) $(LINUXCFLAGS) $(CLICKCPPFLAGS) $(CLICKCFLAGS) \
+ 	$(CLICKCXXFLAGS) $(CLICKDEFS) $(CLICKINCLUDES) $(CLICKDEPCFLAGS)
+@@ -177,7 +177,7 @@
+ 
+ CC = gcc -w -W -Wall
+ CPP = gcc -W -Wall -E
+-CXX = g++ -w -W -Wall -fno-exceptions -fno-rtti  -D__SMP__
++CXX = g++ -w -W -fno-exceptions -fno-rtti  -D__SMP__
+ CXXCPP = g++ -W -Wall  -E
+ LD = ld
+ STRIP = strip
+--- click-1.6.0-27/linuxmodule/sched.cc.orig	2007-08-28 19:01:58.000000000 -0400
++++ click-1.6.0-27/linuxmodule/sched.cc	2009-01-26 16:55:57.000000000 -0500
+@@ -228,7 +228,7 @@
+   click_thread_priority = priority;
+   if (click_thread_pids)
+     for (int i = 0; i < click_thread_pids->size(); i++) {
+-      struct task_struct *task = find_task_by_pid((*click_thread_pids)[i]);
++      struct task_struct *task = find_task_by_vpid((*click_thread_pids)[i]);
+       if (task)
+ 	TASK_PRIO(task) = priority;
+     }
+@@ -429,7 +429,7 @@
+     SOFT_SPIN_LOCK(&click_thread_lock);
+     for (int i = 0; i < click_thread_pids->size(); i++) {
+       printk("<1>click:   router thread pid %d\n", (*click_thread_pids)[i]);
+-      struct task_struct *ct = find_task_by_pid((*click_thread_pids)[i]);
++      struct task_struct *ct = find_task_by_vpid((*click_thread_pids)[i]);
+       if (ct)
+ 	  printk("<1>click:   state %d, EIP %08x\n", (int) ct->state, KSTK_EIP(ct));
+     }
+--- click-1.6.0-27/linuxmodule/proclikefs.c.orig	2007-07-16 19:47:50.000000000 -0400
++++ click-1.6.0-27/linuxmodule/proclikefs.c	2009-01-26 17:17:09.000000000 -0500
+@@ -20,6 +20,7 @@
+ #undef CLICK_LINUXMODULE
+ #include <linux/version.h>
+ #include <linux/autoconf.h>
++#include <linux/list.h>
+ #ifndef EXPORT_SYMTAB
+ # define EXPORT_SYMTAB
+ #endif
+@@ -73,7 +74,7 @@
+     char name[1];
+ };
+ 
+-static LIST_HEAD(fs_list);
++static struct list_head fs_list;
+ static spinlock_t fslist_lock;
+ extern spinlock_t inode_lock;
+ extern spinlock_t sb_lock;
+@@ -357,7 +358,7 @@
+ 	fo->unlocked_ioctl = (void *) return_EIO;
+ 	fo->compat_ioctl = (void *) return_EIO;
+ 	fo->aio_fsync = (void *) return_EIO;
+-	fo->sendfile = (void *) return_EIO;
++	//fo->sendfile = (void *) return_EIO;
+ 	fo->check_flags = (void *) return_EIO;
+ 	fo->flock = (void *) return_EIO;
+ #endif
+@@ -533,10 +534,12 @@
+ int
+ init_module(void)
+ {
+-    proclikefs_null_super_operations.read_inode = proclikefs_read_inode;
++    //proclikefs_null_super_operations.read_inode = proclikefs_read_inode;
+     proclikefs_null_super_operations.put_super = proclikefs_put_super;
+     proclikefs_null_root_inode_operations.lookup = proclikefs_null_root_lookup;
+     spin_lock_init(&fslist_lock);
++    INIT_LIST_HEAD(&fs_list);
++    printk (KERN_CRIT "Initializing module\n");
+     return 0;
+ }
+ 
+--- click-1.6.0-27/elements/linuxmodule/tohost.cc.orig	2007-08-31 11:21:55.000000000 -0400
++++ click-1.6.0-27/elements/linuxmodule/tohost.cc	2009-01-26 16:52:00.000000000 -0500
+@@ -143,7 +143,7 @@
+ 
+     // do not call eth_type_trans; it changes pkt_type! Instead, do its work
+     // directly.
+-    skb->mac.raw = skb->data;
++    skb->mac_header = skb->data;
+     skb_pull(skb, 14);
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
+--- click-1.6.0-27/elements/linuxmodule/fromdevice.cc.orig	2007-08-29 04:01:48.000000000 -0400
++++ click-1.6.0-27/elements/linuxmodule/fromdevice.cc	2009-01-26 14:38:07.000000000 -0500
+@@ -258,7 +258,7 @@
+ 	assert(skb_shared(skb) == 0); /* else skb = skb_clone(skb, GFP_ATOMIC); */
+ 
+ 	/* Retrieve the MAC header. */
+-	skb_push(skb, skb->data - skb->mac.raw);
++	skb_push(skb, skb->data - skb_mac_header(skb));
+ 
+ 	Packet *p = Packet::make(skb);
+ 	_queue[_tail] = p; /* hand it to run_task */
+--- click-1.6.0-27/elements/linuxmodule/fromhost.cc.orig	2007-07-16 19:47:50.000000000 -0400
++++ click-1.6.0-27/elements/linuxmodule/fromhost.cc	2009-01-26 15:16:05.000000000 -0500
+@@ -121,7 +121,7 @@
+     used = this;
+     
+     // check for existing device
+-    _dev = dev_get_by_name(_devname.c_str());
++    _dev = dev_get_by_name(&init_net, _devname.c_str());
+     if (_dev) {
+ 	if (_dev->open != fl_open) {
+ 	    dev_put(_dev);
+@@ -175,16 +175,16 @@
+ 
+     ifr.ifr_hwaddr.sa_family = _dev->type;
+     memcpy(ifr.ifr_hwaddr.sa_data, _macaddr.data(), 6);
+-    if ((res = dev_ioctl(SIOCSIFHWADDR, &ifr)) < 0)
++    if ((res = dev_ioctl(&init_net, SIOCSIFHWADDR, &ifr)) < 0)
+ 	errh->error("error %d setting hardware address for device '%s'", res, _devname.c_str());
+ 
+     sin->sin_family = AF_INET;
+     sin->sin_addr = _destaddr;
+-    if (res >= 0 && (res = devinet_ioctl(SIOCSIFADDR, &ifr)) < 0)
++    if (res >= 0 && (res = devinet_ioctl(&init_net,SIOCSIFADDR, &ifr)) < 0)
+ 	errh->error("error %d setting address for device '%s'", res, _devname.c_str());
+ 
+     sin->sin_addr = _destmask;
+-    if (res >= 0 && (res = devinet_ioctl(SIOCSIFNETMASK, &ifr)) < 0)
++    if (res >= 0 && (res = devinet_ioctl(&init_net,SIOCSIFNETMASK, &ifr)) < 0)
+ 	errh->error("error %d setting netmask for device '%s'", res, _devname.c_str());
+ 
+     set_fs(oldfs);
+@@ -202,9 +202,9 @@
+     mm_segment_t oldfs = get_fs();
+     set_fs(get_ds());
+ 
+-    (void) dev_ioctl(SIOCGIFFLAGS, &ifr);
++    (void) dev_ioctl(&init_net, SIOCGIFFLAGS, &ifr);
+     ifr.ifr_flags = (up > 0 ? ifr.ifr_flags | flags : ifr.ifr_flags & ~flags);
+-    if ((res = dev_ioctl(SIOCSIFFLAGS, &ifr)) < 0 && errh)
++    if ((res = dev_ioctl(&init_net, SIOCSIFFLAGS, &ifr)) < 0 && errh)
+ 	errh->error("error %d bringing %s device '%s'", res, (up > 0 ? "up" : "down"), dev->name);
+ 
+     set_fs(oldfs);
+--- click-1.6.0-27/elements/linuxmodule/anydevice.cc.orig	2007-08-29 04:03:55.000000000 -0400
++++ click-1.6.0-27/elements/linuxmodule/anydevice.cc	2009-01-21 14:44:39.000000000 -0500
+@@ -49,7 +49,7 @@
+ int
+ AnyDevice::find_device(AnyDeviceMap *adm, ErrorHandler *errh)
+ {
+-    _dev = dev_get_by_name(_devname.c_str());
++    _dev = dev_get_by_name(&init_net,_devname.c_str());
+     _devname_exists = (bool) _dev;
+     if (!_dev)
+ 	_dev = dev_get_by_ether_address(_devname, this);
+@@ -233,7 +233,7 @@
+ 	return 0;
+     read_lock(&dev_base_lock);
+     net_device *dev;
+-    for (dev = dev_base; dev; dev = dev->next)
++    for_each_netdev(&init_net, dev)//for (dev = dev_base; dev; dev = dev->next)
+ 	if ((dev->type == ARPHRD_ETHER || dev->type == ARPHRD_80211)
+ 	    && memcmp(en, dev->dev_addr, 6) == 0) {
+ 	    dev_hold(dev);	// dev_get_by_name does dev_hold; so
+--- click-1.6.0-27/elements/linuxmodule/todevice.cc.orig	2007-09-14 12:19:28.000000000 -0400
++++ click-1.6.0-27/elements/linuxmodule/todevice.cc	2009-01-26 16:50:39.000000000 -0500
+@@ -21,6 +21,8 @@
+  * legally binding.
+  */
+ 
++#include <linux/autoconf.h>
++#include <linux/version.h>
+ #include <click/config.h>
+ #include <click/glue.hh>
+ #include "polldevice.hh"
+@@ -243,12 +245,12 @@
+     }
+ # else
+     local_bh_disable();
+-    if (!spin_trylock(&_dev->xmit_lock)) {
++    if (!spin_trylock(&_dev->_tx[0]._xmit_lock)) {
+ 	local_bh_enable();
+ 	_task.fast_reschedule();
+ 	return false;
+     }
+-    _dev->xmit_lock_owner = smp_processor_id();
++    _dev->_tx[0].xmit_lock_owner = smp_processor_id();
+ # endif
+ #endif
+ 
+@@ -316,7 +318,7 @@
+     // (or until Linux sends another packet) unless we poke
+     // net_bh(), which calls qdisc_restart(). We are not allowed
+     // to call qdisc_restart() ourselves, outside of net_bh().
+-    if (is_polling && !busy && _dev->qdisc->q.qlen) {
++    if (is_polling && !busy && _dev->_tx[0].qdisc->q.qlen) {
+ 	_dev->tx_eob(_dev);
+ 	netif_wake_queue(_dev);
+     }
+@@ -349,8 +351,8 @@
+ # if HAVE_NETIF_TX_LOCK
+     netif_tx_unlock_bh(_dev);
+ # else
+-    _dev->xmit_lock_owner = -1;
+-    spin_unlock(&_dev->xmit_lock);
++    _dev->_tx[0].xmit_lock_owner = -1;
++    spin_unlock(&_dev->_tx[0]._xmit_lock);
+     local_bh_enable();
+ # endif
+ #endif
+--- click-1.6.0-27/elements/standard/addressinfo.cc.orig	2007-09-12 02:14:04.000000000 -0400
++++ click-1.6.0-27/elements/standard/addressinfo.cc	2009-01-21 13:08:40.000000000 -0500
+@@ -272,7 +272,7 @@
+     // if it's a device name, return a primary IP address
+ #if CLICK_LINUXMODULE
+ # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 4, 0)
+-    net_device *dev = dev_get_by_name(s.c_str());
++    net_device *dev = dev_get_by_name(&init_net,s.c_str());
+     if (dev) {
+ 	bool found = false;
+ 	in_device *in_dev = in_dev_get(dev);
+@@ -383,7 +383,7 @@
+ # if LINUX_VERSION_CODE < KERNEL_VERSION(2, 4, 0)
+ #  define dev_put(dev) /* nada */
+ # endif
+-    net_device *dev = dev_get_by_name(s.c_str());
++    net_device *dev = dev_get_by_name(&init_net,s.c_str());
+     if (dev && (dev->type == ARPHRD_ETHER || dev->type == ARPHRD_80211)) {
+ 	memcpy(store, dev->dev_addr, 6);
+ 	dev_put(dev);
