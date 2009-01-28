@@ -354,12 +354,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 10
 %ApplyPatch 20
 
-# NetNS patch for VINI
-%if 0%{?with_netns}
-%ApplyPatch 30
-%endif
-%ApplyPatch 40
-
 %ApplyPatch 100
 
 %ApplyPatch 200

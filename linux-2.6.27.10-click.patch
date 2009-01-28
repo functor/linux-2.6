@@ -1,0 +1,2250 @@
+Files linux-2.6.27.10/arch/x86/boot/compressed/relocs and linux-2.6.27.10-clickport/arch/x86/boot/compressed/relocs differ
+Files linux-2.6.27.10/arch/x86/boot/compressed/vmlinux.bin.all and linux-2.6.27.10-clickport/arch/x86/boot/compressed/vmlinux.bin.all differ
+Files linux-2.6.27.10/arch/x86/boot/compressed/vmlinux.relocs and linux-2.6.27.10-clickport/arch/x86/boot/compressed/vmlinux.relocs differ
+diff -Nurb linux-2.6.27.10/arch/x86/kernel/.tmp_i387.ver linux-2.6.27.10-clickport/arch/x86/kernel/.tmp_i387.ver
+--- linux-2.6.27.10/arch/x86/kernel/.tmp_i387.ver	2009-01-27 16:05:11.000000000 -0500
++++ linux-2.6.27.10-clickport/arch/x86/kernel/.tmp_i387.ver	1969-12-31 19:00:00.000000000 -0500
+@@ -1 +0,0 @@
+-__crc_dump_fpu = 0x6dee7be5 ;
+diff -Nurb linux-2.6.27.10/drivers/input/serio/i8042-ppcio.h linux-2.6.27.10-clickport/drivers/input/serio/i8042-ppcio.h
+--- linux-2.6.27.10/drivers/input/serio/i8042-ppcio.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/drivers/input/serio/i8042-ppcio.h	2009-01-27 15:47:16.000000000 -0500
+@@ -77,7 +77,7 @@
+ 	asm volatile("lis     7,0xff88        \n\
+ 		      lswi    6,7,0x8         \n\
+ 		      mr      %0,6"
+-	              : "=r" (kbd_data) :: "6", "7");
++	              : "=r" (kbd_data) : : "6", "7");
+ 
+ 	__raw_writel(0x00000000, 0xff50000c);
+ 	eieio();
+@@ -99,7 +99,7 @@
+ 		      ori     7,7,0x8         \n\
+ 		      lswi    6,7,0x8         \n\
+ 		      mr      %0,6"
+-		      : "=r" (kbd_status) :: "6", "7");
++		      : "=r" (kbd_status) : : "6", "7");
+ 
+ 	__raw_writel(0x00000000, 0xff50000c);
+ 	eieio();
+diff -Nurb linux-2.6.27.10/drivers/net/wireless/rayctl.h linux-2.6.27.10-clickport/drivers/net/wireless/rayctl.h
+--- linux-2.6.27.10/drivers/net/wireless/rayctl.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/drivers/net/wireless/rayctl.h	2009-01-27 15:47:16.000000000 -0500
+@@ -418,9 +418,7 @@
+ };
+ 
+ /****** Host-to-ECF Data Area at Shared RAM offset 0x200 *********************/
+-struct host_to_ecf_area {
+-    
+-};
++EMPTY_STRUCT_DECL(host_to_ecf_area);
+ 
+ /****** ECF-to-Host Data Area at Shared RAM offset 0x0300 ********************/
+ struct startup_res_518 {
+diff -Nurb linux-2.6.27.10/drivers/video/i810/i810_main.h linux-2.6.27.10-clickport/drivers/video/i810/i810_main.h
+--- linux-2.6.27.10/drivers/video/i810/i810_main.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/drivers/video/i810/i810_main.h	2009-01-27 15:47:16.000000000 -0500
+@@ -54,7 +54,7 @@
+ #ifdef CONFIG_X86
+ static inline void flush_cache(void)
+ {
+-	asm volatile ("wbinvd":::"memory");
++	asm volatile ("wbinvd": : :"memory");
+ }
+ #else
+ #define flush_cache() do { } while(0)
+diff -Nurb linux-2.6.27.10/fs/file_table.c linux-2.6.27.10-clickport/fs/file_table.c
+--- linux-2.6.27.10/fs/file_table.c	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/fs/file_table.c	2009-01-27 15:47:16.000000000 -0500
+@@ -34,6 +34,8 @@
+ /* public. Not pretty! */
+ __cacheline_aligned_in_smp DEFINE_SPINLOCK(files_lock);
+ 
++EXPORT_SYMBOL(files_lock);
++
+ static struct percpu_counter nr_files __cacheline_aligned_in_smp;
+ 
+ static inline void file_free_rcu(struct rcu_head *head)
+diff -Nurb linux-2.6.27.10/fs/super.c linux-2.6.27.10-clickport/fs/super.c
+--- linux-2.6.27.10/fs/super.c	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/fs/super.c	2009-01-27 15:47:16.000000000 -0500
+@@ -48,6 +48,8 @@
+ LIST_HEAD(super_blocks);
+ DEFINE_SPINLOCK(sb_lock);
+ 
++EXPORT_SYMBOL(sb_lock);
++
+ /**
+  *	alloc_super	-	create new superblock
+  *	@type:	filesystem type superblock should belong to
+diff -Nurb linux-2.6.27.10/include/asm-cris/arch-v10/io.h linux-2.6.27.10-clickport/include/asm-cris/arch-v10/io.h
+--- linux-2.6.27.10/include/asm-cris/arch-v10/io.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-cris/arch-v10/io.h	2009-01-27 15:47:26.000000000 -0500
+@@ -190,8 +190,8 @@
+  ({ int _Foofoo; __asm__ volatile ("bmod [%0],%0" : "=r" (_Foofoo) : "0" \
+ 			       (255)); _Foofoo; })
+ 
+-#define TRACE_OFF() do { __asm__ volatile ("bmod [%0],%0" :: "r" (254)); } while (0)
+-#define SIM_END() do { __asm__ volatile ("bmod [%0],%0" :: "r" (28)); } while (0)
++#define TRACE_OFF() do { __asm__ volatile ("bmod [%0],%0" : : "r" (254)); } while (0)
++#define SIM_END() do { __asm__ volatile ("bmod [%0],%0" : : "r" (28)); } while (0)
+ #define CRIS_CYCLES() __extension__ \
+  ({ unsigned long c; asm ("bmod [%1],%0" : "=r" (c) : "r" (27)); c;})
+ #endif /* ! defined CONFIG_SVINTO_SIM */
+diff -Nurb linux-2.6.27.10/include/asm-cris/module.h linux-2.6.27.10-clickport/include/asm-cris/module.h
+--- linux-2.6.27.10/include/asm-cris/module.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-cris/module.h	2009-01-27 15:47:26.000000000 -0500
+@@ -1,7 +1,7 @@
+ #ifndef _ASM_CRIS_MODULE_H
+ #define _ASM_CRIS_MODULE_H
+ /* cris is simple */
+-struct mod_arch_specific { };
++EMPTY_STRUCT_DECL(mod_arch_specific);
+ 
+ #define Elf_Shdr Elf32_Shdr
+ #define Elf_Sym Elf32_Sym
+diff -Nurb linux-2.6.27.10/include/asm-frv/bug.h linux-2.6.27.10-clickport/include/asm-frv/bug.h
+--- linux-2.6.27.10/include/asm-frv/bug.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/bug.h	2009-01-27 15:47:26.000000000 -0500
+@@ -17,7 +17,7 @@
+ /*
+  * Tell the user there is some problem.
+  */
+-extern asmlinkage void __debug_bug_trap(int signr);
++asmlinkage void __debug_bug_trap(int signr);
+ 
+ #ifdef CONFIG_NO_KERNEL_MSG
+ #define	_debug_bug_printk()
+diff -Nurb linux-2.6.27.10/include/asm-frv/fpu.h linux-2.6.27.10-clickport/include/asm-frv/fpu.h
+--- linux-2.6.27.10/include/asm-frv/fpu.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/fpu.h	2009-01-27 15:47:26.000000000 -0500
+@@ -6,6 +6,6 @@
+  * MAX floating point unit state size (FSAVE/FRESTORE)
+  */
+ 
+-#define kernel_fpu_end() do { asm volatile("bar":::"memory"); preempt_enable(); } while(0)
++#define kernel_fpu_end() do { asm volatile("bar": : :"memory"); preempt_enable(); } while(0)
+ 
+ #endif /* __ASM_FPU_H */
+diff -Nurb linux-2.6.27.10/include/asm-frv/gdb-stub.h linux-2.6.27.10-clickport/include/asm-frv/gdb-stub.h
+--- linux-2.6.27.10/include/asm-frv/gdb-stub.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/gdb-stub.h	2009-01-27 15:47:26.000000000 -0500
+@@ -87,14 +87,14 @@
+ extern void gdbstub_tx_flush(void);
+ extern void gdbstub_do_rx(void);
+ 
+-extern asmlinkage void __debug_stub_init_break(void);
+-extern asmlinkage void __break_hijack_kernel_event(void);
+-extern asmlinkage void __break_hijack_kernel_event_breaks_here(void);
+-extern asmlinkage void start_kernel(void);
+-
+-extern asmlinkage void gdbstub_rx_handler(void);
+-extern asmlinkage void gdbstub_rx_irq(void);
+-extern asmlinkage void gdbstub_intercept(void);
++asmlinkage void __debug_stub_init_break(void);
++asmlinkage void __break_hijack_kernel_event(void);
++asmlinkage void __break_hijack_kernel_event_breaks_here(void);
++asmlinkage void start_kernel(void);
++
++asmlinkage void gdbstub_rx_handler(void);
++asmlinkage void gdbstub_rx_irq(void);
++asmlinkage void gdbstub_intercept(void);
+ 
+ extern uint32_t __entry_usertrap_table[];
+ extern uint32_t __entry_kerneltrap_table[];
+diff -Nurb linux-2.6.27.10/include/asm-frv/highmem.h linux-2.6.27.10-clickport/include/asm-frv/highmem.h
+--- linux-2.6.27.10/include/asm-frv/highmem.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/highmem.h	2009-01-27 15:47:26.000000000 -0500
+@@ -82,11 +82,11 @@
+ 	dampr = paddr | xAMPRx_L | xAMPRx_M | xAMPRx_S | xAMPRx_SS_16Kb | xAMPRx_V;		\
+ 												\
+ 	if (type != __KM_CACHE)									\
+-		asm volatile("movgs %0,dampr"#ampr :: "r"(dampr) : "memory");			\
++		asm volatile("movgs %0,dampr"#ampr : : "r"(dampr) : "memory");			\
+ 	else											\
+ 		asm volatile("movgs %0,iampr"#ampr"\n"						\
+ 			     "movgs %0,dampr"#ampr"\n"						\
+-			     :: "r"(dampr) : "memory"						\
++			     : : "r"(dampr) : "memory"						\
+ 			     );									\
+ 												\
+ 	asm("movsg damlr"#ampr",%0" : "=r"(damlr));						\
+@@ -140,9 +140,9 @@
+ 
+ #define __kunmap_atomic_primary(type, ampr)				\
+ do {									\
+-	asm volatile("movgs gr0,dampr"#ampr"\n" ::: "memory");		\
++	asm volatile("movgs gr0,dampr"#ampr"\n" : : : "memory");	\
+ 	if (type == __KM_CACHE)						\
+-		asm volatile("movgs gr0,iampr"#ampr"\n" ::: "memory");	\
++		asm volatile("movgs gr0,iampr"#ampr"\n" : : : "memory");\
+ } while(0)
+ 
+ #define __kunmap_atomic_secondary(slot, vaddr)				\
+diff -Nurb linux-2.6.27.10/include/asm-frv/module.h linux-2.6.27.10-clickport/include/asm-frv/module.h
+--- linux-2.6.27.10/include/asm-frv/module.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/module.h	2009-01-27 15:47:26.000000000 -0500
+@@ -11,9 +11,7 @@
+ #ifndef _ASM_MODULE_H
+ #define _ASM_MODULE_H
+ 
+-struct mod_arch_specific
+-{
+-};
++EMPTY_STRUCT_DECL(mod_arch_specific);
+ 
+ #define Elf_Shdr	Elf32_Shdr
+ #define Elf_Sym		Elf32_Sym
+diff -Nurb linux-2.6.27.10/include/asm-frv/pgtable.h linux-2.6.27.10-clickport/include/asm-frv/pgtable.h
+--- linux-2.6.27.10/include/asm-frv/pgtable.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/pgtable.h	2009-01-27 15:47:26.000000000 -0500
+@@ -176,7 +176,7 @@
+ #define set_pte(pteptr, pteval)				\
+ do {							\
+ 	*(pteptr) = (pteval);				\
+-	asm volatile("dcf %M0" :: "U"(*pteptr));	\
++	asm volatile("dcf %M0" : : "U"(*pteptr));	\
+ } while(0)
+ #define set_pte_at(mm,addr,ptep,pteval) set_pte(ptep,pteval)
+ 
+@@ -210,7 +210,7 @@
+ #define set_pgd(pgdptr, pgdval)				\
+ do {							\
+ 	memcpy((pgdptr), &(pgdval), sizeof(pgd_t));	\
+-	asm volatile("dcf %M0" :: "U"(*(pgdptr)));	\
++	asm volatile("dcf %M0" : : "U"(*(pgdptr)));	\
+ } while(0)
+ 
+ static inline pud_t *pud_offset(pgd_t *pgd, unsigned long address)
+diff -Nurb linux-2.6.27.10/include/asm-frv/processor.h linux-2.6.27.10-clickport/include/asm-frv/processor.h
+--- linux-2.6.27.10/include/asm-frv/processor.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/processor.h	2009-01-27 15:47:26.000000000 -0500
+@@ -111,9 +111,9 @@
+ {
+ }
+ 
+-extern asmlinkage int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
+-extern asmlinkage void save_user_regs(struct user_context *target);
+-extern asmlinkage void *restore_user_regs(const struct user_context *target, ...);
++asmlinkage int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
++asmlinkage void save_user_regs(struct user_context *target);
++asmlinkage void *restore_user_regs(const struct user_context *target, ...);
+ 
+ #define copy_segments(tsk, mm)		do { } while (0)
+ #define release_segments(mm)		do { } while (0)
+diff -Nurb linux-2.6.27.10/include/asm-frv/spr-regs.h linux-2.6.27.10-clickport/include/asm-frv/spr-regs.h
+--- linux-2.6.27.10/include/asm-frv/spr-regs.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/spr-regs.h	2009-01-27 15:47:26.000000000 -0500
+@@ -343,7 +343,7 @@
+ 
+ #define restore_dampr(R, _dampr)			\
+ do {							\
+-	asm volatile("movgs %0,dampr"R :: "r"(_dampr));	\
++	asm volatile("movgs %0,dampr"R : : "r"(_dampr));	\
+ } while(0)
+ 
+ /*
+diff -Nurb linux-2.6.27.10/include/asm-frv/system.h linux-2.6.27.10-clickport/include/asm-frv/system.h
+--- linux-2.6.27.10/include/asm-frv/system.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-frv/system.h	2009-01-27 15:47:26.000000000 -0500
+@@ -23,7 +23,7 @@
+  * `prev' will never be the same as `next'.
+  * The `mb' is to tell GCC not to cache `current' across this call.
+  */
+-extern asmlinkage
++asmlinkage
+ struct task_struct *__switch_to(struct thread_struct *prev_thread,
+ 				struct thread_struct *next_thread,
+ 				struct task_struct *prev);
+@@ -175,7 +175,7 @@
+ /*
+  * Force strict CPU ordering.
+  */
+-#define nop()			asm volatile ("nop"::)
++#define nop()			asm volatile ("nop": :)
+ #define mb()			asm volatile ("membar" : : :"memory")
+ #define rmb()			asm volatile ("membar" : : :"memory")
+ #define wmb()			asm volatile ("membar" : : :"memory")
+diff -Nurb linux-2.6.27.10/include/asm-m32r/module.h linux-2.6.27.10-clickport/include/asm-m32r/module.h
+--- linux-2.6.27.10/include/asm-m32r/module.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-m32r/module.h	2009-01-27 15:47:32.000000000 -0500
+@@ -1,7 +1,7 @@
+ #ifndef _ASM_M32R_MODULE_H
+ #define _ASM_M32R_MODULE_H
+ 
+-struct mod_arch_specific { };
++EMPTY_STRUCT_DECL(mod_arch_specific);
+ 
+ #define Elf_Shdr	Elf32_Shdr
+ #define Elf_Sym		Elf32_Sym
+diff -Nurb linux-2.6.27.10/include/asm-m68k/system.h linux-2.6.27.10-clickport/include/asm-m68k/system.h
+--- linux-2.6.27.10/include/asm-m68k/system.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-m68k/system.h	2009-01-27 15:47:33.000000000 -0500
+@@ -167,23 +167,23 @@
+ #define __HAVE_ARCH_CMPXCHG	1
+ 
+ static inline unsigned long __cmpxchg(volatile void *p, unsigned long old,
+-				      unsigned long new, int size)
++				      unsigned long n, int size)
+ {
+ 	switch (size) {
+ 	case 1:
+ 		__asm__ __volatile__ ("casb %0,%2,%1"
+ 				      : "=d" (old), "=m" (*(char *)p)
+-				      : "d" (new), "0" (old), "m" (*(char *)p));
++				      : "d" (n), "0" (old), "m" (*(char *)p));
+ 		break;
+ 	case 2:
+ 		__asm__ __volatile__ ("casw %0,%2,%1"
+ 				      : "=d" (old), "=m" (*(short *)p)
+-				      : "d" (new), "0" (old), "m" (*(short *)p));
++				      : "d" (n), "0" (old), "m" (*(short *)p));
+ 		break;
+ 	case 4:
+ 		__asm__ __volatile__ ("casl %0,%2,%1"
+ 				      : "=d" (old), "=m" (*(int *)p)
+-				      : "d" (new), "0" (old), "m" (*(int *)p));
++				      : "d" (n), "0" (old), "m" (*(int *)p));
+ 		break;
+ 	}
+ 	return old;
+diff -Nurb linux-2.6.27.10/include/asm-mips/fpu.h linux-2.6.27.10-clickport/include/asm-mips/fpu.h
+--- linux-2.6.27.10/include/asm-mips/fpu.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/fpu.h	2009-01-27 15:52:53.000000000 -0500
+@@ -28,11 +28,11 @@
+ struct sigcontext;
+ struct sigcontext32;
+ 
+-extern asmlinkage int (*save_fp_context)(struct sigcontext __user *sc);
+-extern asmlinkage int (*restore_fp_context)(struct sigcontext __user *sc);
++asmlinkage int (*save_fp_context)(struct sigcontext __user *sc);
++asmlinkage int (*restore_fp_context)(struct sigcontext __user *sc);
+ 
+-extern asmlinkage int (*save_fp_context32)(struct sigcontext32 __user *sc);
+-extern asmlinkage int (*restore_fp_context32)(struct sigcontext32 __user *sc);
++asmlinkage int (*save_fp_context32)(struct sigcontext32 __user *sc);
++asmlinkage int (*restore_fp_context32)(struct sigcontext32 __user *sc);
+ 
+ extern void fpu_emulator_init_fpu(void);
+ extern int fpu_emulator_save_context(struct sigcontext __user *sc);
+diff -Nurb linux-2.6.27.10/include/asm-mips/io.h linux-2.6.27.10-clickport/include/asm-mips/io.h
+--- linux-2.6.27.10/include/asm-mips/io.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/io.h	2009-01-27 15:47:33.000000000 -0500
+@@ -303,7 +303,7 @@
+ 	volatile type *__mem;						\
+ 	type __val;							\
+ 									\
+-	__mem = (void *)__swizzle_addr_##bwlq((unsigned long)(mem));	\
++	__mem = (type *)__swizzle_addr_##bwlq((unsigned long)(mem));	\
+ 									\
+ 	__val = pfx##ioswab##bwlq(__mem, val);				\
+ 									\
+@@ -336,7 +336,7 @@
+ 	volatile type *__mem;						\
+ 	type __val;							\
+ 									\
+-	__mem = (void *)__swizzle_addr_##bwlq((unsigned long)(mem));	\
++	__mem = (type *)__swizzle_addr_##bwlq((unsigned long)(mem));	\
+ 									\
+ 	if (sizeof(type) != sizeof(u64) || sizeof(u64) == sizeof(long))	\
+ 		__val = *__mem;						\
+@@ -370,7 +370,7 @@
+ 	volatile type *__addr;						\
+ 	type __val;							\
+ 									\
+-	__addr = (void *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
++	__addr = (type *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
+ 									\
+ 	__val = pfx##ioswab##bwlq(__addr, val);				\
+ 									\
+@@ -386,7 +386,7 @@
+ 	volatile type *__addr;						\
+ 	type __val;							\
+ 									\
+-	__addr = (void *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
++	__addr = (type *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
+ 									\
+ 	BUILD_BUG_ON(sizeof(type) > sizeof(unsigned long));		\
+ 									\
+@@ -448,7 +448,7 @@
+ static inline void writes##bwlq(volatile void __iomem *mem,		\
+ 				const void *addr, unsigned int count)	\
+ {									\
+-	const volatile type *__addr = addr;				\
++	const volatile type *__addr = (const type *) addr;		\
+ 									\
+ 	while (count--) {						\
+ 		__mem_write##bwlq(*__addr, mem);			\
+@@ -459,7 +459,7 @@
+ static inline void reads##bwlq(volatile void __iomem *mem, void *addr,	\
+ 			       unsigned int count)			\
+ {									\
+-	volatile type *__addr = addr;					\
++	volatile type *__addr = (type *) addr;				\
+ 									\
+ 	while (count--) {						\
+ 		*__addr = __mem_read##bwlq(mem);			\
+@@ -472,7 +472,7 @@
+ static inline void outs##bwlq(unsigned long port, const void *addr,	\
+ 			      unsigned int count)			\
+ {									\
+-	const volatile type *__addr = addr;				\
++	const volatile type *__addr = (const type *) addr;		\
+ 									\
+ 	while (count--) {						\
+ 		__mem_out##bwlq(*__addr, port);				\
+@@ -483,7 +483,7 @@
+ static inline void ins##bwlq(unsigned long port, void *addr,		\
+ 			     unsigned int count)			\
+ {									\
+-	volatile type *__addr = addr;					\
++	volatile type *__addr = (type *) addr;				\
+ 									\
+ 	while (count--) {						\
+ 		*__addr = __mem_in##bwlq(port);				\
+@@ -505,7 +505,7 @@
+ 
+ 
+ /* Depends on MIPS II instruction set */
+-#define mmiowb() asm volatile ("sync" ::: "memory")
++#define mmiowb() asm volatile ("sync" : : : "memory")
+ 
+ static inline void memset_io(volatile void __iomem *addr, unsigned char val, int count)
+ {
+diff -Nurb linux-2.6.27.10/include/asm-mips/ip32/mace.h linux-2.6.27.10-clickport/include/asm-mips/ip32/mace.h
+--- linux-2.6.27.10/include/asm-mips/ip32/mace.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/ip32/mace.h	2009-01-27 15:47:33.000000000 -0500
+@@ -308,11 +308,9 @@
+  */
+ 
+ /* Parallel port */
+-struct mace_parallel {
+-};
++EMPTY_STRUCT_DECL(mace_parallel);
+ 
+-struct mace_ecp1284 {	/* later... */
+-};
++EMPTY_STRUCT_DECL(mace_ecp1284);	/* later... */
+ 
+ /* Serial port */
+ struct mace_serial {
+diff -Nurb linux-2.6.27.10/include/asm-mips/mips-boards/sim.h linux-2.6.27.10-clickport/include/asm-mips/mips-boards/sim.h
+--- linux-2.6.27.10/include/asm-mips/mips-boards/sim.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/mips-boards/sim.h	2009-01-27 15:47:33.000000000 -0500
+@@ -31,7 +31,7 @@
+ ({					   \
+ 	__asm__  __volatile__( \
+         "sltiu $0,$0, %0" \
+-		::"i"(code)					\
++		: :"i"(code)					\
+ 		); \
+ })
+ 
+diff -Nurb linux-2.6.27.10/include/asm-mips/mipsregs.h linux-2.6.27.10-clickport/include/asm-mips/mipsregs.h
+--- linux-2.6.27.10/include/asm-mips/mipsregs.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/mipsregs.h	2009-01-27 15:47:33.000000000 -0500
+@@ -1052,15 +1052,15 @@
+ #define mfhi2() ({ long mfhi2; __asm__("mfhi %0, $ac2" : "=r" (mfhi2)); mfhi2;})
+ #define mfhi3() ({ long mfhi3; __asm__("mfhi %0, $ac3" : "=r" (mfhi3)); mfhi3;})
+ 
+-#define mtlo0(x) __asm__("mtlo %0, $ac0" ::"r" (x))
+-#define mtlo1(x) __asm__("mtlo %0, $ac1" ::"r" (x))
+-#define mtlo2(x) __asm__("mtlo %0, $ac2" ::"r" (x))
+-#define mtlo3(x) __asm__("mtlo %0, $ac3" ::"r" (x))
+-
+-#define mthi0(x) __asm__("mthi %0, $ac0" ::"r" (x))
+-#define mthi1(x) __asm__("mthi %0, $ac1" ::"r" (x))
+-#define mthi2(x) __asm__("mthi %0, $ac2" ::"r" (x))
+-#define mthi3(x) __asm__("mthi %0, $ac3" ::"r" (x))
++#define mtlo0(x) __asm__("mtlo %0, $ac0" : :"r" (x))
++#define mtlo1(x) __asm__("mtlo %0, $ac1" : :"r" (x))
++#define mtlo2(x) __asm__("mtlo %0, $ac2" : :"r" (x))
++#define mtlo3(x) __asm__("mtlo %0, $ac3" : :"r" (x))
++
++#define mthi0(x) __asm__("mthi %0, $ac0" : :"r" (x))
++#define mthi1(x) __asm__("mthi %0, $ac1" : :"r" (x))
++#define mthi2(x) __asm__("mthi %0, $ac2" : :"r" (x))
++#define mthi3(x) __asm__("mthi %0, $ac3" : :"r" (x))
+ 
+ #else
+ 
+@@ -1390,13 +1390,13 @@
+ }								\
+ 								\
+ static inline unsigned int					\
+-change_c0_##name(unsigned int change, unsigned int new)		\
++change_c0_##name(unsigned int change, unsigned int newval)	\
+ {								\
+ 	unsigned int res;					\
+ 								\
+ 	res = read_c0_##name();					\
+ 	res &= ~change;						\
+-	res |= (new & change);					\
++	res |= (newval & change);				\
+ 	write_c0_##name(res);					\
+ 								\
+ 	return res;						\
+diff -Nurb linux-2.6.27.10/include/asm-mips/paccess.h linux-2.6.27.10-clickport/include/asm-mips/paccess.h
+--- linux-2.6.27.10/include/asm-mips/paccess.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/paccess.h	2009-01-27 15:47:33.000000000 -0500
+@@ -22,8 +22,8 @@
+ #define __PA_ADDR	".dword"
+ #endif
+ 
+-extern asmlinkage void handle_ibe(void);
+-extern asmlinkage void handle_dbe(void);
++asmlinkage void handle_ibe(void);
++asmlinkage void handle_dbe(void);
+ 
+ #define put_dbe(x, ptr) __put_dbe((x), (ptr), sizeof(*(ptr)))
+ #define get_dbe(x, ptr) __get_dbe((x), (ptr), sizeof(*(ptr)))
+diff -Nurb linux-2.6.27.10/include/asm-mips/processor.h linux-2.6.27.10-clickport/include/asm-mips/processor.h
+--- linux-2.6.27.10/include/asm-mips/processor.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/processor.h	2009-01-27 15:47:33.000000000 -0500
+@@ -242,7 +242,7 @@
+  * overhead of a function call by forcing the compiler to save the return
+  * address register on the stack.
+  */
+-#define return_address() ({__asm__ __volatile__("":::"$31");__builtin_return_address(0);})
++#define return_address() ({__asm__ __volatile__("": : :"$31");__builtin_return_address(0);})
+ 
+ #ifdef CONFIG_CPU_HAS_PREFETCH
+ 
+diff -Nurb linux-2.6.27.10/include/asm-mips/ptrace.h linux-2.6.27.10-clickport/include/asm-mips/ptrace.h
+--- linux-2.6.27.10/include/asm-mips/ptrace.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/ptrace.h	2009-01-27 15:47:33.000000000 -0500
+@@ -84,7 +84,7 @@
+ #define instruction_pointer(regs) ((regs)->cp0_epc)
+ #define profile_pc(regs) instruction_pointer(regs)
+ 
+-extern asmlinkage void do_syscall_trace(struct pt_regs *regs, int entryexit);
++asmlinkage void do_syscall_trace(struct pt_regs *regs, int entryexit);
+ 
+ extern NORET_TYPE void die(const char *, const struct pt_regs *) ATTRIB_NORET;
+ 
+diff -Nurb linux-2.6.27.10/include/asm-mips/smp.h linux-2.6.27.10-clickport/include/asm-mips/smp.h
+--- linux-2.6.27.10/include/asm-mips/smp.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/smp.h	2009-01-27 15:47:33.000000000 -0500
+@@ -55,7 +55,7 @@
+ 	mp_ops->send_ipi_single(cpu, SMP_RESCHEDULE_YOURSELF);
+ }
+ 
+-extern asmlinkage void smp_call_function_interrupt(void);
++asmlinkage void smp_call_function_interrupt(void);
+ 
+ extern void arch_send_call_function_single_ipi(int cpu);
+ extern void arch_send_call_function_ipi(cpumask_t mask);
+diff -Nurb linux-2.6.27.10/include/asm-mips/system.h linux-2.6.27.10-clickport/include/asm-mips/system.h
+--- linux-2.6.27.10/include/asm-mips/system.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-mips/system.h	2009-01-27 15:47:33.000000000 -0500
+@@ -27,7 +27,7 @@
+  * switch_to(n) should switch tasks to task nr n, first
+  * checking that n isn't the current task, in which case it does nothing.
+  */
+-extern asmlinkage void *resume(void *last, void *next, void *next_ti);
++asmlinkage void *resume(void *last, void *next, void *next_ti);
+ 
+ struct task_struct;
+ 
+@@ -189,9 +189,9 @@
+ {
+ 	switch (size) {
+ 	case 4:
+-		return __xchg_u32(ptr, x);
++		return __xchg_u32((volatile int *) ptr, x);
+ 	case 8:
+-		return __xchg_u64(ptr, x);
++		return __xchg_u64((volatile __u64 *) ptr, x);
+ 	}
+ 	__xchg_called_with_bad_pointer();
+ 	return x;
+diff -Nurb linux-2.6.27.10/include/asm-parisc/system.h linux-2.6.27.10-clickport/include/asm-parisc/system.h
+--- linux-2.6.27.10/include/asm-parisc/system.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-parisc/system.h	2009-01-27 15:47:34.000000000 -0500
+@@ -122,7 +122,7 @@
+ ** The __asm__ op below simple prevents gcc/ld from reordering
+ ** instructions across the mb() "call".
+ */
+-#define mb()		__asm__ __volatile__("":::"memory")	/* barrier() */
++#define mb()		__asm__ __volatile__("": : :"memory")	/* barrier() */
+ #define rmb()		mb()
+ #define wmb()		mb()
+ #define smp_mb()	mb()
+diff -Nurb linux-2.6.27.10/include/asm-um/module-i386.h linux-2.6.27.10-clickport/include/asm-um/module-i386.h
+--- linux-2.6.27.10/include/asm-um/module-i386.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-um/module-i386.h	2009-01-27 15:47:37.000000000 -0500
+@@ -2,9 +2,7 @@
+ #define __UM_MODULE_I386_H
+ 
+ /* UML is simple */
+-struct mod_arch_specific
+-{
+-};
++EMPTY_STRUCT_DECL(mod_arch_specific);
+ 
+ #define Elf_Shdr Elf32_Shdr
+ #define Elf_Sym Elf32_Sym
+diff -Nurb linux-2.6.27.10/include/asm-um/module-x86_64.h linux-2.6.27.10-clickport/include/asm-um/module-x86_64.h
+--- linux-2.6.27.10/include/asm-um/module-x86_64.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-um/module-x86_64.h	2009-01-27 15:47:37.000000000 -0500
+@@ -8,9 +8,7 @@
+ #define __UM_MODULE_X86_64_H
+ 
+ /* UML is simple */
+-struct mod_arch_specific
+-{
+-};
++EMPTY_STRUCT_DECL(mod_arch_specific);
+ 
+ #define Elf_Shdr Elf64_Shdr
+ #define Elf_Sym Elf64_Sym
+diff -Nurb linux-2.6.27.10/include/asm-x86/bitops.h linux-2.6.27.10-clickport/include/asm-x86/bitops.h
+--- linux-2.6.27.10/include/asm-x86/bitops.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/bitops.h	2009-01-28 11:21:01.000000000 -0500
+@@ -35,7 +35,7 @@
+  * a mask operation on a byte.
+  */
+ #define IS_IMMEDIATE(nr)		(__builtin_constant_p(nr))
+-#define CONST_MASK_ADDR(nr, addr)	BITOP_ADDR((void *)(addr) + ((nr)>>3))
++#define CONST_MASK_ADDR(nr, addr)	BITOP_ADDR((char *)(addr) + ((nr)>>3))
+ #define CONST_MASK(nr)			(1 << ((nr) & 7))
+ 
+ /**
+diff -Nurb linux-2.6.27.10/include/asm-x86/desc.h linux-2.6.27.10-clickport/include/asm-x86/desc.h
+--- linux-2.6.27.10/include/asm-x86/desc.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/desc.h	2009-01-28 11:30:11.000000000 -0500
+@@ -70,7 +70,7 @@
+ 
+ static inline int desc_empty(const void *ptr)
+ {
+-	const u32 *desc = ptr;
++	const u32 *desc = (const u32 *) ptr;
+ 	return !(desc[0] | desc[1]);
+ }
+ 
+diff -Nurb linux-2.6.27.10/include/asm-x86/hw_irq.h linux-2.6.27.10-clickport/include/asm-x86/hw_irq.h
+--- linux-2.6.27.10/include/asm-x86/hw_irq.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/hw_irq.h	2009-01-28 11:57:08.000000000 -0500
+@@ -84,6 +84,16 @@
+ extern void eisa_set_level_irq(unsigned int irq);
+ 
+ /* Voyager functions */
++#ifdef __cplusplus
++asmlinkage void vic_cpi_interrupt(void);
++asmlinkage void vic_sys_interrupt(void);
++asmlinkage void vic_cmn_interrupt(void);
++asmlinkage void qic_timer_interrupt(void);
++asmlinkage void qic_invalidate_interrupt(void);
++asmlinkage void qic_reschedule_interrupt(void);
++asmlinkage void qic_enable_irq_interrupt(void);
++asmlinkage void qic_call_function_interrupt(void);
++#else
+ extern asmlinkage void vic_cpi_interrupt(void);
+ extern asmlinkage void vic_sys_interrupt(void);
+ extern asmlinkage void vic_cmn_interrupt(void);
+@@ -93,6 +103,8 @@
+ extern asmlinkage void qic_enable_irq_interrupt(void);
+ extern asmlinkage void qic_call_function_interrupt(void);
+ 
++#endif
++
+ #ifdef CONFIG_X86_32
+ extern void (*const interrupt[NR_IRQS])(void);
+ #else
+diff -Nurb linux-2.6.27.10/include/asm-x86/page.h linux-2.6.27.10-clickport/include/asm-x86/page.h
+--- linux-2.6.27.10/include/asm-x86/page.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/page.h	2009-01-28 11:24:13.000000000 -0500
+@@ -138,7 +138,7 @@
+ 
+ static inline pte_t native_make_pte(pteval_t val)
+ {
+-	return (pte_t) { .pte = val };
++	return (pte_t) ({pte_t duh; duh.pte = val;duh;});
+ }
+ 
+ static inline pteval_t native_pte_val(pte_t pte)
+diff -Nurb linux-2.6.27.10/include/asm-x86/paravirt.h linux-2.6.27.10-clickport/include/asm-x86/paravirt.h
+--- linux-2.6.27.10/include/asm-x86/paravirt.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/paravirt.h	2009-01-28 11:28:41.000000000 -0500
+@@ -1060,7 +1060,7 @@
+ 				 pv_mmu_ops.make_pte,
+ 				 val);
+ 
+-	return (pte_t) { .pte = ret };
++	return (pte_t) ({pte_t duh; duh.pte = ret;duh;});
+ }
+ 
+ static inline pteval_t pte_val(pte_t pte)
+@@ -1131,7 +1131,7 @@
+ 	ret = PVOP_CALL3(pteval_t, pv_mmu_ops.ptep_modify_prot_start,
+ 			 mm, addr, ptep);
+ 
+-	return (pte_t) { .pte = ret };
++	return (pte_t) ({pte_t duh; duh.pte = ret;duh;});
+ }
+ 
+ static inline void ptep_modify_prot_commit(struct mm_struct *mm, unsigned long addr,
+@@ -1314,10 +1314,12 @@
+ 	set_pte_at(mm, addr, ptep, __pte(0));
+ }
+ 
++/*
+ static inline void pmd_clear(pmd_t *pmdp)
+ {
+ 	set_pmd(pmdp, __pmd(0));
+ }
++*/
+ #endif	/* CONFIG_X86_PAE */
+ 
+ /* Lazy mode for batching updates / context switch */
+diff -Nurb linux-2.6.27.10/include/asm-x86/pgtable-2level.h linux-2.6.27.10-clickport/include/asm-x86/pgtable-2level.h
+--- linux-2.6.27.10/include/asm-x86/pgtable-2level.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/pgtable-2level.h	2009-01-28 11:47:18.000000000 -0500
+@@ -33,10 +33,12 @@
+ 	native_set_pte(ptep, pte);
+ }
+ 
++/*
+ static inline void native_pmd_clear(pmd_t *pmdp)
+ {
+ 	native_set_pmd(pmdp, __pmd(0));
+ }
++*/
+ 
+ static inline void native_pte_clear(struct mm_struct *mm,
+ 				    unsigned long addr, pte_t *xp)
+diff -Nurb linux-2.6.27.10/include/asm-x86/pgtable.h linux-2.6.27.10-clickport/include/asm-x86/pgtable.h
+--- linux-2.6.27.10/include/asm-x86/pgtable.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/pgtable.h	2009-01-28 11:46:55.000000000 -0500
+@@ -260,11 +260,13 @@
+ 		      pgprot_val(pgprot)) & __supported_pte_mask);
+ }
+ 
++/*
+ static inline pmd_t pfn_pmd(unsigned long page_nr, pgprot_t pgprot)
+ {
+ 	return __pmd((((phys_addr_t)page_nr << PAGE_SHIFT) |
+ 		      pgprot_val(pgprot)) & __supported_pte_mask);
+ }
++*/
+ 
+ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
+ {
+diff -Nurb linux-2.6.27.10/include/asm-x86/spinlock_types.h linux-2.6.27.10-clickport/include/asm-x86/spinlock_types.h
+--- linux-2.6.27.10/include/asm-x86/spinlock_types.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/spinlock_types.h	2009-01-28 11:44:42.000000000 -0500
+@@ -9,12 +9,19 @@
+ 	unsigned int slock;
+ } raw_spinlock_t;
+ 
++#ifndef __cplusplus
+ #define __RAW_SPIN_LOCK_UNLOCKED	{ 0 }
++#else
++#define __RAW_SPIN_LOCK_UNLOCKED	({raw_spinlock_t duh; duh.slock=0;duh;})
++#endif
+ 
+ typedef struct {
+ 	unsigned int lock;
+ } raw_rwlock_t;
+ 
++#ifndef __cplusplus
+ #define __RAW_RW_LOCK_UNLOCKED		{ RW_LOCK_BIAS }
+-
++#else
++#define __RAW_RW_LOCK_UNLOCKED		({raw_rwlock_t duh;duh.lock=RW_LOCK_BIAS;duh;})
++#endif
+ #endif
+diff -Nurb linux-2.6.27.10/include/asm-x86/vdso.h linux-2.6.27.10-clickport/include/asm-x86/vdso.h
+--- linux-2.6.27.10/include/asm-x86/vdso.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-x86/vdso.h	2009-01-28 11:29:35.000000000 -0500
+@@ -33,8 +33,8 @@
+  * These symbols are defined with the addresses in the vsyscall page.
+  * See vsyscall-sigreturn.S.
+  */
+-extern void __user __kernel_sigreturn;
+-extern void __user __kernel_rt_sigreturn;
++extern void* __user __kernel_sigreturn;
++extern void* __user __kernel_rt_sigreturn;
+ 
+ /*
+  * These symbols are defined by vdso32.S to mark the bounds
+diff -Nurb linux-2.6.27.10/include/asm-xtensa/module.h linux-2.6.27.10-clickport/include/asm-xtensa/module.h
+--- linux-2.6.27.10/include/asm-xtensa/module.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-xtensa/module.h	2009-01-27 15:50:31.000000000 -0500
+@@ -13,10 +13,7 @@
+ #ifndef _XTENSA_MODULE_H
+ #define _XTENSA_MODULE_H
+ 
+-struct mod_arch_specific
+-{
+-	/* No special elements, yet. */
+-};
++EMPTY_STRUCT_DECL(mod_arch_specific);
+ 
+ #define MODULE_ARCH_VERMAGIC "xtensa-" __stringify(XCHAL_CORE_ID) " "
+ 
+diff -Nurb linux-2.6.27.10/include/asm-xtensa/processor.h linux-2.6.27.10-clickport/include/asm-xtensa/processor.h
+--- linux-2.6.27.10/include/asm-xtensa/processor.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-xtensa/processor.h	2009-01-27 15:47:52.000000000 -0500
+@@ -183,7 +183,7 @@
+ 
+ /* Special register access. */
+ 
+-#define WSR(v,sr) __asm__ __volatile__ ("wsr %0,"__stringify(sr) :: "a"(v));
++#define WSR(v,sr) __asm__ __volatile__ ("wsr %0,"__stringify(sr) : : "a"(v));
+ #define RSR(v,sr) __asm__ __volatile__ ("rsr %0,"__stringify(sr) : "=a"(v));
+ 
+ #define set_sr(x,sr) ({unsigned int v=(unsigned int)x; WSR(v,sr);})
+diff -Nurb linux-2.6.27.10/include/asm-xtensa/system.h linux-2.6.27.10-clickport/include/asm-xtensa/system.h
+--- linux-2.6.27.10/include/asm-xtensa/system.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/asm-xtensa/system.h	2009-01-27 15:47:52.000000000 -0500
+@@ -21,21 +21,21 @@
+ 	__asm__ __volatile__ ("rsr %0,"__stringify(PS) : "=a" (x));
+ #define local_irq_restore(x)	do {					\
+ 	__asm__ __volatile__ ("wsr %0, "__stringify(PS)" ; rsync" 	\
+-	    		      :: "a" (x) : "memory"); } while(0);
++	    		      : : "a" (x) : "memory"); } while(0);
+ #define local_irq_save(x)	do {					\
+ 	__asm__ __volatile__ ("rsil %0, "__stringify(LOCKLEVEL) 	\
+-	    		      : "=a" (x) :: "memory");} while(0);
++	    		      : "=a" (x) : : "memory");} while(0);
+ 
+ static inline void local_irq_disable(void)
+ {
+ 	unsigned long flags;
+ 	__asm__ __volatile__ ("rsil %0, "__stringify(LOCKLEVEL)
+-	    		      : "=a" (flags) :: "memory");
++	    		      : "=a" (flags) : : "memory");
+ }
+ static inline void local_irq_enable(void)
+ {
+ 	unsigned long flags;
+-	__asm__ __volatile__ ("rsil %0, 0" : "=a" (flags) :: "memory");
++	__asm__ __volatile__ ("rsil %0, 0" : "=a" (flags) : : "memory");
+ 
+ }
+ 
+Files linux-2.6.27.10/include/linux/.bitops.h.swp and linux-2.6.27.10-clickport/include/linux/.bitops.h.swp differ
+diff -Nurb linux-2.6.27.10/include/linux/backing-dev.h linux-2.6.27.10-clickport/include/linux/backing-dev.h
+--- linux-2.6.27.10/include/linux/backing-dev.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/backing-dev.h	2009-01-27 15:56:49.000000000 -0500
+@@ -29,7 +29,7 @@
+ 	BDI_unused,		/* Available bits start here */
+ };
+ 
+-typedef int (congested_fn)(void *, int);
++typedef int (congested_fn_t)(void *, int);
+ 
+ enum bdi_stat_item {
+ 	BDI_RECLAIMABLE,
+@@ -43,7 +43,7 @@
+ 	unsigned long ra_pages;	/* max readahead in PAGE_CACHE_SIZE units */
+ 	unsigned long state;	/* Always use atomic bitops on this */
+ 	unsigned int capabilities; /* Device capabilities */
+-	congested_fn *congested_fn; /* Function pointer if device is md/dm */
++	congested_fn_t *congested_fn; /* Function pointer if device is md/dm */
+ 	void *congested_data;	/* Pointer to aux data for congested func */
+ 	void (*unplug_io_fn)(struct backing_dev_info *, struct page *);
+ 	void *unplug_io_data;
+diff -Nurb linux-2.6.27.10/include/linux/compat.h linux-2.6.27.10-clickport/include/linux/compat.h
+--- linux-2.6.27.10/include/linux/compat.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/compat.h	2009-01-27 15:47:52.000000000 -0500
+@@ -115,7 +115,7 @@
+ 
+ struct compat_siginfo;
+ 
+-extern asmlinkage long compat_sys_waitid(int, compat_pid_t,
++asmlinkage long compat_sys_waitid(int, compat_pid_t,
+ 		struct compat_siginfo __user *, int,
+ 		struct compat_rusage __user *);
+ 
+diff -Nurb linux-2.6.27.10/include/linux/dmaengine.h linux-2.6.27.10-clickport/include/linux/dmaengine.h
+--- linux-2.6.27.10/include/linux/dmaengine.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/dmaengine.h	2009-01-28 11:51:02.000000000 -0500
+@@ -377,7 +377,7 @@
+ 
+ static inline void async_tx_ack(struct dma_async_tx_descriptor *tx)
+ {
+-	tx->flags |= DMA_CTRL_ACK;
++	tx->flags = (enum dma_ctrl_flags) (tx->flags | DMA_CTRL_ACK);
+ }
+ 
+ static inline bool async_tx_test_ack(struct dma_async_tx_descriptor *tx)
+diff -Nurb linux-2.6.27.10/include/linux/dqblk_v1.h linux-2.6.27.10-clickport/include/linux/dqblk_v1.h
+--- linux-2.6.27.10/include/linux/dqblk_v1.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/dqblk_v1.h	2009-01-27 15:47:52.000000000 -0500
+@@ -18,7 +18,6 @@
+ #define V1_DEL_REWRITE 2
+ 
+ /* Special information about quotafile */
+-struct v1_mem_dqinfo {
+-};
++EMPTY_STRUCT_DECL(v1_mem_dqinfo);
+ 
+ #endif	/* _LINUX_DQBLK_V1_H */
+diff -Nurb linux-2.6.27.10/include/linux/fs.h linux-2.6.27.10-clickport/include/linux/fs.h
+--- linux-2.6.27.10/include/linux/fs.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/fs.h	2009-01-27 15:47:52.000000000 -0500
+@@ -2109,7 +2109,7 @@
+ 
+ static inline void simple_transaction_set(struct file *file, size_t n)
+ {
+-	struct simple_transaction_argresp *ar = file->private_data;
++	struct simple_transaction_argresp *ar = (struct simple_transaction_argresp *) file->private_data;
+ 
+ 	BUG_ON(n > SIMPLE_TRANSACTION_LIMIT);
+ 
+diff -Nurb linux-2.6.27.10/include/linux/highmem.h linux-2.6.27.10-clickport/include/linux/highmem.h
+--- linux-2.6.27.10/include/linux/highmem.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/highmem.h	2009-01-27 15:47:52.000000000 -0500
+@@ -165,8 +165,8 @@
+ {
+ 	char *vfrom, *vto;
+ 
+-	vfrom = kmap_atomic(from, KM_USER0);
+-	vto = kmap_atomic(to, KM_USER1);
++	vfrom = (char*)kmap_atomic(from, KM_USER0);
++	vto = (char*)kmap_atomic(to, KM_USER1);
+ 	copy_user_page(vto, vfrom, vaddr, to);
+ 	kunmap_atomic(vfrom, KM_USER0);
+ 	kunmap_atomic(vto, KM_USER1);
+@@ -178,8 +178,8 @@
+ {
+ 	char *vfrom, *vto;
+ 
+-	vfrom = kmap_atomic(from, KM_USER0);
+-	vto = kmap_atomic(to, KM_USER1);
++	vfrom = (char*)kmap_atomic(from, KM_USER0);
++	vto = (char*)kmap_atomic(to, KM_USER1);
+ 	copy_page(vto, vfrom);
+ 	kunmap_atomic(vfrom, KM_USER0);
+ 	kunmap_atomic(vto, KM_USER1);
+diff -Nurb linux-2.6.27.10/include/linux/hrtimer.h linux-2.6.27.10-clickport/include/linux/hrtimer.h
+--- linux-2.6.27.10/include/linux/hrtimer.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/hrtimer.h	2009-01-28 11:55:10.000000000 -0500
+@@ -384,7 +384,7 @@
+ static inline void timer_stats_account_hrtimer(struct hrtimer *timer)
+ {
+ 	timer_stats_update_stats(timer, timer->start_pid, timer->start_site,
+-				 timer->function, timer->start_comm, 0);
++				 (void *) timer->function, timer->start_comm, 0);
+ }
+ 
+ extern void __timer_stats_hrtimer_set_start_info(struct hrtimer *timer,
+diff -Nurb linux-2.6.27.10/include/linux/inetdevice.h linux-2.6.27.10-clickport/include/linux/inetdevice.h
+--- linux-2.6.27.10/include/linux/inetdevice.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/inetdevice.h	2009-01-27 15:47:52.000000000 -0500
+@@ -166,7 +166,7 @@
+ 
+ static inline struct in_device *__in_dev_get_rcu(const struct net_device *dev)
+ {
+-	struct in_device *in_dev = dev->ip_ptr;
++	struct in_device *in_dev = (struct in_device *) dev->ip_ptr;
+ 	if (in_dev)
+ 		in_dev = rcu_dereference(in_dev);
+ 	return in_dev;
+diff -Nurb linux-2.6.27.10/include/linux/jhash.h linux-2.6.27.10-clickport/include/linux/jhash.h
+--- linux-2.6.27.10/include/linux/jhash.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/jhash.h	2009-01-28 12:46:26.000000000 -0500
+@@ -44,7 +44,7 @@
+ static inline u32 jhash(const void *key, u32 length, u32 initval)
+ {
+ 	u32 a, b, c, len;
+-	const u8 *k = key;
++	const u8 *k = (const u8 *) key;
+ 
+ 	len = length;
+ 	a = b = JHASH_GOLDEN_RATIO;
+diff -Nurb linux-2.6.27.10/include/linux/kernel.h linux-2.6.27.10-clickport/include/linux/kernel.h
+--- linux-2.6.27.10/include/linux/kernel.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/kernel.h	2009-01-28 11:26:08.000000000 -0500
+@@ -213,7 +213,7 @@
+ 		{ return false; }
+ #endif
+ 
+-extern void asmlinkage __attribute__((format(printf, 1, 2)))
++asmlinkage void __attribute__((format(printf, 1, 2)))
+ 	early_printk(const char *fmt, ...);
+ 
+ unsigned long int_sqrt(unsigned long);
+diff -Nurb linux-2.6.27.10/include/linux/ktime.h linux-2.6.27.10-clickport/include/linux/ktime.h
+--- linux-2.6.27.10/include/linux/ktime.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/ktime.h	2009-01-28 11:53:54.000000000 -0500
+@@ -71,6 +71,12 @@
+ 
+ #if (BITS_PER_LONG == 64) || defined(CONFIG_KTIME_SCALAR)
+ 
++#ifdef __cplusplus
++# define KTIME_TV64(__s)	({ ktime_t __kt; __kt.tv64 = (__s); __kt; })
++#else
++# define KTIME_TV64(__s)	((ktime_t) { .tv64 = (__s) })
++#endif
++
+ /**
+  * ktime_set - Set a ktime_t variable from a seconds/nanoseconds value
+  * @secs:	seconds to set
+@@ -82,32 +88,37 @@
+ {
+ #if (BITS_PER_LONG == 64)
+ 	if (unlikely(secs >= KTIME_SEC_MAX))
+-		return (ktime_t){ .tv64 = KTIME_MAX };
++		return KTIME_TV64(KTIME_MAX);
+ #endif
+-	return (ktime_t) { .tv64 = (s64)secs * NSEC_PER_SEC + (s64)nsecs };
++	return KTIME_TV64((s64)secs * NSEC_PER_SEC + (s64)nsecs);
+ }
+ 
+ /* Subtract two ktime_t variables. rem = lhs -rhs: */
+ #define ktime_sub(lhs, rhs) \
+-		({ (ktime_t){ .tv64 = (lhs).tv64 - (rhs).tv64 }; })
++		KTIME_TV64((lhs).tv64 - (rhs).tv64)
+ 
+ /* Add two ktime_t variables. res = lhs + rhs: */
+ #define ktime_add(lhs, rhs) \
+-		({ (ktime_t){ .tv64 = (lhs).tv64 + (rhs).tv64 }; })
++		KTIME_TV64((lhs).tv64 + (rhs).tv64)
+ 
+ /*
+  * Add a ktime_t variable and a scalar nanosecond value.
+  * res = kt + nsval:
+  */
+ #define ktime_add_ns(kt, nsval) \
+-		({ (ktime_t){ .tv64 = (kt).tv64 + (nsval) }; })
++		KTIME_TV64((kt).tv64 + (nsval))
+ 
+ /*
+  * Subtract a scalar nanosecod from a ktime_t variable
+  * res = kt - nsval:
+  */
++#ifdef __cplusplus
++#define ktime_sub_ns(kt, nsval) \
++		({ktime_t duh; duh.tv64 = (kt).tv64 - (nsval); duh; })
++#else
+ #define ktime_sub_ns(kt, nsval) \
+ 		({ (ktime_t){ .tv64 = (kt).tv64 - (nsval) }; })
++#endif
+ 
+ /* convert a timespec to ktime_t format: */
+ static inline ktime_t timespec_to_ktime(struct timespec ts)
+@@ -132,6 +143,18 @@
+ 
+ #else
+ 
++#ifdef __cplusplus
++# define KTIME_TV64(__s)		({ ktime_t __kt; __kt.tv64 = (__s); __kt; })
++# define KTIME_SEC_NSEC(__sec, __nsec)	({ ktime_t __kt; __kt.tv.sec = (__sec); __kt.tv.nsec = (__nsec); __kt; })
++# define TIMEVAL_SEC_USEC(__sec, __usec) ({ struct timeval __tv; __tv.tv_sec = (__sec); __tv.tv_usec = (__usec); __tv; })
++# define TIMESPEC_SEC_NSEC(__sec, __nsec) ({ struct timespec __ts; __ts.tv_sec = (__sec); __ts.tv_nsec = (__nsec); __ts; })
++#else
++# define KTIME_TV64(__s)		((ktime_t) { .tv64 = (__s) })
++# define KTIME_SEC_NSEC(__sec, __nsec)	((ktime_t) { .tv = { .sec = (__sec), .nsec = (__nsec) } })
++# define TIMEVAL_SEC_USEC(__sec, __usec) ((struct timeval) { .tv_sec = (__sec), .tv_usec = (__usec) })
++# define TIMESPEC_SEC_NSEC(__sec, __nsec) ((struct timespec) { .tv_sec = (__sec), .tv_nsec = (__nsec) })
++#endif
++
+ /*
+  * Helper macros/inlines to get the ktime_t math right in the timespec
+  * representation. The macros are sometimes ugly - their actual use is
+@@ -150,7 +173,7 @@
+ /* Set a ktime_t variable to a value in sec/nsec representation: */
+ static inline ktime_t ktime_set(const long secs, const unsigned long nsecs)
+ {
+-	return (ktime_t) { .tv = { .sec = secs, .nsec = nsecs } };
++	return KTIME_SEC_NSEC(secs, nsecs);
+ }
+ 
+ /**
+@@ -223,8 +246,7 @@
+  */
+ static inline ktime_t timespec_to_ktime(const struct timespec ts)
+ {
+-	return (ktime_t) { .tv = { .sec = (s32)ts.tv_sec,
+-			   	   .nsec = (s32)ts.tv_nsec } };
++	return KTIME_SEC_NSEC((s32)ts.tv_sec, (s32)ts.tv_nsec);
+ }
+ 
+ /**
+@@ -235,8 +257,7 @@
+  */
+ static inline ktime_t timeval_to_ktime(const struct timeval tv)
+ {
+-	return (ktime_t) { .tv = { .sec = (s32)tv.tv_sec,
+-				   .nsec = (s32)tv.tv_usec * 1000 } };
++	return KTIME_SEC_NSEC((s32)tv.tv_sec, (s32)tv.tv_usec * 1000);
+ }
+ 
+ /**
+@@ -247,8 +268,7 @@
+  */
+ static inline struct timespec ktime_to_timespec(const ktime_t kt)
+ {
+-	return (struct timespec) { .tv_sec = (time_t) kt.tv.sec,
+-				   .tv_nsec = (long) kt.tv.nsec };
++	return TIMESPEC_SEC_NSEC((time_t) kt.tv.sec, (long) kt.tv.nsec);
+ }
+ 
+ /**
+@@ -259,9 +279,8 @@
+  */
+ static inline struct timeval ktime_to_timeval(const ktime_t kt)
+ {
+-	return (struct timeval) {
+-		.tv_sec = (time_t) kt.tv.sec,
+-		.tv_usec = (suseconds_t) (kt.tv.nsec / NSEC_PER_USEC) };
++	return TIMEVAL_SEC_USEC((time_t) kt.tv.sec,
++				(suseconds_t) (kt.tv.nsec / NSEC_PER_USEC));
+ }
+ 
+ /**
+@@ -329,7 +348,7 @@
+ 
+ static inline ktime_t ns_to_ktime(u64 ns)
+ {
+-	static const ktime_t ktime_zero = { .tv64 = 0 };
++	static const ktime_t ktime_zero = ({ktime_t duh; duh.tv64 = 0;duh;});
+ 	return ktime_add_ns(ktime_zero, ns);
+ }
+ 
+diff -Nurb linux-2.6.27.10/include/linux/linkage.h linux-2.6.27.10-clickport/include/linux/linkage.h
+--- linux-2.6.27.10/include/linux/linkage.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/linkage.h	2009-01-27 15:47:52.000000000 -0500
+@@ -11,6 +11,13 @@
+ #else
+ #define CPP_ASMLINKAGE
+ #endif
++#ifndef extern_asmlinkage
++# ifdef __cplusplus
++#  define extern_asmlinkage asmlinkage
++# else
++#  define extern_asmlinkage extern asmlinkage
++# endif
++#endif
+ 
+ #ifndef asmlinkage
+ #define asmlinkage CPP_ASMLINKAGE
+diff -Nurb linux-2.6.27.10/include/linux/list.h linux-2.6.27.10-clickport/include/linux/list.h
+--- linux-2.6.27.10/include/linux/list.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/list.h	2009-01-28 11:46:14.000000000 -0500
+@@ -20,7 +20,11 @@
+ 	struct list_head *next, *prev;
+ };
+ 
++#ifdef __cplusplus
++#define LIST_HEAD_INIT(name) ({struct list_head duh;duh.next=&(name);duh.prev=&(name);duh;})
++#else
+ #define LIST_HEAD_INIT(name) { &(name), &(name) }
++#endif
+ 
+ #define LIST_HEAD(name) \
+ 	struct list_head name = LIST_HEAD_INIT(name)
+@@ -103,8 +107,8 @@
+ static inline void list_del(struct list_head *entry)
+ {
+ 	__list_del(entry->prev, entry->next);
+-	entry->next = LIST_POISON1;
+-	entry->prev = LIST_POISON2;
++	entry->next = (struct list_head*)(LIST_POISON1);
++	entry->prev = (struct list_head*)(LIST_POISON2);
+ }
+ #else
+ extern void list_del(struct list_head *entry);
+@@ -576,8 +580,8 @@
+ static inline void hlist_del(struct hlist_node *n)
+ {
+ 	__hlist_del(n);
+-	n->next = LIST_POISON1;
+-	n->pprev = LIST_POISON2;
++	n->next = (struct hlist_node*)(LIST_POISON1);
++	n->pprev = (struct hlist_node**)(LIST_POISON2);
+ }
+ 
+ static inline void hlist_del_init(struct hlist_node *n)
+diff -Nurb linux-2.6.27.10/include/linux/mempolicy.h linux-2.6.27.10-clickport/include/linux/mempolicy.h
+--- linux-2.6.27.10/include/linux/mempolicy.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/mempolicy.h	2009-01-27 15:47:52.000000000 -0500
+@@ -241,7 +241,7 @@
+ 
+ #else
+ 
+-struct mempolicy {};
++EMPTY_STRUCT_DECL(mempolicy);
+ 
+ static inline int mpol_equal(struct mempolicy *a, struct mempolicy *b)
+ {
+@@ -271,7 +271,7 @@
+ 	return NULL;
+ }
+ 
+-struct shared_policy {};
++EMPTY_STRUCT_DECL(shared_policy);
+ 
+ static inline int mpol_set_shared_policy(struct shared_policy *info,
+ 					struct vm_area_struct *vma,
+diff -Nurb linux-2.6.27.10/include/linux/mm.h linux-2.6.27.10-clickport/include/linux/mm.h
+--- linux-2.6.27.10/include/linux/mm.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/mm.h	2009-01-28 11:48:07.000000000 -0500
+@@ -327,7 +327,7 @@
+ static inline void set_compound_page_dtor(struct page *page,
+ 						compound_page_dtor *dtor)
+ {
+-	page[1].lru.next = (void *)dtor;
++	page[1].lru.next = (struct list_head *)dtor;
+ }
+ 
+ static inline compound_page_dtor *get_compound_page_dtor(struct page *page)
+@@ -344,7 +344,7 @@
+ 
+ static inline void set_compound_order(struct page *page, unsigned long order)
+ {
+-	page[1].lru.prev = (void *)order;
++	page[1].lru.prev = (struct list_head  *)order;
+ }
+ 
+ /*
+@@ -494,7 +494,7 @@
+ 
+ static inline enum zone_type page_zonenum(struct page *page)
+ {
+-	return (page->flags >> ZONES_PGSHIFT) & ZONES_MASK;
++	return (enum zone_type) ((page->flags >> ZONES_PGSHIFT) & ZONES_MASK);
+ }
+ 
+ /*
+diff -Nurb linux-2.6.27.10/include/linux/netdevice.h linux-2.6.27.10-clickport/include/linux/netdevice.h
+--- linux-2.6.27.10/include/linux/netdevice.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/netdevice.h	2009-01-27 15:59:47.000000000 -0500
+@@ -735,6 +735,46 @@
+ 	/* GARP */
+ 	struct garp_port	*garp_port;
+ 
++	/* Click polling support */
++	/*
++	 * polling is < 0 if the device does not support polling, == 0 if the
++	 * device supports polling but interrupts are on, and > 0 if polling
++	 * is on.
++	 */
++	int			polling;
++	int			(*poll_on)(struct net_device *);
++	int			(*poll_off)(struct net_device *);
++	/*
++	 * rx_poll returns to caller a linked list of sk_buff objects received
++	 * by the device. on call, the want argument specifies the number of
++	 * packets wanted. on return, the want argument specifies the number
++	 * of packets actually returned.
++	 */
++	struct sk_buff *	(*rx_poll)(struct net_device*, int *want);
++	/* refill rx dma ring using the given sk_buff list. returns 0 if
++	 * successful, or if there are more entries need to be cleaned,
++	 * returns the number of dirty entries. the ptr to the sk_buff list is
++	 * updated by the driver to point to any unused skbs.
++	 */
++	int			(*rx_refill)(struct net_device*, struct sk_buff**);
++	/*
++	 * place sk_buff on the transmit ring. returns 0 if successful, 1
++	 * otherwise
++	 */
++	int			(*tx_queue)(struct net_device *, struct sk_buff *);
++	/*
++	 * clean tx dma ring. returns the list of skb objects cleaned
++	 */
++	struct sk_buff*		(*tx_clean)(struct net_device *);
++	/*
++	 * start transmission. returns 0 if successful, 1 otherwise
++	 */
++	int			(*tx_start)(struct net_device *);
++	/*
++	 * tell device the end of a batch of packets
++	 */
++	int			(*tx_eob)(struct net_device *);
++
+ 	/* class/net/name entry */
+ 	struct device		dev;
+ 	/* space for optional statistics and wireless sysfs groups */
+@@ -918,6 +958,11 @@
+ extern int		dev_queue_xmit(struct sk_buff *skb);
+ extern int		register_netdevice(struct net_device *dev);
+ extern void		unregister_netdevice(struct net_device *dev);
++
++extern int		register_net_in(struct notifier_block *nb); /* Click */
++extern int		unregister_net_in(struct notifier_block *nb); /* Click */
++extern int		ptype_dispatch(struct sk_buff *skb, unsigned short type); /* Click */
++
+ extern void		free_netdev(struct net_device *dev);
+ extern void		synchronize_net(void);
+ extern int 		register_netdevice_notifier(struct notifier_block *nb);
+@@ -1216,7 +1261,10 @@
+ extern int		netif_rx(struct sk_buff *skb);
+ extern int		netif_rx_ni(struct sk_buff *skb);
+ #define HAVE_NETIF_RECEIVE_SKB 1
+-extern int		netif_receive_skb(struct sk_buff *skb);
++//extern int		netif_receive_skb(struct sk_buff *skb);
++#define HAVE___NETIF_RECEIVE_SKB 1
++extern int		__netif_receive_skb(struct sk_buff *skb, unsigned short protocol, int ignore_notifiers);
++
+ extern void		netif_nit_deliver(struct sk_buff *skb);
+ extern int		dev_valid_name(const char *name);
+ extern int		dev_ioctl(struct net *net, unsigned int cmd, void __user *);
+@@ -1357,6 +1405,11 @@
+ 
+ extern void netif_device_attach(struct net_device *dev);
+ 
++static inline int netif_receive_skb(struct sk_buff *skb)
++{
++	return __netif_receive_skb(skb, skb->protocol, 0);
++}
++
+ /*
+  * Network interface message level settings
+  */
+diff -Nurb linux-2.6.27.10/include/linux/netlink.h linux-2.6.27.10-clickport/include/linux/netlink.h
+--- linux-2.6.27.10/include/linux/netlink.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/netlink.h	2009-01-27 15:47:52.000000000 -0500
+@@ -242,7 +242,7 @@
+ 	nlh->nlmsg_flags = flags;
+ 	nlh->nlmsg_pid = pid;
+ 	nlh->nlmsg_seq = seq;
+-	memset(NLMSG_DATA(nlh) + len, 0, NLMSG_ALIGN(size) - size);
++	memset((char*) NLMSG_DATA(nlh) + len, 0, NLMSG_ALIGN(size) - size);
+ 	return nlh;
+ }
+ 
+diff -Nurb linux-2.6.27.10/include/linux/page-flags.h linux-2.6.27.10-clickport/include/linux/page-flags.h
+--- linux-2.6.27.10/include/linux/page-flags.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/page-flags.h	2009-01-28 11:49:03.000000000 -0500
+@@ -174,8 +174,10 @@
+ PAGEFLAG(Pinned, pinned) TESTSCFLAG(Pinned, pinned)	/* Xen */
+ PAGEFLAG(SavePinned, savepinned);			/* Xen */
+ PAGEFLAG(Reserved, reserved) __CLEARPAGEFLAG(Reserved, reserved)
++#ifndef __cplusplus
+ PAGEFLAG(Private, private) __CLEARPAGEFLAG(Private, private)
+ 	__SETPAGEFLAG(Private, private)
++#endif
+ 
+ __PAGEFLAG(SlobPage, slob_page)
+ __PAGEFLAG(SlobFree, slob_free)
+diff -Nurb linux-2.6.27.10/include/linux/prefetch.h linux-2.6.27.10-clickport/include/linux/prefetch.h
+--- linux-2.6.27.10/include/linux/prefetch.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/prefetch.h	2009-01-27 15:47:52.000000000 -0500
+@@ -54,9 +54,9 @@
+ {
+ #ifdef ARCH_HAS_PREFETCH
+ 	char *cp;
+-	char *end = addr + len;
++	char *end = (char*)(addr) + len;
+ 
+-	for (cp = addr; cp < end; cp += PREFETCH_STRIDE)
++	for (cp = (char*)(addr); cp < end; cp += PREFETCH_STRIDE)
+ 		prefetch(cp);
+ #endif
+ }
+diff -Nurb linux-2.6.27.10/include/linux/proc_fs.h linux-2.6.27.10-clickport/include/linux/proc_fs.h
+--- linux-2.6.27.10/include/linux/proc_fs.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/proc_fs.h	2009-01-28 13:12:34.000000000 -0500
+@@ -315,7 +315,7 @@
+ 
+ static inline struct net *PDE_NET(struct proc_dir_entry *pde)
+ {
+-	return pde->parent->data;
++	return (struct net *) pde->parent->data;
+ }
+ 
+ struct proc_maps_private {
+diff -Nurb linux-2.6.27.10/include/linux/rculist.h linux-2.6.27.10-clickport/include/linux/rculist.h
+--- linux-2.6.27.10/include/linux/rculist.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/rculist.h	2009-01-28 12:00:49.000000000 -0500
+@@ -94,7 +94,7 @@
+ static inline void list_del_rcu(struct list_head *entry)
+ {
+ 	__list_del(entry->prev, entry->next);
+-	entry->prev = LIST_POISON2;
++	entry->prev = (struct list_head *) LIST_POISON2;
+ }
+ 
+ /**
+@@ -140,7 +140,7 @@
+ 	new->prev = old->prev;
+ 	rcu_assign_pointer(new->prev->next, new);
+ 	new->next->prev = new;
+-	old->prev = LIST_POISON2;
++	old->prev = (struct list_head *) LIST_POISON2;
+ }
+ 
+ /**
+@@ -271,7 +271,7 @@
+ static inline void hlist_del_rcu(struct hlist_node *n)
+ {
+ 	__hlist_del(n);
+-	n->pprev = LIST_POISON2;
++	n->pprev = (struct hlist_node **) LIST_POISON2;
+ }
+ 
+ /**
+@@ -291,7 +291,7 @@
+ 	rcu_assign_pointer(*new->pprev, new);
+ 	if (next)
+ 		new->next->pprev = &new->next;
+-	old->pprev = LIST_POISON2;
++	old->pprev = (struct hlist_node **) LIST_POISON2;
+ }
+ 
+ /**
+diff -Nurb linux-2.6.27.10/include/linux/reiserfs_fs_sb.h linux-2.6.27.10-clickport/include/linux/reiserfs_fs_sb.h
+--- linux-2.6.27.10/include/linux/reiserfs_fs_sb.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/reiserfs_fs_sb.h	2009-01-27 15:47:52.000000000 -0500
+@@ -337,8 +337,7 @@
+ 	} journal;
+ } reiserfs_proc_info_data_t;
+ #else
+-typedef struct reiserfs_proc_info_data {
+-} reiserfs_proc_info_data_t;
++typedef EMPTY_STRUCT_DECL(reiserfs_proc_info_data) reiserfs_proc_info_data_t;
+ #endif
+ 
+ /* reiserfs union of in-core super block data */
+diff -Nurb linux-2.6.27.10/include/linux/rtnetlink.h linux-2.6.27.10-clickport/include/linux/rtnetlink.h
+--- linux-2.6.27.10/include/linux/rtnetlink.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/rtnetlink.h	2009-01-27 15:47:52.000000000 -0500
+@@ -727,7 +727,7 @@
+ 	rta = (struct rtattr*)skb_put(skb, RTA_ALIGN(size));
+ 	rta->rta_type = attrtype;
+ 	rta->rta_len = size;
+-	memset(RTA_DATA(rta) + attrlen, 0, RTA_ALIGN(size) - size);
++	memset((char*) RTA_DATA(rta) + attrlen, 0, RTA_ALIGN(size) - size);
+ 	return rta;
+ }
+ 
+diff -Nurb linux-2.6.27.10/include/linux/scatterlist.h linux-2.6.27.10-clickport/include/linux/scatterlist.h
+--- linux-2.6.27.10/include/linux/scatterlist.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/scatterlist.h	2009-01-28 11:49:33.000000000 -0500
+@@ -196,7 +196,7 @@
+  **/
+ static inline void *sg_virt(struct scatterlist *sg)
+ {
+-	return page_address(sg_page(sg)) + sg->offset;
++	return (char *) page_address(sg_page(sg)) + sg->offset;
+ }
+ 
+ struct scatterlist *sg_next(struct scatterlist *);
+diff -Nurb linux-2.6.27.10/include/linux/sched.h linux-2.6.27.10-clickport/include/linux/sched.h
+--- linux-2.6.27.10/include/linux/sched.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/sched.h	2009-01-28 11:56:24.000000000 -0500
+@@ -242,7 +242,12 @@
+ 
+ extern void sched_init(void);
+ extern void sched_init_smp(void);
++#ifdef __cplusplus
++asmlinkage void schedule_tail(struct task_struct *prev);
++#else
+ extern asmlinkage void schedule_tail(struct task_struct *prev);
++#endif
++
+ extern void init_idle(struct task_struct *idle, int cpu);
+ extern void init_idle_bootup_task(struct task_struct *idle);
+ 
+@@ -1978,7 +1983,7 @@
+ 
+ static inline unsigned long *end_of_stack(struct task_struct *p)
+ {
+-	return (unsigned long *)(task_thread_info(p) + 1);
++	return (unsigned long *)((char *) task_thread_info(p) + 1);
+ }
+ 
+ #endif
+@@ -1987,7 +1992,7 @@
+ {
+ 	void *stack = task_stack_page(current);
+ 
+-	return (obj >= stack) && (obj < (stack + THREAD_SIZE));
++	return (obj >= stack) && ((char *) obj < ((char *) stack + THREAD_SIZE));
+ }
+ 
+ extern void thread_info_cache_init(void);
+diff -Nurb linux-2.6.27.10/include/linux/seccomp.h linux-2.6.27.10-clickport/include/linux/seccomp.h
+--- linux-2.6.27.10/include/linux/seccomp.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/seccomp.h	2009-01-27 15:47:52.000000000 -0500
+@@ -21,7 +21,7 @@
+ 
+ #else /* CONFIG_SECCOMP */
+ 
+-typedef struct { } seccomp_t;
++typedef EMPTY_STRUCT_DECL(/* unnamed */) seccomp_t;
+ 
+ #define secure_computing(x) do { } while (0)
+ 
+diff -Nurb linux-2.6.27.10/include/linux/security.h linux-2.6.27.10-clickport/include/linux/security.h
+--- linux-2.6.27.10/include/linux/security.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/security.h	2009-01-27 15:47:52.000000000 -0500
+@@ -2427,7 +2427,7 @@
+ static inline struct dentry *securityfs_create_dir(const char *name,
+ 					struct dentry *parent)
+ {
+-	return ERR_PTR(-ENODEV);
++	return (struct dentry *) ERR_PTR(-ENODEV);
+ }
+ 
+ static inline struct dentry *securityfs_create_file(const char *name,
+@@ -2436,7 +2436,7 @@
+ 						void *data,
+ 						const struct file_operations *fops)
+ {
+-	return ERR_PTR(-ENODEV);
++	return (struct dentry *) ERR_PTR(-ENODEV);
+ }
+ 
+ static inline void securityfs_remove(struct dentry *dentry)
+diff -Nurb linux-2.6.27.10/include/linux/semaphore.h linux-2.6.27.10-clickport/include/linux/semaphore.h
+--- linux-2.6.27.10/include/linux/semaphore.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/semaphore.h	2009-01-28 11:34:40.000000000 -0500
+@@ -19,12 +19,21 @@
+ 	struct list_head	wait_list;
+ };
+ 
++#ifdef __cplusplus
++#define __SEMAPHORE_INITIALIZER(name, n)				\
++({ struct semaphore duh;									\
++	duh.lock		= __SPIN_LOCK_UNLOCKED((name).lock),		\
++	duh.count		= n,						\
++	duh.wait_list	= LIST_HEAD_INIT((name).wait_list),		\
++    duh;})
++#else
+ #define __SEMAPHORE_INITIALIZER(name, n)				\
+ {									\
+ 	.lock		= __SPIN_LOCK_UNLOCKED((name).lock),		\
+ 	.count		= n,						\
+ 	.wait_list	= LIST_HEAD_INIT((name).wait_list),		\
+ }
++#endif
+ 
+ #define DECLARE_MUTEX(name)	\
+ 	struct semaphore name = __SEMAPHORE_INITIALIZER(name, 1)
+diff -Nurb linux-2.6.27.10/include/linux/skbuff.h linux-2.6.27.10-clickport/include/linux/skbuff.h
+--- linux-2.6.27.10/include/linux/skbuff.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/skbuff.h	2009-01-27 15:47:52.000000000 -0500
+@@ -194,6 +194,12 @@
+ typedef unsigned char *sk_buff_data_t;
+ #endif
+ 
++/* Click: overload sk_buff.pkt_type to contain information about whether
++   a packet is clean. Clean packets have the following fields zero:
++   dst, destructor, pkt_bridged, prev, list, sk, security, priority. */
++#define PACKET_CLEAN           128             /* Is packet clean? */
++#define PACKET_TYPE_MASK       127             /* Actual packet type */
++
+ /** 
+  *	struct sk_buff - socket buffer
+  *	@next: Next buffer in list
+@@ -376,6 +382,7 @@
+ 				gfp_t priority);
+ extern struct sk_buff *pskb_copy(struct sk_buff *skb,
+ 				 gfp_t gfp_mask);
++extern struct sk_buff *skb_recycle(struct sk_buff *skb);
+ extern int	       pskb_expand_head(struct sk_buff *skb,
+ 					int nhead, int ntail,
+ 					gfp_t gfp_mask);
+@@ -1325,7 +1332,7 @@
+ }
+ 
+ static inline int skb_add_data(struct sk_buff *skb,
+-			       char __user *from, int copy)
++			       unsigned char __user *from, int copy)
+ {
+ 	const int off = skb->len;
+ 
+@@ -1401,7 +1408,7 @@
+ 				      const void *start, unsigned int len)
+ {
+ 	if (skb->ip_summed == CHECKSUM_COMPLETE)
+-		skb->csum = csum_sub(skb->csum, csum_partial(start, len, 0));
++		skb->csum = csum_sub(skb->csum, csum_partial((const unsigned char *) start, len, 0));
+ }
+ 
+ unsigned char *skb_pull_rcsum(struct sk_buff *skb, unsigned int len);
+diff -Nurb linux-2.6.27.10/include/linux/spinlock.h linux-2.6.27.10-clickport/include/linux/spinlock.h
+--- linux-2.6.27.10/include/linux/spinlock.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/spinlock.h	2009-01-27 15:47:52.000000000 -0500
+@@ -54,6 +54,7 @@
+ #include <linux/kernel.h>
+ #include <linux/stringify.h>
+ #include <linux/bottom_half.h>
++#include <linux/types.h>
+ 
+ #include <asm/system.h>
+ 
+diff -Nurb linux-2.6.27.10/include/linux/spinlock_types.h linux-2.6.27.10-clickport/include/linux/spinlock_types.h
+--- linux-2.6.27.10/include/linux/spinlock_types.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/spinlock_types.h	2009-01-27 15:47:52.000000000 -0500
+@@ -51,37 +51,47 @@
+ 
+ #define SPINLOCK_OWNER_INIT	((void *)-1L)
+ 
++#if defined(CONFIG_PREEMPT) && defined(CONFIG_SMP)
++# define SPINLOCK_BREAK_LOCK_INIT 0,
++#else
++# define SPINLOCK_BREAK_LOCK_INIT
++#endif
++
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+-# define SPIN_DEP_MAP_INIT(lockname)	.dep_map = { .name = #lockname }
++# define SPIN_DEP_MAP_INIT(lockname)	{ 0, 0, #lockname }
+ #else
+ # define SPIN_DEP_MAP_INIT(lockname)
+ #endif
+ 
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+-# define RW_DEP_MAP_INIT(lockname)	.dep_map = { .name = #lockname }
++# define RW_DEP_MAP_INIT(lockname)	{ 0, 0, #lockname }
+ #else
+ # define RW_DEP_MAP_INIT(lockname)
+ #endif
+ 
+ #ifdef CONFIG_DEBUG_SPINLOCK
+ # define __SPIN_LOCK_UNLOCKED(lockname)					\
+-	(spinlock_t)	{	.raw_lock = __RAW_SPIN_LOCK_UNLOCKED,	\
+-				.magic = SPINLOCK_MAGIC,		\
+-				.owner = SPINLOCK_OWNER_INIT,		\
+-				.owner_cpu = -1,			\
++	(spinlock_t)	{ /*raw_lock*/	__RAW_SPIN_LOCK_UNLOCKED,	\
++			  /*break_lock*/ SPINLOCK_BREAK_LOCK_INIT	\
++			  /*magic*/	SPINLOCK_MAGIC,			\
++			  /*owner_cpu*/	-1,				\
++			  /*owner*/	SPINLOCK_OWNER_INIT,		\
+ 				SPIN_DEP_MAP_INIT(lockname) }
+ #define __RW_LOCK_UNLOCKED(lockname)					\
+-	(rwlock_t)	{	.raw_lock = __RAW_RW_LOCK_UNLOCKED,	\
+-				.magic = RWLOCK_MAGIC,			\
+-				.owner = SPINLOCK_OWNER_INIT,		\
+-				.owner_cpu = -1,			\
++	(rwlock_t)	{ /*raw_lock*/	__RAW_RW_LOCK_UNLOCKED,		\
++			  /*break_lock*/ SPINLOCK_BREAK_LOCK_INIT	\
++			  /*magic*/	RWLOCK_MAGIC,			\
++			  /*owner_cpu*/ -1,				\
++			  /*owner*/	SPINLOCK_OWNER_INIT,		\
+ 				RW_DEP_MAP_INIT(lockname) }
+ #else
+ # define __SPIN_LOCK_UNLOCKED(lockname) \
+-	(spinlock_t)	{	.raw_lock = __RAW_SPIN_LOCK_UNLOCKED,	\
++	(spinlock_t)	{ /*raw_lock*/	__RAW_SPIN_LOCK_UNLOCKED,	\
++			  /*break_lock*/ SPINLOCK_BREAK_LOCK_INIT	\
+ 				SPIN_DEP_MAP_INIT(lockname) }
+ #define __RW_LOCK_UNLOCKED(lockname) \
+-	(rwlock_t)	{	.raw_lock = __RAW_RW_LOCK_UNLOCKED,	\
++	(rwlock_t)	{ /*raw_lock*/	__RAW_RW_LOCK_UNLOCKED,		\
++			  /*break_lock*/ SPINLOCK_BREAK_LOCK_INIT	\
+ 				RW_DEP_MAP_INIT(lockname) }
+ #endif
+ 
+diff -Nurb linux-2.6.27.10/include/linux/stddef.h linux-2.6.27.10-clickport/include/linux/stddef.h
+--- linux-2.6.27.10/include/linux/stddef.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/stddef.h	2009-01-27 15:47:52.000000000 -0500
+@@ -12,10 +12,12 @@
+ 
+ #ifdef __KERNEL__
+ 
++#ifndef __cplusplus
+ enum {
+ 	false	= 0,
+ 	true	= 1
+ };
++#endif
+ 
+ #undef offsetof
+ #ifdef __compiler_offsetof
+diff -Nurb linux-2.6.27.10/include/linux/sysctl.h linux-2.6.27.10-clickport/include/linux/sysctl.h
+--- linux-2.6.27.10/include/linux/sysctl.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/sysctl.h	2009-01-27 16:04:48.000000000 -0500
+@@ -978,7 +978,7 @@
+ 			 void __user *oldval, size_t __user *oldlenp,
+ 			 void __user *newval, size_t newlen);
+ 
+-typedef int proc_handler (struct ctl_table *ctl, int write, struct file * filp,
++typedef int proc_handler_t (struct ctl_table *ctl, int write, struct file * filp,
+ 			  void __user *buffer, size_t *lenp, loff_t *ppos);
+ 
+ extern int proc_dostring(struct ctl_table *, int, struct file *,
+@@ -1059,7 +1059,7 @@
+ 	mode_t mode;
+ 	struct ctl_table *child;
+ 	struct ctl_table *parent;	/* Automatically set */
+-	proc_handler *proc_handler;	/* Callback for text formatting */
++	proc_handler_t *proc_handler;	/* Callback for text formatting */
+ 	ctl_handler *strategy;		/* Callback function for all r/w */
+ 	void *extra1;
+ 	void *extra2;
+diff -Nurb linux-2.6.27.10/include/linux/textsearch.h linux-2.6.27.10-clickport/include/linux/textsearch.h
+--- linux-2.6.27.10/include/linux/textsearch.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/textsearch.h	2009-01-27 15:55:38.000000000 -0500
+@@ -162,9 +162,9 @@
+ {
+ 	struct ts_config *conf;
+ 
+-	conf = kzalloc(TS_PRIV_ALIGN(sizeof(*conf)) + payload, gfp_mask);
++	conf = (struct ts_config *) kzalloc(TS_PRIV_ALIGN(sizeof(*conf)) + payload, gfp_mask);
+ 	if (conf == NULL)
+-		return ERR_PTR(-ENOMEM);
++		return (struct ts_config *) ERR_PTR(-ENOMEM);
+ 
+ 	return conf;
+ }
+diff -Nurb linux-2.6.27.10/include/linux/types.h linux-2.6.27.10-clickport/include/linux/types.h
+--- linux-2.6.27.10/include/linux/types.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/types.h	2009-01-27 15:47:52.000000000 -0500
+@@ -30,7 +30,9 @@
+ typedef __kernel_mqd_t		mqd_t;
+ 
+ #ifdef __KERNEL__
++#ifndef __cplusplus
+ typedef _Bool			bool;
++#endif
+ 
+ typedef __kernel_uid32_t	uid_t;
+ typedef __kernel_gid32_t	gid_t;
+@@ -209,4 +211,12 @@
+ 
+ #endif	/* __KERNEL__ */
+ 
++/*
++ * Click: Macros for defining empty structures. Needed because GCC's C and C++
++ * compilers have different ABIs for empty structures.
++ */
++
++#define EMPTY_STRUCT_DECL(s) struct s { int gcc_is_buggy; }
++#define EMPTY_STRUCT_INIT(s) (s) { 0 }
++
+ #endif /* _LINUX_TYPES_H */
+diff -Nurb linux-2.6.27.10/include/linux/unwind.h linux-2.6.27.10-clickport/include/linux/unwind.h
+--- linux-2.6.27.10/include/linux/unwind.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/unwind.h	2009-01-27 15:47:52.000000000 -0500
+@@ -14,7 +14,7 @@
+ 
+ struct module;
+ 
+-struct unwind_frame_info {};
++EMPTY_STRUCT_DECL(unwind_frame_info);
+ 
+ static inline void unwind_init(void) {}
+ static inline void unwind_setup(void) {}
+diff -Nurb linux-2.6.27.10/include/linux/wait.h linux-2.6.27.10-clickport/include/linux/wait.h
+--- linux-2.6.27.10/include/linux/wait.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/linux/wait.h	2009-01-27 15:47:52.000000000 -0500
+@@ -485,7 +485,7 @@
+ static inline int wait_on_bit(void *word, int bit,
+ 				int (*action)(void *), unsigned mode)
+ {
+-	if (!test_bit(bit, word))
++	if (!test_bit(bit, (volatile unsigned long *) word))
+ 		return 0;
+ 	return out_of_line_wait_on_bit(word, bit, action, mode);
+ }
+@@ -509,7 +509,7 @@
+ static inline int wait_on_bit_lock(void *word, int bit,
+ 				int (*action)(void *), unsigned mode)
+ {
+-	if (!test_and_set_bit(bit, word))
++	if (!test_and_set_bit(bit, (volatile unsigned long *) word))
+ 		return 0;
+ 	return out_of_line_wait_on_bit_lock(word, bit, action, mode);
+ }
+diff -Nurb linux-2.6.27.10/include/net/compat.h linux-2.6.27.10-clickport/include/net/compat.h
+--- linux-2.6.27.10/include/net/compat.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/compat.h	2009-01-27 15:52:42.000000000 -0500
+@@ -33,9 +33,9 @@
+ 
+ extern int get_compat_msghdr(struct msghdr *, struct compat_msghdr __user *);
+ extern int verify_compat_iovec(struct msghdr *, struct iovec *, struct sockaddr *, int);
+-extern asmlinkage long compat_sys_sendmsg(int,struct compat_msghdr __user *,unsigned);
+-extern asmlinkage long compat_sys_recvmsg(int,struct compat_msghdr __user *,unsigned);
+-extern asmlinkage long compat_sys_getsockopt(int, int, int, char __user *, int __user *);
++asmlinkage long compat_sys_sendmsg(int,struct compat_msghdr __user *,unsigned);
++asmlinkage long compat_sys_recvmsg(int,struct compat_msghdr __user *,unsigned);
++asmlinkage long compat_sys_getsockopt(int, int, int, char __user *, int __user *);
+ extern int put_cmsg_compat(struct msghdr*, int, int, int, void *);
+ 
+ extern int cmsghdr_from_user_compat_to_kern(struct msghdr *, struct sock *, unsigned char *, int);
+diff -Nurb linux-2.6.27.10/include/net/neighbour.h linux-2.6.27.10-clickport/include/net/neighbour.h
+--- linux-2.6.27.10/include/net/neighbour.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/neighbour.h	2009-01-27 15:47:52.000000000 -0500
+@@ -275,7 +275,7 @@
+ 						      struct neigh_parms *p,
+ 						      int p_id, int pdev_id,
+ 						      char *p_name,
+-						      proc_handler *proc_handler,
++						      proc_handler_t *proc_handler,
+ 						      ctl_handler *strategy);
+ extern void			neigh_sysctl_unregister(struct neigh_parms *p);
+ 
+diff -Nurb linux-2.6.27.10/include/net/netlink.h linux-2.6.27.10-clickport/include/net/netlink.h
+--- linux-2.6.27.10/include/net/netlink.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/netlink.h	2009-01-28 12:45:44.000000000 -0500
+@@ -315,7 +315,7 @@
+ static inline struct nlattr *nlmsg_attrdata(const struct nlmsghdr *nlh,
+ 					    int hdrlen)
+ {
+-	unsigned char *data = nlmsg_data(nlh);
++	unsigned char *data = (unsigned char *)  nlmsg_data(nlh);
+ 	return (struct nlattr *) (data + NLMSG_ALIGN(hdrlen));
+ }
+ 
+@@ -732,7 +732,7 @@
+  */
+ static inline struct nlattr *nla_find_nested(struct nlattr *nla, int attrtype)
+ {
+-	return nla_find(nla_data(nla), nla_len(nla), attrtype);
++	return nla_find((struct nlattr *) nla_data(nla), nla_len(nla), attrtype);
+ }
+ 
+ /**
+@@ -748,7 +748,7 @@
+ 				   struct nlattr *nla,
+ 				   const struct nla_policy *policy)
+ {
+-	return nla_parse(tb, maxtype, nla_data(nla), nla_len(nla), policy);
++	return nla_parse(tb, maxtype, (struct nlattr *) nla_data(nla), nla_len(nla), policy);
+ }
+ 
+ /**
+@@ -775,7 +775,7 @@
+ 	if (nested_len < 0)
+ 		return -EINVAL;
+ 	if (nested_len >= nla_attr_size(0))
+-		return nla_parse(tb, maxtype, nla_data(nla) + NLA_ALIGN(len),
++		return nla_parse(tb, maxtype, (struct nlattr *) nla_data(nla) + NLA_ALIGN(len),
+ 				 nested_len, policy);
+ 	memset(tb, 0, sizeof(struct nlattr *) * (maxtype + 1));
+ 	return 0;
+@@ -1069,7 +1069,7 @@
+  */
+ static inline int nla_nest_compat_end(struct sk_buff *skb, struct nlattr *start)
+ {
+-	struct nlattr *nest = (void *)start + NLMSG_ALIGN(start->nla_len);
++	struct nlattr *nest = (struct nlattr *) (char *)start + NLMSG_ALIGN(start->nla_len);
+ 
+ 	start->nla_len = skb_tail_pointer(skb) - (unsigned char *)start;
+ 	return nla_nest_end(skb, nest);
+@@ -1103,7 +1103,7 @@
+ static inline int nla_validate_nested(struct nlattr *start, int maxtype,
+ 				      const struct nla_policy *policy)
+ {
+-	return nla_validate(nla_data(start), nla_len(start), maxtype, policy);
++	return nla_validate((struct nlattr *) nla_data(start), nla_len(start), maxtype, policy);
+ }
+ 
+ /**
+diff -Nurb linux-2.6.27.10/include/net/pkt_cls.h linux-2.6.27.10-clickport/include/net/pkt_cls.h
+--- linux-2.6.27.10/include/net/pkt_cls.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/pkt_cls.h	2009-01-27 15:47:52.000000000 -0500
+@@ -302,9 +302,7 @@
+ 
+ #else /* CONFIG_NET_EMATCH */
+ 
+-struct tcf_ematch_tree
+-{
+-};
++EMPTY_STRUCT_DECL(tcf_ematch_tree);
+ 
+ #define tcf_em_tree_validate(tp, tb, t) ((void)(t), 0)
+ #define tcf_em_tree_destroy(tp, t) do { (void)(t); } while(0)
+diff -Nurb linux-2.6.27.10/include/net/request_sock.h linux-2.6.27.10-clickport/include/net/request_sock.h
+--- linux-2.6.27.10/include/net/request_sock.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/request_sock.h	2009-01-28 13:02:38.000000000 -0500
+@@ -60,7 +60,7 @@
+ 
+ static inline struct request_sock *reqsk_alloc(const struct request_sock_ops *ops)
+ {
+-	struct request_sock *req = kmem_cache_alloc(ops->slab, GFP_ATOMIC);
++	struct request_sock *req = (struct request_sock *) kmem_cache_alloc(ops->slab, GFP_ATOMIC);
+ 
+ 	if (req != NULL)
+ 		req->rsk_ops = ops;
+diff -Nurb linux-2.6.27.10/include/net/route.h linux-2.6.27.10-clickport/include/net/route.h
+--- linux-2.6.27.10/include/net/route.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/route.h	2009-01-27 15:47:52.000000000 -0500
+@@ -161,6 +161,16 @@
+ 				   __be16 sport, __be16 dport, struct sock *sk,
+ 				   int flags)
+ {
++#ifdef __cplusplus
++	struct flowi fl;
++	fl.oif = oif;
++	fl.nl_u.ip4_u.daddr = dst;
++	fl.nl_u.ip4_u.saddr = src;
++	fl.nl_u.ip4_u.tos = tos;
++	fl.proto = protocol;
++	fl.uli_u.ports.sport = sport;
++	fl.uli_u.ports.dport = dport;
++#else
+ 	struct flowi fl = { .oif = oif,
+ 			    .mark = sk->sk_mark,
+ 			    .nl_u = { .ip4_u = { .daddr = dst,
+@@ -170,6 +180,7 @@
+ 			    .uli_u = { .ports =
+ 				       { .sport = sport,
+ 					 .dport = dport } } };
++#endif
+ 
+ 	int err;
+ 	struct net *net = sock_net(sk);
+diff -Nurb linux-2.6.27.10/include/net/sock.h linux-2.6.27.10-clickport/include/net/sock.h
+--- linux-2.6.27.10/include/net/sock.h	2009-01-27 15:18:03.000000000 -0500
++++ linux-2.6.27.10-clickport/include/net/sock.h	2009-01-27 15:51:30.000000000 -0500
+@@ -1104,13 +1104,13 @@
+ {
+ 	if (skb->ip_summed == CHECKSUM_NONE) {
+ 		int err = 0;
+-		__wsum csum = csum_and_copy_from_user(from,
+-						     page_address(page) + off,
++		__wsum csum = csum_and_copy_from_user((unsigned char *) from,
++						     (unsigned char *) page_address(page) + off,
+ 							    copy, 0, &err);
+ 		if (err)
+ 			return err;
+ 		skb->csum = csum_block_add(skb->csum, csum, skb->len);
+-	} else if (copy_from_user(page_address(page) + off, from, copy))
++	} else if (copy_from_user((char *) page_address(page) + off, from, copy))
+ 		return -EFAULT;
+ 
+ 	skb->len	     += copy;
+diff -Nurb linux-2.6.27.10/include/rdma/ib_user_verbs.h linux-2.6.27.10-clickport/include/rdma/ib_user_verbs.h
+--- linux-2.6.27.10/include/rdma/ib_user_verbs.h	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/include/rdma/ib_user_verbs.h	2009-01-27 15:47:52.000000000 -0500
+@@ -504,8 +504,7 @@
+ 	__u64 driver_data[0];
+ };
+ 
+-struct ib_uverbs_modify_qp_resp {
+-};
++EMPTY_STRUCT_DECL(ib_uverbs_modify_qp_resp);
+ 
+ struct ib_uverbs_destroy_qp {
+ 	__u64 response;
+diff -Nurb linux-2.6.27.10/kernel/sched.c linux-2.6.27.10-clickport/kernel/sched.c
+--- linux-2.6.27.10/kernel/sched.c	2009-01-27 15:18:04.000000000 -0500
++++ linux-2.6.27.10-clickport/kernel/sched.c	2009-01-27 16:06:52.000000000 -0500
+@@ -6298,7 +6298,7 @@
+ static void
+ set_table_entry(struct ctl_table *entry,
+ 		const char *procname, void *data, int maxlen,
+-		mode_t mode, proc_handler *proc_handler)
++		mode_t mode, proc_handler_t *proc_handler)
+ {
+ 	entry->procname = procname;
+ 	entry->data = data;
+diff -Nurb linux-2.6.27.10/net/core/dev.c linux-2.6.27.10-clickport/net/core/dev.c
+--- linux-2.6.27.10/net/core/dev.c	2009-01-27 15:18:04.000000000 -0500
++++ linux-2.6.27.10-clickport/net/core/dev.c	2009-01-27 16:02:45.000000000 -0500
+@@ -250,6 +250,9 @@
+ 	write_unlock_bh(&dev_base_lock);
+ }
+ 
++/* Click: input packet handlers, might steal packets from net_rx_action. */
++static RAW_NOTIFIER_HEAD(net_in_chain);
++
+ /*
+  *	Our notifier list
+  */
+@@ -2019,6 +2022,31 @@
+ 	return pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
+ }
+ 
++
++/*
++ * Click: Allow Click to ask to intercept input packets.
++ */
++int
++register_net_in(struct notifier_block *nb)
++{
++	int err;
++	rtnl_lock();
++	err = raw_notifier_chain_register(&net_in_chain, nb);
++	rtnl_unlock();
++	return err;
++}
++
++int
++unregister_net_in(struct notifier_block *nb)
++{
++	int err;
++	rtnl_lock();
++	err = raw_notifier_chain_unregister(&net_in_chain, nb);
++	rtnl_unlock();
++	return err;
++}
++
++
+ #if defined(CONFIG_BRIDGE) || defined (CONFIG_BRIDGE_MODULE)
+ /* These hooks defined here for ATM */
+ struct net_bridge;
+@@ -2185,13 +2213,14 @@
+  *	NET_RX_SUCCESS: no congestion
+  *	NET_RX_DROP: packet was dropped
+  */
+-int netif_receive_skb(struct sk_buff *skb)
++//int netif_receive_skb(struct sk_buff *skb)
++int __netif_receive_skb(struct sk_buff *skb, unsigned short type, int notifier_data)
+ {
+ 	struct packet_type *ptype, *pt_prev;
+ 	struct net_device *orig_dev;
+ 	struct net_device *null_or_orig;
+ 	int ret = NET_RX_DROP;
+-	__be16 type;
++//	__be16 type;
+ 
+ 	/* if we've gotten here through NAPI, check netpoll */
+ 	if (netpoll_receive_skb(skb))
+@@ -2218,6 +2247,14 @@
+ 	skb_reset_transport_header(skb);
+ 	skb->mac_len = skb->network_header - skb->mac_header;
+ 
++	/* Click: may want to steal the packet */
++	if (notifier_data >= 0
++	    && raw_notifier_call_chain(&net_in_chain,
++				   notifier_data,
++				   skb) & NOTIFY_STOP_MASK) {
++        	return ret;
++	}
++ 
+ 	pt_prev = NULL;
+ 
+ 	rcu_read_lock();
+@@ -2316,7 +2353,8 @@
+ 		}
+ 		local_irq_enable();
+ 
+-		netif_receive_skb(skb);
++ 		__netif_receive_skb(skb, skb->protocol, skb_queue_len(&queue->input_pkt_queue));
++//XXX		netif_receive_skb(skb);
+ 	} while (++work < quota && jiffies == start_time);
+ 
+ 	return work;
+@@ -4869,6 +4907,7 @@
+ EXPORT_SYMBOL(dev_get_by_index);
+ EXPORT_SYMBOL(dev_get_by_name);
+ EXPORT_SYMBOL(dev_open);
++EXPORT_SYMBOL(dev_ioctl);
+ EXPORT_SYMBOL(dev_queue_xmit);
+ EXPORT_SYMBOL(dev_remove_pack);
+ EXPORT_SYMBOL(dev_set_allmulti);
+@@ -4881,10 +4920,16 @@
+ EXPORT_SYMBOL(netdev_set_master);
+ EXPORT_SYMBOL(netdev_state_change);
+ EXPORT_SYMBOL(netif_receive_skb);
++EXPORT_SYMBOL(__netif_receive_skb);
+ EXPORT_SYMBOL(netif_rx);
+ EXPORT_SYMBOL(register_gifconf);
+ EXPORT_SYMBOL(register_netdevice);
+ EXPORT_SYMBOL(register_netdevice_notifier);
++
++/* Click */
++EXPORT_SYMBOL(register_net_in);
++EXPORT_SYMBOL(unregister_net_in);
++
+ EXPORT_SYMBOL(skb_checksum_help);
+ EXPORT_SYMBOL(synchronize_net);
+ EXPORT_SYMBOL(unregister_netdevice);
+diff -Nurb linux-2.6.27.10/net/core/neighbour.c linux-2.6.27.10-clickport/net/core/neighbour.c
+--- linux-2.6.27.10/net/core/neighbour.c	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/net/core/neighbour.c	2009-01-27 16:03:49.000000000 -0500
+@@ -2702,7 +2702,7 @@
+ 
+ int neigh_sysctl_register(struct net_device *dev, struct neigh_parms *p,
+ 			  int p_id, int pdev_id, char *p_name,
+-			  proc_handler *handler, ctl_handler *strategy)
++			  proc_handler_t *handler, ctl_handler *strategy)
+ {
+ 	struct neigh_sysctl_table *t;
+ 	const char *dev_name_source = NULL;
+diff -Nurb linux-2.6.27.10/net/core/skbuff.c linux-2.6.27.10-clickport/net/core/skbuff.c
+--- linux-2.6.27.10/net/core/skbuff.c	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/net/core/skbuff.c	2009-01-27 17:09:12.000000000 -0500
+@@ -570,6 +570,112 @@
+ 	skb_shinfo(new)->gso_type = skb_shinfo(old)->gso_type;
+ }
+ 
++
++/* Click: clear skb header state */
++static inline void skb_headerinit(void *p, struct kmem_cache *cache,
++				  unsigned long flags)
++{
++	struct sk_buff *skb = p;
++
++	skb->next = NULL;
++	skb->prev = NULL;
++	skb->sk = NULL;
++	skb->tstamp.tv64 = 0;     /* No idea about time */
++	skb->dev = NULL;
++	skb->iif = 0;
++	skb->dst = NULL;
++	skb->sp = NULL;
++	memset(skb->cb, 0, sizeof(skb->cb));
++	skb->priority = 0;
++	skb->pkt_type = PACKET_HOST;   /* Default type */
++	skb->ip_summed = 0;
++	skb->destructor = NULL;
++
++#ifdef CONFIG_NETFILTER
++	skb->mark = 0;
++	skb->nfct = NULL;
++# if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
++	skb->nfct_reasm = NULL;
++# endif
++# ifdef CONFIG_BRIDGE_NETFILTER
++	skb->nf_bridge = NULL;
++# endif
++#endif
++#ifdef CONFIG_NET_SCHED
++	skb->tc_index = 0;
++# ifdef CONFIG_NET_CLS_ACT
++	skb->tc_verd = 0;
++# endif
++#endif
++}
++
++/* Click: attempts to recycle a sk_buff. if it can be recycled, return it */
++struct sk_buff *skb_recycle(struct sk_buff *skb)
++{
++	if (atomic_dec_and_test(&skb->users)) { 
++		dst_release(skb->dst);
++#ifdef CONFIG_XFRM
++		secpath_put(skb->sp);
++#endif
++		if(skb->destructor) {
++			WARN_ON(in_irq());
++			skb->destructor(skb);
++		}
++#ifdef CONFIG_NETFILTER
++		nf_conntrack_put(skb->nfct);
++# if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
++		nf_conntrack_put_reasm(skb->nfct_reasm);
++# endif
++# ifdef CONFIG_BRIDGE_NETFILTER
++		nf_bridge_put(skb->nf_bridge);
++# endif
++#endif
++		skb_headerinit(skb, NULL, 0);
++
++		if (skb->fclone == SKB_FCLONE_UNAVAILABLE
++		    && (!skb->cloned ||
++			atomic_read(&skb_shinfo(skb)->dataref) == (skb->nohdr ? (1 << SKB_DATAREF_SHIFT) + 1 : 1))) {
++			/* Don't need to atomic_sub skb_shinfo(skb)->dataref,
++			   as we set that to 1 below. */
++			
++			if (skb_shinfo(skb)->nr_frags) {
++				int i;
++				for (i = 0; i < skb_shinfo(skb)->nr_frags; i++)
++					put_page(skb_shinfo(skb)->frags[i].page);
++				/* Jason Park patch */
++				skb_shinfo(skb)->nr_frags = 0;
++			}
++
++			if (skb_shinfo(skb)->frag_list)
++				skb_drop_fraglist(skb);
++
++			/* Load the data pointers. */
++			skb->data = skb->head;
++			skb->tail = skb->data;
++			/* end and truesize should have never changed */
++			/* skb->end = skb->data + skb->truesize; */
++
++			/* set up other state */
++			skb->len = 0;
++			skb->cloned = 0;
++
++			atomic_set(&skb->users, 1);
++			atomic_set(&(skb_shinfo(skb)->dataref), 1);
++			/* Jason Park patch */
++			skb_shinfo(skb)->gso_size = 0;
++			skb_shinfo(skb)->gso_segs = 0;
++			skb_shinfo(skb)->gso_type = 0;
++			skb_shinfo(skb)->ip6_frag_id = 0;
++
++			return skb;
++		}
++
++		kfree_skbmem(skb);
++      	}
++
++	return 0;
++}
++
+ /**
+  *	skb_copy	-	create private copy of an sk_buff
+  *	@skb: buffer to copy
+@@ -2599,6 +2705,7 @@
+ EXPORT_SYMBOL(skb_append_datato_frags);
+ EXPORT_SYMBOL(__skb_warn_lro_forwarding);
+ 
++EXPORT_SYMBOL(skb_recycle);
+ EXPORT_SYMBOL_GPL(skb_to_sgvec);
+ EXPORT_SYMBOL_GPL(skb_cow_data);
+ EXPORT_SYMBOL_GPL(skb_partial_csum_set);
+diff -Nurb linux-2.6.27.10/net/ipv4/arp.c linux-2.6.27.10-clickport/net/ipv4/arp.c
+--- linux-2.6.27.10/net/ipv4/arp.c	2008-12-18 12:13:59.000000000 -0500
++++ linux-2.6.27.10-clickport/net/ipv4/arp.c	2009-01-27 15:47:52.000000000 -0500
+@@ -328,6 +328,7 @@
+ {
+ 	__be32 saddr = 0;
+ 	u8  *dst_ha = NULL;
++	u8  dst_ha_buf[MAX_ADDR_LEN+sizeof(unsigned long)];
+ 	struct net_device *dev = neigh->dev;
+ 	__be32 target = *(__be32*)neigh->primary_key;
+ 	int probes = atomic_read(&neigh->probes);
+@@ -365,8 +366,8 @@
+ 	if ((probes -= neigh->parms->ucast_probes) < 0) {
+ 		if (!(neigh->nud_state&NUD_VALID))
+ 			printk(KERN_DEBUG "trying to ucast probe in NUD_INVALID\n");
+-		dst_ha = neigh->ha;
+-		read_lock_bh(&neigh->lock);
++		memcpy(dst_ha_buf, neigh->ha, sizeof(neigh->ha));
++		dst_ha = dst_ha_buf;
+ 	} else if ((probes -= neigh->parms->app_probes) < 0) {
+ #ifdef CONFIG_ARPD
+ 		neigh_app_ns(neigh);
+@@ -376,8 +377,6 @@
+ 
+ 	arp_send(ARPOP_REQUEST, ETH_P_ARP, target, dev, saddr,
+ 		 dst_ha, dev->dev_addr, NULL);
+-	if (dst_ha)
+-		read_unlock_bh(&neigh->lock);
+ }
+ 
+ static int arp_ignore(struct in_device *in_dev, __be32 sip, __be32 tip)
+diff -Nurb linux-2.6.27.10/net/ipv4/devinet.c linux-2.6.27.10-clickport/net/ipv4/devinet.c
+--- linux-2.6.27.10/net/ipv4/devinet.c	2009-01-27 15:18:04.000000000 -0500
++++ linux-2.6.27.10-clickport/net/ipv4/devinet.c	2009-01-27 15:47:52.000000000 -0500
+@@ -1687,3 +1687,4 @@
+ EXPORT_SYMBOL(inetdev_by_index);
+ EXPORT_SYMBOL(register_inetaddr_notifier);
+ EXPORT_SYMBOL(unregister_inetaddr_notifier);
++EXPORT_SYMBOL(devinet_ioctl);
+diff -Nurb linux-2.6.27.10/scr linux-2.6.27.10-clickport/scr
+--- linux-2.6.27.10/scr	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.27.10-clickport/scr	2009-01-27 15:48:50.000000000 -0500
+@@ -0,0 +1,29 @@
++vi -o ./include/asm-um/elf-x86_64.h ./include/asm-um/elf-x86_64.h.rej
++vi -o ./include/asm-frv/tlbflush.h ./include/asm-frv/tlbflush.h.rej
++vi -o ./include/asm-frv/pgtable.h ./include/asm-frv/pgtable.h.rej
++vi -o ./include/asm-xtensa/pgalloc.h ./include/asm-xtensa/pgalloc.h.rej
++vi -o ./include/asm-xtensa/pgtable.h ./include/asm-xtensa/pgtable.h.rej
++vi -o ./include/asm-xtensa/module.h ./include/asm-xtensa/module.h.rej
++vi -o ./include/asm-xtensa/system.h ./include/asm-xtensa/system.h.rej
++vi -o ./include/asm-xtensa/timex.h ./include/asm-xtensa/timex.h.rej
++vi -o ./include/net/sock.h ./include/net/sock.h.rej
++vi -o ./include/net/compat.h ./include/net/compat.h.rej
++vi -o ./include/asm-mips/fpu.h ./include/asm-mips/fpu.h.rej
++vi -o ./include/asm-mips/time.h ./include/asm-mips/time.h.rej
++vi -o ./include/asm-mips/irq.h ./include/asm-mips/irq.h.rej
++vi -o ./include/asm-mips/system.h ./include/asm-mips/system.h.rej
++vi -o ./include/linux/lockdep.h ./include/linux/lockdep.h.rej
++vi -o ./include/linux/ktime.h ./include/linux/ktime.h.rej
++vi -o ./include/linux/textsearch.h ./include/linux/textsearch.h.rej
++vi -o ./include/linux/backing-dev.h ./include/linux/backing-dev.h.rej
++vi -o ./include/linux/kexec.h ./include/linux/kexec.h.rej
++vi -o ./include/linux/sysctl.h ./include/linux/sysctl.h.rej
++vi -o ./include/linux/netdevice.h ./include/linux/netdevice.h.rej
++vi -o ./include/linux/spinlock_types_up.h ./include/linux/spinlock_types_up.h.rej
++vi -o ./include/linux/list.h ./include/linux/list.h.rej
++vi -o ./include/asm-m68k/module.h ./include/asm-m68k/module.h.rej
++vi -o ./net/core/dev.c ./net/core/dev.c.rej
++vi -o ./net/core/skbuff.c ./net/core/skbuff.c.rej
++vi -o ./net/core/neighbour.c ./net/core/neighbour.c.rej
++vi -o ./drivers/media/dvb/bt8xx/bt878.h ./drivers/media/dvb/bt8xx/bt878.h.rej
++vi -o ./drivers/net/ibmveth.c ./drivers/net/ibmveth.c.rej
