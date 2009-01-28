@@ -119,7 +119,7 @@
  }
  
 --- click-1.6.0-27/include/click/config-linuxmodule.h.orig	2009-01-19 15:07:24.000000000 -0500
-+++ click-1.6.0-27/include/click/config-linuxmodule.h	2009-01-27 12:30:56.000000000 -0500
++++ click-1.6.0-27/include/click/config-linuxmodule.h	2009-01-28 16:05:44.000000000 -0500
 @@ -27,7 +27,7 @@
  #define HAVE_FAST_CHECKSUM 1
  
@@ -144,7 +144,7 @@
  /* Define HAVE_INT64_IS_LONG based on HAVE_INT64_IS_LONG_LINUXMODULE. */
  #ifdef HAVE_INT64_IS_LONG_LINUXMODULE
 --- click-1.6.0-27/linuxmodule/Makefile.orig	2009-01-19 15:15:55.000000000 -0500
-+++ click-1.6.0-27/linuxmodule/Makefile	2009-01-27 12:21:58.000000000 -0500
++++ click-1.6.0-27/linuxmodule/Makefile	2009-01-28 16:15:43.000000000 -0500
 @@ -5,12 +5,12 @@
  subdir := linuxmodule
  conf_auxdir = $(top_srcdir)
@@ -160,7 +160,7 @@
 +bindir = /d/click/click-1.6.0-27/inst/bin
 +sbindir = /d/click/click-1.6.0-27/inst/sbin
 +libdir = /d/click/click-1.6.0-27/inst/lib
-+linuxdir = /d/kernels/linux-2.6.27.10-click/
++linuxdir = /d/kernels/linux-2.6.27.10-clickport
  
  LIB_CXX_OBJS = string.o straccum.o nameinfo.o \
  	bitvector.o vectorv.o templatei.o bighashmap_arena.o \
@@ -169,7 +169,7 @@
  ## LINUX 2.6								##
  
 -KERNELPATH = /d/kernels/linux-2.6.27.10-click
-+KERNELPATH = /d/kernels/linux-2.6.27.10-click/
++KERNELPATH = /d/kernels/linux-2.6.27.10-clickport
  
  ifeq ($(KBUILD_EXTMOD),)
  top_srcdir := ..
@@ -182,15 +182,6 @@
  
  CXXCOMPILE = $(CLICKCXX) $(LINUXCFLAGS) $(CLICKCPPFLAGS) $(CLICKCFLAGS) \
  	$(CLICKCXXFLAGS) $(CLICKDEFS) $(CLICKINCLUDES) $(CLICKDEPCFLAGS)
-@@ -270,7 +270,7 @@
- 	@/bin/rm -f elements.conf
- 	@$(MAKE) elements.conf
- elements.conf: $(top_builddir)/config.status $(top_builddir)/click-buildtool
--	echo "linuxmodule  app aqm ethernet icmp ip standard tcpudp" | $(top_builddir)/click-buildtool findelem -r linuxmodule -p $(top_srcdir) > elements.conf
-+	echo "linuxmodule  app aqm ethernet icmp ip standard tcpudp test" | $(top_builddir)/click-buildtool findelem -r linuxmodule -p $(top_srcdir) > elements.conf
- $(ELEMENTSCONF).mk: $(ELEMENTSCONF).conf $(top_builddir)/click-buildtool
- 	$(CLICK_ELEM2MAKE) -x "$(STD_ELEMENT_OBJS)" < $(ELEMENTSCONF).conf > $(ELEMENTSCONF).mk
- $(ELEMENTSCONF).cc: $(ELEMENTSCONF).conf $(top_builddir)/click-buildtool
 --- click-1.6.0-27/linuxmodule/sched.cc.orig	2007-08-28 19:01:58.000000000 -0400
 +++ click-1.6.0-27/linuxmodule/sched.cc	2009-01-26 16:55:57.000000000 -0500
 @@ -228,7 +228,7 @@
@@ -415,6 +406,22 @@
      if (dev && (dev->type == ARPHRD_ETHER || dev->type == ARPHRD_80211)) {
  	memcpy(store, dev->dev_addr, 6);
  	dev_put(dev);
+--- click-1.6.0-27/config-linuxmodule.h.in.orig	2007-09-18 16:24:46.000000000 -0400
++++ click-1.6.0-27/config-linuxmodule.h.in	2009-01-28 16:06:28.000000000 -0500
+@@ -86,12 +86,10 @@
+ #endif
+ 
+ /* Include integer type definitions. */
+-#if !HAVE_LINUXMODULE_2_6
+ # include <linux/autoconf.h>
+-#endif
+ #include <linux/types.h>
+ typedef ptrdiff_t intptr_t;
+-typedef unsigned long uintptr_t; /* XXX? */
++//typedef unsigned long uintptr_t; /* XXX? */
+ 
+ /* Define HAVE_INT64_IS_LONG based on HAVE_INT64_IS_LONG_LINUXMODULE. */
+ #ifdef HAVE_INT64_IS_LONG_LINUXMODULE
 --- click-1.6.0-27/configure.in.orig	2007-09-18 16:40:01.000000000 -0400
 +++ click-1.6.0-27/configure.in	2009-01-27 12:14:10.000000000 -0500
 @@ -12,6 +12,7 @@
