@@ -33,11 +33,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 19
+%define patchlevel 14
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
-%define vsversion 2.3.0.34
+%define vsversion 2.3.0.36.4
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
@@ -143,18 +143,8 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
-Patch010: linux-2.6-010-e1000e.patch
-Patch020: linux-2.6-020-build-id.patch
-Patch030: linux-2.6-030-netns.patch
-Patch040: linux-2.6-040-i_mutex-check.patch
-
-# These are patches picked up from Fedora/RHEL
-Patch100: linux-2.6-100-build-nonintconfig.patch
-
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
-Patch210: linux-2.6-210-vserver-cpu-sched.patch
-Patch220: delta-ptrace-fix01.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -175,15 +165,11 @@ Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
-Patch590: linux-2.6-590-chopstix-intern.patch
-Patch620: linux-2.6-620-kdb.patch
+# Patch590: linux-2.6-590-chopstix-intern.patch
 Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
-%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
-Patch670: linux-2.6-670-gcc43.patch
-%endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
 
@@ -351,20 +337,9 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 10
-%ApplyPatch 20
-
 # NetNS patch for VINI
-%if 0%{?with_netns}
-%ApplyPatch 30
-%endif
-%ApplyPatch 40
-
-%ApplyPatch 100
 
 %ApplyPatch 200
-%ApplyPatch 210
-%ApplyPatch 220
 
 %ApplyPatch 250
 
@@ -386,17 +361,13 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 560
 %ApplyPatch 570
 %ApplyPatch 580
-%ApplyPatch 590
-%ApplyPatch 620
+# %ApplyPatch 590
 %ApplyPatch 630
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
-%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
-%ApplyPatch 670
-%endif
-%ApplyPatch 680
-%ApplyPatch 690
+# %ApplyPatch 680
+# %ApplyPatch 690
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may

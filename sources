@@ -1,5 +1,5 @@
-2e230d005c002fb3d38a3ca07c0200d0  http://ftp.kernel.org/pub/linux/kernel/v2.6/linux-2.6.22.tar.bz2
-066cc3bdd2783dcd01f6ff466e449ec0  http://ftp.kernel.org/pub/linux/kernel/v2.6/patch-2.6.22.19.bz2
+b3e78977aa79d3754cb7f8143d7ddabd  http://ftp.kernel.org/pub/linux/kernel/v2.6/linux-2.6.27.tar.bz2
+5ee26f54ad6f657d3f904fbbb4151a09  http://ftp.kernel.org/pub/linux/kernel/v2.6/patch-2.6.27.14.bz2
 206302227c1eff2b2067651859c13794  http://intellinuxwireless.org/mac80211/downloads/mac80211-10.0.4.tgz
 e8726b20dd2f9457611019632709889a  http://intellinuxwireless.org/iwlwifi/downloads/iwlwifi-1.2.25.tgz
-d78f1915d2ff8e96422c26573add43e5  http://ftp.linux-vserver.org/pub/kernel/vs2.3/testing/patch-2.6.22.19-vs2.3.0.34.diff
+5203c848e1d0edf6b8232a5e1bcd3e73  http://vserver.13thfloor.at/Experimental/patch-2.6.27.14-vs2.3.0.36.4.diff
