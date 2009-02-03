@@ -85,7 +85,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 
 # MEF commented out
-# %define xen_conflicts glibc < 2.3.5-1
+#define xen_conflicts glibc < 2.3.5-1
 
 #
 # Packages that need to be installed before the kernel is, because the %post
