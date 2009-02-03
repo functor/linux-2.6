@@ -1,7 +1,7 @@
-diff -Nurp linux-2.6.22-570/kernel/vserver/context.c linux-2.6.22-580/kernel/vserver/context.c
---- linux-2.6.22-570/kernel/vserver/context.c	2008-02-15 20:36:20.000000000 +0100
-+++ linux-2.6.22-580/kernel/vserver/context.c	2008-02-15 20:39:37.000000000 +0100
-@@ -406,7 +406,7 @@ int get_xid_list(int index, unsigned int
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/kernel/vserver/context.c linux-2.6.27.10-vs2.3.x-P580/kernel/vserver/context.c
+--- linux-2.6.27.10-vs2.3.x-P/kernel/vserver/context.c	2008-10-31 03:56:55.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P580/kernel/vserver/context.c	2009-01-12 01:18:23.000000000 +0100
+@@ -419,7 +419,7 @@ int get_xid_list(int index, unsigned int
  	int hindex, nr_xids = 0;
  
  	/* only show current and children */
@@ -10,10 +10,10 @@ diff -Nurp linux-2.6.22-570/kernel/vserver/context.c linux-2.6.22-580/kernel/vse
  		if (index > 0)
  			return 0;
  		xids[nr_xids] = vx_current_xid();
-diff -Nurp linux-2.6.22-570/kernel/vserver/network.c linux-2.6.22-580/kernel/vserver/network.c
---- linux-2.6.22-570/kernel/vserver/network.c	2008-02-15 20:36:20.000000000 +0100
-+++ linux-2.6.22-580/kernel/vserver/network.c	2008-02-15 20:40:34.000000000 +0100
-@@ -390,7 +390,7 @@ int get_nid_list(int index, unsigned int
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/kernel/vserver/network.c linux-2.6.27.10-vs2.3.x-P580/kernel/vserver/network.c
+--- linux-2.6.27.10-vs2.3.x-P/kernel/vserver/network.c	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P580/kernel/vserver/network.c	2009-01-12 01:18:23.000000000 +0100
+@@ -392,7 +392,7 @@ int get_nid_list(int index, unsigned int
  	int hindex, nr_nids = 0;
  
  	/* only show current and children */

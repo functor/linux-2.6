@@ -166,7 +166,7 @@ Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
 # Patch590: linux-2.6-590-chopstix-intern.patch
-Patch630: linux-2.6-630-sched-fix.patch
+# Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
@@ -361,13 +361,9 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 560
 %ApplyPatch 570
 %ApplyPatch 580
-# %ApplyPatch 590
-%ApplyPatch 630
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
-# %ApplyPatch 680
-# %ApplyPatch 690
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
@@ -454,7 +450,7 @@ BuildKernel() {
     #Arch=`head -1 .config | cut -b 3-`
     echo USING ARCH=$Arch
 
-    make -s ARCH=$Arch nonint_oldconfig > /dev/null
+    make -s ARCH=$Arch oldconfig < /dev/null > /dev/null
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 

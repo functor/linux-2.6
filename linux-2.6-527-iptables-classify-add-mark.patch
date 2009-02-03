@@ -1,6 +1,6 @@
-diff -Nurp linux-2.6.22-526/include/linux/netfilter/xt_CLASSIFY.h linux-2.6.22-527/include/linux/netfilter/xt_CLASSIFY.h
---- linux-2.6.22-526/include/linux/netfilter/xt_CLASSIFY.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-527/include/linux/netfilter/xt_CLASSIFY.h	2008-07-25 14:46:22.000000000 -0400
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526/include/linux/netfilter/xt_CLASSIFY.h linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526-527/include/linux/netfilter/xt_CLASSIFY.h
+--- linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526/include/linux/netfilter/xt_CLASSIFY.h	2008-07-13 23:51:29.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526-527/include/linux/netfilter/xt_CLASSIFY.h	2009-01-21 03:49:25.000000000 +0100
 @@ -3,6 +3,7 @@
  
  struct xt_classify_target_info {
@@ -9,15 +9,15 @@ diff -Nurp linux-2.6.22-526/include/linux/netfilter/xt_CLASSIFY.h linux-2.6.22-5
  };
  
  #endif /*_XT_CLASSIFY_H */
-diff -Nurp linux-2.6.22-526/net/netfilter/xt_CLASSIFY.c linux-2.6.22-527/net/netfilter/xt_CLASSIFY.c
---- linux-2.6.22-526/net/netfilter/xt_CLASSIFY.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-527/net/netfilter/xt_CLASSIFY.c	2008-07-25 14:50:50.000000000 -0400
-@@ -36,6 +36,9 @@ target(struct sk_buff **pskb,
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526/net/netfilter/xt_CLASSIFY.c linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526-527/net/netfilter/xt_CLASSIFY.c
+--- linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526/net/netfilter/xt_CLASSIFY.c	2008-07-13 23:51:29.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523-524-525-526-527/net/netfilter/xt_CLASSIFY.c	2009-01-21 03:51:49.000000000 +0100
+@@ -34,6 +34,9 @@ classify_tg(struct sk_buff *skb, const s
  	const struct xt_classify_target_info *clinfo = targinfo;
  
- 	(*pskb)->priority = clinfo->priority;
+ 	skb->priority = clinfo->priority;
 +	if (clinfo->add_mark)
-+		(*pskb)->priority += (*pskb)->mark;
++		skb->priority += skb->mark;
 +
  	return XT_CONTINUE;
  }

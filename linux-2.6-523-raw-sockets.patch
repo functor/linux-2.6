@@ -1,7 +1,7 @@
-diff -Nurb linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/include/linux/vserver/network.h
---- linux-2.6.22-510/include/linux/vserver/network.h	2008-06-06 17:07:48.000000000 -0400
-+++ linux-2.6.22-520/include/linux/vserver/network.h	2008-06-06 17:07:56.000000000 -0400
-@@ -47,6 +47,8 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522/include/linux/vserver/network.h linux-2.6.27.10-vs2.3.x-PS-522-523/include/linux/vserver/network.h
+--- linux-2.6.27.10-vs2.3.x-PS-522/include/linux/vserver/network.h	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523/include/linux/vserver/network.h	2009-01-21 03:22:02.000000000 +0100
+@@ -47,6 +47,8 @@ static inline uint64_t __nxf_init_set(vo
  #define NXC_TUN_CREATE		0x00000001
  
  #define NXC_RAW_ICMP		0x00000100
@@ -10,22 +10,19 @@ diff -Nurb linux-2.6.22-510/include/linux/vserver/network.h linux-2.6.22-520/inc
  
  
  /* address types */
-diff -Nurb linux-2.6.22-510/include/net/raw.h linux-2.6.22-520/include/net/raw.h
---- linux-2.6.22-510/include/net/raw.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/net/raw.h	2008-06-06 17:07:56.000000000 -0400
-@@ -36,7 +36,7 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522/net/core/sock.c linux-2.6.27.10-vs2.3.x-PS-522-523/net/core/sock.c
+--- linux-2.6.27.10-vs2.3.x-PS-522/net/core/sock.c	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523/net/core/sock.c	2009-01-21 03:27:01.000000000 +0100
+@@ -381,7 +381,7 @@ static int sock_bindtodevice(struct sock
  
- extern struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
- 				    __be32 raddr, __be32 laddr,
--				    int dif);
-+				    int dif, int tag);
+ 	/* Sorry... */
+ 	ret = -EPERM;
+-	if (!capable(CAP_NET_RAW))
++	if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET))
+ 		goto out;
  
- extern int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash);
-
-diff -Nurb linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
---- linux-2.6.22-510/net/core/sock.c	2008-06-06 17:07:48.000000000 -0400
-+++ linux-2.6.22-520/net/core/sock.c	2008-06-06 17:07:56.000000000 -0400
-@@ -444,6 +444,19 @@
+ 	ret = -EINVAL;
+@@ -515,6 +515,19 @@ set_sndbuf:
  		}
  		goto set_sndbuf;
  
@@ -45,19 +42,10 @@ diff -Nurb linux-2.6.22-510/net/core/sock.c linux-2.6.22-520/net/core/sock.c
  	case SO_RCVBUF:
  		/* Don't error on this BSD doesn't and if you think
  		   about it this is right. Otherwise apps have to
-@@ -573,7 +586,7 @@
- 		char devname[IFNAMSIZ];
- 
- 		/* Sorry... */
--		if (!capable(CAP_NET_RAW)) {
-+		if (!nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET)) {
- 			ret = -EPERM;
- 			break;
- 		}
-diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet.c
---- linux-2.6.22-510/net/ipv4/af_inet.c	2008-06-06 17:07:48.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/af_inet.c	2008-06-06 17:07:56.000000000 -0400
-@@ -312,6 +314,9 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522/net/ipv4/af_inet.c linux-2.6.27.10-vs2.3.x-PS-522-523/net/ipv4/af_inet.c
+--- linux-2.6.27.10-vs2.3.x-PS-522/net/ipv4/af_inet.c	2009-01-21 03:12:46.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-PS-522-523/net/ipv4/af_inet.c	2009-01-21 03:22:02.000000000 +0100
+@@ -331,6 +331,9 @@ lookup_protocol:
  	if ((protocol == IPPROTO_ICMP) &&
  		nx_capable(answer->capability, NXC_RAW_ICMP))
  		goto override;
@@ -67,22 +55,10 @@ diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet
  	if (answer->capability > 0 && !capable(answer->capability))
  		goto out_rcu_unlock;
  override:
-diff -Nurb linux-2.6.22-510/net/ipv4/icmp.c linux-2.6.22-520/net/ipv4/icmp.c
---- linux-2.6.22-510/net/ipv4/icmp.c	2008-06-06 17:07:55.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/icmp.c	2008-06-06 17:07:56.000000000 -0400
-@@ -709,7 +709,7 @@
- 	if ((raw_sk = sk_head(&raw_v4_htable[hash])) != NULL) {
- 		while ((raw_sk = __raw_v4_lookup(raw_sk, protocol, iph->daddr,
- 						 iph->saddr,
--						 skb->dev->ifindex)) != NULL) {
-+						 skb->dev->ifindex, skb->skb_tag)) != NULL) {
- 			raw_err(raw_sk, skb, info);
- 			raw_sk = sk_next(raw_sk);
- 			iph = (struct iphdr *)skb->data;
-diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_options.c
---- linux-2.6.22-510/net/ipv4/ip_options.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/ip_options.c	2008-06-06 17:07:56.000000000 -0400
-@@ -409,7 +409,7 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522/net/ipv4/ip_options.c linux-2.6.27.10-vs2.3.x-PS-522-523/net/ipv4/ip_options.c
+--- linux-2.6.27.10-vs2.3.x-PS-522/net/ipv4/ip_options.c	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523/net/ipv4/ip_options.c	2009-01-21 03:22:02.000000000 +0100
+@@ -397,7 +397,7 @@ int ip_options_compile(struct net *net,
  					optptr[2] += 8;
  					break;
  				      default:
@@ -91,7 +67,7 @@ diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  						pp_ptr = optptr + 3;
  						goto error;
  					}
-@@ -445,7 +445,7 @@
+@@ -433,7 +433,7 @@ int ip_options_compile(struct net *net,
  				opt->router_alert = optptr - iph;
  			break;
  		      case IPOPT_CIPSO:
@@ -100,7 +76,7 @@ diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  				pp_ptr = optptr;
  				goto error;
  			}
-@@ -458,7 +458,7 @@
+@@ -446,7 +446,7 @@ int ip_options_compile(struct net *net,
  		      case IPOPT_SEC:
  		      case IPOPT_SID:
  		      default:
@@ -109,46 +85,57 @@ diff -Nurb linux-2.6.22-510/net/ipv4/ip_options.c linux-2.6.22-520/net/ipv4/ip_o
  				pp_ptr = optptr;
  				goto error;
  			}
-diff -Nurb linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
---- linux-2.6.22-510/net/ipv4/raw.c	2008-06-06 17:07:48.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/raw.c	2008-06-06 17:07:56.000000000 -0400
-@@ -103,7 +103,7 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522/net/ipv4/raw.c linux-2.6.27.10-vs2.3.x-PS-522-523/net/ipv4/raw.c
+--- linux-2.6.27.10-vs2.3.x-PS-522/net/ipv4/raw.c	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523/net/ipv4/raw.c	2009-01-21 03:26:02.000000000 +0100
+@@ -108,7 +108,7 @@ void raw_unhash_sk(struct sock *sk)
+ EXPORT_SYMBOL_GPL(raw_unhash_sk);
  
- struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
- 			     __be32 raddr, __be32 laddr,
--			     int dif)
-+			     int dif, int tag)
+ static struct sock *__raw_v4_lookup(struct net *net, struct sock *sk,
+-		unsigned short num, __be32 raddr, __be32 laddr, int dif)
++		unsigned short num, __be32 raddr, __be32 laddr, int dif, int tag)
  {
  	struct hlist_node *node;
  
-@@ -112,6 +112,7 @@
+@@ -117,6 +117,7 @@ static struct sock *__raw_v4_lookup(stru
  
- 		if (inet->num == num 					&&
+ 		if (net_eq(sock_net(sk), net) && inet->num == num	&&
  		    !(inet->daddr && inet->daddr != raddr) 		&&
 +		    (!sk->sk_nx_info || tag == 1 || sk->sk_nid == tag)	&&
  		    v4_sock_addr_match(sk->sk_nx_info, inet, laddr)	&&
  		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
  			goto found; /* gotcha */
-@@ -161,7 +162,7 @@
- 		goto out;
- 	sk = __raw_v4_lookup(__sk_head(head), iph->protocol,
+@@ -169,7 +170,7 @@ static int raw_v4_input(struct sk_buff *
+ 	net = dev_net(skb->dev);
+ 	sk = __raw_v4_lookup(net, __sk_head(head), iph->protocol,
  			     iph->saddr, iph->daddr,
 -			     skb->dev->ifindex);
 +			     skb->dev->ifindex, skb->skb_tag);
  
  	while (sk) {
  		delivered = 1;
-@@ -174,7 +175,7 @@
+@@ -182,7 +183,7 @@ static int raw_v4_input(struct sk_buff *
  		}
- 		sk = __raw_v4_lookup(sk_next(sk), iph->protocol,
+ 		sk = __raw_v4_lookup(net, sk_next(sk), iph->protocol,
  				     iph->saddr, iph->daddr,
 -				     skb->dev->ifindex);
 +				     skb->dev->ifindex, skb->skb_tag);
  	}
  out:
- 	read_unlock(&raw_v4_lock);
-@@ -315,7 +316,7 @@
- 	}
+ 	read_unlock(&raw_v4_hashinfo.lock);
+@@ -277,8 +278,8 @@ void raw_icmp_error(struct sk_buff *skb,
+ 		net = dev_net(skb->dev);
+ 
+ 		while ((raw_sk = __raw_v4_lookup(net, raw_sk, protocol,
+-						iph->daddr, iph->saddr,
+-						skb->dev->ifindex)) != NULL) {
++			iph->daddr, iph->saddr, skb->dev->ifindex,
++			skb->skb_tag)) != NULL) {
+ 			raw_err(raw_sk, skb, info);
+ 			raw_sk = sk_next(raw_sk);
+ 			iph = (struct iphdr *)skb->data;
+@@ -373,7 +374,7 @@ static int raw_send_hdrinc(struct sock *
+ 			skb_transport_header(skb))->type);
  
  	err = -EPERM;
 -	if (!nx_check(0, VS_ADMIN) && !capable(CAP_NET_RAW) &&
@@ -156,5 +143,3 @@ diff -Nurb linux-2.6.22-510/net/ipv4/raw.c linux-2.6.22-520/net/ipv4/raw.c
  		sk->sk_nx_info &&
  		!v4_addr_in_nx_info(sk->sk_nx_info, iph->saddr, NXA_MASK_BIND))
  		goto error_free;
-
-

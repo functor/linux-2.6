@@ -1,12 +1,12 @@
-diff -Nurb linux-2.6.22-650/include/asm-i386/nmi.h linux-2.6.22-660/include/asm-i386/nmi.h
---- linux-2.6.22-650/include/asm-i386/nmi.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-660/include/asm-i386/nmi.h	2008-08-12 14:51:44.000000000 -0400
-@@ -33,7 +33,7 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/arch/x86/kernel/nmi.c linux-2.6.27.10-vs2.3.x-P660/arch/x86/kernel/nmi.c
+--- linux-2.6.27.10-vs2.3.x-P/arch/x86/kernel/nmi.c	2008-10-13 14:51:58.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P660/arch/x86/kernel/nmi.c	2009-01-21 02:24:07.000000000 +0100
+@@ -52,7 +52,7 @@ static cpumask_t backtrace_mask = CPU_MA
+ atomic_t nmi_active = ATOMIC_INIT(0);		/* oprofile uses this */
+ EXPORT_SYMBOL(nmi_active);
  
- extern atomic_t nmi_active;
- extern unsigned int nmi_watchdog;
--#define NMI_DEFAULT     -1
-+#define NMI_DEFAULT     1
- #define NMI_NONE	0
- #define NMI_IO_APIC	1
- #define NMI_LOCAL_APIC	2
+-unsigned int nmi_watchdog = NMI_NONE;
++unsigned int nmi_watchdog = NMI_IO_APIC;
+ EXPORT_SYMBOL(nmi_watchdog);
+ 
+ static int panic_on_timeout;
