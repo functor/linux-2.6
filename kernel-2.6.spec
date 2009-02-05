@@ -535,12 +535,12 @@ BuildKernel() {
     cp -a acpi config keys linux math-emu media mtd net pcmcia rdma rxrpc scsi sound video asm asm-generic $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     if [ "$Arch" = "x86_64" ]; then
-      cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cp -a asm-x86 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %if %{buildxen}
     if [ "$Flavour" = "xenU" ]; then
       cp -a xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-      cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cp -a asm-x86 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %endif
 %if %{builduml}
