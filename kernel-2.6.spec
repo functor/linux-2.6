@@ -186,6 +186,8 @@ Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
+Patch700: linux-2.6-700-click-for-trellis.patch
+Patch710: linux-2.6-710-disable-vserver-check-for-ns-devices.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -391,6 +393,10 @@ KERNEL_PREVIOUS=vanilla
 %endif
 %ApplyPatch 680
 %ApplyPatch 690
+
+# Trellis series
+%ApplyPatch 700
+%ApplyPatch 710
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
