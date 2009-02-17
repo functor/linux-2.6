@@ -725,8 +725,8 @@ diff -Nurb linux-2.6.22-580/mm/slab.c linux-2.6.22-590/mm/slab.c
  	local_irq_restore(flags);
  }
  EXPORT_SYMBOL(kfree);
---- mm/memory.c.orig	2008-02-25 18:59:40.000000000 -0500
-+++ mm/memory.c	2009-02-17 17:14:01.000000000 -0500
+--- linux-2.6.22.19-chopstix/mm/memory.c.orig	2008-02-25 18:59:40.000000000 -0500
++++ linux-2.6.22.19-chopstix/mm/memory.c	2009-02-17 18:34:55.000000000 -0500
 @@ -59,6 +59,7 @@
  
  #include <linux/swapops.h>
@@ -762,7 +762,7 @@ diff -Nurb linux-2.6.22-580/mm/slab.c linux-2.6.22-590/mm/slab.c
 +        struct pt_regs *regs;
 +        unsigned int pc;
 +        regs = task_pt_regs(current);
-+        pc = regs->eip & 4095;
++        pc = regs->eip & (unsigned int) ~4095;
 +
 +		espec.reason = 0; /* alloc */
 +		event.event_data=&espec;
