@@ -12,6 +12,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define builduml 0
 %define buildxen 0
 %define builddoc 0
+%define headers 1
 
 # default is to not build this - to override, use something like
 # kernel-SPECVARS := iwlwifi=1 
@@ -298,6 +299,12 @@ implicit or explicit dependencies on the "kernel" package
 (e.g. tcpdump). This package installs no files but provides the
 necessary dependencies to make rpm and yum happy.
 
+%package headers
+Summary: Kernel header
+Group: System Environment/Kernel
+
+%description headers
+This package contains the sanitized kernel headers.
 
 %prep
 # First we unpack the kernel tarball.
@@ -453,6 +460,10 @@ BuildKernel() {
     make -s ARCH=$Arch oldconfig < /dev/null > /dev/null
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
+%if %{headers}
+    make -s ARCH=$Arch INSTALL_HDR_PATH=$RPM_BUILD_ROOT/usr
+    rm -f $RPM_BUILD_ROOT/%{_includedir}/{..,.}{check,install}*
+%endif
 
 %if %{build_iwlwifi}
     # build the iwlwifi driver
@@ -823,6 +834,13 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %{_datadir}/doc/kernel-doc-%{kversion}/Documentation/*
 %dir %{_datadir}/doc/kernel-doc-%{kversion}/Documentation
 %dir %{_datadir}/doc/kernel-doc-%{kversion}
+%endif
+
+%if %{headers}
+%files headers
+%defattr(-,root,root)
+%dir %{_includedir}
+%{_includedir}/*
 %endif
 
 %changelog
