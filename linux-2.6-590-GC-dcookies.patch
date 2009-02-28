@@ -1,0 +1,139 @@
+--- linux-2.6.22.19-chopstix/fs/dcookies.c	2009-02-28 03:10:05.000000000 -0500
++++ linux-2.6.22.19-chopstix/fs/dcookies.c.orig	2008-02-25 18:59:40.000000000 -0500
+@@ -38,19 +38,14 @@
+ static LIST_HEAD(dcookie_users);
+ static DEFINE_MUTEX(dcookie_mutex);
+ static struct kmem_cache *dcookie_cache __read_mostly;
+-static struct list_head *dcookie_hashtable[2] __read_mostly;
++static struct list_head *dcookie_hashtable __read_mostly;
+ static size_t hash_size __read_mostly;
+-unsigned int current_hash = 0;
+ 
+ static inline int is_live(void)
+ {
+ 	return !(list_empty(&dcookie_users));
+ }
+ 
+-static inline int is_shared(void)
+-{
+-	return !(list_empty(&dcookie_users)) && !(list_empty(dcookie_users.next));
+-}
+ 
+ /* The dentry is locked, its address will do for the cookie */
+ static inline unsigned long dcookie_value(struct dcookie_struct * dcs)
+@@ -72,7 +67,7 @@
+ 	struct list_head * pos;
+ 	struct list_head * list;
+ 
+-	list = dcookie_hashtable[current_hash] + dcookie_hash(dcookie);
++	list = dcookie_hashtable + dcookie_hash(dcookie);
+ 
+ 	list_for_each(pos, list) {
+ 		dcs = list_entry(pos, struct dcookie_struct, hash_list);
+@@ -88,7 +83,7 @@
+ 
+ static void hash_dcookie(struct dcookie_struct * dcs)
+ {
+-	struct list_head * list = dcookie_hashtable[current_hash] + dcookie_hash(dcookie_value(dcs));
++	struct list_head * list = dcookie_hashtable + dcookie_hash(dcookie_value(dcs));
+ 	list_add(&dcs->hash_list, list);
+ }
+ 
+@@ -96,7 +91,7 @@
+ static struct dcookie_struct * alloc_dcookie(struct dentry * dentry,
+ 	struct vfsmount * vfsmnt)
+ {
+-	struct dcookie_struct * dcs = kmem_cache_alloc(dcookie_cache, GFP_ATOMIC);
++	struct dcookie_struct * dcs = kmem_cache_alloc(dcookie_cache, GFP_KERNEL);
+ 	if (!dcs)
+ 		return NULL;
+ 
+@@ -215,12 +210,8 @@
+ 	if (!dcookie_cache)
+ 		goto out;
+ 
+-	dcookie_hashtable[0] = kmalloc(PAGE_SIZE, GFP_KERNEL);
+-	if (!dcookie_hashtable[0])
+-		goto out_kmem;
+-    
+-    dcookie_hashtable[1] = kmalloc(PAGE_SIZE, GFP_KERNEL);
+-	if (!dcookie_hashtable[1])
++	dcookie_hashtable = kmalloc(PAGE_SIZE, GFP_KERNEL);
++	if (!dcookie_hashtable)
+ 		goto out_kmem;
+ 
+ 	err = 0;
+@@ -244,15 +235,7 @@
+ 	hash_size = 1UL << hash_bits;
+ 
+ 	/* And initialize the newly allocated array */
+-	d = dcookie_hashtable[0];
+-	i = hash_size;
+-	do {
+-		INIT_LIST_HEAD(d);
+-		d++;
+-		i--;
+-	} while (i);
+-
+-    d = dcookie_hashtable[1];
++	d = dcookie_hashtable;
+ 	i = hash_size;
+ 	do {
+ 		INIT_LIST_HEAD(d);
+@@ -276,30 +259,6 @@
+ 	kmem_cache_free(dcookie_cache, dcs);
+ }
+ 
+-/* Switch to the second hash */
+-int garbage_collect(void) {
+-    struct list_head * list;
+-	struct list_head * pos;
+-	struct list_head * pos2;
+-	struct dcookie_struct * dcs;
+-	size_t i;
+-
+-    if (is_shared())
+-        return -EAGAIN;
+-
+-	for (i = 0; i < hash_size; ++i) {
+-		list = dcookie_hashtable[current_hash] + i;
+-		list_for_each_safe(pos, pos2, list) {
+-			dcs = list_entry(pos, struct dcookie_struct, hash_list);
+-			list_del(&dcs->hash_list);
+-			free_dcookie(dcs);
+-		}
+-	}
+-
+-    current_hash = (current_hash & 1) ^ 1;
+-
+-    return 0;
+-}
+ 
+ static void dcookie_exit(void)
+ {
+@@ -310,14 +269,7 @@
+ 	size_t i;
+ 
+ 	for (i = 0; i < hash_size; ++i) {
+-		list = dcookie_hashtable[0] + i;
+-		list_for_each_safe(pos, pos2, list) {
+-			dcs = list_entry(pos, struct dcookie_struct, hash_list);
+-			list_del(&dcs->hash_list);
+-			free_dcookie(dcs);
+-		}
+-
+-        list = dcookie_hashtable[1] + i;
++		list = dcookie_hashtable + i;
+ 		list_for_each_safe(pos, pos2, list) {
+ 			dcs = list_entry(pos, struct dcookie_struct, hash_list);
+ 			list_del(&dcs->hash_list);
+@@ -325,8 +277,7 @@
+ 		}
+ 	}
+ 
+-	kfree(dcookie_hashtable[0]);
+-	kfree(dcookie_hashtable[1]);
++	kfree(dcookie_hashtable);
+ 	kmem_cache_destroy(dcookie_cache);
+ }
+ 
