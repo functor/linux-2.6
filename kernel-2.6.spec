@@ -175,7 +175,8 @@ Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
-Patch590: linux-2.6-590-chopstix-intern.patch
+Patch590: linux-2.6-590-GC-dcookies.patch
+Patch591: linux-2.6-591-chopstix-intern.patch
 Patch620: linux-2.6-620-kdb.patch
 Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
@@ -387,6 +388,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 570
 %ApplyPatch 580
 %ApplyPatch 590
+%ApplyPatch 591
 %ApplyPatch 620
 %ApplyPatch 630
 %ApplyPatch 640
