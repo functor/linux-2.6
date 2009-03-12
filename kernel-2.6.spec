@@ -92,6 +92,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # scripts use them.
 #
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
+%define _unpackaged_files_terminate_build 0
 
 Vendor: PlanetLab
 Packager: PlanetLab Central <support@planet-lab.org>
