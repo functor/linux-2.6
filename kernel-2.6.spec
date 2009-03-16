@@ -462,6 +462,7 @@ BuildKernel() {
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 %if %{headers}
     make -s ARCH=$Arch INSTALL_HDR_PATH=$RPM_BUILD_ROOT/usr
+    find $RPM_BUILD_ROOT/%{_includedir} -name \*.cmd -delete
     rm -f $RPM_BUILD_ROOT/%{_includedir}/{..,.}{check,install}*
 %endif
 
