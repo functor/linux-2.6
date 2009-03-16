@@ -188,3 +188,34 @@ diff -Nurb linux-2.6.22.19/fs/dcookies.c linux-2.6.22.19-dcookies/fs/dcookies.c
  EXPORT_SYMBOL_GPL(get_dcookie);
 +EXPORT_SYMBOL_GPL(dcookie_garbage_collect);
 +EXPORT_SYMBOL_GPL(dcookie_swap);
+diff -Nurb linux-2.6.22.19/include/linux/dcookies.h linux-2.6.22.19-dcookies/include/linux/dcookies.h
+--- linux-2.6.22.19/include/linux/dcookies.h	2008-02-25 18:59:40.000000000 -0500
++++ linux-2.6.22.19-dcookies/include/linux/dcookies.h	2009-03-16 15:15:13.000000000 -0400
+@@ -45,6 +45,27 @@
+ int get_dcookie(struct dentry * dentry, struct vfsmount * vfsmnt,
+ 	unsigned long * cookie);
+ 
++
++/**
++ * dcookie_swap - switch to the next dcookie epoch
++ *
++ * Deactivate the current dcookie hash table and activate
++ * the next one
++ *
++ * Returns 0 on success
++ */
++
++int dcookie_swap(void);
++
++/**
++ * dcookie_garbage_collect - clear the hash table next in line
++ *
++ * Clear the hash table to be activated in the next epoch.
++ *
++ * Returns 0 on success
++ */
++
++int dcookie_garbage_colect(void);
+ #else
+ 
+ static inline struct dcookie_user * dcookie_register(void)
