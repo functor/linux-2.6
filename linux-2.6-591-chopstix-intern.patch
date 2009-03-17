@@ -1,6 +1,6 @@
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/arch/i386/Kconfig kernel-2.6.22/linux-2.6.22-591/arch/i386/Kconfig
---- kernel-2.6.22/linux-2.6.22-590/arch/i386/Kconfig	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/arch/i386/Kconfig	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/arch/i386/Kconfig linux-2.6.22-591/arch/i386/Kconfig
+--- linux-2.6.22-590/arch/i386/Kconfig	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/arch/i386/Kconfig	2009-03-16 20:58:59.000000000 -0400
 @@ -1217,6 +1217,14 @@
  
  source "arch/i386/oprofile/Kconfig"
@@ -16,9 +16,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  config KPROBES
  	bool "Kprobes (EXPERIMENTAL)"
  	depends on KALLSYMS && EXPERIMENTAL && MODULES
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/arch/i386/kernel/asm-offsets.c kernel-2.6.22/linux-2.6.22-591/arch/i386/kernel/asm-offsets.c
---- kernel-2.6.22/linux-2.6.22-590/arch/i386/kernel/asm-offsets.c	2007-07-08 19:32:17.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/arch/i386/kernel/asm-offsets.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/arch/i386/kernel/asm-offsets.c linux-2.6.22-591/arch/i386/kernel/asm-offsets.c
+--- linux-2.6.22-590/arch/i386/kernel/asm-offsets.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/arch/i386/kernel/asm-offsets.c	2009-03-16 20:58:59.000000000 -0400
 @@ -9,6 +9,7 @@
  #include <linux/signal.h>
  #include <linux/personality.h>
@@ -65,9 +65,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
  	OFFSET(TI_status, thread_info, status);
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/arch/i386/kernel/entry.S kernel-2.6.22/linux-2.6.22-591/arch/i386/kernel/entry.S
---- kernel-2.6.22/linux-2.6.22-590/arch/i386/kernel/entry.S	2009-03-16 20:49:07.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/arch/i386/kernel/entry.S	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/arch/i386/kernel/entry.S linux-2.6.22-591/arch/i386/kernel/entry.S
+--- linux-2.6.22-590/arch/i386/kernel/entry.S	2009-03-16 20:49:07.000000000 -0400
++++ linux-2.6.22-591/arch/i386/kernel/entry.S	2009-03-16 20:58:59.000000000 -0400
 @@ -374,6 +374,33 @@
  	cmpl $(nr_syscalls), %eax
  	jae syscall_badsys
@@ -102,9 +102,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	call *sys_call_table(,%eax,4)
  	movl %eax,PT_EAX(%esp)		# store the return value
  syscall_exit:
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/arch/i386/mm/fault.c kernel-2.6.22/linux-2.6.22-591/arch/i386/mm/fault.c
---- kernel-2.6.22/linux-2.6.22-590/arch/i386/mm/fault.c	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/arch/i386/mm/fault.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/arch/i386/mm/fault.c linux-2.6.22-591/arch/i386/mm/fault.c
+--- linux-2.6.22-590/arch/i386/mm/fault.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/arch/i386/mm/fault.c	2009-03-16 20:58:59.000000000 -0400
 @@ -60,6 +60,15 @@
  	                                  DIE_PAGE_FAULT, &args);
  }
@@ -130,9 +130,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  fastcall void __kprobes do_page_fault(struct pt_regs *regs,
  				      unsigned long error_code)
  {
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/block/ll_rw_blk.c kernel-2.6.22/linux-2.6.22-591/block/ll_rw_blk.c
---- kernel-2.6.22/linux-2.6.22-590/block/ll_rw_blk.c	2009-03-16 20:49:07.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/block/ll_rw_blk.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/block/ll_rw_blk.c linux-2.6.22-591/block/ll_rw_blk.c
+--- linux-2.6.22-590/block/ll_rw_blk.c	2009-03-16 20:49:07.000000000 -0400
++++ linux-2.6.22-591/block/ll_rw_blk.c	2009-03-16 20:58:59.000000000 -0400
 @@ -30,6 +30,7 @@
  #include <linux/cpu.h>
  #include <linux/blktrace_api.h>
@@ -180,9 +180,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  		ret = q->make_request_fn(q, bio);
  	} while (ret);
  }
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/drivers/char/Makefile kernel-2.6.22/linux-2.6.22-591/drivers/char/Makefile
---- kernel-2.6.22/linux-2.6.22-590/drivers/char/Makefile	2007-07-08 19:32:17.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/drivers/char/Makefile	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/drivers/char/Makefile linux-2.6.22-591/drivers/char/Makefile
+--- linux-2.6.22-590/drivers/char/Makefile	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/drivers/char/Makefile	2009-03-16 20:58:59.000000000 -0400
 @@ -9,6 +9,9 @@
  
  obj-y	 += mem.o random.o tty_io.o n_tty.o tty_ioctl.o
@@ -193,9 +193,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  obj-$(CONFIG_LEGACY_PTYS)	+= pty.o
  obj-$(CONFIG_UNIX98_PTYS)	+= pty.o
  obj-y				+= misc.o
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/drivers/char/chardevice.c kernel-2.6.22/linux-2.6.22-591/drivers/char/chardevice.c
---- kernel-2.6.22/linux-2.6.22-590/drivers/char/chardevice.c	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/drivers/char/chardevice.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/drivers/char/chardevice.c linux-2.6.22-591/drivers/char/chardevice.c
+--- linux-2.6.22-590/drivers/char/chardevice.c	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/drivers/char/chardevice.c	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,36 @@
 +#include<linux/module.h>
 +#include<linux/init.h>
@@ -233,9 +233,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +return ;
 +}
 +
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/drivers/char/chardevice.h kernel-2.6.22/linux-2.6.22-591/drivers/char/chardevice.h
---- kernel-2.6.22/linux-2.6.22-590/drivers/char/chardevice.h	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/drivers/char/chardevice.h	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/drivers/char/chardevice.h linux-2.6.22-591/drivers/char/chardevice.h
+--- linux-2.6.22-590/drivers/char/chardevice.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/drivers/char/chardevice.h	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,65 @@
 +/*
 + * my device header file 
@@ -302,9 +302,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +	return 0;
 +}
 +#endif
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/drivers/char/inject.c kernel-2.6.22/linux-2.6.22-591/drivers/char/inject.c
---- kernel-2.6.22/linux-2.6.22-590/drivers/char/inject.c	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/drivers/char/inject.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/drivers/char/inject.c linux-2.6.22-591/drivers/char/inject.c
+--- linux-2.6.22-590/drivers/char/inject.c	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/drivers/char/inject.c	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,37 @@
 +#include<linux/module.h>
 +#include<linux/init.h>
@@ -343,9 +343,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +return ;
 +}
 +
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/drivers/char/inject.h kernel-2.6.22/linux-2.6.22-591/drivers/char/inject.h
---- kernel-2.6.22/linux-2.6.22-590/drivers/char/inject.h	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/drivers/char/inject.h	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/drivers/char/inject.h linux-2.6.22-591/drivers/char/inject.h
+--- linux-2.6.22-590/drivers/char/inject.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/drivers/char/inject.h	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,65 @@
 +/*
 + * my device header file 
@@ -412,9 +412,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +	return 0;
 +}
 +#endif
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/drivers/oprofile/cpu_buffer.c kernel-2.6.22/linux-2.6.22-591/drivers/oprofile/cpu_buffer.c
---- kernel-2.6.22/linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/drivers/oprofile/cpu_buffer.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/drivers/oprofile/cpu_buffer.c linux-2.6.22-591/drivers/oprofile/cpu_buffer.c
+--- linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/drivers/oprofile/cpu_buffer.c	2009-03-16 20:58:59.000000000 -0400
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -478,9 +478,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  }
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/fs/bio.c kernel-2.6.22/linux-2.6.22-591/fs/bio.c
---- kernel-2.6.22/linux-2.6.22-590/fs/bio.c	2007-07-08 19:32:17.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/fs/bio.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/fs/bio.c linux-2.6.22-591/fs/bio.c
+--- linux-2.6.22-590/fs/bio.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/fs/bio.c	2009-03-16 20:58:59.000000000 -0400
 @@ -27,6 +27,7 @@
  #include <linux/workqueue.h>
  #include <linux/blktrace_api.h>
@@ -537,9 +537,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	if (bio->bi_end_io)
  		bio->bi_end_io(bio, bytes_done, error);
  }
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/fs/exec.c kernel-2.6.22/linux-2.6.22-591/fs/exec.c
---- kernel-2.6.22/linux-2.6.22-590/fs/exec.c	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/fs/exec.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/fs/exec.c linux-2.6.22-591/fs/exec.c
+--- linux-2.6.22-590/fs/exec.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/fs/exec.c	2009-03-16 20:58:59.000000000 -0400
 @@ -27,6 +27,7 @@
  #include <linux/mman.h>
  #include <linux/a.out.h>
@@ -581,9 +581,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  
  	zap_other_threads(tsk);
  	read_unlock(&tasklist_lock);
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/include/linux/arrays.h kernel-2.6.22/linux-2.6.22-591/include/linux/arrays.h
---- kernel-2.6.22/linux-2.6.22-590/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/include/linux/arrays.h	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/include/linux/arrays.h linux-2.6.22-591/include/linux/arrays.h
+--- linux-2.6.22-590/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/include/linux/arrays.h	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,36 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
@@ -621,9 +621,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +	struct task_struct *task;
 +};
 +#endif
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/include/linux/mutex.h kernel-2.6.22/linux-2.6.22-591/include/linux/mutex.h
---- kernel-2.6.22/linux-2.6.22-590/include/linux/mutex.h	2007-07-08 19:32:17.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/include/linux/mutex.h	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/include/linux/mutex.h linux-2.6.22-591/include/linux/mutex.h
+--- linux-2.6.22-590/include/linux/mutex.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/include/linux/mutex.h	2009-03-16 20:58:59.000000000 -0400
 @@ -53,6 +53,10 @@
  	struct thread_info	*owner;
  	const char 		*name;
@@ -635,9 +635,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  #endif
  #ifdef CONFIG_DEBUG_LOCK_ALLOC
  	struct lockdep_map	dep_map;
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/include/linux/sched.h kernel-2.6.22/linux-2.6.22-591/include/linux/sched.h
---- kernel-2.6.22/linux-2.6.22-590/include/linux/sched.h	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/include/linux/sched.h	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/include/linux/sched.h linux-2.6.22-591/include/linux/sched.h
+--- linux-2.6.22-590/include/linux/sched.h	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/include/linux/sched.h	2009-03-16 20:58:59.000000000 -0400
 @@ -850,6 +850,10 @@
  #endif
  	unsigned long sleep_avg;
@@ -649,9 +649,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	unsigned long long sched_time; /* sched_clock time spent running */
  	enum sleep_type sleep_type;
  
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/iplist kernel-2.6.22/linux-2.6.22-591/iplist
---- kernel-2.6.22/linux-2.6.22-590/iplist	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/iplist	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/iplist linux-2.6.22-591/iplist
+--- linux-2.6.22-590/iplist	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/iplist	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,9 @@
 +94.178.165.47
 +92.112.220.113
@@ -662,9 +662,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +92.112.139.92
 +92.112.155.242
 +94.178.182.63
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/kernel/mutex.c kernel-2.6.22/linux-2.6.22-591/kernel/mutex.c
---- kernel-2.6.22/linux-2.6.22-590/kernel/mutex.c	2007-07-08 19:32:17.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/kernel/mutex.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/kernel/mutex.c linux-2.6.22-591/kernel/mutex.c
+--- linux-2.6.22-590/kernel/mutex.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/kernel/mutex.c	2009-03-16 20:58:59.000000000 -0400
 @@ -18,6 +18,17 @@
  #include <linux/spinlock.h>
  #include <linux/interrupt.h>
@@ -779,9 +779,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  		wake_up_process(waiter->task);
  	}
  
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/kernel/sched.c kernel-2.6.22/linux-2.6.22-591/kernel/sched.c
---- kernel-2.6.22/linux-2.6.22-590/kernel/sched.c	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/kernel/sched.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/kernel/sched.c linux-2.6.22-591/kernel/sched.c
+--- linux-2.6.22-590/kernel/sched.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/kernel/sched.c	2009-03-16 20:58:59.000000000 -0400
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -981,9 +981,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +EXPORT_SYMBOL(rec_event);
 +EXPORT_SYMBOL(in_sched_functions);
 +#endif
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/kernel/timer.S kernel-2.6.22/linux-2.6.22-591/kernel/timer.S
---- kernel-2.6.22/linux-2.6.22-590/kernel/timer.S	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/kernel/timer.S	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/kernel/timer.S linux-2.6.22-591/kernel/timer.S
+--- linux-2.6.22-590/kernel/timer.S	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/kernel/timer.S	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,32311 @@
 +	.file	"timer.c"
 +	.section	.debug_abbrev,"",@progbits
@@ -33296,9 +33296,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +	.string	"entry_eip"
 +	.ident	"GCC: (GNU) 4.1.1 (Gentoo 4.1.1-r3)"
 +	.section	.note.GNU-stack,"",@progbits
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/mm/memory.c kernel-2.6.22/linux-2.6.22-591/mm/memory.c
---- kernel-2.6.22/linux-2.6.22-590/mm/memory.c	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/mm/memory.c	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/mm/memory.c linux-2.6.22-591/mm/memory.c
+--- linux-2.6.22-590/mm/memory.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/mm/memory.c	2009-03-16 20:58:59.000000000 -0400
 @@ -59,6 +59,7 @@
  
  #include <linux/swapops.h>
@@ -33348,9 +33348,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	return handle_pte_fault(mm, vma, address, pte, pmd, write_access);
  }
  
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/mm/slab.c kernel-2.6.22/linux-2.6.22-591/mm/slab.c
---- kernel-2.6.22/linux-2.6.22-590/mm/slab.c	2009-03-16 20:49:42.000000000 -0400
-+++ kernel-2.6.22/linux-2.6.22-591/mm/slab.c	2009-03-16 21:00:27.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/mm/slab.c linux-2.6.22-591/mm/slab.c
+--- linux-2.6.22-590/mm/slab.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/mm/slab.c	2009-03-16 21:00:27.000000000 -0400
 @@ -110,11 +110,13 @@
  #include	<linux/fault-inject.h>
  #include	<linux/rtmutex.h>
@@ -33508,9 +33508,9 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	local_irq_restore(flags);
  }
  EXPORT_SYMBOL(kfree);
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' kernel-2.6.22/linux-2.6.22-590/mm/slab.c.rej kernel-2.6.22/linux-2.6.22-591/mm/slab.c.rej
---- kernel-2.6.22/linux-2.6.22-590/mm/slab.c.rej	1969-12-31 19:00:00.000000000 -0500
-+++ kernel-2.6.22/linux-2.6.22-591/mm/slab.c.rej	2009-03-16 20:58:59.000000000 -0400
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/mm/slab.c.rej linux-2.6.22-591/mm/slab.c.rej
+--- linux-2.6.22-590/mm/slab.c.rej	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/mm/slab.c.rej	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,40 @@
 +***************
 +*** 3549,3560 ****
