@@ -158,7 +158,7 @@ Patch522: linux-2.6-522-iptables-connection-tagging.patch
 Patch523: linux-2.6-523-raw-sockets.patch
 Patch524: linux-2.6-524-peercred.patch
 Patch525: linux-2.6-525-sknid-elevator.patch
-Patch526: linux-2.6-526-tun-tap.patch
+# Patch526: linux-2.6-526-tun-tap.patch
 Patch527: linux-2.6-527-iptables-classify-add-mark.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
