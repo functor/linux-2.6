@@ -1,6 +1,6 @@
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl04/scripts/mkcompile_h linux-2.6.22.10-vs2.3.0.29-pl05/scripts/mkcompile_h
---- linux-2.6.22.10-vs2.3.0.29-pl04/scripts/mkcompile_h	2007-07-21 18:00:28.000000000 -0400
-+++ linux-2.6.22.10-vs2.3.0.29-pl05/scripts/mkcompile_h	2007-11-14 17:08:09.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/scripts/mkcompile_h linux-2.6.27.10-vs2.3.x-P530/scripts/mkcompile_h
+--- linux-2.6.27.10-vs2.3.x-P/scripts/mkcompile_h	2008-07-13 23:51:29.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P530/scripts/mkcompile_h	2009-01-12 01:18:23.000000000 +0100
 @@ -60,8 +60,8 @@ UTS_TRUNCATE="sed -e s/\(.\{1,$UTS_LEN\}
    echo \#define UTS_VERSION \"`echo $UTS_VERSION | $UTS_TRUNCATE`\"
  

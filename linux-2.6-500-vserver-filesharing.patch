@@ -1,19 +1,6 @@
-diff -Nurp linux-2.6.22.10-vs2.3.0.29.orig/kernel/vserver/inode.c linux-2.6.22.10-vs2.3.0.29-pl01/kernel/vserver/inode.c
---- linux-2.6.22.10-vs2.3.0.29.orig/kernel/vserver/inode.c	2007-10-29 21:23:59.000000000 -0400
-+++ linux-2.6.22.10-vs2.3.0.29-pl01/kernel/vserver/inode.c	2007-11-14 13:56:04.000000000 -0500
-@@ -368,6 +368,9 @@ int __dx_parse_tag(char *string, tag_t *
- int dx_parse_tag(char *string, tag_t *tag, int remove)
- {
- 	int retval, flags = 0;
-+#ifdef CONFIG_VSERVER_FILESHARING
-+	flags |= MNT_NOTAGCHECK;
-+#endif
- 
- 	while ((retval = __dx_parse_tag(string, tag, remove)))
- 		flags |= retval;
-diff -Nurp linux-2.6.22.10-vs2.3.0.29.orig/kernel/vserver/Kconfig linux-2.6.22.10-vs2.3.0.29-pl01/kernel/vserver/Kconfig
---- linux-2.6.22.10-vs2.3.0.29.orig/kernel/vserver/Kconfig	2007-10-29 21:23:59.000000000 -0400
-+++ linux-2.6.22.10-vs2.3.0.29-pl01/kernel/vserver/Kconfig	2007-11-14 13:55:33.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/kernel/vserver/Kconfig linux-2.6.27.10-vs2.3.x-P500/kernel/vserver/Kconfig
+--- linux-2.6.27.10-vs2.3.x-P/kernel/vserver/Kconfig	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P500/kernel/vserver/Kconfig	2009-01-12 01:18:23.000000000 +0100
 @@ -4,6 +4,15 @@
  
  menu "Linux VServer"

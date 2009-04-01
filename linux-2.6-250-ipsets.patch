@@ -1,6 +1,6 @@
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,498 @@
 +#ifndef _IP_SET_H
 +#define _IP_SET_H
@@ -500,9 +500,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set.h
 +#endif				/* __KERNEL__ */
 +
 +#endif /*_IP_SET_H*/
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_iphash.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_iphash.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_iphash.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_iphash.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_iphash.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_iphash.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_iphash.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_iphash.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,30 @@
 +#ifndef __IP_SET_IPHASH_H
 +#define __IP_SET_IPHASH_H
@@ -534,9 +534,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_i
 +};
 +
 +#endif	/* __IP_SET_IPHASH_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_ipmap.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_ipmap.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_ipmap.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_ipmap.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_ipmap.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_ipmap.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_ipmap.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_ipmap.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,56 @@
 +#ifndef __IP_SET_IPMAP_H
 +#define __IP_SET_IPMAP_H
@@ -594,9 +594,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_i
 +}
 +	
 +#endif /* __IP_SET_IPMAP_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_ipporthash.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_ipporthash.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_ipporthash.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_ipporthash.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_ipporthash.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_ipporthash.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_ipporthash.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_ipporthash.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,34 @@
 +#ifndef __IP_SET_IPPORTHASH_H
 +#define __IP_SET_IPPORTHASH_H
@@ -632,9 +632,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_i
 +};
 +
 +#endif	/* __IP_SET_IPPORTHASH_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_iptree.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_iptree.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_iptree.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_iptree.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_iptree.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_iptree.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_iptree.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_iptree.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,40 @@
 +#ifndef __IP_SET_IPTREE_H
 +#define __IP_SET_IPTREE_H
@@ -676,9 +676,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_i
 +};
 +
 +#endif	/* __IP_SET_IPTREE_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_iptreemap.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_iptreemap.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_iptreemap.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_iptreemap.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_iptreemap.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_iptreemap.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_iptreemap.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_iptreemap.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,40 @@
 +#ifndef __IP_SET_IPTREEMAP_H
 +#define __IP_SET_IPTREEMAP_H
@@ -720,9 +720,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_i
 +};
 +
 +#endif /* __IP_SET_IPTREEMAP_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_jhash.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_jhash.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_jhash.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_jhash.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_jhash.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_jhash.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_jhash.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_jhash.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,148 @@
 +#ifndef _LINUX_IPSET_JHASH_H
 +#define _LINUX_IPSET_JHASH_H
@@ -872,9 +872,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_j
 +}
 +
 +#endif /* _LINUX_IPSET_JHASH_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_macipmap.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_macipmap.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_macipmap.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_macipmap.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_macipmap.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_macipmap.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_macipmap.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_macipmap.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,38 @@
 +#ifndef __IP_SET_MACIPMAP_H
 +#define __IP_SET_MACIPMAP_H
@@ -914,9 +914,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_m
 +};
 +
 +#endif	/* __IP_SET_MACIPMAP_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_malloc.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_malloc.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_malloc.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_malloc.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_malloc.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_malloc.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_malloc.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_malloc.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,116 @@
 +#ifndef _IP_SET_MALLOC_H
 +#define _IP_SET_MALLOC_H
@@ -1034,9 +1034,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_m
 +#endif				/* __KERNEL__ */
 +
 +#endif /*_IP_SET_MALLOC_H*/
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_nethash.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_nethash.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_nethash.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_nethash.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_nethash.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_nethash.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_nethash.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_nethash.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,55 @@
 +#ifndef __IP_SET_NETHASH_H
 +#define __IP_SET_NETHASH_H
@@ -1093,9 +1093,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_n
 +}
 +
 +#endif	/* __IP_SET_NETHASH_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_portmap.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_portmap.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_portmap.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ip_set_portmap.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_portmap.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_portmap.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ip_set_portmap.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ip_set_portmap.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,25 @@
 +#ifndef __IP_SET_PORTMAP_H
 +#define __IP_SET_PORTMAP_H
@@ -1122,9 +1122,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ip_set_p
 +};
 +
 +#endif /* __IP_SET_PORTMAP_H */
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ipt_set.h linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ipt_set.h
---- linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ipt_set.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/include/linux/netfilter_ipv4/ipt_set.h	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ipt_set.h linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ipt_set.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/netfilter_ipv4/ipt_set.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/include/linux/netfilter_ipv4/ipt_set.h	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,21 @@
 +#ifndef _IPT_SET_H
 +#define _IPT_SET_H
@@ -1147,9 +1147,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/include/linux/netfilter_ipv4/ipt_set.
 +};
 +
 +#endif /*_IPT_SET_H*/
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,2005 @@
 +/* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
 + *                         Patrick Schaaf <bof@bof.de>
@@ -3156,9 +3156,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set.c linux-2.6
 +
 +module_init(ip_set_init);
 +module_exit(ip_set_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iphash.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_iphash.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iphash.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_iphash.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_iphash.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_iphash.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_iphash.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_iphash.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,429 @@
 +/* Copyright (C) 2003-2004 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
 + *
@@ -3589,9 +3589,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iphash.c li
 +
 +module_init(ip_set_iphash_init);
 +module_exit(ip_set_iphash_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_ipmap.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_ipmap.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_ipmap.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_ipmap.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_ipmap.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_ipmap.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_ipmap.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_ipmap.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,336 @@
 +/* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
 + *                         Patrick Schaaf <bof@bof.de>
@@ -3929,9 +3929,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_ipmap.c lin
 +
 +module_init(ip_set_ipmap_init);
 +module_exit(ip_set_ipmap_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_ipporthash.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_ipporthash.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_ipporthash.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_ipporthash.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_ipporthash.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_ipporthash.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_ipporthash.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_ipporthash.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,581 @@
 +/* Copyright (C) 2003-2004 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
 + *
@@ -4514,9 +4514,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_ipporthash.
 +
 +module_init(ip_set_ipporthash_init);
 +module_exit(ip_set_ipporthash_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iptree.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_iptree.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iptree.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_iptree.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_iptree.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_iptree.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_iptree.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_iptree.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,612 @@
 +/* Copyright (C) 2005 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
 + *
@@ -5130,9 +5130,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iptree.c li
 +
 +module_init(ip_set_iptree_init);
 +module_exit(ip_set_iptree_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iptreemap.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_iptreemap.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iptreemap.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_iptreemap.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_iptreemap.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_iptreemap.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_iptreemap.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_iptreemap.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,829 @@
 +/* Copyright (C) 2007 Sven Wegener <sven.wegener@stealer.net>
 + *
@@ -5963,9 +5963,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_iptreemap.c
 +
 +module_init(ip_set_iptreemap_init);
 +module_exit(ip_set_iptreemap_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_macipmap.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_macipmap.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_macipmap.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_macipmap.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_macipmap.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_macipmap.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_macipmap.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_macipmap.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,375 @@
 +/* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
 + *                         Patrick Schaaf <bof@bof.de>
@@ -6342,9 +6342,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_macipmap.c 
 +
 +module_init(ip_set_macipmap_init);
 +module_exit(ip_set_macipmap_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_nethash.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_nethash.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_nethash.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_nethash.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_nethash.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_nethash.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_nethash.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_nethash.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,497 @@
 +/* Copyright (C) 2003-2004 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
 + *
@@ -6843,9 +6843,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_nethash.c l
 +
 +module_init(ip_set_nethash_init);
 +module_exit(ip_set_nethash_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_portmap.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_portmap.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_portmap.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ip_set_portmap.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_portmap.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_portmap.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ip_set_portmap.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ip_set_portmap.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,346 @@
 +/* Copyright (C) 2003-2004 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
 + *
@@ -7193,9 +7193,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ip_set_portmap.c l
 +
 +module_init(ip_set_portmap_init);
 +module_exit(ip_set_portmap_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ipt_set.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ipt_set.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ipt_set.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ipt_set.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ipt_set.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ipt_set.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ipt_set.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ipt_set.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,160 @@
 +/* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
 + *                         Patrick Schaaf <bof@bof.de>
@@ -7357,9 +7357,9 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ipt_set.c linux-2.
 +
 +module_init(ipt_ipset_init);
 +module_exit(ipt_ipset_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ipt_SET.c linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ipt_SET.c
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ipt_SET.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/ipt_SET.c	2007-11-14 14:12:25.000000000 -0500
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ipt_SET.c linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ipt_SET.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ipt_SET.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/ipt_SET.c	2009-01-12 01:18:23.000000000 +0100
 @@ -0,0 +1,172 @@
 +/* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
 + *                         Patrick Schaaf <bof@bof.de>
@@ -7533,10 +7533,10 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/ipt_SET.c linux-2.
 +
 +module_init(ipt_SET_init);
 +module_exit(ipt_SET_fini);
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/Kconfig linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/Kconfig
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/Kconfig	2007-07-21 18:00:25.000000000 -0400
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/Kconfig	2007-11-14 14:12:25.000000000 -0500
-@@ -402,5 +402,122 @@ config IP_NF_ARP_MANGLE
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/Kconfig linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/Kconfig
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/Kconfig	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/Kconfig	2009-01-12 01:18:23.000000000 +0100
+@@ -406,5 +406,122 @@ config IP_NF_ARP_MANGLE
  	  Allows altering the ARP packet payload: source and destination
  	  hardware and network addresses.
  
@@ -7659,23 +7659,24 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/Kconfig linux-2.6.
 +
  endmenu
  
-diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/Makefile linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/Makefile
---- linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/Makefile	2007-07-21 18:00:25.000000000 -0400
-+++ linux-2.6.22.10-vs2.3.0.29-pl03/net/ipv4/netfilter/Makefile	2007-11-14 14:12:25.000000000 -0500
-@@ -48,6 +48,7 @@ obj-$(CONFIG_IP_NF_MATCH_RECENT) += ipt_
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/Makefile linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/Makefile
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/Makefile	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P250/net/ipv4/netfilter/Makefile	2009-01-12 01:40:13.000000000 +0100
+@@ -50,6 +50,7 @@ obj-$(CONFIG_IP_NF_MATCH_AH) += ipt_ah.o
  obj-$(CONFIG_IP_NF_MATCH_ECN) += ipt_ecn.o
- obj-$(CONFIG_IP_NF_MATCH_AH) += ipt_ah.o
+ obj-$(CONFIG_IP_NF_MATCH_RECENT) += ipt_recent.o
  obj-$(CONFIG_IP_NF_MATCH_TTL) += ipt_ttl.o
 +obj-$(CONFIG_IP_NF_MATCH_SET) += ipt_set.o
- obj-$(CONFIG_IP_NF_MATCH_ADDRTYPE) += ipt_addrtype.o
  
  # targets
-@@ -62,6 +63,18 @@ obj-$(CONFIG_IP_NF_TARGET_LOG) += ipt_LO
- obj-$(CONFIG_IP_NF_TARGET_ULOG) += ipt_ULOG.o
  obj-$(CONFIG_IP_NF_TARGET_CLUSTERIP) += ipt_CLUSTERIP.o
+@@ -60,8 +61,20 @@ obj-$(CONFIG_IP_NF_TARGET_NETMAP) += ipt
+ obj-$(CONFIG_IP_NF_TARGET_REDIRECT) += ipt_REDIRECT.o
+ obj-$(CONFIG_IP_NF_TARGET_REJECT) += ipt_REJECT.o
  obj-$(CONFIG_IP_NF_TARGET_TTL) += ipt_TTL.o
 +obj-$(CONFIG_IP_NF_TARGET_SET) += ipt_SET.o
-+
+ obj-$(CONFIG_IP_NF_TARGET_ULOG) += ipt_ULOG.o
+ 
 +# sets
 +obj-$(CONFIG_IP_NF_SET) += ip_set.o
 +obj-$(CONFIG_IP_NF_SET_IPMAP) += ip_set_ipmap.o
@@ -7686,6 +7687,58 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl02/net/ipv4/netfilter/Makefile linux-2.6
 +obj-$(CONFIG_IP_NF_SET_IPPORTHASH) += ip_set_ipporthash.o
 +obj-$(CONFIG_IP_NF_SET_IPTREE) += ip_set_iptree.o
 +obj-$(CONFIG_IP_NF_SET_IPTREEMAP) += ip_set_iptreemap.o
- 
++
  # generic ARP tables
  obj-$(CONFIG_IP_NF_ARPTABLES) += arp_tables.o
+ obj-$(CONFIG_IP_NF_ARP_MANGLE) += arpt_mangle.o
+
+; fixup
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-02.0/net/ipv4/netfilter/ip_set.c linux-2.6.27.10-vs2.3.x-PS-02.1/net/ipv4/netfilter/ip_set.c
+--- linux-2.6.27.10-vs2.3.x-PS-02.0/net/ipv4/netfilter/ip_set.c	2009-01-25 02:29:31.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-PS-02.1/net/ipv4/netfilter/ip_set.c	2009-01-25 01:51:40.000000000 +0100
+@@ -24,7 +24,7 @@
+ #include <linux/errno.h>
+ #include <asm/uaccess.h>
+ #include <asm/bitops.h>
+-#include <asm/semaphore.h>
++// #include <asm/semaphore.h>
+ #include <linux/spinlock.h>
+ #include <linux/vmalloc.h>
+ 
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-02.0/net/ipv4/netfilter/ipt_SET.c linux-2.6.27.10-vs2.3.x-PS-02.1/net/ipv4/netfilter/ipt_SET.c
+--- linux-2.6.27.10-vs2.3.x-PS-02.0/net/ipv4/netfilter/ipt_SET.c	2009-01-25 02:29:31.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-PS-02.1/net/ipv4/netfilter/ipt_SET.c	2009-01-25 01:51:19.000000000 +0100
+@@ -25,30 +25,20 @@
+ #include <linux/netfilter_ipv4/ip_tables.h>
+ #include <linux/netfilter_ipv4/ipt_set.h>
+ 
+-static unsigned int
+-target(struct sk_buff **pskb,
++static unsigned int target(struct sk_buff *skb,
+        const struct net_device *in,
+        const struct net_device *out,
+        unsigned int hooknum,
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,17)
+        const struct xt_target *target,
+-#endif
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,19)
+-       const void *targinfo,
+-       void *userinfo)
+-#else
+        const void *targinfo)
+-#endif
+ {
+ 	const struct ipt_set_info_target *info = targinfo;
+ 	
+ 	if (info->add_set.index != IP_SET_INVALID_ID)
+-		ip_set_addip_kernel(info->add_set.index,
+-				    *pskb,
++		ip_set_addip_kernel(info->add_set.index, skb,
+ 				    info->add_set.flags);
+ 	if (info->del_set.index != IP_SET_INVALID_ID)
+-		ip_set_delip_kernel(info->del_set.index,
+-				    *pskb,
++		ip_set_delip_kernel(info->del_set.index, skb,
+ 				    info->del_set.flags);
+ 
+ 	return IPT_CONTINUE;

@@ -1,18 +1,18 @@
-diff -Nurb linux-2.6.22-510/include/linux/skbuff.h linux-2.6.22-520/include/linux/skbuff.h
---- linux-2.6.22-510/include/linux/skbuff.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/include/linux/skbuff.h	2008-06-06 17:07:56.000000000 -0400
-@@ -302,6 +302,7 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/skbuff.h linux-2.6.27.10-vs2.3.x-P521/include/linux/skbuff.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/skbuff.h	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P521/include/linux/skbuff.h	2009-01-12 01:18:23.000000000 +0100
+@@ -330,6 +330,7 @@ struct sk_buff {
  #endif
  
  	__u32			mark;
 +#define skb_tag			mark
  
- 	sk_buff_data_t		transport_header;
- 	sk_buff_data_t		network_header;
-diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
---- linux-2.6.22-510/net/core/skbuff.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-520/net/core/skbuff.c	2008-06-06 17:07:56.000000000 -0400
-@@ -56,6 +56,7 @@
+ 	__u16			vlan_tci;
+ 
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/core/skbuff.c linux-2.6.27.10-vs2.3.x-P521/net/core/skbuff.c
+--- linux-2.6.27.10-vs2.3.x-P/net/core/skbuff.c	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P521/net/core/skbuff.c	2009-01-12 01:56:55.000000000 +0100
+@@ -55,6 +55,7 @@
  #include <linux/rtnetlink.h>
  #include <linux/init.h>
  #include <linux/scatterlist.h>
@@ -20,7 +20,7 @@ diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  
  #include <net/protocol.h>
  #include <net/dst.h>
-@@ -174,6 +175,7 @@
+@@ -209,6 +210,7 @@ struct sk_buff *__alloc_skb(unsigned int
  	skb->data = data;
  	skb_reset_tail_pointer(skb);
  	skb->end = skb->tail + size;
@@ -28,27 +28,27 @@ diff -Nurb linux-2.6.22-510/net/core/skbuff.c linux-2.6.22-520/net/core/skbuff.c
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
-@@ -443,6 +445,8 @@
- 	C(tail);
- 	C(end);
+@@ -460,6 +462,7 @@ static void __copy_skb_header(struct sk_
+ #endif
+ #endif
+ 	new->vlan_tci		= old->vlan_tci;
++	new->skb_tag		= old->skb_tag;
+ 
+ 	skb_copy_secmark(new, old);
+ }
+@@ -490,6 +493,8 @@ static struct sk_buff *__skb_clone(struc
+ #endif
+ 	atomic_set(&n->users, 1);
  
 +	/* Sapan: Cloned skbs aren't owned by anyone. Let the cloner decide who it belongs to. */
 +
  	atomic_inc(&(skb_shinfo(skb)->dataref));
  	skb->cloned = 1;
  
-@@ -492,6 +496,7 @@
- 	new->tc_index	= old->tc_index;
- #endif
- 	skb_copy_secmark(new, old);
-+	new->skb_tag = old->skb_tag;
- 	atomic_set(&new->users, 1);
- 	skb_shinfo(new)->gso_size = skb_shinfo(old)->gso_size;
- 	skb_shinfo(new)->gso_segs = skb_shinfo(old)->gso_segs;
-diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet.c
---- linux-2.6.22-510/net/ipv4/af_inet.c	2008-06-06 17:07:48.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/af_inet.c	2008-06-06 17:07:56.000000000 -0400
-@@ -178,6 +178,8 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/af_inet.c linux-2.6.27.10-vs2.3.x-P521/net/ipv4/af_inet.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/af_inet.c	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P521/net/ipv4/af_inet.c	2009-01-12 01:18:23.000000000 +0100
+@@ -181,6 +181,8 @@ static int inet_autobind(struct sock *sk
  			return -EAGAIN;
  		}
  		inet->sport = htons(inet->num);
@@ -57,10 +57,10 @@ diff -Nurb linux-2.6.22-510/net/ipv4/af_inet.c linux-2.6.22-520/net/ipv4/af_inet
  	}
  	release_sock(sk);
  	return 0;
-diff -Nurb linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c
---- linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c	2008-06-06 17:07:43.000000000 -0400
-+++ linux-2.6.22-520/net/ipv4/netfilter/ipt_LOG.c	2008-06-06 17:07:56.000000000 -0400
-@@ -49,6 +49,8 @@
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ipt_LOG.c linux-2.6.27.10-vs2.3.x-P521/net/ipv4/netfilter/ipt_LOG.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/netfilter/ipt_LOG.c	2008-07-13 23:51:29.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P521/net/ipv4/netfilter/ipt_LOG.c	2009-01-12 01:18:23.000000000 +0100
+@@ -45,6 +45,8 @@ static void dump_packet(const struct nf_
  	else
  		logflags = NF_LOG_MASK;
  
@@ -69,4 +69,3 @@ diff -Nurb linux-2.6.22-510/net/ipv4/netfilter/ipt_LOG.c linux-2.6.22-520/net/ip
  	ih = skb_header_pointer(skb, iphoff, sizeof(_iph), &_iph);
  	if (ih == NULL) {
  		printk("TRUNCATED");
-

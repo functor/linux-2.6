@@ -1,5 +1,6 @@
---- linux-2.6.22-640/drivers/char/hangcheck-timer.c	2007-07-09 01:32:17.000000000 +0200
-+++ linux-2.6.22-650/drivers/char/hangcheck-timer.c	2008-11-25 10:22:00.000000000 +0100
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/drivers/char/hangcheck-timer.c linux-2.6.27.10-vs2.3.x-P650/drivers/char/hangcheck-timer.c
+--- linux-2.6.27.10-vs2.3.x-P/drivers/char/hangcheck-timer.c	2008-07-13 23:51:29.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P650/drivers/char/hangcheck-timer.c	2009-01-12 01:18:23.000000000 +0100
 @@ -57,7 +57,7 @@
  
  static int hangcheck_tick = DEFAULT_IOFENCE_TICK;

@@ -12,19 +12,16 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define builduml 0
 %define buildxen 0
 %define builddoc 0
+%define headers 1
 
-# default is to not build this - to override, use something like
-# kernel-SPECVARS := iwlwifi=1 
-# rpm does not seem to have a syntax for defining overridable defaults
-# any better solution would be more than welcome.
-%define build_iwlwifi %{?iwlwifi:1}%{!?iwlwifi:0}
+# from 2.6.27 iwlwifi in builtin
 
 # Versions of various parts
 
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 0
+%define taglevel 2
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -33,11 +30,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 19
+%define patchlevel 14
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
-%define vsversion 2.3.0.34
+%define vsversion 2.3.0.36.4
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
@@ -85,7 +82,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 #
 
 # MEF commented out
-# %define xen_conflicts glibc < 2.3.5-1
+#define xen_conflicts glibc < 2.3.5-1
 
 #
 # Packages that need to be installed before the kernel is, because the %post
@@ -143,18 +140,8 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
-Patch010: linux-2.6-010-e1000e.patch
-Patch020: linux-2.6-020-build-id.patch
-Patch030: linux-2.6-030-netns.patch
-Patch040: linux-2.6-040-i_mutex-check.patch
-
-# These are patches picked up from Fedora/RHEL
-Patch100: linux-2.6-100-build-nonintconfig.patch
-
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
-Patch210: linux-2.6-210-vserver-cpu-sched.patch
-Patch220: delta-ptrace-fix01.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -167,7 +154,7 @@ Patch522: linux-2.6-522-iptables-connection-tagging.patch
 Patch523: linux-2.6-523-raw-sockets.patch
 Patch524: linux-2.6-524-peercred.patch
 Patch525: linux-2.6-525-sknid-elevator.patch
-Patch526: linux-2.6-526-tun-tap.patch
+# Patch526: linux-2.6-526-tun-tap.patch
 Patch527: linux-2.6-527-iptables-classify-add-mark.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
@@ -175,29 +162,13 @@ Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
-Patch590: linux-2.6-590-chopstix-intern.patch
-Patch620: linux-2.6-620-kdb.patch
-Patch630: linux-2.6-630-sched-fix.patch
+# Patch590: linux-2.6-590-chopstix-intern.patch
+# Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
-%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
-Patch670: linux-2.6-670-gcc43.patch
-%endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
-Patch700: linux-2.6-700-click-for-trellis.patch
-Patch710: linux-2.6-710-disable-vserver-check-for-ns-devices.patch
-
-# See also the file named 'sources' here for the related checksums
-# NOTE. iwlwifi should be in-kernel starting from 2.6.24
-# see http://bughost.org/bugzilla/show_bug.cgi?id=1584
-%if %{build_iwlwifi}
-%define mac80211_version 10.0.4
-Patch600: http://intellinuxwireless.org/mac80211/downloads/mac80211-%{mac80211_version}.tgz
-%define iwlwifi_version 1.2.25
-Patch601: http://intellinuxwireless.org/iwlwifi/downloads/iwlwifi-%{iwlwifi_version}.tgz
-%endif
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -314,6 +285,12 @@ implicit or explicit dependencies on the "kernel" package
 (e.g. tcpdump). This package installs no files but provides the
 necessary dependencies to make rpm and yum happy.
 
+%package headers
+Summary: Kernel header
+Group: System Environment/Kernel
+
+%description headers
+This package contains the sanitized kernel headers.
 
 %prep
 # First we unpack the kernel tarball.
@@ -353,14 +330,9 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 10
-%ApplyPatch 20
-
-%ApplyPatch 100
+# NetNS patch for VINI
 
 %ApplyPatch 200
-%ApplyPatch 210
-%ApplyPatch 220
 
 %ApplyPatch 250
 
@@ -373,7 +345,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 523
 %ApplyPatch 524
 %ApplyPatch 525
-%ApplyPatch 526
 %ApplyPatch 527
 
 %ApplyPatch 530
@@ -382,21 +353,9 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 560
 %ApplyPatch 570
 %ApplyPatch 580
-%ApplyPatch 590
-%ApplyPatch 620
-%ApplyPatch 630
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
-%if "%{distroname}" == "f9" || "%{distroname}" == "f10"
-%ApplyPatch 670
-%endif
-%ApplyPatch 680
-%ApplyPatch 690
-
-# Trellis series
-%ApplyPatch 700
-%ApplyPatch 710
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
@@ -404,29 +363,6 @@ KERNEL_PREVIOUS=vanilla
 
 %if 0%{?with_netns}
 %ApplyPatch %vini_pl_patch
-%endif
-
-%if %{build_iwlwifi}
-# Run the mac80211 stuff in the kernel tree holding the last patch
-tar -xzf %{PATCH600}
-pushd mac80211-%{mac80211_version}
-mac80211_makeflags="KSRC=../$KERNEL_PREVIOUS"
-make $mac80211_makeflags modified
-make $mac80211_makeflags source
-make $mac80211_makeflags patch_kernel
-popd
-
-# Untar iwlwifi in the same place - needs to be compiled later
-tar -xzf %{PATCH601}
-# the install target is broken: first it does not pass the right -b flag to depmod
-# second we do not need to invoke depmod at this stage anyway
-# let's add our own patch/stuff in this Makefile for manual install later on
-pushd iwlwifi-%{iwlwifi_version}
-cat >> Makefile <<EOF
-module-list:
-	@echo \$(addprefix \$(DIR),\$(addsuffix .ko,\$(list-m)))
-EOF
-popd
 %endif
 
 rm -fr linux-%{kversion}
@@ -483,14 +419,13 @@ BuildKernel() {
     #Arch=`head -1 .config | cut -b 3-`
     echo USING ARCH=$Arch
 
-    make -s ARCH=$Arch nonint_oldconfig > /dev/null
+    make -s ARCH=$Arch oldconfig < /dev/null > /dev/null
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
-
-%if %{build_iwlwifi}
-    # build the iwlwifi driver
-    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
-      KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour
+%if %{headers}
+    make -s ARCH=$Arch INSTALL_HDR_PATH=$RPM_BUILD_ROOT/usr
+    find $RPM_BUILD_ROOT/%{_includedir} -name \*.cmd -delete
+    rm -f $RPM_BUILD_ROOT/%{_includedir}/{..,.}{check,install}*
 %endif
 
     # Start installing the results
@@ -513,20 +448,6 @@ BuildKernel() {
 
     mkdir -p $RPM_BUILD_ROOT/lib/modules/$KernelVer
     make -s ARCH=$Arch INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install KERNELRELEASE=$KernelVer
-
-%if %{build_iwlwifi}
-    # install iwlwifi
-#    make -C %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version} ARCH=$Arch \
-#         KSRC=%{_builddir}/kernel-%{kversion}/linux-%{_target_cpu}-%{kversion}$Flavour \
-#        KMISC=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless install
-    pushd %{_builddir}/kernel-%{kversion}/iwlwifi-%{iwlwifi_version}
-    iwlwifi_dest=$RPM_BUILD_ROOT/lib/modules/$KernelVer/kernel/drivers/net/wireless
-    # get the list and location of modules to install - no need to pass KSRC nor anything, let's keep it simple
-    iwlwifi_modules=$(make --no-print-directory module-list)
-    install -d $iwlwifi_dest
-    install -m 644 -c $iwlwifi_modules $iwlwifi_dest
-    popd
-%endif
 
     # And save the headers/makefiles etc for building modules against
     #
@@ -568,12 +489,12 @@ BuildKernel() {
     cp -a acpi config keys linux math-emu media mtd net pcmcia rdma rxrpc scsi sound video asm asm-generic $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     cp -a `readlink asm` $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     if [ "$Arch" = "x86_64" ]; then
-      cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cp -a asm-x86 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %if %{buildxen}
     if [ "$Flavour" = "xenU" ]; then
       cp -a xen $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
-      cp -a asm-i386 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+      cp -a asm-x86 $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
     fi
 %endif
 %if %{builduml}
@@ -858,7 +779,22 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %dir %{_datadir}/doc/kernel-doc-%{kversion}
 %endif
 
+%if %{headers}
+%files headers
+%defattr(-,root,root)
+%dir %{_includedir}
+%{_includedir}/*
+%endif
+
 %changelog
+* Tue Mar 24 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-2
+- cleaned up obsolete (2.6.22) configs
+- added gnuradio config links
+- fix for building headers package (remove .cmd files)
+
+* Tue Mar 10 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-1
+- untested feature-complete version, but for the scheduler that is still missing
+
 * Thu Jan 08 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-32
 - support building on fedora 10
 
