@@ -6,7 +6,7 @@ diff -Nurb linux-2.6.27.10-clickport/net/core/dev.c trellis2/net/core/dev.c
  	total = 0;
  	for_each_netdev(net, dev) {
 -		if (!nx_dev_visible(current->nx_info, dev))
-+		if (net==&init_dev && !nx_dev_visible(current->nx_info, dev))
++		if (net==&init_net && !nx_dev_visible(current->nx_info, dev))
  			continue;
  		for (i = 0; i < NPROTO; i++) {
  			if (gifconf_list[i]) {
