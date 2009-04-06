@@ -1,6 +1,35 @@
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-580/fs/dcookies.c linux-2.6.22-590/fs/dcookies.c
---- linux-2.6.22-580/fs/dcookies.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/fs/dcookies.c	2009-03-16 20:57:32.000000000 -0400
+--- linux-chopstix/include/linux/dcookies.h.orig	2009-03-05 08:45:29.000000000 -0500
++++ linux-chopstix/include/linux/dcookies.h	2009-03-12 13:43:53.000000000 -0400
+@@ -45,6 +45,27 @@
+ int get_dcookie(struct dentry * dentry, struct vfsmount * vfsmnt,
+ 	unsigned long * cookie);
+ 
++
++/**
++ * dcookie_swap - switch to the next dcookie epoch
++ *
++ * Deactivate the current dcookie hash table and activate
++ * the next one
++ *
++ * Returns 0 on success
++ */
++
++int dcookie_swap(void);
++
++/**
++ * dcookie_garbage_collect - clear the hash table next in line
++ *
++ * Clear the hash table to be activated in the next epoch.
++ *
++ * Returns 0 on success
++ */
++
++int dcookie_garbage_colect(void);
+ #else
+ 
+ static inline struct dcookie_user * dcookie_register(void)
+--- linux-chopstix/fs/dcookies.c.orig	2009-03-05 08:46:09.000000000 -0500
++++ linux-chopstix/fs/dcookies.c	2009-03-16 15:18:40.000000000 -0400
 @@ -38,14 +38,19 @@
  static LIST_HEAD(dcookie_users);
  static DEFINE_MUTEX(dcookie_mutex);
@@ -8,7 +37,7 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 -static struct list_head *dcookie_hashtable __read_mostly;
 +static struct list_head *dcookie_hashtable[3] __read_mostly;
  static size_t hash_size __read_mostly;
-+unsigned int current_hash = 0, old_hash = -1;
++unsigned int current_hash = 1, old_hash = 0;
  
  static inline int is_live(void)
  {
@@ -35,7 +64,7 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  		}
  	}
  
-+    if (!found && (old_hash!=-1)) {
++    if (!found) {
 +        list = dcookie_hashtable[old_hash] + dcookie_hash(dcookie);
 +
 +        list_for_each(pos, list) {
@@ -68,7 +97,7 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  	if (!dcs)
  		return NULL;
  
-@@ -210,10 +228,19 @@
+@@ -210,9 +228,18 @@
  	if (!dcookie_cache)
  		goto out;
  
@@ -80,16 +109,15 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
 +    
 +    dcookie_hashtable[1] = kmalloc(PAGE_SIZE, GFP_KERNEL);
 +	if (!dcookie_hashtable[1])
- 		goto out_kmem;
- 
++		goto out_kmem;
++
 +    dcookie_hashtable[2] = kmalloc(PAGE_SIZE, GFP_KERNEL);
 +	if (!dcookie_hashtable[0])
-+		goto out_kmem;
+ 		goto out_kmem;
 +    
-+
+ 
  	err = 0;
  
- 	/*
 @@ -235,7 +262,24 @@
  	hash_size = 1UL << hash_bits;
  
@@ -187,35 +215,3 @@ diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags
  EXPORT_SYMBOL_GPL(dcookie_unregister);
  EXPORT_SYMBOL_GPL(get_dcookie);
 +EXPORT_SYMBOL_GPL(dcookie_garbage_collect);
-+EXPORT_SYMBOL_GPL(dcookie_swap);
-diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-580/include/linux/dcookies.h linux-2.6.22-590/include/linux/dcookies.h
---- linux-2.6.22-580/include/linux/dcookies.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/include/linux/dcookies.h	2009-03-16 20:57:32.000000000 -0400
-@@ -45,6 +45,27 @@
- int get_dcookie(struct dentry * dentry, struct vfsmount * vfsmnt,
- 	unsigned long * cookie);
- 
-+
-+/**
-+ * dcookie_swap - switch to the next dcookie epoch
-+ *
-+ * Deactivate the current dcookie hash table and activate
-+ * the next one
-+ *
-+ * Returns 0 on success
-+ */
-+
-+int dcookie_swap(void);
-+
-+/**
-+ * dcookie_garbage_collect - clear the hash table next in line
-+ *
-+ * Clear the hash table to be activated in the next epoch.
-+ *
-+ * Returns 0 on success
-+ */
-+
-+int dcookie_garbage_colect(void);
- #else
- 
- static inline struct dcookie_user * dcookie_register(void)
