@@ -140,7 +140,7 @@
 +		goto out_kmem;
 +
 +    dcookie_hashtable[2] = kmalloc(PAGE_SIZE, GFP_KERNEL);
-+	if (!dcookie_hashtable[0])
++	if (!dcookie_hashtable[2])
 +		goto out_kmem;
 +    
  
