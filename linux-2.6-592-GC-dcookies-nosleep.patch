@@ -112,7 +112,7 @@
  	struct dcookie_struct * dcs;
  
 -	mutex_lock(&dcookie_mutex);
-+	spin_lock(&dcookie_hash_writelock);
++	spin_lock(&dcookie_hash_write_lock);
  
  	if (!is_live()) {
  		err = -EINVAL;
@@ -121,7 +121,7 @@
  
  out:
 -	mutex_unlock(&dcookie_mutex);
-+	spin_unlock(&dcookie_hash_writelock);
++	spin_unlock(&dcookie_hash_write_lock);
  	return err;
  }
  
