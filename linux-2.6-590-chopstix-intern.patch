@@ -1,6 +1,6 @@
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/arch/i386/Kconfig linux-2.6.22-590/arch/i386/Kconfig
---- linux-2.6.22-580/arch/i386/Kconfig	2009-02-18 09:56:02.000000000 -0500
-+++ linux-2.6.22-590/arch/i386/Kconfig	2009-02-18 09:57:23.000000000 -0500
+diff -Nurb --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.22-590/arch/i386/Kconfig linux-2.6.22-591/arch/i386/Kconfig
+--- linux-2.6.22-590/arch/i386/Kconfig	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/arch/i386/Kconfig	2009-03-16 20:58:59.000000000 -0400
 @@ -1217,6 +1217,14 @@
  
  source "arch/i386/oprofile/Kconfig"
@@ -16,9 +16,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  config KPROBES
  	bool "Kprobes (EXPERIMENTAL)"
  	depends on KALLSYMS && EXPERIMENTAL && MODULES
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/arch/i386/kernel/asm-offsets.c linux-2.6.22-590/arch/i386/kernel/asm-offsets.c
---- linux-2.6.22-580/arch/i386/kernel/asm-offsets.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/arch/i386/kernel/asm-offsets.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/arch/i386/kernel/asm-offsets.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/arch/i386/kernel/asm-offsets.c	2009-03-16 20:58:59.000000000 -0400
 @@ -9,6 +9,7 @@
  #include <linux/signal.h>
  #include <linux/personality.h>
@@ -56,7 +55,7 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
 +    STACKOFFSET(THREAD_esp, thread_struct, esp);
 +    STACKOFFSET(EVENT_event_data, event, event_data);
 +    STACKOFFSET(EVENT_task, event, task);
-+    STACKOFFSET(EVENT_event_type, event, event_data);
++    STACKOFFSET(EVENT_event_type, event, event_type);
 +    STACKOFFSET(SPEC_number, event_spec, number);
 +    DEFINE(EVENT_SIZE, sizeof(struct event));
 +    DEFINE(SPEC_SIZE, sizeof(struct event_spec));
@@ -65,9 +64,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
  	OFFSET(TI_status, thread_info, status);
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/arch/i386/mm/fault.c linux-2.6.22-590/arch/i386/mm/fault.c
---- linux-2.6.22-580/arch/i386/mm/fault.c	2009-02-18 09:56:02.000000000 -0500
-+++ linux-2.6.22-590/arch/i386/mm/fault.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/arch/i386/mm/fault.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/arch/i386/mm/fault.c	2009-03-16 20:58:59.000000000 -0400
 @@ -60,6 +60,15 @@
  	                                  DIE_PAGE_FAULT, &args);
  }
@@ -93,9 +91,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  fastcall void __kprobes do_page_fault(struct pt_regs *regs,
  				      unsigned long error_code)
  {
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/block/ll_rw_blk.c linux-2.6.22-590/block/ll_rw_blk.c
---- linux-2.6.22-580/block/ll_rw_blk.c	2009-02-18 09:55:48.000000000 -0500
-+++ linux-2.6.22-590/block/ll_rw_blk.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/block/ll_rw_blk.c	2009-03-16 20:49:07.000000000 -0400
++++ linux-2.6.22-591/block/ll_rw_blk.c	2009-03-16 20:58:59.000000000 -0400
 @@ -30,6 +30,7 @@
  #include <linux/cpu.h>
  #include <linux/blktrace_api.h>
@@ -143,9 +140,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  		ret = q->make_request_fn(q, bio);
  	} while (ret);
  }
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/drivers/oprofile/cpu_buffer.c linux-2.6.22-590/drivers/oprofile/cpu_buffer.c
---- linux-2.6.22-580/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/drivers/oprofile/cpu_buffer.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/drivers/oprofile/cpu_buffer.c	2009-03-16 20:58:59.000000000 -0400
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -209,9 +205,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  }
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/fs/bio.c linux-2.6.22-590/fs/bio.c
---- linux-2.6.22-580/fs/bio.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/fs/bio.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/fs/bio.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/fs/bio.c	2009-03-16 20:58:59.000000000 -0400
 @@ -27,6 +27,7 @@
  #include <linux/workqueue.h>
  #include <linux/blktrace_api.h>
@@ -268,9 +263,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  	if (bio->bi_end_io)
  		bio->bi_end_io(bio, bytes_done, error);
  }
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/fs/exec.c linux-2.6.22-590/fs/exec.c
---- linux-2.6.22-580/fs/exec.c	2009-02-18 09:56:02.000000000 -0500
-+++ linux-2.6.22-590/fs/exec.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/fs/exec.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/fs/exec.c	2009-03-16 20:58:59.000000000 -0400
 @@ -27,6 +27,7 @@
  #include <linux/mman.h>
  #include <linux/a.out.h>
@@ -312,9 +306,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  
  	zap_other_threads(tsk);
  	read_unlock(&tasklist_lock);
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/include/linux/arrays.h linux-2.6.22-590/include/linux/arrays.h
---- linux-2.6.22-580/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-590/include/linux/arrays.h	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.22-591/include/linux/arrays.h	2009-03-16 20:58:59.000000000 -0400
 @@ -0,0 +1,36 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
@@ -352,9 +345,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
 +	struct task_struct *task;
 +};
 +#endif
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/include/linux/mutex.h linux-2.6.22-590/include/linux/mutex.h
---- linux-2.6.22-580/include/linux/mutex.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/include/linux/mutex.h	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/include/linux/mutex.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/include/linux/mutex.h	2009-03-16 20:58:59.000000000 -0400
 @@ -53,6 +53,10 @@
  	struct thread_info	*owner;
  	const char 		*name;
@@ -366,9 +358,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  #endif
  #ifdef CONFIG_DEBUG_LOCK_ALLOC
  	struct lockdep_map	dep_map;
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/include/linux/sched.h linux-2.6.22-590/include/linux/sched.h
---- linux-2.6.22-580/include/linux/sched.h	2009-02-18 09:56:02.000000000 -0500
-+++ linux-2.6.22-590/include/linux/sched.h	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/include/linux/sched.h	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/include/linux/sched.h	2009-03-16 20:58:59.000000000 -0400
 @@ -850,6 +850,10 @@
  #endif
  	unsigned long sleep_avg;
@@ -380,9 +371,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  	unsigned long long sched_time; /* sched_clock time spent running */
  	enum sleep_type sleep_type;
  
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/kernel/mutex.c linux-2.6.22-590/kernel/mutex.c
---- linux-2.6.22-580/kernel/mutex.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-590/kernel/mutex.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/kernel/mutex.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-591/kernel/mutex.c	2009-03-16 20:58:59.000000000 -0400
 @@ -18,6 +18,17 @@
  #include <linux/spinlock.h>
  #include <linux/interrupt.h>
@@ -497,9 +487,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  		wake_up_process(waiter->task);
  	}
  
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/kernel/sched.c linux-2.6.22-590/kernel/sched.c
---- linux-2.6.22-580/kernel/sched.c	2009-02-18 09:56:02.000000000 -0500
-+++ linux-2.6.22-590/kernel/sched.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/kernel/sched.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/kernel/sched.c	2009-03-16 20:58:59.000000000 -0400
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -575,8 +564,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
 +struct event_spec {
 +	unsigned long pc;
 +	unsigned long dcookie;
-+	unsigned count;
-+	unsigned char reason;
++	unsigned int count;
++	unsigned int reason;
 +};
 +#endif
 +
@@ -642,13 +631,13 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
 +			if (diff >= HZ/10) {
 +				struct event event;
 +				struct event_spec espec;
-+				unsigned long eip;
++                struct pt_regs *regs;
++                regs = task_pt_regs(current);
 +
 +				espec.reason = sampling_reason;
-+				eip = next->thread.esp & 4095;
 +				event.event_data=&espec;
 +				event.task=next;
-+				espec.pc=eip;
++				espec.pc=regs->eip;
 +				event.event_type=2; 
 +				/* index in the event array currently set up */
 +				/* make sure the counters are loaded in the order we want them to show up*/ 
@@ -678,7 +667,7 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  	retval = copy_to_user(interval, &t, sizeof(t)) ? -EFAULT : 0;
  out_nounlock:
  	return retval;
-@@ -7275,3 +7356,14 @@
+@@ -7275,3 +7356,20 @@
  }
  
  #endif
@@ -688,14 +677,19 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
 +
 +/* To support safe calling from asm */
 +asmlinkage void rec_event_asm (struct event *event_signature_in, unsigned int count) {
++    struct pt_regs *regs;
++    struct event_spec *es = event_signature_in->event_data;
++    regs = task_pt_regs(current);
++	event_signature_in->task=current;
++	es->pc=regs->eip;
++    event_signature_in->count=1;
 +    (*rec_event)(event_signature_in, count);
 +}
 +EXPORT_SYMBOL(rec_event);
 +EXPORT_SYMBOL(in_sched_functions);
 +#endif
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/mm/memory.c linux-2.6.22-590/mm/memory.c
---- linux-2.6.22-580/mm/memory.c	2009-02-18 09:56:03.000000000 -0500
-+++ linux-2.6.22-590/mm/memory.c	2009-02-18 09:57:23.000000000 -0500
+--- linux-2.6.22-590/mm/memory.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/mm/memory.c	2009-03-16 20:58:59.000000000 -0400
 @@ -59,6 +59,7 @@
  
  #include <linux/swapops.h>
@@ -745,9 +739,8 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  	return handle_pte_fault(mm, vma, address, pte, pmd, write_access);
  }
  
-diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' linux-2.6.22-580/mm/slab.c linux-2.6.22-590/mm/slab.c
---- linux-2.6.22-580/mm/slab.c	2009-02-18 09:56:03.000000000 -0500
-+++ linux-2.6.22-590/mm/slab.c	2009-02-18 10:00:42.000000000 -0500
+--- linux-2.6.22-590/mm/slab.c	2009-03-16 20:49:42.000000000 -0400
++++ linux-2.6.22-591/mm/slab.c	2009-03-16 21:00:27.000000000 -0400
 @@ -110,11 +110,13 @@
  #include	<linux/fault-inject.h>
  #include	<linux/rtmutex.h>
@@ -808,20 +801,20 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
  
  	check_irq_off();
 -	objp = cache_free_debugcheck(cachep, objp, __builtin_return_address(0));
-+	objp = cache_free_debugcheck(cachep, objp, caller);
-+    #ifdef CONFIG_CHOPSTIX
-+     	if (rec_event && objp) {
-+     		struct event event;
-+     		struct event_spec espec;
-+     
-+     		espec.reason = 1; /* free */
-+     		event.event_data=&espec;
-+     		event.task = current;
-+     		espec.pc=caller;
-+     		event.event_type=4; 
-+     		(*rec_event)(&event, cachep->buffer_size);
-+     	}
-+    #endif
++ 	objp = cache_free_debugcheck(cachep, objp, caller);
++ #ifdef CONFIG_CHOPSTIX
++  	if (rec_event && objp) {
++  		struct event event;
++  		struct event_spec espec;
++  
++  		espec.reason = 1; /* free */
++  		event.event_data=&espec;
++  		event.task = current;
++  		espec.pc=caller;
++  		event.event_type=4; 
++  		(*rec_event)(&event, cachep->buffer_size);
++  	}
++ #endif
 +
  	vx_slab_free(cachep);
  
@@ -904,3 +897,4 @@ diff -Nurb --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.dif
 +	__cache_free(c, (void *)objp,__builtin_return_address(0));
  	local_irq_restore(flags);
  }
+ EXPORT_SYMBOL(kfree);
