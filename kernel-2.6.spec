@@ -177,6 +177,7 @@ Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
 Patch590: linux-2.6-590-chopstix-intern.patch
+Patch592: linux-2.6-592-GC-dcookies-nosleep.patch
 Patch620: linux-2.6-620-kdb.patch
 Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
