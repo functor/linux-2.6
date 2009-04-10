@@ -1,6 +1,33 @@
-diff -Nurp linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
---- linux-2.6.22-592/drivers/net/gre.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.22-593/drivers/net/gre.c	2008-03-18 16:10:13.000000000 -0400
+diff -Nurb linux-2.6.27-660/drivers/net/Kconfig linux-2.6.27-700/drivers/net/Kconfig
+--- linux-2.6.27-660/drivers/net/Kconfig	2009-04-10 17:34:59.000000000 -0400
++++ linux-2.6.27-700/drivers/net/Kconfig	2009-04-10 17:56:31.000000000 -0400
+@@ -39,6 +39,12 @@
+ 	  'ifb1' etc.
+ 	  Look at the iproute2 documentation directory for usage etc
+ 
++config EGRE
++	tristate "EGRE module for Ethernet over GRE Tunnels"
++	---help---
++	  This is an improvement over the GRE tunnel driver that facilitates
++      the transport of Ethernet frames over GRE tunnels.
++      
+ config DUMMY
+ 	tristate "Dummy net driver support"
+ 	---help---
+diff -Nurb linux-2.6.27-660/drivers/net/Makefile linux-2.6.27-700/drivers/net/Makefile
+--- linux-2.6.27-660/drivers/net/Makefile	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-700/drivers/net/Makefile	2009-04-10 17:53:47.000000000 -0400
+@@ -2,6 +2,7 @@
+ # Makefile for the Linux network (ethercard) device drivers.
+ #
+ 
++obj-$(CONFIG_EGRE) += gre.o
+ obj-$(CONFIG_E1000) += e1000/
+ obj-$(CONFIG_E1000E) += e1000e/
+ obj-$(CONFIG_IBM_NEW_EMAC) += ibm_newemac/
+diff -Nurb linux-2.6.27-660/drivers/net/gre.c linux-2.6.27-700/drivers/net/gre.c
+--- linux-2.6.27-660/drivers/net/gre.c	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.27-700/drivers/net/gre.c	2009-04-10 17:35:46.000000000 -0400
 @@ -0,0 +1,1632 @@
 +/*
 + *	Linux NET3:	GRE over IP protocol decoder.
@@ -1634,20 +1661,9 @@ diff -Nurp linux-2.6.22-592/drivers/net/gre.c linux-2.6.22-593/drivers/net/gre.c
 +module_init(ipgre_init);
 +module_exit(ipgre_fini);
 +MODULE_LICENSE("GPL");
-diff -Nurp linux-2.6.22-592/drivers/net/Makefile linux-2.6.22-593/drivers/net/Makefile
---- linux-2.6.22-592/drivers/net/Makefile	2008-03-18 16:10:09.000000000 -0400
-+++ linux-2.6.22-593/drivers/net/Makefile	2008-03-18 16:10:13.000000000 -0400
-@@ -2,6 +2,7 @@
- # Makefile for the Linux network (ethercard) device drivers.
- #
- 
-+obj-m +=gre.o
- obj-y +=ztun.o shortbridge.o
- obj-$(CONFIG_E1000) += e1000/
- obj-$(CONFIG_E1000E) += e1000e/
-diff -Nurp linux-2.6.22-592/include/linux/if_ether.h linux-2.6.22-593/include/linux/if_ether.h
---- linux-2.6.22-592/include/linux/if_ether.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-593/include/linux/if_ether.h	2008-03-18 16:10:13.000000000 -0400
+diff -Nurb linux-2.6.27-660/include/linux/if_ether.h linux-2.6.27-700/include/linux/if_ether.h
+--- linux-2.6.27-660/include/linux/if_ether.h	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-700/include/linux/if_ether.h	2009-04-10 17:35:46.000000000 -0400
 @@ -56,6 +56,7 @@
  #define ETH_P_DIAG      0x6005          /* DEC Diagnostics              */
  #define ETH_P_CUST      0x6006          /* DEC Customer use             */
@@ -1656,10 +1672,10 @@ diff -Nurp linux-2.6.22-592/include/linux/if_ether.h linux-2.6.22-593/include/li
  #define ETH_P_RARP      0x8035		/* Reverse Addr Res packet	*/
  #define ETH_P_ATALK	0x809B		/* Appletalk DDP		*/
  #define ETH_P_AARP	0x80F3		/* Appletalk AARP		*/
-diff -Nurp linux-2.6.22-592/include/linux/if_tunnel.h linux-2.6.22-593/include/linux/if_tunnel.h
---- linux-2.6.22-592/include/linux/if_tunnel.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-593/include/linux/if_tunnel.h	2008-03-18 16:10:13.000000000 -0400
-@@ -25,6 +25,7 @@ struct ip_tunnel_parm
+diff -Nurb linux-2.6.27-660/include/linux/if_tunnel.h linux-2.6.27-700/include/linux/if_tunnel.h
+--- linux-2.6.27-660/include/linux/if_tunnel.h	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-700/include/linux/if_tunnel.h	2009-04-10 17:35:46.000000000 -0400
+@@ -29,6 +29,7 @@
  	__be16			o_flags;
  	__be32			i_key;
  	__be32			o_key;
@@ -1667,9 +1683,9 @@ diff -Nurp linux-2.6.22-592/include/linux/if_tunnel.h linux-2.6.22-593/include/l
  	struct iphdr		iph;
  };
  
-diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
---- linux-2.6.22-592/net/ipv4/ip_gre.c	2008-03-18 16:10:02.000000000 -0400
-+++ linux-2.6.22-593/net/ipv4/ip_gre.c	2008-03-18 16:12:02.000000000 -0400
+diff -Nurb linux-2.6.27-660/net/ipv4/ip_gre.c linux-2.6.27-700/net/ipv4/ip_gre.c
+--- linux-2.6.27-660/net/ipv4/ip_gre.c	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-700/net/ipv4/ip_gre.c	2009-04-10 18:20:30.000000000 -0400
 @@ -25,6 +25,7 @@
  #include <linux/init.h>
  #include <linux/in6.h>
@@ -1678,7 +1694,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  #include <linux/igmp.h>
  #include <linux/netfilter_ipv4.h>
  #include <linux/if_ether.h>
-@@ -46,6 +47,8 @@
+@@ -48,6 +49,8 @@
  #include <net/ip6_route.h>
  #endif
  
@@ -1687,7 +1703,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  /*
     Problems & solutions
     --------------------
-@@ -116,7 +119,8 @@
+@@ -118,7 +121,8 @@
   */
  
  static int ipgre_tunnel_init(struct net_device *dev);
@@ -1697,7 +1713,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  
  /* Fallback tunnel: no source, no destination, no key, no options */
  
-@@ -243,6 +247,7 @@ static struct ip_tunnel * ipgre_tunnel_l
+@@ -255,6 +259,7 @@
  	__be32 remote = parms->iph.daddr;
  	__be32 local = parms->iph.saddr;
  	__be32 key = parms->i_key;
@@ -1705,7 +1721,7 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  	struct ip_tunnel *t, **tp, *nt;
  	struct net_device *dev;
  	char name[IFNAMSIZ];
-@@ -256,6 +261,8 @@ static struct ip_tunnel * ipgre_tunnel_l
+@@ -269,12 +274,28 @@
  	if (!create)
  		return NULL;
  
@@ -1713,39 +1729,37 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +
  	if (parms->name[0])
  		strlcpy(name, parms->name, IFNAMSIZ);
- 	else {
-@@ -268,8 +275,21 @@ static struct ip_tunnel * ipgre_tunnel_l
- 		if (i==100)
- 			goto failed;
- 	}
-+	
-+	/* Tunnel creation: check payload type and call appropriate
-+	 * function */
-+	switch (proto)
-+	{
-+	    case ETH_P_IP:
-+		dev = alloc_netdev(sizeof(*t), name, ipgre_ip_tunnel_setup);
-+		break;
-+	    case ETH_P_ETH:
-+		dev = alloc_netdev(sizeof(*t), name, ipgre_eth_tunnel_setup);
-+		break;
-+	    default:
-+		return NULL;
-+	}
+ 	else
+ 		sprintf(name, "gre%%d");
  
 -	dev = alloc_netdev(sizeof(*t), name, ipgre_tunnel_setup);
++
++ 	/* Tunnel creation: check payload type and call appropriate
++ 	 * function */
++ 	switch (proto)
++ 	{
++ 	    case ETH_P_IP:
++ 		dev = alloc_netdev(sizeof(*t), name, ipgre_ip_tunnel_setup);
++ 		break;
++ 	    case ETH_P_ETH:
++ 		dev = alloc_netdev(sizeof(*t), name, ipgre_eth_tunnel_setup);
++ 		break;
++ 	    default:
++ 		return NULL;
++ 	}
++
  	if (!dev)
  	  return NULL;
  
-@@ -562,6 +582,7 @@ static int ipgre_rcv(struct sk_buff *skb
+@@ -431,6 +452,7 @@
  	u32    seqno = 0;
  	struct ip_tunnel *tunnel;
  	int    offset = 4;
-+	__be16 proto;
++    __be16 proto;
  
- 	if (skb->dev->nd_net != &init_net) {
- 		kfree_skb(skb);
-@@ -574,6 +595,11 @@ static int ipgre_rcv(struct sk_buff *skb
+ 	if (!pskb_may_pull(skb, 16))
+ 		goto drop_nolock;
+@@ -439,6 +461,11 @@
  	h = skb->data;
  	flags = *(__be16*)h;
  
@@ -1757,37 +1771,37 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  	if (flags&(GRE_CSUM|GRE_KEY|GRE_ROUTING|GRE_SEQ|GRE_VERSION)) {
  		/* - Version must be 0.
  		   - We do not support routing headers.
-@@ -625,7 +651,28 @@ static int ipgre_rcv(struct sk_buff *skb
+@@ -493,7 +520,29 @@
  		__pskb_pull(skb, offset);
  		skb_reset_network_header(skb);
  		skb_postpull_rcsum(skb, skb_transport_header(skb), offset);
--		skb->pkt_type = PACKET_HOST;
-+		if(proto == ETH_P_ETH)
-+		  {
-+#ifdef GRE_DEBUG
-+		    unsigned char* tmp_hdr = skb->data;
-+		    printk(KERN_DEBUG "gre.c [658] %x %x %x %x %x %x\tskb %p\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
-+#endif		    
-+		    skb->protocol = eth_type_trans(skb, tunnel->dev);
++ 		if(proto == ETH_P_ETH)
++ 		  {
++ #ifdef GRE_DEBUG
++ 		    unsigned char* tmp_hdr = skb->data;
++ 		    printk(KERN_DEBUG "gre.c [658] %x %x %x %x %x %x\tskb %p\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
++ #endif		    
++ 		    skb->protocol = eth_type_trans(skb, tunnel->dev);
++ 
++ 		    /* XXX added these lines to make arp work? XXX */
++  		    /*skb->mac.raw = skb->data;*/
++  		    skb->network_header = skb->network_header + ETH_HLEN;
++ 		    /* XXX added these lines to make arp work? XXX */
++ 
++ #ifdef GRE_DEBUG
++ 		    tmp_hdr = skb->data;
++ 		    printk(KERN_DEBUG "gre.c [669] %x %x %x %x %x %x\tskb %p\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
++  		    printk(KERN_ALERT "gre.c [671] received ethernet on gre %x\n",skb->protocol); 
++ #endif
++ 		    memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
++ 		  }
++ 		else
+ 		skb->pkt_type = PACKET_HOST;
 +
-+		    /* XXX added these lines to make arp work? XXX */
-+ 		    /*skb->mac.raw = skb->data;*/
-+ 		    skb->network_header = skb->network_header + ETH_HLEN;
-+		    /* XXX added these lines to make arp work? XXX */
-+
-+#ifdef GRE_DEBUG
-+		    tmp_hdr = skb->data;
-+		    printk(KERN_DEBUG "gre.c [669] %x %x %x %x %x %x\tskb %p\n", tmp_hdr[0], tmp_hdr[1], tmp_hdr[2], tmp_hdr[3], tmp_hdr[4], tmp_hdr[5], skb->data);
-+ 		    printk(KERN_ALERT "gre.c [671] received ethernet on gre %x\n",skb->protocol); 
-+#endif
-+		    memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
-+		  }
-+		else
-+		  skb->pkt_type = PACKET_HOST;
  #ifdef CONFIG_NET_IPGRE_BROADCAST
- 		if (MULTICAST(iph->daddr)) {
+ 		if (ipv4_is_multicast(iph->daddr)) {
  			/* Looped back packet, drop it! */
-@@ -671,7 +718,7 @@ drop_nolock:
+@@ -539,7 +588,7 @@
  	return(0);
  }
  
@@ -1795,9 +1809,33 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +static int ipgre_ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
  {
  	struct ip_tunnel *tunnel = netdev_priv(dev);
- 	struct net_device_stats *stats = &tunnel->stat;
-@@ -904,6 +951,228 @@ tx_error:
- 	return 0;
+ 	struct net_device_stats *stats = &tunnel->dev->stats;
+@@ -799,9 +848,17 @@
+ 			tdev = rt->u.dst.dev;
+ 			ip_rt_put(rt);
+ 		}
++ 		if (tunnel->parms.proto_type == ETH_P_ETH)
++ 		{
++ 		    dev->flags |= IFF_BROADCAST;
++ 		}
++ 		else
++ 		{
+ 		dev->flags |= IFF_POINTOPOINT;
+ 	}
+ 
++	}
++
+ 	if (!tdev && tunnel->parms.link)
+ 		tdev = __dev_get_by_index(dev_net(dev), tunnel->parms.link);
+ 
+@@ -822,10 +879,234 @@
+ 	}
+ 	dev->hard_header_len = hlen + addend;
+ 	dev->mtu = mtu - addend;
++ 	if (tunnel->parms.proto_type == ETH_P_ETH)
++ 	        dev->mtu -= ETH_HLEN;
+ 	tunnel->hlen = addend;
+ 
  }
  
 +static int ipgre_eth_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -2025,69 +2063,59 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
  static int
  ipgre_tunnel_ioctl (struct net_device *dev, struct ifreq *ifr, int cmd)
  {
-@@ -911,6 +1180,8 @@ ipgre_tunnel_ioctl (struct net_device *d
- 	struct ip_tunnel_parm p;
- 	struct ip_tunnel *t;
- 
-+        printk(KERN_ALERT "1174 GRE: entering gre ioctl. command is: %d\n", cmd);
-+
- 	switch (cmd) {
- 	case SIOCGETTUNNEL:
- 		t = NULL;
-@@ -952,7 +1223,7 @@ ipgre_tunnel_ioctl (struct net_device *d
+@@ -876,6 +1157,7 @@
  			p.o_key = 0;
  
- 		t = ipgre_tunnel_locate(&p, cmd == SIOCADDTUNNEL);
--
-+		if (t) printk(KERN_ALERT "1174 GRE: proto %s %x\n", p.name, p.proto_type);
- 		if (dev != ipgre_fb_tunnel_dev && cmd == SIOCCHGTUNNEL) {
+ 		t = ipgre_tunnel_locate(net, &p, cmd == SIOCADDTUNNEL);
++ 		if (t) printk(KERN_ALERT "1174 GRE: proto %s %x\n", p.name, p.proto_type);
+ 
+ 		if (dev != ign->fb_tunnel_dev && cmd == SIOCCHGTUNNEL) {
  			if (t != NULL) {
- 				if (t->dev != dev) {
-@@ -968,6 +1239,12 @@ ipgre_tunnel_ioctl (struct net_device *d
- 					nflags = IFF_BROADCAST;
+@@ -893,6 +1175,12 @@
  				else if (p.iph.daddr)
  					nflags = IFF_POINTOPOINT;
-+				
+ 
 +				/* XXX:Set back IFF_BROADCAST if
 +				 * transporting ethernet */
 +				printk(KERN_ALERT "1193 GRE: proto %s %d\n", p.name, p.proto_type);
 +				if (p.proto_type == ETH_P_ETH)
 +				    	nflags = IFF_BROADCAST;
- 
++
  				if ((dev->flags^nflags)&(IFF_POINTOPOINT|IFF_BROADCAST)) {
  					err = -EINVAL;
-@@ -978,8 +1255,12 @@ ipgre_tunnel_ioctl (struct net_device *d
+ 					break;
+@@ -902,8 +1190,13 @@
  				t->parms.iph.daddr = p.iph.daddr;
  				t->parms.i_key = p.i_key;
  				t->parms.o_key = p.o_key;
--				memcpy(dev->dev_addr, &p.iph.saddr, 4);
--				memcpy(dev->broadcast, &p.iph.daddr, 4);
-+				/* XXX:Copy in the protocol field */
-+				t->parms.proto_type = p.proto_type;
-+				if (t->parms.proto_type != ETH_P_ETH) {
-+					memcpy(dev->dev_addr, &p.iph.saddr, 4);
-+					memcpy(dev->broadcast, &p.iph.daddr, 4);
-+				}
- 				ipgre_tunnel_link(t);
++ 				/* XXX:Copy in the protocol field */
++ 				t->parms.proto_type = p.proto_type;
++ 				if (t->parms.proto_type != ETH_P_ETH) {
+ 				memcpy(dev->dev_addr, &p.iph.saddr, 4);
+ 				memcpy(dev->broadcast, &p.iph.daddr, 4);
++ 				}
++
+ 				ipgre_tunnel_link(ign, t);
  				netdev_state_change(dev);
  			}
-@@ -1139,12 +1420,12 @@ static int ipgre_close(struct net_device
+@@ -1076,13 +1369,13 @@
  
  #endif
  
 -static void ipgre_tunnel_setup(struct net_device *dev)
 +static void ipgre_ip_tunnel_setup(struct net_device *dev)
  {
- 	SET_MODULE_OWNER(dev);
  	dev->uninit		= ipgre_tunnel_uninit;
  	dev->destructor 	= free_netdev;
 -	dev->hard_start_xmit	= ipgre_tunnel_xmit;
-+	dev->hard_start_xmit	= ipgre_ip_tunnel_xmit;
- 	dev->get_stats		= ipgre_tunnel_get_stats;
  	dev->do_ioctl		= ipgre_tunnel_ioctl;
  	dev->change_mtu		= ipgre_tunnel_change_mtu;
-@@ -1157,6 +1438,35 @@ static void ipgre_tunnel_setup(struct ne
- 	dev->addr_len		= 4;
++ 	dev->hard_start_xmit	= ipgre_ip_tunnel_xmit;
+ 
+ 	dev->type		= ARPHRD_IPGRE;
+ 	dev->hard_header_len 	= LL_MAX_HEADER + sizeof(struct iphdr) + 4;
+@@ -1093,6 +1386,35 @@
+ 	dev->features		|= NETIF_F_NETNS_LOCAL;
  }
  
 +/* Tunnel setup for ipgre_eth */
@@ -2121,51 +2149,30 @@ diff -Nurp linux-2.6.22-592/net/ipv4/ip_gre.c linux-2.6.22-593/net/ipv4/ip_gre.c
 +
  static int ipgre_tunnel_init(struct net_device *dev)
  {
- 	struct net_device *tdev = NULL;
-@@ -1172,8 +1482,10 @@ static int ipgre_tunnel_init(struct net_
+ 	struct ip_tunnel *tunnel;
+@@ -1104,8 +1426,10 @@
  	tunnel->dev = dev;
  	strcpy(tunnel->parms.name, dev->name);
  
--	memcpy(dev->dev_addr, &tunnel->parms.iph.saddr, 4);
--	memcpy(dev->broadcast, &tunnel->parms.iph.daddr, 4);
 +	if (tunnel->parms.proto_type != ETH_P_ETH) {
-+		memcpy(dev->dev_addr, &tunnel->parms.iph.saddr, 4);
-+		memcpy(dev->broadcast, &tunnel->parms.iph.daddr, 4);
-+	} 
+ 	memcpy(dev->dev_addr, &tunnel->parms.iph.saddr, 4);
+ 	memcpy(dev->broadcast, &tunnel->parms.iph.daddr, 4);
++ 	} 
  
- 	/* Guess output device to choose reasonable mtu and hard_header_len */
+ 	ipgre_tunnel_bind_dev(dev);
  
-@@ -1191,7 +1503,14 @@ static int ipgre_tunnel_init(struct net_
- 			ip_rt_put(rt);
- 		}
+@@ -1181,7 +1505,7 @@
+ 		goto err_assign;
  
--		dev->flags |= IFF_POINTOPOINT;
-+		if (tunnel->parms.proto_type == ETH_P_ETH)
-+		{
-+		    dev->flags |= IFF_BROADCAST;
-+		}
-+		else
-+		{
-+			dev->flags |= IFF_POINTOPOINT;
-+		}
- 
- #ifdef CONFIG_NET_IPGRE_BROADCAST
- 		if (MULTICAST(iph->daddr)) {
-@@ -1225,6 +1544,8 @@ static int ipgre_tunnel_init(struct net_
- 	}
- 	dev->hard_header_len = hlen + addend;
- 	dev->mtu = mtu - addend;
-+	if (tunnel->parms.proto_type == ETH_P_ETH)
-+	        dev->mtu -= ETH_HLEN;
- 	tunnel->hlen = addend;
- 	return 0;
- }
-@@ -1270,7 +1591,7 @@ static int __init ipgre_init(void)
- 	}
- 
- 	ipgre_fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel), "gre0",
+ 	ign->fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel), "gre0",
 -					   ipgre_tunnel_setup);
 +					   ipgre_ip_tunnel_setup);
- 	if (!ipgre_fb_tunnel_dev) {
+ 	if (!ign->fb_tunnel_dev) {
  		err = -ENOMEM;
- 		goto err1;
+ 		goto err_alloc_dev;
+diff -Nurb linux-2.6.27-660/rej linux-2.6.27-700/rej
+--- linux-2.6.27-660/rej	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.27-700/rej	2009-04-10 17:50:33.000000000 -0400
+@@ -0,0 +1,2 @@
++./net/ipv4/ip_gre.c.rej
++./drivers/net/Makefile.rej
