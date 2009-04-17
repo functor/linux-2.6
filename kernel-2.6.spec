@@ -40,7 +40,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro.vini}}%{?date:.%{date}}
 
 %{!?pldistro:%global pldistro planetlab}
 
@@ -170,6 +170,7 @@ Patch660: linux-2.6-660-nmi-watchdog-default.patch
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-egre.patch
+Patch710: linux-2.6-710-netns-unshare-kludge.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -358,14 +359,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 650
 %ApplyPatch 660
 %ApplyPatch 700
+%ApplyPatch 710
 
-
-# NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
-# break with later patches.
-
-%if 0%{?with_netns}
-%ApplyPatch %vini_pl_patch
-%endif
 
 rm -fr linux-%{kversion}
 ln -sf $KERNEL_PREVIOUS linux-%{kversion}

@@ -1,0 +1,21 @@
+diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-700/net/socket.c linux-2.6.27-710/net/socket.c
+--- linux-2.6.27-700/net/socket.c	2009-04-16 21:55:22.000000000 -0400
++++ linux-2.6.27-710/net/socket.c	2009-04-16 22:22:48.000000000 -0400
+@@ -1138,12 +1138,17 @@
+ 	if (type < 0 || type >= SOCK_MAX)
+ 		return -EINVAL;
+ 
++    /*
++       This fragment prevents net ns from being unshared when a vserver is created
++       via util-vserver-pl. Commenting out of Trellis for now.
++
+ 	if (!nx_check(0, VS_ADMIN)) {
+ 		if (family == PF_INET && !current_nx_info_has_v4())
+ 			return -EAFNOSUPPORT;
+ 		if (family == PF_INET6 && !current_nx_info_has_v6())
+ 			return -EAFNOSUPPORT;
+ 	}
++    */
+ 
+ 	/* Compatibility.
+ 
