@@ -40,7 +40,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro.vini}}%{?date:.%{date}}
+%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}.vini%{?date:.%{date}}
 
 %{!?pldistro:%global pldistro planetlab}
 
