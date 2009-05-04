@@ -1,6 +1,6 @@
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/drivers/input/serio/i8042-ppcio.h linux-2.6.27-720/drivers/input/serio/i8042-ppcio.h
 --- linux-2.6.27-710/drivers/input/serio/i8042-ppcio.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/drivers/input/serio/i8042-ppcio.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/drivers/input/serio/i8042-ppcio.h	2009-05-04 16:03:46.000000000 -0400
 @@ -77,7 +77,7 @@
  	asm volatile("lis     7,0xff88        \n\
  		      lswi    6,7,0x8         \n\
@@ -21,7 +21,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	eieio();
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/drivers/net/wireless/rayctl.h linux-2.6.27-720/drivers/net/wireless/rayctl.h
 --- linux-2.6.27-710/drivers/net/wireless/rayctl.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/drivers/net/wireless/rayctl.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/drivers/net/wireless/rayctl.h	2009-05-04 16:03:46.000000000 -0400
 @@ -418,9 +418,7 @@
  };
  
@@ -35,7 +35,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  struct startup_res_518 {
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/drivers/video/i810/i810_main.h linux-2.6.27-720/drivers/video/i810/i810_main.h
 --- linux-2.6.27-710/drivers/video/i810/i810_main.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/drivers/video/i810/i810_main.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/drivers/video/i810/i810_main.h	2009-05-04 16:03:46.000000000 -0400
 @@ -54,7 +54,7 @@
  #ifdef CONFIG_X86
  static inline void flush_cache(void)
@@ -46,8 +46,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #else
  #define flush_cache() do { } while(0)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/fs/file_table.c linux-2.6.27-720/fs/file_table.c
---- linux-2.6.27-710/fs/file_table.c	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/fs/file_table.c	2009-05-04 12:31:56.000000000 -0400
+--- linux-2.6.27-710/fs/file_table.c	2009-05-04 12:36:00.000000000 -0400
++++ linux-2.6.27-720/fs/file_table.c	2009-05-04 16:03:46.000000000 -0400
 @@ -34,6 +34,8 @@
  /* public. Not pretty! */
  __cacheline_aligned_in_smp DEFINE_SPINLOCK(files_lock);
@@ -58,8 +58,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  static inline void file_free_rcu(struct rcu_head *head)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/fs/super.c linux-2.6.27-720/fs/super.c
---- linux-2.6.27-710/fs/super.c	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/fs/super.c	2009-05-04 12:31:56.000000000 -0400
+--- linux-2.6.27-710/fs/super.c	2009-05-04 12:36:00.000000000 -0400
++++ linux-2.6.27-720/fs/super.c	2009-05-04 16:03:46.000000000 -0400
 @@ -48,6 +48,8 @@
  LIST_HEAD(super_blocks);
  DEFINE_SPINLOCK(sb_lock);
@@ -71,7 +71,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
   *	@type:	filesystem type superblock should belong to
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-cris/arch-v10/io.h linux-2.6.27-720/include/asm-cris/arch-v10/io.h
 --- linux-2.6.27-710/include/asm-cris/arch-v10/io.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-cris/arch-v10/io.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-cris/arch-v10/io.h	2009-05-04 16:03:46.000000000 -0400
 @@ -190,8 +190,8 @@
   ({ int _Foofoo; __asm__ volatile ("bmod [%0],%0" : "=r" (_Foofoo) : "0" \
  			       (255)); _Foofoo; })
@@ -85,7 +85,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #endif /* ! defined CONFIG_SVINTO_SIM */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-cris/module.h linux-2.6.27-720/include/asm-cris/module.h
 --- linux-2.6.27-710/include/asm-cris/module.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-cris/module.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-cris/module.h	2009-05-04 16:03:46.000000000 -0400
 @@ -1,7 +1,7 @@
  #ifndef _ASM_CRIS_MODULE_H
  #define _ASM_CRIS_MODULE_H
@@ -97,7 +97,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define Elf_Sym Elf32_Sym
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/bug.h linux-2.6.27-720/include/asm-frv/bug.h
 --- linux-2.6.27-710/include/asm-frv/bug.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/bug.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/bug.h	2009-05-04 16:03:46.000000000 -0400
 @@ -17,7 +17,7 @@
  /*
   * Tell the user there is some problem.
@@ -109,7 +109,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define	_debug_bug_printk()
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/fpu.h linux-2.6.27-720/include/asm-frv/fpu.h
 --- linux-2.6.27-710/include/asm-frv/fpu.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/fpu.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/fpu.h	2009-05-04 16:03:46.000000000 -0400
 @@ -6,6 +6,6 @@
   * MAX floating point unit state size (FSAVE/FRESTORE)
   */
@@ -120,7 +120,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #endif /* __ASM_FPU_H */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/gdb-stub.h linux-2.6.27-720/include/asm-frv/gdb-stub.h
 --- linux-2.6.27-710/include/asm-frv/gdb-stub.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/gdb-stub.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/gdb-stub.h	2009-05-04 16:03:46.000000000 -0400
 @@ -87,14 +87,14 @@
  extern void gdbstub_tx_flush(void);
  extern void gdbstub_do_rx(void);
@@ -146,7 +146,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  extern uint32_t __entry_kerneltrap_table[];
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/highmem.h linux-2.6.27-720/include/asm-frv/highmem.h
 --- linux-2.6.27-710/include/asm-frv/highmem.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/highmem.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/highmem.h	2009-05-04 16:03:46.000000000 -0400
 @@ -82,11 +82,11 @@
  	dampr = paddr | xAMPRx_L | xAMPRx_M | xAMPRx_S | xAMPRx_SS_16Kb | xAMPRx_V;		\
  												\
@@ -175,7 +175,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define __kunmap_atomic_secondary(slot, vaddr)				\
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/module.h linux-2.6.27-720/include/asm-frv/module.h
 --- linux-2.6.27-710/include/asm-frv/module.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/module.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/module.h	2009-05-04 16:03:46.000000000 -0400
 @@ -11,9 +11,7 @@
  #ifndef _ASM_MODULE_H
  #define _ASM_MODULE_H
@@ -189,7 +189,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define Elf_Sym		Elf32_Sym
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/pgtable.h linux-2.6.27-720/include/asm-frv/pgtable.h
 --- linux-2.6.27-710/include/asm-frv/pgtable.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/pgtable.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/pgtable.h	2009-05-04 16:03:46.000000000 -0400
 @@ -176,7 +176,7 @@
  #define set_pte(pteptr, pteval)				\
  do {							\
@@ -210,7 +210,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline pud_t *pud_offset(pgd_t *pgd, unsigned long address)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/processor.h linux-2.6.27-720/include/asm-frv/processor.h
 --- linux-2.6.27-710/include/asm-frv/processor.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/processor.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/processor.h	2009-05-04 16:03:46.000000000 -0400
 @@ -111,9 +111,9 @@
  {
  }
@@ -226,7 +226,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define release_segments(mm)		do { } while (0)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/spr-regs.h linux-2.6.27-720/include/asm-frv/spr-regs.h
 --- linux-2.6.27-710/include/asm-frv/spr-regs.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/spr-regs.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/spr-regs.h	2009-05-04 16:03:46.000000000 -0400
 @@ -343,7 +343,7 @@
  
  #define restore_dampr(R, _dampr)			\
@@ -238,7 +238,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  /*
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-frv/system.h linux-2.6.27-720/include/asm-frv/system.h
 --- linux-2.6.27-710/include/asm-frv/system.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-frv/system.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-frv/system.h	2009-05-04 16:03:46.000000000 -0400
 @@ -23,7 +23,7 @@
   * `prev' will never be the same as `next'.
   * The `mb' is to tell GCC not to cache `current' across this call.
@@ -257,9 +257,25 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define mb()			asm volatile ("membar" : : :"memory")
  #define rmb()			asm volatile ("membar" : : :"memory")
  #define wmb()			asm volatile ("membar" : : :"memory")
+diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-generic/bitops/hweight.h linux-2.6.27-720/include/asm-generic/bitops/hweight.h
+--- linux-2.6.27-710/include/asm-generic/bitops/hweight.h	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-720/include/asm-generic/bitops/hweight.h	2009-05-04 16:03:46.000000000 -0400
+@@ -3,6 +3,12 @@
+ 
+ #include <asm/types.h>
+ 
++#ifdef __cplusplus
++#ifndef CXX_PROTECTED
++#error Unprotected code region
++#endif
++#endif
++
+ extern unsigned int hweight32(unsigned int w);
+ extern unsigned int hweight16(unsigned int w);
+ extern unsigned int hweight8(unsigned int w);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-m32r/module.h linux-2.6.27-720/include/asm-m32r/module.h
 --- linux-2.6.27-710/include/asm-m32r/module.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-m32r/module.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-m32r/module.h	2009-05-04 16:03:46.000000000 -0400
 @@ -1,7 +1,7 @@
  #ifndef _ASM_M32R_MODULE_H
  #define _ASM_M32R_MODULE_H
@@ -271,7 +287,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define Elf_Sym		Elf32_Sym
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-m68k/system.h linux-2.6.27-720/include/asm-m68k/system.h
 --- linux-2.6.27-710/include/asm-m68k/system.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-m68k/system.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-m68k/system.h	2009-05-04 16:03:46.000000000 -0400
 @@ -167,23 +167,23 @@
  #define __HAVE_ARCH_CMPXCHG	1
  
@@ -302,7 +318,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	return old;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/fpu.h linux-2.6.27-720/include/asm-mips/fpu.h
 --- linux-2.6.27-710/include/asm-mips/fpu.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/fpu.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/fpu.h	2009-05-04 16:03:46.000000000 -0400
 @@ -28,11 +28,11 @@
  struct sigcontext;
  struct sigcontext32;
@@ -321,7 +337,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  extern int fpu_emulator_save_context(struct sigcontext __user *sc);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/io.h linux-2.6.27-720/include/asm-mips/io.h
 --- linux-2.6.27-710/include/asm-mips/io.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/io.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/io.h	2009-05-04 16:03:46.000000000 -0400
 @@ -303,7 +303,7 @@
  	volatile type *__mem;						\
  	type __val;							\
@@ -405,7 +421,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  {
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/ip32/mace.h linux-2.6.27-720/include/asm-mips/ip32/mace.h
 --- linux-2.6.27-710/include/asm-mips/ip32/mace.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/ip32/mace.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/ip32/mace.h	2009-05-04 16:03:46.000000000 -0400
 @@ -308,11 +308,9 @@
   */
  
@@ -422,7 +438,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  struct mace_serial {
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/mips-boards/sim.h linux-2.6.27-720/include/asm-mips/mips-boards/sim.h
 --- linux-2.6.27-710/include/asm-mips/mips-boards/sim.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/mips-boards/sim.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/mips-boards/sim.h	2009-05-04 16:03:46.000000000 -0400
 @@ -31,7 +31,7 @@
  ({					   \
  	__asm__  __volatile__( \
@@ -434,7 +450,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/mipsregs.h linux-2.6.27-720/include/asm-mips/mipsregs.h
 --- linux-2.6.27-710/include/asm-mips/mipsregs.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/mipsregs.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/mipsregs.h	2009-05-04 16:03:46.000000000 -0400
 @@ -1052,15 +1052,15 @@
  #define mfhi2() ({ long mfhi2; __asm__("mfhi %0, $ac2" : "=r" (mfhi2)); mfhi2;})
  #define mfhi3() ({ long mfhi3; __asm__("mfhi %0, $ac3" : "=r" (mfhi3)); mfhi3;})
@@ -478,7 +494,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	return res;						\
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/paccess.h linux-2.6.27-720/include/asm-mips/paccess.h
 --- linux-2.6.27-710/include/asm-mips/paccess.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/paccess.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/paccess.h	2009-05-04 16:03:46.000000000 -0400
 @@ -22,8 +22,8 @@
  #define __PA_ADDR	".dword"
  #endif
@@ -492,7 +508,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define get_dbe(x, ptr) __get_dbe((x), (ptr), sizeof(*(ptr)))
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/processor.h linux-2.6.27-720/include/asm-mips/processor.h
 --- linux-2.6.27-710/include/asm-mips/processor.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/processor.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/processor.h	2009-05-04 16:03:46.000000000 -0400
 @@ -242,7 +242,7 @@
   * overhead of a function call by forcing the compiler to save the return
   * address register on the stack.
@@ -504,7 +520,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/ptrace.h linux-2.6.27-720/include/asm-mips/ptrace.h
 --- linux-2.6.27-710/include/asm-mips/ptrace.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/ptrace.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/ptrace.h	2009-05-04 16:03:46.000000000 -0400
 @@ -84,7 +84,7 @@
  #define instruction_pointer(regs) ((regs)->cp0_epc)
  #define profile_pc(regs) instruction_pointer(regs)
@@ -516,7 +532,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/smp.h linux-2.6.27-720/include/asm-mips/smp.h
 --- linux-2.6.27-710/include/asm-mips/smp.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/smp.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/smp.h	2009-05-04 16:03:46.000000000 -0400
 @@ -55,7 +55,7 @@
  	mp_ops->send_ipi_single(cpu, SMP_RESCHEDULE_YOURSELF);
  }
@@ -528,7 +544,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  extern void arch_send_call_function_ipi(cpumask_t mask);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-mips/system.h linux-2.6.27-720/include/asm-mips/system.h
 --- linux-2.6.27-710/include/asm-mips/system.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-mips/system.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-mips/system.h	2009-05-04 16:03:46.000000000 -0400
 @@ -27,7 +27,7 @@
   * switch_to(n) should switch tasks to task nr n, first
   * checking that n isn't the current task, in which case it does nothing.
@@ -552,7 +568,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	return x;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-parisc/system.h linux-2.6.27-720/include/asm-parisc/system.h
 --- linux-2.6.27-710/include/asm-parisc/system.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-parisc/system.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-parisc/system.h	2009-05-04 16:03:46.000000000 -0400
 @@ -122,7 +122,7 @@
  ** The __asm__ op below simple prevents gcc/ld from reordering
  ** instructions across the mb() "call".
@@ -564,7 +580,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define smp_mb()	mb()
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-um/module-i386.h linux-2.6.27-720/include/asm-um/module-i386.h
 --- linux-2.6.27-710/include/asm-um/module-i386.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-um/module-i386.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-um/module-i386.h	2009-05-04 16:03:46.000000000 -0400
 @@ -2,9 +2,7 @@
  #define __UM_MODULE_I386_H
  
@@ -578,7 +594,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define Elf_Sym Elf32_Sym
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-um/module-x86_64.h linux-2.6.27-720/include/asm-um/module-x86_64.h
 --- linux-2.6.27-710/include/asm-um/module-x86_64.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-um/module-x86_64.h	2009-05-04 12:31:56.000000000 -0400
++++ linux-2.6.27-720/include/asm-um/module-x86_64.h	2009-05-04 16:03:46.000000000 -0400
 @@ -8,9 +8,7 @@
  #define __UM_MODULE_X86_64_H
  
@@ -592,7 +608,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define Elf_Sym Elf64_Sym
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/bitops.h linux-2.6.27-720/include/asm-x86/bitops.h
 --- linux-2.6.27-710/include/asm-x86/bitops.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/bitops.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/bitops.h	2009-05-04 16:03:46.000000000 -0400
 @@ -35,7 +35,7 @@
   * a mask operation on a byte.
   */
@@ -604,7 +620,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  /**
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/desc.h linux-2.6.27-720/include/asm-x86/desc.h
 --- linux-2.6.27-710/include/asm-x86/desc.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/desc.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/desc.h	2009-05-04 16:03:46.000000000 -0400
 @@ -70,7 +70,7 @@
  
  static inline int desc_empty(const void *ptr)
@@ -616,7 +632,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/hw_irq.h linux-2.6.27-720/include/asm-x86/hw_irq.h
 --- linux-2.6.27-710/include/asm-x86/hw_irq.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/hw_irq.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/hw_irq.h	2009-05-04 16:03:46.000000000 -0400
 @@ -84,6 +84,16 @@
  extern void eisa_set_level_irq(unsigned int irq);
  
@@ -645,7 +661,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #else
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/page.h linux-2.6.27-720/include/asm-x86/page.h
 --- linux-2.6.27-710/include/asm-x86/page.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/page.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/page.h	2009-05-04 16:03:46.000000000 -0400
 @@ -138,7 +138,7 @@
  
  static inline pte_t native_make_pte(pteval_t val)
@@ -657,7 +673,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline pteval_t native_pte_val(pte_t pte)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/paravirt.h linux-2.6.27-720/include/asm-x86/paravirt.h
 --- linux-2.6.27-710/include/asm-x86/paravirt.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/paravirt.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/paravirt.h	2009-05-04 16:03:46.000000000 -0400
 @@ -1060,7 +1060,7 @@
  				 pv_mmu_ops.make_pte,
  				 val);
@@ -680,18 +696,18 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	set_pte_at(mm, addr, ptep, __pte(0));
  }
  
-+/*
++#ifndef __cplusplus
  static inline void pmd_clear(pmd_t *pmdp)
  {
  	set_pmd(pmdp, __pmd(0));
  }
-+*/
++#endif
  #endif	/* CONFIG_X86_PAE */
  
  /* Lazy mode for batching updates / context switch */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/pgtable-2level.h linux-2.6.27-720/include/asm-x86/pgtable-2level.h
 --- linux-2.6.27-710/include/asm-x86/pgtable-2level.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/pgtable-2level.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/pgtable-2level.h	2009-05-04 16:03:46.000000000 -0400
 @@ -33,10 +33,12 @@
  	native_set_pte(ptep, pte);
  }
@@ -707,24 +723,24 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  				    unsigned long addr, pte_t *xp)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/pgtable.h linux-2.6.27-720/include/asm-x86/pgtable.h
 --- linux-2.6.27-710/include/asm-x86/pgtable.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/pgtable.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/pgtable.h	2009-05-04 16:03:46.000000000 -0400
 @@ -260,11 +260,13 @@
  		      pgprot_val(pgprot)) & __supported_pte_mask);
  }
  
-+/*
++#ifndef __cplusplus
  static inline pmd_t pfn_pmd(unsigned long page_nr, pgprot_t pgprot)
  {
  	return __pmd((((phys_addr_t)page_nr << PAGE_SHIFT) |
  		      pgprot_val(pgprot)) & __supported_pte_mask);
  }
-+*/
++#endif
  
  static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
  {
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/spinlock_types.h linux-2.6.27-720/include/asm-x86/spinlock_types.h
 --- linux-2.6.27-710/include/asm-x86/spinlock_types.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/spinlock_types.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/spinlock_types.h	2009-05-04 16:03:46.000000000 -0400
 @@ -9,12 +9,19 @@
  	unsigned int slock;
  } raw_spinlock_t;
@@ -748,7 +764,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #endif
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-x86/vdso.h linux-2.6.27-720/include/asm-x86/vdso.h
 --- linux-2.6.27-710/include/asm-x86/vdso.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-x86/vdso.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-x86/vdso.h	2009-05-04 16:03:46.000000000 -0400
 @@ -33,8 +33,8 @@
   * These symbols are defined with the addresses in the vsyscall page.
   * See vsyscall-sigreturn.S.
@@ -762,7 +778,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
   * These symbols are defined by vdso32.S to mark the bounds
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-xtensa/module.h linux-2.6.27-720/include/asm-xtensa/module.h
 --- linux-2.6.27-710/include/asm-xtensa/module.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-xtensa/module.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-xtensa/module.h	2009-05-04 16:03:46.000000000 -0400
 @@ -13,10 +13,7 @@
  #ifndef _XTENSA_MODULE_H
  #define _XTENSA_MODULE_H
@@ -777,7 +793,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-xtensa/processor.h linux-2.6.27-720/include/asm-xtensa/processor.h
 --- linux-2.6.27-710/include/asm-xtensa/processor.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-xtensa/processor.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-xtensa/processor.h	2009-05-04 16:03:46.000000000 -0400
 @@ -183,7 +183,7 @@
  
  /* Special register access. */
@@ -789,7 +805,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define set_sr(x,sr) ({unsigned int v=(unsigned int)x; WSR(v,sr);})
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/asm-xtensa/system.h linux-2.6.27-720/include/asm-xtensa/system.h
 --- linux-2.6.27-710/include/asm-xtensa/system.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/asm-xtensa/system.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/asm-xtensa/system.h	2009-05-04 16:03:46.000000000 -0400
 @@ -21,21 +21,21 @@
  	__asm__ __volatile__ ("rsr %0,"__stringify(PS) : "=a" (x));
  #define local_irq_restore(x)	do {					\
@@ -818,7 +834,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/backing-dev.h linux-2.6.27-720/include/linux/backing-dev.h
 --- linux-2.6.27-710/include/linux/backing-dev.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/backing-dev.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/backing-dev.h	2009-05-04 16:03:46.000000000 -0400
 @@ -29,7 +29,7 @@
  	BDI_unused,		/* Available bits start here */
  };
@@ -837,9 +853,20 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	void *congested_data;	/* Pointer to aux data for congested func */
  	void (*unplug_io_fn)(struct backing_dev_info *, struct page *);
  	void *unplug_io_data;
+diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/bitops.h linux-2.6.27-720/include/linux/bitops.h
+--- linux-2.6.27-710/include/linux/bitops.h	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-720/include/linux/bitops.h	2009-05-04 16:03:46.000000000 -0400
+@@ -44,7 +44,6 @@
+ {
+ 	return sizeof(w) == 4 ? hweight32(w) : hweight64(w);
+ }
+-
+ /**
+  * rol32 - rotate a 32-bit value left
+  * @word: value to rotate
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/compat.h linux-2.6.27-720/include/linux/compat.h
---- linux-2.6.27-710/include/linux/compat.h	2009-05-04 12:28:19.000000000 -0400
-+++ linux-2.6.27-720/include/linux/compat.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/compat.h	2009-05-04 12:35:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/compat.h	2009-05-04 16:03:46.000000000 -0400
 @@ -115,7 +115,7 @@
  
  struct compat_siginfo;
@@ -851,7 +878,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/dmaengine.h linux-2.6.27-720/include/linux/dmaengine.h
 --- linux-2.6.27-710/include/linux/dmaengine.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/dmaengine.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/dmaengine.h	2009-05-04 16:03:46.000000000 -0400
 @@ -377,7 +377,7 @@
  
  static inline void async_tx_ack(struct dma_async_tx_descriptor *tx)
@@ -863,7 +890,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline bool async_tx_test_ack(struct dma_async_tx_descriptor *tx)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/dqblk_v1.h linux-2.6.27-720/include/linux/dqblk_v1.h
 --- linux-2.6.27-710/include/linux/dqblk_v1.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/dqblk_v1.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/dqblk_v1.h	2009-05-04 16:03:46.000000000 -0400
 @@ -18,7 +18,6 @@
  #define V1_DEL_REWRITE 2
  
@@ -874,8 +901,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  #endif	/* _LINUX_DQBLK_V1_H */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/fs.h linux-2.6.27-720/include/linux/fs.h
---- linux-2.6.27-710/include/linux/fs.h	2009-05-04 12:28:32.000000000 -0400
-+++ linux-2.6.27-720/include/linux/fs.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/fs.h	2009-05-04 12:36:50.000000000 -0400
++++ linux-2.6.27-720/include/linux/fs.h	2009-05-04 16:03:46.000000000 -0400
 @@ -2111,7 +2111,7 @@
  
  static inline void simple_transaction_set(struct file *file, size_t n)
@@ -887,7 +914,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/highmem.h linux-2.6.27-720/include/linux/highmem.h
 --- linux-2.6.27-710/include/linux/highmem.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/highmem.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/highmem.h	2009-05-04 16:03:46.000000000 -0400
 @@ -165,8 +165,8 @@
  {
  	char *vfrom, *vto;
@@ -912,7 +939,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	kunmap_atomic(vto, KM_USER1);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/hrtimer.h linux-2.6.27-720/include/linux/hrtimer.h
 --- linux-2.6.27-710/include/linux/hrtimer.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/hrtimer.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/hrtimer.h	2009-05-04 16:03:46.000000000 -0400
 @@ -384,7 +384,7 @@
  static inline void timer_stats_account_hrtimer(struct hrtimer *timer)
  {
@@ -924,7 +951,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  extern void __timer_stats_hrtimer_set_start_info(struct hrtimer *timer,
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/inetdevice.h linux-2.6.27-720/include/linux/inetdevice.h
 --- linux-2.6.27-710/include/linux/inetdevice.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/inetdevice.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/inetdevice.h	2009-05-04 16:03:46.000000000 -0400
 @@ -166,7 +166,7 @@
  
  static inline struct in_device *__in_dev_get_rcu(const struct net_device *dev)
@@ -936,7 +963,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	return in_dev;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/jhash.h linux-2.6.27-720/include/linux/jhash.h
 --- linux-2.6.27-710/include/linux/jhash.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/jhash.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/jhash.h	2009-05-04 16:03:46.000000000 -0400
 @@ -44,7 +44,7 @@
  static inline u32 jhash(const void *key, u32 length, u32 initval)
  {
@@ -948,7 +975,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	a = b = JHASH_GOLDEN_RATIO;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/kernel.h linux-2.6.27-720/include/linux/kernel.h
 --- linux-2.6.27-710/include/linux/kernel.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/kernel.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/kernel.h	2009-05-04 16:03:46.000000000 -0400
 @@ -213,7 +213,7 @@
  		{ return false; }
  #endif
@@ -960,7 +987,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  unsigned long int_sqrt(unsigned long);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/ktime.h linux-2.6.27-720/include/linux/ktime.h
 --- linux-2.6.27-710/include/linux/ktime.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/ktime.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/ktime.h	2009-05-04 16:03:46.000000000 -0400
 @@ -71,6 +71,12 @@
  
  #if (BITS_PER_LONG == 64) || defined(CONFIG_KTIME_SCALAR)
@@ -1087,18 +1114,19 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  }
  
  /**
-@@ -329,7 +348,7 @@
+@@ -329,7 +348,8 @@
  
  static inline ktime_t ns_to_ktime(u64 ns)
  {
 -	static const ktime_t ktime_zero = { .tv64 = 0 };
-+	static const ktime_t ktime_zero = ({ktime_t duh; duh.tv64 = 0;duh;});
++	static ktime_t ktime_zero;
++    ktime_zero = ({ktime_t duh; duh.tv64 = 0;duh;});
  	return ktime_add_ns(ktime_zero, ns);
  }
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/linkage.h linux-2.6.27-720/include/linux/linkage.h
 --- linux-2.6.27-710/include/linux/linkage.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/linkage.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/linkage.h	2009-05-04 16:03:46.000000000 -0400
 @@ -11,6 +11,13 @@
  #else
  #define CPP_ASMLINKAGE
@@ -1115,7 +1143,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define asmlinkage CPP_ASMLINKAGE
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/list.h linux-2.6.27-720/include/linux/list.h
 --- linux-2.6.27-710/include/linux/list.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/list.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/list.h	2009-05-04 16:03:46.000000000 -0400
 @@ -20,7 +20,11 @@
  	struct list_head *next, *prev;
  };
@@ -1152,7 +1180,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline void hlist_del_init(struct hlist_node *n)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/mempolicy.h linux-2.6.27-720/include/linux/mempolicy.h
 --- linux-2.6.27-710/include/linux/mempolicy.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/mempolicy.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/mempolicy.h	2009-05-04 16:03:46.000000000 -0400
 @@ -241,7 +241,7 @@
  
  #else
@@ -1172,8 +1200,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline int mpol_set_shared_policy(struct shared_policy *info,
  					struct vm_area_struct *vma,
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/mm.h linux-2.6.27-720/include/linux/mm.h
---- linux-2.6.27-710/include/linux/mm.h	2009-05-04 12:28:19.000000000 -0400
-+++ linux-2.6.27-720/include/linux/mm.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/mm.h	2009-05-04 12:35:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/mm.h	2009-05-04 16:03:46.000000000 -0400
 @@ -326,7 +326,7 @@
  static inline void set_compound_page_dtor(struct page *page,
  						compound_page_dtor *dtor)
@@ -1202,8 +1230,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  /*
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/netdevice.h linux-2.6.27-720/include/linux/netdevice.h
---- linux-2.6.27-710/include/linux/netdevice.h	2009-05-04 12:28:25.000000000 -0400
-+++ linux-2.6.27-720/include/linux/netdevice.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/netdevice.h	2009-05-04 12:36:43.000000000 -0400
++++ linux-2.6.27-720/include/linux/netdevice.h	2009-05-04 16:03:46.000000000 -0400
 @@ -735,6 +735,46 @@
  	/* GARP */
  	struct garp_port	*garp_port;
@@ -1289,7 +1317,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
   */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/netlink.h linux-2.6.27-720/include/linux/netlink.h
 --- linux-2.6.27-710/include/linux/netlink.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/netlink.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/netlink.h	2009-05-04 16:03:46.000000000 -0400
 @@ -242,7 +242,7 @@
  	nlh->nlmsg_flags = flags;
  	nlh->nlmsg_pid = pid;
@@ -1301,7 +1329,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/page-flags.h linux-2.6.27-720/include/linux/page-flags.h
 --- linux-2.6.27-710/include/linux/page-flags.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/page-flags.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/page-flags.h	2009-05-04 16:03:46.000000000 -0400
 @@ -174,8 +174,10 @@
  PAGEFLAG(Pinned, pinned) TESTSCFLAG(Pinned, pinned)	/* Xen */
  PAGEFLAG(SavePinned, savepinned);			/* Xen */
@@ -1313,9 +1341,20 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  __PAGEFLAG(SlobPage, slob_page)
  __PAGEFLAG(SlobFree, slob_free)
+diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/posix_types.h linux-2.6.27-720/include/linux/posix_types.h
+--- linux-2.6.27-710/include/linux/posix_types.h	2008-10-09 18:13:53.000000000 -0400
++++ linux-2.6.27-720/include/linux/posix_types.h	2009-05-04 16:03:46.000000000 -0400
+@@ -33,6 +33,7 @@
+ #undef __FDMASK
+ #define	__FDMASK(d)	(1UL << ((d) % __NFDBITS))
+ 
++
+ typedef struct {
+ 	unsigned long fds_bits [__FDSET_LONGS];
+ } __kernel_fd_set;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/prefetch.h linux-2.6.27-720/include/linux/prefetch.h
 --- linux-2.6.27-710/include/linux/prefetch.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/prefetch.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/prefetch.h	2009-05-04 16:03:46.000000000 -0400
 @@ -54,9 +54,9 @@
  {
  #ifdef ARCH_HAS_PREFETCH
@@ -1329,8 +1368,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #endif
  }
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/proc_fs.h linux-2.6.27-720/include/linux/proc_fs.h
---- linux-2.6.27-710/include/linux/proc_fs.h	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/include/linux/proc_fs.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/proc_fs.h	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/include/linux/proc_fs.h	2009-05-04 16:03:46.000000000 -0400
 @@ -315,7 +315,7 @@
  
  static inline struct net *PDE_NET(struct proc_dir_entry *pde)
@@ -1342,7 +1381,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  struct proc_maps_private {
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/rculist.h linux-2.6.27-720/include/linux/rculist.h
 --- linux-2.6.27-710/include/linux/rculist.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/rculist.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/rculist.h	2009-05-04 16:03:46.000000000 -0400
 @@ -94,7 +94,7 @@
  static inline void list_del_rcu(struct list_head *entry)
  {
@@ -1380,8 +1419,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  /**
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/reiserfs_fs_sb.h linux-2.6.27-720/include/linux/reiserfs_fs_sb.h
---- linux-2.6.27-710/include/linux/reiserfs_fs_sb.h	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/include/linux/reiserfs_fs_sb.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/reiserfs_fs_sb.h	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/include/linux/reiserfs_fs_sb.h	2009-05-04 16:03:46.000000000 -0400
 @@ -337,8 +337,7 @@
  	} journal;
  } reiserfs_proc_info_data_t;
@@ -1394,7 +1433,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  /* reiserfs union of in-core super block data */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/rtnetlink.h linux-2.6.27-720/include/linux/rtnetlink.h
 --- linux-2.6.27-710/include/linux/rtnetlink.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/rtnetlink.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/rtnetlink.h	2009-05-04 16:03:46.000000000 -0400
 @@ -727,7 +727,7 @@
  	rta = (struct rtattr*)skb_put(skb, RTA_ALIGN(size));
  	rta->rta_type = attrtype;
@@ -1406,7 +1445,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/scatterlist.h linux-2.6.27-720/include/linux/scatterlist.h
 --- linux-2.6.27-710/include/linux/scatterlist.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/scatterlist.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/scatterlist.h	2009-05-04 16:03:46.000000000 -0400
 @@ -196,7 +196,7 @@
   **/
  static inline void *sg_virt(struct scatterlist *sg)
@@ -1417,8 +1456,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  struct scatterlist *sg_next(struct scatterlist *);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/sched.h linux-2.6.27-720/include/linux/sched.h
---- linux-2.6.27-710/include/linux/sched.h	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/include/linux/sched.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/sched.h	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/include/linux/sched.h	2009-05-04 16:03:46.000000000 -0400
 @@ -242,7 +242,12 @@
  
  extern void sched_init(void);
@@ -1452,7 +1491,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  extern void thread_info_cache_init(void);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/seccomp.h linux-2.6.27-720/include/linux/seccomp.h
 --- linux-2.6.27-710/include/linux/seccomp.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/seccomp.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/seccomp.h	2009-05-04 16:03:46.000000000 -0400
 @@ -21,7 +21,7 @@
  
  #else /* CONFIG_SECCOMP */
@@ -1464,7 +1503,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/security.h linux-2.6.27-720/include/linux/security.h
 --- linux-2.6.27-710/include/linux/security.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/security.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/security.h	2009-05-04 16:03:46.000000000 -0400
 @@ -2427,7 +2427,7 @@
  static inline struct dentry *securityfs_create_dir(const char *name,
  					struct dentry *parent)
@@ -1485,7 +1524,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline void securityfs_remove(struct dentry *dentry)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/semaphore.h linux-2.6.27-720/include/linux/semaphore.h
 --- linux-2.6.27-710/include/linux/semaphore.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/semaphore.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/semaphore.h	2009-05-04 16:03:46.000000000 -0400
 @@ -19,12 +19,21 @@
  	struct list_head	wait_list;
  };
@@ -1509,8 +1548,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define DECLARE_MUTEX(name)	\
  	struct semaphore name = __SEMAPHORE_INITIALIZER(name, 1)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/skbuff.h linux-2.6.27-720/include/linux/skbuff.h
---- linux-2.6.27-710/include/linux/skbuff.h	2009-05-04 12:28:23.000000000 -0400
-+++ linux-2.6.27-720/include/linux/skbuff.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/skbuff.h	2009-05-04 12:36:07.000000000 -0400
++++ linux-2.6.27-720/include/linux/skbuff.h	2009-05-04 16:03:46.000000000 -0400
 @@ -194,6 +194,12 @@
  typedef unsigned char *sk_buff_data_t;
  #endif
@@ -1552,7 +1591,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  unsigned char *skb_pull_rcsum(struct sk_buff *skb, unsigned int len);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/spinlock.h linux-2.6.27-720/include/linux/spinlock.h
 --- linux-2.6.27-710/include/linux/spinlock.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/spinlock.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/spinlock.h	2009-05-04 16:03:46.000000000 -0400
 @@ -54,6 +54,7 @@
  #include <linux/kernel.h>
  #include <linux/stringify.h>
@@ -1563,7 +1602,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/spinlock_types.h linux-2.6.27-720/include/linux/spinlock_types.h
 --- linux-2.6.27-710/include/linux/spinlock_types.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/spinlock_types.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/spinlock_types.h	2009-05-04 16:03:46.000000000 -0400
 @@ -51,37 +51,47 @@
  
  #define SPINLOCK_OWNER_INIT	((void *)-1L)
@@ -1626,11 +1665,12 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/stddef.h linux-2.6.27-720/include/linux/stddef.h
 --- linux-2.6.27-710/include/linux/stddef.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/stddef.h	2009-05-04 12:31:57.000000000 -0400
-@@ -12,10 +12,12 @@
++++ linux-2.6.27-720/include/linux/stddef.h	2009-05-04 16:03:46.000000000 -0400
+@@ -11,11 +11,12 @@
+ #endif
  
  #ifdef __KERNEL__
- 
+-
 +#ifndef __cplusplus
  enum {
  	false	= 0,
@@ -1641,8 +1681,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #undef offsetof
  #ifdef __compiler_offsetof
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/sysctl.h linux-2.6.27-720/include/linux/sysctl.h
---- linux-2.6.27-710/include/linux/sysctl.h	2009-05-04 12:28:22.000000000 -0400
-+++ linux-2.6.27-720/include/linux/sysctl.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/sysctl.h	2009-05-04 12:36:06.000000000 -0400
++++ linux-2.6.27-720/include/linux/sysctl.h	2009-05-04 16:03:46.000000000 -0400
 @@ -985,7 +985,7 @@
  			 void __user *oldval, size_t __user *oldlenp,
  			 void __user *newval, size_t newlen);
@@ -1663,7 +1703,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	void *extra2;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/textsearch.h linux-2.6.27-720/include/linux/textsearch.h
 --- linux-2.6.27-710/include/linux/textsearch.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/textsearch.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/textsearch.h	2009-05-04 16:03:46.000000000 -0400
 @@ -162,9 +162,9 @@
  {
  	struct ts_config *conf;
@@ -1677,8 +1717,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	return conf;
  }
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/types.h linux-2.6.27-720/include/linux/types.h
---- linux-2.6.27-710/include/linux/types.h	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/include/linux/types.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/linux/types.h	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/include/linux/types.h	2009-05-04 16:03:46.000000000 -0400
 @@ -30,7 +30,9 @@
  typedef __kernel_mqd_t		mqd_t;
  
@@ -1704,7 +1744,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #endif /* _LINUX_TYPES_H */
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/unwind.h linux-2.6.27-720/include/linux/unwind.h
 --- linux-2.6.27-710/include/linux/unwind.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/unwind.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/unwind.h	2009-05-04 16:03:46.000000000 -0400
 @@ -14,7 +14,7 @@
  
  struct module;
@@ -1716,7 +1756,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  static inline void unwind_setup(void) {}
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/linux/wait.h linux-2.6.27-720/include/linux/wait.h
 --- linux-2.6.27-710/include/linux/wait.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/linux/wait.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/linux/wait.h	2009-05-04 16:03:46.000000000 -0400
 @@ -485,7 +485,7 @@
  static inline int wait_on_bit(void *word, int bit,
  				int (*action)(void *), unsigned mode)
@@ -1737,7 +1777,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  }
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/compat.h linux-2.6.27-720/include/net/compat.h
 --- linux-2.6.27-710/include/net/compat.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/net/compat.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/net/compat.h	2009-05-04 16:03:46.000000000 -0400
 @@ -33,9 +33,9 @@
  
  extern int get_compat_msghdr(struct msghdr *, struct compat_msghdr __user *);
@@ -1753,7 +1793,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  extern int cmsghdr_from_user_compat_to_kern(struct msghdr *, struct sock *, unsigned char *, int);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/neighbour.h linux-2.6.27-720/include/net/neighbour.h
 --- linux-2.6.27-710/include/net/neighbour.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/net/neighbour.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/net/neighbour.h	2009-05-04 16:03:46.000000000 -0400
 @@ -275,7 +275,7 @@
  						      struct neigh_parms *p,
  						      int p_id, int pdev_id,
@@ -1765,7 +1805,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/netlink.h linux-2.6.27-720/include/net/netlink.h
 --- linux-2.6.27-710/include/net/netlink.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/net/netlink.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/net/netlink.h	2009-05-04 16:03:46.000000000 -0400
 @@ -315,7 +315,7 @@
  static inline struct nlattr *nlmsg_attrdata(const struct nlmsghdr *nlh,
  					    int hdrlen)
@@ -1822,7 +1862,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  /**
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/pkt_cls.h linux-2.6.27-720/include/net/pkt_cls.h
 --- linux-2.6.27-710/include/net/pkt_cls.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/net/pkt_cls.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/net/pkt_cls.h	2009-05-04 16:03:46.000000000 -0400
 @@ -302,9 +302,7 @@
  
  #else /* CONFIG_NET_EMATCH */
@@ -1836,7 +1876,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  #define tcf_em_tree_destroy(tp, t) do { (void)(t); } while(0)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/request_sock.h linux-2.6.27-720/include/net/request_sock.h
 --- linux-2.6.27-710/include/net/request_sock.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/net/request_sock.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/net/request_sock.h	2009-05-04 16:03:46.000000000 -0400
 @@ -60,7 +60,7 @@
  
  static inline struct request_sock *reqsk_alloc(const struct request_sock_ops *ops)
@@ -1847,8 +1887,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	if (req != NULL)
  		req->rsk_ops = ops;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/route.h linux-2.6.27-720/include/net/route.h
---- linux-2.6.27-710/include/net/route.h	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/include/net/route.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/net/route.h	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/include/net/route.h	2009-05-04 16:03:46.000000000 -0400
 @@ -161,6 +161,16 @@
  				   __be16 sport, __be16 dport, struct sock *sk,
  				   int flags)
@@ -1875,8 +1915,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	int err;
  	struct net *net = sock_net(sk);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/net/sock.h linux-2.6.27-720/include/net/sock.h
---- linux-2.6.27-710/include/net/sock.h	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/include/net/sock.h	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/include/net/sock.h	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/include/net/sock.h	2009-05-04 16:03:46.000000000 -0400
 @@ -1104,13 +1104,13 @@
  {
  	if (skb->ip_summed == CHECKSUM_NONE) {
@@ -1896,7 +1936,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	skb->len	     += copy;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/include/rdma/ib_user_verbs.h linux-2.6.27-720/include/rdma/ib_user_verbs.h
 --- linux-2.6.27-710/include/rdma/ib_user_verbs.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/include/rdma/ib_user_verbs.h	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/include/rdma/ib_user_verbs.h	2009-05-04 16:03:47.000000000 -0400
 @@ -504,8 +504,7 @@
  	__u64 driver_data[0];
  };
@@ -1908,8 +1948,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  struct ib_uverbs_destroy_qp {
  	__u64 response;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/kernel/sched.c linux-2.6.27-720/kernel/sched.c
---- linux-2.6.27-710/kernel/sched.c	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/kernel/sched.c	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/kernel/sched.c	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/kernel/sched.c	2009-05-04 16:03:47.000000000 -0400
 @@ -6298,7 +6298,7 @@
  static void
  set_table_entry(struct ctl_table *entry,
@@ -1920,8 +1960,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	entry->procname = procname;
  	entry->data = data;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/net/core/dev.c linux-2.6.27-720/net/core/dev.c
---- linux-2.6.27-710/net/core/dev.c	2009-05-04 12:28:25.000000000 -0400
-+++ linux-2.6.27-720/net/core/dev.c	2009-05-04 12:33:30.000000000 -0400
+--- linux-2.6.27-710/net/core/dev.c	2009-05-04 12:36:43.000000000 -0400
++++ linux-2.6.27-720/net/core/dev.c	2009-05-04 16:05:12.000000000 -0400
 @@ -252,6 +252,9 @@
  	write_unlock_bh(&dev_base_lock);
  }
@@ -2035,7 +2075,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  EXPORT_SYMBOL(unregister_netdevice);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/net/core/dev.c.rej linux-2.6.27-720/net/core/dev.c.rej
 --- linux-2.6.27-710/net/core/dev.c.rej	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-720/net/core/dev.c.rej	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/net/core/dev.c.rej	2009-05-04 16:03:47.000000000 -0400
 @@ -0,0 +1,30 @@
 +***************
 +*** 2187,2199 ****
@@ -2069,7 +2109,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
 +  	if (netpoll_receive_skb(skb))
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/net/core/neighbour.c linux-2.6.27-720/net/core/neighbour.c
 --- linux-2.6.27-710/net/core/neighbour.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/net/core/neighbour.c	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/net/core/neighbour.c	2009-05-04 16:03:47.000000000 -0400
 @@ -2702,7 +2702,7 @@
  
  int neigh_sysctl_register(struct net_device *dev, struct neigh_parms *p,
@@ -2080,8 +2120,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  	struct neigh_sysctl_table *t;
  	const char *dev_name_source = NULL;
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/net/core/skbuff.c linux-2.6.27-720/net/core/skbuff.c
---- linux-2.6.27-710/net/core/skbuff.c	2009-05-04 12:28:23.000000000 -0400
-+++ linux-2.6.27-720/net/core/skbuff.c	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/net/core/skbuff.c	2009-05-04 12:36:07.000000000 -0400
++++ linux-2.6.27-720/net/core/skbuff.c	2009-05-04 16:03:47.000000000 -0400
 @@ -575,6 +575,112 @@
  	skb_shinfo(new)->gso_type = skb_shinfo(old)->gso_type;
  }
@@ -2205,7 +2245,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  EXPORT_SYMBOL_GPL(skb_partial_csum_set);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/net/ipv4/arp.c linux-2.6.27-720/net/ipv4/arp.c
 --- linux-2.6.27-710/net/ipv4/arp.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-720/net/ipv4/arp.c	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/net/ipv4/arp.c	2009-05-04 16:03:47.000000000 -0400
 @@ -328,6 +328,7 @@
  {
  	__be32 saddr = 0;
@@ -2235,8 +2275,8 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
  
  static int arp_ignore(struct in_device *in_dev, __be32 sip, __be32 tip)
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/net/ipv4/devinet.c linux-2.6.27-720/net/ipv4/devinet.c
---- linux-2.6.27-710/net/ipv4/devinet.c	2009-05-04 12:28:20.000000000 -0400
-+++ linux-2.6.27-720/net/ipv4/devinet.c	2009-05-04 12:31:57.000000000 -0400
+--- linux-2.6.27-710/net/ipv4/devinet.c	2009-05-04 12:36:01.000000000 -0400
++++ linux-2.6.27-720/net/ipv4/devinet.c	2009-05-04 16:03:47.000000000 -0400
 @@ -1687,3 +1687,4 @@
  EXPORT_SYMBOL(inetdev_by_index);
  EXPORT_SYMBOL(register_inetaddr_notifier);
@@ -2244,7 +2284,7 @@ diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d'
 +EXPORT_SYMBOL(devinet_ioctl);
 diff -Nurb --exclude='*.a' --exclude='*.dbg' --exclude='*.order' --exclude='*.d' --exclude='*.elf' --exclude='*.o' --exclude='*.mod' --exclude='*.cmd' --exclude='*.orig' --exclude='*.swp' --exclude=tags --exclude='*.patch' --exclude='*.diff' --exclude='*.svn*' linux-2.6.27-710/scr linux-2.6.27-720/scr
 --- linux-2.6.27-710/scr	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-720/scr	2009-05-04 12:31:57.000000000 -0400
++++ linux-2.6.27-720/scr	2009-05-04 16:03:47.000000000 -0400
 @@ -0,0 +1,29 @@
 +vi -o ./include/asm-um/elf-x86_64.h ./include/asm-um/elf-x86_64.h.rej
 +vi -o ./include/asm-frv/tlbflush.h ./include/asm-frv/tlbflush.h.rej
