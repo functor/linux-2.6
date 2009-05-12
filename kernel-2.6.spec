@@ -24,7 +24,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 36
+%define taglevel 37
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -864,6 +864,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Tue May 12 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-37
+- enable patch about 64bits adresses and cardbus
+
 * Thu Apr 09 2009 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-36
 - Inserting this patch, which I missed in the previous tag.
 
