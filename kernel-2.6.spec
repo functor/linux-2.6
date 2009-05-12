@@ -167,9 +167,10 @@ Patch580: linux-2.6-580-show-proc-virt.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
-Patch680: linux-2.6-680-htb-hysteresis-tso.patch
-Patch690: linux-2.6-690-web100.patch
+# Patch680: linux-2.6-680-htb-hysteresis-tso.patch
+# Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-egre.patch
+Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -358,6 +359,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 650
 %ApplyPatch 660
 %ApplyPatch 700
+%ApplyPatch 710
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
