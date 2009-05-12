@@ -21,7 +21,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 2
+%define taglevel 3
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -791,6 +791,14 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Tue May 12 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-3
+- new tuntap patch available but not enabled
+- mac80211 and iwlwifi are now mainstream, no ext. sources anymore
+- new egre patch
+- various changes in the config about netns and scheduler ...
+- gnuradio gets a specific config
+- enable patch about 64bits adresses and cardbus
+
 * Tue Mar 24 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-2
 - cleaned up obsolete (2.6.22) configs
 - added gnuradio config links
