@@ -29,34 +29,38 @@ diff -Naur linux-source-2.6.29-orig/drivers/pci/bus.c linux-source-2.6.29/driver
 diff -Naur linux-source-2.6.29-orig/drivers/pci/setup-bus.c linux-source-2.6.29/drivers/pci/setup-bus.c
 --- linux-source-2.6.29-orig/drivers/pci/setup-bus.c	2009-03-24 00:12:14.000000000 +0100
 +++ linux-source-2.6.29/drivers/pci/setup-bus.c	2009-04-06 11:04:41.000000000 +0200
-@@ -429,19 +429,23 @@
- 	 * If we have prefetchable memory support, allocate
- 	 * two regions.  Otherwise, allocate one region of
- 	 * twice the size.
-+	 * Avoid 64bit address space, as cardbus devices can't handle it.
- 	 */
- 	if (ctrl & PCI_CB_BRIDGE_CTL_PREFETCH_MEM0) {
- 		b_res[2].start = 0;
- 		b_res[2].end = pci_cardbus_mem_size - 1;
--		b_res[2].flags |= IORESOURCE_MEM | IORESOURCE_PREFETCH | IORESOURCE_SIZEALIGN;
-+		b_res[2].flags |= IORESOURCE_MEM | IORESOURCE_PREFETCH |
-+			IORESOURCE_SIZEALIGN | IORESOURCE_PCI_32BIT;
- 
- 		b_res[3].start = 0;
- 		b_res[3].end = pci_cardbus_mem_size - 1;
--		b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_SIZEALIGN;
-+		b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_SIZEALIGN |
-+			IORESOURCE_PCI_32BIT;
- 	} else {
- 		b_res[3].start = 0;
- 		b_res[3].end = pci_cardbus_mem_size * 2 - 1;
--		b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_SIZEALIGN;
-+		b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_SIZEALIGN |
-+			IORESOURCE_PCI_32BIT;
- 	}
- }
- 
-diff -Naur linux-source-2.6.29-orig/include/linux/ioport.h linux-source-2.6.29/include/linux/ioport.h
+*** 430,444 ****
+        if (ctrl & PCI_CB_BRIDGE_CTL_PREFETCH_MEM0) {
+                b_res[2].start = pci_cardbus_mem_size;
+                b_res[2].end = b_res[2].start + pci_cardbus_mem_size - 1;
+!               b_res[2].flags |= IORESOURCE_MEM | IORESOURCE_PREFETCH;
+  
+                b_res[3].start = pci_cardbus_mem_size;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size - 1;
+!               b_res[3].flags |= IORESOURCE_MEM;
+        } else {
+                b_res[3].start = pci_cardbus_mem_size * 2;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size * 2 - 1;
+!               b_res[3].flags |= IORESOURCE_MEM;
+        }
+  }
+  
+--- 430,444 ----
+        if (ctrl & PCI_CB_BRIDGE_CTL_PREFETCH_MEM0) {
+                b_res[2].start = pci_cardbus_mem_size;
+                b_res[2].end = b_res[2].start + pci_cardbus_mem_size - 1;
+!               b_res[2].flags |= IORESOURCE_MEM | IORESOURCE_PREFETCH | IORESOURCE_PCI_32BIT;
+  
+                b_res[3].start = pci_cardbus_mem_size;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size - 1;
+!               b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_PCI_32BIT;
+        } else {
+                b_res[3].start = pci_cardbus_mem_size * 2;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size * 2 - 1;
+!               b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_PCI_32BIT;
+        }
+  }
+  diff -Naur linux-source-2.6.29-orig/include/linux/ioport.h linux-source-2.6.29/include/linux/ioport.h
 --- linux-source-2.6.29-orig/include/linux/ioport.h	2009-03-24 00:12:14.000000000 +0100
 +++ linux-source-2.6.29/include/linux/ioport.h	2009-04-06 11:04:41.000000000 +0200
 @@ -103,6 +103,7 @@
