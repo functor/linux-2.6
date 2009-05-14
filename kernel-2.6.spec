@@ -188,7 +188,8 @@ Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
-Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
+# this patch causes mysterious errors when building madwifi on this 2.6.22 kernel..
+#Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -401,7 +402,7 @@ KERNEL_PREVIOUS=vanilla
 %endif
 %ApplyPatch 680
 %ApplyPatch 690
-%ApplyPatch 710
+#%ApplyPatch 710
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
