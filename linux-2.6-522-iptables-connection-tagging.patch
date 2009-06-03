@@ -378,6 +378,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 -	skb->mark = (skb->mark & ~info->mask) ^ info->mark;
  	return XT_CONTINUE;
  }
+
 diff -Nurb linux-2.6.27-521/net/netfilter/xt_SETXID.c linux-2.6.27-522-ol/net/netfilter/xt_SETXID.c
 --- linux-2.6.27-521/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
 +++ linux-2.6.27-522-ol/net/netfilter/xt_SETXID.c	2009-06-02 10:02:16.000000000 -0400
