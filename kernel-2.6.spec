@@ -25,7 +25,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 39
+%define taglevel 40
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -885,6 +885,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Wed Jun 03 2009 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-40
+- Added patch 700, which implements VXC_PROC_WRITE support
+
 * Tue May 26 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-39
 - outputs the kernel-headers rpm as backported from 2.6.27
 
