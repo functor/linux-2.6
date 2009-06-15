@@ -72,7 +72,7 @@ diff -Nurp linux-2.6.22.19-vs2.3.0.34/drivers/net/bonding/bond_main.c linux-2.6.
 +				    struct net_device *bond_dev, int count)
 +{
 +	static atomic_t packets;
-+	return atomic_inc_return(packets) % count;
++	return atomic_inc_return(&packets) % count;
 +}
 +
  /*-------------------------- Device entry points ----------------------------*/
@@ -83,7 +83,7 @@ diff -Nurp linux-2.6.22.19-vs2.3.0.34/drivers/net/bonding/bond_main.c linux-2.6.
  		if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER34)
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l34;
 +		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER23)
-+			bond->xmit_hash_policy = bond_xmit_hash_policty_l23;
++			bond->xmit_hash_policy = bond_xmit_hash_policy_l23;
 +		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER3)
 +			bond->xmit_hash_policy = bond_xmit_hash_policy_l3;
 +		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_RR)
@@ -96,7 +96,7 @@ diff -Nurp linux-2.6.22.19-vs2.3.0.34/drivers/net/bonding/bond_main.c linux-2.6.
  		if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER34)
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l34;
 +		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER23)
-+			bond->xmit_hash_policy = bond_xmit_hash_policty_l23;
++			bond->xmit_hash_policy = bond_xmit_hash_policy_l23;
 +		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER3)
 +			bond->xmit_hash_policy = bond_xmit_hash_policy_l3;
 +		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_RR)
