@@ -191,7 +191,10 @@ Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-fperm.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
-Patch720: linux-2.6-720-bonding-hashes.patch
+# This one is a backport from usptream.
+Patch720: linux-2.6-720-bonding-layer23.patch
+Patch721: linux-2.6-721-bonding-layer3.patch
+Patch722: linux-2.6-722-bonding-rr.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
