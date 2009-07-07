@@ -1,0 +1,57 @@
+diff -Nurp linux-2.6.22.19-vs2.3.0.34.bond2/drivers/net/bonding/bond_main.c linux-2.6.22.19-vs2.3.0.34.bonding/drivers/net/bonding/bond_main.c
+--- linux-2.6.22.19-vs2.3.0.34.bond2/drivers/net/bonding/bond_main.c	2009-06-23 01:02:56.000000000 +0200
++++ linux-2.6.22.19-vs2.3.0.34.bonding/drivers/net/bonding/bond_main.c	2009-06-15 21:52:30.000000000 +0200
+@@ -172,6 +172,7 @@ struct bond_parm_tbl xmit_hashtype_tbl[]
+ {	"layer3+4",		BOND_XMIT_POLICY_LAYER34},
+ {	"layer2+3",		BOND_XMIT_POLICY_LAYER23},
+ {	"layer3",		BOND_XMIT_POLICY_LAYER3},
++{	"rr",			BOND_XMIT_POLICY_RR},
+ {	NULL,			-1},
+ };
+ 
+@@ -3522,6 +3523,16 @@ static int bond_xmit_hash_policy_l2(stru
+ 	return (data->h_dest[5] ^ bond_dev->dev_addr[5]) % count;
+ }
+ 
++/*
++ * Round-robin "hashing" algorithm
++ */
++static int bond_xmit_hash_policy_rr(struct sk_buff *skb,
++				    struct net_device *bond_dev, int count)
++{
++	static atomic_t packets;
++	return atomic_inc_return(packets) % count;
++}
++
+ /*-------------------------- Device entry points ----------------------------*/
+ 
+ static int bond_open(struct net_device *bond_dev)
+@@ -4223,6 +4234,8 @@ void bond_set_mode_ops(struct bonding *b
+ 			bond->xmit_hash_policy = bond_xmit_hash_policy_l23;
+ 		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER3)
+ 			bond->xmit_hash_policy = bond_xmit_hash_policy_l3;
++		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_RR)
++			bond->xmit_hash_policy = bond_xmit_hash_policy_rr;
+ 		else
+ 			bond->xmit_hash_policy = bond_xmit_hash_policy_l2;
+ 		break;
+@@ -4238,6 +4251,8 @@ void bond_set_mode_ops(struct bonding *b
+ 			bond->xmit_hash_policy = bond_xmit_hash_policy_l23;
+ 		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER3)
+ 			bond->xmit_hash_policy = bond_xmit_hash_policy_l3;
++		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_RR)
++			bond->xmit_hash_policy = bond_xmit_hash_policy_rr;
+ 		else
+ 			bond->xmit_hash_policy = bond_xmit_hash_policy_l2;
+ 		break;
+diff -Nurp linux-2.6.22.19-vs2.3.0.34.bond2/include/linux/if_bonding.h linux-2.6.22.19-vs2.3.0.34.bonding/include/linux/if_bonding.h
+--- linux-2.6.22.19-vs2.3.0.34.bond2/include/linux/if_bonding.h	2009-06-23 01:02:07.000000000 +0200
++++ linux-2.6.22.19-vs2.3.0.34.bonding/include/linux/if_bonding.h	2009-06-15 22:02:09.000000000 +0200
+@@ -88,6 +88,7 @@
+ #define BOND_XMIT_POLICY_LAYER34	1 /* layer 3+4 (IP ^ MAC) */
+ #define BOND_XMIT_POLICY_LAYER23	2 /* layer 2+3 (IP ^ MAC) */
+ #define BOND_XMIT_POLICY_LAYER3		3 /* layer3 (IP only) */
++#define BOND_XMIT_POLICY_RR		255 /* round-robin */
+ 
+ typedef struct ifbond {
+ 	__s32 bond_mode;

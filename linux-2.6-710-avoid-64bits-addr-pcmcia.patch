@@ -1,0 +1,73 @@
+diff -Naur linux-source-2.6.29-orig/drivers/pci/bus.c linux-source-2.6.29/drivers/pci/bus.c
+--- linux-source-2.6.29-orig/drivers/pci/bus.c	2009-03-24 00:12:14.000000000 +0100
++++ linux-source-2.6.29/drivers/pci/bus.c	2009-04-06 11:04:41.000000000 +0200
+@@ -41,6 +41,7 @@
+ 		void *alignf_data)
+ {
+ 	int i, ret = -ENOMEM;
++	resource_size_t max = -1;
+ 
+ 	type_mask |= IORESOURCE_IO | IORESOURCE_MEM;
+ 
+@@ -59,10 +60,15 @@
+ 		    !(res->flags & IORESOURCE_PREFETCH))
+ 			continue;
+ 
++		/* Limit address to 32 bits when requested */
++		if ((res->flags & IORESOURCE_MEM) &&
++		    (res->flags & IORESOURCE_PCI_32BIT))
++			max = (u32) -1;
++
+ 		/* Ok, try it out.. */
+ 		ret = allocate_resource(r, res, size,
+ 					r->start ? : min,
+-					-1, align,
++					max, align,
+ 					alignf, alignf_data);
+ 		if (ret == 0)
+ 			break;
+diff -Naur linux-source-2.6.29-orig/drivers/pci/setup-bus.c linux-source-2.6.29/drivers/pci/setup-bus.c
+--- linux-source-2.6.29-orig/drivers/pci/setup-bus.c	2009-03-24 00:12:14.000000000 +0100
++++ linux-source-2.6.29/drivers/pci/setup-bus.c	2009-04-06 11:04:41.000000000 +0200
+*** 430,444 ****
+        if (ctrl & PCI_CB_BRIDGE_CTL_PREFETCH_MEM0) {
+                b_res[2].start = pci_cardbus_mem_size;
+                b_res[2].end = b_res[2].start + pci_cardbus_mem_size - 1;
+!               b_res[2].flags |= IORESOURCE_MEM | IORESOURCE_PREFETCH;
+  
+                b_res[3].start = pci_cardbus_mem_size;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size - 1;
+!               b_res[3].flags |= IORESOURCE_MEM;
+        } else {
+                b_res[3].start = pci_cardbus_mem_size * 2;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size * 2 - 1;
+!               b_res[3].flags |= IORESOURCE_MEM;
+        }
+  }
+  
+--- 430,444 ----
+        if (ctrl & PCI_CB_BRIDGE_CTL_PREFETCH_MEM0) {
+                b_res[2].start = pci_cardbus_mem_size;
+                b_res[2].end = b_res[2].start + pci_cardbus_mem_size - 1;
+!               b_res[2].flags |= IORESOURCE_MEM | IORESOURCE_PREFETCH | IORESOURCE_PCI_32BIT;
+  
+                b_res[3].start = pci_cardbus_mem_size;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size - 1;
+!               b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_PCI_32BIT;
+        } else {
+                b_res[3].start = pci_cardbus_mem_size * 2;
+                b_res[3].end = b_res[3].start + pci_cardbus_mem_size * 2 - 1;
+!               b_res[3].flags |= IORESOURCE_MEM | IORESOURCE_PCI_32BIT;
+        }
+  }
+  diff -Naur linux-source-2.6.29-orig/include/linux/ioport.h linux-source-2.6.29/include/linux/ioport.h
+--- linux-source-2.6.29-orig/include/linux/ioport.h	2009-03-24 00:12:14.000000000 +0100
++++ linux-source-2.6.29/include/linux/ioport.h	2009-04-06 11:04:41.000000000 +0200
+@@ -103,6 +103,7 @@
+ 
+ /* PCI control bits.  Shares IORESOURCE_BITS with above PCI ROM.  */
+ #define IORESOURCE_PCI_FIXED		(1<<4)	/* Do not move resource */
++#define IORESOURCE_PCI_32BIT		(1<<5)	/* Do not use 64bit address space (for cardbus devices) */
+ 
+ /* PC/ISA/whatever - the normal PC address spaces: IO and memory */
+ extern struct resource ioport_resource;

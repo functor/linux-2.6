@@ -1,0 +1,97 @@
+#!/bin/env python
+#
+# compare: a tool to compare kernel config files
+#
+# Marc E. Fiuczynski <mef@cs.princeton.edu>
+# Copyright (C) 2006 The Trustees of Princeton University
+#
+# $Id: kompare,v 1.6 2006/12/14 19:59:05 mef Exp $
+#
+
+import sys, re, os
+
+def process(file):
+    ORDER = []
+    CONFIGS = {}
+    for line in file.readlines():
+        iline = line.lower()
+        iline = iline.strip()
+        if len(iline)==0: continue
+        firstchar = iline[0]
+
+        if firstchar == '#':
+            offset=iline.find(" is not set")
+            if offset <> -1:
+                config = line[line.find("CONFIG"):offset].strip()
+                if CONFIGS.has_key(config): print "duplicate entry %s" % config
+                CONFIGS[config]="is not set"
+                ORDER.append(config)
+            else:
+                # skip over comments that do not contain the "is not set" string
+                pass
+
+        else:
+            offset = iline.find('=')
+            if offset  <> -1:
+                config = line[line.find("CONFIG"):offset].strip()
+                if CONFIGS.has_key(config): print "duplicate entry %s" % config
+                CONFIGS[config] = line[offset+1:].strip()
+                ORDER.append(config)
+        
+    return (CONFIGS,ORDER)
+
+showall=False
+args = sys.argv[1:]
+
+if len(args) <=1:
+    name = os.path.basename(sys.argv[0])
+    print "USAGE: %s [options] from.config to.config" % name
+    print """
+Options
+    -a    Show all differences
+
+State Legend
+    ADD     Added config (exists in to.config, but not in from.config)
+    REM     Removed config (exists in from.config, but not in to.config)
+    BLT     Builtin
+    MOD     Module
+    DIS     Disabled
+    """
+    sys.exit(0)
+
+if args[0] == "-a":
+    showall = True
+    args = args[1:]
+
+(old,oldorder)= process(open(args[0]))
+(new,neworder)= process(open(args[1]))
+
+newstate = {None:'REMOVED',"is not set":'DISABLE','y':'BUILTIN','m':'MODULE '}
+keys = neworder
+seen = {}
+for key in keys:
+    o = old.get(key,None)
+    n = new[key]
+    if n==o and not showall: continue
+    try:
+       print "%6s -> %6s : %s" % (newstate.get(o,o),newstate.get(n,n),key)
+    except IOError, e:
+	#print e
+        sys.exit(0)
+
+    seen[key] = None
+
+# not sure we care about what options have been removed
+# from from.config file
+oldstate = {None:'REMOVED',"is not set":'DISABLE','y':'BUILTIN','m':'MODULE '}
+keys = oldorder
+for key in keys:
+    if seen.has_key(key): continue
+    n = new.get(key,None)
+    o = old[key]
+    if n == o and not showall: continue
+    try:
+       print "%6s -> %6s : %s" % (oldstate.get(o,o),oldstate.get(n,n),key)
+    except IOError, e:
+	#print e
+        sys.exit(0)

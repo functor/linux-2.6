@@ -1,0 +1,215 @@
+From: Roland McGrath <roland@redhat.com>
+Date: Thu, 19 Jul 2007 08:48:40 +0000 (-0700)
+Subject: Use --build-id ld option
+X-Git-Tag: v2.6.23-rc1~388
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=18991197b4b588255ccabf472ebc84db7b66a19c
+
+Use --build-id ld option
+
+This change passes the --build-id when linking the kernel and when linking
+modules, if ld supports it.  This is a new GNU ld option that synthesizes an
+ELF note section inside the read-only data.  The note in this section contains
+unique identifying bits called the "build ID", which are generated so as to be
+different for any two linked ELF files that aren't identical.  The build ID
+can be recovered from stripped files, memory dumps, etc.  and used to look up
+the original program built, locate debuginfo or other details or history
+associated with it.  For normal program linking, the compiler passes
+--build-id to ld by default, but the option is needed when using ld directly
+as we do.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+Cc: Andi Kleen <ak@suse.de>
+Cc: Paul Mackerras <paulus@samba.org>
+Cc: Benjamin Herrenschmidt <benh@kernel.crashing.org>
+Cc: Richard Henderson <rth@twiddle.net>
+Cc: Ivan Kokshaysky <ink@jurassic.park.msu.ru>
+Cc: Martin Schwidefsky <schwidefsky@de.ibm.com>
+Cc: Heiko Carstens <heiko.carstens@de.ibm.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/Makefile b/Makefile
+index ddbfcac..eccb03b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -514,6 +514,12 @@ CFLAGS += $(call cc-option,-Wdeclaration-after-statement,)
+ # disable pointer signed / unsigned warnings in gcc 4.0
+ CFLAGS += $(call cc-option,-Wno-pointer-sign,)
+ 
++# Use --build-id when available.
++LDFLAGS_BUILD_ID = $(patsubst -Wl$(comma)%,%,\
++			      $(call ld-option, -Wl$(comma)--build-id,))
++LDFLAGS_MODULE += $(LDFLAGS_BUILD_ID)
++LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
++
+ # Default kernel image to build when no specific target is given.
+ # KBUILD_IMAGE may be overruled on the command line or
+ # set in the environment
+
+
+From: Roland McGrath <roland@redhat.com>
+Date: Mon, 23 Jul 2007 08:12:08 +0000 (-0700)
+Subject: kbuild: use LDFLAGS_MODULE only for .ko links
+X-Git-Tag: v2.6.23-rc2~266^2~3
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=114f51577724b782a30f4f5ceaee9880de93d776
+
+kbuild: use LDFLAGS_MODULE only for .ko links
+
+Sam Ravnborg pointed out that Documentation/kbuild/makefiles.txt already
+says this is what it's for.  This patch makes the reality live up to the
+documentation.  This fixes the problem of LDFLAGS_BUILD_ID getting into too
+many places.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+Signed-off-by: Sam Ravnborg <sam@ravnborg.org>
+---
+
+diff --git a/Makefile b/Makefile
+index 23f81c9..dfe3d16 100644
+--- a/Makefile
++++ b/Makefile
+@@ -299,7 +299,7 @@ CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ -Wbitwise $(C
+ MODFLAGS	= -DMODULE
+ CFLAGS_MODULE   = $(MODFLAGS)
+ AFLAGS_MODULE   = $(MODFLAGS)
+-LDFLAGS_MODULE  = -r
++LDFLAGS_MODULE  =
+ CFLAGS_KERNEL	=
+ AFLAGS_KERNEL	=
+ 
+diff --git a/scripts/Makefile.build b/scripts/Makefile.build
+index 3f7b451..7fd6055 100644
+--- a/scripts/Makefile.build
++++ b/scripts/Makefile.build
+@@ -315,7 +315,7 @@ quiet_cmd_link_multi-y = LD      $@
+ cmd_link_multi-y = $(LD) $(ld_flags) -r -o $@ $(link_multi_deps)
+ 
+ quiet_cmd_link_multi-m = LD [M]  $@
+-cmd_link_multi-m = $(LD) $(ld_flags) $(LDFLAGS_MODULE) -o $@ $(link_multi_deps)
++cmd_link_multi-m = $(cmd_link_multi-y)
+ 
+ # We would rather have a list of rules like
+ # 	foo.o: $(foo-objs)
+diff --git a/scripts/Makefile.modpost b/scripts/Makefile.modpost
+index 1818c50..d988f5d 100644
+--- a/scripts/Makefile.modpost
++++ b/scripts/Makefile.modpost
+@@ -98,7 +98,7 @@ targets += $(modules:.ko=.mod.o)
+ 
+ # Step 6), final link of the modules
+ quiet_cmd_ld_ko_o = LD [M]  $@
+-      cmd_ld_ko_o = $(LD) $(LDFLAGS) $(LDFLAGS_MODULE) -o $@		\
++      cmd_ld_ko_o = $(LD) -r $(LDFLAGS) $(LDFLAGS_MODULE) -o $@		\
+ 			  $(filter-out FORCE,$^)
+ 
+ $(modules): %.ko :%.o %.mod.o FORCE
+
+
+
+From: Roland McGrath <roland@redhat.com>
+Date: Thu, 19 Jul 2007 08:48:37 +0000 (-0700)
+Subject: x86_64: Put allocated ELF notes in read-only data segment
+X-Git-Tag: v2.6.23-rc1~393
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=2e1d5b8f24a887caded5ae3ceb2f341d4fbd1861
+
+x86_64: Put allocated ELF notes in read-only data segment
+
+This changes the x86_64 linker script to use the asm-generic NOTES macro so
+that ELF note sections with SHF_ALLOC set are linked into the kernel image
+along with other read-only data.  The PT_NOTE also points to their location.
+
+This paves the way for putting useful build-time information into ELF notes
+that can be found easily later in a kernel memory dump.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+Cc: Andi Kleen <ak@suse.de>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/x86_64/kernel/vmlinux.lds.S b/arch/x86_64/kernel/vmlinux.lds.S
+index 2259069..5c57ea4 100644
+--- a/arch/x86_64/kernel/vmlinux.lds.S
++++ b/arch/x86_64/kernel/vmlinux.lds.S
+@@ -48,7 +48,9 @@ SECTIONS
+   __ex_table : AT(ADDR(__ex_table) - LOAD_OFFSET) { *(__ex_table) }
+   __stop___ex_table = .;
+ 
+-  BUG_TABLE
++  NOTES :text :note
++
++  BUG_TABLE :text
+ 
+   RODATA
+ 
+
+
+
+From: Roland McGrath <roland@redhat.com>
+Date: Thu, 19 Jul 2007 08:48:36 +0000 (-0700)
+Subject: i386: Put allocated ELF notes in read-only data segment
+X-Git-Tag: v2.6.23-rc1~394
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Ftorvalds%2Flinux-2.6.git;a=commitdiff_plain;h=cbe87121f1545bb3e98ae114519bf0c4db27d6ab
+
+i386: Put allocated ELF notes in read-only data segment
+
+This changes the i386 linker script and the asm-generic macro it uses so that
+ELF note sections with SHF_ALLOC set are linked into the kernel image along
+with other read-only data.  The PT_NOTE also points to their location.
+
+This paves the way for putting useful build-time information into ELF notes
+that can be found easily later in a kernel memory dump.
+
+Signed-off-by: Roland McGrath <roland@redhat.com>
+Cc: Andi Kleen <ak@suse.de>
+Cc: Paul Mackerras <paulus@samba.org>
+Cc: Benjamin Herrenschmidt <benh@kernel.crashing.org>
+Cc: Richard Henderson <rth@twiddle.net>
+Cc: Ivan Kokshaysky <ink@jurassic.park.msu.ru>
+Cc: Martin Schwidefsky <schwidefsky@de.ibm.com>
+Cc: Heiko Carstens <heiko.carstens@de.ibm.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+diff --git a/arch/i386/kernel/vmlinux.lds.S b/arch/i386/kernel/vmlinux.lds.S
+index 4dc44b8..7d72cce 100644
+--- a/arch/i386/kernel/vmlinux.lds.S
++++ b/arch/i386/kernel/vmlinux.lds.S
+@@ -60,7 +60,9 @@ SECTIONS
+   	__stop___ex_table = .;
+   }
+ 
+-  BUG_TABLE
++  NOTES :text :note
++
++  BUG_TABLE :text
+ 
+   . = ALIGN(4);
+   .tracedata : AT(ADDR(.tracedata) - LOAD_OFFSET) {
+@@ -208,6 +210,4 @@ SECTIONS
+   STABS_DEBUG
+ 
+   DWARF_DEBUG
+-
+-  NOTES
+ }
+diff --git a/include/asm-generic/vmlinux.lds.h b/include/asm-generic/vmlinux.lds.h
+index a2b09ed..0240e05 100644
+--- a/include/asm-generic/vmlinux.lds.h
++++ b/include/asm-generic/vmlinux.lds.h
+@@ -224,7 +224,11 @@
+ 	}
+ 
+ #define NOTES								\
+-	.notes : { *(.note.*) } :note
++	.notes : AT(ADDR(.notes) - LOAD_OFFSET) {			\
++		VMLINUX_SYMBOL(__start_notes) = .;			\
++		*(.note.*)						\
++		VMLINUX_SYMBOL(__stop_notes) = .;			\
++	}
+ 
+ #define INITCALLS							\
+   	*(.initcall0.init)						\
+

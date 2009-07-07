@@ -1,0 +1,22 @@
+--- linux-2.6.22-640/drivers/char/hangcheck-timer.c	2007-07-09 01:32:17.000000000 +0200
++++ linux-2.6.22-650/drivers/char/hangcheck-timer.c	2008-11-25 10:22:00.000000000 +0100
+@@ -57,7 +57,7 @@
+ 
+ static int hangcheck_tick = DEFAULT_IOFENCE_TICK;
+ static int hangcheck_margin = DEFAULT_IOFENCE_MARGIN;
+-static int hangcheck_reboot;  /* Defaults to not reboot */
++static int hangcheck_reboot = 1;  /* Defaults to reboot */
+ static int hangcheck_dump_tasks;  /* Defaults to not dumping SysRQ T */
+ 
+ /* options - modular */
+@@ -175,8 +175,8 @@ static void hangcheck_fire(unsigned long
+ 
+ static int __init hangcheck_init(void)
+ {
+-	printk("Hangcheck: starting hangcheck timer %s (tick is %d seconds, margin is %d seconds).\n",
+-	       VERSION_STR, hangcheck_tick, hangcheck_margin);
++	printk("Hangcheck: starting hangcheck timer %s (tick is %d seconds, margin is %d seconds, reboot is %d).\n",
++	       VERSION_STR, hangcheck_tick, hangcheck_margin, hangcheck_reboot);
+ #if defined (HAVE_MONOTONIC)
+ 	printk("Hangcheck: Using monotonic_clock().\n");
+ #else

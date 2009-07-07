@@ -1,0 +1,24 @@
+diff -Nurp linux-2.6.22-550/arch/i386/pci/common.c linux-2.6.22-560/arch/i386/pci/common.c
+--- linux-2.6.22-550/arch/i386/pci/common.c	2007-07-21 17:58:15.000000000 -0400
++++ linux-2.6.22-560/arch/i386/pci/common.c	2007-12-04 14:47:24.000000000 -0500
+@@ -17,8 +17,7 @@
+ 
+ #include "pci.h"
+ 
+-unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2 |
+-				PCI_PROBE_MMCONF;
++unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2;
+ 
+ static int pci_bf_sort;
+ int pci_routeirq;
+@@ -388,6 +387,10 @@ char * __devinit  pcibios_setup(char *st
+ 		pci_probe &= ~PCI_PROBE_MMCONF;
+ 		return NULL;
+ 	}
++	else if (!strcmp(str, "mmconf")) {
++		pci_probe |= PCI_PROBE_MMCONF;
++		return NULL;
++	}
+ #endif
+ 	else if (!strcmp(str, "noacpi")) {
+ 		acpi_noirq_set();
