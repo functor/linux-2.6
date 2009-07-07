@@ -32,7 +32,7 @@ diff -Nurp linux-2.6.22.19-vs2.3.0.34.bond1/drivers/net/bonding/bond_main.c linu
   * Hash for the output device based upon layer 2 and layer 3 data. If
   * the packet is not IP mimic bond_xmit_hash_policy_l2()
   */
-@@ -4204,7 +4221,9 @@ void bond_set_mode_ops(struct bonding *b
+@@ -4204,6 +4221,8 @@ void bond_set_mode_ops(struct bonding *b
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l34;
  		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER23)
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l23;
@@ -41,8 +41,7 @@ diff -Nurp linux-2.6.22.19-vs2.3.0.34.bond1/drivers/net/bonding/bond_main.c linu
  		else
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l2;
  		break;
-@@ -4217,7 +4236,9 @@ void bond_set_mode_ops(struct bonding *b
- 		if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER34)
+@@ -4217,6 +4236,8 @@ void bond_set_mode_ops(struct bonding *b
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l34;
  		else if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER23)
  			bond->xmit_hash_policy = bond_xmit_hash_policy_l23;
