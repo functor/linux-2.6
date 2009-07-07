@@ -1,7 +1,7 @@
 #
-# $Id: kernel-2.6.spec 14099 2009-06-26 01:52:18Z dhozac $
+# $Id: kernel-2.6.spec 13623 2009-05-26 10:51:21Z thierry $
 #
-%define url $URL: https://mef@svn.planet-lab.org/svn/linux-2.6/tags/linux-2.6-22-42/kernel-2.6.spec $
+%define url $URL: https://mef@svn.planet-lab.org/svn/linux-2.6/tags/linux-2.6-22-39/kernel-2.6.spec $
 
 Summary: The Linux kernel (the core of the Linux operating system)
 
@@ -25,7 +25,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 42
+%define taglevel 39
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -189,12 +189,7 @@ Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
-Patch700: linux-2.6-700-fperm.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
-# This one is a backport from usptream.
-Patch720: linux-2.6-720-bonding-layer23.patch
-Patch721: linux-2.6-721-bonding-layer3.patch
-Patch722: linux-2.6-722-bonding-rr.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -413,11 +408,7 @@ KERNEL_PREVIOUS=vanilla
 %endif
 %ApplyPatch 680
 %ApplyPatch 690
-%ApplyPatch 700
 %ApplyPatch 710
-%ApplyPatch 720
-%ApplyPatch 721
-%ApplyPatch 722
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
@@ -892,15 +883,6 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
-* Fri Jun 26 2009 Daniel Hokka Zakrisson <daniel@hozac.com> - linux-2.6-22-42
-- Bonding and multipath things.
-
-* Thu Jun 11 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-41
-- configs for the embedemu pldistro
-
-* Wed Jun 03 2009 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-22-40
-- Added patch 700, which implements VXC_PROC_WRITE support
-
 * Tue May 26 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-22-39
 - outputs the kernel-headers rpm as backported from 2.6.27
 
