@@ -502,6 +502,12 @@ BuildKernel() {
     make -s ARCH=$Arch INSTALL_HDR_PATH=$RPM_BUILD_ROOT/usr
     find $RPM_BUILD_ROOT/%{_includedir} -name \*.cmd -delete
     rm -f $RPM_BUILD_ROOT/%{_includedir}/{..,.}{check,install}*
+
+    # glibc provides scsi headers for itself, for now
+    rm -rf $RPM_BUILD_ROOT/usr/include/scsi
+    rm -f $RPM_BUILD_ROOT/usr/include/asm*/atomic.h
+    rm -f $RPM_BUILD_ROOT/usr/include/asm*/io.h
+    rm -f $RPM_BUILD_ROOT/usr/include/asm*/irq.h
 %endif
 
 %if %{build_iwlwifi}
