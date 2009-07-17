@@ -190,6 +190,7 @@ Patch670: linux-2.6-670-gcc43.patch
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch690: linux-2.6-690-web100.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
+Patch730: linux-2.6-730-igb-driver.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
