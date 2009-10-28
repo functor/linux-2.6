@@ -760,7 +760,6 @@ popd > /dev/null
 
 # ask for a reboot
 mkdir -p /etc/planetlab
-touch /etc/planetlab/update-reboot
 
 %post devel
 [ -f /etc/sysconfig/kernel ] && . /etc/sysconfig/kernel
