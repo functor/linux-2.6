@@ -171,6 +171,8 @@ Patch524: linux-2.6-524-peercred.patch
 Patch525: linux-2.6-525-sknid-elevator.patch
 Patch526: linux-2.6-526-tun-tap.patch
 Patch527: linux-2.6-527-iptables-classify-add-mark.patch
+Patch528: linux-2.6-528-enable-stdtun.patch
+
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
 Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
@@ -389,6 +391,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 525
 %ApplyPatch 526
 %ApplyPatch 527
+%ApplyPatch 528
 
 %ApplyPatch 530
 %ApplyPatch 540
