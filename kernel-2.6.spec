@@ -108,7 +108,7 @@ Version: %{rpmversion}
 # In the future, we'll split the kernel package into the main
 # kernel, and kernel modules, but for now, hacks of this kind
 # save on the operational overhead of a full kernel update.
-Release: %{release}-update1
+Release: %{release}
 ExclusiveOS: Linux
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
