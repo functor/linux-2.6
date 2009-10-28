@@ -104,7 +104,11 @@ Name: kernel
 Group: System Environment/Kernel
 License: GPLv2
 Version: %{rpmversion}
-Release: %{release}
+# A kernel module update only. Very hacky, but does the job.
+# In the future, we'll split the kernel package into the main
+# kernel, and kernel modules, but for now, hacks of this kind
+# save on the operational overhead of a full kernel update.
+Release: %{release}-update1
 ExclusiveOS: Linux
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
