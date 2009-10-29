@@ -44,10 +44,13 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
+
+%define update 1
+
 # Tweak for being able to issue updates with the same kernel version, but with
 # a different package version.
 %define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
-%define packagerelease %{kernelrelease}
+%define packagerelease %{kernelrelease}%{?update:.%{update}}
 
 %{!?pldistro:%global pldistro planetlab}
 
