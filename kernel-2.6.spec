@@ -44,13 +44,18 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-%define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+#%define updatelevel 1
+
+# Tweak for being able to issue updates with the same kernel version, but with
+# a different package version.
+%define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+%define packagerelease %{kernelrelease}%{?updatelevel:.%{updatelevel}}
 
 %{!?pldistro:%global pldistro planetlab}
 
 %define signmodules 0
 %define make_target bzImage
-%define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
+%define KVERREL %{PACKAGE_VERSION}-%{kernelrelease}
 
 # Override generic defaults with per-arch defaults
 
@@ -104,13 +109,13 @@ Name: kernel
 Group: System Environment/Kernel
 License: GPLv2
 Version: %{rpmversion}
-Release: %{release}
+Release: %{packagerelease}
 ExclusiveOS: Linux
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-smp = %{rpmversion}-%{release}
-Provides: kernel-smp-%{_target_cpu} = %{rpmversion}-%{release}
+Provides: kernel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
+Provides: kernel-smp = %{rpmversion}-%{kernelrelease}
+Provides: kernel-smp-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
 Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
@@ -219,9 +224,9 @@ input and output, etc.
 Summary: Development package for building kernel modules to match the kernel.
 Group: System Environment/Kernel
 AutoReqProv: no
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-smp-devel = %{rpmversion}-%{release}
-Provides: kernel-smp-devel-%{_target_cpu} = %{rpmversion}-%{release}
+Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
+Provides: kernel-smp-devel = %{rpmversion}-%{kernelrelease}
+Provides: kernel-smp-devel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
 Prereq: /usr/bin/find
 
 %description devel
@@ -246,7 +251,7 @@ Summary: The Linux kernel compiled for unprivileged Xen guest VMs
 
 Group: System Environment/Kernel
 Provides: kernel = %{version}
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}xenU
+Provides: kernel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}xenU
 Prereq: %{kernel_prereq}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
@@ -270,9 +275,9 @@ the guest0 domain.
 Summary: Development package for building kernel modules to match the kernel.
 Group: System Environment/Kernel
 AutoReqProv: no
-Provides: kernel-xenU-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}xenU
-Provides: kernel-devel = %{rpmversion}-%{release}xenU
+Provides: kernel-xenU-devel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
+Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}xenU
+Provides: kernel-devel = %{rpmversion}-%{kernelrelease}xenU
 Prereq: /usr/sbin/hardlink, /usr/bin/find
 
 %description xenU-devel
@@ -290,9 +295,9 @@ This package includes a user mode version of the Linux kernel.
 %package uml-devel
 Summary: Development package for building kernel modules to match the UML kernel.
 Group: System Environment/Kernel
-Provides: kernel-uml-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}smp
-Provides: kernel-devel = %{rpmversion}-%{release}smp
+Provides: kernel-uml-devel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
+Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}smp
+Provides: kernel-devel = %{rpmversion}-%{kernelrelease}smp
 AutoReqProv: no
 Prereq: /usr/sbin/hardlink, /usr/bin/find
 
@@ -314,7 +319,7 @@ Summary: A placeholder RPM that provides kernel and kernel-drm
 Group: System Environment/Kernel
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
-Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
+Provides: kernel-%{_target_cpu} = %{rpmversion}-%{kernelrelease}
 
 %description vserver
 VServers do not require and cannot use kernels, but some RPMs have
@@ -342,6 +347,10 @@ else
   # We already have a vanilla dir.
   cd kernel-%{kversion}
 fi
+
+%if "0%{updatelevel}"
+echo "This is a trivial maintenance update. There will be no reboot following installation."
+%endif
 
 KERNEL_PREVIOUS=vanilla
 # Dark RPM-magic to apply each patch to a hardlinked copy of the tree.
@@ -492,11 +501,11 @@ BuildKernel() {
       DevelLink=
     fi
 
-    KernelVer=%{version}-%{release}$Flavour
+    KernelVer=%{version}-%{kernelrelease}$Flavour
     echo BUILDING A KERNEL FOR $Flavour %{_target_cpu}...
 
     # make sure EXTRAVERSION says what we want it to say
-    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = %{?patchlevel:.%{patchlevel}}-%{release}$Flavour/" Makefile
+    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = %{?patchlevel:.%{patchlevel}}-%{kernelrelease}$Flavour/" Makefile
 
     # and now to start the build process
 
@@ -748,7 +757,7 @@ if echo $rootdev |grep -q /dev/mapper 2>/dev/null ; then
     fi
 fi
 
-[ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade %{rpmversion}-%{release}
+[ ! -x /usr/sbin/module_upgrade ] || /usr/sbin/module_upgrade %{rpmversion}-%{kernelrelease}
 #/sbin/new-kernel-pkg --package kernel --mkinitrd --depmod --install %{KVERREL}
 # Older modutils do not support --package option
 /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}
@@ -771,7 +780,10 @@ popd > /dev/null
 
 # ask for a reboot
 mkdir -p /etc/planetlab
+
+%if "%{updatelevel}"==""
 touch /etc/planetlab/update-reboot
+%endif
 
 %post devel
 [ -f /etc/sysconfig/kernel ] && . /etc/sysconfig/kernel
