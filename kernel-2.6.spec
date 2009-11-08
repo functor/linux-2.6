@@ -188,7 +188,7 @@ Patch660: linux-2.6-660-nmi-watchdog-default.patch
 Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
-Patch690: linux-2.6-690-web100.patch
+#Patch690: linux-2.6-690-web100.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 Patch730: linux-2.6-730-igb-driver.patch
 
