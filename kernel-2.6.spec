@@ -162,7 +162,7 @@ Patch550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch560: linux-2.6-560-mmconf.patch
 Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
-# Patch590: linux-2.6-590-chopstix-intern.patch
+Patch590: linux-2.6-590-dcookies-mm.patch
 # Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
