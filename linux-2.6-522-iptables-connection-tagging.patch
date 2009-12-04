@@ -180,7 +180,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +	}
 +}
 +
-+static struct sock *__udp4_lib_lookup(__be32 saddr, __be16 sport,
++static struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr, __be16 sport,
 +                      __be32 daddr, __be16 dport,
 +                      int dif, struct hlist_head udptable[])
 +{
