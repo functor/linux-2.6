@@ -284,8 +284,8 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +        }
 +        else if (proto == 17) {
 +            struct sock *sk;
-+            if (!skb->mark) {
-+                sk = __udp4_lib_lookup(src_ip, src_port,
++            if (!skb->mark) {struct net *net = &init_net;
++                sk = __udp4_lib_lookup(net,src_ip, src_port,
 +                        ip, port, dif, udp_hash);
 +
 +                if (sk && hooknum == NF_INET_LOCAL_IN)
