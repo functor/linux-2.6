@@ -1,6 +1,6 @@
-diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_MARK.h linux-2.6.27-522-ol/include/linux/netfilter/xt_MARK.h
+diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_MARK.h linux-2.6.27-522/include/linux/netfilter/xt_MARK.h
 --- linux-2.6.27-521/include/linux/netfilter/xt_MARK.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522-ol/include/linux/netfilter/xt_MARK.h	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/include/linux/netfilter/xt_MARK.h	2009-12-10 11:49:48.000000000 -0500
 @@ -11,6 +11,7 @@
  	XT_MARK_SET=0,
  	XT_MARK_AND,
@@ -9,9 +9,9 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_MARK.h linux-2.6.27-522-o
  };
  
  struct xt_mark_target_info_v1 {
-diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h linux-2.6.27-522-ol/include/linux/netfilter/xt_SETXID.h
+diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h linux-2.6.27-522/include/linux/netfilter/xt_SETXID.h
 --- linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-522-ol/include/linux/netfilter/xt_SETXID.h	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/include/linux/netfilter/xt_SETXID.h	2009-12-10 11:49:48.000000000 -0500
 @@ -0,0 +1,14 @@
 +#ifndef _XT_SETXID_H_target
 +#define _XT_SETXID_H_target
@@ -27,9 +27,9 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h linux-2.6.27-522
 +};
 +
 +#endif /*_XT_SETXID_H_target*/
-diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.27-522-ol/include/linux/netfilter_ipv4/ipt_MARK.h
+diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_MARK.h
 --- linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522-ol/include/linux/netfilter_ipv4/ipt_MARK.h	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_MARK.h	2009-12-10 11:49:48.000000000 -0500
 @@ -12,6 +12,7 @@
  #define IPT_MARK_SET	XT_MARK_SET
  #define IPT_MARK_AND	XT_MARK_AND
@@ -38,9 +38,9 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.27
  
  #define ipt_mark_target_info_v1 xt_mark_target_info_v1
  
-diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.27-522-ol/include/linux/netfilter_ipv4/ipt_SETXID.h
+diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_SETXID.h
 --- linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-522-ol/include/linux/netfilter_ipv4/ipt_SETXID.h	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_SETXID.h	2009-12-10 11:49:48.000000000 -0500
 @@ -0,0 +1,13 @@
 +#ifndef _IPT_SETXID_H_target
 +#define _IPT_SETXID_H_target
@@ -55,9 +55,9 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.
 +#define ipt_setxid_target_info_v1 xt_setxid_target_info_v1
 +
 +#endif /*_IPT_SETXID_H_target*/
-diff -Nurb linux-2.6.27-521/include/net/netfilter/nf_conntrack.h linux-2.6.27-522-ol/include/net/netfilter/nf_conntrack.h
+diff -Nurb linux-2.6.27-521/include/net/netfilter/nf_conntrack.h linux-2.6.27-522/include/net/netfilter/nf_conntrack.h
 --- linux-2.6.27-521/include/net/netfilter/nf_conntrack.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522-ol/include/net/netfilter/nf_conntrack.h	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/include/net/netfilter/nf_conntrack.h	2009-12-10 11:49:48.000000000 -0500
 @@ -121,6 +121,9 @@
  	/* Storage reserved for other modules: */
  	union nf_conntrack_proto proto;
@@ -68,9 +68,9 @@ diff -Nurb linux-2.6.27-521/include/net/netfilter/nf_conntrack.h linux-2.6.27-52
  	/* Extensions */
  	struct nf_ct_ext *ext;
  
-diff -Nurb linux-2.6.27-521/net/netfilter/Kconfig linux-2.6.27-522-ol/net/netfilter/Kconfig
+diff -Nurb linux-2.6.27-521/net/netfilter/Kconfig linux-2.6.27-522/net/netfilter/Kconfig
 --- linux-2.6.27-521/net/netfilter/Kconfig	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522-ol/net/netfilter/Kconfig	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/net/netfilter/Kconfig	2009-12-10 11:49:48.000000000 -0500
 @@ -477,6 +477,13 @@
  	  This option adds a "TCPOPTSTRIP" target, which allows you to strip
  	  TCP options from TCP packets.
@@ -85,9 +85,9 @@ diff -Nurb linux-2.6.27-521/net/netfilter/Kconfig linux-2.6.27-522-ol/net/netfil
  config NETFILTER_XT_MATCH_COMMENT
  	tristate  '"comment" match support'
  	depends on NETFILTER_XTABLES
-diff -Nurb linux-2.6.27-521/net/netfilter/Makefile linux-2.6.27-522-ol/net/netfilter/Makefile
+diff -Nurb linux-2.6.27-521/net/netfilter/Makefile linux-2.6.27-522/net/netfilter/Makefile
 --- linux-2.6.27-521/net/netfilter/Makefile	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522-ol/net/netfilter/Makefile	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/net/netfilter/Makefile	2009-12-10 11:49:48.000000000 -0500
 @@ -38,6 +38,7 @@
  obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
  
@@ -96,9 +96,9 @@ diff -Nurb linux-2.6.27-521/net/netfilter/Makefile linux-2.6.27-522-ol/net/netfi
  obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CONNMARK) += xt_CONNMARK.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CONNSECMARK) += xt_CONNSECMARK.o
-diff -Nurb linux-2.6.27-521/net/netfilter/nf_conntrack_core.c linux-2.6.27-522-ol/net/netfilter/nf_conntrack_core.c
+diff -Nurb linux-2.6.27-521/net/netfilter/nf_conntrack_core.c linux-2.6.27-522/net/netfilter/nf_conntrack_core.c
 --- linux-2.6.27-521/net/netfilter/nf_conntrack_core.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522-ol/net/netfilter/nf_conntrack_core.c	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/net/netfilter/nf_conntrack_core.c	2009-12-10 11:49:48.000000000 -0500
 @@ -595,6 +595,9 @@
  	/* Overload tuple linked list to put us in unconfirmed list. */
  	hlist_add_head(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnode, &unconfirmed);
@@ -111,7 +111,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/nf_conntrack_core.c linux-2.6.27-522-o
  	if (exp) {
 diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilter/xt_MARK.c
 --- linux-2.6.27-521/net/netfilter/xt_MARK.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/net/netfilter/xt_MARK.c	2009-06-02 11:12:59.000000000 -0400
++++ linux-2.6.27-522/net/netfilter/xt_MARK.c	2009-12-10 11:57:31.000000000 -0500
 @@ -13,7 +13,13 @@
  #include <linux/module.h>
  #include <linux/skbuff.h>
@@ -135,7 +135,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
  static unsigned int
  mark_tg_v0(struct sk_buff *skb, const struct net_device *in,
             const struct net_device *out, unsigned int hooknum,
-@@ -61,14 +69,242 @@
+@@ -61,14 +69,255 @@
  	return XT_CONTINUE;
  }
  
@@ -180,63 +180,66 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +	}
 +}
 +
-+static struct sock *__udp4_lib_lookup(__be32 saddr, __be16 sport,
-+                      __be32 daddr, __be16 dport,
-+                      int dif, struct hlist_head udptable[])
++static struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr,
++		__be16 sport, __be32 daddr, __be16 dport,
++		int dif, struct hlist_head udptable[])
 +{
-+    struct sock *sk, *result = NULL;
-+    struct hlist_node *node;
-+    unsigned short hnum = ntohs(dport);
-+    int badness = -1;
++	struct sock *sk, *result = NULL;
++	struct hlist_node *node;
++	unsigned short hnum = ntohs(dport);
++	int badness = -1;
 +
-+    read_lock(&udp_hash_lock);
++	read_lock(&udp_hash_lock);
++	sk_for_each(sk, node, &udptable[udp_hashfn(net, hnum)]) {
++		struct inet_sock *inet = inet_sk(sk);
 +
-+    sk_for_each(sk, node, &udptable[hnum & (UDP_HTABLE_SIZE - 1)]) {
-+        struct inet_sock *inet = inet_sk(sk);
++		if (net_eq(sock_net(sk), net) && sk->sk_hash == hnum &&
++				!ipv6_only_sock(sk)) {
++			int score = (sk->sk_family == PF_INET ? 1 : 0);
 +
-+        if (sk->sk_hash == hnum && !ipv6_only_sock(sk)) {
-+            int score = (sk->sk_family == PF_INET ? 1 : 0);
++			if (inet->rcv_saddr) {
++				if (inet->rcv_saddr != daddr)
++					continue;
++				score+=2;
++			} else {
++				/* block non nx_info ips */
++				if (!v4_addr_in_nx_info(sk->sk_nx_info,
++					daddr, NXA_MASK_BIND))
++					continue;
++			}
++			if (inet->daddr) {
++				if (inet->daddr != saddr)
++					continue;
++				score+=2;
++			}
++			if (inet->dport) {
++				if (inet->dport != sport)
++					continue;
++				score+=2;
++			}
++			if (sk->sk_bound_dev_if) {
++				if (sk->sk_bound_dev_if != dif)
++					continue;
++				score+=2;
++			}
++			if (score == 9) {
++				result = sk;
++				break;
++			} else if (score > badness) {
++				result = sk;
++				badness = score;
++			}
++		}
++	}
 +
-+            if (inet->rcv_saddr) {
-+                if (inet->rcv_saddr != daddr)
-+                    continue;
-+                score+=2;
-+            } else {
-+                /* block non nx_info ips */
-+                if (!v4_addr_in_nx_info(sk->sk_nx_info,
-+                    daddr, NXA_MASK_BIND))
-+                    continue;
-+            }
-+            if (inet->daddr) {
-+                if (inet->daddr != saddr)
-+                    continue;
-+                score+=2;
-+            }
-+            if (inet->dport) {
-+                if (inet->dport != sport)
-+                    continue;
-+                score+=2;
-+            }
-+            if (sk->sk_bound_dev_if) {
-+                if (sk->sk_bound_dev_if != dif)
-+                    continue;
-+                score+=2;
-+            }
-+            if (score == 9) {
-+                result = sk;
-+                break;
-+            } else if (score > badness) {
-+                result = sk;
-+                badness = score;
-+            }
-+        }
-+    }
-+
-+    if (result)
-+        sock_hold(result);
-+    read_unlock(&udp_hash_lock);
-+    return result;
++	if (result)
++		sock_hold(result);
++	read_unlock(&udp_hash_lock);
++	return result;
 +}
++
++int onceonly = 1;
++
  static unsigned int
  mark_tg(struct sk_buff *skb, const struct net_device *in,
          const struct net_device *out, unsigned int hooknum,
@@ -257,7 +260,18 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +    u_int32_t ip;
 +    u_int16_t port;
 +
++    
 +    if (info->mark == ~0U) {
++        // As of 2.6.27.39, Dec 8 2009, 
++        // NetNS + VNET = Trouble
++        // Let's handle this as a special case
++        struct net *net = dev_net(skb->dev);
++        if (!net_eq(net, &init_net)) {
++            WARN_ON(onceonly);
++            onceonly = 0;
++            return XT_CONTINUE;
++        }
++
 +        /* copy-xid */
 +        dif = ((struct rtable *)(skb->dst))->rt_iif;
 +
@@ -285,7 +299,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +        else if (proto == 17) {
 +            struct sock *sk;
 +            if (!skb->mark) {
-+                sk = __udp4_lib_lookup(src_ip, src_port,
++                sk = __udp4_lib_lookup(net,src_ip, src_port,
 +                        ip, port, dif, udp_hash);
 +
 +                if (sk && hooknum == NF_INET_LOCAL_IN)
@@ -300,7 +314,6 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +        }
 +        else if (proto == 6) /* TCP */{
 +            int sockettype = 0; /* Established socket */
-+            struct net *net = &init_net;
 +
 +            /* Looks for an established socket or a listening 
 +               socket corresponding to the 4-tuple, in that order.
@@ -378,10 +391,10 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 -	skb->mark = (skb->mark & ~info->mask) ^ info->mark;
  	return XT_CONTINUE;
  }
-
-diff -Nurb linux-2.6.27-521/net/netfilter/xt_SETXID.c linux-2.6.27-522-ol/net/netfilter/xt_SETXID.c
+ 
+diff -Nurb linux-2.6.27-521/net/netfilter/xt_SETXID.c linux-2.6.27-522/net/netfilter/xt_SETXID.c
 --- linux-2.6.27-521/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-522-ol/net/netfilter/xt_SETXID.c	2009-06-02 10:02:16.000000000 -0400
++++ linux-2.6.27-522/net/netfilter/xt_SETXID.c	2009-12-10 11:49:48.000000000 -0500
 @@ -0,0 +1,79 @@
 +#include <linux/module.h>
 +#include <linux/skbuff.h>
