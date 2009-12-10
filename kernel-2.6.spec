@@ -30,11 +30,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 39
+%define patchlevel 14
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
-%define vsversion 2.3.0.36.8
+%define vsversion 2.3.0.36.4
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.

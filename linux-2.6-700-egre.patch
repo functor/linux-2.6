@@ -1,3 +1,15 @@
+diff -Nurb linux-2.6.27-660/Makefile linux-2.6.27-700/Makefile
+--- linux-2.6.27-660/Makefile	2009-04-16 10:27:07.000000000 -0400
++++ linux-2.6.27-700/Makefile	2009-04-16 10:27:39.000000000 -0400
+@@ -1,7 +1,7 @@
+ VERSION = 2
+ PATCHLEVEL = 6
+ SUBLEVEL = 27
+-EXTRAVERSION = .14-vs2.3.0.36.4
++EXTRAVERSION = -prep
+ NAME = Trembling Tortoise
+ 
+ # *DOCUMENTATION*
 diff -Nurb linux-2.6.27-660/drivers/net/Kconfig linux-2.6.27-700/drivers/net/Kconfig
 --- linux-2.6.27-660/drivers/net/Kconfig	2009-04-16 10:27:01.000000000 -0400
 +++ linux-2.6.27-700/drivers/net/Kconfig	2009-04-16 10:27:39.000000000 -0400
