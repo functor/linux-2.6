@@ -1,0 +1,7 @@
+%_topdir PWD
+%_tmppath PWD/tmp
+%__spec_install_pre %{___build_pre}
+%_install_langs C:en_US:en
+%_netsharedpath /proc:/dev/pts:/usr/share/info
+%_excludedocs 1
+%__file_context_path /dev/null
