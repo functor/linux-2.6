@@ -1,3 +1,7 @@
+#
+# $Id$
+# $URL$
+#
 # We have to override the new %%install behavior because, well... the kernel is special.
 %global __spec_install_pre %{___build_pre}
 
@@ -3889,9 +3893,4 @@ fi
 * Mon Mar 23 2009 Dave Jones <davej@redhat.com>
 - 2.6.29
 
-###
-# The following Emacs magic makes C-c C-e use UTC dates.
-# Local Variables:
-# rpm-change-log-uses-utc: t
-# End:
 ###
