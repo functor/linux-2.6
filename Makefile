@@ -73,21 +73,23 @@ new-sources: download-sources
 	done
 
 PREPARCH ?= noarch
-RPMDIRDEFS = --define "_sourcedir $(PWD)" --define "_builddir $(PWD)" --define "_srcrpmdir $(PWD)" --define "_rpmdir $(PWD)"
+RPMDIRDEFS = --define "_sourcedir $(PWD)/SOURCES" --define "_builddir $(PWD)" --define "_srcrpmdir $(PWD)" --define "_rpmdir $(PWD)"
 trees: sources
 	rpmbuild $(RPMDIRDEFS) $(RPMDEFS) --nodeps -bp --target $(PREPARCH) $(SPECFILE)
 
 # use the stock source rpm, unwrap it,
+# copy the downloaded material
 # install our own specfile and patched patches
 # and patch configs for IPV6
 # then rewrap with rpm
 srpm: sources
-	mkdir SOURCES SRPMS
+	mkdir -p SOURCES SRPMS
 	(cd SOURCES; rpm2cpio ../$(SOURCE_RPM) | cpio -diu; \
 	 cp ../$(SPECFILE) . ; cp ../linux*.patch . ; \
+	 for downloaded in $(SOURCEFILES) ; do cp ../$$downloaded . ; done ; \
 	 sed -i -e s,CONFIG_IPV6=m,CONFIG_IPV6=y, config-generic)
 	./rpmmacros.sh
-	export HOME=$(shell pwd) ; rpmbuild $(RPMDIRDEFS) $(RPMDEFS) --nodeps -bs SOURCES/$(SPECFILE)
+	export HOME=$(shell pwd) ; rpmbuild $(RPMDIRDEFS) $(RPMDEFS) --nodeps -bs $(SPECFILE)
 	cp $(SOURCE_RPM) $(EXPECTED_SRPM)
 
 TARGET ?= $(shell uname -m)

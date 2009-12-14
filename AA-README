@@ -1,0 +1,16 @@
+This package provides a vserver-capable kernel for plain fedora 12
+boxes it should be rebuilt on a fedora 12 host
+
+This package is *NOT* intended to be a basis for a PlanetLab nodes
+kernel 
+
+In a nutshell, we take the upstream kernel source rpm, and
+sneak the plain vserver patch as an addition before the fedora patches
+are applied; only a few of the fedora patches needed to be tweaked b/c
+they were working on an area that the vserver patch had altered.
+
+We use this, together with util-vserver that we rebuild as well, in order
+to set up the planetlab build and test architecture.
+
+FYI, a centos5.4 vserver box cannot easily create f11 or f12 vservers,
+due to a disruptive change in rpm
