@@ -88,13 +88,13 @@ Summary: The Linux kernel
 # kernel-kdump
 %define with_kdump     %{?_without_kdump:     0} %{?!_without_kdump:     1}
 # kernel-debug
-%define with_debug     %{?_without_debug:     0} %{?!_without_debug:     1}
+%define with_debug     %{?_with_debug:        1} %{?!_with_debug:        0}
 # kernel-doc
-%define with_doc       %{?_without_doc:       0} %{?!_without_doc:       1}
+%define with_doc       %{?_with_doc:          1} %{?!_with_doc:          0}
 # kernel-headers
 %define with_headers   %{?_without_headers:   0} %{?!_without_headers:   1}
 # kernel-firmware
-%define with_firmware  %{?_with_firmware:     1} %{?!_with_firmware:     0}
+%define with_firmware  %{?_without_firmware:  0} %{?!_without_firmware:  1}
 # tools/perf
 %define with_perftool  %{?_without_perftool:  0} %{?!_without_perftool:  1}
 # perf noarch subpkg
