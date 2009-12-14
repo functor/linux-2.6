@@ -9,6 +9,7 @@ AWK	= awk
 SHA1SUM	= sha1sum
 SED	= sed
 
+# this is passed on the command line as the full path to <build>/SPECS/kernel.spec
 SPECFILE = kernel.spec
 
 # Thierry - when called from within the build, PWD is /build
@@ -85,12 +86,11 @@ trees: sources
 srpm: sources
 	mkdir -p SOURCES SRPMS
 	(cd SOURCES; rpm2cpio ../$(SOURCE_RPM) | cpio -diu; \
-	 cp ../$(SPECFILE) . ; cp ../linux*.patch . ; \
+	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux*.patch . ; \
 	 for downloaded in $(SOURCEFILES) ; do cp ../$$downloaded . ; done ; \
 	 sed -i -e s,CONFIG_IPV6=m,CONFIG_IPV6=y, config-generic)
 	./rpmmacros.sh
 	export HOME=$(shell pwd) ; rpmbuild $(RPMDIRDEFS) $(RPMDEFS) --nodeps -bs $(SPECFILE)
-	cp $(SOURCE_RPM) $(EXPECTED_SRPM)
 
 TARGET ?= $(shell uname -m)
 rpm: sources
