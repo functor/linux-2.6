@@ -1562,7 +1562,8 @@ for i in *.config
 do
   mv $i .config
   Arch=`head -1 .config | cut -b 3-`
-  make ARCH=$Arch %{oldconfig_target}
+###-vs- ignore the warnings, due to IPV6 being set to 'm'
+  make ARCH=$Arch %{oldconfig_target} || :
   echo "# $Arch" > configs/$i
   cat .config >> configs/$i
 done
