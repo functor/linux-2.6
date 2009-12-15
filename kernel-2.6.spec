@@ -139,6 +139,7 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 %if "0%{patchlevel}"
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
+Patch050: linux-2.6-050-getline.patch
 
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
@@ -332,8 +333,9 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-# NetNS patch for VINI
+%ApplyPatch 050
 
+# vserver patch
 %ApplyPatch 200
 
 %ApplyPatch 250
