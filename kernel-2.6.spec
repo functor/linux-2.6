@@ -333,7 +333,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 050
+%ApplyPatch 50
 
 # vserver patch
 %ApplyPatch 200
