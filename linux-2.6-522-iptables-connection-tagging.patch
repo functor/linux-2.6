@@ -1,6 +1,6 @@
 diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_MARK.h linux-2.6.27-522/include/linux/netfilter/xt_MARK.h
 --- linux-2.6.27-521/include/linux/netfilter/xt_MARK.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/include/linux/netfilter/xt_MARK.h	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/include/linux/netfilter/xt_MARK.h	2009-12-10 12:09:35.000000000 -0500
 @@ -11,6 +11,7 @@
  	XT_MARK_SET=0,
  	XT_MARK_AND,
@@ -11,7 +11,7 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_MARK.h linux-2.6.27-522/i
  struct xt_mark_target_info_v1 {
 diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h linux-2.6.27-522/include/linux/netfilter/xt_SETXID.h
 --- linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-522/include/linux/netfilter/xt_SETXID.h	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/include/linux/netfilter/xt_SETXID.h	2009-12-10 12:09:35.000000000 -0500
 @@ -0,0 +1,14 @@
 +#ifndef _XT_SETXID_H_target
 +#define _XT_SETXID_H_target
@@ -29,7 +29,7 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter/xt_SETXID.h linux-2.6.27-522
 +#endif /*_XT_SETXID_H_target*/
 diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_MARK.h
 --- linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_MARK.h	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_MARK.h	2009-12-10 12:09:35.000000000 -0500
 @@ -12,6 +12,7 @@
  #define IPT_MARK_SET	XT_MARK_SET
  #define IPT_MARK_AND	XT_MARK_AND
@@ -40,7 +40,7 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_MARK.h linux-2.6.27
  
 diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_SETXID.h
 --- linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_SETXID.h	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/include/linux/netfilter_ipv4/ipt_SETXID.h	2009-12-10 12:09:35.000000000 -0500
 @@ -0,0 +1,13 @@
 +#ifndef _IPT_SETXID_H_target
 +#define _IPT_SETXID_H_target
@@ -57,7 +57,7 @@ diff -Nurb linux-2.6.27-521/include/linux/netfilter_ipv4/ipt_SETXID.h linux-2.6.
 +#endif /*_IPT_SETXID_H_target*/
 diff -Nurb linux-2.6.27-521/include/net/netfilter/nf_conntrack.h linux-2.6.27-522/include/net/netfilter/nf_conntrack.h
 --- linux-2.6.27-521/include/net/netfilter/nf_conntrack.h	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/include/net/netfilter/nf_conntrack.h	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/include/net/netfilter/nf_conntrack.h	2009-12-10 12:09:35.000000000 -0500
 @@ -121,6 +121,9 @@
  	/* Storage reserved for other modules: */
  	union nf_conntrack_proto proto;
@@ -70,7 +70,7 @@ diff -Nurb linux-2.6.27-521/include/net/netfilter/nf_conntrack.h linux-2.6.27-52
  
 diff -Nurb linux-2.6.27-521/net/netfilter/Kconfig linux-2.6.27-522/net/netfilter/Kconfig
 --- linux-2.6.27-521/net/netfilter/Kconfig	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/net/netfilter/Kconfig	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/net/netfilter/Kconfig	2009-12-10 12:09:35.000000000 -0500
 @@ -477,6 +477,13 @@
  	  This option adds a "TCPOPTSTRIP" target, which allows you to strip
  	  TCP options from TCP packets.
@@ -87,7 +87,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/Kconfig linux-2.6.27-522/net/netfilter
  	depends on NETFILTER_XTABLES
 diff -Nurb linux-2.6.27-521/net/netfilter/Makefile linux-2.6.27-522/net/netfilter/Makefile
 --- linux-2.6.27-521/net/netfilter/Makefile	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/net/netfilter/Makefile	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/net/netfilter/Makefile	2009-12-10 12:09:35.000000000 -0500
 @@ -38,6 +38,7 @@
  obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
  
@@ -98,7 +98,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/Makefile linux-2.6.27-522/net/netfilte
  obj-$(CONFIG_NETFILTER_XT_TARGET_CONNSECMARK) += xt_CONNSECMARK.o
 diff -Nurb linux-2.6.27-521/net/netfilter/nf_conntrack_core.c linux-2.6.27-522/net/netfilter/nf_conntrack_core.c
 --- linux-2.6.27-521/net/netfilter/nf_conntrack_core.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/net/netfilter/nf_conntrack_core.c	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/net/netfilter/nf_conntrack_core.c	2009-12-10 12:09:35.000000000 -0500
 @@ -595,6 +595,9 @@
  	/* Overload tuple linked list to put us in unconfirmed list. */
  	hlist_add_head(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnode, &unconfirmed);
@@ -111,7 +111,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/nf_conntrack_core.c linux-2.6.27-522/n
  	if (exp) {
 diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilter/xt_MARK.c
 --- linux-2.6.27-521/net/netfilter/xt_MARK.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-522/net/netfilter/xt_MARK.c	2009-12-10 11:57:31.000000000 -0500
++++ linux-2.6.27-522/net/netfilter/xt_MARK.c	2009-12-16 01:39:55.000000000 -0500
 @@ -13,7 +13,13 @@
  #include <linux/module.h>
  #include <linux/skbuff.h>
@@ -135,7 +135,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
  static unsigned int
  mark_tg_v0(struct sk_buff *skb, const struct net_device *in,
             const struct net_device *out, unsigned int hooknum,
-@@ -61,14 +69,255 @@
+@@ -61,14 +69,256 @@
  	return XT_CONTINUE;
  }
  
@@ -330,6 +330,11 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +            }
 +
 +            if (connection_sk) {
++                if (connection_sk->sk_state == TCP_TIME_WAIT) {
++                    inet_twsk_put(inet_twsk(connection_sk));
++                    goto out_mark_finish;
++                }
++
 +                /* The peercred is not set. We set it if the other side has an xid. */
 +                if (!PEERCRED_SET(connection_sk->sk_peercred.uid)
 +                        && ct->xid[!dir] > 0 && (sockettype == 0)) {
@@ -353,11 +358,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
 +                if (mark == -1 && (ct->xid[dir] != 0))
 +                    mark = ct->xid[dir];
 +
-+                if (connection_sk->sk_state == TCP_TIME_WAIT) {
-+                    inet_twsk_put(inet_twsk(connection_sk));
-+                    goto out_mark_finish;
-+                } else
-+                    sock_put(connection_sk);
++                sock_put(connection_sk);
 +            }
 +
 +            /* All else failed. Is this a connection over raw sockets?
@@ -394,7 +395,7 @@ diff -Nurb linux-2.6.27-521/net/netfilter/xt_MARK.c linux-2.6.27-522/net/netfilt
  
 diff -Nurb linux-2.6.27-521/net/netfilter/xt_SETXID.c linux-2.6.27-522/net/netfilter/xt_SETXID.c
 --- linux-2.6.27-521/net/netfilter/xt_SETXID.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-522/net/netfilter/xt_SETXID.c	2009-12-10 11:49:48.000000000 -0500
++++ linux-2.6.27-522/net/netfilter/xt_SETXID.c	2009-12-10 12:09:35.000000000 -0500
 @@ -0,0 +1,79 @@
 +#include <linux/module.h>
 +#include <linux/skbuff.h>
