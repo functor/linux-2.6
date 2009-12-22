@@ -20,7 +20,7 @@ diff -Nurp linux-2.6.22.19-vs2.3.0.34.bond2/drivers/net/bonding/bond_main.c linu
 +				    struct net_device *bond_dev, int count)
 +{
 +	static atomic_t packets;
-+	return atomic_inc_return(packets) % count;
++	return atomic_inc_return(&packets) % count;
 +}
 +
  /*-------------------------- Device entry points ----------------------------*/
