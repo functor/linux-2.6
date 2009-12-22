@@ -146,6 +146,7 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
 Patch010: linux-2.6-010-e1000e.patch
+Patch015: linux-2.6-015-igb.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
 Patch040: linux-2.6-040-i_mutex-check.patch
@@ -190,7 +191,6 @@ Patch670: linux-2.6-670-gcc43.patch
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 #Patch690: linux-2.6-690-web100.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
-Patch730: linux-2.6-730-igb-driver.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -363,6 +363,7 @@ KERNEL_PREVIOUS=vanilla
 %endif
 
 %ApplyPatch 10
+%ApplyPatch 15
 %ApplyPatch 20
 
 # NetNS patch for VINI
@@ -409,7 +410,6 @@ KERNEL_PREVIOUS=vanilla
 %endif
 %ApplyPatch 680
 %ApplyPatch 710
-%ApplyPatch 730
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
