@@ -86,7 +86,7 @@ trees: sources
 srpm: sources
 	mkdir -p SOURCES SRPMS
 	(cd SOURCES; rpm2cpio ../$(SOURCE_RPM) | cpio -diu; \
-	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux*.patch . ; \
+	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux*.patch . ; cp ../Makefile.config . ; cp ../config-vserver . ; \
 	 for downloaded in $(SOURCEFILES) ; do cp ../$$downloaded . ; done ; \
 	 sed -i -e s,CONFIG_IPV6=m,CONFIG_IPV6=y, config-generic)
 	./rpmmacros.sh

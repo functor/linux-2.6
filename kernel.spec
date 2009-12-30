@@ -561,6 +561,8 @@ Source90: config-sparc64-generic
 
 Source100: config-arm
 
+Source110: config-vserver
+
 Source200: perf
 
 # Here should be only the patches up to the upstream canonical Linus tree.
