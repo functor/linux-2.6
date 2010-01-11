@@ -46,10 +46,10 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 #%define updatelevel 1
 
-# Tweak for being able to issue updates with the same kernel version, but with
-# a different package version.
-%define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
-%define packagerelease %{kernelrelease}%{?updatelevel:.%{updatelevel}}
+%define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}%{?updatelevel:.%{updatelevel}}
+%define packagerelease %{kernelrelease}
+
+
 
 %{!?pldistro:%global pldistro planetlab}
 
