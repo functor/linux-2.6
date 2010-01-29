@@ -269,7 +269,7 @@ diff -Nurb linux-2.6.27-590/fs/exec.c linux-2.6.27-591/fs/exec.c
 +    unsigned long cookie;
 +    extern void (*rec_event)(void *, unsigned int);
 +    if (rec_event && !nd.path.dentry->d_cookie)
-+        get_dcookie(nd.path, &cookie);
++        get_dcookie(&nd.path, &cookie);
 + #endif
 +
  	return file;
