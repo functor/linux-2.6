@@ -268,8 +268,8 @@ diff -Nurb linux-2.6.27-590/fs/exec.c linux-2.6.27-591/fs/exec.c
 + #ifdef CONFIG_CHOPSTIX
 +    unsigned long cookie;
 +    extern void (*rec_event)(void *, unsigned int);
-+    if (rec_event && !nd.dentry->d_cookie)
-+        get_dcookie(nd.dentry, nd.mnt, &cookie);
++    if (rec_event && !nd.path.dentry->d_cookie)
++        get_dcookie(nd.path.dentry, nd.path.mnt, &cookie);
 + #endif
 +
  	return file;
