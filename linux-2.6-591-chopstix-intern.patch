@@ -574,7 +574,7 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c.rej linux-2.6.27-591/kernel/sched.c.r
 ++ 				espec.reason = sampling_reason;
 ++ 				event.event_data=&espec;
 ++ 				event.task=next;
-++ 				espec.pc=regs->eip;
+++ 				espec.pc=regs->ip;
 ++ 				event.event_type=2; 
 ++ 				/* index in the event array currently set up */
 ++ 				/* make sure the counters are loaded in the order we want them to show up*/ 
@@ -623,7 +623,7 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c.rej linux-2.6.27-591/kernel/sched.c.r
 ++     struct event_spec *es = event_signature_in->event_data;
 ++     regs = task_pt_regs(current);
 ++ 	event_signature_in->task=current;
-++ 	es->pc=regs->eip;
+++ 	es->pc=regs->ip;
 ++     event_signature_in->count=1;
 ++     (*rec_event)(event_signature_in, count);
 ++ }
@@ -668,7 +668,7 @@ diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
 +        struct pt_regs *regs;
 +        unsigned int pc;
 +        regs = task_pt_regs(current);
-+        pc = regs->eip & (unsigned int) ~4095;
++        pc = regs->ip & (unsigned int) ~4095;
 +
 +		espec.reason = 0; /* alloc */
 +		event.event_data=&espec;
