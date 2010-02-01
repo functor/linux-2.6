@@ -1,7 +1,8 @@
-diff -Nurb linux-2.6.27-590/arch/Kconfig linux-2.6.27-591/arch/Kconfig
---- linux-2.6.27-590/arch/Kconfig	2010-01-29 16:29:46.000000000 -0500
-+++ linux-2.6.27-591/arch/Kconfig	2010-01-29 16:30:22.000000000 -0500
-@@ -13,9 +13,18 @@
+Index: linux-2.6.27.y/arch/Kconfig
+===================================================================
+--- linux-2.6.27.y.orig/arch/Kconfig
++++ linux-2.6.27.y/arch/Kconfig
+@@ -13,9 +13,18 @@ config OPROFILE
  
  	  If unsure, say N.
  
@@ -20,9 +21,10 @@ diff -Nurb linux-2.6.27-590/arch/Kconfig linux-2.6.27-591/arch/Kconfig
  config KPROBES
  	bool "Kprobes"
  	depends on KALLSYMS && MODULES
-diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c linux-2.6.27-591/arch/x86/kernel/asm-offsets_32.c
---- linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-591/arch/x86/kernel/asm-offsets_32.c	2010-01-29 16:45:48.000000000 -0500
+Index: linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c
+===================================================================
+--- linux-2.6.27.y.orig/arch/x86/kernel/asm-offsets_32.c
++++ linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c
 @@ -9,6 +9,7 @@
  #include <linux/signal.h>
  #include <linux/personality.h>
@@ -52,7 +54,7 @@ diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c linux-2.6.27-591/ar
  void foo(void)
  {
  	OFFSET(IA32_SIGCONTEXT_ax, sigcontext, ax);
-@@ -50,6 +62,16 @@
+@@ -50,6 +62,16 @@ void foo(void)
  	OFFSET(CPUINFO_x86_vendor_id, cpuinfo_x86, x86_vendor_id);
  	BLANK();
  
@@ -69,9 +71,10 @@ diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c linux-2.6.27-591/ar
  	OFFSET(TI_task, thread_info, task);
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
-diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c.rej linux-2.6.27-591/arch/x86/kernel/asm-offsets_32.c.rej
---- linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c.rej	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-591/arch/x86/kernel/asm-offsets_32.c.rej	2010-01-31 22:21:08.000000000 -0500
+Index: linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c.rej
+===================================================================
+--- /dev/null
++++ linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c.rej
 @@ -0,0 +1,17 @@
 +***************
 +*** 63,69 ****
@@ -90,10 +93,11 @@ diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c.rej linux-2.6.27-59
 +      STACKOFFSET(EVENT_event_data, event, event_data);
 +      STACKOFFSET(EVENT_task, event, task);
 +      STACKOFFSET(EVENT_event_type, event, event_type);
-diff -Nurb linux-2.6.27-590/arch/x86/kernel/entry_32.S linux-2.6.27-591/arch/x86/kernel/entry_32.S
---- linux-2.6.27-590/arch/x86/kernel/entry_32.S	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-591/arch/x86/kernel/entry_32.S	2010-01-29 16:30:22.000000000 -0500
-@@ -426,6 +426,33 @@
+Index: linux-2.6.27.y/arch/x86/kernel/entry_32.S
+===================================================================
+--- linux-2.6.27.y.orig/arch/x86/kernel/entry_32.S
++++ linux-2.6.27.y/arch/x86/kernel/entry_32.S
+@@ -426,6 +426,33 @@ ENTRY(system_call)
  	cmpl $(nr_syscalls), %eax
  	jae syscall_badsys
  syscall_call:
@@ -127,10 +131,11 @@ diff -Nurb linux-2.6.27-590/arch/x86/kernel/entry_32.S linux-2.6.27-591/arch/x86
  	call *sys_call_table(,%eax,4)
  	movl %eax,PT_EAX(%esp)		# store the return value
  syscall_exit:
-diff -Nurb linux-2.6.27-590/arch/x86/mm/fault.c linux-2.6.27-591/arch/x86/mm/fault.c
---- linux-2.6.27-590/arch/x86/mm/fault.c	2010-01-29 16:29:46.000000000 -0500
-+++ linux-2.6.27-591/arch/x86/mm/fault.c	2010-01-29 16:30:22.000000000 -0500
-@@ -79,6 +79,15 @@
+Index: linux-2.6.27.y/arch/x86/mm/fault.c
+===================================================================
+--- linux-2.6.27.y.orig/arch/x86/mm/fault.c
++++ linux-2.6.27.y/arch/x86/mm/fault.c
+@@ -79,6 +79,15 @@ static inline int notify_page_fault(stru
  #endif
  }
  
@@ -146,9 +151,10 @@ diff -Nurb linux-2.6.27-590/arch/x86/mm/fault.c linux-2.6.27-591/arch/x86/mm/fau
  /*
   * X86_32
   * Sometimes AMD Athlon/Opteron CPUs report invalid exceptions on prefetch.
-diff -Nurb linux-2.6.27-590/drivers/oprofile/cpu_buffer.c linux-2.6.27-591/drivers/oprofile/cpu_buffer.c
---- linux-2.6.27-590/drivers/oprofile/cpu_buffer.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-591/drivers/oprofile/cpu_buffer.c	2010-01-29 16:30:22.000000000 -0500
+Index: linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
+===================================================================
+--- linux-2.6.27.y.orig/drivers/oprofile/cpu_buffer.c
++++ linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -157,7 +163,7 @@ diff -Nurb linux-2.6.27-590/drivers/oprofile/cpu_buffer.c linux-2.6.27-591/drive
   
  #include "event_buffer.h"
  #include "cpu_buffer.h"
-@@ -147,6 +148,17 @@
+@@ -147,6 +148,17 @@ static void increment_head(struct oprofi
  		b->head_pos = 0;
  }
  
@@ -175,7 +181,7 @@ diff -Nurb linux-2.6.27-590/drivers/oprofile/cpu_buffer.c linux-2.6.27-591/drive
  static inline void
  add_sample(struct oprofile_cpu_buffer * cpu_buf,
             unsigned long pc, unsigned long event)
-@@ -155,6 +167,7 @@
+@@ -155,6 +167,7 @@ add_sample(struct oprofile_cpu_buffer * 
  	entry->eip = pc;
  	entry->event = event;
  	increment_head(cpu_buf);
@@ -183,7 +189,7 @@ diff -Nurb linux-2.6.27-590/drivers/oprofile/cpu_buffer.c linux-2.6.27-591/drive
  }
  
  static inline void
-@@ -250,8 +263,28 @@
+@@ -250,8 +263,28 @@ void oprofile_add_sample(struct pt_regs 
  {
  	int is_kernel = !user_mode(regs);
  	unsigned long pc = profile_pc(regs);
@@ -212,9 +218,10 @@ diff -Nurb linux-2.6.27-590/drivers/oprofile/cpu_buffer.c linux-2.6.27-591/drive
  }
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
-diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
---- linux-2.6.27-590/fs/bio.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-591/fs/bio.c	2010-01-31 22:21:09.000000000 -0500
+Index: linux-2.6.27.y/fs/bio.c
+===================================================================
+--- linux-2.6.27.y.orig/fs/bio.c
++++ linux-2.6.27.y/fs/bio.c
 @@ -27,6 +27,7 @@
  #include <linux/workqueue.h>
  #include <linux/blktrace_api.h>
@@ -223,7 +230,7 @@ diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
  
  static struct kmem_cache *bio_slab __read_mostly;
  
-@@ -44,6 +45,7 @@
+@@ -44,6 +45,7 @@ static struct biovec_slab bvec_slabs[BIO
  };
  #undef BV
  
@@ -231,7 +238,7 @@ diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
  /*
   * fs_bio_set is the bio_set containing bio and iovec memory pools used by
   * IO code that does not need private memory pools.
-@@ -1171,6 +1173,14 @@
+@@ -1171,6 +1173,14 @@ void bio_check_pages_dirty(struct bio *b
  	}
  }
  
@@ -246,7 +253,7 @@ diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
  /**
   * bio_endio - end I/O on a bio
   * @bio:	bio
-@@ -1192,6 +1202,24 @@
+@@ -1192,6 +1202,24 @@ void bio_endio(struct bio *bio, int erro
  	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
  		error = -EIO;
  
@@ -271,9 +278,10 @@ diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
  	if (bio->bi_end_io)
  		bio->bi_end_io(bio, error);
  }
-diff -Nurb linux-2.6.27-590/fs/exec.c linux-2.6.27-591/fs/exec.c
---- linux-2.6.27-590/fs/exec.c	2010-01-29 16:29:48.000000000 -0500
-+++ linux-2.6.27-591/fs/exec.c	2010-01-29 16:45:48.000000000 -0500
+Index: linux-2.6.27.y/fs/exec.c
+===================================================================
+--- linux-2.6.27.y.orig/fs/exec.c
++++ linux-2.6.27.y/fs/exec.c
 @@ -27,6 +27,7 @@
  #include <linux/fdtable.h>
  #include <linux/mm.h>
@@ -282,7 +290,7 @@ diff -Nurb linux-2.6.27-590/fs/exec.c linux-2.6.27-591/fs/exec.c
  #include <linux/fcntl.h>
  #include <linux/smp_lock.h>
  #include <linux/swap.h>
-@@ -698,6 +699,13 @@
+@@ -698,6 +699,13 @@ struct file *open_exec(const char *name)
  		goto out;
  	}
  
@@ -296,9 +304,10 @@ diff -Nurb linux-2.6.27-590/fs/exec.c linux-2.6.27-591/fs/exec.c
  	return file;
  
   out_path_put:
-diff -Nurb linux-2.6.27-590/fs/exec.c.rej linux-2.6.27-591/fs/exec.c.rej
---- linux-2.6.27-590/fs/exec.c.rej	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-591/fs/exec.c.rej	2010-01-31 22:21:18.000000000 -0500
+Index: linux-2.6.27.y/fs/exec.c.rej
+===================================================================
+--- /dev/null
++++ linux-2.6.27.y/fs/exec.c.rej
 @@ -0,0 +1,36 @@
 +***************
 +*** 40,46 ****
@@ -336,9 +345,10 @@ diff -Nurb linux-2.6.27-590/fs/exec.c.rej linux-2.6.27-591/fs/exec.c.rej
 +   #endif
 +  
 +  	return file;
-diff -Nurb linux-2.6.27-590/include/linux/arrays.h linux-2.6.27-591/include/linux/arrays.h
---- linux-2.6.27-590/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-591/include/linux/arrays.h	2010-01-29 16:30:22.000000000 -0500
+Index: linux-2.6.27.y/include/linux/arrays.h
+===================================================================
+--- /dev/null
++++ linux-2.6.27.y/include/linux/arrays.h
 @@ -0,0 +1,36 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
@@ -376,9 +386,10 @@ diff -Nurb linux-2.6.27-590/include/linux/arrays.h linux-2.6.27-591/include/linu
 +	struct task_struct *task;
 +};
 +#endif
-diff -Nurb linux-2.6.27-590/include/linux/sched.h.rej linux-2.6.27-591/include/linux/sched.h.rej
---- linux-2.6.27-590/include/linux/sched.h.rej	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-591/include/linux/sched.h.rej	2010-01-29 16:30:22.000000000 -0500
+Index: linux-2.6.27.y/include/linux/sched.h.rej
+===================================================================
+--- /dev/null
++++ linux-2.6.27.y/include/linux/sched.h.rej
 @@ -0,0 +1,19 @@
 +***************
 +*** 850,855 ****
@@ -399,9 +410,10 @@ diff -Nurb linux-2.6.27-590/include/linux/sched.h.rej linux-2.6.27-591/include/l
 +  	unsigned long long sched_time; /* sched_clock time spent running */
 +  	enum sleep_type sleep_type;
 +  
-diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
---- linux-2.6.27-590/kernel/sched.c	2010-01-29 16:29:48.000000000 -0500
-+++ linux-2.6.27-591/kernel/sched.c	2010-01-31 22:21:08.000000000 -0500
+Index: linux-2.6.27.y/kernel/sched.c
+===================================================================
+--- linux-2.6.27.y.orig/kernel/sched.c
++++ linux-2.6.27.y/kernel/sched.c
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -428,7 +440,7 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
  /*
   * Convert user-nice values [ -20 ... 0 ... 19 ]
   * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
-@@ -4428,6 +4432,29 @@
+@@ -4436,6 +4440,29 @@ pick_next_task(struct rq *rq, struct tas
  	}
  }
  
@@ -458,7 +470,7 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
  /*
   * schedule() is the main scheduler function.
   */
-@@ -5369,6 +5396,7 @@
+@@ -5382,6 +5409,7 @@ long sched_setaffinity(pid_t pid, const 
  	get_task_struct(p);
  	read_unlock(&tasklist_lock);
  
@@ -466,36 +478,10 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
  	retval = -EPERM;
  	if ((current->euid != p->euid) && (current->euid != p->uid) &&
  			!capable(CAP_SYS_NICE))
-@@ -9296,3 +9324,26 @@
- 	.subsys_id = cpuacct_subsys_id,
- };
- #endif	/* CONFIG_CGROUP_CPUACCT */
-+
-+#ifdef CONFIG_CHOPSTIX
-+void (*rec_event)();
-+EXPORT_SYMBOL(rec_event);
-+
-+struct event_spec {
-+    unsigned long pc;
-+    unsigned long dcookie;
-+    unsigned int count;
-+    unsigned int reason;
-+};
-+
-+/* To support safe calling from asm */
-+asmlinkage void rec_event_asm (struct event *event_signature_in, unsigned int count) {
-+    struct pt_regs *regs;
-+    struct event_spec *es = event_signature_in->event_data;
-+    regs = task_pt_regs(current);
-+    event_signature_in->task=current;
-+    es->pc=regs->ip;
-+    event_signature_in->count=1;
-+    (*rec_event)(event_signature_in, count);
-+}
-+#endif
-diff -Nurb linux-2.6.27-590/kernel/sched.c.rej linux-2.6.27-591/kernel/sched.c.rej
---- linux-2.6.27-590/kernel/sched.c.rej	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.27-591/kernel/sched.c.rej	2010-01-29 16:30:22.000000000 -0500
+Index: linux-2.6.27.y/kernel/sched.c.rej
+===================================================================
+--- /dev/null
++++ linux-2.6.27.y/kernel/sched.c.rej
 @@ -0,0 +1,258 @@
 +***************
 +*** 23,28 ****
@@ -755,9 +741,10 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c.rej linux-2.6.27-591/kernel/sched.c.r
 ++ EXPORT_SYMBOL(rec_event);
 ++ EXPORT_SYMBOL(in_sched_functions);
 ++ #endif
-diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
---- linux-2.6.27-590/mm/memory.c	2010-01-29 16:29:48.000000000 -0500
-+++ linux-2.6.27-591/mm/memory.c	2010-01-31 22:21:18.000000000 -0500
+Index: linux-2.6.27.y/mm/memory.c
+===================================================================
+--- linux-2.6.27.y.orig/mm/memory.c
++++ linux-2.6.27.y/mm/memory.c
 @@ -61,6 +61,7 @@
  
  #include <linux/swapops.h>
@@ -766,7 +753,7 @@ diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
  
  #include "internal.h"
  
-@@ -2690,6 +2691,15 @@
+@@ -2753,6 +2754,15 @@ out:
  	return ret;
  }
  
@@ -782,7 +769,7 @@ diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
  /*
   * By the time we get here, we already hold the mm semaphore
   */
-@@ -2719,6 +2729,24 @@
+@@ -2782,6 +2792,24 @@ int handle_mm_fault(struct mm_struct *mm
  	if (!pte)
  		return VM_FAULT_OOM;
  
@@ -807,9 +794,10 @@ diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
  	return handle_pte_fault(mm, vma, address, pte, pmd, write_access);
  }
  
-diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
---- linux-2.6.27-590/mm/slab.c	2010-01-29 16:29:48.000000000 -0500
-+++ linux-2.6.27-591/mm/slab.c	2010-01-29 16:30:22.000000000 -0500
+Index: linux-2.6.27.y/mm/slab.c
+===================================================================
+--- linux-2.6.27.y.orig/mm/slab.c
++++ linux-2.6.27.y/mm/slab.c
 @@ -110,6 +110,7 @@
  #include	<linux/fault-inject.h>
  #include	<linux/rtmutex.h>
@@ -818,7 +806,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  #include	<linux/debugobjects.h>
  
  #include	<asm/cacheflush.h>
-@@ -248,6 +249,14 @@
+@@ -248,6 +249,14 @@ struct slab_rcu {
  	void *addr;
  };
  
@@ -833,7 +821,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  /*
   * struct array_cache
   *
-@@ -3469,6 +3478,19 @@
+@@ -3469,6 +3478,19 @@ __cache_alloc(struct kmem_cache *cachep,
  	local_irq_restore(save_flags);
  	objp = cache_alloc_debugcheck_after(cachep, flags, objp, caller);
  	prefetchw(objp);
@@ -853,7 +841,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  
  	if (unlikely((flags & __GFP_ZERO) && objp))
  		memset(objp, 0, obj_size(cachep));
-@@ -3578,12 +3600,26 @@
+@@ -3578,12 +3600,26 @@ free_done:
   * Release an obj back to its cache. If the obj has a constructed state, it must
   * be in this state _before_ it is released.  Called with disabled ints.
   */
@@ -882,7 +870,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  	vx_slab_free(cachep);
  
  	/*
-@@ -3714,6 +3750,7 @@
+@@ -3714,6 +3750,7 @@ static __always_inline void *__do_kmallo
  					  void *caller)
  {
  	struct kmem_cache *cachep;
@@ -890,7 +878,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  
  	/* If you want to save a few bytes .text space: replace
  	 * __ with kmem_.
-@@ -3741,10 +3778,17 @@
+@@ -3741,10 +3778,17 @@ void *__kmalloc_track_caller(size_t size
  EXPORT_SYMBOL(__kmalloc_track_caller);
  
  #else
@@ -908,7 +896,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  EXPORT_SYMBOL(__kmalloc);
  #endif
  
-@@ -3764,7 +3808,7 @@
+@@ -3764,7 +3808,7 @@ void kmem_cache_free(struct kmem_cache *
  	debug_check_no_locks_freed(objp, obj_size(cachep));
  	if (!(cachep->flags & SLAB_DEBUG_OBJECTS))
  		debug_check_no_obj_freed(objp, obj_size(cachep));
@@ -917,7 +905,7 @@ diff -Nurb linux-2.6.27-590/mm/slab.c linux-2.6.27-591/mm/slab.c
  	local_irq_restore(flags);
  }
  EXPORT_SYMBOL(kmem_cache_free);
-@@ -3790,7 +3834,7 @@
+@@ -3790,7 +3834,7 @@ void kfree(const void *objp)
  	c = virt_to_cache(objp);
  	debug_check_no_locks_freed(objp, obj_size(c));
  	debug_check_no_obj_freed(objp, obj_size(c));
