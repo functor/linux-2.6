@@ -71,28 +71,6 @@ Index: linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c
  	OFFSET(TI_task, thread_info, task);
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
-Index: linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c.rej
-===================================================================
---- /dev/null
-+++ linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c.rej
-@@ -0,0 +1,17 @@
-+***************
-+*** 63,69 ****
-+  	BLANK();
-+  
-+      STACKOFFSET(TASK_thread, task_struct, thread);
-+-     STACKOFFSET(THREAD_esp, thread_struct, esp);
-+      STACKOFFSET(EVENT_event_data, event, event_data);
-+      STACKOFFSET(EVENT_task, event, task);
-+      STACKOFFSET(EVENT_event_type, event, event_type);
-+--- 63,69 ----
-+  	BLANK();
-+  
-+      STACKOFFSET(TASK_thread, task_struct, thread);
-++     STACKOFFSET(THREAD_esp, thread_struct, sp);
-+      STACKOFFSET(EVENT_event_data, event, event_data);
-+      STACKOFFSET(EVENT_task, event, task);
-+      STACKOFFSET(EVENT_event_type, event, event_type);
 Index: linux-2.6.27.y/arch/x86/kernel/entry_32.S
 ===================================================================
 --- linux-2.6.27.y.orig/arch/x86/kernel/entry_32.S
@@ -297,54 +275,13 @@ Index: linux-2.6.27.y/fs/exec.c
 + #ifdef CONFIG_CHOPSTIX
 +    unsigned long cookie;
 +    extern void (*rec_event)(void *, unsigned int);
-+    if (rec_event && !nd.dentry->d_cookie)
-+        get_dcookie(nd.dentry, nd.mnt, &cookie);
++    if (rec_event && !nd.path.dentry->d_cookie)
++        get_dcookie(&nd.path, &cookie);
 + #endif
 +
  	return file;
  
   out_path_put:
-Index: linux-2.6.27.y/fs/exec.c.rej
-===================================================================
---- /dev/null
-+++ linux-2.6.27.y/fs/exec.c.rej
-@@ -0,0 +1,36 @@
-+***************
-+*** 40,46 ****
-+  #include <linux/personality.h>
-+  #include <linux/binfmts.h>
-+  #include <linux/utsname.h>
-+- /*#include <linux/pid_namespace.h>*/
-+  #include <linux/module.h>
-+  #include <linux/namei.h>
-+  #include <linux/proc_fs.h>
-+--- 40,46 ----
-+  #include <linux/personality.h>
-+  #include <linux/binfmts.h>
-+  #include <linux/utsname.h>
-++ #include <linux/pid_namespace.h>
-+  #include <linux/module.h>
-+  #include <linux/namei.h>
-+  #include <linux/proc_fs.h>
-+***************
-+*** 702,709 ****
-+   #ifdef CONFIG_CHOPSTIX
-+      unsigned long cookie;
-+      extern void (*rec_event)(void *, unsigned int);
-+-     if (rec_event && !nd.dentry->d_cookie)
-+-         get_dcookie(nd.dentry, nd.mnt, &cookie);
-+   #endif
-+  
-+  	return file;
-+--- 702,709 ----
-+   #ifdef CONFIG_CHOPSTIX
-+      unsigned long cookie;
-+      extern void (*rec_event)(void *, unsigned int);
-++     if (rec_event && !nd.path.dentry->d_cookie)
-++         get_dcookie(&nd.path, &cookie);
-+   #endif
-+  
-+  	return file;
 Index: linux-2.6.27.y/include/linux/arrays.h
 ===================================================================
 --- /dev/null
