@@ -69,6 +69,27 @@ diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c linux-2.6.27-591/ar
  	OFFSET(TI_task, thread_info, task);
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
+diff -Nurb linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c.rej linux-2.6.27-591/arch/x86/kernel/asm-offsets_32.c.rej
+--- linux-2.6.27-590/arch/x86/kernel/asm-offsets_32.c.rej	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.27-591/arch/x86/kernel/asm-offsets_32.c.rej	2010-01-31 22:21:08.000000000 -0500
+@@ -0,0 +1,17 @@
++***************
++*** 63,69 ****
++  	BLANK();
++  
++      STACKOFFSET(TASK_thread, task_struct, thread);
++-     STACKOFFSET(THREAD_esp, thread_struct, esp);
++      STACKOFFSET(EVENT_event_data, event, event_data);
++      STACKOFFSET(EVENT_task, event, task);
++      STACKOFFSET(EVENT_event_type, event, event_type);
++--- 63,69 ----
++  	BLANK();
++  
++      STACKOFFSET(TASK_thread, task_struct, thread);
+++     STACKOFFSET(THREAD_esp, thread_struct, sp);
++      STACKOFFSET(EVENT_event_data, event, event_data);
++      STACKOFFSET(EVENT_task, event, task);
++      STACKOFFSET(EVENT_event_type, event, event_type);
 diff -Nurb linux-2.6.27-590/arch/x86/kernel/entry_32.S linux-2.6.27-591/arch/x86/kernel/entry_32.S
 --- linux-2.6.27-590/arch/x86/kernel/entry_32.S	2008-10-09 18:13:53.000000000 -0400
 +++ linux-2.6.27-591/arch/x86/kernel/entry_32.S	2010-01-29 16:30:22.000000000 -0500
@@ -193,7 +214,7 @@ diff -Nurb linux-2.6.27-590/drivers/oprofile/cpu_buffer.c linux-2.6.27-591/drive
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
 diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
 --- linux-2.6.27-590/fs/bio.c	2008-10-09 18:13:53.000000000 -0400
-+++ linux-2.6.27-591/fs/bio.c	2010-01-29 16:30:22.000000000 -0500
++++ linux-2.6.27-591/fs/bio.c	2010-01-31 22:21:09.000000000 -0500
 @@ -27,6 +27,7 @@
  #include <linux/workqueue.h>
  #include <linux/blktrace_api.h>
@@ -229,7 +250,7 @@ diff -Nurb linux-2.6.27-590/fs/bio.c linux-2.6.27-591/fs/bio.c
  	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
  		error = -EIO;
  
-+#ifdef CONFIG_CHOPSTIX
++#if 0
 +		if (rec_event) {
 +			struct event event;
 +			struct event_spec espec;
@@ -275,6 +296,46 @@ diff -Nurb linux-2.6.27-590/fs/exec.c linux-2.6.27-591/fs/exec.c
  	return file;
  
   out_path_put:
+diff -Nurb linux-2.6.27-590/fs/exec.c.rej linux-2.6.27-591/fs/exec.c.rej
+--- linux-2.6.27-590/fs/exec.c.rej	1969-12-31 19:00:00.000000000 -0500
++++ linux-2.6.27-591/fs/exec.c.rej	2010-01-31 22:21:18.000000000 -0500
+@@ -0,0 +1,36 @@
++***************
++*** 40,46 ****
++  #include <linux/personality.h>
++  #include <linux/binfmts.h>
++  #include <linux/utsname.h>
++- /*#include <linux/pid_namespace.h>*/
++  #include <linux/module.h>
++  #include <linux/namei.h>
++  #include <linux/proc_fs.h>
++--- 40,46 ----
++  #include <linux/personality.h>
++  #include <linux/binfmts.h>
++  #include <linux/utsname.h>
+++ #include <linux/pid_namespace.h>
++  #include <linux/module.h>
++  #include <linux/namei.h>
++  #include <linux/proc_fs.h>
++***************
++*** 702,709 ****
++   #ifdef CONFIG_CHOPSTIX
++      unsigned long cookie;
++      extern void (*rec_event)(void *, unsigned int);
++-     if (rec_event && !nd.dentry->d_cookie)
++-         get_dcookie(nd.dentry, nd.mnt, &cookie);
++   #endif
++  
++  	return file;
++--- 702,709 ----
++   #ifdef CONFIG_CHOPSTIX
++      unsigned long cookie;
++      extern void (*rec_event)(void *, unsigned int);
+++     if (rec_event && !nd.path.dentry->d_cookie)
+++         get_dcookie(&nd.path, &cookie);
++   #endif
++  
++  	return file;
 diff -Nurb linux-2.6.27-590/include/linux/arrays.h linux-2.6.27-591/include/linux/arrays.h
 --- linux-2.6.27-590/include/linux/arrays.h	1969-12-31 19:00:00.000000000 -0500
 +++ linux-2.6.27-591/include/linux/arrays.h	2010-01-29 16:30:22.000000000 -0500
@@ -340,7 +401,7 @@ diff -Nurb linux-2.6.27-590/include/linux/sched.h.rej linux-2.6.27-591/include/l
 +  
 diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
 --- linux-2.6.27-590/kernel/sched.c	2010-01-29 16:29:48.000000000 -0500
-+++ linux-2.6.27-591/kernel/sched.c	2010-01-29 17:38:44.000000000 -0500
++++ linux-2.6.27-591/kernel/sched.c	2010-01-31 22:21:08.000000000 -0500
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -350,7 +411,14 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
   *		an array-switch method of distributing timeslices
   *		and per-CPU runqueues.  Cleanups and useful suggestions
   *		by Davide Libenzi, preemptible kernel bits by Robert Love.
-@@ -79,6 +79,9 @@
+@@ -73,12 +73,16 @@
+ #include <linux/ftrace.h>
+ #include <linux/vs_sched.h>
+ #include <linux/vs_cvirt.h>
++#include <linux/arrays.h>
+ 
+ #include <asm/tlb.h>
+ #include <asm/irq_regs.h>
  
  #include "sched_cpupri.h"
  
@@ -360,13 +428,13 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
  /*
   * Convert user-nice values [ -20 ... 0 ... 19 ]
   * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
-@@ -4428,6 +4431,29 @@
+@@ -4428,6 +4432,29 @@
  	}
  }
  
-+#ifdef CONFIG_CHOPSTIX
 +void (*rec_event)(void *,unsigned int) = NULL;
 +EXPORT_SYMBOL(rec_event);
++#ifdef CONFIG_CHOPSTIX
 +
 +struct event_spec {
 +    unsigned long pc;
@@ -390,7 +458,7 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
  /*
   * schedule() is the main scheduler function.
   */
-@@ -5369,6 +5395,7 @@
+@@ -5369,6 +5396,7 @@
  	get_task_struct(p);
  	read_unlock(&tasklist_lock);
  
@@ -398,6 +466,33 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c linux-2.6.27-591/kernel/sched.c
  	retval = -EPERM;
  	if ((current->euid != p->euid) && (current->euid != p->uid) &&
  			!capable(CAP_SYS_NICE))
+@@ -9296,3 +9324,26 @@
+ 	.subsys_id = cpuacct_subsys_id,
+ };
+ #endif	/* CONFIG_CGROUP_CPUACCT */
++
++#ifdef CONFIG_CHOPSTIX
++void (*rec_event)();
++EXPORT_SYMBOL(rec_event);
++
++struct event_spec {
++    unsigned long pc;
++    unsigned long dcookie;
++    unsigned int count;
++    unsigned int reason;
++};
++
++/* To support safe calling from asm */
++asmlinkage void rec_event_asm (struct event *event_signature_in, unsigned int count) {
++    struct pt_regs *regs;
++    struct event_spec *es = event_signature_in->event_data;
++    regs = task_pt_regs(current);
++    event_signature_in->task=current;
++    es->pc=regs->ip;
++    event_signature_in->count=1;
++    (*rec_event)(event_signature_in, count);
++}
++#endif
 diff -Nurb linux-2.6.27-590/kernel/sched.c.rej linux-2.6.27-591/kernel/sched.c.rej
 --- linux-2.6.27-590/kernel/sched.c.rej	1969-12-31 19:00:00.000000000 -0500
 +++ linux-2.6.27-591/kernel/sched.c.rej	2010-01-29 16:30:22.000000000 -0500
@@ -662,7 +757,7 @@ diff -Nurb linux-2.6.27-590/kernel/sched.c.rej linux-2.6.27-591/kernel/sched.c.r
 ++ #endif
 diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
 --- linux-2.6.27-590/mm/memory.c	2010-01-29 16:29:48.000000000 -0500
-+++ linux-2.6.27-591/mm/memory.c	2010-01-29 16:30:22.000000000 -0500
++++ linux-2.6.27-591/mm/memory.c	2010-01-31 22:21:18.000000000 -0500
 @@ -61,6 +61,7 @@
  
  #include <linux/swapops.h>
@@ -698,7 +793,7 @@ diff -Nurb linux-2.6.27-590/mm/memory.c linux-2.6.27-591/mm/memory.c
 +        struct pt_regs *regs;
 +        unsigned int pc;
 +        regs = task_pt_regs(current);
-+        pc = regs->eip & (unsigned int) ~4095;
++        pc = regs->ip & (unsigned int) ~4095;
 +
 +		espec.reason = 0; /* alloc */
 +		event.event_data=&espec;
