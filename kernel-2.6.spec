@@ -139,7 +139,6 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 %if "0%{patchlevel}"
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
-Patch050: linux-2.6-050-getline.patch
 
 Patch100: linux-2.6-100-build-nonintconfig.patch
 
