@@ -1,6 +1,7 @@
-diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/init/Kconfig linux-2.6.27.10-vs2.3.x-P540/init/Kconfig
---- linux-2.6.27.10-vs2.3.x-P/init/Kconfig	2008-10-13 14:52:09.000000000 +0200
-+++ linux-2.6.27.10-vs2.3.x-P540/init/Kconfig	2009-01-12 01:18:23.000000000 +0100
+Index: linux-2.6.27.y/init/Kconfig
+===================================================================
+--- linux-2.6.27.y.orig/init/Kconfig
++++ linux-2.6.27.y/init/Kconfig
 @@ -306,6 +306,23 @@ config CGROUP_DEVICE
  	  Provides a cgroup implementing whitelists for devices which
  	  a process in the cgroup can mknod or open.
@@ -25,10 +26,11 @@ diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/init/
  config CPUSETS
  	bool "Cpuset support"
  	depends on SMP && CGROUPS
-diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/mm/oom_kill.c linux-2.6.27.10-vs2.3.x-P540/mm/oom_kill.c
---- linux-2.6.27.10-vs2.3.x-P/mm/oom_kill.c	2008-10-13 14:54:20.000000000 +0200
-+++ linux-2.6.27.10-vs2.3.x-P540/mm/oom_kill.c	2009-01-12 01:18:23.000000000 +0100
-@@ -176,6 +176,11 @@ unsigned long badness(struct task_struct
+Index: linux-2.6.27.y/mm/oom_kill.c
+===================================================================
+--- linux-2.6.27.y.orig/mm/oom_kill.c
++++ linux-2.6.27.y/mm/oom_kill.c
+@@ -177,6 +177,11 @@ unsigned long badness(struct task_struct
  	return points;
  }
  
@@ -40,7 +42,23 @@ diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/mm/oo
  /*
   * Determine the type of allocation constraint.
   */
-@@ -597,3 +602,37 @@ out:
+@@ -454,6 +459,7 @@ out:
+ 	read_unlock(&tasklist_lock);
+ 	cgroup_unlock();
+ }
++
+ #endif
+ 
+ static BLOCKING_NOTIFIER_HEAD(oom_notify_list);
+@@ -519,6 +525,7 @@ void clear_zonelist_oom(struct zonelist 
+ 	}
+ 	spin_unlock(&zone_scan_mutex);
+ }
++EXPORT_SYMBOL_GPL(clear_zonelist_oom);
+ 
+ /**
+  * out_of_memory - kill the "best" process when we run out of memory
+@@ -602,3 +609,47 @@ out:
  	if (!test_thread_flag(TIF_MEMDIE))
  		schedule_timeout_uninterruptible(1);
  }
@@ -77,10 +95,21 @@ diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/mm/oo
 +	}
 +	spin_unlock(&oom_lock);
 +}
++
++#ifdef CONFIG_CGROUP_MEM_RES_CTLR
++void mem_cgroup_out_of_memory(struct mem_cgroup *mem, gfp_t gfp_mask)
++{
++	cgroup_lock();
++	panic("Memory cgroup out Of Memory");
++	cgroup_unlock();
++}
++
++#endif
 +#endif /*  CONFIG_OOM_PANIC */
-diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/mm/oom_panic.c linux-2.6.27.10-vs2.3.x-P540/mm/oom_panic.c
---- linux-2.6.27.10-vs2.3.x-P/mm/oom_panic.c	1970-01-01 01:00:00.000000000 +0100
-+++ linux-2.6.27.10-vs2.3.x-P540/mm/oom_panic.c	2009-01-12 01:18:23.000000000 +0100
+Index: linux-2.6.27.y/mm/oom_panic.c
+===================================================================
+--- /dev/null
++++ linux-2.6.27.y/mm/oom_panic.c
 @@ -0,0 +1,51 @@
 +/* 
 + * Just panic() instead of the default behavior of selecting processes
@@ -133,46 +162,11 @@ diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/mm/oo
 +out_unlock:
 +	spin_unlock(&oom_lock);
 +}
-
-; fixup
-diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-02.0/mm/oom_kill.c linux-2.6.27.10-vs2.3.x-PS-02.1/mm/oom_kill.c
---- linux-2.6.27.10-vs2.3.x-PS-02.0/mm/oom_kill.c	2009-01-25 02:29:32.000000000 +0100
-+++ linux-2.6.27.10-vs2.3.x-PS-02.1/mm/oom_kill.c	2009-01-25 02:05:07.000000000 +0100
-@@ -454,6 +454,7 @@ out:
- 	read_unlock(&tasklist_lock);
- 	cgroup_unlock();
- }
-+
- #endif
- 
- static BLOCKING_NOTIFIER_HEAD(oom_notify_list);
-@@ -519,6 +520,7 @@ void clear_zonelist_oom(struct zonelist 
- 	}
- 	spin_unlock(&zone_scan_mutex);
- }
-+EXPORT_SYMBOL_GPL(clear_zonelist_oom);
- 
- /**
-  * out_of_memory - kill the "best" process when we run out of memory
-@@ -635,4 +637,14 @@ void out_of_memory(struct zonelist *zone
- 	}
- 	spin_unlock(&oom_lock);
- }
-+
-+#ifdef CONFIG_CGROUP_MEM_RES_CTLR
-+void mem_cgroup_out_of_memory(struct mem_cgroup *mem, gfp_t gfp_mask)
-+{
-+	cgroup_lock();
-+	panic("Memory cgroup out Of Memory");
-+	cgroup_unlock();
-+}
-+
-+#endif
- #endif /*  CONFIG_OOM_PANIC */
-diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-02.0/mm/page_alloc.c linux-2.6.27.10-vs2.3.x-PS-02.1/mm/page_alloc.c
---- linux-2.6.27.10-vs2.3.x-PS-02.0/mm/page_alloc.c	2008-12-19 12:09:14.000000000 +0100
-+++ linux-2.6.27.10-vs2.3.x-PS-02.1/mm/page_alloc.c	2009-01-25 00:37:42.000000000 +0100
-@@ -1583,11 +1583,12 @@ nofail_alloc:
+Index: linux-2.6.27.y/mm/page_alloc.c
+===================================================================
+--- linux-2.6.27.y.orig/mm/page_alloc.c
++++ linux-2.6.27.y/mm/page_alloc.c
+@@ -1588,11 +1588,12 @@ nofail_alloc:
  		if (page)
  			goto got_pg;
  	} else if ((gfp_mask & __GFP_FS) && !(gfp_mask & __GFP_NORETRY)) {
@@ -186,7 +180,7 @@ diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-02.0
  		/*
  		 * Go through the zonelist yet one more time, keep
  		 * very high watermark here, this is only to catch
-@@ -1598,18 +1599,24 @@ nofail_alloc:
+@@ -1603,18 +1604,24 @@ nofail_alloc:
  			order, zonelist, high_zoneidx,
  			ALLOC_WMARK_HIGH|ALLOC_CPUSET);
  		if (page) {
