@@ -1,0 +1,46 @@
+commit 58d5fa7a6a6fc4754d295d0999b284edd67c8620
+Author: Siddha, Suresh B <suresh.b.siddha@intel.com>
+Date:   Wed Oct 17 18:04:33 2007 +0200
+
+    i386: fix 4 bit apicid assumption of mach-default
+    
+    Fix get_apic_id() in mach-default, so that it uses 8 bits incase of
+    xAPIC case and 4 bits for legacy APIC case.
+    
+    This fixes the i386 kernel assumption that apic id is less than 16 for
+    xAPIC platforms with 8 cpus or less and makes the kernel boot on such
+    platforms.
+    
+    [ tglx: arch/x86 adaptation ]
+    
+    Signed-off-by: Suresh Siddha <suresh.b.siddha@intel.com>
+    Signed-off-by: Andi Kleen <ak@suse.de>
+    Cc: Andi Kleen <ak@suse.de>
+    Cc: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Ingo Molnar <mingo@elte.hu>
+    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+
+diff --git a/include/asm-i386/mach-default/mach_apicdef.h b/include/asm-i386/mach-default/mach_apicdef.h
+index 7bcb350..ae98413 100644
+--- a/include/asm-i386/mach-default/mach_apicdef.h
++++ b/include/asm-i386/mach-default/mach_apicdef.h
+@@ -1,11 +1,17 @@
+ #ifndef __ASM_MACH_APICDEF_H
+ #define __ASM_MACH_APICDEF_H
+ 
++#include <asm/apic.h>
++
+ #define		APIC_ID_MASK		(0xF<<24)
+ 
+ static inline unsigned get_apic_id(unsigned long x) 
+ { 
+-	return (((x)>>24)&0xF);
++	unsigned int ver = GET_APIC_VERSION(apic_read(APIC_LVR));
++	if (APIC_XAPIC(ver))
++		return (((x)>>24)&0xFF);
++	else
++		return (((x)>>24)&0xF);
+ } 
+ 
+ #define		GET_APIC_ID(x)	get_apic_id(x)

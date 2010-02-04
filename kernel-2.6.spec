@@ -204,6 +204,8 @@ Patch720: linux-2.6-720-bonding-layer23.patch
 Patch721: linux-2.6-721-bonding-layer3.patch
 Patch722: linux-2.6-722-bonding-rr.patch
 
+Patch800: linux-2.6-800-fix-4-bit-apicid-assumption.patch
+
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
 # see http://bughost.org/bugzilla/show_bug.cgi?id=1584
@@ -432,6 +434,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 720
 %ApplyPatch 721
 %ApplyPatch 722
+%ApplyPatch 800
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
