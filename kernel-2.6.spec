@@ -160,6 +160,8 @@ Patch050: linux-2.6-050-getline.patch
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
 
+Patch150: linux-2.6-150-cciss-allow-kexec-to-work.patch
+
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch210: linux-2.6-210-vserver-cpu-sched.patch
@@ -392,6 +394,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 50
 
 %ApplyPatch 100
+
+%ApplyPatch 150
 
 %ApplyPatch 200
 %ApplyPatch 210
