@@ -1,7 +1,6 @@
-Index: linux-2.6.27.y/include/linux/netdevice.h
-===================================================================
---- linux-2.6.27.y.orig/include/linux/netdevice.h
-+++ linux-2.6.27.y/include/linux/netdevice.h
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522-523-524/include/linux/netdevice.h linux-2.6.27.10-vs2.3.x-PS-522-523-524-525/include/linux/netdevice.h
+--- linux-2.6.27.10-vs2.3.x-PS-522-523-524/include/linux/netdevice.h	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523-524-525/include/linux/netdevice.h	2009-01-21 03:38:41.000000000 +0100
 @@ -857,6 +857,7 @@ static inline void netif_napi_del(struct
  struct packet_type {
  	__be16			type;	/* This is really htons(ether_type). */
@@ -10,10 +9,9 @@ Index: linux-2.6.27.y/include/linux/netdevice.h
  	int			(*func) (struct sk_buff *,
  					 struct net_device *,
  					 struct packet_type *,
-Index: linux-2.6.27.y/net/core/dev.c
-===================================================================
---- linux-2.6.27.y.orig/net/core/dev.c
-+++ linux-2.6.27.y/net/core/dev.c
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522-523-524/net/core/dev.c linux-2.6.27.10-vs2.3.x-PS-522-523-524-525/net/core/dev.c
+--- linux-2.6.27.10-vs2.3.x-PS-522-523-524/net/core/dev.c	2008-12-19 12:09:14.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-PS-522-523-524-525/net/core/dev.c	2009-01-21 03:43:19.000000000 +0100
 @@ -99,6 +99,8 @@
  #include <linux/proc_fs.h>
  #include <linux/seq_file.h>
@@ -47,15 +45,15 @@ Index: linux-2.6.27.y/net/core/dev.c
  	struct net_device *orig_dev;
  	struct net_device *null_or_orig;
  	int ret = NET_RX_DROP;
-+ 	int *cur_elevator = &__get_cpu_var(sknid_elevator);
++	int *cur_elevator = &__get_cpu_var(sknid_elevator);
  	__be16 type;
  
-+ 	*cur_elevator = 0;
++	*cur_elevator = 0;
 +
- 	if (skb->vlan_tci && vlan_hwaccel_do_receive(skb))
- 		return NET_RX_SUCCESS;
- 
-@@ -2272,7 +2281,27 @@ ncls:
+ 	/* if we've gotten here through NAPI, check netpoll */
+ 	if (netpoll_receive_skb(skb))
+ 		return NET_RX_DROP;
+@@ -2269,7 +2278,27 @@ ncls:
  	}
  
  	if (pt_prev) {
@@ -83,7 +81,7 @@ Index: linux-2.6.27.y/net/core/dev.c
  	} else {
  		kfree_skb(skb);
  		/* Jamal, now you will not able to escape explaining
-@@ -4895,6 +4924,7 @@ EXPORT_SYMBOL(unregister_netdevice_notif
+@@ -4892,6 +4921,7 @@ EXPORT_SYMBOL(unregister_netdevice_notif
  EXPORT_SYMBOL(net_enable_timestamp);
  EXPORT_SYMBOL(net_disable_timestamp);
  EXPORT_SYMBOL(dev_get_flags);
@@ -91,19 +89,18 @@ Index: linux-2.6.27.y/net/core/dev.c
  
  #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
  EXPORT_SYMBOL(br_handle_frame_hook);
-Index: linux-2.6.27.y/net/packet/af_packet.c
-===================================================================
---- linux-2.6.27.y.orig/net/packet/af_packet.c
-+++ linux-2.6.27.y/net/packet/af_packet.c
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-522-523-524/net/packet/af_packet.c linux-2.6.27.10-vs2.3.x-PS-522-523-524-525/net/packet/af_packet.c
+--- linux-2.6.27.10-vs2.3.x-PS-522-523-524/net/packet/af_packet.c	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-PS-522-523-524-525/net/packet/af_packet.c	2009-01-21 03:38:41.000000000 +0100
 @@ -77,6 +77,7 @@
  #include <linux/poll.h>
  #include <linux/module.h>
  #include <linux/init.h>
 +#include <linux/vs_network.h>
- #include <linux/mutex.h>
  
  #ifdef CONFIG_INET
-@@ -278,10 +279,53 @@ static const struct proto_ops packet_ops
+ #include <net/inet_common.h>
+@@ -276,10 +277,53 @@ static const struct proto_ops packet_ops
  
  static const struct proto_ops packet_ops_spkt;
  
@@ -157,7 +154,7 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  
  	/*
  	 *	When we registered the protocol we saved the socket in the data
-@@ -301,6 +345,16 @@ static int packet_rcv_spkt(struct sk_buf
+@@ -299,6 +343,16 @@ static int packet_rcv_spkt(struct sk_buf
  	 *	so that this procedure is noop.
  	 */
  
@@ -174,7 +171,7 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  	if (skb->pkt_type == PACKET_LOOPBACK)
  		goto out;
  
-@@ -359,6 +413,9 @@ static int packet_sendmsg_spkt(struct ki
+@@ -357,6 +411,9 @@ static int packet_sendmsg_spkt(struct ki
  	__be16 proto=0;
  	int err;
  
@@ -184,7 +181,7 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  	/*
  	 *	Get and verify the address.
  	 */
-@@ -451,11 +508,16 @@ out_unlock:
+@@ -449,11 +506,16 @@ out_unlock:
  	return err;
  }
  
@@ -201,7 +198,7 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  	rcu_read_lock_bh();
  	filter = rcu_dereference(sk->sk_filter);
  	if (filter != NULL)
-@@ -775,6 +837,9 @@ static int packet_sendmsg(struct kiocb *
+@@ -773,6 +835,9 @@ static int packet_sendmsg(struct kiocb *
  	unsigned char *addr;
  	int ifindex, err, reserve = 0;
  
@@ -211,7 +208,7 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  	/*
  	 *	Get and verify the address.
  	 */
-@@ -941,6 +1006,7 @@ static int packet_do_bind(struct sock *s
+@@ -939,6 +1004,7 @@ static int packet_do_bind(struct sock *s
  
  	po->num = protocol;
  	po->prot_hook.type = protocol;
@@ -219,7 +216,7 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  	po->prot_hook.dev = dev;
  
  	po->ifindex = dev ? dev->ifindex : 0;
-@@ -1039,8 +1105,9 @@ static int packet_create(struct net *net
+@@ -1037,8 +1103,9 @@ static int packet_create(struct net *net
  	__be16 proto = (__force __be16)protocol; /* weird, but documented */
  	int err;
  
@@ -230,11 +227,11 @@ Index: linux-2.6.27.y/net/packet/af_packet.c
  	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
  	    sock->type != SOCK_PACKET)
  		return -ESOCKTNOSUPPORT;
-@@ -1072,6 +1139,7 @@ static int packet_create(struct net *net
+@@ -1069,6 +1136,7 @@ static int packet_create(struct net *net
+ 
  	spin_lock_init(&po->bind_lock);
- 	mutex_init(&po->pg_vec_lock);
  	po->prot_hook.func = packet_rcv;
-+ 	po->prot_hook.sknid_elevator = 1;
++	po->prot_hook.sknid_elevator = 1;
  
  	if (sock->type == SOCK_PACKET)
  		po->prot_hook.func = packet_rcv_spkt;

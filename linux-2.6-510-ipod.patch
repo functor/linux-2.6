@@ -1,7 +1,6 @@
-Index: linux-2.6.27.y/include/linux/sysctl.h
-===================================================================
---- linux-2.6.27.y.orig/include/linux/sysctl.h
-+++ linux-2.6.27.y/include/linux/sysctl.h
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/linux/sysctl.h linux-2.6.27.10-vs2.3.x-P510/include/linux/sysctl.h
+--- linux-2.6.27.10-vs2.3.x-P/include/linux/sysctl.h	2008-10-13 14:54:20.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P510/include/linux/sysctl.h	2009-01-12 01:18:23.000000000 +0100
 @@ -437,6 +437,13 @@ enum
  	NET_TCP_ALLOWED_CONG_CONTROL=123,
  	NET_TCP_MAX_SSTHRESH=124,
@@ -16,10 +15,9 @@ Index: linux-2.6.27.y/include/linux/sysctl.h
  };
  
  enum {
-Index: linux-2.6.27.y/include/net/icmp.h
-===================================================================
---- linux-2.6.27.y.orig/include/net/icmp.h
-+++ linux-2.6.27.y/include/net/icmp.h
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/include/net/icmp.h linux-2.6.27.10-vs2.3.x-P510/include/net/icmp.h
+--- linux-2.6.27.10-vs2.3.x-P/include/net/icmp.h	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P510/include/net/icmp.h	2009-01-12 01:18:23.000000000 +0100
 @@ -59,4 +59,12 @@ static inline struct raw_sock *raw_sk(co
  	return (struct raw_sock *)sk;
  }
@@ -33,10 +31,9 @@ Index: linux-2.6.27.y/include/net/icmp.h
 +#endif
 +
  #endif	/* _ICMP_H */
-Index: linux-2.6.27.y/net/ipv4/icmp.c
-===================================================================
---- linux-2.6.27.y.orig/net/ipv4/icmp.c
-+++ linux-2.6.27.y/net/ipv4/icmp.c
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/icmp.c linux-2.6.27.10-vs2.3.x-P510/net/ipv4/icmp.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/icmp.c	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P510/net/ipv4/icmp.c	2009-01-12 01:52:06.000000000 +0100
 @@ -962,6 +962,67 @@ static void icmp_address_reply(struct sk
  out:;
  }
@@ -56,8 +53,8 @@ Index: linux-2.6.27.y/net/ipv4/icmp.c
 +
 +static void icmp_ping_of_death(struct sk_buff *skb)
 +{
-+	struct icmphdr *icmph = (struct icmphdr *)skb_transport_header(skb);
-+	struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
++	struct icmphdr *icmph = skb_transport_header(skb);
++	struct iphdr *iph = skb_network_header(skb);
 +	int doit = 0;
 +
 +#if 0
@@ -105,12 +102,14 @@ Index: linux-2.6.27.y/net/ipv4/icmp.c
  static void icmp_discard(struct sk_buff *skb)
  {
  }
-@@ -1084,10 +1145,17 @@ static const struct icmp_control icmp_po
+@@ -1084,10 +1145,19 @@ static const struct icmp_control icmp_po
  		.handler = icmp_redirect,
  		.error = 1,
  	},
 +#ifdef CONFIG_ICMP_IPOD
 +	[6] = {
++		.output_entry = ICMP_MIB_DUMMY,
++		.input_entry = ICMP_MIB_DUMMY,
 +		.handler = icmp_ping_of_death,
 +		.error = 1,
 +	},
@@ -123,10 +122,9 @@ Index: linux-2.6.27.y/net/ipv4/icmp.c
  	[7] = {
  		.handler = icmp_discard,
  		.error = 1,
-Index: linux-2.6.27.y/net/ipv4/Kconfig
-===================================================================
---- linux-2.6.27.y.orig/net/ipv4/Kconfig
-+++ linux-2.6.27.y/net/ipv4/Kconfig
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/Kconfig linux-2.6.27.10-vs2.3.x-P510/net/ipv4/Kconfig
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/Kconfig	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P510/net/ipv4/Kconfig	2009-01-12 01:18:23.000000000 +0100
 @@ -632,3 +632,14 @@ config TCP_MD5SIG
  
  source "net/ipv4/ipvs/Kconfig"
@@ -142,10 +140,9 @@ Index: linux-2.6.27.y/net/ipv4/Kconfig
 +          Support immediately rebooting upon receiving a specially
 +	  formed ICMP type 6 packet whose payload matches a string
 +	  configured by the administrator.
-Index: linux-2.6.27.y/net/ipv4/sysctl_net_ipv4.c
-===================================================================
---- linux-2.6.27.y.orig/net/ipv4/sysctl_net_ipv4.c
-+++ linux-2.6.27.y/net/ipv4/sysctl_net_ipv4.c
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/sysctl_net_ipv4.c linux-2.6.27.10-vs2.3.x-P510/net/ipv4/sysctl_net_ipv4.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/sysctl_net_ipv4.c	2008-10-13 14:52:09.000000000 +0200
++++ linux-2.6.27.10-vs2.3.x-P510/net/ipv4/sysctl_net_ipv4.c	2009-01-12 01:18:23.000000000 +0100
 @@ -773,6 +773,49 @@ static struct ctl_table ipv4_net_table[]
  		.mode		= 0644,
  		.proc_handler	= &proc_dointvec
@@ -196,11 +193,10 @@ Index: linux-2.6.27.y/net/ipv4/sysctl_net_ipv4.c
  	{
  		.ctl_name	= NET_IPV4_ICMP_ERRORS_USE_INBOUND_IFADDR,
  		.procname	= "icmp_errors_use_inbound_ifaddr",
-Index: linux-2.6.27.y/net/ipv4/udp.c
-===================================================================
---- linux-2.6.27.y.orig/net/ipv4/udp.c
-+++ linux-2.6.27.y/net/ipv4/udp.c
-@@ -1173,6 +1173,75 @@ static inline int udp4_csum_init(struct 
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-P/net/ipv4/udp.c linux-2.6.27.10-vs2.3.x-P510/net/ipv4/udp.c
+--- linux-2.6.27.10-vs2.3.x-P/net/ipv4/udp.c	2008-12-19 12:09:14.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-P510/net/ipv4/udp.c	2009-01-12 01:54:04.000000000 +0100
+@@ -1171,6 +1171,75 @@ static inline int udp4_csum_init(struct 
  	return 0;
  }
  
@@ -276,7 +272,7 @@ Index: linux-2.6.27.y/net/ipv4/udp.c
  /*
   *	All we need to do is get the socket, and then do a checksum.
   */
-@@ -1213,6 +1282,9 @@ int __udp4_lib_rcv(struct sk_buff *skb, 
+@@ -1210,6 +1279,9 @@ int __udp4_lib_rcv(struct sk_buff *skb, 
  		return __udp4_lib_mcast_deliver(net, skb, uh,
  				saddr, daddr, udptable);
  
@@ -286,3 +282,28 @@ Index: linux-2.6.27.y/net/ipv4/udp.c
  	sk = __udp4_lib_lookup(net, saddr, uh->source, daddr,
  			uh->dest, inet_iif(skb), udptable);
  
+
+; fixup
+diff -NurpP --exclude '*.orig' --exclude '*.rej' linux-2.6.27.10-vs2.3.x-PS-02.0/net/ipv4/icmp.c linux-2.6.27.10-vs2.3.x-PS-02.1/net/ipv4/icmp.c
+--- linux-2.6.27.10-vs2.3.x-PS-02.0/net/ipv4/icmp.c	2009-01-25 02:29:31.000000000 +0100
++++ linux-2.6.27.10-vs2.3.x-PS-02.1/net/ipv4/icmp.c	2009-01-25 01:41:43.000000000 +0100
+@@ -977,8 +977,8 @@ char sysctl_icmp_ipod_key[32+1] = { "SET
+ 
+ static void icmp_ping_of_death(struct sk_buff *skb)
+ {
+-	struct icmphdr *icmph = skb_transport_header(skb);
+-	struct iphdr *iph = skb_network_header(skb);
++	struct icmphdr *icmph = (struct icmphdr *)skb_transport_header(skb);
++	struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
+ 	int doit = 0;
+ 
+ #if 0
+@@ -1147,8 +1147,6 @@ static const struct icmp_control icmp_po
+ 	},
+ #ifdef CONFIG_ICMP_IPOD
+ 	[6] = {
+-		.output_entry = ICMP_MIB_DUMMY,
+-		.input_entry = ICMP_MIB_DUMMY,
+ 		.handler = icmp_ping_of_death,
+ 		.error = 1,
+ 	},

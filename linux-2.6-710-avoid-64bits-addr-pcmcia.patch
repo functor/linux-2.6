@@ -1,8 +1,7 @@
-Index: linux-2.6.27.y/drivers/pci/bus.c
-===================================================================
---- linux-2.6.27.y.orig/drivers/pci/bus.c
-+++ linux-2.6.27.y/drivers/pci/bus.c
-@@ -41,6 +41,7 @@ pci_bus_alloc_resource(struct pci_bus *b
+diff -Naur linux-source-2.6.29-orig/drivers/pci/bus.c linux-source-2.6.29/drivers/pci/bus.c
+--- linux-source-2.6.29-orig/drivers/pci/bus.c	2009-03-24 00:12:14.000000000 +0100
++++ linux-source-2.6.29/drivers/pci/bus.c	2009-04-06 11:04:41.000000000 +0200
+@@ -41,6 +41,7 @@
  		void *alignf_data)
  {
  	int i, ret = -ENOMEM;
@@ -10,7 +9,7 @@ Index: linux-2.6.27.y/drivers/pci/bus.c
  
  	type_mask |= IORESOURCE_IO | IORESOURCE_MEM;
  
-@@ -59,10 +60,15 @@ pci_bus_alloc_resource(struct pci_bus *b
+@@ -59,10 +60,15 @@
  		    !(res->flags & IORESOURCE_PREFETCH))
  			continue;
  
@@ -27,11 +26,10 @@ Index: linux-2.6.27.y/drivers/pci/bus.c
  					alignf, alignf_data);
  		if (ret == 0)
  			break;
-Index: linux-2.6.27.y/drivers/pci/setup-bus.c
-===================================================================
---- linux-2.6.27.y.orig/drivers/pci/setup-bus.c
-+++ linux-2.6.27.y/drivers/pci/setup-bus.c
-@@ -433,19 +433,23 @@ static void pci_bus_size_cardbus(struct 
+diff -Naur linux-source-2.6.29-orig/drivers/pci/setup-bus.c linux-source-2.6.29/drivers/pci/setup-bus.c
+--- linux-source-2.6.29-orig/drivers/pci/setup-bus.c	2009-03-24 00:12:14.000000000 +0100
++++ linux-source-2.6.29/drivers/pci/setup-bus.c	2009-04-06 11:04:41.000000000 +0200
+@@ -429,19 +429,23 @@
  	 * If we have prefetchable memory support, allocate
  	 * two regions.  Otherwise, allocate one region of
  	 * twice the size.
@@ -58,11 +56,10 @@ Index: linux-2.6.27.y/drivers/pci/setup-bus.c
  	}
  }
  
-Index: linux-2.6.27.y/include/linux/ioport.h
-===================================================================
---- linux-2.6.27.y.orig/include/linux/ioport.h
-+++ linux-2.6.27.y/include/linux/ioport.h
-@@ -101,6 +101,7 @@ struct resource_list {
+diff -Naur linux-source-2.6.29-orig/include/linux/ioport.h linux-source-2.6.29/include/linux/ioport.h
+--- linux-source-2.6.29-orig/include/linux/ioport.h	2009-03-24 00:12:14.000000000 +0100
++++ linux-source-2.6.29/include/linux/ioport.h	2009-04-06 11:04:41.000000000 +0200
+@@ -103,6 +103,7 @@
  
  /* PCI control bits.  Shares IORESOURCE_BITS with above PCI ROM.  */
  #define IORESOURCE_PCI_FIXED		(1<<4)	/* Do not move resource */

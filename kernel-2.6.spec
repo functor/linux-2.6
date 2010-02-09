@@ -30,11 +30,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 45
+%define patchlevel 14
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
-%define vsversion 2.3.0.36.8
+%define vsversion 2.3.0.36.4
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
@@ -139,12 +139,10 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 %if "0%{patchlevel}"
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
-
-Patch100: linux-2.6-100-build-nonintconfig.patch
+Patch050: linux-2.6-050-getline.patch
 
 # Linux-VServer
-Patch200: patch-2.6.27.39-vs%{vsversion}.diff
-Patch220: delta-ptrace-fix01.diff
+Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -171,7 +169,7 @@ Patch591: linux-2.6-591-chopstix-intern.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
-Patch680: linux-2.6-680-htb-hysteresis-tso.patch
+# Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 # Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-egre.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
@@ -336,7 +334,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 100
+%ApplyPatch 50
 
 # vserver patch
 %ApplyPatch 200
@@ -365,7 +363,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
-%ApplyPatch 680
 %ApplyPatch 700
 %ApplyPatch 710
 
@@ -431,7 +428,7 @@ BuildKernel() {
     #Arch=`head -1 .config | cut -b 3-`
     echo USING ARCH=$Arch
 
-    make -s ARCH=$Arch nonint_oldconfig < /dev/null > /dev/null
+    make -s ARCH=$Arch oldconfig < /dev/null > /dev/null
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 %if %{headers}
