@@ -128,7 +128,7 @@ diff -Nurb linux-2.6.27-580/fs/dcookies.c linux-2.6.27-590/fs/dcookies.c
 -	i = hash_size;
 +
 +    for (i=0; i<3; i++) {
-+        d = dcookie_hashtable[0];
++        d = dcookie_hashtable[i];
 +        j = hash_size;
  	do {
  		INIT_LIST_HEAD(d);
@@ -191,7 +191,7 @@ diff -Nurb linux-2.6.27-580/fs/dcookies.c linux-2.6.27-590/fs/dcookies.c
 +	size_t j;
 +    unsigned int i;
 +
-+    for (i = 0; i < 3; ++j) {
++    for (i = 0; i < 3; ++i) {
 +        for (j = 0; j < hash_size; ++j) {
 +            list = dcookie_hashtable[i] + j;
  		list_for_each_safe(pos, pos2, list) {
