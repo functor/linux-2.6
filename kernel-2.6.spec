@@ -21,7 +21,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 3
+%define taglevel 4
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -796,6 +796,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Mon Feb 15 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-27-4
+- Tagging trunk
+
 * Tue May 12 2009 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-3
 - new tuntap patch available but not enabled
 - mac80211 and iwlwifi are now mainstream, no ext. sources anymore
