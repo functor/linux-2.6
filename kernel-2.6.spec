@@ -21,7 +21,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 4
+%define taglevel 3
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -30,7 +30,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 14
+%define patchlevel 45
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
@@ -139,10 +139,12 @@ Source30: %{pldistro}-%{kversion}-i686-xenU.config
 %if "0%{patchlevel}"
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
-Patch050: linux-2.6-050-getline.patch
+
+Patch100: linux-2.6-100-build-nonintconfig.patch
 
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
+Patch220: delta-ptrace-fix01.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -169,7 +171,7 @@ Patch591: linux-2.6-591-chopstix-intern.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
-# Patch680: linux-2.6-680-htb-hysteresis-tso.patch
+Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 # Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-egre.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
@@ -334,7 +336,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 50
+%ApplyPatch 100
 
 # vserver patch
 %ApplyPatch 200
@@ -363,6 +365,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 640
 %ApplyPatch 650
 %ApplyPatch 660
+%ApplyPatch 680
 %ApplyPatch 700
 %ApplyPatch 710
 
@@ -428,7 +431,7 @@ BuildKernel() {
     #Arch=`head -1 .config | cut -b 3-`
     echo USING ARCH=$Arch
 
-    make -s ARCH=$Arch oldconfig < /dev/null > /dev/null
+    make -s ARCH=$Arch nonint_oldconfig < /dev/null > /dev/null
     make -s ARCH=$Arch %{?_smp_mflags} $MakeTarget
     make -s ARCH=$Arch %{?_smp_mflags} modules || exit 1
 %if %{headers}
