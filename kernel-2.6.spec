@@ -176,6 +176,10 @@ Patch680: linux-2.6-680-htb-hysteresis-tso.patch
 Patch700: linux-2.6-700-egre.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 
+# Ext4
+Patch800: linux-2.6-800-rename-ext4dev-to-ext4.patch
+Patch810: linux-2.6-810-ext4-cap-check-delay.patch
+
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
 %description
@@ -369,6 +373,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 700
 %ApplyPatch 710
 
+%ApplyPatch 800
+%ApplyPatch 810
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
