@@ -145,6 +145,7 @@ Patch100: linux-2.6-100-build-nonintconfig.patch
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch220: delta-ptrace-fix01.diff
+Patch230: delta-pivot-fix01.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -157,7 +158,6 @@ Patch522: linux-2.6-522-iptables-connection-tagging.patch
 Patch523: linux-2.6-523-raw-sockets.patch
 Patch524: linux-2.6-524-peercred.patch
 Patch525: linux-2.6-525-sknid-elevator.patch
-# Patch526: linux-2.6-526-tun-tap.patch
 Patch527: linux-2.6-527-iptables-classify-add-mark.patch
 Patch530: linux-2.6-530-built-by-support.patch
 Patch540: linux-2.6-540-oom-kill.patch
@@ -167,7 +167,6 @@ Patch570: linux-2.6-570-tagxid.patch
 Patch580: linux-2.6-580-show-proc-virt.patch
 Patch590: linux-2.6-590-dcookies-mm.patch
 Patch591: linux-2.6-591-chopstix-intern.patch
-# Patch630: linux-2.6-630-sched-fix.patch
 Patch640: linux-2.6-640-netlink-audit-hack.patch
 Patch650: linux-2.6-650-hangcheck-reboot.patch
 Patch660: linux-2.6-660-nmi-watchdog-default.patch
@@ -344,6 +343,8 @@ KERNEL_PREVIOUS=vanilla
 
 # vserver patch
 %ApplyPatch 200
+%ApplyPatch 220
+%ApplyPatch 230
 
 %ApplyPatch 250
 
