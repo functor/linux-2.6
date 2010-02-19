@@ -25,7 +25,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 41
+%define taglevel 42
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -898,6 +898,10 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Fri Feb 19 2010 Daniel Hokka Zakrisson <dhozac@coblitz.com> linux-2.6-22-42.coblitz
+- Use CoBlitz support address
+- hardware support
+
 * Sun Nov  8 2009 Daniel Hokka Zakrisson <daniel@hozac.com> linux-2.6-22-40.coblitz
 - Tag CoBlitz kernel
 
