@@ -792,7 +792,7 @@ popd > /dev/null
 mkdir -p /etc/planetlab
 
 %if "%{updatelevel}"==""
-touch /etc/planetlab/update-reboot
+#touch /etc/planetlab/update-reboot
 %endif
 
 %post devel
