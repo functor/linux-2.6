@@ -14,7 +14,14 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define builddoc 0
 %define headers 1
 
-# from 2.6.27 iwlwifi in builtin
+%{!?pldistro:%global pldistro planetlab}
+
+# default is to search the config file after pldistro
+# e.g. set
+# kernel-SPECVARS := kernelconfig=planetlab
+# to use the planetlab config from another pldistro 
+# without having to manage symlinks
+%{!?kernelconfig:%global kernelconfig %{pldistro}}
 
 # Versions of various parts
 
@@ -41,8 +48,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define vini_pl_patch 561
 
 %define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
-
-%{!?pldistro:%global pldistro planetlab}
 
 %define signmodules 0
 %define make_target bzImage
@@ -126,13 +131,13 @@ BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
 Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
 
-Source11: %{pldistro}-%{kversion}-i686.config
-Source12: %{pldistro}-%{kversion}-x86_64.config
+Source11: %{kernelconfig}-%{kversion}-i686.config
+Source12: %{kernelconfig}-%{kversion}-x86_64.config
 %if %{builduml}
-Source20: %{pldistro}-%{kversion}-i686-uml.config
+Source20: %{kernelconfig}-%{kversion}-i686-uml.config
 %endif
 %if %{buildxen}
-Source30: %{pldistro}-%{kversion}-i686-xenU.config
+Source30: %{kernelconfig}-%{kversion}-i686-xenU.config
 %endif
 
 # Mainline patches
@@ -186,6 +191,7 @@ The kernel package contains the Linux kernel (vmlinuz), the core of any
 Linux operating system.  The kernel handles the basic functions
 of the operating system:  memory allocation, process allocation, device
 input and output, etc.
+Configured with kernelconfig=%{kernelconfig}
 
 %package devel
 Summary: Development package for building kernel modules to match the kernel.
@@ -415,11 +421,11 @@ BuildKernel() {
 
     # Pick the right config file for the kernel we're building
     if [ -n "$Flavour" ] ; then
-      Config=%{pldistro}-%{kversion}-%{_target_cpu}-$Flavour.config
+      Config=%{kernelconfig}-%{kversion}-%{_target_cpu}-$Flavour.config
       DevelDir=/usr/src/kernels/%{KVERREL}-$Flavour-%{_target_cpu}
       DevelLink=/usr/src/kernels/%{KVERREL}$Flavour-%{_target_cpu}
     else
-      Config=%{pldistro}-%{kversion}-%{_target_cpu}.config
+      Config=%{kernelconfig}-%{kversion}-%{_target_cpu}.config
       DevelDir=/usr/src/kernels/%{KVERREL}-%{_target_cpu}
       DevelLink=
     fi
