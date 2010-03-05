@@ -239,7 +239,7 @@ diff -Nurb linux-2.6.27-580/include/linux/dcookies.h linux-2.6.27-590/include/li
 + * Returns 0 on success
 + */
 +
-+int dcookie_garbage_colect(void);
++int dcookie_garbage_collect(void);
 +
  #else
  
