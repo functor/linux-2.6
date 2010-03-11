@@ -157,6 +157,7 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 
 Patch010: linux-2.6-010-e1000e.patch
 Patch015: linux-2.6-015-igb.patch
+Patch016: linux-2.6-016-bnx2x.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
 Patch040: linux-2.6-040-i_mutex-check.patch
@@ -390,6 +391,7 @@ KERNEL_PREVIOUS=vanilla
 
 %ApplyPatch 10
 %ApplyPatch 15
+%ApplyPatch 16
 %ApplyPatch 20
 
 # NetNS patch for VINI
