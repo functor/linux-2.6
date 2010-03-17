@@ -53,9 +53,9 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # updated every time the PL kernel is updated.
 %define vini_pl_patch 561
 
-#%define updatelevel 1
+%define requiresreboot 0
 
-%define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}%{?updatelevel:.%{updatelevel}}
+%define kernelrelease vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 %define packagerelease %{kernelrelease}
 
 %define signmodules 0
@@ -364,7 +364,7 @@ else
   cd kernel-%{kversion}
 fi
 
-%if "0%{updatelevel}"
+%if %{requiresreboot}
 echo "This is a trivial maintenance update. There will be no reboot following installation."
 %endif
 
@@ -802,11 +802,10 @@ pushd /boot > /dev/null ; {
 }
 popd > /dev/null
 
+%if %{requiresreboot}
 # ask for a reboot
 mkdir -p /etc/planetlab
-
-%if "%{updatelevel}"==""
-#touch /etc/planetlab/update-reboot
+touch /etc/planetlab/update-reboot
 %endif
 
 %post devel
