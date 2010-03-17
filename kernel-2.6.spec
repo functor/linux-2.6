@@ -157,7 +157,8 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 
 Patch010: linux-2.6-010-e1000e.patch
 Patch015: linux-2.6-015-igb.patch
-Patch016: linux-2.6-016-bnx2x.patch
+# disabled
+#Patch016: linux-2.6-016-bnx2x.patch
 Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
 Patch040: linux-2.6-040-i_mutex-check.patch
@@ -213,6 +214,8 @@ Patch721: linux-2.6-721-bonding-layer3.patch
 Patch722: linux-2.6-722-bonding-rr.patch
 
 Patch800: linux-2.6-800-fix-4-bit-apicid-assumption.patch
+
+Patch810: linux-2.6-810-ich10.patch
 
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
@@ -391,7 +394,8 @@ KERNEL_PREVIOUS=vanilla
 
 %ApplyPatch 10
 %ApplyPatch 15
-%ApplyPatch 16
+# linux-2.6-016-bnx2x.patch
+# %ApplyPatch 16
 %ApplyPatch 20
 
 # NetNS patch for VINI
@@ -447,6 +451,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 721
 %ApplyPatch 722
 %ApplyPatch 800
+%ApplyPatch 810
 
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
