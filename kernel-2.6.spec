@@ -394,8 +394,9 @@ KERNEL_PREVIOUS=vanilla
 
 %ApplyPatch 10
 %ApplyPatch 15
-# linux-2.6-016-bnx2x.patch
-# %ApplyPatch 16
+%if 0
+%ApplyPatch 16
+%endif
 %ApplyPatch 20
 
 # NetNS patch for VINI
