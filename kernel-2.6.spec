@@ -217,6 +217,9 @@ Patch800: linux-2.6-800-fix-4-bit-apicid-assumption.patch
 
 Patch810: linux-2.6-810-ich10.patch
 
+Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
+Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
+
 # See also the file named 'sources' here for the related checksums
 # NOTE. iwlwifi should be in-kernel starting from 2.6.24
 # see http://bughost.org/bugzilla/show_bug.cgi?id=1584
@@ -454,6 +457,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 800
 %ApplyPatch 810
 
+%ApplyPatch 900
+%ApplyPatch 910
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.

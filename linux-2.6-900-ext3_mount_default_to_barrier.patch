@@ -1,0 +1,42 @@
+commit 79eb79ed8e042e446accad244073af0f9bf4f35d
+Author: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date:   Fri Mar 19 10:17:24 2010 -0400
+
+    make_ext3_mount_default_to_barrier=1
+
+diff --git a/fs/ext3/fsync.c b/fs/ext3/fsync.c
+index 00c9597..841f0f7 100644
+--- a/fs/ext3/fsync.c
++++ b/fs/ext3/fsync.c
+@@ -27,6 +27,7 @@
+ #include <linux/sched.h>
+ #include <linux/writeback.h>
+ #include <linux/jbd.h>
++#include <linux/blkdev.h>
+ #include <linux/ext3_fs.h>
+ #include <linux/ext3_jbd.h>
+ 
+@@ -84,7 +85,10 @@ int ext3_sync_file(struct file * file, struct dentry *dentry, int datasync)
+ 			.sync_mode = WB_SYNC_ALL,
+ 			.nr_to_write = 0, /* sys_fsync did this */
+ 		};
++		journal_t *journal = EXT3_SB(inode->i_sb)->s_journal;
+ 		ret = sync_inode(inode, &wbc);
++		if (journal && (journal->j_flags & JFS_BARRIER))
++			blkdev_issue_flush(inode->i_sb->s_bdev, NULL);
+ 	}
+ out:
+ 	return ret;
+diff --git a/fs/ext3/super.c b/fs/ext3/super.c
+index 7facb78..ce186bc 100644
+--- a/fs/ext3/super.c
++++ b/fs/ext3/super.c
+@@ -1504,6 +1504,8 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
+ 	sbi->s_resuid = le16_to_cpu(es->s_def_resuid);
+ 	sbi->s_resgid = le16_to_cpu(es->s_def_resgid);
+ 
++	/* enable barriers by default */
++	set_opt(sbi->s_mount_opt, BARRIER);
+ 	set_opt(sbi->s_mount_opt, RESERVATION);
+ 
+ 	if (!parse_options ((char *) data, sb, &journal_inum, &journal_devnum,
