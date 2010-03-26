@@ -1,0 +1,1057 @@
+* orphan_list_check_on_destroy_inode.patch
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/56ccd891a32e6409700786737953906426512ff7
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=a6c15c2b0fbfd5c0a84f5f0e1e3f20f85d2b8692
+
+* don-t-read-inode-block-if-buf-has-write-error.patch
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/1e7d951fa2bd7d49121aff0ec7eb0331e3d5eeb5
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=95450f5a7e53d5752ce1a0d0b8282e10fe745ae0
+
+* error-in-ext3_lookup-if-corruption-found.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/f1d52243f69747ee601d671ec1b98a7363ce0597
+	Filesystem errors should be logged and not silently ignored
+
+* fix-accessing-freed-memory-in-ext3_abort.patch
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/f863ab8749fca8d167b357357ed7492c1c6d530d
+	http://git.kernel.org/?p=linux/kernel/git/stable/linux-2.6.32.y.git;a=commitdiff_plain;h=44d6f78756560e95903de239e10f8a40a6eae444
+
+* make_fdatasync_not_sync_metadata.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/1d29962ae5187764989ede9ec0d0777d2f489345
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=3d61f75eefedf75914ab4453c67aaa2ee64bcf93
+
+* add_checks_for_errors_from_jbd.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/f38c319731f010b1c36c25ed591f79bcb557d2f2
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=2d7c820e56ce83b23daee9eb5343730fb309418e
+
+* add_missing_error_checks.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/8f0e6faf83721162a77cb5df5c483e4799bea22b
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=cbe5f466f6995e10a10c7ae66d6dc8608f08a6b8
+
+The original patch does the following two things:
+
+  (1) stop aborting the journal on file data write errors, instead
+      just call printk() and set AS_EIO to appropriate address_space
+      objects
+  (2) add missing error checks for file data writes
+
+This patch does only (2).
+
+* dont_dirty_original_metadata_buffer_on_abort.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/d003fa1a88c857795ca7e102eefbf26c9088aa66
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=7ad7445f60fe4d46c4c9d2a9463db180d2a3b270
+
+* fix_commit_code_to_properly_abort_journal.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/232632e87d9bc83b89d97f98f311d67d45e0e6dd
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=7a266e75cf5a1efd20d084408a1b7f1a185496dd
+
+* fix_journal_overflow_issues.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/74361d7e55f28847e3b7eda4a4563d02ab001537
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=5bc833feaa8b2236265764e7e81f44937be46eda
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=5b9a499d77e9dd39c9e6611ea10c56a31604f274
+
+* fix_typo_in_recovery_code.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/da999401f4bedf317b2e7dcd3c9163b1a433ba3c
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=439aeec639d7c57f3561054a6d315c40fd24bb74
+
+* jbd-properly-dispose-of-unmapped-data-buffers.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/841d34d702702c85c7b8cc31a185e48ce3ca0a8e
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=fc80c44277b3c92d808b73e9d40e120229aa4b6a
+
+* jdb-abort-when-failed-to-log-metadata-buffers.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/7de4ddac8020dcb2078b7237650e972ecfd112cf
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=44519faf22ad6ce924ad0352d3dc200d9e0b66e8
+
+* fix-assertion-failure-in-fs-jbd-checkpoint.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/268ff9d67ed3269e5d84914aabd30d06ee89f563
+	http://git.kernel.org/?p=linux/kernel/git/stable/linux-2.6.32.y.git;a=commitdiff_plain;h=d4beaf4ab5f89496f2bcf67db62ad95d99bfeff6
+
+* fix-error-handling-for-checkpoint-io.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/e1ef6b77a95b8e02255dfa02fef06e2231e92645
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=4afe978530702c934dfdb11f54073136818b2119
+
+* jbd-test-BH_Write_EIO-to-detect-errors-on-metadata.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/1a8ede62acc03d3b2baa98d02189685a4e30044f
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff;h=9f818b4ac04f53458d0354950b4f229f54be4dbf
+
+* handle-corrupted-orphan-list-at-mount.patch 
+	http://github.com/caglar10ur/linux-2.6.27.y/commit/6003003452a5faaa0b2d1deb6356ebf8d4e2fe3f
+	http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff_plain;h=ae76dd9a6b5bbe5315fb7028e03f68f75b8538f3
+
+
+diff --git a/fs/ext3/fsync.c b/fs/ext3/fsync.c
+index b0615c8..841f0f7 100644
+--- a/fs/ext3/fsync.c
++++ b/fs/ext3/fsync.c
+@@ -73,6 +73,9 @@ int ext3_sync_file(struct file * file, struct dentry *dentry, int datasync)
+ 		goto out;
+ 	}
+ 
++	if (datasync && !(inode->i_state & I_DIRTY_DATASYNC))
++		goto out;
++
+ 	/*
+ 	 * The VFS has written the file data.  If the inode is unaltered
+ 	 * then we need not start a commit.
+diff --git a/fs/ext3/ialloc.c b/fs/ext3/ialloc.c
+index 9885ff8..d586377 100644
+--- a/fs/ext3/ialloc.c
++++ b/fs/ext3/ialloc.c
+@@ -658,14 +658,15 @@ struct inode *ext3_orphan_get(struct super_block *sb, unsigned long ino)
+ 	unsigned long max_ino = le32_to_cpu(EXT3_SB(sb)->s_es->s_inodes_count);
+ 	unsigned long block_group;
+ 	int bit;
+-	struct buffer_head *bitmap_bh = NULL;
++	struct buffer_head *bitmap_bh;
+ 	struct inode *inode = NULL;
++	long err = -EIO;
+ 
+ 	/* Error cases - e2fsck has already cleaned up for us */
+ 	if (ino > max_ino) {
+ 		ext3_warning(sb, __FUNCTION__,
+ 			     "bad orphan ino %lu!  e2fsck was run?", ino);
+-		goto out;
++		goto error;
+ 	}
+ 
+ 	block_group = (ino - 1) / EXT3_INODES_PER_GROUP(sb);
+@@ -674,38 +675,58 @@ struct inode *ext3_orphan_get(struct super_block *sb, unsigned long ino)
+ 	if (!bitmap_bh) {
+ 		ext3_warning(sb, __FUNCTION__,
+ 			     "inode bitmap error for orphan %lu", ino);
+-		goto out;
++		goto error;
+ 	}
+ 
+ 	/* Having the inode bit set should be a 100% indicator that this
+ 	 * is a valid orphan (no e2fsck run on fs).  Orphans also include
+ 	 * inodes that were being truncated, so we can't check i_nlink==0.
+ 	 */
+-	if (!ext3_test_bit(bit, bitmap_bh->b_data) ||
+-			!(inode = iget(sb, ino)) || is_bad_inode(inode) ||
+-			NEXT_ORPHAN(inode) > max_ino) {
+-		ext3_warning(sb, __FUNCTION__,
+-			     "bad orphan inode %lu!  e2fsck was run?", ino);
+-		printk(KERN_NOTICE "ext3_test_bit(bit=%d, block=%llu) = %d\n",
+-		       bit, (unsigned long long)bitmap_bh->b_blocknr,
+-		       ext3_test_bit(bit, bitmap_bh->b_data));
+-		printk(KERN_NOTICE "inode=%p\n", inode);
+-		if (inode) {
+-			printk(KERN_NOTICE "is_bad_inode(inode)=%d\n",
+-			       is_bad_inode(inode));
+-			printk(KERN_NOTICE "NEXT_ORPHAN(inode)=%u\n",
+-			       NEXT_ORPHAN(inode));
+-			printk(KERN_NOTICE "max_ino=%lu\n", max_ino);
+-		}
++	if (!ext3_test_bit(bit, bitmap_bh->b_data))
++		goto bad_orphan;
++
++	inode = iget(sb, ino);
++	if (IS_ERR(inode))
++		goto iget_failed;
++
++        /*
++         * If the orphans has i_nlinks > 0 then it should be able to be
++         * truncated, otherwise it won't be removed from the orphan list
++         * during processing and an infinite loop will result.
++         */
++	if (inode->i_nlink && !ext3_can_truncate(inode))
++		goto bad_orphan;
++
++	if (NEXT_ORPHAN(inode) > max_ino)
++		goto bad_orphan;
++	brelse(bitmap_bh);
++	return inode;
++
++iget_failed:
++        err = PTR_ERR(inode);
++        inode = NULL;
++bad_orphan:
++	ext3_warning(sb, __FUNCTION__,
++		     "bad orphan inode %lu!  e2fsck was run?", ino);
++	printk(KERN_NOTICE "ext3_test_bit(bit=%d, block=%llu) = %d\n",
++	       bit, (unsigned long long)bitmap_bh->b_blocknr,
++	       ext3_test_bit(bit, bitmap_bh->b_data));
++	printk(KERN_NOTICE "inode=%p\n", inode);
++	if (inode) {
++		printk(KERN_NOTICE "is_bad_inode(inode)=%d\n",
++		       is_bad_inode(inode));
++		printk(KERN_NOTICE "NEXT_ORPHAN(inode)=%u\n",
++		       NEXT_ORPHAN(inode));
++		printk(KERN_NOTICE "max_ino=%lu\n", max_ino);
++                printk(KERN_NOTICE "i_nlink=%u\n", inode->i_nlink);
+ 		/* Avoid freeing blocks if we got a bad deleted inode */
+-		if (inode && inode->i_nlink == 0)
++		if (inode->i_nlink == 0)
+ 			inode->i_blocks = 0;
+ 		iput(inode);
+-		inode = NULL;
+ 	}
+-out:
+-	brelse(bitmap_bh);
+-	return inode;
++        brelse(bitmap_bh);
++error:
++	return ERR_PTR(err);
+ }
+ 
+ unsigned long ext3_count_free_inodes (struct super_block * sb)
+diff --git a/fs/ext3/inode.c b/fs/ext3/inode.c
+index 0698ce5..cede457 100644
+--- a/fs/ext3/inode.c
++++ b/fs/ext3/inode.c
+@@ -2189,6 +2189,19 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
+ 	}
+ }
+ 
++int ext3_can_truncate(struct inode *inode)
++{
++	if (IS_APPEND(inode) || IS_IXORUNLINK(inode))
++		return 0;
++	if (S_ISREG(inode->i_mode))
++		return 1;
++	if (S_ISDIR(inode->i_mode))
++		return 1;
++	if (S_ISLNK(inode->i_mode))
++		return !ext3_inode_is_fast_symlink(inode);
++	return 0;
++}
++
+ /*
+  * ext3_truncate()
+  *
+@@ -2233,12 +2246,7 @@ void ext3_truncate(struct inode *inode)
+ 	unsigned blocksize = inode->i_sb->s_blocksize;
+ 	struct page *page;
+ 
+-	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
+-	    S_ISLNK(inode->i_mode)))
+-		return;
+-	if (ext3_inode_is_fast_symlink(inode))
+-		return;
+-	if (IS_APPEND(inode) || IS_IXORUNLINK(inode))
++	if (!ext3_can_truncate(inode))
+ 		return;
+ 
+ 	/*
+@@ -2462,6 +2470,16 @@ static int __ext3_get_inode_loc(struct inode *inode,
+ 	}
+ 	if (!buffer_uptodate(bh)) {
+ 		lock_buffer(bh);
++
++		/*
++		* If the buffer has the write error flag, we have failed
++		* to write out another inode in the same block.  In this
++		* case, we don't have to read the block because we may
++		* read the old inode data successfully.
++		*/
++		if (buffer_write_io_error(bh) && !buffer_uptodate(bh))
++			set_buffer_uptodate(bh);
++
+ 		if (buffer_uptodate(bh)) {
+ 			/* someone brought it uptodate while we waited */
+ 			unlock_buffer(bh);
+diff --git a/fs/ext3/ioctl.c b/fs/ext3/ioctl.c
+index 2e910db..127733b 100644
+--- a/fs/ext3/ioctl.c
++++ b/fs/ext3/ioctl.c
+@@ -215,7 +215,7 @@ flags_err:
+ 	case EXT3_IOC_GROUP_EXTEND: {
+ 		ext3_fsblk_t n_blocks_count;
+ 		struct super_block *sb = inode->i_sb;
+-		int err;
++		int err, err2;
+ 
+ 		if (!capable(CAP_SYS_RESOURCE))
+ 			return -EPERM;
+@@ -229,15 +229,17 @@ flags_err:
+ 
+ 		err = ext3_group_extend(sb, EXT3_SB(sb)->s_es, n_blocks_count);
+ 		journal_lock_updates(EXT3_SB(sb)->s_journal);
+-		journal_flush(EXT3_SB(sb)->s_journal);
++		err2 = journal_flush(EXT3_SB(sb)->s_journal);
+ 		journal_unlock_updates(EXT3_SB(sb)->s_journal);
++		if (err == 0)
++			err = err2;
+ 
+ 		return err;
+ 	}
+ 	case EXT3_IOC_GROUP_ADD: {
+ 		struct ext3_new_group_data input;
+ 		struct super_block *sb = inode->i_sb;
+-		int err;
++		int err, err2;
+ 
+ 		if (!capable(CAP_SYS_RESOURCE))
+ 			return -EPERM;
+@@ -252,8 +254,10 @@ flags_err:
+ 
+ 		err = ext3_group_add(sb, &input);
+ 		journal_lock_updates(EXT3_SB(sb)->s_journal);
+-		journal_flush(EXT3_SB(sb)->s_journal);
++		err2 = journal_flush(EXT3_SB(sb)->s_journal);
+ 		journal_unlock_updates(EXT3_SB(sb)->s_journal);
++		if (err == 0)
++			err = err2;
+ 
+ 		return err;
+ 	}
+diff --git a/fs/ext3/namei.c b/fs/ext3/namei.c
+index acbfa15..a2a3d92 100644
+--- a/fs/ext3/namei.c
++++ b/fs/ext3/namei.c
+@@ -1053,6 +1053,16 @@ static struct dentry *ext3_lookup(struct inode * dir, struct dentry *dentry, str
+ 
+ 		if (!inode)
+ 			return ERR_PTR(-EACCES);
++
++		if (is_bad_inode(inode)) {
++			/* if bad because unlinked, something has gone wrong */
++			if (!inode->i_nlink && printk_ratelimit())
++				ext3_error(inode->i_sb, __FUNCTION__, "unlinked inode %lu in dir #%lu", inode->i_ino, dir->i_ino);
++
++			iput(inode);
++			return ERR_PTR(-ENOENT);
++		}
++
+ 		dx_propagate_tag(nd, inode);
+ 	}
+ 	return d_splice_alias(inode, dentry);
+@@ -1089,6 +1099,11 @@ struct dentry *ext3_get_parent(struct dentry *child)
+ 	if (!inode)
+ 		return ERR_PTR(-EACCES);
+ 
++	if (is_bad_inode(inode)) {
++		iput(inode);
++		return ERR_PTR(-ENOENT);
++	}
++
+ 	parent = d_alloc_anon(inode);
+ 	if (!parent) {
+ 		iput(inode);
+diff --git a/fs/ext3/super.c b/fs/ext3/super.c
+index 22244a2..ce186bc 100644
+--- a/fs/ext3/super.c
++++ b/fs/ext3/super.c
+@@ -279,7 +279,8 @@ void ext3_abort (struct super_block * sb, const char * function,
+ 	EXT3_SB(sb)->s_mount_state |= EXT3_ERROR_FS;
+ 	sb->s_flags |= MS_RDONLY;
+ 	EXT3_SB(sb)->s_mount_opt |= EXT3_MOUNT_ABORT;
+-	journal_abort(EXT3_SB(sb)->s_journal, -EIO);
++	if (EXT3_SB(sb)->s_journal)
++		journal_abort(EXT3_SB(sb)->s_journal, -EIO);
+ }
+ 
+ void ext3_warning (struct super_block * sb, const char * function,
+@@ -388,10 +389,14 @@ static void ext3_put_super (struct super_block * sb)
+ {
+ 	struct ext3_sb_info *sbi = EXT3_SB(sb);
+ 	struct ext3_super_block *es = sbi->s_es;
+-	int i;
++	int i, err;
+ 
+ 	ext3_xattr_put_super(sb);
+-	journal_destroy(sbi->s_journal);
++	err = journal_destroy(sbi->s_journal);
++	sbi->s_journal = NULL; 
++	if (err < 0)
++		ext3_abort(sb, __func__, "Couldn't clean up the journal");
++
+ 	if (!(sb->s_flags & MS_RDONLY)) {
+ 		EXT3_CLEAR_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER);
+ 		es->s_state = cpu_to_le16(sbi->s_mount_state);
+@@ -2161,13 +2166,15 @@ static void ext3_mark_recovery_complete(struct super_block * sb,
+ 	journal_t *journal = EXT3_SB(sb)->s_journal;
+ 
+ 	journal_lock_updates(journal);
+-	journal_flush(journal);
++	if (journal_flush(journal) < 0)
++		goto out;
+ 	if (EXT3_HAS_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER) &&
+ 	    sb->s_flags & MS_RDONLY) {
+ 		EXT3_CLEAR_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER);
+ 		sb->s_dirt = 0;
+ 		ext3_commit_super(sb, es, 1);
+ 	}
++out:
+ 	journal_unlock_updates(journal);
+ }
+ 
+@@ -2269,6 +2276,13 @@ static void ext3_write_super_lockfs(struct super_block *sb)
+ 		journal_lock_updates(journal);
+ 		journal_flush(journal);
+ 
++		/*
++		 * We don't want to clear needs_recovery flag when we failed
++		 * to flush the journal.
++		 */
++		if (journal_flush(journal) < 0)
++        		return;
++
+ 		/* Journal blocked and flushed, clear needs_recovery flag. */
+ 		EXT3_CLEAR_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_RECOVER);
+ 		ext3_commit_super(sb, EXT3_SB(sb)->s_es, 1);
+diff --git a/fs/jbd/checkpoint.c b/fs/jbd/checkpoint.c
+index 47552d4..803392f 100644
+--- a/fs/jbd/checkpoint.c
++++ b/fs/jbd/checkpoint.c
+@@ -93,7 +93,8 @@ static int __try_to_free_cp_buf(struct journal_head *jh)
+ 	int ret = 0;
+ 	struct buffer_head *bh = jh2bh(jh);
+ 
+-	if (jh->b_jlist == BJ_None && !buffer_locked(bh) && !buffer_dirty(bh)) {
++	if (jh->b_jlist == BJ_None && !buffer_locked(bh) &&
++	    !buffer_dirty(bh) && !buffer_write_io_error(bh)) {
+ 		JBUFFER_TRACE(jh, "remove from checkpoint list");
+ 		ret = __journal_remove_checkpoint(jh) + 1;
+ 		jbd_unlock_bh_state(bh);
+@@ -160,21 +161,25 @@ static void jbd_sync_bh(journal_t *journal, struct buffer_head *bh)
+  * buffers. Note that we take the buffers in the opposite ordering
+  * from the one in which they were submitted for IO.
+  *
++ * Return 0 on success, and return <0 if some buffers have failed
++ * to be written out.
++ *
+  * Called with j_list_lock held.
+  */
+-static void __wait_cp_io(journal_t *journal, transaction_t *transaction)
++static int __wait_cp_io(journal_t *journal, transaction_t *transaction)
+ {
+ 	struct journal_head *jh;
+ 	struct buffer_head *bh;
+ 	tid_t this_tid;
+ 	int released = 0;
++	int ret = 0;
+ 
+ 	this_tid = transaction->t_tid;
+ restart:
+ 	/* Did somebody clean up the transaction in the meanwhile? */
+ 	if (journal->j_checkpoint_transactions != transaction ||
+ 			transaction->t_tid != this_tid)
+-		return;
++		return ret;
+ 	while (!released && transaction->t_checkpoint_io_list) {
+ 		jh = transaction->t_checkpoint_io_list;
+ 		bh = jh2bh(jh);
+@@ -194,6 +199,9 @@ restart:
+ 			spin_lock(&journal->j_list_lock);
+ 			goto restart;
+ 		}
++		if (unlikely(buffer_write_io_error(bh)))
++			ret = -EIO;
++
+ 		/*
+ 		 * Now in whatever state the buffer currently is, we know that
+ 		 * it has been written out and so we can drop it from the list
+@@ -203,6 +211,8 @@ restart:
+ 		journal_remove_journal_head(bh);
+ 		__brelse(bh);
+ 	}
++
++	return ret;
+ }
+ 
+ #define NR_BATCH	64
+@@ -226,7 +236,8 @@ __flush_batch(journal_t *journal, struct buffer_head **bhs, int *batch_count)
+  * Try to flush one buffer from the checkpoint list to disk.
+  *
+  * Return 1 if something happened which requires us to abort the current
+- * scan of the checkpoint list.
++ * scan of the checkpoint list.  Return <0 if the buffer has failed to
++ * be written out.
+  *
+  * Called with j_list_lock held and drops it if 1 is returned
+  * Called under jbd_lock_bh_state(jh2bh(jh)), and drops it
+@@ -256,6 +267,9 @@ static int __process_buffer(journal_t *journal, struct journal_head *jh,
+ 		log_wait_commit(journal, tid);
+ 		ret = 1;
+ 	} else if (!buffer_dirty(bh)) {
++		ret = 1;
++		if (unlikely(buffer_write_io_error(bh)))
++			ret = -EIO;
+ 		J_ASSERT_JH(jh, !buffer_jbddirty(bh));
+ 		BUFFER_TRACE(bh, "remove from checkpoint");
+ 		__journal_remove_checkpoint(jh);
+@@ -263,7 +277,6 @@ static int __process_buffer(journal_t *journal, struct journal_head *jh,
+ 		jbd_unlock_bh_state(bh);
+ 		journal_remove_journal_head(bh);
+ 		__brelse(bh);
+-		ret = 1;
+ 	} else {
+ 		/*
+ 		 * Important: we are about to write the buffer, and
+@@ -295,6 +308,7 @@ static int __process_buffer(journal_t *journal, struct journal_head *jh,
+  * to disk. We submit larger chunks of data at once.
+  *
+  * The journal should be locked before calling this function.
++ * Called with j_checkpoint_mutex held.
+  */
+ int log_do_checkpoint(journal_t *journal)
+ {
+@@ -318,6 +332,7 @@ int log_do_checkpoint(journal_t *journal)
+ 	 * OK, we need to start writing disk blocks.  Take one transaction
+ 	 * and write it.
+ 	 */
++	result = 0;
+ 	spin_lock(&journal->j_list_lock);
+ 	if (!journal->j_checkpoint_transactions)
+ 		goto out;
+@@ -334,7 +349,7 @@ restart:
+ 		int batch_count = 0;
+ 		struct buffer_head *bhs[NR_BATCH];
+ 		struct journal_head *jh;
+-		int retry = 0;
++		int retry = 0, err;
+ 
+ 		while (!retry && transaction->t_checkpoint_list) {
+ 			struct buffer_head *bh;
+@@ -347,6 +362,8 @@ restart:
+ 				break;
+ 			}
+ 			retry = __process_buffer(journal, jh, bhs,&batch_count);
++			if (retry < 0 && !result)
++				result = retry;
+ 			if (!retry && lock_need_resched(&journal->j_list_lock)){
+ 				spin_unlock(&journal->j_list_lock);
+ 				retry = 1;
+@@ -370,14 +387,18 @@ restart:
+ 		 * Now we have cleaned up the first transaction's checkpoint
+ 		 * list. Let's clean up the second one
+ 		 */
+-		__wait_cp_io(journal, transaction);
++		err = __wait_cp_io(journal, transaction);
++		if (!result)
++			result = err;
+ 	}
+ out:
+ 	spin_unlock(&journal->j_list_lock);
+-	result = cleanup_journal_tail(journal);
+ 	if (result < 0)
+-		return result;
+-	return 0;
++		journal_abort(journal, result);
++	else
++		result = cleanup_journal_tail(journal);
++
++	return (result < 0) ? result : 0;
+ }
+ 
+ /*
+@@ -393,8 +414,9 @@ out:
+  * This is the only part of the journaling code which really needs to be
+  * aware of transaction aborts.  Checkpointing involves writing to the
+  * main filesystem area rather than to the journal, so it can proceed
+- * even in abort state, but we must not update the journal superblock if
+- * we have an abort error outstanding.
++ * even in abort state, but we must not update the super block if
++ * checkpointing may have failed.  Otherwise, we would lose some metadata
++ * buffers which should be written-back to the filesystem.
+  */
+ 
+ int cleanup_journal_tail(journal_t *journal)
+@@ -403,6 +425,9 @@ int cleanup_journal_tail(journal_t *journal)
+ 	tid_t		first_tid;
+ 	unsigned long	blocknr, freed;
+ 
++	if (is_journal_aborted(journal))
++		return 1;
++
+ 	/* OK, work out the oldest transaction remaining in the log, and
+ 	 * the log block it starts at.
+ 	 *
+@@ -602,15 +627,15 @@ int __journal_remove_checkpoint(struct journal_head *jh)
+ 
+ 	/*
+ 	 * There is one special case to worry about: if we have just pulled the
+-	 * buffer off a committing transaction's forget list, then even if the
+-	 * checkpoint list is empty, the transaction obviously cannot be
+-	 * dropped!
++	 * buffer off a running or committing transaction's checkpoing list,
++	 * then even if the checkpoint list is empty, the transaction obviously
++	 * cannot be dropped!
+ 	 *
+-	 * The locking here around j_committing_transaction is a bit sleazy.
++	 * The locking here around t_state is a bit sleazy.
+ 	 * See the comment at the end of journal_commit_transaction().
+ 	 */
+-	if (transaction == journal->j_committing_transaction) {
+-		JBUFFER_TRACE(jh, "belongs to committing transaction");
++	if (transaction->t_state != T_FINISHED) {
++		JBUFFER_TRACE(jh, "belongs to running/committing transaction");
+ 		goto out;
+ 	}
+ 
+diff --git a/fs/jbd/commit.c b/fs/jbd/commit.c
+index a003d50..0d2785d 100644
+--- a/fs/jbd/commit.c
++++ b/fs/jbd/commit.c
+@@ -36,7 +36,7 @@ static void journal_end_buffer_io_sync(struct buffer_head *bh, int uptodate)
+ 
+ /*
+  * When an ext3-ordered file is truncated, it is possible that many pages are
+- * not sucessfully freed, because they are attached to a committing transaction.
++ * not successfully freed, because they are attached to a committing transaction.
+  * After the transaction commits, these pages are left on the LRU, with no
+  * ->mapping, and with attached buffers.  These pages are trivially reclaimable
+  * by the VM, but their apparent absence upsets the VM accounting, and it makes
+@@ -45,8 +45,8 @@ static void journal_end_buffer_io_sync(struct buffer_head *bh, int uptodate)
+  * So here, we have a buffer which has just come off the forget list.  Look to
+  * see if we can strip all buffers from the backing page.
+  *
+- * Called under lock_journal(), and possibly under journal_datalist_lock.  The
+- * caller provided us with a ref against the buffer, and we drop that here.
++ * Called under journal->j_list_lock.  The caller provided us with a ref
++ * against the buffer, and we drop that here.
+  */
+ static void release_buffer_page(struct buffer_head *bh)
+ {
+@@ -78,6 +78,19 @@ nope:
+ }
+ 
+ /*
++ * Decrement reference counter for data buffer. If it has been marked
++ * 'BH_Freed', release it and the page to which it belongs if possible.
++ */
++static void release_data_buffer(struct buffer_head *bh)
++{
++	if (buffer_freed(bh)) {
++		clear_buffer_freed(bh);
++		release_buffer_page(bh);
++	} else
++		put_bh(bh);
++}
++
++/*
+  * Try to acquire jbd_lock_bh_state() against the buffer, when j_list_lock is
+  * held.  For ranking reasons we must trylock.  If we lose, schedule away and
+  * return 0.  j_list_lock is dropped in this case.
+@@ -173,7 +186,7 @@ static void journal_do_submit_data(struct buffer_head **wbuf, int bufs)
+ /*
+  *  Submit all the data buffers to disk
+  */
+-static void journal_submit_data_buffers(journal_t *journal,
++static int journal_submit_data_buffers(journal_t *journal,
+ 				transaction_t *commit_transaction)
+ {
+ 	struct journal_head *jh;
+@@ -181,6 +194,7 @@ static void journal_submit_data_buffers(journal_t *journal,
+ 	int locked;
+ 	int bufs = 0;
+ 	struct buffer_head **wbuf = journal->j_wbuf;
++	int err = 0;
+ 
+ 	/*
+ 	 * Whenever we unlock the journal and sleep, things can get added
+@@ -232,7 +246,7 @@ write_out_data:
+ 			if (locked)
+ 				unlock_buffer(bh);
+ 			BUFFER_TRACE(bh, "already cleaned up");
+-			put_bh(bh);
++			release_data_buffer(bh);
+ 			continue;
+ 		}
+ 		if (locked && test_clear_buffer_dirty(bh)) {
+@@ -254,15 +268,17 @@ write_out_data:
+ 			put_bh(bh);
+ 		} else {
+ 			BUFFER_TRACE(bh, "writeout complete: unfile");
++			if (unlikely(buffer_write_io_error(bh)))
++				err = -EIO;
+ 			__journal_unfile_buffer(jh);
+ 			jbd_unlock_bh_state(bh);
+ 			if (locked)
+ 				unlock_buffer(bh);
+ 			journal_remove_journal_head(bh);
+-			/* Once for our safety reference, once for
++			/* One for our safety reference, other for
+ 			 * journal_remove_journal_head() */
+ 			put_bh(bh);
+-			put_bh(bh);
++			release_data_buffer(bh);
+ 		}
+ 
+ 		if (lock_need_resched(&journal->j_list_lock)) {
+@@ -272,6 +288,8 @@ write_out_data:
+ 	}
+ 	spin_unlock(&journal->j_list_lock);
+ 	journal_do_submit_data(wbuf, bufs);
++
++	return err;
+ }
+ 
+ /*
+@@ -408,27 +426,10 @@ void journal_commit_transaction(journal_t *journal)
+ 	jbd_debug (3, "JBD: commit phase 2\n");
+ 
+ 	/*
+-	 * First, drop modified flag: all accesses to the buffers
+-	 * will be tracked for a new trasaction only -bzzz
+-	 */
+-	spin_lock(&journal->j_list_lock);
+-	if (commit_transaction->t_buffers) {
+-		new_jh = jh = commit_transaction->t_buffers->b_tnext;
+-		do {
+-			J_ASSERT_JH(new_jh, new_jh->b_modified == 1 ||
+-					new_jh->b_modified == 0);
+-			new_jh->b_modified = 0;
+-			new_jh = new_jh->b_tnext;
+-		} while (new_jh != jh);
+-	}
+-	spin_unlock(&journal->j_list_lock);
+-
+-	/*
+ 	 * Now start flushing things to disk, in the order they appear
+ 	 * on the transaction lists.  Data blocks go first.
+ 	 */
+-	err = 0;
+-	journal_submit_data_buffers(journal, commit_transaction);
++	err = journal_submit_data_buffers(journal, commit_transaction);
+ 
+ 	/*
+ 	 * Wait for all previously submitted IO to complete.
+@@ -443,10 +444,11 @@ void journal_commit_transaction(journal_t *journal)
+ 		if (buffer_locked(bh)) {
+ 			spin_unlock(&journal->j_list_lock);
+ 			wait_on_buffer(bh);
+-			if (unlikely(!buffer_uptodate(bh)))
+-				err = -EIO;
+ 			spin_lock(&journal->j_list_lock);
+ 		}
++		if (unlikely(!buffer_uptodate(bh)))
++			err = -EIO;
++
+ 		if (!inverted_lock(journal, bh)) {
+ 			put_bh(bh);
+ 			spin_lock(&journal->j_list_lock);
+@@ -460,18 +462,16 @@ void journal_commit_transaction(journal_t *journal)
+ 		} else {
+ 			jbd_unlock_bh_state(bh);
+ 		}
+-		put_bh(bh);
++		release_data_buffer(bh);
+ 		cond_resched_lock(&journal->j_list_lock);
+ 	}
+ 	spin_unlock(&journal->j_list_lock);
+ 
+ 	if (err)
+-		__journal_abort_hard(journal);
++		journal_abort(journal, err);
+ 
+ 	journal_write_revoke_records(journal, commit_transaction);
+ 
+-	jbd_debug(3, "JBD: commit phase 2\n");
+-
+ 	/*
+ 	 * If we found any dirty or locked buffers, then we should have
+ 	 * looped back up to the write_out_data label.  If there weren't
+@@ -489,6 +489,9 @@ void journal_commit_transaction(journal_t *journal)
+ 	 */
+ 	commit_transaction->t_state = T_COMMIT;
+ 
++	J_ASSERT(commit_transaction->t_nr_buffers <=
++		commit_transaction->t_outstanding_credits);
++
+ 	descriptor = NULL;
+ 	bufs = 0;
+ 	while (commit_transaction->t_buffers) {
+@@ -498,9 +501,10 @@ void journal_commit_transaction(journal_t *journal)
+ 		jh = commit_transaction->t_buffers;
+ 
+ 		/* If we're in abort mode, we just un-journal the buffer and
+-		   release it for background writing. */
++		   release it */
+ 
+ 		if (is_journal_aborted(journal)) {
++			clear_buffer_jbddirty(jh2bh(jh));
+ 			JBUFFER_TRACE(jh, "journal is aborting: refile");
+ 			journal_refile_buffer(journal, jh);
+ 			/* If that was the last one, we need to clean up
+@@ -524,7 +528,7 @@ void journal_commit_transaction(journal_t *journal)
+ 
+ 			descriptor = journal_get_descriptor_buffer(journal);
+ 			if (!descriptor) {
+-				__journal_abort_hard(journal);
++				journal_abort(journal, -EIO);
+ 				continue;
+ 			}
+ 
+@@ -557,7 +561,7 @@ void journal_commit_transaction(journal_t *journal)
+ 		   and repeat this loop: we'll fall into the
+ 		   refile-on-abort condition above. */
+ 		if (err) {
+-			__journal_abort_hard(journal);
++			journal_abort(journal, err);
+ 			continue;
+ 		}
+ 
+@@ -742,13 +746,16 @@ wait_for_iobuf:
+ 		/* AKPM: bforget here */
+ 	}
+ 
++	if (err)
++		journal_abort(journal, err);
++
+ 	jbd_debug(3, "JBD: commit phase 6\n");
+ 
+ 	if (journal_write_commit_record(journal, commit_transaction))
+ 		err = -EIO;
+ 
+ 	if (err)
+-		__journal_abort_hard(journal);
++		journal_abort(journal, err);
+ 
+ 	/* End of a transaction!  Finally, we can do checkpoint
+            processing: any buffers committed as a result of this
+@@ -832,6 +839,8 @@ restart_loop:
+ 		if (buffer_jbddirty(bh)) {
+ 			JBUFFER_TRACE(jh, "add to new checkpointing trans");
+ 			__journal_insert_checkpoint(jh, commit_transaction);
++			if (is_journal_aborted(journal))
++				clear_buffer_jbddirty(bh);
+ 			JBUFFER_TRACE(jh, "refile for checkpoint writeback");
+ 			__journal_refile_buffer(jh);
+ 			jbd_unlock_bh_state(bh);
+@@ -858,10 +867,10 @@ restart_loop:
+ 	}
+ 	spin_unlock(&journal->j_list_lock);
+ 	/*
+-	 * This is a bit sleazy.  We borrow j_list_lock to protect
+-	 * journal->j_committing_transaction in __journal_remove_checkpoint.
+-	 * Really, __journal_remove_checkpoint should be using j_state_lock but
+-	 * it's a bit hassle to hold that across __journal_remove_checkpoint
++	 * This is a bit sleazy.  We use j_list_lock to protect transition
++	 * of a transaction into T_FINISHED state and calling
++	 * __journal_drop_transaction(). Otherwise we could race with
++	 * other checkpointing code processing the transaction...
+ 	 */
+ 	spin_lock(&journal->j_state_lock);
+ 	spin_lock(&journal->j_list_lock);
+diff --git a/fs/jbd/journal.c b/fs/jbd/journal.c
+index 46fe743..8e937fc 100644
+--- a/fs/jbd/journal.c
++++ b/fs/jbd/journal.c
+@@ -1128,9 +1128,12 @@ recovery_error:
+  *
+  * Release a journal_t structure once it is no longer in use by the
+  * journaled object.
++ * Return <0 if we couldn't clean up the journal.
+  */
+-void journal_destroy(journal_t *journal)
++int journal_destroy(journal_t *journal)
+ {
++	int err = 0;
++
+ 	/* Wait for the commit thread to wake up and die. */
+ 	journal_kill_thread(journal);
+ 
+@@ -1153,11 +1156,16 @@ void journal_destroy(journal_t *journal)
+ 	J_ASSERT(journal->j_checkpoint_transactions == NULL);
+ 	spin_unlock(&journal->j_list_lock);
+ 
+-	/* We can now mark the journal as empty. */
+-	journal->j_tail = 0;
+-	journal->j_tail_sequence = ++journal->j_transaction_sequence;
+ 	if (journal->j_sb_buffer) {
+-		journal_update_superblock(journal, 1);
++		if (!is_journal_aborted(journal)) {
++			/* We can now mark the journal as empty. */
++			journal->j_tail = 0;
++			journal->j_tail_sequence =
++				++journal->j_transaction_sequence;
++			journal_update_superblock(journal, 1);
++		} else {
++			err = -EIO;
++		}
+ 		brelse(journal->j_sb_buffer);
+ 	}
+ 
+@@ -1167,6 +1175,8 @@ void journal_destroy(journal_t *journal)
+ 		journal_destroy_revoke(journal);
+ 	kfree(journal->j_wbuf);
+ 	kfree(journal);
++
++	return err;
+ }
+ 
+ 
+@@ -1366,10 +1376,16 @@ int journal_flush(journal_t *journal)
+ 	spin_lock(&journal->j_list_lock);
+ 	while (!err && journal->j_checkpoint_transactions != NULL) {
+ 		spin_unlock(&journal->j_list_lock);
++		mutex_lock(&journal->j_checkpoint_mutex);
+ 		err = log_do_checkpoint(journal);
++		mutex_unlock(&journal->j_checkpoint_mutex);
+ 		spin_lock(&journal->j_list_lock);
+ 	}
+ 	spin_unlock(&journal->j_list_lock);
++
++	if (is_journal_aborted(journal))
++		return -EIO;
++
+ 	cleanup_journal_tail(journal);
+ 
+ 	/* Finally, mark the journal as really needing no recovery.
+@@ -1391,7 +1407,7 @@ int journal_flush(journal_t *journal)
+ 	J_ASSERT(journal->j_head == journal->j_tail);
+ 	J_ASSERT(journal->j_tail_sequence == journal->j_transaction_sequence);
+ 	spin_unlock(&journal->j_state_lock);
+-	return err;
++	return 0;
+ }
+ 
+ /**
+diff --git a/fs/jbd/recovery.c b/fs/jbd/recovery.c
+index 2a5f4b8..66ae0e5 100644
+--- a/fs/jbd/recovery.c
++++ b/fs/jbd/recovery.c
+@@ -223,7 +223,7 @@ do {									\
+  */
+ int journal_recover(journal_t *journal)
+ {
+-	int			err;
++	int			err, err2;
+ 	journal_superblock_t *	sb;
+ 
+ 	struct recovery_info	info;
+@@ -261,7 +261,10 @@ int journal_recover(journal_t *journal)
+ 	journal->j_transaction_sequence = ++info.end_transaction;
+ 
+ 	journal_clear_revoke(journal);
+-	sync_blockdev(journal->j_fs_dev);
++	err2 = sync_blockdev(journal->j_fs_dev);
++	if (!err)
++		err = err2;
++
+ 	return err;
+ }
+ 
+@@ -478,7 +481,7 @@ static int do_one_pass(journal_t *journal,
+ 					memcpy(nbh->b_data, obh->b_data,
+ 							journal->j_blocksize);
+ 					if (flags & JFS_FLAG_ESCAPE) {
+-						*((__be32 *)bh->b_data) =
++						*((__be32 *)nbh->b_data) =
+ 						cpu_to_be32(JFS_MAGIC_NUMBER);
+ 					}
+ 
+diff --git a/fs/jbd/transaction.c b/fs/jbd/transaction.c
+index 772b653..1b9a804 100644
+--- a/fs/jbd/transaction.c
++++ b/fs/jbd/transaction.c
+@@ -600,6 +600,13 @@ repeat:
+ 	    jh->b_next_transaction == transaction)
+ 		goto done;
+ 
++        /*
++	 * this is the first time this transaction is touching this buffer,
++	 * reset the modified flag
++	 */
++	jh->b_modified = 0;
++
++
+ 	/*
+ 	 * If there is already a copy-out version of this buffer, then we don't
+ 	 * need to make another one
+@@ -812,9 +819,15 @@ int journal_get_create_access(handle_t *handle, struct buffer_head *bh)
+ 
+ 	if (jh->b_transaction == NULL) {
+ 		jh->b_transaction = transaction;
++
++		/* first access by this transaction */
++		jh->b_modified = 0;
++
+ 		JBUFFER_TRACE(jh, "file as BJ_Reserved");
+ 		__journal_file_buffer(jh, transaction, BJ_Reserved);
+ 	} else if (jh->b_transaction == journal->j_committing_transaction) {
++		/* first access by this transaction */
++		jh->b_modified = 0;
+ 		JBUFFER_TRACE(jh, "set next transaction");
+ 		jh->b_next_transaction = transaction;
+ 	}
+@@ -1213,6 +1226,7 @@ int journal_forget (handle_t *handle, struct buffer_head *bh)
+ 	struct journal_head *jh;
+ 	int drop_reserve = 0;
+ 	int err = 0;
++	int was_modified = 0;
+ 
+ 	BUFFER_TRACE(bh, "entry");
+ 
+@@ -1231,6 +1245,9 @@ int journal_forget (handle_t *handle, struct buffer_head *bh)
+ 		goto not_jbd;
+ 	}
+ 
++	/* keep track of wether or not this transaction modified us */
++	was_modified = jh->b_modified;
++
+ 	/*
+ 	 * The buffer's going from the transaction, we must drop
+ 	 * all references -bzzz
+@@ -1248,7 +1265,12 @@ int journal_forget (handle_t *handle, struct buffer_head *bh)
+ 
+ 		JBUFFER_TRACE(jh, "belongs to current transaction: unfile");
+ 
+-		drop_reserve = 1;
++		/*
++		 * we only want to drop a reference if this transaction
++		 * modified the buffer
++		 */
++		if (was_modified)
++			drop_reserve = 1;
+ 
+ 		/*
+ 		 * We are no longer going to journal this buffer.
+@@ -1288,7 +1310,12 @@ int journal_forget (handle_t *handle, struct buffer_head *bh)
+ 		if (jh->b_next_transaction) {
+ 			J_ASSERT(jh->b_next_transaction == transaction);
+ 			jh->b_next_transaction = NULL;
+-			drop_reserve = 1;
++			/*
++			 * only drop a reference if this transaction modified
++			 * the buffer
++			 */
++			if (was_modified)
++				drop_reserve = 1;
+ 		}
+ 	}
+ 
+@@ -2058,7 +2085,7 @@ void __journal_refile_buffer(struct journal_head *jh)
+ 	jh->b_transaction = jh->b_next_transaction;
+ 	jh->b_next_transaction = NULL;
+ 	__journal_file_buffer(jh, jh->b_transaction,
+-				was_dirty ? BJ_Metadata : BJ_Reserved);
++				jh->b_modified ? BJ_Metadata : BJ_Reserved);
+ 	J_ASSERT_JH(jh, jh->b_transaction->t_state == T_RUNNING);
+ 
+ 	if (was_dirty)
+diff --git a/include/linux/ext3_fs.h b/include/linux/ext3_fs.h
+index ff56e39..8c51469 100644
+--- a/include/linux/ext3_fs.h
++++ b/include/linux/ext3_fs.h
+@@ -827,6 +827,7 @@ extern void ext3_discard_reservation (struct inode *);
+ extern void ext3_dirty_inode(struct inode *);
+ extern int ext3_change_inode_journal_flag(struct inode *, int);
+ extern int ext3_get_inode_loc(struct inode *, struct ext3_iloc *);
++extern int ext3_can_truncate(struct inode *inode);
+ extern void ext3_truncate (struct inode *);
+ extern void ext3_set_inode_flags(struct inode *);
+ extern void ext3_get_inode_flags(struct ext3_inode_info *);
+diff --git a/include/linux/jbd.h b/include/linux/jbd.h
+index 4527375..6bc0e4f 100644
+--- a/include/linux/jbd.h
++++ b/include/linux/jbd.h
+@@ -446,6 +446,8 @@ struct transaction_s
+ 	/*
+ 	 * Transaction's current state
+ 	 * [no locking - only kjournald alters this]
++	 * [j_list_lock] guards transition of a transaction into T_FINISHED
++	 * state and subsequent call of __journal_drop_transaction()
+ 	 * FIXME: needs barriers
+ 	 * KLUDGE: [use j_state_lock]
+ 	 */
+@@ -924,7 +926,7 @@ extern int	   journal_set_features
+ 		   (journal_t *, unsigned long, unsigned long, unsigned long);
+ extern int	   journal_create     (journal_t *);
+ extern int	   journal_load       (journal_t *journal);
+-extern void	   journal_destroy    (journal_t *);
++extern int	   journal_destroy    (journal_t *);
+ extern int	   journal_recover    (journal_t *journal);
+ extern int	   journal_wipe       (journal_t *, int);
+ extern int	   journal_skip_recovery	(journal_t *);
