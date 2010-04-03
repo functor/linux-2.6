@@ -1,0 +1,140 @@
+commit 6b2ba85752b8123d68ceb8770c94ebf4ba1dbb94
+Author: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date:   Fri Apr 2 18:33:58 2010 -0400
+
+    support_barriers_on_single_device_dm_devices.patch
+
+diff --git a/drivers/md/dm-linear.c b/drivers/md/dm-linear.c
+index 6449bcd..2d50fff 100644
+--- a/drivers/md/dm-linear.c
++++ b/drivers/md/dm-linear.c
+@@ -151,6 +151,7 @@ static struct target_type linear_target = {
+ 	.status = linear_status,
+ 	.ioctl  = linear_ioctl,
+ 	.merge  = linear_merge,
++	.features = DM_TARGET_SUPPORTS_BARRIERS,
+ };
+ 
+ int __init dm_linear_init(void)
+diff --git a/drivers/md/dm-table.c b/drivers/md/dm-table.c
+index 61f4414..a27cce2 100644
+--- a/drivers/md/dm-table.c
++++ b/drivers/md/dm-table.c
+@@ -38,6 +38,8 @@ struct dm_table {
+ 	sector_t *highs;
+ 	struct dm_target *targets;
+ 
++	unsigned barriers_supported:1;
++
+ 	/*
+ 	 * Indicates the rw permissions for the new logical
+ 	 * device.  This should be a combination of FMODE_READ
+@@ -227,6 +229,7 @@ int dm_table_create(struct dm_table **result, int mode,
+ 
+ 	INIT_LIST_HEAD(&t->devices);
+ 	atomic_set(&t->holders, 1);
++	t->barriers_supported = 1;
+ 
+ 	if (!num_targets)
+ 		num_targets = KEYS_PER_NODE;
+@@ -723,6 +726,10 @@ int dm_table_add_target(struct dm_table *t, const char *type,
+ 	/* FIXME: the plan is to combine high here and then have
+ 	 * the merge fn apply the target level restrictions. */
+ 	combine_restrictions_low(&t->limits, &tgt->limits);
++
++	if (!(tgt->type->features & DM_TARGET_SUPPORTS_BARRIERS))
++		t->barriers_supported = 0;
++
+ 	return 0;
+ 
+  bad:
+@@ -767,6 +774,12 @@ int dm_table_complete(struct dm_table *t)
+ 
+ 	check_for_valid_limits(&t->limits);
+ 
++	/*
++	 * We only support barriers if there is exactly one underlying device.
++	 */
++	if (!list_is_singular(&t->devices))
++		t->barriers_supported = 0;
++
+ 	/* how many indexes will the btree have ? */
+ 	leaf_nodes = dm_div_up(t->num_targets, KEYS_PER_NODE);
+ 	t->depth = 1 + int_log(leaf_nodes, CHILDREN_PER_NODE);
+@@ -968,6 +981,11 @@ struct mapped_device *dm_table_get_md(struct dm_table *t)
+ 	return t->md;
+ }
+ 
++int dm_table_barrier_ok(struct dm_table *t)
++{
++	return t->barriers_supported;
++}
++EXPORT_SYMBOL(dm_table_barrier_ok);
+ EXPORT_SYMBOL(dm_vcalloc);
+ EXPORT_SYMBOL(dm_get_device);
+ EXPORT_SYMBOL(dm_put_device);
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+index 191f56d..8b11f14 100644
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -816,6 +816,12 @@ static int __split_bio(struct mapped_device *md, struct bio *bio)
+ 	if (unlikely(!ci.map))
+ 		return -EIO;
+ 
++	if (unlikely(bio_barrier(bio) && !dm_table_barrier_ok(ci.map))) {
++		dm_table_put(ci.map);
++		bio_endio(bio, -EOPNOTSUPP);
++		return;
++	}
++
+ 	ci.md = md;
+ 	ci.bio = bio;
+ 	ci.io = alloc_io(md);
+@@ -898,15 +904,6 @@ static int dm_request(struct request_queue *q, struct bio *bio)
+ 	int rw = bio_data_dir(bio);
+ 	struct mapped_device *md = q->queuedata;
+ 
+-	/*
+-	 * There is no use in forwarding any barrier request since we can't
+-	 * guarantee it is (or can be) handled by the targets correctly.
+-	 */
+-	if (unlikely(bio_barrier(bio))) {
+-		bio_endio(bio, -EOPNOTSUPP);
+-		return 0;
+-	}
+-
+ 	down_read(&md->io_lock);
+ 
+ 	disk_stat_inc(dm_disk(md), ios[rw]);
+diff --git a/drivers/md/dm.h b/drivers/md/dm.h
+index a72d6d7..cd82816 100644
+--- a/drivers/md/dm.h
++++ b/drivers/md/dm.h
+@@ -50,6 +50,7 @@ void dm_table_postsuspend_targets(struct dm_table *t);
+ int dm_table_resume_targets(struct dm_table *t);
+ int dm_table_any_congested(struct dm_table *t, int bdi_bits);
+ void dm_table_unplug_all(struct dm_table *t);
++int dm_table_barrier_ok(struct dm_table *t);
+ 
+ /*
+  * To check the return value from dm_table_find_target().
+diff --git a/include/linux/device-mapper.h b/include/linux/device-mapper.h
+index a90222e..3854a3e 100644
+--- a/include/linux/device-mapper.h
++++ b/include/linux/device-mapper.h
+@@ -94,9 +94,15 @@ int dm_get_device(struct dm_target *ti, const char *path, sector_t start,
+ void dm_put_device(struct dm_target *ti, struct dm_dev *d);
+ 
+ /*
++ * Target features
++ */
++#define DM_TARGET_SUPPORTS_BARRIERS 0x00000001
++
++/*
+  * Information about a target type
+  */
+ struct target_type {
++	uint64_t features;
+ 	const char *name;
+ 	struct module *module;
+ 	unsigned version[3];
