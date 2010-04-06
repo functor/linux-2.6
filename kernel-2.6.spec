@@ -184,8 +184,8 @@ Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 Patch800: linux-2.6-800-rename-ext4dev-to-ext4.patch
 Patch810: linux-2.6-810-ext4-cap-check-delay.patch
 
-Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
-Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
+#Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
+#Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -386,8 +386,10 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 800
 %ApplyPatch 810
 
+%if 0
 %ApplyPatch 900
 %ApplyPatch 910
+%endif
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.

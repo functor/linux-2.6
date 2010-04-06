@@ -84,7 +84,7 @@ index 191f56d..8b11f14 100644
 +	if (unlikely(bio_barrier(bio) && !dm_table_barrier_ok(ci.map))) {
 +		dm_table_put(ci.map);
 +		bio_endio(bio, -EOPNOTSUPP);
-+		return;
++		return 0;
 +	}
 +
  	ci.md = md;
