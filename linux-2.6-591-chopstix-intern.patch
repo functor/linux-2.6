@@ -1,7 +1,7 @@
-Index: linux-2.6.27.y/arch/Kconfig
-===================================================================
---- linux-2.6.27.y.orig/arch/Kconfig
-+++ linux-2.6.27.y/arch/Kconfig
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 1d07625..7d503e4 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
 @@ -13,9 +13,18 @@ config OPROFILE
  
  	  If unsure, say N.
@@ -21,10 +21,10 @@ Index: linux-2.6.27.y/arch/Kconfig
  config KPROBES
  	bool "Kprobes"
  	depends on KALLSYMS && MODULES
-Index: linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c
-===================================================================
---- linux-2.6.27.y.orig/arch/x86/kernel/asm-offsets_32.c
-+++ linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c
+diff --git a/arch/x86/kernel/asm-offsets_32.c b/arch/x86/kernel/asm-offsets_32.c
+index 6649d09..5508d20 100644
+--- a/arch/x86/kernel/asm-offsets_32.c
++++ b/arch/x86/kernel/asm-offsets_32.c
 @@ -9,6 +9,7 @@
  #include <linux/signal.h>
  #include <linux/personality.h>
@@ -33,91 +33,92 @@ Index: linux-2.6.27.y/arch/x86/kernel/asm-offsets_32.c
  #include <linux/kbuild.h>
  #include <asm/ucontext.h>
  #include "sigframe.h"
-@@ -24,9 +25,20 @@
+@@ -24,6 +25,18 @@
  #include <linux/lguest.h>
  #include "../../../drivers/lguest/lg.h"
  
-+
++#ifdef CONFIG_CHOPSTIX
 +#define STACKOFFSET(sym, str, mem) \
 +	DEFINE(sym, offsetof(struct str, mem)-sizeof(struct str));
 +
- /* workaround for a warning with -Wmissing-prototypes */
- void foo(void);
- 
 +struct event_spec {
 +	unsigned long pc;
 +	unsigned long dcookie;
 +	unsigned count;
 +	unsigned int number;
 +};
++#endif
 +
- void foo(void)
- {
- 	OFFSET(IA32_SIGCONTEXT_ax, sigcontext, ax);
-@@ -50,6 +62,16 @@ void foo(void)
+ /* workaround for a warning with -Wmissing-prototypes */
+ void foo(void);
+ 
+@@ -50,6 +63,18 @@ void foo(void)
  	OFFSET(CPUINFO_x86_vendor_id, cpuinfo_x86, x86_vendor_id);
  	BLANK();
  
-+    STACKOFFSET(TASK_thread, task_struct, thread);
-+    STACKOFFSET(THREAD_esp, thread_struct, sp);
-+    STACKOFFSET(EVENT_event_data, event, event_data);
-+    STACKOFFSET(EVENT_task, event, task);
-+    STACKOFFSET(EVENT_event_type, event, event_type);
-+    STACKOFFSET(SPEC_number, event_spec, number);
-+    DEFINE(EVENT_SIZE, sizeof(struct event));
-+    DEFINE(SPEC_SIZE, sizeof(struct event_spec));
-+    DEFINE(SPEC_EVENT_SIZE, sizeof(struct event_spec)+sizeof(struct event));
++#ifdef CONFIG_CHOPSTIX
++	STACKOFFSET(TASK_thread, task_struct, thread);
++	STACKOFFSET(THREAD_esp, thread_struct, sp);
++	STACKOFFSET(EVENT_event_data, event, event_data);
++	STACKOFFSET(EVENT_task, event, task);
++	STACKOFFSET(EVENT_event_type, event, event_type);
++	STACKOFFSET(SPEC_number, event_spec, number);
++	DEFINE(EVENT_SIZE, sizeof(struct event));
++	DEFINE(SPEC_SIZE, sizeof(struct event_spec));
++	DEFINE(SPEC_EVENT_SIZE, sizeof(struct event_spec)+sizeof(struct event));
++#endif
 +
  	OFFSET(TI_task, thread_info, task);
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
-Index: linux-2.6.27.y/arch/x86/kernel/entry_32.S
-===================================================================
---- linux-2.6.27.y.orig/arch/x86/kernel/entry_32.S
-+++ linux-2.6.27.y/arch/x86/kernel/entry_32.S
-@@ -426,6 +426,33 @@ ENTRY(system_call)
+diff --git a/arch/x86/kernel/entry_32.S b/arch/x86/kernel/entry_32.S
+index 109792b..ef514b0 100644
+--- a/arch/x86/kernel/entry_32.S
++++ b/arch/x86/kernel/entry_32.S
+@@ -426,6 +426,34 @@ ENTRY(system_call)
  	cmpl $(nr_syscalls), %eax
  	jae syscall_badsys
  syscall_call:
-+    /* Move Chopstix syscall probe here */
-+    /* Save and clobber: eax, ecx, ebp  */
-+    pushl   %eax
-+    pushl   %ecx
-+    pushl   %ebp
-+    movl    %esp, %ebp
-+    subl    $SPEC_EVENT_SIZE, %esp 
-+    movl    rec_event, %ecx
-+    testl   %ecx, %ecx
-+    jz  carry_on
-+    # struct event is first, just below %ebp
-+    movl    %eax, (SPEC_number-EVENT_SIZE)(%ebp)
-+    leal    -SPEC_EVENT_SIZE(%ebp), %eax
-+    movl    %eax, EVENT_event_data(%ebp)
-+    movl    $6, EVENT_event_type(%ebp)
-+    movl    rec_event, %edx
-+    movl    $1, 4(%esp)
-+    leal    -EVENT_SIZE(%ebp), %eax
-+    movl    %eax, (%esp)
-+    call    rec_event_asm 
++#ifdef CONFIG_CHOPSTIX
++	/* Move Chopstix syscall probe here */
++	/* Save and clobber: eax, ecx, ebp  */
++	pushl   %eax
++	pushl   %ecx
++	pushl   %ebp
++	movl    %esp, %ebp
++	subl    $SPEC_EVENT_SIZE, %esp 
++	movl    rec_event, %ecx
++	testl   %ecx, %ecx
++	jz  carry_on
++	# struct event is first, just below %ebp
++	movl    %eax, (SPEC_number-EVENT_SIZE)(%ebp)
++	leal    -SPEC_EVENT_SIZE(%ebp), %eax
++	movl    %eax, EVENT_event_data(%ebp)
++	movl    $6, EVENT_event_type(%ebp)
++	movl    rec_event, %edx
++	movl    $1, 4(%esp)
++	leal    -EVENT_SIZE(%ebp), %eax
++	movl    %eax, (%esp)
++	call    rec_event_asm 
 +carry_on: 
-+    addl $SPEC_EVENT_SIZE, %esp
-+    popl %ebp
-+    popl %ecx
-+    popl %eax
-+     /* End chopstix */
-+
++	addl $SPEC_EVENT_SIZE, %esp
++	popl %ebp
++	popl %ecx
++	popl %eax
++	/* End chopstix */
++#endif
  	call *sys_call_table(,%eax,4)
  	movl %eax,PT_EAX(%esp)		# store the return value
  syscall_exit:
-Index: linux-2.6.27.y/arch/x86/mm/fault.c
-===================================================================
---- linux-2.6.27.y.orig/arch/x86/mm/fault.c
-+++ linux-2.6.27.y/arch/x86/mm/fault.c
-@@ -79,6 +79,15 @@ static inline int notify_page_fault(stru
+diff --git a/arch/x86/mm/fault.c b/arch/x86/mm/fault.c
+index 3384255..cd535c7 100644
+--- a/arch/x86/mm/fault.c
++++ b/arch/x86/mm/fault.c
+@@ -79,6 +79,16 @@ static inline int notify_page_fault(struct pt_regs *regs)
  #endif
  }
  
-+
++#ifdef CONFIG_CHOPSTIX
 +extern void (*rec_event)(void *,unsigned int);
 +struct event_spec {
 +	unsigned long pc;
@@ -125,14 +126,15 @@ Index: linux-2.6.27.y/arch/x86/mm/fault.c
 +	unsigned count;
 +	unsigned char reason;
 +};
++#endif
 +
  /*
   * X86_32
   * Sometimes AMD Athlon/Opteron CPUs report invalid exceptions on prefetch.
-Index: linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
-===================================================================
---- linux-2.6.27.y.orig/drivers/oprofile/cpu_buffer.c
-+++ linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
+diff --git a/drivers/oprofile/cpu_buffer.c b/drivers/oprofile/cpu_buffer.c
+index 7ba78e6..ef379fb 100644
+--- a/drivers/oprofile/cpu_buffer.c
++++ b/drivers/oprofile/cpu_buffer.c
 @@ -21,6 +21,7 @@
  #include <linux/oprofile.h>
  #include <linux/vmalloc.h>
@@ -141,7 +143,7 @@ Index: linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
   
  #include "event_buffer.h"
  #include "cpu_buffer.h"
-@@ -147,6 +148,17 @@ static void increment_head(struct oprofi
+@@ -147,6 +148,17 @@ static void increment_head(struct oprofile_cpu_buffer * b)
  		b->head_pos = 0;
  }
  
@@ -159,19 +161,9 @@ Index: linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
  static inline void
  add_sample(struct oprofile_cpu_buffer * cpu_buf,
             unsigned long pc, unsigned long event)
-@@ -155,6 +167,7 @@ add_sample(struct oprofile_cpu_buffer * 
- 	entry->eip = pc;
- 	entry->event = event;
- 	increment_head(cpu_buf);
-+
- }
- 
- static inline void
-@@ -250,8 +263,28 @@ void oprofile_add_sample(struct pt_regs 
- {
+@@ -251,7 +263,24 @@ void oprofile_add_sample(struct pt_regs * const regs, unsigned long event)
  	int is_kernel = !user_mode(regs);
  	unsigned long pc = profile_pc(regs);
-+	int res=0;
  
 +#ifdef CONFIG_CHOPSTIX
 +	if (rec_event) {
@@ -186,20 +178,18 @@ Index: linux-2.6.27.y/drivers/oprofile/cpu_buffer.c
 +		(*rec_event)(&esig, 1);
 +	}
 +	else {
- 	oprofile_add_ext_sample(pc, regs, event, is_kernel);
++		oprofile_add_ext_sample(pc, regs, event, is_kernel);
 +	}
 +#else
-+ 	oprofile_add_ext_sample(pc, regs, event, is_kernel);
+ 	oprofile_add_ext_sample(pc, regs, event, is_kernel);
 +#endif
-+
-+
  }
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
-Index: linux-2.6.27.y/fs/bio.c
-===================================================================
---- linux-2.6.27.y.orig/fs/bio.c
-+++ linux-2.6.27.y/fs/bio.c
+diff --git a/fs/bio.c b/fs/bio.c
+index 3cba7ae..d888eb8 100644
+--- a/fs/bio.c
++++ b/fs/bio.c
 @@ -27,6 +27,7 @@
  #include <linux/workqueue.h>
  #include <linux/blktrace_api.h>
@@ -208,7 +198,7 @@ Index: linux-2.6.27.y/fs/bio.c
  
  static struct kmem_cache *bio_slab __read_mostly;
  
-@@ -44,6 +45,7 @@ static struct biovec_slab bvec_slabs[BIO
+@@ -44,6 +45,7 @@ static struct biovec_slab bvec_slabs[BIOVEC_NR_POOLS] __read_mostly = {
  };
  #undef BV
  
@@ -216,10 +206,11 @@ Index: linux-2.6.27.y/fs/bio.c
  /*
   * fs_bio_set is the bio_set containing bio and iovec memory pools used by
   * IO code that does not need private memory pools.
-@@ -1171,6 +1173,14 @@ void bio_check_pages_dirty(struct bio *b
+@@ -1171,6 +1173,17 @@ void bio_check_pages_dirty(struct bio *bio)
  	}
  }
  
++#ifdef CONFIG_CHOPSTIX
 +struct event_spec {
 +	unsigned long pc;
 +	unsigned long dcookie;
@@ -228,10 +219,12 @@ Index: linux-2.6.27.y/fs/bio.c
 +};
 +
 +extern void (*rec_event)(void *,unsigned int);
++#endif
++
  /**
   * bio_endio - end I/O on a bio
   * @bio:	bio
-@@ -1192,6 +1202,24 @@ void bio_endio(struct bio *bio, int erro
+@@ -1192,6 +1205,24 @@ void bio_endio(struct bio *bio, int error)
  	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
  		error = -EIO;
  
@@ -256,10 +249,10 @@ Index: linux-2.6.27.y/fs/bio.c
  	if (bio->bi_end_io)
  		bio->bi_end_io(bio, error);
  }
-Index: linux-2.6.27.y/fs/exec.c
-===================================================================
---- linux-2.6.27.y.orig/fs/exec.c
-+++ linux-2.6.27.y/fs/exec.c
+diff --git a/fs/exec.c b/fs/exec.c
+index e557406..19bc9d8 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
 @@ -27,6 +27,7 @@
  #include <linux/fdtable.h>
  #include <linux/mm.h>
@@ -282,17 +275,20 @@ Index: linux-2.6.27.y/fs/exec.c
  	return file;
  
   out_path_put:
-Index: linux-2.6.27.y/include/linux/arrays.h
-===================================================================
+diff --git a/include/linux/arrays.h b/include/linux/arrays.h
+new file mode 100644
+index 0000000..7641a3c
 --- /dev/null
-+++ linux-2.6.27.y/include/linux/arrays.h
-@@ -0,0 +1,36 @@
++++ b/include/linux/arrays.h
+@@ -0,0 +1,39 @@
 +#ifndef __ARRAYS_H__
 +#define __ARRAYS_H__
 +#include <linux/list.h>
 +
 +#define SAMPLING_METHOD_DEFAULT 0
 +#define SAMPLING_METHOD_LOG 1
++
++#define DEFAULT_ARRAY_SIZE 2048
 +
 +/* Every probe has an array handler */
 +
@@ -313,6 +309,7 @@ Index: linux-2.6.27.y/include/linux/arrays.h
 +	void **epoch_samples; /* size-sized lists of samples */
 +	unsigned int (*serialize)(void *, void *);
 +	unsigned char code[5];
++	unsigned int last_threshold;
 +};
 +
 +struct event {
@@ -323,11 +320,11 @@ Index: linux-2.6.27.y/include/linux/arrays.h
 +	struct task_struct *task;
 +};
 +#endif
-Index: linux-2.6.27.y/include/linux/sched.h
-===================================================================
---- linux-2.6.27.y.orig/include/linux/sched.h
-+++ linux-2.6.27.y/include/linux/sched.h
-@@ -1137,6 +1137,11 @@ struct task_struct {
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 891fbda..05ba57f 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1134,6 +1134,11 @@ struct task_struct {
  	cputime_t utime, stime, utimescaled, stimescaled;
  	cputime_t gtime;
  	cputime_t prev_utime, prev_stime;
@@ -339,10 +336,10 @@ Index: linux-2.6.27.y/include/linux/sched.h
  	unsigned long nvcsw, nivcsw; /* context switch counts */
  	struct timespec start_time; 		/* monotonic time */
  	struct timespec real_start_time;	/* boot based time */
-Index: linux-2.6.27.y/kernel/sched.c
-===================================================================
---- linux-2.6.27.y.orig/kernel/sched.c
-+++ linux-2.6.27.y/kernel/sched.c
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 2d66cdd..d1971b9 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
 @@ -10,7 +10,7 @@
   *  1998-11-19	Implemented schedule_timeout() and related stuff
   *		by Andrea Arcangeli
@@ -369,7 +366,7 @@ Index: linux-2.6.27.y/kernel/sched.c
  /*
   * Convert user-nice values [ -20 ... 0 ... 19 ]
   * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
-@@ -2376,6 +2380,10 @@ static void __sched_fork(struct task_str
+@@ -2368,6 +2372,10 @@ static void __sched_fork(struct task_struct *p)
  	INIT_HLIST_HEAD(&p->preempt_notifiers);
  #endif
  
@@ -380,13 +377,13 @@ Index: linux-2.6.27.y/kernel/sched.c
  	/*
  	 * We mark the process as running here, but have not actually
  	 * inserted it onto the runqueue yet. This guarantees that
-@@ -4436,6 +4444,29 @@ pick_next_task(struct rq *rq, struct tas
+@@ -4428,6 +4436,29 @@ pick_next_task(struct rq *rq, struct task_struct *prev)
  	}
  }
  
++#ifdef CONFIG_CHOPSTIX
 +void (*rec_event)(void *,unsigned int) = NULL;
 +EXPORT_SYMBOL(rec_event);
-+#ifdef CONFIG_CHOPSTIX
 +
 +struct event_spec {
 +    unsigned long pc;
@@ -410,69 +407,62 @@ Index: linux-2.6.27.y/kernel/sched.c
  /*
   * schedule() is the main scheduler function.
   */
-@@ -4495,6 +4526,61 @@ need_resched_nonpreemptible:
+@@ -4482,6 +4513,54 @@ need_resched_nonpreemptible:
  	next = pick_next_task(rq, prev);
  
  	if (likely(prev != next)) {
 +
 +#ifdef CONFIG_CHOPSTIX
-+	/* Run only if the Chopstix module so decrees it */
-+	if (rec_event) {
-+        unsigned long diff;
-+        int sampling_reason;
-+		prev->last_ran_j = jiffies;
-+		if (next->last_interrupted!=INTERRUPTIBLE) {
-+			if (next->last_interrupted!=RUNNING) {
-+				diff = (jiffies-next->last_interrupted);
-+				sampling_reason = 0;/* BLOCKING */
-+			}
-+			else {
-+				diff = jiffies-next->last_ran_j; 
-+				sampling_reason = 1;/* PREEMPTION */
-+			}
++		/* Run only if the Chopstix module so decrees it */
++		if (rec_event) {
++			unsigned long diff;
++			int sampling_reason;
++			prev->last_ran_j = jiffies;
++			if (next->last_interrupted!=INTERRUPTIBLE) {
++				if (next->last_interrupted!=RUNNING) {
++					diff = (jiffies-next->last_interrupted);
++					sampling_reason = 0;/* BLOCKING */
++				}
++				else {
++					diff = jiffies-next->last_ran_j; 
++					sampling_reason = 1;/* PREEMPTION */
++				}
 +
-+			if (diff >= HZ/10) {
-+                struct event_spec {
-+                   unsigned long pc;
-+                   unsigned long dcookie;
-+                   unsigned int count;
-+                   unsigned int reason;
-+                };
-+
-+				struct event event;
-+				struct event_spec espec;
-+                struct pt_regs *regs;
-+                regs = task_pt_regs(current);
-+
-+				espec.reason = sampling_reason;
-+				event.event_data=&espec;
-+				event.task=next;
-+				espec.pc=regs->ip;
-+				event.event_type=2; 
-+				/* index in the event array currently set up */
-+				/* make sure the counters are loaded in the order we want them to show up*/ 
-+				(*rec_event)(&event, diff);
++				if (diff >= HZ/10) {
++					struct event event;
++					struct event_spec espec;
++					struct pt_regs *regs;
++					regs = task_pt_regs(current);
++	
++					espec.reason = sampling_reason;
++					event.event_data=&espec;
++					event.task=next;
++					espec.pc=regs->ip;
++					event.event_type=2; 
++					/* index in the event array currently set up */
++					/* make sure the counters are loaded in the order we want them to show up*/ 
++					(*rec_event)(&event, diff);
++				}
 +			}
++        		/* next has been elected to run */
++			next->last_interrupted=0;
++
++			/* An uninterruptible process just yielded. Record the current jiffy */
++        		if (prev->state & TASK_UNINTERRUPTIBLE) {
++            			prev->last_interrupted=jiffies;
++      			}
++         		/* An interruptible process just yielded, or it got preempted. 
++          		 * Mark it as interruptible */
++        		else if (prev->state & TASK_INTERRUPTIBLE) {
++            			prev->last_interrupted=INTERRUPTIBLE;
++        		}
 +		}
-+        /* next has been elected to run */
-+		next->last_interrupted=0;
-+
-+        /* An uninterruptible process just yielded. Record the current jiffy */
-+        if (prev->state & TASK_UNINTERRUPTIBLE) {
-+            prev->last_interrupted=jiffies;
-+        }
-+         /* An interruptible process just yielded, or it got preempted. 
-+          * Mark it as interruptible */
-+        else if (prev->state & TASK_INTERRUPTIBLE) {
-+            prev->last_interrupted=INTERRUPTIBLE;
-+        }
-+	}
 +#endif
 +
  		sched_info_switch(prev, next);
  
  		rq->nr_switches++;
-@@ -5382,6 +5468,7 @@ long sched_setaffinity(pid_t pid, const 
+@@ -5369,6 +5448,7 @@ long sched_setaffinity(pid_t pid, const cpumask_t *in_mask)
  	get_task_struct(p);
  	read_unlock(&tasklist_lock);
  
@@ -480,10 +470,10 @@ Index: linux-2.6.27.y/kernel/sched.c
  	retval = -EPERM;
  	if ((current->euid != p->euid) && (current->euid != p->uid) &&
  			!capable(CAP_SYS_NICE))
-Index: linux-2.6.27.y/mm/memory.c
-===================================================================
---- linux-2.6.27.y.orig/mm/memory.c
-+++ linux-2.6.27.y/mm/memory.c
+diff --git a/mm/memory.c b/mm/memory.c
+index a258b98..4fd7215 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
 @@ -61,6 +61,7 @@
  
  #include <linux/swapops.h>
@@ -492,10 +482,11 @@ Index: linux-2.6.27.y/mm/memory.c
  
  #include "internal.h"
  
-@@ -2753,6 +2754,15 @@ out:
+@@ -2753,6 +2754,16 @@ out:
  	return ret;
  }
  
++#ifdef CONFIG_CHOPSTIX
 +extern void (*rec_event)(void *,unsigned int);
 +struct event_spec {
 +	unsigned long pc;
@@ -503,12 +494,12 @@ Index: linux-2.6.27.y/mm/memory.c
 +	unsigned count;
 +	unsigned char reason;
 +};
-+
++#endif
 +
  /*
   * By the time we get here, we already hold the mm semaphore
   */
-@@ -2782,6 +2792,24 @@ int handle_mm_fault(struct mm_struct *mm
+@@ -2782,6 +2793,24 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
  	if (!pte)
  		return VM_FAULT_OOM;
  
@@ -516,10 +507,10 @@ Index: linux-2.6.27.y/mm/memory.c
 +	if (rec_event) {
 +		struct event event;
 +		struct event_spec espec;
-+        struct pt_regs *regs;
-+        unsigned int pc;
-+        regs = task_pt_regs(current);
-+        pc = regs->ip & (unsigned int) ~4095;
++		struct pt_regs *regs;
++		unsigned int pc;
++		regs = task_pt_regs(current);
++		pc = regs->ip & (unsigned int) ~4095;
 +
 +		espec.reason = 0; /* alloc */
 +		event.event_data=&espec;
@@ -533,10 +524,10 @@ Index: linux-2.6.27.y/mm/memory.c
  	return handle_pte_fault(mm, vma, address, pte, pmd, write_access);
  }
  
-Index: linux-2.6.27.y/mm/slab.c
-===================================================================
---- linux-2.6.27.y.orig/mm/slab.c
-+++ linux-2.6.27.y/mm/slab.c
+diff --git a/mm/slab.c b/mm/slab.c
+index 88dd5a5..7f0a7c4 100644
+--- a/mm/slab.c
++++ b/mm/slab.c
 @@ -110,6 +110,7 @@
  #include	<linux/fault-inject.h>
  #include	<linux/rtmutex.h>
@@ -545,10 +536,11 @@ Index: linux-2.6.27.y/mm/slab.c
  #include	<linux/debugobjects.h>
  
  #include	<asm/cacheflush.h>
-@@ -248,6 +249,14 @@ struct slab_rcu {
+@@ -248,6 +249,16 @@ struct slab_rcu {
  	void *addr;
  };
  
++#ifdef CONFIG_CHOPSTIX
 +extern void (*rec_event)(void *,unsigned int);
 +struct event_spec {
 +	unsigned long pc;
@@ -556,11 +548,12 @@ Index: linux-2.6.27.y/mm/slab.c
 +	unsigned count;
 +	unsigned char reason;
 +};
++#endif
 +
  /*
   * struct array_cache
   *
-@@ -3469,6 +3478,19 @@ __cache_alloc(struct kmem_cache *cachep,
+@@ -3469,6 +3480,19 @@ __cache_alloc(struct kmem_cache *cachep, gfp_t flags, void *caller)
  	local_irq_restore(save_flags);
  	objp = cache_alloc_debugcheck_after(cachep, flags, objp, caller);
  	prefetchw(objp);
@@ -580,7 +573,7 @@ Index: linux-2.6.27.y/mm/slab.c
  
  	if (unlikely((flags & __GFP_ZERO) && objp))
  		memset(objp, 0, obj_size(cachep));
-@@ -3578,12 +3600,26 @@ free_done:
+@@ -3578,12 +3602,26 @@ free_done:
   * Release an obj back to its cache. If the obj has a constructed state, it must
   * be in this state _before_ it is released.  Called with disabled ints.
   */
@@ -609,15 +602,7 @@ Index: linux-2.6.27.y/mm/slab.c
  	vx_slab_free(cachep);
  
  	/*
-@@ -3714,6 +3750,7 @@ static __always_inline void *__do_kmallo
- 					  void *caller)
- {
- 	struct kmem_cache *cachep;
-+	void *ret;
- 
- 	/* If you want to save a few bytes .text space: replace
- 	 * __ with kmem_.
-@@ -3741,10 +3778,17 @@ void *__kmalloc_track_caller(size_t size
+@@ -3741,10 +3779,17 @@ void *__kmalloc_track_caller(size_t size, gfp_t flags, void *caller)
  EXPORT_SYMBOL(__kmalloc_track_caller);
  
  #else
@@ -635,7 +620,7 @@ Index: linux-2.6.27.y/mm/slab.c
  EXPORT_SYMBOL(__kmalloc);
  #endif
  
-@@ -3764,7 +3808,7 @@ void kmem_cache_free(struct kmem_cache *
+@@ -3764,7 +3809,7 @@ void kmem_cache_free(struct kmem_cache *cachep, void *objp)
  	debug_check_no_locks_freed(objp, obj_size(cachep));
  	if (!(cachep->flags & SLAB_DEBUG_OBJECTS))
  		debug_check_no_obj_freed(objp, obj_size(cachep));
@@ -644,7 +629,7 @@ Index: linux-2.6.27.y/mm/slab.c
  	local_irq_restore(flags);
  }
  EXPORT_SYMBOL(kmem_cache_free);
-@@ -3790,7 +3834,7 @@ void kfree(const void *objp)
+@@ -3790,7 +3835,7 @@ void kfree(const void *objp)
  	c = virt_to_cache(objp);
  	debug_check_no_locks_freed(objp, obj_size(c));
  	debug_check_no_obj_freed(objp, obj_size(c));
