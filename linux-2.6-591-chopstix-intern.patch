@@ -72,7 +72,7 @@ index 6649d09..5508d20 100644
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
 diff --git a/arch/x86/kernel/entry_32.S b/arch/x86/kernel/entry_32.S
-index 109792b..ef514b0 100644
+index 109792b..92a4f72 100644
 --- a/arch/x86/kernel/entry_32.S
 +++ b/arch/x86/kernel/entry_32.S
 @@ -426,6 +426,34 @@ ENTRY(system_call)
@@ -94,7 +94,7 @@ index 109792b..ef514b0 100644
 +	movl    %eax, (SPEC_number-EVENT_SIZE)(%ebp)
 +	leal    -SPEC_EVENT_SIZE(%ebp), %eax
 +	movl    %eax, EVENT_event_data(%ebp)
-+	movl    $6, EVENT_event_type(%ebp)
++	movl    $7, EVENT_event_type(%ebp)
 +	movl    rec_event, %edx
 +	movl    $1, 4(%esp)
 +	leal    -EVENT_SIZE(%ebp), %eax
@@ -131,6 +131,56 @@ index 3384255..cd535c7 100644
  /*
   * X86_32
   * Sometimes AMD Athlon/Opteron CPUs report invalid exceptions on prefetch.
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 2cba5ef..7fc6c2b 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -30,9 +30,20 @@
+ #include <linux/cpu.h>
+ #include <linux/blktrace_api.h>
+ #include <linux/fault-inject.h>
++#include <linux/arrays.h>
+ 
+ #include "blk.h"
+ 
++#ifdef CONFIG_CHOPSTIX
++extern void (*rec_event)(void *,unsigned int);
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie;
++	unsigned count;
++	unsigned char reason;
++};
++#endif
++
+ static int __make_request(struct request_queue *q, struct bio *bio);
+ 
+ /*
+@@ -1414,6 +1425,24 @@ end_io:
+ 			goto end_io;
+ 		}
+ 
++#ifdef CONFIG_CHOPSTIX
++		if (rec_event) {
++			struct event event;
++			struct event_spec espec;
++			unsigned long eip;
++			
++			espec.reason = 0;/*request */
++
++			eip = bio->bi_end_io;
++			event.event_data=&espec;
++			espec.pc=eip;
++			event.event_type=3; 
++			/* index in the event array currently set up */
++			/* make sure the counters are loaded in the order we want them to show up*/ 
++			(*rec_event)(&event, bio->bi_size);
++		}
++#endif
++
+ 		ret = q->make_request_fn(q, bio);
+ 	} while (ret);
+ }
 diff --git a/drivers/oprofile/cpu_buffer.c b/drivers/oprofile/cpu_buffer.c
 index 7ba78e6..ef379fb 100644
 --- a/drivers/oprofile/cpu_buffer.c
@@ -187,7 +237,7 @@ index 7ba78e6..ef379fb 100644
  
  void oprofile_add_pc(unsigned long pc, int is_kernel, unsigned long event)
 diff --git a/fs/bio.c b/fs/bio.c
-index 3cba7ae..d888eb8 100644
+index 3cba7ae..2f16e17 100644
 --- a/fs/bio.c
 +++ b/fs/bio.c
 @@ -27,6 +27,7 @@
@@ -228,7 +278,7 @@ index 3cba7ae..d888eb8 100644
  	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
  		error = -EIO;
  
-+#if 0
++#ifdef CONFIG_CHOPSTIX
 +		if (rec_event) {
 +			struct event event;
 +			struct event_spec espec;
@@ -242,7 +292,7 @@ index 3cba7ae..d888eb8 100644
 +			event.event_type=3; 
 +			/* index in the event array currently set up */
 +			/* make sure the counters are loaded in the order we want them to show up*/ 
-+			(*rec_event)(&event, bytes_done);
++			(*rec_event)(&event, bio->bi_size);
 +		}
 +#endif
 +
@@ -320,6 +370,20 @@ index 0000000..7641a3c
 +	struct task_struct *task;
 +};
 +#endif
+diff --git a/include/linux/mutex.h b/include/linux/mutex.h
+index bc6da10..a385919 100644
+--- a/include/linux/mutex.h
++++ b/include/linux/mutex.h
+@@ -55,6 +55,9 @@ struct mutex {
+ 	const char 		*name;
+ 	void			*magic;
+ #endif
++#ifdef CONFIG_CHOPSTIX
++	struct thread_info	*owner;
++#endif
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+ 	struct lockdep_map	dep_map;
+ #endif
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index 891fbda..05ba57f 100644
 --- a/include/linux/sched.h
@@ -336,8 +400,102 @@ index 891fbda..05ba57f 100644
  	unsigned long nvcsw, nivcsw; /* context switch counts */
  	struct timespec start_time; 		/* monotonic time */
  	struct timespec real_start_time;	/* boot based time */
+diff --git a/kernel/mutex.c b/kernel/mutex.c
+index 12c779d..fcc074f 100644
+--- a/kernel/mutex.c
++++ b/kernel/mutex.c
+@@ -18,6 +18,16 @@
+ #include <linux/spinlock.h>
+ #include <linux/interrupt.h>
+ #include <linux/debug_locks.h>
++#include <linux/arrays.h>
++
++#ifdef CONFIG_CHOPSTIX
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie;
++	unsigned count;
++	unsigned char reason;
++};
++#endif
+ 
+ /*
+  * In the DEBUG case we are using the "NULL fastpath" for mutexes,
+@@ -44,6 +54,9 @@ void
+ __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
+ {
+ 	atomic_set(&lock->count, 1);
++#ifdef CONFIG_CHOPSTIX
++	lock->owner = NULL;
++#endif
+ 	spin_lock_init(&lock->wait_lock);
+ 	INIT_LIST_HEAD(&lock->wait_list);
+ 
+@@ -177,6 +190,25 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
+ 		}
+ 		__set_task_state(task, state);
+ 
++#if 0 && CONFIG_CHOPSTIX
++		if (rec_event) {
++			if (lock->owner) {
++				struct event event;
++				struct event_spec espec;
++				struct task_struct *p = lock->owner->task;
++
++				espec.reason = 0; /* lock */
++				event.event_data = &espec;
++				event.task = p;
++				espec.pc = lock;
++				event.event_type = 5;
++				(*rec_event)(&event, 1);
++			} else {
++				BUG();
++			}
++		}
++#endif
++
+ 		/* didnt get the lock, go to sleep: */
+ 		spin_unlock_mutex(&lock->wait_lock, flags);
+ 		schedule();
+@@ -189,6 +221,10 @@ done:
+ 	mutex_remove_waiter(lock, &waiter, task_thread_info(task));
+ 	debug_mutex_set_owner(lock, task_thread_info(task));
+ 
++#ifdef CONFIG_CHOPSTIX
++	lock->owner = task_thread_info(task);
++#endif
++
+ 	/* set it to 0 if there are no waiters left: */
+ 	if (likely(list_empty(&lock->wait_list)))
+ 		atomic_set(&lock->count, 0);
+@@ -257,6 +293,25 @@ __mutex_unlock_common_slowpath(atomic_t *lock_count, int nested)
+ 
+ 		debug_mutex_wake_waiter(lock, waiter);
+ 
++#if 0 && CONFIG_CHOPSTIX
++		if (rec_event) {
++			if (lock->owner) {
++				struct event event;
++				struct event_spec espec;
++				struct task_struct *p = lock->owner->task;
++
++				espec.reason = 1; /* unlock */
++				event.event_data = &espec;
++				event.task = p;
++				espec.pc = lock;
++				event.event_type = 5;
++				(*rec_event)(&event, 1);
++			} else {
++				BUG();
++			}
++		}
++#endif
++
+ 		wake_up_process(waiter->task);
+ 	}
+ 
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 2d66cdd..d1971b9 100644
+index 2d66cdd..347ce2a 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -10,7 +10,7 @@
@@ -377,13 +535,14 @@ index 2d66cdd..d1971b9 100644
  	/*
  	 * We mark the process as running here, but have not actually
  	 * inserted it onto the runqueue yet. This guarantees that
-@@ -4428,6 +4436,29 @@ pick_next_task(struct rq *rq, struct task_struct *prev)
+@@ -4428,6 +4436,30 @@ pick_next_task(struct rq *rq, struct task_struct *prev)
  	}
  }
  
 +#ifdef CONFIG_CHOPSTIX
 +void (*rec_event)(void *,unsigned int) = NULL;
 +EXPORT_SYMBOL(rec_event);
++EXPORT_SYMBOL(in_sched_functions);
 +
 +struct event_spec {
 +    unsigned long pc;
@@ -407,7 +566,7 @@ index 2d66cdd..d1971b9 100644
  /*
   * schedule() is the main scheduler function.
   */
-@@ -4482,6 +4513,54 @@ need_resched_nonpreemptible:
+@@ -4482,6 +4514,54 @@ need_resched_nonpreemptible:
  	next = pick_next_task(rq, prev);
  
  	if (likely(prev != next)) {
@@ -462,7 +621,7 @@ index 2d66cdd..d1971b9 100644
  		sched_info_switch(prev, next);
  
  		rq->nr_switches++;
-@@ -5369,6 +5448,7 @@ long sched_setaffinity(pid_t pid, const cpumask_t *in_mask)
+@@ -5369,6 +5449,7 @@ long sched_setaffinity(pid_t pid, const cpumask_t *in_mask)
  	get_task_struct(p);
  	read_unlock(&tasklist_lock);
  
@@ -471,7 +630,7 @@ index 2d66cdd..d1971b9 100644
  	if ((current->euid != p->euid) && (current->euid != p->uid) &&
  			!capable(CAP_SYS_NICE))
 diff --git a/mm/memory.c b/mm/memory.c
-index a258b98..4fd7215 100644
+index a258b98..1c1a375 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
 @@ -61,6 +61,7 @@
@@ -516,7 +675,7 @@ index a258b98..4fd7215 100644
 +		event.event_data=&espec;
 +		event.task = current;
 +		espec.pc=pc;
-+		event.event_type=5; 
++		event.event_type=6; 
 +		(*rec_event)(&event, 1);
 +	}
 +#endif
@@ -525,7 +684,7 @@ index a258b98..4fd7215 100644
  }
  
 diff --git a/mm/slab.c b/mm/slab.c
-index 88dd5a5..7f0a7c4 100644
+index 88dd5a5..3486baa 100644
 --- a/mm/slab.c
 +++ b/mm/slab.c
 @@ -110,6 +110,7 @@
@@ -566,7 +725,7 @@ index 88dd5a5..7f0a7c4 100644
 +		event.event_data=&espec;
 +		event.task = current;
 +		espec.pc=caller;
-+		event.event_type=5; 
++		event.event_type=4; 
 +		(*rec_event)(&event, cachep->buffer_size);
 +	}
 +#endif
