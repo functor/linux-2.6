@@ -217,8 +217,8 @@ Patch800: linux-2.6-800-fix-4-bit-apicid-assumption.patch
 
 Patch810: linux-2.6-810-ich10.patch
 
-#Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
-#Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
+Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
+Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
 
 Patch950: linux-2.6.950-ext3_backports.patch
 
@@ -459,10 +459,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 800
 %ApplyPatch 810
 
-%if 0
 %ApplyPatch 900
 %ApplyPatch 910
-%endif
 
 %ApplyPatch 950
 
