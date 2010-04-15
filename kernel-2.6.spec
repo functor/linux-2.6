@@ -557,6 +557,7 @@ BuildKernel() {
     make -s ARCH=$Arch INSTALL_HDR_PATH=$RPM_BUILD_ROOT/usr
     find $RPM_BUILD_ROOT/%{_includedir} -name \*.cmd -delete
     rm -f $RPM_BUILD_ROOT/%{_includedir}/{..,.}{check,install}*
+    rm -rf $RPM_BUILD_ROOT/usr/include/scsi
 %endif
 
 %if %{iwlwifi}
