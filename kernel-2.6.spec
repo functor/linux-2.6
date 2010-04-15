@@ -34,7 +34,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 46
+%define taglevel 47
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -939,6 +939,13 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Thu Apr 15 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-22-47
+- Tagging 22 branch with following changes;
+- * Make barrier=1 for ext3 filesystem,
+- * Support barriers on single device dm devices,
+- * Introduce various ext3 related fixes,
+- * Fix conflict between glibc-headers kernel-headers packages
+
 * Tue Mar 16 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-22-46
 - every released package should have a tag in svn, so remove updatelevel from naming scheme and also change the variable name
 
