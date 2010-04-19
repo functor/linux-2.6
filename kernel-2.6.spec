@@ -41,7 +41,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
-%define vsversion 2.3.0.36.4
+%define vsversion 2.3.0.36.8
 
 # Will go away when VServer supports NetNS in mainline. Currently, it must be 
 # updated every time the PL kernel is updated.
@@ -150,7 +150,6 @@ Patch100: linux-2.6-100-build-nonintconfig.patch
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch220: delta-ptrace-fix01.diff
-Patch230: delta-pivot-fix01.diff
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -353,7 +352,6 @@ KERNEL_PREVIOUS=vanilla
 # vserver patch
 %ApplyPatch 200
 %ApplyPatch 220
-%ApplyPatch 230
 
 %ApplyPatch 250
 
