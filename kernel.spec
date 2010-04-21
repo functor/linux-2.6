@@ -1233,7 +1233,7 @@ ApplyPatch linux-2.6-hotfixes.patch
 ApplyPatch linux-2.6-tracehook.patch
 
 ApplyPatch linux-2.6-utrace.patch -F3
-ApplyPatch linux-2.6-utrace-ptrace.patch
+#ApplyPatch linux-2.6-utrace-ptrace.patch
 
 # Architecture patches
 # x86(-64)
