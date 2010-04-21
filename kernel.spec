@@ -1284,7 +1284,7 @@ ApplyPatch linux-2.6.29-sparc-IOC_TYPECHECK.patch
 # Exec shield
 #
 ###-vs- 
-ApplyPatch linux-2.6-execshield.patch -F3
+#ApplyPatch linux-2.6-execshield.patch -F3
 
 #
 # bugfixes to drivers and filesystems
@@ -1327,7 +1327,7 @@ ApplyPatch linux-2.6-acpi-video-dos.patch
 ApplyPatch linux-2.6-debug-sizeof-structs.patch
 ApplyPatch linux-2.6-debug-nmi-timeout.patch
 ApplyPatch linux-2.6-debug-taint-vm.patch
-ApplyPatch linux-2.6-debug-vm-would-have-oomkilled.patch
+#ApplyPatch linux-2.6-debug-vm-would-have-oomkilled.patch
 ApplyPatch linux-2.6-debug-always-inline-kzalloc.patch
 
 #
@@ -1514,7 +1514,7 @@ do
   mv $i .config
   Arch=`head -1 .config | cut -b 3-`
 ###-vs- ignore the warnings, due to IPV6 being set to 'm'
-  make ARCH=$Arch %{oldconfig_target} > /dev/null
+  make ARCH=$Arch %{oldconfig_target} || :
   echo "# $Arch" > configs/$i
   cat .config >> configs/$i
 done
