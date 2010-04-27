@@ -99,3 +99,4 @@ rpm: sources
 
 clean:
 	rm -f *.rpm
+	rm -rf BUILDROOT SOURCES SPECS SRPMS kernel-2.6.32 original tmp
