@@ -28,7 +28,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 8
+%define taglevel 9
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -818,6 +818,11 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Tue Apr 27 2010 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-9
+- config for wextoolbox OK
+- upgrade to patch-2.6.27.46-vs2.3.0.36.8
+- turn off delta-pivot-fix01.diff (which was tweaked btw)
+
 * Wed Apr 07 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-27-8
 - chopstix fixes & cleanups
 
