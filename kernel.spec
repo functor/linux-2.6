@@ -1865,7 +1865,8 @@ Patch90525: linux-2.6-525-sknid-elevator.patch
 #Patch90527:  linux-2.6-527-iptables-classify-add-mark.patch
 #
 Patch90530: linux-2.6-530-built-by-support.patch
-Patch90540: linux-2.6-540-oom-kill.patch
+# /proc/sys/vm/panic_on_oom ?
+#Patch90540: linux-2.6-540-oom-kill.patch
 Patch90550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch90570:  linux-2.6-570-tagxid.patch
 Patch90580:  linux-2.6-580-show-proc-virt.patch
@@ -3512,7 +3513,7 @@ ApplyPatch linux-2.6-525-sknid-elevator.patch
 #ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
 #
 ApplyPatch linux-2.6-530-built-by-support.patch
-ApplyPatch linux-2.6-540-oom-kill.patch
+#ApplyPatch linux-2.6-540-oom-kill.patch
 ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
 ApplyPatch linux-2.6-570-tagxid.patch
 ApplyPatch linux-2.6-580-show-proc-virt.patch
