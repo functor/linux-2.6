@@ -1854,6 +1854,10 @@ Patch88888: patch-2.6.32-19.el6-vs2.3.0.36.29.4.diff
 Patch90250: linux-2.6-250-ipsets.patch
 Patch90510: linux-2.6-510-ipod.patch
 Patch90521: linux-2.6-521-packet-tagging.patch
+#
+#Patch90522: linux-2.6-522-iptables-connection-tagging.patch
+#
+Patch90523: linux-2.6-523-raw-sockets.patch
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3475,6 +3479,10 @@ ApplyPatch patch-2.6.32-19.el6-vs2.3.0.36.29.4.diff
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
 ApplyPatch linux-2.6-521-packet-tagging.patch
+#
+#ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
+#
+ApplyPatch linux-2.6-523-raw-sockets.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
