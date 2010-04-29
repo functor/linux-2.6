@@ -1862,6 +1862,7 @@ Patch90524: linux-2.6-524-peercred.patch
 Patch90525: linux-2.6-525-sknid-elevator.patch
 Patch90530: linux-2.6-530-built-by-support.patch
 Patch90540: linux-2.6-540-oom-kill.patch
+Patch90550: linux-2.6-550-raise-default-nfile-ulimit.patch
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3491,6 +3492,7 @@ ApplyPatch linux-2.6-524-peercred.patch
 ApplyPatch linux-2.6-525-sknid-elevator.patch
 ApplyPatch linux-2.6-540-oom-kill.patch
 ApplyPatch linux-2.6-530-built-by-support.patch
+ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 

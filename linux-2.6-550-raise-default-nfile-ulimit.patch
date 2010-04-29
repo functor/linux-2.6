@@ -1,0 +1,13 @@
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 22ff9cd..e082c37 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -21,7 +21,7 @@
+ 
+ /* Fixed constants first: */
+ #undef NR_OPEN
+-#define INR_OPEN 1024		/* Initial setting for nfile rlimits */
++#define INR_OPEN 4096		/* Initial setting for nfile rlimits */
+ 
+ #define BLOCK_SIZE_BITS 10
+ #define BLOCK_SIZE (1<<BLOCK_SIZE_BITS)
