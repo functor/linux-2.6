@@ -1,8 +1,8 @@
-Index: linux-2.6.27.y/kernel/ptrace.c
-===================================================================
---- linux-2.6.27.y.orig/kernel/ptrace.c
-+++ linux-2.6.27.y/kernel/ptrace.c
-@@ -140,7 +140,7 @@ int __ptrace_may_access(struct task_stru
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 8eb5006..82dc549 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -58,7 +58,7 @@ int __ptrace_may_access(struct task_struct *task, unsigned int mode)
  		dumpable = get_dumpable(task->mm);
  	if (!dumpable && !capable(CAP_SYS_PTRACE))
  		return -EPERM;
