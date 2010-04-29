@@ -1870,8 +1870,8 @@ Patch90530: linux-2.6-530-built-by-support.patch
 Patch90550: linux-2.6-550-raise-default-nfile-ulimit.patch
 Patch90570:  linux-2.6-570-tagxid.patch
 Patch90580:  linux-2.6-580-show-proc-virt.patch
+Patch90590:  linux-2.6-590-dcookies-mm.patch
 #
-#Patch90590:  linux-2.6-590-dcookies-mm.patch
 #Patch90591:  linux-2.6-591-chopstix-intern.patch
 #
 Patch90640:  linux-2.6-640-netlink-audit-hack.patch
@@ -3517,8 +3517,8 @@ ApplyPatch linux-2.6-530-built-by-support.patch
 ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
 ApplyPatch linux-2.6-570-tagxid.patch
 ApplyPatch linux-2.6-580-show-proc-virt.patch
+ApplyPatch linux-2.6-590-dcookies-mm.patch
 #
-#ApplyPatch linux-2.6-590-dcookies-mm.patch
 #ApplyPatch linux-2.6-591-chopstix-intern.patch
 #
 ApplyPatch linux-2.6-640-netlink-audit-hack.patch
