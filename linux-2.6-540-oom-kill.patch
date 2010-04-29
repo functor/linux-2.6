@@ -55,13 +55,6 @@ index 0000000..4230ae5
 +out_unlock:
 +	spin_unlock(&oom_lock);
 +}
-
-commit 2e378e38451e7b3929110dc6f13d48587a169afe
-Author: root <root@rhel6.(none)>
-Date:   Thu Apr 29 10:08:21 2010 -0400
-
-    linux-2.6-540-oom-kill.patch
-
 diff --git a/init/Kconfig b/init/Kconfig
 index 87fe242..cc782ea 100644
 --- a/init/Kconfig
