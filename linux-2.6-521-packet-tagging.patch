@@ -1,0 +1,72 @@
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+index 567776e..1b64e1e 100644
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -394,6 +394,8 @@ struct sk_buff {
+ 		__u32		dropcount;
+ 	};
+ 
++#define skb_tag			mark
++
+ 	__u16			vlan_tci;
+ 
+ 	sk_buff_data_t		transport_header;
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index ec85681..d5a641e 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -208,6 +208,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
+ 	skb->mac_header = ~0U;
+ #endif
+ 
++	if (!in_interrupt()) skb->skb_tag = nx_current_nid(); else skb->skb_tag = 0;
+ 	/* make sure we initialize shinfo sequentially */
+ 	shinfo = skb_shinfo(skb);
+ 	atomic_set(&shinfo->dataref, 1);
+@@ -559,6 +560,7 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
+ #endif
+ #endif
+ 	new->vlan_tci		= old->vlan_tci;
++	new->skb_tag            = old->skb_tag;
+ 
+ 	skb_copy_secmark(new, old);
+ }
+diff --git a/net/core/sock.c b/net/core/sock.c
+index 617fae7..d276d4b 100644
+--- a/net/core/sock.c
++++ b/net/core/sock.c
+@@ -1056,6 +1056,8 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
+ 		sk->sk_prot = sk->sk_prot_creator = prot;
+ 		sock_lock_init(sk);
+ 		sock_net_set(sk, get_net(net));
++		if (!in_interrupt())
++			sk->sk_mark = nx_current_nid();
+ 		atomic_set(&sk->sk_wmem_alloc, 1);
+ 	}
+ 
+diff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c
+index 7731d22..026c3b1 100644
+--- a/net/ipv4/af_inet.c
++++ b/net/ipv4/af_inet.c
+@@ -181,6 +181,8 @@ static int inet_autobind(struct sock *sk)
+ 			return -EAGAIN;
+ 		}
+ 		inet->sport = htons(inet->num);
++		sk->sk_xid = vx_current_xid();
++		if (!in_interrupt()) sk->sk_nid = nx_current_nid(); else sk->sk_nid=0;
+ 	}
+ 	release_sock(sk);
+ 	return 0;
+diff --git a/net/ipv4/netfilter/ipt_LOG.c b/net/ipv4/netfilter/ipt_LOG.c
+index acc44c6..ac29a8c 100644
+--- a/net/ipv4/netfilter/ipt_LOG.c
++++ b/net/ipv4/netfilter/ipt_LOG.c
+@@ -45,6 +45,8 @@ static void dump_packet(const struct nf_loginfo *info,
+ 	else
+ 		logflags = NF_LOG_MASK;
+ 
++	printk("TAG=%d ", skb->skb_tag);
++
+ 	ih = skb_header_pointer(skb, iphoff, sizeof(_iph), &_iph);
+ 	if (ih == NULL) {
+ 		printk("TRUNCATED");

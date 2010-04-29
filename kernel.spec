@@ -1851,6 +1851,9 @@ Patch1237: mm-Switch-to-SLAB.patch
 Patch1238: redhat-kABI-Update-the-kABI-for-2-6-18-el6.patch
 
 Patch88888: patch-2.6.32-19.el6-vs2.3.0.36.29.4.diff
+Patch90250: linux-2.6-250-ipsets.patch
+Patch90510: linux-2.6-510-ipod.patch
+Patch90521: linux-2.6-521-packet-tagging.patch
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3469,6 +3472,9 @@ ApplyPatch mm-Switch-to-SLAB.patch
 ApplyPatch redhat-kABI-Update-the-kABI-for-2-6-18-el6.patch
 
 ApplyPatch patch-2.6.32-19.el6-vs2.3.0.36.29.4.diff
+ApplyPatch linux-2.6-250-ipsets.patch
+ApplyPatch linux-2.6-510-ipod.patch
+ApplyPatch linux-2.6-521-packet-tagging.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
