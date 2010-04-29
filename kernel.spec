@@ -1860,9 +1860,23 @@ Patch90521: linux-2.6-521-packet-tagging.patch
 Patch90523: linux-2.6-523-raw-sockets.patch
 Patch90524: linux-2.6-524-peercred.patch
 Patch90525: linux-2.6-525-sknid-elevator.patch
+#
+#Patch90527:  linux-2.6-527-iptables-classify-add-mark.patch
+#
 Patch90530: linux-2.6-530-built-by-support.patch
 Patch90540: linux-2.6-540-oom-kill.patch
 Patch90550: linux-2.6-550-raise-default-nfile-ulimit.patch
+Patch90570:  linux-2.6-570-tagxid.patch
+Patch90580:  linux-2.6-580-show-proc-virt.patch
+#
+#Patch90590:  linux-2.6-590-dcookies-mm.patch
+#Patch90591:  linux-2.6-591-chopstix-intern.patch
+#
+Patch90640:  linux-2.6-640-netlink-audit-hack.patch
+Patch90650:  linux-2.6-650-hangcheck-reboot.patch
+Patch90660:  linux-2.6-660-nmi-watchdog-default.patch
+Patch90680:  linux-2.6-680-htb-hysteresis-tso.patch
+
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3490,9 +3504,23 @@ ApplyPatch linux-2.6-521-packet-tagging.patch
 ApplyPatch linux-2.6-523-raw-sockets.patch
 ApplyPatch linux-2.6-524-peercred.patch
 ApplyPatch linux-2.6-525-sknid-elevator.patch
-ApplyPatch linux-2.6-540-oom-kill.patch
+#
+#ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
+#
 ApplyPatch linux-2.6-530-built-by-support.patch
+ApplyPatch linux-2.6-540-oom-kill.patch
 ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
+ApplyPatch linux-2.6-570-tagxid.patch
+ApplyPatch linux-2.6-580-show-proc-virt.patch
+#
+#ApplyPatch linux-2.6-590-dcookies-mm.patch
+#ApplyPatch linux-2.6-591-chopstix-intern.patch
+#
+ApplyPatch linux-2.6-640-netlink-audit-hack.patch
+ApplyPatch linux-2.6-650-hangcheck-reboot.patch
+ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
+ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
+
 
 ApplyOptionalPatch linux-kernel-test.patch
 
