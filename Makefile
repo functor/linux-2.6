@@ -86,7 +86,7 @@ trees: sources
 srpm: sources
 	mkdir -p SOURCES SRPMS
 	(cd SOURCES; rpm2cpio ../$(SOURCE_RPM) | cpio -diu; \
-	 cp ../$(notdir $(SPECFILE)) . ; cp ../config-vserver . ; cp ../config-planetlab .; \
+	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux-*.patch .; cp ../config-vserver . ; cp ../config-planetlab .; \
 	 for downloaded in $(SOURCEFILES) ; do cp ../$$downloaded . ; done ; \
 	 cat config-vserver >> config-generic ; \
 	 cat config-planetlab >> config-generic ; \
