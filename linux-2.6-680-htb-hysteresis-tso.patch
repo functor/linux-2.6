@@ -1,0 +1,13 @@
+diff --git a/net/sched/sch_htb.c b/net/sched/sch_htb.c
+index 85acab9..2de93ee 100644
+--- a/net/sched/sch_htb.c
++++ b/net/sched/sch_htb.c
+@@ -52,7 +52,7 @@
+     one less than their parent.
+ */
+ 
+-static int htb_hysteresis __read_mostly = 0; /* whether to use mode hysteresis for speedup */
++static int htb_hysteresis __read_mostly = 1; /* whether to use mode hysteresis for speedup */
+ #define HTB_VER 0x30011		/* major must be matched with number suplied by TC as version */
+ 
+ #if HTB_VER >> 16 != TC_HTB_PROTOVER

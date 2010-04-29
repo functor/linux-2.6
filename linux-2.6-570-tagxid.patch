@@ -1,0 +1,48 @@
+diff --git a/fs/ext2/super.c b/fs/ext2/super.c
+index 4e77a8d..761112e 100644
+--- a/fs/ext2/super.c
++++ b/fs/ext2/super.c
+@@ -412,6 +412,7 @@ static const match_table_t tokens = {
+ 	{Opt_noacl, "noacl"},
+ 	{Opt_xip, "xip"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_grpquota, "grpquota"},
+diff --git a/fs/ext3/super.c b/fs/ext3/super.c
+index bb3eccb..8cac842 100644
+--- a/fs/ext3/super.c
++++ b/fs/ext3/super.c
+@@ -857,6 +857,7 @@ static const match_table_t tokens = {
+ 	{Opt_barrier, "barrier=%u"},
+ 	{Opt_resize, "resize"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_err, NULL},
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index 8fca488..fb00364 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -1179,6 +1179,7 @@ static const match_table_t tokens = {
+ 	{Opt_discard, "discard"},
+ 	{Opt_nodiscard, "nodiscard"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_err, NULL},
+diff --git a/fs/ocfs2/super.c b/fs/ocfs2/super.c
+index fa2baad..e28e02f 100644
+--- a/fs/ocfs2/super.c
++++ b/fs/ocfs2/super.c
+@@ -201,6 +201,7 @@ static const match_table_t tokens = {
+ 	{Opt_usrquota, "usrquota"},
+ 	{Opt_grpquota, "grpquota"},
+ 	{Opt_tag, "tag"},
++	{Opt_tag, "tagxid"},
+ 	{Opt_notag, "notag"},
+ 	{Opt_tagid, "tagid=%u"},
+ 	{Opt_err, NULL}
