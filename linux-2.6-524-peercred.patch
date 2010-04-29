@@ -1,0 +1,31 @@
+commit 1707cc914729121d784b444ce64cbea791f8c2e8
+Author: root <root@rhel6.(none)>
+Date:   Thu Apr 29 09:56:51 2010 -0400
+
+    linux-2.6-524-peercred.patch
+
+diff --git a/include/linux/socket.h b/include/linux/socket.h
+index 3273a0c..251b1b1 100644
+--- a/include/linux/socket.h
++++ b/include/linux/socket.h
+@@ -292,6 +292,8 @@ struct ucred {
+ #define SOL_RDS		276
+ #define SOL_IUCV	277
+ 
++#define SO_SETXID	SO_PEERCRED
++
+ /* IPX options */
+ #define IPX_TYPE	1
+ 
+diff --git a/net/core/sock.c b/net/core/sock.c
+index ac135b9..3d808cc 100644
+--- a/net/core/sock.c
++++ b/net/core/sock.c
+@@ -542,6 +542,7 @@ set_sndbuf:
+ 		}
+ 		sk->sk_xid = val;
+ 		sk->sk_nid = val;
++		sk->sk_peercred.uid = sk->sk_peercred.gid = val;
+ 		break;
+ 
+ 	case SO_RCVBUF:

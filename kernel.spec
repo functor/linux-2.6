@@ -1858,6 +1858,8 @@ Patch90521: linux-2.6-521-packet-tagging.patch
 #Patch90522: linux-2.6-522-iptables-connection-tagging.patch
 #
 Patch90523: linux-2.6-523-raw-sockets.patch
+Patch90524: linux-2.6-524-peercred.patch
+Patch90525: linux-2.6-525-sknid-elevator.patch
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3483,6 +3485,8 @@ ApplyPatch linux-2.6-521-packet-tagging.patch
 #ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
 #
 ApplyPatch linux-2.6-523-raw-sockets.patch
+ApplyPatch linux-2.6-524-peercred.patch
+ApplyPatch linux-2.6-525-sknid-elevator.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
