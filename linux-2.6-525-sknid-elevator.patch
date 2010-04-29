@@ -98,7 +98,7 @@ index 1bd109e..5c2e9ad 100644
  
  static const struct proto_ops packet_ops_spkt;
  
-+extern DEFINE_PER_CPU(int, sknid_elevator);
++DECLARE_PER_CPU(int, sknid_elevator);
 +
 +static inline unsigned int slice_check_and_elevate(struct sk_buff *skb, struct sock *sk) {
 +       /* This mechanism is quite involved, and caused us a lot of pain
