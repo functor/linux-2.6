@@ -1,0 +1,15 @@
+diff --git a/scripts/mkcompile_h b/scripts/mkcompile_h
+index bce3d0f..ffa7b7a 100755
+--- a/scripts/mkcompile_h
++++ b/scripts/mkcompile_h
+@@ -64,8 +64,8 @@ UTS_TRUNCATE="cut -b -$UTS_LEN"
+   echo \#define UTS_VERSION \"`echo $UTS_VERSION | $UTS_TRUNCATE`\"
+ 
+   echo \#define LINUX_COMPILE_TIME \"`date +%T`\"
+-  echo \#define LINUX_COMPILE_BY \"`whoami`\"
+-  echo \#define LINUX_COMPILE_HOST \"`hostname | $UTS_TRUNCATE`\"
++  echo \#define LINUX_COMPILE_BY \"support\"
++  echo \#define LINUX_COMPILE_HOST \"planet-lab.org\"
+ 
+   if [ -x /bin/dnsdomainname ]; then
+     domain=`dnsdomainname 2> /dev/null`

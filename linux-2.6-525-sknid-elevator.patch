@@ -1,9 +1,3 @@
-commit a57d715bc58005cfae0fdf1626ebf11b11508025
-Author: root <root@rhel6.(none)>
-Date:   Thu Apr 29 10:01:21 2010 -0400
-
-    linux-2.6-525-sknid-elevator.patch
-
 diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
 index 4267c8b..3f36a91 100644
 --- a/include/linux/netdevice.h

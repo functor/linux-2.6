@@ -1860,6 +1860,8 @@ Patch90521: linux-2.6-521-packet-tagging.patch
 Patch90523: linux-2.6-523-raw-sockets.patch
 Patch90524: linux-2.6-524-peercred.patch
 Patch90525: linux-2.6-525-sknid-elevator.patch
+Patch90530: linux-2.6-530-built-by-support.patch
+Patch90540: linux-2.6-540-oom-kill.patch
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3487,6 +3489,8 @@ ApplyPatch linux-2.6-521-packet-tagging.patch
 ApplyPatch linux-2.6-523-raw-sockets.patch
 ApplyPatch linux-2.6-524-peercred.patch
 ApplyPatch linux-2.6-525-sknid-elevator.patch
+ApplyPatch linux-2.6-540-oom-kill.patch
+ApplyPatch linux-2.6-530-built-by-support.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
