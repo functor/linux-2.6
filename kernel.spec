@@ -1874,9 +1874,6 @@ Patch90640:  linux-2.6-640-netlink-audit-hack.patch
 Patch90650:  linux-2.6-650-hangcheck-reboot.patch
 Patch90660:  linux-2.6-660-nmi-watchdog-default.patch
 Patch90680:  linux-2.6-680-htb-hysteresis-tso.patch
-#
-#Patch90700: linux-2.6-700-egre.patch
-#
 
 # empty final patch file to facilitate testing of kernel patches
 Patch99999: linux-kernel-test.patch
@@ -3517,9 +3514,6 @@ ApplyPatch linux-2.6-640-netlink-audit-hack.patch
 ApplyPatch linux-2.6-650-hangcheck-reboot.patch
 ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
-#
-#ApplyPatch linux-2.6-700-egre.patch
-#
 
 ApplyOptionalPatch linux-kernel-test.patch
 
