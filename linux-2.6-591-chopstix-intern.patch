@@ -1,0 +1,793 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 4e312ff..ef6a721 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -43,6 +43,14 @@ config OPROFILE_EVENT_MULTIPLEX
+ 
+ 	  If unsure, say N.
+ 
++config CHOPSTIX
++       bool "Chopstix (PlanetLab)"
++       depends on MODULES && OPROFILE
++       help
++         Chopstix allows you to monitor various events by summarizing them
++         in lossy data structures and transferring these data structures
++         into user space. If in doubt, say "N".
++
+ config HAVE_OPROFILE
+ 	bool
+ 
+diff --git a/arch/x86/kernel/asm-offsets_32.c b/arch/x86/kernel/asm-offsets_32.c
+index dfdbf64..29c79b8 100644
+--- a/arch/x86/kernel/asm-offsets_32.c
++++ b/arch/x86/kernel/asm-offsets_32.c
+@@ -9,6 +9,7 @@
+ #include <linux/signal.h>
+ #include <linux/personality.h>
+ #include <linux/suspend.h>
++#include <linux/arrays.h>
+ #include <linux/kbuild.h>
+ #include <asm/ucontext.h>
+ #include <asm/sigframe.h>
+@@ -25,6 +26,18 @@
+ #include <linux/lguest.h>
+ #include "../../../drivers/lguest/lg.h"
+ 
++#ifdef CONFIG_CHOPSTIX
++#define STACKOFFSET(sym, str, mem) \
++	DEFINE(sym, offsetof(struct str, mem)-sizeof(struct str));
++
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie;
++	unsigned count;
++	unsigned int number;
++};
++#endif
++
+ /* workaround for a warning with -Wmissing-prototypes */
+ void foo(void);
+ 
+@@ -51,6 +64,18 @@ void foo(void)
+ 	OFFSET(CPUINFO_x86_vendor_id, cpuinfo_x86, x86_vendor_id);
+ 	BLANK();
+ 
++#ifdef CONFIG_CHOPSTIX
++	STACKOFFSET(TASK_thread, task_struct, thread);
++	STACKOFFSET(THREAD_esp, thread_struct, sp);
++	STACKOFFSET(EVENT_event_data, event, event_data);
++	STACKOFFSET(EVENT_task, event, task);
++	STACKOFFSET(EVENT_event_type, event, event_type);
++	STACKOFFSET(SPEC_number, event_spec, number);
++	DEFINE(EVENT_SIZE, sizeof(struct event));
++	DEFINE(SPEC_SIZE, sizeof(struct event_spec));
++	DEFINE(SPEC_EVENT_SIZE, sizeof(struct event_spec)+sizeof(struct event));
++#endif
++
+ 	OFFSET(TI_task, thread_info, task);
+ 	OFFSET(TI_exec_domain, thread_info, exec_domain);
+ 	OFFSET(TI_flags, thread_info, flags);
+diff --git a/arch/x86/kernel/entry_32.S b/arch/x86/kernel/entry_32.S
+index c097e7d..8eff053 100644
+--- a/arch/x86/kernel/entry_32.S
++++ b/arch/x86/kernel/entry_32.S
+@@ -526,6 +526,34 @@ ENTRY(system_call)
+ 	cmpl $(nr_syscalls), %eax
+ 	jae syscall_badsys
+ syscall_call:
++#ifdef CONFIG_CHOPSTIX
++	/* Move Chopstix syscall probe here */
++	/* Save and clobber: eax, ecx, ebp  */
++	pushl   %eax
++	pushl   %ecx
++	pushl   %ebp
++	movl    %esp, %ebp
++	subl    $SPEC_EVENT_SIZE, %esp 
++	movl    rec_event, %ecx
++	testl   %ecx, %ecx
++	jz  carry_on
++	# struct event is first, just below %ebp
++	movl    %eax, (SPEC_number-EVENT_SIZE)(%ebp)
++	leal    -SPEC_EVENT_SIZE(%ebp), %eax
++	movl    %eax, EVENT_event_data(%ebp)
++	movl    $7, EVENT_event_type(%ebp)
++	movl    rec_event, %edx
++	movl    $1, 4(%esp)
++	leal    -EVENT_SIZE(%ebp), %eax
++	movl    %eax, (%esp)
++	call    rec_event_asm 
++carry_on: 
++	addl $SPEC_EVENT_SIZE, %esp
++	popl %ebp
++	popl %ecx
++	popl %eax
++	/* End chopstix */
++#endif
+ 	call *sys_call_table(,%eax,4)
+ 	movl %eax,PT_EAX(%esp)		# store the return value
+ syscall_exit:
+diff --git a/arch/x86/mm/fault.c b/arch/x86/mm/fault.c
+index 4302583..85bf9f2 100644
+--- a/arch/x86/mm/fault.c
++++ b/arch/x86/mm/fault.c
+@@ -62,6 +62,16 @@ static inline int notify_page_fault(struct pt_regs *regs)
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_CHOPSTIX
++extern void (*rec_event)(void *,unsigned int);
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie; 
++	unsigned count;
++	unsigned char reason;
++};
++#endif
++
+ /*
+  * Prefetch quirks:
+  *
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 71da511..1cefcaa 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -27,12 +27,23 @@
+ #include <linux/writeback.h>
+ #include <linux/task_io_accounting_ops.h>
+ #include <linux/fault-inject.h>
++#include <linux/arrays.h>
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/block.h>
+ 
+ #include "blk.h"
+ 
++#ifdef CONFIG_CHOPSTIX
++extern void (*rec_event)(void *,unsigned int);
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie;
++	unsigned count;
++	unsigned char reason;
++};
++#endif
++
+ EXPORT_TRACEPOINT_SYMBOL_GPL(block_remap);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_complete);
+@@ -1478,6 +1489,24 @@ static inline void __generic_make_request(struct bio *bio)
+ 
+ 		trace_block_bio_queue(q, bio);
+ 
++#ifdef CONFIG_CHOPSTIX
++		if (rec_event) {
++			struct event event;
++			struct event_spec espec;
++			unsigned long eip;
++			
++			espec.reason = 0;/*request */
++
++			eip = bio->bi_end_io;
++			event.event_data=&espec;
++			espec.pc=eip;
++			event.event_type=3; 
++			/* index in the event array currently set up */
++			/* make sure the counters are loaded in the order we want them to show up*/ 
++			(*rec_event)(&event, bio->bi_size);
++		}
++#endif
++
+ 		ret = q->make_request_fn(q, bio);
+ 	} while (ret);
+ 
+diff --git a/drivers/oprofile/cpu_buffer.c b/drivers/oprofile/cpu_buffer.c
+index a7aae24..9817d91 100644
+--- a/drivers/oprofile/cpu_buffer.c
++++ b/drivers/oprofile/cpu_buffer.c
+@@ -22,6 +22,7 @@
+ #include <linux/sched.h>
+ #include <linux/oprofile.h>
+ #include <linux/errno.h>
++#include <linux/arrays.h>
+ 
+ #include "event_buffer.h"
+ #include "cpu_buffer.h"
+@@ -326,6 +327,17 @@ static inline void oprofile_end_trace(struct oprofile_cpu_buffer *cpu_buf)
+ 	cpu_buf->tracing = 0;
+ }
+ 
++#ifdef CONFIG_CHOPSTIX
++
++struct event_spec {
++	unsigned int pc;
++	unsigned long dcookie;
++	unsigned count;
++};
++
++extern void (*rec_event)(void *,unsigned int);
++#endif
++
+ static inline void
+ __oprofile_add_ext_sample(unsigned long pc, struct pt_regs * const regs,
+ 			  unsigned long event, int is_kernel)
+@@ -360,7 +372,25 @@ void oprofile_add_sample(struct pt_regs * const regs, unsigned long event)
+ 	int is_kernel = !user_mode(regs);
+ 	unsigned long pc = profile_pc(regs);
+ 
++#ifdef CONFIG_CHOPSTIX
++	if (rec_event) {
++		struct event esig;
++		struct event_spec espec;
++		esig.task = current;
++		espec.pc = pc;
++		espec.count = 1;
++		esig.event_data = &espec;
++		esig.event_type = event; /* index in the event array currently set up */
++					/* make sure the counters are loaded in the order we want them to show up*/ 
++		(*rec_event)(&esig, 1);
++	}
++	else {
++		__oprofile_add_ext_sample(pc, regs, event, is_kernel);
++	}
++#else
+ 	__oprofile_add_ext_sample(pc, regs, event, is_kernel);
++#endif
++
+ }
+ 
+ /*
+diff --git a/fs/bio.c b/fs/bio.c
+index e0c9e71..796767d 100644
+--- a/fs/bio.c
++++ b/fs/bio.c
+@@ -26,6 +26,7 @@
+ #include <linux/mempool.h>
+ #include <linux/workqueue.h>
+ #include <scsi/sg.h>		/* for struct sg_iovec */
++#include <linux/arrays.h>
+ 
+ #include <trace/events/block.h>
+ 
+@@ -48,6 +49,7 @@ struct biovec_slab bvec_slabs[BIOVEC_NR_POOLS] __read_mostly = {
+ };
+ #undef BV
+ 
++
+ /*
+  * fs_bio_set is the bio_set containing bio and iovec memory pools used by
+  * IO code that does not need private memory pools.
+@@ -1398,6 +1400,17 @@ void bio_check_pages_dirty(struct bio *bio)
+ 	}
+ }
+ 
++#ifdef CONFIG_CHOPSTIX
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie;
++	unsigned count;
++	unsigned char reason;
++};
++
++extern void (*rec_event)(void *,unsigned int);
++#endif
++
+ /**
+  * bio_endio - end I/O on a bio
+  * @bio:	bio
+@@ -1419,6 +1432,24 @@ void bio_endio(struct bio *bio, int error)
+ 	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
+ 		error = -EIO;
+ 
++#ifdef CONFIG_CHOPSTIX
++		if (rec_event) {
++			struct event event;
++			struct event_spec espec;
++			unsigned long eip;
++			
++			espec.reason = 1;/*response */
++
++			eip = bio->bi_end_io;
++			event.event_data=&espec;
++			espec.pc=eip;
++			event.event_type=3; 
++			/* index in the event array currently set up */
++			/* make sure the counters are loaded in the order we want them to show up*/ 
++			(*rec_event)(&event, bio->bi_size);
++		}
++#endif
++
+ 	if (bio->bi_end_io)
+ 		bio->bi_end_io(bio, error);
+ }
+diff --git a/fs/exec.c b/fs/exec.c
+index 0a049b8..6c6bcc5 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -27,6 +27,7 @@
+ #include <linux/fdtable.h>
+ #include <linux/mm.h>
+ #include <linux/stat.h>
++#include <linux/dcookies.h>
+ #include <linux/fcntl.h>
+ #include <linux/smp_lock.h>
+ #include <linux/swap.h>
+@@ -673,6 +674,13 @@ struct file *open_exec(const char *name)
+ 	if (err)
+ 		goto exit;
+ 
++#ifdef CONFIG_CHOPSTIX
++	unsigned long cookie;
++	extern void (*rec_event)(void *, unsigned int);
++	if (rec_event && !nd.path.dentry->d_cookie)
++		get_dcookie(&nd.path, &cookie);
++#endif
++
+ out:
+ 	return file;
+ 
+diff --git a/include/linux/arrays.h b/include/linux/arrays.h
+new file mode 100644
+index 0000000..7641a3c
+--- /dev/null
++++ b/include/linux/arrays.h
+@@ -0,0 +1,39 @@
++#ifndef __ARRAYS_H__
++#define __ARRAYS_H__
++#include <linux/list.h>
++
++#define SAMPLING_METHOD_DEFAULT 0
++#define SAMPLING_METHOD_LOG 1
++
++#define DEFAULT_ARRAY_SIZE 2048
++
++/* Every probe has an array handler */
++
++/* XXX - Optimize this structure */
++
++extern void (*rec_event)(void *,unsigned int);
++struct array_handler {
++	struct list_head link;
++	unsigned int (*hash_func)(void *);
++	unsigned int (*sampling_func)(void *,int,void *);
++	unsigned short size;
++	unsigned int threshold;
++	unsigned char **expcount;
++	unsigned int sampling_method;
++	unsigned int **arrays;
++	unsigned int arraysize;
++	unsigned int num_samples[2];
++	void **epoch_samples; /* size-sized lists of samples */
++	unsigned int (*serialize)(void *, void *);
++	unsigned char code[5];
++	unsigned int last_threshold;
++};
++
++struct event {
++	struct list_head link;
++	void *event_data;
++	unsigned int count;
++	unsigned int event_type;
++	struct task_struct *task;
++};
++#endif
+diff --git a/include/linux/mutex.h b/include/linux/mutex.h
+index 878cab4..8bac64d 100644
+--- a/include/linux/mutex.h
++++ b/include/linux/mutex.h
+@@ -57,6 +57,9 @@ struct mutex {
+ 	const char 		*name;
+ 	void			*magic;
+ #endif
++#ifdef CONFIG_CHOPSTIX
++	struct thread_info	*owner;
++#endif
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+ 	struct lockdep_map	dep_map;
+ #endif
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index c9d3cae..dd62888 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1349,6 +1349,11 @@ struct task_struct {
+ 	cputime_t utime, stime, utimescaled, stimescaled;
+ 	cputime_t gtime;
+ 	cputime_t prev_utime, prev_stime;
++
++    #ifdef CONFIG_CHOPSTIX
++            unsigned long last_interrupted, last_ran_j;
++    #endif
++
+ 	unsigned long nvcsw, nivcsw; /* context switch counts */
+ 	struct timespec start_time; 		/* monotonic time */
+ 	struct timespec real_start_time;	/* boot based time */
+diff --git a/kernel/mutex.c b/kernel/mutex.c
+index 947b3ad..ae1dc67 100644
+--- a/kernel/mutex.c
++++ b/kernel/mutex.c
+@@ -23,6 +23,16 @@
+ #include <linux/spinlock.h>
+ #include <linux/interrupt.h>
+ #include <linux/debug_locks.h>
++#include <linux/arrays.h>
++
++#ifdef CONFIG_CHOPSTIX
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie;
++	unsigned count;
++	unsigned char reason;
++};
++#endif
+ 
+ /*
+  * In the DEBUG case we are using the "NULL fastpath" for mutexes,
+@@ -49,6 +59,9 @@ void
+ __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
+ {
+ 	atomic_set(&lock->count, 1);
++#ifdef CONFIG_CHOPSTIX
++	lock->owner = NULL;
++#endif
+ 	spin_lock_init(&lock->wait_lock);
+ 	INIT_LIST_HEAD(&lock->wait_list);
+ 	mutex_clear_owner(lock);
+@@ -247,6 +260,25 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
+ 		}
+ 		__set_task_state(task, state);
+ 
++#if 0 && CONFIG_CHOPSTIX
++		if (rec_event) {
++			if (lock->owner) {
++				struct event event;
++				struct event_spec espec;
++				struct task_struct *p = lock->owner->task;
++
++				espec.reason = 0; /* lock */
++				event.event_data = &espec;
++				event.task = p;
++				espec.pc = lock;
++				event.event_type = 5;
++				(*rec_event)(&event, 1);
++			} else {
++				BUG();
++			}
++		}
++#endif
++
+ 		/* didnt get the lock, go to sleep: */
+ 		spin_unlock_mutex(&lock->wait_lock, flags);
+ 		preempt_enable_no_resched();
+@@ -261,6 +293,10 @@ done:
+ 	mutex_remove_waiter(lock, &waiter, current_thread_info());
+ 	mutex_set_owner(lock);
+ 
++#ifdef CONFIG_CHOPSTIX
++	lock->owner = task_thread_info(task);
++#endif
++
+ 	/* set it to 0 if there are no waiters left: */
+ 	if (likely(list_empty(&lock->wait_list)))
+ 		atomic_set(&lock->count, 0);
+@@ -331,6 +367,25 @@ __mutex_unlock_common_slowpath(atomic_t *lock_count, int nested)
+ 
+ 		debug_mutex_wake_waiter(lock, waiter);
+ 
++#if 0 && CONFIG_CHOPSTIX
++		if (rec_event) {
++			if (lock->owner) {
++				struct event event;
++				struct event_spec espec;
++				struct task_struct *p = lock->owner->task;
++
++				espec.reason = 1; /* unlock */
++				event.event_data = &espec;
++				event.task = p;
++				espec.pc = lock;
++				event.event_type = 5;
++				(*rec_event)(&event, 1);
++			} else {
++				BUG();
++			}
++		}
++#endif
++
+ 		wake_up_process(waiter->task);
+ 	}
+ 
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 90b63b8..43b728e 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -10,7 +10,7 @@
+  *  1998-11-19	Implemented schedule_timeout() and related stuff
+  *		by Andrea Arcangeli
+  *  2002-01-04	New ultra-scalable O(1) scheduler by Ingo Molnar:
+- *		hybrid priority-list and round-robin design with
++ *		hybrid priority-list and round-robin deventn with
+  *		an array-switch method of distributing timeslices
+  *		and per-CPU runqueues.  Cleanups and useful suggestions
+  *		by Davide Libenzi, preemptible kernel bits by Robert Love.
+@@ -73,12 +73,16 @@
+ #include <linux/ftrace.h>
+ #include <linux/vs_sched.h>
+ #include <linux/vs_cvirt.h>
++#include <linux/arrays.h>
+ 
+ #include <asm/tlb.h>
+ #include <asm/irq_regs.h>
+ 
+ #include "sched_cpupri.h"
+ 
++#define INTERRUPTIBLE   -1
++#define RUNNING         0
++
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/sched.h>
+ 
+@@ -2742,6 +2746,10 @@ static void __sched_fork(struct task_struct *p)
+ 	INIT_HLIST_HEAD(&p->preempt_notifiers);
+ #endif
+ 
++#ifdef CONFIG_CHOPSTIX
++    p->last_ran_j = jiffies;
++    p->last_interrupted = INTERRUPTIBLE;
++#endif
+ 	/*
+ 	 * We mark the process as running here, but have not actually
+ 	 * inserted it onto the runqueue yet. This guarantees that
+@@ -5659,6 +5667,30 @@ pick_next_task(struct rq *rq)
+ 	}
+ }
+ 
++#ifdef CONFIG_CHOPSTIX
++void (*rec_event)(void *,unsigned int) = NULL;
++EXPORT_SYMBOL(rec_event);
++EXPORT_SYMBOL(in_sched_functions);
++
++struct event_spec {
++    unsigned long pc;
++    unsigned long dcookie;
++    unsigned int count;
++    unsigned int reason;
++};
++
++/* To support safe calling from asm */
++asmlinkage void rec_event_asm (struct event *event_signature_in, unsigned int count) {
++    struct pt_regs *regs;
++    struct event_spec *es = event_signature_in->event_data;
++    regs = task_pt_regs(current);
++    event_signature_in->task=current;
++    es->pc=regs->ip;
++    event_signature_in->count=1;
++    (*rec_event)(event_signature_in, count);
++}
++#endif
++
+ /*
+  * schedule() is the main scheduler function.
+  */
+@@ -5706,6 +5738,54 @@ need_resched_nonpreemptible:
+ 	next = pick_next_task(rq);
+ 
+ 	if (likely(prev != next)) {
++
++#ifdef CONFIG_CHOPSTIX
++		/* Run only if the Chopstix module so decrees it */
++		if (rec_event) {
++			unsigned long diff;
++			int sampling_reason;
++			prev->last_ran_j = jiffies;
++			if (next->last_interrupted!=INTERRUPTIBLE) {
++				if (next->last_interrupted!=RUNNING) {
++					diff = (jiffies-next->last_interrupted);
++					sampling_reason = 0;/* BLOCKING */
++				}
++				else {
++					diff = jiffies-next->last_ran_j; 
++					sampling_reason = 1;/* PREEMPTION */
++				}
++
++				if (diff >= HZ/10) {
++					struct event event;
++					struct event_spec espec;
++					struct pt_regs *regs;
++					regs = task_pt_regs(current);
++	
++					espec.reason = sampling_reason;
++					event.event_data=&espec;
++					event.task=next;
++					espec.pc=regs->ip;
++					event.event_type=2; 
++					/* index in the event array currently set up */
++					/* make sure the counters are loaded in the order we want them to show up*/ 
++					(*rec_event)(&event, diff);
++				}
++			}
++        		/* next has been elected to run */
++			next->last_interrupted=0;
++
++			/* An uninterruptible process just yielded. Record the current jiffy */
++        		if (prev->state & TASK_UNINTERRUPTIBLE) {
++            			prev->last_interrupted=jiffies;
++      			}
++         		/* An interruptible process just yielded, or it got preempted. 
++          		 * Mark it as interruptible */
++        		else if (prev->state & TASK_INTERRUPTIBLE) {
++            			prev->last_interrupted=INTERRUPTIBLE;
++        		}
++		}
++#endif
++
+ 		sched_info_switch(prev, next);
+ 		perf_event_task_sched_out(prev, next, cpu);
+ 
+diff --git a/mm/memory.c b/mm/memory.c
+index e828063..6e88fed 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -57,6 +57,7 @@
+ #include <linux/swapops.h>
+ #include <linux/elf.h>
+ // #include <linux/vs_memory.h>
++#include <linux/arrays.h>
+ 
+ #include <asm/io.h>
+ #include <asm/pgalloc.h>
+@@ -3070,6 +3071,16 @@ out:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_CHOPSTIX
++extern void (*rec_event)(void *,unsigned int);
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie; 
++	unsigned count;
++	unsigned char reason;
++};
++#endif
++
+ /*
+  * By the time we get here, we already hold the mm semaphore
+  */
+@@ -3115,6 +3126,24 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	if (!pte)
+ 		return VM_FAULT_OOM;
+ 
++#ifdef CONFIG_CHOPSTIX
++	if (rec_event) {
++		struct event event;
++		struct event_spec espec;
++		struct pt_regs *regs;
++		unsigned int pc;
++		regs = task_pt_regs(current);
++		pc = regs->ip & (unsigned int) ~4095;
++
++		espec.reason = 0; /* alloc */
++		event.event_data=&espec;
++		event.task = current;
++		espec.pc=pc;
++		event.event_type = 6;
++		(*rec_event)(&event, 1);
++	}
++#endif
++
+ 	return handle_pte_fault(mm, vma, address, pte, pmd, flags);
+ }
+ 
+diff --git a/mm/slab.c b/mm/slab.c
+index ad2828e..5acdf6c 100644
+--- a/mm/slab.c
++++ b/mm/slab.c
+@@ -113,6 +113,7 @@
+ #include	<linux/fault-inject.h>
+ #include	<linux/rtmutex.h>
+ #include	<linux/reciprocal_div.h>
++#include <linux/arrays.h>
+ #include	<linux/debugobjects.h>
+ #include	<linux/kmemcheck.h>
+ 
+@@ -252,6 +253,16 @@ struct slab_rcu {
+ 	void *addr;
+ };
+ 
++#ifdef CONFIG_CHOPSTIX
++extern void (*rec_event)(void *,unsigned int);
++struct event_spec {
++	unsigned long pc;
++	unsigned long dcookie; 
++	unsigned count;
++	unsigned char reason;
++};
++#endif
++
+ /*
+  * struct array_cache
+  *
+@@ -3400,6 +3411,19 @@ __cache_alloc(struct kmem_cache *cachep, gfp_t flags, void *caller)
+ 	kmemleak_alloc_recursive(objp, obj_size(cachep), 1, cachep->flags,
+ 				 flags);
+ 	prefetchw(objp);
++#ifdef CONFIG_CHOPSTIX
++	if (rec_event && objp) {
++		struct event event;
++		struct event_spec espec;
++
++		espec.reason = 0; /* alloc */
++		event.event_data=&espec;
++		event.task = current;
++		espec.pc=caller;
++		event.event_type=4; 
++		(*rec_event)(&event, cachep->buffer_size);
++	}
++#endif
+ 
+ 	if (likely(objp))
+ 		kmemcheck_slab_alloc(cachep, flags, objp, obj_size(cachep));
+@@ -3512,13 +3536,28 @@ free_done:
+  * Release an obj back to its cache. If the obj has a constructed state, it must
+  * be in this state _before_ it is released.  Called with disabled ints.
+  */
+-static inline void __cache_free(struct kmem_cache *cachep, void *objp)
++static inline void __cache_free(struct kmem_cache *cachep, void *objp, void *caller)
+ {
+ 	struct array_cache *ac = cpu_cache_get(cachep);
+ 
+ 	check_irq_off();
+ 	kmemleak_free_recursive(objp, cachep->flags);
+-	objp = cache_free_debugcheck(cachep, objp, __builtin_return_address(0));
++	objp = cache_free_debugcheck(cachep, objp, caller);
++
++#ifdef CONFIG_CHOPSTIX
++	if (rec_event && objp) {
++		struct event event;
++		struct event_spec espec;
++
++		espec.reason = 1; /* free */
++		event.event_data = &espec;
++		event.task = current;
++		espec.pc = caller;
++		event.event_type = 4; 
++		(*rec_event)(&event, cachep->buffer_size);
++	}
++#endif
++
+ 	vx_slab_free(cachep);
+ 
+ 	kmemcheck_slab_free(cachep, objp, obj_size(cachep));
+@@ -3720,10 +3759,17 @@ void *__kmalloc_track_caller(size_t size, gfp_t flags, unsigned long caller)
+ EXPORT_SYMBOL(__kmalloc_track_caller);
+ 
+ #else
++#ifdef CONFIG_CHOPSTIX
++void *__kmalloc(size_t size, gfp_t flags)
++{
++	return __do_kmalloc(size, flags, __builtin_return_address(0));
++}
++#else
+ void *__kmalloc(size_t size, gfp_t flags)
+ {
+ 	return __do_kmalloc(size, flags, NULL);
+ }
++#endif
+ EXPORT_SYMBOL(__kmalloc);
+ #endif
+ 
+@@ -3743,7 +3789,7 @@ void kmem_cache_free(struct kmem_cache *cachep, void *objp)
+ 	debug_check_no_locks_freed(objp, obj_size(cachep));
+ 	if (!(cachep->flags & SLAB_DEBUG_OBJECTS))
+ 		debug_check_no_obj_freed(objp, obj_size(cachep));
+-	__cache_free(cachep, objp);
++	__cache_free(cachep, objp,__builtin_return_address(0));
+ 	local_irq_restore(flags);
+ 
+ 	trace_kmem_cache_free(_RET_IP_, objp);
+@@ -3773,7 +3819,7 @@ void kfree(const void *objp)
+ 	c = virt_to_cache(objp);
+ 	debug_check_no_locks_freed(objp, obj_size(c));
+ 	debug_check_no_obj_freed(objp, obj_size(c));
+-	__cache_free(c, (void *)objp);
++	__cache_free(c, (void *)objp,__builtin_return_address(0));
+ 	local_irq_restore(flags);
+ }
+ EXPORT_SYMBOL(kfree);
