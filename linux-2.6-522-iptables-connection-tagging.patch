@@ -1,9 +1,3 @@
-commit 39e1cee3184d275fa3ec4122de39b90d0d8e9bf4
-Author: root <root@rhel6.(none)>
-Date:   Thu Apr 29 19:59:33 2010 -0400
-
-    linux-2.6-522-iptables-connection-tagging.patch
-
 diff --git a/include/linux/netfilter/xt_SETXID.h b/include/linux/netfilter/xt_SETXID.h
 new file mode 100644
 index 0000000..235b9d6
@@ -82,7 +76,7 @@ index 1e1df20..144e131 100644
  
  	if (exp) {
 diff --git a/net/netfilter/xt_MARK.c b/net/netfilter/xt_MARK.c
-index 225f8d1..7513997 100644
+index 225f8d1..6cb5101 100644
 --- a/net/netfilter/xt_MARK.c
 +++ b/net/netfilter/xt_MARK.c
 @@ -13,7 +13,13 @@
@@ -99,7 +93,7 @@ index 225f8d1..7513997 100644
  
  #include <linux/netfilter/x_tables.h>
  #include <linux/netfilter/xt_MARK.h>
-@@ -24,22 +30,267 @@ MODULE_DESCRIPTION("Xtables: packet mark modification");
+@@ -24,22 +30,269 @@ MODULE_DESCRIPTION("Xtables: packet mark modification");
  MODULE_ALIAS("ipt_MARK");
  MODULE_ALIAS("ip6t_MARK");
  
@@ -145,15 +139,17 @@ index 225f8d1..7513997 100644
 +
 +static struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr,
 +				      __be16 sport, __be32 daddr, __be16 dport,
-+				      int dif, struct hlist_head udptable[])
++				      int dif, struct udp_table *udptable)
 +{
 +	struct sock *sk, *result = NULL;
-+	struct hlist_node *node;
++	struct hlist_nulls_node *node;
 +	unsigned short hnum = ntohs(dport);
++	unsigned int hash = udp_hashfn(net, hnum);
++	struct udp_hslot *hslot = &udptable->hash[hash];
 +	int badness = -1;
 +
 +	rcu_read_lock();
-+	sk_for_each_rcu(sk, node, &udptable[udp_hashfn(net, hnum)]) {
++	sk_nulls_for_each_rcu(sk, node, &hslot->head) {
 +		struct inet_sock *inet = inet_sk(sk);
 +
 +		if (net_eq(sock_net(sk), net) && sk->sk_hash == hnum &&
@@ -233,7 +229,7 @@ index 225f8d1..7513997 100644
 +		}
 +
 +		/* copy-xid */
-+		dif = ((struct rtable *)(skb->dst))->rt_iif;
++		dif = ((struct rtable *)(skb_dst(skb)))->rt_iif;
 +
 +		ct = nf_ct_get(skb, &ctinfo);
 +		if (!ct)
@@ -259,9 +255,9 @@ index 225f8d1..7513997 100644
 +			struct sock *sk;
 +			if (!skb->mark) {
 +				sk = __udp4_lib_lookup(net, src_ip, src_port,
-+						       ip, port, dif, udp_hash);
++						       ip, port, dif, &udp_table);
 +
-+				if (sk && hooknum == NF_INET_LOCAL_IN)
++				if (sk && par->hooknum == NF_INET_LOCAL_IN)
 +					mark = sk->sk_nid;
 +
 +				if (sk)
@@ -351,7 +347,7 @@ index 225f8d1..7513997 100644
 +		skb->mark = mark;
 +
 +	curtag = &__get_cpu_var(sknid_elevator);
-+	if (mark > 0 && *curtag == -2 && hooknum == NF_INET_LOCAL_IN)
++	if (mark > 0 && *curtag == -2 && par->hooknum == NF_INET_LOCAL_IN)
 +		*curtag = mark;
  
 -	skb->mark = (skb->mark & ~info->mask) ^ info->mark;
