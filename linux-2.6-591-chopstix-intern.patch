@@ -300,7 +300,7 @@ index e0c9e71..796767d 100644
  		bio->bi_end_io(bio, error);
  }
 diff --git a/fs/exec.c b/fs/exec.c
-index 0a049b8..6c6bcc5 100644
+index 0a049b8..c2296b5 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -27,6 +27,7 @@
@@ -318,8 +318,8 @@ index 0a049b8..6c6bcc5 100644
 +#ifdef CONFIG_CHOPSTIX
 +	unsigned long cookie;
 +	extern void (*rec_event)(void *, unsigned int);
-+	if (rec_event && !nd.path.dentry->d_cookie)
-+		get_dcookie(&nd.path, &cookie);
++	if (rec_event && !(file->f_path.dentry->d_flags & DCACHE_COOKIE))
++		get_dcookie(&file->f_path, &cookie);
 +#endif
 +
  out:
@@ -371,19 +371,18 @@ index 0000000..7641a3c
 +};
 +#endif
 diff --git a/include/linux/mutex.h b/include/linux/mutex.h
-index 878cab4..8bac64d 100644
+index 878cab4..6c21914 100644
 --- a/include/linux/mutex.h
 +++ b/include/linux/mutex.h
-@@ -57,6 +57,9 @@ struct mutex {
- 	const char 		*name;
- 	void			*magic;
+@@ -50,7 +50,7 @@ struct mutex {
+ 	atomic_t		count;
+ 	spinlock_t		wait_lock;
+ 	struct list_head	wait_list;
+-#if defined(CONFIG_DEBUG_MUTEXES) || defined(CONFIG_SMP)
++#if defined(CONFIG_DEBUG_MUTEXES) || defined(CONFIG_SMP) || defined(CONFIG_CHOPSTIX)
+ 	struct thread_info	*owner;
  #endif
-+#ifdef CONFIG_CHOPSTIX
-+	struct thread_info	*owner;
-+#endif
- #ifdef CONFIG_DEBUG_LOCK_ALLOC
- 	struct lockdep_map	dep_map;
- #endif
+ #ifdef CONFIG_DEBUG_MUTEXES
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index c9d3cae..dd62888 100644
 --- a/include/linux/sched.h
