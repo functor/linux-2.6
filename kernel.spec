@@ -1855,9 +1855,7 @@ Patch90220: linux-2.6-220-delta-ptrace-fix01.patch
 Patch90250: linux-2.6-250-ipsets.patch
 Patch90510: linux-2.6-510-ipod.patch
 Patch90521: linux-2.6-521-packet-tagging.patch
-#
-#Patch90522: linux-2.6-522-iptables-connection-tagging.patch
-#
+Patch90522: linux-2.6-522-iptables-connection-tagging.patch
 Patch90523: linux-2.6-523-raw-sockets.patch
 Patch90524: linux-2.6-524-peercred.patch
 Patch90525: linux-2.6-525-sknid-elevator.patch
@@ -3501,9 +3499,7 @@ ApplyPatch linux-2.6-220-delta-ptrace-fix01.patch
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
 ApplyPatch linux-2.6-521-packet-tagging.patch
-#
-#ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
-#
+ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
 ApplyPatch linux-2.6-523-raw-sockets.patch
 ApplyPatch linux-2.6-524-peercred.patch
 ApplyPatch linux-2.6-525-sknid-elevator.patch

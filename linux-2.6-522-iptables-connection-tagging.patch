@@ -1,0 +1,459 @@
+commit 39e1cee3184d275fa3ec4122de39b90d0d8e9bf4
+Author: root <root@rhel6.(none)>
+Date:   Thu Apr 29 19:59:33 2010 -0400
+
+    linux-2.6-522-iptables-connection-tagging.patch
+
+diff --git a/include/linux/netfilter/xt_SETXID.h b/include/linux/netfilter/xt_SETXID.h
+new file mode 100644
+index 0000000..235b9d6
+--- /dev/null
++++ b/include/linux/netfilter/xt_SETXID.h
+@@ -0,0 +1,13 @@
++#ifndef _XT_SETXID_H_target
++#define _XT_SETXID_H_target
++
++enum {
++	XT_SET_PACKET_XID=0
++};
++
++struct xt_setxid_target_info_v2 {
++	unsigned long mark;
++	u_int8_t mode;
++};
++
++#endif /*_XT_SETXID_H_target*/
+diff --git a/include/net/netfilter/nf_conntrack.h b/include/net/netfilter/nf_conntrack.h
+index 5cf7270..95a5fde 100644
+--- a/include/net/netfilter/nf_conntrack.h
++++ b/include/net/netfilter/nf_conntrack.h
+@@ -119,6 +119,9 @@ struct nf_conn {
+ 	/* Storage reserved for other modules: */
+ 	union nf_conntrack_proto proto;
+ 
++	/* PLANETLAB. VNET-specific */
++	int xid[IP_CT_DIR_MAX];
++	
+ 	/* Extensions */
+ 	struct nf_ct_ext *ext;
+ #ifdef CONFIG_NET_NS
+diff --git a/net/netfilter/Kconfig b/net/netfilter/Kconfig
+index 634d14a..a2872f5 100644
+--- a/net/netfilter/Kconfig
++++ b/net/netfilter/Kconfig
+@@ -543,6 +543,13 @@ config NETFILTER_XT_MATCH_CLUSTER
+ 	  If you say Y or M here, try `iptables -m cluster --help` for
+ 	  more information.
+ 
++config NETFILTER_XT_TARGET_SETXID
++	tristate '"SETXID" target support'
++	depends on NETFILTER_XTABLES
++	help
++	  This option adds a `SETXID' target, which allows you to alter the
++	  xid of a socket.
++
+ config NETFILTER_XT_MATCH_COMMENT
+ 	tristate  '"comment" match support'
+ 	depends on NETFILTER_ADVANCED
+diff --git a/net/netfilter/Makefile b/net/netfilter/Makefile
+index 49f62ee..820655e 100644
+--- a/net/netfilter/Makefile
++++ b/net/netfilter/Makefile
+@@ -41,6 +41,7 @@ obj-$(CONFIG_NETFILTER_TPROXY) += nf_tproxy_core.o
+ obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
+ 
+ # targets
++obj-$(CONFIG_NETFILTER_XT_TARGET_SETXID) += xt_SETXID.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_CONNMARK) += xt_CONNMARK.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_CONNSECMARK) += xt_CONNSECMARK.o
+diff --git a/net/netfilter/nf_conntrack_core.c b/net/netfilter/nf_conntrack_core.c
+index 1e1df20..144e131 100644
+--- a/net/netfilter/nf_conntrack_core.c
++++ b/net/netfilter/nf_conntrack_core.c
+@@ -673,6 +673,9 @@ init_conntrack(struct net *net,
+ 	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
+ 		       &net->ct.unconfirmed);
+ 
++	ct->xid[IP_CT_DIR_ORIGINAL] = -1;
++	ct->xid[IP_CT_DIR_REPLY] = -1;
++
+ 	spin_unlock_bh(&nf_conntrack_lock);
+ 
+ 	if (exp) {
+diff --git a/net/netfilter/xt_MARK.c b/net/netfilter/xt_MARK.c
+index 225f8d1..7513997 100644
+--- a/net/netfilter/xt_MARK.c
++++ b/net/netfilter/xt_MARK.c
+@@ -13,7 +13,13 @@
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
+ #include <linux/ip.h>
++#include <net/udp.h>
+ #include <net/checksum.h>
++#include <net/route.h>
++#include <net/inet_hashtables.h>
++#include <net/net_namespace.h>
++
++#include <net/netfilter/nf_conntrack.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+ #include <linux/netfilter/xt_MARK.h>
+@@ -24,22 +30,267 @@ MODULE_DESCRIPTION("Xtables: packet mark modification");
+ MODULE_ALIAS("ipt_MARK");
+ MODULE_ALIAS("ip6t_MARK");
+ 
++DECLARE_PER_CPU(int, sknid_elevator);
++
++#define PEERCRED_SET(x) ((x!=0) && (x!=(unsigned int)-1))
++
++static inline u_int16_t get_dst_port(struct nf_conntrack_tuple *tuple)
++{
++	switch (tuple->dst.protonum) {
++	case IPPROTO_GRE:
++		/* XXX Truncate 32-bit GRE key to 16 bits */
++		return tuple->dst.u.gre.key;
++	case IPPROTO_ICMP:
++		/* Bind on ICMP echo ID */
++		return tuple->src.u.icmp.id;
++	case IPPROTO_TCP:
++		return tuple->dst.u.tcp.port;
++	case IPPROTO_UDP:
++		return tuple->dst.u.udp.port;
++	default:
++		return tuple->dst.u.all;
++	}
++}
++
++static inline u_int16_t get_src_port(struct nf_conntrack_tuple *tuple)
++{
++	switch (tuple->dst.protonum) {
++	case IPPROTO_GRE:
++		/* XXX Truncate 32-bit GRE key to 16 bits */
++		return htons(ntohl(tuple->src.u.gre.key));
++	case IPPROTO_ICMP:
++		/* Bind on ICMP echo ID */
++		return tuple->src.u.icmp.id;
++	case IPPROTO_TCP:
++		return tuple->src.u.tcp.port;
++	case IPPROTO_UDP:
++		return tuple->src.u.udp.port;
++	default:
++		return tuple->src.u.all;
++	}
++}
++
++static struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr,
++				      __be16 sport, __be32 daddr, __be16 dport,
++				      int dif, struct hlist_head udptable[])
++{
++	struct sock *sk, *result = NULL;
++	struct hlist_node *node;
++	unsigned short hnum = ntohs(dport);
++	int badness = -1;
++
++	rcu_read_lock();
++	sk_for_each_rcu(sk, node, &udptable[udp_hashfn(net, hnum)]) {
++		struct inet_sock *inet = inet_sk(sk);
++
++		if (net_eq(sock_net(sk), net) && sk->sk_hash == hnum &&
++		    !ipv6_only_sock(sk)) {
++			int score = (sk->sk_family == PF_INET ? 1 : 0);
++
++			if (inet->rcv_saddr) {
++				if (inet->rcv_saddr != daddr)
++					continue;
++				score += 2;
++			} else {
++				/* block non nx_info ips */
++				if (!v4_addr_in_nx_info(sk->sk_nx_info,
++							daddr, NXA_MASK_BIND))
++					continue;
++			}
++			if (inet->daddr) {
++				if (inet->daddr != saddr)
++					continue;
++				score += 2;
++			}
++			if (inet->dport) {
++				if (inet->dport != sport)
++					continue;
++				score += 2;
++			}
++			if (sk->sk_bound_dev_if) {
++				if (sk->sk_bound_dev_if != dif)
++					continue;
++				score += 2;
++			}
++			if (score == 9) {
++				result = sk;
++				break;
++			} else if (score > badness) {
++				result = sk;
++				badness = score;
++			}
++		}
++	}
++
++	if (result)
++		sock_hold(result);
++	rcu_read_unlock();
++	return result;
++}
++
++int onceonly = 1;
++
+ static unsigned int
+ mark_tg(struct sk_buff *skb, const struct xt_target_param *par)
+ {
+ 	const struct xt_mark_tginfo2 *info = par->targinfo;
++	long mark = -1;
++	enum ip_conntrack_info ctinfo;
++	struct sock *connection_sk;
++	int dif;
++	struct nf_conn *ct;
++	extern struct inet_hashinfo tcp_hashinfo;
++	enum ip_conntrack_dir dir;
++	int *curtag;
++	u_int32_t src_ip;
++	u_int32_t dst_ip;
++	u_int16_t proto, src_port;
++	u_int32_t ip;
++	u_int16_t port;
++
++	if (info->mark == ~0U) {
++		// As of 2.6.27.39, Dec 8 2009, 
++		// NetNS + VNET = Trouble
++		// Let's handle this as a special case
++		struct net *net = dev_net(skb->dev);
++		if (!net_eq(net, &init_net)) {
++			WARN_ON(onceonly);
++			onceonly = 0;
++			return XT_CONTINUE;
++		}
++
++		/* copy-xid */
++		dif = ((struct rtable *)(skb->dst))->rt_iif;
++
++		ct = nf_ct_get(skb, &ctinfo);
++		if (!ct)
++			goto out_mark_finish;
++
++		dir = CTINFO2DIR(ctinfo);
++		src_ip = ct->tuplehash[dir].tuple.src.u3.ip;
++		dst_ip = ct->tuplehash[dir].tuple.dst.u3.ip;
++		src_port = get_src_port(&ct->tuplehash[dir].tuple);
++		proto = ct->tuplehash[dir].tuple.dst.protonum;
++
++		ip = ct->tuplehash[dir].tuple.dst.u3.ip;
++		port = get_dst_port(&ct->tuplehash[dir].tuple);
++
++		if (proto == 1) {
++			if (skb->mark > 0)
++				/* The packet is marked, it's going out */
++				ct->xid[0] = skb->mark;
++
++			if (ct->xid[0] > 0)
++				mark = ct->xid[0];
++		} else if (proto == 17) {
++			struct sock *sk;
++			if (!skb->mark) {
++				sk = __udp4_lib_lookup(net, src_ip, src_port,
++						       ip, port, dif, udp_hash);
++
++				if (sk && hooknum == NF_INET_LOCAL_IN)
++					mark = sk->sk_nid;
++
++				if (sk)
++					sock_put(sk);
++			} else if (skb->mark > 0)
++				/* The packet is marked, it's going out */
++				ct->xid[0] = skb->mark;
++		} else if (proto == 6) {	/* TCP */
++			int sockettype = 0;	/* Established socket */
++
++			/* Looks for an established socket or a listening 
++			   socket corresponding to the 4-tuple, in that order.
++			   The order is important for Codemux connections
++			   to be handled properly */
++
++			connection_sk = inet_lookup_established(net,
++								&tcp_hashinfo,
++								src_ip,
++								src_port, ip,
++								port, dif);
++
++			if (!connection_sk) {
++				connection_sk = inet_lookup_listener(net,
++								     &tcp_hashinfo,
++								     ip, port,
++								     dif);
++				sockettype = 1;	/* Listening socket */
++			}
++
++			if (connection_sk) {
++				if (connection_sk->sk_state == TCP_TIME_WAIT) {
++					inet_twsk_put(inet_twsk(connection_sk));
++					goto out_mark_finish;
++				}
++
++				/* The peercred is not set. We set it if the other side has an xid. */
++				if (!PEERCRED_SET
++				    (connection_sk->sk_peercred.uid)
++				    && ct->xid[!dir] > 0 && (sockettype == 0)) {
++					connection_sk->sk_peercred.gid =
++					    connection_sk->sk_peercred.uid =
++					    ct->xid[!dir];
++				}
++
++				/* The peercred is set, and is not equal to the XID of 'the other side' */
++				else if (PEERCRED_SET
++					 (connection_sk->sk_peercred.uid)
++					 && (connection_sk->sk_peercred.uid !=
++					     ct->xid[!dir])
++					 && (sockettype == 0)) {
++					mark = connection_sk->sk_peercred.uid;
++				}
++
++				/* Has this connection already been tagged? */
++				if (ct->xid[dir] < 1) {
++					/* No - let's tag it */
++					ct->xid[dir] = connection_sk->sk_nid;
++				}
++
++				if (mark == -1 && (ct->xid[dir] != 0))
++					mark = ct->xid[dir];
++
++				sock_put(connection_sk);
++			}
++
++			/* All else failed. Is this a connection over raw sockets?
++			   That explains why we couldn't get anything out of skb->sk,
++			   or look up a "real" connection. */
++			if (ct->xid[dir] < 1) {
++				if (skb->skb_tag)
++					ct->xid[dir] = skb->skb_tag;
++			}
++
++			/* Covers CoDemux case */
++			if (mark < 1 && (ct->xid[dir] > 0))
++				mark = ct->xid[dir];
++
++			if (mark < 1 && (ct->xid[!dir] > 0))
++				mark = ct->xid[!dir];
++			goto out_mark_finish;
++		}
++	} else
++		mark = (skb->mark & ~info->mask) ^ info->mark;
++
++out_mark_finish:
++	if (mark != -1)
++		skb->mark = mark;
++
++	curtag = &__get_cpu_var(sknid_elevator);
++	if (mark > 0 && *curtag == -2 && hooknum == NF_INET_LOCAL_IN)
++		*curtag = mark;
+ 
+-	skb->mark = (skb->mark & ~info->mask) ^ info->mark;
+ 	return XT_CONTINUE;
+ }
+ 
+ static struct xt_target mark_tg_reg __read_mostly = {
+-	.name           = "MARK",
+-	.revision       = 2,
+-	.family         = NFPROTO_UNSPEC,
+-	.target         = mark_tg,
+-	.targetsize     = sizeof(struct xt_mark_tginfo2),
+-	.me             = THIS_MODULE,
++	.name = "MARK",
++	.revision = 2,
++	.family = NFPROTO_UNSPEC,
++	.target = mark_tg,
++	.targetsize = sizeof(struct xt_mark_tginfo2),
++	.me = THIS_MODULE,
+ };
+ 
+ static int __init mark_tg_init(void)
+diff --git a/net/netfilter/xt_SETXID.c b/net/netfilter/xt_SETXID.c
+new file mode 100644
+index 0000000..f8553c5
+--- /dev/null
++++ b/net/netfilter/xt_SETXID.c
+@@ -0,0 +1,77 @@
++#include <linux/module.h>
++#include <linux/skbuff.h>
++#include <linux/ip.h>
++#include <net/checksum.h>
++#include <linux/vs_network.h>
++
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_SETXID.h>
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("");
++MODULE_DESCRIPTION("");
++MODULE_ALIAS("ipt_SETXID");
++
++static unsigned int
++target_v2(struct sk_buff **pskb,
++	  const struct net_device *in,
++	  const struct net_device *out,
++	  unsigned int hooknum,
++	  const struct xt_target *target, const void *targinfo)
++{
++	const struct xt_setxid_target_info_v2 *setxidinfo = targinfo;
++
++	switch (setxidinfo->mode) {
++	case XT_SET_PACKET_XID:
++		(*pskb)->skb_tag = setxidinfo->mark;
++		break;
++	}
++	return XT_CONTINUE;
++}
++
++static int
++checkentry_v2(const char *tablename,
++	      const void *entry,
++	      const struct xt_target *target,
++	      void *targinfo, unsigned int hook_mask)
++{
++	struct xt_setxid_target_info_v2 *setxidinfo = targinfo;
++
++	if (setxidinfo->mode != XT_SET_PACKET_XID) {
++		printk(KERN_WARNING "SETXID: unknown mode %u\n",
++		       setxidinfo->mode);
++		return 0;
++	}
++
++	return 1;
++}
++
++static struct xt_target xt_setxid_target[] = {
++	{
++	 .name = "SETXID",
++	 .family = AF_INET,
++	 .revision = 2,
++	 .checkentry = checkentry_v2,
++	 .target = target_v2,
++	 .targetsize = sizeof(struct xt_setxid_target_info_v2),
++	 .table = "mangle",
++	 .me = THIS_MODULE,
++	 }
++};
++
++static int __init init(void)
++{
++	int err;
++
++	err =
++	    xt_register_target(xt_setxid_target);
++	return err;
++}
++
++static void __exit fini(void)
++{
++	xt_unregister_target(xt_setxid_target);
++}
++
++module_init(init);
++module_exit(fini);
