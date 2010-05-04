@@ -19,7 +19,7 @@ Summary: The Linux kernel
 %define rhel 1
 %if %{rhel}
 %define distro_build 19
-%define signmodules 1
+%define signmodules 0
 %else
 # fedora_build defines which build revision of this kernel version we're
 # building. Rather than incrementing forever, as with the prior versioning
@@ -126,7 +126,7 @@ Summary: The Linux kernel
 # Control whether we perform a compat. check against published ABI.
 %define with_kabichk   %{?_without_kabichk:   1} %{?!_without_kabichk: 0}
 # Control whether we perform a compat. check against published ABI.
-%define with_fips      %{?_without_fips:      0} %{?!_without_fips:      1}
+%define with_fips      %{?_without_fips:      1} %{?!_without_fips:      0}
 
 # Additional options for user-friendly one-off kernel building:
 #
