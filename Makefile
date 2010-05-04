@@ -10,7 +10,7 @@ SHA1SUM	= sha1sum
 SED	= sed
 
 # this is passed on the command line as the full path to <build>/SPECS/kernel.spec
-SPECFILE = kernel.spec
+SPECFILE = kernel-2.6.spec
 
 # Thierry - when called from within the build, PWD is /build
 PWD=$(shell pwd)
