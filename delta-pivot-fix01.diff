@@ -1,0 +1,16 @@
+diff -NurpP --minimal linux-2.6.29-vs2.3.0.36.9-pre4/fs/namespace.c linux-2.6.29-vs2.3.0.36.9-pre5/fs/namespace.c
+--- linux-2.6.29-vs2.3.0.36.9-pre4/fs/namespace.c	2009-03-24 14:48:35.000000000 +0100
++++ linux-2.6.29-vs2.3.0.36.9-pre5/fs/namespace.c	2009-04-10 23:15:11.000000000 +0200
+@@ -2278,9 +2278,10 @@ SYSCALL_DEFINE2(pivot_root, const char _
+ 	down_write(&namespace_sem);
+ 	mutex_lock(&old.dentry->d_inode->i_mutex);
+ 	error = -EINVAL;
+-	if (IS_MNT_SHARED(old.mnt) ||
++	if ((IS_MNT_SHARED(old.mnt) ||
+ 		IS_MNT_SHARED(new.mnt->mnt_parent) ||
+-		IS_MNT_SHARED(root.mnt->mnt_parent))
++		IS_MNT_SHARED(root.mnt->mnt_parent)) &&
++		!vx_flags(VXF_STATE_SETUP, 0))
+ 		goto out2;
+ 	if (!check_mnt(root.mnt))
+ 		goto out2;
