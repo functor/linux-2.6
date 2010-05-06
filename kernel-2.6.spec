@@ -145,6 +145,8 @@ Source30: %{kernelconfig}-%{kversion}-i686-xenU.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
+Patch010: linux-2.6-010-e1000e-ich10lan.patch
+
 Patch100: linux-2.6-100-build-nonintconfig.patch
 
 # Linux-VServer
@@ -347,6 +349,8 @@ KERNEL_PREVIOUS=vanilla
 %if 0%{?patchlevel}
 %ApplyPatch 0
 %endif
+
+%ApplyPatch 010
 
 %ApplyPatch 100
 
