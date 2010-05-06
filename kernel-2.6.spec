@@ -350,7 +350,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 010
+%ApplyPatch 10
 
 %ApplyPatch 100
 
