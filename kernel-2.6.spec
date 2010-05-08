@@ -34,7 +34,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 47
+%define taglevel 48
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -941,6 +941,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Fri May 07 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-22-48
+- Support next generation of HP Smart Array SAS/SATA controllers
+
 * Thu Apr 15 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-22-47
 - Tagging 22 branch with following changes;
 - * Make barrier=1 for ext3 filesystem,
