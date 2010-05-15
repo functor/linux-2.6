@@ -8,11 +8,11 @@ URL: %(echo %{url} | cut -d ' ' -f 2)
 
 %{!?pldistro:%global pldistro planetlab}
 
-# for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
 %define taglevel 0
 
+%define sublevel 32
 #### Planet-Lab ####
 
 Summary: The Linux kernel
