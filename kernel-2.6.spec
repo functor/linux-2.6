@@ -1,5 +1,20 @@
 %global __spec_install_pre %{___build_pre}
 
+#### Planet-Lab ####
+Vendor: PlanetLab
+Packager: PlanetLab Central <support@planet-lab.org>
+Distribution: PlanetLab %{plrelease}
+URL: %(echo %{url} | cut -d ' ' -f 2)
+
+%{!?pldistro:%global pldistro planetlab}
+
+# for module-tag.py - sublevel is used for the version (middle) part of tag names
+%define name linux-2.6
+%define module_version_varname sublevel
+%define taglevel 0
+
+#### Planet-Lab ####
+
 Summary: The Linux kernel
 
 # For a stable, released kernel, released_kernel should be 1. For rawhide
@@ -208,6 +223,9 @@ Summary: The Linux kernel
 %if %{rhel}
 %define pkg_release %{distro_build}%{?dist}%{?buildid}
 %endif
+#### Planet-Lab ####
+%define pkg_release %{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
+####
 %define KVERREL %{rpmversion}-%{pkg_release}.%{_target_cpu}
 
 %if !%{debugbuildsenabled}
