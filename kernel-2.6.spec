@@ -387,7 +387,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 710
 
 %ApplyPatch 800
-%ApplyPatch 810
 
 %if 0
 %ApplyPatch 900
