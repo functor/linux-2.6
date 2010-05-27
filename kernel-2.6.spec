@@ -37,7 +37,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 46
+%define patchlevel 47
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
@@ -184,7 +184,6 @@ Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 
 # Ext4
 Patch800: linux-2.6-800-rename-ext4dev-to-ext4.patch
-Patch810: linux-2.6-810-ext4-cap-check-delay.patch
 
 #Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
 #Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
