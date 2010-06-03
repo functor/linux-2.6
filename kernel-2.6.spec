@@ -524,7 +524,7 @@ AutoProv: yes\
 Name: kernel%{?variant}
 Group: System Environment/Kernel
 License: GPLv2
-URL: http://www.kernel.org/
+#URL: http://www.kernel.org/
 Version: %{rpmversion}
 Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
