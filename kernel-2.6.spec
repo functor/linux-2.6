@@ -60,7 +60,12 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define signmodules 0
 %define make_target bzImage
+
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 13
+%define KVERREL %{version}-%{kernelrelease}
+%else
 %define KVERREL %{PACKAGE_VERSION}-%{kernelrelease}
+%endif
 
 # Override generic defaults with per-arch defaults
 
