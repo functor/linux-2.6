@@ -155,6 +155,7 @@ Patch040: linux-2.6-040-i_mutex-check.patch
 Patch100: linux-2.6-100-build-nonintconfig.patch
 
 Patch150: linux-2.6-150-cciss-allow-kexec-to-work.patch
+Patch151: linux-2.6-151-cciss-SAS.patch
 
 # Linux-VServer
 Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
@@ -379,6 +380,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 100
 
 %ApplyPatch 150
+%ApplyPatch 151
 
 %ApplyPatch 200
 %ApplyPatch 210
