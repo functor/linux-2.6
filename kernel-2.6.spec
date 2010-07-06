@@ -37,7 +37,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 47
+%define patchlevel 48
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
