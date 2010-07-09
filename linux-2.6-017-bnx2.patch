@@ -1,0 +1,13 @@
+diff --git a/drivers/net/bnx2.c b/drivers/net/bnx2.c
+index ba91aee..56f2a33 100644
+--- a/drivers/net/bnx2.c
++++ b/drivers/net/bnx2.c
+@@ -128,6 +128,8 @@ static DEFINE_PCI_DEVICE_TABLE(bnx2_pci_tbl) = {
+ 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5709S },
+ 	{ PCI_VENDOR_ID_BROADCOM, 0x163b,
+ 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5716 },
++	{ PCI_VENDOR_ID_BROADCOM, 0x163c,
++	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5716S },
+ 	{ 0, }
+ };
+ 
