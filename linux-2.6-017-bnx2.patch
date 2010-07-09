@@ -1,0 +1,15 @@
+diff --git a/drivers/net/bnx2.c b/drivers/net/bnx2.c
+index ce3ed67..5648289 100644
+--- a/drivers/net/bnx2.c
++++ b/drivers/net/bnx2.c
+@@ -121,6 +121,10 @@ static struct pci_device_id bnx2_pci_tbl[] = {
+ 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5709 },
+ 	{ PCI_VENDOR_ID_BROADCOM, PCI_DEVICE_ID_NX2_5709S,
+ 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5709S },
++	{ PCI_VENDOR_ID_BROADCOM, 0x163b,
++	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5716 },
++	{ PCI_VENDOR_ID_BROADCOM, 0x163c,
++	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5716S },
+ 	{ 0, }
+ };
+ 
