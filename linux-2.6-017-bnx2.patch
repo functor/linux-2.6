@@ -1,8 +1,24 @@
 diff --git a/drivers/net/bnx2.c b/drivers/net/bnx2.c
-index ba91aee..56f2a33 100644
+index ba91aee..eb2f2a5 100644
 --- a/drivers/net/bnx2.c
 +++ b/drivers/net/bnx2.c
-@@ -128,6 +128,8 @@ static DEFINE_PCI_DEVICE_TABLE(bnx2_pci_tbl) = {
+@@ -89,6 +89,7 @@ typedef enum {
+ 	BCM5709,
+ 	BCM5709S,
+ 	BCM5716,
++	BCM5716S,
+ } board_t;
+ 
+ /* indexed by board_t, above */
+@@ -105,6 +106,7 @@ static struct {
+ 	{ "Broadcom NetXtreme II BCM5709 1000Base-T" },
+ 	{ "Broadcom NetXtreme II BCM5709 1000Base-SX" },
+ 	{ "Broadcom NetXtreme II BCM5716 1000Base-T" },
++	{ "Broadcom NetXtreme II BCM5716 1000Base-SX" },
+ 	};
+ 
+ static DEFINE_PCI_DEVICE_TABLE(bnx2_pci_tbl) = {
+@@ -128,6 +130,8 @@ static DEFINE_PCI_DEVICE_TABLE(bnx2_pci_tbl) = {
  	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5709S },
  	{ PCI_VENDOR_ID_BROADCOM, 0x163b,
  	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5716 },
