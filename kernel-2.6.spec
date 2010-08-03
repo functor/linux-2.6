@@ -28,7 +28,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 17
+%define taglevel 18
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -830,6 +830,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Mon Aug 02 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-27-18
+- bump to 2.6.27.49
+
 * Wed Jul 14 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-27-17
 - Enable CONFIG_CGROUP_SCHED instead of CONFIG_USER_SCHED for 64bit kernels
 
