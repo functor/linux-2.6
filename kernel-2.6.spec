@@ -37,7 +37,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 50
+%define patchlevel 51
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
@@ -148,6 +148,8 @@ Source30: %{kernelconfig}-%{kversion}-i686-xenU.config
 %if "0%{patchlevel}"
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
+
+Patch001: 52.patch
 
 Patch010: linux-2.6-010-e1000e-ich10lan.patch
 Patch017: linux-2.6-017-bnx2.patch
@@ -354,6 +356,8 @@ KERNEL_PREVIOUS=vanilla
 %if 0%{?patchlevel}
 %ApplyPatch 0
 %endif
+
+%ApplyPatch 1
 
 %ApplyPatch 10
 %ApplyPatch 17
