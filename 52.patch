@@ -76,3 +76,16 @@ index 1c1a375..9739ae4 100644
  	/* Allocate our own private page. */
  	pte_unmap(page_table);
  
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 7201372..bef13a1 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1573,7 +1573,7 @@ static int acct_stack_growth(struct vm_area_struct * vma, unsigned long size, un
+ 	 * Overcommit..  This must be the final test, as it will
+ 	 * update security statistics.
+ 	 */
+-	if (security_vm_enough_memory(grow))
++	if (security_vm_enough_memory_mm(mm, grow))
+ 		return -ENOMEM;
+ 
+ 	/* Ok, everything looks good - let it rip */
