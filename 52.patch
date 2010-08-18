@@ -33,8 +33,35 @@ index cd535c7..1b53da9 100644
  #ifdef CONFIG_X86_32
  	/* User space => ok to do another page fault */
  	if (is_prefetch(regs, address, error_code))
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index d8be92a..0325100 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -205,6 +205,7 @@ static void show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
+ 	struct file *file = vma->vm_file;
+ 	int flags = vma->vm_flags;
+ 	unsigned long ino = 0;
++	unsigned long start;
+ 	dev_t dev = 0;
+ 	int len;
+ 
+@@ -214,8 +215,13 @@ static void show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
+ 		ino = inode->i_ino;
+ 	}
+ 
++	/* We don't show the stack guard page in /proc/maps */
++	start = vma->vm_start;
++	if (vma->vm_flags & VM_GROWSDOWN)
++		start += PAGE_SIZE;
++
+ 	seq_printf(m, "%08lx-%08lx %c%c%c%c %08llx %02x:%02x %lu %n",
+-			vma->vm_start,
++			start,
+ 			vma->vm_end,
+ 			flags & VM_READ ? 'r' : '-',
+ 			flags & VM_WRITE ? 'w' : '-',
 diff --git a/mm/memory.c b/mm/memory.c
-index 1c1a375..9739ae4 100644
+index 1c1a375..2638c6f 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
 @@ -2405,6 +2405,26 @@ out_nomap:
@@ -64,18 +91,22 @@ index 1c1a375..9739ae4 100644
   * We enter with non-exclusive mmap_sem (to exclude vma changes,
   * but allow concurrent faults), and pte mapped but not yet locked.
   * We return with mmap_sem still held, but pte unmapped and unlocked.
-@@ -2417,6 +2437,11 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
+@@ -2417,9 +2437,13 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
  	spinlock_t *ptl;
  	pte_t entry;
  
-+	if (check_stack_guard_page(vma, address) < 0) {
-+		pte_unmap(page_table);
+-	/* Allocate our own private page. */
+-	pte_unmap(page_table);
++        pte_unmap(page_table);
++     
++        /* Check if we need to add a guard page to the stack */
++        if (check_stack_guard_page(vma, address) < 0)
 +		return VM_FAULT_SIGBUS;
-+	}
-+
- 	/* Allocate our own private page. */
- 	pte_unmap(page_table);
  
++	/* Allocate our own private page. */
+ 	if (!vx_rss_avail(mm, 1))
+ 		goto oom;
+ 	if (unlikely(anon_vma_prepare(vma)))
 diff --git a/mm/mmap.c b/mm/mmap.c
 index 7201372..bef13a1 100644
 --- a/mm/mmap.c
