@@ -149,8 +149,6 @@ Source30: %{kernelconfig}-%{kversion}-i686-xenU.config
 Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
-Patch001: 52.patch
-
 Patch010: linux-2.6-010-e1000e-ich10lan.patch
 Patch017: linux-2.6-017-bnx2.patch
 
@@ -161,6 +159,8 @@ Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch220: delta-ptrace-fix01.diff
 Patch230: delta-pivot-fix01.diff
 Patch240: delta-killperm-fix01.diff
+
+Patch241: 52.patch
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -357,8 +357,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 0
 %endif
 
-%ApplyPatch 1
-
 %ApplyPatch 10
 %ApplyPatch 17
 
@@ -369,6 +367,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 220
 %ApplyPatch 230
 %ApplyPatch 240
+
+%ApplyPatch 241
 
 %ApplyPatch 250
 
