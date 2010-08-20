@@ -37,7 +37,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 51
+%define patchlevel 52
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
@@ -159,8 +159,6 @@ Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch220: delta-ptrace-fix01.diff
 Patch230: delta-pivot-fix01.diff
 Patch240: delta-killperm-fix01.diff
-
-Patch241: 52.patch
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -367,8 +365,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 220
 %ApplyPatch 230
 %ApplyPatch 240
-
-%ApplyPatch 241
 
 %ApplyPatch 250
 
