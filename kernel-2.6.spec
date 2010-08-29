@@ -159,6 +159,7 @@ Patch200: patch-%{rpmversion}-vs%{vsversion}.diff
 Patch220: delta-ptrace-fix01.diff
 Patch230: delta-pivot-fix01.diff
 Patch240: delta-killperm-fix01.diff
+Patch241: delta-vx_rss_avail.patch
 
 # IP sets
 Patch250: linux-2.6-250-ipsets.patch
@@ -365,6 +366,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 220
 %ApplyPatch 230
 %ApplyPatch 240
+%ApplyPatch 241
 
 %ApplyPatch 250
 
