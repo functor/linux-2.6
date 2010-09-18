@@ -46,7 +46,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define release vs%{vsversion}.%{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 
-%{!?pldistro:%global pldistro planetlab}
+%{!?pldistro:%global pldistro coblitz}
 
 %define signmodules 0
 %define make_target bzImage
