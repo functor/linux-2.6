@@ -110,6 +110,15 @@ License: GPLv2
 Version: %{rpmversion}
 Release: %{release}
 ExclusiveOS: Linux
+
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
+# this is a big and dirty work around for plymouth's dependencies on
+# Fedora 12. we don't even need plymouth on nodes.
+Provides: kernel = 2.6.29.1
+%else
+Provides: kernel = %{version}
+%endif
+
 Provides: kernel = %{version}
 Provides: kernel-drm = 4.3.0
 Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
