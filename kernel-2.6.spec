@@ -28,7 +28,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 26
+%define taglevel 27
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -841,6 +841,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Fri Sep 24 2010 Baris Metin <Talip-Baris.Metin@sophia.inria.fr> - linux-2.6-27-27
+- f12 workaround
+
 * Sun Aug 29 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-27-26
 - the check_stack_guard_page() has, under certain circumstances, side-effects which can not easily be undone in case the vx_rss_avail() fails
 
