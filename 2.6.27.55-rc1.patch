@@ -1,0 +1,402 @@
+diff --git a/Makefile b/Makefile
+index 1f60819..259a378 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ VERSION = 2
+ PATCHLEVEL = 6
+ SUBLEVEL = 27
+-EXTRAVERSION = .54
++EXTRAVERSION = .55-rc1
+ NAME = Trembling Tortoise
+ 
+ # *DOCUMENTATION*
+diff --git a/arch/powerpc/kernel/head_64.S b/arch/powerpc/kernel/head_64.S
+index cc8fb47..835994e 100644
+--- a/arch/powerpc/kernel/head_64.S
++++ b/arch/powerpc/kernel/head_64.S
+@@ -1479,15 +1479,21 @@ __secondary_start:
+ 	/* Load TOC */
+ 	ld	r2,PACATOC(r13)
+ 
+-	/* Do early setup for that CPU (stab, slb, hash table pointer) */
+-	bl	.early_setup_secondary
+-
+ 	/* Initialize the kernel stack.  Just a repeat for iSeries.	 */
+ 	LOAD_REG_ADDR(r3, current_set)
+ 	sldi	r28,r24,3		/* get current_set[cpu#]	 */
+-	ldx	r1,r3,r28
+-	addi	r1,r1,THREAD_SIZE-STACK_FRAME_OVERHEAD
+-	std	r1,PACAKSAVE(r13)
++	ldx	r14,r3,r28
++	addi	r14,r14,THREAD_SIZE-STACK_FRAME_OVERHEAD
++	std	r14,PACAKSAVE(r13)
++
++	/* Do early setup for that CPU (stab, slb, hash table pointer) */
++	bl	.early_setup_secondary
++
++	/*
++	 * setup the new stack pointer, but *don't* use this until
++	 * translation is on.
++	 */
++	mr	r1, r14
+ 
+ 	/* Clear backchain so we get nice backtraces */
+ 	li	r7,0
+diff --git a/block/bsg.c b/block/bsg.c
+index 9cfbea8..dcdbcd3 100644
+--- a/block/bsg.c
++++ b/block/bsg.c
+@@ -421,7 +421,7 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
+ 	/*
+ 	 * fill in all the output members
+ 	 */
+-	hdr->device_status = status_byte(rq->errors);
++	hdr->device_status = rq->errors & 0xff;
+ 	hdr->transport_status = host_byte(rq->errors);
+ 	hdr->driver_status = driver_byte(rq->errors);
+ 	hdr->info = 0;
+diff --git a/drivers/dma/mv_xor.c b/drivers/dma/mv_xor.c
+index bcda174..369612e 100644
+--- a/drivers/dma/mv_xor.c
++++ b/drivers/dma/mv_xor.c
+@@ -162,7 +162,7 @@ static int mv_is_err_intr(u32 intr_cause)
+ 
+ static void mv_xor_device_clear_eoc_cause(struct mv_xor_chan *chan)
+ {
+-	u32 val = (1 << (1 + (chan->idx * 16)));
++	u32 val = ~(1 << (chan->idx * 16));
+ 	dev_dbg(chan->device->common.dev, "%s, val 0x%08x\n", __func__, val);
+ 	__raw_writel(val, XOR_INTR_CAUSE(chan));
+ }
+diff --git a/drivers/media/video/compat_ioctl32.c b/drivers/media/video/compat_ioctl32.c
+index e6ca401..ec850b5 100644
+--- a/drivers/media/video/compat_ioctl32.c
++++ b/drivers/media/video/compat_ioctl32.c
+@@ -499,17 +499,24 @@ struct video_code32
+ {
+ 	char		loadwhat[16];	/* name or tag of file being passed */
+ 	compat_int_t	datasize;
+-	unsigned char	*data;
++	compat_uptr_t	data;
+ };
+ 
+-static inline int microcode32(struct video_code *kp, struct video_code32 __user *up)
++static struct video_code __user *get_microcode32(struct video_code32 *kp)
+ {
+-	if(!access_ok(VERIFY_READ, up, sizeof(struct video_code32)) ||
+-		copy_from_user(kp->loadwhat, up->loadwhat, sizeof (up->loadwhat)) ||
+-		get_user(kp->datasize, &up->datasize) ||
+-		copy_from_user(kp->data, up->data, up->datasize))
+-			return -EFAULT;
+-	return 0;
++	struct video_code __user *up;
++
++	up = compat_alloc_user_space(sizeof(*up));
++
++	/*
++	 * NOTE! We don't actually care if these fail. If the
++	 * user address is invalid, the native ioctl will do
++	 * the error handling for us
++	 */
++	(void) copy_to_user(up->loadwhat, kp->loadwhat, sizeof(up->loadwhat));
++	(void) put_user(kp->datasize, &up->datasize);
++	(void) put_user(compat_ptr(kp->data), &up->data);
++	return up;
+ }
+ 
+ #define VIDIOCGTUNER32		_IOWR('v',4, struct video_tuner32)
+@@ -618,7 +625,7 @@ static int do_video_ioctl(struct file *file, unsigned int cmd, unsigned long arg
+ 		struct video_tuner vt;
+ 		struct video_buffer vb;
+ 		struct video_window vw;
+-		struct video_code vc;
++		struct video_code32 vc;
+ 		struct video_audio va;
+ #endif
+ 		struct v4l2_format v2f;
+@@ -745,8 +752,11 @@ static int do_video_ioctl(struct file *file, unsigned int cmd, unsigned long arg
+ 		break;
+ #ifdef CONFIG_VIDEO_V4L1_COMPAT
+ 	case VIDIOCSMICROCODE:
+-		err = microcode32(&karg.vc, up);
+-		compatible_arg = 0;
++		/* Copy the 32-bit "video_code32" to kernel space */
++		if (copy_from_user(&karg.vc, up, sizeof(karg.vc)))
++			return -EFAULT;
++		/* Convert the 32-bit version to a 64-bit version in user space */
++		up = get_microcode32(&karg.vc);
+ 		break;
+ #endif
+ 	};
+diff --git a/drivers/net/atlx/atl1.c b/drivers/net/atlx/atl1.c
+index b46e599..13a3885 100644
+--- a/drivers/net/atlx/atl1.c
++++ b/drivers/net/atlx/atl1.c
+@@ -2881,10 +2881,11 @@ static int atl1_resume(struct pci_dev *pdev)
+ 	pci_enable_wake(pdev, PCI_D3cold, 0);
+ 
+ 	atl1_reset_hw(&adapter->hw);
+-	adapter->cmb.cmb->int_stats = 0;
+ 
+-	if (netif_running(netdev))
++	if (netif_running(netdev)) {
++		adapter->cmb.cmb->int_stats = 0;
+ 		atl1_up(adapter);
++	}
+ 	netif_device_attach(netdev);
+ 
+ 	return 0;
+diff --git a/drivers/net/b44.c b/drivers/net/b44.c
+index 012614e..74b68de 100644
+--- a/drivers/net/b44.c
++++ b/drivers/net/b44.c
+@@ -2164,8 +2164,6 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
+ 	dev->irq = sdev->irq;
+ 	SET_ETHTOOL_OPS(dev, &b44_ethtool_ops);
+ 
+-	netif_carrier_off(dev);
+-
+ 	err = ssb_bus_powerup(sdev->bus, 0);
+ 	if (err) {
+ 		dev_err(sdev->dev,
+@@ -2205,6 +2203,8 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
+ 		goto err_out_powerdown;
+ 	}
+ 
++	netif_carrier_off(dev);
++
+ 	ssb_set_drvdata(sdev, dev);
+ 
+ 	/* Chip reset provides power to the b44 MAC & PCI cores, which
+diff --git a/drivers/net/r6040.c b/drivers/net/r6040.c
+index c71982d..2a473cc 100644
+--- a/drivers/net/r6040.c
++++ b/drivers/net/r6040.c
+@@ -135,7 +135,7 @@
+ #define RX_DESC_SIZE	(RX_DCNT * sizeof(struct r6040_descriptor))
+ #define TX_DESC_SIZE	(TX_DCNT * sizeof(struct r6040_descriptor))
+ #define MBCR_DEFAULT	0x012A	/* MAC Bus Control Register */
+-#define MCAST_MAX	4	/* Max number multicast addresses to filter */
++#define MCAST_MAX	3	/* Max number multicast addresses to filter */
+ 
+ /* Descriptor status */
+ #define DSC_OWNER_MAC	0x8000	/* MAC is the owner of this descriptor */
+@@ -969,9 +969,6 @@ static void r6040_multicast_list(struct net_device *dev)
+ 			crc >>= 26;
+ 			hash_table[crc >> 4] |= 1 << (15 - (crc & 0xf));
+ 		}
+-		/* Write the index of the hash table */
+-		for (i = 0; i < 4; i++)
+-			iowrite16(hash_table[i] << 14, ioaddr + MCR1);
+ 		/* Fill the MAC hash tables with their values */
+ 		iowrite16(hash_table[0], ioaddr + MAR0);
+ 		iowrite16(hash_table[1], ioaddr + MAR1);
+@@ -979,6 +976,7 @@ static void r6040_multicast_list(struct net_device *dev)
+ 		iowrite16(hash_table[3], ioaddr + MAR3);
+ 	}
+ 	/* Multicast Address 1~4 case */
++	dmi = dev->mc_list;
+ 	for (i = 0, dmi; (i < dev->mc_count) && (i < MCAST_MAX); i++) {
+ 		adrp = (u16 *)dmi->dmi_addr;
+ 		iowrite16(adrp[0], ioaddr + MID_1L + 8*i);
+@@ -987,9 +985,9 @@ static void r6040_multicast_list(struct net_device *dev)
+ 		dmi = dmi->next;
+ 	}
+ 	for (i = dev->mc_count; i < MCAST_MAX; i++) {
+-		iowrite16(0xffff, ioaddr + MID_0L + 8*i);
+-		iowrite16(0xffff, ioaddr + MID_0M + 8*i);
+-		iowrite16(0xffff, ioaddr + MID_0H + 8*i);
++		iowrite16(0xffff, ioaddr + MID_1L + 8*i);
++		iowrite16(0xffff, ioaddr + MID_1M + 8*i);
++		iowrite16(0xffff, ioaddr + MID_1H + 8*i);
+ 	}
+ }
+ 
+diff --git a/fs/aio.c b/fs/aio.c
+index c1174b5..0f65453 100644
+--- a/fs/aio.c
++++ b/fs/aio.c
+@@ -1677,6 +1677,9 @@ SYSCALL_DEFINE3(io_submit, aio_context_t, ctx_id, long, nr,
+ 	if (unlikely(nr < 0))
+ 		return -EINVAL;
+ 
++	if (unlikely(nr > LONG_MAX/sizeof(*iocbpp)))
++		nr = LONG_MAX/sizeof(*iocbpp);
++
+ 	if (unlikely(!access_ok(VERIFY_READ, iocbpp, (nr*sizeof(*iocbpp)))))
+ 		return -EFAULT;
+ 
+diff --git a/fs/exec.c b/fs/exec.c
+index 50da182..fc30de0 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -393,6 +393,9 @@ static int count(char __user * __user * argv, int max)
+ 			argv++;
+ 			if(++i > max)
+ 				return -E2BIG;
++
++			if (fatal_signal_pending(current))
++				return -ERESTARTNOHAND;
+ 			cond_resched();
+ 		}
+ 	}
+@@ -436,6 +439,12 @@ static int copy_strings(int argc, char __user * __user * argv,
+ 		while (len > 0) {
+ 			int offset, bytes_to_copy;
+ 
++			if (fatal_signal_pending(current)) {
++				ret = -ERESTARTNOHAND;
++				goto out;
++			}
++			cond_resched();
++
+ 			offset = pos % PAGE_SIZE;
+ 			if (offset == 0)
+ 				offset = PAGE_SIZE;
+@@ -608,6 +617,11 @@ int setup_arg_pages(struct linux_binprm *bprm,
+ #else
+ 	stack_top = arch_align_stack(stack_top);
+ 	stack_top = PAGE_ALIGN(stack_top);
++
++	if (unlikely(stack_top < mmap_min_addr) ||
++	    unlikely(vma->vm_end - vma->vm_start >= stack_top - mmap_min_addr))
++		return -ENOMEM;
++
+ 	stack_shift = vma->vm_end - stack_top;
+ 
+ 	bprm->p -= stack_shift;
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index eeb7e56..c20007c 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -87,7 +87,11 @@ extern unsigned int kobjsize(const void *objp);
+ #define VM_MAYSHARE	0x00000080
+ 
+ #define VM_GROWSDOWN	0x00000100	/* general info on the segment */
++#if defined(CONFIG_STACK_GROWSUP) || defined(CONFIG_IA64)
+ #define VM_GROWSUP	0x00000200
++#else
++#define VM_GROWSUP	0x00000000
++#endif
+ #define VM_PFNMAP	0x00000400	/* Page-ranges managed without "struct page", just pure PFN */
+ #define VM_DENYWRITE	0x00000800	/* ETXTBSY on write attempts.. */
+ 
+@@ -1181,8 +1185,10 @@ unsigned long max_sane_readahead(unsigned long nr);
+ 
+ /* Do stack extension */
+ extern int expand_stack(struct vm_area_struct *vma, unsigned long address);
+-#ifdef CONFIG_IA64
++#if VM_GROWSUP
+ extern int expand_upwards(struct vm_area_struct *vma, unsigned long address);
++#else
++  #define expand_upwards(vma, address) do { } while (0)
+ #endif
+ extern int expand_stack_downwards(struct vm_area_struct *vma,
+ 				  unsigned long address);
+diff --git a/mm/memory.c b/mm/memory.c
+index f0282eb..57309b1 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -2396,11 +2396,9 @@ out_nomap:
+ }
+ 
+ /*
+- * This is like a special single-page "expand_downwards()",
+- * except we must first make sure that 'address-PAGE_SIZE'
++ * This is like a special single-page "expand_{down|up}wards()",
++ * except we must first make sure that 'address{-|+}PAGE_SIZE'
+  * doesn't hit another vma.
+- *
+- * The "find_vma()" will do the right thing even if we wrap
+  */
+ static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned long address)
+ {
+@@ -2412,6 +2410,15 @@ static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned lo
+ 
+ 		expand_stack(vma, address);
+ 	}
++	if ((vma->vm_flags & VM_GROWSUP) && address + PAGE_SIZE == vma->vm_end) {
++		struct vm_area_struct *next = vma->vm_next;
++
++		/* As VM_GROWSDOWN but s/below/above/ */
++		if (next && next->vm_start == address + PAGE_SIZE)
++			return next->vm_flags & VM_GROWSUP ? 0 : -ENOMEM;
++
++		expand_upwards(vma, address + PAGE_SIZE);
++	}
+ 	return 0;
+ }
+ 
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 08a32cf..17d640d 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1589,9 +1589,6 @@ static int acct_stack_growth(struct vm_area_struct * vma, unsigned long size, un
+  * PA-RISC uses this for its stack; IA64 for its Register Backing Store.
+  * vma is the last one with address > vma->vm_end.  Have to extend vma.
+  */
+-#ifndef CONFIG_IA64
+-static inline
+-#endif
+ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
+ {
+ 	int error;
+diff --git a/net/wireless/wext.c b/net/wireless/wext.c
+index d98ffb7..6890b7e 100644
+--- a/net/wireless/wext.c
++++ b/net/wireless/wext.c
+@@ -947,7 +947,7 @@ static int ioctl_private_iw_point(struct iw_point *iwp, unsigned int cmd,
+ 	} else if (!iwp->pointer)
+ 		return -EFAULT;
+ 
+-	extra = kmalloc(extra_size, GFP_KERNEL);
++	extra = kzalloc(extra_size, GFP_KERNEL);
+ 	if (!extra)
+ 		return -ENOMEM;
+ 
+diff --git a/sound/core/control.c b/sound/core/control.c
+index 236bbb1..a708b0b 100644
+--- a/sound/core/control.c
++++ b/sound/core/control.c
+@@ -31,6 +31,7 @@
+ 
+ /* max number of user-defined controls */
+ #define MAX_USER_CONTROLS	32
++#define MAX_CONTROL_COUNT	1028
+ 
+ struct snd_kctl_ioctl {
+ 	struct list_head list;		/* list of all ioctls */
+@@ -190,6 +191,8 @@ static struct snd_kcontrol *snd_ctl_new(struct snd_kcontrol *control,
+ 	
+ 	snd_assert(control != NULL, return NULL);
+ 	snd_assert(control->count > 0, return NULL);
++	if (control->count > MAX_CONTROL_COUNT)
++		return NULL;
+ 	kctl = kzalloc(sizeof(*kctl) + sizeof(struct snd_kcontrol_volatile) * control->count, GFP_KERNEL);
+ 	if (kctl == NULL) {
+ 		snd_printk(KERN_ERR "Cannot allocate control instance\n");
+diff --git a/sound/pci/rme9652/hdsp.c b/sound/pci/rme9652/hdsp.c
+index 4d6fbb3..cee643e 100644
+--- a/sound/pci/rme9652/hdsp.c
++++ b/sound/pci/rme9652/hdsp.c
+@@ -4569,6 +4569,7 @@ static int snd_hdsp_hwdep_ioctl(struct snd_hwdep *hw, struct file *file, unsigne
+ 			snd_printk(KERN_ERR "Hammerfall-DSP: Firmware needs to be uploaded to the card.\n");	
+ 			return -EINVAL;
+ 		}
++		memset(&info, 0, sizeof(info));
+ 		spin_lock_irqsave(&hdsp->lock, flags);
+ 		info.pref_sync_ref = (unsigned char)hdsp_pref_sync_ref(hdsp);
+ 		info.wordclock_sync_check = (unsigned char)hdsp_wc_sync_check(hdsp);
+diff --git a/sound/pci/rme9652/hdspm.c b/sound/pci/rme9652/hdspm.c
+index ab423bc..bd36bdd 100644
+--- a/sound/pci/rme9652/hdspm.c
++++ b/sound/pci/rme9652/hdspm.c
+@@ -4133,6 +4133,7 @@ static int snd_hdspm_hwdep_ioctl(struct snd_hwdep * hw, struct file *file,
+ 
+ 	case SNDRV_HDSPM_IOCTL_GET_CONFIG_INFO:
+ 
++		memset(&info, 0, sizeof(info));
+ 		spin_lock_irq(&hdspm->lock);
+ 		info.pref_sync_ref = hdspm_pref_sync_ref(hdspm);
+ 		info.wordclock_sync_check = hdspm_wc_sync_check(hdspm);

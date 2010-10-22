@@ -204,6 +204,8 @@ Patch800: linux-2.6-800-rename-ext4dev-to-ext4.patch
 #Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
 #Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
 
+Patch1000: 2.6.27.55-rc1.patch
+
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
 %description
@@ -411,6 +413,8 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 900
 %ApplyPatch 910
 %endif
+
+%ApplyPatch 1000
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
