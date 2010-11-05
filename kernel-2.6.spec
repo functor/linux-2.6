@@ -34,7 +34,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 49
+%define taglevel 49.1
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -167,7 +167,7 @@ Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
 Patch040: linux-2.6-040-i_mutex-check.patch
 Patch050: linux-2.6-050-getline.patch
-Patch055: linux-2.6-050-ixgbe.patch
+Patch055: linux-2.6-055-ixgbe.patch
 
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
