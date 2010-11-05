@@ -14,7 +14,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define builddoc 0
 %define headers 1
 
-%{!?pldistro:%global pldistro planetlab}
+%{!?pldistro:%global pldistro coblitz}
 
 # default is to not build this - to override, use something like
 # kernel-SPECVARS := iwlwifi=1 
@@ -61,11 +61,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define signmodules 0
 %define make_target bzImage
 
-#%if "%{distro}" == "Fedora" && %{distrorelease} >= 13
-#%define KVERREL %{version}-%{kernelrelease}
-#%else
+#%%if "%{distro}" == "Fedora" && %{distrorelease} >= 13
+#%%define KVERREL %{version}-%{kernelrelease}
+#%%else
 %define KVERREL %{PACKAGE_VERSION}-%{kernelrelease}
-#%endif
+#%%endif
 
 # Override generic defaults with per-arch defaults
 
@@ -167,6 +167,7 @@ Patch020: linux-2.6-020-build-id.patch
 Patch030: linux-2.6-030-netns.patch
 Patch040: linux-2.6-040-i_mutex-check.patch
 Patch050: linux-2.6-050-getline.patch
+Patch055: linux-2.6-050-ixgbe.patch
 
 # These are patches picked up from Fedora/RHEL
 Patch100: linux-2.6-100-build-nonintconfig.patch
@@ -210,7 +211,7 @@ Patch660: linux-2.6-660-nmi-watchdog-default.patch
 Patch670: linux-2.6-670-gcc43.patch
 %endif
 Patch680: linux-2.6-680-htb-hysteresis-tso.patch
-Patch690: linux-2.6-690-web100.patch
+#Patch690: linux-2.6-690-web100.patch
 Patch700: linux-2.6-700-fperm.patch
 Patch710: linux-2.6-710-avoid-64bits-addr-pcmcia.patch
 # This one is a backport from usptream.
@@ -413,6 +414,7 @@ KERNEL_PREVIOUS=vanilla
 %endif
 %ApplyPatch 40
 %ApplyPatch 50
+%ApplyPatch 55
 
 %ApplyPatch 100
 

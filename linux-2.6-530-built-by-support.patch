@@ -8,7 +8,7 @@ diff -Nurp linux-2.6.22.10-vs2.3.0.29-pl04/scripts/mkcompile_h linux-2.6.22.10-v
 -  echo \#define LINUX_COMPILE_BY \"`whoami`\"
 -  echo \#define LINUX_COMPILE_HOST \"`hostname | $UTS_TRUNCATE`\"
 +  echo \#define LINUX_COMPILE_BY \"support\"
-+  echo \#define LINUX_COMPILE_HOST \"planet-lab.org\"
++  echo \#define LINUX_COMPILE_HOST \"verivue.com\"
  
    if [ -x /bin/dnsdomainname ]; then
      echo \#define LINUX_COMPILE_DOMAIN \"`dnsdomainname | $UTS_TRUNCATE`\"
