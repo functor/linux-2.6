@@ -222,6 +222,7 @@ Patch722: linux-2.6-722-bonding-rr.patch
 Patch800: linux-2.6-800-fix-4-bit-apicid-assumption.patch
 
 Patch810: linux-2.6-810-ich10.patch
+Patch820: linux-2.6-820-megaraid.patch
 
 Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
 Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
@@ -464,6 +465,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 722
 %ApplyPatch 800
 %ApplyPatch 810
+%ApplyPatch 820
 
 %ApplyPatch 900
 %ApplyPatch 910
