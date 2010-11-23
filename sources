@@ -1,3 +1,3 @@
 b3e78977aa79d3754cb7f8143d7ddabd  http://build.planet-lab.org/third-party/linux-2.6.27.tar.bz2
-e53a3beb725b719e106b5431881ea7e7  http://ftp.kernel.org/pub/linux/kernel/v2.6/patch-2.6.27.55.bz2
-ea81cda32a2310c87c12972ed69b83b5  http://www.cs.princeton.edu/~caglar/patch-2.6.27.55-vs2.3.0.36.4.diff
+05243ac032539cf186eb969e63347fca  http://ftp.kernel.org/pub/linux/kernel/v2.6/patch-2.6.27.56.bz2
+ea81cda32a2310c87c12972ed69b83b5  http://www.cs.princeton.edu/~caglar/patch-2.6.27.56-vs2.3.0.36.4.diff

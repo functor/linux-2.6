@@ -37,7 +37,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # adding some text to the end of the version number.
 #
 %define sublevel 27
-%define patchlevel 55
+%define patchlevel 56
 %define kversion 2.6.%{sublevel}
 %define rpmversion 2.6.%{sublevel}%{?patchlevel:.%{patchlevel}}
 
@@ -203,9 +203,6 @@ Patch800: linux-2.6-800-rename-ext4dev-to-ext4.patch
 
 #Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
 #Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
-
-# ACPI: Idle C-states disabled by max_cstate should not disable the TSC
-Patch920: linux-2.6-920-cstate.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -414,8 +411,6 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 900
 %ApplyPatch 910
 %endif
-
-%ApplyPatch 920
 
 # NetNS conflict-resolving patch for VINI. Will work with patch vini_pl_patch-1 but may
 # break with later patches.
