@@ -49,7 +49,6 @@ Summary: The Linux kernel (the core of the Linux operating system)
 %define signmodules 0
 %define make_target bzImage
 %define KVERREL %{version}-%{release}
-%endif
 
 # Override generic defaults with per-arch defaults
 
