@@ -1,6 +1,3 @@
-#
-# $Id$
-#
 %define url $URL$
 
 Summary: The Linux kernel (the core of the Linux operating system)
@@ -51,11 +48,11 @@ Summary: The Linux kernel (the core of the Linux operating system)
 
 %define signmodules 0
 %define make_target bzImage
-#%if "%{distro}" == "Fedora" && %{distrorelease} >= 13
-#%define KVERREL %{version}-%{release}
-#%else
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 13
+%define KVERREL %{version}-%{release}
+%else
 %define KVERREL %{PACKAGE_VERSION}-%{PACKAGE_RELEASE}
-#%endif
+%endif
 
 # Override generic defaults with per-arch defaults
 
@@ -97,7 +94,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # Packages that need to be installed before the kernel is, because the %post
 # scripts use them.
 #
-%define kernel_prereq  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
+%define kernel_requires  fileutils, module-init-tools, initscripts >= 5.83, mkinitrd >= 3.5.5
 
 Vendor: PlanetLab
 Packager: PlanetLab Central <support@planet-lab.org>
@@ -124,7 +121,7 @@ Provides: kernel-drm = 4.3.0
 Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}
 Provides: kernel-smp = %{rpmversion}-%{release}
 Provides: kernel-smp-%{_target_cpu} = %{rpmversion}-%{release}
-Prereq: %{kernel_prereq}
+Requires: %{kernel_requires}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
 Conflicts: %{nptl_conflicts}
@@ -136,8 +133,8 @@ AutoReqProv: no
 #
 # List the packages used during the kernel build
 #
-BuildPreReq: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
-BuildPreReq: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, diffutils
+BuildRequires: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
+BuildRequires: bzip2, findutils, gzip, m4, perl, make >= 3.78, gnupg, diffutils
 BuildRequires: gcc >= 3.3.3, binutils >= 2.12, redhat-rpm-config
 BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 
@@ -220,7 +217,7 @@ AutoReqProv: no
 Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}
 Provides: kernel-smp-devel = %{rpmversion}-%{release}
 Provides: kernel-smp-devel-%{_target_cpu} = %{rpmversion}-%{release}
-Prereq: /usr/bin/find
+Requires: /usr/bin/find
 
 %description devel
 This package provides kernel headers and makefiles sufficient to build modules
@@ -245,7 +242,7 @@ Summary: The Linux kernel compiled for unprivileged Xen guest VMs
 Group: System Environment/Kernel
 Provides: kernel = %{version}
 Provides: kernel-%{_target_cpu} = %{rpmversion}-%{release}xenU
-Prereq: %{kernel_prereq}
+Requires: %{kernel_requires}
 Conflicts: %{kernel_dot_org_conflicts}
 Conflicts: %{package_conflicts}
 Conflicts: %{nptl_conflicts}
@@ -271,7 +268,7 @@ AutoReqProv: no
 Provides: kernel-xenU-devel-%{_target_cpu} = %{rpmversion}-%{release}
 Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}xenU
 Provides: kernel-devel = %{rpmversion}-%{release}xenU
-Prereq: /usr/sbin/hardlink, /usr/bin/find
+Requires: /usr/sbin/hardlink, /usr/bin/find
 
 %description xenU-devel
 This package provides kernel headers and makefiles sufficient to build modules
@@ -292,7 +289,7 @@ Provides: kernel-uml-devel-%{_target_cpu} = %{rpmversion}-%{release}
 Provides: kernel-devel-%{_target_cpu} = %{rpmversion}-%{release}smp
 Provides: kernel-devel = %{rpmversion}-%{release}smp
 AutoReqProv: no
-Prereq: /usr/sbin/hardlink, /usr/bin/find
+Requires: /usr/sbin/hardlink, /usr/bin/find
 
 %description uml-devel
 This package provides kernel headers and makefiles sufficient to build modules
