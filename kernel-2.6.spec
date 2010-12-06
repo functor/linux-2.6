@@ -152,7 +152,7 @@ Patch000: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/patch-%{rpmversion}.bz2
 %endif
 
 Patch010: linux-2.6-010-e1000e-ich10lan.patch
-Patch011: linux-2.6-011-e1000e-82574L.patch
+#Patch011: linux-2.6-011-e1000e-82574L.patch
 Patch017: linux-2.6-017-bnx2.patch
 
 Patch100: linux-2.6-100-build-nonintconfig.patch
@@ -360,7 +360,9 @@ KERNEL_PREVIOUS=vanilla
 %endif
 
 %ApplyPatch 10
+%if 0
 %ApplyPatch 11
+%endif
 %ApplyPatch 17
 
 %ApplyPatch 100
