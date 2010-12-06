@@ -226,7 +226,7 @@ Summary: The Linux kernel
 #### Planet-Lab ####
 %define pkg_release %{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 ####
-%define KVERREL %{rpmversion}-%{pkg_release}.%{_target_cpu}
+%define KVERREL %{rpmversion}-%{pkg_release}-%{_target_cpu}
 
 %if !%{debugbuildsenabled}
 %define with_debug 0
