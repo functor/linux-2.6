@@ -116,8 +116,10 @@ Summary: The Linux kernel
 %define with_doc       %{?_without_doc:       0} %{?!_without_doc:       1}
 # kernel-headers
 %define with_headers   %{?_without_headers:   0} %{?!_without_headers:   1}
+#### Planet-Lab ####
 # kernel-firmware
-%define with_firmware  %{?_with_firmware:     1} %{?!_with_firmware:     0}
+%define with_firmware  %{?_with_firmware:     0} %{?!_with_firmware:     1}
+#### Planet-Lab ####
 # tools/perf
 %define with_perftool  %{?_without_perftool:  0} %{?!_without_perftool:  1}
 # perf noarch subpkg
