@@ -408,29 +408,29 @@ index 0000000..f8553c5
 +MODULE_ALIAS("ipt_SETXID");
 +
 +static unsigned int
-+target_v2(struct sk_buff **pskb,
-+	  const struct net_device *in,
-+	  const struct net_device *out,
-+	  unsigned int hooknum,
-+	  const struct xt_target *target, const void *targinfo)
++target_v2(struct sk_buff *skb,
++	  const struct xt_target_param *par)
++
++
++
 +{
-+	const struct xt_setxid_target_info_v2 *setxidinfo = targinfo;
++	const struct xt_setxid_target_info_v2 *setxidinfo = par->targinfo;
 +
 +	switch (setxidinfo->mode) {
 +	case XT_SET_PACKET_XID:
-+		(*pskb)->skb_tag = setxidinfo->mark;
++		skb->skb_tag = setxidinfo->mark;
 +		break;
 +	}
 +	return XT_CONTINUE;
 +}
 +
 +static int
-+checkentry_v2(const char *tablename,
-+	      const void *entry,
-+	      const struct xt_target *target,
-+	      void *targinfo, unsigned int hook_mask)
++checkentry_v2(const struct xt_tgchk_param *par)
++
++
++
 +{
-+	struct xt_setxid_target_info_v2 *setxidinfo = targinfo;
++	struct xt_setxid_target_info_v2 *setxidinfo = par->targinfo;
 +
 +	if (setxidinfo->mode != XT_SET_PACKET_XID) {
 +		printk(KERN_WARNING "SETXID: unknown mode %u\n",

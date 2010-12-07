@@ -905,7 +905,8 @@ ApplyPatch linux-2.6-220-delta-ptrace-fix01.patch
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
 ApplyPatch linux-2.6-521-packet-tagging.patch
-ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
+# fails with -Wall build
+# ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
 ApplyPatch linux-2.6-523-raw-sockets.patch
 ApplyPatch linux-2.6-524-peercred.patch
 ApplyPatch linux-2.6-525-sknid-elevator.patch
@@ -916,6 +917,7 @@ ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
 ApplyPatch linux-2.6-570-tagxid.patch
 ApplyPatch linux-2.6-580-show-proc-virt.patch
 ApplyPatch linux-2.6-590-dcookies-mm.patch
+# fails with -Wall build
 #ApplyPatch linux-2.6-591-chopstix-intern.patch
 ApplyPatch linux-2.6-640-netlink-audit-hack.patch
 ApplyPatch linux-2.6-650-hangcheck-reboot.patch
